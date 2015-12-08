@@ -1,0 +1,1271 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>trees.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">trees.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* trees.c -- output deflated data using Huffman coding
+ * Copyright (C) 1995-2005 Jean-loup Gailly
+ * For conditions of distribution and use, see copyright notice in zlib.h
+ */</span>
+
+<span class="enscript-comment">/*
+ *  ALGORITHM
+ *
+ *      The &quot;deflation&quot; process uses several Huffman trees. The more
+ *      common source values are represented by shorter bit sequences.
+ *
+ *      Each code tree is stored in a compressed form which is itself
+ * a Huffman encoding of the lengths of all the code strings (in
+ * ascending order by source values).  The actual code strings are
+ * reconstructed from the lengths in the inflate process, as described
+ * in the deflate specification.
+ *
+ *  REFERENCES
+ *
+ *      Deutsch, L.P.,&quot;'Deflate' Compressed Data Format Specification&quot;.
+ *      Available in ftp.uu.net:/pub/archiving/zip/doc/deflate-1.1.doc
+ *
+ *      Storer, James A.
+ *          Data Compression:  Methods and Theory, pp. 49-50.
+ *          Computer Science Press, 1988.  ISBN 0-7167-8156-5.
+ *
+ *      Sedgewick, R.
+ *          Algorithms, p290.
+ *          Addison-Wesley, 1983. ISBN 0-201-06672-6.
+ */</span>
+
+<span class="enscript-comment">/* @(#) $Id$ */</span>
+
+<span class="enscript-comment">/* #define GEN_TREES_H */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;deflate.h&quot;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUG</span>
+#  <span class="enscript-reference">include</span> <span class="enscript-string">&lt;ctype.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* ===========================================================================
+ * Constants
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_BL_BITS</span> 7
+<span class="enscript-comment">/* Bit length codes must not exceed MAX_BL_BITS bits */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">END_BLOCK</span> 256
+<span class="enscript-comment">/* end of block literal code */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REP_3_6</span>      16
+<span class="enscript-comment">/* repeat previous bit length 3-6 times (2 bits of repeat count) */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REPZ_3_10</span>    17
+<span class="enscript-comment">/* repeat a zero length 3-10 times  (3 bits of repeat count) */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REPZ_11_138</span>  18
+<span class="enscript-comment">/* repeat a zero length 11-138 times  (7 bits of repeat count) */</span>
+
+local <span class="enscript-type">const</span> <span class="enscript-type">int</span> extra_lbits[LENGTH_CODES] <span class="enscript-comment">/* extra bits for each length code */</span>
+   = {0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0};
+
+local <span class="enscript-type">const</span> <span class="enscript-type">int</span> extra_dbits[D_CODES] <span class="enscript-comment">/* extra bits for each distance code */</span>
+   = {0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13};
+
+local <span class="enscript-type">const</span> <span class="enscript-type">int</span> extra_blbits[BL_CODES]<span class="enscript-comment">/* extra bits for each bit length code */</span>
+   = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,3,7};
+
+local <span class="enscript-type">const</span> uch bl_order[BL_CODES]
+   = {16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15};
+<span class="enscript-comment">/* The lengths of the bit length codes are sent in order of decreasing
+ * probability, to avoid transmitting the lengths for unused bit length codes.
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">Buf_size</span> (8 * 2*sizeof(char))
+<span class="enscript-comment">/* Number of bits used within bi_buf. (bi_buf might be implemented on
+ * more than 16 bits on some systems.)
+ */</span>
+
+<span class="enscript-comment">/* ===========================================================================
+ * Local data. These are initialized only once.
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DIST_CODE_LEN</span>  512 <span class="enscript-comment">/* see definition of array dist_code below */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">GEN_TREES_H</span>) || !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">STDC</span>)
+<span class="enscript-comment">/* non ANSI compilers may not accept trees.h */</span>
+
+local ct_data static_ltree[L_CODES+2];
+<span class="enscript-comment">/* The static literal tree. Since the bit lengths are imposed, there is no
+ * need for the L_CODES extra codes used during heap construction. However
+ * The codes 286 and 287 are needed to build a canonical tree (see _tr_init
+ * below).
+ */</span>
+
+local ct_data static_dtree[D_CODES];
+<span class="enscript-comment">/* The static distance tree. (Actually a trivial tree since all codes use
+ * 5 bits.)
+ */</span>
+
+uch _dist_code[DIST_CODE_LEN];
+<span class="enscript-comment">/* Distance codes. The first 256 values correspond to the distances
+ * 3 .. 258, the last 256 values correspond to the top 8 bits of
+ * the 15 bit distances.
+ */</span>
+
+uch _length_code[MAX_MATCH-MIN_MATCH+1];
+<span class="enscript-comment">/* length code for each normalized match length (0 == MIN_MATCH) */</span>
+
+local <span class="enscript-type">int</span> base_length[LENGTH_CODES];
+<span class="enscript-comment">/* First normalized length for each code (0 = MIN_MATCH) */</span>
+
+local <span class="enscript-type">int</span> base_dist[D_CODES];
+<span class="enscript-comment">/* First normalized distance for each code (0 = distance of 1) */</span>
+
+#<span class="enscript-reference">else</span>
+#  <span class="enscript-reference">include</span> <span class="enscript-string">&quot;trees.h&quot;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* GEN_TREES_H */</span>
+
+<span class="enscript-type">struct</span> static_tree_desc_s {
+    <span class="enscript-type">const</span> ct_data *static_tree;  <span class="enscript-comment">/* static tree or NULL */</span>
+    <span class="enscript-type">const</span> intf *extra_bits;      <span class="enscript-comment">/* extra bits for each code or NULL */</span>
+    <span class="enscript-type">int</span>     extra_base;          <span class="enscript-comment">/* base index for extra_bits */</span>
+    <span class="enscript-type">int</span>     elems;               <span class="enscript-comment">/* max number of elements in the tree */</span>
+    <span class="enscript-type">int</span>     max_length;          <span class="enscript-comment">/* max bit length for the codes */</span>
+};
+
+local static_tree_desc  static_l_desc =
+{static_ltree, extra_lbits, LITERALS+1, L_CODES, MAX_BITS};
+
+local static_tree_desc  static_d_desc =
+{static_dtree, extra_dbits, 0,          D_CODES, MAX_BITS};
+
+local static_tree_desc  static_bl_desc =
+{(<span class="enscript-type">const</span> ct_data *)0, extra_blbits, 0,   BL_CODES, MAX_BL_BITS};
+
+<span class="enscript-comment">/* ===========================================================================
+ * Local (static) routines in this file.
+ */</span>
+
+local <span class="enscript-type">void</span> tr_static_init <span class="enscript-function-name">OF</span>((<span class="enscript-type">void</span>));
+local <span class="enscript-type">void</span> init_block     <span class="enscript-function-name">OF</span>((deflate_state *s));
+local <span class="enscript-type">void</span> pqdownheap     <span class="enscript-function-name">OF</span>((deflate_state *s, ct_data *tree, <span class="enscript-type">int</span> k));
+local <span class="enscript-type">void</span> gen_bitlen     <span class="enscript-function-name">OF</span>((deflate_state *s, tree_desc *desc));
+local <span class="enscript-type">void</span> gen_codes      <span class="enscript-function-name">OF</span>((ct_data *tree, <span class="enscript-type">int</span> max_code, ushf *bl_count));
+local <span class="enscript-type">void</span> build_tree     <span class="enscript-function-name">OF</span>((deflate_state *s, tree_desc *desc));
+local <span class="enscript-type">void</span> scan_tree      <span class="enscript-function-name">OF</span>((deflate_state *s, ct_data *tree, <span class="enscript-type">int</span> max_code));
+local <span class="enscript-type">void</span> send_tree      <span class="enscript-function-name">OF</span>((deflate_state *s, ct_data *tree, <span class="enscript-type">int</span> max_code));
+local <span class="enscript-type">int</span>  build_bl_tree  <span class="enscript-function-name">OF</span>((deflate_state *s));
+local <span class="enscript-type">void</span> send_all_trees <span class="enscript-function-name">OF</span>((deflate_state *s, <span class="enscript-type">int</span> lcodes, <span class="enscript-type">int</span> dcodes,
+                              <span class="enscript-type">int</span> blcodes));
+local <span class="enscript-type">void</span> compress_block <span class="enscript-function-name">OF</span>((deflate_state *s, ct_data *ltree,
+                              ct_data *dtree));
+local <span class="enscript-type">void</span> set_data_type  <span class="enscript-function-name">OF</span>((deflate_state *s));
+local <span class="enscript-type">unsigned</span> bi_reverse <span class="enscript-function-name">OF</span>((<span class="enscript-type">unsigned</span> value, <span class="enscript-type">int</span> length));
+local <span class="enscript-type">void</span> bi_windup      <span class="enscript-function-name">OF</span>((deflate_state *s));
+local <span class="enscript-type">void</span> bi_flush       <span class="enscript-function-name">OF</span>((deflate_state *s));
+local <span class="enscript-type">void</span> copy_block     <span class="enscript-function-name">OF</span>((deflate_state *s, charf *buf, <span class="enscript-type">unsigned</span> len,
+                              <span class="enscript-type">int</span> header));
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GEN_TREES_H</span>
+local <span class="enscript-type">void</span> gen_trees_header <span class="enscript-function-name">OF</span>((<span class="enscript-type">void</span>));
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">DEBUG</span>
+#  <span class="enscript-reference">define</span> <span class="enscript-function-name">send_code</span>(s, c, tree) send_bits(s, tree[c].Code, tree[c].Len)
+   <span class="enscript-comment">/* Send a code of the given tree. c and tree must not have side effects */</span>
+
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* DEBUG */</span>
+#  <span class="enscript-reference">define</span> <span class="enscript-function-name">send_code</span>(s, c, tree) \
+     { <span class="enscript-keyword">if</span> (z_verbose&gt;2) fprintf(stderr,<span class="enscript-string">&quot;\ncd %3d &quot;</span>,(c)); \
+       send_bits(s, tree[c].Code, tree[c].Len); }
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* ===========================================================================
+ * Output a short LSB first on the stream.
+ * IN assertion: there is enough room in pendingBuf.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">put_short</span>(s, w) { \
+    put_byte(s, (uch)((w) &amp; 0xff)); \
+    put_byte(s, (uch)((ush)(w) &gt;&gt; 8)); \
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Send a value on a given number of bits.
+ * IN assertion: length &lt;= 16 and value fits in length bits.
+ */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUG</span>
+local <span class="enscript-type">void</span> send_bits      <span class="enscript-function-name">OF</span>((deflate_state *s, <span class="enscript-type">int</span> value, <span class="enscript-type">int</span> length));
+
+local <span class="enscript-type">void</span> <span class="enscript-function-name">send_bits</span>(s, value, length)
+    deflate_state *s;
+    <span class="enscript-type">int</span> value;  <span class="enscript-comment">/* value to send */</span>
+    <span class="enscript-type">int</span> length; <span class="enscript-comment">/* number of bits */</span>
+{
+    Tracevv((stderr,<span class="enscript-string">&quot; l %2d v %4x &quot;</span>, length, value));
+    Assert(length &gt; 0 &amp;&amp; length &lt;= 15, <span class="enscript-string">&quot;invalid length&quot;</span>);
+    s-&gt;bits_sent += (ulg)length;
+
+    <span class="enscript-comment">/* If not enough room in bi_buf, use (valid) bits from bi_buf and
+     * (16 - bi_valid) bits from value, leaving (width - (16-bi_valid))
+     * unused bits in value.
+     */</span>
+    <span class="enscript-keyword">if</span> (s-&gt;bi_valid &gt; (<span class="enscript-type">int</span>)Buf_size - length) {
+        s-&gt;bi_buf |= (value &lt;&lt; s-&gt;bi_valid);
+        put_short(s, s-&gt;bi_buf);
+        s-&gt;bi_buf = (ush)value &gt;&gt; (Buf_size - s-&gt;bi_valid);
+        s-&gt;bi_valid += length - Buf_size;
+    } <span class="enscript-keyword">else</span> {
+        s-&gt;bi_buf |= value &lt;&lt; s-&gt;bi_valid;
+        s-&gt;bi_valid += length;
+    }
+}
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !DEBUG */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">send_bits</span>(s, value, length) \
+{ <span class="enscript-type">int</span> len = length;\
+  <span class="enscript-keyword">if</span> (s-&gt;bi_valid &gt; (<span class="enscript-type">int</span>)Buf_size - len) {\
+    <span class="enscript-type">int</span> val = value;\
+    s-&gt;bi_buf |= (val &lt;&lt; s-&gt;bi_valid);\
+    put_short(s, s-&gt;bi_buf);\
+    s-&gt;bi_buf = (ush)val &gt;&gt; (Buf_size - s-&gt;bi_valid);\
+    s-&gt;bi_valid += len - Buf_size;\
+  } <span class="enscript-keyword">else</span> {\
+    s-&gt;bi_buf |= (value) &lt;&lt; s-&gt;bi_valid;\
+    s-&gt;bi_valid += len;\
+  }\
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+
+
+<span class="enscript-comment">/* the arguments must not have side effects */</span>
+
+<span class="enscript-comment">/* ===========================================================================
+ * Initialize the various 'constant' tables.
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">tr_static_init</span>()
+{
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">GEN_TREES_H</span>) || !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">STDC</span>)
+    <span class="enscript-type">static</span> <span class="enscript-type">int</span> static_init_done = 0;
+    <span class="enscript-type">int</span> n;        <span class="enscript-comment">/* iterates over tree elements */</span>
+    <span class="enscript-type">int</span> bits;     <span class="enscript-comment">/* bit counter */</span>
+    <span class="enscript-type">int</span> length;   <span class="enscript-comment">/* length value */</span>
+    <span class="enscript-type">int</span> code;     <span class="enscript-comment">/* code value */</span>
+    <span class="enscript-type">int</span> dist;     <span class="enscript-comment">/* distance index */</span>
+    ush bl_count[MAX_BITS+1];
+    <span class="enscript-comment">/* number of codes at each bit length for an optimal tree */</span>
+
+    <span class="enscript-keyword">if</span> (static_init_done) <span class="enscript-keyword">return</span>;
+
+    <span class="enscript-comment">/* For some embedded targets, global variables are not initialized: */</span>
+    static_l_desc.static_tree = static_ltree;
+    static_l_desc.extra_bits = extra_lbits;
+    static_d_desc.static_tree = static_dtree;
+    static_d_desc.extra_bits = extra_dbits;
+    static_bl_desc.extra_bits = extra_blbits;
+
+    <span class="enscript-comment">/* Initialize the mapping length (0..255) -&gt; length code (0..28) */</span>
+    length = 0;
+    <span class="enscript-keyword">for</span> (code = 0; code &lt; LENGTH_CODES-1; code++) {
+        base_length[code] = length;
+        <span class="enscript-keyword">for</span> (n = 0; n &lt; (1&lt;&lt;extra_lbits[code]); n++) {
+            _length_code[length++] = (uch)code;
+        }
+    }
+    Assert (length == 256, <span class="enscript-string">&quot;tr_static_init: length != 256&quot;</span>);
+    <span class="enscript-comment">/* Note that the length 255 (match length 258) can be represented
+     * in two different ways: code 284 + 5 bits or code 285, so we
+     * overwrite length_code[255] to use the best encoding:
+     */</span>
+    _length_code[length-1] = (uch)code;
+
+    <span class="enscript-comment">/* Initialize the mapping dist (0..32K) -&gt; dist code (0..29) */</span>
+    dist = 0;
+    <span class="enscript-keyword">for</span> (code = 0 ; code &lt; 16; code++) {
+        base_dist[code] = dist;
+        <span class="enscript-keyword">for</span> (n = 0; n &lt; (1&lt;&lt;extra_dbits[code]); n++) {
+            _dist_code[dist++] = (uch)code;
+        }
+    }
+    Assert (dist == 256, <span class="enscript-string">&quot;tr_static_init: dist != 256&quot;</span>);
+    dist &gt;&gt;= 7; <span class="enscript-comment">/* from now on, all distances are divided by 128 */</span>
+    <span class="enscript-keyword">for</span> ( ; code &lt; D_CODES; code++) {
+        base_dist[code] = dist &lt;&lt; 7;
+        <span class="enscript-keyword">for</span> (n = 0; n &lt; (1&lt;&lt;(extra_dbits[code]-7)); n++) {
+            _dist_code[256 + dist++] = (uch)code;
+        }
+    }
+    Assert (dist == 256, <span class="enscript-string">&quot;tr_static_init: 256+dist != 512&quot;</span>);
+
+    <span class="enscript-comment">/* Construct the codes of the static literal tree */</span>
+    <span class="enscript-keyword">for</span> (bits = 0; bits &lt;= MAX_BITS; bits++) bl_count[bits] = 0;
+    n = 0;
+    <span class="enscript-keyword">while</span> (n &lt;= 143) static_ltree[n++].Len = 8, bl_count[8]++;
+    <span class="enscript-keyword">while</span> (n &lt;= 255) static_ltree[n++].Len = 9, bl_count[9]++;
+    <span class="enscript-keyword">while</span> (n &lt;= 279) static_ltree[n++].Len = 7, bl_count[7]++;
+    <span class="enscript-keyword">while</span> (n &lt;= 287) static_ltree[n++].Len = 8, bl_count[8]++;
+    <span class="enscript-comment">/* Codes 286 and 287 do not exist, but we must include them in the
+     * tree construction to get a canonical Huffman tree (longest code
+     * all ones)
+     */</span>
+    gen_codes((ct_data *)static_ltree, L_CODES+1, bl_count);
+
+    <span class="enscript-comment">/* The static distance tree is trivial: */</span>
+    <span class="enscript-keyword">for</span> (n = 0; n &lt; D_CODES; n++) {
+        static_dtree[n].Len = 5;
+        static_dtree[n].Code = bi_reverse((<span class="enscript-type">unsigned</span>)n, 5);
+    }
+    static_init_done = 1;
+
+#  <span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GEN_TREES_H</span>
+    gen_trees_header();
+#  <span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(GEN_TREES_H) || !defined(STDC) */</span>
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Genererate the file trees.h describing the static trees.
+ */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GEN_TREES_H</span>
+#  <span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">DEBUG</span>
+#    <span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#  <span class="enscript-reference">endif</span>
+
+#  <span class="enscript-reference">define</span> <span class="enscript-function-name">SEPARATOR</span>(i, last, width) \
+      ((i) == (last)? <span class="enscript-string">&quot;\n};\n\n&quot;</span> :    \
+       ((i) % (width) == (width)-1 ? <span class="enscript-string">&quot;,\n&quot;</span> : <span class="enscript-string">&quot;, &quot;</span>))
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">gen_trees_header</span>()
+{
+    FILE *header = fopen(<span class="enscript-string">&quot;trees.h&quot;</span>, <span class="enscript-string">&quot;w&quot;</span>);
+    <span class="enscript-type">int</span> i;
+
+    Assert (header != NULL, <span class="enscript-string">&quot;Can't open trees.h&quot;</span>);
+    fprintf(header,
+            <span class="enscript-string">&quot;/* header created automatically with -DGEN_TREES_H */\n\n&quot;</span>);
+
+    fprintf(header, <span class="enscript-string">&quot;local const ct_data static_ltree[L_CODES+2] = {\n&quot;</span>);
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; L_CODES+2; i++) {
+        fprintf(header, <span class="enscript-string">&quot;{{%3u},{%3u}}%s&quot;</span>, static_ltree[i].Code,
+                static_ltree[i].Len, SEPARATOR(i, L_CODES+1, 5));
+    }
+
+    fprintf(header, <span class="enscript-string">&quot;local const ct_data static_dtree[D_CODES] = {\n&quot;</span>);
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; D_CODES; i++) {
+        fprintf(header, <span class="enscript-string">&quot;{{%2u},{%2u}}%s&quot;</span>, static_dtree[i].Code,
+                static_dtree[i].Len, SEPARATOR(i, D_CODES-1, 5));
+    }
+
+    fprintf(header, <span class="enscript-string">&quot;const uch _dist_code[DIST_CODE_LEN] = {\n&quot;</span>);
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; DIST_CODE_LEN; i++) {
+        fprintf(header, <span class="enscript-string">&quot;%2u%s&quot;</span>, _dist_code[i],
+                SEPARATOR(i, DIST_CODE_LEN-1, 20));
+    }
+
+    fprintf(header, <span class="enscript-string">&quot;const uch _length_code[MAX_MATCH-MIN_MATCH+1]= {\n&quot;</span>);
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; MAX_MATCH-MIN_MATCH+1; i++) {
+        fprintf(header, <span class="enscript-string">&quot;%2u%s&quot;</span>, _length_code[i],
+                SEPARATOR(i, MAX_MATCH-MIN_MATCH, 20));
+    }
+
+    fprintf(header, <span class="enscript-string">&quot;local const int base_length[LENGTH_CODES] = {\n&quot;</span>);
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; LENGTH_CODES; i++) {
+        fprintf(header, <span class="enscript-string">&quot;%1u%s&quot;</span>, base_length[i],
+                SEPARATOR(i, LENGTH_CODES-1, 20));
+    }
+
+    fprintf(header, <span class="enscript-string">&quot;local const int base_dist[D_CODES] = {\n&quot;</span>);
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; D_CODES; i++) {
+        fprintf(header, <span class="enscript-string">&quot;%5u%s&quot;</span>, base_dist[i],
+                SEPARATOR(i, D_CODES-1, 10));
+    }
+
+    fclose(header);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* GEN_TREES_H */</span>
+
+<span class="enscript-comment">/* ===========================================================================
+ * Initialize the tree data structures for a new zlib stream.
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">_tr_init</span>(s)
+    deflate_state *s;
+{
+    tr_static_init();
+
+    s-&gt;l_desc.dyn_tree = s-&gt;dyn_ltree;
+    s-&gt;l_desc.stat_desc = &amp;static_l_desc;
+
+    s-&gt;d_desc.dyn_tree = s-&gt;dyn_dtree;
+    s-&gt;d_desc.stat_desc = &amp;static_d_desc;
+
+    s-&gt;bl_desc.dyn_tree = s-&gt;bl_tree;
+    s-&gt;bl_desc.stat_desc = &amp;static_bl_desc;
+
+    s-&gt;bi_buf = 0;
+    s-&gt;bi_valid = 0;
+    s-&gt;last_eob_len = 8; <span class="enscript-comment">/* enough lookahead for inflate */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUG</span>
+    s-&gt;compressed_len = 0L;
+    s-&gt;bits_sent = 0L;
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-comment">/* Initialize the first block of the first file: */</span>
+    init_block(s);
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Initialize a new block.
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">init_block</span>(s)
+    deflate_state *s;
+{
+    <span class="enscript-type">int</span> n; <span class="enscript-comment">/* iterates over tree elements */</span>
+
+    <span class="enscript-comment">/* Initialize the trees. */</span>
+    <span class="enscript-keyword">for</span> (n = 0; n &lt; L_CODES;  n++) s-&gt;dyn_ltree[n].Freq = 0;
+    <span class="enscript-keyword">for</span> (n = 0; n &lt; D_CODES;  n++) s-&gt;dyn_dtree[n].Freq = 0;
+    <span class="enscript-keyword">for</span> (n = 0; n &lt; BL_CODES; n++) s-&gt;bl_tree[n].Freq = 0;
+
+    s-&gt;dyn_ltree[END_BLOCK].Freq = 1;
+    s-&gt;opt_len = s-&gt;static_len = 0L;
+    s-&gt;last_lit = s-&gt;matches = 0;
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SMALLEST</span> 1
+<span class="enscript-comment">/* Index within the heap array of least frequent node in the Huffman tree */</span>
+
+
+<span class="enscript-comment">/* ===========================================================================
+ * Remove the smallest element from the heap and recreate the heap with
+ * one less element. Updates heap and heap_len.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">pqremove</span>(s, tree, top) \
+{\
+    top = s-&gt;heap[SMALLEST]; \
+    s-&gt;heap[SMALLEST] = s-&gt;heap[s-&gt;heap_len--]; \
+    pqdownheap(s, tree, SMALLEST); \
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Compares to subtrees, using the tree depth as tie breaker when
+ * the subtrees have equal frequency. This minimizes the worst case length.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">smaller</span>(tree, n, m, depth) \
+   (tree[n].Freq &lt; tree[m].Freq || \
+   (tree[n].Freq == tree[m].Freq &amp;&amp; depth[n] &lt;= depth[m]))
+
+<span class="enscript-comment">/* ===========================================================================
+ * Restore the heap property by moving down the tree starting at node k,
+ * exchanging a node with the smallest of its two sons if necessary, stopping
+ * when the heap property is re-established (each father smaller than its
+ * two sons).
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">pqdownheap</span>(s, tree, k)
+    deflate_state *s;
+    ct_data *tree;  <span class="enscript-comment">/* the tree to restore */</span>
+    <span class="enscript-type">int</span> k;               <span class="enscript-comment">/* node to move down */</span>
+{
+    <span class="enscript-type">int</span> v = s-&gt;heap[k];
+    <span class="enscript-type">int</span> j = k &lt;&lt; 1;  <span class="enscript-comment">/* left son of k */</span>
+    <span class="enscript-keyword">while</span> (j &lt;= s-&gt;heap_len) {
+        <span class="enscript-comment">/* Set j to the smallest of the two sons: */</span>
+        <span class="enscript-keyword">if</span> (j &lt; s-&gt;heap_len &amp;&amp;
+            smaller(tree, s-&gt;heap[j+1], s-&gt;heap[j], s-&gt;depth)) {
+            j++;
+        }
+        <span class="enscript-comment">/* Exit if v is smaller than both sons */</span>
+        <span class="enscript-keyword">if</span> (smaller(tree, v, s-&gt;heap[j], s-&gt;depth)) <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-comment">/* Exchange v with the smallest son */</span>
+        s-&gt;heap[k] = s-&gt;heap[j];  k = j;
+
+        <span class="enscript-comment">/* And continue down the tree, setting j to the left son of k */</span>
+        j &lt;&lt;= 1;
+    }
+    s-&gt;heap[k] = v;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Compute the optimal bit lengths for a tree and update the total bit length
+ * for the current block.
+ * IN assertion: the fields freq and dad are set, heap[heap_max] and
+ *    above are the tree nodes sorted by increasing frequency.
+ * OUT assertions: the field len is set to the optimal bit length, the
+ *     array bl_count contains the frequencies for each bit length.
+ *     The length opt_len is updated; static_len is also updated if stree is
+ *     not null.
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">gen_bitlen</span>(s, desc)
+    deflate_state *s;
+    tree_desc *desc;    <span class="enscript-comment">/* the tree descriptor */</span>
+{
+    ct_data *tree        = desc-&gt;dyn_tree;
+    <span class="enscript-type">int</span> max_code         = desc-&gt;max_code;
+    <span class="enscript-type">const</span> ct_data *stree = desc-&gt;stat_desc-&gt;static_tree;
+    <span class="enscript-type">const</span> intf *extra    = desc-&gt;stat_desc-&gt;extra_bits;
+    <span class="enscript-type">int</span> base             = desc-&gt;stat_desc-&gt;extra_base;
+    <span class="enscript-type">int</span> max_length       = desc-&gt;stat_desc-&gt;max_length;
+    <span class="enscript-type">int</span> h;              <span class="enscript-comment">/* heap index */</span>
+    <span class="enscript-type">int</span> n, m;           <span class="enscript-comment">/* iterate over the tree elements */</span>
+    <span class="enscript-type">int</span> bits;           <span class="enscript-comment">/* bit length */</span>
+    <span class="enscript-type">int</span> xbits;          <span class="enscript-comment">/* extra bits */</span>
+    ush f;              <span class="enscript-comment">/* frequency */</span>
+    <span class="enscript-type">int</span> overflow = 0;   <span class="enscript-comment">/* number of elements with bit length too large */</span>
+
+    <span class="enscript-keyword">for</span> (bits = 0; bits &lt;= MAX_BITS; bits++) s-&gt;bl_count[bits] = 0;
+
+    <span class="enscript-comment">/* In a first pass, compute the optimal bit lengths (which may
+     * overflow in the case of the bit length tree).
+     */</span>
+    tree[s-&gt;heap[s-&gt;heap_max]].Len = 0; <span class="enscript-comment">/* root of the heap */</span>
+
+    <span class="enscript-keyword">for</span> (h = s-&gt;heap_max+1; h &lt; HEAP_SIZE; h++) {
+        n = s-&gt;heap[h];
+        bits = tree[tree[n].Dad].Len + 1;
+        <span class="enscript-keyword">if</span> (bits &gt; max_length) bits = max_length, overflow++;
+        tree[n].Len = (ush)bits;
+        <span class="enscript-comment">/* We overwrite tree[n].Dad which is no longer needed */</span>
+
+        <span class="enscript-keyword">if</span> (n &gt; max_code) <span class="enscript-keyword">continue</span>; <span class="enscript-comment">/* not a leaf node */</span>
+
+        s-&gt;bl_count[bits]++;
+        xbits = 0;
+        <span class="enscript-keyword">if</span> (n &gt;= base) xbits = extra[n-base];
+        f = tree[n].Freq;
+        s-&gt;opt_len += (ulg)f * (bits + xbits);
+        <span class="enscript-keyword">if</span> (stree) s-&gt;static_len += (ulg)f * (stree[n].Len + xbits);
+    }
+    <span class="enscript-keyword">if</span> (overflow == 0) <span class="enscript-keyword">return</span>;
+
+    Trace((stderr,<span class="enscript-string">&quot;\nbit length overflow\n&quot;</span>));
+    <span class="enscript-comment">/* This happens for example on obj2 and pic of the Calgary corpus */</span>
+
+    <span class="enscript-comment">/* Find the first bit length which could increase: */</span>
+    <span class="enscript-keyword">do</span> {
+        bits = max_length-1;
+        <span class="enscript-keyword">while</span> (s-&gt;bl_count[bits] == 0) bits--;
+        s-&gt;bl_count[bits]--;      <span class="enscript-comment">/* move one leaf down the tree */</span>
+        s-&gt;bl_count[bits+1] += 2; <span class="enscript-comment">/* move one overflow item as its brother */</span>
+        s-&gt;bl_count[max_length]--;
+        <span class="enscript-comment">/* The brother of the overflow item also moves one step up,
+         * but this does not affect bl_count[max_length]
+         */</span>
+        overflow -= 2;
+    } <span class="enscript-keyword">while</span> (overflow &gt; 0);
+
+    <span class="enscript-comment">/* Now recompute all bit lengths, scanning in increasing frequency.
+     * h is still equal to HEAP_SIZE. (It is simpler to reconstruct all
+     * lengths instead of fixing only the wrong ones. This idea is taken
+     * from 'ar' written by Haruhiko Okumura.)
+     */</span>
+    <span class="enscript-keyword">for</span> (bits = max_length; bits != 0; bits--) {
+        n = s-&gt;bl_count[bits];
+        <span class="enscript-keyword">while</span> (n != 0) {
+            m = s-&gt;heap[--h];
+            <span class="enscript-keyword">if</span> (m &gt; max_code) <span class="enscript-keyword">continue</span>;
+            <span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span>) tree[m].Len != (<span class="enscript-type">unsigned</span>) bits) {
+                Trace((stderr,<span class="enscript-string">&quot;code %d bits %d-&gt;%d\n&quot;</span>, m, tree[m].Len, bits));
+                s-&gt;opt_len += ((<span class="enscript-type">long</span>)bits - (<span class="enscript-type">long</span>)tree[m].Len)
+                              *(<span class="enscript-type">long</span>)tree[m].Freq;
+                tree[m].Len = (ush)bits;
+            }
+            n--;
+        }
+    }
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Generate the codes for a given tree and bit counts (which need not be
+ * optimal).
+ * IN assertion: the array bl_count contains the bit length statistics for
+ * the given tree and the field len is set for all tree elements.
+ * OUT assertion: the field code is set for all tree elements of non
+ *     zero code length.
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">gen_codes</span> (tree, max_code, bl_count)
+    ct_data *tree;             <span class="enscript-comment">/* the tree to decorate */</span>
+    <span class="enscript-type">int</span> max_code;              <span class="enscript-comment">/* largest code with non zero frequency */</span>
+    ushf *bl_count;            <span class="enscript-comment">/* number of codes at each bit length */</span>
+{
+    ush next_code[MAX_BITS+1]; <span class="enscript-comment">/* next code value for each bit length */</span>
+    ush code = 0;              <span class="enscript-comment">/* running code value */</span>
+    <span class="enscript-type">int</span> bits;                  <span class="enscript-comment">/* bit index */</span>
+    <span class="enscript-type">int</span> n;                     <span class="enscript-comment">/* code index */</span>
+
+    <span class="enscript-comment">/* The distribution counts are first used to generate the code values
+     * without bit reversal.
+     */</span>
+    <span class="enscript-keyword">for</span> (bits = 1; bits &lt;= MAX_BITS; bits++) {
+        next_code[bits] = code = (code + bl_count[bits-1]) &lt;&lt; 1;
+    }
+    <span class="enscript-comment">/* Check that the bit counts in bl_count are consistent. The last code
+     * must be all ones.
+     */</span>
+    Assert (code + bl_count[MAX_BITS]-1 == (1&lt;&lt;MAX_BITS)-1,
+            <span class="enscript-string">&quot;inconsistent bit counts&quot;</span>);
+    Tracev((stderr,<span class="enscript-string">&quot;\ngen_codes: max_code %d &quot;</span>, max_code));
+
+    <span class="enscript-keyword">for</span> (n = 0;  n &lt;= max_code; n++) {
+        <span class="enscript-type">int</span> len = tree[n].Len;
+        <span class="enscript-keyword">if</span> (len == 0) <span class="enscript-keyword">continue</span>;
+        <span class="enscript-comment">/* Now reverse the bits */</span>
+        tree[n].Code = bi_reverse(next_code[len]++, len);
+
+        Tracecv(tree != static_ltree, (stderr,<span class="enscript-string">&quot;\nn %3d %c l %2d c %4x (%x) &quot;</span>,
+             n, (isgraph(n) ? n : <span class="enscript-string">' '</span>), len, tree[n].Code, next_code[len]-1));
+    }
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Construct one Huffman tree and assigns the code bit strings and lengths.
+ * Update the total bit length for the current block.
+ * IN assertion: the field freq is set for all tree elements.
+ * OUT assertions: the fields len and code are set to the optimal bit length
+ *     and corresponding code. The length opt_len is updated; static_len is
+ *     also updated if stree is not null. The field max_code is set.
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">build_tree</span>(s, desc)
+    deflate_state *s;
+    tree_desc *desc; <span class="enscript-comment">/* the tree descriptor */</span>
+{
+    ct_data *tree         = desc-&gt;dyn_tree;
+    <span class="enscript-type">const</span> ct_data *stree  = desc-&gt;stat_desc-&gt;static_tree;
+    <span class="enscript-type">int</span> elems             = desc-&gt;stat_desc-&gt;elems;
+    <span class="enscript-type">int</span> n, m;          <span class="enscript-comment">/* iterate over heap elements */</span>
+    <span class="enscript-type">int</span> max_code = -1; <span class="enscript-comment">/* largest code with non zero frequency */</span>
+    <span class="enscript-type">int</span> node;          <span class="enscript-comment">/* new node being created */</span>
+
+    <span class="enscript-comment">/* Construct the initial heap, with least frequent element in
+     * heap[SMALLEST]. The sons of heap[n] are heap[2*n] and heap[2*n+1].
+     * heap[0] is not used.
+     */</span>
+    s-&gt;heap_len = 0, s-&gt;heap_max = HEAP_SIZE;
+
+    <span class="enscript-keyword">for</span> (n = 0; n &lt; elems; n++) {
+        <span class="enscript-keyword">if</span> (tree[n].Freq != 0) {
+            s-&gt;heap[++(s-&gt;heap_len)] = max_code = n;
+            s-&gt;depth[n] = 0;
+        } <span class="enscript-keyword">else</span> {
+            tree[n].Len = 0;
+        }
+    }
+
+    <span class="enscript-comment">/* The pkzip format requires that at least one distance code exists,
+     * and that at least one bit should be sent even if there is only one
+     * possible code. So to avoid special checks later on we force at least
+     * two codes of non zero frequency.
+     */</span>
+    <span class="enscript-keyword">while</span> (s-&gt;heap_len &lt; 2) {
+        node = s-&gt;heap[++(s-&gt;heap_len)] = (max_code &lt; 2 ? ++max_code : 0);
+        tree[node].Freq = 1;
+        s-&gt;depth[node] = 0;
+        s-&gt;opt_len--; <span class="enscript-keyword">if</span> (stree) s-&gt;static_len -= stree[node].Len;
+        <span class="enscript-comment">/* node is 0 or 1 so it does not have extra bits */</span>
+    }
+    desc-&gt;max_code = max_code;
+
+    <span class="enscript-comment">/* The elements heap[heap_len/2+1 .. heap_len] are leaves of the tree,
+     * establish sub-heaps of increasing lengths:
+     */</span>
+    <span class="enscript-keyword">for</span> (n = s-&gt;heap_len/2; n &gt;= 1; n--) pqdownheap(s, tree, n);
+
+    <span class="enscript-comment">/* Construct the Huffman tree by repeatedly combining the least two
+     * frequent nodes.
+     */</span>
+    node = elems;              <span class="enscript-comment">/* next internal node of the tree */</span>
+    <span class="enscript-keyword">do</span> {
+        pqremove(s, tree, n);  <span class="enscript-comment">/* n = node of least frequency */</span>
+        m = s-&gt;heap[SMALLEST]; <span class="enscript-comment">/* m = node of next least frequency */</span>
+
+        s-&gt;heap[--(s-&gt;heap_max)] = n; <span class="enscript-comment">/* keep the nodes sorted by frequency */</span>
+        s-&gt;heap[--(s-&gt;heap_max)] = m;
+
+        <span class="enscript-comment">/* Create a new node father of n and m */</span>
+        tree[node].Freq = tree[n].Freq + tree[m].Freq;
+        s-&gt;depth[node] = (uch)((s-&gt;depth[n] &gt;= s-&gt;depth[m] ?
+                                s-&gt;depth[n] : s-&gt;depth[m]) + 1);
+        tree[n].Dad = tree[m].Dad = (ush)node;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DUMP_BL_TREE</span>
+        <span class="enscript-keyword">if</span> (tree == s-&gt;bl_tree) {
+            fprintf(stderr,<span class="enscript-string">&quot;\nnode %d(%d), sons %d(%d) %d(%d)&quot;</span>,
+                    node, tree[node].Freq, n, tree[n].Freq, m, tree[m].Freq);
+        }
+#<span class="enscript-reference">endif</span>
+        <span class="enscript-comment">/* and insert the new node in the heap */</span>
+        s-&gt;heap[SMALLEST] = node++;
+        pqdownheap(s, tree, SMALLEST);
+
+    } <span class="enscript-keyword">while</span> (s-&gt;heap_len &gt;= 2);
+
+    s-&gt;heap[--(s-&gt;heap_max)] = s-&gt;heap[SMALLEST];
+
+    <span class="enscript-comment">/* At this point, the fields freq and dad are set. We can now
+     * generate the bit lengths.
+     */</span>
+    gen_bitlen(s, (tree_desc *)desc);
+
+    <span class="enscript-comment">/* The field len is now set, we can generate the bit codes */</span>
+    gen_codes ((ct_data *)tree, max_code, s-&gt;bl_count);
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Scan a literal or distance tree to determine the frequencies of the codes
+ * in the bit length tree.
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">scan_tree</span> (s, tree, max_code)
+    deflate_state *s;
+    ct_data *tree;   <span class="enscript-comment">/* the tree to be scanned */</span>
+    <span class="enscript-type">int</span> max_code;    <span class="enscript-comment">/* and its largest code of non zero frequency */</span>
+{
+    <span class="enscript-type">int</span> n;                     <span class="enscript-comment">/* iterates over all tree elements */</span>
+    <span class="enscript-type">int</span> prevlen = -1;          <span class="enscript-comment">/* last emitted length */</span>
+    <span class="enscript-type">int</span> curlen;                <span class="enscript-comment">/* length of current code */</span>
+    <span class="enscript-type">int</span> nextlen = tree[0].Len; <span class="enscript-comment">/* length of next code */</span>
+    <span class="enscript-type">int</span> count = 0;             <span class="enscript-comment">/* repeat count of the current code */</span>
+    <span class="enscript-type">int</span> max_count = 7;         <span class="enscript-comment">/* max repeat count */</span>
+    <span class="enscript-type">int</span> min_count = 4;         <span class="enscript-comment">/* min repeat count */</span>
+
+    <span class="enscript-keyword">if</span> (nextlen == 0) max_count = 138, min_count = 3;
+    tree[max_code+1].Len = (ush)0xffff; <span class="enscript-comment">/* guard */</span>
+
+    <span class="enscript-keyword">for</span> (n = 0; n &lt;= max_code; n++) {
+        curlen = nextlen; nextlen = tree[n+1].Len;
+        <span class="enscript-keyword">if</span> (++count &lt; max_count &amp;&amp; curlen == nextlen) {
+            <span class="enscript-keyword">continue</span>;
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (count &lt; min_count) {
+            s-&gt;bl_tree[curlen].Freq += count;
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (curlen != 0) {
+            <span class="enscript-keyword">if</span> (curlen != prevlen) s-&gt;bl_tree[curlen].Freq++;
+            s-&gt;bl_tree[REP_3_6].Freq++;
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (count &lt;= 10) {
+            s-&gt;bl_tree[REPZ_3_10].Freq++;
+        } <span class="enscript-keyword">else</span> {
+            s-&gt;bl_tree[REPZ_11_138].Freq++;
+        }
+        count = 0; prevlen = curlen;
+        <span class="enscript-keyword">if</span> (nextlen == 0) {
+            max_count = 138, min_count = 3;
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (curlen == nextlen) {
+            max_count = 6, min_count = 3;
+        } <span class="enscript-keyword">else</span> {
+            max_count = 7, min_count = 4;
+        }
+    }
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Send a literal or distance tree in compressed form, using the codes in
+ * bl_tree.
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">send_tree</span> (s, tree, max_code)
+    deflate_state *s;
+    ct_data *tree; <span class="enscript-comment">/* the tree to be scanned */</span>
+    <span class="enscript-type">int</span> max_code;       <span class="enscript-comment">/* and its largest code of non zero frequency */</span>
+{
+    <span class="enscript-type">int</span> n;                     <span class="enscript-comment">/* iterates over all tree elements */</span>
+    <span class="enscript-type">int</span> prevlen = -1;          <span class="enscript-comment">/* last emitted length */</span>
+    <span class="enscript-type">int</span> curlen;                <span class="enscript-comment">/* length of current code */</span>
+    <span class="enscript-type">int</span> nextlen = tree[0].Len; <span class="enscript-comment">/* length of next code */</span>
+    <span class="enscript-type">int</span> count = 0;             <span class="enscript-comment">/* repeat count of the current code */</span>
+    <span class="enscript-type">int</span> max_count = 7;         <span class="enscript-comment">/* max repeat count */</span>
+    <span class="enscript-type">int</span> min_count = 4;         <span class="enscript-comment">/* min repeat count */</span>
+
+    <span class="enscript-comment">/* tree[max_code+1].Len = -1; */</span>  <span class="enscript-comment">/* guard already set */</span>
+    <span class="enscript-keyword">if</span> (nextlen == 0) max_count = 138, min_count = 3;
+
+    <span class="enscript-keyword">for</span> (n = 0; n &lt;= max_code; n++) {
+        curlen = nextlen; nextlen = tree[n+1].Len;
+        <span class="enscript-keyword">if</span> (++count &lt; max_count &amp;&amp; curlen == nextlen) {
+            <span class="enscript-keyword">continue</span>;
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (count &lt; min_count) {
+            <span class="enscript-keyword">do</span> { send_code(s, curlen, s-&gt;bl_tree); } <span class="enscript-keyword">while</span> (--count != 0);
+
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (curlen != 0) {
+            <span class="enscript-keyword">if</span> (curlen != prevlen) {
+                send_code(s, curlen, s-&gt;bl_tree); count--;
+            }
+            Assert(count &gt;= 3 &amp;&amp; count &lt;= 6, <span class="enscript-string">&quot; 3_6?&quot;</span>);
+            send_code(s, REP_3_6, s-&gt;bl_tree); send_bits(s, count-3, 2);
+
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (count &lt;= 10) {
+            send_code(s, REPZ_3_10, s-&gt;bl_tree); send_bits(s, count-3, 3);
+
+        } <span class="enscript-keyword">else</span> {
+            send_code(s, REPZ_11_138, s-&gt;bl_tree); send_bits(s, count-11, 7);
+        }
+        count = 0; prevlen = curlen;
+        <span class="enscript-keyword">if</span> (nextlen == 0) {
+            max_count = 138, min_count = 3;
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (curlen == nextlen) {
+            max_count = 6, min_count = 3;
+        } <span class="enscript-keyword">else</span> {
+            max_count = 7, min_count = 4;
+        }
+    }
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Construct the Huffman tree for the bit lengths and return the index in
+ * bl_order of the last bit length code to send.
+ */</span>
+local <span class="enscript-type">int</span> <span class="enscript-function-name">build_bl_tree</span>(s)
+    deflate_state *s;
+{
+    <span class="enscript-type">int</span> max_blindex;  <span class="enscript-comment">/* index of last bit length code of non zero freq */</span>
+
+    <span class="enscript-comment">/* Determine the bit length frequencies for literal and distance trees */</span>
+    scan_tree(s, (ct_data *)s-&gt;dyn_ltree, s-&gt;l_desc.max_code);
+    scan_tree(s, (ct_data *)s-&gt;dyn_dtree, s-&gt;d_desc.max_code);
+
+    <span class="enscript-comment">/* Build the bit length tree: */</span>
+    build_tree(s, (tree_desc *)(&amp;(s-&gt;bl_desc)));
+    <span class="enscript-comment">/* opt_len now includes the length of the tree representations, except
+     * the lengths of the bit lengths codes and the 5+5+4 bits for the counts.
+     */</span>
+
+    <span class="enscript-comment">/* Determine the number of bit length codes to send. The pkzip format
+     * requires that at least 4 bit length codes be sent. (appnote.txt says
+     * 3 but the actual value used is 4.)
+     */</span>
+    <span class="enscript-keyword">for</span> (max_blindex = BL_CODES-1; max_blindex &gt;= 3; max_blindex--) {
+        <span class="enscript-keyword">if</span> (s-&gt;bl_tree[bl_order[max_blindex]].Len != 0) <span class="enscript-keyword">break</span>;
+    }
+    <span class="enscript-comment">/* Update opt_len to include the bit length tree and counts */</span>
+    s-&gt;opt_len += 3*(max_blindex+1) + 5+5+4;
+    Tracev((stderr, <span class="enscript-string">&quot;\ndyn trees: dyn %ld, stat %ld&quot;</span>,
+            s-&gt;opt_len, s-&gt;static_len));
+
+    <span class="enscript-keyword">return</span> max_blindex;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Send the header for a block using dynamic Huffman trees: the counts, the
+ * lengths of the bit length codes, the literal tree and the distance tree.
+ * IN assertion: lcodes &gt;= 257, dcodes &gt;= 1, blcodes &gt;= 4.
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">send_all_trees</span>(s, lcodes, dcodes, blcodes)
+    deflate_state *s;
+    <span class="enscript-type">int</span> lcodes, dcodes, blcodes; <span class="enscript-comment">/* number of codes for each tree */</span>
+{
+    <span class="enscript-type">int</span> rank;                    <span class="enscript-comment">/* index in bl_order */</span>
+
+    Assert (lcodes &gt;= 257 &amp;&amp; dcodes &gt;= 1 &amp;&amp; blcodes &gt;= 4, <span class="enscript-string">&quot;not enough codes&quot;</span>);
+    Assert (lcodes &lt;= L_CODES &amp;&amp; dcodes &lt;= D_CODES &amp;&amp; blcodes &lt;= BL_CODES,
+            <span class="enscript-string">&quot;too many codes&quot;</span>);
+    Tracev((stderr, <span class="enscript-string">&quot;\nbl counts: &quot;</span>));
+    send_bits(s, lcodes-257, 5); <span class="enscript-comment">/* not +255 as stated in appnote.txt */</span>
+    send_bits(s, dcodes-1,   5);
+    send_bits(s, blcodes-4,  4); <span class="enscript-comment">/* not -3 as stated in appnote.txt */</span>
+    <span class="enscript-keyword">for</span> (rank = 0; rank &lt; blcodes; rank++) {
+        Tracev((stderr, <span class="enscript-string">&quot;\nbl code %2d &quot;</span>, bl_order[rank]));
+        send_bits(s, s-&gt;bl_tree[bl_order[rank]].Len, 3);
+    }
+    Tracev((stderr, <span class="enscript-string">&quot;\nbl tree: sent %ld&quot;</span>, s-&gt;bits_sent));
+
+    send_tree(s, (ct_data *)s-&gt;dyn_ltree, lcodes-1); <span class="enscript-comment">/* literal tree */</span>
+    Tracev((stderr, <span class="enscript-string">&quot;\nlit tree: sent %ld&quot;</span>, s-&gt;bits_sent));
+
+    send_tree(s, (ct_data *)s-&gt;dyn_dtree, dcodes-1); <span class="enscript-comment">/* distance tree */</span>
+    Tracev((stderr, <span class="enscript-string">&quot;\ndist tree: sent %ld&quot;</span>, s-&gt;bits_sent));
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Send a stored block
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">_tr_stored_block</span>(s, buf, stored_len, eof)
+    deflate_state *s;
+    charf *buf;       <span class="enscript-comment">/* input block */</span>
+    ulg stored_len;   <span class="enscript-comment">/* length of input block */</span>
+    <span class="enscript-type">int</span> eof;          <span class="enscript-comment">/* true if this is the last block for a file */</span>
+{
+    send_bits(s, (STORED_BLOCK&lt;&lt;1)+eof, 3);  <span class="enscript-comment">/* send block type */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUG</span>
+    s-&gt;compressed_len = (s-&gt;compressed_len + 3 + 7) &amp; (ulg)~7L;
+    s-&gt;compressed_len += (stored_len + 4) &lt;&lt; 3;
+#<span class="enscript-reference">endif</span>
+    copy_block(s, buf, (<span class="enscript-type">unsigned</span>)stored_len, 1); <span class="enscript-comment">/* with header */</span>
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Send one empty static block to give enough lookahead for inflate.
+ * This takes 10 bits, of which 7 may remain in the bit buffer.
+ * The current inflate code requires 9 bits of lookahead. If the
+ * last two codes for the previous block (real code plus EOB) were coded
+ * on 5 bits or less, inflate may have only 5+3 bits of lookahead to decode
+ * the last real code. In this case we send two empty static blocks instead
+ * of one. (There are no problems if the previous block is stored or fixed.)
+ * To simplify the code, we assume the worst case of last real code encoded
+ * on one bit only.
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">_tr_align</span>(s)
+    deflate_state *s;
+{
+    send_bits(s, STATIC_TREES&lt;&lt;1, 3);
+    send_code(s, END_BLOCK, static_ltree);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUG</span>
+    s-&gt;compressed_len += 10L; <span class="enscript-comment">/* 3 for block type, 7 for EOB */</span>
+#<span class="enscript-reference">endif</span>
+    bi_flush(s);
+    <span class="enscript-comment">/* Of the 10 bits for the empty block, we have already sent
+     * (10 - bi_valid) bits. The lookahead for the last real code (before
+     * the EOB of the previous block) was thus at least one plus the length
+     * of the EOB plus what we have just sent of the empty static block.
+     */</span>
+    <span class="enscript-keyword">if</span> (1 + s-&gt;last_eob_len + 10 - s-&gt;bi_valid &lt; 9) {
+        send_bits(s, STATIC_TREES&lt;&lt;1, 3);
+        send_code(s, END_BLOCK, static_ltree);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUG</span>
+        s-&gt;compressed_len += 10L;
+#<span class="enscript-reference">endif</span>
+        bi_flush(s);
+    }
+    s-&gt;last_eob_len = 7;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Determine the best encoding for the current block: dynamic trees, static
+ * trees or store, and output the encoded block to the zip file.
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">_tr_flush_block</span>(s, buf, stored_len, eof)
+    deflate_state *s;
+    charf *buf;       <span class="enscript-comment">/* input block, or NULL if too old */</span>
+    ulg stored_len;   <span class="enscript-comment">/* length of input block */</span>
+    <span class="enscript-type">int</span> eof;          <span class="enscript-comment">/* true if this is the last block for a file */</span>
+{
+    ulg opt_lenb, static_lenb; <span class="enscript-comment">/* opt_len and static_len in bytes */</span>
+    <span class="enscript-type">int</span> max_blindex = 0;  <span class="enscript-comment">/* index of last bit length code of non zero freq */</span>
+
+    <span class="enscript-comment">/* Build the Huffman trees unless a stored block is forced */</span>
+    <span class="enscript-keyword">if</span> (s-&gt;level &gt; 0) {
+
+        <span class="enscript-comment">/* Check if the file is binary or text */</span>
+        <span class="enscript-keyword">if</span> (stored_len &gt; 0 &amp;&amp; s-&gt;strm-&gt;data_type == Z_UNKNOWN)
+            set_data_type(s);
+
+        <span class="enscript-comment">/* Construct the literal and distance trees */</span>
+        build_tree(s, (tree_desc *)(&amp;(s-&gt;l_desc)));
+        Tracev((stderr, <span class="enscript-string">&quot;\nlit data: dyn %ld, stat %ld&quot;</span>, s-&gt;opt_len,
+                s-&gt;static_len));
+
+        build_tree(s, (tree_desc *)(&amp;(s-&gt;d_desc)));
+        Tracev((stderr, <span class="enscript-string">&quot;\ndist data: dyn %ld, stat %ld&quot;</span>, s-&gt;opt_len,
+                s-&gt;static_len));
+        <span class="enscript-comment">/* At this point, opt_len and static_len are the total bit lengths of
+         * the compressed block data, excluding the tree representations.
+         */</span>
+
+        <span class="enscript-comment">/* Build the bit length tree for the above two trees, and get the index
+         * in bl_order of the last bit length code to send.
+         */</span>
+        max_blindex = build_bl_tree(s);
+
+        <span class="enscript-comment">/* Determine the best encoding. Compute the block lengths in bytes. */</span>
+        opt_lenb = (s-&gt;opt_len+3+7)&gt;&gt;3;
+        static_lenb = (s-&gt;static_len+3+7)&gt;&gt;3;
+
+        Tracev((stderr, <span class="enscript-string">&quot;\nopt %lu(%lu) stat %lu(%lu) stored %lu lit %u &quot;</span>,
+                opt_lenb, s-&gt;opt_len, static_lenb, s-&gt;static_len, stored_len,
+                s-&gt;last_lit));
+
+        <span class="enscript-keyword">if</span> (static_lenb &lt;= opt_lenb) opt_lenb = static_lenb;
+
+    } <span class="enscript-keyword">else</span> {
+        Assert(buf != (<span class="enscript-type">char</span>*)0, <span class="enscript-string">&quot;lost buf&quot;</span>);
+        opt_lenb = static_lenb = stored_len + 5; <span class="enscript-comment">/* force a stored block */</span>
+    }
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">FORCE_STORED</span>
+    <span class="enscript-keyword">if</span> (buf != (<span class="enscript-type">char</span>*)0) { <span class="enscript-comment">/* force stored block */</span>
+#<span class="enscript-reference">else</span>
+    <span class="enscript-keyword">if</span> (stored_len+4 &lt;= opt_lenb &amp;&amp; buf != (<span class="enscript-type">char</span>*)0) {
+                       <span class="enscript-comment">/* 4: two words for the lengths */</span>
+#<span class="enscript-reference">endif</span>
+        <span class="enscript-comment">/* The test buf != NULL is only necessary if LIT_BUFSIZE &gt; WSIZE.
+         * Otherwise we can't have processed more than WSIZE input bytes since
+         * the last block flush, because compression would have been
+         * successful. If LIT_BUFSIZE &lt;= WSIZE, it is never too late to
+         * transform a block into a stored block.
+         */</span>
+        _tr_stored_block(s, buf, stored_len, eof);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">FORCE_STATIC</span>
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (static_lenb &gt;= 0) { <span class="enscript-comment">/* force static trees */</span>
+#<span class="enscript-reference">else</span>
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (s-&gt;strategy == Z_FIXED || static_lenb == opt_lenb) {
+#<span class="enscript-reference">endif</span>
+        send_bits(s, (STATIC_TREES&lt;&lt;1)+eof, 3);
+        compress_block(s, (ct_data *)static_ltree, (ct_data *)static_dtree);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUG</span>
+        s-&gt;compressed_len += 3 + s-&gt;static_len;
+#<span class="enscript-reference">endif</span>
+    } <span class="enscript-keyword">else</span> {
+        send_bits(s, (DYN_TREES&lt;&lt;1)+eof, 3);
+        send_all_trees(s, s-&gt;l_desc.max_code+1, s-&gt;d_desc.max_code+1,
+                       max_blindex+1);
+        compress_block(s, (ct_data *)s-&gt;dyn_ltree, (ct_data *)s-&gt;dyn_dtree);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUG</span>
+        s-&gt;compressed_len += 3 + s-&gt;opt_len;
+#<span class="enscript-reference">endif</span>
+    }
+    Assert (s-&gt;compressed_len == s-&gt;bits_sent, <span class="enscript-string">&quot;bad compressed size&quot;</span>);
+    <span class="enscript-comment">/* The above check is made mod 2^32, for files larger than 512 MB
+     * and uLong implemented on 32 bits.
+     */</span>
+    init_block(s);
+
+    <span class="enscript-keyword">if</span> (eof) {
+        bi_windup(s);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUG</span>
+        s-&gt;compressed_len += 7;  <span class="enscript-comment">/* align on byte boundary */</span>
+#<span class="enscript-reference">endif</span>
+    }
+    Tracev((stderr,<span class="enscript-string">&quot;\ncomprlen %lu(%lu) &quot;</span>, s-&gt;compressed_len&gt;&gt;3,
+           s-&gt;compressed_len-7*eof));
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Save the match info and tally the frequency counts. Return true if
+ * the current block must be flushed.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">_tr_tally</span> (s, dist, lc)
+    deflate_state *s;
+    <span class="enscript-type">unsigned</span> dist;  <span class="enscript-comment">/* distance of matched string */</span>
+    <span class="enscript-type">unsigned</span> lc;    <span class="enscript-comment">/* match length-MIN_MATCH or unmatched char (if dist==0) */</span>
+{
+    s-&gt;d_buf[s-&gt;last_lit] = (ush)dist;
+    s-&gt;l_buf[s-&gt;last_lit++] = (uch)lc;
+    <span class="enscript-keyword">if</span> (dist == 0) {
+        <span class="enscript-comment">/* lc is the unmatched char */</span>
+        s-&gt;dyn_ltree[lc].Freq++;
+    } <span class="enscript-keyword">else</span> {
+        s-&gt;matches++;
+        <span class="enscript-comment">/* Here, lc is the match length - MIN_MATCH */</span>
+        dist--;             <span class="enscript-comment">/* dist = match distance - 1 */</span>
+        Assert((ush)dist &lt; (ush)MAX_DIST(s) &amp;&amp;
+               (ush)lc &lt;= (ush)(MAX_MATCH-MIN_MATCH) &amp;&amp;
+               (ush)d_code(dist) &lt; (ush)D_CODES,  <span class="enscript-string">&quot;_tr_tally: bad match&quot;</span>);
+
+        s-&gt;dyn_ltree[_length_code[lc]+LITERALS+1].Freq++;
+        s-&gt;dyn_dtree[d_code(dist)].Freq++;
+    }
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">TRUNCATE_BLOCK</span>
+    <span class="enscript-comment">/* Try to guess if it is profitable to stop the current block here */</span>
+    <span class="enscript-keyword">if</span> ((s-&gt;last_lit &amp; 0x1fff) == 0 &amp;&amp; s-&gt;level &gt; 2) {
+        <span class="enscript-comment">/* Compute an upper bound for the compressed length */</span>
+        ulg out_length = (ulg)s-&gt;last_lit*8L;
+        ulg in_length = (ulg)((<span class="enscript-type">long</span>)s-&gt;strstart - s-&gt;block_start);
+        <span class="enscript-type">int</span> dcode;
+        <span class="enscript-keyword">for</span> (dcode = 0; dcode &lt; D_CODES; dcode++) {
+            out_length += (ulg)s-&gt;dyn_dtree[dcode].Freq *
+                (5L+extra_dbits[dcode]);
+        }
+        out_length &gt;&gt;= 3;
+        Tracev((stderr,<span class="enscript-string">&quot;\nlast_lit %u, in %ld, out ~%ld(%ld%%) &quot;</span>,
+               s-&gt;last_lit, in_length, out_length,
+               100L - out_length*100L/in_length));
+        <span class="enscript-keyword">if</span> (s-&gt;matches &lt; s-&gt;last_lit/2 &amp;&amp; out_length &lt; in_length/2) <span class="enscript-keyword">return</span> 1;
+    }
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">return</span> (s-&gt;last_lit == s-&gt;lit_bufsize-1);
+    <span class="enscript-comment">/* We avoid equality with lit_bufsize because of wraparound at 64K
+     * on 16 bit machines and because stored blocks are restricted to
+     * 64K-1 bytes.
+     */</span>
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Send the block data compressed using the given Huffman trees
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">compress_block</span>(s, ltree, dtree)
+    deflate_state *s;
+    ct_data *ltree; <span class="enscript-comment">/* literal tree */</span>
+    ct_data *dtree; <span class="enscript-comment">/* distance tree */</span>
+{
+    <span class="enscript-type">unsigned</span> dist;      <span class="enscript-comment">/* distance of matched string */</span>
+    <span class="enscript-type">int</span> lc;             <span class="enscript-comment">/* match length or unmatched char (if dist == 0) */</span>
+    <span class="enscript-type">unsigned</span> lx = 0;    <span class="enscript-comment">/* running index in l_buf */</span>
+    <span class="enscript-type">unsigned</span> code;      <span class="enscript-comment">/* the code to send */</span>
+    <span class="enscript-type">int</span> extra;          <span class="enscript-comment">/* number of extra bits to send */</span>
+
+    <span class="enscript-keyword">if</span> (s-&gt;last_lit != 0) <span class="enscript-keyword">do</span> {
+        dist = s-&gt;d_buf[lx];
+        lc = s-&gt;l_buf[lx++];
+        <span class="enscript-keyword">if</span> (dist == 0) {
+            send_code(s, lc, ltree); <span class="enscript-comment">/* send a literal byte */</span>
+            Tracecv(isgraph(lc), (stderr,<span class="enscript-string">&quot; '%c' &quot;</span>, lc));
+        } <span class="enscript-keyword">else</span> {
+            <span class="enscript-comment">/* Here, lc is the match length - MIN_MATCH */</span>
+            code = _length_code[lc];
+            send_code(s, code+LITERALS+1, ltree); <span class="enscript-comment">/* send the length code */</span>
+            extra = extra_lbits[code];
+            <span class="enscript-keyword">if</span> (extra != 0) {
+                lc -= base_length[code];
+                send_bits(s, lc, extra);       <span class="enscript-comment">/* send the extra length bits */</span>
+            }
+            dist--; <span class="enscript-comment">/* dist is now the match distance - 1 */</span>
+            code = d_code(dist);
+            Assert (code &lt; D_CODES, <span class="enscript-string">&quot;bad d_code&quot;</span>);
+
+            send_code(s, code, dtree);       <span class="enscript-comment">/* send the distance code */</span>
+            extra = extra_dbits[code];
+            <span class="enscript-keyword">if</span> (extra != 0) {
+                dist -= base_dist[code];
+                send_bits(s, dist, extra);   <span class="enscript-comment">/* send the extra distance bits */</span>
+            }
+        } <span class="enscript-comment">/* literal or match pair ? */</span>
+
+        <span class="enscript-comment">/* Check that the overlay between pending_buf and d_buf+l_buf is ok: */</span>
+        Assert((uInt)(s-&gt;pending) &lt; s-&gt;lit_bufsize + 2*lx,
+               <span class="enscript-string">&quot;pendingBuf overflow&quot;</span>);
+
+    } <span class="enscript-keyword">while</span> (lx &lt; s-&gt;last_lit);
+
+    send_code(s, END_BLOCK, ltree);
+    s-&gt;last_eob_len = ltree[END_BLOCK].Len;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Set the data type to BINARY or TEXT, using a crude approximation:
+ * set it to Z_TEXT if all symbols are either printable characters (33 to 255)
+ * or white spaces (9 to 13, or 32); or set it to Z_BINARY otherwise.
+ * IN assertion: the fields Freq of dyn_ltree are set.
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">set_data_type</span>(s)
+    deflate_state *s;
+{
+    <span class="enscript-type">int</span> n;
+
+    <span class="enscript-keyword">for</span> (n = 0; n &lt; 9; n++)
+        <span class="enscript-keyword">if</span> (s-&gt;dyn_ltree[n].Freq != 0)
+            <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">if</span> (n == 9)
+        <span class="enscript-keyword">for</span> (n = 14; n &lt; 32; n++)
+            <span class="enscript-keyword">if</span> (s-&gt;dyn_ltree[n].Freq != 0)
+                <span class="enscript-keyword">break</span>;
+    s-&gt;strm-&gt;data_type = (n == 32) ? Z_TEXT : Z_BINARY;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Reverse the first len bits of a code, using straightforward code (a faster
+ * method would use a table)
+ * IN assertion: 1 &lt;= len &lt;= 15
+ */</span>
+local <span class="enscript-type">unsigned</span> <span class="enscript-function-name">bi_reverse</span>(code, len)
+    <span class="enscript-type">unsigned</span> code; <span class="enscript-comment">/* the value to invert */</span>
+    <span class="enscript-type">int</span> len;       <span class="enscript-comment">/* its bit length */</span>
+{
+    <span class="enscript-type">register</span> <span class="enscript-type">unsigned</span> res = 0;
+    <span class="enscript-keyword">do</span> {
+        res |= code &amp; 1;
+        code &gt;&gt;= 1, res &lt;&lt;= 1;
+    } <span class="enscript-keyword">while</span> (--len &gt; 0);
+    <span class="enscript-keyword">return</span> res &gt;&gt; 1;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Flush the bit buffer, keeping at most 7 bits in it.
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">bi_flush</span>(s)
+    deflate_state *s;
+{
+    <span class="enscript-keyword">if</span> (s-&gt;bi_valid == 16) {
+        put_short(s, s-&gt;bi_buf);
+        s-&gt;bi_buf = 0;
+        s-&gt;bi_valid = 0;
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (s-&gt;bi_valid &gt;= 8) {
+        put_byte(s, (Byte)s-&gt;bi_buf);
+        s-&gt;bi_buf &gt;&gt;= 8;
+        s-&gt;bi_valid -= 8;
+    }
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Flush the bit buffer and align the output on a byte boundary
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">bi_windup</span>(s)
+    deflate_state *s;
+{
+    <span class="enscript-keyword">if</span> (s-&gt;bi_valid &gt; 8) {
+        put_short(s, s-&gt;bi_buf);
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (s-&gt;bi_valid &gt; 0) {
+        put_byte(s, (Byte)s-&gt;bi_buf);
+    }
+    s-&gt;bi_buf = 0;
+    s-&gt;bi_valid = 0;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUG</span>
+    s-&gt;bits_sent = (s-&gt;bits_sent+7) &amp; ~7;
+#<span class="enscript-reference">endif</span>
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Copy a stored block, storing first the length and its
+ * one's complement if requested.
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">copy_block</span>(s, buf, len, header)
+    deflate_state *s;
+    charf    *buf;    <span class="enscript-comment">/* the input data */</span>
+    <span class="enscript-type">unsigned</span> len;     <span class="enscript-comment">/* its length */</span>
+    <span class="enscript-type">int</span>      header;  <span class="enscript-comment">/* true if block header must be written */</span>
+{
+    bi_windup(s);        <span class="enscript-comment">/* align on byte boundary */</span>
+    s-&gt;last_eob_len = 8; <span class="enscript-comment">/* enough lookahead for inflate */</span>
+
+    <span class="enscript-keyword">if</span> (header) {
+        put_short(s, (ush)len);
+        put_short(s, (ush)~len);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUG</span>
+        s-&gt;bits_sent += 2*16;
+#<span class="enscript-reference">endif</span>
+    }
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUG</span>
+    s-&gt;bits_sent += (ulg)len&lt;&lt;3;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">while</span> (len--) {
+        put_byte(s, *buf++);
+    }
+}
+</pre>
+<hr />
+</body></html>

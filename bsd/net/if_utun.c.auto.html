@@ -1,0 +1,1019 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>if_utun.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">if_utun.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+
+
+<span class="enscript-comment">/* ----------------------------------------------------------------------------------
+Application of kernel control for interface creation
+
+Theory of operation:
+utun (user tunnel) acts as glue between kernel control sockets and network interfaces. 
+This kernel control will register an interface for every client that connects. 
+---------------------------------------------------------------------------------- */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kern_control.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_protocol.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_interface.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/bpf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_utun.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSMalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span> 
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sockio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/in6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/in6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+
+
+<span class="enscript-comment">/* Kernel Control functions */</span>
+<span class="enscript-type">static</span> errno_t	utun_ctl_connect(kern_ctl_ref kctlref, <span class="enscript-type">struct</span> sockaddr_ctl *sac,
+								 <span class="enscript-type">void</span> **unitinfo);
+<span class="enscript-type">static</span> errno_t	utun_ctl_disconnect(kern_ctl_ref kctlref, u_int32_t unit,
+									<span class="enscript-type">void</span> *unitinfo);
+<span class="enscript-type">static</span> errno_t	utun_ctl_send(kern_ctl_ref kctlref, u_int32_t unit,
+							   <span class="enscript-type">void</span> *unitinfo, mbuf_t m, <span class="enscript-type">int</span> flags);
+<span class="enscript-type">static</span> errno_t	utun_ctl_getopt(kern_ctl_ref kctlref, u_int32_t unit, <span class="enscript-type">void</span> *unitinfo,
+								 <span class="enscript-type">int</span> opt, <span class="enscript-type">void</span> *data, size_t *len);
+<span class="enscript-type">static</span> errno_t	utun_ctl_setopt(kern_ctl_ref kctlref, u_int32_t unit, <span class="enscript-type">void</span> *unitinfo,
+								 <span class="enscript-type">int</span> opt, <span class="enscript-type">void</span> *data, size_t len);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>		utun_ctl_rcvd(kern_ctl_ref kctlref, u_int32_t unit, <span class="enscript-type">void</span> *unitinfo,
+								<span class="enscript-type">int</span> flags);
+
+<span class="enscript-comment">/* Network Interface functions */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>     <span class="enscript-function-name">utun_start</span>(ifnet_t interface);
+<span class="enscript-type">static</span> errno_t	utun_output(ifnet_t interface, mbuf_t data);
+<span class="enscript-type">static</span> errno_t	utun_demux(ifnet_t interface, mbuf_t data, <span class="enscript-type">char</span> *frame_header,
+						   protocol_family_t *protocol);
+<span class="enscript-type">static</span> errno_t	utun_framer(ifnet_t interface, mbuf_t *packet,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *dest, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *desk_linkaddr,
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *frame_type, u_int32_t *prepend_len, u_int32_t *postpend_len);
+<span class="enscript-type">static</span> errno_t	utun_add_proto(ifnet_t interface, protocol_family_t protocol,
+							   <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ifnet_demux_desc *demux_array,
+							   u_int32_t demux_count);
+<span class="enscript-type">static</span> errno_t	utun_del_proto(ifnet_t interface, protocol_family_t protocol);
+<span class="enscript-type">static</span> errno_t	utun_ioctl(ifnet_t interface, u_long cmd, <span class="enscript-type">void</span> *data);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>		utun_detached(ifnet_t interface);
+
+<span class="enscript-comment">/* Protocol handlers */</span>
+<span class="enscript-type">static</span> errno_t	utun_attach_proto(ifnet_t interface, protocol_family_t proto);
+<span class="enscript-type">static</span> errno_t	utun_proto_input(ifnet_t interface, protocol_family_t protocol,
+								 mbuf_t m, <span class="enscript-type">char</span> *frame_header);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">utun_proto_pre_output</span>(ifnet_t interface, protocol_family_t protocol, 
+					 mbuf_t *packet, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *dest, <span class="enscript-type">void</span> *route,
+					 <span class="enscript-type">char</span> *frame_type, <span class="enscript-type">char</span> *link_layer_dest);
+__private_extern__ errno_t utun_pkt_input (<span class="enscript-type">struct</span> utun_pcb *pcb, mbuf_t m);
+
+<span class="enscript-type">static</span> kern_ctl_ref	utun_kctlref;
+<span class="enscript-type">static</span> u_int32_t	utun_family;
+<span class="enscript-type">static</span> OSMallocTag	utun_malloc_tag;
+<span class="enscript-type">static</span> SInt32		utun_ifcount = 0;
+
+<span class="enscript-comment">/* Prepend length */</span>
+<span class="enscript-type">void</span>*
+<span class="enscript-function-name">utun_alloc</span>(size_t size)
+{
+	size_t	*mem = OSMalloc(size + <span class="enscript-keyword">sizeof</span>(size_t), utun_malloc_tag);
+	
+	<span class="enscript-keyword">if</span> (mem) {
+		*mem = size + <span class="enscript-keyword">sizeof</span>(size_t);
+		mem++;
+	}
+	
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">void</span>*)mem;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">utun_free</span>(<span class="enscript-type">void</span> *ptr)
+{
+	size_t	*size = ptr;
+	size--;
+	OSFree(size, *size, utun_malloc_tag);
+}
+
+errno_t
+<span class="enscript-function-name">utun_register_control</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> kern_ctl_reg	kern_ctl;
+	errno_t				result = 0;
+	
+	<span class="enscript-comment">/* Create a tag to allocate memory */</span>
+	utun_malloc_tag = OSMalloc_Tagalloc(UTUN_CONTROL_NAME, OSMT_DEFAULT);
+	
+	<span class="enscript-comment">/* Find a unique value for our interface family */</span>
+	result = mbuf_tag_id_find(UTUN_CONTROL_NAME, &amp;utun_family);
+	<span class="enscript-keyword">if</span> (result != 0) {
+		printf(<span class="enscript-string">&quot;utun_register_control - mbuf_tag_id_find_internal failed: %d\n&quot;</span>, result);
+		<span class="enscript-keyword">return</span> result;
+	}
+	
+	bzero(&amp;kern_ctl, <span class="enscript-keyword">sizeof</span>(kern_ctl));
+	strlcpy(kern_ctl.ctl_name, UTUN_CONTROL_NAME, <span class="enscript-keyword">sizeof</span>(kern_ctl.ctl_name));
+	kern_ctl.ctl_name[<span class="enscript-keyword">sizeof</span>(kern_ctl.ctl_name) - 1] = 0;
+	kern_ctl.ctl_flags = CTL_FLAG_PRIVILEGED | CTL_FLAG_REG_EXTENDED; <span class="enscript-comment">/* Require root */</span>
+	kern_ctl.ctl_sendsize = 512 * 1024;
+	kern_ctl.ctl_recvsize = 512 * 1024;
+	kern_ctl.ctl_connect = utun_ctl_connect;
+	kern_ctl.ctl_disconnect = utun_ctl_disconnect;
+	kern_ctl.ctl_send = utun_ctl_send;
+	kern_ctl.ctl_setopt = utun_ctl_setopt;
+	kern_ctl.ctl_getopt = utun_ctl_getopt;
+	kern_ctl.ctl_rcvd = utun_ctl_rcvd;
+
+	utun_ctl_init_crypto();
+
+	result = ctl_register(&amp;kern_ctl, &amp;utun_kctlref);
+	<span class="enscript-keyword">if</span> (result != 0) {
+		printf(<span class="enscript-string">&quot;utun_register_control - ctl_register failed: %d\n&quot;</span>, result);
+		<span class="enscript-keyword">return</span> result;
+	}
+	
+	<span class="enscript-comment">/* Register the protocol plumbers */</span>
+	<span class="enscript-keyword">if</span> ((result = proto_register_plumber(PF_INET, utun_family,
+										 utun_attach_proto, NULL)) != 0) {
+		printf(<span class="enscript-string">&quot;utun_register_control - proto_register_plumber(PF_INET, %d) failed: %d\n&quot;</span>,
+			   utun_family, result);
+		ctl_deregister(utun_kctlref);
+		<span class="enscript-keyword">return</span> result;
+	}
+	
+	<span class="enscript-comment">/* Register the protocol plumbers */</span>
+	<span class="enscript-keyword">if</span> ((result = proto_register_plumber(PF_INET6, utun_family,
+										 utun_attach_proto, NULL)) != 0) {
+		proto_unregister_plumber(PF_INET, utun_family);
+		ctl_deregister(utun_kctlref);
+		printf(<span class="enscript-string">&quot;utun_register_control - proto_register_plumber(PF_INET6, %d) failed: %d\n&quot;</span>,
+			   utun_family, result);
+		<span class="enscript-keyword">return</span> result;
+	}
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* Kernel control functions */</span>
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_ctl_connect</span>(
+	kern_ctl_ref		kctlref,
+	<span class="enscript-type">struct</span> sockaddr_ctl	*sac, 
+	<span class="enscript-type">void</span>				**unitinfo)
+{
+	<span class="enscript-type">struct</span> ifnet_init_eparams	utun_init;
+	<span class="enscript-type">struct</span> utun_pcb				*pcb;
+	errno_t						result;
+	<span class="enscript-type">struct</span> ifnet_stats_param 	stats;
+	
+	<span class="enscript-comment">/* kernel control allocates, interface frees */</span>
+	pcb = utun_alloc(<span class="enscript-keyword">sizeof</span>(*pcb));
+	<span class="enscript-keyword">if</span> (pcb == NULL)
+		<span class="enscript-keyword">return</span> ENOMEM;
+	
+	<span class="enscript-comment">/* Setup the protocol control block */</span>
+	bzero(pcb, <span class="enscript-keyword">sizeof</span>(*pcb));
+	*unitinfo = pcb;
+	pcb-&gt;utun_ctlref = kctlref;
+	pcb-&gt;utun_unit = sac-&gt;sc_unit;
+	pcb-&gt;utun_max_pending_packets = 1;
+	
+	printf(<span class="enscript-string">&quot;utun_ctl_connect: creating interface utun%d\n&quot;</span>, pcb-&gt;utun_unit - 1);
+
+	<span class="enscript-comment">/* Create the interface */</span>
+	bzero(&amp;utun_init, <span class="enscript-keyword">sizeof</span>(utun_init));
+	utun_init.ver = IFNET_INIT_CURRENT_VERSION;
+	utun_init.len = <span class="enscript-keyword">sizeof</span> (utun_init);
+	utun_init.name = <span class="enscript-string">&quot;utun&quot;</span>;
+	utun_init.start = utun_start;
+	utun_init.unit = pcb-&gt;utun_unit - 1;
+	utun_init.family = utun_family;
+	utun_init.type = IFT_OTHER;
+	utun_init.demux = utun_demux;
+	utun_init.framer_extended = utun_framer;
+	utun_init.add_proto = utun_add_proto;
+	utun_init.del_proto = utun_del_proto;
+	utun_init.softc = pcb;
+	utun_init.ioctl = utun_ioctl;
+	utun_init.detach = utun_detached;
+	
+	result = ifnet_allocate_extended(&amp;utun_init, &amp;pcb-&gt;utun_ifp);
+	<span class="enscript-keyword">if</span> (result != 0) {
+		printf(<span class="enscript-string">&quot;utun_ctl_connect - ifnet_allocate failed: %d\n&quot;</span>, result);
+		utun_free(pcb);
+		<span class="enscript-keyword">return</span> result;
+	}
+	OSIncrementAtomic(&amp;utun_ifcount);
+	
+	<span class="enscript-comment">/* Set flags and additional information. */</span>
+	ifnet_set_mtu(pcb-&gt;utun_ifp, 1500);
+	ifnet_set_flags(pcb-&gt;utun_ifp, IFF_UP | IFF_MULTICAST | IFF_POINTOPOINT, 0xffff);
+
+	<span class="enscript-comment">/* The interface must generate its own IPv6 LinkLocal address,
+	 * if possible following the recommendation of RFC2472 to the 64bit interface ID
+	 */</span>
+	ifnet_set_eflags(pcb-&gt;utun_ifp, IFEF_NOAUTOIPV6LL, IFEF_NOAUTOIPV6LL);
+	
+	<span class="enscript-comment">/* Reset the stats in case as the interface may have been recycled */</span>
+	bzero(&amp;stats, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ifnet_stats_param));
+	ifnet_set_stat(pcb-&gt;utun_ifp, &amp;stats);
+
+	<span class="enscript-comment">/* Attach the interface */</span>
+	result = ifnet_attach(pcb-&gt;utun_ifp, NULL);
+	<span class="enscript-keyword">if</span> (result != 0) {
+		printf(<span class="enscript-string">&quot;utun_ctl_connect - ifnet_allocate failed: %d\n&quot;</span>, result);
+		ifnet_release(pcb-&gt;utun_ifp);
+		utun_free(pcb);
+	}
+	
+	<span class="enscript-comment">/* Attach to bpf */</span>
+	<span class="enscript-keyword">if</span> (result == 0)
+		bpfattach(pcb-&gt;utun_ifp, DLT_NULL, 4);
+	
+	<span class="enscript-comment">/* The interfaces resoures allocated, mark it as running */</span>
+	<span class="enscript-keyword">if</span> (result == 0)
+		ifnet_set_flags(pcb-&gt;utun_ifp, IFF_RUNNING, IFF_RUNNING);
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_detach_ip</span>(
+	ifnet_t				interface,
+	protocol_family_t	protocol,
+	socket_t			pf_socket)
+{
+	errno_t result = EPROTONOSUPPORT;
+	
+	<span class="enscript-comment">/* Attempt a detach */</span>
+	<span class="enscript-keyword">if</span> (protocol == PF_INET) {
+		<span class="enscript-type">struct</span> ifreq	ifr;
+		
+		bzero(&amp;ifr, <span class="enscript-keyword">sizeof</span>(ifr));
+		snprintf(ifr.ifr_name, <span class="enscript-keyword">sizeof</span>(ifr.ifr_name), <span class="enscript-string">&quot;%s%d&quot;</span>,
+				 ifnet_name(interface), ifnet_unit(interface));
+		
+		result = sock_ioctl(pf_socket, SIOCPROTODETACH, &amp;ifr);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (protocol == PF_INET6) {
+		<span class="enscript-type">struct</span> in6_ifreq	ifr6;
+		
+		bzero(&amp;ifr6, <span class="enscript-keyword">sizeof</span>(ifr6));
+		snprintf(ifr6.ifr_name, <span class="enscript-keyword">sizeof</span>(ifr6.ifr_name), <span class="enscript-string">&quot;%s%d&quot;</span>,
+				 ifnet_name(interface), ifnet_unit(interface));
+		
+		result = sock_ioctl(pf_socket, SIOCPROTODETACH_IN6, &amp;ifr6);
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">utun_remove_address</span>(
+	ifnet_t				interface,
+	protocol_family_t	protocol,
+	ifaddr_t			address,
+	socket_t			pf_socket)
+{
+	errno_t result = 0;
+	
+	<span class="enscript-comment">/* Attempt a detach */</span>
+	<span class="enscript-keyword">if</span> (protocol == PF_INET) {
+		<span class="enscript-type">struct</span> ifreq	ifr;
+		
+		bzero(&amp;ifr, <span class="enscript-keyword">sizeof</span>(ifr));
+		snprintf(ifr.ifr_name, <span class="enscript-keyword">sizeof</span>(ifr.ifr_name), <span class="enscript-string">&quot;%s%d&quot;</span>,
+				 ifnet_name(interface), ifnet_unit(interface));
+		result = ifaddr_address(address, &amp;ifr.ifr_addr, <span class="enscript-keyword">sizeof</span>(ifr.ifr_addr));
+		<span class="enscript-keyword">if</span> (result != 0) {
+			printf(<span class="enscript-string">&quot;utun_remove_address - ifaddr_address failed: %d&quot;</span>, result);
+		}
+		<span class="enscript-keyword">else</span> {
+			result = sock_ioctl(pf_socket, SIOCDIFADDR, &amp;ifr);
+			<span class="enscript-keyword">if</span> (result != 0) {
+				printf(<span class="enscript-string">&quot;utun_remove_address - SIOCDIFADDR failed: %d&quot;</span>, result);
+			}
+		}
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (protocol == PF_INET6) {
+		<span class="enscript-type">struct</span> in6_ifreq	ifr6;
+		
+		bzero(&amp;ifr6, <span class="enscript-keyword">sizeof</span>(ifr6));
+		snprintf(ifr6.ifr_name, <span class="enscript-keyword">sizeof</span>(ifr6.ifr_name), <span class="enscript-string">&quot;%s%d&quot;</span>,
+				 ifnet_name(interface), ifnet_unit(interface));
+		result = ifaddr_address(address, (<span class="enscript-type">struct</span> sockaddr*)&amp;ifr6.ifr_addr,
+								<span class="enscript-keyword">sizeof</span>(ifr6.ifr_addr));
+		<span class="enscript-keyword">if</span> (result != 0) {
+			printf(<span class="enscript-string">&quot;utun_remove_address - ifaddr_address failed (v6): %d&quot;</span>,
+				   result);
+		}
+		<span class="enscript-keyword">else</span> {
+			result = sock_ioctl(pf_socket, SIOCDIFADDR_IN6, &amp;ifr6);
+			<span class="enscript-keyword">if</span> (result != 0) {
+				printf(<span class="enscript-string">&quot;utun_remove_address - SIOCDIFADDR_IN6 failed: %d&quot;</span>,
+					   result);
+			}
+		}
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">utun_cleanup_family</span>(
+	ifnet_t				interface,
+	protocol_family_t	protocol)
+{
+	errno_t		result = 0;
+	socket_t	pf_socket = NULL;
+	ifaddr_t	*addresses = NULL;
+	<span class="enscript-type">int</span>			i;
+	
+	<span class="enscript-keyword">if</span> (protocol != PF_INET &amp;&amp; protocol != PF_INET6) {
+		printf(<span class="enscript-string">&quot;utun_cleanup_family - invalid protocol family %d\n&quot;</span>, protocol);
+		<span class="enscript-keyword">return</span>;
+	}
+	
+	<span class="enscript-comment">/* Create a socket for removing addresses and detaching the protocol */</span>
+	result = sock_socket(protocol, SOCK_DGRAM, 0, NULL, NULL, &amp;pf_socket);
+	<span class="enscript-keyword">if</span> (result != 0) {
+		<span class="enscript-keyword">if</span> (result != EAFNOSUPPORT)
+			printf(<span class="enscript-string">&quot;utun_cleanup_family - failed to create %s socket: %d\n&quot;</span>,
+				protocol == PF_INET ? <span class="enscript-string">&quot;IP&quot;</span> : <span class="enscript-string">&quot;IPv6&quot;</span>, result);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+	}
+	
+        <span class="enscript-comment">/* always set SS_PRIV, we want to close and detach regardless */</span>
+        sock_setpriv(pf_socket, 1);
+
+	result = utun_detach_ip(interface, protocol, pf_socket);
+	<span class="enscript-keyword">if</span> (result == 0 || result == ENXIO) {
+		<span class="enscript-comment">/* We are done! We either detached or weren't attached. */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (result != EBUSY) {
+		<span class="enscript-comment">/* Uh, not really sure what happened here... */</span>
+		printf(<span class="enscript-string">&quot;utun_cleanup_family - utun_detach_ip failed: %d\n&quot;</span>, result);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+	}
+	
+	<span class="enscript-comment">/*
+	 * At this point, we received an EBUSY error. This means there are
+	 * addresses attached. We should detach them and then try again.
+	 */</span>
+	result = ifnet_get_address_list_family(interface, &amp;addresses, protocol);
+	<span class="enscript-keyword">if</span> (result != 0) {
+		printf(<span class="enscript-string">&quot;fnet_get_address_list_family(%s%d, 0xblah, %s) - failed: %d\n&quot;</span>,
+			ifnet_name(interface), ifnet_unit(interface), 
+			protocol == PF_INET ? <span class="enscript-string">&quot;PF_INET&quot;</span> : <span class="enscript-string">&quot;PF_INET6&quot;</span>, result);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+	}
+	
+	<span class="enscript-keyword">for</span> (i = 0; addresses[i] != 0; i++) {
+		utun_remove_address(interface, protocol, addresses[i], pf_socket);
+	}
+	ifnet_free_address_list(addresses);
+	addresses = NULL;
+	
+	<span class="enscript-comment">/*
+	 * The addresses should be gone, we should try the remove again.
+	 */</span>
+	result = utun_detach_ip(interface, protocol, pf_socket);
+	<span class="enscript-keyword">if</span> (result != 0 &amp;&amp; result != ENXIO) {
+		printf(<span class="enscript-string">&quot;utun_cleanup_family - utun_detach_ip failed: %d\n&quot;</span>, result);
+	}
+	
+<span class="enscript-reference">cleanup</span>:
+	<span class="enscript-keyword">if</span> (pf_socket != NULL)
+		sock_close(pf_socket);
+	
+	<span class="enscript-keyword">if</span> (addresses != NULL)
+		ifnet_free_address_list(addresses);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_ctl_disconnect</span>(
+	__unused kern_ctl_ref	kctlref,
+	__unused u_int32_t		unit,
+	<span class="enscript-type">void</span>					*unitinfo)
+{
+	<span class="enscript-type">struct</span> utun_pcb	*pcb = unitinfo;
+	ifnet_t			ifp = pcb-&gt;utun_ifp;
+	errno_t			result = 0;
+
+	utun_cleanup_crypto(pcb);
+
+	pcb-&gt;utun_ctlref = NULL;
+	pcb-&gt;utun_unit = 0;
+	
+	<span class="enscript-comment">/*
+	 * We want to do everything in our power to ensure that the interface
+	 * really goes away when the socket is closed. We must remove IP/IPv6
+	 * addresses and detach the protocols. Finally, we can remove and
+	 * release the interface.
+	 */</span>
+	utun_cleanup_family(ifp, AF_INET);
+	utun_cleanup_family(ifp, AF_INET6);
+	
+	<span class="enscript-keyword">if</span> ((result = ifnet_detach(ifp)) != 0) {
+		printf(<span class="enscript-string">&quot;utun_ctl_disconnect - ifnet_detach failed: %d\n&quot;</span>, result);
+	}
+	
+	<span class="enscript-keyword">if</span> ((result = ifnet_release(ifp)) != 0) {
+		printf(<span class="enscript-string">&quot;utun_ctl_disconnect - ifnet_release failed: %d\n&quot;</span>, result);
+	}
+	
+	<span class="enscript-keyword">return</span> 0;
+}	
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_ctl_send</span>(
+	__unused kern_ctl_ref	kctlref,
+	__unused u_int32_t		unit,
+	<span class="enscript-type">void</span>					*unitinfo,
+	mbuf_t					m,
+	__unused <span class="enscript-type">int</span>			flags)
+{
+	<span class="enscript-comment">/*
+	 * The userland ABI requires the first four bytes have the protocol family 
+	 * in network byte order: swap them
+	 */</span>
+	<span class="enscript-keyword">if</span> (m_pktlen(m) &gt;= 4)
+		*(protocol_family_t *)mbuf_data(m) = ntohl(*(protocol_family_t *)mbuf_data(m));
+	<span class="enscript-keyword">else</span>
+		printf(<span class="enscript-string">&quot;%s - unexpected short mbuf pkt len %d\n&quot;</span>, __func__, m_pktlen(m) );
+
+	<span class="enscript-keyword">return</span> utun_pkt_input((<span class="enscript-type">struct</span> utun_pcb *)unitinfo, m);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_ctl_setopt</span>(
+	__unused kern_ctl_ref	kctlref,
+	__unused u_int32_t		unit, 
+	<span class="enscript-type">void</span>					*unitinfo,
+	<span class="enscript-type">int</span>						opt, 
+	<span class="enscript-type">void</span>					*data, 
+	size_t					len)
+{
+	<span class="enscript-type">struct</span> utun_pcb			*pcb = unitinfo;
+	errno_t					result = 0;
+	
+	<span class="enscript-comment">/* check for privileges for privileged options */</span>
+	<span class="enscript-keyword">switch</span> (opt) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_FLAGS</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_EXT_IFDATA_STATS</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_SET_DELEGATE_INTERFACE</span>:
+			<span class="enscript-keyword">if</span> (kauth_cred_issuser(kauth_cred_get()) == 0) {
+				<span class="enscript-keyword">return</span> EPERM;
+			}
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">switch</span> (opt) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_FLAGS</span>:
+			<span class="enscript-keyword">if</span> (len != <span class="enscript-keyword">sizeof</span>(u_int32_t))
+				result = EMSGSIZE;
+			<span class="enscript-keyword">else</span>
+				pcb-&gt;utun_flags = *(u_int32_t *)data;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_ENABLE_CRYPTO</span>:
+			result = utun_ctl_enable_crypto(kctlref, unit, unitinfo, opt, data, len);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_CONFIG_CRYPTO_KEYS</span>:
+			result = utun_ctl_config_crypto_keys(kctlref, unit, unitinfo, opt, data, len);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_UNCONFIG_CRYPTO_KEYS</span>:
+			result = utun_ctl_unconfig_crypto_keys(kctlref, unit, unitinfo, opt, data, len);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_DISABLE_CRYPTO</span>:
+			result = utun_ctl_disable_crypto(kctlref, unit, unitinfo, opt, data, len);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_STOP_CRYPTO_DATA_TRAFFIC</span>:
+			result = utun_ctl_stop_crypto_data_traffic(kctlref, unit, unitinfo, opt, data, len);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_START_CRYPTO_DATA_TRAFFIC</span>:
+			result = utun_ctl_start_crypto_data_traffic(kctlref, unit, unitinfo, opt, data, len);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_CONFIG_CRYPTO_FRAMER</span>:
+			result = utun_ctl_config_crypto_framer(kctlref, unit, unitinfo, opt, data, len);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_UNCONFIG_CRYPTO_FRAMER</span>:
+			result = utun_ctl_unconfig_crypto_framer(kctlref, unit, unitinfo, opt, data, len);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_EXT_IFDATA_STATS</span>:
+			<span class="enscript-keyword">if</span> (len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)) {
+				result = EMSGSIZE;
+				<span class="enscript-keyword">break</span>;
+			}
+			pcb-&gt;utun_ext_ifdata_stats = (*(<span class="enscript-type">int</span> *)data) ? 1 : 0;
+			<span class="enscript-keyword">break</span>;
+			
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_INC_IFDATA_STATS_IN</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_INC_IFDATA_STATS_OUT</span>: {
+			<span class="enscript-type">struct</span> utun_stats_param *utsp = (<span class="enscript-type">struct</span> utun_stats_param *)data;
+			
+			<span class="enscript-keyword">if</span> (utsp == NULL || len &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> utun_stats_param)) {
+				result = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (!pcb-&gt;utun_ext_ifdata_stats) {
+				result = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (opt == UTUN_OPT_INC_IFDATA_STATS_IN)
+				ifnet_stat_increment_in(pcb-&gt;utun_ifp, utsp-&gt;utsp_packets, 
+					utsp-&gt;utsp_bytes, utsp-&gt;utsp_errors);
+			<span class="enscript-keyword">else</span>
+				ifnet_stat_increment_out(pcb-&gt;utun_ifp, utsp-&gt;utsp_packets, 
+					utsp-&gt;utsp_bytes, utsp-&gt;utsp_errors);
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_SET_DELEGATE_INTERFACE</span>: {
+			ifnet_t		del_ifp = NULL;
+			<span class="enscript-type">char</span>            name[IFNAMSIZ];
+
+			<span class="enscript-keyword">if</span> (len &gt; IFNAMSIZ - 1) {
+				result = EMSGSIZE;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (len != 0) {    <span class="enscript-comment">/* if len==0, del_ifp will be NULL causing the delegate to be removed */</span>
+				bcopy(data, name, len);
+				name[len] = 0;
+				result = ifnet_find_by_name(name, &amp;del_ifp);
+			}
+			<span class="enscript-keyword">if</span> (result == 0) {
+				result = ifnet_set_delegate(pcb-&gt;utun_ifp, del_ifp);
+				<span class="enscript-keyword">if</span> (del_ifp)
+					ifnet_release(del_ifp);            
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_MAX_PENDING_PACKETS</span>: {
+			u_int32_t max_pending_packets = 0;
+			<span class="enscript-keyword">if</span> (len != <span class="enscript-keyword">sizeof</span>(u_int32_t)) {
+				result = EMSGSIZE;
+				<span class="enscript-keyword">break</span>;
+			}
+			max_pending_packets = *(u_int32_t *)data;
+			<span class="enscript-keyword">if</span> (max_pending_packets == 0) {
+				result = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			pcb-&gt;utun_max_pending_packets = max_pending_packets;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-reference">default</span>: {
+			result = ENOPROTOOPT;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_ctl_getopt</span>(
+	__unused kern_ctl_ref	kctlref,
+	__unused u_int32_t		unit, 
+	<span class="enscript-type">void</span>					*unitinfo,
+	<span class="enscript-type">int</span>						opt, 
+	<span class="enscript-type">void</span>					*data, 
+	size_t					*len)
+{
+	<span class="enscript-type">struct</span> utun_pcb			*pcb = unitinfo;
+	errno_t					result = 0;
+	
+	<span class="enscript-keyword">switch</span> (opt) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_FLAGS</span>:
+			<span class="enscript-keyword">if</span> (*len != <span class="enscript-keyword">sizeof</span>(u_int32_t))
+				result = EMSGSIZE;
+			<span class="enscript-keyword">else</span>
+				*(u_int32_t *)data = pcb-&gt;utun_flags;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_EXT_IFDATA_STATS</span>:
+			<span class="enscript-keyword">if</span> (*len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>))
+				result = EMSGSIZE;
+			<span class="enscript-keyword">else</span>
+				*(<span class="enscript-type">int</span> *)data = (pcb-&gt;utun_ext_ifdata_stats) ? 1 : 0;
+			<span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_IFNAME</span>:
+			*len = snprintf(data, *len, <span class="enscript-string">&quot;%s%d&quot;</span>, ifnet_name(pcb-&gt;utun_ifp), ifnet_unit(pcb-&gt;utun_ifp)) + 1;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_GENERATE_CRYPTO_KEYS_IDX</span>:
+			result = utun_ctl_generate_crypto_keys_idx(kctlref, unit, unitinfo, opt, data, len);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">UTUN_OPT_MAX_PENDING_PACKETS</span>: {
+			*len = <span class="enscript-keyword">sizeof</span>(u_int32_t);
+			*((u_int32_t *)data) = pcb-&gt;utun_max_pending_packets;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-reference">default</span>:
+			result = ENOPROTOOPT;
+			<span class="enscript-keyword">break</span>;
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">utun_ctl_rcvd</span>(kern_ctl_ref kctlref, u_int32_t unit, <span class="enscript-type">void</span> *unitinfo, <span class="enscript-type">int</span> flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">flags</span>)
+	bool reenable_output = false;
+	<span class="enscript-type">struct</span> utun_pcb *pcb = unitinfo;
+	<span class="enscript-keyword">if</span> (pcb == NULL) {
+		<span class="enscript-keyword">return</span>;
+	}
+	ifnet_lock_exclusive(pcb-&gt;utun_ifp);
+
+	u_int32_t utun_packet_cnt;
+	errno_t error_pc = ctl_getenqueuepacketcount(kctlref, unit, &amp;utun_packet_cnt);
+	<span class="enscript-keyword">if</span> (error_pc != 0) {
+		printf(<span class="enscript-string">&quot;utun_ctl_rcvd: ctl_getenqueuepacketcount returned error %d\n&quot;</span>, error_pc);
+		utun_packet_cnt = 0;
+	}
+
+	<span class="enscript-keyword">if</span> (utun_packet_cnt &lt; pcb-&gt;utun_max_pending_packets) {
+		reenable_output = true;
+	}
+
+	<span class="enscript-keyword">if</span> (reenable_output) {
+		errno_t error = ifnet_enable_output(pcb-&gt;utun_ifp);
+		<span class="enscript-keyword">if</span> (error != 0) {
+			printf(<span class="enscript-string">&quot;utun_ctl_rcvd: ifnet_enable_output returned error %d\n&quot;</span>, error);
+		}
+	}
+	ifnet_lock_done(pcb-&gt;utun_ifp);
+}
+
+<span class="enscript-comment">/* Network Interface functions */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">utun_start</span>(ifnet_t interface)
+{
+	mbuf_t data;
+	<span class="enscript-type">struct</span> utun_pcb*pcb = ifnet_softc(interface);
+	<span class="enscript-keyword">for</span> (;;) {
+		bool can_accept_packets = true;
+		ifnet_lock_shared(pcb-&gt;utun_ifp);
+
+		u_int32_t utun_packet_cnt;
+		errno_t error_pc = ctl_getenqueuepacketcount(pcb-&gt;utun_ctlref, pcb-&gt;utun_unit, &amp;utun_packet_cnt);
+		<span class="enscript-keyword">if</span> (error_pc != 0) {
+			printf(<span class="enscript-string">&quot;utun_start: ctl_getenqueuepacketcount returned error %d\n&quot;</span>, error_pc);
+			utun_packet_cnt = 0;
+		}
+
+		can_accept_packets = (utun_packet_cnt &lt; pcb-&gt;utun_max_pending_packets);
+		<span class="enscript-keyword">if</span> (!can_accept_packets &amp;&amp; pcb-&gt;utun_ctlref) {
+			u_int32_t difference = 0;
+			<span class="enscript-keyword">if</span> (ctl_getenqueuereadable(pcb-&gt;utun_ctlref, pcb-&gt;utun_unit, &amp;difference) == 0) {
+				<span class="enscript-keyword">if</span> (difference &gt; 0) {
+					<span class="enscript-comment">// If the low-water mark has not yet been reached, we still need to enqueue data
+</span>					<span class="enscript-comment">// into the buffer
+</span>					can_accept_packets = true;
+				}
+			}
+		}
+		<span class="enscript-keyword">if</span> (!can_accept_packets) {
+			errno_t error = ifnet_disable_output(interface);
+			<span class="enscript-keyword">if</span> (error != 0) {
+				printf(<span class="enscript-string">&quot;utun_start: ifnet_disable_output returned error %d\n&quot;</span>, error);
+			}
+			ifnet_lock_done(pcb-&gt;utun_ifp);
+			<span class="enscript-keyword">break</span>;
+		}
+		ifnet_lock_done(pcb-&gt;utun_ifp);
+		<span class="enscript-keyword">if</span> (ifnet_dequeue(interface, &amp;data) != 0)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (utun_output(interface, data) != 0)
+			<span class="enscript-keyword">break</span>;
+	}
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_output</span>(
+			   ifnet_t	interface,
+			   mbuf_t	data)
+{
+	<span class="enscript-type">struct</span> utun_pcb	*pcb = ifnet_softc(interface);
+	errno_t			result;
+	
+	<span class="enscript-keyword">if</span> (m_pktlen(data) &gt;= 4) {
+		bpf_tap_out(pcb-&gt;utun_ifp, DLT_NULL, data, 0, 0);
+	}
+	
+	<span class="enscript-keyword">if</span> (pcb-&gt;utun_flags &amp; UTUN_FLAGS_NO_OUTPUT) {
+		<span class="enscript-comment">/* flush data */</span>
+		mbuf_freem(data);
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-comment">// otherwise, fall thru to ctl_enqueumbuf
+</span>	<span class="enscript-keyword">if</span> (pcb-&gt;utun_ctlref) {
+		<span class="enscript-type">int</span>	length;
+
+		<span class="enscript-comment">// only pass packets to utun-crypto if crypto is enabled and 'suspend data traffic' is not.
+</span>		<span class="enscript-keyword">if</span> ((pcb-&gt;utun_flags &amp; (UTUN_FLAGS_CRYPTO | UTUN_FLAGS_CRYPTO_STOP_DATA_TRAFFIC)) == UTUN_FLAGS_CRYPTO) {
+			<span class="enscript-keyword">if</span> (utun_pkt_crypto_output(pcb, &amp;data) == 0) {
+				<span class="enscript-keyword">return</span> 0;
+			}
+		}
+
+		<span class="enscript-comment">/*
+		 * The ABI requires the protocol in network byte order
+		 */</span>
+		<span class="enscript-keyword">if</span> (m_pktlen(data) &gt;= 4)
+			*(u_int32_t *)mbuf_data(data) = htonl(*(u_int32_t *)mbuf_data(data));
+
+		length = mbuf_pkthdr_len(data);
+		result = ctl_enqueuembuf(pcb-&gt;utun_ctlref, pcb-&gt;utun_unit, data, CTL_DATA_EOR);
+		<span class="enscript-keyword">if</span> (result != 0) {
+			mbuf_freem(data);
+			printf(<span class="enscript-string">&quot;utun_output - ctl_enqueuembuf failed: %d\n&quot;</span>, result);
+
+			ifnet_stat_increment_out(interface, 0, 0, 1);
+		}
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (!pcb-&gt;utun_ext_ifdata_stats)
+				ifnet_stat_increment_out(interface, 1, length, 0);
+		}
+	}
+	<span class="enscript-keyword">else</span> 
+		mbuf_freem(data);
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_demux</span>(
+	__unused ifnet_t	interface,
+	mbuf_t				data,
+	__unused <span class="enscript-type">char</span>		*frame_header,
+	protocol_family_t	*protocol)
+{
+	
+	<span class="enscript-keyword">while</span> (data != NULL &amp;&amp; mbuf_len(data) &lt; 1) {
+		data = mbuf_next(data);
+	}
+	
+	<span class="enscript-keyword">if</span> (data == NULL)
+		<span class="enscript-keyword">return</span> ENOENT;
+	
+	*protocol = *(u_int32_t *)mbuf_data(data);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_framer</span>(
+		   __unused ifnet_t				interface,
+		   mbuf_t				*packet,
+			__unused <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *dest, 
+			__unused <span class="enscript-type">const</span> <span class="enscript-type">char</span> *desk_linkaddr,
+			<span class="enscript-type">const</span> <span class="enscript-type">char</span> *frame_type,
+			u_int32_t *prepend_len, 
+			u_int32_t *postpend_len)
+{
+    <span class="enscript-keyword">if</span> (mbuf_prepend(packet, <span class="enscript-keyword">sizeof</span>(protocol_family_t), MBUF_DONTWAIT) != 0) {
+		printf(<span class="enscript-string">&quot;utun_framer - ifnet_output prepend failed\n&quot;</span>);
+
+		ifnet_stat_increment_out(interface, 0, 0, 1);
+
+		<span class="enscript-comment">// just	return, because the buffer was freed in mbuf_prepend
+</span>        <span class="enscript-keyword">return</span> EJUSTRETURN;	
+    }
+	<span class="enscript-keyword">if</span> (prepend_len != NULL)
+		*prepend_len = <span class="enscript-keyword">sizeof</span>(protocol_family_t);
+	<span class="enscript-keyword">if</span> (postpend_len != NULL)
+		*postpend_len = 0;
+	
+    <span class="enscript-comment">// place protocol number at the beginning of the mbuf
+</span>    *(protocol_family_t *)mbuf_data(*packet) = *(protocol_family_t *)(uintptr_t)(size_t)frame_type;
+    
+    <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_add_proto</span>(
+	__unused ifnet_t						interface,
+	protocol_family_t						protocol,
+	__unused <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ifnet_demux_desc	*demux_array,
+	__unused u_int32_t						demux_count)
+{
+	<span class="enscript-keyword">switch</span>(protocol) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PF_INET</span>:
+			<span class="enscript-keyword">return</span> 0;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PF_INET6</span>:
+			<span class="enscript-keyword">return</span> 0;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">break</span>;
+	}
+	
+	<span class="enscript-keyword">return</span> ENOPROTOOPT;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_del_proto</span>(
+	__unused ifnet_t 			interface,
+	__unused protocol_family_t	protocol)
+{
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_ioctl</span>(
+	ifnet_t		interface,
+	u_long		command,
+	<span class="enscript-type">void</span>		*data)
+{
+	errno_t	result = 0;
+	
+	<span class="enscript-keyword">switch</span>(command) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFMTU</span>:
+			ifnet_set_mtu(interface, ((<span class="enscript-type">struct</span> ifreq*)data)-&gt;ifr_mtu);
+			<span class="enscript-keyword">break</span>;
+			
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFFLAGS</span>:
+			<span class="enscript-comment">/* ifioctl() takes care of it */</span>
+			<span class="enscript-keyword">break</span>;
+			
+		<span class="enscript-reference">default</span>:
+			result = EOPNOTSUPP;
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">utun_detached</span>(
+	ifnet_t	interface)
+{
+	<span class="enscript-type">struct</span> utun_pcb	*pcb = ifnet_softc(interface);
+	
+	utun_free(pcb);
+	
+	OSDecrementAtomic(&amp;utun_ifcount);
+}
+
+<span class="enscript-comment">/* Protocol Handlers */</span>
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_proto_input</span>(
+	__unused ifnet_t	interface,
+	protocol_family_t	protocol,
+	mbuf_t				m,
+	__unused <span class="enscript-type">char</span>		*frame_header)
+{
+	
+	<span class="enscript-comment">// remove protocol family first
+</span>	mbuf_adj(m, <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	
+	<span class="enscript-keyword">if</span> (proto_input(protocol, m) != 0)
+		m_freem(m);
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_proto_pre_output</span>(
+	__unused ifnet_t	interface,
+	protocol_family_t	protocol,
+	__unused mbuf_t		*packet,
+	__unused <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *dest,
+	__unused <span class="enscript-type">void</span> *route, 
+	__unused <span class="enscript-type">char</span> *frame_type, 
+	__unused <span class="enscript-type">char</span> *link_layer_dest)
+{
+	
+	*(protocol_family_t *)(<span class="enscript-type">void</span> *)frame_type = protocol;
+		<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">utun_attach_proto</span>(
+	ifnet_t				interface,
+	protocol_family_t	protocol)
+{
+	<span class="enscript-type">struct</span> ifnet_attach_proto_param	proto;
+	errno_t							result;
+	
+	bzero(&amp;proto, <span class="enscript-keyword">sizeof</span>(proto));
+	proto.input = utun_proto_input;
+	proto.pre_output = utun_proto_pre_output;
+
+	result = ifnet_attach_protocol(interface, protocol, &amp;proto);
+	<span class="enscript-keyword">if</span> (result != 0 &amp;&amp; result != EEXIST) {
+		printf(<span class="enscript-string">&quot;utun_attach_inet - ifnet_attach_protocol %d failed: %d\n&quot;</span>,
+			protocol, result);
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+errno_t
+<span class="enscript-function-name">utun_pkt_input</span> (<span class="enscript-type">struct</span> utun_pcb *pcb, mbuf_t m)
+{
+	errno_t	result;
+	protocol_family_t protocol = 0;
+
+	mbuf_pkthdr_setrcvif(m, pcb-&gt;utun_ifp);
+
+	<span class="enscript-keyword">if</span> (m_pktlen(m) &gt;= 4)  {
+		protocol = *(u_int32_t *)mbuf_data(m);
+	
+		bpf_tap_in(pcb-&gt;utun_ifp, DLT_NULL, m, 0, 0);
+	}
+	<span class="enscript-keyword">if</span> (pcb-&gt;utun_flags &amp; UTUN_FLAGS_NO_INPUT) {
+		<span class="enscript-comment">/* flush data */</span>
+		mbuf_freem(m);
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-comment">// quick exit for keepalive packets
+</span>	<span class="enscript-keyword">if</span> (protocol == AF_UTUN &amp;&amp; pcb-&gt;utun_flags &amp; UTUN_FLAGS_CRYPTO) {
+		<span class="enscript-keyword">if</span> (utun_pkt_crypto_output(pcb, &amp;m) == 0) {
+			<span class="enscript-keyword">return</span> 0;
+		}
+		printf(<span class="enscript-string">&quot;%s: utun_pkt_crypto_output failed, flags %x\n&quot;</span>, __FUNCTION__, pcb-&gt;utun_flags);
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-keyword">if</span> (!pcb-&gt;utun_ext_ifdata_stats) {
+		<span class="enscript-type">struct</span> ifnet_stat_increment_param	incs;
+		
+		bzero(&amp;incs, <span class="enscript-keyword">sizeof</span>(incs));
+		incs.packets_in = 1;
+		incs.bytes_in = mbuf_pkthdr_len(m);
+		result = ifnet_input(pcb-&gt;utun_ifp, m, &amp;incs);
+	} <span class="enscript-keyword">else</span> {
+		result = ifnet_input(pcb-&gt;utun_ifp, m, NULL);
+	}
+	<span class="enscript-keyword">if</span> (result != 0) {
+		ifnet_stat_increment_in(pcb-&gt;utun_ifp, 0, 0, 1);
+		
+		printf(<span class="enscript-string">&quot;%s - ifnet_input failed: %d\n&quot;</span>, __FUNCTION__, result);
+		mbuf_freem(m);
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,1019 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>if_gif.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">if_gif.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* $FreeBSD: src/sys/net/if_gif.c,v 1.4.2.6 2001/07/24 19:10:18 brooks Exp $ */</span>
+<span class="enscript-comment">/* $KAME: if_gif.c,v 1.47 2001/05/01 05:28:42 itojun Exp $ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the project nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2006 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sockio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/bpf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_protocol.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_interface.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/init.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">INET</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_gif.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* INET */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/in6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/in6_gif.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6protosw.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_encap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/dlil.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_gif.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">GIFNAME</span>		<span class="enscript-string">&quot;gif&quot;</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">GIFDEV</span>		<span class="enscript-string">&quot;if_gif&quot;</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">GIF_MAXUNIT</span>	0x7fff	<span class="enscript-comment">/* ifp-&gt;if_unit is only 15 bits */</span>
+
+<span class="enscript-comment">/* gif lock variables */</span>
+<span class="enscript-type">static</span> lck_grp_t	*gif_mtx_grp;
+<span class="enscript-type">static</span> lck_grp_attr_t	*gif_mtx_grp_attr;
+<span class="enscript-type">static</span> lck_attr_t	*gif_mtx_attr;
+<span class="enscript-function-name">decl_lck_mtx_data</span>(<span class="enscript-type">static</span>, gif_mtx_data);
+<span class="enscript-type">static</span> lck_mtx_t	*gif_mtx = &amp;gif_mtx_data;
+
+<span class="enscript-function-name">TAILQ_HEAD</span>(gifhead, gif_softc) gifs = TAILQ_HEAD_INITIALIZER(gifs);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">gif_encapcheck</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>, <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">gif_output</span>(ifnet_t ifp, mbuf_t m);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">gif_input</span>(ifnet_t ifp, protocol_family_t protocol_family,
+    mbuf_t m, <span class="enscript-type">char</span> *frame_header);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">gif_ioctl</span>(ifnet_t ifp, u_long cmd, <span class="enscript-type">void</span> *data);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> ngif = 0;		<span class="enscript-comment">/* number of interfaces */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> protosw in_gif_protosw =
+{
+	.pr_type =		SOCK_RAW,
+	.pr_protocol =		0, <span class="enscript-comment">/* IPPROTO_IPV[46] */</span>
+	.pr_flags =		PR_ATOMIC|PR_ADDR,
+	.pr_input =		in_gif_input,
+	.pr_usrreqs =		&amp;rip_usrreqs,
+	.pr_unlock =		rip_unlock,
+};
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ip6protosw in6_gif_protosw =
+{
+	.pr_type =		SOCK_RAW,
+	.pr_protocol =		0, <span class="enscript-comment">/* IPPROTO_IPV[46] */</span>
+	.pr_flags =		PR_ATOMIC|PR_ADDR,
+	.pr_input =		in6_gif_input,
+	.pr_usrreqs =		&amp;rip6_usrreqs,
+	.pr_unlock =		rip_unlock,
+};
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> if_clone_t gif_cloner = NULL;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">gif_clone_create</span>(<span class="enscript-type">struct</span> if_clone *, uint32_t, <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">gif_clone_destroy</span>(<span class="enscript-type">struct</span> ifnet *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">gif_delete_tunnel</span>(<span class="enscript-type">struct</span> gif_softc *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">gif_detach</span>(<span class="enscript-type">struct</span> ifnet *);
+
+<span class="enscript-comment">/*
+ * Theory of operation: initially, one gif interface is created.
+ * Any time a gif interface is configured, if there are no other
+ * unconfigured gif interfaces, a new gif interface is created.
+ * BSD uses the clone mechanism to dynamically create more
+ * gif interfaces.
+ *
+ * We have some extra glue to support DLIL.
+ */</span>
+
+<span class="enscript-comment">/* GIF interface module support */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">gif_demux</span>(
+	ifnet_t ifp,
+	__unused mbuf_t m,
+	__unused <span class="enscript-type">char</span> *frame_header,
+	protocol_family_t *protocol_family)
+{
+	<span class="enscript-type">struct</span> gif_softc *sc = ifnet_softc(ifp);
+
+	GIF_LOCK(sc);
+	<span class="enscript-comment">/* Only one protocol may be attached to a gif interface. */</span>
+	*protocol_family = sc-&gt;gif_proto;
+	GIF_UNLOCK(sc);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">gif_add_proto</span>(
+	ifnet_t ifp,
+	protocol_family_t protocol_family,
+	__unused <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ifnet_demux_desc *demux_array,
+	__unused u_int32_t demux_count)
+{
+	<span class="enscript-comment">/* Only one protocol may be attached at a time */</span>
+	<span class="enscript-type">struct</span> gif_softc *sc = ifnet_softc(ifp);
+
+	GIF_LOCK(sc);
+	<span class="enscript-keyword">if</span> (sc-&gt;gif_proto != 0)
+		printf(<span class="enscript-string">&quot;gif_add_proto: request add_proto for gif%d\n&quot;</span>,
+		    ifnet_unit(ifp));
+
+	sc-&gt;gif_proto = protocol_family;
+	GIF_UNLOCK(sc);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">gif_del_proto</span>(
+	ifnet_t ifp,
+	protocol_family_t protocol_family)
+{
+	<span class="enscript-type">struct</span> gif_softc *sc = ifnet_softc(ifp);
+
+	GIF_LOCK(sc);
+	<span class="enscript-keyword">if</span> (sc-&gt;gif_proto == protocol_family)
+		sc-&gt;gif_proto = 0;
+	GIF_UNLOCK(sc);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* Glue code to attach inet to a gif interface through DLIL */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">gif_attach_proto_family</span>(
+	ifnet_t ifp,
+	protocol_family_t protocol_family)
+{
+	<span class="enscript-type">struct</span> ifnet_attach_proto_param reg;
+	errno_t stat;
+
+	bzero(&amp;reg, <span class="enscript-keyword">sizeof</span> (reg));
+	reg.input = gif_input;
+
+	stat = ifnet_attach_protocol(ifp, protocol_family, &amp;reg);
+	<span class="enscript-keyword">if</span> (stat &amp;&amp; stat != EEXIST) {
+		printf(<span class="enscript-string">&quot;gif_attach_proto_family can't attach interface	\
+		    fam=%d\n&quot;</span>, protocol_family);
+	}
+
+	<span class="enscript-keyword">return</span> (stat);
+}
+
+<span class="enscript-comment">/* Function to setup the first gif interface */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">gif_init</span>(<span class="enscript-type">void</span>)
+{
+	errno_t result;
+	<span class="enscript-type">struct</span> ifnet_clone_params ifnet_clone_params;
+	<span class="enscript-type">struct</span> if_clone *ifc = NULL;
+
+	<span class="enscript-comment">/* Initialize the list of interfaces */</span>
+	TAILQ_INIT(&amp;gifs);
+
+	<span class="enscript-comment">/* Initialize the gif global lock */</span>
+	gif_mtx_grp_attr = lck_grp_attr_alloc_init();
+	gif_mtx_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;gif&quot;</span>, gif_mtx_grp_attr);
+	gif_mtx_attr = lck_attr_alloc_init();
+	lck_mtx_init(gif_mtx, gif_mtx_grp, gif_mtx_attr);
+
+	<span class="enscript-comment">/* Register protocol registration functions */</span>
+	result = proto_register_plumber(PF_INET, APPLE_IF_FAM_GIF,
+	    gif_attach_proto_family, NULL);
+	<span class="enscript-keyword">if</span> (result != 0)
+		printf(<span class="enscript-string">&quot;proto_register_plumber failed for AF_INET error=%d\n&quot;</span>,
+		    result);
+
+	result = proto_register_plumber(PF_INET6, APPLE_IF_FAM_GIF,
+	    gif_attach_proto_family, NULL);
+	<span class="enscript-keyword">if</span> (result != 0)
+		printf(<span class="enscript-string">&quot;proto_register_plumber failed for AF_INET6 error=%d\n&quot;</span>,
+		    result);
+
+	ifnet_clone_params.ifc_name = <span class="enscript-string">&quot;gif&quot;</span>;
+	ifnet_clone_params.ifc_create = gif_clone_create;
+	ifnet_clone_params.ifc_destroy = gif_clone_destroy;
+
+	result = ifnet_clone_attach(&amp;ifnet_clone_params, &amp;gif_cloner);
+	<span class="enscript-keyword">if</span> (result != 0)
+		printf(<span class="enscript-string">&quot;gifattach: ifnet_clone_attach failed %d\n&quot;</span>, result);
+
+	<span class="enscript-comment">/* Create first device */</span>
+	ifc = if_clone_lookup(<span class="enscript-string">&quot;gif&quot;</span>, NULL);
+	gif_clone_create(ifc, 0, NULL);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">gif_set_bpf_tap</span>(
+	ifnet_t ifp,
+	bpf_tap_mode mode,
+	bpf_packet_func callback)
+{
+	<span class="enscript-type">struct</span> gif_softc *sc = ifnet_softc(ifp);
+
+	GIF_LOCK(sc);
+	sc-&gt;tap_mode = mode;
+	sc-&gt;tap_callback = callback;
+	GIF_UNLOCK(sc);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">gif_detach</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">struct</span> gif_softc *sc = ifp-&gt;if_softc;
+	lck_mtx_destroy(&amp;sc-&gt;gif_lock, gif_mtx_grp);
+	_FREE(ifp-&gt;if_softc, M_DEVBUF);
+	ifp-&gt;if_softc = NULL;
+	(<span class="enscript-type">void</span>) ifnet_release(ifp);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">gif_clone_create</span>(<span class="enscript-type">struct</span> if_clone *ifc, uint32_t unit, __unused <span class="enscript-type">void</span> *params)
+{
+	<span class="enscript-type">struct</span> gif_softc *sc = NULL;
+	<span class="enscript-type">struct</span> ifnet_init_params gif_init_params;
+	errno_t error = 0;
+
+	lck_mtx_lock(gif_mtx);
+
+	<span class="enscript-comment">/* Can't create more than GIF_MAXUNIT */</span>
+	<span class="enscript-keyword">if</span> (ngif &gt;= GIF_MAXUNIT) {
+		error = ENXIO;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	sc = _MALLOC(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> gif_softc), M_DEVBUF, M_WAITOK | M_ZERO);
+	<span class="enscript-keyword">if</span> (sc == NULL) {
+		log(LOG_ERR, <span class="enscript-string">&quot;gif_clone_create: failed to allocate gif%d\n&quot;</span>,
+		    unit);
+		error = ENOBUFS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* use the interface name as the unique id for ifp recycle */</span>
+	snprintf(sc-&gt;gif_ifname, <span class="enscript-keyword">sizeof</span> (sc-&gt;gif_ifname), <span class="enscript-string">&quot;%s%d&quot;</span>,
+	    ifc-&gt;ifc_name, unit);
+
+	lck_mtx_init(&amp;sc-&gt;gif_lock, gif_mtx_grp, gif_mtx_attr);
+
+	bzero(&amp;gif_init_params, <span class="enscript-keyword">sizeof</span> (gif_init_params));
+	gif_init_params.uniqueid = sc-&gt;gif_ifname;
+	gif_init_params.uniqueid_len = strlen(sc-&gt;gif_ifname);
+	gif_init_params.name = GIFNAME;
+	gif_init_params.unit = unit;
+	gif_init_params.type = IFT_GIF;
+	gif_init_params.family = IFNET_FAMILY_GIF;
+	gif_init_params.output = gif_output;
+	gif_init_params.demux = gif_demux;
+	gif_init_params.add_proto = gif_add_proto;
+	gif_init_params.del_proto = gif_del_proto;
+	gif_init_params.softc = sc;
+	gif_init_params.ioctl = gif_ioctl;
+	gif_init_params.set_bpf_tap = gif_set_bpf_tap;
+	gif_init_params.detach = gif_detach;
+
+	error = ifnet_allocate(&amp;gif_init_params, &amp;sc-&gt;gif_if);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		printf(<span class="enscript-string">&quot;gif_clone_create, ifnet_allocate failed - %d\n&quot;</span>, error);
+		_FREE(sc, M_DEVBUF);
+		error = ENOBUFS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	sc-&gt;encap_cookie4 = sc-&gt;encap_cookie6 = NULL;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+	sc-&gt;encap_cookie4 = encap_attach_func(AF_INET, -1,
+			gif_encapcheck, &amp;in_gif_protosw, sc);
+	<span class="enscript-keyword">if</span> (sc-&gt;encap_cookie4 == NULL) {
+		printf(<span class="enscript-string">&quot;%s: unable to attach encap4\n&quot;</span>, if_name(sc-&gt;gif_if));
+		ifnet_release(sc-&gt;gif_if);
+		FREE(sc, M_DEVBUF);
+		error = ENOBUFS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	sc-&gt;encap_cookie6 = encap_attach_func(AF_INET6, -1,
+	    gif_encapcheck, (<span class="enscript-type">struct</span> protosw *)&amp;in6_gif_protosw, sc);
+	<span class="enscript-keyword">if</span> (sc-&gt;encap_cookie6 == NULL) {
+		<span class="enscript-keyword">if</span> (sc-&gt;encap_cookie4) {
+			encap_detach(sc-&gt;encap_cookie4);
+			sc-&gt;encap_cookie4 = NULL;
+		}
+		printf(<span class="enscript-string">&quot;%s: unable to attach encap6\n&quot;</span>, if_name(sc-&gt;gif_if));
+		ifnet_release(sc-&gt;gif_if);
+		FREE(sc, M_DEVBUF);
+		error = ENOBUFS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+#<span class="enscript-reference">endif</span>
+	sc-&gt;gif_called = 0;
+	ifnet_set_mtu(sc-&gt;gif_if, GIF_MTU);
+	ifnet_set_flags(sc-&gt;gif_if, IFF_POINTOPOINT | IFF_MULTICAST, 0xffff);
+#<span class="enscript-reference">if</span> 0
+	<span class="enscript-comment">/* turn off ingress filter */</span>
+	sc-&gt;gif_if.if_flags  |= IFF_LINK2;
+#<span class="enscript-reference">endif</span>
+	error = ifnet_attach(sc-&gt;gif_if, NULL);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		printf(<span class="enscript-string">&quot;gif_clone_create - ifnet_attach failed - %d\n&quot;</span>, error);
+		ifnet_release(sc-&gt;gif_if);
+		<span class="enscript-keyword">if</span> (sc-&gt;encap_cookie4) {
+			encap_detach(sc-&gt;encap_cookie4);
+			sc-&gt;encap_cookie4 = NULL;
+		}
+		<span class="enscript-keyword">if</span> (sc-&gt;encap_cookie6) {
+			encap_detach(sc-&gt;encap_cookie6);
+			sc-&gt;encap_cookie6 = NULL;
+		}
+		FREE(sc, M_DEVBUF);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+	mac_ifnet_label_init(&amp;sc-&gt;gif_if);
+#<span class="enscript-reference">endif</span>
+	bpfattach(sc-&gt;gif_if, DLT_NULL, <span class="enscript-keyword">sizeof</span> (u_int));
+	TAILQ_INSERT_TAIL(&amp;gifs, sc, gif_link);
+	ngif++;
+<span class="enscript-reference">done</span>:
+	lck_mtx_unlock(gif_mtx);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">gif_clone_destroy</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">INET</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">INET6</span>)
+	<span class="enscript-type">int</span> error = 0;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-type">struct</span> gif_softc *sc = ifp-&gt;if_softc;
+
+	lck_mtx_lock(gif_mtx);
+	TAILQ_REMOVE(&amp;gifs, sc, gif_link);
+	ngif--;
+
+	GIF_LOCK(sc);
+	gif_delete_tunnel(sc);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">if</span> (sc-&gt;encap_cookie6 != NULL) {
+		error = encap_detach(sc-&gt;encap_cookie6);
+		KASSERT(error == 0, (<span class="enscript-string">&quot;gif_clone_destroy: Unexpected	\
+		    error detaching encap_cookie6&quot;</span>));
+	}
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">INET</span>
+	<span class="enscript-keyword">if</span> (sc-&gt;encap_cookie4 != NULL) {
+		error = encap_detach(sc-&gt;encap_cookie4);
+		KASSERT(error == 0, (<span class="enscript-string">&quot;gif_clone_destroy: Unexpected	\
+		    error detaching encap_cookie4&quot;</span>));
+	}
+#<span class="enscript-reference">endif</span>
+	error = ifnet_set_flags(ifp, 0, IFF_UP);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		printf(<span class="enscript-string">&quot;gif_clone_destroy: ifnet_set_flags failed %d\n&quot;</span>, error);
+	}
+
+	error = ifnet_detach(ifp);
+	<span class="enscript-keyword">if</span> (error != 0)
+		panic(<span class="enscript-string">&quot;gif_clone_destroy: ifnet_detach(%p) failed %d\n&quot;</span>, ifp,
+		    error);
+
+	GIF_UNLOCK(sc);
+	lck_mtx_unlock(gif_mtx);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">gif_encapcheck</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mbuf *m,
+	<span class="enscript-type">int</span> off,
+	<span class="enscript-type">int</span> proto,
+	<span class="enscript-type">void</span> *arg)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> ip ip;
+	<span class="enscript-type">struct</span> gif_softc *sc;
+
+	sc = (<span class="enscript-type">struct</span> gif_softc *)arg;
+	<span class="enscript-keyword">if</span> (sc == NULL)
+		<span class="enscript-keyword">return</span> (error);
+
+	GIF_LOCK(sc);
+	<span class="enscript-keyword">if</span> ((ifnet_flags(sc-&gt;gif_if) &amp; IFF_UP) == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-comment">/* no physical address */</span>
+	<span class="enscript-keyword">if</span> (!sc-&gt;gif_psrc || !sc-&gt;gif_pdst)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-keyword">switch</span> (proto) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPPROTO_IPV4</span>:
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPPROTO_IPV6</span>:
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	mbuf_copydata((<span class="enscript-type">struct</span> mbuf *)(size_t)m, 0, <span class="enscript-keyword">sizeof</span> (ip), &amp;ip);
+
+	<span class="enscript-keyword">switch</span> (ip.ip_v) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">4</span>:
+		<span class="enscript-keyword">if</span> (sc-&gt;gif_psrc-&gt;sa_family != AF_INET ||
+		    sc-&gt;gif_pdst-&gt;sa_family != AF_INET)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		error = gif_encapcheck4(m, off, proto, arg);
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">6</span>:
+		<span class="enscript-keyword">if</span> (sc-&gt;gif_psrc-&gt;sa_family != AF_INET6 ||
+		    sc-&gt;gif_pdst-&gt;sa_family != AF_INET6)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		error = gif_encapcheck6(m, off, proto, arg);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+<span class="enscript-reference">done</span>:
+	GIF_UNLOCK(sc);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">gif_output</span>(
+	ifnet_t ifp,
+	mbuf_t m)
+{
+	<span class="enscript-type">struct</span> gif_softc *sc = ifnet_softc(ifp);
+	<span class="enscript-type">struct</span> sockaddr *gif_psrc;
+	<span class="enscript-type">struct</span> sockaddr *gif_pdst;
+	<span class="enscript-type">int</span> error = 0;
+
+	GIF_LOCK(sc);
+	gif_psrc = sc-&gt;gif_psrc;
+	gif_pdst = sc-&gt;gif_pdst;
+	GIF_UNLOCK(sc);
+
+	<span class="enscript-comment">/*
+	 * max_gif_nesting check used to live here. It doesn't anymore
+	 * because there is no guaruntee that we won't be called
+	 * concurrently from more than one thread.
+	 */</span>
+	m-&gt;m_flags &amp;= ~(M_BCAST|M_MCAST);
+	<span class="enscript-keyword">if</span> (!(ifnet_flags(ifp) &amp; IFF_UP) ||
+	    gif_psrc == NULL || gif_pdst == NULL) {
+		ifnet_touch_lastchange(ifp);
+		m_freem(m);	<span class="enscript-comment">/* free it here not in dlil_output */</span>
+		error = ENETDOWN;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">end</span>;
+	}
+
+	bpf_tap_out(ifp, 0, m, &amp;sc-&gt;gif_proto, <span class="enscript-keyword">sizeof</span> (sc-&gt;gif_proto));
+
+	GIF_LOCK(sc);
+
+	<span class="enscript-comment">/* inner AF-specific encapsulation */</span>
+
+	<span class="enscript-comment">/* XXX should we check if our outer source is legal? */</span>
+
+	<span class="enscript-comment">/* dispatch to output logic based on outer AF */</span>
+	<span class="enscript-keyword">switch</span> (sc-&gt;gif_psrc-&gt;sa_family) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET</span>:
+		error = in_gif_output(ifp, sc-&gt;gif_proto, m, NULL);
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET6</span>:
+		error = in6_gif_output(ifp, sc-&gt;gif_proto, m, NULL);
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-reference">default</span>:
+		error = ENETDOWN;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	GIF_UNLOCK(sc);
+<span class="enscript-reference">end</span>:        
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-comment">/* the mbuf was freed either by in_gif_output or in here */</span>
+		ifnet_stat_increment_out(ifp, 0, 0, 1);
+	} <span class="enscript-keyword">else</span> {
+		ifnet_stat_increment_out(ifp, 1, m-&gt;m_pkthdr.len, 0);
+	}
+	<span class="enscript-keyword">if</span> (error == 0)
+		error = EJUSTRETURN; <span class="enscript-comment">/* if no error, packet got sent already */</span>
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * gif_input is the input handler for IP and IPv6 attached to gif
+ */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">gif_input</span>(
+	ifnet_t ifp,
+	protocol_family_t protocol_family,
+	mbuf_t m,
+	__unused <span class="enscript-type">char</span> *frame_header)
+{
+	<span class="enscript-type">struct</span> gif_softc *sc = ifnet_softc(ifp);
+
+	bpf_tap_in(ifp, 0, m, &amp;sc-&gt;gif_proto, <span class="enscript-keyword">sizeof</span> (sc-&gt;gif_proto));
+
+	<span class="enscript-comment">/*
+	 * Put the packet to the network layer input queue according to the
+	 * specified address family.
+	 * Note: older versions of gif_input directly called network layer
+	 * input functions, e.g. ip6_input, here. We changed the policy to
+	 * prevent too many recursive calls of such input functions, which
+	 * might cause kernel panic. But the change may introduce another
+	 * problem; if the input queue is full, packets are discarded.
+	 * We believed it rarely occurs and changed the policy. If we find
+	 * it occurs more times than we thought, we may change the policy
+	 * again.
+	 */</span>
+	<span class="enscript-keyword">if</span> (proto_input(protocol_family, m) != 0) {
+		ifnet_stat_increment_in(ifp, 0, 0, 1);
+		m_freem(m);
+	} <span class="enscript-keyword">else</span>
+		ifnet_stat_increment_in(ifp, 1, m-&gt;m_pkthdr.len, 0);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* XXX how should we handle IPv6 scope on SIOC[GS]IFPHYADDR? */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">gif_ioctl</span>(
+	ifnet_t			ifp,
+	u_long			cmd,
+	<span class="enscript-type">void</span>			*data)
+{
+	<span class="enscript-type">struct</span> gif_softc *sc  = ifnet_softc(ifp);
+	<span class="enscript-type">struct</span> ifreq *ifr = (<span class="enscript-type">struct</span> ifreq *)data;
+	<span class="enscript-type">int</span> error = 0, size;
+	<span class="enscript-type">struct</span> sockaddr *dst = NULL, *src = NULL;
+	<span class="enscript-type">struct</span> sockaddr *sa;
+	<span class="enscript-type">struct</span> ifnet *ifp2;
+	<span class="enscript-type">struct</span> gif_softc *sc2;
+
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFADDR</span>:
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFDSTADDR</span>:
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCADDMULTI</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCDELMULTI</span>:
+		<span class="enscript-keyword">break</span>;
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">SIOCSIFMTU</span> <span class="enscript-comment">/* xxx */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFMTU</span>:
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFMTU</span>:
+		{
+			u_int32_t mtu;
+			mtu = ifr-&gt;ifr_mtu;
+			<span class="enscript-keyword">if</span> (mtu &lt; GIF_MTU_MIN || mtu &gt; GIF_MTU_MAX) {
+				<span class="enscript-keyword">return</span> (EINVAL);
+			}
+			ifnet_set_mtu(ifp, mtu);
+		}
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SIOCSIFMTU */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFPHYADDR</span>:
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFPHYADDR_IN6_32</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFPHYADDR_IN6_64</span>:
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+		<span class="enscript-keyword">switch</span> (cmd) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFPHYADDR</span>:
+			src = (<span class="enscript-type">struct</span> sockaddr *)
+				&amp;(((<span class="enscript-type">struct</span> in_aliasreq *)data)-&gt;ifra_addr);
+			dst = (<span class="enscript-type">struct</span> sockaddr *)
+				&amp;(((<span class="enscript-type">struct</span> in_aliasreq *)data)-&gt;ifra_dstaddr);
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFPHYADDR_IN6_32</span>: {
+			<span class="enscript-type">struct</span> in6_aliasreq_32 *ifra_32 =
+			    (<span class="enscript-type">struct</span> in6_aliasreq_32 *)data;
+
+			src = (<span class="enscript-type">struct</span> sockaddr *)&amp;ifra_32-&gt;ifra_addr;
+			dst = (<span class="enscript-type">struct</span> sockaddr *)&amp;ifra_32-&gt;ifra_dstaddr;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFPHYADDR_IN6_64</span>: {
+			<span class="enscript-type">struct</span> in6_aliasreq_64 *ifra_64 =
+			    (<span class="enscript-type">struct</span> in6_aliasreq_64 *)data;
+
+			src = (<span class="enscript-type">struct</span> sockaddr *)&amp;ifra_64-&gt;ifra_addr;
+			dst = (<span class="enscript-type">struct</span> sockaddr *)&amp;ifra_64-&gt;ifra_dstaddr;
+			<span class="enscript-keyword">break</span>;
+		}
+#<span class="enscript-reference">endif</span>
+		}
+
+		<span class="enscript-comment">/* sa_family must be equal */</span>
+		<span class="enscript-keyword">if</span> (src-&gt;sa_family != dst-&gt;sa_family)
+			<span class="enscript-keyword">return</span> (EINVAL);
+
+		<span class="enscript-comment">/* validate sa_len */</span>
+		<span class="enscript-keyword">switch</span> (src-&gt;sa_family) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET</span>:
+			<span class="enscript-keyword">if</span> (src-&gt;sa_len != <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in))
+				<span class="enscript-keyword">return</span> (EINVAL);
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET6</span>:
+			<span class="enscript-keyword">if</span> (src-&gt;sa_len != <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in6))
+				<span class="enscript-keyword">return</span> (EINVAL);
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> (EAFNOSUPPORT);
+		}
+		<span class="enscript-keyword">switch</span> (dst-&gt;sa_family) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET</span>:
+			<span class="enscript-keyword">if</span> (dst-&gt;sa_len != <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in))
+				<span class="enscript-keyword">return</span> (EINVAL);
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET6</span>:
+			<span class="enscript-keyword">if</span> (dst-&gt;sa_len != <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in6))
+				<span class="enscript-keyword">return</span> (EINVAL);
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> (EAFNOSUPPORT);
+		}
+
+		<span class="enscript-comment">/* check sa_family looks sane for the cmd */</span>
+		<span class="enscript-keyword">switch</span> (cmd) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFPHYADDR</span>:
+			<span class="enscript-keyword">if</span> (src-&gt;sa_family == AF_INET)
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">return</span> (EAFNOSUPPORT);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFPHYADDR_IN6_32</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFPHYADDR_IN6_64</span>:
+			<span class="enscript-keyword">if</span> (src-&gt;sa_family == AF_INET6)
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">return</span> (EAFNOSUPPORT);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+		}
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">GIF_ORDERED_LOCK</span>(sc, sc2)	\
+	<span class="enscript-keyword">if</span> (sc &lt; sc2) {			\
+		GIF_LOCK(sc);		\
+		GIF_LOCK(sc2);		\
+	} <span class="enscript-keyword">else</span> {			\
+		GIF_LOCK(sc2);		\
+		GIF_LOCK(sc);		\
+	}
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">GIF_ORDERED_UNLOCK</span>(sc, sc2)	\
+	<span class="enscript-keyword">if</span> (sc &gt; sc2) {			\
+		GIF_UNLOCK(sc);		\
+		GIF_UNLOCK(sc2);	\
+	} <span class="enscript-keyword">else</span> {			\
+		GIF_UNLOCK(sc2);	\
+		GIF_UNLOCK(sc);		\
+	}
+
+		ifnet_head_lock_shared();
+		TAILQ_FOREACH(ifp2, &amp;ifnet_head, if_link) {
+			<span class="enscript-keyword">if</span> (strcmp(ifnet_name(ifp2), GIFNAME) != 0)
+				<span class="enscript-keyword">continue</span>;
+			sc2 = ifnet_softc(ifp2);
+			<span class="enscript-keyword">if</span> (sc2 == sc)
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-comment">/* lock sc and sc2 in increasing order of ifnet index */</span>
+			GIF_ORDERED_LOCK(sc, sc2);
+			<span class="enscript-keyword">if</span> (!sc2-&gt;gif_pdst || !sc2-&gt;gif_psrc) {
+				GIF_ORDERED_UNLOCK(sc, sc2);
+				<span class="enscript-keyword">continue</span>;
+			}
+			<span class="enscript-keyword">if</span> (sc2-&gt;gif_pdst-&gt;sa_family != dst-&gt;sa_family ||
+			    sc2-&gt;gif_pdst-&gt;sa_len != dst-&gt;sa_len ||
+			    sc2-&gt;gif_psrc-&gt;sa_family != src-&gt;sa_family ||
+			    sc2-&gt;gif_psrc-&gt;sa_len != src-&gt;sa_len) {
+				GIF_ORDERED_UNLOCK(sc, sc2);
+				<span class="enscript-keyword">continue</span>;
+			}
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">XBONEHACK</span>
+			<span class="enscript-comment">/* can't configure same pair of address onto two gifs */</span>
+			<span class="enscript-keyword">if</span> (bcmp(sc2-&gt;gif_pdst, dst, dst-&gt;sa_len) == 0 &amp;&amp;
+			    bcmp(sc2-&gt;gif_psrc, src, src-&gt;sa_len) == 0) {
+				GIF_ORDERED_UNLOCK(sc, sc2);
+				error = EADDRNOTAVAIL;
+				ifnet_head_done();
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+#<span class="enscript-reference">endif</span>
+
+			<span class="enscript-comment">/* can't configure multiple multi-dest interfaces */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">multidest</span>(x) \
+	(((<span class="enscript-type">struct</span> sockaddr_in *)(<span class="enscript-type">void</span> *)(x))-&gt;sin_addr.s_addr == INADDR_ANY)
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">multidest6</span>(x) \
+	(IN6_IS_ADDR_UNSPECIFIED(&amp;((<span class="enscript-type">struct</span> sockaddr_in6 *)	\
+	    (<span class="enscript-type">void</span> *)(x))-&gt;sin6_addr))
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-keyword">if</span> (dst-&gt;sa_family == AF_INET &amp;&amp;
+			    multidest(dst) &amp;&amp; multidest(sc2-&gt;gif_pdst)) {
+				GIF_ORDERED_UNLOCK(sc, sc2);
+				error = EADDRNOTAVAIL;
+				ifnet_head_done();
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+			<span class="enscript-keyword">if</span> (dst-&gt;sa_family == AF_INET6 &amp;&amp;
+			    multidest6(dst) &amp;&amp; multidest6(sc2-&gt;gif_pdst)) {
+				GIF_ORDERED_UNLOCK(sc, sc2);
+				error = EADDRNOTAVAIL;
+				ifnet_head_done();
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+#<span class="enscript-reference">endif</span>
+			GIF_ORDERED_UNLOCK(sc, sc2);
+		}
+		ifnet_head_done();
+
+		GIF_LOCK(sc);
+		<span class="enscript-keyword">if</span> (sc-&gt;gif_psrc)
+			FREE((caddr_t)sc-&gt;gif_psrc, M_IFADDR);
+		sa = (<span class="enscript-type">struct</span> sockaddr *)_MALLOC(src-&gt;sa_len, M_IFADDR,
+		    M_WAITOK);
+		<span class="enscript-keyword">if</span> (sa == NULL) {
+			GIF_UNLOCK(sc);
+			<span class="enscript-keyword">return</span> (ENOBUFS);
+		}
+		bcopy((caddr_t)src, (caddr_t)sa, src-&gt;sa_len);
+		sc-&gt;gif_psrc = sa;
+
+		<span class="enscript-keyword">if</span> (sc-&gt;gif_pdst)
+			FREE((caddr_t)sc-&gt;gif_pdst, M_IFADDR);
+		sa = (<span class="enscript-type">struct</span> sockaddr *)_MALLOC(dst-&gt;sa_len, M_IFADDR,
+		    M_WAITOK);
+		<span class="enscript-keyword">if</span> (sa == NULL) {
+			GIF_UNLOCK(sc);
+			<span class="enscript-keyword">return</span> (ENOBUFS);
+		}
+		bcopy((caddr_t)dst, (caddr_t)sa, dst-&gt;sa_len);
+		sc-&gt;gif_pdst = sa;
+		GIF_UNLOCK(sc);
+
+		ifnet_set_flags(ifp, IFF_RUNNING | IFF_UP, IFF_RUNNING |
+		    IFF_UP);
+
+		error = 0;
+		<span class="enscript-keyword">break</span>;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">SIOCDIFPHYADDR</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCDIFPHYADDR</span>:
+		GIF_LOCK(sc);
+		<span class="enscript-keyword">if</span> (sc-&gt;gif_psrc) {
+			FREE((caddr_t)sc-&gt;gif_psrc, M_IFADDR);
+			sc-&gt;gif_psrc = NULL;
+		}
+		<span class="enscript-keyword">if</span> (sc-&gt;gif_pdst) {
+			FREE((caddr_t)sc-&gt;gif_pdst, M_IFADDR);
+			sc-&gt;gif_pdst = NULL;
+		}
+		GIF_UNLOCK(sc);
+		<span class="enscript-comment">/* change the IFF_{UP, RUNNING} flag as well? */</span>
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFPSRCADDR</span>:
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFPSRCADDR_IN6</span>:
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+		GIF_LOCK(sc);
+		<span class="enscript-keyword">if</span> (sc-&gt;gif_psrc == NULL) {
+			GIF_UNLOCK(sc);
+			error = EADDRNOTAVAIL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		src = sc-&gt;gif_psrc;
+		<span class="enscript-keyword">switch</span> (cmd) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFPSRCADDR</span>:
+			dst = &amp;ifr-&gt;ifr_addr;
+			size = <span class="enscript-keyword">sizeof</span> (ifr-&gt;ifr_addr);
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFPSRCADDR_IN6</span>:
+			dst = (<span class="enscript-type">struct</span> sockaddr *)
+				&amp;(((<span class="enscript-type">struct</span> in6_ifreq *)data)-&gt;ifr_addr);
+			size = <span class="enscript-keyword">sizeof</span> (((<span class="enscript-type">struct</span> in6_ifreq *)data)-&gt;ifr_addr);
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+		<span class="enscript-reference">default</span>:
+			GIF_UNLOCK(sc);
+			error = EADDRNOTAVAIL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		<span class="enscript-keyword">if</span> (src-&gt;sa_len &gt; size) {
+			GIF_UNLOCK(sc);
+			<span class="enscript-keyword">return</span> (EINVAL);
+		}
+		bcopy((caddr_t)src, (caddr_t)dst, src-&gt;sa_len);
+		GIF_UNLOCK(sc);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFPDSTADDR</span>:
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFPDSTADDR_IN6</span>:
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+		GIF_LOCK(sc);
+		<span class="enscript-keyword">if</span> (sc-&gt;gif_pdst == NULL) {
+			GIF_UNLOCK(sc);
+			error = EADDRNOTAVAIL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		src = sc-&gt;gif_pdst;
+		<span class="enscript-keyword">switch</span> (cmd) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFPDSTADDR</span>:
+			dst = &amp;ifr-&gt;ifr_addr;
+			size = <span class="enscript-keyword">sizeof</span> (ifr-&gt;ifr_addr);
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFPDSTADDR_IN6</span>:
+			dst = (<span class="enscript-type">struct</span> sockaddr *)
+				&amp;(((<span class="enscript-type">struct</span> in6_ifreq *)data)-&gt;ifr_addr);
+			size = <span class="enscript-keyword">sizeof</span> (((<span class="enscript-type">struct</span> in6_ifreq *)data)-&gt;ifr_addr);
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+		<span class="enscript-reference">default</span>:
+			error = EADDRNOTAVAIL;
+			GIF_UNLOCK(sc);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		<span class="enscript-keyword">if</span> (src-&gt;sa_len &gt; size) {
+			GIF_UNLOCK(sc);
+			<span class="enscript-keyword">return</span> (EINVAL);
+		}
+		bcopy((caddr_t)src, (caddr_t)dst, src-&gt;sa_len);
+		GIF_UNLOCK(sc);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFFLAGS</span>:
+		<span class="enscript-comment">/* if_ioctl() takes care of it */</span>
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		error = EOPNOTSUPP;
+		<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">bad</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">gif_delete_tunnel</span>(<span class="enscript-type">struct</span> gif_softc *sc)
+{
+	GIF_LOCK_ASSERT(sc);
+	<span class="enscript-keyword">if</span> (sc-&gt;gif_psrc) {
+		FREE((caddr_t)sc-&gt;gif_psrc, M_IFADDR);
+		sc-&gt;gif_psrc = NULL;
+	}
+	<span class="enscript-keyword">if</span> (sc-&gt;gif_pdst) {
+		FREE((caddr_t)sc-&gt;gif_pdst, M_IFADDR);
+		sc-&gt;gif_pdst = NULL;
+	}
+	ROUTE_RELEASE(&amp;sc-&gt;gif_ro);
+	<span class="enscript-comment">/* change the IFF_UP flag as well? */</span>
+}
+</pre>
+<hr />
+</body></html>

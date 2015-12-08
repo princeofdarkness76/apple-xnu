@@ -1,0 +1,4226 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ipc_kmsg.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ipc_kmsg.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by McAfee Research in 2004 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ * Copyright (c) 2005 SPARTA, Inc.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+<span class="enscript-comment">/*
+ *	File:	ipc/ipc_kmsg.c
+ *	Author:	Rich Draves
+ *	Date:	1989
+ *
+ *	Operations on kernel messages.
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/message.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_statistics.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_kobject.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/counters.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_data.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machlimits.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_entry.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_kmsg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_notify.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_space.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_right.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_hash.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_table.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_importance.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_mach_internal.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ppc</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ppc/Firmware.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ppc/low_trace.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEBUG_MSGS_K64</span> 1
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">pack</span>(4)
+
+<span class="enscript-type">typedef</span>	<span class="enscript-type">struct</span> 
+{
+  mach_msg_bits_t	msgh_bits;
+  mach_msg_size_t	msgh_size;
+  mach_port_name_t	msgh_remote_port;
+  mach_port_name_t	msgh_local_port;
+  mach_port_name_t	msgh_voucher_port;
+  mach_msg_id_t		msgh_id;
+} mach_msg_legacy_header_t;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span>
+{
+        mach_msg_legacy_header_t       header;
+        mach_msg_body_t         body;
+} mach_msg_legacy_base_t;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span>
+{
+  mach_port_name_t				name;
+  mach_msg_size_t				pad1;
+  uint32_t						pad2 : 16;
+  mach_msg_type_name_t			disposition : 8;
+  mach_msg_descriptor_type_t	type : 8;
+} mach_msg_legacy_port_descriptor_t;
+
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">union</span>
+{
+  mach_msg_legacy_port_descriptor_t			port;
+  mach_msg_ool_descriptor32_t		out_of_line32;
+  mach_msg_ool_ports_descriptor32_t	ool_ports32;
+  mach_msg_type_descriptor_t			type;
+} mach_msg_legacy_descriptor_t;
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">pack</span>()
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LEGACY_HEADER_SIZE_DELTA</span> ((mach_msg_size_t)(sizeof(mach_msg_header_t) - sizeof(mach_msg_legacy_header_t)))
+
+<span class="enscript-comment">// END LP64 fixes
+</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG_MSGS_K64</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ipc_pset_print64</span>(
+			ipc_pset_t	pset);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>	ipc_kmsg_print64(
+			ipc_kmsg_t      kmsg,
+			<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*str);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>	ipc_msg_print64(
+		mach_msg_header_t       *msgh);
+
+<span class="enscript-type">extern</span> ipc_port_t <span class="enscript-function-name">ipc_name_to_data64</span>(
+			task_t			task,
+			mach_port_name_t	name);
+
+<span class="enscript-comment">/*
+ * Forward declarations
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">ipc_msg_print_untyped64</span>(
+	mach_msg_body_t		*body);
+
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> * <span class="enscript-function-name">ipc_type_name64</span>(
+	<span class="enscript-type">int</span>		type_name,
+	boolean_t	received);
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">ipc_print_type_name64</span>(
+	<span class="enscript-type">int</span>	type_name);
+
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">msgh_bit_decode64</span>(
+	mach_msg_bits_t	bit);
+
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">mm_copy_options_string64</span>(
+	mach_msg_copy_options_t	option);
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">db_print_msg_uid64</span>(mach_msg_header_t *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_msg_body_print64</span>(<span class="enscript-type">void</span> *body, <span class="enscript-type">int</span> size)
+{
+	uint32_t	*word = (uint32_t *) body;
+	uint32_t	*end  = (uint32_t *)(((uintptr_t) body) + size
+						- <span class="enscript-keyword">sizeof</span>(mach_msg_header_t));
+	<span class="enscript-type">int</span>		i;
+
+	kprintf(<span class="enscript-string">&quot;  body(%p-%p):\n    %p: &quot;</span>, body, end, word);
+	<span class="enscript-keyword">for</span> (;;) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; 8; i++, word++) {
+			<span class="enscript-keyword">if</span> (word &gt;= end) {
+				kprintf(<span class="enscript-string">&quot;\n&quot;</span>);
+				<span class="enscript-keyword">return</span>;
+			}
+			kprintf(<span class="enscript-string">&quot;%08x &quot;</span>, *word); 
+		}
+		kprintf(<span class="enscript-string">&quot;\n    %p: &quot;</span>, word);
+	}
+}
+
+
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">ipc_type_name64</span>(
+	<span class="enscript-type">int</span>		type_name,
+	boolean_t	received)
+{
+	<span class="enscript-keyword">switch</span> (type_name) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_TYPE_PORT_NAME</span>:
+		<span class="enscript-keyword">return</span> <span class="enscript-string">&quot;port_name&quot;</span>;
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_TYPE_MOVE_RECEIVE</span>:
+		<span class="enscript-keyword">if</span> (received) {
+			<span class="enscript-keyword">return</span> <span class="enscript-string">&quot;port_receive&quot;</span>;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span> <span class="enscript-string">&quot;move_receive&quot;</span>;
+		}
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_TYPE_MOVE_SEND</span>:
+		<span class="enscript-keyword">if</span> (received) {
+			<span class="enscript-keyword">return</span> <span class="enscript-string">&quot;port_send&quot;</span>;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span> <span class="enscript-string">&quot;move_send&quot;</span>;
+		}
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_TYPE_MOVE_SEND_ONCE</span>:
+		<span class="enscript-keyword">if</span> (received) {
+			<span class="enscript-keyword">return</span> <span class="enscript-string">&quot;port_send_once&quot;</span>;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span> <span class="enscript-string">&quot;move_send_once&quot;</span>;
+		}
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_TYPE_COPY_SEND</span>:
+		<span class="enscript-keyword">return</span> <span class="enscript-string">&quot;copy_send&quot;</span>;
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_TYPE_MAKE_SEND</span>:
+		<span class="enscript-keyword">return</span> <span class="enscript-string">&quot;make_send&quot;</span>;
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_TYPE_MAKE_SEND_ONCE</span>:
+		<span class="enscript-keyword">return</span> <span class="enscript-string">&quot;make_send_once&quot;</span>;
+		
+		<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (<span class="enscript-type">char</span> *) 0;
+	}
+}
+		
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_print_type_name64</span>(
+	<span class="enscript-type">int</span>	type_name)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name = ipc_type_name64(type_name, TRUE);
+	<span class="enscript-keyword">if</span> (name) {
+		kprintf(<span class="enscript-string">&quot;%s&quot;</span>, name);
+	} <span class="enscript-keyword">else</span> {
+		kprintf(<span class="enscript-string">&quot;type%d&quot;</span>, type_name);
+	}
+}
+
+<span class="enscript-comment">/*
+ * ipc_kmsg_print64	[ debug ]
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_print64</span>(
+	ipc_kmsg_t	kmsg,
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*str)
+{
+	kprintf(<span class="enscript-string">&quot;%s kmsg=%p:\n&quot;</span>, str, kmsg);
+	kprintf(<span class="enscript-string">&quot;  next=%p, prev=%p, size=%d&quot;</span>,
+		kmsg-&gt;ikm_next,
+		kmsg-&gt;ikm_prev,
+		kmsg-&gt;ikm_size);
+	kprintf(<span class="enscript-string">&quot;\n&quot;</span>);
+	ipc_msg_print64(kmsg-&gt;ikm_header);
+}
+
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">msgh_bit_decode64</span>(
+	mach_msg_bits_t	bit)
+{
+	<span class="enscript-keyword">switch</span> (bit) {
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSGH_BITS_COMPLEX</span>:	<span class="enscript-keyword">return</span> <span class="enscript-string">&quot;complex&quot;</span>;
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSGH_BITS_CIRCULAR</span>:	<span class="enscript-keyword">return</span> <span class="enscript-string">&quot;circular&quot;</span>;
+	    <span class="enscript-reference">default</span>:				<span class="enscript-keyword">return</span> (<span class="enscript-type">char</span> *) 0;
+	}
+}
+
+<span class="enscript-comment">/*
+ * ipc_msg_print64	[ debug ]
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_msg_print64</span>(
+	mach_msg_header_t	*msgh)
+{
+	mach_msg_bits_t	mbits;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	bit, i;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*bit_name;
+	<span class="enscript-type">int</span>		needs_comma;
+
+	mbits = msgh-&gt;msgh_bits;
+	kprintf(<span class="enscript-string">&quot;  msgh_bits=0x%x: l=0x%x,r=0x%x\n&quot;</span>,
+		mbits,
+		MACH_MSGH_BITS_LOCAL(msgh-&gt;msgh_bits),
+		MACH_MSGH_BITS_REMOTE(msgh-&gt;msgh_bits));
+
+	mbits = MACH_MSGH_BITS_OTHER(mbits) &amp; MACH_MSGH_BITS_USED;
+	kprintf(<span class="enscript-string">&quot;  decoded bits:  &quot;</span>);
+	needs_comma = 0;
+	<span class="enscript-keyword">for</span> (i = 0, bit = 1; i &lt; <span class="enscript-keyword">sizeof</span>(mbits) * 8; ++i, bit &lt;&lt;= 1) {
+		<span class="enscript-keyword">if</span> ((mbits &amp; bit) == 0)
+			<span class="enscript-keyword">continue</span>;
+		bit_name = msgh_bit_decode64((mach_msg_bits_t)bit);
+		<span class="enscript-keyword">if</span> (bit_name)
+			kprintf(<span class="enscript-string">&quot;%s%s&quot;</span>, needs_comma ? <span class="enscript-string">&quot;,&quot;</span> : <span class="enscript-string">&quot;&quot;</span>, bit_name);
+		<span class="enscript-keyword">else</span>
+			kprintf(<span class="enscript-string">&quot;%sunknown(0x%x),&quot;</span>, needs_comma ? <span class="enscript-string">&quot;,&quot;</span> : <span class="enscript-string">&quot;&quot;</span>, bit);
+		++needs_comma;
+	}
+	<span class="enscript-keyword">if</span> (msgh-&gt;msgh_bits &amp; ~MACH_MSGH_BITS_USED) {
+		kprintf(<span class="enscript-string">&quot;%sunused=0x%x,&quot;</span>, needs_comma ? <span class="enscript-string">&quot;,&quot;</span> : <span class="enscript-string">&quot;&quot;</span>,
+		       msgh-&gt;msgh_bits &amp; ~MACH_MSGH_BITS_USED);
+	}
+	kprintf(<span class="enscript-string">&quot;\n&quot;</span>);
+
+	needs_comma = 1;
+	<span class="enscript-keyword">if</span> (msgh-&gt;msgh_remote_port) {
+		kprintf(<span class="enscript-string">&quot;  remote=%p(&quot;</span>, msgh-&gt;msgh_remote_port);
+		ipc_print_type_name64(MACH_MSGH_BITS_REMOTE(msgh-&gt;msgh_bits));
+		kprintf(<span class="enscript-string">&quot;)&quot;</span>);
+	} <span class="enscript-keyword">else</span> {
+		kprintf(<span class="enscript-string">&quot;  remote=null&quot;</span>);
+	}
+
+	<span class="enscript-keyword">if</span> (msgh-&gt;msgh_local_port) {
+		kprintf(<span class="enscript-string">&quot;%slocal=%p(&quot;</span>, needs_comma ? <span class="enscript-string">&quot;,&quot;</span> : <span class="enscript-string">&quot;&quot;</span>,
+		       msgh-&gt;msgh_local_port);
+		ipc_print_type_name64(MACH_MSGH_BITS_LOCAL(msgh-&gt;msgh_bits));
+		kprintf(<span class="enscript-string">&quot;)\n&quot;</span>);
+	} <span class="enscript-keyword">else</span> {
+		kprintf(<span class="enscript-string">&quot;local=null\n&quot;</span>);
+	}
+
+	kprintf(<span class="enscript-string">&quot;  msgh_id=%d, size=%d\n&quot;</span>,
+		msgh-&gt;msgh_id,
+		msgh-&gt;msgh_size);
+
+	<span class="enscript-keyword">if</span> (mbits &amp; MACH_MSGH_BITS_COMPLEX) {	
+		ipc_msg_print_untyped64((mach_msg_body_t *) (msgh + 1));
+	}
+
+	ipc_msg_body_print64((<span class="enscript-type">void</span> *)(msgh + 1), msgh-&gt;msgh_size);
+}
+
+
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">mm_copy_options_string64</span>(
+	mach_msg_copy_options_t	option)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*name;
+
+	<span class="enscript-keyword">switch</span> (option) {
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_PHYSICAL_COPY</span>:
+		name = <span class="enscript-string">&quot;PHYSICAL&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_VIRTUAL_COPY</span>:
+		name = <span class="enscript-string">&quot;VIRTUAL&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OVERWRITE</span>:
+		name = <span class="enscript-string">&quot;OVERWRITE(DEPRECATED)&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_ALLOCATE</span>:
+		name = <span class="enscript-string">&quot;ALLOCATE&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_KALLOC_COPY_T</span>:
+		name = <span class="enscript-string">&quot;KALLOC_COPY_T&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	    <span class="enscript-reference">default</span>:
+		name = <span class="enscript-string">&quot;unknown&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span> name;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_msg_print_untyped64</span>(
+	mach_msg_body_t		*body)
+{
+    mach_msg_descriptor_t	*saddr, *send;
+    mach_msg_descriptor_type_t	type;
+
+    kprintf(<span class="enscript-string">&quot;  %d descriptors: \n&quot;</span>, body-&gt;msgh_descriptor_count);
+
+    saddr = (mach_msg_descriptor_t *) (body + 1);
+    send = saddr + body-&gt;msgh_descriptor_count;
+
+    <span class="enscript-keyword">for</span> ( ; saddr &lt; send; saddr++ ) {
+	
+	type = saddr-&gt;type.type;
+
+	<span class="enscript-keyword">switch</span> (type) {
+	    
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_PORT_DESCRIPTOR</span>: {
+		mach_msg_port_descriptor_t *dsc;
+
+		dsc = &amp;saddr-&gt;port;
+		kprintf(<span class="enscript-string">&quot;    PORT name = %p disp = &quot;</span>, dsc-&gt;name);
+		ipc_print_type_name64(dsc-&gt;disposition);
+		kprintf(<span class="enscript-string">&quot;\n&quot;</span>);
+		<span class="enscript-keyword">break</span>;
+	    }
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_VOLATILE_DESCRIPTOR</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_DESCRIPTOR</span>: {
+		mach_msg_ool_descriptor_t *dsc;
+		
+		dsc = (mach_msg_ool_descriptor_t *) &amp;saddr-&gt;out_of_line;
+		kprintf(<span class="enscript-string">&quot;    OOL%s addr = %p size = 0x%x copy = %s %s\n&quot;</span>,
+			type == MACH_MSG_OOL_DESCRIPTOR ? <span class="enscript-string">&quot;&quot;</span> : <span class="enscript-string">&quot; VOLATILE&quot;</span>,
+			dsc-&gt;address, dsc-&gt;size,
+			mm_copy_options_string64(dsc-&gt;copy),
+			dsc-&gt;deallocate ? <span class="enscript-string">&quot;DEALLOC&quot;</span> : <span class="enscript-string">&quot;&quot;</span>);
+		<span class="enscript-keyword">break</span>;
+	    } 
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_PORTS_DESCRIPTOR</span> : {
+		mach_msg_ool_ports_descriptor_t *dsc;
+
+		dsc = (mach_msg_ool_ports_descriptor_t *) &amp;saddr-&gt;ool_ports;
+
+		kprintf(<span class="enscript-string">&quot;    OOL_PORTS addr = %p count = 0x%x &quot;</span>,
+		          dsc-&gt;address, dsc-&gt;count);
+		kprintf(<span class="enscript-string">&quot;disp = &quot;</span>);
+		ipc_print_type_name64(dsc-&gt;disposition);
+		kprintf(<span class="enscript-string">&quot; copy = %s %s\n&quot;</span>,
+		       mm_copy_options_string64(dsc-&gt;copy),
+		       dsc-&gt;deallocate ? <span class="enscript-string">&quot;DEALLOC&quot;</span> : <span class="enscript-string">&quot;&quot;</span>);
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-reference">default</span>: {
+		kprintf(<span class="enscript-string">&quot;    UNKNOWN DESCRIPTOR 0x%x\n&quot;</span>, type);
+		<span class="enscript-keyword">break</span>;
+	    }
+	}
+    }
+}
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">DEBUG_IPC_KMSG_PRINT</span>(kmsg,string)	\
+	__unreachable_ok_push	\
+	<span class="enscript-keyword">if</span> (DEBUG_KPRINT_SYSCALL_PREDICATE(DEBUG_KPRINT_SYSCALL_IPC_MASK)) {	\
+		ipc_kmsg_print64(kmsg, string);	\
+	}	\
+	__unreachable_ok_pop
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">DEBUG_IPC_MSG_BODY_PRINT</span>(body,size)	\
+	__unreachable_ok_push	\
+	<span class="enscript-keyword">if</span> (DEBUG_KPRINT_SYSCALL_PREDICATE(DEBUG_KPRINT_SYSCALL_IPC_MASK)) { 	\
+		ipc_msg_body_print64(body,size);\
+	}	\
+	__unreachable_ok_pop
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !DEBUG_MSGS_K64 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DEBUG_IPC_KMSG_PRINT</span>(kmsg,string)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">DEBUG_IPC_MSG_BODY_PRINT</span>(body,size)
+#<span class="enscript-reference">endif</span>  <span class="enscript-comment">/* !DEBUG_MSGS_K64 */</span>
+
+<span class="enscript-type">extern</span> vm_map_t		ipc_kernel_copy_map;
+<span class="enscript-type">extern</span> vm_size_t	ipc_kmsg_max_space;
+<span class="enscript-type">extern</span> vm_size_t	ipc_kmsg_max_vm_space;
+<span class="enscript-type">extern</span> vm_size_t	ipc_kmsg_max_body_space;
+<span class="enscript-type">extern</span> vm_size_t	msg_ool_size_small;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MSG_OOL_SIZE_SMALL</span>	msg_ool_size_small
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MAP_SIZE_DIFFERS</span>(map)	(map-&gt;max_offset &lt; MACH_VM_MAX_ADDRESS)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">OTHER_OOL_DESCRIPTOR</span>	mach_msg_ool_descriptor32_t
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">OTHER_OOL_PORTS_DESCRIPTOR</span>	mach_msg_ool_ports_descriptor32_t
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MAP_SIZE_DIFFERS</span>(map)	(map-&gt;max_offset &gt; VM_MAX_ADDRESS)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">OTHER_OOL_DESCRIPTOR</span>	mach_msg_ool_descriptor64_t
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">OTHER_OOL_PORTS_DESCRIPTOR</span>	mach_msg_ool_ports_descriptor64_t
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DESC_SIZE_ADJUSTMENT</span>	((mach_msg_size_t)(sizeof(mach_msg_ool_descriptor64_t) - \
+				 <span class="enscript-keyword">sizeof</span>(mach_msg_ool_descriptor32_t)))
+
+<span class="enscript-comment">/* scatter list macros */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SKIP_PORT_DESCRIPTORS</span>(s, c)					\
+MACRO_BEGIN								\
+	<span class="enscript-keyword">if</span> ((s) != MACH_MSG_DESCRIPTOR_NULL) {				\
+		<span class="enscript-keyword">while</span> ((c) &gt; 0) {					\
+			<span class="enscript-keyword">if</span> ((s)-&gt;type.type != MACH_MSG_PORT_DESCRIPTOR)	\
+				<span class="enscript-keyword">break</span>;					\
+			(s)++; (c)--;					\
+		}							\
+		<span class="enscript-keyword">if</span> (c == 0)						\
+			(s) = MACH_MSG_DESCRIPTOR_NULL;			\
+	}								\
+MACRO_END
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">INCREMENT_SCATTER</span>(s, c, d)					\
+MACRO_BEGIN								\
+	<span class="enscript-keyword">if</span> ((s) != MACH_MSG_DESCRIPTOR_NULL) {				\
+	    s = (d) ? (mach_msg_descriptor_t *)				\
+		((OTHER_OOL_DESCRIPTOR *)(s) + 1) :			\
+		(s + 1);						\
+		(c)--;							\
+	}								\
+MACRO_END
+
+<span class="enscript-comment">/* zone for cached ipc_kmsg_t structures */</span>
+zone_t			ipc_kmsg_zone;
+
+<span class="enscript-comment">/*
+ * Forward declarations
+ */</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">ipc_kmsg_clean</span>(
+	ipc_kmsg_t	kmsg);
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">ipc_kmsg_clean_body</span>(
+    	ipc_kmsg_t	kmsg,
+    	mach_msg_type_number_t	number,
+	mach_msg_descriptor_t	*desc);
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">ipc_kmsg_clean_partial</span>(
+	ipc_kmsg_t		kmsg,
+	mach_msg_type_number_t	number,
+	mach_msg_descriptor_t	*desc,
+	vm_offset_t		paddr,
+	vm_size_t		length);
+
+mach_msg_return_t <span class="enscript-function-name">ipc_kmsg_copyin_body</span>(
+	ipc_kmsg_t		kmsg,
+	ipc_space_t		space,
+	vm_map_t		map);
+
+<span class="enscript-comment">/*
+ *	We keep a per-processor cache of kernel message buffers.
+ *	The cache saves the overhead/locking of using kalloc/kfree.
+ *	The per-processor cache seems to miss less than a per-thread cache,
+ *	and it also uses less memory.  Access to the cache doesn't
+ *	require locking.
+ */</span>
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_alloc
+ *	Purpose:
+ *		Allocate a kernel message structure.  If we can get one from
+ *		the cache, that is best.  Otherwise, allocate a new one.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+ipc_kmsg_t
+<span class="enscript-function-name">ipc_kmsg_alloc</span>(
+	mach_msg_size_t msg_and_trailer_size)
+{
+	mach_msg_size_t max_expanded_size;
+	ipc_kmsg_t kmsg;
+
+	<span class="enscript-comment">/*
+	 * LP64support -
+	 * Pad the allocation in case we need to expand the
+	 * message descrptors for user spaces with pointers larger than
+	 * the kernel's own, or vice versa.  We don't know how many descriptors
+	 * there are yet, so just assume the whole body could be
+	 * descriptors (if there could be any at all).
+	 *
+	 * The expansion space is left in front of the header,
+	 * because it is easier to pull the header and descriptors
+	 * forward as we process them than it is to push all the
+	 * data backwards.
+	 */</span>
+	mach_msg_size_t size = msg_and_trailer_size - MAX_TRAILER_SIZE;
+
+	<span class="enscript-comment">/* compare against implementation upper limit for the body */</span>
+	<span class="enscript-keyword">if</span> (size &gt; ipc_kmsg_max_body_space)
+		<span class="enscript-keyword">return</span> IKM_NULL;
+
+	<span class="enscript-keyword">if</span> (size &gt; <span class="enscript-keyword">sizeof</span>(mach_msg_base_t)) {
+		mach_msg_size_t max_desc = (mach_msg_size_t)(((size - <span class="enscript-keyword">sizeof</span>(mach_msg_base_t)) /
+				           <span class="enscript-keyword">sizeof</span>(mach_msg_ool_descriptor32_t)) *
+				           DESC_SIZE_ADJUSTMENT);
+
+		<span class="enscript-comment">/* make sure expansion won't cause wrap */</span>
+		<span class="enscript-keyword">if</span> (msg_and_trailer_size &gt; MACH_MSG_SIZE_MAX - max_desc)
+			<span class="enscript-keyword">return</span> IKM_NULL;
+
+		max_expanded_size = msg_and_trailer_size + max_desc;
+	} <span class="enscript-keyword">else</span>
+	  max_expanded_size = msg_and_trailer_size;
+
+	<span class="enscript-keyword">if</span> (max_expanded_size &lt; IKM_SAVED_MSG_SIZE)
+		max_expanded_size = IKM_SAVED_MSG_SIZE; 	<span class="enscript-comment">/* round up for ikm_cache */</span>
+
+	<span class="enscript-keyword">if</span> (max_expanded_size == IKM_SAVED_MSG_SIZE) {
+		<span class="enscript-type">struct</span> ikm_cache	*cache;
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		i;
+
+		disable_preemption();
+		cache = &amp;PROCESSOR_DATA(current_processor(), ikm_cache);
+		<span class="enscript-keyword">if</span> ((i = cache-&gt;avail) &gt; 0) {
+			assert(i &lt;= IKM_STASH);
+			kmsg = cache-&gt;entries[--i];
+			cache-&gt;avail = i;
+			enable_preemption();
+			ikm_check_init(kmsg, max_expanded_size);
+			ikm_set_header(kmsg, msg_and_trailer_size);
+			<span class="enscript-keyword">return</span> (kmsg);
+		}
+		enable_preemption();
+		kmsg = (ipc_kmsg_t)zalloc(ipc_kmsg_zone);
+	} <span class="enscript-keyword">else</span> {
+		kmsg = (ipc_kmsg_t)kalloc(ikm_plus_overhead(max_expanded_size));
+	}
+
+	<span class="enscript-keyword">if</span> (kmsg != IKM_NULL) {
+		ikm_init(kmsg, max_expanded_size);
+		ikm_set_header(kmsg, msg_and_trailer_size);
+	}
+
+	<span class="enscript-keyword">return</span>(kmsg);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_free
+ *	Purpose:
+ *		Free a kernel message buffer.  If the kms is preallocated
+ *		to a port, just &quot;put it back (marked unused).&quot;  We have to
+ *		do this with the port locked.  The port may have its hold
+ *		on our message released.  In that case, we have to just
+ *		revert the message to a traditional one and free it normally.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_free</span>(
+	ipc_kmsg_t	kmsg)
+{
+	mach_msg_size_t size = kmsg-&gt;ikm_size;
+	ipc_port_t port;
+
+	assert(!IP_VALID(kmsg-&gt;ikm_voucher));
+
+	KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_IPC,MACH_IPC_KMSG_FREE) | DBG_FUNC_NONE,
+			      VM_KERNEL_ADDRPERM((uintptr_t)kmsg),
+			      0, 0, 0, 0);
+
+	<span class="enscript-comment">/*
+	 * Check to see if the message is bound to the port.  If so,
+	 * mark it not in use.  If the port isn't already dead, then
+	 * leave the message associated with it.  Otherwise, free it.
+	 */</span>
+	port = ikm_prealloc_inuse_port(kmsg);
+	<span class="enscript-keyword">if</span> (port != IP_NULL) {
+		ip_lock(port);
+		ikm_prealloc_clear_inuse(kmsg, port);
+		<span class="enscript-keyword">if</span> (ip_active(port) &amp;&amp; (port-&gt;ip_premsg == kmsg)) {
+			assert(IP_PREALLOC(port));
+			ip_unlock(port);
+			ip_release(port);
+			<span class="enscript-keyword">return</span>;
+		}
+                ip_unlock(port);
+		ip_release(port); <span class="enscript-comment">/* May be last reference */</span>
+	}
+
+	<span class="enscript-comment">/*
+	 * Peek and see if it has to go back in the cache.
+	 */</span>
+	<span class="enscript-keyword">if</span> (kmsg-&gt;ikm_size == IKM_SAVED_MSG_SIZE) {
+		<span class="enscript-type">struct</span> ikm_cache	*cache;
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		i;
+
+		disable_preemption();
+		cache = &amp;PROCESSOR_DATA(current_processor(), ikm_cache);
+		<span class="enscript-keyword">if</span> ((i = cache-&gt;avail) &lt; IKM_STASH) {
+			cache-&gt;entries[i] = kmsg;
+			cache-&gt;avail = i + 1;
+			enable_preemption();
+			<span class="enscript-keyword">return</span>;
+		}
+		enable_preemption();
+		zfree(ipc_kmsg_zone, kmsg);
+		<span class="enscript-keyword">return</span>;
+	}
+	kfree(kmsg, ikm_plus_overhead(size));
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_enqueue
+ *	Purpose:
+ *		Enqueue a kmsg.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_enqueue</span>(
+	ipc_kmsg_queue_t	queue,
+	ipc_kmsg_t		kmsg)
+{
+	ipc_kmsg_enqueue_macro(queue, kmsg);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_dequeue
+ *	Purpose:
+ *		Dequeue and return a kmsg.
+ */</span>
+
+ipc_kmsg_t
+<span class="enscript-function-name">ipc_kmsg_dequeue</span>(
+	ipc_kmsg_queue_t	queue)
+{
+	ipc_kmsg_t first;
+
+	first = ipc_kmsg_queue_first(queue);
+
+	<span class="enscript-keyword">if</span> (first != IKM_NULL)
+		ipc_kmsg_rmqueue_first_macro(queue, first);
+
+	<span class="enscript-keyword">return</span> first;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_rmqueue
+ *	Purpose:
+ *		Pull a kmsg out of a queue.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_rmqueue</span>(
+	ipc_kmsg_queue_t	queue,
+	ipc_kmsg_t		kmsg)
+{
+	ipc_kmsg_t next, prev;
+
+	assert(queue-&gt;ikmq_base != IKM_NULL);
+
+	next = kmsg-&gt;ikm_next;
+	prev = kmsg-&gt;ikm_prev;
+
+	<span class="enscript-keyword">if</span> (next == kmsg) {
+		assert(prev == kmsg);
+		assert(queue-&gt;ikmq_base == kmsg);
+
+		queue-&gt;ikmq_base = IKM_NULL;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (queue-&gt;ikmq_base == kmsg)
+			queue-&gt;ikmq_base = next;
+
+		next-&gt;ikm_prev = prev;
+		prev-&gt;ikm_next = next;
+	}
+	<span class="enscript-comment">/* XXX Temporary debug logic */</span>
+	assert((kmsg-&gt;ikm_next = IKM_BOGUS) == IKM_BOGUS);
+	assert((kmsg-&gt;ikm_prev = IKM_BOGUS) == IKM_BOGUS);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_queue_next
+ *	Purpose:
+ *		Return the kmsg following the given kmsg.
+ *		(Or IKM_NULL if it is the last one in the queue.)
+ */</span>
+
+ipc_kmsg_t
+<span class="enscript-function-name">ipc_kmsg_queue_next</span>(
+	ipc_kmsg_queue_t	queue,
+	ipc_kmsg_t		kmsg)
+{
+	ipc_kmsg_t next;
+
+	assert(queue-&gt;ikmq_base != IKM_NULL);
+
+	next = kmsg-&gt;ikm_next;
+	<span class="enscript-keyword">if</span> (queue-&gt;ikmq_base == next)
+		next = IKM_NULL;
+
+	<span class="enscript-keyword">return</span> next;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_destroy
+ *	Purpose:
+ *		Destroys a kernel message.  Releases all rights,
+ *		references, and memory held by the message.
+ *		Frees the message.
+ *	Conditions:
+ *		No locks held.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_destroy</span>(
+	ipc_kmsg_t	kmsg)
+{
+	<span class="enscript-comment">/*
+	 *	Destroying a message can cause more messages to be destroyed.
+	 *	Curtail recursion by putting messages on the deferred
+	 *	destruction queue.  If this was the first message on the
+	 *	queue, this instance must process the full queue.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ipc_kmsg_delayed_destroy(kmsg))
+		ipc_kmsg_reap_delayed();
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_delayed_destroy
+ *	Purpose:
+ *		Enqueues a kernel message for deferred destruction.
+ *	Returns:
+ *		Boolean indicator that the caller is responsible to reap
+ *		deferred messages.
+ */</span>
+
+boolean_t <span class="enscript-function-name">ipc_kmsg_delayed_destroy</span>(
+	ipc_kmsg_t kmsg)
+{
+	ipc_kmsg_queue_t queue = &amp;(current_thread()-&gt;ith_messages);
+	boolean_t first = ipc_kmsg_queue_empty(queue);
+
+	ipc_kmsg_enqueue(queue, kmsg);
+	<span class="enscript-keyword">return</span> first;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_destroy_queue
+ *	Purpose:
+ *		Destroys messages from the per-thread
+ *		deferred reaping queue.
+ *	Conditions:
+ *		No locks held.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_reap_delayed</span>(<span class="enscript-type">void</span>)
+{
+	ipc_kmsg_queue_t queue = &amp;(current_thread()-&gt;ith_messages);
+	ipc_kmsg_t kmsg;
+
+	<span class="enscript-comment">/*
+	 * must leave kmsg in queue while cleaning it to assure
+	 * no nested calls recurse into here.
+	 */</span>
+	<span class="enscript-keyword">while</span> ((kmsg = ipc_kmsg_queue_first(queue)) != IKM_NULL) {
+		ipc_kmsg_clean(kmsg);
+		ipc_kmsg_rmqueue(queue, kmsg);
+		ipc_kmsg_free(kmsg);
+	}
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_clean_body
+ *	Purpose:
+ *		Cleans the body of a kernel message.
+ *		Releases all rights, references, and memory.
+ *
+ *	Conditions:
+ *		No locks held.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> _ipc_kmsg_clean_invalid_desc = 0;
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_clean_body</span>(
+	__unused ipc_kmsg_t	kmsg,
+	mach_msg_type_number_t	number,
+	mach_msg_descriptor_t	*saddr)
+{
+    mach_msg_type_number_t	i;
+
+    <span class="enscript-keyword">if</span> ( number == 0 )
+	<span class="enscript-keyword">return</span>;
+
+    <span class="enscript-keyword">for</span> (i = 0 ; i &lt; number; i++, saddr++ ) {
+	
+	<span class="enscript-keyword">switch</span> (saddr-&gt;type.type) {
+	    
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_PORT_DESCRIPTOR</span>: {
+		mach_msg_port_descriptor_t *dsc;
+
+		dsc = &amp;saddr-&gt;port;
+
+		<span class="enscript-comment">/* 
+		 * Destroy port rights carried in the message 
+		 */</span>
+		<span class="enscript-keyword">if</span> (!IO_VALID((ipc_object_t) dsc-&gt;name))
+		    <span class="enscript-keyword">continue</span>;
+		ipc_object_destroy((ipc_object_t) dsc-&gt;name, dsc-&gt;disposition);
+		<span class="enscript-keyword">break</span>;
+	    }
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_VOLATILE_DESCRIPTOR</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_DESCRIPTOR</span> : {
+		mach_msg_ool_descriptor_t *dsc;
+
+		dsc = (mach_msg_ool_descriptor_t *)&amp;saddr-&gt;out_of_line;
+		
+		<span class="enscript-comment">/* 
+		 * Destroy memory carried in the message 
+		 */</span>
+		<span class="enscript-keyword">if</span> (dsc-&gt;size == 0) {
+			assert(dsc-&gt;address == (<span class="enscript-type">void</span> *) 0);
+		} <span class="enscript-keyword">else</span> {
+		    	vm_map_copy_discard((vm_map_copy_t) dsc-&gt;address);
+		}
+		<span class="enscript-keyword">break</span>;
+	    }
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_PORTS_DESCRIPTOR</span> : {
+		ipc_object_t             	*objects;
+		mach_msg_type_number_t   	j;
+		mach_msg_ool_ports_descriptor_t	*dsc;
+
+		dsc = (mach_msg_ool_ports_descriptor_t	*)&amp;saddr-&gt;ool_ports;
+		objects = (ipc_object_t *) dsc-&gt;address;
+
+		<span class="enscript-keyword">if</span> (dsc-&gt;count == 0) {
+			<span class="enscript-keyword">break</span>;
+		}
+
+		assert(objects != (ipc_object_t *) 0);
+		
+		<span class="enscript-comment">/* destroy port rights carried in the message */</span>
+		
+		<span class="enscript-keyword">for</span> (j = 0; j &lt; dsc-&gt;count; j++) {
+		    ipc_object_t object = objects[j];
+		    
+		    <span class="enscript-keyword">if</span> (!IO_VALID(object))
+			<span class="enscript-keyword">continue</span>;
+		    
+		    ipc_object_destroy(object, dsc-&gt;disposition);
+		}
+
+		<span class="enscript-comment">/* destroy memory carried in the message */</span>
+
+		assert(dsc-&gt;count != 0);
+
+		kfree(dsc-&gt;address, 
+		     (vm_size_t) dsc-&gt;count * <span class="enscript-keyword">sizeof</span>(mach_port_t));
+		<span class="enscript-keyword">break</span>;
+	    }
+	    <span class="enscript-keyword">default</span> : {
+		    _ipc_kmsg_clean_invalid_desc++; <span class="enscript-comment">/* don't understand this type of descriptor */</span>
+	    }
+	}
+    }
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_clean_partial
+ *	Purpose:
+ *		Cleans a partially-acquired kernel message.
+ *		number is the index of the type descriptor
+ *		in the body of the message that contained the error.
+ *		If dolast, the memory and port rights in this last
+ *		type spec are also cleaned.  In that case, number
+ *		specifies the number of port rights to clean.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_clean_partial</span>(
+	ipc_kmsg_t		kmsg,
+	mach_msg_type_number_t	number,
+	mach_msg_descriptor_t	*desc,
+	vm_offset_t		paddr,
+	vm_size_t		length)
+{
+	ipc_object_t object;
+	mach_msg_bits_t mbits = kmsg-&gt;ikm_header-&gt;msgh_bits;
+
+	<span class="enscript-comment">/* deal with importance chain while we still have dest and voucher references */</span>
+	ipc_importance_clean(kmsg);
+
+	object = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+	assert(IO_VALID(object));
+	ipc_object_destroy_dest(object, MACH_MSGH_BITS_REMOTE(mbits));
+
+	object = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_local_port;
+	<span class="enscript-keyword">if</span> (IO_VALID(object))
+		ipc_object_destroy(object, MACH_MSGH_BITS_LOCAL(mbits));
+
+	object = (ipc_object_t) kmsg-&gt;ikm_voucher;
+	<span class="enscript-keyword">if</span> (IO_VALID(object)) {
+		assert(MACH_MSGH_BITS_VOUCHER(mbits) == MACH_MSG_TYPE_MOVE_SEND);
+		ipc_object_destroy(object, MACH_MSG_TYPE_PORT_SEND);
+		kmsg-&gt;ikm_voucher = IP_NULL;
+	}
+
+	<span class="enscript-keyword">if</span> (paddr) {
+		(<span class="enscript-type">void</span>) vm_deallocate(ipc_kernel_copy_map, paddr, length);
+	}
+
+	ipc_kmsg_clean_body(kmsg, number, desc);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_clean
+ *	Purpose:
+ *		Cleans a kernel message.  Releases all rights,
+ *		references, and memory held by the message.
+ *	Conditions:
+ *		No locks held.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_clean</span>(
+	ipc_kmsg_t	kmsg)
+{
+	ipc_object_t object;
+	mach_msg_bits_t mbits;
+
+	<span class="enscript-comment">/* deal with importance chain while we still have dest and voucher references */</span>
+	ipc_importance_clean(kmsg);
+
+	mbits = kmsg-&gt;ikm_header-&gt;msgh_bits;
+	object = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+	<span class="enscript-keyword">if</span> (IO_VALID(object))
+		ipc_object_destroy_dest(object, MACH_MSGH_BITS_REMOTE(mbits));
+
+	object = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_local_port;
+	<span class="enscript-keyword">if</span> (IO_VALID(object))
+		ipc_object_destroy(object, MACH_MSGH_BITS_LOCAL(mbits));
+
+	object = (ipc_object_t) kmsg-&gt;ikm_voucher;
+	<span class="enscript-keyword">if</span> (IO_VALID(object)) {
+		assert(MACH_MSGH_BITS_VOUCHER(mbits) == MACH_MSG_TYPE_MOVE_SEND);
+		ipc_object_destroy(object, MACH_MSG_TYPE_PORT_SEND);
+		kmsg-&gt;ikm_voucher = IP_NULL;
+	}
+
+	<span class="enscript-keyword">if</span> (mbits &amp; MACH_MSGH_BITS_COMPLEX) {
+		mach_msg_body_t *body;
+
+		body = (mach_msg_body_t *) (kmsg-&gt;ikm_header + 1);
+		ipc_kmsg_clean_body(kmsg, body-&gt;msgh_descriptor_count,
+				    (mach_msg_descriptor_t *)(body + 1));
+	}
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_set_prealloc
+ *	Purpose:
+ *		Assign a kmsg as a preallocated message buffer to a port.
+ *	Conditions:
+ *		port locked.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_set_prealloc</span>(
+	ipc_kmsg_t		kmsg,
+	ipc_port_t		port)
+{
+	assert(kmsg-&gt;ikm_prealloc == IP_NULL);
+  
+	kmsg-&gt;ikm_prealloc = IP_NULL;
+	IP_SET_PREALLOC(port, kmsg);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_clear_prealloc
+ *	Purpose:
+ *		Release the Assignment of a preallocated message buffer from a port.
+ *	Conditions:
+ *		port locked.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_clear_prealloc</span>(
+	ipc_kmsg_t		kmsg,
+	ipc_port_t		port)
+{
+	assert(kmsg-&gt;ikm_prealloc == port);
+  
+	kmsg-&gt;ikm_prealloc = IP_NULL;
+	IP_CLEAR_PREALLOC(port, kmsg);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_prealloc
+ *	Purpose:
+ *		Wraper to ipc_kmsg_alloc() to account for
+ *		header expansion requirements.
+ */</span>
+ipc_kmsg_t
+<span class="enscript-function-name">ipc_kmsg_prealloc</span>(mach_msg_size_t size)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+	<span class="enscript-keyword">if</span> (size &gt; MACH_MSG_SIZE_MAX - LEGACY_HEADER_SIZE_DELTA)
+		<span class="enscript-keyword">return</span> IKM_NULL;
+
+	size += LEGACY_HEADER_SIZE_DELTA;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span> ipc_kmsg_alloc(size);
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_get
+ *	Purpose:
+ *		Allocates a kernel message buffer.
+ *		Copies a user message to the message buffer.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Acquired a message buffer.
+ *		MACH_SEND_MSG_TOO_SMALL	Message smaller than a header.
+ *		MACH_SEND_MSG_TOO_SMALL	Message size not long-word multiple.
+ *		MACH_SEND_TOO_LARGE	Message too large to ever be sent.
+ *		MACH_SEND_NO_BUFFER	Couldn't allocate a message buffer.
+ *		MACH_SEND_INVALID_DATA	Couldn't copy message data.
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">ipc_kmsg_get</span>(
+	mach_vm_address_t	msg_addr,
+	mach_msg_size_t	size,
+	ipc_kmsg_t		*kmsgp)
+{
+	mach_msg_size_t			msg_and_trailer_size;
+	ipc_kmsg_t 			kmsg;
+	mach_msg_max_trailer_t	 	*trailer;
+	mach_msg_legacy_base_t	    legacy_base;
+	mach_msg_size_t             len_copied;
+	legacy_base.body.msgh_descriptor_count = 0;
+
+	<span class="enscript-keyword">if</span> ((size &lt; <span class="enscript-keyword">sizeof</span>(mach_msg_legacy_header_t)) || (size &amp; 3))
+		<span class="enscript-keyword">return</span> MACH_SEND_MSG_TOO_SMALL;
+
+	<span class="enscript-keyword">if</span> (size &gt; ipc_kmsg_max_body_space)
+		<span class="enscript-keyword">return</span> MACH_SEND_TOO_LARGE;
+
+	<span class="enscript-keyword">if</span>(size == <span class="enscript-keyword">sizeof</span>(mach_msg_legacy_header_t))
+		len_copied = <span class="enscript-keyword">sizeof</span>(mach_msg_legacy_header_t);
+	<span class="enscript-keyword">else</span>
+		len_copied = <span class="enscript-keyword">sizeof</span>(mach_msg_legacy_base_t);
+
+	<span class="enscript-keyword">if</span> (copyinmsg(msg_addr, (<span class="enscript-type">char</span> *)&amp;legacy_base, len_copied))
+		<span class="enscript-keyword">return</span> MACH_SEND_INVALID_DATA;
+
+	msg_addr += <span class="enscript-keyword">sizeof</span>(legacy_base.header);
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+	size += LEGACY_HEADER_SIZE_DELTA;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-comment">/* unreachable if !DEBUG */</span>
+	__unreachable_ok_push
+	<span class="enscript-keyword">if</span> (DEBUG_KPRINT_SYSCALL_PREDICATE(DEBUG_KPRINT_SYSCALL_IPC_MASK)) {
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> j;
+		<span class="enscript-keyword">for</span> (j=0; j&lt;<span class="enscript-keyword">sizeof</span>(legacy_base.header); j++) {
+			kprintf(<span class="enscript-string">&quot;%02x\n&quot;</span>, ((<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>*)&amp;legacy_base.header)[j]);
+		}
+	}
+	__unreachable_ok_pop
+
+	msg_and_trailer_size = size + MAX_TRAILER_SIZE;
+	kmsg = ipc_kmsg_alloc(msg_and_trailer_size);
+	<span class="enscript-keyword">if</span> (kmsg == IKM_NULL)
+		<span class="enscript-keyword">return</span> MACH_SEND_NO_BUFFER;
+
+	kmsg-&gt;ikm_header-&gt;msgh_size			= size;
+	kmsg-&gt;ikm_header-&gt;msgh_bits			= legacy_base.header.msgh_bits;
+	kmsg-&gt;ikm_header-&gt;msgh_remote_port	= CAST_MACH_NAME_TO_PORT(legacy_base.header.msgh_remote_port);
+	kmsg-&gt;ikm_header-&gt;msgh_local_port	= CAST_MACH_NAME_TO_PORT(legacy_base.header.msgh_local_port);
+	kmsg-&gt;ikm_header-&gt;msgh_voucher_port		= legacy_base.header.msgh_voucher_port;
+	kmsg-&gt;ikm_header-&gt;msgh_id			= legacy_base.header.msgh_id;
+
+	DEBUG_KPRINT_SYSCALL_IPC(<span class="enscript-string">&quot;ipc_kmsg_get header:\n&quot;</span>
+							 <span class="enscript-string">&quot;  size:		0x%.8x\n&quot;</span>
+							 <span class="enscript-string">&quot;  bits:		0x%.8x\n&quot;</span>
+							 <span class="enscript-string">&quot;  remote_port:	%p\n&quot;</span>
+							 <span class="enscript-string">&quot;  local_port:	%p\n&quot;</span>
+							 <span class="enscript-string">&quot;  voucher_port:	0x%.8x\n&quot;</span>
+							 <span class="enscript-string">&quot;  id:		%.8d\n&quot;</span>,
+							 kmsg-&gt;ikm_header-&gt;msgh_size,
+							 kmsg-&gt;ikm_header-&gt;msgh_bits,
+							 kmsg-&gt;ikm_header-&gt;msgh_remote_port,
+							 kmsg-&gt;ikm_header-&gt;msgh_local_port,
+							 kmsg-&gt;ikm_header-&gt;msgh_voucher_port,
+							 kmsg-&gt;ikm_header-&gt;msgh_id);
+
+	<span class="enscript-keyword">if</span> (copyinmsg(msg_addr, (<span class="enscript-type">char</span> *)(kmsg-&gt;ikm_header + 1), size - (mach_msg_size_t)<span class="enscript-keyword">sizeof</span>(mach_msg_header_t))) {
+		ipc_kmsg_free(kmsg);
+		<span class="enscript-keyword">return</span> MACH_SEND_INVALID_DATA;
+	}
+
+	<span class="enscript-comment">/* unreachable if !DEBUG */</span>
+	__unreachable_ok_push
+	<span class="enscript-keyword">if</span> (DEBUG_KPRINT_SYSCALL_PREDICATE(DEBUG_KPRINT_SYSCALL_IPC_MASK))
+	{
+		kprintf(<span class="enscript-string">&quot;body: size: %lu\n&quot;</span>, (size - <span class="enscript-keyword">sizeof</span>(mach_msg_header_t)));
+		uint32_t i;
+		<span class="enscript-keyword">for</span>(i=0;i*4 &lt; (size - <span class="enscript-keyword">sizeof</span>(mach_msg_header_t));i++)
+		{
+			kprintf(<span class="enscript-string">&quot;%.4x\n&quot;</span>,((uint32_t *)(kmsg-&gt;ikm_header + 1))[i]);
+		}
+	}
+	__unreachable_ok_pop
+	DEBUG_IPC_KMSG_PRINT(kmsg, <span class="enscript-string">&quot;ipc_kmsg_get()&quot;</span>);
+
+	<span class="enscript-comment">/* 
+	 * I reserve for the trailer the largest space (MAX_TRAILER_SIZE)
+	 * However, the internal size field of the trailer (msgh_trailer_size)
+	 * is initialized to the minimum (sizeof(mach_msg_trailer_t)), to optimize
+	 * the cases where no implicit data is requested.
+	 */</span>
+	trailer = (mach_msg_max_trailer_t *) ((vm_offset_t)kmsg-&gt;ikm_header + size);
+	trailer-&gt;msgh_sender = current_thread()-&gt;task-&gt;sec_token;
+	trailer-&gt;msgh_audit = current_thread()-&gt;task-&gt;audit_token;
+	trailer-&gt;msgh_trailer_type = MACH_MSG_TRAILER_FORMAT_0;
+	trailer-&gt;msgh_trailer_size = MACH_MSG_TRAILER_MINIMUM_SIZE;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ppc</span>
+	<span class="enscript-keyword">if</span>(trcWork.traceMask) dbgTrace(0x1100, (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)kmsg-&gt;ikm_header-&gt;msgh_id, 
+		(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)kmsg-&gt;ikm_header-&gt;msgh_remote_port, 
+		(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)kmsg-&gt;ikm_header-&gt;msgh_local_port, 0); 
+#<span class="enscript-reference">endif</span>
+
+	trailer-&gt;msgh_labels.sender = 0;
+	*kmsgp = kmsg;
+	<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_get_from_kernel
+ *	Purpose:
+ *		First checks for a preallocated message
+ *		reserved for kernel clients.  If not found -
+ *		allocates a new kernel message buffer.
+ *		Copies a kernel message to the message buffer.
+ *		Only resource errors are allowed.
+ *	Conditions:
+ *		Nothing locked.
+ *		Ports in header are ipc_port_t.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Acquired a message buffer.
+ *		MACH_SEND_NO_BUFFER	Couldn't allocate a message buffer.
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">ipc_kmsg_get_from_kernel</span>(
+	mach_msg_header_t	*msg,
+	mach_msg_size_t	size,
+	ipc_kmsg_t		*kmsgp)
+{
+	ipc_kmsg_t 	kmsg;
+	mach_msg_size_t	msg_and_trailer_size;
+	mach_msg_max_trailer_t *trailer;
+	ipc_port_t	dest_port;
+
+	assert(size &gt;= <span class="enscript-keyword">sizeof</span>(mach_msg_header_t));
+	assert((size &amp; 3) == 0);
+
+	dest_port = (ipc_port_t)msg-&gt;msgh_remote_port;
+
+	msg_and_trailer_size = size + MAX_TRAILER_SIZE;
+
+	<span class="enscript-comment">/*
+	 * See if the port has a pre-allocated kmsg for kernel
+	 * clients.  These are set up for those kernel clients
+	 * which cannot afford to wait.
+	 */</span>
+	<span class="enscript-keyword">if</span> (IP_VALID(dest_port) &amp;&amp; IP_PREALLOC(dest_port)) {
+		mach_msg_size_t max_desc = 0;
+
+		ip_lock(dest_port);
+		<span class="enscript-keyword">if</span> (!ip_active(dest_port)) {
+			ip_unlock(dest_port);
+			<span class="enscript-keyword">return</span> MACH_SEND_NO_BUFFER;
+		}
+		assert(IP_PREALLOC(dest_port));
+		kmsg = dest_port-&gt;ip_premsg;
+		<span class="enscript-keyword">if</span> (ikm_prealloc_inuse(kmsg)) {
+			ip_unlock(dest_port);
+			<span class="enscript-keyword">return</span> MACH_SEND_NO_BUFFER;
+		}
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+		<span class="enscript-keyword">if</span> (msg-&gt;msgh_bits &amp; MACH_MSGH_BITS_COMPLEX) {
+			assert(size &gt; <span class="enscript-keyword">sizeof</span>(mach_msg_base_t));
+			max_desc = ((mach_msg_base_t *)msg)-&gt;body.msgh_descriptor_count *
+				DESC_SIZE_ADJUSTMENT;
+		}
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">if</span> (msg_and_trailer_size &gt; kmsg-&gt;ikm_size - max_desc) {
+			ip_unlock(dest_port);
+			<span class="enscript-keyword">return</span> MACH_SEND_TOO_LARGE;
+		}
+		ikm_prealloc_set_inuse(kmsg, dest_port);
+		ikm_set_header(kmsg, msg_and_trailer_size);
+		ip_unlock(dest_port);
+	}
+	<span class="enscript-keyword">else</span>
+	{
+		kmsg = ipc_kmsg_alloc(msg_and_trailer_size);
+		<span class="enscript-keyword">if</span> (kmsg == IKM_NULL)
+			<span class="enscript-keyword">return</span> MACH_SEND_NO_BUFFER;
+	}
+
+	(<span class="enscript-type">void</span>) memcpy((<span class="enscript-type">void</span> *) kmsg-&gt;ikm_header, (<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) msg, size);
+
+	kmsg-&gt;ikm_header-&gt;msgh_size = size;
+
+	<span class="enscript-comment">/* 
+	 * I reserve for the trailer the largest space (MAX_TRAILER_SIZE)
+	 * However, the internal size field of the trailer (msgh_trailer_size)
+	 * is initialized to the minimum (sizeof(mach_msg_trailer_t)), to
+	 * optimize the cases where no implicit data is requested.
+	 */</span>
+	trailer = (mach_msg_max_trailer_t *) 
+	          ((vm_offset_t)kmsg-&gt;ikm_header + size);
+	trailer-&gt;msgh_sender = KERNEL_SECURITY_TOKEN;
+	trailer-&gt;msgh_audit = KERNEL_AUDIT_TOKEN;
+	trailer-&gt;msgh_trailer_type = MACH_MSG_TRAILER_FORMAT_0;
+	trailer-&gt;msgh_trailer_size = MACH_MSG_TRAILER_MINIMUM_SIZE;
+
+	trailer-&gt;msgh_labels.sender = 0;
+
+	*kmsgp = kmsg;
+	<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_send
+ *	Purpose:
+ *		Send a message.  The message holds a reference
+ *		for the destination port in the msgh_remote_port field.
+ *
+ *		If unsuccessful, the caller still has possession of
+ *		the message and must do something with it.  If successful,
+ *		the message is queued, given to a receiver, destroyed,
+ *		or handled directly by the kernel via mach_msg.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	The message was accepted.
+ *		MACH_SEND_TIMED_OUT	Caller still has message.
+ *		MACH_SEND_INTERRUPTED	Caller still has message.
+ *		MACH_SEND_INVALID_DEST	Caller still has message.
+ */</span>
+
+
+mach_msg_return_t
+<span class="enscript-function-name">ipc_kmsg_send</span>(
+	ipc_kmsg_t		kmsg,
+	mach_msg_option_t	option,
+	mach_msg_timeout_t	send_timeout)
+{
+	ipc_port_t port;
+	thread_t th = current_thread();
+	mach_msg_return_t error = MACH_MSG_SUCCESS;
+	spl_t s;
+
+	<span class="enscript-comment">/* Check if honor qlimit flag is set on thread. */</span>
+	<span class="enscript-keyword">if</span> ((th-&gt;options &amp; TH_OPT_HONOR_QLIMIT) == TH_OPT_HONOR_QLIMIT) {
+		<span class="enscript-comment">/* Remove the MACH_SEND_ALWAYS flag to honor queue limit. */</span>
+		option &amp;= (~MACH_SEND_ALWAYS);
+		<span class="enscript-comment">/* Add the timeout flag since the message queue might be full. */</span>
+		option |= MACH_SEND_TIMEOUT;
+		th-&gt;options &amp;= (~TH_OPT_HONOR_QLIMIT);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_INHERITANCE</span>
+	boolean_t did_importance = FALSE;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+	mach_msg_id_t imp_msgh_id = -1;
+	<span class="enscript-type">int</span>           sender_pid  = -1;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IMPORTANCE_DEBUG */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IMPORTANCE_INHERITANCE */</span>
+
+	<span class="enscript-comment">/* don't allow the creation of a circular loop */</span>
+	<span class="enscript-keyword">if</span> (kmsg-&gt;ikm_header-&gt;msgh_bits &amp; MACH_MSGH_BITS_CIRCULAR) {
+		ipc_kmsg_destroy(kmsg);
+		<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+	}
+
+	port = (ipc_port_t) kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+	assert(IP_VALID(port));
+	ip_lock(port);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_INHERITANCE</span>
+<span class="enscript-reference">retry</span>:
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IMPORTANCE_INHERITANCE */</span>
+	<span class="enscript-comment">/*
+	 *	Can't deliver to a dead port.
+	 *	However, we can pretend it got sent
+	 *	and was then immediately destroyed.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!ip_active(port)) {
+		ip_unlock(port);
+		ip_release(port);  <span class="enscript-comment">/* JMM - Future: release right, not just ref */</span>
+		kmsg-&gt;ikm_header-&gt;msgh_remote_port = MACH_PORT_NULL;
+		ipc_kmsg_destroy(kmsg);
+		<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+	}
+
+	<span class="enscript-keyword">if</span> (port-&gt;ip_receiver == ipc_space_kernel) {
+
+		<span class="enscript-comment">/*
+		 *	We can check ip_receiver == ipc_space_kernel
+		 *	before checking that the port is active because
+		 *	ipc_port_dealloc_kernel clears ip_receiver
+		 *	before destroying a kernel port.
+		 */</span>
+		assert(ip_active(port));
+		port-&gt;ip_messages.imq_seqno++;
+		ip_unlock(port);
+
+		current_task()-&gt;messages_sent++;
+
+		<span class="enscript-comment">/*
+		 * Call the server routine, and get the reply message to send.
+		 */</span>
+		kmsg = ipc_kobject_server(kmsg);
+		<span class="enscript-keyword">if</span> (kmsg == IKM_NULL)
+			<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+
+		port = (ipc_port_t) kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+		assert(IP_VALID(port));
+		ip_lock(port);
+		<span class="enscript-comment">/* fall thru with reply - same options */</span>
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_INHERITANCE</span>
+	<span class="enscript-comment">/*
+	 * Need to see if this message needs importance donation and/or
+	 * propagation.  That routine can drop the port lock temporarily.
+	 * If it does we'll have to revalidate the destination.
+	 */</span>
+	<span class="enscript-keyword">if</span> (did_importance == FALSE) {
+		did_importance = TRUE;
+		<span class="enscript-keyword">if</span> (ipc_importance_send(kmsg, option))
+	  		<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry</span>;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IMPORTANCE_INHERITANCE */</span>
+
+	<span class="enscript-comment">/*
+	 * We have a valid message and a valid reference on the port.
+	 * we can unlock the port and call mqueue_send() on its message
+	 * queue. Lock message queue while port is locked.
+	 */</span>
+	s = splsched();
+	imq_lock(&amp;port-&gt;ip_messages);
+	ip_unlock(port);
+
+	error = ipc_mqueue_send(&amp;port-&gt;ip_messages, kmsg, option, 
+			send_timeout, s);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_INHERITANCE</span>
+	<span class="enscript-keyword">if</span> (did_importance == TRUE) {
+		__unused <span class="enscript-type">int</span> importance_cleared = 0;
+		<span class="enscript-keyword">switch</span> (error) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_SEND_TIMED_OUT</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_SEND_NO_BUFFER</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_SEND_INTERRUPTED</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_SEND_INVALID_DEST</span>:
+				<span class="enscript-comment">/*
+				 * We still have the kmsg and its
+				 * reference on the port.  But we
+				 * have to back out the importance
+				 * boost.
+				 *
+				 * The port could have changed hands,
+				 * be inflight to another destination,
+				 * etc...  But in those cases our
+				 * back-out will find the new owner
+				 * (and all the operations that
+				 * transferred the right should have
+				 * applied their own boost adjustments
+				 * to the old owner(s)).
+				 */</span>
+				importance_cleared = 1;
+				ipc_importance_clean(kmsg);
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_SUCCESS</span>:
+			<span class="enscript-reference">default</span>:
+				<span class="enscript-keyword">break</span>;
+		}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, (IMPORTANCE_CODE(IMP_MSG, IMP_MSG_SEND)) | DBG_FUNC_END,
+		                          task_pid(current_task()), sender_pid, imp_msgh_id, importance_cleared, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IMPORTANCE_DEBUG */</span>
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IMPORTANCE_INHERITANCE */</span>
+
+	<span class="enscript-comment">/*
+	 * If the port has been destroyed while we wait, treat the message
+	 * as a successful delivery (like we do for an inactive port).
+	 */</span>
+	<span class="enscript-keyword">if</span> (error == MACH_SEND_INVALID_DEST) {
+		ip_release(port); <span class="enscript-comment">/* JMM - Future: release right, not just ref */</span>
+		kmsg-&gt;ikm_header-&gt;msgh_remote_port = MACH_PORT_NULL;
+		ipc_kmsg_destroy(kmsg);
+		<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+	}
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_put
+ *	Purpose:
+ *		Copies a message buffer to a user message.
+ *		Copies only the specified number of bytes.
+ *		Frees the message buffer.
+ *	Conditions:
+ *		Nothing locked.  The message buffer must have clean
+ *		header fields.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Copied data out of message buffer.
+ *		MACH_RCV_INVALID_DATA	Couldn't copy to user message.
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">ipc_kmsg_put</span>(
+	mach_vm_address_t	msg_addr,
+	ipc_kmsg_t		kmsg,
+	mach_msg_size_t		size)
+{
+	mach_msg_return_t mr;
+
+	DEBUG_IPC_KMSG_PRINT(kmsg, <span class="enscript-string">&quot;ipc_kmsg_put()&quot;</span>);
+
+
+	DEBUG_KPRINT_SYSCALL_IPC(<span class="enscript-string">&quot;ipc_kmsg_put header:\n&quot;</span>
+							 <span class="enscript-string">&quot;  size:		0x%.8x\n&quot;</span>
+							 <span class="enscript-string">&quot;  bits:		0x%.8x\n&quot;</span>
+							 <span class="enscript-string">&quot;  remote_port:	%p\n&quot;</span>
+							 <span class="enscript-string">&quot;  local_port:	%p\n&quot;</span>
+							 <span class="enscript-string">&quot;  voucher_port:	0x%.8x\n&quot;</span>
+							 <span class="enscript-string">&quot;  id:		%.8d\n&quot;</span>,
+							 kmsg-&gt;ikm_header-&gt;msgh_size,
+							 kmsg-&gt;ikm_header-&gt;msgh_bits,
+							 kmsg-&gt;ikm_header-&gt;msgh_remote_port,
+							 kmsg-&gt;ikm_header-&gt;msgh_local_port,
+							 kmsg-&gt;ikm_header-&gt;msgh_voucher_port,
+							 kmsg-&gt;ikm_header-&gt;msgh_id);
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+	<span class="enscript-keyword">if</span> (current_task() != kernel_task) { <span class="enscript-comment">/* don't if receiver expects fully-cooked in-kernel msg; ux_exception */</span>
+		mach_msg_legacy_header_t *legacy_header = 
+			(mach_msg_legacy_header_t *)((vm_offset_t)(kmsg-&gt;ikm_header) + LEGACY_HEADER_SIZE_DELTA);
+
+		mach_msg_bits_t		bits		= kmsg-&gt;ikm_header-&gt;msgh_bits;
+		mach_msg_size_t		msg_size	= kmsg-&gt;ikm_header-&gt;msgh_size;
+		mach_port_name_t	remote_port	= CAST_MACH_PORT_TO_NAME(kmsg-&gt;ikm_header-&gt;msgh_remote_port);
+		mach_port_name_t	local_port	= CAST_MACH_PORT_TO_NAME(kmsg-&gt;ikm_header-&gt;msgh_local_port);
+		mach_port_name_t	voucher_port	= kmsg-&gt;ikm_header-&gt;msgh_voucher_port;
+		mach_msg_id_t		id			= kmsg-&gt;ikm_header-&gt;msgh_id;
+
+		legacy_header-&gt;msgh_id			= id;
+		legacy_header-&gt;msgh_local_port = local_port;
+		legacy_header-&gt;msgh_remote_port = remote_port;
+		legacy_header-&gt;msgh_voucher_port = voucher_port;
+		legacy_header-&gt;msgh_size		= msg_size - LEGACY_HEADER_SIZE_DELTA;
+		legacy_header-&gt;msgh_bits		= bits;
+
+		size -= LEGACY_HEADER_SIZE_DELTA;
+		kmsg-&gt;ikm_header = (mach_msg_header_t *)legacy_header;
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* unreachable if !DEBUG */</span>
+	__unreachable_ok_push
+	<span class="enscript-keyword">if</span> (DEBUG_KPRINT_SYSCALL_PREDICATE(DEBUG_KPRINT_SYSCALL_IPC_MASK)) {
+		kprintf(<span class="enscript-string">&quot;ipc_kmsg_put header+body: %d\n&quot;</span>, (size));
+		uint32_t i;
+		<span class="enscript-keyword">for</span>(i=0;i*4 &lt; size;i++)
+		{
+			kprintf(<span class="enscript-string">&quot;%.4x\n&quot;</span>,((uint32_t *)kmsg-&gt;ikm_header)[i]);
+		}
+		kprintf(<span class="enscript-string">&quot;type: %d\n&quot;</span>, ((mach_msg_type_descriptor_t *)(((mach_msg_base_t *)kmsg-&gt;ikm_header)+1))-&gt;type);
+	}
+	__unreachable_ok_pop
+	<span class="enscript-keyword">if</span> (copyoutmsg((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) kmsg-&gt;ikm_header, msg_addr, size))
+		mr = MACH_RCV_INVALID_DATA;
+	<span class="enscript-keyword">else</span>
+		mr = MACH_MSG_SUCCESS;
+
+	ipc_kmsg_free(kmsg);
+	<span class="enscript-keyword">return</span> mr;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_put_to_kernel
+ *	Purpose:
+ *		Copies a message buffer to a kernel message.
+ *		Frees the message buffer.
+ *		No errors allowed.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_put_to_kernel</span>(
+	mach_msg_header_t	*msg,
+	ipc_kmsg_t		kmsg,
+	mach_msg_size_t		size)
+{
+	(<span class="enscript-type">void</span>) memcpy((<span class="enscript-type">void</span> *) msg, (<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) kmsg-&gt;ikm_header, size);
+
+	ipc_kmsg_free(kmsg);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_copyin_header
+ *	Purpose:
+ *		&quot;Copy-in&quot; port rights in the header of a message.
+ *		Operates atomically; if it doesn't succeed the
+ *		message header and the space are left untouched.
+ *		If it does succeed the remote/local port fields
+ *		contain object pointers instead of port names,
+ *		and the bits field is updated.  The destination port
+ *		will be a valid port pointer.
+ *
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Successful copyin.
+ *		MACH_SEND_INVALID_HEADER
+ *			Illegal value in the message header bits.
+ *		MACH_SEND_INVALID_DEST	The space is dead.
+ *		MACH_SEND_INVALID_DEST	Can't copyin destination port.
+ *			(Either KERN_INVALID_NAME or KERN_INVALID_RIGHT.)
+ *		MACH_SEND_INVALID_REPLY	Can't copyin reply port.
+ *			(Either KERN_INVALID_NAME or KERN_INVALID_RIGHT.)
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">ipc_kmsg_copyin_header</span>(
+	ipc_kmsg_t              kmsg,
+	ipc_space_t		space,
+	mach_msg_option_t	*optionp)
+{
+	mach_msg_header_t *msg = kmsg-&gt;ikm_header;
+	mach_msg_bits_t mbits = msg-&gt;msgh_bits &amp; MACH_MSGH_BITS_USER;
+	mach_port_name_t dest_name = CAST_MACH_PORT_TO_NAME(msg-&gt;msgh_remote_port);
+	mach_port_name_t reply_name = CAST_MACH_PORT_TO_NAME(msg-&gt;msgh_local_port);
+	mach_port_name_t voucher_name = MACH_PORT_NULL;
+	kern_return_t kr;
+
+	mach_msg_type_name_t dest_type = MACH_MSGH_BITS_REMOTE(mbits);
+	mach_msg_type_name_t reply_type = MACH_MSGH_BITS_LOCAL(mbits);
+	mach_msg_type_name_t voucher_type = MACH_MSGH_BITS_VOUCHER(mbits);
+	ipc_object_t dest_port = IO_NULL;
+	ipc_object_t reply_port = IO_NULL;
+	ipc_port_t dest_soright = IP_NULL;
+	ipc_port_t reply_soright = IP_NULL;
+	ipc_port_t voucher_soright = IP_NULL;
+	ipc_port_t release_port = IP_NULL;
+	ipc_port_t voucher_port = IP_NULL;
+	ipc_port_t voucher_release_port = IP_NULL;
+	ipc_entry_t dest_entry = IE_NULL;
+	ipc_entry_t reply_entry = IE_NULL;
+	ipc_entry_t voucher_entry = IE_NULL;
+
+	<span class="enscript-type">int</span> assertcnt = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_INHERITANCE</span>
+	boolean_t needboost = FALSE;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IMPORTANCE_INHERITANCE */</span>
+
+	<span class="enscript-keyword">if</span> ((mbits != msg-&gt;msgh_bits) ||
+	    (!MACH_MSG_TYPE_PORT_ANY_SEND(dest_type)) ||
+	    ((reply_type == 0) ?
+	     (reply_name != MACH_PORT_NULL) :
+	     !MACH_MSG_TYPE_PORT_ANY_SEND(reply_type)))
+		<span class="enscript-keyword">return</span> MACH_SEND_INVALID_HEADER;
+
+	<span class="enscript-keyword">if</span> (!MACH_PORT_VALID(dest_name))
+		<span class="enscript-keyword">return</span> MACH_SEND_INVALID_DEST;
+
+	is_write_lock(space);
+	<span class="enscript-keyword">if</span> (!is_active(space)) {
+		is_write_unlock(space);
+		<span class="enscript-keyword">return</span> MACH_SEND_INVALID_DEST;
+	}
+	<span class="enscript-comment">/* space locked and active */</span>
+
+	<span class="enscript-comment">/*
+	 *	If there is a voucher specified, make sure the disposition is
+	 *	valid and the entry actually refers to a voucher port.  Don't
+	 *	actually copy in until we validate destination and reply.
+	 */</span>
+	<span class="enscript-keyword">if</span> (voucher_type != MACH_MSGH_BITS_ZERO) {
+
+		voucher_name = msg-&gt;msgh_voucher_port;
+
+		<span class="enscript-keyword">if</span> (voucher_name == MACH_PORT_DEAD ||
+		    (voucher_type != MACH_MSG_TYPE_MOVE_SEND &amp;&amp;
+		     voucher_type != MACH_MSG_TYPE_COPY_SEND)) {
+			is_write_unlock(space);
+			<span class="enscript-keyword">return</span> MACH_SEND_INVALID_VOUCHER;
+		}
+
+		<span class="enscript-keyword">if</span> (voucher_name != MACH_PORT_NULL) {
+			voucher_entry = ipc_entry_lookup(space, voucher_name);
+			<span class="enscript-keyword">if</span> (voucher_entry == IE_NULL || 
+			    (voucher_entry-&gt;ie_bits &amp; MACH_PORT_TYPE_SEND) == 0 ||
+			    io_kotype(voucher_entry-&gt;ie_object) != IKOT_VOUCHER) {
+				is_write_unlock(space);
+				<span class="enscript-keyword">return</span> MACH_SEND_INVALID_VOUCHER;
+			}
+		} <span class="enscript-keyword">else</span> {
+			voucher_type = MACH_MSG_TYPE_MOVE_SEND;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 *	Handle combinations of validating destination and reply; along
+	 *	with copying in destination, reply, and voucher in an atomic way.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (dest_name == voucher_name) {
+
+		<span class="enscript-comment">/*
+		 *	If the destination name is the same as the voucher name,
+		 *	the voucher_entry must already be known.  Either that or
+		 *	the destination name is MACH_PORT_NULL (i.e. invalid).
+		 */</span>
+		dest_entry = voucher_entry;
+		<span class="enscript-keyword">if</span> (dest_entry == IE_NULL) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalid_dest</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 *	Make sure a future copyin of the reply port will succeed.
+		 *	Once we start copying in the dest/voucher pair, we can't
+		 *	back out.
+		 */</span>
+		<span class="enscript-keyword">if</span> (MACH_PORT_VALID(reply_name)) {
+			assert(reply_type != 0); <span class="enscript-comment">/* because reply_name not null */</span>
+
+			<span class="enscript-comment">/* It is just WRONG if dest, voucher, and reply are all the same. */</span>
+			<span class="enscript-keyword">if</span> (voucher_name == reply_name) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalid_reply</span>;
+			}
+			reply_entry = ipc_entry_lookup(space, reply_name);
+			<span class="enscript-keyword">if</span> (reply_entry == IE_NULL) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalid_reply</span>;
+			}
+			assert(dest_entry != reply_entry); <span class="enscript-comment">/* names are not equal */</span>
+			<span class="enscript-keyword">if</span> (!ipc_right_copyin_check(space, reply_name, reply_entry, reply_type)) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalid_reply</span>;
+			}
+		}
+
+		<span class="enscript-comment">/* 
+		 *	Do the joint copyin of the dest disposition and 
+		 *	voucher disposition from the one entry/port.  We
+		 *	already validated that the voucher copyin would
+		 *	succeed (above).  So, any failure in combining
+		 *	the copyins can be blamed on the destination.
+		 */</span>
+		kr = ipc_right_copyin_two(space, dest_name, dest_entry,
+					  dest_type, voucher_type,
+					  &amp;dest_port, &amp;dest_soright,
+					  &amp;release_port);
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+			assert(kr != KERN_INVALID_CAPABILITY);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalid_dest</span>;
+		}
+		voucher_port = (ipc_port_t)dest_port;
+
+		<span class="enscript-comment">/* 
+		 * could not have been one of these dispositions, 
+		 * validated the port was a true kernel voucher port above,
+		 * AND was successfully able to copyin both dest and voucher.
+		 */</span>
+		assert(dest_type != MACH_MSG_TYPE_MAKE_SEND);
+		assert(dest_type != MACH_MSG_TYPE_MAKE_SEND_ONCE);
+		assert(dest_type != MACH_MSG_TYPE_MOVE_SEND_ONCE);
+		
+		<span class="enscript-comment">/*
+		 *	Perform the delayed reply right copyin (guaranteed success).
+		 */</span>
+		<span class="enscript-keyword">if</span> (reply_entry != IE_NULL) {
+			kr = ipc_right_copyin(space, reply_name, reply_entry,
+					      reply_type, TRUE,
+					      &amp;reply_port, &amp;reply_soright,
+					      &amp;release_port, &amp;assertcnt);
+			assert(assertcnt == 0);
+			assert(kr == KERN_SUCCESS);
+		}
+
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (dest_name == reply_name) {
+			<span class="enscript-comment">/*
+			 *	Destination and reply ports are the same!
+			 *	This is very similar to the case where the
+			 *	destination and voucher ports were the same
+			 *	(except the reply port disposition is not
+			 *	previously validated).
+			 */</span>
+			dest_entry = ipc_entry_lookup(space, dest_name);
+			<span class="enscript-keyword">if</span> (dest_entry == IE_NULL) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalid_dest</span>;
+			}
+			reply_entry = dest_entry;
+			assert(reply_type != 0); <span class="enscript-comment">/* because name not null */</span>
+
+			<span class="enscript-comment">/* 
+			 *	Do the joint copyin of the dest disposition and 
+			 *	reply disposition from the one entry/port.
+			 */</span>
+			kr = ipc_right_copyin_two(space, dest_name, dest_entry,
+						  dest_type, reply_type,
+						  &amp;dest_port, &amp;dest_soright,
+						  &amp;release_port);
+			<span class="enscript-keyword">if</span> (kr == KERN_INVALID_CAPABILITY) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalid_reply</span>;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalid_dest</span>;
+			}
+			reply_port = dest_port;
+
+
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 *	Handle destination and reply independently, as
+			 *	they are independent entries (even if the entries
+			 *	refer to the same port).
+			 *
+			 *	This can be the tough case to make atomic.
+			 *
+			 *	The difficult problem is serializing with port death.
+			 *	The bad case is when dest_port dies after its copyin,
+			 *	reply_port dies before its copyin, and dest_port dies before
+			 *	reply_port.  Then the copyins operated as if dest_port was
+			 *	alive and reply_port was dead, which shouldn't have happened
+			 *	because they died in the other order.
+			 *
+			 *	Note that it is easy for a user task to tell if
+			 *	a copyin happened before or after a port died.
+			 *	If a port dies before copyin, a dead-name notification
+			 *	is generated and the dead name's urefs are incremented,
+			 *	and if the copyin happens first, a port-deleted
+			 *	notification is generated.
+			 *
+			 *	Even so, avoiding that potentially detectable race is too
+			 *	expensive - and no known code cares about it.  So, we just
+			 *	do the expedient thing and copy them in one after the other.
+			 */</span>
+
+			dest_entry = ipc_entry_lookup(space, dest_name);
+			<span class="enscript-keyword">if</span> (dest_entry == IE_NULL) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalid_dest</span>;
+			}
+			assert(dest_entry != voucher_entry);
+
+			<span class="enscript-comment">/*
+			 *	Make sure reply port entry is valid before dest copyin.
+			 */</span>
+			<span class="enscript-keyword">if</span> (MACH_PORT_VALID(reply_name)) {
+				<span class="enscript-keyword">if</span> (reply_name == voucher_name) {
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalid_reply</span>;
+				}
+				reply_entry = ipc_entry_lookup(space, reply_name);
+				<span class="enscript-keyword">if</span> (reply_entry == IE_NULL) {
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalid_reply</span>;
+				}
+				assert(dest_entry != reply_entry); <span class="enscript-comment">/* names are not equal */</span>
+				assert(reply_type != 0); <span class="enscript-comment">/* because reply_name not null */</span>
+
+				<span class="enscript-keyword">if</span> (!ipc_right_copyin_check(space, reply_name, reply_entry, reply_type)) {
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalid_reply</span>;
+				}
+			}
+
+			<span class="enscript-comment">/*
+			 *	copyin the destination.
+			 */</span>
+			kr = ipc_right_copyin(space, dest_name, dest_entry,
+					      dest_type, FALSE,
+					      &amp;dest_port, &amp;dest_soright,
+					      &amp;release_port, &amp;assertcnt);
+			assert(assertcnt == 0);
+			<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalid_dest</span>;
+			}
+			assert(IO_VALID(dest_port));
+			assert(!IP_VALID(release_port));
+
+			<span class="enscript-comment">/*
+			 *	Copyin the pre-validated reply right.
+			 *	It's OK if the reply right has gone dead in the meantime.
+			 */</span>
+			<span class="enscript-keyword">if</span> (MACH_PORT_VALID(reply_name)) {
+				kr = ipc_right_copyin(space, reply_name, reply_entry,
+						      reply_type, TRUE,
+						      &amp;reply_port, &amp;reply_soright,
+						      &amp;release_port, &amp;assertcnt);
+				assert(assertcnt == 0);
+				assert(kr == KERN_SUCCESS);
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* convert invalid name to equivalent ipc_object type */</span>
+				reply_port = (ipc_object_t)CAST_MACH_NAME_TO_PORT(reply_name);
+			}
+		}
+
+		<span class="enscript-comment">/*
+		 * Finally can copyin the voucher right now that dest and reply
+		 * are fully copied in (guaranteed success).
+		 */</span>
+		<span class="enscript-keyword">if</span> (IE_NULL != voucher_entry) {
+			kr = ipc_right_copyin(space, voucher_name, voucher_entry,
+					      voucher_type, FALSE,
+					      (ipc_object_t *)&amp;voucher_port,
+					      &amp;voucher_soright,
+					      &amp;voucher_release_port,
+					      &amp;assertcnt);
+			assert(assertcnt == 0);
+			assert(KERN_SUCCESS == kr);
+			assert(IP_VALID(voucher_port));
+			assert(ip_active(voucher_port));
+		}
+	}
+
+	<span class="enscript-comment">/* the entry(s) might need to be deallocated */</span>
+	assert(IE_NULL != dest_entry);
+	<span class="enscript-keyword">if</span> (IE_BITS_TYPE(dest_entry-&gt;ie_bits) == MACH_PORT_TYPE_NONE) {
+		ipc_entry_dealloc(space, dest_name, dest_entry);
+		dest_entry = IE_NULL;
+	}
+	<span class="enscript-keyword">if</span> (dest_entry != reply_entry &amp;&amp; IE_NULL != reply_entry &amp;&amp;
+	    IE_BITS_TYPE(reply_entry-&gt;ie_bits) == MACH_PORT_TYPE_NONE) {
+		ipc_entry_dealloc(space, reply_name, reply_entry);
+		reply_entry = IE_NULL;
+	}
+	<span class="enscript-keyword">if</span> (dest_entry != voucher_entry &amp;&amp; IE_NULL != voucher_entry &amp;&amp;
+	    IE_BITS_TYPE(voucher_entry-&gt;ie_bits) == MACH_PORT_TYPE_NONE) {
+		ipc_entry_dealloc(space, voucher_name, voucher_entry);
+		voucher_entry = IE_NULL;
+	}
+
+	<span class="enscript-comment">/*
+	 * No room to store voucher port in in-kernel msg header,
+	 * so we store it back in the kmsg itself.
+	 */</span>
+	<span class="enscript-keyword">if</span> (IP_VALID(voucher_port)) {
+		assert(ip_active(voucher_port));
+		kmsg-&gt;ikm_voucher = voucher_port;
+		voucher_type = MACH_MSG_TYPE_MOVE_SEND;
+	}
+
+	dest_type = ipc_object_copyin_type(dest_type);
+	reply_type = ipc_object_copyin_type(reply_type);
+
+	<span class="enscript-comment">/*
+	 * JMM - Without rdar://problem/6275821, this is the last place we can
+	 * re-arm the send-possible notifications.  It may trigger unexpectedly
+	 * early (send may NOT have failed), but better than missing.  We assure
+	 * we won't miss by forcing MACH_SEND_ALWAYS if we got past arming.
+	 */</span>
+	<span class="enscript-keyword">if</span> (((*optionp &amp; MACH_SEND_NOTIFY) != 0) &amp;&amp; 
+	    dest_type != MACH_MSG_TYPE_PORT_SEND_ONCE &amp;&amp;
+	    dest_entry != IE_NULL &amp;&amp; dest_entry-&gt;ie_request != IE_REQ_NONE) {
+		ipc_port_t dport = (ipc_port_t)dest_port;
+
+		assert(dport != IP_NULL);
+		ip_lock(dport);
+		<span class="enscript-keyword">if</span> (ip_active(dport) &amp;&amp; dport-&gt;ip_receiver != ipc_space_kernel) {
+			<span class="enscript-keyword">if</span> (ip_full(dport)) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_INHERITANCE</span>
+				needboost = ipc_port_request_sparm(dport, dest_name, 
+							dest_entry-&gt;ie_request,
+							(*optionp &amp; MACH_SEND_NOIMPORTANCE));
+				<span class="enscript-keyword">if</span> (needboost == FALSE)
+					ip_unlock(dport);
+#<span class="enscript-reference">else</span>
+				ipc_port_request_sparm(dport, dest_name, dest_entry-&gt;ie_request);
+				ip_unlock(dport);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IMPORTANCE_INHERITANCE */</span>
+			} <span class="enscript-keyword">else</span> {
+				*optionp |= MACH_SEND_ALWAYS;
+				ip_unlock(dport);
+			}
+		} <span class="enscript-keyword">else</span> {
+			ip_unlock(dport);
+		}
+	}
+
+	is_write_unlock(space);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_INHERITANCE</span>
+	<span class="enscript-comment">/* 
+	 * If our request is the first boosting send-possible
+	 * notification this cycle, push the boost down the
+	 * destination port.
+	 */</span>
+	<span class="enscript-keyword">if</span> (needboost == TRUE) {
+		ipc_port_t dport = (ipc_port_t)dest_port;
+
+		<span class="enscript-comment">/* dport still locked from above */</span>
+		<span class="enscript-keyword">if</span> (ipc_port_importance_delta(dport, 1) == FALSE) {
+			ip_unlock(dport);
+		}
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IMPORTANCE_INHERITANCE */</span>
+
+	<span class="enscript-keyword">if</span> (dest_soright != IP_NULL) {
+		ipc_notify_port_deleted(dest_soright, dest_name);
+	}
+	<span class="enscript-keyword">if</span> (reply_soright != IP_NULL) {
+		ipc_notify_port_deleted(reply_soright, reply_name);
+	}
+	<span class="enscript-keyword">if</span> (voucher_soright != IP_NULL) {
+		ipc_notify_port_deleted(voucher_soright, voucher_name);
+	}
+	msg-&gt;msgh_bits = MACH_MSGH_BITS_SET(dest_type, reply_type, voucher_type, mbits);
+	msg-&gt;msgh_remote_port = (ipc_port_t)dest_port;
+	msg-&gt;msgh_local_port = (ipc_port_t)reply_port;
+
+	<span class="enscript-keyword">if</span> (release_port != IP_NULL)
+		ip_release(release_port);
+
+	<span class="enscript-keyword">if</span> (voucher_release_port != IP_NULL)
+		ip_release(voucher_release_port);
+
+	<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+
+<span class="enscript-reference">invalid_reply</span>:
+	is_write_unlock(space);
+
+	<span class="enscript-keyword">if</span> (release_port != IP_NULL)
+		ip_release(release_port);
+
+	assert(voucher_port == IP_NULL);
+	assert(voucher_soright == IP_NULL);
+
+	<span class="enscript-keyword">return</span> MACH_SEND_INVALID_REPLY;
+
+<span class="enscript-reference">invalid_dest</span>:
+	is_write_unlock(space);
+
+	<span class="enscript-keyword">if</span> (release_port != IP_NULL)
+		ip_release(release_port);
+
+	<span class="enscript-keyword">if</span> (reply_soright != IP_NULL)
+		ipc_notify_port_deleted(reply_soright, reply_name);
+
+	assert(voucher_port == IP_NULL);
+	assert(voucher_soright == IP_NULL);
+
+	<span class="enscript-keyword">return</span> MACH_SEND_INVALID_DEST;
+}
+
+mach_msg_descriptor_t *<span class="enscript-function-name">ipc_kmsg_copyin_port_descriptor</span>(
+        <span class="enscript-type">volatile</span> mach_msg_port_descriptor_t *dsc,
+        mach_msg_legacy_port_descriptor_t *user_dsc,
+        ipc_space_t space,
+        ipc_object_t dest,
+        ipc_kmsg_t kmsg,
+        mach_msg_return_t *mr);
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">ipc_print_type_name</span>(
+   <span class="enscript-type">int</span> type_name);
+mach_msg_descriptor_t *
+<span class="enscript-function-name">ipc_kmsg_copyin_port_descriptor</span>(
+        <span class="enscript-type">volatile</span> mach_msg_port_descriptor_t *dsc,
+        mach_msg_legacy_port_descriptor_t *user_dsc_in,
+        ipc_space_t space,
+        ipc_object_t dest,
+        ipc_kmsg_t kmsg,
+        mach_msg_return_t *mr)
+{
+    <span class="enscript-type">volatile</span> mach_msg_legacy_port_descriptor_t *user_dsc = user_dsc_in;
+    mach_msg_type_name_t 	user_disp;
+    mach_msg_type_name_t	result_disp;
+    mach_port_name_t		name;
+    ipc_object_t 			object;
+
+    user_disp = user_dsc-&gt;disposition;
+    result_disp = ipc_object_copyin_type(user_disp);
+
+    name = (mach_port_name_t)user_dsc-&gt;name;
+    <span class="enscript-keyword">if</span> (MACH_PORT_VALID(name)) {
+
+        kern_return_t kr = ipc_object_copyin(space, name, user_disp, &amp;object);
+        <span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+            *mr = MACH_SEND_INVALID_RIGHT;
+            <span class="enscript-keyword">return</span> NULL;
+        }
+
+        <span class="enscript-keyword">if</span> ((result_disp == MACH_MSG_TYPE_PORT_RECEIVE) &amp;&amp;
+                ipc_port_check_circularity((ipc_port_t) object,
+                    (ipc_port_t) dest)) {
+            kmsg-&gt;ikm_header-&gt;msgh_bits |= MACH_MSGH_BITS_CIRCULAR;
+        }
+        dsc-&gt;name = (ipc_port_t) object;
+    } <span class="enscript-keyword">else</span> {
+        dsc-&gt;name = CAST_MACH_NAME_TO_PORT(name);
+    }
+    dsc-&gt;disposition = result_disp;
+    dsc-&gt;type = MACH_MSG_PORT_DESCRIPTOR;
+
+    dsc-&gt;pad_end = 0; <span class="enscript-comment">// debug, unnecessary
+</span>
+    <span class="enscript-keyword">return</span> (mach_msg_descriptor_t *)(user_dsc_in+1);
+}
+
+mach_msg_descriptor_t * <span class="enscript-function-name">ipc_kmsg_copyin_ool_descriptor</span>(
+        mach_msg_ool_descriptor_t *dsc,
+        mach_msg_descriptor_t *user_dsc,
+        <span class="enscript-type">int</span> is_64bit,
+        vm_offset_t *paddr,
+        vm_map_copy_t *copy,
+        vm_size_t *space_needed,
+        vm_map_t map,
+        mach_msg_return_t *mr);
+mach_msg_descriptor_t *
+<span class="enscript-function-name">ipc_kmsg_copyin_ool_descriptor</span>(
+        mach_msg_ool_descriptor_t *dsc,
+        mach_msg_descriptor_t *user_dsc,
+        <span class="enscript-type">int</span> is_64bit,
+        vm_offset_t *paddr,
+        vm_map_copy_t *copy,
+        vm_size_t *space_needed,
+        vm_map_t map,
+        mach_msg_return_t *mr)
+{
+    vm_size_t            		length;
+    boolean_t            		dealloc;
+    mach_msg_copy_options_t		copy_options;
+    mach_vm_offset_t		addr;
+    mach_msg_descriptor_type_t	dsc_type;
+
+    <span class="enscript-keyword">if</span> (is_64bit) {
+        mach_msg_ool_descriptor64_t *user_ool_dsc = (typeof(user_ool_dsc))user_dsc;
+
+        addr = (mach_vm_offset_t) user_ool_dsc-&gt;address;
+        length = user_ool_dsc-&gt;size;
+        dealloc = user_ool_dsc-&gt;deallocate;
+        copy_options = user_ool_dsc-&gt;copy;
+        dsc_type = user_ool_dsc-&gt;type;
+
+        user_dsc = (typeof(user_dsc))(user_ool_dsc+1);
+    } <span class="enscript-keyword">else</span> {
+        mach_msg_ool_descriptor32_t *user_ool_dsc = (typeof(user_ool_dsc))user_dsc;
+
+        addr = CAST_USER_ADDR_T(user_ool_dsc-&gt;address);
+        dealloc = user_ool_dsc-&gt;deallocate;
+        copy_options = user_ool_dsc-&gt;copy;
+        dsc_type = user_ool_dsc-&gt;type;
+        length = user_ool_dsc-&gt;size;
+
+        user_dsc = (typeof(user_dsc))(user_ool_dsc+1);
+    }
+
+    dsc-&gt;size = (mach_msg_size_t)length;
+    dsc-&gt;deallocate = dealloc;
+    dsc-&gt;copy = copy_options;
+    dsc-&gt;type = dsc_type;
+
+    <span class="enscript-keyword">if</span> (length == 0) {
+        dsc-&gt;address = NULL;
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((length &gt;= MSG_OOL_SIZE_SMALL) &amp;&amp;
+            (copy_options == MACH_MSG_PHYSICAL_COPY) &amp;&amp; !dealloc) {
+
+        <span class="enscript-comment">/*
+         * If the request is a physical copy and the source
+         * is not being deallocated, then allocate space
+         * in the kernel's pageable ipc copy map and copy
+         * the data in.  The semantics guarantee that the
+         * data will have been physically copied before
+         * the send operation terminates.  Thus if the data
+         * is not being deallocated, we must be prepared
+         * to page if the region is sufficiently large.
+         */</span>
+        <span class="enscript-keyword">if</span> (copyin(addr, (<span class="enscript-type">char</span> *)*paddr, length)) {
+            *mr = MACH_SEND_INVALID_MEMORY;
+            <span class="enscript-keyword">return</span> NULL;
+        }	
+
+        <span class="enscript-comment">/*
+         * The kernel ipc copy map is marked no_zero_fill.
+         * If the transfer is not a page multiple, we need
+         * to zero fill the balance.
+         */</span>
+        <span class="enscript-keyword">if</span> (!page_aligned(length)) {
+            (<span class="enscript-type">void</span>) memset((<span class="enscript-type">void</span> *) (*paddr + length), 0,
+                    round_page(length) - length);
+        }
+        <span class="enscript-keyword">if</span> (vm_map_copyin(ipc_kernel_copy_map, (vm_map_address_t)*paddr,
+                    (vm_map_size_t)length, TRUE, copy) != KERN_SUCCESS) {
+            *mr = MACH_MSG_VM_KERNEL;
+            <span class="enscript-keyword">return</span> NULL;
+        }
+        dsc-&gt;address = (<span class="enscript-type">void</span> *)*copy;
+        *paddr += round_page(length);
+        *space_needed -= round_page(length);
+    } <span class="enscript-keyword">else</span> {
+
+        <span class="enscript-comment">/*
+         * Make a vm_map_copy_t of the of the data.  If the
+         * data is small, this will do an optimized physical
+         * copy.  Otherwise, it will do a virtual copy.
+         *
+         * NOTE: A virtual copy is OK if the original is being
+         * deallocted, even if a physical copy was requested.
+         */</span>
+        kern_return_t kr = vm_map_copyin(map, addr, 
+                (vm_map_size_t)length, dealloc, copy);
+        <span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+            *mr = (kr == KERN_RESOURCE_SHORTAGE) ?
+                MACH_MSG_VM_KERNEL :
+                MACH_SEND_INVALID_MEMORY;
+            <span class="enscript-keyword">return</span> NULL;
+        }
+        dsc-&gt;address = (<span class="enscript-type">void</span> *)*copy;
+    }
+    <span class="enscript-keyword">return</span> user_dsc;
+}
+
+mach_msg_descriptor_t * <span class="enscript-function-name">ipc_kmsg_copyin_ool_ports_descriptor</span>(
+        mach_msg_ool_ports_descriptor_t *dsc,
+        mach_msg_descriptor_t *user_dsc,
+        <span class="enscript-type">int</span> is_64bit,
+        vm_map_t map,
+        ipc_space_t space,
+        ipc_object_t dest,
+        ipc_kmsg_t kmsg,
+        mach_msg_return_t *mr);
+mach_msg_descriptor_t *
+<span class="enscript-function-name">ipc_kmsg_copyin_ool_ports_descriptor</span>(
+        mach_msg_ool_ports_descriptor_t *dsc,
+        mach_msg_descriptor_t *user_dsc,
+        <span class="enscript-type">int</span> is_64bit,
+        vm_map_t map,
+        ipc_space_t space,
+        ipc_object_t dest,
+        ipc_kmsg_t kmsg,
+        mach_msg_return_t *mr)
+{
+    <span class="enscript-type">void</span>					*data;
+    ipc_object_t            		*objects;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>				i;
+    mach_vm_offset_t             		addr;
+    mach_msg_type_name_t    		user_disp;
+    mach_msg_type_name_t    		result_disp;
+    mach_msg_type_number_t			count;
+    mach_msg_copy_options_t			copy_option;
+    boolean_t				deallocate;
+    mach_msg_descriptor_type_t      type;
+    vm_size_t 				ports_length, names_length;
+
+    <span class="enscript-keyword">if</span> (is_64bit) {
+        mach_msg_ool_ports_descriptor64_t *user_ool_dsc = (typeof(user_ool_dsc))user_dsc;
+
+        addr = (mach_vm_offset_t)user_ool_dsc-&gt;address;
+        count = user_ool_dsc-&gt;count;
+        deallocate = user_ool_dsc-&gt;deallocate;
+        copy_option = user_ool_dsc-&gt;copy;
+        user_disp = user_ool_dsc-&gt;disposition;
+        type = user_ool_dsc-&gt;type;
+
+        user_dsc = (typeof(user_dsc))(user_ool_dsc+1);
+    } <span class="enscript-keyword">else</span> {
+        mach_msg_ool_ports_descriptor32_t *user_ool_dsc = (typeof(user_ool_dsc))user_dsc;
+
+        addr = CAST_USER_ADDR_T(user_ool_dsc-&gt;address);
+        count = user_ool_dsc-&gt;count;
+        deallocate = user_ool_dsc-&gt;deallocate;
+        copy_option = user_ool_dsc-&gt;copy;
+        user_disp = user_ool_dsc-&gt;disposition;
+        type = user_ool_dsc-&gt;type;
+
+        user_dsc = (typeof(user_dsc))(user_ool_dsc+1);
+    }
+
+    dsc-&gt;deallocate = deallocate;
+    dsc-&gt;copy = copy_option;
+    dsc-&gt;type = type;
+    dsc-&gt;count = count;
+    dsc-&gt;address = NULL;  <span class="enscript-comment">/* for now */</span>
+
+    result_disp = ipc_object_copyin_type(user_disp);
+    dsc-&gt;disposition = result_disp;
+
+    <span class="enscript-keyword">if</span> (count &gt; (INT_MAX / <span class="enscript-keyword">sizeof</span>(mach_port_t))) {
+        *mr = MACH_SEND_TOO_LARGE;
+        <span class="enscript-keyword">return</span> NULL;
+    }
+
+    <span class="enscript-comment">/* calculate length of data in bytes, rounding up */</span>
+    ports_length = count * <span class="enscript-keyword">sizeof</span>(mach_port_t);
+    names_length = count * <span class="enscript-keyword">sizeof</span>(mach_port_name_t);
+
+    <span class="enscript-keyword">if</span> (ports_length == 0) {
+        <span class="enscript-keyword">return</span> user_dsc;
+    }
+
+    data = kalloc(ports_length);
+
+    <span class="enscript-keyword">if</span> (data == NULL) {
+        *mr = MACH_SEND_NO_BUFFER;
+        <span class="enscript-keyword">return</span> NULL;
+    }
+    
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__LP64__</span>
+    mach_port_name_t *names = &amp;((mach_port_name_t *)data)[count];
+#<span class="enscript-reference">else</span>
+    mach_port_name_t *names = ((mach_port_name_t *)data);
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-keyword">if</span> (copyinmap(map, addr, names, names_length) != KERN_SUCCESS) {
+        kfree(data, ports_length);
+        *mr = MACH_SEND_INVALID_MEMORY;
+        <span class="enscript-keyword">return</span> NULL;
+    }
+
+    <span class="enscript-keyword">if</span> (deallocate) {
+        (<span class="enscript-type">void</span>) mach_vm_deallocate(map, addr, (mach_vm_size_t)ports_length);
+    }
+
+    objects = (ipc_object_t *) data;
+    dsc-&gt;address = data;
+
+    <span class="enscript-keyword">for</span> ( i = 0; i &lt; count; i++) {
+        mach_port_name_t name = names[i];
+        ipc_object_t object;
+
+        <span class="enscript-keyword">if</span> (!MACH_PORT_VALID(name)) {
+            objects[i] = (ipc_object_t)CAST_MACH_NAME_TO_PORT(name);
+            <span class="enscript-keyword">continue</span>;
+        }
+
+        kern_return_t kr = ipc_object_copyin(space, name, user_disp, &amp;object);
+
+        <span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+            <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> j;
+
+            <span class="enscript-keyword">for</span>(j = 0; j &lt; i; j++) {
+                object = objects[j];
+                <span class="enscript-keyword">if</span> (IPC_OBJECT_VALID(object))
+                    ipc_object_destroy(object, result_disp);
+            }
+            kfree(data, ports_length);
+            dsc-&gt;address = NULL;
+            *mr = MACH_SEND_INVALID_RIGHT;
+            <span class="enscript-keyword">return</span> NULL;
+        }
+
+        <span class="enscript-keyword">if</span> ((dsc-&gt;disposition == MACH_MSG_TYPE_PORT_RECEIVE) &amp;&amp;
+                ipc_port_check_circularity(
+                    (ipc_port_t) object,
+                    (ipc_port_t) dest))
+            kmsg-&gt;ikm_header-&gt;msgh_bits |= MACH_MSGH_BITS_CIRCULAR;
+
+        objects[i] = object;
+    }
+
+    <span class="enscript-keyword">return</span> user_dsc;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_copyin_body
+ *	Purpose:
+ *		&quot;Copy-in&quot; port rights and out-of-line memory
+ *		in the message body.
+ *
+ *		In all failure cases, the message is left holding
+ *		no rights or memory.  However, the message buffer
+ *		is not deallocated.  If successful, the message
+ *		contains a valid destination port.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Successful copyin.
+ *		MACH_SEND_INVALID_MEMORY	Can't grab out-of-line memory.
+ *		MACH_SEND_INVALID_RIGHT	Can't copyin port right in body.
+ *		MACH_SEND_INVALID_TYPE	Bad type specification.
+ *		MACH_SEND_MSG_TOO_SMALL	Body is too small for types/data.
+ *		MACH_SEND_INVALID_RT_OOL_SIZE OOL Buffer too large for RT
+ *		MACH_MSG_INVALID_RT_DESCRIPTOR Dealloc and RT are incompatible
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">ipc_kmsg_copyin_body</span>(
+	ipc_kmsg_t	kmsg,
+	ipc_space_t	space,
+	vm_map_t	map)
+{
+    ipc_object_t       		dest;
+    mach_msg_body_t		*body;
+    mach_msg_descriptor_t	*daddr, *naddr;
+    mach_msg_descriptor_t	*user_addr, *kern_addr;
+    mach_msg_type_number_t	dsc_count;
+    boolean_t 			is_task_64bit = (map-&gt;max_offset &gt; VM_MAX_ADDRESS);
+    boolean_t 			complex = FALSE;
+    vm_size_t			space_needed = 0;
+    vm_offset_t			paddr = 0;
+    vm_map_copy_t		copy = VM_MAP_COPY_NULL;
+    mach_msg_type_number_t	i;
+    mach_msg_return_t		mr = MACH_MSG_SUCCESS;
+
+    vm_size_t           descriptor_size = 0;
+
+    <span class="enscript-comment">/*
+     * Determine if the target is a kernel port.
+     */</span>
+    dest = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+    body = (mach_msg_body_t *) (kmsg-&gt;ikm_header + 1);
+    naddr = (mach_msg_descriptor_t *) (body + 1);
+
+    dsc_count = body-&gt;msgh_descriptor_count;
+    <span class="enscript-keyword">if</span> (dsc_count == 0)
+	<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+
+    <span class="enscript-comment">/*
+     * Make an initial pass to determine kernal VM space requirements for
+     * physical copies and possible contraction of the descriptors from
+     * processes with pointers larger than the kernel's.
+     */</span>
+    daddr = NULL;
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; dsc_count; i++) {
+	mach_msg_size_t size;
+
+	daddr = naddr;
+
+	<span class="enscript-comment">/* make sure the descriptor fits in the message */</span>
+	<span class="enscript-keyword">if</span> (is_task_64bit) {
+	    <span class="enscript-keyword">switch</span> (daddr-&gt;type.type) {
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_DESCRIPTOR</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_VOLATILE_DESCRIPTOR</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_PORTS_DESCRIPTOR</span>:
+		    descriptor_size += 16;
+            naddr = (typeof(naddr))((vm_offset_t)daddr + 16);
+            <span class="enscript-keyword">break</span>;
+	    <span class="enscript-reference">default</span>:
+		    descriptor_size += 12;
+            naddr = (typeof(naddr))((vm_offset_t)daddr + 12);
+            <span class="enscript-keyword">break</span>;
+	    }
+	} <span class="enscript-keyword">else</span> {
+        descriptor_size += 12;
+        naddr = (typeof(naddr))((vm_offset_t)daddr + 12);
+	}
+
+	<span class="enscript-keyword">if</span> (naddr &gt; (mach_msg_descriptor_t *)
+	    ((vm_offset_t)kmsg-&gt;ikm_header + kmsg-&gt;ikm_header-&gt;msgh_size)) {
+	    ipc_kmsg_clean_partial(kmsg, 0, NULL, 0, 0);
+	    mr = MACH_SEND_MSG_TOO_SMALL;
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">switch</span> (daddr-&gt;type.type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_DESCRIPTOR</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_VOLATILE_DESCRIPTOR</span>:
+        size = (is_task_64bit) ?
+		((mach_msg_ool_descriptor64_t *)daddr)-&gt;size :
+	    daddr-&gt;out_of_line.size;
+
+	    <span class="enscript-keyword">if</span> (daddr-&gt;out_of_line.copy != MACH_MSG_PHYSICAL_COPY &amp;&amp;
+		daddr-&gt;out_of_line.copy != MACH_MSG_VIRTUAL_COPY) {
+		<span class="enscript-comment">/*
+		 * Invalid copy option
+		 */</span>
+		ipc_kmsg_clean_partial(kmsg, 0, NULL, 0, 0);
+		mr = MACH_SEND_INVALID_TYPE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	    }
+	    
+	    <span class="enscript-keyword">if</span> ((size &gt;= MSG_OOL_SIZE_SMALL) &amp;&amp;
+		(daddr-&gt;out_of_line.copy == MACH_MSG_PHYSICAL_COPY) &amp;&amp;
+		!(daddr-&gt;out_of_line.deallocate)) {
+
+		<span class="enscript-comment">/*
+		 * Out-of-line memory descriptor, accumulate kernel
+		 * memory requirements
+		 */</span>
+		<span class="enscript-keyword">if</span> (space_needed + round_page(size) &lt;= space_needed) {
+		    <span class="enscript-comment">/* Overflow dectected */</span>
+		    ipc_kmsg_clean_partial(kmsg, 0, NULL, 0, 0);
+		    mr = MACH_MSG_VM_KERNEL;
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}		    
+		    
+		space_needed += round_page(size);
+		<span class="enscript-keyword">if</span> (space_needed &gt; ipc_kmsg_max_vm_space) {
+		    
+		    <span class="enscript-comment">/*
+		     * Per message kernel memory limit exceeded
+		     */</span>
+		    ipc_kmsg_clean_partial(kmsg, 0, NULL, 0, 0);
+		    mr = MACH_MSG_VM_KERNEL;
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	    }
+	}
+    }
+
+    <span class="enscript-comment">/*
+     * Allocate space in the pageable kernel ipc copy map for all the
+     * ool data that is to be physically copied.  Map is marked wait for
+     * space.
+     */</span>
+    <span class="enscript-keyword">if</span> (space_needed) {
+        <span class="enscript-keyword">if</span> (vm_allocate(ipc_kernel_copy_map, &amp;paddr, space_needed, 
+                    VM_FLAGS_ANYWHERE | VM_MAKE_TAG(VM_KERN_MEMORY_IPC)) != KERN_SUCCESS) {
+            ipc_kmsg_clean_partial(kmsg, 0, NULL, 0, 0);
+            mr = MACH_MSG_VM_KERNEL;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+        }
+    }
+
+    <span class="enscript-comment">/* user_addr = just after base as it was copied in */</span>
+    user_addr = (mach_msg_descriptor_t *)((vm_offset_t)kmsg-&gt;ikm_header + <span class="enscript-keyword">sizeof</span>(mach_msg_base_t));
+
+    <span class="enscript-comment">/* Shift the mach_msg_base_t down to make room for dsc_count*16bytes of descriptors */</span>
+    <span class="enscript-keyword">if</span>(descriptor_size != 16*dsc_count) {
+        vm_offset_t dsc_adjust = 16*dsc_count - descriptor_size;
+
+        memmove((<span class="enscript-type">char</span> *)(((vm_offset_t)kmsg-&gt;ikm_header) - dsc_adjust), kmsg-&gt;ikm_header, <span class="enscript-keyword">sizeof</span>(mach_msg_base_t));
+        kmsg-&gt;ikm_header = (mach_msg_header_t *)((vm_offset_t)kmsg-&gt;ikm_header - dsc_adjust);
+
+        <span class="enscript-comment">/* Update the message size for the larger in-kernel representation */</span>
+        kmsg-&gt;ikm_header-&gt;msgh_size += (mach_msg_size_t)dsc_adjust;
+    }
+
+
+    <span class="enscript-comment">/* kern_addr = just after base after it has been (conditionally) moved */</span>
+    kern_addr = (mach_msg_descriptor_t *)((vm_offset_t)kmsg-&gt;ikm_header + <span class="enscript-keyword">sizeof</span>(mach_msg_base_t));
+
+    <span class="enscript-comment">/* handle the OOL regions and port descriptors. */</span>
+    <span class="enscript-keyword">for</span>(i=0;i&lt;dsc_count;i++) {
+        <span class="enscript-keyword">switch</span> (user_addr-&gt;type.type) {
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_PORT_DESCRIPTOR</span>:
+                user_addr = ipc_kmsg_copyin_port_descriptor((mach_msg_port_descriptor_t *)kern_addr, 
+                        (mach_msg_legacy_port_descriptor_t *)user_addr, space, dest, kmsg, &amp;mr);
+                kern_addr++;
+                complex = TRUE;
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_VOLATILE_DESCRIPTOR</span>:
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_DESCRIPTOR</span>: 
+                user_addr = ipc_kmsg_copyin_ool_descriptor((mach_msg_ool_descriptor_t *)kern_addr, 
+                        user_addr, is_task_64bit, &amp;paddr, &amp;copy, &amp;space_needed, map, &amp;mr);
+                kern_addr++;
+                complex = TRUE;
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_PORTS_DESCRIPTOR</span>: 
+                user_addr = ipc_kmsg_copyin_ool_ports_descriptor((mach_msg_ool_ports_descriptor_t *)kern_addr, 
+                        user_addr, is_task_64bit, map, space, dest, kmsg, &amp;mr);
+                kern_addr++;
+                complex = TRUE;
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-reference">default</span>:
+                <span class="enscript-comment">/* Invalid descriptor */</span>
+                mr = MACH_SEND_INVALID_TYPE;
+                <span class="enscript-keyword">break</span>;
+        }
+
+        <span class="enscript-keyword">if</span> (MACH_MSG_SUCCESS != mr) {
+            <span class="enscript-comment">/* clean from start of message descriptors to i */</span>
+            ipc_kmsg_clean_partial(kmsg, i,
+                    (mach_msg_descriptor_t *)((mach_msg_base_t *)kmsg-&gt;ikm_header + 1),
+                    paddr, space_needed);
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+        }
+    } <span class="enscript-comment">/* End of loop */</span> 
+    
+    <span class="enscript-keyword">if</span> (!complex) {
+	kmsg-&gt;ikm_header-&gt;msgh_bits &amp;= ~MACH_MSGH_BITS_COMPLEX;
+    }
+ <span class="enscript-reference">out</span>:
+    <span class="enscript-keyword">return</span> mr;
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_copyin
+ *	Purpose:
+ *		&quot;Copy-in&quot; port rights and out-of-line memory
+ *		in the message.
+ *
+ *		In all failure cases, the message is left holding
+ *		no rights or memory.  However, the message buffer
+ *		is not deallocated.  If successful, the message
+ *		contains a valid destination port.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Successful copyin.
+ *		MACH_SEND_INVALID_HEADER
+ *			Illegal value in the message header bits.
+ *		MACH_SEND_INVALID_DEST	Can't copyin destination port.
+ *		MACH_SEND_INVALID_REPLY	Can't copyin reply port.
+ *		MACH_SEND_INVALID_MEMORY	Can't grab out-of-line memory.
+ *		MACH_SEND_INVALID_RIGHT	Can't copyin port right in body.
+ *		MACH_SEND_INVALID_TYPE	Bad type specification.
+ *		MACH_SEND_MSG_TOO_SMALL	Body is too small for types/data.
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">ipc_kmsg_copyin</span>(
+	ipc_kmsg_t		kmsg,
+	ipc_space_t		space,
+	vm_map_t		map,
+	mach_msg_option_t	*optionp)
+{
+    mach_msg_return_t 		mr;
+
+    kmsg-&gt;ikm_header-&gt;msgh_bits &amp;= MACH_MSGH_BITS_USER;
+
+    mr = ipc_kmsg_copyin_header(kmsg, space, optionp);
+
+    <span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS)
+	<span class="enscript-keyword">return</span> mr;
+
+    KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_IPC,MACH_IPC_MSG_SEND) | DBG_FUNC_NONE,
+			  VM_KERNEL_ADDRPERM((uintptr_t)kmsg),
+			  (uintptr_t)kmsg-&gt;ikm_header-&gt;msgh_bits,
+			  (uintptr_t)kmsg-&gt;ikm_header-&gt;msgh_id,
+			  VM_KERNEL_ADDRPERM((uintptr_t)unsafe_convert_port_to_voucher(kmsg-&gt;ikm_voucher)),
+			  0);
+
+    DEBUG_KPRINT_SYSCALL_IPC(<span class="enscript-string">&quot;ipc_kmsg_copyin header:\n%.8x\n%.8x\n%p\n%p\n%p\n%.8x\n&quot;</span>,
+			     kmsg-&gt;ikm_header-&gt;msgh_size,
+			     kmsg-&gt;ikm_header-&gt;msgh_bits,
+			     kmsg-&gt;ikm_header-&gt;msgh_remote_port,
+			     kmsg-&gt;ikm_header-&gt;msgh_local_port,
+			     kmsg-&gt;ikm_voucher,
+			     kmsg-&gt;ikm_header-&gt;msgh_id);
+
+    <span class="enscript-keyword">if</span> ((kmsg-&gt;ikm_header-&gt;msgh_bits &amp; MACH_MSGH_BITS_COMPLEX) == 0)
+	<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+    
+	mr = ipc_kmsg_copyin_body( kmsg, space, map);
+
+	<span class="enscript-comment">/* unreachable if !DEBUG */</span>
+	__unreachable_ok_push
+	<span class="enscript-keyword">if</span> (DEBUG_KPRINT_SYSCALL_PREDICATE(DEBUG_KPRINT_SYSCALL_IPC_MASK))
+	{
+		kprintf(<span class="enscript-string">&quot;body:\n&quot;</span>);
+		uint32_t i;
+		<span class="enscript-keyword">for</span>(i=0;i*4 &lt; (kmsg-&gt;ikm_header-&gt;msgh_size - <span class="enscript-keyword">sizeof</span>(mach_msg_header_t));i++)
+		{
+			kprintf(<span class="enscript-string">&quot;%.4x\n&quot;</span>,((uint32_t *)(kmsg-&gt;ikm_header + 1))[i]);
+		}
+	}
+	__unreachable_ok_pop
+
+	<span class="enscript-keyword">return</span> mr;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_copyin_from_kernel
+ *	Purpose:
+ *		&quot;Copy-in&quot; port rights and out-of-line memory
+ *		in a message sent from the kernel.
+ *
+ *		Because the message comes from the kernel,
+ *		the implementation assumes there are no errors
+ *		or peculiarities in the message.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">ipc_kmsg_copyin_from_kernel</span>(
+	ipc_kmsg_t	kmsg)
+{
+	mach_msg_bits_t bits = kmsg-&gt;ikm_header-&gt;msgh_bits;
+	mach_msg_type_name_t rname = MACH_MSGH_BITS_REMOTE(bits);
+	mach_msg_type_name_t lname = MACH_MSGH_BITS_LOCAL(bits);
+	ipc_object_t remote = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+	ipc_object_t local = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_local_port;
+
+	<span class="enscript-comment">/* translate the destination and reply ports */</span>
+	<span class="enscript-keyword">if</span> (!IO_VALID(remote))
+		<span class="enscript-keyword">return</span> MACH_SEND_INVALID_DEST;
+
+	ipc_object_copyin_from_kernel(remote, rname);
+	<span class="enscript-keyword">if</span> (IO_VALID(local))
+		ipc_object_copyin_from_kernel(local, lname);
+
+	<span class="enscript-comment">/*
+	 *	The common case is a complex message with no reply port,
+	 *	because that is what the memory_object interface uses.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (bits == (MACH_MSGH_BITS_COMPLEX |
+		     MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, 0))) {
+		bits = (MACH_MSGH_BITS_COMPLEX |
+			MACH_MSGH_BITS(MACH_MSG_TYPE_PORT_SEND, 0));
+
+		kmsg-&gt;ikm_header-&gt;msgh_bits = bits;
+	} <span class="enscript-keyword">else</span> {
+		bits = (MACH_MSGH_BITS_OTHER(bits) |
+			MACH_MSGH_BITS(ipc_object_copyin_type(rname),
+				       ipc_object_copyin_type(lname)));
+
+		kmsg-&gt;ikm_header-&gt;msgh_bits = bits;
+		<span class="enscript-keyword">if</span> ((bits &amp; MACH_MSGH_BITS_COMPLEX) == 0)
+			<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+	}
+    {
+    	mach_msg_descriptor_t	*saddr;
+    	mach_msg_body_t		*body;
+	mach_msg_type_number_t	i, count;
+
+    	body = (mach_msg_body_t *) (kmsg-&gt;ikm_header + 1);
+    	saddr = (mach_msg_descriptor_t *) (body + 1);
+	count = body-&gt;msgh_descriptor_count;
+
+    	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++, saddr++) {
+
+	    <span class="enscript-keyword">switch</span> (saddr-&gt;type.type) {
+	    
+	        <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_PORT_DESCRIPTOR</span>: {
+		    mach_msg_type_name_t 	name;
+		    ipc_object_t 		object;
+		    mach_msg_port_descriptor_t 	*dsc;
+		
+		    dsc = &amp;saddr-&gt;port;
+		
+		    <span class="enscript-comment">/* this is really the type SEND, SEND_ONCE, etc. */</span>
+		    name = dsc-&gt;disposition;
+		    object = (ipc_object_t) dsc-&gt;name;
+		    dsc-&gt;disposition = ipc_object_copyin_type(name);
+		
+		    <span class="enscript-keyword">if</span> (!IO_VALID(object)) {
+		        <span class="enscript-keyword">break</span>;
+		    }
+
+		    ipc_object_copyin_from_kernel(object, name);
+		    
+		    <span class="enscript-comment">/* CDY avoid circularity when the destination is also */</span>
+		    <span class="enscript-comment">/* the kernel.  This check should be changed into an  */</span>
+		    <span class="enscript-comment">/* assert when the new kobject model is in place since*/</span>
+		    <span class="enscript-comment">/* ports will not be used in kernel to kernel chats   */</span>
+			
+		    <span class="enscript-keyword">if</span> (((ipc_port_t)remote)-&gt;ip_receiver != ipc_space_kernel) {
+		       <span class="enscript-keyword">if</span> ((dsc-&gt;disposition == MACH_MSG_TYPE_PORT_RECEIVE) &amp;&amp;
+		           ipc_port_check_circularity((ipc_port_t) object, 
+						(ipc_port_t) remote)) {
+		           kmsg-&gt;ikm_header-&gt;msgh_bits |= 
+					MACH_MSGH_BITS_CIRCULAR;
+		       }
+		    }
+		    <span class="enscript-keyword">break</span>;
+	        }
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_VOLATILE_DESCRIPTOR</span>:
+	        <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_DESCRIPTOR</span>: {
+		    <span class="enscript-comment">/*
+		     * The sender should supply ready-made memory, i.e.
+		     * a vm_map_copy_t, so we don't need to do anything.
+		     */</span>
+		    <span class="enscript-keyword">break</span>;
+	        }
+	        <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_PORTS_DESCRIPTOR</span>: {
+		    ipc_object_t            		*objects;
+		    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>			j;
+		    mach_msg_type_name_t    		name;
+		    mach_msg_ool_ports_descriptor_t 	*dsc;
+		
+		    dsc = (mach_msg_ool_ports_descriptor_t *)&amp;saddr-&gt;ool_ports;
+
+		    <span class="enscript-comment">/* this is really the type SEND, SEND_ONCE, etc. */</span>
+		    name = dsc-&gt;disposition;
+		    dsc-&gt;disposition = ipc_object_copyin_type(name);
+	    	
+		    objects = (ipc_object_t *) dsc-&gt;address;
+	    	
+		    <span class="enscript-keyword">for</span> ( j = 0; j &lt; dsc-&gt;count; j++) {
+		        ipc_object_t object = objects[j];
+		        
+		        <span class="enscript-keyword">if</span> (!IO_VALID(object))
+			    <span class="enscript-keyword">continue</span>;
+		        
+		        ipc_object_copyin_from_kernel(object, name);
+    
+		        <span class="enscript-keyword">if</span> ((dsc-&gt;disposition == MACH_MSG_TYPE_PORT_RECEIVE) &amp;&amp;
+			    ipc_port_check_circularity(
+						       (ipc_port_t) object,
+						       (ipc_port_t) remote))
+			    kmsg-&gt;ikm_header-&gt;msgh_bits |= MACH_MSGH_BITS_CIRCULAR;
+		    }
+		    <span class="enscript-keyword">break</span>;
+	        }
+	        <span class="enscript-reference">default</span>: {
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MACH_ASSERT</span>
+		    panic(<span class="enscript-string">&quot;ipc_kmsg_copyin_from_kernel:  bad descriptor&quot;</span>);
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MACH_ASSERT */</span>
+		}
+	    }
+	}
+    }
+    <span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IKM_SUPPORT_LEGACY</span>
+mach_msg_return_t
+<span class="enscript-function-name">ipc_kmsg_copyin_from_kernel_legacy</span>(
+	ipc_kmsg_t	kmsg)
+{
+	mach_msg_bits_t bits = kmsg-&gt;ikm_header-&gt;msgh_bits;
+	mach_msg_type_name_t rname = MACH_MSGH_BITS_REMOTE(bits);
+	mach_msg_type_name_t lname = MACH_MSGH_BITS_LOCAL(bits);
+	ipc_object_t remote = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+	ipc_object_t local = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_local_port;
+
+	<span class="enscript-comment">/* translate the destination and reply ports */</span>
+	<span class="enscript-keyword">if</span> (!IO_VALID(remote))
+		<span class="enscript-keyword">return</span> MACH_SEND_INVALID_DEST;
+
+	ipc_object_copyin_from_kernel(remote, rname);
+	<span class="enscript-keyword">if</span> (IO_VALID(local))
+		ipc_object_copyin_from_kernel(local, lname);
+
+	<span class="enscript-comment">/*
+	 *	The common case is a complex message with no reply port,
+	 *	because that is what the memory_object interface uses.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (bits == (MACH_MSGH_BITS_COMPLEX |
+		     MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, 0))) {
+		bits = (MACH_MSGH_BITS_COMPLEX |
+			MACH_MSGH_BITS(MACH_MSG_TYPE_PORT_SEND, 0));
+
+		kmsg-&gt;ikm_header-&gt;msgh_bits = bits;
+	} <span class="enscript-keyword">else</span> {
+		bits = (MACH_MSGH_BITS_OTHER(bits) |
+			MACH_MSGH_BITS(ipc_object_copyin_type(rname),
+				       ipc_object_copyin_type(lname)));
+
+		kmsg-&gt;ikm_header-&gt;msgh_bits = bits;
+		<span class="enscript-keyword">if</span> ((bits &amp; MACH_MSGH_BITS_COMPLEX) == 0)
+			<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+	}
+    {
+    	mach_msg_legacy_descriptor_t	*saddr;
+        mach_msg_descriptor_t	*daddr;
+    	mach_msg_body_t		*body;
+	mach_msg_type_number_t	i, count;
+
+    	body = (mach_msg_body_t *) (kmsg-&gt;ikm_header + 1);
+    	saddr = (typeof(saddr)) (body + 1);
+	count = body-&gt;msgh_descriptor_count;
+
+    <span class="enscript-keyword">if</span>(count) {
+        vm_offset_t dsc_adjust = 4*count;
+        memmove((<span class="enscript-type">char</span> *)(((vm_offset_t)kmsg-&gt;ikm_header) - dsc_adjust), kmsg-&gt;ikm_header, <span class="enscript-keyword">sizeof</span>(mach_msg_base_t));
+        kmsg-&gt;ikm_header = (mach_msg_header_t *)((vm_offset_t)kmsg-&gt;ikm_header - dsc_adjust);
+        <span class="enscript-comment">/* Update the message size for the larger in-kernel representation */</span>
+        kmsg-&gt;ikm_header-&gt;msgh_size += dsc_adjust;
+    }
+    daddr = (mach_msg_descriptor_t *)((vm_offset_t)kmsg-&gt;ikm_header + <span class="enscript-keyword">sizeof</span>(mach_msg_base_t));
+
+    	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++, saddr++, daddr++) {
+	    <span class="enscript-keyword">switch</span> (saddr-&gt;type.type) {
+	    
+	        <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_PORT_DESCRIPTOR</span>: {
+		    mach_msg_type_name_t 	name;
+		    ipc_object_t 		object;
+		    mach_msg_legacy_port_descriptor_t 	*dsc;
+		    mach_msg_port_descriptor_t 	*dest_dsc;
+		
+		    dsc = (typeof(dsc))&amp;saddr-&gt;port;
+            dest_dsc = &amp;daddr-&gt;port;
+		
+		    <span class="enscript-comment">/* this is really the type SEND, SEND_ONCE, etc. */</span>
+		    name = dsc-&gt;disposition;
+		    object = (ipc_object_t) CAST_MACH_NAME_TO_PORT(dsc-&gt;name);
+		    dest_dsc-&gt;disposition = ipc_object_copyin_type(name);
+            dest_dsc-&gt;name = (mach_port_t)object;
+            dest_dsc-&gt;type = MACH_MSG_PORT_DESCRIPTOR;
+		
+		    <span class="enscript-keyword">if</span> (!IO_VALID(object)) {
+		        <span class="enscript-keyword">break</span>;
+		    }
+
+		    ipc_object_copyin_from_kernel(object, name);
+		    
+		    <span class="enscript-comment">/* CDY avoid circularity when the destination is also */</span>
+		    <span class="enscript-comment">/* the kernel.  This check should be changed into an  */</span>
+		    <span class="enscript-comment">/* assert when the new kobject model is in place since*/</span>
+		    <span class="enscript-comment">/* ports will not be used in kernel to kernel chats   */</span>
+			
+		    <span class="enscript-keyword">if</span> (((ipc_port_t)remote)-&gt;ip_receiver != ipc_space_kernel) {
+		       <span class="enscript-keyword">if</span> ((dest_dsc-&gt;disposition == MACH_MSG_TYPE_PORT_RECEIVE) &amp;&amp;
+		           ipc_port_check_circularity((ipc_port_t) object, 
+						(ipc_port_t) remote)) {
+		           kmsg-&gt;ikm_header-&gt;msgh_bits |= 
+					MACH_MSGH_BITS_CIRCULAR;
+		       }
+		    }
+		    <span class="enscript-keyword">break</span>;
+	        }
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_VOLATILE_DESCRIPTOR</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_DESCRIPTOR</span>: {
+		    <span class="enscript-comment">/* The sender should supply ready-made memory, i.e. a vm_map_copy_t
+             * so we don't need to do anything special. */</span>
+
+		    mach_msg_ool_descriptor32_t	*source_dsc = &amp;saddr-&gt;out_of_line32;
+		    mach_msg_ool_descriptor_t 	*dest_dsc = (typeof(dest_dsc))&amp;daddr-&gt;out_of_line;
+
+            vm_offset_t		    address = source_dsc-&gt;address;
+            vm_size_t            		size = source_dsc-&gt;size;
+            boolean_t            		deallocate = source_dsc-&gt;deallocate;
+            mach_msg_copy_options_t		copy = source_dsc-&gt;copy;
+            mach_msg_descriptor_type_t  type = source_dsc-&gt;type;
+
+            dest_dsc-&gt;address = (<span class="enscript-type">void</span> *)address;
+            dest_dsc-&gt;size = size;
+            dest_dsc-&gt;deallocate = deallocate;
+            dest_dsc-&gt;copy = copy;
+            dest_dsc-&gt;type = type;
+		    <span class="enscript-keyword">break</span>;
+	        }
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_PORTS_DESCRIPTOR</span>: {
+		    ipc_object_t            		*objects;
+		    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>			j;
+		    mach_msg_type_name_t    		name;
+		    mach_msg_ool_ports_descriptor_t 	*dest_dsc;
+		
+		    mach_msg_ool_ports_descriptor32_t	*source_dsc = &amp;saddr-&gt;ool_ports32;
+            dest_dsc = (typeof(dest_dsc))&amp;daddr-&gt;ool_ports;
+
+            boolean_t deallocate = source_dsc-&gt;deallocate;
+            mach_msg_copy_options_t copy = source_dsc-&gt;copy;
+            mach_msg_size_t port_count = source_dsc-&gt;count;
+            mach_msg_type_name_t disposition = source_dsc-&gt;disposition;
+
+		    <span class="enscript-comment">/* this is really the type SEND, SEND_ONCE, etc. */</span>
+		    name = disposition;
+		    disposition = ipc_object_copyin_type(name);
+	    	
+		    objects = (ipc_object_t *) (uintptr_t)source_dsc-&gt;address;
+	    	
+		    <span class="enscript-keyword">for</span> ( j = 0; j &lt; port_count; j++) {
+		        ipc_object_t object = objects[j];
+		        
+		        <span class="enscript-keyword">if</span> (!IO_VALID(object))
+			    <span class="enscript-keyword">continue</span>;
+		        
+		        ipc_object_copyin_from_kernel(object, name);
+    
+		        <span class="enscript-keyword">if</span> ((disposition == MACH_MSG_TYPE_PORT_RECEIVE) &amp;&amp;
+			    ipc_port_check_circularity(
+						       (ipc_port_t) object,
+						       (ipc_port_t) remote))
+			    kmsg-&gt;ikm_header-&gt;msgh_bits |= MACH_MSGH_BITS_CIRCULAR;
+		    }
+
+            dest_dsc-&gt;address = objects;
+            dest_dsc-&gt;deallocate = deallocate;
+            dest_dsc-&gt;copy = copy;
+            dest_dsc-&gt;disposition = disposition;
+            dest_dsc-&gt;type = MACH_MSG_OOL_PORTS_DESCRIPTOR;
+            dest_dsc-&gt;count = port_count;
+		    <span class="enscript-keyword">break</span>;
+	        }
+	        <span class="enscript-reference">default</span>: {
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MACH_ASSERT</span>
+		    panic(<span class="enscript-string">&quot;ipc_kmsg_copyin_from_kernel:  bad descriptor&quot;</span>);
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MACH_ASSERT */</span>
+		}
+	    }
+	}
+    }
+    <span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IKM_SUPPORT_LEGACY */</span>
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_copyout_header
+ *	Purpose:
+ *		&quot;Copy-out&quot; port rights in the header of a message.
+ *		Operates atomically; if it doesn't succeed the
+ *		message header and the space are left untouched.
+ *		If it does succeed the remote/local port fields
+ *		contain port names instead of object pointers,
+ *		and the bits field is updated.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Copied out port rights.
+ *		MACH_RCV_INVALID_NOTIFY	
+ *			Notify is non-null and doesn't name a receive right.
+ *			(Either KERN_INVALID_NAME or KERN_INVALID_RIGHT.)
+ *		MACH_RCV_HEADER_ERROR|MACH_MSG_IPC_SPACE
+ *			The space is dead.
+ *		MACH_RCV_HEADER_ERROR|MACH_MSG_IPC_SPACE
+ *			No room in space for another name.
+ *		MACH_RCV_HEADER_ERROR|MACH_MSG_IPC_KERNEL
+ *			Couldn't allocate memory for the reply port.
+ *		MACH_RCV_HEADER_ERROR|MACH_MSG_IPC_KERNEL
+ *			Couldn't allocate memory for the dead-name request.
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">ipc_kmsg_copyout_header</span>(
+	ipc_kmsg_t              kmsg,
+	ipc_space_t		space,
+	mach_msg_option_t	option)
+{
+	mach_msg_header_t *msg = kmsg-&gt;ikm_header;
+	mach_msg_bits_t mbits = msg-&gt;msgh_bits;
+	ipc_port_t dest = (ipc_port_t) msg-&gt;msgh_remote_port;
+
+	assert(IP_VALID(dest));
+
+	<span class="enscript-comment">/*
+	 * While we still hold a reference on the received-from port,
+	 * process all send-possible notfications we received along with
+	 * the message.
+	 */</span>
+	ipc_port_spnotify(dest);
+
+    {
+	mach_msg_type_name_t dest_type = MACH_MSGH_BITS_REMOTE(mbits);
+	mach_msg_type_name_t reply_type = MACH_MSGH_BITS_LOCAL(mbits);
+	mach_msg_type_name_t voucher_type = MACH_MSGH_BITS_VOUCHER(mbits);
+	ipc_port_t reply = msg-&gt;msgh_local_port;
+	ipc_port_t release_reply_port = IP_NULL;
+	mach_port_name_t dest_name, reply_name;
+
+	ipc_port_t voucher = kmsg-&gt;ikm_voucher;
+	ipc_port_t release_voucher_port = IP_NULL;
+	mach_port_name_t voucher_name;
+
+	uint32_t entries_held = 0;
+	boolean_t need_write_lock = FALSE;
+	kern_return_t kr;
+
+	<span class="enscript-comment">/*
+	 * Reserve any potentially needed entries in the target space.
+	 * We'll free any unused before unlocking the space.
+	 */</span>
+	<span class="enscript-keyword">if</span> (IP_VALID(reply)) {
+		entries_held++;
+		need_write_lock = TRUE;
+	}
+	<span class="enscript-keyword">if</span> (IP_VALID(voucher)) {
+		assert(voucher_type == MACH_MSG_TYPE_MOVE_SEND); 
+
+		<span class="enscript-keyword">if</span> ((option &amp; MACH_RCV_VOUCHER) != 0)
+ 			entries_held++;
+		need_write_lock = TRUE;
+	}
+
+	<span class="enscript-keyword">if</span> (need_write_lock) {
+
+		is_write_lock(space);
+
+		<span class="enscript-keyword">while</span>(entries_held) {
+			<span class="enscript-keyword">if</span> (!is_active(space)) {
+				is_write_unlock(space);
+				<span class="enscript-keyword">return</span> (MACH_RCV_HEADER_ERROR|
+					MACH_MSG_IPC_SPACE);
+			}
+				
+			kr = ipc_entries_hold(space, entries_held);
+			<span class="enscript-keyword">if</span> (KERN_SUCCESS == kr)
+				<span class="enscript-keyword">break</span>;
+
+			kr = ipc_entry_grow_table(space, ITS_SIZE_NONE);
+			<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+				<span class="enscript-keyword">return</span>(MACH_RCV_HEADER_ERROR|
+				       MACH_MSG_IPC_SPACE);
+			<span class="enscript-comment">/* space was unlocked and relocked - retry */</span>
+		}
+
+		<span class="enscript-comment">/* Handle reply port. */</span>
+		<span class="enscript-keyword">if</span> (IP_VALID(reply)) {
+			ipc_entry_t entry;
+
+			<span class="enscript-comment">/* Is there already an entry we can use? */</span>
+			<span class="enscript-keyword">if</span> ((reply_type != MACH_MSG_TYPE_PORT_SEND_ONCE) &amp;&amp;
+			    ipc_right_reverse(space, (ipc_object_t) reply, &amp;reply_name, &amp;entry)) {
+				<span class="enscript-comment">/* reply port is locked and active */</span>
+				assert(entry-&gt;ie_bits &amp; MACH_PORT_TYPE_SEND_RECEIVE);
+			} <span class="enscript-keyword">else</span> {
+				ip_lock(reply);
+				<span class="enscript-keyword">if</span> (!ip_active(reply)) {
+					ip_unlock(reply);
+					
+					release_reply_port = reply;
+					reply = IP_DEAD;
+					reply_name = MACH_PORT_DEAD;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">done_with_reply</span>;
+				}
+				
+				<span class="enscript-comment">/* claim a held entry for the reply port */</span>
+				assert(entries_held &gt; 0);
+				entries_held--;
+				ipc_entry_claim(space, &amp;reply_name, &amp;entry);
+				assert(IE_BITS_TYPE(entry-&gt;ie_bits) == MACH_PORT_TYPE_NONE);
+				assert(entry-&gt;ie_object == IO_NULL); 
+				entry-&gt;ie_object = (ipc_object_t) reply;
+			}
+
+			<span class="enscript-comment">/* space and reply port are locked and active */</span>
+			ip_reference(reply);	<span class="enscript-comment">/* hold onto the reply port */</span>
+
+			kr = ipc_right_copyout(space, reply_name, entry,
+					       reply_type, TRUE, (ipc_object_t) reply);
+			assert(kr == KERN_SUCCESS);
+			<span class="enscript-comment">/* reply port is unlocked */</span>
+		} <span class="enscript-keyword">else</span>
+			reply_name = CAST_MACH_PORT_TO_NAME(reply);
+
+	<span class="enscript-reference">done_with_reply</span>:
+
+		<span class="enscript-comment">/* Handle voucher port. */</span>
+		<span class="enscript-keyword">if</span> (voucher_type != MACH_MSGH_BITS_ZERO) {
+			assert(voucher_type == MACH_MSG_TYPE_MOVE_SEND);
+
+			<span class="enscript-keyword">if</span> (!IP_VALID(voucher)) {
+				<span class="enscript-keyword">if</span> ((option &amp; MACH_RCV_VOUCHER) == 0) {
+					voucher_type = MACH_MSGH_BITS_ZERO;
+				}
+				voucher_name = MACH_PORT_NULL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done_with_voucher</span>;
+			}
+			
+			<span class="enscript-comment">/* clear voucher from its hiding place back in the kmsg */</span>
+			kmsg-&gt;ikm_voucher = IP_NULL;
+
+			<span class="enscript-keyword">if</span> ((option &amp; MACH_RCV_VOUCHER) != 0) {
+				ipc_entry_t entry;
+
+				<span class="enscript-keyword">if</span> (ipc_right_reverse(space, (ipc_object_t) voucher,
+						      &amp;voucher_name, &amp;entry)) {
+					<span class="enscript-comment">/* voucher port locked */</span>
+					assert(entry-&gt;ie_bits &amp; MACH_PORT_TYPE_SEND);
+				} <span class="enscript-keyword">else</span> {
+					assert(entries_held &gt; 0);
+					entries_held--;
+					ipc_entry_claim(space, &amp;voucher_name, &amp;entry);
+					assert(IE_BITS_TYPE(entry-&gt;ie_bits) == MACH_PORT_TYPE_NONE);
+					assert(entry-&gt;ie_object == IO_NULL); 
+					entry-&gt;ie_object = (ipc_object_t) voucher;
+					ip_lock(voucher);
+				}
+				<span class="enscript-comment">/* space is locked and active */</span>
+
+				assert(ip_active(voucher));
+				assert(ip_kotype(voucher) == IKOT_VOUCHER);
+				kr = ipc_right_copyout(space, voucher_name, entry,
+						       MACH_MSG_TYPE_MOVE_SEND, TRUE, 
+						       (ipc_object_t) voucher);
+				<span class="enscript-comment">/* voucher port is unlocked */</span>
+			} <span class="enscript-keyword">else</span> {
+				voucher_type = MACH_MSGH_BITS_ZERO;
+				release_voucher_port = voucher;
+				voucher_name = MACH_PORT_NULL;
+			}
+		} <span class="enscript-keyword">else</span> {
+			voucher_name = msg-&gt;msgh_voucher_port;
+		}
+
+	<span class="enscript-reference">done_with_voucher</span>:
+
+		ip_lock(dest);
+		is_write_unlock(space);
+
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 *	No reply or voucher port!  This is an easy case.
+		 *	We only need to have the space locked
+		 *	when locking the destination.
+		 */</span>
+
+		is_read_lock(space);
+		<span class="enscript-keyword">if</span> (!is_active(space)) {
+			is_read_unlock(space);
+			<span class="enscript-keyword">return</span> MACH_RCV_HEADER_ERROR|MACH_MSG_IPC_SPACE;
+		}
+
+		ip_lock(dest);
+		is_read_unlock(space);
+
+		reply_name = CAST_MACH_PORT_TO_NAME(reply);
+
+		<span class="enscript-keyword">if</span> (voucher_type != MACH_MSGH_BITS_ZERO) {
+			assert(voucher_type == MACH_MSG_TYPE_MOVE_SEND);
+			<span class="enscript-keyword">if</span> ((option &amp; MACH_RCV_VOUCHER) == 0) {
+				voucher_type = MACH_MSGH_BITS_ZERO;
+			}
+			voucher_name = MACH_PORT_NULL;
+		} <span class="enscript-keyword">else</span> {
+			voucher_name = msg-&gt;msgh_voucher_port;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 *	At this point, the space is unlocked and the destination
+	 *	port is locked.  (Lock taken while space was locked.)
+	 *	reply_name is taken care of; we still need dest_name.
+	 *	We still hold a ref for reply (if it is valid).
+	 *
+	 *	If the space holds receive rights for the destination,
+	 *	we return its name for the right.  Otherwise the task
+	 *	managed to destroy or give away the receive right between
+	 *	receiving the message and this copyout.  If the destination
+	 *	is dead, return MACH_PORT_DEAD, and if the receive right
+	 *	exists somewhere else (another space, in transit)
+	 *	return MACH_PORT_NULL.
+	 *
+	 *	Making this copyout operation atomic with the previous
+	 *	copyout of the reply port is a bit tricky.  If there was
+	 *	no real reply port (it wasn't IP_VALID) then this isn't
+	 *	an issue.  If the reply port was dead at copyout time,
+	 *	then we are OK, because if dest is dead we serialize
+	 *	after the death of both ports and if dest is alive
+	 *	we serialize after reply died but before dest's (later) death.
+	 *	So assume reply was alive when we copied it out.  If dest
+	 *	is alive, then we are OK because we serialize before
+	 *	the ports' deaths.  So assume dest is dead when we look at it.
+	 *	If reply dies/died after dest, then we are OK because
+	 *	we serialize after dest died but before reply dies.
+	 *	So the hard case is when reply is alive at copyout,
+	 *	dest is dead at copyout, and reply died before dest died.
+	 *	In this case pretend that dest is still alive, so
+	 *	we serialize while both ports are alive.
+	 *
+	 *	Because the space lock is held across the copyout of reply
+	 *	and locking dest, the receive right for dest can't move
+	 *	in or out of the space while the copyouts happen, so
+	 *	that isn't an atomicity problem.  In the last hard case
+	 *	above, this implies that when dest is dead that the
+	 *	space couldn't have had receive rights for dest at
+	 *	the time reply was copied-out, so when we pretend
+	 *	that dest is still alive, we can return MACH_PORT_NULL.
+	 *
+	 *	If dest == reply, then we have to make it look like
+	 *	either both copyouts happened before the port died,
+	 *	or both happened after the port died.  This special
+	 *	case works naturally if the timestamp comparison
+	 *	is done correctly.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (ip_active(dest)) {
+		ipc_object_copyout_dest(space, (ipc_object_t) dest,
+					dest_type, &amp;dest_name);
+		<span class="enscript-comment">/* dest is unlocked */</span>
+
+	} <span class="enscript-keyword">else</span> {
+		ipc_port_timestamp_t timestamp;
+
+		timestamp = dest-&gt;ip_timestamp;
+		ip_unlock(dest);
+		ip_release(dest);
+
+		<span class="enscript-keyword">if</span> (IP_VALID(reply)) {
+			ip_lock(reply);
+			<span class="enscript-keyword">if</span> (ip_active(reply) ||
+			    IP_TIMESTAMP_ORDER(timestamp,
+					       reply-&gt;ip_timestamp))
+				dest_name = MACH_PORT_DEAD;
+			<span class="enscript-keyword">else</span>
+				dest_name = MACH_PORT_NULL;
+			ip_unlock(reply);
+		} <span class="enscript-keyword">else</span>
+			dest_name = MACH_PORT_DEAD;
+	}
+
+	<span class="enscript-keyword">if</span> (IP_VALID(reply))
+		ip_release(reply);
+
+	<span class="enscript-keyword">if</span> (IP_VALID(release_reply_port)) {
+		<span class="enscript-keyword">if</span> (reply_type == MACH_MSG_TYPE_PORT_SEND_ONCE)
+			ipc_port_release_sonce(release_reply_port);
+		<span class="enscript-keyword">else</span>
+			ipc_port_release_send(release_reply_port);
+	}
+
+	<span class="enscript-keyword">if</span> (IP_VALID(release_voucher_port))
+		ipc_port_release_send(release_voucher_port);
+
+
+	<span class="enscript-keyword">if</span> ((option &amp; MACH_RCV_VOUCHER) != 0) {
+	    KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_IPC, MACH_IPC_MSG_RECV) | DBG_FUNC_NONE,
+				  VM_KERNEL_ADDRPERM((uintptr_t)kmsg),
+				  (uintptr_t)kmsg-&gt;ikm_header-&gt;msgh_bits,
+				  (uintptr_t)kmsg-&gt;ikm_header-&gt;msgh_id,
+				  VM_KERNEL_ADDRPERM((uintptr_t)unsafe_convert_port_to_voucher(voucher)),
+				  0);
+	} <span class="enscript-keyword">else</span> {
+	    KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_IPC, MACH_IPC_MSG_RECV_VOUCHER_REFUSED) | DBG_FUNC_NONE,
+				  VM_KERNEL_ADDRPERM((uintptr_t)kmsg),
+				  (uintptr_t)kmsg-&gt;ikm_header-&gt;msgh_bits,
+				  (uintptr_t)kmsg-&gt;ikm_header-&gt;msgh_id,
+				  VM_KERNEL_ADDRPERM((uintptr_t)unsafe_convert_port_to_voucher(voucher)),
+				  0);
+	}
+
+	msg-&gt;msgh_bits = MACH_MSGH_BITS_SET(reply_type, dest_type,
+					    voucher_type, mbits);
+	msg-&gt;msgh_local_port = CAST_MACH_NAME_TO_PORT(dest_name);
+	msg-&gt;msgh_remote_port = CAST_MACH_NAME_TO_PORT(reply_name);
+	msg-&gt;msgh_voucher_port = voucher_name;
+    }
+
+    <span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_copyout_object
+ *	Purpose:
+ *		Copy-out a port right.  Always returns a name,
+ *		even for unsuccessful return codes.  Always
+ *		consumes the supplied object.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	The space acquired the right
+ *			(name is valid) or the object is dead (MACH_PORT_DEAD).
+ *		MACH_MSG_IPC_SPACE	No room in space for the right,
+ *			or the space is dead.  (Name is MACH_PORT_NULL.)
+ *		MACH_MSG_IPC_KERNEL	Kernel resource shortage.
+ *			(Name is MACH_PORT_NULL.)
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">ipc_kmsg_copyout_object</span>(
+	ipc_space_t		space,
+	ipc_object_t		object,
+	mach_msg_type_name_t	msgt_name,
+	mach_port_name_t	*namep)
+{
+	kern_return_t kr;
+
+	<span class="enscript-keyword">if</span> (!IO_VALID(object)) {
+		*namep = CAST_MACH_PORT_TO_NAME(object);
+		<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+	}
+
+	kr = ipc_object_copyout(space, object, msgt_name, TRUE, namep);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		ipc_object_destroy(object, msgt_name);
+
+		<span class="enscript-keyword">if</span> (kr == KERN_INVALID_CAPABILITY)
+			*namep = MACH_PORT_DEAD;
+		<span class="enscript-keyword">else</span> {
+			*namep = MACH_PORT_NULL;
+
+			<span class="enscript-keyword">if</span> (kr == KERN_RESOURCE_SHORTAGE)
+				<span class="enscript-keyword">return</span> MACH_MSG_IPC_KERNEL;
+			<span class="enscript-keyword">else</span>
+				<span class="enscript-keyword">return</span> MACH_MSG_IPC_SPACE;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+}
+
+mach_msg_descriptor_t *
+<span class="enscript-function-name">ipc_kmsg_copyout_port_descriptor</span>(mach_msg_descriptor_t *dsc,
+        mach_msg_descriptor_t *user_dsc,
+        ipc_space_t space,
+        kern_return_t *mr);
+mach_msg_descriptor_t *
+<span class="enscript-function-name">ipc_kmsg_copyout_port_descriptor</span>(mach_msg_descriptor_t *dsc,
+        mach_msg_descriptor_t *dest_dsc,
+        ipc_space_t space, 
+        kern_return_t *mr)
+{
+    mach_port_t			port;
+    mach_port_name_t		name;
+    mach_msg_type_name_t		disp;
+
+
+    <span class="enscript-comment">/* Copyout port right carried in the message */</span>
+    port = dsc-&gt;port.name;
+    disp = dsc-&gt;port.disposition;
+    *mr |= ipc_kmsg_copyout_object(space, 
+            (ipc_object_t)port, 
+            disp, 
+            &amp;name);
+
+    <span class="enscript-keyword">if</span>(current_task() == kernel_task)
+    {
+        mach_msg_port_descriptor_t *user_dsc = (typeof(user_dsc))dest_dsc;
+        user_dsc--; <span class="enscript-comment">// point to the start of this port descriptor
+</span>        user_dsc-&gt;name = CAST_MACH_NAME_TO_PORT(name);
+        user_dsc-&gt;disposition = disp;
+        user_dsc-&gt;type = MACH_MSG_PORT_DESCRIPTOR;
+        dest_dsc = (typeof(dest_dsc))user_dsc;
+    } <span class="enscript-keyword">else</span> {
+        mach_msg_legacy_port_descriptor_t *user_dsc = (typeof(user_dsc))dest_dsc;
+        user_dsc--; <span class="enscript-comment">// point to the start of this port descriptor
+</span>        user_dsc-&gt;name = CAST_MACH_PORT_TO_NAME(name);
+        user_dsc-&gt;disposition = disp;
+        user_dsc-&gt;type = MACH_MSG_PORT_DESCRIPTOR;
+        dest_dsc = (typeof(dest_dsc))user_dsc;
+    }
+
+    <span class="enscript-keyword">return</span> (mach_msg_descriptor_t *)dest_dsc;
+}
+
+mach_msg_descriptor_t *
+<span class="enscript-function-name">ipc_kmsg_copyout_ool_descriptor</span>(mach_msg_ool_descriptor_t *dsc, mach_msg_descriptor_t *user_dsc, <span class="enscript-type">int</span> is_64bit, vm_map_t map, mach_msg_return_t *mr);
+mach_msg_descriptor_t *
+<span class="enscript-function-name">ipc_kmsg_copyout_ool_descriptor</span>(mach_msg_ool_descriptor_t *dsc, mach_msg_descriptor_t *user_dsc, <span class="enscript-type">int</span> is_64bit, vm_map_t map, mach_msg_return_t *mr)
+{
+    vm_map_copy_t			copy;
+    vm_map_address_t			rcv_addr;
+    mach_msg_copy_options_t		copy_options;
+    mach_msg_size_t			size;
+    mach_msg_descriptor_type_t	dsc_type;
+
+    <span class="enscript-comment">//SKIP_PORT_DESCRIPTORS(saddr, sdsc_count);
+</span>
+    copy = (vm_map_copy_t) dsc-&gt;address;
+    size = dsc-&gt;size;
+    copy_options = dsc-&gt;copy;
+    assert(copy_options != MACH_MSG_KALLOC_COPY_T);
+    dsc_type = dsc-&gt;type;
+
+    <span class="enscript-keyword">if</span> (copy != VM_MAP_COPY_NULL) {
+	kern_return_t kr;
+
+        rcv_addr = 0;
+        kr = vm_map_copyout(map, &amp;rcv_addr, copy);
+        <span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+            <span class="enscript-keyword">if</span> (kr == KERN_RESOURCE_SHORTAGE)
+                *mr |= MACH_MSG_VM_KERNEL;
+            <span class="enscript-keyword">else</span>
+                *mr |= MACH_MSG_VM_SPACE;
+            vm_map_copy_discard(copy);
+            rcv_addr = 0;
+            size = 0;
+        }
+    } <span class="enscript-keyword">else</span> {
+        rcv_addr = 0;
+        size = 0;
+    }
+
+    <span class="enscript-comment">/*
+     * Now update the descriptor as the user would see it.
+     * This may require expanding the descriptor to the user
+     * visible size.  There is already space allocated for
+     * this in what naddr points to.
+     */</span>
+    <span class="enscript-keyword">if</span>(current_task() == kernel_task)
+    {
+        mach_msg_ool_descriptor_t *user_ool_dsc = (typeof(user_ool_dsc))user_dsc;
+        user_ool_dsc--;
+
+        user_ool_dsc-&gt;address = (<span class="enscript-type">void</span> *)(uintptr_t)rcv_addr;
+        user_ool_dsc-&gt;deallocate = (copy_options == MACH_MSG_VIRTUAL_COPY) ?
+            TRUE : FALSE;
+        user_ool_dsc-&gt;copy = copy_options;
+        user_ool_dsc-&gt;type = dsc_type;
+        user_ool_dsc-&gt;size = size;
+
+        user_dsc = (typeof(user_dsc))user_ool_dsc;
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (is_64bit) {
+        mach_msg_ool_descriptor64_t *user_ool_dsc = (typeof(user_ool_dsc))user_dsc;
+        user_ool_dsc--;
+
+        user_ool_dsc-&gt;address = rcv_addr;
+        user_ool_dsc-&gt;deallocate = (copy_options == MACH_MSG_VIRTUAL_COPY) ?
+            TRUE : FALSE;
+        user_ool_dsc-&gt;copy = copy_options;
+        user_ool_dsc-&gt;type = dsc_type;
+        user_ool_dsc-&gt;size = size;
+
+        user_dsc = (typeof(user_dsc))user_ool_dsc;
+    } <span class="enscript-keyword">else</span> {
+        mach_msg_ool_descriptor32_t *user_ool_dsc = (typeof(user_ool_dsc))user_dsc;
+        user_ool_dsc--;
+
+        user_ool_dsc-&gt;address = CAST_DOWN_EXPLICIT(uint32_t, rcv_addr);
+        user_ool_dsc-&gt;size = size;
+        user_ool_dsc-&gt;deallocate = (copy_options == MACH_MSG_VIRTUAL_COPY) ?
+            TRUE : FALSE;
+        user_ool_dsc-&gt;copy = copy_options;
+        user_ool_dsc-&gt;type = dsc_type;
+
+        user_dsc = (typeof(user_dsc))user_ool_dsc;
+    }
+    <span class="enscript-keyword">return</span> user_dsc;
+}
+
+mach_msg_descriptor_t *
+<span class="enscript-function-name">ipc_kmsg_copyout_ool_ports_descriptor</span>(mach_msg_ool_ports_descriptor_t *dsc,
+        mach_msg_descriptor_t *user_dsc,
+        <span class="enscript-type">int</span> is_64bit,
+        vm_map_t map,
+        ipc_space_t space,
+        ipc_kmsg_t kmsg,
+        mach_msg_return_t *mr);
+mach_msg_descriptor_t *
+<span class="enscript-function-name">ipc_kmsg_copyout_ool_ports_descriptor</span>(mach_msg_ool_ports_descriptor_t *dsc,
+        mach_msg_descriptor_t *user_dsc,
+        <span class="enscript-type">int</span> is_64bit,
+        vm_map_t map,
+        ipc_space_t space,
+        ipc_kmsg_t kmsg,
+        mach_msg_return_t *mr)
+{
+    mach_vm_offset_t		rcv_addr = 0;
+    mach_msg_type_name_t		disp;
+    mach_msg_type_number_t 		count, i;
+    vm_size_t           		ports_length, names_length;
+
+    mach_msg_copy_options_t copy_options = MACH_MSG_VIRTUAL_COPY;
+
+    <span class="enscript-comment">//SKIP_PORT_DESCRIPTORS(saddr, sdsc_count);
+</span>
+    count = dsc-&gt;count;
+    disp = dsc-&gt;disposition;
+    ports_length = count * <span class="enscript-keyword">sizeof</span>(mach_port_t);
+    names_length = count * <span class="enscript-keyword">sizeof</span>(mach_port_name_t);
+
+    <span class="enscript-keyword">if</span> (ports_length != 0 &amp;&amp; dsc-&gt;address != 0) {
+
+        <span class="enscript-comment">/*
+         * Check to see if there is an overwrite descriptor
+         * specified in the scatter list for this ool data.
+         * The descriptor has already been verified.
+         */</span>
+#<span class="enscript-reference">if</span> 0
+        <span class="enscript-keyword">if</span> (saddr != MACH_MSG_DESCRIPTOR_NULL) {
+            <span class="enscript-keyword">if</span> (differs) {
+                OTHER_OOL_DESCRIPTOR *scatter_dsc;
+
+                scatter_dsc = (OTHER_OOL_DESCRIPTOR *)saddr;
+                rcv_addr = (mach_vm_offset_t) scatter_dsc-&gt;address;
+                copy_options = scatter_dsc-&gt;copy;
+            } <span class="enscript-keyword">else</span> {
+                mach_msg_ool_descriptor_t *scatter_dsc;
+
+                scatter_dsc = &amp;saddr-&gt;out_of_line;
+                rcv_addr = CAST_USER_ADDR_T(scatter_dsc-&gt;address);
+                copy_options = scatter_dsc-&gt;copy;
+            }
+            INCREMENT_SCATTER(saddr, sdsc_count, differs);
+        }
+#<span class="enscript-reference">endif</span>
+
+        <span class="enscript-keyword">if</span> (copy_options == MACH_MSG_VIRTUAL_COPY) {
+            <span class="enscript-comment">/*
+             * Dynamically allocate the region
+             */</span>
+            <span class="enscript-type">int</span> anywhere = VM_FLAGS_ANYWHERE;
+	    <span class="enscript-keyword">if</span> (vm_kernel_map_is_kernel(map)) anywhere |= VM_MAKE_TAG(VM_KERN_MEMORY_IPC);
+	    <span class="enscript-keyword">else</span>                              anywhere |= VM_MAKE_TAG(VM_MEMORY_MACH_MSG);
+
+            kern_return_t kr;
+            <span class="enscript-keyword">if</span> ((kr = mach_vm_allocate(map, &amp;rcv_addr, 
+                            (mach_vm_size_t)names_length,
+                            anywhere)) != KERN_SUCCESS) {
+                ipc_kmsg_clean_body(kmsg, 1, (mach_msg_descriptor_t *)dsc);
+                rcv_addr = 0;
+
+                <span class="enscript-keyword">if</span> (kr == KERN_RESOURCE_SHORTAGE){
+                    *mr |= MACH_MSG_VM_KERNEL;
+                } <span class="enscript-keyword">else</span> {
+                    *mr |= MACH_MSG_VM_SPACE;
+                }
+            }
+        }
+
+        <span class="enscript-comment">/*
+         * Handle the port rights and copy out the names
+         * for those rights out to user-space.
+         */</span>
+        <span class="enscript-keyword">if</span> (rcv_addr != 0) {
+            mach_port_t *objects = (mach_port_t *) dsc-&gt;address;
+            mach_port_name_t *names = (mach_port_name_t *) dsc-&gt;address;
+
+            <span class="enscript-comment">/* copyout port rights carried in the message */</span>
+
+            <span class="enscript-keyword">for</span> ( i = 0; i &lt; count ; i++) {
+                ipc_object_t object = (ipc_object_t)objects[i];
+
+                *mr |= ipc_kmsg_copyout_object(space, object,
+                        disp, &amp;names[i]);
+            }
+
+            <span class="enscript-comment">/* copyout to memory allocated above */</span>
+            <span class="enscript-type">void</span> *data = dsc-&gt;address;
+            <span class="enscript-keyword">if</span> (copyoutmap(map, data, rcv_addr, names_length) != KERN_SUCCESS)
+                *mr |= MACH_MSG_VM_SPACE;
+            kfree(data, ports_length);
+        }
+    } <span class="enscript-keyword">else</span> {
+        rcv_addr = 0;
+    }
+
+    <span class="enscript-comment">/*
+     * Now update the descriptor based on the information
+     * calculated above.
+     */</span>
+    <span class="enscript-keyword">if</span>(current_task() == kernel_task) {
+        mach_msg_ool_ports_descriptor_t *user_ool_dsc = (typeof(user_ool_dsc))user_dsc;
+        user_ool_dsc--;
+
+        user_ool_dsc-&gt;address = (<span class="enscript-type">void</span> *)(uintptr_t)rcv_addr;
+        user_ool_dsc-&gt;deallocate = (copy_options == MACH_MSG_VIRTUAL_COPY) ?
+            TRUE : FALSE;
+        user_ool_dsc-&gt;copy = copy_options;
+        user_ool_dsc-&gt;disposition = disp;
+        user_ool_dsc-&gt;type = MACH_MSG_OOL_PORTS_DESCRIPTOR;
+        user_ool_dsc-&gt;count = count;
+
+        user_dsc = (typeof(user_dsc))user_ool_dsc;
+    } <span class="enscript-keyword">if</span> (is_64bit) {
+        mach_msg_ool_ports_descriptor64_t *user_ool_dsc = (typeof(user_ool_dsc))user_dsc;
+        user_ool_dsc--;
+
+        user_ool_dsc-&gt;address = rcv_addr;
+        user_ool_dsc-&gt;deallocate = (copy_options == MACH_MSG_VIRTUAL_COPY) ?
+            TRUE : FALSE;
+        user_ool_dsc-&gt;copy = copy_options;
+        user_ool_dsc-&gt;disposition = disp;
+        user_ool_dsc-&gt;type = MACH_MSG_OOL_PORTS_DESCRIPTOR;
+        user_ool_dsc-&gt;count = count;
+
+        user_dsc = (typeof(user_dsc))user_ool_dsc;
+    } <span class="enscript-keyword">else</span> {
+        mach_msg_ool_ports_descriptor32_t *user_ool_dsc = (typeof(user_ool_dsc))user_dsc;
+        user_ool_dsc--;
+
+        user_ool_dsc-&gt;address = CAST_DOWN_EXPLICIT(uint32_t, rcv_addr);
+        user_ool_dsc-&gt;count = count;
+        user_ool_dsc-&gt;deallocate = (copy_options == MACH_MSG_VIRTUAL_COPY) ?
+            TRUE : FALSE;
+        user_ool_dsc-&gt;copy = copy_options;
+        user_ool_dsc-&gt;disposition = disp;
+        user_ool_dsc-&gt;type = MACH_MSG_OOL_PORTS_DESCRIPTOR;
+
+        user_dsc = (typeof(user_dsc))user_ool_dsc;
+    }
+    <span class="enscript-keyword">return</span> user_dsc;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_copyout_body
+ *	Purpose:
+ *		&quot;Copy-out&quot; port rights and out-of-line memory
+ *		in the body of a message.
+ *
+ *		The error codes are a combination of special bits.
+ *		The copyout proceeds despite errors.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Successful copyout.
+ *		MACH_MSG_IPC_SPACE	No room for port right in name space.
+ *		MACH_MSG_VM_SPACE	No room for memory in address space.
+ *		MACH_MSG_IPC_KERNEL	Resource shortage handling port right.
+ *		MACH_MSG_VM_KERNEL	Resource shortage handling memory.
+ *		MACH_MSG_INVALID_RT_DESCRIPTOR Descriptor incompatible with RT
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">ipc_kmsg_copyout_body</span>(
+    	ipc_kmsg_t		kmsg,
+	ipc_space_t		space,
+	vm_map_t		map,
+	mach_msg_body_t		*slist)
+{
+    mach_msg_body_t 		*body;
+    mach_msg_descriptor_t 	*kern_dsc, *user_dsc;
+    mach_msg_descriptor_t	*saddr;
+    mach_msg_type_number_t	dsc_count, sdsc_count;
+    <span class="enscript-type">int</span> i;
+    mach_msg_return_t 		mr = MACH_MSG_SUCCESS;
+    boolean_t 			is_task_64bit = (map-&gt;max_offset &gt; VM_MAX_ADDRESS);
+
+    body = (mach_msg_body_t *) (kmsg-&gt;ikm_header + 1);
+    dsc_count = body-&gt;msgh_descriptor_count;
+    kern_dsc = (mach_msg_descriptor_t *) (body + 1);
+    <span class="enscript-comment">/* Point user_dsc just after the end of all the descriptors */</span>
+    user_dsc = &amp;kern_dsc[dsc_count];
+
+    <span class="enscript-comment">/* Do scatter list setup */</span>
+    <span class="enscript-keyword">if</span> (slist != MACH_MSG_BODY_NULL) {
+    panic(<span class="enscript-string">&quot;Scatter lists disabled&quot;</span>);
+	saddr = (mach_msg_descriptor_t *) (slist + 1);
+	sdsc_count = slist-&gt;msgh_descriptor_count;
+    }
+    <span class="enscript-keyword">else</span> {
+	saddr = MACH_MSG_DESCRIPTOR_NULL;
+	sdsc_count = 0;
+    }
+
+    <span class="enscript-comment">/* Now process the descriptors */</span>
+    <span class="enscript-keyword">for</span> (i = dsc_count-1; i &gt;= 0; i--) {
+        <span class="enscript-keyword">switch</span> (kern_dsc[i].type.type) {
+
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_PORT_DESCRIPTOR</span>: 
+                user_dsc = ipc_kmsg_copyout_port_descriptor(&amp;kern_dsc[i], user_dsc, space, &amp;mr);
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_VOLATILE_DESCRIPTOR</span>:
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_DESCRIPTOR</span> : 
+                user_dsc = ipc_kmsg_copyout_ool_descriptor(
+                        (mach_msg_ool_descriptor_t *)&amp;kern_dsc[i], user_dsc, is_task_64bit, map, &amp;mr);
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_PORTS_DESCRIPTOR</span> : 
+                user_dsc = ipc_kmsg_copyout_ool_ports_descriptor(
+                        (mach_msg_ool_ports_descriptor_t *)&amp;kern_dsc[i], user_dsc, is_task_64bit, map, space, kmsg, &amp;mr);
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-keyword">default</span> : {
+                          panic(<span class="enscript-string">&quot;untyped IPC copyout body: invalid message descriptor&quot;</span>);
+                      }
+        }
+    }
+
+    <span class="enscript-keyword">if</span>(user_dsc != kern_dsc) {
+        vm_offset_t dsc_adjust = (vm_offset_t)user_dsc - (vm_offset_t)kern_dsc;
+        memmove((<span class="enscript-type">char</span> *)((vm_offset_t)kmsg-&gt;ikm_header + dsc_adjust), kmsg-&gt;ikm_header, <span class="enscript-keyword">sizeof</span>(mach_msg_base_t));
+        kmsg-&gt;ikm_header = (mach_msg_header_t *)((vm_offset_t)kmsg-&gt;ikm_header + dsc_adjust);
+        <span class="enscript-comment">/* Update the message size for the smaller user representation */</span>
+        kmsg-&gt;ikm_header-&gt;msgh_size -= (mach_msg_size_t)dsc_adjust;
+    }
+
+    <span class="enscript-keyword">return</span> mr;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_copyout_size
+ *	Purpose:
+ *		Compute the size of the message as copied out to the given
+ *		map. If the destination map's pointers are a different size
+ *		than the kernel's, we have to allow for expansion/
+ *		contraction of the descriptors as appropriate.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		size of the message as it would be received.
+ */</span>
+
+mach_msg_size_t
+<span class="enscript-function-name">ipc_kmsg_copyout_size</span>(
+	ipc_kmsg_t		kmsg,
+	vm_map_t		map)
+{
+    mach_msg_size_t		send_size;
+
+    send_size = kmsg-&gt;ikm_header-&gt;msgh_size;
+
+    boolean_t is_task_64bit = (map-&gt;max_offset &gt; VM_MAX_ADDRESS);
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+	send_size -= LEGACY_HEADER_SIZE_DELTA;
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-keyword">if</span> (kmsg-&gt;ikm_header-&gt;msgh_bits &amp; MACH_MSGH_BITS_COMPLEX) {
+
+        mach_msg_body_t *body;
+        mach_msg_descriptor_t *saddr, *eaddr;
+
+        body = (mach_msg_body_t *) (kmsg-&gt;ikm_header + 1);
+        saddr = (mach_msg_descriptor_t *) (body + 1);
+        eaddr = saddr + body-&gt;msgh_descriptor_count;
+
+        <span class="enscript-keyword">for</span> ( ; saddr &lt; eaddr; saddr++ ) {
+            <span class="enscript-keyword">switch</span> (saddr-&gt;type.type) {
+                <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_DESCRIPTOR</span>:
+                <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_VOLATILE_DESCRIPTOR</span>:
+                <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_PORTS_DESCRIPTOR</span>:
+                    <span class="enscript-keyword">if</span>(!is_task_64bit)
+                        send_size -= DESC_SIZE_ADJUSTMENT;
+                    <span class="enscript-keyword">break</span>;
+                <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_PORT_DESCRIPTOR</span>:
+                    send_size -= DESC_SIZE_ADJUSTMENT;
+                    <span class="enscript-keyword">break</span>;
+                <span class="enscript-reference">default</span>:
+                    <span class="enscript-keyword">break</span>;
+            }
+        }
+    }
+    <span class="enscript-keyword">return</span> send_size;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_copyout
+ *	Purpose:
+ *		&quot;Copy-out&quot; port rights and out-of-line memory
+ *		in the message.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Copied out all rights and memory.
+ *		MACH_RCV_HEADER_ERROR + special bits
+ *			Rights and memory in the message are intact.
+ *		MACH_RCV_BODY_ERROR + special bits
+ *			The message header was successfully copied out.
+ *			As much of the body was handled as possible.
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">ipc_kmsg_copyout</span>(
+	ipc_kmsg_t		kmsg,
+	ipc_space_t		space,
+	vm_map_t		map,
+	mach_msg_body_t		*slist,
+	 mach_msg_option_t	option)
+{
+	mach_msg_return_t mr;
+
+	mr = ipc_kmsg_copyout_header(kmsg, space, option);
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+		<span class="enscript-keyword">return</span> mr;
+	}
+
+	<span class="enscript-keyword">if</span> (kmsg-&gt;ikm_header-&gt;msgh_bits &amp; MACH_MSGH_BITS_COMPLEX) {
+		mr = ipc_kmsg_copyout_body(kmsg, space, map, slist);
+
+		<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS)
+			mr |= MACH_RCV_BODY_ERROR;
+	}
+
+	<span class="enscript-keyword">return</span> mr;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_copyout_pseudo
+ *	Purpose:
+ *		Does a pseudo-copyout of the message.
+ *		This is like a regular copyout, except
+ *		that the ports in the header are handled
+ *		as if they are in the body.  They aren't reversed.
+ *
+ *		The error codes are a combination of special bits.
+ *		The copyout proceeds despite errors.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Successful copyout.
+ *		MACH_MSG_IPC_SPACE	No room for port right in name space.
+ *		MACH_MSG_VM_SPACE	No room for memory in address space.
+ *		MACH_MSG_IPC_KERNEL	Resource shortage handling port right.
+ *		MACH_MSG_VM_KERNEL	Resource shortage handling memory.
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">ipc_kmsg_copyout_pseudo</span>(
+	ipc_kmsg_t		kmsg,
+	ipc_space_t		space,
+	vm_map_t		map,
+	mach_msg_body_t		*slist)
+{
+	mach_msg_bits_t mbits = kmsg-&gt;ikm_header-&gt;msgh_bits;
+	ipc_object_t dest = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+	ipc_object_t reply = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_local_port;
+	ipc_object_t voucher = (ipc_object_t) kmsg-&gt;ikm_voucher;
+	mach_msg_type_name_t dest_type = MACH_MSGH_BITS_REMOTE(mbits);
+	mach_msg_type_name_t reply_type = MACH_MSGH_BITS_LOCAL(mbits);
+	mach_msg_type_name_t voucher_type = MACH_MSGH_BITS_VOUCHER(mbits);
+	mach_port_name_t voucher_name = kmsg-&gt;ikm_header-&gt;msgh_voucher_port;
+	mach_port_name_t dest_name, reply_name;
+	mach_msg_return_t mr;
+
+	assert(IO_VALID(dest));
+
+#<span class="enscript-reference">if</span> 0
+	<span class="enscript-comment">/*
+	 * If we did this here, it looks like we wouldn't need the undo logic
+	 * at the end of ipc_kmsg_send() in the error cases.  Not sure which
+	 * would be more elegant to keep.
+	 */</span>
+	ipc_importance_clean(kmsg);
+#<span class="enscript-reference">else</span>
+	<span class="enscript-comment">/* just assert it is already clean */</span>
+	ipc_importance_assert_clean(kmsg);
+#<span class="enscript-reference">endif</span>
+
+	mr = (ipc_kmsg_copyout_object(space, dest, dest_type, &amp;dest_name) |
+	      ipc_kmsg_copyout_object(space, reply, reply_type, &amp;reply_name));
+
+	kmsg-&gt;ikm_header-&gt;msgh_bits = mbits &amp; MACH_MSGH_BITS_USER;
+	kmsg-&gt;ikm_header-&gt;msgh_remote_port = CAST_MACH_NAME_TO_PORT(dest_name);
+	kmsg-&gt;ikm_header-&gt;msgh_local_port = CAST_MACH_NAME_TO_PORT(reply_name);
+
+	<span class="enscript-keyword">if</span> (IO_VALID(voucher)) {
+		assert(voucher_type == MACH_MSG_TYPE_MOVE_SEND);
+
+		kmsg-&gt;ikm_voucher = IP_NULL;
+		mr |= ipc_kmsg_copyout_object(space, voucher, voucher_type, &amp;voucher_name);
+		kmsg-&gt;ikm_header-&gt;msgh_voucher_port = voucher_name;
+	}
+		
+	<span class="enscript-keyword">if</span> (mbits &amp; MACH_MSGH_BITS_COMPLEX) {
+		mr |= ipc_kmsg_copyout_body(kmsg, space, map, slist);
+	}
+
+	<span class="enscript-keyword">return</span> mr;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_copyout_dest
+ *	Purpose:
+ *		Copies out the destination port in the message.
+ *		Destroys all other rights and memory in the message.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_copyout_dest</span>(
+	ipc_kmsg_t	kmsg,
+	ipc_space_t	space)
+{
+	mach_msg_bits_t mbits;
+	ipc_object_t dest;
+	ipc_object_t reply;
+	ipc_object_t voucher;
+	mach_msg_type_name_t dest_type;
+	mach_msg_type_name_t reply_type;
+	mach_msg_type_name_t voucher_type;
+	mach_port_name_t dest_name, reply_name, voucher_name;
+
+	mbits = kmsg-&gt;ikm_header-&gt;msgh_bits;
+	dest = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+	reply = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_local_port;
+	voucher = (ipc_object_t) kmsg-&gt;ikm_voucher;
+	voucher_name = kmsg-&gt;ikm_header-&gt;msgh_voucher_port;
+	dest_type = MACH_MSGH_BITS_REMOTE(mbits);
+	reply_type = MACH_MSGH_BITS_LOCAL(mbits);
+	voucher_type = MACH_MSGH_BITS_VOUCHER(mbits);
+
+	assert(IO_VALID(dest));
+
+	ipc_importance_assert_clean(kmsg);
+
+	io_lock(dest);
+	<span class="enscript-keyword">if</span> (io_active(dest)) {
+		ipc_object_copyout_dest(space, dest, dest_type, &amp;dest_name);
+		<span class="enscript-comment">/* dest is unlocked */</span>
+	} <span class="enscript-keyword">else</span> {
+		io_unlock(dest);
+		io_release(dest);
+		dest_name = MACH_PORT_DEAD;
+	}
+
+	<span class="enscript-keyword">if</span> (IO_VALID(reply)) {
+		ipc_object_destroy(reply, reply_type);
+		reply_name = MACH_PORT_NULL;
+	} <span class="enscript-keyword">else</span>
+		reply_name = CAST_MACH_PORT_TO_NAME(reply);
+
+	<span class="enscript-keyword">if</span> (IO_VALID(voucher)) {
+		assert(voucher_type == MACH_MSG_TYPE_MOVE_SEND);
+
+		kmsg-&gt;ikm_voucher = IP_NULL;
+		ipc_object_destroy((ipc_object_t)voucher, voucher_type);
+		voucher_name = MACH_PORT_NULL;
+	}
+
+	kmsg-&gt;ikm_header-&gt;msgh_bits = MACH_MSGH_BITS_SET(reply_type, dest_type,
+							 voucher_type, mbits);
+	kmsg-&gt;ikm_header-&gt;msgh_local_port = CAST_MACH_NAME_TO_PORT(dest_name);
+	kmsg-&gt;ikm_header-&gt;msgh_remote_port = CAST_MACH_NAME_TO_PORT(reply_name);
+	kmsg-&gt;ikm_header-&gt;msgh_voucher_port = voucher_name;
+
+	<span class="enscript-keyword">if</span> (mbits &amp; MACH_MSGH_BITS_COMPLEX) {
+		mach_msg_body_t *body;
+
+		body = (mach_msg_body_t *) (kmsg-&gt;ikm_header + 1);
+		ipc_kmsg_clean_body(kmsg, body-&gt;msgh_descriptor_count, 
+				    (mach_msg_descriptor_t *)(body + 1));
+	}
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kmsg_copyout_to_kernel
+ *	Purpose:
+ *		Copies out the destination and reply ports in the message.
+ *		Leaves all other rights and memory in the message alone.
+ *	Conditions:
+ *		Nothing locked.
+ *
+ *	Derived from ipc_kmsg_copyout_dest.
+ *	Use by mach_msg_rpc_from_kernel (which used to use copyout_dest).
+ *	We really do want to save rights and memory.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_copyout_to_kernel</span>(
+	ipc_kmsg_t	kmsg,
+	ipc_space_t	space)
+{
+	ipc_object_t dest;
+	ipc_object_t reply;
+	mach_msg_type_name_t dest_type;
+	mach_msg_type_name_t reply_type;
+	mach_port_name_t dest_name, reply_name;
+
+	dest = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+	reply = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_local_port;
+	dest_type = MACH_MSGH_BITS_REMOTE(kmsg-&gt;ikm_header-&gt;msgh_bits);
+	reply_type = MACH_MSGH_BITS_LOCAL(kmsg-&gt;ikm_header-&gt;msgh_bits);
+
+	assert(IO_VALID(dest));
+
+	io_lock(dest);
+	<span class="enscript-keyword">if</span> (io_active(dest)) {
+		ipc_object_copyout_dest(space, dest, dest_type, &amp;dest_name);
+		<span class="enscript-comment">/* dest is unlocked */</span>
+	} <span class="enscript-keyword">else</span> {
+		io_unlock(dest);
+		io_release(dest);
+		dest_name = MACH_PORT_DEAD;
+	}
+
+	reply_name = CAST_MACH_PORT_TO_NAME(reply);
+
+	kmsg-&gt;ikm_header-&gt;msgh_bits =
+		(MACH_MSGH_BITS_OTHER(kmsg-&gt;ikm_header-&gt;msgh_bits) |
+					MACH_MSGH_BITS(reply_type, dest_type));
+	kmsg-&gt;ikm_header-&gt;msgh_local_port =  CAST_MACH_NAME_TO_PORT(dest_name);
+	kmsg-&gt;ikm_header-&gt;msgh_remote_port = CAST_MACH_NAME_TO_PORT(reply_name);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IKM_SUPPORT_LEGACY</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kmsg_copyout_to_kernel_legacy</span>(
+	ipc_kmsg_t	kmsg,
+	ipc_space_t	space)
+{
+	ipc_object_t dest;
+	ipc_object_t reply;
+	mach_msg_type_name_t dest_type;
+	mach_msg_type_name_t reply_type;
+	mach_port_name_t dest_name, reply_name;
+
+	dest = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+	reply = (ipc_object_t) kmsg-&gt;ikm_header-&gt;msgh_local_port;
+	dest_type = MACH_MSGH_BITS_REMOTE(kmsg-&gt;ikm_header-&gt;msgh_bits);
+	reply_type = MACH_MSGH_BITS_LOCAL(kmsg-&gt;ikm_header-&gt;msgh_bits);
+
+	assert(IO_VALID(dest));
+
+	io_lock(dest);
+	<span class="enscript-keyword">if</span> (io_active(dest)) {
+		ipc_object_copyout_dest(space, dest, dest_type, &amp;dest_name);
+		<span class="enscript-comment">/* dest is unlocked */</span>
+	} <span class="enscript-keyword">else</span> {
+		io_unlock(dest);
+		io_release(dest);
+		dest_name = MACH_PORT_DEAD;
+	}
+
+	reply_name = CAST_MACH_PORT_TO_NAME(reply);
+
+	kmsg-&gt;ikm_header-&gt;msgh_bits =
+		(MACH_MSGH_BITS_OTHER(kmsg-&gt;ikm_header-&gt;msgh_bits) |
+					MACH_MSGH_BITS(reply_type, dest_type));
+	kmsg-&gt;ikm_header-&gt;msgh_local_port =  CAST_MACH_NAME_TO_PORT(dest_name);
+	kmsg-&gt;ikm_header-&gt;msgh_remote_port = CAST_MACH_NAME_TO_PORT(reply_name);
+
+    mach_msg_descriptor_t *saddr;
+    mach_msg_legacy_descriptor_t *daddr;
+    mach_msg_type_number_t i, count = ((mach_msg_base_t *)kmsg-&gt;ikm_header)-&gt;body.msgh_descriptor_count;
+    saddr = (mach_msg_descriptor_t *) (((mach_msg_base_t *)kmsg-&gt;ikm_header) + 1);
+    saddr = &amp;saddr[count-1];
+    daddr = (mach_msg_legacy_descriptor_t *)&amp;saddr[count];
+    daddr--;
+
+    vm_offset_t dsc_adjust = 0;
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++, saddr--, daddr--) {
+    <span class="enscript-keyword">switch</span> (saddr-&gt;type.type) {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_PORT_DESCRIPTOR</span>: {
+        mach_msg_port_descriptor_t *dsc = &amp;saddr-&gt;port;
+        mach_msg_legacy_port_descriptor_t *dest_dsc = &amp;daddr-&gt;port;
+
+        mach_port_t name = dsc-&gt;name;
+        mach_msg_type_name_t disposition = dsc-&gt;disposition;
+
+        dest_dsc-&gt;name = CAST_MACH_PORT_TO_NAME(name);
+        dest_dsc-&gt;disposition = disposition;
+        dest_dsc-&gt;type = MACH_MSG_PORT_DESCRIPTOR;
+        <span class="enscript-keyword">break</span>;
+        }
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_VOLATILE_DESCRIPTOR</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_DESCRIPTOR</span>: {
+        <span class="enscript-comment">/* The sender should supply ready-made memory, i.e. a vm_map_copy_t
+         * so we don't need to do anything special. */</span>
+
+        mach_msg_ool_descriptor_t 	*source_dsc = (typeof(source_dsc))&amp;saddr-&gt;out_of_line;
+
+            mach_msg_ool_descriptor32_t	*dest_dsc = &amp;daddr-&gt;out_of_line32;
+
+        vm_offset_t		            address = (vm_offset_t)source_dsc-&gt;address;
+        vm_size_t            		size = source_dsc-&gt;size;
+        boolean_t            		deallocate = source_dsc-&gt;deallocate;
+        mach_msg_copy_options_t		copy = source_dsc-&gt;copy;
+        mach_msg_descriptor_type_t  type = source_dsc-&gt;type;
+
+        dest_dsc-&gt;address = address;
+        dest_dsc-&gt;size = size;
+        dest_dsc-&gt;deallocate = deallocate;
+        dest_dsc-&gt;copy = copy;
+        dest_dsc-&gt;type = type;
+        <span class="enscript-keyword">break</span>;
+        }
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_OOL_PORTS_DESCRIPTOR</span>: {
+        mach_msg_ool_ports_descriptor_t 	*source_dsc = (typeof(source_dsc))&amp;saddr-&gt;ool_ports;
+
+            mach_msg_ool_ports_descriptor32_t	*dest_dsc = &amp;daddr-&gt;ool_ports32;
+
+        vm_offset_t		            address = (vm_offset_t)source_dsc-&gt;address;
+        vm_size_t            		port_count = source_dsc-&gt;count;
+        boolean_t            		deallocate = source_dsc-&gt;deallocate;
+        mach_msg_copy_options_t		copy = source_dsc-&gt;copy;
+        mach_msg_descriptor_type_t  type = source_dsc-&gt;type;
+
+        dest_dsc-&gt;address = address;
+        dest_dsc-&gt;count = port_count;
+        dest_dsc-&gt;deallocate = deallocate;
+        dest_dsc-&gt;copy = copy;
+        dest_dsc-&gt;type = type;
+        <span class="enscript-keyword">break</span>;
+        }
+        <span class="enscript-reference">default</span>: {
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MACH_ASSERT</span>
+        panic(<span class="enscript-string">&quot;ipc_kmsg_copyin_from_kernel:  bad descriptor&quot;</span>);
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MACH_ASSERT */</span>
+                 }
+    }
+    }
+
+    <span class="enscript-keyword">if</span>(count) {
+        dsc_adjust = 4*count;
+        memmove((<span class="enscript-type">char</span> *)((vm_offset_t)kmsg-&gt;ikm_header + dsc_adjust), kmsg-&gt;ikm_header, <span class="enscript-keyword">sizeof</span>(mach_msg_base_t));
+        kmsg-&gt;ikm_header = (mach_msg_header_t *)((vm_offset_t)kmsg-&gt;ikm_header + dsc_adjust);
+        <span class="enscript-comment">/* Update the message size for the smaller user representation */</span>
+        kmsg-&gt;ikm_header-&gt;msgh_size -= dsc_adjust;
+    }
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IKM_SUPPORT_LEGACY */</span>
+
+
+mach_msg_trailer_size_t
+<span class="enscript-function-name">ipc_kmsg_add_trailer</span>(ipc_kmsg_t kmsg, ipc_space_t space __unused, 
+		mach_msg_option_t option, thread_t thread, 
+		mach_port_seqno_t seqno, boolean_t minimal_trailer,
+		mach_vm_offset_t context)
+{
+	mach_msg_max_trailer_t *trailer;
+
+	(<span class="enscript-type">void</span>)thread;
+	trailer = (mach_msg_max_trailer_t *)
+		((vm_offset_t)kmsg-&gt;ikm_header +
+		 round_msg(kmsg-&gt;ikm_header-&gt;msgh_size));
+
+	<span class="enscript-keyword">if</span> (!(option &amp; MACH_RCV_TRAILER_MASK)) {
+		<span class="enscript-keyword">return</span> trailer-&gt;msgh_trailer_size;
+	}
+
+	trailer-&gt;msgh_seqno = seqno;
+	trailer-&gt;msgh_context = context;
+	trailer-&gt;msgh_trailer_size = REQUESTED_TRAILER_SIZE(thread_is_64bit(thread), option);
+
+	<span class="enscript-keyword">if</span> (minimal_trailer) { 
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (MACH_RCV_TRAILER_ELEMENTS(option) &gt;= 
+			MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AV)){
+		trailer-&gt;msgh_ad = 0;
+	}
+
+	<span class="enscript-comment">/*
+	 * The ipc_kmsg_t holds a reference to the label of a label
+	 * handle, not the port. We must get a reference to the port
+	 * and a send right to copyout to the receiver.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (option &amp; MACH_RCV_TRAILER_ELEMENTS (MACH_RCV_TRAILER_LABELS)) {
+		trailer-&gt;msgh_labels.sender = 0;
+	}
+
+<span class="enscript-reference">done</span>:
+
+	<span class="enscript-keyword">return</span> trailer-&gt;msgh_trailer_size;
+}
+</pre>
+<hr />
+</body></html>

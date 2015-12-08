@@ -1,0 +1,417 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>spawn_internal.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">spawn_internal.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+
+<span class="enscript-comment">/*
+ * [SPN] Support for _POSIX_SPAWN
+ *
+ * This file contains internal data structures which are externally represented
+ * as opaque void pointers to prevent introspection.  This permits us to
+ * change the underlying implementation of the code to maintain it or to
+ * support new features, as needed, without the consumer needing to recompile
+ * their code because of structure size changes or data reorganization.
+ */</span>
+
+#<span class="enscript-reference">ifndef</span>	<span class="enscript-variable-name">_SYS_SPAWN_INTERNAL_H_</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">_SYS_SPAWN_INTERNAL_H_</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/_types.h&gt;</span>		<span class="enscript-comment">/* __offsetof(), __darwin_size_t */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslimits.h&gt;</span>	<span class="enscript-comment">/* PATH_MAX */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/spawn.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/exception_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/coalition.h&gt;</span>	<span class="enscript-comment">/* COALITION_NUM_TYPES */</span>
+
+<span class="enscript-comment">/*
+ * Allowable posix_spawn() port action types
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">enum</span> {
+	PSPA_SPECIAL = 0,
+	PSPA_EXCEPTION = 1,
+	PSPA_AU_SESSION = 2,
+	PSPA_IMP_WATCHPORTS = 3,
+} pspa_t;
+
+<span class="enscript-comment">/*
+ * Internal representation of one port to be set on posix_spawn().
+ * Currently this is limited to setting special and exception ports,
+ * but could be extended to other inheritable port types.
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> _ps_port_action {
+	pspa_t			port_type;
+	exception_mask_t	mask;
+	mach_port_name_t	new_port;
+	exception_behavior_t	behavior;
+	thread_state_flavor_t	flavor;
+	<span class="enscript-type">int</span>			which;
+} _ps_port_action_t;
+
+<span class="enscript-comment">/*
+ * A collection of port actions to take on the newly spawned process.
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> _posix_spawn_port_actions {
+	<span class="enscript-type">int</span>			pspa_alloc;
+	<span class="enscript-type">int</span>			pspa_count;
+	_ps_port_action_t 	pspa_actions[];
+} *_posix_spawn_port_actions_t;
+
+<span class="enscript-comment">/*
+ * Returns size in bytes of a _posix_spawn_port_actions holding x elements.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">PS_PORT_ACTIONS_SIZE</span>(x)	\
+	__offsetof(<span class="enscript-type">struct</span> _posix_spawn_port_actions, pspa_actions[(x)])
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NBINPREFS</span>	4
+
+<span class="enscript-comment">/*
+ * Mapping of opaque data pointer to a MAC policy (specified by name).
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> _ps_mac_policy_extension {
+	<span class="enscript-type">char</span>			policyname[128];
+	<span class="enscript-type">union</span> {
+		uint64_t	data;
+		<span class="enscript-type">void</span> 		*datap;		<span class="enscript-comment">/* pointer in kernel memory */</span>
+	};
+	uint64_t		datalen;
+} _ps_mac_policy_extension_t;
+
+<span class="enscript-comment">/*
+ * A collection of extra data passed to MAC policies for the newly spawned process.
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> _posix_spawn_mac_policy_extensions {
+	<span class="enscript-type">int</span>			psmx_alloc;
+	<span class="enscript-type">int</span>			psmx_count;
+	_ps_mac_policy_extension_t psmx_extensions[];
+} *_posix_spawn_mac_policy_extensions_t;
+
+<span class="enscript-comment">/*
+ * Returns size in bytes of a _posix_spawn_mac_policy_extensions holding x elements.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PS_MAC_EXTENSIONS_SIZE</span>(x)     \
+        __offsetof(<span class="enscript-type">struct</span> _posix_spawn_mac_policy_extensions, psmx_extensions[(x)])
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PS_MAC_EXTENSIONS_INIT_COUNT</span>	2
+
+<span class="enscript-comment">/*
+ * Coalition posix spawn attributes
+ */</span>
+<span class="enscript-type">struct</span> _posix_spawn_coalition_info {
+	<span class="enscript-type">struct</span> {
+		uint64_t psci_id;
+		uint32_t psci_role;
+		uint32_t psci_reserved1;
+		uint64_t psci_reserved2;
+	} psci_info[COALITION_NUM_TYPES];
+};
+
+<span class="enscript-comment">/*
+ * A posix_spawnattr structure contains all of the attribute elements that
+ * can be set, as well as any metadata whose validity is signalled by the
+ * presence of a bit in the flags field.  All fields are initialized to the
+ * appropriate default values by posix_spawnattr_init().
+ */</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> _posix_spawnattr {
+	<span class="enscript-type">short</span>		psa_flags;		<span class="enscript-comment">/* spawn attribute flags */</span>
+	<span class="enscript-type">short</span> 		flags_padding; 	<span class="enscript-comment">/* get the flags to be int aligned */</span>
+	sigset_t	psa_sigdefault;		<span class="enscript-comment">/* signal set to default */</span>
+	sigset_t	psa_sigmask;		<span class="enscript-comment">/* signal set to mask */</span>
+	pid_t		psa_pgroup;		<span class="enscript-comment">/* pgroup to spawn into */</span>
+	cpu_type_t	psa_binprefs[NBINPREFS];   <span class="enscript-comment">/* cpu affinity prefs*/</span>
+	<span class="enscript-type">int</span>		psa_pcontrol;		<span class="enscript-comment">/* process control bits on resource starvation */</span>
+	<span class="enscript-type">int</span>		psa_apptype;		<span class="enscript-comment">/* app type and process spec behav */</span>
+	uint64_t 	psa_cpumonitor_percent; <span class="enscript-comment">/* CPU usage monitor percentage */</span>
+	uint64_t 	psa_cpumonitor_interval; <span class="enscript-comment">/* CPU usage monitor interval, in seconds */</span>
+	uint64_t	psa_reserved;
+
+	<span class="enscript-type">short</span>       psa_jetsam_flags;		<span class="enscript-comment">/* jetsam flags */</span>
+	<span class="enscript-type">short</span>		short_padding;		<span class="enscript-comment">/* Padding for alignment issues */</span>
+	<span class="enscript-type">int</span>         psa_priority;		<span class="enscript-comment">/* jetsam relative importance */</span>
+	<span class="enscript-type">int</span>         psa_memlimit_active;	<span class="enscript-comment">/* jetsam memory limit (in MB) when process is active */</span>
+	<span class="enscript-type">int</span>         psa_memlimit_inactive;	<span class="enscript-comment">/* jetsam memory limit (in MB) when process is inactive */</span>
+
+	uint64_t        psa_qos_clamp;          <span class="enscript-comment">/* QoS Clamp to set on the new process */</span>
+	uint64_t        psa_darwin_role;           <span class="enscript-comment">/* PRIO_DARWIN_ROLE to set on the new process */</span>
+
+	<span class="enscript-comment">/*
+	 * NOTE: Extensions array pointers must stay at the end so that
+	 * everything above this point stays the same size on different bitnesses
+	 * see &lt;rdar://problem/12858307&gt;
+	 */</span>
+	 _posix_spawn_port_actions_t	psa_ports; <span class="enscript-comment">/* special/exception ports */</span>
+	_posix_spawn_mac_policy_extensions_t psa_mac_extensions; <span class="enscript-comment">/* MAC policy-specific extensions. */</span>
+	<span class="enscript-type">struct</span> _posix_spawn_coalition_info *psa_coalition_info;  <span class="enscript-comment">/* coalition info */</span>
+	<span class="enscript-type">void</span>		*reserved;
+} *_posix_spawnattr_t;
+
+<span class="enscript-comment">/*
+ * Jetsam flags  eg: psa_jetsam_flags
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">POSIX_SPAWN_JETSAM_SET</span>                      0x8000
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">POSIX_SPAWN_JETSAM_USE_EFFECTIVE_PRIORITY</span>	0x01
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">POSIX_SPAWN_JETSAM_HIWATER_BACKGROUND</span>		0x02
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">POSIX_SPAWN_JETSAM_MEMLIMIT_FATAL</span>		0x04  <span class="enscript-comment">/* to be deprecated */</span>
+
+<span class="enscript-comment">/*
+ * Additional flags available for use with
+ * the posix_spawnattr_setjetsam_ext() call
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">POSIX_SPAWN_JETSAM_MEMLIMIT_ACTIVE_FATAL</span>	0x04  <span class="enscript-comment">/* if set, limit is fatal when the process is active   */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">POSIX_SPAWN_JETSAM_MEMLIMIT_INACTIVE_FATAL</span>	0x08  <span class="enscript-comment">/* if set, limit is fatal when the process is inactive */</span>
+
+<span class="enscript-comment">/*
+ * Deprecated posix_spawn psa_flags values
+ * 
+ * POSIX_SPAWN_OSX_TALAPP_START         0x0400
+ * POSIX_SPAWN_IOS_RESV1_APP_START      0x0400
+ * POSIX_SPAWN_IOS_APPLE_DAEMON_START   0x0800
+ * POSIX_SPAWN_IOS_APP_START            0x1000
+ * POSIX_SPAWN_OSX_WIDGET_START         0x0800
+ * POSIX_SPAWN_OSX_DBCLIENT_START       0x0800
+ * POSIX_SPAWN_OSX_RESVAPP_START        0x1000
+ */</span>
+
+<span class="enscript-comment">/*
+ * Deprecated posix_spawn psa_apptype values
+ *
+ * POSIX_SPAWN_PROCESS_TYPE_APPLEDAEMON             0x00000001
+ * POSIX_SPAWN_PROCESS_TYPE_UIAPP                   0x00000002
+ * POSIX_SPAWN_PROCESS_TYPE_ADAPTIVE                0x00000004
+ * POSIX_SPAWN_PROCESS_TYPE_TAL                     0x00000001
+ * POSIX_SPAWN_PROCESS_TYPE_WIDGET                  0x00000002
+ * POSIX_SPAWN_PROCESS_TYPE_DELAYIDLESLEEP          0x10000000
+ *
+ * POSIX_SPAWN_PROCESS_FLAG_IMPORTANCE_DONOR        0x00000010
+ * POSIX_SPAWN_PROCESS_FLAG_ADAPTIVE                0x00000020
+ * POSIX_SPAWN_PROCESS_FLAG_START_BACKGROUND        0x00000040
+ * POSIX_SPAWN_PROCESS_FLAG_START_LIGHT_THROTTLE    0x00000080
+ */</span>
+
+<span class="enscript-comment">/*
+ * posix_spawn psa_apptype process type settings.
+ * when POSIX_SPAWN_PROC_TYPE is set, old psa_apptype bits are ignored
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_PROCESS_TYPE_NORMAL</span>             0x00000000
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_PROCESS_TYPE_DEFAULT</span>            POSIX_SPAWN_PROCESS_TYPE_NORMAL
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_PROC_TYPE_MASK</span>                  0x00000F00
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_PROC_TYPE_APP_DEFAULT</span>           0x00000100
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_PROC_TYPE_APP_TAL</span>               0x00000200
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_PROC_TYPE_DAEMON_STANDARD</span>       0x00000300
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_PROC_TYPE_DAEMON_INTERACTIVE</span>    0x00000400
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_PROC_TYPE_DAEMON_BACKGROUND</span>     0x00000500
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_PROC_TYPE_DAEMON_ADAPTIVE</span>       0x00000600
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_PROC_CLAMP_NONE</span>                 0x00000000
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_PROC_CLAMP_UTILITY</span>              0x00000001
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_PROC_CLAMP_BACKGROUND</span>           0x00000002
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_PROC_CLAMP_MAINTENANCE</span>          0x00000003
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_PROC_CLAMP_LAST</span>                 0x00000004
+
+<span class="enscript-comment">/* Setting to indicate no change to darwin role */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">POSIX_SPAWN_DARWIN_ROLE_NONE</span>                0x00000000
+<span class="enscript-comment">/* Other possible values are specified by PRIO_DARWIN_ROLE in sys/resource.h */</span>
+
+<span class="enscript-comment">/*
+ * Allowable posix_spawn() file actions
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">enum</span> {
+	PSFA_OPEN = 0,
+	PSFA_CLOSE = 1,
+	PSFA_DUP2 = 2,
+	PSFA_INHERIT = 3
+} psfa_t;
+
+
+<span class="enscript-comment">/*
+ * A posix_spawn() file action record for a single action
+ *
+ * Notes:	We carry around the full open arguments for both the open
+ *		and the close to permit the use of a single array of action
+ *		elements to be associated with a file actions object.
+ *
+ *		A possible future optimization would be to break this into
+ *		a variable sized vector list to save space (i.e. a separate
+ *		string area, allocation of least amount of path buffer per
+ *		open action, etc.).
+ *
+ * XXX:		Currently overloading psfao_oflag for PSFA_DUP2
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> _psfa_action {
+	psfa_t	psfaa_type;			<span class="enscript-comment">/* file action type */</span>
+	<span class="enscript-type">int</span>	psfaa_filedes;			<span class="enscript-comment">/* fd to operate on */</span>
+	<span class="enscript-type">struct</span> _psfaa_open {
+		<span class="enscript-type">int</span>	psfao_oflag;		<span class="enscript-comment">/* open flags to use */</span>
+		mode_t	psfao_mode;		<span class="enscript-comment">/* mode for open */</span>
+		<span class="enscript-type">char</span>	psfao_path[PATH_MAX];	<span class="enscript-comment">/* path to open */</span>
+	} psfaa_openargs;
+} _psfa_action_t;
+
+
+<span class="enscript-comment">/*
+ * Internal representation of posix_spawn() file actions structure
+ *
+ * Notes:	This is implemented as a structure followed by an array of
+ *		file action records.  The psfa_act_alloc value is the number
+ *		of elements allocated in this array, and the psfa_act_count is
+ *		the number of elements currently in use (to permit some form
+ *		of preallocation, e.g. a power of 2 growth for reallocation,
+ *		etc.).
+ *
+ *		A possible future optimization would keep a size value and
+ *		a structure base reference pointer to permit copyin to the
+ *		kernel directly as a single blob, without damaging relative
+ *		internal pointer math.  It's probably better that this be a
+ *		long long rather than a true pointer, to make it invariant
+ *		for 32 vs. 64 bt programming SPIs.
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> _posix_spawn_file_actions {
+	<span class="enscript-type">int</span>		psfa_act_alloc;		<span class="enscript-comment">/* available actions space */</span>
+	<span class="enscript-type">int</span>		psfa_act_count;		<span class="enscript-comment">/* count of defined actions */</span>
+	_psfa_action_t	psfa_act_acts[];	<span class="enscript-comment">/* actions array (uses c99) */</span>
+} *_posix_spawn_file_actions_t;
+
+<span class="enscript-comment">/*
+ * Calculate the size of a structure, given the number of elements that it is
+ * capable of containing.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">PSF_ACTIONS_SIZE</span>(x)	\
+	__offsetof(<span class="enscript-type">struct</span> _posix_spawn_file_actions, psfa_act_acts[(x)])
+
+<span class="enscript-comment">/*
+ * Initial count of actions in a struct _posix_spawn_file_actions after it is
+ * first allocated; this should be non-zero, since we expect that one would not
+ * have been allocated unless there was an intent to use it.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PSF_ACTIONS_INIT_COUNT</span>	2
+
+<span class="enscript-comment">/*
+ * Structure defining the true third argument to the posix_spawn() system call
+ * entry point; we wrap it and pass a descriptor so that we can know the
+ * copyin size ahead of time, and deal with copying in variant lists of things
+ * as single monolithic units, instead of many individual elements.  This is a
+ * performance optimization.
+ */</span>
+<span class="enscript-type">struct</span> _posix_spawn_args_desc {
+	__darwin_size_t		attr_size;	<span class="enscript-comment">/* size of attributes block */</span>
+	_posix_spawnattr_t	attrp;		<span class="enscript-comment">/* pointer to block */</span>
+	__darwin_size_t	file_actions_size;	<span class="enscript-comment">/* size of file actions block */</span>
+	_posix_spawn_file_actions_t
+				file_actions;	<span class="enscript-comment">/* pointer to block */</span>
+	__darwin_size_t	port_actions_size; 	<span class="enscript-comment">/* size of port actions block */</span>
+	_posix_spawn_port_actions_t
+				port_actions; 	<span class="enscript-comment">/* pointer to port block */</span>
+	__darwin_size_t mac_extensions_size;
+	_posix_spawn_mac_policy_extensions_t
+				mac_extensions;	<span class="enscript-comment">/* pointer to policy-specific
+						 * attributes */</span>
+	__darwin_size_t coal_info_size;
+	<span class="enscript-type">struct</span> _posix_spawn_coalition_info *coal_info;	<span class="enscript-comment">/* pointer to coalition info */</span>
+
+	__darwin_size_t reserved_size;
+	<span class="enscript-type">void</span> *reserved;
+};
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/appleapiopts.h&gt;</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__APPLE_API_PRIVATE</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__DARWIN_ALIGN_NATURAL</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">options</span> <span class="enscript-variable-name">align</span>=<span class="enscript-variable-name">natural</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">struct</span> user32__posix_spawn_args_desc {
+	uint32_t		attr_size;	<span class="enscript-comment">/* size of attributes block */</span>
+	uint32_t		attrp;		<span class="enscript-comment">/* pointer to block */</span>
+	uint32_t	file_actions_size;	<span class="enscript-comment">/* size of file actions block */</span>
+	uint32_t		file_actions;	<span class="enscript-comment">/* pointer to block */</span>
+	uint32_t	port_actions_size;	<span class="enscript-comment">/* size of port actions block */</span>
+	uint32_t		port_actions;	<span class="enscript-comment">/* pointer to block */</span>
+	uint32_t	mac_extensions_size;
+	uint32_t	mac_extensions;
+	uint32_t	coal_info_size;
+	uint32_t	coal_info;
+	uint32_t	reserved_size;
+	uint32_t	reserved;
+};
+
+<span class="enscript-type">struct</span> user__posix_spawn_args_desc {
+	user_size_t		attr_size;	<span class="enscript-comment">/* size of attributes block */</span>
+	user_addr_t		attrp;		<span class="enscript-comment">/* pointer to block */</span>
+	user_size_t	file_actions_size;	<span class="enscript-comment">/* size of file actions block */</span>
+	user_addr_t		file_actions;	<span class="enscript-comment">/* pointer to block */</span>
+	user_size_t	port_actions_size;	<span class="enscript-comment">/* size of port actions block */</span>
+	user_addr_t		port_actions;	<span class="enscript-comment">/* pointer to block */</span>
+	user_size_t	mac_extensions_size;	<span class="enscript-comment">/* size of MAC-specific attrs. */</span>
+	user_addr_t	mac_extensions;		<span class="enscript-comment">/* pointer to block */</span>
+	user_size_t	coal_info_size;
+	user_addr_t	coal_info;
+	user_size_t	reserved_size;
+	user_addr_t	reserved;
+};
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__DARWIN_ALIGN_NATURAL</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">options</span> <span class="enscript-variable-name">align</span>=<span class="enscript-variable-name">reset</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* __APPLE_API_PRIVATE */</span>
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* KERNEL */</span>
+	
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* _SYS_SPAWN_INTERNAL_H_ */</span>
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,153 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>sys_work_interval.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">sys_work_interval.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/priv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/work_interval.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">work_interval_ctl</span>(__unused proc_t p, <span class="enscript-type">struct</span> work_interval_ctl_args *uap, __unused int32_t *retval)
+{
+	uint32_t	operation = uap-&gt;operation;
+	<span class="enscript-type">int</span>			error = 0;
+	kern_return_t	kret = KERN_SUCCESS;
+	uint64_t	work_interval_id;
+	<span class="enscript-type">struct</span> work_interval_notification	notification;
+
+	<span class="enscript-keyword">switch</span> (operation) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">WORK_INTERVAL_OPERATION_CREATE</span>:
+			<span class="enscript-keyword">if</span> (uap-&gt;arg == USER_ADDR_NULL || uap-&gt;work_interval_id != 0) {
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+			<span class="enscript-keyword">if</span> (uap-&gt;len &lt; <span class="enscript-keyword">sizeof</span>(work_interval_id)) {
+				<span class="enscript-keyword">return</span> ERANGE;
+			}
+
+			<span class="enscript-comment">/*
+			 * Privilege check performed up-front, and then the work
+			 * ID is allocated for use by the thread
+			 */</span>
+			error = priv_check_cred(kauth_cred_get(), PRIV_WORK_INTERVAL, 0);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">return</span> (error);
+			}
+
+			kret = thread_policy_create_work_interval(current_thread(),
+													  &amp;work_interval_id);
+			<span class="enscript-keyword">if</span> (kret == KERN_SUCCESS) {
+				error = copyout(&amp;work_interval_id, uap-&gt;arg, <span class="enscript-keyword">sizeof</span>(work_interval_id));
+			} <span class="enscript-keyword">else</span> {
+				error = EINVAL;
+			}
+
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">WORK_INTERVAL_OPERATION_DESTROY</span>:
+			<span class="enscript-keyword">if</span> (uap-&gt;arg != USER_ADDR_NULL || uap-&gt;work_interval_id == 0) {
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+
+			<span class="enscript-comment">/*
+			 * No privilege check, we assume a previous WORK_INTERVAL_OPERATION_CREATE
+			 * operation would have allocated a work interval ID for the current
+			 * thread, which the scheduler will validate.
+			 */</span>
+			kret = thread_policy_destroy_work_interval(current_thread(),
+													   uap-&gt;work_interval_id);
+			<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) {
+				error = EINVAL;
+			}
+
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">WORK_INTERVAL_OPERATION_NOTIFY</span>:
+			<span class="enscript-keyword">if</span> (uap-&gt;arg == USER_ADDR_NULL || uap-&gt;work_interval_id == 0) {
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+			<span class="enscript-keyword">if</span> (uap-&gt;len &lt; <span class="enscript-keyword">sizeof</span>(notification)) {
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+
+			<span class="enscript-comment">/*
+			 * No privilege check, we assume a previous WORK_INTERVAL_OPERATION_CREATE
+			 * operation would have allocated a work interval ID for the current
+			 * thread, which the scheduler will validate.
+			 */</span>
+			error = copyin(uap-&gt;arg, &amp;notification, <span class="enscript-keyword">sizeof</span>(notification));
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">break</span>;
+			}
+
+			kret = sched_work_interval_notify(current_thread(),
+											  uap-&gt;work_interval_id,
+											  notification.start,
+											  notification.finish,
+											  notification.deadline,
+											  notification.next_start,
+											  notification.flags);
+			<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) {
+				error = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			error = ENOTSUP;
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+</pre>
+<hr />
+</body></html>

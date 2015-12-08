@@ -1,0 +1,4020 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ntstat.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ntstat.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2010-2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kpi_mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kern_control.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/priv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSMalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/locks.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/ntstat.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_fsm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_cc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/udp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/udp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/in6_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/in6_var.h&gt;</span>
+
+__private_extern__ <span class="enscript-type">int</span>	nstat_collect = 1;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net, OID_AUTO, statistics, CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;nstat_collect, 0, <span class="enscript-string">&quot;Collect detailed statistics&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> nstat_privcheck = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net, OID_AUTO, statistics_privcheck, CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;nstat_privcheck, 0, <span class="enscript-string">&quot;Entitlement check&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net, OID_AUTO, stats,
+    CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;network statistics&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> nstat_debug = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_stats, OID_AUTO, debug, CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;nstat_debug, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> nstat_sendspace = 2048;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_stats, OID_AUTO, sendspace, CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;nstat_sendspace, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> nstat_recvspace = 8192;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_stats, OID_AUTO, recvspace, CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;nstat_recvspace, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> nstat_stats nstat_stats;
+<span class="enscript-function-name">SYSCTL_STRUCT</span>(_net_stats, OID_AUTO, stats, CTLFLAG_RD | CTLFLAG_LOCKED,
+    &amp;nstat_stats, nstat_stats, <span class="enscript-string">&quot;&quot;</span>);
+
+
+<span class="enscript-type">enum</span>
+{
+	NSTAT_FLAG_CLEANUP				= (1 &lt;&lt; 0),
+	NSTAT_FLAG_REQCOUNTS			= (1 &lt;&lt; 1),
+	NSTAT_FLAG_SUPPORTS_UPDATES		= (1 &lt;&lt; 2),
+	NSTAT_FLAG_SYSINFO_SUBSCRIBED	= (1 &lt;&lt; 3),
+};
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">QUERY_CONTINUATION_SRC_COUNT</span> 100
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> nstat_control_state
+{
+	<span class="enscript-type">struct</span> nstat_control_state	*ncs_next;
+	u_int32_t			ncs_watching;
+	decl_lck_mtx_data(, mtx);
+	kern_ctl_ref			ncs_kctl;
+	u_int32_t			ncs_unit;
+	nstat_src_ref_t			ncs_next_srcref;
+	<span class="enscript-type">struct</span> nstat_src		*ncs_srcs;
+	mbuf_t				ncs_accumulated;
+	u_int32_t			ncs_flags;
+	u_int64_t			ncs_provider_filters[NSTAT_PROVIDER_COUNT];
+	<span class="enscript-comment">/* state maintained for partial query requests */</span>
+	u_int64_t			ncs_context;
+	u_int64_t			ncs_seq;
+} nstat_control_state;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> nstat_provider
+{
+	<span class="enscript-type">struct</span> nstat_provider	*next;
+	nstat_provider_id_t		nstat_provider_id;
+	size_t					nstat_descriptor_length;
+	errno_t					(*nstat_lookup)(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *data, u_int32_t length, nstat_provider_cookie_t *out_cookie);
+	<span class="enscript-type">int</span>						(*nstat_gone)(nstat_provider_cookie_t cookie);
+	errno_t					(*nstat_counts)(nstat_provider_cookie_t cookie, <span class="enscript-type">struct</span> nstat_counts *out_counts, <span class="enscript-type">int</span> *out_gone);
+	errno_t					(*nstat_watcher_add)(nstat_control_state *state);
+	<span class="enscript-type">void</span>					(*nstat_watcher_remove)(nstat_control_state *state);
+	errno_t					(*nstat_copy_descriptor)(nstat_provider_cookie_t cookie, <span class="enscript-type">void</span> *data, u_int32_t len);
+	<span class="enscript-type">void</span>					(*nstat_release)(nstat_provider_cookie_t cookie, boolean_t locked);
+	bool    				(*nstat_reporting_allowed)(nstat_provider_cookie_t cookie, uint64_t filter);
+} nstat_provider;
+
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> nstat_src
+{
+	<span class="enscript-type">struct</span> nstat_src		*next;
+	nstat_src_ref_t			srcref;
+	nstat_provider			*provider;
+	nstat_provider_cookie_t		cookie;
+	uint32_t			filter;
+	uint64_t			seq;
+} nstat_src;
+
+<span class="enscript-type">static</span> errno_t		nstat_control_send_counts(nstat_control_state *,
+			    nstat_src *, <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> <span class="enscript-type">long</span>, u_int16_t, <span class="enscript-type">int</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>		nstat_control_send_description(nstat_control_state *state, nstat_src *src, u_int64_t context, u_int16_t hdr_flags);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">nstat_control_send_update</span>(nstat_control_state *state, nstat_src *src, u_int64_t context, u_int16_t hdr_flags, <span class="enscript-type">int</span> *gone);
+<span class="enscript-type">static</span> errno_t		nstat_control_send_removed(nstat_control_state *, nstat_src *);
+<span class="enscript-type">static</span> errno_t		nstat_control_send_goodbye(nstat_control_state	*state, nstat_src *src);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>		nstat_control_cleanup_source(nstat_control_state *state, nstat_src *src, boolean_t);
+<span class="enscript-type">static</span> bool		nstat_control_reporting_allowed(nstat_control_state *state, nstat_src *src);
+<span class="enscript-type">static</span> boolean_t	nstat_control_begin_query(nstat_control_state *state, <span class="enscript-type">const</span> nstat_msg_hdr *hdrp);
+<span class="enscript-type">static</span> u_int16_t	nstat_control_end_query(nstat_control_state *state, nstat_src *last_src, boolean_t partial);
+
+<span class="enscript-type">static</span> u_int32_t	nstat_udp_watchers = 0;
+<span class="enscript-type">static</span> u_int32_t	nstat_tcp_watchers = 0;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">nstat_control_register</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/*
+ * The lock order is as follows:
+ *
+ * socket_lock (inpcb)
+ *     nstat_mtx
+ *         state-&gt;mtx
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> OSMallocTag	nstat_malloc_tag = NULL;
+<span class="enscript-type">static</span> nstat_control_state	*nstat_controls = NULL;
+<span class="enscript-type">static</span> uint64_t				nstat_idle_time = 0;
+<span class="enscript-type">static</span> <span class="enscript-function-name">decl_lck_mtx_data</span>(, nstat_mtx);
+
+<span class="enscript-comment">/* some extern definitions */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">mbuf_report_peak_usage</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">tcp_report_stats</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_copy_sa_out</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr	*src,
+	<span class="enscript-type">struct</span> sockaddr			*dst,
+	<span class="enscript-type">int</span>						maxlen)
+{
+	<span class="enscript-keyword">if</span> (src-&gt;sa_len &gt; maxlen) <span class="enscript-keyword">return</span>;
+	
+	bcopy(src, dst, src-&gt;sa_len);
+	<span class="enscript-keyword">if</span> (src-&gt;sa_family == AF_INET6 &amp;&amp;
+		src-&gt;sa_len &gt;= <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in6))
+	{
+		<span class="enscript-type">struct</span> sockaddr_in6	*sin6 = (<span class="enscript-type">struct</span> sockaddr_in6*)(<span class="enscript-type">void</span> *)dst;
+		<span class="enscript-keyword">if</span> (IN6_IS_SCOPE_EMBED(&amp;sin6-&gt;sin6_addr))
+		{
+			<span class="enscript-keyword">if</span> (sin6-&gt;sin6_scope_id == 0)
+				sin6-&gt;sin6_scope_id = ntohs(sin6-&gt;sin6_addr.s6_addr16[1]);
+			sin6-&gt;sin6_addr.s6_addr16[1] = 0;
+		}
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_ip_to_sockaddr</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_addr	*ip,
+	u_int16_t				port,
+	<span class="enscript-type">struct</span> sockaddr_in		*sin,
+	u_int32_t				maxlen)
+{
+	<span class="enscript-keyword">if</span> (maxlen &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in))
+		<span class="enscript-keyword">return</span>;
+	
+	sin-&gt;sin_family = AF_INET;
+	sin-&gt;sin_len = <span class="enscript-keyword">sizeof</span>(*sin);
+	sin-&gt;sin_port = port;
+	sin-&gt;sin_addr = *ip;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_ip6_to_sockaddr</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> in6_addr	*ip6,
+	u_int16_t				port,
+	<span class="enscript-type">struct</span> sockaddr_in6		*sin6,
+	u_int32_t				maxlen)
+{
+	<span class="enscript-keyword">if</span> (maxlen &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in6))
+		<span class="enscript-keyword">return</span>;
+	
+	sin6-&gt;sin6_family = AF_INET6;
+	sin6-&gt;sin6_len = <span class="enscript-keyword">sizeof</span>(*sin6);
+	sin6-&gt;sin6_port = port;
+	sin6-&gt;sin6_addr = *ip6;
+	<span class="enscript-keyword">if</span> (IN6_IS_SCOPE_EMBED(&amp;sin6-&gt;sin6_addr))
+	{
+		sin6-&gt;sin6_scope_id = ntohs(sin6-&gt;sin6_addr.s6_addr16[1]);
+		sin6-&gt;sin6_addr.s6_addr16[1] = 0;
+	}
+}
+
+<span class="enscript-type">static</span> u_int16_t
+<span class="enscript-function-name">nstat_inpcb_to_flags</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> inpcb *inp)
+{
+	u_int16_t flags = 0;
+
+	<span class="enscript-keyword">if</span> ((inp != NULL ) &amp;&amp; (inp-&gt;inp_last_outifp != NULL))
+	{
+		<span class="enscript-type">struct</span> ifnet *ifp = inp-&gt;inp_last_outifp;
+
+		u_int32_t functional_type = if_functional_type(ifp);
+
+		<span class="enscript-comment">/* Panic if someone adds a functional type without updating ntstat. */</span>
+		VERIFY(0 &lt;= functional_type &amp;&amp; functional_type &lt;= IFRTYPE_FUNCTIONAL_LAST);
+
+		<span class="enscript-keyword">switch</span> (functional_type)
+		{
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IFRTYPE_FUNCTIONAL_UNKNOWN</span>:
+			flags |= NSTAT_IFNET_IS_UNKNOWN_TYPE;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IFRTYPE_FUNCTIONAL_LOOPBACK</span>:
+			flags |= NSTAT_IFNET_IS_LOOPBACK;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IFRTYPE_FUNCTIONAL_WIRED</span>:
+			flags |= NSTAT_IFNET_IS_WIRED;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IFRTYPE_FUNCTIONAL_WIFI_INFRA</span>:
+			flags |= NSTAT_IFNET_IS_WIFI;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IFRTYPE_FUNCTIONAL_WIFI_AWDL</span>:
+			flags |= NSTAT_IFNET_IS_WIFI;
+			flags |= NSTAT_IFNET_IS_AWDL;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IFRTYPE_FUNCTIONAL_CELLULAR</span>:
+			flags |= NSTAT_IFNET_IS_CELLULAR;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (IFNET_IS_EXPENSIVE(ifp))
+		{
+			flags |= NSTAT_IFNET_IS_EXPENSIVE;
+		}
+	}
+	<span class="enscript-keyword">else</span>
+	{
+		flags = NSTAT_IFNET_IS_UNKNOWN_TYPE;
+	}
+
+	<span class="enscript-keyword">return</span> flags;
+}
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> -- <span class="enscript-variable-name">Network</span> <span class="enscript-variable-name">Statistic</span> <span class="enscript-variable-name">Providers</span> --
+
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">nstat_control_source_add</span>(u_int64_t context, nstat_control_state *state, nstat_provider *provider, nstat_provider_cookie_t cookie);
+<span class="enscript-type">struct</span> nstat_provider	*nstat_providers = NULL;
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> nstat_provider*
+<span class="enscript-function-name">nstat_find_provider_by_id</span>(
+	nstat_provider_id_t	id)
+{
+	<span class="enscript-type">struct</span> nstat_provider	*provider;
+	
+	<span class="enscript-keyword">for</span> (provider = nstat_providers; provider != NULL; provider = provider-&gt;next)
+	{
+		<span class="enscript-keyword">if</span> (provider-&gt;nstat_provider_id == id)
+			<span class="enscript-keyword">break</span>;
+	}
+	
+	<span class="enscript-keyword">return</span> provider;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_lookup_entry</span>(
+	nstat_provider_id_t		id,
+	<span class="enscript-type">const</span> <span class="enscript-type">void</span>				*data,
+	u_int32_t				length,
+	nstat_provider			**out_provider,
+	nstat_provider_cookie_t	*out_cookie)
+{
+	*out_provider = nstat_find_provider_by_id(id);
+	<span class="enscript-keyword">if</span> (*out_provider == NULL)
+	{
+		<span class="enscript-keyword">return</span> ENOENT;
+	}
+	
+	<span class="enscript-keyword">return</span> (*out_provider)-&gt;nstat_lookup(data, length, out_cookie);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">nstat_init_route_provider</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">nstat_init_tcp_provider</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">nstat_init_udp_provider</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">nstat_init_ifnet_provider</span>(<span class="enscript-type">void</span>);
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">if</span> (nstat_malloc_tag != NULL) <span class="enscript-keyword">return</span>;
+	
+	OSMallocTag tag = OSMalloc_Tagalloc(NET_STAT_CONTROL_NAME, OSMT_DEFAULT);
+	<span class="enscript-keyword">if</span> (!OSCompareAndSwapPtr(NULL, tag, &amp;nstat_malloc_tag))
+	{
+		OSMalloc_Tagfree(tag);
+		tag = nstat_malloc_tag;
+	}
+	<span class="enscript-keyword">else</span>
+	{
+		<span class="enscript-comment">// we need to initialize other things, we do it here as this code path will only be hit once;
+</span>		nstat_init_route_provider();
+		nstat_init_tcp_provider();
+		nstat_init_udp_provider();
+		nstat_init_ifnet_provider();
+		nstat_control_register();
+	}
+}
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> -- <span class="enscript-variable-name">Aligned</span> <span class="enscript-variable-name">Buffer</span> <span class="enscript-variable-name">Allocation</span> --
+
+<span class="enscript-type">struct</span> align_header
+{
+	u_int32_t	offset;
+	u_int32_t	length;
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>*
+<span class="enscript-function-name">nstat_malloc_aligned</span>(
+	u_int32_t	length,
+	u_int8_t	alignment,
+	OSMallocTag	tag)
+{
+	<span class="enscript-type">struct</span> align_header	*hdr = NULL;
+	u_int32_t	size = length + <span class="enscript-keyword">sizeof</span>(*hdr) + alignment - 1;
+	
+	u_int8_t	*buffer = OSMalloc(size, tag);
+	<span class="enscript-keyword">if</span> (buffer == NULL) <span class="enscript-keyword">return</span> NULL;
+	
+	u_int8_t	*aligned = buffer + <span class="enscript-keyword">sizeof</span>(*hdr);
+	aligned = (u_int8_t*)P2ROUNDUP(aligned, alignment);
+	
+	hdr = (<span class="enscript-type">struct</span> align_header*)(<span class="enscript-type">void</span> *)(aligned - <span class="enscript-keyword">sizeof</span>(*hdr));
+	hdr-&gt;offset = aligned - buffer;
+	hdr-&gt;length = size;
+	
+	<span class="enscript-keyword">return</span> aligned;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_free_aligned</span>(
+	<span class="enscript-type">void</span>		*buffer,
+	OSMallocTag	tag)
+{
+	<span class="enscript-type">struct</span> align_header *hdr = (<span class="enscript-type">struct</span> align_header*)(<span class="enscript-type">void</span> *)((u_int8_t*)buffer - <span class="enscript-keyword">sizeof</span>(*hdr));
+	OSFree(((<span class="enscript-type">char</span>*)buffer) - hdr-&gt;offset, hdr-&gt;length, tag);
+}
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> -- <span class="enscript-variable-name">Route</span> <span class="enscript-variable-name">Provider</span> --
+
+<span class="enscript-type">static</span> nstat_provider	nstat_route_provider;
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_route_lookup</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">void</span>				*data,
+	u_int32_t 				length,
+	nstat_provider_cookie_t	*out_cookie)
+{
+	<span class="enscript-comment">// rt_lookup doesn't take const params but it doesn't modify the parameters for
+</span>	<span class="enscript-comment">// the lookup. So...we use a union to eliminate the warning.
+</span>	<span class="enscript-type">union</span>
+	{
+		<span class="enscript-type">struct</span> sockaddr *sa;
+		<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *const_sa;
+	} dst, mask;
+	
+	<span class="enscript-type">const</span> nstat_route_add_param	*param = (<span class="enscript-type">const</span> nstat_route_add_param*)data;
+	*out_cookie = NULL;
+	
+	<span class="enscript-keyword">if</span> (length &lt; <span class="enscript-keyword">sizeof</span>(*param))
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+	<span class="enscript-keyword">if</span> (param-&gt;dst.v4.sin_family == 0 ||
+		param-&gt;dst.v4.sin_family &gt; AF_MAX ||
+		(param-&gt;mask.v4.sin_family != 0 &amp;&amp; param-&gt;mask.v4.sin_family != param-&gt;dst.v4.sin_family))
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+	<span class="enscript-keyword">if</span> (param-&gt;dst.v4.sin_len &gt; <span class="enscript-keyword">sizeof</span>(param-&gt;dst) ||
+		(param-&gt;mask.v4.sin_family &amp;&amp; param-&gt;mask.v4.sin_len &gt; <span class="enscript-keyword">sizeof</span>(param-&gt;mask.v4.sin_len)))
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	<span class="enscript-keyword">if</span> ((param-&gt;dst.v4.sin_family == AF_INET &amp;&amp;
+	    param-&gt;dst.v4.sin_len &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in)) ||
+	    (param-&gt;dst.v6.sin6_family == AF_INET6 &amp;&amp;
+	    param-&gt;dst.v6.sin6_len &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in6)))
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+	dst.const_sa = (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr*)&amp;param-&gt;dst;
+	mask.const_sa = param-&gt;mask.v4.sin_family ? (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr*)&amp;param-&gt;mask : NULL;
+	
+	<span class="enscript-type">struct</span> radix_node_head	*rnh = rt_tables[dst.sa-&gt;sa_family];
+	<span class="enscript-keyword">if</span> (rnh == NULL) <span class="enscript-keyword">return</span> EAFNOSUPPORT;
+	
+	lck_mtx_lock(rnh_lock);
+	<span class="enscript-type">struct</span> rtentry *rt = rt_lookup(TRUE, dst.sa, mask.sa, rnh, param-&gt;ifindex);
+	lck_mtx_unlock(rnh_lock);
+	
+	<span class="enscript-keyword">if</span> (rt) *out_cookie = (nstat_provider_cookie_t)rt;
+	
+	<span class="enscript-keyword">return</span> rt ? 0 : ENOENT;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">nstat_route_gone</span>(
+	nstat_provider_cookie_t	cookie)
+{
+	<span class="enscript-type">struct</span> rtentry		*rt = (<span class="enscript-type">struct</span> rtentry*)cookie;
+	<span class="enscript-keyword">return</span> ((rt-&gt;rt_flags &amp; RTF_UP) == 0) ? 1 : 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_route_counts</span>(
+	nstat_provider_cookie_t	cookie,
+	<span class="enscript-type">struct</span> nstat_counts		*out_counts,
+	<span class="enscript-type">int</span>						*out_gone)
+{
+	<span class="enscript-type">struct</span> rtentry		*rt = (<span class="enscript-type">struct</span> rtentry*)cookie;
+	<span class="enscript-type">struct</span> nstat_counts	*rt_stats = rt-&gt;rt_stats;
+	
+	<span class="enscript-keyword">if</span> (out_gone) *out_gone = 0;
+	
+	<span class="enscript-keyword">if</span> (out_gone &amp;&amp; (rt-&gt;rt_flags &amp; RTF_UP) == 0) *out_gone = 1;
+	
+	<span class="enscript-keyword">if</span> (rt_stats)
+	{
+		atomic_get_64(out_counts-&gt;nstat_rxpackets, &amp;rt_stats-&gt;nstat_rxpackets);
+		atomic_get_64(out_counts-&gt;nstat_rxbytes, &amp;rt_stats-&gt;nstat_rxbytes);
+		atomic_get_64(out_counts-&gt;nstat_txpackets, &amp;rt_stats-&gt;nstat_txpackets);
+		atomic_get_64(out_counts-&gt;nstat_txbytes, &amp;rt_stats-&gt;nstat_txbytes);
+		out_counts-&gt;nstat_rxduplicatebytes = rt_stats-&gt;nstat_rxduplicatebytes;
+		out_counts-&gt;nstat_rxoutoforderbytes = rt_stats-&gt;nstat_rxoutoforderbytes;
+		out_counts-&gt;nstat_txretransmit = rt_stats-&gt;nstat_txretransmit;
+		out_counts-&gt;nstat_connectattempts = rt_stats-&gt;nstat_connectattempts;
+		out_counts-&gt;nstat_connectsuccesses = rt_stats-&gt;nstat_connectsuccesses;
+		out_counts-&gt;nstat_min_rtt = rt_stats-&gt;nstat_min_rtt;
+		out_counts-&gt;nstat_avg_rtt = rt_stats-&gt;nstat_avg_rtt;
+		out_counts-&gt;nstat_var_rtt = rt_stats-&gt;nstat_var_rtt;
+		out_counts-&gt;nstat_cell_rxbytes = out_counts-&gt;nstat_cell_txbytes = 0;
+	}
+	<span class="enscript-keyword">else</span>
+	{
+		bzero(out_counts, <span class="enscript-keyword">sizeof</span>(*out_counts));
+	}
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_route_release</span>(
+	nstat_provider_cookie_t cookie,
+	__unused <span class="enscript-type">int</span> locked)
+{
+	rtfree((<span class="enscript-type">struct</span> rtentry*)cookie);
+}
+
+<span class="enscript-type">static</span> u_int32_t	nstat_route_watchers = 0;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">nstat_route_walktree_add</span>(
+	<span class="enscript-type">struct</span> radix_node	*rn,
+	<span class="enscript-type">void</span>				*context)
+{
+	errno_t	result = 0;
+	<span class="enscript-type">struct</span> rtentry *rt = (<span class="enscript-type">struct</span> rtentry *)rn;
+	nstat_control_state	*state	= (nstat_control_state*)context;
+
+	lck_mtx_assert(rnh_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-comment">/* RTF_UP can't change while rnh_lock is held */</span>
+	<span class="enscript-keyword">if</span> ((rt-&gt;rt_flags &amp; RTF_UP) != 0)
+	{
+		<span class="enscript-comment">/* Clear RTPRF_OURS if the route is still usable */</span>
+		RT_LOCK(rt);
+		<span class="enscript-keyword">if</span> (rt_validate(rt)) {
+			RT_ADDREF_LOCKED(rt);
+			RT_UNLOCK(rt);
+		} <span class="enscript-keyword">else</span> {
+			RT_UNLOCK(rt);
+			rt = NULL;
+		}
+
+		<span class="enscript-comment">/* Otherwise if RTF_CONDEMNED, treat it as if it were down */</span>
+		<span class="enscript-keyword">if</span> (rt == NULL)
+			<span class="enscript-keyword">return</span> (0);
+
+		result = nstat_control_source_add(0, state, &amp;nstat_route_provider, rt);
+		<span class="enscript-keyword">if</span> (result != 0)
+			rtfree_locked(rt);
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_route_add_watcher</span>(
+	nstat_control_state	*state)
+{
+	<span class="enscript-type">int</span> i;
+	errno_t result = 0;
+	OSIncrementAtomic(&amp;nstat_route_watchers);
+	
+	lck_mtx_lock(rnh_lock);
+	<span class="enscript-keyword">for</span> (i = 1; i &lt; AF_MAX; i++)
+	{
+		<span class="enscript-type">struct</span> radix_node_head *rnh;
+		rnh = rt_tables[i];
+		<span class="enscript-keyword">if</span> (!rnh) <span class="enscript-keyword">continue</span>;
+		
+		result = rnh-&gt;rnh_walktree(rnh, nstat_route_walktree_add, state);
+		<span class="enscript-keyword">if</span> (result != 0)
+		{
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	lck_mtx_unlock(rnh_lock);
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_route_new_entry</span>(
+	<span class="enscript-type">struct</span> rtentry	*rt)
+{
+	<span class="enscript-keyword">if</span> (nstat_route_watchers == 0)
+		<span class="enscript-keyword">return</span>;
+	
+	lck_mtx_lock(&amp;nstat_mtx);
+	<span class="enscript-keyword">if</span> ((rt-&gt;rt_flags &amp; RTF_UP) != 0)
+	{
+		nstat_control_state	*state;
+		<span class="enscript-keyword">for</span> (state = nstat_controls; state; state = state-&gt;ncs_next)
+		{
+			<span class="enscript-keyword">if</span> ((state-&gt;ncs_watching &amp; (1 &lt;&lt; NSTAT_PROVIDER_ROUTE)) != 0)
+			{
+				<span class="enscript-comment">// this client is watching routes
+</span>				<span class="enscript-comment">// acquire a reference for the route
+</span>				RT_ADDREF(rt);
+				
+				<span class="enscript-comment">// add the source, if that fails, release the reference
+</span>				<span class="enscript-keyword">if</span> (nstat_control_source_add(0, state, &amp;nstat_route_provider, rt) != 0)
+					RT_REMREF(rt);
+			}
+		}
+	}
+	lck_mtx_unlock(&amp;nstat_mtx);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_route_remove_watcher</span>(
+	__unused nstat_control_state	*state)
+{
+	OSDecrementAtomic(&amp;nstat_route_watchers);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_route_copy_descriptor</span>(
+	nstat_provider_cookie_t	cookie,
+	<span class="enscript-type">void</span>					*data,
+	u_int32_t				len)
+{
+	nstat_route_descriptor	*desc = (nstat_route_descriptor*)data;
+	<span class="enscript-keyword">if</span> (len &lt; <span class="enscript-keyword">sizeof</span>(*desc))
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	bzero(desc, <span class="enscript-keyword">sizeof</span>(*desc));
+	
+	<span class="enscript-type">struct</span> rtentry	*rt = (<span class="enscript-type">struct</span> rtentry*)cookie;
+	desc-&gt;id = (uint64_t)VM_KERNEL_ADDRPERM(rt);
+	desc-&gt;parent_id = (uint64_t)VM_KERNEL_ADDRPERM(rt-&gt;rt_parent);
+	desc-&gt;gateway_id = (uint64_t)VM_KERNEL_ADDRPERM(rt-&gt;rt_gwroute);
+
+	
+	<span class="enscript-comment">// key/dest
+</span>	<span class="enscript-type">struct</span> sockaddr	*sa;
+	<span class="enscript-keyword">if</span> ((sa = rt_key(rt)))
+		nstat_copy_sa_out(sa, &amp;desc-&gt;dst.sa, <span class="enscript-keyword">sizeof</span>(desc-&gt;dst));
+	
+	<span class="enscript-comment">// mask
+</span>	<span class="enscript-keyword">if</span> ((sa = rt_mask(rt)) &amp;&amp; sa-&gt;sa_len &lt;= <span class="enscript-keyword">sizeof</span>(desc-&gt;mask))
+		memcpy(&amp;desc-&gt;mask, sa, sa-&gt;sa_len);
+	
+	<span class="enscript-comment">// gateway
+</span>	<span class="enscript-keyword">if</span> ((sa = rt-&gt;rt_gateway))
+		nstat_copy_sa_out(sa, &amp;desc-&gt;gateway.sa, <span class="enscript-keyword">sizeof</span>(desc-&gt;gateway));
+	
+	<span class="enscript-keyword">if</span> (rt-&gt;rt_ifp)
+		desc-&gt;ifindex = rt-&gt;rt_ifp-&gt;if_index;
+	
+	desc-&gt;flags = rt-&gt;rt_flags;
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_init_route_provider</span>(<span class="enscript-type">void</span>)
+{
+	bzero(&amp;nstat_route_provider, <span class="enscript-keyword">sizeof</span>(nstat_route_provider));
+	nstat_route_provider.nstat_descriptor_length = <span class="enscript-keyword">sizeof</span>(nstat_route_descriptor);
+	nstat_route_provider.nstat_provider_id = NSTAT_PROVIDER_ROUTE;
+	nstat_route_provider.nstat_lookup = nstat_route_lookup;
+	nstat_route_provider.nstat_gone = nstat_route_gone;
+	nstat_route_provider.nstat_counts = nstat_route_counts;
+	nstat_route_provider.nstat_release = nstat_route_release;
+	nstat_route_provider.nstat_watcher_add = nstat_route_add_watcher;
+	nstat_route_provider.nstat_watcher_remove = nstat_route_remove_watcher;
+	nstat_route_provider.nstat_copy_descriptor = nstat_route_copy_descriptor;
+	nstat_route_provider.next = nstat_providers;
+	nstat_providers = &amp;nstat_route_provider;
+}
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> -- <span class="enscript-variable-name">Route</span> <span class="enscript-variable-name">Collection</span> --
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> nstat_counts*
+<span class="enscript-function-name">nstat_route_attach</span>(
+	<span class="enscript-type">struct</span> rtentry	*rte)
+{
+	<span class="enscript-type">struct</span> nstat_counts *result = rte-&gt;rt_stats;
+	<span class="enscript-keyword">if</span> (result) <span class="enscript-keyword">return</span> result;
+	
+	<span class="enscript-keyword">if</span> (nstat_malloc_tag == NULL) nstat_init();
+	
+	result = nstat_malloc_aligned(<span class="enscript-keyword">sizeof</span>(*result), <span class="enscript-keyword">sizeof</span>(u_int64_t), nstat_malloc_tag);
+	<span class="enscript-keyword">if</span> (!result) <span class="enscript-keyword">return</span> result;
+	
+	bzero(result, <span class="enscript-keyword">sizeof</span>(*result));
+	
+	<span class="enscript-keyword">if</span> (!OSCompareAndSwapPtr(NULL, result, &amp;rte-&gt;rt_stats))
+	{
+		nstat_free_aligned(result, nstat_malloc_tag);
+		result = rte-&gt;rt_stats;
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_route_detach</span>(
+	<span class="enscript-type">struct</span> rtentry	*rte)
+{
+	<span class="enscript-keyword">if</span> (rte-&gt;rt_stats)
+	{
+		nstat_free_aligned(rte-&gt;rt_stats, nstat_malloc_tag);
+		rte-&gt;rt_stats = NULL;
+	}
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_route_connect_attempt</span>(
+	<span class="enscript-type">struct</span> rtentry	*rte)
+{
+	<span class="enscript-keyword">while</span> (rte)
+	{
+		<span class="enscript-type">struct</span> nstat_counts*	stats = nstat_route_attach(rte);
+		<span class="enscript-keyword">if</span> (stats)
+		{
+			OSIncrementAtomic(&amp;stats-&gt;nstat_connectattempts);
+		}
+		
+		rte = rte-&gt;rt_parent;
+	}
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_route_connect_success</span>(
+	<span class="enscript-type">struct</span> rtentry	*rte)
+{
+	<span class="enscript-comment">// This route
+</span>	<span class="enscript-keyword">while</span> (rte)
+	{
+		<span class="enscript-type">struct</span> nstat_counts*	stats = nstat_route_attach(rte);
+		<span class="enscript-keyword">if</span> (stats)
+		{
+			OSIncrementAtomic(&amp;stats-&gt;nstat_connectsuccesses);
+		}
+		
+		rte = rte-&gt;rt_parent;
+	}
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_route_tx</span>(
+	<span class="enscript-type">struct</span> rtentry	*rte,
+	u_int32_t		packets,
+	u_int32_t		bytes,
+	u_int32_t		flags)
+{
+	<span class="enscript-keyword">while</span> (rte)
+	{
+		<span class="enscript-type">struct</span> nstat_counts*	stats = nstat_route_attach(rte);
+		<span class="enscript-keyword">if</span> (stats)
+		{
+			<span class="enscript-keyword">if</span> ((flags &amp; NSTAT_TX_FLAG_RETRANSMIT) != 0)
+			{
+				OSAddAtomic(bytes, &amp;stats-&gt;nstat_txretransmit);
+			}
+			<span class="enscript-keyword">else</span>
+			{
+				OSAddAtomic64((SInt64)packets, (SInt64*)&amp;stats-&gt;nstat_txpackets);
+				OSAddAtomic64((SInt64)bytes, (SInt64*)&amp;stats-&gt;nstat_txbytes);
+			}
+		}
+		
+		rte = rte-&gt;rt_parent;
+	}
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_route_rx</span>(
+	<span class="enscript-type">struct</span> rtentry	*rte,
+	u_int32_t		packets,
+	u_int32_t		bytes,
+	u_int32_t		flags)
+{
+	<span class="enscript-keyword">while</span> (rte)
+	{
+		<span class="enscript-type">struct</span> nstat_counts*	stats = nstat_route_attach(rte);
+		<span class="enscript-keyword">if</span> (stats)
+		{
+			<span class="enscript-keyword">if</span> (flags == 0)
+			{
+				OSAddAtomic64((SInt64)packets, (SInt64*)&amp;stats-&gt;nstat_rxpackets);
+				OSAddAtomic64((SInt64)bytes, (SInt64*)&amp;stats-&gt;nstat_rxbytes);
+			}
+			<span class="enscript-keyword">else</span>
+			{
+				<span class="enscript-keyword">if</span> (flags &amp; NSTAT_RX_FLAG_OUT_OF_ORDER)
+					OSAddAtomic(bytes, &amp;stats-&gt;nstat_rxoutoforderbytes);
+				<span class="enscript-keyword">if</span> (flags &amp; NSTAT_RX_FLAG_DUPLICATE)
+					OSAddAtomic(bytes, &amp;stats-&gt;nstat_rxduplicatebytes);
+			}
+		}
+		
+		rte = rte-&gt;rt_parent;
+	}
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_route_rtt</span>(
+	<span class="enscript-type">struct</span> rtentry	*rte,
+	u_int32_t		rtt,
+	u_int32_t		rtt_var)
+{
+	<span class="enscript-type">const</span> int32_t	factor = 8;
+	
+	<span class="enscript-keyword">while</span> (rte)
+	{
+		<span class="enscript-type">struct</span> nstat_counts*	stats = nstat_route_attach(rte);
+		<span class="enscript-keyword">if</span> (stats)
+		{
+			int32_t	oldrtt;
+			int32_t	newrtt;
+			
+			<span class="enscript-comment">// average
+</span>			<span class="enscript-keyword">do</span>
+			{
+				oldrtt = stats-&gt;nstat_avg_rtt;
+				<span class="enscript-keyword">if</span> (oldrtt == 0)
+				{
+					newrtt = rtt;
+				}
+				<span class="enscript-keyword">else</span>
+				{
+					newrtt = oldrtt - (oldrtt - (int32_t)rtt) / factor;
+				}
+				<span class="enscript-keyword">if</span> (oldrtt == newrtt) <span class="enscript-keyword">break</span>;
+			} <span class="enscript-keyword">while</span> (!OSCompareAndSwap(oldrtt, newrtt, &amp;stats-&gt;nstat_avg_rtt));
+			
+			<span class="enscript-comment">// minimum
+</span>			<span class="enscript-keyword">do</span>
+			{
+				oldrtt = stats-&gt;nstat_min_rtt;
+				<span class="enscript-keyword">if</span> (oldrtt != 0 &amp;&amp; oldrtt &lt; (int32_t)rtt)
+				{
+					<span class="enscript-keyword">break</span>;
+				}
+			} <span class="enscript-keyword">while</span> (!OSCompareAndSwap(oldrtt, rtt, &amp;stats-&gt;nstat_min_rtt));
+			
+			<span class="enscript-comment">// variance
+</span>			<span class="enscript-keyword">do</span>
+			{
+				oldrtt = stats-&gt;nstat_var_rtt;
+				<span class="enscript-keyword">if</span> (oldrtt == 0)
+				{
+					newrtt = rtt_var;
+				}
+				<span class="enscript-keyword">else</span>
+				{
+					newrtt = oldrtt - (oldrtt - (int32_t)rtt_var) / factor;
+				}
+				<span class="enscript-keyword">if</span> (oldrtt == newrtt) <span class="enscript-keyword">break</span>;
+			} <span class="enscript-keyword">while</span> (!OSCompareAndSwap(oldrtt, newrtt, &amp;stats-&gt;nstat_var_rtt));
+		}
+		
+		rte = rte-&gt;rt_parent;
+	}
+}
+
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> -- <span class="enscript-variable-name">TCP</span> <span class="enscript-variable-name">Provider</span> --
+
+<span class="enscript-comment">/*
+ * Due to the way the kernel deallocates a process (the process structure
+ * might be gone by the time we get the PCB detach notification),
+ * we need to cache the process name. Without this, proc_name() would
+ * return null and the process name would never be sent to userland.
+ *
+ * For UDP sockets, we also store the cached the connection tuples along with
+ * the interface index. This is necessary because when UDP sockets are
+ * disconnected, the connection tuples are forever lost from the inpcb, thus
+ * we need to keep track of the last call to connect() in ntstat.
+ */</span>
+<span class="enscript-type">struct</span> nstat_tucookie {
+	<span class="enscript-type">struct</span> inpcb 	*inp;
+	<span class="enscript-type">char</span>		pname[MAXCOMLEN+1];
+	bool		cached;
+	<span class="enscript-type">union</span>
+	{
+		<span class="enscript-type">struct</span> sockaddr_in	v4;
+		<span class="enscript-type">struct</span> sockaddr_in6	v6;
+	} local;
+	<span class="enscript-type">union</span>
+	{
+		<span class="enscript-type">struct</span> sockaddr_in	v4;
+		<span class="enscript-type">struct</span> sockaddr_in6	v6;
+	} remote;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	if_index;
+	uint16_t	ifnet_properties;
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> nstat_tucookie *
+<span class="enscript-function-name">nstat_tucookie_alloc_internal</span>(
+    <span class="enscript-type">struct</span> inpcb *inp,
+    bool	  ref,
+    bool	  locked)
+{
+	<span class="enscript-type">struct</span> nstat_tucookie *cookie;
+
+	cookie = OSMalloc(<span class="enscript-keyword">sizeof</span>(*cookie), nstat_malloc_tag);
+	<span class="enscript-keyword">if</span> (cookie == NULL)
+		<span class="enscript-keyword">return</span> NULL;
+	<span class="enscript-keyword">if</span> (!locked)
+		lck_mtx_assert(&amp;nstat_mtx, LCK_MTX_ASSERT_NOTOWNED);
+	<span class="enscript-keyword">if</span> (ref &amp;&amp; in_pcb_checkstate(inp, WNT_ACQUIRE, locked) == WNT_STOPUSING)
+	{
+		OSFree(cookie, <span class="enscript-keyword">sizeof</span>(*cookie), nstat_malloc_tag);
+		<span class="enscript-keyword">return</span> NULL;
+	}
+	bzero(cookie, <span class="enscript-keyword">sizeof</span>(*cookie));
+	cookie-&gt;inp = inp;
+	proc_name(inp-&gt;inp_socket-&gt;last_pid, cookie-&gt;pname,
+	    <span class="enscript-keyword">sizeof</span>(cookie-&gt;pname));
+	<span class="enscript-comment">/*
+	 * We only increment the reference count for UDP sockets because we
+	 * only cache UDP socket tuples.
+	 */</span>
+	<span class="enscript-keyword">if</span> (SOCK_PROTO(inp-&gt;inp_socket) == IPPROTO_UDP)
+		OSIncrementAtomic(&amp;inp-&gt;inp_nstat_refcnt);
+
+	<span class="enscript-keyword">return</span> cookie;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> nstat_tucookie *
+<span class="enscript-function-name">nstat_tucookie_alloc</span>(
+    <span class="enscript-type">struct</span> inpcb *inp)
+{
+	<span class="enscript-keyword">return</span> nstat_tucookie_alloc_internal(inp, false, false);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> nstat_tucookie *
+<span class="enscript-function-name">nstat_tucookie_alloc_ref</span>(
+    <span class="enscript-type">struct</span> inpcb *inp)
+{
+	<span class="enscript-keyword">return</span> nstat_tucookie_alloc_internal(inp, true, false);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> nstat_tucookie *
+<span class="enscript-function-name">nstat_tucookie_alloc_ref_locked</span>(
+    <span class="enscript-type">struct</span> inpcb *inp)
+{
+	<span class="enscript-keyword">return</span> nstat_tucookie_alloc_internal(inp, true, true);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_tucookie_release_internal</span>(
+    <span class="enscript-type">struct</span> nstat_tucookie *cookie,
+    <span class="enscript-type">int</span>				inplock)
+{
+	<span class="enscript-keyword">if</span> (SOCK_PROTO(cookie-&gt;inp-&gt;inp_socket) == IPPROTO_UDP)
+		OSDecrementAtomic(&amp;cookie-&gt;inp-&gt;inp_nstat_refcnt);
+	in_pcb_checkstate(cookie-&gt;inp, WNT_RELEASE, inplock);
+	OSFree(cookie, <span class="enscript-keyword">sizeof</span>(*cookie), nstat_malloc_tag);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_tucookie_release</span>(
+    <span class="enscript-type">struct</span> nstat_tucookie *cookie)
+{
+	nstat_tucookie_release_internal(cookie, false);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_tucookie_release_locked</span>(
+    <span class="enscript-type">struct</span> nstat_tucookie *cookie)
+{
+	nstat_tucookie_release_internal(cookie, true);
+}
+
+
+<span class="enscript-type">static</span> nstat_provider	nstat_tcp_provider;
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_tcpudp_lookup</span>(
+	<span class="enscript-type">struct</span> inpcbinfo	*inpinfo,
+	<span class="enscript-type">const</span> <span class="enscript-type">void</span>		*data,
+	u_int32_t 		length,
+	nstat_provider_cookie_t	*out_cookie)
+{
+	<span class="enscript-type">struct</span> inpcb *inp = NULL;
+
+	<span class="enscript-comment">// parameter validation
+</span>	<span class="enscript-type">const</span> nstat_tcp_add_param	*param = (<span class="enscript-type">const</span> nstat_tcp_add_param*)data;
+	<span class="enscript-keyword">if</span> (length &lt; <span class="enscript-keyword">sizeof</span>(*param))
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+	<span class="enscript-comment">// src and dst must match
+</span>	<span class="enscript-keyword">if</span> (param-&gt;remote.v4.sin_family != 0 &amp;&amp;
+		param-&gt;remote.v4.sin_family != param-&gt;local.v4.sin_family)
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+	
+	<span class="enscript-keyword">switch</span> (param-&gt;local.v4.sin_family)
+	{
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET</span>:
+		{
+			<span class="enscript-keyword">if</span> (param-&gt;local.v4.sin_len != <span class="enscript-keyword">sizeof</span>(param-&gt;local.v4) ||
+		  		(param-&gt;remote.v4.sin_family != 0 &amp;&amp;
+		  		 param-&gt;remote.v4.sin_len != <span class="enscript-keyword">sizeof</span>(param-&gt;remote.v4)))
+		  	{
+				<span class="enscript-keyword">return</span> EINVAL;
+		  	}
+		  	
+			inp = in_pcblookup_hash(inpinfo, param-&gt;remote.v4.sin_addr, param-&gt;remote.v4.sin_port,
+						param-&gt;local.v4.sin_addr, param-&gt;local.v4.sin_port, 1, NULL);
+		}
+		<span class="enscript-keyword">break</span>;
+		
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET6</span>:
+		{
+			<span class="enscript-type">union</span>
+			{
+				<span class="enscript-type">const</span> <span class="enscript-type">struct</span> in6_addr 	*in6c;
+				<span class="enscript-type">struct</span> in6_addr			*in6;
+			} local, remote;
+			
+			<span class="enscript-keyword">if</span> (param-&gt;local.v6.sin6_len != <span class="enscript-keyword">sizeof</span>(param-&gt;local.v6) ||
+		  		(param-&gt;remote.v6.sin6_family != 0 &amp;&amp;
+				 param-&gt;remote.v6.sin6_len != <span class="enscript-keyword">sizeof</span>(param-&gt;remote.v6)))
+			{
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+			
+			local.in6c = &amp;param-&gt;local.v6.sin6_addr;
+			remote.in6c = &amp;param-&gt;remote.v6.sin6_addr;
+			
+			inp = in6_pcblookup_hash(inpinfo, remote.in6, param-&gt;remote.v6.sin6_port,
+						local.in6, param-&gt;local.v6.sin6_port, 1, NULL);
+		}
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+		
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+	<span class="enscript-keyword">if</span> (inp == NULL)
+		<span class="enscript-keyword">return</span> ENOENT;
+	
+	<span class="enscript-comment">// At this point we have a ref to the inpcb
+</span>	*out_cookie = nstat_tucookie_alloc(inp);
+	<span class="enscript-keyword">if</span> (*out_cookie == NULL)
+		in_pcb_checkstate(inp, WNT_RELEASE, 0);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_tcp_lookup</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">void</span>				*data,
+	u_int32_t 				length,
+	nstat_provider_cookie_t	*out_cookie)
+{
+	<span class="enscript-keyword">return</span> nstat_tcpudp_lookup(&amp;tcbinfo, data, length, out_cookie);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">nstat_tcp_gone</span>(
+	nstat_provider_cookie_t	cookie)
+{
+	<span class="enscript-type">struct</span> nstat_tucookie *tucookie =
+	    (<span class="enscript-type">struct</span> nstat_tucookie *)cookie;
+	<span class="enscript-type">struct</span> inpcb *inp;
+	<span class="enscript-type">struct</span> tcpcb *tp;
+	
+	<span class="enscript-keyword">return</span> (!(inp = tucookie-&gt;inp) ||
+	    !(tp = intotcpcb(inp)) ||
+	    inp-&gt;inp_state == INPCB_STATE_DEAD) ? 1 : 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_tcp_counts</span>(
+	nstat_provider_cookie_t	cookie,
+	<span class="enscript-type">struct</span> nstat_counts		*out_counts,
+	<span class="enscript-type">int</span>						*out_gone)
+{
+	<span class="enscript-type">struct</span> nstat_tucookie *tucookie =
+	    (<span class="enscript-type">struct</span> nstat_tucookie *)cookie;
+	<span class="enscript-type">struct</span> inpcb *inp;
+
+	bzero(out_counts, <span class="enscript-keyword">sizeof</span>(*out_counts));
+	
+	<span class="enscript-keyword">if</span> (out_gone) *out_gone = 0;
+	
+	<span class="enscript-comment">// if the pcb is in the dead state, we should stop using it
+</span>	<span class="enscript-keyword">if</span> (nstat_tcp_gone(cookie))
+	{
+		<span class="enscript-keyword">if</span> (out_gone) *out_gone = 1;
+		<span class="enscript-keyword">if</span> (!(inp = tucookie-&gt;inp) || !intotcpcb(inp))
+			<span class="enscript-keyword">return</span> EINVAL;
+	} 
+	inp = tucookie-&gt;inp;
+	<span class="enscript-type">struct</span> tcpcb *tp = intotcpcb(inp);
+	
+	atomic_get_64(out_counts-&gt;nstat_rxpackets, &amp;inp-&gt;inp_stat-&gt;rxpackets);
+	atomic_get_64(out_counts-&gt;nstat_rxbytes, &amp;inp-&gt;inp_stat-&gt;rxbytes);
+	atomic_get_64(out_counts-&gt;nstat_txpackets, &amp;inp-&gt;inp_stat-&gt;txpackets);
+	atomic_get_64(out_counts-&gt;nstat_txbytes, &amp;inp-&gt;inp_stat-&gt;txbytes);
+	out_counts-&gt;nstat_rxduplicatebytes = tp-&gt;t_stat.rxduplicatebytes;
+	out_counts-&gt;nstat_rxoutoforderbytes = tp-&gt;t_stat.rxoutoforderbytes;
+	out_counts-&gt;nstat_txretransmit = tp-&gt;t_stat.txretransmitbytes;
+	out_counts-&gt;nstat_connectattempts = tp-&gt;t_state &gt;= TCPS_SYN_SENT ? 1 : 0;
+	out_counts-&gt;nstat_connectsuccesses = tp-&gt;t_state &gt;= TCPS_ESTABLISHED ? 1 : 0;
+	out_counts-&gt;nstat_avg_rtt = tp-&gt;t_srtt;
+	out_counts-&gt;nstat_min_rtt = tp-&gt;t_rttbest;
+	out_counts-&gt;nstat_var_rtt = tp-&gt;t_rttvar;
+	<span class="enscript-keyword">if</span> (out_counts-&gt;nstat_avg_rtt &lt; out_counts-&gt;nstat_min_rtt)
+		out_counts-&gt;nstat_min_rtt = out_counts-&gt;nstat_avg_rtt;
+	atomic_get_64(out_counts-&gt;nstat_cell_rxbytes, &amp;inp-&gt;inp_cstat-&gt;rxbytes);
+	atomic_get_64(out_counts-&gt;nstat_cell_txbytes, &amp;inp-&gt;inp_cstat-&gt;txbytes);
+	atomic_get_64(out_counts-&gt;nstat_wifi_rxbytes, &amp;inp-&gt;inp_wstat-&gt;rxbytes);
+	atomic_get_64(out_counts-&gt;nstat_wifi_txbytes, &amp;inp-&gt;inp_wstat-&gt;txbytes);
+	atomic_get_64(out_counts-&gt;nstat_wired_rxbytes, &amp;inp-&gt;inp_Wstat-&gt;rxbytes);
+	atomic_get_64(out_counts-&gt;nstat_wired_txbytes, &amp;inp-&gt;inp_Wstat-&gt;txbytes);
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_tcp_release</span>(
+	nstat_provider_cookie_t	cookie,
+	<span class="enscript-type">int</span> locked)
+{
+	<span class="enscript-type">struct</span> nstat_tucookie *tucookie =
+	    (<span class="enscript-type">struct</span> nstat_tucookie *)cookie;
+
+	nstat_tucookie_release_internal(tucookie, locked);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_tcp_add_watcher</span>(
+	nstat_control_state	*state)
+{
+	OSIncrementAtomic(&amp;nstat_tcp_watchers);
+	
+	lck_rw_lock_shared(tcbinfo.ipi_lock);
+	
+	<span class="enscript-comment">// Add all current tcp inpcbs. Ignore those in timewait
+</span>	<span class="enscript-type">struct</span> inpcb *inp;
+	<span class="enscript-type">struct</span> nstat_tucookie *cookie;
+	LIST_FOREACH(inp, tcbinfo.ipi_listhead, inp_list)
+	{
+		cookie = nstat_tucookie_alloc_ref(inp);
+		<span class="enscript-keyword">if</span> (cookie == NULL)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (nstat_control_source_add(0, state, &amp;nstat_tcp_provider,
+		    cookie) != 0)
+		{
+			nstat_tucookie_release(cookie);
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	
+	lck_rw_done(tcbinfo.ipi_lock);
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_tcp_remove_watcher</span>(
+	__unused nstat_control_state	*state)
+{
+	OSDecrementAtomic(&amp;nstat_tcp_watchers);
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_tcp_new_pcb</span>(
+	<span class="enscript-type">struct</span> inpcb	*inp)
+{
+	<span class="enscript-type">struct</span> nstat_tucookie *cookie;
+
+	<span class="enscript-keyword">if</span> (nstat_tcp_watchers == 0)
+		<span class="enscript-keyword">return</span>;
+
+	socket_lock(inp-&gt;inp_socket, 0);
+	lck_mtx_lock(&amp;nstat_mtx);
+	nstat_control_state	*state;
+	<span class="enscript-keyword">for</span> (state = nstat_controls; state; state = state-&gt;ncs_next)
+	{
+		<span class="enscript-keyword">if</span> ((state-&gt;ncs_watching &amp; (1 &lt;&lt; NSTAT_PROVIDER_TCP)) != 0)
+		{
+			<span class="enscript-comment">// this client is watching tcp
+</span>			<span class="enscript-comment">// acquire a reference for it
+</span>			cookie = nstat_tucookie_alloc_ref_locked(inp);
+			<span class="enscript-keyword">if</span> (cookie == NULL)
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-comment">// add the source, if that fails, release the reference
+</span>			<span class="enscript-keyword">if</span> (nstat_control_source_add(0, state,
+			    &amp;nstat_tcp_provider, cookie) != 0)
+			{
+				nstat_tucookie_release_locked(cookie);
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+	}
+	lck_mtx_unlock(&amp;nstat_mtx);
+	socket_unlock(inp-&gt;inp_socket, 0);
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_pcb_detach</span>(<span class="enscript-type">struct</span> inpcb *inp)
+{
+	nstat_control_state *state;
+	nstat_src *src, *prevsrc;
+	nstat_src *dead_list = NULL;
+	<span class="enscript-type">struct</span> nstat_tucookie *tucookie;
+	errno_t result;
+
+	<span class="enscript-keyword">if</span> (inp == NULL || (nstat_tcp_watchers == 0 &amp;&amp; nstat_udp_watchers == 0))
+		<span class="enscript-keyword">return</span>;
+
+	lck_mtx_lock(&amp;nstat_mtx);
+	<span class="enscript-keyword">for</span> (state = nstat_controls; state; state = state-&gt;ncs_next)
+	{
+		lck_mtx_lock(&amp;state-&gt;mtx);
+		<span class="enscript-keyword">for</span> (prevsrc = NULL, src = state-&gt;ncs_srcs; src;
+		    prevsrc = src, src = src-&gt;next) 
+		{
+			tucookie = (<span class="enscript-type">struct</span> nstat_tucookie *)src-&gt;cookie;
+			<span class="enscript-keyword">if</span> (tucookie-&gt;inp == inp)
+				<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (src)
+		{
+			result = nstat_control_send_goodbye(state, src);
+			
+			<span class="enscript-keyword">if</span> (prevsrc)
+				prevsrc-&gt;next = src-&gt;next;
+			<span class="enscript-keyword">else</span>
+				state-&gt;ncs_srcs = src-&gt;next;
+			
+			src-&gt;next = dead_list;
+			dead_list = src;
+		}
+		lck_mtx_unlock(&amp;state-&gt;mtx);
+	}
+	lck_mtx_unlock(&amp;nstat_mtx);
+
+	<span class="enscript-keyword">while</span> (dead_list) {
+		src = dead_list;
+		dead_list = src-&gt;next;
+
+		nstat_control_cleanup_source(NULL, src, TRUE);
+	}
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_pcb_cache</span>(<span class="enscript-type">struct</span> inpcb *inp)
+{
+	nstat_control_state *state;
+	nstat_src *src;
+	<span class="enscript-type">struct</span> nstat_tucookie *tucookie;
+
+	<span class="enscript-keyword">if</span> (inp == NULL || nstat_udp_watchers == 0 || 
+	    inp-&gt;inp_nstat_refcnt == 0)
+		<span class="enscript-keyword">return</span>;
+	VERIFY(SOCK_PROTO(inp-&gt;inp_socket) == IPPROTO_UDP);
+	lck_mtx_lock(&amp;nstat_mtx);
+	<span class="enscript-keyword">for</span> (state = nstat_controls; state; state = state-&gt;ncs_next) {
+		lck_mtx_lock(&amp;state-&gt;mtx);
+		<span class="enscript-keyword">for</span> (src = state-&gt;ncs_srcs; src; src = src-&gt;next) 
+		{
+			tucookie = (<span class="enscript-type">struct</span> nstat_tucookie *)src-&gt;cookie;
+			<span class="enscript-keyword">if</span> (tucookie-&gt;inp == inp)
+			{
+				<span class="enscript-keyword">if</span> (inp-&gt;inp_vflag &amp; INP_IPV6)
+				{
+					nstat_ip6_to_sockaddr(&amp;inp-&gt;in6p_laddr,
+					    inp-&gt;inp_lport, 
+					    &amp;tucookie-&gt;local.v6,
+					    <span class="enscript-keyword">sizeof</span>(tucookie-&gt;local));
+					nstat_ip6_to_sockaddr(&amp;inp-&gt;in6p_faddr,
+					    inp-&gt;inp_fport,
+					    &amp;tucookie-&gt;remote.v6,
+					    <span class="enscript-keyword">sizeof</span>(tucookie-&gt;remote));
+				}
+				<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (inp-&gt;inp_vflag &amp; INP_IPV4)
+				{
+					nstat_ip_to_sockaddr(&amp;inp-&gt;inp_laddr,
+					    inp-&gt;inp_lport, 
+					    &amp;tucookie-&gt;local.v4,
+					    <span class="enscript-keyword">sizeof</span>(tucookie-&gt;local));
+					nstat_ip_to_sockaddr(&amp;inp-&gt;inp_faddr,
+					    inp-&gt;inp_fport, 
+					    &amp;tucookie-&gt;remote.v4,
+					    <span class="enscript-keyword">sizeof</span>(tucookie-&gt;remote));
+				}
+				<span class="enscript-keyword">if</span> (inp-&gt;inp_last_outifp)
+					tucookie-&gt;if_index = 
+					    inp-&gt;inp_last_outifp-&gt;if_index;
+
+				tucookie-&gt;ifnet_properties = nstat_inpcb_to_flags(inp);
+				tucookie-&gt;cached = true;
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+		lck_mtx_unlock(&amp;state-&gt;mtx);
+	}
+	lck_mtx_unlock(&amp;nstat_mtx);
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_pcb_invalidate_cache</span>(<span class="enscript-type">struct</span> inpcb *inp)
+{
+	nstat_control_state *state;
+	nstat_src *src;
+	<span class="enscript-type">struct</span> nstat_tucookie *tucookie;
+
+	<span class="enscript-keyword">if</span> (inp == NULL || nstat_udp_watchers == 0 ||
+	    inp-&gt;inp_nstat_refcnt == 0)
+		<span class="enscript-keyword">return</span>;
+	VERIFY(SOCK_PROTO(inp-&gt;inp_socket) == IPPROTO_UDP);
+	lck_mtx_lock(&amp;nstat_mtx);
+	<span class="enscript-keyword">for</span> (state = nstat_controls; state; state = state-&gt;ncs_next) {
+		lck_mtx_lock(&amp;state-&gt;mtx);
+		<span class="enscript-keyword">for</span> (src = state-&gt;ncs_srcs; src; src = src-&gt;next) 
+		{
+			tucookie = (<span class="enscript-type">struct</span> nstat_tucookie *)src-&gt;cookie;
+			<span class="enscript-keyword">if</span> (tucookie-&gt;inp == inp)
+			{
+				tucookie-&gt;cached = false;
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+		lck_mtx_unlock(&amp;state-&gt;mtx);
+	}
+	lck_mtx_unlock(&amp;nstat_mtx);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_tcp_copy_descriptor</span>(
+	nstat_provider_cookie_t	cookie,
+	<span class="enscript-type">void</span>			*data,
+	u_int32_t		len)
+{
+	<span class="enscript-keyword">if</span> (len &lt; <span class="enscript-keyword">sizeof</span>(nstat_tcp_descriptor))
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-keyword">if</span> (nstat_tcp_gone(cookie))
+		<span class="enscript-keyword">return</span> EINVAL;
+	
+	nstat_tcp_descriptor	*desc = (nstat_tcp_descriptor*)data;
+	<span class="enscript-type">struct</span> nstat_tucookie *tucookie =
+	    (<span class="enscript-type">struct</span> nstat_tucookie *)cookie;
+	<span class="enscript-type">struct</span> inpcb		*inp = tucookie-&gt;inp;
+	<span class="enscript-type">struct</span> tcpcb		*tp = intotcpcb(inp);
+	bzero(desc, <span class="enscript-keyword">sizeof</span>(*desc));
+	
+	<span class="enscript-keyword">if</span> (inp-&gt;inp_vflag &amp; INP_IPV6)
+	{
+		nstat_ip6_to_sockaddr(&amp;inp-&gt;in6p_laddr, inp-&gt;inp_lport,
+			&amp;desc-&gt;local.v6, <span class="enscript-keyword">sizeof</span>(desc-&gt;local));
+		nstat_ip6_to_sockaddr(&amp;inp-&gt;in6p_faddr, inp-&gt;inp_fport,
+			&amp;desc-&gt;remote.v6, <span class="enscript-keyword">sizeof</span>(desc-&gt;remote));
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (inp-&gt;inp_vflag &amp; INP_IPV4)
+	{
+		nstat_ip_to_sockaddr(&amp;inp-&gt;inp_laddr, inp-&gt;inp_lport,
+			&amp;desc-&gt;local.v4, <span class="enscript-keyword">sizeof</span>(desc-&gt;local));
+		nstat_ip_to_sockaddr(&amp;inp-&gt;inp_faddr, inp-&gt;inp_fport,
+			&amp;desc-&gt;remote.v4, <span class="enscript-keyword">sizeof</span>(desc-&gt;remote));
+	}
+	
+	desc-&gt;state = intotcpcb(inp)-&gt;t_state;
+	desc-&gt;ifindex = (inp-&gt;inp_last_outifp == NULL) ? 0 :
+	    inp-&gt;inp_last_outifp-&gt;if_index;
+	
+	<span class="enscript-comment">// danger - not locked, values could be bogus
+</span>	desc-&gt;txunacked = tp-&gt;snd_max - tp-&gt;snd_una;
+	desc-&gt;txwindow = tp-&gt;snd_wnd;
+	desc-&gt;txcwindow = tp-&gt;snd_cwnd;
+
+	<span class="enscript-keyword">if</span> (CC_ALGO(tp)-&gt;name != NULL) {
+		strlcpy(desc-&gt;cc_algo, CC_ALGO(tp)-&gt;name,
+		    <span class="enscript-keyword">sizeof</span>(desc-&gt;cc_algo));
+	}
+	
+	<span class="enscript-type">struct</span> socket *so = inp-&gt;inp_socket;
+	<span class="enscript-keyword">if</span> (so)
+	{
+		<span class="enscript-comment">// TBD - take the socket lock around these to make sure
+</span>		<span class="enscript-comment">// they're in sync?
+</span>		desc-&gt;upid = so-&gt;last_upid;
+		desc-&gt;pid = so-&gt;last_pid;
+		desc-&gt;traffic_class = so-&gt;so_traffic_class;
+		desc-&gt;traffic_mgt_flags = so-&gt;so_traffic_mgt_flags;
+		proc_name(desc-&gt;pid, desc-&gt;pname, <span class="enscript-keyword">sizeof</span>(desc-&gt;pname));
+		<span class="enscript-keyword">if</span> (desc-&gt;pname[0] == 0)
+		{
+			strlcpy(desc-&gt;pname, tucookie-&gt;pname,
+			    <span class="enscript-keyword">sizeof</span>(desc-&gt;pname));
+		}
+		<span class="enscript-keyword">else</span>
+		{
+			desc-&gt;pname[<span class="enscript-keyword">sizeof</span>(desc-&gt;pname) - 1] = 0;
+			strlcpy(tucookie-&gt;pname, desc-&gt;pname,
+			    <span class="enscript-keyword">sizeof</span>(tucookie-&gt;pname));
+		}
+		memcpy(desc-&gt;uuid, so-&gt;last_uuid, <span class="enscript-keyword">sizeof</span>(so-&gt;last_uuid));
+		memcpy(desc-&gt;vuuid, so-&gt;so_vuuid, <span class="enscript-keyword">sizeof</span>(so-&gt;so_vuuid));
+		<span class="enscript-keyword">if</span> (so-&gt;so_flags &amp; SOF_DELEGATED) {
+			desc-&gt;eupid = so-&gt;e_upid;
+			desc-&gt;epid = so-&gt;e_pid;
+			memcpy(desc-&gt;euuid, so-&gt;e_uuid, <span class="enscript-keyword">sizeof</span>(so-&gt;e_uuid));
+		} <span class="enscript-keyword">else</span> {
+			desc-&gt;eupid = desc-&gt;upid;
+			desc-&gt;epid = desc-&gt;pid;
+			memcpy(desc-&gt;euuid, desc-&gt;uuid, <span class="enscript-keyword">sizeof</span>(desc-&gt;uuid));
+		}
+		desc-&gt;sndbufsize = so-&gt;so_snd.sb_hiwat;
+		desc-&gt;sndbufused = so-&gt;so_snd.sb_cc;
+		desc-&gt;rcvbufsize = so-&gt;so_rcv.sb_hiwat;
+		desc-&gt;rcvbufused = so-&gt;so_rcv.sb_cc;
+	}
+
+	tcp_get_connectivity_status(tp, &amp;desc-&gt;connstatus);
+	desc-&gt;ifnet_properties = nstat_inpcb_to_flags(inp);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> bool
+<span class="enscript-function-name">nstat_tcpudp_reporting_allowed</span>(nstat_provider_cookie_t cookie, uint64_t filter)
+{
+	bool retval = true;
+
+	<span class="enscript-comment">/* Only apply interface filter if at least one is allowed. */</span>
+	<span class="enscript-keyword">if</span> ((filter &amp; NSTAT_FILTER_ACCEPT_ALL) != 0)
+	{
+		<span class="enscript-type">struct</span> nstat_tucookie *tucookie = (<span class="enscript-type">struct</span> nstat_tucookie *)cookie;
+		<span class="enscript-type">struct</span> inpcb	*inp = tucookie-&gt;inp;
+
+		uint16_t interface_properties = nstat_inpcb_to_flags(inp);
+
+		<span class="enscript-comment">/* For now, just check on interface type. */</span>
+		retval = ((filter &amp; interface_properties) != 0);
+	}
+	<span class="enscript-keyword">return</span> retval;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_init_tcp_provider</span>(<span class="enscript-type">void</span>)
+{
+	bzero(&amp;nstat_tcp_provider, <span class="enscript-keyword">sizeof</span>(nstat_tcp_provider));
+	nstat_tcp_provider.nstat_descriptor_length = <span class="enscript-keyword">sizeof</span>(nstat_tcp_descriptor);
+	nstat_tcp_provider.nstat_provider_id = NSTAT_PROVIDER_TCP;
+	nstat_tcp_provider.nstat_lookup = nstat_tcp_lookup;
+	nstat_tcp_provider.nstat_gone = nstat_tcp_gone;
+	nstat_tcp_provider.nstat_counts = nstat_tcp_counts;
+	nstat_tcp_provider.nstat_release = nstat_tcp_release;
+	nstat_tcp_provider.nstat_watcher_add = nstat_tcp_add_watcher;
+	nstat_tcp_provider.nstat_watcher_remove = nstat_tcp_remove_watcher;
+	nstat_tcp_provider.nstat_copy_descriptor = nstat_tcp_copy_descriptor;
+	nstat_tcp_provider.nstat_reporting_allowed = nstat_tcpudp_reporting_allowed;
+	nstat_tcp_provider.next = nstat_providers;
+	nstat_providers = &amp;nstat_tcp_provider;
+}
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> -- <span class="enscript-variable-name">UDP</span> <span class="enscript-variable-name">Provider</span> --
+
+<span class="enscript-type">static</span> nstat_provider	nstat_udp_provider;
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_udp_lookup</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">void</span>				*data,
+	u_int32_t 				length,
+	nstat_provider_cookie_t	*out_cookie)
+{
+	<span class="enscript-keyword">return</span> nstat_tcpudp_lookup(&amp;udbinfo, data, length, out_cookie);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">nstat_udp_gone</span>(
+	nstat_provider_cookie_t	cookie)
+{
+	<span class="enscript-type">struct</span> nstat_tucookie *tucookie =
+	    (<span class="enscript-type">struct</span> nstat_tucookie *)cookie;
+	<span class="enscript-type">struct</span> inpcb *inp;
+
+	<span class="enscript-keyword">return</span> (!(inp = tucookie-&gt;inp) ||
+		inp-&gt;inp_state == INPCB_STATE_DEAD) ? 1 : 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_udp_counts</span>(
+	nstat_provider_cookie_t	cookie,
+	<span class="enscript-type">struct</span> nstat_counts	*out_counts,
+	<span class="enscript-type">int</span>			*out_gone)
+{
+	<span class="enscript-type">struct</span> nstat_tucookie *tucookie =
+	    (<span class="enscript-type">struct</span> nstat_tucookie *)cookie;
+	
+	<span class="enscript-keyword">if</span> (out_gone) *out_gone = 0;
+	
+	<span class="enscript-comment">// if the pcb is in the dead state, we should stop using it
+</span>	<span class="enscript-keyword">if</span> (nstat_udp_gone(cookie))
+	{
+		<span class="enscript-keyword">if</span> (out_gone) *out_gone = 1;
+		<span class="enscript-keyword">if</span> (!tucookie-&gt;inp)
+			<span class="enscript-keyword">return</span> EINVAL;
+	}
+	<span class="enscript-type">struct</span> inpcb *inp = tucookie-&gt;inp;
+	
+	atomic_get_64(out_counts-&gt;nstat_rxpackets, &amp;inp-&gt;inp_stat-&gt;rxpackets);
+	atomic_get_64(out_counts-&gt;nstat_rxbytes, &amp;inp-&gt;inp_stat-&gt;rxbytes);
+	atomic_get_64(out_counts-&gt;nstat_txpackets, &amp;inp-&gt;inp_stat-&gt;txpackets);
+	atomic_get_64(out_counts-&gt;nstat_txbytes, &amp;inp-&gt;inp_stat-&gt;txbytes);
+	atomic_get_64(out_counts-&gt;nstat_cell_rxbytes, &amp;inp-&gt;inp_cstat-&gt;rxbytes);
+	atomic_get_64(out_counts-&gt;nstat_cell_txbytes, &amp;inp-&gt;inp_cstat-&gt;txbytes);
+	atomic_get_64(out_counts-&gt;nstat_wifi_rxbytes, &amp;inp-&gt;inp_wstat-&gt;rxbytes);
+	atomic_get_64(out_counts-&gt;nstat_wifi_txbytes, &amp;inp-&gt;inp_wstat-&gt;txbytes);
+	atomic_get_64(out_counts-&gt;nstat_wired_rxbytes, &amp;inp-&gt;inp_Wstat-&gt;rxbytes);
+	atomic_get_64(out_counts-&gt;nstat_wired_txbytes, &amp;inp-&gt;inp_Wstat-&gt;txbytes);
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_udp_release</span>(
+	nstat_provider_cookie_t	cookie,
+	<span class="enscript-type">int</span> locked)
+{
+	<span class="enscript-type">struct</span> nstat_tucookie *tucookie =
+	    (<span class="enscript-type">struct</span> nstat_tucookie *)cookie;
+
+	nstat_tucookie_release_internal(tucookie, locked);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_udp_add_watcher</span>(
+	nstat_control_state	*state)
+{
+	<span class="enscript-type">struct</span> inpcb *inp;
+	<span class="enscript-type">struct</span> nstat_tucookie *cookie;
+
+	OSIncrementAtomic(&amp;nstat_udp_watchers);
+	
+	lck_rw_lock_shared(udbinfo.ipi_lock);
+	<span class="enscript-comment">// Add all current UDP inpcbs.
+</span>	LIST_FOREACH(inp, udbinfo.ipi_listhead, inp_list)
+	{
+		cookie = nstat_tucookie_alloc_ref(inp);
+		<span class="enscript-keyword">if</span> (cookie == NULL)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (nstat_control_source_add(0, state, &amp;nstat_udp_provider,
+		    cookie) != 0)
+		{
+			nstat_tucookie_release(cookie);
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	
+	lck_rw_done(udbinfo.ipi_lock);
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_udp_remove_watcher</span>(
+	__unused nstat_control_state	*state)
+{
+	OSDecrementAtomic(&amp;nstat_udp_watchers);
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_udp_new_pcb</span>(
+	<span class="enscript-type">struct</span> inpcb	*inp)
+{
+	<span class="enscript-type">struct</span> nstat_tucookie *cookie;
+
+	<span class="enscript-keyword">if</span> (nstat_udp_watchers == 0)
+		<span class="enscript-keyword">return</span>;
+	
+	socket_lock(inp-&gt;inp_socket, 0);
+	lck_mtx_lock(&amp;nstat_mtx);
+	nstat_control_state	*state;
+	<span class="enscript-keyword">for</span> (state = nstat_controls; state; state = state-&gt;ncs_next)
+	{
+		<span class="enscript-keyword">if</span> ((state-&gt;ncs_watching &amp; (1 &lt;&lt; NSTAT_PROVIDER_UDP)) != 0)
+		{
+			<span class="enscript-comment">// this client is watching tcp
+</span>			<span class="enscript-comment">// acquire a reference for it
+</span>			cookie = nstat_tucookie_alloc_ref_locked(inp);
+			<span class="enscript-keyword">if</span> (cookie == NULL)
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-comment">// add the source, if that fails, release the reference
+</span>			<span class="enscript-keyword">if</span> (nstat_control_source_add(0, state, 
+			    &amp;nstat_udp_provider, cookie) != 0)
+			{
+				nstat_tucookie_release_locked(cookie);
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+	}
+	lck_mtx_unlock(&amp;nstat_mtx);
+	socket_unlock(inp-&gt;inp_socket, 0);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_udp_copy_descriptor</span>(
+	nstat_provider_cookie_t	cookie,
+	<span class="enscript-type">void</span>					*data,
+	u_int32_t				len)
+{
+	<span class="enscript-keyword">if</span> (len &lt; <span class="enscript-keyword">sizeof</span>(nstat_udp_descriptor))
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+	<span class="enscript-keyword">if</span> (nstat_udp_gone(cookie))
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	<span class="enscript-type">struct</span> nstat_tucookie	*tucookie =
+	    (<span class="enscript-type">struct</span> nstat_tucookie *)cookie;
+	nstat_udp_descriptor		*desc = (nstat_udp_descriptor*)data;
+	<span class="enscript-type">struct</span> inpcb 			*inp = tucookie-&gt;inp;
+
+	bzero(desc, <span class="enscript-keyword">sizeof</span>(*desc));
+	
+	<span class="enscript-keyword">if</span> (tucookie-&gt;cached == false) {
+		<span class="enscript-keyword">if</span> (inp-&gt;inp_vflag &amp; INP_IPV6)
+		{
+			nstat_ip6_to_sockaddr(&amp;inp-&gt;in6p_laddr, inp-&gt;inp_lport,
+				&amp;desc-&gt;local.v6, <span class="enscript-keyword">sizeof</span>(desc-&gt;local.v6));
+			nstat_ip6_to_sockaddr(&amp;inp-&gt;in6p_faddr, inp-&gt;inp_fport,
+				&amp;desc-&gt;remote.v6, <span class="enscript-keyword">sizeof</span>(desc-&gt;remote.v6));
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (inp-&gt;inp_vflag &amp; INP_IPV4)
+		{
+			nstat_ip_to_sockaddr(&amp;inp-&gt;inp_laddr, inp-&gt;inp_lport,
+				&amp;desc-&gt;local.v4, <span class="enscript-keyword">sizeof</span>(desc-&gt;local.v4));
+			nstat_ip_to_sockaddr(&amp;inp-&gt;inp_faddr, inp-&gt;inp_fport,
+				&amp;desc-&gt;remote.v4, <span class="enscript-keyword">sizeof</span>(desc-&gt;remote.v4));
+		}
+		desc-&gt;ifnet_properties = nstat_inpcb_to_flags(inp);
+	}
+	<span class="enscript-keyword">else</span>
+	{
+		<span class="enscript-keyword">if</span> (inp-&gt;inp_vflag &amp; INP_IPV6)
+		{
+			memcpy(&amp;desc-&gt;local.v6, &amp;tucookie-&gt;local.v6,
+			    <span class="enscript-keyword">sizeof</span>(desc-&gt;local.v6));
+			memcpy(&amp;desc-&gt;remote.v6, &amp;tucookie-&gt;remote.v6,
+			    <span class="enscript-keyword">sizeof</span>(desc-&gt;remote.v6));
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (inp-&gt;inp_vflag &amp; INP_IPV4)
+		{
+			memcpy(&amp;desc-&gt;local.v4, &amp;tucookie-&gt;local.v4,
+			    <span class="enscript-keyword">sizeof</span>(desc-&gt;local.v4));
+			memcpy(&amp;desc-&gt;remote.v4, &amp;tucookie-&gt;remote.v4,
+			    <span class="enscript-keyword">sizeof</span>(desc-&gt;remote.v4));
+		}
+		desc-&gt;ifnet_properties = tucookie-&gt;ifnet_properties;
+	}
+	
+	<span class="enscript-keyword">if</span> (inp-&gt;inp_last_outifp)
+		desc-&gt;ifindex = inp-&gt;inp_last_outifp-&gt;if_index;
+	<span class="enscript-keyword">else</span>
+		desc-&gt;ifindex = tucookie-&gt;if_index;
+		
+	<span class="enscript-type">struct</span> socket *so = inp-&gt;inp_socket;
+	<span class="enscript-keyword">if</span> (so)
+	{
+		<span class="enscript-comment">// TBD - take the socket lock around these to make sure
+</span>		<span class="enscript-comment">// they're in sync?
+</span>		desc-&gt;upid = so-&gt;last_upid;
+		desc-&gt;pid = so-&gt;last_pid;
+		proc_name(desc-&gt;pid, desc-&gt;pname, <span class="enscript-keyword">sizeof</span>(desc-&gt;pname));
+		<span class="enscript-keyword">if</span> (desc-&gt;pname[0] == 0)
+		{
+			strlcpy(desc-&gt;pname, tucookie-&gt;pname,
+			    <span class="enscript-keyword">sizeof</span>(desc-&gt;pname));
+		}
+		<span class="enscript-keyword">else</span>
+		{
+			desc-&gt;pname[<span class="enscript-keyword">sizeof</span>(desc-&gt;pname) - 1] = 0;
+			strlcpy(tucookie-&gt;pname, desc-&gt;pname,
+			    <span class="enscript-keyword">sizeof</span>(tucookie-&gt;pname));
+		}
+		memcpy(desc-&gt;uuid, so-&gt;last_uuid, <span class="enscript-keyword">sizeof</span>(so-&gt;last_uuid));
+		memcpy(desc-&gt;vuuid, so-&gt;so_vuuid, <span class="enscript-keyword">sizeof</span>(so-&gt;so_vuuid));
+		<span class="enscript-keyword">if</span> (so-&gt;so_flags &amp; SOF_DELEGATED) {
+			desc-&gt;eupid = so-&gt;e_upid;
+			desc-&gt;epid = so-&gt;e_pid;
+			memcpy(desc-&gt;euuid, so-&gt;e_uuid, <span class="enscript-keyword">sizeof</span>(so-&gt;e_uuid));
+		} <span class="enscript-keyword">else</span> {
+			desc-&gt;eupid = desc-&gt;upid;
+			desc-&gt;epid = desc-&gt;pid;
+			memcpy(desc-&gt;euuid, desc-&gt;uuid, <span class="enscript-keyword">sizeof</span>(desc-&gt;uuid));
+		}
+		desc-&gt;rcvbufsize = so-&gt;so_rcv.sb_hiwat;
+		desc-&gt;rcvbufused = so-&gt;so_rcv.sb_cc;
+		desc-&gt;traffic_class = so-&gt;so_traffic_class;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_init_udp_provider</span>(<span class="enscript-type">void</span>)
+{
+	bzero(&amp;nstat_udp_provider, <span class="enscript-keyword">sizeof</span>(nstat_udp_provider));
+	nstat_udp_provider.nstat_provider_id = NSTAT_PROVIDER_UDP;
+	nstat_udp_provider.nstat_descriptor_length = <span class="enscript-keyword">sizeof</span>(nstat_udp_descriptor);
+	nstat_udp_provider.nstat_lookup = nstat_udp_lookup;
+	nstat_udp_provider.nstat_gone = nstat_udp_gone;
+	nstat_udp_provider.nstat_counts = nstat_udp_counts;
+	nstat_udp_provider.nstat_watcher_add = nstat_udp_add_watcher;
+	nstat_udp_provider.nstat_watcher_remove = nstat_udp_remove_watcher;
+	nstat_udp_provider.nstat_copy_descriptor = nstat_udp_copy_descriptor;
+	nstat_udp_provider.nstat_release = nstat_udp_release;
+	nstat_udp_provider.nstat_reporting_allowed = nstat_tcpudp_reporting_allowed;
+	nstat_udp_provider.next = nstat_providers;
+	nstat_providers = &amp;nstat_udp_provider;
+}
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> -- <span class="enscript-variable-name">ifnet</span> <span class="enscript-variable-name">Provider</span> --
+
+<span class="enscript-type">static</span> nstat_provider	nstat_ifnet_provider;
+
+<span class="enscript-comment">/*
+ * We store a pointer to the ifnet and the original threshold
+ * requested by the client.
+ */</span>
+<span class="enscript-type">struct</span> nstat_ifnet_cookie
+{
+	<span class="enscript-type">struct</span> ifnet 	*ifp;
+	uint64_t	threshold;
+};
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_ifnet_lookup</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">void</span>		*data,
+	u_int32_t 		length,
+	nstat_provider_cookie_t	*out_cookie)
+{
+	<span class="enscript-type">const</span> nstat_ifnet_add_param *param = (<span class="enscript-type">const</span> nstat_ifnet_add_param *)data;
+	<span class="enscript-type">struct</span> ifnet *ifp;
+	boolean_t changed = FALSE;
+	nstat_control_state *state;
+	nstat_src *src;
+	<span class="enscript-type">struct</span> nstat_ifnet_cookie *cookie;
+
+	<span class="enscript-keyword">if</span> (length &lt; <span class="enscript-keyword">sizeof</span>(*param) || param-&gt;threshold &lt; 1024*1024)
+		<span class="enscript-keyword">return</span> EINVAL;
+	<span class="enscript-keyword">if</span> (nstat_privcheck != 0) {
+		errno_t result = priv_check_cred(kauth_cred_get(), 
+		    PRIV_NET_PRIVILEGED_NETWORK_STATISTICS, 0);
+		<span class="enscript-keyword">if</span> (result != 0)
+			<span class="enscript-keyword">return</span> result;
+	}
+	cookie = OSMalloc(<span class="enscript-keyword">sizeof</span>(*cookie), nstat_malloc_tag);
+	<span class="enscript-keyword">if</span> (cookie == NULL)
+		<span class="enscript-keyword">return</span> ENOMEM;
+	bzero(cookie, <span class="enscript-keyword">sizeof</span>(*cookie));
+
+	ifnet_head_lock_shared();
+	TAILQ_FOREACH(ifp, &amp;ifnet_head, if_link)
+	{
+		ifnet_lock_exclusive(ifp);
+		<span class="enscript-keyword">if</span> (ifp-&gt;if_index == param-&gt;ifindex)
+		{
+			cookie-&gt;ifp = ifp;
+			cookie-&gt;threshold = param-&gt;threshold;
+			*out_cookie = cookie;
+			<span class="enscript-keyword">if</span> (!ifp-&gt;if_data_threshold ||
+			    ifp-&gt;if_data_threshold &gt; param-&gt;threshold)
+			{
+				changed = TRUE;
+				ifp-&gt;if_data_threshold = param-&gt;threshold;
+			}
+			ifnet_lock_done(ifp);
+			ifnet_reference(ifp);
+			<span class="enscript-keyword">break</span>;
+		}
+		ifnet_lock_done(ifp);
+	}
+	ifnet_head_done();
+
+	<span class="enscript-comment">/*
+	 * When we change the threshold to something smaller, we notify
+	 * all of our clients with a description message.
+	 * We won't send a message to the client we are currently serving
+	 * because it has no `ifnet source' yet.
+	 */</span>
+	<span class="enscript-keyword">if</span> (changed)
+	{
+		lck_mtx_lock(&amp;nstat_mtx);
+		<span class="enscript-keyword">for</span> (state = nstat_controls; state; state = state-&gt;ncs_next)
+		{
+			lck_mtx_lock(&amp;state-&gt;mtx);
+			<span class="enscript-keyword">for</span> (src = state-&gt;ncs_srcs; src; src = src-&gt;next)
+			{
+				<span class="enscript-keyword">if</span> (src-&gt;provider != &amp;nstat_ifnet_provider)
+					<span class="enscript-keyword">continue</span>;
+				nstat_control_send_description(state, src, 0, 0);
+			}
+			lck_mtx_unlock(&amp;state-&gt;mtx);
+		}
+		lck_mtx_unlock(&amp;nstat_mtx);
+	}
+	<span class="enscript-keyword">if</span> (cookie-&gt;ifp == NULL)
+		OSFree(cookie, <span class="enscript-keyword">sizeof</span>(*cookie), nstat_malloc_tag);
+
+	<span class="enscript-keyword">return</span> ifp ? 0 : EINVAL;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">nstat_ifnet_gone</span>(
+	nstat_provider_cookie_t	cookie)
+{
+	<span class="enscript-type">struct</span> ifnet *ifp;
+	<span class="enscript-type">struct</span> nstat_ifnet_cookie *ifcookie =
+	    (<span class="enscript-type">struct</span> nstat_ifnet_cookie *)cookie;
+
+	ifnet_head_lock_shared();
+	TAILQ_FOREACH(ifp, &amp;ifnet_head, if_link)
+	{
+		<span class="enscript-keyword">if</span> (ifp == ifcookie-&gt;ifp)
+			<span class="enscript-keyword">break</span>;
+	}
+	ifnet_head_done();
+
+	<span class="enscript-keyword">return</span> ifp ? 0 : 1;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_ifnet_counts</span>(
+	nstat_provider_cookie_t	cookie,
+	<span class="enscript-type">struct</span> nstat_counts	*out_counts,
+	<span class="enscript-type">int</span>			*out_gone)
+{
+	<span class="enscript-type">struct</span> nstat_ifnet_cookie *ifcookie =
+	    (<span class="enscript-type">struct</span> nstat_ifnet_cookie *)cookie;
+	<span class="enscript-type">struct</span> ifnet *ifp = ifcookie-&gt;ifp;
+
+	<span class="enscript-keyword">if</span> (out_gone) *out_gone = 0;
+	
+	<span class="enscript-comment">// if the ifnet is gone, we should stop using it
+</span>	<span class="enscript-keyword">if</span> (nstat_ifnet_gone(cookie))
+	{
+		<span class="enscript-keyword">if</span> (out_gone) *out_gone = 1;
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	bzero(out_counts, <span class="enscript-keyword">sizeof</span>(*out_counts));
+	out_counts-&gt;nstat_rxpackets = ifp-&gt;if_ipackets;
+	out_counts-&gt;nstat_rxbytes = ifp-&gt;if_ibytes;
+	out_counts-&gt;nstat_txpackets = ifp-&gt;if_opackets;
+	out_counts-&gt;nstat_txbytes = ifp-&gt;if_obytes;
+	out_counts-&gt;nstat_cell_rxbytes = out_counts-&gt;nstat_cell_txbytes = 0;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_ifnet_release</span>(
+	nstat_provider_cookie_t	cookie,
+	__unused <span class="enscript-type">int</span> 		locked)
+{
+	<span class="enscript-type">struct</span> nstat_ifnet_cookie *ifcookie;
+	<span class="enscript-type">struct</span> ifnet *ifp;
+	nstat_control_state *state;
+	nstat_src *src;
+	uint64_t minthreshold = UINT64_MAX;
+
+	<span class="enscript-comment">/*
+	 * Find all the clients that requested a threshold
+	 * for this ifnet and re-calculate if_data_threshold.
+	 */</span>
+	lck_mtx_lock(&amp;nstat_mtx);
+	<span class="enscript-keyword">for</span> (state = nstat_controls; state; state = state-&gt;ncs_next)
+	{
+		lck_mtx_lock(&amp;state-&gt;mtx);
+		<span class="enscript-keyword">for</span> (src = state-&gt;ncs_srcs; src; src = src-&gt;next)
+		{
+			<span class="enscript-comment">/* Skip the provider we are about to detach. */</span>
+			<span class="enscript-keyword">if</span> (src-&gt;provider != &amp;nstat_ifnet_provider ||
+			    src-&gt;cookie == cookie)
+				<span class="enscript-keyword">continue</span>;
+	    		ifcookie = (<span class="enscript-type">struct</span> nstat_ifnet_cookie *)src-&gt;cookie;
+			<span class="enscript-keyword">if</span> (ifcookie-&gt;threshold &lt; minthreshold)
+				minthreshold = ifcookie-&gt;threshold; 
+		}
+		lck_mtx_unlock(&amp;state-&gt;mtx);
+	}
+	lck_mtx_unlock(&amp;nstat_mtx);
+	<span class="enscript-comment">/*
+	 * Reset if_data_threshold or disable it.
+	 */</span>
+	ifcookie = (<span class="enscript-type">struct</span> nstat_ifnet_cookie *)cookie;
+	ifp = ifcookie-&gt;ifp;
+	<span class="enscript-keyword">if</span> (ifnet_is_attached(ifp, 1)) {
+		ifnet_lock_exclusive(ifp);
+		<span class="enscript-keyword">if</span> (minthreshold == UINT64_MAX)
+			ifp-&gt;if_data_threshold = 0;
+		<span class="enscript-keyword">else</span>
+			ifp-&gt;if_data_threshold = minthreshold;
+		ifnet_lock_done(ifp);
+		ifnet_decr_iorefcnt(ifp);                               
+	}
+	ifnet_release(ifp);
+	OSFree(ifcookie, <span class="enscript-keyword">sizeof</span>(*ifcookie), nstat_malloc_tag);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_ifnet_copy_link_status</span>(
+	<span class="enscript-type">struct</span> ifnet			*ifp,
+	<span class="enscript-type">struct</span> nstat_ifnet_descriptor	*desc)
+{
+	<span class="enscript-type">struct</span> if_link_status *ifsr = ifp-&gt;if_link_status;
+	nstat_ifnet_desc_link_status *link_status = &amp;desc-&gt;link_status;
+
+	link_status-&gt;link_status_type = NSTAT_IFNET_DESC_LINK_STATUS_TYPE_NONE;
+	<span class="enscript-keyword">if</span> (ifsr == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	lck_rw_lock_shared(&amp;ifp-&gt;if_link_status_lock);
+
+	<span class="enscript-keyword">if</span> (ifp-&gt;if_type == IFT_CELLULAR) {
+
+		nstat_ifnet_desc_cellular_status *cell_status = &amp;link_status-&gt;u.cellular;
+		<span class="enscript-type">struct</span> if_cellular_status_v1 *if_cell_sr =
+			&amp;ifsr-&gt;ifsr_u.ifsr_cell.if_cell_u.if_status_v1;
+
+		<span class="enscript-keyword">if</span> (ifsr-&gt;ifsr_version != IF_CELLULAR_STATUS_REPORT_VERSION_1)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+		link_status-&gt;link_status_type = NSTAT_IFNET_DESC_LINK_STATUS_TYPE_CELLULAR;
+
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_LINK_QUALITY_METRIC_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_LINK_QUALITY_METRIC_VALID;
+			cell_status-&gt;link_quality_metric = if_cell_sr-&gt;link_quality_metric;
+		}
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_UL_EFFECTIVE_BANDWIDTH_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_UL_EFFECTIVE_BANDWIDTH_VALID;
+			cell_status-&gt;ul_effective_bandwidth = if_cell_sr-&gt;ul_effective_bandwidth;
+		}
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_UL_MAX_BANDWIDTH_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_UL_MAX_BANDWIDTH_VALID;
+			cell_status-&gt;ul_max_bandwidth = if_cell_sr-&gt;ul_max_bandwidth;
+		}
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_UL_MIN_LATENCY_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_UL_MIN_LATENCY_VALID;
+			cell_status-&gt;ul_min_latency = if_cell_sr-&gt;ul_min_latency;
+		}
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_UL_EFFECTIVE_LATENCY_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_UL_EFFECTIVE_LATENCY_VALID;
+			cell_status-&gt;ul_effective_latency = if_cell_sr-&gt;ul_effective_latency;
+		}
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_UL_MAX_LATENCY_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_UL_MAX_LATENCY_VALID;
+			cell_status-&gt;ul_max_latency = if_cell_sr-&gt;ul_max_latency;
+		}
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_UL_RETXT_LEVEL_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_UL_RETXT_LEVEL_VALID;
+			<span class="enscript-keyword">if</span> (if_cell_sr-&gt;ul_retxt_level == IF_CELL_UL_RETXT_LEVEL_NONE)
+				cell_status-&gt;ul_retxt_level = NSTAT_IFNET_DESC_CELL_UL_RETXT_LEVEL_NONE;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (if_cell_sr-&gt;ul_retxt_level == IF_CELL_UL_RETXT_LEVEL_LOW)
+				cell_status-&gt;ul_retxt_level = NSTAT_IFNET_DESC_CELL_UL_RETXT_LEVEL_LOW;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (if_cell_sr-&gt;ul_retxt_level == IF_CELL_UL_RETXT_LEVEL_MEDIUM)
+				cell_status-&gt;ul_retxt_level = NSTAT_IFNET_DESC_CELL_UL_RETXT_LEVEL_MEDIUM;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (if_cell_sr-&gt;ul_retxt_level == IF_CELL_UL_RETXT_LEVEL_HIGH)
+				cell_status-&gt;ul_retxt_level = NSTAT_IFNET_DESC_CELL_UL_RETXT_LEVEL_HIGH;
+			<span class="enscript-keyword">else</span>
+				cell_status-&gt;valid_bitmask &amp;= ~NSTAT_IFNET_DESC_CELL_UL_RETXT_LEVEL_VALID;
+		}
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_UL_BYTES_LOST_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_UL_BYTES_LOST_VALID;
+			cell_status-&gt;ul_bytes_lost = if_cell_sr-&gt;ul_bytes_lost;
+		}
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_UL_MIN_QUEUE_SIZE_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_UL_MIN_QUEUE_SIZE_VALID;
+			cell_status-&gt;ul_min_queue_size = if_cell_sr-&gt;ul_min_queue_size;
+		}
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_UL_AVG_QUEUE_SIZE_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_UL_AVG_QUEUE_SIZE_VALID;
+			cell_status-&gt;ul_avg_queue_size = if_cell_sr-&gt;ul_avg_queue_size;
+		}
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_UL_MAX_QUEUE_SIZE_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_UL_MAX_QUEUE_SIZE_VALID;
+			cell_status-&gt;ul_max_queue_size = if_cell_sr-&gt;ul_max_queue_size;
+		}
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_DL_EFFECTIVE_BANDWIDTH_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_DL_EFFECTIVE_BANDWIDTH_VALID;
+			cell_status-&gt;dl_effective_bandwidth = if_cell_sr-&gt;dl_effective_bandwidth;
+		}
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_DL_MAX_BANDWIDTH_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_DL_MAX_BANDWIDTH_VALID;
+			cell_status-&gt;dl_max_bandwidth = if_cell_sr-&gt;dl_max_bandwidth;
+		}
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_CONFIG_INACTIVITY_TIME_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_CONFIG_INACTIVITY_TIME_VALID;
+			cell_status-&gt;config_inactivity_time = if_cell_sr-&gt;config_inactivity_time;
+		}
+		<span class="enscript-keyword">if</span> (if_cell_sr-&gt;valid_bitmask &amp; IF_CELL_CONFIG_BACKOFF_TIME_VALID) {
+			cell_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_CELL_CONFIG_BACKOFF_TIME_VALID;
+			cell_status-&gt;config_backoff_time = if_cell_sr-&gt;config_backoff_time;
+		}
+
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ifp-&gt;if_subfamily == IFNET_SUBFAMILY_WIFI) {
+
+		nstat_ifnet_desc_wifi_status *wifi_status = &amp;link_status-&gt;u.wifi;
+		<span class="enscript-type">struct</span> if_wifi_status_v1 *if_wifi_sr =
+			&amp;ifsr-&gt;ifsr_u.ifsr_wifi.if_wifi_u.if_status_v1;
+
+		<span class="enscript-keyword">if</span> (ifsr-&gt;ifsr_version != IF_WIFI_STATUS_REPORT_VERSION_1)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+		link_status-&gt;link_status_type = NSTAT_IFNET_DESC_LINK_STATUS_TYPE_WIFI;
+
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_LINK_QUALITY_METRIC_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_LINK_QUALITY_METRIC_VALID;
+			wifi_status-&gt;link_quality_metric = if_wifi_sr-&gt;link_quality_metric;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_UL_EFFECTIVE_BANDWIDTH_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_UL_EFFECTIVE_BANDWIDTH_VALID;
+			wifi_status-&gt;ul_effective_bandwidth = if_wifi_sr-&gt;ul_effective_bandwidth;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_UL_MAX_BANDWIDTH_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_UL_MAX_BANDWIDTH_VALID;
+			wifi_status-&gt;ul_max_bandwidth = if_wifi_sr-&gt;ul_max_bandwidth;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_UL_MIN_LATENCY_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_UL_MIN_LATENCY_VALID;
+			wifi_status-&gt;ul_min_latency = if_wifi_sr-&gt;ul_min_latency;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_UL_EFFECTIVE_LATENCY_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_UL_EFFECTIVE_LATENCY_VALID;
+			wifi_status-&gt;ul_effective_latency = if_wifi_sr-&gt;ul_effective_latency;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_UL_MAX_LATENCY_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_UL_MAX_LATENCY_VALID;
+			wifi_status-&gt;ul_max_latency = if_wifi_sr-&gt;ul_max_latency;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_UL_RETXT_LEVEL_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_UL_RETXT_LEVEL_VALID;
+			<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;ul_retxt_level == IF_WIFI_UL_RETXT_LEVEL_NONE)
+				wifi_status-&gt;ul_retxt_level = NSTAT_IFNET_DESC_WIFI_UL_RETXT_LEVEL_NONE;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (if_wifi_sr-&gt;ul_retxt_level == IF_WIFI_UL_RETXT_LEVEL_LOW)
+				wifi_status-&gt;ul_retxt_level = NSTAT_IFNET_DESC_WIFI_UL_RETXT_LEVEL_LOW;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (if_wifi_sr-&gt;ul_retxt_level == IF_WIFI_UL_RETXT_LEVEL_MEDIUM)
+				wifi_status-&gt;ul_retxt_level = NSTAT_IFNET_DESC_WIFI_UL_RETXT_LEVEL_MEDIUM;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (if_wifi_sr-&gt;ul_retxt_level == IF_WIFI_UL_RETXT_LEVEL_HIGH)
+				wifi_status-&gt;ul_retxt_level = NSTAT_IFNET_DESC_WIFI_UL_RETXT_LEVEL_HIGH;
+			<span class="enscript-keyword">else</span>
+				wifi_status-&gt;valid_bitmask &amp;= ~NSTAT_IFNET_DESC_WIFI_UL_RETXT_LEVEL_VALID;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_UL_BYTES_LOST_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_UL_BYTES_LOST_VALID;
+			wifi_status-&gt;ul_bytes_lost = if_wifi_sr-&gt;ul_bytes_lost;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_UL_ERROR_RATE_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_UL_ERROR_RATE_VALID;
+			wifi_status-&gt;ul_error_rate = if_wifi_sr-&gt;ul_error_rate;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_DL_EFFECTIVE_BANDWIDTH_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_DL_EFFECTIVE_BANDWIDTH_VALID;
+			wifi_status-&gt;dl_effective_bandwidth = if_wifi_sr-&gt;dl_effective_bandwidth;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_DL_MAX_BANDWIDTH_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_DL_MAX_BANDWIDTH_VALID;
+			wifi_status-&gt;dl_max_bandwidth = if_wifi_sr-&gt;dl_max_bandwidth;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_DL_MIN_LATENCY_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_DL_MIN_LATENCY_VALID;
+			wifi_status-&gt;dl_min_latency = if_wifi_sr-&gt;dl_min_latency;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_DL_EFFECTIVE_LATENCY_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_DL_EFFECTIVE_LATENCY_VALID;
+			wifi_status-&gt;dl_effective_latency = if_wifi_sr-&gt;dl_effective_latency;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_DL_MAX_LATENCY_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_DL_MAX_LATENCY_VALID;
+			wifi_status-&gt;dl_max_latency = if_wifi_sr-&gt;dl_max_latency;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_DL_ERROR_RATE_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_DL_ERROR_RATE_VALID;
+			wifi_status-&gt;dl_error_rate = if_wifi_sr-&gt;dl_error_rate;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_CONFIG_FREQUENCY_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_CONFIG_FREQUENCY_VALID;
+			<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;config_frequency == IF_WIFI_CONFIG_FREQUENCY_2_4_GHZ)
+				wifi_status-&gt;config_frequency = NSTAT_IFNET_DESC_WIFI_CONFIG_FREQUENCY_2_4_GHZ;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (if_wifi_sr-&gt;config_frequency == IF_WIFI_CONFIG_FREQUENCY_5_0_GHZ)
+				wifi_status-&gt;config_frequency = NSTAT_IFNET_DESC_WIFI_CONFIG_FREQUENCY_5_0_GHZ;
+			<span class="enscript-keyword">else</span>
+				wifi_status-&gt;valid_bitmask &amp;= ~NSTAT_IFNET_DESC_WIFI_CONFIG_FREQUENCY_VALID;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_CONFIG_MULTICAST_RATE_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_CONFIG_MULTICAST_RATE_VALID;
+			wifi_status-&gt;config_multicast_rate = if_wifi_sr-&gt;config_multicast_rate;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_CONFIG_SCAN_COUNT_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_CONFIG_SCAN_COUNT_VALID;
+			wifi_status-&gt;scan_count = if_wifi_sr-&gt;scan_count;
+		}
+		<span class="enscript-keyword">if</span> (if_wifi_sr-&gt;valid_bitmask &amp; IF_WIFI_CONFIG_SCAN_DURATION_VALID) {
+			wifi_status-&gt;valid_bitmask |= NSTAT_IFNET_DESC_WIFI_CONFIG_SCAN_DURATION_VALID;
+			wifi_status-&gt;scan_duration = if_wifi_sr-&gt;scan_duration;
+		}
+	}
+
+<span class="enscript-reference">done</span>:
+	lck_rw_done(&amp;ifp-&gt;if_link_status_lock);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_ifnet_copy_descriptor</span>(
+	nstat_provider_cookie_t	cookie,
+	<span class="enscript-type">void</span>			*data,
+	u_int32_t		len)
+{	
+	nstat_ifnet_descriptor *desc = (nstat_ifnet_descriptor *)data;
+	<span class="enscript-type">struct</span> nstat_ifnet_cookie *ifcookie =
+	    (<span class="enscript-type">struct</span> nstat_ifnet_cookie *)cookie;
+	<span class="enscript-type">struct</span> ifnet *ifp = ifcookie-&gt;ifp;
+
+	<span class="enscript-keyword">if</span> (len &lt; <span class="enscript-keyword">sizeof</span>(nstat_ifnet_descriptor))
+		<span class="enscript-keyword">return</span> EINVAL;
+	
+	<span class="enscript-keyword">if</span> (nstat_ifnet_gone(cookie))
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	bzero(desc, <span class="enscript-keyword">sizeof</span>(*desc));
+	ifnet_lock_shared(ifp);
+	strlcpy(desc-&gt;name, ifp-&gt;if_xname, <span class="enscript-keyword">sizeof</span>(desc-&gt;name));
+	desc-&gt;ifindex = ifp-&gt;if_index;
+	desc-&gt;threshold = ifp-&gt;if_data_threshold;
+	desc-&gt;type = ifp-&gt;if_type;
+	<span class="enscript-keyword">if</span> (ifp-&gt;if_desc.ifd_len &lt; <span class="enscript-keyword">sizeof</span>(desc-&gt;description))
+		memcpy(desc-&gt;description, ifp-&gt;if_desc.ifd_desc,
+	    	    <span class="enscript-keyword">sizeof</span>(desc-&gt;description));
+	nstat_ifnet_copy_link_status(ifp, desc);
+	ifnet_lock_done(ifp);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_init_ifnet_provider</span>(<span class="enscript-type">void</span>)
+{
+	bzero(&amp;nstat_ifnet_provider, <span class="enscript-keyword">sizeof</span>(nstat_ifnet_provider));
+	nstat_ifnet_provider.nstat_provider_id = NSTAT_PROVIDER_IFNET;
+	nstat_ifnet_provider.nstat_descriptor_length = <span class="enscript-keyword">sizeof</span>(nstat_ifnet_descriptor);
+	nstat_ifnet_provider.nstat_lookup = nstat_ifnet_lookup;
+	nstat_ifnet_provider.nstat_gone = nstat_ifnet_gone;
+	nstat_ifnet_provider.nstat_counts = nstat_ifnet_counts;
+	nstat_ifnet_provider.nstat_watcher_add = NULL;
+	nstat_ifnet_provider.nstat_watcher_remove = NULL;
+	nstat_ifnet_provider.nstat_copy_descriptor = nstat_ifnet_copy_descriptor;
+	nstat_ifnet_provider.nstat_release = nstat_ifnet_release;
+	nstat_ifnet_provider.next = nstat_providers;
+	nstat_providers = &amp;nstat_ifnet_provider;
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_ifnet_threshold_reached</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> ifindex)
+{
+	nstat_control_state *state;
+	nstat_src *src;
+	<span class="enscript-type">struct</span> ifnet *ifp;
+	<span class="enscript-type">struct</span> nstat_ifnet_cookie *ifcookie;
+
+	lck_mtx_lock(&amp;nstat_mtx);
+	<span class="enscript-keyword">for</span> (state = nstat_controls; state; state = state-&gt;ncs_next)
+	{
+		lck_mtx_lock(&amp;state-&gt;mtx);
+		<span class="enscript-keyword">for</span> (src = state-&gt;ncs_srcs; src; src = src-&gt;next)
+		{
+			<span class="enscript-keyword">if</span> (src-&gt;provider != &amp;nstat_ifnet_provider)
+				<span class="enscript-keyword">continue</span>;
+			ifcookie = (<span class="enscript-type">struct</span> nstat_ifnet_cookie *)src-&gt;cookie;
+			ifp = ifcookie-&gt;ifp;
+			<span class="enscript-keyword">if</span> (ifp-&gt;if_index != ifindex)
+				<span class="enscript-keyword">continue</span>;
+			nstat_control_send_counts(state, src, 0, 0, NULL);
+		}
+		lck_mtx_unlock(&amp;state-&gt;mtx);
+	}
+	lck_mtx_unlock(&amp;nstat_mtx);
+}
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> -- <span class="enscript-variable-name">Sysinfo</span> --
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_set_keyval_scalar</span>(nstat_sysinfo_keyval *kv, <span class="enscript-type">int</span> key, u_int32_t val)
+{
+	kv-&gt;nstat_sysinfo_key = key;
+	kv-&gt;nstat_sysinfo_flags = NSTAT_SYSINFO_FLAG_SCALAR;
+	kv-&gt;u.nstat_sysinfo_scalar = val;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_sysinfo_send_data_internal</span>(
+	nstat_control_state *control,
+	nstat_sysinfo_data *data)
+{
+	nstat_msg_sysinfo_counts *syscnt = NULL;
+	size_t allocsize = 0, countsize = 0, nkeyvals = 0;
+	nstat_sysinfo_keyval *kv;
+	errno_t result = 0;
+	size_t i = 0;
+	
+	allocsize = offsetof(nstat_msg_sysinfo_counts, counts);
+	countsize = offsetof(nstat_sysinfo_counts, nstat_sysinfo_keyvals);
+
+	<span class="enscript-comment">/* get number of key-vals for each kind of stat */</span>
+	<span class="enscript-keyword">switch</span> (data-&gt;flags)
+	{
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSTAT_SYSINFO_MBUF_STATS</span>:
+			nkeyvals = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> nstat_sysinfo_mbuf_stats) /
+			    <span class="enscript-keyword">sizeof</span>(u_int32_t);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSTAT_SYSINFO_TCP_STATS</span>:
+			nkeyvals = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> nstat_sysinfo_tcp_stats) /
+			    <span class="enscript-keyword">sizeof</span>(u_int32_t);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span>;
+	}
+	countsize += <span class="enscript-keyword">sizeof</span>(nstat_sysinfo_keyval) * nkeyvals;
+	allocsize += countsize;
+
+	syscnt = OSMalloc(allocsize, nstat_malloc_tag);
+	<span class="enscript-keyword">if</span> (syscnt == NULL)
+		<span class="enscript-keyword">return</span>;
+	bzero(syscnt, allocsize);
+
+	syscnt-&gt;hdr.type = NSTAT_MSG_TYPE_SYSINFO_COUNTS;
+	syscnt-&gt;hdr.length = allocsize;
+	syscnt-&gt;counts.nstat_sysinfo_len = countsize;
+	
+	kv = (nstat_sysinfo_keyval *) &amp;syscnt-&gt;counts.nstat_sysinfo_keyvals;
+	<span class="enscript-keyword">switch</span> (data-&gt;flags)
+	{
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSTAT_SYSINFO_MBUF_STATS</span>:
+		{
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_KEY_MBUF_256B_TOTAL,
+			    data-&gt;u.mb_stats.total_256b);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_KEY_MBUF_2KB_TOTAL,
+			    data-&gt;u.mb_stats.total_2kb);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_KEY_MBUF_4KB_TOTAL,
+			    data-&gt;u.mb_stats.total_4kb);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_MBUF_16KB_TOTAL,
+			    data-&gt;u.mb_stats.total_16kb);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_KEY_SOCK_MBCNT,
+			    data-&gt;u.mb_stats.sbmb_total);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_KEY_SOCK_ATMBLIMIT,
+			    data-&gt;u.mb_stats.sb_atmbuflimit);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_MBUF_DRAIN_CNT,
+			    data-&gt;u.mb_stats.draincnt);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_MBUF_MEM_RELEASED,
+			    data-&gt;u.mb_stats.memreleased);
+			VERIFY(i == nkeyvals);
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSTAT_SYSINFO_TCP_STATS</span>:
+		{
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_KEY_IPV4_AVGRTT,
+			    data-&gt;u.tcp_stats.ipv4_avgrtt);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_KEY_IPV6_AVGRTT,
+			    data-&gt;u.tcp_stats.ipv6_avgrtt);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_KEY_SEND_PLR,
+			    data-&gt;u.tcp_stats.send_plr);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_KEY_RECV_PLR,
+			    data-&gt;u.tcp_stats.recv_plr);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_KEY_SEND_TLRTO,
+			    data-&gt;u.tcp_stats.send_tlrto_rate);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_KEY_SEND_REORDERRATE,
+			    data-&gt;u.tcp_stats.send_reorder_rate);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_CONNECTION_ATTEMPTS,
+			    data-&gt;u.tcp_stats.connection_attempts);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_CONNECTION_ACCEPTS,
+			    data-&gt;u.tcp_stats.connection_accepts);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_CLIENT_ENABLED,
+			    data-&gt;u.tcp_stats.ecn_client_enabled);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_SERVER_ENABLED,
+			    data-&gt;u.tcp_stats.ecn_server_enabled);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_CLIENT_SETUP,
+			    data-&gt;u.tcp_stats.ecn_client_setup);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_SERVER_SETUP,
+			    data-&gt;u.tcp_stats.ecn_server_setup);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_CLIENT_SUCCESS,
+			    data-&gt;u.tcp_stats.ecn_client_success);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_SERVER_SUCCESS,
+			    data-&gt;u.tcp_stats.ecn_server_success);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_NOT_SUPPORTED,
+			    data-&gt;u.tcp_stats.ecn_not_supported);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_LOST_SYN,
+			    data-&gt;u.tcp_stats.ecn_lost_syn);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_LOST_SYNACK,
+			    data-&gt;u.tcp_stats.ecn_lost_synack);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_RECV_CE,
+			    data-&gt;u.tcp_stats.ecn_recv_ce);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_RECV_ECE,
+			    data-&gt;u.tcp_stats.ecn_recv_ece);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_SENT_ECE,
+			    data-&gt;u.tcp_stats.ecn_sent_ece);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_CONN_RECV_CE,
+			    data-&gt;u.tcp_stats.ecn_conn_recv_ce);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_CONN_RECV_ECE,
+			    data-&gt;u.tcp_stats.ecn_conn_recv_ece);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_CONN_PLNOCE,
+			    data-&gt;u.tcp_stats.ecn_conn_plnoce);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_CONN_PL_CE,
+			    data-&gt;u.tcp_stats.ecn_conn_pl_ce);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_ECN_CONN_NOPL_CE,
+			    data-&gt;u.tcp_stats.ecn_conn_nopl_ce);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_TFO_SYN_DATA_RCV,
+			    data-&gt;u.tcp_stats.tfo_syn_data_rcv);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_TFO_COOKIE_REQ_RCV,
+			    data-&gt;u.tcp_stats.tfo_cookie_req_rcv);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_TFO_COOKIE_SENT,
+			    data-&gt;u.tcp_stats.tfo_cookie_sent);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_TFO_COOKIE_INVALID,
+			    data-&gt;u.tcp_stats.tfo_cookie_invalid);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_TFO_COOKIE_REQ,
+			    data-&gt;u.tcp_stats.tfo_cookie_req);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_TFO_COOKIE_RCV,
+			    data-&gt;u.tcp_stats.tfo_cookie_rcv);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_TFO_SYN_DATA_SENT,
+			    data-&gt;u.tcp_stats.tfo_syn_data_sent);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_TFO_SYN_DATA_ACKED,
+			    data-&gt;u.tcp_stats.tfo_syn_data_acked);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_TFO_SYN_LOSS,
+			    data-&gt;u.tcp_stats.tfo_syn_loss);
+			nstat_set_keyval_scalar(&amp;kv[i++],
+			    NSTAT_SYSINFO_TFO_BLACKHOLE,
+			    data-&gt;u.tcp_stats.tfo_blackhole);
+
+			VERIFY(i == nkeyvals);
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	
+	<span class="enscript-keyword">if</span> (syscnt != NULL)
+	{
+		result = ctl_enqueuedata(control-&gt;ncs_kctl,
+		    control-&gt;ncs_unit, syscnt, allocsize, CTL_DATA_EOR);
+		<span class="enscript-keyword">if</span> (result != 0)
+		{
+			nstat_stats.nstat_sysinfofailures += 1;
+		}
+		OSFree(syscnt, allocsize, nstat_malloc_tag);
+	}
+	<span class="enscript-keyword">return</span>;
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_sysinfo_send_data</span>(
+	nstat_sysinfo_data *data)
+{
+	nstat_control_state *control;
+
+	lck_mtx_lock(&amp;nstat_mtx);
+	<span class="enscript-keyword">for</span> (control = nstat_controls; control; control = control-&gt;ncs_next)
+	{
+		lck_mtx_lock(&amp;control-&gt;mtx);
+		<span class="enscript-keyword">if</span> ((control-&gt;ncs_flags &amp; NSTAT_FLAG_SYSINFO_SUBSCRIBED) != 0)
+		{
+			nstat_sysinfo_send_data_internal(control, data);
+		}
+		lck_mtx_unlock(&amp;control-&gt;mtx);
+	}
+	lck_mtx_unlock(&amp;nstat_mtx);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_sysinfo_generate_report</span>(<span class="enscript-type">void</span>)
+{
+	mbuf_report_peak_usage();
+	tcp_report_stats();
+}
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> -- <span class="enscript-variable-name">Kernel</span> <span class="enscript-variable-name">Control</span> <span class="enscript-variable-name">Socket</span> --
+
+<span class="enscript-type">static</span> kern_ctl_ref	nstat_ctlref = NULL;
+<span class="enscript-type">static</span> lck_grp_t	*nstat_lck_grp = NULL;
+
+<span class="enscript-type">static</span> errno_t	nstat_control_connect(kern_ctl_ref kctl, <span class="enscript-type">struct</span> sockaddr_ctl *sac, <span class="enscript-type">void</span> **uinfo);
+<span class="enscript-type">static</span> errno_t	nstat_control_disconnect(kern_ctl_ref kctl, u_int32_t unit, <span class="enscript-type">void</span> *uinfo);
+<span class="enscript-type">static</span> errno_t	nstat_control_send(kern_ctl_ref kctl, u_int32_t unit, <span class="enscript-type">void</span> *uinfo, mbuf_t m, <span class="enscript-type">int</span> flags);
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_enqueue_success</span>(
+    uint64_t context,
+    nstat_control_state	*state,
+    u_int16_t flags)
+{
+	nstat_msg_hdr success;
+	errno_t result;
+
+	bzero(&amp;success, <span class="enscript-keyword">sizeof</span>(success));
+	success.context = context;
+	success.type = NSTAT_MSG_TYPE_SUCCESS;
+	success.length = <span class="enscript-keyword">sizeof</span>(success);
+	success.flags = flags;
+	result = ctl_enqueuedata(state-&gt;ncs_kctl, state-&gt;ncs_unit, &amp;success,
+	    <span class="enscript-keyword">sizeof</span>(success), CTL_DATA_EOR | CTL_DATA_CRIT);
+	<span class="enscript-keyword">if</span> (result != 0) {
+		<span class="enscript-keyword">if</span> (nstat_debug != 0)
+			printf(<span class="enscript-string">&quot;%s: could not enqueue success message %d\n&quot;</span>,
+			    __func__, result);
+		nstat_stats.nstat_successmsgfailures += 1;
+	}
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_send_goodbye</span>(
+	nstat_control_state	*state,
+	nstat_src			*src)
+{
+	errno_t result = 0;
+	<span class="enscript-type">int</span> failed = 0;
+
+	<span class="enscript-keyword">if</span> (nstat_control_reporting_allowed(state, src))
+	{
+		<span class="enscript-keyword">if</span> ((state-&gt;ncs_flags &amp; NSTAT_FLAG_SUPPORTS_UPDATES) != 0)
+		{
+			result = nstat_control_send_update(state, src, 0, NSTAT_MSG_HDR_FLAG_CLOSING, NULL);
+			<span class="enscript-keyword">if</span> (result != 0)
+			{
+				failed = 1;
+				<span class="enscript-keyword">if</span> (nstat_debug != 0)
+					printf(<span class="enscript-string">&quot;%s - nstat_control_send_update() %d\n&quot;</span>, __func__, result);
+			}
+		}
+		<span class="enscript-keyword">else</span>
+		{
+			<span class="enscript-comment">// send one last counts notification
+</span>			result = nstat_control_send_counts(state, src, 0, NSTAT_MSG_HDR_FLAG_CLOSING, NULL);
+			<span class="enscript-keyword">if</span> (result != 0)
+			{
+				failed = 1;
+				<span class="enscript-keyword">if</span> (nstat_debug != 0)
+					printf(<span class="enscript-string">&quot;%s - nstat_control_send_counts() %d\n&quot;</span>, __func__, result);
+			}
+
+			<span class="enscript-comment">// send a last description
+</span>			result = nstat_control_send_description(state, src, 0, NSTAT_MSG_HDR_FLAG_CLOSING);
+			<span class="enscript-keyword">if</span> (result != 0)
+			{
+				failed = 1;
+				<span class="enscript-keyword">if</span> (nstat_debug != 0)
+					printf(<span class="enscript-string">&quot;%s - nstat_control_send_description() %d\n&quot;</span>, __func__, result);
+			}
+		}
+	}
+
+	<span class="enscript-comment">// send the source removed notification
+</span>	result = nstat_control_send_removed(state, src);
+	<span class="enscript-keyword">if</span> (result != 0 &amp;&amp; nstat_debug)
+	{
+		failed = 1;
+		<span class="enscript-keyword">if</span> (nstat_debug != 0)
+			printf(<span class="enscript-string">&quot;%s - nstat_control_send_removed() %d\n&quot;</span>, __func__, result);
+	}
+
+	<span class="enscript-keyword">if</span> (failed != 0)
+		nstat_stats.nstat_control_send_goodbye_failures++;
+
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_flush_accumulated_msgs</span>(
+	nstat_control_state	*state)
+{
+	errno_t result = 0;
+	<span class="enscript-keyword">if</span> (state-&gt;ncs_accumulated &amp;&amp; mbuf_len(state-&gt;ncs_accumulated))
+	{
+		mbuf_pkthdr_setlen(state-&gt;ncs_accumulated, mbuf_len(state-&gt;ncs_accumulated));
+		result = ctl_enqueuembuf(state-&gt;ncs_kctl, state-&gt;ncs_unit, state-&gt;ncs_accumulated, CTL_DATA_EOR);
+		<span class="enscript-keyword">if</span> (result != 0 &amp;&amp; nstat_debug)
+		{
+			nstat_stats.nstat_flush_accumulated_msgs_failures++;
+			<span class="enscript-keyword">if</span> (nstat_debug != 0)
+				printf(<span class="enscript-string">&quot;%s - ctl_enqueuembuf failed: %d\n&quot;</span>, __func__, result);
+			mbuf_freem(state-&gt;ncs_accumulated);
+		}
+		state-&gt;ncs_accumulated = NULL;
+	}
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_accumulate_msg</span>(
+	nstat_control_state	*state,
+	nstat_msg_hdr		*hdr,
+	size_t				length)
+{
+	<span class="enscript-keyword">if</span> (state-&gt;ncs_accumulated &amp;&amp; mbuf_trailingspace(state-&gt;ncs_accumulated) &lt; length)
+	{
+		<span class="enscript-comment">// Will send the current mbuf
+</span>		nstat_flush_accumulated_msgs(state);
+	}
+	
+	errno_t result = 0;
+	
+	<span class="enscript-keyword">if</span> (state-&gt;ncs_accumulated == NULL)
+	{
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> one = 1;
+		<span class="enscript-keyword">if</span> (mbuf_allocpacket(MBUF_DONTWAIT, NSTAT_MAX_MSG_SIZE, &amp;one, &amp;state-&gt;ncs_accumulated) != 0)
+		{
+			<span class="enscript-keyword">if</span> (nstat_debug != 0)
+				printf(<span class="enscript-string">&quot;%s - mbuf_allocpacket failed\n&quot;</span>, __func__);
+			result = ENOMEM;
+		}
+		<span class="enscript-keyword">else</span>
+		{
+			mbuf_setlen(state-&gt;ncs_accumulated, 0);
+		}
+	}
+	
+	<span class="enscript-keyword">if</span> (result == 0)
+	{
+		hdr-&gt;length = length;
+		result = mbuf_copyback(state-&gt;ncs_accumulated, mbuf_len(state-&gt;ncs_accumulated),
+							   length, hdr, MBUF_DONTWAIT);
+	}
+	
+	<span class="enscript-keyword">if</span> (result != 0)
+	{
+		nstat_flush_accumulated_msgs(state);
+		<span class="enscript-keyword">if</span> (nstat_debug != 0)
+			printf(<span class="enscript-string">&quot;%s - resorting to ctl_enqueuedata\n&quot;</span>, __func__);
+		result = ctl_enqueuedata(state-&gt;ncs_kctl, state-&gt;ncs_unit, hdr, length, CTL_DATA_EOR);
+	}
+	
+	<span class="enscript-keyword">if</span> (result != 0)
+		nstat_stats.nstat_accumulate_msg_failures++;
+
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>*
+<span class="enscript-function-name">nstat_idle_check</span>(
+	__unused thread_call_param_t p0,
+	__unused thread_call_param_t p1)
+{
+	lck_mtx_lock(&amp;nstat_mtx);
+	
+	nstat_idle_time = 0;
+	
+	nstat_control_state *control;
+	nstat_src	*dead = NULL;
+	nstat_src	*dead_list = NULL;
+	<span class="enscript-keyword">for</span> (control = nstat_controls; control; control = control-&gt;ncs_next)
+	{
+		lck_mtx_lock(&amp;control-&gt;mtx);
+		nstat_src	**srcpp = &amp;control-&gt;ncs_srcs;
+		
+		<span class="enscript-keyword">if</span> (!(control-&gt;ncs_flags &amp; NSTAT_FLAG_REQCOUNTS))
+		{
+			<span class="enscript-keyword">while</span>(*srcpp != NULL)
+			{
+				<span class="enscript-keyword">if</span> ((*srcpp)-&gt;provider-&gt;nstat_gone((*srcpp)-&gt;cookie))
+				{
+					errno_t result;
+					
+					<span class="enscript-comment">// Pull it off the list
+</span>					dead = *srcpp;
+					*srcpp = (*srcpp)-&gt;next;
+					
+					result = nstat_control_send_goodbye(control, dead);
+					
+					<span class="enscript-comment">// Put this on the list to release later
+</span>					dead-&gt;next = dead_list;
+					dead_list = dead;
+				}
+				<span class="enscript-keyword">else</span>
+				{
+					srcpp = &amp;(*srcpp)-&gt;next;
+				}
+			}
+		}
+		control-&gt;ncs_flags &amp;= ~NSTAT_FLAG_REQCOUNTS;
+		lck_mtx_unlock(&amp;control-&gt;mtx);
+	}
+
+	<span class="enscript-keyword">if</span> (nstat_controls)
+	{
+		clock_interval_to_deadline(60, NSEC_PER_SEC, &amp;nstat_idle_time);
+		thread_call_func_delayed((thread_call_func_t)nstat_idle_check, NULL, nstat_idle_time);
+	}
+	
+	lck_mtx_unlock(&amp;nstat_mtx);
+	
+	<span class="enscript-comment">/* Generate any system level reports, if needed */</span>
+	nstat_sysinfo_generate_report();
+	
+	<span class="enscript-comment">// Release the sources now that we aren't holding lots of locks
+</span>	<span class="enscript-keyword">while</span> (dead_list)
+	{
+		dead = dead_list;
+		dead_list = dead-&gt;next;
+		
+		nstat_control_cleanup_source(NULL, dead, FALSE);
+	}
+	
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_control_register</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">// Create our lock group first
+</span>	lck_grp_attr_t	*grp_attr = lck_grp_attr_alloc_init();
+	lck_grp_attr_setdefault(grp_attr);
+	nstat_lck_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;network statistics kctl&quot;</span>, grp_attr);
+	lck_grp_attr_free(grp_attr);
+	
+	lck_mtx_init(&amp;nstat_mtx, nstat_lck_grp, NULL);
+	
+	<span class="enscript-comment">// Register the control
+</span>	<span class="enscript-type">struct</span> kern_ctl_reg	nstat_control;
+	bzero(&amp;nstat_control, <span class="enscript-keyword">sizeof</span>(nstat_control));	
+	strlcpy(nstat_control.ctl_name, NET_STAT_CONTROL_NAME, <span class="enscript-keyword">sizeof</span>(nstat_control.ctl_name));
+	nstat_control.ctl_flags = CTL_FLAG_REG_EXTENDED | CTL_FLAG_REG_CRIT;
+	nstat_control.ctl_sendsize = nstat_sendspace;
+	nstat_control.ctl_recvsize = nstat_recvspace;
+	nstat_control.ctl_connect = nstat_control_connect;
+	nstat_control.ctl_disconnect = nstat_control_disconnect;
+	nstat_control.ctl_send = nstat_control_send;
+	
+	ctl_register(&amp;nstat_control, &amp;nstat_ctlref);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_control_cleanup_source</span>(
+	nstat_control_state	*state,
+	<span class="enscript-type">struct</span> nstat_src	*src,
+	boolean_t 		locked)
+{
+	errno_t result;
+	
+	<span class="enscript-keyword">if</span> (state)
+	{
+		result = nstat_control_send_removed(state, src);
+		<span class="enscript-keyword">if</span> (result != 0)
+		{
+			nstat_stats.nstat_control_cleanup_source_failures++;
+			<span class="enscript-keyword">if</span> (nstat_debug != 0)
+				printf(<span class="enscript-string">&quot;%s - nstat_control_send_removed() %d\n&quot;</span>,
+				    __func__, result);
+		}
+	}
+	<span class="enscript-comment">// Cleanup the source if we found it.
+</span>	src-&gt;provider-&gt;nstat_release(src-&gt;cookie, locked);
+	OSFree(src, <span class="enscript-keyword">sizeof</span>(*src), nstat_malloc_tag);
+}
+
+
+<span class="enscript-type">static</span> bool
+<span class="enscript-function-name">nstat_control_reporting_allowed</span>(
+	nstat_control_state *state,
+	nstat_src *src)
+{
+	<span class="enscript-keyword">if</span> (src-&gt;provider-&gt;nstat_reporting_allowed == NULL)
+		<span class="enscript-keyword">return</span> TRUE;
+
+	<span class="enscript-keyword">return</span> (
+	    src-&gt;provider-&gt;nstat_reporting_allowed( src-&gt;cookie,
+		state-&gt;ncs_provider_filters[src-&gt;provider-&gt;nstat_provider_id])
+	);
+}
+
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_connect</span>(
+	kern_ctl_ref		kctl,
+	<span class="enscript-type">struct</span> sockaddr_ctl	*sac,
+	<span class="enscript-type">void</span>				**uinfo)
+{
+	nstat_control_state	*state = OSMalloc(<span class="enscript-keyword">sizeof</span>(*state), nstat_malloc_tag);
+	<span class="enscript-keyword">if</span> (state == NULL) <span class="enscript-keyword">return</span> ENOMEM;
+	
+	bzero(state, <span class="enscript-keyword">sizeof</span>(*state));
+	lck_mtx_init(&amp;state-&gt;mtx, nstat_lck_grp, NULL);
+	state-&gt;ncs_kctl = kctl;
+	state-&gt;ncs_unit = sac-&gt;sc_unit;
+	state-&gt;ncs_flags = NSTAT_FLAG_REQCOUNTS;
+	*uinfo = state;
+	
+	lck_mtx_lock(&amp;nstat_mtx);
+	state-&gt;ncs_next = nstat_controls;
+	nstat_controls = state;
+	
+	<span class="enscript-keyword">if</span> (nstat_idle_time == 0)
+	{
+		clock_interval_to_deadline(60, NSEC_PER_SEC, &amp;nstat_idle_time);
+		thread_call_func_delayed((thread_call_func_t)nstat_idle_check, NULL, nstat_idle_time);
+	}
+	
+	lck_mtx_unlock(&amp;nstat_mtx);
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_disconnect</span>(
+	__unused kern_ctl_ref	kctl,
+	__unused u_int32_t		unit,
+	<span class="enscript-type">void</span>					*uinfo)
+{
+	u_int32_t	watching;
+	nstat_control_state	*state = (nstat_control_state*)uinfo;
+	
+	<span class="enscript-comment">// pull it out of the global list of states
+</span>	lck_mtx_lock(&amp;nstat_mtx);
+	nstat_control_state	**statepp;
+	<span class="enscript-keyword">for</span> (statepp = &amp;nstat_controls; *statepp; statepp = &amp;(*statepp)-&gt;ncs_next)
+	{
+		<span class="enscript-keyword">if</span> (*statepp == state)
+		{
+			*statepp = state-&gt;ncs_next;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	lck_mtx_unlock(&amp;nstat_mtx);
+	
+	lck_mtx_lock(&amp;state-&gt;mtx);
+	<span class="enscript-comment">// Stop watching for sources
+</span>	nstat_provider	*provider;
+	watching = state-&gt;ncs_watching;
+	state-&gt;ncs_watching = 0;
+	<span class="enscript-keyword">for</span> (provider = nstat_providers; provider &amp;&amp; watching;  provider = provider-&gt;next)
+	{
+		<span class="enscript-keyword">if</span> ((watching &amp; (1 &lt;&lt; provider-&gt;nstat_provider_id)) != 0)
+		{
+			watching &amp;= ~(1 &lt;&lt; provider-&gt;nstat_provider_id);
+			provider-&gt;nstat_watcher_remove(state);
+		}
+	}
+	
+	<span class="enscript-comment">// set cleanup flags
+</span>	state-&gt;ncs_flags |= NSTAT_FLAG_CLEANUP;
+	
+	<span class="enscript-keyword">if</span> (state-&gt;ncs_accumulated)
+	{
+		mbuf_freem(state-&gt;ncs_accumulated);
+		state-&gt;ncs_accumulated = NULL;
+	}
+	
+	<span class="enscript-comment">// Copy out the list of sources
+</span>	nstat_src	*srcs = state-&gt;ncs_srcs;
+	state-&gt;ncs_srcs = NULL;
+	lck_mtx_unlock(&amp;state-&gt;mtx);
+	
+	<span class="enscript-keyword">while</span> (srcs)
+	{
+		nstat_src	*src;
+		
+		<span class="enscript-comment">// pull it out of the list
+</span>		src = srcs;
+		srcs = src-&gt;next;
+		
+		<span class="enscript-comment">// clean it up
+</span>		nstat_control_cleanup_source(NULL, src, FALSE);
+	}
+	lck_mtx_destroy(&amp;state-&gt;mtx, nstat_lck_grp);
+	OSFree(state, <span class="enscript-keyword">sizeof</span>(*state), nstat_malloc_tag);
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> nstat_src_ref_t
+<span class="enscript-function-name">nstat_control_next_src_ref</span>(
+	nstat_control_state	*state)
+{
+	<span class="enscript-type">int</span> i = 0;
+	nstat_src_ref_t	toReturn = NSTAT_SRC_REF_INVALID;
+	
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; 1000 &amp;&amp; toReturn == NSTAT_SRC_REF_INVALID; i++)
+	{
+		<span class="enscript-keyword">if</span> (state-&gt;ncs_next_srcref == NSTAT_SRC_REF_INVALID ||
+			state-&gt;ncs_next_srcref == NSTAT_SRC_REF_ALL)
+		{
+			state-&gt;ncs_next_srcref = 1;
+		}
+		
+		nstat_src	*src;
+		<span class="enscript-keyword">for</span> (src = state-&gt;ncs_srcs; src; src = src-&gt;next)
+		{
+			<span class="enscript-keyword">if</span> (src-&gt;srcref == state-&gt;ncs_next_srcref)
+				<span class="enscript-keyword">break</span>;
+		}
+		
+		<span class="enscript-keyword">if</span> (src == NULL) toReturn = state-&gt;ncs_next_srcref;
+		state-&gt;ncs_next_srcref++;
+	}
+	
+	<span class="enscript-keyword">return</span> toReturn;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_send_counts</span>(
+	nstat_control_state	*state,
+	nstat_src		*src,
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> <span class="enscript-type">long</span>	context,
+	u_int16_t hdr_flags,
+	<span class="enscript-type">int</span> *gone)
+{
+	nstat_msg_src_counts counts;
+	errno_t result = 0;
+
+	<span class="enscript-comment">/* Some providers may not have any counts to send */</span>
+	<span class="enscript-keyword">if</span> (src-&gt;provider-&gt;nstat_counts == NULL)
+		<span class="enscript-keyword">return</span> (0);
+
+	bzero(&amp;counts, <span class="enscript-keyword">sizeof</span>(counts));
+	counts.hdr.type = NSTAT_MSG_TYPE_SRC_COUNTS;
+	counts.hdr.length = <span class="enscript-keyword">sizeof</span>(counts);
+	counts.hdr.flags = hdr_flags;
+	counts.hdr.context = context;
+	counts.srcref = src-&gt;srcref;
+	
+	<span class="enscript-keyword">if</span> (src-&gt;provider-&gt;nstat_counts(src-&gt;cookie, &amp;counts.counts, gone) == 0)
+	{
+		<span class="enscript-keyword">if</span> ((src-&gt;filter &amp; NSTAT_FILTER_NOZEROBYTES) &amp;&amp;
+		    counts.counts.nstat_rxbytes == 0 &amp;&amp; 
+		    counts.counts.nstat_txbytes == 0)
+		{
+			result = EAGAIN;
+		}
+		<span class="enscript-keyword">else</span>
+		{
+			result = ctl_enqueuedata(state-&gt;ncs_kctl,
+			    state-&gt;ncs_unit, &amp;counts, <span class="enscript-keyword">sizeof</span>(counts),
+			    CTL_DATA_EOR);
+			<span class="enscript-keyword">if</span> (result != 0)
+				nstat_stats.nstat_sendcountfailures += 1;
+		}
+	}
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_append_counts</span>(
+	nstat_control_state	*state,
+	nstat_src			*src,
+	<span class="enscript-type">int</span>					*gone)
+{
+	<span class="enscript-comment">/* Some providers may not have any counts to send */</span>
+	<span class="enscript-keyword">if</span> (!src-&gt;provider-&gt;nstat_counts) <span class="enscript-keyword">return</span> 0;
+	
+	nstat_msg_src_counts counts;
+	bzero(&amp;counts, <span class="enscript-keyword">sizeof</span>(counts));
+	counts.hdr.type = NSTAT_MSG_TYPE_SRC_COUNTS;
+	counts.hdr.length = <span class="enscript-keyword">sizeof</span>(counts);
+	counts.srcref = src-&gt;srcref;
+	
+	errno_t	result = 0;
+	result = src-&gt;provider-&gt;nstat_counts(src-&gt;cookie, &amp;counts.counts, gone);
+	<span class="enscript-keyword">if</span> (result != 0)
+	{
+		<span class="enscript-keyword">return</span> result;
+	}
+	
+	<span class="enscript-keyword">if</span> ((src-&gt;filter &amp; NSTAT_FILTER_NOZEROBYTES) == NSTAT_FILTER_NOZEROBYTES &amp;&amp;
+		counts.counts.nstat_rxbytes == 0 &amp;&amp; counts.counts.nstat_txbytes == 0)
+	{
+		<span class="enscript-keyword">return</span> EAGAIN;
+	}
+	
+	<span class="enscript-keyword">return</span> nstat_accumulate_msg(state, &amp;counts.hdr, counts.hdr.length);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">nstat_control_send_description</span>(
+	nstat_control_state	*state,
+	nstat_src			*src,
+	u_int64_t			context,
+	u_int16_t			hdr_flags)
+{
+	<span class="enscript-comment">// Provider doesn't support getting the descriptor? Done.
+</span>	<span class="enscript-keyword">if</span> (src-&gt;provider-&gt;nstat_descriptor_length == 0 ||
+		src-&gt;provider-&gt;nstat_copy_descriptor == NULL)
+	{
+		<span class="enscript-keyword">return</span> EOPNOTSUPP;
+	}
+
+	<span class="enscript-comment">// Allocate storage for the descriptor message
+</span>	mbuf_t			msg;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	one = 1;
+	u_int32_t		size = offsetof(nstat_msg_src_description, data) + src-&gt;provider-&gt;nstat_descriptor_length;
+	<span class="enscript-keyword">if</span> (mbuf_allocpacket(MBUF_DONTWAIT, size, &amp;one, &amp;msg) != 0)
+	{
+		<span class="enscript-keyword">return</span> ENOMEM;
+	}
+
+	nstat_msg_src_description	*desc = (nstat_msg_src_description*)mbuf_data(msg);
+	bzero(desc, size);
+	mbuf_setlen(msg, size);
+	mbuf_pkthdr_setlen(msg, mbuf_len(msg));
+
+	<span class="enscript-comment">// Query the provider for the provider specific bits
+</span>	errno_t	result = src-&gt;provider-&gt;nstat_copy_descriptor(src-&gt;cookie, desc-&gt;data, src-&gt;provider-&gt;nstat_descriptor_length);
+
+	<span class="enscript-keyword">if</span> (result != 0)
+	{
+		mbuf_freem(msg);
+		<span class="enscript-keyword">return</span> result;
+	}
+
+	desc-&gt;hdr.context = context;
+	desc-&gt;hdr.type = NSTAT_MSG_TYPE_SRC_DESC;
+	desc-&gt;hdr.length = size;
+	desc-&gt;hdr.flags = hdr_flags;
+	desc-&gt;srcref = src-&gt;srcref;
+	desc-&gt;provider = src-&gt;provider-&gt;nstat_provider_id;
+
+	result = ctl_enqueuembuf(state-&gt;ncs_kctl, state-&gt;ncs_unit, msg, CTL_DATA_EOR);
+	<span class="enscript-keyword">if</span> (result != 0)
+	{
+		nstat_stats.nstat_descriptionfailures += 1;
+		mbuf_freem(msg);
+	}
+
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_append_description</span>(
+	nstat_control_state	*state,
+	nstat_src			*src)
+{
+	size_t	size = offsetof(nstat_msg_src_description, data) + src-&gt;provider-&gt;nstat_descriptor_length;
+	<span class="enscript-keyword">if</span> (size &gt; 512 || src-&gt;provider-&gt;nstat_descriptor_length == 0 ||
+		src-&gt;provider-&gt;nstat_copy_descriptor == NULL)
+	{
+		<span class="enscript-keyword">return</span> EOPNOTSUPP;
+	}
+	
+	<span class="enscript-comment">// Fill out a buffer on the stack, we will copy to the mbuf later
+</span>	u_int64_t buffer[size/<span class="enscript-keyword">sizeof</span>(u_int64_t)  + 1]; <span class="enscript-comment">// u_int64_t to ensure alignment
+</span>	bzero(buffer, size);
+	
+	nstat_msg_src_description	*desc = (nstat_msg_src_description*)buffer;
+	desc-&gt;hdr.type = NSTAT_MSG_TYPE_SRC_DESC;
+	desc-&gt;hdr.length = size;
+	desc-&gt;srcref = src-&gt;srcref;
+	desc-&gt;provider = src-&gt;provider-&gt;nstat_provider_id;
+	
+	errno_t	result = 0;
+	<span class="enscript-comment">// Fill in the description
+</span>	<span class="enscript-comment">// Query the provider for the provider specific bits
+</span>	result = src-&gt;provider-&gt;nstat_copy_descriptor(src-&gt;cookie, desc-&gt;data,
+				src-&gt;provider-&gt;nstat_descriptor_length);
+	<span class="enscript-keyword">if</span> (result != 0)
+	{
+		<span class="enscript-keyword">return</span> result;
+	}
+	
+	<span class="enscript-keyword">return</span> nstat_accumulate_msg(state, &amp;desc-&gt;hdr, size);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">nstat_control_send_update</span>(
+	nstat_control_state	*state,
+	nstat_src			*src,
+	u_int64_t			context,
+	u_int16_t		hdr_flags,
+	<span class="enscript-type">int</span>					*gone)
+{
+	<span class="enscript-comment">// Provider doesn't support getting the descriptor or counts? Done.
+</span>	<span class="enscript-keyword">if</span> ((src-&gt;provider-&gt;nstat_descriptor_length == 0 ||
+		 src-&gt;provider-&gt;nstat_copy_descriptor == NULL) &amp;&amp;
+		src-&gt;provider-&gt;nstat_counts == NULL)
+	{
+		<span class="enscript-keyword">return</span> EOPNOTSUPP;
+	}
+	
+	<span class="enscript-comment">// Allocate storage for the descriptor message
+</span>	mbuf_t			msg;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	one = 1;
+	u_int32_t		size = offsetof(nstat_msg_src_update, data) +
+						   src-&gt;provider-&gt;nstat_descriptor_length;
+	<span class="enscript-keyword">if</span> (mbuf_allocpacket(MBUF_DONTWAIT, size, &amp;one, &amp;msg) != 0)
+	{
+		<span class="enscript-keyword">return</span> ENOMEM;
+	}
+	
+	nstat_msg_src_update	*desc = (nstat_msg_src_update*)mbuf_data(msg);
+	bzero(desc, size);
+	desc-&gt;hdr.context = context;
+	desc-&gt;hdr.type = NSTAT_MSG_TYPE_SRC_UPDATE;
+	desc-&gt;hdr.length = size;
+	desc-&gt;hdr.flags = hdr_flags;
+	desc-&gt;srcref = src-&gt;srcref;
+	desc-&gt;provider = src-&gt;provider-&gt;nstat_provider_id;
+	
+	mbuf_setlen(msg, size);
+	mbuf_pkthdr_setlen(msg, mbuf_len(msg));
+	
+	errno_t	result = 0;
+	<span class="enscript-keyword">if</span> (src-&gt;provider-&gt;nstat_descriptor_length != 0 &amp;&amp; src-&gt;provider-&gt;nstat_copy_descriptor)
+	{
+		<span class="enscript-comment">// Query the provider for the provider specific bits
+</span>		result = src-&gt;provider-&gt;nstat_copy_descriptor(src-&gt;cookie, desc-&gt;data,
+							src-&gt;provider-&gt;nstat_descriptor_length);
+		<span class="enscript-keyword">if</span> (result != 0)
+		{
+			mbuf_freem(msg);
+			<span class="enscript-keyword">return</span> result;
+		}
+	}
+	
+	<span class="enscript-keyword">if</span> (src-&gt;provider-&gt;nstat_counts)
+	{
+		result = src-&gt;provider-&gt;nstat_counts(src-&gt;cookie, &amp;desc-&gt;counts, gone);
+		<span class="enscript-keyword">if</span> (result == 0)
+		{
+			<span class="enscript-keyword">if</span> ((src-&gt;filter &amp; NSTAT_FILTER_NOZEROBYTES) == NSTAT_FILTER_NOZEROBYTES &amp;&amp;
+				desc-&gt;counts.nstat_rxbytes == 0 &amp;&amp; desc-&gt;counts.nstat_txbytes == 0)
+			{
+				result = EAGAIN;
+			}
+			<span class="enscript-keyword">else</span>
+			{
+				result = ctl_enqueuembuf(state-&gt;ncs_kctl, state-&gt;ncs_unit, msg, CTL_DATA_EOR);
+			}
+		}
+	}
+	
+	<span class="enscript-keyword">if</span> (result != 0)
+	{
+		nstat_stats.nstat_srcupatefailures += 1;
+		mbuf_freem(msg);
+	}
+
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_append_update</span>(
+	nstat_control_state	*state,
+	nstat_src			*src,
+	<span class="enscript-type">int</span>					*gone)
+{
+	size_t	size = offsetof(nstat_msg_src_update, data) + src-&gt;provider-&gt;nstat_descriptor_length;
+	<span class="enscript-keyword">if</span> (size &gt; 512 || ((src-&gt;provider-&gt;nstat_descriptor_length == 0 ||
+		src-&gt;provider-&gt;nstat_copy_descriptor == NULL) &amp;&amp;
+		src-&gt;provider-&gt;nstat_counts == NULL))
+	{
+		<span class="enscript-keyword">return</span> EOPNOTSUPP;
+	}
+	
+	<span class="enscript-comment">// Fill out a buffer on the stack, we will copy to the mbuf later
+</span>	u_int64_t buffer[size/<span class="enscript-keyword">sizeof</span>(u_int64_t)  + 1]; <span class="enscript-comment">// u_int64_t to ensure alignment
+</span>	bzero(buffer, size);
+	
+	nstat_msg_src_update	*desc = (nstat_msg_src_update*)buffer;
+	desc-&gt;hdr.type = NSTAT_MSG_TYPE_SRC_UPDATE;
+	desc-&gt;hdr.length = size;
+	desc-&gt;srcref = src-&gt;srcref;
+	desc-&gt;provider = src-&gt;provider-&gt;nstat_provider_id;
+	
+	errno_t	result = 0;
+	<span class="enscript-comment">// Fill in the description
+</span>	<span class="enscript-keyword">if</span> (src-&gt;provider-&gt;nstat_descriptor_length != 0 &amp;&amp; src-&gt;provider-&gt;nstat_copy_descriptor)
+	{
+		<span class="enscript-comment">// Query the provider for the provider specific bits
+</span>		result = src-&gt;provider-&gt;nstat_copy_descriptor(src-&gt;cookie, desc-&gt;data,
+					src-&gt;provider-&gt;nstat_descriptor_length);
+		<span class="enscript-keyword">if</span> (result != 0)
+		{
+			nstat_stats.nstat_copy_descriptor_failures++;
+			<span class="enscript-keyword">if</span> (nstat_debug != 0)
+				printf(<span class="enscript-string">&quot;%s: src-&gt;provider-&gt;nstat_copy_descriptor: %d\n&quot;</span>, __func__, result);
+			<span class="enscript-keyword">return</span> result;
+		}
+	}
+	
+	<span class="enscript-keyword">if</span> (src-&gt;provider-&gt;nstat_counts)
+	{
+		result = src-&gt;provider-&gt;nstat_counts(src-&gt;cookie, &amp;desc-&gt;counts, gone);
+		<span class="enscript-keyword">if</span> (result != 0)
+		{
+			nstat_stats.nstat_provider_counts_failures++;
+			<span class="enscript-keyword">if</span> (nstat_debug != 0)
+				printf(<span class="enscript-string">&quot;%s: src-&gt;provider-&gt;nstat_counts: %d\n&quot;</span>, __func__, result);
+			<span class="enscript-keyword">return</span> result;
+		}
+		
+		<span class="enscript-keyword">if</span> ((src-&gt;filter &amp; NSTAT_FILTER_NOZEROBYTES) == NSTAT_FILTER_NOZEROBYTES &amp;&amp;
+			desc-&gt;counts.nstat_rxbytes == 0 &amp;&amp; desc-&gt;counts.nstat_txbytes == 0)
+		{
+			<span class="enscript-keyword">return</span> EAGAIN;
+		}
+	}
+	
+	<span class="enscript-keyword">return</span> nstat_accumulate_msg(state, &amp;desc-&gt;hdr, size);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_send_removed</span>(
+	nstat_control_state	*state,
+	nstat_src		*src)
+{
+	nstat_msg_src_removed removed;
+	errno_t result;
+
+	bzero(&amp;removed, <span class="enscript-keyword">sizeof</span>(removed));
+	removed.hdr.type = NSTAT_MSG_TYPE_SRC_REMOVED;
+	removed.hdr.length = <span class="enscript-keyword">sizeof</span>(removed);
+	removed.hdr.context = 0;
+	removed.srcref = src-&gt;srcref;
+	result = ctl_enqueuedata(state-&gt;ncs_kctl, state-&gt;ncs_unit, &amp;removed,
+	    <span class="enscript-keyword">sizeof</span>(removed), CTL_DATA_EOR | CTL_DATA_CRIT);
+	<span class="enscript-keyword">if</span> (result != 0)
+		nstat_stats.nstat_msgremovedfailures += 1;
+
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_handle_add_request</span>(
+	nstat_control_state	*state,
+	mbuf_t				m)
+{
+	errno_t	result;
+
+	<span class="enscript-comment">// Verify the header fits in the first mbuf
+</span>	<span class="enscript-keyword">if</span> (mbuf_len(m) &lt; offsetof(nstat_msg_add_src_req, param))
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+	<span class="enscript-comment">// Calculate the length of the parameter field
+</span>	int32_t	paramlength = mbuf_pkthdr_len(m) - offsetof(nstat_msg_add_src_req, param);
+	<span class="enscript-keyword">if</span> (paramlength &lt; 0 || paramlength &gt; 2 * 1024)
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+	nstat_provider			*provider;
+	nstat_provider_cookie_t	cookie;
+	nstat_msg_add_src_req	*req = mbuf_data(m);
+	<span class="enscript-keyword">if</span> (mbuf_pkthdr_len(m) &gt; mbuf_len(m))
+	{
+		<span class="enscript-comment">// parameter is too large, we need to make a contiguous copy
+</span>		<span class="enscript-type">void</span>	*data = OSMalloc(paramlength, nstat_malloc_tag);
+		
+		<span class="enscript-keyword">if</span> (!data) <span class="enscript-keyword">return</span> ENOMEM;
+		result = mbuf_copydata(m, offsetof(nstat_msg_add_src_req, param), paramlength, data);
+		<span class="enscript-keyword">if</span> (result == 0)
+			result = nstat_lookup_entry(req-&gt;provider, data, paramlength, &amp;provider, &amp;cookie);
+		OSFree(data, paramlength, nstat_malloc_tag);
+	}
+	<span class="enscript-keyword">else</span>
+	{
+		result = nstat_lookup_entry(req-&gt;provider, (<span class="enscript-type">void</span>*)&amp;req-&gt;param, paramlength, &amp;provider, &amp;cookie);
+	}
+	
+	<span class="enscript-keyword">if</span> (result != 0)
+	{
+		<span class="enscript-keyword">return</span> result;
+	}
+	
+	result = nstat_control_source_add(req-&gt;hdr.context, state, provider, cookie);
+	<span class="enscript-keyword">if</span> (result != 0)
+		provider-&gt;nstat_release(cookie, 0);
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_handle_add_all</span>(
+	nstat_control_state	*state,
+	mbuf_t				m)
+{
+	errno_t	result = 0;
+	
+	<span class="enscript-comment">// Verify the header fits in the first mbuf
+</span>	<span class="enscript-keyword">if</span> (mbuf_len(m) &lt; <span class="enscript-keyword">sizeof</span>(nstat_msg_add_all_srcs))
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+
+	nstat_msg_add_all_srcs	*req = mbuf_data(m);
+	<span class="enscript-keyword">if</span> (req-&gt;provider &gt; NSTAT_PROVIDER_LAST) <span class="enscript-keyword">return</span> ENOENT;
+
+	nstat_provider			*provider = nstat_find_provider_by_id(req-&gt;provider);
+	u_int64_t           	filter = req-&gt;filter;
+
+	<span class="enscript-keyword">if</span> (!provider) <span class="enscript-keyword">return</span> ENOENT;
+	<span class="enscript-keyword">if</span> (provider-&gt;nstat_watcher_add == NULL) <span class="enscript-keyword">return</span> ENOTSUP;
+	
+	<span class="enscript-keyword">if</span> (nstat_privcheck != 0) {
+		result = priv_check_cred(kauth_cred_get(), 
+		    PRIV_NET_PRIVILEGED_NETWORK_STATISTICS, 0);
+		<span class="enscript-keyword">if</span> (result != 0)
+			<span class="enscript-keyword">return</span> result;
+	}
+
+	<span class="enscript-comment">// Make sure we don't add the provider twice
+</span>	lck_mtx_lock(&amp;state-&gt;mtx);
+	<span class="enscript-keyword">if</span> ((state-&gt;ncs_watching &amp; (1 &lt;&lt; provider-&gt;nstat_provider_id)) != 0)
+		result = EALREADY;
+	state-&gt;ncs_watching |= (1 &lt;&lt; provider-&gt;nstat_provider_id);
+	lck_mtx_unlock(&amp;state-&gt;mtx);
+	<span class="enscript-keyword">if</span> (result != 0) <span class="enscript-keyword">return</span> result;
+
+	state-&gt;ncs_provider_filters[req-&gt;provider] = filter;
+
+	result = provider-&gt;nstat_watcher_add(state);
+	<span class="enscript-keyword">if</span> (result != 0)
+	{
+		state-&gt;ncs_provider_filters[req-&gt;provider] = 0;
+		lck_mtx_lock(&amp;state-&gt;mtx);
+		state-&gt;ncs_watching &amp;= ~(1 &lt;&lt; provider-&gt;nstat_provider_id);
+		lck_mtx_unlock(&amp;state-&gt;mtx);
+	}
+	<span class="enscript-keyword">if</span> (result == 0)
+		nstat_enqueue_success(req-&gt;hdr.context, state, 0);
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_source_add</span>(
+	u_int64_t			context,
+	nstat_control_state		*state,
+	nstat_provider			*provider,
+	nstat_provider_cookie_t		cookie)
+{
+	<span class="enscript-comment">// Fill out source added message if appropriate
+</span>	mbuf_t			msg = NULL;
+	nstat_src_ref_t		*srcrefp = NULL;
+
+	u_int64_t		provider_filters =
+	    state-&gt;ncs_provider_filters[provider-&gt;nstat_provider_id];
+	boolean_t		tell_user =
+	    ((provider_filters &amp; NSTAT_FILTER_SUPPRESS_SRC_ADDED) == 0);
+	u_int32_t		src_filter =
+	    (provider_filters &amp; NSTAT_FILTER_PROVIDER_NOZEROBYTES)
+		? NSTAT_FILTER_NOZEROBYTES : 0;
+
+	<span class="enscript-keyword">if</span> (tell_user)
+	{
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> one = 1;
+	
+		<span class="enscript-keyword">if</span> (mbuf_allocpacket(MBUF_DONTWAIT, <span class="enscript-keyword">sizeof</span>(nstat_msg_src_added),
+		    &amp;one, &amp;msg) != 0)
+			<span class="enscript-keyword">return</span> ENOMEM;
+	
+		mbuf_setlen(msg, <span class="enscript-keyword">sizeof</span>(nstat_msg_src_added));
+		mbuf_pkthdr_setlen(msg, mbuf_len(msg));
+		nstat_msg_src_added	*add = mbuf_data(msg);
+		bzero(add, <span class="enscript-keyword">sizeof</span>(*add));
+		add-&gt;hdr.type = NSTAT_MSG_TYPE_SRC_ADDED;
+		add-&gt;hdr.length = mbuf_len(msg);
+		add-&gt;hdr.context = context;
+		add-&gt;provider = provider-&gt;nstat_provider_id;
+		srcrefp = &amp;add-&gt;srcref;
+	}
+	
+	<span class="enscript-comment">// Allocate storage for the source
+</span>	nstat_src	*src = OSMalloc(<span class="enscript-keyword">sizeof</span>(*src), nstat_malloc_tag);
+	<span class="enscript-keyword">if</span> (src == NULL)
+	{
+		<span class="enscript-keyword">if</span> (msg) mbuf_freem(msg);
+		<span class="enscript-keyword">return</span> ENOMEM;
+	}
+	
+	<span class="enscript-comment">// Fill in the source, including picking an unused source ref
+</span>	lck_mtx_lock(&amp;state-&gt;mtx);
+
+	src-&gt;srcref = nstat_control_next_src_ref(state);
+	<span class="enscript-keyword">if</span> (srcrefp)
+		*srcrefp = src-&gt;srcref;
+
+	<span class="enscript-keyword">if</span> (state-&gt;ncs_flags &amp; NSTAT_FLAG_CLEANUP || src-&gt;srcref == NSTAT_SRC_REF_INVALID)
+	{
+		lck_mtx_unlock(&amp;state-&gt;mtx);
+		OSFree(src, <span class="enscript-keyword">sizeof</span>(*src), nstat_malloc_tag);
+		<span class="enscript-keyword">if</span> (msg) mbuf_freem(msg);
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	src-&gt;provider = provider;
+	src-&gt;cookie = cookie;
+	src-&gt;filter = src_filter;
+
+	<span class="enscript-keyword">if</span> (msg)
+	{
+		<span class="enscript-comment">// send the source added message if appropriate
+</span>		errno_t result = ctl_enqueuembuf(state-&gt;ncs_kctl, state-&gt;ncs_unit, msg,
+						CTL_DATA_EOR);
+		<span class="enscript-keyword">if</span> (result != 0)
+		{
+			nstat_stats.nstat_srcaddedfailures += 1;
+			lck_mtx_unlock(&amp;state-&gt;mtx);
+			OSFree(src, <span class="enscript-keyword">sizeof</span>(*src), nstat_malloc_tag);
+			mbuf_freem(msg);
+			<span class="enscript-keyword">return</span> result;
+		}
+	}
+	<span class="enscript-comment">// Put the source in the list
+</span>	src-&gt;next = state-&gt;ncs_srcs;
+	state-&gt;ncs_srcs = src;
+	
+	lck_mtx_unlock(&amp;state-&gt;mtx);
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_handle_remove_request</span>(
+	nstat_control_state	*state,
+	mbuf_t				m)
+{
+	nstat_src_ref_t			srcref = NSTAT_SRC_REF_INVALID;
+	
+	<span class="enscript-keyword">if</span> (mbuf_copydata(m, offsetof(nstat_msg_rem_src_req, srcref), <span class="enscript-keyword">sizeof</span>(srcref), &amp;srcref) != 0)
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+	lck_mtx_lock(&amp;state-&gt;mtx);
+	
+	<span class="enscript-comment">// Remove this source as we look for it
+</span>	nstat_src	**nextp;
+	nstat_src	*src = NULL;
+	<span class="enscript-keyword">for</span> (nextp = &amp;state-&gt;ncs_srcs; *nextp; nextp = &amp;(*nextp)-&gt;next)
+	{
+		<span class="enscript-keyword">if</span> ((*nextp)-&gt;srcref == srcref)
+		{
+			src = *nextp;
+			*nextp = src-&gt;next;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	
+	lck_mtx_unlock(&amp;state-&gt;mtx);
+	
+	<span class="enscript-keyword">if</span> (src) nstat_control_cleanup_source(state, src, FALSE);
+	
+	<span class="enscript-keyword">return</span> src ? 0 : ENOENT;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_handle_query_request</span>(
+	nstat_control_state	*state,
+	mbuf_t				m)
+{
+	<span class="enscript-comment">// TBD: handle this from another thread so we can enqueue a lot of data
+</span>	<span class="enscript-comment">// As written, if a client requests query all, this function will be 
+</span>	<span class="enscript-comment">// called from their send of the request message. We will attempt to write
+</span>	<span class="enscript-comment">// responses and succeed until the buffer fills up. Since the clients thread
+</span>	<span class="enscript-comment">// is blocked on send, it won't be reading unless the client has two threads
+</span>	<span class="enscript-comment">// using this socket, one for read and one for write. Two threads probably
+</span>	<span class="enscript-comment">// won't work with this code anyhow since we don't have proper locking in
+</span>	<span class="enscript-comment">// place yet.
+</span>	nstat_src				*dead_srcs = NULL;
+	errno_t					result = ENOENT;
+	nstat_msg_query_src_req	req;
+
+	<span class="enscript-keyword">if</span> (mbuf_copydata(m, 0, <span class="enscript-keyword">sizeof</span>(req), &amp;req) != 0)
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-type">const</span> boolean_t all_srcs = (req.srcref == NSTAT_SRC_REF_ALL);
+	
+	lck_mtx_lock(&amp;state-&gt;mtx);
+
+	<span class="enscript-keyword">if</span> (all_srcs)
+	{
+		state-&gt;ncs_flags |= NSTAT_FLAG_REQCOUNTS;
+	}
+	nstat_src	**srcpp = &amp;state-&gt;ncs_srcs;
+	u_int64_t	src_count = 0;
+	boolean_t	partial = FALSE;
+
+	<span class="enscript-comment">/*
+	 * Error handling policy and sequence number generation is folded into
+	 * nstat_control_begin_query.
+	 */</span>
+	partial = nstat_control_begin_query(state, &amp;req.hdr);
+
+	<span class="enscript-keyword">while</span> (*srcpp != NULL
+		&amp;&amp; (!partial || src_count &lt; QUERY_CONTINUATION_SRC_COUNT))
+	{
+		nstat_src	*src = NULL;
+		<span class="enscript-type">int</span>			gone;
+		
+		src = *srcpp;
+		gone = 0;
+		<span class="enscript-comment">// XXX ignore IFACE types?
+</span>		<span class="enscript-keyword">if</span> (all_srcs || src-&gt;srcref == req.srcref)
+		{
+			<span class="enscript-keyword">if</span> (nstat_control_reporting_allowed(state, src)
+			    &amp;&amp; (!partial || !all_srcs || src-&gt;seq != state-&gt;ncs_seq))
+			{
+				<span class="enscript-keyword">if</span> (all_srcs &amp;&amp;
+					(req.hdr.flags &amp; NSTAT_MSG_HDR_FLAG_SUPPORTS_AGGREGATE) != 0)
+				{
+					result = nstat_control_append_counts(state, src, &amp;gone);
+				}
+				<span class="enscript-keyword">else</span>
+				{
+					result = nstat_control_send_counts(state, src, req.hdr.context, 0, &amp;gone);
+				}
+
+				<span class="enscript-keyword">if</span> (ENOMEM == result || ENOBUFS == result)
+				{
+					<span class="enscript-comment">/*
+					 * If the counts message failed to
+					 * enqueue then we should clear our flag so
+					 * that a client doesn't miss anything on
+					 * idle cleanup.  We skip the &quot;gone&quot;
+					 * processing in the hope that we may
+					 * catch it another time.
+					 */</span>
+					state-&gt;ncs_flags &amp;= ~NSTAT_FLAG_REQCOUNTS;
+					<span class="enscript-keyword">break</span>;
+				}
+				<span class="enscript-keyword">if</span> (partial)
+				{
+					<span class="enscript-comment">/*
+					 * We skip over hard errors and
+					 * filtered sources.
+					 */</span>
+					src-&gt;seq = state-&gt;ncs_seq;
+					src_count++;
+				}
+			}
+		}
+		
+		<span class="enscript-keyword">if</span> (gone)
+		{
+			<span class="enscript-comment">// send one last descriptor message so client may see last state
+</span>			<span class="enscript-comment">// If we can't send the notification now, it
+</span>			<span class="enscript-comment">// will be sent in the idle cleanup.
+</span>			result = nstat_control_send_description(state, *srcpp, 0, 0);
+			<span class="enscript-keyword">if</span> (result != 0)
+			{
+				nstat_stats.nstat_control_send_description_failures++;
+				<span class="enscript-keyword">if</span> (nstat_debug != 0)
+					printf(<span class="enscript-string">&quot;%s - nstat_control_send_description() %d\n&quot;</span>, __func__, result);
+				state-&gt;ncs_flags &amp;= ~NSTAT_FLAG_REQCOUNTS;
+				<span class="enscript-keyword">break</span>;
+			}
+			
+			<span class="enscript-comment">// pull src out of the list
+</span>			*srcpp = src-&gt;next;
+			
+			src-&gt;next = dead_srcs;
+			dead_srcs = src;
+		}
+		<span class="enscript-keyword">else</span>
+		{
+			srcpp = &amp;(*srcpp)-&gt;next;
+		}
+		
+		<span class="enscript-keyword">if</span> (!all_srcs &amp;&amp; req.srcref == src-&gt;srcref)
+		{
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	nstat_flush_accumulated_msgs(state);
+
+	u_int16_t flags = 0;
+	<span class="enscript-keyword">if</span> (req.srcref == NSTAT_SRC_REF_ALL)
+		flags = nstat_control_end_query(state, *srcpp, partial);
+
+	lck_mtx_unlock(&amp;state-&gt;mtx);
+
+	<span class="enscript-comment">/*
+	 * If an error occurred enqueueing data, then allow the error to
+	 * propagate to nstat_control_send. This way, the error is sent to
+	 * user-level.
+	 */</span>
+	<span class="enscript-keyword">if</span> (all_srcs &amp;&amp; ENOMEM != result &amp;&amp; ENOBUFS != result)
+	{
+		nstat_enqueue_success(req.hdr.context, state, flags);
+		result = 0;
+	}
+	
+	<span class="enscript-keyword">while</span> (dead_srcs)
+	{
+		nstat_src	*src;
+		
+		src = dead_srcs;
+		dead_srcs = src-&gt;next;
+		
+		<span class="enscript-comment">// release src and send notification
+</span>		nstat_control_cleanup_source(state, src, FALSE);
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_handle_get_src_description</span>(
+	nstat_control_state	*state,
+	mbuf_t				m)
+{
+	nstat_msg_get_src_description	req;
+	errno_t result = ENOENT;
+	nstat_src *src;
+
+	<span class="enscript-keyword">if</span> (mbuf_copydata(m, 0, <span class="enscript-keyword">sizeof</span>(req), &amp;req) != 0)
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	lck_mtx_lock(&amp;state-&gt;mtx);
+	u_int64_t src_count = 0;
+	boolean_t partial = FALSE;
+	<span class="enscript-type">const</span> boolean_t all_srcs = (req.srcref == NSTAT_SRC_REF_ALL);
+
+	<span class="enscript-comment">/*
+	 * Error handling policy and sequence number generation is folded into
+	 * nstat_control_begin_query.
+	 */</span>
+	partial = nstat_control_begin_query(state, &amp;req.hdr);
+
+	<span class="enscript-keyword">for</span> (src = state-&gt;ncs_srcs;
+	     src &amp;&amp; (!partial || src_count &lt; QUERY_CONTINUATION_SRC_COUNT);
+	     src = src-&gt;next)
+	{
+		<span class="enscript-keyword">if</span> (all_srcs || src-&gt;srcref == req.srcref)
+		{
+			<span class="enscript-keyword">if</span> (nstat_control_reporting_allowed(state, src)
+			    &amp;&amp; (!all_srcs || !partial ||  src-&gt;seq != state-&gt;ncs_seq))
+			{
+				<span class="enscript-keyword">if</span> ((req.hdr.flags &amp; NSTAT_MSG_HDR_FLAG_SUPPORTS_AGGREGATE) != 0 &amp;&amp; all_srcs)
+				{
+					result = nstat_control_append_description(state, src);
+				}
+				<span class="enscript-keyword">else</span>
+				{
+					result = nstat_control_send_description(state, src, req.hdr.context, 0);
+				}
+
+				<span class="enscript-keyword">if</span> (ENOMEM == result || ENOBUFS == result)
+				{
+					<span class="enscript-comment">/*
+					 * If the description message failed to
+					 * enqueue then we give up for now.
+					 */</span>
+					<span class="enscript-keyword">break</span>;
+				}
+				<span class="enscript-keyword">if</span> (partial)
+				{
+					<span class="enscript-comment">/*
+					 * Note, we skip over hard errors and
+					 * filtered sources.
+					 */</span>
+					src-&gt;seq = state-&gt;ncs_seq;
+					src_count++;
+				}
+			}
+			
+			<span class="enscript-keyword">if</span> (!all_srcs)
+			{
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+	}
+	nstat_flush_accumulated_msgs(state);
+
+	u_int16_t flags = 0;
+	<span class="enscript-keyword">if</span> (req.srcref == NSTAT_SRC_REF_ALL)
+		flags = nstat_control_end_query(state, src, partial);
+
+	lck_mtx_unlock(&amp;state-&gt;mtx);
+	<span class="enscript-comment">/*
+	 * If an error occurred enqueueing data, then allow the error to
+	 * propagate to nstat_control_send. This way, the error is sent to
+	 * user-level.
+	 */</span>
+	<span class="enscript-keyword">if</span> (all_srcs &amp;&amp; ENOMEM != result &amp;&amp; ENOBUFS != result)
+	{
+		nstat_enqueue_success(req.hdr.context, state, flags);
+		result = 0;
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_handle_set_filter</span>(
+    nstat_control_state		*state,
+    mbuf_t			m)
+{
+	nstat_msg_set_filter req;
+	nstat_src *src;
+
+	<span class="enscript-keyword">if</span> (mbuf_copydata(m, 0, <span class="enscript-keyword">sizeof</span>(req), &amp;req) != 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+	<span class="enscript-keyword">if</span> (req.srcref == NSTAT_SRC_REF_ALL ||
+	    req.srcref == NSTAT_SRC_REF_INVALID)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	lck_mtx_lock(&amp;state-&gt;mtx);
+	<span class="enscript-keyword">for</span> (src = state-&gt;ncs_srcs; src; src = src-&gt;next)
+		<span class="enscript-keyword">if</span> (req.srcref == src-&gt;srcref)
+		{
+			src-&gt;filter = req.filter;
+			<span class="enscript-keyword">break</span>;
+		}
+	lck_mtx_unlock(&amp;state-&gt;mtx);
+	<span class="enscript-keyword">if</span> (src == NULL)
+		<span class="enscript-keyword">return</span> ENOENT;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nstat_send_error</span>(
+    nstat_control_state *state,
+    u_int64_t context,
+    u_int32_t error)
+{
+	errno_t result;
+	<span class="enscript-type">struct</span> nstat_msg_error	err;
+
+	bzero(&amp;err, <span class="enscript-keyword">sizeof</span>(err));
+	err.hdr.type = NSTAT_MSG_TYPE_ERROR;
+	err.hdr.length = <span class="enscript-keyword">sizeof</span>(err);
+	err.hdr.context = context;
+	err.error = error;
+
+	result = ctl_enqueuedata(state-&gt;ncs_kctl, state-&gt;ncs_unit, &amp;err,
+				    <span class="enscript-keyword">sizeof</span>(err), CTL_DATA_EOR | CTL_DATA_CRIT);
+	<span class="enscript-keyword">if</span> (result != 0)
+		nstat_stats.nstat_msgerrorfailures++;
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">nstat_control_begin_query</span>(
+    nstat_control_state *state,
+    <span class="enscript-type">const</span> nstat_msg_hdr *hdrp)
+{
+	boolean_t partial = FALSE;
+
+	<span class="enscript-keyword">if</span> (hdrp-&gt;flags &amp; NSTAT_MSG_HDR_FLAG_CONTINUATION)
+	{
+		<span class="enscript-comment">/* A partial query all has been requested. */</span>
+		partial = TRUE;
+
+		<span class="enscript-keyword">if</span> (state-&gt;ncs_context != hdrp-&gt;context)
+		{
+			<span class="enscript-keyword">if</span> (state-&gt;ncs_context != 0)
+				nstat_send_error(state, state-&gt;ncs_context, EAGAIN);
+
+			<span class="enscript-comment">/* Initialize state for a partial query all. */</span>
+			state-&gt;ncs_context = hdrp-&gt;context;
+			state-&gt;ncs_seq++;
+		}
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (state-&gt;ncs_context != 0)
+	{
+		<span class="enscript-comment">/*
+		 * A continuation of a paced-query was in progress. Send that
+		 * context an error and reset the state.  If the same context
+		 * has changed its mind, just send the full query results.
+		 */</span>
+		<span class="enscript-keyword">if</span> (state-&gt;ncs_context != hdrp-&gt;context)
+			nstat_send_error(state, state-&gt;ncs_context, EAGAIN);
+	}
+
+	<span class="enscript-keyword">return</span> partial;
+}
+
+<span class="enscript-type">static</span> u_int16_t
+<span class="enscript-function-name">nstat_control_end_query</span>(
+    nstat_control_state *state,
+    nstat_src *last_src,
+    boolean_t partial)
+{
+	u_int16_t flags = 0;
+
+	<span class="enscript-keyword">if</span> (last_src == NULL || !partial)
+	{
+		<span class="enscript-comment">/*
+		 * We iterated through the entire srcs list or exited early
+		 * from the loop when a partial update was not requested (an
+		 * error occurred), so clear context to indicate internally
+		 * that the query is finished.
+		 */</span>
+		state-&gt;ncs_context = 0;
+	}
+	<span class="enscript-keyword">else</span>
+	{
+		<span class="enscript-comment">/*
+		 * Indicate to userlevel to make another partial request as
+		 * there are still sources left to be reported.
+		 */</span>
+		flags |= NSTAT_MSG_HDR_FLAG_CONTINUATION;
+	}
+
+	<span class="enscript-keyword">return</span> flags;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_handle_get_update</span>(
+    nstat_control_state		*state,
+    mbuf_t					m)
+{
+	nstat_msg_query_src_req	req;
+
+	<span class="enscript-keyword">if</span> (mbuf_copydata(m, 0, <span class="enscript-keyword">sizeof</span>(req), &amp;req) != 0)
+	{
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	lck_mtx_lock(&amp;state-&gt;mtx);
+	
+	state-&gt;ncs_flags |= NSTAT_FLAG_SUPPORTS_UPDATES;
+
+	errno_t		result = ENOENT;
+	nstat_src	*src;
+	nstat_src	*dead_srcs = NULL;
+	nstat_src	**srcpp = &amp;state-&gt;ncs_srcs;
+	u_int64_t src_count = 0;
+	boolean_t partial = FALSE;
+
+	<span class="enscript-comment">/*
+	 * Error handling policy and sequence number generation is folded into
+	 * nstat_control_begin_query.
+	 */</span>
+	partial = nstat_control_begin_query(state, &amp;req.hdr);
+
+	<span class="enscript-keyword">while</span> (*srcpp != NULL
+	    &amp;&amp; (FALSE == partial
+		|| src_count &lt; QUERY_CONTINUATION_SRC_COUNT))
+	{
+		<span class="enscript-type">int</span>			gone;
+		
+		gone = 0;
+		src = *srcpp;
+		<span class="enscript-keyword">if</span> (nstat_control_reporting_allowed(state, src))
+		{
+			<span class="enscript-comment">/* skip this source if it has the current state
+			 * sequence number as it's already been reported in
+			 * this query-all partial sequence. */</span>
+			<span class="enscript-keyword">if</span> (req.srcref == NSTAT_SRC_REF_ALL
+			    &amp;&amp; (FALSE == partial || src-&gt;seq != state-&gt;ncs_seq))
+			{
+				result = nstat_control_append_update(state, src, &amp;gone);
+				<span class="enscript-keyword">if</span> (ENOMEM == result || ENOBUFS == result)
+				{
+					<span class="enscript-comment">/*
+					 * If the update message failed to
+					 * enqueue then give up.
+					 */</span>
+					<span class="enscript-keyword">break</span>;
+				}
+				<span class="enscript-keyword">if</span> (partial)
+				{
+					<span class="enscript-comment">/*
+					 * We skip over hard errors and
+					 * filtered sources.
+					 */</span>
+					src-&gt;seq = state-&gt;ncs_seq;
+					src_count++;
+				}
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (src-&gt;srcref == req.srcref)
+			{
+				result = nstat_control_send_update(state, src, req.hdr.context, 0, &amp;gone);
+			}
+		}
+		
+		<span class="enscript-keyword">if</span> (gone)
+		{
+			<span class="enscript-comment">// pull src out of the list
+</span>			*srcpp = src-&gt;next;
+
+			src-&gt;next = dead_srcs;
+			dead_srcs = src;
+		}
+		<span class="enscript-keyword">else</span>
+		{
+			srcpp = &amp;(*srcpp)-&gt;next;
+		}
+		
+		<span class="enscript-keyword">if</span> (req.srcref != NSTAT_SRC_REF_ALL &amp;&amp; req.srcref == src-&gt;srcref)
+		{
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	nstat_flush_accumulated_msgs(state);
+
+
+	u_int16_t flags = 0;
+	<span class="enscript-keyword">if</span> (req.srcref == NSTAT_SRC_REF_ALL)
+		flags = nstat_control_end_query(state, *srcpp, partial);
+
+	lck_mtx_unlock(&amp;state-&gt;mtx);
+	<span class="enscript-comment">/*
+	 * If an error occurred enqueueing data, then allow the error to
+	 * propagate to nstat_control_send. This way, the error is sent to
+	 * user-level.
+	 */</span>
+	<span class="enscript-keyword">if</span> (req.srcref == NSTAT_SRC_REF_ALL &amp;&amp; ENOMEM != result &amp;&amp; ENOBUFS != result)
+	{
+		nstat_enqueue_success(req.hdr.context, state, flags);
+		result = 0;
+	}
+
+	<span class="enscript-keyword">while</span> (dead_srcs)
+	{
+		src = dead_srcs;
+		dead_srcs = src-&gt;next;
+		
+		<span class="enscript-comment">// release src and send notification
+</span>		nstat_control_cleanup_source(state, src, FALSE);
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_handle_subscribe_sysinfo</span>(
+    nstat_control_state		*state)
+{
+	errno_t result = priv_check_cred(kauth_cred_get(), PRIV_NET_PRIVILEGED_NETWORK_STATISTICS, 0);
+	
+	<span class="enscript-keyword">if</span> (result != 0)
+	{
+		<span class="enscript-keyword">return</span> result;
+	}
+	
+	lck_mtx_lock(&amp;state-&gt;mtx);
+	state-&gt;ncs_flags |= NSTAT_FLAG_SYSINFO_SUBSCRIBED;
+	lck_mtx_unlock(&amp;state-&gt;mtx);
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">nstat_control_send</span>(
+	kern_ctl_ref	kctl,
+	u_int32_t		unit,
+	<span class="enscript-type">void</span>	*uinfo,
+	mbuf_t			m,
+	__unused <span class="enscript-type">int</span>	flags)
+{
+	nstat_control_state	*state = (nstat_control_state*)uinfo;
+	<span class="enscript-type">struct</span> nstat_msg_hdr	*hdr;
+	<span class="enscript-type">struct</span> nstat_msg_hdr	storage;
+	errno_t					result = 0;
+	
+	<span class="enscript-keyword">if</span> (mbuf_pkthdr_len(m) &lt; <span class="enscript-keyword">sizeof</span>(*hdr))
+	{
+		<span class="enscript-comment">// Is this the right thing to do?
+</span>		mbuf_freem(m);
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+	<span class="enscript-keyword">if</span> (mbuf_len(m) &gt;= <span class="enscript-keyword">sizeof</span>(*hdr))
+	{
+		hdr = mbuf_data(m);
+	}
+	<span class="enscript-keyword">else</span>
+	{
+		mbuf_copydata(m, 0, <span class="enscript-keyword">sizeof</span>(storage), &amp;storage);
+		hdr = &amp;storage;
+	}
+	
+	<span class="enscript-comment">// Legacy clients may not set the length
+</span>	<span class="enscript-comment">// Those clients are likely not setting the flags either
+</span>	<span class="enscript-comment">// Fix everything up so old clients continue to work
+</span>	<span class="enscript-keyword">if</span> (hdr-&gt;length != mbuf_pkthdr_len(m))
+	{
+		hdr-&gt;flags = 0;
+		hdr-&gt;length = mbuf_pkthdr_len(m);
+		<span class="enscript-keyword">if</span> (hdr == &amp;storage)
+		{
+			mbuf_copyback(m, 0, <span class="enscript-keyword">sizeof</span>(*hdr), hdr, MBUF_DONTWAIT);
+		}
+	}
+	
+	<span class="enscript-keyword">switch</span> (hdr-&gt;type)
+	{
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSTAT_MSG_TYPE_ADD_SRC</span>:
+			result = nstat_control_handle_add_request(state, m);
+			<span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSTAT_MSG_TYPE_ADD_ALL_SRCS</span>:
+			result = nstat_control_handle_add_all(state, m);
+			<span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSTAT_MSG_TYPE_REM_SRC</span>:
+			result = nstat_control_handle_remove_request(state, m);
+			<span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSTAT_MSG_TYPE_QUERY_SRC</span>:
+			result = nstat_control_handle_query_request(state, m);
+			<span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSTAT_MSG_TYPE_GET_SRC_DESC</span>:
+			result = nstat_control_handle_get_src_description(state, m);
+			<span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSTAT_MSG_TYPE_SET_FILTER</span>:
+			result = nstat_control_handle_set_filter(state, m);
+			<span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSTAT_MSG_TYPE_GET_UPDATE</span>:
+			result = nstat_control_handle_get_update(state, m);
+			<span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSTAT_MSG_TYPE_SUBSCRIBE_SYSINFO</span>:
+			result = nstat_control_handle_subscribe_sysinfo(state);
+			<span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-reference">default</span>:
+			result = EINVAL;
+			<span class="enscript-keyword">break</span>;
+	}
+	
+	<span class="enscript-keyword">if</span> (result != 0)
+	{
+		<span class="enscript-type">struct</span> nstat_msg_error	err;
+		
+		bzero(&amp;err, <span class="enscript-keyword">sizeof</span>(err));
+		err.hdr.type = NSTAT_MSG_TYPE_ERROR;
+		err.hdr.length = <span class="enscript-keyword">sizeof</span>(err) + mbuf_pkthdr_len(m);
+		err.hdr.context = hdr-&gt;context;
+		err.error = result;
+		
+		<span class="enscript-keyword">if</span> (mbuf_prepend(&amp;m, <span class="enscript-keyword">sizeof</span>(err), MBUF_DONTWAIT) == 0 &amp;&amp;
+			mbuf_copyback(m, 0, <span class="enscript-keyword">sizeof</span>(err), &amp;err, MBUF_DONTWAIT) == 0)
+		{
+			result = ctl_enqueuembuf(kctl, unit, m, CTL_DATA_EOR | CTL_DATA_CRIT);
+			<span class="enscript-keyword">if</span> (result != 0)
+			{
+				mbuf_freem(m);
+			}
+			m = NULL;
+		}
+		
+		<span class="enscript-keyword">if</span> (result != 0)
+		{
+			<span class="enscript-comment">// Unable to prepend the error to the request - just send the error
+</span>			err.hdr.length = <span class="enscript-keyword">sizeof</span>(err);
+			result = ctl_enqueuedata(kctl, unit, &amp;err, <span class="enscript-keyword">sizeof</span>(err),
+						CTL_DATA_EOR | CTL_DATA_CRIT);
+			<span class="enscript-keyword">if</span> (result != 0)
+				nstat_stats.nstat_msgerrorfailures += 1;
+		}
+		nstat_stats.nstat_handle_msg_failures += 1;
+	}
+	
+	<span class="enscript-keyword">if</span> (m) mbuf_freem(m);
+	
+	<span class="enscript-keyword">return</span> result;
+}
+</pre>
+<hr />
+</body></html>

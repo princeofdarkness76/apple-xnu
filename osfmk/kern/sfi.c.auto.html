@@ -1,0 +1,1167 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>sfi.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">sfi.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/coalition.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/simple_lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sfi.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/timer_call.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/waitq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ledger.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/kernel_mach_header.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_SCHED_SFI</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SFI_DEBUG</span> 0
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SFI_DEBUG</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">dprintf</span>(...) kprintf(__VA_ARGS__)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">dprintf</span>(...) do { } while(0)
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MACH_BSD</span>
+<span class="enscript-type">extern</span> sched_call_t <span class="enscript-function-name">workqueue_get_sched_callback</span>(<span class="enscript-type">void</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MACH_BSD */</span>
+
+<span class="enscript-comment">/*
+ * SFI (Selective Forced Idle) operates by enabling a global
+ * timer on the SFI window interval. When it fires, all processors
+ * running a thread that should be SFI-ed are sent an AST.
+ * As threads become runnable while in their &quot;off phase&quot;, they
+ * are placed on a deferred ready queue. When a per-class
+ * &quot;on timer&quot; fires, the ready threads for that class are
+ * re-enqueued for running. As an optimization to avoid spurious
+ * wakeups, the timer may be lazily programmed.
+ */</span>
+
+<span class="enscript-comment">/*
+ * The &quot;sfi_lock&quot; simple lock guards access to static configuration
+ * parameters (as specified by userspace), dynamic state changes
+ * (as updated by the timer event routine), and timer data structures.
+ * Since it can be taken with interrupts disabled in some cases, all
+ * uses should be taken with interrupts disabled at splsched(). The
+ * &quot;sfi_lock&quot; also guards the &quot;sfi_wait_class&quot; field of thread_t, and
+ * must only be accessed with it held.
+ *
+ * When an &quot;on timer&quot; fires, we must deterministically be able to drain
+ * the wait queue, since if any threads are added to the queue afterwards,
+ * they may never get woken out of SFI wait. So sfi_lock must be
+ * taken before the wait queue's own spinlock.
+ *
+ * The wait queue will take the thread's scheduling lock. We may also take
+ * the thread_lock directly to update the &quot;sfi_class&quot; field and determine
+ * if the thread should block in the wait queue, but the lock will be
+ * released before doing so.
+ *
+ * The pset lock may also be taken, but not while any other locks are held.
+ *
+ * splsched ---&gt; sfi_lock ---&gt; waitq ---&gt; thread_lock
+ *        \  \              \__ thread_lock (*)
+ *         \  \__ pset_lock
+ *          \
+ *           \__ thread_lock
+ */</span>
+
+<span class="enscript-function-name">decl_simple_lock_data</span>(<span class="enscript-type">static</span>,sfi_lock);
+<span class="enscript-type">static</span> timer_call_data_t        sfi_timer_call_entry;
+<span class="enscript-type">volatile</span> boolean_t	sfi_is_enabled;
+
+boolean_t sfi_window_is_set;
+uint64_t sfi_window_usecs;
+uint64_t sfi_window_interval;
+uint64_t sfi_next_off_deadline;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	sfi_class_id_t	class_id;
+	thread_continue_t	class_continuation;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *	class_name;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *	class_ledger_name;
+} sfi_class_registration_t;
+
+<span class="enscript-comment">/*
+ * To add a new SFI class:
+ *
+ * 1) Raise MAX_SFI_CLASS_ID in mach/sfi_class.h
+ * 2) Add a #define for it to mach/sfi_class.h. It need not be inserted in order of restrictiveness.
+ * 3) Add a call to SFI_CLASS_REGISTER below
+ * 4) Augment sfi_thread_classify to categorize threads as early as possible for as restrictive as possible.
+ * 5) Modify thermald to use the SFI class
+ */</span>
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">_sfi_wait_cleanup</span>(sched_call_t callback);
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SFI_CLASS_REGISTER</span>(class_id, ledger_name)					\
+<span class="enscript-type">extern</span> <span class="enscript-type">char</span> compile_time_assert_ ## class_id[SFI_CLASS_ ## class_id &lt; MAX_SFI_CLASS_ID ? 1 : -1];  \
+<span class="enscript-type">void</span> <span class="enscript-function-name">__attribute__</span>((noinline,noreturn)) SFI_ ## class_id ## _THREAD_IS_WAITING(<span class="enscript-type">void</span> *callback, wait_result_t wret __unused); \
+<span class="enscript-type">void</span> SFI_ ## class_id ## _THREAD_IS_WAITING(<span class="enscript-type">void</span> *callback, wait_result_t wret __unused) \
+{																		\
+	_sfi_wait_cleanup(callback);										\
+	thread_exception_return();											\
+}																		\
+																		\
+sfi_class_registration_t SFI_ ## class_id ## _registration __attribute__((section(<span class="enscript-string">&quot;__DATA,__sfi_class_reg&quot;</span>),used)) = { SFI_CLASS_ ## class_id, SFI_ ## class_id ## _THREAD_IS_WAITING, <span class="enscript-string">&quot;SFI_CLASS_&quot;</span> # class_id, <span class="enscript-string">&quot;SFI_CLASS_&quot;</span> # ledger_name };
+
+<span class="enscript-comment">/* SFI_CLASS_UNSPECIFIED not included here */</span>
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(MAINTENANCE,               MAINTENANCE)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(DARWIN_BG,                 DARWIN_BG)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(APP_NAP,                   APP_NAP)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(MANAGED_FOCAL,             MANAGED)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(MANAGED_NONFOCAL,          MANAGED)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(UTILITY,                   UTILITY)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(DEFAULT_FOCAL,             DEFAULT)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(DEFAULT_NONFOCAL,          DEFAULT)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(LEGACY_FOCAL,              LEGACY)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(LEGACY_NONFOCAL,           LEGACY)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(USER_INITIATED_FOCAL,      USER_INITIATED)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(USER_INITIATED_NONFOCAL,   USER_INITIATED)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(USER_INTERACTIVE_FOCAL,    USER_INTERACTIVE)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(USER_INTERACTIVE_NONFOCAL, USER_INTERACTIVE)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(KERNEL,                    OPTED_OUT)
+<span class="enscript-function-name">SFI_CLASS_REGISTER</span>(OPTED_OUT,                 OPTED_OUT)
+
+<span class="enscript-type">struct</span> sfi_class_state {
+	uint64_t	off_time_usecs;
+	uint64_t	off_time_interval;
+
+	timer_call_data_t	on_timer;
+	uint64_t	on_timer_deadline;
+	boolean_t			on_timer_programmed;
+
+	boolean_t	class_sfi_is_enabled;
+	<span class="enscript-type">volatile</span> boolean_t	class_in_on_phase;
+
+	<span class="enscript-type">struct</span> waitq		waitq;	<span class="enscript-comment">/* threads in ready state */</span>
+	thread_continue_t	continuation;
+
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *	class_name;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *	class_ledger_name;
+};
+
+<span class="enscript-comment">/* Static configuration performed in sfi_early_init() */</span>
+<span class="enscript-type">struct</span> sfi_class_state sfi_classes[MAX_SFI_CLASS_ID];
+
+<span class="enscript-type">int</span> sfi_enabled_class_count;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfi_timer_global_off</span>(
+	timer_call_param_t      param0,
+	timer_call_param_t      param1);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfi_timer_per_class_on</span>(
+	timer_call_param_t      param0,
+	timer_call_param_t      param1);
+
+<span class="enscript-type">static</span> sfi_class_registration_t *
+<span class="enscript-function-name">sfi_get_registration_data</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> *count)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> sectlen = 0;
+	<span class="enscript-type">void</span> *sectdata;
+
+	sectdata = getsectdatafromheader(&amp;_mh_execute_header, <span class="enscript-string">&quot;__DATA&quot;</span>, <span class="enscript-string">&quot;__sfi_class_reg&quot;</span>, &amp;sectlen);
+	<span class="enscript-keyword">if</span> (sectdata) {
+
+		<span class="enscript-keyword">if</span> (sectlen % <span class="enscript-keyword">sizeof</span>(sfi_class_registration_t) != 0) {
+			<span class="enscript-comment">/* corrupt data? */</span>
+			panic(<span class="enscript-string">&quot;__sfi_class_reg section has invalid size %lu&quot;</span>, sectlen);
+			__builtin_unreachable();
+		}
+
+		*count = sectlen / <span class="enscript-keyword">sizeof</span>(sfi_class_registration_t);
+		<span class="enscript-keyword">return</span> (sfi_class_registration_t *)sectdata;
+	} <span class="enscript-keyword">else</span> {
+		panic(<span class="enscript-string">&quot;__sfi_class_reg section not found&quot;</span>);
+		__builtin_unreachable();
+	}
+}
+
+<span class="enscript-comment">/* Called early in boot, when kernel is single-threaded */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">sfi_early_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> i, count;
+	sfi_class_registration_t *registrations;
+
+	registrations = sfi_get_registration_data(&amp;count);
+	<span class="enscript-keyword">for</span> (i=0; i &lt; count; i++) {
+		sfi_class_id_t class_id = registrations[i].class_id;
+
+		assert(class_id &lt; MAX_SFI_CLASS_ID); <span class="enscript-comment">/* should be caught at compile-time */</span>
+		<span class="enscript-keyword">if</span> (class_id &lt; MAX_SFI_CLASS_ID) {
+			<span class="enscript-keyword">if</span> (sfi_classes[class_id].continuation != NULL) {
+				panic(<span class="enscript-string">&quot;Duplicate SFI registration for class 0x%x&quot;</span>, class_id);
+			}
+			sfi_classes[class_id].class_sfi_is_enabled = FALSE;
+			sfi_classes[class_id].class_in_on_phase = TRUE;
+			sfi_classes[class_id].continuation = registrations[i].class_continuation;
+			sfi_classes[class_id].class_name = registrations[i].class_name;
+			sfi_classes[class_id].class_ledger_name = registrations[i].class_ledger_name;
+		}
+	}
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">sfi_init</span>(<span class="enscript-type">void</span>)
+{
+	sfi_class_id_t i;
+	kern_return_t kret;
+
+	simple_lock_init(&amp;sfi_lock, 0);
+	timer_call_setup(&amp;sfi_timer_call_entry, sfi_timer_global_off, NULL);
+	sfi_window_is_set = FALSE;
+	sfi_enabled_class_count = 0;
+	sfi_is_enabled = FALSE;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; MAX_SFI_CLASS_ID; i++) {
+		<span class="enscript-comment">/* If the class was set up in sfi_early_init(), initialize remaining fields */</span>
+		<span class="enscript-keyword">if</span> (sfi_classes[i].continuation) {
+			timer_call_setup(&amp;sfi_classes[i].on_timer, sfi_timer_per_class_on, (<span class="enscript-type">void</span> *)(uintptr_t)i);
+			sfi_classes[i].on_timer_programmed = FALSE;
+			
+			kret = waitq_init(&amp;sfi_classes[i].waitq, SYNC_POLICY_FIFO|SYNC_POLICY_DISABLE_IRQ);
+			assert(kret == KERN_SUCCESS);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* The only allowed gap is for SFI_CLASS_UNSPECIFIED */</span>
+			<span class="enscript-keyword">if</span>(i != SFI_CLASS_UNSPECIFIED) {
+				panic(<span class="enscript-string">&quot;Gap in registered SFI classes&quot;</span>);
+			}
+		}
+	}
+}
+
+<span class="enscript-comment">/* Can be called before sfi_init() by task initialization, but after sfi_early_init() */</span>
+sfi_class_id_t
+<span class="enscript-function-name">sfi_get_ledger_alias_for_class</span>(sfi_class_id_t class_id)
+{
+	sfi_class_id_t i;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *ledger_name = NULL;
+
+	ledger_name = sfi_classes[class_id].class_ledger_name;
+
+	<span class="enscript-comment">/* Find the first class in the registration table with this ledger name */</span>
+	<span class="enscript-keyword">if</span> (ledger_name) {
+		<span class="enscript-keyword">for</span> (i = SFI_CLASS_UNSPECIFIED + 1; i &lt; class_id; i++) {
+			<span class="enscript-keyword">if</span> (0 == strcmp(sfi_classes[i].class_ledger_name, ledger_name)) {
+				dprintf(<span class="enscript-string">&quot;sfi_get_ledger_alias_for_class(0x%x) -&gt; 0x%x\n&quot;</span>, class_id, i);
+				<span class="enscript-keyword">return</span> i;
+			}
+		}
+
+		<span class="enscript-comment">/* This class is the primary one for the ledger, so there is no alias */</span>
+		dprintf(<span class="enscript-string">&quot;sfi_get_ledger_alias_for_class(0x%x) -&gt; 0x%x\n&quot;</span>, class_id, SFI_CLASS_UNSPECIFIED);
+		<span class="enscript-keyword">return</span> SFI_CLASS_UNSPECIFIED;
+	}
+
+	<span class="enscript-comment">/* We are permissive on SFI class lookup failures. In sfi_init(), we assert more */</span>
+	<span class="enscript-keyword">return</span> SFI_CLASS_UNSPECIFIED;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sfi_ledger_entry_add</span>(ledger_template_t template, sfi_class_id_t class_id)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *ledger_name = NULL;
+
+	ledger_name = sfi_classes[class_id].class_ledger_name;
+
+	dprintf(<span class="enscript-string">&quot;sfi_ledger_entry_add(%p, 0x%x) -&gt; %s\n&quot;</span>, template, class_id, ledger_name);
+	<span class="enscript-keyword">return</span> ledger_entry_add(template, ledger_name, <span class="enscript-string">&quot;sfi&quot;</span>, <span class="enscript-string">&quot;MATUs&quot;</span>);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfi_timer_global_off</span>(
+	timer_call_param_t      param0 __unused,
+	timer_call_param_t      param1 __unused)
+{
+	uint64_t	now = mach_absolute_time();
+	sfi_class_id_t	i;
+	processor_set_t	pset, nset;
+	processor_t		processor;
+	uint32_t		needs_cause_ast_mask = 0x0;
+	spl_t		s;
+
+	s = splsched();
+
+	simple_lock(&amp;sfi_lock);
+	<span class="enscript-keyword">if</span> (!sfi_is_enabled) {
+		<span class="enscript-comment">/* If SFI has been disabled, let all &quot;on&quot; timers drain naturally */</span>
+		KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_OFF_TIMER) | DBG_FUNC_NONE, 1, 0, 0, 0, 0);
+
+		simple_unlock(&amp;sfi_lock);
+		splx(s);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_OFF_TIMER) | DBG_FUNC_START, 0, 0, 0, 0, 0);
+
+	<span class="enscript-comment">/* First set all configured classes into the off state, and program their &quot;on&quot; timer */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; MAX_SFI_CLASS_ID; i++) {
+		<span class="enscript-keyword">if</span> (sfi_classes[i].class_sfi_is_enabled) {
+			uint64_t on_timer_deadline;
+			
+			sfi_classes[i].class_in_on_phase = FALSE;
+			sfi_classes[i].on_timer_programmed = TRUE;
+
+			<span class="enscript-comment">/* Push out on-timer */</span>
+			on_timer_deadline = now + sfi_classes[i].off_time_interval;
+			sfi_classes[i].on_timer_deadline = on_timer_deadline;
+
+			timer_call_enter1(&amp;sfi_classes[i].on_timer, NULL, on_timer_deadline, TIMER_CALL_SYS_CRITICAL);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* If this class no longer needs SFI, make sure the timer is cancelled */</span>
+			sfi_classes[i].class_in_on_phase = TRUE;
+			<span class="enscript-keyword">if</span> (sfi_classes[i].on_timer_programmed) {
+				sfi_classes[i].on_timer_programmed = FALSE;
+				sfi_classes[i].on_timer_deadline = ~0ULL;
+				timer_call_cancel(&amp;sfi_classes[i].on_timer);
+			}
+		}
+	}
+	simple_unlock(&amp;sfi_lock);
+
+	<span class="enscript-comment">/* Iterate over processors, call cause_ast_check() on ones running a thread that should be in an off phase */</span>
+	processor = processor_list;
+	pset = processor-&gt;processor_set;
+	
+	pset_lock(pset);
+	
+	<span class="enscript-keyword">do</span> {
+		nset = processor-&gt;processor_set;
+		<span class="enscript-keyword">if</span> (nset != pset) {
+			pset_unlock(pset);
+			pset = nset;
+			pset_lock(pset);
+		}
+
+		<span class="enscript-comment">/* &quot;processor&quot; and its pset are locked */</span>
+		<span class="enscript-keyword">if</span> (processor-&gt;state == PROCESSOR_RUNNING) {
+			<span class="enscript-keyword">if</span> (AST_NONE != sfi_processor_needs_ast(processor)) {
+				needs_cause_ast_mask |= (1U &lt;&lt; processor-&gt;cpu_id);
+			}
+		}
+	} <span class="enscript-keyword">while</span> ((processor = processor-&gt;processor_list) != NULL);
+
+	pset_unlock(pset);
+
+	processor = processor_list;
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-keyword">if</span> (needs_cause_ast_mask &amp; (1U &lt;&lt; processor-&gt;cpu_id)) {
+			<span class="enscript-keyword">if</span> (processor == current_processor())
+				ast_on(AST_SFI);
+			<span class="enscript-keyword">else</span>
+				cause_ast_check(processor);
+		}
+	} <span class="enscript-keyword">while</span> ((processor = processor-&gt;processor_list) != NULL);
+
+	<span class="enscript-comment">/* Re-arm timer if still enabled */</span>
+	simple_lock(&amp;sfi_lock);
+	<span class="enscript-keyword">if</span> (sfi_is_enabled) {
+		clock_deadline_for_periodic_event(sfi_window_interval,
+										  now,
+										  &amp;sfi_next_off_deadline);
+		timer_call_enter1(&amp;sfi_timer_call_entry,
+						  NULL,
+						  sfi_next_off_deadline,
+						  TIMER_CALL_SYS_CRITICAL);
+	}
+
+	KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_OFF_TIMER) | DBG_FUNC_END, 0, 0, 0, 0, 0);
+
+	simple_unlock(&amp;sfi_lock);
+
+	splx(s);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfi_timer_per_class_on</span>(
+	timer_call_param_t      param0,
+	timer_call_param_t      param1 __unused)
+{
+	sfi_class_id_t sfi_class_id = (sfi_class_id_t)(uintptr_t)param0;
+	<span class="enscript-type">struct</span> sfi_class_state	*sfi_class = &amp;sfi_classes[sfi_class_id];
+	kern_return_t	kret;
+	spl_t		s;
+
+	s = splsched();
+
+	simple_lock(&amp;sfi_lock);
+
+	KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_ON_TIMER) | DBG_FUNC_START, sfi_class_id, 0, 0, 0, 0);
+
+	<span class="enscript-comment">/*
+	 * Any threads that may have accumulated in the ready queue for this class should get re-enqueued.
+	 * Since we have the sfi_lock held and have changed &quot;class_in_on_phase&quot;, we expect
+	 * no new threads to be put on this wait queue until the global &quot;off timer&quot; has fired.
+	 */</span>
+
+	sfi_class-&gt;class_in_on_phase = TRUE;
+	sfi_class-&gt;on_timer_programmed = FALSE;
+
+	kret = waitq_wakeup64_all(&amp;sfi_class-&gt;waitq,
+				  CAST_EVENT64_T(sfi_class_id),
+				  THREAD_AWAKENED, WAITQ_ALL_PRIORITIES);
+	assert(kret == KERN_SUCCESS || kret == KERN_NOT_WAITING);
+
+	KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_ON_TIMER) | DBG_FUNC_END, 0, 0, 0, 0, 0);
+
+	simple_unlock(&amp;sfi_lock);
+
+	splx(s);
+}
+
+
+kern_return_t <span class="enscript-function-name">sfi_set_window</span>(uint64_t window_usecs)
+{
+	uint64_t	interval, deadline;
+	uint64_t	now = mach_absolute_time();
+	sfi_class_id_t	i;
+	spl_t		s;
+	uint64_t	largest_class_off_interval = 0;
+
+	<span class="enscript-keyword">if</span> (window_usecs &lt; MIN_SFI_WINDOW_USEC)
+		window_usecs = MIN_SFI_WINDOW_USEC;
+
+	<span class="enscript-keyword">if</span> (window_usecs &gt; UINT32_MAX)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_SET_WINDOW), window_usecs, 0, 0, 0, 0);
+
+	clock_interval_to_absolutetime_interval((uint32_t)window_usecs, NSEC_PER_USEC, &amp;interval);
+	deadline = now + interval;
+
+	s = splsched();
+
+	simple_lock(&amp;sfi_lock);
+
+	<span class="enscript-comment">/* Check that we are not bringing in the SFI window smaller than any class */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; MAX_SFI_CLASS_ID; i++) {
+		<span class="enscript-keyword">if</span> (sfi_classes[i].class_sfi_is_enabled) {
+			largest_class_off_interval = MAX(largest_class_off_interval, sfi_classes[i].off_time_interval);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Off window must be strictly greater than all enabled classes,
+	 * otherwise threads would build up on ready queue and never be able to run.
+	 */</span>
+	<span class="enscript-keyword">if</span> (interval &lt;= largest_class_off_interval) {
+		simple_unlock(&amp;sfi_lock);
+		splx(s);
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	}
+
+	<span class="enscript-comment">/*
+	 * If the new &quot;off&quot; deadline is further out than the current programmed timer,
+	 * just let the current one expire (and the new cadence will be established thereafter).
+	 * If the new &quot;off&quot; deadline is nearer than the current one, bring it in, so we
+	 * can start the new behavior sooner. Note that this may cause the &quot;off&quot; timer to
+	 * fire before some of the class &quot;on&quot; timers have fired.
+	 */</span>
+	sfi_window_usecs = window_usecs;
+	sfi_window_interval = interval;
+	sfi_window_is_set = TRUE;
+
+	<span class="enscript-keyword">if</span> (sfi_enabled_class_count == 0) {
+		<span class="enscript-comment">/* Can't program timer yet */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!sfi_is_enabled) {
+		sfi_is_enabled = TRUE;
+		sfi_next_off_deadline = deadline;
+		timer_call_enter1(&amp;sfi_timer_call_entry,
+						  NULL,
+						  sfi_next_off_deadline,
+						  TIMER_CALL_SYS_CRITICAL);		
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (deadline &gt;= sfi_next_off_deadline) {
+		sfi_next_off_deadline = deadline;
+	} <span class="enscript-keyword">else</span> {
+		sfi_next_off_deadline = deadline;
+		timer_call_enter1(&amp;sfi_timer_call_entry,
+						  NULL,
+						  sfi_next_off_deadline,
+						  TIMER_CALL_SYS_CRITICAL);		
+	}
+
+	simple_unlock(&amp;sfi_lock);
+	splx(s);
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+kern_return_t <span class="enscript-function-name">sfi_window_cancel</span>(<span class="enscript-type">void</span>)
+{
+	spl_t		s;
+
+	s = splsched();
+
+	KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_CANCEL_WINDOW), 0, 0, 0, 0, 0);
+
+	<span class="enscript-comment">/* Disable globals so that global &quot;off-timer&quot; is not re-armed */</span>
+	simple_lock(&amp;sfi_lock);
+	sfi_window_is_set = FALSE;
+	sfi_window_usecs = 0;
+	sfi_window_interval = 0;
+	sfi_next_off_deadline = 0;
+	sfi_is_enabled = FALSE;
+	simple_unlock(&amp;sfi_lock);
+
+	splx(s);
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/* Defers SFI off and per-class on timers (if live) by the specified interval
+ * in Mach Absolute Time Units. Currently invoked to align with the global
+ * forced idle mechanism. Making some simplifying assumptions, the iterative GFI
+ * induced SFI on+off deferrals form a geometric series that converges to yield
+ * an effective SFI duty cycle that is scaled by the GFI duty cycle. Initial phase
+ * alignment and congruency of the SFI/GFI periods can distort this to some extent.
+ */</span>
+
+kern_return_t <span class="enscript-function-name">sfi_defer</span>(uint64_t sfi_defer_matus)
+{
+	spl_t		s;
+	kern_return_t kr = KERN_FAILURE;
+	s = splsched();
+
+	KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_GLOBAL_DEFER), sfi_defer_matus, 0, 0, 0, 0);
+
+	simple_lock(&amp;sfi_lock);
+	<span class="enscript-keyword">if</span> (!sfi_is_enabled) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">sfi_defer_done</span>;
+	}
+
+	assert(sfi_next_off_deadline != 0);
+
+	sfi_next_off_deadline += sfi_defer_matus;
+	timer_call_enter1(&amp;sfi_timer_call_entry, NULL, sfi_next_off_deadline, TIMER_CALL_SYS_CRITICAL);
+
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; MAX_SFI_CLASS_ID; i++) {
+		<span class="enscript-keyword">if</span> (sfi_classes[i].class_sfi_is_enabled) {
+			<span class="enscript-keyword">if</span> (sfi_classes[i].on_timer_programmed) {
+				uint64_t new_on_deadline = sfi_classes[i].on_timer_deadline + sfi_defer_matus;
+				sfi_classes[i].on_timer_deadline = new_on_deadline;
+				timer_call_enter1(&amp;sfi_classes[i].on_timer, NULL, new_on_deadline, TIMER_CALL_SYS_CRITICAL);
+			}
+		}
+	}
+
+	kr = KERN_SUCCESS;
+<span class="enscript-reference">sfi_defer_done</span>:
+	simple_unlock(&amp;sfi_lock);
+
+	splx(s);
+
+	<span class="enscript-keyword">return</span> (kr);
+}
+
+
+kern_return_t <span class="enscript-function-name">sfi_get_window</span>(uint64_t *window_usecs)
+{
+	spl_t		s;
+	uint64_t	off_window_us;
+
+	s = splsched();
+	simple_lock(&amp;sfi_lock);
+
+	off_window_us = sfi_window_usecs;
+
+	simple_unlock(&amp;sfi_lock);
+	splx(s);
+
+	*window_usecs = off_window_us;
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+
+kern_return_t <span class="enscript-function-name">sfi_set_class_offtime</span>(sfi_class_id_t class_id, uint64_t offtime_usecs)
+{
+	uint64_t	interval;
+	spl_t		s;
+	uint64_t	off_window_interval;
+
+	<span class="enscript-keyword">if</span> (offtime_usecs &lt; MIN_SFI_WINDOW_USEC)
+		offtime_usecs = MIN_SFI_WINDOW_USEC;
+
+	<span class="enscript-keyword">if</span> (class_id == SFI_CLASS_UNSPECIFIED || class_id &gt;= MAX_SFI_CLASS_ID)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">if</span> (offtime_usecs &gt; UINT32_MAX)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_SET_CLASS_OFFTIME), offtime_usecs, class_id, 0, 0, 0);
+
+	clock_interval_to_absolutetime_interval((uint32_t)offtime_usecs, NSEC_PER_USEC, &amp;interval);
+
+	s = splsched();
+
+	simple_lock(&amp;sfi_lock);
+	off_window_interval = sfi_window_interval;
+
+	<span class="enscript-comment">/* Check that we are not bringing in class off-time larger than the SFI window */</span>
+	<span class="enscript-keyword">if</span> (off_window_interval &amp;&amp; (interval &gt;= off_window_interval)) {
+		simple_unlock(&amp;sfi_lock);
+		splx(s);
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	}
+
+	<span class="enscript-comment">/* We never re-program the per-class on-timer, but rather just let it expire naturally */</span>
+	<span class="enscript-keyword">if</span> (!sfi_classes[class_id].class_sfi_is_enabled) {
+		sfi_enabled_class_count++;
+	}
+	sfi_classes[class_id].off_time_usecs = offtime_usecs;
+	sfi_classes[class_id].off_time_interval = interval;
+	sfi_classes[class_id].class_sfi_is_enabled = TRUE;
+
+	<span class="enscript-keyword">if</span> (sfi_window_is_set &amp;&amp; !sfi_is_enabled) {
+		<span class="enscript-comment">/* start global off timer */</span>
+		sfi_is_enabled = TRUE;
+		sfi_next_off_deadline = mach_absolute_time() + sfi_window_interval;
+		timer_call_enter1(&amp;sfi_timer_call_entry,
+						  NULL,
+						  sfi_next_off_deadline,
+						  TIMER_CALL_SYS_CRITICAL);		
+	}
+
+	simple_unlock(&amp;sfi_lock);
+
+	splx(s);
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+kern_return_t <span class="enscript-function-name">sfi_class_offtime_cancel</span>(sfi_class_id_t class_id)
+{
+	spl_t		s;
+
+	<span class="enscript-keyword">if</span> (class_id == SFI_CLASS_UNSPECIFIED || class_id &gt;= MAX_SFI_CLASS_ID)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	s = splsched();
+
+	KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_CANCEL_CLASS_OFFTIME), class_id, 0, 0, 0, 0);
+
+	simple_lock(&amp;sfi_lock);
+
+	<span class="enscript-comment">/* We never re-program the per-class on-timer, but rather just let it expire naturally */</span>
+	<span class="enscript-keyword">if</span> (sfi_classes[class_id].class_sfi_is_enabled) {
+		sfi_enabled_class_count--;
+	}
+	sfi_classes[class_id].off_time_usecs = 0;
+	sfi_classes[class_id].off_time_interval = 0;
+	sfi_classes[class_id].class_sfi_is_enabled = FALSE;
+
+	<span class="enscript-keyword">if</span> (sfi_enabled_class_count == 0) {
+		sfi_is_enabled = FALSE;
+	}
+
+	simple_unlock(&amp;sfi_lock);
+
+	splx(s);
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+kern_return_t <span class="enscript-function-name">sfi_get_class_offtime</span>(sfi_class_id_t class_id, uint64_t *offtime_usecs)
+{
+	uint64_t	off_time_us;
+	spl_t		s;
+
+	<span class="enscript-keyword">if</span> (class_id == SFI_CLASS_UNSPECIFIED || class_id &gt;= MAX_SFI_CLASS_ID)
+		<span class="enscript-keyword">return</span> (0);
+
+	s = splsched();
+
+	simple_lock(&amp;sfi_lock);
+	off_time_us = sfi_classes[class_id].off_time_usecs;
+	simple_unlock(&amp;sfi_lock);
+
+	splx(s);
+
+	*offtime_usecs = off_time_us;
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ * sfi_thread_classify and sfi_processor_active_thread_classify perform the critical
+ * role of quickly categorizing a thread into its SFI class so that an AST_SFI can be
+ * set. As the thread is unwinding to userspace, sfi_ast() performs full locking
+ * and determines whether the thread should enter an SFI wait state. Because of
+ * the inherent races between the time the AST is set and when it is evaluated,
+ * thread classification can be inaccurate (but should always be safe). This is
+ * especially the case for sfi_processor_active_thread_classify, which must
+ * classify the active thread on a remote processor without taking the thread lock.
+ * When in doubt, classification should err on the side of *not* classifying a
+ * thread at all, and wait for the thread itself to either hit a quantum expiration
+ * or block inside the kernel.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Thread must be locked. Ultimately, the real decision to enter
+ * SFI wait happens at the AST boundary.
+ */</span>
+sfi_class_id_t <span class="enscript-function-name">sfi_thread_classify</span>(thread_t thread)
+{
+	task_t task = thread-&gt;task;
+	boolean_t is_kernel_thread = (task == kernel_task);
+	sched_mode_t thmode = thread-&gt;sched_mode;
+	<span class="enscript-type">int</span> latency_qos = proc_get_effective_task_policy(task, TASK_POLICY_LATENCY_QOS);
+	<span class="enscript-type">int</span> task_role = proc_get_effective_task_policy(task, TASK_POLICY_ROLE);
+	<span class="enscript-type">int</span> thread_bg = proc_get_effective_thread_policy(thread, TASK_POLICY_DARWIN_BG);
+	<span class="enscript-type">int</span> managed_task = proc_get_effective_task_policy(task, TASK_POLICY_SFI_MANAGED);
+	<span class="enscript-type">int</span> thread_qos = proc_get_effective_thread_policy(thread, TASK_POLICY_QOS);
+	boolean_t focal = FALSE;
+
+	<span class="enscript-comment">/* kernel threads never reach the user AST boundary, and are in a separate world for SFI */</span>
+	<span class="enscript-keyword">if</span> (is_kernel_thread) {
+		<span class="enscript-keyword">return</span> SFI_CLASS_KERNEL;
+	}
+
+	<span class="enscript-keyword">if</span> (thread_qos == THREAD_QOS_MAINTENANCE)
+		<span class="enscript-keyword">return</span> SFI_CLASS_MAINTENANCE;
+
+	<span class="enscript-keyword">if</span> (thread_bg || thread_qos == THREAD_QOS_BACKGROUND) {
+		<span class="enscript-keyword">return</span> SFI_CLASS_DARWIN_BG;
+	}
+
+	<span class="enscript-keyword">if</span> (latency_qos != 0) {
+		<span class="enscript-type">int</span> latency_qos_wtf = latency_qos - 1;
+
+		<span class="enscript-keyword">if</span> ((latency_qos_wtf &gt;= 4) &amp;&amp; (latency_qos_wtf &lt;= 5)) {
+			<span class="enscript-keyword">return</span> SFI_CLASS_APP_NAP;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Realtime and fixed priority threads express their duty cycle constraints
+	 * via other mechanisms, and are opted out of (most) forms of SFI
+	 */</span>
+	<span class="enscript-keyword">if</span> (thmode == TH_MODE_REALTIME || thmode == TH_MODE_FIXED || task_role == TASK_GRAPHICS_SERVER) {
+		<span class="enscript-keyword">return</span> SFI_CLASS_OPTED_OUT;
+	}
+
+	<span class="enscript-comment">/*
+	 * Threads with unspecified, legacy, or user-initiated QOS class can be individually managed.
+	 */</span>
+	<span class="enscript-keyword">switch</span> (task_role) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TASK_CONTROL_APPLICATION</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TASK_FOREGROUND_APPLICATION</span>:
+		focal = TRUE;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TASK_BACKGROUND_APPLICATION</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TASK_DEFAULT_APPLICATION</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TASK_THROTTLE_APPLICATION</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TASK_UNSPECIFIED</span>:
+		<span class="enscript-comment">/* Focal if the task is in a coalition with a FG/focal app */</span>
+		<span class="enscript-keyword">if</span> (task_coalition_focal_count(thread-&gt;task) &gt; 0)
+			focal = TRUE;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (managed_task) {
+		<span class="enscript-keyword">switch</span> (thread_qos) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_UNSPECIFIED</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_LEGACY</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_USER_INITIATED</span>:
+			<span class="enscript-keyword">if</span> (focal)
+				<span class="enscript-keyword">return</span> SFI_CLASS_MANAGED_FOCAL;
+			<span class="enscript-keyword">else</span>
+				<span class="enscript-keyword">return</span> SFI_CLASS_MANAGED_NONFOCAL;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (thread_qos == THREAD_QOS_UTILITY)
+		<span class="enscript-keyword">return</span> SFI_CLASS_UTILITY;
+
+	<span class="enscript-comment">/*
+	 * Classify threads in non-managed tasks
+	 */</span>
+	<span class="enscript-keyword">if</span> (focal) {
+		<span class="enscript-keyword">switch</span> (thread_qos) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_USER_INTERACTIVE</span>:
+			<span class="enscript-keyword">return</span> SFI_CLASS_USER_INTERACTIVE_FOCAL;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_USER_INITIATED</span>:
+			<span class="enscript-keyword">return</span> SFI_CLASS_USER_INITIATED_FOCAL;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_LEGACY</span>:
+			<span class="enscript-keyword">return</span> SFI_CLASS_LEGACY_FOCAL;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> SFI_CLASS_DEFAULT_FOCAL;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">switch</span> (thread_qos) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_USER_INTERACTIVE</span>:
+			<span class="enscript-keyword">return</span> SFI_CLASS_USER_INTERACTIVE_NONFOCAL;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_USER_INITIATED</span>:
+			<span class="enscript-keyword">return</span> SFI_CLASS_USER_INITIATED_NONFOCAL;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_LEGACY</span>:
+			<span class="enscript-keyword">return</span> SFI_CLASS_LEGACY_NONFOCAL;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> SFI_CLASS_DEFAULT_NONFOCAL;
+		}
+	}
+}
+
+<span class="enscript-comment">/*
+ * pset must be locked.
+ */</span>
+sfi_class_id_t <span class="enscript-function-name">sfi_processor_active_thread_classify</span>(processor_t processor)
+{
+	<span class="enscript-keyword">return</span> processor-&gt;current_sfi_class;
+}
+
+<span class="enscript-comment">/*
+ * thread must be locked. This is inherently racy, with the intent that
+ * at the AST boundary, it will be fully evaluated whether we need to
+ * perform an AST wait
+ */</span>
+ast_t <span class="enscript-function-name">sfi_thread_needs_ast</span>(thread_t thread, sfi_class_id_t *out_class)
+{
+	sfi_class_id_t class_id;
+
+	class_id = sfi_thread_classify(thread);
+
+	<span class="enscript-keyword">if</span> (out_class)
+		*out_class = class_id;
+
+	<span class="enscript-comment">/* No lock taken, so a stale value may be used. */</span>
+	<span class="enscript-keyword">if</span> (!sfi_classes[class_id].class_in_on_phase)
+		<span class="enscript-keyword">return</span> AST_SFI;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> AST_NONE;
+}
+
+<span class="enscript-comment">/*
+ * pset must be locked. We take the SFI class for
+ * the currently running thread which is cached on
+ * the processor_t, and assume it is accurate. In the
+ * worst case, the processor will get an IPI and be asked
+ * to evaluate if the current running thread at that
+ * later point in time should be in an SFI wait.
+ */</span>
+ast_t <span class="enscript-function-name">sfi_processor_needs_ast</span>(processor_t processor)
+{
+	sfi_class_id_t class_id;
+
+	class_id = sfi_processor_active_thread_classify(processor);
+
+	<span class="enscript-comment">/* No lock taken, so a stale value may be used. */</span>
+	<span class="enscript-keyword">if</span> (!sfi_classes[class_id].class_in_on_phase)
+		<span class="enscript-keyword">return</span> AST_SFI;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> AST_NONE;
+
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">_sfi_wait_cleanup</span>(sched_call_t callback) {
+	thread_t self = current_thread();
+	sfi_class_id_t current_sfi_wait_class = SFI_CLASS_UNSPECIFIED;
+	int64_t sfi_wait_time, sfi_wait_begin = 0;
+
+	spl_t s = splsched();
+	thread_lock(self);
+	<span class="enscript-keyword">if</span> (callback) {
+		thread_sched_call(self, callback);
+	}
+	sfi_wait_begin = self-&gt;wait_sfi_begin_time;
+	thread_unlock(self);
+
+	simple_lock(&amp;sfi_lock);
+	sfi_wait_time = mach_absolute_time() - sfi_wait_begin;
+	current_sfi_wait_class = self-&gt;sfi_wait_class;
+	self-&gt;sfi_wait_class = SFI_CLASS_UNSPECIFIED;
+	simple_unlock(&amp;sfi_lock);
+	splx(s);
+	assert((SFI_CLASS_UNSPECIFIED &lt; current_sfi_wait_class) &amp;&amp; (current_sfi_wait_class &lt; MAX_SFI_CLASS_ID));
+	ledger_credit(self-&gt;task-&gt;ledger, task_ledgers.sfi_wait_times[current_sfi_wait_class], sfi_wait_time);
+}
+
+<span class="enscript-comment">/*
+ * Called at AST context to fully evaluate if the current thread
+ * (which is obviously running) should instead block in an SFI wait.
+ * We must take the sfi_lock to check whether we are in the &quot;off&quot; period
+ * for the class, and if so, block.
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">sfi_ast</span>(thread_t thread)
+{
+	sfi_class_id_t class_id;
+	spl_t		s;
+	<span class="enscript-type">struct</span> sfi_class_state	*sfi_class;
+	wait_result_t	waitret;
+	boolean_t	did_wait = FALSE;
+	uint64_t	tid;
+	thread_continue_t	continuation;
+	sched_call_t	workq_callback = workqueue_get_sched_callback();
+	boolean_t	did_clear_wq = FALSE;
+
+	s = splsched();
+
+	simple_lock(&amp;sfi_lock);
+
+	<span class="enscript-keyword">if</span> (!sfi_is_enabled) {
+		<span class="enscript-comment">/*
+		 * SFI is not enabled, or has recently been disabled.
+		 * There is no point putting this thread on a deferred ready
+		 * queue, even if it were classified as needing it, since
+		 * SFI will truly be off at the next global off timer
+		 */</span>
+		simple_unlock(&amp;sfi_lock);
+		splx(s);
+
+		<span class="enscript-keyword">return</span>;
+	}
+
+	thread_lock(thread);
+	thread-&gt;sfi_class = class_id = sfi_thread_classify(thread);
+	tid = thread_tid(thread);
+
+	<span class="enscript-comment">/*
+	 * Once the sfi_lock is taken and the thread's -&gt;sfi_class field is updated, we
+	 * are committed to transitioning to whatever state is indicated by &quot;-&gt;class_in_on_phase&quot;.
+	 * If another thread tries to call sfi_reevaluate() after this point, it will take the
+	 * sfi_lock and see the thread in this wait state. If another thread calls
+	 * sfi_reevaluate() before this point, it would see a runnable thread and at most
+	 * attempt to send an AST to this processor, but we would have the most accurate
+	 * classification.
+	 */</span>
+
+	<span class="enscript-comment">/* Optimistically clear workq callback while thread is already locked */</span>
+	<span class="enscript-keyword">if</span> (workq_callback &amp;&amp; (thread-&gt;sched_call == workq_callback)) {
+		thread_sched_call(thread, NULL);
+		did_clear_wq = TRUE;
+	}
+	thread_unlock(thread);
+
+	sfi_class = &amp;sfi_classes[class_id];
+	<span class="enscript-keyword">if</span> (!sfi_class-&gt;class_in_on_phase) {
+		<span class="enscript-comment">/* Need to block thread in wait queue */</span>
+		KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_THREAD_DEFER), tid, class_id, 0, 0, 0);
+
+		waitret = waitq_assert_wait64(&amp;sfi_class-&gt;waitq,
+					      CAST_EVENT64_T(class_id),
+					      THREAD_INTERRUPTIBLE,
+					      0);
+		<span class="enscript-keyword">if</span> (waitret == THREAD_WAITING) {
+			thread-&gt;sfi_wait_class = class_id;
+			did_wait = TRUE;
+			continuation = sfi_class-&gt;continuation;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* thread may be exiting already, all other errors are unexpected */</span>
+			assert(waitret == THREAD_INTERRUPTED);
+		}
+	}
+	simple_unlock(&amp;sfi_lock);
+	
+	splx(s);
+
+	<span class="enscript-keyword">if</span> (did_wait) {
+		thread_block_reason(continuation, did_clear_wq ? workq_callback : NULL, AST_SFI);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (did_clear_wq) {
+			s = splsched();
+			thread_lock(thread);
+			thread_sched_call(thread, workq_callback);
+			thread_unlock(thread);
+			splx(s);
+		}
+	}
+}
+
+<span class="enscript-comment">/* Thread must be unlocked */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">sfi_reevaluate</span>(thread_t thread)
+{
+	kern_return_t kret;
+	spl_t		s;
+	sfi_class_id_t class_id, current_class_id;
+	ast_t		sfi_ast;
+
+	s = splsched();
+
+	simple_lock(&amp;sfi_lock);
+
+	thread_lock(thread);
+	sfi_ast = sfi_thread_needs_ast(thread, &amp;class_id);
+	thread-&gt;sfi_class = class_id;
+
+	<span class="enscript-comment">/*
+	 * This routine chiefly exists to boost threads out of an SFI wait
+	 * if their classification changes before the &quot;on&quot; timer fires.
+	 *
+	 * If we calculate that a thread is in a different -&gt;sfi_wait_class
+	 * than we think it should be (including no-SFI-wait), we need to
+	 * correct that:
+	 *
+	 * If the thread is in SFI wait and should not be (or should be waiting
+	 * on a different class' &quot;on&quot; timer), we wake it up. If needed, the
+	 * thread may immediately block again in the different SFI wait state.
+	 *
+	 * If the thread is not in an SFI wait state and it should be, we need
+	 * to get that thread's attention, possibly by sending an AST to another
+	 * processor.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> ((current_class_id = thread-&gt;sfi_wait_class) != SFI_CLASS_UNSPECIFIED) {
+
+		thread_unlock(thread); <span class="enscript-comment">/* not needed anymore */</span>
+
+		assert(current_class_id &lt; MAX_SFI_CLASS_ID);
+
+		<span class="enscript-keyword">if</span> ((sfi_ast == AST_NONE) || (class_id != current_class_id)) {
+			<span class="enscript-type">struct</span> sfi_class_state	*sfi_class = &amp;sfi_classes[current_class_id];
+
+			KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_WAIT_CANCELED), thread_tid(thread), current_class_id, class_id, 0, 0);
+
+			kret = waitq_wakeup64_thread(&amp;sfi_class-&gt;waitq,
+											  CAST_EVENT64_T(current_class_id),
+											  thread,
+											  THREAD_AWAKENED);
+			assert(kret == KERN_SUCCESS || kret == KERN_NOT_WAITING);
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * Thread's current SFI wait class is not set, and because we
+		 * have the sfi_lock, it won't get set.
+		 */</span>
+
+		<span class="enscript-keyword">if</span> ((thread-&gt;state &amp; (TH_RUN | TH_IDLE)) == TH_RUN) {
+			<span class="enscript-keyword">if</span> (sfi_ast != AST_NONE) {
+				<span class="enscript-keyword">if</span> (thread == current_thread())
+					ast_on(sfi_ast);
+				<span class="enscript-keyword">else</span> {
+					processor_t             processor = thread-&gt;last_processor;
+					
+					<span class="enscript-keyword">if</span> (processor != PROCESSOR_NULL &amp;&amp;
+						processor-&gt;state == PROCESSOR_RUNNING &amp;&amp;
+						processor-&gt;active_thread == thread) {
+						cause_ast_check(processor);
+					} <span class="enscript-keyword">else</span> {
+						<span class="enscript-comment">/*
+						 * Runnable thread that's not on a CPU currently. When a processor
+						 * does context switch to it, the AST will get set based on whether
+						 * the thread is in its &quot;off time&quot;.
+						 */</span>
+					}
+				}
+			}
+		}
+
+		thread_unlock(thread);
+	}
+
+	simple_unlock(&amp;sfi_lock);
+	splx(s);
+}
+
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !CONFIG_SCHED_SFI */</span>
+
+kern_return_t <span class="enscript-function-name">sfi_set_window</span>(uint64_t window_usecs __unused)
+{
+	<span class="enscript-keyword">return</span> (KERN_NOT_SUPPORTED);
+}
+
+kern_return_t <span class="enscript-function-name">sfi_window_cancel</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (KERN_NOT_SUPPORTED);
+}
+
+
+kern_return_t <span class="enscript-function-name">sfi_get_window</span>(uint64_t *window_usecs __unused)
+{
+	<span class="enscript-keyword">return</span> (KERN_NOT_SUPPORTED);
+}
+
+
+kern_return_t <span class="enscript-function-name">sfi_set_class_offtime</span>(sfi_class_id_t class_id __unused, uint64_t offtime_usecs __unused)
+{
+	<span class="enscript-keyword">return</span> (KERN_NOT_SUPPORTED);
+}
+
+kern_return_t <span class="enscript-function-name">sfi_class_offtime_cancel</span>(sfi_class_id_t class_id __unused)
+{
+	<span class="enscript-keyword">return</span> (KERN_NOT_SUPPORTED);
+}
+
+kern_return_t <span class="enscript-function-name">sfi_get_class_offtime</span>(sfi_class_id_t class_id __unused, uint64_t *offtime_usecs __unused)
+{
+	<span class="enscript-keyword">return</span> (KERN_NOT_SUPPORTED);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">sfi_reevaluate</span>(thread_t thread __unused)
+{
+	<span class="enscript-keyword">return</span>;
+}
+
+sfi_class_id_t <span class="enscript-function-name">sfi_thread_classify</span>(thread_t thread)
+{
+	task_t task = thread-&gt;task;
+	boolean_t is_kernel_thread = (task == kernel_task);
+
+	<span class="enscript-keyword">if</span> (is_kernel_thread) {
+		<span class="enscript-keyword">return</span> SFI_CLASS_KERNEL;
+	}
+
+	<span class="enscript-keyword">return</span> SFI_CLASS_OPTED_OUT;
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !CONFIG_SCHED_SFI */</span>
+</pre>
+<hr />
+</body></html>

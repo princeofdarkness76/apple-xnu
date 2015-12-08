@@ -1,0 +1,3235 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kern_sig.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kern_sig.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1995-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1989, 1991, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ * (c) UNIX System Laboratories, Inc.
+ * All or some portions of this file are derived from material licensed
+ * to the University of California by American Telephone and Telegraph
+ * Co. or Unix System Laboratories, Inc. and are reproduced herein with
+ * the permission of UNIX System Laboratories, Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)kern_sig.c	8.7 (Berkeley) 4/18/94
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SIGPROP</span>		<span class="enscript-comment">/* include signal properties table */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/resourcevar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/timeb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/times.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/acct.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/wait.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signalvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/spl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>		<span class="enscript-comment">/* for coredump */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ast.h&gt;</span>		<span class="enscript-comment">/* for APC support */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>		<span class="enscript-comment">/* extern void   *get_bsdtask_info(task_t); */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread_call.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/exception.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sdt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/codesign.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Missing prototypes that Mach should export
+ *
+ * +++
+ */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">thread_enable_fpe</span>(thread_t act, <span class="enscript-type">int</span> onoff);
+<span class="enscript-type">extern</span> thread_t	port_name_to_thread(mach_port_name_t port_name);
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">get_signalact</span>(task_t , thread_t *, <span class="enscript-type">int</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> <span class="enscript-function-name">get_useraddr</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/*
+ * ---
+ */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">doexception</span>(<span class="enscript-type">int</span> exc, mach_exception_code_t code, 
+		mach_exception_subcode_t sub);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">stop</span>(proc_t, proc_t);
+<span class="enscript-type">int</span> <span class="enscript-function-name">cansignal</span>(proc_t, kauth_cred_t, proc_t, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);
+<span class="enscript-type">int</span> <span class="enscript-function-name">killpg1</span>(proc_t, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">psignal_uthread</span>(thread_t, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">psignal_try_thread</span>(proc_t, thread_t, <span class="enscript-type">int</span> signum);
+kern_return_t <span class="enscript-function-name">do_bsdexception</span>(<span class="enscript-type">int</span>, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);
+<span class="enscript-type">void</span> <span class="enscript-function-name">__posix_sem_syscall_return</span>(kern_return_t);
+<span class="enscript-type">char</span> *<span class="enscript-function-name">proc_name_address</span>(<span class="enscript-type">void</span> *p);
+
+<span class="enscript-comment">/* implementations in osfmk/kern/sync_sema.c. We do not want port.h in this scope, so void * them  */</span>
+kern_return_t <span class="enscript-function-name">semaphore_timedwait_signal_trap_internal</span>(mach_port_name_t, mach_port_name_t, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>, clock_res_t, <span class="enscript-type">void</span> (*)(kern_return_t));
+kern_return_t <span class="enscript-function-name">semaphore_timedwait_trap_internal</span>(mach_port_name_t, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>, clock_res_t, <span class="enscript-type">void</span> (*)(kern_return_t));
+kern_return_t <span class="enscript-function-name">semaphore_wait_signal_trap_internal</span>(mach_port_name_t, mach_port_name_t, <span class="enscript-type">void</span> (*)(kern_return_t));
+kern_return_t <span class="enscript-function-name">semaphore_wait_trap_internal</span>(mach_port_name_t, <span class="enscript-type">void</span> (*)(kern_return_t));
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	filt_sigattach(<span class="enscript-type">struct</span> knote *kn);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	filt_sigdetach(<span class="enscript-type">struct</span> knote *kn);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	filt_signal(<span class="enscript-type">struct</span> knote *kn, <span class="enscript-type">long</span> hint);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	filt_signaltouch(<span class="enscript-type">struct</span> knote *kn, <span class="enscript-type">struct</span> kevent_internal_s *kev, 
+		<span class="enscript-type">long</span> type);
+
+<span class="enscript-type">struct</span> filterops sig_filtops = {
+        .f_attach = filt_sigattach,
+        .f_detach = filt_sigdetach,
+        .f_event = filt_signal,
+        .f_touch = filt_signaltouch,
+};
+
+<span class="enscript-comment">/* structures  and fns for killpg1 iterartion callback and filters */</span>
+<span class="enscript-type">struct</span> killpg1_filtargs {
+	<span class="enscript-type">int</span>  posix;
+	proc_t cp;
+};
+
+<span class="enscript-type">struct</span> killpg1_iterargs {
+	proc_t cp;
+	kauth_cred_t uc;
+	<span class="enscript-type">int</span> signum;
+	<span class="enscript-type">int</span> * nfoundp;
+	<span class="enscript-type">int</span> zombie;
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">killpg1_filt</span>(proc_t p, <span class="enscript-type">void</span> * arg);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">killpg1_pgrpfilt</span>(proc_t p, __unused <span class="enscript-type">void</span> * arg);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">killpg1_callback</span>(proc_t p, <span class="enscript-type">void</span> * arg);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pgsignal_filt</span>(proc_t p, <span class="enscript-type">void</span> * arg);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pgsignal_callback</span>(proc_t p, <span class="enscript-type">void</span> * arg);
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">get_signalthread</span>(proc_t, <span class="enscript-type">int</span>, thread_t *);
+
+
+<span class="enscript-comment">/* flags for psignal_internal */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PSIG_LOCKED</span>     0x1
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PSIG_VFORK</span>      0x2
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PSIG_THREAD</span>     0x4
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PSIG_TRY_THREAD</span> 0x8
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">psignal_internal</span>(proc_t p, task_t task, thread_t thread, <span class="enscript-type">int</span> flavor, <span class="enscript-type">int</span> signum);
+
+<span class="enscript-comment">/*
+ * NOTE: Source and target may *NOT* overlap! (target is smaller)
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sigaltstack_kern_to_user32</span>(<span class="enscript-type">struct</span> kern_sigaltstack *in, <span class="enscript-type">struct</span> user32_sigaltstack *out)
+{
+	out-&gt;ss_sp	    = CAST_DOWN_EXPLICIT(user32_addr_t, in-&gt;ss_sp);
+	out-&gt;ss_size	= CAST_DOWN_EXPLICIT(user32_size_t, in-&gt;ss_size);
+	out-&gt;ss_flags	= in-&gt;ss_flags;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sigaltstack_kern_to_user64</span>(<span class="enscript-type">struct</span> kern_sigaltstack *in, <span class="enscript-type">struct</span> user64_sigaltstack *out)
+{
+	out-&gt;ss_sp	    = in-&gt;ss_sp;
+	out-&gt;ss_size	= in-&gt;ss_size;
+	out-&gt;ss_flags	= in-&gt;ss_flags;
+}
+
+<span class="enscript-comment">/*
+ * NOTE: Source and target may are permitted to overlap! (source is smaller);
+ * this works because we copy fields in order from the end of the struct to
+ * the beginning.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sigaltstack_user32_to_kern</span>(<span class="enscript-type">struct</span> user32_sigaltstack *in, <span class="enscript-type">struct</span> kern_sigaltstack *out)
+{
+	out-&gt;ss_flags	= in-&gt;ss_flags;
+	out-&gt;ss_size	= in-&gt;ss_size;
+	out-&gt;ss_sp		= CAST_USER_ADDR_T(in-&gt;ss_sp);
+}
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sigaltstack_user64_to_kern</span>(<span class="enscript-type">struct</span> user64_sigaltstack *in, <span class="enscript-type">struct</span> kern_sigaltstack *out)
+{
+	out-&gt;ss_flags	= in-&gt;ss_flags;
+	out-&gt;ss_size	= in-&gt;ss_size;
+	out-&gt;ss_sp		= in-&gt;ss_sp;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sigaction_kern_to_user32</span>(<span class="enscript-type">struct</span> kern_sigaction *in, <span class="enscript-type">struct</span> user32_sigaction *out)
+{
+	<span class="enscript-comment">/* This assumes 32 bit __sa_handler is of type sig_t */</span>
+	out-&gt;__sigaction_u.__sa_handler = CAST_DOWN_EXPLICIT(user32_addr_t,in-&gt;__sigaction_u.__sa_handler);
+	out-&gt;sa_mask = in-&gt;sa_mask;
+	out-&gt;sa_flags = in-&gt;sa_flags;
+}
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sigaction_kern_to_user64</span>(<span class="enscript-type">struct</span> kern_sigaction *in, <span class="enscript-type">struct</span> user64_sigaction *out)
+{
+	<span class="enscript-comment">/* This assumes 32 bit __sa_handler is of type sig_t */</span>
+	out-&gt;__sigaction_u.__sa_handler = in-&gt;__sigaction_u.__sa_handler;
+	out-&gt;sa_mask = in-&gt;sa_mask;
+	out-&gt;sa_flags = in-&gt;sa_flags;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">__sigaction_user32_to_kern</span>(<span class="enscript-type">struct</span> __user32_sigaction *in, <span class="enscript-type">struct</span> __kern_sigaction *out)
+{
+	out-&gt;__sigaction_u.__sa_handler = CAST_USER_ADDR_T(in-&gt;__sigaction_u.__sa_handler);
+	out-&gt;sa_tramp = CAST_USER_ADDR_T(in-&gt;sa_tramp);
+	out-&gt;sa_mask = in-&gt;sa_mask;
+	out-&gt;sa_flags = in-&gt;sa_flags;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">__sigaction_user64_to_kern</span>(<span class="enscript-type">struct</span> __user64_sigaction *in, <span class="enscript-type">struct</span> __kern_sigaction *out)
+{
+	out-&gt;__sigaction_u.__sa_handler = in-&gt;__sigaction_u.__sa_handler;
+	out-&gt;sa_tramp = in-&gt;sa_tramp;
+	out-&gt;sa_mask = in-&gt;sa_mask;
+	out-&gt;sa_flags = in-&gt;sa_flags;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SIGNAL_DEBUG</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">ram_printf</span>(<span class="enscript-type">int</span>);
+<span class="enscript-type">int</span> ram_debug=0;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> rdebug_proc=0;
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ram_printf</span>(<span class="enscript-type">int</span> x)
+{
+    printf(<span class="enscript-string">&quot;x is %d&quot;</span>,x);
+
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SIGNAL_DEBUG */</span>
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">signal_setast</span>(thread_t sig_actthread)
+{
+	act_set_astbsd(sig_actthread);
+}
+
+<span class="enscript-comment">/*
+ * Can process p, with ucred uc, send the signal signum to process q?
+ * uc is refcounted  by the caller so internal fileds can be used safely
+ * when called with zombie arg, list lock is held
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cansignal</span>(proc_t p, kauth_cred_t uc, proc_t q, <span class="enscript-type">int</span> signum, <span class="enscript-type">int</span> zombie)
+{
+	kauth_cred_t my_cred;
+	<span class="enscript-type">struct</span> session * p_sessp = SESSION_NULL;
+	<span class="enscript-type">struct</span> session * q_sessp = SESSION_NULL;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-type">int</span> error;
+
+	error = mac_proc_check_signal(p, q, signum);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (0);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* you can signal yourself */</span>
+	<span class="enscript-keyword">if</span> (p == q)
+		<span class="enscript-keyword">return</span>(1);
+
+	<span class="enscript-comment">/* you can't send launchd SIGKILL, even if root */</span>
+	<span class="enscript-keyword">if</span> (signum == SIGKILL &amp;&amp; q == initproc)
+		<span class="enscript-keyword">return</span>(0);
+
+	<span class="enscript-keyword">if</span> (!suser(uc, NULL))
+		<span class="enscript-keyword">return</span> (1);		<span class="enscript-comment">/* root can always signal */</span>
+
+	<span class="enscript-keyword">if</span> (zombie == 0)
+		proc_list_lock();
+	<span class="enscript-keyword">if</span> (p-&gt;p_pgrp != PGRP_NULL)
+		p_sessp = p-&gt;p_pgrp-&gt;pg_session;
+	<span class="enscript-keyword">if</span> (q-&gt;p_pgrp != PGRP_NULL)
+		q_sessp = q-&gt;p_pgrp-&gt;pg_session;
+
+	<span class="enscript-keyword">if</span> (signum == SIGCONT &amp;&amp; q_sessp == p_sessp) {
+		<span class="enscript-keyword">if</span> (zombie == 0)
+			proc_list_unlock();
+		<span class="enscript-keyword">return</span> (1);		<span class="enscript-comment">/* SIGCONT in session */</span>
+	}
+
+	<span class="enscript-keyword">if</span> (zombie == 0) 
+		proc_list_unlock();
+
+	<span class="enscript-comment">/*
+	 * If the real or effective UID of the sender matches the real
+	 * or saved UID of the target, permit the signal to
+	 * be sent.
+	 */</span>
+	<span class="enscript-keyword">if</span> (zombie == 0)
+		my_cred = kauth_cred_proc_ref(q);
+	<span class="enscript-keyword">else</span>
+		my_cred = proc_ucred(q);
+
+	<span class="enscript-keyword">if</span> (kauth_cred_getruid(uc) == kauth_cred_getruid(my_cred) ||
+	    kauth_cred_getruid(uc) == kauth_cred_getsvuid(my_cred) ||
+	    kauth_cred_getuid(uc) == kauth_cred_getruid(my_cred) ||
+	    kauth_cred_getuid(uc) == kauth_cred_getsvuid(my_cred)) {
+		<span class="enscript-keyword">if</span> (zombie == 0)
+			kauth_cred_unref(&amp;my_cred);
+		<span class="enscript-keyword">return</span> (1);
+	}
+
+	<span class="enscript-keyword">if</span> (zombie == 0)
+		kauth_cred_unref(&amp;my_cred);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * &lt;rdar://problem/21952708&gt; Some signals can be restricted from being handled,
+ * forcing the default action for that signal. This behavior applies only to
+ * non-root (EUID != 0) processes, and is configured with the &quot;sigrestrict=x&quot;
+ * bootarg:
+ *
+ *   0 (default): Disallow use of restricted signals. Trying to register a handler
+ *		returns ENOTSUP, which userspace may use to take special action (e.g. abort).
+ *   1: As above, but return EINVAL. Restricted signals behave similarly to SIGKILL.
+ *   2: Usual POSIX semantics.
+ */</span>
+<span class="enscript-type">unsigned</span> sigrestrict_arg = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PLATFORM_WatchOS</span> || <span class="enscript-variable-name">PLATFORM_AppleTVOS</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sigrestrictmask</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">if</span> (kauth_getuid() != 0 &amp;&amp; sigrestrict_arg != 2) {
+		<span class="enscript-keyword">return</span> SIGRESTRICTMASK;
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">signal_is_restricted</span>(proc_t p, <span class="enscript-type">int</span> signum)
+{
+	<span class="enscript-keyword">if</span> (sigmask(signum) &amp; sigrestrictmask()) {
+		<span class="enscript-keyword">if</span> (sigrestrict_arg == 0 &amp;&amp;
+				task_get_apptype(p-&gt;task) == TASK_APPTYPE_APP_DEFAULT) {
+			<span class="enscript-keyword">return</span> ENOTSUP;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span> EINVAL;
+		}
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+#<span class="enscript-reference">else</span>
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">signal_is_restricted</span>(proc_t p, <span class="enscript-type">int</span> signum)
+{
+	(<span class="enscript-type">void</span>)p;
+	(<span class="enscript-type">void</span>)signum;
+	<span class="enscript-keyword">return</span> 0;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !(PLATFORM_WatchOS || PLATFORM_AppleTVOS) */</span>
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINVAL
+ *	copyout:EFAULT
+ *	copyin:EFAULT
+ *
+ * Notes:	Uses current thread as a parameter to inform PPC to enable
+ *		FPU exceptions via setsigvec(); this operation is not proxy
+ *		safe!
+ */</span>
+<span class="enscript-comment">/* ARGSUSED */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sigaction</span>(proc_t p, <span class="enscript-type">struct</span> sigaction_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-type">struct</span> kern_sigaction vec;
+	<span class="enscript-type">struct</span> __kern_sigaction __vec;
+
+	<span class="enscript-type">struct</span> kern_sigaction *sa = &amp;vec;
+	<span class="enscript-type">struct</span> sigacts *ps = p-&gt;p_sigacts;
+
+	<span class="enscript-type">int</span> signum;
+	<span class="enscript-type">int</span> bit, error=0;
+
+	signum = uap-&gt;signum;
+	<span class="enscript-keyword">if</span> (signum &lt;= 0 || signum &gt;= NSIG ||
+			signum == SIGKILL || signum == SIGSTOP)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">if</span> ((error = signal_is_restricted(p, signum))) {
+		<span class="enscript-keyword">if</span> (error == ENOTSUP) {
+			printf(<span class="enscript-string">&quot;%s(%d): denied attempt to register action for signal %d\n&quot;</span>,
+					proc_name_address(p), proc_pid(p), signum);
+		}
+		<span class="enscript-keyword">return</span> error;
+	}
+
+	<span class="enscript-keyword">if</span> (uap-&gt;osa) {
+		sa-&gt;sa_handler = ps-&gt;ps_sigact[signum];
+		sa-&gt;sa_mask = ps-&gt;ps_catchmask[signum];
+		bit = sigmask(signum);
+		sa-&gt;sa_flags = 0;
+		<span class="enscript-keyword">if</span> ((ps-&gt;ps_sigonstack &amp; bit) != 0)
+			sa-&gt;sa_flags |= SA_ONSTACK;
+		<span class="enscript-keyword">if</span> ((ps-&gt;ps_sigintr &amp; bit) == 0)
+			sa-&gt;sa_flags |= SA_RESTART;
+		<span class="enscript-keyword">if</span> (ps-&gt;ps_siginfo &amp; bit)
+			sa-&gt;sa_flags |= SA_SIGINFO;
+		<span class="enscript-keyword">if</span> (ps-&gt;ps_signodefer &amp; bit)
+			sa-&gt;sa_flags |= SA_NODEFER;
+		<span class="enscript-keyword">if</span> (ps-&gt;ps_64regset &amp; bit)
+			sa-&gt;sa_flags |= SA_64REGSET;
+		<span class="enscript-keyword">if</span> ((signum == SIGCHLD) &amp;&amp; (p-&gt;p_flag &amp; P_NOCLDSTOP))
+			sa-&gt;sa_flags |= SA_NOCLDSTOP;
+		<span class="enscript-keyword">if</span> ((signum == SIGCHLD) &amp;&amp; (p-&gt;p_flag &amp; P_NOCLDWAIT))
+			sa-&gt;sa_flags |= SA_NOCLDWAIT;
+
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+			<span class="enscript-type">struct</span> user64_sigaction	vec64;
+			
+			sigaction_kern_to_user64(sa, &amp;vec64);
+			error = copyout(&amp;vec64, uap-&gt;osa, <span class="enscript-keyword">sizeof</span>(vec64));
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">struct</span> user32_sigaction	vec32;
+			
+			sigaction_kern_to_user32(sa, &amp;vec32);
+			error = copyout(&amp;vec32, uap-&gt;osa, <span class="enscript-keyword">sizeof</span>(vec32));
+		}
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+	}
+	<span class="enscript-keyword">if</span> (uap-&gt;nsa) {
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+			<span class="enscript-type">struct</span> __user64_sigaction	__vec64;
+			
+			error = copyin(uap-&gt;nsa, &amp;__vec64, <span class="enscript-keyword">sizeof</span>(__vec64));
+			__sigaction_user64_to_kern(&amp;__vec64, &amp;__vec);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">struct</span> __user32_sigaction	__vec32;
+			
+			error = copyin(uap-&gt;nsa, &amp;__vec32, <span class="enscript-keyword">sizeof</span>(__vec32));
+			__sigaction_user32_to_kern(&amp;__vec32, &amp;__vec);
+		}
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+		__vec.sa_flags &amp;= SA_USERSPACE_MASK; <span class="enscript-comment">/* Only pass on valid sa_flags */</span>
+		error = setsigvec(p, current_thread(), signum, &amp;__vec, FALSE);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/* Routines to manipulate bits on all threads */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">clear_procsiglist</span>(proc_t p,  <span class="enscript-type">int</span> bit, boolean_t in_signalstart)
+{
+	<span class="enscript-type">struct</span> uthread * uth;
+	thread_t thact;
+
+	proc_lock(p);
+	<span class="enscript-keyword">if</span> (!in_signalstart)
+		proc_signalstart(p, 1);
+
+	<span class="enscript-keyword">if</span> ((p-&gt;p_lflag &amp; P_LINVFORK) &amp;&amp; p-&gt;p_vforkact) {
+		thact = p-&gt;p_vforkact;	
+		uth = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(thact);
+		<span class="enscript-keyword">if</span> (uth) {
+			uth-&gt;uu_siglist &amp;= ~bit;
+		}
+		<span class="enscript-keyword">if</span> (!in_signalstart)
+			proc_signalend(p, 1);
+		proc_unlock(p);
+		<span class="enscript-keyword">return</span>(0);
+	} 
+
+	TAILQ_FOREACH(uth, &amp;p-&gt;p_uthlist, uu_list) {
+		uth-&gt;uu_siglist &amp;= ~bit;
+	}
+	p-&gt;p_siglist &amp;= ~bit;
+	<span class="enscript-keyword">if</span> (!in_signalstart)
+		proc_signalend(p, 1);
+	proc_unlock(p);
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">unblock_procsigmask</span>(proc_t p,  <span class="enscript-type">int</span> bit)
+{
+	<span class="enscript-type">struct</span> uthread * uth;
+	thread_t thact;
+
+	proc_lock(p);
+	proc_signalstart(p, 1);
+
+	<span class="enscript-keyword">if</span> ((p-&gt;p_lflag &amp; P_LINVFORK) &amp;&amp; p-&gt;p_vforkact) {
+		thact = p-&gt;p_vforkact;	
+		uth = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(thact);
+		<span class="enscript-keyword">if</span> (uth) {
+			uth-&gt;uu_sigmask &amp;= ~bit;
+		}
+		p-&gt;p_sigmask &amp;= ~bit;
+		proc_signalend(p, 1);
+		proc_unlock(p);
+		<span class="enscript-keyword">return</span>(0);
+	} 
+	TAILQ_FOREACH(uth, &amp;p-&gt;p_uthlist, uu_list) {
+		uth-&gt;uu_sigmask &amp;= ~bit;
+	}
+	p-&gt;p_sigmask &amp;= ~bit;
+
+	proc_signalend(p, 1);
+	proc_unlock(p);
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">block_procsigmask</span>(proc_t p,  <span class="enscript-type">int</span> bit)
+{
+	<span class="enscript-type">struct</span> uthread * uth;
+	thread_t thact;
+
+	proc_lock(p);
+	proc_signalstart(p, 1);
+
+	<span class="enscript-keyword">if</span> ((p-&gt;p_lflag &amp; P_LINVFORK) &amp;&amp; p-&gt;p_vforkact) {
+		thact = p-&gt;p_vforkact;	
+		uth = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(thact);
+		<span class="enscript-keyword">if</span> (uth) {
+			uth-&gt;uu_sigmask |= bit;
+		}
+		p-&gt;p_sigmask |=  bit;
+		proc_signalend(p, 1);
+		proc_unlock(p);
+		<span class="enscript-keyword">return</span>(0);
+	} 
+	TAILQ_FOREACH(uth, &amp;p-&gt;p_uthlist, uu_list) {
+		uth-&gt;uu_sigmask |= bit;
+	}
+	p-&gt;p_sigmask |=  bit;
+
+	proc_signalend(p, 1);
+	proc_unlock(p);
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">set_procsigmask</span>(proc_t p,  <span class="enscript-type">int</span> bit)
+{
+	<span class="enscript-type">struct</span> uthread * uth;
+	thread_t thact;
+
+	proc_lock(p);
+	proc_signalstart(p, 1);
+
+	<span class="enscript-keyword">if</span> ((p-&gt;p_lflag &amp; P_LINVFORK) &amp;&amp; p-&gt;p_vforkact) {
+		thact = p-&gt;p_vforkact;	
+		uth = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(thact);
+		<span class="enscript-keyword">if</span> (uth) {
+			uth-&gt;uu_sigmask = bit;
+		}
+		p-&gt;p_sigmask =  bit;
+		proc_signalend(p, 1);
+		proc_unlock(p);
+		<span class="enscript-keyword">return</span>(0);
+	} 
+	TAILQ_FOREACH(uth, &amp;p-&gt;p_uthlist, uu_list) {
+		uth-&gt;uu_sigmask = bit;
+	}
+	p-&gt;p_sigmask =  bit;
+	proc_signalend(p, 1);
+	proc_unlock(p);
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/* XXX should be static? */</span>
+<span class="enscript-comment">/*
+ * Notes:	The thread parameter is used in the PPC case to select the
+ *		thread on which the floating point exception will be enabled
+ *		or disabled.  We can't simply take current_thread(), since
+ *		this is called from posix_spawn() on the not currently running
+ *		process/thread pair.
+ *
+ *		We mark thread as unused to alow compilation without warning
+ *		on non-PPC platforms.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">setsigvec</span>(proc_t p, __unused thread_t thread, <span class="enscript-type">int</span> signum, <span class="enscript-type">struct</span> __kern_sigaction *sa, boolean_t in_sigstart)
+{
+	<span class="enscript-type">struct</span> sigacts *ps = p-&gt;p_sigacts;
+	<span class="enscript-type">int</span> bit;
+
+	<span class="enscript-keyword">if</span> ((signum == SIGKILL || signum == SIGSTOP) &amp;&amp;
+		sa-&gt;sa_handler != SIG_DFL)
+		<span class="enscript-keyword">return</span>(EINVAL);
+	bit = sigmask(signum);
+	<span class="enscript-comment">/*
+	 * Change setting atomically.
+	 */</span>
+	ps-&gt;ps_sigact[signum] = sa-&gt;sa_handler;
+	ps-&gt;ps_trampact[signum] = sa-&gt;sa_tramp;
+	ps-&gt;ps_catchmask[signum] = sa-&gt;sa_mask &amp;~ sigcantmask;
+	<span class="enscript-keyword">if</span> (sa-&gt;sa_flags &amp; SA_SIGINFO)
+		ps-&gt;ps_siginfo |= bit;
+	<span class="enscript-keyword">else</span>
+		ps-&gt;ps_siginfo &amp;= ~bit;
+	<span class="enscript-keyword">if</span> (sa-&gt;sa_flags &amp; SA_64REGSET)
+		ps-&gt;ps_64regset |= bit;
+	<span class="enscript-keyword">else</span>
+		ps-&gt;ps_64regset &amp;= ~bit;
+	<span class="enscript-keyword">if</span> ((sa-&gt;sa_flags &amp; SA_RESTART) == 0)
+		ps-&gt;ps_sigintr |= bit;
+	<span class="enscript-keyword">else</span>
+		ps-&gt;ps_sigintr &amp;= ~bit;
+	<span class="enscript-keyword">if</span> (sa-&gt;sa_flags &amp; SA_ONSTACK)
+		ps-&gt;ps_sigonstack |= bit;
+	<span class="enscript-keyword">else</span>
+		ps-&gt;ps_sigonstack &amp;= ~bit;
+	<span class="enscript-keyword">if</span> (sa-&gt;sa_flags &amp; SA_USERTRAMP)
+		ps-&gt;ps_usertramp |= bit;
+	<span class="enscript-keyword">else</span>
+		ps-&gt;ps_usertramp &amp;= ~bit;
+	<span class="enscript-keyword">if</span> (sa-&gt;sa_flags &amp; SA_RESETHAND)
+		ps-&gt;ps_sigreset |= bit;
+	<span class="enscript-keyword">else</span>
+		ps-&gt;ps_sigreset &amp;= ~bit;
+	<span class="enscript-keyword">if</span> (sa-&gt;sa_flags &amp; SA_NODEFER)
+		ps-&gt;ps_signodefer |= bit;
+	<span class="enscript-keyword">else</span>
+		ps-&gt;ps_signodefer &amp;= ~bit;
+	<span class="enscript-keyword">if</span> (signum == SIGCHLD) {
+		<span class="enscript-keyword">if</span> (sa-&gt;sa_flags &amp; SA_NOCLDSTOP)
+			OSBitOrAtomic(P_NOCLDSTOP, &amp;p-&gt;p_flag);
+		<span class="enscript-keyword">else</span>
+			OSBitAndAtomic(~((uint32_t)P_NOCLDSTOP), &amp;p-&gt;p_flag);
+		<span class="enscript-keyword">if</span> ((sa-&gt;sa_flags &amp; SA_NOCLDWAIT) || (sa-&gt;sa_handler == SIG_IGN))
+			OSBitOrAtomic(P_NOCLDWAIT, &amp;p-&gt;p_flag);
+		<span class="enscript-keyword">else</span>
+			OSBitAndAtomic(~((uint32_t)P_NOCLDWAIT), &amp;p-&gt;p_flag);
+	}
+
+	<span class="enscript-comment">/*
+	 * Set bit in p_sigignore for signals that are set to SIG_IGN,
+	 * and for signals set to SIG_DFL where the default is to ignore.
+	 * However, don't put SIGCONT in p_sigignore,
+	 * as we have to restart the process.
+	 */</span>
+	<span class="enscript-keyword">if</span> (sa-&gt;sa_handler == SIG_IGN ||
+	    (sigprop[signum] &amp; SA_IGNORE &amp;&amp; sa-&gt;sa_handler == SIG_DFL)) {
+
+		clear_procsiglist(p, bit, in_sigstart);
+		<span class="enscript-keyword">if</span> (signum != SIGCONT)
+			p-&gt;p_sigignore |= bit;	<span class="enscript-comment">/* easier in psignal */</span>
+		p-&gt;p_sigcatch &amp;= ~bit;
+	} <span class="enscript-keyword">else</span> {
+		p-&gt;p_sigignore &amp;= ~bit;
+		<span class="enscript-keyword">if</span> (sa-&gt;sa_handler == SIG_DFL)
+			p-&gt;p_sigcatch &amp;= ~bit;
+		<span class="enscript-keyword">else</span>
+			p-&gt;p_sigcatch |= bit;
+	}
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/*
+ * Initialize signal state for process 0;
+ * set to ignore signals that are ignored by default.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">siginit</span>(proc_t p)
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">for</span> (i = 1; i &lt; NSIG; i++)
+		<span class="enscript-keyword">if</span> (sigprop[i] &amp; SA_IGNORE &amp;&amp; i != SIGCONT)
+			p-&gt;p_sigignore |= sigmask(i);
+}
+
+<span class="enscript-comment">/*
+ * Reset signals for an exec of the specified process.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">execsigs</span>(proc_t p, thread_t thread)
+{
+	<span class="enscript-type">struct</span> sigacts *ps = p-&gt;p_sigacts;
+	<span class="enscript-type">int</span> nc, mask;
+	<span class="enscript-type">struct</span> uthread *ut;
+
+	ut = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(thread);
+
+	<span class="enscript-comment">/*
+	 * transfer saved signal states from the process
+	 * back to the current thread.
+	 *
+	 * NOTE: We do this without the process locked,
+	 * because we are guaranteed to be single-threaded
+	 * by this point in exec and the p_siglist is
+	 * only accessed by threads inside the process.
+	 */</span>
+	ut-&gt;uu_siglist |= p-&gt;p_siglist;
+	p-&gt;p_siglist = 0;
+
+	<span class="enscript-comment">/*
+	 * Reset caught signals.  Held signals remain held
+	 * through p_sigmask (unless they were caught,
+	 * and are now ignored by default).
+	 */</span>
+	<span class="enscript-keyword">while</span> (p-&gt;p_sigcatch) {
+		nc = ffs((<span class="enscript-type">long</span>)p-&gt;p_sigcatch);
+		mask = sigmask(nc);
+		p-&gt;p_sigcatch &amp;= ~mask;
+		<span class="enscript-keyword">if</span> (sigprop[nc] &amp; SA_IGNORE) {
+			<span class="enscript-keyword">if</span> (nc != SIGCONT)
+				p-&gt;p_sigignore |= mask;
+			ut-&gt;uu_siglist &amp;= ~mask;
+		}
+		ps-&gt;ps_sigact[nc] = SIG_DFL;
+	}
+
+	<span class="enscript-comment">/*
+	 * Reset stack state to the user stack.
+	 * Clear set of signals caught on the signal stack.
+	 */</span>
+	<span class="enscript-comment">/* thread */</span>
+	ut-&gt;uu_sigstk.ss_flags = SA_DISABLE;
+	ut-&gt;uu_sigstk.ss_size = 0;
+	ut-&gt;uu_sigstk.ss_sp = USER_ADDR_NULL;
+	ut-&gt;uu_flag &amp;= ~UT_ALTSTACK;
+	<span class="enscript-comment">/* process */</span>
+	ps-&gt;ps_sigonstack = 0;
+}
+
+<span class="enscript-comment">/*
+ * Manipulate signal mask.
+ * Note that we receive new mask, not pointer,
+ * and return old mask as return value;
+ * the library stub does the rest.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sigprocmask</span>(proc_t p, <span class="enscript-type">struct</span> sigprocmask_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-type">int</span> error = 0;
+	sigset_t oldmask, nmask;
+	user_addr_t omask = uap-&gt;omask;
+	<span class="enscript-type">struct</span> uthread *ut;
+
+	ut = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(current_thread());
+	oldmask  = ut-&gt;uu_sigmask;
+
+	<span class="enscript-keyword">if</span> (uap-&gt;mask == USER_ADDR_NULL) {
+		<span class="enscript-comment">/* just want old mask */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	error = copyin(uap-&gt;mask, &amp;nmask, <span class="enscript-keyword">sizeof</span>(sigset_t));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	<span class="enscript-keyword">switch</span> (uap-&gt;how) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIG_BLOCK</span>:
+		block_procsigmask(p, (nmask &amp; ~sigcantmask));
+		signal_setast(current_thread());
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIG_UNBLOCK</span>:
+		unblock_procsigmask(p, (nmask &amp; ~sigcantmask));
+		signal_setast(current_thread());
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIG_SETMASK</span>:
+		set_procsigmask(p, (nmask &amp; ~sigcantmask));
+		signal_setast(current_thread());
+		<span class="enscript-keyword">break</span>;
+	
+	<span class="enscript-reference">default</span>:
+		error = EINVAL;
+		<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (!error &amp;&amp; omask != USER_ADDR_NULL)
+		copyout(&amp;oldmask, omask, <span class="enscript-keyword">sizeof</span>(sigset_t));
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sigpending</span>(__unused proc_t p, <span class="enscript-type">struct</span> sigpending_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-type">struct</span> uthread *ut;
+	sigset_t pendlist;
+
+	ut = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(current_thread());
+	pendlist = ut-&gt;uu_siglist;
+
+	<span class="enscript-keyword">if</span> (uap-&gt;osv)
+		copyout(&amp;pendlist, uap-&gt;osv, <span class="enscript-keyword">sizeof</span>(sigset_t));
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/*
+ * Suspend process until signal, providing mask to be set
+ * in the meantime.  Note nonstandard calling convention:
+ * libc stub passes mask, not pointer, to save a copyin.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sigcontinue</span>(__unused <span class="enscript-type">int</span> error)
+{
+<span class="enscript-comment">//	struct uthread *ut = get_bsdthread_info(current_thread());
+</span>	unix_syscall_return(EINTR);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sigsuspend</span>(proc_t p, <span class="enscript-type">struct</span> sigsuspend_args *uap, int32_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span>(sigsuspend_nocancel(p, (<span class="enscript-type">struct</span> sigsuspend_nocancel_args *)uap, retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sigsuspend_nocancel</span>(proc_t p, <span class="enscript-type">struct</span> sigsuspend_nocancel_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-type">struct</span> uthread *ut;
+
+	ut = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(current_thread());
+
+	<span class="enscript-comment">/*
+	 * When returning from sigpause, we want
+	 * the old mask to be restored after the
+	 * signal handler has finished.  Thus, we
+	 * save it here and mark the sigacts structure
+	 * to indicate this.
+	 */</span>
+	ut-&gt;uu_oldmask = ut-&gt;uu_sigmask;
+	ut-&gt;uu_flag |= UT_SAS_OLDMASK;
+	ut-&gt;uu_sigmask = (uap-&gt;mask &amp; ~sigcantmask);
+	(<span class="enscript-type">void</span>) tsleep0((caddr_t) p, PPAUSE|PCATCH, <span class="enscript-string">&quot;pause&quot;</span>, 0, sigcontinue);
+	<span class="enscript-comment">/* always return EINTR rather than ERESTART... */</span>
+	<span class="enscript-keyword">return</span> (EINTR);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">__disable_threadsignal</span>(__unused proc_t p,
+		       __unused <span class="enscript-type">struct</span> __disable_threadsignal_args *uap,
+		       __unused int32_t *retval)
+{
+	<span class="enscript-type">struct</span> uthread *uth;
+
+	uth = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(current_thread());
+
+	<span class="enscript-comment">/* No longer valid to have any signal delivered */</span>
+	uth-&gt;uu_flag |= (UT_NO_SIGMASK | UT_CANCELDISABLE);
+
+	<span class="enscript-keyword">return</span>(0);
+
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">__pthread_testcancel</span>(<span class="enscript-type">int</span> presyscall)
+{
+
+	thread_t self = current_thread();
+	<span class="enscript-type">struct</span> uthread * uthread;
+
+	uthread = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(self);
+
+	
+	uthread-&gt;uu_flag &amp;= ~UT_NOTCANCELPT;
+
+	<span class="enscript-keyword">if</span> ((uthread-&gt;uu_flag &amp; (UT_CANCELDISABLE | UT_CANCEL | UT_CANCELED)) == UT_CANCEL) {
+		<span class="enscript-keyword">if</span>(presyscall != 0) {
+			unix_syscall_return(EINTR);
+			<span class="enscript-comment">/* NOTREACHED */</span>
+		} <span class="enscript-keyword">else</span> 
+			thread_abort_safely(self);
+	}
+}
+
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">__pthread_markcancel</span>(__unused proc_t p,
+	<span class="enscript-type">struct</span> __pthread_markcancel_args *uap, __unused int32_t *retval)
+{
+	thread_act_t target_act;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> uthread *uth;
+
+	target_act = (thread_act_t)port_name_to_thread(uap-&gt;thread_port);
+
+	<span class="enscript-keyword">if</span> (target_act == THR_ACT_NULL)
+		<span class="enscript-keyword">return</span> (ESRCH);
+
+	uth = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(target_act);
+
+	<span class="enscript-comment">/* if the thread is in vfork do not cancel */</span>
+	<span class="enscript-keyword">if</span> ((uth-&gt;uu_flag &amp; (UT_VFORK | UT_CANCEL | UT_CANCELED )) == 0) {
+		uth-&gt;uu_flag |= (UT_CANCEL | UT_NO_SIGMASK);
+		<span class="enscript-keyword">if</span> (((uth-&gt;uu_flag &amp; UT_NOTCANCELPT) == 0) 
+			&amp;&amp; ((uth-&gt;uu_flag &amp; UT_CANCELDISABLE) == 0))
+				thread_abort_safely(target_act);
+	}
+
+	thread_deallocate(target_act);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/* if action =0 ; return the cancellation state , 
+ *      if marked for cancellation, make the thread canceled
+ * if action = 1 ; Enable the cancel handling
+ * if action = 2; Disable the cancel handling
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">__pthread_canceled</span>(__unused proc_t p,
+	<span class="enscript-type">struct</span> __pthread_canceled_args *uap, __unused int32_t *retval)
+{
+	thread_act_t thread;
+	<span class="enscript-type">struct</span> uthread *uth;
+	<span class="enscript-type">int</span> action = uap-&gt;action;
+
+	thread = current_thread();
+	uth = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(thread);
+
+	<span class="enscript-keyword">switch</span> (action) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">1</span>:
+			uth-&gt;uu_flag &amp;= ~UT_CANCELDISABLE;
+			<span class="enscript-keyword">return</span>(0);
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">2</span>:
+			uth-&gt;uu_flag |= UT_CANCELDISABLE;
+			<span class="enscript-keyword">return</span>(0);
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-comment">/* if the thread is in vfork do not cancel */</span>
+			<span class="enscript-keyword">if</span>((uth-&gt;uu_flag &amp; ( UT_CANCELDISABLE | UT_CANCEL | UT_CANCELED)) == UT_CANCEL) {
+				uth-&gt;uu_flag &amp;= ~UT_CANCEL;
+				uth-&gt;uu_flag |= (UT_CANCELED | UT_NO_SIGMASK);
+				<span class="enscript-keyword">return</span>(0);
+			}
+			<span class="enscript-keyword">return</span>(EINVAL);
+	}	 	
+	<span class="enscript-keyword">return</span>(EINVAL);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">__posix_sem_syscall_return</span>(kern_return_t kern_result) 
+{
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-keyword">if</span> (kern_result == KERN_SUCCESS)
+		error = 0;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kern_result == KERN_ABORTED)
+		error = EINTR;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kern_result == KERN_OPERATION_TIMED_OUT) 
+		error = ETIMEDOUT;
+	<span class="enscript-keyword">else</span>
+		error = EINVAL;
+	unix_syscall_return(error);
+	<span class="enscript-comment">/* does not return */</span>
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">OLD_SEMWAIT_SIGNAL</span>
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINTR
+ *		ETIMEDOUT
+ *		EINVAL
+ *      EFAULT if timespec is NULL
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">__old_semwait_signal</span>(proc_t p, <span class="enscript-type">struct</span> __old_semwait_signal_args *uap,
+                     int32_t *retval)
+{
+	__pthread_testcancel(0);
+	<span class="enscript-keyword">return</span>(__old_semwait_signal_nocancel(p, (<span class="enscript-type">struct</span> __old_semwait_signal_nocancel_args *)uap, retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">__old_semwait_signal_nocancel</span>(proc_t p, <span class="enscript-type">struct</span> __old_semwait_signal_nocancel_args *uap,
+                              __unused int32_t *retval)
+{
+	
+	kern_return_t kern_result;
+	<span class="enscript-type">int</span> error;
+	mach_timespec_t then;
+	<span class="enscript-type">struct</span> timespec now;
+	<span class="enscript-type">struct</span> user_timespec ts;
+	boolean_t truncated_timeout = FALSE;
+	
+	<span class="enscript-keyword">if</span>(uap-&gt;timeout) {
+		
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+			<span class="enscript-type">struct</span> user64_timespec ts64;
+			error = copyin(uap-&gt;ts, &amp;ts64, <span class="enscript-keyword">sizeof</span>(ts64));
+			ts.tv_sec = ts64.tv_sec;
+			ts.tv_nsec = ts64.tv_nsec;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">struct</span> user32_timespec ts32;
+			error = copyin(uap-&gt;ts, &amp;ts32, <span class="enscript-keyword">sizeof</span>(ts32));
+			ts.tv_sec = ts32.tv_sec;
+			ts.tv_nsec = ts32.tv_nsec;
+		}
+		
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">return</span> error;
+		}
+		
+		<span class="enscript-keyword">if</span> ((ts.tv_sec &amp; 0xFFFFFFFF00000000ULL) != 0) {
+			ts.tv_sec = 0xFFFFFFFF;
+			ts.tv_nsec = 0;
+			truncated_timeout = TRUE;
+		}
+		
+		<span class="enscript-keyword">if</span> (uap-&gt;relative) {
+			then.tv_sec = ts.tv_sec;
+			then.tv_nsec = ts.tv_nsec;
+		} <span class="enscript-keyword">else</span> {
+			nanotime(&amp;now);
+			
+			<span class="enscript-comment">/* if time has elapsed, set time to null timepsec to bailout rightaway */</span>
+			<span class="enscript-keyword">if</span> (now.tv_sec == ts.tv_sec ?
+				now.tv_nsec &gt; ts.tv_nsec :
+				now.tv_sec &gt; ts.tv_sec) {
+				then.tv_sec = 0;
+				then.tv_nsec = 0;
+			} <span class="enscript-keyword">else</span> {
+				then.tv_sec = ts.tv_sec - now.tv_sec;
+				then.tv_nsec = ts.tv_nsec - now.tv_nsec;
+				<span class="enscript-keyword">if</span> (then.tv_nsec &lt; 0) {
+					then.tv_nsec += NSEC_PER_SEC;
+					then.tv_sec--; 
+				}
+			}
+		}
+		
+		<span class="enscript-keyword">if</span> (uap-&gt;mutex_sem == 0)
+			kern_result = semaphore_timedwait_trap_internal((mach_port_name_t)uap-&gt;cond_sem, then.tv_sec, then.tv_nsec, __posix_sem_syscall_return);
+		<span class="enscript-keyword">else</span>
+			kern_result = semaphore_timedwait_signal_trap_internal(uap-&gt;cond_sem, uap-&gt;mutex_sem, then.tv_sec, then.tv_nsec, __posix_sem_syscall_return);
+		
+	} <span class="enscript-keyword">else</span> {
+		
+		<span class="enscript-keyword">if</span> (uap-&gt;mutex_sem == 0)
+			kern_result = semaphore_wait_trap_internal(uap-&gt;cond_sem, __posix_sem_syscall_return);
+		<span class="enscript-keyword">else</span>
+			
+			kern_result = semaphore_wait_signal_trap_internal(uap-&gt;cond_sem, uap-&gt;mutex_sem, __posix_sem_syscall_return);
+	}
+	
+	<span class="enscript-keyword">if</span> (kern_result == KERN_SUCCESS &amp;&amp; !truncated_timeout)
+		<span class="enscript-keyword">return</span>(0);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kern_result == KERN_SUCCESS &amp;&amp; truncated_timeout)
+		<span class="enscript-keyword">return</span>(EINTR); <span class="enscript-comment">/* simulate an exceptional condition because Mach doesn't support a longer timeout */</span>
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kern_result == KERN_ABORTED)
+		<span class="enscript-keyword">return</span>(EINTR);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kern_result == KERN_OPERATION_TIMED_OUT) 
+		<span class="enscript-keyword">return</span>(ETIMEDOUT);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>(EINVAL);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* OLD_SEMWAIT_SIGNAL*/</span>
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINTR
+ *		ETIMEDOUT
+ *		EINVAL
+ *      EFAULT if timespec is NULL
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">__semwait_signal</span>(proc_t p, <span class="enscript-type">struct</span> __semwait_signal_args *uap,
+                     int32_t *retval)
+{
+	__pthread_testcancel(0);
+	<span class="enscript-keyword">return</span>(__semwait_signal_nocancel(p, (<span class="enscript-type">struct</span> __semwait_signal_nocancel_args *)uap, retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">__semwait_signal_nocancel</span>(__unused proc_t p, <span class="enscript-type">struct</span> __semwait_signal_nocancel_args *uap,
+                              __unused int32_t *retval)
+{
+	
+	kern_return_t kern_result;
+	mach_timespec_t then;
+	<span class="enscript-type">struct</span> timespec now;
+	<span class="enscript-type">struct</span> user_timespec ts;
+        boolean_t truncated_timeout = FALSE;
+	
+	<span class="enscript-keyword">if</span>(uap-&gt;timeout) {
+                
+		ts.tv_sec = uap-&gt;tv_sec;
+                ts.tv_nsec = uap-&gt;tv_nsec;
+
+                <span class="enscript-keyword">if</span> ((ts.tv_sec &amp; 0xFFFFFFFF00000000ULL) != 0) {
+                        ts.tv_sec = 0xFFFFFFFF;
+                        ts.tv_nsec = 0;
+                        truncated_timeout = TRUE;
+                }		
+		
+		<span class="enscript-keyword">if</span> (uap-&gt;relative) {
+			then.tv_sec = ts.tv_sec;
+			then.tv_nsec = ts.tv_nsec;
+		} <span class="enscript-keyword">else</span> {
+			nanotime(&amp;now);
+
+                        <span class="enscript-comment">/* if time has elapsed, set time to null timepsec to bailout rightaway */</span>
+                        <span class="enscript-keyword">if</span> (now.tv_sec == ts.tv_sec ?
+                                now.tv_nsec &gt; ts.tv_nsec :
+                                now.tv_sec &gt; ts.tv_sec) {
+                                then.tv_sec = 0;
+                                then.tv_nsec = 0;
+                        } <span class="enscript-keyword">else</span> {
+                                then.tv_sec = ts.tv_sec - now.tv_sec;
+                                then.tv_nsec = ts.tv_nsec - now.tv_nsec;
+                                <span class="enscript-keyword">if</span> (then.tv_nsec &lt; 0) {
+                                        then.tv_nsec += NSEC_PER_SEC;
+                                        then.tv_sec--;
+                                }
+                        }
+		}
+					
+		<span class="enscript-keyword">if</span> (uap-&gt;mutex_sem == 0)
+			kern_result = semaphore_timedwait_trap_internal((mach_port_name_t)uap-&gt;cond_sem, then.tv_sec, then.tv_nsec, __posix_sem_syscall_return);
+		<span class="enscript-keyword">else</span>
+			kern_result = semaphore_timedwait_signal_trap_internal(uap-&gt;cond_sem, uap-&gt;mutex_sem, then.tv_sec, then.tv_nsec, __posix_sem_syscall_return);
+		
+	} <span class="enscript-keyword">else</span> {
+		
+		<span class="enscript-keyword">if</span> (uap-&gt;mutex_sem == 0)
+			kern_result = semaphore_wait_trap_internal(uap-&gt;cond_sem, __posix_sem_syscall_return);
+		<span class="enscript-keyword">else</span>
+			
+			kern_result = semaphore_wait_signal_trap_internal(uap-&gt;cond_sem, uap-&gt;mutex_sem, __posix_sem_syscall_return);
+	}
+	
+	<span class="enscript-keyword">if</span> (kern_result == KERN_SUCCESS &amp;&amp; !truncated_timeout)
+                <span class="enscript-keyword">return</span>(0);
+        <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kern_result == KERN_SUCCESS &amp;&amp; truncated_timeout)
+                <span class="enscript-keyword">return</span>(EINTR); <span class="enscript-comment">/* simulate an exceptional condition because Mach doesn't support a longer timeout */</span>
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kern_result == KERN_ABORTED)
+		<span class="enscript-keyword">return</span>(EINTR);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kern_result == KERN_OPERATION_TIMED_OUT) 
+		<span class="enscript-keyword">return</span>(ETIMEDOUT);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>(EINVAL);
+}
+
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">__pthread_kill</span>(__unused proc_t p, <span class="enscript-type">struct</span> __pthread_kill_args *uap,
+	       __unused int32_t *retval) 
+{
+	thread_t target_act;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> signum = uap-&gt;sig;
+	<span class="enscript-type">struct</span> uthread *uth;
+
+	target_act = (thread_t)port_name_to_thread(uap-&gt;thread_port);
+
+	<span class="enscript-keyword">if</span> (target_act == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (ESRCH);
+	<span class="enscript-keyword">if</span> ((u_int)signum &gt;= NSIG) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	uth = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(target_act);
+
+	<span class="enscript-keyword">if</span> (uth-&gt;uu_flag &amp; UT_NO_SIGMASK) {
+		error = ESRCH;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (signum)
+		psignal_uthread(target_act, signum);
+<span class="enscript-reference">out</span>:
+	thread_deallocate(target_act);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">__pthread_sigmask</span>(__unused proc_t p, <span class="enscript-type">struct</span> __pthread_sigmask_args *uap,
+		  __unused int32_t *retval)
+{
+	user_addr_t set = uap-&gt;set;
+	user_addr_t oset = uap-&gt;oset;
+	sigset_t nset;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> uthread *ut;
+	sigset_t  oldset;
+
+	ut = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(current_thread());
+	oldset = ut-&gt;uu_sigmask;
+
+	<span class="enscript-keyword">if</span> (set == USER_ADDR_NULL) {
+		<span class="enscript-comment">/* need only old mask */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	error = copyin(set, &amp;nset, <span class="enscript-keyword">sizeof</span>(sigset_t));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	<span class="enscript-keyword">switch</span> (uap-&gt;how) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIG_BLOCK</span>:
+		ut-&gt;uu_sigmask |= (nset &amp; ~sigcantmask);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIG_UNBLOCK</span>:
+		ut-&gt;uu_sigmask &amp;= ~(nset);
+		signal_setast(current_thread());
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIG_SETMASK</span>:
+		ut-&gt;uu_sigmask = (nset &amp; ~sigcantmask);
+		signal_setast(current_thread());
+		<span class="enscript-keyword">break</span>;
+	
+	<span class="enscript-reference">default</span>:
+		error = EINVAL;
+
+	}
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (!error &amp;&amp; oset != USER_ADDR_NULL)
+		copyout(&amp;oldset, oset, <span class="enscript-keyword">sizeof</span>(sigset_t));
+
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINVAL
+ *	copyin:EFAULT
+ *	copyout:EFAULT
+ */</span>
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">__sigwait</span>(proc_t p, <span class="enscript-type">struct</span> __sigwait_args *uap, int32_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span>(__sigwait_nocancel(p, (<span class="enscript-type">struct</span> __sigwait_nocancel_args *)uap, retval));
+}
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">__sigwait_nocancel</span>(proc_t p, <span class="enscript-type">struct</span> __sigwait_nocancel_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-type">struct</span> uthread *ut;
+	<span class="enscript-type">struct</span> uthread *uth;
+	<span class="enscript-type">int</span> error = 0;
+	sigset_t mask;
+	sigset_t siglist;
+	sigset_t sigw=0;
+	<span class="enscript-type">int</span> signum;
+
+	ut = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(current_thread());
+
+	<span class="enscript-keyword">if</span> (uap-&gt;set == USER_ADDR_NULL)
+		<span class="enscript-keyword">return</span>(EINVAL);
+
+	error = copyin(uap-&gt;set, &amp;mask, <span class="enscript-keyword">sizeof</span>(sigset_t));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span>(error);
+
+	siglist = (mask &amp; ~sigcantmask);
+
+	<span class="enscript-keyword">if</span> (siglist == 0)
+		<span class="enscript-keyword">return</span>(EINVAL);
+
+	proc_lock(p);
+	<span class="enscript-keyword">if</span> ((p-&gt;p_lflag &amp; P_LINVFORK) &amp;&amp; p-&gt;p_vforkact) {
+		proc_unlock(p);
+		<span class="enscript-keyword">return</span>(EINVAL);
+	} <span class="enscript-keyword">else</span> {
+		proc_signalstart(p, 1);
+		TAILQ_FOREACH(uth, &amp;p-&gt;p_uthlist, uu_list) {
+			<span class="enscript-keyword">if</span> ( (sigw = uth-&gt;uu_siglist &amp; siglist) ) {
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+		proc_signalend(p, 1);
+	}
+
+	<span class="enscript-keyword">if</span> (sigw) {
+		<span class="enscript-comment">/* The signal was pending on a thread */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">sigwait1</span>;
+	}
+	<span class="enscript-comment">/*
+	 * When returning from sigwait, we want
+	 * the old mask to be restored after the
+	 * signal handler has finished.  Thus, we
+	 * save it here and mark the sigacts structure
+	 * to indicate this.
+	 */</span>
+	uth = ut;		<span class="enscript-comment">/* wait for it to be delivered to us */</span>
+	ut-&gt;uu_oldmask = ut-&gt;uu_sigmask;
+	ut-&gt;uu_flag |= UT_SAS_OLDMASK;
+	<span class="enscript-keyword">if</span> (siglist == (sigset_t)0) {
+		proc_unlock(p);
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+	<span class="enscript-comment">/* SIGKILL and SIGSTOP are not maskable as well */</span>
+	ut-&gt;uu_sigmask = ~(siglist|sigcantmask);
+	ut-&gt;uu_sigwait = siglist; 
+
+	<span class="enscript-comment">/* No Continuations for now */</span>
+	error =  msleep((caddr_t)&amp;ut-&gt;uu_sigwait, &amp;p-&gt;p_mlock, PPAUSE|PCATCH, <span class="enscript-string">&quot;pause&quot;</span>, 0);
+
+	<span class="enscript-keyword">if</span> (error == ERESTART)
+		error = 0;
+
+	sigw = (ut-&gt;uu_sigwait &amp; siglist);
+	ut-&gt;uu_sigmask = ut-&gt;uu_oldmask;
+	ut-&gt;uu_oldmask = 0;
+	ut-&gt;uu_flag &amp;= ~UT_SAS_OLDMASK;
+<span class="enscript-reference">sigwait1</span>:
+	ut-&gt;uu_sigwait = 0;
+	<span class="enscript-keyword">if</span> (!error) {
+		signum = ffs((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)sigw);
+		<span class="enscript-keyword">if</span> (!signum)
+			panic(<span class="enscript-string">&quot;sigwait with no signal wakeup&quot;</span>);
+		<span class="enscript-comment">/* Clear the pending signal in the thread it was delivered */</span>
+		uth-&gt;uu_siglist &amp;= ~(sigmask(signum));
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+		DTRACE_PROC2(signal__clear, <span class="enscript-type">int</span>, signum, siginfo_t *, &amp;(ut-&gt;t_dtrace_siginfo));
+#<span class="enscript-reference">endif</span>
+
+		proc_unlock(p);
+		<span class="enscript-keyword">if</span> (uap-&gt;sig != USER_ADDR_NULL)
+				error = copyout(&amp;signum, uap-&gt;sig, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+	} <span class="enscript-keyword">else</span>
+		proc_unlock(p);
+
+	<span class="enscript-keyword">return</span>(error);
+
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sigaltstack</span>(__unused proc_t p, <span class="enscript-type">struct</span> sigaltstack_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-type">struct</span> kern_sigaltstack ss;
+	<span class="enscript-type">struct</span> kern_sigaltstack *pstk;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> uthread *uth;
+	<span class="enscript-type">int</span> onstack;
+
+	uth = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(current_thread());
+
+	pstk = &amp;uth-&gt;uu_sigstk;
+	<span class="enscript-keyword">if</span> ((uth-&gt;uu_flag &amp; UT_ALTSTACK) == 0)
+		uth-&gt;uu_sigstk.ss_flags |= SA_DISABLE;
+	onstack = pstk-&gt;ss_flags &amp; SA_ONSTACK;
+	<span class="enscript-keyword">if</span> (uap-&gt;oss) {
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+			<span class="enscript-type">struct</span> user64_sigaltstack ss64;
+			sigaltstack_kern_to_user64(pstk, &amp;ss64);			
+			error = copyout(&amp;ss64, uap-&gt;oss, <span class="enscript-keyword">sizeof</span>(ss64));
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">struct</span> user32_sigaltstack ss32;
+			sigaltstack_kern_to_user32(pstk, &amp;ss32);			
+			error = copyout(&amp;ss32, uap-&gt;oss, <span class="enscript-keyword">sizeof</span>(ss32));
+		}
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+	}
+	<span class="enscript-keyword">if</span> (uap-&gt;nss == USER_ADDR_NULL)
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+		<span class="enscript-type">struct</span> user64_sigaltstack ss64;
+		error = copyin(uap-&gt;nss, &amp;ss64, <span class="enscript-keyword">sizeof</span>(ss64));
+		sigaltstack_user64_to_kern(&amp;ss64, &amp;ss);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> user32_sigaltstack ss32;
+		error = copyin(uap-&gt;nss, &amp;ss32, <span class="enscript-keyword">sizeof</span>(ss32));
+		sigaltstack_user32_to_kern(&amp;ss32, &amp;ss);
+	}
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+	<span class="enscript-keyword">if</span> ((ss.ss_flags &amp; ~SA_DISABLE) != 0)  {
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+
+	<span class="enscript-keyword">if</span> (ss.ss_flags &amp; SA_DISABLE) {
+		<span class="enscript-comment">/* if we are here we are not in the signal handler ;so no need to check */</span>
+		<span class="enscript-keyword">if</span> (uth-&gt;uu_sigstk.ss_flags &amp; SA_ONSTACK)
+			<span class="enscript-keyword">return</span> (EINVAL);
+		uth-&gt;uu_flag &amp;= ~UT_ALTSTACK;
+		uth-&gt;uu_sigstk.ss_flags = ss.ss_flags;
+		<span class="enscript-keyword">return</span> (0);
+	}
+	<span class="enscript-keyword">if</span> (onstack)
+		<span class="enscript-keyword">return</span> (EPERM);
+<span class="enscript-comment">/* The older stacksize was 8K, enforce that one so no compat problems */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">OLDMINSIGSTKSZ</span> 8*1024
+	<span class="enscript-keyword">if</span> (ss.ss_size &lt; OLDMINSIGSTKSZ)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	uth-&gt;uu_flag |= UT_ALTSTACK;
+	uth-&gt;uu_sigstk= ss;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kill</span>(proc_t cp, <span class="enscript-type">struct</span> kill_args *uap, __unused int32_t *retval)
+{
+	proc_t p;
+	kauth_cred_t uc = kauth_cred_get();
+	<span class="enscript-type">int</span> posix = uap-&gt;posix;		<span class="enscript-comment">/* !0 if posix behaviour desired */</span>
+
+       AUDIT_ARG(pid, uap-&gt;pid);
+       AUDIT_ARG(signum, uap-&gt;signum);
+
+	<span class="enscript-keyword">if</span> ((u_int)uap-&gt;signum &gt;= NSIG)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">if</span> (uap-&gt;pid &gt; 0) {
+		<span class="enscript-comment">/* kill single process */</span>
+		<span class="enscript-keyword">if</span> ((p = proc_find(uap-&gt;pid)) == NULL) {
+			<span class="enscript-keyword">if</span> ((p = pzfind(uap-&gt;pid)) != NULL) {
+				<span class="enscript-comment">/*
+				 * IEEE Std 1003.1-2001: return success
+				 * when killing a zombie.
+				 */</span>
+				<span class="enscript-keyword">return</span> (0);
+			}
+			<span class="enscript-keyword">return</span> (ESRCH);
+		}
+		AUDIT_ARG(process, p);
+		<span class="enscript-keyword">if</span> (!cansignal(cp, uc, p, uap-&gt;signum, 0)) {
+			proc_rele(p);
+			<span class="enscript-keyword">return</span>(EPERM);
+		}
+		<span class="enscript-keyword">if</span> (uap-&gt;signum)
+			psignal(p, uap-&gt;signum);
+		proc_rele(p);
+		<span class="enscript-keyword">return</span> (0);
+	}
+	<span class="enscript-keyword">switch</span> (uap-&gt;pid) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">-1</span>:		<span class="enscript-comment">/* broadcast signal */</span>
+		<span class="enscript-keyword">return</span> (killpg1(cp, uap-&gt;signum, 0, 1, posix));
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:			<span class="enscript-comment">/* signal own process group */</span>
+		<span class="enscript-keyword">return</span> (killpg1(cp, uap-&gt;signum, 0, 0, posix));
+	<span class="enscript-reference">default</span>:		<span class="enscript-comment">/* negative explicit process group */</span>
+		<span class="enscript-keyword">return</span> (killpg1(cp, uap-&gt;signum, -(uap-&gt;pid), 0, posix));
+	}
+	<span class="enscript-comment">/* NOTREACHED */</span>
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">killpg1_filt</span>(proc_t p, <span class="enscript-type">void</span> * arg)
+{
+	<span class="enscript-type">struct</span> killpg1_filtargs * kfargp = (<span class="enscript-type">struct</span> killpg1_filtargs *)arg;
+	proc_t cp = kfargp-&gt;cp;
+	<span class="enscript-type">int</span> posix = kfargp-&gt;posix;
+
+
+	<span class="enscript-keyword">if</span> (p-&gt;p_pid &lt;= 1 || p-&gt;p_flag &amp; P_SYSTEM ||
+		(!posix &amp;&amp; p == cp))
+		<span class="enscript-keyword">return</span>(0);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>(1);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">killpg1_pgrpfilt</span>(proc_t p, __unused <span class="enscript-type">void</span> * arg)
+{
+        <span class="enscript-keyword">if</span> (p-&gt;p_pid &lt;= 1 || p-&gt;p_flag &amp; P_SYSTEM ||
+                (p-&gt;p_stat == SZOMB))
+                <span class="enscript-keyword">return</span>(0);
+        <span class="enscript-keyword">else</span>
+                <span class="enscript-keyword">return</span>(1);
+}
+
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">killpg1_callback</span>(proc_t p, <span class="enscript-type">void</span> * arg)
+{
+	<span class="enscript-type">struct</span> killpg1_iterargs * kargp = (<span class="enscript-type">struct</span> killpg1_iterargs *)arg;
+        proc_t cp = kargp-&gt;cp;
+        kauth_cred_t uc = kargp-&gt;uc;   <span class="enscript-comment">/* refcounted by the caller safe to use internal fields */</span>
+        <span class="enscript-type">int</span> signum = kargp-&gt;signum;
+	<span class="enscript-type">int</span> * nfoundp = kargp-&gt;nfoundp;
+	<span class="enscript-type">int</span> n;
+	<span class="enscript-type">int</span> zombie = 0;
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-keyword">if</span> ((kargp-&gt;zombie != 0) &amp;&amp; ((p-&gt;p_listflag &amp; P_LIST_EXITED) == P_LIST_EXITED))
+		zombie = 1;
+
+	<span class="enscript-keyword">if</span> (zombie != 0) {
+		proc_list_lock();
+		error = cansignal(cp, uc, p, signum, zombie);
+		proc_list_unlock();
+	
+		<span class="enscript-keyword">if</span> (error != 0 &amp;&amp; nfoundp != NULL) {
+			n = *nfoundp;
+			*nfoundp = n+1;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (cansignal(cp, uc, p, signum, 0) == 0)
+			<span class="enscript-keyword">return</span>(PROC_RETURNED);
+
+		<span class="enscript-keyword">if</span> (nfoundp != NULL) {
+			n = *nfoundp;
+			*nfoundp = n+1;
+		}
+		<span class="enscript-keyword">if</span> (signum != 0)
+			psignal(p, signum);
+	}
+
+	<span class="enscript-keyword">return</span>(PROC_RETURNED);
+}
+
+<span class="enscript-comment">/*
+ * Common code for kill process group/broadcast kill.
+ * cp is calling process.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">killpg1</span>(proc_t cp, <span class="enscript-type">int</span> signum, <span class="enscript-type">int</span> pgid, <span class="enscript-type">int</span> all, <span class="enscript-type">int</span> posix)
+{
+	kauth_cred_t uc;
+	<span class="enscript-type">struct</span> pgrp *pgrp;
+	<span class="enscript-type">int</span> nfound = 0;
+	<span class="enscript-type">struct</span> killpg1_iterargs karg;
+	<span class="enscript-type">struct</span> killpg1_filtargs kfarg;
+	<span class="enscript-type">int</span> error = 0;
+	
+	uc = kauth_cred_proc_ref(cp);
+	<span class="enscript-keyword">if</span> (all) {
+		<span class="enscript-comment">/* 
+		 * broadcast 
+		 */</span>
+		kfarg.posix = posix;
+		kfarg.cp = cp;
+
+		karg.cp = cp;
+		karg.uc = uc;
+		karg.nfoundp = &amp;nfound;
+		karg.signum = signum;
+		karg.zombie = 1;
+
+		proc_iterate((PROC_ALLPROCLIST | PROC_ZOMBPROCLIST), killpg1_callback, &amp;karg, killpg1_filt, (<span class="enscript-type">void</span> *)&amp;kfarg);
+
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (pgid == 0) {
+			<span class="enscript-comment">/* 
+			 * zero pgid means send to my process group.
+			 */</span>
+			pgrp = proc_pgrp(cp);
+		 } <span class="enscript-keyword">else</span> {
+			pgrp = pgfind(pgid);
+			<span class="enscript-keyword">if</span> (pgrp == NULL) {
+				error = ESRCH;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+		}
+
+                karg.nfoundp = &amp;nfound;
+                karg.uc = uc;
+                karg.signum = signum;
+		karg.cp = cp;
+		karg.zombie = 0;
+
+
+		<span class="enscript-comment">/* PGRP_DROPREF drops the pgrp refernce */</span>
+		pgrp_iterate(pgrp, PGRP_BLOCKITERATE | PGRP_DROPREF, killpg1_callback, &amp;karg,
+			killpg1_pgrpfilt, NULL);
+	}
+	error =  (nfound ? 0 : (posix ? EPERM : ESRCH));
+<span class="enscript-reference">out</span>:
+	kauth_cred_unref(&amp;uc);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * Send a signal to a process group.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">gsignal</span>(<span class="enscript-type">int</span> pgid, <span class="enscript-type">int</span> signum)
+{
+	<span class="enscript-type">struct</span> pgrp *pgrp;
+
+	<span class="enscript-keyword">if</span> (pgid &amp;&amp; (pgrp = pgfind(pgid))) {
+		pgsignal(pgrp, signum, 0);
+		pg_rele(pgrp);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Send a signal to a process group.  If checkctty is 1,
+ * limit to members which have a controlling terminal.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pgsignal_filt</span>(proc_t p, <span class="enscript-type">void</span> * arg)
+{
+	<span class="enscript-type">int</span> checkctty = *(<span class="enscript-type">int</span>*)arg;
+
+	<span class="enscript-keyword">if</span> ((checkctty == 0) || p-&gt;p_flag &amp; P_CONTROLT)
+		<span class="enscript-keyword">return</span>(1);
+	<span class="enscript-keyword">else</span> 
+		<span class="enscript-keyword">return</span>(0);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pgsignal_callback</span>(proc_t p, <span class="enscript-type">void</span> * arg)
+{
+        <span class="enscript-type">int</span>  signum = *(<span class="enscript-type">int</span>*)arg;
+
+	psignal(p, signum);
+	<span class="enscript-keyword">return</span>(PROC_RETURNED);
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pgsignal</span>(<span class="enscript-type">struct</span> pgrp *pgrp, <span class="enscript-type">int</span> signum, <span class="enscript-type">int</span> checkctty)
+{
+	<span class="enscript-keyword">if</span> (pgrp != PGRP_NULL) {
+		pgrp_iterate(pgrp, PGRP_BLOCKITERATE, pgsignal_callback, &amp;signum, pgsignal_filt, &amp;checkctty);
+	}
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tty_pgsignal</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">int</span> signum, <span class="enscript-type">int</span> checkctty)
+{
+	<span class="enscript-type">struct</span> pgrp * pg;
+
+	pg = tty_pgrp(tp);
+	<span class="enscript-keyword">if</span> (pg != PGRP_NULL) {
+		pgrp_iterate(pg, PGRP_BLOCKITERATE, pgsignal_callback, &amp;signum, pgsignal_filt, &amp;checkctty);
+		pg_rele(pg);
+	}
+}
+<span class="enscript-comment">/*
+ * Send a signal caused by a trap to a specific thread.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">threadsignal</span>(thread_t sig_actthread, <span class="enscript-type">int</span> signum, mach_exception_code_t code)
+{
+	<span class="enscript-type">struct</span> uthread *uth;
+	<span class="enscript-type">struct</span> task * sig_task;
+	proc_t p;
+	<span class="enscript-type">int</span> mask;
+
+	<span class="enscript-keyword">if</span> ((u_int)signum &gt;= NSIG || signum == 0)
+		<span class="enscript-keyword">return</span>;
+
+	mask = sigmask(signum);
+	<span class="enscript-keyword">if</span> ((mask &amp; threadmask) == 0)
+		<span class="enscript-keyword">return</span>;
+	sig_task = get_threadtask(sig_actthread);
+	p = (proc_t)(get_bsdtask_info(sig_task));
+
+	uth = get_bsdthread_info(sig_actthread);
+	<span class="enscript-keyword">if</span> (uth-&gt;uu_flag &amp; UT_VFORK)
+		p = uth-&gt;uu_proc;
+
+	proc_lock(p);
+	<span class="enscript-keyword">if</span> (!(p-&gt;p_lflag &amp; P_LTRACED) &amp;&amp; (p-&gt;p_sigignore &amp; mask)) {
+		proc_unlock(p);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	uth-&gt;uu_siglist |= mask;
+	uth-&gt;uu_code = code;
+	proc_unlock(p);
+
+	<span class="enscript-comment">/* mark on process as well */</span>
+	signal_setast(sig_actthread);
+}
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">get_signalthread</span>(proc_t p, <span class="enscript-type">int</span> signum, thread_t * thr)
+{
+	<span class="enscript-type">struct</span> uthread *uth;
+	sigset_t mask = sigmask(signum);
+	thread_t sig_thread;
+	<span class="enscript-type">struct</span> task * sig_task = p-&gt;task;
+	kern_return_t kret;
+
+	*thr = THREAD_NULL;
+
+	<span class="enscript-keyword">if</span> ((p-&gt;p_lflag &amp; P_LINVFORK) &amp;&amp; p-&gt;p_vforkact) {
+		sig_thread = p-&gt;p_vforkact;	
+		kret = check_actforsig(sig_task, sig_thread, 1);
+		<span class="enscript-keyword">if</span> (kret == KERN_SUCCESS)  {
+			*thr = sig_thread;
+			<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+		}<span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">return</span>(KERN_FAILURE);
+	}
+
+	proc_lock(p);
+
+	TAILQ_FOREACH(uth, &amp;p-&gt;p_uthlist, uu_list) {
+		<span class="enscript-keyword">if</span>(((uth-&gt;uu_flag &amp; UT_NO_SIGMASK)== 0) &amp;&amp; 
+			(((uth-&gt;uu_sigmask &amp; mask) == 0) || (uth-&gt;uu_sigwait &amp; mask))) {
+			<span class="enscript-keyword">if</span> (check_actforsig(p-&gt;task, uth-&gt;uu_context.vc_thread, 1) == KERN_SUCCESS) {
+				*thr = uth-&gt;uu_context.vc_thread;
+				proc_unlock(p);
+				<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+			}
+		}
+	}
+	proc_unlock(p);
+	<span class="enscript-keyword">if</span> (get_signalact(p-&gt;task, thr, 1) == KERN_SUCCESS) {
+		<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+	}
+
+	<span class="enscript-keyword">return</span>(KERN_FAILURE);
+}
+
+<span class="enscript-comment">/*
+ * Send the signal to the process.  If the signal has an action, the action
+ * is usually performed by the target process rather than the caller; we add
+ * the signal to the set of pending signals for the process.
+ *
+ * Exceptions:
+ *   o When a stop signal is sent to a sleeping process that takes the
+ *     default action, the process is stopped without awakening it.
+ *   o SIGCONT restarts stopped processes (or puts them back to sleep)
+ *     regardless of the signal action (eg, blocked or ignored).
+ *
+ * Other ignored signals are discarded immediately.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">psignal_internal</span>(proc_t p, task_t task, thread_t thread, <span class="enscript-type">int</span> flavor, <span class="enscript-type">int</span> signum)
+{
+	<span class="enscript-type">int</span> prop;
+	user_addr_t action = USER_ADDR_NULL;
+	proc_t 		sig_proc;
+	thread_t	sig_thread;
+	<span class="enscript-type">register</span> task_t		sig_task;
+	<span class="enscript-type">int</span> mask;
+	<span class="enscript-type">struct</span> uthread *uth;
+	kern_return_t kret;
+	uid_t r_uid;
+	proc_t pp;
+	kauth_cred_t my_cred;
+
+	<span class="enscript-keyword">if</span> ((u_int)signum &gt;= NSIG || signum == 0)
+		panic(<span class="enscript-string">&quot;psignal signal number&quot;</span>);
+	mask = sigmask(signum);
+	prop = sigprop[signum];
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SIGNAL_DEBUG</span>
+        <span class="enscript-keyword">if</span>(rdebug_proc &amp;&amp; (p != PROC_NULL) &amp;&amp; (p == rdebug_proc)) {
+                ram_printf(3);
+        }
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SIGNAL_DEBUG */</span>
+
+	<span class="enscript-comment">/* catch unexpected initproc kills early for easier debuggging */</span>
+	<span class="enscript-keyword">if</span> (signum == SIGKILL &amp;&amp; p == initproc)
+		panic_plain(<span class="enscript-string">&quot;unexpected SIGKILL of %s %s&quot;</span>,
+		            (p-&gt;p_name[0] != <span class="enscript-string">'\0'</span> ? p-&gt;p_name : <span class="enscript-string">&quot;initproc&quot;</span>),
+		            ((p-&gt;p_csflags &amp; CS_KILLED) ? <span class="enscript-string">&quot;(CS_KILLED)&quot;</span> : <span class="enscript-string">&quot;&quot;</span>));
+
+	<span class="enscript-comment">/*
+	 *	We will need the task pointer later.  Grab it now to
+	 *	check for a zombie process.  Also don't send signals
+	 *	to kernel internal tasks.
+	 */</span>
+	<span class="enscript-keyword">if</span> (flavor &amp; PSIG_VFORK) {
+		sig_task = task;
+		sig_thread = thread;
+		sig_proc = p;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flavor &amp; PSIG_THREAD) {
+		sig_task = get_threadtask(thread);
+		sig_thread = thread;
+		sig_proc = (proc_t)get_bsdtask_info(sig_task);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flavor &amp; PSIG_TRY_THREAD) {
+		sig_task = p-&gt;task;
+		sig_thread = thread;
+		sig_proc = p;
+	} <span class="enscript-keyword">else</span> {
+		sig_task = p-&gt;task;
+		sig_thread = (<span class="enscript-type">struct</span> thread *)0;
+		sig_proc = p;
+	}
+
+	<span class="enscript-keyword">if</span> ((sig_task == TASK_NULL) || is_kerneltask(sig_task))
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/*
+	 * do not send signals to the process that has the thread
+	 * doing a reboot(). Not doing so will mark that thread aborted
+	 * and can cause IO failures wich will cause data loss.  There's
+	 * also no need to send a signal to a process that is in the middle
+	 * of being torn down.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ISSET(sig_proc-&gt;p_flag, P_REBOOT) ||
+	    ISSET(sig_proc-&gt;p_lflag, P_LEXIT))
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span>( (flavor &amp; (PSIG_VFORK | PSIG_THREAD)) == 0) {
+		proc_knote(sig_proc, NOTE_SIGNAL | signum);
+	}
+
+	<span class="enscript-keyword">if</span> ((flavor &amp; PSIG_LOCKED)== 0)
+		proc_signalstart(sig_proc, 0);
+
+	<span class="enscript-comment">/*
+	 *	Deliver the signal to the first thread in the task. This
+	 *	allows single threaded applications which use signals to
+	 *	be able to be linked with multithreaded libraries.  We have
+	 *	an implicit reference to the current thread, but need
+	 *	an explicit one otherwise.  The thread reference keeps
+	 *	the corresponding task data structures around too.  This
+	 *	reference is released by thread_deallocate.
+	 */</span>
+
+
+	<span class="enscript-keyword">if</span> (((flavor &amp; PSIG_VFORK) == 0) &amp;&amp; ((sig_proc-&gt;p_lflag &amp; P_LTRACED) == 0) &amp;&amp; (sig_proc-&gt;p_sigignore &amp; mask)) {
+		DTRACE_PROC3(signal__discard, thread_t, sig_thread, proc_t, sig_proc, <span class="enscript-type">int</span>, signum);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (flavor &amp; PSIG_VFORK) {
+		action = SIG_DFL;
+		act_set_astbsd(sig_thread);
+		kret = KERN_SUCCESS;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flavor &amp; PSIG_TRY_THREAD) {
+		uth = get_bsdthread_info(sig_thread);
+		<span class="enscript-keyword">if</span> (((uth-&gt;uu_flag &amp; UT_NO_SIGMASK) == 0) &amp;&amp;
+				(((uth-&gt;uu_sigmask &amp; mask) == 0) || (uth-&gt;uu_sigwait &amp; mask)) &amp;&amp;
+				((kret = check_actforsig(sig_proc-&gt;task, sig_thread, 1)) == KERN_SUCCESS)) {
+			<span class="enscript-comment">/* deliver to specified thread */</span>
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* deliver to any willing thread */</span>
+			kret = get_signalthread(sig_proc, signum, &amp;sig_thread);
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flavor &amp; PSIG_THREAD) {
+		<span class="enscript-comment">/* If successful return with ast set */</span>
+		kret = check_actforsig(sig_task, sig_thread, 1);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* If successful return with ast set */</span>
+		kret = get_signalthread(sig_proc, signum, &amp;sig_thread);
+	}
+	<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SIGNAL_DEBUG</span>
+       		ram_printf(1);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SIGNAL_DEBUG */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+	}
+
+	uth = get_bsdthread_info(sig_thread);
+
+	<span class="enscript-comment">/*
+	 * If proc is traced, always give parent a chance.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> ((flavor &amp; PSIG_VFORK) == 0) {
+		<span class="enscript-keyword">if</span> (sig_proc-&gt;p_lflag &amp; P_LTRACED)
+			action = SIG_DFL;
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * If the signal is being ignored,
+			 * then we forget about it immediately.
+			 * (Note: we don't set SIGCONT in p_sigignore,
+			 * and if it is set to SIG_IGN,
+			 * action will be SIG_DFL here.)
+			 */</span>
+			<span class="enscript-keyword">if</span> (sig_proc-&gt;p_sigignore &amp; mask)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+			<span class="enscript-keyword">if</span> (uth-&gt;uu_sigwait &amp; mask)
+				action = KERN_SIG_WAIT;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (uth-&gt;uu_sigmask &amp; mask)
+				action = KERN_SIG_HOLD;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sig_proc-&gt;p_sigcatch &amp; mask)
+				action = KERN_SIG_CATCH;
+			<span class="enscript-keyword">else</span>
+				action = SIG_DFL;
+		}
+	}
+
+	proc_lock(sig_proc);
+
+	<span class="enscript-keyword">if</span> (sig_proc-&gt;p_nice &gt; NZERO &amp;&amp; action == SIG_DFL &amp;&amp; (prop &amp; SA_KILL) &amp;&amp;
+		(sig_proc-&gt;p_lflag &amp; P_LTRACED) == 0)
+			sig_proc-&gt;p_nice = NZERO;
+
+	<span class="enscript-keyword">if</span> (prop &amp; SA_CONT)
+		uth-&gt;uu_siglist &amp;= ~stopsigmask;
+
+	<span class="enscript-keyword">if</span> (prop &amp; SA_STOP) {
+		<span class="enscript-type">struct</span> pgrp *pg;
+		<span class="enscript-comment">/*
+		 * If sending a tty stop signal to a member of an orphaned
+		 * process group, discard the signal here if the action
+		 * is default; don't stop the process below if sleeping,
+		 * and don't clear any pending SIGCONT.
+		 */</span>
+		proc_unlock(sig_proc);
+		pg = proc_pgrp(sig_proc);
+		<span class="enscript-keyword">if</span> (prop &amp; SA_TTYSTOP &amp;&amp; pg-&gt;pg_jobc == 0 &amp;&amp;
+			action == SIG_DFL) {
+			pg_rele(pg);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+		}
+		pg_rele(pg);
+		proc_lock(sig_proc);
+		uth-&gt;uu_siglist &amp;= ~contsigmask;
+	}
+
+	uth-&gt;uu_siglist |= mask;
+	<span class="enscript-comment">/* 
+	 * Repost AST incase sigthread has processed 
+	 * ast and missed signal post.
+	 */</span>
+	<span class="enscript-keyword">if</span> (action == KERN_SIG_CATCH)
+		act_set_astbsd(sig_thread);
+
+	
+	<span class="enscript-comment">/*
+	 * Defer further processing for signals which are held,
+	 * except that stopped processes must be continued by SIGCONT.
+	 */</span>
+	<span class="enscript-comment">/* vfork will not go thru as action is SIG_DFL */</span>
+	<span class="enscript-keyword">if</span> ((action == KERN_SIG_HOLD) &amp;&amp; ((prop &amp; SA_CONT) == 0 || sig_proc-&gt;p_stat != SSTOP)) {
+		proc_unlock(sig_proc);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+	}
+	<span class="enscript-comment">/*
+	 *	SIGKILL priority twiddling moved here from above because
+	 *	it needs sig_thread.  Could merge it into large switch
+	 *	below if we didn't care about priority for tracing
+	 *	as SIGKILL's action is always SIG_DFL.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((signum == SIGKILL) &amp;&amp; (sig_proc-&gt;p_nice &gt; NZERO)) {
+		sig_proc-&gt;p_nice = NZERO;
+	}
+
+	<span class="enscript-comment">/*
+	 *	Process is traced - wake it up (if not already
+	 *	stopped) so that it can discover the signal in
+	 *	issig() and stop for the parent.
+	 */</span>
+	<span class="enscript-keyword">if</span> (sig_proc-&gt;p_lflag &amp; P_LTRACED) {
+	   	<span class="enscript-keyword">if</span> (sig_proc-&gt;p_stat != SSTOP)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">runlocked</span>;
+		<span class="enscript-keyword">else</span> {
+			proc_unlock(sig_proc);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> ((flavor &amp; PSIG_VFORK) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">runlocked</span>;
+
+	<span class="enscript-keyword">if</span> (action == KERN_SIG_WAIT) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+		<span class="enscript-comment">/*
+		 * DTrace proc signal-clear returns a siginfo_t. Collect the needed info.
+		 */</span>
+		r_uid = kauth_getruid(); <span class="enscript-comment">/* per thread credential; protected by our thread context */</span>
+
+		bzero((caddr_t)&amp;(uth-&gt;t_dtrace_siginfo), <span class="enscript-keyword">sizeof</span>(uth-&gt;t_dtrace_siginfo));
+
+		uth-&gt;t_dtrace_siginfo.si_signo = signum;
+		uth-&gt;t_dtrace_siginfo.si_pid = current_proc()-&gt;p_pid;
+		uth-&gt;t_dtrace_siginfo.si_status = W_EXITCODE(signum, 0);
+		uth-&gt;t_dtrace_siginfo.si_uid = r_uid;
+		uth-&gt;t_dtrace_siginfo.si_code = 0;
+#<span class="enscript-reference">endif</span>
+		uth-&gt;uu_sigwait = mask;
+		uth-&gt;uu_siglist &amp;= ~mask;
+		wakeup(&amp;uth-&gt;uu_sigwait);
+		<span class="enscript-comment">/* if it is SIGCONT resume whole process */</span>
+		<span class="enscript-keyword">if</span> (prop &amp; SA_CONT) {
+			OSBitOrAtomic(P_CONTINUED, &amp;sig_proc-&gt;p_flag);
+			sig_proc-&gt;p_contproc = current_proc()-&gt;p_pid;
+
+			proc_unlock(sig_proc);
+			(<span class="enscript-type">void</span>) task_resume_internal(sig_task);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+		}
+		proc_unlock(sig_proc);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (action != SIG_DFL) {
+		<span class="enscript-comment">/*
+		 *	User wants to catch the signal.
+		 *	Wake up the thread, but don't un-suspend it
+		 *	(except for SIGCONT).
+		 */</span>
+		<span class="enscript-keyword">if</span> (prop &amp; SA_CONT) {
+			OSBitOrAtomic(P_CONTINUED, &amp;sig_proc-&gt;p_flag);
+			proc_unlock(sig_proc);
+			(<span class="enscript-type">void</span>) task_resume_internal(sig_task);
+			proc_lock(sig_proc);
+			sig_proc-&gt;p_stat = SRUN;
+		}  <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sig_proc-&gt;p_stat == SSTOP) {
+			proc_unlock(sig_proc);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+		}
+		<span class="enscript-comment">/*
+		 * Fill out siginfo structure information to pass to the
+		 * signalled process/thread sigaction handler, when it
+		 * wakes up.  si_code is 0 because this is an ordinary
+		 * signal, not a SIGCHLD, and so si_status is the signal
+		 * number itself, instead of the child process exit status.
+		 * We shift this left because it will be shifted right before
+		 * it is passed to user space.  kind of ugly to use W_EXITCODE
+		 * this way, but it beats defining a new macro.
+		 *
+		 * Note:	Avoid the SIGCHLD recursion case!
+		 */</span>
+		<span class="enscript-keyword">if</span> (signum != SIGCHLD) {
+			proc_unlock(sig_proc);
+			r_uid = kauth_getruid();
+			proc_lock(sig_proc);
+
+			sig_proc-&gt;si_pid = current_proc()-&gt;p_pid;
+			sig_proc-&gt;si_status = W_EXITCODE(signum, 0);
+			sig_proc-&gt;si_uid = r_uid;
+			sig_proc-&gt;si_code = 0;
+		}
+
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">runlocked</span>;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*	Default action - varies */</span>
+		<span class="enscript-keyword">if</span> (mask &amp; stopsigmask) {
+			<span class="enscript-comment">/*
+			 * These are the signals which by default
+			 * stop a process.
+			 *
+			 * Don't clog system with children of init
+			 * stopped from the keyboard.
+			 */</span>
+			<span class="enscript-keyword">if</span> (!(prop &amp; SA_STOP) &amp;&amp; sig_proc-&gt;p_pptr == initproc) {
+				proc_unlock(sig_proc);
+				psignal_locked(sig_proc, SIGKILL);
+				proc_lock(sig_proc);
+				uth-&gt;uu_siglist &amp;= ~mask;
+				proc_unlock(sig_proc);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+			}
+                        
+			<span class="enscript-comment">/*
+			 *	Stop the task
+			 *	if task hasn't already been stopped by
+			 *	a signal.
+			 */</span>
+			uth-&gt;uu_siglist &amp;= ~mask;
+			<span class="enscript-keyword">if</span> (sig_proc-&gt;p_stat != SSTOP) {
+				sig_proc-&gt;p_xstat = signum;
+				sig_proc-&gt;p_stat = SSTOP;
+				OSBitAndAtomic(~((uint32_t)P_CONTINUED), &amp;sig_proc-&gt;p_flag);
+				sig_proc-&gt;p_lflag &amp;= ~P_LWAITED;
+				proc_unlock(sig_proc);
+
+				pp = proc_parentholdref(sig_proc);
+				stop(sig_proc, pp);
+				<span class="enscript-keyword">if</span> (( pp != PROC_NULL) &amp;&amp; ((pp-&gt;p_flag &amp; P_NOCLDSTOP) == 0)) {
+
+					my_cred = kauth_cred_proc_ref(sig_proc);
+					r_uid = kauth_cred_getruid(my_cred);
+					kauth_cred_unref(&amp;my_cred);
+
+					proc_lock(sig_proc);
+					pp-&gt;si_pid = sig_proc-&gt;p_pid;
+					<span class="enscript-comment">/*
+					 * POSIX: sigaction for a stopped child
+					 * when sent to the parent must set the
+					 * child's signal number into si_status.
+					 */</span>
+					<span class="enscript-keyword">if</span> (signum != SIGSTOP)
+						pp-&gt;si_status = WEXITSTATUS(sig_proc-&gt;p_xstat);
+					<span class="enscript-keyword">else</span>
+						pp-&gt;si_status = W_EXITCODE(signum, signum);
+					pp-&gt;si_code = CLD_STOPPED;
+					pp-&gt;si_uid = r_uid;
+					proc_unlock(sig_proc);
+
+					psignal(pp, SIGCHLD);
+				}
+				<span class="enscript-keyword">if</span> (pp != PROC_NULL)
+					proc_parentdropref(pp, 0);
+			} <span class="enscript-keyword">else</span>
+				proc_unlock(sig_proc);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+		}
+
+		DTRACE_PROC3(signal__send, thread_t, sig_thread, proc_t, p, <span class="enscript-type">int</span>, signum);
+
+		<span class="enscript-comment">/*
+		 * enters switch with sig_proc lock held but dropped when
+		 * gets out of switch
+		 */</span>
+		<span class="enscript-keyword">switch</span> (signum) {
+			<span class="enscript-comment">/*
+			 * Signals ignored by default have been dealt
+			 * with already, since their bits are on in
+			 * p_sigignore.
+			 */</span>
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIGKILL</span>:
+			<span class="enscript-comment">/*
+			 * Kill signal always sets process running and
+			 * unsuspends it.
+			 */</span>
+			<span class="enscript-comment">/*
+			 *	Process will be running after 'run'
+			 */</span>
+			sig_proc-&gt;p_stat = SRUN;
+			<span class="enscript-comment">/*
+			 * In scenarios where suspend/resume are racing
+			 * the signal we are missing AST_BSD by the time
+			 * we get here, set again to avoid races. This
+			 * was the scenario with spindump enabled shutdowns.
+			 * We would need to cover this approp down the line.
+			 */</span>
+			act_set_astbsd(sig_thread);
+			thread_abort(sig_thread);
+			proc_unlock(sig_proc);
+
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIGCONT</span>:
+			<span class="enscript-comment">/*
+			 * Let the process run.  If it's sleeping on an
+			 * event, it remains so.
+			 */</span>
+			OSBitOrAtomic(P_CONTINUED, &amp;sig_proc-&gt;p_flag);
+			sig_proc-&gt;p_contproc = sig_proc-&gt;p_pid;
+
+			proc_unlock(sig_proc);
+			(<span class="enscript-type">void</span>) task_resume_internal(sig_task);
+			proc_lock(sig_proc);
+			<span class="enscript-comment">/*
+			 * When processing a SIGCONT, we need to check
+			 * to see if there are signals pending that
+			 * were not delivered because we had been
+			 * previously stopped.  If that's the case,
+			 * we need to thread_abort_safely() to trigger
+			 * interruption of the current system call to
+			 * cause their handlers to fire.  If it's only
+			 * the SIGCONT, then don't wake up.
+			 */</span>
+			<span class="enscript-keyword">if</span> (((flavor &amp; (PSIG_VFORK|PSIG_THREAD)) == 0) &amp;&amp; (((uth-&gt;uu_siglist &amp; ~uth-&gt;uu_sigmask) &amp; ~sig_proc-&gt;p_sigignore) &amp; ~mask)) {
+				uth-&gt;uu_siglist &amp;= ~mask;
+				sig_proc-&gt;p_stat = SRUN;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">runlocked</span>;
+			}
+
+			uth-&gt;uu_siglist &amp;= ~mask;
+			sig_proc-&gt;p_stat = SRUN;
+			proc_unlock(sig_proc);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-comment">/*
+			 * A signal which has a default action of killing
+			 * the process, and for which there is no handler,
+			 * needs to act like SIGKILL
+			 */</span>
+			<span class="enscript-keyword">if</span> (((flavor &amp; (PSIG_VFORK|PSIG_THREAD)) == 0) &amp;&amp; (action == SIG_DFL) &amp;&amp; (prop &amp; SA_KILL)) {
+				sig_proc-&gt;p_stat = SRUN;
+				proc_unlock(sig_proc);
+				thread_abort(sig_thread);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+			}
+
+			<span class="enscript-comment">/*
+			 * All other signals wake up the process, but don't
+			 * resume it.
+			 */</span>
+			<span class="enscript-keyword">if</span> (sig_proc-&gt;p_stat == SSTOP) {
+				proc_unlock(sig_proc);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">psigout</span>;
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">runlocked</span>;
+		}
+	}
+	<span class="enscript-comment">/*NOTREACHED*/</span>
+
+<span class="enscript-reference">runlocked</span>:
+	<span class="enscript-comment">/*
+	 * If we're being traced (possibly because someone attached us
+	 * while we were stopped), check for a signal from the debugger.
+	 */</span>
+	<span class="enscript-keyword">if</span> (sig_proc-&gt;p_stat == SSTOP) {
+		<span class="enscript-keyword">if</span> ((sig_proc-&gt;p_lflag &amp; P_LTRACED) != 0 &amp;&amp; sig_proc-&gt;p_xstat != 0)
+			uth-&gt;uu_siglist |= sigmask(sig_proc-&gt;p_xstat); 
+		<span class="enscript-keyword">if</span> ((flavor &amp; PSIG_VFORK) != 0) {
+			sig_proc-&gt;p_stat = SRUN;
+		}
+		proc_unlock(sig_proc);	
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+	 	 * setrunnable(p) in BSD and
+	 	 * Wake up the thread if it is interruptible.
+	 	 */</span>
+		sig_proc-&gt;p_stat = SRUN;
+		proc_unlock(sig_proc);	
+		<span class="enscript-keyword">if</span> ((flavor &amp; PSIG_VFORK) == 0)
+			thread_abort_safely(sig_thread);
+	}
+<span class="enscript-reference">psigout</span>:
+	<span class="enscript-keyword">if</span> ((flavor &amp; PSIG_LOCKED)== 0) {
+		proc_signalend(sig_proc, 0);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">psignal</span>(proc_t p, <span class="enscript-type">int</span> signum)
+{
+	psignal_internal(p, NULL, NULL, 0, signum);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">psignal_locked</span>(proc_t p, <span class="enscript-type">int</span> signum)
+{
+	psignal_internal(p, NULL, NULL, PSIG_LOCKED, signum);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">psignal_vfork</span>(proc_t p, task_t new_task, thread_t thread, <span class="enscript-type">int</span> signum)
+{
+	psignal_internal(p, new_task, thread, PSIG_VFORK, signum);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">psignal_uthread</span>(thread_t thread, <span class="enscript-type">int</span> signum)
+{
+	psignal_internal(PROC_NULL, TASK_NULL, thread, PSIG_THREAD, signum);
+}
+
+<span class="enscript-comment">/* same as psignal(), but prefer delivery to 'thread' if possible */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">psignal_try_thread</span>(proc_t p, thread_t thread, <span class="enscript-type">int</span> signum)
+{
+	psignal_internal(p, NULL, thread, PSIG_TRY_THREAD, signum);
+}
+
+<span class="enscript-comment">/*
+ * If the current process has received a signal (should be caught or cause
+ * termination, should interrupt current syscall), return the signal number.
+ * Stop signals with default action are processed immediately, then cleared;
+ * they aren't returned.  This is checked after each entry to the system for
+ * a syscall or trap (though this can usually be done without calling issignal
+ * by checking the pending signal masks in the CURSIG macro.) The normal call
+ * sequence is
+ *
+ *	while (signum = CURSIG(curproc))
+ *		postsig(signum);
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">issignal_locked</span>(proc_t p)
+{
+	<span class="enscript-type">int</span> signum, mask, prop, sigbits;
+	thread_t cur_act;
+	<span class="enscript-type">struct</span> uthread * ut;
+	proc_t pp;
+	kauth_cred_t my_cred;
+	<span class="enscript-type">int</span> retval = 0;
+	uid_t r_uid;
+
+	cur_act = current_thread();
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SIGNAL_DEBUG</span>
+        <span class="enscript-keyword">if</span>(rdebug_proc &amp;&amp; (p == rdebug_proc)) {
+                ram_printf(3);
+        }
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SIGNAL_DEBUG */</span>
+
+	<span class="enscript-comment">/*
+	 * Try to grab the signal lock.
+	 */</span>
+	<span class="enscript-keyword">if</span> (sig_try_locked(p) &lt;= 0) {
+		<span class="enscript-keyword">return</span>(0);
+	}
+
+	proc_signalstart(p, 1);
+
+	ut = get_bsdthread_info(cur_act);
+	<span class="enscript-keyword">for</span>(;;) {
+		sigbits = ut-&gt;uu_siglist  &amp; ~ut-&gt;uu_sigmask;
+
+		<span class="enscript-keyword">if</span> (p-&gt;p_lflag &amp; P_LPPWAIT)
+			sigbits &amp;= ~stopsigmask;
+		<span class="enscript-keyword">if</span> (sigbits == 0) {	 	<span class="enscript-comment">/* no signal to send */</span>
+			retval = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+
+		signum = ffs((<span class="enscript-type">long</span>)sigbits);
+		mask = sigmask(signum);
+		prop = sigprop[signum];
+
+		<span class="enscript-comment">/*
+		 * We should see pending but ignored signals
+		 * only if P_LTRACED was on when they were posted.
+		 */</span>
+		<span class="enscript-keyword">if</span> (mask &amp; p-&gt;p_sigignore &amp;&amp; (p-&gt;p_lflag &amp; P_LTRACED) == 0) {
+			ut-&gt;uu_siglist &amp;= ~mask;		<span class="enscript-comment">/* take the signal! */</span>
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> (p-&gt;p_lflag &amp; P_LTRACED &amp;&amp; (p-&gt;p_lflag &amp; P_LPPWAIT) == 0)  {
+			task_t	task;
+			<span class="enscript-comment">/*
+			 * If traced, always stop, and stay
+			 * stopped until released by the debugger.
+			 */</span>
+			<span class="enscript-comment">/* ptrace debugging */</span>
+			p-&gt;p_xstat = signum;
+	
+			<span class="enscript-keyword">if</span> (p-&gt;p_lflag &amp; P_LSIGEXC) {
+				p-&gt;sigwait = TRUE;
+				p-&gt;sigwait_thread = cur_act;
+				p-&gt;p_stat = SSTOP;
+				OSBitAndAtomic(~((uint32_t)P_CONTINUED), &amp;p-&gt;p_flag);
+				p-&gt;p_lflag &amp;= ~P_LWAITED;
+				ut-&gt;uu_siglist &amp;= ~mask;	<span class="enscript-comment">/* clear the old signal */</span>
+				proc_signalend(p, 1);
+				proc_unlock(p);
+				do_bsdexception(EXC_SOFTWARE, EXC_SOFT_SIGNAL, signum);
+				proc_lock(p);
+				proc_signalstart(p, 1);
+			} <span class="enscript-keyword">else</span> {
+				proc_unlock(p);
+				my_cred = kauth_cred_proc_ref(p);
+				r_uid = kauth_cred_getruid(my_cred);
+				kauth_cred_unref(&amp;my_cred);
+
+				pp = proc_parentholdref(p);
+				<span class="enscript-keyword">if</span> (pp != PROC_NULL) {
+					proc_lock(pp);
+
+					pp-&gt;si_pid = p-&gt;p_pid;
+					pp-&gt;si_status = p-&gt;p_xstat;
+					pp-&gt;si_code = CLD_TRAPPED;
+					pp-&gt;si_uid = r_uid;
+
+					proc_unlock(pp);
+				}
+
+				<span class="enscript-comment">/*
+			 	*	XXX Have to really stop for debuggers;
+			 	*	XXX stop() doesn't do the right thing.
+			 	*/</span>
+				task = p-&gt;task;
+				task_suspend_internal(task);
+
+				proc_lock(p);
+				p-&gt;sigwait = TRUE;
+				p-&gt;sigwait_thread = cur_act;
+				p-&gt;p_stat = SSTOP;
+				OSBitAndAtomic(~((uint32_t)P_CONTINUED), &amp;p-&gt;p_flag);
+				p-&gt;p_lflag &amp;= ~P_LWAITED;
+				ut-&gt;uu_siglist &amp;= ~mask;	<span class="enscript-comment">/* clear the old signal */</span>
+
+				proc_signalend(p, 1);
+				proc_unlock(p);
+
+				<span class="enscript-keyword">if</span> (pp != PROC_NULL) {
+					psignal(pp, SIGCHLD);
+					proc_list_lock();
+					wakeup((caddr_t)pp);
+					proc_parentdropref(pp, 1);
+					proc_list_unlock();
+				}
+
+				assert_wait((caddr_t)&amp;p-&gt;sigwait, (THREAD_INTERRUPTIBLE));
+				thread_block(THREAD_CONTINUE_NULL);
+				proc_lock(p);
+				proc_signalstart(p, 1);
+			}
+
+			p-&gt;sigwait = FALSE;
+			p-&gt;sigwait_thread = NULL;
+			wakeup((caddr_t)&amp;p-&gt;sigwait_thread);
+
+			<span class="enscript-comment">/*
+			 * This code is to detect when gdb is killed
+			 * even as the traced program is attached.
+			 * pgsignal would get the SIGKILL to traced program
+			 * That's what we are trying to see (I hope)
+			 */</span>
+			<span class="enscript-keyword">if</span> (ut-&gt;uu_siglist &amp; sigmask(SIGKILL)) {
+				<span class="enscript-comment">/*
+				 * Wait event may still be outstanding;
+				 * clear it, since sig_lock_to_exit will
+				 * wait.
+				 */</span>
+				clear_wait(current_thread(), THREAD_INTERRUPTED);
+				sig_lock_to_exit(p);
+				<span class="enscript-comment">/*
+			 	* Since this thread will be resumed
+			 	* to allow the current syscall to
+			 	* be completed, must save u_qsave
+			 	* before calling exit().  (Since exit()
+			 	* calls closef() which can trash u_qsave.)
+			 	*/</span>
+				proc_signalend(p, 1);
+				proc_unlock(p);
+				KERNEL_DEBUG_CONSTANT(BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_FRCEXIT) | DBG_FUNC_NONE,
+					      p-&gt;p_pid, W_EXITCODE(0, SIGKILL), 2, 0, 0);
+				exit1(p, W_EXITCODE(0, SIGKILL), (<span class="enscript-type">int</span> *)NULL);
+				proc_lock(p);
+				<span class="enscript-keyword">return</span>(0);
+			}
+
+			<span class="enscript-comment">/*
+			 *	We may have to quit
+			 */</span>
+			<span class="enscript-keyword">if</span> (thread_should_abort(current_thread())) {
+				retval = 0;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			<span class="enscript-comment">/*
+			 * If parent wants us to take the signal,
+			 * then it will leave it in p-&gt;p_xstat;
+			 * otherwise we just look for signals again.
+			 */</span>
+			signum = p-&gt;p_xstat;
+			<span class="enscript-keyword">if</span> (signum == 0)
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-comment">/*
+			 * Put the new signal into p_siglist.  If the
+			 * signal is being masked, look for other signals.
+			 */</span>
+			mask = sigmask(signum);
+			ut-&gt;uu_siglist |= mask;
+			<span class="enscript-keyword">if</span> (ut-&gt;uu_sigmask &amp; mask)
+				<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Decide whether the signal should be returned.
+		 * Return the signal's number, or fall through
+		 * to clear it from the pending mask.
+		 */</span>
+
+		<span class="enscript-keyword">switch</span> ((<span class="enscript-type">long</span>)p-&gt;p_sigacts-&gt;ps_sigact[signum]) {
+		
+		<span class="enscript-keyword">case</span> (<span class="enscript-type">long</span>)SIG_DFL:
+			<span class="enscript-comment">/*
+			 * If there is a pending stop signal to process
+			 * with default action, stop here,
+			 * then clear the signal.  However,
+			 * if process is member of an orphaned
+			 * process group, ignore tty stop signals.
+			 */</span>
+			<span class="enscript-keyword">if</span> (prop &amp; SA_STOP) {
+				<span class="enscript-type">struct</span> pgrp * pg;
+
+				proc_unlock(p);
+				pg = proc_pgrp(p);
+				<span class="enscript-keyword">if</span> (p-&gt;p_lflag &amp; P_LTRACED ||
+					(pg-&gt;pg_jobc == 0 &amp;&amp;
+					prop &amp; SA_TTYSTOP)) {
+					proc_lock(p);
+					pg_rele(pg);
+					<span class="enscript-keyword">break</span>;	<span class="enscript-comment">/* == ignore */</span>
+				}
+				pg_rele(pg);
+				<span class="enscript-keyword">if</span> (p-&gt;p_stat != SSTOP) {
+					proc_lock(p);
+					p-&gt;p_xstat = signum;
+				
+					p-&gt;p_stat = SSTOP;
+					p-&gt;p_lflag &amp;= ~P_LWAITED;
+					proc_unlock(p);
+
+					pp = proc_parentholdref(p);
+					stop(p, pp);
+					<span class="enscript-keyword">if</span> ((pp != PROC_NULL) &amp;&amp; ((pp-&gt;p_flag &amp; P_NOCLDSTOP) == 0)) {
+						my_cred = kauth_cred_proc_ref(p);
+						r_uid = kauth_cred_getruid(my_cred);
+						kauth_cred_unref(&amp;my_cred);
+
+						proc_lock(pp);
+						pp-&gt;si_pid = p-&gt;p_pid;
+						pp-&gt;si_status = WEXITSTATUS(p-&gt;p_xstat);
+						pp-&gt;si_code = CLD_STOPPED;
+						pp-&gt;si_uid = r_uid;
+						proc_unlock(pp);
+
+						psignal(pp, SIGCHLD);
+					}
+					<span class="enscript-keyword">if</span> (pp != PROC_NULL)
+						proc_parentdropref(pp, 0);
+				}
+				proc_lock(p);
+				<span class="enscript-keyword">break</span>;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (prop &amp; SA_IGNORE) {
+				<span class="enscript-comment">/*
+				 * Except for SIGCONT, shouldn't get here.
+				 * Default action is to ignore; drop it.
+				 */</span>
+				<span class="enscript-keyword">break</span>;		<span class="enscript-comment">/* == ignore */</span>
+			} <span class="enscript-keyword">else</span> {
+				ut-&gt;uu_siglist &amp;= ~mask;	<span class="enscript-comment">/* take the signal! */</span>
+				retval = signum;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+
+			<span class="enscript-comment">/*NOTREACHED*/</span>
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> (<span class="enscript-type">long</span>)SIG_IGN:
+			<span class="enscript-comment">/*
+			 * Masking above should prevent us ever trying
+			 * to take action on an ignored signal other
+			 * than SIGCONT, unless process is traced.
+			 */</span>
+			<span class="enscript-keyword">if</span> ((prop &amp; SA_CONT) == 0 &amp;&amp;
+				(p-&gt;p_lflag &amp; P_LTRACED) == 0)
+				printf(<span class="enscript-string">&quot;issignal\n&quot;</span>);
+			<span class="enscript-keyword">break</span>;		<span class="enscript-comment">/* == ignore */</span>
+
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-comment">/*
+			 * This signal has an action, let
+			 * postsig() process it.
+			 */</span>
+			ut-&gt;uu_siglist &amp;= ~mask;		<span class="enscript-comment">/* take the signal! */</span>
+			retval = signum;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		ut-&gt;uu_siglist &amp;= ~mask;		<span class="enscript-comment">/* take the signal! */</span>
+		}
+	<span class="enscript-comment">/* NOTREACHED */</span>
+<span class="enscript-reference">out</span>:
+	proc_signalend(p, 1);
+	<span class="enscript-keyword">return</span>(retval);
+}
+
+<span class="enscript-comment">/* called from _sleep */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">CURSIG</span>(proc_t p)
+{
+	<span class="enscript-type">int</span> signum, mask, prop, sigbits;
+	thread_t cur_act;
+	<span class="enscript-type">struct</span> uthread * ut;
+	<span class="enscript-type">int</span> retnum = 0;
+           
+
+	cur_act = current_thread();
+
+	ut = get_bsdthread_info(cur_act);
+
+	<span class="enscript-keyword">if</span> (ut-&gt;uu_siglist == 0)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">if</span> (((ut-&gt;uu_siglist &amp; ~ut-&gt;uu_sigmask) == 0) &amp;&amp; ((p-&gt;p_lflag &amp; P_LTRACED) == 0))
+		<span class="enscript-keyword">return</span> (0);
+
+	sigbits = ut-&gt;uu_siglist &amp; ~ut-&gt;uu_sigmask;
+
+	<span class="enscript-keyword">for</span>(;;) {
+		<span class="enscript-keyword">if</span> (p-&gt;p_lflag &amp; P_LPPWAIT)
+			sigbits &amp;= ~stopsigmask;
+		<span class="enscript-keyword">if</span> (sigbits == 0) {	 	<span class="enscript-comment">/* no signal to send */</span>
+			<span class="enscript-keyword">return</span> (retnum);
+		}
+
+		signum = ffs((<span class="enscript-type">long</span>)sigbits);
+		mask = sigmask(signum);
+		prop = sigprop[signum];
+		sigbits &amp;= ~mask;		<span class="enscript-comment">/* take the signal out */</span>
+
+		<span class="enscript-comment">/*
+		 * We should see pending but ignored signals
+		 * only if P_LTRACED was on when they were posted.
+		 */</span>
+		<span class="enscript-keyword">if</span> (mask &amp; p-&gt;p_sigignore &amp;&amp; (p-&gt;p_lflag &amp; P_LTRACED) == 0) {
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (p-&gt;p_lflag &amp; P_LTRACED &amp;&amp; (p-&gt;p_lflag &amp; P_LPPWAIT) == 0) {
+			<span class="enscript-keyword">return</span>(signum);
+		}
+
+		<span class="enscript-comment">/*
+		 * Decide whether the signal should be returned.
+		 * Return the signal's number, or fall through
+		 * to clear it from the pending mask.
+		 */</span>
+
+		<span class="enscript-keyword">switch</span> ((<span class="enscript-type">long</span>)p-&gt;p_sigacts-&gt;ps_sigact[signum]) {
+		
+		<span class="enscript-keyword">case</span> (<span class="enscript-type">long</span>)SIG_DFL:
+			<span class="enscript-comment">/*
+			 * If there is a pending stop signal to process
+			 * with default action, stop here,
+			 * then clear the signal.  However,
+			 * if process is member of an orphaned
+			 * process group, ignore tty stop signals.
+			 */</span>
+			<span class="enscript-keyword">if</span> (prop &amp; SA_STOP) {
+				<span class="enscript-type">struct</span> pgrp *pg;
+
+				pg = proc_pgrp(p);
+
+				<span class="enscript-keyword">if</span> (p-&gt;p_lflag &amp; P_LTRACED ||
+					(pg-&gt;pg_jobc == 0 &amp;&amp;
+					prop &amp; SA_TTYSTOP)) {
+					pg_rele(pg);
+					<span class="enscript-keyword">break</span>;	<span class="enscript-comment">/* == ignore */</span>
+				}
+				pg_rele(pg);
+				retnum = signum;
+				<span class="enscript-keyword">break</span>;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (prop &amp; SA_IGNORE) {
+				<span class="enscript-comment">/*
+				 * Except for SIGCONT, shouldn't get here.
+				 * Default action is to ignore; drop it.
+				 */</span>
+				<span class="enscript-keyword">break</span>;		<span class="enscript-comment">/* == ignore */</span>
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">return</span> (signum);
+			}
+			<span class="enscript-comment">/*NOTREACHED*/</span>
+
+		<span class="enscript-keyword">case</span> (<span class="enscript-type">long</span>)SIG_IGN:
+			<span class="enscript-comment">/*
+			 * Masking above should prevent us ever trying
+			 * to take action on an ignored signal other
+			 * than SIGCONT, unless process is traced.
+			 */</span>
+			<span class="enscript-keyword">if</span> ((prop &amp; SA_CONT) == 0 &amp;&amp;
+				(p-&gt;p_lflag &amp; P_LTRACED) == 0)
+				printf(<span class="enscript-string">&quot;issignal\n&quot;</span>);
+			<span class="enscript-keyword">break</span>;		<span class="enscript-comment">/* == ignore */</span>
+
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-comment">/*
+			 * This signal has an action, let
+			 * postsig() process it.
+			 */</span>
+			<span class="enscript-keyword">return</span> (signum);
+		}
+	}
+	<span class="enscript-comment">/* NOTREACHED */</span>
+}
+
+<span class="enscript-comment">/*
+ * Put the argument process into the stopped state and notify the parent
+ * via wakeup.  Signals are handled elsewhere.  The process must not be
+ * on the run queue.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">stop</span>(proc_t p, proc_t parent)
+{
+	OSBitAndAtomic(~((uint32_t)P_CONTINUED), &amp;p-&gt;p_flag);
+	<span class="enscript-keyword">if</span> ((parent != PROC_NULL) &amp;&amp; (parent-&gt;p_stat != SSTOP)) {
+		proc_list_lock();
+		wakeup((caddr_t)parent);
+		proc_list_unlock();
+	}
+	(<span class="enscript-type">void</span>) task_suspend_internal(p-&gt;task);
+}
+
+<span class="enscript-comment">/*
+ * Take the action for the specified signal
+ * from the current set of pending signals.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">postsig_locked</span>(<span class="enscript-type">int</span> signum)
+{
+	proc_t p = current_proc();
+	<span class="enscript-type">struct</span> sigacts *ps = p-&gt;p_sigacts;
+	user_addr_t catcher;
+	uint32_t code;
+	<span class="enscript-type">int</span> mask, returnmask;
+	<span class="enscript-type">struct</span> uthread * ut;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-keyword">if</span> (signum == 0)
+		panic(<span class="enscript-string">&quot;postsig&quot;</span>);
+	<span class="enscript-comment">/*
+	 *	This must be called on master cpu
+	 */</span>
+	<span class="enscript-keyword">if</span> (cpu_number() != master_cpu)
+		panic(<span class="enscript-string">&quot;psig not on master&quot;</span>);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * Try to grab the signal lock.
+	 */</span>
+	<span class="enscript-keyword">if</span> (sig_try_locked(p) &lt;= 0) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	proc_signalstart(p, 1);
+
+	ut = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(current_thread());
+	mask = sigmask(signum);
+	ut-&gt;uu_siglist &amp;= ~mask;
+	catcher = ps-&gt;ps_sigact[signum];
+	<span class="enscript-keyword">if</span> (catcher == SIG_DFL) {
+		<span class="enscript-comment">/*
+		 * Default catcher, where the default is to kill
+		 * the process.  (Other cases were ignored above.)
+		 */</span>
+		sig_lock_to_exit(p);
+		p-&gt;p_acflag |= AXSIG;
+		<span class="enscript-keyword">if</span> (sigprop[signum] &amp; SA_CORE) {
+			p-&gt;p_sigacts-&gt;ps_sig = signum;
+			proc_signalend(p, 1);
+			proc_unlock(p);
+			<span class="enscript-keyword">if</span> (coredump(p, 0, 0) == 0)
+				signum |= WCOREFLAG;
+		} <span class="enscript-keyword">else</span>  {
+			proc_signalend(p, 1);
+			proc_unlock(p);
+		}
+		
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+		bzero((caddr_t)&amp;(ut-&gt;t_dtrace_siginfo), <span class="enscript-keyword">sizeof</span>(ut-&gt;t_dtrace_siginfo));
+
+		ut-&gt;t_dtrace_siginfo.si_signo = signum;
+		ut-&gt;t_dtrace_siginfo.si_pid = p-&gt;si_pid;
+		ut-&gt;t_dtrace_siginfo.si_uid = p-&gt;si_uid;
+		ut-&gt;t_dtrace_siginfo.si_status = WEXITSTATUS(p-&gt;si_status);
+
+		<span class="enscript-comment">/* Fire DTrace proc:::fault probe when signal is generated by hardware. */</span>
+		<span class="enscript-keyword">switch</span> (signum) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIGILL</span>: <span class="enscript-keyword">case</span> <span class="enscript-reference">SIGBUS</span>: <span class="enscript-keyword">case</span> <span class="enscript-reference">SIGSEGV</span>: <span class="enscript-keyword">case</span> <span class="enscript-reference">SIGFPE</span>: <span class="enscript-keyword">case</span> <span class="enscript-reference">SIGTRAP</span>:
+			DTRACE_PROC2(fault, <span class="enscript-type">int</span>, (<span class="enscript-type">int</span>)(ut-&gt;uu_code), siginfo_t *, &amp;(ut-&gt;t_dtrace_siginfo));
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">break</span>;
+		}
+		
+
+		DTRACE_PROC3(signal__handle, <span class="enscript-type">int</span>, signum, siginfo_t *, &amp;(ut-&gt;t_dtrace_siginfo),
+					<span class="enscript-type">void</span> (*)(<span class="enscript-type">void</span>), SIG_DFL);
+#<span class="enscript-reference">endif</span>
+
+		KERNEL_DEBUG_CONSTANT(BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_FRCEXIT) | DBG_FUNC_NONE,
+					      p-&gt;p_pid, W_EXITCODE(0, signum), 3, 0, 0);
+		exit1(p, W_EXITCODE(0, signum), (<span class="enscript-type">int</span> *)NULL);
+		proc_lock(p);
+		<span class="enscript-keyword">return</span>;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * If we get here, the signal must be caught.
+		 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+		<span class="enscript-keyword">if</span> (catcher == SIG_IGN || (ut-&gt;uu_sigmask &amp; mask))
+			log(LOG_WARNING,
+				<span class="enscript-string">&quot;postsig: processing masked or ignored signal\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-comment">/*
+		 * Set the new mask value and also defer further
+		 * occurences of this signal.
+		 *
+		 * Special case: user has done a sigpause.  Here the
+		 * current mask is not of interest, but rather the
+		 * mask from before the sigpause is what we want
+		 * restored after the signal processing is completed.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ut-&gt;uu_flag &amp; UT_SAS_OLDMASK) {
+			returnmask = ut-&gt;uu_oldmask;
+			ut-&gt;uu_flag &amp;= ~UT_SAS_OLDMASK;
+			ut-&gt;uu_oldmask = 0;
+		} <span class="enscript-keyword">else</span>
+			returnmask = ut-&gt;uu_sigmask;
+		ut-&gt;uu_sigmask |= ps-&gt;ps_catchmask[signum];
+		<span class="enscript-keyword">if</span> ((ps-&gt;ps_signodefer &amp; mask) == 0)
+			ut-&gt;uu_sigmask |= mask;
+		<span class="enscript-keyword">if</span> ((signum != SIGILL) &amp;&amp; (signum != SIGTRAP) &amp;&amp; (ps-&gt;ps_sigreset &amp; mask)) {
+			<span class="enscript-keyword">if</span> ((signum != SIGCONT) &amp;&amp; (sigprop[signum] &amp; SA_IGNORE))
+				p-&gt;p_sigignore |= mask;
+			ps-&gt;ps_sigact[signum] = SIG_DFL;
+			ps-&gt;ps_siginfo &amp;= ~mask;
+			ps-&gt;ps_signodefer &amp;= ~mask;
+		}
+
+		<span class="enscript-keyword">if</span> (ps-&gt;ps_sig != signum) {
+			code = 0;
+		} <span class="enscript-keyword">else</span> {
+			code = ps-&gt;ps_code;
+			ps-&gt;ps_code = 0;
+		}
+		OSIncrementAtomicLong(&amp;p-&gt;p_stats-&gt;p_ru.ru_nsignals);
+		sendsig(p, catcher, signum, returnmask, code);
+	}
+	proc_signalend(p, 1);
+}
+
+<span class="enscript-comment">/*
+ * Attach a signal knote to the list of knotes for this process.
+ *
+ * Signal knotes share the knote list with proc knotes.  This
+ * could be avoided by using a signal-specific knote list, but
+ * probably isn't worth the trouble.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">filt_sigattach</span>(<span class="enscript-type">struct</span> knote *kn)
+{
+	proc_t p = current_proc();  <span class="enscript-comment">/* can attach only to oneself */</span>
+
+	proc_klist_lock();
+
+	kn-&gt;kn_ptr.p_proc = p;
+	kn-&gt;kn_flags |= EV_CLEAR;		<span class="enscript-comment">/* automatically set */</span>
+
+	KNOTE_ATTACH(&amp;p-&gt;p_klist, kn);
+
+	proc_klist_unlock();
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * remove the knote from the process list, if it hasn't already
+ * been removed by exit processing.  
+ */</span>
+	   
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">filt_sigdetach</span>(<span class="enscript-type">struct</span> knote *kn)
+{
+	proc_t p = kn-&gt;kn_ptr.p_proc;
+
+	proc_klist_lock();
+	kn-&gt;kn_ptr.p_proc = NULL;
+	KNOTE_DETACH(&amp;p-&gt;p_klist, kn);
+	proc_klist_unlock();
+}
+
+<span class="enscript-comment">/*
+ * Post an event to the signal filter.  Because we share the same list
+ * as process knotes, we have to filter out and handle only signal events.
+ *
+ * We assume that we process fdfree() before we post the NOTE_EXIT for
+ * a process during exit.  Therefore, since signal filters can only be
+ * set up &quot;in-process&quot;, we should have already torn down the kqueue
+ * hosting the EVFILT_SIGNAL knote and should never see NOTE_EXIT.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">filt_signal</span>(<span class="enscript-type">struct</span> knote *kn, <span class="enscript-type">long</span> hint)
+{
+
+	<span class="enscript-keyword">if</span> (hint &amp; NOTE_SIGNAL) {
+		hint &amp;= ~NOTE_SIGNAL;
+
+		<span class="enscript-keyword">if</span> (kn-&gt;kn_id == (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)hint)
+			kn-&gt;kn_data++;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (hint &amp; NOTE_EXIT) {
+		panic(<span class="enscript-string">&quot;filt_signal: detected NOTE_EXIT event&quot;</span>);
+	}
+
+	<span class="enscript-keyword">return</span> (kn-&gt;kn_data != 0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">filt_signaltouch</span>(<span class="enscript-type">struct</span> knote *kn, <span class="enscript-type">struct</span> kevent_internal_s *kev, <span class="enscript-type">long</span> type)
+{
+	proc_klist_lock();
+	<span class="enscript-keyword">switch</span> (type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EVENT_REGISTER</span>:
+		kn-&gt;kn_sfflags = kev-&gt;fflags;
+		kn-&gt;kn_sdata = kev-&gt;data;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EVENT_PROCESS</span>:
+		*kev = kn-&gt;kn_kevent;
+		<span class="enscript-keyword">if</span> (kn-&gt;kn_flags &amp; EV_CLEAR) {
+			kn-&gt;kn_data = 0;
+			kn-&gt;kn_fflags = 0;
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;filt_signaltouch() - invalid type (%ld)&quot;</span>, type);
+		<span class="enscript-keyword">break</span>;
+	}
+	proc_klist_unlock();
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bsd_ast</span>(thread_t thread)
+{
+	proc_t p = current_proc();
+	<span class="enscript-type">struct</span> uthread *ut = get_bsdthread_info(thread);
+	<span class="enscript-type">int</span>	signum;
+	user_addr_t pc;
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> bsd_init_done = 0;
+
+	<span class="enscript-keyword">if</span> (p == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> ((p-&gt;p_flag &amp; P_OWEUPC) &amp;&amp; (p-&gt;p_flag &amp; P_PROFIL)) {
+		pc = get_useraddr();
+		addupc_task(p, pc, 1);
+		OSBitAndAtomic(~((uint32_t)P_OWEUPC), &amp;p-&gt;p_flag);
+	}
+
+	<span class="enscript-keyword">if</span> (timerisset(&amp;p-&gt;p_vtimer_user.it_value)) {
+		uint32_t	microsecs;
+
+		task_vtimer_update(p-&gt;task, TASK_VTIMER_USER, &amp;microsecs);
+
+		<span class="enscript-keyword">if</span> (!itimerdecr(p, &amp;p-&gt;p_vtimer_user, microsecs)) {
+			<span class="enscript-keyword">if</span> (timerisset(&amp;p-&gt;p_vtimer_user.it_value))
+				task_vtimer_set(p-&gt;task, TASK_VTIMER_USER);
+			<span class="enscript-keyword">else</span>
+				task_vtimer_clear(p-&gt;task, TASK_VTIMER_USER);
+
+			psignal_try_thread(p, thread, SIGVTALRM);
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (timerisset(&amp;p-&gt;p_vtimer_prof.it_value)) {
+		uint32_t	microsecs;
+
+		task_vtimer_update(p-&gt;task, TASK_VTIMER_PROF, &amp;microsecs);
+
+		<span class="enscript-keyword">if</span> (!itimerdecr(p, &amp;p-&gt;p_vtimer_prof, microsecs)) {
+			<span class="enscript-keyword">if</span> (timerisset(&amp;p-&gt;p_vtimer_prof.it_value))
+				task_vtimer_set(p-&gt;task, TASK_VTIMER_PROF);
+			<span class="enscript-keyword">else</span>
+				task_vtimer_clear(p-&gt;task, TASK_VTIMER_PROF);
+
+			psignal_try_thread(p, thread, SIGPROF);
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (timerisset(&amp;p-&gt;p_rlim_cpu)) {
+		<span class="enscript-type">struct</span> timeval		tv;
+
+		task_vtimer_update(p-&gt;task, TASK_VTIMER_RLIM, (uint32_t *) &amp;tv.tv_usec);
+
+		proc_spinlock(p);
+		<span class="enscript-keyword">if</span> (p-&gt;p_rlim_cpu.tv_sec &gt; 0 || p-&gt;p_rlim_cpu.tv_usec &gt; tv.tv_usec) {
+			tv.tv_sec = 0;
+			timersub(&amp;p-&gt;p_rlim_cpu, &amp;tv, &amp;p-&gt;p_rlim_cpu);
+			proc_spinunlock(p);
+		} <span class="enscript-keyword">else</span> {
+
+			timerclear(&amp;p-&gt;p_rlim_cpu);
+			proc_spinunlock(p);
+
+			task_vtimer_clear(p-&gt;task, TASK_VTIMER_RLIM);
+
+			psignal_try_thread(p, thread, SIGXCPU);
+		}
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+	<span class="enscript-keyword">if</span> (ut-&gt;t_dtrace_sig) {
+	    uint8_t dt_action_sig = ut-&gt;t_dtrace_sig;
+	    ut-&gt;t_dtrace_sig = 0;
+	    psignal(p, dt_action_sig);
+	}
+
+	<span class="enscript-keyword">if</span> (ut-&gt;t_dtrace_stop) {
+		ut-&gt;t_dtrace_stop = 0;
+		proc_lock(p);
+		p-&gt;p_dtrace_stop = 1;
+		proc_unlock(p);
+		(<span class="enscript-type">void</span>)task_suspend_internal(p-&gt;task);
+	}
+
+	<span class="enscript-keyword">if</span> (ut-&gt;t_dtrace_resumepid) {
+		proc_t resumeproc = proc_find(ut-&gt;t_dtrace_resumepid);
+		ut-&gt;t_dtrace_resumepid = 0;
+		<span class="enscript-keyword">if</span> (resumeproc != PROC_NULL) {
+			proc_lock(resumeproc);
+			<span class="enscript-comment">/* We only act on processes stopped by dtrace */</span>
+			<span class="enscript-keyword">if</span> (resumeproc-&gt;p_dtrace_stop) {
+				resumeproc-&gt;p_dtrace_stop = 0;
+				proc_unlock(resumeproc);
+				task_resume_internal(resumeproc-&gt;task);
+			}
+			<span class="enscript-keyword">else</span> {
+				proc_unlock(resumeproc);
+			}
+			proc_rele(resumeproc);
+		}
+	}
+		    
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_DTRACE */</span>
+
+	proc_lock(p);
+	<span class="enscript-keyword">if</span> (CHECK_SIGNALS(p, current_thread(), ut)) {
+		<span class="enscript-keyword">while</span> ( (signum = issignal_locked(p)) )
+			postsig_locked(signum);
+	}
+	proc_unlock(p);
+
+	<span class="enscript-keyword">if</span> (!bsd_init_done) {
+		bsd_init_done = 1;
+		bsdinit_task();
+	}
+
+}
+
+<span class="enscript-comment">/* ptrace set runnable */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pt_setrunnable</span>(proc_t p)
+{
+	task_t task;
+
+	task = p-&gt;task;
+
+	<span class="enscript-keyword">if</span> (p-&gt;p_lflag &amp; P_LTRACED) {
+		proc_lock(p);
+		p-&gt;p_stat = SRUN;
+		proc_unlock(p);
+		<span class="enscript-keyword">if</span> (p-&gt;sigwait) {
+			wakeup((caddr_t)&amp;(p-&gt;sigwait));
+			<span class="enscript-keyword">if</span> ((p-&gt;p_lflag &amp; P_LSIGEXC) == 0) {	<span class="enscript-comment">// 5878479
+</span>				task_release(task);
+			}
+		}
+	}
+}
+
+kern_return_t
+<span class="enscript-function-name">do_bsdexception</span>(
+	    <span class="enscript-type">int</span> exc,
+	    <span class="enscript-type">int</span> code,
+	    <span class="enscript-type">int</span> sub)
+{
+	mach_exception_data_type_t   codes[EXCEPTION_CODE_MAX];
+
+	codes[0] = code;	
+	codes[1] = sub;
+	<span class="enscript-keyword">return</span>(bsd_exception(exc, codes, 2));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_pendingsignals</span>(proc_t p, sigset_t mask)
+{
+	<span class="enscript-type">struct</span> uthread * uth;
+	thread_t th;
+	sigset_t bits = 0;
+
+	proc_lock(p);
+	<span class="enscript-comment">/* If the process is in proc exit return no signal info */</span>
+	<span class="enscript-keyword">if</span> (p-&gt;p_lflag &amp; P_LPEXIT)  {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ((p-&gt;p_lflag &amp; P_LINVFORK) &amp;&amp; p-&gt;p_vforkact) {
+		th = p-&gt;p_vforkact;	
+		uth = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(th);
+		<span class="enscript-keyword">if</span> (uth) {
+			bits = (((uth-&gt;uu_siglist &amp; ~uth-&gt;uu_sigmask) &amp; ~p-&gt;p_sigignore) &amp; mask);
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	} 
+
+	bits = 0;
+	TAILQ_FOREACH(uth, &amp;p-&gt;p_uthlist, uu_list) {
+		bits |= (((uth-&gt;uu_siglist &amp; ~uth-&gt;uu_sigmask) &amp; ~p-&gt;p_sigignore) &amp; mask);
+	}
+<span class="enscript-reference">out</span>:
+	proc_unlock(p);
+	<span class="enscript-keyword">return</span>(bits);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">thread_issignal</span>(proc_t p, thread_t th, sigset_t mask)
+{
+	<span class="enscript-type">struct</span> uthread * uth;
+	sigset_t  bits=0;
+
+	proc_lock(p);
+	uth = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(th);
+	<span class="enscript-keyword">if</span> (uth) {
+		bits = (((uth-&gt;uu_siglist &amp; ~uth-&gt;uu_sigmask) &amp; ~p-&gt;p_sigignore) &amp; mask);
+	}
+	proc_unlock(p);
+	<span class="enscript-keyword">return</span>(bits);
+}
+
+<span class="enscript-comment">/*
+ * Allow external reads of the sigprop array.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hassigprop</span>(<span class="enscript-type">int</span> sig, <span class="enscript-type">int</span> prop)
+{
+	<span class="enscript-keyword">return</span> (sigprop[sig] &amp; prop);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pgsigio</span>(pid_t pgid, <span class="enscript-type">int</span> sig)
+{ 
+	proc_t p = PROC_NULL;
+
+	<span class="enscript-keyword">if</span> (pgid &lt; 0) 
+		gsignal(-(pgid), sig);
+
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (pgid &gt; 0 &amp;&amp; (p = proc_find(pgid)) != 0) 
+		psignal(p, sig);
+	<span class="enscript-keyword">if</span> (p != PROC_NULL)
+		proc_rele(p);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_signalstart</span>(proc_t p, <span class="enscript-type">int</span> locked)
+{
+	<span class="enscript-keyword">if</span> (!locked)
+		proc_lock(p);
+	
+	<span class="enscript-keyword">if</span>(p-&gt;p_signalholder == current_thread())
+		panic(<span class="enscript-string">&quot;proc_signalstart: thread attempting to signal a process for which it holds the signal lock&quot;</span>);	
+	
+	p-&gt;p_sigwaitcnt++;
+	<span class="enscript-keyword">while</span> ((p-&gt;p_lflag &amp; P_LINSIGNAL) == P_LINSIGNAL)
+		msleep(&amp;p-&gt;p_sigmask, &amp;p-&gt;p_mlock, 0, <span class="enscript-string">&quot;proc_signstart&quot;</span>, NULL);
+	p-&gt;p_sigwaitcnt--;
+
+	p-&gt;p_lflag |= P_LINSIGNAL;
+	p-&gt;p_signalholder = current_thread();
+	<span class="enscript-keyword">if</span> (!locked)
+		proc_unlock(p);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_signalend</span>(proc_t p, <span class="enscript-type">int</span> locked)
+{
+	<span class="enscript-keyword">if</span> (!locked)
+		proc_lock(p);
+	p-&gt;p_lflag &amp;= ~P_LINSIGNAL;
+
+	<span class="enscript-keyword">if</span> (p-&gt;p_sigwaitcnt &gt; 0)
+		wakeup(&amp;p-&gt;p_sigmask);
+
+	p-&gt;p_signalholder = NULL;
+	<span class="enscript-keyword">if</span> (!locked)
+		proc_unlock(p);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sig_lock_to_exit</span>(proc_t p)
+{
+	thread_t	self = current_thread();
+
+	p-&gt;exit_thread = self;
+	proc_unlock(p);
+
+	task_hold(p-&gt;task);
+	task_wait(p-&gt;task, FALSE);
+
+	proc_lock(p);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sig_try_locked</span>(proc_t p)
+{
+	thread_t	self = current_thread();
+
+	<span class="enscript-keyword">while</span> (p-&gt;sigwait || p-&gt;exit_thread) {
+		<span class="enscript-keyword">if</span> (p-&gt;exit_thread) {
+			<span class="enscript-keyword">return</span>(0);
+		}
+		msleep((caddr_t)&amp;p-&gt;sigwait_thread, &amp;p-&gt;p_mlock, PCATCH | PDROP, 0, 0);
+		<span class="enscript-keyword">if</span> (thread_should_abort(self)) {
+			<span class="enscript-comment">/*
+			 * Terminate request - clean up.
+			 */</span>
+			proc_lock(p);
+			<span class="enscript-keyword">return</span> -1;
+		}
+		proc_lock(p);
+	}
+	<span class="enscript-keyword">return</span> 1;
+}
+</pre>
+<hr />
+</body></html>

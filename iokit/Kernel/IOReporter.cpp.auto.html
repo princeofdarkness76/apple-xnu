@@ -1,0 +1,1095 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOReporter.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOReporter.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2012-2013 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKernelReportStructs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKernelReporters.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;IOReporterDefs.h&quot;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IORegistryEntry.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> OSObject
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IOReporter, OSObject);
+
+<span class="enscript-comment">// be careful to retain and release as necessary
+</span><span class="enscript-type">static</span> <span class="enscript-type">const</span> OSSymbol *gIOReportNoChannelName = OSSymbol::withCString(<span class="enscript-string">&quot;_NO_NAME_4&quot;</span>);
+
+<span class="enscript-comment">// * We might someday want an IOReportManager (vs. these static funcs)
+</span>
+<span class="enscript-comment">/**************************************/</span>
+<span class="enscript-comment">/***         STATIC METHODS         ***/</span>
+<span class="enscript-comment">/**************************************/</span>
+IOReturn
+<span class="enscript-function-name">IOReporter::configureAllReports</span>(OSSet *reporters,
+                                IOReportChannelList *channelList,
+                                IOReportConfigureAction action,
+                                <span class="enscript-type">void</span> *result,
+                                <span class="enscript-type">void</span> *destination)
+{
+    IOReturn rval = kIOReturnError;
+    OSCollectionIterator *iterator = NULL;
+
+    <span class="enscript-keyword">if</span> (reporters == NULL || channelList == NULL || result == NULL) {
+        rval = kIOReturnBadArgument;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+        
+    <span class="enscript-keyword">switch</span> (action) {
+            
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOReportGetDimensions</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOReportEnable</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOReportDisable</span>:
+        {
+            OSObject * object;
+            iterator = OSCollectionIterator::withCollection(reporters);
+
+            <span class="enscript-keyword">while</span> ((object = iterator-&gt;getNextObject())) {
+                
+                IOReporter *rep = OSDynamicCast(IOReporter, object);
+                
+                <span class="enscript-keyword">if</span> (rep) {
+                    (<span class="enscript-type">void</span>)rep-&gt;configureReport(channelList, action, result, destination);
+                } <span class="enscript-keyword">else</span> {
+                    rval = kIOReturnUnsupported;    <span class="enscript-comment">// kIOReturnNotFound?
+</span>                    <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+                }
+            }
+            
+            <span class="enscript-keyword">break</span>;
+        }
+            
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOReportTraceOnChange</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOReportNotifyHubOnChange</span>:
+        <span class="enscript-reference">default</span>:
+            rval = kIOReturnUnsupported;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    rval = kIOReturnSuccess;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">if</span> (iterator)       iterator-&gt;release();
+
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">// the duplication in these functions almost makes one want Objective-C SEL* ;)
+</span>IOReturn
+<span class="enscript-function-name">IOReporter::updateAllReports</span>(OSSet *reporters,
+                             IOReportChannelList *channelList,
+                             IOReportConfigureAction action,
+                             <span class="enscript-type">void</span> *result,
+                             <span class="enscript-type">void</span> *destination)
+{
+    IOReturn rval = kIOReturnError;
+    OSCollectionIterator *iterator = NULL;
+
+    <span class="enscript-keyword">if</span> (reporters == NULL ||
+            channelList == NULL ||
+            result == NULL ||
+            destination == NULL) {
+        rval = kIOReturnBadArgument;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-keyword">switch</span> (action) {
+            
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOReportCopyChannelData</span>:
+        {
+            OSObject * object;
+            iterator = OSCollectionIterator::withCollection(reporters);
+            
+            <span class="enscript-keyword">while</span> ((object = iterator-&gt;getNextObject())) {
+                
+                IOReporter *rep = OSDynamicCast(IOReporter, object);
+                
+                <span class="enscript-keyword">if</span> (rep) {
+                    (<span class="enscript-type">void</span>)rep-&gt;updateReport(channelList, action, result, destination);
+                } <span class="enscript-keyword">else</span> {
+                    rval = kIOReturnUnsupported;    <span class="enscript-comment">// kIOReturnNotFound?
+</span>                    <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+                }
+            }
+            
+            <span class="enscript-keyword">break</span>;
+        }
+            
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOReportTraceChannelData</span>:
+        <span class="enscript-reference">default</span>:
+            rval = kIOReturnUnsupported;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    rval = kIOReturnSuccess;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">if</span> (iterator)       iterator-&gt;release();
+
+    <span class="enscript-keyword">return</span> rval;
+}
+
+
+<span class="enscript-comment">/**************************************/</span>
+<span class="enscript-comment">/***       COMMON INIT METHODS      ***/</span>
+<span class="enscript-comment">/**************************************/</span>
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IOReporter::init</span>(IOService *reportingService,
+                 IOReportChannelType channelType,
+                 IOReportUnits unit)
+{
+    <span class="enscript-type">bool</span> success = false;
+
+    <span class="enscript-comment">// ::free() relies on these being initialized
+</span>    _reporterLock = NULL;
+    _configLock = NULL;
+    _elements = NULL;
+    _enableCounts = NULL;
+    _channelNames = NULL;
+
+    <span class="enscript-keyword">if</span> (channelType.report_format == kIOReportInvalidFormat) {
+        IORLOG(<span class="enscript-string">&quot;init ERROR: Channel Type ill-defined&quot;</span>);
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    _driver_id = reportingService-&gt;getRegistryEntryID();
+    <span class="enscript-keyword">if</span> (_driver_id == 0) {
+        IORLOG(<span class="enscript-string">&quot;init() ERROR: no registry ID&quot;</span>);
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+        
+    <span class="enscript-keyword">if</span> (!super::init()) <span class="enscript-keyword">return</span> false;
+
+    _channelDimension = channelType.nelements;
+    _channelType = channelType;
+    <span class="enscript-comment">// FIXME: need to look up dynamically
+</span>    <span class="enscript-keyword">if</span> (unit == kIOReportUnitHWTicks) {
+#<span class="enscript-reference">if</span>   <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+        <span class="enscript-comment">// Most, but not all Macs use 1GHz
+</span>        unit = kIOReportUnit1GHzTicks;
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">kIOReportUnitHWTicks</span> <span class="enscript-variable-name">not</span> <span class="enscript-variable-name">defined</span>
+#<span class="enscript-reference">endif</span>
+    }
+    _unit = unit;
+    
+    <span class="enscript-comment">// Allocate a reporter (data) lock
+</span>    _reporterLock = IOSimpleLockAlloc();
+    <span class="enscript-keyword">if</span> (!_reporterLock)     <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    _reporterIsLocked = false;
+    
+    <span class="enscript-comment">// Allocate a config lock
+</span>    _configLock = IOLockAlloc();
+    <span class="enscript-keyword">if</span> (!_configLock)       <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    _reporterConfigIsLocked = false;    
+    
+    <span class="enscript-comment">// Allocate channel names array
+</span>    _channelNames = OSArray::withCapacity(1);
+    <span class="enscript-keyword">if</span> (!_channelNames)     <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    
+    <span class="enscript-comment">// success
+</span>    success = true;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">if</span> (!success) {
+        <span class="enscript-keyword">if</span> (_configLock)        IOLockFree(_configLock);
+        <span class="enscript-keyword">if</span> (_reporterLock)      IOSimpleLockFree(_reporterLock);
+        <span class="enscript-keyword">if</span> (_channelNames)      _channelNames-&gt;release();
+    }
+
+    <span class="enscript-keyword">return</span> success;
+}
+
+
+<span class="enscript-comment">/*******************************/</span>
+<span class="enscript-comment">/***      PUBLIC METHODS     ***/</span>
+<span class="enscript-comment">/*******************************/</span>
+
+<span class="enscript-comment">// init() [possibly via init*()] must be called before free()
+</span><span class="enscript-comment">// to ensure that _&lt;var&gt; = NULL
+</span><span class="enscript-type">void</span>
+<span class="enscript-function-name">IOReporter::free</span>(<span class="enscript-type">void</span>)
+{    
+    <span class="enscript-keyword">if</span> (_configLock)         IOLockFree(_configLock);
+    <span class="enscript-keyword">if</span> (_reporterLock)       IOSimpleLockFree(_reporterLock);
+    
+    <span class="enscript-keyword">if</span> (_elements) {
+        PREFL_MEMOP_PANIC(_nElements, IOReportElement);
+        IOFree(_elements, (size_t)_nElements * <span class="enscript-keyword">sizeof</span>(IOReportElement));
+    }
+    <span class="enscript-keyword">if</span> (_enableCounts) {
+        PREFL_MEMOP_PANIC(_nChannels, <span class="enscript-type">int</span>);
+        IOFree(_enableCounts, (size_t)_nChannels * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+    }
+
+    <span class="enscript-reference">super</span>::free();
+}
+
+<span class="enscript-comment">/*
+#define TESTALLOC() do { \
+    void *tbuf;                 \
+    tbuf = IOMalloc(10);        \
+    IOFree(tbuf, 10);           \
+    IORLOG(&quot;%s:%d - _reporterIsLocked = %d &amp; allocation successful&quot;, \
+            __PRETTY_FUNCTION__, __LINE__, _reporterIsLocked); \
+} while (0);
+*/</span>
+IOReturn
+<span class="enscript-function-name">IOReporter::addChannel</span>(uint64_t channelID,
+                       <span class="enscript-type">const</span> <span class="enscript-type">char</span> *channelName <span class="enscript-comment">/* = NULL */</span>)
+{
+    IOReturn res = kIOReturnError, kerr;
+    <span class="enscript-type">const</span> OSSymbol *symChannelName = NULL;
+    <span class="enscript-type">int</span> oldNChannels, newNChannels = 0, freeNChannels = 0;
+    
+    IORLOG(<span class="enscript-string">&quot;IOReporter::addChannel %llx&quot;</span>, channelID);
+    
+    <span class="enscript-comment">// protect instance variables (but not contents)
+</span>    lockReporterConfig();
+
+    <span class="enscript-comment">// FIXME: Check if any channel is already present and return error
+</span>    
+    <span class="enscript-comment">// addChannel() always adds one channel
+</span>    oldNChannels = _nChannels;
+    <span class="enscript-keyword">if</span> (oldNChannels &lt; 0 || oldNChannels &gt; INT_MAX - 1) {
+        res = kIOReturnOverrun;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    newNChannels = oldNChannels + 1;
+    freeNChannels = newNChannels;       <span class="enscript-comment">// until swap success
+</span>
+    <span class="enscript-comment">// Expand addChannel()-specific data structure
+</span>    <span class="enscript-keyword">if</span> (_channelNames-&gt;ensureCapacity((<span class="enscript-type">unsigned</span>)newNChannels) &lt;
+            (<span class="enscript-type">unsigned</span>)newNChannels) {
+        res = kIOReturnNoMemory; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    <span class="enscript-keyword">if</span> (channelName) {
+        symChannelName = OSSymbol::withCString(channelName);
+        <span class="enscript-keyword">if</span> (!symChannelName) {
+            res = kIOReturnNoMemory; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+    } <span class="enscript-keyword">else</span> {
+        <span class="enscript-comment">// grab a reference to our shared global
+</span>        symChannelName = gIOReportNoChannelName;
+        symChannelName-&gt;retain();
+    }
+
+    <span class="enscript-comment">// allocate new buffers into _swap* variables
+</span>    <span class="enscript-keyword">if</span> ((kerr = handleSwapPrepare(newNChannels))) {
+        <span class="enscript-comment">// on error, channels are *not* swapped
+</span>        res = kerr; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    <span class="enscript-comment">// exchange main and _swap* buffers with buffer contents protected
+</span>    <span class="enscript-comment">// IOReporter::handleAddChannelSwap() also increments _nElements, etc
+</span>    lockReporter();
+    res = handleAddChannelSwap(channelID, symChannelName);
+    unlockReporter();
+    <span class="enscript-comment">// On failure, handleAddChannelSwap() leaves *new* buffers in _swap*.
+</span>    <span class="enscript-comment">// On success, it's the old buffers, so we put the right size in here.
+</span>    <span class="enscript-keyword">if</span> (res == kIOReturnSuccess) {
+        freeNChannels = oldNChannels;
+    }
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-comment">// free up not-in-use buffers (tracked by _swap*)
+</span>    handleSwapCleanup(freeNChannels);
+    <span class="enscript-keyword">if</span> (symChannelName)     symChannelName-&gt;release();
+    unlockReporterConfig();
+
+    <span class="enscript-keyword">return</span> res;
+}
+
+
+IOReportLegendEntry*
+<span class="enscript-function-name">IOReporter::createLegend</span>(<span class="enscript-type">void</span>)
+{
+    IOReportLegendEntry *legendEntry = NULL;
+    
+    lockReporterConfig();
+    
+    legendEntry = handleCreateLegend();
+    
+    unlockReporterConfig();
+    
+    <span class="enscript-keyword">return</span> legendEntry;
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOReporter::configureReport</span>(IOReportChannelList *channelList,
+                            IOReportConfigureAction action,
+                            <span class="enscript-type">void</span> *result,
+                            <span class="enscript-type">void</span> *destination)
+{
+    IOReturn res = kIOReturnError;
+    
+    lockReporterConfig();
+    
+    res = handleConfigureReport(channelList, action, result, destination);
+    
+    unlockReporterConfig();
+    
+    <span class="enscript-keyword">return</span> res;
+    
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOReporter::updateReport</span>(IOReportChannelList *channelList,
+                         IOReportConfigureAction action,
+                         <span class="enscript-type">void</span> *result,
+                         <span class="enscript-type">void</span> *destination)
+{
+    IOReturn res = kIOReturnError;
+    
+    lockReporter();
+    
+    res = handleUpdateReport(channelList, action, result, destination);
+    
+    unlockReporter();
+    
+    <span class="enscript-keyword">return</span> res;
+    
+}
+
+
+<span class="enscript-comment">/*******************************/</span>
+<span class="enscript-comment">/***    PROTECTED METHODS    ***/</span>
+<span class="enscript-comment">/*******************************/</span>
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">IOReporter::lockReporter</span>()
+{
+    _interruptState = IOSimpleLockLockDisableInterrupt(_reporterLock);
+    _reporterIsLocked = true;
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">IOReporter::unlockReporter</span>()
+{
+    _reporterIsLocked = false;
+    IOSimpleLockUnlockEnableInterrupt(_reporterLock, _interruptState);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">IOReporter::lockReporterConfig</span>()
+{
+    IOLockLock(_configLock);
+    _reporterConfigIsLocked = true;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">IOReporter::unlockReporterConfig</span>()
+{
+    _reporterConfigIsLocked = false;
+    IOLockUnlock(_configLock);
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOReporter::handleSwapPrepare</span>(<span class="enscript-type">int</span> newNChannels)
+{
+    IOReturn res = kIOReturnError;
+    <span class="enscript-type">int</span> newNElements;
+    size_t newElementsSize, newECSize;
+    
+    <span class="enscript-comment">// analyzer appeasement
+</span>    newElementsSize = newECSize = 0;
+    
+    <span class="enscript-comment">//IORLOG(&quot;IOReporter::handleSwapPrepare&quot;);
+</span>    
+    IOREPORTER_CHECK_CONFIG_LOCK();
+    
+    <span class="enscript-keyword">if</span> (newNChannels &lt; _nChannels) {
+        panic(<span class="enscript-string">&quot;%s doesn't support shrinking&quot;</span>, __func__);
+    }
+    <span class="enscript-keyword">if</span> (newNChannels &lt;= 0 || _channelDimension &lt;= 0) {
+        res = kIOReturnUnderrun;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    <span class="enscript-keyword">if</span> (_swapElements || _swapEnableCounts) {
+        panic(<span class="enscript-string">&quot;IOReporter::_swap* already in use&quot;</span>);
+    }
+
+    <span class="enscript-comment">// calculate the number of elements given #ch &amp; the dimension of each
+</span>    <span class="enscript-keyword">if</span> (newNChannels &lt; 0 || newNChannels &gt; INT_MAX / _channelDimension) {
+        res = kIOReturnOverrun;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    newNElements = newNChannels * _channelDimension;
+
+    <span class="enscript-comment">// Allocate memory for the new array of report elements
+</span>    PREFL_MEMOP_FAIL(newNElements, IOReportElement);
+    newElementsSize = (size_t)newNElements * <span class="enscript-keyword">sizeof</span>(IOReportElement);
+    _swapElements = (IOReportElement *)IOMalloc(newElementsSize);
+    <span class="enscript-keyword">if</span> (_swapElements == NULL) {
+        res = kIOReturnNoMemory; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    memset(_swapElements, 0, newElementsSize);
+    
+    <span class="enscript-comment">// Allocate memory for the new array of channel watch counts
+</span>    PREFL_MEMOP_FAIL(newNChannels, <span class="enscript-type">int</span>);
+    newECSize = (size_t)newNChannels * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>);
+    _swapEnableCounts = (<span class="enscript-type">int</span> *)IOMalloc(newECSize);
+    <span class="enscript-keyword">if</span> (_swapEnableCounts == NULL){
+        res = kIOReturnNoMemory; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    memset(_swapEnableCounts, 0, newECSize);
+    
+    <span class="enscript-comment">// success
+</span>    res = kIOReturnSuccess;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">if</span> (res) {
+        <span class="enscript-keyword">if</span> (_swapElements) {
+            IOFree(_swapElements, newElementsSize);
+            _swapElements = NULL;
+        }
+        <span class="enscript-keyword">if</span> (_swapEnableCounts) {
+            IOFree(_swapEnableCounts, newECSize);
+            _swapEnableCounts = NULL;
+        }
+    }
+
+    <span class="enscript-keyword">return</span> res;
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOReporter::handleAddChannelSwap</span>(uint64_t channel_id,
+                                 <span class="enscript-type">const</span> OSSymbol *symChannelName)
+{
+    IOReturn res = kIOReturnError;
+    <span class="enscript-type">int</span> cnt;
+    <span class="enscript-type">int</span> *tmpWatchCounts = NULL;
+    IOReportElement *tmpElements = NULL;
+    <span class="enscript-type">bool</span> swapComplete = false;
+    
+    <span class="enscript-comment">//IORLOG(&quot;IOReporter::handleSwap&quot;);
+</span>    
+    IOREPORTER_CHECK_CONFIG_LOCK();
+    IOREPORTER_CHECK_LOCK();
+    
+    <span class="enscript-keyword">if</span> (!_swapElements || !_swapEnableCounts) {
+        IORLOG(<span class="enscript-string">&quot;IOReporter::handleSwap ERROR swap variables uninitialized!&quot;</span>);
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-comment">// Copy any existing elements to the new location
+</span>    <span class="enscript-comment">//IORLOG(&quot;handleSwap (base) -&gt; copying %u elements over...&quot;, _nChannels);
+</span>    <span class="enscript-keyword">if</span> (_elements) {
+        PREFL_MEMOP_PANIC(_nElements, IOReportElement);
+        memcpy(_swapElements, _elements,
+               (size_t)_nElements * <span class="enscript-keyword">sizeof</span>(IOReportElement));
+        
+        PREFL_MEMOP_PANIC(_nElements, <span class="enscript-type">int</span>);
+        memcpy(_swapEnableCounts, _enableCounts,
+               (size_t)_nChannels * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+    }
+    
+    <span class="enscript-comment">// Update principal instance variables, keep old buffers for cleanup
+</span>    tmpElements = _elements;
+    _elements = _swapElements;
+    _swapElements = tmpElements;
+
+    tmpWatchCounts = _enableCounts;
+    _enableCounts = _swapEnableCounts;
+    _swapEnableCounts = tmpWatchCounts;
+
+    swapComplete = true;
+
+    <span class="enscript-comment">// but _nChannels &amp; _nElements is still the old (one smaller) size
+</span>
+    <span class="enscript-comment">// Initialize new element metadata (existing elements copied above)
+</span>    <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; _channelDimension; cnt++) {
+ 
+        _elements[_nElements + cnt].channel_id = channel_id;
+        _elements[_nElements + cnt].provider_id = _driver_id;
+        _elements[_nElements + cnt].channel_type = _channelType;
+        _elements[_nElements + cnt].channel_type.element_idx = cnt;
+ 
+        <span class="enscript-comment">//IOREPORTER_DEBUG_ELEMENT(_swapNElements + cnt);
+</span>    }
+    
+    <span class="enscript-comment">// Store a channel name at the end
+</span>    <span class="enscript-keyword">if</span> (!_channelNames-&gt;setObject((<span class="enscript-type">unsigned</span>)_nChannels, symChannelName)) {
+        <span class="enscript-comment">// Should never happen because we ensured capacity in addChannel()
+</span>        res = kIOReturnNoMemory;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-comment">// And update the metadata: addChannel() always adds just one channel
+</span>    _nChannels += 1;
+    _nElements += _channelDimension;
+ 
+    <span class="enscript-comment">// success
+</span>    res = kIOReturnSuccess;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">if</span> (res &amp;&amp; swapComplete) {
+        <span class="enscript-comment">// unswap so new buffers get cleaned up instead of old
+</span>        tmpElements = _elements;
+        _elements = _swapElements;
+        _swapElements = tmpElements;
+    
+        tmpWatchCounts = _enableCounts;
+        _enableCounts = _swapEnableCounts;
+        _swapEnableCounts = tmpWatchCounts;
+    }
+    <span class="enscript-keyword">return</span> res;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">IOReporter::handleSwapCleanup</span>(<span class="enscript-type">int</span> swapNChannels)
+{
+    <span class="enscript-type">int</span> swapNElements;
+
+    <span class="enscript-keyword">if</span> (!_channelDimension || swapNChannels &gt; INT_MAX / _channelDimension) {
+        panic(<span class="enscript-string">&quot;%s - can't free %d channels of dimension %d&quot;</span>, __func__,
+              swapNChannels, _channelDimension);
+    }
+    swapNElements = swapNChannels * _channelDimension;
+
+    IOREPORTER_CHECK_CONFIG_LOCK();
+
+    <span class="enscript-comment">// release buffers no longer used after swapping
+</span>    <span class="enscript-keyword">if</span> (_swapElements) {
+        PREFL_MEMOP_PANIC(swapNElements, IOReportElement);
+        IOFree(_swapElements, (size_t)swapNElements * <span class="enscript-keyword">sizeof</span>(IOReportElement));
+        _swapElements = NULL;
+    }
+    <span class="enscript-keyword">if</span> (_swapEnableCounts) {
+        PREFL_MEMOP_PANIC(swapNChannels, <span class="enscript-type">int</span>);
+        IOFree(_swapEnableCounts, (size_t)swapNChannels * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+        _swapEnableCounts = NULL;
+    }
+}
+
+
+<span class="enscript-comment">// The reporter wants to know if its channels have observers.
+</span><span class="enscript-comment">// Eventually we'll add some sort of bool ::anyChannelsInUse() which
+</span><span class="enscript-comment">// clients can use to cull unused reporters after configureReport(disable).
+</span>IOReturn
+<span class="enscript-function-name">IOReporter::handleConfigureReport</span>(IOReportChannelList *channelList,
+                                  IOReportConfigureAction action,
+                                  <span class="enscript-type">void</span> *result,
+                                  <span class="enscript-type">void</span> *destination)
+{
+    IOReturn res = kIOReturnError;
+    <span class="enscript-type">int</span> channel_index = 0;
+    uint32_t chIdx;
+    <span class="enscript-type">int</span> *nElements, *nChannels;
+
+    <span class="enscript-comment">// Check on channelList and result because used below
+</span>    <span class="enscript-keyword">if</span> (!channelList || !result)       <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+
+    <span class="enscript-comment">//IORLOG(&quot;IOReporter::configureReport action %u for %u channels&quot;,
+</span>    <span class="enscript-comment">//       action, channelList-&gt;nchannels);
+</span>    
+    <span class="enscript-comment">// Make sure channel is present, increase matching watch count, 'result'
+</span>    <span class="enscript-keyword">for</span> (chIdx = 0; chIdx &lt; channelList-&gt;nchannels; chIdx++) {
+        
+        <span class="enscript-keyword">if</span> (getChannelIndex(channelList-&gt;channels[chIdx].channel_id,
+                            &amp;channel_index) == kIOReturnSuccess) {
+            <span class="enscript-comment">// IORLOG(&quot;reporter %p recognizes channel %lld&quot;, this, channelList-&gt;channels[chIdx].channel_id);
+</span>
+            <span class="enscript-keyword">switch</span> (action) {
+                    
+                <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOReportEnable</span>:
+                    nChannels = (<span class="enscript-type">int</span>*)result;
+                    _enabled++;
+                    _enableCounts[channel_index]++;
+                    (*nChannels)++;
+                    <span class="enscript-keyword">break</span>;
+                    
+                <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOReportDisable</span>:
+                    nChannels = (<span class="enscript-type">int</span>*)result;
+                    _enabled--;
+                    _enableCounts[channel_index]--;
+                    (*nChannels)++;
+                    <span class="enscript-keyword">break</span>;
+                    
+                <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOReportGetDimensions</span>:
+                    nElements = (<span class="enscript-type">int</span> *)result;
+                    *nElements += _channelDimension;
+                    <span class="enscript-keyword">break</span>;
+                    
+                <span class="enscript-reference">default</span>:
+                    IORLOG(<span class="enscript-string">&quot;ERROR configureReport unknown action!&quot;</span>);
+                    <span class="enscript-keyword">break</span>;
+            }
+        }
+    }
+    
+    <span class="enscript-comment">// success
+</span>    res = kIOReturnSuccess;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> res;
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOReporter::handleUpdateReport</span>(IOReportChannelList *channelList,
+                               IOReportConfigureAction action,
+                               <span class="enscript-type">void</span> *result,
+                               <span class="enscript-type">void</span> *destination)
+{
+    IOReturn res = kIOReturnError;
+    <span class="enscript-type">int</span> *nElements = (<span class="enscript-type">int</span> *)result;
+    <span class="enscript-type">int</span> channel_index = 0;
+    uint32_t chIdx;
+    IOBufferMemoryDescriptor *dest;
+    
+    <span class="enscript-keyword">if</span> (!channelList || !result || !destination)    <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    
+    dest = OSDynamicCast(IOBufferMemoryDescriptor, (OSObject *)destination);
+    <span class="enscript-keyword">if</span> (dest == NULL) {
+        <span class="enscript-comment">// Invalid destination
+</span>        res = kIOReturnBadArgument;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-keyword">if</span> (!_enabled) {
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-keyword">for</span> (chIdx = 0; chIdx &lt; channelList-&gt;nchannels; chIdx++) {
+        
+        <span class="enscript-keyword">if</span> (getChannelIndex(channelList-&gt;channels[chIdx].channel_id,
+                            &amp;channel_index) == kIOReturnSuccess) {
+            
+            <span class="enscript-comment">//IORLOG(&quot;%s - found channel_id %llx @ index %d&quot;, __func__,
+</span>            <span class="enscript-comment">//       channelList-&gt;channels[chIdx].channel_id,
+</span>            <span class="enscript-comment">//       channel_index);
+</span>            
+            <span class="enscript-keyword">switch</span>(action) {
+                
+                <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOReportCopyChannelData</span>:
+                    res = updateChannelValues(channel_index);
+                    <span class="enscript-keyword">if</span> (res) {
+                        IORLOG(<span class="enscript-string">&quot;ERROR: updateChannelValues() failed: %x&quot;</span>, res);
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+                    }
+                    
+                    res = updateReportChannel(channel_index, nElements, dest);
+                    <span class="enscript-keyword">if</span> (res) {
+                        IORLOG(<span class="enscript-string">&quot;ERROR: updateReportChannel() failed: %x&quot;</span>, res);
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+                    }
+                    <span class="enscript-keyword">break</span>;
+                    
+                <span class="enscript-reference">default</span>:
+                    IORLOG(<span class="enscript-string">&quot;ERROR updateReport unknown action!&quot;</span>);
+                    res = kIOReturnError;
+                    <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+            }
+        }
+    }
+    
+    <span class="enscript-comment">// success
+</span>    res = kIOReturnSuccess;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> res;
+}
+
+
+IOReportLegendEntry*
+<span class="enscript-function-name">IOReporter::handleCreateLegend</span>(<span class="enscript-type">void</span>)
+{
+    IOReportLegendEntry *legendEntry = NULL;
+    OSArray *channelIDs;
+    
+    channelIDs = copyChannelIDs();
+    
+    <span class="enscript-keyword">if</span> (channelIDs) {
+        legendEntry = IOReporter::legendWith(channelIDs, _channelNames, _channelType, _unit);
+        channelIDs-&gt;release();
+    }
+    
+    <span class="enscript-keyword">return</span> legendEntry;
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOReporter::setElementValues</span>(<span class="enscript-type">int</span> element_index,
+                             IOReportElementValues *values,
+                             uint64_t record_time <span class="enscript-comment">/* = 0 */</span>)
+{
+    IOReturn res = kIOReturnError;
+    
+    IOREPORTER_CHECK_LOCK();
+
+    <span class="enscript-keyword">if</span> (record_time == 0) {
+        record_time = mach_absolute_time();
+    }
+    
+    <span class="enscript-keyword">if</span> (element_index &gt;= _nElements || values == NULL) {
+        res = kIOReturnBadArgument;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    memcpy(&amp;_elements[element_index].values, values, <span class="enscript-keyword">sizeof</span>(IOReportElementValues));
+    
+    _elements[element_index].timestamp = record_time;
+
+    <span class="enscript-comment">//IOREPORTER_DEBUG_ELEMENT(index);
+</span>    
+    res = kIOReturnSuccess;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> res;
+}
+
+
+<span class="enscript-type">const</span> IOReportElementValues*
+<span class="enscript-function-name">IOReporter::getElementValues</span>(<span class="enscript-type">int</span> element_index)
+{
+    IOReportElementValues *elementValues = NULL;
+    
+    IOREPORTER_CHECK_LOCK();
+    
+    <span class="enscript-keyword">if</span> (element_index &lt; 0 || element_index &gt;= _nElements) {
+        IORLOG(<span class="enscript-string">&quot;ERROR getElementValues out of bounds!&quot;</span>);
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    elementValues = &amp;_elements[element_index].values;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> elementValues;
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOReporter::updateChannelValues</span>(<span class="enscript-type">int</span> channel_index)
+{
+    <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOReporter::updateReportChannel</span>(<span class="enscript-type">int</span> channel_index,
+                                <span class="enscript-type">int</span> *nElements,
+                                IOBufferMemoryDescriptor *destination)
+{
+    IOReturn res = kIOReturnError;
+    <span class="enscript-type">int</span> start_element_idx, chElems;
+    size_t       size2cpy;
+
+    res = kIOReturnBadArgument;
+    <span class="enscript-keyword">if</span> (!nElements || !destination) {
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    <span class="enscript-keyword">if</span> (channel_index &gt; _nChannels) {
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    IOREPORTER_CHECK_LOCK();
+
+    res = kIOReturnOverrun;
+
+    start_element_idx = channel_index * _channelDimension;
+    <span class="enscript-keyword">if</span> (start_element_idx &gt;= _nElements)        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    
+    chElems = _elements[start_element_idx].channel_type.nelements;
+    
+    <span class="enscript-comment">// make sure we don't go beyond the end of _elements[_nElements-1]
+</span>    <span class="enscript-keyword">if</span> (start_element_idx + chElems &gt; _nElements) {
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    PREFL_MEMOP_FAIL(chElems, IOReportElement);
+    size2cpy = (size_t)chElems * <span class="enscript-keyword">sizeof</span>(IOReportElement);
+
+    <span class="enscript-comment">// make sure there's space in the destination
+</span>    <span class="enscript-keyword">if</span> (size2cpy &gt; (destination-&gt;getCapacity() - destination-&gt;getLength())) {
+        IORLOG(<span class="enscript-string">&quot;CRITICAL ERROR: Report Buffer Overflow (buffer cap %luB, length %luB, size2cpy %luB&quot;</span>,
+               (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)destination-&gt;getCapacity(),
+               (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)destination-&gt;getLength(),
+               (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)size2cpy);
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    destination-&gt;appendBytes(&amp;_elements[start_element_idx], size2cpy);
+    *nElements += chElems;
+    
+    res = kIOReturnSuccess;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> res;
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOReporter::copyElementValues</span>(<span class="enscript-type">int</span> element_index,
+                              IOReportElementValues *elementValues)
+{
+    IOReturn res = kIOReturnError;
+    
+    <span class="enscript-keyword">if</span> (!elementValues)     <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+
+    IOREPORTER_CHECK_LOCK();
+    
+    <span class="enscript-keyword">if</span> (element_index &gt;= _nElements) {
+        IORLOG(<span class="enscript-string">&quot;ERROR getElementValues out of bounds!&quot;</span>);
+        res = kIOReturnBadArgument;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    memcpy(elementValues, &amp;_elements[element_index].values, <span class="enscript-keyword">sizeof</span>(IOReportElementValues));
+    res = kIOReturnSuccess;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> res;
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOReporter::getFirstElementIndex</span>(uint64_t channel_id,
+                                 <span class="enscript-type">int</span> *index)
+{
+    IOReturn res = kIOReturnError;
+    <span class="enscript-type">int</span> channel_index = 0, element_index = 0;
+    
+    <span class="enscript-keyword">if</span> (!index)     <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    
+    res = getChannelIndices(channel_id, &amp;channel_index, &amp;element_index);
+    
+    <span class="enscript-keyword">if</span> (res == kIOReturnSuccess) {
+        *index = element_index;
+    }
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> res;
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOReporter::getChannelIndex</span>(uint64_t channel_id,
+                            <span class="enscript-type">int</span> *index)
+{
+    IOReturn res = kIOReturnError;
+    <span class="enscript-type">int</span> channel_index = 0, element_index = 0;
+    
+    <span class="enscript-keyword">if</span> (!index)     <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    
+    res = getChannelIndices(channel_id, &amp;channel_index, &amp;element_index);
+    
+    <span class="enscript-keyword">if</span> (res == kIOReturnSuccess) {
+        *index = channel_index;
+    }
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> res;
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOReporter::getChannelIndices</span>(uint64_t channel_id,
+                              <span class="enscript-type">int</span> *channel_index,
+                              <span class="enscript-type">int</span> *element_index)
+{
+    IOReturn res = kIOReturnNotFound;
+    <span class="enscript-type">int</span> chIdx, elemIdx;
+    
+    <span class="enscript-keyword">if</span> (!channel_index || !element_index)   <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    
+    <span class="enscript-keyword">for</span> (chIdx = 0; chIdx &lt; _nChannels; chIdx++) {
+        
+        elemIdx = chIdx * _channelDimension;
+        <span class="enscript-keyword">if</span> (elemIdx &gt;= _nElements) {
+            IORLOG(<span class="enscript-string">&quot;ERROR getChannelIndices out of bounds!&quot;</span>);
+            res = kIOReturnOverrun;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+                
+        <span class="enscript-keyword">if</span> (channel_id == _elements[elemIdx].channel_id) {
+            
+            <span class="enscript-comment">// The channel index does not care about the depth of elements...
+</span>            *channel_index = chIdx;
+            *element_index = elemIdx;
+            
+            res = kIOReturnSuccess;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+    }
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> res;    
+}
+
+<span class="enscript-comment">/********************************/</span>
+<span class="enscript-comment">/***      PRIVATE METHODS     ***/</span>
+<span class="enscript-comment">/********************************/</span>
+
+
+<span class="enscript-comment">// copyChannelIDs relies on the caller to take lock
+</span>OSArray*
+<span class="enscript-function-name">IOReporter::copyChannelIDs</span>()
+{
+    <span class="enscript-type">int</span>    cnt, cnt2;
+    OSArray        *channelIDs = NULL;
+    OSNumber       *tmpNum;
+    
+    channelIDs = OSArray::withCapacity((<span class="enscript-type">unsigned</span>)_nChannels);
+    
+    <span class="enscript-keyword">if</span> (!channelIDs)    <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    
+    <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; _nChannels; cnt++) {
+        
+        cnt2 = cnt * _channelDimension;
+        
+        <span class="enscript-comment">// Encapsulate the Channel ID in OSNumber
+</span>        tmpNum = OSNumber::withNumber(_elements[cnt2].channel_id, 64);
+        <span class="enscript-keyword">if</span> (!tmpNum) {
+            IORLOG(<span class="enscript-string">&quot;ERROR: Could not create array of channelIDs&quot;</span>);
+            channelIDs-&gt;release();
+            channelIDs = NULL;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+        
+        channelIDs-&gt;setObject((<span class="enscript-type">unsigned</span>)cnt, tmpNum);
+        tmpNum-&gt;release();
+    }
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> channelIDs;
+}
+
+
+<span class="enscript-comment">// DO NOT REMOVE THIS METHOD WHICH IS THE MAIN LEGEND CREATION FUNCTION
+</span><span class="enscript-comment">/*static */</span> IOReportLegendEntry*
+<span class="enscript-function-name">IOReporter::legendWith</span>(OSArray *channelIDs,
+                       OSArray *channelNames,
+                       IOReportChannelType channelType,
+                       IOReportUnits unit)
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>            cnt, chCnt;
+    uint64_t                type64;
+    OSNumber                *tmpNum;
+    <span class="enscript-type">const</span> OSSymbol          *tmpSymbol;
+    OSArray                 *channelLegendArray = NULL, *tmpChannelArray = NULL;
+    OSDictionary            *channelInfoDict = NULL;
+    IOReportLegendEntry     *legendEntry = NULL;
+    
+    <span class="enscript-comment">// No need to check validity of channelNames because param is optional
+</span>    <span class="enscript-keyword">if</span> (!channelIDs)    <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    chCnt = channelIDs-&gt;getCount();
+    
+    channelLegendArray = OSArray::withCapacity(chCnt);
+    
+    <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; chCnt; cnt++) {
+        
+        tmpChannelArray = OSArray::withCapacity(3);
+        
+        <span class="enscript-comment">// Encapsulate the Channel ID in OSNumber
+</span>        tmpChannelArray-&gt;setObject(kIOReportChannelIDIdx, channelIDs-&gt;getObject(cnt));
+        
+        <span class="enscript-comment">// Encapsulate the Channel Type in OSNumber
+</span>        memcpy(&amp;type64, &amp;channelType, <span class="enscript-keyword">sizeof</span>(type64));
+        tmpNum = OSNumber::withNumber(type64, 64);
+        <span class="enscript-keyword">if</span> (!tmpNum) {
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+        tmpChannelArray-&gt;setObject(kIOReportChannelTypeIdx, tmpNum);
+        tmpNum-&gt;release();
+        
+        <span class="enscript-comment">// Encapsulate the Channel Name in OSSymbol
+</span>        <span class="enscript-comment">// Use channelNames if provided
+</span>        <span class="enscript-keyword">if</span> (channelNames != NULL) {
+            tmpSymbol = OSDynamicCast(OSSymbol, channelNames-&gt;getObject(cnt));
+            <span class="enscript-keyword">if</span> (tmpSymbol &amp;&amp; tmpSymbol != gIOReportNoChannelName) {
+                tmpChannelArray-&gt;setObject(kIOReportChannelNameIdx, tmpSymbol);
+            } <span class="enscript-comment">// Else, skip and leave name field empty
+</span>        }
+        
+        channelLegendArray-&gt;setObject(cnt, tmpChannelArray);
+        tmpChannelArray-&gt;release();
+        tmpChannelArray = NULL;
+    }
+    
+    <span class="enscript-comment">// Stuff the legend entry only if we have channels...
+</span>    <span class="enscript-keyword">if</span> (channelLegendArray-&gt;getCount() != 0) {
+        
+        channelInfoDict = OSDictionary::withCapacity(1);
+        
+        <span class="enscript-keyword">if</span> (!channelInfoDict) {
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+        
+        tmpNum = OSNumber::withNumber(unit, 64);
+        <span class="enscript-keyword">if</span> (tmpNum) {
+            channelInfoDict-&gt;setObject(kIOReportLegendUnitKey, tmpNum);
+            tmpNum-&gt;release();
+        }
+        
+        legendEntry = OSDictionary::withCapacity(1);
+        
+        <span class="enscript-keyword">if</span> (legendEntry) {
+            legendEntry-&gt;setObject(kIOReportLegendChannelsKey, channelLegendArray);
+            legendEntry-&gt;setObject(kIOReportLegendInfoKey, channelInfoDict);
+        }
+    }
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">if</span> (tmpChannelArray)    tmpChannelArray-&gt;release();
+    <span class="enscript-keyword">if</span> (channelInfoDict)    channelInfoDict-&gt;release();
+    <span class="enscript-keyword">if</span> (channelLegendArray) channelLegendArray-&gt;release();
+    
+    <span class="enscript-keyword">return</span> legendEntry;
+}
+</pre>
+<hr />
+</body></html>

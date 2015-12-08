@@ -1,0 +1,506 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>device_tree.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">device_tree.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_FREE_COPYRIGHT@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/boot.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/device_tree.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine/vm_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">NULL</span>
+#<span class="enscript-reference">define</span>       <span class="enscript-variable-name">NULL</span>    ((void *) 0)
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">round_long</span>(x)	(((x) + 3UL) &amp; ~(3UL))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">next_prop</span>(x)	((DeviceTreeNodeProperty *) (((uintptr_t)x) + sizeof(DeviceTreeNodeProperty) + round_long(x-&gt;length)))
+
+<span class="enscript-comment">/* Entry*/</span>
+<span class="enscript-type">typedef</span> DeviceTreeNode *RealDTEntry;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> DTSavedScope {
+	<span class="enscript-type">struct</span> DTSavedScope * nextScope;
+	RealDTEntry scope;
+	RealDTEntry entry;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> index;		
+} *DTSavedScopePtr;
+
+<span class="enscript-comment">/* Entry Iterator*/</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> OpaqueDTEntryIterator {
+	RealDTEntry outerScope;
+	RealDTEntry currentScope;
+	RealDTEntry currentEntry;
+	DTSavedScopePtr savedScope;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> currentIndex;		
+} *RealDTEntryIterator;
+
+<span class="enscript-comment">/* Property Iterator*/</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> OpaqueDTPropertyIterator {
+	RealDTEntry entry;
+	DeviceTreeNodeProperty *currentProperty;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> currentIndex;
+} *RealDTPropertyIterator;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> DTInitialized;
+<span class="enscript-type">static</span> RealDTEntry DTRootNode;
+
+<span class="enscript-comment">/*
+ * Support Routines
+ */</span>
+<span class="enscript-type">static</span> RealDTEntry
+<span class="enscript-function-name">skipProperties</span>(RealDTEntry entry)
+{
+	DeviceTreeNodeProperty *prop;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> k;
+
+	<span class="enscript-keyword">if</span> (entry == NULL || entry-&gt;nProperties == 0) {
+		<span class="enscript-keyword">return</span> NULL;
+	} <span class="enscript-keyword">else</span> {
+		prop = (DeviceTreeNodeProperty *) (entry + 1);
+		<span class="enscript-keyword">for</span> (k = 0; k &lt; entry-&gt;nProperties; k++) {
+			prop = next_prop(prop);
+		}
+	}
+	<span class="enscript-keyword">return</span> ((RealDTEntry) prop);
+}
+
+<span class="enscript-type">static</span> RealDTEntry
+<span class="enscript-function-name">skipTree</span>(RealDTEntry root)
+{
+	RealDTEntry entry;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> k;
+
+	entry = skipProperties(root);
+	<span class="enscript-keyword">if</span> (entry == NULL) {
+		<span class="enscript-keyword">return</span> NULL;
+	}
+	<span class="enscript-keyword">for</span> (k = 0; k &lt; root-&gt;nChildren; k++) {
+		entry = skipTree(entry);
+	}
+	<span class="enscript-keyword">return</span> entry;
+}
+
+<span class="enscript-type">static</span> RealDTEntry
+<span class="enscript-function-name">GetFirstChild</span>(RealDTEntry parent)
+{
+	<span class="enscript-keyword">return</span> skipProperties(parent);
+}
+
+<span class="enscript-type">static</span> RealDTEntry
+<span class="enscript-function-name">GetNextChild</span>(RealDTEntry sibling)
+{
+	<span class="enscript-keyword">return</span> skipTree(sibling);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">GetNextComponent</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *cp, <span class="enscript-type">char</span> *bp)
+{
+	size_t length = 0;
+	<span class="enscript-type">char</span> *origbp = bp;
+
+	<span class="enscript-keyword">while</span> (*cp != 0) {
+		<span class="enscript-keyword">if</span> (*cp == kDTPathNameSeparator) {
+			cp++;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (++length &gt; kDTMaxEntryNameLength) {
+			*origbp = <span class="enscript-string">'\0'</span>;
+			<span class="enscript-keyword">return</span> cp;
+		}
+		*bp++ = *cp++;
+	}
+	*bp = 0;
+	<span class="enscript-keyword">return</span> cp;
+}
+
+<span class="enscript-type">static</span> RealDTEntry
+<span class="enscript-function-name">FindChild</span>(RealDTEntry cur, <span class="enscript-type">char</span> *buf)
+{
+	RealDTEntry	child;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>	index;
+	<span class="enscript-type">char</span> *			str;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	dummy;
+
+	<span class="enscript-keyword">if</span> (cur-&gt;nChildren == 0) {
+		<span class="enscript-keyword">return</span> NULL;
+	}
+	index = 1;
+	child = GetFirstChild(cur);
+	<span class="enscript-keyword">while</span> (1) {
+		<span class="enscript-keyword">if</span> (DTGetProperty(child, <span class="enscript-string">&quot;name&quot;</span>, (<span class="enscript-type">void</span> **)&amp;str, &amp;dummy) != kSuccess) {
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (strcmp(str, buf) == 0) {
+			<span class="enscript-keyword">return</span> child;
+		}
+		<span class="enscript-keyword">if</span> (index &gt;= cur-&gt;nChildren) {
+			<span class="enscript-keyword">break</span>;
+		}
+		child = GetNextChild(child);
+		index++;
+	}
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+
+<span class="enscript-comment">/*
+ * External Routines
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">DTInit</span>(<span class="enscript-type">void</span> *base)
+{
+	DTRootNode = (RealDTEntry) base;
+	DTInitialized = (DTRootNode != 0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">DTEntryIsEqual</span>(<span class="enscript-type">const</span> DTEntry ref1, <span class="enscript-type">const</span> DTEntry ref2)
+{
+	<span class="enscript-comment">/* equality of pointers */</span>
+	<span class="enscript-keyword">return</span> (ref1 == ref2);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> *startingP;		<span class="enscript-comment">// needed for find_entry
+</span><span class="enscript-type">int</span> <span class="enscript-function-name">find_entry</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *propName, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *propValue, DTEntry *entryH);
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">DTFindEntry</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *propName, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *propValue, DTEntry *entryH)
+{
+	<span class="enscript-keyword">if</span> (!DTInitialized) {
+		<span class="enscript-keyword">return</span> kError;
+	}
+
+	startingP = (<span class="enscript-type">char</span> *)DTRootNode;
+	<span class="enscript-keyword">return</span>(find_entry(propName, propValue, entryH));
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">find_entry</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *propName, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *propValue, DTEntry *entryH)
+{
+	DeviceTreeNode *nodeP = (DeviceTreeNode *) (<span class="enscript-type">void</span> *) startingP;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> k;
+
+	<span class="enscript-keyword">if</span> (nodeP-&gt;nProperties == 0) <span class="enscript-keyword">return</span>(kError);	<span class="enscript-comment">// End of the list of nodes
+</span>	startingP = (<span class="enscript-type">char</span> *) (nodeP + 1);
+
+	<span class="enscript-comment">// Search current entry
+</span>	<span class="enscript-keyword">for</span> (k = 0; k &lt; nodeP-&gt;nProperties; ++k) {
+		DeviceTreeNodeProperty *propP = (DeviceTreeNodeProperty *) (<span class="enscript-type">void</span> *) startingP;
+
+		startingP += <span class="enscript-keyword">sizeof</span> (*propP) + ((propP-&gt;length + 3) &amp; -4);
+
+		<span class="enscript-keyword">if</span> (strcmp (propP-&gt;name, propName) == 0) {
+			<span class="enscript-keyword">if</span> (propValue == NULL || strcmp( (<span class="enscript-type">char</span> *)(propP + 1), propValue) == 0)
+			{
+				*entryH = (DTEntry)nodeP;
+				<span class="enscript-keyword">return</span>(kSuccess);
+			}
+		}
+	}
+
+	<span class="enscript-comment">// Search child nodes
+</span>	<span class="enscript-keyword">for</span> (k = 0; k &lt; nodeP-&gt;nChildren; ++k)
+	{
+		<span class="enscript-keyword">if</span> (find_entry(propName, propValue, entryH) == kSuccess)
+			<span class="enscript-keyword">return</span>(kSuccess);
+	}
+	<span class="enscript-keyword">return</span>(kError);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">DTLookupEntry</span>(<span class="enscript-type">const</span> DTEntry searchPoint, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *pathName, DTEntry *foundEntry)
+{
+	DTEntryNameBuf	buf;
+	RealDTEntry	cur;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *	cp;
+
+	<span class="enscript-keyword">if</span> (!DTInitialized) {
+		<span class="enscript-keyword">return</span> kError;
+	}
+	<span class="enscript-keyword">if</span> (searchPoint == NULL) {
+		cur = DTRootNode;
+	} <span class="enscript-keyword">else</span> {
+		cur = searchPoint;
+	}
+	cp = pathName;
+	<span class="enscript-keyword">if</span> (*cp == kDTPathNameSeparator) {
+		cp++;
+		<span class="enscript-keyword">if</span> (*cp == 0) {
+			*foundEntry = cur;
+			<span class="enscript-keyword">return</span> kSuccess;
+		}
+	}
+	<span class="enscript-keyword">do</span> {
+		cp = GetNextComponent(cp, buf);
+
+		<span class="enscript-comment">/* Check for done */</span>
+		<span class="enscript-keyword">if</span> (*buf == 0) {
+			<span class="enscript-keyword">if</span> (*cp == 0) {
+				*foundEntry = cur;
+				<span class="enscript-keyword">return</span> kSuccess;
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+
+		cur = FindChild(cur, buf);
+
+	} <span class="enscript-keyword">while</span> (cur != NULL);
+
+	<span class="enscript-keyword">return</span> kError;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">DTCreateEntryIterator</span>(<span class="enscript-type">const</span> DTEntry startEntry, DTEntryIterator *iterator)
+{
+	RealDTEntryIterator iter;
+
+	<span class="enscript-keyword">if</span> (!DTInitialized) {
+		<span class="enscript-keyword">return</span> kError;
+	}
+
+	iter = (RealDTEntryIterator) kalloc(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> OpaqueDTEntryIterator));
+	<span class="enscript-keyword">if</span> (startEntry != NULL) {
+		iter-&gt;outerScope = (RealDTEntry) startEntry;
+		iter-&gt;currentScope = (RealDTEntry) startEntry;
+	} <span class="enscript-keyword">else</span> {
+		iter-&gt;outerScope = DTRootNode;
+		iter-&gt;currentScope = DTRootNode;
+	}
+	iter-&gt;currentEntry = NULL;
+	iter-&gt;savedScope = NULL;
+	iter-&gt;currentIndex = 0;
+
+	*iterator = iter;
+	<span class="enscript-keyword">return</span> kSuccess;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">DTDisposeEntryIterator</span>(DTEntryIterator iterator)
+{
+	RealDTEntryIterator iter = iterator;
+	DTSavedScopePtr scope;
+
+	<span class="enscript-keyword">while</span> ((scope = iter-&gt;savedScope) != NULL) {
+		iter-&gt;savedScope = scope-&gt;nextScope;
+		kfree(scope, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> DTSavedScope));
+	}
+	kfree(iterator, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> OpaqueDTEntryIterator));
+	<span class="enscript-keyword">return</span> kSuccess;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">DTEnterEntry</span>(DTEntryIterator iterator, DTEntry childEntry)
+{
+	RealDTEntryIterator iter = iterator;
+	DTSavedScopePtr newScope;
+
+	<span class="enscript-keyword">if</span> (childEntry == NULL) {
+		<span class="enscript-keyword">return</span> kError;
+	}
+	newScope = (DTSavedScopePtr) kalloc(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> DTSavedScope));
+	newScope-&gt;nextScope = iter-&gt;savedScope;
+	newScope-&gt;scope = iter-&gt;currentScope;
+	newScope-&gt;entry = iter-&gt;currentEntry;
+	newScope-&gt;index = iter-&gt;currentIndex;		
+
+	iter-&gt;currentScope = childEntry;
+	iter-&gt;currentEntry = NULL;
+	iter-&gt;savedScope = newScope;
+	iter-&gt;currentIndex = 0;
+
+	<span class="enscript-keyword">return</span> kSuccess;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">DTExitEntry</span>(DTEntryIterator iterator, DTEntry *currentPosition)
+{
+	RealDTEntryIterator iter = iterator;
+	DTSavedScopePtr newScope;
+
+	newScope = iter-&gt;savedScope;
+	<span class="enscript-keyword">if</span> (newScope == NULL) {
+		<span class="enscript-keyword">return</span> kError;
+	}
+	iter-&gt;savedScope = newScope-&gt;nextScope;
+	iter-&gt;currentScope = newScope-&gt;scope;
+	iter-&gt;currentEntry = newScope-&gt;entry;
+	iter-&gt;currentIndex = newScope-&gt;index;
+	*currentPosition = iter-&gt;currentEntry;
+
+	kfree(newScope, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> DTSavedScope));
+
+	<span class="enscript-keyword">return</span> kSuccess;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">DTIterateEntries</span>(DTEntryIterator iterator, DTEntry *nextEntry)
+{
+	RealDTEntryIterator iter = iterator;
+
+	<span class="enscript-keyword">if</span> (iter-&gt;currentIndex &gt;= iter-&gt;currentScope-&gt;nChildren) {
+		*nextEntry = NULL;
+		<span class="enscript-keyword">return</span> kIterationDone;
+	} <span class="enscript-keyword">else</span> {
+		iter-&gt;currentIndex++;
+		<span class="enscript-keyword">if</span> (iter-&gt;currentIndex == 1) {
+			iter-&gt;currentEntry = GetFirstChild(iter-&gt;currentScope);
+		} <span class="enscript-keyword">else</span> {
+			iter-&gt;currentEntry = GetNextChild(iter-&gt;currentEntry);
+		}
+		*nextEntry = iter-&gt;currentEntry;
+		<span class="enscript-keyword">return</span> kSuccess;
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">DTRestartEntryIteration</span>(DTEntryIterator iterator)
+{
+	RealDTEntryIterator iter = iterator;
+#<span class="enscript-reference">if</span> 0
+	<span class="enscript-comment">// This commented out code allows a second argument (outer)
+</span>	<span class="enscript-comment">// which (if true) causes restarting at the outer scope
+</span>	<span class="enscript-comment">// rather than the current scope.
+</span>	DTSavedScopePtr scope;
+
+	<span class="enscript-keyword">if</span> (outer) {
+		<span class="enscript-keyword">while</span> ((scope = iter-&gt;savedScope) != NULL) {
+			iter-&gt;savedScope = scope-&gt;nextScope;
+			kfree((vm_offset_t) scope, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> DTSavedScope));
+		}
+		iter-&gt;currentScope = iter-&gt;outerScope;
+	}
+#<span class="enscript-reference">endif</span>
+	iter-&gt;currentEntry = NULL;
+	iter-&gt;currentIndex = 0;
+	<span class="enscript-keyword">return</span> kSuccess;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">DTGetProperty</span>(<span class="enscript-type">const</span> DTEntry entry, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *propertyName, <span class="enscript-type">void</span> **propertyValue, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *propertySize)
+{
+	DeviceTreeNodeProperty *prop;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> k;
+
+	<span class="enscript-keyword">if</span> (entry == NULL || entry-&gt;nProperties == 0) {
+		<span class="enscript-keyword">return</span> kError;
+	} <span class="enscript-keyword">else</span> {
+		prop = (DeviceTreeNodeProperty *) (entry + 1);
+		<span class="enscript-keyword">for</span> (k = 0; k &lt; entry-&gt;nProperties; k++) {
+			<span class="enscript-keyword">if</span> (strcmp(prop-&gt;name, propertyName) == 0) {
+				*propertyValue = (<span class="enscript-type">void</span> *) (((uintptr_t)prop)
+						+ <span class="enscript-keyword">sizeof</span>(DeviceTreeNodeProperty));
+				*propertySize = prop-&gt;length;
+				<span class="enscript-keyword">return</span> kSuccess;
+			}
+			prop = next_prop(prop);
+		}
+	}
+	<span class="enscript-keyword">return</span> kError;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">DTCreatePropertyIterator</span>(<span class="enscript-type">const</span> DTEntry entry, DTPropertyIterator *iterator)
+{
+	RealDTPropertyIterator iter;
+
+	iter = (RealDTPropertyIterator) kalloc(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> OpaqueDTPropertyIterator));
+	iter-&gt;entry = entry;
+	iter-&gt;currentProperty = NULL;
+	iter-&gt;currentIndex = 0;
+
+	*iterator = iter;
+	<span class="enscript-keyword">return</span> kSuccess;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">DTDisposePropertyIterator</span>(DTPropertyIterator iterator)
+{
+	kfree(iterator, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> OpaqueDTPropertyIterator));
+	<span class="enscript-keyword">return</span> kSuccess;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">DTIterateProperties</span>(DTPropertyIterator iterator, <span class="enscript-type">char</span> **foundProperty)
+{
+	RealDTPropertyIterator iter = iterator;
+
+	<span class="enscript-keyword">if</span> (iter-&gt;currentIndex &gt;= iter-&gt;entry-&gt;nProperties) {
+		*foundProperty = NULL;
+		<span class="enscript-keyword">return</span> kIterationDone;
+	} <span class="enscript-keyword">else</span> {
+		iter-&gt;currentIndex++;
+		<span class="enscript-keyword">if</span> (iter-&gt;currentIndex == 1) {
+			iter-&gt;currentProperty = (DeviceTreeNodeProperty *) (iter-&gt;entry + 1);
+		} <span class="enscript-keyword">else</span> {
+			iter-&gt;currentProperty = next_prop(iter-&gt;currentProperty);
+		}
+		*foundProperty = iter-&gt;currentProperty-&gt;name;
+		<span class="enscript-keyword">return</span> kSuccess;
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">DTRestartPropertyIteration</span>(DTPropertyIterator iterator)
+{
+	RealDTPropertyIterator iter = iterator;
+
+	iter-&gt;currentProperty = NULL;
+	iter-&gt;currentIndex = 0;
+	<span class="enscript-keyword">return</span> kSuccess;
+}
+
+</pre>
+<hr />
+</body></html>

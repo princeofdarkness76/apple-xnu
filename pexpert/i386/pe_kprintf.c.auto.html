@@ -1,0 +1,179 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pe_kprintf.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pe_kprintf.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * file: pe_kprintf.c
+ *    i386 platform expert debugging output initialization.
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdarg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/simple_lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_cpu.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/pal_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/proc_reg.h&gt;</span>
+
+<span class="enscript-comment">/* Globals */</span>
+<span class="enscript-function-name">void</span> (*PE_kputc)(<span class="enscript-type">char</span> c);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span> 
+<span class="enscript-comment">/* DEBUG kernel starts with true serial, but
+ * may later disable or switch to video
+ * console */</span>
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> disable_serial_output = FALSE;
+#<span class="enscript-reference">else</span>
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> disable_serial_output = TRUE;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-function-name">decl_simple_lock_data</span>(<span class="enscript-type">static</span>, kprintf_lock)
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PE_init_kprintf</span>(boolean_t vm_initialized)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	boot_arg;
+
+	<span class="enscript-keyword">if</span> (PE_state.initialized == FALSE)
+		panic(<span class="enscript-string">&quot;Platform Expert not initialized&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (!vm_initialized) {
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> new_disable_serial_output = TRUE;
+
+		simple_lock_init(&amp;kprintf_lock, 0);
+
+		<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;debug&quot;</span>, &amp;boot_arg, <span class="enscript-keyword">sizeof</span> (boot_arg)))
+			<span class="enscript-keyword">if</span> (boot_arg &amp; DB_KPRT)
+				new_disable_serial_output = FALSE;
+
+		<span class="enscript-comment">/* If we are newly enabling serial, make sure we only
+		 * call pal_serial_init() if our previous state was
+		 * not enabled */</span>
+		<span class="enscript-keyword">if</span> (!new_disable_serial_output &amp;&amp; (!disable_serial_output || pal_serial_init()))
+			PE_kputc = pal_serial_putc;
+		<span class="enscript-keyword">else</span>
+			PE_kputc = cnputc;
+
+		disable_serial_output = new_disable_serial_output;
+	}
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_NO_KPRINTF_STRINGS</span>
+<span class="enscript-comment">/* Prevent CPP from breaking the definition below */</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">kprintf</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MP_DEBUG</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">_kprintf</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *format, ...)
+{
+	va_list   listp;
+
+        va_start(listp, format);
+        _doprnt(format, &amp;listp, PE_kputc, 16);
+        va_end(listp);
+}
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MP_DEBUG_KPRINTF</span>(x...)	_kprintf(x)
+#<span class="enscript-reference">else</span>  <span class="enscript-comment">/* MP_DEBUG */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MP_DEBUG_KPRINTF</span>(x...)
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MP_DEBUG */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> cpu_last_locked = 0;
+<span class="enscript-type">void</span> <span class="enscript-function-name">kprintf</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *fmt, ...)
+{
+	va_list   listp;
+	boolean_t state;
+
+	<span class="enscript-keyword">if</span> (!disable_serial_output) {
+		boolean_t early = FALSE;
+		<span class="enscript-keyword">if</span> (rdmsr64(MSR_IA32_GS_BASE) == 0) {
+			early = TRUE;
+		}
+		<span class="enscript-comment">/* If PE_kputc has not yet been initialized, don't
+		 * take any locks, just dump to serial */</span>
+		<span class="enscript-keyword">if</span> (!PE_kputc || early) {
+			va_start(listp, fmt);
+			_doprnt_log(fmt, &amp;listp, pal_serial_putc, 16);
+			va_end(listp);
+			<span class="enscript-keyword">return</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Spin to get kprintf lock but poll for incoming signals
+		 * while interrupts are masked.
+		 */</span>
+		state = ml_set_interrupts_enabled(FALSE);
+
+		pal_preemption_assert();
+
+		<span class="enscript-keyword">while</span> (!simple_lock_try(&amp;kprintf_lock)) {
+			(<span class="enscript-type">void</span>) cpu_signal_handler(NULL);
+		}
+
+		<span class="enscript-keyword">if</span> (cpu_number() != cpu_last_locked) {
+			MP_DEBUG_KPRINTF(<span class="enscript-string">&quot;[cpu%d...]\n&quot;</span>, cpu_number());
+			cpu_last_locked = cpu_number();
+		}
+
+		va_start(listp, fmt);
+		_doprnt(fmt, &amp;listp, PE_kputc, 16);
+		va_end(listp);
+
+		simple_unlock(&amp;kprintf_lock);
+		ml_set_interrupts_enabled(state);
+	}
+}
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kprintf_break_lock</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kprintf_break_lock</span>(<span class="enscript-type">void</span>)
+{
+	simple_lock_init(&amp;kprintf_lock, 0);
+}
+</pre>
+<hr />
+</body></html>

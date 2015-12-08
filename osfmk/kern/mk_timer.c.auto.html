@@ -1,0 +1,374 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mk_timer.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mk_timer.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000 Apple Computer, Inc.  All rights reserved.
+ *
+ * HISTORY
+ *
+ * 29 June 2000 (debo)
+ *  Created.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_traps.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_port_server.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mk_timer.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_space.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/mk_timer.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread_call.h&gt;</span>
+
+<span class="enscript-type">static</span> zone_t		mk_timer_zone;
+
+<span class="enscript-type">static</span> mach_port_qos_t mk_timer_qos = {
+	FALSE, TRUE, 0, <span class="enscript-keyword">sizeof</span> (mk_timer_expire_msg_t)
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	mk_timer_expire(
+				<span class="enscript-type">void</span>			*p0,
+				<span class="enscript-type">void</span>			*p1);
+
+mach_port_name_t
+<span class="enscript-function-name">mk_timer_create_trap</span>(
+	__unused <span class="enscript-type">struct</span> mk_timer_create_trap_args *args)
+{
+	mk_timer_t			timer;
+	ipc_space_t			myspace = current_space();
+	mach_port_name_t	name = MACH_PORT_NULL;
+	ipc_port_t			port;
+	kern_return_t		result;
+
+	timer = (mk_timer_t)zalloc(mk_timer_zone);
+	<span class="enscript-keyword">if</span> (timer == NULL)
+		<span class="enscript-keyword">return</span> (MACH_PORT_NULL);
+
+	result = mach_port_allocate_qos(myspace, MACH_PORT_RIGHT_RECEIVE,
+														&amp;mk_timer_qos, &amp;name);
+	<span class="enscript-keyword">if</span> (result == KERN_SUCCESS)
+		result = ipc_port_translate_receive(myspace, name, &amp;port);
+
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS) {
+		zfree(mk_timer_zone, timer);
+
+		<span class="enscript-keyword">return</span> (MACH_PORT_NULL);
+	}
+
+	simple_lock_init(&amp;timer-&gt;lock, 0);
+	thread_call_setup(&amp;timer-&gt;call_entry, mk_timer_expire, timer);
+	timer-&gt;is_armed = timer-&gt;is_dead = FALSE;
+	timer-&gt;active = 0;
+
+	timer-&gt;port = port;
+	ipc_kobject_set_atomically(port, (ipc_kobject_t)timer, IKOT_TIMER);
+
+	port-&gt;ip_srights++;
+	ip_reference(port);
+	ip_unlock(port);
+
+	<span class="enscript-keyword">return</span> (name);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mk_timer_port_destroy</span>(
+	ipc_port_t			port)
+{
+	mk_timer_t			timer = NULL;
+
+	ip_lock(port);
+	<span class="enscript-keyword">if</span> (ip_kotype(port) == IKOT_TIMER) {
+		timer = (mk_timer_t)port-&gt;ip_kobject;
+		assert(timer != NULL);
+		ipc_kobject_set_atomically(port, IKO_NULL, IKOT_NONE);
+		simple_lock(&amp;timer-&gt;lock);
+		assert(timer-&gt;port == port);
+	}
+	ip_unlock(port);
+
+	<span class="enscript-keyword">if</span> (timer != NULL) {
+		<span class="enscript-keyword">if</span> (thread_call_cancel(&amp;timer-&gt;call_entry))
+			timer-&gt;active--;
+		timer-&gt;is_armed = FALSE;
+
+		timer-&gt;is_dead = TRUE;
+		<span class="enscript-keyword">if</span> (timer-&gt;active == 0) {
+			simple_unlock(&amp;timer-&gt;lock);
+			zfree(mk_timer_zone, timer);
+
+			ipc_port_release_send(port);
+			<span class="enscript-keyword">return</span>;
+		}
+
+		simple_unlock(&amp;timer-&gt;lock);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mk_timer_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span>			s = <span class="enscript-keyword">sizeof</span> (mk_timer_data_t);
+
+	assert(!(mk_timer_zone != NULL));
+
+	mk_timer_zone = zinit(s, (4096 * s), (16 * s), <span class="enscript-string">&quot;mk_timer&quot;</span>);
+
+	zone_change(mk_timer_zone, Z_NOENCRYPT, TRUE);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mk_timer_expire</span>(
+	<span class="enscript-type">void</span>			*p0,
+	__unused <span class="enscript-type">void</span>		*p1)
+{
+	mk_timer_t			timer = p0;
+	ipc_port_t			port;
+
+	simple_lock(&amp;timer-&gt;lock);
+
+	<span class="enscript-keyword">if</span> (timer-&gt;active &gt; 1) {
+		timer-&gt;active--;
+		simple_unlock(&amp;timer-&gt;lock);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	port = timer-&gt;port;
+	assert(port != IP_NULL);
+	assert(timer-&gt;active == 1);
+
+	<span class="enscript-keyword">while</span> (timer-&gt;is_armed &amp;&amp; timer-&gt;active == 1) {
+		mk_timer_expire_msg_t		msg;
+
+		timer-&gt;is_armed = FALSE;
+		simple_unlock(&amp;timer-&gt;lock);
+
+		msg.header.msgh_bits =
+		    MACH_MSGH_BITS_SET(MACH_MSG_TYPE_COPY_SEND, 0, 0, 0);
+		msg.header.msgh_remote_port = port;
+		msg.header.msgh_local_port = MACH_PORT_NULL;
+		msg.header.msgh_voucher_port = MACH_PORT_NULL;
+		msg.header.msgh_id = 0;
+
+		msg.unused[0] = msg.unused[1] = msg.unused[2] = 0;
+
+		(<span class="enscript-type">void</span>) mach_msg_send_from_kernel_proper(&amp;msg.header, <span class="enscript-keyword">sizeof</span> (msg));
+
+		simple_lock(&amp;timer-&gt;lock);
+	}
+
+	<span class="enscript-keyword">if</span> (--timer-&gt;active == 0 &amp;&amp; timer-&gt;is_dead) {
+		simple_unlock(&amp;timer-&gt;lock);
+		zfree(mk_timer_zone, timer);
+
+		ipc_port_release_send(port);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	simple_unlock(&amp;timer-&gt;lock);
+}
+
+<span class="enscript-comment">/*
+ * mk_timer_destroy_trap: Destroy the Mach port associated with a timer
+ *
+ * Parameters:  args                     User argument descriptor (see below)
+ *
+ * Indirect:     args-&gt;name               Mach port name
+ *
+ *
+ * Returns:        0                      Success
+ *                !0                      Not success           
+ *
+ */</span>
+kern_return_t
+<span class="enscript-function-name">mk_timer_destroy_trap</span>(
+	<span class="enscript-type">struct</span> mk_timer_destroy_trap_args *args)
+{
+	mach_port_name_t	name = args-&gt;name;
+	ipc_space_t			myspace = current_space();
+	ipc_port_t			port;
+	kern_return_t		result;
+
+	result = ipc_port_translate_receive(myspace, name, &amp;port);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> (result);
+
+	<span class="enscript-keyword">if</span> (ip_kotype(port) == IKOT_TIMER) {
+		ip_unlock(port);
+		result = mach_port_destroy(myspace, name);
+	}
+	<span class="enscript-keyword">else</span> {
+		ip_unlock(port);
+		result = KERN_INVALID_ARGUMENT;
+	}
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ * mk_timer_arm_trap: Start (arm) a timer
+ *
+ * Parameters:  args                     User argument descriptor (see below)
+ *
+ * Indirect:     args-&gt;name               Mach port name
+ *               args-&gt;expire_time        Time when timer expires
+ *
+ *
+ * Returns:        0                      Success
+ *                !0                      Not success           
+ *
+ */</span>
+kern_return_t
+<span class="enscript-function-name">mk_timer_arm_trap</span>(
+	<span class="enscript-type">struct</span> mk_timer_arm_trap_args *args)
+{
+	mach_port_name_t		name = args-&gt;name;
+	uint64_t			expire_time = args-&gt;expire_time;
+	mk_timer_t			timer;
+	ipc_space_t			myspace = current_space();
+	ipc_port_t			port;
+	kern_return_t			result;
+
+	result = ipc_port_translate_receive(myspace, name, &amp;port);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> (result);
+
+	<span class="enscript-keyword">if</span> (ip_kotype(port) == IKOT_TIMER) {
+		timer = (mk_timer_t)port-&gt;ip_kobject;
+		assert(timer != NULL);
+
+		simple_lock(&amp;timer-&gt;lock);
+		assert(timer-&gt;port == port);
+		ip_unlock(port);
+
+		<span class="enscript-keyword">if</span> (!timer-&gt;is_dead) {
+			timer-&gt;is_armed = TRUE;
+
+			<span class="enscript-keyword">if</span> (expire_time &gt; mach_absolute_time()) {
+				<span class="enscript-keyword">if</span> (!thread_call_enter_delayed_with_leeway(&amp;timer-&gt;call_entry, NULL,
+									   expire_time, 0, THREAD_CALL_DELAY_USER_NORMAL))
+					timer-&gt;active++;
+			}
+			<span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> (!thread_call_enter1(&amp;timer-&gt;call_entry, NULL))
+					timer-&gt;active++;
+			}
+		}
+
+		simple_unlock(&amp;timer-&gt;lock);
+	}
+	<span class="enscript-keyword">else</span> {
+		ip_unlock(port);
+		result = KERN_INVALID_ARGUMENT;
+	}
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ * mk_timer_cancel_trap: Cancel a timer
+ *
+ * Parameters:  args                     User argument descriptor (see below)
+ *
+ * Indirect:     args-&gt;name               Mach port name
+ *               args-&gt;result_time        The armed time of the cancelled timer (return value)
+ *
+ *
+ * Returns:        0                      Success
+ *                !0                      Not success           
+ *
+ */</span>
+kern_return_t
+<span class="enscript-function-name">mk_timer_cancel_trap</span>(
+	<span class="enscript-type">struct</span> mk_timer_cancel_trap_args *args)
+{
+	mach_port_name_t	name = args-&gt;name;
+	mach_vm_address_t	result_time_addr = args-&gt;result_time; 
+	uint64_t			armed_time = 0;
+	mk_timer_t			timer;
+	ipc_space_t			myspace = current_space();
+	ipc_port_t			port;
+	kern_return_t		result;
+
+	result = ipc_port_translate_receive(myspace, name, &amp;port);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> (result);
+
+	<span class="enscript-keyword">if</span> (ip_kotype(port) == IKOT_TIMER) {
+		timer = (mk_timer_t)port-&gt;ip_kobject;
+		assert(timer != NULL);
+		simple_lock(&amp;timer-&gt;lock);
+		assert(timer-&gt;port == port);
+		ip_unlock(port);
+
+		<span class="enscript-keyword">if</span> (timer-&gt;is_armed) {
+			armed_time = timer-&gt;call_entry.tc_call.deadline;
+			<span class="enscript-keyword">if</span> (thread_call_cancel(&amp;timer-&gt;call_entry))
+				timer-&gt;active--;
+			timer-&gt;is_armed = FALSE;
+		}
+
+		simple_unlock(&amp;timer-&gt;lock);
+	}
+	<span class="enscript-keyword">else</span> {
+		ip_unlock(port);
+		result = KERN_INVALID_ARGUMENT;
+	}
+
+	<span class="enscript-keyword">if</span> (result == KERN_SUCCESS)
+		<span class="enscript-keyword">if</span> (	result_time_addr != 0										&amp;&amp;
+				copyout((<span class="enscript-type">void</span> *)&amp;armed_time, result_time_addr,
+								<span class="enscript-keyword">sizeof</span> (armed_time)) != 0					)
+			result = KERN_FAILURE;
+
+	<span class="enscript-keyword">return</span> (result);
+}
+</pre>
+<hr />
+</body></html>

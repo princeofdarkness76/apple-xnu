@@ -1,0 +1,2080 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>process.py</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">process.py&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+
+<span class="enscript-string">&quot;&quot;&quot; Please make sure you read the README file COMPLETELY BEFORE reading anything below.
+    It is very critical that you read coding guidelines in Section E in README file.
+&quot;&quot;&quot;</span>
+
+<span class="enscript-keyword">from</span> xnu <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">import</span> sys, shlex
+<span class="enscript-keyword">from</span> utils <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> core.lazytarget <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">import</span> time
+<span class="enscript-keyword">import</span> xnudefines
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetProcNameForTask</span>(task):
+    <span class="enscript-string">&quot;&quot;&quot; returns a string name of the process. if proc is not valid &quot;unknown&quot; is returned
+        params:
+            task: value object represeting a task in the kernel.
+        returns:
+            str : A string name of the process linked to the task
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> task <span class="enscript-keyword">or</span> <span class="enscript-keyword">not</span> unsigned(task.bsd_info):
+        <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;unknown&quot;</span>
+    p = Cast(task.bsd_info, <span class="enscript-string">'proc *'</span>)
+    <span class="enscript-keyword">return</span> str(p.p_comm)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetProcPIDForTask</span>(task):
+    <span class="enscript-string">&quot;&quot;&quot; returns a int pid of the process. if the proc is not valid, val[5] from audit_token is returned.
+        params:
+            task: value object representing a task in the kernel
+        returns:
+            int : pid of the process or -1 if not found
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> task <span class="enscript-keyword">and</span> unsigned(task.bsd_info):
+        p = Cast(task.bsd_info, <span class="enscript-string">'proc *'</span>)
+        <span class="enscript-keyword">return</span> unsigned(p.p_pid)
+    
+    <span class="enscript-keyword">if</span> task :
+        <span class="enscript-keyword">return</span> unsigned(task.audit_token.val[5])
+
+    <span class="enscript-keyword">return</span> -1
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetProcInfo</span>(proc):
+    <span class="enscript-string">&quot;&quot;&quot; returns a string name, pid, parent and task for a proc_t. Decodes cred, flag and p_stat fields.
+        params:
+            proc : value object representing a proc in the kernel
+        returns:
+            str : A string describing various information for process.
+    &quot;&quot;&quot;</span>
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    out_string += (<span class="enscript-string">&quot;Process {p: &lt;#020x}\n\tname {p.p_comm: &lt;20s}\n\tpid:{p.p_pid: &lt;6d} &quot;</span> + 
+                   <span class="enscript-string">&quot;task:{p.task: &lt;#020x} p_stat:{p.p_stat: &lt;6d} parent pid: {p.p_ppid: &lt;6d}\n&quot;</span>
+                   ).format(p=proc)
+    <span class="enscript-comment">#print the Creds
+</span>    ucred = proc.p_ucred
+    <span class="enscript-keyword">if</span> ucred:
+        out_string += <span class="enscript-string">&quot;Cred: euid {:d} ruid {:d} svuid {:d}\n&quot;</span>.format(ucred.cr_posix.cr_uid,
+                                                                      ucred.cr_posix.cr_ruid,
+                                                                      ucred.cr_posix.cr_svuid )
+    <span class="enscript-comment">#print the flags
+</span>    flags = int(proc.p_flag)
+    out_string += <span class="enscript-string">&quot;Flags: {0: &lt;#020x}\n&quot;</span>.format(flags)
+    i = 1
+    num = 1
+    <span class="enscript-keyword">while</span> num &lt;= flags:
+        <span class="enscript-keyword">if</span> flags &amp; num:
+            out_string += <span class="enscript-string">&quot;\t&quot;</span> + xnudefines.proc_flag_explain_strings[i] + <span class="enscript-string">&quot;\n&quot;</span>
+        <span class="enscript-keyword">elif</span> num == 0x4: <span class="enscript-comment">#special case for 32bit flag
+</span>            out_string += <span class="enscript-string">&quot;\t&quot;</span> + xnudefines.proc_flag_explain_strings[0] + <span class="enscript-string">&quot;\n&quot;</span>
+        i += 1
+        num = num &lt;&lt; 1
+    out_string += <span class="enscript-string">&quot;State: &quot;</span>
+    state_val = proc.p_stat
+    <span class="enscript-keyword">if</span> state_val &lt; 1 <span class="enscript-keyword">or</span> state_val &gt; len(xnudefines.proc_state_strings) :
+        out_string += <span class="enscript-string">&quot;(Unknown)&quot;</span>
+    <span class="enscript-keyword">else</span>:
+        out_string += xnudefines.proc_state_strings[int(state_val)]
+    
+    <span class="enscript-keyword">return</span> out_string
+    
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetProcNameForPid</span>(pid):
+    <span class="enscript-string">&quot;&quot;&quot; Finds the name of the process corresponding to a given pid
+        params:
+            pid     : int, pid you want to find the procname for
+        returns
+            str     : Name of the process corresponding to the pid, &quot;Unknown&quot; if not found
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">for</span> p <span class="enscript-keyword">in</span> kern.procs:
+        <span class="enscript-keyword">if</span> int(p.p_pid) == int(pid):
+            <span class="enscript-keyword">return</span> str(p.p_comm)
+    <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;Unknown&quot;</span>
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetProcForPid</span>(search_pid):
+    <span class="enscript-string">&quot;&quot;&quot; Finds the value object representing a proc in the kernel based on its pid
+        params:
+            search_pid  : int, pid whose proc structure you want to find
+        returns:
+            value       : The value object representing the proc, if a proc corresponding
+                          to the given pid is found. Returns None otherwise
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> search_pid == 0:
+        <span class="enscript-keyword">return</span> kern.globals.initproc
+    <span class="enscript-keyword">else</span>:
+        headp = kern.globals.allproc
+        <span class="enscript-keyword">for</span> proc <span class="enscript-keyword">in</span> IterateListEntry(headp, <span class="enscript-string">'struct proc *'</span>, <span class="enscript-string">'p_list'</span>):
+            <span class="enscript-keyword">if</span> proc.p_pid == search_pid:
+                <span class="enscript-keyword">return</span> proc
+        <span class="enscript-keyword">return</span> None
+
+@lldb_command(<span class="enscript-string">'allproc'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">AllProc</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Walk through the allproc structure and print procinfo for each process structure. 
+        params: 
+            cmd_args - [] : array of strings passed from lldb command prompt
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">for</span> proc <span class="enscript-keyword">in</span> kern.procs :
+        <span class="enscript-keyword">print</span> GetProcInfo(proc)
+    
+
+@lldb_command(<span class="enscript-string">'zombproc'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ZombProc</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to print out all procs in the zombie list
+        params: 
+            cmd_args - [] : array of strings passed from lldb command prompt
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> len(kern.zombprocs) != 0:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\nZombie Processes:&quot;</span>
+        <span class="enscript-keyword">for</span> proc <span class="enscript-keyword">in</span> kern.zombprocs:
+            <span class="enscript-keyword">print</span> GetProcInfo(proc) + <span class="enscript-string">&quot;\n\n&quot;</span>
+
+@lldb_command(<span class="enscript-string">'zombtasks'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ZombTasks</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to print out all tasks in the zombie list
+        params: None
+    &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> len(kern.zombprocs) != 0:
+        header = <span class="enscript-string">&quot;\nZombie Tasks:\n&quot;</span>
+        header += GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+        <span class="enscript-keyword">for</span> proc <span class="enscript-keyword">in</span> kern.zombprocs:
+            <span class="enscript-keyword">if</span> proc.p_stat != 5:
+                t = Cast(proc.task, <span class="enscript-string">'task *'</span>)
+                out_str += GetTaskSummary(t) +<span class="enscript-string">&quot; &quot;</span>+ GetProcSummary(proc) + <span class="enscript-string">&quot;\n&quot;</span>
+        <span class="enscript-keyword">if</span> out_str != <span class="enscript-string">&quot;&quot;</span>:
+            <span class="enscript-keyword">print</span> header
+            <span class="enscript-keyword">print</span> out_str
+
+@lldb_command(<span class="enscript-string">'zombstacks'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ZombStacks</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to print out all stacks of tasks that are exiting
+    &quot;&quot;&quot;</span>
+    header_flag = 0
+    <span class="enscript-keyword">for</span> proc <span class="enscript-keyword">in</span> kern.zombprocs:
+        <span class="enscript-keyword">if</span> proc.p_stat != 5:
+            <span class="enscript-keyword">if</span> header_flag == 0:
+                <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\nZombie Stacks:&quot;</span>
+                header_flag = 1
+            t = Cast(proc.task, <span class="enscript-string">'task *'</span>)
+            ShowTaskStacks(t)
+<span class="enscript-comment">#End of Zombstacks
+</span>
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetASTSummary</span>(ast):
+    <span class="enscript-string">&quot;&quot;&quot; Summarizes an AST field
+        Flags:
+        P - AST_PREEMPT
+        Q - AST_QUANTUM
+        U - AST_URGENT
+        H - AST_HANDOFF
+        Y - AST_YIELD
+        A - AST_APC
+        L - AST_LEDGER
+        B - AST_BSD
+        K - AST_KPERF
+        M - AST_MACF
+        C - AST_CHUD
+        C - AST_CHUD_URGENT
+        G - AST_GUARD
+        T - AST_TELEMETRY_USER
+        T - AST_TELEMETRY_KERNEL
+        T - AST_TELEMETRY_WINDOWED
+        S - AST_SFI
+    &quot;&quot;&quot;</span>
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    state = int(ast)
+    thread_state_chars = {0x0:<span class="enscript-string">''</span>, 0x1:<span class="enscript-string">'P'</span>, 0x2:<span class="enscript-string">'Q'</span>, 0x4:<span class="enscript-string">'U'</span>, 0x8:<span class="enscript-string">'H'</span>, 0x10:<span class="enscript-string">'Y'</span>, 0x20:<span class="enscript-string">'A'</span>,
+                          0x40:<span class="enscript-string">'L'</span>, 0x80:<span class="enscript-string">'B'</span>, 0x100:<span class="enscript-string">'K'</span>, 0x200:<span class="enscript-string">'M'</span>, 0x400:<span class="enscript-string">'C'</span>, 0x800:<span class="enscript-string">'C'</span>,
+                          0x1000:<span class="enscript-string">'G'</span>, 0x2000:<span class="enscript-string">'T'</span>, 0x4000:<span class="enscript-string">'T'</span>, 0x8000:<span class="enscript-string">'T'</span>, 0x10000:<span class="enscript-string">'S'</span>}
+    state_str = <span class="enscript-string">''</span>
+    mask = 0x1
+    <span class="enscript-keyword">while</span> mask &lt;= 0x10000:
+        state_str += thread_state_chars[int(state &amp; mask)]
+        mask = mask &lt;&lt; 1
+
+    <span class="enscript-keyword">return</span> state_str
+
+
+@lldb_type_summary([<span class="enscript-string">'kcdata_descriptor *'</span>, <span class="enscript-string">'kcdata_descriptor_t'</span>])
+@header(<span class="enscript-string">&quot;{0: &lt;20s} {1: &lt;20s} {2: &lt;20s} {3: &lt;10s} {4: &lt;5s}&quot;</span>.format(<span class="enscript-string">&quot;kcdata_descriptor&quot;</span>, <span class="enscript-string">&quot;begin_addr&quot;</span>, <span class="enscript-string">&quot;cur_pos&quot;</span>, <span class="enscript-string">&quot;size&quot;</span>, <span class="enscript-string">&quot;flags&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetKCDataSummary</span>(kcdata):
+    <span class="enscript-string">&quot;&quot;&quot; Summarizes kcdata_descriptor structure
+        params: kcdata: value - value object representing kcdata_descriptor
+        returns: str - summary of the kcdata object
+    &quot;&quot;&quot;</span>
+    format_string = <span class="enscript-string">&quot;{0: &lt;#020x} {1: &lt;#020x} {2: &lt;#020x} {3: &lt;10d} {4: &lt;#05x}&quot;</span>
+    <span class="enscript-keyword">return</span> format_string.format(kcdata, kcdata.kcd_addr_begin, kcdata.kcd_addr_end, kcdata.kcd_length, kcdata.kcd_flags)
+
+
+@lldb_type_summary([<span class="enscript-string">'task'</span>, <span class="enscript-string">'task_t'</span>])
+@header(<span class="enscript-string">&quot;{0: &lt;20s} {1: &lt;20s} {2: &lt;20s} {3: &gt;5s} {4: &lt;5s}&quot;</span>.format(<span class="enscript-string">&quot;task&quot;</span>,<span class="enscript-string">&quot;vm_map&quot;</span>, <span class="enscript-string">&quot;ipc_space&quot;</span>, <span class="enscript-string">&quot;#acts&quot;</span>, <span class="enscript-string">&quot;flags&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetTaskSummary</span>(task, showcorpse=False):
+    <span class="enscript-string">&quot;&quot;&quot; Summarizes the important fields in task structure.
+        params: task: value - value object representing a task in kernel
+        returns: str - summary of the task
+    &quot;&quot;&quot;</span>
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    format_string = <span class="enscript-string">'{0: &lt;#020x} {1: &lt;#020x} {2: &lt;#020x} {3: &gt;5d} {4: &lt;5s}'</span>
+    thread_count = int(task.thread_count)
+    task_flags = <span class="enscript-string">''</span>
+    <span class="enscript-keyword">if</span> hasattr(task, <span class="enscript-string">&quot;suppression_generation&quot;</span>) <span class="enscript-keyword">and</span> (int(task.suppression_generation) &amp; 0x1) == 0x1:
+        task_flags += <span class="enscript-string">'P'</span>
+    <span class="enscript-keyword">if</span> hasattr(task, <span class="enscript-string">&quot;suspend_count&quot;</span>) <span class="enscript-keyword">and</span> int(task.suspend_count) &gt; 0:
+        task_flags += <span class="enscript-string">'S'</span>
+    <span class="enscript-keyword">if</span> hasattr(task, <span class="enscript-string">'task_imp_base'</span>) <span class="enscript-keyword">and</span> unsigned(task.task_imp_base):
+        tib = task.task_imp_base
+        <span class="enscript-keyword">if</span> int(tib.iit_receiver) == 1:
+            task_flags += <span class="enscript-string">'R'</span>
+        <span class="enscript-keyword">if</span> int(tib.iit_donor) == 1:
+            task_flags += <span class="enscript-string">'D'</span>
+        <span class="enscript-keyword">if</span> int(tib.iit_assertcnt) &gt; 0:
+            task_flags += <span class="enscript-string">'B'</span>
+
+    <span class="enscript-comment"># check if corpse flag is set
+</span>    <span class="enscript-keyword">if</span> unsigned(task.t_flags) &amp; 0x20:
+        task_flags += <span class="enscript-string">'C'</span>
+    <span class="enscript-keyword">if</span> unsigned(task.t_flags) &amp; 0x40:
+        task_flags += <span class="enscript-string">'P'</span>
+
+    out_string += format_string.format(task, task.map, task.itk_space, thread_count, task_flags)
+    <span class="enscript-keyword">if</span> showcorpse <span class="enscript-keyword">is</span> True <span class="enscript-keyword">and</span> unsigned(task.corpse_info) != 0:
+        out_string += <span class="enscript-string">&quot; &quot;</span> + GetKCDataSummary(task.corpse_info)
+    <span class="enscript-keyword">return</span> out_string
+
+@lldb_type_summary([<span class="enscript-string">'thread *'</span>, <span class="enscript-string">'thread_t'</span>])
+@header(<span class="enscript-string">&quot;{0: &lt;24s} {1: &lt;10s} {2: &lt;20s} {3: &lt;6s} {4: &lt;6s} {5: &lt;15s} {6: &lt;15s} {7: &lt;8s} {8: &lt;12s} {9: &lt;32s} {10: &lt;20s} {11: &lt;20s} {12: &lt;20s}&quot;</span>.format(<span class="enscript-string">'thread'</span>, <span class="enscript-string">'thread_id'</span>, <span class="enscript-string">'processor'</span>, <span class="enscript-string">'base'</span>, <span class="enscript-string">'pri'</span>, <span class="enscript-string">'sched_mode'</span>, <span class="enscript-string">'io_policy'</span>, <span class="enscript-string">'state'</span>, <span class="enscript-string">'ast'</span>, <span class="enscript-string">'waitq'</span>, <span class="enscript-string">'wait_event'</span>, <span class="enscript-string">'wmesg'</span>, <span class="enscript-string">'thread_name'</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetThreadSummary</span>(thread):
+    <span class="enscript-string">&quot;&quot;&quot; Summarize the thread structure. It decodes the wait state and waitevents from the data in the struct.
+        params: thread: value - value objecte representing a thread in kernel
+        returns: str - summary of a thread
+        
+        State flags:
+        W - WAIT
+        S - SUSP
+        R - RUN
+        U - Uninterruptible
+        H - Terminated
+        A - Terminated and on termination queue
+        I - Idle thread
+        C - Crashed thread
+
+        policy flags:
+        B - darwinbg
+        L - lowpri cpu
+        T - IO throttle
+        P - IO passive
+        D - Terminated
+    &quot;&quot;&quot;</span>
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    format_string = <span class="enscript-string">&quot;{0: &lt;24s} {1: &lt;10s} {2: &lt;20s} {3: &lt;6s} {4: &lt;6s} {5: &lt;15s} {6: &lt;15s} {7: &lt;8s} {8: &lt;12s} {9: &lt;32s} {10: &lt;20s} {11: &lt;20s} {12: &lt;20s}&quot;</span>
+    thread_ptr_str = str(<span class="enscript-string">&quot;{0: &lt;#020x}&quot;</span>.format(thread))
+    <span class="enscript-keyword">if</span> int(thread.static_param) : 
+        thread_ptr_str+=<span class="enscript-string">&quot;[WQ]&quot;</span>
+    thread_id = hex(thread.thread_id)
+    thread_name = <span class="enscript-string">''</span>
+    processor = hex(thread.last_processor)
+    base_priority = str(int(thread.base_pri))
+    sched_priority = str(int(thread.sched_pri))
+    sched_mode = <span class="enscript-string">''</span>
+    mode = str(thread.sched_mode)
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;TIMESHARE&quot;</span> <span class="enscript-keyword">in</span> mode:
+        sched_mode+=<span class="enscript-string">&quot;timeshare&quot;</span>
+    <span class="enscript-keyword">elif</span> <span class="enscript-string">&quot;FIXED&quot;</span> <span class="enscript-keyword">in</span> mode:
+        sched_mode+=<span class="enscript-string">&quot;fixed&quot;</span>
+    <span class="enscript-keyword">elif</span> <span class="enscript-string">&quot;REALTIME&quot;</span> <span class="enscript-keyword">in</span> mode:
+        sched_mode+=<span class="enscript-string">&quot;realtime&quot;</span>
+        
+    <span class="enscript-keyword">if</span> (unsigned(thread.bound_processor) != 0):
+        sched_mode+=<span class="enscript-string">&quot; bound&quot;</span>
+        
+    <span class="enscript-comment"># TH_SFLAG_THROTTLED
+</span>    <span class="enscript-keyword">if</span> (unsigned(thread.sched_flags) &amp; 0x0004):
+        sched_mode+=<span class="enscript-string">&quot; BG&quot;</span>
+    
+    io_policy_str = <span class="enscript-string">&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> int(thread.uthread) != 0:
+        uthread = Cast(thread.uthread, <span class="enscript-string">'uthread *'</span>)
+        <span class="enscript-comment">#check for thread name
+</span>        <span class="enscript-keyword">if</span> int(uthread.pth_name) != 0 :
+            th_name_strval = Cast(uthread.pth_name, <span class="enscript-string">'char *'</span>)
+            <span class="enscript-keyword">if</span> len(str(th_name_strval)) &gt; 0 :
+                thread_name = str(th_name_strval)
+        
+        <span class="enscript-comment">#check for io_policy flags 
+</span>        <span class="enscript-keyword">if</span> int(uthread.uu_flag) &amp; 0x400:
+            io_policy_str+=<span class="enscript-string">'RAGE '</span>
+        
+        <span class="enscript-comment">#now flags for task_policy
+</span>        
+        io_policy_str = <span class="enscript-string">&quot;&quot;</span>
+        
+        <span class="enscript-keyword">if</span> int(thread.effective_policy.darwinbg) != 0:
+            io_policy_str += <span class="enscript-string">&quot;B&quot;</span>
+        <span class="enscript-keyword">if</span> int(thread.effective_policy.lowpri_cpu) != 0:
+            io_policy_str += <span class="enscript-string">&quot;L&quot;</span>
+        
+        <span class="enscript-keyword">if</span> int(thread.effective_policy.io_tier) != 0:
+            io_policy_str += <span class="enscript-string">&quot;T&quot;</span>
+        <span class="enscript-keyword">if</span> int(thread.effective_policy.io_passive) != 0:
+            io_policy_str += <span class="enscript-string">&quot;P&quot;</span>
+        <span class="enscript-keyword">if</span> int(thread.effective_policy.terminated) != 0:
+            io_policy_str += <span class="enscript-string">&quot;D&quot;</span>
+                
+    state = int(thread.state)
+    thread_state_chars = {0x0:<span class="enscript-string">''</span>, 0x1:<span class="enscript-string">'W'</span>, 0x2:<span class="enscript-string">'S'</span>, 0x4:<span class="enscript-string">'R'</span>, 0x8:<span class="enscript-string">'U'</span>, 0x10:<span class="enscript-string">'H'</span>, 0x20:<span class="enscript-string">'A'</span>, 0x40:<span class="enscript-string">'P'</span>, 0x80:<span class="enscript-string">'I'</span>}
+    state_str = <span class="enscript-string">''</span>
+    mask = 0x1
+    <span class="enscript-keyword">while</span> mask &lt;= 0x80 :
+        state_str += thread_state_chars[int(state &amp; mask)]
+        mask = mask &lt;&lt; 1
+    
+    <span class="enscript-keyword">if</span> int(thread.inspection):
+        state_str += <span class="enscript-string">'C'</span>
+
+    ast = int(thread.ast) | int(thread.reason)
+    ast_str = GetASTSummary(ast)
+    
+    <span class="enscript-comment">#wait queue information
+</span>    wait_queue_str = <span class="enscript-string">''</span>
+    wait_event_str = <span class="enscript-string">''</span>
+    wait_message = <span class="enscript-string">''</span>
+    <span class="enscript-keyword">if</span> ( state &amp; 0x1 ) != 0:
+        <span class="enscript-comment">#we need to look at the waitqueue as well
+</span>        wait_queue_str = str(<span class="enscript-string">&quot;{0: &lt;#020x}&quot;</span>.format(int(hex(thread.waitq), 16)))
+        wait_event_str = str(<span class="enscript-string">&quot;{0: &lt;#020x}&quot;</span>.format(int(hex(thread.wait_event), 16)))
+        wait_event_str_sym = kern.Symbolicate(int(hex(thread.wait_event), 16))
+        <span class="enscript-keyword">if</span> len(wait_event_str_sym) &gt; 0:
+            wait_event_str = wait_event_str.strip() + <span class="enscript-string">&quot; &lt;&quot;</span> + wait_event_str_sym + <span class="enscript-string">&quot;&gt;&quot;</span>
+        <span class="enscript-keyword">if</span> int(thread.uthread) != 0 :
+            uthread = Cast(thread.uthread, <span class="enscript-string">'uthread *'</span>)
+            <span class="enscript-keyword">if</span> int(uthread.uu_wmesg) != 0:
+                wait_message = str(Cast(uthread.uu_wmesg, <span class="enscript-string">'char *'</span>))
+            
+    out_string += format_string.format(thread_ptr_str, thread_id, processor, base_priority, sched_priority, sched_mode, io_policy_str, state_str, ast_str, wait_queue_str, wait_event_str, wait_message, thread_name)
+    <span class="enscript-keyword">return</span> out_string
+
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetTaskRoleString</span>(role):
+    role_strs = {
+                 0 : <span class="enscript-string">&quot;TASK_UNSPECIFIED&quot;</span>,
+                 1 : <span class="enscript-string">&quot;TASK_FOREGROUND_APPLICATION&quot;</span>,
+                 2 : <span class="enscript-string">&quot;TASK_BACKGROUND_APPLICATION&quot;</span>,
+                 3 : <span class="enscript-string">&quot;TASK_CONTROL_APPLICATION&quot;</span>,
+                 4 : <span class="enscript-string">&quot;TASK_GRAPHICS_SERVER&quot;</span>,
+                 5 : <span class="enscript-string">&quot;TASK_THROTTLE_APPLICATION&quot;</span>,
+                 6 : <span class="enscript-string">&quot;TASK_NONUI_APPLICATION&quot;</span>,
+                 7 : <span class="enscript-string">&quot;TASK_DEFAULT_APPLICATION&quot;</span>,
+                }
+    <span class="enscript-keyword">return</span> role_strs[int(role)]
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetCoalitionFlagString</span>(coal):
+    flags = []
+    <span class="enscript-keyword">if</span> (coal.privileged):
+        flags.append(<span class="enscript-string">'privileged'</span>)
+    <span class="enscript-keyword">if</span> (coal.termrequested):
+        flags.append(<span class="enscript-string">'termrequested'</span>)
+    <span class="enscript-keyword">if</span> (coal.terminated):
+        flags.append(<span class="enscript-string">'terminated'</span>)
+    <span class="enscript-keyword">if</span> (coal.reaped):
+        flags.append(<span class="enscript-string">'reaped'</span>)
+    <span class="enscript-keyword">if</span> (coal.notified):
+        flags.append(<span class="enscript-string">'notified'</span>)
+    <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;|&quot;</span>.join(flags)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetCoalitionTasks</span>(queue, coal_type, thread_details=False):
+    sfi_strs = {
+                 0x0  : <span class="enscript-string">&quot;SFI_CLASS_UNSPECIFIED&quot;</span>,
+                 0x1  : <span class="enscript-string">&quot;SFI_CLASS_DARWIN_BG&quot;</span>,
+                 0x2  : <span class="enscript-string">&quot;SFI_CLASS_APP_NAP&quot;</span>,
+                 0x3  : <span class="enscript-string">&quot;SFI_CLASS_MANAGED_FOCAL&quot;</span>,
+                 0x4  : <span class="enscript-string">&quot;SFI_CLASS_MANAGED_NONFOCAL&quot;</span>,
+                 0x5  : <span class="enscript-string">&quot;SFI_CLASS_DEFAULT_FOCAL&quot;</span>,
+                 0x6  : <span class="enscript-string">&quot;SFI_CLASS_DEFAULT_NONFOCAL&quot;</span>,
+                 0x7  : <span class="enscript-string">&quot;SFI_CLASS_KERNEL&quot;</span>,
+                 0x8  : <span class="enscript-string">&quot;SFI_CLASS_OPTED_OUT&quot;</span>,
+                 0x9  : <span class="enscript-string">&quot;SFI_CLASS_UTILITY&quot;</span>,
+                 0xA  : <span class="enscript-string">&quot;SFI_CLASS_LEGACY_FOCAL&quot;</span>,
+                 0xB  : <span class="enscript-string">&quot;SFI_CLASS_LEGACY_NONFOCAL&quot;</span>,
+                 0xC  : <span class="enscript-string">&quot;SFI_CLASS_USER_INITIATED_FOCAL&quot;</span>,
+                 0xD  : <span class="enscript-string">&quot;SFI_CLASS_USER_INITIATED_NONFOCAL&quot;</span>,
+                 0xE  : <span class="enscript-string">&quot;SFI_CLASS_USER_INTERACTIVE_FOCAL&quot;</span>,
+                 0xF  : <span class="enscript-string">&quot;SFI_CLASS_USER_INTERACTIVE_NONFOCAL&quot;</span>,
+                 0x10 : <span class="enscript-string">&quot;SFI_CLASS_MAINTENANCE&quot;</span>,
+                }
+    tasks = []
+    field_name = <span class="enscript-string">'task_coalition'</span>
+    <span class="enscript-keyword">for</span> task <span class="enscript-keyword">in</span> IterateLinkageChain(queue, <span class="enscript-string">'task *'</span>, field_name, coal_type * sizeof(<span class="enscript-string">'queue_chain_t'</span>)):
+        task_str = <span class="enscript-string">&quot;({0: &lt;d},{1: #x}, {2: &lt;s}, {3: &lt;s})&quot;</span>.format(GetProcPIDForTask(task),task,GetProcNameForTask(task),GetTaskRoleString(task.effective_policy.t_role))
+        <span class="enscript-keyword">if</span> thread_details:
+            <span class="enscript-keyword">for</span> thread <span class="enscript-keyword">in</span> IterateQueue(task.threads, <span class="enscript-string">&quot;thread_t&quot;</span>, <span class="enscript-string">&quot;task_threads&quot;</span>):
+                task_str += <span class="enscript-string">&quot;\n\t\t\t|-&gt; thread:&quot;</span> + hex(thread) + <span class="enscript-string">&quot;, &quot;</span> + sfi_strs[int(thread.sfi_class)]
+        tasks.append(task_str)
+    <span class="enscript-keyword">return</span> tasks
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetCoalitionTypeString</span>(type):
+    <span class="enscript-string">&quot;&quot;&quot; Convert a coalition type field into a string
+    Currently supported types (from &lt;mach/coalition.h&gt;):
+        COALITION_TYPE_RESOURCE
+        COALITION_TYPE_JETSAM
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> type == 0: <span class="enscript-comment"># COALITION_TYPE_RESOURCE
+</span>        <span class="enscript-keyword">return</span> <span class="enscript-string">'RESOURCE'</span>
+    <span class="enscript-keyword">if</span> type == 1:
+        <span class="enscript-keyword">return</span> <span class="enscript-string">'JETSAM'</span>
+    <span class="enscript-keyword">return</span> <span class="enscript-string">'&lt;unknown&gt;'</span>
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetResourceCoalitionSummary</span>(coal, verbose=False):
+    <span class="enscript-string">&quot;&quot;&quot; Summarize a resource coalition
+    &quot;&quot;&quot;</span>
+    out_string = <span class="enscript-string">&quot;Resource Coalition:\n\t  Ledger:\n&quot;</span>
+    thread_details = False
+    <span class="enscript-keyword">if</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vSCRIPT:
+        thread_details = True
+    ledgerp = coal.r.ledger
+    <span class="enscript-keyword">if</span> verbose <span class="enscript-keyword">and</span> unsigned(ledgerp) != 0:
+        i = 0
+        <span class="enscript-keyword">while</span> i != ledgerp.l_template.lt_cnt:
+            out_string += <span class="enscript-string">&quot;\t\t&quot;</span>
+            out_string += GetLedgerEntrySummary(kern.globals.task_ledger_template, ledgerp.l_entries[i], i)
+            i = i + 1
+    out_string += <span class="enscript-string">&quot;\t  bytesread {0: &lt;d}\n\t  byteswritten {1: &lt;d}\n\t  gpu_time {2: &lt;d}&quot;</span>.format(coal.r.bytesread, coal.r.byteswritten, coal.r.gpu_time)
+    out_string += <span class="enscript-string">&quot;\n\t  total_tasks {0: &lt;d}\n\t  dead_tasks {1: &lt;d}\n\t  active_tasks {2: &lt;d}&quot;</span>.format(coal.r.task_count, coal.r.dead_task_count, coal.r.task_count - coal.r.dead_task_count)
+    out_string += <span class="enscript-string">&quot;\n\t  last_became_nonempty_time {0: &lt;d}\n\t  time_nonempty {1: &lt;d}&quot;</span>.format(coal.r.last_became_nonempty_time, coal.r.time_nonempty)
+    out_string += <span class="enscript-string">&quot;\n\t  Tasks:\n\t\t&quot;</span>
+    tasks = GetCoalitionTasks(addressof(coal.r.tasks), 0, thread_details)
+    out_string += <span class="enscript-string">&quot;\n\t\t&quot;</span>.join(tasks)
+    <span class="enscript-keyword">return</span> out_string
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetJetsamCoalitionSummary</span>(coal, verbose=False):
+    out_string = <span class="enscript-string">&quot;Jetsam Coalition:&quot;</span>
+    thread_details = False
+    <span class="enscript-keyword">if</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vSCRIPT:
+        thread_details = True
+    <span class="enscript-keyword">if</span> unsigned(coal.j.leader) == 0:
+        out_string += <span class="enscript-string">&quot;\n\t  NO Leader!&quot;</span>
+    <span class="enscript-keyword">else</span>:
+        out_string += <span class="enscript-string">&quot;\n\t  Leader:\n\t\t&quot;</span>
+        out_string += <span class="enscript-string">&quot;({0: &lt;d},{1: #x}, {2: &lt;s}, {3: &lt;s})&quot;</span>.format(GetProcPIDForTask(coal.j.leader),coal.j.leader,GetProcNameForTask(coal.j.leader),GetTaskRoleString(coal.j.leader.effective_policy.t_role))
+    out_string += <span class="enscript-string">&quot;\n\t  Extensions:\n\t\t&quot;</span>
+    tasks = GetCoalitionTasks(addressof(coal.j.extensions), 1, thread_details)
+    out_string += <span class="enscript-string">&quot;\n\t\t&quot;</span>.join(tasks)
+    out_string += <span class="enscript-string">&quot;\n\t  XPC Services:\n\t\t&quot;</span>
+    tasks = GetCoalitionTasks(addressof(coal.j.services), 1, thread_details)
+    out_string += <span class="enscript-string">&quot;\n\t\t&quot;</span>.join(tasks)
+    out_string += <span class="enscript-string">&quot;\n\t  Other Tasks:\n\t\t&quot;</span>
+    tasks = GetCoalitionTasks(addressof(coal.j.other), 1, thread_details)
+    out_string += <span class="enscript-string">&quot;\n\t\t&quot;</span>.join(tasks)
+    <span class="enscript-keyword">return</span> out_string
+
+@lldb_type_summary([<span class="enscript-string">'coalition_t'</span>, <span class="enscript-string">'coalition *'</span>])
+@header(<span class="enscript-string">&quot;{0: &lt;20s} {1: &lt;15s} {2: &lt;10s} {3: &lt;10s} {4: &lt;10s} {5: &lt;12s} {6: &lt;12s} {7: &lt;20s}&quot;</span>.format(<span class="enscript-string">&quot;coalition&quot;</span>, <span class="enscript-string">&quot;type&quot;</span>, <span class="enscript-string">&quot;id&quot;</span>, <span class="enscript-string">&quot;ref count&quot;</span>, <span class="enscript-string">&quot;act count&quot;</span>, <span class="enscript-string">&quot;focal cnt&quot;</span>, <span class="enscript-string">&quot;nonfocal cnt&quot;</span>,<span class="enscript-string">&quot;flags&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetCoalitionSummary</span>(coal):
+    <span class="enscript-keyword">if</span> unsigned(coal) == 0:
+        <span class="enscript-keyword">return</span> <span class="enscript-string">'{0: &lt;#020x} {1: &lt;15s} {2: &lt;10d} {3: &lt;10d} {4: &lt;10d} {5: &lt;12d} {6: &lt;12d} {7: &lt;s}'</span>.format(0, <span class="enscript-string">&quot;&quot;</span>, -1, -1, -1, -1, -1, <span class="enscript-string">&quot;&quot;</span>)
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    format_string = <span class="enscript-string">'{0: &lt;#020x} {1: &lt;15s} {2: &lt;10d} {3: &lt;10d} {4: &lt;10d} {5: &lt;12d} {6: &lt;12d} {7: &lt;s}'</span>
+    type_string = GetCoalitionTypeString(coal.type)
+    flag_string = GetCoalitionFlagString(coal)
+    out_string += format_string.format(coal, type_string, coal.id, coal.ref_count, coal.active_count, coal.focal_task_count, coal.nonfocal_task_count, flag_string)
+    <span class="enscript-keyword">return</span> out_string
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetCoalitionInfo</span>(coal, verbose=False):
+    <span class="enscript-string">&quot;&quot;&quot; returns a string describing a coalition, including details about the particular coalition type.
+        params:
+            coal : value object representing a coalition in the kernel
+        returns:
+            str : A string describing the coalition.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> unsigned(coal) == 0:
+        <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;&lt;null coalition&gt;&quot;</span>
+    typestr = GetCoalitionTypeString(coal.type)
+    flagstr = GetCoalitionFlagString(coal)
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    out_string += <span class="enscript-string">&quot;Coalition {c: &lt;#020x}\n\tID {c.id: &lt;d}\n\tType {c.type: &lt;d} ({t: &lt;s})\n\tRefCount {c.ref_count: &lt;d}\n\tActiveCount {c.active_count: &lt;d}\n\tFocal Tasks: {c.focal_task_count: &lt;d}\n\tNon-Focal Tasks: {c.nonfocal_task_count: &lt;d}\n\tFlags {f: &lt;s}\n\t&quot;</span>.format(c=coal,t=typestr,f=flagstr)
+    <span class="enscript-keyword">if</span> coal.type == 0: <span class="enscript-comment"># COALITION_TYPE_RESOURCE
+</span>        out_string += GetResourceCoalitionSummary(coal, verbose)
+    <span class="enscript-keyword">elif</span> coal.type == 1: <span class="enscript-comment"># COALITION_TYPE_JETSAM
+</span>        out_string += GetJetsamCoalitionSummary(coal, verbose)
+    <span class="enscript-keyword">else</span>:
+        out_string += <span class="enscript-string">&quot;Unknown Type&quot;</span>
+
+    <span class="enscript-keyword">return</span> out_string
+
+<span class="enscript-comment"># Macro: showcoalitioninfo
+</span>
+@lldb_command(<span class="enscript-string">'showcoalitioninfo'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowCoalitionInfo</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot;  Display more detailed information about a coalition
+         Usage: showcoalitioninfo &lt;address of coalition&gt;
+    &quot;&quot;&quot;</span>
+    verbose = False
+    <span class="enscript-keyword">if</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vHUMAN:
+        verbose = True
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No arguments passed&quot;</span>
+        <span class="enscript-keyword">print</span> ShowCoalitionInfo.__doc__
+        <span class="enscript-keyword">return</span> False
+    coal = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'coalition *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> coal:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;unknown arguments:&quot;</span>, str(cmd_args)
+        <span class="enscript-keyword">return</span> False
+    <span class="enscript-keyword">print</span> GetCoalitionInfo(coal, verbose)
+
+<span class="enscript-comment"># EndMacro: showcoalitioninfo
+</span>
+<span class="enscript-comment"># Macro: showallcoalitions
+</span>
+@lldb_command(<span class="enscript-string">'showallcoalitions'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllCoalitions</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  Print a summary listing of all the coalitions
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> kern
+    <span class="enscript-keyword">print</span> GetCoalitionSummary.header
+    <span class="enscript-keyword">for</span> c <span class="enscript-keyword">in</span> kern.coalitions:
+        <span class="enscript-keyword">print</span> GetCoalitionSummary(c)
+
+<span class="enscript-comment"># EndMacro: showallcoalitions
+</span>
+<span class="enscript-comment"># Macro: showtaskcoalitions
+</span>
+@lldb_command(<span class="enscript-string">'showtaskcoalitions'</span>, <span class="enscript-string">'F:'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowTaskCoalitions</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot;
+    &quot;&quot;&quot;</span>
+    task_list = []
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-F&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        task_list = FindTasksByName(cmd_options[<span class="enscript-string">&quot;-F&quot;</span>])
+    <span class="enscript-keyword">elif</span> cmd_args:
+        t = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'task *'</span>)
+        task_list.append(t)
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;No arguments passed&quot;</span>)
+
+    <span class="enscript-keyword">if</span> len(task_list) &gt; 0:
+        <span class="enscript-keyword">print</span> GetCoalitionSummary.header
+    <span class="enscript-keyword">for</span> task <span class="enscript-keyword">in</span> task_list:
+        <span class="enscript-keyword">print</span> GetCoalitionSummary(task.coalition[0])
+        <span class="enscript-keyword">print</span> GetCoalitionSummary(task.coalition[1])
+
+<span class="enscript-comment"># EndMacro: showtaskcoalitions
+</span>
+@lldb_type_summary([<span class="enscript-string">'proc'</span>, <span class="enscript-string">'proc *'</span>])
+@header(<span class="enscript-string">&quot;{0: &gt;6s} {1: ^20s} {2: &gt;14s} {3: ^10s} {4: &lt;20s}&quot;</span>.format(<span class="enscript-string">&quot;pid&quot;</span>, <span class="enscript-string">&quot;process&quot;</span>, <span class="enscript-string">&quot;io_policy&quot;</span>, <span class="enscript-string">&quot;wq_state&quot;</span>, <span class="enscript-string">&quot;command&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetProcSummary</span>(proc):
+    <span class="enscript-string">&quot;&quot;&quot; Summarize the process data. 
+        params:
+          proc : value - value representaitng a proc * in kernel
+        returns:
+          str - string summary of the process.
+    &quot;&quot;&quot;</span>
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    format_string= <span class="enscript-string">&quot;{0: &gt;6d} {1: &gt;#020x} {2: &gt;14s} {3: &gt;2d} {4: &gt;2d} {5: &gt;2d}    {6: &lt;20s}&quot;</span>
+    pval = proc.GetSBValue()
+    <span class="enscript-comment">#code.interact(local=locals())
+</span>    <span class="enscript-keyword">if</span> str(pval.GetType()) != str(gettype(<span class="enscript-string">'proc *'</span>)) :
+        <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;Unknown type &quot;</span> + str(pval.GetType()) + <span class="enscript-string">&quot; &quot;</span> + str(hex(proc))
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> proc:
+        out_string += <span class="enscript-string">&quot;Process &quot;</span> + hex(proc) + <span class="enscript-string">&quot; is not valid.&quot;</span>
+        <span class="enscript-keyword">return</span> out_string 
+    pid = int(proc.p_pid)
+    proc_addr = int(hex(proc), 16)
+    proc_rage_str = <span class="enscript-string">&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> int(proc.p_lflag) &amp; 0x400000 :
+        proc_rage_str = <span class="enscript-string">&quot;RAGE&quot;</span>
+    
+    task = Cast(proc.task, <span class="enscript-string">'task *'</span>)
+    
+    io_policy_str = <span class="enscript-string">&quot;&quot;</span>
+    
+    <span class="enscript-keyword">if</span> int(task.effective_policy.darwinbg) != 0:
+        io_policy_str += <span class="enscript-string">&quot;B&quot;</span>
+    <span class="enscript-keyword">if</span> int(task.effective_policy.lowpri_cpu) != 0:
+        io_policy_str += <span class="enscript-string">&quot;L&quot;</span>
+    
+    <span class="enscript-keyword">if</span> int(task.effective_policy.io_tier) != 0:
+        io_policy_str += <span class="enscript-string">&quot;T&quot;</span>
+    <span class="enscript-keyword">if</span> int(task.effective_policy.io_passive) != 0:
+        io_policy_str += <span class="enscript-string">&quot;P&quot;</span>
+    <span class="enscript-keyword">if</span> int(task.effective_policy.terminated) != 0:
+        io_policy_str += <span class="enscript-string">&quot;D&quot;</span>
+    
+    <span class="enscript-keyword">if</span> int(task.effective_policy.t_suspended) != 0:
+        io_policy_str += <span class="enscript-string">&quot;S&quot;</span>
+    <span class="enscript-keyword">if</span> int(task.effective_policy.t_latency_qos) != 0:
+        io_policy_str += <span class="enscript-string">&quot;Q&quot;</span>
+    <span class="enscript-keyword">if</span> int(task.effective_policy.t_sup_active) != 0:
+        io_policy_str += <span class="enscript-string">&quot;A&quot;</span>
+    
+    
+    <span class="enscript-keyword">try</span>:
+        work_queue = Cast(proc.p_wqptr, <span class="enscript-string">'workqueue *'</span>)
+        <span class="enscript-keyword">if</span> proc.p_wqptr != 0 :
+            wq_num_threads = int(work_queue.wq_nthreads)
+            wq_idle_threads = int(work_queue.wq_thidlecount)
+            wq_req_threads = int(work_queue.wq_reqcount)
+        <span class="enscript-keyword">else</span>:
+            wq_num_threads = 0
+            wq_idle_threads = 0
+            wq_req_threads = 0
+    <span class="enscript-keyword">except</span>:
+        wq_num_threads = -1
+        wq_idle_threads = -1
+        wq_req_threads = -1
+    process_name = str(proc.p_comm)
+    out_string += format_string.format(pid, proc_addr, <span class="enscript-string">&quot; &quot;</span>.join([proc_rage_str, io_policy_str]), wq_num_threads, wq_idle_threads, wq_req_threads, process_name)
+    <span class="enscript-keyword">return</span> out_string
+
+@lldb_type_summary([<span class="enscript-string">'tty_dev_t'</span>, <span class="enscript-string">'tty_dev_t *'</span>])
+@header(<span class="enscript-string">&quot;{0: &lt;20s} {1: &lt;10s} {2: &lt;10s} {3: &lt;15s} {4: &lt;15s} {5: &lt;15s} {6: &lt;15s}&quot;</span>.format(<span class="enscript-string">&quot;tty_dev&quot;</span>,<span class="enscript-string">&quot;master&quot;</span>, <span class="enscript-string">&quot;slave&quot;</span>, <span class="enscript-string">&quot;open&quot;</span>, <span class="enscript-string">&quot;free&quot;</span>, <span class="enscript-string">&quot;name&quot;</span>, <span class="enscript-string">&quot;revoke&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetTTYDevSummary</span>(tty_dev):
+    <span class="enscript-string">&quot;&quot;&quot; Summarizes the important fields in tty_dev_t structure.
+        params: tty_dev: value - value object representing a tty_dev_t in kernel
+        returns: str - summary of the tty_dev
+    &quot;&quot;&quot;</span>
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    format_string = <span class="enscript-string">&quot;{0: &lt;#020x} {1: &lt;#010x} {2: &lt;#010x} {3: &lt;15s} {4: &lt;15s} {5: &lt;15s} {6: &lt;15s}&quot;</span> 
+    open_fn = kern.Symbolicate(int(hex(tty_dev.open), 16))
+    free_fn = kern.Symbolicate(int(hex(tty_dev.free), 16))
+    name_fn = kern.Symbolicate(int(hex(tty_dev.name), 16))
+    revoke_fn = kern.Symbolicate(int(hex(tty_dev.revoke), 16))
+    out_string += format_string.format(tty_dev, tty_dev.master, tty_dev.slave, open_fn, free_fn, name_fn, revoke_fn)
+    <span class="enscript-keyword">return</span> out_string
+
+@lldb_type_summary([<span class="enscript-string">'kqueue *'</span>])
+@header(<span class="enscript-string">&quot;{: &lt;20s} {: &lt;20s} {: &lt;6s} {: &lt;20s} {: &lt;10s}&quot;</span>.format(<span class="enscript-string">'kqueue'</span>, <span class="enscript-string">'process'</span>, <span class="enscript-string">'#events'</span>, <span class="enscript-string">'wqs'</span>, <span class="enscript-string">'state'</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetKQueueSummary</span>(kq):
+    <span class="enscript-string">&quot;&quot;&quot; summarizes kqueue information
+        returns: str - summary of kqueue
+    &quot;&quot;&quot;</span>
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    format_string = <span class="enscript-string">&quot;{o: &lt;#020x} {o.kq_p: &lt;#020x} {o.kq_count: &lt;6d} {o.kq_wqs: &lt;#020x} {st_str: &lt;10s}&quot;</span>
+    state = int(kq.kq_state)
+    state_str = <span class="enscript-string">''</span>
+    mask = 0x1
+    <span class="enscript-keyword">while</span> mask &lt;= 0x80 :
+        <span class="enscript-keyword">if</span> int(state &amp; mask):
+            state_str += <span class="enscript-string">' '</span> + xnudefines.kq_state_strings[int(state &amp; mask)]
+        mask = mask &lt;&lt; 1
+    out_string += format_string.format(o=kq, st_str=state_str)
+    out_string += <span class="enscript-string">&quot;\n&quot;</span> + GetKnoteSummary.header
+    <span class="enscript-keyword">for</span> kn <span class="enscript-keyword">in</span> IterateTAILQ_HEAD(kq.kq_head, <span class="enscript-string">'kn_tqe'</span>):
+        out_string += <span class="enscript-string">&quot;\n&quot;</span> + GetKnoteSummary(kn)
+    <span class="enscript-keyword">return</span> out_string
+
+@lldb_type_summary([<span class="enscript-string">'knote *'</span>])
+@header(<span class="enscript-string">&quot;{0: &lt;20s} {1: &lt;10s} {2: &lt;10s} {3: &lt;20s} {4: &lt;20s} {5: &lt;30s}&quot;</span>.format(<span class="enscript-string">'knote'</span>, <span class="enscript-string">'ident'</span>, <span class="enscript-string">'kev_flags'</span>, <span class="enscript-string">'kn_kq'</span>, <span class="enscript-string">'filtops'</span>, <span class="enscript-string">' status'</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetKnoteSummary</span>(kn):
+    <span class="enscript-string">&quot;&quot;&quot; Summarizes a knote and related information
+        returns: str - summary of knote
+    &quot;&quot;&quot;</span>
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    format_string = <span class="enscript-string">&quot;{o: &lt;#020x} {o.kn_kevent.ident: &lt;#010X} {o.kn_kevent.flags: &lt;#010X} {o.kn_kq: &lt;#020X} {ops_str: &lt;20s} {st_str: &lt;30s}&quot;</span>
+    state = unsigned(kn.kn_status)
+    fops_str = kern.Symbolicate(unsigned(kn.kn_fop))
+    mask = 0x1
+    status_desc = <span class="enscript-string">''</span>
+    <span class="enscript-keyword">while</span> mask &lt;= 0x40:
+        <span class="enscript-keyword">if</span> state &amp; mask:
+            status_desc += <span class="enscript-string">' '</span> + xnudefines.kn_state_strings[int(state &amp; mask)]
+        mask = mask &lt;&lt; 1
+
+    out_string += format_string.format(o=kn, st_str=status_desc, ops_str=fops_str)
+    <span class="enscript-keyword">return</span> out_string
+
+<span class="enscript-comment"># Macro: showtask
+</span>
+@lldb_command(<span class="enscript-string">'showtask'</span>, <span class="enscript-string">'F:'</span>) 
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowTask</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print a summary listing of given task
+         Usage: showtask &lt;address of task&gt;
+         or   : showtask -F &lt;name of task&gt;  
+    &quot;&quot;&quot;</span>
+    task_list = []
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-F&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        task_list = FindTasksByName(cmd_options[<span class="enscript-string">'-F'</span>])
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+            <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid arguments passed.&quot;</span>)
+
+        tval = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'task *'</span>)
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> tval:
+            <span class="enscript-keyword">raise</span> (<span class="enscript-string">&quot;Unknown arguments: %r&quot;</span> % cmd_args)
+        task_list.append(tval)
+    
+    <span class="enscript-keyword">for</span> tval <span class="enscript-keyword">in</span> task_list:
+        <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+        pval = Cast(tval.bsd_info, <span class="enscript-string">'proc *'</span>)
+        <span class="enscript-keyword">print</span> GetTaskSummary(tval) +<span class="enscript-string">&quot; &quot;</span>+ GetProcSummary(pval)
+
+<span class="enscript-comment"># EndMacro: showtask
+</span>
+<span class="enscript-comment"># Macro: showpid
+</span>
+@lldb_command(<span class="enscript-string">'showpid'</span>) 
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowPid</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print a summary listing of task corresponding to given pid
+         Usage: showpid &lt;pid value&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No arguments passed&quot;</span>
+        <span class="enscript-keyword">print</span> ShowPid.__doc__
+        <span class="enscript-keyword">return</span> False
+    pidval = ArgumentStringToInt(cmd_args[0])
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.tasks:
+        pval = Cast(t.bsd_info, <span class="enscript-string">'proc *'</span>)
+        <span class="enscript-keyword">if</span> pval <span class="enscript-keyword">and</span> pval.p_pid == pidval:
+            <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+            <span class="enscript-keyword">print</span> GetTaskSummary(t) + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary(pval)
+            <span class="enscript-keyword">break</span>
+
+<span class="enscript-comment"># EndMacro: showpid
+</span>
+<span class="enscript-comment"># Macro: showproc
+</span>
+@lldb_command(<span class="enscript-string">'showproc'</span>) 
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowProc</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print a summary listing of task corresponding to given proc
+         Usage: showproc &lt;address of proc&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No arguments passed&quot;</span>
+        <span class="enscript-keyword">print</span> ShowProc.__doc__
+        <span class="enscript-keyword">return</span> False
+    pval = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'proc *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> pval:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;unknown arguments:&quot;</span>, str(cmd_args)
+        <span class="enscript-keyword">return</span> False
+    <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+    tval = Cast(pval.task, <span class="enscript-string">'task *'</span>)
+    <span class="enscript-keyword">print</span> GetTaskSummary(tval) +<span class="enscript-string">&quot; &quot;</span>+ GetProcSummary(pval)
+
+<span class="enscript-comment"># EndMacro: showproc
+</span>
+<span class="enscript-comment"># Macro: showprocinfo
+</span>
+@lldb_command(<span class="enscript-string">'showprocinfo'</span>) 
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowProcInfo</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to display name, pid, parent &amp; task for the given proc address
+         It also shows the Cred, Flags and state of the process
+         Usage: showprocinfo &lt;address of proc&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No arguments passed&quot;</span>
+        <span class="enscript-keyword">print</span> ShowProcInfo.__doc__
+        <span class="enscript-keyword">return</span> False
+    pval = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'proc *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> pval:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;unknown arguments:&quot;</span>, str(cmd_args)
+        <span class="enscript-keyword">return</span> False
+    <span class="enscript-keyword">print</span> GetProcInfo(pval)
+
+<span class="enscript-comment"># EndMacro: showprocinfo
+</span>
+<span class="enscript-comment">#Macro: showprocfiles
+</span>
+@lldb_command(<span class="enscript-string">'showprocfiles'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowProcFiles</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Given a proc_t pointer, display the list of open file descriptors for the referenced process.
+        Usage: showprocfiles &lt;proc_t&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> ShowProcFiles.__doc__
+        <span class="enscript-keyword">return</span>
+    proc = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'proc_t'</span>)
+    proc_filedesc = proc.p_fd
+    proc_lastfile = unsigned(proc_filedesc.fd_lastfile)
+    proc_ofiles = proc_filedesc.fd_ofiles
+    <span class="enscript-keyword">if</span> unsigned(proc_ofiles) == 0:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">'No open files for proc {0: &lt;s}'</span>.format(cmd_args[0])
+        <span class="enscript-keyword">return</span>
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{0: &lt;5s} {1: &lt;18s} {2: &lt;10s} {3: &lt;8s} {4: &lt;18s} {5: &lt;64s}&quot;</span>.format(<span class="enscript-string">'FD'</span>, <span class="enscript-string">'FILEGLOB'</span>, <span class="enscript-string">'FG_FLAGS'</span>, <span class="enscript-string">'FG_TYPE'</span>, <span class="enscript-string">'FG_DATA'</span>,<span class="enscript-string">'INFO'</span>)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{0:-&lt;5s} {0:-&lt;18s} {0:-&lt;10s} {0:-&lt;8s} {0:-&lt;18s} {0:-&lt;64s}&quot;</span>.format(<span class="enscript-string">&quot;&quot;</span>)
+    count = 0
+
+    <span class="enscript-comment"># Filetype map
+</span>    filetype_dict = {
+                1: <span class="enscript-string">'VNODE'</span>,
+                2: <span class="enscript-string">'SOCKET'</span>,
+                3: <span class="enscript-string">'PSXSHM'</span>,
+                4: <span class="enscript-string">'PSXSEM'</span>,
+                5: <span class="enscript-string">'KQUEUE'</span>,
+                6: <span class="enscript-string">'PIPE'</span>,
+                7: <span class="enscript-string">'FSEVENTS'</span>
+              }
+
+    <span class="enscript-keyword">while</span> count &lt;= proc_lastfile:
+        <span class="enscript-keyword">if</span> unsigned(proc_ofiles[count]) != 0:
+            out_str = <span class="enscript-string">''</span>
+            proc_fd_flags = proc_ofiles[count].f_flags
+            proc_fd_fglob = proc_ofiles[count].f_fglob
+            out_str += <span class="enscript-string">&quot;{0: &lt;5d} &quot;</span>.format(count)
+            out_str += <span class="enscript-string">&quot;{0: &lt;#18x} &quot;</span>.format(unsigned(proc_fd_fglob))
+            out_str += <span class="enscript-string">&quot;0x{0:0&gt;8x} &quot;</span>.format(unsigned(proc_fd_flags))
+            proc_fd_ftype = unsigned(proc_fd_fglob.fg_ops.fo_type)
+            <span class="enscript-keyword">if</span> proc_fd_ftype <span class="enscript-keyword">in</span> filetype_dict:
+                out_str += <span class="enscript-string">&quot;{0: &lt;8s} &quot;</span>.format(filetype_dict[proc_fd_ftype])
+            <span class="enscript-keyword">else</span>:
+                out_str += <span class="enscript-string">&quot;?: {0: &lt;5d} &quot;</span>.format(proc_fd_ftype)
+            out_str += <span class="enscript-string">&quot;{0: &lt;#18x} &quot;</span>.format(unsigned(proc_fd_fglob.fg_data))
+            <span class="enscript-keyword">if</span> proc_fd_ftype == 1:
+                fd_name = Cast(proc_fd_fglob.fg_data, <span class="enscript-string">'struct vnode *'</span>).v_name
+                out_str += <span class="enscript-string">&quot;{0: &lt;64s}&quot;</span>.format(fd_name)
+            out_str += <span class="enscript-string">&quot;\n&quot;</span>
+            <span class="enscript-keyword">print</span> out_str
+        count += 1
+
+<span class="enscript-comment">#EndMacro: showprocfiles
+</span>
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetProcKqueues</span>(proc):
+    filetype_KQUEUE = 5
+
+    proc_filedesc = proc.p_fd
+    proc_lastfile = unsigned(proc_filedesc.fd_lastfile)
+    proc_ofiles = proc_filedesc.fd_ofiles
+
+    queues = list()
+
+    <span class="enscript-keyword">if</span> unsigned(proc_ofiles) == 0:
+        <span class="enscript-keyword">return</span> queues
+
+    count = 0
+
+    <span class="enscript-keyword">while</span> count &lt;= proc_lastfile:
+        <span class="enscript-keyword">if</span> unsigned(proc_ofiles[count]) != 0:
+            proc_fd_flags = proc_ofiles[count].f_flags
+            proc_fd_fglob = proc_ofiles[count].f_fglob
+            proc_fd_ftype = unsigned(proc_fd_fglob.fg_ops.fo_type)
+            <span class="enscript-keyword">if</span> proc_fd_ftype == filetype_KQUEUE:
+                q = Cast(proc_fd_fglob.fg_data, <span class="enscript-string">'struct kqueue *'</span>)
+                queues.append(q)
+        count += 1
+
+    <span class="enscript-keyword">return</span> queues
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetAllKqueues</span>():
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.tasks:
+        <span class="enscript-keyword">if</span> unsigned(t.bsd_info) == 0:
+            <span class="enscript-keyword">continue</span>
+        pval = Cast(t.bsd_info, <span class="enscript-string">'proc *'</span>)
+        <span class="enscript-keyword">for</span> kq <span class="enscript-keyword">in</span> GetProcKqueues(pval):
+            <span class="enscript-keyword">yield</span> kq
+
+<span class="enscript-comment">#Macro: showallkqueues
+</span>@lldb_command(<span class="enscript-string">'showallkqueues'</span> ,<span class="enscript-string">''</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllKqueues</span>(cmd_args=[], cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Display a summary of all the kqueues in the system &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">for</span> kq <span class="enscript-keyword">in</span> GetAllKqueues():
+        <span class="enscript-keyword">print</span> GetKQueueSummary.header
+        <span class="enscript-keyword">print</span> GetKQueueSummary(kq)
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\n\n&quot;</span>
+<span class="enscript-comment">#EndMacro: showallkqueues
+</span>
+<span class="enscript-comment">#Macro: showkqueue
+</span>@lldb_command(<span class="enscript-string">'showkqueue'</span> ,<span class="enscript-string">''</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowKQueue</span>(cmd_args=[], cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Given a struct kqueue pointer, display the summary of the kqueue
+        Usage: (lldb) showkqueue &lt;struct kqueue *&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">'Invalid arguments'</span>)
+
+    kq = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'struct kqueue *'</span>)
+    <span class="enscript-keyword">print</span> GetKQueueSummary.header
+    <span class="enscript-keyword">print</span> GetKQueueSummary(kq)
+
+<span class="enscript-comment">#EndMacro: showkqueue
+</span>
+<span class="enscript-comment">#Macro: showtty
+</span>
+@lldb_command(<span class="enscript-string">'showtty'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowTTY</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Display information about a struct tty
+        Usage: showtty &lt;tty struct&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> ShowTTY.__doc__
+        <span class="enscript-keyword">return</span>
+    
+    tty = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'struct tty *'</span>)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;TTY structure at:              {0: &lt;s}&quot;</span>.format(cmd_args[0])
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Last input to raw queue:       {0: &lt;#18x} \&quot;{1: &lt;s}\&quot;&quot;</span>.format(unsigned(tty.t_rawq.c_cs), tty.t_rawq.c_cs)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Last input to canonical queue: {0: &lt;#18x} \&quot;{1: &lt;s}\&quot;&quot;</span>.format(unsigned(tty.t_canq.c_cs), tty.t_canq.c_cs)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Last output data:              {0: &lt;#18x} \&quot;{1: &lt;s}\&quot;&quot;</span>.format(unsigned(tty.t_outq.c_cs), tty.t_outq.c_cs)
+    tty_state_info = [
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_SO_OLOWAT (Wake up when output &lt;= low water)'</span>],
+                  [<span class="enscript-string">'- (synchronous I/O mode)'</span>, <span class="enscript-string">'TS_ASYNC (async I/O mode)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_BUSY (Draining output)'</span>],
+                  [<span class="enscript-string">'- (Carrier is NOT present)'</span>, <span class="enscript-string">'TS_CARR_ON (Carrier is present)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_FLUSH (Outq has been flushed during DMA)'</span>],
+                  [<span class="enscript-string">'- (Open has NOT completed)'</span>, <span class="enscript-string">'TS_ISOPEN (Open has completed)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_TBLOCK (Further input blocked)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_TIMEOUT (Wait for output char processing)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_TTSTOP (Output paused)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_WOPEN (Open in progress)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_XCLUDE (Tty requires exclusivity)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_BKSL (State for lowercase \\ work)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_CNTTB (Counting tab width, ignore FLUSHO)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_ERASE (Within a \\.../ for PRTRUB)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_LNCH (Next character is literal)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_TYPEN (Retyping suspended input (PENDIN))'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_CAN_BYPASS_L_RINT (Device in &quot;raw&quot; mode)'</span>],
+                  [<span class="enscript-string">'- (Connection NOT open)'</span>, <span class="enscript-string">'TS_CONNECTED (Connection open)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_SNOOP (Device is being snooped on)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_SO_OCOMPLETE (Wake up when output completes)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_ZOMBIE (Connection lost)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_CAR_OFLOW (For MDMBUF - handle in driver)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_CTS_OFLOW (For CCTS_OFLOW - handle in driver)'</span>],
+                  [<span class="enscript-string">''</span>, <span class="enscript-string">'TS_DSR_OFLOW (For CDSR_OFLOW - handle in driver)'</span>]
+                ]
+    index = 0
+    mask = 0x1
+    tty_state = unsigned(tty.t_state)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;State:&quot;</span>
+    <span class="enscript-keyword">while</span> index &lt; 24:
+        <span class="enscript-keyword">if</span> tty_state &amp; mask != 0:
+            <span class="enscript-keyword">if</span> len(tty_state_info[index][1]) &gt; 0:
+                <span class="enscript-keyword">print</span> <span class="enscript-string">'\t'</span> + tty_state_info[index][1]
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">if</span> len(tty_state_info[index][0]) &gt; 0:
+                <span class="enscript-keyword">print</span> <span class="enscript-string">'\t'</span> + tty_state_info[index][0]
+        index += 1
+        mask = mask &lt;&lt; 1
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Flags:                    0x{0:0&gt;8x}&quot;</span>.format(unsigned(tty.t_flags))
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Foreground Process Group: 0x{0:0&gt;16x}&quot;</span>.format(unsigned(tty.t_pgrp))
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Enclosing session:        0x{0:0&gt;16x}&quot;</span>.format(unsigned(tty.t_session))
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Termios:&quot;</span>
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\tInput Flags:   0x{0:0&gt;8x}&quot;</span>.format(unsigned(tty.t_termios.c_iflag))
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\tOutput Flags:  0x{0:0&gt;8x}&quot;</span>.format(unsigned(tty.t_termios.c_oflag))
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\tControl Flags: 0x{0:0&gt;8x}&quot;</span>.format(unsigned(tty.t_termios.c_cflag))
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\tLocal Flags:   0x{0:0&gt;8x}&quot;</span>.format(unsigned(tty.t_termios.c_lflag))
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\tInput Speed:   {0: &lt;8d}&quot;</span>.format(tty.t_termios.c_ispeed)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\tOutput Speed:  {0: &lt;8d}&quot;</span>.format(tty.t_termios.c_ospeed)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;High Watermark: {0: &lt;d} bytes&quot;</span>.format(tty.t_hiwat)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Low Watermark : {0: &lt;d} bytes&quot;</span>.format(tty.t_lowat)
+
+<span class="enscript-comment">#EndMacro: showtty
+</span>
+<span class="enscript-comment">#Macro showallttydevs
+</span>
+@lldb_command(<span class="enscript-string">'showallttydevs'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllTTYDevs</span>(cmd_args=[], cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Show a list of ttydevs registered in the system.
+        Usage:
+        (lldb)showallttydevs
+    &quot;&quot;&quot;</span>
+    tty_dev_head = kern.globals.tty_dev_head
+    tty_dev = tty_dev_head
+    <span class="enscript-keyword">print</span> GetTTYDevSummary.header
+    <span class="enscript-keyword">while</span> unsigned(tty_dev) != 0:
+        <span class="enscript-keyword">print</span> GetTTYDevSummary(tty_dev)
+        tty_dev = tty_dev.next
+    <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;&quot;</span>
+
+<span class="enscript-comment">#EndMacro: showallttydevs
+</span>
+<span class="enscript-comment">#Macro: dumpthread_terminate_queue
+</span>
+@lldb_command(<span class="enscript-string">'dumpthread_terminate_queue'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">DumpThreadTerminateQueue</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Displays the contents of the specified call_entry queue.
+        Usage: dumpthread_terminate_queue 
+    &quot;&quot;&quot;</span>
+    
+    count = 0
+    <span class="enscript-keyword">print</span> GetThreadSummary.header
+    <span class="enscript-keyword">for</span> th <span class="enscript-keyword">in</span> IterateQueue(addressof(kern.globals.thread_terminate_queue), <span class="enscript-string">'struct thread *'</span>,  <span class="enscript-string">'q_link'</span>):
+        <span class="enscript-keyword">print</span> GetThreadSummary(th)
+        count += 1
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{0: &lt;d} entries!&quot;</span>.format(count)
+
+<span class="enscript-comment">#EndMacro: dumpthread_terminate_queue
+</span>
+<span class="enscript-comment">#Macro: dumpcrashed_thread_queue
+</span>
+@lldb_command(<span class="enscript-string">'dumpcrashed_thread_queue'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">DumpCrashedThreadsQueue</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Displays the contents of the specified call_entry queue.
+        Usage: dumpcrashed_thread_queue 
+    &quot;&quot;&quot;</span>
+    
+    count = 0
+    <span class="enscript-keyword">print</span> GetThreadSummary.header
+    <span class="enscript-keyword">for</span> th <span class="enscript-keyword">in</span> IterateQueue(addressof(kern.globals.crashed_threads_queue), <span class="enscript-string">'struct thread *'</span>,  <span class="enscript-string">'q_link'</span>):
+        <span class="enscript-keyword">print</span> GetThreadSummary(th)
+        count += 1
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{0: &lt;d} entries!&quot;</span>.format(count)
+
+<span class="enscript-comment">#EndMacro: dumpcrashed_thread_queue
+</span>
+<span class="enscript-comment">#Macro: dumpcallqueue
+</span>
+@lldb_command(<span class="enscript-string">'dumpcallqueue'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">DumpCallQueue</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Displays the contents of the specified call_entry queue.
+        Usage: dumpcallqueue &lt;queue_head_t *&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid arguments&quot;</span>)
+
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{0: &lt;18s} {1: &lt;18s} {2: &lt;18s} {3: &lt;64s} {4: &lt;18s}&quot;</span>.format(<span class="enscript-string">'CALL_ENTRY'</span>, <span class="enscript-string">'PARAM0'</span>, <span class="enscript-string">'PARAM1'</span>, <span class="enscript-string">'DEADLINE'</span>, <span class="enscript-string">'FUNC'</span>)
+    callhead = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'queue_head_t *'</span>)
+    count = 0
+    <span class="enscript-keyword">for</span> callentry <span class="enscript-keyword">in</span> IterateQueue(callhead, <span class="enscript-string">'struct call_entry *'</span>,  <span class="enscript-string">'q_link'</span>):
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{0: &lt;#18x} {1: &lt;#18x} {2: &lt;#18x} {3: &lt;64d} {4: &lt;#18x}&quot;</span>.format(
+              unsigned(callentry), unsigned(callentry.param0), unsigned(callentry.param1), 
+              unsigned(callentry.deadline), unsigned(callentry.func))
+        count += 1
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{0: &lt;d} entries!&quot;</span>.format(count)
+
+<span class="enscript-comment">#EndMacro: dumpcallqueue
+</span>
+@lldb_command(<span class="enscript-string">'showalltasks'</span>,<span class="enscript-string">'C'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllTasks</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print a summary listing of all the tasks
+         wq_state -&gt; reports &quot;number of workq threads&quot;, &quot;number of scheduled workq threads&quot;, &quot;number of pending work items&quot;
+         if &quot;number of pending work items&quot; seems stuck at non-zero, it may indicate that the workqueue mechanism is hung
+         io_policy -&gt; RAGE  - rapid aging of vnodes requested
+                     NORM  - normal I/O explicitly requested (this is the default)
+                     PASS  - passive I/O requested (i.e. I/Os do not affect throttling decisions)
+                     THROT - throttled I/O requested (i.e. thread/task may be throttled after each I/O completes)
+         Usage: (lldb) showalltasks -C  : describe the corpse structure
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> kern
+    extra_hdr = <span class="enscript-string">''</span>
+    showcorpse = False
+    <span class="enscript-keyword">if</span> <span class="enscript-string">'-C'</span> <span class="enscript-keyword">in</span> cmd_options:
+        showcorpse = True
+        extra_hdr += <span class="enscript-string">&quot; &quot;</span> + GetKCDataSummary.header
+
+    <span class="enscript-keyword">print</span> GetTaskSummary.header + extra_hdr + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.tasks:
+        pval = Cast(t.bsd_info, <span class="enscript-string">'proc *'</span>)
+        out_str = GetTaskSummary(t, showcorpse) + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary(pval)
+        <span class="enscript-keyword">print</span> out_str
+    ZombTasks()
+
+@lldb_command(<span class="enscript-string">'showterminatedtasks'</span>) 
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowTerminatedTasks</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print a summary listing of all the terminated tasks
+         wq_state -&gt; reports &quot;number of workq threads&quot;, &quot;number of scheduled workq threads&quot;, &quot;number of pending work items&quot;
+         if &quot;number of pending work items&quot; seems stuck at non-zero, it may indicate that the workqueue mechanism is hung
+         io_policy -&gt; RAGE  - rapid aging of vnodes requested
+                     NORM  - normal I/O explicitly requested (this is the default)
+                     PASS  - passive I/O requested (i.e. I/Os do not affect throttling decisions)
+                     THROT - throttled I/O requested (i.e. thread/task may be throttled after each I/O completes)
+        syntax: (lldb)showallterminatedtasks
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> kern
+    <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.terminated_tasks:
+        pval = Cast(t.bsd_info, <span class="enscript-string">'proc *'</span>)
+        <span class="enscript-keyword">print</span> GetTaskSummary(t) +<span class="enscript-string">&quot; &quot;</span>+ GetProcSummary(pval)
+    <span class="enscript-keyword">return</span> True
+
+<span class="enscript-comment"># Macro: showtaskstacks
+</span>
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowTaskStacks</span>(task):
+    <span class="enscript-string">&quot;&quot;&quot; Print a task with summary and stack information for each of its threads 
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> kern
+    <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+    pval = Cast(task.bsd_info, <span class="enscript-string">'proc *'</span>)
+    <span class="enscript-keyword">print</span> GetTaskSummary(task) + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary(pval)
+    <span class="enscript-keyword">for</span> th <span class="enscript-keyword">in</span> IterateQueue(task.threads, <span class="enscript-string">'thread *'</span>, <span class="enscript-string">'task_threads'</span>):
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;  &quot;</span> + GetThreadSummary.header
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;  &quot;</span> + GetThreadSummary(th)
+        <span class="enscript-keyword">print</span> GetThreadBackTrace(th, prefix=<span class="enscript-string">&quot;    &quot;</span>) + <span class="enscript-string">&quot;\n&quot;</span>
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">FindTasksByName</span>(searchstr, ignore_case=True):
+    <span class="enscript-string">&quot;&quot;&quot; Search the list of tasks by name. 
+        params:
+            searchstr: str - a regex like string to search for task
+            ignore_case: bool - If False then exact matching will be enforced
+        returns:
+            [] - array of task object. Empty if not found any
+    &quot;&quot;&quot;</span>
+    re_options = 0   
+    <span class="enscript-keyword">if</span> ignore_case:
+        re_options = re.IGNORECASE
+    search_regex = re.compile(searchstr, re_options)
+    retval = []
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.tasks: 
+        pval = Cast(t.bsd_info, <span class="enscript-string">&quot;proc *&quot;</span>)
+        process_name = <span class="enscript-string">&quot;{:s}&quot;</span>.format(pval.p_comm)
+        <span class="enscript-keyword">if</span> search_regex.search(process_name):
+            retval.append(t)
+    <span class="enscript-keyword">return</span> retval
+
+@lldb_command(<span class="enscript-string">'showtaskstacks'</span>, <span class="enscript-string">'F:'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowTaskStacksCmdHelper</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to print out the stack for each thread in a task
+        Usage: showtaskstacks &lt;0xaddress of task&gt;
+           or: showtaskstacks -F launchd   
+    &quot;&quot;&quot;</span>
+
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-F&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        find_task_str = cmd_options[<span class="enscript-string">&quot;-F&quot;</span>]
+        task_list = FindTasksByName(find_task_str)
+        <span class="enscript-keyword">for</span> tval <span class="enscript-keyword">in</span> task_list:
+            ShowTaskStacks(tval)
+        <span class="enscript-keyword">return</span>
+    
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;No arguments passed&quot;</span>)
+
+    tval = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'task *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> tval:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;unknown arguments: {:s}&quot;</span>.format(str(cmd_args)))
+    <span class="enscript-keyword">else</span>:
+        ShowTaskStacks(tval)
+        <span class="enscript-keyword">return</span>
+
+<span class="enscript-comment"># EndMacro: showtaskstacks
+</span>
+@lldb_command(<span class="enscript-string">'showallthreads'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllThreads</span>(cmd_args = None):
+    <span class="enscript-string">&quot;&quot;&quot; Display info about all threads in the system
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.tasks:
+        ShowTaskThreads([str(int(t))])
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot; \n&quot;</span>
+        
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.terminated_tasks:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Terminated: \n&quot;</span>
+        ShowTaskThreads([str(int(t))])
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot; \n&quot;</span>
+        
+    <span class="enscript-keyword">return</span>
+
+@lldb_command(<span class="enscript-string">'showtaskthreads'</span>, <span class="enscript-string">&quot;F:&quot;</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowTaskThreads</span>(cmd_args = None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Display thread information for a given task
+        Usage: showtaskthreads &lt;0xaddress of task&gt;
+           or: showtaskthreads -F &lt;name&gt;
+    &quot;&quot;&quot;</span>
+    task_list = []
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-F&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        task_list = FindTasksByName(cmd_options[<span class="enscript-string">&quot;-F&quot;</span>])
+    <span class="enscript-keyword">elif</span> cmd_args:
+        t = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'task *'</span>)
+        task_list.append(t)
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;No arguments passed&quot;</span>)
+    
+    <span class="enscript-keyword">for</span> task <span class="enscript-keyword">in</span> task_list:
+        <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+        pval = Cast(task.bsd_info, <span class="enscript-string">'proc *'</span>)
+        <span class="enscript-keyword">print</span> GetTaskSummary(task) + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary(pval)
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary.header
+        <span class="enscript-keyword">for</span> thval <span class="enscript-keyword">in</span> IterateQueue(task.threads, <span class="enscript-string">'thread *'</span>, <span class="enscript-string">'task_threads'</span>):
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary(thval)
+    <span class="enscript-keyword">return</span>
+
+@lldb_command(<span class="enscript-string">'showact'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAct</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to print out the state of a specific thread.
+        usage: showact &lt;activation&gt; 
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> cmd_args == None <span class="enscript-keyword">or</span> len(cmd_args) &lt; 1:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No arguments passed&quot;</span>
+        <span class="enscript-keyword">print</span> ShowAct.__doc__
+        <span class="enscript-keyword">return</span> False
+    threadval = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'thread *'</span>)
+    <span class="enscript-keyword">print</span> GetThreadSummary.header
+    <span class="enscript-keyword">print</span> GetThreadSummary(threadval)
+
+@lldb_command(<span class="enscript-string">'showactstack'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowActStack</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to print out the stack of a specific thread.
+        usage:  showactstack &lt;activation&gt; 
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> cmd_args == None <span class="enscript-keyword">or</span> len(cmd_args) &lt; 1:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No arguments passed&quot;</span>
+        <span class="enscript-keyword">print</span> ShowAct.__doc__.strip()
+        <span class="enscript-keyword">return</span> False
+    threadval = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'thread *'</span>)
+    <span class="enscript-keyword">print</span> GetThreadSummary.header
+    <span class="enscript-keyword">print</span> GetThreadSummary(threadval)
+    <span class="enscript-keyword">print</span> GetThreadBackTrace(threadval, prefix=<span class="enscript-string">&quot;\t&quot;</span>)
+    <span class="enscript-keyword">return</span>
+
+@lldb_command(<span class="enscript-string">'switchtoact'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">SwitchToAct</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Switch to different context specified by activation
+    This command allows gdb to examine the execution context and call
+    stack for the specified activation. For example, to view the backtrace
+    for an activation issue &quot;switchtoact &lt;address&gt;&quot;, followed by &quot;bt&quot;.
+    Before resuming execution, issue a &quot;resetctx&quot; command, to
+    return to the original execution context.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> cmd_args == None <span class="enscript-keyword">or</span> len(cmd_args) &lt; 1:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No arguments passed&quot;</span>
+        <span class="enscript-keyword">print</span> SwitchToAct.__doc__.strip()
+        <span class="enscript-keyword">return</span> False
+    thval = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'thread *'</span>)
+    lldbthread = GetLLDBThreadForKernelThread(thval)
+    <span class="enscript-keyword">print</span> GetThreadSummary.header
+    <span class="enscript-keyword">print</span> GetThreadSummary(thval)
+    LazyTarget.GetProcess().selected_thread = lldbthread
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> LazyTarget.GetProcess().SetSelectedThread(lldbthread):
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Failed to switch thread.&quot;</span>
+    <span class="enscript-keyword">return</span>
+
+@lldb_command(<span class="enscript-string">'switchtoregs'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">SwitchToRegs</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to switch to a register state.
+        Usage: (lldb) switchtoregs &lt;struct arm_saved_state[64] *&gt;
+        This command creates a fake thread in lldb with the saved register state.
+        Note: This command ONLY works for ARM based kernel setup.
+    &quot;&quot;&quot;</span>
+    
+    <span class="enscript-keyword">if</span> cmd_args == None <span class="enscript-keyword">or</span> len(cmd_args) &lt; 1:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;No arguments passed&quot;</span>)
+
+    lldb_process = LazyTarget.GetProcess()
+    
+    saved_state = ArgumentStringToInt(cmd_args[0])
+    <span class="enscript-comment"># any change to this logic requires change in operating_system.py as well
+</span>    fake_thread_id = 0xdead0000 | (saved_state &amp; ~0xffff0000)
+    fake_thread_id = fake_thread_id &amp; 0xdeadffff
+    lldb_process.CreateOSPluginThread(0xdeadbeef, saved_state)
+    lldbthread = lldb_process.GetThreadByID(fake_thread_id)
+    
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> lldbthread.IsValid():
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Failed to create thread&quot;</span>
+        <span class="enscript-keyword">return</span>
+
+    lldb_process.selected_thread = lldbthread
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> lldb_process.SetSelectedThread(lldbthread):
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Failed to switch thread&quot;</span>
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Switched to Fake thread created from register state at 0x%x&quot;</span> % saved_state
+            
+
+
+<span class="enscript-comment"># Macro: showallstacks
+</span>@lldb_command(<span class="enscript-string">'showallstacks'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllStacks</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;Routine to print out the stack for each thread in the system.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.tasks:
+        ShowTaskStacks(t)
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot; \n&quot;</span>    
+    ZombStacks()
+    <span class="enscript-keyword">return</span>
+        
+<span class="enscript-comment"># EndMacro: showallstacks
+</span>
+<span class="enscript-comment"># Macro: showcurrentstacks
+</span>@lldb_command(<span class="enscript-string">'showcurrentstacks'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowCurrentStacks</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to print out the thread running on each cpu (incl. its stack)
+    &quot;&quot;&quot;</span>
+    processor_list = kern.GetGlobalVariable(<span class="enscript-string">'processor_list'</span>)
+    current_processor = processor_list
+    <span class="enscript-keyword">while</span> unsigned(current_processor) &gt; 0:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\n&quot;</span> + GetProcessorSummary(current_processor)
+        active_thread = current_processor.active_thread
+        <span class="enscript-keyword">if</span> unsigned(active_thread) != 0 :
+            task_val = active_thread.task
+            proc_val = Cast(task_val.bsd_info, <span class="enscript-string">'proc *'</span>)
+            <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+            <span class="enscript-keyword">print</span> GetTaskSummary(task_val) + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary(proc_val)
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary.header
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary(active_thread)
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\tBacktrace:&quot;</span>
+            <span class="enscript-keyword">print</span> GetThreadBackTrace(active_thread, prefix=<span class="enscript-string">&quot;\t&quot;</span>)
+        current_processor = current_processor.processor_list
+    <span class="enscript-keyword">return</span>
+<span class="enscript-comment"># EndMacro: showcurrentstacks
+</span>
+@lldb_command(<span class="enscript-string">'showcurrentthreads'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowCurrentThreads</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Display info about threads running on each cpu &quot;&quot;&quot;</span>
+    processor_list = kern.GetGlobalVariable(<span class="enscript-string">'processor_list'</span>)
+    current_processor = processor_list
+    <span class="enscript-keyword">while</span> unsigned(current_processor) &gt; 0:
+        <span class="enscript-keyword">print</span> GetProcessorSummary(current_processor)
+        active_thread = current_processor.active_thread
+        <span class="enscript-keyword">if</span> unsigned(active_thread) != 0 :
+            task_val = active_thread.task
+            proc_val = Cast(task_val.bsd_info, <span class="enscript-string">'proc *'</span>)
+            <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+            <span class="enscript-keyword">print</span> GetTaskSummary(task_val) + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary(proc_val)
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary.header
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary(active_thread)
+        current_processor = current_processor.processor_list
+    <span class="enscript-keyword">return</span>
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetFullBackTrace</span>(frame_addr, verbosity = vHUMAN, prefix = <span class="enscript-string">&quot;&quot;</span>):
+    <span class="enscript-string">&quot;&quot;&quot; Get backtrace across interrupt context. 
+        params: frame_addr - int - address in memory which is a frame pointer (ie. rbp, r7)
+                prefix - str - prefix for each line of output.
+        
+    &quot;&quot;&quot;</span>
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    bt_count = 0
+    frame_ptr = frame_addr
+    previous_frame_ptr = 0
+    <span class="enscript-comment"># &lt;rdar://problem/12677290&gt; lldb unable to find symbol for _mh_execute_header
+</span>    mh_execute_addr = int(lldb_run_command(<span class="enscript-string">'p/x (uintptr_t *)&amp;_mh_execute_header'</span>).split(<span class="enscript-string">'='</span>)[-1].strip(), 16)
+    <span class="enscript-keyword">while</span> frame_ptr <span class="enscript-keyword">and</span> frame_ptr != previous_frame_ptr <span class="enscript-keyword">and</span> bt_count &lt; 128:
+        <span class="enscript-keyword">if</span> (kern.arch <span class="enscript-keyword">not</span> <span class="enscript-keyword">in</span> (<span class="enscript-string">'arm'</span>, <span class="enscript-string">'arm64'</span>) <span class="enscript-keyword">and</span> frame_ptr &lt; mh_execute_addr) <span class="enscript-keyword">or</span> (kern.arch <span class="enscript-keyword">in</span> (<span class="enscript-string">'arm'</span>, <span class="enscript-string">'arm64'</span>) <span class="enscript-keyword">and</span> frame_ptr &gt; mh_execute_addr):
+            <span class="enscript-keyword">break</span>
+        pc_val = kern.GetValueFromAddress(frame_ptr + kern.ptrsize,<span class="enscript-string">'uintptr_t *'</span>)
+        pc_val = unsigned(dereference(pc_val))
+        out_string += prefix + GetSourceInformationForAddress(pc_val) + <span class="enscript-string">&quot;\n&quot;</span>
+        bt_count +=1
+        previous_frame_ptr = frame_ptr
+        frame_val = kern.GetValueFromAddress((frame_ptr), <span class="enscript-string">'uintptr_t *'</span>)
+        <span class="enscript-keyword">if</span> unsigned(frame_val) == 0:
+            <span class="enscript-keyword">break</span>
+        frame_ptr = unsigned(dereference(frame_val))
+        
+    <span class="enscript-keyword">return</span> out_string
+
+@lldb_command(<span class="enscript-string">'fullbt'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">FullBackTrace</span>(cmd_args=[]):
+    <span class="enscript-string">&quot;&quot;&quot; Show full backtrace across the interrupt boundary.
+        Syntax: fullbt &lt;frame ptr&gt;
+        Example: fullbt  `$rbp` 
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> len(cmd_args) &lt; 1:
+        <span class="enscript-keyword">print</span> FullBackTrace.__doc__
+        <span class="enscript-keyword">return</span> False
+    <span class="enscript-keyword">print</span> GetFullBackTrace(ArgumentStringToInt(cmd_args[0]), prefix=<span class="enscript-string">&quot;\t&quot;</span>)
+
+@lldb_command(<span class="enscript-string">'fullbtall'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">FullBackTraceAll</span>(cmd_args=[]):
+    <span class="enscript-string">&quot;&quot;&quot; Show full backtrace across the interrupt boundary for threads running on all processors.
+        Syntax: fullbtall
+        Example: fullbtall
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">for</span> processor <span class="enscript-keyword">in</span> IterateLinkedList(kern.globals.processor_list, <span class="enscript-string">'processor_list'</span>) :
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\n&quot;</span> + GetProcessorSummary(processor)
+        active_thread = processor.active_thread
+        <span class="enscript-keyword">if</span> unsigned(active_thread) != 0 :
+            task_val = active_thread.task
+            proc_val = Cast(task_val.bsd_info, <span class="enscript-string">'proc *'</span>)
+            <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+            <span class="enscript-keyword">print</span> GetTaskSummary(task_val) + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary(proc_val)
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary.header
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary(active_thread)
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\tBacktrace:&quot;</span>
+                
+            ThreadVal = GetLLDBThreadForKernelThread(active_thread)
+
+            FramePtr = ThreadVal.frames[0].GetFP()
+            
+            <span class="enscript-keyword">print</span> GetFullBackTrace(unsigned(FramePtr), prefix=<span class="enscript-string">&quot;\t&quot;</span>)
+            
+
+@lldb_command(<span class="enscript-string">'symbolicate'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">SymbolicateAddress</span>(cmd_args=[]):
+    <span class="enscript-string">&quot;&quot;&quot; Symbolicate an address for symbol information from loaded symbols
+        Example: &quot;symbolicate 0xaddr&quot; is equivalent to &quot;output/a 0xaddr&quot;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> len(cmd_args) &lt; 1:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Invalid address.\nSyntax: symbolicate &lt;address&gt;&quot;</span>
+        <span class="enscript-keyword">return</span> False
+    <span class="enscript-keyword">print</span> GetSourceInformationForAddress(ArgumentStringToInt(cmd_args[0]))
+    <span class="enscript-keyword">return</span> True
+
+@lldb_command(<span class="enscript-string">'showinitchild'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowInitChild</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to print out all processes in the system
+        which are children of init process
+    &quot;&quot;&quot;</span>
+    headp = kern.globals.initproc.p_children
+    <span class="enscript-keyword">for</span> pp <span class="enscript-keyword">in</span> IterateListEntry(headp, <span class="enscript-string">'struct proc *'</span>, <span class="enscript-string">'p_sibling'</span>):
+        <span class="enscript-keyword">print</span> GetProcInfo(pp)
+    <span class="enscript-keyword">return</span>
+
+@lldb_command(<span class="enscript-string">'showproctree'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowProcTree</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to print the processes in the system in a hierarchical tree form. This routine does not print zombie processes.
+        If no argument is given, showproctree will print all the processes in the system.
+        If pid is specified, showproctree prints all the descendants of the indicated process
+    &quot;&quot;&quot;</span>
+    search_pid = 0
+    <span class="enscript-keyword">if</span> cmd_args:
+        search_pid = ArgumentStringToInt(cmd_args[0])
+    
+    <span class="enscript-keyword">if</span> search_pid &lt; 0:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;pid specified must be a positive number&quot;</span>
+        <span class="enscript-keyword">print</span> ShowProcTree.__doc__
+        <span class="enscript-keyword">return</span>
+    
+    hdr_format = <span class="enscript-string">&quot;{0: &lt;6s} {1: &lt;14s} {2: &lt;9s}\n&quot;</span>
+    out_string = hdr_format.format(<span class="enscript-string">&quot;PID&quot;</span>, <span class="enscript-string">&quot;PROCESS&quot;</span>, <span class="enscript-string">&quot;POINTER&quot;</span>)
+    out_string += hdr_format.format(<span class="enscript-string">'='</span>*3, <span class="enscript-string">'='</span>*7, <span class="enscript-string">'='</span>*7)
+    proc = GetProcForPid(search_pid)
+    out_string += <span class="enscript-string">&quot;{0: &lt;6d} {1: &lt;14s} [ {2: #019x} ]\n&quot;</span>.format(proc.p_ppid, proc.p_pptr.p_comm, unsigned(proc.p_pptr))
+    out_string += <span class="enscript-string">&quot;|--{0: &lt;6d} {1: &lt;16s} [ {2: #019x} ]\n&quot;</span>.format(proc.p_pid, proc.p_comm, unsigned(proc))
+    <span class="enscript-keyword">print</span> out_string
+    ShowProcTreeRecurse(proc, <span class="enscript-string">&quot;|  &quot;</span>)
+    
+    <span class="enscript-keyword">return</span>
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowProcTreeRecurse</span>(proc, prefix=<span class="enscript-string">&quot;&quot;</span>):
+    <span class="enscript-string">&quot;&quot;&quot; Prints descendants of a given proc in hierarchial tree form
+        params:
+            proc  : core.value representing a struct proc * in the kernel
+        returns:
+            str   : String containing info about a given proc and its descendants in tree form
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> proc.p_childrencnt &gt; 0:
+        head_ptr = proc.p_children.lh_first
+        
+        <span class="enscript-keyword">for</span> p <span class="enscript-keyword">in</span> IterateListEntry(proc.p_children, <span class="enscript-string">'struct proc *'</span>, <span class="enscript-string">'p_sibling'</span>):
+            <span class="enscript-keyword">print</span> prefix + <span class="enscript-string">&quot;|--{0: &lt;6d} {1: &lt;16s} [ {2: #019x} ]\n&quot;</span>.format(p.p_pid, p.p_comm, unsigned(p))
+            ShowProcTreeRecurse(p, prefix + <span class="enscript-string">&quot;|  &quot;</span>)
+
+@lldb_command(<span class="enscript-string">'showthreadfortid'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowThreadForTid</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; The thread structure contains a unique thread_id value for each thread.
+        This command is used to retrieve the address of the thread structure(thread_t)
+        corresponding to a given thread_id.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Please provide thread_t whose tid you'd like to look up&quot;</span>
+        <span class="enscript-keyword">print</span> ShowThreadForTid.__doc__
+        <span class="enscript-keyword">return</span>
+    search_tid = ArgumentStringToInt(cmd_args[0])
+    <span class="enscript-keyword">for</span> taskp <span class="enscript-keyword">in</span> kern.tasks:
+        <span class="enscript-keyword">for</span> actp <span class="enscript-keyword">in</span> IterateQueue(taskp.threads, <span class="enscript-string">'struct thread *'</span>, <span class="enscript-string">'task_threads'</span>):
+            <span class="enscript-keyword">if</span> search_tid == int(actp.thread_id):
+                <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Found {0: #019x}&quot;</span>.format(actp)
+                <span class="enscript-keyword">print</span> GetThreadSummary.header
+                <span class="enscript-keyword">print</span> GetThreadSummary(actp)
+                <span class="enscript-keyword">return</span>
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Not a valid thread_id&quot;</span>
+
+<span class="enscript-comment"># Macro: showallprocessors
+</span>
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetProcessorSummary</span>(processor):
+    <span class="enscript-string">&quot;&quot;&quot; Internal function to print summary of processor
+        params: processor - value representing struct processor * 
+        return: str - representing the details of given processor
+    &quot;&quot;&quot;</span>
+    
+    processor_state_str = <span class="enscript-string">&quot;INVALID&quot;</span> 
+    processor_state = int(processor.state)
+    
+    processor_states = {
+                0: <span class="enscript-string">'OFF_LINE'</span>,
+                1: <span class="enscript-string">'SHUTDOWN'</span>,
+                2: <span class="enscript-string">'START'</span>,
+                <span class="enscript-comment"># 3 (formerly INACTIVE)
+</span>                4: <span class="enscript-string">'IDLE'</span>,
+                5: <span class="enscript-string">'DISPATCHING'</span>,
+                6: <span class="enscript-string">'RUNNING'</span>
+                }
+    
+    <span class="enscript-keyword">if</span> processor_state <span class="enscript-keyword">in</span> processor_states:
+        processor_state_str = <span class="enscript-string">&quot;{0: &lt;11s} &quot;</span>.format(processor_states[processor_state])
+
+    processor_recommended_str = <span class="enscript-string">&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> int(processor.is_recommended) == 0:
+        processor_recommended_str = <span class="enscript-string">&quot; (not recommended)&quot;</span>
+
+    ast = 0
+    preemption_disable = 0
+    preemption_disable_str = <span class="enscript-string">&quot;&quot;</span>
+
+    <span class="enscript-keyword">if</span> kern.arch == <span class="enscript-string">'x86_64'</span>:
+        cpu_data = kern.globals.cpu_data_ptr[processor.cpu_id]
+        <span class="enscript-keyword">if</span> (cpu_data != 0) :
+            ast = cpu_data.cpu_pending_ast
+            preemption_disable = cpu_data.cpu_preemption_level
+    <span class="enscript-comment"># On arm64, it's kern.globals.CpuDataEntries[processor.cpu_id].cpu_data_vaddr
+</span>    <span class="enscript-comment"># but LLDB can't find CpuDataEntries...
+</span>
+    ast_str = GetASTSummary(ast)
+
+    <span class="enscript-keyword">if</span> (preemption_disable != 0) :
+        preemption_disable_str = <span class="enscript-string">&quot;Preemption Disabled&quot;</span>
+
+    out_str = <span class="enscript-string">&quot;Processor {: &lt;#018x} cpu_id {:&gt;#4x} AST: {:&lt;6s} State {:&lt;s}{:&lt;s} {:&lt;s}\n&quot;</span>.format(
+            processor, int(processor.cpu_id), ast_str, processor_state_str, processor_recommended_str,
+            preemption_disable_str)
+    <span class="enscript-keyword">return</span> out_str   
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetGroupSetSummary</span>(runq, task_map):
+    <span class="enscript-string">&quot;&quot;&quot; Internal function to print summary of group run queue
+        params: runq - value representing struct run_queue * 
+        return: str - representing the details of given run_queue
+    &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">&quot;    runq: count {: &lt;10d} highq: {: &lt;10d} urgency {: &lt;10d}\n&quot;</span>.format(runq.count, runq.highq, runq.urgency)
+    
+    runq_queue_i = 0
+    runq_queue_count = sizeof(runq.queues)/sizeof(runq.queues[0])
+    
+    <span class="enscript-keyword">for</span> runq_queue_i <span class="enscript-keyword">in</span> range(runq_queue_count) :
+        runq_queue_head = addressof(runq.queues[runq_queue_i])
+        runq_queue_p = runq_queue_head.next
+        
+        <span class="enscript-keyword">if</span> unsigned(runq_queue_p) != unsigned(runq_queue_head):
+            runq_queue_this_count = 0
+            
+            <span class="enscript-keyword">for</span> entry <span class="enscript-keyword">in</span> IterateQueue(runq_queue_head, <span class="enscript-string">&quot;sched_entry_t&quot;</span>, <span class="enscript-string">&quot;links&quot;</span>):
+                runq_queue_this_count += 1
+            
+            out_str += <span class="enscript-string">&quot;      Queue [{: &lt;#012x}] Priority {: &lt;3d} count {:d}\n&quot;</span>.format(runq_queue_head, runq_queue_i, runq_queue_this_count)
+            <span class="enscript-keyword">for</span> entry <span class="enscript-keyword">in</span> IterateQueue(runq_queue_head, <span class="enscript-string">&quot;sched_entry_t&quot;</span>, <span class="enscript-string">&quot;links&quot;</span>):
+                group_addr = unsigned(entry) - (sizeof(dereference(entry)) * unsigned(entry.sched_pri))
+                group = kern.GetValueFromAddress(unsigned(group_addr), <span class="enscript-string">'sched_group_t'</span>)
+                task = task_map.get(unsigned(group), 0x0)
+                <span class="enscript-keyword">if</span> task == 0x0 :
+                    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Cannot find task for group: {: &lt;#012x}&quot;</span>.format(group)
+                out_str += <span class="enscript-string">&quot;\tEntry [{: &lt;#012x}] Priority {: &lt;3d} Group {: &lt;#012x} Task {: &lt;#012x}\n&quot;</span>.format(unsigned(entry), entry.sched_pri, unsigned(group), unsigned(task))
+                
+    <span class="enscript-keyword">return</span> out_str
+
+@lldb_command(<span class="enscript-string">'showrunq'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowRunq</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print information of a runq
+         Usage: showrunq &lt;runq&gt;
+    &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">''</span>
+    runq = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'struct run_queue *'</span>)
+    out_str += GetRunQSummary(runq)
+    <span class="enscript-keyword">print</span> out_str
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetRunQSummary</span>(runq):
+    <span class="enscript-string">&quot;&quot;&quot; Internal function to print summary of run_queue
+        params: runq - value representing struct run_queue * 
+        return: str - representing the details of given run_queue
+    &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">&quot;    runq: count {: &lt;10d} highq: {: &lt;10d} urgency {: &lt;10d}\n&quot;</span>.format(runq.count, runq.highq, runq.urgency)
+    
+    runq_queue_i = 0
+    runq_queue_count = sizeof(runq.queues)/sizeof(runq.queues[0])
+    
+    <span class="enscript-keyword">for</span> runq_queue_i <span class="enscript-keyword">in</span> range(runq_queue_count) :
+        runq_queue_head = addressof(runq.queues[runq_queue_i])
+        runq_queue_p = runq_queue_head.next
+        
+        <span class="enscript-keyword">if</span> unsigned(runq_queue_p) != unsigned(runq_queue_head):
+            runq_queue_this_count = 0
+            
+            <span class="enscript-keyword">for</span> thread <span class="enscript-keyword">in</span> IterateQueue(runq_queue_head, <span class="enscript-string">&quot;thread_t&quot;</span>, <span class="enscript-string">&quot;links&quot;</span>):
+                runq_queue_this_count += 1
+            
+            out_str += <span class="enscript-string">&quot;      Queue [{: &lt;#012x}] Priority {: &lt;3d} count {:d}\n&quot;</span>.format(runq_queue_head, runq_queue_i, runq_queue_this_count)
+            out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary.header + <span class="enscript-string">&quot;\n&quot;</span>
+            <span class="enscript-keyword">for</span> thread <span class="enscript-keyword">in</span> IterateQueue(runq_queue_head, <span class="enscript-string">&quot;thread_t&quot;</span>, <span class="enscript-string">&quot;links&quot;</span>):
+                out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary(thread) + <span class="enscript-string">&quot;\n&quot;</span>
+                <span class="enscript-keyword">if</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vHUMAN :
+                    out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadBackTrace(thread, prefix=<span class="enscript-string">&quot;\t\t&quot;</span>) + <span class="enscript-string">&quot;\n&quot;</span>
+    <span class="enscript-keyword">return</span> out_str
+
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetGrrrSummary</span>(grrr_runq):
+    <span class="enscript-string">&quot;&quot;&quot; Internal function to print summary of grrr_run_queue
+        params: grrr_runq - value representing struct grrr_run_queue * 
+        return: str - representing the details of given grrr_run_queue
+    &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">&quot;    GRRR Info: Count {: &lt;10d} Weight {: &lt;10d} Current Group {: &lt;#012x}\n&quot;</span>.format(grrr_runq.count,
+        grrr_runq.weight, grrr_runq.current_group)
+    grrr_group_i = 0
+    grrr_group_count = sizeof(grrr_runq.groups)/sizeof(grrr_runq.groups[0])
+    <span class="enscript-keyword">for</span> grrr_group_i <span class="enscript-keyword">in</span> range(grrr_group_count) :
+        grrr_group = addressof(grrr_runq.groups[grrr_group_i])
+        <span class="enscript-keyword">if</span> grrr_group.count &gt; 0:
+            out_str += <span class="enscript-string">&quot;      Group {: &lt;3d} [{: &lt;#012x}] &quot;</span>.format(grrr_group.index, grrr_group)
+            out_str += <span class="enscript-string">&quot;Count {:d} Weight {:d}\n&quot;</span>.format(grrr_group.count, grrr_group.weight)
+            grrr_group_client_head = addressof(grrr_group.clients)
+            out_str += GetThreadSummary.header
+            <span class="enscript-keyword">for</span> thread <span class="enscript-keyword">in</span> IterateQueue(grrr_group_client_head, <span class="enscript-string">&quot;thread_t&quot;</span>, <span class="enscript-string">&quot;links&quot;</span>):
+                out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary(thread) + <span class="enscript-string">&quot;\n&quot;</span>
+                <span class="enscript-keyword">if</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vHUMAN :
+                    out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadBackTrace(thread, prefix=<span class="enscript-string">&quot;\t\t&quot;</span>) + <span class="enscript-string">&quot;\n&quot;</span>
+    <span class="enscript-keyword">return</span> out_str
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowNextThread</span>(processor):
+    out_str = <span class="enscript-string">&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> (processor.next_thread != 0) :
+        out_str += <span class="enscript-string">&quot;      &quot;</span> + <span class="enscript-string">&quot;Next thread:\n&quot;</span>
+        out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary.header + <span class="enscript-string">&quot;\n&quot;</span>
+        out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary(processor.next_thread) + <span class="enscript-string">&quot;\n&quot;</span>
+    <span class="enscript-keyword">return</span> out_str
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowActiveThread</span>(processor):
+    out_str = <span class="enscript-string">&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> (processor.active_thread != 0) :
+        out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary.header + <span class="enscript-string">&quot;\n&quot;</span>
+        out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary(processor.active_thread) + <span class="enscript-string">&quot;\n&quot;</span>
+    <span class="enscript-keyword">return</span> out_str
+
+@lldb_command(<span class="enscript-string">'showallprocessors'</span>) 
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllProcessors</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print information of all psets and processors
+         Usage: showallprocessors
+    &quot;&quot;&quot;</span>
+    pset = addressof(kern.globals.pset0)
+    show_grrr = 0
+    show_priority_runq = 0
+    show_priority_pset_runq = 0
+    show_group_pset_runq = 0
+    sched_string = str(kern.globals.sched_current_dispatch.sched_name)
+    
+    <span class="enscript-keyword">if</span> sched_string == <span class="enscript-string">&quot;traditional&quot;</span>:
+        show_priority_runq = 1
+    <span class="enscript-keyword">elif</span> sched_string == <span class="enscript-string">&quot;traditional_with_pset_runqueue&quot;</span>:
+        show_priority_pset_runq = 1
+    <span class="enscript-keyword">elif</span> sched_string == <span class="enscript-string">&quot;grrr&quot;</span>:
+        show_grrr = 1
+    <span class="enscript-keyword">elif</span> sched_string == <span class="enscript-string">&quot;multiq&quot;</span>:
+        show_priority_runq = 1
+        show_group_pset_runq = 1
+    <span class="enscript-keyword">elif</span> sched_string == <span class="enscript-string">&quot;dualq&quot;</span>:
+        show_priority_pset_runq = 1        
+        show_priority_runq = 1
+    <span class="enscript-keyword">else</span> :
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Unknown sched_string {:s}&quot;</span>.format(sched_string)
+
+    out_str = <span class="enscript-string">''</span>
+    
+    out_str += <span class="enscript-string">&quot;Scheduler: {:s} ({:s})\n&quot;</span>.format(sched_string,
+            kern.Symbolicate(unsigned(kern.globals.sched_current_dispatch)))
+    
+    out_str += <span class="enscript-string">&quot;Runnable threads: {:d} Timeshare threads: {:d} Background threads: {:d}\n&quot;</span>.format(
+            kern.globals.sched_run_count, kern.globals.sched_share_count, kern.globals.sched_background_count)    
+    
+    <span class="enscript-keyword">if</span> show_group_pset_runq:
+        <span class="enscript-comment"># Create a group-&gt;task mapping
+</span>        task_map = {}
+        <span class="enscript-keyword">for</span> task <span class="enscript-keyword">in</span> kern.tasks:
+            task_map[unsigned(task.sched_group)] = task
+        <span class="enscript-keyword">for</span> task <span class="enscript-keyword">in</span> kern.terminated_tasks:
+            task_map[unsigned(task.sched_group)] = task
+    
+    <span class="enscript-keyword">while</span> unsigned(pset) != 0:
+        out_str += <span class="enscript-string">&quot;Processor Set  {: &lt;#012x} Count {:d} (cpu_id {:&lt;#x}-{:&lt;#x})\n&quot;</span>.format(pset, 
+            pset.cpu_set_count, pset.cpu_set_low, pset.cpu_set_hi)
+        
+        <span class="enscript-keyword">if</span> show_priority_pset_runq:
+            runq = pset.pset_runq
+            out_str += GetRunQSummary(runq)
+            
+        <span class="enscript-keyword">if</span> show_group_pset_runq:
+            out_str += <span class="enscript-string">&quot;Main Runq:\n&quot;</span>    
+            runq = pset.pset_runq
+            out_str += GetGroupSetSummary(runq, task_map)
+            out_str += <span class="enscript-string">&quot;All Groups:\n&quot;</span>    
+            <span class="enscript-comment"># TODO: Possibly output task header for each group
+</span>            <span class="enscript-keyword">for</span> group <span class="enscript-keyword">in</span> IterateQueue(kern.globals.sched_groups, <span class="enscript-string">&quot;sched_group_t&quot;</span>, <span class="enscript-string">&quot;sched_groups&quot;</span>):
+                <span class="enscript-keyword">if</span> (group.runq.count != 0) :
+                    task = task_map.get(unsigned(group), <span class="enscript-string">&quot;Unknown task!&quot;</span>)
+                    out_str += <span class="enscript-string">&quot;Group {: &lt;#012x} Task {: &lt;#012x}\n&quot;</span>.format(unsigned(group), unsigned(task))
+                    out_str += GetRunQSummary(group.runq)
+
+        out_str += <span class="enscript-string">&quot;  Active Processors:\n&quot;</span>
+        <span class="enscript-keyword">for</span> processor <span class="enscript-keyword">in</span> IterateQueue(pset.active_queue, <span class="enscript-string">&quot;processor_t&quot;</span>, <span class="enscript-string">&quot;processor_queue&quot;</span>):
+            out_str += <span class="enscript-string">&quot;    &quot;</span>
+            out_str += GetProcessorSummary(processor)
+            out_str += ShowActiveThread(processor)
+            out_str += ShowNextThread(processor)
+
+            <span class="enscript-keyword">if</span> show_priority_runq:
+                runq = processor.runq
+                out_str += GetRunQSummary(runq)
+            <span class="enscript-keyword">if</span> show_grrr:
+                grrr_runq = processor.grrr_runq
+                out_str += GetGrrrSummary(grrr_runq)
+
+        out_str += <span class="enscript-string">&quot;  Idle Processors:\n&quot;</span>
+        <span class="enscript-keyword">for</span> processor <span class="enscript-keyword">in</span> IterateQueue(pset.idle_queue, <span class="enscript-string">&quot;processor_t&quot;</span>, <span class="enscript-string">&quot;processor_queue&quot;</span>):
+            out_str += <span class="enscript-string">&quot;    &quot;</span> + GetProcessorSummary(processor)
+            out_str += ShowActiveThread(processor)
+            out_str += ShowNextThread(processor)
+
+            <span class="enscript-keyword">if</span> show_priority_runq:            
+                out_str += GetRunQSummary(processor.runq)
+
+        out_str += <span class="enscript-string">&quot;  Idle Secondary Processors:\n&quot;</span>
+        <span class="enscript-keyword">for</span> processor <span class="enscript-keyword">in</span> IterateQueue(pset.idle_secondary_queue, <span class="enscript-string">&quot;processor_t&quot;</span>, <span class="enscript-string">&quot;processor_queue&quot;</span>):
+            out_str += <span class="enscript-string">&quot;    &quot;</span> + GetProcessorSummary(processor)
+            out_str += ShowActiveThread(processor)
+            out_str += ShowNextThread(processor)
+
+            <span class="enscript-keyword">if</span> show_priority_runq:            
+                out_str += GetRunQSummary(processor.runq)
+        
+        pset = pset.pset_list
+
+    out_str += <span class="enscript-string">&quot;\nRealtime Queue ({:&lt;#012x}) Count {:d}\n&quot;</span>.format(addressof(kern.globals.rt_runq.queue), kern.globals.rt_runq.count)
+    <span class="enscript-keyword">if</span> kern.globals.rt_runq.count != 0:
+        out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary.header + <span class="enscript-string">&quot;\n&quot;</span>
+        <span class="enscript-keyword">for</span> rt_runq_thread <span class="enscript-keyword">in</span> IterateQueue(kern.globals.rt_runq.queue, <span class="enscript-string">&quot;thread_t&quot;</span>, <span class="enscript-string">&quot;links&quot;</span>):
+            out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary(rt_runq_thread) + <span class="enscript-string">&quot;\n&quot;</span>
+
+    out_str += <span class="enscript-string">&quot;\nTerminate Queue: ({:&lt;#012x})\n&quot;</span>.format(addressof(kern.globals.thread_terminate_queue))
+    first = False
+    <span class="enscript-keyword">for</span> thread <span class="enscript-keyword">in</span> IterateQueue(kern.globals.thread_terminate_queue, <span class="enscript-string">&quot;thread_t&quot;</span>, <span class="enscript-string">&quot;links&quot;</span>):
+        <span class="enscript-keyword">if</span> first:
+            out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary.header + <span class="enscript-string">&quot;\n&quot;</span>
+            first = True
+        out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary(thread) + <span class="enscript-string">&quot;\n&quot;</span>
+
+    out_str += <span class="enscript-string">&quot;\nCrashed Threads Queue: ({:&lt;#012x})\n&quot;</span>.format(addressof(kern.globals.crashed_threads_queue))
+    first = False
+    <span class="enscript-keyword">for</span> thread <span class="enscript-keyword">in</span> IterateQueue(kern.globals.crashed_threads_queue, <span class="enscript-string">&quot;thread_t&quot;</span>, <span class="enscript-string">&quot;links&quot;</span>):
+        <span class="enscript-keyword">if</span> first:
+            out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary.header + <span class="enscript-string">&quot;\n&quot;</span>
+            first = True
+        out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetThreadSummary(thread) + <span class="enscript-string">&quot;\n&quot;</span>
+
+    out_str += <span class="enscript-string">&quot;\n&quot;</span>
+    
+    out_str += <span class="enscript-string">&quot;\n&quot;</span>
+
+    <span class="enscript-keyword">print</span> out_str
+<span class="enscript-comment"># EndMacro: showallprocessors
+</span>
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetLedgerEntrySummary</span>(ledger_template, ledger, i):
+    <span class="enscript-string">&quot;&quot;&quot; Internal function to get internals of a ledger entry (*not* a ledger itself)
+        params: ledger_template - value representing struct ledger_template_t for the task or thread
+                ledger - value representing struct ledger_entry *
+        return: str - formatted output information of ledger entries
+    &quot;&quot;&quot;</span>
+    ledger_limit_infinity = (uint64_t(0x1).value &lt;&lt; 63) - 1
+    lf_refill_scheduled = 0x0400
+    lf_tracking_max = 0x4000
+
+    out_str = <span class="enscript-string">''</span>
+    now = unsigned(kern.globals.sched_tick) / 20
+    lim_pct = 0
+
+    out_str += <span class="enscript-string">&quot;{: &gt;32s} {:&lt;2d}:&quot;</span>.format(ledger_template.lt_entries[i].et_key, i)
+    out_str += <span class="enscript-string">&quot;{: &gt;15d} &quot;</span>.format(unsigned(ledger.le_credit) - unsigned(ledger.le_debit))
+    <span class="enscript-keyword">if</span> (ledger.le_flags &amp; lf_tracking_max):
+        out_str += <span class="enscript-string">&quot;{:9d} {:5d} &quot;</span>.format(ledger._le.le_peaks[0].le_max, now - unsigned(ledger._le.le_peaks[0].le_time))
+        out_str += <span class="enscript-string">&quot;{:9d} {:4d} &quot;</span>.format(ledger._le.le_peaks[1].le_max, now - unsigned(ledger._le.le_peaks[1].le_time))
+    <span class="enscript-keyword">else</span>:
+        out_str += <span class="enscript-string">&quot;        -     -         -    - &quot;</span>
+    
+    out_str += <span class="enscript-string">&quot;{:12d} {:12d} &quot;</span>.format(unsigned(ledger.le_credit), unsigned(ledger.le_debit))
+    <span class="enscript-keyword">if</span> (unsigned(ledger.le_limit) != ledger_limit_infinity):
+        out_str += <span class="enscript-string">&quot;{:12d} &quot;</span>.format(unsigned(ledger.le_limit))
+    <span class="enscript-keyword">else</span>:
+        out_str += <span class="enscript-string">&quot;           - &quot;</span>
+
+    <span class="enscript-keyword">if</span> (ledger.le_flags &amp; lf_refill_scheduled):
+        out_str += <span class="enscript-string">&quot;{:15d} &quot;</span>.format(ledger._le.le_refill.le_refill_period)
+    <span class="enscript-keyword">else</span>:
+        out_str += <span class="enscript-string">&quot;              - &quot;</span>
+
+    <span class="enscript-keyword">if</span> (ledger.le_flags &amp; lf_refill_scheduled):
+        out_str += <span class="enscript-string">&quot;{:9d} &quot;</span>.format((unsigned(ledger.le_limit) * 100) / ledger._le.le_refill.le_refill_period)
+    <span class="enscript-keyword">else</span>:
+        out_str += <span class="enscript-string">&quot;        - &quot;</span>
+
+    <span class="enscript-keyword">if</span> (unsigned(ledger.le_warn_level) != ledger_limit_infinity):
+        out_str += <span class="enscript-string">&quot;{:9d} &quot;</span>.format((unsigned(ledger.le_warn_level) * 100) / unsigned(ledger.le_limit))
+    <span class="enscript-keyword">else</span>:
+        out_str += <span class="enscript-string">&quot;        - &quot;</span>
+
+    <span class="enscript-keyword">if</span> ((unsigned(ledger.le_credit) - unsigned(ledger.le_debit)) &gt; unsigned(ledger.le_limit)):
+        out_str += <span class="enscript-string">&quot;    X &quot;</span>
+    <span class="enscript-keyword">else</span>:
+        out_str += <span class="enscript-string">&quot;      &quot;</span>
+
+    out_str += <span class="enscript-string">&quot;{:#8x}\n&quot;</span>.format(ledger.le_flags)
+    <span class="enscript-keyword">return</span> out_str
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetThreadLedgerSummary</span>(thread_val):
+    <span class="enscript-string">&quot;&quot;&quot; Internal function to get a summary of ledger entries for the given thread
+        params: thread - value representing struct thread *
+        return: str - formatted output information for ledger entries of the input thread
+    &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">&quot;   [{:#08x}]\n&quot;</span>.format(thread_val)
+    ledgerp = thread_val.t_threadledger
+    <span class="enscript-keyword">if</span> ledgerp:
+        i = 0
+        <span class="enscript-keyword">while</span> i != ledgerp.l_template.lt_cnt:
+            out_str += GetLedgerEntrySummary(kern.globals.thread_ledger_template,
+                ledgerp.l_entries[i], i)
+            i = i + 1
+    <span class="enscript-keyword">return</span> out_str
+
+@header(<span class="enscript-string">&quot;{0: &lt;15s} {1: &gt;16s} {2: &lt;2s} {3: &gt;15s} {4: &gt;9s} {5: &gt;6s} {6: &gt;8s} {7: &lt;10s} {8: &lt;9s} \
+    {9: &lt;12s} {10: &lt;7s} {11: &lt;15s} {12: &lt;8s} {13: &lt;9s} {14: &lt;6s} {15: &gt;6s}&quot;</span>.format(
+    <span class="enscript-string">&quot;task [thread]&quot;</span>, <span class="enscript-string">&quot;entry&quot;</span>, <span class="enscript-string">&quot;#&quot;</span>, <span class="enscript-string">&quot;balance&quot;</span>, <span class="enscript-string">&quot;peakA&quot;</span>, <span class="enscript-string">&quot;(age)&quot;</span>, <span class="enscript-string">&quot;peakB&quot;</span>, <span class="enscript-string">&quot;(age)&quot;</span>, <span class="enscript-string">&quot;credit&quot;</span>,
+     <span class="enscript-string">&quot;debit&quot;</span>, <span class="enscript-string">&quot;limit&quot;</span>, <span class="enscript-string">&quot;refill period&quot;</span>, <span class="enscript-string">&quot;lim pct&quot;</span>, <span class="enscript-string">&quot;warn pct&quot;</span>, <span class="enscript-string">&quot;over?&quot;</span>, <span class="enscript-string">&quot;flags&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetTaskLedgers</span>(task_val):
+    <span class="enscript-string">&quot;&quot;&quot; Internal function to get summary of ledger entries from the task and its threads
+        params: task_val - value representing struct task *
+        return: str - formatted output information for ledger entries of the input task
+    &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">''</span>
+    task_ledgerp = task_val.ledger
+    i = 0
+    out_str += <span class="enscript-string">&quot;{: #08x} &quot;</span>.format(task_val)
+    pval = Cast(task_val.bsd_info, <span class="enscript-string">'proc *'</span>)
+    <span class="enscript-keyword">if</span> pval:
+        out_str += <span class="enscript-string">&quot;{: &lt;5s}:\n&quot;</span>.format(pval.p_comm)
+    <span class="enscript-keyword">else</span>:
+        out_str += <span class="enscript-string">&quot;Invalid process:\n&quot;</span>
+    <span class="enscript-keyword">while</span> i != task_ledgerp.l_template.lt_cnt:
+        out_str += GetLedgerEntrySummary(kern.globals.task_ledger_template, task_ledgerp.l_entries[i], i)
+        i = i + 1
+
+    <span class="enscript-comment"># Now walk threads
+</span>    <span class="enscript-keyword">for</span> thval <span class="enscript-keyword">in</span> IterateQueue(task_val.threads, <span class="enscript-string">'thread *'</span>, <span class="enscript-string">'task_threads'</span>):
+        out_str += GetThreadLedgerSummary(thval)
+
+    <span class="enscript-keyword">return</span> out_str
+
+<span class="enscript-comment"># Macro: showtaskledgers
+</span>
+@lldb_command(<span class="enscript-string">'showtaskledgers'</span>, <span class="enscript-string">'F:'</span>) 
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowTaskLedgers</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print a summary  of ledger entries for the task and all of its threads
+         Usage: showtaskledgers &lt;address of task&gt;
+         or   : showtaskledgers -F &lt;name of task&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-F&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        task_list = FindTasksByName(cmd_options[<span class="enscript-string">&quot;-F&quot;</span>])
+        <span class="enscript-keyword">for</span> tval <span class="enscript-keyword">in</span> task_list:
+            <span class="enscript-keyword">print</span> GetTaskLedgers.header
+            <span class="enscript-keyword">print</span> GetTaskLedgers(tval)
+        <span class="enscript-keyword">return</span>
+    
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;No arguments passed.&quot;</span>)
+    tval = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'task *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> tval:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;unknown arguments: %r&quot;</span> %cmd_args)
+    <span class="enscript-keyword">print</span> GetTaskLedgers.header
+    <span class="enscript-keyword">print</span> GetTaskLedgers(tval)
+
+<span class="enscript-comment"># EndMacro: showtaskledgers
+</span>
+<span class="enscript-comment"># Macro: showalltaskledgers
+</span>
+@lldb_command(<span class="enscript-string">'showalltaskledgers'</span>) 
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllTaskLedgers</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print a summary  of ledger entries for all tasks and respective threads
+         Usage: showalltaskledgers
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.tasks:
+        task_val = unsigned(t)
+        ShowTaskLedgers([task_val])
+    
+<span class="enscript-comment"># EndMacro: showalltaskledgers
+</span>
+<span class="enscript-comment"># Macro: showprocuuidpolicytable
+</span>
+@lldb_type_summary([<span class="enscript-string">'proc_uuid_policy_entry'</span>])
+@header(<span class="enscript-string">&quot;{0: &lt;36s} {1: &lt;10s}&quot;</span>.format(<span class="enscript-string">&quot;uuid&quot;</span>, <span class="enscript-string">&quot;flags&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetProcUUIDPolicyEntrySummary</span>(entry):
+    <span class="enscript-string">&quot;&quot;&quot; Summarizes the important fields in proc_uuid_policy_entry structure.
+        params: entry: value - value object representing an entry
+        returns: str - summary of the entry
+    &quot;&quot;&quot;</span>
+    data = []
+    <span class="enscript-keyword">for</span> i <span class="enscript-keyword">in</span> range(16):
+        data.append(int(entry.uuid[i]))
+    flags = unsigned(entry.flags)
+    out_string = <span class="enscript-string">&quot;{a[0]:02X}{a[1]:02X}{a[2]:02X}{a[3]:02X}-{a[4]:02X}{a[5]:02X}-{a[6]:02X}{a[7]:02X}-{a[8]:02X}{a[9]:02X}-{a[10]:02X}{a[11]:02X}{a[12]:02X}{a[13]:02X}{a[14]:02X}{a[15]:02X} 0x{b:0&gt;8x}&quot;</span>.format(a=data, b=flags)
+    <span class="enscript-keyword">return</span> out_string
+
+@lldb_command(<span class="enscript-string">'showprocuuidpolicytable'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowProcUUIDPolicyTable</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to print the proc UUID policy table
+        Usage: showprocuuidpolicytable
+    &quot;&quot;&quot;</span>
+    hashslots = unsigned(kern.globals.proc_uuid_policy_hash_mask)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{0: &lt;8s} &quot;</span>.format(<span class="enscript-string">&quot;slot&quot;</span>) + GetProcUUIDPolicyEntrySummary.header
+    <span class="enscript-keyword">for</span> i <span class="enscript-keyword">in</span> range(0, hashslots+1):
+        headp = addressof(kern.globals.proc_uuid_policy_hashtbl[i])
+        entrynum = 0
+        <span class="enscript-keyword">for</span> entry <span class="enscript-keyword">in</span> IterateListEntry(headp, <span class="enscript-string">'struct proc_uuid_policy_entry *'</span>, <span class="enscript-string">'entries'</span>):
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{0: &gt;2d}.{1: &lt;5d} &quot;</span>.format(i, entrynum) + GetProcUUIDPolicyEntrySummary(entry)
+            entrynum += 1
+
+
+<span class="enscript-comment"># EndMacro: showprocuuidpolicytable
+</span>
+@lldb_command(<span class="enscript-string">'showalltaskpolicy'</span>) 
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllTaskPolicy</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  
+         Routine to print a summary listing of all the tasks
+         wq_state -&gt; reports &quot;number of workq threads&quot;, &quot;number of scheduled workq threads&quot;, &quot;number of pending work items&quot;
+         if &quot;number of pending work items&quot; seems stuck at non-zero, it may indicate that the workqueue mechanism is hung
+         io_policy -&gt; RAGE  - rapid aging of vnodes requested
+                     NORM  - normal I/O explicitly requested (this is the default)
+                     PASS  - passive I/O requested (i.e. I/Os do not affect throttling decisions)
+                     THROT - throttled I/O requested (i.e. thread/task may be throttled after each I/O completes)
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> kern
+    <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.tasks:
+        pval = Cast(t.bsd_info, <span class="enscript-string">'proc *'</span>)
+        <span class="enscript-keyword">print</span> GetTaskSummary(t) +<span class="enscript-string">&quot; &quot;</span>+ GetProcSummary(pval)
+        requested_strings = [
+                [<span class="enscript-string">&quot;int_darwinbg&quot;</span>,        <span class="enscript-string">&quot;DBG-int&quot;</span>],
+                [<span class="enscript-string">&quot;ext_darwinbg&quot;</span>,        <span class="enscript-string">&quot;DBG-ext&quot;</span>],
+                [<span class="enscript-string">&quot;int_iotier&quot;</span>,          <span class="enscript-string">&quot;iotier-int&quot;</span>],
+                [<span class="enscript-string">&quot;ext_iotier&quot;</span>,          <span class="enscript-string">&quot;iotier-ext&quot;</span>],
+                [<span class="enscript-string">&quot;int_iopassive&quot;</span>,       <span class="enscript-string">&quot;passive-int&quot;</span>],
+                [<span class="enscript-string">&quot;ext_iopassive&quot;</span>,       <span class="enscript-string">&quot;passive-ext&quot;</span>],
+                [<span class="enscript-string">&quot;bg_iotier&quot;</span>,           <span class="enscript-string">&quot;bg-iotier&quot;</span>],
+                [<span class="enscript-string">&quot;terminated&quot;</span>,          <span class="enscript-string">&quot;terminated&quot;</span>],
+                [<span class="enscript-string">&quot;th_pidbind_bg&quot;</span>,       <span class="enscript-string">&quot;bg-pidbind&quot;</span>],
+                [<span class="enscript-string">&quot;th_workq_bg&quot;</span>,         <span class="enscript-string">&quot;bg-workq&quot;</span>],
+                [<span class="enscript-string">&quot;t_apptype&quot;</span>,           <span class="enscript-string">&quot;apptype&quot;</span>],
+                [<span class="enscript-string">&quot;t_boosted&quot;</span>,           <span class="enscript-string">&quot;boosted&quot;</span>],
+                [<span class="enscript-string">&quot;t_int_gpu_deny&quot;</span>,      <span class="enscript-string">&quot;gpudeny-int&quot;</span>],
+                [<span class="enscript-string">&quot;t_ext_gpu_deny&quot;</span>,      <span class="enscript-string">&quot;gpudeny-ext&quot;</span>],
+                [<span class="enscript-string">&quot;t_role&quot;</span>,              <span class="enscript-string">&quot;role&quot;</span>],
+                [<span class="enscript-string">&quot;t_tal_enabled&quot;</span>,       <span class="enscript-string">&quot;tal-enabled&quot;</span>],
+                [<span class="enscript-string">&quot;t_base_latency_qos&quot;</span>,  <span class="enscript-string">&quot;latency-base&quot;</span>],
+                [<span class="enscript-string">&quot;t_over_latency_qos&quot;</span>,  <span class="enscript-string">&quot;latency-override&quot;</span>],
+                [<span class="enscript-string">&quot;t_base_through_qos&quot;</span>,  <span class="enscript-string">&quot;throughput-base&quot;</span>],
+                [<span class="enscript-string">&quot;t_over_through_qos&quot;</span>,  <span class="enscript-string">&quot;throughput-override&quot;</span>]
+                ]
+        
+        requested=<span class="enscript-string">&quot;&quot;</span>
+        <span class="enscript-keyword">for</span> value <span class="enscript-keyword">in</span> requested_strings:
+            <span class="enscript-keyword">if</span> t.requested_policy.__getattr__(value[0]) :
+                requested+=value[1] + <span class="enscript-string">&quot;: &quot;</span> + str(t.requested_policy.__getattr__(value[0])) + <span class="enscript-string">&quot; &quot;</span>
+            <span class="enscript-keyword">else</span>:
+                requested+=<span class="enscript-string">&quot;&quot;</span>
+        
+        suppression_strings = [
+                [<span class="enscript-string">&quot;t_sup_active&quot;</span>,        <span class="enscript-string">&quot;active&quot;</span>],
+                [<span class="enscript-string">&quot;t_sup_lowpri_cpu&quot;</span>,    <span class="enscript-string">&quot;lowpri-cpu&quot;</span>],
+                [<span class="enscript-string">&quot;t_sup_timer&quot;</span>,         <span class="enscript-string">&quot;timer-throttling&quot;</span>],
+                [<span class="enscript-string">&quot;t_sup_disk&quot;</span>,          <span class="enscript-string">&quot;disk-throttling&quot;</span>],
+                [<span class="enscript-string">&quot;t_sup_cpu_limit&quot;</span>,     <span class="enscript-string">&quot;cpu-limits&quot;</span>],
+                [<span class="enscript-string">&quot;t_sup_suspend&quot;</span>,       <span class="enscript-string">&quot;suspend&quot;</span>],
+                [<span class="enscript-string">&quot;t_sup_bg_sockets&quot;</span>,    <span class="enscript-string">&quot;bg-sockets&quot;</span>]
+                ]
+            
+        suppression=<span class="enscript-string">&quot;&quot;</span>
+        <span class="enscript-keyword">for</span> value <span class="enscript-keyword">in</span> suppression_strings:
+            <span class="enscript-keyword">if</span> t.requested_policy.__getattr__(value[0]) :
+                suppression+=value[1] + <span class="enscript-string">&quot;: &quot;</span> + str(t.requested_policy.__getattr__(value[0])) + <span class="enscript-string">&quot; &quot;</span>
+            <span class="enscript-keyword">else</span>:
+                suppression+=<span class="enscript-string">&quot;&quot;</span>
+
+        effective_strings = [
+                [<span class="enscript-string">&quot;darwinbg&quot;</span>,        <span class="enscript-string">&quot;background&quot;</span>],
+                [<span class="enscript-string">&quot;lowpri_cpu&quot;</span>,      <span class="enscript-string">&quot;lowpri-cpu&quot;</span>],
+                [<span class="enscript-string">&quot;io_tier&quot;</span>,         <span class="enscript-string">&quot;iotier&quot;</span>],
+                [<span class="enscript-string">&quot;io_passive&quot;</span>,      <span class="enscript-string">&quot;passive&quot;</span>],
+                [<span class="enscript-string">&quot;all_sockets_bg&quot;</span>,  <span class="enscript-string">&quot;bg-allsockets&quot;</span>],
+                [<span class="enscript-string">&quot;new_sockets_bg&quot;</span>,  <span class="enscript-string">&quot;bg-newsockets&quot;</span>],
+                [<span class="enscript-string">&quot;bg_iotier&quot;</span>,       <span class="enscript-string">&quot;bg-iotier&quot;</span>],
+                [<span class="enscript-string">&quot;terminated&quot;</span>,      <span class="enscript-string">&quot;terminated&quot;</span>],
+                [<span class="enscript-string">&quot;t_gpu_deny&quot;</span>,      <span class="enscript-string">&quot;gpu-deny&quot;</span>],
+                [<span class="enscript-string">&quot;t_tal_engaged&quot;</span>,   <span class="enscript-string">&quot;tal-engaged&quot;</span>],
+                [<span class="enscript-string">&quot;t_suspended&quot;</span>,     <span class="enscript-string">&quot;suspended&quot;</span>],
+                [<span class="enscript-string">&quot;t_watchers_bg&quot;</span>,   <span class="enscript-string">&quot;bg-watchers&quot;</span>],
+                [<span class="enscript-string">&quot;t_latency_qos&quot;</span>,   <span class="enscript-string">&quot;latency-qos&quot;</span>],
+                [<span class="enscript-string">&quot;t_through_qos&quot;</span>,   <span class="enscript-string">&quot;throughput-qos&quot;</span>],
+                [<span class="enscript-string">&quot;t_sup_active&quot;</span>,    <span class="enscript-string">&quot;suppression-active&quot;</span>],
+                [<span class="enscript-string">&quot;t_role&quot;</span>,          <span class="enscript-string">&quot;role&quot;</span>]
+                ]
+            
+        effective=<span class="enscript-string">&quot;&quot;</span>
+        <span class="enscript-keyword">for</span> value <span class="enscript-keyword">in</span> effective_strings:
+            <span class="enscript-keyword">if</span> t.effective_policy.__getattr__(value[0]) :
+                effective+=value[1] + <span class="enscript-string">&quot;: &quot;</span> + str(t.effective_policy.__getattr__(value[0])) + <span class="enscript-string">&quot; &quot;</span>
+            <span class="enscript-keyword">else</span>:
+                effective+=<span class="enscript-string">&quot;&quot;</span>
+                
+
+        pended_strings = [
+                [<span class="enscript-string">&quot;t_updating_policy&quot;</span>,     <span class="enscript-string">&quot;updating&quot;</span>],
+                [<span class="enscript-string">&quot;update_sockets&quot;</span>,        <span class="enscript-string">&quot;update_sockets&quot;</span>],
+                [<span class="enscript-string">&quot;t_update_timers&quot;</span>,       <span class="enscript-string">&quot;update_timers&quot;</span>],
+                [<span class="enscript-string">&quot;t_update_watchers&quot;</span>,     <span class="enscript-string">&quot;update_watchers&quot;</span>]
+                ]
+            
+        pended=<span class="enscript-string">&quot;&quot;</span>
+        <span class="enscript-keyword">for</span> value <span class="enscript-keyword">in</span> pended_strings:
+            <span class="enscript-keyword">if</span> t.pended_policy.__getattr__(value[0]) :
+                pended+=value[1] + <span class="enscript-string">&quot;: &quot;</span> + str(t.pended_policy.__getattr__(value[0])) + <span class="enscript-string">&quot; &quot;</span>
+            <span class="enscript-keyword">else</span>:
+                pended+=<span class="enscript-string">&quot;&quot;</span>
+                
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;requested: &quot;</span> + requested
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;suppression: &quot;</span> + suppression
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;effective: &quot;</span> + effective
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;pended: &quot;</span> + pended
+
+
+@lldb_type_summary([<span class="enscript-string">'wait_queue'</span>, <span class="enscript-string">'wait_queue_t'</span>])
+@header(<span class="enscript-string">&quot;{: &lt;20s} {: &lt;20s} {: &lt;15s} {:&lt;5s} {:&lt;5s} {: &lt;20s}&quot;</span>.format(<span class="enscript-string">&quot;waitq&quot;</span>, <span class="enscript-string">&quot;interlock&quot;</span>, <span class="enscript-string">&quot;policy&quot;</span>, <span class="enscript-string">&quot;members&quot;</span>, <span class="enscript-string">&quot;threads&quot;</span>, <span class="enscript-string">&quot;eventmask&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetWaitQSummary</span>(waitq):
+    <span class="enscript-string">&quot;&quot;&quot; Summarizes the important fields in task structure.
+        params: task: value - value object representing a task in kernel
+        returns: str - summary of the task
+    &quot;&quot;&quot;</span>
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    format_string = <span class="enscript-string">'{: &lt;#020x} {: &lt;#020x} {: &lt;15s} {: &lt;5d} {: &lt;5d} {: &lt;#020x}'</span>
+    
+    wqtype = <span class="enscript-string">&quot;&quot;</span>
+
+    <span class="enscript-keyword">if</span> (waitq.wq_fifo == 1) :
+        wqtype += <span class="enscript-string">&quot;FIFO&quot;</span>
+    <span class="enscript-keyword">else</span> :
+        wqtype += <span class="enscript-string">&quot;PRIO&quot;</span>
+        
+    <span class="enscript-keyword">if</span> (waitq.wq_prepost == 1) :
+        wqtype += <span class="enscript-string">&quot;Prepost&quot;</span>
+        
+    <span class="enscript-keyword">if</span> (waitq.wq_type == 0x3) :
+        wqtype += <span class="enscript-string">&quot;Set&quot;</span>
+    <span class="enscript-keyword">elif</span> (waitq.wq_type == 0x2) :
+        wqtype += <span class="enscript-string">&quot;Queue&quot;</span>
+    <span class="enscript-keyword">else</span> :
+        wqtype += <span class="enscript-string">&quot;INVALID&quot;</span>
+        
+    out_string += format_string.format(waitq, unsigned(waitq.wq_interlock.lock_data), policy, 0, 0, unsigned(waitq.wq_eventmask))
+    
+    out_string += <span class="enscript-string">&quot;\n&quot;</span> + GetThreadSummary.header
+
+    <span class="enscript-keyword">for</span> thread <span class="enscript-keyword">in</span> IterateQueue(waitq.wq_queue, <span class="enscript-string">&quot;thread_t&quot;</span>, <span class="enscript-string">&quot;links&quot;</span>):
+        out_string += <span class="enscript-string">&quot;\n&quot;</span> + GetThreadSummary(thread)
+
+    <span class="enscript-keyword">return</span> out_string
+
+
+@lldb_command(<span class="enscript-string">'showallsuspendedtasks'</span>, <span class="enscript-string">''</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowSuspendedTasks</span>(cmd_args=[], options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Show a list of suspended tasks with their process name summary.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">' '</span> + GetProcSummary.header
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.tasks:
+        <span class="enscript-keyword">if</span> t.suspend_count &gt; 0:
+            <span class="enscript-keyword">print</span> GetTaskSummary(t) + <span class="enscript-string">' '</span> + GetProcSummary(Cast(t.bsd_info, <span class="enscript-string">'proc *'</span>))
+    <span class="enscript-keyword">return</span> True
+
+
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,1146 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>processor.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">processor.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989,1988 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+
+<span class="enscript-comment">/*
+ *	processor.c: processor and processor_set manipulation routines.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/policy.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/processor_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_tt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_mach_internal.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Exported interface
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_host_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/processor_set_server.h&gt;</span>
+
+<span class="enscript-type">struct</span> processor_set	pset0;
+<span class="enscript-type">struct</span> pset_node		pset_node0;
+<span class="enscript-function-name">decl_simple_lock_data</span>(<span class="enscript-type">static</span>,pset_node_lock)
+
+queue_head_t			tasks;
+queue_head_t			terminated_tasks;	<span class="enscript-comment">/* To be used ONLY for stackshot. */</span>
+<span class="enscript-type">int</span>						tasks_count;
+<span class="enscript-type">int</span>						terminated_tasks_count;
+queue_head_t			threads;
+<span class="enscript-type">int</span>						threads_count;
+<span class="enscript-function-name">decl_lck_mtx_data</span>(,tasks_threads_lock)
+
+processor_t				processor_list;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>			processor_count;
+<span class="enscript-type">static</span> processor_t		processor_list_tail;
+<span class="enscript-function-name">decl_simple_lock_data</span>(,processor_list_lock)
+
+uint32_t				processor_avail_count;
+
+processor_t		master_processor;
+<span class="enscript-type">int</span> 			master_cpu = 0;
+boolean_t		sched_stats_active = FALSE;
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">processor_bootstrap</span>(<span class="enscript-type">void</span>)
+{
+	pset_init(&amp;pset0, &amp;pset_node0);
+	pset_node0.psets = &amp;pset0;
+
+	simple_lock_init(&amp;pset_node_lock, 0);
+
+	queue_init(&amp;tasks);
+	queue_init(&amp;terminated_tasks);
+	queue_init(&amp;threads);
+
+	simple_lock_init(&amp;processor_list_lock, 0);
+
+	master_processor = cpu_to_processor(master_cpu);
+
+	processor_init(master_processor, master_cpu, &amp;pset0);
+}
+
+<span class="enscript-comment">/*
+ *	Initialize the given processor for the cpu
+ *	indicated by cpu_id, and assign to the
+ *	specified processor set.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">processor_init</span>(
+	processor_t			processor,
+	<span class="enscript-type">int</span>					cpu_id,
+	processor_set_t		pset)
+{
+	spl_t		s;
+
+	<span class="enscript-keyword">if</span> (processor != master_processor) {
+		<span class="enscript-comment">/* Scheduler state deferred until sched_init() */</span>
+		SCHED(processor_init)(processor);
+	}
+
+	processor-&gt;state = PROCESSOR_OFF_LINE;
+	processor-&gt;active_thread = processor-&gt;next_thread = processor-&gt;idle_thread = THREAD_NULL;
+	processor-&gt;processor_set = pset;
+	processor-&gt;current_pri = MINPRI;
+	processor-&gt;current_thmode = TH_MODE_NONE;
+	processor-&gt;cpu_id = cpu_id;
+	timer_call_setup(&amp;processor-&gt;quantum_timer, thread_quantum_expire, processor);
+	processor-&gt;quantum_end = UINT64_MAX;
+	processor-&gt;deadline = UINT64_MAX;
+	processor-&gt;first_timeslice = FALSE;
+	processor-&gt;processor_primary = processor; <span class="enscript-comment">/* no SMT relationship known at this point */</span>
+	processor-&gt;processor_secondary = NULL;
+	processor-&gt;is_SMT = FALSE;
+	processor-&gt;is_recommended = TRUE;
+	processor-&gt;processor_self = IP_NULL;
+	processor_data_init(processor);
+	processor-&gt;processor_list = NULL;
+
+	s = splsched();
+	pset_lock(pset);
+	<span class="enscript-keyword">if</span> (pset-&gt;cpu_set_count++ == 0)
+		pset-&gt;cpu_set_low = pset-&gt;cpu_set_hi = cpu_id;
+	<span class="enscript-keyword">else</span> {
+		pset-&gt;cpu_set_low = (cpu_id &lt; pset-&gt;cpu_set_low)? cpu_id: pset-&gt;cpu_set_low;
+		pset-&gt;cpu_set_hi = (cpu_id &gt; pset-&gt;cpu_set_hi)? cpu_id: pset-&gt;cpu_set_hi;
+	}
+	pset_unlock(pset);
+	splx(s);
+
+	simple_lock(&amp;processor_list_lock);
+	<span class="enscript-keyword">if</span> (processor_list == NULL)
+		processor_list = processor;
+	<span class="enscript-keyword">else</span>
+		processor_list_tail-&gt;processor_list = processor;
+	processor_list_tail = processor;
+	processor_count++;
+	simple_unlock(&amp;processor_list_lock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">processor_set_primary</span>(
+	processor_t		processor,
+	processor_t		primary)
+{
+	assert(processor-&gt;processor_primary == primary || processor-&gt;processor_primary == processor);
+	<span class="enscript-comment">/* Re-adjust primary point for this (possibly) secondary processor */</span>
+	processor-&gt;processor_primary = primary;
+
+	assert(primary-&gt;processor_secondary == NULL || primary-&gt;processor_secondary == processor);
+	<span class="enscript-keyword">if</span> (primary != processor) {
+		<span class="enscript-comment">/* Link primary to secondary, assumes a 2-way SMT model
+		 * We'll need to move to a queue if any future architecture
+		 * requires otherwise.
+		 */</span>
+		assert(processor-&gt;processor_secondary == NULL);
+		primary-&gt;processor_secondary = processor;
+		<span class="enscript-comment">/* Mark both processors as SMT siblings */</span>
+		primary-&gt;is_SMT = TRUE;
+		processor-&gt;is_SMT = TRUE;
+	}
+}
+
+processor_set_t
+<span class="enscript-function-name">processor_pset</span>(
+	processor_t	processor)
+{
+	<span class="enscript-keyword">return</span> (processor-&gt;processor_set);
+}
+
+pset_node_t
+<span class="enscript-function-name">pset_node_root</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> &amp;pset_node0;
+}
+
+processor_set_t
+<span class="enscript-function-name">pset_create</span>(
+	pset_node_t			node)
+{
+	<span class="enscript-comment">/* some schedulers do not support multiple psets */</span>
+	<span class="enscript-keyword">if</span> (SCHED(multiple_psets_enabled) == FALSE)
+		<span class="enscript-keyword">return</span> processor_pset(master_processor);
+
+	processor_set_t		*prev, pset = kalloc(<span class="enscript-keyword">sizeof</span> (*pset));
+
+	<span class="enscript-keyword">if</span> (pset != PROCESSOR_SET_NULL) {
+		pset_init(pset, node);
+
+		simple_lock(&amp;pset_node_lock);
+
+		prev = &amp;node-&gt;psets;
+		<span class="enscript-keyword">while</span> (*prev != PROCESSOR_SET_NULL)
+			prev = &amp;(*prev)-&gt;pset_list;
+
+		*prev = pset;
+
+		simple_unlock(&amp;pset_node_lock);
+	}
+
+	<span class="enscript-keyword">return</span> (pset);
+}
+
+<span class="enscript-comment">/*
+ *	Initialize the given processor_set structure.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pset_init</span>(
+	processor_set_t		pset,
+	pset_node_t			node)
+{
+	<span class="enscript-keyword">if</span> (pset != &amp;pset0) {
+		<span class="enscript-comment">/* Scheduler state deferred until sched_init() */</span>
+		SCHED(pset_init)(pset);
+	}
+
+	queue_init(&amp;pset-&gt;active_queue);
+	queue_init(&amp;pset-&gt;idle_queue);
+	queue_init(&amp;pset-&gt;idle_secondary_queue);
+	pset-&gt;online_processor_count = 0;
+	pset-&gt;cpu_set_low = pset-&gt;cpu_set_hi = 0;
+	pset-&gt;cpu_set_count = 0;
+	pset-&gt;pending_AST_cpu_mask = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_DEFERRED_AST</span>)
+	pset-&gt;pending_deferred_AST_cpu_mask = 0;
+#<span class="enscript-reference">endif</span>
+	pset_lock_init(pset);
+	pset-&gt;pset_self = IP_NULL;
+	pset-&gt;pset_name_self = IP_NULL;
+	pset-&gt;pset_list = PROCESSOR_SET_NULL;
+	pset-&gt;node = node;
+}
+
+kern_return_t
+<span class="enscript-function-name">processor_info_count</span>(
+	processor_flavor_t		flavor,
+	mach_msg_type_number_t	*count)
+{
+	<span class="enscript-keyword">switch</span> (flavor) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PROCESSOR_BASIC_INFO</span>:
+		*count = PROCESSOR_BASIC_INFO_COUNT;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PROCESSOR_CPU_LOAD_INFO</span>:
+		*count = PROCESSOR_CPU_LOAD_INFO_COUNT;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (cpu_info_count(flavor, count));
+	}
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+
+kern_return_t
+<span class="enscript-function-name">processor_info</span>(
+	<span class="enscript-type">register</span> processor_t	processor,
+	processor_flavor_t		flavor,
+	host_t					*host,
+	processor_info_t		info,
+	mach_msg_type_number_t	*count)
+{
+	<span class="enscript-type">register</span> <span class="enscript-type">int</span>	cpu_id, state;
+	kern_return_t	result;
+
+	<span class="enscript-keyword">if</span> (processor == PROCESSOR_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	cpu_id = processor-&gt;cpu_id;
+
+	<span class="enscript-keyword">switch</span> (flavor) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PROCESSOR_BASIC_INFO</span>:
+	{
+		<span class="enscript-type">register</span> processor_basic_info_t		basic_info;
+
+		<span class="enscript-keyword">if</span> (*count &lt; PROCESSOR_BASIC_INFO_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+		basic_info = (processor_basic_info_t) info;
+		basic_info-&gt;cpu_type = slot_type(cpu_id);
+		basic_info-&gt;cpu_subtype = slot_subtype(cpu_id);
+		state = processor-&gt;state;
+		<span class="enscript-keyword">if</span> (state == PROCESSOR_OFF_LINE)
+			basic_info-&gt;running = FALSE;
+		<span class="enscript-keyword">else</span>
+			basic_info-&gt;running = TRUE;
+		basic_info-&gt;slot_num = cpu_id;
+		<span class="enscript-keyword">if</span> (processor == master_processor) 
+			basic_info-&gt;is_master = TRUE;
+		<span class="enscript-keyword">else</span>
+			basic_info-&gt;is_master = FALSE;
+
+		*count = PROCESSOR_BASIC_INFO_COUNT;
+		*host = &amp;realhost;
+
+	    <span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PROCESSOR_CPU_LOAD_INFO</span>:
+	{
+		processor_cpu_load_info_t	cpu_load_info;
+		timer_t		idle_state;
+		uint64_t	idle_time_snapshot1, idle_time_snapshot2;
+		uint64_t	idle_time_tstamp1, idle_time_tstamp2;
+
+		<span class="enscript-comment">/*
+		 * We capture the accumulated idle time twice over
+		 * the course of this function, as well as the timestamps
+		 * when each were last updated. Since these are
+		 * all done using non-atomic racy mechanisms, the
+		 * most we can infer is whether values are stable.
+		 * timer_grab() is the only function that can be
+		 * used reliably on another processor's per-processor
+		 * data.
+		 */</span>
+
+		<span class="enscript-keyword">if</span> (*count &lt; PROCESSOR_CPU_LOAD_INFO_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+		cpu_load_info = (processor_cpu_load_info_t) info;
+		<span class="enscript-keyword">if</span> (precise_user_kernel_time) {
+			cpu_load_info-&gt;cpu_ticks[CPU_STATE_USER] =
+							(uint32_t)(timer_grab(&amp;PROCESSOR_DATA(processor, user_state)) / hz_tick_interval);
+			cpu_load_info-&gt;cpu_ticks[CPU_STATE_SYSTEM] =
+							(uint32_t)(timer_grab(&amp;PROCESSOR_DATA(processor, system_state)) / hz_tick_interval);
+		} <span class="enscript-keyword">else</span> {
+			uint64_t tval = timer_grab(&amp;PROCESSOR_DATA(processor, user_state)) +
+				timer_grab(&amp;PROCESSOR_DATA(processor, system_state));
+
+			cpu_load_info-&gt;cpu_ticks[CPU_STATE_USER] = (uint32_t)(tval / hz_tick_interval);
+			cpu_load_info-&gt;cpu_ticks[CPU_STATE_SYSTEM] = 0;
+		}
+
+		idle_state = &amp;PROCESSOR_DATA(processor, idle_state);
+		idle_time_snapshot1 = timer_grab(idle_state);
+		idle_time_tstamp1 = idle_state-&gt;tstamp;
+
+		<span class="enscript-comment">/*
+		 * Idle processors are not continually updating their
+		 * per-processor idle timer, so it may be extremely
+		 * out of date, resulting in an over-representation
+		 * of non-idle time between two measurement
+		 * intervals by e.g. top(1). If we are non-idle, or
+		 * have evidence that the timer is being updated
+		 * concurrently, we consider its value up-to-date.
+		 */</span>
+		<span class="enscript-keyword">if</span> (PROCESSOR_DATA(processor, current_state) != idle_state) {
+			cpu_load_info-&gt;cpu_ticks[CPU_STATE_IDLE] =
+							(uint32_t)(idle_time_snapshot1 / hz_tick_interval);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((idle_time_snapshot1 != (idle_time_snapshot2 = timer_grab(idle_state))) ||
+				   (idle_time_tstamp1 != (idle_time_tstamp2 = idle_state-&gt;tstamp))){
+			<span class="enscript-comment">/* Idle timer is being updated concurrently, second stamp is good enough */</span>
+			cpu_load_info-&gt;cpu_ticks[CPU_STATE_IDLE] =
+							(uint32_t)(idle_time_snapshot2 / hz_tick_interval);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * Idle timer may be very stale. Fortunately we have established
+			 * that idle_time_snapshot1 and idle_time_tstamp1 are unchanging
+			 */</span>
+			idle_time_snapshot1 += mach_absolute_time() - idle_time_tstamp1;
+				
+			cpu_load_info-&gt;cpu_ticks[CPU_STATE_IDLE] =
+				(uint32_t)(idle_time_snapshot1 / hz_tick_interval);
+		}
+
+		cpu_load_info-&gt;cpu_ticks[CPU_STATE_NICE] = 0;
+
+	    *count = PROCESSOR_CPU_LOAD_INFO_COUNT;
+	    *host = &amp;realhost;
+
+	    <span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	<span class="enscript-reference">default</span>:
+	    result = cpu_info(flavor, cpu_id, info, count);
+	    <span class="enscript-keyword">if</span> (result == KERN_SUCCESS)
+			*host = &amp;realhost;		   
+
+	    <span class="enscript-keyword">return</span> (result);
+	}
+}
+
+kern_return_t
+<span class="enscript-function-name">processor_start</span>(
+	processor_t			processor)
+{
+	processor_set_t		pset;
+	thread_t			thread;   
+	kern_return_t		result;
+	spl_t				s;
+
+	<span class="enscript-keyword">if</span> (processor == PROCESSOR_NULL || processor-&gt;processor_set == PROCESSOR_SET_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">if</span> (processor == master_processor) {
+		processor_t		prev;
+
+		prev = thread_bind(processor);
+		thread_block(THREAD_CONTINUE_NULL);
+
+		result = cpu_start(processor-&gt;cpu_id);
+
+		thread_bind(prev);
+
+		<span class="enscript-keyword">return</span> (result);
+	}
+
+	s = splsched();
+	pset = processor-&gt;processor_set;
+	pset_lock(pset);
+	<span class="enscript-keyword">if</span> (processor-&gt;state != PROCESSOR_OFF_LINE) {
+		pset_unlock(pset);
+		splx(s);
+
+		<span class="enscript-keyword">return</span> (KERN_FAILURE);
+	}
+
+	processor-&gt;state = PROCESSOR_START;
+	pset_unlock(pset);
+	splx(s);
+
+	<span class="enscript-comment">/*
+	 *	Create the idle processor thread.
+	 */</span>
+	<span class="enscript-keyword">if</span> (processor-&gt;idle_thread == THREAD_NULL) {
+		result = idle_thread_create(processor);
+		<span class="enscript-keyword">if</span> (result != KERN_SUCCESS) {
+			s = splsched();
+			pset_lock(pset);
+			processor-&gt;state = PROCESSOR_OFF_LINE;
+			pset_unlock(pset);
+			splx(s);
+
+			<span class="enscript-keyword">return</span> (result);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 *	If there is no active thread, the processor
+	 *	has never been started.  Create a dedicated
+	 *	start up thread.
+	 */</span>
+	<span class="enscript-keyword">if</span> (	processor-&gt;active_thread == THREAD_NULL		&amp;&amp;
+			processor-&gt;next_thread == THREAD_NULL		) {
+		result = kernel_thread_create((thread_continue_t)processor_start_thread, NULL, MAXPRI_KERNEL, &amp;thread);
+		<span class="enscript-keyword">if</span> (result != KERN_SUCCESS) {
+			s = splsched();
+			pset_lock(pset);
+			processor-&gt;state = PROCESSOR_OFF_LINE;
+			pset_unlock(pset);
+			splx(s);
+
+			<span class="enscript-keyword">return</span> (result);
+		}
+
+		s = splsched();
+		thread_lock(thread);
+		thread-&gt;bound_processor = processor;
+		processor-&gt;next_thread = thread;
+		thread-&gt;state = TH_RUN;
+		thread-&gt;last_made_runnable_time = mach_absolute_time();
+		thread_unlock(thread);
+		splx(s);
+
+		thread_deallocate(thread);
+	}
+
+	<span class="enscript-keyword">if</span> (processor-&gt;processor_self == IP_NULL)
+		ipc_processor_init(processor);
+
+	result = cpu_start(processor-&gt;cpu_id);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS) {
+		s = splsched();
+		pset_lock(pset);
+		processor-&gt;state = PROCESSOR_OFF_LINE;
+		pset_unlock(pset);
+		splx(s);
+
+		<span class="enscript-keyword">return</span> (result);
+	}
+
+	ipc_processor_enable(processor);
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+kern_return_t
+<span class="enscript-function-name">processor_exit</span>(
+	processor_t	processor)
+{
+	<span class="enscript-keyword">if</span> (processor == PROCESSOR_NULL)
+		<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">return</span>(processor_shutdown(processor));
+}
+
+kern_return_t
+<span class="enscript-function-name">processor_control</span>(
+	processor_t		processor,
+	processor_info_t	info,
+	mach_msg_type_number_t	count)
+{
+	<span class="enscript-keyword">if</span> (processor == PROCESSOR_NULL)
+		<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">return</span>(cpu_control(processor-&gt;cpu_id, info, count));
+}
+	    
+kern_return_t
+<span class="enscript-function-name">processor_set_create</span>(
+	__unused host_t		host,
+	__unused processor_set_t	*new_set,
+	__unused processor_set_t	*new_name)
+{
+	<span class="enscript-keyword">return</span>(KERN_FAILURE);
+}
+
+kern_return_t
+<span class="enscript-function-name">processor_set_destroy</span>(
+	__unused processor_set_t	pset)
+{
+	<span class="enscript-keyword">return</span>(KERN_FAILURE);
+}
+
+kern_return_t
+<span class="enscript-function-name">processor_get_assignment</span>(
+	processor_t	processor,
+	processor_set_t	*pset)
+{
+	<span class="enscript-type">int</span> state;
+
+	<span class="enscript-keyword">if</span> (processor == PROCESSOR_NULL)
+		<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+	state = processor-&gt;state;
+	<span class="enscript-keyword">if</span> (state == PROCESSOR_SHUTDOWN || state == PROCESSOR_OFF_LINE)
+		<span class="enscript-keyword">return</span>(KERN_FAILURE);
+
+	*pset = &amp;pset0;
+
+	<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+}
+
+kern_return_t
+<span class="enscript-function-name">processor_set_info</span>(
+	processor_set_t		pset,
+	<span class="enscript-type">int</span>			flavor,
+	host_t			*host,
+	processor_set_info_t	info,
+	mach_msg_type_number_t	*count)
+{
+	<span class="enscript-keyword">if</span> (pset == PROCESSOR_SET_NULL)
+		<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">if</span> (flavor == PROCESSOR_SET_BASIC_INFO) {
+		<span class="enscript-type">register</span> processor_set_basic_info_t	basic_info;
+
+		<span class="enscript-keyword">if</span> (*count &lt; PROCESSOR_SET_BASIC_INFO_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_FAILURE);
+
+		basic_info = (processor_set_basic_info_t) info;
+		basic_info-&gt;processor_count = processor_avail_count;
+		basic_info-&gt;default_policy = POLICY_TIMESHARE;
+
+		*count = PROCESSOR_SET_BASIC_INFO_COUNT;
+		*host = &amp;realhost;
+		<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flavor == PROCESSOR_SET_TIMESHARE_DEFAULT) {
+		<span class="enscript-type">register</span> policy_timeshare_base_t	ts_base;
+
+		<span class="enscript-keyword">if</span> (*count &lt; POLICY_TIMESHARE_BASE_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_FAILURE);
+
+		ts_base = (policy_timeshare_base_t) info;
+		ts_base-&gt;base_priority = BASEPRI_DEFAULT;
+
+		*count = POLICY_TIMESHARE_BASE_COUNT;
+		*host = &amp;realhost;
+		<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flavor == PROCESSOR_SET_FIFO_DEFAULT) {
+		<span class="enscript-type">register</span> policy_fifo_base_t		fifo_base;
+
+		<span class="enscript-keyword">if</span> (*count &lt; POLICY_FIFO_BASE_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_FAILURE);
+
+		fifo_base = (policy_fifo_base_t) info;
+		fifo_base-&gt;base_priority = BASEPRI_DEFAULT;
+
+		*count = POLICY_FIFO_BASE_COUNT;
+		*host = &amp;realhost;
+		<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flavor == PROCESSOR_SET_RR_DEFAULT) {
+		<span class="enscript-type">register</span> policy_rr_base_t		rr_base;
+
+		<span class="enscript-keyword">if</span> (*count &lt; POLICY_RR_BASE_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_FAILURE);
+
+		rr_base = (policy_rr_base_t) info;
+		rr_base-&gt;base_priority = BASEPRI_DEFAULT;
+		rr_base-&gt;quantum = 1;
+
+		*count = POLICY_RR_BASE_COUNT;
+		*host = &amp;realhost;
+		<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flavor == PROCESSOR_SET_TIMESHARE_LIMITS) {
+		<span class="enscript-type">register</span> policy_timeshare_limit_t	ts_limit;
+
+		<span class="enscript-keyword">if</span> (*count &lt; POLICY_TIMESHARE_LIMIT_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_FAILURE);
+
+		ts_limit = (policy_timeshare_limit_t) info;
+		ts_limit-&gt;max_priority = MAXPRI_KERNEL;
+
+		*count = POLICY_TIMESHARE_LIMIT_COUNT;
+		*host = &amp;realhost;
+		<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flavor == PROCESSOR_SET_FIFO_LIMITS) {
+		<span class="enscript-type">register</span> policy_fifo_limit_t		fifo_limit;
+
+		<span class="enscript-keyword">if</span> (*count &lt; POLICY_FIFO_LIMIT_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_FAILURE);
+
+		fifo_limit = (policy_fifo_limit_t) info;
+		fifo_limit-&gt;max_priority = MAXPRI_KERNEL;
+
+		*count = POLICY_FIFO_LIMIT_COUNT;
+		*host = &amp;realhost;
+		<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flavor == PROCESSOR_SET_RR_LIMITS) {
+		<span class="enscript-type">register</span> policy_rr_limit_t		rr_limit;
+
+		<span class="enscript-keyword">if</span> (*count &lt; POLICY_RR_LIMIT_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_FAILURE);
+
+		rr_limit = (policy_rr_limit_t) info;
+		rr_limit-&gt;max_priority = MAXPRI_KERNEL;
+
+		*count = POLICY_RR_LIMIT_COUNT;
+		*host = &amp;realhost;
+		<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flavor == PROCESSOR_SET_ENABLED_POLICIES) {
+		<span class="enscript-type">register</span> <span class="enscript-type">int</span>				*enabled;
+
+		<span class="enscript-keyword">if</span> (*count &lt; (<span class="enscript-keyword">sizeof</span>(*enabled)/<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)))
+			<span class="enscript-keyword">return</span>(KERN_FAILURE);
+
+		enabled = (<span class="enscript-type">int</span> *) info;
+		*enabled = POLICY_TIMESHARE | POLICY_RR | POLICY_FIFO;
+
+		*count = <span class="enscript-keyword">sizeof</span>(*enabled)/<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>);
+		*host = &amp;realhost;
+		<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+	}
+
+
+	*host = HOST_NULL;
+	<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+}
+
+<span class="enscript-comment">/*
+ *	processor_set_statistics
+ *
+ *	Returns scheduling statistics for a processor set. 
+ */</span>
+kern_return_t 
+<span class="enscript-function-name">processor_set_statistics</span>(
+	processor_set_t         pset,
+	<span class="enscript-type">int</span>                     flavor,
+	processor_set_info_t    info,
+	mach_msg_type_number_t	*count)
+{
+	<span class="enscript-keyword">if</span> (pset == PROCESSOR_SET_NULL || pset != &amp;pset0)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_PROCESSOR_SET);
+
+	<span class="enscript-keyword">if</span> (flavor == PROCESSOR_SET_LOAD_INFO) {
+		<span class="enscript-type">register</span> processor_set_load_info_t     load_info;
+
+		<span class="enscript-keyword">if</span> (*count &lt; PROCESSOR_SET_LOAD_INFO_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_FAILURE);
+
+		load_info = (processor_set_load_info_t) info;
+
+		load_info-&gt;mach_factor = sched_mach_factor;
+		load_info-&gt;load_average = sched_load_average;
+
+		load_info-&gt;task_count = tasks_count;
+		load_info-&gt;thread_count = threads_count;
+
+		*count = PROCESSOR_SET_LOAD_INFO_COUNT;
+		<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+	}
+
+	<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+}
+
+<span class="enscript-comment">/*
+ *	processor_set_max_priority:
+ *
+ *	Specify max priority permitted on processor set.  This affects
+ *	newly created and assigned threads.  Optionally change existing
+ * 	ones.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">processor_set_max_priority</span>(
+	__unused processor_set_t	pset,
+	__unused <span class="enscript-type">int</span>			max_priority,
+	__unused boolean_t		change_threads)
+{
+	<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+}
+
+<span class="enscript-comment">/*
+ *	processor_set_policy_enable:
+ *
+ *	Allow indicated policy on processor set.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">processor_set_policy_enable</span>(
+	__unused processor_set_t	pset,
+	__unused <span class="enscript-type">int</span>			policy)
+{
+	<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+}
+
+<span class="enscript-comment">/*
+ *	processor_set_policy_disable:
+ *
+ *	Forbid indicated policy on processor set.  Time sharing cannot
+ *	be forbidden.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">processor_set_policy_disable</span>(
+	__unused processor_set_t	pset,
+	__unused <span class="enscript-type">int</span>			policy,
+	__unused boolean_t		change_threads)
+{
+	<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+}
+
+<span class="enscript-comment">/*
+ *	processor_set_things:
+ *
+ *	Common internals for processor_set_{threads,tasks}
+ */</span>
+kern_return_t
+<span class="enscript-function-name">processor_set_things</span>(
+	processor_set_t	pset,
+	<span class="enscript-type">void</span> **thing_list,
+	mach_msg_type_number_t *count,
+	<span class="enscript-type">int</span> type)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i , j, used;
+	task_t task;
+	thread_t thread;
+
+	task_t *task_list;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> actual_tasks;
+	vm_size_t task_size, task_size_needed;
+
+	thread_t *thread_list;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> actual_threads;
+	vm_size_t thread_size, thread_size_needed;
+
+	<span class="enscript-type">void</span> *addr, *newaddr;
+	vm_size_t size, size_needed;
+
+	<span class="enscript-keyword">if</span> (pset == PROCESSOR_SET_NULL || pset != &amp;pset0)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	task_size = 0;
+	task_size_needed = 0;
+	task_list = NULL;
+	actual_tasks = 0;
+
+	thread_size = 0;
+	thread_size_needed = 0;
+	thread_list = NULL;
+	actual_threads = 0;
+
+	<span class="enscript-keyword">for</span> (;;) {
+		lck_mtx_lock(&amp;tasks_threads_lock);
+
+		<span class="enscript-comment">/* do we have the memory we need? */</span>
+		<span class="enscript-keyword">if</span> (type == PSET_THING_THREAD)
+			thread_size_needed = threads_count * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span> *);
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CONFIG_MACF</span>
+		<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span>
+			task_size_needed = tasks_count * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span> *);
+
+		<span class="enscript-keyword">if</span> (task_size_needed &lt;= task_size &amp;&amp;
+		    thread_size_needed &lt;= thread_size)
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-comment">/* unlock and allocate more memory */</span>
+		lck_mtx_unlock(&amp;tasks_threads_lock);
+
+		<span class="enscript-comment">/* grow task array */</span>
+		<span class="enscript-keyword">if</span> (task_size_needed &gt; task_size) {
+			<span class="enscript-keyword">if</span> (task_size != 0)
+				kfree(task_list, task_size);
+
+			assert(task_size_needed &gt; 0);
+			task_size = task_size_needed;
+
+			task_list = (task_t *)kalloc(task_size);
+			<span class="enscript-keyword">if</span> (task_list == NULL) {
+				<span class="enscript-keyword">if</span> (thread_size != 0)
+					kfree(thread_list, thread_size);
+				<span class="enscript-keyword">return</span> (KERN_RESOURCE_SHORTAGE);
+			}
+		}
+
+		<span class="enscript-comment">/* grow thread array */</span>
+		<span class="enscript-keyword">if</span> (thread_size_needed &gt; thread_size) {
+			<span class="enscript-keyword">if</span> (thread_size != 0)
+				kfree(thread_list, thread_size);
+
+			assert(thread_size_needed &gt; 0);
+			thread_size = thread_size_needed;
+
+			thread_list = (thread_t *)kalloc(thread_size);
+			<span class="enscript-keyword">if</span> (thread_list == 0) {
+				<span class="enscript-keyword">if</span> (task_size != 0)
+					kfree(task_list, task_size);
+				<span class="enscript-keyword">return</span> (KERN_RESOURCE_SHORTAGE);
+			}
+		}
+	}
+
+	<span class="enscript-comment">/* OK, have memory and the list locked */</span>
+
+	<span class="enscript-comment">/* If we need it, get the thread list */</span>
+	<span class="enscript-keyword">if</span> (type == PSET_THING_THREAD) {
+		<span class="enscript-keyword">for</span> (thread = (thread_t)queue_first(&amp;threads);
+		     !queue_end(&amp;threads, (queue_entry_t)thread);
+		     thread = (thread_t)queue_next(&amp;thread-&gt;threads)) {
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">SECURE_KERNEL</span>)
+			<span class="enscript-keyword">if</span> (thread-&gt;task != kernel_task) {
+#<span class="enscript-reference">endif</span>
+				thread_reference_internal(thread);
+				thread_list[actual_threads++] = thread;
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">SECURE_KERNEL</span>)
+			}
+#<span class="enscript-reference">endif</span>
+		}
+	}
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CONFIG_MACF</span>
+	  <span class="enscript-keyword">else</span> {
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-comment">/* get a list of the tasks */</span>
+		<span class="enscript-keyword">for</span> (task = (task_t)queue_first(&amp;tasks);
+		     !queue_end(&amp;tasks, (queue_entry_t)task);
+		     task = (task_t)queue_next(&amp;task-&gt;tasks)) {
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">SECURE_KERNEL</span>)
+			<span class="enscript-keyword">if</span> (task != kernel_task) {
+#<span class="enscript-reference">endif</span>
+				task_reference_internal(task);
+				task_list[actual_tasks++] = task;
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">SECURE_KERNEL</span>)
+			}
+#<span class="enscript-reference">endif</span>
+		}
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CONFIG_MACF</span>
+	}
+#<span class="enscript-reference">endif</span>
+
+	lck_mtx_unlock(&amp;tasks_threads_lock);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-comment">/* for each task, make sure we are allowed to examine it */</span>
+	<span class="enscript-keyword">for</span> (i = used = 0; i &lt; actual_tasks; i++) {
+		<span class="enscript-keyword">if</span> (mac_task_check_expose_task(task_list[i])) {
+			task_deallocate(task_list[i]);
+			<span class="enscript-keyword">continue</span>;
+		}
+		task_list[used++] = task_list[i];
+	}
+	actual_tasks = used;
+	task_size_needed = actual_tasks * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span> *);
+
+	<span class="enscript-keyword">if</span> (type == PSET_THING_THREAD) {
+
+		<span class="enscript-comment">/* for each thread (if any), make sure it's task is in the allowed list */</span>
+		<span class="enscript-keyword">for</span> (i = used = 0; i &lt; actual_threads; i++) {
+			boolean_t found_task = FALSE;
+
+			task = thread_list[i]-&gt;task;
+			<span class="enscript-keyword">for</span> (j = 0; j &lt; actual_tasks; j++) {
+				<span class="enscript-keyword">if</span> (task_list[j] == task) {
+					found_task = TRUE;
+					<span class="enscript-keyword">break</span>;
+				}
+			}
+			<span class="enscript-keyword">if</span> (found_task)
+				thread_list[used++] = thread_list[i];
+			<span class="enscript-keyword">else</span>
+				thread_deallocate(thread_list[i]);
+		}
+		actual_threads = used;
+		thread_size_needed = actual_threads * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span> *);
+
+		<span class="enscript-comment">/* done with the task list */</span>
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; actual_tasks; i++)
+			task_deallocate(task_list[i]);
+		kfree(task_list, task_size);
+		task_size = 0;
+		actual_tasks = 0;
+		task_list = NULL;
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (type == PSET_THING_THREAD) {
+		<span class="enscript-keyword">if</span> (actual_threads == 0) {
+			<span class="enscript-comment">/* no threads available to return */</span>
+			assert(task_size == 0);
+			<span class="enscript-keyword">if</span> (thread_size != 0)
+				kfree(thread_list, thread_size);
+			*thing_list = NULL;
+			*count = 0;
+			<span class="enscript-keyword">return</span> KERN_SUCCESS;
+		}
+		size_needed = actual_threads * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span> *);
+		size = thread_size;
+		addr = thread_list;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (actual_tasks == 0) {
+			<span class="enscript-comment">/* no tasks available to return */</span>
+			assert(thread_size == 0);
+			<span class="enscript-keyword">if</span> (task_size != 0)
+				kfree(task_list, task_size);
+			*thing_list = NULL;
+			*count = 0;
+			<span class="enscript-keyword">return</span> KERN_SUCCESS;
+		} 
+		size_needed = actual_tasks * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span> *);
+		size = task_size;
+		addr = task_list;
+	}
+
+	<span class="enscript-comment">/* if we allocated too much, must copy */</span>
+	<span class="enscript-keyword">if</span> (size_needed &lt; size) {
+		newaddr = kalloc(size_needed);
+		<span class="enscript-keyword">if</span> (newaddr == 0) {
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; actual_tasks; i++) {
+				<span class="enscript-keyword">if</span> (type == PSET_THING_THREAD)
+					thread_deallocate(thread_list[i]);
+				<span class="enscript-keyword">else</span>
+					task_deallocate(task_list[i]);
+			}
+			<span class="enscript-keyword">if</span> (size)
+				kfree(addr, size);
+			<span class="enscript-keyword">return</span> (KERN_RESOURCE_SHORTAGE);
+		}
+
+		bcopy((<span class="enscript-type">void</span> *) addr, (<span class="enscript-type">void</span> *) newaddr, size_needed);
+		kfree(addr, size);
+
+		addr = newaddr;
+		size = size_needed;
+	}
+
+	*thing_list = (<span class="enscript-type">void</span> **)addr;
+	*count = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)size / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span> *);
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+
+<span class="enscript-comment">/*
+ *	processor_set_tasks:
+ *
+ *	List all tasks in the processor set.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">processor_set_tasks</span>(
+	processor_set_t		pset,
+	task_array_t		*task_list,
+	mach_msg_type_number_t	*count)
+{
+	kern_return_t ret;
+	mach_msg_type_number_t i;
+
+	ret = processor_set_things(pset, (<span class="enscript-type">void</span> **)task_list, count, PSET_THING_TASK);
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> ret;
+
+	<span class="enscript-comment">/* do the conversion that Mig should handle */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; *count; i++)
+		(*task_list)[i] = (task_t)convert_task_to_port((*task_list)[i]);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	processor_set_threads:
+ *
+ *	List all threads in the processor set.
+ */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">SECURE_KERNEL</span>)
+kern_return_t
+<span class="enscript-function-name">processor_set_threads</span>(
+	__unused processor_set_t		pset,
+	__unused thread_array_t		*thread_list,
+	__unused mach_msg_type_number_t	*count)
+{
+    <span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+#<span class="enscript-reference">else</span>
+kern_return_t
+<span class="enscript-function-name">processor_set_threads</span>(
+	processor_set_t		pset,
+	thread_array_t		*thread_list,
+	mach_msg_type_number_t	*count)
+{
+	kern_return_t ret;
+	mach_msg_type_number_t i;
+
+	ret = processor_set_things(pset, (<span class="enscript-type">void</span> **)thread_list, count, PSET_THING_THREAD);
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> ret;
+
+	<span class="enscript-comment">/* do the conversion that Mig should handle */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; *count; i++)
+		(*thread_list)[i] = (thread_t)convert_thread_to_port((*thread_list)[i]);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ *	processor_set_policy_control
+ *
+ *	Controls the scheduling attributes governing the processor set.
+ *	Allows control of enabled policies, and per-policy base and limit
+ *	priorities.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">processor_set_policy_control</span>(
+	__unused processor_set_t		pset,
+	__unused <span class="enscript-type">int</span>				flavor,
+	__unused processor_set_info_t	policy_info,
+	__unused mach_msg_type_number_t	count,
+	__unused boolean_t			change)
+{
+	<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+}
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">pset_deallocate</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">pset_deallocate</span>(processor_set_t pset);
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pset_deallocate</span>(
+__unused processor_set_t	pset)
+{
+	<span class="enscript-keyword">return</span>;
+}
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">pset_reference</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">pset_reference</span>(processor_set_t pset);
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pset_reference</span>(
+__unused processor_set_t	pset)
+{
+	<span class="enscript-keyword">return</span>;
+}
+</pre>
+<hr />
+</body></html>

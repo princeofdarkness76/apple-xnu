@@ -1,0 +1,263 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>hibernate_i386.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">hibernate_i386.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2004-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/processor_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOPlatformExpert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/i386/efi.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOHibernatePrivate.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_page.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/i386_lowmem.h&gt;</span>
+
+<span class="enscript-type">extern</span> ppnum_t max_ppnum;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_BANKS</span>	32
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+hibernate_page_list_t *
+<span class="enscript-function-name">hibernate_page_list_allocate</span>(boolean_t log)
+{
+    ppnum_t		    base, num;
+    vm_size_t               size;
+    uint32_t                bank, num_banks;
+    uint32_t		    pages, page_count;
+    hibernate_page_list_t * list;
+    hibernate_bitmap_t *    bitmap;
+
+    EfiMemoryRange *	    mptr;
+    uint32_t		    mcount, msize, i;
+    hibernate_bitmap_t	    dram_ranges[MAX_BANKS];
+    boot_args *		    args = (boot_args *) PE_state.bootArgs;
+    uint32_t		    non_os_pagecount;
+
+    mptr = (EfiMemoryRange *)ml_static_ptovirt(args-&gt;MemoryMap);
+    <span class="enscript-keyword">if</span> (args-&gt;MemoryMapDescriptorSize == 0)
+	panic(<span class="enscript-string">&quot;Invalid memory map descriptor size&quot;</span>);
+    msize = args-&gt;MemoryMapDescriptorSize;
+    mcount = args-&gt;MemoryMapSize / msize;
+
+    num_banks = 0;
+    non_os_pagecount = 0;
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; mcount; i++, mptr = (EfiMemoryRange *)(((vm_offset_t)mptr) + msize))
+    {
+	base = (ppnum_t) (mptr-&gt;PhysicalStart &gt;&gt; I386_PGSHIFT);
+	num = (ppnum_t) mptr-&gt;NumberOfPages;
+
+	<span class="enscript-keyword">if</span> (base &gt; max_ppnum)
+		<span class="enscript-keyword">continue</span>;
+	<span class="enscript-keyword">if</span> ((base + num - 1) &gt; max_ppnum)
+		num = max_ppnum - base + 1;
+	<span class="enscript-keyword">if</span> (!num)
+		<span class="enscript-keyword">continue</span>;
+
+	<span class="enscript-keyword">switch</span> (mptr-&gt;Type)
+	{
+	    <span class="enscript-comment">// any kind of dram
+</span>	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiACPIMemoryNVS</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiPalCode</span>:
+		non_os_pagecount += num;
+
+	    <span class="enscript-comment">// OS used dram
+</span>	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiLoaderCode</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiLoaderData</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiBootServicesCode</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiBootServicesData</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiConventionalMemory</span>:
+
+		<span class="enscript-keyword">for</span> (bank = 0; bank &lt; num_banks; bank++)
+		{
+		    <span class="enscript-keyword">if</span> (dram_ranges[bank].first_page &lt;= base)
+			<span class="enscript-keyword">continue</span>;
+		    <span class="enscript-keyword">if</span> ((base + num) == dram_ranges[bank].first_page)
+		    {
+			dram_ranges[bank].first_page = base;
+			num = 0;
+		    }
+		    <span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (!num) <span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-keyword">if</span> (bank &amp;&amp; (base == (1 + dram_ranges[bank - 1].last_page)))
+		    bank--;
+		<span class="enscript-keyword">else</span>
+		{
+		    num_banks++;
+		    <span class="enscript-keyword">if</span> (num_banks &gt;= MAX_BANKS) <span class="enscript-keyword">break</span>;
+		    bcopy(&amp;dram_ranges[bank], 
+			  &amp;dram_ranges[bank + 1], 
+			  (num_banks - bank - 1) * <span class="enscript-keyword">sizeof</span>(hibernate_bitmap_t));
+		    dram_ranges[bank].first_page = base;
+		}
+		dram_ranges[bank].last_page = base + num - 1;
+		<span class="enscript-keyword">break</span>;
+
+	    <span class="enscript-comment">// runtime services will be restarted, so no save
+</span>	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiRuntimeServicesCode</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiRuntimeServicesData</span>:
+	    <span class="enscript-comment">// contents are volatile once the platform expert starts
+</span>	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiACPIReclaimMemory</span>:
+	    <span class="enscript-comment">// non dram
+</span>	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiReservedMemoryType</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiUnusableMemory</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiMemoryMappedIO</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiMemoryMappedIOPortSpace</span>:
+	    <span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+    }
+
+    <span class="enscript-keyword">if</span> (num_banks &gt;= MAX_BANKS)
+	<span class="enscript-keyword">return</span> (NULL);
+
+    <span class="enscript-comment">// size the hibernation bitmap
+</span>
+    size = <span class="enscript-keyword">sizeof</span>(hibernate_page_list_t);
+    page_count = 0;
+    <span class="enscript-keyword">for</span> (bank = 0; bank &lt; num_banks; bank++) {
+	pages = dram_ranges[bank].last_page + 1 - dram_ranges[bank].first_page;
+	page_count += pages;
+        size += <span class="enscript-keyword">sizeof</span>(hibernate_bitmap_t) + ((pages + 31) &gt;&gt; 5) * <span class="enscript-keyword">sizeof</span>(uint32_t);
+    }
+
+    list = (hibernate_page_list_t *)kalloc(size);
+    <span class="enscript-keyword">if</span> (!list)
+	<span class="enscript-keyword">return</span> (list);
+	
+    list-&gt;list_size  = (uint32_t)size;
+    list-&gt;page_count = page_count;
+    list-&gt;bank_count = num_banks;
+
+    <span class="enscript-comment">// convert to hibernation bitmap.
+</span>
+    bitmap = &amp;list-&gt;bank_bitmap[0];
+    <span class="enscript-keyword">for</span> (bank = 0; bank &lt; num_banks; bank++)
+    {
+        bitmap-&gt;first_page = dram_ranges[bank].first_page;
+        bitmap-&gt;last_page  = dram_ranges[bank].last_page;
+        bitmap-&gt;bitmapwords = (bitmap-&gt;last_page + 1
+                               - bitmap-&gt;first_page + 31) &gt;&gt; 5;
+        <span class="enscript-keyword">if</span> (log) kprintf(<span class="enscript-string">&quot;hib bank[%d]: 0x%x000 end 0x%xfff\n&quot;</span>,
+        		  bank, bitmap-&gt;first_page, bitmap-&gt;last_page);
+	bitmap = (hibernate_bitmap_t *) &amp;bitmap-&gt;bitmap[bitmap-&gt;bitmapwords];
+    }
+    <span class="enscript-keyword">if</span> (log) printf(<span class="enscript-string">&quot;efi pagecount %d\n&quot;</span>, non_os_pagecount);
+
+    <span class="enscript-keyword">return</span> (list);
+}
+
+<span class="enscript-comment">// mark pages not to be saved, but available for scratch usage during restore
+</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hibernate_page_list_setall_machine</span>( __unused hibernate_page_list_t * page_list,
+                                    __unused hibernate_page_list_t * page_list_wired,
+                                    __unused boolean_t preflight,
+                                    __unused uint32_t * pagesOut)
+{
+}
+
+<span class="enscript-comment">// mark pages not to be saved and not for scratch usage during restore
+</span><span class="enscript-type">void</span>
+<span class="enscript-function-name">hibernate_page_list_set_volatile</span>( hibernate_page_list_t * page_list,
+				  hibernate_page_list_t * page_list_wired,
+				  uint32_t * pagesOut)
+{
+    boot_args * args = (boot_args *) PE_state.bootArgs;
+
+    <span class="enscript-keyword">if</span> (args-&gt;efiRuntimeServicesPageStart)
+    {
+	hibernate_set_page_state(page_list, page_list_wired, 
+		    args-&gt;efiRuntimeServicesPageStart, args-&gt;efiRuntimeServicesPageCount, 
+		    kIOHibernatePageStateFree);
+	*pagesOut -= args-&gt;efiRuntimeServicesPageCount;
+    }
+}
+
+kern_return_t 
+<span class="enscript-function-name">hibernate_processor_setup</span>(IOHibernateImageHeader * header)
+{
+    boot_args * args = (boot_args *) PE_state.bootArgs;
+
+    cpu_datap(0)-&gt;cpu_hibernate = 1;
+    header-&gt;processorFlags = 0;
+
+    header-&gt;runtimePages     = args-&gt;efiRuntimeServicesPageStart;
+    header-&gt;runtimePageCount = args-&gt;efiRuntimeServicesPageCount;
+    header-&gt;runtimeVirtualPages = args-&gt;efiRuntimeServicesVirtualPageStart;
+    header-&gt;performanceDataStart = args-&gt;performanceDataStart;
+    header-&gt;performanceDataSize = args-&gt;performanceDataSize;
+
+    <span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hibernate_vm_lock</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">if</span> (current_cpu_datap()-&gt;cpu_hibernate) hibernate_vm_lock_queues();
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hibernate_vm_unlock</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">if</span> (current_cpu_datap()-&gt;cpu_hibernate)  hibernate_vm_unlock_queues();
+}
+</pre>
+<hr />
+</body></html>

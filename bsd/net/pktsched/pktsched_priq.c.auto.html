@@ -1,0 +1,1334 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pktsched_priq.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pktsched_priq.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*	$OpenBSD: altq_priq.c,v 1.21 2007/09/13 20:40:02 chl Exp $	*/</span>
+<span class="enscript-comment">/*	$KAME: altq_priq.c,v 1.1 2000/10/18 09:15:23 kjc Exp $	*/</span>
+
+<span class="enscript-comment">/*
+ * Copyright (C) 2000-2003
+ *	Sony Computer Science Laboratories Inc.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY SONY CSL AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL SONY CSL OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+<span class="enscript-comment">/*
+ * priority queue
+ */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PKTSCHED_PRIQ</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/pktsched/pktsched_priq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * function prototypes
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">priq_enqueue_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *, <span class="enscript-type">struct</span> mbuf *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">priq_dequeue_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *, cqdq_op_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">priq_request_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *, cqrq_t, <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">priq_clear_interface</span>(<span class="enscript-type">struct</span> priq_if *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> priq_class *<span class="enscript-function-name">priq_class_create</span>(<span class="enscript-type">struct</span> priq_if *, <span class="enscript-type">int</span>, u_int32_t,
+    <span class="enscript-type">int</span>, u_int32_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">priq_class_destroy</span>(<span class="enscript-type">struct</span> priq_if *, <span class="enscript-type">struct</span> priq_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">priq_destroy_locked</span>(<span class="enscript-type">struct</span> priq_if *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span> <span class="enscript-function-name">priq_addq</span>(<span class="enscript-type">struct</span> priq_class *, <span class="enscript-type">struct</span> mbuf *,
+    <span class="enscript-type">struct</span> pf_mtag *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">priq_getq</span>(<span class="enscript-type">struct</span> priq_class *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">priq_pollq</span>(<span class="enscript-type">struct</span> priq_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">priq_purgeq</span>(<span class="enscript-type">struct</span> priq_if *, <span class="enscript-type">struct</span> priq_class *, u_int32_t,
+    u_int32_t *, u_int32_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">priq_purge_sc</span>(<span class="enscript-type">struct</span> priq_if *, cqrq_purge_sc_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">priq_updateq</span>(<span class="enscript-type">struct</span> priq_if *, <span class="enscript-type">struct</span> priq_class *, cqev_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">priq_throttle</span>(<span class="enscript-type">struct</span> priq_if *, cqrq_throttle_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">priq_resumeq</span>(<span class="enscript-type">struct</span> priq_if *, <span class="enscript-type">struct</span> priq_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">priq_suspendq</span>(<span class="enscript-type">struct</span> priq_if *, <span class="enscript-type">struct</span> priq_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">priq_stat_sc</span>(<span class="enscript-type">struct</span> priq_if *, cqrq_stat_sc_t *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> priq_class *<span class="enscript-function-name">priq_clh_to_clp</span>(<span class="enscript-type">struct</span> priq_if *, u_int32_t);
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *<span class="enscript-function-name">priq_style</span>(<span class="enscript-type">struct</span> priq_if *);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PRIQ_ZONE_MAX</span>	32		<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PRIQ_ZONE_NAME</span>	<span class="enscript-string">&quot;pktsched_priq&quot;</span>	<span class="enscript-comment">/* zone name */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> priq_size;		<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *priq_zone;		<span class="enscript-comment">/* zone for priq */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PRIQ_CL_ZONE_MAX</span>	32	<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PRIQ_CL_ZONE_NAME</span>	<span class="enscript-string">&quot;pktsched_priq_cl&quot;</span> <span class="enscript-comment">/* zone name */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> priq_cl_size;	<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *priq_cl_zone;	<span class="enscript-comment">/* zone for priq_class */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">priq_init</span>(<span class="enscript-type">void</span>)
+{
+	priq_size = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> priq_if);
+	priq_zone = zinit(priq_size, PRIQ_ZONE_MAX * priq_size,
+	    0, PRIQ_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (priq_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, PRIQ_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(priq_zone, Z_EXPAND, TRUE);
+	zone_change(priq_zone, Z_CALLERACCT, TRUE);
+
+	priq_cl_size = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> priq_class);
+	priq_cl_zone = zinit(priq_cl_size, PRIQ_CL_ZONE_MAX * priq_cl_size,
+	    0, PRIQ_CL_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (priq_cl_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, PRIQ_CL_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(priq_cl_zone, Z_EXPAND, TRUE);
+	zone_change(priq_cl_zone, Z_CALLERACCT, TRUE);
+}
+
+<span class="enscript-type">struct</span> priq_if *
+<span class="enscript-function-name">priq_alloc</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">int</span> how, boolean_t altq)
+{
+	<span class="enscript-type">struct</span> priq_if	*pif;
+
+	pif = (how == M_WAITOK) ? zalloc(priq_zone) : zalloc_noblock(priq_zone);
+	<span class="enscript-keyword">if</span> (pif == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	bzero(pif, priq_size);
+	pif-&gt;pif_maxpri = -1;
+	pif-&gt;pif_ifq = &amp;ifp-&gt;if_snd;
+	<span class="enscript-keyword">if</span> (altq)
+		pif-&gt;pif_flags |= PRIQIFF_ALTQ;
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s scheduler allocated\n&quot;</span>,
+		    if_name(ifp), priq_style(pif));
+	}
+
+	<span class="enscript-keyword">return</span> (pif);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_destroy</span>(<span class="enscript-type">struct</span> priq_if *pif)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = pif-&gt;pif_ifq;
+	<span class="enscript-type">int</span> err;
+
+	IFCQ_LOCK(ifq);
+	err = priq_destroy_locked(pif);
+	IFCQ_UNLOCK(ifq);
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_destroy_locked</span>(<span class="enscript-type">struct</span> priq_if *pif)
+{
+	IFCQ_LOCK_ASSERT_HELD(pif-&gt;pif_ifq);
+
+	(<span class="enscript-type">void</span>) priq_clear_interface(pif);
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s scheduler destroyed\n&quot;</span>,
+		    if_name(PRIQIF_IFP(pif)), priq_style(pif));
+	}
+
+	zfree(priq_zone, pif);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * bring the interface back to the initial state by discarding
+ * all the filters and classes.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_clear_interface</span>(<span class="enscript-type">struct</span> priq_if *pif)
+{
+	<span class="enscript-type">struct</span> priq_class	*cl;
+	<span class="enscript-type">int</span> pri;
+
+	IFCQ_LOCK_ASSERT_HELD(pif-&gt;pif_ifq);
+
+	<span class="enscript-comment">/* clear out the classes */</span>
+	<span class="enscript-keyword">for</span> (pri = 0; pri &lt;= pif-&gt;pif_maxpri; pri++)
+		<span class="enscript-keyword">if</span> ((cl = pif-&gt;pif_classes[pri]) != NULL)
+			priq_class_destroy(pif, cl);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* discard all the queued packets on the interface */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">priq_purge</span>(<span class="enscript-type">struct</span> priq_if *pif)
+{
+	<span class="enscript-type">struct</span> priq_class *cl;
+	<span class="enscript-type">int</span> pri;
+
+	IFCQ_LOCK_ASSERT_HELD(pif-&gt;pif_ifq);
+
+	<span class="enscript-keyword">for</span> (pri = 0; pri &lt;= pif-&gt;pif_maxpri; pri++) {
+		<span class="enscript-keyword">if</span> ((cl = pif-&gt;pif_classes[pri]) != NULL &amp;&amp; !qempty(&amp;cl-&gt;cl_q))
+			priq_purgeq(pif, cl, 0, NULL, NULL);
+	}
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">PF_ALTQ</span>
+	<span class="enscript-comment">/*
+	 * This assertion is safe to be made only when PF_ALTQ is not
+	 * configured; otherwise, IFCQ_LEN represents the sum of the
+	 * packets managed by ifcq_disc and altq_disc instances, which
+	 * is possible when transitioning between the two.
+	 */</span>
+	VERIFY(IFCQ_LEN(pif-&gt;pif_ifq) == 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !PF_ALTQ */</span>
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">priq_purge_sc</span>(<span class="enscript-type">struct</span> priq_if *pif, cqrq_purge_sc_t *pr)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = pif-&gt;pif_ifq;
+	u_int32_t i;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	VERIFY(pr-&gt;sc == MBUF_SC_UNSPEC || MBUF_VALID_SC(pr-&gt;sc));
+	VERIFY(pr-&gt;flow != 0);
+
+	<span class="enscript-keyword">if</span> (pr-&gt;sc != MBUF_SC_UNSPEC) {
+		i = MBUF_SCIDX(pr-&gt;sc);
+		VERIFY(i &lt; IFCQ_SC_MAX);
+
+		priq_purgeq(pif, ifq-&gt;ifcq_disc_slots[i].cl,
+		    pr-&gt;flow, &amp;pr-&gt;packets, &amp;pr-&gt;bytes);
+	} <span class="enscript-keyword">else</span> {
+		u_int32_t cnt, len;
+
+		pr-&gt;packets = 0;
+		pr-&gt;bytes = 0;
+
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; IFCQ_SC_MAX; i++) {
+			priq_purgeq(pif, ifq-&gt;ifcq_disc_slots[i].cl,
+			    pr-&gt;flow, &amp;cnt, &amp;len);
+			pr-&gt;packets += cnt;
+			pr-&gt;bytes += len;
+		}
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">priq_event</span>(<span class="enscript-type">struct</span> priq_if *pif, cqev_t ev)
+{
+	<span class="enscript-type">struct</span> priq_class *cl;
+	<span class="enscript-type">int</span> pri;
+
+	IFCQ_LOCK_ASSERT_HELD(pif-&gt;pif_ifq);
+
+	<span class="enscript-keyword">for</span> (pri = 0; pri &lt;= pif-&gt;pif_maxpri; pri++)
+		<span class="enscript-keyword">if</span> ((cl = pif-&gt;pif_classes[pri]) != NULL)
+			priq_updateq(pif, cl, ev);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_add_queue</span>(<span class="enscript-type">struct</span> priq_if *pif, <span class="enscript-type">int</span> priority, u_int32_t qlimit,
+    <span class="enscript-type">int</span> flags, u_int32_t qid, <span class="enscript-type">struct</span> priq_class **clp)
+{
+	<span class="enscript-type">struct</span> priq_class *cl;
+
+	IFCQ_LOCK_ASSERT_HELD(pif-&gt;pif_ifq);
+
+	<span class="enscript-comment">/* check parameters */</span>
+	<span class="enscript-keyword">if</span> (priority &gt;= PRIQ_MAXPRI)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">if</span> (pif-&gt;pif_classes[priority] != NULL)
+		<span class="enscript-keyword">return</span> (EBUSY);
+	<span class="enscript-keyword">if</span> (priq_clh_to_clp(pif, qid) != NULL)
+		<span class="enscript-keyword">return</span> (EBUSY);
+
+	cl = priq_class_create(pif, priority, qlimit, flags, qid);
+	<span class="enscript-keyword">if</span> (cl == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	<span class="enscript-keyword">if</span> (clp != NULL)
+		*clp = cl;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> priq_class *
+<span class="enscript-function-name">priq_class_create</span>(<span class="enscript-type">struct</span> priq_if *pif, <span class="enscript-type">int</span> pri, u_int32_t qlimit,
+    <span class="enscript-type">int</span> flags, u_int32_t qid)
+{
+	<span class="enscript-type">struct</span> ifnet *ifp;
+	<span class="enscript-type">struct</span> ifclassq *ifq;
+	<span class="enscript-type">struct</span> priq_class *cl;
+
+	IFCQ_LOCK_ASSERT_HELD(pif-&gt;pif_ifq);
+
+	<span class="enscript-comment">/* Sanitize flags unless internally configured */</span>
+	<span class="enscript-keyword">if</span> (pif-&gt;pif_flags &amp; PRIQIFF_ALTQ)
+		flags &amp;= PRCF_USERFLAGS;
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (flags &amp; PRCF_RED) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s RED not available!\n&quot;</span>,
+		    if_name(PRIQIF_IFP(pif)), priq_style(pif));
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !CLASSQ_RED */</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (flags &amp; PRCF_RIO) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s RIO not available!\n&quot;</span>,
+		    if_name(PRIQIF_IFP(pif)), priq_style(pif));
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (flags &amp; PRCF_BLUE) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s BLUE not available!\n&quot;</span>,
+		    if_name(PRIQIF_IFP(pif)), priq_style(pif));
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+
+	<span class="enscript-comment">/* These are mutually exclusive */</span>
+	<span class="enscript-keyword">if</span> ((flags &amp; (PRCF_RED|PRCF_RIO|PRCF_BLUE|PRCF_SFB)) &amp;&amp;
+	    (flags &amp; (PRCF_RED|PRCF_RIO|PRCF_BLUE|PRCF_SFB)) != PRCF_RED &amp;&amp;
+	    (flags &amp; (PRCF_RED|PRCF_RIO|PRCF_BLUE|PRCF_SFB)) != PRCF_RIO &amp;&amp;
+	    (flags &amp; (PRCF_RED|PRCF_RIO|PRCF_BLUE|PRCF_SFB)) != PRCF_BLUE &amp;&amp;
+	    (flags &amp; (PRCF_RED|PRCF_RIO|PRCF_BLUE|PRCF_SFB)) != PRCF_SFB) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s more than one RED|RIO|BLUE|SFB\n&quot;</span>,
+		    if_name(PRIQIF_IFP(pif)), priq_style(pif));
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	ifq = pif-&gt;pif_ifq;
+	ifp = PRIQIF_IFP(pif);
+
+	<span class="enscript-keyword">if</span> ((cl = pif-&gt;pif_classes[pri]) != NULL) {
+		<span class="enscript-comment">/* modify the class instead of creating a new one */</span>
+		<span class="enscript-keyword">if</span> (!qempty(&amp;cl-&gt;cl_q))
+			priq_purgeq(pif, cl, 0, NULL, NULL);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+			rio_destroy(cl-&gt;cl_rio);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+		<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+			red_destroy(cl-&gt;cl_red);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+		<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+			blue_destroy(cl-&gt;cl_blue);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+		<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q) &amp;&amp; cl-&gt;cl_sfb != NULL)
+			sfb_destroy(cl-&gt;cl_sfb);
+		cl-&gt;cl_qalg.ptr = NULL;
+		qtype(&amp;cl-&gt;cl_q) = Q_DROPTAIL;
+		qstate(&amp;cl-&gt;cl_q) = QS_RUNNING;
+	} <span class="enscript-keyword">else</span> {
+		cl = zalloc(priq_cl_zone);
+		<span class="enscript-keyword">if</span> (cl == NULL)
+			<span class="enscript-keyword">return</span> (NULL);
+
+		bzero(cl, priq_cl_size);
+	}
+
+	pif-&gt;pif_classes[pri] = cl;
+	<span class="enscript-keyword">if</span> (flags &amp; PRCF_DEFAULTCLASS)
+		pif-&gt;pif_default = cl;
+	<span class="enscript-keyword">if</span> (qlimit == 0 || qlimit &gt; IFCQ_MAXLEN(ifq)) {
+		qlimit = IFCQ_MAXLEN(ifq);
+		<span class="enscript-keyword">if</span> (qlimit == 0)
+			qlimit = DEFAULT_QLIMIT;  <span class="enscript-comment">/* use default */</span>
+	}
+	_qinit(&amp;cl-&gt;cl_q, Q_DROPTAIL, qlimit);
+	cl-&gt;cl_flags = flags;
+	cl-&gt;cl_pri = pri;
+	<span class="enscript-keyword">if</span> (pri &gt; pif-&gt;pif_maxpri)
+		pif-&gt;pif_maxpri = pri;
+	cl-&gt;cl_pif = pif;
+	cl-&gt;cl_handle = qid;
+
+	<span class="enscript-keyword">if</span> (flags &amp; (PRCF_RED|PRCF_RIO|PRCF_BLUE|PRCF_SFB)) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span> || <span class="enscript-variable-name">CLASSQ_RIO</span>
+		u_int64_t ifbandwidth = ifnet_output_linkrate(ifp);
+		<span class="enscript-type">int</span> pkttime;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED || CLASSQ_RIO */</span>
+
+		cl-&gt;cl_qflags = 0;
+		<span class="enscript-keyword">if</span> (flags &amp; PRCF_ECN) {
+			<span class="enscript-keyword">if</span> (flags &amp; PRCF_BLUE)
+				cl-&gt;cl_qflags |= BLUEF_ECN;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; PRCF_SFB)
+				cl-&gt;cl_qflags |= SFBF_ECN;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; PRCF_RED)
+				cl-&gt;cl_qflags |= REDF_ECN;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; PRCF_RIO)
+				cl-&gt;cl_qflags |= RIOF_ECN;
+		}
+		<span class="enscript-keyword">if</span> (flags &amp; PRCF_FLOWCTL) {
+			<span class="enscript-keyword">if</span> (flags &amp; PRCF_SFB)
+				cl-&gt;cl_qflags |= SFBF_FLOWCTL;
+		}
+		<span class="enscript-keyword">if</span> (flags &amp; PRCF_CLEARDSCP) {
+			<span class="enscript-keyword">if</span> (flags &amp; PRCF_RIO)
+				cl-&gt;cl_qflags |= RIOF_CLEARDSCP;
+		}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span> || <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-comment">/*
+		 * XXX: RED &amp; RIO should be watching link speed and MTU
+		 *	events and recompute pkttime accordingly.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ifbandwidth &lt; 8)
+			pkttime = 1000 * 1000 * 1000; <span class="enscript-comment">/* 1 sec */</span>
+		<span class="enscript-keyword">else</span>
+			pkttime = (int64_t)ifp-&gt;if_mtu * 1000 * 1000 * 1000 /
+			    (ifbandwidth / 8);
+
+		<span class="enscript-comment">/* Test for exclusivity {RED,RIO,BLUE,SFB} was done above */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+		<span class="enscript-keyword">if</span> (flags &amp; PRCF_RED) {
+			cl-&gt;cl_red = red_alloc(ifp, 0, 0,
+			    qlimit(&amp;cl-&gt;cl_q) * 10/100,
+			    qlimit(&amp;cl-&gt;cl_q) * 30/100,
+			    cl-&gt;cl_qflags, pkttime);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_red != NULL)
+				qtype(&amp;cl-&gt;cl_q) = Q_RED;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-keyword">if</span> (flags &amp; PRCF_RIO) {
+			cl-&gt;cl_rio =
+			    rio_alloc(ifp, 0, NULL, cl-&gt;cl_qflags, pkttime);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_rio != NULL)
+				qtype(&amp;cl-&gt;cl_q) = Q_RIO;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED || CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+		<span class="enscript-keyword">if</span> (flags &amp; PRCF_BLUE) {
+			cl-&gt;cl_blue = blue_alloc(ifp, 0, 0, cl-&gt;cl_qflags);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_blue != NULL)
+				qtype(&amp;cl-&gt;cl_q) = Q_BLUE;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+		<span class="enscript-keyword">if</span> (flags &amp; PRCF_SFB) {
+			<span class="enscript-keyword">if</span> (!(cl-&gt;cl_flags &amp; PRCF_LAZY))
+				cl-&gt;cl_sfb = sfb_alloc(ifp, cl-&gt;cl_handle,
+				    qlimit(&amp;cl-&gt;cl_q), cl-&gt;cl_qflags);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_sfb != NULL || (cl-&gt;cl_flags &amp; PRCF_LAZY))
+				qtype(&amp;cl-&gt;cl_q) = Q_SFB;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s created qid=%d pri=%d qlimit=%d &quot;</span>
+		    <span class="enscript-string">&quot;flags=%b\n&quot;</span>, if_name(ifp), priq_style(pif),
+		    cl-&gt;cl_handle, cl-&gt;cl_pri, qlimit, flags, PRCF_BITS);
+	}
+
+	<span class="enscript-keyword">return</span> (cl);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_remove_queue</span>(<span class="enscript-type">struct</span> priq_if *pif, u_int32_t qid)
+{
+	<span class="enscript-type">struct</span> priq_class *cl;
+
+	IFCQ_LOCK_ASSERT_HELD(pif-&gt;pif_ifq);
+
+	<span class="enscript-keyword">if</span> ((cl = priq_clh_to_clp(pif, qid)) == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">return</span> (priq_class_destroy(pif, cl));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_class_destroy</span>(<span class="enscript-type">struct</span> priq_if *pif, <span class="enscript-type">struct</span> priq_class *cl)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = pif-&gt;pif_ifq;
+	<span class="enscript-type">int</span> pri;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	<span class="enscript-keyword">if</span> (!qempty(&amp;cl-&gt;cl_q))
+		priq_purgeq(pif, cl, 0, NULL, NULL);
+
+	VERIFY(cl-&gt;cl_pri &lt; PRIQ_MAXPRI);
+	VERIFY(!pktsched_bit_tst(cl-&gt;cl_pri, &amp;pif-&gt;pif_bitmap));
+
+	pif-&gt;pif_classes[cl-&gt;cl_pri] = NULL;
+	<span class="enscript-keyword">if</span> (pif-&gt;pif_maxpri == cl-&gt;cl_pri) {
+		<span class="enscript-keyword">for</span> (pri = cl-&gt;cl_pri; pri &gt;= 0; pri--)
+			<span class="enscript-keyword">if</span> (pif-&gt;pif_classes[pri] != NULL) {
+				pif-&gt;pif_maxpri = pri;
+				<span class="enscript-keyword">break</span>;
+			}
+		<span class="enscript-keyword">if</span> (pri &lt; 0)
+			pif-&gt;pif_maxpri = -1;
+	}
+
+	<span class="enscript-keyword">if</span> (pif-&gt;pif_default == cl)
+		pif-&gt;pif_default = NULL;
+
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qalg.ptr != NULL) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+			rio_destroy(cl-&gt;cl_rio);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+		<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+			red_destroy(cl-&gt;cl_red);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+		<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+			blue_destroy(cl-&gt;cl_blue);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+		<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q) &amp;&amp; cl-&gt;cl_sfb != NULL)
+			sfb_destroy(cl-&gt;cl_sfb);
+		cl-&gt;cl_qalg.ptr = NULL;
+		qtype(&amp;cl-&gt;cl_q) = Q_DROPTAIL;
+		qstate(&amp;cl-&gt;cl_q) = QS_RUNNING;
+	}
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s destroyed qid=%d pri=%d\n&quot;</span>,
+		    if_name(PRIQIF_IFP(pif)), priq_style(pif),
+		    cl-&gt;cl_handle, cl-&gt;cl_pri);
+	}
+
+	zfree(priq_cl_zone, cl);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_enqueue</span>(<span class="enscript-type">struct</span> priq_if *pif, <span class="enscript-type">struct</span> priq_class *cl, <span class="enscript-type">struct</span> mbuf *m,
+    <span class="enscript-type">struct</span> pf_mtag *t)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = pif-&gt;pif_ifq;
+	u_int32_t pri;
+	<span class="enscript-type">int</span> len, ret;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(cl == NULL || cl-&gt;cl_pif == pif);
+
+	<span class="enscript-keyword">if</span> (cl == NULL) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PF_ALTQ</span>
+		cl = priq_clh_to_clp(pif, t-&gt;pftag_qid);
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !PF_ALTQ */</span>
+		cl = priq_clh_to_clp(pif, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !PF_ALTQ */</span>
+		<span class="enscript-keyword">if</span> (cl == NULL) {
+			cl = pif-&gt;pif_default;
+			<span class="enscript-keyword">if</span> (cl == NULL) {
+				IFCQ_CONVERT_LOCK(ifq);
+				m_freem(m);
+				<span class="enscript-keyword">return</span> (ENOBUFS);
+			}
+		}
+	}
+	pri = cl-&gt;cl_pri;
+	VERIFY(pri &lt; PRIQ_MAXPRI);
+
+	len = m_pktlen(m);
+
+	ret = priq_addq(cl, m, t);
+	<span class="enscript-keyword">if</span> (ret != 0) {
+		<span class="enscript-keyword">if</span> (ret == CLASSQEQ_SUCCESS_FC) {
+			<span class="enscript-comment">/* packet enqueued, return advisory feedback */</span>
+			ret = EQFULL;
+		} <span class="enscript-keyword">else</span> {
+			VERIFY(ret == CLASSQEQ_DROPPED ||
+			    ret == CLASSQEQ_DROPPED_FC ||
+			    ret == CLASSQEQ_DROPPED_SP);
+			<span class="enscript-comment">/* packet has been freed in priq_addq */</span>
+			PKTCNTR_ADD(&amp;cl-&gt;cl_dropcnt, 1, len);
+			IFCQ_DROP_ADD(ifq, 1, len);
+			<span class="enscript-keyword">switch</span> (ret) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQEQ_DROPPED</span>:
+				<span class="enscript-keyword">return</span> (ENOBUFS);
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQEQ_DROPPED_FC</span>:
+				<span class="enscript-keyword">return</span> (EQFULL);
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQEQ_DROPPED_SP</span>:
+				<span class="enscript-keyword">return</span> (EQSUSPENDED);
+			}
+			<span class="enscript-comment">/* NOT REACHED */</span>
+		}
+	}
+	IFCQ_INC_LEN(ifq);
+	IFCQ_INC_BYTES(ifq, len);
+
+	<span class="enscript-comment">/* class is now active; indicate it as such */</span>
+	<span class="enscript-keyword">if</span> (!pktsched_bit_tst(pri, &amp;pif-&gt;pif_bitmap))
+		pktsched_bit_set(pri, &amp;pif-&gt;pif_bitmap);
+
+	<span class="enscript-comment">/* successfully queued. */</span>
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-comment">/*
+ * note: CLASSQDQ_POLL returns the next packet without removing the packet
+ *	from the queue.  CLASSQDQ_REMOVE is a normal dequeue operation.
+ *	CLASSQDQ_REMOVE must return the same packet if called immediately
+ *	after CLASSQDQ_POLL.
+ */</span>
+<span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">priq_dequeue</span>(<span class="enscript-type">struct</span> priq_if *pif, cqdq_op_t op)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = pif-&gt;pif_ifq;
+	<span class="enscript-type">struct</span> priq_class *cl;
+	<span class="enscript-type">struct</span> mbuf *m;
+	u_int32_t pri, len;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	<span class="enscript-keyword">if</span> (pif-&gt;pif_bitmap == 0) {
+		<span class="enscript-comment">/* no active class; nothing to dequeue */</span>
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	VERIFY(!IFCQ_IS_EMPTY(ifq));
+
+	pri = pktsched_fls(pif-&gt;pif_bitmap) - 1;	<span class="enscript-comment">/* zero based */</span>
+	VERIFY(pri &lt; PRIQ_MAXPRI);
+	cl = pif-&gt;pif_classes[pri];
+	VERIFY(cl != NULL &amp;&amp; !qempty(&amp;cl-&gt;cl_q));
+
+	<span class="enscript-keyword">if</span> (op == CLASSQDQ_POLL)
+		<span class="enscript-keyword">return</span> (priq_pollq(cl));
+
+	m = priq_getq(cl);
+	VERIFY(m != NULL);	<span class="enscript-comment">/* qalg must be work conserving */</span>
+	len = m_pktlen(m);
+
+	IFCQ_DEC_LEN(ifq);
+	IFCQ_DEC_BYTES(ifq, len);
+	<span class="enscript-keyword">if</span> (qempty(&amp;cl-&gt;cl_q)) {
+		cl-&gt;cl_period++;
+		<span class="enscript-comment">/* class is now inactive; indicate it as such */</span>
+		pktsched_bit_clr(pri, &amp;pif-&gt;pif_bitmap);
+	}
+	PKTCNTR_ADD(&amp;cl-&gt;cl_xmitcnt, 1, len);
+	IFCQ_XMIT_ADD(ifq, 1, len);
+
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_addq</span>(<span class="enscript-type">struct</span> priq_class *cl, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> pf_mtag *t)
+{
+	<span class="enscript-type">struct</span> priq_if *pif = cl-&gt;cl_pif;
+	<span class="enscript-type">struct</span> ifclassq *ifq = pif-&gt;pif_ifq;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (rio_addq(cl-&gt;cl_rio, &amp;cl-&gt;cl_q, m, t));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (red_addq(cl-&gt;cl_red, &amp;cl-&gt;cl_q, m, t));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (blue_addq(cl-&gt;cl_blue, &amp;cl-&gt;cl_q, m, t));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q)) {
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_sfb == NULL) {
+			<span class="enscript-type">struct</span> ifnet *ifp = PRIQIF_IFP(pif);
+
+			VERIFY(cl-&gt;cl_flags &amp; PRCF_LAZY);
+			cl-&gt;cl_flags &amp;= ~PRCF_LAZY;
+			IFCQ_CONVERT_LOCK(ifq);
+
+			cl-&gt;cl_sfb = sfb_alloc(ifp, cl-&gt;cl_handle,
+			    qlimit(&amp;cl-&gt;cl_q), cl-&gt;cl_qflags);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_sfb == NULL) {
+				<span class="enscript-comment">/* fall back to droptail */</span>
+				qtype(&amp;cl-&gt;cl_q) = Q_DROPTAIL;
+				cl-&gt;cl_flags &amp;= ~PRCF_SFB;
+				cl-&gt;cl_qflags &amp;= ~(SFBF_ECN | SFBF_FLOWCTL);
+
+				log(LOG_ERR, <span class="enscript-string">&quot;%s: %s SFB lazy allocation &quot;</span>
+				    <span class="enscript-string">&quot;failed for qid=%d pri=%d, falling back &quot;</span>
+				    <span class="enscript-string">&quot;to DROPTAIL\n&quot;</span>, if_name(ifp),
+				    priq_style(pif), cl-&gt;cl_handle,
+				    cl-&gt;cl_pri);
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (pif-&gt;pif_throttle != IFNET_THROTTLE_OFF) {
+				<span class="enscript-comment">/* if there's pending throttling, set it */</span>
+				cqrq_throttle_t tr = { 1, pif-&gt;pif_throttle };
+				<span class="enscript-type">int</span> err = priq_throttle(pif, &amp;tr);
+
+				<span class="enscript-keyword">if</span> (err == EALREADY)
+					err = 0;
+				<span class="enscript-keyword">if</span> (err != 0) {
+					tr.level = IFNET_THROTTLE_OFF;
+					(<span class="enscript-type">void</span>) priq_throttle(pif, &amp;tr);
+				}
+			}
+		}
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_sfb != NULL)
+			<span class="enscript-keyword">return</span> (sfb_addq(cl-&gt;cl_sfb, &amp;cl-&gt;cl_q, m, t));
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (qlen(&amp;cl-&gt;cl_q) &gt;= qlimit(&amp;cl-&gt;cl_q)) {
+		IFCQ_CONVERT_LOCK(ifq);
+		m_freem(m);
+		<span class="enscript-keyword">return</span> (CLASSQEQ_DROPPED);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PF_ECN</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_flags &amp; PRCF_CLEARDSCP)
+		write_dsfield(m, t, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PF_ECN */</span>
+
+	_addq(&amp;cl-&gt;cl_q, m);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">priq_getq</span>(<span class="enscript-type">struct</span> priq_class *cl)
+{
+	IFCQ_LOCK_ASSERT_HELD(cl-&gt;cl_pif-&gt;pif_ifq);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (rio_getq(cl-&gt;cl_rio, &amp;cl-&gt;cl_q));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (red_getq(cl-&gt;cl_red, &amp;cl-&gt;cl_q));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (blue_getq(cl-&gt;cl_blue, &amp;cl-&gt;cl_q));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q) &amp;&amp; cl-&gt;cl_sfb != NULL)
+		<span class="enscript-keyword">return</span> (sfb_getq(cl-&gt;cl_sfb, &amp;cl-&gt;cl_q));
+
+	<span class="enscript-keyword">return</span> (_getq(&amp;cl-&gt;cl_q));
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">priq_pollq</span>(<span class="enscript-type">struct</span> priq_class *cl)
+{
+	IFCQ_LOCK_ASSERT_HELD(cl-&gt;cl_pif-&gt;pif_ifq);
+
+	<span class="enscript-keyword">return</span> (qhead(&amp;cl-&gt;cl_q));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">priq_purgeq</span>(<span class="enscript-type">struct</span> priq_if *pif, <span class="enscript-type">struct</span> priq_class *cl, u_int32_t flow,
+    u_int32_t *packets, u_int32_t *bytes)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = pif-&gt;pif_ifq;
+	u_int32_t cnt = 0, len = 0, qlen;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	<span class="enscript-keyword">if</span> ((qlen = qlen(&amp;cl-&gt;cl_q)) == 0) {
+		VERIFY(!pktsched_bit_tst(cl-&gt;cl_pri, &amp;pif-&gt;pif_bitmap));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* become regular mutex before freeing mbufs */</span>
+	IFCQ_CONVERT_LOCK(ifq);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+		rio_purgeq(cl-&gt;cl_rio, &amp;cl-&gt;cl_q, flow, &amp;cnt, &amp;len);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+		red_purgeq(cl-&gt;cl_red, &amp;cl-&gt;cl_q, flow, &amp;cnt, &amp;len);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+		blue_purgeq(cl-&gt;cl_blue, &amp;cl-&gt;cl_q, flow, &amp;cnt, &amp;len);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q) &amp;&amp; cl-&gt;cl_sfb != NULL)
+		sfb_purgeq(cl-&gt;cl_sfb, &amp;cl-&gt;cl_q, flow, &amp;cnt, &amp;len);
+	<span class="enscript-keyword">else</span>
+		_flushq_flow(&amp;cl-&gt;cl_q, flow, &amp;cnt, &amp;len);
+
+	<span class="enscript-keyword">if</span> (cnt &gt; 0) {
+		VERIFY(qlen(&amp;cl-&gt;cl_q) == (qlen - cnt));
+
+		PKTCNTR_ADD(&amp;cl-&gt;cl_dropcnt, cnt, len);
+		IFCQ_DROP_ADD(ifq, cnt, len);
+
+		VERIFY(((<span class="enscript-type">signed</span>)IFCQ_LEN(ifq) - cnt) &gt;= 0);
+		IFCQ_LEN(ifq) -= cnt;
+
+		<span class="enscript-keyword">if</span> (qempty(&amp;cl-&gt;cl_q))
+			pktsched_bit_clr(cl-&gt;cl_pri, &amp;pif-&gt;pif_bitmap);
+
+		<span class="enscript-keyword">if</span> (pktsched_verbose) {
+			log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s purge qid=%d pri=%d &quot;</span>
+			    <span class="enscript-string">&quot;qlen=[%d,%d] cnt=%d len=%d flow=0x%x\n&quot;</span>,
+			    if_name(PRIQIF_IFP(pif)), priq_style(pif),
+			    cl-&gt;cl_handle, cl-&gt;cl_pri, qlen, qlen(&amp;cl-&gt;cl_q),
+			    cnt, len, flow);
+		}
+	}
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (packets != NULL)
+		*packets = cnt;
+	<span class="enscript-keyword">if</span> (bytes != NULL)
+		*bytes = len;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">priq_updateq</span>(<span class="enscript-type">struct</span> priq_if *pif, <span class="enscript-type">struct</span> priq_class *cl, cqev_t ev)
+{
+	IFCQ_LOCK_ASSERT_HELD(pif-&gt;pif_ifq);
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s update qid=%d pri=%d event=%s\n&quot;</span>,
+		    if_name(PRIQIF_IFP(pif)), priq_style(pif),
+		    cl-&gt;cl_handle, cl-&gt;cl_pri, ifclassq_ev2str(ev));
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (rio_updateq(cl-&gt;cl_rio, ev));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (red_updateq(cl-&gt;cl_red, ev));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (blue_updateq(cl-&gt;cl_blue, ev));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q) &amp;&amp; cl-&gt;cl_sfb != NULL)
+		<span class="enscript-keyword">return</span> (sfb_updateq(cl-&gt;cl_sfb, ev));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_get_class_stats</span>(<span class="enscript-type">struct</span> priq_if *pif, u_int32_t qid,
+    <span class="enscript-type">struct</span> priq_classstats *sp)
+{
+	<span class="enscript-type">struct</span> priq_class *cl;
+
+	IFCQ_LOCK_ASSERT_HELD(pif-&gt;pif_ifq);
+
+	<span class="enscript-keyword">if</span> ((cl = priq_clh_to_clp(pif, qid)) == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	sp-&gt;class_handle = cl-&gt;cl_handle;
+	sp-&gt;priority = cl-&gt;cl_pri;
+	sp-&gt;qlength = qlen(&amp;cl-&gt;cl_q);
+	sp-&gt;qlimit = qlimit(&amp;cl-&gt;cl_q);
+	sp-&gt;period = cl-&gt;cl_period;
+	sp-&gt;xmitcnt = cl-&gt;cl_xmitcnt;
+	sp-&gt;dropcnt = cl-&gt;cl_dropcnt;
+
+	sp-&gt;qtype = qtype(&amp;cl-&gt;cl_q);
+	sp-&gt;qstate = qstate(&amp;cl-&gt;cl_q);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+		red_getstats(cl-&gt;cl_red, &amp;sp-&gt;red[0]);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+		rio_getstats(cl-&gt;cl_rio, &amp;sp-&gt;red[0]);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+		blue_getstats(cl-&gt;cl_blue, &amp;sp-&gt;blue);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q) &amp;&amp; cl-&gt;cl_sfb != NULL)
+		sfb_getstats(cl-&gt;cl_sfb, &amp;sp-&gt;sfb);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_stat_sc</span>(<span class="enscript-type">struct</span> priq_if *pif, cqrq_stat_sc_t *sr)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = pif-&gt;pif_ifq;
+	<span class="enscript-type">struct</span> priq_class *cl;
+	u_int32_t i;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	VERIFY(sr-&gt;sc == MBUF_SC_UNSPEC || MBUF_VALID_SC(sr-&gt;sc));
+
+	i = MBUF_SCIDX(sr-&gt;sc);
+	VERIFY(i &lt; IFCQ_SC_MAX);
+
+	cl = ifq-&gt;ifcq_disc_slots[i].cl;
+	sr-&gt;packets = qlen(&amp;cl-&gt;cl_q);
+	sr-&gt;bytes = qsize(&amp;cl-&gt;cl_q);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* convert a class handle to the corresponding class pointer */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> priq_class *
+<span class="enscript-function-name">priq_clh_to_clp</span>(<span class="enscript-type">struct</span> priq_if *pif, u_int32_t chandle)
+{
+	<span class="enscript-type">struct</span> priq_class *cl;
+	<span class="enscript-type">int</span> idx;
+
+	IFCQ_LOCK_ASSERT_HELD(pif-&gt;pif_ifq);
+
+	<span class="enscript-keyword">for</span> (idx = pif-&gt;pif_maxpri; idx &gt;= 0; idx--)
+		<span class="enscript-keyword">if</span> ((cl = pif-&gt;pif_classes[idx]) != NULL &amp;&amp;
+		    cl-&gt;cl_handle == chandle)
+			<span class="enscript-keyword">return</span> (cl);
+
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">priq_style</span>(<span class="enscript-type">struct</span> priq_if *pif)
+{
+	<span class="enscript-keyword">return</span> ((pif-&gt;pif_flags &amp; PRIQIFF_ALTQ) ? <span class="enscript-string">&quot;ALTQ_PRIQ&quot;</span> : <span class="enscript-string">&quot;PRIQ&quot;</span>);
+}
+
+<span class="enscript-comment">/*
+ * priq_enqueue_ifclassq is an enqueue function to be registered to
+ * (*ifcq_enqueue) in struct ifclassq.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_enqueue_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq, <span class="enscript-type">struct</span> mbuf *m)
+{
+	u_int32_t i;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	<span class="enscript-keyword">if</span> (!(m-&gt;m_flags &amp; M_PKTHDR)) {
+		<span class="enscript-comment">/* should not happen */</span>
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: packet does not have pkthdr\n&quot;</span>,
+		    if_name(ifq-&gt;ifcq_ifp));
+		IFCQ_CONVERT_LOCK(ifq);
+		m_freem(m);
+		<span class="enscript-keyword">return</span> (ENOBUFS);
+	}
+
+	i = MBUF_SCIDX(mbuf_get_service_class(m));
+	VERIFY((u_int32_t)i &lt; IFCQ_SC_MAX);
+
+	<span class="enscript-keyword">return</span> (priq_enqueue(ifq-&gt;ifcq_disc,
+	    ifq-&gt;ifcq_disc_slots[i].cl, m, m_pftag(m)));
+}
+
+<span class="enscript-comment">/*
+ * priq_dequeue_ifclassq is a dequeue function to be registered to
+ * (*ifcq_dequeue) in struct ifclass.
+ *
+ * note: CLASSQDQ_POLL returns the next packet without removing the packet
+ *	from the queue.  CLASSQDQ_REMOVE is a normal dequeue operation.
+ *	CLASSQDQ_REMOVE must return the same packet if called immediately
+ *	after CLASSQDQ_POLL.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">priq_dequeue_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq, cqdq_op_t op)
+{
+	<span class="enscript-keyword">return</span> (priq_dequeue(ifq-&gt;ifcq_disc, op));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_request_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq, cqrq_t req, <span class="enscript-type">void</span> *arg)
+{
+	<span class="enscript-type">struct</span> priq_if *pif = (<span class="enscript-type">struct</span> priq_if *)ifq-&gt;ifcq_disc;
+	<span class="enscript-type">int</span> err = 0;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	<span class="enscript-keyword">switch</span> (req) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQRQ_PURGE</span>:
+		priq_purge(pif);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQRQ_PURGE_SC</span>:
+		priq_purge_sc(pif, (cqrq_purge_sc_t *)arg);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQRQ_EVENT</span>:
+		priq_event(pif, (cqev_t)arg);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQRQ_THROTTLE</span>:
+		err = priq_throttle(pif, (cqrq_throttle_t *)arg);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQRQ_STAT_SC</span>:
+		err = priq_stat_sc(pif, (cqrq_stat_sc_t *)arg);
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_setup_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq, u_int32_t flags)
+{
+	<span class="enscript-type">struct</span> ifnet *ifp = ifq-&gt;ifcq_ifp;
+	<span class="enscript-type">struct</span> priq_class *cl0, *cl1, *cl2, *cl3, *cl4;
+	<span class="enscript-type">struct</span> priq_class *cl5, *cl6, *cl7, *cl8, *cl9;
+	<span class="enscript-type">struct</span> priq_if *pif;
+	u_int32_t maxlen = 0, qflags = 0;
+	<span class="enscript-type">int</span> err = 0;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(ifq-&gt;ifcq_disc == NULL);
+	VERIFY(ifq-&gt;ifcq_type == PKTSCHEDT_NONE);
+
+	<span class="enscript-keyword">if</span> (flags &amp; PKTSCHEDF_QALG_RED)
+		qflags |= PRCF_RED;
+	<span class="enscript-keyword">if</span> (flags &amp; PKTSCHEDF_QALG_RIO)
+		qflags |= PRCF_RIO;
+	<span class="enscript-keyword">if</span> (flags &amp; PKTSCHEDF_QALG_BLUE)
+		qflags |= PRCF_BLUE;
+	<span class="enscript-keyword">if</span> (flags &amp; PKTSCHEDF_QALG_SFB)
+		qflags |= PRCF_SFB;
+	<span class="enscript-keyword">if</span> (flags &amp; PKTSCHEDF_QALG_ECN)
+		qflags |= PRCF_ECN;
+	<span class="enscript-keyword">if</span> (flags &amp; PKTSCHEDF_QALG_FLOWCTL)
+		qflags |= PRCF_FLOWCTL;
+
+	pif = priq_alloc(ifp, M_WAITOK, FALSE);
+	<span class="enscript-keyword">if</span> (pif == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	<span class="enscript-keyword">if</span> ((maxlen = IFCQ_MAXLEN(ifq)) == 0)
+		maxlen = if_sndq_maxlen;
+
+	<span class="enscript-keyword">if</span> ((err = priq_add_queue(pif, 0, maxlen,
+	    qflags | PRCF_LAZY, SCIDX_BK_SYS, &amp;cl0)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = priq_add_queue(pif, 1, maxlen,
+	    qflags | PRCF_LAZY, SCIDX_BK, &amp;cl1)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = priq_add_queue(pif, 2, maxlen,
+	    qflags | PRCF_DEFAULTCLASS, SCIDX_BE, &amp;cl2)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = priq_add_queue(pif, 3, maxlen,
+	    qflags | PRCF_LAZY, SCIDX_RD, &amp;cl3)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = priq_add_queue(pif, 4, maxlen,
+	    qflags | PRCF_LAZY, SCIDX_OAM, &amp;cl4)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = priq_add_queue(pif, 5, maxlen,
+	    qflags | PRCF_LAZY, SCIDX_AV, &amp;cl5)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = priq_add_queue(pif, 6, maxlen,
+	    qflags | PRCF_LAZY, SCIDX_RV, &amp;cl6)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = priq_add_queue(pif, 7, maxlen,
+	    qflags | PRCF_LAZY, SCIDX_VI, &amp;cl7)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = priq_add_queue(pif, 8, maxlen,
+	    qflags | PRCF_LAZY, SCIDX_VO, &amp;cl8)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = priq_add_queue(pif, 9, maxlen,
+	    qflags, SCIDX_CTL, &amp;cl9)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	err = ifclassq_attach(ifq, PKTSCHEDT_PRIQ, pif,
+	    priq_enqueue_ifclassq, priq_dequeue_ifclassq, NULL,
+	    priq_request_ifclassq);
+
+	<span class="enscript-comment">/* cache these for faster lookup */</span>
+	<span class="enscript-keyword">if</span> (err == 0) {
+		ifq-&gt;ifcq_disc_slots[SCIDX_BK_SYS].qid = SCIDX_BK_SYS;
+		ifq-&gt;ifcq_disc_slots[SCIDX_BK_SYS].cl = cl0;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_BK].qid = SCIDX_BK;
+		ifq-&gt;ifcq_disc_slots[SCIDX_BK].cl = cl1;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_BE].qid = SCIDX_BE;
+		ifq-&gt;ifcq_disc_slots[SCIDX_BE].cl = cl2;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_RD].qid = SCIDX_RD;
+		ifq-&gt;ifcq_disc_slots[SCIDX_RD].cl = cl3;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_OAM].qid = SCIDX_OAM;
+		ifq-&gt;ifcq_disc_slots[SCIDX_OAM].cl = cl4;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_AV].qid = SCIDX_AV;
+		ifq-&gt;ifcq_disc_slots[SCIDX_AV].cl = cl5;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_RV].qid = SCIDX_RV;
+		ifq-&gt;ifcq_disc_slots[SCIDX_RV].cl = cl6;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_VI].qid = SCIDX_VI;
+		ifq-&gt;ifcq_disc_slots[SCIDX_VI].cl = cl7;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_VO].qid = SCIDX_VO;
+		ifq-&gt;ifcq_disc_slots[SCIDX_VO].cl = cl8;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_CTL].qid = SCIDX_CTL;
+		ifq-&gt;ifcq_disc_slots[SCIDX_CTL].cl = cl9;
+	}
+
+<span class="enscript-reference">cleanup</span>:
+	<span class="enscript-keyword">if</span> (err != 0)
+		(<span class="enscript-type">void</span>) priq_destroy_locked(pif);
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_teardown_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq)
+{
+	<span class="enscript-type">struct</span> priq_if *pif = ifq-&gt;ifcq_disc;
+	<span class="enscript-type">int</span> i;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(pif != NULL &amp;&amp; ifq-&gt;ifcq_type == PKTSCHEDT_PRIQ);
+
+	(<span class="enscript-type">void</span>) priq_destroy_locked(pif);
+
+	ifq-&gt;ifcq_disc = NULL;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; IFCQ_SC_MAX; i++) {
+		ifq-&gt;ifcq_disc_slots[i].qid = 0;
+		ifq-&gt;ifcq_disc_slots[i].cl = NULL;
+	}
+
+	<span class="enscript-keyword">return</span> (ifclassq_detach(ifq));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_getqstats_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq, u_int32_t slot,
+    <span class="enscript-type">struct</span> if_ifclassq_stats *ifqs)
+{
+	<span class="enscript-type">struct</span> priq_if *pif = ifq-&gt;ifcq_disc;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(ifq-&gt;ifcq_type == PKTSCHEDT_PRIQ);
+
+	<span class="enscript-keyword">if</span> (slot &gt;= IFCQ_SC_MAX)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">return</span> (priq_get_class_stats(pif, ifq-&gt;ifcq_disc_slots[slot].qid,
+	    &amp;ifqs-&gt;ifqs_priq_stats));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_throttle</span>(<span class="enscript-type">struct</span> priq_if *pif, cqrq_throttle_t *tr)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = pif-&gt;pif_ifq;
+	<span class="enscript-type">struct</span> priq_class *cl;
+	<span class="enscript-type">int</span> err = 0;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(!(pif-&gt;pif_flags &amp; PRIQIFF_ALTQ));
+
+	<span class="enscript-keyword">if</span> (!tr-&gt;set) {
+		tr-&gt;level = pif-&gt;pif_throttle;
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">if</span> (tr-&gt;level == pif-&gt;pif_throttle)
+		<span class="enscript-keyword">return</span> (EALREADY);
+
+	<span class="enscript-comment">/* Current throttling levels only involve BK_SYS class */</span>
+	cl = ifq-&gt;ifcq_disc_slots[SCIDX_BK_SYS].cl;
+
+	<span class="enscript-keyword">switch</span> (tr-&gt;level) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFNET_THROTTLE_OFF</span>:
+		err = priq_resumeq(pif, cl);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFNET_THROTTLE_OPPORTUNISTIC</span>:
+		err = priq_suspendq(pif, cl);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		VERIFY(0);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-keyword">if</span> (err == 0 || err == ENXIO) {
+		<span class="enscript-keyword">if</span> (pktsched_verbose) {
+			log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s throttling level %sset %d-&gt;%d\n&quot;</span>,
+			    if_name(PRIQIF_IFP(pif)), priq_style(pif),
+			    (err == 0) ? <span class="enscript-string">&quot;&quot;</span> : <span class="enscript-string">&quot;lazy &quot;</span>, pif-&gt;pif_throttle,
+			    tr-&gt;level);
+		}
+		pif-&gt;pif_throttle = tr-&gt;level;
+		<span class="enscript-keyword">if</span> (err != 0)
+			err = 0;
+		<span class="enscript-keyword">else</span>
+			priq_purgeq(pif, cl, 0, NULL, NULL);
+	} <span class="enscript-keyword">else</span> {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s unable to set throttling level &quot;</span>
+		    <span class="enscript-string">&quot;%d-&gt;%d [error=%d]\n&quot;</span>, if_name(PRIQIF_IFP(pif)),
+		    priq_style(pif), pif-&gt;pif_throttle, tr-&gt;level, err);
+	}
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_resumeq</span>(<span class="enscript-type">struct</span> priq_if *pif, <span class="enscript-type">struct</span> priq_class *cl)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = pif-&gt;pif_ifq;
+	<span class="enscript-type">int</span> err = 0;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+		err = rio_suspendq(cl-&gt;cl_rio, &amp;cl-&gt;cl_q, FALSE);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+		err = red_suspendq(cl-&gt;cl_red, &amp;cl-&gt;cl_q, FALSE);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+		err = blue_suspendq(cl-&gt;cl_blue, &amp;cl-&gt;cl_q, FALSE);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q) &amp;&amp; cl-&gt;cl_sfb != NULL)
+		err = sfb_suspendq(cl-&gt;cl_sfb, &amp;cl-&gt;cl_q, FALSE);
+
+	<span class="enscript-keyword">if</span> (err == 0)
+		qstate(&amp;cl-&gt;cl_q) = QS_RUNNING;
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">priq_suspendq</span>(<span class="enscript-type">struct</span> priq_if *pif, <span class="enscript-type">struct</span> priq_class *cl)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = pif-&gt;pif_ifq;
+	<span class="enscript-type">int</span> err = 0;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+		err = rio_suspendq(cl-&gt;cl_rio, &amp;cl-&gt;cl_q, TRUE);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+		err = red_suspendq(cl-&gt;cl_red, &amp;cl-&gt;cl_q, TRUE);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+		err = blue_suspendq(cl-&gt;cl_blue, &amp;cl-&gt;cl_q, TRUE);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q)) {
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_sfb != NULL) {
+			err = sfb_suspendq(cl-&gt;cl_sfb, &amp;cl-&gt;cl_q, TRUE);
+		} <span class="enscript-keyword">else</span> {
+			VERIFY(cl-&gt;cl_flags &amp; PRCF_LAZY);
+			err = ENXIO;	<span class="enscript-comment">/* delayed throttling */</span>
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (err == 0 || err == ENXIO)
+		qstate(&amp;cl-&gt;cl_q) = QS_SUSPENDED;
+
+	<span class="enscript-keyword">return</span> (err);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PKTSCHED_PRIQ */</span>
+</pre>
+<hr />
+</body></html>

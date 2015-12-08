@@ -1,0 +1,385 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>CatalogUtilities.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">CatalogUtilities.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2002, 2004-2005 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/utfconv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+
+#<span class="enscript-reference">include</span>	<span class="enscript-string">&quot;../headers/FileMgrInternal.h&quot;</span>
+#<span class="enscript-reference">include</span>	<span class="enscript-string">&quot;../headers/BTreesInternal.h&quot;</span>
+#<span class="enscript-reference">include</span>	<span class="enscript-string">&quot;../headers/CatalogPrivate.h&quot;</span>
+#<span class="enscript-reference">include</span>	<span class="enscript-string">&quot;../headers/HFSUnicodeWrappers.h&quot;</span>
+#<span class="enscript-reference">include</span> 	<span class="enscript-string">&quot;../headers/BTreesPrivate.h&quot;</span>
+#<span class="enscript-reference">include</span>	<span class="enscript-string">&lt;string.h&gt;</span>
+
+<span class="enscript-comment">//
+</span><span class="enscript-comment">//	Routine:	LocateCatalogNodeByKey
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Function: 	Locates the catalog record for an existing folder or file
+</span><span class="enscript-comment">//				CNode and returns the key and data records.
+</span><span class="enscript-comment">//
+</span>
+OSErr
+<span class="enscript-function-name">LocateCatalogNodeByKey</span>(<span class="enscript-type">const</span> ExtendedVCB *volume, u_int32_t hint, CatalogKey *keyPtr,
+						CatalogRecord *dataPtr, u_int32_t *newHint)
+{
+	OSErr				result;
+	CatalogName 		*nodeName = NULL;
+	HFSCatalogNodeID	threadParentID;
+	u_int16_t tempSize;
+	FSBufferDescriptor	 btRecord;
+	<span class="enscript-type">struct</span> BTreeIterator *searchIterator;
+	FCB			*fcb;
+
+	MALLOC (searchIterator, <span class="enscript-type">struct</span> BTreeIterator*, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> BTreeIterator), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (searchIterator == NULL) {
+		<span class="enscript-keyword">return</span> memFullErr;  <span class="enscript-comment">// translates to ENOMEM
+</span>	}
+
+	bzero(searchIterator, <span class="enscript-keyword">sizeof</span>(*searchIterator));
+
+	fcb = GetFileControlBlock(volume-&gt;catalogRefNum);
+
+	btRecord.bufferAddress = dataPtr;
+	btRecord.itemCount = 1;
+	btRecord.itemSize = <span class="enscript-keyword">sizeof</span>(CatalogRecord);
+
+	searchIterator-&gt;hint.nodeNum = hint;
+
+	bcopy(keyPtr, &amp;searchIterator-&gt;key, <span class="enscript-keyword">sizeof</span>(CatalogKey));
+	
+	result = BTSearchRecord( fcb, searchIterator, &amp;btRecord, &amp;tempSize, searchIterator );
+
+	<span class="enscript-keyword">if</span> (result == noErr)
+	{
+		*newHint = searchIterator-&gt;hint.nodeNum;
+
+		BlockMoveData(&amp;searchIterator-&gt;key, keyPtr, <span class="enscript-keyword">sizeof</span>(CatalogKey));
+	}
+
+	<span class="enscript-keyword">if</span> (result == btNotFound) {
+		result = cmNotFound;
+	}	
+
+	<span class="enscript-keyword">if</span> (result) {
+		FREE(searchIterator, M_TEMP);
+		<span class="enscript-keyword">return</span> result;
+	}
+	
+	<span class="enscript-comment">// if we got a thread record, then go look up real record
+</span>	<span class="enscript-keyword">switch</span> ( dataPtr-&gt;recordType )
+	{
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSFileThreadRecord</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSFolderThreadRecord</span>:
+			threadParentID = dataPtr-&gt;hfsThread.parentID;
+			nodeName = (CatalogName *) &amp;dataPtr-&gt;hfsThread.nodeName;
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSPlusFileThreadRecord</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSPlusFolderThreadRecord</span>:
+			threadParentID = dataPtr-&gt;hfsPlusThread.parentID;
+			nodeName = (CatalogName *) &amp;dataPtr-&gt;hfsPlusThread.nodeName;	
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:
+			threadParentID = 0;
+			<span class="enscript-keyword">break</span>;
+	}
+	
+	<span class="enscript-keyword">if</span> ( threadParentID )		<span class="enscript-comment">// found a thread
+</span>		result = LocateCatalogRecord(volume, threadParentID, nodeName, kNoHint, keyPtr, dataPtr, newHint);
+	
+	FREE (searchIterator, M_TEMP);
+	<span class="enscript-keyword">return</span> result;
+}
+
+
+
+<span class="enscript-comment">//*******************************************************************************
+</span><span class="enscript-comment">//	Routine:	LocateCatalogRecord
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Function: 	Locates the catalog record associated with folderID and name
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//*******************************************************************************
+</span>
+OSErr
+<span class="enscript-function-name">LocateCatalogRecord</span>(<span class="enscript-type">const</span> ExtendedVCB *volume, HFSCatalogNodeID folderID, <span class="enscript-type">const</span> CatalogName *name,
+					__unused u_int32_t hint, CatalogKey *keyPtr, CatalogRecord *dataPtr, u_int32_t *newHint)
+{
+	OSErr result;
+	uint16_t tempSize;
+	FSBufferDescriptor btRecord;
+	<span class="enscript-type">struct</span> BTreeIterator *searchIterator = NULL;
+	FCB *fcb;
+	BTreeControlBlock *btcb;
+
+	MALLOC (searchIterator, <span class="enscript-type">struct</span> BTreeIterator*, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> BTreeIterator), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (searchIterator == NULL) {
+		<span class="enscript-keyword">return</span> memFullErr;  <span class="enscript-comment">// translates to ENOMEM
+</span>	}
+
+	bzero(searchIterator, <span class="enscript-keyword">sizeof</span>(*searchIterator));
+
+
+	fcb = GetFileControlBlock(volume-&gt;catalogRefNum);
+	btcb = (BTreeControlBlock *)fcb-&gt;fcbBTCBPtr;
+	
+	btRecord.bufferAddress = dataPtr;
+	btRecord.itemCount = 1;
+	btRecord.itemSize = <span class="enscript-keyword">sizeof</span>(CatalogRecord);
+
+	BuildCatalogKey(folderID, name, (volume-&gt;vcbSigWord == kHFSPlusSigWord), (CatalogKey *)&amp;searchIterator-&gt;key);
+
+	result = BTSearchRecord(fcb, searchIterator, &amp;btRecord, &amp;tempSize, searchIterator);
+	<span class="enscript-keyword">if</span> (result == noErr) {
+		*newHint = searchIterator-&gt;hint.nodeNum;
+		BlockMoveData(&amp;searchIterator-&gt;key, keyPtr, CalcKeySize(btcb, &amp;searchIterator-&gt;key));
+	}
+
+	FREE (searchIterator, M_TEMP);
+	<span class="enscript-keyword">return</span> (result == btNotFound ? cmNotFound : result);
+}
+
+
+
+<span class="enscript-comment">/*
+ *	Routine:	BuildCatalogKey
+ *
+ *	Function: 	Constructs a catalog key record (ckr) given the parent
+ *				folder ID and CName.  Works for both classic and extended
+ *				HFS volumes.
+ *
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">BuildCatalogKey</span>(HFSCatalogNodeID parentID, <span class="enscript-type">const</span> CatalogName *cName, Boolean isHFSPlus, CatalogKey *key)
+{
+	<span class="enscript-keyword">if</span> ( isHFSPlus )
+	{
+		key-&gt;hfsPlus.keyLength			= kHFSPlusCatalogKeyMinimumLength;	<span class="enscript-comment">// initial key length (4 + 2)
+</span>		key-&gt;hfsPlus.parentID			= parentID;		<span class="enscript-comment">// set parent ID
+</span>		key-&gt;hfsPlus.nodeName.length	= 0;			<span class="enscript-comment">// null CName length
+</span>		<span class="enscript-keyword">if</span> ( cName != NULL )
+		{
+			CopyCatalogName(cName, (CatalogName *) &amp;key-&gt;hfsPlus.nodeName, isHFSPlus);
+			key-&gt;hfsPlus.keyLength += <span class="enscript-keyword">sizeof</span>(UniChar) * cName-&gt;ustr.length;	<span class="enscript-comment">// add CName size to key length
+</span>		}
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+	<span class="enscript-keyword">else</span>
+	{
+		key-&gt;hfs.keyLength		= kHFSCatalogKeyMinimumLength;	<span class="enscript-comment">// initial key length (1 + 4 + 1)
+</span>		key-&gt;hfs.reserved		= 0;				<span class="enscript-comment">// clear unused byte
+</span>		key-&gt;hfs.parentID		= parentID;			<span class="enscript-comment">// set parent ID
+</span>		key-&gt;hfs.nodeName[0]	= 0;				<span class="enscript-comment">// null CName length
+</span>		<span class="enscript-keyword">if</span> ( cName != NULL )
+		{
+			UpdateCatalogName(cName-&gt;pstr, key-&gt;hfs.nodeName);
+			key-&gt;hfs.keyLength += key-&gt;hfs.nodeName[0];		<span class="enscript-comment">// add CName size to key length
+</span>		}
+	}
+#<span class="enscript-reference">endif</span>
+
+}
+
+OSErr
+<span class="enscript-function-name">BuildCatalogKeyUTF8</span>(ExtendedVCB *volume, HFSCatalogNodeID parentID, <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *name, u_int32_t nameLength,
+		    CatalogKey *key, u_int32_t *textEncoding)
+{
+	OSErr err = 0;
+
+    <span class="enscript-keyword">if</span> ( name == NULL)
+        nameLength = 0;
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (nameLength == kUndefinedStrLen)
+        nameLength = strlen((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)name);
+
+	<span class="enscript-keyword">if</span> ( volume-&gt;vcbSigWord == kHFSPlusSigWord ) {
+		size_t unicodeBytes = 0;
+
+		key-&gt;hfsPlus.keyLength = kHFSPlusCatalogKeyMinimumLength;	<span class="enscript-comment">// initial key length (4 + 2)
+</span>		key-&gt;hfsPlus.parentID = parentID;			<span class="enscript-comment">// set parent ID
+</span>		key-&gt;hfsPlus.nodeName.length = 0;			<span class="enscript-comment">// null CName length
+</span>		<span class="enscript-keyword">if</span> ( nameLength &gt; 0 ) {
+			err = utf8_decodestr(name, nameLength, key-&gt;hfsPlus.nodeName.unicode,
+				&amp;unicodeBytes, <span class="enscript-keyword">sizeof</span>(key-&gt;hfsPlus.nodeName.unicode), <span class="enscript-string">':'</span>, UTF_DECOMPOSED);
+			key-&gt;hfsPlus.nodeName.length = unicodeBytes / <span class="enscript-keyword">sizeof</span>(UniChar);
+			key-&gt;hfsPlus.keyLength += unicodeBytes;
+		}
+
+		<span class="enscript-keyword">if</span> (textEncoding &amp;&amp; (*textEncoding != kTextEncodingMacUnicode))
+			*textEncoding = hfs_pickencoding(key-&gt;hfsPlus.nodeName.unicode,
+				key-&gt;hfsPlus.nodeName.length);
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+	<span class="enscript-keyword">else</span> {
+		key-&gt;hfs.keyLength		= kHFSCatalogKeyMinimumLength;	<span class="enscript-comment">// initial key length (1 + 4 + 1)
+</span>		key-&gt;hfs.reserved		= 0;				<span class="enscript-comment">// clear unused byte
+</span>		key-&gt;hfs.parentID		= parentID;			<span class="enscript-comment">// set parent ID
+</span>		key-&gt;hfs.nodeName[0]	= 0;				<span class="enscript-comment">// null CName length
+</span>		<span class="enscript-keyword">if</span> ( nameLength &gt; 0 ) {
+			err = utf8_to_hfs(volume, nameLength, name, &amp;key-&gt;hfs.nodeName[0]);
+			<span class="enscript-comment">/*
+			 * Retry with MacRoman in case that's how it was exported.
+			 * When textEncoding != NULL we know that this is a create
+			 * or rename call and can skip the retry (ugly but it works).
+			 */</span>
+			<span class="enscript-keyword">if</span> (err &amp;&amp; (textEncoding == NULL))
+				err = utf8_to_mac_roman(nameLength, name, &amp;key-&gt;hfs.nodeName[0]);
+			key-&gt;hfs.keyLength += key-&gt;hfs.nodeName[0];		<span class="enscript-comment">// add CName size to key length
+</span>		}
+		<span class="enscript-keyword">if</span> (textEncoding)
+			*textEncoding = 0;
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (err) {
+		<span class="enscript-keyword">if</span> (err == ENAMETOOLONG)
+			err = bdNamErr;	<span class="enscript-comment">/* name is too long */</span>
+		<span class="enscript-keyword">else</span>
+			err = paramErr;	<span class="enscript-comment">/* name has invalid characters */</span>
+	}
+
+	<span class="enscript-keyword">return</span> err;
+}
+
+
+<span class="enscript-comment">//*******************************************************************************
+</span><span class="enscript-comment">//	Routine:	FlushCatalog
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Function: 	Flushes the catalog for a specified volume.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//*******************************************************************************
+</span>
+OSErr
+<span class="enscript-function-name">FlushCatalog</span>(ExtendedVCB *volume)
+{
+	FCB *	fcb;
+	OSErr	result;
+	<span class="enscript-type">struct</span> hfsmount *hfsmp = VCBTOHFS (volume);
+	
+	fcb = GetFileControlBlock(volume-&gt;catalogRefNum);
+	result = BTFlushPath(fcb);
+
+	<span class="enscript-keyword">if</span> (result == noErr)
+	{
+		<span class="enscript-comment">//--- check if catalog's fcb is dirty...
+</span>		
+		<span class="enscript-keyword">if</span> ( (0) <span class="enscript-comment">/*fcb-&gt;fcbFlags &amp; fcbModifiedMask*/</span> )
+		{
+			hfs_lock_mount (hfsmp);
+			MarkVCBDirty(volume);	<span class="enscript-comment">// Mark the VCB dirty
+</span>			volume-&gt;vcbLsMod = GetTimeUTC();	<span class="enscript-comment">// update last modified date
+</span>			hfs_unlock_mount (hfsmp);
+
+		<span class="enscript-comment">//	result = FlushVolumeControlBlock(volume);
+</span>		}
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+
+<span class="enscript-comment">//ÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑ
+</span><span class="enscript-comment">//	Routine:	UpdateCatalogName
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Function: 	Updates a CName.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//ÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑÑ
+</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">UpdateCatalogName</span>(ConstStr31Param srcName, Str31 destName)
+{
+	Size length = srcName[0];
+	
+	<span class="enscript-keyword">if</span> (length &gt; CMMaxCName)
+		length = CMMaxCName;				<span class="enscript-comment">// truncate to max
+</span>
+	destName[0] = length;					<span class="enscript-comment">// set length byte
+</span>	
+	BlockMoveData(&amp;srcName[1], &amp;destName[1], length);
+}
+
+<span class="enscript-comment">//_______________________________________________________________________
+</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">CopyCatalogName</span>(<span class="enscript-type">const</span> CatalogName *srcName, CatalogName *dstName, Boolean isHFSPlus)
+{
+	u_int32_t	length = 0;
+	
+	<span class="enscript-keyword">if</span> ( srcName == NULL )
+	{
+		<span class="enscript-keyword">if</span> ( dstName != NULL )
+			dstName-&gt;ustr.length = 0;	<span class="enscript-comment">// set length byte to zero (works for both unicode and pascal)		
+</span>		<span class="enscript-keyword">return</span>;
+	}
+	
+	<span class="enscript-keyword">if</span> (isHFSPlus) {
+		length = <span class="enscript-keyword">sizeof</span>(UniChar) * (srcName-&gt;ustr.length + 1);
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+	<span class="enscript-keyword">else</span> {
+		length = <span class="enscript-keyword">sizeof</span>(u_int8_t) + srcName-&gt;pstr[0];
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> ( length &gt; 1 )
+		BlockMoveData(srcName, dstName, length);
+	<span class="enscript-keyword">else</span>
+		dstName-&gt;ustr.length = 0;	<span class="enscript-comment">// set length byte to zero (works for both unicode and pascal)		
+</span>}
+
+</pre>
+<hr />
+</body></html>

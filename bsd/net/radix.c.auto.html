@@ -1,0 +1,1196 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>radix.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">radix.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1988, 1989, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)radix.c	8.4 (Berkeley) 11/2/94
+ * $FreeBSD: src/sys/net/radix.c,v 1.20.2.2 2001/03/06 00:56:50 obrien Exp $
+ */</span>
+
+<span class="enscript-comment">/*
+ * Routines to build and maintain radix trees for routing lookups.
+ */</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_RADIX_H_</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">M_DONTWAIT</span> M_NOWAIT
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/radix.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	rn_walktree_from(<span class="enscript-type">struct</span> radix_node_head *h, <span class="enscript-type">void</span> *a,
+				      <span class="enscript-type">void</span> *m, walktree_f_t *f, <span class="enscript-type">void</span> *w);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">rn_walktree</span>(<span class="enscript-type">struct</span> radix_node_head *, walktree_f_t *, <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> radix_node
+	 *rn_insert(<span class="enscript-type">void</span> *, <span class="enscript-type">struct</span> radix_node_head *, <span class="enscript-type">int</span> *,
+			<span class="enscript-type">struct</span> radix_node [2]),
+	 *rn_newpair(<span class="enscript-type">void</span> *, <span class="enscript-type">int</span>, <span class="enscript-type">struct</span> radix_node[2]),
+	 *rn_search(<span class="enscript-type">void</span> *, <span class="enscript-type">struct</span> radix_node *),
+	 *rn_search_m(<span class="enscript-type">void</span> *, <span class="enscript-type">struct</span> radix_node *, <span class="enscript-type">void</span> *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	max_keylen;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> radix_mask *rn_mkfreelist;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> radix_node_head *mask_rnhead;
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> *addmask_key;
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> normal_chars[] = {0, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe, -1};
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> *rn_zeros, *rn_ones;
+
+
+<span class="enscript-type">extern</span> lck_grp_t	*domain_proto_mtx_grp;
+<span class="enscript-type">extern</span> lck_attr_t	*domain_proto_mtx_attr;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">rn_masktop</span> (mask_rnhead-&gt;rnh_treetop)
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">Bcmp</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">Bcmp</span>(a, b, l) \
+	(l == 0 ? 0 : bcmp((caddr_t)(a), (caddr_t)(b), (uint32_t)l))
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	rn_lexobetter(<span class="enscript-type">void</span> *m_arg, <span class="enscript-type">void</span> *n_arg);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> radix_mask *
+		rn_new_radix_mask(<span class="enscript-type">struct</span> radix_node *tt,
+				       <span class="enscript-type">struct</span> radix_mask *next);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">rn_satisfies_leaf</span>(<span class="enscript-type">char</span> *trial, <span class="enscript-type">struct</span> radix_node *leaf, <span class="enscript-type">int</span> skip,
+    rn_matchf_t *f, <span class="enscript-type">void</span> *w);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">RN_MATCHF</span>(rn, f, arg)	(f == NULL || (*f)((rn), arg))
+
+<span class="enscript-comment">/*
+ * The data structure for the keys is a radix tree with one way
+ * branching removed.  The index rn_bit at an internal node n represents a bit
+ * position to be tested.  The tree is arranged so that all descendants
+ * of a node n have keys whose bits all agree up to position rn_bit - 1.
+ * (We say the index of n is rn_bit.)
+ *
+ * There is at least one descendant which has a one bit at position rn_bit,
+ * and at least one with a zero there.
+ *
+ * A route is determined by a pair of key and mask.  We require that the
+ * bit-wise logical and of the key and mask to be the key.
+ * We define the index of a route to associated with the mask to be
+ * the first bit number in the mask where 0 occurs (with bit number 0
+ * representing the highest order bit).
+ *
+ * We say a mask is normal if every bit is 0, past the index of the mask.
+ * If a node n has a descendant (k, m) with index(m) == index(n) == rn_bit,
+ * and m is a normal mask, then the route applies to every descendant of n.
+ * If the index(m) &lt; rn_bit, this implies the trailing last few bits of k
+ * before bit b are all 0, (and hence consequently true of every descendant
+ * of n), so the route applies to all descendants of the node as well.
+ *
+ * Similar logic shows that a non-normal mask m such that
+ * index(m) &lt;= index(n) could potentially apply to many children of n.
+ * Thus, for each non-host route, we attach its mask to a list at an internal
+ * node as high in the tree as we can go.
+ *
+ * The present version of the code makes use of normal routes in short-
+ * circuiting an explict mask and compare operation when testing whether
+ * a key satisfies a normal route, and also in remembering the unique leaf
+ * that governs a subtree.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> radix_node *
+<span class="enscript-function-name">rn_search</span>(<span class="enscript-type">void</span> *v_arg, <span class="enscript-type">struct</span> radix_node *head)
+{
+	<span class="enscript-type">struct</span> radix_node *x;
+	caddr_t v;
+
+	<span class="enscript-keyword">for</span> (x = head, v = v_arg; x-&gt;rn_bit &gt;= 0;) {
+		<span class="enscript-keyword">if</span> (x-&gt;rn_bmask &amp; v[x-&gt;rn_offset])
+			x = x-&gt;rn_right;
+		<span class="enscript-keyword">else</span>
+			x = x-&gt;rn_left;
+	}
+	<span class="enscript-keyword">return</span> (x);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> radix_node *
+<span class="enscript-function-name">rn_search_m</span>(<span class="enscript-type">void</span> *v_arg, <span class="enscript-type">struct</span> radix_node *head, <span class="enscript-type">void</span> *m_arg)
+{
+	<span class="enscript-type">struct</span> radix_node *x;
+	caddr_t v = v_arg, m = m_arg;
+
+	<span class="enscript-keyword">for</span> (x = head; x-&gt;rn_bit &gt;= 0;) {
+		<span class="enscript-keyword">if</span> ((x-&gt;rn_bmask &amp; m[x-&gt;rn_offset]) &amp;&amp;
+		    (x-&gt;rn_bmask &amp; v[x-&gt;rn_offset]))
+			x = x-&gt;rn_right;
+		<span class="enscript-keyword">else</span>
+			x = x-&gt;rn_left;
+	}
+	<span class="enscript-keyword">return</span> x;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">rn_refines</span>(<span class="enscript-type">void</span> *m_arg, <span class="enscript-type">void</span> *n_arg)
+{
+	caddr_t m = m_arg, n = n_arg;
+	caddr_t lim, lim2 = lim = n + *(u_char *)n;
+	<span class="enscript-type">int</span> longer = (*(u_char *)n++) - (<span class="enscript-type">int</span>)(*(u_char *)m++);
+	<span class="enscript-type">int</span> masks_are_equal = 1;
+
+	<span class="enscript-keyword">if</span> (longer &gt; 0)
+		lim -= longer;
+	<span class="enscript-keyword">while</span> (n &lt; lim) {
+		<span class="enscript-keyword">if</span> (*n &amp; ~(*m))
+			<span class="enscript-keyword">return</span> 0;
+		<span class="enscript-keyword">if</span> (*n++ != *m++)
+			masks_are_equal = 0;
+	}
+	<span class="enscript-keyword">while</span> (n &lt; lim2)
+		<span class="enscript-keyword">if</span> (*n++)
+			<span class="enscript-keyword">return</span> 0;
+	<span class="enscript-keyword">if</span> (masks_are_equal &amp;&amp; (longer &lt; 0))
+		<span class="enscript-keyword">for</span> (lim2 = m - longer; m &lt; lim2; )
+			<span class="enscript-keyword">if</span> (*m++)
+				<span class="enscript-keyword">return</span> 1;
+	<span class="enscript-keyword">return</span> (!masks_are_equal);
+}
+
+<span class="enscript-type">struct</span> radix_node *
+<span class="enscript-function-name">rn_lookup</span>(<span class="enscript-type">void</span> *v_arg, <span class="enscript-type">void</span> *m_arg, <span class="enscript-type">struct</span> radix_node_head *head)
+{
+	<span class="enscript-keyword">return</span> (rn_lookup_args(v_arg, m_arg, head, NULL, NULL));
+}
+
+<span class="enscript-type">struct</span> radix_node *
+<span class="enscript-function-name">rn_lookup_args</span>(<span class="enscript-type">void</span> *v_arg, <span class="enscript-type">void</span> *m_arg, <span class="enscript-type">struct</span> radix_node_head *head,
+    rn_matchf_t *f, <span class="enscript-type">void</span> *w)
+{
+	<span class="enscript-type">struct</span> radix_node *x;
+	caddr_t netmask = NULL;
+
+	<span class="enscript-keyword">if</span> (m_arg) {
+		x = rn_addmask(m_arg, 1, head-&gt;rnh_treetop-&gt;rn_offset);
+		<span class="enscript-keyword">if</span> (x == 0)
+			<span class="enscript-keyword">return</span> (NULL);
+		netmask = x-&gt;rn_key;
+	}
+	x = rn_match_args(v_arg, head, f, w);
+	<span class="enscript-keyword">if</span> (x &amp;&amp; netmask) {
+		<span class="enscript-keyword">while</span> (x &amp;&amp; x-&gt;rn_mask != netmask)
+			x = x-&gt;rn_dupedkey;
+	}
+	<span class="enscript-keyword">return</span> x;
+}
+
+<span class="enscript-comment">/*
+ * Returns true if address 'trial' has no bits differing from the
+ * leaf's key when compared under the leaf's mask.  In other words,
+ * returns true when 'trial' matches leaf.  If a leaf-matching
+ * routine is passed in, it is also used to find a match on the
+ * conditions defined by the caller of rn_match.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">rn_satisfies_leaf</span>(<span class="enscript-type">char</span> *trial, <span class="enscript-type">struct</span> radix_node *leaf, <span class="enscript-type">int</span> skip,
+    rn_matchf_t *f, <span class="enscript-type">void</span> *w)
+{
+	<span class="enscript-type">char</span> *cp = trial, *cp2 = leaf-&gt;rn_key, *cp3 = leaf-&gt;rn_mask;
+	<span class="enscript-type">char</span> *cplim;
+	<span class="enscript-type">int</span> length = min(*(u_char *)cp, *(u_char *)cp2);
+
+	<span class="enscript-keyword">if</span> (cp3 == 0)
+		cp3 = rn_ones;
+	<span class="enscript-keyword">else</span>
+		length = min(length, *(u_char *)cp3);
+	cplim = cp + length; cp3 += skip; cp2 += skip;
+	<span class="enscript-keyword">for</span> (cp += skip; cp &lt; cplim; cp++, cp2++, cp3++)
+		<span class="enscript-keyword">if</span> ((*cp ^ *cp2) &amp; *cp3)
+			<span class="enscript-keyword">return</span> 0;
+
+	<span class="enscript-keyword">return</span> (RN_MATCHF(leaf, f, w));
+}
+
+<span class="enscript-type">struct</span> radix_node *
+<span class="enscript-function-name">rn_match</span>(<span class="enscript-type">void</span> *v_arg, <span class="enscript-type">struct</span> radix_node_head *head)
+{
+	<span class="enscript-keyword">return</span> (rn_match_args(v_arg, head, NULL, NULL));
+}
+
+<span class="enscript-type">struct</span> radix_node *
+<span class="enscript-function-name">rn_match_args</span>(<span class="enscript-type">void</span> *v_arg, <span class="enscript-type">struct</span> radix_node_head *head,
+    rn_matchf_t *f, <span class="enscript-type">void</span> *w)
+{
+	caddr_t v = v_arg;
+	<span class="enscript-type">struct</span> radix_node *t = head-&gt;rnh_treetop, *x;
+	caddr_t cp = v, cp2;
+	caddr_t cplim;
+	<span class="enscript-type">struct</span> radix_node *saved_t, *top = t;
+	<span class="enscript-type">int</span> off = t-&gt;rn_offset, vlen = *(u_char *)cp, matched_off;
+	<span class="enscript-type">int</span> test, b, rn_bit;
+
+	<span class="enscript-comment">/*
+	 * Open code rn_search(v, top) to avoid overhead of extra
+	 * subroutine call.
+	 */</span>
+	<span class="enscript-keyword">for</span> (; t-&gt;rn_bit &gt;= 0; ) {
+		<span class="enscript-keyword">if</span> (t-&gt;rn_bmask &amp; cp[t-&gt;rn_offset])
+			t = t-&gt;rn_right;
+		<span class="enscript-keyword">else</span>
+			t = t-&gt;rn_left;
+	}
+	<span class="enscript-comment">/*
+	 * See if we match exactly as a host destination
+	 * or at least learn how many bits match, for normal mask finesse.
+	 *
+	 * It doesn't hurt us to limit how many bytes to check
+	 * to the length of the mask, since if it matches we had a genuine
+	 * match and the leaf we have is the most specific one anyway;
+	 * if it didn't match with a shorter length it would fail
+	 * with a long one.  This wins big for class B&amp;C netmasks which
+	 * are probably the most common case...
+	 */</span>
+	<span class="enscript-keyword">if</span> (t-&gt;rn_mask)
+		vlen = *(u_char *)t-&gt;rn_mask;
+	cp += off; cp2 = t-&gt;rn_key + off; cplim = v + vlen;
+	<span class="enscript-keyword">for</span> (; cp &lt; cplim; cp++, cp2++)
+		<span class="enscript-keyword">if</span> (*cp != *cp2)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">on1</span>;
+	<span class="enscript-comment">/*
+	 * This extra grot is in case we are explicitly asked
+	 * to look up the default.  Ugh!
+	 *
+	 * Never return the root node itself, it seems to cause a
+	 * lot of confusion.
+	 */</span>
+	<span class="enscript-keyword">if</span> (t-&gt;rn_flags &amp; RNF_ROOT)
+		t = t-&gt;rn_dupedkey;
+	<span class="enscript-keyword">if</span> (t == NULL || RN_MATCHF(t, f, w)) {
+		<span class="enscript-keyword">return</span> (t);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * Although we found an exact match on the key,
+		 * f() is looking for some other criteria as well.
+		 * Continue looking as if the exact match failed.
+		 */</span>
+		<span class="enscript-keyword">if</span> (t-&gt;rn_parent-&gt;rn_flags &amp; RNF_ROOT) {
+			<span class="enscript-comment">/* Hit the top; have to give up */</span>
+			<span class="enscript-keyword">return</span> (NULL);
+		}
+		b = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">keeplooking</span>;
+	}
+<span class="enscript-reference">on1</span>:
+	test = (*cp ^ *cp2) &amp; 0xff; <span class="enscript-comment">/* find first bit that differs */</span>
+	<span class="enscript-keyword">for</span> (b = 7; (test &gt;&gt;= 1) &gt; 0;)
+		b--;
+<span class="enscript-reference">keeplooking</span>:
+	matched_off = cp - v;
+	b += matched_off &lt;&lt; 3;
+	rn_bit = -1 - b;
+	<span class="enscript-comment">/*
+	 * If there is a host route in a duped-key chain, it will be first.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((saved_t = t)-&gt;rn_mask == 0)
+		t = t-&gt;rn_dupedkey;
+	<span class="enscript-keyword">for</span> (; t; t = t-&gt;rn_dupedkey) {
+		<span class="enscript-comment">/*
+		 * Even if we don't match exactly as a host,
+		 * we may match if the leaf we wound up at is
+		 * a route to a net.
+		 */</span>
+		<span class="enscript-keyword">if</span> (t-&gt;rn_flags &amp; RNF_NORMAL) {
+			<span class="enscript-keyword">if</span> ((rn_bit &lt;= t-&gt;rn_bit) &amp;&amp; RN_MATCHF(t, f, w))
+				<span class="enscript-keyword">return</span> (t);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (rn_satisfies_leaf(v, t, matched_off, f, w)) {
+			<span class="enscript-keyword">return</span> (t);
+		}
+	}
+	t = saved_t;
+	<span class="enscript-comment">/* start searching up the tree */</span>
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-type">struct</span> radix_mask *m;
+		t = t-&gt;rn_parent;
+		m = t-&gt;rn_mklist;
+		<span class="enscript-comment">/*
+		 * If non-contiguous masks ever become important
+		 * we can restore the masking and open coding of
+		 * the search and satisfaction test and put the
+		 * calculation of &quot;off&quot; back before the &quot;do&quot;.
+		 */</span>
+		<span class="enscript-keyword">while</span> (m) {
+			<span class="enscript-keyword">if</span> (m-&gt;rm_flags &amp; RNF_NORMAL) {
+				<span class="enscript-keyword">if</span> ((rn_bit &lt;= m-&gt;rm_bit) &amp;&amp;
+				    RN_MATCHF(m-&gt;rm_leaf, f, w))
+					<span class="enscript-keyword">return</span> (m-&gt;rm_leaf);
+			} <span class="enscript-keyword">else</span> {
+				off = min(t-&gt;rn_offset, matched_off);
+				x = rn_search_m(v, t, m-&gt;rm_mask);
+				<span class="enscript-keyword">while</span> (x &amp;&amp; x-&gt;rn_mask != m-&gt;rm_mask)
+					x = x-&gt;rn_dupedkey;
+				<span class="enscript-keyword">if</span> (x &amp;&amp; rn_satisfies_leaf(v, x, off, f, w))
+					<span class="enscript-keyword">return</span> (x);
+			}
+			m = m-&gt;rm_mklist;
+		}
+	} <span class="enscript-keyword">while</span> (t != top);
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">RN_DEBUG</span>
+<span class="enscript-type">int</span>	rn_nodenum;
+<span class="enscript-type">struct</span>	radix_node *rn_clist;
+<span class="enscript-type">int</span>	rn_saveinfo;
+<span class="enscript-type">int</span>	rn_debug =  1;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> radix_node *
+<span class="enscript-function-name">rn_newpair</span>(<span class="enscript-type">void</span> *v, <span class="enscript-type">int</span> b, <span class="enscript-type">struct</span> radix_node nodes[2])
+{
+	<span class="enscript-type">struct</span> radix_node *tt = nodes, *t = tt + 1;
+	t-&gt;rn_bit = b;
+	t-&gt;rn_bmask = 0x80 &gt;&gt; (b &amp; 7);
+	t-&gt;rn_left = tt;
+	t-&gt;rn_offset = b &gt;&gt; 3;
+	tt-&gt;rn_bit = -1;
+	tt-&gt;rn_key = (caddr_t)v;
+	tt-&gt;rn_parent = t;
+	tt-&gt;rn_flags = t-&gt;rn_flags = RNF_ACTIVE;
+	tt-&gt;rn_mklist = t-&gt;rn_mklist = NULL;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">RN_DEBUG</span>
+	tt-&gt;rn_info = rn_nodenum++; t-&gt;rn_info = rn_nodenum++;
+	tt-&gt;rn_twin = t;
+	tt-&gt;rn_ybro = rn_clist;
+	rn_clist = tt;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span> t;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> radix_node *
+<span class="enscript-function-name">rn_insert</span>(<span class="enscript-type">void</span> *v_arg, <span class="enscript-type">struct</span> radix_node_head *head, <span class="enscript-type">int</span> *dupentry,
+	  <span class="enscript-type">struct</span> radix_node nodes[2])
+{
+	caddr_t v = v_arg;
+	<span class="enscript-type">struct</span> radix_node *top = head-&gt;rnh_treetop;
+	<span class="enscript-type">int</span> head_off = top-&gt;rn_offset, vlen = (<span class="enscript-type">int</span>)*((u_char *)v);
+	<span class="enscript-type">struct</span> radix_node *t = rn_search(v_arg, top);
+	caddr_t cp = v + head_off;
+	<span class="enscript-type">int</span> b;
+	<span class="enscript-type">struct</span> radix_node *tt;
+    	<span class="enscript-comment">/*
+	 * Find first bit at which v and t-&gt;rn_key differ
+	 */</span>
+    {
+	caddr_t cp2 = t-&gt;rn_key + head_off;
+	<span class="enscript-type">int</span> cmp_res;
+	caddr_t cplim = v + vlen;
+
+	<span class="enscript-keyword">while</span> (cp &lt; cplim)
+		<span class="enscript-keyword">if</span> (*cp2++ != *cp++)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">on1</span>;
+	*dupentry = 1;
+	<span class="enscript-keyword">return</span> t;
+<span class="enscript-reference">on1</span>:
+	*dupentry = 0;
+	cmp_res = (cp[-1] ^ cp2[-1]) &amp; 0xff;
+	<span class="enscript-keyword">for</span> (b = (cp - v) &lt;&lt; 3; cmp_res; b--)
+		cmp_res &gt;&gt;= 1;
+    }
+    {
+	<span class="enscript-type">struct</span> radix_node *p, *x = top;
+	cp = v;
+	<span class="enscript-keyword">do</span> {
+		p = x;
+		<span class="enscript-keyword">if</span> (cp[x-&gt;rn_offset] &amp; x-&gt;rn_bmask)
+			x = x-&gt;rn_right;
+		<span class="enscript-keyword">else</span>
+			x = x-&gt;rn_left;
+	} <span class="enscript-keyword">while</span> (b &gt; (<span class="enscript-type">unsigned</span>) x-&gt;rn_bit);
+				<span class="enscript-comment">/* x-&gt;rn_bit &lt; b &amp;&amp; x-&gt;rn_bit &gt;= 0 */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">RN_DEBUG</span>
+	<span class="enscript-keyword">if</span> (rn_debug)
+		log(LOG_DEBUG, <span class="enscript-string">&quot;rn_insert: Going In:\n&quot;</span>), traverse(p);
+#<span class="enscript-reference">endif</span>
+	t = rn_newpair(v_arg, b, nodes); 
+	tt = t-&gt;rn_left;
+	<span class="enscript-keyword">if</span> ((cp[p-&gt;rn_offset] &amp; p-&gt;rn_bmask) == 0)
+		p-&gt;rn_left = t;
+	<span class="enscript-keyword">else</span>
+		p-&gt;rn_right = t;
+	x-&gt;rn_parent = t;
+	t-&gt;rn_parent = p; <span class="enscript-comment">/* frees x, p as temp vars below */</span>
+	<span class="enscript-keyword">if</span> ((cp[t-&gt;rn_offset] &amp; t-&gt;rn_bmask) == 0) {
+		t-&gt;rn_right = x;
+	} <span class="enscript-keyword">else</span> {
+		t-&gt;rn_right = tt;
+		t-&gt;rn_left = x;
+	}
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">RN_DEBUG</span>
+	<span class="enscript-keyword">if</span> (rn_debug)
+		log(LOG_DEBUG, <span class="enscript-string">&quot;rn_insert: Coming Out:\n&quot;</span>), traverse(p);
+#<span class="enscript-reference">endif</span>
+    }
+	<span class="enscript-keyword">return</span> (tt);
+}
+
+<span class="enscript-type">struct</span> radix_node *
+<span class="enscript-function-name">rn_addmask</span>(<span class="enscript-type">void</span> *n_arg, <span class="enscript-type">int</span> search, <span class="enscript-type">int</span> skip)
+{
+	caddr_t netmask = (caddr_t)n_arg;
+	<span class="enscript-type">struct</span> radix_node *x;
+	caddr_t cp, cplim;
+	<span class="enscript-type">int</span> b = 0, mlen, j;
+	<span class="enscript-type">int</span> maskduplicated, m0, isnormal;
+	<span class="enscript-type">struct</span> radix_node *saved_x;
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> last_zeroed = 0;
+
+	<span class="enscript-keyword">if</span> ((mlen = *(u_char *)netmask) &gt; max_keylen)
+		mlen = max_keylen;
+	<span class="enscript-keyword">if</span> (skip == 0)
+		skip = 1;
+	<span class="enscript-keyword">if</span> (mlen &lt;= skip)
+		<span class="enscript-keyword">return</span> (mask_rnhead-&gt;rnh_nodes);
+	<span class="enscript-keyword">if</span> (skip &gt; 1)
+		Bcopy(rn_ones + 1, addmask_key + 1, skip - 1);
+	<span class="enscript-keyword">if</span> ((m0 = mlen) &gt; skip)
+		Bcopy(netmask + skip, addmask_key + skip, mlen - skip);
+	<span class="enscript-comment">/*
+	 * Trim trailing zeroes.
+	 */</span>
+	<span class="enscript-keyword">for</span> (cp = addmask_key + mlen; (cp &gt; addmask_key) &amp;&amp; cp[-1] == 0;)
+		cp--;
+	mlen = cp - addmask_key;
+	<span class="enscript-keyword">if</span> (mlen &lt;= skip) {
+		<span class="enscript-keyword">if</span> (m0 &gt;= last_zeroed)
+			last_zeroed = mlen;
+		<span class="enscript-keyword">return</span> (mask_rnhead-&gt;rnh_nodes);
+	}
+	<span class="enscript-keyword">if</span> (m0 &lt; last_zeroed)
+		Bzero(addmask_key + m0, last_zeroed - m0);
+	*addmask_key = last_zeroed = mlen;
+	x = rn_search(addmask_key, rn_masktop);
+	<span class="enscript-keyword">if</span> (Bcmp(addmask_key, x-&gt;rn_key, mlen) != 0)
+		x = NULL;
+	<span class="enscript-keyword">if</span> (x || search)
+		<span class="enscript-keyword">return</span> (x);
+	R_Malloc(x, <span class="enscript-type">struct</span> radix_node *, max_keylen + 2 * <span class="enscript-keyword">sizeof</span> (*x));
+	<span class="enscript-keyword">if</span> ((saved_x = x) == 0)
+		<span class="enscript-keyword">return</span> (NULL);
+	Bzero(x, max_keylen + 2 * <span class="enscript-keyword">sizeof</span> (*x));
+	netmask = cp = (caddr_t)(x + 2);
+	Bcopy(addmask_key, cp, mlen);
+	x = rn_insert(cp, mask_rnhead, &amp;maskduplicated, x);
+	<span class="enscript-keyword">if</span> (maskduplicated) {
+		log(LOG_ERR, <span class="enscript-string">&quot;rn_addmask: mask impossibly already in tree&quot;</span>);
+		R_Free(saved_x);
+		<span class="enscript-keyword">return</span> (x);
+	}
+	mask_rnhead-&gt;rnh_cnt++;
+	<span class="enscript-comment">/*
+	 * Calculate index of mask, and check for normalcy.
+	 */</span>
+	cplim = netmask + mlen; isnormal = 1;
+	<span class="enscript-keyword">for</span> (cp = netmask + skip; (cp &lt; cplim) &amp;&amp; *(u_char *)cp == 0xff;)
+		cp++;
+	<span class="enscript-keyword">if</span> (cp != cplim) {
+		<span class="enscript-keyword">for</span> (j = 0x80; (j &amp; *cp) != 0; j &gt;&gt;= 1)
+			b++;
+		<span class="enscript-keyword">if</span> (*cp != normal_chars[b] || cp != (cplim - 1))
+			isnormal = 0;
+	}
+	b += (cp - netmask) &lt;&lt; 3;
+	x-&gt;rn_bit = -1 - b;
+	<span class="enscript-keyword">if</span> (isnormal)
+		x-&gt;rn_flags |= RNF_NORMAL;
+	<span class="enscript-keyword">return</span> (x);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	<span class="enscript-comment">/* XXX: arbitrary ordering for non-contiguous masks */</span>
+<span class="enscript-function-name">rn_lexobetter</span>(<span class="enscript-type">void</span> *m_arg, <span class="enscript-type">void</span> *n_arg)
+{
+	u_char *mp = m_arg, *np = n_arg, *lim;
+
+	<span class="enscript-keyword">if</span> (*mp &gt; *np)
+		<span class="enscript-keyword">return</span> 1;  <span class="enscript-comment">/* not really, but need to check longer one first */</span>
+	<span class="enscript-keyword">if</span> (*mp == *np)
+		<span class="enscript-keyword">for</span> (lim = mp + *mp; mp &lt; lim;)
+			<span class="enscript-keyword">if</span> (*mp++ &gt; *np++)
+				<span class="enscript-keyword">return</span> 1;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> radix_mask *
+<span class="enscript-function-name">rn_new_radix_mask</span>(<span class="enscript-type">struct</span> radix_node *tt, <span class="enscript-type">struct</span> radix_mask *next)
+{
+	<span class="enscript-type">struct</span> radix_mask *m;
+
+	MKGet(m);
+	<span class="enscript-keyword">if</span> (m == 0) {
+		log(LOG_ERR, <span class="enscript-string">&quot;Mask for route not entered\n&quot;</span>);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	Bzero(m, <span class="enscript-keyword">sizeof</span> *m);
+	m-&gt;rm_bit = tt-&gt;rn_bit;
+	m-&gt;rm_flags = tt-&gt;rn_flags;
+	<span class="enscript-keyword">if</span> (tt-&gt;rn_flags &amp; RNF_NORMAL)
+		m-&gt;rm_leaf = tt;
+	<span class="enscript-keyword">else</span>
+		m-&gt;rm_mask = tt-&gt;rn_mask;
+	m-&gt;rm_mklist = next;
+	tt-&gt;rn_mklist = m;
+	<span class="enscript-keyword">return</span> m;
+}
+
+<span class="enscript-type">struct</span> radix_node *
+<span class="enscript-function-name">rn_addroute</span>(<span class="enscript-type">void</span> *v_arg, <span class="enscript-type">void</span> *n_arg, <span class="enscript-type">struct</span> radix_node_head *head,
+	    <span class="enscript-type">struct</span> radix_node treenodes[2])
+{
+	caddr_t v = (caddr_t)v_arg, netmask = (caddr_t)n_arg;
+	<span class="enscript-type">struct</span> radix_node *t, *x = NULL, *tt;
+	<span class="enscript-type">struct</span> radix_node *saved_tt, *top = head-&gt;rnh_treetop;
+	<span class="enscript-type">short</span> b = 0, b_leaf = 0;
+	<span class="enscript-type">int</span> keyduplicated;
+	caddr_t mmask;
+	<span class="enscript-type">struct</span> radix_mask *m, **mp;
+
+	<span class="enscript-comment">/*
+	 * In dealing with non-contiguous masks, there may be
+	 * many different routes which have the same mask.
+	 * We will find it useful to have a unique pointer to
+	 * the mask to speed avoiding duplicate references at
+	 * nodes and possibly save time in calculating indices.
+	 */</span>
+	<span class="enscript-keyword">if</span> (netmask)  {
+		<span class="enscript-keyword">if</span> ((x = rn_addmask(netmask, 0, top-&gt;rn_offset)) == 0)
+			<span class="enscript-keyword">return</span> (NULL);
+		b_leaf = x-&gt;rn_bit;
+		b = -1 - x-&gt;rn_bit;
+		netmask = x-&gt;rn_key;
+	}
+	<span class="enscript-comment">/*
+	 * Deal with duplicated keys: attach node to previous instance
+	 */</span>
+	saved_tt = tt = rn_insert(v, head, &amp;keyduplicated, treenodes);
+	<span class="enscript-keyword">if</span> (keyduplicated) {
+		<span class="enscript-keyword">for</span> (t = tt; tt; t = tt, tt = tt-&gt;rn_dupedkey) {
+			<span class="enscript-keyword">if</span> (tt-&gt;rn_mask == netmask)
+				<span class="enscript-keyword">return</span> (NULL);
+			<span class="enscript-keyword">if</span> (netmask == 0 ||
+			    (tt-&gt;rn_mask &amp;&amp;
+			     ((b_leaf &lt; tt-&gt;rn_bit) <span class="enscript-comment">/* index(netmask) &gt; node */</span>
+			      || rn_refines(netmask, tt-&gt;rn_mask)
+			      || rn_lexobetter(netmask, tt-&gt;rn_mask))))
+				<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/*
+		 * If the mask is not duplicated, we wouldn't
+		 * find it among possible duplicate key entries
+		 * anyway, so the above test doesn't hurt.
+		 *
+		 * We sort the masks for a duplicated key the same way as
+		 * in a masklist -- most specific to least specific.
+		 * This may require the unfortunate nuisance of relocating
+		 * the head of the list.
+		 */</span>
+		<span class="enscript-keyword">if</span> (tt == saved_tt) {
+			<span class="enscript-type">struct</span>	radix_node *xx = x;
+			<span class="enscript-comment">/* link in at head of list */</span>
+			(tt = treenodes)-&gt;rn_dupedkey = t;
+			tt-&gt;rn_flags = t-&gt;rn_flags;
+			tt-&gt;rn_parent = x = t-&gt;rn_parent;
+			t-&gt;rn_parent = tt;	 		<span class="enscript-comment">/* parent */</span>
+			<span class="enscript-keyword">if</span> (x-&gt;rn_left == t)
+				x-&gt;rn_left = tt;
+			<span class="enscript-keyword">else</span>
+				x-&gt;rn_right = tt;
+			saved_tt = tt; x = xx;
+		} <span class="enscript-keyword">else</span> {
+			(tt = treenodes)-&gt;rn_dupedkey = t-&gt;rn_dupedkey;
+			t-&gt;rn_dupedkey = tt;
+			tt-&gt;rn_parent = t;			<span class="enscript-comment">/* parent */</span>
+			<span class="enscript-keyword">if</span> (tt-&gt;rn_dupedkey)			<span class="enscript-comment">/* parent */</span>
+				tt-&gt;rn_dupedkey-&gt;rn_parent = tt; <span class="enscript-comment">/* parent */</span>
+		}
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">RN_DEBUG</span>
+		t=tt+1; tt-&gt;rn_info = rn_nodenum++; t-&gt;rn_info = rn_nodenum++;
+		tt-&gt;rn_twin = t; tt-&gt;rn_ybro = rn_clist; rn_clist = tt;
+#<span class="enscript-reference">endif</span>
+		tt-&gt;rn_key = (caddr_t) v;
+		tt-&gt;rn_bit = -1;
+		tt-&gt;rn_flags = RNF_ACTIVE;
+	}
+	head-&gt;rnh_cnt++;
+	<span class="enscript-comment">/*
+	 * Put mask in tree.
+	 */</span>
+	<span class="enscript-keyword">if</span> (netmask) {
+		tt-&gt;rn_mask = netmask;
+		tt-&gt;rn_bit = x-&gt;rn_bit;
+		tt-&gt;rn_flags |= x-&gt;rn_flags &amp; RNF_NORMAL;
+	}
+	t = saved_tt-&gt;rn_parent;
+	<span class="enscript-keyword">if</span> (keyduplicated)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">on2</span>;
+	b_leaf = -1 - t-&gt;rn_bit;
+	<span class="enscript-keyword">if</span> (t-&gt;rn_right == saved_tt)
+		x = t-&gt;rn_left;
+	<span class="enscript-keyword">else</span>
+		x = t-&gt;rn_right;
+	<span class="enscript-comment">/* Promote general routes from below */</span>
+	<span class="enscript-keyword">if</span> (x-&gt;rn_bit &lt; 0) {
+	    <span class="enscript-keyword">for</span> (mp = &amp;t-&gt;rn_mklist; x; x = x-&gt;rn_dupedkey)
+		<span class="enscript-keyword">if</span> (x-&gt;rn_mask &amp;&amp; (x-&gt;rn_bit &gt;= b_leaf) &amp;&amp; x-&gt;rn_mklist == 0) {
+			*mp = m = rn_new_radix_mask(x, NULL);
+			<span class="enscript-keyword">if</span> (m)
+				mp = &amp;m-&gt;rm_mklist;
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (x-&gt;rn_mklist) {
+		<span class="enscript-comment">/*
+		 * Skip over masks whose index is &gt; that of new node
+		 */</span>
+		<span class="enscript-keyword">for</span> (mp = &amp;x-&gt;rn_mklist; (m = *mp); mp = &amp;m-&gt;rm_mklist)
+			<span class="enscript-keyword">if</span> (m-&gt;rm_bit &gt;= b_leaf)
+				<span class="enscript-keyword">break</span>;
+		t-&gt;rn_mklist = m; *mp = NULL;
+	}
+<span class="enscript-reference">on2</span>:
+	<span class="enscript-comment">/* Add new route to highest possible ancestor's list */</span>
+	<span class="enscript-keyword">if</span> ((netmask == 0) || (b &gt; t-&gt;rn_bit ))
+		<span class="enscript-keyword">return</span> tt; <span class="enscript-comment">/* can't lift at all */</span>
+	b_leaf = tt-&gt;rn_bit;
+	<span class="enscript-keyword">do</span> {
+		x = t;
+		t = t-&gt;rn_parent;
+	} <span class="enscript-keyword">while</span> (b &lt;= t-&gt;rn_bit &amp;&amp; x != top);
+	<span class="enscript-comment">/*
+	 * Search through routes associated with node to
+	 * insert new route according to index.
+	 * Need same criteria as when sorting dupedkeys to avoid
+	 * double loop on deletion.
+	 */</span>
+	<span class="enscript-keyword">for</span> (mp = &amp;x-&gt;rn_mklist; (m = *mp); mp = &amp;m-&gt;rm_mklist) {
+		<span class="enscript-keyword">if</span> (m-&gt;rm_bit &lt; b_leaf)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (m-&gt;rm_bit &gt; b_leaf)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (m-&gt;rm_flags &amp; RNF_NORMAL) {
+			mmask = m-&gt;rm_leaf-&gt;rn_mask;
+			<span class="enscript-keyword">if</span> (tt-&gt;rn_flags &amp; RNF_NORMAL) {
+			    log(LOG_ERR,
+			        <span class="enscript-string">&quot;Non-unique normal route, mask not entered&quot;</span>);
+				<span class="enscript-keyword">return</span> tt;
+			}
+		} <span class="enscript-keyword">else</span>
+			mmask = m-&gt;rm_mask;
+		<span class="enscript-keyword">if</span> (mmask == netmask) {
+			m-&gt;rm_refs++;
+			tt-&gt;rn_mklist = m;
+			<span class="enscript-keyword">return</span> tt;
+		}
+		<span class="enscript-keyword">if</span> (rn_refines(netmask, mmask)
+		    || rn_lexobetter(netmask, mmask))
+			<span class="enscript-keyword">break</span>;
+	}
+	*mp = rn_new_radix_mask(tt, *mp);
+	<span class="enscript-keyword">return</span> tt;
+}
+
+<span class="enscript-type">struct</span> radix_node *
+<span class="enscript-function-name">rn_delete</span>(<span class="enscript-type">void</span> *v_arg, <span class="enscript-type">void</span> *netmask_arg, <span class="enscript-type">struct</span> radix_node_head *head)
+{
+	<span class="enscript-type">struct</span> radix_node *t, *p, *x, *tt;
+	<span class="enscript-type">struct</span> radix_mask *m, *saved_m, **mp;
+	<span class="enscript-type">struct</span> radix_node *dupedkey, *saved_tt, *top;
+	caddr_t v, netmask;
+	<span class="enscript-type">int</span> b, head_off, vlen;
+
+	v = v_arg;
+	netmask = netmask_arg;
+	x = head-&gt;rnh_treetop;
+	tt = rn_search(v, x);
+	head_off = x-&gt;rn_offset;
+	vlen =  *(u_char *)v;
+	saved_tt = tt;
+	top = x;
+	<span class="enscript-keyword">if</span> (tt == 0 ||
+	    Bcmp(v + head_off, tt-&gt;rn_key + head_off, vlen - head_off))
+		<span class="enscript-keyword">return</span> (NULL);
+	<span class="enscript-comment">/*
+	 * Delete our route from mask lists.
+	 */</span>
+	<span class="enscript-keyword">if</span> (netmask) {
+		<span class="enscript-keyword">if</span> ((x = rn_addmask(netmask, 1, head_off)) == 0)
+			<span class="enscript-keyword">return</span> (NULL);
+		netmask = x-&gt;rn_key;
+		<span class="enscript-keyword">while</span> (tt-&gt;rn_mask != netmask)
+			<span class="enscript-keyword">if</span> ((tt = tt-&gt;rn_dupedkey) == 0)
+				<span class="enscript-keyword">return</span> (NULL);
+	}
+	<span class="enscript-keyword">if</span> (tt-&gt;rn_mask == 0 || (saved_m = m = tt-&gt;rn_mklist) == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">on1</span>;
+	<span class="enscript-keyword">if</span> (tt-&gt;rn_flags &amp; RNF_NORMAL) {
+		<span class="enscript-keyword">if</span> (m-&gt;rm_leaf != tt || m-&gt;rm_refs &gt; 0) {
+			log(LOG_ERR, <span class="enscript-string">&quot;rn_delete: inconsistent annotation\n&quot;</span>);
+			<span class="enscript-keyword">return</span> NULL;  <span class="enscript-comment">/* dangling ref could cause disaster */</span>
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (m-&gt;rm_mask != tt-&gt;rn_mask) {
+			log(LOG_ERR, <span class="enscript-string">&quot;rn_delete: inconsistent annotation\n&quot;</span>);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">on1</span>;
+		}
+		<span class="enscript-keyword">if</span> (--m-&gt;rm_refs &gt;= 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">on1</span>;
+	}
+	b = -1 - tt-&gt;rn_bit;
+	t = saved_tt-&gt;rn_parent;
+	<span class="enscript-keyword">if</span> (b &gt; t-&gt;rn_bit)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">on1</span>; <span class="enscript-comment">/* Wasn't lifted at all */</span>
+	<span class="enscript-keyword">do</span> {
+		x = t;
+		t = t-&gt;rn_parent;
+	} <span class="enscript-keyword">while</span> (b &lt;= t-&gt;rn_bit &amp;&amp; x != top);
+	<span class="enscript-keyword">for</span> (mp = &amp;x-&gt;rn_mklist; (m = *mp); mp = &amp;m-&gt;rm_mklist)
+		<span class="enscript-keyword">if</span> (m == saved_m) {
+			*mp = m-&gt;rm_mklist;
+			MKFree(m);
+			<span class="enscript-keyword">break</span>;
+		}
+	<span class="enscript-keyword">if</span> (m == 0) {
+		log(LOG_ERR, <span class="enscript-string">&quot;rn_delete: couldn't find our annotation\n&quot;</span>);
+		<span class="enscript-keyword">if</span> (tt-&gt;rn_flags &amp; RNF_NORMAL)
+			<span class="enscript-keyword">return</span> (NULL); <span class="enscript-comment">/* Dangling ref to us */</span>
+	}
+<span class="enscript-reference">on1</span>:
+	<span class="enscript-comment">/*
+	 * Eliminate us from tree
+	 */</span>
+	<span class="enscript-keyword">if</span> (tt-&gt;rn_flags &amp; RNF_ROOT)
+		<span class="enscript-keyword">return</span> (NULL);
+	head-&gt;rnh_cnt--;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">RN_DEBUG</span>
+	<span class="enscript-comment">/* Get us out of the creation list */</span>
+	<span class="enscript-keyword">for</span> (t = rn_clist; t &amp;&amp; t-&gt;rn_ybro != tt; t = t-&gt;rn_ybro) {}
+	<span class="enscript-keyword">if</span> (t) t-&gt;rn_ybro = tt-&gt;rn_ybro;
+#<span class="enscript-reference">endif</span>
+	t = tt-&gt;rn_parent;
+	dupedkey = saved_tt-&gt;rn_dupedkey;
+	<span class="enscript-keyword">if</span> (dupedkey) {
+		<span class="enscript-comment">/*
+		 * at this point, tt is the deletion target and saved_tt
+		 * is the head of the dupekey chain
+		 */</span>
+		<span class="enscript-keyword">if</span> (tt == saved_tt) {
+			<span class="enscript-comment">/* remove from head of chain */</span>
+			x = dupedkey; x-&gt;rn_parent = t;
+			<span class="enscript-keyword">if</span> (t-&gt;rn_left == tt)
+				t-&gt;rn_left = x;
+			<span class="enscript-keyword">else</span>
+				t-&gt;rn_right = x;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* find node in front of tt on the chain */</span>
+			<span class="enscript-keyword">for</span> (x = p = saved_tt; p &amp;&amp; p-&gt;rn_dupedkey != tt;)
+				p = p-&gt;rn_dupedkey;
+			<span class="enscript-keyword">if</span> (p) {
+				p-&gt;rn_dupedkey = tt-&gt;rn_dupedkey;
+				<span class="enscript-keyword">if</span> (tt-&gt;rn_dupedkey)		<span class="enscript-comment">/* parent */</span>
+					tt-&gt;rn_dupedkey-&gt;rn_parent = p;
+								<span class="enscript-comment">/* parent */</span>
+			} <span class="enscript-keyword">else</span> log(LOG_ERR, <span class="enscript-string">&quot;rn_delete: couldn't find us\n&quot;</span>);
+		}
+		t = tt + 1;
+		<span class="enscript-keyword">if</span>  (t-&gt;rn_flags &amp; RNF_ACTIVE) {
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">RN_DEBUG</span>
+			*++x = *t;
+			p = t-&gt;rn_parent;
+#<span class="enscript-reference">else</span>
+			b = t-&gt;rn_info;
+			*++x = *t;
+			t-&gt;rn_info = b;
+			p = t-&gt;rn_parent;
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-keyword">if</span> (p-&gt;rn_left == t)
+				p-&gt;rn_left = x;
+			<span class="enscript-keyword">else</span>
+				p-&gt;rn_right = x;
+			x-&gt;rn_left-&gt;rn_parent = x;
+			x-&gt;rn_right-&gt;rn_parent = x;
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (t-&gt;rn_left == tt)
+		x = t-&gt;rn_right;
+	<span class="enscript-keyword">else</span>
+		x = t-&gt;rn_left;
+	p = t-&gt;rn_parent;
+	<span class="enscript-keyword">if</span> (p-&gt;rn_right == t)
+		p-&gt;rn_right = x;
+	<span class="enscript-keyword">else</span>
+		p-&gt;rn_left = x;
+	x-&gt;rn_parent = p;
+	<span class="enscript-comment">/*
+	 * Demote routes attached to us.
+	 */</span>
+	<span class="enscript-keyword">if</span> (t-&gt;rn_mklist) {
+		<span class="enscript-keyword">if</span> (x-&gt;rn_bit &gt;= 0) {
+			<span class="enscript-keyword">for</span> (mp = &amp;x-&gt;rn_mklist; (m = *mp);)
+				mp = &amp;m-&gt;rm_mklist;
+			*mp = t-&gt;rn_mklist;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* If there are any key,mask pairs in a sibling
+			   duped-key chain, some subset will appear sorted
+			   in the same order attached to our mklist */</span>
+			<span class="enscript-keyword">for</span> (m = t-&gt;rn_mklist; m &amp;&amp; x; x = x-&gt;rn_dupedkey)
+				<span class="enscript-keyword">if</span> (m == x-&gt;rn_mklist) {
+					<span class="enscript-type">struct</span> radix_mask *mm = m-&gt;rm_mklist;
+					x-&gt;rn_mklist = NULL;
+					<span class="enscript-keyword">if</span> (--(m-&gt;rm_refs) &lt; 0)
+						MKFree(m);
+					m = mm;
+				}
+			<span class="enscript-keyword">if</span> (m)
+				log(LOG_ERR, <span class="enscript-string">&quot;rn_delete: Orphaned Mask &quot;</span>
+				    <span class="enscript-string">&quot;0x%llx at 0x%llx\n&quot;</span>,
+				    (uint64_t)VM_KERNEL_ADDRPERM(m),
+				    (uint64_t)VM_KERNEL_ADDRPERM(x));
+		}
+	}
+	<span class="enscript-comment">/*
+	 * We may be holding an active internal node in the tree.
+	 */</span>
+	x = tt + 1;
+	<span class="enscript-keyword">if</span> (t != x) {
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">RN_DEBUG</span>
+		*t = *x;
+#<span class="enscript-reference">else</span>
+		b = t-&gt;rn_info;
+		*t = *x;
+		t-&gt;rn_info = b;
+#<span class="enscript-reference">endif</span>
+		t-&gt;rn_left-&gt;rn_parent = t;
+		t-&gt;rn_right-&gt;rn_parent = t;
+		p = x-&gt;rn_parent;
+		<span class="enscript-keyword">if</span> (p-&gt;rn_left == x)
+			p-&gt;rn_left = t;
+		<span class="enscript-keyword">else</span>
+			p-&gt;rn_right = t;
+	}
+<span class="enscript-reference">out</span>:
+	tt-&gt;rn_flags &amp;= ~RNF_ACTIVE;
+	tt[1].rn_flags &amp;= ~RNF_ACTIVE;
+	<span class="enscript-keyword">return</span> (tt);
+}
+
+<span class="enscript-comment">/*
+ * This is the same as rn_walktree() except for the parameters and the
+ * exit.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">rn_walktree_from</span>(<span class="enscript-type">struct</span> radix_node_head *h, <span class="enscript-type">void</span> *a, <span class="enscript-type">void</span> *m, walktree_f_t *f,
+    <span class="enscript-type">void</span> *w)
+{
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> radix_node *base, *next;
+	u_char *xa = (u_char *)a;
+	u_char *xm = (u_char *)m;
+	<span class="enscript-type">struct</span> radix_node *rn, *last;
+	<span class="enscript-type">int</span> stopping;
+	<span class="enscript-type">int</span> lastb;
+	<span class="enscript-type">int</span> rnh_cnt;
+
+	<span class="enscript-comment">/*
+	 * This gets complicated because we may delete the node while
+	 * applying the function f to it; we cannot simply use the next
+	 * leaf as the successor node in advance, because that leaf may
+	 * be removed as well during deletion when it is a clone of the
+	 * current node.  When that happens, we would end up referring
+	 * to an already-freed radix node as the successor node.  To get
+	 * around this issue, if we detect that the radix tree has changed
+	 * in dimension (smaller than before), we simply restart the walk
+	 * from the top of tree.
+	 */</span>
+<span class="enscript-reference">restart</span>:
+	last = NULL;
+	stopping = 0;
+	rnh_cnt = h-&gt;rnh_cnt;
+
+	<span class="enscript-comment">/*
+	 * rn_search_m is sort-of-open-coded here.
+	 */</span>
+	<span class="enscript-keyword">for</span> (rn = h-&gt;rnh_treetop; rn-&gt;rn_bit &gt;= 0; ) {
+		last = rn;
+		<span class="enscript-keyword">if</span> (!(rn-&gt;rn_bmask &amp; xm[rn-&gt;rn_offset]))
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">if</span> (rn-&gt;rn_bmask &amp; xa[rn-&gt;rn_offset])
+			rn = rn-&gt;rn_right;
+		<span class="enscript-keyword">else</span>
+			rn = rn-&gt;rn_left;
+	}
+
+	<span class="enscript-comment">/*
+	 * Two cases: either we stepped off the end of our mask,
+	 * in which case last == rn, or we reached a leaf, in which
+	 * case we want to start from the last node we looked at.
+	 * Either way, last is the node we want to start from.
+	 */</span>
+	rn = last;
+	lastb = rn-&gt;rn_bit;
+
+	<span class="enscript-comment">/* First time through node, go left */</span>
+	<span class="enscript-keyword">while</span> (rn-&gt;rn_bit &gt;= 0)
+		rn = rn-&gt;rn_left;
+
+	<span class="enscript-keyword">while</span> (!stopping) {
+		base = rn;
+		<span class="enscript-comment">/* If at right child go back up, otherwise, go right */</span>
+		<span class="enscript-keyword">while</span> (rn-&gt;rn_parent-&gt;rn_right == rn
+		       &amp;&amp; !(rn-&gt;rn_flags &amp; RNF_ROOT)) {
+			rn = rn-&gt;rn_parent;
+
+			<span class="enscript-comment">/* if went up beyond last, stop */</span>
+			<span class="enscript-keyword">if</span> (rn-&gt;rn_bit &lt;= lastb) {
+				stopping = 1;
+				<span class="enscript-comment">/*
+				 * XXX we should jump to the 'Process leaves'
+				 * part, because the values of 'rn' and 'next'
+				 * we compute will not be used. Not a big deal
+				 * because this loop will terminate, but it is
+				 * inefficient and hard to understand!
+				 */</span>
+			}
+		}
+
+		<span class="enscript-comment">/*
+		 * The following code (bug fix) inherited from FreeBSD is
+		 * currently disabled, because our implementation uses the
+		 * RTF_PRCLONING scheme that has been abandoned in current
+		 * FreeBSD release.  The scheme involves setting such a flag
+		 * for the default route entry, and therefore all off-link
+		 * destinations would become clones of that entry.  Enabling
+		 * the following code would be problematic at this point,
+		 * because the removal of default route would cause only
+		 * the left-half of the tree to be traversed, leaving the
+		 * right-half untouched.  If there are clones of the entry
+		 * that reside in that right-half, they would not be deleted
+		 * and would linger around until they expire or explicitly
+		 * deleted, which is a very bad thing.
+		 *
+		 * This code should be uncommented only after we get rid
+		 * of the RTF_PRCLONING scheme.
+		 */</span>
+#<span class="enscript-reference">if</span> 0
+		<span class="enscript-comment">/*
+		 * At the top of the tree, no need to traverse the right
+		 * half, prevent the traversal of the entire tree in the
+		 * case of default route.
+		 */</span>
+		<span class="enscript-keyword">if</span> (rn-&gt;rn_parent-&gt;rn_flags &amp; RNF_ROOT)
+			stopping = 1;
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-comment">/* Find the next *leaf* to start from */</span>
+		<span class="enscript-keyword">for</span> (rn = rn-&gt;rn_parent-&gt;rn_right; rn-&gt;rn_bit &gt;= 0;)
+			rn = rn-&gt;rn_left;
+		next = rn;
+		<span class="enscript-comment">/* Process leaves */</span>
+		<span class="enscript-keyword">while</span> ((rn = base) != 0) {
+			base = rn-&gt;rn_dupedkey;
+			<span class="enscript-keyword">if</span> (!(rn-&gt;rn_flags &amp; RNF_ROOT)
+			    &amp;&amp; (error = (*f)(rn, w)))
+				<span class="enscript-keyword">return</span> (error);
+		}
+		<span class="enscript-comment">/* If one or more nodes got deleted, restart from top */</span>
+		<span class="enscript-keyword">if</span> (h-&gt;rnh_cnt &lt; rnh_cnt)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">restart</span>;
+		rn = next;
+		<span class="enscript-keyword">if</span> (rn-&gt;rn_flags &amp; RNF_ROOT)
+			stopping = 1;
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">rn_walktree</span>(<span class="enscript-type">struct</span> radix_node_head *h, walktree_f_t *f, <span class="enscript-type">void</span> *w)
+{
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> radix_node *base, *next;
+	<span class="enscript-type">struct</span> radix_node *rn;
+	<span class="enscript-type">int</span> rnh_cnt;
+
+	<span class="enscript-comment">/*
+	 * This gets complicated because we may delete the node while
+	 * applying the function f to it; we cannot simply use the next
+	 * leaf as the successor node in advance, because that leaf may
+	 * be removed as well during deletion when it is a clone of the
+	 * current node.  When that happens, we would end up referring
+	 * to an already-freed radix node as the successor node.  To get
+	 * around this issue, if we detect that the radix tree has changed
+	 * in dimension (smaller than before), we simply restart the walk
+	 * from the top of tree.
+	 */</span>
+<span class="enscript-reference">restart</span>:
+	rn = h-&gt;rnh_treetop;
+	rnh_cnt = h-&gt;rnh_cnt;
+
+	<span class="enscript-comment">/* First time through node, go left */</span>
+	<span class="enscript-keyword">while</span> (rn-&gt;rn_bit &gt;= 0)
+		rn = rn-&gt;rn_left;
+	<span class="enscript-keyword">for</span> (;;) {
+		base = rn;
+		<span class="enscript-comment">/* If at right child go back up, otherwise, go right */</span>
+		<span class="enscript-keyword">while</span> (rn-&gt;rn_parent-&gt;rn_right == rn &amp;&amp;
+		    (rn-&gt;rn_flags &amp; RNF_ROOT) == 0)
+			rn = rn-&gt;rn_parent;
+		<span class="enscript-comment">/* Find the next *leaf* to start from */</span>
+		<span class="enscript-keyword">for</span> (rn = rn-&gt;rn_parent-&gt;rn_right; rn-&gt;rn_bit &gt;= 0;)
+			rn = rn-&gt;rn_left;
+		next = rn;
+		<span class="enscript-comment">/* Process leaves */</span>
+		<span class="enscript-keyword">while</span> ((rn = base) != NULL) {
+			base = rn-&gt;rn_dupedkey;
+			<span class="enscript-keyword">if</span> (!(rn-&gt;rn_flags &amp; RNF_ROOT)
+			    &amp;&amp; (error = (*f)(rn, w)))
+				<span class="enscript-keyword">return</span> (error);
+		}
+		<span class="enscript-comment">/* If one or more nodes got deleted, restart from top */</span>
+		<span class="enscript-keyword">if</span> (h-&gt;rnh_cnt &lt; rnh_cnt)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">restart</span>;
+		rn = next;
+		<span class="enscript-keyword">if</span> (rn-&gt;rn_flags &amp; RNF_ROOT)
+			<span class="enscript-keyword">return</span> (0);
+	}
+	<span class="enscript-comment">/* NOTREACHED */</span>
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">rn_inithead</span>(<span class="enscript-type">void</span> **head, <span class="enscript-type">int</span> off)
+{
+	<span class="enscript-type">struct</span> radix_node_head *rnh;
+	<span class="enscript-type">struct</span> radix_node *t, *tt, *ttt;
+	<span class="enscript-keyword">if</span> (*head)
+		<span class="enscript-keyword">return</span> (1);
+	R_Malloc(rnh, <span class="enscript-type">struct</span> radix_node_head *, <span class="enscript-keyword">sizeof</span> (*rnh));
+	<span class="enscript-keyword">if</span> (rnh == 0)
+		<span class="enscript-keyword">return</span> (0);
+	Bzero(rnh, <span class="enscript-keyword">sizeof</span> (*rnh));
+	*head = rnh;
+	t = rn_newpair(rn_zeros, off, rnh-&gt;rnh_nodes);
+	ttt = rnh-&gt;rnh_nodes + 2;
+	t-&gt;rn_right = ttt;
+	t-&gt;rn_parent = t;
+	tt = t-&gt;rn_left;
+	tt-&gt;rn_flags = t-&gt;rn_flags = RNF_ROOT | RNF_ACTIVE;
+	tt-&gt;rn_bit = -1 - off;
+	*ttt = *tt;
+	ttt-&gt;rn_key = rn_ones;
+	rnh-&gt;rnh_addaddr = rn_addroute;
+	rnh-&gt;rnh_deladdr = rn_delete;
+	rnh-&gt;rnh_matchaddr = rn_match;
+	rnh-&gt;rnh_matchaddr_args = rn_match_args;
+	rnh-&gt;rnh_lookup = rn_lookup;
+	rnh-&gt;rnh_lookup_args = rn_lookup_args;
+	rnh-&gt;rnh_walktree = rn_walktree;
+	rnh-&gt;rnh_walktree_from = rn_walktree_from;
+	rnh-&gt;rnh_treetop = t;
+	rnh-&gt;rnh_cnt = 3;
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">rn_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">char</span> *cp, *cplim;
+	<span class="enscript-type">struct</span> domain *dom;
+
+	<span class="enscript-comment">/* lock already held when rn_init is called */</span>
+	TAILQ_FOREACH(dom, &amp;domains, dom_entry) {
+		<span class="enscript-keyword">if</span> (dom-&gt;dom_maxrtkey &gt; max_keylen)
+			max_keylen = dom-&gt;dom_maxrtkey;
+	}
+	<span class="enscript-keyword">if</span> (max_keylen == 0) {
+		log(LOG_ERR,
+		    <span class="enscript-string">&quot;rn_init: radix functions require max_keylen be set\n&quot;</span>);
+		<span class="enscript-keyword">return</span>;
+	}
+	R_Malloc(rn_zeros, <span class="enscript-type">char</span> *, 3 * max_keylen);
+	<span class="enscript-keyword">if</span> (rn_zeros == NULL)
+		panic(<span class="enscript-string">&quot;rn_init&quot;</span>);
+	Bzero(rn_zeros, 3 * max_keylen);
+	rn_ones = cp = rn_zeros + max_keylen;
+	addmask_key = cplim = rn_ones + max_keylen;
+	<span class="enscript-keyword">while</span> (cp &lt; cplim)
+		*cp++ = -1;
+	<span class="enscript-keyword">if</span> (rn_inithead((<span class="enscript-type">void</span> **)&amp;mask_rnhead, 0) == 0)
+		panic(<span class="enscript-string">&quot;rn_init 2&quot;</span>);
+}
+</pre>
+<hr />
+</body></html>

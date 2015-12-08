@@ -1,0 +1,703 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>BTreeMiscOps.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">BTreeMiscOps.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2003, 2005-2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+	File:		BTreeMiscOps.c
+
+	Contains:	Miscellaneous operations for the BTree Module.
+
+	Version:	xxx put the technology version here xxx
+
+	Written by:	Gordon Sheridan and Bill Bruffey
+
+	Copyright:	© 1992-1999 by Apple Computer, Inc., all rights reserved.
+
+	File Ownership:
+
+		DRI:				Don Brady
+
+		Other Contact:		Mark Day
+
+		Technology:			File Systems
+
+	Writers:
+
+		(DSH)	Deric Horn
+		(msd)	Mark Day
+		(djb)	Don Brady
+
+	Change History (most recent first):
+
+	   &lt;MOSXS&gt;	  6/1/99	djb		Sync up with Mac OS 8.6.
+	   &lt;CS2&gt;	  9/4/97	djb		Optimize TrySimpleReplace for the case where record size is not
+									changing.
+	   &lt;CS1&gt;	 4/23/97	djb		first checked in
+
+	  &lt;HFS7&gt;	 3/31/97	djb		Move ClearMemory to Utilities.c.
+	  &lt;HFS6&gt;	 3/17/97	DSH		Casting for DFA
+	  &lt;HFS5&gt;	 2/27/97	msd		Remove temporary fix from last revision. BTree EOF's should be
+									correct now, so check for strict equality.
+	  &lt;HFS4&gt;	 2/26/97	msd		Fix a casting problem in ClearMemory. TEMPORARY FIX: Made
+									VerifyHeader more lenient, allowing the EOF to be greater than
+									the amount actually used by nodes; this should really be fixed
+									in the formatting code (which needs to compute the real BTree
+									sizes before writing the volume header).
+	  &lt;HFS3&gt;	 2/19/97	djb		Added ClearMemory. Changed CalcKeyLength to KeyLength.
+	  &lt;HFS2&gt;	  1/3/97	djb		Added support for large keys.
+	  &lt;HFS1&gt;	12/19/96	djb		first checked in
+
+	History applicable to original Scarecrow Design:
+
+		 &lt;9&gt;	10/25/96	ser		Changing for new VFPI
+		 &lt;8&gt;	10/18/96	ser		Converting over VFPI changes
+		 &lt;7&gt;	 9/17/96	dkh		More BTree statistics. Change IsItAHint to not always check to
+									see if the hint node is allocated.
+		 &lt;6&gt;	 9/16/96	dkh		Revised BTree statistics.
+		 &lt;5&gt;	 6/20/96	dkh		Radar #1358740. Change from using Pools to debug MemAllocators.
+		 &lt;4&gt;	 1/22/96	dkh		Change Pools.i inclusion to PoolsPriv.i
+		 &lt;3&gt;	 1/10/96	msd		Change 64-bit math to use real function names from Math64.i.
+		 &lt;2&gt;	 12/7/95	dkh		D10E2 build. Changed usage of Ref data type to LogicalAddress.
+		 &lt;1&gt;	10/18/95	rst		Moved from Scarecrow project.
+
+		&lt;19&gt;	 4/26/95	prp		In UpdateHeader, clear the dirty flag after the BTree is updated.
+		&lt;18&gt;	 1/12/95	wjk		Adopt Model FileSystem changes in D5.
+		&lt;17&gt;	11/16/94	prp		Add IsItAHint routine and use it whenever hint's node number was
+									used for testing.
+		&lt;16&gt;	 10/5/94	bk		add pools.h include file
+		&lt;15&gt;	 9/30/94	prp		Get in sync with D2 interface changes.
+		&lt;14&gt;	 7/22/94	wjk		Convert to the new set of header files.
+		&lt;13&gt;	 12/2/93	wjk		Move from Makefiles to BuildFiles. Fit into the ModernOS and
+									NRCmds environments.
+		&lt;12&gt;	11/30/93	wjk		Move from Makefiles to BuildFiles. Fit into the ModernOS and
+									NRCmds environments.
+		&lt;11&gt;	11/23/93	wjk		Changes required to compile on the RS6000.
+		&lt;10&gt;	 8/31/93	prp		Use U64SetU instead of S64Set.
+		 &lt;9&gt;	  6/2/93	gs		Update for changes to FSErrors.h and add some comments.
+		 &lt;8&gt;	 5/21/93	gs		Modify UpdateHeader to write out attributes. Remove
+									Get/UpdateNode from TrySimpleReplace.
+		 &lt;7&gt;	 5/10/93	gs		Add TrySimpleReplace routine.
+		 &lt;6&gt;	 3/23/93	gs		Change MoveData to take void * instead of Ptr. Add UpdateHeader
+									and ClearBytes routines.
+		 &lt;5&gt;	  2/8/93	gs		Add FindIteratorPosition.
+		 &lt;4&gt;	12/10/92	gs		Implement CheckKeyDescriptor and the KeyDescriptor interpreter.
+		 &lt;3&gt;	 12/8/92	gs		Add GetKeyDescriptor, VerifyHeader, and Alloc/Dealloc memory
+									routines.
+		 &lt;2&gt;	 12/2/92	gs		Add CompareKeys routine.
+		 &lt;1&gt;	11/15/92	gs		first checked in
+
+*/</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../headers/BTreesPrivate.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../../hfs_btreeio.h&quot;</span>
+
+
+<span class="enscript-comment">////////////////////////////// Routine Definitions //////////////////////////////
+</span>
+<span class="enscript-comment">/*-------------------------------------------------------------------------------
+Routine:	CalcKeyRecordSize	-	Return size of combined key/record structure.
+
+Function:	Rounds keySize and recSize so they will end on word boundaries.
+			Does NOT add size of offset.
+
+Input:		keySize		- length of key (including length field)
+			recSize		- length of record data
+
+Output:		none
+			
+Result:		u_int16_t	- size of combined key/record that will be inserted in btree
+-------------------------------------------------------------------------------*/</span>
+
+u_int16_t		CalcKeyRecordSize		(u_int16_t				 keySize,
+										 u_int16_t				 recSize )
+{
+	<span class="enscript-keyword">if</span> ( M_IsOdd (keySize) )	keySize += 1;	<span class="enscript-comment">// pad byte
+</span>	
+	<span class="enscript-keyword">if</span> (M_IsOdd (recSize) )		recSize += 1;	<span class="enscript-comment">// pad byte
+</span>	
+	<span class="enscript-keyword">return</span>	(keySize + recSize);
+}
+
+
+
+<span class="enscript-comment">/*-------------------------------------------------------------------------------
+Routine:	VerifyHeader	-	Validate fields of the BTree header record.
+
+Function:	Examines the fields of the BTree header record to determine if the
+			fork appears to contain a valid BTree.
+			
+Input:		forkPtr		- pointer to fork control block
+			header		- pointer to BTree header
+			
+			
+Result:		noErr		- success
+			!= noErr	- failure
+-------------------------------------------------------------------------------*/</span>
+
+OSStatus	VerifyHeader	(FCB				*filePtr,
+							 BTHeaderRec			 *header )
+{
+	u_int64_t		forkSize;
+	u_int32_t		totalNodes;
+	
+
+	<span class="enscript-keyword">switch</span> (header-&gt;nodeSize)							<span class="enscript-comment">// node size == 512*2^n
+</span>	{
+		<span class="enscript-keyword">case</span>   <span class="enscript-reference">512</span>:
+		<span class="enscript-keyword">case</span>  <span class="enscript-reference">1024</span>:
+		<span class="enscript-keyword">case</span>  <span class="enscript-reference">2048</span>:
+		<span class="enscript-keyword">case</span>  <span class="enscript-reference">4096</span>:
+		<span class="enscript-keyword">case</span>  <span class="enscript-reference">8192</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">16384</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">32768</span>:		<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:		<span class="enscript-keyword">return</span>	fsBTInvalidHeaderErr;			<span class="enscript-comment">//€€ E_BadNodeType
+</span>	}
+	
+	totalNodes = header-&gt;totalNodes;
+
+	forkSize = (u_int64_t)totalNodes * (u_int64_t)header-&gt;nodeSize;
+	
+	<span class="enscript-keyword">if</span> ( forkSize &gt; (u_int64_t)filePtr-&gt;fcbEOF )
+		<span class="enscript-keyword">return</span> fsBTInvalidHeaderErr;
+	
+	<span class="enscript-keyword">if</span> ( header-&gt;freeNodes &gt;= totalNodes )
+		<span class="enscript-keyword">return</span> fsBTInvalidHeaderErr;
+	
+	<span class="enscript-keyword">if</span> ( header-&gt;rootNode &gt;= totalNodes )
+		<span class="enscript-keyword">return</span> fsBTInvalidHeaderErr;
+	
+	<span class="enscript-keyword">if</span> ( header-&gt;firstLeafNode &gt;= totalNodes )
+		<span class="enscript-keyword">return</span> fsBTInvalidHeaderErr;
+	
+	<span class="enscript-keyword">if</span> ( header-&gt;lastLeafNode &gt;= totalNodes )
+		<span class="enscript-keyword">return</span> fsBTInvalidHeaderErr;
+	
+	<span class="enscript-keyword">if</span> ( header-&gt;treeDepth &gt; kMaxTreeDepth )
+		<span class="enscript-keyword">return</span> fsBTInvalidHeaderErr;
+
+
+	<span class="enscript-comment">/////////////////////////// Check BTree Type ////////////////////////////////
+</span>	
+	<span class="enscript-keyword">switch</span> (header-&gt;btreeType)
+	{
+		<span class="enscript-keyword">case</span>	<span class="enscript-reference">0</span>:					<span class="enscript-comment">// HFS Type - no Key Descriptor
+</span>		<span class="enscript-keyword">case</span>	<span class="enscript-reference">kUserBTreeType</span>:		<span class="enscript-comment">// with Key Descriptors etc.
+</span>		<span class="enscript-keyword">case</span>	<span class="enscript-reference">kReservedBTreeType</span>:	<span class="enscript-comment">// Desktop Mgr BTree ?
+</span>									<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:					<span class="enscript-keyword">return</span> fsBTUnknownVersionErr;		
+	}
+	
+	<span class="enscript-keyword">return</span> noErr;
+}
+
+
+
+__private_extern__
+OSStatus <span class="enscript-function-name">TreeIsDirty</span>(BTreeControlBlockPtr btreePtr)
+{
+    <span class="enscript-keyword">return</span> (btreePtr-&gt;flags &amp; kBTHeaderDirty);
+}
+
+
+
+<span class="enscript-comment">/*-------------------------------------------------------------------------------
+Routine:	UpdateHeader	-	Write BTreeInfoRec fields to Header node.
+
+Function:	Checks the kBTHeaderDirty flag in the BTreeInfoRec and updates the
+			header node if necessary.
+			
+Input:		btreePtr		- pointer to BTreeInfoRec
+			
+			
+Result:		noErr		- success
+			!= noErr	- failure
+-------------------------------------------------------------------------------*/</span>
+
+OSStatus <span class="enscript-function-name">UpdateHeader</span>(BTreeControlBlockPtr btreePtr, Boolean forceWrite)
+{
+	OSStatus				err;
+	BlockDescriptor			node;
+	BTHeaderRec	*header;	
+	u_int32_t options;
+
+	<span class="enscript-keyword">if</span> ((btreePtr-&gt;flags &amp; kBTHeaderDirty) == 0)			<span class="enscript-comment">// btree info already flushed
+</span>	<span class="enscript-keyword">return</span>	noErr;
+	
+	
+	err = GetNode (btreePtr, kHeaderNodeNum, 0, &amp;node );
+	<span class="enscript-keyword">if</span> (err != noErr) {
+		<span class="enscript-keyword">return</span>	err;
+	}
+	
+	<span class="enscript-comment">// XXXdbg
+</span>	ModifyBlockStart(btreePtr-&gt;fileRefNum, &amp;node);
+
+	header = (BTHeaderRec*) ((<span class="enscript-type">char</span> *)node.buffer + <span class="enscript-keyword">sizeof</span>(BTNodeDescriptor));
+	
+	header-&gt;treeDepth		= btreePtr-&gt;treeDepth;
+	header-&gt;rootNode		= btreePtr-&gt;rootNode;
+	header-&gt;leafRecords		= btreePtr-&gt;leafRecords;
+	header-&gt;firstLeafNode	= btreePtr-&gt;firstLeafNode;
+	header-&gt;lastLeafNode	= btreePtr-&gt;lastLeafNode;
+	header-&gt;nodeSize		= btreePtr-&gt;nodeSize;			<span class="enscript-comment">//€€ this shouldn't change
+</span>	header-&gt;maxKeyLength	= btreePtr-&gt;maxKeyLength;		<span class="enscript-comment">//€€ neither should this
+</span>	header-&gt;totalNodes		= btreePtr-&gt;totalNodes;
+	header-&gt;freeNodes		= btreePtr-&gt;freeNodes;
+	header-&gt;btreeType		= btreePtr-&gt;btreeType;
+
+	<span class="enscript-comment">// ignore	header-&gt;clumpSize;							//€€ rename this field?
+</span>
+	<span class="enscript-keyword">if</span> (forceWrite)
+		options = kForceWriteBlock;
+	<span class="enscript-keyword">else</span>
+		options = kLockTransaction;
+
+	err = UpdateNode (btreePtr, &amp;node, 0, options);
+
+	btreePtr-&gt;flags &amp;= (~kBTHeaderDirty);
+
+	<span class="enscript-keyword">return</span>	err;
+}
+
+
+
+<span class="enscript-comment">/*-------------------------------------------------------------------------------
+Routine:	FindIteratorPosition	-	One_line_description.
+
+Function:	Brief_description_of_the_function_and_any_side_effects
+
+Algorithm:	see FSC.BT.BTIterateRecord.PICT
+
+Note:		//€€ document side-effects of bad node hints
+
+Input:		btreePtr		- description
+			iterator		- description
+			
+
+Output:		iterator		- description
+			left			- description
+			middle			- description
+			right			- description
+			nodeNum			- description
+			returnIndex		- description
+			foundRecord		- description
+			
+			
+Result:		noErr		- success
+			!= noErr	- failure
+-------------------------------------------------------------------------------*/</span>
+
+OSStatus	FindIteratorPosition	(BTreeControlBlockPtr	 btreePtr,
+									 BTreeIteratorPtr		 iterator,
+									 BlockDescriptor		*left,
+									 BlockDescriptor		*middle,
+									 BlockDescriptor		*right,
+									 u_int32_t				*returnNodeNum,
+									 u_int16_t				*returnIndex,
+									 Boolean				*foundRecord )
+{
+	OSStatus		err;
+	Boolean			foundIt;
+	u_int32_t		nodeNum;
+	u_int16_t		leftIndex,	index,	rightIndex;
+	Boolean			validHint;
+
+	<span class="enscript-comment">// assume btreePtr valid
+</span>	<span class="enscript-comment">// assume left, middle, right point to BlockDescriptors
+</span>	<span class="enscript-comment">// assume nodeNum points to u_int32_t
+</span>	<span class="enscript-comment">// assume index points to u_int16_t
+</span>	<span class="enscript-comment">// assume foundRecord points to Boolean
+</span>	
+	left-&gt;buffer		= nil;
+	left-&gt;blockHeader   = nil;
+	middle-&gt;buffer		= nil;
+	middle-&gt;blockHeader	= nil;
+	right-&gt;buffer		= nil;
+	right-&gt;blockHeader	= nil;
+	
+	foundIt				= false;
+	
+	<span class="enscript-keyword">if</span> (iterator == nil)						<span class="enscript-comment">// do we have an iterator?
+</span>	{
+		err = fsBTInvalidIteratorErr;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+	}
+
+	err = IsItAHint (btreePtr, iterator, &amp;validHint);
+	M_ExitOnError (err);
+
+	nodeNum = iterator-&gt;hint.nodeNum;
+	<span class="enscript-keyword">if</span> (! validHint)							<span class="enscript-comment">// does the hint appear to be valid?
+</span>	{
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">SearchTheTree</span>;
+	}
+	
+	err = GetNode (btreePtr, nodeNum, kGetNodeHint, middle);
+	<span class="enscript-keyword">if</span>( err == fsBTInvalidNodeErr )	<span class="enscript-comment">// returned if nodeNum is out of range
+</span>		<span class="enscript-keyword">goto</span> <span class="enscript-reference">SearchTheTree</span>;
+		
+	M_ExitOnError (err);
+	
+	<span class="enscript-keyword">if</span> ( ((NodeDescPtr) middle-&gt;buffer)-&gt;kind != kBTLeafNode ||
+		 ((NodeDescPtr) middle-&gt;buffer)-&gt;numRecords &lt;= 0 )
+	{	
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">SearchTheTree</span>;
+	}	
+	
+	foundIt = SearchNode (btreePtr, middle-&gt;buffer, &amp;iterator-&gt;key, &amp;index);
+	<span class="enscript-keyword">if</span> (foundIt == true)
+	{
+		++btreePtr-&gt;numValidHints;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">SuccessfulExit</span>;
+	}
+	iterator-&gt;hint.nodeNum = 0;
+
+	<span class="enscript-keyword">if</span> (index == 0)
+	{
+		<span class="enscript-keyword">if</span> (((NodeDescPtr) middle-&gt;buffer)-&gt;bLink == 0)		<span class="enscript-comment">// before 1st btree record
+</span>		{
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">SuccessfulExit</span>;
+		}
+		
+		nodeNum = ((NodeDescPtr) middle-&gt;buffer)-&gt;bLink;
+		
+		<span class="enscript-comment">// BTree nodes are always grabbed in left to right order.  
+</span>		<span class="enscript-comment">// Therefore release the current node before looking up the 
+</span>		<span class="enscript-comment">// left node.
+</span>		err = ReleaseNode(btreePtr, middle);
+		M_ExitOnError(err);
+
+		<span class="enscript-comment">// Look up the left node 
+</span>		err = GetNode (btreePtr, nodeNum, 0, left);
+		M_ExitOnError (err);
+
+		<span class="enscript-comment">// Look up the current node again
+</span>		err = GetRightSiblingNode (btreePtr, left-&gt;buffer, middle);
+		M_ExitOnError (err);
+
+		<span class="enscript-keyword">if</span> ( ((NodeDescPtr) left-&gt;buffer)-&gt;kind != kBTLeafNode ||
+			 ((NodeDescPtr) left-&gt;buffer)-&gt;numRecords &lt;= 0 )
+		{	
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">SearchTheTree</span>;
+		}
+		
+		foundIt = SearchNode (btreePtr, left-&gt;buffer, &amp;iterator-&gt;key, &amp;leftIndex);
+		<span class="enscript-keyword">if</span> (foundIt == true)
+		{
+			*right			= *middle;
+			*middle			= *left;
+			left-&gt;buffer	= nil;
+			index			= leftIndex;
+			
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">SuccessfulExit</span>;
+		}
+		
+		<span class="enscript-keyword">if</span> (leftIndex == 0)									<span class="enscript-comment">// we're lost!
+</span>		{
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">SearchTheTree</span>;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (leftIndex &gt;= ((NodeDescPtr) left-&gt;buffer)-&gt;numRecords)
+		{
+			nodeNum = ((NodeDescPtr) left-&gt;buffer)-&gt;fLink;
+			
+			PanicIf (index != 0, <span class="enscript-string">&quot;FindIteratorPosition: index != 0&quot;</span>);	<span class="enscript-comment">//€€ just checking...
+</span>			<span class="enscript-keyword">goto</span> <span class="enscript-reference">SuccessfulExit</span>;
+		}
+		<span class="enscript-keyword">else</span>
+		{
+			*right			= *middle;
+			*middle			= *left;
+			left-&gt;buffer	= nil;
+			index			= leftIndex;
+			
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">SuccessfulExit</span>;
+		}
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (index &gt;= ((NodeDescPtr) middle-&gt;buffer)-&gt;numRecords)
+	{
+		<span class="enscript-keyword">if</span> (((NodeDescPtr) middle-&gt;buffer)-&gt;fLink == 0)	<span class="enscript-comment">// beyond last record
+</span>		{
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">SuccessfulExit</span>;
+		}
+		
+		nodeNum = ((NodeDescPtr) middle-&gt;buffer)-&gt;fLink;
+		
+		err = GetRightSiblingNode (btreePtr, middle-&gt;buffer, right);
+		M_ExitOnError (err);
+		
+		<span class="enscript-keyword">if</span> ( ((NodeDescPtr) right-&gt;buffer)-&gt;kind != kBTLeafNode ||
+			 ((NodeDescPtr) right-&gt;buffer)-&gt;numRecords &lt;= 0 )
+		{	
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">SearchTheTree</span>;
+		}
+
+		foundIt = SearchNode (btreePtr, right-&gt;buffer, &amp;iterator-&gt;key, &amp;rightIndex);
+		<span class="enscript-keyword">if</span> (rightIndex &gt;= ((NodeDescPtr) right-&gt;buffer)-&gt;numRecords)		<span class="enscript-comment">// we're lost
+</span>		{
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">SearchTheTree</span>;
+		}
+		<span class="enscript-keyword">else</span>	<span class="enscript-comment">// we found it, or rightIndex==0, or rightIndex&lt;numRecs
+</span>		{
+			*left			= *middle;
+			*middle			= *right;
+			right-&gt;buffer	= nil;
+			index			= rightIndex;
+			
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">SuccessfulExit</span>;
+		}
+	}
+
+	
+	<span class="enscript-comment">//////////////////////////// Search The Tree ////////////////////////////////	
+</span>
+<span class="enscript-reference">SearchTheTree</span>:
+	{
+		TreePathTable	treePathTable;		<span class="enscript-comment">// so we only use stack space if we need to
+</span>
+		err = ReleaseNode (btreePtr, left);			M_ExitOnError (err);
+		err = ReleaseNode (btreePtr, middle);		M_ExitOnError (err);
+		err = ReleaseNode (btreePtr, right);		M_ExitOnError (err);
+	
+		err = SearchTree ( btreePtr, &amp;iterator-&gt;key, treePathTable, &amp;nodeNum, middle, &amp;index);
+		<span class="enscript-keyword">switch</span> (err)				<span class="enscript-comment">//€€ separate find condition from exceptions
+</span>		{
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">noErr</span>:			foundIt = true;				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">fsBTRecordNotFoundErr</span>:						<span class="enscript-keyword">break</span>;
+			<span class="enscript-reference">default</span>:				<span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+		}
+	}
+
+	<span class="enscript-comment">/////////////////////////////// Success! ////////////////////////////////////
+</span>
+<span class="enscript-reference">SuccessfulExit</span>:
+	
+	*returnNodeNum	= nodeNum;
+	*returnIndex 	= index;
+	*foundRecord	= foundIt;
+	
+	<span class="enscript-keyword">return</span>	noErr;
+	
+	
+	<span class="enscript-comment">////////////////////////////// Error Exit ///////////////////////////////////
+</span>
+<span class="enscript-reference">ErrorExit</span>:
+
+	(<span class="enscript-type">void</span>)	ReleaseNode (btreePtr, left);
+	(<span class="enscript-type">void</span>)	ReleaseNode (btreePtr, middle);
+	(<span class="enscript-type">void</span>)	ReleaseNode (btreePtr, right);
+
+	*returnNodeNum	= 0;
+	*returnIndex 	= 0;
+	*foundRecord	= false;
+
+	<span class="enscript-keyword">return</span>	err;
+}
+
+
+
+<span class="enscript-comment">/////////////////////////////// CheckInsertParams ///////////////////////////////
+</span>
+OSStatus	CheckInsertParams		(FCB						*filePtr,
+									 BTreeIterator				*iterator,
+									 FSBufferDescriptor			*record,
+									 u_int16_t					 recordLen )
+{
+	BTreeControlBlockPtr	btreePtr;
+	
+	<span class="enscript-keyword">if</span> (filePtr == nil)									<span class="enscript-keyword">return</span>	paramErr;
+
+	btreePtr = (BTreeControlBlockPtr) filePtr-&gt;fcbBTCBPtr;
+	<span class="enscript-keyword">if</span> (btreePtr == nil)								<span class="enscript-keyword">return</span>	fsBTInvalidFileErr;
+	<span class="enscript-keyword">if</span> (iterator == nil)								<span class="enscript-keyword">return</span>	paramErr;
+	<span class="enscript-keyword">if</span> (record	 == nil)								<span class="enscript-keyword">return</span>	paramErr;
+	
+	<span class="enscript-comment">//	check total key/record size limit
+</span>	<span class="enscript-keyword">if</span> ( CalcKeyRecordSize (CalcKeySize(btreePtr, &amp;iterator-&gt;key), recordLen) &gt; (btreePtr-&gt;nodeSize &gt;&gt; 1))
+		<span class="enscript-keyword">return</span>	fsBTRecordTooLargeErr;
+	
+	<span class="enscript-keyword">return</span>	noErr;
+}
+
+
+
+<span class="enscript-comment">/*-------------------------------------------------------------------------------
+Routine:	TrySimpleReplace	-	Attempts a simple insert, set, or replace.
+
+Function:	If a hint exitst for the iterator, attempt to find the key in the hint
+			node. If the key is found, an insert operation fails. If the is not
+			found, a replace operation fails. If the key was not found, and the
+			insert position is greater than 0 and less than numRecords, the record
+			is inserted, provided there is enough freeSpace.  If the key was found,
+			and there is more freeSpace than the difference between the new record
+			and the old record, the old record is deleted and the new record is
+			inserted.
+
+Assumptions:	iterator key has already been checked by CheckKey
+
+
+Input:		btreePtr		- description
+			iterator		- description
+			record			- description
+			recordLen		- description
+			operation		- description
+			
+
+Output:		recordInserted		- description
+			
+						
+Result:		noErr			- success
+			E_RecordExits		- insert operation failure
+			!= noErr		- GetNode, ReleaseNode, UpdateNode returned an error
+-------------------------------------------------------------------------------*/</span>
+
+OSStatus	TrySimpleReplace		(BTreeControlBlockPtr	 btreePtr,
+									 NodeDescPtr			 nodePtr,
+									 BTreeIterator			*iterator,
+									 FSBufferDescriptor		*record,
+									 u_int16_t				 recordLen,
+									 Boolean				*recordInserted )
+{
+	u_int32_t			oldSpace;
+	u_int32_t			spaceNeeded;
+	u_int16_t			index;
+	u_int16_t			keySize;
+	Boolean				foundIt;
+	Boolean				didItFit;
+	
+	
+	*recordInserted	= false;								<span class="enscript-comment">// we'll assume this won't work...
+</span>	
+	<span class="enscript-keyword">if</span> ( nodePtr-&gt;kind != kBTLeafNode )
+		<span class="enscript-keyword">return</span>	noErr;	<span class="enscript-comment">// we're in the weeds!
+</span>
+	foundIt	= SearchNode (btreePtr, nodePtr, &amp;iterator-&gt;key, &amp;index);	
+
+	<span class="enscript-keyword">if</span> ( foundIt == false )
+		<span class="enscript-keyword">return</span>	noErr;	<span class="enscript-comment">// we might be lost...
+</span>		
+	keySize = CalcKeySize(btreePtr, &amp;iterator-&gt;key);	<span class="enscript-comment">// includes length field
+</span>	
+	spaceNeeded	= CalcKeyRecordSize (keySize, recordLen);
+	
+	oldSpace = GetRecordSize (btreePtr, nodePtr, index);
+	
+	<span class="enscript-keyword">if</span> ( spaceNeeded == oldSpace )
+	{
+		u_int8_t *		dst;
+
+		dst = GetRecordAddress (btreePtr, nodePtr, index);
+
+		<span class="enscript-keyword">if</span> ( M_IsOdd (keySize) )
+			++keySize;			<span class="enscript-comment">// add pad byte
+</span>		
+		dst += keySize;		<span class="enscript-comment">// skip over key to point at record
+</span>
+		BlockMoveData(record-&gt;bufferAddress, dst, recordLen);	<span class="enscript-comment">// blast away...
+</span>
+		*recordInserted = true;
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( (GetNodeFreeSize(btreePtr, nodePtr) + oldSpace) &gt;= spaceNeeded)
+	{
+		DeleteRecord (btreePtr, nodePtr, index);
+	
+		didItFit = InsertKeyRecord (btreePtr, nodePtr, index,
+										&amp;iterator-&gt;key, KeyLength(btreePtr, &amp;iterator-&gt;key),
+										record-&gt;bufferAddress, recordLen);
+		PanicIf (didItFit == false, <span class="enscript-string">&quot;TrySimpleInsert: InsertKeyRecord returned false!&quot;</span>);
+
+		*recordInserted = true;
+	}
+	<span class="enscript-comment">// else not enough space...
+</span>
+	<span class="enscript-keyword">return</span>	noErr;
+}
+
+
+<span class="enscript-comment">/*-------------------------------------------------------------------------------
+Routine:	IsItAHint	-	checks the hint within a BTreeInterator.
+
+Function:	checks the hint within a BTreeInterator.  If it is non-zero, it may 
+			possibly be valid. 
+
+Input:		btreePtr	- pointer to control block for BTree file
+			iterator	- pointer to BTreeIterator
+			
+Output:		answer		- true if the hint looks reasonable
+						- false if the hint is 0
+			
+Result:		noErr			- success
+-------------------------------------------------------------------------------*/</span>
+
+
+OSStatus	IsItAHint	(BTreeControlBlockPtr btreePtr, BTreeIterator *iterator, Boolean *answer)
+{
+	++btreePtr-&gt;numHintChecks;
+	
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG_BUILD</span>
+	<span class="enscript-keyword">if</span> (iterator-&gt;hint.nodeNum &gt;= btreePtr-&gt;totalNodes)
+	{
+		*answer = false;
+	} <span class="enscript-keyword">else</span> 
+
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (iterator-&gt;hint.nodeNum == 0)
+	{
+		*answer = false;
+	}
+	<span class="enscript-keyword">else</span>
+	{
+		*answer = true;
+		++btreePtr-&gt;numPossibleHints;
+	}
+	
+	<span class="enscript-keyword">return</span> noErr;
+}
+</pre>
+<hr />
+</body></html>

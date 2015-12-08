@@ -1,0 +1,3011 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>uipc_socket2.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">uipc_socket2.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1988, 1990, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)uipc_socket2.c	8.1 (Berkeley) 6/10/93
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signalvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ev.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/content_filter.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MPTCP</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/mptcp_var.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_FNC_SBDROP</span>		NETDBG_CODE(DBG_NETSOCK, 4)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_FNC_SBAPPEND</span>	NETDBG_CODE(DBG_NETSOCK, 5)
+
+<span class="enscript-function-name">SYSCTL_DECL</span>(_kern_ipc);
+
+__private_extern__ u_int32_t net_io_policy_throttle_best_effort = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_kern_ipc, OID_AUTO, throttle_best_effort,
+    CTLFLAG_RW | CTLFLAG_LOCKED, &amp;net_io_policy_throttle_best_effort, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">sbcompress</span>(<span class="enscript-type">struct</span> sockbuf *, <span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">struct</span> mbuf *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> socket *<span class="enscript-function-name">sonewconn_internal</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">sbappendaddr_internal</span>(<span class="enscript-type">struct</span> sockbuf *, <span class="enscript-type">struct</span> sockaddr *,
+    <span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">struct</span> mbuf *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">sbappendcontrol_internal</span>(<span class="enscript-type">struct</span> sockbuf *, <span class="enscript-type">struct</span> mbuf *,
+    <span class="enscript-type">struct</span> mbuf *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">soevent_ifdenied</span>(<span class="enscript-type">struct</span> socket *);
+
+<span class="enscript-comment">/*
+ * Primitive routines for operating on sockets and socket buffers
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> soqlimitcompat = 1;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> soqlencomp = 0;
+
+<span class="enscript-comment">/*
+ * Based on the number of mbuf clusters configured, high_sb_max and sb_max can
+ * get scaled up or down to suit that memory configuration. high_sb_max is a
+ * higher limit on sb_max that is checked when sb_max gets set through sysctl.
+ */</span>
+
+u_int32_t	sb_max = SB_MAX;		<span class="enscript-comment">/* XXX should be static */</span>
+u_int32_t	high_sb_max = SB_MAX;
+
+<span class="enscript-type">static</span>	u_int32_t sb_efficiency = 8;	<span class="enscript-comment">/* parameter for sbreserve() */</span>
+int32_t total_sbmb_cnt <span class="enscript-function-name">__attribute__</span>((aligned(8))) = 0;
+int32_t total_sbmb_cnt_peak <span class="enscript-function-name">__attribute__</span>((aligned(8))) = 0;
+int32_t total_snd_byte_count <span class="enscript-function-name">__attribute__</span>((aligned(8))) = 0;
+int64_t sbmb_limreached <span class="enscript-function-name">__attribute__</span>((aligned(8))) = 0;
+
+<span class="enscript-comment">/* Control whether to throttle sockets eligible to be throttled */</span>
+__private_extern__ u_int32_t net_io_policy_throttled = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> sysctl_io_policy_throttled SYSCTL_HANDLER_ARGS;
+
+u_int32_t net_io_policy_log = 0;	<span class="enscript-comment">/* log socket policy changes */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_PROC_UUID_POLICY</span>
+u_int32_t net_io_policy_uuid = 1;	<span class="enscript-comment">/* enable UUID socket policy */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_PROC_UUID_POLICY */</span>
+
+<span class="enscript-comment">/*
+ * Procedures to manipulate state flags of socket
+ * and do appropriate wakeups.  Normal sequence from the
+ * active (originating) side is that soisconnecting() is
+ * called during processing of connect() call,
+ * resulting in an eventual call to soisconnected() if/when the
+ * connection is established.  When the connection is torn down
+ * soisdisconnecting() is called during processing of disconnect() call,
+ * and soisdisconnected() is called when the connection to the peer
+ * is totally severed.  The semantics of these routines are such that
+ * connectionless protocols can call soisconnected() and soisdisconnected()
+ * only, bypassing the in-progress calls when setting up a ``connection''
+ * takes no time.
+ *
+ * From the passive side, a socket is created with
+ * two queues of sockets: so_incomp for connections in progress
+ * and so_comp for connections already made and awaiting user acceptance.
+ * As a protocol is preparing incoming connections, it creates a socket
+ * structure queued on so_incomp by calling sonewconn().  When the connection
+ * is established, soisconnected() is called, and transfers the
+ * socket structure to so_comp, making it available to accept().
+ *
+ * If a socket is closed with sockets on either
+ * so_incomp or so_comp, these sockets are dropped.
+ *
+ * If higher level protocols are implemented in
+ * the kernel, the wakeups done here will sometimes
+ * cause software-interrupt process scheduling.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">soisconnecting</span>(<span class="enscript-type">struct</span> socket *so)
+{
+
+	so-&gt;so_state &amp;= ~(SS_ISCONNECTED|SS_ISDISCONNECTING);
+	so-&gt;so_state |= SS_ISCONNECTING;
+
+	sflt_notify(so, sock_evt_connecting, NULL);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">soisconnected</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> socket *head = so-&gt;so_head;
+
+	so-&gt;so_state &amp;= ~(SS_ISCONNECTING|SS_ISDISCONNECTING|SS_ISCONFIRMING);
+	so-&gt;so_state |= SS_ISCONNECTED;
+
+	soreserve_preconnect(so, 0);
+
+	sflt_notify(so, sock_evt_connected, NULL);
+
+	<span class="enscript-keyword">if</span> (head &amp;&amp; (so-&gt;so_state &amp; SS_INCOMP)) {
+		so-&gt;so_state &amp;= ~SS_INCOMP;
+		so-&gt;so_state |= SS_COMP;
+		<span class="enscript-keyword">if</span> (head-&gt;so_proto-&gt;pr_getlock != NULL) {
+			socket_unlock(so, 0);
+			socket_lock(head, 1);
+		}
+		postevent(head, 0, EV_RCONN);
+		TAILQ_REMOVE(&amp;head-&gt;so_incomp, so, so_list);
+		head-&gt;so_incqlen--;
+		TAILQ_INSERT_TAIL(&amp;head-&gt;so_comp, so, so_list);
+		sorwakeup(head);
+		wakeup_one((caddr_t)&amp;head-&gt;so_timeo);
+		<span class="enscript-keyword">if</span> (head-&gt;so_proto-&gt;pr_getlock != NULL) {
+			socket_unlock(head, 1);
+			socket_lock(so, 0);
+		}
+	} <span class="enscript-keyword">else</span> {
+		postevent(so, 0, EV_WCONN);
+		wakeup((caddr_t)&amp;so-&gt;so_timeo);
+		sorwakeup(so);
+		sowwakeup(so);
+		soevent(so, SO_FILT_HINT_LOCKED | SO_FILT_HINT_CONNECTED |
+		    SO_FILT_HINT_CONNINFO_UPDATED);
+	}
+}
+
+boolean_t
+<span class="enscript-function-name">socanwrite</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-keyword">return</span> ((so-&gt;so_state &amp; SS_ISCONNECTED) ||
+	       !(so-&gt;so_proto-&gt;pr_flags &amp; PR_CONNREQUIRED) ||
+	       (so-&gt;so_flags1 &amp; SOF1_PRECONNECT_DATA));
+
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">soisdisconnecting</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	so-&gt;so_state &amp;= ~SS_ISCONNECTING;
+	so-&gt;so_state |= (SS_ISDISCONNECTING|SS_CANTRCVMORE|SS_CANTSENDMORE);
+	soevent(so, SO_FILT_HINT_LOCKED);
+	sflt_notify(so, sock_evt_disconnecting, NULL);
+	wakeup((caddr_t)&amp;so-&gt;so_timeo);
+	sowwakeup(so);
+	sorwakeup(so);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">soisdisconnected</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	so-&gt;so_state &amp;= ~(SS_ISCONNECTING|SS_ISCONNECTED|SS_ISDISCONNECTING);
+	so-&gt;so_state |= (SS_CANTRCVMORE|SS_CANTSENDMORE|SS_ISDISCONNECTED);
+	soevent(so, SO_FILT_HINT_LOCKED | SO_FILT_HINT_DISCONNECTED |
+	    SO_FILT_HINT_CONNINFO_UPDATED);
+	sflt_notify(so, sock_evt_disconnected, NULL);
+	wakeup((caddr_t)&amp;so-&gt;so_timeo);
+	sowwakeup(so);
+	sorwakeup(so);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONTENT_FILTER</span>
+	<span class="enscript-comment">/* Notify content filters as soon as we cannot send/receive data */</span>
+	cfil_sock_notify_shutdown(so, SHUT_RDWR);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONTENT_FILTER */</span>
+}
+
+<span class="enscript-comment">/*
+ * This function will issue a wakeup like soisdisconnected but it will not
+ * notify the socket filters. This will avoid unlocking the socket
+ * in the midst of closing it.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sodisconnectwakeup</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	so-&gt;so_state &amp;= ~(SS_ISCONNECTING|SS_ISCONNECTED|SS_ISDISCONNECTING);
+	so-&gt;so_state |= (SS_CANTRCVMORE|SS_CANTSENDMORE|SS_ISDISCONNECTED);
+	soevent(so, SO_FILT_HINT_LOCKED | SO_FILT_HINT_DISCONNECTED |
+	    SO_FILT_HINT_CONNINFO_UPDATED);
+	wakeup((caddr_t)&amp;so-&gt;so_timeo);
+	sowwakeup(so);
+	sorwakeup(so);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONTENT_FILTER</span>
+	<span class="enscript-comment">/* Notify content filters as soon as we cannot send/receive data */</span>
+	cfil_sock_notify_shutdown(so, SHUT_RDWR);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONTENT_FILTER */</span>
+}
+
+<span class="enscript-comment">/*
+ * When an attempt at a new connection is noted on a socket
+ * which accepts connections, sonewconn is called.  If the
+ * connection is possible (subject to space constraints, etc.)
+ * then we allocate a new structure, propoerly linked into the
+ * data structure of the original socket, and return this.
+ * Connstatus may be 0, or SO_ISCONFIRMING, or SO_ISCONNECTED.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> socket *
+<span class="enscript-function-name">sonewconn_internal</span>(<span class="enscript-type">struct</span> socket *head, <span class="enscript-type">int</span> connstatus)
+{
+	<span class="enscript-type">int</span> so_qlen, error = 0;
+	<span class="enscript-type">struct</span> socket *so;
+	lck_mtx_t *mutex_held;
+
+	<span class="enscript-keyword">if</span> (head-&gt;so_proto-&gt;pr_getlock != NULL)
+		mutex_held = (*head-&gt;so_proto-&gt;pr_getlock)(head, 0);
+	<span class="enscript-keyword">else</span>
+		mutex_held = head-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+	lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (!soqlencomp) {
+		<span class="enscript-comment">/*
+		 * This is the default case; so_qlen represents the
+		 * sum of both incomplete and completed queues.
+		 */</span>
+		so_qlen = head-&gt;so_qlen;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * When kern.ipc.soqlencomp is set to 1, so_qlen
+		 * represents only the completed queue.  Since we
+		 * cannot let the incomplete queue goes unbounded
+		 * (in case of SYN flood), we cap the incomplete
+		 * queue length to at most somaxconn, and use that
+		 * as so_qlen so that we fail immediately below.
+		 */</span>
+		so_qlen = head-&gt;so_qlen - head-&gt;so_incqlen;
+		<span class="enscript-keyword">if</span> (head-&gt;so_incqlen &gt; somaxconn)
+			so_qlen = somaxconn;
+	}
+
+	<span class="enscript-keyword">if</span> (so_qlen &gt;=
+	    (soqlimitcompat ? head-&gt;so_qlimit : (3 * head-&gt;so_qlimit / 2)))
+		<span class="enscript-keyword">return</span> ((<span class="enscript-type">struct</span> socket *)0);
+	so = soalloc(1, SOCK_DOM(head), head-&gt;so_type);
+	<span class="enscript-keyword">if</span> (so == NULL)
+		<span class="enscript-keyword">return</span> ((<span class="enscript-type">struct</span> socket *)0);
+	<span class="enscript-comment">/* check if head was closed during the soalloc */</span>
+	<span class="enscript-keyword">if</span> (head-&gt;so_proto == NULL) {
+		sodealloc(so);
+		<span class="enscript-keyword">return</span> ((<span class="enscript-type">struct</span> socket *)0);
+	}
+
+	so-&gt;so_type = head-&gt;so_type;
+	so-&gt;so_options = head-&gt;so_options &amp;~ SO_ACCEPTCONN;
+	so-&gt;so_linger = head-&gt;so_linger;
+	so-&gt;so_state = head-&gt;so_state | SS_NOFDREF;
+	so-&gt;so_proto = head-&gt;so_proto;
+	so-&gt;so_timeo = head-&gt;so_timeo;
+	so-&gt;so_pgid  = head-&gt;so_pgid;
+	kauth_cred_ref(head-&gt;so_cred);
+	so-&gt;so_cred = head-&gt;so_cred;
+	so-&gt;last_pid = head-&gt;last_pid;
+	so-&gt;last_upid = head-&gt;last_upid;
+	memcpy(so-&gt;last_uuid, head-&gt;last_uuid, <span class="enscript-keyword">sizeof</span> (so-&gt;last_uuid));
+	<span class="enscript-keyword">if</span> (head-&gt;so_flags &amp; SOF_DELEGATED) {
+		so-&gt;e_pid = head-&gt;e_pid;
+		so-&gt;e_upid = head-&gt;e_upid;
+		memcpy(so-&gt;e_uuid, head-&gt;e_uuid, <span class="enscript-keyword">sizeof</span> (so-&gt;e_uuid));
+	}
+	<span class="enscript-comment">/* inherit socket options stored in so_flags */</span>
+	so-&gt;so_flags = head-&gt;so_flags &amp;
+	    (SOF_NOSIGPIPE | SOF_NOADDRAVAIL | SOF_REUSESHAREUID |
+	    SOF_NOTIFYCONFLICT | SOF_BINDRANDOMPORT | SOF_NPX_SETOPTSHUT |
+	    SOF_NODEFUNCT | SOF_PRIVILEGED_TRAFFIC_CLASS| SOF_NOTSENT_LOWAT |
+	    SOF_USELRO | SOF_DELEGATED);
+	so-&gt;so_usecount = 1;
+	so-&gt;next_lock_lr = 0;
+	so-&gt;next_unlock_lr = 0;
+
+	so-&gt;so_rcv.sb_flags |= SB_RECV;	<span class="enscript-comment">/* XXX */</span>
+	so-&gt;so_rcv.sb_so = so-&gt;so_snd.sb_so = so;
+	TAILQ_INIT(&amp;so-&gt;so_evlist);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET</span>
+	mac_socket_label_associate_accept(head, so);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* inherit traffic management properties of listener */</span>
+	so-&gt;so_traffic_mgt_flags =
+	    head-&gt;so_traffic_mgt_flags &amp; (TRAFFIC_MGT_SO_BACKGROUND);
+	so-&gt;so_background_thread = head-&gt;so_background_thread;
+	so-&gt;so_traffic_class = head-&gt;so_traffic_class;
+
+	<span class="enscript-keyword">if</span> (soreserve(so, head-&gt;so_snd.sb_hiwat, head-&gt;so_rcv.sb_hiwat)) {
+		sodealloc(so);
+		<span class="enscript-keyword">return</span> ((<span class="enscript-type">struct</span> socket *)0);
+	}
+	so-&gt;so_rcv.sb_flags |= (head-&gt;so_rcv.sb_flags &amp; SB_USRSIZE);
+	so-&gt;so_snd.sb_flags |= (head-&gt;so_snd.sb_flags &amp; SB_USRSIZE);
+
+	<span class="enscript-comment">/*
+	 * Must be done with head unlocked to avoid deadlock
+	 * for protocol with per socket mutexes.
+	 */</span>
+	<span class="enscript-keyword">if</span> (head-&gt;so_proto-&gt;pr_unlock)
+		socket_unlock(head, 0);
+	<span class="enscript-keyword">if</span> (((*so-&gt;so_proto-&gt;pr_usrreqs-&gt;pru_attach)(so, 0, NULL) != 0) ||
+	    error) {
+		sodealloc(so);
+		<span class="enscript-keyword">if</span> (head-&gt;so_proto-&gt;pr_unlock)
+			socket_lock(head, 0);
+		<span class="enscript-keyword">return</span> ((<span class="enscript-type">struct</span> socket *)0);
+	}
+	<span class="enscript-keyword">if</span> (head-&gt;so_proto-&gt;pr_unlock) {
+		socket_lock(head, 0);
+		<span class="enscript-comment">/*
+		 * Radar 7385998 Recheck that the head is still accepting
+		 * to avoid race condition when head is getting closed.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((head-&gt;so_options &amp; SO_ACCEPTCONN) == 0) {
+			so-&gt;so_state &amp;= ~SS_NOFDREF;
+			soclose(so);
+			<span class="enscript-keyword">return</span> ((<span class="enscript-type">struct</span> socket *)0);
+		}
+	}
+
+	atomic_add_32(&amp;so-&gt;so_proto-&gt;pr_domain-&gt;dom_refs, 1);
+
+	<span class="enscript-comment">/* Insert in head appropriate lists */</span>
+	so-&gt;so_head = head;
+
+	<span class="enscript-comment">/*
+	 * Since this socket is going to be inserted into the incomp
+	 * queue, it can be picked up by another thread in
+	 * tcp_dropdropablreq to get dropped before it is setup..
+	 * To prevent this race, set in-progress flag which can be
+	 * cleared later
+	 */</span>
+	so-&gt;so_flags |= SOF_INCOMP_INPROGRESS;
+
+	<span class="enscript-keyword">if</span> (connstatus) {
+		TAILQ_INSERT_TAIL(&amp;head-&gt;so_comp, so, so_list);
+		so-&gt;so_state |= SS_COMP;
+	} <span class="enscript-keyword">else</span> {
+		TAILQ_INSERT_TAIL(&amp;head-&gt;so_incomp, so, so_list);
+		so-&gt;so_state |= SS_INCOMP;
+		head-&gt;so_incqlen++;
+	}
+	head-&gt;so_qlen++;
+
+	<span class="enscript-comment">/* Attach socket filters for this protocol */</span>
+	sflt_initsock(so);
+
+	<span class="enscript-keyword">if</span> (connstatus) {
+		so-&gt;so_state |= connstatus;
+		sorwakeup(head);
+		wakeup((caddr_t)&amp;head-&gt;so_timeo);
+	}
+	<span class="enscript-keyword">return</span> (so);
+}
+
+
+<span class="enscript-type">struct</span> socket *
+<span class="enscript-function-name">sonewconn</span>(<span class="enscript-type">struct</span> socket *head, <span class="enscript-type">int</span> connstatus, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *from)
+{
+	<span class="enscript-type">int</span> error = sflt_connectin(head, from);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	<span class="enscript-keyword">return</span> (sonewconn_internal(head, connstatus));
+}
+
+<span class="enscript-comment">/*
+ * Socantsendmore indicates that no more data will be sent on the
+ * socket; it would normally be applied to a socket when the user
+ * informs the system that no more data is to be sent, by the protocol
+ * code (in case PRU_SHUTDOWN).  Socantrcvmore indicates that no more data
+ * will be received, and will normally be applied to the socket by a
+ * protocol when it detects that the peer will send no more data.
+ * Data queued for reading in the socket may yet be read.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">socantsendmore</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	so-&gt;so_state |= SS_CANTSENDMORE;
+	soevent(so, SO_FILT_HINT_LOCKED | SO_FILT_HINT_CANTSENDMORE);
+	sflt_notify(so, sock_evt_cantsendmore, NULL);
+	sowwakeup(so);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">socantrcvmore</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	so-&gt;so_state |= SS_CANTRCVMORE;
+	soevent(so, SO_FILT_HINT_LOCKED | SO_FILT_HINT_CANTRCVMORE);
+	sflt_notify(so, sock_evt_cantrecvmore, NULL);
+	sorwakeup(so);
+}
+
+<span class="enscript-comment">/*
+ * Wait for data to arrive at/drain from a socket buffer.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbwait</span>(<span class="enscript-type">struct</span> sockbuf *sb)
+{
+	boolean_t nointr = (sb-&gt;sb_flags &amp; SB_NOINTR);
+	<span class="enscript-type">void</span> *lr_saved = __builtin_return_address(0);
+	<span class="enscript-type">struct</span> socket *so = sb-&gt;sb_so;
+	lck_mtx_t *mutex_held;
+	<span class="enscript-type">struct</span> timespec ts;
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		panic(<span class="enscript-string">&quot;%s: null so, sb=%p sb_flags=0x%x lr=%p\n&quot;</span>,
+		    __func__, sb, sb-&gt;sb_flags, lr_saved);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (so-&gt;so_usecount &lt; 1) {
+		panic(<span class="enscript-string">&quot;%s: sb=%p sb_flags=0x%x sb_so=%p usecount=%d lr=%p &quot;</span>
+		    <span class="enscript-string">&quot;lrh= %s\n&quot;</span>, __func__, sb, sb-&gt;sb_flags, so,
+		    so-&gt;so_usecount, lr_saved, solockhistory_nr(so));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_getlock != NULL)
+		mutex_held = (*so-&gt;so_proto-&gt;pr_getlock)(so, 0);
+	<span class="enscript-keyword">else</span>
+		mutex_held = so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+
+	lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+
+	ts.tv_sec = sb-&gt;sb_timeo.tv_sec;
+	ts.tv_nsec = sb-&gt;sb_timeo.tv_usec * 1000;
+
+	sb-&gt;sb_waiters++;
+	VERIFY(sb-&gt;sb_waiters != 0);
+
+	error = msleep((caddr_t)&amp;sb-&gt;sb_cc, mutex_held,
+	    nointr ? PSOCK : PSOCK | PCATCH,
+	    nointr ? <span class="enscript-string">&quot;sbwait_nointr&quot;</span> : <span class="enscript-string">&quot;sbwait&quot;</span>, &amp;ts);
+
+	VERIFY(sb-&gt;sb_waiters != 0);
+	sb-&gt;sb_waiters--;
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_usecount &lt; 1) {
+		panic(<span class="enscript-string">&quot;%s: 2 sb=%p sb_flags=0x%x sb_so=%p usecount=%d lr=%p &quot;</span>
+		    <span class="enscript-string">&quot;lrh= %s\n&quot;</span>, __func__, sb, sb-&gt;sb_flags, so,
+		    so-&gt;so_usecount, lr_saved, solockhistory_nr(so));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_DRAINING) || (so-&gt;so_flags &amp; SOF_DEFUNCT)) {
+		error = EBADF;
+		<span class="enscript-keyword">if</span> (so-&gt;so_flags &amp; SOF_DEFUNCT) {
+			SODEFUNCTLOG((<span class="enscript-string">&quot;%s[%d]: defunct so 0x%llx [%d,%d] &quot;</span>
+			    <span class="enscript-string">&quot;(%d)\n&quot;</span>, __func__, proc_selfpid(),
+			    (uint64_t)VM_KERNEL_ADDRPERM(so),
+			    SOCK_DOM(so), SOCK_TYPE(so), error));
+		}
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sbwakeup</span>(<span class="enscript-type">struct</span> sockbuf *sb)
+{
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_waiters &gt; 0)
+		wakeup((caddr_t)&amp;sb-&gt;sb_cc);
+}
+
+<span class="enscript-comment">/*
+ * Wakeup processes waiting on a socket buffer.
+ * Do asynchronous notification via SIGIO
+ * if the socket has the SS_ASYNC flag set.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sowakeup</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockbuf *sb)
+{
+	<span class="enscript-keyword">if</span> (so-&gt;so_flags &amp; SOF_DEFUNCT) {
+		SODEFUNCTLOG((<span class="enscript-string">&quot;%s[%d]: defunct so 0x%llx [%d,%d] si 0x%x, &quot;</span>
+		    <span class="enscript-string">&quot;fl 0x%x [%s]\n&quot;</span>, __func__, proc_selfpid(),
+		    (uint64_t)VM_KERNEL_ADDRPERM(so), SOCK_DOM(so),
+		    SOCK_TYPE(so), (uint32_t)sb-&gt;sb_sel.si_flags, sb-&gt;sb_flags,
+		    (sb-&gt;sb_flags &amp; SB_RECV) ? <span class="enscript-string">&quot;rcv&quot;</span> : <span class="enscript-string">&quot;snd&quot;</span>));
+	}
+
+	sb-&gt;sb_flags &amp;= ~SB_SEL;
+	selwakeup(&amp;sb-&gt;sb_sel);
+	sbwakeup(sb);
+	<span class="enscript-keyword">if</span> (so-&gt;so_state &amp; SS_ASYNC) {
+		<span class="enscript-keyword">if</span> (so-&gt;so_pgid &lt; 0)
+			gsignal(-so-&gt;so_pgid, SIGIO);
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (so-&gt;so_pgid &gt; 0)
+			proc_signal(so-&gt;so_pgid, SIGIO);
+	}
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_flags &amp; SB_KNOTE) {
+		KNOTE(&amp;sb-&gt;sb_sel.si_note, SO_FILT_HINT_LOCKED);
+	}
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_flags &amp; SB_UPCALL) {
+		<span class="enscript-type">void</span> (*sb_upcall)(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">void</span> *, <span class="enscript-type">int</span>);
+		caddr_t sb_upcallarg;
+
+		sb_upcall = sb-&gt;sb_upcall;
+		sb_upcallarg = sb-&gt;sb_upcallarg;
+		<span class="enscript-comment">/* Let close know that we're about to do an upcall */</span>
+		so-&gt;so_upcallusecount++;
+
+		socket_unlock(so, 0);
+		(*sb_upcall)(so, sb_upcallarg, M_DONTWAIT);
+		socket_lock(so, 0);
+
+		so-&gt;so_upcallusecount--;
+		<span class="enscript-comment">/* Tell close that it's safe to proceed */</span>
+		<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CLOSEWAIT) &amp;&amp;
+		    so-&gt;so_upcallusecount == 0)
+			wakeup((caddr_t)&amp;so-&gt;so_upcallusecount);
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONTENT_FILTER</span>
+	<span class="enscript-comment">/*
+	 * Trap disconnection events for content filters
+	 */</span>
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) != 0) {
+		<span class="enscript-keyword">if</span> ((sb-&gt;sb_flags &amp; SB_RECV)) {
+			<span class="enscript-keyword">if</span> (so-&gt;so_state &amp; (SS_CANTRCVMORE))
+				cfil_sock_notify_shutdown(so, SHUT_RD);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (so-&gt;so_state &amp; (SS_CANTSENDMORE))
+				cfil_sock_notify_shutdown(so, SHUT_WR);
+		}
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONTENT_FILTER */</span>
+}
+
+<span class="enscript-comment">/*
+ * Socket buffer (struct sockbuf) utility routines.
+ *
+ * Each socket contains two socket buffers: one for sending data and
+ * one for receiving data.  Each buffer contains a queue of mbufs,
+ * information about the number of mbufs and amount of data in the
+ * queue, and other fields allowing select() statements and notification
+ * on data availability to be implemented.
+ *
+ * Data stored in a socket buffer is maintained as a list of records.
+ * Each record is a list of mbufs chained together with the m_next
+ * field.  Records are chained together with the m_nextpkt field. The upper
+ * level routine soreceive() expects the following conventions to be
+ * observed when placing information in the receive buffer:
+ *
+ * 1. If the protocol requires each message be preceded by the sender's
+ *    name, then a record containing that name must be present before
+ *    any associated data (mbuf's must be of type MT_SONAME).
+ * 2. If the protocol supports the exchange of ``access rights'' (really
+ *    just additional data associated with the message), and there are
+ *    ``rights'' to be received, then a record containing this data
+ *    should be present (mbuf's must be of type MT_RIGHTS).
+ * 3. If a name or rights record exists, then it must be followed by
+ *    a data record, perhaps of zero length.
+ *
+ * Before using a new socket structure it is first necessary to reserve
+ * buffer space to the socket, by calling sbreserve().  This should commit
+ * some of the available buffer space in the system buffer pool for the
+ * socket (currently, it does nothing but enforce limits).  The space
+ * should be released by calling sbrelease() when the socket is destroyed.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		ENOBUFS
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">soreserve</span>(<span class="enscript-type">struct</span> socket *so, u_int32_t sndcc, u_int32_t rcvcc)
+{
+
+	<span class="enscript-keyword">if</span> (sbreserve(&amp;so-&gt;so_snd, sndcc) == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	<span class="enscript-keyword">else</span>
+		so-&gt;so_snd.sb_idealsize = sndcc;
+
+	<span class="enscript-keyword">if</span> (sbreserve(&amp;so-&gt;so_rcv, rcvcc) == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad2</span>;
+	<span class="enscript-keyword">else</span>
+		so-&gt;so_rcv.sb_idealsize = rcvcc;
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_rcv.sb_lowat == 0)
+		so-&gt;so_rcv.sb_lowat = 1;
+	<span class="enscript-keyword">if</span> (so-&gt;so_snd.sb_lowat == 0)
+		so-&gt;so_snd.sb_lowat = MCLBYTES;
+	<span class="enscript-keyword">if</span> (so-&gt;so_snd.sb_lowat &gt; so-&gt;so_snd.sb_hiwat)
+		so-&gt;so_snd.sb_lowat = so-&gt;so_snd.sb_hiwat;
+	<span class="enscript-keyword">return</span> (0);
+<span class="enscript-reference">bad2</span>:
+	so-&gt;so_snd.sb_flags &amp;= ~SB_SEL;
+	selthreadclear(&amp;so-&gt;so_snd.sb_sel);
+	sbrelease(&amp;so-&gt;so_snd);
+<span class="enscript-reference">bad</span>:
+	<span class="enscript-keyword">return</span> (ENOBUFS);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">soreserve_preconnect</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> pre_cc)
+{
+	<span class="enscript-comment">/* As of now, same bytes for both preconnect read and write */</span>
+	so-&gt;so_snd.sb_preconn_hiwat = pre_cc;
+	so-&gt;so_rcv.sb_preconn_hiwat = pre_cc;
+}
+
+<span class="enscript-comment">/*
+ * Allot mbufs to a sockbuf.
+ * Attempt to scale mbmax so that mbcnt doesn't become limiting
+ * if buffering efficiency is near the normal case.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbreserve</span>(<span class="enscript-type">struct</span> sockbuf *sb, u_int32_t cc)
+{
+	<span class="enscript-keyword">if</span> ((u_quad_t)cc &gt; (u_quad_t)sb_max * MCLBYTES / (MSIZE + MCLBYTES))
+		<span class="enscript-keyword">return</span> (0);
+	sb-&gt;sb_hiwat = cc;
+	sb-&gt;sb_mbmax = min(cc * sb_efficiency, sb_max);
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_lowat &gt; sb-&gt;sb_hiwat)
+		sb-&gt;sb_lowat = sb-&gt;sb_hiwat;
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/*
+ * Free mbufs held by a socket, and reserved mbuf space.
+ */</span>
+<span class="enscript-comment">/*  WARNING needs to do selthreadclear() before calling this */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sbrelease</span>(<span class="enscript-type">struct</span> sockbuf *sb)
+{
+	sbflush(sb);
+	sb-&gt;sb_hiwat = 0;
+	sb-&gt;sb_mbmax = 0;
+}
+
+<span class="enscript-comment">/*
+ * Routines to add and remove
+ * data from an mbuf queue.
+ *
+ * The routines sbappend() or sbappendrecord() are normally called to
+ * append new mbufs to a socket buffer, after checking that adequate
+ * space is available, comparing the function sbspace() with the amount
+ * of data to be added.  sbappendrecord() differs from sbappend() in
+ * that data supplied is treated as the beginning of a new record.
+ * To place a sender's address, optional access rights, and data in a
+ * socket receive buffer, sbappendaddr() should be used.  To place
+ * access rights and data in a socket receive buffer, sbappendrights()
+ * should be used.  In either case, the new data begins a new record.
+ * Note that unlike sbappend() and sbappendrecord(), these routines check
+ * for the caller that there will be enough space to store the data.
+ * Each fails if there is not enough space, or if it cannot find mbufs
+ * to store additional information in.
+ *
+ * Reliable protocols may use the socket send buffer to hold data
+ * awaiting acknowledgement.  Data is normally copied from a socket
+ * send buffer in a protocol with m_copy for output to a peer,
+ * and then removing the data from the socket buffer with sbdrop()
+ * or sbdroprecord() when the data is acknowledged by the peer.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Append mbuf chain m to the last record in the
+ * socket buffer sb.  The additional space associated
+ * the mbuf chain is recorded in sb.  Empty mbufs are
+ * discarded and mbufs are compacted where possible.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbappend</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">struct</span> socket *so = sb-&gt;sb_so;
+
+	<span class="enscript-keyword">if</span> (m == NULL || (sb-&gt;sb_flags &amp; SB_DROP)) {
+		<span class="enscript-keyword">if</span> (m != NULL)
+			m_freem(m);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbappend 1&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_lastrecord != NULL &amp;&amp; (sb-&gt;sb_mbtail-&gt;m_flags &amp; M_EOR))
+		<span class="enscript-keyword">return</span> (sbappendrecord(sb, m));
+
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_flags &amp; SB_RECV &amp;&amp; !(m &amp;&amp; m-&gt;m_flags &amp; M_SKIPCFIL)) {
+		<span class="enscript-type">int</span> error = sflt_data_in(so, NULL, &amp;m, NULL, 0);
+		SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbappend 2&quot;</span>);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONTENT_FILTER</span>
+		<span class="enscript-keyword">if</span> (error == 0)
+			error = cfil_sock_data_in(so, NULL, m, NULL, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONTENT_FILTER */</span>
+
+		<span class="enscript-keyword">if</span> (error != 0) {
+			<span class="enscript-keyword">if</span> (error != EJUSTRETURN)
+				m_freem(m);
+			<span class="enscript-keyword">return</span> (0);
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (m) {
+		m-&gt;m_flags &amp;= ~M_SKIPCFIL;
+	}
+
+	<span class="enscript-comment">/* If this is the first record, it's also the last record */</span>
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_lastrecord == NULL)
+		sb-&gt;sb_lastrecord = m;
+
+	sbcompress(sb, m, sb-&gt;sb_mbtail);
+	SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbappend 3&quot;</span>);
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/*
+ * Similar to sbappend, except that this is optimized for stream sockets.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbappendstream</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">struct</span> socket *so = sb-&gt;sb_so;
+
+	<span class="enscript-keyword">if</span> (m == NULL || (sb-&gt;sb_flags &amp; SB_DROP)) {
+		<span class="enscript-keyword">if</span> (m != NULL)
+			m_freem(m);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">if</span> (m-&gt;m_nextpkt != NULL || (sb-&gt;sb_mb != sb-&gt;sb_lastrecord)) {
+		panic(<span class="enscript-string">&quot;sbappendstream: nexpkt %p || mb %p != lastrecord %p\n&quot;</span>,
+		    m-&gt;m_nextpkt, sb-&gt;sb_mb, sb-&gt;sb_lastrecord);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	SBLASTMBUFCHK(sb, __func__);
+
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_flags &amp; SB_RECV &amp;&amp; !(m &amp;&amp; m-&gt;m_flags &amp; M_SKIPCFIL)) {
+		<span class="enscript-type">int</span> error = sflt_data_in(so, NULL, &amp;m, NULL, 0);
+		SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbappendstream 1&quot;</span>);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONTENT_FILTER</span>
+		<span class="enscript-keyword">if</span> (error == 0)
+			error = cfil_sock_data_in(so, NULL, m, NULL, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONTENT_FILTER */</span>
+
+		<span class="enscript-keyword">if</span> (error != 0) {
+			<span class="enscript-keyword">if</span> (error != EJUSTRETURN)
+				m_freem(m);
+			<span class="enscript-keyword">return</span> (0);
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (m) {
+		m-&gt;m_flags &amp;= ~M_SKIPCFIL;
+	}
+
+	sbcompress(sb, m, sb-&gt;sb_mbtail);
+	sb-&gt;sb_lastrecord = sb-&gt;sb_mb;
+	SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbappendstream 2&quot;</span>);
+	<span class="enscript-keyword">return</span> (1);
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">SOCKBUF_DEBUG</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sbcheck</span>(<span class="enscript-type">struct</span> sockbuf *sb)
+{
+	<span class="enscript-type">struct</span> mbuf *m;
+	<span class="enscript-type">struct</span> mbuf *n = 0;
+	u_int32_t len = 0, mbcnt = 0;
+	lck_mtx_t *mutex_held;
+
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_so-&gt;so_proto-&gt;pr_getlock != NULL)
+		mutex_held = (*sb-&gt;sb_so-&gt;so_proto-&gt;pr_getlock)(sb-&gt;sb_so, 0);
+	<span class="enscript-keyword">else</span>
+		mutex_held = sb-&gt;sb_so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+
+	lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (sbchecking == 0)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">for</span> (m = sb-&gt;sb_mb; m; m = n) {
+		n = m-&gt;m_nextpkt;
+		<span class="enscript-keyword">for</span> (; m; m = m-&gt;m_next) {
+			len += m-&gt;m_len;
+			mbcnt += MSIZE;
+			<span class="enscript-comment">/* XXX pretty sure this is bogus */</span>
+			<span class="enscript-keyword">if</span> (m-&gt;m_flags &amp; M_EXT)
+				mbcnt += m-&gt;m_ext.ext_size;
+		}
+	}
+	<span class="enscript-keyword">if</span> (len != sb-&gt;sb_cc || mbcnt != sb-&gt;sb_mbcnt) {
+		panic(<span class="enscript-string">&quot;cc %ld != %ld || mbcnt %ld != %ld\n&quot;</span>, len, sb-&gt;sb_cc,
+		    mbcnt, sb-&gt;sb_mbcnt);
+	}
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sblastrecordchk</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *where)
+{
+	<span class="enscript-type">struct</span> mbuf *m = sb-&gt;sb_mb;
+
+	<span class="enscript-keyword">while</span> (m &amp;&amp; m-&gt;m_nextpkt)
+		m = m-&gt;m_nextpkt;
+
+	<span class="enscript-keyword">if</span> (m != sb-&gt;sb_lastrecord) {
+		printf(<span class="enscript-string">&quot;sblastrecordchk: mb 0x%llx lastrecord 0x%llx &quot;</span>
+		    <span class="enscript-string">&quot;last 0x%llx\n&quot;</span>,
+		    (uint64_t)VM_KERNEL_ADDRPERM(sb-&gt;sb_mb),
+		    (uint64_t)VM_KERNEL_ADDRPERM(sb-&gt;sb_lastrecord),
+		    (uint64_t)VM_KERNEL_ADDRPERM(m));
+		printf(<span class="enscript-string">&quot;packet chain:\n&quot;</span>);
+		<span class="enscript-keyword">for</span> (m = sb-&gt;sb_mb; m != NULL; m = m-&gt;m_nextpkt)
+			printf(<span class="enscript-string">&quot;\t0x%llx\n&quot;</span>, (uint64_t)VM_KERNEL_ADDRPERM(m));
+		panic(<span class="enscript-string">&quot;sblastrecordchk from %s&quot;</span>, where);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sblastmbufchk</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *where)
+{
+	<span class="enscript-type">struct</span> mbuf *m = sb-&gt;sb_mb;
+	<span class="enscript-type">struct</span> mbuf *n;
+
+	<span class="enscript-keyword">while</span> (m &amp;&amp; m-&gt;m_nextpkt)
+		m = m-&gt;m_nextpkt;
+
+	<span class="enscript-keyword">while</span> (m &amp;&amp; m-&gt;m_next)
+		m = m-&gt;m_next;
+
+	<span class="enscript-keyword">if</span> (m != sb-&gt;sb_mbtail) {
+		printf(<span class="enscript-string">&quot;sblastmbufchk: mb 0x%llx mbtail 0x%llx last 0x%llx\n&quot;</span>,
+		    (uint64_t)VM_KERNEL_ADDRPERM(sb-&gt;sb_mb),
+		    (uint64_t)VM_KERNEL_ADDRPERM(sb-&gt;sb_mbtail),
+		    (uint64_t)VM_KERNEL_ADDRPERM(m));
+		printf(<span class="enscript-string">&quot;packet tree:\n&quot;</span>);
+		<span class="enscript-keyword">for</span> (m = sb-&gt;sb_mb; m != NULL; m = m-&gt;m_nextpkt) {
+			printf(<span class="enscript-string">&quot;\t&quot;</span>);
+			<span class="enscript-keyword">for</span> (n = m; n != NULL; n = n-&gt;m_next)
+				printf(<span class="enscript-string">&quot;0x%llx &quot;</span>,
+				    (uint64_t)VM_KERNEL_ADDRPERM(n));
+			printf(<span class="enscript-string">&quot;\n&quot;</span>);
+		}
+		panic(<span class="enscript-string">&quot;sblastmbufchk from %s&quot;</span>, where);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Similar to sbappend, except the mbuf chain begins a new record.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbappendrecord</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> mbuf *m0)
+{
+	<span class="enscript-type">struct</span> mbuf *m;
+	<span class="enscript-type">int</span> space = 0;
+
+	<span class="enscript-keyword">if</span> (m0 == NULL || (sb-&gt;sb_flags &amp; SB_DROP)) {
+		<span class="enscript-keyword">if</span> (m0 != NULL)
+			m_freem(m0);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">for</span> (m = m0; m != NULL; m = m-&gt;m_next)
+		space += m-&gt;m_len;
+
+	<span class="enscript-keyword">if</span> (space &gt; sbspace(sb) &amp;&amp; !(sb-&gt;sb_flags &amp; SB_UNIX)) {
+		m_freem(m0);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_flags &amp; SB_RECV &amp;&amp; !(m0 &amp;&amp; m0-&gt;m_flags &amp; M_SKIPCFIL)) {
+		<span class="enscript-type">int</span> error = sflt_data_in(sb-&gt;sb_so, NULL, &amp;m0, NULL,
+		    sock_data_filt_flag_record);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONTENT_FILTER</span>
+		<span class="enscript-keyword">if</span> (error == 0)
+			error = cfil_sock_data_in(sb-&gt;sb_so, NULL, m0, NULL, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONTENT_FILTER */</span>
+
+		<span class="enscript-keyword">if</span> (error != 0) {
+			SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbappendrecord 1&quot;</span>);
+			<span class="enscript-keyword">if</span> (error != EJUSTRETURN)
+				m_freem(m0);
+			<span class="enscript-keyword">return</span> (0);
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (m0) {
+		m0-&gt;m_flags &amp;= ~M_SKIPCFIL;
+	}
+
+	<span class="enscript-comment">/*
+	 * Note this permits zero length records.
+	 */</span>
+	sballoc(sb, m0);
+	SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbappendrecord 2&quot;</span>);
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_lastrecord != NULL) {
+		sb-&gt;sb_lastrecord-&gt;m_nextpkt = m0;
+	} <span class="enscript-keyword">else</span> {
+		sb-&gt;sb_mb = m0;
+	}
+	sb-&gt;sb_lastrecord = m0;
+	sb-&gt;sb_mbtail = m0;
+
+	m = m0-&gt;m_next;
+	m0-&gt;m_next = 0;
+	<span class="enscript-keyword">if</span> (m &amp;&amp; (m0-&gt;m_flags &amp; M_EOR)) {
+		m0-&gt;m_flags &amp;= ~M_EOR;
+		m-&gt;m_flags |= M_EOR;
+	}
+	sbcompress(sb, m, m0);
+	SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbappendrecord 3&quot;</span>);
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/*
+ * As above except that OOB data
+ * is inserted at the beginning of the sockbuf,
+ * but after any other OOB data.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbinsertoob</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> mbuf *m0)
+{
+	<span class="enscript-type">struct</span> mbuf *m;
+	<span class="enscript-type">struct</span> mbuf **mp;
+
+	<span class="enscript-keyword">if</span> (m0 == 0)
+		<span class="enscript-keyword">return</span> (0);
+
+	SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbinsertoob 1&quot;</span>);
+
+	<span class="enscript-keyword">if</span> ((sb-&gt;sb_flags &amp; SB_RECV &amp;&amp; !(m0-&gt;m_flags &amp; M_SKIPCFIL)) != 0) {
+		<span class="enscript-type">int</span> error = sflt_data_in(sb-&gt;sb_so, NULL, &amp;m0, NULL,
+		    sock_data_filt_flag_oob);
+
+		SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbinsertoob 2&quot;</span>);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONTENT_FILTER</span>
+		<span class="enscript-keyword">if</span> (error == 0)
+			error = cfil_sock_data_in(sb-&gt;sb_so, NULL, m0, NULL, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONTENT_FILTER */</span>
+
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">if</span> (error != EJUSTRETURN) {
+				m_freem(m0);
+			}
+			<span class="enscript-keyword">return</span> (0);
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (m0) {
+		m0-&gt;m_flags &amp;= ~M_SKIPCFIL;
+	}
+
+	<span class="enscript-keyword">for</span> (mp = &amp;sb-&gt;sb_mb; *mp; mp = &amp;((*mp)-&gt;m_nextpkt)) {
+		m = *mp;
+<span class="enscript-reference">again</span>:
+		<span class="enscript-keyword">switch</span> (m-&gt;m_type) {
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MT_OOBDATA</span>:
+			<span class="enscript-keyword">continue</span>;		<span class="enscript-comment">/* WANT next train */</span>
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MT_CONTROL</span>:
+			m = m-&gt;m_next;
+			<span class="enscript-keyword">if</span> (m)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;	<span class="enscript-comment">/* inspect THIS train further */</span>
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-comment">/*
+	 * Put the first mbuf on the queue.
+	 * Note this permits zero length records.
+	 */</span>
+	sballoc(sb, m0);
+	m0-&gt;m_nextpkt = *mp;
+	<span class="enscript-keyword">if</span> (*mp == NULL) {
+		<span class="enscript-comment">/* m0 is actually the new tail */</span>
+		sb-&gt;sb_lastrecord = m0;
+	}
+	*mp = m0;
+	m = m0-&gt;m_next;
+	m0-&gt;m_next = 0;
+	<span class="enscript-keyword">if</span> (m &amp;&amp; (m0-&gt;m_flags &amp; M_EOR)) {
+		m0-&gt;m_flags &amp;= ~M_EOR;
+		m-&gt;m_flags |= M_EOR;
+	}
+	sbcompress(sb, m, m0);
+	SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbinsertoob 3&quot;</span>);
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/*
+ * Append address and data, and optionally, control (ancillary) data
+ * to the receive queue of a socket.  If present,
+ * m0 must include a packet header with total length.
+ * Returns 0 if no space in sockbuf or insufficient mbufs.
+ *
+ * Returns:	0			No space/out of mbufs
+ *		1			Success
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sbappendaddr_internal</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> sockaddr *asa,
+    <span class="enscript-type">struct</span> mbuf *m0, <span class="enscript-type">struct</span> mbuf *control)
+{
+	<span class="enscript-type">struct</span> mbuf *m, *n, *nlast;
+	<span class="enscript-type">int</span> space = asa-&gt;sa_len;
+
+	<span class="enscript-keyword">if</span> (m0 &amp;&amp; (m0-&gt;m_flags &amp; M_PKTHDR) == 0)
+		panic(<span class="enscript-string">&quot;sbappendaddr&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (m0)
+		space += m0-&gt;m_pkthdr.len;
+	<span class="enscript-keyword">for</span> (n = control; n; n = n-&gt;m_next) {
+		space += n-&gt;m_len;
+		<span class="enscript-keyword">if</span> (n-&gt;m_next == 0)	<span class="enscript-comment">/* keep pointer to last control buf */</span>
+			<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">if</span> (space &gt; sbspace(sb))
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">if</span> (asa-&gt;sa_len &gt; MLEN)
+		<span class="enscript-keyword">return</span> (0);
+	MGET(m, M_DONTWAIT, MT_SONAME);
+	<span class="enscript-keyword">if</span> (m == 0)
+		<span class="enscript-keyword">return</span> (0);
+	m-&gt;m_len = asa-&gt;sa_len;
+	bcopy((caddr_t)asa, mtod(m, caddr_t), asa-&gt;sa_len);
+	<span class="enscript-keyword">if</span> (n)
+		n-&gt;m_next = m0;		<span class="enscript-comment">/* concatenate data to control */</span>
+	<span class="enscript-keyword">else</span>
+		control = m0;
+	m-&gt;m_next = control;
+
+	SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbappendadddr 1&quot;</span>);
+
+	<span class="enscript-keyword">for</span> (n = m; n-&gt;m_next != NULL; n = n-&gt;m_next)
+		sballoc(sb, n);
+	sballoc(sb, n);
+	nlast = n;
+
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_lastrecord != NULL) {
+		sb-&gt;sb_lastrecord-&gt;m_nextpkt = m;
+	} <span class="enscript-keyword">else</span> {
+		sb-&gt;sb_mb = m;
+	}
+	sb-&gt;sb_lastrecord = m;
+	sb-&gt;sb_mbtail = nlast;
+
+	SBLASTMBUFCHK(sb, __func__);
+	SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbappendadddr 2&quot;</span>);
+
+	postevent(0, sb, EV_RWBYTES);
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Error: No space/out of mbufs/etc.
+ *		1			Success
+ *
+ * Imputed:	(*error_out)		errno for error
+ *		ENOBUFS
+ *	sflt_data_in:???		[whatever a filter author chooses]
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbappendaddr</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> sockaddr *asa, <span class="enscript-type">struct</span> mbuf *m0,
+    <span class="enscript-type">struct</span> mbuf *control, <span class="enscript-type">int</span> *error_out)
+{
+	<span class="enscript-type">int</span> result = 0;
+	boolean_t sb_unix = (sb-&gt;sb_flags &amp; SB_UNIX);
+
+	<span class="enscript-keyword">if</span> (error_out)
+		*error_out = 0;
+
+	<span class="enscript-keyword">if</span> (m0 &amp;&amp; (m0-&gt;m_flags &amp; M_PKTHDR) == 0)
+		panic(<span class="enscript-string">&quot;sbappendaddrorfree&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_flags &amp; SB_DROP) {
+		<span class="enscript-keyword">if</span> (m0 != NULL)
+			m_freem(m0);
+		<span class="enscript-keyword">if</span> (control != NULL &amp;&amp; !sb_unix)
+			m_freem(control);
+		<span class="enscript-keyword">if</span> (error_out != NULL)
+			*error_out = EINVAL;
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-comment">/* Call socket data in filters */</span>
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_flags &amp; SB_RECV &amp;&amp; !(m0 &amp;&amp; m0-&gt;m_flags &amp; M_SKIPCFIL)) {
+		<span class="enscript-type">int</span> error;
+		error = sflt_data_in(sb-&gt;sb_so, asa, &amp;m0, &amp;control, 0);
+		SBLASTRECORDCHK(sb, __func__);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONTENT_FILTER</span>
+		<span class="enscript-keyword">if</span> (error == 0)
+			error = cfil_sock_data_in(sb-&gt;sb_so, asa, m0, control,
+			    0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONTENT_FILTER */</span>
+
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">if</span> (error != EJUSTRETURN) {
+				<span class="enscript-keyword">if</span> (m0)
+					m_freem(m0);
+				<span class="enscript-keyword">if</span> (control != NULL &amp;&amp; !sb_unix)
+					m_freem(control);
+				<span class="enscript-keyword">if</span> (error_out)
+					*error_out = error;
+			}
+			<span class="enscript-keyword">return</span> (0);
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (m0) {
+		m0-&gt;m_flags &amp;= ~M_SKIPCFIL;
+	}
+
+	result = sbappendaddr_internal(sb, asa, m0, control);
+	<span class="enscript-keyword">if</span> (result == 0) {
+		<span class="enscript-keyword">if</span> (m0)
+			m_freem(m0);
+		<span class="enscript-keyword">if</span> (control != NULL &amp;&amp; !sb_unix)
+			m_freem(control);
+		<span class="enscript-keyword">if</span> (error_out)
+			*error_out = ENOBUFS;
+	}
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sbappendcontrol_internal</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> mbuf *m0,
+    <span class="enscript-type">struct</span> mbuf *control)
+{
+	<span class="enscript-type">struct</span> mbuf *m, *mlast, *n;
+	<span class="enscript-type">int</span> space = 0;
+
+	<span class="enscript-keyword">if</span> (control == 0)
+		panic(<span class="enscript-string">&quot;sbappendcontrol&quot;</span>);
+
+	<span class="enscript-keyword">for</span> (m = control; ; m = m-&gt;m_next) {
+		space += m-&gt;m_len;
+		<span class="enscript-keyword">if</span> (m-&gt;m_next == 0)
+			<span class="enscript-keyword">break</span>;
+	}
+	n = m;			<span class="enscript-comment">/* save pointer to last control buffer */</span>
+	<span class="enscript-keyword">for</span> (m = m0; m; m = m-&gt;m_next)
+		space += m-&gt;m_len;
+	<span class="enscript-keyword">if</span> (space &gt; sbspace(sb) &amp;&amp; !(sb-&gt;sb_flags &amp; SB_UNIX))
+		<span class="enscript-keyword">return</span> (0);
+	n-&gt;m_next = m0;			<span class="enscript-comment">/* concatenate data to control */</span>
+	SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbappendcontrol 1&quot;</span>);
+
+	<span class="enscript-keyword">for</span> (m = control; m-&gt;m_next != NULL; m = m-&gt;m_next)
+		sballoc(sb, m);
+	sballoc(sb, m);
+	mlast = m;
+
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_lastrecord != NULL) {
+		sb-&gt;sb_lastrecord-&gt;m_nextpkt = control;
+	} <span class="enscript-keyword">else</span> {
+		sb-&gt;sb_mb = control;
+	}
+	sb-&gt;sb_lastrecord = control;
+	sb-&gt;sb_mbtail = mlast;
+
+	SBLASTMBUFCHK(sb, __func__);
+	SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbappendcontrol 2&quot;</span>);
+
+	postevent(0, sb, EV_RWBYTES);
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbappendcontrol</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> mbuf	*m0, <span class="enscript-type">struct</span> mbuf *control,
+    <span class="enscript-type">int</span> *error_out)
+{
+	<span class="enscript-type">int</span> result = 0;
+	boolean_t sb_unix = (sb-&gt;sb_flags &amp; SB_UNIX);
+
+	<span class="enscript-keyword">if</span> (error_out)
+		*error_out = 0;
+
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_flags &amp; SB_DROP) {
+		<span class="enscript-keyword">if</span> (m0 != NULL)
+			m_freem(m0);
+		<span class="enscript-keyword">if</span> (control != NULL &amp;&amp; !sb_unix)
+			m_freem(control);
+		<span class="enscript-keyword">if</span> (error_out != NULL)
+			*error_out = EINVAL;
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_flags &amp; SB_RECV &amp;&amp; !(m0 &amp;&amp; m0-&gt;m_flags &amp; M_SKIPCFIL)) {
+		<span class="enscript-type">int</span> error;
+
+		error = sflt_data_in(sb-&gt;sb_so, NULL, &amp;m0, &amp;control, 0);
+		SBLASTRECORDCHK(sb, __func__);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONTENT_FILTER</span>
+		<span class="enscript-keyword">if</span> (error == 0)
+			error = cfil_sock_data_in(sb-&gt;sb_so, NULL, m0, control,
+			    0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONTENT_FILTER */</span>
+
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">if</span> (error != EJUSTRETURN) {
+				<span class="enscript-keyword">if</span> (m0)
+					m_freem(m0);
+				<span class="enscript-keyword">if</span> (control != NULL &amp;&amp; !sb_unix)
+					m_freem(control);
+				<span class="enscript-keyword">if</span> (error_out)
+					*error_out = error;
+			}
+			<span class="enscript-keyword">return</span> (0);
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (m0) {
+		m0-&gt;m_flags &amp;= ~M_SKIPCFIL;
+	}
+
+	result = sbappendcontrol_internal(sb, m0, control);
+	<span class="enscript-keyword">if</span> (result == 0) {
+		<span class="enscript-keyword">if</span> (m0)
+			m_freem(m0);
+		<span class="enscript-keyword">if</span> (control != NULL &amp;&amp; !sb_unix)
+			m_freem(control);
+		<span class="enscript-keyword">if</span> (error_out)
+			*error_out = ENOBUFS;
+	}
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ * Append a contiguous TCP data blob with TCP sequence number as control data
+ * as a new msg to the receive socket buffer.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbappendmsgstream_rcv</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> mbuf *m, uint32_t seqnum,
+    <span class="enscript-type">int</span> unordered)
+{
+	<span class="enscript-type">struct</span> mbuf *m_eor = NULL;
+	u_int32_t data_len = 0;
+	<span class="enscript-type">int</span> ret = 0;
+	<span class="enscript-type">struct</span> socket *so = sb-&gt;sb_so;
+
+	VERIFY((m-&gt;m_flags &amp; M_PKTHDR) &amp;&amp; m_pktlen(m) &gt; 0);
+	VERIFY(so-&gt;so_msg_state != NULL);
+	VERIFY(sb-&gt;sb_flags &amp; SB_RECV);
+
+	<span class="enscript-comment">/* Keep the TCP sequence number in the mbuf pkthdr */</span>
+	m-&gt;m_pkthdr.msg_seq = seqnum;
+
+	<span class="enscript-comment">/* find last mbuf and set M_EOR */</span>
+	<span class="enscript-keyword">for</span> (m_eor = m; ; m_eor = m_eor-&gt;m_next) {
+		<span class="enscript-comment">/*
+		 * If the msg is unordered, we need to account for
+		 * these bytes in receive socket buffer size. Otherwise,
+		 * the receive window advertised will shrink because
+		 * of the additional unordered bytes added to the
+		 * receive buffer.
+		 */</span>
+		<span class="enscript-keyword">if</span> (unordered) {
+			m_eor-&gt;m_flags |= M_UNORDERED_DATA;
+			data_len += m_eor-&gt;m_len;
+			so-&gt;so_msg_state-&gt;msg_uno_bytes += m_eor-&gt;m_len;
+		} <span class="enscript-keyword">else</span> {
+			m_eor-&gt;m_flags &amp;= ~M_UNORDERED_DATA;
+		}
+		<span class="enscript-keyword">if</span> (m_eor-&gt;m_next == NULL)
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/* set EOR flag at end of byte blob */</span>
+	m_eor-&gt;m_flags |= M_EOR;
+
+	<span class="enscript-comment">/* expand the receive socket buffer to allow unordered data */</span>
+	<span class="enscript-keyword">if</span> (unordered &amp;&amp; !sbreserve(sb, sb-&gt;sb_hiwat + data_len)) {
+		<span class="enscript-comment">/*
+		 * Could not allocate memory for unordered data, it
+		 * means this packet will have to be delivered in order
+		 */</span>
+		printf(<span class="enscript-string">&quot;%s: could not reserve space for unordered data\n&quot;</span>,
+		    __func__);
+	}
+
+	<span class="enscript-keyword">if</span> (!unordered &amp;&amp; (sb-&gt;sb_mbtail != NULL) &amp;&amp;
+		!(sb-&gt;sb_mbtail-&gt;m_flags &amp; M_UNORDERED_DATA)) {
+		sb-&gt;sb_mbtail-&gt;m_flags &amp;= ~M_EOR;
+		sbcompress(sb, m, sb-&gt;sb_mbtail);
+		ret = 1;
+	} <span class="enscript-keyword">else</span> {
+		ret = sbappendrecord(sb, m);
+	}
+	VERIFY(sb-&gt;sb_mbtail-&gt;m_flags &amp; M_EOR);
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-comment">/*
+ * TCP streams have message based out of order delivery support, or have
+ * Multipath TCP support, or are regular TCP sockets
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbappendstream_rcvdemux</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> mbuf *m, uint32_t seqnum,
+	<span class="enscript-type">int</span> unordered)
+{
+	<span class="enscript-type">int</span> ret = 0;
+
+	<span class="enscript-keyword">if</span> ((m != NULL) &amp;&amp; (m_pktlen(m) &lt;= 0)) {
+		m_freem(m);
+		<span class="enscript-keyword">return</span> (ret);
+	}
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_flags &amp; SOF_ENABLE_MSGS) {
+		ret = sbappendmsgstream_rcv(&amp;so-&gt;so_rcv, m, seqnum, unordered);
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MPTCP</span>
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (so-&gt;so_flags &amp; SOF_MPTCP_TRUE) {
+		ret = sbappendmptcpstream_rcv(&amp;so-&gt;so_rcv, m);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MPTCP */</span>
+	<span class="enscript-keyword">else</span> {
+		ret = sbappendstream(&amp;so-&gt;so_rcv, m);
+	}
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MPTCP</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbappendmptcpstream_rcv</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">struct</span> socket *so = sb-&gt;sb_so;
+
+	VERIFY(m == NULL || (m-&gt;m_flags &amp; M_PKTHDR));
+	<span class="enscript-comment">/* SB_NOCOMPRESS must be set prevent loss of M_PKTHDR data */</span>
+	VERIFY((sb-&gt;sb_flags &amp; (SB_RECV|SB_NOCOMPRESS)) ==
+	    (SB_RECV|SB_NOCOMPRESS));
+
+	<span class="enscript-keyword">if</span> (m == NULL || m_pktlen(m) == 0 || (sb-&gt;sb_flags &amp; SB_DROP) ||
+	    (so-&gt;so_state &amp; SS_CANTRCVMORE)) {
+		<span class="enscript-keyword">if</span> (m != NULL)
+			m_freem(m);
+		<span class="enscript-keyword">return</span> (0);
+	}
+	<span class="enscript-comment">/* the socket is not closed, so SOF_MP_SUBFLOW must be set */</span>
+	VERIFY(so-&gt;so_flags &amp; SOF_MP_SUBFLOW);
+
+	<span class="enscript-keyword">if</span> (m-&gt;m_nextpkt != NULL || (sb-&gt;sb_mb != sb-&gt;sb_lastrecord)) {
+		panic(<span class="enscript-string">&quot;%s: nexpkt %p || mb %p != lastrecord %p\n&quot;</span>, __func__,
+		    m-&gt;m_nextpkt, sb-&gt;sb_mb, sb-&gt;sb_lastrecord);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	SBLASTMBUFCHK(sb, __func__);
+
+	<span class="enscript-keyword">if</span> (mptcp_adj_rmap(so, m) != 0)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-comment">/* No filter support (SB_RECV) on mptcp subflow sockets */</span>
+
+	sbcompress(sb, m, sb-&gt;sb_mbtail);
+	sb-&gt;sb_lastrecord = sb-&gt;sb_mb;
+	SBLASTRECORDCHK(sb, __func__);
+	<span class="enscript-keyword">return</span> (1);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MPTCP */</span>
+
+<span class="enscript-comment">/*
+ * Append message to send socket buffer based on priority.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbappendmsg_snd</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">struct</span> socket *so = sb-&gt;sb_so;
+	<span class="enscript-type">struct</span> msg_priq *priq;
+	<span class="enscript-type">int</span> set_eor = 0;
+
+	VERIFY(so-&gt;so_msg_state != NULL);
+
+	<span class="enscript-keyword">if</span> (m-&gt;m_nextpkt != NULL || (sb-&gt;sb_mb != sb-&gt;sb_lastrecord))
+		panic(<span class="enscript-string">&quot;sbappendstream: nexpkt %p || mb %p != lastrecord %p\n&quot;</span>,
+		    m-&gt;m_nextpkt, sb-&gt;sb_mb, sb-&gt;sb_lastrecord);
+
+	SBLASTMBUFCHK(sb, __func__);
+
+	<span class="enscript-keyword">if</span> (m == NULL || (sb-&gt;sb_flags &amp; SB_DROP) || so-&gt;so_msg_state == NULL) {
+		<span class="enscript-keyword">if</span> (m != NULL)
+			m_freem(m);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	priq = &amp;so-&gt;so_msg_state-&gt;msg_priq[m-&gt;m_pkthdr.msg_pri];
+
+	<span class="enscript-comment">/* note if we need to propogate M_EOR to the last mbuf */</span>
+	<span class="enscript-keyword">if</span> (m-&gt;m_flags &amp; M_EOR) {
+		set_eor = 1;
+
+		<span class="enscript-comment">/* Reset M_EOR from the first mbuf */</span>
+		m-&gt;m_flags &amp;= ~(M_EOR);
+	}
+
+	<span class="enscript-keyword">if</span> (priq-&gt;msgq_head == NULL) {
+		VERIFY(priq-&gt;msgq_tail == NULL &amp;&amp; priq-&gt;msgq_lastmsg == NULL);
+		priq-&gt;msgq_head = priq-&gt;msgq_lastmsg = m;
+	} <span class="enscript-keyword">else</span> {
+		VERIFY(priq-&gt;msgq_tail-&gt;m_next == NULL);
+
+		<span class="enscript-comment">/* Check if the last message has M_EOR flag set */</span>
+		<span class="enscript-keyword">if</span> (priq-&gt;msgq_tail-&gt;m_flags &amp; M_EOR) {
+			<span class="enscript-comment">/* Insert as a new message */</span>
+			priq-&gt;msgq_lastmsg-&gt;m_nextpkt = m;
+
+			<span class="enscript-comment">/* move the lastmsg pointer */</span>
+			priq-&gt;msgq_lastmsg = m;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* Append to the existing message */</span>
+			priq-&gt;msgq_tail-&gt;m_next = m;
+		}
+	}
+
+	<span class="enscript-comment">/* Update accounting and the queue tail pointer */</span>
+
+	<span class="enscript-keyword">while</span> (m-&gt;m_next != NULL) {
+		sballoc(sb, m);
+		priq-&gt;msgq_bytes += m-&gt;m_len;
+		m = m-&gt;m_next;
+	}
+	sballoc(sb, m);
+	priq-&gt;msgq_bytes += m-&gt;m_len;
+
+	<span class="enscript-keyword">if</span> (set_eor) {
+		m-&gt;m_flags |= M_EOR;
+
+		<span class="enscript-comment">/*
+		 * Since the user space can not write a new msg
+		 * without completing the previous one, we can
+		 * reset this flag to start sending again.
+		 */</span>
+		priq-&gt;msgq_flags &amp;= ~(MSGQ_MSG_NOTDONE);
+	}
+
+	priq-&gt;msgq_tail = m;
+
+	SBLASTRECORDCHK(sb, <span class="enscript-string">&quot;sbappendstream 2&quot;</span>);
+	postevent(0, sb, EV_RWBYTES);
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/*
+ * Pull data from priority queues to the serial snd queue
+ * right before sending.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sbpull_unordered_data</span>(<span class="enscript-type">struct</span> socket *so, int32_t off, int32_t len)
+{
+	int32_t topull, i;
+	<span class="enscript-type">struct</span> msg_priq *priq = NULL;
+
+	VERIFY(so-&gt;so_msg_state != NULL);
+
+	topull = (off + len) - so-&gt;so_msg_state-&gt;msg_serial_bytes;
+
+	i = MSG_PRI_MAX;
+	<span class="enscript-keyword">while</span> (i &gt;= MSG_PRI_MIN &amp;&amp; topull &gt; 0) {
+		<span class="enscript-type">struct</span> mbuf *m = NULL, *mqhead = NULL, *mend = NULL;
+		priq = &amp;so-&gt;so_msg_state-&gt;msg_priq[i];
+		<span class="enscript-keyword">if</span> ((priq-&gt;msgq_flags &amp; MSGQ_MSG_NOTDONE) &amp;&amp;
+		    priq-&gt;msgq_head == NULL) {
+			<span class="enscript-comment">/*
+			 * We were in the middle of sending
+			 * a message and we have not seen the
+			 * end of it.
+			 */</span>
+			VERIFY(priq-&gt;msgq_lastmsg == NULL &amp;&amp;
+			    priq-&gt;msgq_tail == NULL);
+			<span class="enscript-keyword">return</span>;
+		}
+		<span class="enscript-keyword">if</span> (priq-&gt;msgq_head != NULL) {
+			int32_t bytes = 0, topull_tmp = topull;
+			<span class="enscript-comment">/*
+			 * We found a msg while scanning the priority
+			 * queue from high to low priority.
+			 */</span>
+			m = priq-&gt;msgq_head;
+			mqhead = m;
+			mend = m;
+
+			<span class="enscript-comment">/*
+			 * Move bytes from the priority queue to the
+			 * serial queue. Compute the number of bytes
+			 * being added.
+			 */</span>
+			<span class="enscript-keyword">while</span> (mqhead-&gt;m_next != NULL &amp;&amp; topull_tmp &gt; 0) {
+				bytes += mqhead-&gt;m_len;
+				topull_tmp -= mqhead-&gt;m_len;
+				mend = mqhead;
+				mqhead = mqhead-&gt;m_next;
+			}
+
+			<span class="enscript-keyword">if</span> (mqhead-&gt;m_next == NULL) {
+				<span class="enscript-comment">/*
+				 * If we have only one more mbuf left,
+				 * move the last mbuf of this message to
+				 * serial queue and set the head of the
+				 * queue to be the next message.
+				 */</span>
+				bytes += mqhead-&gt;m_len;
+				mend = mqhead;
+				mqhead = m-&gt;m_nextpkt;
+				<span class="enscript-keyword">if</span> (!(mend-&gt;m_flags &amp; M_EOR)) {
+					<span class="enscript-comment">/*
+					 * We have not seen the end of
+					 * this message, so we can not
+					 * pull anymore.
+					 */</span>
+					priq-&gt;msgq_flags |= MSGQ_MSG_NOTDONE;
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-comment">/* Reset M_EOR */</span>
+					mend-&gt;m_flags &amp;= ~(M_EOR);
+				}
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* propogate the next msg pointer */</span>
+				mqhead-&gt;m_nextpkt = m-&gt;m_nextpkt;
+			}
+			priq-&gt;msgq_head = mqhead;
+
+			<span class="enscript-comment">/*
+			 * if the lastmsg pointer points to
+			 * the mbuf that is being dequeued, update
+			 * it to point to the new head.
+			 */</span>
+			<span class="enscript-keyword">if</span> (priq-&gt;msgq_lastmsg == m)
+				priq-&gt;msgq_lastmsg = priq-&gt;msgq_head;
+
+			m-&gt;m_nextpkt = NULL;
+			mend-&gt;m_next = NULL;
+
+			<span class="enscript-keyword">if</span> (priq-&gt;msgq_head == NULL) {
+				<span class="enscript-comment">/* Moved all messages, update tail */</span>
+				priq-&gt;msgq_tail = NULL;
+				VERIFY(priq-&gt;msgq_lastmsg == NULL);
+			}
+
+			<span class="enscript-comment">/* Move it to serial sb_mb queue */</span>
+			<span class="enscript-keyword">if</span> (so-&gt;so_snd.sb_mb == NULL) {
+				so-&gt;so_snd.sb_mb = m;
+			} <span class="enscript-keyword">else</span> {
+				so-&gt;so_snd.sb_mbtail-&gt;m_next = m;
+			}
+
+			priq-&gt;msgq_bytes -= bytes;
+			VERIFY(priq-&gt;msgq_bytes &gt;= 0);
+			sbwakeup(&amp;so-&gt;so_snd);
+
+			so-&gt;so_msg_state-&gt;msg_serial_bytes += bytes;
+			so-&gt;so_snd.sb_mbtail = mend;
+			so-&gt;so_snd.sb_lastrecord = so-&gt;so_snd.sb_mb;
+
+			topull =
+			    (off + len) - so-&gt;so_msg_state-&gt;msg_serial_bytes;
+
+			<span class="enscript-keyword">if</span> (priq-&gt;msgq_flags &amp; MSGQ_MSG_NOTDONE)
+				<span class="enscript-keyword">break</span>;
+		} <span class="enscript-keyword">else</span> {
+			--i;
+		}
+	}
+	sblastrecordchk(&amp;so-&gt;so_snd, <span class="enscript-string">&quot;sbpull_unordered_data&quot;</span>);
+	sblastmbufchk(&amp;so-&gt;so_snd, <span class="enscript-string">&quot;sbpull_unordered_data&quot;</span>);
+}
+
+<span class="enscript-comment">/*
+ * Compress mbuf chain m into the socket
+ * buffer sb following mbuf n.  If n
+ * is null, the buffer is presumed empty.
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">sbcompress</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> mbuf *n)
+{
+	<span class="enscript-type">int</span> eor = 0, compress = (!(sb-&gt;sb_flags &amp; SB_NOCOMPRESS));
+	<span class="enscript-type">struct</span> mbuf *o;
+
+	<span class="enscript-keyword">if</span> (m == NULL) {
+		<span class="enscript-comment">/* There is nothing to compress; just update the tail */</span>
+		<span class="enscript-keyword">for</span> (; n-&gt;m_next != NULL; n = n-&gt;m_next)
+			;
+		sb-&gt;sb_mbtail = n;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">while</span> (m != NULL) {
+		eor |= m-&gt;m_flags &amp; M_EOR;
+		<span class="enscript-keyword">if</span> (compress &amp;&amp; m-&gt;m_len == 0 &amp;&amp; (eor == 0 ||
+		    (((o = m-&gt;m_next) || (o = n)) &amp;&amp; o-&gt;m_type == m-&gt;m_type))) {
+			<span class="enscript-keyword">if</span> (sb-&gt;sb_lastrecord == m)
+				sb-&gt;sb_lastrecord = m-&gt;m_next;
+			m = m_free(m);
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> (compress &amp;&amp; n != NULL &amp;&amp; (n-&gt;m_flags &amp; M_EOR) == 0 &amp;&amp;
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__APPLE__</span>
+		    M_WRITABLE(n) &amp;&amp;
+#<span class="enscript-reference">endif</span>
+		    m-&gt;m_len &lt;= MCLBYTES / 4 &amp;&amp; <span class="enscript-comment">/* XXX: Don't copy too much */</span>
+		    m-&gt;m_len &lt;= M_TRAILINGSPACE(n) &amp;&amp;
+		    n-&gt;m_type == m-&gt;m_type) {
+			bcopy(mtod(m, caddr_t), mtod(n, caddr_t) + n-&gt;m_len,
+			    (<span class="enscript-type">unsigned</span>)m-&gt;m_len);
+			n-&gt;m_len += m-&gt;m_len;
+			sb-&gt;sb_cc += m-&gt;m_len;
+			<span class="enscript-keyword">if</span> (m-&gt;m_type != MT_DATA &amp;&amp; m-&gt;m_type != MT_HEADER &amp;&amp;
+			    m-&gt;m_type != MT_OOBDATA) {
+				<span class="enscript-comment">/* XXX: Probably don't need */</span>
+				sb-&gt;sb_ctl += m-&gt;m_len;
+			}
+			m = m_free(m);
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> (n != NULL)
+			n-&gt;m_next = m;
+		<span class="enscript-keyword">else</span>
+			sb-&gt;sb_mb = m;
+		sb-&gt;sb_mbtail = m;
+		sballoc(sb, m);
+		n = m;
+		m-&gt;m_flags &amp;= ~M_EOR;
+		m = m-&gt;m_next;
+		n-&gt;m_next = NULL;
+	}
+	<span class="enscript-keyword">if</span> (eor != 0) {
+		<span class="enscript-keyword">if</span> (n != NULL)
+			n-&gt;m_flags |= eor;
+		<span class="enscript-keyword">else</span>
+			printf(<span class="enscript-string">&quot;semi-panic: sbcompress\n&quot;</span>);
+	}
+<span class="enscript-reference">done</span>:
+	SBLASTMBUFCHK(sb, __func__);
+	postevent(0, sb, EV_RWBYTES);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sb_empty_assert</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *where)
+{
+	<span class="enscript-keyword">if</span> (!(sb-&gt;sb_cc == 0 &amp;&amp; sb-&gt;sb_mb == NULL &amp;&amp; sb-&gt;sb_mbcnt == 0 &amp;&amp;
+	    sb-&gt;sb_mbtail == NULL &amp;&amp; sb-&gt;sb_lastrecord == NULL)) {
+		panic(<span class="enscript-string">&quot;%s: sb %p so %p cc %d mbcnt %d mb %p mbtail %p &quot;</span>
+		    <span class="enscript-string">&quot;lastrecord %p\n&quot;</span>, where, sb, sb-&gt;sb_so, sb-&gt;sb_cc,
+		    sb-&gt;sb_mbcnt, sb-&gt;sb_mb, sb-&gt;sb_mbtail,
+		    sb-&gt;sb_lastrecord);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sbflush_priq</span>(<span class="enscript-type">struct</span> msg_priq *priq)
+{
+	<span class="enscript-type">struct</span> mbuf *m;
+	m = priq-&gt;msgq_head;
+	<span class="enscript-keyword">if</span> (m != NULL)
+		m_freem_list(m);
+	priq-&gt;msgq_head = priq-&gt;msgq_tail = priq-&gt;msgq_lastmsg = NULL;
+	priq-&gt;msgq_bytes = priq-&gt;msgq_flags = 0;
+}
+
+<span class="enscript-comment">/*
+ * Free all mbufs in a sockbuf.
+ * Check that all resources are reclaimed.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sbflush</span>(<span class="enscript-type">struct</span> sockbuf *sb)
+{
+	<span class="enscript-type">void</span> *lr_saved = __builtin_return_address(0);
+	<span class="enscript-type">struct</span> socket *so = sb-&gt;sb_so;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">notyet</span>
+	lck_mtx_t *mutex_held;
+#<span class="enscript-reference">endif</span>
+	u_int32_t i;
+
+	<span class="enscript-comment">/* so_usecount may be 0 if we get here from sofreelastref() */</span>
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		panic(<span class="enscript-string">&quot;%s: null so, sb=%p sb_flags=0x%x lr=%p\n&quot;</span>,
+		    __func__, sb, sb-&gt;sb_flags, lr_saved);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (so-&gt;so_usecount &lt; 0) {
+		panic(<span class="enscript-string">&quot;%s: sb=%p sb_flags=0x%x sb_so=%p usecount=%d lr=%p &quot;</span>
+		    <span class="enscript-string">&quot;lrh= %s\n&quot;</span>, __func__, sb, sb-&gt;sb_flags, so,
+		    so-&gt;so_usecount, lr_saved, solockhistory_nr(so));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">notyet</span>
+	<span class="enscript-comment">/*
+	 * XXX: This code is currently commented out, because we may get here
+	 * as part of sofreelastref(), and at that time, pr_getlock() may no
+	 * longer be able to return us the lock; this will be fixed in future.
+	 */</span>
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_getlock != NULL)
+		mutex_held = (*so-&gt;so_proto-&gt;pr_getlock)(so, 0);
+	<span class="enscript-keyword">else</span>
+		mutex_held = so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+
+	lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * Obtain lock on the socket buffer (SB_LOCK).  This is required
+	 * to prevent the socket buffer from being unexpectedly altered
+	 * while it is used by another thread in socket send/receive.
+	 *
+	 * sblock() must not fail here, hence the assertion.
+	 */</span>
+	(<span class="enscript-type">void</span>) sblock(sb, SBL_WAIT | SBL_NOINTR | SBL_IGNDEFUNCT);
+	VERIFY(sb-&gt;sb_flags &amp; SB_LOCK);
+
+	<span class="enscript-keyword">while</span> (sb-&gt;sb_mbcnt &gt; 0) {
+		<span class="enscript-comment">/*
+		 * Don't call sbdrop(sb, 0) if the leading mbuf is non-empty:
+		 * we would loop forever. Panic instead.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!sb-&gt;sb_cc &amp;&amp; (sb-&gt;sb_mb == NULL || sb-&gt;sb_mb-&gt;m_len))
+			<span class="enscript-keyword">break</span>;
+		sbdrop(sb, (<span class="enscript-type">int</span>)sb-&gt;sb_cc);
+	}
+
+	<span class="enscript-keyword">if</span> (!(sb-&gt;sb_flags &amp; SB_RECV) &amp;&amp; (so-&gt;so_flags &amp; SOF_ENABLE_MSGS)) {
+		VERIFY(so-&gt;so_msg_state != NULL);
+		<span class="enscript-keyword">for</span> (i = MSG_PRI_MIN; i &lt;= MSG_PRI_MAX; ++i) {
+			sbflush_priq(&amp;so-&gt;so_msg_state-&gt;msg_priq[i]);
+		}
+		so-&gt;so_msg_state-&gt;msg_serial_bytes = 0;
+		so-&gt;so_msg_state-&gt;msg_uno_bytes = 0;
+	}
+
+	sb_empty_assert(sb, __func__);
+	postevent(0, sb, EV_RWBYTES);
+
+	sbunlock(sb, TRUE);	<span class="enscript-comment">/* keep socket locked */</span>
+}
+
+<span class="enscript-comment">/*
+ * Drop data from (the front of) a sockbuf.
+ * use m_freem_list to free the mbuf structures
+ * under a single lock... this is done by pruning
+ * the top of the tree from the body by keeping track
+ * of where we get to in the tree and then zeroing the
+ * two pertinent pointers m_nextpkt and m_next
+ * the socket buffer is then updated to point at the new
+ * top of the tree and the pruned area is released via
+ * m_freem_list.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sbdrop</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">int</span> len)
+{
+	<span class="enscript-type">struct</span> mbuf *m, *free_list, *ml;
+	<span class="enscript-type">struct</span> mbuf *next, *last;
+
+	next = (m = sb-&gt;sb_mb) ? m-&gt;m_nextpkt : 0;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MPTCP</span>
+	<span class="enscript-keyword">if</span> ((m != NULL) &amp;&amp; (len &gt; 0) &amp;&amp;
+	    (!(sb-&gt;sb_flags &amp; SB_RECV)) &amp;&amp;
+	    ((sb-&gt;sb_so-&gt;so_flags &amp; SOF_MP_SUBFLOW) ||
+	    ((SOCK_CHECK_DOM(sb-&gt;sb_so, PF_MULTIPATH)) &amp;&amp;
+	    (SOCK_CHECK_PROTO(sb-&gt;sb_so, IPPROTO_TCP)))) &amp;&amp;
+	    (!(sb-&gt;sb_so-&gt;so_flags1 &amp; SOF1_POST_FALLBACK_SYNC))) {
+		mptcp_preproc_sbdrop(m, (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)len);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MPTCP */</span>
+	KERNEL_DEBUG((DBG_FNC_SBDROP | DBG_FUNC_START), sb, len, 0, 0, 0);
+
+	free_list = last = m;
+	ml = (<span class="enscript-type">struct</span> mbuf *)0;
+
+	<span class="enscript-keyword">while</span> (len &gt; 0) {
+		<span class="enscript-keyword">if</span> (m == 0) {
+			<span class="enscript-keyword">if</span> (next == 0) {
+				<span class="enscript-comment">/*
+				 * temporarily replacing this panic with printf
+				 * because it occurs occasionally when closing
+				 * a socket when there is no harm in ignoring
+				 * it. This problem will be investigated
+				 * further.
+				 */</span>
+				<span class="enscript-comment">/* panic(&quot;sbdrop&quot;); */</span>
+				printf(<span class="enscript-string">&quot;sbdrop - count not zero\n&quot;</span>);
+				len = 0;
+				<span class="enscript-comment">/*
+				 * zero the counts. if we have no mbufs,
+				 * we have no data (PR-2986815)
+				 */</span>
+				sb-&gt;sb_cc = 0;
+				sb-&gt;sb_mbcnt = 0;
+				<span class="enscript-keyword">if</span> (!(sb-&gt;sb_flags &amp; SB_RECV) &amp;&amp;
+				    (sb-&gt;sb_so-&gt;so_flags &amp; SOF_ENABLE_MSGS)) {
+					sb-&gt;sb_so-&gt;so_msg_state-&gt;
+					    msg_serial_bytes = 0;
+				}
+				<span class="enscript-keyword">break</span>;
+			}
+			m = last = next;
+			next = m-&gt;m_nextpkt;
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> (m-&gt;m_len &gt; len) {
+			m-&gt;m_len -= len;
+			m-&gt;m_data += len;
+			sb-&gt;sb_cc -= len;
+			<span class="enscript-keyword">if</span> (m-&gt;m_type != MT_DATA &amp;&amp; m-&gt;m_type != MT_HEADER &amp;&amp;
+			    m-&gt;m_type != MT_OOBDATA)
+				sb-&gt;sb_ctl -= len;
+			<span class="enscript-keyword">break</span>;
+		}
+		len -= m-&gt;m_len;
+		sbfree(sb, m);
+
+		ml = m;
+		m = m-&gt;m_next;
+	}
+	<span class="enscript-keyword">while</span> (m &amp;&amp; m-&gt;m_len == 0) {
+		sbfree(sb, m);
+
+		ml = m;
+		m = m-&gt;m_next;
+	}
+	<span class="enscript-keyword">if</span> (ml) {
+		ml-&gt;m_next = (<span class="enscript-type">struct</span> mbuf *)0;
+		last-&gt;m_nextpkt = (<span class="enscript-type">struct</span> mbuf *)0;
+		m_freem_list(free_list);
+	}
+	<span class="enscript-keyword">if</span> (m) {
+		sb-&gt;sb_mb = m;
+		m-&gt;m_nextpkt = next;
+	} <span class="enscript-keyword">else</span> {
+		sb-&gt;sb_mb = next;
+	}
+
+	<span class="enscript-comment">/*
+	 * First part is an inline SB_EMPTY_FIXUP().  Second part
+	 * makes sure sb_lastrecord is up-to-date if we dropped
+	 * part of the last record.
+	 */</span>
+	m = sb-&gt;sb_mb;
+	<span class="enscript-keyword">if</span> (m == NULL) {
+		sb-&gt;sb_mbtail = NULL;
+		sb-&gt;sb_lastrecord = NULL;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (m-&gt;m_nextpkt == NULL) {
+		sb-&gt;sb_lastrecord = m;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONTENT_FILTER</span>
+	cfil_sock_buf_update(sb);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONTENT_FILTER */</span>
+
+	postevent(0, sb, EV_RWBYTES);
+
+	KERNEL_DEBUG((DBG_FNC_SBDROP | DBG_FUNC_END), sb, 0, 0, 0, 0);
+}
+
+<span class="enscript-comment">/*
+ * Drop a record off the front of a sockbuf
+ * and move the next record to the front.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sbdroprecord</span>(<span class="enscript-type">struct</span> sockbuf *sb)
+{
+	<span class="enscript-type">struct</span> mbuf *m, *mn;
+
+	m = sb-&gt;sb_mb;
+	<span class="enscript-keyword">if</span> (m) {
+		sb-&gt;sb_mb = m-&gt;m_nextpkt;
+		<span class="enscript-keyword">do</span> {
+			sbfree(sb, m);
+			MFREE(m, mn);
+			m = mn;
+		} <span class="enscript-keyword">while</span> (m);
+	}
+	SB_EMPTY_FIXUP(sb);
+	postevent(0, sb, EV_RWBYTES);
+}
+
+<span class="enscript-comment">/*
+ * Create a &quot;control&quot; mbuf containing the specified data
+ * with the specified type for presentation on a socket buffer.
+ */</span>
+<span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">sbcreatecontrol</span>(caddr_t p, <span class="enscript-type">int</span> size, <span class="enscript-type">int</span> type, <span class="enscript-type">int</span> level)
+{
+	<span class="enscript-type">struct</span> cmsghdr *cp;
+	<span class="enscript-type">struct</span> mbuf *m;
+
+	<span class="enscript-keyword">if</span> (CMSG_SPACE((u_int)size) &gt; MLEN)
+		<span class="enscript-keyword">return</span> ((<span class="enscript-type">struct</span> mbuf *)NULL);
+	<span class="enscript-keyword">if</span> ((m = m_get(M_DONTWAIT, MT_CONTROL)) == NULL)
+		<span class="enscript-keyword">return</span> ((<span class="enscript-type">struct</span> mbuf *)NULL);
+	cp = mtod(m, <span class="enscript-type">struct</span> cmsghdr *);
+	VERIFY(IS_P2ALIGNED(cp, <span class="enscript-keyword">sizeof</span> (u_int32_t)));
+	<span class="enscript-comment">/* XXX check size? */</span>
+	(<span class="enscript-type">void</span>) memcpy(CMSG_DATA(cp), p, size);
+	m-&gt;m_len = CMSG_SPACE(size);
+	cp-&gt;cmsg_len = CMSG_LEN(size);
+	cp-&gt;cmsg_level = level;
+	cp-&gt;cmsg_type = type;
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-type">struct</span> mbuf **
+<span class="enscript-function-name">sbcreatecontrol_mbuf</span>(caddr_t p, <span class="enscript-type">int</span> size, <span class="enscript-type">int</span> type, <span class="enscript-type">int</span> level, <span class="enscript-type">struct</span> mbuf **mp)
+{
+	<span class="enscript-type">struct</span> mbuf *m;
+	<span class="enscript-type">struct</span> cmsghdr *cp;
+
+	<span class="enscript-keyword">if</span> (*mp == NULL) {
+		*mp = sbcreatecontrol(p, size, type, level);
+		<span class="enscript-keyword">return</span> (mp);
+	}
+
+	<span class="enscript-keyword">if</span> (CMSG_SPACE((u_int)size) + (*mp)-&gt;m_len &gt; MLEN) {
+		mp = &amp;(*mp)-&gt;m_next;
+		*mp = sbcreatecontrol(p, size, type, level);
+		<span class="enscript-keyword">return</span> (mp);
+	}
+
+	m = *mp;
+
+	cp = (<span class="enscript-type">struct</span> cmsghdr *)(<span class="enscript-type">void</span> *)(mtod(m, <span class="enscript-type">char</span> *) + m-&gt;m_len);
+	<span class="enscript-comment">/* CMSG_SPACE ensures 32-bit alignment */</span>
+	VERIFY(IS_P2ALIGNED(cp, <span class="enscript-keyword">sizeof</span> (u_int32_t)));
+	m-&gt;m_len += CMSG_SPACE(size);
+
+	<span class="enscript-comment">/* XXX check size? */</span>
+	(<span class="enscript-type">void</span>) memcpy(CMSG_DATA(cp), p, size);
+	cp-&gt;cmsg_len = CMSG_LEN(size);
+	cp-&gt;cmsg_level = level;
+	cp-&gt;cmsg_type = type;
+
+	<span class="enscript-keyword">return</span> (mp);
+}
+
+
+<span class="enscript-comment">/*
+ * Some routines that return EOPNOTSUPP for entry points that are not
+ * supported by a protocol.  Fill in as needed.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_abort_notsupp</span>(<span class="enscript-type">struct</span> socket *so)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_accept_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr **nam)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">nam</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_attach_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> proto, <span class="enscript-type">struct</span> proc *p)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">proto</span>, <span class="enscript-variable-name">p</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_bind_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr *nam, <span class="enscript-type">struct</span> proc *p)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">nam</span>, <span class="enscript-variable-name">p</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_connect_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr *nam, <span class="enscript-type">struct</span> proc *p)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">nam</span>, <span class="enscript-variable-name">p</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_connect2_notsupp</span>(<span class="enscript-type">struct</span> socket *so1, <span class="enscript-type">struct</span> socket *so2)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so1</span>, <span class="enscript-variable-name">so2</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_connectx_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr_list **src_sl,
+    <span class="enscript-type">struct</span> sockaddr_list **dst_sl, <span class="enscript-type">struct</span> proc *p, uint32_t ifscope,
+    sae_associd_t aid, sae_connid_t *pcid, uint32_t flags, <span class="enscript-type">void</span> *arg,
+    uint32_t arglen, <span class="enscript-type">struct</span> uio *uio, user_ssize_t *bytes_written)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">src_sl</span>, <span class="enscript-variable-name">dst_sl</span>, <span class="enscript-variable-name">p</span>, <span class="enscript-variable-name">ifscope</span>, <span class="enscript-variable-name">aid</span>, <span class="enscript-variable-name">pcid</span>, <span class="enscript-variable-name">flags</span>, <span class="enscript-variable-name">arg</span>, <span class="enscript-variable-name">arglen</span>, <span class="enscript-variable-name">uio</span>, <span class="enscript-variable-name">bytes_written</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_control_notsupp</span>(<span class="enscript-type">struct</span> socket *so, u_long cmd, caddr_t data,
+    <span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> proc *p)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">cmd</span>, <span class="enscript-variable-name">data</span>, <span class="enscript-variable-name">ifp</span>, <span class="enscript-variable-name">p</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_detach_notsupp</span>(<span class="enscript-type">struct</span> socket *so)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_disconnect_notsupp</span>(<span class="enscript-type">struct</span> socket *so)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_disconnectx_notsupp</span>(<span class="enscript-type">struct</span> socket *so, sae_associd_t aid, sae_connid_t cid)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">aid</span>, <span class="enscript-variable-name">cid</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_listen_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> proc *p)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">p</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_peeloff_notsupp</span>(<span class="enscript-type">struct</span> socket *so, sae_associd_t aid, <span class="enscript-type">struct</span> socket **psop)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">aid</span>, <span class="enscript-variable-name">psop</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_peeraddr_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr **nam)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">nam</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_rcvd_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">flags</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_rcvoob_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">m</span>, <span class="enscript-variable-name">flags</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_send_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> flags, <span class="enscript-type">struct</span> mbuf *m,
+    <span class="enscript-type">struct</span> sockaddr *addr, <span class="enscript-type">struct</span> mbuf *control, <span class="enscript-type">struct</span> proc *p)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">flags</span>, <span class="enscript-variable-name">m</span>, <span class="enscript-variable-name">addr</span>, <span class="enscript-variable-name">control</span>, <span class="enscript-variable-name">p</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_send_list_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> flags, <span class="enscript-type">struct</span> mbuf *m,
+    <span class="enscript-type">struct</span> sockaddr *addr, <span class="enscript-type">struct</span> mbuf *control, <span class="enscript-type">struct</span> proc *p)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">flags</span>, <span class="enscript-variable-name">m</span>, <span class="enscript-variable-name">addr</span>, <span class="enscript-variable-name">control</span>, <span class="enscript-variable-name">p</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-comment">/*
+ * This isn't really a ``null'' operation, but it's the default one
+ * and doesn't do anything destructive.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_sense_null</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">void</span> *ub, <span class="enscript-type">int</span> isstat64)
+{
+	<span class="enscript-keyword">if</span> (isstat64 != 0) {
+		<span class="enscript-type">struct</span> stat64 *sb64;
+
+		sb64 = (<span class="enscript-type">struct</span> stat64 *)ub;
+		sb64-&gt;st_blksize = so-&gt;so_snd.sb_hiwat;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> stat *sb;
+
+		sb = (<span class="enscript-type">struct</span> stat *)ub;
+		sb-&gt;st_blksize = so-&gt;so_snd.sb_hiwat;
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_sosend_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr *addr, <span class="enscript-type">struct</span> uio *uio,
+    <span class="enscript-type">struct</span> mbuf *top, <span class="enscript-type">struct</span> mbuf *control, <span class="enscript-type">int</span> flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">addr</span>, <span class="enscript-variable-name">uio</span>, <span class="enscript-variable-name">top</span>, <span class="enscript-variable-name">control</span>, <span class="enscript-variable-name">flags</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_sosend_list_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> uio **uio,
+    u_int uiocnt, <span class="enscript-type">int</span> flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">uio</span>, <span class="enscript-variable-name">uiocnt</span>, <span class="enscript-variable-name">flags</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_soreceive_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr **paddr,
+    <span class="enscript-type">struct</span> uio *uio, <span class="enscript-type">struct</span> mbuf **mp0, <span class="enscript-type">struct</span> mbuf **controlp, <span class="enscript-type">int</span> *flagsp)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">paddr</span>, <span class="enscript-variable-name">uio</span>, <span class="enscript-variable-name">mp0</span>, <span class="enscript-variable-name">controlp</span>, <span class="enscript-variable-name">flagsp</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_soreceive_list_notsupp</span>(<span class="enscript-type">struct</span> socket *so, 
+    <span class="enscript-type">struct</span> recv_msg_elem *recv_msg_array, u_int uiocnt, <span class="enscript-type">int</span> *flagsp)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">recv_msg_array</span>, <span class="enscript-variable-name">uiocnt</span>, <span class="enscript-variable-name">flagsp</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_shutdown_notsupp</span>(<span class="enscript-type">struct</span> socket *so)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_sockaddr_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr **nam)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">nam</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_sopoll_notsupp</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> events, kauth_cred_t cred, <span class="enscript-type">void</span> *wql)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">events</span>, <span class="enscript-variable-name">cred</span>, <span class="enscript-variable-name">wql</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_socheckopt_null</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">sopt</span>)
+	<span class="enscript-comment">/*
+	 * Allow all options for set/get by default.
+	 */</span>
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pru_preconnect_null</span>(<span class="enscript-type">struct</span> socket *so)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>)
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pru_sanitize</span>(<span class="enscript-type">struct</span> pr_usrreqs *pru)
+{
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">DEFAULT</span>(foo, bar)	if ((foo) == NULL) (foo) = (bar)
+	DEFAULT(pru-&gt;pru_abort, pru_abort_notsupp);
+	DEFAULT(pru-&gt;pru_accept, pru_accept_notsupp);
+	DEFAULT(pru-&gt;pru_attach, pru_attach_notsupp);
+	DEFAULT(pru-&gt;pru_bind, pru_bind_notsupp);
+	DEFAULT(pru-&gt;pru_connect, pru_connect_notsupp);
+	DEFAULT(pru-&gt;pru_connect2, pru_connect2_notsupp);
+	DEFAULT(pru-&gt;pru_connectx, pru_connectx_notsupp);
+	DEFAULT(pru-&gt;pru_control, pru_control_notsupp);
+	DEFAULT(pru-&gt;pru_detach, pru_detach_notsupp);
+	DEFAULT(pru-&gt;pru_disconnect, pru_disconnect_notsupp);
+	DEFAULT(pru-&gt;pru_disconnectx, pru_disconnectx_notsupp);
+	DEFAULT(pru-&gt;pru_listen, pru_listen_notsupp);
+	DEFAULT(pru-&gt;pru_peeloff, pru_peeloff_notsupp);
+	DEFAULT(pru-&gt;pru_peeraddr, pru_peeraddr_notsupp);
+	DEFAULT(pru-&gt;pru_rcvd, pru_rcvd_notsupp);
+	DEFAULT(pru-&gt;pru_rcvoob, pru_rcvoob_notsupp);
+	DEFAULT(pru-&gt;pru_send, pru_send_notsupp);
+	DEFAULT(pru-&gt;pru_send_list, pru_send_list_notsupp);
+	DEFAULT(pru-&gt;pru_sense, pru_sense_null);
+	DEFAULT(pru-&gt;pru_shutdown, pru_shutdown_notsupp);
+	DEFAULT(pru-&gt;pru_sockaddr, pru_sockaddr_notsupp);
+	DEFAULT(pru-&gt;pru_sopoll, pru_sopoll_notsupp);
+	DEFAULT(pru-&gt;pru_soreceive, pru_soreceive_notsupp);
+	DEFAULT(pru-&gt;pru_soreceive_list, pru_soreceive_list_notsupp);
+	DEFAULT(pru-&gt;pru_sosend, pru_sosend_notsupp);
+	DEFAULT(pru-&gt;pru_sosend_list, pru_sosend_list_notsupp);
+	DEFAULT(pru-&gt;pru_socheckopt, pru_socheckopt_null);
+	DEFAULT(pru-&gt;pru_preconnect, pru_preconnect_null);
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">DEFAULT</span>
+}
+
+<span class="enscript-comment">/*
+ * The following are macros on BSD and functions on Darwin
+ */</span>
+
+<span class="enscript-comment">/*
+ * Do we need to notify the other side when I/O is possible?
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sb_notify</span>(<span class="enscript-type">struct</span> sockbuf *sb)
+{
+	<span class="enscript-keyword">return</span> (sb-&gt;sb_waiters &gt; 0 ||
+	    (sb-&gt;sb_flags &amp; (SB_SEL|SB_ASYNC|SB_UPCALL|SB_KNOTE)));
+}
+
+<span class="enscript-comment">/*
+ * How much space is there in a socket buffer (so-&gt;so_snd or so-&gt;so_rcv)?
+ * This is problematical if the fields are unsigned, as the space might
+ * still be negative (cc &gt; hiwat or mbcnt &gt; mbmax).  Should detect
+ * overflow and return 0.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbspace</span>(<span class="enscript-type">struct</span> sockbuf *sb)
+{
+	<span class="enscript-type">int</span> pending = 0;
+	<span class="enscript-type">int</span> space = imin((<span class="enscript-type">int</span>)(sb-&gt;sb_hiwat - sb-&gt;sb_cc),
+	    (<span class="enscript-type">int</span>)(sb-&gt;sb_mbmax - sb-&gt;sb_mbcnt));
+
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_preconn_hiwat != 0)
+		space = imin((<span class="enscript-type">int</span>)(sb-&gt;sb_preconn_hiwat - sb-&gt;sb_cc), space);
+
+	<span class="enscript-keyword">if</span> (space &lt; 0)
+		space = 0;
+
+	<span class="enscript-comment">/* Compensate for data being processed by content filters */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONTENT_FILTER</span>
+	pending = cfil_sock_data_space(sb);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONTENT_FILTER */</span>
+	<span class="enscript-keyword">if</span> (pending &gt; space)
+		space = 0;
+	<span class="enscript-keyword">else</span>
+		space -= pending;
+
+	<span class="enscript-keyword">return</span> (space);
+}
+
+<span class="enscript-comment">/*
+ * If this socket has priority queues, check if there is enough
+ * space in the priority queue for this msg.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">msgq_sbspace</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> mbuf *control)
+{
+	<span class="enscript-type">int</span> space = 0, error;
+	u_int32_t msgpri;
+	VERIFY(so-&gt;so_type == SOCK_STREAM &amp;&amp;
+		SOCK_PROTO(so) == IPPROTO_TCP);
+	<span class="enscript-keyword">if</span> (control != NULL) {
+		error = tcp_get_msg_priority(control, &amp;msgpri);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (0);
+	} <span class="enscript-keyword">else</span> {
+		msgpri = MSG_PRI_0;
+	}
+	space = (so-&gt;so_snd.sb_idealsize / MSG_PRI_COUNT) -
+	    so-&gt;so_msg_state-&gt;msg_priq[msgpri].msgq_bytes;
+	<span class="enscript-keyword">if</span> (space &lt; 0)
+		space = 0;
+	<span class="enscript-keyword">return</span> (space);
+}
+
+<span class="enscript-comment">/* do we have to send all at once on a socket? */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sosendallatonce</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-keyword">return</span> (so-&gt;so_proto-&gt;pr_flags &amp; PR_ATOMIC);
+}
+
+<span class="enscript-comment">/* can we read something from so? */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">soreadable</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-keyword">return</span> (so-&gt;so_rcv.sb_cc &gt;= so-&gt;so_rcv.sb_lowat ||
+	    ((so-&gt;so_state &amp; SS_CANTRCVMORE)
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONTENT_FILTER</span>
+	    &amp;&amp; cfil_sock_data_pending(&amp;so-&gt;so_rcv) == 0
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONTENT_FILTER */</span>
+	    ) ||
+	    so-&gt;so_comp.tqh_first || so-&gt;so_error);
+}
+
+<span class="enscript-comment">/* can we write something to so? */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sowriteable</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_CANTSENDMORE) ||
+	    so-&gt;so_error &gt; 0)
+		<span class="enscript-keyword">return</span> (1);
+	<span class="enscript-keyword">if</span> (so_wait_for_if_feedback(so) || !socanwrite(so))
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">if</span> (so-&gt;so_flags1 &amp; SOF1_PRECONNECT_DATA)
+		<span class="enscript-keyword">return</span>(1);
+
+	<span class="enscript-keyword">if</span> (sbspace(&amp;(so)-&gt;so_snd) &gt;= (so)-&gt;so_snd.sb_lowat) {
+		<span class="enscript-keyword">if</span> (so-&gt;so_flags &amp; SOF_NOTSENT_LOWAT) {
+			<span class="enscript-keyword">if</span> ((SOCK_DOM(so) == PF_INET6 ||
+			    SOCK_DOM(so) == PF_INET) &amp;&amp;
+			    so-&gt;so_type == SOCK_STREAM) {
+				<span class="enscript-keyword">return</span> (tcp_notsent_lowat_check(so));
+			}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MPTCP</span>
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((SOCK_DOM(so) == PF_MULTIPATH) &amp;&amp;
+			    (SOCK_PROTO(so) == IPPROTO_TCP)) {
+				<span class="enscript-keyword">return</span> (mptcp_notsent_lowat_check(so));
+			}
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">return</span> (1);
+			}
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span> (1);
+		}
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* adjust counters in sb reflecting allocation of m */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sballoc</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> mbuf *m)
+{
+	u_int32_t cnt = 1;
+	sb-&gt;sb_cc += m-&gt;m_len;
+	<span class="enscript-keyword">if</span> (m-&gt;m_type != MT_DATA &amp;&amp; m-&gt;m_type != MT_HEADER &amp;&amp;
+	    m-&gt;m_type != MT_OOBDATA)
+		sb-&gt;sb_ctl += m-&gt;m_len;
+	sb-&gt;sb_mbcnt += MSIZE;
+
+	<span class="enscript-keyword">if</span> (m-&gt;m_flags &amp; M_EXT) {
+		sb-&gt;sb_mbcnt += m-&gt;m_ext.ext_size;
+		cnt += (m-&gt;m_ext.ext_size &gt;&gt; MSIZESHIFT);
+	}
+	OSAddAtomic(cnt, &amp;total_sbmb_cnt);
+	VERIFY(total_sbmb_cnt &gt; 0);
+	<span class="enscript-keyword">if</span> (total_sbmb_cnt &gt; total_sbmb_cnt_peak)
+		total_sbmb_cnt_peak = total_sbmb_cnt;
+
+	<span class="enscript-comment">/*
+	 * If data is being appended to the send socket buffer,
+	 * update the send byte count
+	 */</span>
+	<span class="enscript-keyword">if</span> (!(sb-&gt;sb_flags &amp; SB_RECV))
+		OSAddAtomic(cnt, &amp;total_snd_byte_count);
+}
+
+<span class="enscript-comment">/* adjust counters in sb reflecting freeing of m */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sbfree</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">int</span> cnt = -1;
+
+	sb-&gt;sb_cc -= m-&gt;m_len;
+	<span class="enscript-keyword">if</span> (m-&gt;m_type != MT_DATA &amp;&amp; m-&gt;m_type != MT_HEADER &amp;&amp;
+	    m-&gt;m_type != MT_OOBDATA)
+		sb-&gt;sb_ctl -= m-&gt;m_len;
+	sb-&gt;sb_mbcnt -= MSIZE;
+	<span class="enscript-keyword">if</span> (m-&gt;m_flags &amp; M_EXT) {
+		sb-&gt;sb_mbcnt -= m-&gt;m_ext.ext_size;
+		cnt -= (m-&gt;m_ext.ext_size &gt;&gt; MSIZESHIFT);
+	}
+	OSAddAtomic(cnt, &amp;total_sbmb_cnt);
+	VERIFY(total_sbmb_cnt &gt;= 0);
+
+	<span class="enscript-comment">/*
+	 * If data is being removed from the send socket buffer,
+	 * update the send byte count
+	 */</span>
+	<span class="enscript-keyword">if</span> (!(sb-&gt;sb_flags &amp; SB_RECV)) {
+		OSAddAtomic(cnt, &amp;total_snd_byte_count);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Set lock on sockbuf sb; sleep if lock is already held.
+ * Unless SB_NOINTR is set on sockbuf, sleep is interruptible.
+ * Returns error without lock if sleep is interrupted.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sblock</span>(<span class="enscript-type">struct</span> sockbuf *sb, uint32_t flags)
+{
+	boolean_t nointr = ((sb-&gt;sb_flags &amp; SB_NOINTR) || (flags &amp; SBL_NOINTR));
+	<span class="enscript-type">void</span> *lr_saved = __builtin_return_address(0);
+	<span class="enscript-type">struct</span> socket *so = sb-&gt;sb_so;
+	<span class="enscript-type">void</span> * wchan;
+	<span class="enscript-type">int</span> error = 0;
+	thread_t tp = current_thread();
+
+	VERIFY((flags &amp; SBL_VALID) == flags);
+
+	<span class="enscript-comment">/* so_usecount may be 0 if we get here from sofreelastref() */</span>
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		panic(<span class="enscript-string">&quot;%s: null so, sb=%p sb_flags=0x%x lr=%p\n&quot;</span>,
+		    __func__, sb, sb-&gt;sb_flags, lr_saved);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (so-&gt;so_usecount &lt; 0) {
+		panic(<span class="enscript-string">&quot;%s: sb=%p sb_flags=0x%x sb_so=%p usecount=%d lr=%p &quot;</span>
+		    <span class="enscript-string">&quot;lrh= %s\n&quot;</span>, __func__, sb, sb-&gt;sb_flags, so,
+		    so-&gt;so_usecount, lr_saved, solockhistory_nr(so));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-comment">/*
+	 * The content filter thread must hold the sockbuf lock
+	 */</span>
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) &amp;&amp; sb-&gt;sb_cfil_thread == tp) {
+		<span class="enscript-comment">/*
+		 * Don't panic if we are defunct because SB_LOCK has
+		 * been cleared by sodefunct()
+		 */</span>
+		<span class="enscript-keyword">if</span> (!(so-&gt;so_flags &amp; SOF_DEFUNCT) &amp;&amp; !(sb-&gt;sb_flags &amp; SB_LOCK))
+			panic(<span class="enscript-string">&quot;%s: SB_LOCK not held for %p\n&quot;</span>,
+			    __func__, sb);
+
+		<span class="enscript-comment">/* Keep the sockbuf locked */</span>
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">if</span> ((sb-&gt;sb_flags &amp; SB_LOCK) &amp;&amp; !(flags &amp; SBL_WAIT))
+		<span class="enscript-keyword">return</span> (EWOULDBLOCK);
+	<span class="enscript-comment">/*
+	 * We may get here from sorflush(), in which case &quot;sb&quot; may not
+	 * point to the real socket buffer.  Use the actual socket buffer
+	 * address from the socket instead.
+	 */</span>
+	wchan = (sb-&gt;sb_flags &amp; SB_RECV) ?
+	    &amp;so-&gt;so_rcv.sb_flags : &amp;so-&gt;so_snd.sb_flags;
+
+	<span class="enscript-comment">/*
+	 * A content filter thread has exclusive access to the sockbuf
+	 * until it clears the
+	 */</span>
+	<span class="enscript-keyword">while</span> ((sb-&gt;sb_flags &amp; SB_LOCK) ||
+		((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) &amp;&amp;
+		sb-&gt;sb_cfil_thread != NULL)) {
+		lck_mtx_t *mutex_held;
+
+		<span class="enscript-comment">/*
+		 * XXX: This code should be moved up above outside of this loop;
+		 * however, we may get here as part of sofreelastref(), and
+		 * at that time pr_getlock() may no longer be able to return
+		 * us the lock.  This will be fixed in future.
+		 */</span>
+		<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_getlock != NULL)
+			mutex_held = (*so-&gt;so_proto-&gt;pr_getlock)(so, 0);
+		<span class="enscript-keyword">else</span>
+			mutex_held = so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+
+		lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+
+		sb-&gt;sb_wantlock++;
+		VERIFY(sb-&gt;sb_wantlock != 0);
+
+		error = msleep(wchan, mutex_held,
+		    nointr ? PSOCK : PSOCK | PCATCH,
+		    nointr ? <span class="enscript-string">&quot;sb_lock_nointr&quot;</span> : <span class="enscript-string">&quot;sb_lock&quot;</span>, NULL);
+
+		VERIFY(sb-&gt;sb_wantlock != 0);
+		sb-&gt;sb_wantlock--;
+
+		<span class="enscript-keyword">if</span> (error == 0 &amp;&amp; (so-&gt;so_flags &amp; SOF_DEFUNCT) &amp;&amp;
+		    !(flags &amp; SBL_IGNDEFUNCT)) {
+			error = EBADF;
+			SODEFUNCTLOG((<span class="enscript-string">&quot;%s[%d]: defunct so 0x%llx [%d,%d] &quot;</span>
+			    <span class="enscript-string">&quot;(%d)\n&quot;</span>, __func__, proc_selfpid(),
+			    (uint64_t)VM_KERNEL_ADDRPERM(so),
+			    SOCK_DOM(so), SOCK_TYPE(so), error));
+		}
+
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">return</span> (error);
+	}
+	sb-&gt;sb_flags |= SB_LOCK;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Release lock on sockbuf sb
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sbunlock</span>(<span class="enscript-type">struct</span> sockbuf *sb, boolean_t keeplocked)
+{
+	<span class="enscript-type">void</span> *lr_saved = __builtin_return_address(0);
+	<span class="enscript-type">struct</span> socket *so = sb-&gt;sb_so;
+	thread_t tp = current_thread();
+
+	<span class="enscript-comment">/* so_usecount may be 0 if we get here from sofreelastref() */</span>
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		panic(<span class="enscript-string">&quot;%s: null so, sb=%p sb_flags=0x%x lr=%p\n&quot;</span>,
+		    __func__, sb, sb-&gt;sb_flags, lr_saved);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (so-&gt;so_usecount &lt; 0) {
+		panic(<span class="enscript-string">&quot;%s: sb=%p sb_flags=0x%x sb_so=%p usecount=%d lr=%p &quot;</span>
+		    <span class="enscript-string">&quot;lrh= %s\n&quot;</span>, __func__, sb, sb-&gt;sb_flags, so,
+		    so-&gt;so_usecount, lr_saved, solockhistory_nr(so));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-comment">/*
+	 * The content filter thread must hold the sockbuf lock
+	 */</span>
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) &amp;&amp; sb-&gt;sb_cfil_thread == tp) {
+		<span class="enscript-comment">/*
+		 * Don't panic if we are defunct because SB_LOCK has
+		 * been cleared by sodefunct()
+		 */</span>
+		<span class="enscript-keyword">if</span> (!(so-&gt;so_flags &amp; SOF_DEFUNCT) &amp;&amp;
+		    !(sb-&gt;sb_flags &amp; SB_LOCK) &amp;&amp;
+		    !(so-&gt;so_state &amp; SS_DEFUNCT) &amp;&amp;
+		    !(so-&gt;so_flags1 &amp; SOF1_DEFUNCTINPROG)) {
+			panic(<span class="enscript-string">&quot;%s: SB_LOCK not held for %p\n&quot;</span>,
+			    __func__, sb);
+		}
+		<span class="enscript-comment">/* Keep the sockbuf locked and proceed */</span>
+	} <span class="enscript-keyword">else</span> {
+		VERIFY((sb-&gt;sb_flags &amp; SB_LOCK) ||
+		    (so-&gt;so_state &amp; SS_DEFUNCT) ||
+		    (so-&gt;so_flags1 &amp; SOF1_DEFUNCTINPROG));
+
+		sb-&gt;sb_flags &amp;= ~SB_LOCK;
+
+		<span class="enscript-keyword">if</span> (sb-&gt;sb_wantlock &gt; 0) {
+			<span class="enscript-comment">/*
+			 * We may get here from sorflush(), in which case &quot;sb&quot;
+			 * may not point to the real socket buffer.  Use the
+			 * actual socket buffer address from the socket instead.
+			 */</span>
+			wakeup((sb-&gt;sb_flags &amp; SB_RECV) ? &amp;so-&gt;so_rcv.sb_flags :
+			    &amp;so-&gt;so_snd.sb_flags);
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (!keeplocked) {	<span class="enscript-comment">/* unlock on exit */</span>
+		lck_mtx_t *mutex_held;
+
+		<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_getlock != NULL)
+			mutex_held = (*so-&gt;so_proto-&gt;pr_getlock)(so, 0);
+		<span class="enscript-keyword">else</span>
+			mutex_held = so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+
+		lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+
+		VERIFY(so-&gt;so_usecount != 0);
+		so-&gt;so_usecount--;
+		so-&gt;unlock_lr[so-&gt;next_unlock_lr] = lr_saved;
+		so-&gt;next_unlock_lr = (so-&gt;next_unlock_lr + 1) % SO_LCKDBG_MAX;
+		lck_mtx_unlock(mutex_held);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sorwakeup</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-keyword">if</span> (sb_notify(&amp;so-&gt;so_rcv))
+		sowakeup(so, &amp;so-&gt;so_rcv);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sowwakeup</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-keyword">if</span> (sb_notify(&amp;so-&gt;so_snd))
+		sowakeup(so, &amp;so-&gt;so_snd);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">soevent</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">long</span> hint)
+{
+	<span class="enscript-keyword">if</span> (so-&gt;so_flags &amp; SOF_KNOTE)
+		KNOTE(&amp;so-&gt;so_klist, hint);
+
+	soevupcall(so, hint);
+
+	<span class="enscript-comment">/*
+	 * Don't post an event if this a subflow socket or
+	 * the app has opted out of using cellular interface
+	 */</span>
+	<span class="enscript-keyword">if</span> ((hint &amp; SO_FILT_HINT_IFDENIED) &amp;&amp;
+	    !(so-&gt;so_flags &amp; SOF_MP_SUBFLOW) &amp;&amp;
+	    !(so-&gt;so_restrictions &amp; SO_RESTRICT_DENY_CELLULAR) &amp;&amp;
+	    !(so-&gt;so_restrictions &amp; SO_RESTRICT_DENY_EXPENSIVE))
+		soevent_ifdenied(so);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">soevupcall</span>(<span class="enscript-type">struct</span> socket *so, u_int32_t hint)
+{
+	<span class="enscript-keyword">if</span> (so-&gt;so_event != NULL) {
+		caddr_t so_eventarg = so-&gt;so_eventarg;
+		<span class="enscript-type">int</span> locked = hint &amp; SO_FILT_HINT_LOCKED;
+
+		hint &amp;= so-&gt;so_eventmask;
+		<span class="enscript-keyword">if</span> (hint != 0) {
+			<span class="enscript-keyword">if</span> (locked)
+				socket_unlock(so, 0);
+
+			so-&gt;so_event(so, so_eventarg, hint);
+
+			<span class="enscript-keyword">if</span> (locked)
+				socket_lock(so, 0);
+		}
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">soevent_ifdenied</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> kev_netpolicy_ifdenied ev_ifdenied;
+
+	bzero(&amp;ev_ifdenied, <span class="enscript-keyword">sizeof</span> (ev_ifdenied));
+	<span class="enscript-comment">/*
+	 * The event consumer is interested about the effective {upid,pid,uuid}
+	 * info which can be different than the those related to the process
+	 * that recently performed a system call on the socket, i.e. when the
+	 * socket is delegated.
+	 */</span>
+	<span class="enscript-keyword">if</span> (so-&gt;so_flags &amp; SOF_DELEGATED) {
+		ev_ifdenied.ev_data.eupid = so-&gt;e_upid;
+		ev_ifdenied.ev_data.epid = so-&gt;e_pid;
+		uuid_copy(ev_ifdenied.ev_data.euuid, so-&gt;e_uuid);
+	} <span class="enscript-keyword">else</span> {
+		ev_ifdenied.ev_data.eupid = so-&gt;last_upid;
+		ev_ifdenied.ev_data.epid = so-&gt;last_pid;
+		uuid_copy(ev_ifdenied.ev_data.euuid, so-&gt;last_uuid);
+	}
+
+	<span class="enscript-keyword">if</span> (++so-&gt;so_ifdenied_notifies &gt; 1) {
+		<span class="enscript-comment">/*
+		 * Allow for at most one kernel event to be generated per
+		 * socket; so_ifdenied_notifies is reset upon changes in
+		 * the UUID policy.  See comments in inp_update_policy.
+		 */</span>
+		<span class="enscript-keyword">if</span> (net_io_policy_log) {
+			uuid_string_t buf;
+
+			uuid_unparse(ev_ifdenied.ev_data.euuid, buf);
+			log(LOG_DEBUG, <span class="enscript-string">&quot;%s[%d]: so 0x%llx [%d,%d] epid %d &quot;</span>
+			    <span class="enscript-string">&quot;euuid %s%s has %d redundant events supressed\n&quot;</span>,
+			    __func__, so-&gt;last_pid,
+			    (uint64_t)VM_KERNEL_ADDRPERM(so), SOCK_DOM(so),
+			    SOCK_TYPE(so), ev_ifdenied.ev_data.epid, buf,
+			    ((so-&gt;so_flags &amp; SOF_DELEGATED) ?
+			    <span class="enscript-string">&quot; [delegated]&quot;</span> : <span class="enscript-string">&quot;&quot;</span>), so-&gt;so_ifdenied_notifies);
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (net_io_policy_log) {
+			uuid_string_t buf;
+
+			uuid_unparse(ev_ifdenied.ev_data.euuid, buf);
+			log(LOG_DEBUG, <span class="enscript-string">&quot;%s[%d]: so 0x%llx [%d,%d] epid %d &quot;</span>
+			    <span class="enscript-string">&quot;euuid %s%s event posted\n&quot;</span>, __func__,
+			    so-&gt;last_pid, (uint64_t)VM_KERNEL_ADDRPERM(so),
+			    SOCK_DOM(so), SOCK_TYPE(so),
+			    ev_ifdenied.ev_data.epid, buf,
+			    ((so-&gt;so_flags &amp; SOF_DELEGATED) ?
+			    <span class="enscript-string">&quot; [delegated]&quot;</span> : <span class="enscript-string">&quot;&quot;</span>));
+		}
+		netpolicy_post_msg(KEV_NETPOLICY_IFDENIED, &amp;ev_ifdenied.ev_data,
+		    <span class="enscript-keyword">sizeof</span> (ev_ifdenied));
+	}
+}
+
+<span class="enscript-comment">/*
+ * Make a copy of a sockaddr in a malloced buffer of type M_SONAME.
+ */</span>
+<span class="enscript-type">struct</span> sockaddr *
+<span class="enscript-function-name">dup_sockaddr</span>(<span class="enscript-type">struct</span> sockaddr *sa, <span class="enscript-type">int</span> canwait)
+{
+	<span class="enscript-type">struct</span> sockaddr *sa2;
+
+	MALLOC(sa2, <span class="enscript-type">struct</span> sockaddr *, sa-&gt;sa_len, M_SONAME,
+	    canwait ? M_WAITOK : M_NOWAIT);
+	<span class="enscript-keyword">if</span> (sa2)
+		bcopy(sa, sa2, sa-&gt;sa_len);
+	<span class="enscript-keyword">return</span> (sa2);
+}
+
+<span class="enscript-comment">/*
+ * Create an external-format (``xsocket'') structure using the information
+ * in the kernel-format socket structure pointed to by so.  This is done
+ * to reduce the spew of irrelevant information over this interface,
+ * to isolate user code from changes in the kernel structure, and
+ * potentially to provide information-hiding if we decide that
+ * some of this information should be hidden from users.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sotoxsocket</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> xsocket *xso)
+{
+	xso-&gt;xso_len = <span class="enscript-keyword">sizeof</span> (*xso);
+	xso-&gt;xso_so = (_XSOCKET_PTR(<span class="enscript-type">struct</span> socket *))VM_KERNEL_ADDRPERM(so);
+	xso-&gt;so_type = so-&gt;so_type;
+	xso-&gt;so_options = (<span class="enscript-type">short</span>)(so-&gt;so_options &amp; 0xffff);
+	xso-&gt;so_linger = so-&gt;so_linger;
+	xso-&gt;so_state = so-&gt;so_state;
+	xso-&gt;so_pcb = (_XSOCKET_PTR(caddr_t))VM_KERNEL_ADDRPERM(so-&gt;so_pcb);
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto) {
+		xso-&gt;xso_protocol = SOCK_PROTO(so);
+		xso-&gt;xso_family = SOCK_DOM(so);
+	} <span class="enscript-keyword">else</span> {
+		xso-&gt;xso_protocol = xso-&gt;xso_family = 0;
+	}
+	xso-&gt;so_qlen = so-&gt;so_qlen;
+	xso-&gt;so_incqlen = so-&gt;so_incqlen;
+	xso-&gt;so_qlimit = so-&gt;so_qlimit;
+	xso-&gt;so_timeo = so-&gt;so_timeo;
+	xso-&gt;so_error = so-&gt;so_error;
+	xso-&gt;so_pgid = so-&gt;so_pgid;
+	xso-&gt;so_oobmark = so-&gt;so_oobmark;
+	sbtoxsockbuf(&amp;so-&gt;so_snd, &amp;xso-&gt;so_snd);
+	sbtoxsockbuf(&amp;so-&gt;so_rcv, &amp;xso-&gt;so_rcv);
+	xso-&gt;so_uid = kauth_cred_getuid(so-&gt;so_cred);
+}
+
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sotoxsocket64</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> xsocket64 *xso)
+{
+	xso-&gt;xso_len = <span class="enscript-keyword">sizeof</span> (*xso);
+	xso-&gt;xso_so = (u_int64_t)VM_KERNEL_ADDRPERM(so);
+	xso-&gt;so_type = so-&gt;so_type;
+	xso-&gt;so_options = (<span class="enscript-type">short</span>)(so-&gt;so_options &amp; 0xffff);
+	xso-&gt;so_linger = so-&gt;so_linger;
+	xso-&gt;so_state = so-&gt;so_state;
+	xso-&gt;so_pcb = (u_int64_t)VM_KERNEL_ADDRPERM(so-&gt;so_pcb);
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto) {
+		xso-&gt;xso_protocol = SOCK_PROTO(so);
+		xso-&gt;xso_family = SOCK_DOM(so);
+	} <span class="enscript-keyword">else</span> {
+		xso-&gt;xso_protocol = xso-&gt;xso_family = 0;
+	}
+	xso-&gt;so_qlen = so-&gt;so_qlen;
+	xso-&gt;so_incqlen = so-&gt;so_incqlen;
+	xso-&gt;so_qlimit = so-&gt;so_qlimit;
+	xso-&gt;so_timeo = so-&gt;so_timeo;
+	xso-&gt;so_error = so-&gt;so_error;
+	xso-&gt;so_pgid = so-&gt;so_pgid;
+	xso-&gt;so_oobmark = so-&gt;so_oobmark;
+	sbtoxsockbuf(&amp;so-&gt;so_snd, &amp;xso-&gt;so_snd);
+	sbtoxsockbuf(&amp;so-&gt;so_rcv, &amp;xso-&gt;so_rcv);
+	xso-&gt;so_uid = kauth_cred_getuid(so-&gt;so_cred);
+}
+
+
+<span class="enscript-comment">/*
+ * This does the same for sockbufs.  Note that the xsockbuf structure,
+ * since it is always embedded in a socket, does not include a self
+ * pointer nor a length.  We make this entry point public in case
+ * some other mechanism needs it.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sbtoxsockbuf</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> xsockbuf *xsb)
+{
+	xsb-&gt;sb_cc = sb-&gt;sb_cc;
+	xsb-&gt;sb_hiwat = sb-&gt;sb_hiwat;
+	xsb-&gt;sb_mbcnt = sb-&gt;sb_mbcnt;
+	xsb-&gt;sb_mbmax = sb-&gt;sb_mbmax;
+	xsb-&gt;sb_lowat = sb-&gt;sb_lowat;
+	xsb-&gt;sb_flags = sb-&gt;sb_flags;
+	xsb-&gt;sb_timeo = (<span class="enscript-type">short</span>)
+	    (sb-&gt;sb_timeo.tv_sec * hz) + sb-&gt;sb_timeo.tv_usec / tick;
+	<span class="enscript-keyword">if</span> (xsb-&gt;sb_timeo == 0 &amp;&amp; sb-&gt;sb_timeo.tv_usec != 0)
+		xsb-&gt;sb_timeo = 1;
+}
+
+<span class="enscript-comment">/*
+ * Based on the policy set by an all knowing decison maker, throttle sockets
+ * that either have been marked as belonging to &quot;background&quot; process.
+ */</span>
+inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">soisthrottled</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-comment">/*
+	 * On non-embedded, we rely on implicit throttling by the
+	 * application, as we're missing the system wide &quot;decision maker&quot;
+	 */</span>
+	<span class="enscript-keyword">return</span> (
+		(so-&gt;so_traffic_mgt_flags &amp; TRAFFIC_MGT_SO_BACKGROUND));
+}
+
+inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">soisprivilegedtraffic</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-keyword">return</span> ((so-&gt;so_flags &amp; SOF_PRIVILEGED_TRAFFIC_CLASS) ? 1 : 0);
+}
+
+inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">soissrcbackground</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-keyword">return</span> ((so-&gt;so_traffic_mgt_flags &amp; TRAFFIC_MGT_SO_BACKGROUND) ||
+		IS_SO_TC_BACKGROUND(so-&gt;so_traffic_class));
+}
+
+inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">soissrcrealtime</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-keyword">return</span> (so-&gt;so_traffic_class &gt;= SO_TC_AV &amp;&amp;
+	    so-&gt;so_traffic_class &lt;= SO_TC_VO);
+}
+
+inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">soissrcbesteffort</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-keyword">return</span> (so-&gt;so_traffic_class == SO_TC_BE ||
+	    so-&gt;so_traffic_class == SO_TC_RD ||
+	    so-&gt;so_traffic_class == SO_TC_OAM);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sonullevent</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">void</span> *arg, uint32_t hint)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">so</span>, <span class="enscript-variable-name">arg</span>, <span class="enscript-variable-name">hint</span>)
+}
+
+<span class="enscript-comment">/*
+ * Here is the definition of some of the basic objects in the kern.ipc
+ * branch of the MIB.
+ */</span>
+<span class="enscript-function-name">SYSCTL_NODE</span>(_kern, KERN_IPC, ipc,
+	CTLFLAG_RW|CTLFLAG_LOCKED|CTLFLAG_ANYBODY, 0, <span class="enscript-string">&quot;IPC&quot;</span>);
+
+<span class="enscript-comment">/* Check that the maximum socket buffer size is within a range */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+sysctl_sb_max SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	u_int32_t new_value;
+	<span class="enscript-type">int</span> changed = 0;
+	<span class="enscript-type">int</span> error = sysctl_io_number(req, sb_max, <span class="enscript-keyword">sizeof</span> (u_int32_t),
+	    &amp;new_value, &amp;changed);
+	<span class="enscript-keyword">if</span> (!error &amp;&amp; changed) {
+		<span class="enscript-keyword">if</span> (new_value &gt; LOW_SB_MAX &amp;&amp; new_value &lt;= high_sb_max) {
+			sb_max = new_value;
+		} <span class="enscript-keyword">else</span> {
+			error = ERANGE;
+		}
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+sysctl_io_policy_throttled SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> i, err;
+
+	i = net_io_policy_throttled;
+
+	err = sysctl_handle_int(oidp, &amp;i, 0, req);
+	<span class="enscript-keyword">if</span> (err != 0 || req-&gt;newptr == USER_ADDR_NULL)
+		<span class="enscript-keyword">return</span> (err);
+
+	<span class="enscript-keyword">if</span> (i != net_io_policy_throttled)
+		SOTHROTTLELOG((<span class="enscript-string">&quot;throttle: network IO policy throttling is &quot;</span>
+		    <span class="enscript-string">&quot;now %s\n&quot;</span>, i ? <span class="enscript-string">&quot;ON&quot;</span> : <span class="enscript-string">&quot;OFF&quot;</span>));
+
+	net_io_policy_throttled = i;
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern_ipc, KIPC_MAXSOCKBUF, maxsockbuf,
+	CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;sb_max, 0, &amp;sysctl_sb_max, <span class="enscript-string">&quot;IU&quot;</span>, <span class="enscript-string">&quot;Maximum socket buffer size&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_kern_ipc, KIPC_SOCKBUF_WASTE, sockbuf_waste_factor,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;sb_efficiency, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_kern_ipc, KIPC_NMBCLUSTERS, nmbclusters,
+	CTLFLAG_RD | CTLFLAG_LOCKED, &amp;nmbclusters, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_kern_ipc, OID_AUTO, njcl,
+	CTLFLAG_RD | CTLFLAG_LOCKED, &amp;njcl, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_kern_ipc, OID_AUTO, njclbytes,
+	CTLFLAG_RD | CTLFLAG_LOCKED, &amp;njclbytes, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_kern_ipc, KIPC_SOQLIMITCOMPAT, soqlimitcompat,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;soqlimitcompat, 1,
+	<span class="enscript-string">&quot;Enable socket queue limit compatibility&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_kern_ipc, OID_AUTO, soqlencomp, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;soqlencomp, 0, <span class="enscript-string">&quot;Listen backlog represents only complete queue&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_kern_ipc, OID_AUTO, io_policy, CTLFLAG_RW, 0, <span class="enscript-string">&quot;network IO policy&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern_ipc_io_policy, OID_AUTO, throttled,
+	CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, &amp;net_io_policy_throttled, 0,
+	sysctl_io_policy_throttled, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_kern_ipc_io_policy, OID_AUTO, log, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;net_io_policy_log, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_PROC_UUID_POLICY</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_kern_ipc_io_policy, OID_AUTO, uuid, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;net_io_policy_uuid, 0, <span class="enscript-string">&quot;&quot;</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_PROC_UUID_POLICY */</span>
+</pre>
+<hr />
+</body></html>

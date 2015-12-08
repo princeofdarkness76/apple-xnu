@@ -1,0 +1,335 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pmap_pcid.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pmap_pcid.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/proc_reg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpuid.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/tsc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmap_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmap_pcid.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/branch_predicates.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * PCID (Process context identifier) aka tagged TLB support.
+ * On processors with this feature, unless disabled via the -pmap_pcid_disable
+ * boot-arg, the following algorithm is in effect:
+ * Each processor maintains an array of tag refcounts indexed by tag.
+ * Each address space maintains an array of tags indexed by CPU number.
+ * Each address space maintains a coherency vector, indexed by CPU
+ * indicating that the TLB state for that address space has a pending
+ * invalidation.
+ * On a context switch, a refcounted tag is lazily assigned to the newly
+ * dispatched (CPU, address space) tuple.
+ * When an inactive address space is invalidated on a remote CPU, it is marked
+ * for invalidation upon the next dispatch. Some invalidations are
+ * also processed at the user/kernel boundary.
+ * Provisions are made for the case where a CPU is overcommmitted, i.e.
+ * more active address spaces exist than the number of logical tags
+ * provided for by the processor architecture (currently 4096).
+ * The algorithm assumes the processor remaps the logical tags
+ * to physical TLB context IDs in an LRU fashion for efficiency. (DRK '10)
+ */</span>
+
+uint32_t	pmap_pcid_ncpus;
+boolean_t 	pmap_pcid_disabled = FALSE;
+
+<span class="enscript-type">void</span>	pmap_pcid_configure(<span class="enscript-type">void</span>) {
+	<span class="enscript-type">int</span> ccpu = cpu_number();
+	uintptr_t cr4 = get_cr4();
+	boolean_t pcid_present = FALSE;
+
+	pmap_pcid_log(<span class="enscript-string">&quot;PCID configure invoked on CPU %d\n&quot;</span>, ccpu);
+	pmap_assert(ml_get_interrupts_enabled() == FALSE || get_preemption_level() !=0);
+	pmap_assert(cpu_mode_is64bit());
+
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;-pmap_pcid_disable&quot;</span>, &amp;pmap_pcid_disabled, <span class="enscript-keyword">sizeof</span> (pmap_pcid_disabled))) {
+		pmap_pcid_log(<span class="enscript-string">&quot;PMAP: PCID feature disabled\n&quot;</span>);
+		printf(<span class="enscript-string">&quot;PMAP: PCID feature disabled, %u\n&quot;</span>, pmap_pcid_disabled);
+		kprintf(<span class="enscript-string">&quot;PMAP: PCID feature disabled %u\n&quot;</span>, pmap_pcid_disabled);
+	}
+	 <span class="enscript-comment">/* no_shared_cr3+PCID is currently unsupported */</span>
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">DEBUG</span>
+	<span class="enscript-keyword">if</span> (pmap_pcid_disabled == FALSE)
+		no_shared_cr3 = FALSE;
+	<span class="enscript-keyword">else</span>
+		no_shared_cr3 = TRUE;
+#<span class="enscript-reference">else</span>
+	<span class="enscript-keyword">if</span> (no_shared_cr3)
+		pmap_pcid_disabled = TRUE;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (pmap_pcid_disabled || no_shared_cr3) {
+		<span class="enscript-type">unsigned</span> i;
+		<span class="enscript-comment">/* Reset PCID status, as we may have picked up
+		 * strays if discovered prior to platform
+		 * expert initialization.
+		 */</span>
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; real_ncpus; i++) {
+			<span class="enscript-keyword">if</span> (cpu_datap(i)) {
+				cpu_datap(i)-&gt;cpu_pmap_pcid_enabled = FALSE;
+			}
+			pmap_pcid_ncpus = 0;
+		}
+		cpu_datap(ccpu)-&gt;cpu_pmap_pcid_enabled = FALSE;
+		<span class="enscript-keyword">return</span>;
+	}
+	<span class="enscript-comment">/* DRKTODO: assert if features haven't been discovered yet. Redundant
+	 * invocation of cpu_mode_init and descendants masks this for now.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((cpuid_features() &amp; CPUID_FEATURE_PCID))
+		pcid_present = TRUE;
+	<span class="enscript-keyword">else</span> {
+		cpu_datap(ccpu)-&gt;cpu_pmap_pcid_enabled = FALSE;
+		pmap_pcid_log(<span class="enscript-string">&quot;PMAP: PCID not detected CPU %d\n&quot;</span>, ccpu);
+		<span class="enscript-keyword">return</span>;
+	}
+	<span class="enscript-keyword">if</span> ((cr4 &amp; (CR4_PCIDE | CR4_PGE)) == (CR4_PCIDE|CR4_PGE)) {
+		cpu_datap(ccpu)-&gt;cpu_pmap_pcid_enabled = TRUE;
+		pmap_pcid_log(<span class="enscript-string">&quot;PMAP: PCID already enabled %d\n&quot;</span>, ccpu);
+		<span class="enscript-keyword">return</span>;
+	}
+	<span class="enscript-keyword">if</span> (pcid_present == TRUE) {
+		pmap_pcid_log(<span class="enscript-string">&quot;Pre-PCID:CR0: 0x%lx, CR3: 0x%lx, CR4(CPU %d): 0x%lx\n&quot;</span>, get_cr0(), get_cr3_raw(), ccpu, cr4);
+
+		<span class="enscript-keyword">if</span> (cpu_number() &gt;= PMAP_PCID_MAX_CPUS) {
+			panic(<span class="enscript-string">&quot;PMAP_PCID_MAX_CPUS %d\n&quot;</span>, cpu_number());
+		}
+		<span class="enscript-keyword">if</span> ((get_cr4() &amp; CR4_PGE) == 0) {
+			set_cr4(get_cr4() | CR4_PGE);
+			pmap_pcid_log(<span class="enscript-string">&quot;Toggled PGE ON (CPU: %d\n&quot;</span>, ccpu);
+		}
+		set_cr4(get_cr4() | CR4_PCIDE);
+		pmap_pcid_log(<span class="enscript-string">&quot;Post PCID: CR0: 0x%lx, CR3: 0x%lx, CR4(CPU %d): 0x%lx\n&quot;</span>, get_cr0(), get_cr3_raw(), ccpu, get_cr4());
+		tlb_flush_global();
+		cpu_datap(ccpu)-&gt;cpu_pmap_pcid_enabled = TRUE;
+
+		<span class="enscript-keyword">if</span> (OSIncrementAtomic(&amp;pmap_pcid_ncpus) == machine_info.max_cpus) {
+			pmap_pcid_log(<span class="enscript-string">&quot;All PCIDs enabled: real_ncpus: %d, pmap_pcid_ncpus: %d\n&quot;</span>, real_ncpus, pmap_pcid_ncpus);
+		}
+		cpu_datap(ccpu)-&gt;cpu_pmap_pcid_coherentp =
+		    cpu_datap(ccpu)-&gt;cpu_pmap_pcid_coherentp_kernel =
+		    &amp;(kernel_pmap-&gt;pmap_pcid_coherency_vector[ccpu]);
+		cpu_datap(ccpu)-&gt;cpu_pcid_refcounts[0] = 1;
+	}
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">pmap_pcid_initialize</span>(pmap_t p) {
+	<span class="enscript-type">unsigned</span> i;
+	<span class="enscript-type">unsigned</span> nc = <span class="enscript-keyword">sizeof</span>(p-&gt;pmap_pcid_cpus)/<span class="enscript-keyword">sizeof</span>(pcid_t);
+
+	pmap_assert(nc &gt;= real_ncpus);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; nc; i++) {
+		p-&gt;pmap_pcid_cpus[i] = PMAP_PCID_INVALID_PCID;
+		<span class="enscript-comment">/* We assume here that the coherency vector is zeroed by
+		 * pmap_create
+		 */</span>
+	}
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">pmap_pcid_initialize_kernel</span>(pmap_t p) {
+	<span class="enscript-type">unsigned</span> i;
+	<span class="enscript-type">unsigned</span> nc = <span class="enscript-keyword">sizeof</span>(p-&gt;pmap_pcid_cpus)/<span class="enscript-keyword">sizeof</span>(pcid_t);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; nc; i++) {
+		p-&gt;pmap_pcid_cpus[i] = 0;
+		<span class="enscript-comment">/* We assume here that the coherency vector is zeroed by
+		 * pmap_create
+		 */</span>
+	}
+}
+
+pcid_t	pmap_pcid_allocate_pcid(<span class="enscript-type">int</span> ccpu) {
+	<span class="enscript-type">int</span> i;
+	pcid_ref_t 	cur_min = 0xFF;
+	uint32_t	cur_min_index = ~1;
+	pcid_ref_t	*cpu_pcid_refcounts = &amp;cpu_datap(ccpu)-&gt;cpu_pcid_refcounts[0];
+	pcid_ref_t	old_count;
+
+	<span class="enscript-keyword">if</span> ((i = cpu_datap(ccpu)-&gt;cpu_pcid_free_hint) != 0) {
+		<span class="enscript-keyword">if</span> (cpu_pcid_refcounts[i] == 0) {
+			(<span class="enscript-type">void</span>)__sync_fetch_and_add(&amp;cpu_pcid_refcounts[i], 1);
+			cpu_datap(ccpu)-&gt;cpu_pcid_free_hint = 0;
+			<span class="enscript-keyword">return</span> i;
+		}
+	}
+	<span class="enscript-comment">/* Linear scan to discover free slot, with hint. Room for optimization
+	 * but with intelligent prefetchers this should be
+	 * adequately performant, as it is invoked
+	 * only on first dispatch of a new address space onto
+	 * a given processor. DRKTODO: use larger loads and
+	 * zero byte discovery -- any pattern != ~1 should
+	 * signify a free slot.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = PMAP_PCID_MIN_PCID; i &lt; PMAP_PCID_MAX_PCID; i++) {
+		pcid_ref_t cur_refcount = cpu_pcid_refcounts[i];
+
+		pmap_assert(cur_refcount &lt; PMAP_PCID_MAX_REFCOUNT);
+
+		<span class="enscript-keyword">if</span> (cur_refcount == 0) {
+			(<span class="enscript-type">void</span>)__sync_fetch_and_add(&amp;cpu_pcid_refcounts[i], 1);
+			<span class="enscript-keyword">return</span> i;
+		}
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (cur_refcount &lt; cur_min) {
+				cur_min_index = i;
+				cur_min = cur_refcount;
+			}
+		}
+	}
+	pmap_assert(cur_min_index &gt; 0 &amp;&amp; cur_min_index &lt; PMAP_PCID_MAX_PCID);
+	<span class="enscript-comment">/* Consider &quot;rebalancing&quot; tags actively in highly oversubscribed cases
+	 * perhaps selecting tags with lower activity.
+	 */</span>
+
+	old_count = __sync_fetch_and_add(&amp;cpu_pcid_refcounts[cur_min_index], 1);
+	pmap_assert(old_count &lt; PMAP_PCID_MAX_REFCOUNT);
+	<span class="enscript-keyword">return</span> cur_min_index;
+}
+
+<span class="enscript-type">void</span>	pmap_pcid_deallocate_pcid(<span class="enscript-type">int</span> ccpu, pmap_t tpmap) {
+	pcid_t pcid;
+	pmap_t lp;
+	pcid_ref_t prior_count;
+
+	pcid = tpmap-&gt;pmap_pcid_cpus[ccpu];
+	pmap_assert(pcid != PMAP_PCID_INVALID_PCID);
+	<span class="enscript-keyword">if</span> (pcid == PMAP_PCID_INVALID_PCID)
+		<span class="enscript-keyword">return</span>;
+
+	lp = cpu_datap(ccpu)-&gt;cpu_pcid_last_pmap_dispatched[pcid];
+	pmap_assert(pcid &gt; 0 &amp;&amp; pcid &lt; PMAP_PCID_MAX_PCID);
+	pmap_assert(cpu_datap(ccpu)-&gt;cpu_pcid_refcounts[pcid] &gt;= 1);
+
+	<span class="enscript-keyword">if</span> (lp == tpmap)
+		(<span class="enscript-type">void</span>)__sync_bool_compare_and_swap(&amp;cpu_datap(ccpu)-&gt;cpu_pcid_last_pmap_dispatched[pcid], tpmap, PMAP_INVALID);
+
+	<span class="enscript-keyword">if</span> ((prior_count = __sync_fetch_and_sub(&amp;cpu_datap(ccpu)-&gt;cpu_pcid_refcounts[pcid], 1)) == 1) {
+		    cpu_datap(ccpu)-&gt;cpu_pcid_free_hint = pcid;
+	}
+	pmap_assert(prior_count &lt;= PMAP_PCID_MAX_REFCOUNT);
+}
+
+<span class="enscript-type">void</span>	pmap_destroy_pcid_sync(pmap_t p) {
+	<span class="enscript-type">int</span> i;
+	pmap_assert(ml_get_interrupts_enabled() == FALSE || get_preemption_level() !=0);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; PMAP_PCID_MAX_CPUS; i++)
+		<span class="enscript-keyword">if</span> (p-&gt;pmap_pcid_cpus[i] != PMAP_PCID_INVALID_PCID)
+			pmap_pcid_deallocate_pcid(i, p);
+}
+
+pcid_t	pcid_for_pmap_cpu_tuple(pmap_t pmap, <span class="enscript-type">int</span> ccpu) {
+	<span class="enscript-keyword">return</span> pmap-&gt;pmap_pcid_cpus[ccpu];
+}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PMAP_ASSERT</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PCID_RECORD_SIZE</span> 128
+uint64_t pcid_record_array[PCID_RECORD_SIZE];
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">void</span>	pmap_pcid_activate(pmap_t tpmap, <span class="enscript-type">int</span> ccpu) {
+	pcid_t		new_pcid = tpmap-&gt;pmap_pcid_cpus[ccpu];
+	pmap_t		last_pmap;
+	boolean_t	pcid_conflict = FALSE, pending_flush = FALSE;
+
+	pmap_assert(cpu_datap(ccpu)-&gt;cpu_pmap_pcid_enabled);
+	<span class="enscript-keyword">if</span> (__improbable(new_pcid == PMAP_PCID_INVALID_PCID)) {
+		new_pcid = tpmap-&gt;pmap_pcid_cpus[ccpu] = pmap_pcid_allocate_pcid(ccpu);
+	}
+	pmap_assert(new_pcid != PMAP_PCID_INVALID_PCID);
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">PCID_ASSERT</span>	
+	cpu_datap(ccpu)-&gt;cpu_last_pcid = cpu_datap(ccpu)-&gt;cpu_active_pcid;
+#<span class="enscript-reference">endif</span>
+	cpu_datap(ccpu)-&gt;cpu_active_pcid = new_pcid;
+
+	pending_flush = (tpmap-&gt;pmap_pcid_coherency_vector[ccpu] != 0);
+	<span class="enscript-keyword">if</span> (__probable(pending_flush == FALSE)) {
+		last_pmap = cpu_datap(ccpu)-&gt;cpu_pcid_last_pmap_dispatched[new_pcid];
+		pcid_conflict = ((last_pmap != NULL) &amp;&amp;(tpmap != last_pmap));
+	}
+	<span class="enscript-keyword">if</span> (__improbable(pending_flush || pcid_conflict)) {
+		pmap_pcid_validate_cpu(tpmap, ccpu);
+	}
+	<span class="enscript-comment">/* Consider making this a unique id */</span>
+	cpu_datap(ccpu)-&gt;cpu_pcid_last_pmap_dispatched[new_pcid] = tpmap;
+
+	pmap_assert(new_pcid &lt; PMAP_PCID_MAX_PCID);
+	pmap_assert(((tpmap ==  kernel_pmap) &amp;&amp; new_pcid == 0) || ((new_pcid != PMAP_PCID_INVALID_PCID) &amp;&amp; (new_pcid != 0)));
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">PMAP_ASSERT</span>
+	pcid_record_array[ccpu % PCID_RECORD_SIZE] = tpmap-&gt;pm_cr3 | new_pcid | (((uint64_t)(!(pending_flush || pcid_conflict))) &lt;&lt;63);
+	pml4_entry_t *pml4 = pmap64_pml4(tpmap, 0ULL);
+	<span class="enscript-comment">/* Diagnostic to detect pagetable anchor corruption */</span>
+	<span class="enscript-keyword">if</span> (pml4[KERNEL_PML4_INDEX] != kernel_pmap-&gt;pm_pml4[KERNEL_PML4_INDEX])
+		__asm__ <span class="enscript-type">volatile</span>(<span class="enscript-string">&quot;int3&quot;</span>);
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* PMAP_ASSERT */</span>
+	set_cr3_composed(tpmap-&gt;pm_cr3, new_pcid, !(pending_flush || pcid_conflict));
+
+	<span class="enscript-keyword">if</span> (!pending_flush) {
+		<span class="enscript-comment">/* We did not previously observe a pending invalidation for this
+		 * ASID. However, the load from the coherency vector
+		 * could've been reordered ahead of the store to the
+		 * active_cr3 field (in the context switch path, our
+		 * caller). Re-consult the pending invalidation vector
+		 * after the CR3 write. We rely on MOV CR3's documented
+		 * serializing property to avoid insertion of an expensive
+		 * barrier. (DRK)
+		 */</span>
+		pending_flush = (tpmap-&gt;pmap_pcid_coherency_vector[ccpu] != 0);
+		<span class="enscript-keyword">if</span> (__improbable(pending_flush != 0)) {
+			pmap_pcid_validate_cpu(tpmap, ccpu);
+			set_cr3_composed(tpmap-&gt;pm_cr3, new_pcid, FALSE);
+		}
+	}
+	cpu_datap(ccpu)-&gt;cpu_pmap_pcid_coherentp = &amp;(tpmap-&gt;pmap_pcid_coherency_vector[ccpu]);
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">DEBUG</span>	
+	KERNEL_DEBUG_CONSTANT(0x9c1d0000, tpmap, new_pcid, pending_flush, pcid_conflict, 0);
+#<span class="enscript-reference">endif</span>
+}
+</pre>
+<hr />
+</body></html>

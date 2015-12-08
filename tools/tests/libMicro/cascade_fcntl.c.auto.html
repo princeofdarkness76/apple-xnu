@@ -1,0 +1,262 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>cascade_fcntl.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">cascade_fcntl.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms
+ * of the Common Development and Distribution License
+ * (the &quot;License&quot;).  You may not use this file except
+ * in compliance with the License.
+ *
+ * You can obtain a copy of the license at
+ * src/OPENSOLARIS.LICENSE
+ * or <a href="http://www.opensolaris.org/os/licensing.">http://www.opensolaris.org/os/licensing.</a>
+ * See the License for the specific language governing
+ * permissions and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL
+ * HEADER in each file and include the License file at
+ * usr/src/OPENSOLARIS.LICENSE.  If applicable,
+ * add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets &quot;[]&quot; replaced with your
+ * own identifying information: Portions Copyright [yyyy]
+ * [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Use is subject to license terms.
+ */</span>
+
+<span class="enscript-comment">/*
+ * The &quot;cascade&quot; test case is a multiprocess/multithread batten-passing model
+ * using lock primitives alone for synchronisation. Threads are arranged in a
+ * ring. Each thread has two locks of its own on which it blocks, and is able
+ * to manipulate the two locks belonging to the thread which follows it in the
+ * ring.
+ *
+ * The number of threads (nthreads) is specified by the generic libMicro -P/-T
+ * options. With nthreads == 1 (the default) the uncontended case can be timed.
+ *
+ * The main logic is generic and allows any simple blocking API to be tested.
+ * The API-specific component is clearly indicated.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;fcntl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;libmicro.h&quot;</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	<span class="enscript-type">int</span>			ts_once;
+	<span class="enscript-type">int</span>			ts_id;
+	<span class="enscript-type">int</span>			ts_us0;		<span class="enscript-comment">/* our lock indices */</span>
+	<span class="enscript-type">int</span>			ts_us1;
+	<span class="enscript-type">int</span>			ts_them0;	<span class="enscript-comment">/* their lock indices */</span>
+	<span class="enscript-type">int</span>			ts_them1;
+} tsd_t;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			nthreads;
+
+<span class="enscript-comment">/*
+ * API-specific code BEGINS here
+ */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DEFD</span>			<span class="enscript-string">&quot;/private/tmp&quot;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">char</span>			*optd = DEFD;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 			file;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 			nlocks;
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_init</span>()
+{
+	lm_tsdsize = <span class="enscript-keyword">sizeof</span> (tsd_t);
+
+	(<span class="enscript-type">void</span>) sprintf(lm_optstr, <span class="enscript-string">&quot;d:&quot;</span>);
+
+	lm_defN = <span class="enscript-string">&quot;cscd_fcntl&quot;</span>;
+
+	(<span class="enscript-type">void</span>) sprintf(lm_usage,
+	    <span class="enscript-string">&quot;       [-d directory for temp file (default %s)]\n&quot;</span>
+	    <span class="enscript-string">&quot;notes: thread cascade using fcntl region locking\n&quot;</span>,
+	    DEFD);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_optswitch</span>(<span class="enscript-type">int</span> opt, <span class="enscript-type">char</span> *optarg)
+{
+	<span class="enscript-keyword">switch</span> (opt) {
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'d'</span>:
+		optd = optarg;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initrun</span>()
+{
+	<span class="enscript-type">int</span>			errors = 0;
+	<span class="enscript-type">char</span>			fname[1024];
+
+	nthreads = lm_optP * lm_optT;
+	nlocks = nthreads * 2;
+
+	(<span class="enscript-type">void</span>) sprintf(fname, <span class="enscript-string">&quot;%s/cascade.%ld&quot;</span>, optd, getpid());
+
+	file = open(fname, O_CREAT | O_TRUNC | O_RDWR, 0600);
+	<span class="enscript-keyword">if</span> (file == -1) {
+		errors++;
+	}
+
+	<span class="enscript-keyword">if</span> (unlink(fname)) {
+		errors++;
+	}
+
+	<span class="enscript-keyword">if</span> (ftruncate(file, nlocks * 3) == -1) {
+		errors++;
+	}
+
+	<span class="enscript-keyword">return</span> (errors);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">block</span>(<span class="enscript-type">int</span> index)
+{
+	<span class="enscript-type">struct</span> flock		fl;
+
+	fl.l_type = F_WRLCK;
+	fl.l_whence = SEEK_SET;
+	fl.l_start = index;
+	fl.l_len = 1;
+	<span class="enscript-keyword">return</span> (fcntl(file, F_SETLKW, &amp;fl) == -1);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">unblock</span>(<span class="enscript-type">int</span> index)
+{
+	<span class="enscript-type">struct</span> flock		fl;
+
+	fl.l_type = F_UNLCK;
+	fl.l_whence = SEEK_SET;
+	fl.l_start = index;
+	fl.l_len = 1;
+	<span class="enscript-keyword">return</span> (fcntl(file, F_SETLK, &amp;fl) == -1);
+}
+
+<span class="enscript-comment">/*
+ * API-specific code ENDS here
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initbatch</span>(<span class="enscript-type">void</span> *tsd)
+{
+	tsd_t			*ts = (tsd_t *)tsd;
+	<span class="enscript-type">int</span>			e = 0;
+
+	<span class="enscript-keyword">if</span> (ts-&gt;ts_once == 0) {
+		<span class="enscript-type">int</span>		us, them;
+
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__APPLE__</span>)
+        us = (getpindex() * lm_optT) + gettindex();
+#<span class="enscript-reference">else</span>
+        us = gettsdindex(tsd);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE__ */</span>
+	
+		them = (us + 1) % (lm_optP * lm_optT);
+
+		ts-&gt;ts_id = us;
+
+		<span class="enscript-comment">/* lock index asignment for us and them */</span>
+		ts-&gt;ts_us0 = (us * 4);
+		ts-&gt;ts_us1 = (us * 4) + 2;
+		<span class="enscript-keyword">if</span> (us &lt; nthreads - 1) {
+			<span class="enscript-comment">/* straight-thru connection to them */</span>
+			ts-&gt;ts_them0 = (them * 4);
+			ts-&gt;ts_them1 = (them * 4) + 2;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* cross-over connection to them */</span>
+			ts-&gt;ts_them0 = (them * 4) + 2;
+			ts-&gt;ts_them1 = (them * 4);
+		}
+
+		ts-&gt;ts_once = 1;
+	}
+
+	<span class="enscript-comment">/* block their first move */</span>
+	e += block(ts-&gt;ts_them0);
+
+	<span class="enscript-keyword">return</span> (e);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark</span>(<span class="enscript-type">void</span> *tsd, result_t *res)
+{
+	tsd_t			*ts = (tsd_t *)tsd;
+	<span class="enscript-type">int</span>			i;
+	<span class="enscript-type">int</span>			e = 0;
+
+	<span class="enscript-comment">/* wait to be unblocked (id == 0 will not block) */</span>
+	e += block(ts-&gt;ts_us0);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; lm_optB; i += 2) {
+		<span class="enscript-comment">/* allow them to block us again */</span>
+		e += unblock(ts-&gt;ts_us0);
+
+		<span class="enscript-comment">/* block their next + 1 move */</span>
+		e += block(ts-&gt;ts_them1);
+
+		<span class="enscript-comment">/* unblock their next move */</span>
+		e += unblock(ts-&gt;ts_them0);
+
+		<span class="enscript-comment">/* wait for them to unblock us */</span>
+		e += block(ts-&gt;ts_us1);
+
+		<span class="enscript-comment">/* repeat with locks reversed */</span>
+		e += unblock(ts-&gt;ts_us1);
+		e += block(ts-&gt;ts_them0);
+		e += unblock(ts-&gt;ts_them1);
+		e += block(ts-&gt;ts_us0);
+	}
+
+	<span class="enscript-comment">/* finish batch with nothing blocked */</span>
+	e += unblock(ts-&gt;ts_them0);
+	e += unblock(ts-&gt;ts_us0);
+
+	res-&gt;re_count = i;
+	res-&gt;re_errors = e;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+</pre>
+<hr />
+</body></html>

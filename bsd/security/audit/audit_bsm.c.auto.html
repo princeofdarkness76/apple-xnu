@@ -1,0 +1,2031 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>audit_bsm.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">audit_bsm.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1999-2009 Apple Inc.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1.  Redistributions of source code must retain the above copyright
+ *     notice, this list of conditions and the following disclaimer.
+ * 2.  Redistributions in binary form must reproduce the above copyright
+ *     notice, this list of conditions and the following disclaimer in the
+ *     documentation and/or other materials provided with the distribution.
+ * 3.  Neither the name of Apple Inc. (&quot;Apple&quot;) nor the names of
+ *     its contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS &quot;AS IS&quot; AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+ * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ipc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sem.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ipc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit_record.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit_kevents.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit_bsd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit_private.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_AUDIT</span>
+<span class="enscript-function-name">MALLOC_DEFINE</span>(M_AUDITBSM, <span class="enscript-string">&quot;audit_bsm&quot;</span>, <span class="enscript-string">&quot;Audit BSM data&quot;</span>);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	audit_sys_auditon(<span class="enscript-type">struct</span> audit_record *ar,
+		    <span class="enscript-type">struct</span> au_record *rec);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	audit_sys_fcntl(<span class="enscript-type">struct</span> kaudit_record *kar,
+		    <span class="enscript-type">struct</span> au_record *rec);
+
+<span class="enscript-comment">/*
+ * Initialize the BSM auditing subsystem.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kau_init</span>(<span class="enscript-type">void</span>)
+{
+
+	au_evclassmap_init();
+}
+
+<span class="enscript-comment">/*
+ * This call reserves memory for the audit record.  Memory must be guaranteed
+ * before any auditable event can be generated.  The au_record structure
+ * maintains a reference to the memory allocated above and also the list of
+ * tokens associated with this record.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> au_record *
+<span class="enscript-function-name">kau_open</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> au_record *rec;
+
+	rec = malloc(<span class="enscript-keyword">sizeof</span>(*rec), M_AUDITBSM, M_WAITOK);
+	rec-&gt;data = NULL;
+	TAILQ_INIT(&amp;rec-&gt;token_q);
+	rec-&gt;len = 0;
+	rec-&gt;used = 1;
+
+	<span class="enscript-keyword">return</span> (rec);
+}
+
+<span class="enscript-comment">/*
+ * Store the token with the record descriptor.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kau_write</span>(<span class="enscript-type">struct</span> au_record *rec, <span class="enscript-type">struct</span> au_token *tok)
+{
+
+	KASSERT(tok != NULL, (<span class="enscript-string">&quot;kau_write: tok == NULL&quot;</span>));
+
+	TAILQ_INSERT_TAIL(&amp;rec-&gt;token_q, tok, tokens);
+	rec-&gt;len += tok-&gt;len;
+}
+
+<span class="enscript-comment">/*
+ * Close out the audit record by adding the header token, identifying any
+ * missing tokens.  Write out the tokens to the record memory.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kau_close</span>(<span class="enscript-type">struct</span> au_record *rec, <span class="enscript-type">struct</span> timespec *ctime, <span class="enscript-type">short</span> event)
+{
+	u_char *dptr;
+	size_t tot_rec_size;
+	token_t *cur, *hdr, *trail;
+	<span class="enscript-type">struct</span> timeval tm;
+	size_t hdrsize;
+	<span class="enscript-type">struct</span> auditinfo_addr ak;
+	<span class="enscript-type">struct</span> in6_addr *ap;
+
+	audit_get_kinfo(&amp;ak);
+	hdrsize = 0;
+	<span class="enscript-keyword">switch</span> (ak.ai_termid.at_type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AU_IPv4</span>:
+		hdrsize = (ak.ai_termid.at_addr[0] == INADDR_ANY) ?
+		    AUDIT_HEADER_SIZE : AUDIT_HEADER_EX_SIZE(&amp;ak);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AU_IPv6</span>:
+		ap = (<span class="enscript-type">struct</span> in6_addr *)&amp;ak.ai_termid.at_addr[0];
+		hdrsize = (IN6_IS_ADDR_UNSPECIFIED(ap)) ? AUDIT_HEADER_SIZE :
+		    AUDIT_HEADER_EX_SIZE(&amp;ak);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;kau_close: invalid address family&quot;</span>);
+	}
+	tot_rec_size = rec-&gt;len + AUDIT_HEADER_SIZE + AUDIT_TRAILER_SIZE;
+	rec-&gt;data = malloc(tot_rec_size, M_AUDITBSM, M_WAITOK | M_ZERO);
+
+	tm.tv_usec = ctime-&gt;tv_nsec / 1000;
+	tm.tv_sec = ctime-&gt;tv_sec;
+	<span class="enscript-keyword">if</span> (hdrsize != AUDIT_HEADER_SIZE)
+		hdr = au_to_header32_ex_tm(tot_rec_size, event, 0, tm, &amp;ak);
+	<span class="enscript-keyword">else</span>
+		hdr = au_to_header32_tm(tot_rec_size, event, 0, tm);
+	TAILQ_INSERT_HEAD(&amp;rec-&gt;token_q, hdr, tokens);
+
+	trail = au_to_trailer(tot_rec_size);
+	TAILQ_INSERT_TAIL(&amp;rec-&gt;token_q, trail, tokens);
+
+	rec-&gt;len = tot_rec_size;
+	dptr = rec-&gt;data;
+	TAILQ_FOREACH(cur, &amp;rec-&gt;token_q, tokens) {
+		memcpy(dptr, cur-&gt;t_data, cur-&gt;len);
+		dptr += cur-&gt;len;
+	}
+}
+
+<span class="enscript-comment">/*
+ * Free a BSM audit record by releasing all the tokens and clearing the audit
+ * record information.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kau_free</span>(<span class="enscript-type">struct</span> au_record *rec)
+{
+	<span class="enscript-type">struct</span> au_token *tok;
+
+	<span class="enscript-comment">/* Free the token list. */</span>
+	<span class="enscript-keyword">while</span> ((tok = TAILQ_FIRST(&amp;rec-&gt;token_q))) {
+		TAILQ_REMOVE(&amp;rec-&gt;token_q, tok, tokens);
+		free(tok-&gt;t_data, M_AUDITBSM);
+		free(tok, M_AUDITBSM);
+	}
+
+	rec-&gt;used = 0;
+	rec-&gt;len = 0;
+	free(rec-&gt;data, M_AUDITBSM);
+	free(rec, M_AUDITBSM);
+}
+
+<span class="enscript-comment">/*
+ * XXX: May want turn some (or all) of these macros into functions in order
+ * to reduce the generated code size.
+ *
+ * XXXAUDIT: These macros assume that 'kar', 'ar', 'rec', and 'tok' in the
+ * caller are OK with this.
+ */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MAC_VNODE1_LABEL_TOKEN</span>   do {				          \
+	<span class="enscript-keyword">if</span> (ar-&gt;ar_vnode1_mac_labels != NULL &amp;&amp; 			  \
+	    strlen(ar-&gt;ar_vnode1_mac_labels) != 0) {			  \
+		tok = au_to_text(ar-&gt;ar_vnode1_mac_labels);	          \
+		kau_write(rec, tok);				          \
+	}							          \
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MAC_VNODE2_LABEL_TOKEN</span>  do {					  \
+	<span class="enscript-keyword">if</span> (ar-&gt;ar_vnode2_mac_labels != NULL &amp;&amp;				  \
+	    strlen(ar-&gt;ar_vnode2_mac_labels) != 0) {			  \
+		tok = au_to_text(ar-&gt;ar_vnode2_mac_labels);	          \
+		kau_write(rec, tok);				          \
+	}							          \
+} <span class="enscript-keyword">while</span> (0)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MAC_VNODE1_LABEL_TOKEN</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MAC_VNODE2_LABEL_TOKEN</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">UPATH1_TOKENS</span> do {						\
+	<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_UPATH1)) {				\
+		tok = au_to_path(ar-&gt;ar_arg_upath1);			\
+		kau_write(rec, tok);					\
+	}								\
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">UPATH2_TOKENS</span> do {						\
+	<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_UPATH2)) {				\
+		tok = au_to_path(ar-&gt;ar_arg_upath2);			\
+		kau_write(rec, tok);					\
+	}								\
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">VNODE1_TOKENS</span> do {						\
+	<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_KPATH1)) {				\
+		tok = au_to_path(ar-&gt;ar_arg_kpath1);			\
+		kau_write(rec, tok);					\
+	}								\
+	<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VNODE1)) {				\
+		tok = au_to_attr32(&amp;ar-&gt;ar_arg_vnode1);			\
+		kau_write(rec, tok);					\
+		MAC_VNODE1_LABEL_TOKEN;					\
+	}								\
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">UPATH1_VNODE1_TOKENS</span> do {					\
+	<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_UPATH1)) {				\
+		tok = au_to_path(ar-&gt;ar_arg_upath1);			\
+		kau_write(rec, tok);					\
+	}								\
+	<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_KPATH1)) {				\
+		tok = au_to_path(ar-&gt;ar_arg_kpath1);			\
+		kau_write(rec, tok);					\
+	}								\
+	<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VNODE1)) {				\
+		tok = au_to_attr32(&amp;ar-&gt;ar_arg_vnode1);			\
+		kau_write(rec, tok);					\
+		MAC_VNODE1_LABEL_TOKEN;					\
+	}								\
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">VNODE2_TOKENS</span> do {						\
+	<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VNODE2)) {				\
+		tok = au_to_attr32(&amp;ar-&gt;ar_arg_vnode2);			\
+		kau_write(rec, tok);					\
+		MAC_VNODE2_LABEL_TOKEN;					\
+	}								\
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FD_VNODE1_TOKENS</span> do {						\
+	<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VNODE1)) {				\
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_KPATH1)) {			\
+			tok = au_to_path(ar-&gt;ar_arg_kpath1);		\
+			kau_write(rec, tok);				\
+		}							\
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FD)) {			\
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;fd&quot;</span>, ar-&gt;ar_arg_fd);	\
+			kau_write(rec, tok);				\
+			MAC_VNODE1_LABEL_TOKEN;				\
+		}							\
+		tok = au_to_attr32(&amp;ar-&gt;ar_arg_vnode1);			\
+		kau_write(rec, tok);					\
+	} <span class="enscript-keyword">else</span> {							\
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FD)) {			\
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;fd&quot;</span>,			\
+			    ar-&gt;ar_arg_fd);				\
+			kau_write(rec, tok);				\
+			MAC_VNODE1_LABEL_TOKEN;				\
+		}							\
+	}								\
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">PROCESS_PID_TOKENS</span>(argn) do {					\
+	<span class="enscript-keyword">if</span> ((ar-&gt;ar_arg_pid &gt; 0) <span class="enscript-comment">/* Reference a single process */</span>	\
+	    &amp;&amp; (ARG_IS_VALID(kar, ARG_PROCESS))) {			\
+		tok = au_to_process32_ex(ar-&gt;ar_arg_auid,		\
+		    ar-&gt;ar_arg_euid, ar-&gt;ar_arg_egid,			\
+		    ar-&gt;ar_arg_ruid, ar-&gt;ar_arg_rgid,			\
+		    ar-&gt;ar_arg_pid, ar-&gt;ar_arg_asid,			\
+		    &amp;ar-&gt;ar_arg_termid_addr);				\
+		kau_write(rec, tok);					\
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_PID)) {			\
+		tok = au_to_arg32(argn, <span class="enscript-string">&quot;process&quot;</span>, ar-&gt;ar_arg_pid);	\
+		kau_write(rec, tok);					\
+	}								\
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">EXTATTR_TOKENS</span> do {						\
+	<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {				\
+		<span class="enscript-keyword">switch</span> (ar-&gt;ar_arg_value32) {				\
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EXTATTR_NAMESPACE_USER</span>:				\
+			tok = au_to_text(EXTATTR_NAMESPACE_USER_STRING);\
+			<span class="enscript-keyword">break</span>;						\
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EXTATTR_NAMESPACE_SYSTEM</span>:				\
+			tok = au_to_text(EXTATTR_NAMESPACE_SYSTEM_STRING);\
+			<span class="enscript-keyword">break</span>;						\
+		<span class="enscript-reference">default</span>:						\
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;attrnamespace&quot;</span>,		\
+			    ar-&gt;ar_arg_value32);			\
+			<span class="enscript-keyword">break</span>;						\
+		}							\
+		kau_write(rec, tok);					\
+	}								\
+	<span class="enscript-comment">/* attrname is in the text field */</span>				\
+	<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_TEXT)) {				\
+		tok = au_to_text(ar-&gt;ar_arg_text);			\
+		kau_write(rec, tok);					\
+	}								\
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">EXTENDED_TOKENS</span>(n) do {						\
+		<span class="enscript-comment">/* ACL data */</span>						\
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_OPAQUE)) {			\
+			tok = au_to_opaque(ar-&gt;ar_arg_opaque,		\
+			    ar-&gt;ar_arg_opq_size);			\
+			kau_write(rec, tok);				\
+		}							\
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_MODE)) {			\
+			tok = au_to_arg32(n+2, <span class="enscript-string">&quot;mode&quot;</span>, ar-&gt;ar_arg_mode);\
+			kau_write(rec, tok);				\
+		}							\
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_GID)) {			\
+			tok = au_to_arg32(n+1, <span class="enscript-string">&quot;gid&quot;</span>, ar-&gt;ar_arg_gid);	\
+			kau_write(rec, tok);				\
+		}							\
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_UID)) {			\
+			tok = au_to_arg32(n, <span class="enscript-string">&quot;uid&quot;</span>, ar-&gt;ar_arg_uid);	\
+			kau_write(rec, tok);				\
+		}							\
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PROCESS_MAC_TOKENS</span> do {						\
+	<span class="enscript-keyword">if</span> (ar-&gt;ar_valid_arg &amp; ARG_MAC_STRING) {			\
+		tok = au_to_text(ar-&gt;ar_arg_mac_string);		\
+		kau_write(rec, tok);					\
+	}								\
+} <span class="enscript-keyword">while</span> (0)
+
+<span class="enscript-comment">/*
+ * Implement auditing for the auditon() system call. The audit tokens that
+ * are generated depend on the command that was sent into the auditon()
+ * system call.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_sys_auditon</span>(<span class="enscript-type">struct</span> audit_record *ar, <span class="enscript-type">struct</span> au_record *rec)
+{
+	<span class="enscript-type">struct</span> au_token *tok;
+
+	<span class="enscript-keyword">switch</span> (ar-&gt;ar_arg_cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">A_OLDSETPOLICY</span>:
+		<span class="enscript-keyword">if</span> (ar-&gt;ar_arg_len &gt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;length&quot;</span>, ar-&gt;ar_arg_len);
+			kau_write(rec, tok);
+			tok = au_to_arg64(2, <span class="enscript-string">&quot;policy&quot;</span>,
+			    ar-&gt;ar_arg_auditon.au_policy64);
+			kau_write(rec, tok);
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">A_SETPOLICY</span>:
+		tok = au_to_arg32(3, <span class="enscript-string">&quot;length&quot;</span>, ar-&gt;ar_arg_len);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;policy&quot;</span>, ar-&gt;ar_arg_auditon.au_policy);
+		kau_write(rec, tok);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">A_SETKMASK</span>:
+		tok = au_to_arg32(3, <span class="enscript-string">&quot;length&quot;</span>, ar-&gt;ar_arg_len);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setkmask:as_success&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_mask.am_success);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setkmask:as_failure&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_mask.am_failure);
+		kau_write(rec, tok);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">A_OLDSETQCTRL</span>:
+		<span class="enscript-keyword">if</span> (ar-&gt;ar_arg_len &gt; <span class="enscript-keyword">sizeof</span>(au_qctrl_t)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;length&quot;</span>, ar-&gt;ar_arg_len);
+			kau_write(rec, tok);
+			tok = au_to_arg64(2, <span class="enscript-string">&quot;setqctrl:aq_hiwater&quot;</span>,
+			    ar-&gt;ar_arg_auditon.au_qctrl64.aq64_hiwater);
+			kau_write(rec, tok);
+			tok = au_to_arg64(2, <span class="enscript-string">&quot;setqctrl:aq_lowater&quot;</span>,
+			    ar-&gt;ar_arg_auditon.au_qctrl64.aq64_lowater);
+			kau_write(rec, tok);
+			tok = au_to_arg64(2, <span class="enscript-string">&quot;setqctrl:aq_bufsz&quot;</span>,
+			    ar-&gt;ar_arg_auditon.au_qctrl64.aq64_bufsz);
+			kau_write(rec, tok);
+			tok = au_to_arg64(2, <span class="enscript-string">&quot;setqctrl:aq_delay&quot;</span>,
+			    ar-&gt;ar_arg_auditon.au_qctrl64.aq64_delay);
+			kau_write(rec, tok);
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;setqctrl:aq_minfree&quot;</span>,
+			    ar-&gt;ar_arg_auditon.au_qctrl64.aq64_minfree);
+			kau_write(rec, tok);
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">A_SETQCTRL</span>:
+		tok = au_to_arg32(3, <span class="enscript-string">&quot;length&quot;</span>, ar-&gt;ar_arg_len);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setqctrl:aq_hiwater&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_qctrl.aq_hiwater);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setqctrl:aq_lowater&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_qctrl.aq_lowater);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setqctrl:aq_bufsz&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_qctrl.aq_bufsz);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setqctrl:aq_delay&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_qctrl.aq_delay);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setqctrl:aq_minfree&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_qctrl.aq_minfree);
+		kau_write(rec, tok);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">A_SETUMASK</span>:
+		tok = au_to_arg32(3, <span class="enscript-string">&quot;length&quot;</span>, ar-&gt;ar_arg_len);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setumask:as_success&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_auinfo.ai_mask.am_success);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setumask:as_failure&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_auinfo.ai_mask.am_failure);
+		kau_write(rec, tok);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">A_SETSMASK</span>:
+		tok = au_to_arg32(3, <span class="enscript-string">&quot;length&quot;</span>, ar-&gt;ar_arg_len);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setsmask:as_success&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_auinfo.ai_mask.am_success);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setsmask:as_failure&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_auinfo.ai_mask.am_failure);
+		kau_write(rec, tok);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">A_OLDSETCOND</span>:
+		<span class="enscript-keyword">if</span> (ar-&gt;ar_arg_len &gt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;length&quot;</span>, ar-&gt;ar_arg_len);
+			kau_write(rec, tok);
+			tok = au_to_arg64(2, <span class="enscript-string">&quot;setcond&quot;</span>,
+			    ar-&gt;ar_arg_auditon.au_cond64);
+			kau_write(rec, tok);
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">A_SETCOND</span>:
+		tok = au_to_arg32(3, <span class="enscript-string">&quot;length&quot;</span>, ar-&gt;ar_arg_len);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setcond&quot;</span>, ar-&gt;ar_arg_auditon.au_cond);
+		kau_write(rec, tok);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">A_SETCLASS</span>:
+		tok = au_to_arg32(3, <span class="enscript-string">&quot;length&quot;</span>, ar-&gt;ar_arg_len);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setclass:ec_event&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_evclass.ec_number);
+		kau_write(rec, tok);
+		tok = au_to_arg32(3, <span class="enscript-string">&quot;setclass:ec_class&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_evclass.ec_class);
+		kau_write(rec, tok);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">A_SETPMASK</span>:
+		tok = au_to_arg32(3, <span class="enscript-string">&quot;length&quot;</span>, ar-&gt;ar_arg_len);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setpmask:as_success&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_aupinfo.ap_mask.am_success);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setpmask:as_failure&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_aupinfo.ap_mask.am_failure);
+		kau_write(rec, tok);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">A_SETFSIZE</span>:
+		tok = au_to_arg32(3, <span class="enscript-string">&quot;length&quot;</span>, ar-&gt;ar_arg_len);
+		kau_write(rec, tok);
+		tok = au_to_arg32(2, <span class="enscript-string">&quot;setfsize:filesize&quot;</span>,
+		    ar-&gt;ar_arg_auditon.au_fstat.af_filesz);
+		kau_write(rec, tok);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+	tok = au_to_arg32(1, <span class="enscript-string">&quot;cmd&quot;</span>, ar-&gt;ar_arg_cmd);
+	kau_write(rec, tok);
+}
+
+<span class="enscript-comment">/*
+ * Implement auditing for the fcntl() system call. The audit tokens that
+ * are generated depend on the command that was sent into the fcntl()
+ * system call.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_sys_fcntl</span>(<span class="enscript-type">struct</span> kaudit_record *kar, <span class="enscript-type">struct</span> au_record *rec)
+{
+	<span class="enscript-type">struct</span> au_token *tok;
+	<span class="enscript-type">struct</span> audit_record *ar = &amp;kar-&gt;k_ar;
+
+	<span class="enscript-keyword">switch</span> (ar-&gt;ar_arg_cmd) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">F_DUPFD</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;min fd&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">F_SETFD</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;close-on-exec flag&quot;</span>,
+			    ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">F_SETFL</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;fd flags&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">F_SETOWN</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;pid&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">F_SETSIZE</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">F_SETSIZE</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE64)) {
+			tok = au_to_arg64(3, <span class="enscript-string">&quot;offset&quot;</span>, ar-&gt;ar_arg_value64);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* F_SETSIZE */</span>
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">F_PATHPKG_CHECK</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">F_PATHPKG_CHECK</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_TEXT)) {
+			tok = au_to_text(ar-&gt;ar_arg_text);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+	tok = au_to_arg32(2, <span class="enscript-string">&quot;cmd&quot;</span>, au_fcntl_cmd_to_bsm(ar-&gt;ar_arg_cmd));
+	kau_write(rec, tok);
+}
+
+<span class="enscript-comment">/*
+ * Convert an internal kernel audit record to a BSM record and return a
+ * success/failure indicator. The BSM record is passed as an out parameter to
+ * this function.
+ *
+ * Return conditions:
+ *   BSM_SUCCESS: The BSM record is valid
+ *   BSM_FAILURE: Failure; the BSM record is NULL.
+ *   BSM_NOAUDIT: The event is not auditable for BSM; the BSM record is NULL.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kaudit_to_bsm</span>(<span class="enscript-type">struct</span> kaudit_record *kar, <span class="enscript-type">struct</span> au_record **pau)
+{
+	<span class="enscript-type">struct</span> au_token *tok = NULL, *subj_tok;
+	<span class="enscript-type">struct</span> au_record *rec;
+	au_tid_t tid;
+	<span class="enscript-type">struct</span> audit_record *ar;
+	<span class="enscript-type">int</span> ctr;
+	u_int uctr;
+
+	KASSERT(kar != NULL, (<span class="enscript-string">&quot;kaudit_to_bsm: kar == NULL&quot;</span>));
+
+	*pau = NULL;
+	ar = &amp;kar-&gt;k_ar;
+	rec = kau_open();
+
+	<span class="enscript-comment">/*
+	 * Create the subject token.
+	 */</span>
+	<span class="enscript-keyword">switch</span> (ar-&gt;ar_subj_term_addr.at_type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AU_IPv4</span>:
+		tid.port = ar-&gt;ar_subj_term_addr.at_port;
+		tid.machine = ar-&gt;ar_subj_term_addr.at_addr[0];
+		subj_tok = au_to_subject32(ar-&gt;ar_subj_auid,  <span class="enscript-comment">/* audit ID */</span>
+		    ar-&gt;ar_subj_cred.cr_uid, <span class="enscript-comment">/* eff uid */</span>
+		    ar-&gt;ar_subj_egid,	<span class="enscript-comment">/* eff group id */</span>
+		    ar-&gt;ar_subj_ruid,	<span class="enscript-comment">/* real uid */</span>
+		    ar-&gt;ar_subj_rgid,	<span class="enscript-comment">/* real group id */</span>
+		    ar-&gt;ar_subj_pid,	<span class="enscript-comment">/* process id */</span>
+		    ar-&gt;ar_subj_asid,	<span class="enscript-comment">/* session ID */</span>
+		    &amp;tid);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AU_IPv6</span>:
+		subj_tok = au_to_subject32_ex(ar-&gt;ar_subj_auid,
+		    ar-&gt;ar_subj_cred.cr_uid,
+		    ar-&gt;ar_subj_egid,
+		    ar-&gt;ar_subj_ruid,
+		    ar-&gt;ar_subj_rgid,
+		    ar-&gt;ar_subj_pid,
+		    ar-&gt;ar_subj_asid,
+		    &amp;ar-&gt;ar_subj_term_addr);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		bzero(&amp;tid, <span class="enscript-keyword">sizeof</span>(tid));
+		subj_tok = au_to_subject32(ar-&gt;ar_subj_auid,
+		    ar-&gt;ar_subj_cred.cr_uid,
+		    ar-&gt;ar_subj_egid,
+		    ar-&gt;ar_subj_ruid,
+		    ar-&gt;ar_subj_rgid,
+		    ar-&gt;ar_subj_pid,
+		    ar-&gt;ar_subj_asid,
+		    &amp;tid);
+	}
+
+	<span class="enscript-comment">/*
+	 * The logic inside each case fills in the tokens required for the
+	 * event, except for the header, trailer, and return tokens.  The
+	 * header and trailer tokens are added by the kau_close() function.
+	 * The return token is added outside of the switch statement.
+	 */</span>
+	<span class="enscript-keyword">switch</span>(ar-&gt;ar_event) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SENDFILE</span>:
+		<span class="enscript-comment">/* For sendfile the file and socket descriptor are both saved */</span>
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;sd&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_ACCEPT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_BIND</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_LISTEN</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_CONNECT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_RECVFROM</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_RECVMSG</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SENDMSG</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SENDTO</span>:
+		<span class="enscript-comment">/*
+		 * Socket-related events.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FD)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;fd&quot;</span>, ar-&gt;ar_arg_fd);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SADDRINET)) {
+			tok = au_to_sock_inet((<span class="enscript-type">struct</span> sockaddr_in *)
+			    &amp;ar-&gt;ar_arg_sockaddr);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SADDRUNIX)) {
+			tok = au_to_sock_unix((<span class="enscript-type">struct</span> sockaddr_un *)
+			    &amp;ar-&gt;ar_arg_sockaddr);
+			kau_write(rec, tok);
+			UPATH1_TOKENS;
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SADDRINET6)) {
+			tok = au_to_sock_inet128((<span class="enscript-type">struct</span> sockaddr_in6 *)
+				&amp;ar-&gt;ar_arg_sockaddr);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SOCKET</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SOCKETPAIR</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SOCKINFO)) {
+			tok = au_to_arg32(1,<span class="enscript-string">&quot;domain&quot;</span>,
+			    au_domain_to_bsm(ar-&gt;ar_arg_sockinfo.sai_domain));
+			kau_write(rec, tok);
+			tok = au_to_arg32(2,<span class="enscript-string">&quot;type&quot;</span>,
+			    au_socket_type_to_bsm(ar-&gt;ar_arg_sockinfo.sai_type));
+			kau_write(rec, tok);
+			tok = au_to_arg32(3,<span class="enscript-string">&quot;protocol&quot;</span>,
+			    ar-&gt;ar_arg_sockinfo.sai_protocol);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETSOCKOPT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SHUTDOWN</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FD)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;fd&quot;</span>, ar-&gt;ar_arg_fd);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_ACCT</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, (ARG_KPATH1 | ARG_UPATH1))) {
+			UPATH1_VNODE1_TOKENS;
+		} <span class="enscript-keyword">else</span> {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;accounting off&quot;</span>, 0);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETAUID</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_AUID)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;setauid&quot;</span>, ar-&gt;ar_arg_auid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETAUDIT</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_AUID) &amp;&amp;
+		    ARG_IS_VALID(kar, ARG_ASID) &amp;&amp;
+		    ARG_IS_VALID(kar, ARG_AMASK) &amp;&amp;
+		    ARG_IS_VALID(kar, ARG_TERMID)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;setaudit:auid&quot;</span>,
+			    ar-&gt;ar_arg_auid);
+			kau_write(rec, tok);
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;setaudit:port&quot;</span>,
+			    ar-&gt;ar_arg_termid.port);
+			kau_write(rec, tok);
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;setaudit:machine&quot;</span>,
+			    ar-&gt;ar_arg_termid.machine);
+			kau_write(rec, tok);
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;setaudit:as_success&quot;</span>,
+			    ar-&gt;ar_arg_amask.am_success);
+			kau_write(rec, tok);
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;setaudit:as_failure&quot;</span>,
+			    ar-&gt;ar_arg_amask.am_failure);
+			kau_write(rec, tok);
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;setaudit:asid&quot;</span>,
+			    ar-&gt;ar_arg_asid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETAUDIT_ADDR</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_AUID) &amp;&amp;
+		    ARG_IS_VALID(kar, ARG_ASID) &amp;&amp;
+		    ARG_IS_VALID(kar, ARG_AMASK) &amp;&amp;
+		    ARG_IS_VALID(kar, ARG_TERMID_ADDR)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;setaudit_addr:auid&quot;</span>,
+			    ar-&gt;ar_arg_auid);
+			kau_write(rec, tok);
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;setaudit_addr:as_success&quot;</span>,
+			    ar-&gt;ar_arg_amask.am_success);
+			kau_write(rec, tok);
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;setaudit_addr:as_failure&quot;</span>,
+			    ar-&gt;ar_arg_amask.am_failure);
+			kau_write(rec, tok);
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;setaudit_addr:asid&quot;</span>,
+			    ar-&gt;ar_arg_asid);
+			kau_write(rec, tok);
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;setaudit_addr:type&quot;</span>,
+			    ar-&gt;ar_arg_termid_addr.at_type);
+			kau_write(rec, tok);
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;setaudit_addr:port&quot;</span>,
+			    ar-&gt;ar_arg_termid_addr.at_port);
+			kau_write(rec, tok);
+			<span class="enscript-keyword">if</span> (ar-&gt;ar_arg_termid_addr.at_type == AU_IPv6)
+				tok = au_to_in_addr_ex((<span class="enscript-type">struct</span> in6_addr *)
+				    &amp;ar-&gt;ar_arg_termid_addr.at_addr[0]);
+			<span class="enscript-keyword">if</span> (ar-&gt;ar_arg_termid_addr.at_type == AU_IPv4)
+				tok = au_to_in_addr((<span class="enscript-type">struct</span> in_addr *)
+				    &amp;ar-&gt;ar_arg_termid_addr.at_addr[0]);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON</span>:
+		<span class="enscript-comment">/*
+		 * For AUDITON commands without own event, audit the cmd.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_CMD)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;cmd&quot;</span>, ar-&gt;ar_arg_cmd);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_GETCAR</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_GETCLASS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_GETCOND</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_GETCWD</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_GETKMASK</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_GETSTAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_GPOLICY</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_GQCTRL</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_SETCLASS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_SETCOND</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_SETKMASK</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_SETSMASK</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_SETSTAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_SETUMASK</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_SPOLICY</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITON_SQCTRL</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_AUDITON))
+			audit_sys_auditon(ar, rec);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDITCTL</span>:
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_EXIT</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_EXIT)) {
+			tok = au_to_exit(ar-&gt;ar_arg_exitretval,
+			    ar-&gt;ar_arg_exitstatus);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_ADJTIME</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_AUDIT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_DUP2</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_GETAUDIT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_GETAUDIT_ADDR</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_GETAUID</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_GETFSSTAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_KQUEUE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_LSEEK</span>:
+#<span class="enscript-reference">if</span> 0 
+<span class="enscript-comment">/*  XXXss replace with kext  */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MODLOAD</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MODUNLOAD</span>:
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_GETFSSTAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_PIPE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_PROFILE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SEMSYS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SHMSYS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETPGRP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETRLIMIT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETSID</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETTIMEOFDAY</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_KDEBUGTRACE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_PTHREADSIGMASK</span>:
+		<span class="enscript-comment">/*
+		 * Header, subject, and return tokens added at end.
+		 */</span>
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MKFIFO</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_MODE)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;mode&quot;</span>, ar-&gt;ar_arg_mode);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_ACCESS_EXTENDED</span>:
+		<span class="enscript-comment">/*
+		 * The access_extended() argument vector is stored in an
+		 * opaque token.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_OPAQUE)) {
+			tok = au_to_opaque(ar-&gt;ar_arg_opaque,
+			    ar-&gt;ar_arg_opq_size);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-comment">/*
+		 * The access_extended() result vector is stored in an arbitrary
+		 * data token.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_DATA)) {
+			tok = au_to_data(AUP_DECIMAL, ar-&gt;ar_arg_data_type,
+			    ar-&gt;ar_arg_data_count, ar-&gt;ar_arg_data);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_LSTAT_EXTENDED</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_STAT_EXTENDED</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_ACCESS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_CHDIR</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_CHROOT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_GETATTRLIST</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_NFS_GETFH</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_LSTAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_PATHCONF</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_READLINK</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_REVOKE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_RMDIR</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SEARCHFS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETATTRLIST</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_STAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_STATFS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_TRUNCATE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_UNDELETE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_UNLINK</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_UTIMES</span>:
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FHOPEN</span>:
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_CHFLAGS</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FFLAGS)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;flags&quot;</span>, ar-&gt;ar_arg_fflags);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_CHMOD</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_MODE)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;new file mode&quot;</span>,
+			    ar-&gt;ar_arg_mode);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_CHOWN</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_LCHOWN</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_UID)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;new file uid&quot;</span>, ar-&gt;ar_arg_uid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_GID)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;new file gid&quot;</span>, ar-&gt;ar_arg_gid);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_EXCHANGEDATA</span>:
+		UPATH1_VNODE1_TOKENS;
+		UPATH2_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_CLOSE</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FD)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;fd&quot;</span>, ar-&gt;ar_arg_fd);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_CORE</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SIGNUM)) {
+			tok = au_to_arg32(0, <span class="enscript-string">&quot;signal&quot;</span>, ar-&gt;ar_arg_signum);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_POSIX_SPAWN</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_PID)) {
+			tok = au_to_arg32(0, <span class="enscript-string">&quot;child PID&quot;</span>, ar-&gt;ar_arg_pid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_EXECVE</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_ARGV)) {
+			tok = au_to_exec_args(ar-&gt;ar_arg_argv,
+			    ar-&gt;ar_arg_argc);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_ENVV)) {
+			tok = au_to_exec_env(ar-&gt;ar_arg_envv,
+			    ar-&gt;ar_arg_envc);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FCHMOD_EXTENDED</span>:
+		EXTENDED_TOKENS(2);
+		FD_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FCHMOD</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_MODE)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;new file mode&quot;</span>,
+			    ar-&gt;ar_arg_mode);
+			kau_write(rec, tok);
+		}
+		FD_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_NFS_SVC</span>:
+		tok = au_to_arg32(1, <span class="enscript-string">&quot;request&quot;</span>, ar-&gt;ar_arg_cmd);
+		kau_write(rec, tok);
+		<span class="enscript-keyword">if</span> (ar-&gt;ar_valid_arg &amp; (ARG_KPATH1 | ARG_UPATH1)) {
+			UPATH1_VNODE1_TOKENS;
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * XXXRW: Some of these need to handle non-vnode cases as well.
+         */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FSTAT_EXTENDED</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FCHDIR</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FPATHCONF</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FSTAT</span>:		<span class="enscript-comment">/* XXX Need to handle sockets and shm */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FSTATFS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FSYNC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FTRUNCATE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FUTIMES</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_GETDIRENTRIES</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_GETDIRENTRIESATTR</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_GETATTRLISTBULK</span>:
+#<span class="enscript-reference">if</span> 0  <span class="enscript-comment">/* XXXss new */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_POLL</span>:
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_READ</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_READV</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_PREAD</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_WRITE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_WRITEV</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_PWRITE</span>:
+		FD_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FCHOWN</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_UID)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;new file uid&quot;</span>, ar-&gt;ar_arg_uid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_GID)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;new file gid&quot;</span>, ar-&gt;ar_arg_gid);
+			kau_write(rec, tok);
+		}
+		FD_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FCNTL</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_CMD))
+			audit_sys_fcntl(kar, rec);
+		FD_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FSCTL</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(4, <span class="enscript-string">&quot;options&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_CMD)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;cmd&quot;</span>, ar-&gt;ar_arg_cmd);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FFSCTL</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(4, <span class="enscript-string">&quot;options&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_CMD)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;cmd&quot;</span>, ar-&gt;ar_arg_cmd);
+			kau_write(rec, tok);
+		}
+		FD_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FCHFLAGS</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FFLAGS)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;flags&quot;</span>, ar-&gt;ar_arg_fflags);
+			kau_write(rec, tok);
+		}
+		FD_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FLOCK</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_CMD)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;operation&quot;</span>, ar-&gt;ar_arg_cmd);
+			kau_write(rec, tok);
+		}
+		FD_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FORK</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_VFORK</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_PID)) {
+			tok = au_to_arg32(0, <span class="enscript-string">&quot;child PID&quot;</span>, ar-&gt;ar_arg_pid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_GETLCID</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_PID)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;pid&quot;</span>, (u_int32_t)ar-&gt;ar_arg_pid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETLCID</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_PID)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;pid&quot;</span>, (u_int32_t)ar-&gt;ar_arg_pid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;lcid&quot;</span>,
+			    (u_int32_t)ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_IOCTL</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_CMD)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;cmd&quot;</span>, ar-&gt;ar_arg_cmd);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE64)) {
+			tok = au_to_arg64(2, <span class="enscript-string">&quot;cmd&quot;</span>, ar-&gt;ar_arg_value64);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_ADDR64)) {
+			tok = au_to_arg64(3, <span class="enscript-string">&quot;arg&quot;</span>, ar-&gt;ar_arg_addr);
+			kau_write(rec, tok);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_ADDR32)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;arg&quot;</span>,
+			    (u_int32_t)ar-&gt;ar_arg_addr);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VNODE1))
+			FD_VNODE1_TOKENS;
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SOCKINFO)) {
+				tok = au_to_socket_ex(
+				    ar-&gt;ar_arg_sockinfo.sai_domain,
+				    ar-&gt;ar_arg_sockinfo.sai_type,
+				    (<span class="enscript-type">struct</span> sockaddr *)
+				    &amp;ar-&gt;ar_arg_sockinfo.sai_laddr,
+				    (<span class="enscript-type">struct</span> sockaddr *)
+				    &amp;ar-&gt;ar_arg_sockinfo.sai_faddr);
+				kau_write(rec, tok);
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FD)) {
+					tok = au_to_arg32(1, <span class="enscript-string">&quot;fd&quot;</span>,
+					    ar-&gt;ar_arg_fd);
+					kau_write(rec, tok);
+				}
+			}
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_KILL</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SIGNUM)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;signal&quot;</span>, ar-&gt;ar_arg_signum);
+			kau_write(rec, tok);
+		}
+		PROCESS_PID_TOKENS(1);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_LINK</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_RENAME</span>:
+		UPATH1_VNODE1_TOKENS;
+		UPATH2_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MKDIR_EXTENDED</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_CHMOD_EXTENDED</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MKFIFO_EXTENDED</span>:
+		EXTENDED_TOKENS(2);
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MKDIR</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_MODE)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;mode&quot;</span>, ar-&gt;ar_arg_mode);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MKNOD</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_MODE)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;mode&quot;</span>, ar-&gt;ar_arg_mode);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;dev&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MMAP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MUNMAP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MPROTECT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MLOCK</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MUNLOCK</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MINHERIT</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_ADDR64)) {
+			tok = au_to_arg64(1, <span class="enscript-string">&quot;addr&quot;</span>, ar-&gt;ar_arg_addr);
+			kau_write(rec, tok);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_ADDR32)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;addr&quot;</span>,
+			    (u_int32_t)ar-&gt;ar_arg_addr);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_LEN)) {
+			tok = au_to_arg64(2, <span class="enscript-string">&quot;len&quot;</span>, ar-&gt;ar_arg_len);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ar-&gt;ar_event == AUE_MMAP)
+			FD_VNODE1_TOKENS;
+		<span class="enscript-keyword">if</span> (ar-&gt;ar_event == AUE_MPROTECT) {
+			<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+				tok = au_to_arg32(3, <span class="enscript-string">&quot;protection&quot;</span>,
+				    ar-&gt;ar_arg_value32);
+				kau_write(rec, tok);
+			}
+		}
+		<span class="enscript-keyword">if</span> (ar-&gt;ar_event == AUE_MINHERIT) {
+			<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+				tok = au_to_arg32(3, <span class="enscript-string">&quot;inherit&quot;</span>,
+				    ar-&gt;ar_arg_value32);
+				kau_write(rec, tok);
+			}
+		}
+		<span class="enscript-keyword">break</span>;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_MOUNT</span>:
+		PROCESS_MAC_TOKENS;
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MOUNT</span>:
+		<span class="enscript-comment">/* XXX Need to handle NFS mounts */</span>
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FFLAGS)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;flags&quot;</span>, ar-&gt;ar_arg_fflags);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_TEXT)) {
+			tok = au_to_text(ar-&gt;ar_arg_text);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_UMOUNT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_UNMOUNT</span>:
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MSGCTL</span>:
+		ar-&gt;ar_event = audit_msgctl_to_event(ar-&gt;ar_arg_svipc_cmd);
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MSGRCV</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MSGSND</span>:
+		tok = au_to_arg32(1, <span class="enscript-string">&quot;msg ID&quot;</span>, ar-&gt;ar_arg_svipc_id);
+		kau_write(rec, tok);
+		<span class="enscript-keyword">if</span> (ar-&gt;ar_errno != EINVAL) {
+			tok = au_to_ipc(AT_IPC_MSG, ar-&gt;ar_arg_svipc_id);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MSGGET</span>:
+		<span class="enscript-keyword">if</span> (ar-&gt;ar_errno == 0) {
+			<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SVIPC_ID)) {
+				tok = au_to_ipc(AT_IPC_MSG,
+				    ar-&gt;ar_arg_svipc_id);
+				kau_write(rec, tok);
+			}
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_R</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_RT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_RW</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_RWT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_W</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_WT</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FFLAGS)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;flags&quot;</span>, ar-&gt;ar_arg_fflags);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_RC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_RTC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_RWC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_RWTC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_WC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_WTC</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_MODE)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;mode&quot;</span>, ar-&gt;ar_arg_mode);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FFLAGS)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;flags&quot;</span>, ar-&gt;ar_arg_fflags);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_EXTENDED</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_EXTENDED_R</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_EXTENDED_RT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_EXTENDED_RW</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_EXTENDED_RWT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_EXTENDED_W</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_EXTENDED_WT</span>:
+		EXTENDED_TOKENS(3);
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FFLAGS)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;flags&quot;</span>, ar-&gt;ar_arg_fflags);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_EXTENDED_RC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_EXTENDED_RTC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_EXTENDED_RWC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_EXTENDED_RWTC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_EXTENDED_WC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPEN_EXTENDED_WTC</span>:
+		EXTENDED_TOKENS(3);
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FFLAGS)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;flags&quot;</span>, ar-&gt;ar_arg_fflags);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENAT_R</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENAT_RT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENAT_RW</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENAT_RWT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENAT_W</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENAT_WT</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FFLAGS)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;flags&quot;</span>, ar-&gt;ar_arg_fflags);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FD)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;dir fd&quot;</span>, ar-&gt;ar_arg_fd);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENAT_RC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENAT_RTC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENAT_RWC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENAT_RWTC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENAT_WC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENAT_WTC</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_MODE)) {
+			tok = au_to_arg32(4, <span class="enscript-string">&quot;mode&quot;</span>, ar-&gt;ar_arg_mode);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FFLAGS)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;flags&quot;</span>, ar-&gt;ar_arg_fflags);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FD)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;dir fd&quot;</span>, ar-&gt;ar_arg_fd);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENBYID</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENBYID_R</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENBYID_RT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENBYID_RW</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENBYID_RWT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENBYID_W</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_OPENBYID_WT</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FFLAGS)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;flags&quot;</span>, ar-&gt;ar_arg_fflags);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;volfsid&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE64)) {
+			tok = au_to_arg64(2, <span class="enscript-string">&quot;objid&quot;</span>, ar-&gt;ar_arg_value64);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_RENAMEAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FACCESSAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FCHMODAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FCHOWNAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FSTATAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_LINKAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_UNLINKAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_READLINKAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SYMLINKAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MKDIRAT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_GETATTRLISTAT</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FD)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;dir fd&quot;</span>, ar-&gt;ar_arg_fd);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_PTRACE</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_CMD)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;request&quot;</span>, ar-&gt;ar_arg_cmd);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_ADDR64)) {
+			tok = au_to_arg64(3, <span class="enscript-string">&quot;addr&quot;</span>, ar-&gt;ar_arg_addr);
+			kau_write(rec, tok);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_ADDR32)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;addr&quot;</span>,
+			    (u_int32_t)ar-&gt;ar_arg_addr);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(4, <span class="enscript-string">&quot;data&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		PROCESS_PID_TOKENS(2);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_QUOTACTL</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_CMD)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;command&quot;</span>, ar-&gt;ar_arg_cmd);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_UID)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;uid&quot;</span>, ar-&gt;ar_arg_uid);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_REBOOT</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_CMD)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;howto&quot;</span>, ar-&gt;ar_arg_cmd);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SEMCTL</span>:
+		ar-&gt;ar_event = audit_semctl_to_event(ar-&gt;ar_arg_svipc_cmd);
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SEMOP</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SVIPC_ID)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;sem ID&quot;</span>, ar-&gt;ar_arg_svipc_id);
+			kau_write(rec, tok);
+			<span class="enscript-keyword">if</span> (ar-&gt;ar_errno != EINVAL) {
+				tok = au_to_ipc(AT_IPC_SEM,
+				    ar-&gt;ar_arg_svipc_id);
+				kau_write(rec, tok);
+			}
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SEMGET</span>:
+		<span class="enscript-keyword">if</span> (ar-&gt;ar_errno == 0) {
+			<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SVIPC_ID)) {
+				tok = au_to_ipc(AT_IPC_SEM,
+				    ar-&gt;ar_arg_svipc_id);
+				kau_write(rec, tok);
+			}
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETEGID</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_EGID)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;gid&quot;</span>, ar-&gt;ar_arg_egid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETEUID</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_EUID)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;uid&quot;</span>, ar-&gt;ar_arg_euid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETREGID</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_RGID)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;rgid&quot;</span>, ar-&gt;ar_arg_rgid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_EGID)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;egid&quot;</span>, ar-&gt;ar_arg_egid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETREUID</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_RUID)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;ruid&quot;</span>, ar-&gt;ar_arg_ruid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_EUID)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;euid&quot;</span>, ar-&gt;ar_arg_euid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETGID</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_GID)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;gid&quot;</span>, ar-&gt;ar_arg_gid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETUID</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_UID)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;uid&quot;</span>, ar-&gt;ar_arg_uid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETGROUPS</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_GROUPSET)) {
+			<span class="enscript-keyword">for</span> (uctr = 0; uctr &lt; ar-&gt;ar_arg_groups.gidset_size;
+			    uctr++) {
+				tok = au_to_arg32(1, <span class="enscript-string">&quot;setgroups&quot;</span>,
+				    ar-&gt;ar_arg_groups.gidset[uctr]);
+				kau_write(rec, tok);
+			}
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETLOGIN</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_TEXT)) {
+			tok = au_to_text(ar-&gt;ar_arg_text);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETPRIORITY</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_CMD)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;which&quot;</span>, ar-&gt;ar_arg_cmd);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_UID)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;who&quot;</span>, ar-&gt;ar_arg_uid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;priority&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SETPRIVEXEC</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;flag&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/* AUE_SHMAT, AUE_SHMCTL, AUE_SHMDT and AUE_SHMGET are SysV IPC */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SHMAT</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SVIPC_ID)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;shmid&quot;</span>, ar-&gt;ar_arg_svipc_id);
+			kau_write(rec, tok);
+			<span class="enscript-comment">/* XXXAUDIT: Does having the ipc token make sense? */</span>
+			tok = au_to_ipc(AT_IPC_SHM, ar-&gt;ar_arg_svipc_id);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SVIPC_ADDR)) {
+			tok = au_to_arg64(2, <span class="enscript-string">&quot;shmaddr&quot;</span>, ar-&gt;ar_arg_svipc_addr);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SVIPC_PERM)) {
+			tok = au_to_ipc_perm(&amp;ar-&gt;ar_arg_svipc_perm);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SHMCTL</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SVIPC_ID)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;shmid&quot;</span>, ar-&gt;ar_arg_svipc_id);
+			kau_write(rec, tok);
+			<span class="enscript-comment">/* XXXAUDIT: Does having the ipc token make sense? */</span>
+			tok = au_to_ipc(AT_IPC_SHM, ar-&gt;ar_arg_svipc_id);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">switch</span> (ar-&gt;ar_arg_svipc_cmd) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPC_STAT</span>:
+			ar-&gt;ar_event = AUE_SHMCTL_STAT;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPC_RMID</span>:
+			ar-&gt;ar_event = AUE_SHMCTL_RMID;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPC_SET</span>:
+			ar-&gt;ar_event = AUE_SHMCTL_SET;
+			<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SVIPC_PERM)) {
+				tok = au_to_ipc_perm(&amp;ar-&gt;ar_arg_svipc_perm);
+				kau_write(rec, tok);
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">break</span>;	<span class="enscript-comment">/* We will audit a bad command */</span>
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SHMDT</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SVIPC_ADDR)) {
+			tok = au_to_arg64(1, <span class="enscript-string">&quot;shmaddr&quot;</span>,
+			    (<span class="enscript-type">int</span>)(uintptr_t)ar-&gt;ar_arg_svipc_addr);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SHMGET</span>:
+		<span class="enscript-comment">/* This is unusual; the return value is in an argument token */</span>
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SVIPC_ID)) {
+			tok = au_to_arg32(0, <span class="enscript-string">&quot;shmid&quot;</span>, ar-&gt;ar_arg_svipc_id);
+			kau_write(rec, tok);
+			tok = au_to_ipc(AT_IPC_SHM, ar-&gt;ar_arg_svipc_id);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SVIPC_PERM)) {
+			tok = au_to_ipc_perm(&amp;ar-&gt;ar_arg_svipc_perm);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/* AUE_SHMOPEN, AUE_SHMUNLINK, AUE_SEMOPEN, AUE_SEMCLOSE
+	 * and AUE_SEMUNLINK are Posix IPC */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SHMOPEN</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_SVIPC_ADDR)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;flags&quot;</span>, ar-&gt;ar_arg_fflags);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_MODE)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;mode&quot;</span>, ar-&gt;ar_arg_mode);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SHMUNLINK</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_TEXT)) {
+			tok = au_to_text(ar-&gt;ar_arg_text);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_POSIX_IPC_PERM)) {
+			<span class="enscript-type">struct</span> ipc_perm perm;
+
+			perm.uid = ar-&gt;ar_arg_pipc_perm.pipc_uid;
+			perm.gid = ar-&gt;ar_arg_pipc_perm.pipc_gid;
+			perm.cuid = ar-&gt;ar_arg_pipc_perm.pipc_uid;
+			perm.cgid = ar-&gt;ar_arg_pipc_perm.pipc_gid;
+			perm.mode = ar-&gt;ar_arg_pipc_perm.pipc_mode;
+			perm._seq = 0;
+			perm._key = 0;
+			tok = au_to_ipc_perm(&amp;perm);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SEMOPEN</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FFLAGS)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;flags&quot;</span>, ar-&gt;ar_arg_fflags);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_MODE)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;mode&quot;</span>, ar-&gt;ar_arg_mode);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(4, <span class="enscript-string">&quot;value&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SEMUNLINK</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_TEXT)) {
+			tok = au_to_text(ar-&gt;ar_arg_text);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_POSIX_IPC_PERM)) {
+			<span class="enscript-type">struct</span> ipc_perm perm;
+
+			perm.uid = ar-&gt;ar_arg_pipc_perm.pipc_uid;
+			perm.gid = ar-&gt;ar_arg_pipc_perm.pipc_gid;
+			perm.cuid = ar-&gt;ar_arg_pipc_perm.pipc_uid;
+			perm.cgid = ar-&gt;ar_arg_pipc_perm.pipc_gid;
+			perm.mode = ar-&gt;ar_arg_pipc_perm.pipc_mode;
+			perm._seq = 0;
+			perm._key = 0;
+			tok = au_to_ipc_perm(&amp;perm);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SEMCLOSE</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_FD)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;sem&quot;</span>, ar-&gt;ar_arg_fd);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SYMLINK</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_TEXT)) {
+			tok = au_to_text(ar-&gt;ar_arg_text);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SYSCTL</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SYSCTL_NONADMIN</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_CTLNAME | ARG_LEN)) {
+			<span class="enscript-keyword">for</span> (ctr = 0; ctr &lt; (<span class="enscript-type">int</span>)ar-&gt;ar_arg_len; ctr++) {
+				tok = au_to_arg32(1, <span class="enscript-string">&quot;name&quot;</span>,
+				    ar-&gt;ar_arg_ctlname[ctr]);
+				kau_write(rec, tok);
+			}
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(5, <span class="enscript-string">&quot;newval&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_TEXT)) {
+			tok = au_to_text(ar-&gt;ar_arg_text);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_UMASK_EXTENDED</span>:
+		<span class="enscript-comment">/* ACL data */</span>
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_OPAQUE)) {
+			tok = au_to_opaque(ar-&gt;ar_arg_opaque,
+			    ar-&gt;ar_arg_opq_size);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_UMASK</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_MASK)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;new mask&quot;</span>, ar-&gt;ar_arg_mask);
+			kau_write(rec, tok);
+		}
+		tok = au_to_arg32(0, <span class="enscript-string">&quot;prev mask&quot;</span>, ar-&gt;ar_retval);
+		kau_write(rec, tok);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_WAIT4</span>:
+#<span class="enscript-reference">if</span> 0 <span class="enscript-comment">/* XXXss - new  */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_WAITID</span>:
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_PID)) {
+			tok = au_to_arg32(0, <span class="enscript-string">&quot;pid&quot;</span>, ar-&gt;ar_arg_pid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_FSGETPATH</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;volfsid&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE64)) {
+			tok = au_to_arg64(4, <span class="enscript-string">&quot;objid&quot;</span>, ar-&gt;ar_arg_value64);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_TEXT)) {
+			tok = au_to_text(ar-&gt;ar_arg_text);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SESSION_START</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SESSION_UPDATE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SESSION_END</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SESSION_CLOSE</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE64)) {
+			tok = au_to_arg64(1, <span class="enscript-string">&quot;sflags&quot;</span>, ar-&gt;ar_arg_value64);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_AMASK)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;am_success&quot;</span>,
+			    ar-&gt;ar_arg_amask.am_success);
+			kau_write(rec, tok);
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;am_failure&quot;</span>,
+			    ar-&gt;ar_arg_amask.am_failure);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/************************
+	 * Mach system calls    *
+	 ************************/</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_INITPROCESS</span>:
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_PIDFORTASK</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_MACHPORT1)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;port&quot;</span>,
+			    (u_int32_t)ar-&gt;ar_arg_mach_port1);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_PID)) {
+			tok = au_to_arg32(2, <span class="enscript-string">&quot;pid&quot;</span>, (u_int32_t)ar-&gt;ar_arg_pid);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_TASKFORPID</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_TASKNAMEFORPID</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_MACHPORT1)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;target port&quot;</span>,
+			    (u_int32_t)ar-&gt;ar_arg_mach_port1);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_MACHPORT2)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;task port&quot;</span>,
+			    (u_int32_t)ar-&gt;ar_arg_mach_port2);
+			kau_write(rec, tok);
+		}
+		PROCESS_PID_TOKENS(2);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SWAPON</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(4, <span class="enscript-string">&quot;priority&quot;</span>,
+			    (u_int32_t)ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_SWAPOFF</span>:
+		UPATH1_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAPFD</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_ADDR64)) {
+			tok = au_to_arg64(3, <span class="enscript-string">&quot;va&quot;</span>, ar-&gt;ar_arg_addr);
+			kau_write(rec, tok);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_ADDR32)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;va&quot;</span>,
+			    (u_int32_t)ar-&gt;ar_arg_addr);
+			kau_write(rec, tok);
+		}
+		FD_VNODE1_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_GET_FILE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_SET_FILE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_GET_LINK</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_SET_LINK</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_GET_MOUNT</span>:
+		UPATH1_VNODE1_TOKENS;
+		PROCESS_MAC_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_GET_FD</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_SET_FD</span>:
+		FD_VNODE1_TOKENS;
+		PROCESS_MAC_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_SYSCALL</span>:
+		PROCESS_MAC_TOKENS;
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(3, <span class="enscript-string">&quot;call&quot;</span>, ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_EXECVE</span>:
+		UPATH1_VNODE1_TOKENS;
+		PROCESS_MAC_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_GET_PID</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_PID)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;pid&quot;</span>, (u_int32_t)ar-&gt;ar_arg_pid);
+			kau_write(rec, tok);
+		}
+		PROCESS_MAC_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_GET_LCID</span>:
+		<span class="enscript-keyword">if</span> (ARG_IS_VALID(kar, ARG_VALUE32)) {
+			tok = au_to_arg32(1, <span class="enscript-string">&quot;lcid&quot;</span>,
+			    (u_int32_t)ar-&gt;ar_arg_value32);
+			kau_write(rec, tok);
+		}
+		PROCESS_MAC_TOKENS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_GET_PROC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_MAC_SET_PROC</span>:
+		PROCESS_MAC_TOKENS;
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUE_NULL</span>:
+	<span class="enscript-reference">default</span>:
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+		printf(<span class="enscript-string">&quot;BSM conversion requested for unknown event %d\n&quot;</span>,
+		    ar-&gt;ar_event);
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-comment">/*
+		 * Write the subject token so it is properly freed here.
+		 */</span>
+		kau_write(rec, subj_tok);
+		kau_free(rec);
+		<span class="enscript-keyword">return</span> (BSM_NOAUDIT);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-keyword">if</span> (NULL != ar-&gt;ar_mac_records) {
+		<span class="enscript-comment">/* Convert the audit data from the MAC policies */</span>
+		<span class="enscript-type">struct</span> mac_audit_record *mar;
+
+		LIST_FOREACH(mar, ar-&gt;ar_mac_records, records) {
+			<span class="enscript-keyword">switch</span> (mar-&gt;type) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">MAC_AUDIT_DATA_TYPE</span>:
+					tok = au_to_data(AUP_BINARY, AUR_BYTE,
+					    mar-&gt;length, 
+					    (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)mar-&gt;data);
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">MAC_AUDIT_TEXT_TYPE</span>:
+					tok = au_to_text((<span class="enscript-type">char</span>*) mar-&gt;data);
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-reference">default</span>:
+					<span class="enscript-comment">/*
+					 * XXX: we can either continue,
+					 * skipping this particular entry,
+					 * or we can pre-verify the list and
+					 * abort before writing any records
+					 */</span>
+					printf(<span class="enscript-string">&quot;kaudit_to_bsm(): &quot;</span>
+					    <span class="enscript-string">&quot;BSM conversion requested for&quot;</span>
+					    <span class="enscript-string">&quot;unknown mac_audit data type %d\n&quot;</span>,
+					    mar-&gt;type);
+			}
+
+			kau_write(rec, tok);
+		}
+	}
+#<span class="enscript-reference">endif</span>
+
+	kau_write(rec, subj_tok);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-keyword">if</span> (ar-&gt;ar_cred_mac_labels != NULL &amp;&amp;
+	    strlen(ar-&gt;ar_cred_mac_labels) != 0) {
+		tok = au_to_text(ar-&gt;ar_cred_mac_labels);
+		kau_write(rec, tok);
+	}
+#<span class="enscript-reference">endif</span>
+
+	tok = au_to_return32(au_errno_to_bsm(ar-&gt;ar_errno), ar-&gt;ar_retval);
+	kau_write(rec, tok);  <span class="enscript-comment">/* Every record gets a return token */</span>
+
+	kau_close(rec, &amp;ar-&gt;ar_endtime, ar-&gt;ar_event);
+
+	*pau = rec;
+	<span class="enscript-keyword">return</span> (BSM_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ * Verify that a record is a valid BSM record. This verification is simple
+ * now, but may be expanded on sometime in the future.  Return 1 if the
+ * record is good, 0 otherwise.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">bsm_rec_verify</span>(<span class="enscript-type">void</span> *rec)
+{
+	<span class="enscript-type">char</span> c = *(<span class="enscript-type">char</span> *)rec;
+
+	<span class="enscript-comment">/*
+	 * Check the token ID of the first token; it has to be a header
+	 * token.
+	 *
+	 * XXXAUDIT There needs to be a token structure to map a token.
+	 * XXXAUDIT 'Shouldn't be simply looking at the first char.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((c != AUT_HEADER32) &amp;&amp; (c != AUT_HEADER32_EX) &amp;&amp;
+	    (c != AUT_HEADER64) &amp;&amp; (c != AUT_HEADER64_EX))
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">return</span> (1);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_AUDIT */</span>
+</pre>
+<hr />
+</body></html>

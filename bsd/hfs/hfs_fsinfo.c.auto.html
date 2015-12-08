@@ -1,0 +1,918 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>hfs_fsinfo.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">hfs_fsinfo.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cprotect.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/xattr.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/utfconv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSByteOrder.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_fsctl.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_endian.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfscommon/headers/BTreesInternal.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfscommon/headers/BTreesPrivate.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfscommon/headers/FileMgrInternal.h&quot;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;hfs/hfs_cprotect.h&gt;</span>
+
+
+<span class="enscript-type">union</span> HFSPlusRecord {
+	HFSPlusCatalogFolder folder_record;
+	HFSPlusCatalogFile file_record;
+	HFSPlusCatalogThread thread_record;
+	HFSPlusExtentRecord extent_record;
+	HFSPlusAttrRecord attr_record;
+}; 
+<span class="enscript-type">typedef</span> <span class="enscript-type">union</span> HFSPlusRecord HFSPlusRecord;
+
+<span class="enscript-type">union</span> HFSPlusKey {
+	HFSPlusExtentKey extent_key;
+	HFSPlusAttrKey attr_key;
+};
+<span class="enscript-type">typedef</span> <span class="enscript-type">union</span> HFSPlusKey HFSPlusKey;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">enum</span> traverse_btree_flag {
+	
+	<span class="enscript-comment">//If set, extents btree will also be traversed along with catalog btree, so grab correct locks upfront
+</span>	TRAVERSE_BTREE_EXTENTS = 1,
+
+	<span class="enscript-comment">// Getting content-protection attributes, allocate enough space to accomodate the records.
+</span>	TRAVERSE_BTREE_XATTR_CPROTECT = 2,
+	
+} traverse_btree_flag_t;
+
+
+
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">hfs_fsinfo_metadata_blocks</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> hfs_fsinfo_metadata *fsinfo);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">hfs_fsinfo_metadata_extents</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> hfs_fsinfo_metadata *fsinfo);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">hfs_fsinfo_metadata_percentfree</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> hfs_fsinfo_metadata *fsinfo);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_file_extent_count_callback</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_file_extent_size_catalog_callback</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_file_extent_size_overflow_callback</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_file_size_callback</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_dir_valence_callback</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_name_size_callback</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_xattr_size_callback</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">traverse_btree</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, uint32_t btree_fileID, traverse_btree_flag_t flags, <span class="enscript-type">void</span> *fsinfo,
+		<span class="enscript-type">int</span> (*callback)(<span class="enscript-type">struct</span> hfsmount *, HFSPlusKey *, HFSPlusRecord *, <span class="enscript-type">void</span> *));
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">hfs_fsinfo_free_extents</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> hfs_fsinfo_data *fsinfo);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">fsinfo_free_extents_callback</span>(<span class="enscript-type">void</span> *data, off_t free_extent_size);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_PROTECT</span>
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_cprotect_count_callback</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data);
+#<span class="enscript-reference">endif</span>
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_symlink_size_callback</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data);
+
+<span class="enscript-comment">/* 
+ * Entry function for all the fsinfo requests from hfs_vnop_ioctl() 
+ * Depending on the type of request, this function will call the 
+ * appropriate sub-function and return success or failure back to 
+ * the caller.
+ */</span>
+__private_extern__
+errno_t <span class="enscript-function-name">hfs_get_fsinfo</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">void</span> *a_data)
+{
+	<span class="enscript-type">int</span> error = 0;
+	hfs_fsinfo *fsinfo_union;
+	uint32_t request_type;
+	uint32_t header_len = <span class="enscript-keyword">sizeof</span>(hfs_fsinfo_header_t);
+
+	fsinfo_union = (hfs_fsinfo *)a_data;
+	request_type = fsinfo_union-&gt;header.request_type;
+
+	<span class="enscript-comment">// Zero out output fields to fsinfo_union, keep the user input fields intact.
+</span>	bzero((<span class="enscript-type">char</span> *)fsinfo_union + header_len, <span class="enscript-keyword">sizeof</span>(hfs_fsinfo) - header_len);
+
+	<span class="enscript-keyword">switch</span> (request_type) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">HFS_FSINFO_METADATA_BLOCKS_INFO</span>:
+			error = hfs_fsinfo_metadata_blocks(hfsmp, &amp;(fsinfo_union-&gt;metadata));
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">HFS_FSINFO_METADATA_EXTENTS</span>:
+			error = hfs_fsinfo_metadata_extents(hfsmp, &amp;(fsinfo_union-&gt;metadata));
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">HFS_FSINFO_METADATA_PERCENTFREE</span>:
+			error = hfs_fsinfo_metadata_percentfree(hfsmp, &amp;(fsinfo_union-&gt;metadata));
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">HFS_FSINFO_FILE_EXTENT_COUNT</span>:
+			<span class="enscript-comment">/* Traverse catalog btree and invoke callback for all records */</span>
+			error = traverse_btree(hfsmp, kHFSCatalogFileID, TRAVERSE_BTREE_EXTENTS, &amp;(fsinfo_union-&gt;data), fsinfo_file_extent_count_callback);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">HFS_FSINFO_FILE_EXTENT_SIZE</span>:
+			<span class="enscript-comment">/* Traverse the catalog btree first */</span>
+			error = traverse_btree(hfsmp, kHFSCatalogFileID, 0, &amp;(fsinfo_union-&gt;data), &amp;fsinfo_file_extent_size_catalog_callback);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-comment">/* Traverse the overflow extents btree now */</span>
+			error = traverse_btree(hfsmp, kHFSExtentsFileID, 0, &amp;(fsinfo_union-&gt;data), &amp;fsinfo_file_extent_size_overflow_callback);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">HFS_FSINFO_FILE_SIZE</span>:
+			<span class="enscript-comment">/* Traverse catalog btree and invoke callback for all records */</span>
+			error = traverse_btree(hfsmp, kHFSCatalogFileID, 0, &amp;(fsinfo_union-&gt;data), &amp;fsinfo_file_size_callback);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">HFS_FSINFO_DIR_VALENCE</span>:
+			<span class="enscript-comment">/* Traverse catalog btree and invoke callback for all records */</span>
+			error = traverse_btree(hfsmp, kHFSCatalogFileID, 0, &amp;(fsinfo_union-&gt;data), &amp;fsinfo_dir_valence_callback);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">HFS_FSINFO_NAME_SIZE</span>:
+			<span class="enscript-comment">/* Traverse catalog btree and invoke callback for all records */</span>
+			error = traverse_btree(hfsmp, kHFSCatalogFileID, 0, &amp;(fsinfo_union-&gt;name), &amp;fsinfo_name_size_callback);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">HFS_FSINFO_XATTR_SIZE</span>:
+			<span class="enscript-comment">/* Traverse attribute btree and invoke callback for all records */</span>
+			error = traverse_btree(hfsmp, kHFSAttributesFileID, 0, &amp;(fsinfo_union-&gt;data), &amp;fsinfo_xattr_size_callback);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">HFS_FSINFO_FREE_EXTENTS</span>:
+			error = hfs_fsinfo_free_extents(hfsmp, &amp;(fsinfo_union-&gt;data));
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">HFS_FSINFO_SYMLINK_SIZE</span>:
+			<span class="enscript-comment">/* Traverse catalog btree and invoke callback for all records */</span>
+			error = traverse_btree(hfsmp, kHFSCatalogFileID, 0, &amp;(fsinfo_union-&gt;data), &amp;fsinfo_symlink_size_callback);
+			<span class="enscript-keyword">break</span>;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_PROTECT</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">HFS_FSINFO_FILE_CPROTECT_COUNT</span>:
+			<span class="enscript-comment">/* Traverse attribute btree and invoke callback for all records */</span>
+			error = traverse_btree(hfsmp, kHFSAttributesFileID, TRAVERSE_BTREE_XATTR_CPROTECT, &amp;(fsinfo_union-&gt;cprotect), &amp;fsinfo_cprotect_count_callback);
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> ENOTSUP;
+	};
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-comment">/* 
+ * This function provides information about total number of allocation blocks 
+ * for each individual metadata file.
+ */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">hfs_fsinfo_metadata_blocks</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> hfs_fsinfo_metadata *fsinfo)
+{
+	<span class="enscript-type">int</span> lockflags = 0;
+	<span class="enscript-type">int</span> ret_lockflags = 0;
+
+	<span class="enscript-comment">/* 
+	 * Getting number of allocation blocks for all metadata files 
+	 * should be a relatively quick operation, so we grab locks for all
+	 * the btrees at the same time
+	 */</span>
+	lockflags = SFL_CATALOG | SFL_EXTENTS | SFL_BITMAP | SFL_ATTRIBUTE;
+	ret_lockflags = hfs_systemfile_lock(hfsmp, lockflags, HFS_SHARED_LOCK);
+
+	<span class="enscript-comment">/* Get information about all the btrees */</span>
+	fsinfo-&gt;extents    = hfsmp-&gt;hfs_extents_cp-&gt;c_datafork-&gt;ff_blocks;
+	fsinfo-&gt;catalog    = hfsmp-&gt;hfs_catalog_cp-&gt;c_datafork-&gt;ff_blocks;
+	fsinfo-&gt;allocation = hfsmp-&gt;hfs_allocation_cp-&gt;c_datafork-&gt;ff_blocks;
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_attribute_cp)
+		fsinfo-&gt;attribute  = hfsmp-&gt;hfs_attribute_cp-&gt;c_datafork-&gt;ff_blocks;
+	<span class="enscript-keyword">else</span>
+		fsinfo-&gt;attribute = 0;
+
+	<span class="enscript-comment">/* Done with btrees, give up the locks */</span>
+	hfs_systemfile_unlock(hfsmp, ret_lockflags);
+
+	<span class="enscript-comment">/* Get information about journal file */</span>
+	fsinfo-&gt;journal = howmany(hfsmp-&gt;jnl_size, hfsmp-&gt;blockSize);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* 
+ * Helper function to count the number of valid extents in a file fork structure
+ */</span>
+<span class="enscript-type">static</span> uint32_t
+<span class="enscript-function-name">hfs_count_extents_fp</span>(<span class="enscript-type">struct</span> filefork *ff)
+{
+	<span class="enscript-type">int</span> i;
+	uint32_t count = 0;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; kHFSPlusExtentDensity; i++) {
+		<span class="enscript-keyword">if</span> (ff-&gt;ff_data.cf_extents[i].blockCount == 0) {
+			<span class="enscript-keyword">break</span>;
+		}
+		count++;
+	}
+	<span class="enscript-keyword">return</span> count;
+}
+
+
+<span class="enscript-comment">/* 
+ * This is a helper function that counts the total number of valid 
+ * extents in all the overflow extent records for given fileID 
+ * in overflow extents btree
+ */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">hfs_count_overflow_extents</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, uint32_t fileID, uint32_t *num_extents)
+{
+	<span class="enscript-type">int</span> error;
+	FCB *fcb;
+	<span class="enscript-type">struct</span> BTreeIterator *iterator = NULL;
+	FSBufferDescriptor btdata;
+	HFSPlusExtentKey *extentKey;
+	HFSPlusExtentRecord extentData;
+	uint32_t extent_count = 0;
+	<span class="enscript-type">int</span> i;
+
+	fcb = VTOF(hfsmp-&gt;hfs_extents_vp);
+	MALLOC(iterator, <span class="enscript-type">struct</span> BTreeIterator *, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> BTreeIterator), M_TEMP, M_WAITOK | M_ZERO);
+	
+	extentKey = (HFSPlusExtentKey *) &amp;iterator-&gt;key;	
+	extentKey-&gt;keyLength = kHFSPlusExtentKeyMaximumLength;
+	extentKey-&gt;forkType = kHFSDataForkType;
+	extentKey-&gt;fileID = fileID;
+	extentKey-&gt;startBlock = 0;
+
+	btdata.bufferAddress = &amp;extentData;
+	btdata.itemSize = <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord);
+	btdata.itemCount = 1;
+
+	<span class="enscript-comment">/* Search for overflow extent record */</span>
+	error = BTSearchRecord(fcb, iterator, &amp;btdata, NULL, iterator);
+	
+	<span class="enscript-comment">/*
+	 * We used startBlock of zero, so we will not find any records and errors
+	 * are expected.  It will also position the iterator just before the first 
+	 * overflow extent record for given fileID (if any). 
+	 */</span>
+	<span class="enscript-keyword">if</span> (error &amp;&amp; error != fsBTRecordNotFoundErr &amp;&amp; error != fsBTEndOfIterationErr)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	error = 0;
+
+	<span class="enscript-keyword">for</span> (;;) {
+		
+		<span class="enscript-keyword">if</span> (msleep(NULL, NULL, PINOD | PCATCH,
+				   <span class="enscript-string">&quot;hfs_fsinfo&quot;</span>, NULL) == EINTR) {
+			error = EINTR;
+			<span class="enscript-keyword">break</span>;
+		}
+		
+		error = BTIterateRecord(fcb, kBTreeNextRecord, iterator, &amp;btdata, NULL);
+		<span class="enscript-keyword">if</span> (error != 0) {
+			<span class="enscript-comment">/* These are expected errors, so mask them */</span>
+			<span class="enscript-keyword">if</span> (error == fsBTRecordNotFoundErr || error == fsBTEndOfIterationErr) {
+				error = 0;
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/* If we encounter different fileID, stop the iteration */</span>
+		<span class="enscript-keyword">if</span> (extentKey-&gt;fileID != fileID) {
+			<span class="enscript-keyword">break</span>;
+		}
+		
+		<span class="enscript-keyword">if</span> (extentKey-&gt;forkType != kHFSDataForkType)
+			<span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-comment">/* This is our record of interest; only count the datafork extents. */</span>
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; kHFSPlusExtentDensity; i++) {
+			<span class="enscript-keyword">if</span> (extentData[i].blockCount == 0) {
+				<span class="enscript-keyword">break</span>;
+			}
+			extent_count++;
+		}
+	}
+
+<span class="enscript-reference">out</span>:
+	FREE(iterator, M_TEMP);
+
+	<span class="enscript-keyword">if</span> (error == 0) {
+		*num_extents = extent_count;
+	}
+	<span class="enscript-keyword">return</span> MacToVFSError(error);
+}
+
+<span class="enscript-comment">/*
+ * This function provides information about total number of extents (including 
+ * extents from overflow extents btree, if any) for each individual metadata 
+ * file.
+ */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">hfs_fsinfo_metadata_extents</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> hfs_fsinfo_metadata *fsinfo)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> lockflags = 0;
+	<span class="enscript-type">int</span> ret_lockflags = 0;
+	uint32_t overflow_count;
+
+	<span class="enscript-comment">/*
+	 * Counting the number of extents for all metadata files should
+	 * be a relatively quick operation, so we grab locks for all the
+	 * btrees at the same time
+	 */</span>
+	lockflags = SFL_CATALOG | SFL_EXTENTS | SFL_BITMAP | SFL_ATTRIBUTE;
+	ret_lockflags = hfs_systemfile_lock(hfsmp, lockflags, HFS_SHARED_LOCK);
+
+	<span class="enscript-comment">/* Get number of extents for extents overflow btree */</span>
+	fsinfo-&gt;extents = hfs_count_extents_fp(hfsmp-&gt;hfs_extents_cp-&gt;c_datafork);
+
+	<span class="enscript-comment">/* Get number of extents for catalog btree */</span>
+	fsinfo-&gt;catalog = hfs_count_extents_fp(hfsmp-&gt;hfs_catalog_cp-&gt;c_datafork);
+	<span class="enscript-keyword">if</span> (fsinfo-&gt;catalog &gt;= kHFSPlusExtentDensity) {
+		error = hfs_count_overflow_extents(hfsmp, kHFSCatalogFileID, &amp;overflow_count);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		fsinfo-&gt;catalog += overflow_count;
+	}
+
+	<span class="enscript-comment">/* Get number of extents for allocation file */</span>
+	fsinfo-&gt;allocation = hfs_count_extents_fp(hfsmp-&gt;hfs_allocation_cp-&gt;c_datafork);
+	<span class="enscript-keyword">if</span> (fsinfo-&gt;allocation &gt;= kHFSPlusExtentDensity) {
+		error = hfs_count_overflow_extents(hfsmp, kHFSAllocationFileID, &amp;overflow_count);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		fsinfo-&gt;allocation += overflow_count;
+	}
+
+	<span class="enscript-comment">/*
+	 * Get number of extents for attribute btree.
+	 *	hfs_attribute_cp might be NULL.
+	 */</span>
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_attribute_cp) {
+		fsinfo-&gt;attribute = hfs_count_extents_fp(hfsmp-&gt;hfs_attribute_cp-&gt;c_datafork);
+		<span class="enscript-keyword">if</span> (fsinfo-&gt;attribute &gt;= kHFSPlusExtentDensity) {
+			error = hfs_count_overflow_extents(hfsmp, kHFSAttributesFileID, &amp;overflow_count);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			fsinfo-&gt;attribute += overflow_count;
+		}
+	}
+	<span class="enscript-comment">/* Journal always has one extent */</span>
+	fsinfo-&gt;journal = 1;
+<span class="enscript-reference">out</span>:
+	hfs_systemfile_unlock(hfsmp, ret_lockflags);
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-comment">/* 
+ * Helper function to calculate percentage i.e. X is what percent of Y?
+ */</span>
+<span class="enscript-type">static</span> inline uint32_t 
+<span class="enscript-function-name">hfs_percent</span>(uint32_t X, uint32_t Y)
+{
+	<span class="enscript-keyword">return</span> (X * 100ll) / Y;
+}
+
+<span class="enscript-comment">/*
+ * This function provides percentage of free nodes vs total nodes for each 
+ * individual metadata btrees, i.e. for catalog, overflow extents and 
+ * attributes btree.  This information is not applicable for allocation 
+ * file and journal file.
+ */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">hfs_fsinfo_metadata_percentfree</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> hfs_fsinfo_metadata *fsinfo)
+{
+	<span class="enscript-type">int</span> lockflags = 0;
+	<span class="enscript-type">int</span> ret_lockflags = 0;
+	BTreeControlBlockPtr btreePtr;
+	uint32_t free_nodes, total_nodes;
+
+	<span class="enscript-comment">/*
+	 * Getting total and used nodes for all metadata btrees should 
+	 * be a relatively quick operation, so we grab locks for all the
+	 * btrees at the same time
+	 */</span>
+	lockflags = SFL_CATALOG | SFL_EXTENTS | SFL_BITMAP | SFL_ATTRIBUTE;
+	ret_lockflags = hfs_systemfile_lock(hfsmp, lockflags, HFS_SHARED_LOCK);
+	
+	<span class="enscript-comment">/* Overflow extents btree */</span>
+	btreePtr = VTOF(hfsmp-&gt;hfs_extents_vp)-&gt;fcbBTCBPtr;
+	total_nodes = btreePtr-&gt;totalNodes;
+	free_nodes = btreePtr-&gt;freeNodes;
+	fsinfo-&gt;extents = hfs_percent(free_nodes, total_nodes);
+
+	<span class="enscript-comment">/* Catalog btree */</span>
+	btreePtr = VTOF(hfsmp-&gt;hfs_catalog_vp)-&gt;fcbBTCBPtr;
+	total_nodes = btreePtr-&gt;totalNodes;
+	free_nodes = btreePtr-&gt;freeNodes;
+	fsinfo-&gt;catalog = hfs_percent(free_nodes, total_nodes);
+
+	<span class="enscript-comment">/* Attributes btree */</span>
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_attribute_vp) {
+		btreePtr = VTOF(hfsmp-&gt;hfs_attribute_vp)-&gt;fcbBTCBPtr;
+		total_nodes = btreePtr-&gt;totalNodes;
+		free_nodes = btreePtr-&gt;freeNodes;
+		fsinfo-&gt;attribute = hfs_percent(free_nodes, total_nodes);
+	}
+
+	hfs_systemfile_unlock(hfsmp, ret_lockflags);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* 
+ * Helper function to calculate log base 2 for given number 
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span> 
+<span class="enscript-function-name">hfs_log2</span>(uint64_t entry) 
+{
+	<span class="enscript-keyword">return</span> (63 - __builtin_clzll(entry|1));
+}
+
+<span class="enscript-comment">/*
+ * Helper function to account for input entry into the data 
+ * array based on its log base 2 value
+ */</span>
+__private_extern__
+<span class="enscript-type">void</span> <span class="enscript-function-name">hfs_fsinfo_data_add</span>(<span class="enscript-type">struct</span> hfs_fsinfo_data *fsinfo, uint64_t entry)
+{
+	<span class="enscript-comment">/* 
+	 * From hfs_fsctl.h - 
+	 *
+	 * hfs_fsinfo_data is generic data structure to aggregate information like sizes 
+	 * or counts in buckets of power of 2.  Each bucket represents a range of values 
+	 * that is determined based on its index in the array.  Specifically, buckets[i] 
+	 * represents values that are greater than or equal to 2^(i-1) and less than 2^i, 
+	 * except the last bucket which represents range greater than or equal to 2^(i-1)
+	 *
+	 * The current maximum number of buckets is 41, so we can represent range from
+	 * 0 up to 1TB in increments of power of 2, and then a catch-all bucket of 
+	 * anything that is greater than or equal to 1TB.
+	 *
+	 * For example, 
+	 * bucket[0]  -&gt; greater than or equal to 0 and less than 1
+	 * bucket[1]  -&gt; greater than or equal to 1 and less than 2
+	 * bucket[10] -&gt; greater than or equal to 2^(10-1) = 512 and less than 2^10 = 1024
+	 * bucket[20] -&gt; greater than or equal to 2^(20-1) = 512KB and less than 2^20 = 1MB
+	 * bucket[41] -&gt; greater than or equal to 2^(41-1) = 1TB
+	 */</span>
+	uint32_t bucket;
+
+	<span class="enscript-keyword">if</span> (entry) {
+		<span class="enscript-comment">/* 
+		 * Calculate log base 2 value for the entry.
+		 * Account for this value in the appropriate bucket.
+		 * The last bucket is a catch-all bucket of
+		 * anything that is greater than or equal to 1TB
+		 */</span>
+		bucket = MIN(hfs_log2(entry) + 1, HFS_FSINFO_DATA_MAX_BUCKETS-1);
+		++fsinfo-&gt;bucket[bucket];
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* Entry is zero, so account it in 0th offset */</span>
+		fsinfo-&gt;bucket[0]++;
+	}
+}
+
+<span class="enscript-comment">/* 
+ * Function to traverse all the records of a btree and then call caller-provided 
+ * callback function for every record found.  The type of btree is chosen based 
+ * on the fileID provided by the caller.  This fuction grabs the correct locks 
+ * depending on the type of btree it will be traversing and flags provided 
+ * by the caller.
+ *
+ * Note: It might drop and reacquire the locks during execution.
+ */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">traverse_btree</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, uint32_t btree_fileID, traverse_btree_flag_t flags,
+			   <span class="enscript-type">void</span> *fsinfo, <span class="enscript-type">int</span> (*callback)(<span class="enscript-type">struct</span> hfsmount *, HFSPlusKey *, HFSPlusRecord *, <span class="enscript-type">void</span> *))
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> lockflags = 0;
+	<span class="enscript-type">int</span> ret_lockflags = 0;
+	FCB *fcb;
+	<span class="enscript-type">struct</span> BTreeIterator *iterator = NULL;
+	<span class="enscript-type">struct</span> FSBufferDescriptor btdata;
+	<span class="enscript-type">int</span> btree_operation;
+	HFSPlusRecord record;
+	HFSPlusKey *key;
+	uint64_t start, timeout_abs;
+
+	<span class="enscript-keyword">switch</span>(btree_fileID) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSExtentsFileID</span>: 
+			fcb = VTOF(hfsmp-&gt;hfs_extents_vp);
+			lockflags = SFL_EXTENTS;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSCatalogFileID</span>:
+			fcb = VTOF(hfsmp-&gt;hfs_catalog_vp);
+			lockflags = SFL_CATALOG;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSAttributesFileID</span>:
+			<span class="enscript-comment">// Attributes file doesn’t exist, There are no records to iterate.
+</span>			<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_attribute_vp == NULL)
+				<span class="enscript-keyword">return</span> error;
+			fcb = VTOF(hfsmp-&gt;hfs_attribute_vp);
+			lockflags = SFL_ATTRIBUTE;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	MALLOC(iterator, <span class="enscript-type">struct</span> BTreeIterator *, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> BTreeIterator), M_TEMP, M_WAITOK | M_ZERO);
+
+	<span class="enscript-comment">/* The key is initialized to zero because we are traversing entire btree */</span>
+	key = (HFSPlusKey *)&amp;iterator-&gt;key;
+
+	<span class="enscript-keyword">if</span> (flags &amp; TRAVERSE_BTREE_EXTENTS) {
+		lockflags |= SFL_EXTENTS;
+	}
+
+	btdata.bufferAddress = &amp;record;
+	btdata.itemSize = <span class="enscript-keyword">sizeof</span>(HFSPlusRecord);
+	btdata.itemCount = 1;
+
+	<span class="enscript-comment">/* Lock btree for duration of traversal */</span>
+	ret_lockflags = hfs_systemfile_lock(hfsmp, lockflags, HFS_SHARED_LOCK);
+	btree_operation = kBTreeFirstRecord;
+
+	nanoseconds_to_absolutetime(HFS_FSINFO_MAX_LOCKHELD_TIME, &amp;timeout_abs);
+	start = mach_absolute_time();
+
+	<span class="enscript-keyword">while</span> (1) {
+
+		<span class="enscript-keyword">if</span> (msleep(NULL, NULL, PINOD | PCATCH,
+				   <span class="enscript-string">&quot;hfs_fsinfo&quot;</span>, NULL) == EINTR) {
+			error = EINTR;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		error = BTIterateRecord(fcb, btree_operation, iterator, &amp;btdata, NULL);
+		<span class="enscript-keyword">if</span> (error != 0) {
+			<span class="enscript-keyword">if</span> (error == fsBTRecordNotFoundErr || error == fsBTEndOfIterationErr) {
+				error = 0;
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/* Lookup next btree record on next call to BTIterateRecord() */</span>
+		btree_operation = kBTreeNextRecord;
+
+		<span class="enscript-comment">/* Call our callback function and stop iteration if there are any errors */</span>
+		error = callback(hfsmp, key, &amp;record, fsinfo);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/* let someone else use the tree after we've processed over HFS_FSINFO_MAX_LOCKHELD_TIME */</span>
+		<span class="enscript-keyword">if</span> ((mach_absolute_time() - start) &gt;= timeout_abs) {
+
+			<span class="enscript-comment">/* release b-tree locks and let someone else get the lock */</span>
+			hfs_systemfile_unlock (hfsmp, ret_lockflags);
+
+			<span class="enscript-comment">/* add tsleep here to force context switch and fairness */</span>
+			tsleep((caddr_t)hfsmp, PRIBIO, <span class="enscript-string">&quot;hfs_fsinfo&quot;</span>, 1);
+
+			<span class="enscript-comment">/*
+			 * re-acquire the locks in the same way that we wanted them originally.
+			 * note: it is subtle but worth pointing out that in between the time that we
+			 * released and now want to re-acquire these locks that the b-trees may have shifted
+			 * slightly but significantly. For example, the catalog or other b-tree could have grown
+			 * past 8 extents and now requires the extents lock to be held in order to be safely
+			 * manipulated. We can't be sure of the state of the b-tree from where we last left off.
+			 */</span>
+
+			ret_lockflags = hfs_systemfile_lock (hfsmp, lockflags, HFS_SHARED_LOCK);
+
+			<span class="enscript-comment">/*
+			 * It's highly likely that the search key we stashed away before dropping lock
+			 * no longer points to an existing item.  Iterator's IterateRecord is able to
+			 * re-position itself and process the next record correctly.  With lock dropped,
+			 * there might be records missed for statistic gathering, which is ok. The
+			 * point is to get aggregate values.
+			 */</span>
+
+			start = mach_absolute_time();
+
+			<span class="enscript-comment">/* loop back around and get another record */</span>
+		}
+	}
+
+	hfs_systemfile_unlock(hfsmp, ret_lockflags);
+	FREE (iterator, M_TEMP);
+	<span class="enscript-keyword">return</span> MacToVFSError(error);
+}
+
+<span class="enscript-comment">/* 
+ * Callback function to get distribution of number of extents 
+ * for all user files in given file system.  Note that this only 
+ * accounts for data fork, no resource fork. 
+ */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">fsinfo_file_extent_count_callback</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, 
+		__unused HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data)
+{
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> error = 0;
+	uint32_t num_extents = 0;
+	uint32_t num_overflow = 0;
+	uint32_t blockCount;
+
+	<span class="enscript-keyword">if</span> (record-&gt;file_record.recordType == kHFSPlusFileRecord) {
+		<span class="enscript-comment">/* Count total number of extents for this file */</span>
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; kHFSPlusExtentDensity; i++) {
+			blockCount = record-&gt;file_record.dataFork.extents[i].blockCount;
+			<span class="enscript-keyword">if</span> (blockCount == 0) {
+				<span class="enscript-keyword">break</span>;
+			}
+			num_extents++;
+		}
+		<span class="enscript-comment">/* This file has overflow extent records, so search overflow btree */</span>
+		<span class="enscript-keyword">if</span> (num_extents &gt;= kHFSPlusExtentDensity) {
+			<span class="enscript-comment">/* The caller also hold extents overflow btree lock */</span>
+			error = hfs_count_overflow_extents(hfsmp, record-&gt;file_record.fileID, &amp;num_overflow);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			num_extents += num_overflow;
+		}
+		hfs_fsinfo_data_add(data, num_extents);
+	}
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-comment">/* 
+ * Callback function to get distribution of individual extent sizes
+ * (in bytes) for all user files in given file system from catalog 
+ * btree only.  Note that this only accounts for data fork, no resource 
+ * fork. 
+ */</span>
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_file_extent_size_catalog_callback</span>(__unused <span class="enscript-type">struct</span> hfsmount *hfsmp,
+		__unused HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data)
+{
+	<span class="enscript-type">int</span> i;
+	uint32_t blockCount;
+	uint64_t extent_size;
+
+	<span class="enscript-keyword">if</span> (record-&gt;file_record.recordType == kHFSPlusFileRecord) {
+		<span class="enscript-comment">/* Traverse through all valid extents */</span>
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; kHFSPlusExtentDensity; i++) {
+			blockCount = record-&gt;file_record.dataFork.extents[i].blockCount;
+			<span class="enscript-keyword">if</span> (blockCount == 0) {
+				<span class="enscript-keyword">break</span>;
+			}
+			extent_size = hfs_blk_to_bytes(blockCount, hfsmp-&gt;blockSize);
+			hfs_fsinfo_data_add(data, extent_size);
+		}
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* 
+ * Callback function to get distribution of individual extent sizes
+ * (in bytes) for all user files in given file system from overflow 
+ * extents btree only.  Note that this only accounts for data fork, 
+ * no resource fork. 
+ */</span>
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_file_extent_size_overflow_callback</span>(__unused <span class="enscript-type">struct</span> hfsmount *hfsmp,
+		HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data)
+{
+	<span class="enscript-type">int</span> i;
+	uint32_t blockCount;
+	uint64_t extent_size;
+
+	<span class="enscript-keyword">if</span> (key-&gt;extent_key.fileID &gt;= kHFSFirstUserCatalogNodeID) {
+		<span class="enscript-comment">// Only count the data fork extents.
+</span>		<span class="enscript-keyword">if</span> (key-&gt;extent_key.forkType == kHFSDataForkType) {
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; kHFSPlusExtentDensity; i++) {
+				blockCount = record-&gt;extent_record[i].blockCount;
+				<span class="enscript-keyword">if</span> (blockCount == 0) {
+					<span class="enscript-keyword">break</span>;
+				}
+				extent_size = hfs_blk_to_bytes(blockCount, hfsmp-&gt;blockSize);
+				hfs_fsinfo_data_add(data, extent_size);
+			}
+		}
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* 
+ * Callback function to get distribution of file sizes (in bytes) 
+ * for all user files in given file system.  Note that this only 
+ * accounts for data fork, no resource fork. 
+ */</span>
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_file_size_callback</span>(__unused <span class="enscript-type">struct</span> hfsmount *hfsmp,
+		__unused HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data)
+{
+	<span class="enscript-keyword">if</span> (record-&gt;file_record.recordType == kHFSPlusFileRecord) {
+		<span class="enscript-comment">/* Record of interest, account for the size in the bucket */</span>
+		hfs_fsinfo_data_add(data, record-&gt;file_record.dataFork.logicalSize);
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Callback function to get distribution of directory valence 
+ * for all directories in the given file system.
+ */</span>
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_dir_valence_callback</span>(__unused <span class="enscript-type">struct</span> hfsmount *hfsmp,
+		__unused HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data)
+{
+	<span class="enscript-keyword">if</span> (record-&gt;folder_record.recordType == kHFSPlusFolderRecord) {
+		hfs_fsinfo_data_add(data, record-&gt;folder_record.valence);
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* 
+ * Callback function to get distribution of number of unicode 
+ * characters in name for all files and directories for a given 
+ * file system.
+ */</span>
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_name_size_callback</span>(__unused <span class="enscript-type">struct</span> hfsmount *hfsmp,
+		__unused HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data)
+{
+	<span class="enscript-type">struct</span> hfs_fsinfo_name *fsinfo = (<span class="enscript-type">struct</span> hfs_fsinfo_name *)data;
+	uint32_t length;
+
+	<span class="enscript-keyword">if</span> ((record-&gt;folder_record.recordType == kHFSPlusFolderThreadRecord) ||
+	    (record-&gt;folder_record.recordType == kHFSPlusFileThreadRecord)) {
+		length = record-&gt;thread_record.nodeName.length;
+		<span class="enscript-comment">/* Make sure that the nodeName is bounded, otherwise return error */</span>
+		<span class="enscript-keyword">if</span> (length &gt; kHFSPlusMaxFileNameChars) {
+			<span class="enscript-keyword">return</span> EIO;
+		}
+		
+		<span class="enscript-comment">// sanity check for a name length of zero, which isn't valid on disk.
+</span>		<span class="enscript-keyword">if</span> (length == 0)
+			<span class="enscript-keyword">return</span> EIO;
+		
+		<span class="enscript-comment">/* Round it down to nearest multiple of 5 to match our buckets granularity */</span>
+		length = (length - 1)/ 5;
+		<span class="enscript-comment">/* Account this value into our bucket */</span>
+		fsinfo-&gt;bucket[length]++;
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* 
+ * Callback function to get distribution of size of all extended 
+ * attributes for a given file system.
+ */</span>
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_xattr_size_callback</span>(__unused <span class="enscript-type">struct</span> hfsmount *hfsmp,
+		__unused HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data)
+{
+	<span class="enscript-keyword">if</span> (record-&gt;attr_record.recordType == kHFSPlusAttrInlineData) {
+		<span class="enscript-comment">/* Inline attribute */</span>
+		hfs_fsinfo_data_add(data, record-&gt;attr_record.attrData.attrSize);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (record-&gt;attr_record.recordType == kHFSPlusAttrForkData) {
+		<span class="enscript-comment">/* Larger attributes with extents information */</span>
+		hfs_fsinfo_data_add(data, record-&gt;attr_record.forkData.theFork.logicalSize);
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-comment">/*
+ * Callback function to get distribution of free space extents for a given file system.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">fsinfo_free_extents_callback</span>(<span class="enscript-type">void</span> *data, off_t free_extent_size)
+{
+	<span class="enscript-comment">// Assume a minimum of 4 KB block size
+</span>	hfs_fsinfo_data_add(data, free_extent_size / 4096);
+}
+
+<span class="enscript-comment">/*
+ * Function to get distribution of free space extents for a given file system.
+ */</span>
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">hfs_fsinfo_free_extents</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> hfs_fsinfo_data *fsinfo)
+{
+	<span class="enscript-keyword">return</span> hfs_find_free_extents(hfsmp, &amp;fsinfo_free_extents_callback, fsinfo);
+}
+
+<span class="enscript-comment">/*
+ * Callback function to get distribution of symblock link sizes (in bytes)
+ * for all user files in given file system.  Note that this only
+ * accounts for data fork, no resource fork.
+ */</span>
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">fsinfo_symlink_size_callback</span>(__unused <span class="enscript-type">struct</span> hfsmount *hfsmp,
+									 __unused HFSPlusKey *key, HFSPlusRecord *record, <span class="enscript-type">void</span> *data)
+{
+	<span class="enscript-keyword">if</span> (record-&gt;file_record.recordType == kHFSPlusFileRecord) {
+		<span class="enscript-comment">/* Record of interest, account for the size in the bucket */</span>
+		<span class="enscript-keyword">if</span> (S_ISLNK(record-&gt;file_record.bsdInfo.fileMode))
+			hfs_fsinfo_data_add((<span class="enscript-type">struct</span> hfs_fsinfo_data *)data, record-&gt;file_record.dataFork.logicalSize);
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_PROTECT</span>
+<span class="enscript-comment">/*
+ * Callback function to get total number of files/directories
+ * for each content protection class
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">fsinfo_cprotect_count_callback</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, HFSPlusKey *key,
+										  HFSPlusRecord *record, <span class="enscript-type">void</span> *data)
+{
+	<span class="enscript-type">struct</span> hfs_fsinfo_cprotect *fsinfo = (<span class="enscript-type">struct</span> hfs_fsinfo_cprotect *)data;
+	<span class="enscript-type">static</span> <span class="enscript-type">const</span> uint16_t cp_xattrname_utf16[] = CONTENT_PROTECTION_XATTR_NAME_CHARS;
+	<span class="enscript-comment">/*
+	 * NOTE: cp_xattrname_utf16_len is the number of UTF-16 code units in
+	 * the EA name string.
+	 */</span>
+	<span class="enscript-type">static</span> <span class="enscript-type">const</span> size_t cp_xattrname_utf16_len = <span class="enscript-keyword">sizeof</span>(cp_xattrname_utf16)/2;
+	<span class="enscript-type">struct</span> cp_xattr_v5 *xattr;
+	size_t xattr_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cp_xattr_v5);
+	<span class="enscript-type">struct</span> cprotect cp_entry;
+	<span class="enscript-type">struct</span> cprotect *cp_entryp = &amp;cp_entry;
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-comment">/* Content protect xattrs are inline attributes only, so skip all others */</span>
+	<span class="enscript-keyword">if</span> (record-&gt;attr_record.recordType != kHFSPlusAttrInlineData)
+		<span class="enscript-keyword">return</span> 0;
+
+	<span class="enscript-comment">/* We only look at content protection xattrs */</span>
+	<span class="enscript-keyword">if</span> ((key-&gt;attr_key.attrNameLen != cp_xattrname_utf16_len) ||
+		(bcmp(key-&gt;attr_key.attrName, cp_xattrname_utf16, 2 * cp_xattrname_utf16_len))) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	xattr = (<span class="enscript-type">struct</span> cp_xattr_v5 *)((<span class="enscript-type">void</span> *)(record-&gt;attr_record.attrData.attrData));
+	error = cp_read_xattr_v5(hfsmp, xattr, xattr_len, (cprotect_t *)&amp;cp_entryp,
+							 CP_GET_XATTR_BASIC_INFO);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> 0;
+
+	<span class="enscript-comment">/* No key present, skip this record */</span>
+	<span class="enscript-keyword">if</span> (!ISSET(cp_entry.cp_flags, CP_HAS_A_KEY))
+		<span class="enscript-keyword">return</span> 0;
+
+	<span class="enscript-comment">/* Now account for the persistent class */</span>
+	<span class="enscript-keyword">switch</span> (CP_CLASS(cp_entry.cp_pclass)) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROTECTION_CLASS_A</span>:
+			fsinfo-&gt;class_A++;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROTECTION_CLASS_B</span>:
+			fsinfo-&gt;class_B++;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROTECTION_CLASS_C</span>:
+			fsinfo-&gt;class_C++;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROTECTION_CLASS_D</span>:
+			fsinfo-&gt;class_D++;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROTECTION_CLASS_E</span>:
+			fsinfo-&gt;class_E++;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROTECTION_CLASS_F</span>:
+			fsinfo-&gt;class_F++;
+			<span class="enscript-keyword">break</span>;
+	};
+
+	<span class="enscript-keyword">return</span> 0;
+}
+#<span class="enscript-reference">endif</span>
+</pre>
+<hr />
+</body></html>

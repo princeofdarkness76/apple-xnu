@@ -1,0 +1,256 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>getgrnam.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">getgrnam.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2006 Apple Inc.  All Rights Reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdbool.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+
+<span class="enscript-comment">// add additional headers needed here.
+</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../libmicro.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;grp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;uuid/uuid.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+# <span class="enscript-reference">define</span> <span class="enscript-function-name">debug</span>(fmt, args...)    (void) fprintf(stderr, fmt <span class="enscript-string">&quot;\n&quot;</span> , ##args)
+#<span class="enscript-reference">else</span>
+# <span class="enscript-reference">define</span> <span class="enscript-function-name">debug</span>(fmt, args...)
+#<span class="enscript-reference">endif</span>
+
+
+<span class="enscript-comment">// Correct use case
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//    getgrnam -E  -L -S -W -B 200 -C 10 -r 10
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//      libMicro default benchmark run options are &quot;-E -L -S -W -C 200&quot;
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// -B is batch size: loop iteration per each benchmark run. Needs to match # of
+</span><span class="enscript-comment">//                   real lookups. This is total number of lookups to issue.
+</span><span class="enscript-comment">// -C is min sample number: how many benchmark needs to run to get proper sample
+</span><span class="enscript-comment">//                          1 is mimumum, but you get at least 3 benchmark run
+</span><span class="enscript-comment">//                          samples. Do not set to zero. Default is 200 for most
+</span><span class="enscript-comment">//                          runs in libMicro.
+</span><span class="enscript-comment">// -r is the number of total groups (from &quot;local_test_group1&quot; to &quot;local_test_group#&quot;)
+</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> gL1CacheEnabled;
+
+<span class="enscript-comment">/*
+ *    Your state variables should live in the tsd_t struct below
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+} tsd_t;
+
+<span class="enscript-comment">// temporary buffer size
+</span>#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BUFSIZE</span> 200
+
+<span class="enscript-comment">// the number of record lookup to issue is covered by standard option optB
+</span><span class="enscript-type">static</span> <span class="enscript-type">int</span>  optRecords =    10;  <span class="enscript-comment">// the number of total records
+</span>
+<span class="enscript-comment">// This will use local users (local_test_*)
+</span><span class="enscript-type">static</span> <span class="enscript-type">char</span> *default_gprefix = <span class="enscript-string">&quot;ds_test_group&quot;</span>;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">GROUPNAME_LEN</span>	30
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> *grpname_list;
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_init</span>()
+{
+    debug(<span class="enscript-string">&quot;benchmark_init&quot;</span>);
+    (<span class="enscript-type">void</span>) sprintf(lm_optstr,  <span class="enscript-string">&quot;l:r:g:&quot;</span>);
+
+    lm_tsdsize = <span class="enscript-keyword">sizeof</span> (tsd_t);
+    lm_defB = 100;
+
+    (<span class="enscript-type">void</span>) sprintf(lm_usage,
+                <span class="enscript-string">&quot;\n     ------- getgrnam specific options (default: *)\n&quot;</span>
+                <span class="enscript-string">&quot;       [-r total number of group records (10*)]\n&quot;</span>
+                <span class="enscript-string">&quot;       [-g group prefix(ds_test_group)]\n&quot;</span>
+                <span class="enscript-string">&quot;\n&quot;</span> );
+    <span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * This is where you parse your lower-case arguments.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_optswitch</span>(<span class="enscript-type">int</span> opt, <span class="enscript-type">char</span> *optarg)
+{
+    debug(<span class="enscript-string">&quot;benchmark_optswitch&quot;</span>);
+
+    <span class="enscript-keyword">switch</span> (opt) {
+    <span class="enscript-keyword">case</span> <span class="enscript-string">'r'</span>:    <span class="enscript-comment">// total number of records. default is 100
+</span>        optRecords = atoi(optarg);
+        debug(<span class="enscript-string">&quot;optRecords = %d\n&quot;</span>, optRecords);
+        <span class="enscript-keyword">break</span>;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-string">'l'</span>:
+        gL1CacheEnabled = atoi(optarg);
+        <span class="enscript-keyword">break</span>;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-string">'g'</span>:	<span class="enscript-comment">// base name for the groups to use
+</span>	default_gprefix = strdup(optarg);
+	debug(<span class="enscript-string">&quot;default_gprefix = %s\n&quot;</span>, default_gprefix);
+	<span class="enscript-keyword">break</span>;
+
+    <span class="enscript-reference">default</span>:
+        <span class="enscript-keyword">return</span> -1;
+    }
+
+    <span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-comment">// Initialize all structures that will be used in benchmark()
+</span><span class="enscript-comment">// moved template init from benchmark_initworker -&gt; benchmark_initrun
+</span><span class="enscript-comment">//  since username_list is static across threads and processes
+</span><span class="enscript-comment">//
+</span><span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initrun</span>()
+{
+    <span class="enscript-type">int</span> i;
+
+    debug(<span class="enscript-string">&quot;\nbenchmark_initrun&quot;</span>);
+
+    <span class="enscript-comment">// create an array of usernames to use in benchmark before their use
+</span>    <span class="enscript-comment">// realtime generation in benchmark effects performance measurements
+</span>    grpname_list = malloc( optRecords * GROUPNAME_LEN );
+    <span class="enscript-keyword">if</span> (!grpname_list) {
+        debug (<span class="enscript-string">&quot;malloc error&quot;</span>);
+        exit (1);
+    }
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; optRecords; i++) {
+        sprintf(&amp;grpname_list[i*GROUPNAME_LEN], <span class="enscript-string">&quot;%s%d&quot;</span>, default_gprefix, i+1);
+        debug(<span class="enscript-string">&quot;creating group name %s&quot;</span>, &amp;grpname_list[i*GROUPNAME_LEN]);
+    }
+
+    <span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark</span>(<span class="enscript-type">void</span> *tsd, result_t *res)
+{
+    <span class="enscript-type">int</span>          i, err;
+    <span class="enscript-type">struct</span> group *grp = NULL;
+
+    res-&gt;re_errors = 0;
+
+    debug(<span class="enscript-string">&quot;in to benchmark - optB = %i&quot;</span>, lm_optB);
+    srandom(getpid());
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; lm_optB; i++) {
+        <span class="enscript-type">int</span> index = (random() % optRecords) * GROUPNAME_LEN;
+
+        <span class="enscript-keyword">if</span> (lm_optT &gt; 1) {
+            <span class="enscript-type">struct</span> group gd;
+            <span class="enscript-type">struct</span> group *grp_ptr = &amp;gd;
+            <span class="enscript-type">struct</span> group *tmp_ptr;
+            <span class="enscript-type">char</span> gbuf[BUFSIZE];
+
+            err = getgrnam_r( &amp;grpname_list[index], grp_ptr, gbuf, BUFSIZE, &amp;tmp_ptr);
+            <span class="enscript-comment">// non-NULL err means failure and NULL result ptr means no matching
+</span>            <span class="enscript-comment">// entry
+</span>            <span class="enscript-keyword">if</span> (err) {
+                debug(<span class="enscript-string">&quot;error: %s -&gt; %s&quot;</span>,  &amp;grpname_list[index], strerror(err));
+                res-&gt;re_errors++;
+            }
+            <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( !tmp_ptr) {
+                debug(<span class="enscript-string">&quot;not found: %s&quot;</span>,  &amp;grpname_list[index] );
+                res-&gt;re_errors++;
+            }
+        }
+        <span class="enscript-keyword">else</span> {
+            errno = 0;
+            grp = getgrnam( &amp;grpname_list[index] );
+
+            <span class="enscript-keyword">if</span> (!grp) {
+                <span class="enscript-keyword">if</span> (errno) {
+                    debug(<span class="enscript-string">&quot;error: %s -&gt; %s&quot;</span>, &amp;grpname_list[index], strerror(errno));
+                    res-&gt;re_errors++;
+                }
+                <span class="enscript-keyword">else</span> {
+                    debug(<span class="enscript-string">&quot;not found: %s&quot;</span>,  &amp;grpname_list[index] );
+                    res-&gt;re_errors++;
+                }
+            }
+        }
+    }
+    res-&gt;re_count = i;
+
+    <span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">// We need to release all the structures we allocated in benchmark_initrun()
+</span><span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_finirun</span>(<span class="enscript-type">void</span> *tsd)
+{
+    <span class="enscript-comment">// tsd_t    *ts = (tsd_t *)tsd;
+</span>    debug(<span class="enscript-string">&quot;benchmark_finiworker: deallocating structures&quot;</span>);
+
+    free (grpname_list);
+
+    <span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">char</span> *
+<span class="enscript-function-name">benchmark_result</span>()
+{
+    <span class="enscript-type">static</span> <span class="enscript-type">char</span>    result = <span class="enscript-string">'\0'</span>;
+    debug(<span class="enscript-string">&quot;benchmark_result&quot;</span>);
+    <span class="enscript-keyword">return</span> (&amp;result);
+}
+
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,1819 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>deflate.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">deflate.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* deflate.c -- compress data using the deflation algorithm
+ * Copyright (C) 1995-2005 Jean-loup Gailly.
+ * For conditions of distribution and use, see copyright notice in zlib.h
+ */</span>
+
+<span class="enscript-comment">/*
+ *  ALGORITHM
+ *
+ *      The &quot;deflation&quot; process depends on being able to identify portions
+ *      of the input text which are identical to earlier input (within a
+ *      sliding window trailing behind the input currently being processed).
+ *
+ *      The most straightforward technique turns out to be the fastest for
+ *      most input files: try all possible matches and select the longest.
+ *      The key feature of this algorithm is that insertions into the string
+ *      dictionary are very simple and thus fast, and deletions are avoided
+ *      completely. Insertions are performed at each input character, whereas
+ *      string matches are performed only when the previous match ends. So it
+ *      is preferable to spend more time in matches to allow very fast string
+ *      insertions and avoid deletions. The matching algorithm for small
+ *      strings is inspired from that of Rabin &amp; Karp. A brute force approach
+ *      is used to find longer strings when a small match has been found.
+ *      A similar algorithm is used in comic (by Jan-Mark Wams) and freeze
+ *      (by Leonid Broukhis).
+ *         A previous version of this file used a more sophisticated algorithm
+ *      (by Fiala and Greene) which is guaranteed to run in linear amortized
+ *      time, but has a larger average cost, uses more memory and is patented.
+ *      However the F&amp;G algorithm may be faster for some highly redundant
+ *      files if the parameter max_chain_length (described below) is too large.
+ *
+ *  ACKNOWLEDGEMENTS
+ *
+ *      The idea of lazy evaluation of matches is due to Jan-Mark Wams, and
+ *      I found it in 'freeze' written by Leonid Broukhis.
+ *      Thanks to many people for bug reports and testing.
+ *
+ *  REFERENCES
+ *
+ *      Deutsch, L.P.,&quot;DEFLATE Compressed Data Format Specification&quot;.
+ *      Available in <a href="http://www.ietf.org/rfc/rfc1951.txt">http://www.ietf.org/rfc/rfc1951.txt</a>
+ *
+ *      A description of the Rabin and Karp algorithm is given in the book
+ *         &quot;Algorithms&quot; by R. Sedgewick, Addison-Wesley, p252.
+ *
+ *      Fiala,E.R., and Greene,D.H.
+ *         Data Compression with Finite Windows, Comm.ACM, 32,4 (1989) 490-595
+ *
+ */</span>
+
+<span class="enscript-comment">/* @(#) $Id$ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;deflate.h&quot;</span>
+
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> deflate_copyright[] =
+   <span class="enscript-string">&quot; deflate 1.2.3 Copyright 1995-2005 Jean-loup Gailly &quot;</span>;
+<span class="enscript-comment">/*
+  If you use the zlib library in a product, an acknowledgment is welcome
+  in the documentation of your product. If for some reason you cannot
+  include such an acknowledgment, I would appreciate that you keep this
+  copyright string in the executable of your product.
+ */</span>
+
+<span class="enscript-comment">/* ===========================================================================
+ *  Function prototypes.
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">enum</span> {
+    need_more,      <span class="enscript-comment">/* block not completed, need more input or more output */</span>
+    block_done,     <span class="enscript-comment">/* block flush performed */</span>
+    finish_started, <span class="enscript-comment">/* finish started, need only more output at next deflate */</span>
+    finish_done     <span class="enscript-comment">/* finish done, accept no more input or output */</span>
+} block_state;
+
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">block_state</span> (*compress_func) OF((deflate_state *s, <span class="enscript-type">int</span> flush));
+<span class="enscript-comment">/* Compression function. Returns the block state after the call. */</span>
+
+local <span class="enscript-type">void</span> fill_window    <span class="enscript-function-name">OF</span>((deflate_state *s));
+local block_state deflate_stored <span class="enscript-function-name">OF</span>((deflate_state *s, <span class="enscript-type">int</span> flush));
+local block_state deflate_fast   <span class="enscript-function-name">OF</span>((deflate_state *s, <span class="enscript-type">int</span> flush));
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">FASTEST</span>
+local block_state deflate_slow   <span class="enscript-function-name">OF</span>((deflate_state *s, <span class="enscript-type">int</span> flush));
+#<span class="enscript-reference">endif</span>
+local <span class="enscript-type">void</span> lm_init        <span class="enscript-function-name">OF</span>((deflate_state *s));
+local <span class="enscript-type">void</span> putShortMSB    <span class="enscript-function-name">OF</span>((deflate_state *s, uInt b));
+local <span class="enscript-type">void</span> flush_pending  <span class="enscript-function-name">OF</span>((z_streamp strm));
+local <span class="enscript-type">int</span> read_buf        <span class="enscript-function-name">OF</span>((z_streamp strm, Bytef *buf, <span class="enscript-type">unsigned</span> size));
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">FASTEST</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ASMV</span>
+      <span class="enscript-type">void</span> match_init OF((<span class="enscript-type">void</span>)); <span class="enscript-comment">/* asm code initialization */</span>
+      uInt longest_match  OF((deflate_state *s, IPos cur_match));
+#<span class="enscript-reference">else</span>
+local uInt longest_match  <span class="enscript-function-name">OF</span>((deflate_state *s, IPos cur_match));
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span>
+local uInt longest_match_fast <span class="enscript-function-name">OF</span>((deflate_state *s, IPos cur_match));
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUG</span>
+local  <span class="enscript-type">void</span> check_match <span class="enscript-function-name">OF</span>((deflate_state *s, IPos start, IPos match,
+                            <span class="enscript-type">int</span> length));
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* ===========================================================================
+ * Local data
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NIL</span> 0
+<span class="enscript-comment">/* Tail of hash chains */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">TOO_FAR</span>
+#  <span class="enscript-reference">define</span> <span class="enscript-variable-name">TOO_FAR</span> 4096
+#<span class="enscript-reference">endif</span>
+<span class="enscript-comment">/* Matches of length 3 are discarded if their distance exceeds TOO_FAR */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MIN_LOOKAHEAD</span> (MAX_MATCH+MIN_MATCH+1)
+<span class="enscript-comment">/* Minimum amount of lookahead, except at the end of the input file.
+ * See deflate.c for comments about the MIN_MATCH+1.
+ */</span>
+
+<span class="enscript-comment">/* Values for max_lazy_match, good_match and max_chain_length, depending on
+ * the desired pack level (0..9). The values given below have been tuned to
+ * exclude worst case performance for pathological files. Better values may be
+ * found for specific files.
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> config_s {
+   ush good_length; <span class="enscript-comment">/* reduce lazy search above this match length */</span>
+   ush max_lazy;    <span class="enscript-comment">/* do not perform lazy search above this match length */</span>
+   ush nice_length; <span class="enscript-comment">/* quit search above this match length */</span>
+   ush max_chain;
+   compress_func func;
+} config;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">FASTEST</span>
+local <span class="enscript-type">const</span> config configuration_table[2] = {
+<span class="enscript-comment">/*      good lazy nice chain */</span>
+<span class="enscript-comment">/* 0 */</span> {0,    0,  0,    0, deflate_stored},  <span class="enscript-comment">/* store only */</span>
+<span class="enscript-comment">/* 1 */</span> {4,    4,  8,    4, deflate_fast}}; <span class="enscript-comment">/* max speed, no lazy matches */</span>
+#<span class="enscript-reference">else</span>
+local <span class="enscript-type">const</span> config configuration_table[10] = {
+<span class="enscript-comment">/*      good lazy nice chain */</span>
+<span class="enscript-comment">/* 0 */</span> {0,    0,  0,    0, deflate_stored},  <span class="enscript-comment">/* store only */</span>
+<span class="enscript-comment">/* 1 */</span> {4,    4,  8,    4, deflate_fast}, <span class="enscript-comment">/* max speed, no lazy matches */</span>
+<span class="enscript-comment">/* 2 */</span> {4,    5, 16,    8, deflate_fast},
+<span class="enscript-comment">/* 3 */</span> {4,    6, 32,   32, deflate_fast},
+
+<span class="enscript-comment">/* 4 */</span> {4,    4, 16,   16, deflate_slow},  <span class="enscript-comment">/* lazy matches */</span>
+<span class="enscript-comment">/* 5 */</span> {8,   16, 32,   32, deflate_slow},
+<span class="enscript-comment">/* 6 */</span> {8,   16, 128, 128, deflate_slow},
+<span class="enscript-comment">/* 7 */</span> {8,   32, 128, 256, deflate_slow},
+<span class="enscript-comment">/* 8 */</span> {32, 128, 258, 1024, deflate_slow},
+<span class="enscript-comment">/* 9 */</span> {32, 258, 258, 4096, deflate_slow}}; <span class="enscript-comment">/* max compression */</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* Note: the deflate() code requires max_lazy &gt;= MIN_MATCH and max_chain &gt;= 4
+ * For deflate_fast() (levels &lt;= 3) good is ignored and lazy has a different
+ * meaning.
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">EQUAL</span> 0
+<span class="enscript-comment">/* result of memcmp for equal strings */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">NO_DUMMY_DECL</span>
+<span class="enscript-type">struct</span> static_tree_desc_s {<span class="enscript-type">int</span> dummy;}; <span class="enscript-comment">/* for buggy compilers */</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* ===========================================================================
+ * Update a hash value with the given input byte
+ * IN  assertion: all calls to to UPDATE_HASH are made with consecutive
+ *    input characters, so that a running hash key can be computed from the
+ *    previous key instead of complete recalculation each time.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">UPDATE_HASH</span>(s,h,c) (h = (((h)&lt;&lt;s-&gt;hash_shift) ^ (c)) &amp; s-&gt;hash_mask)
+
+
+<span class="enscript-comment">/* ===========================================================================
+ * Insert string str in the dictionary and set match_head to the previous head
+ * of the hash chain (the most recent string with same hash key). Return
+ * the previous length of the hash chain.
+ * If this file is compiled with -DFASTEST, the compression level is forced
+ * to 1, and no hash chains are maintained.
+ * IN  assertion: all calls to to INSERT_STRING are made with consecutive
+ *    input characters and the first MIN_MATCH bytes of str are valid
+ *    (except for the last MIN_MATCH-1 bytes of the input file).
+ */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">FASTEST</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">INSERT_STRING</span>(s, str, match_head) \
+   (UPDATE_HASH(s, s-&gt;ins_h, s-&gt;window[(str) + (MIN_MATCH-1)]), \
+    match_head = s-&gt;head[s-&gt;ins_h], \
+    s-&gt;head[s-&gt;ins_h] = (Pos)(str))
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">INSERT_STRING</span>(s, str, match_head) \
+   (UPDATE_HASH(s, s-&gt;ins_h, s-&gt;window[(str) + (MIN_MATCH-1)]), \
+    match_head = s-&gt;prev[(str) &amp; s-&gt;w_mask] = s-&gt;head[s-&gt;ins_h], \
+    s-&gt;head[s-&gt;ins_h] = (Pos)(str))
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* ===========================================================================
+ * Initialize the hash table (avoiding 64K overflow for 16 bit systems).
+ * prev[] will be initialized on the fly.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">CLEAR_HASH</span>(s) \
+    s-&gt;head[s-&gt;hash_size-1] = NIL; \
+    zmemzero((Bytef *)s-&gt;head, (<span class="enscript-type">unsigned</span>)(s-&gt;hash_size-1)*<span class="enscript-keyword">sizeof</span>(*s-&gt;head));
+
+<span class="enscript-comment">/* ========================================================================= */</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">deflateInit_</span>(strm, level, version, stream_size)
+    z_streamp strm;
+    <span class="enscript-type">int</span> level;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *version;
+    <span class="enscript-type">int</span> stream_size;
+{
+    <span class="enscript-keyword">return</span> deflateInit2_(strm, level, Z_DEFLATED, MAX_WBITS, DEF_MEM_LEVEL,
+                         Z_DEFAULT_STRATEGY, version, stream_size);
+    <span class="enscript-comment">/* To do: ignore strm-&gt;next_in if we use it as window */</span>
+}
+
+<span class="enscript-comment">/* ========================================================================= */</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">deflateInit2_</span>(strm, level, method, windowBits, memLevel, strategy,
+                  version, stream_size)
+    z_streamp strm;
+    <span class="enscript-type">int</span>  level;
+    <span class="enscript-type">int</span>  method;
+    <span class="enscript-type">int</span>  windowBits;
+    <span class="enscript-type">int</span>  memLevel;
+    <span class="enscript-type">int</span>  strategy;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *version;
+    <span class="enscript-type">int</span> stream_size;
+{
+    deflate_state *s;
+    <span class="enscript-type">int</span> wrap = 1;
+    <span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> my_version[] = ZLIB_VERSION;
+
+    ushf *overlay;
+    <span class="enscript-comment">/* We overlay pending_buf and d_buf+l_buf. This works since the average
+     * output size for (length,distance) codes is &lt;= 24 bits.
+     */</span>
+
+    <span class="enscript-keyword">if</span> (version == Z_NULL || version[0] != my_version[0] ||
+        stream_size != <span class="enscript-keyword">sizeof</span>(z_stream)) {
+        <span class="enscript-keyword">return</span> Z_VERSION_ERROR;
+    }
+    <span class="enscript-keyword">if</span> (strm == Z_NULL) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+
+    strm-&gt;msg = Z_NULL;
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">NO_ZCFUNCS</span>
+    <span class="enscript-keyword">if</span> (strm-&gt;zalloc == (alloc_func)0) {
+        strm-&gt;zalloc = zcalloc;
+        strm-&gt;opaque = (voidpf)0;
+    }
+    <span class="enscript-keyword">if</span> (strm-&gt;zfree == (free_func)0) strm-&gt;zfree = zcfree;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* NO_ZCFUNCS */</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">FASTEST</span>
+    <span class="enscript-keyword">if</span> (level != 0) level = 1;
+#<span class="enscript-reference">else</span>
+    <span class="enscript-keyword">if</span> (level == Z_DEFAULT_COMPRESSION) level = 6;
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-keyword">if</span> (windowBits &lt; 0) { <span class="enscript-comment">/* suppress zlib wrapper */</span>
+        wrap = 0;
+        windowBits = -windowBits;
+    }
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GZIP</span>
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (windowBits &gt; 15) {
+        wrap = 2;       <span class="enscript-comment">/* write gzip wrapper instead */</span>
+        windowBits -= 16;
+    }
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (memLevel &lt; 1 || memLevel &gt; MAX_MEM_LEVEL || method != Z_DEFLATED ||
+        windowBits &lt; 8 || windowBits &gt; 15 || level &lt; 0 || level &gt; 9 ||
+        strategy &lt; 0 || strategy &gt; Z_FIXED) {
+        <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    }
+    <span class="enscript-keyword">if</span> (windowBits == 8) windowBits = 9;  <span class="enscript-comment">/* until 256-byte window bug fixed */</span>
+    s = (deflate_state *) ZALLOC(strm, 1, <span class="enscript-keyword">sizeof</span>(deflate_state));
+    <span class="enscript-keyword">if</span> (s == Z_NULL) <span class="enscript-keyword">return</span> Z_MEM_ERROR;
+    strm-&gt;state = (<span class="enscript-type">struct</span> internal_state FAR *)s;
+    s-&gt;strm = strm;
+
+    s-&gt;wrap = wrap;
+    s-&gt;gzhead = Z_NULL;
+    s-&gt;w_bits = windowBits;
+    s-&gt;w_size = 1 &lt;&lt; s-&gt;w_bits;
+    s-&gt;w_mask = s-&gt;w_size - 1;
+
+    s-&gt;hash_bits = memLevel + 7;
+    s-&gt;hash_size = 1 &lt;&lt; s-&gt;hash_bits;
+    s-&gt;hash_mask = s-&gt;hash_size - 1;
+    s-&gt;hash_shift =  ((s-&gt;hash_bits+MIN_MATCH-1)/MIN_MATCH);
+
+    s-&gt;window = (Bytef *) ZALLOC(strm, s-&gt;w_size, 2*<span class="enscript-keyword">sizeof</span>(Byte));
+    s-&gt;prev   = (Posf *)  ZALLOC(strm, s-&gt;w_size, <span class="enscript-keyword">sizeof</span>(Pos));
+    s-&gt;head   = (Posf *)  ZALLOC(strm, s-&gt;hash_size, <span class="enscript-keyword">sizeof</span>(Pos));
+
+    s-&gt;lit_bufsize = 1 &lt;&lt; (memLevel + 6); <span class="enscript-comment">/* 16K elements by default */</span>
+
+    overlay = (ushf *) ZALLOC(strm, s-&gt;lit_bufsize, <span class="enscript-keyword">sizeof</span>(ush)+2);
+    s-&gt;pending_buf = (uchf *) overlay;
+    s-&gt;pending_buf_size = (ulg)s-&gt;lit_bufsize * (<span class="enscript-keyword">sizeof</span>(ush)+2L);
+
+    <span class="enscript-keyword">if</span> (s-&gt;window == Z_NULL || s-&gt;prev == Z_NULL || s-&gt;head == Z_NULL ||
+        s-&gt;pending_buf == Z_NULL) {
+        s-&gt;status = FINISH_STATE;
+        strm-&gt;msg = (<span class="enscript-type">char</span>*)ERR_MSG(Z_MEM_ERROR);
+        deflateEnd (strm);
+        <span class="enscript-keyword">return</span> Z_MEM_ERROR;
+    }
+    s-&gt;d_buf = overlay + s-&gt;lit_bufsize/<span class="enscript-keyword">sizeof</span>(ush);
+    s-&gt;l_buf = s-&gt;pending_buf + (1+<span class="enscript-keyword">sizeof</span>(ush))*s-&gt;lit_bufsize;
+
+    s-&gt;level = level;
+    s-&gt;strategy = strategy;
+    s-&gt;method = (Byte)method;
+
+    <span class="enscript-keyword">return</span> deflateReset(strm);
+}
+
+<span class="enscript-comment">/* ========================================================================= */</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">deflateSetDictionary</span> (strm, dictionary, dictLength)
+    z_streamp strm;
+    <span class="enscript-type">const</span> Bytef *dictionary;
+    uInt  dictLength;
+{
+    deflate_state *s;
+    uInt length = dictLength;
+    uInt n;
+    IPos hash_head = 0;
+
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL || dictionary == Z_NULL ||
+        strm-&gt;state-&gt;wrap == 2 ||
+        (strm-&gt;state-&gt;wrap == 1 &amp;&amp; strm-&gt;state-&gt;status != INIT_STATE))
+        <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+
+    s = strm-&gt;state;
+    <span class="enscript-keyword">if</span> (s-&gt;wrap)
+        strm-&gt;adler = adler32(strm-&gt;adler, dictionary, dictLength);
+
+    <span class="enscript-keyword">if</span> (length &lt; MIN_MATCH) <span class="enscript-keyword">return</span> Z_OK;
+    <span class="enscript-keyword">if</span> (length &gt; MAX_DIST(s)) {
+        length = MAX_DIST(s);
+        dictionary += dictLength - length; <span class="enscript-comment">/* use the tail of the dictionary */</span>
+    }
+    zmemcpy(s-&gt;window, dictionary, length);
+    s-&gt;strstart = length;
+    s-&gt;block_start = (<span class="enscript-type">long</span>)length;
+
+    <span class="enscript-comment">/* Insert all strings in the hash table (except for the last two bytes).
+     * s-&gt;lookahead stays null, so s-&gt;ins_h will be recomputed at the next
+     * call of fill_window.
+     */</span>
+    s-&gt;ins_h = s-&gt;window[0];
+    UPDATE_HASH(s, s-&gt;ins_h, s-&gt;window[1]);
+    <span class="enscript-keyword">for</span> (n = 0; n &lt;= length - MIN_MATCH; n++) {
+        INSERT_STRING(s, n, hash_head);
+    }
+    <span class="enscript-keyword">if</span> (hash_head) hash_head = 0;  <span class="enscript-comment">/* to make compiler happy */</span>
+    <span class="enscript-keyword">return</span> Z_OK;
+}
+
+<span class="enscript-comment">/* ========================================================================= */</span>
+
+ZEXTERN <span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">deflateResetWithIO</span>(z_streamp strm, z_input_func zinput, z_output_func zoutput)
+{
+    <span class="enscript-type">int</span> zerr;
+
+    zerr = deflateReset(strm);
+    <span class="enscript-keyword">if</span> (Z_OK != zerr) <span class="enscript-keyword">return</span> (zerr);
+    strm-&gt;state-&gt;zinput  = zinput;
+    strm-&gt;state-&gt;zoutput = zoutput;
+    <span class="enscript-keyword">return</span> Z_OK;
+}
+
+<span class="enscript-comment">/* ========================================================================= */</span>
+
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">deflateReset</span> (strm)
+    z_streamp strm;
+{
+    deflate_state *s;
+
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL ||
+        strm-&gt;zalloc == (alloc_func)0 || strm-&gt;zfree == (free_func)0) {
+        <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    }
+
+    strm-&gt;total_in = strm-&gt;total_out = 0;
+    strm-&gt;msg = Z_NULL; <span class="enscript-comment">/* use zfree if we ever allocate msg dynamically */</span>
+    strm-&gt;data_type = Z_UNKNOWN;
+
+    s = (deflate_state *)strm-&gt;state;
+    s-&gt;pending = 0;
+    s-&gt;pending_out = s-&gt;pending_buf;
+    s-&gt;zinput = &amp;read_buf;
+    s-&gt;zoutput = NULL;
+
+    <span class="enscript-keyword">if</span> (s-&gt;wrap &lt; 0) {
+        s-&gt;wrap = -s-&gt;wrap; <span class="enscript-comment">/* was made negative by deflate(..., Z_FINISH); */</span>
+    }
+    s-&gt;status = s-&gt;wrap ? INIT_STATE : BUSY_STATE;
+    strm-&gt;adler =
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GZIP</span>
+        s-&gt;wrap == 2 ? z_crc32(0L, Z_NULL, 0) :
+#<span class="enscript-reference">endif</span>
+        adler32(0L, Z_NULL, 0);
+    s-&gt;last_flush = Z_NO_FLUSH;
+
+    _tr_init(s);
+    lm_init(s);
+
+    <span class="enscript-keyword">return</span> Z_OK;
+}
+
+<span class="enscript-comment">/* ========================================================================= */</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">deflateSetHeader</span> (strm, head)
+    z_streamp strm;
+    gz_headerp head;
+{
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    <span class="enscript-keyword">if</span> (strm-&gt;state-&gt;wrap != 2) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    strm-&gt;state-&gt;gzhead = head;
+    <span class="enscript-keyword">return</span> Z_OK;
+}
+
+<span class="enscript-comment">/* ========================================================================= */</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">deflatePrime</span> (strm, bits, value)
+    z_streamp strm;
+    <span class="enscript-type">int</span> bits;
+    <span class="enscript-type">int</span> value;
+{
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    strm-&gt;state-&gt;bi_valid = bits;
+    strm-&gt;state-&gt;bi_buf = (ush)(value &amp; ((1 &lt;&lt; bits) - 1));
+    <span class="enscript-keyword">return</span> Z_OK;
+}
+
+<span class="enscript-comment">/* ========================================================================= */</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">deflateParams</span>(strm, level, strategy)
+    z_streamp strm;
+    <span class="enscript-type">int</span> level;
+    <span class="enscript-type">int</span> strategy;
+{
+    deflate_state *s;
+    compress_func func;
+    <span class="enscript-type">int</span> err = Z_OK;
+
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    s = strm-&gt;state;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">FASTEST</span>
+    <span class="enscript-keyword">if</span> (level != 0) level = 1;
+#<span class="enscript-reference">else</span>
+    <span class="enscript-keyword">if</span> (level == Z_DEFAULT_COMPRESSION) level = 6;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (level &lt; 0 || level &gt; 9 || strategy &lt; 0 || strategy &gt; Z_FIXED) {
+        <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    }
+    func = configuration_table[s-&gt;level].func;
+
+    <span class="enscript-keyword">if</span> (func != configuration_table[level].func &amp;&amp; strm-&gt;total_in != 0) {
+        <span class="enscript-comment">/* Flush the last buffer: */</span>
+        err = deflate(strm, Z_PARTIAL_FLUSH);
+    }
+    <span class="enscript-keyword">if</span> (s-&gt;level != level) {
+        s-&gt;level = level;
+        s-&gt;max_lazy_match   = configuration_table[level].max_lazy;
+        s-&gt;good_match       = configuration_table[level].good_length;
+        s-&gt;nice_match       = configuration_table[level].nice_length;
+        s-&gt;max_chain_length = configuration_table[level].max_chain;
+    }
+    s-&gt;strategy = strategy;
+    <span class="enscript-keyword">return</span> err;
+}
+
+<span class="enscript-comment">/* ========================================================================= */</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">deflateTune</span>(strm, good_length, max_lazy, nice_length, max_chain)
+    z_streamp strm;
+    <span class="enscript-type">int</span> good_length;
+    <span class="enscript-type">int</span> max_lazy;
+    <span class="enscript-type">int</span> nice_length;
+    <span class="enscript-type">int</span> max_chain;
+{
+    deflate_state *s;
+
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    s = strm-&gt;state;
+    s-&gt;good_match = good_length;
+    s-&gt;max_lazy_match = max_lazy;
+    s-&gt;nice_match = nice_length;
+    s-&gt;max_chain_length = max_chain;
+    <span class="enscript-keyword">return</span> Z_OK;
+}
+
+<span class="enscript-comment">/* =========================================================================
+ * For the default windowBits of 15 and memLevel of 8, this function returns
+ * a close to exact, as well as small, upper bound on the compressed size.
+ * They are coded as constants here for a reason--if the #define's are
+ * changed, then this function needs to be changed as well.  The return
+ * value for 15 and 8 only works for those exact settings.
+ *
+ * For any setting other than those defaults for windowBits and memLevel,
+ * the value returned is a conservative worst case for the maximum expansion
+ * resulting from using fixed blocks instead of stored blocks, which deflate
+ * can emit on compressed data for some combinations of the parameters.
+ *
+ * This function could be more sophisticated to provide closer upper bounds
+ * for every combination of windowBits and memLevel, as well as wrap.
+ * But even the conservative upper bound of about 14% expansion does not
+ * seem onerous for output buffer allocation.
+ */</span>
+uLong ZEXPORT <span class="enscript-function-name">deflateBound</span>(strm, sourceLen)
+    z_streamp strm;
+    uLong sourceLen;
+{
+    deflate_state *s;
+    uLong destLen;
+
+    <span class="enscript-comment">/* conservative upper bound */</span>
+    destLen = sourceLen +
+              ((sourceLen + 7) &gt;&gt; 3) + ((sourceLen + 63) &gt;&gt; 6) + 11;
+
+    <span class="enscript-comment">/* if can't get parameters, return conservative bound */</span>
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL)
+        <span class="enscript-keyword">return</span> destLen;
+
+    <span class="enscript-comment">/* if not default parameters, return conservative bound */</span>
+    s = strm-&gt;state;
+    <span class="enscript-keyword">if</span> (s-&gt;w_bits != 15 || s-&gt;hash_bits != 8 + 7)
+        <span class="enscript-keyword">return</span> destLen;
+
+    <span class="enscript-comment">/* default settings: return tight bound for that case */</span>
+    <span class="enscript-keyword">return</span> compressBound(sourceLen);
+}
+
+<span class="enscript-comment">/* =========================================================================
+ * Put a short in the pending buffer. The 16-bit value is put in MSB order.
+ * IN assertion: the stream state is correct and there is enough room in
+ * pending_buf.
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">putShortMSB</span> (s, b)
+    deflate_state *s;
+    uInt b;
+{
+    put_byte(s, (Byte)(b &gt;&gt; 8));
+    put_byte(s, (Byte)(b &amp; 0xff));
+}
+
+<span class="enscript-comment">/* =========================================================================
+ * Flush as much pending output as possible. All deflate() output goes
+ * through this function so some applications may wish to modify it
+ * to avoid allocating a large strm-&gt;next_out buffer and copying into it.
+ * (See also read_buf()).
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">flush_pending</span>(strm)
+    z_streamp strm;
+{
+    <span class="enscript-type">unsigned</span> len = strm-&gt;state-&gt;pending;
+
+    <span class="enscript-keyword">if</span> (strm-&gt;state-&gt;zoutput) {
+        len = (*strm-&gt;state-&gt;zoutput)(strm, strm-&gt;state-&gt;pending_out, len);
+    } <span class="enscript-keyword">else</span> {
+	<span class="enscript-keyword">if</span> (len &gt; strm-&gt;avail_out) len = strm-&gt;avail_out;
+	<span class="enscript-keyword">if</span> (len == 0) <span class="enscript-keyword">return</span>;
+	zmemcpy(strm-&gt;next_out, strm-&gt;state-&gt;pending_out, len);
+	strm-&gt;next_out  += len;
+	strm-&gt;avail_out  -= len;
+    }
+
+    strm-&gt;state-&gt;pending_out  += len;
+    strm-&gt;total_out += len;
+    strm-&gt;state-&gt;pending -= len;
+    <span class="enscript-keyword">if</span> (strm-&gt;state-&gt;pending == 0) {
+        strm-&gt;state-&gt;pending_out = strm-&gt;state-&gt;pending_buf;
+    }
+}
+
+<span class="enscript-comment">/* ========================================================================= */</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">deflate</span> (strm, flush)
+    z_streamp strm;
+    <span class="enscript-type">int</span> flush;
+{
+    <span class="enscript-type">int</span> old_flush; <span class="enscript-comment">/* value of flush param for previous deflate call */</span>
+    deflate_state *s;
+
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL ||
+        flush &gt; Z_FINISH || flush &lt; 0) {
+        <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    }
+    s = strm-&gt;state;
+
+    <span class="enscript-keyword">if</span> (strm-&gt;next_out == Z_NULL ||
+        (strm-&gt;next_in == Z_NULL &amp;&amp; strm-&gt;avail_in != 0) ||
+        (s-&gt;status == FINISH_STATE &amp;&amp; flush != Z_FINISH)) {
+        ERR_RETURN(strm, Z_STREAM_ERROR);
+    }
+    <span class="enscript-keyword">if</span> (strm-&gt;avail_out == 0) ERR_RETURN(strm, Z_BUF_ERROR);
+
+    s-&gt;strm = strm; <span class="enscript-comment">/* just in case */</span>
+    old_flush = s-&gt;last_flush;
+    s-&gt;last_flush = flush;
+
+    <span class="enscript-comment">/* Write the header */</span>
+    <span class="enscript-keyword">if</span> (s-&gt;status == INIT_STATE) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GZIP</span>
+        <span class="enscript-keyword">if</span> (s-&gt;wrap == 2) {
+            strm-&gt;adler = z_crc32(0L, Z_NULL, 0);
+            put_byte(s, 31);
+            put_byte(s, 139);
+            put_byte(s, 8);
+            <span class="enscript-keyword">if</span> (s-&gt;gzhead == NULL) {
+                put_byte(s, 0);
+                put_byte(s, 0);
+                put_byte(s, 0);
+                put_byte(s, 0);
+                put_byte(s, 0);
+                put_byte(s, s-&gt;level == 9 ? 2 :
+                            (s-&gt;strategy &gt;= Z_HUFFMAN_ONLY || s-&gt;level &lt; 2 ?
+                             4 : 0));
+                put_byte(s, OS_CODE);
+                s-&gt;status = BUSY_STATE;
+            }
+            <span class="enscript-keyword">else</span> {
+                put_byte(s, (s-&gt;gzhead-&gt;text ? 1 : 0) +
+                            (s-&gt;gzhead-&gt;hcrc ? 2 : 0) +
+                            (s-&gt;gzhead-&gt;extra == Z_NULL ? 0 : 4) +
+                            (s-&gt;gzhead-&gt;name == Z_NULL ? 0 : 8) +
+                            (s-&gt;gzhead-&gt;comment == Z_NULL ? 0 : 16)
+                        );
+                put_byte(s, (Byte)(s-&gt;gzhead-&gt;time &amp; 0xff));
+                put_byte(s, (Byte)((s-&gt;gzhead-&gt;time &gt;&gt; 8) &amp; 0xff));
+                put_byte(s, (Byte)((s-&gt;gzhead-&gt;time &gt;&gt; 16) &amp; 0xff));
+                put_byte(s, (Byte)((s-&gt;gzhead-&gt;time &gt;&gt; 24) &amp; 0xff));
+                put_byte(s, s-&gt;level == 9 ? 2 :
+                            (s-&gt;strategy &gt;= Z_HUFFMAN_ONLY || s-&gt;level &lt; 2 ?
+                             4 : 0));
+                put_byte(s, s-&gt;gzhead-&gt;os &amp; 0xff);
+                <span class="enscript-keyword">if</span> (s-&gt;gzhead-&gt;extra != NULL) {
+                    put_byte(s, s-&gt;gzhead-&gt;extra_len &amp; 0xff);
+                    put_byte(s, (s-&gt;gzhead-&gt;extra_len &gt;&gt; 8) &amp; 0xff);
+                }
+                <span class="enscript-keyword">if</span> (s-&gt;gzhead-&gt;hcrc)
+                    strm-&gt;adler = z_crc32(strm-&gt;adler, s-&gt;pending_buf,
+                                        s-&gt;pending);
+                s-&gt;gzindex = 0;
+                s-&gt;status = EXTRA_STATE;
+            }
+        }
+        <span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span>
+        {
+            uInt header = (Z_DEFLATED + ((s-&gt;w_bits-8)&lt;&lt;4)) &lt;&lt; 8;
+            uInt level_flags;
+
+            <span class="enscript-keyword">if</span> (s-&gt;strategy &gt;= Z_HUFFMAN_ONLY || s-&gt;level &lt; 2)
+                level_flags = 0;
+            <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (s-&gt;level &lt; 6)
+                level_flags = 1;
+            <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (s-&gt;level == 6)
+                level_flags = 2;
+            <span class="enscript-keyword">else</span>
+                level_flags = 3;
+            header |= (level_flags &lt;&lt; 6);
+            <span class="enscript-keyword">if</span> (s-&gt;strstart != 0) header |= PRESET_DICT;
+            header += 31 - (header % 31);
+
+            s-&gt;status = BUSY_STATE;
+            putShortMSB(s, header);
+
+            <span class="enscript-comment">/* Save the adler32 of the preset dictionary: */</span>
+            <span class="enscript-keyword">if</span> (s-&gt;strstart != 0) {
+                putShortMSB(s, (uInt)(strm-&gt;adler &gt;&gt; 16));
+                putShortMSB(s, (uInt)(strm-&gt;adler &amp; 0xffff));
+            }
+            strm-&gt;adler = adler32(0L, Z_NULL, 0);
+        }
+    }
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GZIP</span>
+    <span class="enscript-keyword">if</span> (s-&gt;status == EXTRA_STATE) {
+        <span class="enscript-keyword">if</span> (s-&gt;gzhead-&gt;extra != NULL) {
+            uInt beg = s-&gt;pending;  <span class="enscript-comment">/* start of bytes to update crc */</span>
+
+            <span class="enscript-keyword">while</span> (s-&gt;gzindex &lt; (s-&gt;gzhead-&gt;extra_len &amp; 0xffff)) {
+                <span class="enscript-keyword">if</span> (s-&gt;pending == s-&gt;pending_buf_size) {
+                    <span class="enscript-keyword">if</span> (s-&gt;gzhead-&gt;hcrc &amp;&amp; s-&gt;pending &gt; beg)
+                        strm-&gt;adler = z_crc32(strm-&gt;adler, s-&gt;pending_buf + beg,
+                                            s-&gt;pending - beg);
+                    flush_pending(strm);
+                    beg = s-&gt;pending;
+                    <span class="enscript-keyword">if</span> (s-&gt;pending == s-&gt;pending_buf_size)
+                        <span class="enscript-keyword">break</span>;
+                }
+                put_byte(s, s-&gt;gzhead-&gt;extra[s-&gt;gzindex]);
+                s-&gt;gzindex++;
+            }
+            <span class="enscript-keyword">if</span> (s-&gt;gzhead-&gt;hcrc &amp;&amp; s-&gt;pending &gt; beg)
+                strm-&gt;adler = z_crc32(strm-&gt;adler, s-&gt;pending_buf + beg,
+                                    s-&gt;pending - beg);
+            <span class="enscript-keyword">if</span> (s-&gt;gzindex == s-&gt;gzhead-&gt;extra_len) {
+                s-&gt;gzindex = 0;
+                s-&gt;status = NAME_STATE;
+            }
+        }
+        <span class="enscript-keyword">else</span>
+            s-&gt;status = NAME_STATE;
+    }
+    <span class="enscript-keyword">if</span> (s-&gt;status == NAME_STATE) {
+        <span class="enscript-keyword">if</span> (s-&gt;gzhead-&gt;name != NULL) {
+            uInt beg = s-&gt;pending;  <span class="enscript-comment">/* start of bytes to update crc */</span>
+            <span class="enscript-type">int</span> val;
+
+            <span class="enscript-keyword">do</span> {
+                <span class="enscript-keyword">if</span> (s-&gt;pending == s-&gt;pending_buf_size) {
+                    <span class="enscript-keyword">if</span> (s-&gt;gzhead-&gt;hcrc &amp;&amp; s-&gt;pending &gt; beg)
+                        strm-&gt;adler = z_crc32(strm-&gt;adler, s-&gt;pending_buf + beg,
+                                            s-&gt;pending - beg);
+                    flush_pending(strm);
+                    beg = s-&gt;pending;
+                    <span class="enscript-keyword">if</span> (s-&gt;pending == s-&gt;pending_buf_size) {
+                        val = 1;
+                        <span class="enscript-keyword">break</span>;
+                    }
+                }
+                val = s-&gt;gzhead-&gt;name[s-&gt;gzindex++];
+                put_byte(s, val);
+            } <span class="enscript-keyword">while</span> (val != 0);
+            <span class="enscript-keyword">if</span> (s-&gt;gzhead-&gt;hcrc &amp;&amp; s-&gt;pending &gt; beg)
+                strm-&gt;adler = z_crc32(strm-&gt;adler, s-&gt;pending_buf + beg,
+                                    s-&gt;pending - beg);
+            <span class="enscript-keyword">if</span> (val == 0) {
+                s-&gt;gzindex = 0;
+                s-&gt;status = COMMENT_STATE;
+            }
+        }
+        <span class="enscript-keyword">else</span>
+            s-&gt;status = COMMENT_STATE;
+    }
+    <span class="enscript-keyword">if</span> (s-&gt;status == COMMENT_STATE) {
+        <span class="enscript-keyword">if</span> (s-&gt;gzhead-&gt;comment != NULL) {
+            uInt beg = s-&gt;pending;  <span class="enscript-comment">/* start of bytes to update crc */</span>
+            <span class="enscript-type">int</span> val;
+
+            <span class="enscript-keyword">do</span> {
+                <span class="enscript-keyword">if</span> (s-&gt;pending == s-&gt;pending_buf_size) {
+                    <span class="enscript-keyword">if</span> (s-&gt;gzhead-&gt;hcrc &amp;&amp; s-&gt;pending &gt; beg)
+                        strm-&gt;adler = z_crc32(strm-&gt;adler, s-&gt;pending_buf + beg,
+                                            s-&gt;pending - beg);
+                    flush_pending(strm);
+                    beg = s-&gt;pending;
+                    <span class="enscript-keyword">if</span> (s-&gt;pending == s-&gt;pending_buf_size) {
+                        val = 1;
+                        <span class="enscript-keyword">break</span>;
+                    }
+                }
+                val = s-&gt;gzhead-&gt;comment[s-&gt;gzindex++];
+                put_byte(s, val);
+            } <span class="enscript-keyword">while</span> (val != 0);
+            <span class="enscript-keyword">if</span> (s-&gt;gzhead-&gt;hcrc &amp;&amp; s-&gt;pending &gt; beg)
+                strm-&gt;adler = z_crc32(strm-&gt;adler, s-&gt;pending_buf + beg,
+                                    s-&gt;pending - beg);
+            <span class="enscript-keyword">if</span> (val == 0)
+                s-&gt;status = HCRC_STATE;
+        }
+        <span class="enscript-keyword">else</span>
+            s-&gt;status = HCRC_STATE;
+    }
+    <span class="enscript-keyword">if</span> (s-&gt;status == HCRC_STATE) {
+        <span class="enscript-keyword">if</span> (s-&gt;gzhead-&gt;hcrc) {
+            <span class="enscript-keyword">if</span> (s-&gt;pending + 2 &gt; s-&gt;pending_buf_size)
+                flush_pending(strm);
+            <span class="enscript-keyword">if</span> (s-&gt;pending + 2 &lt;= s-&gt;pending_buf_size) {
+                put_byte(s, (Byte)(strm-&gt;adler &amp; 0xff));
+                put_byte(s, (Byte)((strm-&gt;adler &gt;&gt; 8) &amp; 0xff));
+                strm-&gt;adler = z_crc32(0L, Z_NULL, 0);
+                s-&gt;status = BUSY_STATE;
+            }
+        }
+        <span class="enscript-keyword">else</span>
+            s-&gt;status = BUSY_STATE;
+    }
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-comment">/* Flush as much pending output as possible */</span>
+    <span class="enscript-keyword">if</span> (s-&gt;pending != 0) {
+        flush_pending(strm);
+        <span class="enscript-keyword">if</span> (strm-&gt;avail_out == 0) {
+            <span class="enscript-comment">/* Since avail_out is 0, deflate will be called again with
+             * more output space, but possibly with both pending and
+             * avail_in equal to zero. There won't be anything to do,
+             * but this is not an error situation so make sure we
+             * return OK instead of BUF_ERROR at next call of deflate:
+             */</span>
+            s-&gt;last_flush = -1;
+            <span class="enscript-keyword">return</span> Z_OK;
+        }
+
+    <span class="enscript-comment">/* Make sure there is something to do and avoid duplicate consecutive
+     * flushes. For repeated and useless calls with Z_FINISH, we keep
+     * returning Z_STREAM_END instead of Z_BUF_ERROR.
+     */</span>
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (strm-&gt;avail_in == 0 &amp;&amp; flush &lt;= old_flush &amp;&amp;
+               flush != Z_FINISH) {
+        ERR_RETURN(strm, Z_BUF_ERROR);
+    }
+
+    <span class="enscript-comment">/* User must not provide more input after the first FINISH: */</span>
+    <span class="enscript-keyword">if</span> (s-&gt;status == FINISH_STATE &amp;&amp; strm-&gt;avail_in != 0) {
+        ERR_RETURN(strm, Z_BUF_ERROR);
+    }
+
+    <span class="enscript-comment">/* Start a new block or continue the current one.
+     */</span>
+    <span class="enscript-keyword">if</span> (strm-&gt;avail_in != 0 || s-&gt;lookahead != 0 ||
+        (flush != Z_NO_FLUSH &amp;&amp; s-&gt;status != FINISH_STATE)) {
+        block_state bstate;
+
+        bstate = (*(configuration_table[s-&gt;level].func))(s, flush);
+
+        <span class="enscript-keyword">if</span> (bstate == finish_started || bstate == finish_done) {
+            s-&gt;status = FINISH_STATE;
+        }
+        <span class="enscript-keyword">if</span> (bstate == need_more || bstate == finish_started) {
+            <span class="enscript-keyword">if</span> (strm-&gt;avail_out == 0) {
+                s-&gt;last_flush = -1; <span class="enscript-comment">/* avoid BUF_ERROR next call, see above */</span>
+            }
+            <span class="enscript-keyword">return</span> Z_OK;
+            <span class="enscript-comment">/* If flush != Z_NO_FLUSH &amp;&amp; avail_out == 0, the next call
+             * of deflate should use the same flush parameter to make sure
+             * that the flush is complete. So we don't have to output an
+             * empty block here, this will be done at next call. This also
+             * ensures that for a very small output buffer, we emit at most
+             * one empty block.
+             */</span>
+        }
+        <span class="enscript-keyword">if</span> (bstate == block_done) {
+            <span class="enscript-keyword">if</span> (flush == Z_PARTIAL_FLUSH) {
+                _tr_align(s);
+            } <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* FULL_FLUSH or SYNC_FLUSH */</span>
+                _tr_stored_block(s, (<span class="enscript-type">char</span>*)0, 0L, 0);
+                <span class="enscript-comment">/* For a full flush, this empty block will be recognized
+                 * as a special marker by inflate_sync().
+                 */</span>
+                <span class="enscript-keyword">if</span> (flush == Z_FULL_FLUSH) {
+                    CLEAR_HASH(s);             <span class="enscript-comment">/* forget history */</span>
+                }
+            }
+            flush_pending(strm);
+            <span class="enscript-keyword">if</span> (strm-&gt;avail_out == 0) {
+              s-&gt;last_flush = -1; <span class="enscript-comment">/* avoid BUF_ERROR at next call, see above */</span>
+              <span class="enscript-keyword">return</span> Z_OK;
+            }
+        }
+    }
+    Assert(strm-&gt;avail_out &gt; 0, <span class="enscript-string">&quot;bug2&quot;</span>);
+
+    <span class="enscript-keyword">if</span> (flush != Z_FINISH) <span class="enscript-keyword">return</span> Z_OK;
+    <span class="enscript-keyword">if</span> (s-&gt;wrap &lt;= 0) <span class="enscript-keyword">return</span> Z_STREAM_END;
+
+    <span class="enscript-comment">/* Write the trailer */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GZIP</span>
+    <span class="enscript-keyword">if</span> (s-&gt;wrap == 2) {
+        put_byte(s, (Byte)(strm-&gt;adler &amp; 0xff));
+        put_byte(s, (Byte)((strm-&gt;adler &gt;&gt; 8) &amp; 0xff));
+        put_byte(s, (Byte)((strm-&gt;adler &gt;&gt; 16) &amp; 0xff));
+        put_byte(s, (Byte)((strm-&gt;adler &gt;&gt; 24) &amp; 0xff));
+        put_byte(s, (Byte)(strm-&gt;total_in &amp; 0xff));
+        put_byte(s, (Byte)((strm-&gt;total_in &gt;&gt; 8) &amp; 0xff));
+        put_byte(s, (Byte)((strm-&gt;total_in &gt;&gt; 16) &amp; 0xff));
+        put_byte(s, (Byte)((strm-&gt;total_in &gt;&gt; 24) &amp; 0xff));
+    }
+    <span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span>
+    {
+        putShortMSB(s, (uInt)(strm-&gt;adler &gt;&gt; 16));
+        putShortMSB(s, (uInt)(strm-&gt;adler &amp; 0xffff));
+    }
+    flush_pending(strm);
+    <span class="enscript-comment">/* If avail_out is zero, the application will call deflate again
+     * to flush the rest.
+     */</span>
+    <span class="enscript-keyword">if</span> (s-&gt;wrap &gt; 0) s-&gt;wrap = -s-&gt;wrap; <span class="enscript-comment">/* write the trailer only once! */</span>
+    <span class="enscript-keyword">return</span> s-&gt;pending != 0 ? Z_OK : Z_STREAM_END;
+}
+
+<span class="enscript-comment">/* ========================================================================= */</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">deflateEnd</span> (strm)
+    z_streamp strm;
+{
+    <span class="enscript-type">int</span> status;
+
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+
+    status = strm-&gt;state-&gt;status;
+    <span class="enscript-keyword">if</span> (status != INIT_STATE &amp;&amp;
+        status != EXTRA_STATE &amp;&amp;
+        status != NAME_STATE &amp;&amp;
+        status != COMMENT_STATE &amp;&amp;
+        status != HCRC_STATE &amp;&amp;
+        status != BUSY_STATE &amp;&amp;
+        status != FINISH_STATE) {
+      <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    }
+
+    <span class="enscript-comment">/* Deallocate in reverse order of allocations: */</span>
+    TRY_FREE(strm, strm-&gt;state-&gt;pending_buf);
+    TRY_FREE(strm, strm-&gt;state-&gt;head);
+    TRY_FREE(strm, strm-&gt;state-&gt;prev);
+    TRY_FREE(strm, strm-&gt;state-&gt;window);
+
+    ZFREE(strm, strm-&gt;state);
+    strm-&gt;state = Z_NULL;
+
+    <span class="enscript-keyword">return</span> status == BUSY_STATE ? Z_DATA_ERROR : Z_OK;
+}
+
+<span class="enscript-comment">/* =========================================================================
+ * Copy the source state to the destination state.
+ * To simplify the source, this is not supported for 16-bit MSDOS (which
+ * doesn't have enough memory anyway to duplicate compression states).
+ */</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">deflateCopy</span> (dest, source)
+    z_streamp dest;
+    z_streamp source;
+{
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MAXSEG_64K</span>
+    <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+#<span class="enscript-reference">else</span>
+    deflate_state *ds;
+    deflate_state *ss;
+    ushf *overlay;
+
+
+    <span class="enscript-keyword">if</span> (source == Z_NULL || dest == Z_NULL || source-&gt;state == Z_NULL) {
+        <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    }
+
+    ss = source-&gt;state;
+
+    zmemcpy(dest, source, <span class="enscript-keyword">sizeof</span>(z_stream));
+
+    ds = (deflate_state *) ZALLOC(dest, 1, <span class="enscript-keyword">sizeof</span>(deflate_state));
+    <span class="enscript-keyword">if</span> (ds == Z_NULL) <span class="enscript-keyword">return</span> Z_MEM_ERROR;
+    dest-&gt;state = (<span class="enscript-type">struct</span> internal_state FAR *) ds;
+    zmemcpy(ds, ss, <span class="enscript-keyword">sizeof</span>(deflate_state));
+    ds-&gt;strm = dest;
+
+    ds-&gt;window = (Bytef *) ZALLOC(dest, ds-&gt;w_size, 2*<span class="enscript-keyword">sizeof</span>(Byte));
+    ds-&gt;prev   = (Posf *)  ZALLOC(dest, ds-&gt;w_size, <span class="enscript-keyword">sizeof</span>(Pos));
+    ds-&gt;head   = (Posf *)  ZALLOC(dest, ds-&gt;hash_size, <span class="enscript-keyword">sizeof</span>(Pos));
+    overlay = (ushf *) ZALLOC(dest, ds-&gt;lit_bufsize, <span class="enscript-keyword">sizeof</span>(ush)+2);
+    ds-&gt;pending_buf = (uchf *) overlay;
+
+    <span class="enscript-keyword">if</span> (ds-&gt;window == Z_NULL || ds-&gt;prev == Z_NULL || ds-&gt;head == Z_NULL ||
+        ds-&gt;pending_buf == Z_NULL) {
+        deflateEnd (dest);
+        <span class="enscript-keyword">return</span> Z_MEM_ERROR;
+    }
+    <span class="enscript-comment">/* following zmemcpy do not work for 16-bit MSDOS */</span>
+    zmemcpy(ds-&gt;window, ss-&gt;window, ds-&gt;w_size * 2 * <span class="enscript-keyword">sizeof</span>(Byte));
+    zmemcpy(ds-&gt;prev, ss-&gt;prev, ds-&gt;w_size * <span class="enscript-keyword">sizeof</span>(Pos));
+    zmemcpy(ds-&gt;head, ss-&gt;head, ds-&gt;hash_size * <span class="enscript-keyword">sizeof</span>(Pos));
+    zmemcpy(ds-&gt;pending_buf, ss-&gt;pending_buf, (uInt)ds-&gt;pending_buf_size);
+
+    ds-&gt;pending_out = ds-&gt;pending_buf + (ss-&gt;pending_out - ss-&gt;pending_buf);
+    ds-&gt;d_buf = overlay + ds-&gt;lit_bufsize/<span class="enscript-keyword">sizeof</span>(ush);
+    ds-&gt;l_buf = ds-&gt;pending_buf + (1+<span class="enscript-keyword">sizeof</span>(ush))*ds-&gt;lit_bufsize;
+
+    ds-&gt;l_desc.dyn_tree = ds-&gt;dyn_ltree;
+    ds-&gt;d_desc.dyn_tree = ds-&gt;dyn_dtree;
+    ds-&gt;bl_desc.dyn_tree = ds-&gt;bl_tree;
+
+    <span class="enscript-keyword">return</span> Z_OK;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAXSEG_64K */</span>
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Read a new buffer from the current input stream, update the adler32
+ * and total number of bytes read.  All deflate() input goes through
+ * this function so some applications may wish to modify it to avoid
+ * allocating a large strm-&gt;next_in buffer and copying from it.
+ * (See also flush_pending()).
+ */</span>
+local <span class="enscript-type">int</span> <span class="enscript-function-name">read_buf</span>(strm, buf, size)
+    z_streamp strm;
+    Bytef *buf;
+    <span class="enscript-type">unsigned</span> size;
+{
+    <span class="enscript-type">unsigned</span> len = strm-&gt;avail_in;
+
+    <span class="enscript-keyword">if</span> (len &gt; size) len = size;
+    <span class="enscript-keyword">if</span> (len == 0) <span class="enscript-keyword">return</span> 0;
+
+    strm-&gt;avail_in  -= len;
+
+    <span class="enscript-keyword">if</span> (strm-&gt;state-&gt;wrap == 1) {
+        strm-&gt;adler = adler32(strm-&gt;adler, strm-&gt;next_in, len);
+    }
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GZIP</span>
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (strm-&gt;state-&gt;wrap == 2) {
+        strm-&gt;adler = z_crc32(strm-&gt;adler, strm-&gt;next_in, len);
+    }
+#<span class="enscript-reference">endif</span>
+    zmemcpy(buf, strm-&gt;next_in, len);
+    strm-&gt;next_in  += len;
+    strm-&gt;total_in += len;
+
+    <span class="enscript-keyword">return</span> (<span class="enscript-type">int</span>)len;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Initialize the &quot;longest match&quot; routines for a new zlib stream
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">lm_init</span> (s)
+    deflate_state *s;
+{
+    s-&gt;window_size = (ulg)2L*s-&gt;w_size;
+
+    CLEAR_HASH(s);
+
+    <span class="enscript-comment">/* Set the default configuration parameters:
+     */</span>
+    s-&gt;max_lazy_match   = configuration_table[s-&gt;level].max_lazy;
+    s-&gt;good_match       = configuration_table[s-&gt;level].good_length;
+    s-&gt;nice_match       = configuration_table[s-&gt;level].nice_length;
+    s-&gt;max_chain_length = configuration_table[s-&gt;level].max_chain;
+
+    s-&gt;strstart = 0;
+    s-&gt;block_start = 0L;
+    s-&gt;lookahead = 0;
+    s-&gt;match_length = s-&gt;prev_length = MIN_MATCH-1;
+    s-&gt;match_available = 0;
+    s-&gt;ins_h = 0;
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">FASTEST</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ASMV</span>
+    match_init(); <span class="enscript-comment">/* initialize the asm code */</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span>
+}
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">FASTEST</span>
+<span class="enscript-comment">/* ===========================================================================
+ * Set match_start to the longest match starting at the given string and
+ * return its length. Matches shorter or equal to prev_length are discarded,
+ * in which case the result is equal to prev_length and match_start is
+ * garbage.
+ * IN assertions: cur_match is the head of the hash chain for the current
+ *   string (strstart) and its distance is &lt;= MAX_DIST, and prev_length &gt;= 1
+ * OUT assertion: the match length is not greater than s-&gt;lookahead.
+ */</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">ASMV</span>
+<span class="enscript-comment">/* For 80x86 and 680x0, an optimized version will be provided in match.asm or
+ * match.S. The code will be functionally equivalent.
+ */</span>
+local uInt <span class="enscript-function-name">longest_match</span>(s, cur_match)
+    deflate_state *s;
+    IPos cur_match;                             <span class="enscript-comment">/* current match */</span>
+{
+    <span class="enscript-type">unsigned</span> chain_length = s-&gt;max_chain_length;<span class="enscript-comment">/* max hash chain length */</span>
+    <span class="enscript-type">register</span> Bytef *scan = s-&gt;window + s-&gt;strstart; <span class="enscript-comment">/* current string */</span>
+    <span class="enscript-type">register</span> Bytef *match;                       <span class="enscript-comment">/* matched string */</span>
+    <span class="enscript-type">register</span> <span class="enscript-type">int</span> len;                           <span class="enscript-comment">/* length of current match */</span>
+    <span class="enscript-type">int</span> best_len = s-&gt;prev_length;              <span class="enscript-comment">/* best match length so far */</span>
+    <span class="enscript-type">int</span> nice_match = s-&gt;nice_match;             <span class="enscript-comment">/* stop if match long enough */</span>
+    IPos limit = s-&gt;strstart &gt; (IPos)MAX_DIST(s) ?
+        s-&gt;strstart - (IPos)MAX_DIST(s) : NIL;
+    <span class="enscript-comment">/* Stop when cur_match becomes &lt;= limit. To simplify the code,
+     * we prevent matches with the string of window index 0.
+     */</span>
+    Posf *prev = s-&gt;prev;
+    uInt wmask = s-&gt;w_mask;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">UNALIGNED_OK</span>
+    <span class="enscript-comment">/* Compare two bytes at a time. Note: this is not always beneficial.
+     * Try with and without -DUNALIGNED_OK to check.
+     */</span>
+    <span class="enscript-type">register</span> Bytef *strend = s-&gt;window + s-&gt;strstart + MAX_MATCH - 1;
+    <span class="enscript-type">register</span> ush scan_start = *(ushf*)scan;
+    <span class="enscript-type">register</span> ush scan_end   = *(ushf*)(scan+best_len-1);
+#<span class="enscript-reference">else</span>
+    <span class="enscript-type">register</span> Bytef *strend = s-&gt;window + s-&gt;strstart + MAX_MATCH;
+    <span class="enscript-type">register</span> Byte scan_end1  = scan[best_len-1];
+    <span class="enscript-type">register</span> Byte scan_end   = scan[best_len];
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-comment">/* The code is optimized for HASH_BITS &gt;= 8 and MAX_MATCH-2 multiple of 16.
+     * It is easy to get rid of this optimization if necessary.
+     */</span>
+    Assert(s-&gt;hash_bits &gt;= 8 &amp;&amp; MAX_MATCH == 258, <span class="enscript-string">&quot;Code too clever&quot;</span>);
+
+    <span class="enscript-comment">/* Do not waste too much time if we already have a good match: */</span>
+    <span class="enscript-keyword">if</span> (s-&gt;prev_length &gt;= s-&gt;good_match) {
+        chain_length &gt;&gt;= 2;
+    }
+    <span class="enscript-comment">/* Do not look for matches beyond the end of the input. This is necessary
+     * to make deflate deterministic.
+     */</span>
+    <span class="enscript-keyword">if</span> ((uInt)nice_match &gt; s-&gt;lookahead) nice_match = s-&gt;lookahead;
+
+    Assert((ulg)s-&gt;strstart &lt;= s-&gt;window_size-MIN_LOOKAHEAD, <span class="enscript-string">&quot;need lookahead&quot;</span>);
+
+    <span class="enscript-keyword">do</span> {
+        Assert(cur_match &lt; s-&gt;strstart, <span class="enscript-string">&quot;no future&quot;</span>);
+        match = s-&gt;window + cur_match;
+
+        <span class="enscript-comment">/* Skip to next match if the match length cannot increase
+         * or if the match length is less than 2.  Note that the checks below
+         * for insufficient lookahead only occur occasionally for performance
+         * reasons.  Therefore uninitialized memory will be accessed, and
+         * conditional jumps will be made that depend on those values.
+         * However the length of the match is limited to the lookahead, so
+         * the output of deflate is not affected by the uninitialized values.
+         */</span>
+#<span class="enscript-reference">if</span> (<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">UNALIGNED_OK</span>) &amp;&amp; <span class="enscript-variable-name">MAX_MATCH</span> == 258)
+        <span class="enscript-comment">/* This code assumes sizeof(unsigned short) == 2. Do not use
+         * UNALIGNED_OK if your compiler uses a different size.
+         */</span>
+        <span class="enscript-keyword">if</span> (*(ushf*)(match+best_len-1) != scan_end ||
+            *(ushf*)match != scan_start) <span class="enscript-keyword">continue</span>;
+
+        <span class="enscript-comment">/* It is not necessary to compare scan[2] and match[2] since they are
+         * always equal when the other bytes match, given that the hash keys
+         * are equal and that HASH_BITS &gt;= 8. Compare 2 bytes at a time at
+         * strstart+3, +5, ... up to strstart+257. We check for insufficient
+         * lookahead only every 4th comparison; the 128th check will be made
+         * at strstart+257. If MAX_MATCH-2 is not a multiple of 8, it is
+         * necessary to put more guard bytes at the end of the window, or
+         * to check more often for insufficient lookahead.
+         */</span>
+        Assert(scan[2] == match[2], <span class="enscript-string">&quot;scan[2]?&quot;</span>);
+        scan++, match++;
+        <span class="enscript-keyword">do</span> {
+        } <span class="enscript-keyword">while</span> (*(ushf*)(scan+=2) == *(ushf*)(match+=2) &amp;&amp;
+                 *(ushf*)(scan+=2) == *(ushf*)(match+=2) &amp;&amp;
+                 *(ushf*)(scan+=2) == *(ushf*)(match+=2) &amp;&amp;
+                 *(ushf*)(scan+=2) == *(ushf*)(match+=2) &amp;&amp;
+                 scan &lt; strend);
+        <span class="enscript-comment">/* The funny &quot;do {}&quot; generates better code on most compilers */</span>
+
+        <span class="enscript-comment">/* Here, scan &lt;= window+strstart+257 */</span>
+        Assert(scan &lt;= s-&gt;window+(<span class="enscript-type">unsigned</span>)(s-&gt;window_size-1), <span class="enscript-string">&quot;wild scan&quot;</span>);
+        <span class="enscript-keyword">if</span> (*scan == *match) scan++;
+
+        len = (MAX_MATCH - 1) - (<span class="enscript-type">int</span>)(strend-scan);
+        scan = strend - (MAX_MATCH-1);
+
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* UNALIGNED_OK */</span>
+
+        <span class="enscript-keyword">if</span> (match[best_len]   != scan_end  ||
+            match[best_len-1] != scan_end1 ||
+            *match            != *scan     ||
+            *++match          != scan[1])      <span class="enscript-keyword">continue</span>;
+
+        <span class="enscript-comment">/* The check at best_len-1 can be removed because it will be made
+         * again later. (This heuristic is not always a win.)
+         * It is not necessary to compare scan[2] and match[2] since they
+         * are always equal when the other bytes match, given that
+         * the hash keys are equal and that HASH_BITS &gt;= 8.
+         */</span>
+        scan += 2, match++;
+        Assert(*scan == *match, <span class="enscript-string">&quot;match[2]?&quot;</span>);
+
+        <span class="enscript-comment">/* We check for insufficient lookahead only every 8th comparison;
+         * the 256th check will be made at strstart+258.
+         */</span>
+        <span class="enscript-keyword">do</span> {
+        } <span class="enscript-keyword">while</span> (*++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+                 *++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+                 *++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+                 *++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+                 scan &lt; strend);
+
+        Assert(scan &lt;= s-&gt;window+(<span class="enscript-type">unsigned</span>)(s-&gt;window_size-1), <span class="enscript-string">&quot;wild scan&quot;</span>);
+
+        len = MAX_MATCH - (<span class="enscript-type">int</span>)(strend - scan);
+        scan = strend - MAX_MATCH;
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* UNALIGNED_OK */</span>
+
+        <span class="enscript-keyword">if</span> (len &gt; best_len) {
+            s-&gt;match_start = cur_match;
+            best_len = len;
+            <span class="enscript-keyword">if</span> (len &gt;= nice_match) <span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">UNALIGNED_OK</span>
+            scan_end = *(ushf*)(scan+best_len-1);
+#<span class="enscript-reference">else</span>
+            scan_end1  = scan[best_len-1];
+            scan_end   = scan[best_len];
+#<span class="enscript-reference">endif</span>
+        }
+    } <span class="enscript-keyword">while</span> ((cur_match = prev[cur_match &amp; wmask]) &gt; limit
+             &amp;&amp; --chain_length != 0);
+
+    <span class="enscript-keyword">if</span> ((uInt)best_len &lt;= s-&gt;lookahead) <span class="enscript-keyword">return</span> (uInt)best_len;
+    <span class="enscript-keyword">return</span> s-&gt;lookahead;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* ASMV */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* FASTEST */</span>
+
+<span class="enscript-comment">/* ---------------------------------------------------------------------------
+ * Optimized version for level == 1 or strategy == Z_RLE only
+ */</span>
+local uInt <span class="enscript-function-name">longest_match_fast</span>(s, cur_match)
+    deflate_state *s;
+    IPos cur_match;                             <span class="enscript-comment">/* current match */</span>
+{
+    <span class="enscript-type">register</span> Bytef *scan = s-&gt;window + s-&gt;strstart; <span class="enscript-comment">/* current string */</span>
+    <span class="enscript-type">register</span> Bytef *match;                       <span class="enscript-comment">/* matched string */</span>
+    <span class="enscript-type">register</span> <span class="enscript-type">int</span> len;                           <span class="enscript-comment">/* length of current match */</span>
+    <span class="enscript-type">register</span> Bytef *strend = s-&gt;window + s-&gt;strstart + MAX_MATCH;
+
+    <span class="enscript-comment">/* The code is optimized for HASH_BITS &gt;= 8 and MAX_MATCH-2 multiple of 16.
+     * It is easy to get rid of this optimization if necessary.
+     */</span>
+    Assert(s-&gt;hash_bits &gt;= 8 &amp;&amp; MAX_MATCH == 258, <span class="enscript-string">&quot;Code too clever&quot;</span>);
+
+    Assert((ulg)s-&gt;strstart &lt;= s-&gt;window_size-MIN_LOOKAHEAD, <span class="enscript-string">&quot;need lookahead&quot;</span>);
+
+    Assert(cur_match &lt; s-&gt;strstart, <span class="enscript-string">&quot;no future&quot;</span>);
+
+    match = s-&gt;window + cur_match;
+
+    <span class="enscript-comment">/* Return failure if the match length is less than 2:
+     */</span>
+    <span class="enscript-keyword">if</span> (match[0] != scan[0] || match[1] != scan[1]) <span class="enscript-keyword">return</span> MIN_MATCH-1;
+
+    <span class="enscript-comment">/* The check at best_len-1 can be removed because it will be made
+     * again later. (This heuristic is not always a win.)
+     * It is not necessary to compare scan[2] and match[2] since they
+     * are always equal when the other bytes match, given that
+     * the hash keys are equal and that HASH_BITS &gt;= 8.
+     */</span>
+    scan += 2, match += 2;
+    Assert(*scan == *match, <span class="enscript-string">&quot;match[2]?&quot;</span>);
+
+    <span class="enscript-comment">/* We check for insufficient lookahead only every 8th comparison;
+     * the 256th check will be made at strstart+258.
+     */</span>
+    <span class="enscript-keyword">do</span> {
+    } <span class="enscript-keyword">while</span> (*++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+             *++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+             *++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+             *++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+             scan &lt; strend);
+
+    Assert(scan &lt;= s-&gt;window+(<span class="enscript-type">unsigned</span>)(s-&gt;window_size-1), <span class="enscript-string">&quot;wild scan&quot;</span>);
+
+    len = MAX_MATCH - (<span class="enscript-type">int</span>)(strend - scan);
+
+    <span class="enscript-keyword">if</span> (len &lt; MIN_MATCH) <span class="enscript-keyword">return</span> MIN_MATCH - 1;
+
+    s-&gt;match_start = cur_match;
+    <span class="enscript-keyword">return</span> (uInt)len &lt;= s-&gt;lookahead ? (uInt)len : s-&gt;lookahead;
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-comment">/* ===========================================================================
+ * Check that the match at match_start is indeed a match.
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">check_match</span>(s, start, match, length)
+    deflate_state *s;
+    IPos start, match;
+    <span class="enscript-type">int</span> length;
+{
+    <span class="enscript-comment">/* check that the match is indeed a match */</span>
+    <span class="enscript-keyword">if</span> (zmemcmp(s-&gt;window + match,
+                s-&gt;window + start, length) != EQUAL) {
+        fprintf(stderr, <span class="enscript-string">&quot; start %u, match %u, length %d\n&quot;</span>,
+                start, match, length);
+        <span class="enscript-keyword">do</span> {
+            fprintf(stderr, <span class="enscript-string">&quot;%c%c&quot;</span>, s-&gt;window[match++], s-&gt;window[start++]);
+        } <span class="enscript-keyword">while</span> (--length != 0);
+        z_error(<span class="enscript-string">&quot;invalid match&quot;</span>);
+    }
+    <span class="enscript-keyword">if</span> (z_verbose &gt; 1) {
+        fprintf(stderr,<span class="enscript-string">&quot;\\[%d,%d]&quot;</span>, start-match, length);
+        <span class="enscript-keyword">do</span> { putc(s-&gt;window[start++], stderr); } <span class="enscript-keyword">while</span> (--length != 0);
+    }
+}
+#<span class="enscript-reference">else</span>
+#  <span class="enscript-reference">define</span> <span class="enscript-function-name">check_match</span>(s, start, match, length)
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+
+<span class="enscript-comment">/* ===========================================================================
+ * Fill the window when the lookahead becomes insufficient.
+ * Updates strstart and lookahead.
+ *
+ * IN assertion: lookahead &lt; MIN_LOOKAHEAD
+ * OUT assertions: strstart &lt;= window_size-MIN_LOOKAHEAD
+ *    At least one byte has been read, or avail_in == 0; reads are
+ *    performed for at least two bytes (required for the zip translate_eol
+ *    option -- not supported here).
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">fill_window</span>(s)
+    deflate_state *s;
+{
+    <span class="enscript-type">register</span> <span class="enscript-type">unsigned</span> n, m;
+    <span class="enscript-type">register</span> Posf *p;
+    <span class="enscript-type">unsigned</span> more;    <span class="enscript-comment">/* Amount of free space at the end of the window. */</span>
+    uInt wsize = s-&gt;w_size;
+
+    <span class="enscript-keyword">do</span> {
+        more = (<span class="enscript-type">unsigned</span>)(s-&gt;window_size -(ulg)s-&gt;lookahead -(ulg)s-&gt;strstart);
+
+        <span class="enscript-comment">/* Deal with !@#$% 64K limit: */</span>
+        <span class="enscript-keyword">if</span> (<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>) &lt;= 2) {
+            <span class="enscript-keyword">if</span> (more == 0 &amp;&amp; s-&gt;strstart == 0 &amp;&amp; s-&gt;lookahead == 0) {
+                more = wsize;
+
+            } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (more == (<span class="enscript-type">unsigned</span>)(-1)) {
+                <span class="enscript-comment">/* Very unlikely, but possible on 16 bit machine if
+                 * strstart == 0 &amp;&amp; lookahead == 1 (input done a byte at time)
+                 */</span>
+                more--;
+            }
+        }
+
+        <span class="enscript-comment">/* If the window is almost full and there is insufficient lookahead,
+         * move the upper half to the lower one to make room in the upper half.
+         */</span>
+        <span class="enscript-keyword">if</span> (s-&gt;strstart &gt;= wsize+MAX_DIST(s)) {
+
+            zmemcpy(s-&gt;window, s-&gt;window+wsize, (<span class="enscript-type">unsigned</span>)wsize);
+            s-&gt;match_start -= wsize;
+            s-&gt;strstart    -= wsize; <span class="enscript-comment">/* we now have strstart &gt;= MAX_DIST */</span>
+            s-&gt;block_start -= (<span class="enscript-type">long</span>) wsize;
+
+            <span class="enscript-comment">/* Slide the hash table (could be avoided with 32 bit values
+               at the expense of memory usage). We slide even when level == 0
+               to keep the hash table consistent if we switch back to level &gt; 0
+               later. (Using level 0 permanently is not an optimal usage of
+               zlib, so we don't care about this pathological case.)
+             */</span>
+            <span class="enscript-comment">/* %%% avoid this when Z_RLE */</span>
+            n = s-&gt;hash_size;
+            p = &amp;s-&gt;head[n];
+            <span class="enscript-keyword">do</span> {
+                m = *--p;
+                *p = (Pos)(m &gt;= wsize ? m-wsize : NIL);
+            } <span class="enscript-keyword">while</span> (--n);
+
+            n = wsize;
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">FASTEST</span>
+            p = &amp;s-&gt;prev[n];
+            <span class="enscript-keyword">do</span> {
+                m = *--p;
+                *p = (Pos)(m &gt;= wsize ? m-wsize : NIL);
+                <span class="enscript-comment">/* If n is not on any hash chain, prev[n] is garbage but
+                 * its value will never be used.
+                 */</span>
+            } <span class="enscript-keyword">while</span> (--n);
+#<span class="enscript-reference">endif</span>
+            more += wsize;
+        }
+        <span class="enscript-keyword">if</span> (s-&gt;strm-&gt;avail_in == 0) <span class="enscript-keyword">return</span>;
+
+        <span class="enscript-comment">/* If there was no sliding:
+         *    strstart &lt;= WSIZE+MAX_DIST-1 &amp;&amp; lookahead &lt;= MIN_LOOKAHEAD - 1 &amp;&amp;
+         *    more == window_size - lookahead - strstart
+         * =&gt; more &gt;= window_size - (MIN_LOOKAHEAD-1 + WSIZE + MAX_DIST-1)
+         * =&gt; more &gt;= window_size - 2*WSIZE + 2
+         * In the BIG_MEM or MMAP case (not yet supported),
+         *   window_size == input_size + MIN_LOOKAHEAD  &amp;&amp;
+         *   strstart + s-&gt;lookahead &lt;= input_size =&gt; more &gt;= MIN_LOOKAHEAD.
+         * Otherwise, window_size == 2*WSIZE so more &gt;= 2.
+         * If there was sliding, more &gt;= WSIZE. So in all cases, more &gt;= 2.
+         */</span>
+        Assert(more &gt;= 2, <span class="enscript-string">&quot;more &lt; 2&quot;</span>);
+
+        n = (*s-&gt;zinput)(s-&gt;strm, s-&gt;window + s-&gt;strstart + s-&gt;lookahead, more);
+        s-&gt;lookahead += n;
+
+        <span class="enscript-comment">/* Initialize the hash value now that we have some input: */</span>
+        <span class="enscript-keyword">if</span> (s-&gt;lookahead &gt;= MIN_MATCH) {
+            s-&gt;ins_h = s-&gt;window[s-&gt;strstart];
+            UPDATE_HASH(s, s-&gt;ins_h, s-&gt;window[s-&gt;strstart+1]);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MIN_MATCH</span> != 3
+            Call UPDATE_HASH() MIN_MATCH-3 more times
+#<span class="enscript-reference">endif</span>
+        }
+        <span class="enscript-comment">/* If the whole input has less than MIN_MATCH bytes, ins_h is garbage,
+         * but this is not important since only literal bytes will be emitted.
+         */</span>
+
+    } <span class="enscript-keyword">while</span> (s-&gt;lookahead &lt; MIN_LOOKAHEAD &amp;&amp; s-&gt;strm-&gt;avail_in != 0);
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Flush the current block, with given end-of-file flag.
+ * IN assertion: strstart is set to the end of the current match.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">FLUSH_BLOCK_ONLY</span>(s, eof) { \
+   _tr_flush_block(s, (s-&gt;block_start &gt;= 0L ? \
+                   (charf *)&amp;s-&gt;window[(<span class="enscript-type">unsigned</span>)s-&gt;block_start] : \
+                   (charf *)Z_NULL), \
+                (ulg)((<span class="enscript-type">long</span>)s-&gt;strstart - s-&gt;block_start), \
+                (eof)); \
+   s-&gt;block_start = s-&gt;strstart; \
+   flush_pending(s-&gt;strm); \
+   Tracev((stderr,<span class="enscript-string">&quot;[FLUSH]&quot;</span>)); \
+}
+
+<span class="enscript-comment">/* Same but force premature exit if necessary. */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">FLUSH_BLOCK</span>(s, eof) { \
+   FLUSH_BLOCK_ONLY(s, eof); \
+   <span class="enscript-keyword">if</span> (s-&gt;strm-&gt;avail_out == 0) <span class="enscript-keyword">return</span> (eof) ? finish_started : need_more; \
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Copy without compression as much as possible from the input stream, return
+ * the current block state.
+ * This function does not insert new strings in the dictionary since
+ * uncompressible data is probably not useful. This function is used
+ * only for the level=0 compression option.
+ * NOTE: this function should be optimized to avoid extra copying from
+ * window to pending_buf.
+ */</span>
+local block_state <span class="enscript-function-name">deflate_stored</span>(s, flush)
+    deflate_state *s;
+    <span class="enscript-type">int</span> flush;
+{
+    <span class="enscript-comment">/* Stored blocks are limited to 0xffff bytes, pending_buf is limited
+     * to pending_buf_size, and each stored block has a 5 byte header:
+     */</span>
+    ulg max_block_size = 0xffff;
+    ulg max_start;
+
+    <span class="enscript-keyword">if</span> (max_block_size &gt; s-&gt;pending_buf_size - 5) {
+        max_block_size = s-&gt;pending_buf_size - 5;
+    }
+
+    <span class="enscript-comment">/* Copy as much as possible from input to output: */</span>
+    <span class="enscript-keyword">for</span> (;;) {
+        <span class="enscript-comment">/* Fill the window as much as possible: */</span>
+        <span class="enscript-keyword">if</span> (s-&gt;lookahead &lt;= 1) {
+
+            Assert(s-&gt;strstart &lt; s-&gt;w_size+MAX_DIST(s) ||
+                   s-&gt;block_start &gt;= (<span class="enscript-type">long</span>)s-&gt;w_size, <span class="enscript-string">&quot;slide too late&quot;</span>);
+
+            fill_window(s);
+            <span class="enscript-keyword">if</span> (s-&gt;lookahead == 0 &amp;&amp; flush == Z_NO_FLUSH) <span class="enscript-keyword">return</span> need_more;
+
+            <span class="enscript-keyword">if</span> (s-&gt;lookahead == 0) <span class="enscript-keyword">break</span>; <span class="enscript-comment">/* flush the current block */</span>
+        }
+        Assert(s-&gt;block_start &gt;= 0L, <span class="enscript-string">&quot;block gone&quot;</span>);
+
+        s-&gt;strstart += s-&gt;lookahead;
+        s-&gt;lookahead = 0;
+
+        <span class="enscript-comment">/* Emit a stored block if pending_buf will be full: */</span>
+        max_start = s-&gt;block_start + max_block_size;
+        <span class="enscript-keyword">if</span> (s-&gt;strstart == 0 || (ulg)s-&gt;strstart &gt;= max_start) {
+            <span class="enscript-comment">/* strstart == 0 is possible when wraparound on 16-bit machine */</span>
+            s-&gt;lookahead = (uInt)(s-&gt;strstart - max_start);
+            s-&gt;strstart = (uInt)max_start;
+            FLUSH_BLOCK(s, 0);
+        }
+        <span class="enscript-comment">/* Flush if we may have to slide, otherwise block_start may become
+         * negative and the data will be gone:
+         */</span>
+        <span class="enscript-keyword">if</span> (s-&gt;strstart - (uInt)s-&gt;block_start &gt;= MAX_DIST(s)) {
+            FLUSH_BLOCK(s, 0);
+        }
+    }
+    FLUSH_BLOCK(s, flush == Z_FINISH);
+    <span class="enscript-keyword">return</span> flush == Z_FINISH ? finish_done : block_done;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Compress as much as possible from the input stream, return the current
+ * block state.
+ * This function does not perform lazy evaluation of matches and inserts
+ * new strings in the dictionary only for unmatched strings or for short
+ * matches. It is used only for the fast compression options.
+ */</span>
+local block_state <span class="enscript-function-name">deflate_fast</span>(s, flush)
+    deflate_state *s;
+    <span class="enscript-type">int</span> flush;
+{
+    IPos hash_head = NIL; <span class="enscript-comment">/* head of the hash chain */</span>
+    <span class="enscript-type">int</span> bflush;           <span class="enscript-comment">/* set if current block must be flushed */</span>
+
+    <span class="enscript-keyword">for</span> (;;) {
+        <span class="enscript-comment">/* Make sure that we always have enough lookahead, except
+         * at the end of the input file. We need MAX_MATCH bytes
+         * for the next match, plus MIN_MATCH bytes to insert the
+         * string following the next match.
+         */</span>
+        <span class="enscript-keyword">if</span> (s-&gt;lookahead &lt; MIN_LOOKAHEAD) {
+            fill_window(s);
+            <span class="enscript-keyword">if</span> (s-&gt;lookahead &lt; MIN_LOOKAHEAD &amp;&amp; flush == Z_NO_FLUSH) {
+                <span class="enscript-keyword">return</span> need_more;
+            }
+            <span class="enscript-keyword">if</span> (s-&gt;lookahead == 0) <span class="enscript-keyword">break</span>; <span class="enscript-comment">/* flush the current block */</span>
+        }
+
+        <span class="enscript-comment">/* Insert the string window[strstart .. strstart+2] in the
+         * dictionary, and set hash_head to the head of the hash chain:
+         */</span>
+        <span class="enscript-keyword">if</span> (s-&gt;lookahead &gt;= MIN_MATCH) {
+            INSERT_STRING(s, s-&gt;strstart, hash_head);
+        }
+
+        <span class="enscript-comment">/* Find the longest match, discarding those &lt;= prev_length.
+         * At this point we have always match_length &lt; MIN_MATCH
+         */</span>
+        <span class="enscript-keyword">if</span> (hash_head != NIL &amp;&amp; s-&gt;strstart - hash_head &lt;= MAX_DIST(s)) {
+            <span class="enscript-comment">/* To simplify the code, we prevent matches with the string
+             * of window index 0 (in particular we have to avoid a match
+             * of the string with itself at the start of the input file).
+             */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">FASTEST</span>
+            <span class="enscript-keyword">if</span> ((s-&gt;strategy != Z_HUFFMAN_ONLY &amp;&amp; s-&gt;strategy != Z_RLE) ||
+                (s-&gt;strategy == Z_RLE &amp;&amp; s-&gt;strstart - hash_head == 1)) {
+                s-&gt;match_length = longest_match_fast (s, hash_head);
+            }
+#<span class="enscript-reference">else</span>
+            <span class="enscript-keyword">if</span> (s-&gt;strategy != Z_HUFFMAN_ONLY &amp;&amp; s-&gt;strategy != Z_RLE) {
+                s-&gt;match_length = longest_match (s, hash_head);
+            } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (s-&gt;strategy == Z_RLE &amp;&amp; s-&gt;strstart - hash_head == 1) {
+                s-&gt;match_length = longest_match_fast (s, hash_head);
+            }
+#<span class="enscript-reference">endif</span>
+            <span class="enscript-comment">/* longest_match() or longest_match_fast() sets match_start */</span>
+        }
+        <span class="enscript-keyword">if</span> (s-&gt;match_length &gt;= MIN_MATCH) {
+            check_match(s, s-&gt;strstart, s-&gt;match_start, s-&gt;match_length);
+
+            _tr_tally_dist(s, s-&gt;strstart - s-&gt;match_start,
+                           s-&gt;match_length - MIN_MATCH, bflush);
+
+            s-&gt;lookahead -= s-&gt;match_length;
+
+            <span class="enscript-comment">/* Insert new strings in the hash table only if the match length
+             * is not too large. This saves time but degrades compression.
+             */</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">FASTEST</span>
+            <span class="enscript-keyword">if</span> (s-&gt;match_length &lt;= s-&gt;max_insert_length &amp;&amp;
+                s-&gt;lookahead &gt;= MIN_MATCH) {
+                s-&gt;match_length--; <span class="enscript-comment">/* string at strstart already in table */</span>
+                <span class="enscript-keyword">do</span> {
+                    s-&gt;strstart++;
+                    INSERT_STRING(s, s-&gt;strstart, hash_head);
+                    <span class="enscript-comment">/* strstart never exceeds WSIZE-MAX_MATCH, so there are
+                     * always MIN_MATCH bytes ahead.
+                     */</span>
+                } <span class="enscript-keyword">while</span> (--s-&gt;match_length != 0);
+                s-&gt;strstart++;
+            } <span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span>
+            {
+                s-&gt;strstart += s-&gt;match_length;
+                s-&gt;match_length = 0;
+                s-&gt;ins_h = s-&gt;window[s-&gt;strstart];
+                UPDATE_HASH(s, s-&gt;ins_h, s-&gt;window[s-&gt;strstart+1]);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MIN_MATCH</span> != 3
+                Call UPDATE_HASH() MIN_MATCH-3 more times
+#<span class="enscript-reference">endif</span>
+                <span class="enscript-comment">/* If lookahead &lt; MIN_MATCH, ins_h is garbage, but it does not
+                 * matter since it will be recomputed at next deflate call.
+                 */</span>
+            }
+        } <span class="enscript-keyword">else</span> {
+            <span class="enscript-comment">/* No match, output a literal byte */</span>
+            Tracevv((stderr,<span class="enscript-string">&quot;%c&quot;</span>, s-&gt;window[s-&gt;strstart]));
+            _tr_tally_lit (s, s-&gt;window[s-&gt;strstart], bflush);
+            s-&gt;lookahead--;
+            s-&gt;strstart++;
+        }
+        <span class="enscript-keyword">if</span> (bflush) FLUSH_BLOCK(s, 0);
+    }
+    FLUSH_BLOCK(s, flush == Z_FINISH);
+    <span class="enscript-keyword">return</span> flush == Z_FINISH ? finish_done : block_done;
+}
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">FASTEST</span>
+<span class="enscript-comment">/* ===========================================================================
+ * Same as above, but achieves better compression. We use a lazy
+ * evaluation for matches: a match is finally adopted only if there is
+ * no better match at the next window position.
+ */</span>
+local block_state <span class="enscript-function-name">deflate_slow</span>(s, flush)
+    deflate_state *s;
+    <span class="enscript-type">int</span> flush;
+{
+    IPos hash_head = NIL;    <span class="enscript-comment">/* head of hash chain */</span>
+    <span class="enscript-type">int</span> bflush;              <span class="enscript-comment">/* set if current block must be flushed */</span>
+
+    <span class="enscript-comment">/* Process the input block. */</span>
+    <span class="enscript-keyword">for</span> (;;) {
+        <span class="enscript-comment">/* Make sure that we always have enough lookahead, except
+         * at the end of the input file. We need MAX_MATCH bytes
+         * for the next match, plus MIN_MATCH bytes to insert the
+         * string following the next match.
+         */</span>
+        <span class="enscript-keyword">if</span> (s-&gt;lookahead &lt; MIN_LOOKAHEAD) {
+            fill_window(s);
+            <span class="enscript-keyword">if</span> (s-&gt;lookahead &lt; MIN_LOOKAHEAD &amp;&amp; flush == Z_NO_FLUSH) {
+                <span class="enscript-keyword">return</span> need_more;
+            }
+            <span class="enscript-keyword">if</span> (s-&gt;lookahead == 0) <span class="enscript-keyword">break</span>; <span class="enscript-comment">/* flush the current block */</span>
+        }
+
+        <span class="enscript-comment">/* Insert the string window[strstart .. strstart+2] in the
+         * dictionary, and set hash_head to the head of the hash chain:
+         */</span>
+        <span class="enscript-keyword">if</span> (s-&gt;lookahead &gt;= MIN_MATCH) {
+            INSERT_STRING(s, s-&gt;strstart, hash_head);
+        }
+
+        <span class="enscript-comment">/* Find the longest match, discarding those &lt;= prev_length.
+         */</span>
+        s-&gt;prev_length = s-&gt;match_length, s-&gt;prev_match = s-&gt;match_start;
+        s-&gt;match_length = MIN_MATCH-1;
+
+        <span class="enscript-keyword">if</span> (hash_head != NIL &amp;&amp; s-&gt;prev_length &lt; s-&gt;max_lazy_match &amp;&amp;
+            s-&gt;strstart - hash_head &lt;= MAX_DIST(s)) {
+            <span class="enscript-comment">/* To simplify the code, we prevent matches with the string
+             * of window index 0 (in particular we have to avoid a match
+             * of the string with itself at the start of the input file).
+             */</span>
+            <span class="enscript-keyword">if</span> (s-&gt;strategy != Z_HUFFMAN_ONLY &amp;&amp; s-&gt;strategy != Z_RLE) {
+                s-&gt;match_length = longest_match (s, hash_head);
+            } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (s-&gt;strategy == Z_RLE &amp;&amp; s-&gt;strstart - hash_head == 1) {
+                s-&gt;match_length = longest_match_fast (s, hash_head);
+            }
+            <span class="enscript-comment">/* longest_match() or longest_match_fast() sets match_start */</span>
+
+            <span class="enscript-keyword">if</span> (s-&gt;match_length &lt;= 5 &amp;&amp; (s-&gt;strategy == Z_FILTERED
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">TOO_FAR</span> &lt;= 32767
+                || (s-&gt;match_length == MIN_MATCH &amp;&amp;
+                    s-&gt;strstart - s-&gt;match_start &gt; TOO_FAR)
+#<span class="enscript-reference">endif</span>
+                )) {
+
+                <span class="enscript-comment">/* If prev_match is also MIN_MATCH, match_start is garbage
+                 * but we will ignore the current match anyway.
+                 */</span>
+                s-&gt;match_length = MIN_MATCH-1;
+            }
+        }
+        <span class="enscript-comment">/* If there was a match at the previous step and the current
+         * match is not better, output the previous match:
+         */</span>
+        <span class="enscript-keyword">if</span> (s-&gt;prev_length &gt;= MIN_MATCH &amp;&amp; s-&gt;match_length &lt;= s-&gt;prev_length) {
+            uInt max_insert = s-&gt;strstart + s-&gt;lookahead - MIN_MATCH;
+            <span class="enscript-comment">/* Do not insert strings in hash table beyond this. */</span>
+
+            check_match(s, s-&gt;strstart-1, s-&gt;prev_match, s-&gt;prev_length);
+
+            _tr_tally_dist(s, s-&gt;strstart -1 - s-&gt;prev_match,
+                           s-&gt;prev_length - MIN_MATCH, bflush);
+
+            <span class="enscript-comment">/* Insert in hash table all strings up to the end of the match.
+             * strstart-1 and strstart are already inserted. If there is not
+             * enough lookahead, the last two strings are not inserted in
+             * the hash table.
+             */</span>
+            s-&gt;lookahead -= s-&gt;prev_length-1;
+            s-&gt;prev_length -= 2;
+            <span class="enscript-keyword">do</span> {
+                <span class="enscript-keyword">if</span> (++s-&gt;strstart &lt;= max_insert) {
+                    INSERT_STRING(s, s-&gt;strstart, hash_head);
+                }
+            } <span class="enscript-keyword">while</span> (--s-&gt;prev_length != 0);
+            s-&gt;match_available = 0;
+            s-&gt;match_length = MIN_MATCH-1;
+            s-&gt;strstart++;
+
+            <span class="enscript-keyword">if</span> (bflush) FLUSH_BLOCK(s, 0);
+
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (s-&gt;match_available) {
+            <span class="enscript-comment">/* If there was no match at the previous position, output a
+             * single literal. If there was a match but the current match
+             * is longer, truncate the previous match to a single literal.
+             */</span>
+            Tracevv((stderr,<span class="enscript-string">&quot;%c&quot;</span>, s-&gt;window[s-&gt;strstart-1]));
+            _tr_tally_lit(s, s-&gt;window[s-&gt;strstart-1], bflush);
+            <span class="enscript-keyword">if</span> (bflush) {
+                FLUSH_BLOCK_ONLY(s, 0);
+            }
+            s-&gt;strstart++;
+            s-&gt;lookahead--;
+            <span class="enscript-keyword">if</span> (s-&gt;strm-&gt;avail_out == 0) <span class="enscript-keyword">return</span> need_more;
+        } <span class="enscript-keyword">else</span> {
+            <span class="enscript-comment">/* There is no previous match to compare with, wait for
+             * the next step to decide.
+             */</span>
+            s-&gt;match_available = 1;
+            s-&gt;strstart++;
+            s-&gt;lookahead--;
+        }
+    }
+    Assert (flush != Z_NO_FLUSH, <span class="enscript-string">&quot;no flush?&quot;</span>);
+    <span class="enscript-keyword">if</span> (s-&gt;match_available) {
+        Tracevv((stderr,<span class="enscript-string">&quot;%c&quot;</span>, s-&gt;window[s-&gt;strstart-1]));
+        _tr_tally_lit(s, s-&gt;window[s-&gt;strstart-1], bflush);
+        s-&gt;match_available = 0;
+    }
+    FLUSH_BLOCK(s, flush == Z_FINISH);
+    <span class="enscript-keyword">return</span> flush == Z_FINISH ? finish_done : block_done;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* FASTEST */</span>
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-comment">/* ===========================================================================
+ * For Z_RLE, simply look for runs of bytes, generate matches only of distance
+ * one.  Do not maintain a hash table.  (It will be regenerated if this run of
+ * deflate switches away from Z_RLE.)
+ */</span>
+local block_state <span class="enscript-function-name">deflate_rle</span>(s, flush)
+    deflate_state *s;
+    <span class="enscript-type">int</span> flush;
+{
+    <span class="enscript-type">int</span> bflush;         <span class="enscript-comment">/* set if current block must be flushed */</span>
+    uInt run;           <span class="enscript-comment">/* length of run */</span>
+    uInt max;           <span class="enscript-comment">/* maximum length of run */</span>
+    uInt prev;          <span class="enscript-comment">/* byte at distance one to match */</span>
+    Bytef *scan;        <span class="enscript-comment">/* scan for end of run */</span>
+
+    <span class="enscript-keyword">for</span> (;;) {
+        <span class="enscript-comment">/* Make sure that we always have enough lookahead, except
+         * at the end of the input file. We need MAX_MATCH bytes
+         * for the longest encodable run.
+         */</span>
+        <span class="enscript-keyword">if</span> (s-&gt;lookahead &lt; MAX_MATCH) {
+            fill_window(s);
+            <span class="enscript-keyword">if</span> (s-&gt;lookahead &lt; MAX_MATCH &amp;&amp; flush == Z_NO_FLUSH) {
+                <span class="enscript-keyword">return</span> need_more;
+            }
+            <span class="enscript-keyword">if</span> (s-&gt;lookahead == 0) <span class="enscript-keyword">break</span>; <span class="enscript-comment">/* flush the current block */</span>
+        }
+
+        <span class="enscript-comment">/* See how many times the previous byte repeats */</span>
+        run = 0;
+        <span class="enscript-keyword">if</span> (s-&gt;strstart &gt; 0) {      <span class="enscript-comment">/* if there is a previous byte, that is */</span>
+            max = s-&gt;lookahead &lt; MAX_MATCH ? s-&gt;lookahead : MAX_MATCH;
+            scan = s-&gt;window + s-&gt;strstart - 1;
+            prev = *scan++;
+            <span class="enscript-keyword">do</span> {
+                <span class="enscript-keyword">if</span> (*scan++ != prev)
+                    <span class="enscript-keyword">break</span>;
+            } <span class="enscript-keyword">while</span> (++run &lt; max);
+        }
+
+        <span class="enscript-comment">/* Emit match if have run of MIN_MATCH or longer, else emit literal */</span>
+        <span class="enscript-keyword">if</span> (run &gt;= MIN_MATCH) {
+            check_match(s, s-&gt;strstart, s-&gt;strstart - 1, run);
+            _tr_tally_dist(s, 1, run - MIN_MATCH, bflush);
+            s-&gt;lookahead -= run;
+            s-&gt;strstart += run;
+        } <span class="enscript-keyword">else</span> {
+            <span class="enscript-comment">/* No match, output a literal byte */</span>
+            Tracevv((stderr,<span class="enscript-string">&quot;%c&quot;</span>, s-&gt;window[s-&gt;strstart]));
+            _tr_tally_lit (s, s-&gt;window[s-&gt;strstart], bflush);
+            s-&gt;lookahead--;
+            s-&gt;strstart++;
+        }
+        <span class="enscript-keyword">if</span> (bflush) FLUSH_BLOCK(s, 0);
+    }
+    FLUSH_BLOCK(s, flush == Z_FINISH);
+    <span class="enscript-keyword">return</span> flush == Z_FINISH ? finish_done : block_done;
+}
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">XNU_KERNEL_PRIVATE</span>
+
+uLong <span class="enscript-function-name">zlib_deflate_memory_size</span>(<span class="enscript-type">int</span> wbits, <span class="enscript-type">int</span> memlevel)
+{
+    <span class="enscript-keyword">return</span> (31 + <span class="enscript-keyword">sizeof</span>(deflate_state) + (1 &lt;&lt; (wbits + 2)) + (1 &lt;&lt; (memlevel + 9)));
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* XNU_KERNEL_PRIVATE */</span>
+</pre>
+<hr />
+</body></html>

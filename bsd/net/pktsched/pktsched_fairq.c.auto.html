@@ -1,0 +1,1325 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pktsched_fairq.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pktsched_fairq.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2011-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright (c) 2008 The DragonFly Project.  All rights reserved.
+ * 
+ * This code is derived from software contributed to The DragonFly Project
+ * by Matthew Dillon &lt;<a href="mailto:dillon@backplane.com">dillon@backplane.com</a>&gt;
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of The DragonFly Project nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific, prior written permission.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE
+ * COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ * 
+ * $DragonFly: src/sys/net/altq/altq_fairq.c,v 1.2 2008/05/14 11:59:23 sephe Exp $
+ */</span>
+<span class="enscript-comment">/*
+ * Matt: I gutted altq_priq.c and used it as a skeleton on which to build
+ * fairq.  The fairq algorithm is completely different then priq, of course,
+ * but because I used priq's skeleton I believe I should include priq's
+ * copyright.
+ *
+ * Copyright (C) 2000-2003
+ *	Sony Computer Science Laboratories Inc.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY SONY CSL AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL SONY CSL OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+<span class="enscript-comment">/*
+ * FAIRQ - take traffic classified by keep state (hashed into
+ *	   pf-&gt;pftag_flowhash) and bucketize it.  Fairly extract
+ *	   the first packet from each bucket in a round-robin fashion.
+ *
+ * TODO - better overall qlimit support (right now it is per-bucket).
+ *	- NOTE: red etc is per bucket, not overall.
+ *	- better service curve support.
+ *
+ * EXAMPLE:
+ *
+ *  altq on em0 fairq bandwidth 650Kb queue { std, bulk }
+ *  queue std  priority 3 bandwidth 200Kb \
+ *	fairq (buckets 64, default, hogs 1Kb) qlimit 50
+ *  queue bulk priority 2 bandwidth 100Kb \
+ *	fairq (buckets 64, hogs 1Kb) qlimit 50
+ *
+ *	NOTE: When the aggregate bandwidth is less than the link bandwidth
+ *	      any remaining bandwidth is dynamically assigned using the
+ *	      existing bandwidth specs as weightings.
+ *
+ *  pass out on em0 from any to any keep state queue std
+ *  pass out on em0 inet proto tcp ..... port ... keep state queue bulk
+ */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PKTSCHED_FAIRQ</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/pktsched/pktsched_fairq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * function prototypes
+ */</span>
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">fairq_enqueue_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *, <span class="enscript-type">struct</span> mbuf *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">fairq_dequeue_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *, cqdq_op_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">fairq_request_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *, cqrq_t, <span class="enscript-type">void</span> *);
+#<span class="enscript-reference">endif</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">fairq_clear_interface</span>(<span class="enscript-type">struct</span> fairq_if *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span> <span class="enscript-function-name">fairq_addq</span>(<span class="enscript-type">struct</span> fairq_class *, <span class="enscript-type">struct</span> mbuf *,
+    <span class="enscript-type">struct</span> pf_mtag *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">fairq_getq</span>(<span class="enscript-type">struct</span> fairq_class *, u_int64_t);
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">fairq_pollq</span>(<span class="enscript-type">struct</span> fairq_class *, u_int64_t, <span class="enscript-type">int</span> *);
+<span class="enscript-type">static</span> fairq_bucket_t *<span class="enscript-function-name">fairq_selectq</span>(<span class="enscript-type">struct</span> fairq_class *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">fairq_purgeq</span>(<span class="enscript-type">struct</span> fairq_if *, <span class="enscript-type">struct</span> fairq_class *, u_int32_t,
+    u_int32_t *, u_int32_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">fairq_updateq</span>(<span class="enscript-type">struct</span> fairq_if *, <span class="enscript-type">struct</span> fairq_class *, cqev_t);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> fairq_class *<span class="enscript-function-name">fairq_class_create</span>(<span class="enscript-type">struct</span> fairq_if *, <span class="enscript-type">int</span>, u_int32_t,
+    u_int64_t, u_int32_t, <span class="enscript-type">int</span>, u_int64_t, u_int64_t, u_int64_t, u_int64_t,
+    u_int32_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">fairq_class_destroy</span>(<span class="enscript-type">struct</span> fairq_if *, <span class="enscript-type">struct</span> fairq_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">fairq_destroy_locked</span>(<span class="enscript-type">struct</span> fairq_if *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> fairq_class *<span class="enscript-function-name">fairq_clh_to_clp</span>(<span class="enscript-type">struct</span> fairq_if *,
+    u_int32_t);
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *<span class="enscript-function-name">fairq_style</span>(<span class="enscript-type">struct</span> fairq_if *);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FAIRQ_ZONE_MAX</span>	32		<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FAIRQ_ZONE_NAME</span>	<span class="enscript-string">&quot;pktsched_fairq&quot;</span> <span class="enscript-comment">/* zone name */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> fairq_size;		<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *fairq_zone;		<span class="enscript-comment">/* zone for fairq */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FAIRQ_CL_ZONE_MAX</span>	32	<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FAIRQ_CL_ZONE_NAME</span>	<span class="enscript-string">&quot;pktsched_fairq_cl&quot;</span> <span class="enscript-comment">/* zone name */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> fairq_cl_size;	<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *fairq_cl_zone;	<span class="enscript-comment">/* zone for fairq */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fairq_init</span>(<span class="enscript-type">void</span>)
+{
+	fairq_size = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> fairq_if);
+	fairq_zone = zinit(fairq_size, FAIRQ_ZONE_MAX * fairq_size,
+	    0, FAIRQ_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (fairq_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, FAIRQ_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(fairq_zone, Z_EXPAND, TRUE);
+	zone_change(fairq_zone, Z_CALLERACCT, TRUE);
+
+	fairq_cl_size = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> fairq_class);
+	fairq_cl_zone = zinit(fairq_cl_size, FAIRQ_CL_ZONE_MAX * fairq_cl_size,
+	    0, FAIRQ_CL_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (fairq_cl_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, FAIRQ_CL_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(fairq_cl_zone, Z_EXPAND, TRUE);
+	zone_change(fairq_cl_zone, Z_CALLERACCT, TRUE);
+}
+
+<span class="enscript-type">struct</span> fairq_if *
+<span class="enscript-function-name">fairq_alloc</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">int</span> how, boolean_t altq)
+{
+	<span class="enscript-type">struct</span> fairq_if *fif;
+
+	fif = (how == M_WAITOK) ?
+	    zalloc(fairq_zone) : zalloc_noblock(fairq_zone);
+	<span class="enscript-keyword">if</span> (fif == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	bzero(fif, fairq_size);
+	fif-&gt;fif_maxpri = -1;
+	fif-&gt;fif_ifq = &amp;ifp-&gt;if_snd;
+	<span class="enscript-keyword">if</span> (altq)
+		fif-&gt;fif_flags |= FAIRQIFF_ALTQ;
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s scheduler allocated\n&quot;</span>,
+		    if_name(ifp), fairq_style(fif));
+	}
+
+	<span class="enscript-keyword">return</span> (fif);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fairq_destroy</span>(<span class="enscript-type">struct</span> fairq_if *fif)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = fif-&gt;fif_ifq;
+	<span class="enscript-type">int</span> err;
+
+	IFCQ_LOCK(ifq);
+	err = fairq_destroy_locked(fif);
+	IFCQ_UNLOCK(ifq);
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">fairq_destroy_locked</span>(<span class="enscript-type">struct</span> fairq_if *fif)
+{
+	IFCQ_LOCK_ASSERT_HELD(fif-&gt;fif_ifq);
+
+	(<span class="enscript-type">void</span>) fairq_clear_interface(fif);
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s scheduler destroyed\n&quot;</span>,
+		    if_name(FAIRQIF_IFP(fif)), fairq_style(fif));
+	}
+
+	zfree(fairq_zone, fif);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * bring the interface back to the initial state by discarding
+ * all the filters and classes.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">fairq_clear_interface</span>(<span class="enscript-type">struct</span> fairq_if *fif)
+{
+	<span class="enscript-type">struct</span> fairq_class *cl;
+	<span class="enscript-type">int</span> pri;
+
+	IFCQ_LOCK_ASSERT_HELD(fif-&gt;fif_ifq);
+
+	<span class="enscript-comment">/* clear out the classes */</span>
+	<span class="enscript-keyword">for</span> (pri = 0; pri &lt;= fif-&gt;fif_maxpri; pri++)
+		<span class="enscript-keyword">if</span> ((cl = fif-&gt;fif_classes[pri]) != NULL)
+			fairq_class_destroy(fif, cl);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* discard all the queued packets on the interface */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fairq_purge</span>(<span class="enscript-type">struct</span> fairq_if *fif)
+{
+	<span class="enscript-type">struct</span> fairq_class *cl;
+	<span class="enscript-type">int</span> pri;
+
+	IFCQ_LOCK_ASSERT_HELD(fif-&gt;fif_ifq);
+
+	<span class="enscript-keyword">for</span> (pri = 0; pri &lt;= fif-&gt;fif_maxpri; pri++) {
+		<span class="enscript-keyword">if</span> ((cl = fif-&gt;fif_classes[pri]) != NULL &amp;&amp; cl-&gt;cl_head)
+			fairq_purgeq(fif, cl, 0, NULL, NULL);
+	}
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">PF_ALTQ</span>
+	<span class="enscript-comment">/*
+	 * This assertion is safe to be made only when PF_ALTQ is not
+	 * configured; otherwise, IFCQ_LEN represents the sum of the
+	 * packets managed by ifcq_disc and altq_disc instances, which
+	 * is possible when transitioning between the two.
+	 */</span>
+	VERIFY(IFCQ_LEN(fif-&gt;fif_ifq) == 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !PF_ALTQ */</span>
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fairq_event</span>(<span class="enscript-type">struct</span> fairq_if *fif, cqev_t ev)
+{
+	<span class="enscript-type">struct</span> fairq_class *cl;
+	<span class="enscript-type">int</span> pri;
+
+	IFCQ_LOCK_ASSERT_HELD(fif-&gt;fif_ifq);
+
+	<span class="enscript-keyword">for</span> (pri = 0; pri &lt;= fif-&gt;fif_maxpri; pri++)
+		<span class="enscript-keyword">if</span> ((cl = fif-&gt;fif_classes[pri]) != NULL)
+			fairq_updateq(fif, cl, ev);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fairq_add_queue</span>(<span class="enscript-type">struct</span> fairq_if *fif, <span class="enscript-type">int</span> priority, u_int32_t qlimit,
+    u_int64_t bandwidth, u_int32_t nbuckets, <span class="enscript-type">int</span> flags, u_int64_t hogs_m1,
+    u_int64_t lssc_m1, u_int64_t lssc_d, u_int64_t lssc_m2, u_int32_t qid,
+    <span class="enscript-type">struct</span> fairq_class **clp)
+{
+	<span class="enscript-type">struct</span> fairq_class *cl;
+
+	IFCQ_LOCK_ASSERT_HELD(fif-&gt;fif_ifq);
+
+	<span class="enscript-comment">/* check parameters */</span>
+	<span class="enscript-keyword">if</span> (priority &gt;= FAIRQ_MAXPRI)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">if</span> (bandwidth == 0 || (bandwidth / 8) == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">if</span> (fif-&gt;fif_classes[priority] != NULL)
+		<span class="enscript-keyword">return</span> (EBUSY);
+	<span class="enscript-keyword">if</span> (fairq_clh_to_clp(fif, qid) != NULL)
+		<span class="enscript-keyword">return</span> (EBUSY);
+
+	cl = fairq_class_create(fif, priority, qlimit, bandwidth,
+	    nbuckets, flags, hogs_m1, lssc_m1, lssc_d, lssc_m2, qid);
+	<span class="enscript-keyword">if</span> (cl == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	<span class="enscript-keyword">if</span> (clp != NULL)
+		*clp = cl;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> fairq_class *
+<span class="enscript-function-name">fairq_class_create</span>(<span class="enscript-type">struct</span> fairq_if *fif, <span class="enscript-type">int</span> pri, u_int32_t qlimit,
+    u_int64_t bandwidth, u_int32_t nbuckets, <span class="enscript-type">int</span> flags, u_int64_t hogs_m1,
+    u_int64_t lssc_m1, u_int64_t lssc_d, u_int64_t lssc_m2, u_int32_t qid)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">lssc_d</span>, <span class="enscript-variable-name">lssc_m2</span>)
+	<span class="enscript-type">struct</span> ifnet *ifp;
+	<span class="enscript-type">struct</span> ifclassq *ifq;
+	<span class="enscript-type">struct</span> fairq_class *cl;
+	u_int32_t i;
+
+	IFCQ_LOCK_ASSERT_HELD(fif-&gt;fif_ifq);
+
+	<span class="enscript-comment">/* Sanitize flags unless internally configured */</span>
+	<span class="enscript-keyword">if</span> (fif-&gt;fif_flags &amp; FAIRQIFF_ALTQ)
+		flags &amp;= FARF_USERFLAGS;
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (flags &amp; FARF_RED) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s RED not available!\n&quot;</span>,
+		    if_name(FAIRQIF_IFP(fif)), fairq_style(fif));
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !CLASSQ_RED */</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (flags &amp; FARF_RIO) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s RIO not available!\n&quot;</span>,
+		    if_name(FAIRQIF_IFP(fif)), fairq_style(fif));
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (flags &amp; FARF_BLUE) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s BLUE not available!\n&quot;</span>,
+		    if_name(FAIRQIF_IFP(fif)), fairq_style(fif));
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+
+	<span class="enscript-comment">/* These are mutually exclusive */</span>
+	<span class="enscript-keyword">if</span> ((flags &amp; (FARF_RED|FARF_RIO|FARF_BLUE|FARF_SFB)) &amp;&amp;
+	    (flags &amp; (FARF_RED|FARF_RIO|FARF_BLUE|FARF_SFB)) != FARF_RED &amp;&amp;
+	    (flags &amp; (FARF_RED|FARF_RIO|FARF_BLUE|FARF_SFB)) != FARF_RIO &amp;&amp;
+	    (flags &amp; (FARF_RED|FARF_RIO|FARF_BLUE|FARF_SFB)) != FARF_BLUE &amp;&amp;
+	    (flags &amp; (FARF_RED|FARF_RIO|FARF_BLUE|FARF_SFB)) != FARF_SFB) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s more than one RED|RIO|BLUE|SFB\n&quot;</span>,
+		    if_name(FAIRQIF_IFP(fif)), fairq_style(fif));
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	<span class="enscript-keyword">if</span> (bandwidth == 0 || (bandwidth / 8) == 0) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s invalid data rate %llu\n&quot;</span>,
+		    if_name(FAIRQIF_IFP(fif)), fairq_style(fif), bandwidth);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	<span class="enscript-keyword">if</span> (nbuckets == 0)
+		nbuckets = 256;
+	<span class="enscript-keyword">if</span> (nbuckets &gt; FAIRQ_MAX_BUCKETS)
+		nbuckets = FAIRQ_MAX_BUCKETS;
+	<span class="enscript-comment">/* enforce power-of-2 size */</span>
+	<span class="enscript-keyword">while</span> ((nbuckets ^ (nbuckets - 1)) != ((nbuckets &lt;&lt; 1) - 1))
+		++nbuckets;
+
+	ifq = fif-&gt;fif_ifq;
+	ifp = FAIRQIF_IFP(fif);
+
+	<span class="enscript-keyword">if</span> ((cl = fif-&gt;fif_classes[pri]) != NULL) {
+		<span class="enscript-comment">/* modify the class instead of creating a new one */</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_head)
+			fairq_purgeq(fif, cl, 0, NULL, NULL);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RIO)
+			rio_destroy(cl-&gt;cl_rio);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RED)
+			red_destroy(cl-&gt;cl_red);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_BLUE)
+			blue_destroy(cl-&gt;cl_blue);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_SFB &amp;&amp; cl-&gt;cl_sfb != NULL)
+			sfb_destroy(cl-&gt;cl_sfb);
+		cl-&gt;cl_qalg.ptr = NULL;
+		cl-&gt;cl_qtype = Q_DROPTAIL;
+		cl-&gt;cl_qstate = QS_RUNNING;
+	} <span class="enscript-keyword">else</span> {
+		cl = zalloc(fairq_cl_zone);
+		<span class="enscript-keyword">if</span> (cl == NULL)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err_ret</span>;
+		bzero(cl, fairq_cl_size);
+		cl-&gt;cl_nbuckets = nbuckets;
+		cl-&gt;cl_nbucket_mask = nbuckets - 1;
+
+		cl-&gt;cl_buckets = _MALLOC(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> fairq_bucket) *
+		    cl-&gt;cl_nbuckets, M_DEVBUF, M_WAITOK|M_ZERO);
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_buckets == NULL)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err_buckets</span>;
+		cl-&gt;cl_head = NULL;
+	}
+
+	fif-&gt;fif_classes[pri] = cl;
+	<span class="enscript-keyword">if</span> (flags &amp; FARF_DEFAULTCLASS)
+		fif-&gt;fif_default = cl;
+	<span class="enscript-keyword">if</span> (qlimit == 0 || qlimit &gt; IFCQ_MAXLEN(ifq)) {
+		qlimit = IFCQ_MAXLEN(ifq);
+		<span class="enscript-keyword">if</span> (qlimit == 0)
+			qlimit = DEFAULT_QLIMIT;	<span class="enscript-comment">/* use default */</span>
+	}
+	cl-&gt;cl_qlimit = qlimit;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; cl-&gt;cl_nbuckets; ++i) {
+		_qinit(&amp;cl-&gt;cl_buckets[i].queue, Q_DROPTAIL, qlimit);
+	}
+	cl-&gt;cl_bandwidth = bandwidth / 8;	<span class="enscript-comment">/* cvt to bytes per second */</span>
+	cl-&gt;cl_qtype = Q_DROPTAIL;
+	cl-&gt;cl_qstate = QS_RUNNING;
+	cl-&gt;cl_flags = flags;
+	cl-&gt;cl_pri = pri;
+	<span class="enscript-keyword">if</span> (pri &gt; fif-&gt;fif_maxpri)
+		fif-&gt;fif_maxpri = pri;
+	cl-&gt;cl_fif = fif;
+	cl-&gt;cl_handle = qid;
+	cl-&gt;cl_hogs_m1 = hogs_m1 / 8;
+	cl-&gt;cl_lssc_m1 = lssc_m1 / 8;	<span class="enscript-comment">/* NOT YET USED */</span>
+	cl-&gt;cl_bw_current = 0;
+
+	<span class="enscript-keyword">if</span> (flags &amp; (FARF_RED|FARF_RIO|FARF_BLUE|FARF_SFB)) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span> || <span class="enscript-variable-name">CLASSQ_RIO</span>
+		u_int64_t ifbandwidth = ifnet_output_linkrate(ifp);
+		<span class="enscript-type">int</span> pkttime;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED || CLASSQ_RIO */</span>
+
+		cl-&gt;cl_qflags = 0;
+		<span class="enscript-keyword">if</span> (flags &amp; FARF_ECN) {
+			<span class="enscript-keyword">if</span> (flags &amp; FARF_BLUE)
+				cl-&gt;cl_qflags |= BLUEF_ECN;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; FARF_SFB)
+				cl-&gt;cl_qflags |= SFBF_ECN;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; FARF_RED)
+				cl-&gt;cl_qflags |= REDF_ECN;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; FARF_RIO)
+				cl-&gt;cl_qflags |= RIOF_ECN;
+		}
+		<span class="enscript-keyword">if</span> (flags &amp; FARF_FLOWCTL) {
+			<span class="enscript-keyword">if</span> (flags &amp; FARF_SFB)
+				cl-&gt;cl_qflags |= SFBF_FLOWCTL;
+		}
+		<span class="enscript-keyword">if</span> (flags &amp; FARF_CLEARDSCP) {
+			<span class="enscript-keyword">if</span> (flags &amp; FARF_RIO)
+				cl-&gt;cl_qflags |= RIOF_CLEARDSCP;
+		}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span> || <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-comment">/*
+		 * XXX: RED &amp; RIO should be watching link speed and MTU
+		 *	events and recompute pkttime accordingly.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ifbandwidth &lt; 8)
+			pkttime = 1000 * 1000 * 1000; <span class="enscript-comment">/* 1 sec */</span>
+		<span class="enscript-keyword">else</span>
+			pkttime = (int64_t)ifp-&gt;if_mtu * 1000 * 1000 * 1000 /
+			    (ifbandwidth / 8);
+
+		<span class="enscript-comment">/* Test for exclusivity {RED,RIO,BLUE,SFB} was done above */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-keyword">if</span> (flags &amp; FARF_RIO) {
+			cl-&gt;cl_rio =
+			    rio_alloc(ifp, 0, NULL, cl-&gt;cl_qflags, pkttime);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_rio != NULL)
+				cl-&gt;cl_qtype = Q_RIO;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+		<span class="enscript-keyword">if</span> (flags &amp; FARF_RED) {
+			cl-&gt;cl_red = red_alloc(ifp, 0, 0,
+			    cl-&gt;cl_qlimit * 10/100,
+			    cl-&gt;cl_qlimit * 30/100,
+			    cl-&gt;cl_qflags, pkttime);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_red != NULL)
+				cl-&gt;cl_qtype = Q_RED;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED || CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+		<span class="enscript-keyword">if</span> (flags &amp; FARF_BLUE) {
+			cl-&gt;cl_blue = blue_alloc(ifp, 0, 0, cl-&gt;cl_qflags);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_blue != NULL)
+				cl-&gt;cl_qtype = Q_BLUE;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+		<span class="enscript-keyword">if</span> (flags &amp; FARF_SFB) {
+			<span class="enscript-keyword">if</span> (!(cl-&gt;cl_flags &amp; FARF_LAZY))
+				cl-&gt;cl_sfb = sfb_alloc(ifp, cl-&gt;cl_handle,
+				    cl-&gt;cl_qlimit, cl-&gt;cl_qflags);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_sfb != NULL || (cl-&gt;cl_flags &amp; FARF_LAZY))
+				cl-&gt;cl_qtype = Q_SFB;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s created qid=%d pri=%d qlimit=%d &quot;</span>
+		    <span class="enscript-string">&quot;flags=%b\n&quot;</span>, if_name(ifp), fairq_style(fif),
+		    cl-&gt;cl_handle, cl-&gt;cl_pri, cl-&gt;cl_qlimit, flags, FARF_BITS);
+	}
+
+	<span class="enscript-keyword">return</span> (cl);
+
+<span class="enscript-reference">err_buckets</span>:
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_buckets != NULL)
+		_FREE(cl-&gt;cl_buckets, M_DEVBUF);
+<span class="enscript-reference">err_ret</span>:
+	<span class="enscript-keyword">if</span> (cl != NULL) {
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_qalg.ptr != NULL) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RIO)
+				rio_destroy(cl-&gt;cl_rio);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RED)
+				red_destroy(cl-&gt;cl_red);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_BLUE)
+				blue_destroy(cl-&gt;cl_blue);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_SFB &amp;&amp; cl-&gt;cl_sfb != NULL)
+				sfb_destroy(cl-&gt;cl_sfb);
+			cl-&gt;cl_qalg.ptr = NULL;
+			cl-&gt;cl_qtype = Q_DROPTAIL;
+			cl-&gt;cl_qstate = QS_RUNNING;
+		}
+		zfree(fairq_cl_zone, cl);
+	}
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fairq_remove_queue</span>(<span class="enscript-type">struct</span> fairq_if *fif, u_int32_t qid)
+{
+	<span class="enscript-type">struct</span> fairq_class *cl;
+
+	IFCQ_LOCK_ASSERT_HELD(fif-&gt;fif_ifq);
+
+	<span class="enscript-keyword">if</span> ((cl = fairq_clh_to_clp(fif, qid)) == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">return</span> (fairq_class_destroy(fif, cl));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">fairq_class_destroy</span>(<span class="enscript-type">struct</span> fairq_if *fif, <span class="enscript-type">struct</span> fairq_class *cl)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = fif-&gt;fif_ifq;
+	<span class="enscript-type">int</span> pri;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_head)
+		fairq_purgeq(fif, cl, 0, NULL, NULL);
+
+	fif-&gt;fif_classes[cl-&gt;cl_pri] = NULL;
+	<span class="enscript-keyword">if</span> (fif-&gt;fif_poll_cache == cl)
+		fif-&gt;fif_poll_cache = NULL;
+	<span class="enscript-keyword">if</span> (fif-&gt;fif_maxpri == cl-&gt;cl_pri) {
+		<span class="enscript-keyword">for</span> (pri = cl-&gt;cl_pri; pri &gt;= 0; pri--)
+			<span class="enscript-keyword">if</span> (fif-&gt;fif_classes[pri] != NULL) {
+				fif-&gt;fif_maxpri = pri;
+				<span class="enscript-keyword">break</span>;
+			}
+		<span class="enscript-keyword">if</span> (pri &lt; 0)
+			fif-&gt;fif_maxpri = -1;
+	}
+
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qalg.ptr != NULL) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RIO)
+			rio_destroy(cl-&gt;cl_rio);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RED)
+			red_destroy(cl-&gt;cl_red);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_BLUE)
+			blue_destroy(cl-&gt;cl_blue);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_SFB &amp;&amp; cl-&gt;cl_sfb != NULL)
+			sfb_destroy(cl-&gt;cl_sfb);
+		cl-&gt;cl_qalg.ptr = NULL;
+		cl-&gt;cl_qtype = Q_DROPTAIL;
+		cl-&gt;cl_qstate = QS_RUNNING;
+	}
+
+	<span class="enscript-keyword">if</span> (fif-&gt;fif_default == cl)
+		fif-&gt;fif_default = NULL;
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s destroyed qid=%d pri=%d\n&quot;</span>,
+		    if_name(FAIRQIF_IFP(fif)), fairq_style(fif),
+		    cl-&gt;cl_handle, cl-&gt;cl_pri);
+	}
+
+	_FREE(cl-&gt;cl_buckets, M_DEVBUF);
+	cl-&gt;cl_head = NULL;	<span class="enscript-comment">/* sanity */</span>
+	cl-&gt;cl_polled = NULL;	<span class="enscript-comment">/* sanity */</span>
+	cl-&gt;cl_buckets = NULL;	<span class="enscript-comment">/* sanity */</span>
+
+	zfree(fairq_cl_zone, cl);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fairq_enqueue</span>(<span class="enscript-type">struct</span> fairq_if *fif, <span class="enscript-type">struct</span> fairq_class *cl, <span class="enscript-type">struct</span> mbuf *m,
+    <span class="enscript-type">struct</span> pf_mtag *t)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = fif-&gt;fif_ifq;
+	<span class="enscript-type">int</span> len, ret;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(cl == NULL || cl-&gt;cl_fif == fif);
+
+	<span class="enscript-keyword">if</span> (cl == NULL) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PF_ALTQ</span>
+		cl = fairq_clh_to_clp(fif, t-&gt;pftag_qid);
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !PF_ALTQ */</span>
+		cl = fairq_clh_to_clp(fif, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !PF_ALTQ */</span>
+		<span class="enscript-keyword">if</span> (cl == NULL) {
+			cl = fif-&gt;fif_default;
+			<span class="enscript-keyword">if</span> (cl == NULL) {
+				IFCQ_CONVERT_LOCK(ifq);
+				m_freem(m);
+				<span class="enscript-keyword">return</span> (ENOBUFS);
+			}
+		}
+	}
+
+	cl-&gt;cl_flags |= FARF_HAS_PACKETS;
+	len = m_pktlen(m);
+
+	ret = fairq_addq(cl, m, t);
+	<span class="enscript-keyword">if</span> (ret != 0) {
+		<span class="enscript-keyword">if</span> (ret == CLASSQEQ_SUCCESS_FC) {
+			<span class="enscript-comment">/* packet enqueued, return advisory feedback */</span>
+			ret = EQFULL;
+		} <span class="enscript-keyword">else</span> {
+			VERIFY(ret == CLASSQEQ_DROPPED ||
+			    ret == CLASSQEQ_DROPPED_FC ||
+			    ret == CLASSQEQ_DROPPED_SP);
+
+			<span class="enscript-comment">/* packet has been freed in fairq_addq */</span>
+			PKTCNTR_ADD(&amp;cl-&gt;cl_dropcnt, 1, len);
+			IFCQ_DROP_ADD(ifq, 1, len);
+			<span class="enscript-keyword">switch</span> (ret) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQEQ_DROPPED</span>:
+				<span class="enscript-keyword">return</span> (ENOBUFS);
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQEQ_DROPPED_FC</span>:
+				<span class="enscript-keyword">return</span> (EQFULL);
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQEQ_DROPPED_SP</span>:
+				<span class="enscript-keyword">return</span> (EQSUSPENDED);
+			}
+			<span class="enscript-comment">/* NOT REACHED */</span>
+		}
+	}
+	IFCQ_INC_LEN(ifq);
+	IFCQ_INC_BYTES(ifq, len);
+
+	<span class="enscript-comment">/* successfully queued. */</span>
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-comment">/*
+ * note: CLASSQDQ_POLL returns the next packet without removing the packet
+ *	from the queue.  CLASSQDQ_REMOVE is a normal dequeue operation.
+ *	CLASSQDQ_REMOVE must return the same packet if called immediately
+ *	after CLASSQDQ_POLL.
+ */</span>
+<span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">fairq_dequeue</span>(<span class="enscript-type">struct</span> fairq_if *fif, cqdq_op_t op)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = fif-&gt;fif_ifq;
+	<span class="enscript-type">struct</span> fairq_class *cl;
+	<span class="enscript-type">struct</span> fairq_class *best_cl;
+	<span class="enscript-type">struct</span> mbuf *best_m;
+	<span class="enscript-type">struct</span> mbuf *m;
+	u_int64_t cur_time = read_machclk();
+	u_int32_t best_scale;
+	u_int32_t scale;
+	<span class="enscript-type">int</span> pri;
+	<span class="enscript-type">int</span> hit_limit;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	<span class="enscript-keyword">if</span> (IFCQ_IS_EMPTY(ifq)) {
+		<span class="enscript-comment">/* no packet in the queue */</span>
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	<span class="enscript-keyword">if</span> (fif-&gt;fif_poll_cache &amp;&amp; op == CLASSQDQ_REMOVE) {
+		best_cl = fif-&gt;fif_poll_cache;
+		m = fairq_getq(best_cl, cur_time);
+		fif-&gt;fif_poll_cache = NULL;
+		<span class="enscript-keyword">if</span> (m != NULL) {
+			IFCQ_DEC_LEN(ifq);
+			IFCQ_DEC_BYTES(ifq, m_pktlen(m));
+			IFCQ_XMIT_ADD(ifq, 1, m_pktlen(m));
+			PKTCNTR_ADD(&amp;best_cl-&gt;cl_xmitcnt, 1, m_pktlen(m));
+		}
+	} <span class="enscript-keyword">else</span> {
+		best_cl = NULL;
+		best_m = NULL;
+		best_scale = 0xFFFFFFFFU;
+
+		<span class="enscript-keyword">for</span> (pri = fif-&gt;fif_maxpri;  pri &gt;= 0; pri--) {
+			<span class="enscript-keyword">if</span> ((cl = fif-&gt;fif_classes[pri]) == NULL)
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-keyword">if</span> ((cl-&gt;cl_flags &amp; FARF_HAS_PACKETS) == 0)
+				<span class="enscript-keyword">continue</span>;
+			m = fairq_pollq(cl, cur_time, &amp;hit_limit);
+			<span class="enscript-keyword">if</span> (m == NULL) {
+				cl-&gt;cl_flags &amp;= ~FARF_HAS_PACKETS;
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			<span class="enscript-comment">/*
+			 * We can halt the search immediately if the queue
+			 * did not hit its bandwidth limit.
+			 */</span>
+			<span class="enscript-keyword">if</span> (hit_limit == 0) {
+				best_cl = cl;
+				best_m = m;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			<span class="enscript-comment">/*
+			 * Otherwise calculate the scale factor and select
+			 * the queue with the lowest scale factor.  This
+			 * apportions any unused bandwidth weighted by
+			 * the relative bandwidth specification.
+			 */</span>
+			scale = cl-&gt;cl_bw_current * 100 / cl-&gt;cl_bandwidth;
+			<span class="enscript-keyword">if</span> (scale &lt; best_scale) {
+				best_cl = cl;
+				best_m = m;
+				best_scale = scale;
+			}
+		}
+
+		<span class="enscript-keyword">if</span> (op == CLASSQDQ_POLL) {
+			fif-&gt;fif_poll_cache = best_cl;
+			m = best_m;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (best_cl != NULL) {
+			m = fairq_getq(best_cl, cur_time);
+			<span class="enscript-keyword">if</span> (m != NULL) {
+				IFCQ_DEC_LEN(ifq);
+				IFCQ_DEC_BYTES(ifq, m_pktlen(m));
+				IFCQ_XMIT_ADD(ifq, 1, m_pktlen(m));
+				PKTCNTR_ADD(&amp;best_cl-&gt;cl_xmitcnt, 1,
+				    m_pktlen(m));
+			}
+		} <span class="enscript-keyword">else</span> {
+			m = NULL;
+		}
+	}
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">fairq_addq</span>(<span class="enscript-type">struct</span> fairq_class *cl, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> pf_mtag *t)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = cl-&gt;cl_fif-&gt;fif_ifq;
+	fairq_bucket_t *b;
+	u_int32_t hash = m-&gt;m_pkthdr.pkt_flowid;
+	u_int32_t hindex;
+	u_int64_t bw;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	<span class="enscript-comment">/*
+	 * If the packet doesn't have any keep state put it on the end of
+	 * our queue.  XXX this can result in out of order delivery.
+	 */</span>
+	<span class="enscript-keyword">if</span> (hash == 0) {
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_head)
+			b = cl-&gt;cl_head-&gt;prev;
+		<span class="enscript-keyword">else</span>
+			b = &amp;cl-&gt;cl_buckets[0];
+	} <span class="enscript-keyword">else</span> {
+		hindex = (hash &amp; cl-&gt;cl_nbucket_mask);
+		b = &amp;cl-&gt;cl_buckets[hindex];
+	}
+
+	<span class="enscript-comment">/*
+	 * Add the bucket to the end of the circular list of active buckets.
+	 *
+	 * As a special case we add the bucket to the beginning of the list
+	 * instead of the end if it was not previously on the list and if
+	 * its traffic is less then the hog level.
+	 */</span>
+	<span class="enscript-keyword">if</span> (b-&gt;in_use == 0) {
+		b-&gt;in_use = 1;
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_head == NULL) {
+			cl-&gt;cl_head = b;
+			b-&gt;next = b;
+			b-&gt;prev = b;
+		} <span class="enscript-keyword">else</span> {
+			b-&gt;next = cl-&gt;cl_head;
+			b-&gt;prev = cl-&gt;cl_head-&gt;prev;
+			b-&gt;prev-&gt;next = b;
+			b-&gt;next-&gt;prev = b;
+
+			<span class="enscript-keyword">if</span> (b-&gt;bw_delta &amp;&amp; cl-&gt;cl_hogs_m1) {
+				bw = b-&gt;bw_bytes * machclk_freq / b-&gt;bw_delta;
+				<span class="enscript-keyword">if</span> (bw &lt; cl-&gt;cl_hogs_m1)
+					cl-&gt;cl_head = b;
+			}
+		}
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RIO)
+		<span class="enscript-keyword">return</span> (rio_addq(cl-&gt;cl_rio, &amp;b-&gt;queue, m, t));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RED)
+		<span class="enscript-keyword">return</span> (red_addq(cl-&gt;cl_red, &amp;b-&gt;queue, m, t));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_BLUE)
+		<span class="enscript-keyword">return</span> (blue_addq(cl-&gt;cl_blue, &amp;b-&gt;queue, m, t));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_SFB) {
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_sfb == NULL) {
+			<span class="enscript-type">struct</span> ifnet *ifp = FAIRQIF_IFP(cl-&gt;cl_fif);
+
+			VERIFY(cl-&gt;cl_flags &amp; FARF_LAZY);
+			IFCQ_CONVERT_LOCK(ifq);
+
+			cl-&gt;cl_sfb = sfb_alloc(ifp, cl-&gt;cl_handle,
+			    cl-&gt;cl_qlimit, cl-&gt;cl_qflags);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_sfb == NULL) {
+				<span class="enscript-comment">/* fall back to droptail */</span>
+				cl-&gt;cl_qtype = Q_DROPTAIL;
+				cl-&gt;cl_flags &amp;= ~FARF_SFB;
+				cl-&gt;cl_qflags &amp;= ~(SFBF_ECN | SFBF_FLOWCTL);
+
+				log(LOG_ERR, <span class="enscript-string">&quot;%s: %s SFB lazy allocation &quot;</span>
+				    <span class="enscript-string">&quot;failed for qid=%d pri=%d, falling back &quot;</span>
+				    <span class="enscript-string">&quot;to DROPTAIL\n&quot;</span>, if_name(ifp),
+				    fairq_style(cl-&gt;cl_fif), cl-&gt;cl_handle,
+				    cl-&gt;cl_pri);
+			}
+		}
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_sfb != NULL)
+			<span class="enscript-keyword">return</span> (sfb_addq(cl-&gt;cl_sfb, &amp;b-&gt;queue, m, t));
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (qlen(&amp;b-&gt;queue) &gt;= qlimit(&amp;b-&gt;queue)) {
+		IFCQ_CONVERT_LOCK(ifq);
+		m_freem(m);
+		<span class="enscript-keyword">return</span> (CLASSQEQ_DROPPED);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PF_ECN</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_flags &amp; FARF_CLEARDSCP)
+		write_dsfield(m, t, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PF_ECN */</span>
+
+	_addq(&amp;b-&gt;queue, m);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">fairq_getq</span>(<span class="enscript-type">struct</span> fairq_class *cl, u_int64_t cur_time)
+{
+	fairq_bucket_t *b;
+	<span class="enscript-type">struct</span> mbuf *m;
+
+	IFCQ_LOCK_ASSERT_HELD(cl-&gt;cl_fif-&gt;fif_ifq);
+
+	b = fairq_selectq(cl, 0);
+	<span class="enscript-keyword">if</span> (b == NULL)
+		m = NULL;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RIO)
+		m = rio_getq(cl-&gt;cl_rio, &amp;b-&gt;queue);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RED)
+		m = red_getq(cl-&gt;cl_red, &amp;b-&gt;queue);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_BLUE)
+		m = blue_getq(cl-&gt;cl_blue, &amp;b-&gt;queue);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_SFB &amp;&amp; cl-&gt;cl_sfb != NULL)
+		m = sfb_getq(cl-&gt;cl_sfb, &amp;b-&gt;queue);
+	<span class="enscript-keyword">else</span>
+		m = _getq(&amp;b-&gt;queue);
+
+	<span class="enscript-comment">/*
+	 * Calculate the BW change
+	 */</span>
+	<span class="enscript-keyword">if</span> (m != NULL) {
+		u_int64_t delta;
+
+		<span class="enscript-comment">/*
+		 * Per-class bandwidth calculation
+		 */</span>
+		delta = (cur_time - cl-&gt;cl_last_time);
+		<span class="enscript-keyword">if</span> (delta &gt; machclk_freq * 8)
+			delta = machclk_freq * 8;
+		cl-&gt;cl_bw_delta += delta;
+		cl-&gt;cl_bw_bytes += m-&gt;m_pkthdr.len;
+		cl-&gt;cl_last_time = cur_time;
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_bw_delta &gt; machclk_freq) {
+			cl-&gt;cl_bw_delta -= cl-&gt;cl_bw_delta &gt;&gt; 2;
+			cl-&gt;cl_bw_bytes -= cl-&gt;cl_bw_bytes &gt;&gt; 2;
+		}
+
+		<span class="enscript-comment">/*
+		 * Per-bucket bandwidth calculation
+		 */</span>
+		delta = (cur_time - b-&gt;last_time);
+		<span class="enscript-keyword">if</span> (delta &gt; machclk_freq * 8)
+			delta = machclk_freq * 8;
+		b-&gt;bw_delta += delta;
+		b-&gt;bw_bytes += m-&gt;m_pkthdr.len;
+		b-&gt;last_time = cur_time;
+		<span class="enscript-keyword">if</span> (b-&gt;bw_delta &gt; machclk_freq) {
+			b-&gt;bw_delta -= b-&gt;bw_delta &gt;&gt; 2;
+			b-&gt;bw_bytes -= b-&gt;bw_bytes &gt;&gt; 2;
+		}
+	}
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-comment">/*
+ * Figure out what the next packet would be if there were no limits.  If
+ * this class hits its bandwidth limit *hit_limit is set to no-zero, otherwise
+ * it is set to 0.  A non-NULL mbuf is returned either way.
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">fairq_pollq</span>(<span class="enscript-type">struct</span> fairq_class *cl, u_int64_t cur_time, <span class="enscript-type">int</span> *hit_limit)
+{
+	fairq_bucket_t *b;
+	<span class="enscript-type">struct</span> mbuf *m;
+	u_int64_t delta;
+	u_int64_t bw;
+
+	IFCQ_LOCK_ASSERT_HELD(cl-&gt;cl_fif-&gt;fif_ifq);
+
+	*hit_limit = 0;
+	b = fairq_selectq(cl, 1);
+	<span class="enscript-keyword">if</span> (b == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+	m = qhead(&amp;b-&gt;queue);
+
+	<span class="enscript-comment">/*
+	 * Did this packet exceed the class bandwidth?  Calculate the
+	 * bandwidth component of the packet.
+	 *
+	 * - Calculate bytes per second
+	 */</span>
+	delta = cur_time - cl-&gt;cl_last_time;
+	<span class="enscript-keyword">if</span> (delta &gt; machclk_freq * 8)
+		delta = machclk_freq * 8;
+	cl-&gt;cl_bw_delta += delta;
+	cl-&gt;cl_last_time = cur_time;
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_bw_delta) {
+		bw = cl-&gt;cl_bw_bytes * machclk_freq / cl-&gt;cl_bw_delta;
+
+		<span class="enscript-keyword">if</span> (bw &gt; cl-&gt;cl_bandwidth)
+			*hit_limit = 1;
+		cl-&gt;cl_bw_current = bw;
+#<span class="enscript-reference">if</span> 0
+		printf(<span class="enscript-string">&quot;BW %6lld relative to %6u %d queue 0x%llx\n&quot;</span>,
+		    bw, cl-&gt;cl_bandwidth, *hit_limit,
+		    (uint64_t)VM_KERNEL_ADDRPERM(b));
+#<span class="enscript-reference">endif</span>
+	}
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-comment">/*
+ * Locate the next queue we want to pull a packet out of.  This code
+ * is also responsible for removing empty buckets from the circular list.
+ */</span>
+<span class="enscript-type">static</span> fairq_bucket_t *
+<span class="enscript-function-name">fairq_selectq</span>(<span class="enscript-type">struct</span> fairq_class *cl, <span class="enscript-type">int</span> ispoll)
+{
+	fairq_bucket_t *b;
+	u_int64_t bw;
+
+	IFCQ_LOCK_ASSERT_HELD(cl-&gt;cl_fif-&gt;fif_ifq);
+
+	<span class="enscript-keyword">if</span> (ispoll == 0 &amp;&amp; cl-&gt;cl_polled) {
+		b = cl-&gt;cl_polled;
+		cl-&gt;cl_polled = NULL;
+		<span class="enscript-keyword">return</span> (b);
+	}
+
+	<span class="enscript-keyword">while</span> ((b = cl-&gt;cl_head) != NULL) {
+		<span class="enscript-comment">/*
+		 * Remove empty queues from consideration
+		 */</span>
+		<span class="enscript-keyword">if</span> (qempty(&amp;b-&gt;queue)) {
+			b-&gt;in_use = 0;
+			cl-&gt;cl_head = b-&gt;next;
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_head == b) {
+				cl-&gt;cl_head = NULL;
+			} <span class="enscript-keyword">else</span> {
+				b-&gt;next-&gt;prev = b-&gt;prev;
+				b-&gt;prev-&gt;next = b-&gt;next;
+			}
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Advance the round robin.  Queues with bandwidths less
+		 * then the hog bandwidth are allowed to burst.
+		 */</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_hogs_m1 == 0) {
+			cl-&gt;cl_head = b-&gt;next;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (b-&gt;bw_delta) {
+			bw = b-&gt;bw_bytes * machclk_freq / b-&gt;bw_delta;
+			<span class="enscript-keyword">if</span> (bw &gt;= cl-&gt;cl_hogs_m1) {
+				cl-&gt;cl_head = b-&gt;next;
+			}
+			<span class="enscript-comment">/*
+			 * XXX TODO -
+			 */</span>
+		}
+
+		<span class="enscript-comment">/*
+		 * Return bucket b.
+		 */</span>
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">if</span> (ispoll)
+		cl-&gt;cl_polled = b;
+	<span class="enscript-keyword">return</span> (b);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fairq_purgeq</span>(<span class="enscript-type">struct</span> fairq_if *fif, <span class="enscript-type">struct</span> fairq_class *cl, u_int32_t flow,
+    u_int32_t *packets, u_int32_t *bytes)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = fif-&gt;fif_ifq;
+	u_int32_t _cnt = 0, _len = 0;
+	fairq_bucket_t *b;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	<span class="enscript-comment">/* become regular mutex before freeing mbufs */</span>
+	IFCQ_CONVERT_LOCK(ifq);
+
+	<span class="enscript-keyword">while</span> ((b = fairq_selectq(cl, 0)) != NULL) {
+		u_int32_t cnt, len, qlen;
+
+		<span class="enscript-keyword">if</span> ((qlen = qlen(&amp;b-&gt;queue)) == 0)
+			<span class="enscript-keyword">continue</span>;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RIO)
+			rio_purgeq(cl-&gt;cl_rio, &amp;b-&gt;queue, flow, &amp;cnt, &amp;len);
+		<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RED)
+			red_purgeq(cl-&gt;cl_red, &amp;b-&gt;queue, flow, &amp;cnt, &amp;len);
+		<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_BLUE)
+			blue_purgeq(cl-&gt;cl_blue, &amp;b-&gt;queue, flow, &amp;cnt, &amp;len);
+		<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_SFB &amp;&amp; cl-&gt;cl_sfb != NULL)
+			sfb_purgeq(cl-&gt;cl_sfb, &amp;b-&gt;queue, flow, &amp;cnt, &amp;len);
+		<span class="enscript-keyword">else</span>
+			_flushq_flow(&amp;b-&gt;queue, flow, &amp;cnt, &amp;len);
+
+		<span class="enscript-keyword">if</span> (cnt == 0)
+			<span class="enscript-keyword">continue</span>;
+
+		VERIFY(qlen(&amp;b-&gt;queue) == (qlen - cnt));
+
+		PKTCNTR_ADD(&amp;cl-&gt;cl_dropcnt, cnt, len);
+		IFCQ_DROP_ADD(ifq, cnt, len);
+
+		VERIFY(((<span class="enscript-type">signed</span>)IFCQ_LEN(ifq) - cnt) &gt;= 0);
+		IFCQ_LEN(ifq) -= cnt;
+
+		_cnt += cnt;
+		_len += len;
+
+		<span class="enscript-keyword">if</span> (pktsched_verbose) {
+			log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s purge qid=%d pri=%d &quot;</span>
+			    <span class="enscript-string">&quot;qlen=[%d,%d] cnt=%d len=%d flow=0x%x\n&quot;</span>,
+			    if_name(FAIRQIF_IFP(fif)), fairq_style(fif),
+			    cl-&gt;cl_handle, cl-&gt;cl_pri, qlen, qlen(&amp;b-&gt;queue),
+			    cnt, len, flow);
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (packets != NULL)
+		*packets = _cnt;
+	<span class="enscript-keyword">if</span> (bytes != NULL)
+		*bytes = _len;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fairq_updateq</span>(<span class="enscript-type">struct</span> fairq_if *fif, <span class="enscript-type">struct</span> fairq_class *cl, cqev_t ev)
+{
+	IFCQ_LOCK_ASSERT_HELD(fif-&gt;fif_ifq);
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s update qid=%d pri=%d event=%s\n&quot;</span>,
+		    if_name(FAIRQIF_IFP(fif)), fairq_style(fif),
+		    cl-&gt;cl_handle, cl-&gt;cl_pri, ifclassq_ev2str(ev));
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RIO)
+		<span class="enscript-keyword">return</span> (rio_updateq(cl-&gt;cl_rio, ev));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RED)
+		<span class="enscript-keyword">return</span> (red_updateq(cl-&gt;cl_red, ev));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_BLUE)
+		<span class="enscript-keyword">return</span> (blue_updateq(cl-&gt;cl_blue, ev));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_SFB &amp;&amp; cl-&gt;cl_sfb != NULL)
+		<span class="enscript-keyword">return</span> (sfb_updateq(cl-&gt;cl_sfb, ev));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fairq_get_class_stats</span>(<span class="enscript-type">struct</span> fairq_if *fif, u_int32_t qid,
+    <span class="enscript-type">struct</span> fairq_classstats *sp)
+{
+	<span class="enscript-type">struct</span> fairq_class *cl;
+	fairq_bucket_t *b;
+
+	IFCQ_LOCK_ASSERT_HELD(fif-&gt;fif_ifq);
+
+	<span class="enscript-keyword">if</span> ((cl = fairq_clh_to_clp(fif, qid)) == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	sp-&gt;class_handle = cl-&gt;cl_handle;
+	sp-&gt;priority = cl-&gt;cl_pri;
+	sp-&gt;qlimit = cl-&gt;cl_qlimit;
+	sp-&gt;xmit_cnt = cl-&gt;cl_xmitcnt;
+	sp-&gt;drop_cnt = cl-&gt;cl_dropcnt;
+	sp-&gt;qtype = cl-&gt;cl_qtype;
+	sp-&gt;qstate = cl-&gt;cl_qstate;
+	sp-&gt;qlength = 0;
+
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_head) {
+		b = cl-&gt;cl_head;
+		<span class="enscript-keyword">do</span> {
+			sp-&gt;qlength += qlen(&amp;b-&gt;queue);
+			b = b-&gt;next;
+		} <span class="enscript-keyword">while</span> (b != cl-&gt;cl_head);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RED)
+		red_getstats(cl-&gt;cl_red, &amp;sp-&gt;red[0]);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_RIO)
+		rio_getstats(cl-&gt;cl_rio, &amp;sp-&gt;red[0]);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_BLUE)
+		blue_getstats(cl-&gt;cl_blue, &amp;sp-&gt;blue);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qtype == Q_SFB &amp;&amp; cl-&gt;cl_sfb != NULL)
+		sfb_getstats(cl-&gt;cl_sfb, &amp;sp-&gt;sfb);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* convert a class handle to the corresponding class pointer */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> fairq_class *
+<span class="enscript-function-name">fairq_clh_to_clp</span>(<span class="enscript-type">struct</span> fairq_if *fif, u_int32_t chandle)
+{
+	<span class="enscript-type">struct</span> fairq_class *cl;
+	<span class="enscript-type">int</span> idx;
+
+	IFCQ_LOCK_ASSERT_HELD(fif-&gt;fif_ifq);
+
+	<span class="enscript-keyword">for</span> (idx = fif-&gt;fif_maxpri; idx &gt;= 0; idx--)
+		<span class="enscript-keyword">if</span> ((cl = fif-&gt;fif_classes[idx]) != NULL &amp;&amp;
+		    cl-&gt;cl_handle == chandle)
+			<span class="enscript-keyword">return</span> (cl);
+
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">fairq_style</span>(<span class="enscript-type">struct</span> fairq_if *fif)
+{
+	<span class="enscript-keyword">return</span> ((fif-&gt;fif_flags &amp; FAIRQIFF_ALTQ) ? <span class="enscript-string">&quot;ALTQ_FAIRQ&quot;</span> : <span class="enscript-string">&quot;FAIRQ&quot;</span>);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fairq_setup_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq, u_int32_t flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">ifq</span>, <span class="enscript-variable-name">flags</span>)
+	<span class="enscript-keyword">return</span> (ENXIO);		<span class="enscript-comment">/* not yet */</span>
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fairq_teardown_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq)
+{
+	<span class="enscript-type">struct</span> fairq_if *fif = ifq-&gt;ifcq_disc;
+	<span class="enscript-type">int</span> i;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(fif != NULL &amp;&amp; ifq-&gt;ifcq_type == PKTSCHEDT_FAIRQ);
+
+	(<span class="enscript-type">void</span>) fairq_destroy_locked(fif);
+
+	ifq-&gt;ifcq_disc = NULL;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; IFCQ_SC_MAX; i++) {
+		ifq-&gt;ifcq_disc_slots[i].qid = 0;
+		ifq-&gt;ifcq_disc_slots[i].cl = NULL;
+	}
+
+	<span class="enscript-keyword">return</span> (ifclassq_detach(ifq));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fairq_getqstats_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq, u_int32_t slot,
+    <span class="enscript-type">struct</span> if_ifclassq_stats *ifqs)
+{
+	<span class="enscript-type">struct</span> fairq_if *fif = ifq-&gt;ifcq_disc;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(ifq-&gt;ifcq_type == PKTSCHEDT_FAIRQ);
+
+	<span class="enscript-keyword">if</span> (slot &gt;= IFCQ_SC_MAX)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">return</span> (fairq_get_class_stats(fif, ifq-&gt;ifcq_disc_slots[slot].qid,
+	    &amp;ifqs-&gt;ifqs_fairq_stats));
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PKTSCHED_FAIRQ */</span>
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,219 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pal_routines_asm.s</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pal_routines_asm.s&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+/*
+ <span class="enscript-keyword">*</span> Copyright (c) 2009 Apple Inc. All rights reserved.
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span> @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ <span class="enscript-keyword">*</span> 
+ <span class="enscript-keyword">*</span> This file contains Original Code and/or Modifications of Original Code
+ <span class="enscript-keyword">*</span> as defined in and that are subject to the Apple Public Source License
+ <span class="enscript-keyword">*</span> Version 2.0 (the 'License'). You may not use this file except in
+ <span class="enscript-keyword">*</span> compliance with the License. The rights granted to you under the License
+ <span class="enscript-keyword">*</span> may not be used to create, or enable the creation or redistribution of,
+ <span class="enscript-keyword">*</span> unlawful or unlicensed copies of an Apple operating system, or to
+ <span class="enscript-keyword">*</span> circumvent, violate, or enable the circumvention or violation of, any
+ <span class="enscript-keyword">*</span> terms of an Apple operating system software license agreement.
+ <span class="enscript-keyword">*</span> 
+ <span class="enscript-keyword">*</span> Please obtain a copy of the License at
+ <span class="enscript-keyword">*</span> <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ <span class="enscript-keyword">*</span> 
+ <span class="enscript-keyword">*</span> The Original Code and all software distributed under the License are
+ <span class="enscript-keyword">*</span> distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ <span class="enscript-keyword">*</span> EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ <span class="enscript-keyword">*</span> INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ <span class="enscript-keyword">*</span> FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ <span class="enscript-keyword">*</span> Please see the License for the specific language governing rights and
+ <span class="enscript-keyword">*</span> limitations under the License.
+ <span class="enscript-keyword">*</span> 
+ <span class="enscript-keyword">*</span> @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ <span class="enscript-keyword">*/
+</span> <span class="enscript-keyword">
+</span>#include &lt;i386/asm.h&gt;
+#include &lt;i386/asm64.h&gt;
+       <span class="enscript-keyword">
+</span>#include &lt;assym.s&gt;
+
+/*
+ <span class="enscript-keyword">*</span> Copy <span class="enscript-string">&quot;count&quot;</span> bytes from <span class="enscript-string">&quot;src&quot;</span> to %rsp, using
+ <span class="enscript-keyword">*</span> <span class="enscript-string">&quot;tmpindex&quot;</span> for a scratch counter and %rax
+ <span class="enscript-keyword">*/
+</span>#define COPY_STACK(src, count, tmpindex) \
+	<span class="enscript-keyword">mov</span>	$0, tmpindex	/* initial scratch counter */ <span class="enscript-comment">; \
+1: \
+</span>	<span class="enscript-keyword">mov</span>	0(src,tmpindex,1), %rax	 /* copy one 64-bit word from source... */ <span class="enscript-comment">; \
+	mov	%rax, 0(%rsp,tmpindex,1) /* ... to stack */ ; \
+</span>	<span class="enscript-keyword">add</span>	$8, tmpindex		 /* increment counter */ <span class="enscript-comment">; \
+	cmp	count, tmpindex		 /* exit it stack has been copied */ ; \
+</span>	<span class="enscript-keyword">jne</span> 1b
+	<span class="enscript-keyword">
+</span>/*
+	<span class="enscript-keyword">void
+</span>	<span class="enscript-keyword">pal_efi_call_in_64bit_mode_asm(uint64_t</span> func,
+	                           <span class="enscript-keyword">struct</span> pal_efi_registers *efi_reg,
+	                           <span class="enscript-keyword">void</span> *stack_contents,
+	                           <span class="enscript-keyword">size_t</span> stack_contents_size)
+
+	<span class="enscript-keyword">*</span> Switch from compatibility mode to long mode, and
+	<span class="enscript-keyword">*</span> then execute the function pointer with the specified
+	<span class="enscript-keyword">*</span> register and stack contents (based at %rsp). Afterwards,
+	<span class="enscript-keyword">*</span> collect the return value, restore the original state,
+	<span class="enscript-keyword">*</span> and return.
+*/
+ENTRY(_pal_efi_call_in_64bit_mode_asm)
+	<span class="enscript-keyword">FRAME
+</span>
+	<span class="enscript-keyword">/*</span> save non-volatile registers */
+	<span class="enscript-keyword">push</span>	%rbx
+	<span class="enscript-keyword">push</span>	%r12
+	<span class="enscript-keyword">push</span>	%r13
+	<span class="enscript-keyword">push</span>	%r14
+	<span class="enscript-keyword">push</span>	%r15
+
+	<span class="enscript-keyword">/*</span> save parameters that we will need later */
+	<span class="enscript-keyword">push</span>	%rsi
+	<span class="enscript-keyword">push</span>	%rcx
+
+	<span class="enscript-keyword">sub</span>	$8, %rsp	/* align to 16-byte boundary */
+				<span class="enscript-keyword">/*</span> efi_reg in %rsi */
+				<span class="enscript-keyword">/*</span> stack_contents into %rdx */
+				<span class="enscript-keyword">/*</span> s_c_s into %rcx */
+	<span class="enscript-keyword">sub</span>	%rcx, %rsp	/* make room for stack contents */
+
+	<span class="enscript-keyword">COPY_STACK(%rdx,</span> %rcx, %r8)
+
+	<span class="enscript-keyword">/*</span> load efi_reg into real registers */
+	<span class="enscript-keyword">mov</span>	0(%rsi),  %rcx
+	<span class="enscript-keyword">mov</span>	8(%rsi),  %rdx
+	<span class="enscript-keyword">mov</span>	16(%rsi), %r8
+	<span class="enscript-keyword">mov</span>	24(%rsi), %r9
+	<span class="enscript-keyword">mov</span>	32(%rsi), %rax
+
+					<span class="enscript-keyword">/*</span> func pointer in %rdi */
+	<span class="enscript-keyword">call</span>	*%rdi			/* call EFI runtime */
+
+	<span class="enscript-keyword">mov</span>	-48(%rbp), %rsi		/* load efi_reg into %esi */
+	<span class="enscript-keyword">mov</span>	%rax, 32(%rsi)		/* save RAX back */
+
+	<span class="enscript-keyword">mov</span>	-56(%rbp), %rcx	/* load s_c_s into %rcx */
+	<span class="enscript-keyword">add</span>	%rcx, %rsp	/* discard stack contents */
+	<span class="enscript-keyword">add</span>	$8, %rsp	/* restore stack pointer */
+
+	<span class="enscript-keyword">pop</span>	%rcx
+	<span class="enscript-keyword">pop</span>	%rsi
+	<span class="enscript-keyword">pop</span>	%r15
+	<span class="enscript-keyword">pop</span>	%r14
+	<span class="enscript-keyword">pop</span>	%r13
+	<span class="enscript-keyword">pop</span>	%r12
+	<span class="enscript-keyword">pop</span>	%rbx
+
+	<span class="enscript-keyword">EMARF
+</span>	<span class="enscript-keyword">ret
+</span>
+/*
+	<span class="enscript-keyword">void
+</span>	<span class="enscript-keyword">pal_efi_call_in_32bit_mode_asm(uint32_t</span> func,
+	                           <span class="enscript-keyword">struct</span> pal_efi_registers *efi_reg,
+	                           <span class="enscript-keyword">void</span> *stack_contents,
+	                           <span class="enscript-keyword">size_t</span> stack_contents_size)
+
+*/
+ENTRY(_pal_efi_call_in_32bit_mode_asm)
+	<span class="enscript-keyword">FRAME
+</span>
+	<span class="enscript-keyword">/*</span> save non-volatile registers */
+	<span class="enscript-keyword">push</span>	%rbx
+	<span class="enscript-keyword">push</span>	%r12
+	<span class="enscript-keyword">push</span>	%r13
+	<span class="enscript-keyword">push</span>	%r14
+	<span class="enscript-keyword">push</span>	%r15
+
+	<span class="enscript-keyword">/*</span> save parameters that we will need later */
+	<span class="enscript-keyword">push</span>	%rsi
+	<span class="enscript-keyword">push</span>	%rcx
+
+	<span class="enscript-keyword">push</span>	%rbp	/* save %rbp and align to 16-byte boundary */
+				<span class="enscript-keyword">/*</span> efi_reg in %rsi */
+				<span class="enscript-keyword">/*</span> stack_contents into %rdx */
+				<span class="enscript-keyword">/*</span> s_c_s into %rcx */
+	<span class="enscript-keyword">sub</span>	%rcx, %rsp	/* make room for stack contents */
+
+	<span class="enscript-keyword">COPY_STACK(%rdx,</span> %rcx, %r8)
+
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Here in long-mode, with high kernel addresses,
+	 <span class="enscript-keyword">*</span> but with the kernel double-mapped in the bottom 4GB.
+	 <span class="enscript-keyword">*</span> We now switch to compat mode and call into EFI.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">ENTER_COMPAT_MODE()
+</span>
+	<span class="enscript-keyword">call</span>	*%edi			/* call EFI runtime */
+
+	<span class="enscript-keyword">ENTER_64BIT_MODE()
+</span>
+	<span class="enscript-keyword">mov</span>	-48(%rbp), %rsi		/* load efi_reg into %esi */
+	<span class="enscript-keyword">mov</span>	%rax, 32(%rsi)		/* save RAX back */
+
+	<span class="enscript-keyword">mov</span>	-56(%rbp), %rcx	/* load s_c_s into %rcx */
+	<span class="enscript-keyword">add</span>	%rcx, %rsp	/* discard stack contents */
+	<span class="enscript-keyword">pop</span>	%rbp		/* restore full 64-bit frame pointer */
+				<span class="enscript-keyword">/*</span> which the 32-bit EFI will have truncated */
+				<span class="enscript-keyword">/*</span> our full %rsp will be restored by EMARF */
+	<span class="enscript-keyword">pop</span>	%rcx
+	<span class="enscript-keyword">pop</span>	%rsi
+	<span class="enscript-keyword">pop</span>	%r15
+	<span class="enscript-keyword">pop</span>	%r14
+	<span class="enscript-keyword">pop</span>	%r13
+	<span class="enscript-keyword">pop</span>	%r12
+	<span class="enscript-keyword">pop</span>	%rbx
+
+	<span class="enscript-keyword">EMARF
+</span>	<span class="enscript-keyword">ret
+</span>
+
+
+/*
+ <span class="enscript-keyword">*</span> void _pal_rtc_nanotime_store(
+ <span class="enscript-keyword">*</span>		uint64_t        tsc,		// %rdi
+ <span class="enscript-keyword">*</span>		uint64_t        nsec,		// %rsi
+ <span class="enscript-keyword">*</span>		uint32_t        scale,		// %rdx
+ <span class="enscript-keyword">*</span>		uint32_t        shift,		// %rcx
+ <span class="enscript-keyword">*</span>		rtc_nanotime_t  *dst)<span class="enscript-comment">;		// %r8
+ */
+</span>ENTRY(_pal_rtc_nanotime_store)
+	<span class="enscript-keyword">movl</span>	RNT_GENERATION(%r8),%eax	/* get current generation */
+	<span class="enscript-keyword">movl</span>	$0,RNT_GENERATION(%r8)		/* flag data as being updated */
+	<span class="enscript-keyword">movq</span>	%rdi,RNT_TSC_BASE(%r8)
+	<span class="enscript-keyword">movq</span>	%rsi,RNT_NS_BASE(%r8)
+	<span class="enscript-keyword">movl</span>	%edx,RNT_SCALE(%r8)
+	<span class="enscript-keyword">movl</span>	%ecx,RNT_SHIFT(%r8)
+
+	<span class="enscript-keyword">incl</span>	%eax				/* next generation */
+	<span class="enscript-keyword">jnz</span>	1f
+	<span class="enscript-keyword">incl</span>	%eax				/* skip 0, which is a flag */
+<span class="enscript-function-name">1:</span>	movl	%eax,RNT_GENERATION(%r8)	/* update generation */
+
+	<span class="enscript-keyword">ret
+</span>
+</pre>
+<hr />
+</body></html>

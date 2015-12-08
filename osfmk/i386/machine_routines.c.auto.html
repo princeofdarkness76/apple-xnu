@@ -1,0 +1,900 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>machine_routines.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">machine_routines.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/io_map_entries.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpuid.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/fpu.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread_call.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;prng/random.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_cpu.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/lapic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/bit_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp_events.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmCPU.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/trap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/tsc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_threads.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/proc_reg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmap_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/timer_queue.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KPC</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kpc.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;architecture/i386/pio.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DBG</span>(x...)	kprintf(<span class="enscript-string">&quot;DBG: &quot;</span> x)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DBG</span>(x...)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> 	wakeup(<span class="enscript-type">void</span> *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> max_cpus_initialized = 0;
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	LockTimeOut;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	TLBTimeOut;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	LockTimeOutTSC;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	MutexSpin;
+uint64_t	LastDebuggerEntryAllowance;
+uint64_t	delay_spin_threshold;
+
+<span class="enscript-type">extern</span> uint64_t panic_restart_timeout;
+
+boolean_t virtualized = FALSE;
+
+<span class="enscript-function-name">decl_simple_lock_data</span>(<span class="enscript-type">static</span>,  ml_timer_evaluation_slock);
+uint32_t ml_timer_eager_evaluations;
+uint64_t ml_timer_eager_evaluation_max;
+<span class="enscript-type">static</span> boolean_t ml_timer_evaluation_in_progress = FALSE;
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_CPUS_SET</span>    0x1
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_CPUS_WAIT</span>   0x2
+
+<span class="enscript-comment">/* IO memory map services */</span>
+
+<span class="enscript-comment">/* Map memory map IO space */</span>
+vm_offset_t <span class="enscript-function-name">ml_io_map</span>(
+	vm_offset_t phys_addr, 
+	vm_size_t size)
+{
+	<span class="enscript-keyword">return</span>(io_map(phys_addr,size,VM_WIMG_IO));
+}
+
+<span class="enscript-comment">/* boot memory allocation */</span>
+vm_offset_t <span class="enscript-function-name">ml_static_malloc</span>(
+			     __unused vm_size_t size)
+{
+	<span class="enscript-keyword">return</span>((vm_offset_t)NULL);
+}
+
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">ml_get_bouncepool_info</span>(vm_offset_t *phys_addr, vm_size_t *size)
+{
+        *phys_addr = 0;
+	*size      = 0;
+}
+
+
+vm_offset_t
+<span class="enscript-function-name">ml_static_ptovirt</span>(
+	vm_offset_t paddr)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+	<span class="enscript-keyword">return</span> (vm_offset_t)(((<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>) paddr) | VM_MIN_KERNEL_ADDRESS);
+#<span class="enscript-reference">else</span>
+	<span class="enscript-keyword">return</span> (vm_offset_t)((paddr) | LINEAR_KERNEL_ADDRESS);
+#<span class="enscript-reference">endif</span>
+} 
+
+
+<span class="enscript-comment">/*
+ *	Routine:        ml_static_mfree
+ *	Function:
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ml_static_mfree</span>(
+	vm_offset_t vaddr,
+	vm_size_t size)
+{
+	addr64_t vaddr_cur;
+	ppnum_t ppn;
+	uint32_t freed_pages = 0;
+	assert(vaddr &gt;= VM_MIN_KERNEL_ADDRESS);
+
+	assert((vaddr &amp; (PAGE_SIZE-1)) == 0); <span class="enscript-comment">/* must be page aligned */</span>
+
+	<span class="enscript-keyword">for</span> (vaddr_cur = vaddr;
+ 	     vaddr_cur &lt; round_page_64(vaddr+size);
+	     vaddr_cur += PAGE_SIZE) {
+		ppn = pmap_find_phys(kernel_pmap, vaddr_cur);
+		<span class="enscript-keyword">if</span> (ppn != (vm_offset_t)NULL) {
+		        kernel_pmap-&gt;stats.resident_count++;
+			<span class="enscript-keyword">if</span> (kernel_pmap-&gt;stats.resident_count &gt;
+			    kernel_pmap-&gt;stats.resident_max) {
+				kernel_pmap-&gt;stats.resident_max =
+					kernel_pmap-&gt;stats.resident_count;
+			}
+			pmap_remove(kernel_pmap, vaddr_cur, vaddr_cur+PAGE_SIZE);
+			assert(pmap_valid_page(ppn));
+			<span class="enscript-keyword">if</span> (IS_MANAGED_PAGE(ppn)) {
+				vm_page_create(ppn,(ppn+1));
+				freed_pages++;
+			}
+		}
+	}
+	vm_page_lockspin_queues();
+	vm_page_wire_count -= freed_pages;
+	vm_page_wire_count_initial -= freed_pages;
+	vm_page_unlock_queues();
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">DEBUG</span>	
+	kprintf(<span class="enscript-string">&quot;ml_static_mfree: Released 0x%x pages at VA %p, size:0x%llx, last ppn: 0x%x\n&quot;</span>, freed_pages, (<span class="enscript-type">void</span> *)vaddr, (uint64_t)size, ppn);
+#<span class="enscript-reference">endif</span>
+}
+
+
+<span class="enscript-comment">/* virtual to physical on wired pages */</span>
+vm_offset_t <span class="enscript-function-name">ml_vtophys</span>(
+	vm_offset_t vaddr)
+{
+	<span class="enscript-keyword">return</span>	(vm_offset_t)kvtophys(vaddr);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:        ml_nofault_copy
+ *	Function:	Perform a physical mode copy if the source and
+ *			destination have valid translations in the kernel pmap.
+ *			If translations are present, they are assumed to
+ *			be wired; i.e. no attempt is made to guarantee that the
+ *			translations obtained remained valid for
+ *			the duration of the copy process.
+ */</span>
+
+vm_size_t <span class="enscript-function-name">ml_nofault_copy</span>(
+	vm_offset_t virtsrc, vm_offset_t virtdst, vm_size_t size)
+{
+	addr64_t cur_phys_dst, cur_phys_src;
+	uint32_t count, nbytes = 0;
+
+	<span class="enscript-keyword">while</span> (size &gt; 0) {
+		<span class="enscript-keyword">if</span> (!(cur_phys_src = kvtophys(virtsrc)))
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (!(cur_phys_dst = kvtophys(virtdst)))
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (!pmap_valid_page(i386_btop(cur_phys_dst)) || !pmap_valid_page(i386_btop(cur_phys_src)))
+			<span class="enscript-keyword">break</span>;
+		count = (uint32_t)(PAGE_SIZE - (cur_phys_src &amp; PAGE_MASK));
+		<span class="enscript-keyword">if</span> (count &gt; (PAGE_SIZE - (cur_phys_dst &amp; PAGE_MASK)))
+			count = (uint32_t)(PAGE_SIZE - (cur_phys_dst &amp; PAGE_MASK));
+		<span class="enscript-keyword">if</span> (count &gt; size)
+			count = (uint32_t)size;
+
+		bcopy_phys(cur_phys_src, cur_phys_dst, count);
+
+		nbytes += count;
+		virtsrc += count;
+		virtdst += count;
+		size -= count;
+	}
+
+	<span class="enscript-keyword">return</span> nbytes;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:        ml_validate_nofault
+ *	Function: Validate that ths address range has a valid translations
+ *			in the kernel pmap.  If translations are present, they are
+ *			assumed to be wired; i.e. no attempt is made to guarantee
+ *			that the translation persist after the check.
+ *  Returns: TRUE if the range is mapped and will not cause a fault,
+ *			FALSE otherwise.
+ */</span>
+
+boolean_t <span class="enscript-function-name">ml_validate_nofault</span>(
+	vm_offset_t virtsrc, vm_size_t size)
+{
+	addr64_t cur_phys_src;
+	uint32_t count;
+
+	<span class="enscript-keyword">while</span> (size &gt; 0) {
+		<span class="enscript-keyword">if</span> (!(cur_phys_src = kvtophys(virtsrc)))
+			<span class="enscript-keyword">return</span> FALSE;
+		<span class="enscript-keyword">if</span> (!pmap_valid_page(i386_btop(cur_phys_src)))
+			<span class="enscript-keyword">return</span> FALSE;
+		count = (uint32_t)(PAGE_SIZE - (cur_phys_src &amp; PAGE_MASK));
+		<span class="enscript-keyword">if</span> (count &gt; size)
+			count = (uint32_t)size;
+
+		virtsrc += count;
+		size -= count;
+	}
+
+	<span class="enscript-keyword">return</span> TRUE;
+}
+
+<span class="enscript-comment">/* Interrupt handling */</span>
+
+<span class="enscript-comment">/* Initialize Interrupts */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">ml_init_interrupt</span>(<span class="enscript-type">void</span>)
+{
+	(<span class="enscript-type">void</span>) ml_set_interrupts_enabled(TRUE);
+}
+
+
+<span class="enscript-comment">/* Get Interrupts Enabled */</span>
+boolean_t <span class="enscript-function-name">ml_get_interrupts_enabled</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> flags;
+
+  __asm__ <span class="enscript-type">volatile</span>(<span class="enscript-string">&quot;pushf; pop	%0&quot;</span> :  <span class="enscript-string">&quot;=r&quot;</span> (flags));
+  <span class="enscript-keyword">return</span> (flags &amp; EFL_IF) != 0;
+}
+
+<span class="enscript-comment">/* Set Interrupts Enabled */</span>
+boolean_t <span class="enscript-function-name">ml_set_interrupts_enabled</span>(boolean_t enable)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> flags;
+	boolean_t istate;
+	
+	__asm__ <span class="enscript-type">volatile</span>(<span class="enscript-string">&quot;pushf; pop	%0&quot;</span> :  <span class="enscript-string">&quot;=r&quot;</span> (flags));
+
+	assert(get_interrupt_level() ? (enable == FALSE) : TRUE);
+
+	istate = ((flags &amp; EFL_IF) != 0);
+
+	<span class="enscript-keyword">if</span> (enable) {
+		__asm__ <span class="enscript-type">volatile</span>(<span class="enscript-string">&quot;sti;nop&quot;</span>);
+
+		<span class="enscript-keyword">if</span> ((get_preemption_level() == 0) &amp;&amp; (*ast_pending() &amp; AST_URGENT))
+			__asm__ <span class="enscript-type">volatile</span> (<span class="enscript-string">&quot;int %0&quot;</span> :: <span class="enscript-string">&quot;N&quot;</span> (T_PREEMPT));
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (istate)
+			__asm__ <span class="enscript-type">volatile</span>(<span class="enscript-string">&quot;cli&quot;</span>);
+	}
+
+	<span class="enscript-keyword">return</span> istate;
+}
+
+<span class="enscript-comment">/* Check if running at interrupt context */</span>
+boolean_t <span class="enscript-function-name">ml_at_interrupt_context</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> get_interrupt_level() != 0;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">ml_get_power_state</span>(boolean_t *icp, boolean_t *pidlep) {
+	*icp = (get_interrupt_level() != 0);
+	<span class="enscript-comment">/* These will be technically inaccurate for interrupts that occur
+	 * successively within a single &quot;idle exit&quot; event, but shouldn't
+	 * matter statistically.
+	 */</span>
+	*pidlep = (current_cpu_datap()-&gt;lcpu.package-&gt;num_idle == topoParms.nLThreadsPerPackage);
+}
+
+<span class="enscript-comment">/* Generate a fake interrupt */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">ml_cause_interrupt</span>(<span class="enscript-type">void</span>)
+{
+	panic(<span class="enscript-string">&quot;ml_cause_interrupt not defined yet on Intel&quot;</span>);
+}
+
+<span class="enscript-comment">/*
+ * TODO: transition users of this to kernel_thread_start_priority
+ * ml_thread_policy is an unsupported KPI
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">ml_thread_policy</span>(
+	thread_t thread,
+__unused	<span class="enscript-type">unsigned</span> policy_id,
+	<span class="enscript-type">unsigned</span> policy_info)
+{
+	<span class="enscript-keyword">if</span> (policy_info &amp; MACHINE_NETWORK_WORKLOOP) {
+		thread_precedence_policy_data_t info;
+		__assert_only kern_return_t kret;
+
+		info.importance = 1;
+
+		kret = thread_policy_set_internal(thread, THREAD_PRECEDENCE_POLICY,
+		                                                (thread_policy_t)&amp;info,
+		                                                THREAD_PRECEDENCE_POLICY_COUNT);
+		assert(kret == KERN_SUCCESS);
+	}
+}
+
+<span class="enscript-comment">/* Initialize Interrupts */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">ml_install_interrupt_handler</span>(
+	<span class="enscript-type">void</span> *nub,
+	<span class="enscript-type">int</span> source,
+	<span class="enscript-type">void</span> *target,
+	IOInterruptHandler handler,
+	<span class="enscript-type">void</span> *refCon)  
+{
+	boolean_t current_state;
+
+	current_state = ml_get_interrupts_enabled();
+
+	PE_install_interrupt_handler(nub, source, target,
+	                             (IOInterruptHandler) handler, refCon);
+
+	(<span class="enscript-type">void</span>) ml_set_interrupts_enabled(current_state);
+
+	initialize_screen(NULL, kPEAcquireScreen);
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">machine_signal_idle</span>(
+        processor_t processor)
+{
+	cpu_interrupt(processor-&gt;cpu_id);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">machine_signal_idle_deferred</span>(
+	__unused processor_t processor)
+{
+	panic(<span class="enscript-string">&quot;Unimplemented&quot;</span>);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">machine_signal_idle_cancel</span>(
+	__unused processor_t processor)
+{
+	panic(<span class="enscript-string">&quot;Unimplemented&quot;</span>);
+}
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">register_cpu</span>(
+        uint32_t        lapic_id,
+	processor_t     *processor_out,
+	boolean_t       boot_cpu )
+{
+	<span class="enscript-type">int</span>		target_cpu;
+	cpu_data_t	*this_cpu_datap;
+
+	this_cpu_datap = cpu_data_alloc(boot_cpu);
+	<span class="enscript-keyword">if</span> (this_cpu_datap == NULL) {
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+	target_cpu = this_cpu_datap-&gt;cpu_number;
+	assert((boot_cpu &amp;&amp; (target_cpu == 0)) ||
+	      (!boot_cpu &amp;&amp; (target_cpu != 0)));
+
+	lapic_cpu_map(lapic_id, target_cpu);
+
+	<span class="enscript-comment">/* The cpu_id is not known at registration phase. Just do
+	 * lapic_id for now 
+	 */</span>
+	this_cpu_datap-&gt;cpu_phys_number = lapic_id;
+
+	this_cpu_datap-&gt;cpu_console_buf = console_cpu_alloc(boot_cpu);
+	<span class="enscript-keyword">if</span> (this_cpu_datap-&gt;cpu_console_buf == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">failed</span>;
+
+	this_cpu_datap-&gt;cpu_chud = chudxnu_cpu_alloc(boot_cpu);
+	<span class="enscript-keyword">if</span> (this_cpu_datap-&gt;cpu_chud == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">failed</span>;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KPC</span>
+	<span class="enscript-keyword">if</span> (kpc_register_cpu(this_cpu_datap) != TRUE)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">failed</span>;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (!boot_cpu) {
+		cpu_thread_alloc(this_cpu_datap-&gt;cpu_number);
+		<span class="enscript-keyword">if</span> (this_cpu_datap-&gt;lcpu.core == NULL)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">failed</span>;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NCOPY_WINDOWS</span> &gt; 0
+		this_cpu_datap-&gt;cpu_pmap = pmap_cpu_alloc(boot_cpu);
+		<span class="enscript-keyword">if</span> (this_cpu_datap-&gt;cpu_pmap == NULL)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">failed</span>;
+#<span class="enscript-reference">endif</span>
+
+		this_cpu_datap-&gt;cpu_processor = cpu_processor_alloc(boot_cpu);
+		<span class="enscript-keyword">if</span> (this_cpu_datap-&gt;cpu_processor == NULL)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">failed</span>;
+		<span class="enscript-comment">/*
+		 * processor_init() deferred to topology start
+		 * because &quot;slot numbers&quot; a.k.a. logical processor numbers
+	 	 * are not yet finalized.
+		 */</span>
+	}
+
+	*processor_out = this_cpu_datap-&gt;cpu_processor;
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+
+<span class="enscript-reference">failed</span>:
+	cpu_processor_free(this_cpu_datap-&gt;cpu_processor);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NCOPY_WINDOWS</span> &gt; 0
+	pmap_cpu_free(this_cpu_datap-&gt;cpu_pmap);
+#<span class="enscript-reference">endif</span>
+	chudxnu_cpu_free(this_cpu_datap-&gt;cpu_chud);
+	console_cpu_free(this_cpu_datap-&gt;cpu_console_buf);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KPC</span>
+	kpc_counterbuf_free(this_cpu_datap-&gt;cpu_kpc_buf[0]);
+	kpc_counterbuf_free(this_cpu_datap-&gt;cpu_kpc_buf[1]);
+	kpc_counterbuf_free(this_cpu_datap-&gt;cpu_kpc_shadow);
+	kpc_counterbuf_free(this_cpu_datap-&gt;cpu_kpc_reload);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+
+kern_return_t
+<span class="enscript-function-name">ml_processor_register</span>(
+        cpu_id_t        cpu_id,
+        uint32_t        lapic_id,
+        processor_t     *processor_out,
+        boolean_t       boot_cpu,
+	boolean_t       start )
+{
+    <span class="enscript-type">static</span> boolean_t done_topo_sort = FALSE;
+    <span class="enscript-type">static</span> uint32_t num_registered = 0;
+
+    <span class="enscript-comment">/* Register all CPUs first, and track max */</span>
+    <span class="enscript-keyword">if</span>( start == FALSE )
+    {
+	num_registered++;
+
+	DBG( <span class="enscript-string">&quot;registering CPU lapic id %d\n&quot;</span>, lapic_id );
+
+	<span class="enscript-keyword">return</span> register_cpu( lapic_id, processor_out, boot_cpu );
+    }
+
+    <span class="enscript-comment">/* Sort by topology before we start anything */</span>
+    <span class="enscript-keyword">if</span>( !done_topo_sort )
+    {
+	DBG( <span class="enscript-string">&quot;about to start CPUs. %d registered\n&quot;</span>, num_registered );
+
+	cpu_topology_sort( num_registered );
+	done_topo_sort = TRUE;
+    }
+
+    <span class="enscript-comment">/* Assign the cpu ID */</span>
+    uint32_t cpunum = -1;
+    cpu_data_t	*this_cpu_datap = NULL;
+
+    <span class="enscript-comment">/* find cpu num and pointer */</span>
+    cpunum = ml_get_cpuid( lapic_id );
+
+    <span class="enscript-keyword">if</span>( cpunum == 0xFFFFFFFF ) <span class="enscript-comment">/* never heard of it? */</span>
+	panic( <span class="enscript-string">&quot;trying to start invalid/unregistered CPU %d\n&quot;</span>, lapic_id );
+
+    this_cpu_datap = cpu_datap(cpunum);
+
+    <span class="enscript-comment">/* fix the CPU id */</span>
+    this_cpu_datap-&gt;cpu_id = cpu_id;
+
+    <span class="enscript-comment">/* allocate and initialize other per-cpu structures */</span>
+    <span class="enscript-keyword">if</span> (!boot_cpu) {
+	mp_cpus_call_cpu_init(cpunum);
+	prng_cpu_init(cpunum);
+    }
+
+    <span class="enscript-comment">/* output arg */</span>
+    *processor_out = this_cpu_datap-&gt;cpu_processor;
+
+    <span class="enscript-comment">/* OK, try and start this CPU */</span>
+    <span class="enscript-keyword">return</span> cpu_topology_start_cpu( cpunum );
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ml_cpu_get_info</span>(ml_cpu_info_t *cpu_infop)
+{
+	boolean_t	os_supports_sse;
+	i386_cpu_info_t *cpuid_infop;
+
+	<span class="enscript-keyword">if</span> (cpu_infop == NULL)
+		<span class="enscript-keyword">return</span>;
+ 
+	<span class="enscript-comment">/*
+	 * Are we supporting MMX/SSE/SSE2/SSE3?
+	 * As distinct from whether the cpu has these capabilities.
+	 */</span>
+	os_supports_sse = !!(get_cr4() &amp; CR4_OSXMM);
+
+	<span class="enscript-keyword">if</span> (ml_fpu_avx_enabled())
+		cpu_infop-&gt;vector_unit = 9;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((cpuid_features() &amp; CPUID_FEATURE_SSE4_2) &amp;&amp; os_supports_sse)
+		cpu_infop-&gt;vector_unit = 8;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((cpuid_features() &amp; CPUID_FEATURE_SSE4_1) &amp;&amp; os_supports_sse)
+		cpu_infop-&gt;vector_unit = 7;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((cpuid_features() &amp; CPUID_FEATURE_SSSE3) &amp;&amp; os_supports_sse)
+		cpu_infop-&gt;vector_unit = 6;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((cpuid_features() &amp; CPUID_FEATURE_SSE3) &amp;&amp; os_supports_sse)
+		cpu_infop-&gt;vector_unit = 5;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((cpuid_features() &amp; CPUID_FEATURE_SSE2) &amp;&amp; os_supports_sse)
+		cpu_infop-&gt;vector_unit = 4;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((cpuid_features() &amp; CPUID_FEATURE_SSE) &amp;&amp; os_supports_sse)
+		cpu_infop-&gt;vector_unit = 3;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cpuid_features() &amp; CPUID_FEATURE_MMX)
+		cpu_infop-&gt;vector_unit = 2;
+	<span class="enscript-keyword">else</span>
+		cpu_infop-&gt;vector_unit = 0;
+
+	cpuid_infop  = cpuid_info();
+
+	cpu_infop-&gt;cache_line_size = cpuid_infop-&gt;cache_linesize; 
+
+	cpu_infop-&gt;l1_icache_size = cpuid_infop-&gt;cache_size[L1I];
+	cpu_infop-&gt;l1_dcache_size = cpuid_infop-&gt;cache_size[L1D];
+  
+        <span class="enscript-keyword">if</span> (cpuid_infop-&gt;cache_size[L2U] &gt; 0) {
+            cpu_infop-&gt;l2_settings = 1;
+            cpu_infop-&gt;l2_cache_size = cpuid_infop-&gt;cache_size[L2U];
+        } <span class="enscript-keyword">else</span> {
+            cpu_infop-&gt;l2_settings = 0;
+            cpu_infop-&gt;l2_cache_size = 0xFFFFFFFF;
+        }
+
+        <span class="enscript-keyword">if</span> (cpuid_infop-&gt;cache_size[L3U] &gt; 0) {
+            cpu_infop-&gt;l3_settings = 1;
+            cpu_infop-&gt;l3_cache_size = cpuid_infop-&gt;cache_size[L3U];
+        } <span class="enscript-keyword">else</span> {
+            cpu_infop-&gt;l3_settings = 0;
+            cpu_infop-&gt;l3_cache_size = 0xFFFFFFFF;
+        }
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ml_init_max_cpus</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> max_cpus)
+{
+        boolean_t current_state;
+
+        current_state = ml_set_interrupts_enabled(FALSE);
+        <span class="enscript-keyword">if</span> (max_cpus_initialized != MAX_CPUS_SET) {
+                <span class="enscript-keyword">if</span> (max_cpus &gt; 0 &amp;&amp; max_cpus &lt;= MAX_CPUS) {
+			<span class="enscript-comment">/*
+			 * Note: max_cpus is the number of enabled processors
+			 * that ACPI found; max_ncpus is the maximum number
+			 * that the kernel supports or that the &quot;cpus=&quot;
+			 * boot-arg has set. Here we take int minimum.
+			 */</span>
+                        machine_info.max_cpus = (integer_t)MIN(max_cpus, max_ncpus);
+		}
+                <span class="enscript-keyword">if</span> (max_cpus_initialized == MAX_CPUS_WAIT)
+                        wakeup((event_t)&amp;max_cpus_initialized);
+                max_cpus_initialized = MAX_CPUS_SET;
+        }
+        (<span class="enscript-type">void</span>) ml_set_interrupts_enabled(current_state);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ml_get_max_cpus</span>(<span class="enscript-type">void</span>)
+{
+        boolean_t current_state;
+
+        current_state = ml_set_interrupts_enabled(FALSE);
+        <span class="enscript-keyword">if</span> (max_cpus_initialized != MAX_CPUS_SET) {
+                max_cpus_initialized = MAX_CPUS_WAIT;
+                assert_wait((event_t)&amp;max_cpus_initialized, THREAD_UNINT);
+                (<span class="enscript-type">void</span>)thread_block(THREAD_CONTINUE_NULL);
+        }
+        (<span class="enscript-type">void</span>) ml_set_interrupts_enabled(current_state);
+        <span class="enscript-keyword">return</span>(machine_info.max_cpus);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:        ml_init_lock_timeout
+ *	Function:
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ml_init_lock_timeout</span>(<span class="enscript-type">void</span>)
+{
+	uint64_t	abstime;
+	uint32_t	mtxspin;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	uint64_t	default_timeout_ns = NSEC_PER_SEC&gt;&gt;2;
+#<span class="enscript-reference">else</span>
+	uint64_t	default_timeout_ns = NSEC_PER_SEC&gt;&gt;1;
+#<span class="enscript-reference">endif</span>
+	uint32_t	slto;
+	uint32_t	prt;
+
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;slto_us&quot;</span>, &amp;slto, <span class="enscript-keyword">sizeof</span> (slto)))
+		default_timeout_ns = slto * NSEC_PER_USEC;
+
+	<span class="enscript-comment">/* LockTimeOut is absolutetime, LockTimeOutTSC is in TSC ticks */</span>
+	nanoseconds_to_absolutetime(default_timeout_ns, &amp;abstime);
+	LockTimeOut = (uint32_t) abstime;
+	LockTimeOutTSC = (uint32_t) tmrCvt(abstime, tscFCvtn2t);
+
+	<span class="enscript-comment">/*
+	 * TLBTimeOut dictates the TLB flush timeout period. It defaults to
+	 * LockTimeOut but can be overriden separately. In particular, a
+	 * zero value inhibits the timeout-panic and cuts a trace evnt instead
+	 * - see pmap_flush_tlbs().
+	 */</span>
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;tlbto_us&quot;</span>, &amp;slto, <span class="enscript-keyword">sizeof</span> (slto))) {
+		default_timeout_ns = slto * NSEC_PER_USEC;
+		nanoseconds_to_absolutetime(default_timeout_ns, &amp;abstime);
+		TLBTimeOut = (uint32_t) abstime;
+	} <span class="enscript-keyword">else</span> {
+		TLBTimeOut = LockTimeOut;
+	}
+
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;phyreadmaxus&quot;</span>, &amp;slto, <span class="enscript-keyword">sizeof</span> (slto))) {
+		default_timeout_ns = slto * NSEC_PER_USEC;
+		nanoseconds_to_absolutetime(default_timeout_ns, &amp;abstime);
+		reportphyreaddelayabs = abstime;
+	}
+
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;mtxspin&quot;</span>, &amp;mtxspin, <span class="enscript-keyword">sizeof</span> (mtxspin))) {
+		<span class="enscript-keyword">if</span> (mtxspin &gt; USEC_PER_SEC&gt;&gt;4)
+			mtxspin =  USEC_PER_SEC&gt;&gt;4;
+		nanoseconds_to_absolutetime(mtxspin*NSEC_PER_USEC, &amp;abstime);
+	} <span class="enscript-keyword">else</span> {
+		nanoseconds_to_absolutetime(10*NSEC_PER_USEC, &amp;abstime);
+	}
+	MutexSpin = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)abstime;
+
+	nanoseconds_to_absolutetime(4ULL * NSEC_PER_SEC, &amp;LastDebuggerEntryAllowance);
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;panic_restart_timeout&quot;</span>, &amp;prt, <span class="enscript-keyword">sizeof</span> (prt)))
+		nanoseconds_to_absolutetime(prt * NSEC_PER_SEC, &amp;panic_restart_timeout);
+	virtualized = ((cpuid_features() &amp; CPUID_FEATURE_VMM) != 0);
+	interrupt_latency_tracker_setup();
+	simple_lock_init(&amp;ml_timer_evaluation_slock, 0);
+}
+
+<span class="enscript-comment">/*
+ * Threshold above which we should attempt to block
+ * instead of spinning for clock_delay_until().
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ml_init_delay_spin_threshold</span>(<span class="enscript-type">int</span> threshold_us)
+{
+	nanoseconds_to_absolutetime(threshold_us * NSEC_PER_USEC, &amp;delay_spin_threshold);
+}
+
+boolean_t
+<span class="enscript-function-name">ml_delay_should_spin</span>(uint64_t interval)
+{
+	<span class="enscript-keyword">return</span> (interval &lt; delay_spin_threshold) ? TRUE : FALSE;
+}
+
+<span class="enscript-comment">/*
+ * This is called from the machine-independent layer
+ * to perform machine-dependent info updates. Defer to cpu_thread_init().
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ml_cpu_up</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * This is called from the machine-independent layer
+ * to perform machine-dependent info updates.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ml_cpu_down</span>(<span class="enscript-type">void</span>)
+{
+	i386_deactivate_cpu();
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * The following are required for parts of the kernel
+ * that cannot resolve these functions as inlines:
+ */</span>
+<span class="enscript-type">extern</span> thread_t <span class="enscript-function-name">current_act</span>(<span class="enscript-type">void</span>);
+thread_t
+<span class="enscript-function-name">current_act</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span>(current_thread_fast());
+}
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">current_thread</span>
+<span class="enscript-type">extern</span> thread_t <span class="enscript-function-name">current_thread</span>(<span class="enscript-type">void</span>);
+thread_t
+<span class="enscript-function-name">current_thread</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span>(current_thread_fast());
+}
+
+
+boolean_t <span class="enscript-function-name">ml_is64bit</span>(<span class="enscript-type">void</span>) {
+
+        <span class="enscript-keyword">return</span> (cpu_mode_is64bit());
+}
+
+
+boolean_t <span class="enscript-function-name">ml_thread_is64bit</span>(thread_t thread) {
+  
+        <span class="enscript-keyword">return</span> (thread_is_64bit(thread));
+}
+
+
+boolean_t <span class="enscript-function-name">ml_state_is64bit</span>(<span class="enscript-type">void</span> *saved_state) {
+
+	<span class="enscript-keyword">return</span> is_saved_state64(saved_state);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">ml_cpu_set_ldt</span>(<span class="enscript-type">int</span> selector)
+{
+	<span class="enscript-comment">/*
+	 * Avoid loading the LDT
+	 * if we're setting the KERNEL LDT and it's already set.
+	 */</span>
+	<span class="enscript-keyword">if</span> (selector == KERNEL_LDT &amp;&amp;
+	    current_cpu_datap()-&gt;cpu_ldt == KERNEL_LDT)
+		<span class="enscript-keyword">return</span>;
+
+	lldt(selector);
+	current_cpu_datap()-&gt;cpu_ldt = selector;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">ml_fp_setvalid</span>(boolean_t value)
+{
+        fp_setvalid(value);
+}
+
+uint64_t <span class="enscript-function-name">ml_cpu_int_event_time</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> current_cpu_datap()-&gt;cpu_int_event_time;
+}
+
+vm_offset_t <span class="enscript-function-name">ml_stack_remaining</span>(<span class="enscript-type">void</span>)
+{
+	uintptr_t local = (uintptr_t) &amp;local;
+
+	<span class="enscript-keyword">if</span> (ml_at_interrupt_context() != 0) {
+	    <span class="enscript-keyword">return</span> (local - (current_cpu_datap()-&gt;cpu_int_stack_top - INTSTACK_SIZE));
+	} <span class="enscript-keyword">else</span> {
+	    <span class="enscript-keyword">return</span> (local - current_thread()-&gt;kernel_stack);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kernel_preempt_check</span>(<span class="enscript-type">void</span>)
+{
+	boolean_t	intr;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> flags;
+
+	assert(get_preemption_level() == 0);
+
+	__asm__ <span class="enscript-type">volatile</span>(<span class="enscript-string">&quot;pushf; pop	%0&quot;</span> :  <span class="enscript-string">&quot;=r&quot;</span> (flags));
+
+	intr = ((flags &amp; EFL_IF) != 0);
+
+	<span class="enscript-keyword">if</span> ((*ast_pending() &amp; AST_URGENT) &amp;&amp; intr == TRUE) {
+		<span class="enscript-comment">/*
+		 * can handle interrupts and preemptions 
+		 * at this point
+		 */</span>
+
+		<span class="enscript-comment">/*
+		 * now cause the PRE-EMPTION trap
+		 */</span>
+		__asm__ <span class="enscript-type">volatile</span> (<span class="enscript-string">&quot;int %0&quot;</span> :: <span class="enscript-string">&quot;N&quot;</span> (T_PREEMPT));
+	}
+}
+
+boolean_t <span class="enscript-function-name">machine_timeout_suspended</span>(<span class="enscript-type">void</span>) {
+	<span class="enscript-keyword">return</span> (virtualized || pmap_tlb_flush_timeout || spinlock_timed_out || panic_active() || mp_recent_debugger_activity() || ml_recent_wake());
+}
+
+<span class="enscript-comment">/* Eagerly evaluate all pending timer and thread callouts
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">ml_timer_evaluate</span>(<span class="enscript-type">void</span>) {
+	KERNEL_DEBUG_CONSTANT(DECR_TIMER_RESCAN|DBG_FUNC_START, 0, 0, 0, 0, 0);
+
+	uint64_t te_end, te_start = mach_absolute_time();
+	simple_lock(&amp;ml_timer_evaluation_slock);
+	ml_timer_evaluation_in_progress = TRUE;
+	thread_call_delayed_timer_rescan_all();
+	mp_cpus_call(CPUMASK_ALL, ASYNC, timer_queue_expire_rescan, NULL);
+	ml_timer_evaluation_in_progress = FALSE;
+	ml_timer_eager_evaluations++;
+	te_end = mach_absolute_time();
+	ml_timer_eager_evaluation_max = MAX(ml_timer_eager_evaluation_max, (te_end - te_start));
+	simple_unlock(&amp;ml_timer_evaluation_slock);
+
+	KERNEL_DEBUG_CONSTANT(DECR_TIMER_RESCAN|DBG_FUNC_END, 0, 0, 0, 0, 0);
+}
+
+boolean_t
+<span class="enscript-function-name">ml_timer_forced_evaluation</span>(<span class="enscript-type">void</span>) {
+	<span class="enscript-keyword">return</span> ml_timer_evaluation_in_progress;
+}
+
+<span class="enscript-comment">/* 32-bit right-rotate n bits */</span>
+<span class="enscript-type">static</span> inline uint32_t <span class="enscript-function-name">ror32</span>(uint32_t val, <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> n)
+{	
+	__asm__ <span class="enscript-type">volatile</span>(<span class="enscript-string">&quot;rorl %%cl,%0&quot;</span> : <span class="enscript-string">&quot;=r&quot;</span> (val) : <span class="enscript-string">&quot;0&quot;</span> (val), <span class="enscript-string">&quot;c&quot;</span> (n));
+	<span class="enscript-keyword">return</span> val;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ml_entropy_collect</span>(<span class="enscript-type">void</span>)
+{
+	uint32_t	tsc_lo, tsc_hi;
+	uint32_t	*ep;
+
+	assert(cpu_number() == master_cpu);
+
+	<span class="enscript-comment">/* update buffer pointer cyclically */</span>
+	<span class="enscript-keyword">if</span> (EntropyData.index_ptr - EntropyData.buffer == ENTROPY_BUFFER_SIZE)
+		ep = EntropyData.index_ptr = EntropyData.buffer;
+	<span class="enscript-keyword">else</span>
+		ep = EntropyData.index_ptr++;
+
+	rdtsc_nofence(tsc_lo, tsc_hi);
+	*ep = ror32(*ep, 9) ^ tsc_lo;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ml_gpu_stat_update</span>(uint64_t gpu_ns_delta) {
+	current_thread()-&gt;machine.thread_gpu_ns += gpu_ns_delta;
+}
+
+uint64_t
+<span class="enscript-function-name">ml_gpu_stat</span>(thread_t t) {
+	<span class="enscript-keyword">return</span> t-&gt;machine.thread_gpu_ns;
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,131 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>hibernate_restore.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">hibernate_restore.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/proc_reg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOHibernatePrivate.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pal_hibernate.h&gt;</span>
+
+<span class="enscript-type">extern</span> pd_entry_t BootPTD[2048];
+
+<span class="enscript-comment">// src is virtually mapped, not page aligned, 
+</span><span class="enscript-comment">// dst is a physical 4k page aligned ptr, len is one 4K page
+</span><span class="enscript-comment">// src &amp; dst will not overlap
+</span>
+uintptr_t 
+<span class="enscript-function-name">hibernate_restore_phys_page</span>(uint64_t src, uint64_t dst, uint32_t len, uint32_t procFlags)
+{
+	(<span class="enscript-type">void</span>)procFlags;
+	uint64_t * d;
+	uint64_t * s;
+
+	<span class="enscript-keyword">if</span> (src == 0)
+		<span class="enscript-keyword">return</span> (uintptr_t)dst;
+
+	d = (uint64_t *)pal_hib_map(DEST_COPY_AREA, dst);
+	s = (uint64_t *) (uintptr_t)src;
+
+	memcpy(d, s, len);
+
+	<span class="enscript-keyword">return</span> (uintptr_t)d;
+}
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">hibprintf</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">hibprintf</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *fmt, ...);
+
+uintptr_t
+<span class="enscript-function-name">pal_hib_map</span>(uintptr_t virt, uint64_t phys)
+{
+    uintptr_t index;
+
+    <span class="enscript-keyword">switch</span> (virt)
+    {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DEST_COPY_AREA</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SRC_COPY_AREA</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">COPY_PAGE_AREA</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BITMAP_AREA</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IMAGE_AREA</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IMAGE2_AREA</span>:
+	    <span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+	    asm(<span class="enscript-string">&quot;cli;hlt;&quot;</span>);
+	    <span class="enscript-keyword">break</span>;
+    }
+    <span class="enscript-keyword">if</span> (phys &lt; IMAGE2_AREA)
+    {
+    	<span class="enscript-comment">// first 4Gb is all mapped,
+</span>	<span class="enscript-comment">// and do not expect source areas to cross 4Gb
+</span>        <span class="enscript-keyword">return</span> (phys);
+    }
+    index = (virt &gt;&gt; I386_LPGSHIFT);
+    virt += (uintptr_t)(phys &amp; I386_LPGMASK);
+    phys  = ((phys &amp; ~((uint64_t)I386_LPGMASK)) | INTEL_PTE_PS  | INTEL_PTE_VALID | INTEL_PTE_WRITE);
+    <span class="enscript-keyword">if</span> (phys == BootPTD[index]) <span class="enscript-keyword">return</span> (virt);
+    BootPTD[index] = phys;
+    invlpg(virt);
+    BootPTD[index + 1] = (phys + I386_LPGBYTES);
+    invlpg(virt + I386_LPGBYTES);
+
+    <span class="enscript-keyword">return</span> (virt);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">hibernateRestorePALState</span>(uint32_t *arg)
+{
+    (<span class="enscript-type">void</span>)arg;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pal_hib_patchup</span>(<span class="enscript-type">void</span>)
+{
+}
+</pre>
+<hr />
+</body></html>

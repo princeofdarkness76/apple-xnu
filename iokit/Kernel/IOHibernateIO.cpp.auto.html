@@ -1,0 +1,2452 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOHibernateIO.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOHibernateIO.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2004-2008 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+
+<span class="enscript-comment">/*
+
+Sleep:
+
+- PMRootDomain calls IOHibernateSystemSleep() before system sleep
+(devices awake, normal execution context)
+- IOHibernateSystemSleep opens the hibernation file (or partition) at the bsd level, 
+  grabs its extents and searches for a polling driver willing to work with that IOMedia.
+  The BSD code makes an ioctl to the storage driver to get the partition base offset to
+  the disk, and other ioctls to get the transfer constraints 
+  If successful, the file is written to make sure its initially not bootable (in case of
+  later failure) and nvram set to point to the first block of the file. (Has to be done
+  here so blocking is possible in nvram support).
+  hibernate_setup() in osfmk is called to allocate page bitmaps for all dram, and
+  page out any pages it wants to (currently zero, but probably some percentage of memory).
+  Its assumed just allocating pages will cause the VM system to naturally select the best
+  pages for eviction. It also copies processor flags needed for the restore path and sets
+  a flag in the boot processor proc info.
+  gIOHibernateState = kIOHibernateStateHibernating.
+- Regular sleep progresses - some drivers may inspect the root domain property 
+  kIOHibernateStateKey to modify behavior. The platform driver saves state to memory
+  as usual but leaves motherboard I/O on.
+- Eventually the platform calls ml_ppc_sleep() in the shutdown context on the last cpu,
+  at which point memory is ready to be saved. mapping_hibernate_flush() is called to get
+  all ppc RC bits out of the hash table and caches into the mapping structures.
+- hibernate_write_image() is called (still in shutdown context, no blocking or preemption).
+  hibernate_page_list_setall() is called to get a bitmap of dram pages that need to be saved.
+  All pages are assumed to be saved (as part of the wired image) unless explicitly subtracted
+  by hibernate_page_list_setall(), avoiding having to find arch dependent low level bits.
+  The image header and block list are written. The header includes the second file extent so
+  only the header block is needed to read the file, regardless of filesystem.
+  The kernel segment &quot;__HIB&quot; is written uncompressed to the image. This segment of code and data 
+  (only) is used to decompress the image during wake/boot.
+  Some additional pages are removed from the bitmaps - the buffers used for hibernation.
+  The bitmaps are written to the image.
+  More areas are removed from the bitmaps (after they have been written to the image) - the 
+  segment &quot;__HIB&quot; pages and interrupt stack.
+  Each wired page is compressed and written and then each non-wired page. Compression and 
+  disk writes are in parallel.
+  The image header is written to the start of the file and the polling driver closed.
+  The machine powers down (or sleeps).
+  
+Boot/Wake:
+
+- BootX sees the boot-image nvram variable containing the device and block number of the image,
+  reads the header and if the signature is correct proceeds. The boot-image variable is cleared.
+- BootX reads the portion of the image used for wired pages, to memory. Its assumed this will fit
+  in the OF memory environment, and the image is decrypted. There is no decompression in BootX,
+  that is in the kernel's __HIB section.
+- BootX copies the &quot;__HIB&quot; section to its correct position in memory, quiesces and calls its entry
+  hibernate_kernel_entrypoint(), passing the location of the image in memory. Translation is off, 
+  only code &amp; data in that section is safe to call since all the other wired pages are still 
+  compressed in the image.
+- hibernate_kernel_entrypoint() removes pages occupied by the raw image from the page bitmaps.
+  It uses the bitmaps to work out which pages can be uncompressed from the image to their final
+  location directly, and copies those that can't to interim free pages. When the image has been
+  completed, the copies are uncompressed, overwriting the wired image pages.
+  hibernate_restore_phys_page() (in osfmk since its arch dependent, but part of the &quot;__HIB&quot; section)
+  is used to get pages into place for 64bit.
+- the reset vector is called (at least on ppc), the kernel proceeds on a normal wake, with some
+  changes conditional on the per proc flag - before VM is turned on the boot cpu, all mappings
+  are removed from the software strutures, and the hash table is reinitialized. 
+- After the platform CPU init code is called, hibernate_machine_init() is called to restore the rest
+  of memory, using the polled mode driver, before other threads can run or any devices are turned on.
+  This reduces the memory usage for BootX and allows decompression in parallel with disk reads,
+  for the remaining non wired pages. 
+- The polling driver is closed down and regular wake proceeds. When the kernel calls iokit to wake
+  (normal execution context) hibernate_teardown() in osmfk is called to release any memory, the file
+  is closed via bsd.
+
+Polled Mode I/O:
+
+IOHibernateSystemSleep() finds a polled mode interface to the ATA controller via a property in the
+registry, specifying an object of calls IOPolledInterface.
+
+Before the system goes to sleep it searches from the IOMedia object (could be a filesystem or
+partition) that the image is going to live, looking for polled interface properties. If it finds
+one the IOMedia object is passed to a &quot;probe&quot; call for the interface to accept or reject. All the
+interfaces found are kept in an ordered list.
+
+There is an Open/Close pair of calls made to each of the interfaces at various stages since there are 
+few different contexts things happen in:
+
+- there is an Open/Close (Preflight) made before any part of the system has slept (I/O is all
+up and running) and after wake - this is safe to allocate memory and do anything. The device
+ignores sleep requests from that point since its a waste of time if it goes to sleep and
+immediately wakes back up for the image write.
+
+- there is an Open/Close (BeforeSleep) pair made around the image write operations that happen
+immediately before sleep. These can't block or allocate memory - the I/O system is asleep apart
+from the low level bits (motherboard I/O etc). There is only one thread running. The close can be 
+used to flush and set the disk to sleep.
+
+- there is an Open/Close (AfterSleep) pair made around the image read operations that happen
+immediately after sleep. These can't block or allocate memory. This is happening after the platform
+expert has woken the low level bits of the system, but most of the I/O system has not. There is only
+one thread running.
+
+For the actual I/O, all the ops are with respect to a single IOMemoryDescriptor that was passed
+(prepared) to the Preflight Open() call. There is a read/write op, buffer offset to the IOMD for
+the data, an offset to the disk and length (block aligned 64 bit numbers), and completion callback.
+Each I/O is async but only one is ever outstanding. The polled interface has a checkForWork call
+that is called for the hardware to check for events, and complete the I/O via the callback.
+The hibernate path uses the same transfer constraints the regular cluster I/O path in BSD uses
+to restrict I/O ops.
+*/</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOWorkLoop.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOCommandGate.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOTimerEventSource.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOPlatformExpert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKitDebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOTimeStamp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/pwr_mgt/RootDomain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/pwr_mgt/IOPMPrivate.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOMessage.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IODeviceTreeSupport.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOBSD.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;RootDomainUserClient.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/pwr_mgt/IOPowerConnection.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;IOPMPowerStateQueue.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOBufferMemoryDescriptor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/AppleKeyStoreInterface.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/crypto/aes.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>                       // (FWRITE, ...)
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdint.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOHibernatePrivate.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOPolledInterface.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IONVRAM.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;IOHibernateInternal.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/WKdm_new.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;IOKitKernelInternal.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/device_tree.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/pal_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/pal_hibernate.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/tsc.h&gt;</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> addr64_t		kvtophys(vm_offset_t va);
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> ppnum_t		pmap_find_phys(pmap_t pmap, addr64_t va);
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DISABLE_TRIM</span>		0
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TRIM_DELAY</span>		5000
+
+<span class="enscript-type">extern</span> boolean_t		root_is_CF_drive;
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		save_kdebug_enable;
+<span class="enscript-type">extern</span> uint32_t 		gIOHibernateState;
+uint32_t			gIOHibernateMode;
+<span class="enscript-type">static</span> <span class="enscript-type">char</span>			gIOHibernateBootSignature[256+1];
+<span class="enscript-type">static</span> <span class="enscript-type">char</span>			gIOHibernateFilename[MAXPATHLEN+1];
+<span class="enscript-type">static</span> uint32_t			gIOHibernateFreeRatio = 0;	 <span class="enscript-comment">// free page target (percent)
+</span>uint32_t			gIOHibernateFreeTime  = 0*1000;  <span class="enscript-comment">// max time to spend freeing pages (ms)
+</span><span class="enscript-type">static</span> uint64_t			gIOHibernateCompression = 0x80;  <span class="enscript-comment">// default compression 50%
+</span>
+<span class="enscript-type">static</span> IODTNVRAM *		gIOOptionsEntry;
+<span class="enscript-type">static</span> IORegistryEntry *	gIOChosenEntry;
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> OSSymbol * 	gIOHibernateBootImageKey;
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> OSSymbol * 	gIOHibernateRTCVariablesKey;
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> OSSymbol *         gIOHibernateBoot0082Key;
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> OSSymbol *         gIOHibernateBootNextKey;
+<span class="enscript-type">static</span> OSData *	                gIOHibernateBoot0082Data;
+<span class="enscript-type">static</span> OSData *	                gIOHibernateBootNextData;
+<span class="enscript-type">static</span> OSObject *		gIOHibernateBootNextSave;
+
+<span class="enscript-type">static</span> IOPolledFileIOVars *     gDebugImageFileVars;
+<span class="enscript-type">static</span> IOLock             *     gDebugImageLock;
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(__i386__) || defined(__x86_64__) */</span>
+
+<span class="enscript-type">static</span> IOLock *                           gFSLock;
+<span class="enscript-type">static</span> uint32_t                           gFSState;
+<span class="enscript-type">static</span> IOPolledFileIOVars	          gFileVars;
+<span class="enscript-type">static</span> IOHibernateVars			  gIOHibernateVars;
+<span class="enscript-type">static</span> IOPolledFileCryptVars 		  gIOHibernateCryptWakeContext;
+<span class="enscript-type">static</span> hibernate_graphics_t  		  _hibernateGraphics;
+<span class="enscript-type">static</span> hibernate_graphics_t * 		  gIOHibernateGraphicsInfo = &amp;_hibernateGraphics;
+<span class="enscript-type">static</span> hibernate_statistics_t		  _hibernateStats;
+<span class="enscript-type">static</span> hibernate_statistics_t *		  gIOHibernateStats = &amp;_hibernateStats;
+
+<span class="enscript-type">enum</span> 
+{
+    kFSIdle     = 0,
+    kFSOpening  = 2,
+    kFSOpened   = 3,
+    kFSTimedOut = 4,
+};
+
+<span class="enscript-type">static</span> IOReturn <span class="enscript-function-name">IOHibernateDone</span>(IOHibernateVars * vars);
+<span class="enscript-type">static</span> IOReturn <span class="enscript-function-name">IOWriteExtentsToFile</span>(IOPolledFileIOVars * vars, uint32_t signature);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>     <span class="enscript-function-name">IOSetBootImageNVRAM</span>(OSData * data);
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">enum</span> { kDefaultIOSize = 128 * 1024 };
+<span class="enscript-type">enum</span> { kVideoMapSize  = 80 * 1024 * 1024 };
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-comment">// copy from phys addr to MD
+</span>
+<span class="enscript-type">static</span> IOReturn
+<span class="enscript-function-name">IOMemoryDescriptorWriteFromPhysical</span>(IOMemoryDescriptor * md,
+				    IOByteCount offset, addr64_t bytes, IOByteCount length)
+{
+    addr64_t srcAddr = bytes;
+    IOByteCount remaining;
+
+    remaining = length = min(length, md-&gt;getLength() - offset);
+    <span class="enscript-keyword">while</span> (remaining) {	<span class="enscript-comment">// (process another target segment?)
+</span>        addr64_t    dstAddr64;
+        IOByteCount dstLen;
+
+        dstAddr64 = md-&gt;getPhysicalSegment(offset, &amp;dstLen, kIOMemoryMapperNone);
+        <span class="enscript-keyword">if</span> (!dstAddr64)
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-comment">// Clip segment length to remaining
+</span>        <span class="enscript-keyword">if</span> (dstLen &gt; remaining)
+            dstLen = remaining;
+
+#<span class="enscript-reference">if</span> 1
+	bcopy_phys(srcAddr, dstAddr64, dstLen);
+#<span class="enscript-reference">else</span>
+        copypv(srcAddr, dstAddr64, dstLen,
+                            cppvPsnk | cppvFsnk | cppvNoRefSrc | cppvNoModSnk | cppvKmap);
+#<span class="enscript-reference">endif</span>
+        srcAddr   += dstLen;
+        offset    += dstLen;
+        remaining -= dstLen;
+    }
+
+    assert(!remaining);
+
+    <span class="enscript-keyword">return</span> remaining ? kIOReturnUnderrun : kIOReturnSuccess;
+}
+
+<span class="enscript-comment">// copy from MD to phys addr
+</span>
+<span class="enscript-type">static</span> IOReturn
+<span class="enscript-function-name">IOMemoryDescriptorReadToPhysical</span>(IOMemoryDescriptor * md,
+				 IOByteCount offset, addr64_t bytes, IOByteCount length)
+{
+    addr64_t dstAddr = bytes;
+    IOByteCount remaining;
+
+    remaining = length = min(length, md-&gt;getLength() - offset);
+    <span class="enscript-keyword">while</span> (remaining) {	<span class="enscript-comment">// (process another target segment?)
+</span>        addr64_t    srcAddr64;
+        IOByteCount dstLen;
+
+        srcAddr64 = md-&gt;getPhysicalSegment(offset, &amp;dstLen, kIOMemoryMapperNone);
+        <span class="enscript-keyword">if</span> (!srcAddr64)
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-comment">// Clip segment length to remaining
+</span>        <span class="enscript-keyword">if</span> (dstLen &gt; remaining)
+            dstLen = remaining;
+
+#<span class="enscript-reference">if</span> 1
+	bcopy_phys(srcAddr64, dstAddr, dstLen);
+#<span class="enscript-reference">else</span>
+        copypv(srcAddr, dstAddr64, dstLen,
+                            cppvPsnk | cppvFsnk | cppvNoRefSrc | cppvNoModSnk | cppvKmap);
+#<span class="enscript-reference">endif</span>
+        dstAddr    += dstLen;
+        offset     += dstLen;
+        remaining  -= dstLen;
+    }
+
+    assert(!remaining);
+
+    <span class="enscript-keyword">return</span> remaining ? kIOReturnUnderrun : kIOReturnSuccess;
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hibernate_set_page_state</span>(hibernate_page_list_t * page_list, hibernate_page_list_t * page_list_wired,
+				vm_offset_t ppnum, vm_offset_t count, uint32_t kind)
+{
+    count += ppnum;
+    <span class="enscript-keyword">switch</span> (kind)
+    {
+      <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOHibernatePageStateUnwiredSave</span>:
+	<span class="enscript-comment">// unwired save
+</span>	<span class="enscript-keyword">for</span> (; ppnum &lt; count; ppnum++)
+	{
+	    hibernate_page_bitset(page_list,       FALSE, ppnum);
+	    hibernate_page_bitset(page_list_wired, TRUE,  ppnum);
+	}
+	<span class="enscript-keyword">break</span>;
+      <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOHibernatePageStateWiredSave</span>:
+	<span class="enscript-comment">// wired save
+</span>	<span class="enscript-keyword">for</span> (; ppnum &lt; count; ppnum++)
+	{
+	    hibernate_page_bitset(page_list,       FALSE, ppnum);
+	    hibernate_page_bitset(page_list_wired, FALSE, ppnum);
+	}
+	<span class="enscript-keyword">break</span>;
+      <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOHibernatePageStateFree</span>:
+	<span class="enscript-comment">// free page
+</span>	<span class="enscript-keyword">for</span> (; ppnum &lt; count; ppnum++)
+	{
+	    hibernate_page_bitset(page_list,       TRUE, ppnum);
+	    hibernate_page_bitset(page_list_wired, TRUE, ppnum);
+	}
+	<span class="enscript-keyword">break</span>;
+      <span class="enscript-reference">default</span>:
+	panic(<span class="enscript-string">&quot;hibernate_set_page_state&quot;</span>);
+    }
+}
+
+<span class="enscript-type">static</span> vm_offset_t
+<span class="enscript-function-name">hibernate_page_list_iterate</span>(hibernate_page_list_t * list, vm_offset_t * pPage)
+{
+    uint32_t		 page = *pPage;
+    uint32_t		 count;
+    hibernate_bitmap_t * bitmap;
+
+    <span class="enscript-keyword">while</span> ((bitmap = hibernate_page_bitmap_pin(list, &amp;page)))
+    {
+	count = hibernate_page_bitmap_count(bitmap, TRUE, page);
+	<span class="enscript-keyword">if</span> (!count)
+	    <span class="enscript-keyword">break</span>;
+	page += count;
+	<span class="enscript-keyword">if</span> (page &lt;= bitmap-&gt;last_page)
+	    <span class="enscript-keyword">break</span>;
+    }
+
+    *pPage = page;
+    <span class="enscript-keyword">if</span> (bitmap)
+	count = hibernate_page_bitmap_count(bitmap, FALSE, page);
+    <span class="enscript-keyword">else</span>
+	count = 0;
+
+    <span class="enscript-keyword">return</span> (count);
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+IOReturn
+<span class="enscript-function-name">IOHibernateSystemSleep</span>(<span class="enscript-type">void</span>)
+{
+    IOReturn   err;
+    OSData *   nvramData;
+    OSObject * obj;
+    OSString * str;
+    OSNumber * num;
+    <span class="enscript-type">bool</span>       dsSSD, vmflush;
+    IOHibernateVars * vars;
+    uint64_t   setFileSize = 0;
+
+    gIOHibernateState = kIOHibernateStateInactive;
+
+    gIOHibernateDebugFlags = 0;
+    <span class="enscript-keyword">if</span> (kIOLogHibernate &amp; gIOKitDebug)
+	gIOHibernateDebugFlags |= kIOHibernateDebugRestoreLogs;
+
+    <span class="enscript-keyword">if</span> (IOService::getPMRootDomain()-&gt;getHibernateSettings(
+        &amp;gIOHibernateMode, &amp;gIOHibernateFreeRatio, &amp;gIOHibernateFreeTime))
+    {
+        <span class="enscript-keyword">if</span> (kIOHibernateModeSleep &amp; gIOHibernateMode)
+            <span class="enscript-comment">// default to discard clean for safe sleep
+</span>            gIOHibernateMode ^= (kIOHibernateModeDiscardCleanInactive 
+                                | kIOHibernateModeDiscardCleanActive);
+    }
+
+    <span class="enscript-keyword">if</span> ((obj = IOService::getPMRootDomain()-&gt;copyProperty(kIOHibernateFileKey)))
+    {
+	<span class="enscript-keyword">if</span> ((str = OSDynamicCast(OSString, obj)))
+	    strlcpy(gIOHibernateFilename, str-&gt;getCStringNoCopy(),
+			    <span class="enscript-keyword">sizeof</span>(gIOHibernateFilename));
+	obj-&gt;release();
+    }
+
+    <span class="enscript-keyword">if</span> (!gIOHibernateMode || !gIOHibernateFilename[0])
+	<span class="enscript-keyword">return</span> (kIOReturnUnsupported);
+
+    HIBLOG(<span class="enscript-string">&quot;hibernate image path: %s\n&quot;</span>, gIOHibernateFilename);
+
+    vars = IONew(IOHibernateVars, 1);
+    <span class="enscript-keyword">if</span> (!vars) <span class="enscript-keyword">return</span> (kIOReturnNoMemory);
+    bzero(vars, <span class="enscript-keyword">sizeof</span>(*vars));
+
+    IOLockLock(gFSLock);
+    <span class="enscript-keyword">if</span> (kFSIdle != gFSState)
+    {
+	HIBLOG(<span class="enscript-string">&quot;hibernate file busy\n&quot;</span>);
+	IOLockUnlock(gFSLock);
+	IODelete(vars, IOHibernateVars, 1);
+        <span class="enscript-keyword">return</span> (kIOReturnBusy);
+    }
+    gFSState = kFSOpening;
+    IOLockUnlock(gFSLock);
+
+    <span class="enscript-keyword">do</span>
+    {
+        vars-&gt;srcBuffer = IOBufferMemoryDescriptor::withOptions(kIODirectionOutIn,
+				    2 * page_size + WKdm_SCRATCH_BUF_SIZE, page_size);
+
+	vars-&gt;handoffBuffer = IOBufferMemoryDescriptor::withOptions(kIODirectionOutIn, 
+				    ptoa_64(gIOHibernateHandoffPageCount), page_size);
+
+        <span class="enscript-keyword">if</span> (!vars-&gt;srcBuffer || !vars-&gt;handoffBuffer)
+        {
+            err = kIOReturnNoMemory;
+            <span class="enscript-keyword">break</span>;
+        }
+
+	<span class="enscript-keyword">if</span> ((obj = IOService::getPMRootDomain()-&gt;copyProperty(kIOHibernateFileMinSizeKey)))
+	{
+	    <span class="enscript-keyword">if</span> ((num = OSDynamicCast(OSNumber, obj))) vars-&gt;fileMinSize = num-&gt;unsigned64BitValue();
+	    obj-&gt;release();
+	}
+	<span class="enscript-keyword">if</span> ((obj = IOService::getPMRootDomain()-&gt;copyProperty(kIOHibernateFileMaxSizeKey)))
+	{
+	    <span class="enscript-keyword">if</span> ((num = OSDynamicCast(OSNumber, obj))) vars-&gt;fileMaxSize = num-&gt;unsigned64BitValue();
+	    obj-&gt;release();
+	}
+
+        boolean_t encryptedswap = true;
+        uint32_t pageCount;
+        AbsoluteTime startTime, endTime;
+        uint64_t nsec;
+
+	bzero(gIOHibernateCurrentHeader, <span class="enscript-keyword">sizeof</span>(IOHibernateImageHeader));
+	gIOHibernateCurrentHeader-&gt;debugFlags = gIOHibernateDebugFlags;
+	gIOHibernateCurrentHeader-&gt;signature = kIOHibernateHeaderInvalidSignature;
+
+	vmflush = ((kOSBooleanTrue == IOService::getPMRootDomain()-&gt;getProperty(kIOPMDeepSleepEnabledKey)) &amp;&amp; root_is_CF_drive == FALSE);
+        err = hibernate_alloc_page_lists(&amp;vars-&gt;page_list, 
+        				 &amp;vars-&gt;page_list_wired,
+        				 &amp;vars-&gt;page_list_pal);
+        <span class="enscript-keyword">if</span> (KERN_SUCCESS != err)
+            <span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">if</span> (vars-&gt;fileMinSize || (kIOHibernateModeFileResize &amp; gIOHibernateMode))
+	{
+	    hibernate_page_list_setall(vars-&gt;page_list,
+				       vars-&gt;page_list_wired,
+				       vars-&gt;page_list_pal,
+				       true <span class="enscript-comment">/* preflight */</span>,
+				       vmflush <span class="enscript-comment">/* discard */</span>,
+				       &amp;pageCount);
+	    PE_Video consoleInfo;
+	    bzero(&amp;consoleInfo, <span class="enscript-keyword">sizeof</span>(consoleInfo));
+	    <span class="enscript-reference">IOService</span>::getPlatform()-&gt;getConsoleInfo(&amp;consoleInfo);
+
+	    <span class="enscript-comment">// estimate: 6% increase in pages compressed
+</span>	    <span class="enscript-comment">// screen preview 2 images compressed 0%
+</span>	    setFileSize = ((ptoa_64((106 * pageCount) / 100) * gIOHibernateCompression) &gt;&gt; 8)
+				+ vars-&gt;page_list-&gt;list_size
+	 			+ (consoleInfo.v_width * consoleInfo.v_height * 8);
+	    <span class="enscript-type">enum</span> { setFileRound = 1024*1024ULL };
+	    setFileSize = ((setFileSize + setFileRound) &amp; ~(setFileRound - 1));
+	
+	    HIBLOG(<span class="enscript-string">&quot;hibernate_page_list_setall preflight pageCount %d est comp %qd setfile %qd min %qd\n&quot;</span>, 
+		    pageCount, (100ULL * gIOHibernateCompression) &gt;&gt; 8,
+		    setFileSize, vars-&gt;fileMinSize);
+
+	    <span class="enscript-keyword">if</span> (!(kIOHibernateModeFileResize &amp; gIOHibernateMode)
+	     &amp;&amp; (setFileSize &lt; vars-&gt;fileMinSize))
+	    { 
+		setFileSize = vars-&gt;fileMinSize;
+	    }
+	}
+    
+	<span class="enscript-comment">// Invalidate the image file
+</span>    <span class="enscript-keyword">if</span> (gDebugImageLock) {
+        IOLockLock(gDebugImageLock);
+        <span class="enscript-keyword">if</span> (gDebugImageFileVars != 0) {
+            kprintf(<span class="enscript-string">&quot;IOHIBSystemSleep: Closing debugdata file\n&quot;</span>);
+            IOSetBootImageNVRAM(0);
+            IOPolledFileClose(&amp;gDebugImageFileVars, 0, 0, 0, 0, 0);
+        }
+        IOLockUnlock(gDebugImageLock);
+    }
+
+        err = IOPolledFileOpen(gIOHibernateFilename, setFileSize, 0,
+        			gIOHibernateCurrentHeader, <span class="enscript-keyword">sizeof</span>(gIOHibernateCurrentHeader),
+                                &amp;vars-&gt;fileVars, &amp;nvramData, 
+                                &amp;vars-&gt;volumeCryptKey[0], <span class="enscript-keyword">sizeof</span>(vars-&gt;volumeCryptKey));
+
+        <span class="enscript-keyword">if</span> (KERN_SUCCESS != err)
+        {
+	    IOLockLock(gFSLock);
+	    <span class="enscript-keyword">if</span> (kFSOpening != gFSState) err = kIOReturnTimeout;
+	    IOLockUnlock(gFSLock);
+	}
+
+        <span class="enscript-keyword">if</span> (KERN_SUCCESS != err)
+        {
+	    HIBLOG(<span class="enscript-string">&quot;IOPolledFileOpen(%x)\n&quot;</span>, err);
+            <span class="enscript-keyword">break</span>;
+        }
+
+	<span class="enscript-comment">// write extents for debug data usage in EFI
+</span>        IOWriteExtentsToFile(vars-&gt;fileVars, kIOHibernateHeaderOpenSignature);
+
+        err = IOPolledFilePollersSetup(vars-&gt;fileVars, kIOPolledPreflightState);
+        <span class="enscript-keyword">if</span> (KERN_SUCCESS != err) <span class="enscript-keyword">break</span>;
+
+        clock_get_uptime(&amp;startTime);
+        err = hibernate_setup(gIOHibernateCurrentHeader, 
+                                vmflush,
+                                vars-&gt;page_list, vars-&gt;page_list_wired, vars-&gt;page_list_pal);
+        clock_get_uptime(&amp;endTime);
+        SUB_ABSOLUTETIME(&amp;endTime, &amp;startTime);
+        absolutetime_to_nanoseconds(endTime, &amp;nsec);
+        HIBLOG(<span class="enscript-string">&quot;hibernate_setup(%d) took %qd ms\n&quot;</span>, err, nsec / 1000000ULL);
+        <span class="enscript-keyword">if</span> (KERN_SUCCESS != err) <span class="enscript-keyword">break</span>;
+
+        dsSSD = ((0 != (kIOPolledFileSSD &amp; vars-&gt;fileVars-&gt;flags))
+                &amp;&amp; (kOSBooleanTrue == IOService::getPMRootDomain()-&gt;getProperty(kIOPMDeepSleepEnabledKey)));
+
+        <span class="enscript-keyword">if</span> (dsSSD) gIOHibernateCurrentHeader-&gt;options |= kIOHibernateOptionSSD | kIOHibernateOptionColor;
+        <span class="enscript-keyword">else</span>       gIOHibernateCurrentHeader-&gt;options |= kIOHibernateOptionProgress;
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+	<span class="enscript-keyword">if</span> (!uuid_is_null(vars-&gt;volumeCryptKey) &amp;&amp;
+	      (kOSBooleanTrue != IOService::getPMRootDomain()-&gt;getProperty(kIOPMDestroyFVKeyOnStandbyKey)))
+	{
+	    uintptr_t smcVars[2];
+	    smcVars[0] = <span class="enscript-keyword">sizeof</span>(vars-&gt;volumeCryptKey);
+	    smcVars[1] = (uintptr_t)(<span class="enscript-type">void</span> *) &amp;gIOHibernateVars.volumeCryptKey[0];
+
+	    <span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;setProperty(kIOHibernateSMCVariablesKey, smcVars, <span class="enscript-keyword">sizeof</span>(smcVars));
+	    bzero(smcVars, <span class="enscript-keyword">sizeof</span>(smcVars));
+	}
+#<span class="enscript-reference">endif</span>
+
+
+        <span class="enscript-keyword">if</span> (encryptedswap || !uuid_is_null(vars-&gt;volumeCryptKey))
+            gIOHibernateMode ^= kIOHibernateModeEncrypt; 
+
+        <span class="enscript-keyword">if</span> (kIOHibernateOptionProgress &amp; gIOHibernateCurrentHeader-&gt;options)
+        {
+            vars-&gt;videoAllocSize = kVideoMapSize;
+            <span class="enscript-keyword">if</span> (KERN_SUCCESS != kmem_alloc_pageable(kernel_map, &amp;vars-&gt;videoMapping, vars-&gt;videoAllocSize, VM_KERN_MEMORY_IOKIT))
+                vars-&gt;videoMapping = 0;
+        }
+
+	<span class="enscript-comment">// generate crypt keys
+</span>        <span class="enscript-keyword">for</span> (uint32_t i = 0; i &lt; <span class="enscript-keyword">sizeof</span>(vars-&gt;wiredCryptKey); i++)
+            vars-&gt;wiredCryptKey[i] = random();
+        <span class="enscript-keyword">for</span> (uint32_t i = 0; i &lt; <span class="enscript-keyword">sizeof</span>(vars-&gt;cryptKey); i++)
+            vars-&gt;cryptKey[i] = random();
+
+	<span class="enscript-comment">// set nvram
+</span>
+	IOSetBootImageNVRAM(nvramData);
+        nvramData-&gt;release();
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+	{
+	    <span class="enscript-type">struct</span> AppleRTCHibernateVars
+	    {
+		uint8_t     signature[4];
+		uint32_t    revision;
+		uint8_t	    booterSignature[20];
+		uint8_t	    wiredCryptKey[16];
+	    };
+	    AppleRTCHibernateVars rtcVars;
+	    OSData * data;
+
+	    rtcVars.signature[0] = <span class="enscript-string">'A'</span>;
+	    rtcVars.signature[1] = <span class="enscript-string">'A'</span>;
+	    rtcVars.signature[2] = <span class="enscript-string">'P'</span>;
+	    rtcVars.signature[3] = <span class="enscript-string">'L'</span>;
+	    rtcVars.revision     = 1;
+	    bcopy(&amp;vars-&gt;wiredCryptKey[0], &amp;rtcVars.wiredCryptKey[0], <span class="enscript-keyword">sizeof</span>(rtcVars.wiredCryptKey));
+	    <span class="enscript-keyword">if</span> (gIOHibernateBootSignature[0])
+	    {
+		<span class="enscript-type">char</span> c;
+		uint8_t value = 0;
+		<span class="enscript-keyword">for</span> (uint32_t i = 0;
+		    (c = gIOHibernateBootSignature[i]) &amp;&amp; (i &lt; (<span class="enscript-keyword">sizeof</span>(rtcVars.booterSignature) &lt;&lt; 1));
+		    i++)
+		{
+		    <span class="enscript-keyword">if</span> (c &gt;= <span class="enscript-string">'a'</span>)      c -= <span class="enscript-string">'a'</span> - 10;
+		    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (c &gt;= <span class="enscript-string">'A'</span>) c -= <span class="enscript-string">'A'</span> - 10;
+		    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (c &gt;= <span class="enscript-string">'0'</span>) c -= <span class="enscript-string">'0'</span>;
+		    <span class="enscript-keyword">else</span>               <span class="enscript-keyword">continue</span>;
+		    value = (value &lt;&lt; 4) | c;
+		    <span class="enscript-keyword">if</span> (i &amp; 1) rtcVars.booterSignature[i &gt;&gt; 1] = value;
+		}
+	    }
+	    data = OSData::withBytes(&amp;rtcVars, <span class="enscript-keyword">sizeof</span>(rtcVars));
+	    <span class="enscript-keyword">if</span> (data)
+	    { 
+		<span class="enscript-keyword">if</span> (gIOHibernateRTCVariablesKey)
+		    <span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;setProperty(gIOHibernateRTCVariablesKey, data);
+		data-&gt;release();
+	    }
+            <span class="enscript-keyword">if</span> (gIOChosenEntry)
+            {
+                data = OSDynamicCast(OSData, gIOChosenEntry-&gt;getProperty(kIOHibernateMachineSignatureKey));
+                <span class="enscript-keyword">if</span> (data) gIOHibernateCurrentHeader-&gt;machineSignature = *((UInt32 *)data-&gt;getBytesNoCopy());
+		<span class="enscript-comment">// set BootNext
+</span>		<span class="enscript-keyword">if</span> (!gIOHibernateBoot0082Data)
+		{
+		    data = OSDynamicCast(OSData, gIOChosenEntry-&gt;getProperty(<span class="enscript-string">&quot;boot-device-path&quot;</span>));
+		    <span class="enscript-keyword">if</span> (data)
+		    {
+			<span class="enscript-comment">// AppleNVRAM_EFI_LOAD_OPTION
+</span>			<span class="enscript-type">struct</span> {
+			    uint32_t Attributes;
+			    uint16_t FilePathLength;
+			    uint16_t Desc;
+			} loadOptionHeader;
+			loadOptionHeader.Attributes     = 1;
+			loadOptionHeader.FilePathLength = data-&gt;getLength();
+			loadOptionHeader.Desc           = 0;
+			gIOHibernateBoot0082Data = OSData::withCapacity(<span class="enscript-keyword">sizeof</span>(loadOptionHeader) + loadOptionHeader.FilePathLength);
+			<span class="enscript-keyword">if</span> (gIOHibernateBoot0082Data)
+			{
+			    gIOHibernateBoot0082Data-&gt;appendBytes(&amp;loadOptionHeader, <span class="enscript-keyword">sizeof</span>(loadOptionHeader));
+			    gIOHibernateBoot0082Data-&gt;appendBytes(data);
+			}
+		    }
+		}
+		<span class="enscript-keyword">if</span> (!gIOHibernateBootNextData)
+		{
+		    uint16_t bits = 0x0082;
+		    gIOHibernateBootNextData = OSData::withBytes(&amp;bits, <span class="enscript-keyword">sizeof</span>(bits));
+		}
+		<span class="enscript-keyword">if</span> (gIOHibernateBoot0082Key &amp;&amp; gIOHibernateBoot0082Data &amp;&amp; gIOHibernateBootNextKey &amp;&amp; gIOHibernateBootNextData)
+		{
+		    gIOHibernateBootNextSave = gIOOptionsEntry-&gt;copyProperty(gIOHibernateBootNextKey);
+		    gIOOptionsEntry-&gt;setProperty(gIOHibernateBoot0082Key, gIOHibernateBoot0082Data);
+		    gIOOptionsEntry-&gt;setProperty(gIOHibernateBootNextKey, gIOHibernateBootNextData);
+		}
+		<span class="enscript-comment">// BootNext
+</span>            }
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !i386 &amp;&amp; !x86_64 */</span>
+    }
+    <span class="enscript-keyword">while</span> (false);
+
+    IOLockLock(gFSLock);
+    <span class="enscript-keyword">if</span> ((kIOReturnSuccess == err) &amp;&amp; (kFSOpening != gFSState))
+    {
+	HIBLOG(<span class="enscript-string">&quot;hibernate file close due timeout\n&quot;</span>);
+	err = kIOReturnTimeout;
+    }
+    <span class="enscript-keyword">if</span> (kIOReturnSuccess == err)
+    {
+	gFSState = kFSOpened;
+	gIOHibernateVars = *vars;
+	gFileVars = *vars-&gt;fileVars;
+	gFileVars.allocated = false;
+	gIOHibernateVars.fileVars = &amp;gFileVars;
+	gIOHibernateCurrentHeader-&gt;signature = kIOHibernateHeaderSignature;
+	gIOHibernateState = kIOHibernateStateHibernating;
+    }
+    <span class="enscript-keyword">else</span>
+    {
+	IOPolledFileIOVars * fileVars = vars-&gt;fileVars;
+	IOHibernateDone(vars);
+    IOPolledFileClose(&amp;fileVars,
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DISABLE_TRIM</span>
+                      0, NULL, 0, 0, 0);
+#<span class="enscript-reference">else</span>
+                      0, NULL, 0, <span class="enscript-keyword">sizeof</span>(IOHibernateImageHeader), setFileSize);
+#<span class="enscript-reference">endif</span>
+	gFSState = kFSIdle;
+    }
+    IOLockUnlock(gFSLock);
+
+    <span class="enscript-keyword">if</span> (vars-&gt;fileVars) IODelete(vars-&gt;fileVars, IOPolledFileIOVars, 1);
+    IODelete(vars, IOHibernateVars, 1);
+
+    <span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">IOSetBootImageNVRAM</span>(OSData * data)
+{
+    IORegistryEntry * regEntry;
+
+    <span class="enscript-keyword">if</span> (!gIOOptionsEntry)
+    {
+        regEntry = IORegistryEntry::fromPath(<span class="enscript-string">&quot;/options&quot;</span>, gIODTPlane);
+        gIOOptionsEntry = OSDynamicCast(IODTNVRAM, regEntry);
+        <span class="enscript-keyword">if</span> (regEntry &amp;&amp; !gIOOptionsEntry)
+            regEntry-&gt;release();
+    }
+    <span class="enscript-keyword">if</span> (gIOOptionsEntry &amp;&amp; gIOHibernateBootImageKey)
+    {
+    	<span class="enscript-keyword">if</span> (data) gIOOptionsEntry-&gt;setProperty(gIOHibernateBootImageKey, data);
+    	<span class="enscript-keyword">else</span>
+    	{
+	    gIOOptionsEntry-&gt;removeProperty(gIOHibernateBootImageKey);
+	    gIOOptionsEntry-&gt;sync();
+	}
+    }
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+<span class="enscript-comment">/* 
+ * Writes header to disk with signature, block size and file extents data.
+ * If there are more than 2 extents, then they are written on second block.
+ */</span>
+<span class="enscript-type">static</span> IOReturn
+<span class="enscript-function-name">IOWriteExtentsToFile</span>(IOPolledFileIOVars * vars, uint32_t signature)
+{
+    IOHibernateImageHeader hdr;
+    IOItemCount            count;
+    IOReturn               err = kIOReturnSuccess;
+    <span class="enscript-type">int</span>                    rc;
+    IOPolledFileExtent *   fileExtents;
+
+    fileExtents = (typeof(fileExtents)) vars-&gt;fileExtents-&gt;getBytesNoCopy(),
+
+    memset(&amp;hdr, 0, <span class="enscript-keyword">sizeof</span>(IOHibernateImageHeader));
+    count = vars-&gt;fileExtents-&gt;getLength();
+    <span class="enscript-keyword">if</span> (count &gt; <span class="enscript-keyword">sizeof</span>(hdr.fileExtentMap))
+    {
+        hdr.fileExtentMapSize = count;
+        count = <span class="enscript-keyword">sizeof</span>(hdr.fileExtentMap);
+    }
+    <span class="enscript-keyword">else</span>
+        hdr.fileExtentMapSize = <span class="enscript-keyword">sizeof</span>(hdr.fileExtentMap);
+
+    bcopy(fileExtents, &amp;hdr.fileExtentMap[0], count);
+
+    <span class="enscript-comment">// copy file block extent list if larger than header
+</span>    <span class="enscript-keyword">if</span> (hdr.fileExtentMapSize &gt; <span class="enscript-keyword">sizeof</span>(hdr.fileExtentMap))
+    {
+            count = hdr.fileExtentMapSize - <span class="enscript-keyword">sizeof</span>(hdr.fileExtentMap);
+            rc = kern_write_file(vars-&gt;fileRef, vars-&gt;blockSize, 
+                                 (caddr_t)(((uint8_t *)fileExtents) + <span class="enscript-keyword">sizeof</span>(hdr.fileExtentMap)), 
+                                 count, IO_SKIP_ENCRYPTION);
+            <span class="enscript-keyword">if</span> (rc != 0) {
+                HIBLOG(<span class="enscript-string">&quot;kern_write_file returned %d\n&quot;</span>, rc);
+                err = kIOReturnIOError;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+            }    
+    }
+    hdr.signature = signature;
+    hdr.deviceBlockSize = vars-&gt;blockSize;
+
+    rc = kern_write_file(vars-&gt;fileRef, 0, (<span class="enscript-type">char</span> *)&amp;hdr, <span class="enscript-keyword">sizeof</span>(hdr), IO_SKIP_ENCRYPTION);
+    <span class="enscript-keyword">if</span> (rc != 0) {
+        HIBLOG(<span class="enscript-string">&quot;kern_write_file returned %d\n&quot;</span>, rc);
+        err = kIOReturnIOError;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+    }
+
+<span class="enscript-reference">exit</span>:
+    <span class="enscript-keyword">return</span> err;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">IOOpenDebugDataFile</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *fname, uint64_t size)
+{
+    IOReturn   err;
+    OSData *   imagePath = NULL;
+    uint64_t   padding;
+
+    <span class="enscript-keyword">if</span> (!gDebugImageLock) {
+        gDebugImageLock = IOLockAlloc();
+    }
+
+    <span class="enscript-comment">// Try to get a lock, but don't block for getting lock
+</span>    <span class="enscript-keyword">if</span> (!IOLockTryLock(gDebugImageLock)) {
+        HIBLOG(<span class="enscript-string">&quot;IOOpenDebugDataFile: Failed to get lock\n&quot;</span>);
+        <span class="enscript-keyword">return</span>;
+    }
+
+    <span class="enscript-keyword">if</span> (gDebugImageFileVars ||  !fname || !size) {
+        HIBLOG(<span class="enscript-string">&quot;IOOpenDebugDataFile: conditions failed\n&quot;</span>);
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+    }
+
+    padding = (PAGE_SIZE*2);  <span class="enscript-comment">// allocate couple more pages for header and fileextents
+</span>    err = IOPolledFileOpen(fname, size+padding, 32ULL*1024*1024*1024,
+                           NULL, 0,
+                           &amp;gDebugImageFileVars, &amp;imagePath, NULL, 0);
+
+    <span class="enscript-keyword">if</span> ((kIOReturnSuccess == err) &amp;&amp; imagePath)
+    {
+        <span class="enscript-keyword">if</span> ((gDebugImageFileVars-&gt;fileSize &lt; (size+padding)) ||
+            (gDebugImageFileVars-&gt;fileExtents-&gt;getLength() &gt; PAGE_SIZE)) {
+            <span class="enscript-comment">// Can't use the file
+</span>            IOPolledFileClose(&amp;gDebugImageFileVars, 0, 0, 0, 0, 0);
+            HIBLOG(<span class="enscript-string">&quot;IOOpenDebugDataFile: too many file extents\n&quot;</span>);
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+        }
+
+        <span class="enscript-comment">// write extents for debug data usage in EFI
+</span>        IOWriteExtentsToFile(gDebugImageFileVars, kIOHibernateHeaderOpenSignature);
+        IOSetBootImageNVRAM(imagePath);
+        kprintf(<span class="enscript-string">&quot;IOOpenDebugDataFile: opened debugdata file\n&quot;</span>);
+    }
+
+<span class="enscript-reference">exit</span>:
+    IOLockUnlock(gDebugImageLock);
+
+    <span class="enscript-keyword">if</span> (imagePath) imagePath-&gt;release();
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+DECLARE_IOHIBERNATEPROGRESSALPHA
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ProgressInit</span>(hibernate_graphics_t * display, uint8_t * screen, uint8_t * saveunder, uint32_t savelen)
+{
+    uint32_t	rowBytes, pixelShift;
+    uint32_t	x, y;
+    int32_t	blob;
+    uint32_t	alpha, in, color, result;
+    uint8_t *	out;
+    uint32_t	saveindex[kIOHibernateProgressCount] = { 0 };
+
+    rowBytes = display-&gt;rowBytes;
+    pixelShift = display-&gt;depth &gt;&gt; 4;
+    <span class="enscript-keyword">if</span> (pixelShift &lt; 1) <span class="enscript-keyword">return</span>;
+    
+    screen += ((display-&gt;width
+                - kIOHibernateProgressCount * (kIOHibernateProgressWidth + kIOHibernateProgressSpacing)) &lt;&lt; (pixelShift - 1))
+        + (display-&gt;height - kIOHibernateProgressOriginY - kIOHibernateProgressHeight) * rowBytes;
+    
+    <span class="enscript-keyword">for</span> (y = 0; y &lt; kIOHibernateProgressHeight; y++)
+    {
+        out = screen + y * rowBytes;
+        <span class="enscript-keyword">for</span> (blob = 0; blob &lt; kIOHibernateProgressCount; blob++)
+        {
+            color = blob ? kIOHibernateProgressDarkGray : kIOHibernateProgressMidGray;
+            <span class="enscript-keyword">for</span> (x = 0; x &lt; kIOHibernateProgressWidth; x++)
+            {
+                alpha  = gIOHibernateProgressAlpha[y][x];
+                result = color;
+                <span class="enscript-keyword">if</span> (alpha)
+                {
+                    <span class="enscript-keyword">if</span> (0xff != alpha)
+                    {
+                        <span class="enscript-keyword">if</span> (1 == pixelShift)
+                        {
+                            in = *((uint16_t *)out) &amp; 0x1f;	<span class="enscript-comment">// 16
+</span>                            in = (in &lt;&lt; 3) | (in &gt;&gt; 2);
+                        }
+                        <span class="enscript-keyword">else</span>
+                            in = *((uint32_t *)out) &amp; 0xff;	<span class="enscript-comment">// 32
+</span>                        saveunder[blob * kIOHibernateProgressSaveUnderSize + saveindex[blob]++] = in;
+                        result = ((255 - alpha) * in + alpha * result + 0xff) &gt;&gt; 8;
+                    }
+                    <span class="enscript-keyword">if</span> (1 == pixelShift)
+                    {
+                        result &gt;&gt;= 3;
+                        *((uint16_t *)out) = (result &lt;&lt; 10) | (result &lt;&lt; 5) | result;	<span class="enscript-comment">// 16
+</span>                    }
+                    <span class="enscript-keyword">else</span>
+                        *((uint32_t *)out) = (result &lt;&lt; 16) | (result &lt;&lt; 8) | result;	<span class="enscript-comment">// 32
+</span>                }
+                out += (1 &lt;&lt; pixelShift);
+            }
+            out += (kIOHibernateProgressSpacing &lt;&lt; pixelShift);
+        }
+    }
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ProgressUpdate</span>(hibernate_graphics_t * display, uint8_t * screen, int32_t firstBlob, int32_t select)
+{
+    uint32_t  rowBytes, pixelShift;
+    uint32_t  x, y;
+    int32_t   blob, lastBlob;
+    uint32_t  alpha, in, color, result;
+    uint8_t * out;
+    uint32_t  saveindex[kIOHibernateProgressCount] = { 0 };
+
+    pixelShift = display-&gt;depth &gt;&gt; 4;
+    <span class="enscript-keyword">if</span> (pixelShift &lt; 1)
+        <span class="enscript-keyword">return</span>;
+
+    rowBytes = display-&gt;rowBytes;
+
+    screen += ((display-&gt;width 
+            - kIOHibernateProgressCount * (kIOHibernateProgressWidth + kIOHibernateProgressSpacing)) &lt;&lt; (pixelShift - 1))
+                + (display-&gt;height - kIOHibernateProgressOriginY - kIOHibernateProgressHeight) * rowBytes;
+
+    lastBlob  = (select &lt; kIOHibernateProgressCount) ? select : (kIOHibernateProgressCount - 1);
+
+    screen += (firstBlob * (kIOHibernateProgressWidth + kIOHibernateProgressSpacing)) &lt;&lt; pixelShift;
+
+    <span class="enscript-keyword">for</span> (y = 0; y &lt; kIOHibernateProgressHeight; y++)
+    {
+        out = screen + y * rowBytes;
+        <span class="enscript-keyword">for</span> (blob = firstBlob; blob &lt;= lastBlob; blob++)
+        {
+            color = (blob &lt; select) ? kIOHibernateProgressLightGray : kIOHibernateProgressMidGray;
+            <span class="enscript-keyword">for</span> (x = 0; x &lt; kIOHibernateProgressWidth; x++)
+            {
+                alpha  = gIOHibernateProgressAlpha[y][x];
+                result = color;
+                <span class="enscript-keyword">if</span> (alpha)
+                {
+                    <span class="enscript-keyword">if</span> (0xff != alpha)
+                    {
+                        in = display-&gt;progressSaveUnder[blob][saveindex[blob]++];
+                        result = ((255 - alpha) * in + alpha * result + 0xff) / 255;
+                    }
+                    <span class="enscript-keyword">if</span> (1 == pixelShift)
+                    {
+                        result &gt;&gt;= 3;
+                        *((uint16_t *)out) = (result &lt;&lt; 10) | (result &lt;&lt; 5) | result;	<span class="enscript-comment">// 16
+</span>                    }
+                    <span class="enscript-keyword">else</span>
+                        *((uint32_t *)out) = (result &lt;&lt; 16) | (result &lt;&lt; 8) | result;	<span class="enscript-comment">// 32
+</span>                }
+                out += (1 &lt;&lt; pixelShift);
+            }
+            out += (kIOHibernateProgressSpacing &lt;&lt; pixelShift);
+        }
+    }
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+IOReturn
+<span class="enscript-function-name">IOHibernateIOKitSleep</span>(<span class="enscript-type">void</span>)
+{
+    IOReturn ret = kIOReturnSuccess;
+    IOLockLock(gFSLock);
+    <span class="enscript-keyword">if</span> (kFSOpening == gFSState)
+    {
+	gFSState = kFSTimedOut;
+	HIBLOG(<span class="enscript-string">&quot;hibernate file open timed out\n&quot;</span>);
+	ret = kIOReturnTimeout;
+    }
+    IOLockUnlock(gFSLock);
+    <span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+IOReturn
+<span class="enscript-function-name">IOHibernateSystemHasSlept</span>(<span class="enscript-type">void</span>)
+{
+    IOReturn          ret = kIOReturnSuccess;
+    IOHibernateVars * vars  = &amp;gIOHibernateVars;
+    OSObject        * obj = 0;
+    OSData          * data;
+
+    IOLockLock(gFSLock);
+    <span class="enscript-keyword">if</span> ((kFSOpened != gFSState) &amp;&amp; gIOHibernateMode)
+    {
+	ret = kIOReturnTimeout;
+    }
+    IOLockUnlock(gFSLock);
+    <span class="enscript-keyword">if</span> (kIOReturnSuccess != ret) <span class="enscript-keyword">return</span> (ret);
+
+    <span class="enscript-keyword">if</span> (gIOHibernateMode) obj = IOService::getPMRootDomain()-&gt;copyProperty(kIOHibernatePreviewBufferKey);
+    vars-&gt;previewBuffer = OSDynamicCast(IOMemoryDescriptor, obj);
+    <span class="enscript-keyword">if</span> (obj &amp;&amp; !vars-&gt;previewBuffer)
+	obj-&gt;release();
+
+    vars-&gt;consoleMapping = NULL;
+    <span class="enscript-keyword">if</span> (vars-&gt;previewBuffer &amp;&amp; (kIOReturnSuccess != vars-&gt;previewBuffer-&gt;prepare()))
+    {
+	vars-&gt;previewBuffer-&gt;release();
+	vars-&gt;previewBuffer = 0;
+    }
+
+    <span class="enscript-keyword">if</span> ((kIOHibernateOptionProgress &amp; gIOHibernateCurrentHeader-&gt;options)
+        &amp;&amp; vars-&gt;previewBuffer 
+        &amp;&amp; (data = OSDynamicCast(OSData, 
+	<span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;getProperty(kIOHibernatePreviewActiveKey))))
+    {
+	UInt32 flags = *((UInt32 *)data-&gt;getBytesNoCopy());
+	HIBPRINT(<span class="enscript-string">&quot;kIOHibernatePreviewActiveKey %08lx\n&quot;</span>, (<span class="enscript-type">long</span>)flags);
+
+	<span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;removeProperty(kIOHibernatePreviewActiveKey);
+
+	<span class="enscript-keyword">if</span> (kIOHibernatePreviewUpdates &amp; flags)
+	{
+	    PE_Video	       consoleInfo;
+	    hibernate_graphics_t * graphicsInfo = gIOHibernateGraphicsInfo;
+
+	    <span class="enscript-reference">IOService</span>::getPlatform()-&gt;getConsoleInfo(&amp;consoleInfo);
+
+	    graphicsInfo-&gt;width    = consoleInfo.v_width;
+	    graphicsInfo-&gt;height   = consoleInfo.v_height;
+	    graphicsInfo-&gt;rowBytes = consoleInfo.v_rowBytes;
+	    graphicsInfo-&gt;depth    = consoleInfo.v_depth;
+	    vars-&gt;consoleMapping   = (uint8_t *) consoleInfo.v_baseAddr;
+
+	    HIBPRINT(<span class="enscript-string">&quot;video %p %d %d %d\n&quot;</span>,
+			vars-&gt;consoleMapping, graphicsInfo-&gt;depth, 
+			graphicsInfo-&gt;width, graphicsInfo-&gt;height);
+	    <span class="enscript-keyword">if</span> (vars-&gt;consoleMapping)
+			ProgressInit(graphicsInfo, vars-&gt;consoleMapping,
+					&amp;graphicsInfo-&gt;progressSaveUnder[0][0], <span class="enscript-keyword">sizeof</span>(graphicsInfo-&gt;progressSaveUnder));
+	}
+    }
+
+    <span class="enscript-keyword">if</span> (gIOOptionsEntry)
+        gIOOptionsEntry-&gt;sync();
+
+    <span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">static</span> DeviceTreeNode *
+<span class="enscript-function-name">MergeDeviceTree</span>(DeviceTreeNode * entry, IORegistryEntry * regEntry)
+{
+    DeviceTreeNodeProperty * prop;
+    DeviceTreeNode *         child;
+    IORegistryEntry *        childRegEntry;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *             nameProp;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>             propLen, idx;
+
+    prop = (DeviceTreeNodeProperty *) (entry + 1);
+    <span class="enscript-keyword">for</span> (idx = 0; idx &lt; entry-&gt;nProperties; idx++)
+    {
+	<span class="enscript-keyword">if</span> (regEntry &amp;&amp; (0 != strcmp(<span class="enscript-string">&quot;name&quot;</span>, prop-&gt;name)))
+	{
+	    regEntry-&gt;setProperty((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) prop-&gt;name, (<span class="enscript-type">void</span> *) (prop + 1), prop-&gt;length);
+<span class="enscript-comment">//	    HIBPRINT(&quot;%s: %s, %d\n&quot;, regEntry-&gt;getName(), prop-&gt;name, prop-&gt;length);
+</span>	}
+	prop = (DeviceTreeNodeProperty *) (((uintptr_t)(prop + 1)) + ((prop-&gt;length + 3) &amp; ~3));
+    }
+
+    child = (DeviceTreeNode *) prop;
+    <span class="enscript-keyword">for</span> (idx = 0; idx &lt; entry-&gt;nChildren; idx++)
+    {
+	<span class="enscript-keyword">if</span> (kSuccess != DTGetProperty(child, <span class="enscript-string">&quot;name&quot;</span>, (<span class="enscript-type">void</span> **) &amp;nameProp, &amp;propLen))
+	    panic(<span class="enscript-string">&quot;no name&quot;</span>);
+	childRegEntry = regEntry ? regEntry-&gt;childFromPath(nameProp, gIODTPlane) : NULL;
+<span class="enscript-comment">//	HIBPRINT(&quot;%s == %p\n&quot;, nameProp, childRegEntry);
+</span>	child = MergeDeviceTree(child, childRegEntry);
+    }
+    <span class="enscript-keyword">return</span> (child);
+}
+
+IOReturn
+<span class="enscript-function-name">IOHibernateSystemWake</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">if</span> (kFSOpened == gFSState)
+    {
+	IOPolledFilePollersClose(gIOHibernateVars.fileVars, kIOPolledPostflightState);
+    	IOHibernateDone(&amp;gIOHibernateVars);
+    }
+    <span class="enscript-keyword">else</span>
+    {
+        <span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;removeProperty(kIOHibernateOptionsKey);
+        <span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;removeProperty(kIOHibernateGfxStatusKey);
+    }
+    <span class="enscript-keyword">return</span> (kIOReturnSuccess);
+}
+
+<span class="enscript-type">static</span> IOReturn
+<span class="enscript-function-name">IOHibernateDone</span>(IOHibernateVars * vars)
+{
+    hibernate_teardown(vars-&gt;page_list, vars-&gt;page_list_wired, vars-&gt;page_list_pal);
+
+    <span class="enscript-keyword">if</span> (vars-&gt;videoMapping)
+    {
+        <span class="enscript-keyword">if</span> (vars-&gt;videoMapSize)
+            <span class="enscript-comment">// remove mappings
+</span>            IOUnmapPages(kernel_map, vars-&gt;videoMapping, vars-&gt;videoMapSize);
+        <span class="enscript-keyword">if</span> (vars-&gt;videoAllocSize)
+            <span class="enscript-comment">// dealloc range
+</span>            kmem_free(kernel_map, trunc_page(vars-&gt;videoMapping), vars-&gt;videoAllocSize);
+    }
+
+    <span class="enscript-keyword">if</span> (vars-&gt;previewBuffer)
+    {
+        vars-&gt;previewBuffer-&gt;release();
+        vars-&gt;previewBuffer = 0;
+    }
+
+    <span class="enscript-keyword">if</span> (kIOHibernateStateWakingFromHibernate == gIOHibernateState)
+    {
+        <span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;setProperty(kIOHibernateOptionsKey, 
+                                            gIOHibernateCurrentHeader-&gt;options, 32);
+    }
+    <span class="enscript-keyword">else</span>
+    {
+        <span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;removeProperty(kIOHibernateOptionsKey);
+    }
+
+    <span class="enscript-keyword">if</span> ((kIOHibernateStateWakingFromHibernate == gIOHibernateState)
+      &amp;&amp; (kIOHibernateGfxStatusUnknown != gIOHibernateGraphicsInfo-&gt;gfxStatus))
+    {
+        <span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;setProperty(kIOHibernateGfxStatusKey, 
+                                        &amp;gIOHibernateGraphicsInfo-&gt;gfxStatus,
+                                        <span class="enscript-keyword">sizeof</span>(gIOHibernateGraphicsInfo-&gt;gfxStatus));
+    }
+    <span class="enscript-keyword">else</span>
+    {
+        <span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;removeProperty(kIOHibernateGfxStatusKey);
+    }
+
+    <span class="enscript-comment">// invalidate nvram properties - (gIOOptionsEntry != 0) =&gt; nvram was touched
+</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+	<span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;removeProperty(gIOHibernateRTCVariablesKey);
+	<span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;removeProperty(kIOHibernateSMCVariablesKey);
+
+	<span class="enscript-comment">/*
+	 * Hibernate variable is written to NVRAM on platforms in which RtcRam
+	 * is not backed by coin cell.  Remove Hibernate data from NVRAM.
+	 */</span>
+	<span class="enscript-keyword">if</span> (gIOOptionsEntry) {
+
+	    <span class="enscript-keyword">if</span> (gIOHibernateRTCVariablesKey) {
+		<span class="enscript-keyword">if</span> (gIOOptionsEntry-&gt;getProperty(gIOHibernateRTCVariablesKey)) {
+		    gIOOptionsEntry-&gt;removeProperty(gIOHibernateRTCVariablesKey);
+		}
+	    }
+
+	    <span class="enscript-keyword">if</span> (gIOHibernateBootNextKey)
+	    {
+		<span class="enscript-keyword">if</span> (gIOHibernateBootNextSave)
+		{
+		    gIOOptionsEntry-&gt;setProperty(gIOHibernateBootNextKey, gIOHibernateBootNextSave);
+		    gIOHibernateBootNextSave-&gt;release();
+		    gIOHibernateBootNextSave = NULL;
+		}
+		<span class="enscript-keyword">else</span>
+		    gIOOptionsEntry-&gt;removeProperty(gIOHibernateBootNextKey);
+	    }
+	    <span class="enscript-keyword">if</span> (kIOHibernateStateWakingFromHibernate != gIOHibernateState) gIOOptionsEntry-&gt;sync();
+	}
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-keyword">if</span> (vars-&gt;srcBuffer) vars-&gt;srcBuffer-&gt;release();
+    bzero(&amp;gIOHibernateHandoffPages[0], gIOHibernateHandoffPageCount * <span class="enscript-keyword">sizeof</span>(gIOHibernateHandoffPages[0]));
+    <span class="enscript-keyword">if</span> (vars-&gt;handoffBuffer)
+    {
+	<span class="enscript-keyword">if</span> (kIOHibernateStateWakingFromHibernate == gIOHibernateState)
+	{
+	    IOHibernateHandoff * handoff;
+	    <span class="enscript-type">bool</span> done = false;
+	    <span class="enscript-keyword">for</span> (handoff = (IOHibernateHandoff *) vars-&gt;handoffBuffer-&gt;getBytesNoCopy();
+		 !done;
+		 handoff = (IOHibernateHandoff *) &amp;handoff-&gt;data[handoff-&gt;bytecount])
+	    {
+		HIBPRINT(<span class="enscript-string">&quot;handoff %p, %x, %x\n&quot;</span>, handoff, handoff-&gt;type, handoff-&gt;bytecount);
+		uint8_t * data = &amp;handoff-&gt;data[0];
+		<span class="enscript-keyword">switch</span> (handoff-&gt;type)
+		{
+		    <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOHibernateHandoffTypeEnd</span>:
+			done = true;
+			<span class="enscript-keyword">break</span>;
+
+		    <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOHibernateHandoffTypeDeviceTree</span>:
+			MergeDeviceTree((DeviceTreeNode *) data, IOService::getServiceRoot());
+			<span class="enscript-keyword">break</span>;
+	
+		    <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOHibernateHandoffTypeKeyStore</span>:
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+			{
+			    IOBufferMemoryDescriptor *
+			    md = IOBufferMemoryDescriptor::withBytes(data, handoff-&gt;bytecount, kIODirectionOutIn);
+			    <span class="enscript-keyword">if</span> (md)
+			    {
+				IOSetKeyStoreData(md);
+			    }
+			}
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-keyword">break</span>;
+	
+		    <span class="enscript-reference">default</span>:
+			done = (kIOHibernateHandoffType != (handoff-&gt;type &amp; 0xFFFF0000));
+			<span class="enscript-keyword">break</span>;
+		}    
+	    }
+	}
+	vars-&gt;handoffBuffer-&gt;release();
+    }
+
+    bzero(vars, <span class="enscript-keyword">sizeof</span>(*vars));
+
+<span class="enscript-comment">//    gIOHibernateState = kIOHibernateStateInactive;       // leave it for post wake code to see
+</span>
+    <span class="enscript-keyword">return</span> (kIOReturnSuccess);
+}
+
+IOReturn
+<span class="enscript-function-name">IOHibernateSystemPostWake</span>(<span class="enscript-type">void</span>)
+{
+    gIOHibernateCurrentHeader-&gt;signature = kIOHibernateHeaderInvalidSignature;
+    <span class="enscript-keyword">if</span> (kFSOpened == gFSState)
+    {
+	<span class="enscript-comment">// invalidate &amp; close the image file
+</span>	IOSleep(TRIM_DELAY);
+	IOPolledFileIOVars * vars = &amp;gFileVars;
+	IOPolledFileClose(&amp;vars,
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DISABLE_TRIM</span>
+				       0, NULL, 0, 0, 0);
+#<span class="enscript-reference">else</span>
+				       0, (caddr_t)gIOHibernateCurrentHeader, <span class="enscript-keyword">sizeof</span>(IOHibernateImageHeader),
+				       <span class="enscript-keyword">sizeof</span>(IOHibernateImageHeader), gIOHibernateCurrentHeader-&gt;imageSize);
+#<span class="enscript-reference">endif</span>
+    }
+    gFSState = kFSIdle;
+
+    IOSetBootImageNVRAM(0);
+
+    <span class="enscript-keyword">if</span> (gDebugImageLock) {
+        IOLockLock(gDebugImageLock);
+        <span class="enscript-keyword">if</span> (gDebugImageFileVars != 0) {
+            kprintf(<span class="enscript-string">&quot;IOHibernateSystemPostWake: Closing debugdata file\n&quot;</span>);
+            IOPolledFileClose(&amp;gDebugImageFileVars, 0, 0, 0, 0, 0);
+        }
+        IOLockUnlock(gDebugImageLock);
+    }
+
+    <span class="enscript-keyword">return</span> (kIOReturnSuccess);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOHibernateWasScreenLocked</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-type">bool</span> ret = false;
+    <span class="enscript-keyword">if</span> ((kIOHibernateStateWakingFromHibernate == gIOHibernateState) &amp;&amp; gIOChosenEntry)
+    {
+	OSData *
+	data = OSDynamicCast(OSData, gIOChosenEntry-&gt;getProperty(kIOScreenLockStateKey));
+	<span class="enscript-keyword">if</span> (data) <span class="enscript-keyword">switch</span> (*((uint32_t *)data-&gt;getBytesNoCopy()))
+	{
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOScreenLockLocked</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOScreenLockFileVaultDialog</span>:
+		ret = true;
+		<span class="enscript-keyword">break</span>;
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOScreenLockNoLock</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOScreenLockUnlocked</span>:
+	    <span class="enscript-reference">default</span>:
+		ret = false;
+		<span class="enscript-keyword">break</span>;
+	}
+    }
+    <span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-function-name">SYSCTL_STRING</span>(_kern, OID_AUTO, hibernatefile, 
+		CTLFLAG_RW | CTLFLAG_NOAUTO | CTLFLAG_KERN | CTLFLAG_LOCKED,
+		gIOHibernateFilename, <span class="enscript-keyword">sizeof</span>(gIOHibernateFilename), <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_STRING</span>(_kern, OID_AUTO, bootsignature, 
+		CTLFLAG_RW | CTLFLAG_NOAUTO | CTLFLAG_KERN | CTLFLAG_LOCKED,
+		gIOHibernateBootSignature, <span class="enscript-keyword">sizeof</span>(gIOHibernateBootSignature), <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_kern, OID_AUTO, hibernatemode, 
+		CTLFLAG_RW | CTLFLAG_NOAUTO | CTLFLAG_KERN | CTLFLAG_LOCKED,
+		&amp;gIOHibernateMode, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_STRUCT</span>(_kern, OID_AUTO, hibernatestatistics,
+		CTLTYPE_STRUCT | CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN | CTLFLAG_LOCKED,
+		gIOHibernateStats, hibernate_statistics_t, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_UINT</span>(_kern, OID_AUTO, hibernategraphicsready,
+		CTLFLAG_RW | CTLFLAG_NOAUTO | CTLFLAG_KERN | CTLFLAG_ANYBODY,
+		&amp;gIOHibernateStats-&gt;graphicsReadyTime, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_kern, OID_AUTO, hibernatewakenotification,
+		CTLFLAG_RW | CTLFLAG_NOAUTO | CTLFLAG_KERN | CTLFLAG_ANYBODY,
+		&amp;gIOHibernateStats-&gt;wakeNotificationTime, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_kern, OID_AUTO, hibernatelockscreenready,
+		CTLFLAG_RW | CTLFLAG_NOAUTO | CTLFLAG_KERN | CTLFLAG_ANYBODY,
+		&amp;gIOHibernateStats-&gt;lockScreenReadyTime, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_kern, OID_AUTO, hibernatehidready,
+		CTLFLAG_RW | CTLFLAG_NOAUTO | CTLFLAG_KERN | CTLFLAG_ANYBODY,
+		&amp;gIOHibernateStats-&gt;hidReadyTime, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">IOHibernateSystemInit</span>(IOPMrootDomain * rootDomain)
+{
+    gIOHibernateBootImageKey = OSSymbol::withCStringNoCopy(kIOHibernateBootImageKey);
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+    gIOHibernateRTCVariablesKey = OSSymbol::withCStringNoCopy(kIOHibernateRTCVariablesKey);
+    gIOHibernateBoot0082Key     = OSSymbol::withCString(<span class="enscript-string">&quot;8BE4DF61-93CA-11D2-AA0D-00E098032B8C:Boot0082&quot;</span>);
+    gIOHibernateBootNextKey     = OSSymbol::withCString(<span class="enscript-string">&quot;8BE4DF61-93CA-11D2-AA0D-00E098032B8C:BootNext&quot;</span>);
+    gIOHibernateRTCVariablesKey = OSSymbol::withCStringNoCopy(kIOHibernateRTCVariablesKey);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(__i386__) || defined(__x86_64__) */</span>
+
+    OSData * data = OSData::withBytesNoCopy(&amp;gIOHibernateState, <span class="enscript-keyword">sizeof</span>(gIOHibernateState));
+    <span class="enscript-keyword">if</span> (data)
+    {
+	rootDomain-&gt;setProperty(kIOHibernateStateKey, data);
+	data-&gt;release();
+    }
+
+    <span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;hfile&quot;</span>, gIOHibernateFilename, <span class="enscript-keyword">sizeof</span>(gIOHibernateFilename)))
+	gIOHibernateMode = kIOHibernateModeOn;
+    <span class="enscript-keyword">else</span>
+	gIOHibernateFilename[0] = 0;
+
+    sysctl_register_oid(&amp;sysctl__kern_hibernatefile);
+    sysctl_register_oid(&amp;sysctl__kern_bootsignature);
+    sysctl_register_oid(&amp;sysctl__kern_hibernatemode);
+    sysctl_register_oid(&amp;sysctl__kern_hibernatestatistics);
+    sysctl_register_oid(&amp;sysctl__kern_hibernategraphicsready);
+    sysctl_register_oid(&amp;sysctl__kern_hibernatewakenotification);
+    sysctl_register_oid(&amp;sysctl__kern_hibernatelockscreenready);
+    sysctl_register_oid(&amp;sysctl__kern_hibernatehidready);
+
+    gIOChosenEntry = IORegistryEntry::fromPath(<span class="enscript-string">&quot;/chosen&quot;</span>, gIODTPlane);
+
+    gFSLock = IOLockAlloc();
+}
+
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">hibernate_setup_for_wake</span>(<span class="enscript-type">void</span>)
+{
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">static</span> IOReturn 
+<span class="enscript-function-name">IOHibernatePolledFileWrite</span>(IOPolledFileIOVars * vars,
+			   <span class="enscript-type">const</span> uint8_t * bytes, IOByteCount size,
+			   IOPolledFileCryptVars * cryptvars)
+{
+    IOReturn err;
+
+    err = IOPolledFileWrite(vars, bytes, size, cryptvars);
+    <span class="enscript-keyword">if</span> ((kIOReturnSuccess == err) &amp;&amp; hibernate_should_abort()) err = kIOReturnAborted;
+
+    <span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> uint32_t
+<span class="enscript-function-name">hibernate_write_image</span>(<span class="enscript-type">void</span>)
+{
+    IOHibernateImageHeader * header = gIOHibernateCurrentHeader;
+    IOHibernateVars *        vars  = &amp;gIOHibernateVars;
+    IOPolledFileExtent *     fileExtents;
+
+    assert_static(<span class="enscript-keyword">sizeof</span>(IOHibernateImageHeader) == 512);
+
+    uint32_t	 pageCount, pagesDone;
+    IOReturn     err;
+    vm_offset_t  ppnum, page;
+    IOItemCount  count;
+    uint8_t *	 src;
+    uint8_t *	 data;
+    uint8_t *	 compressed;
+    uint8_t *	 scratch;
+    IOByteCount  pageCompressedSize;
+    uint64_t	 compressedSize, uncompressedSize;
+    uint64_t	 image1Size = 0;
+    uint32_t	 bitmap_size;
+    <span class="enscript-type">bool</span>	 iterDone, pollerOpen, needEncrypt;
+    uint32_t	 restore1Sum, sum, sum1, sum2;
+    <span class="enscript-type">int</span>          wkresult;
+    uint32_t	 tag;
+    uint32_t	 pageType;
+    uint32_t	 pageAndCount[2];
+    addr64_t     phys64;
+    IOByteCount  segLen;
+    uintptr_t    hibernateBase;
+    uintptr_t    hibernateEnd;
+
+    AbsoluteTime startTime, endTime;
+    AbsoluteTime allTime, compTime;
+    uint64_t     compBytes;
+    uint64_t     nsec;
+    uint32_t     lastProgressStamp = 0;
+    uint32_t     progressStamp;
+    uint32_t	 blob, lastBlob = (uint32_t) -1L;
+
+    uint32_t	 wiredPagesEncrypted;
+    uint32_t	 dirtyPagesEncrypted;
+    uint32_t	 wiredPagesClear;
+    uint32_t	 svPageCount;
+    uint32_t	 zvPageCount;
+
+    IOPolledFileCryptVars _cryptvars;
+    IOPolledFileCryptVars * cryptvars = 0;
+
+    wiredPagesEncrypted = 0;
+    dirtyPagesEncrypted = 0;
+    wiredPagesClear     = 0;
+    svPageCount         = 0;
+    zvPageCount         = 0;
+
+    <span class="enscript-keyword">if</span> (!vars-&gt;fileVars || !vars-&gt;fileVars-&gt;pollers)
+        <span class="enscript-keyword">return</span> (false <span class="enscript-comment">/* sleep */</span> );
+
+    <span class="enscript-keyword">if</span> (kIOHibernateModeSleep &amp; gIOHibernateMode)
+	kdebug_enable = save_kdebug_enable;
+
+    KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 1) | DBG_FUNC_START, 0, 0, 0, 0, 0);
+    <span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;tracePoint(kIOPMTracePointHibernate);
+
+    restore1Sum = sum1 = sum2 = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPTO</span>
+    <span class="enscript-comment">// encryption data. &quot;iv&quot; is the &quot;initial vector&quot;.
+</span>    <span class="enscript-keyword">if</span> (kIOHibernateModeEncrypt &amp; gIOHibernateMode)
+    {
+        <span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> first_iv[AES_BLOCK_SIZE]
+        = {  0xa3, 0x63, 0x65, 0xa9, 0x0b, 0x71, 0x7b, 0x1c,
+             0xdf, 0x9e, 0x5f, 0x32, 0xd7, 0x61, 0x63, 0xda };
+    
+        cryptvars = &amp;gIOHibernateCryptWakeContext;
+        bzero(cryptvars, <span class="enscript-keyword">sizeof</span>(IOPolledFileCryptVars));
+        aes_encrypt_key(vars-&gt;cryptKey,
+                        kIOHibernateAESKeySize,
+                        &amp;cryptvars-&gt;ctx.encrypt);
+        aes_decrypt_key(vars-&gt;cryptKey,
+                        kIOHibernateAESKeySize,
+                        &amp;cryptvars-&gt;ctx.decrypt);
+
+        cryptvars = &amp;_cryptvars;
+        bzero(cryptvars, <span class="enscript-keyword">sizeof</span>(IOPolledFileCryptVars));
+        <span class="enscript-keyword">for</span> (pageCount = 0; pageCount &lt; <span class="enscript-keyword">sizeof</span>(vars-&gt;wiredCryptKey); pageCount++)
+            vars-&gt;wiredCryptKey[pageCount] ^= vars-&gt;volumeCryptKey[pageCount];
+        bzero(&amp;vars-&gt;volumeCryptKey[0], <span class="enscript-keyword">sizeof</span>(vars-&gt;volumeCryptKey));
+        aes_encrypt_key(vars-&gt;wiredCryptKey,
+                        kIOHibernateAESKeySize,
+                        &amp;cryptvars-&gt;ctx.encrypt);
+
+        bcopy(&amp;first_iv[0], &amp;cryptvars-&gt;aes_iv[0], AES_BLOCK_SIZE);
+        bzero(&amp;vars-&gt;wiredCryptKey[0], <span class="enscript-keyword">sizeof</span>(vars-&gt;wiredCryptKey));
+        bzero(&amp;vars-&gt;cryptKey[0], <span class="enscript-keyword">sizeof</span>(vars-&gt;cryptKey));
+    }
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPTO */</span>
+
+    hibernate_setup_for_wake();
+
+    hibernate_page_list_setall(vars-&gt;page_list,
+                               vars-&gt;page_list_wired,
+                               vars-&gt;page_list_pal,
+			       false <span class="enscript-comment">/* !preflight */</span>,
+			       <span class="enscript-comment">/* discard_all */</span>
+			       ((0 == (kIOHibernateModeSleep &amp; gIOHibernateMode)) 
+			       &amp;&amp; (0 != ((kIOHibernateModeDiscardCleanActive | kIOHibernateModeDiscardCleanInactive) &amp; gIOHibernateMode))),
+                               &amp;pageCount);
+
+    HIBLOG(<span class="enscript-string">&quot;hibernate_page_list_setall found pageCount %d\n&quot;</span>, pageCount);
+
+    fileExtents = (IOPolledFileExtent *) vars-&gt;fileVars-&gt;fileExtents-&gt;getBytesNoCopy();
+
+#<span class="enscript-reference">if</span> 0
+    count = vars-&gt;fileExtents-&gt;getLength() / <span class="enscript-keyword">sizeof</span>(IOPolledFileExtent);
+    <span class="enscript-keyword">for</span> (page = 0; page &lt; count; page++)
+    {
+	HIBLOG(<span class="enscript-string">&quot;fileExtents[%d] %qx, %qx (%qx)\n&quot;</span>, page, 
+		fileExtents[page].start, fileExtents[page].length,
+		fileExtents[page].start + fileExtents[page].length);
+    }
+#<span class="enscript-reference">endif</span>
+
+    needEncrypt = (0 != (kIOHibernateModeEncrypt &amp; gIOHibernateMode));
+    AbsoluteTime_to_scalar(&amp;compTime) = 0;
+    compBytes = 0;
+
+    clock_get_uptime(&amp;allTime);
+    <span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;pmStatsRecordEvent( 
+                        kIOPMStatsHibernateImageWrite | kIOPMStatsEventStartFlag, allTime);
+    <span class="enscript-keyword">do</span> 
+    {
+        compressedSize   = 0;
+        uncompressedSize = 0;
+        svPageCount      = 0;
+        zvPageCount      = 0;
+
+        IOPolledFileSeek(vars-&gt;fileVars, vars-&gt;fileVars-&gt;blockSize);
+    
+        HIBLOG(<span class="enscript-string">&quot;IOHibernatePollerOpen, ml_get_interrupts_enabled %d\n&quot;</span>, 
+                ml_get_interrupts_enabled());
+        err = IOPolledFilePollersOpen(vars-&gt;fileVars, kIOPolledBeforeSleepState, true);
+        HIBLOG(<span class="enscript-string">&quot;IOHibernatePollerOpen(%x)\n&quot;</span>, err);
+        pollerOpen = (kIOReturnSuccess == err);
+        <span class="enscript-keyword">if</span> (!pollerOpen)
+            <span class="enscript-keyword">break</span>;
+    
+        <span class="enscript-comment">// copy file block extent list if larger than header
+</span>    
+        count = vars-&gt;fileVars-&gt;fileExtents-&gt;getLength();
+        <span class="enscript-keyword">if</span> (count &gt; <span class="enscript-keyword">sizeof</span>(header-&gt;fileExtentMap))
+        {
+            count -= <span class="enscript-keyword">sizeof</span>(header-&gt;fileExtentMap);
+            err = IOHibernatePolledFileWrite(vars-&gt;fileVars,
+                                    ((uint8_t *) &amp;fileExtents[0]) + <span class="enscript-keyword">sizeof</span>(header-&gt;fileExtentMap), count, cryptvars);
+            <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+                <span class="enscript-keyword">break</span>;
+        }
+
+        hibernateBase = HIB_BASE; <span class="enscript-comment">/* Defined in PAL headers */</span>
+        hibernateEnd = (segHIBB + segSizeHIB);
+
+        <span class="enscript-comment">// copy out restore1 code
+</span>
+        <span class="enscript-keyword">for</span> (count = 0;
+            (phys64 = vars-&gt;handoffBuffer-&gt;getPhysicalSegment(count, &amp;segLen, kIOMemoryMapperNone));
+            count += segLen)
+        {
+	    <span class="enscript-keyword">for</span> (pagesDone = 0; pagesDone &lt; atop_32(segLen); pagesDone++)
+	    {
+	    	gIOHibernateHandoffPages[atop_32(count) + pagesDone] = atop_64(phys64) + pagesDone;
+	    }
+        }
+
+        page = atop_32(kvtophys(hibernateBase));
+        count = atop_32(round_page(hibernateEnd) - hibernateBase);
+        header-&gt;restore1CodePhysPage = page;
+        header-&gt;restore1CodeVirt = hibernateBase;
+        header-&gt;restore1PageCount = count;
+        header-&gt;restore1CodeOffset = ((uintptr_t) &amp;hibernate_machine_entrypoint)      - hibernateBase;
+        header-&gt;restore1StackOffset = ((uintptr_t) &amp;gIOHibernateRestoreStackEnd[0]) - 64 - hibernateBase;
+
+        <span class="enscript-comment">// sum __HIB seg, with zeros for the stack
+</span>        src = (uint8_t *) trunc_page(hibernateBase);
+        <span class="enscript-keyword">for</span> (page = 0; page &lt; count; page++)
+        {
+            <span class="enscript-keyword">if</span> ((src &lt; &amp;gIOHibernateRestoreStack[0]) || (src &gt;= &amp;gIOHibernateRestoreStackEnd[0]))
+                restore1Sum += hibernate_sum_page(src, header-&gt;restore1CodeVirt + page);
+            <span class="enscript-keyword">else</span>
+                restore1Sum += 0x00000000;
+            src += page_size;
+        }
+        sum1 = restore1Sum;
+    
+        <span class="enscript-comment">// write the __HIB seg, with zeros for the stack
+</span>
+        src = (uint8_t *) trunc_page(hibernateBase);
+        count = ((uintptr_t) &amp;gIOHibernateRestoreStack[0]) - trunc_page(hibernateBase);
+        <span class="enscript-keyword">if</span> (count)
+        {
+            err = IOHibernatePolledFileWrite(vars-&gt;fileVars, src, count, cryptvars);
+            <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+                <span class="enscript-keyword">break</span>;
+        }
+        err = IOHibernatePolledFileWrite(vars-&gt;fileVars, 
+                                        (uint8_t *) 0,
+                                        &amp;gIOHibernateRestoreStackEnd[0] - &amp;gIOHibernateRestoreStack[0],
+                                        cryptvars);
+        <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+            <span class="enscript-keyword">break</span>;
+        src = &amp;gIOHibernateRestoreStackEnd[0];
+        count = round_page(hibernateEnd) - ((uintptr_t) src);
+        <span class="enscript-keyword">if</span> (count)
+        {
+            err = IOHibernatePolledFileWrite(vars-&gt;fileVars, src, count, cryptvars);
+            <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+                <span class="enscript-keyword">break</span>;
+        }
+
+	<span class="enscript-keyword">if</span> (kIOHibernateModeEncrypt &amp; gIOHibernateMode)
+	{
+	    vars-&gt;fileVars-&gt;encryptStart = (vars-&gt;fileVars-&gt;position &amp; ~(AES_BLOCK_SIZE - 1));
+	    vars-&gt;fileVars-&gt;encryptEnd   = UINT64_MAX;
+	    HIBLOG(<span class="enscript-string">&quot;encryptStart %qx\n&quot;</span>, vars-&gt;fileVars-&gt;encryptStart);
+	}
+
+        <span class="enscript-comment">// write the preview buffer
+</span>
+        <span class="enscript-keyword">if</span> (vars-&gt;previewBuffer)
+        {
+            ppnum = 0;
+            count = 0;
+            <span class="enscript-keyword">do</span>
+            {
+                phys64 = vars-&gt;previewBuffer-&gt;getPhysicalSegment(count, &amp;segLen, kIOMemoryMapperNone);
+                pageAndCount[0] = atop_64(phys64);
+                pageAndCount[1] = atop_32(segLen);
+                err = IOHibernatePolledFileWrite(vars-&gt;fileVars, 
+                                        (<span class="enscript-type">const</span> uint8_t *) &amp;pageAndCount, <span class="enscript-keyword">sizeof</span>(pageAndCount), 
+                                        cryptvars);
+                <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+                    <span class="enscript-keyword">break</span>;
+                count += segLen;
+                ppnum += <span class="enscript-keyword">sizeof</span>(pageAndCount);
+            }
+            <span class="enscript-keyword">while</span> (phys64);
+            <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+                <span class="enscript-keyword">break</span>;
+
+            src = (uint8_t *) vars-&gt;previewBuffer-&gt;getPhysicalSegment(0, NULL, _kIOMemorySourceSegment);
+
+			((hibernate_preview_t *)src)-&gt;lockTime = gIOConsoleLockTime;
+
+            count = vars-&gt;previewBuffer-&gt;getLength();
+
+            header-&gt;previewPageListSize = ppnum;
+            header-&gt;previewSize = count + ppnum;
+
+            <span class="enscript-keyword">for</span> (page = 0; page &lt; count; page += page_size)
+            {
+                phys64 = vars-&gt;previewBuffer-&gt;getPhysicalSegment(page, NULL, kIOMemoryMapperNone);
+                sum1 += hibernate_sum_page(src + page, atop_64(phys64));
+            }
+            err = IOHibernatePolledFileWrite(vars-&gt;fileVars, src, count, cryptvars);
+            <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+                <span class="enscript-keyword">break</span>;
+        }
+
+        <span class="enscript-comment">// mark areas for no save
+</span>        IOMemoryDescriptor * ioBuffer;
+        ioBuffer = IOPolledFileGetIOBuffer(vars-&gt;fileVars);
+        <span class="enscript-keyword">for</span> (count = 0;
+            (phys64 = ioBuffer-&gt;getPhysicalSegment(count, &amp;segLen, kIOMemoryMapperNone));
+            count += segLen)
+        {
+            hibernate_set_page_state(vars-&gt;page_list, vars-&gt;page_list_wired, 
+                                        atop_64(phys64), atop_32(segLen),
+                                        kIOHibernatePageStateFree);
+            pageCount -= atop_32(segLen);
+        }
+    
+        <span class="enscript-keyword">for</span> (count = 0;
+            (phys64 = vars-&gt;srcBuffer-&gt;getPhysicalSegment(count, &amp;segLen, kIOMemoryMapperNone));
+            count += segLen)
+        {
+            hibernate_set_page_state(vars-&gt;page_list, vars-&gt;page_list_wired, 
+                                        atop_64(phys64), atop_32(segLen),
+                                        kIOHibernatePageStateFree);
+            pageCount -= atop_32(segLen);
+        }
+
+        <span class="enscript-comment">// copy out bitmap of pages available for trashing during restore
+</span>    
+        bitmap_size = vars-&gt;page_list_wired-&gt;list_size;
+        src = (uint8_t *) vars-&gt;page_list_wired;
+        err = IOHibernatePolledFileWrite(vars-&gt;fileVars, src, bitmap_size, cryptvars);
+        <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-comment">// mark more areas for no save, but these are not available 
+</span>        <span class="enscript-comment">// for trashing during restore
+</span>
+	hibernate_page_list_set_volatile(vars-&gt;page_list, vars-&gt;page_list_wired, &amp;pageCount);
+    
+
+        page = atop_32(KERNEL_IMAGE_TO_PHYS(hibernateBase));
+        count = atop_32(round_page(KERNEL_IMAGE_TO_PHYS(hibernateEnd))) - page;
+        hibernate_set_page_state(vars-&gt;page_list, vars-&gt;page_list_wired,
+                                        page, count,
+                                        kIOHibernatePageStateFree);
+        pageCount -= count;
+
+        <span class="enscript-keyword">if</span> (vars-&gt;previewBuffer) <span class="enscript-keyword">for</span> (count = 0;
+                                        (phys64 = vars-&gt;previewBuffer-&gt;getPhysicalSegment(count, &amp;segLen, kIOMemoryMapperNone));
+                                        count += segLen)
+        {
+            hibernate_set_page_state(vars-&gt;page_list, vars-&gt;page_list_wired, 
+                                        atop_64(phys64), atop_32(segLen),
+                                        kIOHibernatePageStateFree);
+            pageCount -= atop_32(segLen);
+        }
+
+        <span class="enscript-keyword">for</span> (count = 0;
+            (phys64 = vars-&gt;handoffBuffer-&gt;getPhysicalSegment(count, &amp;segLen, kIOMemoryMapperNone));
+            count += segLen)
+        {
+            hibernate_set_page_state(vars-&gt;page_list, vars-&gt;page_list_wired, 
+                                        atop_64(phys64), atop_32(segLen),
+                                        kIOHibernatePageStateFree);
+            pageCount -= atop_32(segLen);
+        }
+
+        src = (uint8_t *) vars-&gt;srcBuffer-&gt;getBytesNoCopy();
+	compressed = src + page_size;
+        scratch    = compressed + page_size;
+
+        pagesDone  = 0;
+        lastBlob   = 0;
+    
+        HIBLOG(<span class="enscript-string">&quot;bitmap_size 0x%x, previewSize 0x%x, writing %d pages @ 0x%llx\n&quot;</span>, 
+        	bitmap_size, header-&gt;previewSize,
+        	pageCount, vars-&gt;fileVars-&gt;position);
+
+        <span class="enscript-type">enum</span>
+        <span class="enscript-comment">// pageType
+</span>        { 
+            kWired          = 0x02,
+            kEncrypt        = 0x01,
+            kWiredEncrypt   = kWired | kEncrypt,
+            kWiredClear     = kWired,
+            kUnwiredEncrypt = kEncrypt
+        };
+
+        <span class="enscript-keyword">for</span> (pageType = kWiredEncrypt; pageType &gt;= kUnwiredEncrypt; pageType--)
+        {
+	    <span class="enscript-keyword">if</span> (kUnwiredEncrypt == pageType)
+	   {
+		<span class="enscript-comment">// start unwired image
+</span>		<span class="enscript-keyword">if</span> (kIOHibernateModeEncrypt &amp; gIOHibernateMode)
+		{
+		    vars-&gt;fileVars-&gt;encryptStart = (vars-&gt;fileVars-&gt;position &amp; ~(((uint64_t)AES_BLOCK_SIZE) - 1));
+		    vars-&gt;fileVars-&gt;encryptEnd   = UINT64_MAX;
+		    HIBLOG(<span class="enscript-string">&quot;encryptStart %qx\n&quot;</span>, vars-&gt;fileVars-&gt;encryptStart);
+		}
+		bcopy(&amp;cryptvars-&gt;aes_iv[0], 
+			&amp;gIOHibernateCryptWakeContext.aes_iv[0], 
+			<span class="enscript-keyword">sizeof</span>(cryptvars-&gt;aes_iv));
+		cryptvars = &amp;gIOHibernateCryptWakeContext;
+            }
+            <span class="enscript-keyword">for</span> (iterDone = false, ppnum = 0; !iterDone; )
+            {
+                count = hibernate_page_list_iterate((kWired &amp; pageType) 
+                                                            ? vars-&gt;page_list_wired : vars-&gt;page_list,
+                                                        &amp;ppnum);
+<span class="enscript-comment">//              kprintf(&quot;[%d](%x : %x)\n&quot;, pageType, ppnum, count);
+</span>                iterDone = !count;
+    
+                <span class="enscript-keyword">if</span> (count &amp;&amp; (kWired &amp; pageType) &amp;&amp; needEncrypt)
+                {
+                    uint32_t checkIndex;
+                    <span class="enscript-keyword">for</span> (checkIndex = 0;
+                            (checkIndex &lt; count) 
+                                &amp;&amp; (((kEncrypt &amp; pageType) == 0) == pmap_is_noencrypt(ppnum + checkIndex)); 
+                            checkIndex++)
+                    {}
+                    <span class="enscript-keyword">if</span> (!checkIndex)
+                    {
+                        ppnum++;
+                        <span class="enscript-keyword">continue</span>;
+                    }
+                    count = checkIndex;
+                }
+
+                <span class="enscript-keyword">switch</span> (pageType)
+                {
+                    <span class="enscript-keyword">case</span> <span class="enscript-reference">kWiredEncrypt</span>:   wiredPagesEncrypted += count; <span class="enscript-keyword">break</span>;
+                    <span class="enscript-keyword">case</span> <span class="enscript-reference">kWiredClear</span>:     wiredPagesClear     += count; <span class="enscript-keyword">break</span>;
+                    <span class="enscript-keyword">case</span> <span class="enscript-reference">kUnwiredEncrypt</span>: dirtyPagesEncrypted += count; <span class="enscript-keyword">break</span>;
+                }
+    
+                <span class="enscript-keyword">if</span> (iterDone &amp;&amp; (kWiredEncrypt == pageType))   {<span class="enscript-comment">/* not yet end of wired list */</span>}
+                <span class="enscript-keyword">else</span>
+                {
+                    pageAndCount[0] = ppnum;
+                    pageAndCount[1] = count;
+                    err = IOHibernatePolledFileWrite(vars-&gt;fileVars, 
+                                            (<span class="enscript-type">const</span> uint8_t *) &amp;pageAndCount, <span class="enscript-keyword">sizeof</span>(pageAndCount), 
+                                            cryptvars);
+                    <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+                        <span class="enscript-keyword">break</span>;
+                }
+    
+                <span class="enscript-keyword">for</span> (page = ppnum; page &lt; (ppnum + count); page++)
+                {
+                    err = IOMemoryDescriptorWriteFromPhysical(vars-&gt;srcBuffer, 0, ptoa_64(page), page_size);
+                    <span class="enscript-keyword">if</span> (err)
+                    {
+                        HIBLOG(<span class="enscript-string">&quot;IOMemoryDescriptorWriteFromPhysical %d [%ld] %x\n&quot;</span>, __LINE__, (<span class="enscript-type">long</span>)page, err);
+                        <span class="enscript-keyword">break</span>;
+                    }
+        
+                    sum = hibernate_sum_page(src, page);
+                    <span class="enscript-keyword">if</span> (kWired &amp; pageType)
+                        sum1 += sum;
+                    <span class="enscript-keyword">else</span>
+                        sum2 += sum;
+       
+                    clock_get_uptime(&amp;startTime);
+                    wkresult = WKdm_compress_new((<span class="enscript-type">const</span> WK_word*) src,
+						 (WK_word*) compressed, 
+						 (WK_word*) scratch,
+						 page_size - 4);
+
+                    clock_get_uptime(&amp;endTime);
+                    ADD_ABSOLUTETIME(&amp;compTime, &amp;endTime);
+                    SUB_ABSOLUTETIME(&amp;compTime, &amp;startTime);
+
+                    compBytes += page_size;
+                    pageCompressedSize = (-1 == wkresult) ? page_size : wkresult;
+
+		    <span class="enscript-keyword">if</span> (pageCompressedSize == 0) 
+		    {
+			pageCompressedSize = 4;
+                        data = src;
+
+			<span class="enscript-keyword">if</span> (*(uint32_t *)src)
+				svPageCount++;
+			<span class="enscript-keyword">else</span>
+				zvPageCount++;
+		    }
+		    <span class="enscript-keyword">else</span> 
+		    {
+			<span class="enscript-keyword">if</span> (pageCompressedSize != page_size)
+			    data = compressed;
+			<span class="enscript-keyword">else</span>
+			    data = src;
+		    }
+    
+                    tag = pageCompressedSize | kIOHibernateTagSignature;
+                    err = IOHibernatePolledFileWrite(vars-&gt;fileVars, (<span class="enscript-type">const</span> uint8_t *) &amp;tag, <span class="enscript-keyword">sizeof</span>(tag), cryptvars);
+                    <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+                        <span class="enscript-keyword">break</span>;
+    
+                    err = IOHibernatePolledFileWrite(vars-&gt;fileVars, data, (pageCompressedSize + 3) &amp; ~3, cryptvars);
+                    <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+                        <span class="enscript-keyword">break</span>;
+    
+                    compressedSize += pageCompressedSize;
+                    uncompressedSize += page_size;
+                    pagesDone++;
+    
+                    <span class="enscript-keyword">if</span> (vars-&gt;consoleMapping &amp;&amp; (0 == (1023 &amp; pagesDone)))
+                    {
+                        blob = ((pagesDone * kIOHibernateProgressCount) / pageCount);
+                        <span class="enscript-keyword">if</span> (blob != lastBlob)
+                        {
+                            ProgressUpdate(gIOHibernateGraphicsInfo, vars-&gt;consoleMapping, lastBlob, blob);
+                            lastBlob = blob;
+                        }
+                    }
+                    <span class="enscript-keyword">if</span> (0 == (8191 &amp; pagesDone))
+                    {
+                        clock_get_uptime(&amp;endTime);
+                        SUB_ABSOLUTETIME(&amp;endTime, &amp;allTime);
+                        absolutetime_to_nanoseconds(endTime, &amp;nsec);
+                        progressStamp = nsec / 750000000ULL;
+                        <span class="enscript-keyword">if</span> (progressStamp != lastProgressStamp)
+                        {
+                            lastProgressStamp = progressStamp;
+                            HIBPRINT(<span class="enscript-string">&quot;pages %d (%d%%)\n&quot;</span>, pagesDone, (100 * pagesDone) / pageCount);
+                        }
+                    }
+                }
+                <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+                    <span class="enscript-keyword">break</span>;
+                ppnum = page;
+            }
+
+            <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+                <span class="enscript-keyword">break</span>;
+
+            <span class="enscript-keyword">if</span> ((kEncrypt &amp; pageType) &amp;&amp; vars-&gt;fileVars-&gt;encryptStart)
+            {
+                vars-&gt;fileVars-&gt;encryptEnd = ((vars-&gt;fileVars-&gt;position + 511) &amp; ~511ULL);
+                HIBLOG(<span class="enscript-string">&quot;encryptEnd %qx\n&quot;</span>, vars-&gt;fileVars-&gt;encryptEnd);
+            }
+
+            <span class="enscript-keyword">if</span> (kWiredEncrypt != pageType)
+            {
+                <span class="enscript-comment">// end of image1/2 - fill to next block
+</span>                err = IOHibernatePolledFileWrite(vars-&gt;fileVars, 0, 0, cryptvars);
+                <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+                    <span class="enscript-keyword">break</span>;
+            }
+            <span class="enscript-keyword">if</span> (kWiredClear == pageType)
+            {
+		<span class="enscript-comment">// enlarge wired image for test
+</span><span class="enscript-comment">//              err = IOHibernatePolledFileWrite(vars-&gt;fileVars, 0, 0x60000000, cryptvars);
+</span>
+                <span class="enscript-comment">// end wired image
+</span>                header-&gt;encryptStart = vars-&gt;fileVars-&gt;encryptStart;
+                header-&gt;encryptEnd   = vars-&gt;fileVars-&gt;encryptEnd;
+                image1Size = vars-&gt;fileVars-&gt;position;
+                HIBLOG(<span class="enscript-string">&quot;image1Size 0x%qx, encryptStart1 0x%qx, End1 0x%qx\n&quot;</span>,
+                        image1Size, header-&gt;encryptStart, header-&gt;encryptEnd);
+            }
+        }
+        <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+        {
+            <span class="enscript-keyword">if</span> (kIOReturnOverrun == err)
+            {
+                <span class="enscript-comment">// update actual compression ratio on not enough space (for retry)
+</span>                gIOHibernateCompression = (compressedSize &lt;&lt; 8) / uncompressedSize;
+            }
+
+            <span class="enscript-comment">// update partial amount written (for IOPolledFileClose cleanup/unmap)
+</span>            header-&gt;imageSize = vars-&gt;fileVars-&gt;position;
+            <span class="enscript-keyword">break</span>;
+        }
+
+        <span class="enscript-comment">// Header:
+</span>    
+        header-&gt;imageSize    = vars-&gt;fileVars-&gt;position;
+        header-&gt;image1Size   = image1Size;
+        header-&gt;bitmapSize   = bitmap_size;
+        header-&gt;pageCount    = pageCount;
+    
+        header-&gt;restore1Sum  = restore1Sum;
+        header-&gt;image1Sum    = sum1;
+        header-&gt;image2Sum    = sum2;
+        header-&gt;sleepTime    = gIOLastSleepTime.tv_sec;
+
+	header-&gt;compression     = (compressedSize &lt;&lt; 8) / uncompressedSize;
+	gIOHibernateCompression = header-&gt;compression;
+    
+        count = vars-&gt;fileVars-&gt;fileExtents-&gt;getLength();
+        <span class="enscript-keyword">if</span> (count &gt; <span class="enscript-keyword">sizeof</span>(header-&gt;fileExtentMap))
+        {
+            header-&gt;fileExtentMapSize = count;
+            count = <span class="enscript-keyword">sizeof</span>(header-&gt;fileExtentMap);
+        }
+        <span class="enscript-keyword">else</span>
+            header-&gt;fileExtentMapSize = <span class="enscript-keyword">sizeof</span>(header-&gt;fileExtentMap);
+        bcopy(&amp;fileExtents[0], &amp;header-&gt;fileExtentMap[0], count);
+
+        header-&gt;deviceBase      = vars-&gt;fileVars-&gt;block0;
+        header-&gt;deviceBlockSize = vars-&gt;fileVars-&gt;blockSize;
+    
+        IOPolledFileSeek(vars-&gt;fileVars, 0);
+        err = IOHibernatePolledFileWrite(vars-&gt;fileVars,
+                                    (uint8_t *) header, <span class="enscript-keyword">sizeof</span>(IOHibernateImageHeader), 
+                                    cryptvars);
+        <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+            <span class="enscript-keyword">break</span>;
+        err = IOHibernatePolledFileWrite(vars-&gt;fileVars, 0, 0, cryptvars);
+    }
+    <span class="enscript-keyword">while</span> (false);
+    
+    clock_get_uptime(&amp;endTime);
+
+    <span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;pmStatsRecordEvent( 
+                        kIOPMStatsHibernateImageWrite | kIOPMStatsEventStopFlag, endTime);
+
+    SUB_ABSOLUTETIME(&amp;endTime, &amp;allTime);
+    absolutetime_to_nanoseconds(endTime, &amp;nsec);
+    HIBLOG(<span class="enscript-string">&quot;all time: %qd ms, &quot;</span>, nsec / 1000000ULL);
+
+    absolutetime_to_nanoseconds(compTime, &amp;nsec);
+    HIBLOG(<span class="enscript-string">&quot;comp bytes: %qd time: %qd ms %qd Mb/s, &quot;</span>, 
+		compBytes, 
+		nsec / 1000000ULL,
+		nsec ? (((compBytes * 1000000000ULL) / 1024 / 1024) / nsec) : 0);
+
+    absolutetime_to_nanoseconds(vars-&gt;fileVars-&gt;cryptTime, &amp;nsec);
+    HIBLOG(<span class="enscript-string">&quot;crypt bytes: %qd time: %qd ms %qd Mb/s, &quot;</span>, 
+		vars-&gt;fileVars-&gt;cryptBytes, 
+		nsec / 1000000ULL, 
+		nsec ? (((vars-&gt;fileVars-&gt;cryptBytes * 1000000000ULL) / 1024 / 1024) / nsec) : 0);
+
+    HIBLOG(<span class="enscript-string">&quot;\nimage %qd (%lld%%), uncompressed %qd (%d), compressed %qd (%d%%), sum1 %x, sum2 %x\n&quot;</span>, 
+               header-&gt;imageSize, (header-&gt;imageSize * 100) / vars-&gt;fileVars-&gt;fileSize,
+               uncompressedSize, atop_32(uncompressedSize), compressedSize,
+               uncompressedSize ? ((<span class="enscript-type">int</span>) ((compressedSize * 100ULL) / uncompressedSize)) : 0,
+               sum1, sum2);
+
+    HIBLOG(<span class="enscript-string">&quot;svPageCount %d, zvPageCount %d, wiredPagesEncrypted %d, wiredPagesClear %d, dirtyPagesEncrypted %d\n&quot;</span>, 
+	   svPageCount, zvPageCount, wiredPagesEncrypted, wiredPagesClear, dirtyPagesEncrypted);
+
+    <span class="enscript-keyword">if</span> (pollerOpen)
+        IOPolledFilePollersClose(vars-&gt;fileVars, kIOPolledBeforeSleepState);
+
+    <span class="enscript-keyword">if</span> (vars-&gt;consoleMapping)
+        ProgressUpdate(gIOHibernateGraphicsInfo, 
+                        vars-&gt;consoleMapping, 0, kIOHibernateProgressCount);
+
+    HIBLOG(<span class="enscript-string">&quot;hibernate_write_image done(%x)\n&quot;</span>, err);
+
+    <span class="enscript-comment">// should we come back via regular wake, set the state in memory.
+</span>    gIOHibernateState = kIOHibernateStateInactive;
+
+    KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 1) | DBG_FUNC_END,
+			  wiredPagesEncrypted, wiredPagesClear, dirtyPagesEncrypted, 0, 0);
+
+    <span class="enscript-keyword">if</span> (kIOReturnSuccess == err)
+    {
+	<span class="enscript-keyword">if</span> (kIOHibernateModeSleep &amp; gIOHibernateMode)
+	{
+	    <span class="enscript-keyword">return</span> (kIOHibernatePostWriteSleep);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span>(kIOHibernateModeRestart &amp; gIOHibernateMode)
+	{
+	    <span class="enscript-keyword">return</span> (kIOHibernatePostWriteRestart);
+	}
+	<span class="enscript-keyword">else</span>
+	{
+	    <span class="enscript-comment">/* by default, power down */</span>
+	    <span class="enscript-keyword">return</span> (kIOHibernatePostWriteHalt);
+	}
+    }
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kIOReturnAborted == err)
+    {
+	<span class="enscript-keyword">return</span> (kIOHibernatePostWriteWake);
+    }
+    <span class="enscript-keyword">else</span>
+    {
+	<span class="enscript-comment">/* on error, sleep */</span>
+	<span class="enscript-keyword">return</span> (kIOHibernatePostWriteSleep);
+    }
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> <span class="enscript-type">void</span> 
+<span class="enscript-function-name">hibernate_machine_init</span>(<span class="enscript-type">void</span>)
+{
+    IOReturn     err;
+    uint32_t     sum;
+    uint32_t     pagesDone;
+    uint32_t     pagesRead = 0;
+    AbsoluteTime startTime, compTime;
+    AbsoluteTime allTime, endTime;
+    AbsoluteTime startIOTime, endIOTime;
+    uint64_t     nsec, nsecIO;
+    uint64_t     compBytes;
+    uint32_t     lastProgressStamp = 0;
+    uint32_t     progressStamp;
+    IOPolledFileCryptVars * cryptvars = 0;
+
+    IOHibernateVars * vars  = &amp;gIOHibernateVars;
+    bzero(gIOHibernateStats, <span class="enscript-keyword">sizeof</span>(hibernate_statistics_t));
+
+    <span class="enscript-keyword">if</span> (!vars-&gt;fileVars || !vars-&gt;fileVars-&gt;pollers)
+	<span class="enscript-keyword">return</span>;
+
+    sum = gIOHibernateCurrentHeader-&gt;actualImage1Sum;
+    pagesDone = gIOHibernateCurrentHeader-&gt;actualUncompressedPages;
+
+    <span class="enscript-keyword">if</span> (kIOHibernateStateWakingFromHibernate != gIOHibernateState)
+    {
+	HIBLOG(<span class="enscript-string">&quot;regular wake\n&quot;</span>);
+	<span class="enscript-keyword">return</span>;
+    }
+
+    HIBPRINT(<span class="enscript-string">&quot;diag %x %x %x %x\n&quot;</span>,
+	    gIOHibernateCurrentHeader-&gt;diag[0], gIOHibernateCurrentHeader-&gt;diag[1], 
+	    gIOHibernateCurrentHeader-&gt;diag[2], gIOHibernateCurrentHeader-&gt;diag[3]);
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">t40ms</span>(x)	(tmrCvt((((uint64_t)(x)) &lt;&lt; 8), tscFCvtt2n) / 1000000)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">tStat</span>(x, y)	gIOHibernateStats-&gt;x = t40ms(gIOHibernateCurrentHeader-&gt;y);
+    tStat(booterStart, booterStart);
+    gIOHibernateStats-&gt;smcStart = gIOHibernateCurrentHeader-&gt;smcStart,
+    tStat(booterDuration0, booterTime0);
+    tStat(booterDuration1, booterTime1);
+    tStat(booterDuration2, booterTime2);
+    tStat(booterDuration, booterTime);
+    tStat(booterConnectDisplayDuration, connectDisplayTime);
+    tStat(booterSplashDuration, splashTime);
+    tStat(trampolineDuration, trampolineTime);
+
+    gIOHibernateStats-&gt;image1Size  = gIOHibernateCurrentHeader-&gt;image1Size;
+    gIOHibernateStats-&gt;imageSize   = gIOHibernateCurrentHeader-&gt;imageSize;
+    gIOHibernateStats-&gt;image1Pages = pagesDone;
+
+    HIBLOG(<span class="enscript-string">&quot;booter start at %d ms smc %d ms, [%d, %d, %d] total %d ms, dsply %d, %d ms, tramp %d ms\n&quot;</span>, 
+	   gIOHibernateStats-&gt;booterStart,
+	   gIOHibernateStats-&gt;smcStart,
+	   gIOHibernateStats-&gt;booterDuration0,
+	   gIOHibernateStats-&gt;booterDuration1,
+	   gIOHibernateStats-&gt;booterDuration2,
+	   gIOHibernateStats-&gt;booterDuration,
+	   gIOHibernateStats-&gt;booterConnectDisplayDuration,
+	   gIOHibernateStats-&gt;booterSplashDuration,
+	   gIOHibernateStats-&gt;trampolineDuration);
+
+    HIBLOG(<span class="enscript-string">&quot;hibernate_machine_init: state %d, image pages %d, sum was %x, imageSize 0x%qx, image1Size 0x%qx, conflictCount %d, nextFree %x\n&quot;</span>,
+	    gIOHibernateState, pagesDone, sum, gIOHibernateStats-&gt;imageSize, gIOHibernateStats-&gt;image1Size,
+	    gIOHibernateCurrentHeader-&gt;conflictCount, gIOHibernateCurrentHeader-&gt;nextFree);
+
+    <span class="enscript-keyword">if</span> ((0 != (kIOHibernateModeSleep &amp; gIOHibernateMode)) 
+     &amp;&amp; (0 != ((kIOHibernateModeDiscardCleanActive | kIOHibernateModeDiscardCleanInactive) &amp; gIOHibernateMode)))
+    {
+        hibernate_page_list_discard(vars-&gt;page_list);
+    }
+
+    cryptvars = (kIOHibernateModeEncrypt &amp; gIOHibernateMode) ? &amp;gIOHibernateCryptWakeContext : 0;
+
+    <span class="enscript-keyword">if</span> (gIOHibernateCurrentHeader-&gt;handoffPageCount &gt; gIOHibernateHandoffPageCount)
+    	panic(<span class="enscript-string">&quot;handoff overflow&quot;</span>);
+
+    IOHibernateHandoff * handoff;
+    <span class="enscript-type">bool</span>                 done           = false;
+    <span class="enscript-type">bool</span>                 foundCryptData = false;
+
+    <span class="enscript-keyword">for</span> (handoff = (IOHibernateHandoff *) vars-&gt;handoffBuffer-&gt;getBytesNoCopy();
+    	 !done;
+    	 handoff = (IOHibernateHandoff *) &amp;handoff-&gt;data[handoff-&gt;bytecount])
+    {
+<span class="enscript-comment">//	HIBPRINT(&quot;handoff %p, %x, %x\n&quot;, handoff, handoff-&gt;type, handoff-&gt;bytecount);
+</span>	uint8_t * data = &amp;handoff-&gt;data[0];
+    	<span class="enscript-keyword">switch</span> (handoff-&gt;type)
+    	{
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOHibernateHandoffTypeEnd</span>:
+	    	done = true;
+		<span class="enscript-keyword">break</span>;
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOHibernateHandoffTypeGraphicsInfo</span>:
+		bcopy(data, gIOHibernateGraphicsInfo, <span class="enscript-keyword">sizeof</span>(*gIOHibernateGraphicsInfo));
+		<span class="enscript-keyword">break</span>;
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOHibernateHandoffTypeCryptVars</span>:
+		<span class="enscript-keyword">if</span> (cryptvars)
+		{
+		    hibernate_cryptwakevars_t *
+		    wakevars = (hibernate_cryptwakevars_t *) &amp;handoff-&gt;data[0];
+		    bcopy(&amp;wakevars-&gt;aes_iv[0], &amp;cryptvars-&gt;aes_iv[0], <span class="enscript-keyword">sizeof</span>(cryptvars-&gt;aes_iv));
+		}
+		foundCryptData = true;
+		bzero(data, handoff-&gt;bytecount);
+		<span class="enscript-keyword">break</span>;
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOHibernateHandoffTypeMemoryMap</span>:
+
+		clock_get_uptime(&amp;allTime);
+
+		hibernate_newruntime_map(data, handoff-&gt;bytecount, 
+					 gIOHibernateCurrentHeader-&gt;systemTableOffset);
+
+		clock_get_uptime(&amp;endTime);
+	    
+		SUB_ABSOLUTETIME(&amp;endTime, &amp;allTime);
+		absolutetime_to_nanoseconds(endTime, &amp;nsec);
+	    
+		HIBLOG(<span class="enscript-string">&quot;hibernate_newruntime_map time: %qd ms, &quot;</span>, nsec / 1000000ULL);
+
+	    	<span class="enscript-keyword">break</span>;
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOHibernateHandoffTypeDeviceTree</span>:
+		{
+<span class="enscript-comment">//		    DTEntry chosen = NULL;
+</span><span class="enscript-comment">//		    HIBPRINT(&quot;DTLookupEntry %d\n&quot;, DTLookupEntry((const DTEntry) data, &quot;/chosen&quot;, &amp;chosen));
+</span>		}
+	    	<span class="enscript-keyword">break</span>;
+
+	    <span class="enscript-reference">default</span>:
+	    	done = (kIOHibernateHandoffType != (handoff-&gt;type &amp; 0xFFFF0000));
+	    	<span class="enscript-keyword">break</span>;
+	}    
+    }
+    <span class="enscript-keyword">if</span> (cryptvars &amp;&amp; !foundCryptData)
+    	panic(<span class="enscript-string">&quot;hibernate handoff&quot;</span>);
+
+    HIBPRINT(<span class="enscript-string">&quot;video %x %d %d %d status %x\n&quot;</span>,
+	    gIOHibernateGraphicsInfo-&gt;physicalAddress, gIOHibernateGraphicsInfo-&gt;depth, 
+	    gIOHibernateGraphicsInfo-&gt;width, gIOHibernateGraphicsInfo-&gt;height, gIOHibernateGraphicsInfo-&gt;gfxStatus); 
+
+    <span class="enscript-keyword">if</span> (vars-&gt;videoMapping &amp;&amp; gIOHibernateGraphicsInfo-&gt;physicalAddress)
+    {
+        vars-&gt;videoMapSize = round_page(gIOHibernateGraphicsInfo-&gt;height 
+                                        * gIOHibernateGraphicsInfo-&gt;rowBytes);
+	<span class="enscript-keyword">if</span> (vars-&gt;videoMapSize &gt; vars-&gt;videoAllocSize) vars-&gt;videoMapSize = 0;
+	<span class="enscript-keyword">else</span>
+	{
+	    IOMapPages(kernel_map, 
+			vars-&gt;videoMapping, gIOHibernateGraphicsInfo-&gt;physicalAddress,
+			vars-&gt;videoMapSize, kIOMapInhibitCache );
+	}
+    }
+
+    <span class="enscript-keyword">if</span> (vars-&gt;videoMapSize)
+        ProgressUpdate(gIOHibernateGraphicsInfo, 
+                        (uint8_t *) vars-&gt;videoMapping, 0, kIOHibernateProgressCount);
+
+    uint8_t * src = (uint8_t *) vars-&gt;srcBuffer-&gt;getBytesNoCopy();
+    uint8_t * compressed = src + page_size;
+    uint8_t * scratch    = compressed + page_size;
+    uint32_t  decoOffset;
+
+    clock_get_uptime(&amp;allTime);
+    AbsoluteTime_to_scalar(&amp;compTime) = 0;
+    compBytes = 0;
+
+    HIBLOG(<span class="enscript-string">&quot;IOPolledFilePollersOpen(), ml_get_interrupts_enabled %d\n&quot;</span>, ml_get_interrupts_enabled());
+    err = IOPolledFilePollersOpen(vars-&gt;fileVars, kIOPolledAfterSleepState, false);
+    clock_get_uptime(&amp;startIOTime);
+    endTime = startIOTime;
+    SUB_ABSOLUTETIME(&amp;endTime, &amp;allTime);
+    absolutetime_to_nanoseconds(endTime, &amp;nsec);
+    HIBLOG(<span class="enscript-string">&quot;IOPolledFilePollersOpen(%x) %qd ms\n&quot;</span>, err, nsec / 1000000ULL);
+
+    IOPolledFileSeek(vars-&gt;fileVars, gIOHibernateCurrentHeader-&gt;image1Size);
+
+    <span class="enscript-comment">// kick off the read ahead
+</span>    vars-&gt;fileVars-&gt;bufferHalf   = 0;
+    vars-&gt;fileVars-&gt;bufferLimit  = 0;
+    vars-&gt;fileVars-&gt;lastRead     = 0;
+    vars-&gt;fileVars-&gt;readEnd      = gIOHibernateCurrentHeader-&gt;imageSize;
+    vars-&gt;fileVars-&gt;bufferOffset = vars-&gt;fileVars-&gt;bufferLimit;
+    vars-&gt;fileVars-&gt;cryptBytes   = 0;
+    AbsoluteTime_to_scalar(&amp;vars-&gt;fileVars-&gt;cryptTime) = 0;
+
+    err = IOPolledFileRead(vars-&gt;fileVars, 0, 0, cryptvars);
+    vars-&gt;fileVars-&gt;bufferOffset = vars-&gt;fileVars-&gt;bufferLimit;
+    <span class="enscript-comment">// --
+</span>
+    HIBLOG(<span class="enscript-string">&quot;hibernate_machine_init reading\n&quot;</span>);
+
+    uint32_t * header = (uint32_t *) src;
+    sum = 0;
+
+    <span class="enscript-keyword">while</span> (kIOReturnSuccess == err)
+    {
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> count;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> page;
+        uint32_t     tag;
+	vm_offset_t  ppnum, compressedSize;
+
+	err = IOPolledFileRead(vars-&gt;fileVars, src, 8, cryptvars);
+	<span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+	    <span class="enscript-keyword">break</span>;
+
+	ppnum = header[0];
+	count = header[1];
+
+<span class="enscript-comment">//	HIBPRINT(&quot;(%x, %x)\n&quot;, ppnum, count);
+</span>
+	<span class="enscript-keyword">if</span> (!count)
+	    <span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">for</span> (page = 0; page &lt; count; page++)
+	{
+	    err = IOPolledFileRead(vars-&gt;fileVars, (uint8_t *) &amp;tag, 4, cryptvars);
+	    <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+		<span class="enscript-keyword">break</span>;
+
+	    compressedSize = kIOHibernateTagLength &amp; tag;
+	    <span class="enscript-keyword">if</span> (kIOHibernateTagSignature != (tag &amp; ~kIOHibernateTagLength))
+	    {
+		err = kIOReturnIPCError;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    err = IOPolledFileRead(vars-&gt;fileVars, src, (compressedSize + 3) &amp; ~3, cryptvars);
+	    <span class="enscript-keyword">if</span> (kIOReturnSuccess != err) <span class="enscript-keyword">break</span>;
+
+	    <span class="enscript-keyword">if</span> (compressedSize &lt; page_size)
+	    {
+		decoOffset = page_size;
+		clock_get_uptime(&amp;startTime);
+
+		<span class="enscript-keyword">if</span> (compressedSize == 4) {
+		    <span class="enscript-type">int</span> i;
+		    uint32_t *s, *d;
+			
+		    s = (uint32_t *)src;
+		    d = (uint32_t *)(uintptr_t)compressed;
+
+		    <span class="enscript-keyword">for</span> (i = 0; i &lt; (<span class="enscript-type">int</span>)(PAGE_SIZE / <span class="enscript-keyword">sizeof</span>(int32_t)); i++)
+			*d++ = *s;
+		}
+		<span class="enscript-keyword">else</span> 
+		    WKdm_decompress_new((WK_word*) src, (WK_word*) compressed, (WK_word*) scratch, compressedSize);
+		clock_get_uptime(&amp;endTime);
+		ADD_ABSOLUTETIME(&amp;compTime, &amp;endTime);
+		SUB_ABSOLUTETIME(&amp;compTime, &amp;startTime);
+		compBytes += page_size;
+	    }
+	    <span class="enscript-keyword">else</span> decoOffset = 0;
+
+	    sum += hibernate_sum_page((src + decoOffset), ppnum);
+	    err = IOMemoryDescriptorReadToPhysical(vars-&gt;srcBuffer, decoOffset, ptoa_64(ppnum), page_size);
+	    <span class="enscript-keyword">if</span> (err)
+	    {
+		    HIBLOG(<span class="enscript-string">&quot;IOMemoryDescriptorReadToPhysical [%ld] %x\n&quot;</span>, (<span class="enscript-type">long</span>)ppnum, err);
+		    <span class="enscript-keyword">break</span>;
+	    }
+
+	    ppnum++;
+	    pagesDone++;
+	    pagesRead++;
+
+	    <span class="enscript-keyword">if</span> (0 == (8191 &amp; pagesDone))
+	    {
+		clock_get_uptime(&amp;endTime);
+		SUB_ABSOLUTETIME(&amp;endTime, &amp;allTime);
+		absolutetime_to_nanoseconds(endTime, &amp;nsec);
+		progressStamp = nsec / 750000000ULL;
+		<span class="enscript-keyword">if</span> (progressStamp != lastProgressStamp)
+		{
+		    lastProgressStamp = progressStamp;
+		    HIBPRINT(<span class="enscript-string">&quot;pages %d (%d%%)\n&quot;</span>, pagesDone, 
+			    (100 * pagesDone) / gIOHibernateCurrentHeader-&gt;pageCount);
+		}
+	    }
+	}
+    }
+    <span class="enscript-keyword">if</span> ((kIOReturnSuccess == err) &amp;&amp; (pagesDone == gIOHibernateCurrentHeader-&gt;actualUncompressedPages))
+    	err = kIOReturnLockedRead;
+
+    <span class="enscript-keyword">if</span> (kIOReturnSuccess != err)
+	panic(<span class="enscript-string">&quot;Hibernate restore error %x&quot;</span>, err);
+
+    gIOHibernateCurrentHeader-&gt;actualImage2Sum = sum;
+    gIOHibernateCompression = gIOHibernateCurrentHeader-&gt;compression;
+
+    clock_get_uptime(&amp;endIOTime);
+
+    err = IOPolledFilePollersClose(vars-&gt;fileVars, kIOPolledAfterSleepState);
+
+    clock_get_uptime(&amp;endTime);
+
+    <span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;pmStatsRecordEvent( 
+                        kIOPMStatsHibernateImageRead | kIOPMStatsEventStartFlag, allTime);
+    <span class="enscript-reference">IOService</span>::getPMRootDomain()-&gt;pmStatsRecordEvent( 
+                        kIOPMStatsHibernateImageRead | kIOPMStatsEventStopFlag, endTime);
+
+    SUB_ABSOLUTETIME(&amp;endTime, &amp;allTime);
+    absolutetime_to_nanoseconds(endTime, &amp;nsec);
+
+    SUB_ABSOLUTETIME(&amp;endIOTime, &amp;startIOTime);
+    absolutetime_to_nanoseconds(endIOTime, &amp;nsecIO);
+
+    gIOHibernateStats-&gt;kernelImageReadDuration = nsec / 1000000ULL;
+    gIOHibernateStats-&gt;imagePages              = pagesDone;
+
+    HIBLOG(<span class="enscript-string">&quot;hibernate_machine_init pagesDone %d sum2 %x, time: %d ms, disk(0x%x) %qd Mb/s, &quot;</span>, 
+		pagesDone, sum, gIOHibernateStats-&gt;kernelImageReadDuration, kDefaultIOSize,
+		nsecIO ? ((((gIOHibernateCurrentHeader-&gt;imageSize - gIOHibernateCurrentHeader-&gt;image1Size) * 1000000000ULL) / 1024 / 1024) / nsecIO) : 0);
+
+    absolutetime_to_nanoseconds(compTime, &amp;nsec);
+    HIBLOG(<span class="enscript-string">&quot;comp bytes: %qd time: %qd ms %qd Mb/s, &quot;</span>, 
+		compBytes, 
+		nsec / 1000000ULL,
+		nsec ? (((compBytes * 1000000000ULL) / 1024 / 1024) / nsec) : 0);
+
+    absolutetime_to_nanoseconds(vars-&gt;fileVars-&gt;cryptTime, &amp;nsec);
+    HIBLOG(<span class="enscript-string">&quot;crypt bytes: %qd time: %qd ms %qd Mb/s\n&quot;</span>, 
+		vars-&gt;fileVars-&gt;cryptBytes, 
+		nsec / 1000000ULL, 
+		nsec ? (((vars-&gt;fileVars-&gt;cryptBytes * 1000000000ULL) / 1024 / 1024) / nsec) : 0);
+
+    KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 2) | DBG_FUNC_NONE, pagesRead, pagesDone, 0, 0, 0);
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOHibernateSetWakeCapabilities</span>(uint32_t capability)
+{
+    <span class="enscript-keyword">if</span> (kIOHibernateStateWakingFromHibernate == gIOHibernateState)
+    {
+	gIOHibernateStats-&gt;wakeCapability = capability;
+
+	<span class="enscript-keyword">if</span> (kIOPMSystemCapabilityGraphics &amp; capability)
+	{
+		vm_compressor_do_warmup();
+	}
+    }
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOHibernateSystemRestart</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-type">static</span> uint8_t    noteStore[32] __attribute__((aligned(32)));
+    IORegistryEntry * regEntry;
+    <span class="enscript-type">const</span> OSSymbol *  sym;
+    OSData *          noteProp;
+    OSData *          data;
+    uintptr_t *       smcVars;
+    uint8_t *         smcBytes;
+    size_t            len;
+    addr64_t          element;
+
+    data = OSDynamicCast(OSData, IOService::getPMRootDomain()-&gt;getProperty(kIOHibernateSMCVariablesKey));
+    <span class="enscript-keyword">if</span> (!data) <span class="enscript-keyword">return</span>;
+
+    smcVars = (typeof(smcVars)) data-&gt;getBytesNoCopy();
+    smcBytes = (typeof(smcBytes)) smcVars[1];
+    len = smcVars[0];
+    <span class="enscript-keyword">if</span> (len &gt; <span class="enscript-keyword">sizeof</span>(noteStore)) len = <span class="enscript-keyword">sizeof</span>(noteStore);
+    noteProp = OSData::withCapacity(3 * <span class="enscript-keyword">sizeof</span>(element));
+    <span class="enscript-keyword">if</span> (!noteProp) <span class="enscript-keyword">return</span>;
+    element = len;
+    noteProp-&gt;appendBytes(&amp;element, <span class="enscript-keyword">sizeof</span>(element));
+    element = crc32(0, smcBytes, len);
+    noteProp-&gt;appendBytes(&amp;element, <span class="enscript-keyword">sizeof</span>(element));
+
+    bcopy(smcBytes, noteStore, len);
+    element = (addr64_t) &amp;noteStore[0];
+    element = (element &amp; page_mask) | ptoa_64(pmap_find_phys(kernel_pmap, element));
+    noteProp-&gt;appendBytes(&amp;element, <span class="enscript-keyword">sizeof</span>(element));
+
+    <span class="enscript-keyword">if</span> (!gIOOptionsEntry)
+    {
+	regEntry = IORegistryEntry::fromPath(<span class="enscript-string">&quot;/options&quot;</span>, gIODTPlane);
+	gIOOptionsEntry = OSDynamicCast(IODTNVRAM, regEntry);
+	<span class="enscript-keyword">if</span> (regEntry &amp;&amp; !gIOOptionsEntry)
+	    regEntry-&gt;release();
+    }
+
+    sym = OSSymbol::withCStringNoCopy(kIOHibernateBootNoteKey);
+    <span class="enscript-keyword">if</span> (gIOOptionsEntry &amp;&amp; sym) gIOOptionsEntry-&gt;setProperty(sym, noteProp);
+    <span class="enscript-keyword">if</span> (noteProp)               noteProp-&gt;release();
+    <span class="enscript-keyword">if</span> (sym)                    sym-&gt;release();
+}
+
+
+
+</pre>
+<hr />
+</body></html>

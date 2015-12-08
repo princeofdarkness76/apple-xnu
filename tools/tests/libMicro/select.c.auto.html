@@ -1,0 +1,239 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>select.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">select.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms
+ * of the Common Development and Distribution License
+ * (the &quot;License&quot;).  You may not use this file except
+ * in compliance with the License.
+ *
+ * You can obtain a copy of the license at
+ * src/OPENSOLARIS.LICENSE
+ * or <a href="http://www.opensolaris.org/os/licensing.">http://www.opensolaris.org/os/licensing.</a>
+ * See the License for the specific language governing
+ * permissions and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL
+ * HEADER in each file and include the License file at
+ * usr/src/OPENSOLARIS.LICENSE.  If applicable,
+ * add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets &quot;[]&quot; replaced with your
+ * own identifying information: Portions Copyright [yyyy]
+ * [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Use is subject to license terms.
+ */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">MAX</span>(x, y)		((x) &gt; (y) ? (x) : (y))
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">MIN</span>(x, y)		((x) &gt; (y) ? (y) : (x))
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;libmicro.h&quot;</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DEFN</span>			256
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			optn = DEFN;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			optr = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			optw = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			optx = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			*fds;
+<span class="enscript-type">static</span> fd_set			iset;
+<span class="enscript-type">static</span> fd_set			oset;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			maxfd = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			target = 0;
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_init</span>()
+{
+	(<span class="enscript-type">void</span>) sprintf(lm_optstr, <span class="enscript-string">&quot;n:r:w:x&quot;</span>);
+
+	lm_tsdsize = 0;
+
+	(<span class="enscript-type">void</span>) sprintf(lm_usage,
+	    <span class="enscript-string">&quot;       [-n fds-per-thread (default %d)]\n&quot;</span>
+	    <span class="enscript-string">&quot;       [-r readable-fds (default 0)]\n&quot;</span>
+	    <span class="enscript-string">&quot;       [-w writeable-fds (default 0)]\n&quot;</span>
+	    <span class="enscript-string">&quot;       [-x] (start -r option with highest fd first; &quot;</span>
+	    <span class="enscript-string">&quot;default is lowest first)\n&quot;</span>
+	    <span class="enscript-string">&quot;notes: measures select()\n&quot;</span>,
+	    DEFN);
+
+	(<span class="enscript-type">void</span>) sprintf(lm_header, <span class="enscript-string">&quot;%8s %5s&quot;</span>, <span class="enscript-string">&quot;maxfd&quot;</span>, <span class="enscript-string">&quot;flags&quot;</span>);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_optswitch</span>(<span class="enscript-type">int</span> opt, <span class="enscript-type">char</span> *optarg)
+{
+	<span class="enscript-keyword">switch</span> (opt) {
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'n'</span>:
+		optn = atoi(optarg);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'r'</span>:
+		optr = atoi(optarg);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'w'</span>:
+		optw = atoi(optarg);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'x'</span>:
+		optx = 1;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initrun</span>()
+{
+	<span class="enscript-type">int</span>			i;
+	<span class="enscript-type">int</span>			j;
+	<span class="enscript-type">int</span>			pair[2];
+
+	<span class="enscript-keyword">if</span> (optn % 2 != 0) {
+		(<span class="enscript-type">void</span>) printf(<span class="enscript-string">&quot;ERROR: -n value must be even\n&quot;</span>);
+		optn = optr = optw = 0;
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	<span class="enscript-keyword">if</span> (optn &lt; 0 || optr &lt; 0 || optw &lt; 0) {
+		(<span class="enscript-type">void</span>) printf(<span class="enscript-string">&quot;ERROR: -n, -r and -w values must be &gt; 0\n&quot;</span>);
+		optn = optr = optw = 0;
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	<span class="enscript-keyword">if</span> (optr &gt; optn || optw &gt; optn) {
+		(<span class="enscript-type">void</span>) printf(<span class="enscript-string">&quot;ERROR: -r and -w values must be &lt;= maxfd\n&quot;</span>);
+		optn = optr = optw = 0;
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	fds = (<span class="enscript-type">int</span> *)malloc(optn * <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>));
+	<span class="enscript-keyword">if</span> (fds == NULL) {
+		(<span class="enscript-type">void</span>) printf(<span class="enscript-string">&quot;ERROR: malloc() failed\n&quot;</span>);
+		optn = optr = optw = 0;
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	(<span class="enscript-type">void</span>) setfdlimit(optn + 10);
+
+	target = optr + optw;
+
+	FD_ZERO(&amp;iset);
+	FD_ZERO(&amp;oset);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; optn; i += 2) {
+		<span class="enscript-keyword">if</span> (socketpair(PF_UNIX, SOCK_STREAM, 0, pair) == -1) {
+			(<span class="enscript-type">void</span>) printf(<span class="enscript-string">&quot;ERROR: socketpair() failed\n&quot;</span>);
+			<span class="enscript-keyword">return</span> (-1);
+		}
+
+		fds[i] = MIN(pair[0], pair[1]);
+		fds[i+1] = MAX(pair[0], pair[1]);
+		maxfd = fds[i+1] + 1;
+
+		<span class="enscript-keyword">if</span> (maxfd &gt; FD_SETSIZE) {
+			(<span class="enscript-type">void</span>) printf(<span class="enscript-string">&quot;WARNING: FD_SETSIZE is too small!\n&quot;</span>);
+			<span class="enscript-keyword">return</span> (-1);
+		}
+
+		FD_SET(fds[i], &amp;iset);
+		FD_SET(fds[i+1], &amp;iset);
+	}
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; optw; i++) {
+		FD_SET(fds[i], &amp;oset);
+	}
+	<span class="enscript-keyword">if</span> (optx) {
+		<span class="enscript-keyword">for</span> (i = 0, j = optn - 1; i &lt; optr; i++, j--) {
+			(<span class="enscript-type">void</span>) write(fds[j+1 - (2*(j%2))], <span class="enscript-string">&quot;&quot;</span>, 1);
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; optr; i++) {
+			(<span class="enscript-type">void</span>) write(fds[i+1 - (2*(i%2))], <span class="enscript-string">&quot;&quot;</span>, 1);
+		}
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark</span>(<span class="enscript-type">void</span> *tsd, result_t *res)
+{
+	<span class="enscript-type">int</span>			i;
+	fd_set			set1;
+	fd_set			set2;
+	fd_set		*my_iset = &amp;set1;
+	fd_set		*my_oset = NULL;
+	<span class="enscript-type">struct</span> timeval		tv = {0, 0};
+
+	<span class="enscript-keyword">if</span> (optw) {
+		my_oset = &amp;set2;
+	}
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; lm_optB; i++) {
+		(<span class="enscript-type">void</span>) memcpy(&amp;set1, &amp;iset, <span class="enscript-keyword">sizeof</span> (fd_set));
+		(<span class="enscript-type">void</span>) memcpy(&amp;set2, &amp;oset, <span class="enscript-keyword">sizeof</span> (fd_set));
+
+		<span class="enscript-keyword">if</span> (select(maxfd, my_iset, my_oset, NULL, &amp;tv) != target) {
+			res-&gt;re_errors++;
+		}
+	}
+	res-&gt;re_count = i;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">char</span> *
+<span class="enscript-function-name">benchmark_result</span>()
+{
+	<span class="enscript-type">static</span> <span class="enscript-type">char</span>		result[256];
+	<span class="enscript-type">char</span>			flags[4];
+
+	flags[0] = optr ? <span class="enscript-string">'r'</span> : <span class="enscript-string">'-'</span>;
+	flags[1] = optw ? <span class="enscript-string">'w'</span> : <span class="enscript-string">'-'</span>;
+	flags[2] = optx ? <span class="enscript-string">'x'</span> : <span class="enscript-string">'-'</span>;
+	flags[3] = 0;
+
+	(<span class="enscript-type">void</span>) sprintf(result, <span class="enscript-string">&quot;%8d %5s&quot;</span>, optn, flags);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+</pre>
+<hr />
+</body></html>

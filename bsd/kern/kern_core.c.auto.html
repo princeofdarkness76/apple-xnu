@@ -1,0 +1,534 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kern_core.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kern_core.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* Copyright (c) 1991 NeXT Computer, Inc.  All rights reserved.
+ *
+ *	File:	bsd/kern/kern_core.c
+ *
+ *	This file contains machine independent code for performing core dumps.
+ *
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_status.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signalvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/resourcevar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/timeb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/times.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/acct.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/loader.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_region.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_statistics.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span> <span class="enscript-comment">/* last */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>		<span class="enscript-comment">/* current_map() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>	<span class="enscript-comment">/* mach_vm_region_recurse() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task.h&gt;</span>		<span class="enscript-comment">/* task_suspend() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>		<span class="enscript-comment">/* get_task_numacts() */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	<span class="enscript-type">int</span>	flavor;			<span class="enscript-comment">/* the number for this flavor */</span>
+	mach_msg_type_number_t	count;	<span class="enscript-comment">/* count of ints in this flavor */</span>
+} mythread_state_flavor_t;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">defined</span> (<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-variable-name">defined</span> (<span class="enscript-variable-name">__x86_64__</span>)
+mythread_state_flavor_t thread_flavor_array [] = { 
+		{x86_THREAD_STATE, x86_THREAD_STATE_COUNT},
+		{x86_FLOAT_STATE, x86_FLOAT_STATE_COUNT},
+		{x86_EXCEPTION_STATE, x86_EXCEPTION_STATE_COUNT},
+		};
+<span class="enscript-type">int</span> mynum_flavors=3;
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">architecture</span> <span class="enscript-variable-name">not</span> <span class="enscript-variable-name">supported</span>
+#<span class="enscript-reference">endif</span>
+
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	vm_offset_t header; 
+	<span class="enscript-type">int</span>  hoffset;
+	mythread_state_flavor_t *flavors;
+	<span class="enscript-type">int</span> tstate_size;
+	<span class="enscript-type">int</span> flavor_count;
+} tir_t;
+
+<span class="enscript-comment">/* XXX should be static */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">collectth_state</span>(thread_t th_act, <span class="enscript-type">void</span> *tirp);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">freespace_mb</span>(vnode_t vp);
+
+<span class="enscript-comment">/* XXX not in a Mach header anywhere */</span>
+kern_return_t <span class="enscript-function-name">thread_getstatus</span>(<span class="enscript-type">register</span> thread_t act, <span class="enscript-type">int</span> flavor,
+	thread_state_t tstate, mach_msg_type_number_t *count);
+<span class="enscript-type">void</span> <span class="enscript-function-name">task_act_iterate_wth_args</span>(task_t, <span class="enscript-type">void</span>(*)(thread_t, <span class="enscript-type">void</span> *), <span class="enscript-type">void</span> *);
+
+<span class="enscript-type">static</span> cpu_type_t <span class="enscript-function-name">process_cpu_type</span>(proc_t proc);
+<span class="enscript-type">static</span> cpu_type_t <span class="enscript-function-name">process_cpu_subtype</span>(proc_t proc);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">SECURE_KERNEL</span>
+__XNU_PRIVATE_EXTERN <span class="enscript-type">int</span> do_coredump = 0;	<span class="enscript-comment">/* default: don't dump cores */</span>
+#<span class="enscript-reference">else</span>
+__XNU_PRIVATE_EXTERN <span class="enscript-type">int</span> do_coredump = 1;	<span class="enscript-comment">/* default: dump cores */</span>
+#<span class="enscript-reference">endif</span>
+__XNU_PRIVATE_EXTERN <span class="enscript-type">int</span> sugid_coredump = 0; <span class="enscript-comment">/* default: but not SGUID binaries */</span>
+
+
+<span class="enscript-comment">/* cpu_type returns only the most generic indication of the current CPU. */</span>
+<span class="enscript-comment">/* in a core we want to know the kind of process. */</span>
+
+<span class="enscript-type">static</span> cpu_type_t
+<span class="enscript-function-name">process_cpu_type</span>(proc_t core_proc)
+{
+	cpu_type_t what_we_think;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">defined</span> (<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-variable-name">defined</span> (<span class="enscript-variable-name">__x86_64__</span>)
+    <span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(core_proc)) {
+		what_we_think = CPU_TYPE_X86_64;
+	} <span class="enscript-keyword">else</span> {
+		what_we_think = CPU_TYPE_I386;
+	}
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span> what_we_think;
+}
+
+<span class="enscript-type">static</span> cpu_type_t
+<span class="enscript-function-name">process_cpu_subtype</span>(proc_t core_proc)
+{
+	cpu_type_t what_we_think;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">defined</span> (<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-variable-name">defined</span> (<span class="enscript-variable-name">__x86_64__</span>)
+    <span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(core_proc)) {
+		what_we_think = CPU_SUBTYPE_X86_64_ALL;
+	} <span class="enscript-keyword">else</span> {
+		what_we_think = CPU_SUBTYPE_I386_ALL;
+	}
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span> what_we_think;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">collectth_state</span>(thread_t th_act, <span class="enscript-type">void</span> *tirp)
+{
+	vm_offset_t	header;
+	<span class="enscript-type">int</span>  hoffset, i ;
+	mythread_state_flavor_t *flavors;
+	<span class="enscript-type">struct</span> thread_command	*tc;
+	tir_t *t = (tir_t *)tirp;
+
+		<span class="enscript-comment">/*
+		 *	Fill in thread command structure.
+		 */</span>
+		header = t-&gt;header;
+		hoffset = t-&gt;hoffset;
+		flavors = t-&gt;flavors;
+	
+		tc = (<span class="enscript-type">struct</span> thread_command *) (header + hoffset);
+		tc-&gt;cmd = LC_THREAD;
+		tc-&gt;cmdsize = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_command)
+				+ t-&gt;tstate_size;
+		hoffset += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_command);
+		<span class="enscript-comment">/*
+		 * Follow with a struct thread_state_flavor and
+		 * the appropriate thread state struct for each
+		 * thread state flavor.
+		 */</span>
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; t-&gt;flavor_count; i++) {
+			*(mythread_state_flavor_t *)(header+hoffset) =
+			  flavors[i];
+			hoffset += <span class="enscript-keyword">sizeof</span>(mythread_state_flavor_t);
+			thread_getstatus(th_act, flavors[i].flavor,
+					(thread_state_t)(header+hoffset),
+					&amp;flavors[i].count);
+			hoffset += flavors[i].count*<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>);
+		}
+
+		t-&gt;hoffset = hoffset;
+}
+
+
+<span class="enscript-comment">/*
+ * coredump
+ *
+ * Description:	Create a core image on the file &quot;core&quot; for the process
+ *		indicated
+ *
+ * Parameters:	core_proc			Process to dump core [*]
+ *				reserve_mb			If non-zero, leave filesystem with
+ *									at least this much free space.
+ *				coredump_flags	Extra options (ignore rlimit, run fsync)
+ *
+ * Returns:	0				Success
+ *		EFAULT				Failed
+ *
+ * IMPORTANT:	This function can only be called on the current process, due
+ *		to assumptions below; see variable declaration section for
+ *		details.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MAX_TSTATE_FLAVORS</span>	10
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">coredump</span>(proc_t core_proc, uint32_t reserve_mb, <span class="enscript-type">int</span> coredump_flags)
+{
+<span class="enscript-comment">/* Begin assumptions that limit us to only the current process */</span>
+	vfs_context_t ctx = vfs_context_current();
+	vm_map_t	map = current_map();
+	task_t		task = current_task();
+<span class="enscript-comment">/* End assumptions */</span>
+	kauth_cred_t cred = vfs_context_ucred(ctx);
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> vnode_attr va;
+	<span class="enscript-type">int</span>		thread_count, segment_count;
+	<span class="enscript-type">int</span>		command_size, header_size, tstate_size;
+	<span class="enscript-type">int</span>		hoffset;
+	off_t		foffset;
+	mach_vm_offset_t vmoffset;
+	vm_offset_t	header;
+	mach_vm_size_t	vmsize;
+	vm_prot_t	prot;
+	vm_prot_t	maxprot;
+	vm_inherit_t	inherit;
+	<span class="enscript-type">int</span>		error1 = 0;
+	<span class="enscript-type">char</span>		stack_name[MAXCOMLEN+6];
+	<span class="enscript-type">char</span>		*alloced_name = NULL;
+	<span class="enscript-type">char</span>		*name;
+	mythread_state_flavor_t flavors[MAX_TSTATE_FLAVORS];
+	vm_size_t	mapsize;
+	<span class="enscript-type">int</span>		i;
+	uint32_t nesting_depth = 0;
+	kern_return_t	kret;
+	<span class="enscript-type">struct</span> vm_region_submap_info_64 vbr;
+	mach_msg_type_number_t vbrcount = 0;
+	tir_t tir1;
+	<span class="enscript-type">struct</span> vnode * vp;
+	<span class="enscript-type">struct</span> mach_header	*mh = NULL;	<span class="enscript-comment">/* protected by is_64 */</span>
+	<span class="enscript-type">struct</span> mach_header_64	*mh64 = NULL;	<span class="enscript-comment">/* protected by is_64 */</span>
+	<span class="enscript-type">int</span>		is_64 = 0;
+	size_t		mach_header_sz = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> mach_header);
+	size_t		segment_command_sz = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> segment_command);
+	
+	<span class="enscript-keyword">if</span> (current_proc() != core_proc) {
+		panic(<span class="enscript-string">&quot;coredump() called against proc that is not current_proc: %p&quot;</span>, core_proc);
+	}
+
+	<span class="enscript-keyword">if</span> (do_coredump == 0 ||		<span class="enscript-comment">/* Not dumping at all */</span>
+	    ( (sugid_coredump == 0) &amp;&amp;	<span class="enscript-comment">/* Not dumping SUID/SGID binaries */</span>
+	      ( (kauth_cred_getsvuid(cred) != kauth_cred_getruid(cred)) ||
+	        (kauth_cred_getsvgid(cred) != kauth_cred_getrgid(cred))))) {
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_AUDIT</span>
+		audit_proc_coredump(core_proc, NULL, EFAULT);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">return</span> (EFAULT);
+	}
+
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(core_proc)) {
+		is_64 = 1;
+		mach_header_sz = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> mach_header_64);
+		segment_command_sz = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> segment_command_64);
+	}
+
+	mapsize = get_vmmap_size(map);
+
+	<span class="enscript-keyword">if</span> (((coredump_flags &amp; COREDUMP_IGNORE_ULIMIT) == 0) &amp;&amp;
+	    (mapsize &gt;=  core_proc-&gt;p_rlimit[RLIMIT_CORE].rlim_cur))
+		<span class="enscript-keyword">return</span> (EFAULT);
+
+	(<span class="enscript-type">void</span>) task_suspend_internal(task);
+
+	MALLOC(alloced_name, <span class="enscript-type">char</span> *, MAXPATHLEN, M_TEMP, M_NOWAIT | M_ZERO);
+
+	<span class="enscript-comment">/* create name according to sysctl'able format string */</span>
+	<span class="enscript-comment">/* if name creation fails, fall back to historical behaviour... */</span>
+	<span class="enscript-keyword">if</span> (alloced_name == NULL ||
+	    proc_core_name(core_proc-&gt;p_comm, kauth_cred_getuid(cred),
+			   core_proc-&gt;p_pid, alloced_name, MAXPATHLEN)) {
+		snprintf(stack_name, <span class="enscript-keyword">sizeof</span>(stack_name),
+			 <span class="enscript-string">&quot;/cores/core.%d&quot;</span>, core_proc-&gt;p_pid);
+		name = stack_name;
+	} <span class="enscript-keyword">else</span>
+		name = alloced_name;
+
+	<span class="enscript-keyword">if</span> ((error = vnode_open(name, (O_CREAT | FWRITE | O_NOFOLLOW), S_IRUSR, VNODE_LOOKUP_NOFOLLOW, &amp;vp, ctx)))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out2</span>;
+
+	VATTR_INIT(&amp;va);
+	VATTR_WANTED(&amp;va, va_nlink);
+	<span class="enscript-comment">/* Don't dump to non-regular files or files with links. */</span>
+	<span class="enscript-keyword">if</span> (vp-&gt;v_type != VREG ||
+	    vnode_getattr(vp, &amp;va, ctx) || va.va_nlink != 1) {
+		error = EFAULT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	VATTR_INIT(&amp;va);	<span class="enscript-comment">/* better to do it here than waste more stack in vnode_setsize */</span>
+	VATTR_SET(&amp;va, va_data_size, 0);
+	vnode_setattr(vp, &amp;va, ctx);
+	core_proc-&gt;p_acflag |= ACORE;
+
+	<span class="enscript-keyword">if</span> ((reserve_mb &gt; 0) &amp;&amp;
+	    ((freespace_mb(vp) - (mapsize &gt;&gt; 20)) &lt; reserve_mb)) {
+		error = ENOSPC;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 *	If the task is modified while dumping the file
+	 *	(e.g., changes in threads or VM, the resulting
+	 *	file will not necessarily be correct.
+	 */</span>
+
+	thread_count = get_task_numacts(task);
+	segment_count = get_vmmap_entries(map);	<span class="enscript-comment">/* XXX */</span>
+	tir1.flavor_count = <span class="enscript-keyword">sizeof</span>(thread_flavor_array)/<span class="enscript-keyword">sizeof</span>(mythread_state_flavor_t);
+	bcopy(thread_flavor_array, flavors,<span class="enscript-keyword">sizeof</span>(thread_flavor_array));
+	tstate_size = 0;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; tir1.flavor_count; i++)
+		tstate_size += <span class="enscript-keyword">sizeof</span>(mythread_state_flavor_t) +
+		  (flavors[i].count * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+	command_size = segment_count * segment_command_sz +
+	  thread_count*<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_command) +
+	  tstate_size*thread_count;
+
+	header_size = command_size + mach_header_sz;
+
+	<span class="enscript-keyword">if</span> (kmem_alloc(kernel_map, &amp;header, (vm_size_t)header_size, VM_KERN_MEMORY_DIAG) != KERN_SUCCESS) {
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 *	Set up Mach-O header.
+	 */</span>
+	<span class="enscript-keyword">if</span> (is_64) {
+		mh64 = (<span class="enscript-type">struct</span> mach_header_64 *)header;
+		mh64-&gt;magic = MH_MAGIC_64;
+		mh64-&gt;cputype = process_cpu_type(core_proc);
+		mh64-&gt;cpusubtype = process_cpu_subtype(core_proc);
+		mh64-&gt;filetype = MH_CORE;
+		mh64-&gt;ncmds = segment_count + thread_count;
+		mh64-&gt;sizeofcmds = command_size;
+		mh64-&gt;reserved = 0;		<span class="enscript-comment">/* 8 byte alignment */</span>
+	} <span class="enscript-keyword">else</span> {
+		mh = (<span class="enscript-type">struct</span> mach_header *)header;
+		mh-&gt;magic = MH_MAGIC;
+		mh-&gt;cputype = process_cpu_type(core_proc);
+		mh-&gt;cpusubtype = process_cpu_subtype(core_proc);
+		mh-&gt;filetype = MH_CORE;
+		mh-&gt;ncmds = segment_count + thread_count;
+		mh-&gt;sizeofcmds = command_size;
+	}
+
+	hoffset = mach_header_sz;	<span class="enscript-comment">/* offset into header */</span>
+	foffset = round_page(header_size);	<span class="enscript-comment">/* offset into file */</span>
+	vmoffset = MACH_VM_MIN_ADDRESS;		<span class="enscript-comment">/* offset into VM */</span>
+
+	<span class="enscript-comment">/*
+	 * We use to check for an error, here, now we try and get 
+	 * as much as we can
+	 */</span>
+	<span class="enscript-keyword">while</span> (segment_count &gt; 0) {
+		<span class="enscript-type">struct</span> segment_command		*sc;
+		<span class="enscript-type">struct</span> segment_command_64	*sc64;
+
+		<span class="enscript-comment">/*
+		 *	Get region information for next region.
+		 */</span>
+		
+		<span class="enscript-keyword">while</span> (1) {
+			vbrcount = VM_REGION_SUBMAP_INFO_COUNT_64;
+			<span class="enscript-keyword">if</span>((kret = mach_vm_region_recurse(map, 
+					&amp;vmoffset, &amp;vmsize, &amp;nesting_depth, 
+					(vm_region_recurse_info_t)&amp;vbr,
+					&amp;vbrcount)) != KERN_SUCCESS) {
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-comment">/*
+			 * If we get a valid mapping back, but we're dumping
+			 * a 32 bit process,  and it's over the allowable
+			 * address space of a 32 bit process, it's the same
+			 * as if mach_vm_region_recurse() failed.
+			 */</span>
+			<span class="enscript-keyword">if</span> (!(is_64) &amp;&amp;
+			    (vmoffset + vmsize &gt; VM_MAX_ADDRESS)) {
+			    	kret = KERN_INVALID_ADDRESS;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span>(vbr.is_submap) {
+				nesting_depth++;
+				<span class="enscript-keyword">continue</span>;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+		<span class="enscript-keyword">if</span>(kret != KERN_SUCCESS)
+			<span class="enscript-keyword">break</span>;
+
+		prot = vbr.protection;
+		maxprot = vbr.max_protection;
+		inherit = vbr.inheritance;
+		<span class="enscript-comment">/*
+		 *	Fill in segment command structure.
+		 */</span>
+		<span class="enscript-keyword">if</span> (is_64) {
+			sc64 = (<span class="enscript-type">struct</span> segment_command_64 *)(header + hoffset);
+			sc64-&gt;cmd = LC_SEGMENT_64;
+			sc64-&gt;cmdsize = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> segment_command_64);
+			<span class="enscript-comment">/* segment name is zeroed by kmem_alloc */</span>
+			sc64-&gt;segname[0] = 0;
+			sc64-&gt;vmaddr = vmoffset;
+			sc64-&gt;vmsize = vmsize;
+			sc64-&gt;fileoff = foffset;
+			sc64-&gt;filesize = vmsize;
+			sc64-&gt;maxprot = maxprot;
+			sc64-&gt;initprot = prot;
+			sc64-&gt;nsects = 0;
+			sc64-&gt;flags = 0;
+		} <span class="enscript-keyword">else</span>  {
+			sc = (<span class="enscript-type">struct</span> segment_command *) (header + hoffset);
+			sc-&gt;cmd = LC_SEGMENT;
+			sc-&gt;cmdsize = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> segment_command);
+			<span class="enscript-comment">/* segment name is zeroed by kmem_alloc */</span>
+			sc-&gt;segname[0] = 0;
+			sc-&gt;vmaddr = CAST_DOWN_EXPLICIT(vm_offset_t,vmoffset);
+			sc-&gt;vmsize = CAST_DOWN_EXPLICIT(vm_size_t,vmsize);
+			sc-&gt;fileoff = CAST_DOWN_EXPLICIT(uint32_t,foffset); <span class="enscript-comment">/* will never truncate */</span>
+			sc-&gt;filesize = CAST_DOWN_EXPLICIT(uint32_t,vmsize); <span class="enscript-comment">/* will never truncate */</span>
+			sc-&gt;maxprot = maxprot;
+			sc-&gt;initprot = prot;
+			sc-&gt;nsects = 0;
+			sc-&gt;flags = 0;
+		}
+
+		<span class="enscript-comment">/*
+		 *	Write segment out.  Try as hard as possible to
+		 *	get read access to the data.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((prot &amp; VM_PROT_READ) == 0) {
+			mach_vm_protect(map, vmoffset, vmsize, FALSE,
+					   prot|VM_PROT_READ);
+		}
+		<span class="enscript-comment">/*
+		 *	Only actually perform write if we can read.
+		 *	Note: if we can't read, then we end up with
+		 *	a hole in the file.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((maxprot &amp; VM_PROT_READ) == VM_PROT_READ
+			&amp;&amp; vbr.user_tag != VM_MEMORY_IOKIT
+			&amp;&amp; coredumpok(map,vmoffset)) {
+			
+			error = vn_rdwr_64(UIO_WRITE, vp, vmoffset, vmsize, foffset,
+					(IS_64BIT_PROCESS(core_proc) ? UIO_USERSPACE64 : UIO_USERSPACE32), 
+					IO_NOCACHE|IO_NODELOCKED|IO_UNIT, cred, (int64_t *) 0, core_proc);
+
+		}
+
+		hoffset += segment_command_sz;
+		foffset += vmsize;
+		vmoffset += vmsize;
+		segment_count--;
+	}
+
+	<span class="enscript-comment">/*
+	 * If there are remaining segments which have not been written
+	 * out because break in the loop above, then they were not counted
+	 * because they exceed the real address space of the executable
+	 * type: remove them from the header's count.  This is OK, since
+	 * we are allowed to have a sparse area following the segments.
+	 */</span>
+	<span class="enscript-keyword">if</span> (is_64) {
+		mh64-&gt;ncmds -= segment_count;
+		mh64-&gt;sizeofcmds -= segment_count * segment_command_sz;
+	} <span class="enscript-keyword">else</span> {
+		mh-&gt;ncmds -= segment_count;
+		mh-&gt;sizeofcmds -= segment_count * segment_command_sz;
+	}
+
+	tir1.header = header;
+	tir1.hoffset = hoffset;
+	tir1.flavors = flavors;
+	tir1.tstate_size = tstate_size;
+	task_act_iterate_wth_args(task, collectth_state,&amp;tir1);
+
+	<span class="enscript-comment">/*
+	 *	Write out the Mach header at the beginning of the
+	 *	file.  OK to use a 32 bit write for this.
+	 */</span>
+	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)header, header_size, (off_t)0,
+			UIO_SYSSPACE, IO_NOCACHE|IO_NODELOCKED|IO_UNIT, cred, (<span class="enscript-type">int</span> *) 0, core_proc);
+	kmem_free(kernel_map, header, header_size);
+
+	<span class="enscript-keyword">if</span> ((coredump_flags &amp; COREDUMP_FULLFSYNC) &amp;&amp; error == 0)
+		error = VNOP_IOCTL(vp, F_FULLFSYNC, (caddr_t)NULL, 0, ctx);
+<span class="enscript-reference">out</span>:
+	error1 = vnode_close(vp, FWRITE, ctx);
+<span class="enscript-reference">out2</span>:
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_AUDIT</span>
+	audit_proc_coredump(core_proc, name, error);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (alloced_name != NULL)
+		FREE(alloced_name, M_TEMP);
+	<span class="enscript-keyword">if</span> (error == 0)
+		error = error1;
+
+	<span class="enscript-keyword">return</span> (error);
+}
+</pre>
+<hr />
+</body></html>

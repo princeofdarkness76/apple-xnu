@@ -1,0 +1,111 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>test_fault_helper.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">test_fault_helper.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;test_fault_helper.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;fail.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mman.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;TargetConditionals.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MEMSIZE</span> (1L&lt;&lt;30)
+
+<span class="enscript-type">static</span> <span class="enscript-type">char</span>* memblock;
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">test_fault_setup</span>() {
+    <span class="enscript-type">char</span> *ptr;
+    <span class="enscript-type">int</span> pgsz = getpagesize();
+    <span class="enscript-type">int</span> retval;
+
+    memblock = (<span class="enscript-type">char</span> *)mmap(NULL, MEMSIZE, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+    VERIFY(memblock != MAP_FAILED, <span class="enscript-string">&quot;mmap failed&quot;</span>);
+
+    <span class="enscript-comment">/* make sure memory is paged */</span>
+    <span class="enscript-keyword">for</span>(ptr = memblock; ptr&lt;memblock+MEMSIZE; ptr+= pgsz) {
+        *ptr = 1;
+    }
+
+    <span class="enscript-comment">/* set to read only, then back to read write so it faults on first write */</span>
+    retval = mprotect(memblock, MEMSIZE, PROT_READ);
+    VERIFY(retval == 0, <span class="enscript-string">&quot;mprotect failed&quot;</span>);
+
+    retval = mprotect(memblock, MEMSIZE, PROT_READ | PROT_WRITE);
+    VERIFY(retval == 0, <span class="enscript-string">&quot;mprotect failed&quot;</span>);
+
+    <span class="enscript-keyword">return</span> PERFINDEX_SUCCESS;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">test_fault_helper</span>(<span class="enscript-type">int</span> thread_id, <span class="enscript-type">int</span> num_threads, <span class="enscript-type">long</span> <span class="enscript-type">long</span> length, testtype_t testtype) {
+    <span class="enscript-type">char</span> *ptr;
+    <span class="enscript-type">int</span> pgsz = getpagesize();
+    <span class="enscript-type">int</span> retval;
+
+    <span class="enscript-type">long</span> <span class="enscript-type">long</span> num_pages = MEMSIZE / pgsz;
+    <span class="enscript-type">long</span> <span class="enscript-type">long</span> region_len = num_pages/num_threads;
+    <span class="enscript-type">long</span> <span class="enscript-type">long</span> region_start = region_len * thread_id; 
+    <span class="enscript-type">long</span> <span class="enscript-type">long</span> region_end;
+
+    <span class="enscript-keyword">if</span>(thread_id &lt; num_pages % num_threads) {
+        region_start += thread_id;
+        region_len++;
+    }
+    <span class="enscript-keyword">else</span> {
+        region_start += num_pages % num_threads;
+    }
+
+    region_start *= pgsz;
+    region_len *= pgsz;
+    region_end = region_start + region_len;
+
+    <span class="enscript-type">long</span> <span class="enscript-type">long</span> left = length;
+
+    <span class="enscript-keyword">while</span>(1) {
+        <span class="enscript-keyword">for</span>(ptr = memblock+region_start; ptr&lt;memblock+region_end; ptr+= pgsz) {
+            *ptr = 1;
+            left--;
+            <span class="enscript-keyword">if</span>(left==0)
+                <span class="enscript-keyword">break</span>;
+        }
+
+        <span class="enscript-keyword">if</span>(left==0)
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">if</span>(testtype == TESTFAULT) {
+            retval = mprotect(memblock+region_start, region_len, PROT_READ) == 0;
+            VERIFY(retval == 0, <span class="enscript-string">&quot;mprotect failed&quot;</span>);
+            retval = mprotect(memblock+region_start, region_len, PROT_READ | PROT_WRITE) == 0;
+            VERIFY(retval == 0, <span class="enscript-string">&quot;mprotect failed&quot;</span>);
+        }
+
+        <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span>(testtype == TESTZFOD) {
+            retval = munmap(memblock+region_start, region_len) == 0;
+            VERIFY(retval == 0, <span class="enscript-string">&quot;munmap failed&quot;</span>);
+            ptr = mmap(memblock+region_start, region_len, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE | MAP_FIXED, -1, 0);
+            VERIFY(ptr != 0, <span class="enscript-string">&quot;mmap failed&quot;</span>);
+        }
+    }
+    <span class="enscript-keyword">return</span> PERFINDEX_SUCCESS;
+}
+</pre>
+<hr />
+</body></html>

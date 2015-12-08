@@ -1,0 +1,1700 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kxld_reloc.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kxld_reloc.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007-2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KERNEL</span>
+    #include &lt;libkern/libkern.h&gt;
+    #include &lt;mach/machine.h&gt;
+#<span class="enscript-reference">else</span>
+    #include &lt;stdlib.h&gt;
+    #include &lt;libkern/OSByteOrder.h&gt;
+
+    <span class="enscript-comment">/* Get machine.h from the kernel source so we can support all platforms
+     * that the kernel supports. Otherwise we're at the mercy of the host.
+     */</span>
+    #include <span class="enscript-string">&quot;../../osfmk/mach/machine.h&quot;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEBUG_ASSERT_COMPONENT_NAME_STRING</span> <span class="enscript-string">&quot;kxld&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;AssertMacros.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_array.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_demangle.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_dict.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_reloc.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_sect.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_seg.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_sym.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_symtab.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_util.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_vtable.h&quot;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_PIC_KEXTS</span>
+<span class="enscript-comment">/* This will try to pull in mach/machine.h, so it has to come after the
+ * explicit include above.
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/loader.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* include target-specific relocation prototypes */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/reloc.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_X86_64</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/x86_64/reloc.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ARM</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/arm/reloc.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ARM64</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/arm64/reloc.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KXLD_TARGET_NONE</span>        (u_int) 0x0
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KXLD_TARGET_VALUE</span>       (u_int) 0x1
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KXLD_TARGET_SECTNUM</span>     (u_int) 0x2
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KXLD_TARGET_SYMBOLNUM</span>   (u_int) 0x3
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KXLD_TARGET_LOOKUP</span>      (u_int) 0x4
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KXLD_TARGET_GOT</span>         (u_int) 0x5
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ABSOLUTE_VALUE</span>(x) (((x) &lt; 0) ? -(x) : (x))
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">LO16</span>(x) (0x0000FFFF &amp; x)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">LO16S</span>(x) ((0x0000FFFF &amp; x) &lt;&lt; 16)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">HI16</span>(x) (0xFFFF0000 &amp; x)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">HI16S</span>(x) ((0xFFFF0000 &amp; x) &gt;&gt; 16)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">BIT15</span>(x) (0x00008000 &amp; x)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">BR14I</span>(x) (0xFFFF0003 &amp; x)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">BR14D</span>(x) (0x0000FFFC &amp; x)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">BR24I</span>(x) (0xFC000003 &amp; x)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">BR24D</span>(x) (0x03FFFFFC &amp; x)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">HADISP</span> 0x00010000
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BR14_LIMIT</span> 0x00008000
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BR24_LIMIT</span> 0x02000000
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IS_COND_BR_INSTR</span>(x) ((x &amp; 0xFC000000) == 0x40000000)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IS_NOT_ALWAYS_TAKEN</span>(x) ((x &amp; 0x03E00000) != 0x02800000)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">FLIP_PREDICT_BIT</span>(x) x ^= 0x00200000
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SIGN_EXTEND_MASK</span>(n) (1 &lt;&lt; ((n) - 1))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SIGN_EXTEND</span>(x,n) (((x) ^ SIGN_EXTEND_MASK(n)) - SIGN_EXTEND_MASK(n))
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BR14_NBITS_DISPLACEMENT</span> 16
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BR24_NBITS_DISPLACEMENT</span> 26
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">X86_64_RIP_RELATIVE_LIMIT</span> 0x80000000UL
+
+<span class="enscript-comment">/*******************************************************************************
+* Prototypes
+*******************************************************************************/</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_I386</span>
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">generic_reloc_has_pair</span>(u_int _type) 
+    __attribute__((<span class="enscript-type">const</span>));
+<span class="enscript-type">static</span> u_int <span class="enscript-function-name">generic_reloc_get_pair_type</span>(u_int _prev_type)
+    __attribute__((<span class="enscript-type">const</span>));
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">generic_reloc_has_got</span>(u_int _type)
+    __attribute__((<span class="enscript-type">const</span>));
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">generic_process_reloc</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator,
+    u_char *instruction, u_int length, u_int pcrel, kxld_addr_t base_pc, 
+    kxld_addr_t link_pc, kxld_addr_t link_disp, u_int type, kxld_addr_t target, 
+    kxld_addr_t pair_target, boolean_t swap);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_I386 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_X86_64</span> 
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">x86_64_reloc_has_pair</span>(u_int _type) 
+    __attribute__((<span class="enscript-type">const</span>));
+<span class="enscript-type">static</span> u_int <span class="enscript-function-name">x86_64_reloc_get_pair_type</span>(u_int _prev_type) 
+    __attribute__((<span class="enscript-type">const</span>));
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">x86_64_reloc_has_got</span>(u_int _type)
+    __attribute__((<span class="enscript-type">const</span>));
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">x86_64_process_reloc</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, 
+    u_char *instruction, u_int length, u_int pcrel, kxld_addr_t base_pc, 
+    kxld_addr_t link_pc, kxld_addr_t link_disp, u_int type, kxld_addr_t target, 
+    kxld_addr_t pair_target, boolean_t swap);
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">calculate_displacement_x86_64</span>(uint64_t target, 
+    uint64_t adjustment, int32_t *instr32);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_X86_64 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ARM</span>
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">arm_reloc_has_pair</span>(u_int _type) 
+    __attribute__((<span class="enscript-type">const</span>));
+<span class="enscript-type">static</span> u_int <span class="enscript-function-name">arm_reloc_get_pair_type</span>(u_int _prev_type) 
+    __attribute__((<span class="enscript-type">const</span>));
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">arm_reloc_has_got</span>(u_int _type)
+    __attribute__((<span class="enscript-type">const</span>));
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">arm_process_reloc</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, 
+    u_char *instruction, u_int length, u_int pcrel, kxld_addr_t base_pc, 
+    kxld_addr_t link_pc, kxld_addr_t link_disp, u_int type, kxld_addr_t target, 
+    kxld_addr_t pair_target, boolean_t swap);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_ARM */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ARM64</span>
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">arm64_reloc_has_pair</span>(u_int _type) 
+    __attribute__((<span class="enscript-type">const</span>));
+<span class="enscript-type">static</span> u_int <span class="enscript-function-name">arm64_reloc_get_pair_type</span>(u_int _prev_type) 
+    __attribute__((<span class="enscript-type">const</span>));
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">arm64_reloc_has_got</span>(u_int _type)
+    __attribute__((<span class="enscript-type">const</span>));
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">arm64_process_reloc</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, 
+    u_char *instruction, u_int length, u_int pcrel, kxld_addr_t base_pc, 
+    kxld_addr_t link_pc, kxld_addr_t link_disp, u_int type, kxld_addr_t target, 
+    kxld_addr_t pair_target, boolean_t swap);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_ARM64 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ILP32</span>
+<span class="enscript-type">static</span> kxld_addr_t <span class="enscript-function-name">get_pointer_at_addr_32</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, 
+    <span class="enscript-type">const</span> u_char *data, u_long offset)
+    __attribute__((pure, nonnull));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_ILP32 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_LP64</span>
+<span class="enscript-type">static</span> kxld_addr_t <span class="enscript-function-name">get_pointer_at_addr_64</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, 
+    <span class="enscript-type">const</span> u_char *data, u_long offset)
+    __attribute__((pure, nonnull));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_LP64 */</span>
+
+<span class="enscript-type">static</span> u_int <span class="enscript-function-name">count_relocatable_relocs</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, 
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> relocation_info *relocs, u_int nrelocs)
+    __attribute__((pure));
+
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">calculate_targets</span>(KXLDRelocator *relocator, 
+    kxld_addr_t *_target, kxld_addr_t *_pair_target, <span class="enscript-type">const</span> KXLDReloc *reloc);
+
+<span class="enscript-type">static</span> kxld_addr_t <span class="enscript-function-name">align_raw_function_address</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, 
+    kxld_addr_t value);
+
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">get_target_by_address_lookup</span>(kxld_addr_t *target, 
+    kxld_addr_t addr, <span class="enscript-type">const</span> KXLDArray *sectarray);
+
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">check_for_direct_pure_virtual_call</span>(
+    <span class="enscript-type">const</span> KXLDRelocator *relocator, u_long offset);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_PIC_KEXTS</span>
+<span class="enscript-type">static</span> u_long <span class="enscript-function-name">get_macho_data_size_for_array</span>(<span class="enscript-type">const</span> KXLDArray *relocs);
+
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">export_macho_for_array</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator,
+    <span class="enscript-type">const</span> KXLDArray *relocs, <span class="enscript-type">struct</span> relocation_info **dstp);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_PIC_KEXTS */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t 
+<span class="enscript-function-name">kxld_relocator_init</span>(KXLDRelocator *relocator, u_char *file,
+    <span class="enscript-type">const</span> KXLDSymtab *symtab, <span class="enscript-type">const</span> KXLDArray *sectarray, cpu_type_t cputype, 
+    cpu_subtype_t cpusubtype __unused, boolean_t swap)
+{
+    kern_return_t rval = KERN_FAILURE;
+
+    check(relocator);
+
+    <span class="enscript-keyword">switch</span>(cputype) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_I386</span>
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">CPU_TYPE_I386</span>:
+        relocator-&gt;reloc_has_pair = generic_reloc_has_pair;
+        relocator-&gt;reloc_get_pair_type = generic_reloc_get_pair_type;
+        relocator-&gt;reloc_has_got = generic_reloc_has_got;
+        relocator-&gt;process_reloc = generic_process_reloc;
+        relocator-&gt;function_align = 0;
+        relocator-&gt;is_32_bit = TRUE;
+        relocator-&gt;may_scatter = TRUE;
+        <span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_I386 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_X86_64</span>
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">CPU_TYPE_X86_64</span>:
+        relocator-&gt;reloc_has_pair = x86_64_reloc_has_pair;
+        relocator-&gt;reloc_get_pair_type = x86_64_reloc_get_pair_type;
+        relocator-&gt;reloc_has_got = x86_64_reloc_has_got;
+        relocator-&gt;process_reloc = x86_64_process_reloc;
+        relocator-&gt;function_align = 0;
+        relocator-&gt;is_32_bit = FALSE;
+        relocator-&gt;may_scatter = FALSE;
+        <span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_X86_64 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ARM</span>
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">CPU_TYPE_ARM</span>:
+        relocator-&gt;reloc_has_pair = arm_reloc_has_pair;
+        relocator-&gt;reloc_get_pair_type = arm_reloc_get_pair_type;
+        relocator-&gt;reloc_has_got = arm_reloc_has_got;
+        relocator-&gt;process_reloc = arm_process_reloc;
+        relocator-&gt;function_align = 1;
+        relocator-&gt;is_32_bit = TRUE;
+        relocator-&gt;may_scatter = FALSE;
+        <span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_ARM */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ARM64</span>
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">CPU_TYPE_ARM64</span>:
+        relocator-&gt;reloc_has_pair = arm64_reloc_has_pair;
+        relocator-&gt;reloc_get_pair_type = arm64_reloc_get_pair_type;
+        relocator-&gt;reloc_has_got = arm64_reloc_has_got;
+        relocator-&gt;process_reloc = arm64_process_reloc;
+        relocator-&gt;function_align = 0;
+        relocator-&gt;is_32_bit = FALSE;
+        relocator-&gt;may_scatter = FALSE;
+        <span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_ARM64 */</span>
+
+    <span class="enscript-reference">default</span>:
+        rval = KERN_FAILURE;
+        kxld_log(kKxldLogLinking, kKxldLogErr,
+            kKxldLogArchNotSupported, cputype);
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    relocator-&gt;file = file;
+    relocator-&gt;symtab = symtab;
+    relocator-&gt;sectarray = sectarray;
+    relocator-&gt;is_32_bit = kxld_is_32_bit(cputype);
+    relocator-&gt;swap = swap;
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_reloc_create_macho</span>(KXLDArray *relocarray, <span class="enscript-type">const</span> KXLDRelocator *relocator, 
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> relocation_info *srcs, u_int nsrcs)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDReloc *reloc = NULL;
+    u_int nrelocs = 0;
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> relocation_info *src = NULL;
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> scattered_relocation_info *scatsrc = NULL;
+    u_int i = 0;
+    u_int reloc_index = 0;
+
+    check(relocarray);
+    check(srcs);
+
+    <span class="enscript-comment">/* If there are no relocation entries, just return */</span>
+    <span class="enscript-keyword">if</span> (!nsrcs) {
+        rval = KERN_SUCCESS;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    <span class="enscript-comment">/* Count the number of non-pair relocs */</span>
+    nrelocs = count_relocatable_relocs(relocator, srcs, nsrcs);
+
+    <span class="enscript-keyword">if</span> (nrelocs) {
+
+        <span class="enscript-comment">/* Allocate the array of relocation entries */</span>
+
+        rval = kxld_array_init(relocarray, <span class="enscript-keyword">sizeof</span>(KXLDReloc), nrelocs);
+        require_noerr(rval, finish);
+
+        <span class="enscript-comment">/* Initialize the relocation entries */</span>
+        
+        <span class="enscript-keyword">for</span> (i = 0; i &lt; nsrcs; ++i) {
+            src = srcs + i;
+            scatsrc = (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> scattered_relocation_info *) src;
+
+            <span class="enscript-comment">/* A section-based relocation entry can be skipped for absolute 
+             * symbols.
+             */</span>
+
+            <span class="enscript-keyword">if</span> (!(relocator-&gt;may_scatter &amp;&amp; (src-&gt;r_address &amp; R_SCATTERED)) &amp;&amp;
+                !(src-&gt;r_extern) &amp;&amp; (R_ABS == src-&gt;r_symbolnum))
+            {
+                <span class="enscript-keyword">continue</span>;
+            }
+            
+            <span class="enscript-comment">/* Pull out the data from the relocation entries.  The target_type
+             * depends on the r_extern bit:
+             *  Scattered -&gt; Section Lookup by Address
+             *  Local (not extern) -&gt; Section by Index
+             *  Extern -&gt; Symbolnum by Index
+             */</span>
+            reloc = kxld_array_get_item(relocarray, reloc_index++);
+            <span class="enscript-keyword">if</span> (relocator-&gt;may_scatter &amp;&amp; (src-&gt;r_address &amp; R_SCATTERED)) {
+                reloc-&gt;address = scatsrc-&gt;r_address;
+                reloc-&gt;pcrel = scatsrc-&gt;r_pcrel;
+                reloc-&gt;length = scatsrc-&gt;r_length;
+                reloc-&gt;reloc_type = scatsrc-&gt;r_type;
+                reloc-&gt;target = scatsrc-&gt;r_value;
+                reloc-&gt;target_type = KXLD_TARGET_LOOKUP;
+            } <span class="enscript-keyword">else</span> {
+                reloc-&gt;address = src-&gt;r_address;
+                reloc-&gt;pcrel = src-&gt;r_pcrel;
+                reloc-&gt;length = src-&gt;r_length;
+                reloc-&gt;reloc_type = src-&gt;r_type;
+                reloc-&gt;target = src-&gt;r_symbolnum;
+
+                <span class="enscript-keyword">if</span> (0 == src-&gt;r_extern) {
+                    reloc-&gt;target_type = KXLD_TARGET_SECTNUM;
+                    reloc-&gt;target -= 1;
+                } <span class="enscript-keyword">else</span> {
+                    reloc-&gt;target_type = KXLD_TARGET_SYMBOLNUM;
+                }
+            }
+            
+            <span class="enscript-comment">/* Find the pair entry if it exists */</span>
+
+            <span class="enscript-keyword">if</span> (relocator-&gt;reloc_has_pair(reloc-&gt;reloc_type)) {
+                ++i;
+                require_action(i &lt; nsrcs, finish, rval=KERN_FAILURE);
+
+                src = srcs + i;
+                scatsrc = (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> scattered_relocation_info *) src;
+                 
+                <span class="enscript-keyword">if</span> (relocator-&gt;may_scatter &amp;&amp; (src-&gt;r_address &amp; R_SCATTERED)) {
+                    require_action(relocator-&gt;reloc_get_pair_type(
+                        reloc-&gt;reloc_type) == scatsrc-&gt;r_type,
+                        finish, rval=KERN_FAILURE);
+                    reloc-&gt;pair_address= scatsrc-&gt;r_address;
+                    reloc-&gt;pair_target = scatsrc-&gt;r_value;
+                    reloc-&gt;pair_target_type = KXLD_TARGET_LOOKUP;
+                } <span class="enscript-keyword">else</span> {
+                    require_action(relocator-&gt;reloc_get_pair_type(
+                        reloc-&gt;reloc_type) == scatsrc-&gt;r_type,
+                        finish, rval=KERN_FAILURE);
+                    reloc-&gt;pair_address = scatsrc-&gt;r_address;
+                    <span class="enscript-keyword">if</span> (src-&gt;r_extern) {
+                        reloc-&gt;pair_target = src-&gt;r_symbolnum;
+                        reloc-&gt;pair_target_type = KXLD_TARGET_SYMBOLNUM;
+                    } <span class="enscript-keyword">else</span> {
+                        reloc-&gt;pair_target = src-&gt;r_address;
+                        reloc-&gt;pair_target_type = KXLD_TARGET_VALUE;
+                    }
+                }
+            } <span class="enscript-keyword">else</span> {
+                reloc-&gt;pair_target = 0;
+                <span class="enscript-keyword">if</span> (relocator-&gt;reloc_has_got(reloc-&gt;reloc_type)) {
+                   reloc-&gt;pair_target_type = KXLD_TARGET_GOT;
+                } <span class="enscript-keyword">else</span> {
+                   reloc-&gt;pair_target_type = KXLD_TARGET_NONE;
+                }
+            }
+        }
+    }
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+
+<span class="enscript-comment">/*******************************************************************************
+* Relocatable relocs :
+*   1) Are not _PAIR_ relocs
+*   2) Don't reference N_ABS symbols
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> u_int
+<span class="enscript-function-name">count_relocatable_relocs</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, 
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> relocation_info *relocs, u_int nrelocs)
+{
+    u_int num_nonpair_relocs = 0;
+    u_int i = 0;
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> relocation_info *reloc = NULL;
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> scattered_relocation_info *sreloc = NULL;
+
+    check(relocator);
+    check(relocs);
+
+    <span class="enscript-comment">/* Loop over all of the relocation entries */</span>
+
+    num_nonpair_relocs = 1;
+    <span class="enscript-keyword">for</span> (i = 1; i &lt; nrelocs; ++i) {
+        reloc = relocs + i;
+
+        <span class="enscript-keyword">if</span> (reloc-&gt;r_address &amp; R_SCATTERED) {
+            <span class="enscript-comment">/* A scattered relocation entry is relocatable as long as it's not a
+             * pair.
+             */</span>
+            sreloc = (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> scattered_relocation_info *) reloc;
+
+            num_nonpair_relocs += 
+                !relocator-&gt;reloc_has_pair(sreloc-&gt;r_type);
+        } <span class="enscript-keyword">else</span> {
+            <span class="enscript-comment">/* A normal relocation entry is relocatable if it is not a pair and
+             * if it is not a section-based relocation for an absolute symbol.
+             */</span>
+            num_nonpair_relocs += 
+                !(relocator-&gt;reloc_has_pair(reloc-&gt;r_type)
+                 || (0 == reloc-&gt;r_extern &amp;&amp; R_ABS == reloc-&gt;r_symbolnum));
+        }
+
+    }
+    
+    <span class="enscript-keyword">return</span> num_nonpair_relocs;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_relocator_clear</span>(KXLDRelocator *relocator)
+{
+    bzero(relocator, <span class="enscript-keyword">sizeof</span>(*relocator));
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t 
+<span class="enscript-function-name">kxld_relocator_has_pair</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, u_int r_type)
+{
+    check(relocator);
+
+    <span class="enscript-keyword">return</span> relocator-&gt;reloc_has_pair(r_type);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_int 
+<span class="enscript-function-name">kxld_relocator_get_pair_type</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator,
+    u_int prev_r_type)
+{
+    check(relocator);
+
+    <span class="enscript-keyword">return</span> relocator-&gt;reloc_get_pair_type(prev_r_type);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t 
+<span class="enscript-function-name">kxld_relocator_has_got</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, u_int r_type)
+{
+    check(relocator);
+
+    <span class="enscript-keyword">return</span> relocator-&gt;reloc_has_got(r_type);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+KXLDSym *
+<span class="enscript-function-name">kxld_reloc_get_symbol</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, <span class="enscript-type">const</span> KXLDReloc *reloc,
+    <span class="enscript-type">const</span> u_char *data)
+{
+    KXLDSym *sym = NULL;
+    kxld_addr_t value = 0;
+
+    check(reloc);
+
+    <span class="enscript-keyword">switch</span> (reloc-&gt;target_type) {
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">KXLD_TARGET_SYMBOLNUM</span>:
+        sym = kxld_symtab_get_symbol_by_index(relocator-&gt;symtab, reloc-&gt;target);
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">KXLD_TARGET_SECTNUM</span>:
+        <span class="enscript-keyword">if</span> (data) { 
+            value = kxld_relocator_get_pointer_at_addr(relocator, data, 
+                reloc-&gt;address);
+            sym = kxld_symtab_get_cxx_symbol_by_value(relocator-&gt;symtab, value);           
+        }
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-reference">default</span>:
+        sym = NULL;
+        <span class="enscript-keyword">break</span>;
+    }
+
+    <span class="enscript-keyword">return</span> sym;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_reloc_get_reloc_index_by_offset</span>(<span class="enscript-type">const</span> KXLDArray *relocs, 
+    kxld_size_t offset, u_int *idx)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDReloc *reloc = NULL;
+    u_int i = 0;
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; relocs-&gt;nitems; ++i) {
+        reloc = kxld_array_get_item(relocs, i);
+        <span class="enscript-keyword">if</span> (reloc-&gt;address == offset) <span class="enscript-keyword">break</span>;
+    }
+    
+    <span class="enscript-keyword">if</span> (i &gt;= relocs-&gt;nitems) {
+        rval = KERN_FAILURE;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    *idx = i;
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+KXLDReloc *
+<span class="enscript-function-name">kxld_reloc_get_reloc_by_offset</span>(<span class="enscript-type">const</span> KXLDArray *relocs, kxld_addr_t offset)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDReloc *reloc = NULL;
+    u_int i = 0;
+
+    rval = kxld_reloc_get_reloc_index_by_offset(relocs, offset, &amp;i);
+    <span class="enscript-keyword">if</span> (rval) <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+
+    reloc = kxld_array_get_item(relocs, i);
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> reloc;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_PIC_KEXTS</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_long
+<span class="enscript-function-name">kxld_reloc_get_macho_header_size</span>()
+{
+    <span class="enscript-keyword">return</span> <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dysymtab_command);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_long
+<span class="enscript-function-name">kxld_reloc_get_macho_data_size</span>(<span class="enscript-type">const</span> KXLDArray *locrelocs,
+    <span class="enscript-type">const</span> KXLDArray *extrelocs)
+{
+    u_long    rval = 0;
+
+    rval += get_macho_data_size_for_array(locrelocs);
+    rval += get_macho_data_size_for_array(extrelocs);
+
+    <span class="enscript-keyword">return</span> (rval);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_reloc_export_macho</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator,
+    <span class="enscript-type">const</span> KXLDArray *locrelocs, <span class="enscript-type">const</span> KXLDArray *extrelocs,
+    u_char *buf, u_long *header_offset, u_long header_size,
+    u_long *data_offset, u_long size)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">struct</span> dysymtab_command *dysymtabhdr = NULL;
+    <span class="enscript-type">struct</span> relocation_info *start = NULL;
+    <span class="enscript-type">struct</span> relocation_info *dst = NULL;
+    u_long count = 0;
+    u_long data_size = 0;
+
+    check(locrelocs);
+    check(extrelocs);
+    check(buf);
+    check(header_offset);
+    check(data_offset);
+
+    require_action(<span class="enscript-keyword">sizeof</span>(*dysymtabhdr) &lt;= header_size - *header_offset, finish, rval=KERN_FAILURE);
+    dysymtabhdr = (<span class="enscript-type">struct</span> dysymtab_command *) ((<span class="enscript-type">void</span> *) (buf + *header_offset));
+    *header_offset += <span class="enscript-keyword">sizeof</span>(*dysymtabhdr);
+
+    data_size = kxld_reloc_get_macho_data_size(locrelocs, extrelocs);
+    require_action((*data_offset + data_size) &lt;= size, finish, rval=KERN_FAILURE);
+    
+    start = dst = (<span class="enscript-type">struct</span> relocation_info *) ((<span class="enscript-type">void</span> *) (buf + *data_offset));
+
+    rval = export_macho_for_array(relocator, locrelocs, &amp;dst);
+    require_noerr(rval, finish);
+    
+    rval = export_macho_for_array(relocator, extrelocs, &amp;dst);
+    require_noerr(rval, finish);
+
+    count = dst - start;
+
+    memset(dysymtabhdr, 0, <span class="enscript-keyword">sizeof</span>(*dysymtabhdr));
+    dysymtabhdr-&gt;cmd = LC_DYSYMTAB;
+    dysymtabhdr-&gt;cmdsize = (uint32_t) <span class="enscript-keyword">sizeof</span>(*dysymtabhdr);
+    dysymtabhdr-&gt;locreloff = (uint32_t) *data_offset;
+    dysymtabhdr-&gt;nlocrel = (uint32_t) count;
+    
+    *data_offset += count * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> relocation_info);
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_PIC_KEXTS */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kxld_addr_t
+<span class="enscript-function-name">kxld_relocator_get_pointer_at_addr</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator,
+    <span class="enscript-type">const</span> u_char *data, u_long offset)
+{
+    kxld_addr_t value;
+
+    KXLD_3264_FUNC(relocator-&gt;is_32_bit, value,
+        get_pointer_at_addr_32, get_pointer_at_addr_64,
+        relocator, data, offset);
+
+    <span class="enscript-keyword">return</span> value;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ILP32</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kxld_addr_t
+<span class="enscript-function-name">get_pointer_at_addr_32</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, 
+    <span class="enscript-type">const</span> u_char *data, u_long offset)
+{
+    uint32_t addr = 0;
+    
+    check(relocator);
+
+    addr = *(<span class="enscript-type">const</span> uint32_t *) ((<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) (data + offset));
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+    <span class="enscript-keyword">if</span> (relocator-&gt;swap) {
+        addr = OSSwapInt32(addr);
+    }
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-keyword">return</span> align_raw_function_address(relocator, addr);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_ILP32 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_LP64</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kxld_addr_t
+<span class="enscript-function-name">get_pointer_at_addr_64</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, 
+    <span class="enscript-type">const</span> u_char *data, u_long offset)
+{
+    uint64_t addr = 0;
+    
+    check(relocator);
+
+    addr = *(<span class="enscript-type">const</span> uint64_t *) ((<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) (data + offset));
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+    <span class="enscript-keyword">if</span> (relocator-&gt;swap) {
+        addr = OSSwapInt64(addr);
+    }
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-keyword">return</span> align_raw_function_address(relocator, addr);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_LP64 */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">kxld_relocator_set_vtables</span>(KXLDRelocator *relocator, <span class="enscript-type">const</span> KXLDDict *vtables)
+{
+    relocator-&gt;vtables = vtables;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+* When we're inspecting the raw binary and not the symbol table, value may
+* hold a THUMB address (with bit 0 set to 1) but the index will have the real
+* address (bit 0 set to 0). So if bit 0 is set here, we clear it. This only
+* impacts ARM for now, but it's implemented as a generic function alignment
+* mask.
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kxld_addr_t
+<span class="enscript-function-name">align_raw_function_address</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, kxld_addr_t value)
+{
+    <span class="enscript-keyword">if</span> (relocator-&gt;function_align) { 
+        value &amp;= ~((1ULL &lt;&lt; relocator-&gt;function_align) - 1); 
+    }
+
+    <span class="enscript-keyword">return</span> value; 
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t 
+<span class="enscript-function-name">kxld_relocator_process_sect_reloc</span>(KXLDRelocator *relocator,
+    <span class="enscript-type">const</span> KXLDReloc *reloc, <span class="enscript-type">const</span> KXLDSect *sect)
+{
+    kern_return_t rval = KERN_FAILURE;
+    u_char *instruction = NULL;
+    kxld_addr_t target = 0;
+    kxld_addr_t pair_target = 0;
+    kxld_addr_t base_pc = 0;
+    kxld_addr_t link_pc = 0;
+    kxld_addr_t link_disp = 0;
+
+    check(relocator);
+    check(reloc);
+    check(sect);
+
+    <span class="enscript-comment">/* Find the instruction */</span>
+
+    instruction = sect-&gt;data + reloc-&gt;address;
+
+    <span class="enscript-comment">/* Calculate the target */</span>
+
+    rval = calculate_targets(relocator, &amp;target, &amp;pair_target, reloc);
+    require_noerr(rval, finish);
+
+    base_pc = reloc-&gt;address;
+    link_pc = base_pc + sect-&gt;link_addr;
+    link_disp = sect-&gt;link_addr - sect-&gt;base_addr;
+
+    <span class="enscript-comment">/* Relocate */</span>
+
+    rval = relocator-&gt;process_reloc(relocator, instruction, reloc-&gt;length, 
+        reloc-&gt;pcrel, base_pc, link_pc, link_disp, reloc-&gt;reloc_type, target, 
+        pair_target, relocator-&gt;swap);
+    require_noerr(rval, finish);
+    
+    <span class="enscript-comment">/* Return */</span>
+
+    relocator-&gt;current_vtable = NULL;
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t 
+<span class="enscript-function-name">kxld_reloc_update_symindex</span>(KXLDReloc *reloc, u_int symindex)
+{
+    kern_return_t rval = KERN_FAILURE;
+
+    require_action(reloc-&gt;target_type == KXLD_TARGET_SYMBOLNUM, 
+        finish, rval = KERN_FAILURE);
+
+    reloc-&gt;target = symindex;
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t 
+<span class="enscript-function-name">kxld_relocator_process_table_reloc</span>(KXLDRelocator *relocator,
+    <span class="enscript-type">const</span> KXLDReloc *reloc, <span class="enscript-type">const</span> KXLDSeg *seg, kxld_addr_t link_addr)
+{
+    kern_return_t rval = KERN_FAILURE;
+    u_char *instruction = NULL;
+    kxld_addr_t target = 0;
+    kxld_addr_t pair_target = 0;
+    kxld_addr_t base_pc = 0;
+    kxld_addr_t link_pc = 0;
+    u_long offset = 0;
+
+    check(relocator);
+    check(reloc);
+
+    <span class="enscript-comment">/* Find the instruction */</span>
+
+    offset = (u_long)(seg-&gt;fileoff + (reloc-&gt;address - seg-&gt;base_addr));
+    instruction = relocator-&gt;file + offset;
+
+    <span class="enscript-comment">/* Calculate the target */</span>
+
+    rval = calculate_targets(relocator, &amp;target, &amp;pair_target, reloc);
+    require_noerr(rval, finish);
+
+    base_pc = reloc-&gt;address;
+    link_pc = base_pc + link_addr;
+
+    <span class="enscript-comment">/* Relocate */</span>
+
+    rval = relocator-&gt;process_reloc(relocator, instruction, reloc-&gt;length, 
+        reloc-&gt;pcrel, base_pc, link_pc, link_addr, reloc-&gt;reloc_type, target,
+        pair_target, relocator-&gt;swap);
+    require_noerr(rval, finish);
+    
+    <span class="enscript-comment">/* Return */</span>
+
+    relocator-&gt;current_vtable = NULL;
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">calculate_targets</span>(KXLDRelocator *relocator, kxld_addr_t *_target, 
+    kxld_addr_t *_pair_target, <span class="enscript-type">const</span> KXLDReloc *reloc)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">const</span> KXLDSect *sect = NULL;
+    <span class="enscript-type">const</span> KXLDSym *sym = NULL;
+    kxld_addr_t target = 0;
+    kxld_addr_t pair_target = 0;
+    <span class="enscript-type">char</span> *demangled_name = NULL;
+    size_t demangled_length = 0;
+
+    check(_target);
+    check(_pair_target);
+    *_target = 0;
+    *_pair_target = 0;
+
+    <span class="enscript-comment">/* Find the target based on the lookup type */</span>
+
+    <span class="enscript-keyword">switch</span>(reloc-&gt;target_type) {
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">KXLD_TARGET_LOOKUP</span>:
+        require_action(reloc-&gt;pair_target_type == KXLD_TARGET_NONE ||
+            reloc-&gt;pair_target_type == KXLD_TARGET_LOOKUP ||
+            reloc-&gt;pair_target_type == KXLD_TARGET_VALUE,
+            finish, rval=KERN_FAILURE);
+
+        rval = get_target_by_address_lookup(&amp;target, reloc-&gt;target, 
+            relocator-&gt;sectarray);
+        require_noerr(rval, finish);
+
+        <span class="enscript-keyword">if</span> (reloc-&gt;pair_target_type == KXLD_TARGET_LOOKUP) {
+            rval = get_target_by_address_lookup(&amp;pair_target,
+                reloc-&gt;pair_target, relocator-&gt;sectarray);
+            require_noerr(rval, finish);
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (reloc-&gt;pair_target_type == KXLD_TARGET_VALUE) {
+            pair_target = reloc-&gt;pair_target;
+        }
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">KXLD_TARGET_SECTNUM</span>:
+        require_action(reloc-&gt;pair_target_type == KXLD_TARGET_NONE ||
+            reloc-&gt;pair_target_type == KXLD_TARGET_VALUE, 
+            finish, rval=KERN_FAILURE);
+
+        <span class="enscript-comment">/* Get the target's section by section number */</span>
+        sect = kxld_array_get_item(relocator-&gt;sectarray, reloc-&gt;target);
+        require_action(sect, finish, rval=KERN_FAILURE);
+
+        <span class="enscript-comment">/* target is the change in the section's address */</span>
+        target = sect-&gt;link_addr - sect-&gt;base_addr;
+
+        <span class="enscript-keyword">if</span> (reloc-&gt;pair_target_type) {
+            pair_target = reloc-&gt;pair_target;
+        } <span class="enscript-keyword">else</span> {
+            <span class="enscript-comment">/* x86_64 needs to know when we have a non-external relocation,
+             * so we hack that information in here.
+             */</span>
+            pair_target = TRUE;
+        }
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">KXLD_TARGET_SYMBOLNUM</span>:
+        require_action(reloc-&gt;pair_target_type == KXLD_TARGET_NONE ||
+            reloc-&gt;pair_target_type == KXLD_TARGET_GOT ||
+            reloc-&gt;pair_target_type == KXLD_TARGET_SYMBOLNUM ||
+            reloc-&gt;pair_target_type == KXLD_TARGET_VALUE, finish,
+            rval=KERN_FAILURE);
+
+        <span class="enscript-comment">/* Get the target's symbol by symbol number */</span>
+        sym = kxld_symtab_get_symbol_by_index(relocator-&gt;symtab, reloc-&gt;target);
+        require_action(sym, finish, rval=KERN_FAILURE);
+
+        <span class="enscript-comment">/* If this symbol is a padslot that has already been replaced, then the
+         * only way a relocation entry can still reference it is if there is a
+         * vtable that has not been patched.  The vtable patcher uses the
+         * MetaClass structure to find classes for patching, so an unpatched
+         * vtable means that there is an OSObject-dervied class that is missing
+         * its OSDeclare/OSDefine macros.
+         */</span>
+        require_action(!kxld_sym_is_padslot(sym) || !kxld_sym_is_replaced(sym), 
+            finish, rval=KERN_FAILURE;
+            kxld_log(kKxldLogLinking, kKxldLogErr, kKxldLogRelocatingPatchedSym,
+                kxld_demangle(sym-&gt;name, &amp;demangled_name, &amp;demangled_length)));
+
+        target = sym-&gt;link_addr;
+
+        <span class="enscript-keyword">if</span> (kxld_sym_is_vtable(sym)) {
+            relocator-&gt;current_vtable = kxld_dict_find(relocator-&gt;vtables, sym-&gt;name);
+        }
+
+        <span class="enscript-comment">/* Some relocation types need the GOT entry address instead of the
+         * symbol's actual address.  These types don't have pair relocation
+         * entries, so we store the GOT entry address as the pair target.
+         */</span>
+        <span class="enscript-keyword">if</span> (reloc-&gt;pair_target_type == KXLD_TARGET_VALUE) {
+            pair_target = reloc-&gt;pair_target;
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (reloc-&gt;pair_target_type == KXLD_TARGET_SYMBOLNUM ) {
+            sym = kxld_symtab_get_symbol_by_index(relocator-&gt;symtab, 
+                reloc-&gt;pair_target);
+            require_action(sym, finish, rval=KERN_FAILURE);
+            pair_target = sym-&gt;link_addr;
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (reloc-&gt;pair_target_type == KXLD_TARGET_GOT) {
+            pair_target = sym-&gt;got_addr;
+        }
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-reference">default</span>:
+        rval = KERN_FAILURE;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    *_target = target;
+    *_pair_target = pair_target;
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">if</span> (demangled_name) kxld_free(demangled_name, demangled_length);
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">get_target_by_address_lookup</span>(kxld_addr_t *target, kxld_addr_t addr,
+    <span class="enscript-type">const</span> KXLDArray *sectarray)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">const</span> KXLDSect *sect = NULL;
+    kxld_addr_t start = 0;
+    kxld_addr_t end = 0;
+    u_int i = 0;
+
+    check(target);
+    check(sectarray);
+    *target = 0;
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; sectarray-&gt;nitems; ++i) {
+        sect = kxld_array_get_item(sectarray, i);
+        start = sect-&gt;base_addr;
+        end = start + sect-&gt;size;
+
+        <span class="enscript-keyword">if</span> (start &lt;= addr &amp;&amp; addr &lt; end) <span class="enscript-keyword">break</span>;
+        
+        sect = NULL;
+    }
+    require_action(sect, finish, rval=KERN_FAILURE);
+
+    *target = sect-&gt;link_addr - sect-&gt;base_addr;
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">check_for_direct_pure_virtual_call</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, u_long offset)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">const</span> KXLDVTableEntry *entry = NULL;
+
+    <span class="enscript-keyword">if</span> (relocator-&gt;current_vtable) {
+        entry = kxld_vtable_get_entry_for_offset(relocator-&gt;current_vtable, 
+            offset, relocator-&gt;is_32_bit);
+        require_action(!entry || !entry-&gt;patched.name ||
+            !kxld_sym_name_is_pure_virtual(entry-&gt;patched.name),
+            finish, rval=KERN_FAILURE;
+            kxld_log(kKxldLogLinking, kKxldLogErr, 
+                kKxldLogDirectPureVirtualCall));
+    }
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_PIC_KEXTS</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> u_long
+<span class="enscript-function-name">get_macho_data_size_for_array</span>(<span class="enscript-type">const</span> KXLDArray *relocs)
+{
+    <span class="enscript-type">const</span> KXLDReloc *reloc = NULL;
+    u_int i = 0;
+    u_long size = 0;
+
+    check(relocs);
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; relocs-&gt;nitems; ++i) {
+        reloc = kxld_array_get_item(relocs, i);
+        <span class="enscript-keyword">if</span> (!reloc-&gt;pcrel) {
+            size += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> relocation_info);
+            <span class="enscript-keyword">if</span>(reloc-&gt;pair_target_type != KXLD_TARGET_NONE) {
+                size += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> relocation_info);
+            }
+        }
+    }
+
+    <span class="enscript-keyword">return</span> size;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">export_macho_for_array</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator,
+    <span class="enscript-type">const</span> KXLDArray *relocs, <span class="enscript-type">struct</span> relocation_info **dstp)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">const</span> KXLDReloc *reloc = NULL;
+    <span class="enscript-type">struct</span> relocation_info *dst = NULL;
+    <span class="enscript-type">struct</span> scattered_relocation_info *scatdst = NULL;
+    u_int i = 0;
+
+    dst = *dstp;
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; relocs-&gt;nitems; ++i) {
+        reloc = kxld_array_get_item(relocs, i);
+        scatdst = (<span class="enscript-type">struct</span> scattered_relocation_info *) dst;
+
+        <span class="enscript-keyword">if</span> (reloc-&gt;pcrel) {
+            <span class="enscript-keyword">continue</span>;
+        }
+
+        <span class="enscript-keyword">switch</span> (reloc-&gt;target_type) {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">KXLD_TARGET_LOOKUP</span>:
+            scatdst-&gt;r_address = reloc-&gt;address;
+            scatdst-&gt;r_pcrel = reloc-&gt;pcrel;
+            scatdst-&gt;r_length = reloc-&gt;length;
+            scatdst-&gt;r_type = reloc-&gt;reloc_type;
+            scatdst-&gt;r_value = reloc-&gt;target;
+            scatdst-&gt;r_scattered = 1;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">KXLD_TARGET_SECTNUM</span>:
+            dst-&gt;r_address = reloc-&gt;address;
+            dst-&gt;r_pcrel = reloc-&gt;pcrel;
+            dst-&gt;r_length = reloc-&gt;length;
+            dst-&gt;r_type = reloc-&gt;reloc_type;
+            dst-&gt;r_symbolnum = reloc-&gt;target + 1;
+            dst-&gt;r_extern = 0;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">KXLD_TARGET_SYMBOLNUM</span>:
+           <span class="enscript-comment">/* Assume that everything will be slid together; otherwise,
+            * there is no sensible value for the section number.
+            */</span>
+            dst-&gt;r_address = reloc-&gt;address;
+            dst-&gt;r_pcrel = reloc-&gt;pcrel;
+            dst-&gt;r_length = reloc-&gt;length;
+            dst-&gt;r_type = reloc-&gt;reloc_type;
+            dst-&gt;r_symbolnum = 1;
+            dst-&gt;r_extern = 0;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-reference">default</span>:
+            rval = KERN_FAILURE;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+
+        ++dst;
+
+        <span class="enscript-keyword">if</span>(reloc-&gt;pair_target_type != KXLD_TARGET_NONE) {
+            ++i;
+            require_action(i &lt; relocs-&gt;nitems, finish, rval=KERN_FAILURE);
+            scatdst = (<span class="enscript-type">struct</span> scattered_relocation_info *) dst;
+            <span class="enscript-keyword">switch</span> (reloc-&gt;pair_target_type) {
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">KXLD_TARGET_LOOKUP</span>:
+                scatdst-&gt;r_address = reloc-&gt;pair_address;
+                scatdst-&gt;r_pcrel = reloc-&gt;pcrel;
+                scatdst-&gt;r_length = reloc-&gt;length;
+                scatdst-&gt;r_type = relocator-&gt;reloc_get_pair_type(reloc-&gt;reloc_type);
+                scatdst-&gt;r_value = reloc-&gt;pair_target;
+                scatdst-&gt;r_scattered = 1;
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">KXLD_TARGET_SECTNUM</span>:
+                dst-&gt;r_address = reloc-&gt;pair_address;
+                dst-&gt;r_pcrel = reloc-&gt;pcrel;
+                dst-&gt;r_length = reloc-&gt;length;
+                dst-&gt;r_type = relocator-&gt;reloc_get_pair_type(reloc-&gt;reloc_type);
+                dst-&gt;r_symbolnum = reloc-&gt;pair_target + 1;
+                dst-&gt;r_extern = 0;
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">KXLD_TARGET_SYMBOLNUM</span>:
+                dst-&gt;r_address = reloc-&gt;pair_address;
+                dst-&gt;r_pcrel = reloc-&gt;pcrel;
+                dst-&gt;r_length = reloc-&gt;length;
+                dst-&gt;r_type = relocator-&gt;reloc_get_pair_type(reloc-&gt;reloc_type);
+                dst-&gt;r_symbolnum = 1;
+                dst-&gt;r_extern = 0;
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-reference">default</span>:
+                rval = KERN_FAILURE;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+            }
+            ++dst;
+        }
+    }
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    *dstp = dst;
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_PIC_KEXTS */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_I386</span> 
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">generic_reloc_has_pair</span>(u_int _type)
+{
+    <span class="enscript-type">enum</span> reloc_type_generic type = _type;
+
+    <span class="enscript-keyword">return</span> (type == GENERIC_RELOC_SECTDIFF || 
+        type == GENERIC_RELOC_LOCAL_SECTDIFF);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> u_int 
+<span class="enscript-function-name">generic_reloc_get_pair_type</span>(u_int _prev_type __unused)
+{
+    <span class="enscript-keyword">return</span> GENERIC_RELOC_PAIR;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">generic_reloc_has_got</span>(u_int _type __unused)
+{
+    <span class="enscript-keyword">return</span> FALSE;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t 
+<span class="enscript-function-name">generic_process_reloc</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator, u_char *instruction, 
+    u_int length, u_int pcrel, kxld_addr_t _base_pc, kxld_addr_t _link_pc, 
+    kxld_addr_t _link_disp __unused, u_int _type, kxld_addr_t _target, 
+    kxld_addr_t _pair_target, boolean_t swap __unused)
+{
+    kern_return_t rval = KERN_FAILURE;
+    uint32_t base_pc = (uint32_t) _base_pc;
+    uint32_t link_pc = (uint32_t) _link_pc;
+    uint32_t *instr_addr = NULL;
+    uint32_t instr_data = 0;
+    uint32_t target = (uint32_t) _target;
+    uint32_t pair_target = (uint32_t) _pair_target;
+    <span class="enscript-type">enum</span> reloc_type_generic type = _type;
+
+    check(instruction);
+    require_action(length == 2, finish, rval=KERN_FAILURE);
+
+    <span class="enscript-keyword">if</span> (pcrel) target = target + base_pc - link_pc;
+
+    instr_addr = (uint32_t *) ((<span class="enscript-type">void</span> *) instruction);
+    instr_data = *instr_addr;
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+    <span class="enscript-keyword">if</span> (swap) instr_data = OSSwapInt32(instr_data);
+#<span class="enscript-reference">endif</span>
+
+    rval = check_for_direct_pure_virtual_call(relocator, instr_data);
+    require_noerr(rval, finish);
+
+    <span class="enscript-keyword">switch</span> (type) {
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">GENERIC_RELOC_VANILLA</span>:
+        instr_data += target;
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">GENERIC_RELOC_SECTDIFF</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">GENERIC_RELOC_LOCAL_SECTDIFF</span>:
+        instr_data = instr_data + target - pair_target;
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">GENERIC_RELOC_PB_LA_PTR</span>:
+        rval = KERN_FAILURE;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">GENERIC_RELOC_PAIR</span>:
+    <span class="enscript-reference">default</span>:
+        rval = KERN_FAILURE;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+    <span class="enscript-keyword">if</span> (swap) instr_data = OSSwapInt32(instr_data);
+#<span class="enscript-reference">endif</span>
+
+    *instr_addr = instr_data;
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_I386 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_X86_64</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> boolean_t 
+<span class="enscript-function-name">x86_64_reloc_has_pair</span>(u_int _type)
+{
+    <span class="enscript-type">enum</span> reloc_type_x86_64 type = _type;
+
+    <span class="enscript-keyword">return</span> (type == X86_64_RELOC_SUBTRACTOR);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> u_int 
+<span class="enscript-function-name">x86_64_reloc_get_pair_type</span>(u_int _prev_type __unused)
+{
+    <span class="enscript-keyword">return</span> X86_64_RELOC_UNSIGNED;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> boolean_t 
+<span class="enscript-function-name">x86_64_reloc_has_got</span>(u_int _type)
+{
+    <span class="enscript-type">enum</span> reloc_type_x86_64 type = _type;
+
+    <span class="enscript-keyword">return</span> (type == X86_64_RELOC_GOT_LOAD || type == X86_64_RELOC_GOT);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t 
+<span class="enscript-function-name">x86_64_process_reloc</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator __unused, u_char *instruction, 
+    u_int length, u_int pcrel, kxld_addr_t _base_pc __unused, 
+    kxld_addr_t _link_pc, kxld_addr_t _link_disp, u_int _type, 
+    kxld_addr_t _target, kxld_addr_t _pair_target, boolean_t swap __unused)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">enum</span> reloc_type_x86_64 type = _type;
+    int32_t *instr32p = NULL;
+    int32_t instr32 = 0;
+    uint64_t *instr64p = NULL;
+    uint64_t instr64 = 0;
+    uint64_t target = _target;
+    uint64_t pair_target = _pair_target;
+    uint64_t link_pc = (uint64_t) _link_pc;
+    uint64_t link_disp = (uint64_t) _link_disp;
+    uint64_t adjustment = 0;
+
+    check(instruction);
+    require_action(length == 2 || length == 3, 
+        finish, rval=KERN_FAILURE);
+
+    <span class="enscript-keyword">if</span> (length == 2) {
+        instr32p = (int32_t *) ((<span class="enscript-type">void</span> *) instruction);
+        instr32 = *instr32p;
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+        <span class="enscript-keyword">if</span> (swap) instr32 = OSSwapInt32(instr32);
+#<span class="enscript-reference">endif</span>
+
+        rval = check_for_direct_pure_virtual_call(relocator, instr32);
+        require_noerr(rval, finish);
+
+        <span class="enscript-comment">/* There are a number of different small adjustments for pc-relative
+         * relocation entries.  The general case is to subtract the size of the
+         * relocation (represented by the length parameter), and it applies to
+         * the GOT types and external SIGNED types.  The non-external signed types
+         * have a different adjustment corresponding to the specific type.
+         */</span>
+        <span class="enscript-keyword">switch</span> (type) {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_SIGNED</span>:
+            <span class="enscript-keyword">if</span> (pair_target) {
+                adjustment = 0;    
+                <span class="enscript-keyword">break</span>;
+            }
+            <span class="enscript-comment">/* Fall through */</span>
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_SIGNED_1</span>:
+            <span class="enscript-keyword">if</span> (pair_target) {
+                adjustment = 1;
+                <span class="enscript-keyword">break</span>;
+            }
+            <span class="enscript-comment">/* Fall through */</span>
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_SIGNED_2</span>:
+            <span class="enscript-keyword">if</span> (pair_target) {
+                adjustment = 2;
+                <span class="enscript-keyword">break</span>;
+            }
+            <span class="enscript-comment">/* Fall through */</span>
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_SIGNED_4</span>:
+            <span class="enscript-keyword">if</span> (pair_target) {
+                adjustment = 4;
+                <span class="enscript-keyword">break</span>;
+            }
+            <span class="enscript-comment">/* Fall through */</span>
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_BRANCH</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_GOT</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_GOT_LOAD</span>:
+            adjustment = (1 &lt;&lt; length);
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-reference">default</span>:
+            <span class="enscript-keyword">break</span>;
+        }
+
+        <span class="enscript-comment">/* Perform the actual relocation.  All of the 32-bit relocations are 
+         * pc-relative except for SUBTRACTOR, so a good chunk of the logic is
+         * stuck in calculate_displacement_x86_64.  The signed relocations are
+         * a special case, because when they are non-external, the instruction
+         * already contains the pre-relocation displacement, so we only need to
+         * find the difference between how far the PC was relocated, and how
+         * far the target is relocated.  Since the target variable already
+         * contains the difference between the target's base and link
+         * addresses, we add the difference between the PC's base and link
+         * addresses to the adjustment variable.  This will yield the
+         * appropriate displacement in calculate_displacement.
+         */</span>
+        <span class="enscript-keyword">switch</span> (type) {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_BRANCH</span>:
+            require_action(pcrel, finish, rval=KERN_FAILURE);
+            adjustment += link_pc;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_SIGNED</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_SIGNED_1</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_SIGNED_2</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_SIGNED_4</span>:
+            require_action(pcrel, finish, rval=KERN_FAILURE);
+            adjustment += (pair_target) ? (link_disp) : (link_pc);
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_GOT</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_GOT_LOAD</span>:
+            require_action(pcrel, finish, rval=KERN_FAILURE);
+            adjustment += link_pc;
+            target = pair_target;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_SUBTRACTOR</span>:
+            require_action(!pcrel, finish, rval=KERN_FAILURE);
+            instr32 = (int32_t) (target - pair_target);
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_UNSIGNED</span>:
+        <span class="enscript-reference">default</span>:
+            rval = KERN_FAILURE;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+
+        <span class="enscript-comment">/* Call calculate_displacement for the pc-relative relocations */</span>
+        <span class="enscript-keyword">if</span> (pcrel) {
+            rval = calculate_displacement_x86_64(target, adjustment, &amp;instr32); 
+            require_noerr(rval, finish);
+        }
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+        <span class="enscript-keyword">if</span> (swap) instr32 = OSSwapInt32(instr32);
+#<span class="enscript-reference">endif</span>
+
+        *instr32p = instr32;
+    } <span class="enscript-keyword">else</span> {
+        instr64p = (uint64_t *) ((<span class="enscript-type">void</span> *) instruction);
+        instr64 = *instr64p;
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+        <span class="enscript-keyword">if</span> (swap) instr64 = OSSwapInt64(instr64);
+#<span class="enscript-reference">endif</span>
+
+        rval = check_for_direct_pure_virtual_call(relocator, (u_long) instr64);
+        require_noerr(rval, finish);
+
+        <span class="enscript-keyword">switch</span> (type) {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_UNSIGNED</span>:
+            require_action(!pcrel, finish, rval=KERN_FAILURE);
+            
+            instr64 += target;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_SUBTRACTOR</span>:
+            require_action(!pcrel, finish, rval=KERN_FAILURE);
+
+            instr64 = target - pair_target;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_SIGNED_1</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_SIGNED_2</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_SIGNED_4</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_GOT_LOAD</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_BRANCH</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_SIGNED</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">X86_64_RELOC_GOT</span>:
+        <span class="enscript-reference">default</span>:
+            rval = KERN_FAILURE;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+        <span class="enscript-keyword">if</span> (swap) instr64 = OSSwapInt64(instr64);
+#<span class="enscript-reference">endif</span>
+
+        *instr64p = instr64;
+    }
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">calculate_displacement_x86_64</span>(uint64_t target, uint64_t adjustment, 
+    int32_t *instr32)
+{
+    kern_return_t rval = KERN_FAILURE;
+    int64_t displacement;
+    uint64_t difference;
+
+    displacement = *instr32 + target - adjustment;
+    difference = ABSOLUTE_VALUE(displacement);
+    require_action(difference &lt; X86_64_RIP_RELATIVE_LIMIT, finish, 
+        rval=KERN_FAILURE;
+        kxld_log(kKxldLogLinking, kKxldLogErr, kKxldLogRelocationOverflow));
+
+    *instr32 = (int32_t) displacement;
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_X86_64 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ARM</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> boolean_t 
+<span class="enscript-function-name">arm_reloc_has_pair</span>(u_int _type)
+{
+    <span class="enscript-type">enum</span> reloc_type_arm type = _type;
+
+    <span class="enscript-keyword">switch</span>(type) {
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">ARM_RELOC_SECTDIFF</span>:
+        <span class="enscript-keyword">return</span> TRUE;
+    <span class="enscript-reference">default</span>:
+        <span class="enscript-keyword">return</span> FALSE;
+    }
+    <span class="enscript-keyword">return</span> FALSE;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> u_int 
+<span class="enscript-function-name">arm_reloc_get_pair_type</span>(u_int _prev_type __unused)
+{
+    <span class="enscript-keyword">return</span> ARM_RELOC_PAIR;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> boolean_t 
+<span class="enscript-function-name">arm_reloc_has_got</span>(u_int _type __unused)
+{
+    <span class="enscript-keyword">return</span> FALSE;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t 
+<span class="enscript-function-name">arm_process_reloc</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator __unused, u_char *instruction, 
+    u_int length, u_int pcrel, kxld_addr_t _base_pc __unused, 
+    kxld_addr_t _link_pc __unused, kxld_addr_t _link_disp __unused,
+    u_int _type __unused, kxld_addr_t _target __unused, 
+    kxld_addr_t _pair_target __unused,  boolean_t swap __unused)
+{
+    kern_return_t rval = KERN_FAILURE;
+    uint32_t *instr_addr = NULL;
+    uint32_t instr_data = 0;
+    uint32_t base_pc = (uint32_t) _base_pc;
+    uint32_t link_pc = (uint32_t) _link_pc;
+    uint32_t target = (uint32_t) _target;
+    int32_t displacement = 0;
+    <span class="enscript-type">enum</span> reloc_type_arm type = _type;
+
+    check(instruction);
+    require_action(length == 2, finish, rval=KERN_FAILURE);
+
+    <span class="enscript-keyword">if</span> (pcrel) displacement = target + base_pc - link_pc;
+
+    instr_addr = (uint32_t *) ((<span class="enscript-type">void</span> *) instruction);
+    instr_data = *instr_addr;
+    
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+    <span class="enscript-keyword">if</span> (swap) instr_data = OSSwapInt32(instr_data);
+#<span class="enscript-reference">endif</span>
+
+    rval = check_for_direct_pure_virtual_call(relocator, instr_data);
+    require_noerr(rval, finish);
+
+    <span class="enscript-keyword">switch</span> (type) {
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">ARM_RELOC_VANILLA</span>:
+        instr_data += target;
+        <span class="enscript-keyword">break</span>;
+
+    <span class="enscript-comment">/*
+     * If the displacement is 0 (the offset between the pc and the target has
+     * not changed), then we don't need to do anything for BR24 and BR22
+     * relocs.  As it turns out, because kexts build with -mlong-calls all
+     * relocations currently end up being either vanilla (handled above) or 
+     * BR22/BR24 with a displacement of 0.
+     * We could handle other displacements here but to keep things simple, we
+     * won't until it is needed (at which point the kernelcache will fail to
+     * link)
+     */</span>
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">ARM_RELOC_BR24</span>:
+        require_action(pcrel, finish, rval=KERN_FAILURE);
+        require_action(displacement == 0, finish, rval=KERN_FAILURE);
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">ARM_THUMB_RELOC_BR22</span>:
+        require_action(pcrel, finish, rval=KERN_FAILURE);
+        require_action(displacement == 0, finish, rval=KERN_FAILURE);
+        <span class="enscript-keyword">break</span>;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">ARM_RELOC_SECTDIFF</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">ARM_RELOC_LOCAL_SECTDIFF</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">ARM_RELOC_PB_LA_PTR</span>:
+        rval = KERN_FAILURE;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">ARM_RELOC_PAIR</span>:
+    <span class="enscript-reference">default</span>:
+        rval = KERN_FAILURE;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+    <span class="enscript-keyword">if</span> (swap) instr_data = OSSwapInt32(instr_data);
+#<span class="enscript-reference">endif</span>
+
+    *instr_addr = instr_data;
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_ARM */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ARM64</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">arm64_reloc_has_pair</span>(u_int _type)
+{
+    <span class="enscript-keyword">return</span> (_type == ARM64_RELOC_SUBTRACTOR);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_int
+<span class="enscript-function-name">arm64_reloc_get_pair_type</span>(u_int _prev_type __unused)
+{
+    <span class="enscript-keyword">if</span> (_prev_type == ARM64_RELOC_SUBTRACTOR) {
+        <span class="enscript-keyword">return</span> ARM64_RELOC_UNSIGNED;
+    } <span class="enscript-keyword">else</span> {
+        <span class="enscript-keyword">return</span> -1u;
+    }
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">arm64_reloc_has_got</span>(u_int _type)
+{
+    <span class="enscript-keyword">return</span> (_type == ARM64_RELOC_GOT_LOAD_PAGE21 ||
+            _type == ARM64_RELOC_GOT_LOAD_PAGEOFF12);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">arm64_process_reloc</span>(<span class="enscript-type">const</span> KXLDRelocator *relocator __unused, u_char *instruction,
+    u_int length, u_int pcrel, kxld_addr_t _base_pc __unused, kxld_addr_t _link_pc,
+    kxld_addr_t _link_disp __unused, u_int _type, kxld_addr_t _target,
+    kxld_addr_t _pair_target __unused, boolean_t swap)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">enum</span> reloc_type_arm64 type = _type;
+    uint64_t target = _target;
+    uint64_t link_pc = (uint64_t) _link_pc;
+    uint64_t difference = 0;
+    int64_t displacement = 0;
+    uint32_t addend = 0;
+
+    check(instruction);
+    require_action((length == 2 || length == 3), finish, rval=KERN_FAILURE);
+
+    <span class="enscript-keyword">if</span> (length == 2) {
+        uint32_t *instr32p = (uint32_t *) (<span class="enscript-type">void</span> *) instruction;
+        uint32_t instr32 = *instr32p;
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+        <span class="enscript-keyword">if</span> (swap) instr32 = OSSwapInt32(instr32);
+#<span class="enscript-reference">endif</span>
+
+        <span class="enscript-keyword">switch</span> (type) {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">ARM64_RELOC_BRANCH26</span>:
+            require_action(pcrel, finish, rval=KERN_FAILURE);
+            addend = (instr32 &amp; 0x03FFFFFF) &lt;&lt; 2;
+            addend = SIGN_EXTEND(addend, 27);
+            displacement = (target - link_pc + addend);
+            difference = ABSOLUTE_VALUE(displacement);
+            displacement = (displacement &gt;&gt; 2);
+            require_action(difference &lt; (128 * 1024 * 1024), finish,
+                           rval = KERN_FAILURE;
+                           kxld_log(kKxldLogLinking, kKxldLogErr, kKxldLogRelocationOverflow));
+            instr32 = (instr32 &amp; 0xFC000000) | (displacement &amp; 0x03FFFFFF);
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-reference">default</span>:
+            rval = KERN_FAILURE;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+        <span class="enscript-keyword">if</span> (swap) instr32 = OSSwapInt32(instr32);
+#<span class="enscript-reference">endif</span>
+
+        *instr32p = instr32;
+    } <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* length == 3 */</span>
+        uint64_t *instr64p = (uint64_t *) (<span class="enscript-type">void</span> *) instruction;
+        uint64_t instr64 = *instr64p;
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+        <span class="enscript-keyword">if</span> (swap) instr64 = OSSwapInt64(instr64);
+#<span class="enscript-reference">endif</span>
+
+        <span class="enscript-keyword">switch</span> (type) {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">ARM64_RELOC_UNSIGNED</span>:
+            require_action(!pcrel, finish, rval=KERN_FAILURE);
+            instr64 += target;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-reference">default</span>:
+            rval = KERN_FAILURE;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+        <span class="enscript-keyword">if</span> (swap) instr64 = OSSwapInt64(instr64);
+#<span class="enscript-reference">endif</span>
+
+        *instr64p = instr64;
+    }
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_ARM64 */</span>
+</pre>
+<hr />
+</body></html>

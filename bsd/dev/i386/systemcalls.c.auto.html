@@ -1,0 +1,619 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>systemcalls.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">systemcalls.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine/thread_status.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/branch_predicates.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syscall.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysent.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/seg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/i386/syscall_sw.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/pal_routines.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+<span class="enscript-type">extern</span> int32_t <span class="enscript-function-name">dtrace_systrace_syscall</span>(<span class="enscript-type">struct</span> proc *, <span class="enscript-type">void</span> *, <span class="enscript-type">int</span> *);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">dtrace_systrace_syscall_return</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">short</span>, <span class="enscript-type">int</span>, <span class="enscript-type">int</span> *);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">unix_syscall</span>(x86_saved_state_t *);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">unix_syscall64</span>(x86_saved_state_t *);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> *<span class="enscript-function-name">find_user_regs</span>(thread_t);
+
+<span class="enscript-comment">/* dynamically generated at build time based on syscalls.master */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *syscallnames[];
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">code_is_kdebug_trace</span>(code) (((code) == SYS_kdebug_trace) ||   \
+                                    ((code) == SYS_kdebug_trace64) || \
+                                    ((code) == SYS_kdebug_trace_string))
+
+<span class="enscript-comment">/*
+ * Function:	unix_syscall
+ *
+ * Inputs:	regs	- pointer to i386 save area
+ *
+ * Outputs:	none
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">unix_syscall</span>(x86_saved_state_t *state)
+{
+	thread_t		thread;
+	<span class="enscript-type">void</span>			*vt;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		code;
+	<span class="enscript-type">struct</span> sysent		*callp;
+
+	<span class="enscript-type">int</span>			error;
+	vm_offset_t		params;
+	<span class="enscript-type">struct</span> proc		*p;
+	<span class="enscript-type">struct</span> uthread		*uthread;
+	x86_saved_state32_t	*regs;
+	boolean_t		is_vfork;
+
+	assert(is_saved_state32(state));
+	regs = saved_state32(state);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	<span class="enscript-keyword">if</span> (regs-&gt;eax == 0x800)
+		thread_exception_return();
+#<span class="enscript-reference">endif</span>
+	thread = current_thread();
+	uthread = get_bsdthread_info(thread);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PROC_REF_DEBUG</span>
+	uthread_reset_proc_refcount(uthread);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* Get the approriate proc; may be different from task's for vfork() */</span>
+	is_vfork = uthread-&gt;uu_flag &amp; UT_VFORK;
+	<span class="enscript-keyword">if</span> (__improbable(is_vfork != 0))
+		p = current_proc();
+	<span class="enscript-keyword">else</span> 
+		p = (<span class="enscript-type">struct</span> proc *)get_bsdtask_info(current_task());
+
+	<span class="enscript-comment">/* Verify that we are not being called from a task without a proc */</span>
+	<span class="enscript-keyword">if</span> (__improbable(p == NULL)) {
+		regs-&gt;eax = EPERM;
+		regs-&gt;efl |= EFL_CF;
+		task_terminate_internal(current_task());
+		thread_exception_return();
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	code = regs-&gt;eax &amp; I386_SYSCALL_NUMBER_MASK;
+	DEBUG_KPRINT_SYSCALL_UNIX(<span class="enscript-string">&quot;unix_syscall: code=%d(%s) eip=%u\n&quot;</span>,
+							  code, syscallnames[code &gt;= NUM_SYSENT ? 63 : code], (uint32_t)regs-&gt;eip);
+	params = (vm_offset_t) (regs-&gt;uesp + <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>));
+
+	regs-&gt;efl &amp;= ~(EFL_CF);
+
+	callp = (code &gt;= NUM_SYSENT) ? &amp;sysent[63] : &amp;sysent[code];
+
+	<span class="enscript-keyword">if</span> (__improbable(callp == sysent)) {
+		code = fuword(params);
+		params += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>);
+		callp = (code &gt;= NUM_SYSENT) ? &amp;sysent[63] : &amp;sysent[code];
+	}
+
+	vt = (<span class="enscript-type">void</span> *)uthread-&gt;uu_arg;
+
+	<span class="enscript-keyword">if</span> (callp-&gt;sy_arg_bytes != 0) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_REQUIRES_U32_MUNGING</span>
+		sy_munge_t	*mungerp;
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">U32</span> <span class="enscript-variable-name">syscalls</span> <span class="enscript-variable-name">on</span> <span class="enscript-variable-name">x86_64</span> <span class="enscript-variable-name">kernel</span> <span class="enscript-variable-name">requires</span> <span class="enscript-variable-name">munging</span>
+#<span class="enscript-reference">endif</span>
+		uint32_t	 nargs;
+
+		assert((<span class="enscript-type">unsigned</span>) callp-&gt;sy_arg_bytes &lt;= <span class="enscript-keyword">sizeof</span> (uthread-&gt;uu_arg));
+		nargs = callp-&gt;sy_arg_bytes;
+		error = copyin((user_addr_t) params, (<span class="enscript-type">char</span> *) vt, nargs);
+		<span class="enscript-keyword">if</span> (error) {
+			regs-&gt;eax = error;
+			regs-&gt;efl |= EFL_CF;
+			thread_exception_return();
+			<span class="enscript-comment">/* NOTREACHED */</span>
+		}
+
+		<span class="enscript-keyword">if</span> (__probable(!code_is_kdebug_trace(code))) {
+			<span class="enscript-type">int</span> *ip = (<span class="enscript-type">int</span> *)vt;
+
+			KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+				BSDDBG_CODE(DBG_BSD_EXCP_SC, code) | DBG_FUNC_START,
+				*ip, *(ip+1), *(ip+2), *(ip+3), 0);
+		}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_REQUIRES_U32_MUNGING</span>
+		mungerp = callp-&gt;sy_arg_munge32;
+
+		<span class="enscript-keyword">if</span> (mungerp != NULL)
+			(*mungerp)(vt);
+#<span class="enscript-reference">endif</span>
+	} <span class="enscript-keyword">else</span>
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, 
+			BSDDBG_CODE(DBG_BSD_EXCP_SC, code) | DBG_FUNC_START,
+			0, 0, 0, 0, 0);
+
+	<span class="enscript-comment">/*
+	 * Delayed binding of thread credential to process credential, if we
+	 * are not running with an explicitly set thread credential.
+	 */</span>
+	kauth_cred_uthread_update(uthread, p);
+
+	uthread-&gt;uu_rval[0] = 0;
+	uthread-&gt;uu_rval[1] = 0;
+	uthread-&gt;uu_flag |= UT_NOTCANCELPT;
+	uthread-&gt;syscall_code = code;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">JOE_DEBUG</span>
+        uthread-&gt;uu_iocount = 0;
+        uthread-&gt;uu_vpindex = 0;
+#<span class="enscript-reference">endif</span>
+
+	AUDIT_SYSCALL_ENTER(code, p, uthread);
+	error = (*(callp-&gt;sy_call))((<span class="enscript-type">void</span> *) p, (<span class="enscript-type">void</span> *) vt, &amp;(uthread-&gt;uu_rval[0]));
+	AUDIT_SYSCALL_EXIT(code, p, uthread, error);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">JOE_DEBUG</span>
+        <span class="enscript-keyword">if</span> (uthread-&gt;uu_iocount)
+                printf(<span class="enscript-string">&quot;system call returned with uu_iocount != 0\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+	uthread-&gt;t_dtrace_errno = error;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_DTRACE */</span>
+
+	<span class="enscript-keyword">if</span> (__improbable(error == ERESTART)) {
+		<span class="enscript-comment">/*
+		 * Move the user's pc back to repeat the syscall:
+		 * 5 bytes for a sysenter, or 2 for an int 8x.
+		 * The SYSENTER_TF_CS covers single-stepping over a sysenter
+		 * - see debug trap handler in idt.s/idt64.s
+		 */</span>
+
+		pal_syscall_restart(thread, state);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (error != EJUSTRETURN) {
+		<span class="enscript-keyword">if</span> (__improbable(error)) {
+		    regs-&gt;eax = error;
+		    regs-&gt;efl |= EFL_CF;	<span class="enscript-comment">/* carry bit */</span>
+		} <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* (not error) */</span>
+			<span class="enscript-comment">/*
+			 * We split retval across two registers, in case the
+			 * syscall had a 64-bit return value, in which case
+			 * eax/edx matches the function call ABI.
+			 */</span>
+		    regs-&gt;eax = uthread-&gt;uu_rval[0];
+		    regs-&gt;edx = uthread-&gt;uu_rval[1];
+		} 
+	}
+
+	DEBUG_KPRINT_SYSCALL_UNIX(
+		<span class="enscript-string">&quot;unix_syscall: error=%d retval=(%u,%u)\n&quot;</span>,
+		error, regs-&gt;eax, regs-&gt;edx);
+
+	uthread-&gt;uu_flag &amp;= ~UT_NOTCANCELPT;
+
+	<span class="enscript-keyword">if</span> (__improbable(uthread-&gt;uu_lowpri_window)) {
+	        <span class="enscript-comment">/*
+		 * task is marked as a low priority I/O type
+		 * and the I/O we issued while in this system call
+		 * collided with normal I/O operations... we'll
+		 * delay in order to mitigate the impact of this
+		 * task on the normal operation of the system
+		 */</span>
+		throttle_lowpri_io(1);
+	}
+	<span class="enscript-keyword">if</span> (__probable(!code_is_kdebug_trace(code)))
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, 
+			BSDDBG_CODE(DBG_BSD_EXCP_SC, code) | DBG_FUNC_END,
+			error, uthread-&gt;uu_rval[0], uthread-&gt;uu_rval[1], p-&gt;p_pid, 0);
+
+	<span class="enscript-keyword">if</span> (__improbable(!is_vfork &amp;&amp; callp-&gt;sy_call == (sy_call_t *)execve &amp;&amp; !error)) {
+		pal_execve_return(thread);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PROC_REF_DEBUG</span>
+	<span class="enscript-keyword">if</span> (__improbable(uthread_get_proc_refcount(uthread) != 0)) {
+		panic(<span class="enscript-string">&quot;system call returned with uu_proc_refcount != 0&quot;</span>);
+	}
+#<span class="enscript-reference">endif</span>
+
+	thread_exception_return();
+	<span class="enscript-comment">/* NOTREACHED */</span>
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">unix_syscall64</span>(x86_saved_state_t *state)
+{
+	thread_t	thread;
+	<span class="enscript-type">void</span>			*vt;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	code;
+	<span class="enscript-type">struct</span> sysent	*callp;
+	<span class="enscript-type">int</span>		args_in_regs;
+	boolean_t	args_start_at_rdi;
+	<span class="enscript-type">int</span>		error;
+	<span class="enscript-type">struct</span> proc	*p;
+	<span class="enscript-type">struct</span> uthread	*uthread;
+	x86_saved_state64_t *regs;
+
+	assert(is_saved_state64(state));
+	regs = saved_state64(state);
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">DEBUG</span>
+	<span class="enscript-keyword">if</span> (regs-&gt;rax == 0x2000800)
+		thread_exception_return();
+#<span class="enscript-reference">endif</span>
+	thread = current_thread();
+	uthread = get_bsdthread_info(thread);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PROC_REF_DEBUG</span>
+	uthread_reset_proc_refcount(uthread);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* Get the approriate proc; may be different from task's for vfork() */</span>
+	<span class="enscript-keyword">if</span> (__probable(!(uthread-&gt;uu_flag &amp; UT_VFORK)))
+		p = (<span class="enscript-type">struct</span> proc *)get_bsdtask_info(current_task());
+	<span class="enscript-keyword">else</span> 
+		p = current_proc();
+
+	<span class="enscript-comment">/* Verify that we are not being called from a task without a proc */</span>
+	<span class="enscript-keyword">if</span> (__improbable(p == NULL)) {
+		regs-&gt;rax = EPERM;
+		regs-&gt;isf.rflags |= EFL_CF;
+		task_terminate_internal(current_task());
+		thread_exception_return();
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	code = regs-&gt;rax &amp; SYSCALL_NUMBER_MASK;
+	DEBUG_KPRINT_SYSCALL_UNIX(
+		<span class="enscript-string">&quot;unix_syscall64: code=%d(%s) rip=%llx\n&quot;</span>,
+		code, syscallnames[code &gt;= NUM_SYSENT ? 63 : code], regs-&gt;isf.rip);
+	callp = (code &gt;= NUM_SYSENT) ? &amp;sysent[63] : &amp;sysent[code];
+
+	vt = (<span class="enscript-type">void</span> *)uthread-&gt;uu_arg;
+
+	<span class="enscript-keyword">if</span> (__improbable(callp == sysent)) {
+	        <span class="enscript-comment">/*
+		 * indirect system call... system call number
+		 * passed as 'arg0'
+		 */</span>
+		code = regs-&gt;rdi;
+		callp = (code &gt;= NUM_SYSENT) ? &amp;sysent[63] : &amp;sysent[code];
+		args_start_at_rdi = FALSE;
+		args_in_regs = 5;
+	} <span class="enscript-keyword">else</span> {
+		args_start_at_rdi = TRUE;
+		args_in_regs = 6;
+	}
+
+	<span class="enscript-keyword">if</span> (callp-&gt;sy_narg != 0) {
+		assert(callp-&gt;sy_narg &lt;= 8); <span class="enscript-comment">/* size of uu_arg */</span>
+
+		args_in_regs = MIN(args_in_regs, callp-&gt;sy_narg);
+		memcpy(vt, args_start_at_rdi ? &amp;regs-&gt;rdi : &amp;regs-&gt;rsi, args_in_regs * <span class="enscript-keyword">sizeof</span>(syscall_arg_t));
+
+
+		<span class="enscript-keyword">if</span> (!code_is_kdebug_trace(code)) {
+			uint64_t *ip = (uint64_t *)vt;
+
+			KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, 
+				BSDDBG_CODE(DBG_BSD_EXCP_SC, code) | DBG_FUNC_START,
+				(<span class="enscript-type">int</span>)(*ip), (<span class="enscript-type">int</span>)(*(ip+1)), (<span class="enscript-type">int</span>)(*(ip+2)), (<span class="enscript-type">int</span>)(*(ip+3)), 0);
+		}
+
+		<span class="enscript-keyword">if</span> (__improbable(callp-&gt;sy_narg &gt; args_in_regs)) {
+			<span class="enscript-type">int</span> copyin_count;
+
+			copyin_count = (callp-&gt;sy_narg - args_in_regs) * <span class="enscript-keyword">sizeof</span>(syscall_arg_t);
+
+			error = copyin((user_addr_t)(regs-&gt;isf.rsp + <span class="enscript-keyword">sizeof</span>(user_addr_t)), (<span class="enscript-type">char</span> *)&amp;uthread-&gt;uu_arg[args_in_regs], copyin_count);
+			<span class="enscript-keyword">if</span> (error) {
+				regs-&gt;rax = error;
+				regs-&gt;isf.rflags |= EFL_CF;
+				thread_exception_return();
+				<span class="enscript-comment">/* NOTREACHED */</span>
+			}
+		}
+	} <span class="enscript-keyword">else</span>
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+			BSDDBG_CODE(DBG_BSD_EXCP_SC, code) | DBG_FUNC_START,
+			0, 0, 0, 0, 0);
+
+	<span class="enscript-comment">/*
+	 * Delayed binding of thread credential to process credential, if we
+	 * are not running with an explicitly set thread credential.
+	 */</span>
+	kauth_cred_uthread_update(uthread, p);
+
+	uthread-&gt;uu_rval[0] = 0;
+	uthread-&gt;uu_rval[1] = 0;
+	uthread-&gt;uu_flag |= UT_NOTCANCELPT;
+	uthread-&gt;syscall_code = code;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">JOE_DEBUG</span>
+        uthread-&gt;uu_iocount = 0;
+        uthread-&gt;uu_vpindex = 0;
+#<span class="enscript-reference">endif</span>
+
+	AUDIT_SYSCALL_ENTER(code, p, uthread);
+	error = (*(callp-&gt;sy_call))((<span class="enscript-type">void</span> *) p, vt, &amp;(uthread-&gt;uu_rval[0]));
+	AUDIT_SYSCALL_EXIT(code, p, uthread, error);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">JOE_DEBUG</span>
+        <span class="enscript-keyword">if</span> (uthread-&gt;uu_iocount)
+               printf(<span class="enscript-string">&quot;system call returned with uu_iocount != 0\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+	uthread-&gt;t_dtrace_errno = error;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_DTRACE */</span>
+	
+	<span class="enscript-keyword">if</span> (__improbable(error == ERESTART)) {
+		<span class="enscript-comment">/*
+		 * all system calls come through via the syscall instruction
+		 * in 64 bit mode... its 2 bytes in length
+		 * move the user's pc back to repeat the syscall:
+		 */</span>
+		pal_syscall_restart( thread, state );
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (error != EJUSTRETURN) {
+		<span class="enscript-keyword">if</span> (__improbable(error)) {
+			regs-&gt;rax = error;
+			regs-&gt;isf.rflags |= EFL_CF;	<span class="enscript-comment">/* carry bit */</span>
+		} <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* (not error) */</span>
+
+			<span class="enscript-keyword">switch</span> (callp-&gt;sy_return_type) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_INT_T</span>:
+				regs-&gt;rax = uthread-&gt;uu_rval[0];
+				regs-&gt;rdx = uthread-&gt;uu_rval[1];
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_UINT_T</span>:
+				regs-&gt;rax = ((u_int)uthread-&gt;uu_rval[0]);
+				regs-&gt;rdx = ((u_int)uthread-&gt;uu_rval[1]);
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_OFF_T</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_ADDR_T</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_SIZE_T</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_SSIZE_T</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_UINT64_T</span>:
+			        regs-&gt;rax = *((uint64_t *)(&amp;uthread-&gt;uu_rval[0]));
+				regs-&gt;rdx = 0;
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_NONE</span>:
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-reference">default</span>:
+				panic(<span class="enscript-string">&quot;unix_syscall: unknown return type&quot;</span>);
+				<span class="enscript-keyword">break</span>;
+			}
+			regs-&gt;isf.rflags &amp;= ~EFL_CF;
+		} 
+	}
+
+	DEBUG_KPRINT_SYSCALL_UNIX(
+		<span class="enscript-string">&quot;unix_syscall64: error=%d retval=(%llu,%llu)\n&quot;</span>,
+		error, regs-&gt;rax, regs-&gt;rdx);
+	
+	uthread-&gt;uu_flag &amp;= ~UT_NOTCANCELPT;
+
+	<span class="enscript-keyword">if</span> (__improbable(uthread-&gt;uu_lowpri_window)) {
+	        <span class="enscript-comment">/*
+		 * task is marked as a low priority I/O type
+		 * and the I/O we issued while in this system call
+		 * collided with normal I/O operations... we'll
+		 * delay in order to mitigate the impact of this
+		 * task on the normal operation of the system
+		 */</span>
+		throttle_lowpri_io(1);
+	}
+	<span class="enscript-keyword">if</span> (__probable(!code_is_kdebug_trace(code)))
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, 
+			BSDDBG_CODE(DBG_BSD_EXCP_SC, code) | DBG_FUNC_END,
+			error, uthread-&gt;uu_rval[0], uthread-&gt;uu_rval[1], p-&gt;p_pid, 0);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PROC_REF_DEBUG</span>
+	<span class="enscript-keyword">if</span> (__improbable(uthread_get_proc_refcount(uthread))) {
+		panic(<span class="enscript-string">&quot;system call returned with uu_proc_refcount != 0&quot;</span>);
+	}
+#<span class="enscript-reference">endif</span>
+
+	thread_exception_return();
+	<span class="enscript-comment">/* NOTREACHED */</span>
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">unix_syscall_return</span>(<span class="enscript-type">int</span> error)
+{
+	thread_t		thread;
+	<span class="enscript-type">struct</span> uthread		*uthread;
+	<span class="enscript-type">struct</span> proc *p;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> code;
+	<span class="enscript-type">struct</span> sysent *callp;
+
+	thread = current_thread();
+	uthread = get_bsdthread_info(thread);
+
+	pal_register_cache_state(thread, DIRTY);
+
+	p = current_proc();
+
+	<span class="enscript-keyword">if</span> (proc_is64bit(p)) {
+		x86_saved_state64_t *regs;
+
+		regs = saved_state64(find_user_regs(thread));
+
+		code = uthread-&gt;syscall_code;
+		callp = (code &gt;= NUM_SYSENT) ? &amp;sysent[63] : &amp;sysent[code];
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+		<span class="enscript-keyword">if</span> (callp-&gt;sy_call == dtrace_systrace_syscall)
+			dtrace_systrace_syscall_return( code, error, uthread-&gt;uu_rval );
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_DTRACE */</span>
+		AUDIT_SYSCALL_EXIT(code, p, uthread, error);
+
+		<span class="enscript-keyword">if</span> (error == ERESTART) {
+			<span class="enscript-comment">/*
+			 * repeat the syscall
+			 */</span>
+			pal_syscall_restart( thread, find_user_regs(thread) );
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (error != EJUSTRETURN) {
+			<span class="enscript-keyword">if</span> (error) {
+				regs-&gt;rax = error;
+				regs-&gt;isf.rflags |= EFL_CF;	<span class="enscript-comment">/* carry bit */</span>
+			} <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* (not error) */</span>
+
+				<span class="enscript-keyword">switch</span> (callp-&gt;sy_return_type) {
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_INT_T</span>:
+					regs-&gt;rax = uthread-&gt;uu_rval[0];
+					regs-&gt;rdx = uthread-&gt;uu_rval[1];
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_UINT_T</span>:
+					regs-&gt;rax = ((u_int)uthread-&gt;uu_rval[0]);
+					regs-&gt;rdx = ((u_int)uthread-&gt;uu_rval[1]);
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_OFF_T</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_ADDR_T</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_SIZE_T</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_SSIZE_T</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_UINT64_T</span>:
+					regs-&gt;rax = *((uint64_t *)(&amp;uthread-&gt;uu_rval[0]));
+					regs-&gt;rdx = 0;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_NONE</span>:
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-reference">default</span>:
+					panic(<span class="enscript-string">&quot;unix_syscall: unknown return type&quot;</span>);
+					<span class="enscript-keyword">break</span>;
+				}
+				regs-&gt;isf.rflags &amp;= ~EFL_CF;
+			} 
+		}
+		DEBUG_KPRINT_SYSCALL_UNIX(
+			<span class="enscript-string">&quot;unix_syscall_return: error=%d retval=(%llu,%llu)\n&quot;</span>,
+			error, regs-&gt;rax, regs-&gt;rdx);
+	} <span class="enscript-keyword">else</span> {
+		x86_saved_state32_t	*regs;
+
+		regs = saved_state32(find_user_regs(thread));
+
+		regs-&gt;efl &amp;= ~(EFL_CF);
+
+		code = uthread-&gt;syscall_code;
+		callp = (code &gt;= NUM_SYSENT) ? &amp;sysent[63] : &amp;sysent[code];
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+		<span class="enscript-keyword">if</span> (callp-&gt;sy_call == dtrace_systrace_syscall)
+			dtrace_systrace_syscall_return( code, error, uthread-&gt;uu_rval );
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_DTRACE */</span>
+		AUDIT_SYSCALL_EXIT(code, p, uthread, error);
+
+		<span class="enscript-keyword">if</span> (error == ERESTART) {
+			pal_syscall_restart( thread, find_user_regs(thread) );
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (error != EJUSTRETURN) {
+			<span class="enscript-keyword">if</span> (error) {
+				regs-&gt;eax = error;
+				regs-&gt;efl |= EFL_CF;	<span class="enscript-comment">/* carry bit */</span>
+			} <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* (not error) */</span>
+				regs-&gt;eax = uthread-&gt;uu_rval[0];
+				regs-&gt;edx = uthread-&gt;uu_rval[1];
+			} 
+		}
+		DEBUG_KPRINT_SYSCALL_UNIX(
+			<span class="enscript-string">&quot;unix_syscall_return: error=%d retval=(%u,%u)\n&quot;</span>,
+			error, regs-&gt;eax, regs-&gt;edx);
+	}
+
+
+	uthread-&gt;uu_flag &amp;= ~UT_NOTCANCELPT;
+
+	<span class="enscript-keyword">if</span> (uthread-&gt;uu_lowpri_window) {
+	        <span class="enscript-comment">/*
+		 * task is marked as a low priority I/O type
+		 * and the I/O we issued while in this system call
+		 * collided with normal I/O operations... we'll
+		 * delay in order to mitigate the impact of this
+		 * task on the normal operation of the system
+		 */</span>
+		throttle_lowpri_io(1);
+	}
+	<span class="enscript-keyword">if</span> (!code_is_kdebug_trace(code))
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, 
+			BSDDBG_CODE(DBG_BSD_EXCP_SC, code) | DBG_FUNC_END,
+			error, uthread-&gt;uu_rval[0], uthread-&gt;uu_rval[1], p-&gt;p_pid, 0);
+
+	thread_exception_return();
+	<span class="enscript-comment">/* NOTREACHED */</span>
+}
+
+</pre>
+<hr />
+</body></html>

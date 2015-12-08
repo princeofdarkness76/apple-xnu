@@ -1,0 +1,261 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mptcp_timer.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mptcp_timer.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2012-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/sdt.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/mp_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/mptcp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/mptcp_timer.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/mptcp_seq.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * MPTCP Retransmission Timer comes into play only when subflow level
+ * data is acked, but Data ACK is not received. Time is in seconds.
+ */</span>
+<span class="enscript-type">static</span> u_int32_t mptcp_rto = 3;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, rto, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_rto, 0, <span class="enscript-string">&quot;MPTCP Retransmission Timeout&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> mptcp_nrtos = 3;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, nrto, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_rto, 0, <span class="enscript-string">&quot;MPTCP Retransmissions&quot;</span>);
+
+<span class="enscript-comment">/*
+ * MPTCP connections timewait interval in seconds.
+ */</span>
+<span class="enscript-type">static</span> u_int32_t mptcp_tw = 60;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, tw, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_tw, 0, <span class="enscript-string">&quot;MPTCP Timewait Period&quot;</span>);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">TIMEVAL_TO_HZ</span>(_tv_)	((_tv_).tv_sec * hz + (_tv_).tv_usec / hz)
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">mptcp_timer_demux</span>(<span class="enscript-type">struct</span> mptses *mpte, uint32_t now_msecs)
+{
+	<span class="enscript-type">struct</span> mptcb *mp_tp = NULL;
+	mp_tp = mpte-&gt;mpte_mptcb;
+	<span class="enscript-type">int</span> resched_timer = 0;
+
+	DTRACE_MPTCP2(timer, <span class="enscript-type">struct</span> mptses *, mpte, <span class="enscript-type">struct</span> mptcb *, mp_tp);
+
+	MPTE_LOCK_ASSERT_HELD(mpte);
+	MPT_LOCK(mp_tp);
+	<span class="enscript-keyword">switch</span> (mp_tp-&gt;mpt_timer_vals) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTT_REXMT</span>:
+		<span class="enscript-keyword">if</span> (mp_tp-&gt;mpt_rxtstart == 0)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> ((now_msecs - mp_tp-&gt;mpt_rxtstart) &gt;
+		    (mptcp_rto*hz)) {
+			<span class="enscript-keyword">if</span> (MPTCP_SEQ_GT(mp_tp-&gt;mpt_snduna,
+			    mp_tp-&gt;mpt_rtseq)) {
+				mp_tp-&gt;mpt_timer_vals = 0;
+				mp_tp-&gt;mpt_rtseq = 0;
+				<span class="enscript-keyword">break</span>;
+			}
+			mp_tp-&gt;mpt_rxtshift++;
+			<span class="enscript-keyword">if</span> (mp_tp-&gt;mpt_rxtshift &gt; mptcp_nrtos) {
+				mp_tp-&gt;mpt_softerror = ETIMEDOUT;
+				DTRACE_MPTCP1(error, <span class="enscript-type">struct</span> mptcb *, mp_tp);
+			} <span class="enscript-keyword">else</span> {
+				mp_tp-&gt;mpt_sndnxt = mp_tp-&gt;mpt_rtseq;
+				MPT_UNLOCK(mp_tp);
+				mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Socket: &quot;</span>
+				   <span class="enscript-string">&quot;%s: REXMT %d times.\n&quot;</span>,
+				    __func__, mp_tp-&gt;mpt_rxtshift),
+				    MPTCP_SOCKET_DBG, MPTCP_LOGLVL_LOG);
+				mptcp_output(mpte);
+				MPT_LOCK(mp_tp);
+			}
+		} <span class="enscript-keyword">else</span> {
+			resched_timer = 1;
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTT_TW</span>:
+		<span class="enscript-comment">/* Allows for break before make XXX */</span>
+		<span class="enscript-keyword">if</span> (mp_tp-&gt;mpt_timewait == 0)
+			VERIFY(0);
+		<span class="enscript-keyword">if</span> ((now_msecs - mp_tp-&gt;mpt_timewait) &gt;
+		    (mptcp_tw * hz)) {
+			mp_tp-&gt;mpt_softerror = ETIMEDOUT;
+			DTRACE_MPTCP1(error, <span class="enscript-type">struct</span> mptcb *, mp_tp);
+		} <span class="enscript-keyword">else</span> {
+			resched_timer = 1;
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTT_FASTCLOSE</span>:
+		<span class="enscript-comment">/* TODO XXX */</span>
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+	MPT_UNLOCK(mp_tp);
+
+	<span class="enscript-keyword">return</span> (resched_timer);
+}
+
+uint32_t
+<span class="enscript-function-name">mptcp_timer</span>(<span class="enscript-type">struct</span> mppcbinfo *mppi)
+{
+	<span class="enscript-type">struct</span> mppcb *mpp, *tmpp;
+	<span class="enscript-type">struct</span> timeval now;
+	u_int32_t now_msecs;
+	uint32_t resched_timer = 0;
+
+	lck_mtx_assert(&amp;mppi-&gt;mppi_lock, LCK_MTX_ASSERT_OWNED);
+
+	microuptime(&amp;now);
+	now_msecs = TIMEVAL_TO_HZ(now);
+	TAILQ_FOREACH_SAFE(mpp, &amp;mppi-&gt;mppi_pcbs, mpp_entry, tmpp) {
+		<span class="enscript-type">struct</span> socket *mp_so;
+		<span class="enscript-type">struct</span> mptses *mpte;
+
+		mp_so = mpp-&gt;mpp_socket;
+		VERIFY(mp_so != NULL);
+		mpte = mptompte(mpp);
+		VERIFY(mpte != NULL);
+		MPTE_LOCK(mpte);
+		VERIFY(mpp-&gt;mpp_flags &amp; MPP_ATTACHED);
+		
+		<span class="enscript-keyword">if</span> (mpp-&gt;mpp_flags &amp; MPP_DEFUNCT) {
+			MPTE_UNLOCK(mpte);
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (mptcp_timer_demux(mpte, now_msecs))
+			resched_timer = 1;
+		MPTE_UNLOCK(mpte);
+	}
+
+	<span class="enscript-keyword">return</span> (resched_timer);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mptcp_start_timer</span>(<span class="enscript-type">struct</span> mptses *mpte, <span class="enscript-type">int</span> timer_type)
+{
+	<span class="enscript-type">struct</span> timeval now;
+	<span class="enscript-type">struct</span> mptcb *mp_tp = mpte-&gt;mpte_mptcb;
+
+	microuptime(&amp;now);
+
+	DTRACE_MPTCP2(start__timer, <span class="enscript-type">struct</span> mptcb *, mp_tp, <span class="enscript-type">int</span>, timer_type);
+	mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Socket: %s: %d\n&quot;</span>, __func__, timer_type),
+	    MPTCP_SOCKET_DBG, MPTCP_LOGLVL_VERBOSE);
+
+	<span class="enscript-keyword">switch</span> (timer_type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTT_REXMT</span>:
+		MPT_LOCK(mp_tp);
+		mp_tp-&gt;mpt_timer_vals |= MPTT_REXMT;
+		mp_tp-&gt;mpt_rxtstart = TIMEVAL_TO_HZ(now);
+		mp_tp-&gt;mpt_rxtshift = 0;
+		mp_tp-&gt;mpt_rtseq = mp_tp-&gt;mpt_sndnxt;
+		MPT_UNLOCK(mp_tp);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTT_TW</span>:
+		<span class="enscript-comment">/* XXX: Not implemented yet */</span>
+		MPT_LOCK(mp_tp);
+		mp_tp-&gt;mpt_timer_vals |= MPTT_TW;
+		mp_tp-&gt;mpt_timewait = TIMEVAL_TO_HZ(now);
+		MPT_UNLOCK(mp_tp);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTT_FASTCLOSE</span>:
+		<span class="enscript-comment">/* NO-OP */</span>
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		VERIFY(0);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	mptcp_timer_sched();
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mptcp_cancel_timer</span>(<span class="enscript-type">struct</span> mptcb *mp_tp, <span class="enscript-type">int</span> timer_type)
+{
+	MPT_LOCK_ASSERT_HELD(mp_tp);
+	DTRACE_MPTCP2(cancel__timer, <span class="enscript-type">struct</span> mptcb *, mp_tp, <span class="enscript-type">int</span>, timer_type);
+
+	<span class="enscript-keyword">switch</span> (timer_type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTT_REXMT</span>:
+		mp_tp-&gt;mpt_rxtstart = 0;
+		mp_tp-&gt;mpt_rxtshift = 0;
+		mp_tp-&gt;mpt_timer_vals = 0;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTT_TW</span>:
+		<span class="enscript-comment">/* NO-OP */</span>
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTT_FASTCLOSE</span>:
+		<span class="enscript-comment">/* NO-OP */</span>
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mptcp_cancel_all_timers</span>(<span class="enscript-type">struct</span> mptcb *mp_tp)
+{
+	mptcp_cancel_timer(mp_tp, MPTT_REXMT);
+	mptcp_cancel_timer(mp_tp, MPTT_TW);
+	mptcp_cancel_timer(mp_tp, MPTT_FASTCLOSE);
+}
+</pre>
+<hr />
+</body></html>

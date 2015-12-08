@@ -1,0 +1,913 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOStateReporter.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOStateReporter.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2012-2013 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKernelReportStructs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKernelReporters.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;IOReporterDefs.h&quot;</span>
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOReporter
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IOStateReporter, IOReporter);
+
+
+<span class="enscript-comment">/* static */</span>
+IOStateReporter*
+<span class="enscript-function-name">IOStateReporter::with</span>(IOService *reportingService,
+                      IOReportCategories categories,
+                      <span class="enscript-type">int</span> nstates,
+                      IOReportUnits unit<span class="enscript-comment">/* = kIOReportUnitHWTicks*/</span>)
+{
+    IOStateReporter *reporter, *rval = NULL;
+    
+    <span class="enscript-comment">// kprintf(&quot;%s\n&quot;, __func__);      // can't IORLOG() from static
+</span>    
+    reporter = <span class="enscript-keyword">new</span> IOStateReporter;
+    <span class="enscript-keyword">if</span> (!reporter)      <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+
+    <span class="enscript-keyword">if</span> (!reporter-&gt;initWith(reportingService, categories, nstates, unit)) {
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-comment">// success
+</span>    rval = reporter;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">if</span> (!rval) {
+        <span class="enscript-keyword">if</span> (reporter)       <span class="enscript-keyword">delete</span> reporter;
+    }
+    
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IOStateReporter::initWith</span>(IOService *reportingService,
+                          IOReportCategories categories,
+                          int16_t nstates,
+                          IOReportUnits unit)
+{
+    <span class="enscript-type">bool</span> success = false;
+    
+    IOReportChannelType channelType = {
+        .categories = categories,
+        .report_format = kIOReportFormatState,
+        .nelements = static_cast&lt;uint16_t&gt;(nstates),
+        .element_idx = 0
+    };
+    
+    <span class="enscript-keyword">if</span>(super::init(reportingService, channelType, unit) != true) {
+        IORLOG(<span class="enscript-string">&quot;ERROR super::initWith failed&quot;</span>);
+        success = false;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    _currentStates = NULL;
+    _lastUpdateTimes = NULL;
+    
+    success = true;
+    
+<span class="enscript-reference">finish</span>:    
+    <span class="enscript-keyword">return</span> success;
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">IOStateReporter::free</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">if</span> (_currentStates) {
+        PREFL_MEMOP_PANIC(_nChannels, <span class="enscript-type">int</span>);
+        IOFree(_currentStates, (size_t)_nChannels * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+    }
+    <span class="enscript-keyword">if</span> (_lastUpdateTimes) {
+        PREFL_MEMOP_PANIC(_nChannels, uint64_t);
+        IOFree(_lastUpdateTimes, (size_t)_nChannels * <span class="enscript-keyword">sizeof</span>(uint64_t));
+    }
+    
+    <span class="enscript-reference">super</span>::free();
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::handleSwapPrepare</span>(<span class="enscript-type">int</span> newNChannels)
+{
+    IOReturn res = kIOReturnError;
+    size_t newCurStatesSize, newTSSize;
+    
+    <span class="enscript-comment">//IORLOG(&quot;handleSwapPrepare (state) _nChannels before = %u&quot;, _nChannels);
+</span>    
+    IOREPORTER_CHECK_CONFIG_LOCK();
+
+    <span class="enscript-keyword">if</span> (_swapCurrentStates || _swapLastUpdateTimes) {
+        panic(<span class="enscript-string">&quot;IOStateReporter::_swap* already in use&quot;</span>);
+    }
+    
+    <span class="enscript-comment">// new currentStates buffer
+</span>    PREFL_MEMOP_FAIL(newNChannels, <span class="enscript-type">int</span>);
+    newCurStatesSize = (size_t)newNChannels * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>);
+    _swapCurrentStates = (<span class="enscript-type">int</span>*)IOMalloc(newCurStatesSize);
+    <span class="enscript-keyword">if</span> (_swapCurrentStates == NULL) {
+        res = kIOReturnNoMemory; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    memset(_swapCurrentStates, -1, newCurStatesSize);   <span class="enscript-comment">// init w/&quot;no state&quot;
+</span>    
+    <span class="enscript-comment">// new timestamps buffer
+</span>    PREFL_MEMOP_FAIL(newNChannels, uint64_t);
+    newTSSize = (size_t)newNChannels * <span class="enscript-keyword">sizeof</span>(uint64_t);
+    _swapLastUpdateTimes = (uint64_t *)IOMalloc(newTSSize);
+    <span class="enscript-keyword">if</span> (_swapLastUpdateTimes == NULL) {
+        res = kIOReturnNoMemory; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    memset(_swapLastUpdateTimes, 0, newTSSize);
+
+    res = super::handleSwapPrepare(newNChannels);
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">if</span> (res) {
+        <span class="enscript-keyword">if</span> (_swapCurrentStates) {
+            IOFree(_swapCurrentStates, newCurStatesSize);
+            _swapCurrentStates = NULL;
+        }
+        <span class="enscript-keyword">if</span> (_swapLastUpdateTimes) {
+            IOFree(_swapLastUpdateTimes, newTSSize);
+            _swapLastUpdateTimes = NULL;
+        }
+    }
+
+    <span class="enscript-keyword">return</span> res;
+}
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::handleAddChannelSwap</span>(uint64_t channelID,
+                                      <span class="enscript-type">const</span> OSSymbol *symChannelName)
+{
+    IOReturn res = kIOReturnError;
+    <span class="enscript-type">int</span> cnt;
+    <span class="enscript-type">int</span> *tmpCurStates;
+    uint64_t *tmpTimestamps;
+    <span class="enscript-type">bool</span> swapComplete = false;
+    
+    <span class="enscript-comment">//IORLOG(&quot;IOStateReporter::handleSwap&quot;);
+</span>    
+    <span class="enscript-keyword">if</span> (!_swapCurrentStates || !_swapLastUpdateTimes) {
+        IORLOG(<span class="enscript-string">&quot;IOReporter::handleSwap ERROR swap variables uninitialized!&quot;</span>);
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    IOREPORTER_CHECK_CONFIG_LOCK();
+    IOREPORTER_CHECK_LOCK();
+    
+    <span class="enscript-comment">// Copy any existing buffers
+</span>    <span class="enscript-keyword">if</span> (_currentStates) {
+        PREFL_MEMOP_FAIL(_nChannels, <span class="enscript-type">int</span>);
+        memcpy(_swapCurrentStates, _currentStates,
+               (size_t)_nChannels * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+        
+        <span class="enscript-keyword">if</span> (!_lastUpdateTimes) {
+            panic(<span class="enscript-string">&quot;IOStateReporter::handleAddChannelSwap _lastUpdateTimes unset despite non-NULL _currentStates&quot;</span>);
+        }
+        PREFL_MEMOP_FAIL(_nChannels, uint64_t);
+        memcpy(_swapLastUpdateTimes, _lastUpdateTimes,
+               (size_t)_nChannels * <span class="enscript-keyword">sizeof</span>(uint64_t));
+    }
+    
+    <span class="enscript-comment">// Update principal instance variables, keep old values in _swap* for cleanup
+</span>    tmpCurStates = _currentStates;
+    _currentStates = _swapCurrentStates;
+    _swapCurrentStates = tmpCurStates;
+
+    tmpTimestamps = _lastUpdateTimes;
+    _lastUpdateTimes = _swapLastUpdateTimes;
+    _swapLastUpdateTimes = tmpTimestamps;
+
+    swapComplete = true;
+    
+    <span class="enscript-comment">// subclass success
+</span>
+    <span class="enscript-comment">// invoke superclass(es): base class updates _nChannels &amp; _nElements
+</span>    res = super::handleAddChannelSwap(channelID, symChannelName);
+    <span class="enscript-keyword">if</span> (res) {
+        IORLOG(<span class="enscript-string">&quot;handleSwap(state) ERROR super::handleSwap failed!&quot;</span>);
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-comment">// Channel added successfully, initialize the new channel's state_ids to 0..nStates-1
+</span>    <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; _channelDimension; cnt++) {
+        handleSetStateID(channelID, cnt, (uint64_t)cnt);
+    }
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">if</span> (res &amp;&amp; swapComplete) {
+        <span class="enscript-comment">// unswap so the unused buffers get cleaned up
+</span>        tmpCurStates = _currentStates;
+        _currentStates = _swapCurrentStates;
+        _swapCurrentStates = tmpCurStates;
+
+        tmpTimestamps = _lastUpdateTimes;
+        _lastUpdateTimes = _swapLastUpdateTimes;
+        _swapLastUpdateTimes = tmpTimestamps;
+    }
+
+    <span class="enscript-keyword">return</span> res;
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">IOStateReporter::handleSwapCleanup</span>(<span class="enscript-type">int</span> swapNChannels)
+{
+    IOREPORTER_CHECK_CONFIG_LOCK();
+
+    <span class="enscript-reference">super</span>::handleSwapCleanup(swapNChannels);
+
+    <span class="enscript-keyword">if</span> (_swapCurrentStates) {
+        PREFL_MEMOP_PANIC(swapNChannels, <span class="enscript-type">int</span>);
+        IOFree(_swapCurrentStates, (size_t)swapNChannels * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+        _swapCurrentStates = NULL;
+    }
+    <span class="enscript-keyword">if</span> (_swapLastUpdateTimes) {
+        PREFL_MEMOP_PANIC(swapNChannels, uint64_t);
+        IOFree(_swapLastUpdateTimes, (size_t)swapNChannels * <span class="enscript-keyword">sizeof</span>(uint64_t));
+        _swapLastUpdateTimes = NULL;
+    }
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::_getStateIndices</span>(uint64_t channel_id,
+                                  uint64_t state_id,
+                                  <span class="enscript-type">int</span> *channel_index,
+                                  <span class="enscript-type">int</span> *state_index)
+{
+    IOReturn res = kIOReturnError;
+    <span class="enscript-type">int</span> cnt;
+    IOStateReportValues *values;
+    <span class="enscript-type">int</span> element_index = 0;
+    
+    IOREPORTER_CHECK_LOCK();
+    
+    <span class="enscript-keyword">if</span> (getChannelIndices(channel_id,
+                          channel_index,
+                          &amp;element_index) != kIOReturnSuccess) {
+        res = kIOReturnBadArgument;
+
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; _channelDimension; cnt++) {
+        
+        values = (IOStateReportValues *)getElementValues(element_index + cnt);
+        
+        <span class="enscript-keyword">if</span> (values == NULL) {
+
+            res = kIOReturnError;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+        
+        <span class="enscript-keyword">if</span> (values-&gt;state_id == state_id) {
+            *state_index = cnt;
+            res = kIOReturnSuccess;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+    }
+    
+    res = kIOReturnBadArgument;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> res;
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::setChannelState</span>(uint64_t channel_id,
+                                 uint64_t new_state_id)
+{
+    IOReturn res = kIOReturnError;
+    <span class="enscript-type">int</span> channel_index, new_state_index;
+    uint64_t last_intransition = 0;
+    uint64_t prev_state_residency = 0;
+    
+    lockReporter();
+    
+    <span class="enscript-keyword">if</span> (_getStateIndices(channel_id, new_state_id, &amp;channel_index, &amp;new_state_index) == kIOReturnSuccess) {
+        res = handleSetStateByIndices(channel_index, new_state_index,
+                                      last_intransition,
+                                      prev_state_residency);
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    res = kIOReturnBadArgument;
+    
+<span class="enscript-reference">finish</span>:
+    unlockReporter();
+    <span class="enscript-keyword">return</span> res;
+}
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::setChannelState</span>(uint64_t channel_id,
+                                 uint64_t new_state_id,
+                                 uint64_t last_intransition,
+                                 uint64_t prev_state_residency)
+{
+    <span class="enscript-keyword">return</span> setChannelState(channel_id, new_state_id);
+}
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::overrideChannelState</span>(uint64_t channel_id,
+                                      uint64_t state_id,
+                                      uint64_t time_in_state,
+                                      uint64_t intransitions,
+                                      uint64_t last_intransition <span class="enscript-comment">/*=0*/</span>)
+{
+    IOReturn res = kIOReturnError;
+    <span class="enscript-type">int</span> channel_index, state_index;
+    
+    lockReporter();
+    
+    <span class="enscript-keyword">if</span> (_getStateIndices(channel_id, state_id, &amp;channel_index, &amp;state_index) == kIOReturnSuccess) {
+        
+        <span class="enscript-keyword">if</span> (_lastUpdateTimes[channel_index]) {
+            panic(<span class="enscript-string">&quot;overrideChannelState() cannot be used after setChannelState()!\n&quot;</span>);
+        }
+        
+        res = handleOverrideChannelStateByIndices(channel_index, state_index,
+                                                  time_in_state, intransitions,
+                                                  last_intransition);
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    res = kIOReturnBadArgument;
+    
+<span class="enscript-reference">finish</span>:
+    unlockReporter();
+    <span class="enscript-keyword">return</span> res;
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::handleOverrideChannelStateByIndices</span>(<span class="enscript-type">int</span> channel_index,
+                                             <span class="enscript-type">int</span> state_index,
+                                             uint64_t time_in_state,
+                                             uint64_t intransitions,
+                                             uint64_t last_intransition <span class="enscript-comment">/*=0*/</span>)
+{
+    IOReturn kerr, result = kIOReturnError;
+    IOStateReportValues state_values;
+    <span class="enscript-type">int</span> element_index;
+    
+    <span class="enscript-keyword">if</span> (channel_index &lt; 0 || channel_index &gt;= _nChannels) {
+        result = kIOReturnBadArgument; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-keyword">if</span> (channel_index &lt; 0 || channel_index &gt; (_nElements - state_index)
+                                             / _channelDimension) {
+        result = kIOReturnOverrun; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    element_index = channel_index * _channelDimension + state_index;
+    
+    kerr = copyElementValues(element_index,(IOReportElementValues*)&amp;state_values);
+    <span class="enscript-keyword">if</span> (kerr) {
+        result = kerr; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-comment">// last_intransition = 0 -&gt; no current state (&quot;residency summary only&quot;)
+</span>    state_values.last_intransition = last_intransition;
+    state_values.intransitions = intransitions;
+    state_values.upticks = time_in_state;
+    
+    <span class="enscript-comment">// determines current time for metadata
+</span>    kerr = setElementValues(element_index, (IOReportElementValues *)&amp;state_values);
+    <span class="enscript-keyword">if</span> (kerr) {
+        result = kerr; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-comment">// success
+</span>    result = kIOReturnSuccess;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> result;
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::incrementChannelState</span>(uint64_t channel_id,
+                                       uint64_t state_id,
+                                       uint64_t time_in_state,
+                                       uint64_t intransitions,
+                                       uint64_t last_intransition <span class="enscript-comment">/*=0*/</span>)
+{
+    IOReturn res = kIOReturnError;
+    <span class="enscript-type">int</span> channel_index, state_index;
+    
+    lockReporter();
+    
+    <span class="enscript-keyword">if</span> (_getStateIndices(channel_id, state_id, &amp;channel_index, &amp;state_index) == kIOReturnSuccess) {
+        
+        <span class="enscript-keyword">if</span> (_lastUpdateTimes[channel_index]) {
+            panic(<span class="enscript-string">&quot;incrementChannelState() cannot be used after setChannelState()!\n&quot;</span>);
+        }
+        
+        res = handleIncrementChannelStateByIndices(channel_index, state_index,
+                                                   time_in_state, intransitions,
+                                                   last_intransition);
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    res = kIOReturnBadArgument;
+    
+<span class="enscript-reference">finish</span>:
+    unlockReporter();
+    <span class="enscript-keyword">return</span> res;
+
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::handleIncrementChannelStateByIndices</span>(<span class="enscript-type">int</span> channel_index,
+                                                      <span class="enscript-type">int</span> state_index,
+                                                      uint64_t time_in_state,
+                                                      uint64_t intransitions,
+                                                      uint64_t last_intransition <span class="enscript-comment">/*=0*/</span>)
+{
+    IOReturn kerr, result = kIOReturnError;
+    IOStateReportValues state_values;
+    <span class="enscript-type">int</span> element_index;
+    
+    <span class="enscript-keyword">if</span> (channel_index &lt; 0 || channel_index &gt;= _nChannels) {
+        result = kIOReturnBadArgument; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-keyword">if</span> (channel_index &lt; 0 || channel_index &gt; (_nElements - state_index)
+                                             / _channelDimension) {
+        result = kIOReturnOverrun; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    element_index = channel_index * _channelDimension + state_index;
+    
+    kerr = copyElementValues(element_index,(IOReportElementValues*)&amp;state_values);
+    <span class="enscript-keyword">if</span> (kerr) {
+        result = kerr;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    state_values.last_intransition = last_intransition;
+    state_values.intransitions += intransitions;
+    state_values.upticks += time_in_state;
+    
+    <span class="enscript-comment">// determines current time for metadata
+</span>    kerr = setElementValues(element_index, (IOReportElementValues *)&amp;state_values);
+    <span class="enscript-keyword">if</span> (kerr) {
+        result = kerr;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-comment">// success
+</span>    result = kIOReturnSuccess;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> result;
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::setState</span>(uint64_t new_state_id)
+{
+    uint64_t last_intransition = 0;
+    uint64_t prev_state_residency = 0;
+    IOReturn res = kIOReturnError;
+    IOStateReportValues *values;
+    <span class="enscript-type">int</span> channel_index = 0, element_index = 0, new_state_index = 0;
+    <span class="enscript-type">int</span> cnt;
+    
+    lockReporter();
+    
+    <span class="enscript-keyword">if</span> (_nChannels == 1) {
+
+        <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; _channelDimension; cnt++) {
+            
+            new_state_index = element_index + cnt;
+            
+            values = (IOStateReportValues *)getElementValues(new_state_index);
+            
+            <span class="enscript-keyword">if</span> (values == NULL) {
+                res = kIOReturnError;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+            }
+                        
+            <span class="enscript-keyword">if</span> (values-&gt;state_id == new_state_id) {
+                
+                res = handleSetStateByIndices(channel_index, new_state_index,
+                                              last_intransition,
+                                              prev_state_residency);
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+            }
+        }
+    }
+    
+    res = kIOReturnBadArgument;
+
+<span class="enscript-reference">finish</span>:
+    unlockReporter();
+    <span class="enscript-keyword">return</span> res;
+}
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::setState</span>(uint64_t new_state_id,
+                          uint64_t last_intransition,
+                          uint64_t prev_state_residency)
+{
+    <span class="enscript-keyword">return</span> setState(new_state_id);
+}
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::setStateID</span>(uint64_t channel_id,
+                            <span class="enscript-type">int</span> state_index,
+                            uint64_t state_id)
+{
+    IOReturn res = kIOReturnError;
+    
+    lockReporter();
+    
+    res = handleSetStateID(channel_id, state_index, state_id);
+    
+    unlockReporter();
+    
+    <span class="enscript-keyword">return</span> res;    
+}
+
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::handleSetStateID</span>(uint64_t channel_id,
+                                  <span class="enscript-type">int</span> state_index,
+                                  uint64_t state_id)
+{
+    IOReturn res = kIOReturnError;
+    IOStateReportValues state_values;
+    <span class="enscript-type">int</span> element_index = 0;
+    
+    IOREPORTER_CHECK_LOCK();
+    
+    <span class="enscript-keyword">if</span> (getFirstElementIndex(channel_id, &amp;element_index) == kIOReturnSuccess) {
+        
+        <span class="enscript-keyword">if</span> (state_index &gt;= _channelDimension) {
+            res = kIOReturnBadArgument; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+        <span class="enscript-keyword">if</span> (_nElements - state_index &lt;= element_index) {
+            res = kIOReturnOverrun; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+        element_index += state_index;
+        
+        <span class="enscript-keyword">if</span> (copyElementValues(element_index, (IOReportElementValues *)&amp;state_values) != kIOReturnSuccess) {
+            res = kIOReturnBadArgument;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+        
+        state_values.state_id = state_id;
+        
+        res = setElementValues(element_index, (IOReportElementValues *)&amp;state_values);
+    }
+    
+    <span class="enscript-comment">// FIXME: set a bit somewhere (reporter-wide?) that state_ids can no longer be
+</span>    <span class="enscript-comment">// assumed to be contiguous
+</span><span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> res;
+}
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::setStateByIndices</span>(<span class="enscript-type">int</span> channel_index,
+                                   <span class="enscript-type">int</span> new_state_index)
+{
+    IOReturn res = kIOReturnError;
+    uint64_t last_intransition = 0;
+    uint64_t prev_state_residency = 0;
+    
+    lockReporter();
+    
+    res = handleSetStateByIndices(channel_index, new_state_index,
+                                  last_intransition, prev_state_residency);
+    
+    unlockReporter();
+    
+    <span class="enscript-keyword">return</span> res;
+}
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::setStateByIndices</span>(<span class="enscript-type">int</span> channel_index,
+                                   <span class="enscript-type">int</span> new_state_index,
+                                   uint64_t last_intransition,
+                                   uint64_t prev_state_residency)
+{
+    <span class="enscript-keyword">return</span> setStateByIndices(channel_index, new_state_index);
+}
+
+IOReturn
+<span class="enscript-function-name">IOStateReporter::handleSetStateByIndices</span>(<span class="enscript-type">int</span> channel_index,
+                                         <span class="enscript-type">int</span> new_state_index,
+                                         uint64_t last_intransition,
+                                         uint64_t prev_state_residency)
+{
+    IOReturn res = kIOReturnError;
+    
+    IOStateReportValues curr_state_values, new_state_values;
+    <span class="enscript-type">int</span> curr_state_index = 0;
+    <span class="enscript-type">int</span> curr_element_index, new_element_index;
+    uint64_t last_ch_update_time = 0;
+    uint64_t recordTime = mach_absolute_time();
+    
+    IOREPORTER_CHECK_LOCK();
+    
+    <span class="enscript-keyword">if</span> (channel_index &lt; 0 || channel_index &gt;= _nChannels) {
+        res = kIOReturnBadArgument; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-comment">// if no timestamp provided, last_intransition = time of recording (now)
+</span>    <span class="enscript-keyword">if</span> (last_intransition == 0) {
+        last_intransition = recordTime;
+    }
+
+    <span class="enscript-comment">// First update target state if different than the current state
+</span>    <span class="enscript-comment">// _currentStates[] initialized to -1 to detect first state transition
+</span>    curr_state_index = _currentStates[channel_index];
+    <span class="enscript-keyword">if</span> (new_state_index != curr_state_index) {
+        <span class="enscript-comment">// fetch element data
+</span>        <span class="enscript-keyword">if</span> (channel_index &lt; 0 || channel_index &gt; (_nElements-new_state_index)
+                                                 / _channelDimension) {
+            res = kIOReturnOverrun; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+        new_element_index = channel_index*_channelDimension + new_state_index;
+        <span class="enscript-keyword">if</span> (copyElementValues(new_element_index,
+                              (IOReportElementValues *)&amp;new_state_values)) {
+            res = kIOReturnBadArgument;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+    
+        <span class="enscript-comment">// Update new state's transition info
+</span>        new_state_values.intransitions += 1;
+        new_state_values.last_intransition = last_intransition;
+
+        <span class="enscript-comment">// and store the values
+</span>        res = setElementValues(new_element_index,
+                               (IOReportElementValues *)&amp;new_state_values,
+                               recordTime);
+
+        <span class="enscript-keyword">if</span> (res != kIOReturnSuccess) {
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+        
+        _currentStates[channel_index] = new_state_index;
+    }
+    
+    <span class="enscript-comment">/* Now update time spent in any previous state
+       If new_state_index = curr_state_index, this updates time in the
+       current state.  If this is the channel's first state transition,
+       the last update time will be zero.
+
+       Note: While setState() should never be called on a channel being
+       updated with increment/overrideChannelState(), that's another way
+       that the last update time might not exist.  Regardless, if there
+       is no basis for determining time spent in previous state, there's
+       nothing to update!
+     */</span>
+    last_ch_update_time = _lastUpdateTimes[channel_index];
+    <span class="enscript-keyword">if</span> (last_ch_update_time != 0) {
+        <span class="enscript-keyword">if</span> (channel_index &lt; 0 || channel_index &gt; (_nElements-curr_state_index)
+                                                 / _channelDimension) {
+            res = kIOReturnOverrun; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+        curr_element_index = channel_index*_channelDimension + curr_state_index;
+        <span class="enscript-keyword">if</span> (copyElementValues(curr_element_index,
+                              (IOReportElementValues *)&amp;curr_state_values)) {
+            res = kIOReturnBadArgument;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+        <span class="enscript-comment">// compute the time spent in previous state, unless provided
+</span>        <span class="enscript-keyword">if</span> (prev_state_residency == 0) {
+            prev_state_residency = last_intransition - last_ch_update_time;
+        }
+        
+        curr_state_values.upticks += prev_state_residency;
+        
+        res = setElementValues(curr_element_index,
+                               (IOReportElementValues*)&amp;curr_state_values,
+                               recordTime);
+        
+        <span class="enscript-keyword">if</span> (res != kIOReturnSuccess) {
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+    }
+    
+    <span class="enscript-comment">// record basis for next &quot;time in prior state&quot; calculation
+</span>    <span class="enscript-comment">// (also arms a panic in override/incrementChannelState())
+</span>    _lastUpdateTimes[channel_index] = last_intransition;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> res;
+}
+
+
+<span class="enscript-comment">// blocks might make this slightly easier?
+</span>uint64_t
+<span class="enscript-function-name">IOStateReporter::getStateInTransitions</span>(uint64_t channel_id,
+                                       uint64_t state_id)
+{
+    <span class="enscript-keyword">return</span> _getStateValue(channel_id, state_id, kInTransitions);
+}
+
+uint64_t
+<span class="enscript-function-name">IOStateReporter::getStateResidencyTime</span>(uint64_t channel_id,
+                                       uint64_t state_id)
+{
+    <span class="enscript-keyword">return</span> _getStateValue(channel_id, state_id, kResidencyTime);
+}
+
+uint64_t
+<span class="enscript-function-name">IOStateReporter::getStateLastTransitionTime</span>(uint64_t channel_id,
+                                            uint64_t state_id)
+{
+    <span class="enscript-keyword">return</span> _getStateValue(channel_id, state_id, kLastTransitionTime);
+}
+
+uint64_t
+<span class="enscript-function-name">IOStateReporter::_getStateValue</span>(uint64_t channel_id,
+                                uint64_t state_id,
+                                <span class="enscript-type">enum</span> valueSelector value)
+{
+    <span class="enscript-type">int</span> channel_index = 0, element_index = 0, cnt;
+    IOStateReportValues *values = NULL;
+    uint64_t result = kIOReportInvalidValue;
+    
+    lockReporter();
+    
+    <span class="enscript-keyword">if</span> (getChannelIndices(channel_id, &amp;channel_index, &amp;element_index) == kIOReturnSuccess) {
+        
+        <span class="enscript-keyword">if</span> (updateChannelValues(channel_index) == kIOReturnSuccess) {
+        
+            <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; _channelDimension; cnt++) {
+                
+                values = (IOStateReportValues *)getElementValues(element_index);
+                
+                <span class="enscript-keyword">if</span> (state_id == values-&gt;state_id) {
+                    
+                    <span class="enscript-keyword">switch</span> (value) {
+                        <span class="enscript-keyword">case</span> <span class="enscript-reference">kInTransitions</span>:
+                            result = values-&gt;intransitions;
+                            <span class="enscript-keyword">break</span>;
+                        <span class="enscript-keyword">case</span> <span class="enscript-reference">kResidencyTime</span>:
+                            result = values-&gt;upticks;
+                            <span class="enscript-keyword">break</span>;
+                        <span class="enscript-keyword">case</span> <span class="enscript-reference">kLastTransitionTime</span>:
+                            result = values-&gt;last_intransition;
+                        <span class="enscript-reference">default</span>:
+                            <span class="enscript-keyword">break</span>;
+                    }
+                    
+                    <span class="enscript-keyword">break</span>;
+                }
+                
+                element_index++;
+            }
+        }
+    }
+
+    unlockReporter();
+    <span class="enscript-keyword">return</span> result;
+}
+
+
+uint64_t
+<span class="enscript-function-name">IOStateReporter::getStateLastChannelUpdateTime</span>(uint64_t channel_id)
+{
+    <span class="enscript-type">int</span> channel_index;
+    uint64_t result = kIOReportInvalidValue;
+    
+    lockReporter();
+    
+    <span class="enscript-keyword">if</span> (getChannelIndex(channel_id, &amp;channel_index) == kIOReturnSuccess) {
+        
+        result = _lastUpdateTimes[channel_index];
+    }
+    
+    unlockReporter();
+        
+    <span class="enscript-keyword">return</span> result;
+}
+
+
+<span class="enscript-comment">/* updateChannelValues() is called to refresh state before being
+   reported outside the reporter.  In the case of IOStateReporter,
+   this is primarily an update to the &quot;time in state&quot; data.
+*/</span>
+IOReturn
+<span class="enscript-function-name">IOStateReporter::updateChannelValues</span>(<span class="enscript-type">int</span> channel_index)
+{
+    IOReturn kerr, result = kIOReturnError;
+    
+    <span class="enscript-type">int</span> state_index, element_idx;
+    uint64_t currentTime;
+    uint64_t last_ch_update_time;
+    uint64_t time_in_state;
+    IOStateReportValues state_values;
+    
+    IOREPORTER_CHECK_LOCK();
+
+    <span class="enscript-keyword">if</span> (channel_index &lt; 0 || channel_index &gt;= _nChannels) {
+        result = kIOReturnBadArgument; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-comment">/* First check to see whether this channel has begun self-
+       calculation of time in state.  It's possible this channel
+       has yet to be initialized or that the driver is updating
+       the channel with override/incrementChannelState() which
+       never enable automatic time-in-state updates.  In that case,
+       there is nothing to update and we return success.
+     */</span>
+    last_ch_update_time = _lastUpdateTimes[channel_index];
+    <span class="enscript-keyword">if</span> (last_ch_update_time == 0) {
+        result = kIOReturnSuccess; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    <span class="enscript-comment">// figure out the current state (if any)
+</span>    state_index = _currentStates[channel_index];
+    
+    <span class="enscript-comment">// e.g. given 4 4-state channels, the boundary is ch[3].st[3] &lt;- _elems[15]
+</span>    <span class="enscript-keyword">if</span> (channel_index &lt; 0 || channel_index &gt; (_nElements - state_index)
+                                             / _channelDimension) {
+        result = kIOReturnOverrun; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    element_idx = channel_index * _channelDimension + state_index;
+    
+    <span class="enscript-comment">// get the current values
+</span>    kerr = copyElementValues(element_idx,(IOReportElementValues*)&amp;state_values);
+    <span class="enscript-keyword">if</span> (kerr) {
+        result = kerr; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    <span class="enscript-comment">// calculate time in state
+</span>    currentTime = mach_absolute_time();
+    time_in_state = currentTime - last_ch_update_time;
+    state_values.upticks += time_in_state;
+    
+    <span class="enscript-comment">// and store the values
+</span>    kerr = setElementValues(element_idx,
+                            (IOReportElementValues *)&amp;state_values,
+                            currentTime);
+    <span class="enscript-keyword">if</span> (kerr) {
+        result = kerr; <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-comment">// Record basis for next &quot;prior time&quot; calculation
+</span>    _lastUpdateTimes[channel_index] = currentTime;
+
+
+    <span class="enscript-comment">// success
+</span>    result = kIOReturnSuccess;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> result;
+}
+</pre>
+<hr />
+</body></html>

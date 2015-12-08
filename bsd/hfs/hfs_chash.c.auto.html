@@ -1,0 +1,610 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>hfs_chash.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">hfs_chash.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2002-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1989, 1991, 1993, 1995
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *	  notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *	  notice, this list of conditions and the following disclaimer in the
+ *	  documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *	  must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *	  may be used to endorse or promote products derived from this software
+ *	  without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.	IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)hfs_chash.c
+ *	derived from @(#)ufs_ihash.c	8.7 (Berkeley) 5/17/95
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs.h&quot;</span>	<span class="enscript-comment">/* XXX bringup */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_cnode.h&quot;</span>
+
+<span class="enscript-type">extern</span> lck_attr_t *  hfs_lock_attr;
+<span class="enscript-type">extern</span> lck_grp_t *  hfs_mutex_group;
+<span class="enscript-type">extern</span> lck_grp_t *  hfs_rwlock_group;
+
+lck_grp_t * chash_lck_grp;
+lck_grp_attr_t * chash_lck_grp_attr;
+lck_attr_t * chash_lck_attr;
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">CNODEHASH</span>(hfsmp, inum) (&amp;hfsmp-&gt;hfs_cnodehashtbl[(inum) &amp; hfsmp-&gt;hfs_cnodehash])
+
+
+<span class="enscript-comment">/*
+ * Initialize cnode hash table.
+ */</span>
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_chashinit</span>()
+{
+	chash_lck_grp_attr= lck_grp_attr_alloc_init();
+	chash_lck_grp  = lck_grp_alloc_init(<span class="enscript-string">&quot;cnode_hash&quot;</span>, chash_lck_grp_attr);
+	chash_lck_attr = lck_attr_alloc_init();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">hfs_chash_lock</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp) 
+{
+	lck_mtx_lock(&amp;hfsmp-&gt;hfs_chash_mutex);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">hfs_chash_lock_spin</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp) 
+{
+	lck_mtx_lock_spin(&amp;hfsmp-&gt;hfs_chash_mutex);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">hfs_chash_lock_convert</span> (__unused <span class="enscript-type">struct</span> hfsmount *hfsmp)
+{
+	lck_mtx_convert_spin(&amp;hfsmp-&gt;hfs_chash_mutex);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">hfs_chash_unlock</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp) 
+{
+	lck_mtx_unlock(&amp;hfsmp-&gt;hfs_chash_mutex);
+}
+
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_chashinit_finish</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp)
+{
+	lck_mtx_init(&amp;hfsmp-&gt;hfs_chash_mutex, chash_lck_grp, chash_lck_attr);
+
+	hfsmp-&gt;hfs_cnodehashtbl = hashinit(desiredvnodes / 4, M_HFSMNT, &amp;hfsmp-&gt;hfs_cnodehash);
+}
+
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_delete_chash</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp)
+{
+	lck_mtx_destroy(&amp;hfsmp-&gt;hfs_chash_mutex, chash_lck_grp);
+
+	FREE(hfsmp-&gt;hfs_cnodehashtbl, M_HFSMNT);
+}
+
+
+<span class="enscript-comment">/*
+ * Use the device, inum pair to find the incore cnode.
+ *
+ * If it is in core, but locked, wait for it.
+ */</span>
+<span class="enscript-type">struct</span> vnode *
+<span class="enscript-function-name">hfs_chash_getvnode</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, ino_t inum, <span class="enscript-type">int</span> wantrsrc, <span class="enscript-type">int</span> skiplock, <span class="enscript-type">int</span> allow_deleted)
+{
+	<span class="enscript-type">struct</span> cnode *cp;
+	<span class="enscript-type">struct</span> vnode *vp;
+	<span class="enscript-type">int</span> error;
+	u_int32_t vid;
+
+	<span class="enscript-comment">/* 
+	 * Go through the hash list
+	 * If a cnode is in the process of being cleaned out or being
+	 * allocated, wait for it to be finished and then try again.
+	 */</span>
+<span class="enscript-reference">loop</span>:
+	hfs_chash_lock_spin(hfsmp);
+
+	<span class="enscript-keyword">for</span> (cp = CNODEHASH(hfsmp, inum)-&gt;lh_first; cp; cp = cp-&gt;c_hash.le_next) {
+		<span class="enscript-keyword">if</span> (cp-&gt;c_fileid != inum)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-comment">/* Wait if cnode is being created or reclaimed. */</span>
+		<span class="enscript-keyword">if</span> (ISSET(cp-&gt;c_hflag, H_ALLOC | H_TRANSIT | H_ATTACH)) {
+		        SET(cp-&gt;c_hflag, H_WAITING);
+
+			(<span class="enscript-type">void</span>) msleep(cp, &amp;hfsmp-&gt;hfs_chash_mutex, PDROP | PINOD,
+			              <span class="enscript-string">&quot;hfs_chash_getvnode&quot;</span>, 0);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop</span>;
+		}
+		<span class="enscript-comment">/* Obtain the desired vnode. */</span>
+		vp = wantrsrc ? cp-&gt;c_rsrc_vp : cp-&gt;c_vp;
+		<span class="enscript-keyword">if</span> (vp == NULLVP)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+
+		vid = vnode_vid(vp);
+		hfs_chash_unlock(hfsmp);
+
+		<span class="enscript-keyword">if</span> ((error = vnode_getwithvid(vp, vid))) {
+		        <span class="enscript-comment">/*
+			 * If vnode is being reclaimed, or has
+			 * already changed identity, no need to wait
+			 */</span>
+		        <span class="enscript-keyword">return</span> (NULL);
+		}
+		<span class="enscript-keyword">if</span> (!skiplock &amp;&amp; hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT) != 0) {
+			vnode_put(vp);
+			<span class="enscript-keyword">return</span> (NULL);
+		}
+
+		<span class="enscript-comment">/*
+		 * Skip cnodes that are not in the name space anymore
+		 * we need to check with the cnode lock held because
+		 * we may have blocked acquiring the vnode ref or the
+		 * lock on the cnode which would allow the node to be
+		 * unlinked
+		 */</span>
+		<span class="enscript-keyword">if</span> (!allow_deleted) {
+			<span class="enscript-keyword">if</span> (cp-&gt;c_flag &amp; (C_NOEXISTS | C_DELETED)) {
+				<span class="enscript-keyword">if</span> (!skiplock) {
+					hfs_unlock(cp);
+				}
+				vnode_put(vp);
+				<span class="enscript-keyword">return</span> (NULL);
+			}			
+		}
+		<span class="enscript-keyword">return</span> (vp);
+	}
+<span class="enscript-reference">exit</span>:
+	hfs_chash_unlock(hfsmp);
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+
+<span class="enscript-comment">/*
+ * Use the device, fileid pair to snoop an incore cnode.
+ *
+ * A cnode can exists in chash even after it has been 
+ * deleted from the catalog, so this function returns 
+ * ENOENT if C_NOEXIST is set in the cnode's flag.
+ * 
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_chash_snoop</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, ino_t inum, <span class="enscript-type">int</span> existence_only, 
+				<span class="enscript-type">int</span> (*callout)(<span class="enscript-type">const</span> cnode_t *cp, <span class="enscript-type">void</span> *), <span class="enscript-type">void</span> * arg)
+{
+	<span class="enscript-type">struct</span> cnode *cp;
+	<span class="enscript-type">int</span> result = ENOENT;
+
+	<span class="enscript-comment">/* 
+	 * Go through the hash list
+	 * If a cnode is in the process of being cleaned out or being
+	 * allocated, wait for it to be finished and then try again.
+	 */</span>
+	hfs_chash_lock(hfsmp);
+
+	<span class="enscript-keyword">for</span> (cp = CNODEHASH(hfsmp, inum)-&gt;lh_first; cp; cp = cp-&gt;c_hash.le_next) {
+		<span class="enscript-keyword">if</span> (cp-&gt;c_fileid != inum)
+			<span class="enscript-keyword">continue</span>;
+	
+		<span class="enscript-comment">/*
+		 * Under normal circumstances, we would want to return ENOENT if a cnode is in
+		 * the hash and it is marked C_NOEXISTS or C_DELETED.  However, if the CNID
+		 * namespace has wrapped around, then we have the possibility of collisions.  
+		 * In that case, we may use this function to validate whether or not we 
+		 * should trust the nextCNID value in the hfs mount point.  
+		 * 
+		 * If we didn't do this, then it would be possible for a cnode that is no longer backed
+		 * by anything on-disk (C_NOEXISTS) to still exist in the hash along with its
+		 * vnode.  The cat_create routine could then create a new entry in the catalog
+		 * re-using that CNID.  Then subsequent hfs_getnewvnode calls will repeatedly fail
+		 * trying to look it up/validate it because it is marked C_NOEXISTS.  So we want
+		 * to prevent that from happening as much as possible.
+		 */</span>
+		<span class="enscript-keyword">if</span> (existence_only) {
+			result = 0;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/* Skip cnodes that have been removed from the catalog */</span>
+		<span class="enscript-keyword">if</span> (cp-&gt;c_flag &amp; (C_NOEXISTS | C_DELETED)) {
+			result = EACCES;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/* Skip cnodes being created or reclaimed. */</span>
+		<span class="enscript-keyword">if</span> (!ISSET(cp-&gt;c_hflag, H_ALLOC | H_TRANSIT | H_ATTACH)) {
+			result = callout(cp, arg);
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+	hfs_chash_unlock(hfsmp);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+
+<span class="enscript-comment">/*
+ * Use the device, fileid pair to find the incore cnode.
+ * If no cnode if found one is created
+ *
+ * If it is in core, but locked, wait for it.
+ *
+ * If the cnode is C_DELETED, then return NULL since that 
+ * inum is no longer valid for lookups (open-unlinked file).
+ *
+ * If the cnode is C_DELETED but also marked C_RENAMED, then that means
+ * the cnode was renamed over and a new entry exists in its place.  The caller
+ * should re-drive the lookup to get the newer entry.  In that case, we'll still
+ * return NULL for the cnode, but also return GNV_CHASH_RENAMED in the output flags
+ * of this function to indicate the caller that they should re-drive.
+ */</span>
+<span class="enscript-type">struct</span> cnode *
+<span class="enscript-function-name">hfs_chash_getcnode</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, ino_t inum, <span class="enscript-type">struct</span> vnode **vpp, 
+				   <span class="enscript-type">int</span> wantrsrc, <span class="enscript-type">int</span> skiplock, <span class="enscript-type">int</span> *out_flags, <span class="enscript-type">int</span> *hflags)
+{
+	<span class="enscript-type">struct</span> cnode	*cp;
+	<span class="enscript-type">struct</span> cnode	*ncp = NULL;
+	vnode_t		vp;
+	u_int32_t	vid;
+
+	<span class="enscript-comment">/* 
+	 * Go through the hash list
+	 * If a cnode is in the process of being cleaned out or being
+	 * allocated, wait for it to be finished and then try again.
+	 */</span>
+<span class="enscript-reference">loop</span>:
+	hfs_chash_lock_spin(hfsmp);
+
+<span class="enscript-reference">loop_with_lock</span>:
+	<span class="enscript-keyword">for</span> (cp = CNODEHASH(hfsmp, inum)-&gt;lh_first; cp; cp = cp-&gt;c_hash.le_next) {
+		<span class="enscript-keyword">if</span> (cp-&gt;c_fileid != inum)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-comment">/*
+		 * Wait if cnode is being created, attached to or reclaimed.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ISSET(cp-&gt;c_hflag, H_ALLOC | H_ATTACH | H_TRANSIT)) {
+		        SET(cp-&gt;c_hflag, H_WAITING);
+
+			(<span class="enscript-type">void</span>) msleep(cp, &amp;hfsmp-&gt;hfs_chash_mutex, PINOD,
+			              <span class="enscript-string">&quot;hfs_chash_getcnode&quot;</span>, 0);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop_with_lock</span>;
+		}
+		vp = wantrsrc ? cp-&gt;c_rsrc_vp : cp-&gt;c_vp;
+		<span class="enscript-keyword">if</span> (vp == NULL) {
+			<span class="enscript-comment">/*
+			 * The desired vnode isn't there so tag the cnode.
+			 */</span>
+			SET(cp-&gt;c_hflag, H_ATTACH);
+			*hflags |= H_ATTACH;
+
+			hfs_chash_unlock(hfsmp);
+		} <span class="enscript-keyword">else</span> {
+			vid = vnode_vid(vp);
+
+			hfs_chash_unlock(hfsmp);
+
+			<span class="enscript-keyword">if</span> (vnode_getwithvid(vp, vid))
+		        	<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop</span>;
+		}
+		<span class="enscript-keyword">if</span> (ncp) {
+			<span class="enscript-comment">/*
+			 * someone else won the race to create
+			 * this cnode and add it to the hash
+			 * just dump our allocation
+			 */</span>
+			FREE_ZONE(ncp, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cnode), M_HFSNODE);
+			ncp = NULL;
+		}
+
+		<span class="enscript-keyword">if</span> (!skiplock) {
+			hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_ALLOW_NOEXISTS);
+		}
+
+		<span class="enscript-comment">/*
+		 * Skip cnodes that are not in the name space anymore
+		 * we need to check with the cnode lock held because
+		 * we may have blocked acquiring the vnode ref or the
+		 * lock on the cnode which would allow the node to be
+		 * unlinked.
+		 *
+		 * Don't return a cnode in this case since the inum
+		 * is no longer valid for lookups.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((cp-&gt;c_flag &amp; (C_NOEXISTS | C_DELETED)) &amp;&amp; !wantrsrc) {
+			<span class="enscript-type">int</span> renamed = 0;
+			<span class="enscript-keyword">if</span> (cp-&gt;c_flag &amp; C_RENAMED) {
+				renamed = 1;
+			}
+			<span class="enscript-keyword">if</span> (!skiplock)
+				hfs_unlock(cp);
+			<span class="enscript-keyword">if</span> (vp != NULLVP) {
+				vnode_put(vp);
+			} <span class="enscript-keyword">else</span> {
+				hfs_chash_lock_spin(hfsmp);
+				CLR(cp-&gt;c_hflag, H_ATTACH);
+				*hflags &amp;= ~H_ATTACH;
+				<span class="enscript-keyword">if</span> (ISSET(cp-&gt;c_hflag, H_WAITING)) {
+					CLR(cp-&gt;c_hflag, H_WAITING);
+					wakeup((caddr_t)cp);
+				}
+				hfs_chash_unlock(hfsmp);
+			}
+			vp = NULL;
+			cp = NULL;
+			<span class="enscript-keyword">if</span> (renamed) {
+				*out_flags = GNV_CHASH_RENAMED;
+			}
+		}
+		*vpp = vp;
+		<span class="enscript-keyword">return</span> (cp);
+	}
+
+	<span class="enscript-comment">/* 
+	 * Allocate a new cnode
+	 */</span>
+	<span class="enscript-keyword">if</span> (skiplock &amp;&amp; !wantrsrc)
+		panic(<span class="enscript-string">&quot;%s - should never get here when skiplock is set \n&quot;</span>, __FUNCTION__);
+
+	<span class="enscript-keyword">if</span> (ncp == NULL) {
+		hfs_chash_unlock(hfsmp);
+
+	        MALLOC_ZONE(ncp, <span class="enscript-type">struct</span> cnode *, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cnode), M_HFSNODE, M_WAITOK);
+		<span class="enscript-comment">/*
+		 * since we dropped the chash lock, 
+		 * we need to go back and re-verify
+		 * that this node hasn't come into 
+		 * existence...
+		 */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop</span>;
+	}
+	hfs_chash_lock_convert(hfsmp);
+
+	bzero(ncp, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cnode));
+	SET(ncp-&gt;c_hflag, H_ALLOC);
+	*hflags |= H_ALLOC;
+	ncp-&gt;c_fileid = inum;
+	TAILQ_INIT(&amp;ncp-&gt;c_hintlist); <span class="enscript-comment">/* make the list empty */</span>
+	TAILQ_INIT(&amp;ncp-&gt;c_originlist);
+
+	lck_rw_init(&amp;ncp-&gt;c_rwlock, hfs_rwlock_group, hfs_lock_attr);
+	<span class="enscript-keyword">if</span> (!skiplock)
+		(<span class="enscript-type">void</span>) hfs_lock(ncp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
+
+	<span class="enscript-comment">/* Insert the new cnode with it's H_ALLOC flag set */</span>
+	LIST_INSERT_HEAD(CNODEHASH(hfsmp, inum), ncp, c_hash);
+	hfs_chash_unlock(hfsmp);
+
+	*vpp = NULL;
+	<span class="enscript-keyword">return</span> (ncp);
+}
+
+
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_chashwakeup</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> cnode *cp, <span class="enscript-type">int</span> hflags)
+{
+	hfs_chash_lock_spin(hfsmp);
+
+	CLR(cp-&gt;c_hflag, hflags);
+
+	<span class="enscript-keyword">if</span> (ISSET(cp-&gt;c_hflag, H_WAITING)) {
+	        CLR(cp-&gt;c_hflag, H_WAITING);
+		wakeup((caddr_t)cp);
+	}
+	hfs_chash_unlock(hfsmp);
+}
+
+
+<span class="enscript-comment">/*
+ * Re-hash two cnodes in the hash table.
+ */</span>
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_chash_rehash</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> cnode *cp1, <span class="enscript-type">struct</span> cnode *cp2)
+{
+	hfs_chash_lock_spin(hfsmp);
+
+	LIST_REMOVE(cp1, c_hash);
+	LIST_REMOVE(cp2, c_hash);
+	LIST_INSERT_HEAD(CNODEHASH(hfsmp, cp1-&gt;c_fileid), cp1, c_hash);
+	LIST_INSERT_HEAD(CNODEHASH(hfsmp, cp2-&gt;c_fileid), cp2, c_hash);
+
+	hfs_chash_unlock(hfsmp);
+}
+
+
+<span class="enscript-comment">/*
+ * Remove a cnode from the hash table.
+ */</span>
+__private_extern__
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_chashremove</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> cnode *cp)
+{
+	hfs_chash_lock_spin(hfsmp);
+
+	<span class="enscript-comment">/* Check if a vnode is getting attached */</span>
+	<span class="enscript-keyword">if</span> (ISSET(cp-&gt;c_hflag, H_ATTACH)) {
+		hfs_chash_unlock(hfsmp);
+		<span class="enscript-keyword">return</span> (EBUSY);
+	}
+	<span class="enscript-keyword">if</span> (cp-&gt;c_hash.le_next || cp-&gt;c_hash.le_prev) {
+	    LIST_REMOVE(cp, c_hash);
+	    cp-&gt;c_hash.le_next = NULL;
+	    cp-&gt;c_hash.le_prev = NULL;
+	}
+	hfs_chash_unlock(hfsmp);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Remove a cnode from the hash table and wakeup any waiters.
+ */</span>
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_chash_abort</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> cnode *cp)
+{
+	hfs_chash_lock_spin(hfsmp);
+
+	LIST_REMOVE(cp, c_hash);
+	cp-&gt;c_hash.le_next = NULL;
+	cp-&gt;c_hash.le_prev = NULL;
+
+	CLR(cp-&gt;c_hflag, H_ATTACH | H_ALLOC);
+	<span class="enscript-keyword">if</span> (ISSET(cp-&gt;c_hflag, H_WAITING)) {
+	        CLR(cp-&gt;c_hflag, H_WAITING);
+		wakeup((caddr_t)cp);
+	}
+	hfs_chash_unlock(hfsmp);
+}
+
+
+<span class="enscript-comment">/*
+ * mark a cnode as in transition
+ */</span>
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_chash_mark_in_transit</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> cnode *cp)
+{
+	hfs_chash_lock_spin(hfsmp);
+
+        SET(cp-&gt;c_hflag, H_TRANSIT);
+
+	hfs_chash_unlock(hfsmp);
+}
+
+<span class="enscript-comment">/* Search a cnode in the hash.  This function does not return cnode which 
+ * are getting created, destroyed or in transition.  Note that this function
+ * does not acquire the cnode hash mutex, and expects the caller to acquire it.
+ * On success, returns pointer to the cnode found.  On failure, returns NULL.
+ */</span>
+<span class="enscript-type">static</span> 
+<span class="enscript-type">struct</span> cnode *
+<span class="enscript-function-name">hfs_chash_search_cnid</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, cnid_t cnid) 
+{
+	<span class="enscript-type">struct</span> cnode *cp;
+
+	<span class="enscript-keyword">for</span> (cp = CNODEHASH(hfsmp, cnid)-&gt;lh_first; cp; cp = cp-&gt;c_hash.le_next) {
+		<span class="enscript-keyword">if</span> (cp-&gt;c_fileid == cnid) {
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-comment">/* If cnode is being created or reclaimed, return error. */</span>
+	<span class="enscript-keyword">if</span> (cp &amp;&amp; ISSET(cp-&gt;c_hflag, H_ALLOC | H_TRANSIT | H_ATTACH)) {
+		cp = NULL;
+	}
+
+	<span class="enscript-keyword">return</span> cp;
+}
+
+<span class="enscript-comment">/* Search a cnode corresponding to given device and ID in the hash.  If the 
+ * found cnode has kHFSHasChildLinkBit cleared, set it.  If the cnode is not 
+ * found, no new cnode is created and error is returned.
+ * 
+ * Return values - 
+ *	-1 : The cnode was not found.
+ * 	 0 : The cnode was found, and the kHFSHasChildLinkBit was already set.
+ *	 1 : The cnode was found, the kHFSHasChildLinkBit was not set, and the 
+ *	     function had to set that bit.
+ */</span>
+__private_extern__ 
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_chash_set_childlinkbit</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, cnid_t cnid)
+{
+	<span class="enscript-type">int</span> retval = -1;
+	<span class="enscript-type">struct</span> cnode *cp;
+
+	hfs_chash_lock_spin(hfsmp);
+
+	cp = hfs_chash_search_cnid(hfsmp, cnid);
+	<span class="enscript-keyword">if</span> (cp) {
+		<span class="enscript-keyword">if</span> (cp-&gt;c_attr.ca_recflags &amp; kHFSHasChildLinkMask) {
+			retval = 0;
+		} <span class="enscript-keyword">else</span> {
+			cp-&gt;c_attr.ca_recflags |= kHFSHasChildLinkMask;
+			retval = 1;
+		}
+	}
+	hfs_chash_unlock(hfsmp);
+
+	<span class="enscript-keyword">return</span> retval;
+}
+</pre>
+<hr />
+</body></html>

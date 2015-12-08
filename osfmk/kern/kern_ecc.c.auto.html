@@ -1,0 +1,150 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kern_ecc.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kern_ecc.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+* Copyright (c) 2013 Apple Inc. All rights reserved.
+*
+* @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+* 
+* This file contains Original Code and/or Modifications of Original Code
+* as defined in and that are subject to the Apple Public Source License
+* Version 2.0 (the 'License'). You may not use this file except in
+* compliance with the License. The rights granted to you under the License
+* may not be used to create, or enable the creation or redistribution of,
+* unlawful or unlicensed copies of an Apple operating system, or to
+* circumvent, violate, or enable the circumvention or violation of, any
+* terms of an Apple operating system software license agreement.
+* 
+* Please obtain a copy of the License at
+* <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+* 
+* The Original Code and all software distributed under the License are
+* distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+* EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+* INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+* Please see the License for the specific language governing rights and
+* limitations under the License.
+* 
+* @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+*/</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ecc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * ECC data.  Not really KPCs, but this still seems like the
+ * best home for this code.
+ *
+ * Circular buffer of events.  When we fill up, drop data.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ECC_EVENT_BUFFER_COUNT</span>	5
+<span class="enscript-type">struct</span> ecc_event		ecc_data[ECC_EVENT_BUFFER_COUNT];
+<span class="enscript-type">static</span> uint32_t			ecc_data_next_read; 
+<span class="enscript-type">static</span> uint32_t			ecc_data_next_write; 
+<span class="enscript-type">static</span> boolean_t		ecc_data_empty = TRUE; <span class="enscript-comment">// next read == next write : empty or full?
+</span><span class="enscript-type">static</span> lck_grp_t		*ecc_data_lock_group;
+<span class="enscript-type">static</span> lck_spin_t		ecc_data_lock;
+<span class="enscript-type">static</span> uint32_t			ecc_correction_count;
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ecc_log_init</span>()
+{
+	ecc_data_lock_group = lck_grp_alloc_init(<span class="enscript-string">&quot;ecc-data&quot;</span>, NULL);
+	lck_spin_init(&amp;ecc_data_lock, ecc_data_lock_group, NULL);
+	OSMemoryBarrier();
+}
+
+uint32_t
+<span class="enscript-function-name">ecc_log_get_correction_count</span>()
+{
+	<span class="enscript-keyword">return</span> ecc_correction_count;
+}
+
+kern_return_t
+<span class="enscript-function-name">ecc_log_record_event</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ecc_event *ev)
+{
+	spl_t x;
+
+	<span class="enscript-keyword">if</span> (ev-&gt;count &gt; ECC_EVENT_INFO_DATA_ENTRIES) {
+		panic(<span class="enscript-string">&quot;Count of %u on ecc event is too large.&quot;</span>, (<span class="enscript-type">unsigned</span>)ev-&gt;count);
+	}
+
+	x = splhigh();
+	lck_spin_lock(&amp;ecc_data_lock);
+
+	ecc_correction_count++;
+
+	<span class="enscript-keyword">if</span> (ecc_data_next_read == ecc_data_next_write &amp;&amp; !ecc_data_empty)  {
+		lck_spin_unlock(&amp;ecc_data_lock);
+		splx(x);
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+
+	bcopy(ev, &amp;ecc_data[ecc_data_next_write], <span class="enscript-keyword">sizeof</span>(*ev));
+	ecc_data_next_write++;
+	ecc_data_next_write %= ECC_EVENT_BUFFER_COUNT;
+	ecc_data_empty = FALSE;
+
+	lck_spin_unlock(&amp;ecc_data_lock);
+	splx(x);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+
+kern_return_t
+<span class="enscript-function-name">ecc_log_get_next_event</span>(<span class="enscript-type">struct</span> ecc_event *ev)
+{
+	spl_t x;
+
+	x = splhigh();
+	lck_spin_lock(&amp;ecc_data_lock);
+
+	<span class="enscript-keyword">if</span> (ecc_data_empty)  {
+		assert(ecc_data_next_write == ecc_data_next_read);
+
+		lck_spin_unlock(&amp;ecc_data_lock);
+		splx(x);
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+
+	bcopy(&amp;ecc_data[ecc_data_next_read], ev, <span class="enscript-keyword">sizeof</span>(*ev));
+	ecc_data_next_read++;
+	ecc_data_next_read %= ECC_EVENT_BUFFER_COUNT;
+
+	<span class="enscript-keyword">if</span> (ecc_data_next_read == ecc_data_next_write) {
+		ecc_data_empty = TRUE;
+	}
+
+	lck_spin_unlock(&amp;ecc_data_lock);
+	splx(x);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,1116 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ndrv.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ndrv.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1997-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ *	@(#)ndrv.c	1.1 (MacOSX) 6/10/43
+ * Justin Walker, 970604
+ *   AF_NDRV support
+ * 980130 - Cleanup, reorg, performance improvemements
+ * 000816 - Removal of Y adapter cruft
+ */</span>
+
+<span class="enscript-comment">/*
+ * PF_NDRV allows raw access to a specified network device, directly
+ *  with a socket.  Expected use involves a socket option to request
+ *  protocol packets.  This lets ndrv_output() call ifnet_output(), and
+ *  lets DLIL find the proper recipient for incoming packets.
+ *  The purpose here is for user-mode protocol implementation.
+ * Note that &quot;pure raw access&quot; will still be accomplished with BPF.
+ *
+ * In addition to the former use, when combined with socket NKEs,
+ * PF_NDRV permits a fairly flexible mechanism for implementing
+ * strange protocol support.
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/ndrv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_llc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_dl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/ndrv_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/dlil.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/if_ether.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/spl.h&gt;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> ndrv_multi_max_count = NDRV_DMUX_MAX_DESCR;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_net, OID_AUTO, ndrv_multi_max_count, CTLFLAG_RW | CTLFLAG_LOCKED,
+        &amp;ndrv_multi_max_count, 0, <span class="enscript-string">&quot;Number of allowed multicast addresses per NRDV socket&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ndrv_do_detach</span>(<span class="enscript-type">struct</span> ndrv_cb *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ndrv_do_disconnect</span>(<span class="enscript-type">struct</span> ndrv_cb *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ndrv_cb *<span class="enscript-function-name">ndrv_find_inbound</span>(<span class="enscript-type">struct</span> ifnet *ifp, u_int32_t protocol_family);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ndrv_setspec</span>(<span class="enscript-type">struct</span> ndrv_cb *np, <span class="enscript-type">struct</span> sockopt *sopt);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ndrv_delspec</span>(<span class="enscript-type">struct</span> ndrv_cb *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ndrv_to_ifnet_demux</span>(<span class="enscript-type">struct</span> ndrv_demux_desc* ndrv, <span class="enscript-type">struct</span> ifnet_demux_desc* ifdemux);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ndrv_handle_ifp_detach</span>(u_int32_t family, <span class="enscript-type">short</span> unit);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ndrv_do_add_multicast</span>(<span class="enscript-type">struct</span> ndrv_cb *np, <span class="enscript-type">struct</span> sockopt *sopt);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ndrv_do_remove_multicast</span>(<span class="enscript-type">struct</span> ndrv_cb *np, <span class="enscript-type">struct</span> sockopt *sopt);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ndrv_multiaddr* <span class="enscript-function-name">ndrv_have_multicast</span>(<span class="enscript-type">struct</span> ndrv_cb *np, <span class="enscript-type">struct</span> sockaddr* addr);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ndrv_remove_all_multicast</span>(<span class="enscript-type">struct</span> ndrv_cb *np);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ndrv_dominit</span>(<span class="enscript-type">struct</span> domain *);
+
+u_int32_t  ndrv_sendspace = NDRVSNDQ;
+u_int32_t  ndrv_recvspace = NDRVRCVQ;
+<span class="enscript-function-name">TAILQ_HEAD</span>(, ndrv_cb)	ndrvl = TAILQ_HEAD_INITIALIZER(ndrvl);
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> domain *ndrvdomain = NULL;
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> domain ndrvdomain_s;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NDRV_PROTODEMUX_COUNT</span>	10
+
+<span class="enscript-comment">/*
+ * Verify these values match.
+ * To keep clients from including dlil.h, we define
+ * these values independently in ndrv.h. They must
+ * match or a conversion function must be written.
+ */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NDRV_DEMUXTYPE_ETHERTYPE</span> != <span class="enscript-variable-name">DLIL_DESC_ETYPE2</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">NDRV_DEMUXTYPE_ETHERTYPE</span> <span class="enscript-variable-name">must</span> <span class="enscript-variable-name">match</span> <span class="enscript-variable-name">DLIL_DESC_ETYPE2</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NDRV_DEMUXTYPE_SAP</span> != <span class="enscript-variable-name">DLIL_DESC_SAP</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">NDRV_DEMUXTYPE_SAP</span> <span class="enscript-variable-name">must</span> <span class="enscript-variable-name">match</span> <span class="enscript-variable-name">DLIL_DESC_SAP</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NDRV_DEMUXTYPE_SNAP</span> != <span class="enscript-variable-name">DLIL_DESC_SNAP</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">NDRV_DEMUXTYPE_SNAP</span> <span class="enscript-variable-name">must</span> <span class="enscript-variable-name">match</span> <span class="enscript-variable-name">DLIL_DESC_SNAP</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Protocol output - Called to output a raw network packet directly
+ *  to the driver.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_output</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> socket *so)
+{
+    <span class="enscript-type">struct</span> ndrv_cb *np = sotondrvcb(so);
+	<span class="enscript-type">struct</span> ifnet *ifp = np-&gt;nd_if;
+    <span class="enscript-type">int</span>	result = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NDRV_DEBUG</span>
+	kprintf(<span class="enscript-string">&quot;NDRV output: %x, %x, %x\n&quot;</span>, m, so, np);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * No header is a format error
+	 */</span>
+	<span class="enscript-keyword">if</span> ((m-&gt;m_flags&amp;M_PKTHDR) == 0)
+		<span class="enscript-keyword">return</span>(EINVAL);
+
+	<span class="enscript-comment">/* Unlock before calling ifnet_output */</span>
+	socket_unlock(so, 0);
+	
+	<span class="enscript-comment">/*
+     * Call DLIL if we can. DLIL is much safer than calling the
+     * ifp directly.
+     */</span>
+	result = ifnet_output_raw(ifp, np-&gt;nd_proto_family, m);
+	
+	socket_lock(so, 0);
+	
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/* Our input routine called from DLIL */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ndrv_input</span>(
+	ifnet_t				ifp,
+	protocol_family_t	proto_family,
+	mbuf_t				m,
+	<span class="enscript-type">char</span>				*frame_header)
+{
+	<span class="enscript-type">struct</span> socket *so;
+	<span class="enscript-type">struct</span> sockaddr_dl ndrvsrc;
+	<span class="enscript-type">struct</span> ndrv_cb *np;
+	<span class="enscript-type">int</span> error = 0;
+
+    ndrvsrc.sdl_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_dl);
+    ndrvsrc.sdl_family = AF_NDRV;
+    ndrvsrc.sdl_index = 0;
+
+    <span class="enscript-comment">/* move packet from if queue to socket */</span>
+	<span class="enscript-comment">/* Should be media-independent */</span>
+    ndrvsrc.sdl_type = IFT_ETHER;
+    ndrvsrc.sdl_nlen = 0;
+    ndrvsrc.sdl_alen = 6;
+    ndrvsrc.sdl_slen = 0;
+    bcopy(frame_header, &amp;ndrvsrc.sdl_data, 6);
+
+	np = ndrv_find_inbound(ifp, proto_family);
+	<span class="enscript-keyword">if</span> (np == NULL)
+	{
+		<span class="enscript-keyword">return</span>(ENOENT);
+	}
+	so = np-&gt;nd_socket;
+    <span class="enscript-comment">/* prepend the frame header */</span>
+    m = m_prepend(m, ifnet_hdrlen(ifp), M_NOWAIT);
+    <span class="enscript-keyword">if</span> (m == NULL)
+        <span class="enscript-keyword">return</span> EJUSTRETURN;
+    bcopy(frame_header, m-&gt;m_data, ifnet_hdrlen(ifp));
+
+	lck_mtx_assert(ndrvdomain-&gt;dom_mtx, LCK_MTX_ASSERT_NOTOWNED);
+	lck_mtx_lock(ndrvdomain-&gt;dom_mtx);
+	<span class="enscript-keyword">if</span> (sbappendaddr(&amp;(so-&gt;so_rcv), (<span class="enscript-type">struct</span> sockaddr *)&amp;ndrvsrc,
+			 		 m, (<span class="enscript-type">struct</span> mbuf *)0, &amp;error) != 0) {
+		sorwakeup(so);
+	}
+	lck_mtx_unlock(ndrvdomain-&gt;dom_mtx);
+	<span class="enscript-keyword">return</span> 0; <span class="enscript-comment">/* radar 4030377 - always return 0 */</span>
+}
+
+<span class="enscript-comment">/*
+ * Allocate an ndrv control block and some buffer space for the socket
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_attach</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> proto, __unused <span class="enscript-type">struct</span> proc *p)
+{
+    <span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> ndrv_cb *np = sotondrvcb(so);
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_PRIV) == 0)
+		<span class="enscript-keyword">return</span>(EPERM);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NDRV_DEBUG</span>
+	kprintf(<span class="enscript-string">&quot;NDRV attach: %x, %x, %x\n&quot;</span>, so, proto, np);
+#<span class="enscript-reference">endif</span>
+
+        <span class="enscript-keyword">if</span> ((error = soreserve(so, ndrv_sendspace, ndrv_recvspace)))
+                <span class="enscript-keyword">return</span>(error);
+
+	MALLOC(np, <span class="enscript-type">struct</span> ndrv_cb *, <span class="enscript-keyword">sizeof</span>(*np), M_PCB, M_WAITOK);
+	<span class="enscript-keyword">if</span> (np == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+    so-&gt;so_pcb = (caddr_t)np;
+    bzero(np, <span class="enscript-keyword">sizeof</span>(*np));
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NDRV_DEBUG</span>
+	kprintf(<span class="enscript-string">&quot;NDRV attach: %x, %x, %x\n&quot;</span>, so, proto, np);
+#<span class="enscript-reference">endif</span>
+	TAILQ_INIT(&amp;np-&gt;nd_dlist);
+	np-&gt;nd_signature = NDRV_SIGNATURE;
+	np-&gt;nd_socket = so;
+	np-&gt;nd_proto.sp_family = SOCK_DOM(so);
+	np-&gt;nd_proto.sp_protocol = proto;
+    np-&gt;nd_if = NULL;
+    np-&gt;nd_proto_family = 0;
+    np-&gt;nd_family = 0;
+    np-&gt;nd_unit = 0;
+    TAILQ_INSERT_TAIL(&amp;ndrvl, np, nd_next);
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/*
+ * Destroy state just before socket deallocation.
+ * Flush data or not depending on the options.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_detach</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> ndrv_cb *np = sotondrvcb(so);
+
+	<span class="enscript-keyword">if</span> (np == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+	<span class="enscript-keyword">return</span> ndrv_do_detach(np);
+}
+
+
+<span class="enscript-comment">/*
+ * If a socket isn't bound to a single address,
+ * the ndrv input routine will hand it anything
+ * within that protocol family (assuming there's
+ * nothing else around it should go to).
+ *
+ * Don't expect this to be used.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_connect</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr *nam, __unused <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">struct</span> ndrv_cb *np = sotondrvcb(so);
+
+	<span class="enscript-keyword">if</span> (np == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	<span class="enscript-keyword">if</span> (np-&gt;nd_faddr)
+		<span class="enscript-keyword">return</span> EISCONN;
+    
+	<span class="enscript-comment">/* Allocate memory to store the remote address */</span>
+	MALLOC(np-&gt;nd_faddr, <span class="enscript-type">struct</span> sockaddr_ndrv*,
+                nam-&gt;sa_len, M_IFADDR, M_WAITOK);
+	<span class="enscript-keyword">if</span> (np-&gt;nd_faddr == NULL)
+		<span class="enscript-keyword">return</span> ENOMEM;
+    
+	bcopy((caddr_t) nam, (caddr_t) np-&gt;nd_faddr, nam-&gt;sa_len);
+	soisconnected(so);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ndrv_event</span>(<span class="enscript-type">struct</span> ifnet *ifp, __unused protocol_family_t protocol,
+		   <span class="enscript-type">const</span> <span class="enscript-type">struct</span> kev_msg *event)
+{
+	<span class="enscript-keyword">if</span> (event-&gt;vendor_code == KEV_VENDOR_APPLE &amp;&amp;
+		event-&gt;kev_class == KEV_NETWORK_CLASS &amp;&amp;
+		event-&gt;kev_subclass == KEV_DL_SUBCLASS &amp;&amp;
+		event-&gt;event_code == KEV_DL_IF_DETACHING) {
+		lck_mtx_assert(ndrvdomain-&gt;dom_mtx, LCK_MTX_ASSERT_NOTOWNED);
+		lck_mtx_lock(ndrvdomain-&gt;dom_mtx);
+		ndrv_handle_ifp_detach(ifnet_family(ifp), ifnet_unit(ifp));
+		lck_mtx_unlock(ndrvdomain-&gt;dom_mtx);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">name_cmp</span>(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">char</span> *);
+
+<span class="enscript-comment">/*
+ * This is the &quot;driver open&quot; hook - we 'bind' to the
+ *  named driver.
+ * Here's where we latch onto the driver.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_bind</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr *nam, __unused <span class="enscript-type">struct</span> proc *p)
+{
+    <span class="enscript-type">struct</span> sockaddr_ndrv *sa = (<span class="enscript-type">struct</span> sockaddr_ndrv *) nam;
+	<span class="enscript-type">char</span> *dname;
+	<span class="enscript-type">struct</span> ndrv_cb *np;
+	<span class="enscript-type">struct</span> ifnet *ifp;
+    <span class="enscript-type">int</span>	result;
+
+	<span class="enscript-keyword">if</span> TAILQ_EMPTY(&amp;ifnet_head)
+		<span class="enscript-keyword">return</span>(EADDRNOTAVAIL); <span class="enscript-comment">/* Quick sanity check */</span>
+	np = sotondrvcb(so);
+	<span class="enscript-keyword">if</span> (np == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	<span class="enscript-keyword">if</span> (np-&gt;nd_laddr)
+		<span class="enscript-keyword">return</span> EINVAL;			<span class="enscript-comment">/* XXX */</span>
+
+	<span class="enscript-comment">/* I think we just latch onto a copy here; the caller frees */</span>
+	np-&gt;nd_laddr = _MALLOC(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_ndrv), M_IFADDR, M_WAITOK);
+	<span class="enscript-keyword">if</span> (np-&gt;nd_laddr == NULL)
+		<span class="enscript-keyword">return</span>(ENOMEM);
+	bcopy((caddr_t) sa, (caddr_t) np-&gt;nd_laddr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_ndrv));
+	dname = (<span class="enscript-type">char</span> *) sa-&gt;snd_name;
+	<span class="enscript-keyword">if</span> (*dname == <span class="enscript-string">'\0'</span>)
+		<span class="enscript-keyword">return</span>(EINVAL);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NDRV_DEBUG</span>
+	kprintf(<span class="enscript-string">&quot;NDRV bind: %x, %x, %s\n&quot;</span>, so, np, dname);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-comment">/* Track down the driver and its ifnet structure.
+	 * There's no internal call for this so we have to dup the code
+	 *  in if.c/ifconf()
+	 */</span>
+	ifnet_head_lock_shared();
+	TAILQ_FOREACH(ifp, &amp;ifnet_head, if_link) {
+		<span class="enscript-keyword">if</span> (name_cmp(ifp, dname) == 0)
+			<span class="enscript-keyword">break</span>;
+	}
+	ifnet_head_done();
+
+	<span class="enscript-keyword">if</span> (ifp == NULL)
+		<span class="enscript-keyword">return</span>(EADDRNOTAVAIL);
+	
+	<span class="enscript-comment">// PPP doesn't support PF_NDRV.
+</span>	<span class="enscript-keyword">if</span> (ifnet_family(ifp) != APPLE_IF_FAM_PPP)
+	{
+		<span class="enscript-comment">/* NDRV on this interface */</span>
+		<span class="enscript-type">struct</span> ifnet_attach_proto_param	ndrv_proto;
+		result = 0;
+		bzero(&amp;ndrv_proto, <span class="enscript-keyword">sizeof</span>(ndrv_proto));
+		ndrv_proto.event = ndrv_event;
+		
+		<span class="enscript-comment">/* We aren't worried about double attaching, that should just return an error */</span>
+		socket_unlock(so, 0);
+		result = ifnet_attach_protocol(ifp, PF_NDRV, &amp;ndrv_proto);
+		socket_lock(so, 0);
+		<span class="enscript-keyword">if</span> (result &amp;&amp; result != EEXIST) {
+			<span class="enscript-keyword">return</span> result;
+		}
+		np-&gt;nd_proto_family = PF_NDRV;
+	}
+	<span class="enscript-keyword">else</span> {
+		np-&gt;nd_proto_family = 0;
+	}
+    
+	np-&gt;nd_if = ifp;
+    np-&gt;nd_family = ifnet_family(ifp);
+    np-&gt;nd_unit = ifnet_unit(ifp);
+    
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_disconnect</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> ndrv_cb *np = sotondrvcb(so);
+
+	<span class="enscript-keyword">if</span> (np == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	<span class="enscript-keyword">if</span> (np-&gt;nd_faddr == 0)
+		<span class="enscript-keyword">return</span> ENOTCONN;
+
+	ndrv_do_disconnect(np);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Mark the connection as being incapable of further input.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_shutdown</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	lck_mtx_assert(ndrvdomain-&gt;dom_mtx, LCK_MTX_ASSERT_OWNED);
+	socantsendmore(so);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Ship a packet out.  The ndrv output will pass it
+ *  to the appropriate driver.  The really tricky part
+ *  is the destination address...
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_send</span>(<span class="enscript-type">struct</span> socket *so, __unused <span class="enscript-type">int</span> flags, <span class="enscript-type">struct</span> mbuf *m,
+	  __unused <span class="enscript-type">struct</span> sockaddr *addr, <span class="enscript-type">struct</span> mbuf *control,
+	  __unused <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (control)
+		<span class="enscript-keyword">return</span> EOPNOTSUPP;
+
+	error = ndrv_output(m, so);
+	m = NULL;
+	<span class="enscript-keyword">return</span> error;
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_abort</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> ndrv_cb *np = sotondrvcb(so);
+
+	<span class="enscript-keyword">if</span> (np == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	ndrv_do_disconnect(np);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_sockaddr</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr **nam)
+{
+	<span class="enscript-type">struct</span> ndrv_cb *np = sotondrvcb(so);
+	<span class="enscript-type">int</span> len;
+
+	<span class="enscript-keyword">if</span> (np == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	<span class="enscript-keyword">if</span> (np-&gt;nd_laddr == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	len = np-&gt;nd_laddr-&gt;snd_len;
+	MALLOC(*nam, <span class="enscript-type">struct</span> sockaddr *, len, M_SONAME, M_WAITOK);
+	<span class="enscript-keyword">if</span> (*nam == NULL)
+		<span class="enscript-keyword">return</span> ENOMEM;
+	bcopy((caddr_t)np-&gt;nd_laddr, *nam,
+	      (<span class="enscript-type">unsigned</span>)len);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_peeraddr</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr **nam)
+{
+	<span class="enscript-type">struct</span> ndrv_cb *np = sotondrvcb(so);
+	<span class="enscript-type">int</span> len;
+
+	<span class="enscript-keyword">if</span> (np == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	<span class="enscript-keyword">if</span> (np-&gt;nd_faddr == 0)
+		<span class="enscript-keyword">return</span> ENOTCONN;
+
+	len = np-&gt;nd_faddr-&gt;snd_len;
+	MALLOC(*nam, <span class="enscript-type">struct</span> sockaddr *, len, M_SONAME, M_WAITOK);
+	<span class="enscript-keyword">if</span> (*nam == NULL)
+		<span class="enscript-keyword">return</span> ENOMEM;
+	bcopy((caddr_t)np-&gt;nd_faddr, *nam,
+	      (<span class="enscript-type">unsigned</span>)len);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-comment">/* Control output */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_ctloutput</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+    <span class="enscript-type">struct</span> ndrv_cb *np = sotondrvcb(so);
+	<span class="enscript-type">int</span> error = 0;
+    
+    <span class="enscript-keyword">switch</span>(sopt-&gt;sopt_name)
+    {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">NDRV_DELDMXSPEC</span>: <span class="enscript-comment">/* Delete current spec */</span>
+            <span class="enscript-comment">/* Verify no parameter was passed */</span>
+            <span class="enscript-keyword">if</span> (sopt-&gt;sopt_val != 0 || sopt-&gt;sopt_valsize != 0) {
+                <span class="enscript-comment">/*
+                 * We don't support deleting a specific demux, it's
+                 * all or nothing.
+                 */</span>
+                <span class="enscript-keyword">return</span> EINVAL;
+            }
+            error = ndrv_delspec(np);
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">NDRV_SETDMXSPEC</span>: <span class="enscript-comment">/* Set protocol spec */</span>
+            error = ndrv_setspec(np, sopt);
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">NDRV_ADDMULTICAST</span>:
+            error = ndrv_do_add_multicast(np, sopt);
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">NDRV_DELMULTICAST</span>:
+            error = ndrv_do_remove_multicast(np, sopt);
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-reference">default</span>:
+            error = ENOTSUP;
+    }
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NDRV_DEBUG</span>
+	log(LOG_WARNING, <span class="enscript-string">&quot;NDRV CTLOUT: %x returns %d\n&quot;</span>, sopt-&gt;sopt_name,
+	    error);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_do_detach</span>(<span class="enscript-type">struct</span> ndrv_cb *np)
+{
+    <span class="enscript-type">struct</span> ndrv_cb*	cur_np = NULL;
+    <span class="enscript-type">struct</span> socket *so = np-&gt;nd_socket;
+    <span class="enscript-type">int</span> error = 0;
+    <span class="enscript-type">struct</span> ifnet * ifp;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NDRV_DEBUG</span>
+	kprintf(<span class="enscript-string">&quot;NDRV detach: %x, %x\n&quot;</span>, so, np);
+#<span class="enscript-reference">endif</span>
+    ndrv_remove_all_multicast(np);
+
+    ifp = np-&gt;nd_if;
+    <span class="enscript-comment">/* Remove from the linked list of control blocks */</span>
+    TAILQ_REMOVE(&amp;ndrvl, np, nd_next);
+    <span class="enscript-keyword">if</span> (ifp != NULL) {
+		u_int32_t proto_family = np-&gt;nd_proto_family;
+
+		<span class="enscript-keyword">if</span> (proto_family != PF_NDRV &amp;&amp; proto_family != 0) {
+			socket_unlock(so, 0);
+			ifnet_detach_protocol(ifp, proto_family);
+			socket_lock(so, 0);
+		}
+		
+		<span class="enscript-comment">/* Check if this is the last socket attached to this interface */</span>
+		TAILQ_FOREACH(cur_np, &amp;ndrvl, nd_next) {
+			<span class="enscript-keyword">if</span> (cur_np-&gt;nd_family == np-&gt;nd_family &amp;&amp;
+				cur_np-&gt;nd_unit == np-&gt;nd_unit) {
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+		
+		<span class="enscript-comment">/* If there are no other interfaces, detach PF_NDRV from the interface */</span>
+		<span class="enscript-keyword">if</span> (cur_np == NULL) {
+			socket_unlock(so, 0);
+			ifnet_detach_protocol(ifp, PF_NDRV);
+			socket_lock(so, 0);
+		}
+	}
+    	<span class="enscript-keyword">if</span> (np-&gt;nd_laddr != NULL) {
+		FREE((caddr_t)np-&gt;nd_laddr, M_IFADDR);
+		np-&gt;nd_laddr = NULL;
+	}
+	FREE((caddr_t)np, M_PCB);
+	so-&gt;so_pcb = 0;
+	so-&gt;so_flags |= SOF_PCBCLEARING;
+	sofree(so);
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_do_disconnect</span>(<span class="enscript-type">struct</span> ndrv_cb *np)
+{
+	<span class="enscript-type">struct</span> socket * so = np-&gt;nd_socket;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NDRV_DEBUG</span>
+	kprintf(<span class="enscript-string">&quot;NDRV disconnect: %x\n&quot;</span>, np);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (np-&gt;nd_faddr)
+	{
+        FREE(np-&gt;nd_faddr, M_IFADDR);
+		np-&gt;nd_faddr = 0;
+	}
+	<span class="enscript-comment">/*
+	 * A multipath subflow socket would have its SS_NOFDREF set by default,
+	 * so check for SOF_MP_SUBFLOW socket flag before detaching the PCB;
+	 * when the socket is closed for real, SOF_MP_SUBFLOW would be cleared.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!(so-&gt;so_flags &amp; SOF_MP_SUBFLOW) &amp;&amp; (so-&gt;so_state &amp; SS_NOFDREF))
+		ndrv_do_detach(np);
+	soisdisconnected(so);
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/* Hackery - return a string version of a decimal number */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sprint_d</span>(u_int n, <span class="enscript-type">char</span> *buf, <span class="enscript-type">int</span> buflen)
+{	<span class="enscript-type">char</span> dbuf[IFNAMSIZ];
+	<span class="enscript-type">char</span> *cp = dbuf+IFNAMSIZ-1;
+
+        *cp = 0;
+        <span class="enscript-keyword">do</span> {	buflen--;
+		cp--;
+                *cp = <span class="enscript-string">&quot;0123456789&quot;</span>[n % 10];
+                n /= 10;
+        } <span class="enscript-keyword">while</span> (n != 0 &amp;&amp; buflen &gt; 0);
+	strlcpy(buf, cp, IFNAMSIZ-buflen);
+        <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * Try to compare a device name (q) with one of the funky ifnet
+ *  device names (ifp).
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">name_cmp</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">char</span> *q)
+{	<span class="enscript-type">char</span> *r;
+	<span class="enscript-type">int</span> len;
+	<span class="enscript-type">char</span> buf[IFNAMSIZ];
+
+	r = buf;
+	len = strlen(ifnet_name(ifp));
+	strlcpy(r, ifnet_name(ifp), IFNAMSIZ);
+	r += len;
+	sprint_d(ifnet_unit(ifp), r, IFNAMSIZ-(r-buf));
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NDRV_DEBUG</span>
+	kprintf(<span class="enscript-string">&quot;Comparing %s, %s\n&quot;</span>, buf, q);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span>(strncmp(buf, q, IFNAMSIZ));
+}
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-comment">//### Not used
+</span><span class="enscript-comment">/*
+ * When closing, dump any enqueued mbufs.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ndrv_flushq</span>(<span class="enscript-type">struct</span> ifqueue *q)
+{
+    <span class="enscript-type">struct</span> mbuf *m;
+	<span class="enscript-keyword">for</span> (;;)
+	{
+		IF_DEQUEUE(q, m);
+		<span class="enscript-keyword">if</span> (m == NULL)
+			<span class="enscript-keyword">break</span>;
+		IF_DROP(q);
+		<span class="enscript-keyword">if</span> (m)
+			m_freem(m);
+	}
+}
+#<span class="enscript-reference">endif</span> 
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_setspec</span>(<span class="enscript-type">struct</span> ndrv_cb *np, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+	<span class="enscript-type">struct</span> ifnet_attach_proto_param	proto_param;
+	<span class="enscript-type">struct</span> ndrv_protocol_desc	ndrvSpec;
+	<span class="enscript-type">struct</span> ndrv_demux_desc*		ndrvDemux = NULL;
+	<span class="enscript-type">int</span>							error = 0;
+	<span class="enscript-type">struct</span> socket *				so = np-&gt;nd_socket; 
+	user_addr_t					user_addr;
+	
+	<span class="enscript-comment">/* Sanity checking */</span>
+	<span class="enscript-keyword">if</span> (np-&gt;nd_proto_family != PF_NDRV)
+		<span class="enscript-keyword">return</span> EBUSY;
+	<span class="enscript-keyword">if</span> (np-&gt;nd_if == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	<span class="enscript-comment">/* Copy the ndrvSpec */</span>
+	<span class="enscript-keyword">if</span> (proc_is64bit(sopt-&gt;sopt_p)) {
+		<span class="enscript-type">struct</span> ndrv_protocol_desc64	ndrvSpec64;
+
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_valsize != <span class="enscript-keyword">sizeof</span>(ndrvSpec64))
+			<span class="enscript-keyword">return</span> EINVAL;
+	
+		error = sooptcopyin(sopt, &amp;ndrvSpec64, <span class="enscript-keyword">sizeof</span>(ndrvSpec64), <span class="enscript-keyword">sizeof</span>(ndrvSpec64));
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">return</span> error;
+
+		ndrvSpec.version         = ndrvSpec64.version;
+		ndrvSpec.protocol_family = ndrvSpec64.protocol_family;
+		ndrvSpec.demux_count     = ndrvSpec64.demux_count;
+
+		user_addr = ndrvSpec64.demux_list;
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> ndrv_protocol_desc32	ndrvSpec32;
+
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_valsize != <span class="enscript-keyword">sizeof</span>(ndrvSpec32))
+			<span class="enscript-keyword">return</span> EINVAL;
+	
+		error = sooptcopyin(sopt, &amp;ndrvSpec32, <span class="enscript-keyword">sizeof</span>(ndrvSpec32), <span class="enscript-keyword">sizeof</span>(ndrvSpec32));
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">return</span> error;
+
+		ndrvSpec.version         = ndrvSpec32.version;
+		ndrvSpec.protocol_family = ndrvSpec32.protocol_family;
+		ndrvSpec.demux_count     = ndrvSpec32.demux_count;
+
+		user_addr = CAST_USER_ADDR_T(ndrvSpec32.demux_list);
+	}
+	
+	<span class="enscript-comment">/* Verify the parameter */</span>
+	<span class="enscript-keyword">if</span> (ndrvSpec.version &gt; NDRV_PROTOCOL_DESC_VERS)
+		<span class="enscript-keyword">return</span> ENOTSUP; <span class="enscript-comment">// version is too new!
+</span>	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ndrvSpec.version &lt; 1)
+		<span class="enscript-keyword">return</span> EINVAL; <span class="enscript-comment">// version is not valid
+</span>	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ndrvSpec.demux_count &gt; NDRV_PROTODEMUX_COUNT || ndrvSpec.demux_count == 0)
+		<span class="enscript-keyword">return</span> EINVAL; <span class="enscript-comment">// demux_count is not valid
+</span>	
+	bzero(&amp;proto_param, <span class="enscript-keyword">sizeof</span>(proto_param));
+	proto_param.demux_count = ndrvSpec.demux_count;
+	
+	<span class="enscript-comment">/* Allocate storage for demux array */</span>
+	MALLOC(ndrvDemux, <span class="enscript-type">struct</span> ndrv_demux_desc*, proto_param.demux_count *
+		   <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ndrv_demux_desc), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (ndrvDemux == NULL)
+		<span class="enscript-keyword">return</span> ENOMEM;
+	
+	<span class="enscript-comment">/* Allocate enough ifnet_demux_descs */</span>
+	MALLOC(proto_param.demux_array, <span class="enscript-type">struct</span> ifnet_demux_desc*,
+		   <span class="enscript-keyword">sizeof</span>(*proto_param.demux_array) * ndrvSpec.demux_count,
+		   M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (proto_param.demux_array == NULL)
+		error = ENOMEM;
+	
+	<span class="enscript-keyword">if</span> (error == 0)
+	{
+		<span class="enscript-comment">/* Copy the ndrv demux array from userland */</span>
+		error = copyin(user_addr, ndrvDemux,
+					   ndrvSpec.demux_count * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ndrv_demux_desc));
+		ndrvSpec.demux_list = ndrvDemux;
+	}
+	
+	<span class="enscript-keyword">if</span> (error == 0)
+	{
+		<span class="enscript-comment">/* At this point, we've at least got enough bytes to start looking around */</span>
+		u_int32_t	demuxOn = 0;
+		
+		proto_param.demux_count = ndrvSpec.demux_count;
+		proto_param.input = ndrv_input;
+		proto_param.event = ndrv_event;
+		
+		<span class="enscript-keyword">for</span> (demuxOn = 0; demuxOn &lt; ndrvSpec.demux_count; demuxOn++)
+		{
+			<span class="enscript-comment">/* Convert an ndrv_demux_desc to a ifnet_demux_desc */</span>
+			error = ndrv_to_ifnet_demux(&amp;ndrvSpec.demux_list[demuxOn],
+										&amp;proto_param.demux_array[demuxOn]);
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">break</span>;
+		}
+	}
+	
+	<span class="enscript-keyword">if</span> (error == 0)
+	{
+		<span class="enscript-comment">/* We've got all our ducks lined up...lets attach! */</span>
+		socket_unlock(so, 0);
+		error = ifnet_attach_protocol(np-&gt;nd_if, ndrvSpec.protocol_family,
+									  &amp;proto_param);
+		socket_lock(so, 0);
+		<span class="enscript-keyword">if</span> (error == 0)
+			np-&gt;nd_proto_family = ndrvSpec.protocol_family;
+	}
+	
+	<span class="enscript-comment">/* Free any memory we've allocated */</span>
+	<span class="enscript-keyword">if</span> (proto_param.demux_array)
+		FREE(proto_param.demux_array, M_TEMP);
+	<span class="enscript-keyword">if</span> (ndrvDemux)
+		FREE(ndrvDemux, M_TEMP);
+	
+	<span class="enscript-keyword">return</span> error;
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_to_ifnet_demux</span>(<span class="enscript-type">struct</span> ndrv_demux_desc* ndrv, <span class="enscript-type">struct</span> ifnet_demux_desc* ifdemux)
+{
+    bzero(ifdemux, <span class="enscript-keyword">sizeof</span>(*ifdemux));
+    
+    <span class="enscript-keyword">if</span> (ndrv-&gt;type &lt; DLIL_DESC_ETYPE2)
+    {
+        <span class="enscript-comment">/* using old &quot;type&quot;, not supported */</span>
+        <span class="enscript-keyword">return</span> ENOTSUP;
+    }
+    
+    <span class="enscript-keyword">if</span> (ndrv-&gt;length &gt; 28)
+    {
+        <span class="enscript-keyword">return</span> EINVAL;
+    }
+    
+    ifdemux-&gt;type = ndrv-&gt;type;
+    ifdemux-&gt;data = ndrv-&gt;data.other;
+    ifdemux-&gt;datalen = ndrv-&gt;length;
+    
+    <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_delspec</span>(<span class="enscript-type">struct</span> ndrv_cb *np)
+{
+    <span class="enscript-type">int</span> result = 0;
+    
+    <span class="enscript-keyword">if</span> (np-&gt;nd_proto_family == PF_NDRV ||
+    	np-&gt;nd_proto_family == 0)
+        <span class="enscript-keyword">return</span> EINVAL;
+    
+    <span class="enscript-comment">/* Detach the protocol */</span>
+    result = ifnet_detach_protocol(np-&gt;nd_if, np-&gt;nd_proto_family);
+    np-&gt;nd_proto_family = PF_NDRV;
+    
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">struct</span> ndrv_cb *
+<span class="enscript-function-name">ndrv_find_inbound</span>(<span class="enscript-type">struct</span> ifnet *ifp, u_int32_t protocol)
+{
+    <span class="enscript-type">struct</span> ndrv_cb* np;
+	
+	<span class="enscript-keyword">if</span> (protocol == PF_NDRV) <span class="enscript-keyword">return</span> NULL;
+    
+    TAILQ_FOREACH(np, &amp;ndrvl, nd_next) {
+        <span class="enscript-keyword">if</span> (np-&gt;nd_proto_family == protocol &amp;&amp;
+        	np-&gt;nd_if == ifp) {
+            <span class="enscript-keyword">return</span> np;
+        }
+    }
+    
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ndrv_handle_ifp_detach</span>(u_int32_t family, <span class="enscript-type">short</span> unit)
+{
+    <span class="enscript-type">struct</span> ndrv_cb* np;
+    <span class="enscript-type">struct</span> ifnet	*ifp = NULL;
+    <span class="enscript-type">struct</span> socket *so;
+    
+    <span class="enscript-comment">/* Find all sockets using this interface. */</span>
+    TAILQ_FOREACH(np, &amp;ndrvl, nd_next) {
+        <span class="enscript-keyword">if</span> (np-&gt;nd_family == family &amp;&amp;
+            np-&gt;nd_unit == unit)
+        {
+            <span class="enscript-comment">/* This cb is using the detaching interface, but not for long. */</span>
+            <span class="enscript-comment">/* Let the protocol go */</span>
+            ifp = np-&gt;nd_if;
+            <span class="enscript-keyword">if</span> (np-&gt;nd_proto_family != 0)
+                ndrv_delspec(np);
+            
+            <span class="enscript-comment">/* Delete the multicasts first */</span>
+            ndrv_remove_all_multicast(np);
+            
+            <span class="enscript-comment">/* Disavow all knowledge of the ifp */</span>
+            np-&gt;nd_if = NULL;
+            np-&gt;nd_unit = 0;
+            np-&gt;nd_family = 0;
+           
+		  so = np-&gt;nd_socket; 
+            <span class="enscript-comment">/* Make sure sending returns an error */</span>
+		lck_mtx_assert(ndrvdomain-&gt;dom_mtx, LCK_MTX_ASSERT_OWNED);
+            socantsendmore(so);
+            socantrcvmore(so);
+        }
+    }
+    
+    <span class="enscript-comment">/* Unregister our protocol */</span>
+    <span class="enscript-keyword">if</span> (ifp) {
+        ifnet_detach_protocol(ifp, PF_NDRV);
+    }
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_do_add_multicast</span>(<span class="enscript-type">struct</span> ndrv_cb *np, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+    <span class="enscript-type">struct</span> ndrv_multiaddr*	ndrv_multi;
+    <span class="enscript-type">int</span>						result;
+    
+    <span class="enscript-keyword">if</span> (sopt-&gt;sopt_val == 0 || sopt-&gt;sopt_valsize &lt; 2 ||
+        sopt-&gt;sopt_level != SOL_NDRVPROTO || sopt-&gt;sopt_valsize &gt; SOCK_MAXADDRLEN)
+        <span class="enscript-keyword">return</span> EINVAL;
+    <span class="enscript-keyword">if</span> (np-&gt;nd_if == NULL)
+        <span class="enscript-keyword">return</span> ENXIO;
+	<span class="enscript-keyword">if</span> (!(np-&gt;nd_dlist_cnt &lt; ndrv_multi_max_count))
+		<span class="enscript-keyword">return</span> EPERM;
+    
+    <span class="enscript-comment">// Allocate storage
+</span>    MALLOC(ndrv_multi, <span class="enscript-type">struct</span> ndrv_multiaddr*, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ndrv_multiaddr) -
+        <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr) + sopt-&gt;sopt_valsize, M_IFADDR, M_WAITOK);
+    <span class="enscript-keyword">if</span> (ndrv_multi == NULL)
+        <span class="enscript-keyword">return</span> ENOMEM;
+    
+    <span class="enscript-comment">// Copy in the address
+</span>    result = copyin(sopt-&gt;sopt_val, &amp;ndrv_multi-&gt;addr, sopt-&gt;sopt_valsize);
+    
+    <span class="enscript-comment">// Validate the sockaddr
+</span>    <span class="enscript-keyword">if</span> (result == 0 &amp;&amp; sopt-&gt;sopt_valsize != ndrv_multi-&gt;addr.sa_len)
+        result = EINVAL;
+    
+    <span class="enscript-keyword">if</span> (result == 0 &amp;&amp; ndrv_have_multicast(np, &amp;ndrv_multi-&gt;addr))
+        result = EEXIST;
+    
+    <span class="enscript-keyword">if</span> (result == 0)
+    {
+        <span class="enscript-comment">// Try adding the multicast
+</span>        result = ifnet_add_multicast(np-&gt;nd_if, &amp;ndrv_multi-&gt;addr,
+        							 &amp;ndrv_multi-&gt;ifma);
+    }
+    
+    <span class="enscript-keyword">if</span> (result == 0)
+    {
+        <span class="enscript-comment">// Add to our linked list
+</span>        ndrv_multi-&gt;next = np-&gt;nd_multiaddrs;
+        np-&gt;nd_multiaddrs = ndrv_multi;
+		np-&gt;nd_dlist_cnt++;
+    }
+    <span class="enscript-keyword">else</span>
+    {
+        <span class="enscript-comment">// Free up the memory, something went wrong
+</span>        FREE(ndrv_multi, M_IFADDR);
+    }
+    
+    <span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ndrv_do_remove_multicast</span>(<span class="enscript-type">struct</span> ndrv_cb *np, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+    <span class="enscript-type">struct</span> sockaddr*		multi_addr;
+    <span class="enscript-type">struct</span> ndrv_multiaddr*	ndrv_entry = NULL;
+    <span class="enscript-type">int</span>					result;
+    
+    <span class="enscript-keyword">if</span> (sopt-&gt;sopt_val == 0 || sopt-&gt;sopt_valsize &lt; 2 ||
+        sopt-&gt;sopt_level != SOL_NDRVPROTO)
+        <span class="enscript-keyword">return</span> EINVAL;
+    <span class="enscript-keyword">if</span> (np-&gt;nd_if == NULL || np-&gt;nd_dlist_cnt == 0)
+        <span class="enscript-keyword">return</span> ENXIO;
+    
+    <span class="enscript-comment">// Allocate storage
+</span>    MALLOC(multi_addr, <span class="enscript-type">struct</span> sockaddr*, sopt-&gt;sopt_valsize,
+            M_TEMP, M_WAITOK);
+    <span class="enscript-keyword">if</span> (multi_addr == NULL)
+        <span class="enscript-keyword">return</span> ENOMEM;
+    
+    <span class="enscript-comment">// Copy in the address
+</span>    result = copyin(sopt-&gt;sopt_val, multi_addr, sopt-&gt;sopt_valsize);
+    
+    <span class="enscript-comment">// Validate the sockaddr
+</span>    <span class="enscript-keyword">if</span> (result == 0 &amp;&amp; sopt-&gt;sopt_valsize != multi_addr-&gt;sa_len)
+        result = EINVAL;
+    
+    <span class="enscript-keyword">if</span> (result == 0)
+    {
+        <span class="enscript-comment">/* Find the old entry */</span>
+        ndrv_entry = ndrv_have_multicast(np, multi_addr);
+        
+        <span class="enscript-keyword">if</span> (ndrv_entry == NULL)
+            result = ENOENT;
+    }
+    
+    <span class="enscript-keyword">if</span> (result == 0)
+    {
+        <span class="enscript-comment">// Try deleting the multicast
+</span>        result = ifnet_remove_multicast(ndrv_entry-&gt;ifma);
+    }
+    
+    <span class="enscript-keyword">if</span> (result == 0)
+    {
+        <span class="enscript-comment">// Remove from our linked list
+</span>        <span class="enscript-type">struct</span> ndrv_multiaddr*	cur = np-&gt;nd_multiaddrs;
+        
+        ifmaddr_release(ndrv_entry-&gt;ifma);
+        
+        <span class="enscript-keyword">if</span> (cur == ndrv_entry)
+        {
+            np-&gt;nd_multiaddrs = cur-&gt;next;
+        }
+        <span class="enscript-keyword">else</span>
+        {
+            <span class="enscript-keyword">for</span> (cur = cur-&gt;next; cur != NULL; cur = cur-&gt;next)
+            {
+                <span class="enscript-keyword">if</span> (cur-&gt;next == ndrv_entry)
+                {
+                    cur-&gt;next = cur-&gt;next-&gt;next;
+                    <span class="enscript-keyword">break</span>;
+                }
+            }
+        }
+        
+		np-&gt;nd_dlist_cnt--;
+		
+        <span class="enscript-comment">// Free the memory
+</span>        FREE(ndrv_entry, M_IFADDR);
+    }
+    FREE(multi_addr, M_TEMP);
+    
+    <span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ndrv_multiaddr*
+<span class="enscript-function-name">ndrv_have_multicast</span>(<span class="enscript-type">struct</span> ndrv_cb *np, <span class="enscript-type">struct</span> sockaddr* inAddr)
+{
+    <span class="enscript-type">struct</span> ndrv_multiaddr*	cur;
+    <span class="enscript-keyword">for</span> (cur = np-&gt;nd_multiaddrs; cur != NULL; cur = cur-&gt;next)
+    {
+        
+        <span class="enscript-keyword">if</span> ((inAddr-&gt;sa_len == cur-&gt;addr.sa_len) &amp;&amp;
+            (bcmp(&amp;cur-&gt;addr, inAddr, inAddr-&gt;sa_len) == 0))
+        {
+            <span class="enscript-comment">// Found a match
+</span>            <span class="enscript-keyword">return</span> cur;
+        }
+    }
+    
+    <span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ndrv_remove_all_multicast</span>(<span class="enscript-type">struct</span> ndrv_cb* np)
+{
+    <span class="enscript-type">struct</span> ndrv_multiaddr*	cur;
+    
+    <span class="enscript-keyword">if</span> (np-&gt;nd_if != NULL)
+    {
+        <span class="enscript-keyword">while</span> (np-&gt;nd_multiaddrs != NULL)
+        {
+            cur = np-&gt;nd_multiaddrs;
+            np-&gt;nd_multiaddrs = cur-&gt;next;
+            
+            ifnet_remove_multicast(cur-&gt;ifma);
+            ifmaddr_release(cur-&gt;ifma);
+            FREE(cur, M_IFADDR);
+        }
+    }
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pr_usrreqs ndrv_usrreqs = {
+	.pru_abort =		ndrv_abort,
+	.pru_attach =		ndrv_attach,
+	.pru_bind =		ndrv_bind,
+	.pru_connect =		ndrv_connect,
+	.pru_detach =		ndrv_detach,
+	.pru_disconnect =	ndrv_disconnect,
+	.pru_peeraddr =		ndrv_peeraddr,
+	.pru_send =		ndrv_send,
+	.pru_shutdown =		ndrv_shutdown,
+	.pru_sockaddr =		ndrv_sockaddr,
+	.pru_sosend =		sosend,
+	.pru_soreceive =	soreceive,
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> protosw ndrvsw[] = {
+{
+	.pr_type =		SOCK_RAW,
+	.pr_protocol =		NDRVPROTO_NDRV,
+	.pr_flags =		PR_ATOMIC|PR_ADDR,
+	.pr_output =		ndrv_output,
+	.pr_ctloutput =		ndrv_ctloutput,
+	.pr_usrreqs =		&amp;ndrv_usrreqs,
+}
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> ndrv_proto_count = (<span class="enscript-keyword">sizeof</span> (ndrvsw) / <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> protosw));
+
+<span class="enscript-type">struct</span> domain ndrvdomain_s = {
+	.dom_family =		PF_NDRV,
+	.dom_name =		<span class="enscript-string">&quot;NetDriver&quot;</span>,
+	.dom_init =		ndrv_dominit,
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ndrv_dominit</span>(<span class="enscript-type">struct</span> domain *dp)
+{
+	<span class="enscript-type">struct</span> protosw *pr;
+	<span class="enscript-type">int</span> i;
+
+	VERIFY(!(dp-&gt;dom_flags &amp; DOM_INITIALIZED));
+	VERIFY(ndrvdomain == NULL);
+
+	ndrvdomain = dp;
+
+	<span class="enscript-keyword">for</span> (i = 0, pr = &amp;ndrvsw[0]; i &lt; ndrv_proto_count; i++, pr++)
+		net_add_proto(pr, dp, 1);
+}
+</pre>
+<hr />
+</body></html>

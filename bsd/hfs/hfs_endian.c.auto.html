@@ -1,0 +1,1270 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>hfs_endian.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">hfs_endian.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * hfs_endian.c
+ *
+ * This file implements endian swapping routines for the HFS/HFS Plus
+ * volume format.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_endian.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_dbg.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfscommon/headers/BTreesPrivate.h&quot;</span>
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">ENDIAN_DEBUG</span>
+
+<span class="enscript-comment">/*
+ * Internal swapping routines
+ *
+ * These routines handle swapping the records of leaf and index nodes.  The
+ * layout of the keys and records varies depending on the kind of B-tree
+ * (determined by fileID).
+ *
+ * The direction parameter must be kSwapBTNodeBigToHost or kSwapBTNodeHostToBig.
+ * The kSwapBTNodeHeaderRecordOnly &quot;direction&quot; is not valid for these routines.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">hfs_swap_HFSPlusBTInternalNode</span> (BlockDescriptor *src, HFSCatalogNodeID fileID, <span class="enscript-type">enum</span> HFSBTSwapDirection direction);
+<span class="enscript-type">void</span> <span class="enscript-function-name">hfs_swap_HFSPlusForkData</span> (HFSPlusForkData *src);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">hfs_swap_HFSBTInternalNode</span> (BlockDescriptor *src, HFSCatalogNodeID fileID, <span class="enscript-type">enum</span> HFSBTSwapDirection direction);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * hfs_swap_HFSPlusForkData
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_swap_HFSPlusForkData</span> (
+    HFSPlusForkData *src
+)
+{
+    <span class="enscript-type">int</span> i;
+
+	src-&gt;logicalSize		= SWAP_BE64 (src-&gt;logicalSize);
+
+	src-&gt;clumpSize			= SWAP_BE32 (src-&gt;clumpSize);
+	src-&gt;totalBlocks		= SWAP_BE32 (src-&gt;totalBlocks);
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; kHFSPlusExtentDensity; i++) {
+        src-&gt;extents[i].startBlock	= SWAP_BE32 (src-&gt;extents[i].startBlock);
+        src-&gt;extents[i].blockCount	= SWAP_BE32 (src-&gt;extents[i].blockCount);
+    }
+}
+
+<span class="enscript-comment">/*
+ * hfs_swap_BTNode
+ *
+ *  NOTE: This operation is not naturally symmetric.
+ *        We have to determine which way we're swapping things.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_swap_BTNode</span> (
+    BlockDescriptor *src,
+    vnode_t vp,
+    <span class="enscript-type">enum</span> HFSBTSwapDirection direction,
+    u_int8_t allow_empty_node
+)
+{
+    BTNodeDescriptor *srcDesc = src-&gt;buffer;
+    u_int16_t *srcOffs = NULL;
+	BTreeControlBlockPtr btcb = (BTreeControlBlockPtr)VTOF(vp)-&gt;fcbBTCBPtr;
+    u_int16_t i; <span class="enscript-comment">/* index to match srcDesc-&gt;numRecords */</span>
+    <span class="enscript-type">int</span> error = 0;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ENDIAN_DEBUG</span>
+    <span class="enscript-keyword">if</span> (direction == kSwapBTNodeBigToHost) {
+        printf (<span class="enscript-string">&quot;hfs: BE -&gt; Native Swap\n&quot;</span>);
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+        printf (<span class="enscript-string">&quot;hfs: Native -&gt; BE Swap\n&quot;</span>);
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (direction == kSwapBTNodeHeaderRecordOnly) {
+        printf (<span class="enscript-string">&quot;hfs: Not swapping descriptors\n&quot;</span>);
+    } <span class="enscript-keyword">else</span> {
+        panic (<span class="enscript-string">&quot;hfs_swap_BTNode: This is impossible&quot;</span>);
+    }
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-comment">/*
+     * If we are doing a swap from on-disk to in-memory, then swap the node
+     * descriptor and record offsets before we need to use them.
+     */</span>
+    <span class="enscript-keyword">if</span> (direction == kSwapBTNodeBigToHost) {
+        srcDesc-&gt;fLink		= SWAP_BE32 (srcDesc-&gt;fLink);
+        srcDesc-&gt;bLink		= SWAP_BE32 (srcDesc-&gt;bLink);
+    
+    	<span class="enscript-comment">/*
+    	 * When first opening a BTree, we have to read the header node before the
+    	 * control block is initialized.  In this case, totalNodes will be zero,
+    	 * so skip the bounds checking. Also, we should ignore the header node when
+		 * checking for invalid forwards and backwards links, since the header node's
+		 * links can point back to itself legitimately.
+    	 */</span>
+    	<span class="enscript-keyword">if</span> (btcb-&gt;totalNodes != 0) {
+			<span class="enscript-keyword">if</span> (srcDesc-&gt;fLink &gt;= btcb-&gt;totalNodes) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+				panic(<span class="enscript-string">&quot;hfs_swap_BTNode: invalid forward link (0x%08x &gt;= 0x%08x)\n&quot;</span>, srcDesc-&gt;fLink, btcb-&gt;totalNodes);
+#<span class="enscript-reference">else</span>
+				printf(<span class="enscript-string">&quot;hfs_swap_BTNode: invalid forward link (0x%08x &gt;= 0x%08x)\n&quot;</span>, srcDesc-&gt;fLink, btcb-&gt;totalNodes);
+#<span class="enscript-reference">endif</span>
+				error = fsBTInvalidHeaderErr;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+			}
+			<span class="enscript-keyword">if</span> (srcDesc-&gt;bLink &gt;= btcb-&gt;totalNodes) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+				panic(<span class="enscript-string">&quot;hfs_swap_BTNode: invalid backward link (0x%08x &gt;= 0x%08x)\n&quot;</span>, srcDesc-&gt;bLink, btcb-&gt;totalNodes);
+#<span class="enscript-reference">else</span>
+				printf(<span class="enscript-string">&quot;hfs_swap_BTNode: invalid backward link (0x%08x &gt;= 0x%08x)\n&quot;</span>, srcDesc-&gt;bLink, btcb-&gt;totalNodes);
+#<span class="enscript-reference">endif</span>
+				error = fsBTInvalidHeaderErr;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+			}
+			
+			<span class="enscript-keyword">if</span> ((src-&gt;blockNum != 0) &amp;&amp; (srcDesc-&gt;fLink == (u_int32_t) src-&gt;blockNum)) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+				panic(<span class="enscript-string">&quot;hfs_swap_BTNode: invalid forward link (0x%08x == 0x%08x)\n&quot;</span>,
+						srcDesc-&gt;fLink, (u_int32_t) src-&gt;blockNum);
+#<span class="enscript-reference">else</span>
+				printf(<span class="enscript-string">&quot;hfs_swap_BTNode: invalid forward link (0x%08x == 0x%08x)\n&quot;</span>,
+						srcDesc-&gt;fLink, (u_int32_t) src-&gt;blockNum);
+#<span class="enscript-reference">endif</span>
+				error = fsBTInvalidHeaderErr;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+			}
+			<span class="enscript-keyword">if</span> ((src-&gt;blockNum != 0) &amp;&amp; (srcDesc-&gt;bLink == (u_int32_t) src-&gt;blockNum)) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+				panic(<span class="enscript-string">&quot;hfs_swap_BTNode: invalid backward link (0x%08x == 0x%08x)\n&quot;</span>,
+						srcDesc-&gt;bLink, (u_int32_t) src-&gt;blockNum);
+#<span class="enscript-reference">else</span>
+				printf(<span class="enscript-string">&quot;hfs_swap_BTNode: invalid backward link (0x%08x == 0x%08x)\n&quot;</span>,
+						srcDesc-&gt;bLink, (u_int32_t) src-&gt;blockNum);
+#<span class="enscript-reference">endif</span>
+				error = fsBTInvalidHeaderErr;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+			}
+
+
+		}
+		
+		<span class="enscript-comment">/* 
+		 * Check srcDesc-&gt;kind.  Don't swap it because it's only one byte.
+		 */</span>
+		<span class="enscript-keyword">if</span> (srcDesc-&gt;kind &lt; kBTLeafNode || srcDesc-&gt;kind &gt; kBTMapNode) {
+			printf(<span class="enscript-string">&quot;hfs_swap_BTNode: invalid node kind (%d)\n&quot;</span>, srcDesc-&gt;kind);
+			error = fsBTInvalidHeaderErr;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+		
+		<span class="enscript-comment">/*
+		 * Check srcDesc-&gt;height.  Don't swap it because it's only one byte.
+		 */</span>
+		<span class="enscript-keyword">if</span> (srcDesc-&gt;height &gt; kMaxTreeDepth) {
+			printf(<span class="enscript-string">&quot;hfs_swap_BTNode: invalid node height (%d)\n&quot;</span>, srcDesc-&gt;height);
+			error = fsBTInvalidHeaderErr;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+        
+        <span class="enscript-comment">/* Don't swap srcDesc-&gt;reserved */</span>
+    
+        srcDesc-&gt;numRecords	= SWAP_BE16 (srcDesc-&gt;numRecords);
+        
+        <span class="enscript-comment">/*
+         * Swap the node offsets (including the free space one!).
+         */</span>
+        srcOffs = (u_int16_t *)((<span class="enscript-type">char</span> *)src-&gt;buffer + (src-&gt;blockSize - ((srcDesc-&gt;numRecords + 1) * <span class="enscript-keyword">sizeof</span> (u_int16_t))));
+
+        <span class="enscript-comment">/*
+         * Sanity check that the record offsets are within the node itself.
+         */</span>
+        <span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcOffs &gt; ((<span class="enscript-type">char</span> *)src-&gt;buffer + src-&gt;blockSize) ||
+            (<span class="enscript-type">char</span> *)srcOffs &lt; ((<span class="enscript-type">char</span> *)src-&gt;buffer + <span class="enscript-keyword">sizeof</span>(BTNodeDescriptor))) {
+            printf(<span class="enscript-string">&quot;hfs_swap_BTNode: invalid record count (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords);
+            error = fsBTInvalidHeaderErr;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+        }
+
+		<span class="enscript-comment">/*
+		 * Swap and sanity check each of the record offsets.
+		 */</span>
+        <span class="enscript-keyword">for</span> (i = 0; i &lt;= srcDesc-&gt;numRecords; i++) {
+            srcOffs[i]	= SWAP_BE16 (srcOffs[i]);
+
+            <span class="enscript-comment">/*
+             * Sanity check: must be even, and within the node itself.
+             *
+             * We may be called to swap an unused node, which contains all zeroes.
+			 * Unused nodes are expected only when allow_empty_node is true.
+			 * If it is false and record offset is zero, return error.
+             */</span>
+            <span class="enscript-keyword">if</span> ((srcOffs[i] &amp; 1) || (
+			    (allow_empty_node == false) &amp;&amp; (srcOffs[i] == 0)) ||
+				(srcOffs[i] &lt; <span class="enscript-keyword">sizeof</span>(BTNodeDescriptor) &amp;&amp; srcOffs[i] != 0) || 
+				(srcOffs[i] &gt;= src-&gt;blockSize)) { 
+            	printf(<span class="enscript-string">&quot;hfs_swap_BTNode: record #%d invalid offset (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcOffs[i]);
+            	error = fsBTInvalidHeaderErr;
+            	<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+            }
+
+            <span class="enscript-comment">/*
+             * Make sure the offsets are strictly increasing.  Note that we're looping over
+             * them backwards, hence the order in the comparison.
+             */</span>
+            <span class="enscript-keyword">if</span> ((i != 0) &amp;&amp; (srcOffs[i] &gt;= srcOffs[i-1])) {
+            	printf(<span class="enscript-string">&quot;hfs_swap_BTNode: offsets %d and %d out of order (0x%04X, 0x%04X)\n&quot;</span>,
+            	    srcDesc-&gt;numRecords-i-1, srcDesc-&gt;numRecords-i, srcOffs[i], srcOffs[i-1]);
+            	error = fsBTInvalidHeaderErr;
+            	<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+            }
+        }
+    }
+    
+    <span class="enscript-comment">/*
+     * Swap the records (ordered by frequency of access)
+     */</span>
+    <span class="enscript-keyword">if</span> ((srcDesc-&gt;kind == kBTIndexNode) ||
+        (srcDesc-&gt; kind == kBTLeafNode)) {
+
+        <span class="enscript-keyword">if</span> (VTOVCB(vp)-&gt;vcbSigWord == kHFSPlusSigWord) {
+            error = hfs_swap_HFSPlusBTInternalNode (src, VTOC(vp)-&gt;c_fileid, direction);
+        } 
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+		<span class="enscript-keyword">else</span> {
+            error = hfs_swap_HFSBTInternalNode (src, VTOC(vp)-&gt;c_fileid, direction);
+        }
+#<span class="enscript-reference">endif</span>
+        
+        <span class="enscript-keyword">if</span> (error) <span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+        
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (srcDesc-&gt; kind == kBTMapNode) {
+        <span class="enscript-comment">/* Don't swap the bitmaps, they'll be done in the bitmap routines */</span>
+    
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (srcDesc-&gt; kind == kBTHeaderNode) {
+        <span class="enscript-comment">/* The header's offset is hard-wired because we cannot trust the offset pointers. */</span>
+        BTHeaderRec *srcHead = (BTHeaderRec *)((<span class="enscript-type">char</span> *)src-&gt;buffer + <span class="enscript-keyword">sizeof</span>(BTNodeDescriptor));
+        
+        srcHead-&gt;treeDepth		=	SWAP_BE16 (srcHead-&gt;treeDepth);
+        
+        srcHead-&gt;rootNode		=	SWAP_BE32 (srcHead-&gt;rootNode);
+        srcHead-&gt;leafRecords	=	SWAP_BE32 (srcHead-&gt;leafRecords);
+        srcHead-&gt;firstLeafNode	=	SWAP_BE32 (srcHead-&gt;firstLeafNode);
+        srcHead-&gt;lastLeafNode	=	SWAP_BE32 (srcHead-&gt;lastLeafNode);
+        
+        srcHead-&gt;nodeSize		=	SWAP_BE16 (srcHead-&gt;nodeSize);
+        srcHead-&gt;maxKeyLength	=	SWAP_BE16 (srcHead-&gt;maxKeyLength);
+        
+        srcHead-&gt;totalNodes		=	SWAP_BE32 (srcHead-&gt;totalNodes);
+        srcHead-&gt;freeNodes		=	SWAP_BE32 (srcHead-&gt;freeNodes);
+        
+        srcHead-&gt;clumpSize		=	SWAP_BE32 (srcHead-&gt;clumpSize);
+        srcHead-&gt;attributes		=	SWAP_BE32 (srcHead-&gt;attributes);
+
+        <span class="enscript-comment">/* Don't swap srcHead-&gt;reserved1 */</span>
+        <span class="enscript-comment">/* Don't swap srcHead-&gt;btreeType; it's only one byte */</span>
+        <span class="enscript-comment">/* Don't swap srcHead-&gt;reserved2 */</span>
+        <span class="enscript-comment">/* Don't swap srcHead-&gt;reserved3 */</span>
+        <span class="enscript-comment">/* Don't swap bitmap */</span>
+    }
+    
+    <span class="enscript-comment">/*
+     * If we are doing a swap from in-memory to on-disk, then swap the node
+     * descriptor and record offsets after we're done using them.
+     */</span>
+    <span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+		<span class="enscript-comment">/*
+		 * Sanity check and swap the forward and backward links.
+		 * Ignore the header node since its forward and backwards links can legitimately
+		 * point to itself.
+		 */</span>
+		<span class="enscript-keyword">if</span> (srcDesc-&gt;fLink &gt;= btcb-&gt;totalNodes) {
+			panic(<span class="enscript-string">&quot;hfs_UNswap_BTNode: invalid forward link (0x%08X)\n&quot;</span>, srcDesc-&gt;fLink);
+			error = fsBTInvalidHeaderErr;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+		<span class="enscript-keyword">if</span> ((src-&gt;blockNum != 0) &amp;&amp; (srcDesc-&gt;fLink == (u_int32_t) src-&gt;blockNum)) {
+			panic (<span class="enscript-string">&quot;hfs_UNswap_BTNode: invalid forward link (0x%08x == 0x%08x)\n&quot;</span>, 
+					srcDesc-&gt;fLink, (u_int32_t) src-&gt;blockNum);
+			error = fsBTInvalidHeaderErr;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+		
+		<span class="enscript-keyword">if</span> (srcDesc-&gt;bLink &gt;= btcb-&gt;totalNodes) {
+			panic(<span class="enscript-string">&quot;hfs_UNswap_BTNode: invalid backward link (0x%08X)\n&quot;</span>, srcDesc-&gt;bLink);
+			error = fsBTInvalidHeaderErr;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+		<span class="enscript-keyword">if</span> ((src-&gt;blockNum != 0) &amp;&amp; (srcDesc-&gt;bLink == (u_int32_t) src-&gt;blockNum)) {
+			panic (<span class="enscript-string">&quot;hfs_UNswap_BTNode: invalid backward link (0x%08x == 0x%08x)\n&quot;</span>, 
+					srcDesc-&gt;bLink, (u_int32_t) src-&gt;blockNum);
+			error = fsBTInvalidHeaderErr;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+
+
+        srcDesc-&gt;fLink		= SWAP_BE32 (srcDesc-&gt;fLink);
+        srcDesc-&gt;bLink		= SWAP_BE32 (srcDesc-&gt;bLink);
+    
+		<span class="enscript-comment">/* 
+		 * Check srcDesc-&gt;kind.  Don't swap it because it's only one byte.
+		 */</span>
+		<span class="enscript-keyword">if</span> (srcDesc-&gt;kind &lt; kBTLeafNode || srcDesc-&gt;kind &gt; kBTMapNode) {
+			panic(<span class="enscript-string">&quot;hfs_UNswap_BTNode: invalid node kind (%d)\n&quot;</span>, srcDesc-&gt;kind);
+			error = fsBTInvalidHeaderErr;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+
+		<span class="enscript-comment">/* 
+		 * Check srcDesc-&gt;height.  Don't swap it because it's only one byte.
+		 */</span>
+		<span class="enscript-keyword">if</span> (srcDesc-&gt;height &gt; kMaxTreeDepth) {
+			panic(<span class="enscript-string">&quot;hfs_UNswap_BTNode: invalid node height (%d)\n&quot;</span>, srcDesc-&gt;height);
+			error = fsBTInvalidHeaderErr;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+
+        <span class="enscript-comment">/* Don't swap srcDesc-&gt;reserved */</span>
+    
+        <span class="enscript-comment">/*
+         * Swap the node offsets (including the free space one!).
+         */</span>
+        srcOffs = (u_int16_t *)((<span class="enscript-type">char</span> *)src-&gt;buffer + (src-&gt;blockSize - ((srcDesc-&gt;numRecords + 1) * <span class="enscript-keyword">sizeof</span> (u_int16_t))));
+
+        <span class="enscript-comment">/*
+         * Sanity check that the record offsets are within the node itself.
+         */</span>
+        <span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcOffs &gt; ((<span class="enscript-type">char</span> *)src-&gt;buffer + src-&gt;blockSize) ||
+        	(<span class="enscript-type">char</span> *)srcOffs &lt; ((<span class="enscript-type">char</span> *)src-&gt;buffer + <span class="enscript-keyword">sizeof</span>(BTNodeDescriptor))) {
+            panic(<span class="enscript-string">&quot;hfs_UNswap_BTNode: invalid record count (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords);
+            error = fsBTInvalidHeaderErr;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+        }
+
+		<span class="enscript-comment">/*
+		 * Swap and sanity check each of the record offsets.
+		 */</span>
+        <span class="enscript-keyword">for</span> (i = 0; i &lt;= srcDesc-&gt;numRecords; i++) {
+            <span class="enscript-comment">/*
+             * Sanity check: must be even, and within the node itself.
+             *
+             * We may be called to swap an unused node, which contains all zeroes.
+	    	 * This can happen when the last record from a node gets deleted.
+             * This is why we allow the record offset to be zero.
+	     	 * Unused nodes are expected only when allow_empty_node is true 
+	     	 * (the caller should set it to true for kSwapBTNodeBigToHost). 
+             */</span>
+            <span class="enscript-keyword">if</span> ((srcOffs[i] &amp; 1) || 
+			    ((allow_empty_node == false) &amp;&amp; (srcOffs[i] == 0)) ||
+				(srcOffs[i] &lt; <span class="enscript-keyword">sizeof</span>(BTNodeDescriptor) &amp;&amp; srcOffs[i] != 0) || 
+				(srcOffs[i] &gt;= src-&gt;blockSize)) {
+            	panic(<span class="enscript-string">&quot;hfs_UNswap_BTNode: record #%d invalid offset (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcOffs[i]);
+            	error = fsBTInvalidHeaderErr;
+            	<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+            }
+
+            <span class="enscript-comment">/*
+             * Make sure the offsets are strictly increasing.  Note that we're looping over
+             * them backwards, hence the order in the comparison.
+             */</span>
+            <span class="enscript-keyword">if</span> ((i &lt; srcDesc-&gt;numRecords) &amp;&amp; (srcOffs[i+1] &gt;= srcOffs[i])) {
+            	panic(<span class="enscript-string">&quot;hfs_UNswap_BTNode: offsets %d and %d out of order (0x%04X, 0x%04X)\n&quot;</span>,
+            	    srcDesc-&gt;numRecords-i-2, srcDesc-&gt;numRecords-i-1, srcOffs[i+1], srcOffs[i]);
+            	error = fsBTInvalidHeaderErr;
+            	<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+            }
+
+            srcOffs[i]	= SWAP_BE16 (srcOffs[i]);
+        }
+        
+        srcDesc-&gt;numRecords	= SWAP_BE16 (srcDesc-&gt;numRecords);
+    }
+
+<span class="enscript-reference">fail</span>:
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-comment">/*
+		 * Log some useful information about where the corrupt node is.
+		 */</span>
+		printf(<span class="enscript-string">&quot;hfs: node=%lld fileID=%u volume=%s device=%s\n&quot;</span>, src-&gt;blockNum, VTOC(vp)-&gt;c_fileid,
+			VTOVCB(vp)-&gt;vcbVN, vfs_statfs(vnode_mount(vp))-&gt;f_mntfromname);
+		hfs_mark_inconsistent(VTOVCB(vp), HFS_INCONSISTENCY_DETECTED);
+	}
+	
+    <span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_swap_HFSPlusBTInternalNode</span> (
+    BlockDescriptor *src,
+    HFSCatalogNodeID fileID,
+    <span class="enscript-type">enum</span> HFSBTSwapDirection direction
+)
+{
+    BTNodeDescriptor *srcDesc = src-&gt;buffer;
+    u_int16_t *srcOffs = (u_int16_t *)((<span class="enscript-type">char</span> *)src-&gt;buffer + (src-&gt;blockSize - (srcDesc-&gt;numRecords * <span class="enscript-keyword">sizeof</span> (u_int16_t))));
+    <span class="enscript-type">char</span> *nextRecord;	<span class="enscript-comment">/*  Points to start of record following current one */</span>
+    
+    <span class="enscript-comment">/*
+     * i is an int32 because it needs to be negative to index the offset to free space.
+     * srcDesc-&gt;numRecords is a u_int16_t and is unlikely to become 32-bit so this should be ok.
+     */</span>
+
+    int32_t i;
+    u_int32_t j;
+
+    <span class="enscript-keyword">if</span> (fileID == kHFSExtentsFileID) {
+        HFSPlusExtentKey *srcKey;
+        HFSPlusExtentDescriptor *srcRec;
+		size_t recordSize;	<span class="enscript-comment">/* Size of the data part of the record, or node number for index nodes */</span>
+        
+        <span class="enscript-keyword">if</span> (srcDesc-&gt;kind == kBTIndexNode)
+        	recordSize = <span class="enscript-keyword">sizeof</span>(u_int32_t);
+        <span class="enscript-keyword">else</span>
+        	recordSize = <span class="enscript-keyword">sizeof</span>(HFSPlusExtentDescriptor);
+
+        <span class="enscript-keyword">for</span> (i = 0; i &lt; srcDesc-&gt;numRecords; i++) {
+        	<span class="enscript-comment">/* Point to the start of the record we're currently checking. */</span>
+            srcKey = (HFSPlusExtentKey *)((<span class="enscript-type">char</span> *)src-&gt;buffer + srcOffs[i]);
+            
+            <span class="enscript-comment">/*
+             * Point to start of next (larger offset) record.  We'll use this
+             * to be sure the current record doesn't overflow into the next
+             * record.
+             */</span>
+			nextRecord = (<span class="enscript-type">char</span> *)src-&gt;buffer + srcOffs[i-1];
+
+			<span class="enscript-comment">/*
+			 * Make sure the key and data are within the buffer.  Since both key
+			 * and data are fixed size, this is relatively easy.  Note that this
+			 * relies on the keyLength being a constant; we verify the keyLength
+			 * below.
+			 */</span>
+			<span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcKey + <span class="enscript-keyword">sizeof</span>(HFSPlusExtentKey) + recordSize &gt; nextRecord) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: extents key #%d offset too big (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcOffs[i]);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: extents key #%d offset too big (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcOffs[i]);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+			}
+			
+            <span class="enscript-keyword">if</span> (direction == kSwapBTNodeBigToHost) 
+            	srcKey-&gt;keyLength = SWAP_BE16 (srcKey-&gt;keyLength);
+            <span class="enscript-keyword">if</span> (srcKey-&gt;keyLength != <span class="enscript-keyword">sizeof</span>(*srcKey) - <span class="enscript-keyword">sizeof</span>(srcKey-&gt;keyLength)) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: extents key #%d invalid length (%d)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcKey-&gt;keyLength);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: extents key #%d invalid length (%d)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcKey-&gt;keyLength);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+            }
+            srcRec = (HFSPlusExtentDescriptor *)((<span class="enscript-type">char</span> *)srcKey + srcKey-&gt;keyLength + <span class="enscript-keyword">sizeof</span>(srcKey-&gt;keyLength));
+            <span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig)
+            	srcKey-&gt;keyLength = SWAP_BE16 (srcKey-&gt;keyLength);
+
+            <span class="enscript-comment">/* Don't swap srcKey-&gt;forkType; it's only one byte */</span>
+            <span class="enscript-comment">/* Don't swap srcKey-&gt;pad */</span>
+
+            srcKey-&gt;fileID			= SWAP_BE32 (srcKey-&gt;fileID);
+            srcKey-&gt;startBlock		= SWAP_BE32 (srcKey-&gt;startBlock);
+            
+            <span class="enscript-keyword">if</span> (srcDesc-&gt;kind == kBTIndexNode) {
+            	<span class="enscript-comment">/* For index nodes, the record data is just a child node number. */</span>
+                *((u_int32_t *)srcRec) = SWAP_BE32 (*((u_int32_t *)srcRec));
+            } <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* Swap the extent data */</span>
+				<span class="enscript-keyword">for</span> (j = 0; j &lt; kHFSPlusExtentDensity; j++) {
+					srcRec[j].startBlock	= SWAP_BE32 (srcRec[j].startBlock);
+					srcRec[j].blockCount	= SWAP_BE32 (srcRec[j].blockCount);
+				}
+            }
+        }
+
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (fileID == kHFSCatalogFileID) {
+        HFSPlusCatalogKey *srcKey;
+        int16_t *srcPtr;
+        u_int16_t keyLength;
+
+        <span class="enscript-keyword">for</span> (i = 0; i &lt; srcDesc-&gt;numRecords; i++) {
+        	<span class="enscript-comment">/* Point to the start of the record we're currently checking. */</span>
+            srcKey = (HFSPlusCatalogKey *)((<span class="enscript-type">char</span> *)src-&gt;buffer + srcOffs[i]);
+
+            <span class="enscript-comment">/*
+             * Point to start of next (larger offset) record.  We'll use this
+             * to be sure the current record doesn't overflow into the next
+             * record.
+             */</span>
+			nextRecord = (<span class="enscript-type">char</span> *)src-&gt;buffer + (uintptr_t)(srcOffs[i-1]);
+
+			<span class="enscript-comment">/*
+			 * Make sure we can safely dereference the keyLength and parentID fields. 
+			 */</span>
+			<span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcKey + offsetof(HFSPlusCatalogKey, nodeName.unicode[0]) &gt; nextRecord) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog key #%d offset too big (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcOffs[i]);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog key #%d offset too big (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcOffs[i]);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+			}
+
+			<span class="enscript-comment">/*
+			 * Swap and sanity check the key length
+			 */</span>
+            <span class="enscript-keyword">if</span> (direction == kSwapBTNodeBigToHost)
+            	srcKey-&gt;keyLength = SWAP_BE16 (srcKey-&gt;keyLength);
+            keyLength = srcKey-&gt;keyLength;	<span class="enscript-comment">/* Put it in a local (native order) because we use it several times */</span>
+            <span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig)
+            	srcKey-&gt;keyLength = SWAP_BE16 (keyLength);
+            
+            <span class="enscript-comment">/* Sanity check the key length */</span>
+            <span class="enscript-keyword">if</span> (keyLength &lt; kHFSPlusCatalogKeyMinimumLength || keyLength &gt; kHFSPlusCatalogKeyMaximumLength) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog key #%d invalid length (%d)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, keyLength);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog key #%d invalid length (%d)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, keyLength);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+            }
+
+            <span class="enscript-comment">/*
+             * Make sure that we can safely dereference the record's type field or
+             * an index node's child node number.
+             */</span>
+            srcPtr = (int16_t *)((<span class="enscript-type">char</span> *)srcKey + keyLength + <span class="enscript-keyword">sizeof</span>(srcKey-&gt;keyLength));
+            <span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcPtr + <span class="enscript-keyword">sizeof</span>(u_int32_t) &gt; nextRecord) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog key #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog key #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+            }
+
+            srcKey-&gt;parentID						= SWAP_BE32 (srcKey-&gt;parentID);
+
+			<span class="enscript-comment">/*
+			 * Swap and sanity check the key's node name
+			 */</span>
+            <span class="enscript-keyword">if</span> (direction == kSwapBTNodeBigToHost)
+            	srcKey-&gt;nodeName.length	= SWAP_BE16 (srcKey-&gt;nodeName.length);
+            <span class="enscript-comment">/* Make sure name length is consistent with key length */</span>
+            <span class="enscript-keyword">if</span> (keyLength &lt; <span class="enscript-keyword">sizeof</span>(srcKey-&gt;parentID) + <span class="enscript-keyword">sizeof</span>(srcKey-&gt;nodeName.length) +
+                srcKey-&gt;nodeName.length*<span class="enscript-keyword">sizeof</span>(srcKey-&gt;nodeName.unicode[0])) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog record #%d keyLength=%d expected=%lu\n&quot;</span>,
+						srcDesc-&gt;numRecords-i, keyLength, <span class="enscript-keyword">sizeof</span>(srcKey-&gt;parentID) + <span class="enscript-keyword">sizeof</span>(srcKey-&gt;nodeName.length) +
+                    	srcKey-&gt;nodeName.length*<span class="enscript-keyword">sizeof</span>(srcKey-&gt;nodeName.unicode[0]));
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog record #%d keyLength=%d expected=%lu\n&quot;</span>,
+						srcDesc-&gt;numRecords-i, keyLength, <span class="enscript-keyword">sizeof</span>(srcKey-&gt;parentID) + <span class="enscript-keyword">sizeof</span>(srcKey-&gt;nodeName.length) +
+                    	srcKey-&gt;nodeName.length*<span class="enscript-keyword">sizeof</span>(srcKey-&gt;nodeName.unicode[0]));
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+            }
+            <span class="enscript-keyword">for</span> (j = 0; j &lt; srcKey-&gt;nodeName.length; j++) {
+                srcKey-&gt;nodeName.unicode[j]	= SWAP_BE16 (srcKey-&gt;nodeName.unicode[j]);
+            }
+            <span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig)
+            	srcKey-&gt;nodeName.length	= SWAP_BE16 (srcKey-&gt;nodeName.length);
+ 
+            <span class="enscript-comment">/* 
+             * For index nodes, the record data is just the child's node number.
+             * Skip over swapping the various types of catalog record.
+             */</span>
+            <span class="enscript-keyword">if</span> (srcDesc-&gt;kind == kBTIndexNode) {
+                *((u_int32_t *)srcPtr) = SWAP_BE32 (*((u_int32_t *)srcPtr));
+                <span class="enscript-keyword">continue</span>;
+            }
+            
+            <span class="enscript-comment">/* Make sure the recordType is in native order before using it. */</span>
+            <span class="enscript-keyword">if</span> (direction == kSwapBTNodeBigToHost)
+            	srcPtr[0] = SWAP_BE16 (srcPtr[0]);
+            
+            <span class="enscript-keyword">if</span> (srcPtr[0] == kHFSPlusFolderRecord) {
+                HFSPlusCatalogFolder *srcRec = (HFSPlusCatalogFolder *)srcPtr;
+                <span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcRec + <span class="enscript-keyword">sizeof</span>(*srcRec) &gt; nextRecord) {
+					<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+						panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog folder record #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					} <span class="enscript-keyword">else</span> {
+						printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog folder record #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					}
+					<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+                }
+
+                srcRec-&gt;flags				= SWAP_BE16 (srcRec-&gt;flags);
+                srcRec-&gt;valence				= SWAP_BE32 (srcRec-&gt;valence);
+                srcRec-&gt;folderID			= SWAP_BE32 (srcRec-&gt;folderID);
+                srcRec-&gt;createDate			= SWAP_BE32 (srcRec-&gt;createDate);
+                srcRec-&gt;contentModDate		= SWAP_BE32 (srcRec-&gt;contentModDate);
+                srcRec-&gt;attributeModDate	= SWAP_BE32 (srcRec-&gt;attributeModDate);
+                srcRec-&gt;accessDate			= SWAP_BE32 (srcRec-&gt;accessDate);
+                srcRec-&gt;backupDate			= SWAP_BE32 (srcRec-&gt;backupDate);
+                
+                srcRec-&gt;bsdInfo.ownerID		= SWAP_BE32 (srcRec-&gt;bsdInfo.ownerID);
+                srcRec-&gt;bsdInfo.groupID		= SWAP_BE32 (srcRec-&gt;bsdInfo.groupID);
+    
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;bsdInfo.adminFlags; it's only one byte */</span>
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;bsdInfo.ownerFlags; it's only one byte */</span>
+    
+                srcRec-&gt;bsdInfo.fileMode			= SWAP_BE16 (srcRec-&gt;bsdInfo.fileMode);
+                srcRec-&gt;bsdInfo.special.iNodeNum	= SWAP_BE32 (srcRec-&gt;bsdInfo.special.iNodeNum);
+    
+                srcRec-&gt;textEncoding		= SWAP_BE32 (srcRec-&gt;textEncoding);
+    
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;userInfo */</span>
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;finderInfo */</span>
+                srcRec-&gt;folderCount = SWAP_BE32 (srcRec-&gt;folderCount);
+   
+            } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (srcPtr[0] == kHFSPlusFileRecord) {
+                HFSPlusCatalogFile *srcRec = (HFSPlusCatalogFile *)srcPtr;
+                <span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcRec + <span class="enscript-keyword">sizeof</span>(*srcRec) &gt; nextRecord) {
+					<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+						panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog file record #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					} <span class="enscript-keyword">else</span> {
+						printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog file record #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					}
+					<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+                }
+                
+                srcRec-&gt;flags				= SWAP_BE16 (srcRec-&gt;flags);
+    
+                srcRec-&gt;fileID				= SWAP_BE32 (srcRec-&gt;fileID);
+    
+                srcRec-&gt;createDate			= SWAP_BE32 (srcRec-&gt;createDate);
+                srcRec-&gt;contentModDate		= SWAP_BE32 (srcRec-&gt;contentModDate);
+                srcRec-&gt;attributeModDate	= SWAP_BE32 (srcRec-&gt;attributeModDate);
+                srcRec-&gt;accessDate			= SWAP_BE32 (srcRec-&gt;accessDate);
+                srcRec-&gt;backupDate			= SWAP_BE32 (srcRec-&gt;backupDate);
+    
+                srcRec-&gt;bsdInfo.ownerID		= SWAP_BE32 (srcRec-&gt;bsdInfo.ownerID);
+                srcRec-&gt;bsdInfo.groupID		= SWAP_BE32 (srcRec-&gt;bsdInfo.groupID);
+    
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;bsdInfo.adminFlags; it's only one byte */</span>
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;bsdInfo.ownerFlags; it's only one byte */</span>
+    
+                srcRec-&gt;bsdInfo.fileMode			= SWAP_BE16 (srcRec-&gt;bsdInfo.fileMode);
+                srcRec-&gt;bsdInfo.special.iNodeNum	= SWAP_BE32 (srcRec-&gt;bsdInfo.special.iNodeNum);
+    
+                srcRec-&gt;textEncoding		= SWAP_BE32 (srcRec-&gt;textEncoding);
+			
+                <span class="enscript-comment">/* If kHFSHasLinkChainBit is set, reserved1 is hl_FirstLinkID.  
+				 * In all other context, it is expected to be zero.
+				 */</span>
+                srcRec-&gt;reserved1 = SWAP_BE32 (srcRec-&gt;reserved1);
+
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;userInfo */</span>
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;finderInfo */</span>
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;reserved2 */</span>
+    
+                hfs_swap_HFSPlusForkData (&amp;srcRec-&gt;dataFork);
+                hfs_swap_HFSPlusForkData (&amp;srcRec-&gt;resourceFork);
+            
+            } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((srcPtr[0] == kHFSPlusFolderThreadRecord) ||
+                       (srcPtr[0] == kHFSPlusFileThreadRecord)) {
+    
+				<span class="enscript-comment">/*
+				 * Make sure there is room for parentID and name length.
+				 */</span>
+                HFSPlusCatalogThread *srcRec = (HFSPlusCatalogThread *)srcPtr;
+				<span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *) &amp;srcRec-&gt;nodeName.unicode[0] &gt; nextRecord) {
+					<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+						panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog thread record #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					} <span class="enscript-keyword">else</span> {
+						printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog thread record #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					}
+					<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+				}
+
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;reserved */</span>
+                
+                srcRec-&gt;parentID						= SWAP_BE32 (srcRec-&gt;parentID);
+                
+                <span class="enscript-keyword">if</span> (direction == kSwapBTNodeBigToHost)
+                	srcRec-&gt;nodeName.length	= SWAP_BE16 (srcRec-&gt;nodeName.length);
+
+                <span class="enscript-comment">/* 
+                 * Make sure there is room for the name in the buffer.
+                 * Then swap the characters of the name itself.
+                 */</span>
+				<span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *) &amp;srcRec-&gt;nodeName.unicode[srcRec-&gt;nodeName.length] &gt; nextRecord) {
+					<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+						panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog thread record #%d name too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					} <span class="enscript-keyword">else</span> {
+						printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: catalog thread record #%d name too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					}
+					<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+				}
+                <span class="enscript-keyword">for</span> (j = 0; j &lt; srcRec-&gt;nodeName.length; j++) {
+                    srcRec-&gt;nodeName.unicode[j]	= SWAP_BE16 (srcRec-&gt;nodeName.unicode[j]);
+                }
+                
+                <span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig)
+                	srcRec-&gt;nodeName.length = SWAP_BE16 (srcRec-&gt;nodeName.length);
+
+            } <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+            		panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: unrecognized catalog record type (0x%04X; record #%d)\n&quot;</span>, srcPtr[0], srcDesc-&gt;numRecords-i-1);
+				} <span class="enscript-keyword">else</span> {
+            		printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: unrecognized catalog record type (0x%04X; record #%d)\n&quot;</span>, srcPtr[0], srcDesc-&gt;numRecords-i-1);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+            }
+    
+            <span class="enscript-comment">/* We can swap the record type now that we're done using it. */</span>
+            <span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig)
+            	srcPtr[0] = SWAP_BE16 (srcPtr[0]);
+        }
+        
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (fileID == kHFSAttributesFileID) {
+    	HFSPlusAttrKey *srcKey;
+    	HFSPlusAttrRecord *srcRec;
+    	u_int16_t keyLength;
+		u_int32_t attrSize = 0;
+
+    	<span class="enscript-keyword">for</span> (i = 0; i &lt; srcDesc-&gt;numRecords; i++) {
+        	<span class="enscript-comment">/* Point to the start of the record we're currently checking. */</span>
+    		srcKey = (HFSPlusAttrKey *)((<span class="enscript-type">char</span> *)src-&gt;buffer + srcOffs[i]);
+
+            <span class="enscript-comment">/*
+             * Point to start of next (larger offset) record.  We'll use this
+             * to be sure the current record doesn't overflow into the next
+             * record.
+             */</span>
+			nextRecord = (<span class="enscript-type">char</span> *)src-&gt;buffer + srcOffs[i-1];
+
+    		<span class="enscript-comment">/* Make sure there is room in the buffer for a minimal key */</span>
+    		<span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *) &amp;srcKey-&gt;attrName[1] &gt; nextRecord) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: attr key #%d offset too big (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcOffs[i]);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: attr key #%d offset too big (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcOffs[i]);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+    		}
+    		
+    		<span class="enscript-comment">/* Swap the key length field */</span>
+    		<span class="enscript-keyword">if</span> (direction == kSwapBTNodeBigToHost)
+    			srcKey-&gt;keyLength = SWAP_BE16(srcKey-&gt;keyLength);
+    		keyLength = srcKey-&gt;keyLength;	<span class="enscript-comment">/* Keep a copy in native order */</span>
+    		<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig)
+    			srcKey-&gt;keyLength = SWAP_BE16(srcKey-&gt;keyLength);
+
+            <span class="enscript-comment">/*
+             * Make sure that we can safely dereference the record's type field or
+             * an index node's child node number.
+             */</span>
+    		srcRec = (HFSPlusAttrRecord *)((<span class="enscript-type">char</span> *)srcKey + keyLength + <span class="enscript-keyword">sizeof</span>(srcKey-&gt;keyLength));
+    		<span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcRec + <span class="enscript-keyword">sizeof</span>(u_int32_t) &gt; nextRecord) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: attr key #%d too big (%d)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, keyLength);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: attr key #%d too big (%d)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, keyLength);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+    		}
+    		
+    		srcKey-&gt;fileID = SWAP_BE32(srcKey-&gt;fileID);
+    		srcKey-&gt;startBlock = SWAP_BE32(srcKey-&gt;startBlock);
+
+			<span class="enscript-comment">/* 
+			 * Swap and check the attribute name
+			 */</span>
+    		<span class="enscript-keyword">if</span> (direction == kSwapBTNodeBigToHost)
+    			srcKey-&gt;attrNameLen = SWAP_BE16(srcKey-&gt;attrNameLen);
+    		<span class="enscript-comment">/* Sanity check the attribute name length */</span>
+    		<span class="enscript-keyword">if</span> (srcKey-&gt;attrNameLen &gt; kHFSMaxAttrNameLen || keyLength &lt; (kHFSPlusAttrKeyMinimumLength + <span class="enscript-keyword">sizeof</span>(u_int16_t)*srcKey-&gt;attrNameLen)) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: attr key #%d keyLength=%d attrNameLen=%d\n&quot;</span>, srcDesc-&gt;numRecords-i-1, keyLength, srcKey-&gt;attrNameLen);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: attr key #%d keyLength=%d attrNameLen=%d\n&quot;</span>, srcDesc-&gt;numRecords-i-1, keyLength, srcKey-&gt;attrNameLen);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+    		}
+    		<span class="enscript-keyword">for</span> (j = 0; j &lt; srcKey-&gt;attrNameLen; j++)
+    			srcKey-&gt;attrName[j] = SWAP_BE16(srcKey-&gt;attrName[j]);
+    		<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig)
+    			srcKey-&gt;attrNameLen = SWAP_BE16(srcKey-&gt;attrNameLen);
+    		
+            <span class="enscript-comment">/* 
+             * For index nodes, the record data is just the child's node number.
+             * Skip over swapping the various types of attribute record.
+             */</span>
+            <span class="enscript-keyword">if</span> (srcDesc-&gt;kind == kBTIndexNode) {
+                *((u_int32_t *)srcRec) = SWAP_BE32 (*((u_int32_t *)srcRec));
+                <span class="enscript-keyword">continue</span>;
+            }
+            
+            <span class="enscript-comment">/* Swap the record data */</span>
+            <span class="enscript-keyword">if</span> (direction == kSwapBTNodeBigToHost)
+            	srcRec-&gt;recordType = SWAP_BE32(srcRec-&gt;recordType);
+            <span class="enscript-keyword">switch</span> (srcRec-&gt;recordType) {
+            	<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSPlusAttrInlineData</span>:
+            		<span class="enscript-comment">/* Is there room for the inline data header? */</span>
+            		<span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *) &amp;srcRec-&gt;attrData.attrData[0]  &gt; nextRecord) {
+						<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+							panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: attr inline #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+						} <span class="enscript-keyword">else</span> {
+							printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: attr inline #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+						}
+						<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+            		}
+            		
+            		<span class="enscript-comment">/* We're not swapping the reserved fields */</span>
+            		
+            		<span class="enscript-comment">/* Swap the attribute size */</span>
+            		<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig)
+            			attrSize = srcRec-&gt;attrData.attrSize;
+            		srcRec-&gt;attrData.attrSize = SWAP_BE32(srcRec-&gt;attrData.attrSize);
+            		<span class="enscript-keyword">if</span> (direction == kSwapBTNodeBigToHost)
+            			attrSize = srcRec-&gt;attrData.attrSize;
+            			
+            		<span class="enscript-comment">/* Is there room for the inline attribute data? */</span>
+            		<span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *) &amp;srcRec-&gt;attrData.attrData[attrSize] &gt; nextRecord) {
+						<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+							panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: attr inline #%d too big (attrSize=%u)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, attrSize);
+						} <span class="enscript-keyword">else</span> {
+							printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: attr inline #%d too big (attrSize=%u)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, attrSize);
+						}
+						<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+            		}
+            		
+            		<span class="enscript-comment">/* Not swapping the attribute data itself */</span>
+            		<span class="enscript-keyword">break</span>;
+            		
+            	<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSPlusAttrForkData</span>:
+            		<span class="enscript-comment">/* Is there room for the fork data record? */</span>
+            		<span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcRec + <span class="enscript-keyword">sizeof</span>(HFSPlusAttrForkData) &gt; nextRecord) {
+						<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+							panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: attr fork data #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+						} <span class="enscript-keyword">else</span> {
+							printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: attr fork data #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+						}
+						<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+            		}
+            		
+            		<span class="enscript-comment">/* We're not swapping the reserved field */</span>
+            		
+            		hfs_swap_HFSPlusForkData(&amp;srcRec-&gt;forkData.theFork);
+            		<span class="enscript-keyword">break</span>;
+            		
+            	<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSPlusAttrExtents</span>:
+            		<span class="enscript-comment">/* Is there room for an extent record? */</span>
+            		<span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcRec + <span class="enscript-keyword">sizeof</span>(HFSPlusAttrExtents) &gt; nextRecord) {
+						<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+							panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: attr extents #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+						} <span class="enscript-keyword">else</span> {
+							printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: attr extents #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+						}
+						<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+            		}
+            		
+            		<span class="enscript-comment">/* We're not swapping the reserved field */</span>
+            		
+            		<span class="enscript-keyword">for</span> (j = 0; j &lt; kHFSPlusExtentDensity; j++) {
+            			srcRec-&gt;overflowExtents.extents[j].startBlock =
+            				SWAP_BE32(srcRec-&gt;overflowExtents.extents[j].startBlock);
+            			srcRec-&gt;overflowExtents.extents[j].blockCount =
+            				SWAP_BE32(srcRec-&gt;overflowExtents.extents[j].blockCount);
+            		}
+            		<span class="enscript-keyword">break</span>;
+            }
+            <span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig)
+            	srcRec-&gt;recordType = SWAP_BE32(srcRec-&gt;recordType);
+    	}
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (fileID &gt; kHFSFirstUserCatalogNodeID) {
+    	<span class="enscript-comment">/* The only B-tree with a non-system CNID that we use is the hotfile B-tree */</span>
+		HotFileKey *srcKey;
+		u_int32_t *srcRec;
+        
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; srcDesc-&gt;numRecords; i++) {
+        	<span class="enscript-comment">/* Point to the start of the record we're currently checking. */</span>
+			srcKey = (HotFileKey *)((<span class="enscript-type">char</span> *)src-&gt;buffer + srcOffs[i]);
+
+            <span class="enscript-comment">/*
+             * Point to start of next (larger offset) record.  We'll use this
+             * to be sure the current record doesn't overflow into the next
+             * record.
+             */</span>
+			nextRecord = (<span class="enscript-type">char</span> *)src-&gt;buffer + srcOffs[i-1];
+
+			<span class="enscript-comment">/* Make sure there is room for the key (HotFileKey) and data (u_int32_t) */</span>
+			<span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcKey + <span class="enscript-keyword">sizeof</span>(HotFileKey) + <span class="enscript-keyword">sizeof</span>(u_int32_t) &gt; nextRecord) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: hotfile #%d offset too big (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcOffs[i]);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: hotfile #%d offset too big (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcOffs[i]);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+			}
+			
+			<span class="enscript-comment">/* Swap and sanity check the key length field */</span>
+			<span class="enscript-keyword">if</span> (direction == kSwapBTNodeBigToHost)
+				srcKey-&gt;keyLength = SWAP_BE16 (srcKey-&gt;keyLength);
+			<span class="enscript-keyword">if</span> (srcKey-&gt;keyLength != <span class="enscript-keyword">sizeof</span>(*srcKey) - <span class="enscript-keyword">sizeof</span>(srcKey-&gt;keyLength)) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: hotfile #%d incorrect keyLength %d\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcKey-&gt;keyLength);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: hotfile #%d incorrect keyLength %d\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcKey-&gt;keyLength);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+			}
+			srcRec = (u_int32_t *)((<span class="enscript-type">char</span> *)srcKey + srcKey-&gt;keyLength + <span class="enscript-keyword">sizeof</span>(srcKey-&gt;keyLength));
+			<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig)
+				srcKey-&gt;keyLength = SWAP_BE16 (srcKey-&gt;keyLength);
+
+			<span class="enscript-comment">/* Don't swap srcKey-&gt;forkType */</span>
+			<span class="enscript-comment">/* Don't swap srcKey-&gt;pad */</span>
+
+			srcKey-&gt;temperature = SWAP_BE32 (srcKey-&gt;temperature);
+			srcKey-&gt;fileID = SWAP_BE32 (srcKey-&gt;fileID);
+             
+			*((u_int32_t *)srcRec) = SWAP_BE32 (*((u_int32_t *)srcRec));
+		}
+    } <span class="enscript-keyword">else</span> {
+        panic (<span class="enscript-string">&quot;hfs_swap_HFSPlusBTInternalNode: fileID %u is not a system B-tree\n&quot;</span>, fileID);
+    }
+
+
+    <span class="enscript-keyword">return</span> (0);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_swap_HFSBTInternalNode</span> (
+    BlockDescriptor *src,
+    HFSCatalogNodeID fileID,
+    <span class="enscript-type">enum</span> HFSBTSwapDirection direction
+)
+{
+    BTNodeDescriptor *srcDesc = src-&gt;buffer;
+    u_int16_t *srcOffs = (u_int16_t *)((<span class="enscript-type">char</span> *)src-&gt;buffer + (src-&gt;blockSize - (srcDesc-&gt;numRecords * <span class="enscript-keyword">sizeof</span> (u_int16_t))));
+	<span class="enscript-type">char</span> *nextRecord;	<span class="enscript-comment">/*  Points to start of record following current one */</span>
+
+    <span class="enscript-comment">/*
+     * i is an int32 because it needs to be negative to index the offset to free space.
+     * srcDesc-&gt;numRecords is a u_int16_t and is unlikely to become 32-bit so this should be ok.
+     */</span>
+    int32_t i;
+    u_int32_t j;
+
+    <span class="enscript-keyword">if</span> (fileID == kHFSExtentsFileID) {
+        HFSExtentKey *srcKey;
+        HFSExtentDescriptor *srcRec;
+		size_t recordSize;	<span class="enscript-comment">/* Size of the data part of the record, or node number for index nodes */</span>
+        
+        <span class="enscript-keyword">if</span> (srcDesc-&gt;kind == kBTIndexNode)
+        	recordSize = <span class="enscript-keyword">sizeof</span>(u_int32_t);
+        <span class="enscript-keyword">else</span>
+        	recordSize = <span class="enscript-keyword">sizeof</span>(HFSExtentDescriptor);
+
+        <span class="enscript-keyword">for</span> (i = 0; i &lt; srcDesc-&gt;numRecords; i++) {
+        	<span class="enscript-comment">/* Point to the start of the record we're currently checking. */</span>
+            srcKey = (HFSExtentKey *)((<span class="enscript-type">char</span> *)src-&gt;buffer + srcOffs[i]);
+
+            <span class="enscript-comment">/*
+             * Point to start of next (larger offset) record.  We'll use this
+             * to be sure the current record doesn't overflow into the next
+             * record.
+             */</span>
+			nextRecord = (<span class="enscript-type">char</span> *)src-&gt;buffer + srcOffs[i-1];
+
+			<span class="enscript-comment">/*
+			 * Make sure the key and data are within the buffer.  Since both key
+			 * and data are fixed size, this is relatively easy.  Note that this
+			 * relies on the keyLength being a constant; we verify the keyLength
+			 * below.
+			 */</span>
+			<span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcKey + <span class="enscript-keyword">sizeof</span>(HFSExtentKey) + recordSize &gt; nextRecord) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: extents key #%d offset too big (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcOffs[i]);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: extents key #%d offset too big (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcOffs[i]);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+			}
+			
+            <span class="enscript-comment">/* Don't swap srcKey-&gt;keyLength (it's only one byte), but do sanity check it */</span>
+            <span class="enscript-keyword">if</span> (srcKey-&gt;keyLength != <span class="enscript-keyword">sizeof</span>(*srcKey) - <span class="enscript-keyword">sizeof</span>(srcKey-&gt;keyLength)) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: extents key #%d invalid length (%d)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcKey-&gt;keyLength);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: extents key #%d invalid length (%d)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcKey-&gt;keyLength);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+            }
+
+            <span class="enscript-comment">/* Don't swap srcKey-&gt;forkType; it's only one byte */</span>
+
+            srcKey-&gt;fileID			= SWAP_BE32 (srcKey-&gt;fileID);
+            srcKey-&gt;startBlock		= SWAP_BE16 (srcKey-&gt;startBlock);
+
+            <span class="enscript-comment">/* Point to record data (round up to even byte boundary) */</span>
+            srcRec = (HFSExtentDescriptor *)((<span class="enscript-type">char</span> *)srcKey + ((srcKey-&gt;keyLength + 2) &amp; ~1));
+    
+            <span class="enscript-keyword">if</span> (srcDesc-&gt;kind == kBTIndexNode) {
+            	<span class="enscript-comment">/* For index nodes, the record data is just a child node number. */</span>
+                *((u_int32_t *)srcRec) = SWAP_BE32 (*((u_int32_t *)srcRec));
+            } <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* Swap the extent data */</span>
+				<span class="enscript-keyword">for</span> (j = 0; j &lt; kHFSExtentDensity; j++) {
+					srcRec[j].startBlock	= SWAP_BE16 (srcRec[j].startBlock);
+					srcRec[j].blockCount	= SWAP_BE16 (srcRec[j].blockCount);
+				}
+            }
+        }
+        
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (fileID == kHFSCatalogFileID) {
+        HFSCatalogKey *srcKey;
+        int16_t *srcPtr;
+        <span class="enscript-type">unsigned</span> expectedKeyLength;
+
+        <span class="enscript-keyword">for</span> (i = 0; i &lt; srcDesc-&gt;numRecords; i++) {
+        	<span class="enscript-comment">/* Point to the start of the record we're currently checking. */</span>
+            srcKey = (HFSCatalogKey *)((<span class="enscript-type">char</span> *)src-&gt;buffer + srcOffs[i]);
+
+            <span class="enscript-comment">/*
+             * Point to start of next (larger offset) record.  We'll use this
+             * to be sure the current record doesn't overflow into the next
+             * record.
+             */</span>
+			nextRecord = (<span class="enscript-type">char</span> *)src-&gt;buffer + srcOffs[i-1];
+
+			<span class="enscript-comment">/*
+			 * Make sure we can safely dereference the keyLength and parentID fields.
+			 * The value 8 below is 1 bytes for keyLength + 1 byte reserved + 4 bytes
+			 * for parentID + 1 byte for nodeName's length + 1 byte to round up the
+			 * record start to an even offset, which forms a minimal key.
+			 */</span>
+			<span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcKey + 8 &gt; nextRecord) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog key #%d offset too big (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcOffs[i]);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog key #%d offset too big (0x%04X)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcOffs[i]);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+			}
+			
+            <span class="enscript-comment">/* Don't swap srcKey-&gt;keyLength (it's only one byte), but do sanity check it */</span>
+            <span class="enscript-keyword">if</span> (srcKey-&gt;keyLength &lt; kHFSCatalogKeyMinimumLength || srcKey-&gt;keyLength &gt; kHFSCatalogKeyMaximumLength) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog key #%d invalid length (%d)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcKey-&gt;keyLength);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog key #%d invalid length (%d)\n&quot;</span>, srcDesc-&gt;numRecords-i-1, srcKey-&gt;keyLength);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+            }
+            
+            <span class="enscript-comment">/* Don't swap srcKey-&gt;reserved */</span>
+
+            srcKey-&gt;parentID			= SWAP_BE32 (srcKey-&gt;parentID);
+
+            <span class="enscript-comment">/* Don't swap srcKey-&gt;nodeName */</span>
+            
+			<span class="enscript-comment">/* Make sure the keyLength is big enough for the key's content */</span>
+			<span class="enscript-keyword">if</span> (srcDesc-&gt;kind == kBTIndexNode)
+				expectedKeyLength = <span class="enscript-keyword">sizeof</span>(*srcKey) - <span class="enscript-keyword">sizeof</span>(srcKey-&gt;keyLength);
+			<span class="enscript-keyword">else</span>
+				expectedKeyLength = srcKey-&gt;nodeName[0] + kHFSCatalogKeyMinimumLength;
+            <span class="enscript-keyword">if</span> (srcKey-&gt;keyLength &lt; expectedKeyLength) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog record #%d keyLength=%u expected=%u\n&quot;</span>,
+						srcDesc-&gt;numRecords-i, srcKey-&gt;keyLength, expectedKeyLength);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog record #%d keyLength=%u expected=%u\n&quot;</span>,
+						srcDesc-&gt;numRecords-i, srcKey-&gt;keyLength, expectedKeyLength);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+            }
+
+            <span class="enscript-comment">/* Point to record data (round up to even byte boundary) */</span>
+            srcPtr = (int16_t *)((<span class="enscript-type">char</span> *)srcKey + ((srcKey-&gt;keyLength + 2) &amp; ~1));
+            
+            <span class="enscript-comment">/*
+             * Make sure that we can safely dereference the record's type field or
+             * and index node's child node number.
+             */</span>
+            <span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcPtr + <span class="enscript-keyword">sizeof</span>(u_int32_t) &gt; nextRecord) {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+					panic(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog key #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog key #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+            }
+            
+            <span class="enscript-comment">/* 
+             * For index nodes, the record data is just the child's node number.
+             * Skip over swapping the various types of catalog record.
+             */</span>
+            <span class="enscript-keyword">if</span> (srcDesc-&gt;kind == kBTIndexNode) {
+                *((u_int32_t *)srcPtr) = SWAP_BE32 (*((u_int32_t *)srcPtr));
+                <span class="enscript-keyword">continue</span>;
+            }
+    
+            <span class="enscript-comment">/* Make sure the recordType is in native order before using it. */</span>
+            <span class="enscript-keyword">if</span> (direction == kSwapBTNodeBigToHost)
+            	srcPtr[0] = SWAP_BE16 (srcPtr[0]);
+            
+            <span class="enscript-keyword">if</span> (srcPtr[0] == kHFSFolderRecord) {
+                HFSCatalogFolder *srcRec = (HFSCatalogFolder *)srcPtr;
+                <span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcRec + <span class="enscript-keyword">sizeof</span>(*srcRec) &gt; nextRecord) {
+					<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+						panic(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog folder record #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					} <span class="enscript-keyword">else</span> {
+						printf(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog folder record #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					}
+					<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+                }
+                
+                srcRec-&gt;flags				= SWAP_BE16 (srcRec-&gt;flags);
+                srcRec-&gt;valence				= SWAP_BE16 (srcRec-&gt;valence);
+                
+                srcRec-&gt;folderID			= SWAP_BE32 (srcRec-&gt;folderID);
+                srcRec-&gt;createDate			= SWAP_BE32 (srcRec-&gt;createDate);
+                srcRec-&gt;modifyDate			= SWAP_BE32 (srcRec-&gt;modifyDate);
+                srcRec-&gt;backupDate			= SWAP_BE32 (srcRec-&gt;backupDate);
+    
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;userInfo */</span>
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;finderInfo */</span>
+                <span class="enscript-comment">/* Don't swap resserved array */</span>
+    
+            } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (srcPtr[0] == kHFSFileRecord) {
+                HFSCatalogFile *srcRec = (HFSCatalogFile *)srcPtr;
+                <span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *)srcRec + <span class="enscript-keyword">sizeof</span>(*srcRec) &gt; nextRecord) {
+					<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+						panic(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog file record #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					} <span class="enscript-keyword">else</span> {
+						printf(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog file record #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					}
+					<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+                }
+                
+                srcRec-&gt;flags				= srcRec-&gt;flags;
+                srcRec-&gt;fileType			= srcRec-&gt;fileType;
+    
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;userInfo */</span>
+    
+                srcRec-&gt;fileID				= SWAP_BE32 (srcRec-&gt;fileID);
+                
+                srcRec-&gt;dataStartBlock		= SWAP_BE16 (srcRec-&gt;dataStartBlock);
+                srcRec-&gt;dataLogicalSize		= SWAP_BE32 (srcRec-&gt;dataLogicalSize);
+                srcRec-&gt;dataPhysicalSize	= SWAP_BE32 (srcRec-&gt;dataPhysicalSize);
+                
+                srcRec-&gt;rsrcStartBlock		= SWAP_BE16 (srcRec-&gt;rsrcStartBlock);
+                srcRec-&gt;rsrcLogicalSize		= SWAP_BE32 (srcRec-&gt;rsrcLogicalSize);
+                srcRec-&gt;rsrcPhysicalSize	= SWAP_BE32 (srcRec-&gt;rsrcPhysicalSize);
+                
+                srcRec-&gt;createDate			= SWAP_BE32 (srcRec-&gt;createDate);
+                srcRec-&gt;modifyDate			= SWAP_BE32 (srcRec-&gt;modifyDate);
+                srcRec-&gt;backupDate			= SWAP_BE32 (srcRec-&gt;backupDate);
+    
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;finderInfo */</span>
+    
+                srcRec-&gt;clumpSize			= SWAP_BE16 (srcRec-&gt;clumpSize);
+                
+                <span class="enscript-comment">/* Swap the two sets of extents as an array of six (three each) u_int16_t */</span>
+                <span class="enscript-keyword">for</span> (j = 0; j &lt; kHFSExtentDensity * 2; j++) {
+                    srcRec-&gt;dataExtents[j].startBlock	= SWAP_BE16 (srcRec-&gt;dataExtents[j].startBlock);
+                    srcRec-&gt;dataExtents[j].blockCount	= SWAP_BE16 (srcRec-&gt;dataExtents[j].blockCount);
+                }
+    
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;reserved */</span>
+                
+            } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((srcPtr[0] == kHFSFolderThreadRecord) ||
+                    (srcPtr[0] == kHFSFileThreadRecord)) {
+                HFSCatalogThread *srcRec = (HFSCatalogThread *)srcPtr;
+                
+                <span class="enscript-comment">/* Make sure there is room for parentID and name length */</span>
+                <span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *) &amp;srcRec-&gt;nodeName[1] &gt; nextRecord) {
+					<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+						panic(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog thread record #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					} <span class="enscript-keyword">else</span> {
+						printf(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog thread record #%d too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					}
+					<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+                }
+    
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;reserved array */</span>
+    
+                srcRec-&gt;parentID			= SWAP_BE32 (srcRec-&gt;parentID);
+    
+                <span class="enscript-comment">/* Don't swap srcRec-&gt;nodeName */</span>
+                
+    			<span class="enscript-comment">/* Make sure there is room for the name in the buffer */</span>
+                <span class="enscript-keyword">if</span> ((<span class="enscript-type">char</span> *) &amp;srcRec-&gt;nodeName[srcRec-&gt;nodeName[0]] &gt; nextRecord) {
+					<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+						panic(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog thread record #%d name too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					} <span class="enscript-keyword">else</span> {
+						printf(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: catalog thread record #%d name too big\n&quot;</span>, srcDesc-&gt;numRecords-i-1);
+					}
+					<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+                }
+            } <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig) {
+            		panic(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: unrecognized catalog record type (0x%04X; record #%d)\n&quot;</span>, srcPtr[0], srcDesc-&gt;numRecords-i-1);
+				} <span class="enscript-keyword">else</span> {
+            		printf(<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: unrecognized catalog record type (0x%04X; record #%d)\n&quot;</span>, srcPtr[0], srcDesc-&gt;numRecords-i-1);
+				}
+				<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;
+            }
+    
+            <span class="enscript-comment">/* We can swap the record type now that we're done using it */</span>
+            <span class="enscript-keyword">if</span> (direction == kSwapBTNodeHostToBig)
+            	srcPtr[0] = SWAP_BE16 (srcPtr[0]);
+        }
+        
+    } <span class="enscript-keyword">else</span> {
+        panic (<span class="enscript-string">&quot;hfs_swap_HFSBTInternalNode: fileID %u is not a system B-tree\n&quot;</span>, fileID);
+    }
+
+    <span class="enscript-keyword">return</span> (0);
+}
+#<span class="enscript-reference">endif</span>
+
+</pre>
+<hr />
+</body></html>

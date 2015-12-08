@@ -1,0 +1,782 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>xnu.py</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">xnu.py&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-keyword">import</span> sys, subprocess, os, re, time, getopt, shlex
+<span class="enscript-keyword">import</span> lldb
+<span class="enscript-keyword">from</span> functools <span class="enscript-keyword">import</span> wraps
+<span class="enscript-keyword">from</span> ctypes <span class="enscript-keyword">import</span> c_ulonglong as uint64_t
+<span class="enscript-keyword">from</span> ctypes <span class="enscript-keyword">import</span> c_void_p as voidptr_t
+<span class="enscript-keyword">import</span> code
+<span class="enscript-keyword">import</span> core
+<span class="enscript-keyword">from</span> core <span class="enscript-keyword">import</span> caching
+<span class="enscript-keyword">from</span> core.standard <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> core.configuration <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> core.kernelcore <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> utils <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> core.lazytarget <span class="enscript-keyword">import</span> *
+
+MODULE_NAME=__name__ 
+
+<span class="enscript-string">&quot;&quot;&quot; Kernel Debugging macros for lldb.
+    Please make sure you read the README COMPLETELY BEFORE reading anything below.
+    It is very critical that you read coding guidelines in Section E in README file. 
+&quot;&quot;&quot;</span>
+
+<span class="enscript-comment"># End Utility functions
+</span><span class="enscript-comment"># Debugging specific utility functions 
+</span>
+<span class="enscript-comment">#decorators. Not to be called directly.
+</span>
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">static_var</span>(var_name, initial_value):
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">_set_var</span>(obj):
+        setattr(obj, var_name, initial_value)
+        <span class="enscript-keyword">return</span> obj
+    <span class="enscript-keyword">return</span> _set_var
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">header</span>(initial_value):
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">_set_header</span>(obj):
+        setattr(obj, <span class="enscript-string">'header'</span>, initial_value)
+        <span class="enscript-keyword">return</span> obj
+    <span class="enscript-keyword">return</span> _set_header
+
+<span class="enscript-comment"># holds type declarations done by xnu. 
+</span><span class="enscript-comment">#DONOTTOUCHME: Exclusive use of lldb_type_summary only.
+</span>lldb_summary_definitions = {} 
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">lldb_type_summary</span>(types_list):
+    <span class="enscript-string">&quot;&quot;&quot; A function decorator to register a summary for a type in lldb. 
+        params: types_list - [] an array of types that you wish to register a summary callback function. (ex. ['task *', 'task_t'])
+        returns: Nothing. This is a decorator.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">_get_summary</span>(obj):
+        <span class="enscript-keyword">def</span> <span class="enscript-function-name">_internal_summary_function</span>(lldbval, internal_dict):
+            out_string= <span class="enscript-string">&quot;&quot;</span>
+            <span class="enscript-keyword">if</span> internal_dict != None <span class="enscript-keyword">and</span> len(obj.header) &gt; 0 :
+                out_string += <span class="enscript-string">&quot;\n&quot;</span> + obj.header +<span class="enscript-string">&quot;\n&quot;</span>
+            out_string += obj( core.value(lldbval) )
+            <span class="enscript-keyword">return</span> out_string
+        
+        myglobals = globals()
+        summary_function_name = <span class="enscript-string">&quot;LLDBSummary&quot;</span> + obj.__name__
+        myglobals[summary_function_name] = _internal_summary_function
+        summary_function = myglobals[summary_function_name]
+        summary_function.__doc__ = obj.__doc__
+        
+        <span class="enscript-keyword">global</span> lldb_summary_definitions
+        <span class="enscript-keyword">for</span> single_type <span class="enscript-keyword">in</span> types_list:
+            <span class="enscript-keyword">if</span> config[<span class="enscript-string">'showTypeSummary'</span>]:
+                <span class="enscript-keyword">if</span> single_type <span class="enscript-keyword">in</span> lldb_summary_definitions.keys():
+                    lldb.debugger.HandleCommand(<span class="enscript-string">&quot;type summary delete --category kernel \&quot;&quot;</span>+ single_type + <span class="enscript-string">&quot;\&quot;&quot;</span>)
+                lldb.debugger.HandleCommand(<span class="enscript-string">&quot;type summary add \&quot;&quot;</span>+ single_type +<span class="enscript-string">&quot;\&quot; --category kernel --python-function &quot;</span> + MODULE_NAME + <span class="enscript-string">&quot;.&quot;</span> + summary_function_name)
+            lldb_summary_definitions[single_type] = obj
+            
+        <span class="enscript-keyword">return</span> obj
+    <span class="enscript-keyword">return</span> _get_summary
+
+<span class="enscript-comment">#global cache of documentation for lldb commands exported by this module 
+</span><span class="enscript-comment">#DONOTTOUCHME: Exclusive use of lldb_command only.
+</span>lldb_command_documentation = {}
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">lldb_command</span>(cmd_name, option_string = <span class="enscript-string">''</span>):
+    <span class="enscript-string">&quot;&quot;&quot; A function decorator to define a command with namd 'cmd_name' in the lldb scope to call python function.
+        params: cmd_name - str : name of command to be set in lldb prompt.
+            option_string - str: getopt like option string. Only CAPITAL LETTER options allowed. 
+                                 see README on Customizing command options.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> option_string != option_string.upper():
+        <span class="enscript-keyword">raise</span> RuntimeError(<span class="enscript-string">&quot;Cannot setup command with lowercase option args. %s&quot;</span> % option_string)
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">_cmd</span>(obj):
+        <span class="enscript-keyword">def</span> <span class="enscript-function-name">_internal_command_function</span>(debugger, command, result, internal_dict):
+            <span class="enscript-keyword">global</span> config, lldb_run_command_state
+            stream = CommandOutput(result)
+            <span class="enscript-comment"># need to avoid printing on stdout if called from lldb_run_command.
+</span>            <span class="enscript-keyword">if</span> <span class="enscript-string">'active'</span> <span class="enscript-keyword">in</span> lldb_run_command_state <span class="enscript-keyword">and</span> lldb_run_command_state[<span class="enscript-string">'active'</span>]:
+                debuglog(<span class="enscript-string">'Running %s from lldb_run_command'</span> % command)
+            <span class="enscript-keyword">else</span>:
+                result.SetImmediateOutputFile(sys.__stdout__)
+
+            command_args = shlex.split(command)
+            lldb.debugger.HandleCommand(<span class="enscript-string">'type category disable kernel'</span> )
+            def_verbose_level = config[<span class="enscript-string">'verbosity'</span>]
+            
+            <span class="enscript-keyword">try</span>:
+                stream.setOptions(command_args, option_string)
+                <span class="enscript-keyword">if</span> stream.verbose_level != 0:
+                    config[<span class="enscript-string">'verbosity'</span>] +=  stream.verbose_level 
+                with RedirectStdStreams(stdout=stream) :
+                    <span class="enscript-keyword">if</span> option_string:
+                        obj(cmd_args=stream.target_cmd_args, cmd_options=stream.target_cmd_options)
+                    <span class="enscript-keyword">else</span>:
+                        obj(cmd_args=stream.target_cmd_args)
+            <span class="enscript-keyword">except</span> KeyboardInterrupt:
+                <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Execution interrupted by user&quot;</span>
+            <span class="enscript-keyword">except</span> ArgumentError as arg_error:
+                <span class="enscript-keyword">if</span> str(arg_error) != <span class="enscript-string">&quot;HELP&quot;</span>:
+                    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Argument Error: &quot;</span> + str(arg_error)
+                <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{0:s}:\n        {1:s}&quot;</span>.format(cmd_name, obj.__doc__.strip())
+                <span class="enscript-keyword">return</span> False
+            <span class="enscript-keyword">except</span> Exception as exc:
+                <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> config[<span class="enscript-string">'debug'</span>]:
+                    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;&quot;&quot;
+************ LLDB found an exception ************
+There has been an uncaught exception. A possible cause could be that remote connection has been disconnected.
+However, it is recommended that you report the exception to lldb/kernel debugging team about it.
+************ Please run 'xnudebug debug enable' to start collecting logs. ************
+                          &quot;&quot;&quot;</span>
+                <span class="enscript-keyword">raise</span>
+
+            <span class="enscript-keyword">if</span> config[<span class="enscript-string">'showTypeSummary'</span>]:
+                lldb.debugger.HandleCommand(<span class="enscript-string">'type category enable kernel'</span> )
+            
+            <span class="enscript-keyword">if</span> stream.pluginRequired :
+                plugin = LoadXNUPlugin(stream.pluginName)
+                <span class="enscript-keyword">if</span> plugin == None :
+                    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Could not load plugins.&quot;</span>+stream.pluginName
+                    <span class="enscript-keyword">return</span>
+                plugin.plugin_init(kern, config, lldb, kern.IsDebuggerConnected())
+                return_data = plugin.plugin_execute(cmd_name, result.GetOutput())
+                ProcessXNUPluginResult(return_data)
+                plugin.plugin_cleanup()
+            
+            <span class="enscript-comment">#restore the verbose level after command is complete
+</span>            config[<span class="enscript-string">'verbosity'</span>] = def_verbose_level
+            
+            <span class="enscript-keyword">return</span>
+
+        myglobals = globals()
+        command_function_name = obj.__name__+<span class="enscript-string">&quot;Command&quot;</span>
+        myglobals[command_function_name] =  _internal_command_function
+        command_function = myglobals[command_function_name]
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> obj.__doc__ :
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;ERROR: Cannot register command({:s}) without documentation&quot;</span>.format(cmd_name)
+            <span class="enscript-keyword">return</span> obj
+        command_function.__doc__ = obj.__doc__
+        <span class="enscript-keyword">global</span> lldb_command_documentation
+        <span class="enscript-keyword">if</span> cmd_name <span class="enscript-keyword">in</span> lldb_command_documentation:
+            lldb.debugger.HandleCommand(<span class="enscript-string">&quot;command script delete &quot;</span>+cmd_name)
+        lldb_command_documentation[cmd_name] = (obj.__name__, obj.__doc__.lstrip(), option_string)
+        lldb.debugger.HandleCommand(<span class="enscript-string">&quot;command script add -f &quot;</span> + MODULE_NAME + <span class="enscript-string">&quot;.&quot;</span> + command_function_name + <span class="enscript-string">&quot; &quot;</span> + cmd_name)
+        <span class="enscript-keyword">return</span> obj
+    <span class="enscript-keyword">return</span> _cmd
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">lldb_alias</span>(alias_name, cmd_line):
+    <span class="enscript-string">&quot;&quot;&quot; define an alias in the lldb command line. 
+        A programatic way of registering an alias. This basically does
+        (lldb)command alias alias_name &quot;cmd_line&quot;
+        ex. 
+        lldb_alias('readphys16', 'readphys 16')
+    &quot;&quot;&quot;</span>
+    alias_name = alias_name.strip()
+    cmd_line = cmd_line.strip()
+    lldb.debugger.HandleCommand(<span class="enscript-string">&quot;command alias &quot;</span> + alias_name + <span class="enscript-string">&quot; &quot;</span>+ cmd_line)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">SetupLLDBTypeSummaries</span>(reset=False):
+    <span class="enscript-keyword">global</span> lldb_summary_definitions, MODULE_NAME
+    <span class="enscript-keyword">if</span> reset == True:
+            lldb.debugger.HandleCommand(<span class="enscript-string">&quot;type category delete  kernel &quot;</span>)
+    <span class="enscript-keyword">for</span> single_type <span class="enscript-keyword">in</span> lldb_summary_definitions.keys():
+        summary_function = lldb_summary_definitions[single_type]
+        lldb_cmd = <span class="enscript-string">&quot;type summary add \&quot;&quot;</span>+ single_type +<span class="enscript-string">&quot;\&quot; --category kernel --python-function &quot;</span> + MODULE_NAME + <span class="enscript-string">&quot;.LLDBSummary&quot;</span> + summary_function.__name__
+        debuglog(lldb_cmd)
+        lldb.debugger.HandleCommand(lldb_cmd)
+    <span class="enscript-keyword">if</span> config[<span class="enscript-string">'showTypeSummary'</span>]:
+            lldb.debugger.HandleCommand(<span class="enscript-string">&quot;type category enable  kernel&quot;</span>)
+    <span class="enscript-keyword">else</span>:
+            lldb.debugger.HandleCommand(<span class="enscript-string">&quot;type category disable kernel&quot;</span>)
+
+    <span class="enscript-keyword">return</span>
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">LoadXNUPlugin</span>(name):
+    <span class="enscript-string">&quot;&quot;&quot; Try to load a plugin from the plugins directory. 
+    &quot;&quot;&quot;</span>
+    retval = None
+    name=name.strip()
+    <span class="enscript-keyword">try</span>:
+        module_obj = __import__(<span class="enscript-string">'plugins.'</span>+name, globals(), locals(), [], -1)
+        module_obj = module_obj.__dict__[name]
+        defs = dir(module_obj)
+        <span class="enscript-keyword">if</span> <span class="enscript-string">'plugin_init'</span> <span class="enscript-keyword">in</span> defs <span class="enscript-keyword">and</span> <span class="enscript-string">'plugin_execute'</span> <span class="enscript-keyword">in</span> defs <span class="enscript-keyword">and</span> <span class="enscript-string">'plugin_cleanup'</span> <span class="enscript-keyword">in</span> defs:
+            retval = module_obj
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Plugin is not correctly implemented. Please read documentation on implementing plugins&quot;</span>
+    <span class="enscript-keyword">except</span>:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;plugin not found :&quot;</span>+name
+         
+    <span class="enscript-keyword">return</span> retval
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ProcessXNUPluginResult</span>(result_data):
+    <span class="enscript-string">&quot;&quot;&quot; Look at the returned data from plugin and see if anymore actions are required or not
+        params: result_data - list of format (status, out_string, more_commands)
+    &quot;&quot;&quot;</span>
+    ret_status = result_data[0]
+    ret_string = result_data[1]
+    ret_commands = result_data[2]
+    
+    <span class="enscript-keyword">if</span> ret_status == False:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Plugin failed: &quot;</span> + ret_string
+        <span class="enscript-keyword">return</span>
+    <span class="enscript-keyword">print</span> ret_string
+    <span class="enscript-keyword">if</span> len(ret_commands) &gt;= 0:
+        <span class="enscript-keyword">for</span> cmd <span class="enscript-keyword">in</span> ret_commands:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Running command on behalf of plugin:&quot;</span> + cmd
+            lldb.debugger.HandleCommand(cmd)
+    <span class="enscript-keyword">return</span>
+
+<span class="enscript-comment"># holds tests registered with xnu.
+</span><span class="enscript-comment">#DONOTTOUCHME: Exclusive use of xnudebug_test only
+</span>lldb_command_tests = {}
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">xnudebug_test</span>(test_name):
+    <span class="enscript-string">&quot;&quot;&quot; A function decoratore to register a test with the framework. Each test is supposed to be of format 
+        def Test&lt;name&gt;(kernel_target, config, lldb_obj, isConnected )
+        
+        NOTE: The testname should start with &quot;Test&quot; else exception will be raised.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">_test</span>(obj):
+        <span class="enscript-keyword">global</span> lldb_command_tests
+        <span class="enscript-keyword">if</span> obj.__name__.find(<span class="enscript-string">&quot;Test&quot;</span>) != 0 :
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Test name &quot;</span>, obj.__name__ , <span class="enscript-string">&quot; should start with Test&quot;</span> 
+            <span class="enscript-keyword">raise</span> ValueError
+        lldb_command_tests[test_name] = (test_name, obj.__name__, obj, obj.__doc__)
+        <span class="enscript-keyword">return</span> obj
+    <span class="enscript-keyword">return</span> _test
+
+
+<span class="enscript-comment"># End Debugging specific utility functions
+</span><span class="enscript-comment"># Kernel Debugging specific classes and accessor methods 
+</span>
+<span class="enscript-comment"># global access object for target kernel
+</span>
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetObjectAtIndexFromArray</span>(array_base, index):
+    <span class="enscript-string">&quot;&quot;&quot; Subscript indexing for arrays that are represented in C as pointers.
+        for ex. int *arr = malloc(20*sizeof(int));
+        now to get 3rd int from 'arr' you'd do 
+        arr[2] in C
+        GetObjectAtIndexFromArray(arr_val,2)
+        params:
+            array_base : core.value - representing a pointer type (ex. base of type 'ipc_entry *')
+            index : int - 0 based index into the array
+        returns:
+            core.value : core.value of the same type as array_base_val but pointing to index'th element
+    &quot;&quot;&quot;</span>
+    array_base_val = array_base.GetSBValue()
+    base_address = array_base_val.GetValueAsUnsigned()
+    size = array_base_val.GetType().GetPointeeType().GetByteSize()
+    obj_address = base_address + (index * size)
+    obj = kern.GetValueFromAddress(obj_address, array_base_val.GetType().GetName())
+    <span class="enscript-keyword">return</span> Cast(obj, array_base_val.GetType())
+
+
+kern = None
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetLLDBThreadForKernelThread</span>(thread_obj):
+    <span class="enscript-string">&quot;&quot;&quot; Get a reference to lldb.SBThread representation for kernel thread.
+        params:
+            thread_obj : core.cvalue - thread object of type thread_t 
+        returns 
+            lldb.SBThread - lldb thread object for getting backtrace/registers etc.
+    &quot;&quot;&quot;</span>
+    tid = unsigned(thread_obj.thread_id)
+    lldb_process = LazyTarget.GetProcess()
+    sbthread = lldb_process.GetThreadByID(tid)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> sbthread.IsValid():
+        <span class="enscript-comment"># in case lldb doesnt know about this thread, create one
+</span>        <span class="enscript-keyword">if</span> hasattr(lldb_process, <span class="enscript-string">&quot;CreateOSPluginThread&quot;</span>):
+            debuglog(<span class="enscript-string">&quot;creating os plugin thread on the fly for {0:d} 0x{1:x}&quot;</span>.format(tid, thread_obj))
+            lldb_process.CreateOSPluginThread(tid, unsigned(thread_obj))
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">raise</span> RuntimeError(<span class="enscript-string">&quot;LLDB process does not support CreateOSPluginThread.&quot;</span>)
+        sbthread = lldb_process.GetThreadByID(tid)
+
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> sbthread.IsValid():
+        <span class="enscript-keyword">raise</span> RuntimeError(<span class="enscript-string">&quot;Unable to find lldb thread for tid={0:d} thread = {1:#018x} (#16049947: have you put 'settings set target.load-script-from-symbol-file true' in your .lldbinit?)&quot;</span>.format(tid, thread_obj))
+
+    <span class="enscript-keyword">return</span> sbthread
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetThreadBackTrace</span>(thread_obj, verbosity = vHUMAN, prefix = <span class="enscript-string">&quot;&quot;</span>):
+    <span class="enscript-string">&quot;&quot;&quot; Get a string to display back trace for a thread.
+        params:
+            thread_obj - core.cvalue : a thread object of type thread_t.
+            verbosity - int : either of vHUMAN, vSCRIPT or vDETAIL to describe the verbosity of output
+            prefix - str : a string prefix added before the line for each frame.
+            isContinuation - bool : is thread a continuation?
+        returns:
+            str - a multi line string showing each frame in backtrace.
+    &quot;&quot;&quot;</span>
+    is_continuation = <span class="enscript-keyword">not</span> bool(unsigned(thread_obj.kernel_stack))
+    thread_val = GetLLDBThreadForKernelThread(thread_obj)
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    kernel_stack = unsigned(thread_obj.kernel_stack)
+    reserved_stack = unsigned(thread_obj.reserved_stack)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> is_continuation:
+        <span class="enscript-keyword">if</span> kernel_stack <span class="enscript-keyword">and</span> reserved_stack:
+            out_string += prefix + <span class="enscript-string">&quot;reserved_stack = {:#018x}\n&quot;</span>.format(reserved_stack)
+        out_string += prefix + <span class="enscript-string">&quot;kernel_stack = {:#018x}\n&quot;</span>.format(kernel_stack)
+    <span class="enscript-keyword">else</span>:
+        out_string += prefix + <span class="enscript-string">&quot;continuation =&quot;</span>
+    iteration = 0
+    last_frame_p = 0
+    <span class="enscript-keyword">for</span> frame <span class="enscript-keyword">in</span> thread_val.frames:
+        addr = frame.GetPCAddress()
+        load_addr = addr.GetLoadAddress(LazyTarget.GetTarget())
+        function = frame.GetFunction()
+        frame_p = frame.GetFP()
+        mod_name = frame.GetModule().GetFileSpec().GetFilename()
+
+        <span class="enscript-keyword">if</span> iteration == 0 <span class="enscript-keyword">and</span> <span class="enscript-keyword">not</span> is_continuation:
+            out_string += prefix +<span class="enscript-string">&quot;stacktop = {:#018x}\n&quot;</span>.format(frame_p)
+
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> function:
+            <span class="enscript-comment"># No debug info for 'function'.
+</span>            out_string += prefix 
+            <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> is_continuation:
+                out_string += <span class="enscript-string">&quot;{fp:#018x} &quot;</span>.format(fp = frame_p) 
+            
+            symbol = frame.GetSymbol()
+            <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> symbol:
+                symbol_name = <span class="enscript-string">&quot;None&quot;</span>
+                symbol_offset = load_addr
+                kmod_val = kern.globals.kmod
+                <span class="enscript-keyword">for</span> kval <span class="enscript-keyword">in</span> IterateLinkedList(kmod_val, <span class="enscript-string">'next'</span>):
+                    <span class="enscript-keyword">if</span> load_addr &gt;= unsigned(kval.address) <span class="enscript-keyword">and</span> \
+                        load_addr &lt;= (unsigned(kval.address) + unsigned(kval.size)):
+                        symbol_name = kval.name
+                        symbol_offset = load_addr - unsigned(kval.address)
+                        <span class="enscript-keyword">break</span>
+                out_string += <span class="enscript-string">&quot;{:#018x} {:s} + {:#x} \n&quot;</span>.format(load_addr, symbol_name, symbol_offset)
+            <span class="enscript-keyword">else</span>:
+                file_addr = addr.GetFileAddress()
+                start_addr = symbol.GetStartAddress().GetFileAddress()
+                symbol_name = symbol.GetName()
+                symbol_offset = file_addr - start_addr
+                out_string += <span class="enscript-string">&quot;{addr:#018x} {mod}`{symbol} + {offset:#x} \n&quot;</span>.format(addr=load_addr, 
+                    mod=mod_name, symbol=symbol_name, offset=symbol_offset)
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-comment"># Debug info is available for 'function'.
+</span>            func_name = frame.GetFunctionName()
+            file_name = frame.GetLineEntry().GetFileSpec().GetFilename()
+            line_num = frame.GetLineEntry().GetLine()
+            func_name = <span class="enscript-string">'%s [inlined]'</span> % func_name <span class="enscript-keyword">if</span> frame.IsInlined() <span class="enscript-keyword">else</span> func_name
+            <span class="enscript-keyword">if</span> is_continuation <span class="enscript-keyword">and</span> frame.IsInlined():
+                debuglog(<span class="enscript-string">&quot;Skipping frame for thread {:#018x} since its inlined&quot;</span>.format(thread_obj))
+                <span class="enscript-keyword">continue</span> 
+            out_string += prefix 
+            <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> is_continuation:
+                out_string += <span class="enscript-string">&quot;{fp:#018x} &quot;</span>.format(fp=frame_p)
+            out_string += <span class="enscript-string">&quot;{addr:#018x} {func}{args} \n&quot;</span>.format(addr=load_addr,
+                                    func=func_name,
+                                    file=file_name, line=line_num,
+                                    args=<span class="enscript-string">&quot;(&quot;</span> + (str(frame.arguments).replace(<span class="enscript-string">&quot;\n&quot;</span>, <span class="enscript-string">&quot;, &quot;</span>) <span class="enscript-keyword">if</span> len(frame.arguments) &gt; 0 <span class="enscript-keyword">else</span> <span class="enscript-string">&quot;void&quot;</span>) + <span class="enscript-string">&quot;)&quot;</span>)
+        iteration += 1 
+        <span class="enscript-keyword">if</span> frame_p:
+            last_frame_p = frame_p
+
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> is_continuation <span class="enscript-keyword">and</span> last_frame_p:
+        out_string += prefix + <span class="enscript-string">&quot;stackbottom = {:#018x}&quot;</span>.format(last_frame_p)
+    out_string = out_string.replace(<span class="enscript-string">&quot;variable not available&quot;</span>,<span class="enscript-string">&quot;&quot;</span>)
+    <span class="enscript-keyword">return</span> out_string
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetSourceInformationForAddress</span>(addr):
+    <span class="enscript-string">&quot;&quot;&quot; convert and address to function +offset information. 
+        params: addr - int address in the binary to be symbolicated
+        returns: string of format &quot;0xaddress: function + offset&quot; 
+    &quot;&quot;&quot;</span>
+    symbols = kern.SymbolicateFromAddress(addr)
+    format_string = <span class="enscript-string">&quot;{0:#018x} &lt;{1:s} + {2:#0x}&gt;&quot;</span>
+    offset = 0
+    function_name = <span class="enscript-string">&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> len(symbols) &gt; 0:
+        s = symbols[0]
+        function_name = str(s.name)
+        offset = addr - s.GetStartAddress().GetLoadAddress(LazyTarget.GetTarget())
+    <span class="enscript-keyword">if</span> function_name == <span class="enscript-string">&quot;&quot;</span>:
+        function_name = <span class="enscript-string">&quot;???&quot;</span>
+    <span class="enscript-keyword">return</span> format_string.format(addr, function_name, offset)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetFrameLocalVariable</span>(variable_name, frame_no=0):
+    <span class="enscript-string">&quot;&quot;&quot; Find a local variable by name
+        params:
+          variable_name: str - name of variable to search for
+        returns: 
+          core.value - if the variable is found.
+          None   - if not found or not Valid
+    &quot;&quot;&quot;</span>
+    retval = None
+    sbval = None
+    lldb_SBThread = LazyTarget.GetProcess().GetSelectedThread()
+    frame = lldb_SBThread.GetSelectedFrame()
+    <span class="enscript-keyword">if</span> frame_no :
+      frame = lldb_SBThread.GetFrameAtIndex(frame_no)
+    <span class="enscript-keyword">if</span> frame :
+      sbval = frame.FindVariable(variable_name)
+    <span class="enscript-keyword">if</span> sbval <span class="enscript-keyword">and</span> sbval.IsValid():
+      retval = core.cvalue.value(sbval)
+    <span class="enscript-keyword">return</span> retval
+
+<span class="enscript-comment"># Begin Macros for kernel debugging
+</span>
+@lldb_command(<span class="enscript-string">'kgmhelp'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">KernelDebugCommandsHelp</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Show a list of registered commands for kenel debugging.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> lldb_command_documentation
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;List of commands provided by &quot;</span> + MODULE_NAME + <span class="enscript-string">&quot; for kernel debugging.&quot;</span>
+    cmds = lldb_command_documentation.keys()
+    cmds.sort()
+    <span class="enscript-keyword">for</span> cmd <span class="enscript-keyword">in</span> cmds:
+        <span class="enscript-keyword">if</span> type(lldb_command_documentation[cmd][-1]) == type(<span class="enscript-string">&quot;&quot;</span>):
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot; {0: &lt;20s} - {1}&quot;</span>.format(cmd , lldb_command_documentation[cmd][1].split(<span class="enscript-string">&quot;\n&quot;</span>)[0].strip())
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot; {0: &lt;20s} - {1}&quot;</span>.format(cmd , <span class="enscript-string">&quot;No help string found.&quot;</span>)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;&quot;&quot;
+    Each of the functions listed here accept the following common options. 
+        -h  Show the help string for the command.
+        -o &lt;path/to/filename&gt;   The output of this command execution will be saved to file. Parser information or errors will 
+                                not be sent to file though. eg /tmp/output.txt
+        -s &lt;filter_string&gt;      The &quot;filter_string&quot; param is parsed to python regex expression and each line of output 
+                                will be printed/saved only if it matches the expression. 
+        -v [-v...]  Each additional -v will increase the verbosity of the command.
+        -p &lt;plugin_name&gt;        Send the output of the command to plugin. Please see README for usage of plugins.
+
+    Additionally, each command implementation may have more options. &quot;(lldb) help &lt;command&gt; &quot; will show these options.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">return</span> None
+
+
+@lldb_command(<span class="enscript-string">'showraw'</span>)    
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowRawCommand</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; A command to disable the kernel summaries and show data as seen by the system. 
+        This is useful when trying to read every field of a struct as compared to brief summary
+    &quot;&quot;&quot;</span>
+    command = <span class="enscript-string">&quot; &quot;</span>.join(cmd_args)
+    lldb.debugger.HandleCommand(<span class="enscript-string">'type category disable kernel'</span> )
+    lldb.debugger.HandleCommand( command )
+    lldb.debugger.HandleCommand(<span class="enscript-string">'type category enable kernel'</span> )
+ 
+
+@lldb_command(<span class="enscript-string">'xnudebug'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">XnuDebugCommand</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  command interface for operating on the xnu macros. Allowed commands are as follows
+        reload:
+            Reload a submodule from the xnu/tools/lldb directory. Do not include the &quot;.py&quot; suffix in modulename.
+            usage: xnudebug reload &lt;modulename&gt; (eg. memory, process, stats etc)
+        test:
+            Start running registered test with &lt;name&gt; from various modules.
+            usage: xnudebug test &lt;name&gt; (eg. test_memstats)
+        testall:
+            Go through all registered tests and run them
+        debug:
+            Toggle state of debug configuration flag.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> config
+    command_args = cmd_args
+    <span class="enscript-keyword">if</span> len(command_args) == 0:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;No command specified.&quot;</span>)
+    supported_subcommands = [<span class="enscript-string">'debug'</span>, <span class="enscript-string">'reload'</span>, <span class="enscript-string">'test'</span>, <span class="enscript-string">'testall'</span>]
+    subcommand = GetLongestMatchOption(command_args[0], supported_subcommands, True)
+
+    <span class="enscript-keyword">if</span> len(subcommand) == 0:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Subcommand (%s) is not a valid command. &quot;</span> % str(command_args[0]))
+    
+    subcommand = subcommand[0].lower()
+    <span class="enscript-keyword">if</span> subcommand == <span class="enscript-string">'debug'</span>:
+        <span class="enscript-keyword">if</span> command_args[-1].lower().find(<span class="enscript-string">'dis'</span>) &gt;=0 <span class="enscript-keyword">and</span> config[<span class="enscript-string">'debug'</span>]:
+            config[<span class="enscript-string">'debug'</span>] = False
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Disabled debug logging.&quot;</span>
+        <span class="enscript-keyword">elif</span> command_args[-1].lower().find(<span class="enscript-string">'dis'</span>) &lt; 0 <span class="enscript-keyword">and</span> <span class="enscript-keyword">not</span> config[<span class="enscript-string">'debug'</span>]:
+            config[<span class="enscript-string">'debug'</span>] = True
+            EnableLLDBAPILogging()  <span class="enscript-comment"># provided by utils.py
+</span>            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Enabled debug logging. \nPlease run 'xnudebug debug disable' to disable it again. &quot;</span>
+ 
+    <span class="enscript-keyword">if</span> subcommand == <span class="enscript-string">'reload'</span>:
+        module_name = command_args[-1]
+        <span class="enscript-keyword">if</span> module_name <span class="enscript-keyword">in</span> sys.modules:
+            reload(sys.modules[module_name])
+            <span class="enscript-keyword">print</span> module_name + <span class="enscript-string">&quot; is reloaded from &quot;</span> + sys.modules[module_name].__file__
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Unable to locate module named &quot;</span>, module_name
+    <span class="enscript-keyword">if</span> subcommand == <span class="enscript-string">'testall'</span>:
+        <span class="enscript-keyword">for</span> test_name <span class="enscript-keyword">in</span> lldb_command_tests.keys():
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;[BEGIN]&quot;</span>, test_name
+            res = lldb_command_tests[test_name][2](kern, config, lldb, True)
+            <span class="enscript-keyword">if</span> res:
+                <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;[PASSED] {:s}&quot;</span>.format(test_name)
+            <span class="enscript-keyword">else</span>:
+                <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;[FAILED] {:s}&quot;</span>.format(test_name)
+    <span class="enscript-keyword">if</span> subcommand == <span class="enscript-string">'test'</span>:
+        test_name = command_args[-1]
+        <span class="enscript-keyword">if</span> test_name <span class="enscript-keyword">in</span> lldb_command_tests:
+            test = lldb_command_tests[test_name]
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Running test {:s}&quot;</span>.format(test[0])
+            <span class="enscript-keyword">if</span> test[2](kern, config, lldb, True) : 
+                <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;[PASSED] {:s}&quot;</span>.format(test[0])
+            <span class="enscript-keyword">else</span>:
+                <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;[FAILED] {:s}&quot;</span>.format(test[0])
+            <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;&quot;</span>    
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No such test registered with name: {:s}&quot;</span>.format(test_name)
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;XNUDEBUG Available tests are:&quot;</span>
+            <span class="enscript-keyword">for</span> i <span class="enscript-keyword">in</span> lldb_command_tests.keys():
+                <span class="enscript-keyword">print</span> i
+        <span class="enscript-keyword">return</span> None
+    
+    <span class="enscript-keyword">return</span> False
+
+@lldb_command(<span class="enscript-string">'showversion'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowVersion</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Read the kernel version string from a fixed address in low
+        memory. Useful if you don't know which kernel is on the other end,
+        and need to find the appropriate symbols. Beware that if you've
+        loaded a symbol file, but aren't connected to a remote target,
+        the version string from the symbol file will be displayed instead.
+        This macro expects to be connected to the remote kernel to function
+        correctly.
+
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">print</span> kern.version
+
+
+@lldb_command(<span class="enscript-string">'paniclog'</span>, <span class="enscript-string">'S'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowPanicLog</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Display the paniclog information
+        usage: (lldb) paniclog
+        options:
+            -v : increase verbosity
+            -S : parse stackshot data (if panic stackshot available)
+    &quot;&quot;&quot;</span>
+    binary_data_bytes_to_skip = 0
+    <span class="enscript-keyword">if</span> hasattr(kern.globals, <span class="enscript-string">&quot;kc_panic_data&quot;</span>):
+        binary_data_bytes_to_skip = unsigned(kern.globals.kc_panic_data.kcd_addr_end) - unsigned(kern.globals.kc_panic_data.kcd_addr_begin)
+        <span class="enscript-keyword">if</span> binary_data_bytes_to_skip &gt; 0:
+            binary_data_bytes_to_skip += sizeof(<span class="enscript-string">&quot;struct kcdata_item&quot;</span>)
+        <span class="enscript-keyword">else</span>:
+            binary_data_bytes_to_skip = 0
+
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-S&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        <span class="enscript-keyword">if</span> hasattr(kern.globals, <span class="enscript-string">&quot;kc_panic_data&quot;</span>):
+            kc_data = unsigned(addressof(kern.globals.kc_panic_data))
+            ts = int(time.time())
+            ss_binfile = <span class="enscript-string">&quot;/tmp/panic_%d.bin&quot;</span> % ts
+            ss_ipsfile = <span class="enscript-string">&quot;/tmp/stacks_%d.ips&quot;</span> % ts
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;savekcdata  0x%x -O %s&quot;</span> % (kc_data, ss_binfile)
+            SaveKCDataToFile([<span class="enscript-string">&quot;0x%x&quot;</span> % kc_data], {<span class="enscript-string">&quot;-O&quot;</span>:ss_binfile})
+            self_path = str(__file__)
+            base_dir_name = self_path[:self_path.rfind(<span class="enscript-string">&quot;/&quot;</span>)]
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;python %s/kcdata.py %s -s %s&quot;</span> % (base_dir_name, ss_binfile, ss_ipsfile)
+            (c,so,se) = RunShellCommand(<span class="enscript-string">&quot;python %s/kcdata.py %s -s %s&quot;</span> % (base_dir_name, ss_binfile, ss_ipsfile))
+            <span class="enscript-keyword">if</span> c == 0:
+                <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Saved ips stackshot file as %s&quot;</span> % ss_ipsfile
+            <span class="enscript-keyword">else</span>:
+                <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Failed to run command: exit code: %d, SO: %s SE: %s&quot;</span> % (c, so, se)
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;kc_panic_data is unavailable for this kernel config.&quot;</span>
+
+    panic_buf = kern.globals.debug_buf_addr
+    panic_buf_start = unsigned(panic_buf)
+    panic_buf_end = unsigned(kern.globals.debug_buf_ptr)
+    num_bytes = panic_buf_end - panic_buf_start
+    <span class="enscript-keyword">if</span> num_bytes == 0 :
+        <span class="enscript-keyword">return</span>
+    out_str = <span class="enscript-string">&quot;&quot;</span>
+    warn_str = <span class="enscript-string">&quot;&quot;</span>
+    num_print_bytes = 0
+    in_binary_data_region = False
+    pos = 0
+    <span class="enscript-keyword">while</span> pos &lt; num_bytes:
+        p_char = str(panic_buf[pos])
+        out_str += p_char
+        <span class="enscript-keyword">if</span> p_char == <span class="enscript-string">'\n'</span>:
+            <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> in_binary_data_region:
+                num_print_bytes += 1
+                <span class="enscript-keyword">print</span> out_str
+            <span class="enscript-keyword">if</span> (out_str.find(<span class="enscript-string">&quot;Data: BEGIN&gt;&gt;&quot;</span>) &gt;= 0):
+                in_binary_data_region = True
+                pos += binary_data_bytes_to_skip - 1
+            <span class="enscript-keyword">if</span> (out_str.find(<span class="enscript-string">&quot;&lt;&lt;END&quot;</span>) &gt;= 0):
+                in_binary_data_region = False
+            out_str = <span class="enscript-string">&quot;&quot;</span>
+        <span class="enscript-keyword">if</span> num_print_bytes &gt; 4096 <span class="enscript-keyword">and</span> config[<span class="enscript-string">'verbosity'</span>] == vHUMAN:
+            warn_str = <span class="enscript-string">&quot;LLDBMacro Warning: The paniclog is too large. Trimming to 4096 bytes.&quot;</span>
+            warn_str += <span class="enscript-string">&quot; If you wish to see entire log please use '-v' argument.&quot;</span>
+            <span class="enscript-keyword">break</span>
+        pos += 1
+
+    <span class="enscript-keyword">if</span> warn_str:
+        <span class="enscript-keyword">print</span> warn_str
+
+    <span class="enscript-keyword">return</span>
+
+@lldb_command(<span class="enscript-string">'showbootargs'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowBootArgs</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Display boot arguments passed to the target kernel
+    &quot;&quot;&quot;</span>
+    bootargs = Cast(kern.GetGlobalVariable(<span class="enscript-string">'PE_state'</span>).bootArgs, <span class="enscript-string">'boot_args *'</span>)
+    bootargs_cmd = bootargs.CommandLine
+    <span class="enscript-keyword">print</span> str(bootargs_cmd)
+
+@static_var(<span class="enscript-string">&quot;last_process_uniq_id&quot;</span>, 1)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetDebuggerStopIDValue</span>():
+    <span class="enscript-string">&quot;&quot;&quot; Create a unique session identifier. 
+        returns:
+            int - a unique number identified by processid and stopid.
+    &quot;&quot;&quot;</span>
+    stop_id = 0
+    process_obj = LazyTarget.GetProcess()
+    <span class="enscript-keyword">if</span> hasattr(process_obj, <span class="enscript-string">&quot;GetStopID&quot;</span>):
+        stop_id = process_obj.GetStopID()
+    proc_uniq_id = 0
+    <span class="enscript-keyword">if</span> hasattr(process_obj, <span class="enscript-string">'GetUniqueID'</span>):
+        proc_uniq_id = process_obj.GetUniqueID()
+        <span class="enscript-comment">#FIXME &lt;rdar://problem/13034329&gt; forces us to do this twice
+</span>        proc_uniq_id = process_obj.GetUniqueID()
+    <span class="enscript-keyword">else</span>:
+        GetDebuggerStopIDValue.last_process_uniq_id +=1
+        proc_uniq_id = GetDebuggerStopIDValue.last_process_uniq_id + 1
+
+    stop_id_str = <span class="enscript-string">&quot;{:d}:{:d}&quot;</span>.format(proc_uniq_id, stop_id)        
+    <span class="enscript-keyword">return</span> hash(stop_id_str)
+
+<span class="enscript-comment"># The initialization code to add your commands
+</span>_xnu_framework_init = False
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">__lldb_init_module</span>(debugger, internal_dict):
+    <span class="enscript-keyword">global</span> kern, lldb_command_documentation, config, _xnu_framework_init
+    <span class="enscript-keyword">if</span> _xnu_framework_init:
+        <span class="enscript-keyword">return</span>
+    _xnu_framework_init = True
+    caching._GetDebuggerSessionID = GetDebuggerStopIDValue
+    debugger.HandleCommand(<span class="enscript-string">'type summary add --regex --summary-string &quot;${var%s}&quot; -C yes -p -v &quot;char \[[0-9]*\]&quot;'</span>)
+    debugger.HandleCommand(<span class="enscript-string">'type format add --format hex -C yes uintptr_t'</span>)
+    kern = KernelTarget(debugger)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;xnu debug macros loaded successfully. Run showlldbtypesummaries to enable type summaries.&quot;</span>
+
+__lldb_init_module(lldb.debugger, None)
+
+@lldb_command(<span class="enscript-string">&quot;showlldbtypesummaries&quot;</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowLLDBTypeSummaries</span>(cmd_args=[]):
+    <span class="enscript-string">&quot;&quot;&quot; Enable/Disable kernel type summaries. Default is disabled.
+        Usage: showlldbtypesummaries [enable|disable]
+        default is enable
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> config
+    action = <span class="enscript-string">&quot;enable&quot;</span>
+    trailer_msg = <span class="enscript-string">''</span>
+    <span class="enscript-keyword">if</span> len(cmd_args) &gt; 0 <span class="enscript-keyword">and</span> cmd_args[0].lower().find(<span class="enscript-string">'disable'</span>) &gt;=0:
+        action = <span class="enscript-string">&quot;disable&quot;</span>
+        config[<span class="enscript-string">'showTypeSummary'</span>] = False
+        trailer_msg = <span class="enscript-string">&quot;Please run 'showlldbtypesummaries enable' to enable the summary feature.&quot;</span>
+    <span class="enscript-keyword">else</span>:
+        config[<span class="enscript-string">'showTypeSummary'</span>] = True
+        SetupLLDBTypeSummaries(True)
+        trailer_msg = <span class="enscript-string">&quot;Please run 'showlldbtypesummaries disable' to disable the summary feature.&quot;</span>
+    lldb_run_command(<span class="enscript-string">&quot;type category &quot;</span>+ action +<span class="enscript-string">&quot; kernel&quot;</span>)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Successfully &quot;</span>+action+<span class="enscript-string">&quot;d the kernel type summaries. %s&quot;</span> % trailer_msg
+
+@lldb_command(<span class="enscript-string">'walkqueue_head'</span>, <span class="enscript-string">'S'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WalkQueueHead</span>(cmd_args=[], cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; walk a queue_head_t and list all members in it. Note this is for queue_head_t. refer to osfmk/kern/queue.h 
+        Option: -S - suppress summary output.
+        Usage: (lldb) walkqueue_head  &lt;queue_entry *&gt; &lt;struct type&gt; &lt;fieldname&gt;
+        ex:    (lldb) walkqueue_head  0x7fffff80 &quot;thread *&quot; &quot;task_threads&quot;
+        
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> lldb_summary_definitions
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;invalid arguments&quot;</span>)
+    <span class="enscript-keyword">if</span> len(cmd_args) != 3:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;insufficient arguments&quot;</span>)
+    queue_head = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'struct queue_entry *'</span>)
+    el_type = cmd_args[1]
+    field_name = cmd_args[2]
+    showsummary = False
+    <span class="enscript-keyword">if</span> el_type <span class="enscript-keyword">in</span> lldb_summary_definitions:
+        showsummary = True
+    <span class="enscript-keyword">if</span> <span class="enscript-string">'-S'</span> <span class="enscript-keyword">in</span> cmd_options:
+        showsummary = False
+
+    <span class="enscript-keyword">for</span> i <span class="enscript-keyword">in</span> IterateQueue(queue_head, el_type, field_name):
+        <span class="enscript-keyword">if</span> showsummary:
+            <span class="enscript-keyword">print</span> lldb_summary_definitions[el_type](i)
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{0: &lt;#020x}&quot;</span>.format(i)
+    
+
+
+@lldb_command(<span class="enscript-string">'walklist_entry'</span>, <span class="enscript-string">'S'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WalkList</span>(cmd_args=[], cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; iterate over a list as defined with LIST_ENTRY in bsd/sys/queue.h
+        params:
+            object addr  - value : address of object
+            element_type - str   : Type of the next element
+            field_name   - str   : Name of the field in next element's structure
+
+        Option: -S - suppress summary output.
+        Usage: (lldb) walklist_entry  &lt;obj with list_entry *&gt; &lt;struct type&gt; &lt;fieldname&gt;
+        ex:    (lldb) walklist_entry  0x7fffff80 &quot;struct proc *&quot; &quot;p_sibling&quot;
+        
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> lldb_summary_definitions
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;invalid arguments&quot;</span>)
+    <span class="enscript-keyword">if</span> len(cmd_args) != 3:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;insufficient arguments&quot;</span>)
+    el_type = cmd_args[1]
+    queue_head = kern.GetValueFromAddress(cmd_args[0], el_type)
+    field_name = cmd_args[2]
+
+    showsummary = False
+    <span class="enscript-keyword">if</span> el_type <span class="enscript-keyword">in</span> lldb_summary_definitions:
+        showsummary = True
+    <span class="enscript-keyword">if</span> <span class="enscript-string">'-S'</span> <span class="enscript-keyword">in</span> cmd_options:
+        showsummary = False
+    elt = queue_head
+    <span class="enscript-keyword">while</span> unsigned(elt) != 0:
+        i = elt
+        elt = elt.__getattr__(field_name).le_next
+        <span class="enscript-keyword">if</span> showsummary:
+            <span class="enscript-keyword">print</span> lldb_summary_definitions[el_type](i)
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{0: &lt;#020x}&quot;</span>.format(i)
+
+
+
+<span class="enscript-keyword">from</span> memory <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> process <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> ipc <span class="enscript-keyword">import</span> * 
+<span class="enscript-keyword">from</span> pmap <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> ioreg <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> mbufs <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> net <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> kdp <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> userspace <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> pci <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> misc <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> apic <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> scheduler <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> atm <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> structanalyze <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> ipcimportancedetail <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> bank <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> kauth <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> waitq <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> usertaskgdbserver <span class="enscript-keyword">import</span> *
+</pre>
+<hr />
+</body></html>

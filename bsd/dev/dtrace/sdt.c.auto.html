@@ -1,0 +1,633 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>sdt.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">sdt.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the &quot;License&quot;).
+ * You may not use this file except in compliance with the License.
+ *
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or <a href="http://www.opensolaris.org/os/licensing.">http://www.opensolaris.org/os/licensing.</a>
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets &quot;[]&quot; replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
+ * Use is subject to license terms.
+ */</span>
+
+<span class="enscript-comment">/* #pragma ident	&quot;@(#)sdt.c	1.9	08/07/01 SMI&quot; */</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_KERNEL</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_KERNEL</span> <span class="enscript-comment">/* Solaris vs. Darwin */</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/devfs/devfs.h&gt;</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_impl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_glue.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sdt_impl.h&gt;</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> dtrace_kernel_symbol_mode;
+
+<span class="enscript-comment">/* #include &lt;machine/trap.h */</span>
+<span class="enscript-type">struct</span> savearea_t; <span class="enscript-comment">/* Used anonymously */</span>
+
+#<span class="enscript-reference">if</span>   <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">kern_return_t</span> (*perfCallback)(<span class="enscript-type">int</span>, <span class="enscript-type">struct</span> savearea_t *, uintptr_t *, <span class="enscript-type">int</span>);
+<span class="enscript-type">extern</span> perfCallback tempDTraceTrapHook;
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">fbt_perfCallback</span>(<span class="enscript-type">int</span>, <span class="enscript-type">struct</span> savearea_t *, uintptr_t *, <span class="enscript-type">int</span>);
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SDT_PATCHVAL</span>	0xf0
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SDT_AFRAMES</span>		6
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">Unknown</span> <span class="enscript-variable-name">architecture</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SDT_PROBETAB_SIZE</span>	0x1000		<span class="enscript-comment">/* 4k entries -- 16K total */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DTRACE_PROBE_PREFIX</span> <span class="enscript-string">&quot;_dtrace_probe$&quot;</span>
+
+<span class="enscript-type">static</span> dev_info_t		*sdt_devi;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			sdt_verbose = 0;
+sdt_probe_t		**sdt_probetab;
+<span class="enscript-type">int</span>			sdt_probetab_size;
+<span class="enscript-type">int</span>			sdt_probetab_mask;
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">__sdt_provide_module</span>(<span class="enscript-type">void</span> *arg, <span class="enscript-type">struct</span> modctl *ctl)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>)
+	<span class="enscript-type">struct</span> module *mp = (<span class="enscript-type">struct</span> module *)ctl-&gt;mod_address;
+	<span class="enscript-type">char</span> *modname = ctl-&gt;mod_modname;
+	sdt_probedesc_t *sdpd;
+	sdt_probe_t *sdp, *old;
+	sdt_provider_t *prov;
+	<span class="enscript-type">int</span> len;
+
+	<span class="enscript-comment">/*
+	 * One for all, and all for one:  if we haven't yet registered all of
+	 * our providers, we'll refuse to provide anything.
+	 */</span>
+	<span class="enscript-keyword">for</span> (prov = sdt_providers; prov-&gt;sdtp_name != NULL; prov++) {
+		<span class="enscript-keyword">if</span> (prov-&gt;sdtp_id == DTRACE_PROVNONE)
+			<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (!mp || mp-&gt;sdt_nprobes != 0 || (sdpd = mp-&gt;sdt_probes) == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">for</span> (sdpd = mp-&gt;sdt_probes; sdpd != NULL; sdpd = sdpd-&gt;sdpd_next) {
+	    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name = sdpd-&gt;sdpd_name, *func;
+	    <span class="enscript-type">char</span> *nname;
+		<span class="enscript-type">int</span> i, j;
+		dtrace_id_t id;
+
+		<span class="enscript-keyword">for</span> (prov = sdt_providers; prov-&gt;sdtp_prefix != NULL; prov++) {
+			<span class="enscript-type">const</span> <span class="enscript-type">char</span> *prefpart, *prefix = prov-&gt;sdtp_prefix;
+
+			<span class="enscript-keyword">if</span> ((prefpart = strstr(name, prefix))) {
+				name = prefpart + strlen(prefix);
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+
+		nname = kmem_alloc(len = strlen(name) + 1, KM_SLEEP);
+
+		<span class="enscript-keyword">for</span> (i = 0, j = 0; name[j] != <span class="enscript-string">'\0'</span>; i++) {
+			<span class="enscript-keyword">if</span> (name[j] == <span class="enscript-string">'_'</span> &amp;&amp; name[j + 1] == <span class="enscript-string">'_'</span>) {
+				nname[i] = <span class="enscript-string">'-'</span>;
+				j += 2;
+			} <span class="enscript-keyword">else</span> {
+				nname[i] = name[j++];
+			}
+		}
+
+		nname[i] = <span class="enscript-string">'\0'</span>;
+
+		sdp = kmem_zalloc(<span class="enscript-keyword">sizeof</span> (sdt_probe_t), KM_SLEEP);
+		sdp-&gt;sdp_loadcnt = ctl-&gt;mod_loadcnt;
+		sdp-&gt;sdp_ctl = ctl;
+		sdp-&gt;sdp_name = nname;
+		sdp-&gt;sdp_namelen = len;
+		sdp-&gt;sdp_provider = prov;
+
+		func = sdpd-&gt;sdpd_func;
+
+		<span class="enscript-keyword">if</span> (func == NULL)
+			func = <span class="enscript-string">&quot;&lt;unknown&gt;&quot;</span>;
+
+		<span class="enscript-comment">/*
+		 * We have our provider.  Now create the probe.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((id = dtrace_probe_lookup(prov-&gt;sdtp_id, modname,
+		    func, nname)) != DTRACE_IDNONE) {
+			old = dtrace_probe_arg(prov-&gt;sdtp_id, id);
+			ASSERT(old != NULL);
+
+			sdp-&gt;sdp_next = old-&gt;sdp_next;
+			sdp-&gt;sdp_id = id;
+			old-&gt;sdp_next = sdp;
+		} <span class="enscript-keyword">else</span> {
+			sdp-&gt;sdp_id = dtrace_probe_create(prov-&gt;sdtp_id,
+			    modname, func, nname, SDT_AFRAMES, sdp);
+
+			mp-&gt;sdt_nprobes++;
+		}
+
+#<span class="enscript-reference">if</span> 0		
+		printf (<span class="enscript-string">&quot;__sdt_provide_module:  sdpd=0x%p  sdp=0x%p  name=%s, id=%d\n&quot;</span>, sdpd, sdp, nname, sdp-&gt;sdp_id);
+#<span class="enscript-reference">endif</span>		
+
+		sdp-&gt;sdp_hashnext =
+		    sdt_probetab[SDT_ADDR2NDX(sdpd-&gt;sdpd_offset)];
+		sdt_probetab[SDT_ADDR2NDX(sdpd-&gt;sdpd_offset)] = sdp;
+
+		sdp-&gt;sdp_patchval = SDT_PATCHVAL;
+		sdp-&gt;sdp_patchpoint = (sdt_instr_t *)sdpd-&gt;sdpd_offset;
+		sdp-&gt;sdp_savedval = *sdp-&gt;sdp_patchpoint;
+	}
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sdt_destroy</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>,<span class="enscript-variable-name">id</span>)
+	sdt_probe_t *sdp = parg, *old, *last, *hash;
+	<span class="enscript-type">int</span> ndx;
+
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__APPLE__</span>)
+	<span class="enscript-comment">/*
+	 * APPLE NOTE:  sdt probes for kexts not yet implemented
+	 */</span>
+	<span class="enscript-type">struct</span> modctl *ctl = sdp-&gt;sdp_ctl;
+
+	<span class="enscript-keyword">if</span> (ctl != NULL &amp;&amp; ctl-&gt;mod_loadcnt == sdp-&gt;sdp_loadcnt) {
+		<span class="enscript-keyword">if</span> ((ctl-&gt;mod_loadcnt == sdp-&gt;sdp_loadcnt &amp;&amp;
+		    ctl-&gt;mod_loaded)) {
+			((<span class="enscript-type">struct</span> module *)(ctl-&gt;mod_mp))-&gt;sdt_nprobes--;
+		}
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE__ */</span>
+
+	<span class="enscript-keyword">while</span> (sdp != NULL) {
+		old = sdp;
+
+		<span class="enscript-comment">/*
+		 * Now we need to remove this probe from the sdt_probetab.
+		 */</span>
+		ndx = SDT_ADDR2NDX(sdp-&gt;sdp_patchpoint);
+		last = NULL;
+		hash = sdt_probetab[ndx];
+
+		<span class="enscript-keyword">while</span> (hash != sdp) {
+			ASSERT(hash != NULL);
+			last = hash;
+			hash = hash-&gt;sdp_hashnext;
+		}
+
+		<span class="enscript-keyword">if</span> (last != NULL) {
+			last-&gt;sdp_hashnext = sdp-&gt;sdp_hashnext;
+		} <span class="enscript-keyword">else</span> {
+			sdt_probetab[ndx] = sdp-&gt;sdp_hashnext;
+		}
+
+		kmem_free(sdp-&gt;sdp_name, sdp-&gt;sdp_namelen);
+		sdp = sdp-&gt;sdp_next;
+		kmem_free(old, <span class="enscript-keyword">sizeof</span> (sdt_probe_t));
+	}
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sdt_enable</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>,<span class="enscript-variable-name">id</span>)
+	sdt_probe_t *sdp = parg;
+	<span class="enscript-type">struct</span> modctl *ctl = sdp-&gt;sdp_ctl;
+
+	ctl-&gt;mod_nenabled++;
+
+	<span class="enscript-comment">/*
+	 * If this module has disappeared since we discovered its probes,
+	 * refuse to enable it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!ctl-&gt;mod_loaded) {
+		<span class="enscript-keyword">if</span> (sdt_verbose) {
+			cmn_err(CE_NOTE, <span class="enscript-string">&quot;sdt is failing for probe %s &quot;</span>
+			    <span class="enscript-string">&quot;(module %s unloaded)&quot;</span>,
+			    sdp-&gt;sdp_name, ctl-&gt;mod_modname);
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Now check that our modctl has the expected load count.  If it
+	 * doesn't, this module must have been unloaded and reloaded -- and
+	 * we're not going to touch it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ctl-&gt;mod_loadcnt != sdp-&gt;sdp_loadcnt) {
+		<span class="enscript-keyword">if</span> (sdt_verbose) {
+			cmn_err(CE_NOTE, <span class="enscript-string">&quot;sdt is failing for probe %s &quot;</span>
+			    <span class="enscript-string">&quot;(module %s reloaded)&quot;</span>,
+			    sdp-&gt;sdp_name, ctl-&gt;mod_modname);
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+	}
+
+	dtrace_casptr(&amp;tempDTraceTrapHook, NULL, fbt_perfCallback);
+	<span class="enscript-keyword">if</span> (tempDTraceTrapHook != (perfCallback)fbt_perfCallback) {
+		<span class="enscript-keyword">if</span> (sdt_verbose) {
+			cmn_err(CE_NOTE, <span class="enscript-string">&quot;sdt_enable is failing for probe %s &quot;</span>
+			    <span class="enscript-string">&quot;in module %s: tempDTraceTrapHook already occupied.&quot;</span>,
+			    sdp-&gt;sdp_name, ctl-&gt;mod_modname);
+		}
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">while</span> (sdp != NULL) {
+		(<span class="enscript-type">void</span>)ml_nofault_copy( (vm_offset_t)&amp;sdp-&gt;sdp_patchval, (vm_offset_t)sdp-&gt;sdp_patchpoint, 
+		                       (vm_size_t)<span class="enscript-keyword">sizeof</span>(sdp-&gt;sdp_patchval));
+		sdp = sdp-&gt;sdp_next;
+	}
+
+<span class="enscript-reference">err</span>:
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sdt_disable</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>,<span class="enscript-variable-name">id</span>)
+	sdt_probe_t *sdp = parg;
+	<span class="enscript-type">struct</span> modctl *ctl = sdp-&gt;sdp_ctl;
+
+	ctl-&gt;mod_nenabled--;
+
+	<span class="enscript-keyword">if</span> (!ctl-&gt;mod_loaded || ctl-&gt;mod_loadcnt != sdp-&gt;sdp_loadcnt)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+	<span class="enscript-keyword">while</span> (sdp != NULL) {
+		(<span class="enscript-type">void</span>)ml_nofault_copy( (vm_offset_t)&amp;sdp-&gt;sdp_savedval, (vm_offset_t)sdp-&gt;sdp_patchpoint, 
+		                       (vm_size_t)<span class="enscript-keyword">sizeof</span>(sdp-&gt;sdp_savedval));
+		sdp = sdp-&gt;sdp_next;
+	}
+
+<span class="enscript-reference">err</span>:
+	;
+}
+
+<span class="enscript-type">static</span> dtrace_pops_t sdt_pops = {
+	NULL,
+	sdt_provide_module,
+	sdt_enable,
+	sdt_disable,
+	NULL,
+	NULL,
+	sdt_getargdesc,
+	sdt_getarg,
+	NULL,
+	sdt_destroy
+};
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sdt_attach</span>(dev_info_t *devi, ddi_attach_cmd_t cmd)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">cmd</span>)
+	sdt_provider_t *prov;
+
+	<span class="enscript-keyword">if</span> (ddi_create_minor_node(devi, <span class="enscript-string">&quot;sdt&quot;</span>, S_IFCHR,
+	    0, DDI_PSEUDO, 0) == DDI_FAILURE) {
+		cmn_err(CE_NOTE, <span class="enscript-string">&quot;/dev/sdt couldn't create minor node&quot;</span>);
+		ddi_remove_minor_node(devi, NULL);
+		<span class="enscript-keyword">return</span> (DDI_FAILURE);
+	}
+
+	ddi_report_dev(devi);
+	sdt_devi = devi;
+
+	<span class="enscript-keyword">if</span> (sdt_probetab_size == 0)
+		sdt_probetab_size = SDT_PROBETAB_SIZE;
+
+	sdt_probetab_mask = sdt_probetab_size - 1;
+	sdt_probetab =
+	    kmem_zalloc(sdt_probetab_size * <span class="enscript-keyword">sizeof</span> (sdt_probe_t *), KM_SLEEP);
+	dtrace_invop_add(sdt_invop);
+
+	<span class="enscript-keyword">for</span> (prov = sdt_providers; prov-&gt;sdtp_name != NULL; prov++) {
+		<span class="enscript-keyword">if</span> (dtrace_register(prov-&gt;sdtp_name, prov-&gt;sdtp_attr,
+		    DTRACE_PRIV_KERNEL, NULL,
+		    &amp;sdt_pops, prov, &amp;prov-&gt;sdtp_id) != 0) {
+			cmn_err(CE_WARN, <span class="enscript-string">&quot;failed to register sdt provider %s&quot;</span>,
+			    prov-&gt;sdtp_name);
+		}
+	}
+
+	<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ * APPLE NOTE:  sdt_detach not implemented
+ */</span>
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__APPLE__</span>)
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sdt_detach</span>(dev_info_t *dip, ddi_detach_cmd_t cmd)
+{
+	sdt_provider_t *prov;
+
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DDI_DETACH</span>:
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DDI_SUSPEND</span>:
+		<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (DDI_FAILURE);
+	}
+
+	<span class="enscript-keyword">for</span> (prov = sdt_providers; prov-&gt;sdtp_name != NULL; prov++) {
+		<span class="enscript-keyword">if</span> (prov-&gt;sdtp_id != DTRACE_PROVNONE) {
+			<span class="enscript-keyword">if</span> (dtrace_unregister(prov-&gt;sdtp_id) != 0)
+				<span class="enscript-keyword">return</span> (DDI_FAILURE);
+
+			prov-&gt;sdtp_id = DTRACE_PROVNONE;
+		}
+	}
+
+	dtrace_invop_remove(sdt_invop);
+	kmem_free(sdt_probetab, sdt_probetab_size * <span class="enscript-keyword">sizeof</span> (sdt_probe_t *));
+
+	<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE__ */</span>
+
+d_open_t _sdt_open;
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">_sdt_open</span>(dev_t dev, <span class="enscript-type">int</span> flags, <span class="enscript-type">int</span> devtype, <span class="enscript-type">struct</span> proc *p)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">dev</span>,<span class="enscript-variable-name">flags</span>,<span class="enscript-variable-name">devtype</span>,<span class="enscript-variable-name">p</span>)
+	<span class="enscript-keyword">return</span> 0;
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SDT_MAJOR</span>  -24 <span class="enscript-comment">/* let the kernel pick the device number */</span>
+
+<span class="enscript-comment">/*
+ * A struct describing which functions will get invoked for certain
+ * actions.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> cdevsw sdt_cdevsw =
+{
+	_sdt_open,		<span class="enscript-comment">/* open */</span>
+	eno_opcl,			<span class="enscript-comment">/* close */</span>
+	eno_rdwrt,			<span class="enscript-comment">/* read */</span>
+	eno_rdwrt,			<span class="enscript-comment">/* write */</span>
+	eno_ioctl,			<span class="enscript-comment">/* ioctl */</span>
+	(stop_fcn_t *)nulldev, <span class="enscript-comment">/* stop */</span>
+	(reset_fcn_t *)nulldev, <span class="enscript-comment">/* reset */</span>
+	NULL,				<span class="enscript-comment">/* tty's */</span>
+	eno_select,			<span class="enscript-comment">/* select */</span>
+	eno_mmap,			<span class="enscript-comment">/* mmap */</span>
+	eno_strat,			<span class="enscript-comment">/* strategy */</span>
+	eno_getc,			<span class="enscript-comment">/* getc */</span>
+	eno_putc,			<span class="enscript-comment">/* putc */</span>
+	0					<span class="enscript-comment">/* type */</span>
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> gSDTInited = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> modctl g_sdt_kernctl;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> module g_sdt_mach_module;
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/nlist.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/kernel_mach_header.h&gt;</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">sdt_init</span>( <span class="enscript-type">void</span> )
+{
+	<span class="enscript-keyword">if</span> (0 == gSDTInited)
+	{
+		<span class="enscript-type">int</span> majdevno = cdevsw_add(SDT_MAJOR, &amp;sdt_cdevsw);
+		
+		<span class="enscript-keyword">if</span> (majdevno &lt; 0) {
+			printf(<span class="enscript-string">&quot;sdt_init: failed to allocate a major number!\n&quot;</span>);
+			gSDTInited = 0;
+			<span class="enscript-keyword">return</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (dtrace_fbt_probes_restricted()) {
+			<span class="enscript-keyword">return</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (MH_MAGIC_KERNEL != _mh_execute_header.magic) {
+			g_sdt_kernctl.mod_address = (vm_address_t)NULL;
+			g_sdt_kernctl.mod_size = 0;
+		} <span class="enscript-keyword">else</span> {
+			kernel_mach_header_t        *mh;
+			<span class="enscript-type">struct</span> load_command         *cmd;
+			kernel_segment_command_t    *orig_ts = NULL, *orig_le = NULL;
+			<span class="enscript-type">struct</span> symtab_command       *orig_st = NULL;
+			kernel_nlist_t		    *sym = NULL;
+			<span class="enscript-type">char</span>                        *strings;
+			<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> 		    i;
+			
+			g_sdt_mach_module.sdt_nprobes = 0;
+			g_sdt_mach_module.sdt_probes = NULL;
+			
+			g_sdt_kernctl.mod_address = (vm_address_t)&amp;g_sdt_mach_module;
+			g_sdt_kernctl.mod_size = 0;
+			strncpy((<span class="enscript-type">char</span> *)&amp;(g_sdt_kernctl.mod_modname), <span class="enscript-string">&quot;mach_kernel&quot;</span>, KMOD_MAX_NAME);
+			
+			g_sdt_kernctl.mod_next = NULL;
+			g_sdt_kernctl.mod_stale = NULL;
+			g_sdt_kernctl.mod_id = 0;
+			g_sdt_kernctl.mod_loadcnt = 1;
+			g_sdt_kernctl.mod_loaded = 1;
+			g_sdt_kernctl.mod_flags = 0;
+			g_sdt_kernctl.mod_nenabled = 0;
+			
+			mh = &amp;_mh_execute_header;
+			cmd = (<span class="enscript-type">struct</span> load_command*) &amp;mh[1];
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; mh-&gt;ncmds; i++) {
+				<span class="enscript-keyword">if</span> (cmd-&gt;cmd == LC_SEGMENT_KERNEL) {
+					kernel_segment_command_t *orig_sg = (kernel_segment_command_t *) cmd;
+					
+					<span class="enscript-keyword">if</span> (LIT_STRNEQL(orig_sg-&gt;segname, SEG_TEXT))
+						orig_ts = orig_sg;
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (LIT_STRNEQL(orig_sg-&gt;segname, SEG_LINKEDIT))
+						orig_le = orig_sg;
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (LIT_STRNEQL(orig_sg-&gt;segname, <span class="enscript-string">&quot;&quot;</span>))
+						orig_ts = orig_sg; <span class="enscript-comment">/* kexts have a single unnamed segment */</span>
+				}
+				<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cmd-&gt;cmd == LC_SYMTAB)
+					orig_st = (<span class="enscript-type">struct</span> symtab_command *) cmd;
+				
+				cmd = (<span class="enscript-type">struct</span> load_command *) ((uintptr_t) cmd + cmd-&gt;cmdsize);
+			}
+			
+			<span class="enscript-keyword">if</span> ((orig_ts == NULL) || (orig_st == NULL) || (orig_le == NULL))
+				<span class="enscript-keyword">return</span>;
+			
+			sym = (kernel_nlist_t *)(orig_le-&gt;vmaddr + orig_st-&gt;symoff - orig_le-&gt;fileoff);
+			strings = (<span class="enscript-type">char</span> *)(orig_le-&gt;vmaddr + orig_st-&gt;stroff - orig_le-&gt;fileoff);
+			
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; orig_st-&gt;nsyms; i++) {
+				uint8_t n_type = sym[i].n_type &amp; (N_TYPE | N_EXT);
+				<span class="enscript-type">char</span> *name = strings + sym[i].n_un.n_strx;
+				<span class="enscript-type">const</span> <span class="enscript-type">char</span> *prev_name;
+				<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> best;
+				<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> j;
+				
+				<span class="enscript-comment">/* Check that the symbol is a global and that it has a name. */</span>
+				<span class="enscript-keyword">if</span> (((N_SECT | N_EXT) != n_type &amp;&amp; (N_ABS | N_EXT) != n_type))
+					<span class="enscript-keyword">continue</span>;
+				
+				<span class="enscript-keyword">if</span> (0 == sym[i].n_un.n_strx) <span class="enscript-comment">/* iff a null, &quot;&quot;, name. */</span>
+					<span class="enscript-keyword">continue</span>;
+				
+				<span class="enscript-comment">/* Lop off omnipresent leading underscore. */</span>
+				<span class="enscript-keyword">if</span> (*name == <span class="enscript-string">'_'</span>)
+					name += 1;
+				
+				<span class="enscript-keyword">if</span> (strncmp(name, DTRACE_PROBE_PREFIX, <span class="enscript-keyword">sizeof</span>(DTRACE_PROBE_PREFIX) - 1) == 0) {
+					sdt_probedesc_t *sdpd = kmem_alloc(<span class="enscript-keyword">sizeof</span>(sdt_probedesc_t), KM_SLEEP);
+					<span class="enscript-type">int</span> len = strlen(name) + 1;
+					
+					sdpd-&gt;sdpd_name = kmem_alloc(len, KM_SLEEP);
+					strncpy(sdpd-&gt;sdpd_name, name, len); <span class="enscript-comment">/* NUL termination is ensured. */</span>
+					
+					prev_name = <span class="enscript-string">&quot;&lt;unknown&gt;&quot;</span>;
+					best = 0;
+					
+					<span class="enscript-comment">/*
+					 * Find the symbol immediately preceding the sdt probe site just discovered,
+					 * that symbol names the function containing the sdt probe.
+					 */</span>
+					<span class="enscript-keyword">for</span> (j = 0; j &lt; orig_st-&gt;nsyms; j++) {
+						uint8_t jn_type = sym[j].n_type &amp; (N_TYPE | N_EXT);
+						<span class="enscript-type">char</span> *jname = strings + sym[j].n_un.n_strx;
+						
+						<span class="enscript-keyword">if</span> (((N_SECT | N_EXT) != jn_type &amp;&amp; (N_ABS | N_EXT) != jn_type))
+							<span class="enscript-keyword">continue</span>;
+						
+						<span class="enscript-keyword">if</span> (0 == sym[j].n_un.n_strx) <span class="enscript-comment">/* iff a null, &quot;&quot;, name. */</span>
+							<span class="enscript-keyword">continue</span>;
+						
+						<span class="enscript-keyword">if</span> (*jname == <span class="enscript-string">'_'</span>)
+							jname += 1;
+						
+						<span class="enscript-keyword">if</span> (*(<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> *)sym[i].n_value &lt;= (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)sym[j].n_value)
+							<span class="enscript-keyword">continue</span>;
+						
+						<span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)sym[j].n_value &gt; best) {
+							best = (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)sym[j].n_value;
+							prev_name = jname;
+						}
+					}
+					
+					sdpd-&gt;sdpd_func = kmem_alloc((len = strlen(prev_name) + 1), KM_SLEEP);
+					strncpy(sdpd-&gt;sdpd_func, prev_name, len); <span class="enscript-comment">/* NUL termination is ensured. */</span>
+					
+					sdpd-&gt;sdpd_offset = *(<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> *)sym[i].n_value;
+
+#<span class="enscript-reference">if</span> 0
+					printf(<span class="enscript-string">&quot;sdt_init: sdpd_offset=0x%lx, n_value=0x%lx, name=%s\n&quot;</span>,
+					    sdpd-&gt;sdpd_offset,  *(<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> *)sym[i].n_value, name);
+#<span class="enscript-reference">endif</span>
+
+					sdpd-&gt;sdpd_next = g_sdt_mach_module.sdt_probes;
+					g_sdt_mach_module.sdt_probes = sdpd;
+				} <span class="enscript-keyword">else</span> {
+					prev_name = name;
+				}
+			}
+		}
+		
+		sdt_attach( (dev_info_t	*)(uintptr_t)majdevno, DDI_ATTACH );
+		
+		gSDTInited = 1;
+	} <span class="enscript-keyword">else</span>
+		panic(<span class="enscript-string">&quot;sdt_init: called twice!\n&quot;</span>);
+}
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">SDT_MAJOR</span>
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sdt_provide_module</span>(<span class="enscript-type">void</span> *arg, <span class="enscript-type">struct</span> modctl *ctl)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>)
+	ASSERT(ctl != NULL);
+	ASSERT(dtrace_kernel_symbol_mode != DTRACE_KERNEL_SYMBOLS_NEVER);
+	lck_mtx_assert(&amp;mod_lock, LCK_MTX_ASSERT_OWNED);
+	
+	<span class="enscript-keyword">if</span> (MOD_SDT_DONE(ctl))
+		<span class="enscript-keyword">return</span>;
+		
+	<span class="enscript-keyword">if</span> (MOD_IS_MACH_KERNEL(ctl)) {
+		__sdt_provide_module(arg, &amp;g_sdt_kernctl);
+		
+		sdt_probedesc_t *sdpd = g_sdt_mach_module.sdt_probes;
+		<span class="enscript-keyword">while</span> (sdpd) {
+			sdt_probedesc_t *this_sdpd = sdpd;
+			kmem_free((<span class="enscript-type">void</span> *)sdpd-&gt;sdpd_name, strlen(sdpd-&gt;sdpd_name) + 1);
+			kmem_free((<span class="enscript-type">void</span> *)sdpd-&gt;sdpd_func, strlen(sdpd-&gt;sdpd_func) + 1);
+			sdpd = sdpd-&gt;sdpd_next;
+			kmem_free((<span class="enscript-type">void</span> *)this_sdpd, <span class="enscript-keyword">sizeof</span>(sdt_probedesc_t));
+		}
+		g_sdt_mach_module.sdt_probes = NULL;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * APPLE NOTE:  sdt probes for kexts not yet implemented
+		 */</span>
+	}
+	
+	<span class="enscript-comment">/* Need to mark this module as completed */</span>
+	ctl-&gt;mod_flags |= MODCTL_SDT_PROBES_PROVIDED;
+}
+</pre>
+<hr />
+</body></html>

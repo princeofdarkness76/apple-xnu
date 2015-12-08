@@ -1,0 +1,922 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kern_malloc.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kern_malloc.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* Copyright (c) 1995, 1997 Apple Computer, Inc. All Rights Reserved */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1987, 1991, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)kern_malloc.c	8.4 (Berkeley) 5/20/95
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/necp.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/flow_divert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/event.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/eventvar.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ubc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/filedesc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/tty.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/quota.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/resourcevar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signalvar.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;hfs/hfs_cnode.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/specfs/specdev.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/rpcv2.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfsproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfsnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfsmount.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vfs/vfs_journal.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">kmeminit</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/* Strings corresponding to types of memory.
+ * Must be in synch with the #defines is sys/malloc.h 
+ * NOTE - the reason we pass null strings in some cases is to reduce of foot
+ * print as much as possible for systems where a tiny kernel is needed.
+ * todo - We should probably redsign this and use enums for our types and only
+ * include types needed for that configuration of the kernel.  This can't be
+ * done without some kind of kpi since several types are hardwired and exported
+ * (for example see types M_HFSMNT, M_UDFMNT, M_TEMP, etc in sys/malloc.h)
+ */</span>
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> *memname[] = {
+	<span class="enscript-string">&quot;free&quot;</span>,		<span class="enscript-comment">/* 0 M_FREE */</span>
+	<span class="enscript-string">&quot;mbuf&quot;</span>,		<span class="enscript-comment">/* 1 M_MBUF */</span>
+	<span class="enscript-string">&quot;devbuf&quot;</span>,	<span class="enscript-comment">/* 2 M_DEVBUF */</span> 
+	<span class="enscript-string">&quot;socket&quot;</span>,	<span class="enscript-comment">/* 3 M_SOCKET */</span> 
+	<span class="enscript-string">&quot;pcb&quot;</span>,		<span class="enscript-comment">/* 4 M_PCB */</span> 
+	<span class="enscript-string">&quot;routetbl&quot;</span>,	<span class="enscript-comment">/* 5 M_RTABLE */</span> 
+	<span class="enscript-string">&quot;hosttbl&quot;</span>,	<span class="enscript-comment">/* 6 M_HTABLE */</span> 
+	<span class="enscript-string">&quot;fragtbl&quot;</span>,	<span class="enscript-comment">/* 7 M_FTABLE */</span> 
+	<span class="enscript-string">&quot;zombie&quot;</span>,	<span class="enscript-comment">/* 8 M_ZOMBIE */</span> 
+	<span class="enscript-string">&quot;ifaddr&quot;</span>,	<span class="enscript-comment">/* 9 M_IFADDR */</span> 
+	<span class="enscript-string">&quot;soopts&quot;</span>,	<span class="enscript-comment">/* 10 M_SOOPTS */</span> 
+	<span class="enscript-string">&quot;soname&quot;</span>,	<span class="enscript-comment">/* 11 M_SONAME */</span> 
+	<span class="enscript-string">&quot;namei&quot;</span>,	<span class="enscript-comment">/* 12 M_NAMEI */</span> 
+	<span class="enscript-string">&quot;gprof&quot;</span>,	<span class="enscript-comment">/* 13 M_GPROF */</span> 
+	<span class="enscript-string">&quot;ioctlops&quot;</span>,	<span class="enscript-comment">/* 14 M_IOCTLOPS */</span> 
+	<span class="enscript-string">&quot;mapmem&quot;</span>,	<span class="enscript-comment">/* 15 M_MAPMEM */</span> 
+	<span class="enscript-string">&quot;cred&quot;</span>,		<span class="enscript-comment">/* 16 M_CRED */</span> 
+	<span class="enscript-string">&quot;pgrp&quot;</span>,		<span class="enscript-comment">/* 17 M_PGRP */</span> 
+	<span class="enscript-string">&quot;session&quot;</span>,	<span class="enscript-comment">/* 18 M_SESSION */</span> 
+	<span class="enscript-string">&quot;iov32&quot;</span>,	<span class="enscript-comment">/* 19 M_IOV32 */</span> 
+	<span class="enscript-string">&quot;mount&quot;</span>,	<span class="enscript-comment">/* 20 M_MOUNT */</span> 
+	<span class="enscript-string">&quot;fhandle&quot;</span>,		<span class="enscript-comment">/* 21 M_FHANDLE */</span> 
+#<span class="enscript-reference">if</span> (<span class="enscript-variable-name">NFSCLIENT</span> || <span class="enscript-variable-name">NFSSERVER</span>)
+	<span class="enscript-string">&quot;NFS req&quot;</span>,		<span class="enscript-comment">/* 22 M_NFSREQ */</span> 
+	<span class="enscript-string">&quot;NFS mount&quot;</span>,	<span class="enscript-comment">/* 23 M_NFSMNT */</span> 
+	<span class="enscript-string">&quot;NFS node&quot;</span>,		<span class="enscript-comment">/* 24 M_NFSNODE */</span> 
+#<span class="enscript-reference">else</span>
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 22 M_NFSREQ */</span> 
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 23 M_NFSMNT */</span> 
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 24 M_NFSNODE */</span> 
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-string">&quot;vnodes&quot;</span>,		<span class="enscript-comment">/* 25 M_VNODE */</span> 
+	<span class="enscript-string">&quot;namecache&quot;</span>,	<span class="enscript-comment">/* 26 M_CACHE */</span> 
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">QUOTA</span>
+	<span class="enscript-string">&quot;UFS quota&quot;</span>,	<span class="enscript-comment">/* 27 M_DQUOT */</span> 
+#<span class="enscript-reference">else</span>
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 27 M_DQUOT */</span> 
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-string">&quot;proc uuid policy&quot;</span>,		<span class="enscript-comment">/* 28 M_PROC_UUID_POLICY */</span> 
+#<span class="enscript-reference">if</span> (<span class="enscript-variable-name">SYSV_SEM</span> || <span class="enscript-variable-name">SYSV_MSG</span> || <span class="enscript-variable-name">SYSV_SHM</span>)
+	<span class="enscript-string">&quot;shm&quot;</span>,			<span class="enscript-comment">/* 29 M_SHM */</span> 
+#<span class="enscript-reference">else</span>
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 29 M_SHM */</span> 
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-string">&quot;plimit&quot;</span>,		<span class="enscript-comment">/* 30 M_VMMAP */</span> 
+	<span class="enscript-string">&quot;sigacts&quot;</span>,	<span class="enscript-comment">/* 31 M_VMMAPENT */</span> 
+	<span class="enscript-string">&quot;VM object&quot;</span>,	<span class="enscript-comment">/* 32 M_VMOBJ */</span> 
+	<span class="enscript-string">&quot;VM objhash&quot;</span>,	<span class="enscript-comment">/* 33 M_VMOBJHASH */</span> 
+	<span class="enscript-string">&quot;VM pmap&quot;</span>,		<span class="enscript-comment">/* 34 M_VMPMAP */</span> 
+	<span class="enscript-string">&quot;VM pvmap&quot;</span>,		<span class="enscript-comment">/* 35 M_VMPVENT */</span> 
+	<span class="enscript-string">&quot;VM pager&quot;</span>,		<span class="enscript-comment">/* 36 M_VMPAGER */</span> 
+	<span class="enscript-string">&quot;VM pgdata&quot;</span>,	<span class="enscript-comment">/* 37 M_VMPGDATA */</span> 
+	<span class="enscript-string">&quot;fileproc&quot;</span>,		<span class="enscript-comment">/* 38 M_FILEPROC */</span> 
+	<span class="enscript-string">&quot;file desc&quot;</span>,	<span class="enscript-comment">/* 39 M_FILEDESC */</span> 
+	<span class="enscript-string">&quot;lockf&quot;</span>,		<span class="enscript-comment">/* 40 M_LOCKF */</span> 
+	<span class="enscript-string">&quot;proc&quot;</span>,			<span class="enscript-comment">/* 41 M_PROC */</span> 
+	<span class="enscript-string">&quot;pstats&quot;</span>,		<span class="enscript-comment">/* 42 M_SUBPROC */</span> 
+	<span class="enscript-string">&quot;LFS segment&quot;</span>,	<span class="enscript-comment">/* 43 M_SEGMENT */</span> 
+	<span class="enscript-string">&quot;LFS node&quot;</span>,		<span class="enscript-comment">/* 44 M_LFSNODE */</span> 
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 45 M_FFSNODE */</span> 
+	<span class="enscript-string">&quot;MFS node&quot;</span>,		<span class="enscript-comment">/* 46 M_MFSNODE */</span> 
+	<span class="enscript-string">&quot;NQNFS Lease&quot;</span>,	<span class="enscript-comment">/* 47 M_NQLEASE */</span> 
+	<span class="enscript-string">&quot;NQNFS Host&quot;</span>,	<span class="enscript-comment">/* 48 M_NQMHOST */</span> 
+	<span class="enscript-string">&quot;Export Host&quot;</span>,	<span class="enscript-comment">/* 49 M_NETADDR */</span> 
+#<span class="enscript-reference">if</span> (<span class="enscript-variable-name">NFSCLIENT</span> || <span class="enscript-variable-name">NFSSERVER</span>)
+	<span class="enscript-string">&quot;NFS srvsock&quot;</span>,	<span class="enscript-comment">/* 50 M_NFSSVC */</span> 
+	<span class="enscript-string">&quot;NFS uid&quot;</span>,		<span class="enscript-comment">/* 51 M_NFSUID */</span> 
+	<span class="enscript-string">&quot;NFS daemon&quot;</span>,	<span class="enscript-comment">/* 52 M_NFSD */</span> 
+#<span class="enscript-reference">else</span>
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 50 M_NFSSVC */</span> 
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 51 M_NFSUID */</span> 
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 52 M_NFSD */</span> 
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-string">&quot;ip_moptions&quot;</span>,	<span class="enscript-comment">/* 53 M_IPMOPTS */</span> 
+	<span class="enscript-string">&quot;in_multi&quot;</span>,		<span class="enscript-comment">/* 54 M_IPMADDR */</span> 
+	<span class="enscript-string">&quot;ether_multi&quot;</span>,	<span class="enscript-comment">/* 55 M_IFMADDR */</span> 
+	<span class="enscript-string">&quot;mrt&quot;</span>,			<span class="enscript-comment">/* 56 M_MRTABLE */</span> 
+	<span class="enscript-string">&quot;&quot;</span>,		<span class="enscript-comment">/* 57 unused entry */</span> 
+	<span class="enscript-string">&quot;&quot;</span>,		<span class="enscript-comment">/* 58 unused entry */</span> 
+#<span class="enscript-reference">if</span> (<span class="enscript-variable-name">NFSCLIENT</span> || <span class="enscript-variable-name">NFSSERVER</span>)
+	<span class="enscript-string">&quot;NFSV3 srvdesc&quot;</span>,<span class="enscript-comment">/* 59 M_NFSRVDESC */</span> 
+	<span class="enscript-string">&quot;NFSV3 diroff&quot;</span>,	<span class="enscript-comment">/* 60 M_NFSDIROFF */</span> 
+	<span class="enscript-string">&quot;NFSV3 bigfh&quot;</span>,	<span class="enscript-comment">/* 61 M_NFSBIGFH */</span> 
+#<span class="enscript-reference">else</span>
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 59 M_NFSRVDESC */</span> 
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 60 M_NFSDIROFF */</span> 
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 61 M_NFSBIGFH */</span> 
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-string">&quot;MSDOSFS mount&quot;</span>,<span class="enscript-comment">/* 62 M_MSDOSFSMNT */</span> 
+	<span class="enscript-string">&quot;MSDOSFS fat&quot;</span>,	<span class="enscript-comment">/* 63 M_MSDOSFSFAT */</span> 
+	<span class="enscript-string">&quot;MSDOSFS node&quot;</span>,	<span class="enscript-comment">/* 64 M_MSDOSFSNODE */</span> 
+	<span class="enscript-string">&quot;ttys&quot;</span>,			<span class="enscript-comment">/* 65 M_TTYS */</span> 
+	<span class="enscript-string">&quot;exec&quot;</span>,			<span class="enscript-comment">/* 66 M_EXEC */</span> 
+	<span class="enscript-string">&quot;miscfs mount&quot;</span>,	<span class="enscript-comment">/* 67 M_MISCFSMNT */</span> 
+	<span class="enscript-string">&quot;miscfs node&quot;</span>,	<span class="enscript-comment">/* 68 M_MISCFSNODE */</span> 
+	<span class="enscript-string">&quot;adosfs mount&quot;</span>,	<span class="enscript-comment">/* 69 M_ADOSFSMNT */</span> 
+	<span class="enscript-string">&quot;adosfs node&quot;</span>,	<span class="enscript-comment">/* 70 M_ADOSFSNODE */</span> 
+	<span class="enscript-string">&quot;adosfs anode&quot;</span>,	<span class="enscript-comment">/* 71 M_ANODE */</span> 
+	<span class="enscript-string">&quot;buf hdrs&quot;</span>,		<span class="enscript-comment">/* 72 M_BUFHDR */</span> 
+	<span class="enscript-string">&quot;ofile tabl&quot;</span>,	<span class="enscript-comment">/* 73 M_OFILETABL */</span> 
+	<span class="enscript-string">&quot;mbuf clust&quot;</span>,	<span class="enscript-comment">/* 74 M_MCLUST */</span> 
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS</span>
+	<span class="enscript-string">&quot;HFS mount&quot;</span>,	<span class="enscript-comment">/* 75 M_HFSMNT */</span> 
+	<span class="enscript-string">&quot;HFS node&quot;</span>,		<span class="enscript-comment">/* 76 M_HFSNODE */</span> 
+	<span class="enscript-string">&quot;HFS fork&quot;</span>,		<span class="enscript-comment">/* 77 M_HFSFORK */</span> 
+#<span class="enscript-reference">else</span>
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 75 M_HFSMNT */</span> 
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 76 M_HFSNODE */</span> 
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 77 M_HFSFORK */</span> 
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-string">&quot;&quot;</span>, 	<span class="enscript-comment">/* 78 unused */</span>
+	<span class="enscript-string">&quot;&quot;</span>, 	<span class="enscript-comment">/* 79 unused */</span> 
+	<span class="enscript-string">&quot;temp&quot;</span>,			<span class="enscript-comment">/* 80 M_TEMP */</span> 
+	<span class="enscript-string">&quot;key mgmt&quot;</span>,		<span class="enscript-comment">/* 81 M_SECA */</span> 
+	<span class="enscript-string">&quot;DEVFS&quot;</span>,		<span class="enscript-comment">/* 82 M_DEVFS */</span> 
+	<span class="enscript-string">&quot;IpFw/IpAcct&quot;</span>,	<span class="enscript-comment">/* 83 M_IPFW */</span> 
+	<span class="enscript-string">&quot;UDF node&quot;</span>,		<span class="enscript-comment">/* 84 M_UDFNODE */</span> 
+	<span class="enscript-string">&quot;UDF mount&quot;</span>,	<span class="enscript-comment">/* 85 M_UDFMNT */</span> 
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-string">&quot;IPv6 NDP&quot;</span>,		<span class="enscript-comment">/* 86 M_IP6NDP */</span> 
+	<span class="enscript-string">&quot;IPv6 options&quot;</span>,	<span class="enscript-comment">/* 87 M_IP6OPT */</span> 
+	<span class="enscript-string">&quot;IPv6 Misc&quot;</span>,	<span class="enscript-comment">/* 88 M_IP6MISC */</span>
+#<span class="enscript-reference">else</span>
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 86 M_IP6NDP */</span> 
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 87 M_IP6OPT */</span> 
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 88 M_IP6MISC */</span>
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-string">&quot;TCP Segment Q&quot;</span>,<span class="enscript-comment">/* 89 M_TSEGQ */</span>
+	<span class="enscript-string">&quot;IGMP state&quot;</span>,	<span class="enscript-comment">/* 90 M_IGMP */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">JOURNALING</span>
+	<span class="enscript-string">&quot;Journal&quot;</span>,		<span class="enscript-comment">/* 91 M_JNL_JNL */</span>
+	<span class="enscript-string">&quot;Transaction&quot;</span>,	<span class="enscript-comment">/* 92 M_JNL_TR */</span>
+#<span class="enscript-reference">else</span>
+	<span class="enscript-string">&quot;&quot;</span>,    			<span class="enscript-comment">/* 91 M_JNL_JNL */</span>
+	<span class="enscript-string">&quot;&quot;</span>,    			<span class="enscript-comment">/* 92 M_JNL_TR */</span>
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-string">&quot;specinfo&quot;</span>,		<span class="enscript-comment">/* 93 M_SPECINFO */</span>
+	<span class="enscript-string">&quot;kqueue&quot;</span>,		<span class="enscript-comment">/* 94 M_KQUEUE */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS</span>
+	<span class="enscript-string">&quot;HFS dirhint&quot;</span>,	<span class="enscript-comment">/* 95 M_HFSDIRHINT */</span> 
+#<span class="enscript-reference">else</span>
+	<span class="enscript-string">&quot;&quot;</span>,				<span class="enscript-comment">/* 95 M_HFSDIRHINT */</span> 
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-string">&quot;cluster_read&quot;</span>,	<span class="enscript-comment">/* 96 M_CLRDAHEAD */</span> 
+	<span class="enscript-string">&quot;cluster_write&quot;</span>,<span class="enscript-comment">/* 97 M_CLWRBEHIND */</span> 
+	<span class="enscript-string">&quot;iov64&quot;</span>,		<span class="enscript-comment">/* 98 M_IOV64 */</span> 
+	<span class="enscript-string">&quot;fileglob&quot;</span>,		<span class="enscript-comment">/* 99 M_FILEGLOB */</span> 
+	<span class="enscript-string">&quot;kauth&quot;</span>,		<span class="enscript-comment">/* 100 M_KAUTH */</span> 
+	<span class="enscript-string">&quot;dummynet&quot;</span>,		<span class="enscript-comment">/* 101 M_DUMMYNET */</span> 
+	<span class="enscript-string">&quot;&quot;</span>,			<span class="enscript-comment">/* 102 M_UNSAFEFS */</span> 
+	<span class="enscript-string">&quot;macpipelabel&quot;</span>, <span class="enscript-comment">/* 103 M_MACPIPELABEL */</span>
+	<span class="enscript-string">&quot;mactemp&quot;</span>,      <span class="enscript-comment">/* 104 M_MACTEMP */</span>
+	<span class="enscript-string">&quot;sbuf&quot;</span>,         <span class="enscript-comment">/* 105 M_SBUF */</span>
+	<span class="enscript-string">&quot;extattr&quot;</span>,      <span class="enscript-comment">/* 106 M_EXTATTR */</span>
+	<span class="enscript-string">&quot;select&quot;</span>,       <span class="enscript-comment">/* 107 M_SELECT */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">TRAFFIC_MGT</span>
+	<span class="enscript-string">&quot;traffic_mgt&quot;</span>,   <span class="enscript-comment">/* 108 M_TRAFFIC_MGT */</span>
+#<span class="enscript-reference">else</span>
+	<span class="enscript-string">&quot;&quot;</span>, <span class="enscript-comment">/* 108 M_TRAFFIC_MGT */</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	<span class="enscript-string">&quot;decmpfs_cnode&quot;</span>,<span class="enscript-comment">/* 109 M_DECMPFS_CNODE */</span>
+#<span class="enscript-reference">else</span>
+	<span class="enscript-string">&quot;&quot;</span>,             <span class="enscript-comment">/* 109 M_DECMPFS_CNODE */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+	<span class="enscript-string">&quot;ipmfilter&quot;</span>,	<span class="enscript-comment">/* 110 M_INMFILTER */</span>
+	<span class="enscript-string">&quot;ipmsource&quot;</span>,	<span class="enscript-comment">/* 111 M_IPMSOURCE */</span>
+	<span class="enscript-string">&quot;in6mfilter&quot;</span>, 	<span class="enscript-comment">/* 112 M_IN6MFILTER */</span>
+	<span class="enscript-string">&quot;ip6mopts&quot;</span>,	<span class="enscript-comment">/* 113 M_IP6MOPTS */</span>
+	<span class="enscript-string">&quot;ip6msource&quot;</span>,	<span class="enscript-comment">/* 114 M_IP6MSOURCE */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">FLOW_DIVERT</span>
+	<span class="enscript-string">&quot;flow_divert_pcb&quot;</span>,	<span class="enscript-comment">/* 115 M_FLOW_DIVERT_PCB */</span>
+	<span class="enscript-string">&quot;flow_divert_group&quot;</span>,	<span class="enscript-comment">/* 116 M_FLOW_DIVERT_GROUP */</span>
+#<span class="enscript-reference">else</span>
+	<span class="enscript-string">&quot;&quot;</span>,					<span class="enscript-comment">/* 115 M_FLOW_DIVERT_PCB */</span>
+	<span class="enscript-string">&quot;&quot;</span>,					<span class="enscript-comment">/* 116 M_FLOW_DIVERT_GROUP */</span>
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-string">&quot;ip6cga&quot;</span>,	<span class="enscript-comment">/* 117 M_IP6CGA */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NECP</span>
+	<span class="enscript-string">&quot;necp&quot;</span>,					<span class="enscript-comment">/* 118 M_NECP */</span>
+	<span class="enscript-string">&quot;necp_session_policy&quot;</span>,	<span class="enscript-comment">/* 119 M_NECP_SESSION_POLICY */</span>
+	<span class="enscript-string">&quot;necp_socket_policy&quot;</span>,	<span class="enscript-comment">/* 120 M_NECP_SOCKET_POLICY */</span>
+	<span class="enscript-string">&quot;necp_ip_policy&quot;</span>,		<span class="enscript-comment">/* 121 M_NECP_IP_POLICY */</span>
+#<span class="enscript-reference">else</span>
+	<span class="enscript-string">&quot;&quot;</span>,						<span class="enscript-comment">/* 118 M_NECP */</span>
+	<span class="enscript-string">&quot;&quot;</span>,						<span class="enscript-comment">/* 119 M_NECP_SESSION_POLICY */</span>
+	<span class="enscript-string">&quot;&quot;</span>,						<span class="enscript-comment">/* 120 M_NECP_SOCKET_POLICY */</span>
+	<span class="enscript-string">&quot;&quot;</span>,						<span class="enscript-comment">/* 121 M_NECP_IP_POLICY */</span>
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-string">&quot;fdvnodedata&quot;</span>	<span class="enscript-comment">/* 122 M_FD_VN_DATA */</span>
+	<span class="enscript-string">&quot;fddirbuf&quot;</span>,	<span class="enscript-comment">/* 123 M_FD_DIRBUF */</span>
+	<span class="enscript-string">&quot;netagent&quot;</span>,	<span class="enscript-comment">/* 124 M_NETAGENT */</span>
+	<span class="enscript-string">&quot;&quot;</span>
+};
+
+<span class="enscript-comment">/* for use with kmzones.kz_zalloczone */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KMZ_CREATEZONE_ACCT</span>	((void *)-3)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">KMZ_CREATEZONE</span>		((void *)-2)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KMZ_LOOKUPZONE</span>		((void *)-1)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KMZ_MALLOC</span>			((void *)0)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">KMZ_SHAREZONE</span>		((void *)1)
+
+<span class="enscript-type">struct</span> kmzones {
+	size_t		kz_elemsize;
+	<span class="enscript-type">void</span>		*kz_zalloczone;
+	boolean_t	kz_noencrypt;
+} kmzones[M_LAST] = {
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SOS</span>(sname)	sizeof (struct sname)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SOX</span>(sname)	-1
+	{ -1,		0, FALSE },			<span class="enscript-comment">/* 0 M_FREE */</span>
+	{ MSIZE,	KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 1 M_MBUF */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 2 M_DEVBUF */</span>
+	{ SOS(socket),	KMZ_CREATEZONE, TRUE },		<span class="enscript-comment">/* 3 M_SOCKET */</span>
+	{ SOS(inpcb),	KMZ_LOOKUPZONE, TRUE },		<span class="enscript-comment">/* 4 M_PCB */</span>
+	{ M_MBUF,	KMZ_SHAREZONE, FALSE },		<span class="enscript-comment">/* 5 M_RTABLE */</span>
+	{ M_MBUF,	KMZ_SHAREZONE, FALSE },		<span class="enscript-comment">/* 6 M_HTABLE */</span>
+	{ M_MBUF,	KMZ_SHAREZONE, FALSE },		<span class="enscript-comment">/* 7 M_FTABLE */</span>
+	{ SOS(rusage),	KMZ_CREATEZONE, TRUE },		<span class="enscript-comment">/* 8 M_ZOMBIE */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 9 M_IFADDR */</span>
+	{ M_MBUF,	KMZ_SHAREZONE, FALSE },		<span class="enscript-comment">/* 10 M_SOOPTS */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 11 M_SONAME */</span>
+	{ MAXPATHLEN,	KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 12 M_NAMEI */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 13 M_GPROF */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 14 M_IOCTLOPS */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 15 M_MAPMEM */</span>
+	{ SOS(ucred),	KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 16 M_CRED */</span>
+	{ SOS(pgrp),	KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 17 M_PGRP */</span>
+	{ SOS(session),	KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 18 M_SESSION */</span>
+	{ SOS(user32_iovec),	KMZ_LOOKUPZONE, FALSE },<span class="enscript-comment">/* 19 M_IOV32 */</span>
+	{ SOS(mount),	KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 20 M_MOUNT */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 21 M_FHANDLE */</span>
+#<span class="enscript-reference">if</span> (<span class="enscript-variable-name">NFSCLIENT</span> || <span class="enscript-variable-name">NFSSERVER</span>)
+	{ SOS(nfsreq),	KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 22 M_NFSREQ */</span>
+	{ SOS(nfsmount),KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 23 M_NFSMNT */</span>
+	{ SOS(nfsnode),	KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 24 M_NFSNODE */</span>
+#<span class="enscript-reference">else</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 22 M_NFSREQ */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 23 M_NFSMNT */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 24 M_NFSNODE */</span>
+#<span class="enscript-reference">endif</span>
+	{ SOS(vnode),	KMZ_CREATEZONE, TRUE },		<span class="enscript-comment">/* 25 M_VNODE */</span>
+	{ SOS(namecache), KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 26 M_CACHE */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">QUOTA</span>
+	{ SOX(dquot),	KMZ_LOOKUPZONE, FALSE },	<span class="enscript-comment">/* 27 M_DQUOT */</span>
+#<span class="enscript-reference">else</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 27 M_DQUOT */</span>
+#<span class="enscript-reference">endif</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 28 M_PROC_UUID_POLICY */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 29 M_SHM */</span>
+	{ SOS(plimit),	KMZ_CREATEZONE, TRUE },		<span class="enscript-comment">/* 30 M_PLIMIT */</span>
+	{ SOS(sigacts),	KMZ_CREATEZONE_ACCT, TRUE },	<span class="enscript-comment">/* 31 M_SIGACTS */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 32 M_VMOBJ */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 33 M_VMOBJHASH */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 34 M_VMPMAP */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 35 M_VMPVENT */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 36 M_VMPAGER */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 37 M_VMPGDATA */</span>
+	{ SOS(fileproc),KMZ_CREATEZONE_ACCT, TRUE },	<span class="enscript-comment">/* 38 M_FILEPROC */</span>
+	{ SOS(filedesc),KMZ_CREATEZONE_ACCT, TRUE },	<span class="enscript-comment">/* 39 M_FILEDESC */</span>
+	{ SOX(lockf),	KMZ_CREATEZONE_ACCT, TRUE },	<span class="enscript-comment">/* 40 M_LOCKF */</span>
+	{ SOS(proc),	KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 41 M_PROC */</span>
+	{ SOS(pstats),	KMZ_CREATEZONE, TRUE },		<span class="enscript-comment">/* 42 M_PSTATS */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 43 M_SEGMENT */</span>
+	{ M_FFSNODE,	KMZ_SHAREZONE, FALSE },		<span class="enscript-comment">/* 44 M_LFSNODE */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 45 M_FFSNODE */</span>
+	{ M_FFSNODE,	KMZ_SHAREZONE, FALSE },		<span class="enscript-comment">/* 46 M_MFSNODE */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 47 M_NQLEASE */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 48 M_NQMHOST */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 49 M_NETADDR */</span>
+#<span class="enscript-reference">if</span> (<span class="enscript-variable-name">NFSCLIENT</span> || <span class="enscript-variable-name">NFSSERVER</span>)
+	{ SOX(nfsrv_sock),
+	                KMZ_CREATEZONE_ACCT, FALSE },	<span class="enscript-comment">/* 50 M_NFSSVC */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 51 M_NFSUID */</span>
+	{ SOX(nfsrvcache),
+	                KMZ_CREATEZONE_ACCT, FALSE },	<span class="enscript-comment">/* 52 M_NFSD */</span>
+#<span class="enscript-reference">else</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 50 M_NFSSVC */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 51 M_NFSUID */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 52 M_NFSD */</span>
+#<span class="enscript-reference">endif</span>
+	{ SOX(ip_moptions),
+	                KMZ_LOOKUPZONE, FALSE },	<span class="enscript-comment">/* 53 M_IPMOPTS */</span>
+	{ SOX(in_multi),KMZ_LOOKUPZONE, FALSE },	<span class="enscript-comment">/* 54 M_IPMADDR */</span>
+	{ SOX(ether_multi),
+	                KMZ_LOOKUPZONE, FALSE },	<span class="enscript-comment">/* 55 M_IFMADDR */</span>
+	{ SOX(mrt),	KMZ_CREATEZONE, TRUE },		<span class="enscript-comment">/* 56 M_MRTABLE */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 57 unused entry */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 58 unused entry */</span>
+#<span class="enscript-reference">if</span> (<span class="enscript-variable-name">NFSCLIENT</span> || <span class="enscript-variable-name">NFSSERVER</span>)
+	{ SOS(nfsrv_descript),
+	                KMZ_CREATEZONE_ACCT, FALSE },	<span class="enscript-comment">/* 59 M_NFSRVDESC */</span>
+	{ SOS(nfsdmap),	KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 60 M_NFSDIROFF */</span>
+	{ SOS(fhandle),	KMZ_LOOKUPZONE, FALSE },	<span class="enscript-comment">/* 61 M_NFSBIGFH */</span>
+#<span class="enscript-reference">else</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 59 M_NFSRVDESC */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 60 M_NFSDIROFF */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 61 M_NFSBIGFH */</span>
+#<span class="enscript-reference">endif</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 62 M_MSDOSFSMNT */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 63 M_MSDOSFSFAT */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 64 M_MSDOSFSNODE */</span>
+	{ SOS(tty),	KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 65 M_TTYS */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 66 M_EXEC */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 67 M_MISCFSMNT */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 68 M_MISCFSNODE */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 69 M_ADOSFSMNT */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 70 M_ADOSFSNODE */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 71 M_ANODE */</span>
+	{ 0,		KMZ_MALLOC, TRUE },		<span class="enscript-comment">/* 72 M_BUFHDR */</span>
+	{ (NDFILE * OFILESIZE),
+	                KMZ_CREATEZONE_ACCT, FALSE },	<span class="enscript-comment">/* 73 M_OFILETABL */</span>
+	{ MCLBYTES,	KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 74 M_MCLUST */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS</span>
+	{ SOX(hfsmount),KMZ_LOOKUPZONE, FALSE },	<span class="enscript-comment">/* 75 M_HFSMNT */</span>
+	{ SOS(cnode),	KMZ_CREATEZONE, TRUE },		<span class="enscript-comment">/* 76 M_HFSNODE */</span>
+	{ SOS(filefork),KMZ_CREATEZONE, TRUE },		<span class="enscript-comment">/* 77 M_HFSFORK */</span>
+#<span class="enscript-reference">else</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 75 M_HFSMNT */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 76 M_HFSNODE */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 77 M_HFSFORK */</span>
+#<span class="enscript-reference">endif</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 78 unused */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 79 unused */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 80 M_TEMP */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 81 M_SECA */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 82 M_DEVFS */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 83 M_IPFW */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 84 M_UDFNODE */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 85 M_UDFMOUNT */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 86 M_IP6NDP */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 87 M_IP6OPT */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 88 M_IP6MISC */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 89 M_TSEGQ */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 90 M_IGMP */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">JOURNALING</span>
+	{ SOS(journal), KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 91 M_JNL_JNL */</span>
+	{ SOS(transaction), KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 92 M_JNL_TR */</span>
+#<span class="enscript-reference">else</span>
+	{ 0,	 	KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 91 M_JNL_JNL */</span>
+	{ 0,	 	KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 92 M_JNL_TR */</span>
+#<span class="enscript-reference">endif</span>
+	{ SOS(specinfo),KMZ_CREATEZONE, TRUE },		<span class="enscript-comment">/* 93 M_SPECINFO */</span>
+	{ SOS(kqueue),	KMZ_CREATEZONE, FALSE },	<span class="enscript-comment">/* 94 M_KQUEUE */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS</span>
+	{ SOS(directoryhint), KMZ_CREATEZONE, TRUE },	<span class="enscript-comment">/* 95 M_HFSDIRHINT */</span>
+#<span class="enscript-reference">else</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 95 M_HFSDIRHINT */</span>
+#<span class="enscript-reference">endif</span>
+	{ SOS(cl_readahead),  KMZ_CREATEZONE, TRUE },	<span class="enscript-comment">/* 96 M_CLRDAHEAD */</span>
+	{ SOS(cl_writebehind),KMZ_CREATEZONE, TRUE },	<span class="enscript-comment">/* 97 M_CLWRBEHIND */</span>
+	{ SOS(user64_iovec),	KMZ_LOOKUPZONE, FALSE },<span class="enscript-comment">/* 98 M_IOV64 */</span>
+	{ SOS(fileglob),	KMZ_CREATEZONE, TRUE },	<span class="enscript-comment">/* 99 M_FILEGLOB */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 100 M_KAUTH */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 101 M_DUMMYNET */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 102 M_UNSAFEFS */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 103 M_MACPIPELABEL */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 104 M_MACTEMP */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 105 M_SBUF */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 106 M_HFS_EXTATTR */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 107 M_SELECT */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 108 M_TRAFFIC_MGT */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	{ SOS(decmpfs_cnode),KMZ_CREATEZONE , FALSE},	<span class="enscript-comment">/* 109 M_DECMPFS_CNODE */</span>
+#<span class="enscript-reference">else</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 109 M_DECMPFS_CNODE */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+ 	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 110 M_INMFILTER */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 111 M_IPMSOURCE */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 112 M_IN6MFILTER */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 113 M_IP6MOPTS */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 114 M_IP6MSOURCE */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">FLOW_DIVERT</span>
+	{ SOS(flow_divert_pcb),		KMZ_CREATEZONE, TRUE },	<span class="enscript-comment">/* 115 M_FLOW_DIVERT_PCB */</span>
+	{ SOS(flow_divert_group),	KMZ_CREATEZONE, TRUE },	<span class="enscript-comment">/* 116 M_FLOW_DIVERT_GROUP */</span>
+#<span class="enscript-reference">else</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 115 M_FLOW_DIVERT_PCB */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 116 M_FLOW_DIVERT_GROUP */</span>
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* FLOW_DIVERT */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 117 M_IP6CGA */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 118 M_NECP */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NECP</span>
+	{ SOS(necp_session_policy),	KMZ_CREATEZONE, TRUE },	<span class="enscript-comment">/* 119 M_NECP_SESSION_POLICY */</span>
+	{ SOS(necp_kernel_socket_policy),	KMZ_CREATEZONE, TRUE },	<span class="enscript-comment">/* 120 M_NECP_SOCKET_POLICY */</span>
+	{ SOS(necp_kernel_ip_output_policy),	KMZ_CREATEZONE, TRUE },	<span class="enscript-comment">/* 121 M_NECP_IP_POLICY */</span>
+#<span class="enscript-reference">else</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 119 M_NECP_SESSION_POLICY */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 120 M_NECP_SOCKET_POLICY */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 121 M_NECP_IP_POLICY */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* NECP */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 122 M_FD_VN_DATA */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 123 M_FD_DIRBUF */</span>
+	{ 0,		KMZ_MALLOC, FALSE },		<span class="enscript-comment">/* 124 M_NETAGENT */</span>
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">SOS</span>
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">SOX</span>
+};
+
+<span class="enscript-type">extern</span> zone_t <span class="enscript-function-name">kalloc_zone</span>(vm_size_t);	<span class="enscript-comment">/* XXX */</span>
+
+<span class="enscript-comment">/*
+ * Initialize the kernel memory allocator
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kmeminit</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> kmzones	*kmz;
+
+	<span class="enscript-keyword">if</span> ((<span class="enscript-keyword">sizeof</span>(kmzones)/<span class="enscript-keyword">sizeof</span>(kmzones[0])) != (<span class="enscript-keyword">sizeof</span>(memname)/<span class="enscript-keyword">sizeof</span>(memname[0]))) {
+		panic(<span class="enscript-string">&quot;kmeminit: kmzones has %lu elements but memname has %lu\n&quot;</span>,
+			  (<span class="enscript-keyword">sizeof</span>(kmzones)/<span class="enscript-keyword">sizeof</span>(kmzones[0])), (<span class="enscript-keyword">sizeof</span>(memname)/<span class="enscript-keyword">sizeof</span>(memname[0])));
+	}
+
+	kmz = kmzones;
+	<span class="enscript-keyword">while</span> (kmz &lt; &amp;kmzones[M_LAST]) {
+<span class="enscript-comment">/* XXX */</span>
+		<span class="enscript-keyword">if</span> (kmz-&gt;kz_elemsize == (size_t)(-1))
+			;
+		<span class="enscript-keyword">else</span>
+<span class="enscript-comment">/* XXX */</span>
+		<span class="enscript-keyword">if</span> (kmz-&gt;kz_zalloczone == KMZ_CREATEZONE ||
+		    kmz-&gt;kz_zalloczone == KMZ_CREATEZONE_ACCT) {
+			kmz-&gt;kz_zalloczone = zinit(kmz-&gt;kz_elemsize,
+						1024 * 1024, PAGE_SIZE,
+						memname[kmz - kmzones]);
+			zone_change(kmz-&gt;kz_zalloczone, Z_CALLERACCT,
+				    (kmz-&gt;kz_zalloczone == KMZ_CREATEZONE_ACCT));
+
+			<span class="enscript-keyword">if</span> (kmz-&gt;kz_noencrypt == TRUE)
+				zone_change(kmz-&gt;kz_zalloczone, Z_NOENCRYPT, TRUE);
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kmz-&gt;kz_zalloczone == KMZ_LOOKUPZONE)
+			kmz-&gt;kz_zalloczone = kalloc_zone(kmz-&gt;kz_elemsize);
+
+		kmz++;
+	}
+
+	kmz = kmzones;
+	<span class="enscript-keyword">while</span> (kmz &lt; &amp;kmzones[M_LAST]) {
+<span class="enscript-comment">/* XXX */</span>
+		<span class="enscript-keyword">if</span> (kmz-&gt;kz_elemsize == (size_t)(-1))
+			;
+		<span class="enscript-keyword">else</span>
+<span class="enscript-comment">/* XXX */</span>
+		<span class="enscript-keyword">if</span> (kmz-&gt;kz_zalloczone == KMZ_SHAREZONE) {
+			kmz-&gt;kz_zalloczone =
+				kmzones[kmz-&gt;kz_elemsize].kz_zalloczone;
+			kmz-&gt;kz_elemsize =
+				kmzones[kmz-&gt;kz_elemsize].kz_elemsize;
+		}
+
+		kmz++;
+	}
+}
+
+<span class="enscript-type">struct</span> _mhead {
+	size_t	mlen;
+	<span class="enscript-type">char</span>	dat[0];
+};
+
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">_MALLOC_external</span>(
+	size_t		size,
+	<span class="enscript-type">int</span>		type,
+	<span class="enscript-type">int</span>		flags);
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">_MALLOC_external</span>(
+	size_t		size,
+	<span class="enscript-type">int</span>		type,
+	<span class="enscript-type">int</span>		flags)
+{
+    <span class="enscript-type">static</span> vm_allocation_site_t site = { VM_KERN_MEMORY_KALLOC, VM_TAG_BT };
+    <span class="enscript-keyword">return</span> (__MALLOC(size, type, flags, &amp;site));
+}
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">__MALLOC</span>(
+	size_t		size,
+	<span class="enscript-type">int</span>		type,
+	<span class="enscript-type">int</span>		flags,
+	vm_allocation_site_t *site)
+{
+	<span class="enscript-type">struct</span> _mhead	*hdr = NULL;
+	size_t		memsize = <span class="enscript-keyword">sizeof</span> (*hdr) + size;
+
+	<span class="enscript-keyword">if</span> (type &gt;= M_LAST)
+		panic(<span class="enscript-string">&quot;_malloc TYPE&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (size == 0)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	<span class="enscript-keyword">if</span> (flags &amp; M_NOWAIT) {
+               <span class="enscript-keyword">if</span> (size &gt; memsize)   <span class="enscript-comment">/* overflow detected */</span>
+                       <span class="enscript-keyword">return</span> (NULL);
+               <span class="enscript-keyword">else</span>
+                       hdr = (<span class="enscript-type">void</span> *)kalloc_canblock(memsize, FALSE, site); 
+	} <span class="enscript-keyword">else</span> {
+               <span class="enscript-keyword">if</span> (size &gt; memsize) {
+                       <span class="enscript-comment">/*
+                        * We get here when the caller told us to block, waiting for memory but an overflow
+                        * has been detected.  The caller isn't expecting a NULL return code so we panic
+                        * with a descriptive message.
+                        */</span>
+                       panic(<span class="enscript-string">&quot;_MALLOC: overflow detected, size %llu &quot;</span>, (uint64_t) size);
+               }
+               <span class="enscript-keyword">else</span>
+                       hdr = (<span class="enscript-type">void</span> *)kalloc_canblock(memsize, TRUE, site);
+
+	       <span class="enscript-keyword">if</span> (hdr == NULL) {
+
+			<span class="enscript-comment">/*
+			 * We get here when the caller told us to block waiting for memory, but
+			 * kalloc said there's no memory left to get.  Generally, this means there's a 
+			 * leak or the caller asked for an impossibly large amount of memory.  Since there's
+			 * nothing left to wait for and the caller isn't expecting a NULL return code, we
+			 * just panic.  This is less than ideal, but returning NULL doesn't help since the
+			 * majority of callers don't check the return value and will just dereference the pointer and
+			 * trap anyway.  We may as well get a more descriptive message out while we can.
+			 */</span>
+
+			panic(<span class="enscript-string">&quot;_MALLOC: kalloc returned NULL (potential leak), size %llu&quot;</span>, (uint64_t) size);
+		}
+	}
+	<span class="enscript-keyword">if</span> (!hdr)
+		<span class="enscript-keyword">return</span> (0);
+
+	hdr-&gt;mlen = memsize;
+
+	<span class="enscript-keyword">if</span> (flags &amp; M_ZERO)
+		bzero(hdr-&gt;dat, size);
+
+	<span class="enscript-keyword">return</span>  (hdr-&gt;dat);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">_FREE</span>(
+	<span class="enscript-type">void</span>		*addr,
+	<span class="enscript-type">int</span>		type)
+{
+	<span class="enscript-type">struct</span> _mhead	*hdr;
+
+	<span class="enscript-keyword">if</span> (type &gt;= M_LAST)
+		panic(<span class="enscript-string">&quot;_free TYPE&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (!addr)
+		<span class="enscript-keyword">return</span>; <span class="enscript-comment">/* correct (convenient bsd kernel legacy) */</span>
+
+	hdr = addr; hdr--;
+	kfree(hdr, hdr-&gt;mlen);
+}
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">__REALLOC</span>(
+	<span class="enscript-type">void</span>		*addr,
+	size_t		size,
+	<span class="enscript-type">int</span>		type,
+	<span class="enscript-type">int</span>		flags,
+	vm_allocation_site_t *site)
+{
+	<span class="enscript-type">struct</span> _mhead	*hdr;
+	<span class="enscript-type">void</span>		*newaddr;
+	size_t		alloc;
+
+	<span class="enscript-comment">/* realloc(NULL, ...) is equivalent to malloc(...) */</span>
+	<span class="enscript-keyword">if</span> (addr == NULL)
+		<span class="enscript-keyword">return</span> (__MALLOC(size, type, flags, site));
+
+	<span class="enscript-comment">/* Allocate a new, bigger (or smaller) block */</span>
+	<span class="enscript-keyword">if</span> ((newaddr = __MALLOC(size, type, flags, site)) == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	hdr = addr;
+	--hdr;
+	alloc = hdr-&gt;mlen - <span class="enscript-keyword">sizeof</span> (*hdr);
+
+	<span class="enscript-comment">/* Copy over original contents */</span>
+	bcopy(addr, newaddr, MIN(size, alloc));
+	_FREE(addr, type);
+
+	<span class="enscript-keyword">return</span> (newaddr);
+}
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">_MALLOC_ZONE_external</span>(
+	size_t		size,
+	<span class="enscript-type">int</span>		type,
+	<span class="enscript-type">int</span>		flags);
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">_MALLOC_ZONE_external</span>(
+	size_t		size,
+	<span class="enscript-type">int</span>		type,
+	<span class="enscript-type">int</span>		flags)
+{
+    <span class="enscript-keyword">return</span> (__MALLOC_ZONE(size, type, flags, NULL));
+}
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">__MALLOC_ZONE</span>(
+	size_t		size,
+	<span class="enscript-type">int</span>		type,
+	<span class="enscript-type">int</span>		flags,
+	vm_allocation_site_t *site)
+{
+	<span class="enscript-type">struct</span> kmzones	*kmz;
+	<span class="enscript-type">void</span>		*elem;
+
+	<span class="enscript-keyword">if</span> (type &gt;= M_LAST)
+		panic(<span class="enscript-string">&quot;_malloc_zone TYPE&quot;</span>);
+
+	kmz = &amp;kmzones[type];
+	<span class="enscript-keyword">if</span> (kmz-&gt;kz_zalloczone == KMZ_MALLOC)
+		panic(<span class="enscript-string">&quot;_malloc_zone ZONE: type = %d&quot;</span>, type);
+
+<span class="enscript-comment">/* XXX */</span>
+	<span class="enscript-keyword">if</span> (kmz-&gt;kz_elemsize == (size_t)(-1))
+		panic(<span class="enscript-string">&quot;_malloc_zone XXX&quot;</span>);
+<span class="enscript-comment">/* XXX */</span>
+	<span class="enscript-keyword">if</span> (size == kmz-&gt;kz_elemsize)
+		<span class="enscript-keyword">if</span> (flags &amp; M_NOWAIT) {
+	  		elem = (<span class="enscript-type">void</span> *)zalloc_noblock(kmz-&gt;kz_zalloczone);
+		} <span class="enscript-keyword">else</span> {
+	  		elem = (<span class="enscript-type">void</span> *)zalloc(kmz-&gt;kz_zalloczone);
+		}
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">if</span> (flags &amp; M_NOWAIT) {
+			elem = (<span class="enscript-type">void</span> *)kalloc_canblock(size, FALSE, site);
+		} <span class="enscript-keyword">else</span> {
+			elem = (<span class="enscript-type">void</span> *)kalloc_canblock(size, TRUE, site);
+		}
+
+	<span class="enscript-keyword">return</span> (elem);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">_FREE_ZONE</span>(
+	<span class="enscript-type">void</span>		*elem,
+	size_t		size,
+	<span class="enscript-type">int</span>		type)
+{
+	<span class="enscript-type">struct</span> kmzones	*kmz;
+
+	<span class="enscript-keyword">if</span> (type &gt;= M_LAST)
+		panic(<span class="enscript-string">&quot;FREE_SIZE&quot;</span>);
+
+	kmz = &amp;kmzones[type];
+	<span class="enscript-keyword">if</span> (kmz-&gt;kz_zalloczone == KMZ_MALLOC)
+		panic(<span class="enscript-string">&quot;free_zone ZONE&quot;</span>);
+
+<span class="enscript-comment">/* XXX */</span>
+	<span class="enscript-keyword">if</span> (kmz-&gt;kz_elemsize == (size_t)(-1))
+		panic(<span class="enscript-string">&quot;FREE_SIZE XXX&quot;</span>);
+<span class="enscript-comment">/* XXX */</span>
+	<span class="enscript-keyword">if</span> (size == kmz-&gt;kz_elemsize)
+		zfree(kmz-&gt;kz_zalloczone, elem);
+	<span class="enscript-keyword">else</span>
+		kfree(elem, size);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_ZLEAKS</span>
+
+<span class="enscript-function-name">SYSCTL_DECL</span>(_kern_zleak);
+<span class="enscript-function-name">SYSCTL_NODE</span>(_kern, OID_AUTO, zleak, CTLFLAG_RW | CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;zleak&quot;</span>);
+
+<span class="enscript-comment">/*
+ * kern.zleak.active
+ *
+ * Show the status of the zleak subsystem (0 = enabled, 1 = active,
+ * and -1 = failed), and if enabled, allow it to be activated immediately.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+sysctl_zleak_active SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> oldval, val, error;
+
+	val = oldval = get_zleak_state();
+	error = sysctl_handle_int(oidp, &amp;val, 0, req);
+	<span class="enscript-keyword">if</span> (error || !req-&gt;newptr)
+		<span class="enscript-keyword">return</span> (error);
+	<span class="enscript-comment">/*
+	 * Can only be activated if it's off (and not failed.)
+	 * Cannot be deactivated once it's on.
+	 */</span>
+	<span class="enscript-keyword">if</span> (val == 1 &amp;&amp; oldval == 0) {
+		kern_return_t kr = zleak_activate();
+
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+			printf(<span class="enscript-string">&quot;zleak_active: failed to activate &quot;</span>
+			    <span class="enscript-string">&quot;live zone leak debugging (%d).\n&quot;</span>, kr);
+	} <span class="enscript-keyword">if</span> (val == 0 &amp;&amp; oldval == 1) {
+		printf(<span class="enscript-string">&quot;zleak_active: active, cannot be disabled.\n&quot;</span>);
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern_zleak, OID_AUTO, active,
+    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED,
+    0, 0, sysctl_zleak_active, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;zleak activity&quot;</span>);
+
+<span class="enscript-comment">/*
+ * kern.zleak.max_zonemap_size
+ *
+ * Read the value of the maximum zonemap size in bytes; useful
+ * as the maximum size that zleak.global_threshold and
+ * zleak.zone_threshold should be set to.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+sysctl_zleak_max_zonemap_size SYSCTL_HANDLER_ARGS
+{
+	uint64_t zmap_max_size = *(vm_size_t *)arg1;
+
+	<span class="enscript-keyword">return</span> sysctl_handle_quad(oidp, &amp;zmap_max_size, arg2, req);
+}
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern_zleak, OID_AUTO, max_zonemap_size,
+    CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_LOCKED,
+    &amp;zleak_max_zonemap_size, 0,
+    sysctl_zleak_max_zonemap_size, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;zleak max zonemap size&quot;</span>);
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+sysctl_zleak_threshold SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error;
+	uint64_t value = *(vm_size_t *)arg1;
+
+	error = sysctl_io_number(req, value, <span class="enscript-keyword">sizeof</span> (value), &amp;value, NULL);
+
+	<span class="enscript-keyword">if</span> (error || !req-&gt;newptr)
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-keyword">if</span> (value &gt; (uint64_t)zleak_max_zonemap_size)
+		<span class="enscript-keyword">return</span> (ERANGE);
+
+	*(vm_size_t *)arg1 = value;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * kern.zleak.global_threshold
+ *
+ * Set the global zleak threshold size (in bytes).  If the zone map
+ * grows larger than this value, zleaks are automatically activated.
+ *
+ * The default value is set in zleak_init().
+ */</span>
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern_zleak, OID_AUTO, global_threshold,
+    CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;zleak_global_tracking_threshold, 0,
+    sysctl_zleak_threshold, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;zleak global threshold&quot;</span>);
+
+<span class="enscript-comment">/*
+ * kern.zleak.zone_threshold
+ *
+ * Set the per-zone threshold size (in bytes) above which any
+ * zone will automatically start zleak tracking.
+ *
+ * The default value is set in zleak_init().
+ *
+ * Setting this variable will have no effect until zleak tracking is
+ * activated (See above.)
+ */</span>
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern_zleak, OID_AUTO, zone_threshold,
+    CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;zleak_per_zone_tracking_threshold, 0,
+    sysctl_zleak_threshold, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;zleak per-zone threshold&quot;</span>);
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* CONFIG_ZLEAKS */</span>
+</pre>
+<hr />
+</body></html>

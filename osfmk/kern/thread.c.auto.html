@@ -1,0 +1,2661 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>thread.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">thread.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_FREE_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989,1988,1987 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+<span class="enscript-comment">/*
+ *	File:	kern/thread.c
+ *	Author:	Avadis Tevanian, Jr., Michael Wayne Young, David Golub
+ *	Date:	1986
+ *
+ *	Thread management primitives implementation.
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1993 The University of Utah and
+ * the Computer Systems Laboratory (CSL).  All rights reserved.
+ *
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ *
+ * THE UNIVERSITY OF UTAH AND CSL ALLOW FREE USE OF THIS SOFTWARE IN ITS &quot;AS
+ * IS&quot; CONDITION.  THE UNIVERSITY OF UTAH AND CSL DISCLAIM ANY LIABILITY OF
+ * ANY KIND FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ *
+ * CSL requests users of this software to return to <a href="mailto:csl-dist@cs.utah.edu">csl-dist@cs.utah.edu</a> any
+ * improvements that they make and grant CSL redistribution rights.
+ *
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/policy.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_special_ports.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_status.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/time_value.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/pal_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/limits.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/counters.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/extmod_statistics.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_mig.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_tt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/mach_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sync_lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/syscall_subr.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/exc_resource.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/telemetry.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;corpses/task_corpse.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KPC</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kpc.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_kmsg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bank/bank_types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/bsdtask_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/sdt.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Exported interfaces
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_host_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_voucher_server.h&gt;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone			*thread_zone;
+<span class="enscript-type">static</span> lck_grp_attr_t		thread_lck_grp_attr;
+lck_attr_t					thread_lck_attr;
+lck_grp_t					thread_lck_grp;
+
+<span class="enscript-type">struct</span> zone					*thread_qos_override_zone;
+
+<span class="enscript-function-name">decl_simple_lock_data</span>(<span class="enscript-type">static</span>,thread_stack_lock)
+<span class="enscript-type">static</span> queue_head_t		thread_stack_queue;
+
+<span class="enscript-function-name">decl_simple_lock_data</span>(<span class="enscript-type">static</span>,thread_terminate_lock)
+<span class="enscript-type">static</span> queue_head_t		thread_terminate_queue;
+
+<span class="enscript-type">static</span> queue_head_t		crashed_threads_queue;
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> thread	thread_template, init_thread;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>		sched_call_null(
+					<span class="enscript-type">int</span>			type,
+					thread_t	thread);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MACH_BSD</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">proc_exit</span>(<span class="enscript-type">void</span> *);
+<span class="enscript-type">extern</span> uint64_t <span class="enscript-function-name">get_dispatchqueue_offset_from_proc</span>(<span class="enscript-type">void</span> *);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>      <span class="enscript-function-name">proc_selfpid</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">char</span> *   <span class="enscript-function-name">proc_name_address</span>(<span class="enscript-type">void</span> *p);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MACH_BSD */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> disable_exc_resource;
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> audio_active;
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> debug_task;
+<span class="enscript-type">int</span> thread_max = CONFIG_THREAD_MAX;	<span class="enscript-comment">/* Max number of threads */</span>
+<span class="enscript-type">int</span> task_threadmax = CONFIG_THREAD_MAX;
+
+<span class="enscript-type">static</span> uint64_t		thread_unique_id = 100;
+
+<span class="enscript-type">struct</span> _thread_ledger_indices thread_ledgers = { -1 };
+<span class="enscript-type">static</span> ledger_template_t thread_ledger_template = NULL;
+<span class="enscript-type">void</span> <span class="enscript-function-name">init_thread_ledgers</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">int</span> <span class="enscript-function-name">task_disable_cpumon</span>(task_t task);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_JETSAM</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">jetsam_on_ledger_cpulimit_exceeded</span>(<span class="enscript-type">void</span>);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Level (in terms of percentage of the limit) at which the CPU usage monitor triggers telemetry.
+ *
+ * (ie when any thread's CPU consumption exceeds 70% of the limit, start taking user
+ *  stacktraces, aka micro-stackshots)
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CPUMON_USTACKSHOTS_TRIGGER_DEFAULT_PCT</span> 70
+
+<span class="enscript-type">int</span> cpumon_ustackshots_trigger_pct; <span class="enscript-comment">/* Percentage. Level at which we start gathering telemetry. */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">__attribute__</span>((noinline)) THIS_THREAD_IS_CONSUMING_TOO_MUCH_CPU__SENDING_EXC_RESOURCE(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/*
+ * The smallest interval over which we support limiting CPU consumption is 1ms
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MINIMUM_CPULIMIT_INTERVAL_MS</span> 1
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_bootstrap</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">/*
+	 *	Fill in a template thread for fast initialization.
+	 */</span>
+
+	thread_template.runq = PROCESSOR_NULL;
+
+	thread_template.ref_count = 2;
+
+	thread_template.reason = AST_NONE;
+	thread_template.at_safe_point = FALSE;
+	thread_template.wait_event = NO_EVENT64;
+	thread_template.waitq = NULL;
+	thread_template.wait_result = THREAD_WAITING;
+	thread_template.options = THREAD_ABORTSAFE;
+	thread_template.state = TH_WAIT | TH_UNINT;
+	thread_template.wake_active = FALSE;
+	thread_template.continuation = THREAD_CONTINUE_NULL;
+	thread_template.parameter = NULL;
+
+	thread_template.importance = 0;
+	thread_template.sched_mode = TH_MODE_NONE;
+	thread_template.sched_flags = 0;
+	thread_template.saved_mode = TH_MODE_NONE;
+	thread_template.safe_release = 0;
+
+	thread_template.sfi_class = SFI_CLASS_UNSPECIFIED;
+	thread_template.sfi_wait_class = SFI_CLASS_UNSPECIFIED;
+
+	thread_template.active = 0;
+	thread_template.started = 0;
+	thread_template.static_param = 0;
+	thread_template.policy_reset = 0;
+
+	thread_template.base_pri = 0;
+	thread_template.sched_pri = 0;
+	thread_template.max_priority = 0;
+	thread_template.task_priority = 0;
+	thread_template.promotions = 0;
+	thread_template.pending_promoter_index = 0;
+	thread_template.pending_promoter[0] = NULL;
+	thread_template.pending_promoter[1] = NULL;
+	thread_template.rwlock_count = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	thread_template.SHARE_COUNT = 0;
+	thread_template.BG_COUNT = 0;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MACH_ASSERT */</span>	
+
+	thread_template.realtime.deadline = UINT64_MAX;
+
+	thread_template.quantum_remaining = 0;
+	thread_template.last_run_time = 0;
+	thread_template.last_made_runnable_time = 0;
+
+	thread_template.computation_metered = 0;
+	thread_template.computation_epoch = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_TIMESHARE_CORE</span>)
+	thread_template.sched_stamp = 0;
+	thread_template.pri_shift = INT8_MAX;
+	thread_template.sched_usage = 0;
+	thread_template.cpu_usage = thread_template.cpu_delta = 0;
+#<span class="enscript-reference">endif</span>
+	thread_template.c_switch = thread_template.p_switch = thread_template.ps_switch = 0;
+
+	thread_template.bound_processor = PROCESSOR_NULL;
+	thread_template.last_processor = PROCESSOR_NULL;
+
+	thread_template.sched_call = sched_call_null;
+
+	timer_init(&amp;thread_template.user_timer);
+	timer_init(&amp;thread_template.system_timer);
+	thread_template.user_timer_save = 0;
+	thread_template.system_timer_save = 0;
+	thread_template.vtimer_user_save = 0;
+	thread_template.vtimer_prof_save = 0;
+	thread_template.vtimer_rlim_save = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_SCHED_SFI</span>
+	thread_template.wait_sfi_begin_time = 0;
+#<span class="enscript-reference">endif</span>
+
+	thread_template.wait_timer_is_set = FALSE;
+	thread_template.wait_timer_active = 0;
+
+	thread_template.depress_timer_active = 0;
+
+	thread_template.recover = (vm_offset_t)NULL;
+	
+	thread_template.map = VM_MAP_NULL;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+	thread_template.t_dtrace_predcache = 0;
+	thread_template.t_dtrace_vtime = 0;
+	thread_template.t_dtrace_tracing = 0;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_DTRACE */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KPC</span>
+	thread_template.kpc_buf = NULL;
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HYPERVISOR</span>
+	thread_template.hv_thread_target = NULL;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HYPERVISOR */</span>
+
+	thread_template.t_chud = 0;
+
+#<span class="enscript-reference">if</span> (<span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>)
+	thread_template.t_page_creation_throttled_hard = 0;
+	thread_template.t_page_creation_throttled_soft = 0;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEVELOPMENT || DEBUG */</span>
+	thread_template.t_page_creation_throttled = 0;
+	thread_template.t_page_creation_count = 0;
+	thread_template.t_page_creation_time = 0;
+
+	thread_template.affinity_set = NULL;
+	
+	thread_template.syscalls_unix = 0;
+	thread_template.syscalls_mach = 0;
+
+	thread_template.t_ledger = LEDGER_NULL;
+	thread_template.t_threadledger = LEDGER_NULL;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	thread_template.t_bankledger = LEDGER_NULL;
+	thread_template.t_deduct_bank_ledger_time = 0;
+#<span class="enscript-reference">endif</span>
+
+	thread_template.requested_policy = default_task_requested_policy;
+	thread_template.effective_policy = default_task_effective_policy;
+	thread_template.pended_policy    = default_task_pended_policy;
+
+	bzero(&amp;thread_template.overrides, <span class="enscript-keyword">sizeof</span>(thread_template.overrides));
+
+	thread_template.iotier_override = THROTTLE_LEVEL_NONE;
+	thread_template.thread_io_stats = NULL;
+	thread_template.thread_callout_interrupt_wakeups = thread_template.thread_callout_platform_idle_wakeups = 0;
+
+	thread_template.thread_timer_wakeups_bin_1 = thread_template.thread_timer_wakeups_bin_2 = 0;
+	thread_template.callout_woken_from_icontext = thread_template.callout_woken_from_platform_idle = 0;
+
+	thread_template.thread_tag = 0;
+
+	thread_template.ith_voucher_name = MACH_PORT_NULL;
+	thread_template.ith_voucher = IPC_VOUCHER_NULL;
+
+	thread_template.work_interval_id = 0;
+
+	init_thread = thread_template;
+	machine_set_current_thread(&amp;init_thread);
+}
+
+<span class="enscript-type">extern</span> boolean_t allow_qos_policy_set;
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_init</span>(<span class="enscript-type">void</span>)
+{
+	thread_zone = zinit(
+			<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread),
+			thread_max * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread),
+			THREAD_CHUNK * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread),
+			<span class="enscript-string">&quot;threads&quot;</span>);
+
+	thread_qos_override_zone = zinit(
+		<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_qos_override),
+		4 * thread_max * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_qos_override),
+		PAGE_SIZE,
+		<span class="enscript-string">&quot;thread qos override&quot;</span>);
+	zone_change(thread_qos_override_zone, Z_EXPAND, TRUE);
+	zone_change(thread_qos_override_zone, Z_COLLECT, TRUE);
+	zone_change(thread_qos_override_zone, Z_CALLERACCT, FALSE);
+	zone_change(thread_qos_override_zone, Z_NOENCRYPT, TRUE);
+
+	lck_grp_attr_setdefault(&amp;thread_lck_grp_attr);
+	lck_grp_init(&amp;thread_lck_grp, <span class="enscript-string">&quot;thread&quot;</span>, &amp;thread_lck_grp_attr);
+	lck_attr_setdefault(&amp;thread_lck_attr);
+	
+	stack_init();
+
+	<span class="enscript-comment">/*
+	 *	Initialize any machine-dependent
+	 *	per-thread structures necessary.
+	 */</span>
+	machine_thread_init();
+
+	<span class="enscript-keyword">if</span> (!PE_parse_boot_argn(<span class="enscript-string">&quot;cpumon_ustackshots_trigger_pct&quot;</span>, &amp;cpumon_ustackshots_trigger_pct,
+		<span class="enscript-keyword">sizeof</span> (cpumon_ustackshots_trigger_pct))) {
+		cpumon_ustackshots_trigger_pct = CPUMON_USTACKSHOTS_TRIGGER_DEFAULT_PCT;
+	}
+
+	PE_parse_boot_argn(<span class="enscript-string">&quot;-qos-policy-allow&quot;</span>, &amp;allow_qos_policy_set, <span class="enscript-keyword">sizeof</span>(allow_qos_policy_set));	
+
+	init_thread_ledgers();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_terminate_continue</span>(<span class="enscript-type">void</span>)
+{
+	panic(<span class="enscript-string">&quot;thread_terminate_continue&quot;</span>);
+	<span class="enscript-comment">/*NOTREACHED*/</span>
+}
+
+<span class="enscript-comment">/*
+ *	thread_terminate_self:
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_terminate_self</span>(<span class="enscript-type">void</span>)
+{
+	thread_t		thread = current_thread();
+	task_t			task;
+	spl_t			s;
+	<span class="enscript-type">int</span> threadcnt;
+
+	pal_thread_terminate_self(thread);
+
+	DTRACE_PROC(lwp__exit);
+
+	thread_mtx_lock(thread);
+
+	ipc_thread_disable(thread);
+	
+	thread_mtx_unlock(thread);
+
+	s = splsched();
+	thread_lock(thread);
+
+	assert_thread_sched_count(thread);
+
+	<span class="enscript-comment">/*
+	 *	Cancel priority depression, wait for concurrent expirations
+	 *	on other processors.
+	 */</span>
+	<span class="enscript-keyword">if</span> (thread-&gt;sched_flags &amp; TH_SFLAG_DEPRESSED_MASK) {
+		thread-&gt;sched_flags &amp;= ~TH_SFLAG_DEPRESSED_MASK;
+
+		<span class="enscript-comment">/* If our priority was low because of a depressed yield, restore it in case we block below */</span>
+		thread_recompute_sched_pri(thread, FALSE);
+
+		<span class="enscript-keyword">if</span> (timer_call_cancel(&amp;thread-&gt;depress_timer))
+			thread-&gt;depress_timer_active--;
+	}
+
+	<span class="enscript-keyword">while</span> (thread-&gt;depress_timer_active &gt; 0) {
+		thread_unlock(thread);
+		splx(s);
+
+		delay(1);
+
+		s = splsched();
+		thread_lock(thread);
+	}
+
+	thread_sched_call(thread, NULL);
+
+	thread_unlock(thread);
+	splx(s);
+
+
+	thread_mtx_lock(thread);
+
+	thread_policy_reset(thread);
+
+	thread_mtx_unlock(thread);
+
+	task = thread-&gt;task;
+	uthread_cleanup(task, thread-&gt;uthread, task-&gt;bsd_info, thread-&gt;inspection == 1 ? TRUE : FALSE);
+	threadcnt = hw_atomic_sub(&amp;task-&gt;active_thread_count, 1);
+
+	<span class="enscript-comment">/*
+	 * If we are the last thread to terminate and the task is
+	 * associated with a BSD process, perform BSD process exit.
+	 */</span>
+	<span class="enscript-keyword">if</span> (threadcnt == 0 &amp;&amp; task-&gt;bsd_info != NULL) {
+		proc_exit(task-&gt;bsd_info);
+		<span class="enscript-comment">/*
+		 * if there is crash info in task
+		 * then do the deliver action since this is
+		 * last thread for this task.
+		 */</span>
+		<span class="enscript-keyword">if</span> (task-&gt;corpse_info) {
+			task_deliver_crash_notification(task);
+		}
+	}
+	uthread_cred_free(thread-&gt;uthread);
+
+	s = splsched();
+	thread_lock(thread);
+
+	<span class="enscript-comment">/*
+	 *	Cancel wait timer, and wait for
+	 *	concurrent expirations.
+	 */</span>
+	<span class="enscript-keyword">if</span> (thread-&gt;wait_timer_is_set) {
+		thread-&gt;wait_timer_is_set = FALSE;
+
+		<span class="enscript-keyword">if</span> (timer_call_cancel(&amp;thread-&gt;wait_timer))
+			thread-&gt;wait_timer_active--;
+	}
+
+	<span class="enscript-keyword">while</span> (thread-&gt;wait_timer_active &gt; 0) {
+		thread_unlock(thread);
+		splx(s);
+
+		delay(1);
+
+		s = splsched();
+		thread_lock(thread);
+	}
+
+	<span class="enscript-comment">/*
+	 *	If there is a reserved stack, release it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (thread-&gt;reserved_stack != 0) {
+		stack_free_reserved(thread);
+		thread-&gt;reserved_stack = 0;
+	}
+
+	<span class="enscript-comment">/*
+	 *	Mark thread as terminating, and block.
+	 */</span>
+	thread-&gt;state |= TH_TERMINATE;
+	thread_mark_wait_locked(thread, THREAD_UNINT);
+	assert((thread-&gt;sched_flags &amp; TH_SFLAG_PROMOTED) == 0);
+	assert(thread-&gt;promotions == 0);
+	assert(!(thread-&gt;sched_flags &amp; TH_SFLAG_WAITQ_PROMOTED));
+	assert(thread-&gt;rwlock_count == 0);
+	thread_unlock(thread);
+	<span class="enscript-comment">/* splsched */</span>
+
+	thread_block((thread_continue_t)thread_terminate_continue);
+	<span class="enscript-comment">/*NOTREACHED*/</span>
+}
+
+<span class="enscript-comment">/* Drop a thread refcount that definitely isn't the last one. */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_deallocate_safe</span>(thread_t thread)
+{
+	<span class="enscript-keyword">if</span> (__improbable(hw_atomic_sub(&amp;(thread)-&gt;ref_count, 1) == 0))
+		panic(<span class="enscript-string">&quot;bad thread refcount!&quot;</span>);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_deallocate</span>(
+	thread_t			thread)
+{
+	task_t				task;
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (__probable(hw_atomic_sub(&amp;(thread)-&gt;ref_count, 1) &gt; 0))
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span>(!(thread-&gt;state &amp; TH_TERMINATE2))
+		panic(<span class="enscript-string">&quot;thread_deallocate: thread not properly terminated\n&quot;</span>);
+
+	assert(thread-&gt;runq == PROCESSOR_NULL);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KPC</span>
+	kpc_thread_destroy(thread);
+#<span class="enscript-reference">endif</span>
+
+	ipc_thread_terminate(thread);
+
+	proc_thread_qos_deallocate(thread);
+
+	task = thread-&gt;task;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MACH_BSD</span> 
+	{
+		<span class="enscript-type">void</span> *ut = thread-&gt;uthread;
+
+		thread-&gt;uthread = NULL;
+		uthread_zone_free(ut);
+	}
+#<span class="enscript-reference">endif</span>  <span class="enscript-comment">/* MACH_BSD */</span>   
+
+	<span class="enscript-keyword">if</span> (thread-&gt;t_ledger)
+		ledger_dereference(thread-&gt;t_ledger);
+	<span class="enscript-keyword">if</span> (thread-&gt;t_threadledger)
+		ledger_dereference(thread-&gt;t_threadledger);
+
+	<span class="enscript-keyword">if</span> (IPC_VOUCHER_NULL != thread-&gt;ith_voucher)
+		ipc_voucher_release(thread-&gt;ith_voucher);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;thread_io_stats)
+		kfree(thread-&gt;thread_io_stats, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> io_stat_info));
+
+	<span class="enscript-keyword">if</span> (thread-&gt;kernel_stack != 0)
+		stack_free(thread);
+
+	lck_mtx_destroy(&amp;thread-&gt;mutex, &amp;thread_lck_grp);
+	machine_thread_destroy(thread);
+
+	task_deallocate(task);
+
+	zfree(thread_zone, thread);
+}
+
+<span class="enscript-comment">/*
+ *	thread_terminate_daemon:
+ *
+ *	Perform final clean up for terminating threads.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_terminate_daemon</span>(<span class="enscript-type">void</span>)
+{
+	thread_t	self, thread;
+	task_t		task;
+
+	self = current_thread();
+	self-&gt;options |= TH_OPT_SYSTEM_CRITICAL;
+
+	(<span class="enscript-type">void</span>)splsched();
+	simple_lock(&amp;thread_terminate_lock);
+
+	<span class="enscript-keyword">while</span> ((thread = (thread_t)dequeue_head(&amp;thread_terminate_queue)) != THREAD_NULL) {
+
+		<span class="enscript-comment">/* 
+		 * if marked for crash reporting, skip reaping. 
+		 * The corpse delivery thread will clear bit and enqueue 
+		 * for reaping when done
+		 */</span>
+		<span class="enscript-keyword">if</span> (thread-&gt;inspection){
+			enqueue_tail(&amp;crashed_threads_queue, (queue_entry_t)thread);
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		simple_unlock(&amp;thread_terminate_lock);
+		(<span class="enscript-type">void</span>)spllo();
+
+		assert(thread-&gt;SHARE_COUNT == 0);
+		assert(thread-&gt;BG_COUNT == 0);
+
+		task = thread-&gt;task;
+
+		task_lock(task);
+		task-&gt;total_user_time += timer_grab(&amp;thread-&gt;user_timer);
+		<span class="enscript-keyword">if</span> (thread-&gt;precise_user_kernel_time) {
+			task-&gt;total_system_time += timer_grab(&amp;thread-&gt;system_timer);
+		} <span class="enscript-keyword">else</span> {
+			task-&gt;total_user_time += timer_grab(&amp;thread-&gt;system_timer);
+		}
+
+		task-&gt;c_switch += thread-&gt;c_switch;
+		task-&gt;p_switch += thread-&gt;p_switch;
+		task-&gt;ps_switch += thread-&gt;ps_switch;
+
+		task-&gt;syscalls_unix += thread-&gt;syscalls_unix;
+		task-&gt;syscalls_mach += thread-&gt;syscalls_mach;
+
+		task-&gt;task_timer_wakeups_bin_1 += thread-&gt;thread_timer_wakeups_bin_1;
+		task-&gt;task_timer_wakeups_bin_2 += thread-&gt;thread_timer_wakeups_bin_2;
+		task-&gt;task_gpu_ns += ml_gpu_stat(thread);
+		
+		thread_update_qos_cpu_time(thread, FALSE);
+		queue_remove(&amp;task-&gt;threads, thread, thread_t, task_threads);
+		task-&gt;thread_count--;
+
+		<span class="enscript-comment">/* 
+		 * If the task is being halted, and there is only one thread
+		 * left in the task after this one, then wakeup that thread.
+		 */</span>
+		<span class="enscript-keyword">if</span> (task-&gt;thread_count == 1 &amp;&amp; task-&gt;halting)
+			thread_wakeup((event_t)&amp;task-&gt;halting);
+
+		task_unlock(task);
+
+		lck_mtx_lock(&amp;tasks_threads_lock);
+		queue_remove(&amp;threads, thread, thread_t, threads);
+		threads_count--;
+		lck_mtx_unlock(&amp;tasks_threads_lock);
+
+		thread_deallocate(thread);
+
+		(<span class="enscript-type">void</span>)splsched();
+		simple_lock(&amp;thread_terminate_lock);
+	}
+
+	assert_wait((event_t)&amp;thread_terminate_queue, THREAD_UNINT);
+	simple_unlock(&amp;thread_terminate_lock);
+	<span class="enscript-comment">/* splsched */</span>
+
+	self-&gt;options &amp;= ~TH_OPT_SYSTEM_CRITICAL;
+	thread_block((thread_continue_t)thread_terminate_daemon);
+	<span class="enscript-comment">/*NOTREACHED*/</span>
+}
+
+<span class="enscript-comment">/*
+ *	thread_terminate_enqueue:
+ *
+ *	Enqueue a terminating thread for final disposition.
+ *
+ *	Called at splsched.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_terminate_enqueue</span>(
+	thread_t		thread)
+{
+	KERNEL_DEBUG_CONSTANT(TRACE_DATA_THREAD_TERMINATE | DBG_FUNC_NONE, thread-&gt;thread_id, 0, 0, 0, 0);
+
+	simple_lock(&amp;thread_terminate_lock);
+	enqueue_tail(&amp;thread_terminate_queue, (queue_entry_t)thread);
+	simple_unlock(&amp;thread_terminate_lock);
+
+	thread_wakeup((event_t)&amp;thread_terminate_queue);
+}
+
+<span class="enscript-comment">/*
+ * thread_terminate_crashed_threads:
+ * walk the list of crashed therds and put back set of threads
+ * who are no longer being inspected.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_terminate_crashed_threads</span>()
+{
+	thread_t th_iter, th_remove;
+	boolean_t should_wake_terminate_queue = FALSE;
+
+	simple_lock(&amp;thread_terminate_lock);
+	<span class="enscript-comment">/*
+	 * loop through the crashed threads queue
+	 * to put any threads that are not being inspected anymore
+	 */</span>
+	th_iter = (thread_t)queue_first(&amp;crashed_threads_queue);
+	<span class="enscript-keyword">while</span> (!queue_end(&amp;crashed_threads_queue, (queue_entry_t)th_iter)) {
+		th_remove = th_iter;
+		th_iter = (thread_t)queue_next(&amp;th_iter-&gt;links);
+
+		<span class="enscript-comment">/* make sure current_thread is never in crashed queue */</span>
+		assert(th_remove != current_thread());
+		<span class="enscript-keyword">if</span> (th_remove-&gt;inspection != TRUE){
+			remque((queue_entry_t)th_remove);
+			enqueue_tail(&amp;thread_terminate_queue, (queue_entry_t)th_remove);
+			should_wake_terminate_queue = TRUE;
+		}
+	}
+
+	simple_unlock(&amp;thread_terminate_lock);
+	<span class="enscript-keyword">if</span> (should_wake_terminate_queue == TRUE) {
+		thread_wakeup((event_t)&amp;thread_terminate_queue);
+	}
+}
+
+<span class="enscript-comment">/*
+ *	thread_stack_daemon:
+ *
+ *	Perform stack allocation as required due to
+ *	invoke failures.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_stack_daemon</span>(<span class="enscript-type">void</span>)
+{
+	thread_t		thread;
+	spl_t			s;
+
+	s = splsched();
+	simple_lock(&amp;thread_stack_lock);
+
+	<span class="enscript-keyword">while</span> ((thread = (thread_t)dequeue_head(&amp;thread_stack_queue)) != THREAD_NULL) {
+		simple_unlock(&amp;thread_stack_lock);
+		splx(s);
+
+		<span class="enscript-comment">/* allocate stack with interrupts enabled so that we can call into VM */</span>
+		stack_alloc(thread);
+
+		KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SCHED,MACH_STACK_WAIT) | DBG_FUNC_END, thread_tid(thread), 0, 0, 0, 0);
+		
+		s = splsched();
+		thread_lock(thread);
+		thread_setrun(thread, SCHED_PREEMPT | SCHED_TAILQ);
+		thread_unlock(thread);
+
+		simple_lock(&amp;thread_stack_lock);
+	}
+
+	assert_wait((event_t)&amp;thread_stack_queue, THREAD_UNINT);
+	simple_unlock(&amp;thread_stack_lock);
+	splx(s);
+
+	thread_block((thread_continue_t)thread_stack_daemon);
+	<span class="enscript-comment">/*NOTREACHED*/</span>
+}
+
+<span class="enscript-comment">/*
+ *	thread_stack_enqueue:
+ *
+ *	Enqueue a thread for stack allocation.
+ *
+ *	Called at splsched.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_stack_enqueue</span>(
+	thread_t		thread)
+{
+	KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SCHED,MACH_STACK_WAIT) | DBG_FUNC_START, thread_tid(thread), 0, 0, 0, 0);
+
+	simple_lock(&amp;thread_stack_lock);
+	enqueue_tail(&amp;thread_stack_queue, (queue_entry_t)thread);
+	simple_unlock(&amp;thread_stack_lock);
+
+	thread_wakeup((event_t)&amp;thread_stack_queue);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_daemon_init</span>(<span class="enscript-type">void</span>)
+{
+	kern_return_t	result;
+	thread_t	thread = NULL;
+
+	simple_lock_init(&amp;thread_terminate_lock, 0);
+	queue_init(&amp;thread_terminate_queue);
+	queue_init(&amp;crashed_threads_queue);
+
+	result = kernel_thread_start_priority((thread_continue_t)thread_terminate_daemon, NULL, MINPRI_KERNEL, &amp;thread);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		panic(<span class="enscript-string">&quot;thread_daemon_init: thread_terminate_daemon&quot;</span>);
+
+	thread_deallocate(thread);
+
+	simple_lock_init(&amp;thread_stack_lock, 0);
+	queue_init(&amp;thread_stack_queue);
+
+	result = kernel_thread_start_priority((thread_continue_t)thread_stack_daemon, NULL, BASEPRI_PREEMPT, &amp;thread);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		panic(<span class="enscript-string">&quot;thread_daemon_init: thread_stack_daemon&quot;</span>);
+
+	thread_deallocate(thread);
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TH_OPTION_NONE</span>		0x00
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TH_OPTION_NOCRED</span>	0x01
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TH_OPTION_NOSUSP</span>	0x02
+<span class="enscript-comment">/*
+ * Create a new thread.
+ * Doesn't start the thread running.
+ *
+ * Task and tasks_threads_lock are returned locked on success.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">thread_create_internal</span>(
+	task_t					parent_task,
+	integer_t				priority,
+	thread_continue_t		continuation,
+	<span class="enscript-type">int</span>						options,
+	thread_t				*out_thread)
+{
+	thread_t				new_thread;
+	<span class="enscript-type">static</span> thread_t			first_thread;
+
+	<span class="enscript-comment">/*
+	 *	Allocate a thread and initialize static fields
+	 */</span>
+	<span class="enscript-keyword">if</span> (first_thread == THREAD_NULL)
+		new_thread = first_thread = current_thread();
+	<span class="enscript-keyword">else</span>
+		new_thread = (thread_t)zalloc(thread_zone);
+	<span class="enscript-keyword">if</span> (new_thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (KERN_RESOURCE_SHORTAGE);
+
+	<span class="enscript-keyword">if</span> (new_thread != first_thread)
+		*new_thread = thread_template;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MACH_BSD</span>
+	new_thread-&gt;uthread = uthread_alloc(parent_task, new_thread, (options &amp; TH_OPTION_NOCRED) != 0);
+	<span class="enscript-keyword">if</span> (new_thread-&gt;uthread == NULL) {
+		zfree(thread_zone, new_thread);
+		<span class="enscript-keyword">return</span> (KERN_RESOURCE_SHORTAGE);
+	}
+#<span class="enscript-reference">endif</span>  <span class="enscript-comment">/* MACH_BSD */</span>
+
+	<span class="enscript-keyword">if</span> (machine_thread_create(new_thread, parent_task) != KERN_SUCCESS) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MACH_BSD</span>
+		<span class="enscript-type">void</span> *ut = new_thread-&gt;uthread;
+
+		new_thread-&gt;uthread = NULL;
+		<span class="enscript-comment">/* cred free may not be necessary */</span>
+		uthread_cleanup(parent_task, ut, parent_task-&gt;bsd_info, FALSE);
+		uthread_cred_free(ut);
+		uthread_zone_free(ut);
+#<span class="enscript-reference">endif</span>  <span class="enscript-comment">/* MACH_BSD */</span>
+
+		zfree(thread_zone, new_thread);
+		<span class="enscript-keyword">return</span> (KERN_FAILURE);
+	}
+
+	new_thread-&gt;task = parent_task;
+
+	thread_lock_init(new_thread);
+	wake_lock_init(new_thread);
+
+	lck_mtx_init(&amp;new_thread-&gt;mutex, &amp;thread_lck_grp, &amp;thread_lck_attr);
+
+	ipc_thread_init(new_thread);
+
+	new_thread-&gt;continuation = continuation;
+
+	<span class="enscript-comment">/* Allocate I/O Statistics structure */</span>
+	new_thread-&gt;thread_io_stats = (io_stat_info_t)kalloc(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> io_stat_info));
+	assert(new_thread-&gt;thread_io_stats != NULL);
+	bzero(new_thread-&gt;thread_io_stats, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> io_stat_info));
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_IOSCHED</span>
+	<span class="enscript-comment">/* Clear out the I/O Scheduling info for AppleFSCompression */</span>
+	new_thread-&gt;decmp_upl = NULL;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_IOSCHED */</span> 
+
+	lck_mtx_lock(&amp;tasks_threads_lock);
+	task_lock(parent_task);
+
+	<span class="enscript-keyword">if</span> (	!parent_task-&gt;active || parent_task-&gt;halting ||
+			((options &amp; TH_OPTION_NOSUSP) != 0 &amp;&amp;
+			 	parent_task-&gt;suspend_count &gt; 0)	||
+			(parent_task-&gt;thread_count &gt;= task_threadmax &amp;&amp;
+				parent_task != kernel_task)		) {
+		task_unlock(parent_task);
+		lck_mtx_unlock(&amp;tasks_threads_lock);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MACH_BSD</span>
+		{
+			<span class="enscript-type">void</span> *ut = new_thread-&gt;uthread;
+
+			new_thread-&gt;uthread = NULL;
+			uthread_cleanup(parent_task, ut, parent_task-&gt;bsd_info, FALSE);
+			<span class="enscript-comment">/* cred free may not be necessary */</span>
+			uthread_cred_free(ut);
+			uthread_zone_free(ut);
+		}
+#<span class="enscript-reference">endif</span>  <span class="enscript-comment">/* MACH_BSD */</span>
+		ipc_thread_disable(new_thread);
+		ipc_thread_terminate(new_thread);
+		kfree(new_thread-&gt;thread_io_stats, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> io_stat_info));
+		lck_mtx_destroy(&amp;new_thread-&gt;mutex, &amp;thread_lck_grp);
+		machine_thread_destroy(new_thread);
+		zfree(thread_zone, new_thread);
+		<span class="enscript-keyword">return</span> (KERN_FAILURE);
+	}
+
+	<span class="enscript-comment">/* New threads inherit any default state on the task */</span>
+	machine_thread_inherit_taskwide(new_thread, parent_task);
+
+	task_reference_internal(parent_task);
+
+	<span class="enscript-keyword">if</span> (new_thread-&gt;task-&gt;rusage_cpu_flags &amp; TASK_RUSECPU_FLAGS_PERTHR_LIMIT) {
+		<span class="enscript-comment">/*
+		 * This task has a per-thread CPU limit; make sure this new thread
+		 * gets its limit set too, before it gets out of the kernel.
+		 */</span>
+		set_astledger(new_thread);
+	}
+
+	<span class="enscript-comment">/* Instantiate a thread ledger. Do not fail thread creation if ledger creation fails. */</span>
+	<span class="enscript-keyword">if</span> ((new_thread-&gt;t_threadledger = ledger_instantiate(thread_ledger_template,
+				LEDGER_CREATE_INACTIVE_ENTRIES)) != LEDGER_NULL) {
+
+		ledger_entry_setactive(new_thread-&gt;t_threadledger, thread_ledgers.cpu_time);
+	}
+
+	new_thread-&gt;cpu_time_last_qos = 0;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	new_thread-&gt;t_bankledger = LEDGER_NULL;
+	new_thread-&gt;t_deduct_bank_ledger_time = 0;
+#<span class="enscript-reference">endif</span>
+
+	new_thread-&gt;t_ledger = new_thread-&gt;task-&gt;ledger;
+	<span class="enscript-keyword">if</span> (new_thread-&gt;t_ledger)
+		ledger_reference(new_thread-&gt;t_ledger);
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_MULTIQ</span>)
+	<span class="enscript-comment">/* Cache the task's sched_group */</span>
+	new_thread-&gt;sched_group = parent_task-&gt;sched_group;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(CONFIG_SCHED_MULTIQ) */</span>
+
+	<span class="enscript-comment">/* Cache the task's map */</span>
+	new_thread-&gt;map = parent_task-&gt;map;
+
+	timer_call_setup(&amp;new_thread-&gt;wait_timer, thread_timer_expire, new_thread);
+	timer_call_setup(&amp;new_thread-&gt;depress_timer, thread_depress_expire, new_thread);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KPC</span>
+	kpc_thread_create(new_thread);
+#<span class="enscript-reference">endif</span>
+	
+	<span class="enscript-comment">/* Only need to update policies pushed from task to thread */</span>
+	new_thread-&gt;requested_policy.bg_iotier  = parent_task-&gt;effective_policy.bg_iotier;
+	new_thread-&gt;requested_policy.terminated = parent_task-&gt;effective_policy.terminated;
+
+	<span class="enscript-comment">/* Set the thread's scheduling parameters */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_TIMESHARE_CORE</span>)
+	new_thread-&gt;sched_stamp = sched_tick;
+	new_thread-&gt;pri_shift = sched_pri_shift;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(CONFIG_SCHED_TIMESHARE_CORE) */</span>
+
+	new_thread-&gt;sched_mode = SCHED(initial_thread_sched_mode)(parent_task);
+	new_thread-&gt;sched_flags = 0;
+	new_thread-&gt;max_priority = parent_task-&gt;max_priority;
+	new_thread-&gt;task_priority = parent_task-&gt;priority;
+
+	<span class="enscript-type">int</span> new_priority = (priority &lt; 0) ? parent_task-&gt;priority: priority;
+	new_priority = (priority &lt; 0)? parent_task-&gt;priority: priority;
+	<span class="enscript-keyword">if</span> (new_priority &gt; new_thread-&gt;max_priority)
+		new_priority = new_thread-&gt;max_priority;
+
+	new_thread-&gt;importance = new_priority - new_thread-&gt;task_priority;
+	new_thread-&gt;saved_importance = new_thread-&gt;importance;
+
+	<span class="enscript-keyword">if</span> (parent_task-&gt;max_priority &lt;= MAXPRI_THROTTLE) {
+		sched_set_thread_throttled(new_thread, TRUE);
+	}
+
+	sched_set_thread_base_priority(new_thread, new_priority);
+
+	thread_policy_create(new_thread);
+
+	<span class="enscript-comment">/* Chain the thread onto the task's list */</span>
+	queue_enter(&amp;parent_task-&gt;threads, new_thread, thread_t, task_threads);
+	parent_task-&gt;thread_count++;
+
+	<span class="enscript-comment">/* So terminating threads don't need to take the task lock to decrement */</span>
+	hw_atomic_add(&amp;parent_task-&gt;active_thread_count, 1);
+
+	<span class="enscript-comment">/* Protected by the tasks_threads_lock */</span>
+	new_thread-&gt;thread_id = ++thread_unique_id;
+
+	queue_enter(&amp;threads, new_thread, thread_t, threads);
+	threads_count++;
+
+	new_thread-&gt;active = TRUE;
+	new_thread-&gt;inspection = FALSE;
+	*out_thread = new_thread;
+
+	{
+		<span class="enscript-type">long</span>	dbg_arg1, dbg_arg2, dbg_arg3, dbg_arg4;
+
+		kdbg_trace_data(parent_task-&gt;bsd_info, &amp;dbg_arg2);
+
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, 
+			TRACEDBG_CODE(DBG_TRACE_DATA, 1) | DBG_FUNC_NONE,
+			(vm_address_t)(uintptr_t)thread_tid(new_thread), dbg_arg2, 0, 0, 0);
+
+		kdbg_trace_string(parent_task-&gt;bsd_info,
+							&amp;dbg_arg1, &amp;dbg_arg2, &amp;dbg_arg3, &amp;dbg_arg4);
+
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, 
+			TRACEDBG_CODE(DBG_TRACE_STRING, 1) | DBG_FUNC_NONE,
+			dbg_arg1, dbg_arg2, dbg_arg3, dbg_arg4, 0);
+	}
+
+	DTRACE_PROC1(lwp__create, thread_t, *out_thread);
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">thread_create_internal2</span>(
+	task_t				task,
+	thread_t			*new_thread,
+	boolean_t			from_user,
+	thread_continue_t		continuation)
+{
+	kern_return_t		result;
+	thread_t			thread;
+
+	<span class="enscript-keyword">if</span> (task == TASK_NULL || task == kernel_task)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	result = thread_create_internal(task, -1, continuation, TH_OPTION_NONE, &amp;thread);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> (result);
+
+	thread-&gt;user_stop_count = 1;
+	thread_hold(thread);
+	<span class="enscript-keyword">if</span> (task-&gt;suspend_count &gt; 0)
+		thread_hold(thread);
+
+	<span class="enscript-keyword">if</span> (from_user)
+		extmod_statistics_incr_thread_create(task);
+
+	task_unlock(task);
+	lck_mtx_unlock(&amp;tasks_threads_lock);
+	
+	*new_thread = thread;
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/* No prototype, since task_server.h has the _from_user version if KERNEL_SERVER */</span>
+kern_return_t
+<span class="enscript-function-name">thread_create</span>(
+	task_t				task,
+	thread_t			*new_thread);
+
+kern_return_t
+<span class="enscript-function-name">thread_create</span>(
+	task_t				task,
+	thread_t			*new_thread)
+{
+	<span class="enscript-keyword">return</span> thread_create_internal2(task, new_thread, FALSE, (thread_continue_t)thread_bootstrap_return);
+}
+
+kern_return_t
+<span class="enscript-function-name">thread_create_from_user</span>(
+	task_t				task,
+	thread_t			*new_thread)
+{
+	<span class="enscript-keyword">return</span> thread_create_internal2(task, new_thread, TRUE, (thread_continue_t)thread_bootstrap_return);
+}
+
+kern_return_t
+<span class="enscript-function-name">thread_create_with_continuation</span>(
+	task_t				task,
+	thread_t			*new_thread,
+	thread_continue_t		continuation)
+{
+	<span class="enscript-keyword">return</span> thread_create_internal2(task, new_thread, FALSE, continuation);
+}
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">thread_create_running_internal2</span>(
+	<span class="enscript-type">register</span> task_t         task,
+	<span class="enscript-type">int</span>                     flavor,
+	thread_state_t          new_state,
+	mach_msg_type_number_t  new_state_count,
+	thread_t				*new_thread,
+	boolean_t				from_user)
+{
+	<span class="enscript-type">register</span> kern_return_t  result;
+	thread_t				thread;
+
+	<span class="enscript-keyword">if</span> (task == TASK_NULL || task == kernel_task)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	result = thread_create_internal(task, -1, (thread_continue_t)thread_bootstrap_return, TH_OPTION_NONE, &amp;thread);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> (result);
+
+	result = machine_thread_set_state(thread, flavor, new_state, new_state_count);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS) {
+		task_unlock(task);
+		lck_mtx_unlock(&amp;tasks_threads_lock);
+
+		thread_terminate(thread);
+		thread_deallocate(thread);
+		<span class="enscript-keyword">return</span> (result);
+	}
+
+	thread_mtx_lock(thread);
+	thread_start_internal(thread);
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">if</span> (from_user)
+		extmod_statistics_incr_thread_create(task);
+
+	task_unlock(task);
+	lck_mtx_unlock(&amp;tasks_threads_lock);
+
+	*new_thread = thread;
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/* Prototype, see justification above */</span>
+kern_return_t
+<span class="enscript-function-name">thread_create_running</span>(
+	<span class="enscript-type">register</span> task_t         task,
+	<span class="enscript-type">int</span>                     flavor,
+	thread_state_t          new_state,
+	mach_msg_type_number_t  new_state_count,
+	thread_t				*new_thread);
+
+kern_return_t
+<span class="enscript-function-name">thread_create_running</span>(
+	<span class="enscript-type">register</span> task_t         task,
+	<span class="enscript-type">int</span>                     flavor,
+	thread_state_t          new_state,
+	mach_msg_type_number_t  new_state_count,
+	thread_t				*new_thread)
+{
+	<span class="enscript-keyword">return</span> thread_create_running_internal2(
+		task, flavor, new_state, new_state_count,
+		new_thread, FALSE);
+}
+
+kern_return_t
+<span class="enscript-function-name">thread_create_running_from_user</span>(
+	<span class="enscript-type">register</span> task_t         task,
+	<span class="enscript-type">int</span>                     flavor,
+	thread_state_t          new_state,
+	mach_msg_type_number_t  new_state_count,
+	thread_t				*new_thread)
+{
+	<span class="enscript-keyword">return</span> thread_create_running_internal2(
+		task, flavor, new_state, new_state_count,
+		new_thread, TRUE);
+}
+
+kern_return_t
+<span class="enscript-function-name">thread_create_workq</span>(
+	task_t				task,
+	thread_continue_t		thread_return,
+	thread_t			*new_thread)
+{
+	kern_return_t		result;
+	thread_t			thread;
+
+	<span class="enscript-keyword">if</span> (task == TASK_NULL || task == kernel_task)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	result = thread_create_internal(task, -1, thread_return, TH_OPTION_NOCRED | TH_OPTION_NOSUSP, &amp;thread);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> (result);
+
+	thread-&gt;user_stop_count = 1;
+	thread_hold(thread);
+	<span class="enscript-keyword">if</span> (task-&gt;suspend_count &gt; 0)
+		thread_hold(thread);
+
+	task_unlock(task);
+	lck_mtx_unlock(&amp;tasks_threads_lock);
+	
+	*new_thread = thread;
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ *	kernel_thread_create:
+ *
+ *	Create a thread in the kernel task
+ *	to execute in kernel context.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">kernel_thread_create</span>(
+	thread_continue_t	continuation,
+	<span class="enscript-type">void</span>				*parameter,
+	integer_t			priority,
+	thread_t			*new_thread)
+{
+	kern_return_t		result;
+	thread_t			thread;
+	task_t				task = kernel_task;
+
+	result = thread_create_internal(task, priority, continuation, TH_OPTION_NONE, &amp;thread);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> (result);
+
+	task_unlock(task);
+	lck_mtx_unlock(&amp;tasks_threads_lock);
+
+	stack_alloc(thread);
+	assert(thread-&gt;kernel_stack != 0);
+	thread-&gt;reserved_stack = thread-&gt;kernel_stack;
+
+	thread-&gt;parameter = parameter;
+
+<span class="enscript-function-name">if</span>(debug_task &amp; 1)
+	kprintf(<span class="enscript-string">&quot;kernel_thread_create: thread = %p continuation = %p\n&quot;</span>, thread, continuation);
+	*new_thread = thread;
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+kern_return_t
+<span class="enscript-function-name">kernel_thread_start_priority</span>(
+	thread_continue_t	continuation,
+	<span class="enscript-type">void</span>				*parameter,
+	integer_t			priority,
+	thread_t			*new_thread)
+{
+	kern_return_t	result;
+	thread_t		thread;
+
+	result = kernel_thread_create(continuation, parameter, priority, &amp;thread);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> (result);
+
+	*new_thread = thread;	
+
+	thread_mtx_lock(thread);
+	thread_start_internal(thread);
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+kern_return_t
+<span class="enscript-function-name">kernel_thread_start</span>(
+	thread_continue_t	continuation,
+	<span class="enscript-type">void</span>				*parameter,
+	thread_t			*new_thread)
+{
+	<span class="enscript-keyword">return</span> kernel_thread_start_priority(continuation, parameter, -1, new_thread);
+}
+
+<span class="enscript-comment">/* Separated into helper function so it can be used by THREAD_BASIC_INFO and THREAD_EXTENDED_INFO */</span>
+<span class="enscript-comment">/* it is assumed that the thread is locked by the caller */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">retrieve_thread_basic_info</span>(thread_t thread, thread_basic_info_t basic_info)
+{
+	<span class="enscript-type">int</span>	state, flags;
+
+	<span class="enscript-comment">/* fill in info */</span>
+
+	thread_read_times(thread, &amp;basic_info-&gt;user_time,
+								&amp;basic_info-&gt;system_time);
+
+	<span class="enscript-comment">/*
+	 *	Update lazy-evaluated scheduler info because someone wants it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (SCHED(can_update_priority)(thread))
+		SCHED(update_priority)(thread);
+
+	basic_info-&gt;sleep_time = 0;
+
+	<span class="enscript-comment">/*
+	 *	To calculate cpu_usage, first correct for timer rate,
+	 *	then for 5/8 ageing.  The correction factor [3/5] is
+	 *	(1/(5/8) - 1).
+	 */</span>
+	basic_info-&gt;cpu_usage = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_TIMESHARE_CORE</span>)
+	<span class="enscript-keyword">if</span> (sched_tick_interval) {
+		basic_info-&gt;cpu_usage =	(integer_t)(((uint64_t)thread-&gt;cpu_usage
+									* TH_USAGE_SCALE) /	sched_tick_interval);
+		basic_info-&gt;cpu_usage = (basic_info-&gt;cpu_usage * 3) / 5;
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (basic_info-&gt;cpu_usage &gt; TH_USAGE_SCALE)
+		basic_info-&gt;cpu_usage = TH_USAGE_SCALE;
+
+	basic_info-&gt;policy = ((thread-&gt;sched_mode == TH_MODE_TIMESHARE)?
+											<span class="enscript-reference">POLICY_TIMESHARE</span>: POLICY_RR);
+
+	flags = 0;
+	<span class="enscript-keyword">if</span> (thread-&gt;options &amp; TH_OPT_IDLE_THREAD)
+		flags |= TH_FLAGS_IDLE;
+
+	<span class="enscript-keyword">if</span> (thread-&gt;options &amp; TH_OPT_GLOBAL_FORCED_IDLE) {
+		flags |= TH_FLAGS_GLOBAL_FORCED_IDLE;
+	}
+
+	<span class="enscript-keyword">if</span> (!thread-&gt;kernel_stack)
+		flags |= TH_FLAGS_SWAPPED;
+
+	state = 0;
+	<span class="enscript-keyword">if</span> (thread-&gt;state &amp; TH_TERMINATE)
+		state = TH_STATE_HALTED;
+	<span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">if</span> (thread-&gt;state &amp; TH_RUN)
+		state = TH_STATE_RUNNING;
+	<span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">if</span> (thread-&gt;state &amp; TH_UNINT)
+		state = TH_STATE_UNINTERRUPTIBLE;
+	<span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">if</span> (thread-&gt;state &amp; TH_SUSP)
+		state = TH_STATE_STOPPED;
+	<span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">if</span> (thread-&gt;state &amp; TH_WAIT)
+		state = TH_STATE_WAITING;
+
+	basic_info-&gt;run_state = state;
+	basic_info-&gt;flags = flags;
+
+	basic_info-&gt;suspend_count = thread-&gt;user_stop_count;
+
+	<span class="enscript-keyword">return</span>;
+}
+
+kern_return_t
+<span class="enscript-function-name">thread_info_internal</span>(
+	<span class="enscript-type">register</span> thread_t		thread,
+	thread_flavor_t			flavor,
+	thread_info_t			thread_info_out,	<span class="enscript-comment">/* ptr to OUT array */</span>
+	mach_msg_type_number_t	*thread_info_count)	<span class="enscript-comment">/*IN/OUT*/</span>
+{
+	spl_t	s;
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">if</span> (flavor == THREAD_BASIC_INFO) {
+
+		<span class="enscript-keyword">if</span> (*thread_info_count &lt; THREAD_BASIC_INFO_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+		s = splsched();
+		thread_lock(thread);
+
+		retrieve_thread_basic_info(thread, (thread_basic_info_t) thread_info_out);
+
+		thread_unlock(thread);
+		splx(s);
+
+		*thread_info_count = THREAD_BASIC_INFO_COUNT;
+
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+	<span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">if</span> (flavor == THREAD_IDENTIFIER_INFO) {
+		<span class="enscript-type">register</span> thread_identifier_info_t	identifier_info;
+
+		<span class="enscript-keyword">if</span> (*thread_info_count &lt; THREAD_IDENTIFIER_INFO_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+		identifier_info = (thread_identifier_info_t) thread_info_out;
+
+		s = splsched();
+		thread_lock(thread);
+
+		identifier_info-&gt;thread_id = thread-&gt;thread_id;
+		identifier_info-&gt;thread_handle = thread-&gt;machine.cthread_self;
+		identifier_info-&gt;dispatch_qaddr = thread_dispatchqaddr(thread);
+
+		thread_unlock(thread);
+		splx(s);
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+	<span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">if</span> (flavor == THREAD_SCHED_TIMESHARE_INFO) {
+		policy_timeshare_info_t		ts_info;
+
+		<span class="enscript-keyword">if</span> (*thread_info_count &lt; POLICY_TIMESHARE_INFO_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+		ts_info = (policy_timeshare_info_t)thread_info_out;
+
+		s = splsched();
+		thread_lock(thread);
+
+		<span class="enscript-keyword">if</span> (thread-&gt;sched_mode != TH_MODE_TIMESHARE) {
+			thread_unlock(thread);
+			splx(s);
+			<span class="enscript-keyword">return</span> (KERN_INVALID_POLICY);
+		}
+
+		ts_info-&gt;depressed = (thread-&gt;sched_flags &amp; TH_SFLAG_DEPRESSED_MASK) != 0;
+		<span class="enscript-keyword">if</span> (ts_info-&gt;depressed) {
+			ts_info-&gt;base_priority = DEPRESSPRI;
+			ts_info-&gt;depress_priority = thread-&gt;base_pri;
+		}
+		<span class="enscript-keyword">else</span> {
+			ts_info-&gt;base_priority = thread-&gt;base_pri;
+			ts_info-&gt;depress_priority = -1;
+		}
+
+		ts_info-&gt;cur_priority = thread-&gt;sched_pri;
+		ts_info-&gt;max_priority =	thread-&gt;max_priority;
+
+		thread_unlock(thread);
+		splx(s);
+
+		*thread_info_count = POLICY_TIMESHARE_INFO_COUNT;
+
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+	<span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">if</span> (flavor == THREAD_SCHED_FIFO_INFO) {
+		<span class="enscript-keyword">if</span> (*thread_info_count &lt; POLICY_FIFO_INFO_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">return</span> (KERN_INVALID_POLICY);
+	}
+	<span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">if</span> (flavor == THREAD_SCHED_RR_INFO) {
+		policy_rr_info_t			rr_info;
+		uint32_t quantum_time;
+		uint64_t quantum_ns;
+
+		<span class="enscript-keyword">if</span> (*thread_info_count &lt; POLICY_RR_INFO_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+		rr_info = (policy_rr_info_t) thread_info_out;
+
+		s = splsched();
+		thread_lock(thread);
+
+		<span class="enscript-keyword">if</span> (thread-&gt;sched_mode == TH_MODE_TIMESHARE) {
+			thread_unlock(thread);
+			splx(s);
+
+			<span class="enscript-keyword">return</span> (KERN_INVALID_POLICY);
+	    }
+
+		rr_info-&gt;depressed = (thread-&gt;sched_flags &amp; TH_SFLAG_DEPRESSED_MASK) != 0;
+		<span class="enscript-keyword">if</span> (rr_info-&gt;depressed) {
+			rr_info-&gt;base_priority = DEPRESSPRI;
+			rr_info-&gt;depress_priority = thread-&gt;base_pri;
+		}
+		<span class="enscript-keyword">else</span> {
+			rr_info-&gt;base_priority = thread-&gt;base_pri;
+			rr_info-&gt;depress_priority = -1;
+		}
+
+		quantum_time = SCHED(initial_quantum_size)(THREAD_NULL);
+		absolutetime_to_nanoseconds(quantum_time, &amp;quantum_ns);
+
+		rr_info-&gt;max_priority = thread-&gt;max_priority;
+		rr_info-&gt;quantum = (uint32_t)(quantum_ns / 1000 / 1000);
+
+		thread_unlock(thread);
+		splx(s);
+
+		*thread_info_count = POLICY_RR_INFO_COUNT;
+
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+	<span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">if</span> (flavor == THREAD_EXTENDED_INFO) {
+		thread_basic_info_data_t	basic_info;
+		thread_extended_info_t		extended_info = (thread_extended_info_t) thread_info_out;
+
+		<span class="enscript-keyword">if</span> (*thread_info_count &lt; THREAD_EXTENDED_INFO_COUNT) {
+			<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+		}
+
+		s = splsched();
+		thread_lock(thread);
+
+		<span class="enscript-comment">/* NOTE: This mimics fill_taskthreadinfo(), which is the function used by proc_pidinfo() for
+		 * the PROC_PIDTHREADINFO flavor (which can't be used on corpses)
+		 */</span>
+		retrieve_thread_basic_info(thread, &amp;basic_info);
+		extended_info-&gt;pth_user_time = ((basic_info.user_time.seconds * (integer_t)NSEC_PER_SEC) + (basic_info.user_time.microseconds * (integer_t)NSEC_PER_USEC));
+		extended_info-&gt;pth_system_time = ((basic_info.system_time.seconds * (integer_t)NSEC_PER_SEC) + (basic_info.system_time.microseconds * (integer_t)NSEC_PER_USEC));
+
+		extended_info-&gt;pth_cpu_usage = basic_info.cpu_usage;
+		extended_info-&gt;pth_policy = basic_info.policy;
+		extended_info-&gt;pth_run_state = basic_info.run_state;
+		extended_info-&gt;pth_flags = basic_info.flags;
+		extended_info-&gt;pth_sleep_time = basic_info.sleep_time;
+		extended_info-&gt;pth_curpri = thread-&gt;sched_pri;
+		extended_info-&gt;pth_priority = thread-&gt;base_pri;
+		extended_info-&gt;pth_maxpriority = thread-&gt;max_priority;
+
+		bsd_getthreadname(thread-&gt;uthread,extended_info-&gt;pth_name);
+
+		thread_unlock(thread);
+		splx(s);
+
+		*thread_info_count = THREAD_EXTENDED_INFO_COUNT;
+
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+	<span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">if</span> (flavor == THREAD_DEBUG_INFO_INTERNAL) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+		thread_debug_info_internal_t dbg_info;
+		<span class="enscript-keyword">if</span> (*thread_info_count &lt; THREAD_DEBUG_INFO_INTERNAL_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_NOT_SUPPORTED);
+
+		<span class="enscript-keyword">if</span> (thread_info_out == NULL)
+			<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+		dbg_info = (thread_debug_info_internal_t) thread_info_out;
+		dbg_info-&gt;page_creation_count = thread-&gt;t_page_creation_count;
+
+		*thread_info_count = THREAD_DEBUG_INFO_INTERNAL_COUNT;
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEVELOPMENT || DEBUG */</span>
+		<span class="enscript-keyword">return</span> (KERN_NOT_SUPPORTED);
+	}
+
+	<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_read_times</span>(
+	thread_t		thread,
+	time_value_t	*user_time,
+	time_value_t	*system_time)
+{
+	clock_sec_t		secs;
+	clock_usec_t	usecs;
+	uint64_t		tval_user, tval_system;
+
+	tval_user = timer_grab(&amp;thread-&gt;user_timer);
+	tval_system = timer_grab(&amp;thread-&gt;system_timer);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;precise_user_kernel_time) {
+		absolutetime_to_microtime(tval_user, &amp;secs, &amp;usecs);
+		user_time-&gt;seconds = (typeof(user_time-&gt;seconds))secs;
+		user_time-&gt;microseconds = usecs;
+		
+		absolutetime_to_microtime(tval_system, &amp;secs, &amp;usecs);
+		system_time-&gt;seconds = (typeof(system_time-&gt;seconds))secs;
+		system_time-&gt;microseconds = usecs;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* system_timer may represent either sys or user */</span>
+		tval_user += tval_system;
+		absolutetime_to_microtime(tval_user, &amp;secs, &amp;usecs);
+		user_time-&gt;seconds = (typeof(user_time-&gt;seconds))secs;
+		user_time-&gt;microseconds = usecs;
+
+		system_time-&gt;seconds = 0;
+		system_time-&gt;microseconds = 0;
+	}
+}
+
+uint64_t <span class="enscript-function-name">thread_get_runtime_self</span>(<span class="enscript-type">void</span>)
+{
+	boolean_t interrupt_state;
+	uint64_t runtime;
+	thread_t thread = NULL;
+	processor_t processor = NULL;
+
+	thread = current_thread();
+
+	<span class="enscript-comment">/* Not interrupt safe, as the scheduler may otherwise update timer values underneath us */</span>
+	interrupt_state = ml_set_interrupts_enabled(FALSE);
+	processor = current_processor();
+	timer_switch(PROCESSOR_DATA(processor, thread_timer), mach_absolute_time(), PROCESSOR_DATA(processor, thread_timer));
+	runtime = (timer_grab(&amp;thread-&gt;user_timer) + timer_grab(&amp;thread-&gt;system_timer));
+	ml_set_interrupts_enabled(interrupt_state);
+
+	<span class="enscript-keyword">return</span> runtime;
+}
+
+kern_return_t
+<span class="enscript-function-name">thread_assign</span>(
+	__unused thread_t			thread,
+	__unused processor_set_t	new_pset)
+{
+	<span class="enscript-keyword">return</span> (KERN_FAILURE);
+}
+
+<span class="enscript-comment">/*
+ *	thread_assign_default:
+ *
+ *	Special version of thread_assign for assigning threads to default
+ *	processor set.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_assign_default</span>(
+	thread_t		thread)
+{
+	<span class="enscript-keyword">return</span> (thread_assign(thread, &amp;pset0));
+}
+
+<span class="enscript-comment">/*
+ *	thread_get_assignment
+ *
+ *	Return current assignment for this thread.
+ */</span>	    
+kern_return_t
+<span class="enscript-function-name">thread_get_assignment</span>(
+	thread_t		thread,
+	processor_set_t	*pset)
+{
+	<span class="enscript-keyword">if</span> (thread == NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	*pset = &amp;pset0;
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ *	thread_wire_internal:
+ *
+ *	Specify that the target thread must always be able
+ *	to run and to allocate memory.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_wire_internal</span>(
+	host_priv_t		host_priv,
+	thread_t		thread,
+	boolean_t		wired,
+	boolean_t		*prev_state)
+{
+	<span class="enscript-keyword">if</span> (host_priv == NULL || thread != current_thread())
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	assert(host_priv == &amp;realhost);
+
+	<span class="enscript-keyword">if</span> (prev_state)
+	    *prev_state = (thread-&gt;options &amp; TH_OPT_VMPRIV) != 0;
+	
+	<span class="enscript-keyword">if</span> (wired) {
+	    <span class="enscript-keyword">if</span> (!(thread-&gt;options &amp; TH_OPT_VMPRIV)) 
+		    vm_page_free_reserve(1);	<span class="enscript-comment">/* XXX */</span>
+	    thread-&gt;options |= TH_OPT_VMPRIV;
+	}
+	<span class="enscript-keyword">else</span> {
+	    <span class="enscript-keyword">if</span> (thread-&gt;options &amp; TH_OPT_VMPRIV) 
+		    vm_page_free_reserve(-1);	<span class="enscript-comment">/* XXX */</span>
+	    thread-&gt;options &amp;= ~TH_OPT_VMPRIV;
+	}
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+
+<span class="enscript-comment">/*
+ *	thread_wire:
+ *
+ *	User-api wrapper for thread_wire_internal()
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_wire</span>(
+	host_priv_t	host_priv,
+	thread_t	thread,
+	boolean_t	wired)
+{
+    <span class="enscript-keyword">return</span> (thread_wire_internal(host_priv, thread, wired, NULL));
+}
+
+
+boolean_t
+<span class="enscript-function-name">set_vm_privilege</span>(boolean_t privileged)
+{
+	boolean_t       was_vmpriv;
+
+	<span class="enscript-keyword">if</span> (current_thread()-&gt;options &amp; TH_OPT_VMPRIV)
+		was_vmpriv = TRUE;
+	<span class="enscript-keyword">else</span>
+		was_vmpriv = FALSE;
+
+	<span class="enscript-keyword">if</span> (privileged != FALSE)
+		current_thread()-&gt;options |= TH_OPT_VMPRIV;
+	<span class="enscript-keyword">else</span>
+		current_thread()-&gt;options &amp;= ~TH_OPT_VMPRIV;
+
+	<span class="enscript-keyword">return</span> (was_vmpriv);
+}
+
+
+<span class="enscript-comment">/*
+ * XXX assuming current thread only, for now...
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_guard_violation</span>(thread_t thread, <span class="enscript-type">unsigned</span> type)
+{
+	assert(thread == current_thread());
+
+	spl_t s = splsched();
+	<span class="enscript-comment">/*
+	 * Use the saved state area of the thread structure
+	 * to store all info required to handle the AST when
+	 * returning to userspace
+	 */</span>
+	thread-&gt;guard_exc_info.type = type;
+	thread_ast_set(thread, AST_GUARD);
+	ast_propagate(thread-&gt;ast);
+
+	splx(s);
+}
+
+<span class="enscript-comment">/*
+ *	guard_ast:
+ *
+ *	Handle AST_GUARD for a thread. This routine looks at the
+ *	state saved in the thread structure to determine the cause
+ *	of this exception. Based on this value, it invokes the 
+ *	appropriate routine which determines other exception related
+ *	info and raises the exception.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">guard_ast</span>(thread_t thread)
+{
+	<span class="enscript-keyword">if</span> (thread-&gt;guard_exc_info.type == GUARD_TYPE_MACH_PORT)
+		mach_port_guard_ast(thread);
+	<span class="enscript-keyword">else</span>
+		fd_guard_ast(thread);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_cputime_callback</span>(<span class="enscript-type">int</span> warning, __unused <span class="enscript-type">const</span> <span class="enscript-type">void</span> *arg0, __unused <span class="enscript-type">const</span> <span class="enscript-type">void</span> *arg1)
+{
+	<span class="enscript-keyword">if</span> (warning == LEDGER_WARNING_ROSE_ABOVE) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TELEMETRY</span>		
+		<span class="enscript-comment">/*
+		 * This thread is in danger of violating the CPU usage monitor. Enable telemetry
+		 * on the entire task so there are micro-stackshots available if and when
+		 * EXC_RESOURCE is triggered. We could have chosen to enable micro-stackshots
+		 * for this thread only; but now that this task is suspect, knowing what all of
+		 * its threads are up to will be useful.
+		 */</span>
+		telemetry_task_ctl(current_task(), TF_CPUMON_WARNING, 1);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">return</span>;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TELEMETRY</span>
+	<span class="enscript-comment">/*
+	 * If the balance has dipped below the warning level (LEDGER_WARNING_DIPPED_BELOW) or
+	 * exceeded the limit, turn telemetry off for the task.
+	 */</span>
+	telemetry_task_ctl(current_task(), TF_CPUMON_WARNING, 0);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (warning == 0) {
+		THIS_THREAD_IS_CONSUMING_TOO_MUCH_CPU__SENDING_EXC_RESOURCE();
+	}
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">__attribute__</span>((noinline))
+<span class="enscript-function-name">THIS_THREAD_IS_CONSUMING_TOO_MUCH_CPU__SENDING_EXC_RESOURCE</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span>          pid                = 0;
+	task_t		 task				= current_task();
+	thread_t     thread             = current_thread();
+	uint64_t     tid                = thread-&gt;thread_id;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	 *procname          = <span class="enscript-string">&quot;unknown&quot;</span>;
+	time_value_t thread_total_time  = {0, 0};
+	time_value_t thread_system_time;
+	time_value_t thread_user_time;
+	<span class="enscript-type">int</span>          action;
+	uint8_t      percentage;
+	uint32_t     limit_percent;
+	uint32_t     usage_percent;
+	uint32_t     interval_sec;
+	uint64_t     interval_ns;
+	uint64_t     balance_ns;
+	boolean_t	 fatal = FALSE;
+
+	mach_exception_data_type_t	code[EXCEPTION_CODE_MAX];
+	<span class="enscript-type">struct</span> ledger_entry_info	lei;
+
+	assert(thread-&gt;t_threadledger != LEDGER_NULL);
+
+	<span class="enscript-comment">/*
+	 * Now that a thread has tripped the monitor, disable it for the entire task.
+	 */</span>
+	task_lock(task);
+	<span class="enscript-keyword">if</span> ((task-&gt;rusage_cpu_flags &amp; TASK_RUSECPU_FLAGS_PERTHR_LIMIT) == 0) {
+		<span class="enscript-comment">/*
+		 * The CPU usage monitor has been disabled on our task, so some other
+		 * thread must have gotten here first. We only send one exception per
+		 * task lifetime, so there's nothing left for us to do here.
+		 */</span>
+		task_unlock(task);
+		<span class="enscript-keyword">return</span>;
+	}
+	<span class="enscript-keyword">if</span> (task-&gt;rusage_cpu_flags &amp; TASK_RUSECPU_FLAGS_FATAL_CPUMON) {
+		fatal = TRUE;
+	}
+	task_disable_cpumon(task);
+	task_unlock(task);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MACH_BSD</span>
+	pid = proc_selfpid();
+	<span class="enscript-keyword">if</span> (task-&gt;bsd_info != NULL)
+		procname = proc_name_address(task-&gt;bsd_info);
+#<span class="enscript-reference">endif</span>
+
+	thread_get_cpulimit(&amp;action, &amp;percentage, &amp;interval_ns);
+
+	interval_sec = (uint32_t)(interval_ns / NSEC_PER_SEC);
+
+	thread_read_times(thread, &amp;thread_user_time, &amp;thread_system_time);
+	time_value_add(&amp;thread_total_time, &amp;thread_user_time);
+	time_value_add(&amp;thread_total_time, &amp;thread_system_time);
+
+	ledger_get_entry_info(thread-&gt;t_threadledger, thread_ledgers.cpu_time, &amp;lei);
+
+	absolutetime_to_nanoseconds(lei.lei_balance, &amp;balance_ns);
+	usage_percent = (uint32_t) ((balance_ns * 100ULL) / lei.lei_last_refill);
+
+	<span class="enscript-comment">/* Show refill period in the same units as balance, limit, etc */</span>
+	nanoseconds_to_absolutetime(lei.lei_refill_period, &amp;lei.lei_refill_period);
+
+	limit_percent = (uint32_t) ((lei.lei_limit * 100ULL) / lei.lei_refill_period);
+
+	<span class="enscript-comment">/*  TODO: show task total runtime as well? see TASK_ABSOLUTETIME_INFO */</span>
+
+	<span class="enscript-keyword">if</span> (disable_exc_resource) {
+		printf(<span class="enscript-string">&quot;process %s[%d] thread %llu caught burning CPU!; EXC_RESOURCE &quot;</span>
+			<span class="enscript-string">&quot;supressed by a boot-arg\n&quot;</span>, procname, pid, tid);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (audio_active) {
+		printf(<span class="enscript-string">&quot;process %s[%d] thread %llu caught burning CPU!; EXC_RESOURCE &quot;</span>
+		       <span class="enscript-string">&quot;supressed due to audio playback\n&quot;</span>, procname, pid, tid);
+		<span class="enscript-keyword">return</span>;
+	}
+	printf(<span class="enscript-string">&quot;process %s[%d] thread %llu caught burning CPU! &quot;</span>
+	       <span class="enscript-string">&quot;It used more than %d%% CPU (Actual recent usage: %d%%) over %d seconds. &quot;</span>
+	       <span class="enscript-string">&quot;thread lifetime cpu usage %d.%06d seconds, (%d.%06d user, %d.%06d system) &quot;</span>
+	       <span class="enscript-string">&quot;ledger info: balance: %lld credit: %lld debit: %lld limit: %llu (%d%%) &quot;</span>
+	       <span class="enscript-string">&quot;period: %llu time since last refill (ns): %llu %s\n&quot;</span>,
+	       procname, pid, tid,
+	       percentage, usage_percent,  interval_sec,
+	       thread_total_time.seconds,  thread_total_time.microseconds,
+	       thread_user_time.seconds,   thread_user_time.microseconds,
+	       thread_system_time.seconds, thread_system_time.microseconds,
+	       lei.lei_balance,
+	       lei.lei_credit,             lei.lei_debit,
+	       lei.lei_limit,              limit_percent,
+	       lei.lei_refill_period,      lei.lei_last_refill,
+	       (fatal ? <span class="enscript-string">&quot;[fatal violation]&quot;</span> : <span class="enscript-string">&quot;&quot;</span>));
+
+
+	code[0] = code[1] = 0;
+	EXC_RESOURCE_ENCODE_TYPE(code[0], RESOURCE_TYPE_CPU);
+	<span class="enscript-keyword">if</span> (fatal) {
+		EXC_RESOURCE_ENCODE_FLAVOR(code[0], FLAVOR_CPU_MONITOR_FATAL);
+	}<span class="enscript-keyword">else</span> {
+		EXC_RESOURCE_ENCODE_FLAVOR(code[0], FLAVOR_CPU_MONITOR);
+	}
+	EXC_RESOURCE_CPUMONITOR_ENCODE_INTERVAL(code[0], interval_sec);
+	EXC_RESOURCE_CPUMONITOR_ENCODE_PERCENTAGE(code[0], limit_percent);
+	EXC_RESOURCE_CPUMONITOR_ENCODE_PERCENTAGE(code[1], usage_percent);
+	exception_triage(EXC_RESOURCE, code, EXCEPTION_CODE_MAX);
+
+	<span class="enscript-keyword">if</span> (fatal) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_JETSAM</span>
+		jetsam_on_ledger_cpulimit_exceeded();
+#<span class="enscript-reference">else</span>
+		task_terminate_internal(task);
+#<span class="enscript-reference">endif</span>
+	}
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">UPDATE_IO_STATS</span>(info, size) 				\
+{ 								\
+	info.count++; 						\
+	info.size += size; 					\
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">UPDATE_IO_STATS_ATOMIC</span>(info, size) 			\
+{ 								\
+	OSIncrementAtomic64((SInt64 *)&amp;(info.count)); 		\
+	OSAddAtomic64(size, (SInt64 *)&amp;(info.size)); 		\
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">thread_update_io_stats</span>(thread_t thread, <span class="enscript-type">int</span> size, <span class="enscript-type">int</span> io_flags)
+{
+	<span class="enscript-type">int</span> io_tier;
+
+	<span class="enscript-keyword">if</span> (thread-&gt;thread_io_stats == NULL || thread-&gt;task-&gt;task_io_stats == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (io_flags &amp; DKIO_READ) {
+		UPDATE_IO_STATS(thread-&gt;thread_io_stats-&gt;disk_reads, size);
+		UPDATE_IO_STATS_ATOMIC(thread-&gt;task-&gt;task_io_stats-&gt;disk_reads, size);
+	}
+	
+	<span class="enscript-keyword">if</span> (io_flags &amp; DKIO_META) {
+		UPDATE_IO_STATS(thread-&gt;thread_io_stats-&gt;metadata, size);
+		UPDATE_IO_STATS_ATOMIC(thread-&gt;task-&gt;task_io_stats-&gt;metadata, size);
+	}
+	
+	<span class="enscript-keyword">if</span> (io_flags &amp; DKIO_PAGING) {
+		UPDATE_IO_STATS(thread-&gt;thread_io_stats-&gt;paging, size);
+		UPDATE_IO_STATS_ATOMIC(thread-&gt;task-&gt;task_io_stats-&gt;paging, size);
+	}
+
+	io_tier = ((io_flags &amp; DKIO_TIER_MASK) &gt;&gt; DKIO_TIER_SHIFT);
+	assert (io_tier &lt; IO_NUM_PRIORITIES);
+
+	UPDATE_IO_STATS(thread-&gt;thread_io_stats-&gt;io_priority[io_tier], size);
+	UPDATE_IO_STATS_ATOMIC(thread-&gt;task-&gt;task_io_stats-&gt;io_priority[io_tier], size);
+
+	<span class="enscript-comment">/* Update Total I/O Counts */</span>
+	UPDATE_IO_STATS(thread-&gt;thread_io_stats-&gt;total_io, size);
+	UPDATE_IO_STATS_ATOMIC(thread-&gt;task-&gt;task_io_stats-&gt;total_io, size);
+
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">init_thread_ledgers</span>(<span class="enscript-type">void</span>) {
+	ledger_template_t t;
+	<span class="enscript-type">int</span> idx;
+	
+	assert(thread_ledger_template == NULL);
+
+	<span class="enscript-keyword">if</span> ((t = ledger_template_create(<span class="enscript-string">&quot;Per-thread ledger&quot;</span>)) == NULL)
+		panic(<span class="enscript-string">&quot;couldn't create thread ledger template&quot;</span>);
+
+	<span class="enscript-keyword">if</span> ((idx = ledger_entry_add(t, <span class="enscript-string">&quot;cpu_time&quot;</span>, <span class="enscript-string">&quot;sched&quot;</span>, <span class="enscript-string">&quot;ns&quot;</span>)) &lt; 0) {
+		panic(<span class="enscript-string">&quot;couldn't create cpu_time entry for thread ledger template&quot;</span>);
+	}
+
+	<span class="enscript-keyword">if</span> (ledger_set_callback(t, idx, thread_cputime_callback, NULL, NULL) &lt; 0) {
+	    	panic(<span class="enscript-string">&quot;couldn't set thread ledger callback for cpu_time entry&quot;</span>);
+	}
+
+	thread_ledgers.cpu_time = idx;
+	
+	thread_ledger_template = t;
+}
+
+<span class="enscript-comment">/*
+ * Returns currently applied CPU usage limit, or 0/0 if none is applied.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">thread_get_cpulimit</span>(<span class="enscript-type">int</span> *action, uint8_t *percentage, uint64_t *interval_ns)
+{
+	int64_t		abstime = 0;
+	uint64_t 	limittime = 0;
+	thread_t	thread = current_thread();
+
+	*percentage  = 0;
+	*interval_ns = 0;
+	*action      = 0;
+
+	<span class="enscript-keyword">if</span> (thread-&gt;t_threadledger == LEDGER_NULL) {
+		<span class="enscript-comment">/*
+		 * This thread has no per-thread ledger, so it can't possibly
+		 * have a CPU limit applied.
+		 */</span>
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	ledger_get_period(thread-&gt;t_threadledger, thread_ledgers.cpu_time, interval_ns);
+	ledger_get_limit(thread-&gt;t_threadledger, thread_ledgers.cpu_time, &amp;abstime);
+
+	<span class="enscript-keyword">if</span> ((abstime == LEDGER_LIMIT_INFINITY) || (*interval_ns == 0)) {
+		<span class="enscript-comment">/*
+		 * This thread's CPU time ledger has no period or limit; so it
+		 * doesn't have a CPU limit applied.
+		 */</span>
+		 <span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	<span class="enscript-comment">/*
+	 * This calculation is the converse to the one in thread_set_cpulimit().
+	 */</span>
+	absolutetime_to_nanoseconds(abstime, &amp;limittime);
+	*percentage = (limittime * 100ULL) / *interval_ns;
+	assert(*percentage &lt;= 100);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;options &amp; TH_OPT_PROC_CPULIMIT) {
+		assert((thread-&gt;options &amp; TH_OPT_PRVT_CPULIMIT) == 0);
+
+		*action = THREAD_CPULIMIT_BLOCK;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (thread-&gt;options &amp; TH_OPT_PRVT_CPULIMIT) {
+		assert((thread-&gt;options &amp; TH_OPT_PROC_CPULIMIT) == 0);
+
+		*action = THREAD_CPULIMIT_EXCEPTION;
+	} <span class="enscript-keyword">else</span> {
+		*action = THREAD_CPULIMIT_DISABLE;
+	}
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ * Set CPU usage limit on a thread.
+ *
+ * Calling with percentage of 0 will unset the limit for this thread.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">thread_set_cpulimit</span>(<span class="enscript-type">int</span> action, uint8_t percentage, uint64_t interval_ns)
+{
+	thread_t	thread = current_thread(); 
+	ledger_t	l;
+	uint64_t 	limittime = 0;
+	uint64_t	abstime = 0;
+
+	assert(percentage &lt;= 100);
+
+	<span class="enscript-keyword">if</span> (action == THREAD_CPULIMIT_DISABLE) {
+		<span class="enscript-comment">/*
+		 * Remove CPU limit, if any exists.
+		 */</span>
+		<span class="enscript-keyword">if</span> (thread-&gt;t_threadledger != LEDGER_NULL) {
+			l = thread-&gt;t_threadledger;
+			ledger_set_limit(l, thread_ledgers.cpu_time, LEDGER_LIMIT_INFINITY, 0);
+			ledger_set_action(l, thread_ledgers.cpu_time, LEDGER_ACTION_IGNORE);
+			thread-&gt;options &amp;= ~(TH_OPT_PROC_CPULIMIT | TH_OPT_PRVT_CPULIMIT);
+		}
+
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">if</span> (interval_ns &lt; MINIMUM_CPULIMIT_INTERVAL_MS * NSEC_PER_MSEC) {
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	}
+
+ 	l = thread-&gt;t_threadledger;
+	<span class="enscript-keyword">if</span> (l == LEDGER_NULL) {
+		<span class="enscript-comment">/*
+		 * This thread doesn't yet have a per-thread ledger; so create one with the CPU time entry active.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((l = ledger_instantiate(thread_ledger_template, LEDGER_CREATE_INACTIVE_ENTRIES)) == LEDGER_NULL)
+			<span class="enscript-keyword">return</span> (KERN_RESOURCE_SHORTAGE);
+
+		<span class="enscript-comment">/*
+		 * We are the first to create this thread's ledger, so only activate our entry.
+		 */</span>
+		ledger_entry_setactive(l, thread_ledgers.cpu_time);
+		thread-&gt;t_threadledger = l;
+	}
+
+	<span class="enscript-comment">/*
+	 * The limit is specified as a percentage of CPU over an interval in nanoseconds.
+	 * Calculate the amount of CPU time that the thread needs to consume in order to hit the limit.
+	 */</span>
+	limittime = (interval_ns * percentage) / 100;
+	nanoseconds_to_absolutetime(limittime, &amp;abstime); 
+	ledger_set_limit(l, thread_ledgers.cpu_time, abstime, cpumon_ustackshots_trigger_pct);
+	<span class="enscript-comment">/*
+	 * Refill the thread's allotted CPU time every interval_ns nanoseconds.
+	 */</span>
+	ledger_set_period(l, thread_ledgers.cpu_time, interval_ns);
+
+	<span class="enscript-keyword">if</span> (action == THREAD_CPULIMIT_EXCEPTION) {
+		<span class="enscript-comment">/*
+		 * We don't support programming the CPU usage monitor on a task if any of its
+		 * threads have a per-thread blocking CPU limit configured.
+		 */</span>
+		<span class="enscript-keyword">if</span> (thread-&gt;options &amp; TH_OPT_PRVT_CPULIMIT) {
+			panic(<span class="enscript-string">&quot;CPU usage monitor activated, but blocking thread limit exists&quot;</span>);
+		}
+
+		<span class="enscript-comment">/*
+		 * Make a note that this thread's CPU limit is being used for the task-wide CPU
+		 * usage monitor. We don't have to arm the callback which will trigger the
+		 * exception, because that was done for us in ledger_instantiate (because the
+		 * ledger template used has a default callback).
+		 */</span>
+		thread-&gt;options |= TH_OPT_PROC_CPULIMIT;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * We deliberately override any CPU limit imposed by a task-wide limit (eg
+		 * CPU usage monitor).
+		 */</span>
+		thread-&gt;options &amp;= ~TH_OPT_PROC_CPULIMIT;		
+
+		thread-&gt;options |= TH_OPT_PRVT_CPULIMIT;
+		<span class="enscript-comment">/* The per-thread ledger template by default has a callback for CPU time */</span>
+		ledger_disable_callback(l, thread_ledgers.cpu_time);
+		ledger_set_action(l, thread_ledgers.cpu_time, LEDGER_ACTION_BLOCK);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_call_null</span>(
+__unused	<span class="enscript-type">int</span>			type,
+__unused	thread_t	thread)
+{
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_sched_call</span>(
+	thread_t		thread,
+	sched_call_t	call)
+{
+	thread-&gt;sched_call = (call != NULL)? call: sched_call_null;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_static_param</span>(
+	thread_t		thread,
+	boolean_t		state)
+{
+	thread_mtx_lock(thread);
+	thread-&gt;static_param = state;
+	thread_mtx_unlock(thread);
+}
+
+uint64_t
+<span class="enscript-function-name">thread_tid</span>(
+	thread_t	thread)
+{
+	<span class="enscript-keyword">return</span> (thread != THREAD_NULL? thread-&gt;thread_id: 0);
+}
+
+uint16_t	thread_set_tag(thread_t th, uint16_t tag) {
+	<span class="enscript-keyword">return</span> thread_set_tag_internal(th, tag);
+}
+uint16_t	thread_get_tag(thread_t th) {
+	<span class="enscript-keyword">return</span> thread_get_tag_internal(th);
+}
+
+uint64_t
+<span class="enscript-function-name">thread_dispatchqaddr</span>(
+	thread_t		thread)
+{
+	uint64_t	dispatchqueue_addr = 0;
+	uint64_t	thread_handle = 0;
+
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL) {
+		thread_handle = thread-&gt;machine.cthread_self;
+		
+		 <span class="enscript-keyword">if</span> (thread-&gt;inspection == TRUE)
+			dispatchqueue_addr = thread_handle + get_task_dispatchqueue_offset(thread-&gt;task);
+		 <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (thread-&gt;task-&gt;bsd_info)
+			dispatchqueue_addr = thread_handle + get_dispatchqueue_offset_from_proc(thread-&gt;task-&gt;bsd_info);
+	}
+
+	<span class="enscript-keyword">return</span> (dispatchqueue_addr);
+}
+
+<span class="enscript-comment">/*
+ * Export routines to other components for things that are done as macros
+ * within the osfmk component.
+ */</span>
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">thread_reference</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">thread_reference</span>(thread_t thread);
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_reference</span>(
+	thread_t	thread)
+{
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL)
+		thread_reference_internal(thread);
+}
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">thread_should_halt</span>
+
+boolean_t
+<span class="enscript-function-name">thread_should_halt</span>(
+	thread_t		th)
+{
+	<span class="enscript-keyword">return</span> (thread_should_halt_fast(th));
+}
+
+<span class="enscript-comment">/*
+ * thread_set_voucher_name - reset the voucher port name bound to this thread
+ *
+ * Conditions:  nothing locked
+ *
+ *	If we already converted the previous name to a cached voucher
+ *	reference, then we discard that reference here.  The next lookup
+ *	will cache it again.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">thread_set_voucher_name</span>(mach_port_name_t voucher_name)
+{
+	thread_t thread = current_thread();
+	ipc_voucher_t new_voucher = IPC_VOUCHER_NULL;
+	ipc_voucher_t voucher;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	ledger_t bankledger = NULL;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (MACH_PORT_DEAD == voucher_name)
+		<span class="enscript-keyword">return</span> KERN_INVALID_RIGHT;
+
+	<span class="enscript-comment">/*
+	 * agressively convert to voucher reference
+	 */</span>
+	<span class="enscript-keyword">if</span> (MACH_PORT_VALID(voucher_name)) {
+		new_voucher = convert_port_name_to_voucher(voucher_name);
+		<span class="enscript-keyword">if</span> (IPC_VOUCHER_NULL == new_voucher)
+			<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	bankledger = bank_get_voucher_ledger(new_voucher);
+#<span class="enscript-reference">endif</span>
+
+	thread_mtx_lock(thread);
+	voucher = thread-&gt;ith_voucher;
+	thread-&gt;ith_voucher_name = voucher_name;
+	thread-&gt;ith_voucher = new_voucher;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	bank_swap_thread_bank_ledger(thread, bankledger);
+#<span class="enscript-reference">endif</span>
+	thread_mtx_unlock(thread);
+
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+				  MACHDBG_CODE(DBG_MACH_IPC,MACH_THREAD_SET_VOUCHER) | DBG_FUNC_NONE,
+				  (uintptr_t)thread_tid(thread),
+				  (uintptr_t)voucher_name,
+				  VM_KERNEL_ADDRPERM((uintptr_t)new_voucher),
+				  1, 0);
+
+	<span class="enscript-keyword">if</span> (IPC_VOUCHER_NULL != voucher)
+		ipc_voucher_release(voucher);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/* 
+ *  thread_get_mach_voucher - return a voucher reference for the specified thread voucher
+ *
+ *  Conditions:  nothing locked
+ *
+ *  A reference to the voucher may be lazily pending, if someone set the voucher name
+ *  but nobody has done a lookup yet.  In that case, we'll have to do the equivalent
+ *  lookup here.
+ *
+ *  NOTE:  	At the moment, there is no distinction between the current and effective
+ *		vouchers because we only set them at the thread level currently.
+ */</span>
+kern_return_t 
+<span class="enscript-function-name">thread_get_mach_voucher</span>(
+	thread_act_t		thread,
+	mach_voucher_selector_t __unused which,
+	ipc_voucher_t		*voucherp)
+{
+	ipc_voucher_t	       	voucher;
+	mach_port_name_t	voucher_name;
+
+	<span class="enscript-keyword">if</span> (THREAD_NULL == thread)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	thread_mtx_lock(thread);
+	voucher = thread-&gt;ith_voucher;
+
+	<span class="enscript-comment">/* if already cached, just return a ref */</span>
+	<span class="enscript-keyword">if</span> (IPC_VOUCHER_NULL != voucher) {
+		ipc_voucher_reference(voucher);
+		thread_mtx_unlock(thread);
+		*voucherp = voucher;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	voucher_name = thread-&gt;ith_voucher_name;
+
+	<span class="enscript-comment">/* convert the name to a port, then voucher reference */</span>
+	<span class="enscript-keyword">if</span> (MACH_PORT_VALID(voucher_name)) {
+		ipc_port_t port;
+
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS !=
+		    ipc_object_copyin(thread-&gt;task-&gt;itk_space, voucher_name,
+				      MACH_MSG_TYPE_COPY_SEND, (ipc_object_t *)&amp;port)) {
+			thread-&gt;ith_voucher_name = MACH_PORT_NULL;
+			thread_mtx_unlock(thread);
+			*voucherp = IPC_VOUCHER_NULL;
+			<span class="enscript-keyword">return</span> KERN_SUCCESS;
+		}
+
+		<span class="enscript-comment">/* convert to a voucher ref to return, and cache a ref on thread */</span>
+		voucher = convert_port_to_voucher(port);
+		ipc_voucher_reference(voucher);
+		thread-&gt;ith_voucher = voucher;
+		thread_mtx_unlock(thread);
+
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+					  MACHDBG_CODE(DBG_MACH_IPC,MACH_THREAD_SET_VOUCHER) | DBG_FUNC_NONE,
+					  (uintptr_t)thread_tid(thread),
+					  (uintptr_t)port,
+					  VM_KERNEL_ADDRPERM((uintptr_t)voucher),
+					  2, 0);
+
+
+		ipc_port_release_send(port);
+	} <span class="enscript-keyword">else</span>
+		thread_mtx_unlock(thread);
+
+	*voucherp = voucher;
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/* 
+ *  thread_set_mach_voucher - set a voucher reference for the specified thread voucher
+ *
+ *  Conditions: callers holds a reference on the voucher.
+ *		nothing locked.
+ *
+ *  We grab another reference to the voucher and bind it to the thread.  Any lazy
+ *  binding is erased.  The old voucher reference associated with the thread is
+ *  discarded.
+ */</span>
+kern_return_t 
+<span class="enscript-function-name">thread_set_mach_voucher</span>(
+	thread_t		thread,
+	ipc_voucher_t		voucher)
+{
+	ipc_voucher_t old_voucher;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	ledger_t bankledger = NULL;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (THREAD_NULL == thread)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-keyword">if</span> (thread != current_thread() || thread-&gt;started)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+
+	ipc_voucher_reference(voucher);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	bankledger = bank_get_voucher_ledger(voucher);
+#<span class="enscript-reference">endif</span>
+	thread_mtx_lock(thread);
+	old_voucher = thread-&gt;ith_voucher;
+	thread-&gt;ith_voucher = voucher;
+	thread-&gt;ith_voucher_name = MACH_PORT_NULL;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	bank_swap_thread_bank_ledger(thread, bankledger);
+#<span class="enscript-reference">endif</span>
+	thread_mtx_unlock(thread);
+
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+				  MACHDBG_CODE(DBG_MACH_IPC,MACH_THREAD_SET_VOUCHER) | DBG_FUNC_NONE,
+				  (uintptr_t)thread_tid(thread),
+				  (uintptr_t)MACH_PORT_NULL,
+				  VM_KERNEL_ADDRPERM((uintptr_t)voucher),
+				  3, 0);
+
+	ipc_voucher_release(old_voucher);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/* 
+ *  thread_swap_mach_voucher - swap a voucher reference for the specified thread voucher
+ *
+ *  Conditions: callers holds a reference on the new and presumed old voucher(s).
+ *		nothing locked.
+ *
+ *  If the old voucher is still the same as passed in, replace it with new voucher
+ *  and discard the old (and the reference passed in).  Otherwise, discard the new
+ *  and return an updated old voucher.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_swap_mach_voucher</span>(
+	thread_t		thread,
+	ipc_voucher_t		new_voucher,
+	ipc_voucher_t		*in_out_old_voucher)
+{
+	mach_port_name_t old_voucher_name;
+	ipc_voucher_t old_voucher;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	ledger_t bankledger = NULL;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (THREAD_NULL == thread)
+		<span class="enscript-keyword">return</span> KERN_INVALID_TASK;
+
+	<span class="enscript-keyword">if</span> (thread != current_thread() || thread-&gt;started)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	bankledger = bank_get_voucher_ledger(new_voucher);
+#<span class="enscript-reference">endif</span>
+
+	thread_mtx_lock(thread);
+
+	old_voucher = thread-&gt;ith_voucher;
+
+	<span class="enscript-keyword">if</span> (IPC_VOUCHER_NULL == old_voucher) {
+		old_voucher_name = thread-&gt;ith_voucher_name;
+
+		<span class="enscript-comment">/* perform lazy binding if needed */</span>
+		<span class="enscript-keyword">if</span> (MACH_PORT_VALID(old_voucher_name)) {
+			old_voucher = convert_port_name_to_voucher(old_voucher_name);
+			thread-&gt;ith_voucher_name = MACH_PORT_NULL;
+			thread-&gt;ith_voucher = old_voucher;
+
+			KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+						  MACHDBG_CODE(DBG_MACH_IPC,MACH_THREAD_SET_VOUCHER) | DBG_FUNC_NONE,
+						  (uintptr_t)thread_tid(thread),
+						  (uintptr_t)old_voucher_name,
+						  VM_KERNEL_ADDRPERM((uintptr_t)old_voucher),
+						  4, 0);
+
+		}
+	}
+
+	<span class="enscript-comment">/* swap in new voucher, if old voucher matches the one supplied */</span>
+	<span class="enscript-keyword">if</span> (old_voucher == *in_out_old_voucher) {
+		ipc_voucher_reference(new_voucher);
+		thread-&gt;ith_voucher = new_voucher;
+		thread-&gt;ith_voucher_name = MACH_PORT_NULL;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+		bank_swap_thread_bank_ledger(thread, bankledger);
+#<span class="enscript-reference">endif</span>
+		thread_mtx_unlock(thread);
+
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+					  MACHDBG_CODE(DBG_MACH_IPC,MACH_THREAD_SET_VOUCHER) | DBG_FUNC_NONE,
+					  (uintptr_t)thread_tid(thread),
+					  (uintptr_t)MACH_PORT_NULL,
+					  VM_KERNEL_ADDRPERM((uintptr_t)new_voucher),
+					  5, 0);
+
+		ipc_voucher_release(old_voucher);
+
+		*in_out_old_voucher = IPC_VOUCHER_NULL;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	<span class="enscript-comment">/* Otherwise, just return old voucher reference */</span>
+	ipc_voucher_reference(old_voucher);
+	thread_mtx_unlock(thread);
+	*in_out_old_voucher = old_voucher;
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/* 
+ *  thread_get_current_voucher_origin_pid - get the pid of the originator of the current voucher.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_get_current_voucher_origin_pid</span>(
+	int32_t      *pid)
+{
+	uint32_t buf_size;
+	kern_return_t kr;
+	thread_t thread = current_thread();
+	
+	buf_size = <span class="enscript-keyword">sizeof</span>(*pid);
+	kr = mach_voucher_attr_command(thread-&gt;ith_voucher,
+		MACH_VOUCHER_ATTR_KEY_BANK,
+		BANK_ORIGINATOR_PID,
+		NULL,
+		0,
+		(mach_voucher_attr_content_t)pid,
+		&amp;buf_size);
+
+	<span class="enscript-keyword">return</span> kr;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+uint32_t <span class="enscript-function-name">dtrace_get_thread_predcache</span>(thread_t thread)
+{
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL)
+		<span class="enscript-keyword">return</span> thread-&gt;t_dtrace_predcache;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> 0;
+}
+
+int64_t <span class="enscript-function-name">dtrace_get_thread_vtime</span>(thread_t thread)
+{
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL)
+		<span class="enscript-keyword">return</span> thread-&gt;t_dtrace_vtime;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">dtrace_get_thread_last_cpu_id</span>(thread_t thread)
+{
+	<span class="enscript-keyword">if</span> ((thread != THREAD_NULL) &amp;&amp; (thread-&gt;last_processor != PROCESSOR_NULL)) {
+		<span class="enscript-keyword">return</span> thread-&gt;last_processor-&gt;cpu_id;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span> -1;
+	}
+}
+
+int64_t <span class="enscript-function-name">dtrace_get_thread_tracing</span>(thread_t thread)
+{
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL)
+		<span class="enscript-keyword">return</span> thread-&gt;t_dtrace_tracing;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> 0;
+}
+
+boolean_t <span class="enscript-function-name">dtrace_get_thread_reentering</span>(thread_t thread)
+{
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL)
+		<span class="enscript-keyword">return</span> (thread-&gt;options &amp; TH_OPT_DTRACE) ? TRUE : FALSE;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> 0;
+}
+
+vm_offset_t <span class="enscript-function-name">dtrace_get_kernel_stack</span>(thread_t thread)
+{
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL)
+		<span class="enscript-keyword">return</span> thread-&gt;kernel_stack;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> 0;
+}
+
+int64_t <span class="enscript-function-name">dtrace_calc_thread_recent_vtime</span>(thread_t thread)
+{
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL) {
+		processor_t             processor = current_processor();
+		uint64_t 				abstime = mach_absolute_time();
+		timer_t					timer;
+
+		timer = PROCESSOR_DATA(processor, thread_timer);
+
+		<span class="enscript-keyword">return</span> timer_grab(&amp;(thread-&gt;system_timer)) + timer_grab(&amp;(thread-&gt;user_timer)) +
+				(abstime - timer-&gt;tstamp); <span class="enscript-comment">/* XXX need interrupts off to prevent missed time? */</span>
+	} <span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">dtrace_set_thread_predcache</span>(thread_t thread, uint32_t predcache)
+{
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL)
+		thread-&gt;t_dtrace_predcache = predcache;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">dtrace_set_thread_vtime</span>(thread_t thread, int64_t vtime)
+{
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL)
+		thread-&gt;t_dtrace_vtime = vtime;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">dtrace_set_thread_tracing</span>(thread_t thread, int64_t accum)
+{
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL)
+		thread-&gt;t_dtrace_tracing = accum;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">dtrace_set_thread_reentering</span>(thread_t thread, boolean_t vbool)
+{
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL) {
+		<span class="enscript-keyword">if</span> (vbool)
+			thread-&gt;options |= TH_OPT_DTRACE;
+		<span class="enscript-keyword">else</span>
+			thread-&gt;options &amp;= (~TH_OPT_DTRACE);
+	}
+}
+
+vm_offset_t <span class="enscript-function-name">dtrace_set_thread_recover</span>(thread_t thread, vm_offset_t recover)
+{
+	vm_offset_t prev = 0;
+
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL) {
+		prev = thread-&gt;recover;
+		thread-&gt;recover = recover;
+	}
+	<span class="enscript-keyword">return</span> prev;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">dtrace_thread_bootstrap</span>(<span class="enscript-type">void</span>)
+{
+	task_t task = current_task();
+
+	<span class="enscript-keyword">if</span> (task-&gt;thread_count == 1) {
+		thread_t thread = current_thread();
+		<span class="enscript-keyword">if</span> (thread-&gt;t_dtrace_flags &amp; TH_DTRACE_EXECSUCCESS) {
+			thread-&gt;t_dtrace_flags &amp;= ~TH_DTRACE_EXECSUCCESS;
+			DTRACE_PROC(exec__success);
+		}
+		DTRACE_PROC(start);
+	}
+	DTRACE_PROC(lwp__start);
+
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_thread_didexec</span>(thread_t thread)
+{
+	thread-&gt;t_dtrace_flags |= TH_DTRACE_EXECSUCCESS;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_DTRACE */</span>
+</pre>
+<hr />
+</body></html>

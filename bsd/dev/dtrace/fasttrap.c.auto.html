@@ -1,0 +1,2582 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>fasttrap.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">fasttrap.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the &quot;License&quot;).
+ * You may not use this file except in compliance with the License.
+ *
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or <a href="http://www.opensolaris.org/os/licensing.">http://www.opensolaris.org/os/licensing.</a>
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets &quot;[]&quot; replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
+ * Use is subject to license terms.
+ */</span>
+
+<span class="enscript-comment">/*
+ * #pragma ident	&quot;@(#)fasttrap.c	1.26	08/04/21 SMI&quot;
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/utfconv.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fasttrap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fasttrap_impl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fasttrap_isa.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_impl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/devfs/devfs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_glue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_ptss.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+<span class="enscript-comment">/* Solaris proc_t is the struct. Darwin's proc_t is a pointer to it. */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">proc_t</span> struct proc <span class="enscript-comment">/* Steer clear of the Darwin typedef for proc_t */</span>
+
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">qsort</span>(<span class="enscript-type">void</span> *a, size_t n, size_t es, <span class="enscript-type">int</span> (*cmp)(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *));
+
+<span class="enscript-comment">/*
+ * User-Land Trap-Based Tracing
+ * ----------------------------
+ *
+ * The fasttrap provider allows DTrace consumers to instrument any user-level
+ * instruction to gather data; this includes probes with semantic
+ * signifigance like entry and return as well as simple offsets into the
+ * function. While the specific techniques used are very ISA specific, the
+ * methodology is generalizable to any architecture.
+ *
+ *
+ * The General Methodology
+ * -----------------------
+ *
+ * With the primary goal of tracing every user-land instruction and the
+ * limitation that we can't trust user space so don't want to rely on much
+ * information there, we begin by replacing the instructions we want to trace
+ * with trap instructions. Each instruction we overwrite is saved into a hash
+ * table keyed by process ID and pc address. When we enter the kernel due to
+ * this trap instruction, we need the effects of the replaced instruction to
+ * appear to have occurred before we proceed with the user thread's
+ * execution.
+ *
+ * Each user level thread is represented by a ulwp_t structure which is
+ * always easily accessible through a register. The most basic way to produce
+ * the effects of the instruction we replaced is to copy that instruction out
+ * to a bit of scratch space reserved in the user thread's ulwp_t structure
+ * (a sort of kernel-private thread local storage), set the PC to that
+ * scratch space and single step. When we reenter the kernel after single
+ * stepping the instruction we must then adjust the PC to point to what would
+ * normally be the next instruction. Of course, special care must be taken
+ * for branches and jumps, but these represent such a small fraction of any
+ * instruction set that writing the code to emulate these in the kernel is
+ * not too difficult.
+ *
+ * Return probes may require several tracepoints to trace every return site,
+ * and, conversely, each tracepoint may activate several probes (the entry
+ * and offset 0 probes, for example). To solve this muliplexing problem,
+ * tracepoints contain lists of probes to activate and probes contain lists
+ * of tracepoints to enable. If a probe is activated, it adds its ID to
+ * existing tracepoints or creates new ones as necessary.
+ *
+ * Most probes are activated _before_ the instruction is executed, but return
+ * probes are activated _after_ the effects of the last instruction of the
+ * function are visible. Return probes must be fired _after_ we have
+ * single-stepped the instruction whereas all other probes are fired
+ * beforehand.
+ *
+ *
+ * Lock Ordering
+ * -------------
+ *
+ * The lock ordering below -- both internally and with respect to the DTrace
+ * framework -- is a little tricky and bears some explanation. Each provider
+ * has a lock (ftp_mtx) that protects its members including reference counts
+ * for enabled probes (ftp_rcount), consumers actively creating probes
+ * (ftp_ccount) and USDT consumers (ftp_mcount); all three prevent a provider
+ * from being freed. A provider is looked up by taking the bucket lock for the
+ * provider hash table, and is returned with its lock held. The provider lock
+ * may be taken in functions invoked by the DTrace framework, but may not be
+ * held while calling functions in the DTrace framework.
+ *
+ * To ensure consistency over multiple calls to the DTrace framework, the
+ * creation lock (ftp_cmtx) should be held. Naturally, the creation lock may
+ * not be taken when holding the provider lock as that would create a cyclic
+ * lock ordering. In situations where one would naturally take the provider
+ * lock and then the creation lock, we instead up a reference count to prevent
+ * the provider from disappearing, drop the provider lock, and acquire the
+ * creation lock.
+ *
+ * Briefly:
+ * 	bucket lock before provider lock
+ *	DTrace before provider lock
+ *	creation lock before DTrace
+ *	never hold the provider lock and creation lock simultaneously
+ */</span>
+
+<span class="enscript-type">static</span> dev_info_t *fasttrap_devi;
+<span class="enscript-type">static</span> dtrace_meta_provider_id_t fasttrap_meta_id;
+
+<span class="enscript-type">static</span> thread_call_t fasttrap_timeout;
+<span class="enscript-type">static</span> lck_mtx_t fasttrap_cleanup_mtx;
+<span class="enscript-type">static</span> uint_t fasttrap_cleanup_work;
+
+<span class="enscript-comment">/*
+ * Generation count on modifications to the global tracepoint lookup table.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> uint64_t fasttrap_mod_gen;
+
+<span class="enscript-comment">/*
+ * APPLE NOTE: When the fasttrap provider is loaded, fasttrap_max is computed
+ * base on system memory.  Each time a probe is created, fasttrap_total is
+ * incremented by the number of tracepoints that may be associated with that
+ * probe; fasttrap_total is capped at fasttrap_max.
+ */</span>
+
+<span class="enscript-type">static</span> uint32_t fasttrap_max;
+<span class="enscript-type">static</span> uint32_t fasttrap_total;
+
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FASTTRAP_TPOINTS_DEFAULT_SIZE</span>	0x4000
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FASTTRAP_PROVIDERS_DEFAULT_SIZE</span>	0x100
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FASTTRAP_PROCS_DEFAULT_SIZE</span>	0x100
+
+fasttrap_hash_t			fasttrap_tpoints;
+<span class="enscript-type">static</span> fasttrap_hash_t		fasttrap_provs;
+<span class="enscript-type">static</span> fasttrap_hash_t		fasttrap_procs;
+
+<span class="enscript-type">static</span> uint64_t			fasttrap_pid_count;	<span class="enscript-comment">/* pid ref count */</span>
+<span class="enscript-type">static</span> lck_mtx_t       		fasttrap_count_mtx;	<span class="enscript-comment">/* lock on ref count */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FASTTRAP_ENABLE_FAIL</span>	1
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FASTTRAP_ENABLE_PARTIAL</span>	2
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">fasttrap_tracepoint_enable</span>(proc_t *, fasttrap_probe_t *, uint_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">fasttrap_tracepoint_disable</span>(proc_t *, fasttrap_probe_t *, uint_t);
+
+<span class="enscript-type">static</span> fasttrap_provider_t *<span class="enscript-function-name">fasttrap_provider_lookup</span>(pid_t, fasttrap_provider_type_t, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *,
+    <span class="enscript-type">const</span> dtrace_pattr_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">fasttrap_provider_retire</span>(pid_t, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">fasttrap_provider_free</span>(fasttrap_provider_t *);
+
+<span class="enscript-type">static</span> fasttrap_proc_t *<span class="enscript-function-name">fasttrap_proc_lookup</span>(pid_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">fasttrap_proc_release</span>(fasttrap_proc_t *);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">FASTTRAP_PROVS_INDEX</span>(pid, name) \
+	((fasttrap_hash_str(name) + (pid)) &amp; fasttrap_provs.fth_mask)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">FASTTRAP_PROCS_INDEX</span>(pid) ((pid) &amp; fasttrap_procs.fth_mask)
+
+<span class="enscript-comment">/*
+ * APPLE NOTE: To save memory, some common memory allocations are given
+ * a unique zone. For example, dtrace_probe_t is 72 bytes in size,
+ * which means it would fall into the kalloc.128 bucket. With
+ * 20k elements allocated, the space saved is substantial.
+ */</span>
+
+<span class="enscript-type">struct</span> zone *fasttrap_tracepoint_t_zone;
+
+<span class="enscript-comment">/*
+ * APPLE NOTE: fasttrap_probe_t's are variable in size. Some quick profiling has shown
+ * that the sweet spot for reducing memory footprint is covering the first
+ * three sizes. Everything larger goes into the common pool.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">FASTTRAP_PROBE_T_ZONE_MAX_TRACEPOINTS</span> 4
+
+<span class="enscript-type">struct</span> zone *fasttrap_probe_t_zones[FASTTRAP_PROBE_T_ZONE_MAX_TRACEPOINTS];
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *fasttrap_probe_t_zone_names[FASTTRAP_PROBE_T_ZONE_MAX_TRACEPOINTS] = {
+	<span class="enscript-string">&quot;&quot;</span>,
+	<span class="enscript-string">&quot;dtrace.fasttrap_probe_t[1]&quot;</span>,
+	<span class="enscript-string">&quot;dtrace.fasttrap_probe_t[2]&quot;</span>,
+	<span class="enscript-string">&quot;dtrace.fasttrap_probe_t[3]&quot;</span>
+};
+
+<span class="enscript-comment">/*
+ * APPLE NOTE:  We have to manage locks explicitly
+ */</span>
+lck_grp_t*			fasttrap_lck_grp;
+lck_grp_attr_t*			fasttrap_lck_grp_attr;
+lck_attr_t*			fasttrap_lck_attr;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">fasttrap_highbit</span>(ulong_t i)
+{
+	<span class="enscript-type">int</span> h = 1;
+
+	<span class="enscript-keyword">if</span> (i == 0)
+		<span class="enscript-keyword">return</span> (0);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_LP64</span>
+	<span class="enscript-keyword">if</span> (i &amp; 0xffffffff00000000ul) {
+		h += 32; i &gt;&gt;= 32;
+	}
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (i &amp; 0xffff0000) {
+		h += 16; i &gt;&gt;= 16;
+	}
+	<span class="enscript-keyword">if</span> (i &amp; 0xff00) {
+		h += 8; i &gt;&gt;= 8;
+	}
+	<span class="enscript-keyword">if</span> (i &amp; 0xf0) {
+		h += 4; i &gt;&gt;= 4;
+	}
+	<span class="enscript-keyword">if</span> (i &amp; 0xc) {
+		h += 2; i &gt;&gt;= 2;
+	}
+	<span class="enscript-keyword">if</span> (i &amp; 0x2) {
+		h += 1;
+	}
+	<span class="enscript-keyword">return</span> (h);
+}
+
+<span class="enscript-type">static</span> uint_t
+<span class="enscript-function-name">fasttrap_hash_str</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *p)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> g;
+	uint_t hval = 0;
+
+	<span class="enscript-keyword">while</span> (*p) {
+		hval = (hval &lt;&lt; 4) + *p++;
+		<span class="enscript-keyword">if</span> ((g = (hval &amp; 0xf0000000)) != 0)
+			hval ^= g &gt;&gt; 24;
+		hval &amp;= ~g;
+	}
+	<span class="enscript-keyword">return</span> (hval);
+}
+
+<span class="enscript-comment">/*
+ * APPLE NOTE: fasttrap_sigtrap not implemented
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_sigtrap</span>(proc_t *p, uthread_t t, user_addr_t pc)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">p</span>, <span class="enscript-variable-name">t</span>, <span class="enscript-variable-name">pc</span>)
+
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__APPLE__</span>)
+	sigqueue_t *sqp = kmem_zalloc(<span class="enscript-keyword">sizeof</span> (sigqueue_t), KM_SLEEP);
+
+	sqp-&gt;sq_info.si_signo = SIGTRAP;
+	sqp-&gt;sq_info.si_code = TRAP_DTRACE;
+	sqp-&gt;sq_info.si_addr = (caddr_t)pc;
+
+	mutex_enter(&amp;p-&gt;p_lock);
+	sigaddqa(p, t, sqp);
+	mutex_exit(&amp;p-&gt;p_lock);
+
+	<span class="enscript-keyword">if</span> (t != NULL)
+		aston(t);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE__ */</span>
+
+	printf(<span class="enscript-string">&quot;fasttrap_sigtrap called with no implementation.\n&quot;</span>);
+}
+
+<span class="enscript-comment">/*
+ * This function ensures that no threads are actively using the memory
+ * associated with probes that were formerly live.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_mod_barrier</span>(uint64_t gen)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">if</span> (gen &lt; fasttrap_mod_gen)
+		<span class="enscript-keyword">return</span>;
+
+	fasttrap_mod_gen++;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; NCPU; i++) {
+		lck_mtx_lock(&amp;cpu_core[i].cpuc_pid_lock);
+		lck_mtx_unlock(&amp;cpu_core[i].cpuc_pid_lock);
+	}
+}
+
+<span class="enscript-comment">/*
+ * This is the timeout's callback for cleaning up the providers and their
+ * probes.
+ */</span>
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_pid_cleanup_cb</span>(<span class="enscript-type">void</span> *ignored, <span class="enscript-type">void</span>* ignored2)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">ignored</span>, <span class="enscript-variable-name">ignored2</span>)
+	fasttrap_provider_t **fpp, *fp;
+	fasttrap_bucket_t *bucket;
+	dtrace_provider_id_t provid;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i, later = 0;
+
+	<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> <span class="enscript-type">int</span> in = 0;
+	ASSERT(in == 0);
+	in = 1;
+
+	lck_mtx_lock(&amp;fasttrap_cleanup_mtx);
+	<span class="enscript-keyword">while</span> (fasttrap_cleanup_work) {
+		fasttrap_cleanup_work = 0;
+		lck_mtx_unlock(&amp;fasttrap_cleanup_mtx);
+
+		later = 0;
+
+		<span class="enscript-comment">/*
+		 * Iterate over all the providers trying to remove the marked
+		 * ones. If a provider is marked but not retired, we just
+		 * have to take a crack at removing it -- it's no big deal if
+		 * we can't.
+		 */</span>
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; fasttrap_provs.fth_nent; i++) {
+			bucket = &amp;fasttrap_provs.fth_table[i];
+			lck_mtx_lock(&amp;bucket-&gt;ftb_mtx);
+			fpp = (fasttrap_provider_t **)&amp;bucket-&gt;ftb_data;
+
+			<span class="enscript-keyword">while</span> ((fp = *fpp) != NULL) {
+				<span class="enscript-keyword">if</span> (!fp-&gt;ftp_marked) {
+					fpp = &amp;fp-&gt;ftp_next;
+					<span class="enscript-keyword">continue</span>;
+				}
+
+				lck_mtx_lock(&amp;fp-&gt;ftp_mtx);
+
+				<span class="enscript-comment">/*
+				 * If this provider has consumers actively
+				 * creating probes (ftp_ccount) or is a USDT
+				 * provider (ftp_mcount), we can't unregister
+				 * or even condense.
+				 */</span>
+				<span class="enscript-keyword">if</span> (fp-&gt;ftp_ccount != 0 ||
+				    fp-&gt;ftp_mcount != 0) {
+					fp-&gt;ftp_marked = 0;
+					lck_mtx_unlock(&amp;fp-&gt;ftp_mtx);
+					<span class="enscript-keyword">continue</span>;
+				}
+
+				<span class="enscript-keyword">if</span> (!fp-&gt;ftp_retired || fp-&gt;ftp_rcount != 0)
+					fp-&gt;ftp_marked = 0;
+
+				lck_mtx_unlock(&amp;fp-&gt;ftp_mtx);
+
+				<span class="enscript-comment">/*
+				 * If we successfully unregister this
+				 * provider we can remove it from the hash
+				 * chain and free the memory. If our attempt
+				 * to unregister fails and this is a retired
+				 * provider, increment our flag to try again
+				 * pretty soon. If we've consumed more than
+				 * half of our total permitted number of
+				 * probes call dtrace_condense() to try to
+				 * clean out the unenabled probes.
+				 */</span>
+				provid = fp-&gt;ftp_provid;
+				<span class="enscript-keyword">if</span> (dtrace_unregister(provid) != 0) {
+					<span class="enscript-keyword">if</span> (fasttrap_total &gt; fasttrap_max / 2)
+						(<span class="enscript-type">void</span>) dtrace_condense(provid);
+					later += fp-&gt;ftp_marked;
+					fpp = &amp;fp-&gt;ftp_next;
+				} <span class="enscript-keyword">else</span> {
+					*fpp = fp-&gt;ftp_next;
+					fasttrap_provider_free(fp);
+				}
+			}
+			lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+		}
+
+		lck_mtx_lock(&amp;fasttrap_cleanup_mtx);
+	}
+
+	ASSERT(fasttrap_timeout != 0);
+
+	<span class="enscript-comment">/*
+	 * APPLE NOTE: You must hold the fasttrap_cleanup_mtx to do this!
+	 */</span>
+	<span class="enscript-keyword">if</span> (fasttrap_timeout != (thread_call_t)1)
+		thread_call_free(fasttrap_timeout);
+
+	<span class="enscript-comment">/*
+	 * If we were unable to remove a retired provider, try again after
+	 * a second. This situation can occur in certain circumstances where
+	 * providers cannot be unregistered even though they have no probes
+	 * enabled because of an execution of dtrace -l or something similar.
+	 * If the timeout has been disabled (set to 1 because we're trying
+	 * to detach), we set fasttrap_cleanup_work to ensure that we'll
+	 * get a chance to do that work if and when the timeout is reenabled
+	 * (if detach fails).
+	 */</span>
+	<span class="enscript-keyword">if</span> (later &gt; 0 &amp;&amp; fasttrap_timeout != (thread_call_t)1)
+		<span class="enscript-comment">/* The time value passed to dtrace_timeout is in nanos */</span>
+		fasttrap_timeout = dtrace_timeout(&amp;fasttrap_pid_cleanup_cb, NULL, NANOSEC / SEC);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (later &gt; 0)
+		fasttrap_cleanup_work = 1;
+	<span class="enscript-keyword">else</span>
+		fasttrap_timeout = 0;
+
+	lck_mtx_unlock(&amp;fasttrap_cleanup_mtx);
+	in = 0;
+}
+
+<span class="enscript-comment">/*
+ * Activates the asynchronous cleanup mechanism.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_pid_cleanup</span>(<span class="enscript-type">void</span>)
+{
+	lck_mtx_lock(&amp;fasttrap_cleanup_mtx);
+	fasttrap_cleanup_work = 1;
+	<span class="enscript-keyword">if</span> (fasttrap_timeout == 0)
+		fasttrap_timeout = dtrace_timeout(&amp;fasttrap_pid_cleanup_cb, NULL, NANOSEC / MILLISEC);
+	lck_mtx_unlock(&amp;fasttrap_cleanup_mtx);
+}
+
+<span class="enscript-comment">/*
+ * This is called from cfork() via dtrace_fasttrap_fork(). The child
+ * process's address space is a (roughly) a copy of the parent process's so
+ * we have to remove all the instrumentation we had previously enabled in the
+ * parent.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_fork</span>(proc_t *p, proc_t *cp)
+{
+	pid_t ppid = p-&gt;p_pid;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+
+	ASSERT(current_proc() == p);
+	lck_mtx_assert(&amp;p-&gt;p_dtrace_sprlock, LCK_MTX_ASSERT_OWNED);
+	ASSERT(p-&gt;p_dtrace_count &gt; 0);
+	ASSERT(cp-&gt;p_dtrace_count == 0);
+
+	<span class="enscript-comment">/*
+	 * This would be simpler and faster if we maintained per-process
+	 * hash tables of enabled tracepoints. It could, however, potentially
+	 * slow down execution of a tracepoint since we'd need to go
+	 * through two levels of indirection. In the future, we should
+	 * consider either maintaining per-process ancillary lists of
+	 * enabled tracepoints or hanging a pointer to a per-process hash
+	 * table of enabled tracepoints off the proc structure.
+	 */</span>
+
+	<span class="enscript-comment">/*
+	 * We don't have to worry about the child process disappearing
+	 * because we're in fork().
+	 */</span>
+	<span class="enscript-keyword">if</span> (cp != sprlock(cp-&gt;p_pid)) {
+		printf(<span class="enscript-string">&quot;fasttrap_fork: sprlock(%d) returned a differt proc\n&quot;</span>, cp-&gt;p_pid);
+		<span class="enscript-keyword">return</span>;
+	}
+	proc_unlock(cp);
+
+	<span class="enscript-comment">/*
+	 * Iterate over every tracepoint looking for ones that belong to the
+	 * parent process, and remove each from the child process.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; fasttrap_tpoints.fth_nent; i++) {
+		fasttrap_tracepoint_t *tp;
+		fasttrap_bucket_t *bucket = &amp;fasttrap_tpoints.fth_table[i];
+
+		lck_mtx_lock(&amp;bucket-&gt;ftb_mtx);
+		<span class="enscript-keyword">for</span> (tp = bucket-&gt;ftb_data; tp != NULL; tp = tp-&gt;ftt_next) {
+			<span class="enscript-keyword">if</span> (tp-&gt;ftt_pid == ppid &amp;&amp;
+			    tp-&gt;ftt_proc-&gt;ftpc_acount != 0) {
+				fasttrap_tracepoint_remove(cp, tp);
+
+				<span class="enscript-comment">/*
+				 * The count of active providers can only be
+				 * decremented (i.e. to zero) during exec,
+				 * exit, and removal of a meta provider so it
+				 * should be impossible to drop the count
+				 * mid-fork.
+				 */</span>
+				 ASSERT(tp-&gt;ftt_proc-&gt;ftpc_acount != 0);
+			}
+		}
+		lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+	}
+
+	<span class="enscript-comment">/*
+	 * Free any ptss pages/entries in the child.
+	 */</span>
+	dtrace_ptss_fork(p, cp);
+
+	proc_lock(cp);
+	sprunlock(cp);
+}
+
+<span class="enscript-comment">/*
+ * This is called from proc_exit() or from exec_common() if p_dtrace_probes
+ * is set on the proc structure to indicate that there is a pid provider
+ * associated with this process.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_exec_exit</span>(proc_t *p)
+{
+	ASSERT(p == current_proc());
+	lck_mtx_assert(&amp;p-&gt;p_mlock, LCK_MTX_ASSERT_OWNED);
+	lck_mtx_assert(&amp;p-&gt;p_dtrace_sprlock, LCK_MTX_ASSERT_NOTOWNED);
+
+
+	<span class="enscript-comment">/* APPLE NOTE: Okay, the locking here is really odd and needs some
+	 * explaining. This method is always called with the proc_lock held.
+	 * We must drop the proc_lock before calling fasttrap_provider_retire
+	 * to avoid a deadlock when it takes the bucket lock.
+	 * 
+	 * Next, the dtrace_ptss_exec_exit function requires the sprlock
+	 * be held, but not the proc_lock. 
+	 *
+	 * Finally, we must re-acquire the proc_lock
+	 */</span>
+	proc_unlock(p);
+
+	<span class="enscript-comment">/*
+	 * We clean up the pid provider for this process here; user-land
+	 * static probes are handled by the meta-provider remove entry point.
+	 */</span>
+	fasttrap_provider_retire(p-&gt;p_pid, FASTTRAP_PID_NAME, 0);
+
+	<span class="enscript-comment">/*
+	 * APPLE NOTE: We also need to remove any aliased providers.
+	 * XXX optimization: track which provider types are instantiated
+	 * and only retire as needed.
+	 */</span>
+	fasttrap_provider_retire(p-&gt;p_pid, FASTTRAP_OBJC_NAME, 0);
+	fasttrap_provider_retire(p-&gt;p_pid, FASTTRAP_ONESHOT_NAME, 0);
+
+	<span class="enscript-comment">/*
+	 * This should be called after it is no longer possible for a user
+	 * thread to execute (potentially dtrace instrumented) instructions.
+	 */</span>
+	lck_mtx_lock(&amp;p-&gt;p_dtrace_sprlock);
+	dtrace_ptss_exec_exit(p);
+	lck_mtx_unlock(&amp;p-&gt;p_dtrace_sprlock);
+
+	proc_lock(p);
+}
+
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_pid_provide</span>(<span class="enscript-type">void</span> *arg, <span class="enscript-type">const</span> dtrace_probedesc_t *desc)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>, <span class="enscript-variable-name">desc</span>)
+	<span class="enscript-comment">/*
+	 * There are no &quot;default&quot; pid probes.
+	 */</span>
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">fasttrap_tracepoint_enable</span>(proc_t *p, fasttrap_probe_t *probe, uint_t index)
+{
+	fasttrap_tracepoint_t *tp, *new_tp = NULL;
+	fasttrap_bucket_t *bucket;
+	fasttrap_id_t *id;
+	pid_t pid;
+	user_addr_t pc;
+
+	ASSERT(index &lt; probe-&gt;ftp_ntps);
+
+	pid = probe-&gt;ftp_pid;
+	pc = probe-&gt;ftp_tps[index].fit_tp-&gt;ftt_pc;
+	id = &amp;probe-&gt;ftp_tps[index].fit_id;
+
+	ASSERT(probe-&gt;ftp_tps[index].fit_tp-&gt;ftt_pid == pid);
+
+	<span class="enscript-comment">//ASSERT(!(p-&gt;p_flag &amp; SVFORK));
+</span>
+	<span class="enscript-comment">/*
+	 * Before we make any modifications, make sure we've imposed a barrier
+	 * on the generation in which this probe was last modified.
+	 */</span>
+	fasttrap_mod_barrier(probe-&gt;ftp_gen);
+
+	bucket = &amp;fasttrap_tpoints.fth_table[FASTTRAP_TPOINTS_INDEX(pid, pc)];
+
+	<span class="enscript-comment">/*
+	 * If the tracepoint has already been enabled, just add our id to the
+	 * list of interested probes. This may be our second time through
+	 * this path in which case we'll have constructed the tracepoint we'd
+	 * like to install. If we can't find a match, and have an allocated
+	 * tracepoint ready to go, enable that one now.
+	 *
+	 * A tracepoint whose process is defunct is also considered defunct.
+	 */</span>
+<span class="enscript-reference">again</span>:
+	lck_mtx_lock(&amp;bucket-&gt;ftb_mtx);
+	<span class="enscript-keyword">for</span> (tp = bucket-&gt;ftb_data; tp != NULL; tp = tp-&gt;ftt_next) {
+		<span class="enscript-comment">/*
+		 * Note that it's safe to access the active count on the
+		 * associated proc structure because we know that at least one
+		 * provider (this one) will still be around throughout this
+		 * operation.
+		 */</span>
+		<span class="enscript-keyword">if</span> (tp-&gt;ftt_pid != pid || tp-&gt;ftt_pc != pc ||
+		    tp-&gt;ftt_proc-&gt;ftpc_acount == 0)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-comment">/*
+		 * Now that we've found a matching tracepoint, it would be
+		 * a decent idea to confirm that the tracepoint is still
+		 * enabled and the trap instruction hasn't been overwritten.
+		 * Since this is a little hairy, we'll punt for now.
+		 */</span>
+
+		<span class="enscript-comment">/*
+		 * This can't be the first interested probe. We don't have
+		 * to worry about another thread being in the midst of
+		 * deleting this tracepoint (which would be the only valid
+		 * reason for a tracepoint to have no interested probes)
+		 * since we're holding P_PR_LOCK for this process.
+		 */</span>
+		ASSERT(tp-&gt;ftt_ids != NULL || tp-&gt;ftt_retids != NULL);
+
+		<span class="enscript-keyword">switch</span> (id-&gt;fti_ptype) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_ENTRY</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_OFFSETS</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_IS_ENABLED</span>:
+			id-&gt;fti_next = tp-&gt;ftt_ids;
+			dtrace_membar_producer();
+			tp-&gt;ftt_ids = id;
+			dtrace_membar_producer();
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_RETURN</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_POST_OFFSETS</span>:
+			id-&gt;fti_next = tp-&gt;ftt_retids;
+			dtrace_membar_producer();
+			tp-&gt;ftt_retids = id;
+			dtrace_membar_producer();
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:
+			ASSERT(0);
+		}
+
+		lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+
+		<span class="enscript-keyword">if</span> (new_tp != NULL) {
+			new_tp-&gt;ftt_ids = NULL;
+			new_tp-&gt;ftt_retids = NULL;
+		}
+
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-comment">/*
+	 * If we have a good tracepoint ready to go, install it now while
+	 * we have the lock held and no one can screw with us.
+	 */</span>
+	<span class="enscript-keyword">if</span> (new_tp != NULL) {
+		<span class="enscript-type">int</span> rc = 0;
+
+		new_tp-&gt;ftt_next = bucket-&gt;ftb_data;
+		dtrace_membar_producer();
+		bucket-&gt;ftb_data = new_tp;
+		dtrace_membar_producer();
+		lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+
+		<span class="enscript-comment">/*
+		 * Activate the tracepoint in the ISA-specific manner.
+		 * If this fails, we need to report the failure, but
+		 * indicate that this tracepoint must still be disabled
+		 * by calling fasttrap_tracepoint_disable().
+		 */</span>
+		<span class="enscript-keyword">if</span> (fasttrap_tracepoint_install(p, new_tp) != 0)
+			rc = FASTTRAP_ENABLE_PARTIAL;
+
+		<span class="enscript-comment">/*
+		 * Increment the count of the number of tracepoints active in
+		 * the victim process.
+		 */</span>
+		<span class="enscript-comment">//ASSERT(p-&gt;p_proc_flag &amp; P_PR_LOCK);
+</span>		p-&gt;p_dtrace_count++;
+
+		<span class="enscript-keyword">return</span> (rc);
+	}
+
+	lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+
+	<span class="enscript-comment">/*
+	 * Initialize the tracepoint that's been preallocated with the probe.
+	 */</span>
+	new_tp = probe-&gt;ftp_tps[index].fit_tp;
+
+	ASSERT(new_tp-&gt;ftt_pid == pid);
+	ASSERT(new_tp-&gt;ftt_pc == pc);
+	ASSERT(new_tp-&gt;ftt_proc == probe-&gt;ftp_prov-&gt;ftp_proc);
+	ASSERT(new_tp-&gt;ftt_ids == NULL);
+	ASSERT(new_tp-&gt;ftt_retids == NULL);
+
+	<span class="enscript-keyword">switch</span> (id-&gt;fti_ptype) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_ENTRY</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_OFFSETS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_IS_ENABLED</span>:
+		id-&gt;fti_next = NULL;
+		new_tp-&gt;ftt_ids = id;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_RETURN</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_POST_OFFSETS</span>:
+		id-&gt;fti_next = NULL;
+		new_tp-&gt;ftt_retids = id;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		ASSERT(0);
+	}
+
+	<span class="enscript-comment">/*
+	 * If the ISA-dependent initialization goes to plan, go back to the
+	 * beginning and try to install this freshly made tracepoint.
+	 */</span>
+	<span class="enscript-keyword">if</span> (fasttrap_tracepoint_init(p, new_tp, pc, id-&gt;fti_ptype) == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+
+	new_tp-&gt;ftt_ids = NULL;
+	new_tp-&gt;ftt_retids = NULL;
+
+	<span class="enscript-keyword">return</span> (FASTTRAP_ENABLE_FAIL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_tracepoint_disable</span>(proc_t *p, fasttrap_probe_t *probe, uint_t index)
+{
+	fasttrap_bucket_t *bucket;
+	fasttrap_provider_t *provider = probe-&gt;ftp_prov;
+	fasttrap_tracepoint_t **pp, *tp;
+	fasttrap_id_t *id, **idp;
+	pid_t pid;
+	user_addr_t pc;
+
+	ASSERT(index &lt; probe-&gt;ftp_ntps);
+
+	pid = probe-&gt;ftp_pid;
+	pc = probe-&gt;ftp_tps[index].fit_tp-&gt;ftt_pc;
+	id = &amp;probe-&gt;ftp_tps[index].fit_id;
+
+	ASSERT(probe-&gt;ftp_tps[index].fit_tp-&gt;ftt_pid == pid);
+
+	<span class="enscript-comment">/*
+	 * Find the tracepoint and make sure that our id is one of the
+	 * ones registered with it.
+	 */</span>
+	bucket = &amp;fasttrap_tpoints.fth_table[FASTTRAP_TPOINTS_INDEX(pid, pc)];
+	lck_mtx_lock(&amp;bucket-&gt;ftb_mtx);
+	<span class="enscript-keyword">for</span> (tp = bucket-&gt;ftb_data; tp != NULL; tp = tp-&gt;ftt_next) {
+		<span class="enscript-keyword">if</span> (tp-&gt;ftt_pid == pid &amp;&amp; tp-&gt;ftt_pc == pc &amp;&amp;
+		    tp-&gt;ftt_proc == provider-&gt;ftp_proc)
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * If we somehow lost this tracepoint, we're in a world of hurt.
+	 */</span>
+	ASSERT(tp != NULL);
+
+	<span class="enscript-keyword">switch</span> (id-&gt;fti_ptype) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_ENTRY</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_OFFSETS</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_IS_ENABLED</span>:
+			ASSERT(tp-&gt;ftt_ids != NULL);
+			idp = &amp;tp-&gt;ftt_ids;
+			<span class="enscript-keyword">break</span>;
+			
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_RETURN</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_POST_OFFSETS</span>:
+			ASSERT(tp-&gt;ftt_retids != NULL);
+			idp = &amp;tp-&gt;ftt_retids;
+			<span class="enscript-keyword">break</span>;
+			
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-comment">/* Fix compiler warning... */</span>
+			idp = NULL;
+			ASSERT(0);
+	}
+
+	<span class="enscript-keyword">while</span> ((*idp)-&gt;fti_probe != probe) {
+		idp = &amp;(*idp)-&gt;fti_next;
+		ASSERT(*idp != NULL);
+	}
+
+	id = *idp;
+	*idp = id-&gt;fti_next;
+	dtrace_membar_producer();
+
+	ASSERT(id-&gt;fti_probe == probe);
+
+	<span class="enscript-comment">/*
+	 * If there are other registered enablings of this tracepoint, we're
+	 * all done, but if this was the last probe assocated with this
+	 * this tracepoint, we need to remove and free it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (tp-&gt;ftt_ids != NULL || tp-&gt;ftt_retids != NULL) {
+
+		<span class="enscript-comment">/*
+		 * If the current probe's tracepoint is in use, swap it
+		 * for an unused tracepoint.
+		 */</span>
+		<span class="enscript-keyword">if</span> (tp == probe-&gt;ftp_tps[index].fit_tp) {
+			fasttrap_probe_t *tmp_probe;
+			fasttrap_tracepoint_t **tmp_tp;
+			uint_t tmp_index;
+
+			<span class="enscript-keyword">if</span> (tp-&gt;ftt_ids != NULL) {
+				tmp_probe = tp-&gt;ftt_ids-&gt;fti_probe;
+				<span class="enscript-comment">/* LINTED - alignment */</span>
+				tmp_index = FASTTRAP_ID_INDEX(tp-&gt;ftt_ids);
+				tmp_tp = &amp;tmp_probe-&gt;ftp_tps[tmp_index].fit_tp;
+			} <span class="enscript-keyword">else</span> {
+				tmp_probe = tp-&gt;ftt_retids-&gt;fti_probe;
+				<span class="enscript-comment">/* LINTED - alignment */</span>
+				tmp_index = FASTTRAP_ID_INDEX(tp-&gt;ftt_retids);
+				tmp_tp = &amp;tmp_probe-&gt;ftp_tps[tmp_index].fit_tp;
+			}
+
+			ASSERT(*tmp_tp != NULL);
+			ASSERT(*tmp_tp != probe-&gt;ftp_tps[index].fit_tp);
+			ASSERT((*tmp_tp)-&gt;ftt_ids == NULL);
+			ASSERT((*tmp_tp)-&gt;ftt_retids == NULL);
+
+			probe-&gt;ftp_tps[index].fit_tp = *tmp_tp;
+			*tmp_tp = tp;
+
+		}
+
+		lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+
+		<span class="enscript-comment">/*
+		 * Tag the modified probe with the generation in which it was
+		 * changed.
+		 */</span>
+		probe-&gt;ftp_gen = fasttrap_mod_gen;
+		<span class="enscript-keyword">return</span>;
+	}
+
+	lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+
+	<span class="enscript-comment">/*
+	 * We can't safely remove the tracepoint from the set of active
+	 * tracepoints until we've actually removed the fasttrap instruction
+	 * from the process's text. We can, however, operate on this
+	 * tracepoint secure in the knowledge that no other thread is going to
+	 * be looking at it since we hold P_PR_LOCK on the process if it's
+	 * live or we hold the provider lock on the process if it's dead and
+	 * gone.
+	 */</span>
+
+	<span class="enscript-comment">/*
+	 * We only need to remove the actual instruction if we're looking
+	 * at an existing process
+	 */</span>
+	<span class="enscript-keyword">if</span> (p != NULL) {
+		<span class="enscript-comment">/*
+		 * If we fail to restore the instruction we need to kill
+		 * this process since it's in a completely unrecoverable
+		 * state.
+		 */</span>
+		<span class="enscript-keyword">if</span> (fasttrap_tracepoint_remove(p, tp) != 0)
+			fasttrap_sigtrap(p, NULL, pc);
+
+		<span class="enscript-comment">/*
+		 * Decrement the count of the number of tracepoints active
+		 * in the victim process.
+		 */</span>
+		<span class="enscript-comment">//ASSERT(p-&gt;p_proc_flag &amp; P_PR_LOCK);
+</span>		p-&gt;p_dtrace_count--;
+	}
+
+	<span class="enscript-comment">/*
+	 * Remove the probe from the hash table of active tracepoints.
+	 */</span>
+	lck_mtx_lock(&amp;bucket-&gt;ftb_mtx);
+	pp = (fasttrap_tracepoint_t **)&amp;bucket-&gt;ftb_data;
+	ASSERT(*pp != NULL);
+	<span class="enscript-keyword">while</span> (*pp != tp) {
+		pp = &amp;(*pp)-&gt;ftt_next;
+		ASSERT(*pp != NULL);
+	}
+
+	*pp = tp-&gt;ftt_next;
+	dtrace_membar_producer();
+
+	lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+
+	<span class="enscript-comment">/*
+	 * Tag the modified probe with the generation in which it was changed.
+	 */</span>
+	probe-&gt;ftp_gen = fasttrap_mod_gen;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_enable_callbacks</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">/*
+	 * We don't have to play the rw lock game here because we're
+	 * providing something rather than taking something away --
+	 * we can be sure that no threads have tried to follow this
+	 * function pointer yet.
+	 */</span>
+	lck_mtx_lock(&amp;fasttrap_count_mtx);
+	<span class="enscript-keyword">if</span> (fasttrap_pid_count == 0) {
+		ASSERT(dtrace_pid_probe_ptr == NULL);
+		ASSERT(dtrace_return_probe_ptr == NULL);
+		dtrace_pid_probe_ptr = &amp;fasttrap_pid_probe;
+		dtrace_return_probe_ptr = &amp;fasttrap_return_probe;
+	}
+	ASSERT(dtrace_pid_probe_ptr == &amp;fasttrap_pid_probe);
+	ASSERT(dtrace_return_probe_ptr == &amp;fasttrap_return_probe);
+	fasttrap_pid_count++;
+	lck_mtx_unlock(&amp;fasttrap_count_mtx);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_disable_callbacks</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">//ASSERT(MUTEX_HELD(&amp;cpu_lock));
+</span>
+	lck_mtx_lock(&amp;fasttrap_count_mtx);
+	ASSERT(fasttrap_pid_count &gt; 0);
+	fasttrap_pid_count--;
+	<span class="enscript-keyword">if</span> (fasttrap_pid_count == 0) {
+		dtrace_cpu_t *cur, *cpu = CPU;
+
+		<span class="enscript-comment">/*
+		 * APPLE NOTE: This loop seems broken, it touches every CPU
+		 * but the one we're actually running on. Need to ask Sun folks
+		 * if that is safe. Scenario is this: We're running on CPU A,
+		 * and lock all but A. Then we get preempted, and start running
+		 * on CPU B. A probe fires on A, and is allowed to enter. BOOM!
+		 */</span>
+		<span class="enscript-keyword">for</span> (cur = cpu-&gt;cpu_next; cur != cpu; cur = cur-&gt;cpu_next) {
+			lck_rw_lock_exclusive(&amp;cur-&gt;cpu_ft_lock);
+			<span class="enscript-comment">// rw_enter(&amp;cur-&gt;cpu_ft_lock, RW_WRITER);
+</span>		}
+
+		dtrace_pid_probe_ptr = NULL;
+		dtrace_return_probe_ptr = NULL;
+
+		<span class="enscript-keyword">for</span> (cur = cpu-&gt;cpu_next; cur != cpu; cur = cur-&gt;cpu_next) {
+			lck_rw_unlock_exclusive(&amp;cur-&gt;cpu_ft_lock);
+			<span class="enscript-comment">// rw_exit(&amp;cur-&gt;cpu_ft_lock);
+</span>		}
+	}
+	lck_mtx_unlock(&amp;fasttrap_count_mtx);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">fasttrap_pid_enable</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>, <span class="enscript-variable-name">id</span>)
+	fasttrap_probe_t *probe = parg;
+	proc_t *p;
+	<span class="enscript-type">int</span> i, rc;
+
+	ASSERT(probe != NULL);
+	ASSERT(!probe-&gt;ftp_enabled);
+	ASSERT(id == probe-&gt;ftp_id);
+	<span class="enscript-comment">// ASSERT(MUTEX_HELD(&amp;cpu_lock));
+</span>
+	<span class="enscript-comment">/*
+	 * Increment the count of enabled probes on this probe's provider;
+	 * the provider can't go away while the probe still exists. We
+	 * must increment this even if we aren't able to properly enable
+	 * this probe.
+	 */</span>
+	lck_mtx_lock(&amp;probe-&gt;ftp_prov-&gt;ftp_mtx);
+	probe-&gt;ftp_prov-&gt;ftp_rcount++;
+	lck_mtx_unlock(&amp;probe-&gt;ftp_prov-&gt;ftp_mtx);
+
+	<span class="enscript-comment">/*
+	 * If this probe's provider is retired (meaning it was valid in a
+	 * previously exec'ed incarnation of this address space), bail out. The
+	 * provider can't go away while we're in this code path.
+	 */</span>
+	<span class="enscript-keyword">if</span> (probe-&gt;ftp_prov-&gt;ftp_retired)
+	    <span class="enscript-keyword">return</span>(0);
+
+	<span class="enscript-comment">/*
+	 * If we can't find the process, it may be that we're in the context of
+	 * a fork in which the traced process is being born and we're copying
+	 * USDT probes. Otherwise, the process is gone so bail.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((p = sprlock(probe-&gt;ftp_pid)) == PROC_NULL) {
+		<span class="enscript-comment">/*
+		 * APPLE NOTE: We should never end up here. The Solaris sprlock()
+		 * does not return process's with SIDL set, but we always return
+		 * the child process.
+		 */</span>
+	    <span class="enscript-keyword">return</span>(0);
+	}
+
+	<span class="enscript-comment">/*
+	 * APPLE NOTE: We do not have an equivalent thread structure to Solaris.
+	 * Solaris uses its ulwp_t struct for scratch space to support the pid provider.
+	 * To mimic this, we allocate on demand scratch space. If this is the first
+	 * time a probe has been enabled in this process, we need to allocate scratch
+	 * space for each already existing thread. Now is a good time to do this, as
+	 * the target process is suspended and the proc_lock is held.
+	 */</span>
+	<span class="enscript-keyword">if</span> (p-&gt;p_dtrace_ptss_pages == NULL) {
+		dtrace_ptss_enable(p);
+	}
+
+	<span class="enscript-comment">// ASSERT(!(p-&gt;p_flag &amp; SVFORK));
+</span>	proc_unlock(p);
+
+	<span class="enscript-comment">/*
+	 * We have to enable the trap entry point before any user threads have
+	 * the chance to execute the trap instruction we're about to place
+	 * in their process's text.
+	 */</span>
+	fasttrap_enable_callbacks();
+
+	<span class="enscript-comment">/*
+	 * Enable all the tracepoints and add this probe's id to each
+	 * tracepoint's list of active probes.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; (<span class="enscript-type">int</span>)probe-&gt;ftp_ntps; i++) {
+		<span class="enscript-keyword">if</span> ((rc = fasttrap_tracepoint_enable(p, probe, i)) != 0) {
+			<span class="enscript-comment">/*
+			 * If enabling the tracepoint failed completely,
+			 * we don't have to disable it; if the failure
+			 * was only partial we must disable it.
+			 */</span>
+			<span class="enscript-keyword">if</span> (rc == FASTTRAP_ENABLE_FAIL)
+				i--;
+			<span class="enscript-keyword">else</span>
+				ASSERT(rc == FASTTRAP_ENABLE_PARTIAL);
+
+			<span class="enscript-comment">/*
+			 * Back up and pull out all the tracepoints we've
+			 * created so far for this probe.
+			 */</span>
+			<span class="enscript-keyword">while</span> (i &gt;= 0) {
+				fasttrap_tracepoint_disable(p, probe, i);
+				i--;
+			}
+
+			proc_lock(p);
+			sprunlock(p);
+
+			<span class="enscript-comment">/*
+			 * Since we're not actually enabling this probe,
+			 * drop our reference on the trap table entry.
+			 */</span>
+			fasttrap_disable_callbacks();
+			<span class="enscript-keyword">return</span>(0);
+		}
+	}
+
+	proc_lock(p);
+	sprunlock(p);
+
+	probe-&gt;ftp_enabled = 1;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_pid_disable</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>, <span class="enscript-variable-name">id</span>)
+	fasttrap_probe_t *probe = parg;
+	fasttrap_provider_t *provider = probe-&gt;ftp_prov;
+	proc_t *p;
+	<span class="enscript-type">int</span> i, whack = 0;
+
+	ASSERT(id == probe-&gt;ftp_id);
+
+	<span class="enscript-comment">/*
+	 * We won't be able to acquire a /proc-esque lock on the process
+	 * iff the process is dead and gone. In this case, we rely on the
+	 * provider lock as a point of mutual exclusion to prevent other
+	 * DTrace consumers from disabling this probe.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((p = sprlock(probe-&gt;ftp_pid)) != PROC_NULL) {
+		<span class="enscript-comment">// ASSERT(!(p-&gt;p_flag &amp; SVFORK));
+</span>		proc_unlock(p);
+	}
+
+	lck_mtx_lock(&amp;provider-&gt;ftp_mtx);
+
+	<span class="enscript-comment">/*
+	 * Disable all the associated tracepoints (for fully enabled probes).
+	 */</span>
+	<span class="enscript-keyword">if</span> (probe-&gt;ftp_enabled) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; (<span class="enscript-type">int</span>)probe-&gt;ftp_ntps; i++) {
+			fasttrap_tracepoint_disable(p, probe, i);
+		}
+	}
+
+	ASSERT(provider-&gt;ftp_rcount &gt; 0);
+	provider-&gt;ftp_rcount--;
+
+	<span class="enscript-keyword">if</span> (p != NULL) {
+		<span class="enscript-comment">/*
+		 * Even though we may not be able to remove it entirely, we
+		 * mark this retired provider to get a chance to remove some
+		 * of the associated probes.
+		 */</span>
+		<span class="enscript-keyword">if</span> (provider-&gt;ftp_retired &amp;&amp; !provider-&gt;ftp_marked)
+			whack = provider-&gt;ftp_marked = 1;
+		lck_mtx_unlock(&amp;provider-&gt;ftp_mtx);
+
+		proc_lock(p);
+		sprunlock(p);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * If the process is dead, we're just waiting for the
+		 * last probe to be disabled to be able to free it.
+		 */</span>
+		<span class="enscript-keyword">if</span> (provider-&gt;ftp_rcount == 0 &amp;&amp; !provider-&gt;ftp_marked)
+			whack = provider-&gt;ftp_marked = 1;
+		lck_mtx_unlock(&amp;provider-&gt;ftp_mtx);
+	}
+
+	<span class="enscript-keyword">if</span> (whack)
+		fasttrap_pid_cleanup();
+
+	<span class="enscript-keyword">if</span> (!probe-&gt;ftp_enabled)
+		<span class="enscript-keyword">return</span>;
+
+	probe-&gt;ftp_enabled = 0;
+
+	<span class="enscript-comment">// ASSERT(MUTEX_HELD(&amp;cpu_lock));
+</span>	fasttrap_disable_callbacks();
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_pid_getargdesc</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg,
+    dtrace_argdesc_t *desc)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>, <span class="enscript-variable-name">id</span>)
+	fasttrap_probe_t *probe = parg;
+	<span class="enscript-type">char</span> *str;
+	<span class="enscript-type">int</span> i, ndx;
+
+	desc-&gt;dtargd_native[0] = <span class="enscript-string">'\0'</span>;
+	desc-&gt;dtargd_xlate[0] = <span class="enscript-string">'\0'</span>;
+
+	<span class="enscript-keyword">if</span> (probe-&gt;ftp_prov-&gt;ftp_retired != 0 ||
+	    desc-&gt;dtargd_ndx &gt;= probe-&gt;ftp_nargs) {
+		desc-&gt;dtargd_ndx = DTRACE_ARGNONE;
+		<span class="enscript-keyword">return</span>;
+	}
+
+	ndx = (probe-&gt;ftp_argmap != NULL) ?
+		probe-&gt;ftp_argmap[desc-&gt;dtargd_ndx] : desc-&gt;dtargd_ndx;
+
+	str = probe-&gt;ftp_ntypes;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; ndx; i++) {
+		str += strlen(str) + 1;
+	}
+
+	(<span class="enscript-type">void</span>) strlcpy(desc-&gt;dtargd_native, str, <span class="enscript-keyword">sizeof</span>(desc-&gt;dtargd_native));
+
+	<span class="enscript-keyword">if</span> (probe-&gt;ftp_xtypes == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	str = probe-&gt;ftp_xtypes;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; desc-&gt;dtargd_ndx; i++) {
+		str += strlen(str) + 1;
+	}
+
+	(<span class="enscript-type">void</span>) strlcpy(desc-&gt;dtargd_xlate, str, <span class="enscript-keyword">sizeof</span>(desc-&gt;dtargd_xlate));
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_pid_destroy</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>, <span class="enscript-variable-name">id</span>)
+	fasttrap_probe_t *probe = parg;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+
+	ASSERT(probe != NULL);
+	ASSERT(!probe-&gt;ftp_enabled);
+	ASSERT(fasttrap_total &gt;= probe-&gt;ftp_ntps);
+
+	atomic_add_32(&amp;fasttrap_total, -probe-&gt;ftp_ntps);
+
+	<span class="enscript-keyword">if</span> (probe-&gt;ftp_gen + 1 &gt;= fasttrap_mod_gen)
+		fasttrap_mod_barrier(probe-&gt;ftp_gen);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; probe-&gt;ftp_ntps; i++) {
+		zfree(fasttrap_tracepoint_t_zone, probe-&gt;ftp_tps[i].fit_tp);
+	}
+
+	<span class="enscript-keyword">if</span> (probe-&gt;ftp_ntps &lt; FASTTRAP_PROBE_T_ZONE_MAX_TRACEPOINTS) {
+		zfree(fasttrap_probe_t_zones[probe-&gt;ftp_ntps], probe);
+	} <span class="enscript-keyword">else</span> {
+		size_t size = offsetof(fasttrap_probe_t, ftp_tps[probe-&gt;ftp_ntps]);
+		kmem_free(probe, size);
+	}
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> dtrace_pattr_t pid_attr = {
+{ DTRACE_STABILITY_EVOLVING, DTRACE_STABILITY_EVOLVING, DTRACE_CLASS_ISA },
+{ DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_UNKNOWN },
+{ DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_UNKNOWN },
+{ DTRACE_STABILITY_EVOLVING, DTRACE_STABILITY_EVOLVING, DTRACE_CLASS_ISA },
+{ DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_UNKNOWN },
+};
+
+<span class="enscript-type">static</span> dtrace_pops_t pid_pops = {
+	fasttrap_pid_provide,
+	NULL,
+	fasttrap_pid_enable,
+	fasttrap_pid_disable,
+	NULL,
+	NULL,
+	fasttrap_pid_getargdesc,
+	fasttrap_pid_getarg,
+	NULL,
+	fasttrap_pid_destroy
+};
+
+<span class="enscript-type">static</span> dtrace_pops_t usdt_pops = {
+	fasttrap_pid_provide,
+	NULL,
+	fasttrap_pid_enable,
+	fasttrap_pid_disable,
+	NULL,
+	NULL,
+	fasttrap_pid_getargdesc,
+	fasttrap_usdt_getarg,
+	NULL,
+	fasttrap_pid_destroy
+};
+
+<span class="enscript-type">static</span> fasttrap_proc_t *
+<span class="enscript-function-name">fasttrap_proc_lookup</span>(pid_t pid)
+{
+	fasttrap_bucket_t *bucket;
+	fasttrap_proc_t *fprc, *new_fprc;
+
+	bucket = &amp;fasttrap_procs.fth_table[FASTTRAP_PROCS_INDEX(pid)];
+	lck_mtx_lock(&amp;bucket-&gt;ftb_mtx);
+
+	<span class="enscript-keyword">for</span> (fprc = bucket-&gt;ftb_data; fprc != NULL; fprc = fprc-&gt;ftpc_next) {
+		<span class="enscript-keyword">if</span> (fprc-&gt;ftpc_pid == pid &amp;&amp; fprc-&gt;ftpc_acount != 0) {
+			lck_mtx_lock(&amp;fprc-&gt;ftpc_mtx);
+			lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+			fprc-&gt;ftpc_rcount++;
+			atomic_add_64(&amp;fprc-&gt;ftpc_acount, 1);
+			ASSERT(fprc-&gt;ftpc_acount &lt;= fprc-&gt;ftpc_rcount);
+			lck_mtx_unlock(&amp;fprc-&gt;ftpc_mtx);
+
+			<span class="enscript-keyword">return</span> (fprc);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Drop the bucket lock so we don't try to perform a sleeping
+	 * allocation under it.
+	 */</span>
+	lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+
+	new_fprc = kmem_zalloc(<span class="enscript-keyword">sizeof</span> (fasttrap_proc_t), KM_SLEEP);
+	ASSERT(new_fprc != NULL);
+	new_fprc-&gt;ftpc_pid = pid;
+	new_fprc-&gt;ftpc_rcount = 1;
+	new_fprc-&gt;ftpc_acount = 1;
+
+	lck_mtx_lock(&amp;bucket-&gt;ftb_mtx);
+
+	<span class="enscript-comment">/*
+	 * Take another lap through the list to make sure a proc hasn't
+	 * been created for this pid while we weren't under the bucket lock.
+	 */</span>
+	<span class="enscript-keyword">for</span> (fprc = bucket-&gt;ftb_data; fprc != NULL; fprc = fprc-&gt;ftpc_next) {
+		<span class="enscript-keyword">if</span> (fprc-&gt;ftpc_pid == pid &amp;&amp; fprc-&gt;ftpc_acount != 0) {
+			lck_mtx_lock(&amp;fprc-&gt;ftpc_mtx);
+			lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+			fprc-&gt;ftpc_rcount++;
+			atomic_add_64(&amp;fprc-&gt;ftpc_acount, 1);
+			ASSERT(fprc-&gt;ftpc_acount &lt;= fprc-&gt;ftpc_rcount);
+			lck_mtx_unlock(&amp;fprc-&gt;ftpc_mtx);
+
+			kmem_free(new_fprc, <span class="enscript-keyword">sizeof</span> (fasttrap_proc_t));
+
+			<span class="enscript-keyword">return</span> (fprc);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * APPLE NOTE: We have to initialize all locks explicitly
+	 */</span>
+	lck_mtx_init(&amp;new_fprc-&gt;ftpc_mtx, fasttrap_lck_grp, fasttrap_lck_attr);
+
+	new_fprc-&gt;ftpc_next = bucket-&gt;ftb_data;
+	bucket-&gt;ftb_data = new_fprc;
+
+	lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+
+	<span class="enscript-keyword">return</span> (new_fprc);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_proc_release</span>(fasttrap_proc_t *proc)
+{
+	fasttrap_bucket_t *bucket;
+	fasttrap_proc_t *fprc, **fprcp;
+	pid_t pid = proc-&gt;ftpc_pid;
+
+	lck_mtx_lock(&amp;proc-&gt;ftpc_mtx);
+
+	ASSERT(proc-&gt;ftpc_rcount != 0);
+	ASSERT(proc-&gt;ftpc_acount &lt;= proc-&gt;ftpc_rcount);
+
+	<span class="enscript-keyword">if</span> (--proc-&gt;ftpc_rcount != 0) {
+		lck_mtx_unlock(&amp;proc-&gt;ftpc_mtx);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	lck_mtx_unlock(&amp;proc-&gt;ftpc_mtx);
+
+	<span class="enscript-comment">/*
+	 * There should definitely be no live providers associated with this
+	 * process at this point.
+	 */</span>
+	 ASSERT(proc-&gt;ftpc_acount == 0);
+
+	bucket = &amp;fasttrap_procs.fth_table[FASTTRAP_PROCS_INDEX(pid)];
+	lck_mtx_lock(&amp;bucket-&gt;ftb_mtx);
+
+	fprcp = (fasttrap_proc_t **)&amp;bucket-&gt;ftb_data;
+	<span class="enscript-keyword">while</span> ((fprc = *fprcp) != NULL) {
+		<span class="enscript-keyword">if</span> (fprc == proc)
+			<span class="enscript-keyword">break</span>;
+
+		fprcp = &amp;fprc-&gt;ftpc_next;
+	}
+
+	<span class="enscript-comment">/*
+	 * Something strange has happened if we can't find the proc.
+	 */</span>
+	ASSERT(fprc != NULL);
+
+	*fprcp = fprc-&gt;ftpc_next;
+
+	lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+
+	<span class="enscript-comment">/*
+	 * APPLE NOTE: explicit lock management. Not 100% certain we need this, the
+	 * memory is freed even without the destroy. Maybe accounting cleanup?
+	 */</span>
+	lck_mtx_destroy(&amp;fprc-&gt;ftpc_mtx, fasttrap_lck_grp);
+
+	kmem_free(fprc, <span class="enscript-keyword">sizeof</span> (fasttrap_proc_t));
+}
+
+<span class="enscript-comment">/*
+ * Lookup a fasttrap-managed provider based on its name and associated pid.
+ * If the pattr argument is non-NULL, this function instantiates the provider
+ * if it doesn't exist otherwise it returns NULL. The provider is returned
+ * with its lock held.
+ */</span>
+<span class="enscript-type">static</span> fasttrap_provider_t *
+<span class="enscript-function-name">fasttrap_provider_lookup</span>(pid_t pid, fasttrap_provider_type_t provider_type, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name,
+    <span class="enscript-type">const</span> dtrace_pattr_t *pattr)
+{
+	fasttrap_provider_t *fp, *new_fp = NULL;
+	fasttrap_bucket_t *bucket;
+	<span class="enscript-type">char</span> provname[DTRACE_PROVNAMELEN];
+	proc_t *p;
+	cred_t *cred;
+
+	ASSERT(strlen(name) &lt; <span class="enscript-keyword">sizeof</span> (fp-&gt;ftp_name));
+	ASSERT(pattr != NULL);
+
+	bucket = &amp;fasttrap_provs.fth_table[FASTTRAP_PROVS_INDEX(pid, name)];
+	lck_mtx_lock(&amp;bucket-&gt;ftb_mtx);
+
+	<span class="enscript-comment">/*
+	 * Take a lap through the list and return the match if we find it.
+	 */</span>
+	<span class="enscript-keyword">for</span> (fp = bucket-&gt;ftb_data; fp != NULL; fp = fp-&gt;ftp_next) {
+		<span class="enscript-keyword">if</span> (fp-&gt;ftp_pid == pid &amp;&amp;
+		    fp-&gt;ftp_provider_type == provider_type &amp;&amp;
+		    strncmp(fp-&gt;ftp_name, name, <span class="enscript-keyword">sizeof</span>(fp-&gt;ftp_name)) == 0 &amp;&amp;
+		    !fp-&gt;ftp_retired) {
+			lck_mtx_lock(&amp;fp-&gt;ftp_mtx);
+			lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+			<span class="enscript-keyword">return</span> (fp);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Drop the bucket lock so we don't try to perform a sleeping
+	 * allocation under it.
+	 */</span>
+	lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+
+	<span class="enscript-comment">/*
+	 * Make sure the process exists, isn't a child created as the result
+	 * of a vfork(2), and isn't a zombie (but may be in fork).
+	 */</span>
+	<span class="enscript-keyword">if</span> ((p = proc_find(pid)) == NULL) {
+		<span class="enscript-keyword">return</span> NULL;
+	}
+	proc_lock(p);
+	<span class="enscript-keyword">if</span> (p-&gt;p_lflag &amp; (P_LINVFORK | P_LEXIT)) {
+		proc_unlock(p);
+		proc_rele(p);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	<span class="enscript-comment">/*
+	 * Increment p_dtrace_probes so that the process knows to inform us
+	 * when it exits or execs. fasttrap_provider_free() decrements this
+	 * when we're done with this provider.
+	 */</span>
+	p-&gt;p_dtrace_probes++;
+
+	<span class="enscript-comment">/*
+	 * Grab the credentials for this process so we have
+	 * something to pass to dtrace_register().
+	 * APPLE NOTE:  We have no equivalent to crhold,
+	 * even though there is a cr_ref filed in ucred.
+	 */</span>
+	<span class="enscript-comment">// lck_mtx_lock(&amp;p-&gt;p_crlock;
+</span>	crhold(p-&gt;p_ucred);
+	cred = p-&gt;p_ucred;
+	<span class="enscript-comment">// lck_mtx_unlock(&amp;p-&gt;p_crlock);
+</span>	proc_unlock(p);
+	proc_rele(p);
+
+	new_fp = kmem_zalloc(<span class="enscript-keyword">sizeof</span> (fasttrap_provider_t), KM_SLEEP);
+	ASSERT(new_fp != NULL);
+	new_fp-&gt;ftp_pid = pid;
+	new_fp-&gt;ftp_proc = fasttrap_proc_lookup(pid);
+	new_fp-&gt;ftp_provider_type = provider_type;
+
+	<span class="enscript-comment">/*
+	 * APPLE NOTE:  locks require explicit init
+	 */</span>
+	lck_mtx_init(&amp;new_fp-&gt;ftp_mtx, fasttrap_lck_grp, fasttrap_lck_attr);
+	lck_mtx_init(&amp;new_fp-&gt;ftp_cmtx, fasttrap_lck_grp, fasttrap_lck_attr);
+
+	ASSERT(new_fp-&gt;ftp_proc != NULL);
+
+	lck_mtx_lock(&amp;bucket-&gt;ftb_mtx);
+
+	<span class="enscript-comment">/*
+	 * Take another lap through the list to make sure a provider hasn't
+	 * been created for this pid while we weren't under the bucket lock.
+	 */</span>
+	<span class="enscript-keyword">for</span> (fp = bucket-&gt;ftb_data; fp != NULL; fp = fp-&gt;ftp_next) {
+		<span class="enscript-keyword">if</span> (fp-&gt;ftp_pid == pid &amp;&amp; strncmp(fp-&gt;ftp_name, name, <span class="enscript-keyword">sizeof</span>(fp-&gt;ftp_name)) == 0 &amp;&amp;
+		    !fp-&gt;ftp_retired) {
+			lck_mtx_lock(&amp;fp-&gt;ftp_mtx);
+			lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+			fasttrap_provider_free(new_fp);
+			crfree(cred);
+			<span class="enscript-keyword">return</span> (fp);
+		}
+	}
+
+	(<span class="enscript-type">void</span>) strlcpy(new_fp-&gt;ftp_name, name, <span class="enscript-keyword">sizeof</span>(new_fp-&gt;ftp_name));
+
+	<span class="enscript-comment">/*
+	 * Fail and return NULL if either the provider name is too long
+	 * or we fail to register this new provider with the DTrace
+	 * framework. Note that this is the only place we ever construct
+	 * the full provider name -- we keep it in pieces in the provider
+	 * structure.
+	 */</span>
+	<span class="enscript-keyword">if</span> (snprintf(provname, <span class="enscript-keyword">sizeof</span> (provname), <span class="enscript-string">&quot;%s%u&quot;</span>, name, (uint_t)pid) &gt;=
+	    (<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (provname) ||
+	    dtrace_register(provname, pattr,
+	    DTRACE_PRIV_PROC | DTRACE_PRIV_OWNER | DTRACE_PRIV_ZONEOWNER, cred,
+	    pattr == &amp;pid_attr ? &amp;pid_pops : &amp;usdt_pops, new_fp,
+	    &amp;new_fp-&gt;ftp_provid) != 0) {
+		lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+		fasttrap_provider_free(new_fp);
+		crfree(cred);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	new_fp-&gt;ftp_next = bucket-&gt;ftb_data;
+	bucket-&gt;ftb_data = new_fp;
+
+	lck_mtx_lock(&amp;new_fp-&gt;ftp_mtx);
+	lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+
+	crfree(cred);
+	<span class="enscript-keyword">return</span> (new_fp);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_provider_free</span>(fasttrap_provider_t *provider)
+{
+	pid_t pid = provider-&gt;ftp_pid;
+	proc_t *p;
+
+	<span class="enscript-comment">/*
+	 * There need to be no associated enabled probes, no consumers
+	 * creating probes, and no meta providers referencing this provider.
+	 */</span>
+	ASSERT(provider-&gt;ftp_rcount == 0);
+	ASSERT(provider-&gt;ftp_ccount == 0);
+	ASSERT(provider-&gt;ftp_mcount == 0);
+
+	<span class="enscript-comment">/*
+	 * If this provider hasn't been retired, we need to explicitly drop the
+	 * count of active providers on the associated process structure.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!provider-&gt;ftp_retired) {
+		atomic_add_64(&amp;provider-&gt;ftp_proc-&gt;ftpc_acount, -1);
+		ASSERT(provider-&gt;ftp_proc-&gt;ftpc_acount &lt;
+		provider-&gt;ftp_proc-&gt;ftpc_rcount);
+	}
+
+	fasttrap_proc_release(provider-&gt;ftp_proc);
+
+	<span class="enscript-comment">/*
+	 * APPLE NOTE:  explicit lock management. Not 100% certain we need this, the
+	 * memory is freed even without the destroy. Maybe accounting cleanup?
+	 */</span>
+	lck_mtx_destroy(&amp;provider-&gt;ftp_mtx, fasttrap_lck_grp);
+	lck_mtx_destroy(&amp;provider-&gt;ftp_cmtx, fasttrap_lck_grp);
+
+	kmem_free(provider, <span class="enscript-keyword">sizeof</span> (fasttrap_provider_t));
+
+	<span class="enscript-comment">/*
+	 * Decrement p_dtrace_probes on the process whose provider we're
+	 * freeing. We don't have to worry about clobbering somone else's
+	 * modifications to it because we have locked the bucket that
+	 * corresponds to this process's hash chain in the provider hash
+	 * table. Don't sweat it if we can't find the process.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((p = proc_find(pid)) == NULL) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	proc_lock(p);
+	p-&gt;p_dtrace_probes--;
+	proc_unlock(p);
+	
+	proc_rele(p);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_provider_retire</span>(pid_t pid, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">int</span> mprov)
+{
+	fasttrap_provider_t *fp;
+	fasttrap_bucket_t *bucket;
+	dtrace_provider_id_t provid;
+
+	ASSERT(strlen(name) &lt; <span class="enscript-keyword">sizeof</span> (fp-&gt;ftp_name));
+
+	bucket = &amp;fasttrap_provs.fth_table[FASTTRAP_PROVS_INDEX(pid, name)];
+	lck_mtx_lock(&amp;bucket-&gt;ftb_mtx);
+
+	<span class="enscript-keyword">for</span> (fp = bucket-&gt;ftb_data; fp != NULL; fp = fp-&gt;ftp_next) {
+		<span class="enscript-keyword">if</span> (fp-&gt;ftp_pid == pid &amp;&amp; strncmp(fp-&gt;ftp_name, name, <span class="enscript-keyword">sizeof</span>(fp-&gt;ftp_name)) == 0 &amp;&amp;
+		    !fp-&gt;ftp_retired)
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (fp == NULL) {
+		lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	lck_mtx_lock(&amp;fp-&gt;ftp_mtx);
+	ASSERT(!mprov || fp-&gt;ftp_mcount &gt; 0);
+	<span class="enscript-keyword">if</span> (mprov &amp;&amp; --fp-&gt;ftp_mcount != 0)  {
+		lck_mtx_unlock(&amp;fp-&gt;ftp_mtx);
+		lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Mark the provider to be removed in our post-processing step, mark it
+	 * retired, and drop the active count on its proc. Marking it indicates
+	 * that we should try to remove it; setting the retired flag indicates
+	 * that we're done with this provider; dropping the active the proc
+	 * releases our hold, and when this reaches zero (as it will during
+	 * exit or exec) the proc and associated providers become defunct.
+	 *
+	 * We obviously need to take the bucket lock before the provider lock
+	 * to perform the lookup, but we need to drop the provider lock
+	 * before calling into the DTrace framework since we acquire the
+	 * provider lock in callbacks invoked from the DTrace framework. The
+	 * bucket lock therefore protects the integrity of the provider hash
+	 * table.
+	 */</span>
+	atomic_add_64(&amp;fp-&gt;ftp_proc-&gt;ftpc_acount, -1);
+	ASSERT(fp-&gt;ftp_proc-&gt;ftpc_acount &lt; fp-&gt;ftp_proc-&gt;ftpc_rcount);
+
+	fp-&gt;ftp_retired = 1;
+	fp-&gt;ftp_marked = 1;
+	provid = fp-&gt;ftp_provid;
+	lck_mtx_unlock(&amp;fp-&gt;ftp_mtx);
+
+	<span class="enscript-comment">/*
+	 * We don't have to worry about invalidating the same provider twice
+	 * since fasttrap_provider_lookup() will ignore provider that have
+	 * been marked as retired.
+	 */</span>
+	dtrace_invalidate(provid);
+
+	lck_mtx_unlock(&amp;bucket-&gt;ftb_mtx);
+
+	fasttrap_pid_cleanup();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">fasttrap_uint32_cmp</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *ap, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *bp)
+{
+	<span class="enscript-keyword">return</span> (*(<span class="enscript-type">const</span> uint32_t *)ap - *(<span class="enscript-type">const</span> uint32_t *)bp);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">fasttrap_uint64_cmp</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *ap, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *bp)
+{
+	<span class="enscript-keyword">return</span> (*(<span class="enscript-type">const</span> uint64_t *)ap - *(<span class="enscript-type">const</span> uint64_t *)bp);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">fasttrap_add_probe</span>(fasttrap_probe_spec_t *pdata)
+{
+	fasttrap_provider_t *provider;
+	fasttrap_probe_t *pp;
+	fasttrap_tracepoint_t *tp;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i, aframes, whack;
+
+	<span class="enscript-comment">/*
+	 * There needs to be at least one desired trace point.
+	 */</span>
+	 <span class="enscript-keyword">if</span> (pdata-&gt;ftps_noffs == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">switch</span> (pdata-&gt;ftps_probe_type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_ENTRY</span>:
+		name = <span class="enscript-string">&quot;entry&quot;</span>;
+		aframes = FASTTRAP_ENTRY_AFRAMES;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_RETURN</span>:
+		name = <span class="enscript-string">&quot;return&quot;</span>;
+		aframes = FASTTRAP_RETURN_AFRAMES;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_OFFSETS</span>:
+		aframes = 0;
+		name = NULL;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>* provider_name;
+	<span class="enscript-keyword">switch</span> (pdata-&gt;ftps_provider_type) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_PROVIDER_PID</span>:
+			provider_name = FASTTRAP_PID_NAME;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_PROVIDER_OBJC</span>:
+			provider_name = FASTTRAP_OBJC_NAME;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTFTP_PROVIDER_ONESHOT</span>:
+			provider_name = FASTTRAP_ONESHOT_NAME;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-keyword">if</span> ((provider = fasttrap_provider_lookup(pdata-&gt;ftps_pid, pdata-&gt;ftps_provider_type,
+						 provider_name, &amp;pid_attr)) == NULL)
+		<span class="enscript-keyword">return</span> (ESRCH);
+
+	<span class="enscript-comment">/*
+	 * Increment this reference count to indicate that a consumer is
+	 * actively adding a new probe associated with this provider. This
+	 * prevents the provider from being deleted -- we'll need to check
+	 * for pending deletions when we drop this reference count.
+	 */</span>
+	provider-&gt;ftp_ccount++;
+	lck_mtx_unlock(&amp;provider-&gt;ftp_mtx);
+
+	<span class="enscript-comment">/*
+	 * Grab the creation lock to ensure consistency between calls to
+	 * dtrace_probe_lookup() and dtrace_probe_create() in the face of
+	 * other threads creating probes. We must drop the provider lock
+	 * before taking this lock to avoid a three-way deadlock with the
+	 * DTrace framework.
+	 */</span>
+	lck_mtx_lock(&amp;provider-&gt;ftp_cmtx);
+
+	<span class="enscript-keyword">if</span> (name == NULL) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; pdata-&gt;ftps_noffs; i++) {
+			<span class="enscript-type">char</span> name_str[17];
+
+			(<span class="enscript-type">void</span>) snprintf(name_str, <span class="enscript-keyword">sizeof</span>(name_str), <span class="enscript-string">&quot;%llx&quot;</span>,
+			    (uint64_t)pdata-&gt;ftps_offs[i]);
+
+			<span class="enscript-keyword">if</span> (dtrace_probe_lookup(provider-&gt;ftp_provid,
+			    pdata-&gt;ftps_mod, pdata-&gt;ftps_func, name_str) != 0)
+				<span class="enscript-keyword">continue</span>;
+
+			atomic_add_32(&amp;fasttrap_total, 1);
+
+			<span class="enscript-keyword">if</span> (fasttrap_total &gt; fasttrap_max) {
+				atomic_add_32(&amp;fasttrap_total, -1);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">no_mem</span>;
+			}
+
+			pp = zalloc(fasttrap_probe_t_zones[1]);
+			bzero(pp, <span class="enscript-keyword">sizeof</span> (fasttrap_probe_t));
+
+			pp-&gt;ftp_prov = provider;
+			pp-&gt;ftp_faddr = pdata-&gt;ftps_pc;
+			pp-&gt;ftp_fsize = pdata-&gt;ftps_size;
+			pp-&gt;ftp_pid = pdata-&gt;ftps_pid;
+			pp-&gt;ftp_ntps = 1;
+
+			tp = zalloc(fasttrap_tracepoint_t_zone);			
+			bzero(tp, <span class="enscript-keyword">sizeof</span> (fasttrap_tracepoint_t));
+
+			tp-&gt;ftt_proc = provider-&gt;ftp_proc;
+			tp-&gt;ftt_pc = pdata-&gt;ftps_offs[i] + pdata-&gt;ftps_pc;
+			tp-&gt;ftt_pid = pdata-&gt;ftps_pid;
+
+
+			pp-&gt;ftp_tps[0].fit_tp = tp;
+			pp-&gt;ftp_tps[0].fit_id.fti_probe = pp;
+			pp-&gt;ftp_tps[0].fit_id.fti_ptype = pdata-&gt;ftps_probe_type;
+			pp-&gt;ftp_id = dtrace_probe_create(provider-&gt;ftp_provid,
+			    pdata-&gt;ftps_mod, pdata-&gt;ftps_func, name_str,
+			    FASTTRAP_OFFSET_AFRAMES, pp);
+		}
+
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (dtrace_probe_lookup(provider-&gt;ftp_provid, pdata-&gt;ftps_mod,
+	    pdata-&gt;ftps_func, name) == 0) {
+		atomic_add_32(&amp;fasttrap_total, pdata-&gt;ftps_noffs);
+
+		<span class="enscript-keyword">if</span> (fasttrap_total &gt; fasttrap_max) {
+			atomic_add_32(&amp;fasttrap_total, -pdata-&gt;ftps_noffs);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">no_mem</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Make sure all tracepoint program counter values are unique.
+		 * We later assume that each probe has exactly one tracepoint
+		 * for a given pc.
+		 */</span>
+		qsort(pdata-&gt;ftps_offs, pdata-&gt;ftps_noffs,
+			<span class="enscript-keyword">sizeof</span> (uint64_t), fasttrap_uint64_cmp);
+		<span class="enscript-keyword">for</span> (i = 1; i &lt; pdata-&gt;ftps_noffs; i++) {
+			<span class="enscript-keyword">if</span> (pdata-&gt;ftps_offs[i] &gt; pdata-&gt;ftps_offs[i - 1])
+				<span class="enscript-keyword">continue</span>;
+
+			atomic_add_32(&amp;fasttrap_total, -pdata-&gt;ftps_noffs);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">no_mem</span>;
+		}
+
+		ASSERT(pdata-&gt;ftps_noffs &gt; 0);
+		<span class="enscript-keyword">if</span> (pdata-&gt;ftps_noffs &lt; FASTTRAP_PROBE_T_ZONE_MAX_TRACEPOINTS) {
+			pp = zalloc(fasttrap_probe_t_zones[pdata-&gt;ftps_noffs]);
+			bzero(pp, offsetof(fasttrap_probe_t, ftp_tps[pdata-&gt;ftps_noffs]));
+		} <span class="enscript-keyword">else</span> {
+			pp = kmem_zalloc(offsetof(fasttrap_probe_t, ftp_tps[pdata-&gt;ftps_noffs]), KM_SLEEP);
+		}
+
+		pp-&gt;ftp_prov = provider;
+		pp-&gt;ftp_faddr = pdata-&gt;ftps_pc;
+		pp-&gt;ftp_fsize = pdata-&gt;ftps_size;
+		pp-&gt;ftp_pid = pdata-&gt;ftps_pid;
+		pp-&gt;ftp_ntps = pdata-&gt;ftps_noffs;
+
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; pdata-&gt;ftps_noffs; i++) {
+			tp = zalloc(fasttrap_tracepoint_t_zone);
+			bzero(tp, <span class="enscript-keyword">sizeof</span> (fasttrap_tracepoint_t));
+			tp-&gt;ftt_proc = provider-&gt;ftp_proc;
+			tp-&gt;ftt_pc = pdata-&gt;ftps_offs[i] + pdata-&gt;ftps_pc;
+			tp-&gt;ftt_pid = pdata-&gt;ftps_pid;
+
+			pp-&gt;ftp_tps[i].fit_tp = tp;
+			pp-&gt;ftp_tps[i].fit_id.fti_probe = pp;
+			pp-&gt;ftp_tps[i].fit_id.fti_ptype = pdata-&gt;ftps_probe_type;
+		}
+
+		pp-&gt;ftp_id = dtrace_probe_create(provider-&gt;ftp_provid,
+		    pdata-&gt;ftps_mod, pdata-&gt;ftps_func, name, aframes, pp);
+	}
+
+	lck_mtx_unlock(&amp;provider-&gt;ftp_cmtx);
+
+	<span class="enscript-comment">/*
+	 * We know that the provider is still valid since we incremented the
+	 * creation reference count. If someone tried to clean up this provider
+	 * while we were using it (e.g. because the process called exec(2) or
+	 * exit(2)), take note of that and try to clean it up now.
+	 */</span>
+	lck_mtx_lock(&amp;provider-&gt;ftp_mtx);
+	provider-&gt;ftp_ccount--;
+	whack = provider-&gt;ftp_retired;
+	lck_mtx_unlock(&amp;provider-&gt;ftp_mtx);
+
+	<span class="enscript-keyword">if</span> (whack)
+		fasttrap_pid_cleanup();
+
+	<span class="enscript-keyword">return</span> (0);
+
+<span class="enscript-reference">no_mem</span>:
+	<span class="enscript-comment">/*
+	 * If we've exhausted the allowable resources, we'll try to remove
+	 * this provider to free some up. This is to cover the case where
+	 * the user has accidentally created many more probes than was
+	 * intended (e.g. pid123:::).
+	 */</span>
+	lck_mtx_unlock(&amp;provider-&gt;ftp_cmtx);
+	lck_mtx_lock(&amp;provider-&gt;ftp_mtx);
+	provider-&gt;ftp_ccount--;
+	provider-&gt;ftp_marked = 1;
+	lck_mtx_unlock(&amp;provider-&gt;ftp_mtx);
+
+	fasttrap_pid_cleanup();
+
+	<span class="enscript-keyword">return</span> (ENOMEM);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> *
+<span class="enscript-function-name">fasttrap_meta_provide</span>(<span class="enscript-type">void</span> *arg, dtrace_helper_provdesc_t *dhpv, pid_t pid)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>)
+	fasttrap_provider_t *provider;
+
+	<span class="enscript-comment">/*
+	 * A 32-bit unsigned integer (like a pid for example) can be
+	 * expressed in 10 or fewer decimal digits. Make sure that we'll
+	 * have enough space for the provider name.
+	 */</span>
+	<span class="enscript-keyword">if</span> (strlen(dhpv-&gt;dthpv_provname) + 10 &gt;=
+	    <span class="enscript-keyword">sizeof</span> (provider-&gt;ftp_name)) {
+		cmn_err(CE_WARN, <span class="enscript-string">&quot;failed to instantiate provider %s: &quot;</span>
+		    <span class="enscript-string">&quot;name too long to accomodate pid&quot;</span>, dhpv-&gt;dthpv_provname);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	<span class="enscript-comment">/*
+	 * Don't let folks spoof the true pid provider.
+	 */</span>
+	<span class="enscript-keyword">if</span> (strncmp(dhpv-&gt;dthpv_provname, FASTTRAP_PID_NAME, <span class="enscript-keyword">sizeof</span>(FASTTRAP_PID_NAME)) == 0) {
+		cmn_err(CE_WARN, <span class="enscript-string">&quot;failed to instantiate provider %s: &quot;</span>
+		    <span class="enscript-string">&quot;%s is an invalid name&quot;</span>, dhpv-&gt;dthpv_provname,
+		    FASTTRAP_PID_NAME);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	<span class="enscript-comment">/*
+	 * APPLE NOTE: We also need to check the objc and oneshot pid provider types
+	 */</span>
+	<span class="enscript-keyword">if</span> (strncmp(dhpv-&gt;dthpv_provname, FASTTRAP_OBJC_NAME, <span class="enscript-keyword">sizeof</span>(FASTTRAP_OBJC_NAME)) == 0) {
+		cmn_err(CE_WARN, <span class="enscript-string">&quot;failed to instantiate provider %s: &quot;</span>
+		    <span class="enscript-string">&quot;%s is an invalid name&quot;</span>, dhpv-&gt;dthpv_provname,
+		    FASTTRAP_OBJC_NAME);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	<span class="enscript-keyword">if</span> (strncmp(dhpv-&gt;dthpv_provname, FASTTRAP_ONESHOT_NAME, <span class="enscript-keyword">sizeof</span>(FASTTRAP_ONESHOT_NAME)) == 0) {
+		cmn_err(CE_WARN, <span class="enscript-string">&quot;failed to instantiate provider %s: &quot;</span>
+		    <span class="enscript-string">&quot;%s is an invalid name&quot;</span>, dhpv-&gt;dthpv_provname,
+		    FASTTRAP_ONESHOT_NAME);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	<span class="enscript-comment">/*
+	 * The highest stability class that fasttrap supports is ISA; cap
+	 * the stability of the new provider accordingly.
+	 */</span>
+	<span class="enscript-keyword">if</span> (dhpv-&gt;dthpv_pattr.dtpa_provider.dtat_class &gt; DTRACE_CLASS_ISA)
+		dhpv-&gt;dthpv_pattr.dtpa_provider.dtat_class = DTRACE_CLASS_ISA;
+	<span class="enscript-keyword">if</span> (dhpv-&gt;dthpv_pattr.dtpa_mod.dtat_class &gt; DTRACE_CLASS_ISA)
+		dhpv-&gt;dthpv_pattr.dtpa_mod.dtat_class = DTRACE_CLASS_ISA;
+	<span class="enscript-keyword">if</span> (dhpv-&gt;dthpv_pattr.dtpa_func.dtat_class &gt; DTRACE_CLASS_ISA)
+		dhpv-&gt;dthpv_pattr.dtpa_func.dtat_class = DTRACE_CLASS_ISA;
+	<span class="enscript-keyword">if</span> (dhpv-&gt;dthpv_pattr.dtpa_name.dtat_class &gt; DTRACE_CLASS_ISA)
+		dhpv-&gt;dthpv_pattr.dtpa_name.dtat_class = DTRACE_CLASS_ISA;
+	<span class="enscript-keyword">if</span> (dhpv-&gt;dthpv_pattr.dtpa_args.dtat_class &gt; DTRACE_CLASS_ISA)
+		dhpv-&gt;dthpv_pattr.dtpa_args.dtat_class = DTRACE_CLASS_ISA;
+
+	<span class="enscript-keyword">if</span> ((provider = fasttrap_provider_lookup(pid, DTFTP_PROVIDER_USDT, dhpv-&gt;dthpv_provname,
+	    &amp;dhpv-&gt;dthpv_pattr)) == NULL) {
+		cmn_err(CE_WARN, <span class="enscript-string">&quot;failed to instantiate provider %s for &quot;</span>
+		    <span class="enscript-string">&quot;process %u&quot;</span>,  dhpv-&gt;dthpv_provname, (uint_t)pid);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	<span class="enscript-comment">/*
+	 * APPLE NOTE!
+	 *
+	 * USDT probes (fasttrap meta probes) are very expensive to create.
+	 * Profiling has shown that the largest single cost is verifying that
+	 * dtrace hasn't already created a given meta_probe. The reason for
+	 * this is dtrace_match() often has to strcmp ~100 hashed entries for
+	 * each static probe being created. We want to get rid of that check.
+	 * The simplest way of eliminating it is to deny the ability to add
+	 * probes to an existing provider. If the provider already exists, BZZT!
+	 * This still leaves the possibility of intentionally malformed DOF
+	 * having duplicate probes. However, duplicate probes are not fatal,
+	 * and there is no way to get that by accident, so we will not check
+	 * for that case.
+	 *
+	 * UPDATE: It turns out there are several use cases that require adding
+	 * probes to existing providers. Disabling the dtrace_probe_lookup()
+	 * optimization for now. See APPLE NOTE in fasttrap_meta_create_probe.
+	 */</span>
+
+	<span class="enscript-comment">/*
+	 * Up the meta provider count so this provider isn't removed until
+	 * the meta provider has been told to remove it.
+	 */</span>
+	provider-&gt;ftp_mcount++;
+
+	lck_mtx_unlock(&amp;provider-&gt;ftp_mtx);
+
+	<span class="enscript-keyword">return</span> (provider);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_meta_create_probe</span>(<span class="enscript-type">void</span> *arg, <span class="enscript-type">void</span> *parg,
+    dtrace_helper_probedesc_t *dhpb)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>)
+	fasttrap_provider_t *provider = parg;
+	fasttrap_probe_t *pp;
+	fasttrap_tracepoint_t *tp;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i, j;
+	uint32_t ntps;
+
+	<span class="enscript-comment">/*
+	 * Since the meta provider count is non-zero we don't have to worry
+	 * about this provider disappearing.
+	 */</span>
+	ASSERT(provider-&gt;ftp_mcount &gt; 0);
+
+	<span class="enscript-comment">/*
+	 * The offsets must be unique.
+	 */</span>
+	qsort(dhpb-&gt;dthpb_offs, dhpb-&gt;dthpb_noffs, <span class="enscript-keyword">sizeof</span> (uint32_t),
+		fasttrap_uint32_cmp);
+	<span class="enscript-keyword">for</span> (i = 1; i &lt; dhpb-&gt;dthpb_noffs; i++) {
+		<span class="enscript-keyword">if</span> (dhpb-&gt;dthpb_base + dhpb-&gt;dthpb_offs[i] &lt;=
+			dhpb-&gt;dthpb_base + dhpb-&gt;dthpb_offs[i - 1])
+				<span class="enscript-keyword">return</span>;
+	}
+
+	qsort(dhpb-&gt;dthpb_enoffs, dhpb-&gt;dthpb_nenoffs, <span class="enscript-keyword">sizeof</span> (uint32_t),
+		fasttrap_uint32_cmp);
+	<span class="enscript-keyword">for</span> (i = 1; i &lt; dhpb-&gt;dthpb_nenoffs; i++) {
+		<span class="enscript-keyword">if</span> (dhpb-&gt;dthpb_base + dhpb-&gt;dthpb_enoffs[i] &lt;=
+			dhpb-&gt;dthpb_base + dhpb-&gt;dthpb_enoffs[i - 1])
+				<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Grab the creation lock to ensure consistency between calls to
+	 * dtrace_probe_lookup() and dtrace_probe_create() in the face of
+	 * other threads creating probes.
+	 */</span>
+	lck_mtx_lock(&amp;provider-&gt;ftp_cmtx);
+
+#<span class="enscript-reference">if</span> 0
+	<span class="enscript-comment">/*
+	 * APPLE NOTE: This is hideously expensive. See note in 
+	 * fasttrap_meta_provide() for why we can get away without
+	 * checking here.
+	 */</span>
+	<span class="enscript-keyword">if</span> (dtrace_probe_lookup(provider-&gt;ftp_provid, dhpb-&gt;dthpb_mod,
+	    dhpb-&gt;dthpb_func, dhpb-&gt;dthpb_name) != 0) {
+		lck_mtx_unlock(&amp;provider-&gt;ftp_cmtx);
+		<span class="enscript-keyword">return</span>;
+	}
+#<span class="enscript-reference">endif</span>
+
+	ntps = dhpb-&gt;dthpb_noffs + dhpb-&gt;dthpb_nenoffs;
+	ASSERT(ntps &gt; 0);
+
+	atomic_add_32(&amp;fasttrap_total, ntps);
+
+	<span class="enscript-keyword">if</span> (fasttrap_total &gt; fasttrap_max) {
+		atomic_add_32(&amp;fasttrap_total, -ntps);
+		lck_mtx_unlock(&amp;provider-&gt;ftp_cmtx);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (ntps &lt; FASTTRAP_PROBE_T_ZONE_MAX_TRACEPOINTS) {
+		pp = zalloc(fasttrap_probe_t_zones[ntps]);
+		bzero(pp, offsetof(fasttrap_probe_t, ftp_tps[ntps]));
+	} <span class="enscript-keyword">else</span> {
+		pp = kmem_zalloc(offsetof(fasttrap_probe_t, ftp_tps[ntps]), KM_SLEEP);
+	}
+
+	pp-&gt;ftp_prov = provider;
+	pp-&gt;ftp_pid = provider-&gt;ftp_pid;
+	pp-&gt;ftp_ntps = ntps;
+	pp-&gt;ftp_nargs = dhpb-&gt;dthpb_xargc;
+	pp-&gt;ftp_xtypes = dhpb-&gt;dthpb_xtypes;
+	pp-&gt;ftp_ntypes = dhpb-&gt;dthpb_ntypes;
+
+	<span class="enscript-comment">/*
+	 * First create a tracepoint for each actual point of interest.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; dhpb-&gt;dthpb_noffs; i++) {
+		tp = zalloc(fasttrap_tracepoint_t_zone);
+		bzero(tp, <span class="enscript-keyword">sizeof</span> (fasttrap_tracepoint_t));
+
+		tp-&gt;ftt_proc = provider-&gt;ftp_proc;
+
+		<span class="enscript-comment">/*
+		 * APPLE NOTE: We have linker support when creating DOF to handle all relocations for us.
+		 * Unfortunately, a side effect of this is that the relocations do not point at exactly
+		 * the location we want. We need to fix up the addresses here. The fixups vary by arch and type.
+		 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+		<span class="enscript-comment">/*
+		 * Both 32 &amp; 64 bit want to go back one byte, to point at the first NOP
+		 */</span>
+		tp-&gt;ftt_pc = dhpb-&gt;dthpb_base + (int64_t)dhpb-&gt;dthpb_offs[i] - 1;
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-string">&quot;Architecture not supported&quot;</span>
+#<span class="enscript-reference">endif</span>
+
+		tp-&gt;ftt_pid = provider-&gt;ftp_pid;
+
+		pp-&gt;ftp_tps[i].fit_tp = tp;
+		pp-&gt;ftp_tps[i].fit_id.fti_probe = pp;
+		pp-&gt;ftp_tps[i].fit_id.fti_ptype = DTFTP_OFFSETS;
+	}
+
+	<span class="enscript-comment">/*
+	 * Then create a tracepoint for each is-enabled point.
+	 */</span>
+	<span class="enscript-keyword">for</span> (j = 0; i &lt; ntps; i++, j++) {
+		tp = zalloc(fasttrap_tracepoint_t_zone);
+		bzero(tp, <span class="enscript-keyword">sizeof</span> (fasttrap_tracepoint_t));
+
+		tp-&gt;ftt_proc = provider-&gt;ftp_proc;
+
+		<span class="enscript-comment">/*
+		 * APPLE NOTE: We have linker support when creating DOF to handle all relocations for us.
+		 * Unfortunately, a side effect of this is that the relocations do not point at exactly
+		 * the location we want. We need to fix up the addresses here. The fixups vary by arch and type.
+		 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+		<span class="enscript-comment">/*
+		 * Both 32 &amp; 64 bit want to go forward two bytes, to point at a single byte nop.
+		 */</span>
+		tp-&gt;ftt_pc = dhpb-&gt;dthpb_base + (int64_t)dhpb-&gt;dthpb_enoffs[j] + 2;
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-string">&quot;Architecture not supported&quot;</span>
+#<span class="enscript-reference">endif</span>
+
+		tp-&gt;ftt_pid = provider-&gt;ftp_pid;
+
+		pp-&gt;ftp_tps[i].fit_tp = tp;
+		pp-&gt;ftp_tps[i].fit_id.fti_probe = pp;
+		pp-&gt;ftp_tps[i].fit_id.fti_ptype = DTFTP_IS_ENABLED;
+	}
+
+	<span class="enscript-comment">/*
+	 * If the arguments are shuffled around we set the argument remapping
+	 * table. Later, when the probe fires, we only remap the arguments
+	 * if the table is non-NULL.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; dhpb-&gt;dthpb_xargc; i++) {
+		<span class="enscript-keyword">if</span> (dhpb-&gt;dthpb_args[i] != i) {
+			pp-&gt;ftp_argmap = dhpb-&gt;dthpb_args;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * The probe is fully constructed -- register it with DTrace.
+	 */</span>
+	pp-&gt;ftp_id = dtrace_probe_create(provider-&gt;ftp_provid, dhpb-&gt;dthpb_mod,
+	    dhpb-&gt;dthpb_func, dhpb-&gt;dthpb_name, FASTTRAP_OFFSET_AFRAMES, pp);
+
+	lck_mtx_unlock(&amp;provider-&gt;ftp_cmtx);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_meta_remove</span>(<span class="enscript-type">void</span> *arg, dtrace_helper_provdesc_t *dhpv, pid_t pid)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>)
+	<span class="enscript-comment">/*
+	 * Clean up the USDT provider. There may be active consumers of the
+	 * provider busy adding probes, no damage will actually befall the
+	 * provider until that count has dropped to zero. This just puts
+	 * the provider on death row.
+	 */</span>
+	fasttrap_provider_retire(pid, dhpv-&gt;dthpv_provname, 1);
+}
+
+<span class="enscript-type">static</span> dtrace_mops_t fasttrap_mops = {
+	fasttrap_meta_create_probe,
+	fasttrap_meta_provide,
+	fasttrap_meta_remove
+};
+
+<span class="enscript-comment">/*
+ * Validate a null-terminated string. If str is not null-terminated,
+ * or not a UTF8 valid string, the function returns -1. Otherwise, 0 is
+ * returned.
+ *
+ * str: string to validate.
+ * maxlen: maximal length of the string, null-terminated byte included.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">fasttrap_validatestr</span>(<span class="enscript-type">char</span> <span class="enscript-type">const</span>* str, size_t maxlen) {
+	size_t len;
+
+	assert(str);
+	assert(maxlen != 0);
+
+	<span class="enscript-comment">/* Check if the string is null-terminated. */</span>
+	len = strnlen(str, maxlen);
+	<span class="enscript-keyword">if</span> (len &gt;= maxlen)
+		<span class="enscript-keyword">return</span> -1;
+
+	<span class="enscript-comment">/* Finally, check for UTF8 validity. */</span>
+	<span class="enscript-keyword">return</span> utf8_validatestr((<span class="enscript-type">unsigned</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span>*) str, len);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">fasttrap_ioctl</span>(dev_t dev, u_long cmd, user_addr_t arg, <span class="enscript-type">int</span> md, cred_t *cr, <span class="enscript-type">int</span> *rv)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">dev</span>, <span class="enscript-variable-name">md</span>, <span class="enscript-variable-name">rv</span>)
+	<span class="enscript-keyword">if</span> (!dtrace_attached())
+		<span class="enscript-keyword">return</span> (EAGAIN);
+
+	<span class="enscript-keyword">if</span> (cmd == FASTTRAPIOC_MAKEPROBE) {
+		fasttrap_probe_spec_t *probe;
+		uint64_t noffs;
+		size_t size;
+		<span class="enscript-type">int</span> ret;
+
+		<span class="enscript-keyword">if</span> (copyin(arg + __offsetof(fasttrap_probe_spec_t, ftps_noffs), &amp;noffs,
+		    <span class="enscript-keyword">sizeof</span> (probe-&gt;ftps_noffs)))
+			<span class="enscript-keyword">return</span> (EFAULT);
+
+		<span class="enscript-comment">/*
+		 * Probes must have at least one tracepoint.
+		 */</span>
+		<span class="enscript-keyword">if</span> (noffs == 0)
+			<span class="enscript-keyword">return</span> (EINVAL);
+
+		<span class="enscript-comment">/*
+		 * We want to check the number of noffs before doing
+		 * sizing math, to prevent potential buffer overflows.
+		 */</span>
+		<span class="enscript-keyword">if</span> (noffs &gt; ((1024 * 1024) - <span class="enscript-keyword">sizeof</span>(fasttrap_probe_spec_t)) / <span class="enscript-keyword">sizeof</span>(probe-&gt;ftps_offs[0]))
+			<span class="enscript-keyword">return</span> (ENOMEM);
+
+		size = <span class="enscript-keyword">sizeof</span> (fasttrap_probe_spec_t) +
+		    <span class="enscript-keyword">sizeof</span> (probe-&gt;ftps_offs[0]) * (noffs - 1);
+
+		probe = kmem_alloc(size, KM_SLEEP);
+
+		<span class="enscript-keyword">if</span> (copyin(arg, probe, size) != 0 ||
+		    probe-&gt;ftps_noffs != noffs) {
+			kmem_free(probe, size);
+			<span class="enscript-keyword">return</span> (EFAULT);
+		}
+
+		<span class="enscript-comment">/*
+		 * Verify that the function and module strings contain no
+		 * funny characters.
+		 */</span>
+
+		<span class="enscript-keyword">if</span> (fasttrap_validatestr(probe-&gt;ftps_func, <span class="enscript-keyword">sizeof</span>(probe-&gt;ftps_func)) != 0) {
+			ret = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (fasttrap_validatestr(probe-&gt;ftps_mod, <span class="enscript-keyword">sizeof</span>(probe-&gt;ftps_mod)) != 0) {
+			ret = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (!PRIV_POLICY_CHOICE(cr, PRIV_ALL, B_FALSE)) {
+			proc_t *p;
+			pid_t pid = probe-&gt;ftps_pid;
+
+			<span class="enscript-comment">/*
+			 * Report an error if the process doesn't exist
+			 * or is actively being birthed.
+			 */</span>
+			<span class="enscript-keyword">if</span> ((p = proc_find(pid)) == PROC_NULL || p-&gt;p_stat == SIDL) {
+				<span class="enscript-keyword">if</span> (p != PROC_NULL)
+					proc_rele(p);
+				ret = ESRCH;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+			}
+			<span class="enscript-comment">// proc_lock(p);
+</span>			<span class="enscript-comment">// FIXME! How is this done on OS X?
+</span>			<span class="enscript-comment">// if ((ret = priv_proc_cred_perm(cr, p, NULL,
+</span>			<span class="enscript-comment">//     VREAD | VWRITE)) != 0) {
+</span>			<span class="enscript-comment">// 	mutex_exit(&amp;p-&gt;p_lock);
+</span>			<span class="enscript-comment">// 	return (ret);
+</span>			<span class="enscript-comment">// }
+</span>			<span class="enscript-comment">// proc_unlock(p);
+</span>			proc_rele(p);
+		}
+
+		ret = fasttrap_add_probe(probe);
+
+<span class="enscript-reference">err</span>:
+		kmem_free(probe, size);
+
+		<span class="enscript-keyword">return</span> (ret);
+
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cmd == FASTTRAPIOC_GETINSTR) {
+		fasttrap_instr_query_t instr;
+		fasttrap_tracepoint_t *tp;
+		uint_t index;
+		<span class="enscript-comment">// int ret;
+</span>
+		<span class="enscript-keyword">if</span> (copyin(arg, &amp;instr, <span class="enscript-keyword">sizeof</span> (instr)) != 0)
+			<span class="enscript-keyword">return</span> (EFAULT);
+
+		<span class="enscript-keyword">if</span> (!PRIV_POLICY_CHOICE(cr, PRIV_ALL, B_FALSE)) {
+			proc_t *p;
+			pid_t pid = instr.ftiq_pid;
+
+			<span class="enscript-comment">/*
+			 * Report an error if the process doesn't exist
+			 * or is actively being birthed.
+			 */</span>
+			<span class="enscript-keyword">if</span> ((p = proc_find(pid)) == NULL || p-&gt;p_stat == SIDL) {
+				<span class="enscript-keyword">if</span> (p != PROC_NULL)
+					proc_rele(p);
+				<span class="enscript-keyword">return</span> (ESRCH);
+			}
+			<span class="enscript-comment">//proc_lock(p);
+</span>			<span class="enscript-comment">// FIXME! How is this done on OS X?
+</span>			<span class="enscript-comment">// if ((ret = priv_proc_cred_perm(cr, p, NULL,
+</span>			<span class="enscript-comment">//     VREAD)) != 0) {
+</span>			<span class="enscript-comment">// 	mutex_exit(&amp;p-&gt;p_lock);
+</span>			<span class="enscript-comment">// 	return (ret);
+</span>			<span class="enscript-comment">// }
+</span>			<span class="enscript-comment">// proc_unlock(p);
+</span>			proc_rele(p);
+		}
+
+		index = FASTTRAP_TPOINTS_INDEX(instr.ftiq_pid, instr.ftiq_pc);
+
+		lck_mtx_lock(&amp;fasttrap_tpoints.fth_table[index].ftb_mtx);
+		tp = fasttrap_tpoints.fth_table[index].ftb_data;
+		<span class="enscript-keyword">while</span> (tp != NULL) {
+			<span class="enscript-keyword">if</span> (instr.ftiq_pid == tp-&gt;ftt_pid &amp;&amp;
+			    instr.ftiq_pc == tp-&gt;ftt_pc &amp;&amp;
+			    tp-&gt;ftt_proc-&gt;ftpc_acount != 0)
+				<span class="enscript-keyword">break</span>;
+
+			tp = tp-&gt;ftt_next;
+		}
+
+		<span class="enscript-keyword">if</span> (tp == NULL) {
+			lck_mtx_unlock(&amp;fasttrap_tpoints.fth_table[index].ftb_mtx);
+			<span class="enscript-keyword">return</span> (ENOENT);
+		}
+
+		bcopy(&amp;tp-&gt;ftt_instr, &amp;instr.ftiq_instr,
+		    <span class="enscript-keyword">sizeof</span> (instr.ftiq_instr));
+		lck_mtx_unlock(&amp;fasttrap_tpoints.fth_table[index].ftb_mtx);
+
+		<span class="enscript-keyword">if</span> (copyout(&amp;instr, arg, <span class="enscript-keyword">sizeof</span> (instr)) != 0)
+			<span class="enscript-keyword">return</span> (EFAULT);
+
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">return</span> (EINVAL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">fasttrap_attach</span>(dev_info_t *devi, ddi_attach_cmd_t cmd)
+{
+	ulong_t nent;
+
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DDI_ATTACH</span>:
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DDI_RESUME</span>:
+		<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (DDI_FAILURE);
+	}
+
+	ddi_report_dev(devi);
+	fasttrap_devi = devi;
+
+	<span class="enscript-comment">/*
+	 * Install our hooks into fork(2), exec(2), and exit(2).
+	 */</span>
+	dtrace_fasttrap_fork_ptr = &amp;fasttrap_fork;
+	dtrace_fasttrap_exit_ptr = &amp;fasttrap_exec_exit;
+	dtrace_fasttrap_exec_ptr = &amp;fasttrap_exec_exit;
+
+	<span class="enscript-comment">/*
+	 * APPLE NOTE:  We size the maximum number of fasttrap probes
+	 * based on system memory. 100k probes per 256M of system memory.
+	 * Yes, this is a WAG.
+	 */</span>
+	fasttrap_max = (sane_size &gt;&gt; 28) * 100000;
+	<span class="enscript-keyword">if</span> (fasttrap_max == 0)
+		fasttrap_max = 50000;
+
+	fasttrap_total = 0;
+
+	<span class="enscript-comment">/*
+	 * Conjure up the tracepoints hashtable...
+	 */</span>
+	nent = ddi_getprop(DDI_DEV_T_ANY, devi, DDI_PROP_DONTPASS,
+	    <span class="enscript-string">&quot;fasttrap-hash-size&quot;</span>, FASTTRAP_TPOINTS_DEFAULT_SIZE);
+
+	<span class="enscript-keyword">if</span> (nent &lt;= 0 || nent &gt; 0x1000000)
+		nent = FASTTRAP_TPOINTS_DEFAULT_SIZE;
+
+	<span class="enscript-keyword">if</span> ((nent &amp; (nent - 1)) == 0)
+		fasttrap_tpoints.fth_nent = nent;
+	<span class="enscript-keyword">else</span>
+		fasttrap_tpoints.fth_nent = 1 &lt;&lt; fasttrap_highbit(nent);
+	ASSERT(fasttrap_tpoints.fth_nent &gt; 0);
+	fasttrap_tpoints.fth_mask = fasttrap_tpoints.fth_nent - 1;
+	fasttrap_tpoints.fth_table = kmem_zalloc(fasttrap_tpoints.fth_nent *
+	    <span class="enscript-keyword">sizeof</span> (fasttrap_bucket_t), KM_SLEEP);
+	ASSERT(fasttrap_tpoints.fth_table != NULL);
+
+	<span class="enscript-comment">/*
+	 * APPLE NOTE:  explicitly initialize all locks...
+	 */</span>
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+	<span class="enscript-keyword">for</span> (i=0; i&lt;fasttrap_tpoints.fth_nent; i++) {
+		lck_mtx_init(&amp;fasttrap_tpoints.fth_table[i].ftb_mtx, fasttrap_lck_grp, fasttrap_lck_attr);
+	}
+
+	<span class="enscript-comment">/*
+	 * ... and the providers hash table...
+	 */</span>
+	nent = FASTTRAP_PROVIDERS_DEFAULT_SIZE;
+	<span class="enscript-keyword">if</span> ((nent &amp; (nent - 1)) == 0)
+		fasttrap_provs.fth_nent = nent;
+	<span class="enscript-keyword">else</span>
+		fasttrap_provs.fth_nent = 1 &lt;&lt; fasttrap_highbit(nent);
+	ASSERT(fasttrap_provs.fth_nent &gt; 0);
+	fasttrap_provs.fth_mask = fasttrap_provs.fth_nent - 1;
+	fasttrap_provs.fth_table = kmem_zalloc(fasttrap_provs.fth_nent *
+	    <span class="enscript-keyword">sizeof</span> (fasttrap_bucket_t), KM_SLEEP);
+	ASSERT(fasttrap_provs.fth_table != NULL);
+
+	<span class="enscript-comment">/*
+	 * APPLE NOTE: explicitly initialize all locks...
+	 */</span>
+	<span class="enscript-keyword">for</span> (i=0; i&lt;fasttrap_provs.fth_nent; i++) {
+		lck_mtx_init(&amp;fasttrap_provs.fth_table[i].ftb_mtx, fasttrap_lck_grp, fasttrap_lck_attr);
+	}
+
+	<span class="enscript-comment">/*
+	 * ... and the procs hash table.
+	 */</span>
+	nent = FASTTRAP_PROCS_DEFAULT_SIZE;
+	<span class="enscript-keyword">if</span> ((nent &amp; (nent - 1)) == 0)
+		fasttrap_procs.fth_nent = nent;
+	<span class="enscript-keyword">else</span>
+		fasttrap_procs.fth_nent = 1 &lt;&lt; fasttrap_highbit(nent);
+	ASSERT(fasttrap_procs.fth_nent &gt; 0);
+	fasttrap_procs.fth_mask = fasttrap_procs.fth_nent - 1;
+	fasttrap_procs.fth_table = kmem_zalloc(fasttrap_procs.fth_nent *
+	    <span class="enscript-keyword">sizeof</span> (fasttrap_bucket_t), KM_SLEEP);
+	ASSERT(fasttrap_procs.fth_table != NULL);
+
+	<span class="enscript-comment">/*
+	 * APPLE NOTE: explicitly initialize all locks...
+	 */</span>
+	<span class="enscript-keyword">for</span> (i=0; i&lt;fasttrap_procs.fth_nent; i++) {
+		lck_mtx_init(&amp;fasttrap_procs.fth_table[i].ftb_mtx, fasttrap_lck_grp, fasttrap_lck_attr);
+	}
+
+	(<span class="enscript-type">void</span>) dtrace_meta_register(<span class="enscript-string">&quot;fasttrap&quot;</span>, &amp;fasttrap_mops, NULL,
+	    &amp;fasttrap_meta_id);
+
+	<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 
+<span class="enscript-function-name">_fasttrap_open</span>(dev_t dev, <span class="enscript-type">int</span> flags, <span class="enscript-type">int</span> devtype, <span class="enscript-type">struct</span> proc *p)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">dev</span>, <span class="enscript-variable-name">flags</span>, <span class="enscript-variable-name">devtype</span>, <span class="enscript-variable-name">p</span>)
+	<span class="enscript-keyword">return</span>  0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">_fasttrap_ioctl</span>(dev_t dev, u_long cmd, caddr_t data, <span class="enscript-type">int</span> fflag, <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">int</span> err, rv = 0;
+    user_addr_t uaddrp;
+
+    <span class="enscript-keyword">if</span> (proc_is64bit(p))
+        uaddrp = *(user_addr_t *)data;
+    <span class="enscript-keyword">else</span>
+        uaddrp = (user_addr_t) *(uint32_t *)data;
+
+	err = fasttrap_ioctl(dev, cmd, uaddrp, fflag, CRED(), &amp;rv);
+
+	<span class="enscript-comment">/* XXX Darwin's BSD ioctls only return -1 or zero. Overload errno to mimic Solaris. 20 bits suffice. */</span>
+	<span class="enscript-keyword">if</span> (err != 0) {
+		ASSERT( (err &amp; 0xfffff000) == 0 );
+		<span class="enscript-keyword">return</span> (err &amp; 0xfff); <span class="enscript-comment">/* ioctl returns -1 and errno set to an error code &lt; 4096 */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (rv != 0) {
+		ASSERT( (rv &amp; 0xfff00000) == 0 );
+		<span class="enscript-keyword">return</span> (((rv &amp; 0xfffff) &lt;&lt; 12)); <span class="enscript-comment">/* ioctl returns -1 and errno set to a return value &gt;= 4096 */</span>
+	} <span class="enscript-keyword">else</span> 
+		<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> gFasttrapInited = 0;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">FASTTRAP_MAJOR</span>  -24 <span class="enscript-comment">/* let the kernel pick the device number */</span>
+
+<span class="enscript-comment">/*
+ * A struct describing which functions will get invoked for certain
+ * actions.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> cdevsw fasttrap_cdevsw =
+{
+	_fasttrap_open,         <span class="enscript-comment">/* open */</span>
+	eno_opcl,               <span class="enscript-comment">/* close */</span>
+	eno_rdwrt,              <span class="enscript-comment">/* read */</span>
+	eno_rdwrt,              <span class="enscript-comment">/* write */</span>
+	_fasttrap_ioctl,        <span class="enscript-comment">/* ioctl */</span>
+	(stop_fcn_t *)nulldev,  <span class="enscript-comment">/* stop */</span>
+	(reset_fcn_t *)nulldev, <span class="enscript-comment">/* reset */</span>
+	NULL,                   <span class="enscript-comment">/* tty's */</span>
+	eno_select,             <span class="enscript-comment">/* select */</span>
+	eno_mmap,               <span class="enscript-comment">/* mmap */</span>
+	eno_strat,              <span class="enscript-comment">/* strategy */</span>
+	eno_getc,               <span class="enscript-comment">/* getc */</span>
+	eno_putc,               <span class="enscript-comment">/* putc */</span>
+	0                       <span class="enscript-comment">/* type */</span>
+};
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">fasttrap_init</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fasttrap_init</span>( <span class="enscript-type">void</span> )
+{
+	<span class="enscript-comment">/*
+	 * This method is now invoked from multiple places. Any open of /dev/dtrace,
+	 * also dtrace_init if the dtrace_dof_mode is DTRACE_DOF_MODE_NON_LAZY.
+	 *
+	 * The reason is to delay allocating the (rather large) resources as late as possible.
+	 */</span>
+	<span class="enscript-keyword">if</span> (0 == gFasttrapInited) {
+		<span class="enscript-type">int</span> majdevno = cdevsw_add(FASTTRAP_MAJOR, &amp;fasttrap_cdevsw);
+
+		<span class="enscript-keyword">if</span> (majdevno &lt; 0) {
+			<span class="enscript-comment">// FIX ME! What kind of error reporting to do here?
+</span>			printf(<span class="enscript-string">&quot;fasttrap_init: failed to allocate a major number!\n&quot;</span>);
+			<span class="enscript-keyword">return</span>;
+		}
+
+		dev_t device = makedev( (uint32_t)majdevno, 0 );
+		<span class="enscript-keyword">if</span> (NULL == devfs_make_node( device, DEVFS_CHAR, UID_ROOT, GID_WHEEL, 0666, <span class="enscript-string">&quot;fasttrap&quot;</span>, 0 )) {
+			<span class="enscript-keyword">return</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Allocate the fasttrap_tracepoint_t zone
+		 */</span>
+		fasttrap_tracepoint_t_zone = zinit(<span class="enscript-keyword">sizeof</span>(fasttrap_tracepoint_t),
+						   1024 * <span class="enscript-keyword">sizeof</span>(fasttrap_tracepoint_t),
+						   <span class="enscript-keyword">sizeof</span>(fasttrap_tracepoint_t),
+						   <span class="enscript-string">&quot;dtrace.fasttrap_tracepoint_t&quot;</span>);
+
+		<span class="enscript-comment">/*
+		 * fasttrap_probe_t's are variable in size. We use an array of zones to
+		 * cover the most common sizes.
+		 */</span>
+		<span class="enscript-type">int</span> i;
+		<span class="enscript-keyword">for</span> (i=1; i&lt;FASTTRAP_PROBE_T_ZONE_MAX_TRACEPOINTS; i++) {
+			size_t zone_element_size = offsetof(fasttrap_probe_t, ftp_tps[i]);
+			fasttrap_probe_t_zones[i] = zinit(zone_element_size,
+							  1024 * zone_element_size,
+							  zone_element_size,
+							  fasttrap_probe_t_zone_names[i]);
+		}
+
+		
+		<span class="enscript-comment">/*
+		 * Create the fasttrap lock group. Must be done before fasttrap_attach()!
+		 */</span>
+		fasttrap_lck_attr = lck_attr_alloc_init();
+		fasttrap_lck_grp_attr= lck_grp_attr_alloc_init();		
+		fasttrap_lck_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;fasttrap&quot;</span>,  fasttrap_lck_grp_attr);
+
+		<span class="enscript-comment">/*
+		 * Initialize global locks
+		 */</span>
+		lck_mtx_init(&amp;fasttrap_cleanup_mtx, fasttrap_lck_grp, fasttrap_lck_attr);
+		lck_mtx_init(&amp;fasttrap_count_mtx, fasttrap_lck_grp, fasttrap_lck_attr);
+
+		<span class="enscript-keyword">if</span> (DDI_FAILURE == fasttrap_attach((dev_info_t *)(uintptr_t)device, 0 )) {
+			<span class="enscript-comment">// FIX ME! Do we remove the devfs node here?
+</span>			<span class="enscript-comment">// What kind of error reporting?
+</span>			printf(<span class="enscript-string">&quot;fasttrap_init: Call to fasttrap_attach failed.\n&quot;</span>);
+			<span class="enscript-keyword">return</span>;
+		}
+
+		gFasttrapInited = 1;		
+	}
+}
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">FASTTRAP_MAJOR</span>
+</pre>
+<hr />
+</body></html>

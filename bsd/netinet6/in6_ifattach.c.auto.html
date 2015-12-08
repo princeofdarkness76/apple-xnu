@@ -1,0 +1,1237 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>in6_ifattach.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">in6_ifattach.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2003-2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the project nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sockio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/crypto/sha1.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_dl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_protocol.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/if_ether.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/icmp6.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/in6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/in6_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/in6_ifattach.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/nd6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/scope6_var.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;dev/random/randomdev.h&gt;</span>
+
+u_int32_t in6_maxmtu = 0;
+<span class="enscript-type">extern</span> lck_mtx_t *nd6_mutex;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IP6_AUTO_LINKLOCAL</span>
+<span class="enscript-type">int</span> ip6_auto_linklocal = IP6_AUTO_LINKLOCAL;
+#<span class="enscript-reference">else</span>
+<span class="enscript-type">int</span> ip6_auto_linklocal = 1;	<span class="enscript-comment">/* enable by default */</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> inpcbinfo udbinfo;
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> inpcbinfo ripcbinfo;
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> in6_extra_size = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> in6_ifextra);
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> in6_extra_bufsize = in6_extra_size + 
+    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span> *) + <span class="enscript-keyword">sizeof</span>(uint64_t);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">get_rand_iid</span>(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">struct</span> in6_addr *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">in6_generate_tmp_iid</span>(u_int8_t *, <span class="enscript-type">const</span> u_int8_t *, u_int8_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">in6_select_iid_from_all_hw</span>(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">struct</span> ifnet *,
+    <span class="enscript-type">struct</span> in6_addr *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">in6_ifattach_linklocal</span>(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">struct</span> in6_aliasreq *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">in6_ifattach_loopback</span>(<span class="enscript-type">struct</span> ifnet *);
+
+<span class="enscript-comment">/*
+ * Generate a last-resort interface identifier, when the machine has no
+ * IEEE802/EUI64 address sources.
+ * The goal here is to get an interface identifier that is
+ * (1) random enough and (2) does not change across reboot.
+ * We currently use SHA1(hostname) for it.
+ *
+ * in6 - upper 64bits are preserved
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">get_rand_iid</span>(
+	__unused <span class="enscript-type">struct</span> ifnet *ifp,
+	<span class="enscript-type">struct</span> in6_addr *in6)	<span class="enscript-comment">/* upper 64bits are preserved */</span>
+{
+	SHA1_CTX ctxt;
+	u_int8_t digest[SHA1_RESULTLEN];
+	<span class="enscript-type">int</span> hostnlen	= strlen(hostname);
+
+	<span class="enscript-comment">/* generate 8 bytes of pseudo-random value. */</span>
+	bzero(&amp;ctxt, <span class="enscript-keyword">sizeof</span> (ctxt));
+	SHA1Init(&amp;ctxt);
+	SHA1Update(&amp;ctxt, hostname, hostnlen);
+	SHA1Final(digest, &amp;ctxt);
+
+	<span class="enscript-comment">/* assumes sizeof (digest) &gt; sizeof (iid) */</span>
+	bcopy(digest, &amp;in6-&gt;s6_addr[8], 8);
+
+	<span class="enscript-comment">/* make sure to set &quot;u&quot; bit to local, and &quot;g&quot; bit to individual. */</span>
+	in6-&gt;s6_addr[8] &amp;= ~ND6_EUI64_GBIT;	<span class="enscript-comment">/* g bit to &quot;individual&quot; */</span>
+	in6-&gt;s6_addr[8] |= ND6_EUI64_UBIT;	<span class="enscript-comment">/* u bit to &quot;local&quot; */</span>
+
+	<span class="enscript-comment">/* convert EUI64 into IPv6 interface identifier */</span>
+	ND6_EUI64_TO_IFID(in6);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">in6_generate_tmp_iid</span>(
+	u_int8_t *seed0,
+	<span class="enscript-type">const</span> u_int8_t *seed1,
+	u_int8_t *ret)
+{
+	SHA1_CTX ctxt;
+	u_int8_t seed[16], nullbuf[8], digest[SHA1_RESULTLEN];
+	u_int32_t val32;
+	<span class="enscript-type">struct</span> timeval tv;
+
+	<span class="enscript-comment">/* If there's no history, start with a random seed. */</span>
+	bzero(nullbuf, <span class="enscript-keyword">sizeof</span> (nullbuf));
+	<span class="enscript-keyword">if</span> (bcmp(nullbuf, seed0, <span class="enscript-keyword">sizeof</span> (nullbuf)) == 0) {
+		<span class="enscript-type">int</span> i;
+
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; 2; i++) {
+			getmicrotime(&amp;tv);
+			val32 = RandomULong() ^ tv.tv_usec;
+			bcopy(&amp;val32, seed + <span class="enscript-keyword">sizeof</span> (val32) * i,
+			    <span class="enscript-keyword">sizeof</span> (val32));
+		}
+	} <span class="enscript-keyword">else</span> {
+		bcopy(seed0, seed, 8);
+	}
+
+	<span class="enscript-comment">/* copy the right-most 64-bits of the given address */</span>
+	<span class="enscript-comment">/* XXX assumption on the size of IFID */</span>
+	bcopy(seed1, &amp;seed[8], 8);
+
+	<span class="enscript-keyword">if</span> ((0)) {		<span class="enscript-comment">/* for debugging purposes only */</span>
+		<span class="enscript-type">int</span> i;
+
+		printf(<span class="enscript-string">&quot;%s: new randomized ID from: &quot;</span>, __func__);
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; 16; i++)
+			printf(<span class="enscript-string">&quot;%02x&quot;</span>, seed[i]);
+		printf(<span class="enscript-string">&quot; &quot;</span>);
+	}
+
+	<span class="enscript-comment">/* generate 16 bytes of pseudo-random value. */</span>
+	bzero(&amp;ctxt, <span class="enscript-keyword">sizeof</span> (ctxt));
+	SHA1Init(&amp;ctxt);
+	SHA1Update(&amp;ctxt, seed, <span class="enscript-keyword">sizeof</span> (seed));
+	SHA1Final(digest, &amp;ctxt);
+
+	<span class="enscript-comment">/*
+	 * RFC 4941 3.2.1. (3)
+	 * Take the left-most 64-bits of the SHA1 digest and set bit 6 (the
+	 * left-most bit is numbered 0) to zero.
+	 */</span>
+	bcopy(digest, ret, 8);
+	ret[0] &amp;= ~ND6_EUI64_UBIT;
+
+	<span class="enscript-comment">/*
+	 * XXX: we'd like to ensure that the generated value is not zero
+	 * for simplicity.  If the caclculated digest happens to be zero,
+	 * use a random non-zero value as the last resort.
+	 */</span>
+	<span class="enscript-keyword">if</span> (bcmp(nullbuf, ret, <span class="enscript-keyword">sizeof</span> (nullbuf)) == 0) {
+		nd6log((LOG_INFO,
+		    <span class="enscript-string">&quot;%s: computed SHA1 value is zero.\n&quot;</span>, __func__));
+
+		getmicrotime(&amp;tv);
+		val32 = random() ^ tv.tv_usec;
+		val32 = 1 + (val32 % (0xffffffff - 1));
+	}
+
+	<span class="enscript-comment">/*
+	 * RFC 4941 3.2.1. (4)
+	 * Take the next 64-bits of the SHA1 digest and save them in
+	 * stable storage as the history value to be used in the next
+	 * iteration of the algorithm.
+	 */</span>
+	bcopy(&amp;digest[8], seed0, 8);
+
+	<span class="enscript-keyword">if</span> ((0)) {		<span class="enscript-comment">/* for debugging purposes only */</span>
+		<span class="enscript-type">int</span> i;
+
+		printf(<span class="enscript-string">&quot;to: &quot;</span>);
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; 16; i++)
+			printf(<span class="enscript-string">&quot;%02x&quot;</span>, digest[i]);
+		printf(<span class="enscript-string">&quot;\n&quot;</span>);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Get interface identifier for the specified interface using the method in
+ * Appendix A of RFC 4291.
+ *
+ * XXX assumes single sockaddr_dl (AF_LINK address) per an interface
+ *
+ * in6 - upper 64bits are preserved
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">in6_iid_from_hw</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> in6_addr *in6)
+{
+	<span class="enscript-type">struct</span> ifaddr *ifa = NULL;
+	<span class="enscript-type">struct</span> sockaddr_dl *sdl;
+	u_int8_t *addr;
+	size_t addrlen;
+	<span class="enscript-type">static</span> u_int8_t allzero[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+	<span class="enscript-type">static</span> u_int8_t allone[8] =
+		{ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+	<span class="enscript-type">int</span> err = -1;
+
+	<span class="enscript-comment">/* Why doesn't this code use ifnet_addrs? */</span>
+	ifnet_lock_shared(ifp);
+	ifa = ifp-&gt;if_lladdr;
+	sdl = (<span class="enscript-type">struct</span> sockaddr_dl *)(<span class="enscript-type">void</span> *)ifa-&gt;ifa_addr;
+	<span class="enscript-keyword">if</span> (sdl-&gt;sdl_alen == 0) {
+		ifnet_lock_done(ifp);
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	IFA_ADDREF(ifa);	<span class="enscript-comment">/* for this routine */</span>
+	ifnet_lock_done(ifp);
+
+	IFA_LOCK(ifa);
+	addr = (u_int8_t *) LLADDR(sdl);
+	addrlen = sdl-&gt;sdl_alen;
+
+	<span class="enscript-comment">/* get EUI64 */</span>
+	<span class="enscript-keyword">switch</span> (ifp-&gt;if_type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_ETHER</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_FDDI</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_ISO88025</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_ATM</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_IEEE1394</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_L2VLAN</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_IEEE8023ADLAG</span>:
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IFT_IEEE80211</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_IEEE80211</span>:
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_BRIDGE</span>:
+		<span class="enscript-comment">/* IEEE802/EUI64 cases - what others? */</span>
+		<span class="enscript-comment">/* IEEE1394 uses 16byte length address starting with EUI64 */</span>
+		<span class="enscript-keyword">if</span> (addrlen &gt; 8)
+			addrlen = 8;
+
+		<span class="enscript-comment">/* look at IEEE802/EUI64 only */</span>
+		<span class="enscript-keyword">if</span> (addrlen != 8 &amp;&amp; addrlen != 6)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+		<span class="enscript-comment">/*
+		 * check for invalid MAC address - on bsdi, we see it a lot
+		 * since wildboar configures all-zero MAC on pccard before
+		 * card insertion.
+		 */</span>
+		<span class="enscript-keyword">if</span> (bcmp(addr, allzero, addrlen) == 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		<span class="enscript-keyword">if</span> (bcmp(addr, allone, addrlen) == 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+		<span class="enscript-comment">/* make EUI64 address */</span>
+		<span class="enscript-keyword">if</span> (addrlen == 8)
+			bcopy(addr, &amp;in6-&gt;s6_addr[8], 8);
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (addrlen == 6) {
+			in6-&gt;s6_addr[8] = addr[0];
+			in6-&gt;s6_addr[9] = addr[1];
+			in6-&gt;s6_addr[10] = addr[2];
+			in6-&gt;s6_addr[11] = 0xff;
+			in6-&gt;s6_addr[12] = 0xfe;
+			in6-&gt;s6_addr[13] = addr[3];
+			in6-&gt;s6_addr[14] = addr[4];
+			in6-&gt;s6_addr[15] = addr[5];
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_ARCNET</span>:
+		<span class="enscript-keyword">if</span> (addrlen != 1)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		<span class="enscript-keyword">if</span> (!addr[0])
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+		bzero(&amp;in6-&gt;s6_addr[8], 8);
+		in6-&gt;s6_addr[15] = addr[0];
+
+		<span class="enscript-comment">/*
+		 * due to insufficient bitwidth, we mark it local.
+		 */</span>
+		in6-&gt;s6_addr[8] &amp;= ~ND6_EUI64_GBIT;	<span class="enscript-comment">/* g to &quot;individual&quot; */</span>
+		in6-&gt;s6_addr[8] |= ND6_EUI64_UBIT;	<span class="enscript-comment">/* u to &quot;local&quot; */</span>
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_GIF</span>:
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IFT_STF</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_STF</span>:
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-comment">/*
+		 * RFC2893 says: &quot;SHOULD use IPv4 address as IID source&quot;.
+		 * however, IPv4 address is not very suitable as unique
+		 * identifier source (can be renumbered).
+		 * we don't do this.
+		 */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_CELLULAR</span>:
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* sanity check: g bit must not indicate &quot;group&quot; */</span>
+	<span class="enscript-keyword">if</span> (ND6_EUI64_GROUP(in6))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-comment">/* convert EUI64 into IPv6 interface identifier */</span>
+	ND6_EUI64_TO_IFID(in6);
+
+	<span class="enscript-comment">/*
+	 * sanity check: iid must not be all zero, avoid conflict with
+	 * subnet router anycast
+	 */</span>
+	<span class="enscript-keyword">if</span> ((in6-&gt;s6_addr[8] &amp; ~(ND6_EUI64_GBIT | ND6_EUI64_UBIT)) == 0x00 &amp;&amp;
+	    bcmp(&amp;in6-&gt;s6_addr[9], allzero, 7) == 0) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	err = 0;	<span class="enscript-comment">/* found */</span>
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-comment">/* This must not be the last reference to the lladdr */</span>
+	<span class="enscript-keyword">if</span> (IFA_REMREF_LOCKED(ifa) == NULL) {
+		panic(<span class="enscript-string">&quot;%s: unexpected (missing) refcnt ifa=%p&quot;</span>, __func__, ifa);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	IFA_UNLOCK(ifa);
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-comment">/*
+ * Get interface identifier for the specified interface using the method in
+ * Appendix A of RFC 4291.  If it is not available on ifp0, borrow interface
+ * identifier from other information sources.
+ *
+ * ifp     - primary EUI64 source
+ * altifp  - secondary EUI64 source
+ * in6     - IPv6 address to output IID
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">in6_select_iid_from_all_hw</span>(
+	<span class="enscript-type">struct</span> ifnet *ifp0,
+	<span class="enscript-type">struct</span> ifnet *altifp,	<span class="enscript-comment">/* secondary EUI64 source */</span>
+	<span class="enscript-type">struct</span> in6_addr *in6)
+{
+	<span class="enscript-type">struct</span> ifnet *ifp;
+
+	<span class="enscript-comment">/* first, try to get it from the interface itself */</span>
+	<span class="enscript-keyword">if</span> (in6_iid_from_hw(ifp0, in6) == 0) {
+		nd6log((LOG_DEBUG, <span class="enscript-string">&quot;%s: IID derived from HW interface.\n&quot;</span>,
+		    if_name(ifp0)));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">success</span>;
+	}
+
+	<span class="enscript-comment">/* try secondary EUI64 source. this basically is for ATM PVC */</span>
+	<span class="enscript-keyword">if</span> (altifp &amp;&amp; in6_iid_from_hw(altifp, in6) == 0) {
+		nd6log((LOG_DEBUG, <span class="enscript-string">&quot;%s: IID from alterate HW interface %s.\n&quot;</span>,
+		    if_name(ifp0), if_name(altifp)));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">success</span>;
+	}
+
+	<span class="enscript-comment">/* next, try to get it from some other hardware interface */</span>
+	ifnet_head_lock_shared();
+	TAILQ_FOREACH(ifp, &amp;ifnet_head, if_list) {
+		<span class="enscript-keyword">if</span> (ifp == ifp0)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (in6_iid_from_hw(ifp, in6) != 0)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-comment">/*
+		 * to borrow IID from other interface, IID needs to be
+		 * globally unique
+		 */</span>
+		<span class="enscript-keyword">if</span> (ND6_IFID_UNIVERSAL(in6)) {
+			nd6log((LOG_DEBUG, <span class="enscript-string">&quot;%s: borrowed IID from %s\n&quot;</span>,
+			    if_name(ifp0), if_name(ifp)));
+			ifnet_head_done();
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">success</span>;
+		}
+	}
+	ifnet_head_done();
+
+	<span class="enscript-comment">/* last resort: get from random number source */</span>
+	<span class="enscript-keyword">if</span> (get_rand_iid(ifp, in6) == 0) {
+		nd6log((LOG_DEBUG, <span class="enscript-string">&quot;%s: IID from PRNG.\n&quot;</span>, if_name(ifp0)));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">success</span>;
+	}
+
+	printf(<span class="enscript-string">&quot;%s: failed to get interface identifier\n&quot;</span>, if_name(ifp0));
+	<span class="enscript-keyword">return</span> (-1);
+
+<span class="enscript-reference">success</span>:
+	nd6log((LOG_INFO, <span class="enscript-string">&quot;%s: IID: &quot;</span>
+		<span class="enscript-string">&quot;%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n&quot;</span>,
+		if_name(ifp0),
+		in6-&gt;s6_addr[8], in6-&gt;s6_addr[9],
+		in6-&gt;s6_addr[10], in6-&gt;s6_addr[11],
+		in6-&gt;s6_addr[12], in6-&gt;s6_addr[13],
+		in6-&gt;s6_addr[14], in6-&gt;s6_addr[15]));
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">in6_ifattach_linklocal</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> in6_aliasreq *ifra)
+{
+	<span class="enscript-type">struct</span> in6_ifaddr *ia;
+	<span class="enscript-type">struct</span> nd_prefix pr0, *pr;
+	<span class="enscript-type">int</span> i, error;
+
+	VERIFY(ifra != NULL);
+
+	proto_plumb(PF_INET6, ifp);
+
+	error = in6_update_ifa(ifp, ifra, IN6_IFAUPDATE_DADDELAY, &amp;ia);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		<span class="enscript-comment">/*
+		 * XXX: When the interface does not support IPv6, this call
+		 * would fail in the SIOCSIFADDR ioctl.  I believe the
+		 * notification is rather confusing in this case, so just
+		 * suppress it.  (<a href="mailto:jinmei@kame.net">jinmei@kame.net</a> 20010130)
+		 */</span>
+		<span class="enscript-keyword">if</span> (error != EAFNOSUPPORT)
+			nd6log((LOG_NOTICE, <span class="enscript-string">&quot;%s: failed to &quot;</span>
+			    <span class="enscript-string">&quot;configure a link-local address on %s &quot;</span>
+			    <span class="enscript-string">&quot;(errno=%d)\n&quot;</span>,
+			    __func__, if_name(ifp), error));
+		<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+	}
+	VERIFY(ia != NULL);
+
+	<span class="enscript-comment">/*
+	 * Make the link-local prefix (fe80::%link/64) as on-link.
+	 * Since we'd like to manage prefixes separately from addresses,
+	 * we make an ND6 prefix structure for the link-local prefix,
+	 * and add it to the prefix list as a never-expire prefix.
+	 * XXX: this change might affect some existing code base...
+	 */</span>
+	bzero(&amp;pr0, <span class="enscript-keyword">sizeof</span> (pr0));
+	lck_mtx_init(&amp;pr0.ndpr_lock, ifa_mtx_grp, ifa_mtx_attr);
+	pr0.ndpr_ifp = ifp;
+	<span class="enscript-comment">/* this should be 64 at this moment. */</span>
+	pr0.ndpr_plen = in6_mask2len(&amp;ifra-&gt;ifra_prefixmask.sin6_addr, NULL);
+	pr0.ndpr_mask = ifra-&gt;ifra_prefixmask.sin6_addr;
+	pr0.ndpr_prefix = ifra-&gt;ifra_addr;
+	<span class="enscript-comment">/* apply the mask for safety. (nd6_prelist_add will apply it again) */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; 4; i++) {
+		pr0.ndpr_prefix.sin6_addr.s6_addr32[i] &amp;=
+			in6mask64.s6_addr32[i];
+	}
+	<span class="enscript-comment">/*
+	 * Initialize parameters.  The link-local prefix must always be
+	 * on-link, and its lifetimes never expire.
+	 */</span>
+	pr0.ndpr_raf_onlink = 1;
+	pr0.ndpr_raf_auto = 1;	<span class="enscript-comment">/* probably meaningless */</span>
+	pr0.ndpr_vltime = ND6_INFINITE_LIFETIME;
+	pr0.ndpr_pltime = ND6_INFINITE_LIFETIME;
+	pr0.ndpr_stateflags |= NDPRF_STATIC;
+	<span class="enscript-comment">/*
+	 * Since there is no other link-local addresses, nd6_prefix_lookup()
+	 * probably returns NULL.  However, we cannot always expect the result.
+	 * For example, if we first remove the (only) existing link-local
+	 * address, and then reconfigure another one, the prefix is still
+	 * valid with referring to the old link-local address.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((pr = nd6_prefix_lookup(&amp;pr0, ND6_PREFIX_EXPIRY_UNSPEC)) == NULL) {
+		<span class="enscript-keyword">if</span> ((error = nd6_prelist_add(&amp;pr0, NULL, &amp;pr, TRUE)) != 0) {
+			IFA_REMREF(&amp;ia-&gt;ia_ifa);
+			lck_mtx_destroy(&amp;pr0.ndpr_lock, ifa_mtx_grp);
+			<span class="enscript-keyword">return</span> (error);
+		}
+	}
+
+	in6_post_msg(ifp, KEV_INET6_NEW_LL_ADDR, ia, NULL);
+	IFA_REMREF(&amp;ia-&gt;ia_ifa);
+
+	<span class="enscript-comment">/* Drop use count held above during lookup/add */</span>
+	<span class="enscript-keyword">if</span> (pr != NULL)
+		NDPR_REMREF(pr);
+
+	lck_mtx_destroy(&amp;pr0.ndpr_lock, ifa_mtx_grp);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">in6_ifattach_loopback</span>(
+	<span class="enscript-type">struct</span> ifnet *ifp)	<span class="enscript-comment">/* must be IFT_LOOP */</span>
+{
+	<span class="enscript-type">struct</span> in6_aliasreq ifra;
+	<span class="enscript-type">struct</span> in6_ifaddr *ia;
+	<span class="enscript-type">int</span> error;
+
+	bzero(&amp;ifra, <span class="enscript-keyword">sizeof</span> (ifra));
+
+	<span class="enscript-comment">/*
+	 * in6_update_ifa() does not use ifra_name, but we accurately set it
+	 * for safety.
+	 */</span>
+	strlcpy(ifra.ifra_name, if_name(ifp), <span class="enscript-keyword">sizeof</span> (ifra.ifra_name));
+
+	ifra.ifra_prefixmask.sin6_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in6);
+	ifra.ifra_prefixmask.sin6_family = AF_INET6;
+	ifra.ifra_prefixmask.sin6_addr = in6mask128;
+
+	<span class="enscript-comment">/*
+	 * Always initialize ia_dstaddr (= broadcast address) to loopback
+	 * address.  Follows IPv4 practice - see in_ifinit().
+	 */</span>
+	ifra.ifra_dstaddr.sin6_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in6);
+	ifra.ifra_dstaddr.sin6_family = AF_INET6;
+	ifra.ifra_dstaddr.sin6_addr = in6addr_loopback;
+
+	ifra.ifra_addr.sin6_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in6);
+	ifra.ifra_addr.sin6_family = AF_INET6;
+	ifra.ifra_addr.sin6_addr = in6addr_loopback;
+
+	<span class="enscript-comment">/* the loopback  address should NEVER expire. */</span>
+	ifra.ifra_lifetime.ia6t_vltime = ND6_INFINITE_LIFETIME;
+	ifra.ifra_lifetime.ia6t_pltime = ND6_INFINITE_LIFETIME;
+
+	<span class="enscript-comment">/* we don't need to perform DAD on loopback interfaces. */</span>
+	ifra.ifra_flags |= IN6_IFF_NODAD;
+
+	<span class="enscript-comment">/* add the new interface address */</span>
+	error = in6_update_ifa(ifp, &amp;ifra, 0, &amp;ia);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		nd6log((LOG_ERR,
+		    <span class="enscript-string">&quot;%s: failed to configure loopback address %s (error=%d)\n&quot;</span>,
+		    __func__, if_name(ifp), error));
+		VERIFY(ia == NULL);
+		<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+	}
+
+	VERIFY(ia != NULL);
+	IFA_REMREF(&amp;ia-&gt;ia_ifa);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * compute NI group address, based on the current hostname setting.
+ * see RFC 4620.
+ *
+ * when ifp == NULL, the caller is responsible for filling scopeid.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">in6_nigroup</span>(
+	<span class="enscript-type">struct</span> ifnet *ifp,
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name,
+	<span class="enscript-type">int</span> namelen,
+	<span class="enscript-type">struct</span> in6_addr *in6)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *p;
+	u_char *q;
+	SHA1_CTX ctxt;
+	u_int8_t digest[SHA1_RESULTLEN];
+	<span class="enscript-type">char</span> l;
+	<span class="enscript-type">char</span> n[64];	<span class="enscript-comment">/* a single label must not exceed 63 chars */</span>
+
+	<span class="enscript-keyword">if</span> (!namelen || !name)
+		<span class="enscript-keyword">return</span> (-1);
+
+	p = name;
+	<span class="enscript-keyword">while</span> (p &amp;&amp; *p &amp;&amp; *p != <span class="enscript-string">'.'</span> &amp;&amp; p - name &lt; namelen)
+		p++;
+	<span class="enscript-keyword">if</span> (p - name &gt; <span class="enscript-keyword">sizeof</span> (n) - 1)
+		<span class="enscript-keyword">return</span> (-1);	<span class="enscript-comment">/* label too long */</span>
+	l = p - name;
+	strlcpy(n, name, l);
+	n[(<span class="enscript-type">int</span>)l] = <span class="enscript-string">'\0'</span>;
+	<span class="enscript-keyword">for</span> (q = (u_char *) n; *q; q++) {
+		<span class="enscript-keyword">if</span> (<span class="enscript-string">'A'</span> &lt;= *q &amp;&amp; *q &lt;= <span class="enscript-string">'Z'</span>)
+			*q = *q - <span class="enscript-string">'A'</span> + <span class="enscript-string">'a'</span>;
+	}
+
+	<span class="enscript-comment">/* generate 16 bytes of pseudo-random value. */</span>
+	bzero(&amp;ctxt, <span class="enscript-keyword">sizeof</span> (ctxt));
+	SHA1Init(&amp;ctxt);
+	SHA1Update(&amp;ctxt, &amp;l, <span class="enscript-keyword">sizeof</span> (l));
+	SHA1Update(&amp;ctxt, n, l);
+	SHA1Final(digest, &amp;ctxt);
+
+	bzero(in6, <span class="enscript-keyword">sizeof</span> (*in6));
+	in6-&gt;s6_addr16[0] = IPV6_ADDR_INT16_MLL;
+	in6-&gt;s6_addr8[11] = 2;
+	in6-&gt;s6_addr8[12] = 0xff;
+	<span class="enscript-comment">/* copy first 3 bytes of prefix into address */</span>
+	bcopy(digest, &amp;in6-&gt;s6_addr8[13], 3);
+	<span class="enscript-keyword">if</span> (in6_setscope(in6, ifp, NULL))
+		<span class="enscript-keyword">return</span> (-1); <span class="enscript-comment">/* XXX: should not fail */</span>
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">in6_domifattach</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">int</span> error;
+
+	VERIFY(ifp != NULL);
+
+	error = proto_plumb(PF_INET6, ifp);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		<span class="enscript-keyword">if</span> (error != EEXIST)
+			log(LOG_ERR, <span class="enscript-string">&quot;%s: proto_plumb returned %d if=%s\n&quot;</span>,
+			    __func__, error, if_name(ifp));
+	} <span class="enscript-keyword">else</span> {
+		error = in6_ifattach_prelim(ifp);
+		<span class="enscript-keyword">if</span> (error != 0) {
+			<span class="enscript-type">int</span> errorx;
+
+			log(LOG_ERR,
+			    <span class="enscript-string">&quot;%s: in6_ifattach_prelim returned %d if=%s%d\n&quot;</span>,
+			    __func__, error, ifp-&gt;if_name, ifp-&gt;if_unit);
+
+			errorx = proto_unplumb(PF_INET6, ifp);
+			<span class="enscript-keyword">if</span> (errorx != 0) <span class="enscript-comment">/* XXX should not fail */</span>
+				log(LOG_ERR,
+				    <span class="enscript-string">&quot;%s: proto_unplumb returned %d if=%s%d\n&quot;</span>,
+				    __func__, errorx, ifp-&gt;if_name,
+				    ifp-&gt;if_unit);
+		}
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">in6_ifattach_prelim</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">struct</span> in6_ifextra *ext;
+	<span class="enscript-type">void</span> **pbuf, *base;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> in6_ifaddr *ia6 = NULL;
+
+	VERIFY(ifp != NULL);
+
+	<span class="enscript-comment">/* quirks based on interface type */</span>
+	<span class="enscript-keyword">switch</span> (ifp-&gt;if_type) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IFT_STF</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_STF</span>:
+		<span class="enscript-comment">/*
+		 * 6to4 interface is a very special kind of beast.
+		 * no multicast, no linklocal.  RFC2529 specifies how to make
+		 * linklocals for 6to4 interface, but there's no use and
+		 * it is rather harmful to have one.
+		 */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">skipmcast</span>;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * IPv6 requires multicast capability at the interface.
+	 *   (previously, this was a silent error.)
+	 */</span>
+	<span class="enscript-keyword">if</span> ((ifp-&gt;if_flags &amp; IFF_MULTICAST) == 0) {
+		nd6log((LOG_INFO, <span class="enscript-string">&quot;in6_ifattach: &quot;</span>,
+		    <span class="enscript-string">&quot;%s is not multicast capable, IPv6 not enabled\n&quot;</span>,
+		    if_name(ifp)));
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IFT_STF</span>
+<span class="enscript-reference">skipmcast</span>:
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (ifp-&gt;if_inet6data == NULL) {
+		ext = (<span class="enscript-type">struct</span> in6_ifextra *)_MALLOC(in6_extra_bufsize, M_IFADDR,
+		    M_WAITOK|M_ZERO);
+		<span class="enscript-keyword">if</span> (!ext)
+			<span class="enscript-keyword">return</span> (ENOMEM);
+		base = (<span class="enscript-type">void</span> *)P2ROUNDUP((intptr_t)ext + <span class="enscript-keyword">sizeof</span>(uint64_t),
+		    <span class="enscript-keyword">sizeof</span>(uint64_t));
+		VERIFY(((intptr_t)base + in6_extra_size) &lt;=
+		    ((intptr_t)ext + in6_extra_bufsize));
+		pbuf = (<span class="enscript-type">void</span> **)((intptr_t)base - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span> *));
+		*pbuf = ext;
+		ifp-&gt;if_inet6data = base;
+		VERIFY(IS_P2ALIGNED(ifp-&gt;if_inet6data, <span class="enscript-keyword">sizeof</span>(uint64_t)));
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * Since the structure is never freed, we need to zero out
+		 * some of its members. We avoid zeroing out the scope6
+		 * structure on purpose because other threads might be
+		 * using its contents.
+		 */</span>
+		bzero(&amp;IN6_IFEXTRA(ifp)-&gt;icmp6_ifstat,
+		    <span class="enscript-keyword">sizeof</span>(IN6_IFEXTRA(ifp)-&gt;icmp6_ifstat));
+		bzero(&amp;IN6_IFEXTRA(ifp)-&gt;in6_ifstat,
+		    <span class="enscript-keyword">sizeof</span>(IN6_IFEXTRA(ifp)-&gt;in6_ifstat));
+		<span class="enscript-comment">/*
+		 * XXX When recycling, nd_ifinfo gets initialized, other
+		 * than the lock, inside nd6_ifattach
+		 */</span>
+	}
+
+	<span class="enscript-comment">/*
+	 * XXX Only initialize NDP ifinfo for the interface
+	 * if interface has not yet been configured with
+	 * link local IPv6 address.
+	 * Could possibly be optimized with an interface flag if need
+	 * be. For now using in6ifa_ifpforlinklocal.
+	 */</span>
+	ia6 = in6ifa_ifpforlinklocal(ifp, 0);
+	<span class="enscript-keyword">if</span> (ia6 == NULL) {
+		<span class="enscript-comment">/* initialize NDP variables */</span>
+		nd6_ifattach(ifp);
+	} <span class="enscript-keyword">else</span> {
+		VERIFY(ND_IFINFO(ifp)-&gt;initialized);
+		IFA_REMREF(&amp;ia6-&gt;ia_ifa);
+		ia6 = NULL;
+	}
+	scope6_ifattach(ifp);
+
+	<span class="enscript-comment">/* initialize loopback interface address */</span>
+	<span class="enscript-keyword">if</span> ((ifp-&gt;if_flags &amp; IFF_LOOPBACK) != 0) {
+		error = in6_ifattach_loopback(ifp);
+		<span class="enscript-keyword">if</span> (error != 0) {
+			log(LOG_ERR, <span class="enscript-string">&quot;%s: in6_ifattach_loopback returned %d\n&quot;</span>,
+			    __func__, error, ifp-&gt;if_name,
+			    ifp-&gt;if_unit);
+			<span class="enscript-keyword">return</span> (error);
+		}
+	}
+
+	<span class="enscript-comment">/* update dynamically. */</span>
+	<span class="enscript-keyword">if</span> (in6_maxmtu &lt; ifp-&gt;if_mtu)
+		in6_maxmtu = ifp-&gt;if_mtu;
+
+	VERIFY(error == 0);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">in6_ifattach_aliasreq</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> ifnet *altifp,
+    <span class="enscript-type">struct</span> in6_aliasreq *ifra0)
+{
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> in6_ifaddr *ia6;
+	<span class="enscript-type">struct</span> in6_aliasreq ifra;
+
+	error = in6_ifattach_prelim(ifp);
+	<span class="enscript-keyword">if</span> (error != 0)
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-keyword">if</span> (!ip6_auto_linklocal)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-comment">/* assign a link-local address, only if there isn't one here already. */</span>
+	ia6 = in6ifa_ifpforlinklocal(ifp, 0);
+	<span class="enscript-keyword">if</span> (ia6 != NULL) {
+		IFA_REMREF(&amp;ia6-&gt;ia_ifa);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	bzero(&amp;ifra, <span class="enscript-keyword">sizeof</span> (ifra));
+
+	<span class="enscript-comment">/*
+	 * in6_update_ifa() does not use ifra_name, but we accurately set it
+	 * for safety.
+	 */</span>
+	strlcpy(ifra.ifra_name, if_name(ifp), <span class="enscript-keyword">sizeof</span> (ifra.ifra_name));
+
+	<span class="enscript-comment">/* Initialize the IPv6 interface address in our in6_aliasreq block */</span>
+	<span class="enscript-keyword">if</span> ((ifp-&gt;if_eflags &amp; IFEF_NOAUTOIPV6LL) != 0 &amp;&amp; ifra0 != NULL) {
+		<span class="enscript-comment">/* interface provided both addresses for us */</span>
+		<span class="enscript-type">struct</span> sockaddr_in6 *sin6 = &amp;ifra.ifra_addr;
+		<span class="enscript-type">struct</span> in6_addr *in6 = &amp;sin6-&gt;sin6_addr;
+		boolean_t ok = TRUE;
+
+		bcopy(&amp;ifra0-&gt;ifra_addr, sin6, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in6));
+
+		<span class="enscript-keyword">if</span> (sin6-&gt;sin6_family != AF_INET6 || sin6-&gt;sin6_port != 0)
+			ok = FALSE;
+		<span class="enscript-keyword">if</span> (ok &amp;&amp; (in6-&gt;s6_addr16[0] != htons(0xfe80)))
+			ok = FALSE;
+		<span class="enscript-keyword">if</span> (ok) {
+			<span class="enscript-keyword">if</span> (sin6-&gt;sin6_scope_id == 0 &amp;&amp; in6-&gt;s6_addr16[1] == 0)
+				in6-&gt;s6_addr16[1] = htons(ifp-&gt;if_index);
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sin6-&gt;sin6_scope_id != 0 &amp;&amp;
+			    sin6-&gt;sin6_scope_id != ifp-&gt;if_index)
+				ok = FALSE;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (in6-&gt;s6_addr16[1] != 0 &amp;&amp;
+			    ntohs(in6-&gt;s6_addr16[1]) != ifp-&gt;if_index)
+				ok = FALSE;
+		}
+		<span class="enscript-keyword">if</span> (ok &amp;&amp; (in6-&gt;s6_addr32[1] != 0))
+			ok = FALSE;
+		<span class="enscript-keyword">if</span> (!ok)
+			<span class="enscript-keyword">return</span> (EINVAL);
+	} <span class="enscript-keyword">else</span> {
+		ifra.ifra_addr.sin6_family = AF_INET6;
+		ifra.ifra_addr.sin6_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in6);
+		ifra.ifra_addr.sin6_addr.s6_addr16[0] = htons(0xfe80);
+		ifra.ifra_addr.sin6_addr.s6_addr16[1] = htons(ifp-&gt;if_index);
+		ifra.ifra_addr.sin6_addr.s6_addr32[1] = 0;
+		<span class="enscript-keyword">if</span> ((ifp-&gt;if_flags &amp; IFF_LOOPBACK) != 0) {
+			ifra.ifra_addr.sin6_addr.s6_addr32[2] = 0;
+			ifra.ifra_addr.sin6_addr.s6_addr32[3] = htonl(1);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (in6_select_iid_from_all_hw(ifp, altifp,
+			    &amp;ifra.ifra_addr.sin6_addr) != 0) {
+				nd6log((LOG_ERR, <span class="enscript-string">&quot;%s: no IID available\n&quot;</span>,
+				    if_name(ifp)));
+				<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+			}
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (in6_setscope(&amp;ifra.ifra_addr.sin6_addr, ifp, NULL))
+		<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+
+	<span class="enscript-comment">/* Set the prefix mask */</span>
+	ifra.ifra_prefixmask.sin6_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in6);
+	ifra.ifra_prefixmask.sin6_family = AF_INET6;
+	ifra.ifra_prefixmask.sin6_addr = in6mask64;
+
+	<span class="enscript-comment">/* link-local addresses should NEVER expire. */</span>
+	ifra.ifra_lifetime.ia6t_vltime = ND6_INFINITE_LIFETIME;
+	ifra.ifra_lifetime.ia6t_pltime = ND6_INFINITE_LIFETIME;
+
+	<span class="enscript-comment">/* Attach the link-local address */</span>
+	<span class="enscript-keyword">if</span> (in6_ifattach_linklocal(ifp, &amp;ifra) != 0) {
+		nd6log((LOG_INFO,
+		    <span class="enscript-string">&quot;%s: %s could not attach link-local address.\n&quot;</span>,
+		    __func__, if_name(ifp)));
+		<span class="enscript-comment">/* NB: not an error */</span>
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">in6_ifattach_llstartreq</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> in6_llstartreq *llsr)
+{
+	<span class="enscript-type">struct</span> in6_aliasreq ifra;
+	<span class="enscript-type">struct</span> in6_ifaddr *ia6 = NULL;
+	<span class="enscript-type">struct</span> nd_ifinfo *ndi = NULL;
+	<span class="enscript-type">int</span> error;
+
+	VERIFY(llsr != NULL);
+
+	error = in6_ifattach_prelim(ifp);
+	<span class="enscript-keyword">if</span> (error != 0)
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-keyword">if</span> (!ip6_auto_linklocal || (ifp-&gt;if_eflags &amp; IFEF_NOAUTOIPV6LL) != 0)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">if</span> (nd6_send_opstate == ND6_SEND_OPMODE_DISABLED)
+		<span class="enscript-keyword">return</span> (ENXIO);
+
+	ndi = ND_IFINFO(ifp);
+	VERIFY(ndi != NULL &amp;&amp; ndi-&gt;initialized);
+	<span class="enscript-keyword">if</span> ((ndi-&gt;flags &amp; ND6_IFF_INSECURE) != 0) {
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+
+	<span class="enscript-comment">/* assign a link-local address, only if there isn't one here already. */</span>
+	ia6 = in6ifa_ifpforlinklocal(ifp, 0);
+	<span class="enscript-keyword">if</span> (ia6 != NULL) {
+		IFA_REMREF(&amp;ia6-&gt;ia_ifa);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	bzero(&amp;ifra, <span class="enscript-keyword">sizeof</span> (ifra));
+	strlcpy(ifra.ifra_name, if_name(ifp), <span class="enscript-keyword">sizeof</span> (ifra.ifra_name));
+
+	ifra.ifra_addr.sin6_family = AF_INET6;
+	ifra.ifra_addr.sin6_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in6);
+	ifra.ifra_addr.sin6_addr.s6_addr16[0] = htons(0xfe80);
+	ifra.ifra_addr.sin6_addr.s6_addr16[1] = htons(ifp-&gt;if_index);
+	ifra.ifra_addr.sin6_addr.s6_addr32[1] = 0;
+	ifra.ifra_flags = IN6_IFF_SECURED;
+
+	in6_cga_node_lock();
+	<span class="enscript-keyword">if</span> (in6_cga_generate(&amp;llsr-&gt;llsr_cgaprep, 0,
+	    &amp;ifra.ifra_addr.sin6_addr)) {
+		in6_cga_node_unlock();
+		<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+	}
+	in6_cga_node_unlock();
+
+	<span class="enscript-keyword">if</span> (in6_setscope(&amp;ifra.ifra_addr.sin6_addr, ifp, NULL))
+		<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+
+	<span class="enscript-comment">/* Set the prefix mask */</span>
+	ifra.ifra_prefixmask.sin6_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in6);
+	ifra.ifra_prefixmask.sin6_family = AF_INET6;
+	ifra.ifra_prefixmask.sin6_addr = in6mask64;
+
+	<span class="enscript-comment">/*
+	 * link-local addresses should NEVER expire, but cryptographic
+	 * ones may have finite preferred lifetime [if it's important to
+	 * keep them from being used by applications as persistent device
+	 * identifiers].
+	 */</span>
+	ifra.ifra_lifetime.ia6t_vltime = ND6_INFINITE_LIFETIME;
+	ifra.ifra_lifetime.ia6t_pltime = llsr-&gt;llsr_lifetime.ia6t_pltime;
+
+	<span class="enscript-comment">/* Attach the link-local address */</span>
+	<span class="enscript-keyword">if</span> (in6_ifattach_linklocal(ifp, &amp;ifra) != 0) {
+		<span class="enscript-comment">/* NB: not an error */</span>
+		nd6log((LOG_INFO,
+		    <span class="enscript-string">&quot;%s: %s could not attach link-local address.\n&quot;</span>,
+		    __func__, if_name(ifp)));
+	}
+
+	VERIFY(error == 0);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * NOTE: in6_ifdetach() does not support loopback if at this moment.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">in6_ifdetach</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">struct</span> in6_ifaddr *ia, *oia;
+	<span class="enscript-type">struct</span> ifaddr *ifa;
+	<span class="enscript-type">struct</span> rtentry *rt;
+	<span class="enscript-type">struct</span> sockaddr_in6 sin6;
+	<span class="enscript-type">struct</span> in6_multi_mship *imm;
+	<span class="enscript-type">int</span> unlinked;
+
+	lck_mtx_assert(nd6_mutex, LCK_MTX_ASSERT_NOTOWNED);
+
+	<span class="enscript-comment">/* remove neighbor management table */</span>
+	nd6_purge(ifp);
+
+	<span class="enscript-comment">/* nuke any of IPv6 addresses we have */</span>
+	lck_rw_lock_exclusive(&amp;in6_ifaddr_rwlock);
+	ia = in6_ifaddrs;
+	<span class="enscript-keyword">while</span> (ia != NULL) {
+		<span class="enscript-keyword">if</span> (ia-&gt;ia_ifa.ifa_ifp != ifp) {
+			ia = ia-&gt;ia_next;
+			<span class="enscript-keyword">continue</span>;
+		}
+		IFA_ADDREF(&amp;ia-&gt;ia_ifa);	<span class="enscript-comment">/* for us */</span>
+		lck_rw_done(&amp;in6_ifaddr_rwlock);
+		in6_purgeaddr(&amp;ia-&gt;ia_ifa);
+		IFA_REMREF(&amp;ia-&gt;ia_ifa);	<span class="enscript-comment">/* for us */</span>
+		lck_rw_lock_exclusive(&amp;in6_ifaddr_rwlock);
+		<span class="enscript-comment">/*
+		 * Purging the address caused in6_ifaddr_rwlock
+		 * to be dropped and reacquired;
+		 * therefore search again from the beginning
+		 * of in6_ifaddrs list.
+		 */</span>
+		ia = in6_ifaddrs;
+	}
+	lck_rw_done(&amp;in6_ifaddr_rwlock);
+
+	ifnet_lock_exclusive(ifp);
+
+	<span class="enscript-comment">/* undo everything done by in6_ifattach(), just in case */</span>
+	ifa = TAILQ_FIRST(&amp;ifp-&gt;if_addrlist);
+	<span class="enscript-keyword">while</span> (ifa != NULL) {
+		IFA_LOCK(ifa);
+		<span class="enscript-keyword">if</span> (ifa-&gt;ifa_addr-&gt;sa_family != AF_INET6 ||
+		    !IN6_IS_ADDR_LINKLOCAL(&amp;satosin6(&amp;ifa-&gt;ifa_addr)-&gt;
+		    sin6_addr)) {
+			IFA_UNLOCK(ifa);
+			ifa = TAILQ_NEXT(ifa, ifa_list);
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		ia = (<span class="enscript-type">struct</span> in6_ifaddr *)ifa;
+
+		<span class="enscript-comment">/* hold a reference for this routine */</span>
+		IFA_ADDREF_LOCKED(ifa);
+		<span class="enscript-comment">/* remove from the linked list */</span>
+		if_detach_ifa(ifp, ifa);
+		IFA_UNLOCK(ifa);
+
+		<span class="enscript-comment">/*
+		 * Leaving the multicast group(s) may involve freeing the
+		 * link address multicast structure(s) for the interface,
+		 * which is protected by ifnet lock.  To avoid violating
+		 * lock ordering, we must drop ifnet lock before doing so.
+		 * The ifa won't go away since we held a refcnt above.
+		 */</span>
+		ifnet_lock_done(ifp);
+
+		<span class="enscript-comment">/*
+		 * We have to do this work manually here instead of calling
+		 * in6_purgeaddr() since in6_purgeaddr() uses the RTM_HOST flag.
+		 */</span>
+
+		<span class="enscript-comment">/*
+		 * leave from multicast groups we have joined for the interface
+		 */</span>
+		IFA_LOCK(ifa);
+		<span class="enscript-keyword">while</span> ((imm = ia-&gt;ia6_memberships.lh_first) != NULL) {
+			LIST_REMOVE(imm, i6mm_chain);
+			IFA_UNLOCK(ifa);
+			in6_leavegroup(imm);
+			IFA_LOCK(ifa);
+		}
+
+		<span class="enscript-comment">/* remove from the routing table */</span>
+		<span class="enscript-keyword">if</span> (ia-&gt;ia_flags &amp; IFA_ROUTE) {
+			IFA_UNLOCK(ifa);
+			rt = rtalloc1((<span class="enscript-type">struct</span> sockaddr *)&amp;ia-&gt;ia_addr, 0, 0);
+			<span class="enscript-keyword">if</span> (rt != NULL) {
+				(<span class="enscript-type">void</span>) rtrequest(RTM_DELETE,
+					(<span class="enscript-type">struct</span> sockaddr *)&amp;ia-&gt;ia_addr,
+					(<span class="enscript-type">struct</span> sockaddr *)&amp;ia-&gt;ia_addr,
+					(<span class="enscript-type">struct</span> sockaddr *)&amp;ia-&gt;ia_prefixmask,
+					rt-&gt;rt_flags, (<span class="enscript-type">struct</span> rtentry **)0);
+				rtfree(rt);
+			}
+		} <span class="enscript-keyword">else</span> {
+			IFA_UNLOCK(ifa);
+		}
+
+		<span class="enscript-comment">/* also remove from the IPv6 address chain(itojun&amp;jinmei) */</span>
+		unlinked = 1;
+		oia = ia;
+		lck_rw_lock_exclusive(&amp;in6_ifaddr_rwlock);
+		<span class="enscript-keyword">if</span> (oia == (ia = in6_ifaddrs)) {
+			in6_ifaddrs = ia-&gt;ia_next;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">while</span> (ia-&gt;ia_next &amp;&amp; (ia-&gt;ia_next != oia))
+				ia = ia-&gt;ia_next;
+			<span class="enscript-keyword">if</span> (ia-&gt;ia_next) {
+				ia-&gt;ia_next = oia-&gt;ia_next;
+			} <span class="enscript-keyword">else</span> {
+				nd6log((LOG_ERR,
+				    <span class="enscript-string">&quot;%s: didn't unlink in6ifaddr from &quot;</span>
+				    <span class="enscript-string">&quot;list\n&quot;</span>, if_name(ifp)));
+				unlinked = 0;
+			}
+		}
+		lck_rw_done(&amp;in6_ifaddr_rwlock);
+
+		ifa = &amp;oia-&gt;ia_ifa;
+		<span class="enscript-comment">/*
+		 * release another refcnt for the link from in6_ifaddrs.
+		 * Do this only if it's not already unlinked in the event
+		 * that we lost the race, since in6_ifaddr_rwlock was
+		 * momentarily dropped above.
+		 */</span>
+		<span class="enscript-keyword">if</span> (unlinked)
+			IFA_REMREF(ifa);
+		<span class="enscript-comment">/* release reference held for this routine */</span>
+		IFA_REMREF(ifa);
+
+		<span class="enscript-comment">/*
+		 * This is suboptimal, but since we dropped ifnet lock above
+		 * the list might have changed.  Repeat the search from the
+		 * beginning until we find the first eligible IPv6 address.
+		 */</span>
+		ifnet_lock_exclusive(ifp);
+		ifa = TAILQ_FIRST(&amp;ifp-&gt;if_addrlist);
+	}
+	ifnet_lock_done(ifp);
+
+	<span class="enscript-comment">/* invalidate route caches */</span>
+	routegenid_inet6_update();
+
+	<span class="enscript-comment">/*
+	 * remove neighbor management table.  we call it twice just to make
+	 * sure we nuke everything.  maybe we need just one call.
+	 * XXX: since the first call did not release addresses, some prefixes
+	 * might remain.  We should call nd6_purge() again to release the
+	 * prefixes after removing all addresses above.
+	 * (Or can we just delay calling nd6_purge until at this point?)
+	 */</span>
+	nd6_purge(ifp);
+
+	<span class="enscript-comment">/* remove route to link-local allnodes multicast (ff02::1) */</span>
+	bzero(&amp;sin6, <span class="enscript-keyword">sizeof</span> (sin6));
+	sin6.sin6_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in6);
+	sin6.sin6_family = AF_INET6;
+	sin6.sin6_addr = in6addr_linklocal_allnodes;
+	sin6.sin6_addr.s6_addr16[1] = htons(ifp-&gt;if_index);
+	rt = rtalloc1((<span class="enscript-type">struct</span> sockaddr *)&amp;sin6, 0, 0);
+	<span class="enscript-keyword">if</span> (rt != NULL) {
+		RT_LOCK(rt);
+		<span class="enscript-keyword">if</span> (rt-&gt;rt_ifp == ifp) {
+			<span class="enscript-comment">/*
+			 * Prevent another thread from modifying rt_key,
+			 * rt_gateway via rt_setgate() after the rt_lock
+			 * is dropped by marking the route as defunct.
+			 */</span>
+			rt-&gt;rt_flags |= RTF_CONDEMNED;
+			RT_UNLOCK(rt);
+			(<span class="enscript-type">void</span>) rtrequest(RTM_DELETE, rt_key(rt), rt-&gt;rt_gateway,
+			    rt_mask(rt), rt-&gt;rt_flags, 0);
+		} <span class="enscript-keyword">else</span> {
+			RT_UNLOCK(rt);
+		}
+		rtfree(rt);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">in6_iid_mktmp</span>(<span class="enscript-type">struct</span> ifnet *ifp, u_int8_t *retbuf, <span class="enscript-type">const</span> u_int8_t *baseid,
+    <span class="enscript-type">int</span> generate)
+{
+	u_int8_t nullbuf[8];
+	<span class="enscript-type">struct</span> nd_ifinfo *ndi = ND_IFINFO(ifp);
+
+	VERIFY(ndi != NULL &amp;&amp; ndi-&gt;initialized);
+	lck_mtx_lock(&amp;ndi-&gt;lock);
+	bzero(nullbuf, <span class="enscript-keyword">sizeof</span> (nullbuf));
+	<span class="enscript-keyword">if</span> (bcmp(ndi-&gt;randomid, nullbuf, <span class="enscript-keyword">sizeof</span> (nullbuf)) == 0) {
+		<span class="enscript-comment">/* we've never created a random ID.  Create a new one. */</span>
+		generate = 1;
+	}
+
+	<span class="enscript-keyword">if</span> (generate) {
+		bcopy(baseid, ndi-&gt;randomseed1, <span class="enscript-keyword">sizeof</span> (ndi-&gt;randomseed1));
+
+		<span class="enscript-comment">/* in6_generate_tmp_iid will update seedn and buf */</span>
+		(<span class="enscript-type">void</span>) in6_generate_tmp_iid(ndi-&gt;randomseed0, ndi-&gt;randomseed1,
+		    ndi-&gt;randomid);
+	}
+
+	bcopy(ndi-&gt;randomid, retbuf, 8);
+	lck_mtx_unlock(&amp;ndi-&gt;lock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">in6_tmpaddrtimer</span>(<span class="enscript-type">void</span> *arg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>)
+	<span class="enscript-type">struct</span> ifnet *ifp = NULL;
+	<span class="enscript-type">struct</span> nd_ifinfo *ndi = NULL;
+	u_int8_t nullbuf[8];
+
+	timeout(in6_tmpaddrtimer, (caddr_t)0, (ip6_temp_preferred_lifetime -
+	    ip6_desync_factor - ip6_temp_regen_advance) * hz);
+
+	bzero(nullbuf, <span class="enscript-keyword">sizeof</span> (nullbuf));
+	ifnet_head_lock_shared();
+	<span class="enscript-keyword">for</span> (ifp = ifnet_head.tqh_first; ifp;
+	    ifp = ifp-&gt;if_link.tqe_next) {
+		ndi = ND_IFINFO(ifp);
+		<span class="enscript-keyword">if</span> ((NULL == ndi) || (FALSE == ndi-&gt;initialized)) {
+			<span class="enscript-keyword">continue</span>;
+		}
+		lck_mtx_lock(&amp;ndi-&gt;lock);
+		<span class="enscript-keyword">if</span> (bcmp(ndi-&gt;randomid, nullbuf, <span class="enscript-keyword">sizeof</span> (nullbuf)) != 0) {
+			<span class="enscript-comment">/*
+			 * We've been generating a random ID on this interface.
+			 * Create a new one.
+			 */</span>
+			(<span class="enscript-type">void</span>) in6_generate_tmp_iid(ndi-&gt;randomseed0,
+			    ndi-&gt;randomseed1, ndi-&gt;randomid);
+		}
+		lck_mtx_unlock(&amp;ndi-&gt;lock);
+	}
+	ifnet_head_done();
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,460 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ccdrbg_nisthmac.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ccdrbg_nisthmac.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ *  ccdrbg_nisthmac.c
+ *  corecrypto
+ *
+ *  Created on 05/09/2014
+ *
+ *  Copyright (c) 2014,2015 Apple Inc. All rights reserved.
+ *
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;corecrypto/ccdrbg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;corecrypto/cchmac.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;corecrypto/ccsha2.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;corecrypto/cc_priv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;corecrypto/cc_debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;corecrypto/cc_macros.h&gt;</span>
+
+<span class="enscript-comment">// Test vectors at:
+</span><span class="enscript-comment">//      <a href="http://csrc.nist.gov/groups/STM/cavp/#05">http://csrc.nist.gov/groups/STM/cavp/#05</a>
+</span><span class="enscript-comment">//      <a href="http://csrc.nist.gov/groups/STM/cavp/documents/drbg/drbgtestvectors.zip">http://csrc.nist.gov/groups/STM/cavp/documents/drbg/drbgtestvectors.zip</a>
+</span><span class="enscript-comment">//
+</span>
+<span class="enscript-comment">/*
+ This HMAC DBRG is described in:
+ 
+ SP 800-90 A Rev. 1 (2nd Draft)
+ DRAFT Recommendation for Random Number Generation Using Deterministic Random Bit Generators
+ April 2014
+ 
+  
+ See in particular
+ - 10.1.2 HMAC_DRBG (p 45)
+ - B.2 HMAC_DRBGExample (p 83)
+ 
+ We support maximum security strength of 256 bits
+ Note that the example in B.2 is very limited, refer to §10.1.2 for more
+ */</span>
+
+<span class="enscript-comment">/*
+ The Get_entropy_input function is specified in pseudocode in [SP 800-90C] for various RBG constructions;
+ however, in general, the function has the following meaning:
+ Get_entropy_input: A function that is used to obtain entropy input. The function call is:
+ (status, entropy_input) = Get_entropy_input (min_entropy, min_ length, max_ length, prediction_resistance_request),
+ which requests a string of bits (entropy_input) with at least min_entropy bits of entropy. The length for the string
+ shall be equal to or greater than min_length bits, and less than or equal to max_length bits. The
+ prediction_resistance_request parameter indicates whether or not prediction resistance is to be provided during the request
+ (i.e., whether fresh entropy is required). A status code is also returned from the function.
+ */</span>
+
+<span class="enscript-comment">/*
+ Check the validity of the input parameters.
+ 1. If (requested_instantiation_security_strength &gt; 256), then Return (“Invalid
+ requested_instantiation_security_strength”, −1).
+ 2. If (len (personalization_string) &gt; 160), then Return (“Personalization_string
+ too long”, −1)
+ Comment: Set the security_strength to one of the valid security strengths.
+ 3. If (requested_security_strength ≤ 112), then security_strength = 112 Else (requested_ security_strength ≤ 128), then security_strength = 128 Else (requested_ security_strength ≤ 192), then security_strength = 192 Else security_strength = 256.
+ Comment: Get the entropy_input and the nonce.
+ 4. min_entropy = 1.5 × security_strength.
+ 5. (status, entropy_input) = Get_entropy_input (min_entropy, 1000).
+ 6. If (status ≠ “Success”), then Return (status, −1).
+ */</span>
+
+<span class="enscript-comment">/*
+ 1. highest_supported_security_strength = 256.
+ 2. Output block (outlen) = 256 bits.
+ 3. Required minimum entropy for the entropy input at instantiation = 3/2 security_strength (this includes the entropy required for the nonce).
+ 4. Seed length (seedlen) = 440 bits.
+ 5. Maximum number of bits per request (max_number_of_bits_per_request) = 7500
+ bits.
+ 6. Reseed_interval (reseed_ interval) = 10,000 requests.
+ 7. Maximum length of the personalization string (max_personalization_string_length) = 160 bits.
+ 8. Maximum length of the entropy input (max _length) = 1000 bits.
+ */</span>
+
+<span class="enscript-comment">//
+</span><span class="enscript-comment">// Defines below based on 10.1, Table 2: Definitions for Hash-Based DRBG Mechanisms (p 39)
+</span><span class="enscript-comment">//
+</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NH_MAX_OUTPUT_BLOCK_SIZE</span>    (CCSHA512_OUTPUT_SIZE)          // 512 bits, i.e. 64 bytes (CCSHA512_OUTPUT_SIZE)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NH_MAX_KEY_SIZE</span>             (CCSHA512_OUTPUT_SIZE)          // 512 bits, i.e. 64 bytes (CCSHA512_OUTPUT_SIZE)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MIN_REQ_ENTROPY</span>(di)            ((di)-&gt;output_size/2)
+
+<span class="enscript-type">struct</span> ccdrbg_nisthmac_state {
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ccdrbg_nisthmac_custom *custom; <span class="enscript-comment">//ccdrbg_nisthmac_state does not need to store ccdrbg_info. ccdrbg_nisthmac_custom is sufficient
+</span>    size_t bytesLeft;
+    uint64_t reseed_counter; <span class="enscript-comment">// the reseed counter should be able to hole 2^^48. size_t might be smaller than 48 bits
+</span>    size_t vsize;
+    size_t keysize;
+    uint8_t v[NH_MAX_OUTPUT_BLOCK_SIZE];
+    uint8_t key[NH_MAX_KEY_SIZE];
+};
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUGFOO</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">dumpState</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *label, <span class="enscript-type">struct</span> ccdrbg_nisthmac_state *state) {
+    cc_print(label, state-&gt;vsize, state-&gt;v);
+    cc_print(label, state-&gt;keysize, state-&gt;key);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ NIST SP 800-90A, Rev. 1 HMAC_DRBG April 2014, p 46
+ 
+ HMAC_DRBG_Update (provided_data, K, V):
+ 1. provided_data: The data to be used.
+ 2. K: The current value of Key.
+ 3. V: The current value of V.
+ Output:
+ 1. K: The new value for Key.
+ 2. V: The new value for V.
+ 
+ HMAC_DRBG Update Process:
+ 
+ 1. K = HMAC (K, V || 0x00 || provided_data).
+ 2. V=HMAC(K,V).
+ 3. If (provided_data = Null), then return K and V.
+ 4. K = HMAC (K, V || 0x01 || provided_data).
+ 5. V=HMAC(K,V).
+ 6. Return K and V.
+ */</span>
+
+<span class="enscript-comment">// was: unsigned long providedDataLength, const void *providedData
+</span>
+<span class="enscript-comment">/*
+ To handle the case where we have three strings that are concatenated,
+ we pass in three (ptr, len) pairs
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">hmac_dbrg_update</span>(<span class="enscript-type">struct</span> ccdrbg_state *drbg,
+                            <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> daLen, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *da,
+                            <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> dbLen, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *db,
+                            <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> dcLen, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *dc
+                            )
+{
+    <span class="enscript-type">struct</span> ccdrbg_nisthmac_state *state = (<span class="enscript-type">struct</span> ccdrbg_nisthmac_state *)drbg;
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ccdigest_info *di = state-&gt;custom-&gt;di;
+    
+    <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> cZero = 0x00;
+    <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> cOne  = 0x01;
+    cchmac_ctx_decl(di-&gt;state_size, di-&gt;block_size, ctx);
+    
+    cchmac_init(di, ctx, state-&gt;keysize, state-&gt;key);
+    
+    <span class="enscript-comment">// 1. K = HMAC (K, V || 0x00 || provided_data).
+</span>    cchmac_update(di, ctx, state-&gt;vsize, state-&gt;v);
+    cchmac_update(di, ctx, 1, &amp;cZero);
+    <span class="enscript-keyword">if</span> (da &amp;&amp; daLen) cchmac_update(di, ctx, daLen, da);
+    <span class="enscript-keyword">if</span> (db &amp;&amp; dbLen) cchmac_update(di, ctx, dbLen, db);
+    <span class="enscript-keyword">if</span> (dc &amp;&amp; dcLen) cchmac_update(di, ctx, dcLen, dc);
+    cchmac_final(di, ctx, state-&gt;key);
+    
+    <span class="enscript-comment">//  2. V=HMAC(K,V).
+</span>    cchmac(di, state-&gt;keysize, state-&gt;key, state-&gt;vsize, state-&gt;v, state-&gt;v);
+    
+    <span class="enscript-comment">// 3. If (provided_data = Null), then return K and V.
+</span>    <span class="enscript-comment">// One parameter must be non-empty, or return
+</span>    <span class="enscript-keyword">if</span> (!((da &amp;&amp; daLen) || (db &amp;&amp; dbLen) || (dc &amp;&amp; dcLen)))
+        <span class="enscript-keyword">return</span> CCDRBG_STATUS_OK;
+    
+    <span class="enscript-comment">// 4. K = HMAC (K, V || 0x01 || provided_data).
+</span>    cchmac_init(di, ctx, state-&gt;keysize, state-&gt;key);
+    cchmac_update(di, ctx, state-&gt;vsize, state-&gt;v);
+    cchmac_update(di, ctx, 1, &amp;cOne);
+    <span class="enscript-keyword">if</span> (da &amp;&amp; daLen) cchmac_update(di, ctx, daLen, da);
+    <span class="enscript-keyword">if</span> (db &amp;&amp; dbLen) cchmac_update(di, ctx, dbLen, db);
+    <span class="enscript-keyword">if</span> (dc &amp;&amp; dcLen) cchmac_update(di, ctx, dcLen, dc);
+    cchmac_final(di, ctx, state-&gt;key);
+    
+    <span class="enscript-comment">//  5. V=HMAC(K,V).
+</span>    cchmac(di, state-&gt;keysize, state-&gt;key, state-&gt;vsize, state-&gt;v, state-&gt;v);
+    
+    <span class="enscript-keyword">return</span> CCDRBG_STATUS_OK;
+}
+
+<span class="enscript-comment">//make sure state is initialized, before calling this function
+</span><span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">validate_inputs</span>(<span class="enscript-type">struct</span> ccdrbg_nisthmac_state *state,
+                           <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> entropyLength,
+                           <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> additionalInputLength,
+                           <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> psLength)
+{
+    <span class="enscript-type">int</span> rc;
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ccdrbg_nisthmac_custom *custom=state-&gt;custom;
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ccdigest_info *di  = custom-&gt;di;
+    
+    rc =CCDRBG_STATUS_ERROR;
+    <span class="enscript-comment">//buffer size checks
+</span>    cc_require (di-&gt;output_size&lt;=<span class="enscript-keyword">sizeof</span>(state-&gt;v), end); <span class="enscript-comment">//digest size too long
+</span>    cc_require (di-&gt;output_size&lt;=<span class="enscript-keyword">sizeof</span>(state-&gt;key), end); <span class="enscript-comment">//digest size too long
+</span>    
+    <span class="enscript-comment">//NIST SP800 compliance checks
+</span>    <span class="enscript-comment">//the following maximum checks are redundant if long is 32 bits.
+</span>    
+    rc=CCDRBG_STATUS_PARAM_ERROR;
+    cc_require (psLength &lt;= CCDRBG_MAX_PSINPUT_SIZE, end); <span class="enscript-comment">//personalization string too long
+</span>    cc_require (entropyLength &lt;= CCDRBG_MAX_ENTROPY_SIZE, end); <span class="enscript-comment">//supplied too much entropy
+</span>    cc_require (additionalInputLength &lt;= CCDRBG_MAX_ADDITIONALINPUT_SIZE, end); <span class="enscript-comment">//additional input too long
+</span>    cc_require (entropyLength &gt;=  MIN_REQ_ENTROPY(di), end); <span class="enscript-comment">//supplied too litle entropy
+</span>    
+    cc_require(di-&gt;output_size&lt;=NH_MAX_OUTPUT_BLOCK_SIZE, end); <span class="enscript-comment">//the requested security strength is not supported
+</span>    
+    rc=CCDRBG_STATUS_OK;
+<span class="enscript-reference">end</span>:
+    <span class="enscript-keyword">return</span> rc;
+}
+
+<span class="enscript-comment">/*
+ NIST SP 800-90A, Rev. 1 April 2014 B.2.2, p 84
+ 
+ HMAC_DRBG_Instantiate_algorithm (...):
+ Input: bitstring (entropy_input, personalization_string).
+ Output: bitstring (V, Key), integer reseed_counter.
+ 
+ Process:
+ 1. seed_material = entropy_input || personalization_string.
+ 2. Set Key to outlen bits of zeros.
+ 3. Set V to outlen/8 bytes of 0x01.
+ 4. (Key, V) = HMAC_DRBG_Update (seed_material, Key, V).
+ 5. reseed_counter = 1.
+ 6. Return (V, Key, reseed_counter).
+ */</span>
+
+<span class="enscript-comment">// This version does not do memory allocation
+</span><span class="enscript-comment">//SP800-90 A: Required minimum entropy for instantiate and reseed=security_strength
+</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">hmac_dbrg_instantiate_algorithm</span>(<span class="enscript-type">struct</span> ccdrbg_state *drbg,
+                                           <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> entropyLength, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *entropy,
+                                           <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> nonceLength, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *nonce,
+                                           <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> psLength, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *ps)
+{
+    <span class="enscript-comment">// TODO: The NIST code passes nonce (i.e. HMAC key) to generate, but cc interface isn't set up that way
+</span>    <span class="enscript-type">struct</span> ccdrbg_nisthmac_state *state = (<span class="enscript-type">struct</span> ccdrbg_nisthmac_state *)drbg;
+    
+    <span class="enscript-comment">// 1. seed_material = entropy_input || nonce || personalization_string.
+</span>    
+    <span class="enscript-comment">// 2. Set Key to outlen bits of zeros.
+</span>    cc_zero(state-&gt;keysize, state-&gt;key);
+    
+    <span class="enscript-comment">// 3. Set V to outlen/8 bytes of 0x01.
+</span>    CC_MEMSET(state-&gt;v, 0x01, state-&gt;vsize);
+    
+    <span class="enscript-comment">// 4. (Key, V) = HMAC_DRBG_Update (seed_material, Key, V).
+</span>    hmac_dbrg_update(drbg, entropyLength, entropy, nonceLength, nonce, psLength, ps);
+    
+    <span class="enscript-comment">// 5. reseed_counter = 1.
+</span>    state-&gt;reseed_counter = 1;
+    
+    <span class="enscript-keyword">return</span> CCDRBG_STATUS_OK;
+}
+
+<span class="enscript-comment">//  In NIST terminology, the nonce is the HMAC key and ps is the personalization string
+</span><span class="enscript-comment">//  We assume that the caller has passed in
+</span><span class="enscript-comment">//      min_entropy = NH_REQUIRED_MIN_ENTROPY(security_strength)
+</span><span class="enscript-comment">//  bytes of entropy
+</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">done</span>(<span class="enscript-type">struct</span> ccdrbg_state *drbg);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">init</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ccdrbg_info *info, <span class="enscript-type">struct</span> ccdrbg_state *drbg,
+                <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> entropyLength, <span class="enscript-type">const</span> <span class="enscript-type">void</span>* entropy,
+                <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> nonceLength, <span class="enscript-type">const</span> <span class="enscript-type">void</span>* nonce,
+                <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> psLength, <span class="enscript-type">const</span> <span class="enscript-type">void</span>* ps)
+{
+    <span class="enscript-type">struct</span> ccdrbg_nisthmac_state *state=(<span class="enscript-type">struct</span> ccdrbg_nisthmac_state *)drbg;
+    state-&gt;bytesLeft = 0;
+    state-&gt;custom = info-&gt;custom; <span class="enscript-comment">//we only need to get the custom parameter from the info structure.
+</span>    
+    <span class="enscript-type">int</span> rc = validate_inputs(state , entropyLength, 0, psLength);
+    <span class="enscript-keyword">if</span>(rc!=CCDRBG_STATUS_OK){
+        <span class="enscript-comment">//clear everything if cannot initialize. The idea is that if the caller doesn't check the output of init() and init() fails,
+</span>        <span class="enscript-comment">//the system crashes by NULL dereferencing after a call to generate, rather than generating bad random numbers.
+</span>        done(drbg);
+        <span class="enscript-keyword">return</span> rc;
+    }
+
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ccdigest_info *di = state-&gt;custom-&gt;di;
+    state-&gt;vsize = di-&gt;output_size;
+    state-&gt;keysize = di-&gt;output_size;
+    
+    <span class="enscript-comment">// 7. (V, Key, reseed_counter) = HMAC_DRBG_Instantiate_algorithm (entropy_input, personalization_string).
+</span>    hmac_dbrg_instantiate_algorithm(drbg, entropyLength, entropy, nonceLength, nonce, psLength, ps);
+    
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUGFOO</span>
+    dumpState(<span class="enscript-string">&quot;Init: &quot;</span>, state);
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">return</span> CCDRBG_STATUS_OK;
+
+}
+
+<span class="enscript-comment">/*
+ 10.1.2.4 Reseeding an HMAC_DRBG Instantiation
+ Notes for the reseed function specified in Section 9.2:
+ The reseeding of an HMAC_DRBG instantiation requires a call to the Reseed_function specified in Section 9.2.
+ Process step 6 of that function calls the reseed algorithm specified in this section. The values for min_length
+ are provided in Table 2 of Section 10.1.
+ 
+ The reseed algorithm:
+ Let HMAC_DRBG_Update be the function specified in Section 10.1.2.2. The following process or its equivalent
+ shall be used as the reseed algorithm for this DRBG mechanism (see step 6 of the reseed process in Section 9.2):
+ 
+ HMAC_DRBG_Reseed_algorithm (working_state, entropy_input, additional_input):
+ 1.  working_state: The current values for V, Key and reseed_counter (see Section 10.1.2.1).
+ 2.  entropy_input: The string of bits obtained from the source of entropy input.
+ 3.  additional_input: The additional input string received from the consuming application.
+ Note that the length of the additional_input string may be zero.
+ 
+ Output:
+ 1.  new_working_state: The new values for V, Key and reseed_counter. HMAC_DRBG Reseed Process:
+ 1.  seed_material = entropy_input || additional_input.
+ 2.  (Key, V) = HMAC_DRBG_Update (seed_material, Key, V). 3. reseed_counter = 1.
+ 4.  Return V, Key and reseed_counter as the new_working_state.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">reseed</span>(<span class="enscript-type">struct</span> ccdrbg_state *drbg,
+       <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> entropyLength, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *entropy,
+       <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> additionalLength, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *additional)
+{
+    
+    <span class="enscript-type">struct</span> ccdrbg_nisthmac_state *state = (<span class="enscript-type">struct</span> ccdrbg_nisthmac_state *)drbg;
+    <span class="enscript-type">int</span> rc = validate_inputs(state, entropyLength, additionalLength, 0);
+    <span class="enscript-keyword">if</span>(rc!=CCDRBG_STATUS_OK) <span class="enscript-keyword">return</span> rc;
+    
+    <span class="enscript-type">int</span> rx = hmac_dbrg_update(drbg, entropyLength, entropy, additionalLength, additional, 0, NULL);
+    state-&gt;reseed_counter = 1;
+    
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUGFOO</span>
+    dumpState(<span class="enscript-string">&quot;Reseed: &quot;</span>, state);
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">return</span> rx;
+}
+
+<span class="enscript-comment">/*
+ HMAC_DRBG_Generate_algorithm:
+ Input: bitstring (V, Key), integer (reseed_counter, requested_number_of_bits).
+ Output: string status, bitstring (pseudorandom_bits, V, Key), integer reseed_counter.
+ 
+ Process:
+ 1.      If (reseed_counter ≥ 10,000), then Return (“Reseed required”, Null, V, Key, reseed_counter).
+ 2.      temp = Null.
+ 3.      While (len (temp) &lt; requested_no_of_bits) do:
+ 3.1         V = HMAC (Key, V).
+ 3.2         temp = temp || V.
+ 4.      pseudorandom_bits = Leftmost (requested_no_of_bits) of temp.
+ 5.      (Key, V) = HMAC_DRBG_Update (Null, Key, V).
+ 6.      reseed_counter = reseed_counter + 1.
+ 7.      Return (“Success”, pseudorandom_bits, V, Key, reseed_counter).
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">validate_gen_params</span>(uint64_t reseed_counter,  <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> dataOutLength, <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> additionalLength)
+
+{
+    <span class="enscript-type">int</span> rc=CCDRBG_STATUS_PARAM_ERROR;
+    
+    cc_require (dataOutLength &gt;= 1, end); <span class="enscript-comment">//Requested zero byte in one request
+</span>    cc_require (dataOutLength &lt;= CCDRBG_MAX_REQUEST_SIZE, end); <span class="enscript-comment">//Requested too many bytes in one request
+</span>    cc_require (additionalLength&lt;=CCDRBG_MAX_ADDITIONALINPUT_SIZE, end); <span class="enscript-comment">//Additional input too long
+</span>    
+    <span class="enscript-comment">// 1. If (reseed_counter &gt; 2^^48), then Return (“Reseed required”, Null, V, Key, reseed_counter).
+</span>     rc = CCDRBG_STATUS_NEED_RESEED;
+     cc_require (reseed_counter &lt;= CCDRBG_RESEED_INTERVAL, end); <span class="enscript-comment">//Reseed required
+</span>    
+    rc=CCDRBG_STATUS_OK;
+    
+<span class="enscript-reference">end</span>:
+    <span class="enscript-keyword">return</span> rc;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">generate</span>(<span class="enscript-type">struct</span> ccdrbg_state *drbg, <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> dataOutLength, <span class="enscript-type">void</span> *dataOut,
+                    <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> additionalLength, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *additional)
+{
+    <span class="enscript-type">struct</span> ccdrbg_nisthmac_state *state = (<span class="enscript-type">struct</span> ccdrbg_nisthmac_state *)drbg;
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ccdrbg_nisthmac_custom *custom = state-&gt;custom;
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ccdigest_info *di = custom-&gt;di;
+    
+    <span class="enscript-type">int</span> rc = validate_gen_params(state-&gt;reseed_counter, dataOutLength, additional==NULL?0:additionalLength);
+    <span class="enscript-keyword">if</span>(rc!=CCDRBG_STATUS_OK) <span class="enscript-keyword">return</span> rc;
+    
+    <span class="enscript-comment">// 2. If additional_input ≠ Null, then (Key, V) = HMAC_DRBG_Update (additional_input, Key, V).
+</span>    <span class="enscript-keyword">if</span> (additional &amp;&amp; additionalLength)
+        hmac_dbrg_update(drbg, additionalLength, additional, 0, NULL, 0, NULL);
+    
+    <span class="enscript-comment">// hmac_dbrg_generate_algorithm
+</span>    <span class="enscript-type">char</span> *outPtr = (<span class="enscript-type">char</span> *) dataOut;
+    <span class="enscript-keyword">while</span> (dataOutLength &gt; 0) {
+        <span class="enscript-keyword">if</span> (!state-&gt;bytesLeft) {
+            <span class="enscript-comment">//  5. V=HMAC(K,V).
+</span>            cchmac(di, state-&gt;keysize, state-&gt;key, state-&gt;vsize, state-&gt;v, state-&gt;v);
+            state-&gt;bytesLeft = di-&gt;output_size;<span class="enscript-comment">//di-&gt;output_size;  state-&gt;vsize
+</span>        }
+        size_t outLength = dataOutLength &gt; state-&gt;bytesLeft ? state-&gt;bytesLeft : dataOutLength;
+        CC_MEMCPY(outPtr, state-&gt;v, outLength);
+        state-&gt;bytesLeft -= outLength;
+        outPtr += outLength;
+        dataOutLength -= outLength;
+    }
+    
+    <span class="enscript-comment">// 6. (Key, V) = HMAC_DRBG_Update (additional_input, Key, V).
+</span>    hmac_dbrg_update(drbg, additionalLength, additional, 0, NULL, 0, NULL);
+    
+    <span class="enscript-comment">// 7. reseed_counter = reseed_counter + 1.
+</span>    state-&gt;reseed_counter++;
+    
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DEBUGFOO</span>
+    dumpState(<span class="enscript-string">&quot;generate: &quot;</span>, state);
+#<span class="enscript-reference">endif</span>
+    
+    <span class="enscript-keyword">return</span> CCDRBG_STATUS_OK;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">done</span>(<span class="enscript-type">struct</span> ccdrbg_state *drbg)
+{
+    <span class="enscript-type">struct</span> ccdrbg_nisthmac_state *state=(<span class="enscript-type">struct</span> ccdrbg_nisthmac_state *)drbg;
+    cc_clear(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ccdrbg_nisthmac_state), state); <span class="enscript-comment">//clear v, key as well as internal variables
+</span>}
+
+<span class="enscript-type">struct</span> ccdrbg_info ccdrbg_nisthmac_info = {
+    .size = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ccdrbg_nisthmac_state) + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ccdrbg_nisthmac_custom),
+    .init = init,
+    .reseed = reseed,
+    .generate = generate,
+    .done = done,
+    .custom = NULL
+};
+
+<span class="enscript-comment">/* This initializes an info object with the right options */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">ccdrbg_factory_nisthmac</span>(<span class="enscript-type">struct</span> ccdrbg_info *info, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ccdrbg_nisthmac_custom *custom)
+{
+    info-&gt;size = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ccdrbg_nisthmac_state) + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ccdrbg_nisthmac_custom);
+    info-&gt;init = init;
+    info-&gt;generate = generate;
+    info-&gt;reseed = reseed;
+    info-&gt;done = done;
+    info-&gt;custom = custom;
+};
+
+</pre>
+<hr />
+</body></html>

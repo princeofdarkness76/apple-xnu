@@ -1,0 +1,776 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ipc_entry.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ipc_entry.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+<span class="enscript-comment">/*
+ *	File:	ipc/ipc_entry.c
+ *	Author:	Rich Draves
+ *	Date:	1989
+ *
+ *	Primitive functions to manipulate translation entries.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach_debug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_entry.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_space.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_hash.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_table.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_entry_lookup
+ *	Purpose:
+ *		Searches for an entry, given its name.
+ *	Conditions:
+ *		The space must be read or write locked throughout.
+ *		The space must be active.
+ */</span>
+
+ipc_entry_t
+<span class="enscript-function-name">ipc_entry_lookup</span>(
+	ipc_space_t		space,
+	mach_port_name_t	name)
+{
+	mach_port_index_t index;
+	ipc_entry_t entry;
+
+	assert(is_active(space));
+
+	index = MACH_PORT_INDEX(name);
+	<span class="enscript-keyword">if</span> (index &lt;  space-&gt;is_table_size) {
+                entry = &amp;space-&gt;is_table[index];
+		<span class="enscript-keyword">if</span> (IE_BITS_GEN(entry-&gt;ie_bits) != MACH_PORT_GEN(name) ||
+		    IE_BITS_TYPE(entry-&gt;ie_bits) == MACH_PORT_TYPE_NONE)
+			entry = IE_NULL;		
+	}
+	<span class="enscript-keyword">else</span> {
+		entry = IE_NULL;
+	}
+
+	assert((entry == IE_NULL) || IE_BITS_TYPE(entry-&gt;ie_bits));
+	<span class="enscript-keyword">return</span> entry;
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_entries_hold
+ *	Purpose:
+ *		Verifies that there are at least 'entries_needed'
+ *		free list members
+ *	Conditions:
+ *		The space is write-locked and active throughout.
+ *		An object may be locked.  Will not allocate memory.
+ *	Returns:
+ *		KERN_SUCCESS		Free entries were found.
+ *		KERN_NO_SPACE		No entry allocated.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">ipc_entries_hold</span>(
+	ipc_space_t		space,
+	uint32_t		entries_needed)
+{
+
+	ipc_entry_t table;
+	mach_port_index_t next_free = 0;
+	uint32_t i;
+
+	assert(is_active(space));
+
+	table = &amp;space-&gt;is_table[0];
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; entries_needed; i++) {
+		next_free = table[next_free].ie_next;
+		<span class="enscript-keyword">if</span> (next_free == 0) {
+			<span class="enscript-keyword">return</span> KERN_NO_SPACE;
+		}
+		assert(next_free &lt; space-&gt;is_table_size);
+		assert(table[next_free].ie_object == IO_NULL);
+	}
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_entry_claim
+ *	Purpose:
+ *		Take formal ownership of a held entry.
+ *	Conditions:
+ *		The space is write-locked and active throughout.
+ *		An object may be locked.  Will not allocate memory.
+ *
+ * 	Note: The returned entry must be marked as modified before
+ * 	      releasing the space lock
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">ipc_entry_claim</span>(
+	ipc_space_t		space,
+	mach_port_name_t	*namep,
+	ipc_entry_t		*entryp)
+{
+	ipc_entry_t entry;
+	ipc_entry_t table;
+	mach_port_index_t first_free;
+	mach_port_gen_t gen;
+	mach_port_name_t new_name;
+
+	table = &amp;space-&gt;is_table[0];
+
+	first_free = table-&gt;ie_next;
+	assert(first_free != 0);
+
+	entry = &amp;table[first_free];
+	table-&gt;ie_next = entry-&gt;ie_next;
+	space-&gt;is_table_free--;
+
+	assert(table-&gt;ie_next &lt; space-&gt;is_table_size);
+
+	<span class="enscript-comment">/*
+	 *	Initialize the new entry.  We need only
+	 *	increment the generation number and clear ie_request.
+	 */</span>
+	gen = IE_BITS_NEW_GEN(entry-&gt;ie_bits);
+	entry-&gt;ie_bits = gen;
+	entry-&gt;ie_request = IE_REQ_NONE;
+
+	<span class="enscript-comment">/*
+	 *	The new name can't be MACH_PORT_NULL because index
+	 *	is non-zero.  It can't be MACH_PORT_DEAD because
+	 *	the table isn't allowed to grow big enough.
+	 *	(See comment in ipc/ipc_table.h.)
+	 */</span>
+	new_name = MACH_PORT_MAKE(first_free, gen);
+	assert(MACH_PORT_VALID(new_name));
+	*namep = new_name;
+	*entryp = entry;
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_entry_get
+ *	Purpose:
+ *		Tries to allocate an entry out of the space.
+ *	Conditions:
+ *		The space is write-locked and active throughout.
+ *		An object may be locked.  Will not allocate memory.
+ *	Returns:
+ *		KERN_SUCCESS		A free entry was found.
+ *		KERN_NO_SPACE		No entry allocated.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">ipc_entry_get</span>(
+	ipc_space_t		space,
+	mach_port_name_t	*namep,
+	ipc_entry_t		*entryp)
+{
+	kern_return_t kr;
+
+	kr = ipc_entries_hold(space, 1);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+		<span class="enscript-keyword">return</span> kr;
+
+	<span class="enscript-keyword">return</span> ipc_entry_claim(space, namep, entryp);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_entry_alloc
+ *	Purpose:
+ *		Allocate an entry out of the space.
+ *	Conditions:
+ *		The space is not locked before, but it is write-locked after
+ *		if the call is successful.  May allocate memory.
+ *	Returns:
+ *		KERN_SUCCESS		An entry was allocated.
+ *		KERN_INVALID_TASK	The space is dead.
+ *		KERN_NO_SPACE		No room for an entry in the space.
+ *		KERN_RESOURCE_SHORTAGE	Couldn't allocate memory for an entry.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">ipc_entry_alloc</span>(
+	ipc_space_t		space,
+	mach_port_name_t	*namep,
+	ipc_entry_t		*entryp)
+{
+	kern_return_t kr;
+
+	is_write_lock(space);
+
+	<span class="enscript-keyword">for</span> (;;) {
+		<span class="enscript-keyword">if</span> (!is_active(space)) {
+			is_write_unlock(space);
+			<span class="enscript-keyword">return</span> KERN_INVALID_TASK;
+		}
+
+		kr = ipc_entry_get(space, namep, entryp);
+		<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS)
+			<span class="enscript-keyword">return</span> kr;
+
+		kr = ipc_entry_grow_table(space, ITS_SIZE_NONE);
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS)
+			<span class="enscript-keyword">return</span> kr; <span class="enscript-comment">/* space is unlocked */</span>
+	}
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_entry_alloc_name
+ *	Purpose:
+ *		Allocates/finds an entry with a specific name.
+ *		If an existing entry is returned, its type will be nonzero.
+ *	Conditions:
+ *		The space is not locked before, but it is write-locked after
+ *		if the call is successful.  May allocate memory.
+ *	Returns:
+ *		KERN_SUCCESS		Found existing entry with same name.
+ *		KERN_SUCCESS		Allocated a new entry.
+ *		KERN_INVALID_TASK	The space is dead.
+ *		KERN_RESOURCE_SHORTAGE	Couldn't allocate memory.
+ *		KERN_FAILURE		Couldn't allocate requested name.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">ipc_entry_alloc_name</span>(
+	ipc_space_t		space,
+	mach_port_name_t	name,
+	ipc_entry_t		*entryp)
+{
+	mach_port_index_t index = MACH_PORT_INDEX(name);
+	mach_port_gen_t gen = MACH_PORT_GEN(name);
+
+	assert(MACH_PORT_VALID(name));
+
+
+	is_write_lock(space);
+
+	<span class="enscript-keyword">for</span> (;;) {
+		ipc_entry_t entry;
+
+		<span class="enscript-keyword">if</span> (!is_active(space)) {
+			is_write_unlock(space);
+			<span class="enscript-keyword">return</span> KERN_INVALID_TASK;
+		}
+
+		<span class="enscript-comment">/*
+		 *	If we are under the table cutoff,
+		 *	there are usually four cases:
+		 *		1) The entry is reserved (index 0)
+		 *		2) The entry is inuse, for the same name
+		 *		3) The entry is inuse, for a different name
+		 *		4) The entry is free
+		 *	For a task with a &quot;fast&quot; IPC space, we disallow
+		 *	cases 1) and 3), because ports cannot be renamed.
+		 */</span>
+		<span class="enscript-keyword">if</span> (index &lt; space-&gt;is_table_size) {
+			ipc_entry_t table = space-&gt;is_table;
+
+			entry = &amp;table[index];
+
+			<span class="enscript-keyword">if</span> (index == 0) {
+				<span class="enscript-comment">/* case #1 - the entry is reserved */</span>
+				assert(!IE_BITS_TYPE(entry-&gt;ie_bits));
+				assert(!IE_BITS_GEN(entry-&gt;ie_bits));
+				is_write_unlock(space);				
+				<span class="enscript-keyword">return</span> KERN_FAILURE;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (IE_BITS_TYPE(entry-&gt;ie_bits)) {
+				<span class="enscript-keyword">if</span> (IE_BITS_GEN(entry-&gt;ie_bits) == gen) {
+					<span class="enscript-comment">/* case #2 -- the entry is inuse, for the same name */</span>
+					*entryp = entry;
+					<span class="enscript-keyword">return</span> KERN_SUCCESS;
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-comment">/* case #3 -- the entry is inuse, for a different name. */</span>
+					<span class="enscript-comment">/* Collisions are not allowed */</span>
+					is_write_unlock(space);					
+					<span class="enscript-keyword">return</span> KERN_FAILURE;
+				}
+			} <span class="enscript-keyword">else</span> {
+				mach_port_index_t free_index, next_index;
+
+				<span class="enscript-comment">/*
+				 *      case #4 -- the entry is free
+				 *	Rip the entry out of the free list.
+				 */</span>
+
+				<span class="enscript-keyword">for</span> (free_index = 0;
+				     (next_index = table[free_index].ie_next)
+							!= index;
+				     free_index = next_index)
+					<span class="enscript-keyword">continue</span>;
+
+				table[free_index].ie_next =
+					table[next_index].ie_next;
+				space-&gt;is_table_free--;
+
+				<span class="enscript-comment">/* mark the previous entry modified - reconstructing the name */</span>
+				ipc_entry_modified(space, 
+						   MACH_PORT_MAKE(free_index, 
+						   	IE_BITS_GEN(table[free_index].ie_bits)),
+						   &amp;table[free_index]);
+
+				entry-&gt;ie_bits = gen;
+				entry-&gt;ie_request = IE_REQ_NONE;
+				*entryp = entry;
+
+				assert(entry-&gt;ie_object == IO_NULL);
+				<span class="enscript-keyword">return</span> KERN_SUCCESS;
+			}
+		}
+
+		<span class="enscript-comment">/*
+		 *      We grow the table so that the name
+		 *	index fits in the array space.
+		 *      Because the space will be unlocked,
+		 *      we must restart.
+		 */</span>
+                kern_return_t kr;
+		kr = ipc_entry_grow_table(space, index + 1);
+		assert(kr != KERN_NO_SPACE);
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+			<span class="enscript-comment">/* space is unlocked */</span>
+			<span class="enscript-keyword">return</span> kr;
+		}
+		<span class="enscript-keyword">continue</span>;
+	}
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_entry_dealloc
+ *	Purpose:
+ *		Deallocates an entry from a space.
+ *	Conditions:
+ *		The space must be write-locked throughout.
+ *		The space must be active.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_entry_dealloc</span>(
+	ipc_space_t		space,
+	mach_port_name_t	name,
+	ipc_entry_t		entry)
+{
+	ipc_entry_t table;
+	ipc_entry_num_t size;
+	mach_port_index_t index;
+
+	assert(is_active(space));
+	assert(entry-&gt;ie_object == IO_NULL);
+	assert(entry-&gt;ie_request == IE_REQ_NONE);
+
+#<span class="enscript-reference">if</span> 1
+	<span class="enscript-keyword">if</span> (entry-&gt;ie_request != IE_REQ_NONE)
+		panic(<span class="enscript-string">&quot;ipc_entry_dealloc()\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+
+	index = MACH_PORT_INDEX(name);
+	table = space-&gt;is_table;
+	size = space-&gt;is_table_size;
+
+	<span class="enscript-keyword">if</span> ((index &lt; size) &amp;&amp; (entry == &amp;table[index])) {
+		assert(IE_BITS_GEN(entry-&gt;ie_bits) == MACH_PORT_GEN(name));
+		entry-&gt;ie_bits &amp;= IE_BITS_GEN_MASK;
+		entry-&gt;ie_next = table-&gt;ie_next;
+		table-&gt;ie_next = index;
+		space-&gt;is_table_free++;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * Nothing to do.  The entry does not match
+		 * so there is nothing to deallocate.
+		 */</span>
+                assert(index &lt; size);
+		assert(entry == &amp;table[index]);
+		assert(IE_BITS_GEN(entry-&gt;ie_bits) == MACH_PORT_GEN(name));
+	}
+	ipc_entry_modified(space, name, entry);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_entry_modified
+ *	Purpose:
+ *		Note that an entry was modified in a space.
+ *	Conditions:
+ *		Assumes exclusive write access to the space,
+ *		either through a write lock or being the cleaner
+ *		on an inactive space.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_entry_modified</span>(
+	ipc_space_t		space,
+	mach_port_name_t	name,
+	__assert_only ipc_entry_t entry)
+{
+	ipc_entry_t table;
+	ipc_entry_num_t size;
+	mach_port_index_t index;
+
+	index = MACH_PORT_INDEX(name);
+	table = space-&gt;is_table;
+	size = space-&gt;is_table_size;
+
+	assert(index &lt; size);
+	assert(entry == &amp;table[index]);
+
+	assert(space-&gt;is_low_mod &lt;= size);
+	assert(space-&gt;is_high_mod &lt; size);
+
+	<span class="enscript-keyword">if</span> (index &lt; space-&gt;is_low_mod)
+		space-&gt;is_low_mod = index;
+	<span class="enscript-keyword">if</span> (index &gt; space-&gt;is_high_mod)
+		space-&gt;is_high_mod = index;
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IPC_ENTRY_GROW_STATS</span> 1
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPC_ENTRY_GROW_STATS</span>
+<span class="enscript-type">static</span> uint64_t ipc_entry_grow_count = 0;
+<span class="enscript-type">static</span> uint64_t ipc_entry_grow_rescan = 0;
+<span class="enscript-type">static</span> uint64_t ipc_entry_grow_rescan_max = 0;
+<span class="enscript-type">static</span> uint64_t ipc_entry_grow_rescan_entries = 0;
+<span class="enscript-type">static</span> uint64_t ipc_entry_grow_rescan_entries_max = 0;
+<span class="enscript-type">static</span> uint64_t	ipc_entry_grow_freelist_entries = 0;
+<span class="enscript-type">static</span> uint64_t	ipc_entry_grow_freelist_entries_max = 0;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_entry_grow_table
+ *	Purpose:
+ *		Grows the table in a space.
+ *	Conditions:
+ *		The space must be write-locked and active before.
+ *		If successful, the space is also returned locked.
+ *		On failure, the space is returned unlocked.
+ *		Allocates memory.
+ *	Returns:
+ *		KERN_SUCCESS		Grew the table.
+ *		KERN_SUCCESS		Somebody else grew the table.
+ *		KERN_SUCCESS		The space died.
+ *		KERN_NO_SPACE		Table has maximum size already.
+ *		KERN_RESOURCE_SHORTAGE	Couldn't allocate a new table.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">ipc_entry_grow_table</span>(
+	ipc_space_t		space,
+	ipc_table_elems_t	target_size)
+{
+	ipc_entry_num_t osize, size, nsize, psize;
+
+	ipc_entry_t otable, table;
+	ipc_table_size_t oits, its, nits;
+	mach_port_index_t i, free_index;
+	mach_port_index_t low_mod, hi_mod;
+	ipc_table_index_t sanity;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPC_ENTRY_GROW_STATS</span>
+	uint64_t rescan_count = 0;
+#<span class="enscript-reference">endif</span>
+	assert(is_active(space));
+
+	<span class="enscript-keyword">if</span> (is_growing(space)) {
+		<span class="enscript-comment">/*
+		 *	Somebody else is growing the table.
+		 *	We just wait for them to finish.
+		 */</span>
+
+		is_write_sleep(space);
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	otable = space-&gt;is_table;
+		
+	its = space-&gt;is_table_next;
+	size = its-&gt;its_size;
+		
+	<span class="enscript-comment">/*
+	 * Since is_table_next points to the next natural size
+	 * we can identify the current size entry.
+	 */</span>
+	oits = its - 1;
+	osize = oits-&gt;its_size;
+		
+	<span class="enscript-comment">/*
+	 * If there is no target size, then the new size is simply
+	 * specified by is_table_next.  If there is a target
+	 * size, then search for the next entry.
+	 */</span>
+	<span class="enscript-keyword">if</span> (target_size != ITS_SIZE_NONE) {
+		<span class="enscript-keyword">if</span> (target_size &lt;= osize) {
+			<span class="enscript-comment">/* the space is locked */</span>			
+			<span class="enscript-keyword">return</span> KERN_SUCCESS;
+		}
+
+		psize = osize;
+		<span class="enscript-keyword">while</span> ((psize != size) &amp;&amp; (target_size &gt; size)) {
+			psize = size;
+			its++;
+			size = its-&gt;its_size;
+		}
+		<span class="enscript-keyword">if</span> (psize == size) {
+			is_write_unlock(space);
+			<span class="enscript-keyword">return</span> KERN_NO_SPACE;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (osize == size) {
+		is_write_unlock(space);
+		<span class="enscript-keyword">return</span> KERN_NO_SPACE;
+	}
+ 
+	nits = its + 1;
+	nsize = nits-&gt;its_size;
+	assert((osize &lt; size) &amp;&amp; (size &lt;= nsize));
+
+	<span class="enscript-comment">/*
+	 * We'll attempt to grow the table.
+	 *
+	 * Because we will be copying without the space lock, reset
+	 * the lowest_mod index to just beyond the end of the current
+	 * table.  Modification of entries (other than hashes) will
+	 * bump this downward, and we only have to reprocess entries
+	 * above that mark.  Eventually, we'll get done.
+	 */</span>
+	is_start_growing(space);
+	space-&gt;is_low_mod = osize;
+	space-&gt;is_high_mod = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPC_ENTRY_GROW_STATS</span>
+	ipc_entry_grow_count++;
+#<span class="enscript-reference">endif</span>
+	is_write_unlock(space);
+
+	table = it_entries_alloc(its);
+	<span class="enscript-keyword">if</span> (table == IE_NULL) {
+		is_write_lock(space);
+		is_done_growing(space);
+		is_write_unlock(space);
+		thread_wakeup((event_t) space);
+		<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+	}
+
+	<span class="enscript-comment">/* initialize new entries (free chain in backwards order) */</span>
+	<span class="enscript-keyword">for</span> (i = osize; i &lt; size; i++) {
+		table[i].ie_object = IO_NULL;
+		table[i].ie_bits = IE_BITS_GEN_MASK;
+		table[i].ie_index = 0;
+		table[i].ie_next = i + 1;
+	}
+	table[size-1].ie_next = 0;
+
+	<span class="enscript-comment">/* clear out old entries in new table */</span>
+	memset((<span class="enscript-type">void</span> *)table, 0, osize * <span class="enscript-keyword">sizeof</span>(*table));
+
+	low_mod = 0;
+	hi_mod = osize - 1;
+ <span class="enscript-reference">rescan</span>:	
+	<span class="enscript-comment">/*
+	 * Within the range of the table that changed, determine what we
+	 * have to take action on. For each entry, take a snapshot of the
+	 * corresponding entry in the old table (so it won't change
+	 * during this iteration). The snapshot may not be self-consistent
+	 * (if we caught it in the middle of being changed), so be very
+	 * cautious with the values.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = low_mod; i &lt;= hi_mod; i++) {
+		ipc_entry_t entry = &amp;table[i];
+		<span class="enscript-type">struct</span> ipc_entry osnap = otable[i]; 
+
+		<span class="enscript-keyword">if</span> (entry-&gt;ie_object != osnap.ie_object ||
+		    IE_BITS_TYPE(entry-&gt;ie_bits) != IE_BITS_TYPE(osnap.ie_bits)) {
+			
+			<span class="enscript-keyword">if</span> (entry-&gt;ie_object != IO_NULL &amp;&amp;
+			    IE_BITS_TYPE(entry-&gt;ie_bits) == MACH_PORT_TYPE_SEND)
+				ipc_hash_table_delete(table, size, entry-&gt;ie_object, i, entry);
+
+			entry-&gt;ie_object = osnap.ie_object;
+			entry-&gt;ie_bits = osnap.ie_bits;
+			entry-&gt;ie_request = osnap.ie_request; <span class="enscript-comment">/* or ie_next */</span>
+
+			<span class="enscript-keyword">if</span> (entry-&gt;ie_object != IO_NULL &amp;&amp;
+			    IE_BITS_TYPE(entry-&gt;ie_bits) == MACH_PORT_TYPE_SEND)
+				ipc_hash_table_insert(table, size, entry-&gt;ie_object, i, entry);
+		} <span class="enscript-keyword">else</span> {
+			assert(entry-&gt;ie_object == osnap.ie_object);
+			entry-&gt;ie_bits = osnap.ie_bits;
+			entry-&gt;ie_request = osnap.ie_request; <span class="enscript-comment">/* or ie_next */</span>
+		}
+
+	}
+	table[0].ie_next = otable[0].ie_next;  <span class="enscript-comment">/* always rebase the freelist */</span>
+
+	<span class="enscript-comment">/*
+	 * find the end of the freelist (should be short). But be careful,
+	 * the list items can change so only follow through truly free entries
+	 * (no problem stopping short in those cases, because we'll rescan).
+	 */</span>
+	free_index = 0;
+	<span class="enscript-keyword">for</span> (sanity = 0; sanity &lt; osize; sanity++) {
+		<span class="enscript-keyword">if</span> (table[free_index].ie_object != IPC_OBJECT_NULL)
+			<span class="enscript-keyword">break</span>;
+		i = table[free_index].ie_next;
+		<span class="enscript-keyword">if</span> (i == 0 || i &gt;= osize)
+			<span class="enscript-keyword">break</span>;
+		free_index = i;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPC_ENTRY_GROW_STATS</span>
+	ipc_entry_grow_freelist_entries += sanity;
+	<span class="enscript-keyword">if</span> (sanity &gt; ipc_entry_grow_freelist_entries_max)
+		ipc_entry_grow_freelist_entries_max = sanity;
+#<span class="enscript-reference">endif</span>
+		
+	is_write_lock(space);
+
+	<span class="enscript-comment">/*
+	 *	We need to do a wakeup on the space,
+	 *	to rouse waiting threads.  We defer
+	 *	this until the space is unlocked,
+	 *	because we don't want them to spin.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (!is_active(space)) {
+		<span class="enscript-comment">/*
+		 *	The space died while it was unlocked.
+		 */</span>
+
+		is_done_growing(space);
+		is_write_unlock(space);
+		thread_wakeup((event_t) space);
+		it_entries_free(its, table);
+		is_write_lock(space);
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	<span class="enscript-comment">/* If the space changed while unlocked, go back and process the changes */</span>
+	<span class="enscript-keyword">if</span> (space-&gt;is_low_mod &lt; osize) {
+		assert(space-&gt;is_high_mod &gt; 0);
+		low_mod = space-&gt;is_low_mod;
+		space-&gt;is_low_mod = osize;
+		hi_mod = space-&gt;is_high_mod;
+		space-&gt;is_high_mod = 0;
+		is_write_unlock(space);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPC_ENTRY_GROW_STATS</span>
+		rescan_count++;
+		<span class="enscript-keyword">if</span> (rescan_count &gt; ipc_entry_grow_rescan_max)
+			ipc_entry_grow_rescan_max = rescan_count;
+
+		ipc_entry_grow_rescan++;
+		ipc_entry_grow_rescan_entries += hi_mod - low_mod + 1;
+		<span class="enscript-keyword">if</span> (hi_mod - low_mod + 1 &gt; ipc_entry_grow_rescan_entries_max)
+			ipc_entry_grow_rescan_entries_max = hi_mod - low_mod + 1;
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">rescan</span>;
+	}
+
+	<span class="enscript-comment">/* link new free entries onto the rest of the freelist */</span>
+	assert(table[free_index].ie_next == 0 &amp;&amp;
+	       table[free_index].ie_object == IO_NULL);
+	table[free_index].ie_next = osize;
+
+	assert(space-&gt;is_table == otable);
+	assert((space-&gt;is_table_next == its) ||
+	    (target_size != ITS_SIZE_NONE));
+	assert(space-&gt;is_table_size == osize);
+
+	space-&gt;is_table = table;
+	space-&gt;is_table_size = size;
+	space-&gt;is_table_next = nits;
+	space-&gt;is_table_free += size - osize;
+
+	is_done_growing(space);
+	is_write_unlock(space);
+
+	thread_wakeup((event_t) space);
+
+	<span class="enscript-comment">/*
+	 *	Now we need to free the old table.
+	 */</span>
+	it_entries_free(oits, otable);
+	is_write_lock(space);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,989 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>host.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">host.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/*
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989,1988 Carnegie Mellon University
+ * All Rights Reserved.
+ *
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ *
+ * Carnegie Mellon requests users of this software to return to
+ *
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ *
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+
+<span class="enscript-comment">/*
+ *	host.c
+ *
+ *	Non-ipc host functions.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_special_ports.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/processor_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_host_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task_info.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host_statistics.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_purgeable_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_ATM</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;atm/atm_internal.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_mach_internal.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+host_data_t realhost;
+
+vm_extmod_statistics_data_t host_extmod_statistics;
+
+kern_return_t
+<span class="enscript-function-name">host_processors</span>(host_priv_t host_priv, processor_array_t * out_array, mach_msg_type_number_t * countp)
+{
+	<span class="enscript-type">register</span> processor_t processor, *tp;
+	<span class="enscript-type">void</span> * addr;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> count, i;
+
+	<span class="enscript-keyword">if</span> (host_priv == HOST_PRIV_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	assert(host_priv == &amp;realhost);
+
+	count = processor_count;
+	assert(count != 0);
+
+	addr = kalloc((vm_size_t)(count * <span class="enscript-keyword">sizeof</span>(mach_port_t)));
+	<span class="enscript-keyword">if</span> (addr == 0)
+		<span class="enscript-keyword">return</span> (KERN_RESOURCE_SHORTAGE);
+
+	tp = (processor_t *)addr;
+	*tp++ = processor = processor_list;
+
+	<span class="enscript-keyword">if</span> (count &gt; 1) {
+		simple_lock(&amp;processor_list_lock);
+
+		<span class="enscript-keyword">for</span> (i = 1; i &lt; count; i++)
+			*tp++ = processor = processor-&gt;processor_list;
+
+		simple_unlock(&amp;processor_list_lock);
+	}
+
+	*countp = count;
+	*out_array = (processor_array_t)addr;
+
+	<span class="enscript-comment">/* do the conversion that Mig should handle */</span>
+	tp = (processor_t *)addr;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++)
+		((mach_port_t *)tp)[i] = (mach_port_t)convert_processor_to_port(tp[i]);
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+kern_return_t
+<span class="enscript-function-name">host_info</span>(host_t host, host_flavor_t flavor, host_info_t info, mach_msg_type_number_t * count)
+{
+	<span class="enscript-keyword">if</span> (host == HOST_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">switch</span> (flavor) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HOST_BASIC_INFO</span>: {
+		<span class="enscript-type">register</span> host_basic_info_t basic_info;
+		<span class="enscript-type">register</span> <span class="enscript-type">int</span> master_id;
+
+		<span class="enscript-comment">/*
+		 *	Basic information about this host.
+		 */</span>
+		<span class="enscript-keyword">if</span> (*count &lt; HOST_BASIC_INFO_OLD_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+		basic_info = (host_basic_info_t)info;
+
+		basic_info-&gt;memory_size = machine_info.memory_size;
+		basic_info-&gt;max_cpus = machine_info.max_cpus;
+		basic_info-&gt;avail_cpus = processor_avail_count;
+		master_id = master_processor-&gt;cpu_id;
+		basic_info-&gt;cpu_type = slot_type(master_id);
+		basic_info-&gt;cpu_subtype = slot_subtype(master_id);
+
+		<span class="enscript-keyword">if</span> (*count &gt;= HOST_BASIC_INFO_COUNT) {
+			basic_info-&gt;cpu_threadtype = slot_threadtype(master_id);
+			basic_info-&gt;physical_cpu = machine_info.physical_cpu;
+			basic_info-&gt;physical_cpu_max = machine_info.physical_cpu_max;
+			basic_info-&gt;logical_cpu = machine_info.logical_cpu;
+			basic_info-&gt;logical_cpu_max = machine_info.logical_cpu_max;
+			basic_info-&gt;max_mem = machine_info.max_mem;
+
+			*count = HOST_BASIC_INFO_COUNT;
+		} <span class="enscript-keyword">else</span> {
+			*count = HOST_BASIC_INFO_OLD_COUNT;
+		}
+
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HOST_SCHED_INFO</span>: {
+		<span class="enscript-type">register</span> host_sched_info_t sched_info;
+		uint32_t quantum_time;
+		uint64_t quantum_ns;
+
+		<span class="enscript-comment">/*
+		 *	Return scheduler information.
+		 */</span>
+		<span class="enscript-keyword">if</span> (*count &lt; HOST_SCHED_INFO_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+		sched_info = (host_sched_info_t)info;
+
+		quantum_time = SCHED(initial_quantum_size)(THREAD_NULL);
+		absolutetime_to_nanoseconds(quantum_time, &amp;quantum_ns);
+
+		sched_info-&gt;min_timeout = sched_info-&gt;min_quantum = (uint32_t)(quantum_ns / 1000 / 1000);
+
+		*count = HOST_SCHED_INFO_COUNT;
+
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HOST_RESOURCE_SIZES</span>: {
+		<span class="enscript-comment">/*
+		 * Return sizes of kernel data structures
+		 */</span>
+		<span class="enscript-keyword">if</span> (*count &lt; HOST_RESOURCE_SIZES_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+		<span class="enscript-comment">/* XXX Fail until ledgers are implemented */</span>
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HOST_PRIORITY_INFO</span>: {
+		<span class="enscript-type">register</span> host_priority_info_t priority_info;
+
+		<span class="enscript-keyword">if</span> (*count &lt; HOST_PRIORITY_INFO_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+		priority_info = (host_priority_info_t)info;
+
+		priority_info-&gt;kernel_priority = MINPRI_KERNEL;
+		priority_info-&gt;system_priority = MINPRI_KERNEL;
+		priority_info-&gt;server_priority = MINPRI_RESERVED;
+		priority_info-&gt;user_priority = BASEPRI_DEFAULT;
+		priority_info-&gt;depress_priority = DEPRESSPRI;
+		priority_info-&gt;idle_priority = IDLEPRI;
+		priority_info-&gt;minimum_priority = MINPRI_USER;
+		priority_info-&gt;maximum_priority = MAXPRI_RESERVED;
+
+		*count = HOST_PRIORITY_INFO_COUNT;
+
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	<span class="enscript-comment">/*
+	 * Gestalt for various trap facilities.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HOST_MACH_MSG_TRAP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HOST_SEMAPHORE_TRAPS</span>: {
+		*count = 0;
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HOST_VM_PURGABLE</span>: {
+		<span class="enscript-keyword">if</span> (*count &lt; HOST_VM_PURGABLE_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+		vm_purgeable_stats((vm_purgeable_info_t)info, NULL);
+
+		*count = HOST_VM_PURGABLE_COUNT;
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HOST_DEBUG_INFO_INTERNAL</span>: {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+		<span class="enscript-keyword">if</span> (*count &lt; HOST_DEBUG_INFO_INTERNAL_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+		host_debug_info_internal_t debug_info = (host_debug_info_internal_t)info;
+		bzero(debug_info, <span class="enscript-keyword">sizeof</span>(host_debug_info_internal_data_t));
+		*count = HOST_DEBUG_INFO_INTERNAL_COUNT;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_COALITIONS</span>
+		debug_info-&gt;config_coalitions = 1;
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+		debug_info-&gt;config_bank = 1;
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_ATM</span>
+		debug_info-&gt;config_atm = 1;
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_CSR</span>
+		debug_info-&gt;config_csr = 1;
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* DEVELOPMENT || DEBUG */</span>
+		<span class="enscript-keyword">return</span> (KERN_NOT_SUPPORTED);
+#<span class="enscript-reference">endif</span>
+	}
+
+	<span class="enscript-reference">default</span>: <span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	}
+}
+
+kern_return_t
+<span class="enscript-function-name">host_statistics</span>(host_t host, host_flavor_t flavor, host_info_t info, mach_msg_type_number_t * count)
+{
+	uint32_t i;
+
+	<span class="enscript-keyword">if</span> (host == HOST_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_HOST);
+
+	<span class="enscript-keyword">switch</span> (flavor) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HOST_LOAD_INFO</span>: {
+		host_load_info_t load_info;
+
+		<span class="enscript-keyword">if</span> (*count &lt; HOST_LOAD_INFO_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+		load_info = (host_load_info_t)info;
+
+		bcopy((<span class="enscript-type">char</span> *)avenrun, (<span class="enscript-type">char</span> *)load_info-&gt;avenrun, <span class="enscript-keyword">sizeof</span> avenrun);
+		bcopy((<span class="enscript-type">char</span> *)mach_factor, (<span class="enscript-type">char</span> *)load_info-&gt;mach_factor, <span class="enscript-keyword">sizeof</span> mach_factor);
+
+		*count = HOST_LOAD_INFO_COUNT;
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HOST_VM_INFO</span>: {
+		<span class="enscript-type">register</span> processor_t processor;
+		<span class="enscript-type">register</span> vm_statistics64_t stat;
+		vm_statistics64_data_t host_vm_stat;
+		vm_statistics_t stat32;
+		mach_msg_type_number_t original_count;
+
+		<span class="enscript-keyword">if</span> (*count &lt; HOST_VM_INFO_REV0_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+		processor = processor_list;
+		stat = &amp;PROCESSOR_DATA(processor, vm_stat);
+		host_vm_stat = *stat;
+
+		<span class="enscript-keyword">if</span> (processor_count &gt; 1) {
+			simple_lock(&amp;processor_list_lock);
+
+			<span class="enscript-keyword">while</span> ((processor = processor-&gt;processor_list) != NULL) {
+				stat = &amp;PROCESSOR_DATA(processor, vm_stat);
+
+				host_vm_stat.zero_fill_count += stat-&gt;zero_fill_count;
+				host_vm_stat.reactivations += stat-&gt;reactivations;
+				host_vm_stat.pageins += stat-&gt;pageins;
+				host_vm_stat.pageouts += stat-&gt;pageouts;
+				host_vm_stat.faults += stat-&gt;faults;
+				host_vm_stat.cow_faults += stat-&gt;cow_faults;
+				host_vm_stat.lookups += stat-&gt;lookups;
+				host_vm_stat.hits += stat-&gt;hits;
+			}
+
+			simple_unlock(&amp;processor_list_lock);
+		}
+
+		stat32 = (vm_statistics_t)info;
+
+		stat32-&gt;free_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_free_count + vm_page_speculative_count);
+		stat32-&gt;active_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_active_count);
+
+		<span class="enscript-keyword">if</span> (vm_page_local_q) {
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; vm_page_local_q_count; i++) {
+				<span class="enscript-type">struct</span> vpl * lq;
+
+				lq = &amp;vm_page_local_q[i].vpl_un.vpl;
+
+				stat32-&gt;active_count += VM_STATISTICS_TRUNCATE_TO_32_BIT(lq-&gt;vpl_count);
+			}
+		}
+		stat32-&gt;inactive_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_inactive_count);
+		stat32-&gt;wire_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_wire_count + vm_page_throttled_count + vm_lopage_free_count);
+		stat32-&gt;zero_fill_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(host_vm_stat.zero_fill_count);
+		stat32-&gt;reactivations = VM_STATISTICS_TRUNCATE_TO_32_BIT(host_vm_stat.reactivations);
+		stat32-&gt;pageins = VM_STATISTICS_TRUNCATE_TO_32_BIT(host_vm_stat.pageins);
+		stat32-&gt;pageouts = VM_STATISTICS_TRUNCATE_TO_32_BIT(host_vm_stat.pageouts);
+		stat32-&gt;faults = VM_STATISTICS_TRUNCATE_TO_32_BIT(host_vm_stat.faults);
+		stat32-&gt;cow_faults = VM_STATISTICS_TRUNCATE_TO_32_BIT(host_vm_stat.cow_faults);
+		stat32-&gt;lookups = VM_STATISTICS_TRUNCATE_TO_32_BIT(host_vm_stat.lookups);
+		stat32-&gt;hits = VM_STATISTICS_TRUNCATE_TO_32_BIT(host_vm_stat.hits);
+
+		<span class="enscript-comment">/*
+		 * Fill in extra info added in later revisions of the
+		 * vm_statistics data structure.  Fill in only what can fit
+		 * in the data structure the caller gave us !
+		 */</span>
+		original_count = *count;
+		*count = HOST_VM_INFO_REV0_COUNT; <span class="enscript-comment">/* rev0 already filled in */</span>
+		<span class="enscript-keyword">if</span> (original_count &gt;= HOST_VM_INFO_REV1_COUNT) {
+			<span class="enscript-comment">/* rev1 added &quot;purgeable&quot; info */</span>
+			stat32-&gt;purgeable_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_purgeable_count);
+			stat32-&gt;purges = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_purged_count);
+			*count = HOST_VM_INFO_REV1_COUNT;
+		}
+
+		<span class="enscript-keyword">if</span> (original_count &gt;= HOST_VM_INFO_REV2_COUNT) {
+			<span class="enscript-comment">/* rev2 added &quot;speculative&quot; info */</span>
+			stat32-&gt;speculative_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_speculative_count);
+			*count = HOST_VM_INFO_REV2_COUNT;
+		}
+
+		<span class="enscript-comment">/* rev3 changed some of the fields to be 64-bit*/</span>
+
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HOST_CPU_LOAD_INFO</span>: {
+		<span class="enscript-type">register</span> processor_t processor;
+		host_cpu_load_info_t cpu_load_info;
+
+		<span class="enscript-keyword">if</span> (*count &lt; HOST_CPU_LOAD_INFO_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">GET_TICKS_VALUE</span>(state, ticks)                                                      \
+	MACRO_BEGIN cpu_load_info-&gt;cpu_ticks[(state)] += (uint32_t)(ticks / hz_tick_interval); \
+	MACRO_END
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">GET_TICKS_VALUE_FROM_TIMER</span>(processor, state, timer)                            \
+	MACRO_BEGIN GET_TICKS_VALUE(state, timer_grab(&amp;PROCESSOR_DATA(processor, timer))); \
+	MACRO_END
+
+		cpu_load_info = (host_cpu_load_info_t)info;
+		cpu_load_info-&gt;cpu_ticks[CPU_STATE_USER] = 0;
+		cpu_load_info-&gt;cpu_ticks[CPU_STATE_SYSTEM] = 0;
+		cpu_load_info-&gt;cpu_ticks[CPU_STATE_IDLE] = 0;
+		cpu_load_info-&gt;cpu_ticks[CPU_STATE_NICE] = 0;
+
+		simple_lock(&amp;processor_list_lock);
+
+		<span class="enscript-keyword">for</span> (processor = processor_list; processor != NULL; processor = processor-&gt;processor_list) {
+			timer_t idle_state;
+			uint64_t idle_time_snapshot1, idle_time_snapshot2;
+			uint64_t idle_time_tstamp1, idle_time_tstamp2;
+
+			<span class="enscript-comment">/* See discussion in processor_info(PROCESSOR_CPU_LOAD_INFO) */</span>
+
+			GET_TICKS_VALUE_FROM_TIMER(processor, CPU_STATE_USER, user_state);
+			<span class="enscript-keyword">if</span> (precise_user_kernel_time) {
+				GET_TICKS_VALUE_FROM_TIMER(processor, CPU_STATE_SYSTEM, system_state);
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* system_state may represent either sys or user */</span>
+				GET_TICKS_VALUE_FROM_TIMER(processor, CPU_STATE_USER, system_state);
+			}
+
+			idle_state = &amp;PROCESSOR_DATA(processor, idle_state);
+			idle_time_snapshot1 = timer_grab(idle_state);
+			idle_time_tstamp1 = idle_state-&gt;tstamp;
+
+			<span class="enscript-keyword">if</span> (PROCESSOR_DATA(processor, current_state) != idle_state) {
+				<span class="enscript-comment">/* Processor is non-idle, so idle timer should be accurate */</span>
+				GET_TICKS_VALUE_FROM_TIMER(processor, CPU_STATE_IDLE, idle_state);
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((idle_time_snapshot1 != (idle_time_snapshot2 = timer_grab(idle_state))) ||
+			           (idle_time_tstamp1 != (idle_time_tstamp2 = idle_state-&gt;tstamp))) {
+				<span class="enscript-comment">/* Idle timer is being updated concurrently, second stamp is good enough */</span>
+				GET_TICKS_VALUE(CPU_STATE_IDLE, idle_time_snapshot2);
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/*
+				 * Idle timer may be very stale. Fortunately we have established
+				 * that idle_time_snapshot1 and idle_time_tstamp1 are unchanging
+				 */</span>
+				idle_time_snapshot1 += mach_absolute_time() - idle_time_tstamp1;
+
+				GET_TICKS_VALUE(CPU_STATE_IDLE, idle_time_snapshot1);
+			}
+		}
+		simple_unlock(&amp;processor_list_lock);
+
+		*count = HOST_CPU_LOAD_INFO_COUNT;
+
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HOST_EXPIRED_TASK_INFO</span>: {
+		<span class="enscript-keyword">if</span> (*count &lt; TASK_POWER_INFO_COUNT) {
+			<span class="enscript-keyword">return</span> (KERN_FAILURE);
+		}
+
+		task_power_info_t tinfo = (task_power_info_t)info;
+
+		tinfo-&gt;task_interrupt_wakeups = dead_task_statistics.task_interrupt_wakeups;
+		tinfo-&gt;task_platform_idle_wakeups = dead_task_statistics.task_platform_idle_wakeups;
+
+		tinfo-&gt;task_timer_wakeups_bin_1 = dead_task_statistics.task_timer_wakeups_bin_1;
+
+		tinfo-&gt;task_timer_wakeups_bin_2 = dead_task_statistics.task_timer_wakeups_bin_2;
+
+		tinfo-&gt;total_user = dead_task_statistics.total_user_time;
+		tinfo-&gt;total_system = dead_task_statistics.total_system_time;
+
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+	<span class="enscript-reference">default</span>: <span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	}
+}
+
+<span class="enscript-type">extern</span> uint32_t c_segment_pages_compressed;
+
+kern_return_t
+<span class="enscript-function-name">host_statistics64</span>(host_t host, host_flavor_t flavor, host_info64_t info, mach_msg_type_number_t * count)
+{
+	uint32_t i;
+
+	<span class="enscript-keyword">if</span> (host == HOST_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_HOST);
+
+	<span class="enscript-keyword">switch</span> (flavor) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HOST_VM_INFO64</span>: <span class="enscript-comment">/* We were asked to get vm_statistics64 */</span>
+	{
+		<span class="enscript-type">register</span> processor_t processor;
+		<span class="enscript-type">register</span> vm_statistics64_t stat;
+		vm_statistics64_data_t host_vm_stat;
+		mach_msg_type_number_t original_count;
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> local_q_internal_count;
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> local_q_external_count;
+
+		<span class="enscript-keyword">if</span> (*count &lt; HOST_VM_INFO64_REV0_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+		processor = processor_list;
+		stat = &amp;PROCESSOR_DATA(processor, vm_stat);
+		host_vm_stat = *stat;
+
+		<span class="enscript-keyword">if</span> (processor_count &gt; 1) {
+			simple_lock(&amp;processor_list_lock);
+
+			<span class="enscript-keyword">while</span> ((processor = processor-&gt;processor_list) != NULL) {
+				stat = &amp;PROCESSOR_DATA(processor, vm_stat);
+
+				host_vm_stat.zero_fill_count += stat-&gt;zero_fill_count;
+				host_vm_stat.reactivations += stat-&gt;reactivations;
+				host_vm_stat.pageins += stat-&gt;pageins;
+				host_vm_stat.pageouts += stat-&gt;pageouts;
+				host_vm_stat.faults += stat-&gt;faults;
+				host_vm_stat.cow_faults += stat-&gt;cow_faults;
+				host_vm_stat.lookups += stat-&gt;lookups;
+				host_vm_stat.hits += stat-&gt;hits;
+				host_vm_stat.compressions += stat-&gt;compressions;
+				host_vm_stat.decompressions += stat-&gt;decompressions;
+				host_vm_stat.swapins += stat-&gt;swapins;
+				host_vm_stat.swapouts += stat-&gt;swapouts;
+			}
+
+			simple_unlock(&amp;processor_list_lock);
+		}
+
+		stat = (vm_statistics64_t)info;
+
+		stat-&gt;free_count = vm_page_free_count + vm_page_speculative_count;
+		stat-&gt;active_count = vm_page_active_count;
+
+		local_q_internal_count = 0;
+		local_q_external_count = 0;
+		<span class="enscript-keyword">if</span> (vm_page_local_q) {
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; vm_page_local_q_count; i++) {
+				<span class="enscript-type">struct</span> vpl * lq;
+
+				lq = &amp;vm_page_local_q[i].vpl_un.vpl;
+
+				stat-&gt;active_count += lq-&gt;vpl_count;
+				local_q_internal_count += lq-&gt;vpl_internal_count;
+				local_q_external_count += lq-&gt;vpl_external_count;
+			}
+		}
+		stat-&gt;inactive_count = vm_page_inactive_count;
+		stat-&gt;wire_count = vm_page_wire_count + vm_page_throttled_count + vm_lopage_free_count;
+		stat-&gt;zero_fill_count = host_vm_stat.zero_fill_count;
+		stat-&gt;reactivations = host_vm_stat.reactivations;
+		stat-&gt;pageins = host_vm_stat.pageins;
+		stat-&gt;pageouts = host_vm_stat.pageouts;
+		stat-&gt;faults = host_vm_stat.faults;
+		stat-&gt;cow_faults = host_vm_stat.cow_faults;
+		stat-&gt;lookups = host_vm_stat.lookups;
+		stat-&gt;hits = host_vm_stat.hits;
+
+		stat-&gt;purgeable_count = vm_page_purgeable_count;
+		stat-&gt;purges = vm_page_purged_count;
+
+		stat-&gt;speculative_count = vm_page_speculative_count;
+
+		<span class="enscript-comment">/*
+		 * Fill in extra info added in later revisions of the
+		 * vm_statistics data structure.  Fill in only what can fit
+		 * in the data structure the caller gave us !
+		 */</span>
+		original_count = *count;
+		*count = HOST_VM_INFO64_REV0_COUNT; <span class="enscript-comment">/* rev0 already filled in */</span>
+		<span class="enscript-keyword">if</span> (original_count &gt;= HOST_VM_INFO64_REV1_COUNT) {
+			<span class="enscript-comment">/* rev1 added &quot;throttled count&quot; */</span>
+			stat-&gt;throttled_count = vm_page_throttled_count;
+			<span class="enscript-comment">/* rev1 added &quot;compression&quot; info */</span>
+			stat-&gt;compressor_page_count = VM_PAGE_COMPRESSOR_COUNT;
+			stat-&gt;compressions = host_vm_stat.compressions;
+			stat-&gt;decompressions = host_vm_stat.decompressions;
+			stat-&gt;swapins = host_vm_stat.swapins;
+			stat-&gt;swapouts = host_vm_stat.swapouts;
+			<span class="enscript-comment">/* rev1 added:
+			 * &quot;external page count&quot;
+			 * &quot;anonymous page count&quot;
+			 * &quot;total # of pages (uncompressed) held in the compressor&quot;
+			 */</span>
+			stat-&gt;external_page_count = (vm_page_pageable_external_count + local_q_external_count);
+			stat-&gt;internal_page_count = (vm_page_pageable_internal_count + local_q_internal_count);
+			stat-&gt;total_uncompressed_pages_in_compressor = c_segment_pages_compressed;
+			*count = HOST_VM_INFO64_REV1_COUNT;
+		}
+
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HOST_EXTMOD_INFO64</span>: <span class="enscript-comment">/* We were asked to get vm_statistics64 */</span>
+	{
+		vm_extmod_statistics_t out_extmod_statistics;
+
+		<span class="enscript-keyword">if</span> (*count &lt; HOST_EXTMOD_INFO64_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+		out_extmod_statistics = (vm_extmod_statistics_t)info;
+		*out_extmod_statistics = host_extmod_statistics;
+
+		*count = HOST_EXTMOD_INFO64_COUNT;
+
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	<span class="enscript-reference">default</span>: <span class="enscript-comment">/* If we didn't recognize the flavor, send to host_statistics */</span>
+		<span class="enscript-keyword">return</span> (host_statistics(host, flavor, (host_info_t)info, count));
+	}
+}
+
+<span class="enscript-comment">/*
+ * Get host statistics that require privilege.
+ * None for now, just call the un-privileged version.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">host_priv_statistics</span>(host_priv_t host_priv, host_flavor_t flavor, host_info_t info, mach_msg_type_number_t * count)
+{
+	<span class="enscript-keyword">return</span> (host_statistics((host_t)host_priv, flavor, info, count));
+}
+
+kern_return_t
+<span class="enscript-function-name">set_sched_stats_active</span>(boolean_t active)
+{
+	sched_stats_active = active;
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+kern_return_t
+<span class="enscript-function-name">get_sched_statistics</span>(<span class="enscript-type">struct</span> _processor_statistics_np * out, uint32_t * count)
+{
+	processor_t processor;
+
+	<span class="enscript-keyword">if</span> (!sched_stats_active) {
+		<span class="enscript-keyword">return</span> (KERN_FAILURE);
+	}
+
+	simple_lock(&amp;processor_list_lock);
+
+	<span class="enscript-keyword">if</span> (*count &lt; (processor_count + 1) * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> _processor_statistics_np)) { <span class="enscript-comment">/* One for RT */</span>
+		simple_unlock(&amp;processor_list_lock);
+		<span class="enscript-keyword">return</span> (KERN_FAILURE);
+	}
+
+	processor = processor_list;
+	<span class="enscript-keyword">while</span> (processor) {
+		<span class="enscript-type">struct</span> processor_sched_statistics * stats = &amp;processor-&gt;processor_data.sched_stats;
+
+		out-&gt;ps_cpuid = processor-&gt;cpu_id;
+		out-&gt;ps_csw_count = stats-&gt;csw_count;
+		out-&gt;ps_preempt_count = stats-&gt;preempt_count;
+		out-&gt;ps_preempted_rt_count = stats-&gt;preempted_rt_count;
+		out-&gt;ps_preempted_by_rt_count = stats-&gt;preempted_by_rt_count;
+		out-&gt;ps_rt_sched_count = stats-&gt;rt_sched_count;
+		out-&gt;ps_interrupt_count = stats-&gt;interrupt_count;
+		out-&gt;ps_ipi_count = stats-&gt;ipi_count;
+		out-&gt;ps_timer_pop_count = stats-&gt;timer_pop_count;
+		out-&gt;ps_runq_count_sum = SCHED(processor_runq_stats_count_sum)(processor);
+		out-&gt;ps_idle_transitions = stats-&gt;idle_transitions;
+		out-&gt;ps_quantum_timer_expirations = stats-&gt;quantum_timer_expirations;
+
+		out++;
+		processor = processor-&gt;processor_list;
+	}
+
+	*count = (uint32_t)(processor_count * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> _processor_statistics_np));
+
+	simple_unlock(&amp;processor_list_lock);
+
+	<span class="enscript-comment">/* And include RT Queue information */</span>
+	bzero(out, <span class="enscript-keyword">sizeof</span>(*out));
+	out-&gt;ps_cpuid = (-1);
+	out-&gt;ps_runq_count_sum = rt_runq.runq_stats.count_sum;
+	out++;
+	*count += (uint32_t)<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> _processor_statistics_np);
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+kern_return_t
+<span class="enscript-function-name">host_page_size</span>(host_t host, vm_size_t * out_page_size)
+{
+	<span class="enscript-keyword">if</span> (host == HOST_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	*out_page_size = PAGE_SIZE;
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ *	Return kernel version string (more than you ever
+ *	wanted to know about what version of the kernel this is).
+ */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">char</span> version[];
+
+kern_return_t
+<span class="enscript-function-name">host_kernel_version</span>(host_t host, kernel_version_t out_version)
+{
+	<span class="enscript-keyword">if</span> (host == HOST_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	(<span class="enscript-type">void</span>)strncpy(out_version, version, <span class="enscript-keyword">sizeof</span>(kernel_version_t));
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ *	host_processor_sets:
+ *
+ *	List all processor sets on the host.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">host_processor_sets</span>(host_priv_t host_priv, processor_set_name_array_t * pset_list, mach_msg_type_number_t * count)
+{
+	<span class="enscript-type">void</span> * addr;
+
+	<span class="enscript-keyword">if</span> (host_priv == HOST_PRIV_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-comment">/*
+	 *	Allocate memory.  Can be pageable because it won't be
+	 *	touched while holding a lock.
+	 */</span>
+
+	addr = kalloc((vm_size_t)<span class="enscript-keyword">sizeof</span>(mach_port_t));
+	<span class="enscript-keyword">if</span> (addr == 0)
+		<span class="enscript-keyword">return</span> (KERN_RESOURCE_SHORTAGE);
+
+	<span class="enscript-comment">/* do the conversion that Mig should handle */</span>
+	*((ipc_port_t *)addr) = convert_pset_name_to_port(&amp;pset0);
+
+	*pset_list = (processor_set_array_t)addr;
+	*count = 1;
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ *	host_processor_set_priv:
+ *
+ *	Return control port for given processor set.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">host_processor_set_priv</span>(host_priv_t host_priv, processor_set_t pset_name, processor_set_t * pset)
+{
+	<span class="enscript-keyword">if</span> (host_priv == HOST_PRIV_NULL || pset_name == PROCESSOR_SET_NULL) {
+		*pset = PROCESSOR_SET_NULL;
+
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	}
+
+	*pset = pset_name;
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ *	host_processor_info
+ *
+ *	Return info about the processors on this host.  It will return
+ *	the number of processors, and the specific type of info requested
+ *	in an OOL array.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">host_processor_info</span>(host_t host,
+                    processor_flavor_t flavor,
+                    natural_t * out_pcount,
+                    processor_info_array_t * out_array,
+                    mach_msg_type_number_t * out_array_count)
+{
+	kern_return_t result;
+	processor_t processor;
+	host_t thost;
+	processor_info_t info;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> icount, tcount;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> pcount, i;
+	vm_offset_t addr;
+	vm_size_t size, needed;
+	vm_map_copy_t copy;
+
+	<span class="enscript-keyword">if</span> (host == HOST_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	result = processor_info_count(flavor, &amp;icount);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> (result);
+
+	pcount = processor_count;
+	assert(pcount != 0);
+
+	needed = pcount * icount * <span class="enscript-keyword">sizeof</span>(natural_t);
+	size = vm_map_round_page(needed, VM_MAP_PAGE_MASK(ipc_kernel_map));
+	result = kmem_alloc(ipc_kernel_map, &amp;addr, size, VM_KERN_MEMORY_IPC);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> (KERN_RESOURCE_SHORTAGE);
+
+	info = (processor_info_t)addr;
+	processor = processor_list;
+	tcount = icount;
+
+	result = processor_info(processor, flavor, &amp;thost, info, &amp;tcount);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS) {
+		kmem_free(ipc_kernel_map, addr, size);
+		<span class="enscript-keyword">return</span> (result);
+	}
+
+	<span class="enscript-keyword">if</span> (pcount &gt; 1) {
+		<span class="enscript-keyword">for</span> (i = 1; i &lt; pcount; i++) {
+			simple_lock(&amp;processor_list_lock);
+			processor = processor-&gt;processor_list;
+			simple_unlock(&amp;processor_list_lock);
+
+			info += icount;
+			tcount = icount;
+			result = processor_info(processor, flavor, &amp;thost, info, &amp;tcount);
+			<span class="enscript-keyword">if</span> (result != KERN_SUCCESS) {
+				kmem_free(ipc_kernel_map, addr, size);
+				<span class="enscript-keyword">return</span> (result);
+			}
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (size != needed)
+		bzero((<span class="enscript-type">char</span> *)addr + needed, size - needed);
+
+	result = vm_map_unwire(ipc_kernel_map, vm_map_trunc_page(addr, VM_MAP_PAGE_MASK(ipc_kernel_map)),
+	                       vm_map_round_page(addr + size, VM_MAP_PAGE_MASK(ipc_kernel_map)), FALSE);
+	assert(result == KERN_SUCCESS);
+	result = vm_map_copyin(ipc_kernel_map, (vm_map_address_t)addr, (vm_map_size_t)size, TRUE, &amp;copy);
+	assert(result == KERN_SUCCESS);
+
+	*out_pcount = pcount;
+	*out_array = (processor_info_array_t)copy;
+	*out_array_count = pcount * icount;
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ *      Kernel interface for setting a special port.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">kernel_set_special_port</span>(host_priv_t host_priv, <span class="enscript-type">int</span> id, ipc_port_t port)
+{
+	ipc_port_t old_port;
+
+	host_lock(host_priv);
+	old_port = host_priv-&gt;special[id];
+	host_priv-&gt;special[id] = port;
+	host_unlock(host_priv);
+	<span class="enscript-keyword">if</span> (IP_VALID(old_port))
+		ipc_port_release_send(old_port);
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ *      User interface for setting a special port.
+ *
+ *      Only permits the user to set a user-owned special port
+ *      ID, rejecting a kernel-owned special port ID.
+ *
+ *      A special kernel port cannot be set up using this
+ *      routine; use kernel_set_special_port() instead.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">host_set_special_port</span>(host_priv_t host_priv, <span class="enscript-type">int</span> id, ipc_port_t port)
+{
+	<span class="enscript-keyword">if</span> (host_priv == HOST_PRIV_NULL || id &lt;= HOST_MAX_SPECIAL_KERNEL_PORT || id &gt; HOST_MAX_SPECIAL_PORT)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-keyword">if</span> (mac_task_check_set_host_special_port(current_task(), id, port) != 0)
+		<span class="enscript-keyword">return</span> (KERN_NO_ACCESS);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> (kernel_set_special_port(host_priv, id, port));
+}
+
+<span class="enscript-comment">/*
+ *      User interface for retrieving a special port.
+ *
+ *      Note that there is nothing to prevent a user special
+ *      port from disappearing after it has been discovered by
+ *      the caller; thus, using a special port can always result
+ *      in a &quot;port not valid&quot; error.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">host_get_special_port</span>(host_priv_t host_priv, __unused <span class="enscript-type">int</span> node, <span class="enscript-type">int</span> id, ipc_port_t * portp)
+{
+	ipc_port_t port;
+
+	<span class="enscript-keyword">if</span> (host_priv == HOST_PRIV_NULL || id == HOST_SECURITY_PORT || id &gt; HOST_MAX_SPECIAL_PORT || id &lt; 0)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	host_lock(host_priv);
+	port = realhost.special[id];
+	*portp = ipc_port_copy_send(port);
+	host_unlock(host_priv);
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ *	host_get_io_master
+ *
+ *	Return the IO master access port for this host.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">host_get_io_master</span>(host_t host, io_master_t * io_masterp)
+{
+	<span class="enscript-keyword">if</span> (host == HOST_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">return</span> (host_get_io_master_port(host_priv_self(), io_masterp));
+}
+
+host_t
+<span class="enscript-function-name">host_self</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (&amp;realhost);
+}
+
+host_priv_t
+<span class="enscript-function-name">host_priv_self</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (&amp;realhost);
+}
+
+host_security_t
+<span class="enscript-function-name">host_security_self</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (&amp;realhost);
+}
+
+kern_return_t
+<span class="enscript-function-name">host_set_atm_diagnostic_flag</span>(host_priv_t host_priv, uint32_t diagnostic_flag)
+{
+	<span class="enscript-keyword">if</span> (host_priv == HOST_PRIV_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	assert(host_priv == &amp;realhost);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_ATM</span>
+	<span class="enscript-keyword">return</span> (atm_set_diagnostic_config(diagnostic_flag));
+#<span class="enscript-reference">else</span>
+	(<span class="enscript-type">void</span>)diagnostic_flag;
+	<span class="enscript-keyword">return</span> (KERN_NOT_SUPPORTED);
+#<span class="enscript-reference">endif</span>
+}
+</pre>
+<hr />
+</body></html>

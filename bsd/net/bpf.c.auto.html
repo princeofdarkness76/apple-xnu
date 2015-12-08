@@ -1,0 +1,2866 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>bpf.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">bpf.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1990, 1991, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from the Stanford/CMU enet packet filter,
+ * (net/enet.c) distributed as part of 4.3BSD, and code contributed
+ * to Berkeley by Steven McCanne and Van Jacobson both of Lawrence
+ * Berkeley Laboratory.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *      @(#)bpf.c	8.2 (Berkeley) 3/28/94
+ *
+ * $FreeBSD: src/sys/net/bpf.c,v 1.59.2.5 2001/01/05 04:49:09 jdp Exp $
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;bpf.h&quot;</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__GNUC__</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">inline</span>
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">inline</span> __inline
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signalvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/filio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sockio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ttycom.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/filedesc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/event.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/poll.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/bpf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/bpfdesc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/udp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/udp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/if_ether.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/firewire.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/devfs/devfs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/dlil.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/pktap.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread_call.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_NET */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">tvtohz</span>(<span class="enscript-type">struct</span> timeval *);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BPF_BUFSIZE</span> 4096
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">UIOMOVE</span>(cp, len, code, uio) uiomove(cp, len, uio)
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PRINET</span>  26			<span class="enscript-comment">/* interruptible */</span>
+
+<span class="enscript-comment">/*
+ * The default read buffer size is patchable.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> bpf_bufsize = BPF_BUFSIZE;
+<span class="enscript-function-name">SYSCTL_INT</span>(_debug, OID_AUTO, bpf_bufsize, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;bpf_bufsize, 0, <span class="enscript-string">&quot;&quot;</span>);
+__private_extern__ <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> bpf_maxbufsize = BPF_MAXBUFSIZE;
+<span class="enscript-function-name">SYSCTL_INT</span>(_debug, OID_AUTO, bpf_maxbufsize, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;bpf_maxbufsize, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> bpf_maxdevices = 256;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_debug, OID_AUTO, bpf_maxdevices, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;bpf_maxdevices, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-comment">/*
+ * bpf_wantpktap controls the defaul visibility of DLT_PKTAP
+ * For OS X is off by default so process need to use the ioctl BPF_WANT_PKTAP
+ * explicitly to be able to use DLT_PKTAP.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> bpf_wantpktap = 0;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_debug, OID_AUTO, bpf_wantpktap, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;bpf_wantpktap, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> bpf_debug = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_debug, OID_AUTO, bpf_debug, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;bpf_debug, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-comment">/*
+ *  bpf_iflist is the list of interfaces; each corresponds to an ifnet
+ *  bpf_dtab holds pointer to the descriptors, indexed by minor device #
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> bpf_if	*bpf_iflist;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__APPLE__</span>
+<span class="enscript-comment">/*
+ * BSD now stores the bpf_d in the dev_t which is a struct
+ * on their system. Our dev_t is an int, so we still store
+ * the bpf_d in a separate table indexed by minor device #.
+ *
+ * The value stored in bpf_dtab[n] represent three states:
+ *  0: device not opened
+ *  1: device opening or closing
+ *  other: device &lt;n&gt; opened with pointer to storage
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> bpf_d	**bpf_dtab = NULL;
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> bpf_dtab_size = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	nbpfilter = 0;
+
+<span class="enscript-function-name">decl_lck_mtx_data</span>(<span class="enscript-type">static</span>, bpf_mlock_data);
+<span class="enscript-type">static</span> lck_mtx_t		*bpf_mlock = &amp;bpf_mlock_data;
+<span class="enscript-type">static</span> lck_grp_t		*bpf_mlock_grp;
+<span class="enscript-type">static</span> lck_grp_attr_t	*bpf_mlock_grp_attr;
+<span class="enscript-type">static</span> lck_attr_t		*bpf_mlock_attr;
+
+<span class="enscript-type">static</span> mbuf_tag_id_t bpf_mtag_id;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE__ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	bpf_allocbufs(<span class="enscript-type">struct</span> bpf_d *);
+<span class="enscript-type">static</span> errno_t	bpf_attachd(<span class="enscript-type">struct</span> bpf_d *d, <span class="enscript-type">struct</span> bpf_if *bp);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	bpf_detachd(<span class="enscript-type">struct</span> bpf_d *d, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	bpf_freed(<span class="enscript-type">struct</span> bpf_d *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	bpf_mcopy(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *, <span class="enscript-type">void</span> *, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	bpf_movein(<span class="enscript-type">struct</span> uio *, <span class="enscript-type">int</span>,
+		    <span class="enscript-type">struct</span> mbuf **, <span class="enscript-type">struct</span> sockaddr *, <span class="enscript-type">int</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	bpf_setif(<span class="enscript-type">struct</span> bpf_d *, ifnet_t ifp, u_int32_t dlt);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	bpf_timed_out(<span class="enscript-type">void</span> *, <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	bpf_wakeup(<span class="enscript-type">struct</span> bpf_d *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	catchpacket(<span class="enscript-type">struct</span> bpf_d *, u_char *, <span class="enscript-type">struct</span> mbuf *, u_int,
+		    u_int, <span class="enscript-type">int</span>, <span class="enscript-type">void</span> (*)(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *, <span class="enscript-type">void</span> *, size_t));
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	reset_d(<span class="enscript-type">struct</span> bpf_d *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	bpf_setf(<span class="enscript-type">struct</span> bpf_d *, u_int, user_addr_t, u_long);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	bpf_getdltlist(<span class="enscript-type">struct</span> bpf_d *, caddr_t, <span class="enscript-type">struct</span> proc *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	bpf_setdlt(<span class="enscript-type">struct</span> bpf_d *, u_int);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	bpf_set_traffic_class(<span class="enscript-type">struct</span> bpf_d *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	bpf_set_packet_service_class(<span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">int</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	bpf_acquire_d(<span class="enscript-type">struct</span> bpf_d *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	bpf_release_d(<span class="enscript-type">struct</span> bpf_d *);
+
+<span class="enscript-type">static</span>  <span class="enscript-type">int</span> bpf_devsw_installed;
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">bpf_init</span>(<span class="enscript-type">void</span> *unused);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">bpf_tap_callback</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> mbuf *m);
+
+<span class="enscript-comment">/*
+ * Darwin differs from BSD here, the following are static
+ * on BSD and not static on Darwin.
+ */</span>
+	d_open_t	    bpfopen;
+	d_close_t	    bpfclose;
+	d_read_t	    bpfread;
+	d_write_t	    bpfwrite;
+	ioctl_fcn_t	    bpfioctl;
+	select_fcn_t	    bpfselect;
+
+
+<span class="enscript-comment">/* Darwin's cdevsw struct differs slightly from BSDs */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">CDEV_MAJOR</span> 23
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> cdevsw bpf_cdevsw = {
+	<span class="enscript-comment">/* open */</span>	    bpfopen,
+	<span class="enscript-comment">/* close */</span>	    bpfclose,
+	<span class="enscript-comment">/* read */</span>	    bpfread,
+	<span class="enscript-comment">/* write */</span>	    bpfwrite,
+	<span class="enscript-comment">/* ioctl */</span>	    bpfioctl,
+	<span class="enscript-comment">/* stop */</span>	    eno_stop,
+	<span class="enscript-comment">/* reset */</span>	    eno_reset,
+	<span class="enscript-comment">/* tty */</span>	    NULL,
+	<span class="enscript-comment">/* select */</span>	    bpfselect,
+	<span class="enscript-comment">/* mmap */</span>	    eno_mmap,
+	<span class="enscript-comment">/* strategy*/</span>	    eno_strat,
+	<span class="enscript-comment">/* getc */</span>	    eno_getc,
+	<span class="enscript-comment">/* putc */</span>	    eno_putc,
+	<span class="enscript-comment">/* type */</span>	    0
+};
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SOCKADDR_HDR_LEN</span>	   offsetof(struct sockaddr, sa_data)
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">bpf_movein</span>(<span class="enscript-type">struct</span> uio *uio, <span class="enscript-type">int</span> linktype, <span class="enscript-type">struct</span> mbuf **mp, <span class="enscript-type">struct</span> sockaddr *sockp, <span class="enscript-type">int</span> *datlen)
+{
+	<span class="enscript-type">struct</span> mbuf *m;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> len;
+	uint8_t sa_family;
+	<span class="enscript-type">int</span> hlen;
+
+	<span class="enscript-keyword">switch</span> (linktype) {
+	
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SLIP</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLT_SLIP</span>:
+		sa_family = AF_INET;
+		hlen = 0;
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SLIP */</span>
+	
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLT_EN10MB</span>:
+		sa_family = AF_UNSPEC;
+		<span class="enscript-comment">/* XXX Would MAXLINKHDR be better? */</span>
+		hlen = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ether_header);
+		<span class="enscript-keyword">break</span>;
+	
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">FDDI</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLT_FDDI</span>:
+	#<span class="enscript-keyword">if</span> defined(__FreeBSD__) || defined(__bsdi__)
+		sa_family = AF_IMPLINK;
+		hlen = 0;
+	#<span class="enscript-keyword">else</span>
+		sa_family = AF_UNSPEC;
+		<span class="enscript-comment">/* XXX 4(FORMAC)+6(dst)+6(src)+3(LLC)+5(SNAP) */</span>
+		hlen = 24;
+	#endif
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* FDDI */</span>
+	
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLT_RAW</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLT_NULL</span>:
+		sa_family = AF_UNSPEC;
+		hlen = 0;
+		<span class="enscript-keyword">break</span>;
+	
+	#ifdef __FreeBSD__
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLT_ATM_RFC1483</span>:
+		<span class="enscript-comment">/*
+		 * en atm driver requires 4-byte atm pseudo header.
+		 * though it isn't standard, vpi:vci needs to be
+		 * specified anyway.
+		 */</span>
+		sa_family = AF_UNSPEC;
+		hlen = 12; 	<span class="enscript-comment">/* XXX 4(ATM_PH) + 3(LLC) + 5(SNAP) */</span>
+		<span class="enscript-keyword">break</span>;
+	#endif
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLT_PPP</span>:
+		sa_family = AF_UNSPEC;
+		hlen = 4;	<span class="enscript-comment">/* This should match PPP_HDRLEN */</span>
+		<span class="enscript-keyword">break</span>;
+	
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLT_APPLE_IP_OVER_IEEE1394</span>:
+		sa_family = AF_UNSPEC;
+		hlen = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> firewire_header);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLT_IEEE802_11</span>:            <span class="enscript-comment">/* IEEE 802.11 wireless */</span>
+		sa_family = AF_IEEE80211;
+		hlen = 0;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLT_IEEE802_11_RADIO</span>:
+		sa_family = AF_IEEE80211;
+		hlen = 0;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (EIO);
+	}
+
+	<span class="enscript-comment">// LP64todo - fix this!
+</span>	len = uio_resid(uio);
+	*datlen = len - hlen;
+	<span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span>)len &gt; MCLBYTES)
+		<span class="enscript-keyword">return</span> (EIO);
+
+	<span class="enscript-keyword">if</span> (sockp) {
+		<span class="enscript-comment">/*
+		 * Build a sockaddr based on the data link layer type.
+		 * We do this at this level because the ethernet header
+		 * is copied directly into the data field of the sockaddr.
+		 * In the case of SLIP, there is no header and the packet
+		 * is forwarded as is.
+		 * Also, we are careful to leave room at the front of the mbuf
+		 * for the link level header.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((hlen + SOCKADDR_HDR_LEN) &gt; sockp-&gt;sa_len) {
+			<span class="enscript-keyword">return</span> (EIO);
+		}
+		sockp-&gt;sa_family = sa_family;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * We're directly sending the packet data supplied by
+		 * the user; we don't need to make room for the link
+		 * header, and don't need the header length value any
+		 * more, so set it to 0.
+		 */</span>
+		hlen = 0;
+	}
+	
+	MGETHDR(m, M_WAIT, MT_DATA);
+	<span class="enscript-keyword">if</span> (m == 0)
+		<span class="enscript-keyword">return</span> (ENOBUFS);
+	<span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span>)len &gt; MHLEN) {
+		MCLGET(m, M_WAIT);
+		<span class="enscript-keyword">if</span> ((m-&gt;m_flags &amp; M_EXT) == 0) {
+			error = ENOBUFS;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+	}
+	m-&gt;m_pkthdr.len = m-&gt;m_len = len;
+	m-&gt;m_pkthdr.rcvif = NULL;
+	*mp = m;
+	
+	<span class="enscript-comment">/*
+	 * Make room for link header.
+	 */</span>
+	<span class="enscript-keyword">if</span> (hlen != 0) {
+		m-&gt;m_pkthdr.len -= hlen;
+		m-&gt;m_len -= hlen;
+		m-&gt;m_data += hlen; <span class="enscript-comment">/* XXX */</span>
+		error = UIOMOVE((caddr_t)sockp-&gt;sa_data, hlen, UIO_WRITE, uio);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+	error = UIOMOVE(mtod(m, caddr_t), len - hlen, UIO_WRITE, uio);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	
+	<span class="enscript-comment">/* Check for multicast destination */</span>
+	<span class="enscript-keyword">switch</span> (linktype) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DLT_EN10MB</span>: {
+			<span class="enscript-type">struct</span> ether_header *eh = mtod(m, <span class="enscript-type">struct</span> ether_header *);
+			
+			<span class="enscript-keyword">if</span> (ETHER_IS_MULTICAST(eh-&gt;ether_dhost)) {
+				<span class="enscript-keyword">if</span> (_ether_cmp(etherbroadcastaddr, eh-&gt;ether_dhost) == 0)
+					m-&gt;m_flags |= M_BCAST;
+				<span class="enscript-keyword">else</span>
+					m-&gt;m_flags |= M_MCAST;
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	
+	<span class="enscript-keyword">return</span> 0;
+ <span class="enscript-reference">bad</span>:
+	m_freem(m);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__APPLE__</span>
+
+<span class="enscript-comment">/*
+ * The dynamic addition of a new device node must block all processes that
+ * are opening the last device so that no process will get an unexpected
+ * ENOENT 
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">bpf_make_dev_t</span>(<span class="enscript-type">int</span> maj)
+{
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span>		bpf_growing = 0;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	cur_size = nbpfilter, i;
+
+	<span class="enscript-keyword">if</span> (nbpfilter &gt;= bpf_maxdevices)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">while</span> (bpf_growing) {
+		<span class="enscript-comment">/* Wait until new device has been created */</span>
+		(<span class="enscript-type">void</span>)tsleep((caddr_t)&amp;bpf_growing, PZERO, <span class="enscript-string">&quot;bpf_growing&quot;</span>, 0);
+	}
+	<span class="enscript-keyword">if</span> (nbpfilter &gt; cur_size) {
+		<span class="enscript-comment">/* other thread grew it already */</span>
+		<span class="enscript-keyword">return</span>;
+	}
+	bpf_growing = 1;
+	
+	<span class="enscript-comment">/* need to grow bpf_dtab first */</span>
+	<span class="enscript-keyword">if</span> (nbpfilter == bpf_dtab_size) {
+		<span class="enscript-type">int</span> new_dtab_size;
+		<span class="enscript-type">struct</span> bpf_d **new_dtab = NULL;
+		<span class="enscript-type">struct</span> bpf_d **old_dtab = NULL;
+		
+		new_dtab_size = bpf_dtab_size + NBPFILTER;	
+		new_dtab = (<span class="enscript-type">struct</span> bpf_d **)_MALLOC(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> bpf_d *) * new_dtab_size, M_DEVBUF, M_WAIT);
+		<span class="enscript-keyword">if</span> (new_dtab == 0) {
+			printf(<span class="enscript-string">&quot;bpf_make_dev_t: malloc bpf_dtab failed\n&quot;</span>);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		<span class="enscript-keyword">if</span> (bpf_dtab) {
+			bcopy(bpf_dtab, new_dtab, 
+				  <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> bpf_d *) * bpf_dtab_size);
+		}
+		bzero(new_dtab + bpf_dtab_size, 
+			  <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> bpf_d *) * NBPFILTER);
+		old_dtab = bpf_dtab;
+		bpf_dtab = new_dtab;
+		bpf_dtab_size = new_dtab_size;
+		<span class="enscript-keyword">if</span> (old_dtab != NULL)
+			_FREE(old_dtab, M_DEVBUF);
+	}
+	i = nbpfilter++;
+	(<span class="enscript-type">void</span>) devfs_make_node(makedev(maj, i),
+				DEVFS_CHAR, UID_ROOT, GID_WHEEL, 0600,
+				<span class="enscript-string">&quot;bpf%d&quot;</span>, i);
+<span class="enscript-reference">done</span>:
+	bpf_growing = 0;
+	wakeup((caddr_t)&amp;bpf_growing);
+}
+
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Attach file to the bpf interface, i.e. make d listen on bp.
+ */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">bpf_attachd</span>(<span class="enscript-type">struct</span> bpf_d *d, <span class="enscript-type">struct</span> bpf_if *bp)
+{
+	<span class="enscript-type">int</span> first = bp-&gt;bif_dlist == NULL;
+	<span class="enscript-type">int</span>	error = 0;
+	
+	<span class="enscript-comment">/*
+	 * Point d at bp, and add d to the interface's list of listeners.
+	 * Finally, point the driver's bpf cookie at the interface so
+	 * it will divert packets to bpf.
+	 */</span>
+	d-&gt;bd_bif = bp;
+	d-&gt;bd_next = bp-&gt;bif_dlist;
+	bp-&gt;bif_dlist = d;
+
+	<span class="enscript-comment">/*
+	 * Take a reference on the device even if an error is returned
+	 * because we keep the device in the interface's list of listeners
+	 */</span>
+	bpf_acquire_d(d);
+
+	<span class="enscript-keyword">if</span> (first) {
+		<span class="enscript-comment">/* Find the default bpf entry for this ifp */</span>
+		<span class="enscript-keyword">if</span> (bp-&gt;bif_ifp-&gt;if_bpf == NULL) {
+			<span class="enscript-type">struct</span> bpf_if	*tmp, *primary = NULL;
+			
+			<span class="enscript-keyword">for</span> (tmp = bpf_iflist; tmp; tmp = tmp-&gt;bif_next) {
+				<span class="enscript-keyword">if</span> (tmp-&gt;bif_ifp != bp-&gt;bif_ifp)
+					<span class="enscript-keyword">continue</span>;
+				primary = tmp;
+				<span class="enscript-comment">/*
+				 * Make DLT_PKTAP only if process knows how
+				 * to deal with it, otherwise find another one
+				 */</span>
+				<span class="enscript-keyword">if</span> (tmp-&gt;bif_dlt == DLT_PKTAP &amp;&amp;
+					!(d-&gt;bd_flags &amp; BPF_WANT_PKTAP))
+					<span class="enscript-keyword">continue</span>;
+				<span class="enscript-keyword">break</span>;
+			}
+			bp-&gt;bif_ifp-&gt;if_bpf = primary;
+		}
+		
+		<span class="enscript-comment">/* Only call dlil_set_bpf_tap for primary dlt */</span>
+		<span class="enscript-keyword">if</span> (bp-&gt;bif_ifp-&gt;if_bpf == bp)
+			dlil_set_bpf_tap(bp-&gt;bif_ifp, BPF_TAP_INPUT_OUTPUT, bpf_tap_callback);
+		
+		<span class="enscript-keyword">if</span> (bp-&gt;bif_tap)
+			error = bp-&gt;bif_tap(bp-&gt;bif_ifp, bp-&gt;bif_dlt, BPF_TAP_INPUT_OUTPUT);
+	}
+
+	<span class="enscript-comment">/*
+	 * Reset the detach flags in case we previously detached an interface
+	 */</span>
+	d-&gt;bd_flags &amp;= ~(BPF_DETACHING | BPF_DETACHED);
+
+	<span class="enscript-keyword">if</span> (bp-&gt;bif_ifp-&gt;if_bpf != NULL &amp;&amp;
+		bp-&gt;bif_ifp-&gt;if_bpf-&gt;bif_dlt == DLT_PKTAP)
+		d-&gt;bd_flags |= BPF_FINALIZE_PKTAP;
+	<span class="enscript-keyword">else</span>
+		d-&gt;bd_flags &amp;= ~BPF_FINALIZE_PKTAP;
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-comment">/*
+ * Detach a file from its interface.
+ *
+ * Return 1 if was closed by some thread, 0 otherwise
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">bpf_detachd</span>(<span class="enscript-type">struct</span> bpf_d *d, <span class="enscript-type">int</span> closing)
+{
+	<span class="enscript-type">struct</span> bpf_d **p;
+	<span class="enscript-type">struct</span> bpf_if *bp;
+	<span class="enscript-type">struct</span> ifnet  *ifp;
+
+	<span class="enscript-comment">/*
+	 * Some other thread already detached
+	 */</span>
+	<span class="enscript-keyword">if</span> ((d-&gt;bd_flags &amp; (BPF_DETACHED | BPF_DETACHING)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	<span class="enscript-comment">/*
+	 * This thread is doing the detach
+	 */</span>
+	d-&gt;bd_flags |= BPF_DETACHING;
+
+	ifp = d-&gt;bd_bif-&gt;bif_ifp;
+	bp = d-&gt;bd_bif;
+
+	<span class="enscript-keyword">if</span> (bpf_debug != 0)
+		printf(<span class="enscript-string">&quot;%s: %llx %s%s\n&quot;</span>,
+		    __func__, (uint64_t)VM_KERNEL_ADDRPERM(d),
+		    if_name(ifp), closing ? <span class="enscript-string">&quot; closing&quot;</span> : <span class="enscript-string">&quot;&quot;</span>);
+
+	<span class="enscript-comment">/* Remove d from the interface's descriptor list. */</span>
+	p = &amp;bp-&gt;bif_dlist;
+	<span class="enscript-keyword">while</span> (*p != d) {
+		p = &amp;(*p)-&gt;bd_next;
+		<span class="enscript-keyword">if</span> (*p == 0)
+			panic(<span class="enscript-string">&quot;bpf_detachd: descriptor not in list&quot;</span>);
+	}
+	*p = (*p)-&gt;bd_next;
+	<span class="enscript-keyword">if</span> (bp-&gt;bif_dlist == 0) {
+		<span class="enscript-comment">/*
+		 * Let the driver know that there are no more listeners.
+		 */</span>
+		<span class="enscript-comment">/* Only call dlil_set_bpf_tap for primary dlt */</span>
+		<span class="enscript-keyword">if</span> (bp-&gt;bif_ifp-&gt;if_bpf == bp)
+			dlil_set_bpf_tap(ifp, BPF_TAP_DISABLE, NULL);
+		<span class="enscript-keyword">if</span> (bp-&gt;bif_tap)
+			bp-&gt;bif_tap(ifp, bp-&gt;bif_dlt, BPF_TAP_DISABLE);
+		
+		<span class="enscript-keyword">for</span> (bp = bpf_iflist; bp; bp = bp-&gt;bif_next)
+			<span class="enscript-keyword">if</span> (bp-&gt;bif_ifp == ifp &amp;&amp; bp-&gt;bif_dlist != 0)
+				<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (bp == NULL)
+			ifp-&gt;if_bpf = NULL;
+	}
+	d-&gt;bd_bif = NULL;
+	<span class="enscript-comment">/*
+	 * Check if this descriptor had requested promiscuous mode.
+	 * If so, turn it off.
+	 */</span>
+	<span class="enscript-keyword">if</span> (d-&gt;bd_promisc) {
+		d-&gt;bd_promisc = 0;
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">if</span> (ifnet_set_promiscuous(ifp, 0)) {
+			<span class="enscript-comment">/*
+			 * Something is really wrong if we were able to put
+			 * the driver into promiscuous mode, but can't
+			 * take it out.
+			 * Most likely the network interface is gone.
+			 */</span>
+			printf(<span class="enscript-string">&quot;%s: ifnet_set_promiscuous failed\n&quot;</span>, __func__);
+		}
+		lck_mtx_lock(bpf_mlock);
+	}
+
+	<span class="enscript-comment">/*
+	 * Wake up other thread that are waiting for this thread to finish
+	 * detaching
+	 */</span>
+	d-&gt;bd_flags &amp;= ~BPF_DETACHING;
+	d-&gt;bd_flags |= BPF_DETACHED;
+	<span class="enscript-comment">/*
+	 * Note that We've kept the reference because we may have dropped
+	 * the lock when turning off promiscuous mode
+	 */</span>
+	bpf_release_d(d);
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-comment">/*
+	 * When closing makes sure no other thread refer to the bpf_d
+	 */</span>
+	<span class="enscript-keyword">if</span> (bpf_debug != 0)
+		printf(<span class="enscript-string">&quot;%s: %llx done\n&quot;</span>,
+		    __func__, (uint64_t)VM_KERNEL_ADDRPERM(d));
+	<span class="enscript-comment">/*
+	 * Let the caller know the bpf_d is closed
+	 */</span>
+	<span class="enscript-keyword">if</span> ((d-&gt;bd_flags &amp; BPF_CLOSING))
+		<span class="enscript-keyword">return</span> (1);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * Start asynchronous timer, if necessary.
+ * Must be called with bpf_mlock held.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">bpf_start_timer</span>(<span class="enscript-type">struct</span> bpf_d *d)
+{
+	uint64_t deadline;
+	<span class="enscript-type">struct</span> timeval tv;
+
+	<span class="enscript-keyword">if</span> (d-&gt;bd_rtout &gt; 0 &amp;&amp; d-&gt;bd_state == BPF_IDLE) {
+		tv.tv_sec = d-&gt;bd_rtout / hz;
+		tv.tv_usec = (d-&gt;bd_rtout % hz) * tick;
+
+		clock_interval_to_deadline(
+		    (uint64_t)tv.tv_sec * USEC_PER_SEC + tv.tv_usec,
+		    NSEC_PER_USEC, &amp;deadline);
+		<span class="enscript-comment">/*
+		 * The state is BPF_IDLE, so the timer hasn't 
+		 * been started yet, and hasn't gone off yet;
+		 * there is no thread call scheduled, so this
+		 * won't change the schedule.
+		 *
+		 * XXX - what if, by the time it gets entered,
+		 * the deadline has already passed?
+		 */</span>
+		thread_call_enter_delayed(d-&gt;bd_thread_call, deadline);
+		d-&gt;bd_state = BPF_WAITING;
+	}
+}
+
+<span class="enscript-comment">/*
+ * Cancel asynchronous timer.
+ * Must be called with bpf_mlock held.
+ */</span>
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">bpf_stop_timer</span>(<span class="enscript-type">struct</span> bpf_d *d)
+{
+	<span class="enscript-comment">/*
+	 * If the timer has already gone off, this does nothing.
+	 * Our caller is expected to set d-&gt;bd_state to BPF_IDLE,
+	 * with the bpf_mlock, after we are called. bpf_timed_out()
+	 * also grabs bpf_mlock, so, if the timer has gone off and 
+	 * bpf_timed_out() hasn't finished, it's waiting for the
+	 * lock; when this thread releases the lock, it will 
+	 * find the state is BPF_IDLE, and just release the 
+	 * lock and return.
+	 */</span>
+	<span class="enscript-keyword">return</span> (thread_call_cancel(d-&gt;bd_thread_call));
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bpf_acquire_d</span>(<span class="enscript-type">struct</span> bpf_d *d)
+{
+	<span class="enscript-type">void</span> *lr_saved =  __builtin_return_address(0);
+
+	lck_mtx_assert(bpf_mlock, LCK_MTX_ASSERT_OWNED);
+
+	d-&gt;bd_refcnt += 1;
+
+	d-&gt;bd_ref_lr[d-&gt;bd_next_ref_lr] = lr_saved;
+	d-&gt;bd_next_ref_lr = (d-&gt;bd_next_ref_lr + 1) % BPF_REF_HIST;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bpf_release_d</span>(<span class="enscript-type">struct</span> bpf_d *d)
+{
+	<span class="enscript-type">void</span> *lr_saved =  __builtin_return_address(0);
+
+	lck_mtx_assert(bpf_mlock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (d-&gt;bd_refcnt &lt;= 0)
+		panic(<span class="enscript-string">&quot;%s: %p refcnt &lt;= 0&quot;</span>, __func__, d);
+
+	d-&gt;bd_refcnt -= 1;
+
+	d-&gt;bd_unref_lr[d-&gt;bd_next_unref_lr] = lr_saved;
+	d-&gt;bd_next_unref_lr = (d-&gt;bd_next_unref_lr + 1) % BPF_REF_HIST;
+
+	<span class="enscript-keyword">if</span> (d-&gt;bd_refcnt == 0) {
+		<span class="enscript-comment">/* Assert the device is detached */</span>
+		<span class="enscript-keyword">if</span> ((d-&gt;bd_flags &amp; BPF_DETACHED) == 0)
+			panic(<span class="enscript-string">&quot;%s: %p BPF_DETACHED not set&quot;</span>, __func__, d);
+
+		_FREE(d, M_DEVBUF);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Open ethernet device.  Returns ENXIO for illegal minor device number,
+ * EBUSY if file is open by another process.
+ */</span>
+<span class="enscript-comment">/* ARGSUSED */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">bpfopen</span>(dev_t dev, <span class="enscript-type">int</span> flags, __unused <span class="enscript-type">int</span> fmt,
+	__unused <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">struct</span> bpf_d *d;
+
+	lck_mtx_lock(bpf_mlock);
+	<span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) minor(dev) &gt;= nbpfilter) {
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+	<span class="enscript-comment">/* 
+	 * New device nodes are created on demand when opening the last one. 
+	 * The programming model is for processes to loop on the minor starting at 0 
+	 * as long as EBUSY is returned. The loop stops when either the open succeeds or 
+	 * an error other that EBUSY is returned. That means that bpf_make_dev_t() must 
+	 * block all processes that are opening the last  node. If not all 
+	 * processes are blocked, they could unexpectedly get ENOENT and abort their 
+	 * opening loop.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) minor(dev) == (nbpfilter - 1))
+		bpf_make_dev_t(major(dev));
+
+	<span class="enscript-comment">/*
+	 * Each minor can be opened by only one process.  If the requested 
+	 * minor is in use, return EBUSY.
+	 *
+	 * Important: bpfopen() and bpfclose() have to check and set the status of a device
+	 * in the same lockin context otherwise the device may be leaked because the vnode use count 
+	 * will be unpextectly greater than 1 when close() is called.
+	 */</span>
+	<span class="enscript-keyword">if</span> (bpf_dtab[minor(dev)] == 0) {
+		bpf_dtab[minor(dev)] = (<span class="enscript-type">void</span> *)1;	<span class="enscript-comment">/* Mark opening */</span>
+	} <span class="enscript-keyword">else</span> {
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (EBUSY);
+	}
+	d = (<span class="enscript-type">struct</span> bpf_d *)_MALLOC(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> bpf_d), M_DEVBUF,
+	    M_WAIT | M_ZERO);
+	<span class="enscript-keyword">if</span> (d == NULL) {
+		<span class="enscript-comment">/* this really is a catastrophic failure */</span>
+		printf(<span class="enscript-string">&quot;bpfopen: malloc bpf_d failed\n&quot;</span>);
+		bpf_dtab[minor(dev)] = NULL;
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> ENOMEM;
+	}
+
+	<span class="enscript-comment">/* Mark &quot;in use&quot; and do most initialization. */</span>
+	bpf_acquire_d(d);
+	d-&gt;bd_bufsize = bpf_bufsize;
+	d-&gt;bd_sig = SIGIO;
+	d-&gt;bd_seesent = 1;
+	d-&gt;bd_oflags = flags;
+	d-&gt;bd_state = BPF_IDLE;
+	d-&gt;bd_traffic_class = SO_TC_BE;
+	d-&gt;bd_flags |= BPF_DETACHED;
+	<span class="enscript-keyword">if</span> (bpf_wantpktap)
+		d-&gt;bd_flags |= BPF_WANT_PKTAP;
+	<span class="enscript-keyword">else</span>
+		d-&gt;bd_flags &amp;= ~BPF_WANT_PKTAP;
+	d-&gt;bd_thread_call = thread_call_allocate(bpf_timed_out, d);
+	<span class="enscript-keyword">if</span> (d-&gt;bd_thread_call == NULL) {
+		printf(<span class="enscript-string">&quot;bpfopen: malloc thread call failed\n&quot;</span>);
+		bpf_dtab[minor(dev)] = NULL;
+		bpf_release_d(d);
+		lck_mtx_unlock(bpf_mlock);
+
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+	mac_bpfdesc_label_init(d);
+	mac_bpfdesc_label_associate(kauth_cred_get(), d);
+#<span class="enscript-reference">endif</span>
+	bpf_dtab[minor(dev)] = d; 				<span class="enscript-comment">/* Mark opened */</span>
+	lck_mtx_unlock(bpf_mlock);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Close the descriptor by detaching it from its interface,
+ * deallocating its buffers, and marking it free.
+ */</span>
+<span class="enscript-comment">/* ARGSUSED */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">bpfclose</span>(dev_t dev, __unused <span class="enscript-type">int</span> flags, __unused <span class="enscript-type">int</span> fmt,
+	 __unused <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">struct</span> bpf_d *d;
+
+	<span class="enscript-comment">/* Take BPF lock to ensure no other thread is using the device */</span>
+	lck_mtx_lock(bpf_mlock);
+
+	d = bpf_dtab[minor(dev)];
+	<span class="enscript-keyword">if</span> (d == 0 || d == (<span class="enscript-type">void</span> *)1) {
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+
+	<span class="enscript-comment">/*
+	 * Other threads may call bpd_detachd() if we drop the bpf_mlock
+	 */</span>
+	d-&gt;bd_flags |= BPF_CLOSING;
+
+	<span class="enscript-keyword">if</span> (bpf_debug != 0)
+		printf(<span class="enscript-string">&quot;%s: %llx\n&quot;</span>,
+		    __func__, (uint64_t)VM_KERNEL_ADDRPERM(d));
+
+	bpf_dtab[minor(dev)] = (<span class="enscript-type">void</span> *)1;		<span class="enscript-comment">/* Mark closing */</span>
+
+	<span class="enscript-comment">/*
+	 * Deal with any in-progress timeouts.
+	 */</span>
+	<span class="enscript-keyword">switch</span> (d-&gt;bd_state) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_IDLE</span>:
+			<span class="enscript-comment">/*
+			 * Not waiting for a timeout, and no timeout happened.
+			 */</span>
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_WAITING</span>:
+			<span class="enscript-comment">/*
+			 * Waiting for a timeout.
+			 * Cancel any timer that has yet to go off,
+			 * and mark the state as &quot;closing&quot;.
+			 * Then drop the lock to allow any timers that
+			 * *have* gone off to run to completion, and wait
+			 * for them to finish.
+			 */</span>
+			<span class="enscript-keyword">if</span> (!bpf_stop_timer(d)) {
+				<span class="enscript-comment">/*
+				 * There was no pending call, so the call must 
+				 * have been in progress. Wait for the call to
+				 * complete; we have to drop the lock while 
+				 * waiting. to let the in-progrss call complete
+				 */</span>
+				d-&gt;bd_state = BPF_DRAINING;
+				<span class="enscript-keyword">while</span> (d-&gt;bd_state == BPF_DRAINING)
+					msleep((caddr_t)d, bpf_mlock, PRINET,
+							<span class="enscript-string">&quot;bpfdraining&quot;</span>, NULL);
+			}
+			d-&gt;bd_state = BPF_IDLE;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_TIMED_OUT</span>:
+			<span class="enscript-comment">/*
+			 * Timer went off, and the timeout routine finished.
+			 */</span>
+			d-&gt;bd_state = BPF_IDLE;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_DRAINING</span>:
+			<span class="enscript-comment">/*
+			 * Another thread is blocked on a close waiting for
+			 * a timeout to finish.
+			 * This &quot;shouldn't happen&quot;, as the first thread to enter
+			 * bpfclose() will set bpf_dtab[minor(dev)] to 1, and 
+			 * all subsequent threads should see that and fail with 
+			 * ENXIO.
+			 */</span>
+			panic(<span class="enscript-string">&quot;Two threads blocked in a BPF close&quot;</span>);
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (d-&gt;bd_bif)
+		bpf_detachd(d, 1);
+	selthreadclear(&amp;d-&gt;bd_sel);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+	mac_bpfdesc_label_destroy(d);
+#<span class="enscript-reference">endif</span>
+	thread_call_free(d-&gt;bd_thread_call);
+
+	<span class="enscript-keyword">while</span> (d-&gt;bd_hbuf_read)
+		msleep((caddr_t)d, bpf_mlock, PRINET, <span class="enscript-string">&quot;bpf_reading&quot;</span>, NULL);
+
+	bpf_freed(d);
+
+	<span class="enscript-comment">/* Mark free in same context as bpfopen comes to check */</span>
+	bpf_dtab[minor(dev)] = NULL;			<span class="enscript-comment">/* Mark closed */</span>
+
+	bpf_release_d(d);
+
+	lck_mtx_unlock(bpf_mlock);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BPF_SLEEP</span> bpf_sleep
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">bpf_sleep</span>(<span class="enscript-type">struct</span> bpf_d *d, <span class="enscript-type">int</span> pri, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *wmesg, <span class="enscript-type">int</span> timo)
+{
+	u_int64_t abstime = 0;
+
+	<span class="enscript-keyword">if</span>(timo)
+		clock_interval_to_deadline(timo, NSEC_PER_SEC / hz, &amp;abstime);
+	
+	<span class="enscript-keyword">return</span> msleep1((caddr_t)d, bpf_mlock, pri, wmesg, abstime);
+}
+
+<span class="enscript-comment">/*
+ * Rotate the packet buffers in descriptor d.  Move the store buffer
+ * into the hold slot, and the free buffer into the store slot.
+ * Zero the length of the new store buffer.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ROTATE_BUFFERS</span>(d) \
+	<span class="enscript-keyword">if</span> (d-&gt;bd_hbuf_read) \
+		panic(<span class="enscript-string">&quot;rotating bpf buffers during read&quot;</span>); \
+	(d)-&gt;bd_hbuf = (d)-&gt;bd_sbuf; \
+	(d)-&gt;bd_hlen = (d)-&gt;bd_slen; \
+	(d)-&gt;bd_hcnt = (d)-&gt;bd_scnt; \
+	(d)-&gt;bd_sbuf = (d)-&gt;bd_fbuf; \
+	(d)-&gt;bd_slen = 0; \
+	(d)-&gt;bd_scnt = 0; \
+	(d)-&gt;bd_fbuf = NULL;
+<span class="enscript-comment">/*
+ *  bpfread - read next chunk of packets from buffers
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">bpfread</span>(dev_t dev, <span class="enscript-type">struct</span> uio *uio, <span class="enscript-type">int</span> ioflag)
+{
+	<span class="enscript-type">struct</span> bpf_d *d;
+	caddr_t hbuf; 
+	<span class="enscript-type">int</span> timed_out, hbuf_len;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> flags;
+
+	lck_mtx_lock(bpf_mlock);
+
+	d = bpf_dtab[minor(dev)];
+	<span class="enscript-keyword">if</span> (d == 0 || d == (<span class="enscript-type">void</span> *)1 || (d-&gt;bd_flags &amp; BPF_CLOSING) != 0) {
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+
+	bpf_acquire_d(d);
+
+	<span class="enscript-comment">/*
+	 * Restrict application to use a buffer the same size as
+	 * as kernel buffers.
+	 */</span>
+	<span class="enscript-keyword">if</span> (uio_resid(uio) != d-&gt;bd_bufsize) {
+		bpf_release_d(d);
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+	
+ 	<span class="enscript-keyword">if</span> (d-&gt;bd_state == BPF_WAITING)
+		bpf_stop_timer(d);
+	
+	timed_out = (d-&gt;bd_state == BPF_TIMED_OUT);
+	d-&gt;bd_state = BPF_IDLE;
+
+	<span class="enscript-keyword">while</span> (d-&gt;bd_hbuf_read) 
+		msleep((caddr_t)d, bpf_mlock, PRINET, <span class="enscript-string">&quot;bpf_reading&quot;</span>, NULL);
+
+	<span class="enscript-keyword">if</span> ((d-&gt;bd_flags &amp; BPF_CLOSING) != 0) {
+		bpf_release_d(d);
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+	<span class="enscript-comment">/*
+	 * If the hold buffer is empty, then do a timed sleep, which
+	 * ends when the timeout expires or when enough packets
+	 * have arrived to fill the store buffer.
+	 */</span>
+	<span class="enscript-keyword">while</span> (d-&gt;bd_hbuf == 0) {
+		<span class="enscript-keyword">if</span> ((d-&gt;bd_immediate || timed_out || (ioflag &amp; IO_NDELAY)) 
+			&amp;&amp; d-&gt;bd_slen != 0) {
+			<span class="enscript-comment">/*
+			 * We're in immediate mode, or are reading
+			 * in non-blocking mode, or a timer was
+			 * started before the read (e.g., by select()
+			 * or poll()) and has expired and a packet(s)
+			 * either arrived since the previous
+			 * read or arrived while we were asleep.
+			 * Rotate the buffers and return what's here.
+			 */</span>
+			ROTATE_BUFFERS(d);
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * No data is available, check to see if the bpf device
+		 * is still pointed at a real interface.  If not, return
+		 * ENXIO so that the userland process knows to rebind
+		 * it before using it again.
+		 */</span>
+		<span class="enscript-keyword">if</span> (d-&gt;bd_bif == NULL) {
+			bpf_release_d(d);
+			lck_mtx_unlock(bpf_mlock);
+			<span class="enscript-keyword">return</span> (ENXIO);
+		}
+		<span class="enscript-keyword">if</span> (ioflag &amp; IO_NDELAY) {
+			bpf_release_d(d);
+			lck_mtx_unlock(bpf_mlock);
+			<span class="enscript-keyword">return</span> (EWOULDBLOCK);
+		}
+		error = BPF_SLEEP(d, PRINET|PCATCH, <span class="enscript-string">&quot;bpf&quot;</span>,
+				  d-&gt;bd_rtout);
+		<span class="enscript-comment">/*
+		 * Make sure device is still opened
+		 */</span>
+		<span class="enscript-keyword">if</span> ((d-&gt;bd_flags &amp; BPF_CLOSING) != 0) {
+			bpf_release_d(d);
+			lck_mtx_unlock(bpf_mlock);
+			<span class="enscript-keyword">return</span> (ENXIO);
+		}
+
+		<span class="enscript-keyword">while</span> (d-&gt;bd_hbuf_read)
+			msleep((caddr_t)d, bpf_mlock, PRINET, <span class="enscript-string">&quot;bpf_reading&quot;</span>, NULL);
+
+		<span class="enscript-keyword">if</span> ((d-&gt;bd_flags &amp; BPF_CLOSING) != 0) {
+			bpf_release_d(d);
+			lck_mtx_unlock(bpf_mlock);
+			<span class="enscript-keyword">return</span> (ENXIO);
+		}
+
+		<span class="enscript-keyword">if</span> (error == EINTR || error == ERESTART) {
+			<span class="enscript-keyword">if</span> (d-&gt;bd_hbuf) {
+				<span class="enscript-comment">/*
+				 * Because we msleep, the hold buffer might
+				 * be filled when we wake up.  Avoid rotating
+				 * in this case.
+				 */</span>
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (d-&gt;bd_slen) {
+				<span class="enscript-comment">/*
+				 * Sometimes we may be interrupted often and
+				 * the sleep above will not timeout.
+				 * Regardless, we should rotate the buffers
+				 * if there's any new data pending and
+				 * return it.
+				 */</span>
+				ROTATE_BUFFERS(d);
+				<span class="enscript-keyword">break</span>;
+			}
+			bpf_release_d(d);
+			lck_mtx_unlock(bpf_mlock);
+			<span class="enscript-keyword">return</span> (error);
+		}
+		<span class="enscript-keyword">if</span> (error == EWOULDBLOCK) {
+			<span class="enscript-comment">/*
+			 * On a timeout, return what's in the buffer,
+			 * which may be nothing.  If there is something
+			 * in the store buffer, we can rotate the buffers.
+			 */</span>
+			<span class="enscript-keyword">if</span> (d-&gt;bd_hbuf)
+				<span class="enscript-comment">/*
+				 * We filled up the buffer in between
+				 * getting the timeout and arriving
+				 * here, so we don't need to rotate.
+				 */</span>
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">if</span> (d-&gt;bd_slen == 0) {
+				bpf_release_d(d);
+				lck_mtx_unlock(bpf_mlock);
+				<span class="enscript-keyword">return</span> (0);
+			}
+			ROTATE_BUFFERS(d);
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-comment">/*
+	 * At this point, we know we have something in the hold slot.
+	 */</span>
+
+	<span class="enscript-comment">/*
+	 * Set the hold buffer read. So we do not 
+	 * rotate the buffers until the hold buffer
+	 * read is complete. Also to avoid issues resulting
+	 * from page faults during disk sleep (&lt;rdar://problem/13436396&gt;).
+	 */</span>
+	d-&gt;bd_hbuf_read = 1;
+	hbuf = d-&gt;bd_hbuf;
+	hbuf_len = d-&gt;bd_hlen;
+	flags = d-&gt;bd_flags;
+	lck_mtx_unlock(bpf_mlock);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__APPLE__</span>
+	<span class="enscript-comment">/*
+	 * Before we move data to userland, we fill out the extended
+	 * header fields.
+	 */</span>
+	<span class="enscript-keyword">if</span> (flags &amp; BPF_EXTENDED_HDR) {
+		<span class="enscript-type">char</span> *p;
+
+		p = hbuf;
+		<span class="enscript-keyword">while</span> (p &lt; hbuf + hbuf_len) {
+			<span class="enscript-type">struct</span> bpf_hdr_ext *ehp;
+			uint32_t flowid;
+			<span class="enscript-type">struct</span> so_procinfo soprocinfo;
+			<span class="enscript-type">int</span> found = 0;
+
+			ehp = (<span class="enscript-type">struct</span> bpf_hdr_ext *)(<span class="enscript-type">void</span> *)p;
+			<span class="enscript-keyword">if</span> ((flowid = ehp-&gt;bh_flowid)) {
+				<span class="enscript-keyword">if</span> (ehp-&gt;bh_proto == IPPROTO_TCP)
+					found = inp_findinpcb_procinfo(&amp;tcbinfo,
+					    flowid, &amp;soprocinfo);
+				<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ehp-&gt;bh_proto == IPPROTO_UDP)
+					found = inp_findinpcb_procinfo(&amp;udbinfo,
+					    flowid, &amp;soprocinfo);
+				<span class="enscript-keyword">if</span> (found == 1) {
+					ehp-&gt;bh_pid = soprocinfo.spi_pid;
+					proc_name(ehp-&gt;bh_pid, ehp-&gt;bh_comm, MAXCOMLEN);
+				}
+				ehp-&gt;bh_flowid = 0;
+			}
+			<span class="enscript-keyword">if</span> (flags &amp; BPF_FINALIZE_PKTAP) {
+				<span class="enscript-type">struct</span> pktap_header *pktaphdr;
+				
+				pktaphdr = (<span class="enscript-type">struct</span> pktap_header *)(<span class="enscript-type">void</span> *)
+				    (p + BPF_WORDALIGN(ehp-&gt;bh_hdrlen));
+
+				<span class="enscript-keyword">if</span> (pktaphdr-&gt;pth_flags &amp; PTH_FLAG_DELAY_PKTAP)
+					pktap_finalize_proc_info(pktaphdr);
+
+				<span class="enscript-keyword">if</span> (pktaphdr-&gt;pth_flags &amp; PTH_FLAG_TSTAMP) {
+					ehp-&gt;bh_tstamp.tv_sec =
+						pktaphdr-&gt;pth_tstamp.tv_sec;
+					ehp-&gt;bh_tstamp.tv_usec =
+						pktaphdr-&gt;pth_tstamp.tv_usec;
+				}
+			}
+			p += BPF_WORDALIGN(ehp-&gt;bh_hdrlen + ehp-&gt;bh_caplen);
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; BPF_FINALIZE_PKTAP) {
+		<span class="enscript-type">char</span> *p;
+
+		p = hbuf;
+		<span class="enscript-keyword">while</span> (p &lt; hbuf + hbuf_len) {
+			<span class="enscript-type">struct</span> bpf_hdr *hp;
+			<span class="enscript-type">struct</span> pktap_header *pktaphdr;
+			
+			hp = (<span class="enscript-type">struct</span> bpf_hdr *)(<span class="enscript-type">void</span> *)p;
+			pktaphdr = (<span class="enscript-type">struct</span> pktap_header *)(<span class="enscript-type">void</span> *)
+			    (p + BPF_WORDALIGN(hp-&gt;bh_hdrlen));
+
+			<span class="enscript-keyword">if</span> (pktaphdr-&gt;pth_flags &amp; PTH_FLAG_DELAY_PKTAP)
+				pktap_finalize_proc_info(pktaphdr);
+
+			<span class="enscript-keyword">if</span> (pktaphdr-&gt;pth_flags &amp; PTH_FLAG_TSTAMP) {
+				hp-&gt;bh_tstamp.tv_sec =
+					pktaphdr-&gt;pth_tstamp.tv_sec;
+				hp-&gt;bh_tstamp.tv_usec =
+					pktaphdr-&gt;pth_tstamp.tv_usec;
+			}
+
+			p += BPF_WORDALIGN(hp-&gt;bh_hdrlen + hp-&gt;bh_caplen);
+		}
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * Move data from hold buffer into user space.
+	 * We know the entire buffer is transferred since
+	 * we checked above that the read buffer is bpf_bufsize bytes.
+	 */</span>
+	error = UIOMOVE(hbuf, hbuf_len, UIO_READ, uio);
+	
+	lck_mtx_lock(bpf_mlock);
+	<span class="enscript-comment">/*
+	 * Make sure device is still opened
+	 */</span>
+	<span class="enscript-keyword">if</span> ((d-&gt;bd_flags &amp; BPF_CLOSING) != 0) {
+		bpf_release_d(d);
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+	
+	d-&gt;bd_hbuf_read = 0;
+	d-&gt;bd_fbuf = d-&gt;bd_hbuf;
+	d-&gt;bd_hbuf = NULL;
+	d-&gt;bd_hlen = 0;
+	d-&gt;bd_hcnt = 0;
+	wakeup((caddr_t)d);
+
+	bpf_release_d(d);
+	lck_mtx_unlock(bpf_mlock);
+	<span class="enscript-keyword">return</span> (error);
+
+}
+
+
+<span class="enscript-comment">/*
+ * If there are processes sleeping on this descriptor, wake them up.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">bpf_wakeup</span>(<span class="enscript-type">struct</span> bpf_d *d)
+{
+	<span class="enscript-keyword">if</span> (d-&gt;bd_state == BPF_WAITING) {
+		bpf_stop_timer(d);
+		d-&gt;bd_state = BPF_IDLE;
+	}
+	wakeup((caddr_t)d);
+	<span class="enscript-keyword">if</span> (d-&gt;bd_async &amp;&amp; d-&gt;bd_sig &amp;&amp; d-&gt;bd_sigio)
+		pgsigio(d-&gt;bd_sigio, d-&gt;bd_sig);
+
+	selwakeup(&amp;d-&gt;bd_sel);
+	<span class="enscript-keyword">if</span> ((d-&gt;bd_flags &amp; BPF_KNOTE))
+		KNOTE(&amp;d-&gt;bd_sel.si_note, 1);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">bpf_timed_out</span>(<span class="enscript-type">void</span> *arg, __unused <span class="enscript-type">void</span> *dummy)
+{
+	<span class="enscript-type">struct</span> bpf_d *d = (<span class="enscript-type">struct</span> bpf_d *)arg;
+
+	lck_mtx_lock(bpf_mlock);
+	<span class="enscript-keyword">if</span> (d-&gt;bd_state == BPF_WAITING) {
+		<span class="enscript-comment">/*
+		 * There's a select or kqueue waiting for this; if there's 
+		 * now stuff to read, wake it up.
+		 */</span>
+		d-&gt;bd_state = BPF_TIMED_OUT;
+		<span class="enscript-keyword">if</span> (d-&gt;bd_slen != 0)
+			bpf_wakeup(d);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (d-&gt;bd_state == BPF_DRAINING) {
+		<span class="enscript-comment">/*
+		 * A close is waiting for this to finish.
+		 * Mark it as finished, and wake the close up.
+		 */</span>
+		d-&gt;bd_state = BPF_IDLE;
+		bpf_wakeup(d);
+	}
+	lck_mtx_unlock(bpf_mlock);
+}
+	
+
+
+
+
+<span class="enscript-comment">/* keep in sync with bpf_movein above: */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_DATALINK_HDR_LEN</span>	(sizeof(struct firewire_header))
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">bpfwrite</span>(dev_t dev, <span class="enscript-type">struct</span> uio *uio, __unused <span class="enscript-type">int</span> ioflag)
+{
+	<span class="enscript-type">struct</span> bpf_d *d;
+	<span class="enscript-type">struct</span> ifnet *ifp;
+	<span class="enscript-type">struct</span> mbuf *m = NULL;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">char</span> 		  dst_buf[SOCKADDR_HDR_LEN + MAX_DATALINK_HDR_LEN];
+	<span class="enscript-type">int</span> datlen = 0;
+	<span class="enscript-type">int</span> bif_dlt;
+	<span class="enscript-type">int</span> bd_hdrcmplt;
+
+	lck_mtx_lock(bpf_mlock);
+
+	d = bpf_dtab[minor(dev)];
+	<span class="enscript-keyword">if</span> (d == 0 || d == (<span class="enscript-type">void</span> *)1 || (d-&gt;bd_flags &amp; BPF_CLOSING) != 0) {
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+
+	bpf_acquire_d(d);
+
+	<span class="enscript-keyword">if</span> (d-&gt;bd_bif == 0) {
+		bpf_release_d(d);
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+
+	ifp = d-&gt;bd_bif-&gt;bif_ifp;
+
+	<span class="enscript-keyword">if</span> ((ifp-&gt;if_flags &amp; IFF_UP) == 0) {
+		bpf_release_d(d);
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (ENETDOWN);
+	}
+	<span class="enscript-keyword">if</span> (uio_resid(uio) == 0) {
+		bpf_release_d(d);
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (0);
+	}
+	((<span class="enscript-type">struct</span> sockaddr *)dst_buf)-&gt;sa_len = <span class="enscript-keyword">sizeof</span>(dst_buf);
+
+	<span class="enscript-comment">/*
+	 * fix for PR-6849527
+	 * geting variables onto stack before dropping lock for bpf_movein()
+	 */</span>
+	bif_dlt = (<span class="enscript-type">int</span>)d-&gt;bd_bif-&gt;bif_dlt;
+	bd_hdrcmplt  = d-&gt;bd_hdrcmplt;
+
+	<span class="enscript-comment">/* bpf_movein allocating mbufs; drop lock */</span>
+	lck_mtx_unlock(bpf_mlock);
+
+	error = bpf_movein(uio, bif_dlt, &amp;m, 
+	bd_hdrcmplt ? NULL : (<span class="enscript-type">struct</span> sockaddr *)dst_buf,
+	&amp;datlen);
+
+	<span class="enscript-comment">/* take the lock again */</span>
+	lck_mtx_lock(bpf_mlock);
+	<span class="enscript-keyword">if</span> (error) {
+		bpf_release_d(d);
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	<span class="enscript-comment">/* verify the device is still open */</span>
+	<span class="enscript-keyword">if</span> ((d-&gt;bd_flags &amp; BPF_CLOSING) != 0) {
+		bpf_release_d(d);
+		lck_mtx_unlock(bpf_mlock);
+		m_freem(m);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+
+	<span class="enscript-keyword">if</span> (d-&gt;bd_bif == NULL) {
+		bpf_release_d(d);
+		lck_mtx_unlock(bpf_mlock);
+		m_free(m);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+
+	<span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span>)datlen &gt; ifp-&gt;if_mtu) {
+		bpf_release_d(d);
+		lck_mtx_unlock(bpf_mlock);
+		m_freem(m);
+		<span class="enscript-keyword">return</span> (EMSGSIZE);
+	}
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+	mac_mbuf_label_associate_bpfdesc(d, m);
+#<span class="enscript-reference">endif</span>
+
+	bpf_set_packet_service_class(m, d-&gt;bd_traffic_class);
+
+	lck_mtx_unlock(bpf_mlock);
+
+	<span class="enscript-comment">/*
+	 * The driver frees the mbuf.
+	 */</span>
+	<span class="enscript-keyword">if</span> (d-&gt;bd_hdrcmplt) {
+		<span class="enscript-keyword">if</span> (d-&gt;bd_bif-&gt;bif_send)
+			error = d-&gt;bd_bif-&gt;bif_send(ifp, d-&gt;bd_bif-&gt;bif_dlt, m);
+		<span class="enscript-keyword">else</span>
+			error = dlil_output(ifp, 0, m, NULL, NULL, 1, NULL);
+	} <span class="enscript-keyword">else</span> {
+		error = dlil_output(ifp, PF_INET, m, NULL,
+		    (<span class="enscript-type">struct</span> sockaddr *)dst_buf, 0, NULL);
+	}
+
+	lck_mtx_lock(bpf_mlock);
+	bpf_release_d(d);
+	lck_mtx_unlock(bpf_mlock);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Reset a descriptor by flushing its packet buffer and clearing the
+ * receive and drop counts.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">reset_d</span>(<span class="enscript-type">struct</span> bpf_d *d)
+{
+	<span class="enscript-keyword">if</span> (d-&gt;bd_hbuf_read)
+		panic(<span class="enscript-string">&quot;resetting buffers during read&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (d-&gt;bd_hbuf) {
+		<span class="enscript-comment">/* Free the hold buffer. */</span>
+		d-&gt;bd_fbuf = d-&gt;bd_hbuf;
+		d-&gt;bd_hbuf = NULL;
+	}
+	d-&gt;bd_slen = 0;
+	d-&gt;bd_hlen = 0;
+	d-&gt;bd_scnt = 0;
+	d-&gt;bd_hcnt = 0;
+	d-&gt;bd_rcount = 0;
+	d-&gt;bd_dcount = 0;
+}
+
+<span class="enscript-comment">/*
+ *  FIONREAD		Check for read packet available.
+ *  SIOCGIFADDR		Get interface address - convenient hook to driver.
+ *  BIOCGBLEN		Get buffer len [for read()].
+ *  BIOCSETF		Set ethernet read filter.
+ *  BIOCFLUSH		Flush read packet buffer.
+ *  BIOCPROMISC		Put interface into promiscuous mode.
+ *  BIOCGDLT		Get link layer type.
+ *  BIOCGETIF		Get interface name.
+ *  BIOCSETIF		Set interface.
+ *  BIOCSRTIMEOUT	Set read timeout.
+ *  BIOCGRTIMEOUT	Get read timeout.
+ *  BIOCGSTATS		Get packet stats.
+ *  BIOCIMMEDIATE	Set immediate mode.
+ *  BIOCVERSION		Get filter language version.
+ *  BIOCGHDRCMPLT	Get &quot;header already complete&quot; flag
+ *  BIOCSHDRCMPLT	Set &quot;header already complete&quot; flag
+ *  BIOCGSEESENT	Get &quot;see packets sent&quot; flag
+ *  BIOCSSEESENT	Set &quot;see packets sent&quot; flag
+ *  BIOCSETTC		Set traffic class.
+ *  BIOCGETTC		Get traffic class.
+ *  BIOCSEXTHDR		Set &quot;extended header&quot; flag
+ *  BIOCSHEADDROP	Drop head of the buffer if user is not reading
+ *  BIOCGHEADDROP	Get &quot;head-drop&quot; flag
+ */</span>
+<span class="enscript-comment">/* ARGSUSED */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">bpfioctl</span>(dev_t dev, u_long cmd, caddr_t addr, __unused <span class="enscript-type">int</span> flags,
+    <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">struct</span> bpf_d *d;
+	<span class="enscript-type">int</span> error = 0;
+	u_int int_arg;
+	<span class="enscript-type">struct</span> ifreq ifr;
+
+	lck_mtx_lock(bpf_mlock);
+
+	d = bpf_dtab[minor(dev)];
+	<span class="enscript-keyword">if</span> (d == 0 || d == (<span class="enscript-type">void</span> *)1 || (d-&gt;bd_flags &amp; BPF_CLOSING) != 0) {
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+
+	bpf_acquire_d(d);
+
+	<span class="enscript-keyword">if</span> (d-&gt;bd_state == BPF_WAITING)
+		bpf_stop_timer(d);
+	d-&gt;bd_state = BPF_IDLE;
+
+	<span class="enscript-keyword">switch</span> (cmd) {
+
+	<span class="enscript-reference">default</span>:
+		error = EINVAL;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * Check for read packet available.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIONREAD</span>:			<span class="enscript-comment">/* int */</span>
+		{
+			<span class="enscript-type">int</span> n;
+
+			n = d-&gt;bd_slen;
+			<span class="enscript-keyword">if</span> (d-&gt;bd_hbuf &amp;&amp; d-&gt;bd_hbuf_read == 0)
+				n += d-&gt;bd_hlen;
+
+			bcopy(&amp;n, addr, <span class="enscript-keyword">sizeof</span> (n));
+			<span class="enscript-keyword">break</span>;
+		}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		{
+			<span class="enscript-type">struct</span> ifnet *ifp;
+
+			<span class="enscript-keyword">if</span> (d-&gt;bd_bif == 0)
+				error = EINVAL;
+			<span class="enscript-keyword">else</span> {
+				ifp = d-&gt;bd_bif-&gt;bif_ifp;
+				error = ifnet_ioctl(ifp, 0, cmd, addr);
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+
+	<span class="enscript-comment">/*
+	 * Get buffer len [for read()].
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCGBLEN</span>:			<span class="enscript-comment">/* u_int */</span>
+		bcopy(&amp;d-&gt;bd_bufsize, addr, <span class="enscript-keyword">sizeof</span> (u_int));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * Set buffer length.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSBLEN</span>:			<span class="enscript-comment">/* u_int */</span>
+		<span class="enscript-keyword">if</span> (d-&gt;bd_bif != 0)
+			error = EINVAL;
+		<span class="enscript-keyword">else</span> {
+			u_int size;
+
+			bcopy(addr, &amp;size, <span class="enscript-keyword">sizeof</span> (size));
+
+			<span class="enscript-keyword">if</span> (size &gt; bpf_maxbufsize)
+				size = bpf_maxbufsize;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (size &lt; BPF_MINBUFSIZE)
+				size = BPF_MINBUFSIZE;
+			bcopy(&amp;size, addr, <span class="enscript-keyword">sizeof</span> (size));
+			d-&gt;bd_bufsize = size;
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * Set link layer read filter.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSETF32</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSETFNR32</span>: {		<span class="enscript-comment">/* struct bpf_program32 */</span>
+		<span class="enscript-type">struct</span> bpf_program32 prg32;
+
+		bcopy(addr, &amp;prg32, <span class="enscript-keyword">sizeof</span> (prg32));
+		error = bpf_setf(d, prg32.bf_len,
+		    CAST_USER_ADDR_T(prg32.bf_insns), cmd);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSETF64</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSETFNR64</span>: {		<span class="enscript-comment">/* struct bpf_program64 */</span>
+		<span class="enscript-type">struct</span> bpf_program64 prg64;
+
+		bcopy(addr, &amp;prg64, <span class="enscript-keyword">sizeof</span> (prg64));
+		error = bpf_setf(d, prg64.bf_len, prg64.bf_insns, cmd);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Flush read packet buffer.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCFLUSH</span>:
+		<span class="enscript-keyword">while</span> (d-&gt;bd_hbuf_read) {
+			msleep((caddr_t)d, bpf_mlock, PRINET, <span class="enscript-string">&quot;bpf_reading&quot;</span>, NULL);
+		}
+		<span class="enscript-keyword">if</span> ((d-&gt;bd_flags &amp; BPF_CLOSING) != 0) {
+			error = ENXIO;
+			<span class="enscript-keyword">break</span>;
+		}
+		reset_d(d);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * Put interface into promiscuous mode.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCPROMISC</span>:
+		<span class="enscript-keyword">if</span> (d-&gt;bd_bif == 0) {
+			<span class="enscript-comment">/*
+			 * No interface attached yet.
+			 */</span>
+			error = EINVAL;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (d-&gt;bd_promisc == 0) {
+			lck_mtx_unlock(bpf_mlock);
+			error = ifnet_set_promiscuous(d-&gt;bd_bif-&gt;bif_ifp, 1);
+			lck_mtx_lock(bpf_mlock);
+			<span class="enscript-keyword">if</span> (error == 0)
+				d-&gt;bd_promisc = 1;
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * Get device parameters.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCGDLT</span>:			<span class="enscript-comment">/* u_int */</span>
+		<span class="enscript-keyword">if</span> (d-&gt;bd_bif == 0)
+			error = EINVAL;
+		<span class="enscript-keyword">else</span>
+			bcopy(&amp;d-&gt;bd_bif-&gt;bif_dlt, addr, <span class="enscript-keyword">sizeof</span> (u_int));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * Get a list of supported data link types.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCGDLTLIST</span>:		<span class="enscript-comment">/* struct bpf_dltlist */</span>
+		<span class="enscript-keyword">if</span> (d-&gt;bd_bif == NULL) {
+			error = EINVAL;
+		} <span class="enscript-keyword">else</span> {
+			error = bpf_getdltlist(d, addr, p);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * Set data link type.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSDLT</span>:			<span class="enscript-comment">/* u_int */</span>
+		<span class="enscript-keyword">if</span> (d-&gt;bd_bif == NULL) {
+			error = EINVAL;
+		} <span class="enscript-keyword">else</span> {
+			u_int dlt;
+
+			bcopy(addr, &amp;dlt, <span class="enscript-keyword">sizeof</span> (dlt));
+			error = bpf_setdlt(d, dlt);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * Get interface name.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCGETIF</span>:			<span class="enscript-comment">/* struct ifreq */</span>
+		<span class="enscript-keyword">if</span> (d-&gt;bd_bif == 0)
+			error = EINVAL;
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-type">struct</span> ifnet *<span class="enscript-type">const</span> ifp = d-&gt;bd_bif-&gt;bif_ifp;
+
+			snprintf(((<span class="enscript-type">struct</span> ifreq *)(<span class="enscript-type">void</span> *)addr)-&gt;ifr_name,
+			    <span class="enscript-keyword">sizeof</span> (ifr.ifr_name), <span class="enscript-string">&quot;%s&quot;</span>, if_name(ifp));
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * Set interface.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSETIF</span>: {		<span class="enscript-comment">/* struct ifreq */</span>
+		ifnet_t	ifp;
+
+		bcopy(addr, &amp;ifr, <span class="enscript-keyword">sizeof</span> (ifr));
+		ifr.ifr_name[IFNAMSIZ - 1] = <span class="enscript-string">'\0'</span>;
+		ifp = ifunit(ifr.ifr_name);
+		<span class="enscript-keyword">if</span> (ifp == NULL)
+			error = ENXIO;
+		<span class="enscript-keyword">else</span>
+			error = bpf_setif(d, ifp, 0);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Set read timeout.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSRTIMEOUT32</span>: {		<span class="enscript-comment">/* struct user32_timeval */</span>
+		<span class="enscript-type">struct</span> user32_timeval _tv;
+		<span class="enscript-type">struct</span> timeval tv;
+
+		bcopy(addr, &amp;_tv, <span class="enscript-keyword">sizeof</span> (_tv));
+		tv.tv_sec  = _tv.tv_sec;
+		tv.tv_usec = _tv.tv_usec;
+
+		<span class="enscript-comment">/*
+		 * Subtract 1 tick from tvtohz() since this isn't
+		 * a one-shot timer.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((error = itimerfix(&amp;tv)) == 0)
+			d-&gt;bd_rtout = tvtohz(&amp;tv) - 1;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSRTIMEOUT64</span>: {		<span class="enscript-comment">/* struct user64_timeval */</span>
+		<span class="enscript-type">struct</span> user64_timeval _tv;
+		<span class="enscript-type">struct</span> timeval tv;
+
+		bcopy(addr, &amp;_tv, <span class="enscript-keyword">sizeof</span> (_tv));
+		tv.tv_sec  = _tv.tv_sec;
+		tv.tv_usec = _tv.tv_usec;
+
+		<span class="enscript-comment">/*
+		 * Subtract 1 tick from tvtohz() since this isn't
+		 * a one-shot timer.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((error = itimerfix(&amp;tv)) == 0)
+			d-&gt;bd_rtout = tvtohz(&amp;tv) - 1;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Get read timeout.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCGRTIMEOUT32</span>: {		<span class="enscript-comment">/* struct user32_timeval */</span>
+		<span class="enscript-type">struct</span> user32_timeval tv;
+
+		bzero(&amp;tv, <span class="enscript-keyword">sizeof</span> (tv));
+		tv.tv_sec = d-&gt;bd_rtout / hz;
+		tv.tv_usec = (d-&gt;bd_rtout % hz) * tick;
+		bcopy(&amp;tv, addr, <span class="enscript-keyword">sizeof</span> (tv));
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCGRTIMEOUT64</span>: {		<span class="enscript-comment">/* struct user64_timeval */</span>
+		<span class="enscript-type">struct</span> user64_timeval tv;
+
+		bzero(&amp;tv, <span class="enscript-keyword">sizeof</span> (tv));
+		tv.tv_sec = d-&gt;bd_rtout / hz;
+		tv.tv_usec = (d-&gt;bd_rtout % hz) * tick;
+		bcopy(&amp;tv, addr, <span class="enscript-keyword">sizeof</span> (tv));
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Get packet stats.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCGSTATS</span>: {		<span class="enscript-comment">/* struct bpf_stat */</span>
+		<span class="enscript-type">struct</span> bpf_stat bs;
+
+		bzero(&amp;bs, <span class="enscript-keyword">sizeof</span> (bs));
+		bs.bs_recv = d-&gt;bd_rcount;
+		bs.bs_drop = d-&gt;bd_dcount;
+		bcopy(&amp;bs, addr, <span class="enscript-keyword">sizeof</span> (bs));
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Set immediate mode.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCIMMEDIATE</span>:		<span class="enscript-comment">/* u_int */</span>
+		d-&gt;bd_immediate = *(u_int *)(<span class="enscript-type">void</span> *)addr;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCVERSION</span>: {		<span class="enscript-comment">/* struct bpf_version */</span>
+		<span class="enscript-type">struct</span> bpf_version bv;
+
+		bzero(&amp;bv, <span class="enscript-keyword">sizeof</span> (bv));
+		bv.bv_major = BPF_MAJOR_VERSION;
+		bv.bv_minor = BPF_MINOR_VERSION;
+		bcopy(&amp;bv, addr, <span class="enscript-keyword">sizeof</span> (bv));
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Get &quot;header already complete&quot; flag
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCGHDRCMPLT</span>:		<span class="enscript-comment">/* u_int */</span>
+		bcopy(&amp;d-&gt;bd_hdrcmplt, addr, <span class="enscript-keyword">sizeof</span> (u_int));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * Set &quot;header already complete&quot; flag
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSHDRCMPLT</span>:		<span class="enscript-comment">/* u_int */</span>
+		bcopy(addr, &amp;int_arg, <span class="enscript-keyword">sizeof</span> (int_arg));
+		d-&gt;bd_hdrcmplt = int_arg ? 1 : 0;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * Get &quot;see sent packets&quot; flag
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCGSEESENT</span>:		<span class="enscript-comment">/* u_int */</span>
+		bcopy(&amp;d-&gt;bd_seesent, addr, <span class="enscript-keyword">sizeof</span> (u_int));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * Set &quot;see sent packets&quot; flag
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSSEESENT</span>:		<span class="enscript-comment">/* u_int */</span>
+		bcopy(addr, &amp;d-&gt;bd_seesent, <span class="enscript-keyword">sizeof</span> (u_int));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * Set traffic service class
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSETTC</span>: {		<span class="enscript-comment">/* int */</span>
+		<span class="enscript-type">int</span> tc;
+
+		bcopy(addr, &amp;tc, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>));
+		error = bpf_set_traffic_class(d, tc);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Get traffic service class
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCGETTC</span>:			<span class="enscript-comment">/* int */</span>
+		bcopy(&amp;d-&gt;bd_traffic_class, addr, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIONBIO</span>:		<span class="enscript-comment">/* Non-blocking I/O; int */</span>
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIOASYNC</span>:		<span class="enscript-comment">/* Send signal on receive packets; int */</span>
+		bcopy(addr, &amp;d-&gt;bd_async, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>));
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__APPLE__</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIOSETOWN</span>:
+		error = fsetown(*(<span class="enscript-type">int</span> *)addr, &amp;d-&gt;bd_sigio);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIOGETOWN</span>:
+		*(<span class="enscript-type">int</span> *)addr = fgetown(d-&gt;bd_sigio);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/* This is deprecated, FIOSETOWN should be used instead. */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSPGRP</span>:
+		error = fsetown(-(*(<span class="enscript-type">int</span> *)addr), &amp;d-&gt;bd_sigio);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/* This is deprecated, FIOGETOWN should be used instead. */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCGPGRP</span>:
+		*(<span class="enscript-type">int</span> *)addr = -fgetown(d-&gt;bd_sigio);
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSRSIG</span>: {	<span class="enscript-comment">/* Set receive signal; u_int */</span>
+		u_int sig;
+
+		bcopy(addr, &amp;sig, <span class="enscript-keyword">sizeof</span> (u_int));
+
+		<span class="enscript-keyword">if</span> (sig &gt;= NSIG)
+			error = EINVAL;
+		<span class="enscript-keyword">else</span>
+			d-&gt;bd_sig = sig;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCGRSIG</span>:			<span class="enscript-comment">/* u_int */</span>
+		bcopy(&amp;d-&gt;bd_sig, addr, <span class="enscript-keyword">sizeof</span> (u_int));
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__APPLE__</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSEXTHDR</span>:		<span class="enscript-comment">/* u_int */</span>
+		bcopy(addr, &amp;int_arg, <span class="enscript-keyword">sizeof</span> (int_arg));
+		<span class="enscript-keyword">if</span> (int_arg)
+			d-&gt;bd_flags |= BPF_EXTENDED_HDR;
+		<span class="enscript-keyword">else</span>
+			d-&gt;bd_flags &amp;= ~BPF_EXTENDED_HDR;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCGIFATTACHCOUNT</span>: { 		<span class="enscript-comment">/* struct ifreq */</span>
+		ifnet_t	ifp;
+		<span class="enscript-type">struct</span> bpf_if *bp;
+
+		bcopy(addr, &amp;ifr, <span class="enscript-keyword">sizeof</span> (ifr));
+		ifr.ifr_name[IFNAMSIZ - 1] = <span class="enscript-string">'\0'</span>;
+		ifp = ifunit(ifr.ifr_name);
+		<span class="enscript-keyword">if</span> (ifp == NULL) {
+			error = ENXIO;
+			<span class="enscript-keyword">break</span>;
+		}
+		ifr.ifr_intval = 0;
+		<span class="enscript-keyword">for</span> (bp = bpf_iflist; bp != 0; bp = bp-&gt;bif_next) {
+			<span class="enscript-type">struct</span> bpf_d *bpf_d;
+			
+			<span class="enscript-keyword">if</span> (bp-&gt;bif_ifp == NULL || bp-&gt;bif_ifp != ifp)
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-keyword">for</span> (bpf_d = bp-&gt;bif_dlist; bpf_d; bpf_d = bpf_d-&gt;bd_next) {
+				ifr.ifr_intval += 1;
+			}
+		}
+		bcopy(&amp;ifr, addr, <span class="enscript-keyword">sizeof</span> (ifr));
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCGWANTPKTAP</span>:			<span class="enscript-comment">/* u_int */</span>
+		int_arg = d-&gt;bd_flags &amp; BPF_WANT_PKTAP ? 1 : 0;
+		bcopy(&amp;int_arg, addr, <span class="enscript-keyword">sizeof</span> (int_arg));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSWANTPKTAP</span>:			<span class="enscript-comment">/* u_int */</span>
+                bcopy(addr, &amp;int_arg, <span class="enscript-keyword">sizeof</span> (int_arg));
+                <span class="enscript-keyword">if</span> (int_arg)
+                        d-&gt;bd_flags |= BPF_WANT_PKTAP;
+                <span class="enscript-keyword">else</span>
+                        d-&gt;bd_flags &amp;= ~BPF_WANT_PKTAP;
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCSHEADDROP</span>:
+		bcopy(addr, &amp;int_arg, <span class="enscript-keyword">sizeof</span> (int_arg));
+		d-&gt;bd_headdrop = int_arg ? 1 : 0;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BIOCGHEADDROP</span>:
+		bcopy(&amp;d-&gt;bd_headdrop, addr, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>));
+		<span class="enscript-keyword">break</span>;
+	}
+
+	bpf_release_d(d);
+	lck_mtx_unlock(bpf_mlock);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Set d's packet filter program to fp.  If this file already has a filter,
+ * free it and replace it.  Returns EINVAL for bogus requests.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">bpf_setf</span>(<span class="enscript-type">struct</span> bpf_d *d, u_int bf_len, user_addr_t bf_insns,
+    u_long cmd)
+{
+	<span class="enscript-type">struct</span> bpf_insn *fcode, *old;
+	u_int flen, size;
+
+	<span class="enscript-keyword">while</span> (d-&gt;bd_hbuf_read) 
+		msleep((caddr_t)d, bpf_mlock, PRINET, <span class="enscript-string">&quot;bpf_reading&quot;</span>, NULL);
+
+	<span class="enscript-keyword">if</span> ((d-&gt;bd_flags &amp; BPF_CLOSING) != 0)
+		<span class="enscript-keyword">return</span> (ENXIO);
+	
+	old = d-&gt;bd_filter;
+	<span class="enscript-keyword">if</span> (bf_insns == USER_ADDR_NULL) {
+		<span class="enscript-keyword">if</span> (bf_len != 0)
+			<span class="enscript-keyword">return</span> (EINVAL);
+		d-&gt;bd_filter = NULL;
+		reset_d(d);
+		<span class="enscript-keyword">if</span> (old != 0)
+			FREE((caddr_t)old, M_DEVBUF);
+		<span class="enscript-keyword">return</span> (0);
+	}
+	flen = bf_len;
+	<span class="enscript-keyword">if</span> (flen &gt; BPF_MAXINSNS)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	size = flen * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> bpf_insn);
+	fcode = (<span class="enscript-type">struct</span> bpf_insn *) _MALLOC(size, M_DEVBUF, M_WAIT);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__APPLE__</span>
+	<span class="enscript-keyword">if</span> (fcode == NULL)
+		<span class="enscript-keyword">return</span> (ENOBUFS);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (copyin(bf_insns, (caddr_t)fcode, size) == 0 &amp;&amp;
+	    bpf_validate(fcode, (<span class="enscript-type">int</span>)flen)) {
+		d-&gt;bd_filter = fcode;
+	
+		<span class="enscript-keyword">if</span> (cmd == BIOCSETF32 || cmd == BIOCSETF64)
+			reset_d(d);
+	
+		<span class="enscript-keyword">if</span> (old != 0)
+			FREE((caddr_t)old, M_DEVBUF);
+
+		<span class="enscript-keyword">return</span> (0);
+	}
+	FREE((caddr_t)fcode, M_DEVBUF);
+	<span class="enscript-keyword">return</span> (EINVAL);
+}
+
+<span class="enscript-comment">/*
+ * Detach a file from its current interface (if attached at all) and attach
+ * to the interface indicated by the name stored in ifr.
+ * Return an errno or 0.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">bpf_setif</span>(<span class="enscript-type">struct</span> bpf_d *d, ifnet_t theywant, u_int32_t dlt)
+{
+	<span class="enscript-type">struct</span> bpf_if *bp;
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">while</span> (d-&gt;bd_hbuf_read)
+		msleep((caddr_t)d, bpf_mlock, PRINET, <span class="enscript-string">&quot;bpf_reading&quot;</span>, NULL);
+
+	<span class="enscript-keyword">if</span> ((d-&gt;bd_flags &amp; BPF_CLOSING) != 0)
+		<span class="enscript-keyword">return</span> (ENXIO);
+
+	<span class="enscript-comment">/*
+	 * Look through attached interfaces for the named one.
+	 */</span>
+	<span class="enscript-keyword">for</span> (bp = bpf_iflist; bp != 0; bp = bp-&gt;bif_next) {
+		<span class="enscript-type">struct</span> ifnet *ifp = bp-&gt;bif_ifp;
+
+		<span class="enscript-keyword">if</span> (ifp == 0 || ifp != theywant || (dlt != 0 &amp;&amp; dlt != bp-&gt;bif_dlt))
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-comment">/*
+		 * If the process knows how to deal with DLT_PKTAP, use it
+		 * by default
+		 */</span>
+		<span class="enscript-keyword">if</span> (dlt == 0 &amp;&amp; bp-&gt;bif_dlt == DLT_PKTAP &amp;&amp;
+			!(d-&gt;bd_flags &amp; BPF_WANT_PKTAP))
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-comment">/*
+		 * We found the requested interface.
+		 * Allocate the packet buffers if we need to.
+		 * If we're already attached to requested interface,
+		 * just flush the buffer.
+		 */</span>
+		<span class="enscript-keyword">if</span> (d-&gt;bd_sbuf == 0) {
+			error = bpf_allocbufs(d);
+			<span class="enscript-keyword">if</span> (error != 0)
+				<span class="enscript-keyword">return</span> (error);
+		}
+		<span class="enscript-keyword">if</span> (bp != d-&gt;bd_bif) {
+				<span class="enscript-comment">/*
+				 * Detach if attached to something else.
+				 */</span>
+			<span class="enscript-keyword">if</span> (d-&gt;bd_bif) {
+				<span class="enscript-keyword">if</span> (bpf_detachd(d, 0) != 0)
+					<span class="enscript-keyword">return</span> (ENXIO);
+			}
+			<span class="enscript-keyword">if</span> (bpf_attachd(d, bp) != 0)
+				<span class="enscript-keyword">return</span> (ENXIO);
+		}
+		reset_d(d);
+		<span class="enscript-keyword">return</span> (0);
+	}
+	<span class="enscript-comment">/* Not found. */</span>
+	<span class="enscript-keyword">return</span> (ENXIO);
+}
+
+
+
+<span class="enscript-comment">/*
+ * Get a list of available data link type of the interface.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">bpf_getdltlist</span>(<span class="enscript-type">struct</span> bpf_d *d, caddr_t addr, <span class="enscript-type">struct</span> proc *p)
+{
+	u_int		n;
+	<span class="enscript-type">int</span>		error;
+	<span class="enscript-type">struct</span> ifnet	*ifp;
+	<span class="enscript-type">struct</span> bpf_if	*bp;
+	user_addr_t	dlist;
+	<span class="enscript-type">struct</span> bpf_dltlist bfl;
+
+	bcopy(addr, &amp;bfl, <span class="enscript-keyword">sizeof</span> (bfl));
+	<span class="enscript-keyword">if</span> (proc_is64bit(p)) {
+		dlist = (user_addr_t)bfl.bfl_u.bflu_pad;
+	} <span class="enscript-keyword">else</span> {
+		dlist = CAST_USER_ADDR_T(bfl.bfl_u.bflu_list);
+	}
+
+	ifp = d-&gt;bd_bif-&gt;bif_ifp;
+	n = 0;
+	error = 0;
+
+	<span class="enscript-keyword">for</span> (bp = bpf_iflist; bp; bp = bp-&gt;bif_next) {
+		<span class="enscript-keyword">if</span> (bp-&gt;bif_ifp != ifp)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-comment">/* 
+		 * Return DLT_PKTAP only to processes that know how to handle it
+		 */</span>
+		<span class="enscript-keyword">if</span> (bp-&gt;bif_dlt == DLT_PKTAP &amp;&amp; !(d-&gt;bd_flags &amp; BPF_WANT_PKTAP))
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (dlist != USER_ADDR_NULL) {
+			<span class="enscript-keyword">if</span> (n &gt;= bfl.bfl_len) {
+				<span class="enscript-keyword">return</span> (ENOMEM);
+			}
+			error = copyout(&amp;bp-&gt;bif_dlt, dlist,
+			    <span class="enscript-keyword">sizeof</span> (bp-&gt;bif_dlt));
+			<span class="enscript-keyword">if</span> (error != 0)
+				<span class="enscript-keyword">break</span>;
+			dlist += <span class="enscript-keyword">sizeof</span> (bp-&gt;bif_dlt);
+		}
+		n++;
+	}
+	bfl.bfl_len = n;
+	bcopy(&amp;bfl, addr, <span class="enscript-keyword">sizeof</span> (bfl));
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Set the data link type of a BPF instance.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">bpf_setdlt</span>(<span class="enscript-type">struct</span> bpf_d *d, uint32_t dlt)
+{
+	<span class="enscript-type">int</span> error, opromisc;
+	<span class="enscript-type">struct</span> ifnet *ifp;
+	<span class="enscript-type">struct</span> bpf_if *bp;
+	
+	<span class="enscript-keyword">if</span> (d-&gt;bd_bif-&gt;bif_dlt == dlt)
+		<span class="enscript-keyword">return</span> (0);
+	
+	<span class="enscript-keyword">while</span> (d-&gt;bd_hbuf_read)
+		msleep((caddr_t)d, bpf_mlock, PRINET, <span class="enscript-string">&quot;bpf_reading&quot;</span>, NULL);
+
+	<span class="enscript-keyword">if</span> ((d-&gt;bd_flags &amp; BPF_CLOSING) != 0)
+		<span class="enscript-keyword">return</span> (ENXIO);
+
+	ifp = d-&gt;bd_bif-&gt;bif_ifp;
+	<span class="enscript-keyword">for</span> (bp = bpf_iflist; bp; bp = bp-&gt;bif_next) {
+		<span class="enscript-keyword">if</span> (bp-&gt;bif_ifp == ifp &amp;&amp; bp-&gt;bif_dlt == dlt)
+			<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">if</span> (bp != NULL) {
+		opromisc = d-&gt;bd_promisc;
+		<span class="enscript-keyword">if</span> (bpf_detachd(d, 0) != 0)
+			<span class="enscript-keyword">return</span> (ENXIO);
+		error = bpf_attachd(d, bp);
+		<span class="enscript-keyword">if</span> (error) {
+			printf(<span class="enscript-string">&quot;bpf_setdlt: bpf_attachd %s%d failed (%d)\n&quot;</span>,
+				ifnet_name(bp-&gt;bif_ifp), ifnet_unit(bp-&gt;bif_ifp), error);
+			<span class="enscript-keyword">return</span> error;
+		}
+		reset_d(d);
+		<span class="enscript-keyword">if</span> (opromisc) {
+			lck_mtx_unlock(bpf_mlock);
+			error = ifnet_set_promiscuous(bp-&gt;bif_ifp, 1);
+			lck_mtx_lock(bpf_mlock);
+			<span class="enscript-keyword">if</span> (error) {
+				printf(<span class="enscript-string">&quot;%s: ifpromisc %s%d failed (%d)\n&quot;</span>,
+				    __func__, ifnet_name(bp-&gt;bif_ifp),
+				    ifnet_unit(bp-&gt;bif_ifp), error);
+			} <span class="enscript-keyword">else</span> {
+				d-&gt;bd_promisc = 1;
+			}
+		}
+	}
+	<span class="enscript-keyword">return</span> (bp == NULL ? EINVAL : 0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">bpf_set_traffic_class</span>(<span class="enscript-type">struct</span> bpf_d *d, <span class="enscript-type">int</span> tc)
+{
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-keyword">if</span> (!SO_VALID_TC(tc))
+		error = EINVAL;
+	<span class="enscript-keyword">else</span>
+		d-&gt;bd_traffic_class = tc;
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">bpf_set_packet_service_class</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> tc)
+{
+	<span class="enscript-keyword">if</span> (!(m-&gt;m_flags &amp; M_PKTHDR))
+		<span class="enscript-keyword">return</span>;
+
+	VERIFY(SO_VALID_TC(tc));
+	(<span class="enscript-type">void</span>) m_set_service_class(m, so_tc2msc(tc));
+}
+
+<span class="enscript-comment">/*
+ * Support for select()
+ *
+ * Return true iff the specific operation will not block indefinitely.
+ * Otherwise, return false but make a note that a selwakeup() must be done.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">bpfselect</span>(dev_t dev, <span class="enscript-type">int</span> which, <span class="enscript-type">void</span> * wql, <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">struct</span> bpf_d *d;
+	<span class="enscript-type">int</span> ret = 0;
+
+	lck_mtx_lock(bpf_mlock);
+
+	d = bpf_dtab[minor(dev)];
+	<span class="enscript-keyword">if</span> (d == 0 || d == (<span class="enscript-type">void</span> *)1 || (d-&gt;bd_flags &amp; BPF_CLOSING) != 0) {
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+
+	bpf_acquire_d(d);
+
+	<span class="enscript-keyword">if</span> (d-&gt;bd_bif == NULL) {
+		bpf_release_d(d);
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+
+	<span class="enscript-keyword">while</span> (d-&gt;bd_hbuf_read) 
+		msleep((caddr_t)d, bpf_mlock, PRINET, <span class="enscript-string">&quot;bpf_reading&quot;</span>, NULL);
+
+	<span class="enscript-keyword">if</span> ((d-&gt;bd_flags &amp; BPF_CLOSING) != 0) {
+		bpf_release_d(d);
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+
+	<span class="enscript-keyword">switch</span> (which) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">FREAD</span>:
+			<span class="enscript-keyword">if</span> (d-&gt;bd_hlen != 0 ||
+					((d-&gt;bd_immediate || d-&gt;bd_state == BPF_TIMED_OUT) &amp;&amp;
+					 d-&gt;bd_slen != 0))
+				ret = 1; <span class="enscript-comment">/* read has data to return */</span>
+			<span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/*
+				 * Read has no data to return.
+				 * Make the select wait, and start a timer if
+				 * necessary.
+				 */</span>
+				selrecord(p, &amp;d-&gt;bd_sel, wql);
+				bpf_start_timer(d);
+			}
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">FWRITE</span>:
+			ret = 1; <span class="enscript-comment">/* can't determine whether a write would block */</span>
+			<span class="enscript-keyword">break</span>;
+	}
+
+	bpf_release_d(d);
+	lck_mtx_unlock(bpf_mlock);
+
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+
+<span class="enscript-comment">/*
+ * Support for kevent() system call.  Register EVFILT_READ filters and
+ * reject all others.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">bpfkqfilter</span>(dev_t dev, <span class="enscript-type">struct</span> knote *kn);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">filt_bpfdetach</span>(<span class="enscript-type">struct</span> knote *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">filt_bpfread</span>(<span class="enscript-type">struct</span> knote *, <span class="enscript-type">long</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> filterops bpfread_filtops = {
+	.f_isfd = 1, 
+	.f_detach = filt_bpfdetach,
+	.f_event = filt_bpfread,
+};
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">bpfkqfilter</span>(dev_t dev, <span class="enscript-type">struct</span> knote *kn)
+{
+	<span class="enscript-type">struct</span> bpf_d *d;
+
+	<span class="enscript-comment">/*
+	 * Is this device a bpf?
+	 */</span>
+	<span class="enscript-keyword">if</span> (major(dev) != CDEV_MAJOR) {
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-keyword">if</span> (kn-&gt;kn_filter != EVFILT_READ) {
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	lck_mtx_lock(bpf_mlock);
+
+	d = bpf_dtab[minor(dev)];
+	<span class="enscript-keyword">if</span> (d == 0 || d == (<span class="enscript-type">void</span> *)1 || (d-&gt;bd_flags &amp; BPF_CLOSING) != 0) {
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+
+	<span class="enscript-keyword">if</span> (d-&gt;bd_bif == NULL) {
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> (ENXIO);
+	}
+
+	kn-&gt;kn_hook = d;
+	kn-&gt;kn_fop = &amp;bpfread_filtops;
+	KNOTE_ATTACH(&amp;d-&gt;bd_sel.si_note, kn);
+	d-&gt;bd_flags |= BPF_KNOTE;
+
+	lck_mtx_unlock(bpf_mlock);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">filt_bpfdetach</span>(<span class="enscript-type">struct</span> knote *kn)
+{
+	<span class="enscript-type">struct</span> bpf_d *d = (<span class="enscript-type">struct</span> bpf_d *)kn-&gt;kn_hook;
+
+	lck_mtx_lock(bpf_mlock);
+	<span class="enscript-keyword">if</span> (d-&gt;bd_flags &amp; BPF_KNOTE) {
+		KNOTE_DETACH(&amp;d-&gt;bd_sel.si_note, kn);
+		d-&gt;bd_flags &amp;= ~BPF_KNOTE;
+	}
+	lck_mtx_unlock(bpf_mlock);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">filt_bpfread</span>(<span class="enscript-type">struct</span> knote *kn, <span class="enscript-type">long</span> hint)
+{
+	<span class="enscript-type">struct</span> bpf_d *d = (<span class="enscript-type">struct</span> bpf_d *)kn-&gt;kn_hook;
+	<span class="enscript-type">int</span> ready = 0;
+
+	<span class="enscript-keyword">if</span> (hint == 0)
+		lck_mtx_lock(bpf_mlock);
+	
+	<span class="enscript-keyword">if</span> (d-&gt;bd_immediate) {
+		<span class="enscript-comment">/*
+		 * If there's data in the hold buffer, it's the 
+		 * amount of data a read will return.
+		 *
+		 * If there's no data in the hold buffer, but
+		 * there's data in the store buffer, a read will
+		 * immediately rotate the store buffer to the 
+		 * hold buffer, the amount of data in the store
+		 * buffer is the amount of data a read will 
+		 * return.
+		 *
+		 * If there's no data in either buffer, we're not 
+		 * ready to read.
+		 */</span>
+		kn-&gt;kn_data = ((d-&gt;bd_hlen == 0  || d-&gt;bd_hbuf_read) 
+		    ? d-&gt;bd_slen : d-&gt;bd_hlen);
+		int64_t lowwat = 1;
+		<span class="enscript-keyword">if</span> (kn-&gt;kn_sfflags &amp; NOTE_LOWAT)
+		{
+			<span class="enscript-keyword">if</span> (kn-&gt;kn_sdata &gt; d-&gt;bd_bufsize)
+				lowwat = d-&gt;bd_bufsize;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kn-&gt;kn_sdata &gt; lowwat)
+				lowwat = kn-&gt;kn_sdata;
+		}
+		ready = (kn-&gt;kn_data &gt;= lowwat);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * If there's data in the hold buffer, it's the 
+		 * amount of data a read will return.
+		 *
+		 * If there's no data in the hold buffer, but 
+		 * there's data in the store buffer, if the 
+		 * timer has expired a read will immediately
+		 * rotate the store buffer to the hold buffer,
+		 * so the amount of data in the store buffer is 
+		 * the amount of data a read will return.
+		 *
+		 * If there's no data in either buffer, or there's 
+		 * no data in the hold buffer and the timer hasn't 
+		 * expired, we're not ready to read.
+		 */</span>
+		kn-&gt;kn_data = ((d-&gt;bd_hlen == 0 || d-&gt;bd_hbuf_read) &amp;&amp; d-&gt;bd_state == BPF_TIMED_OUT ? 
+				d-&gt;bd_slen : d-&gt;bd_hlen);
+		ready = (kn-&gt;kn_data &gt; 0);
+	}
+	<span class="enscript-keyword">if</span> (!ready)
+		bpf_start_timer(d);
+
+	<span class="enscript-keyword">if</span> (hint == 0)
+		lck_mtx_unlock(bpf_mlock);
+	<span class="enscript-keyword">return</span> (ready);
+}
+
+<span class="enscript-comment">/*
+ * Copy data from an mbuf chain into a buffer.  This code is derived
+ * from m_copydata in sys/uipc_mbuf.c.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">bpf_mcopy</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *src_arg, <span class="enscript-type">void</span> *dst_arg, size_t len)
+{
+	<span class="enscript-type">struct</span> mbuf *m = (<span class="enscript-type">struct</span> mbuf *)(uintptr_t)(src_arg);
+	u_int count;
+	u_char *dst;
+
+	dst = dst_arg;
+	<span class="enscript-keyword">while</span> (len &gt; 0) {
+		<span class="enscript-keyword">if</span> (m == 0)
+			panic(<span class="enscript-string">&quot;bpf_mcopy&quot;</span>);
+		count = min(m-&gt;m_len, len);
+		bcopy(mbuf_data(m), dst, count);
+		m = m-&gt;m_next;
+		dst += count;
+		len -= count;
+	}
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">bpf_tap_imp</span>(
+	ifnet_t		ifp,
+	u_int32_t	dlt,
+	mbuf_t		m,
+	<span class="enscript-type">void</span>*		hdr,
+	size_t		hlen,
+	<span class="enscript-type">int</span>		outbound)
+{
+	<span class="enscript-type">struct</span> bpf_if *bp;
+	<span class="enscript-type">struct</span> mbuf *savedm = m;
+
+	<span class="enscript-comment">/*
+	 * It's possible that we get here after the bpf descriptor has been
+	 * detached from the interface; in such a case we simply return.
+	 * Lock ordering is important since we can be called asynchronously
+	 * (from the IOKit) to process an inbound packet; when that happens
+	 * we would have been holding its &quot;gateLock&quot; and will be acquiring
+	 * &quot;bpf_mlock&quot; upon entering this routine.  Due to that, we release
+	 * &quot;bpf_mlock&quot; prior to calling ifnet_set_promiscuous (which will
+	 * acquire &quot;gateLock&quot; in the IOKit), in order to avoid a deadlock
+	 * when a ifnet_set_promiscuous request simultaneously collides with
+	 * an inbound packet being passed into the tap callback.
+	 */</span>
+	lck_mtx_lock(bpf_mlock);
+	<span class="enscript-keyword">if</span> (ifp-&gt;if_bpf == NULL) {
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span>;
+	}
+	bp = ifp-&gt;if_bpf;
+	<span class="enscript-keyword">for</span> (bp = ifp-&gt;if_bpf; bp &amp;&amp; bp-&gt;bif_ifp == ifp &amp;&amp;
+		 (dlt != 0 &amp;&amp; bp-&gt;bif_dlt != dlt); bp = bp-&gt;bif_next)
+		;
+	<span class="enscript-keyword">if</span> (bp &amp;&amp; bp-&gt;bif_ifp == ifp &amp;&amp; bp-&gt;bif_dlist != NULL) {
+		<span class="enscript-type">struct</span> bpf_d	*d;
+		<span class="enscript-type">struct</span> m_hdr	hack_hdr;
+		u_int	pktlen = 0;
+		u_int	slen = 0;
+		<span class="enscript-type">struct</span> mbuf *m0;
+		
+		<span class="enscript-keyword">if</span> (hdr) {
+			<span class="enscript-comment">/*
+			 * This is gross. We mock up an mbuf that points to the
+			 * header buffer. This means we don't have to copy the
+			 * header. A number of interfaces prepended headers just
+			 * for bpf by allocating an mbuf on the stack. We want to
+			 * give developers an easy way to prepend a header for bpf.
+			 * Since a developer allocating an mbuf on the stack is bad,
+			 * we do even worse here, allocating only a header to point
+			 * to a buffer the developer supplied. This makes assumptions
+			 * that bpf_filter and catchpacket will not look at anything
+			 * in the mbuf other than the header. This was true at the
+			 * time this code was written.
+			 */</span>
+			hack_hdr.mh_next = m;
+			hack_hdr.mh_nextpkt = NULL;
+			hack_hdr.mh_len = hlen;
+			hack_hdr.mh_data = hdr;
+			hack_hdr.mh_type = m-&gt;m_type;
+			hack_hdr.mh_flags = 0;
+			
+			__IGNORE_WCASTALIGN(m = (mbuf_t)&amp;hack_hdr);
+		}
+
+		<span class="enscript-keyword">for</span> (m0 = m; m0 != 0; m0 = m0-&gt;m_next)
+			pktlen += m0-&gt;m_len;
+		
+		<span class="enscript-keyword">for</span> (d = bp-&gt;bif_dlist; d; d = d-&gt;bd_next) {
+			<span class="enscript-keyword">if</span> (outbound &amp;&amp; !d-&gt;bd_seesent)
+				<span class="enscript-keyword">continue</span>;
+			++d-&gt;bd_rcount;
+			slen = bpf_filter(d-&gt;bd_filter, (u_char *)m, pktlen, 0);
+			<span class="enscript-keyword">if</span> (slen != 0) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+				<span class="enscript-keyword">if</span> (mac_bpfdesc_check_receive(d, bp-&gt;bif_ifp) != 0)
+					<span class="enscript-keyword">continue</span>;
+#<span class="enscript-reference">endif</span>
+				catchpacket(d, (u_char *)m, savedm, pktlen,
+				    slen, outbound, bpf_mcopy);
+			}
+		}
+	}
+	lck_mtx_unlock(bpf_mlock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bpf_tap_out</span>(
+	ifnet_t		ifp,
+	u_int32_t	dlt,
+	mbuf_t		m,
+	<span class="enscript-type">void</span>*		hdr,
+	size_t		hlen)
+{
+	bpf_tap_imp(ifp, dlt, m, hdr, hlen, 1);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bpf_tap_in</span>(
+	ifnet_t		ifp,
+	u_int32_t	dlt,
+	mbuf_t		m,
+	<span class="enscript-type">void</span>*		hdr,
+	size_t		hlen)
+{
+	bpf_tap_imp(ifp, dlt, m, hdr, hlen, 0);
+}
+
+<span class="enscript-comment">/* Callback registered with Ethernet driver. */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">bpf_tap_callback</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> mbuf *m)
+{
+	bpf_tap_imp(ifp, 0, m, NULL, 0, mbuf_pkthdr_rcvif(m) == NULL);
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Move the packet data from interface memory (pkt) into the
+ * store buffer.  Return 1 if it's time to wakeup a listener (buffer full),
+ * otherwise 0.  &quot;copy&quot; is the routine called to do the actual data
+ * transfer.  bcopy is passed in to copy contiguous chunks, while
+ * bpf_mcopy is passed in to copy mbuf chains.  In the latter case,
+ * pkt is really an mbuf.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">catchpacket</span>(<span class="enscript-type">struct</span> bpf_d *d, u_char *pkt, <span class="enscript-type">struct</span> mbuf *m, u_int pktlen,
+	u_int snaplen, <span class="enscript-type">int</span> outbound,
+	<span class="enscript-type">void</span> (*cpfn)(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *, <span class="enscript-type">void</span> *, size_t))
+{
+	<span class="enscript-type">struct</span> bpf_hdr *hp;
+	<span class="enscript-type">struct</span> bpf_hdr_ext *ehp;
+	<span class="enscript-type">int</span> totlen, curlen;
+	<span class="enscript-type">int</span> hdrlen, caplen;
+	<span class="enscript-type">int</span> do_wakeup = 0;
+	u_char *payload;
+	<span class="enscript-type">struct</span> timeval tv;
+	<span class="enscript-type">struct</span> m_tag *mt = NULL;
+	<span class="enscript-type">struct</span> bpf_mtag *bt = NULL;
+
+	hdrlen = (d-&gt;bd_flags &amp; BPF_EXTENDED_HDR) ? d-&gt;bd_bif-&gt;bif_exthdrlen :
+	    d-&gt;bd_bif-&gt;bif_hdrlen;
+	<span class="enscript-comment">/*
+	 * Figure out how many bytes to move.  If the packet is
+	 * greater or equal to the snapshot length, transfer that
+	 * much.  Otherwise, transfer the whole packet (unless
+	 * we hit the buffer size limit).
+	 */</span>
+	totlen = hdrlen + min(snaplen, pktlen);
+	<span class="enscript-keyword">if</span> (totlen &gt; d-&gt;bd_bufsize)
+		totlen = d-&gt;bd_bufsize;
+
+	<span class="enscript-comment">/*
+	 * Round up the end of the previous packet to the next longword.
+	 */</span>
+	curlen = BPF_WORDALIGN(d-&gt;bd_slen);
+	<span class="enscript-keyword">if</span> (curlen + totlen &gt; d-&gt;bd_bufsize) {
+		<span class="enscript-comment">/*
+		 * This packet will overflow the storage buffer.
+		 * Rotate the buffers if we can, then wakeup any
+		 * pending reads.
+		 */</span>
+		<span class="enscript-keyword">if</span> (d-&gt;bd_fbuf == NULL) {
+			<span class="enscript-keyword">if</span> (d-&gt;bd_headdrop == 0) {
+				<span class="enscript-comment">/*
+				 * We haven't completed the previous read yet,
+				 * so drop the packet.
+				 */</span>
+				++d-&gt;bd_dcount;
+				<span class="enscript-keyword">return</span>;
+			}
+			<span class="enscript-comment">/*
+			 * Drop the hold buffer as it contains older packets
+			 */</span>
+			d-&gt;bd_dcount += d-&gt;bd_hcnt;
+			d-&gt;bd_fbuf = d-&gt;bd_hbuf;
+			ROTATE_BUFFERS(d);
+		} <span class="enscript-keyword">else</span> {
+			ROTATE_BUFFERS(d);
+		}
+		do_wakeup = 1;
+		curlen = 0;
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (d-&gt;bd_immediate || d-&gt;bd_state == BPF_TIMED_OUT)
+		<span class="enscript-comment">/*
+		 * Immediate mode is set, or the read timeout has 
+		 * already expired during a select call. A packet 
+		 * arrived, so the reader should be woken up.
+		 */</span>
+		do_wakeup = 1;
+
+	<span class="enscript-comment">/*
+	 * Append the bpf header.
+	 */</span>
+	microtime(&amp;tv);
+ 	<span class="enscript-keyword">if</span> (d-&gt;bd_flags &amp; BPF_EXTENDED_HDR) {
+ 		ehp = (<span class="enscript-type">struct</span> bpf_hdr_ext *)(<span class="enscript-type">void</span> *)(d-&gt;bd_sbuf + curlen);
+ 		memset(ehp, 0, <span class="enscript-keyword">sizeof</span>(*ehp));
+ 		ehp-&gt;bh_tstamp.tv_sec = tv.tv_sec;
+ 		ehp-&gt;bh_tstamp.tv_usec = tv.tv_usec;
+ 		ehp-&gt;bh_datalen = pktlen;
+ 		ehp-&gt;bh_hdrlen = hdrlen;
+ 		ehp-&gt;bh_caplen = totlen - hdrlen;
+		mt = m_tag_locate(m, bpf_mtag_id, 0, NULL);
+		<span class="enscript-keyword">if</span> (mt &amp;&amp; mt-&gt;m_tag_len &gt;= <span class="enscript-keyword">sizeof</span>(*bt)) {
+			bt = (<span class="enscript-type">struct</span> bpf_mtag *)(mt + 1);
+			ehp-&gt;bh_pid = bt-&gt;bt_pid;
+			strlcpy(ehp-&gt;bh_comm, bt-&gt;bt_comm,
+			    <span class="enscript-keyword">sizeof</span>(ehp-&gt;bh_comm));
+			ehp-&gt;bh_svc = so_svc2tc(bt-&gt;bt_svc);
+			<span class="enscript-keyword">if</span> (bt-&gt;bt_direction == BPF_MTAG_DIR_OUT)
+				ehp-&gt;bh_flags |= BPF_HDR_EXT_FLAGS_DIR_OUT;
+			<span class="enscript-keyword">else</span>
+				ehp-&gt;bh_flags |= BPF_HDR_EXT_FLAGS_DIR_IN;
+			m_tag_delete(m, mt);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (outbound) {
+			<span class="enscript-comment">/* only do lookups on non-raw INPCB */</span>
+			<span class="enscript-keyword">if</span> ((m-&gt;m_pkthdr.pkt_flags &amp; (PKTF_FLOW_ID|
+			    PKTF_FLOW_LOCALSRC|PKTF_FLOW_RAWSOCK)) ==
+			    (PKTF_FLOW_ID|PKTF_FLOW_LOCALSRC) &amp;&amp;
+			    m-&gt;m_pkthdr.pkt_flowsrc == FLOWSRC_INPCB) {
+				ehp-&gt;bh_flowid = m-&gt;m_pkthdr.pkt_flowid;
+				ehp-&gt;bh_proto = m-&gt;m_pkthdr.pkt_proto;
+			}
+			ehp-&gt;bh_svc = so_svc2tc(m-&gt;m_pkthdr.pkt_svc);
+			ehp-&gt;bh_flags |= BPF_HDR_EXT_FLAGS_DIR_OUT;
+		} <span class="enscript-keyword">else</span>
+			ehp-&gt;bh_flags |= BPF_HDR_EXT_FLAGS_DIR_IN;
+ 		payload = (u_char *)ehp + hdrlen;
+ 		caplen = ehp-&gt;bh_caplen;
+ 	} <span class="enscript-keyword">else</span> {
+ 		hp = (<span class="enscript-type">struct</span> bpf_hdr *)(<span class="enscript-type">void</span> *)(d-&gt;bd_sbuf + curlen);
+ 		hp-&gt;bh_tstamp.tv_sec = tv.tv_sec;
+ 		hp-&gt;bh_tstamp.tv_usec = tv.tv_usec;
+ 		hp-&gt;bh_datalen = pktlen;
+ 		hp-&gt;bh_hdrlen = hdrlen;
+ 		hp-&gt;bh_caplen = totlen - hdrlen;
+ 		payload = (u_char *)hp + hdrlen;
+ 		caplen = hp-&gt;bh_caplen;
+ 	}
+	<span class="enscript-comment">/*
+	 * Copy the packet data into the store buffer and update its length.
+	 */</span>
+	(*cpfn)(pkt, payload, caplen);
+	d-&gt;bd_slen = curlen + totlen;
+	d-&gt;bd_scnt += 1;
+
+	<span class="enscript-keyword">if</span> (do_wakeup)
+		bpf_wakeup(d);
+}
+
+<span class="enscript-comment">/*
+ * Initialize all nonzero fields of a descriptor.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">bpf_allocbufs</span>(<span class="enscript-type">struct</span> bpf_d *d)
+{
+	d-&gt;bd_fbuf = (caddr_t) _MALLOC(d-&gt;bd_bufsize, M_DEVBUF, M_WAIT);
+	<span class="enscript-keyword">if</span> (d-&gt;bd_fbuf == 0)
+		<span class="enscript-keyword">return</span> (ENOBUFS);
+
+	d-&gt;bd_sbuf = (caddr_t) _MALLOC(d-&gt;bd_bufsize, M_DEVBUF, M_WAIT);
+	<span class="enscript-keyword">if</span> (d-&gt;bd_sbuf == 0) {
+		FREE(d-&gt;bd_fbuf, M_DEVBUF);
+		<span class="enscript-keyword">return</span> (ENOBUFS);
+	}
+	d-&gt;bd_slen = 0;
+	d-&gt;bd_hlen = 0;
+	d-&gt;bd_scnt = 0;
+	d-&gt;bd_hcnt = 0;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Free buffers currently in use by a descriptor.
+ * Called on close.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">bpf_freed</span>(<span class="enscript-type">struct</span> bpf_d *d)
+{
+	<span class="enscript-comment">/*
+	 * We don't need to lock out interrupts since this descriptor has
+	 * been detached from its interface and it yet hasn't been marked
+	 * free.
+	 */</span>
+	<span class="enscript-keyword">if</span> (d-&gt;bd_hbuf_read)
+		panic(<span class="enscript-string">&quot;bpf buffer freed during read&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (d-&gt;bd_sbuf != 0) {
+		FREE(d-&gt;bd_sbuf, M_DEVBUF);
+		<span class="enscript-keyword">if</span> (d-&gt;bd_hbuf != 0) 
+			FREE(d-&gt;bd_hbuf, M_DEVBUF);
+		<span class="enscript-keyword">if</span> (d-&gt;bd_fbuf != 0)
+			FREE(d-&gt;bd_fbuf, M_DEVBUF);
+	}
+	<span class="enscript-keyword">if</span> (d-&gt;bd_filter)
+		FREE((caddr_t)d-&gt;bd_filter, M_DEVBUF);
+}
+
+<span class="enscript-comment">/*
+ * Attach an interface to bpf.  driverp is a pointer to a (struct bpf_if *)
+ * in the driver's softc; dlt is the link layer type; hdrlen is the fixed
+ * size of the link header (variable length headers not yet supported).
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bpfattach</span>(<span class="enscript-type">struct</span> ifnet *ifp, u_int dlt, u_int hdrlen)
+{
+	bpf_attach(ifp, dlt, hdrlen, NULL, NULL);
+}
+
+errno_t
+<span class="enscript-function-name">bpf_attach</span>(
+	ifnet_t			ifp,
+	u_int32_t		dlt,
+	u_int32_t		hdrlen,
+	bpf_send_func	send,
+	bpf_tap_func	tap)
+{
+	<span class="enscript-type">struct</span> bpf_if *bp_new;
+	<span class="enscript-type">struct</span> bpf_if *bp_temp;
+	<span class="enscript-type">struct</span> bpf_if *bp_first = NULL;
+	
+	bp_new = (<span class="enscript-type">struct</span> bpf_if *) _MALLOC(<span class="enscript-keyword">sizeof</span>(*bp_new), M_DEVBUF,
+	    M_WAIT | M_ZERO);
+	<span class="enscript-keyword">if</span> (bp_new == 0)
+		panic(<span class="enscript-string">&quot;bpfattach&quot;</span>);
+
+	lck_mtx_lock(bpf_mlock);
+
+	<span class="enscript-comment">/*
+	 * Check if this interface/dlt is already attached, record first
+	 * attachment for this interface.
+	 */</span>
+	<span class="enscript-keyword">for</span> (bp_temp = bpf_iflist; bp_temp &amp;&amp; (bp_temp-&gt;bif_ifp != ifp ||
+		 bp_temp-&gt;bif_dlt != dlt); bp_temp = bp_temp-&gt;bif_next) {
+		 <span class="enscript-keyword">if</span> (bp_temp-&gt;bif_ifp == ifp &amp;&amp; bp_first == NULL)
+		 	bp_first = bp_temp;
+	}
+	
+	<span class="enscript-keyword">if</span> (bp_temp != NULL) {
+		printf(<span class="enscript-string">&quot;bpfattach - %s with dlt %d is already attached\n&quot;</span>,
+			if_name(ifp), dlt);
+		FREE(bp_new, M_DEVBUF);
+		lck_mtx_unlock(bpf_mlock);
+		<span class="enscript-keyword">return</span> EEXIST;
+	}
+	
+	bp_new-&gt;bif_ifp = ifp;
+	bp_new-&gt;bif_dlt = dlt;
+	bp_new-&gt;bif_send = send;
+	bp_new-&gt;bif_tap = tap;
+	
+	<span class="enscript-keyword">if</span> (bp_first == NULL) {
+		<span class="enscript-comment">/* No other entries for this ifp */</span>
+		bp_new-&gt;bif_next = bpf_iflist;
+		bpf_iflist = bp_new;
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* Add this after the first entry for this interface */</span>
+		bp_new-&gt;bif_next = bp_first-&gt;bif_next;
+		bp_first-&gt;bif_next = bp_new;
+	}
+	
+	<span class="enscript-comment">/*
+	 * Compute the length of the bpf header.  This is not necessarily
+	 * equal to SIZEOF_BPF_HDR because we want to insert spacing such
+	 * that the network layer header begins on a longword boundary (for
+	 * performance reasons and to alleviate alignment restrictions).
+	 */</span>
+	bp_new-&gt;bif_hdrlen = BPF_WORDALIGN(hdrlen + SIZEOF_BPF_HDR) - hdrlen;
+	bp_new-&gt;bif_exthdrlen = BPF_WORDALIGN(hdrlen +
+	    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> bpf_hdr_ext)) - hdrlen;
+	
+	<span class="enscript-comment">/* Take a reference on the interface */</span>
+	ifnet_reference(ifp);
+
+	lck_mtx_unlock(bpf_mlock);
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__APPLE__</span>
+	<span class="enscript-keyword">if</span> (bootverbose)
+		printf(<span class="enscript-string">&quot;bpf: %s attached\n&quot;</span>, if_name(ifp));
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Detach bpf from an interface.  This involves detaching each descriptor
+ * associated with the interface, and leaving bd_bif NULL.  Notify each
+ * descriptor as it's detached so that any sleepers wake up and get
+ * ENXIO.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bpfdetach</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">struct</span> bpf_if	*bp, *bp_prev, *bp_next;
+	<span class="enscript-type">struct</span> bpf_d	*d;
+
+	<span class="enscript-keyword">if</span> (bpf_debug != 0)
+		printf(<span class="enscript-string">&quot;%s: %s\n&quot;</span>,
+		    __func__, if_name(ifp));
+
+	lck_mtx_lock(bpf_mlock);
+
+	<span class="enscript-comment">/*
+	 * Build the list of devices attached to that interface
+	 * that we need to free while keeping the lock to maintain
+	 * the integrity of the interface list
+	 */</span>
+	bp_prev = NULL;
+	<span class="enscript-keyword">for</span> (bp = bpf_iflist; bp != NULL; bp = bp_next) {
+		bp_next = bp-&gt;bif_next;
+
+		<span class="enscript-keyword">if</span> (ifp != bp-&gt;bif_ifp) {
+			bp_prev = bp;
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-comment">/* Unlink from the interface list */</span>
+		<span class="enscript-keyword">if</span> (bp_prev)
+			bp_prev-&gt;bif_next = bp-&gt;bif_next;
+		<span class="enscript-keyword">else</span>
+			bpf_iflist = bp-&gt;bif_next;
+
+		<span class="enscript-comment">/* Detach the devices attached to the interface */</span>
+		<span class="enscript-keyword">while</span> ((d = bp-&gt;bif_dlist) != NULL) {
+			<span class="enscript-comment">/*
+			 * Take an extra reference to prevent the device
+			 * from being freed when bpf_detachd() releases
+			 * the reference for the interface list
+			 */</span>
+			bpf_acquire_d(d);
+			bpf_detachd(d, 0);
+			bpf_wakeup(d);
+			bpf_release_d(d);
+		}
+		ifnet_release(ifp);
+	}
+
+	lck_mtx_unlock(bpf_mlock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bpf_init</span>(__unused <span class="enscript-type">void</span> *unused)
+{
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__APPLE__</span>
+	<span class="enscript-type">int</span> 	i;
+	<span class="enscript-type">int</span>	maj;
+
+	<span class="enscript-keyword">if</span> (bpf_devsw_installed == 0) {
+		bpf_devsw_installed = 1;
+		bpf_mlock_grp_attr = lck_grp_attr_alloc_init();
+		bpf_mlock_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;bpf&quot;</span>, bpf_mlock_grp_attr);
+		bpf_mlock_attr = lck_attr_alloc_init();
+		lck_mtx_init(bpf_mlock, bpf_mlock_grp, bpf_mlock_attr);
+		maj = cdevsw_add(CDEV_MAJOR, &amp;bpf_cdevsw);
+		<span class="enscript-keyword">if</span> (maj == -1) {
+			<span class="enscript-keyword">if</span> (bpf_mlock_attr)
+				lck_attr_free(bpf_mlock_attr);
+			<span class="enscript-keyword">if</span> (bpf_mlock_grp)
+				lck_grp_free(bpf_mlock_grp);
+			<span class="enscript-keyword">if</span> (bpf_mlock_grp_attr)
+				lck_grp_attr_free(bpf_mlock_grp_attr);
+			
+			bpf_mlock = NULL;
+			bpf_mlock_attr = NULL;
+			bpf_mlock_grp = NULL;
+			bpf_mlock_grp_attr = NULL;
+			bpf_devsw_installed = 0;
+			printf(<span class="enscript-string">&quot;bpf_init: failed to allocate a major number!\n&quot;</span>);
+			<span class="enscript-keyword">return</span>;
+		}
+
+		<span class="enscript-keyword">for</span> (i = 0 ; i &lt; NBPFILTER; i++)
+			bpf_make_dev_t(maj);
+
+		VERIFY(mbuf_tag_id_find(BPF_CONTROL_NAME, &amp;bpf_mtag_id) == 0);
+	}
+#<span class="enscript-reference">else</span>
+	cdevsw_add(&amp;bpf_cdevsw);
+#<span class="enscript-reference">endif</span>
+}
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__APPLE__</span>
+<span class="enscript-function-name">SYSINIT</span>(bpfdev,SI_SUB_DRIVERS,SI_ORDER_MIDDLE+CDEV_MAJOR,bpf_drvinit,NULL)
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+<span class="enscript-type">struct</span> label *
+<span class="enscript-function-name">mac_bpfdesc_label_get</span>(<span class="enscript-type">struct</span> bpf_d *d)
+{
+
+	<span class="enscript-keyword">return</span> (d-&gt;bd_label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_bpfdesc_label_set</span>(<span class="enscript-type">struct</span> bpf_d *d, <span class="enscript-type">struct</span> label *label)
+{
+
+	d-&gt;bd_label = label;
+}
+#<span class="enscript-reference">endif</span>
+</pre>
+<hr />
+</body></html>

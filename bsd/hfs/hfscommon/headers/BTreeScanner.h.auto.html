@@ -1,0 +1,147 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>BTreeScanner.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">BTreeScanner.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1996-2004 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ *
+ *	@(#)BTreeScanner.h
+ */</span>
+
+#<span class="enscript-reference">ifndef</span>	<span class="enscript-variable-name">_BTREESCANNER_H_</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_BTREESCANNER_H_</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/appleapiopts.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__APPLE_API_PRIVATE</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;FileMgrInternal.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;BTreesPrivate.h&quot;</span>
+
+<span class="enscript-comment">// amount of time we are allowed to process a catalog search (in µ secs)
+</span><span class="enscript-comment">// NOTE - code assumes kMaxMicroSecsInKernel is less than 1,000,000
+</span><span class="enscript-type">enum</span> { kMaxMicroSecsInKernel = (1000 * 100) };	<span class="enscript-comment">// 1 tenth of a second
+</span>
+<span class="enscript-comment">// btree node scanner buffer size.  at 32K we get 8 nodes.  this is the size used
+</span><span class="enscript-comment">// in Mac OS 9
+</span><span class="enscript-type">enum</span> { kCatSearchBufferSize = (32 * 1024) };
+
+
+<span class="enscript-comment">/*
+ * ============ W A R N I N G ! ============
+ * DO NOT INCREASE THE SIZE OF THIS STRUCT!
+ * It must be less than or equal to the size of 
+ * the opaque searchstate struct (in sys/attr.h).
+ */</span>
+<span class="enscript-comment">/* Private description used in hfs_search */</span>
+<span class="enscript-type">struct</span> CatPosition 
+{
+  u_int32_t		writeCount;    	<span class="enscript-comment">/* The BTree's write count (to see if the catalog writeCount */</span>
+                              	<span class="enscript-comment">/* changed since the last search).  If 0, the rest */</span>
+                             	<span class="enscript-comment">/* of the record is invalid, start from beginning. */</span>
+  u_int32_t     nextNode;     	<span class="enscript-comment">/* node number to resume search */</span>
+  u_int32_t   	nextRecord;  	<span class="enscript-comment">/* record number to resume search */</span>
+  u_int32_t   	recordsFound; 	<span class="enscript-comment">/* number of leaf records seen so far */</span>
+};
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> CatPosition              CatPosition;
+
+
+<span class="enscript-comment">/*
+	BTScanState - This structure is used to keep track of the current state
+	of a BTree scan.  It contains both the dynamic state information (like
+	the current node number and record number) and information that is static
+	for the duration of a scan (such as buffer pointers).
+	
+	NOTE: recordNum may equal or exceed the number of records in the node
+	number nodeNum.  If so, then the next attempt to get a record will move
+	to a new node number.
+*/</span>
+<span class="enscript-type">struct</span> BTScanState 
+{
+	<span class="enscript-comment">//	The following fields are set up once at initialization time.
+</span>	<span class="enscript-comment">//	They are not changed during a scan.
+</span>	u_int32_t			bufferSize;
+	<span class="enscript-type">struct</span> buf *		bufferPtr;
+	BTreeControlBlock *	btcb;
+	
+	<span class="enscript-comment">//	The following fields are the dynamic state of the current scan.
+</span>	u_int32_t			nodeNum;			<span class="enscript-comment">// zero is first node
+</span>	u_int32_t			recordNum;			<span class="enscript-comment">// zero is first record
+</span>	BTNodeDescriptor *	currentNodePtr;		<span class="enscript-comment">// points to current node within buffer
+</span>	u_int32_t			nodesLeftInBuffer;	<span class="enscript-comment">// number of valid nodes still in the buffer
+</span>	u_int32_t			recordsFound;		<span class="enscript-comment">// number of leaf records seen so far
+</span>	<span class="enscript-type">struct</span> timeval		startTime;			<span class="enscript-comment">// time we started catalog search
+</span>};
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> BTScanState BTScanState;
+
+
+<span class="enscript-comment">/* *********************** PROTOTYPES *********************** */</span>
+
+<span class="enscript-type">int</span>	BTScanInitialize(	<span class="enscript-type">const</span> FCB *		btreeFile,
+						u_int32_t		startingNode,
+						u_int32_t		startingRecord,
+						u_int32_t		recordsFound,
+						u_int32_t		bufferSize,
+						BTScanState	*	scanState     );
+							
+<span class="enscript-type">int</span> <span class="enscript-function-name">BTScanNextRecord</span>(	BTScanState *	scanState,
+						Boolean			avoidIO,
+						<span class="enscript-type">void</span> * *		key,
+						<span class="enscript-type">void</span> * *		data,
+						u_int32_t *		dataSize  );
+
+<span class="enscript-type">int</span>	BTScanTerminate(	BTScanState *	scanState,
+						u_int32_t *		startingNode,
+						u_int32_t *		startingRecord,
+						u_int32_t *		recordsFound	);
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE_API_PRIVATE */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KERNEL */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !_BTREESCANNER_H_ */</span>
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,1078 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>gzio.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">gzio.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* gzio.c -- IO on .gz files
+ * Copyright (C) 1995-2005 Jean-loup Gailly.
+ * For conditions of distribution and use, see copyright notice in zlib.h
+ *
+ * Compile this file with -DNO_GZCOMPRESS to avoid the compression code.
+ */</span>
+
+<span class="enscript-comment">/* @(#) $Id$ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;zutil.h&quot;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NO_DEFLATE</span>       <span class="enscript-comment">/* for compatibility with old definition */</span>
+#  <span class="enscript-reference">define</span> <span class="enscript-variable-name">NO_GZCOMPRESS</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">NO_DUMMY_DECL</span>
+<span class="enscript-type">struct</span> internal_state {<span class="enscript-type">int</span> dummy;}; <span class="enscript-comment">/* for buggy compilers */</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">Z_BUFSIZE</span>
+#  <span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MAXSEG_64K</span>
+#    <span class="enscript-reference">define</span> <span class="enscript-variable-name">Z_BUFSIZE</span> 4096 <span class="enscript-comment">/* minimize memory usage for 16-bit DOS */</span>
+#  <span class="enscript-reference">else</span>
+#    <span class="enscript-reference">define</span> <span class="enscript-variable-name">Z_BUFSIZE</span> 16384
+#  <span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">Z_PRINTF_BUFSIZE</span>
+#  <span class="enscript-reference">define</span> <span class="enscript-variable-name">Z_PRINTF_BUFSIZE</span> 4096
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__MVS__</span>
+#  <span class="enscript-reference">pragma</span> <span class="enscript-variable-name">map</span> (<span class="enscript-variable-name">fdopen</span> , <span class="enscript-string">&quot;\174\174FDOPEN&quot;</span>)
+   FILE *fdopen(<span class="enscript-type">int</span>, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *);
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">STDC</span>
+<span class="enscript-type">extern</span> voidp  malloc <span class="enscript-function-name">OF</span>((uInt size));
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>   free   <span class="enscript-function-name">OF</span>((voidpf ptr));
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ALLOC</span>(size) malloc(size)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TRYFREE</span>(p) {if (p) free(p);}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-type">const</span> gz_magic[2] = {0x1f, 0x8b}; <span class="enscript-comment">/* gzip magic header */</span>
+
+<span class="enscript-comment">/* gzip flag byte */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ASCII_FLAG</span>   0x01 <span class="enscript-comment">/* bit 0 set: file probably ascii text */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">HEAD_CRC</span>     0x02 <span class="enscript-comment">/* bit 1 set: header CRC present */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">EXTRA_FIELD</span>  0x04 <span class="enscript-comment">/* bit 2 set: extra field present */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ORIG_NAME</span>    0x08 <span class="enscript-comment">/* bit 3 set: original file name present */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">COMMENT</span>      0x10 <span class="enscript-comment">/* bit 4 set: file comment present */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">RESERVED</span>     0xE0 <span class="enscript-comment">/* bits 5..7: reserved */</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> gz_stream {
+    z_stream stream;
+    <span class="enscript-type">int</span>      z_err;   <span class="enscript-comment">/* error code for last stream operation */</span>
+    <span class="enscript-type">int</span>      z_eof;   <span class="enscript-comment">/* set if end of input file */</span>
+    FILE     *file;   <span class="enscript-comment">/* .gz file */</span>
+    Byte     *inbuf;  <span class="enscript-comment">/* input buffer */</span>
+    Byte     *outbuf; <span class="enscript-comment">/* output buffer */</span>
+    uLong    crc;     <span class="enscript-comment">/* crc32 of uncompressed data */</span>
+    <span class="enscript-type">char</span>     *msg;    <span class="enscript-comment">/* error message */</span>
+    <span class="enscript-type">char</span>     *path;   <span class="enscript-comment">/* path name for debugging only */</span>
+    <span class="enscript-type">int</span>      transparent; <span class="enscript-comment">/* 1 if input file is not a .gz file */</span>
+    <span class="enscript-type">char</span>     mode;    <span class="enscript-comment">/* 'w' or 'r' */</span>
+    z_off_t  start;   <span class="enscript-comment">/* start of compressed data in file (header skipped) */</span>
+    z_off_t  in;      <span class="enscript-comment">/* bytes into deflate or inflate */</span>
+    z_off_t  out;     <span class="enscript-comment">/* bytes out of deflate or inflate */</span>
+    <span class="enscript-type">int</span>      back;    <span class="enscript-comment">/* one character push-back */</span>
+    <span class="enscript-type">int</span>      last;    <span class="enscript-comment">/* true if push-back is last character */</span>
+} gz_stream;
+
+
+local gzFile gz_open      <span class="enscript-function-name">OF</span>((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *path, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *mode, <span class="enscript-type">int</span>  fd));
+local <span class="enscript-type">int</span> do_flush        <span class="enscript-function-name">OF</span>((gzFile file, <span class="enscript-type">int</span> flush));
+local <span class="enscript-type">int</span>    get_byte     <span class="enscript-function-name">OF</span>((gz_stream *s));
+local <span class="enscript-type">void</span>   check_header <span class="enscript-function-name">OF</span>((gz_stream *s));
+local <span class="enscript-type">int</span>    destroy      <span class="enscript-function-name">OF</span>((gz_stream *s));
+local <span class="enscript-type">void</span>   putLong      <span class="enscript-function-name">OF</span>((FILE *file, uLong x));
+local uLong  getLong      <span class="enscript-function-name">OF</span>((gz_stream *s));
+
+<span class="enscript-comment">/* ===========================================================================
+     Opens a gzip (.gz) file for reading or writing. The mode parameter
+   is as in fopen (&quot;rb&quot; or &quot;wb&quot;). The file is given either by file descriptor
+   or path name (if fd == -1).
+     gz_open returns NULL if the file could not be opened or if there was
+   insufficient memory to allocate the (de)compression state; errno
+   can be checked to distinguish the two cases (if errno is zero, the
+   zlib error is Z_MEM_ERROR).
+*/</span>
+local gzFile <span class="enscript-function-name">gz_open</span> (path, mode, fd)
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *path;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *mode;
+    <span class="enscript-type">int</span>  fd;
+{
+    <span class="enscript-type">int</span> err;
+    <span class="enscript-type">int</span> level = Z_DEFAULT_COMPRESSION; <span class="enscript-comment">/* compression level */</span>
+    <span class="enscript-type">int</span> strategy = Z_DEFAULT_STRATEGY; <span class="enscript-comment">/* compression strategy */</span>
+    <span class="enscript-type">char</span> *p = (<span class="enscript-type">char</span>*)mode;
+    gz_stream *s;
+    <span class="enscript-type">char</span> fmode[80]; <span class="enscript-comment">/* copy of mode, without the compression level */</span>
+    <span class="enscript-type">char</span> *m = fmode;
+
+    <span class="enscript-keyword">if</span> (!path || !mode) <span class="enscript-keyword">return</span> Z_NULL;
+
+    s = (gz_stream *)ALLOC(<span class="enscript-keyword">sizeof</span>(gz_stream));
+    <span class="enscript-keyword">if</span> (!s) <span class="enscript-keyword">return</span> Z_NULL;
+
+    s-&gt;stream.zalloc = (alloc_func)0;
+    s-&gt;stream.zfree = (free_func)0;
+    s-&gt;stream.opaque = (voidpf)0;
+    s-&gt;stream.next_in = s-&gt;inbuf = Z_NULL;
+    s-&gt;stream.next_out = s-&gt;outbuf = Z_NULL;
+    s-&gt;stream.avail_in = s-&gt;stream.avail_out = 0;
+    s-&gt;file = NULL;
+    s-&gt;z_err = Z_OK;
+    s-&gt;z_eof = 0;
+    s-&gt;in = 0;
+    s-&gt;out = 0;
+    s-&gt;back = EOF;
+    s-&gt;crc = z_crc32(0L, Z_NULL, 0);
+    s-&gt;msg = NULL;
+    s-&gt;transparent = 0;
+
+    s-&gt;path = (<span class="enscript-type">char</span>*)ALLOC(strlen(path)+1);
+    <span class="enscript-keyword">if</span> (s-&gt;path == NULL) {
+        <span class="enscript-keyword">return</span> destroy(s), (gzFile)Z_NULL;
+    }
+    strcpy(s-&gt;path, path); <span class="enscript-comment">/* do this early for debugging */</span>
+
+    s-&gt;mode = <span class="enscript-string">'\0'</span>;
+    <span class="enscript-keyword">do</span> {
+        <span class="enscript-keyword">if</span> (*p == <span class="enscript-string">'r'</span>) s-&gt;mode = <span class="enscript-string">'r'</span>;
+        <span class="enscript-keyword">if</span> (*p == <span class="enscript-string">'w'</span> || *p == <span class="enscript-string">'a'</span>) s-&gt;mode = <span class="enscript-string">'w'</span>;
+        <span class="enscript-keyword">if</span> (*p &gt;= <span class="enscript-string">'0'</span> &amp;&amp; *p &lt;= <span class="enscript-string">'9'</span>) {
+            level = *p - <span class="enscript-string">'0'</span>;
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (*p == <span class="enscript-string">'f'</span>) {
+          strategy = Z_FILTERED;
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (*p == <span class="enscript-string">'h'</span>) {
+          strategy = Z_HUFFMAN_ONLY;
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (*p == <span class="enscript-string">'R'</span>) {
+          strategy = Z_RLE;
+        } <span class="enscript-keyword">else</span> {
+            *m++ = *p; <span class="enscript-comment">/* copy the mode */</span>
+        }
+    } <span class="enscript-keyword">while</span> (*p++ &amp;&amp; m != fmode + <span class="enscript-keyword">sizeof</span>(fmode));
+    <span class="enscript-keyword">if</span> (s-&gt;mode == <span class="enscript-string">'\0'</span>) <span class="enscript-keyword">return</span> destroy(s), (gzFile)Z_NULL;
+
+    <span class="enscript-keyword">if</span> (s-&gt;mode == <span class="enscript-string">'w'</span>) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NO_GZCOMPRESS</span>
+        err = Z_STREAM_ERROR;
+#<span class="enscript-reference">else</span>
+        err = deflateInit2(&amp;(s-&gt;stream), level,
+                           Z_DEFLATED, -MAX_WBITS, DEF_MEM_LEVEL, strategy);
+        <span class="enscript-comment">/* windowBits is passed &lt; 0 to suppress zlib header */</span>
+
+        s-&gt;stream.next_out = s-&gt;outbuf = (Byte*)ALLOC(Z_BUFSIZE);
+#<span class="enscript-reference">endif</span>
+        <span class="enscript-keyword">if</span> (err != Z_OK || s-&gt;outbuf == Z_NULL) {
+            <span class="enscript-keyword">return</span> destroy(s), (gzFile)Z_NULL;
+        }
+    } <span class="enscript-keyword">else</span> {
+        s-&gt;stream.next_in  = s-&gt;inbuf = (Byte*)ALLOC(Z_BUFSIZE);
+
+        err = inflateInit2(&amp;(s-&gt;stream), -MAX_WBITS);
+        <span class="enscript-comment">/* windowBits is passed &lt; 0 to tell that there is no zlib header.
+         * Note that in this case inflate *requires* an extra &quot;dummy&quot; byte
+         * after the compressed stream in order to complete decompression and
+         * return Z_STREAM_END. Here the gzip CRC32 ensures that 4 bytes are
+         * present after the compressed stream.
+         */</span>
+        <span class="enscript-keyword">if</span> (err != Z_OK || s-&gt;inbuf == Z_NULL) {
+            <span class="enscript-keyword">return</span> destroy(s), (gzFile)Z_NULL;
+        }
+    }
+    s-&gt;stream.avail_out = Z_BUFSIZE;
+
+    errno = 0;
+    s-&gt;file = fd &lt; 0 ? F_OPEN(path, fmode) : (FILE*)fdopen(fd, fmode);
+
+    <span class="enscript-keyword">if</span> (s-&gt;file == NULL) {
+        <span class="enscript-keyword">return</span> destroy(s), (gzFile)Z_NULL;
+    }
+    <span class="enscript-keyword">if</span> (s-&gt;mode == <span class="enscript-string">'w'</span>) {
+        <span class="enscript-comment">/* Write a very simple .gz header:
+         */</span>
+        fprintf(s-&gt;file, <span class="enscript-string">&quot;%c%c%c%c%c%c%c%c%c%c&quot;</span>, gz_magic[0], gz_magic[1],
+             Z_DEFLATED, 0 <span class="enscript-comment">/*flags*/</span>, 0,0,0,0 <span class="enscript-comment">/*time*/</span>, 0 <span class="enscript-comment">/*xflags*/</span>, OS_CODE);
+        s-&gt;start = 10L;
+        <span class="enscript-comment">/* We use 10L instead of ftell(s-&gt;file) to because ftell causes an
+         * fflush on some systems. This version of the library doesn't use
+         * start anyway in write mode, so this initialization is not
+         * necessary.
+         */</span>
+    } <span class="enscript-keyword">else</span> {
+        check_header(s); <span class="enscript-comment">/* skip the .gz header */</span>
+        s-&gt;start = ftell(s-&gt;file) - s-&gt;stream.avail_in;
+    }
+
+    <span class="enscript-keyword">return</span> (gzFile)s;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+     Opens a gzip (.gz) file for reading or writing.
+*/</span>
+gzFile ZEXPORT <span class="enscript-function-name">gzopen</span> (path, mode)
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *path;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *mode;
+{
+    <span class="enscript-keyword">return</span> gz_open (path, mode, -1);
+}
+
+<span class="enscript-comment">/* ===========================================================================
+     Associate a gzFile with the file descriptor fd. fd is not dup'ed here
+   to mimic the behavio(u)r of fdopen.
+*/</span>
+gzFile ZEXPORT <span class="enscript-function-name">gzdopen</span> (fd, mode)
+    <span class="enscript-type">int</span> fd;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *mode;
+{
+    <span class="enscript-type">char</span> name[46];      <span class="enscript-comment">/* allow for up to 128-bit integers */</span>
+
+    <span class="enscript-keyword">if</span> (fd &lt; 0) <span class="enscript-keyword">return</span> (gzFile)Z_NULL;
+    sprintf(name, <span class="enscript-string">&quot;&lt;fd:%d&gt;&quot;</span>, fd); <span class="enscript-comment">/* for debugging */</span>
+
+    <span class="enscript-keyword">return</span> gz_open (name, mode, fd);
+}
+
+<span class="enscript-comment">/* ===========================================================================
+ * Update the compression level and strategy
+ */</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">gzsetparams</span> (file, level, strategy)
+    gzFile file;
+    <span class="enscript-type">int</span> level;
+    <span class="enscript-type">int</span> strategy;
+{
+    gz_stream *s = (gz_stream*)file;
+
+    <span class="enscript-keyword">if</span> (s == NULL || s-&gt;mode != <span class="enscript-string">'w'</span>) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+
+    <span class="enscript-comment">/* Make room to allow flushing */</span>
+    <span class="enscript-keyword">if</span> (s-&gt;stream.avail_out == 0) {
+
+        s-&gt;stream.next_out = s-&gt;outbuf;
+        <span class="enscript-keyword">if</span> (fwrite(s-&gt;outbuf, 1, Z_BUFSIZE, s-&gt;file) != Z_BUFSIZE) {
+            s-&gt;z_err = Z_ERRNO;
+        }
+        s-&gt;stream.avail_out = Z_BUFSIZE;
+    }
+
+    <span class="enscript-keyword">return</span> deflateParams (&amp;(s-&gt;stream), level, strategy);
+}
+
+<span class="enscript-comment">/* ===========================================================================
+     Read a byte from a gz_stream; update next_in and avail_in. Return EOF
+   for end of file.
+   IN assertion: the stream s has been sucessfully opened for reading.
+*/</span>
+local <span class="enscript-type">int</span> <span class="enscript-function-name">get_byte</span>(s)
+    gz_stream *s;
+{
+    <span class="enscript-keyword">if</span> (s-&gt;z_eof) <span class="enscript-keyword">return</span> EOF;
+    <span class="enscript-keyword">if</span> (s-&gt;stream.avail_in == 0) {
+        errno = 0;
+        s-&gt;stream.avail_in = (uInt)fread(s-&gt;inbuf, 1, Z_BUFSIZE, s-&gt;file);
+        <span class="enscript-keyword">if</span> (s-&gt;stream.avail_in == 0) {
+            s-&gt;z_eof = 1;
+            <span class="enscript-keyword">if</span> (ferror(s-&gt;file)) s-&gt;z_err = Z_ERRNO;
+            <span class="enscript-keyword">return</span> EOF;
+        }
+        s-&gt;stream.next_in = s-&gt;inbuf;
+    }
+    s-&gt;stream.avail_in--;
+    <span class="enscript-keyword">return</span> *(s-&gt;stream.next_in)++;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+      Check the gzip header of a gz_stream opened for reading. Set the stream
+    mode to transparent if the gzip magic header is not present; set s-&gt;err
+    to Z_DATA_ERROR if the magic header is present but the rest of the header
+    is incorrect.
+    IN assertion: the stream s has already been created sucessfully;
+       s-&gt;stream.avail_in is zero for the first time, but may be non-zero
+       for concatenated .gz files.
+*/</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">check_header</span>(s)
+    gz_stream *s;
+{
+    <span class="enscript-type">int</span> method; <span class="enscript-comment">/* method byte */</span>
+    <span class="enscript-type">int</span> flags;  <span class="enscript-comment">/* flags byte */</span>
+    uInt len;
+    <span class="enscript-type">int</span> c;
+
+    <span class="enscript-comment">/* Assure two bytes in the buffer so we can peek ahead -- handle case
+       where first byte of header is at the end of the buffer after the last
+       gzip segment */</span>
+    len = s-&gt;stream.avail_in;
+    <span class="enscript-keyword">if</span> (len &lt; 2) {
+        <span class="enscript-keyword">if</span> (len) s-&gt;inbuf[0] = s-&gt;stream.next_in[0];
+        errno = 0;
+        len = (uInt)fread(s-&gt;inbuf + len, 1, Z_BUFSIZE &gt;&gt; len, s-&gt;file);
+        <span class="enscript-keyword">if</span> (len == 0 &amp;&amp; ferror(s-&gt;file)) s-&gt;z_err = Z_ERRNO;
+        s-&gt;stream.avail_in += len;
+        s-&gt;stream.next_in = s-&gt;inbuf;
+        <span class="enscript-keyword">if</span> (s-&gt;stream.avail_in &lt; 2) {
+            s-&gt;transparent = s-&gt;stream.avail_in;
+            <span class="enscript-keyword">return</span>;
+        }
+    }
+
+    <span class="enscript-comment">/* Peek ahead to check the gzip magic header */</span>
+    <span class="enscript-keyword">if</span> (s-&gt;stream.next_in[0] != gz_magic[0] ||
+        s-&gt;stream.next_in[1] != gz_magic[1]) {
+        s-&gt;transparent = 1;
+        <span class="enscript-keyword">return</span>;
+    }
+    s-&gt;stream.avail_in -= 2;
+    s-&gt;stream.next_in += 2;
+
+    <span class="enscript-comment">/* Check the rest of the gzip header */</span>
+    method = get_byte(s);
+    flags = get_byte(s);
+    <span class="enscript-keyword">if</span> (method != Z_DEFLATED || (flags &amp; RESERVED) != 0) {
+        s-&gt;z_err = Z_DATA_ERROR;
+        <span class="enscript-keyword">return</span>;
+    }
+
+    <span class="enscript-comment">/* Discard time, xflags and OS code: */</span>
+    <span class="enscript-keyword">for</span> (len = 0; len &lt; 6; len++) (<span class="enscript-type">void</span>)get_byte(s);
+
+    <span class="enscript-keyword">if</span> ((flags &amp; EXTRA_FIELD) != 0) { <span class="enscript-comment">/* skip the extra field */</span>
+        len  =  (uInt)get_byte(s);
+        len += ((uInt)get_byte(s))&lt;&lt;8;
+        <span class="enscript-comment">/* len is garbage if EOF but the loop below will quit anyway */</span>
+        <span class="enscript-keyword">while</span> (len-- != 0 &amp;&amp; get_byte(s) != EOF) ;
+    }
+    <span class="enscript-keyword">if</span> ((flags &amp; ORIG_NAME) != 0) { <span class="enscript-comment">/* skip the original file name */</span>
+        <span class="enscript-keyword">while</span> ((c = get_byte(s)) != 0 &amp;&amp; c != EOF) ;
+    }
+    <span class="enscript-keyword">if</span> ((flags &amp; COMMENT) != 0) {   <span class="enscript-comment">/* skip the .gz file comment */</span>
+        <span class="enscript-keyword">while</span> ((c = get_byte(s)) != 0 &amp;&amp; c != EOF) ;
+    }
+    <span class="enscript-keyword">if</span> ((flags &amp; HEAD_CRC) != 0) {  <span class="enscript-comment">/* skip the header crc */</span>
+        <span class="enscript-keyword">for</span> (len = 0; len &lt; 2; len++) (<span class="enscript-type">void</span>)get_byte(s);
+    }
+    s-&gt;z_err = s-&gt;z_eof ? Z_DATA_ERROR : Z_OK;
+}
+
+ <span class="enscript-comment">/* ===========================================================================
+ * Cleanup then free the given gz_stream. Return a zlib error code.
+   Try freeing in the reverse order of allocations.
+ */</span>
+local <span class="enscript-type">int</span> <span class="enscript-function-name">destroy</span> (s)
+    gz_stream *s;
+{
+    <span class="enscript-type">int</span> err = Z_OK;
+
+    <span class="enscript-keyword">if</span> (!s) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+
+    TRYFREE(s-&gt;msg);
+
+    <span class="enscript-keyword">if</span> (s-&gt;stream.state != NULL) {
+        <span class="enscript-keyword">if</span> (s-&gt;mode == <span class="enscript-string">'w'</span>) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NO_GZCOMPRESS</span>
+            err = Z_STREAM_ERROR;
+#<span class="enscript-reference">else</span>
+            err = deflateEnd(&amp;(s-&gt;stream));
+#<span class="enscript-reference">endif</span>
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (s-&gt;mode == <span class="enscript-string">'r'</span>) {
+            err = inflateEnd(&amp;(s-&gt;stream));
+        }
+    }
+    <span class="enscript-keyword">if</span> (s-&gt;file != NULL &amp;&amp; fclose(s-&gt;file)) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ESPIPE</span>
+        <span class="enscript-keyword">if</span> (errno != ESPIPE) <span class="enscript-comment">/* fclose is broken for pipes in HP/UX */</span>
+#<span class="enscript-reference">endif</span>
+            err = Z_ERRNO;
+    }
+    <span class="enscript-keyword">if</span> (s-&gt;z_err &lt; 0) err = s-&gt;z_err;
+
+    TRYFREE(s-&gt;inbuf);
+    TRYFREE(s-&gt;outbuf);
+    TRYFREE(s-&gt;path);
+    TRYFREE(s);
+    <span class="enscript-keyword">return</span> err;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+     Reads the given number of uncompressed bytes from the compressed file.
+   gzread returns the number of bytes actually read (0 for end of file).
+*/</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">gzread</span> (file, buf, len)
+    gzFile file;
+    voidp buf;
+    <span class="enscript-type">unsigned</span> len;
+{
+    gz_stream *s = (gz_stream*)file;
+    Bytef *start = (Bytef*)buf; <span class="enscript-comment">/* starting point for crc computation */</span>
+    Byte  *next_out; <span class="enscript-comment">/* == stream.next_out but not forced far (for MSDOS) */</span>
+
+    <span class="enscript-keyword">if</span> (s == NULL || s-&gt;mode != <span class="enscript-string">'r'</span>) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+
+    <span class="enscript-keyword">if</span> (s-&gt;z_err == Z_DATA_ERROR || s-&gt;z_err == Z_ERRNO) <span class="enscript-keyword">return</span> -1;
+    <span class="enscript-keyword">if</span> (s-&gt;z_err == Z_STREAM_END) <span class="enscript-keyword">return</span> 0;  <span class="enscript-comment">/* EOF */</span>
+
+    next_out = (Byte*)buf;
+    s-&gt;stream.next_out = (Bytef*)buf;
+    s-&gt;stream.avail_out = len;
+
+    <span class="enscript-keyword">if</span> (s-&gt;stream.avail_out &amp;&amp; s-&gt;back != EOF) {
+        *next_out++ = s-&gt;back;
+        s-&gt;stream.next_out++;
+        s-&gt;stream.avail_out--;
+        s-&gt;back = EOF;
+        s-&gt;out++;
+        start++;
+        <span class="enscript-keyword">if</span> (s-&gt;last) {
+            s-&gt;z_err = Z_STREAM_END;
+            <span class="enscript-keyword">return</span> 1;
+        }
+    }
+
+    <span class="enscript-keyword">while</span> (s-&gt;stream.avail_out != 0) {
+
+        <span class="enscript-keyword">if</span> (s-&gt;transparent) {
+            <span class="enscript-comment">/* Copy first the lookahead bytes: */</span>
+            uInt n = s-&gt;stream.avail_in;
+            <span class="enscript-keyword">if</span> (n &gt; s-&gt;stream.avail_out) n = s-&gt;stream.avail_out;
+            <span class="enscript-keyword">if</span> (n &gt; 0) {
+                zmemcpy(s-&gt;stream.next_out, s-&gt;stream.next_in, n);
+                next_out += n;
+                s-&gt;stream.next_out = next_out;
+                s-&gt;stream.next_in   += n;
+                s-&gt;stream.avail_out -= n;
+                s-&gt;stream.avail_in  -= n;
+            }
+            <span class="enscript-keyword">if</span> (s-&gt;stream.avail_out &gt; 0) {
+                s-&gt;stream.avail_out -=
+                    (uInt)fread(next_out, 1, s-&gt;stream.avail_out, s-&gt;file);
+            }
+            len -= s-&gt;stream.avail_out;
+            s-&gt;in  += len;
+            s-&gt;out += len;
+            <span class="enscript-keyword">if</span> (len == 0) s-&gt;z_eof = 1;
+            <span class="enscript-keyword">return</span> (<span class="enscript-type">int</span>)len;
+        }
+        <span class="enscript-keyword">if</span> (s-&gt;stream.avail_in == 0 &amp;&amp; !s-&gt;z_eof) {
+
+            errno = 0;
+            s-&gt;stream.avail_in = (uInt)fread(s-&gt;inbuf, 1, Z_BUFSIZE, s-&gt;file);
+            <span class="enscript-keyword">if</span> (s-&gt;stream.avail_in == 0) {
+                s-&gt;z_eof = 1;
+                <span class="enscript-keyword">if</span> (ferror(s-&gt;file)) {
+                    s-&gt;z_err = Z_ERRNO;
+                    <span class="enscript-keyword">break</span>;
+                }
+            }
+            s-&gt;stream.next_in = s-&gt;inbuf;
+        }
+        s-&gt;in += s-&gt;stream.avail_in;
+        s-&gt;out += s-&gt;stream.avail_out;
+        s-&gt;z_err = inflate(&amp;(s-&gt;stream), Z_NO_FLUSH);
+        s-&gt;in -= s-&gt;stream.avail_in;
+        s-&gt;out -= s-&gt;stream.avail_out;
+
+        <span class="enscript-keyword">if</span> (s-&gt;z_err == Z_STREAM_END) {
+            <span class="enscript-comment">/* Check CRC and original size */</span>
+            s-&gt;crc = z_crc32(s-&gt;crc, start, (uInt)(s-&gt;stream.next_out - start));
+            start = s-&gt;stream.next_out;
+
+            <span class="enscript-keyword">if</span> (getLong(s) != s-&gt;crc) {
+                s-&gt;z_err = Z_DATA_ERROR;
+            } <span class="enscript-keyword">else</span> {
+                (<span class="enscript-type">void</span>)getLong(s);
+                <span class="enscript-comment">/* The uncompressed length returned by above getlong() may be
+                 * different from s-&gt;out in case of concatenated .gz files.
+                 * Check for such files:
+                 */</span>
+                check_header(s);
+                <span class="enscript-keyword">if</span> (s-&gt;z_err == Z_OK) {
+                    inflateReset(&amp;(s-&gt;stream));
+                    s-&gt;crc = z_crc32(0L, Z_NULL, 0);
+                }
+            }
+        }
+        <span class="enscript-keyword">if</span> (s-&gt;z_err != Z_OK || s-&gt;z_eof) <span class="enscript-keyword">break</span>;
+    }
+    s-&gt;crc = z_crc32(s-&gt;crc, start, (uInt)(s-&gt;stream.next_out - start));
+
+    <span class="enscript-keyword">if</span> (len == s-&gt;stream.avail_out &amp;&amp;
+        (s-&gt;z_err == Z_DATA_ERROR || s-&gt;z_err == Z_ERRNO))
+        <span class="enscript-keyword">return</span> -1;
+    <span class="enscript-keyword">return</span> (<span class="enscript-type">int</span>)(len - s-&gt;stream.avail_out);
+}
+
+
+<span class="enscript-comment">/* ===========================================================================
+      Reads one byte from the compressed file. gzgetc returns this byte
+   or -1 in case of end of file or error.
+*/</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">gzgetc</span>(file)
+    gzFile file;
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> c;
+
+    <span class="enscript-keyword">return</span> gzread(file, &amp;c, 1) == 1 ? c : -1;
+}
+
+
+<span class="enscript-comment">/* ===========================================================================
+      Push one byte back onto the stream.
+*/</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">gzungetc</span>(c, file)
+    <span class="enscript-type">int</span> c;
+    gzFile file;
+{
+    gz_stream *s = (gz_stream*)file;
+
+    <span class="enscript-keyword">if</span> (s == NULL || s-&gt;mode != <span class="enscript-string">'r'</span> || c == EOF || s-&gt;back != EOF) <span class="enscript-keyword">return</span> EOF;
+    s-&gt;back = c;
+    s-&gt;out--;
+    s-&gt;last = (s-&gt;z_err == Z_STREAM_END);
+    <span class="enscript-keyword">if</span> (s-&gt;last) s-&gt;z_err = Z_OK;
+    s-&gt;z_eof = 0;
+    <span class="enscript-keyword">return</span> c;
+}
+
+
+<span class="enscript-comment">/* ===========================================================================
+      Reads bytes from the compressed file until len-1 characters are
+   read, or a newline character is read and transferred to buf, or an
+   end-of-file condition is encountered.  The string is then terminated
+   with a null character.
+      gzgets returns buf, or Z_NULL in case of error.
+
+      The current implementation is not optimized at all.
+*/</span>
+<span class="enscript-type">char</span> * ZEXPORT <span class="enscript-function-name">gzgets</span>(file, buf, len)
+    gzFile file;
+    <span class="enscript-type">char</span> *buf;
+    <span class="enscript-type">int</span> len;
+{
+    <span class="enscript-type">char</span> *b = buf;
+    <span class="enscript-keyword">if</span> (buf == Z_NULL || len &lt;= 0) <span class="enscript-keyword">return</span> Z_NULL;
+
+    <span class="enscript-keyword">while</span> (--len &gt; 0 &amp;&amp; gzread(file, buf, 1) == 1 &amp;&amp; *buf++ != <span class="enscript-string">'\n'</span>) ;
+    *buf = <span class="enscript-string">'\0'</span>;
+    <span class="enscript-keyword">return</span> b == buf &amp;&amp; len &gt; 0 ? Z_NULL : b;
+}
+
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">NO_GZCOMPRESS</span>
+<span class="enscript-comment">/* ===========================================================================
+     Writes the given number of uncompressed bytes into the compressed file.
+   gzwrite returns the number of bytes actually written (0 in case of error).
+*/</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">gzwrite</span> (file, buf, len)
+    gzFile file;
+    voidpc buf;
+    <span class="enscript-type">unsigned</span> len;
+{
+    gz_stream *s = (gz_stream*)file;
+
+    <span class="enscript-keyword">if</span> (s == NULL || s-&gt;mode != <span class="enscript-string">'w'</span>) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+
+    s-&gt;stream.next_in = (Bytef*)buf;
+    s-&gt;stream.avail_in = len;
+
+    <span class="enscript-keyword">while</span> (s-&gt;stream.avail_in != 0) {
+
+        <span class="enscript-keyword">if</span> (s-&gt;stream.avail_out == 0) {
+
+            s-&gt;stream.next_out = s-&gt;outbuf;
+            <span class="enscript-keyword">if</span> (fwrite(s-&gt;outbuf, 1, Z_BUFSIZE, s-&gt;file) != Z_BUFSIZE) {
+                s-&gt;z_err = Z_ERRNO;
+                <span class="enscript-keyword">break</span>;
+            }
+            s-&gt;stream.avail_out = Z_BUFSIZE;
+        }
+        s-&gt;in += s-&gt;stream.avail_in;
+        s-&gt;out += s-&gt;stream.avail_out;
+        s-&gt;z_err = deflate(&amp;(s-&gt;stream), Z_NO_FLUSH);
+        s-&gt;in -= s-&gt;stream.avail_in;
+        s-&gt;out -= s-&gt;stream.avail_out;
+        <span class="enscript-keyword">if</span> (s-&gt;z_err != Z_OK) <span class="enscript-keyword">break</span>;
+    }
+    s-&gt;crc = z_crc32(s-&gt;crc, (<span class="enscript-type">const</span> Bytef *)buf, len);
+
+    <span class="enscript-keyword">return</span> (<span class="enscript-type">int</span>)(len - s-&gt;stream.avail_in);
+}
+
+
+<span class="enscript-comment">/* ===========================================================================
+     Converts, formats, and writes the args to the compressed file under
+   control of the format string, as in fprintf. gzprintf returns the number of
+   uncompressed bytes actually written (0 in case of error).
+*/</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">STDC</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdarg.h&gt;</span>
+
+<span class="enscript-type">int</span> ZEXPORTVA <span class="enscript-function-name">gzprintf</span> (gzFile file, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *format, <span class="enscript-comment">/* args */</span> ...)
+{
+    <span class="enscript-type">char</span> buf[Z_PRINTF_BUFSIZE];
+    va_list va;
+    <span class="enscript-type">int</span> len;
+
+    buf[<span class="enscript-keyword">sizeof</span>(buf) - 1] = 0;
+    va_start(va, format);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NO_vsnprintf</span>
+#  <span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">HAS_vsprintf_void</span>
+    (<span class="enscript-type">void</span>)vsprintf(buf, format, va);
+    va_end(va);
+    <span class="enscript-keyword">for</span> (len = 0; len &lt; <span class="enscript-keyword">sizeof</span>(buf); len++)
+        <span class="enscript-keyword">if</span> (buf[len] == 0) <span class="enscript-keyword">break</span>;
+#  <span class="enscript-reference">else</span>
+    len = vsprintf(buf, format, va);
+    va_end(va);
+#  <span class="enscript-reference">endif</span>
+#<span class="enscript-reference">else</span>
+#  <span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">HAS_vsnprintf_void</span>
+    (<span class="enscript-type">void</span>)vsnprintf(buf, <span class="enscript-keyword">sizeof</span>(buf), format, va);
+    va_end(va);
+    len = strlen(buf);
+#  <span class="enscript-reference">else</span>
+    len = vsnprintf(buf, <span class="enscript-keyword">sizeof</span>(buf), format, va);
+    va_end(va);
+#  <span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (len &lt;= 0 || len &gt;= (<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(buf) || buf[<span class="enscript-keyword">sizeof</span>(buf) - 1] != 0)
+        <span class="enscript-keyword">return</span> 0;
+    <span class="enscript-keyword">return</span> gzwrite(file, buf, (<span class="enscript-type">unsigned</span>)len);
+}
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* not ANSI C */</span>
+
+<span class="enscript-type">int</span> ZEXPORTVA <span class="enscript-function-name">gzprintf</span> (file, format, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
+                       a11, a12, a13, a14, a15, a16, a17, a18, a19, a20)
+    gzFile file;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *format;
+    <span class="enscript-type">int</span> a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
+        a11, a12, a13, a14, a15, a16, a17, a18, a19, a20;
+{
+    <span class="enscript-type">char</span> buf[Z_PRINTF_BUFSIZE];
+    <span class="enscript-type">int</span> len;
+
+    buf[<span class="enscript-keyword">sizeof</span>(buf) - 1] = 0;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NO_snprintf</span>
+#  <span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">HAS_sprintf_void</span>
+    sprintf(buf, format, a1, a2, a3, a4, a5, a6, a7, a8,
+            a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
+    <span class="enscript-keyword">for</span> (len = 0; len &lt; <span class="enscript-keyword">sizeof</span>(buf); len++)
+        <span class="enscript-keyword">if</span> (buf[len] == 0) <span class="enscript-keyword">break</span>;
+#  <span class="enscript-reference">else</span>
+    len = sprintf(buf, format, a1, a2, a3, a4, a5, a6, a7, a8,
+                a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
+#  <span class="enscript-reference">endif</span>
+#<span class="enscript-reference">else</span>
+#  <span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">HAS_snprintf_void</span>
+    snprintf(buf, <span class="enscript-keyword">sizeof</span>(buf), format, a1, a2, a3, a4, a5, a6, a7, a8,
+             a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
+    len = strlen(buf);
+#  <span class="enscript-reference">else</span>
+    len = snprintf(buf, <span class="enscript-keyword">sizeof</span>(buf), format, a1, a2, a3, a4, a5, a6, a7, a8,
+                 a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
+#  <span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (len &lt;= 0 || len &gt;= <span class="enscript-keyword">sizeof</span>(buf) || buf[<span class="enscript-keyword">sizeof</span>(buf) - 1] != 0)
+        <span class="enscript-keyword">return</span> 0;
+    <span class="enscript-keyword">return</span> gzwrite(file, buf, len);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* ===========================================================================
+      Writes c, converted to an unsigned char, into the compressed file.
+   gzputc returns the value that was written, or -1 in case of error.
+*/</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">gzputc</span>(file, c)
+    gzFile file;
+    <span class="enscript-type">int</span> c;
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> cc = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>) c; <span class="enscript-comment">/* required for big endian systems */</span>
+
+    <span class="enscript-keyword">return</span> gzwrite(file, &amp;cc, 1) == 1 ? (<span class="enscript-type">int</span>)cc : -1;
+}
+
+
+<span class="enscript-comment">/* ===========================================================================
+      Writes the given null-terminated string to the compressed file, excluding
+   the terminating null character.
+      gzputs returns the number of characters written, or -1 in case of error.
+*/</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">gzputs</span>(file, s)
+    gzFile file;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *s;
+{
+    <span class="enscript-keyword">return</span> gzwrite(file, (<span class="enscript-type">char</span>*)s, (<span class="enscript-type">unsigned</span>)strlen(s));
+}
+
+
+<span class="enscript-comment">/* ===========================================================================
+     Flushes all pending output into the compressed file. The parameter
+   flush is as in the deflate() function.
+*/</span>
+local <span class="enscript-type">int</span> <span class="enscript-function-name">do_flush</span> (file, flush)
+    gzFile file;
+    <span class="enscript-type">int</span> flush;
+{
+    uInt len;
+    <span class="enscript-type">int</span> done = 0;
+    gz_stream *s = (gz_stream*)file;
+
+    <span class="enscript-keyword">if</span> (s == NULL || s-&gt;mode != <span class="enscript-string">'w'</span>) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+
+    s-&gt;stream.avail_in = 0; <span class="enscript-comment">/* should be zero already anyway */</span>
+
+    <span class="enscript-keyword">for</span> (;;) {
+        len = Z_BUFSIZE - s-&gt;stream.avail_out;
+
+        <span class="enscript-keyword">if</span> (len != 0) {
+            <span class="enscript-keyword">if</span> ((uInt)fwrite(s-&gt;outbuf, 1, len, s-&gt;file) != len) {
+                s-&gt;z_err = Z_ERRNO;
+                <span class="enscript-keyword">return</span> Z_ERRNO;
+            }
+            s-&gt;stream.next_out = s-&gt;outbuf;
+            s-&gt;stream.avail_out = Z_BUFSIZE;
+        }
+        <span class="enscript-keyword">if</span> (done) <span class="enscript-keyword">break</span>;
+        s-&gt;out += s-&gt;stream.avail_out;
+        s-&gt;z_err = deflate(&amp;(s-&gt;stream), flush);
+        s-&gt;out -= s-&gt;stream.avail_out;
+
+        <span class="enscript-comment">/* Ignore the second of two consecutive flushes: */</span>
+        <span class="enscript-keyword">if</span> (len == 0 &amp;&amp; s-&gt;z_err == Z_BUF_ERROR) s-&gt;z_err = Z_OK;
+
+        <span class="enscript-comment">/* deflate has finished flushing only when it hasn't used up
+         * all the available space in the output buffer:
+         */</span>
+        done = (s-&gt;stream.avail_out != 0 || s-&gt;z_err == Z_STREAM_END);
+
+        <span class="enscript-keyword">if</span> (s-&gt;z_err != Z_OK &amp;&amp; s-&gt;z_err != Z_STREAM_END) <span class="enscript-keyword">break</span>;
+    }
+    <span class="enscript-keyword">return</span>  s-&gt;z_err == Z_STREAM_END ? Z_OK : s-&gt;z_err;
+}
+
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">gzflush</span> (file, flush)
+     gzFile file;
+     <span class="enscript-type">int</span> flush;
+{
+    gz_stream *s = (gz_stream*)file;
+    <span class="enscript-type">int</span> err = do_flush (file, flush);
+
+    <span class="enscript-keyword">if</span> (err) <span class="enscript-keyword">return</span> err;
+    fflush(s-&gt;file);
+    <span class="enscript-keyword">return</span>  s-&gt;z_err == Z_STREAM_END ? Z_OK : s-&gt;z_err;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* NO_GZCOMPRESS */</span>
+
+<span class="enscript-comment">/* ===========================================================================
+      Sets the starting position for the next gzread or gzwrite on the given
+   compressed file. The offset represents a number of bytes in the
+      gzseek returns the resulting offset location as measured in bytes from
+   the beginning of the uncompressed stream, or -1 in case of error.
+      SEEK_END is not implemented, returns error.
+      In this version of the library, gzseek can be extremely slow.
+*/</span>
+z_off_t ZEXPORT <span class="enscript-function-name">gzseek</span> (file, offset, whence)
+    gzFile file;
+    z_off_t offset;
+    <span class="enscript-type">int</span> whence;
+{
+    gz_stream *s = (gz_stream*)file;
+
+    <span class="enscript-keyword">if</span> (s == NULL || whence == SEEK_END ||
+        s-&gt;z_err == Z_ERRNO || s-&gt;z_err == Z_DATA_ERROR) {
+        <span class="enscript-keyword">return</span> -1L;
+    }
+
+    <span class="enscript-keyword">if</span> (s-&gt;mode == <span class="enscript-string">'w'</span>) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NO_GZCOMPRESS</span>
+        <span class="enscript-keyword">return</span> -1L;
+#<span class="enscript-reference">else</span>
+        <span class="enscript-keyword">if</span> (whence == SEEK_SET) {
+            offset -= s-&gt;in;
+        }
+        <span class="enscript-keyword">if</span> (offset &lt; 0) <span class="enscript-keyword">return</span> -1L;
+
+        <span class="enscript-comment">/* At this point, offset is the number of zero bytes to write. */</span>
+        <span class="enscript-keyword">if</span> (s-&gt;inbuf == Z_NULL) {
+            s-&gt;inbuf = (Byte*)ALLOC(Z_BUFSIZE); <span class="enscript-comment">/* for seeking */</span>
+            <span class="enscript-keyword">if</span> (s-&gt;inbuf == Z_NULL) <span class="enscript-keyword">return</span> -1L;
+            zmemzero(s-&gt;inbuf, Z_BUFSIZE);
+        }
+        <span class="enscript-keyword">while</span> (offset &gt; 0)  {
+            uInt size = Z_BUFSIZE;
+            <span class="enscript-keyword">if</span> (offset &lt; Z_BUFSIZE) size = (uInt)offset;
+
+            size = gzwrite(file, s-&gt;inbuf, size);
+            <span class="enscript-keyword">if</span> (size == 0) <span class="enscript-keyword">return</span> -1L;
+
+            offset -= size;
+        }
+        <span class="enscript-keyword">return</span> s-&gt;in;
+#<span class="enscript-reference">endif</span>
+    }
+    <span class="enscript-comment">/* Rest of function is for reading only */</span>
+
+    <span class="enscript-comment">/* compute absolute position */</span>
+    <span class="enscript-keyword">if</span> (whence == SEEK_CUR) {
+        offset += s-&gt;out;
+    }
+    <span class="enscript-keyword">if</span> (offset &lt; 0) <span class="enscript-keyword">return</span> -1L;
+
+    <span class="enscript-keyword">if</span> (s-&gt;transparent) {
+        <span class="enscript-comment">/* map to fseek */</span>
+        s-&gt;back = EOF;
+        s-&gt;stream.avail_in = 0;
+        s-&gt;stream.next_in = s-&gt;inbuf;
+        <span class="enscript-keyword">if</span> (fseek(s-&gt;file, offset, SEEK_SET) &lt; 0) <span class="enscript-keyword">return</span> -1L;
+
+        s-&gt;in = s-&gt;out = offset;
+        <span class="enscript-keyword">return</span> offset;
+    }
+
+    <span class="enscript-comment">/* For a negative seek, rewind and use positive seek */</span>
+    <span class="enscript-keyword">if</span> (offset &gt;= s-&gt;out) {
+        offset -= s-&gt;out;
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (gzrewind(file) &lt; 0) {
+        <span class="enscript-keyword">return</span> -1L;
+    }
+    <span class="enscript-comment">/* offset is now the number of bytes to skip. */</span>
+
+    <span class="enscript-keyword">if</span> (offset != 0 &amp;&amp; s-&gt;outbuf == Z_NULL) {
+        s-&gt;outbuf = (Byte*)ALLOC(Z_BUFSIZE);
+        <span class="enscript-keyword">if</span> (s-&gt;outbuf == Z_NULL) <span class="enscript-keyword">return</span> -1L;
+    }
+    <span class="enscript-keyword">if</span> (offset &amp;&amp; s-&gt;back != EOF) {
+        s-&gt;back = EOF;
+        s-&gt;out++;
+        offset--;
+        <span class="enscript-keyword">if</span> (s-&gt;last) s-&gt;z_err = Z_STREAM_END;
+    }
+    <span class="enscript-keyword">while</span> (offset &gt; 0)  {
+        <span class="enscript-type">int</span> size = Z_BUFSIZE;
+        <span class="enscript-keyword">if</span> (offset &lt; Z_BUFSIZE) size = (<span class="enscript-type">int</span>)offset;
+
+        size = gzread(file, s-&gt;outbuf, (uInt)size);
+        <span class="enscript-keyword">if</span> (size &lt;= 0) <span class="enscript-keyword">return</span> -1L;
+        offset -= size;
+    }
+    <span class="enscript-keyword">return</span> s-&gt;out;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+     Rewinds input file.
+*/</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">gzrewind</span> (file)
+    gzFile file;
+{
+    gz_stream *s = (gz_stream*)file;
+
+    <span class="enscript-keyword">if</span> (s == NULL || s-&gt;mode != <span class="enscript-string">'r'</span>) <span class="enscript-keyword">return</span> -1;
+
+    s-&gt;z_err = Z_OK;
+    s-&gt;z_eof = 0;
+    s-&gt;back = EOF;
+    s-&gt;stream.avail_in = 0;
+    s-&gt;stream.next_in = s-&gt;inbuf;
+    s-&gt;crc = z_crc32(0L, Z_NULL, 0);
+    <span class="enscript-keyword">if</span> (!s-&gt;transparent) (<span class="enscript-type">void</span>)inflateReset(&amp;s-&gt;stream);
+    s-&gt;in = 0;
+    s-&gt;out = 0;
+    <span class="enscript-keyword">return</span> fseek(s-&gt;file, s-&gt;start, SEEK_SET);
+}
+
+<span class="enscript-comment">/* ===========================================================================
+     Returns the starting position for the next gzread or gzwrite on the
+   given compressed file. This position represents a number of bytes in the
+   uncompressed data stream.
+*/</span>
+z_off_t ZEXPORT <span class="enscript-function-name">gztell</span> (file)
+    gzFile file;
+{
+    <span class="enscript-keyword">return</span> gzseek(file, 0L, SEEK_CUR);
+}
+
+<span class="enscript-comment">/* ===========================================================================
+     Returns 1 when EOF has previously been detected reading the given
+   input stream, otherwise zero.
+*/</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">gzeof</span> (file)
+    gzFile file;
+{
+    gz_stream *s = (gz_stream*)file;
+
+    <span class="enscript-comment">/* With concatenated compressed files that can have embedded
+     * crc trailers, z_eof is no longer the only/best indicator of EOF
+     * on a gz_stream. Handle end-of-stream error explicitly here.
+     */</span>
+    <span class="enscript-keyword">if</span> (s == NULL || s-&gt;mode != <span class="enscript-string">'r'</span>) <span class="enscript-keyword">return</span> 0;
+    <span class="enscript-keyword">if</span> (s-&gt;z_eof) <span class="enscript-keyword">return</span> 1;
+    <span class="enscript-keyword">return</span> s-&gt;z_err == Z_STREAM_END;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+     Returns 1 if reading and doing so transparently, otherwise zero.
+*/</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">gzdirect</span> (file)
+    gzFile file;
+{
+    gz_stream *s = (gz_stream*)file;
+
+    <span class="enscript-keyword">if</span> (s == NULL || s-&gt;mode != <span class="enscript-string">'r'</span>) <span class="enscript-keyword">return</span> 0;
+    <span class="enscript-keyword">return</span> s-&gt;transparent;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+   Outputs a long in LSB order to the given file
+*/</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">putLong</span> (file, x)
+    FILE *file;
+    uLong x;
+{
+    <span class="enscript-type">int</span> n;
+    <span class="enscript-keyword">for</span> (n = 0; n &lt; 4; n++) {
+        fputc((<span class="enscript-type">int</span>)(x &amp; 0xff), file);
+        x &gt;&gt;= 8;
+    }
+}
+
+<span class="enscript-comment">/* ===========================================================================
+   Reads a long in LSB order from the given gz_stream. Sets z_err in case
+   of error.
+*/</span>
+local uLong <span class="enscript-function-name">getLong</span> (s)
+    gz_stream *s;
+{
+    uLong x = (uLong)get_byte(s);
+    <span class="enscript-type">int</span> c;
+
+    x += ((uLong)get_byte(s))&lt;&lt;8;
+    x += ((uLong)get_byte(s))&lt;&lt;16;
+    c = get_byte(s);
+    <span class="enscript-keyword">if</span> (c == EOF) s-&gt;z_err = Z_DATA_ERROR;
+    x += ((uLong)c)&lt;&lt;24;
+    <span class="enscript-keyword">return</span> x;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+     Flushes all pending output if necessary, closes the compressed file
+   and deallocates all the (de)compression state.
+*/</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">gzclose</span> (file)
+    gzFile file;
+{
+    gz_stream *s = (gz_stream*)file;
+
+    <span class="enscript-keyword">if</span> (s == NULL) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+
+    <span class="enscript-keyword">if</span> (s-&gt;mode == <span class="enscript-string">'w'</span>) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NO_GZCOMPRESS</span>
+        <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+#<span class="enscript-reference">else</span>
+        <span class="enscript-keyword">if</span> (do_flush (file, Z_FINISH) != Z_OK)
+            <span class="enscript-keyword">return</span> destroy((gz_stream*)file);
+
+        putLong (s-&gt;file, s-&gt;crc);
+        putLong (s-&gt;file, (uLong)(s-&gt;in &amp; 0xffffffff));
+#<span class="enscript-reference">endif</span>
+    }
+    <span class="enscript-keyword">return</span> destroy((gz_stream*)file);
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">STDC</span>
+#  <span class="enscript-reference">define</span> <span class="enscript-function-name">zstrerror</span>(errnum) strerror(errnum)
+#<span class="enscript-reference">else</span>
+#  <span class="enscript-reference">define</span> <span class="enscript-function-name">zstrerror</span>(errnum) <span class="enscript-string">&quot;&quot;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* ===========================================================================
+     Returns the error message for the last error which occurred on the
+   given compressed file. errnum is set to zlib error number. If an
+   error occurred in the file system and not in the compression library,
+   errnum is set to Z_ERRNO and the application may consult errno
+   to get the exact error code.
+*/</span>
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> * ZEXPORT <span class="enscript-function-name">gzerror</span> (file, errnum)
+    gzFile file;
+    <span class="enscript-type">int</span> *errnum;
+{
+    <span class="enscript-type">char</span> *m;
+    gz_stream *s = (gz_stream*)file;
+
+    <span class="enscript-keyword">if</span> (s == NULL) {
+        *errnum = Z_STREAM_ERROR;
+        <span class="enscript-keyword">return</span> (<span class="enscript-type">const</span> <span class="enscript-type">char</span>*)ERR_MSG(Z_STREAM_ERROR);
+    }
+    *errnum = s-&gt;z_err;
+    <span class="enscript-keyword">if</span> (*errnum == Z_OK) <span class="enscript-keyword">return</span> (<span class="enscript-type">const</span> <span class="enscript-type">char</span>*)<span class="enscript-string">&quot;&quot;</span>;
+
+    m = (<span class="enscript-type">char</span>*)(*errnum == Z_ERRNO ? zstrerror(errno) : s-&gt;stream.msg);
+
+    <span class="enscript-keyword">if</span> (m == NULL || *m == <span class="enscript-string">'\0'</span>) m = (<span class="enscript-type">char</span>*)ERR_MSG(s-&gt;z_err);
+
+    TRYFREE(s-&gt;msg);
+    s-&gt;msg = (<span class="enscript-type">char</span>*)ALLOC(strlen(s-&gt;path) + strlen(m) + 3);
+    <span class="enscript-keyword">if</span> (s-&gt;msg == Z_NULL) <span class="enscript-keyword">return</span> (<span class="enscript-type">const</span> <span class="enscript-type">char</span>*)ERR_MSG(Z_MEM_ERROR);
+    strcpy(s-&gt;msg, s-&gt;path);
+    strcat(s-&gt;msg, <span class="enscript-string">&quot;: &quot;</span>);
+    strcat(s-&gt;msg, m);
+    <span class="enscript-keyword">return</span> (<span class="enscript-type">const</span> <span class="enscript-type">char</span>*)s-&gt;msg;
+}
+
+<span class="enscript-comment">/* ===========================================================================
+     Clear the error and end-of-file flags, and do the same for the real file.
+*/</span>
+<span class="enscript-type">void</span> ZEXPORT <span class="enscript-function-name">gzclearerr</span> (file)
+    gzFile file;
+{
+    gz_stream *s = (gz_stream*)file;
+
+    <span class="enscript-keyword">if</span> (s == NULL) <span class="enscript-keyword">return</span>;
+    <span class="enscript-keyword">if</span> (s-&gt;z_err != Z_STREAM_END) s-&gt;z_err = Z_OK;
+    s-&gt;z_eof = 0;
+    clearerr(s-&gt;file);
+}
+</pre>
+<hr />
+</body></html>

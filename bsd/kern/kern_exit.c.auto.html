@@ -1,0 +1,2452 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kern_exit.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kern_exit.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2011, 2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* Copyright (c) 1995, 1997 Apple Computer, Inc. All Rights Reserved */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1989, 1991, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ * (c) UNIX System Laboratories, Inc.
+ * All or some portions of this file are derived from material licensed
+ * to the University of California by American Telephone and Telegraph
+ * Co. or Unix System Laboratories, Inc. and are reproduced herein with
+ * the permission of UNIX System Laboratories, Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)kern_exit.c	8.7 (Berkeley) 2/12/94
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+ 
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/reg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/psl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;compat_43.h&quot;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/tty.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/resource.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/wait.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/resourcevar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ptrace.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/_types/_timeval64.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/aio_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signalvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/filedesc.h&gt;</span>	<span class="enscript-comment">/* fdfree */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SYSV_SHM</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/shm_internal.h&gt;</span>	<span class="enscript-comment">/* shmexit */</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/acct.h&gt;</span>		<span class="enscript-comment">/* acct_process */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit_kevents.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;corpses/task_corpse.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread_call.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/codesign.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">VM_PRESSURE_EVENTS</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/vm_pressure.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kern_memorystatus.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+<span class="enscript-comment">/* Do not include dtrace.h, it redefines kmem_[alloc/free] */</span>
+<span class="enscript-type">extern</span> <span class="enscript-function-name">void</span> (*dtrace_fasttrap_exit_ptr)(proc_t);
+<span class="enscript-type">extern</span> <span class="enscript-function-name">void</span> (*dtrace_helpers_cleanup)(proc_t);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">dtrace_lazy_dofs_destroy</span>(proc_t);
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_ptss.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syscall.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sdt.h&gt;</span>
+
+<span class="enscript-type">extern</span> boolean_t init_task_died;
+<span class="enscript-type">void</span> <span class="enscript-function-name">proc_prepareexit</span>(proc_t p, <span class="enscript-type">int</span> rv, boolean_t perf_notify);
+<span class="enscript-type">void</span> <span class="enscript-function-name">vfork_exit</span>(proc_t p, <span class="enscript-type">int</span> rv);
+<span class="enscript-type">void</span> <span class="enscript-function-name">vproc_exit</span>(proc_t p);
+__private_extern__ <span class="enscript-type">void</span> munge_user64_rusage(<span class="enscript-type">struct</span> rusage *a_rusage_p, <span class="enscript-type">struct</span> user64_rusage *a_user_rusage_p);
+__private_extern__ <span class="enscript-type">void</span> munge_user32_rusage(<span class="enscript-type">struct</span> rusage *a_rusage_p, <span class="enscript-type">struct</span> user32_rusage *a_user_rusage_p);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">reap_child_locked</span>(proc_t parent, proc_t child, <span class="enscript-type">int</span> deadparent, <span class="enscript-type">int</span> reparentedtoinit, <span class="enscript-type">int</span> locked, <span class="enscript-type">int</span> droplock);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">populate_corpse_crashinfo</span>(proc_t p, <span class="enscript-type">void</span> *crash_info_ptr, <span class="enscript-type">struct</span> rusage_superset *rup, mach_exception_data_type_t code, mach_exception_data_type_t subcode);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">proc_pidpathinfo</span>(proc_t p, uint64_t arg, user_addr_t buffer, uint32_t buffersize, int32_t *retval);
+
+<span class="enscript-type">static</span> <span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">void</span> launchd_crashed_panic(proc_t p, <span class="enscript-type">int</span> rv);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">proc_piduniqidentifierinfo</span>(proc_t p, <span class="enscript-type">struct</span> proc_uniqidentifierinfo *p_uniqidinfo);
+
+
+<span class="enscript-comment">/*
+ * Things which should have prototypes in headers, but don't
+ */</span>
+<span class="enscript-type">void</span>	proc_exit(proc_t p);
+<span class="enscript-type">int</span>	wait1continue(<span class="enscript-type">int</span> result);
+<span class="enscript-type">int</span>	waitidcontinue(<span class="enscript-type">int</span> result);
+kern_return_t <span class="enscript-function-name">sys_perf_notify</span>(thread_t thread, <span class="enscript-type">int</span> pid);
+kern_return_t <span class="enscript-function-name">task_exception_notify</span>(exception_type_t exception,
+	mach_exception_data_type_t code, mach_exception_data_type_t subcode);
+<span class="enscript-type">void</span>	delay(<span class="enscript-type">int</span>);
+<span class="enscript-type">void</span> <span class="enscript-function-name">gather_rusage_info</span>(proc_t p, rusage_info_current *ru, <span class="enscript-type">int</span> flavor);
+
+<span class="enscript-comment">/*
+ * NOTE: Source and target may *NOT* overlap!
+ * XXX Should share code with bsd/dev/ppc/unix_signal.c
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">siginfo_user_to_user32</span>(user_siginfo_t *in, user32_siginfo_t *out)
+{
+	out-&gt;si_signo	= in-&gt;si_signo;
+	out-&gt;si_errno	= in-&gt;si_errno;
+	out-&gt;si_code	= in-&gt;si_code;
+	out-&gt;si_pid	= in-&gt;si_pid;
+	out-&gt;si_uid	= in-&gt;si_uid;
+	out-&gt;si_status	= in-&gt;si_status;
+	out-&gt;si_addr	= CAST_DOWN_EXPLICIT(user32_addr_t,in-&gt;si_addr);
+	<span class="enscript-comment">/* following cast works for sival_int because of padding */</span>
+	out-&gt;si_value.sival_ptr	= CAST_DOWN_EXPLICIT(user32_addr_t,in-&gt;si_value.sival_ptr);
+	out-&gt;si_band	= in-&gt;si_band;			<span class="enscript-comment">/* range reduction */</span>
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">siginfo_user_to_user64</span>(user_siginfo_t *in, user64_siginfo_t *out)
+{
+	out-&gt;si_signo	= in-&gt;si_signo;
+	out-&gt;si_errno	= in-&gt;si_errno;
+	out-&gt;si_code	= in-&gt;si_code;
+	out-&gt;si_pid	= in-&gt;si_pid;
+	out-&gt;si_uid	= in-&gt;si_uid;
+	out-&gt;si_status	= in-&gt;si_status;
+	out-&gt;si_addr	= in-&gt;si_addr;
+	<span class="enscript-comment">/* following cast works for sival_int because of padding */</span>
+	out-&gt;si_value.sival_ptr	= in-&gt;si_value.sival_ptr;
+	out-&gt;si_band	= in-&gt;si_band;			<span class="enscript-comment">/* range reduction */</span>
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">copyoutsiginfo</span>(user_siginfo_t *native, boolean_t is64, user_addr_t uaddr)
+{
+	<span class="enscript-keyword">if</span> (is64) {
+		user64_siginfo_t sinfo64;
+				
+		bzero(&amp;sinfo64, <span class="enscript-keyword">sizeof</span> (sinfo64));
+		siginfo_user_to_user64(native, &amp;sinfo64);
+		<span class="enscript-keyword">return</span> (copyout(&amp;sinfo64, uaddr, <span class="enscript-keyword">sizeof</span> (sinfo64)));
+	} <span class="enscript-keyword">else</span> {
+		user32_siginfo_t sinfo32;
+
+		bzero(&amp;sinfo32, <span class="enscript-keyword">sizeof</span> (sinfo32));
+		siginfo_user_to_user32(native, &amp;sinfo32);
+		<span class="enscript-keyword">return</span> (copyout(&amp;sinfo32, uaddr, <span class="enscript-keyword">sizeof</span> (sinfo32)));
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">populate_corpse_crashinfo</span>(proc_t p, <span class="enscript-type">void</span> *crash_info_ptr, <span class="enscript-type">struct</span> rusage_superset *rup, mach_exception_data_type_t code, mach_exception_data_type_t subcode)
+{
+	mach_vm_address_t uaddr = 0;
+	mach_exception_data_type_t exc_codes[EXCEPTION_CODE_MAX];
+	exc_codes[0] = code;
+	exc_codes[1] = subcode;
+	cpu_type_t cputype;
+	<span class="enscript-type">struct</span> proc_uniqidentifierinfo p_uniqidinfo;
+	<span class="enscript-type">struct</span> proc_workqueueinfo pwqinfo;
+	<span class="enscript-type">int</span> retval = 0;
+	uint64_t crashed_threadid = thread_tid(current_thread());
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> pflags = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>
+	<span class="enscript-type">int</span> memstat_dirty_flags = 0;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_EXCEPTION_CODES, <span class="enscript-keyword">sizeof</span>(exc_codes), &amp;uaddr)) {
+		copyout(exc_codes, uaddr, <span class="enscript-keyword">sizeof</span>(exc_codes));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_PID, <span class="enscript-keyword">sizeof</span>(p-&gt;p_pid), &amp;uaddr)) {
+		copyout(&amp;p-&gt;p_pid, uaddr, <span class="enscript-keyword">sizeof</span>(p-&gt;p_pid));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_PPID, <span class="enscript-keyword">sizeof</span>(p-&gt;p_ppid), &amp;uaddr)) {
+		copyout(&amp;p-&gt;p_ppid, uaddr, <span class="enscript-keyword">sizeof</span>(p-&gt;p_ppid));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_CRASHED_THREADID, <span class="enscript-keyword">sizeof</span>(uint64_t), &amp;uaddr)) {
+		copyout(&amp;crashed_threadid, uaddr, <span class="enscript-keyword">sizeof</span>(uint64_t));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_RUSAGE, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> rusage), &amp;uaddr)) {
+		copyout(&amp;rup-&gt;ru, uaddr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> rusage));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS ==
+	    kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_BSDINFOWITHUNIQID, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> proc_uniqidentifierinfo), &amp;uaddr)) {
+		proc_piduniqidentifierinfo(p, &amp;p_uniqidinfo);
+		copyout(&amp;p_uniqidinfo, uaddr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> proc_uniqidentifierinfo));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_RUSAGE_INFO, <span class="enscript-keyword">sizeof</span>(rusage_info_current), &amp;uaddr)) {
+		copyout(&amp;rup-&gt;ri, uaddr, <span class="enscript-keyword">sizeof</span>(rusage_info_current));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_PROC_CSFLAGS, <span class="enscript-keyword">sizeof</span>(p-&gt;p_csflags), &amp;uaddr)) {
+		copyout(&amp;p-&gt;p_csflags, uaddr, <span class="enscript-keyword">sizeof</span>(p-&gt;p_csflags));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_PROC_NAME, <span class="enscript-keyword">sizeof</span>(p-&gt;p_comm), &amp;uaddr)) {
+		copyout(&amp;p-&gt;p_comm, uaddr, <span class="enscript-keyword">sizeof</span>(p-&gt;p_comm));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_PROC_STARTTIME, <span class="enscript-keyword">sizeof</span>(p-&gt;p_start), &amp;uaddr)) {
+		<span class="enscript-type">struct</span> timeval64 t64;
+		t64.tv_sec = (int64_t)p-&gt;p_start.tv_sec;
+		t64.tv_usec = (int64_t)p-&gt;p_start.tv_usec;
+		copyout(&amp;t64, uaddr, <span class="enscript-keyword">sizeof</span>(t64));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_USERSTACK, <span class="enscript-keyword">sizeof</span>(p-&gt;user_stack), &amp;uaddr)) {
+		copyout(&amp;p-&gt;user_stack, uaddr, <span class="enscript-keyword">sizeof</span>(p-&gt;user_stack));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_ARGSLEN, <span class="enscript-keyword">sizeof</span>(p-&gt;p_argslen), &amp;uaddr)) {
+		copyout(&amp;p-&gt;p_argslen, uaddr, <span class="enscript-keyword">sizeof</span>(p-&gt;p_argslen));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_PROC_ARGC, <span class="enscript-keyword">sizeof</span>(p-&gt;p_argc), &amp;uaddr)) {
+		copyout(&amp;p-&gt;p_argc, uaddr, <span class="enscript-keyword">sizeof</span>(p-&gt;p_argc));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_PROC_PATH, MAXPATHLEN, &amp;uaddr)) {
+		proc_pidpathinfo(p, 0, uaddr, MAXPATHLEN, &amp;retval);
+	}
+
+	pflags = p-&gt;p_flag &amp; (P_LP64 | P_SUGID);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_PROC_FLAGS, <span class="enscript-keyword">sizeof</span>(pflags), &amp;uaddr)) {
+		copyout(&amp;pflags, uaddr, <span class="enscript-keyword">sizeof</span>(pflags));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_UID, <span class="enscript-keyword">sizeof</span>(p-&gt;p_uid), &amp;uaddr)) {
+		copyout(&amp;p-&gt;p_uid, uaddr, <span class="enscript-keyword">sizeof</span>(p-&gt;p_uid));
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_GID, <span class="enscript-keyword">sizeof</span>(p-&gt;p_gid), &amp;uaddr)) {
+		copyout(&amp;p-&gt;p_gid, uaddr, <span class="enscript-keyword">sizeof</span>(p-&gt;p_gid));
+	}
+
+	cputype = cpu_type() &amp; ~CPU_ARCH_MASK;
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p))
+		cputype |= CPU_ARCH_ABI64;
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_CPUTYPE, <span class="enscript-keyword">sizeof</span>(cpu_type_t), &amp;uaddr)) {
+		copyout(&amp;cputype, uaddr, <span class="enscript-keyword">sizeof</span>(cpu_type_t));
+	}
+
+	bzero(&amp;pwqinfo, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> proc_workqueueinfo));
+	retval = fill_procworkqueue(p, &amp;pwqinfo);
+	<span class="enscript-keyword">if</span> (retval == 0) {
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_WORKQUEUEINFO, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> proc_workqueueinfo), &amp;uaddr)) {
+			copyout(&amp;pwqinfo, uaddr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> proc_workqueueinfo));
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_RESPONSIBLE_PID, <span class="enscript-keyword">sizeof</span>(p-&gt;p_responsible_pid), &amp;uaddr)) {
+		copyout(&amp;p-&gt;p_responsible_pid, uaddr, <span class="enscript-keyword">sizeof</span>(p-&gt;p_responsible_pid));
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>
+	memstat_dirty_flags = memorystatus_dirty_get(p);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kcdata_get_memory_addr(crash_info_ptr, TASK_CRASHINFO_DIRTY_FLAGS, <span class="enscript-keyword">sizeof</span>(memstat_dirty_flags), &amp;uaddr)) {
+		copyout(&amp;memstat_dirty_flags, uaddr, <span class="enscript-keyword">sizeof</span>(memstat_dirty_flags));
+	}
+#<span class="enscript-reference">endif</span>
+
+}
+
+<span class="enscript-type">static</span> <span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">void</span>
+<span class="enscript-function-name">launchd_crashed_panic</span>(proc_t p, <span class="enscript-type">int</span> rv)
+{
+	printf(<span class="enscript-string">&quot;pid 1 exited (signal %d, exit %d)\n&quot;</span>,
+	    WTERMSIG(rv), WEXITSTATUS(rv));
+
+#<span class="enscript-reference">if</span> (<span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>)
+	<span class="enscript-comment">/*
+	 * For debugging purposes, generate a core file of initproc before
+	 * panicking. Leave at least 300 MB free on the root volume, and ignore
+	 * the process's corefile ulimit. fsync() the file to ensure it lands on disk
+	 * before the panic hits.
+	 */</span>
+
+	<span class="enscript-type">int</span>             err;
+	uint64_t        coredump_start = mach_absolute_time();
+	uint64_t        coredump_end;
+	clock_sec_t     tv_sec;
+	clock_usec_t    tv_usec;
+	uint32_t        tv_msec;
+
+	err = coredump(p, 300, COREDUMP_IGNORE_ULIMIT | COREDUMP_FULLFSYNC);
+
+	coredump_end = mach_absolute_time();
+
+	absolutetime_to_microtime(coredump_end - coredump_start, &amp;tv_sec, &amp;tv_usec);
+
+	tv_msec = tv_usec / 1000;
+
+	<span class="enscript-keyword">if</span> (err != 0) {
+		printf(<span class="enscript-string">&quot;Failed to generate initproc core file: error %d, took %d.%03d seconds\n&quot;</span>,
+		       err, (uint32_t)tv_sec, tv_msec);
+	} <span class="enscript-keyword">else</span> {
+		printf(<span class="enscript-string">&quot;Generated initproc core file in %d.%03d seconds\n&quot;</span>,
+		       (uint32_t)tv_sec, tv_msec);
+	}
+#<span class="enscript-reference">endif</span>
+
+	sync(p, (<span class="enscript-type">void</span> *)NULL, (<span class="enscript-type">int</span> *)NULL);
+
+	panic_plain(<span class="enscript-string">&quot;%s exited (signal %d, exit status %d %s)&quot;</span>, (p-&gt;p_name[0] != <span class="enscript-string">'\0'</span> ? p-&gt;p_name : <span class="enscript-string">&quot;initproc&quot;</span>), WTERMSIG(rv),
+	            WEXITSTATUS(rv), ((p-&gt;p_csflags &amp; CS_KILLED) ? <span class="enscript-string">&quot;CS_KILLED&quot;</span> : <span class="enscript-string">&quot;&quot;</span>));
+}
+
+<span class="enscript-comment">/*
+ * exit --
+ *	Death of process.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">exit</span>(proc_t p, <span class="enscript-type">struct</span> exit_args *uap, <span class="enscript-type">int</span> *retval)
+{
+	exit1(p, W_EXITCODE(uap-&gt;rval, 0), retval);
+
+	thread_exception_return();
+	<span class="enscript-comment">/* NOTREACHED */</span>
+	<span class="enscript-keyword">while</span> (TRUE)
+		thread_block(THREAD_CONTINUE_NULL);
+	<span class="enscript-comment">/* NOTREACHED */</span>
+}
+
+<span class="enscript-comment">/*
+ * Exit: deallocate address space and other resources, change proc state
+ * to zombie, and unlink proc from allproc and parent's lists.  Save exit
+ * status and rusage for wait().  Check for child processes and orphan them.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">exit1</span>(proc_t p, <span class="enscript-type">int</span> rv, <span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-keyword">return</span> exit1_internal(p, rv, retval, TRUE, TRUE, 0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">exit1_internal</span>(proc_t p, <span class="enscript-type">int</span> rv, <span class="enscript-type">int</span> *retval, boolean_t thread_can_terminate, boolean_t perf_notify,
+	       <span class="enscript-type">int</span> jetsam_flags)
+{
+	thread_t self = current_thread();
+	<span class="enscript-type">struct</span> task *task = p-&gt;task;
+	<span class="enscript-type">struct</span> uthread *ut;
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-comment">/*
+	 * If a thread in this task has already
+	 * called exit(), then halt any others
+	 * right here.
+	 */</span>
+
+	 ut = get_bsdthread_info(self);
+	 <span class="enscript-keyword">if</span> (ut-&gt;uu_flag &amp; UT_VFORK) {
+		<span class="enscript-keyword">if</span> (!thread_can_terminate) {
+			<span class="enscript-keyword">return</span> EINVAL;
+		}
+
+		vfork_exit(p, rv);
+		vfork_return(p , retval, p-&gt;p_pid);
+		unix_syscall_return(0);
+		<span class="enscript-comment">/* NOT REACHED */</span>
+	 }
+
+	<span class="enscript-comment">/* 
+	 * The parameter list of audit_syscall_exit() was augmented to
+	 * take the Darwin syscall number as the first parameter,
+	 * which is currently required by mac_audit_postselect().
+	 */</span>
+
+	<span class="enscript-comment">/* 
+	 * The BSM token contains two components: an exit status as passed
+	 * to exit(), and a return value to indicate what sort of exit it 
+	 * was.  The exit status is WEXITSTATUS(rv), but it's not clear
+ 	 * what the return value is.
+	 */</span>
+	AUDIT_ARG(exit, WEXITSTATUS(rv), 0);
+	AUDIT_SYSCALL_EXIT(SYS_exit, p, ut, 0); <span class="enscript-comment">/* Exit is always successfull */</span>
+
+	DTRACE_PROC1(exit, <span class="enscript-type">int</span>, CLD_EXITED);
+
+	<span class="enscript-comment">/* mark process is going to exit and pull out of DBG/disk throttle */</span>
+	<span class="enscript-comment">/* TODO: This should be done after becoming exit thread */</span>
+	proc_set_task_policy(p-&gt;task, THREAD_NULL, TASK_POLICY_ATTRIBUTE,
+	                     TASK_POLICY_TERMINATED, TASK_POLICY_ENABLE);
+
+        proc_lock(p);
+	error = proc_transstart(p, 1, ((jetsam_flags &amp; P_JETSAM_VNODE) ? 1 : 0));
+	<span class="enscript-keyword">if</span> (error == EDEADLK) {
+		<span class="enscript-comment">/* Temp: If deadlock error, then it implies multithreaded exec is
+		 * in progress. Instread of letting exit continue and 
+		 * corrupting the freed memory, let the exit thread
+		 * return. This will save corruption in remote case.
+		 */</span>
+		proc_unlock(p);
+		<span class="enscript-keyword">if</span> (current_proc() == p){
+			<span class="enscript-keyword">if</span> (p-&gt;exit_thread == self)
+				printf(<span class="enscript-string">&quot;exit_thread failed to exit, leaving process %s[%d] in unkillable limbo\n&quot;</span>,
+				       p-&gt;p_comm, p-&gt;p_pid);
+			thread_exception_return();
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* external termination like jetsam */</span>
+			<span class="enscript-keyword">return</span>(error);
+		}
+	}
+
+	<span class="enscript-keyword">while</span> (p-&gt;exit_thread != self) {
+		<span class="enscript-keyword">if</span> (sig_try_locked(p) &lt;= 0) {
+			proc_transend(p, 1);
+			<span class="enscript-keyword">if</span> (get_threadtask(self) != task) {
+				proc_unlock(p);
+				<span class="enscript-keyword">return</span>(0);
+                        }
+			proc_unlock(p);
+			
+			thread_terminate(self);
+			<span class="enscript-keyword">if</span> (!thread_can_terminate) {
+				<span class="enscript-keyword">return</span> 0;
+			}
+
+			thread_exception_return();
+			<span class="enscript-comment">/* NOTREACHED */</span>
+		}
+		sig_lock_to_exit(p);
+	}
+
+	<span class="enscript-keyword">if</span> (p == initproc &amp;&amp; current_proc() == p) {
+		init_task_died = TRUE;
+	}
+	
+	p-&gt;p_lflag |= P_LEXIT;
+	p-&gt;p_xstat = rv;
+	p-&gt;p_lflag |= jetsam_flags;
+
+	proc_transend(p, 1);
+	proc_unlock(p);
+
+	proc_prepareexit(p, rv, perf_notify);
+
+	<span class="enscript-comment">/* Last thread to terminate will call proc_exit() */</span>
+	task_terminate_internal(task);
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_prepareexit</span>(proc_t p, <span class="enscript-type">int</span> rv, boolean_t perf_notify) 
+{
+	mach_exception_data_type_t code = 0, subcode = 0;
+
+	<span class="enscript-type">struct</span> uthread *ut;
+	thread_t self = current_thread();
+	ut = get_bsdthread_info(self);
+	<span class="enscript-type">struct</span> rusage_superset *rup;
+	<span class="enscript-type">int</span> kr = 0;
+	<span class="enscript-type">int</span> create_corpse = FALSE;
+
+	<span class="enscript-keyword">if</span> (p == initproc) {
+		launchd_crashed_panic(p, rv);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+ 	<span class="enscript-comment">/* If a core should be generated, notify crash reporter */</span>
+	<span class="enscript-keyword">if</span> (hassigprop(WTERMSIG(rv), SA_CORE) || ((p-&gt;p_csflags &amp; CS_KILLED) != 0)) {
+		<span class="enscript-comment">/* 
+		 * Workaround for processes checking up on PT_DENY_ATTACH:
+		 * should be backed out post-Leopard (details in 5431025).
+		 */</span>
+		<span class="enscript-keyword">if</span> ((SIGSEGV == WTERMSIG(rv)) &amp;&amp; 
+				(p-&gt;p_pptr-&gt;p_lflag &amp; P_LNOATTACH)) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">skipcheck</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Crash Reporter looks for the signal value, original exception
+		 * type, and low 20 bits of the original code in code[0] 
+		 * (8, 4, and 20 bits respectively). code[1] is unmodified. 
+		 */</span>
+		code = ((WTERMSIG(rv) &amp; 0xff) &lt;&lt; 24) |
+			((ut-&gt;uu_exception &amp; 0x0f) &lt;&lt; 20) | 
+			((<span class="enscript-type">int</span>)ut-&gt;uu_code &amp; 0xfffff);
+		subcode = ut-&gt;uu_subcode;
+
+		kr = task_exception_notify(EXC_CRASH, code, subcode);
+
+		<span class="enscript-comment">/* Nobody handled EXC_CRASH?? remember to make corpse */</span>
+		<span class="enscript-keyword">if</span> (kr != 0) {
+			create_corpse = TRUE;
+		}
+	}
+
+<span class="enscript-reference">skipcheck</span>:
+	<span class="enscript-comment">/* Notify the perf server? */</span>
+	<span class="enscript-keyword">if</span> (perf_notify) {
+		(<span class="enscript-type">void</span>)sys_perf_notify(self, p-&gt;p_pid);
+	}
+
+
+	<span class="enscript-comment">/* stash the usage into corpse data if making_corpse == true */</span>
+	<span class="enscript-keyword">if</span> (create_corpse == TRUE) {
+		kr = task_mark_corpse(current_task());
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+			<span class="enscript-keyword">if</span> (kr == KERN_NO_SPACE) {
+				printf(<span class="enscript-string">&quot;Process[%d] has no vm space for corpse info.\n&quot;</span>, p-&gt;p_pid);
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kr == KERN_NOT_SUPPORTED) {
+				printf(<span class="enscript-string">&quot;Process[%d] was destined to be corpse. But corpse is disabled by config.\n&quot;</span>, p-&gt;p_pid);
+			} <span class="enscript-keyword">else</span> {
+				printf(<span class="enscript-string">&quot;Process[%d] crashed: %s. Too many corpses being created.\n&quot;</span>, p-&gt;p_pid, p-&gt;p_comm);
+			}
+			create_corpse = FALSE;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* XXX: &lt;rdar://problem/20491659&gt; Need to sync ATM buffer before crash */</span>
+			kr = task_send_trace_memory(current_task(), p-&gt;p_pid, p-&gt;p_uniqueid);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Before this process becomes a zombie, stash resource usage
+	 * stats in the proc for external observers to query
+	 * via proc_pid_rusage().
+	 *
+	 * If the zombie allocation fails, just punt the stats.
+	 */</span>
+	MALLOC_ZONE(rup, <span class="enscript-type">struct</span> rusage_superset *,
+			<span class="enscript-keyword">sizeof</span> (*rup), M_ZOMBIE, M_WAITOK);
+	<span class="enscript-keyword">if</span> (rup != NULL) {
+		gather_rusage_info(p, &amp;rup-&gt;ri, RUSAGE_INFO_CURRENT);
+		rup-&gt;ri.ri_phys_footprint = 0;
+		rup-&gt;ri.ri_proc_exit_abstime = mach_absolute_time();
+
+		<span class="enscript-comment">/*
+		 * Make the rusage_info visible to external observers
+		 * only after it has been completely filled in.
+		 */</span>
+		p-&gt;p_ru = rup;
+	}
+	<span class="enscript-keyword">if</span> (create_corpse) {
+		populate_corpse_crashinfo(p, task_get_corpseinfo(current_task()), rup, code, subcode);
+	}
+	<span class="enscript-comment">/*
+	 * Remove proc from allproc queue and from pidhash chain.
+	 * Need to do this before we do anything that can block.
+	 * Not doing causes things like mount() find this on allproc
+	 * in partially cleaned state.
+	 */</span>
+
+	proc_list_lock();
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>
+	memorystatus_remove(p, TRUE);
+#<span class="enscript-reference">endif</span>
+
+	LIST_REMOVE(p, p_list);
+	LIST_INSERT_HEAD(&amp;zombproc, p, p_list);	<span class="enscript-comment">/* Place onto zombproc. */</span>
+	<span class="enscript-comment">/* will not be visible via proc_find */</span>
+	p-&gt;p_listflag |= P_LIST_EXITED;
+
+	proc_list_unlock();
+
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">PGINPROF</span>
+	vmsizmon();
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-comment">/*
+	 * If parent is waiting for us to exit or exec,
+	 * P_LPPWAIT is set; we will wakeup the parent below.
+	 */</span>
+	proc_lock(p);
+	p-&gt;p_lflag &amp;= ~(P_LTRACED | P_LPPWAIT);
+	p-&gt;p_sigignore = ~(sigcantmask);
+	ut-&gt;uu_siglist = 0;
+	proc_unlock(p);
+}
+
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">proc_exit</span>(proc_t p)
+{
+	proc_t q;
+	proc_t pp;
+	<span class="enscript-type">struct</span> task *task = p-&gt;task;
+	vnode_t tvp = NULLVP;
+	<span class="enscript-type">struct</span> pgrp * pg;
+	<span class="enscript-type">struct</span> session *sessp;
+	<span class="enscript-type">struct</span> uthread * uth;
+	pid_t pid;
+	<span class="enscript-type">int</span> exitval;
+	<span class="enscript-type">int</span> knote_hint;
+
+	uth = current_uthread();
+
+	proc_lock(p);
+	proc_transstart(p, 1, 0);
+	<span class="enscript-keyword">if</span>( !(p-&gt;p_lflag &amp; P_LEXIT)) {
+		<span class="enscript-comment">/*
+		 * This can happen if a thread_terminate() occurs
+		 * in a single-threaded process.
+		 */</span>
+		p-&gt;p_lflag |= P_LEXIT;
+		proc_transend(p, 1);
+		proc_unlock(p);
+		proc_prepareexit(p, 0, TRUE);	
+		(<span class="enscript-type">void</span>) task_terminate_internal(task);
+		proc_lock(p);
+	} <span class="enscript-keyword">else</span> {
+		proc_transend(p, 1);
+	}
+
+	p-&gt;p_lflag |= P_LPEXIT;
+
+	<span class="enscript-comment">/*
+	 * Other kernel threads may be in the middle of signalling this process.
+	 * Wait for those threads to wrap it up before making the process
+	 * disappear on them.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((p-&gt;p_lflag &amp; P_LINSIGNAL) || (p-&gt;p_sigwaitcnt &gt; 0)) {
+		p-&gt;p_sigwaitcnt++;
+		<span class="enscript-keyword">while</span> ((p-&gt;p_lflag &amp; P_LINSIGNAL) || (p-&gt;p_sigwaitcnt &gt; 1)) 
+			msleep(&amp;p-&gt;p_sigmask, &amp;p-&gt;p_mlock, PWAIT, <span class="enscript-string">&quot;proc_sigdrain&quot;</span>, NULL);
+		p-&gt;p_sigwaitcnt--;
+	}
+
+	proc_unlock(p);
+	pid = p-&gt;p_pid;
+	exitval = p-&gt;p_xstat;
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_COMMON, 
+		BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXIT) | DBG_FUNC_START,
+		pid, exitval, 0, 0, 0);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+	<span class="enscript-comment">/*
+	 * Free any outstanding lazy dof entries. It is imperative we
+	 * always call dtrace_lazy_dofs_destroy, rather than null check
+	 * and call if !NULL. If we NULL test, during lazy dof faulting
+	 * we can race with the faulting code and proceed from here to
+	 * beyond the helpers cleanup. The lazy dof faulting will then
+	 * install new helpers which will never be cleaned up, and leak.
+	 */</span>
+	dtrace_lazy_dofs_destroy(p);
+
+	<span class="enscript-comment">/*
+	 * Clean up any DTrace helper actions or probes for the process.
+	 */</span>
+	<span class="enscript-keyword">if</span> (p-&gt;p_dtrace_helpers != NULL) {
+		(*dtrace_helpers_cleanup)(p);
+	}
+
+	<span class="enscript-comment">/*
+	 * Clean up any DTrace probes associated with this process.
+	 */</span>
+	<span class="enscript-comment">/*
+	 * APPLE NOTE: We release ptss pages/entries in dtrace_fasttrap_exit_ptr(),
+	 * call this after dtrace_helpers_cleanup()
+	 */</span>
+	proc_lock(p);
+	<span class="enscript-keyword">if</span> (p-&gt;p_dtrace_probes &amp;&amp; dtrace_fasttrap_exit_ptr) {
+		(*dtrace_fasttrap_exit_ptr)(p);
+	}
+	proc_unlock(p);
+#<span class="enscript-reference">endif</span>
+
+	nspace_proc_exit(p);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">VM_PRESSURE_EVENTS</span>
+	vm_pressure_proc_cleanup(p);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * need to cancel async IO requests that can be cancelled and wait for those
+	 * already active.  MAY BLOCK!
+	 */</span>
+	
+	proc_refdrain(p);
+
+	<span class="enscript-comment">/* if any pending cpu limits action, clear it */</span>
+	task_clear_cpuusage(p-&gt;task, TRUE);
+
+	workqueue_mark_exiting(p);
+	workqueue_exit(p);
+	kqueue_dealloc(p-&gt;p_wqkqueue);
+	p-&gt;p_wqkqueue = NULL;
+
+	_aio_exit( p );
+
+	<span class="enscript-comment">/*
+	 * Close open files and release open-file table.
+	 * This may block!
+	 */</span>
+	fdfree(p);
+
+	<span class="enscript-keyword">if</span> (uth-&gt;uu_lowpri_window) {
+	        <span class="enscript-comment">/*
+		 * task is marked as a low priority I/O type
+		 * and the I/O we issued while in flushing files on close
+		 * collided with normal I/O operations...
+		 * no need to throttle this thread since its going away
+		 * but we do need to update our bookeeping w/r to throttled threads
+		 */</span>
+		throttle_lowpri_io(0);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SYSV_SHM</span>
+	<span class="enscript-comment">/* Close ref SYSV Shared memory*/</span>
+	<span class="enscript-keyword">if</span> (p-&gt;vm_shm)
+		shmexit(p);
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SYSV_SEM</span>
+	<span class="enscript-comment">/* Release SYSV semaphores */</span>
+	semexit(p);
+#<span class="enscript-reference">endif</span>
+	
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PSYNCH</span>
+	pth_proc_hashdelete(p);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PSYNCH */</span>
+
+	sessp = proc_session(p);
+	<span class="enscript-keyword">if</span> (SESS_LEADER(p, sessp)) {
+
+		<span class="enscript-keyword">if</span> (sessp-&gt;s_ttyvp != NULLVP) {
+			<span class="enscript-type">struct</span> vnode *ttyvp;
+			<span class="enscript-type">int</span> ttyvid;
+			<span class="enscript-type">int</span> cttyflag = 0;
+			<span class="enscript-type">struct</span> vfs_context context;
+			<span class="enscript-type">struct</span> tty *tp;
+
+			<span class="enscript-comment">/*
+			 * Controlling process.
+			 * Signal foreground pgrp,
+			 * drain controlling terminal
+			 * and revoke access to controlling terminal.
+			 */</span>
+			session_lock(sessp);
+			tp = SESSION_TP(sessp);
+			<span class="enscript-keyword">if</span> ((tp != TTY_NULL) &amp;&amp; (tp-&gt;t_session == sessp)) {
+				session_unlock(sessp);
+
+				<span class="enscript-comment">/*
+				 * We're going to SIGHUP the foreground process
+				 * group. It can't change from this point on
+				 * until the revoke is complete.
+				 * The process group changes under both the tty
+				 * lock and proc_list_lock but we need only one
+				 */</span>
+				tty_lock(tp);
+				ttysetpgrphup(tp);
+				tty_unlock(tp);
+
+				tty_pgsignal(tp, SIGHUP, 1);
+
+				session_lock(sessp);
+				tp = SESSION_TP(sessp);
+			}
+			cttyflag = sessp-&gt;s_flags &amp; S_CTTYREF;
+			sessp-&gt;s_flags &amp;= ~S_CTTYREF;
+			ttyvp = sessp-&gt;s_ttyvp;
+			ttyvid = sessp-&gt;s_ttyvid;
+			sessp-&gt;s_ttyvp = NULLVP;
+			sessp-&gt;s_ttyvid = 0;
+			sessp-&gt;s_ttyp = TTY_NULL;
+			sessp-&gt;s_ttypgrpid = NO_PID;
+			session_unlock(sessp);
+
+			<span class="enscript-keyword">if</span> ((ttyvp != NULLVP) &amp;&amp; (vnode_getwithvid(ttyvp, ttyvid) == 0)) {
+				<span class="enscript-keyword">if</span> (tp != TTY_NULL) {
+					tty_lock(tp);
+					(<span class="enscript-type">void</span>) ttywait(tp);
+					tty_unlock(tp);
+				}
+				context.vc_thread = proc_thread(p); <span class="enscript-comment">/* XXX */</span>
+				context.vc_ucred = kauth_cred_proc_ref(p);
+				VNOP_REVOKE(ttyvp, REVOKEALL, &amp;context);
+				<span class="enscript-keyword">if</span> (cttyflag) {
+					<span class="enscript-comment">/*
+					 * Release the extra usecount taken in cttyopen.
+					 * usecount should be released after VNOP_REVOKE is called.
+					 * This usecount was taken to ensure that
+					 * the VNOP_REVOKE results in a close to
+					 * the tty since cttyclose is a no-op.
+					 */</span>
+					vnode_rele(ttyvp);
+				}
+				vnode_put(ttyvp);
+				kauth_cred_unref(&amp;context.vc_ucred);
+				ttyvp = NULLVP;
+			}
+			<span class="enscript-keyword">if</span> (tp) {
+				<span class="enscript-comment">/*
+				 * This is cleared even if not set. This is also done in
+				 * spec_close to ensure that the flag is cleared.
+				 */</span>
+				tty_lock(tp);
+				ttyclrpgrphup(tp);
+				tty_unlock(tp);
+
+				ttyfree(tp);
+			}
+		}
+		session_lock(sessp);
+		sessp-&gt;s_leader = NULL;
+		session_unlock(sessp);
+	}
+	session_rele(sessp);
+
+	pg = proc_pgrp(p);
+	fixjobc(p, pg, 0);
+	pg_rele(pg);
+
+	p-&gt;p_rlimit[RLIMIT_FSIZE].rlim_cur = RLIM_INFINITY;
+	(<span class="enscript-type">void</span>)acct_process(p);
+
+	proc_list_lock();
+
+	<span class="enscript-keyword">if</span> ((p-&gt;p_listflag &amp; P_LIST_EXITCOUNT) == P_LIST_EXITCOUNT) {
+		p-&gt;p_listflag &amp;= ~P_LIST_EXITCOUNT;
+		proc_shutdown_exitcount--;
+		<span class="enscript-keyword">if</span> (proc_shutdown_exitcount == 0)
+			wakeup(&amp;proc_shutdown_exitcount);
+	}
+
+	<span class="enscript-comment">/* wait till parentrefs are dropped and grant no more */</span>
+	proc_childdrainstart(p);
+	<span class="enscript-keyword">while</span> ((q = p-&gt;p_children.lh_first) != NULL) {
+		<span class="enscript-type">int</span> reparentedtoinit = (q-&gt;p_listflag &amp; P_LIST_DEADPARENT) ? 1 : 0;
+		<span class="enscript-keyword">if</span> (q-&gt;p_stat == SZOMB) {
+			<span class="enscript-keyword">if</span> (p != q-&gt;p_pptr)
+				panic(<span class="enscript-string">&quot;parent child linkage broken&quot;</span>);
+			<span class="enscript-comment">/* check for sysctl zomb lookup */</span>
+			<span class="enscript-keyword">while</span> ((q-&gt;p_listflag &amp; P_LIST_WAITING) == P_LIST_WAITING) {
+				msleep(&amp;q-&gt;p_stat, proc_list_mlock, PWAIT, <span class="enscript-string">&quot;waitcoll&quot;</span>, 0);
+			}
+			q-&gt;p_listflag |= P_LIST_WAITING;
+			<span class="enscript-comment">/*
+			 * This is a named reference and it is not granted
+			 * if the reap is already in progress. So we get
+			 * the reference here exclusively and their can be
+			 * no waiters. So there is no need for a wakeup
+			 * after we are done.  Also the reap frees the structure
+			 * and the proc struct cannot be used for wakeups as well. 
+			 * It is safe to use q here as this is system reap
+			 */</span>
+			(<span class="enscript-type">void</span>)reap_child_locked(p, q, 1, reparentedtoinit, 1, 0);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+		 	* Traced processes are killed
+		 	* since their existence means someone is messing up.
+		 	*/</span>
+			<span class="enscript-keyword">if</span> (q-&gt;p_lflag &amp; P_LTRACED) {
+				<span class="enscript-type">struct</span> proc *opp;
+
+				<span class="enscript-comment">/*
+				 * Take a reference on the child process to
+				 * ensure it doesn't exit and disappear between
+				 * the time we drop the list_lock and attempt
+				 * to acquire its proc_lock.
+				 */</span>
+				<span class="enscript-keyword">if</span> (proc_ref_locked(q) != q)
+					<span class="enscript-keyword">continue</span>;
+
+				proc_list_unlock();
+
+				opp = proc_find(q-&gt;p_oppid);
+				<span class="enscript-keyword">if</span> (opp != PROC_NULL) {
+					proc_list_lock();
+					q-&gt;p_oppid = 0;
+					proc_list_unlock();
+					proc_reparentlocked(q, opp, 0, 0);
+					proc_rele(opp);
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-comment">/* original parent exited while traced */</span>
+					proc_list_lock();
+					q-&gt;p_listflag |= P_LIST_DEADPARENT;
+					q-&gt;p_oppid = 0;
+					proc_list_unlock();
+					proc_reparentlocked(q, initproc, 0, 0);
+				}
+
+				proc_lock(q);
+				q-&gt;p_lflag &amp;= ~P_LTRACED;
+
+				<span class="enscript-keyword">if</span> (q-&gt;sigwait_thread) {
+					thread_t thread = q-&gt;sigwait_thread;
+
+					proc_unlock(q);
+					<span class="enscript-comment">/*
+				 	* The sigwait_thread could be stopped at a
+				 	* breakpoint. Wake it up to kill.
+				 	* Need to do this as it could be a thread which is not
+				 	* the first thread in the task. So any attempts to kill
+				 	* the process would result into a deadlock on q-&gt;sigwait.
+				 	*/</span>
+					thread_resume(thread);
+					clear_wait(thread, THREAD_INTERRUPTED);
+					threadsignal(thread, SIGKILL, 0);
+				} <span class="enscript-keyword">else</span> {
+					proc_unlock(q);
+				}
+
+				psignal(q, SIGKILL);
+				proc_list_lock();
+				proc_rele_locked(q);
+			} <span class="enscript-keyword">else</span> {
+				q-&gt;p_listflag |= P_LIST_DEADPARENT;
+				proc_reparentlocked(q, initproc, 0, 1);
+			}
+		}
+	}
+
+	proc_childdrainend(p);
+	proc_list_unlock();
+
+	<span class="enscript-comment">/*
+	 * Release reference to text vnode
+	 */</span>
+	tvp = p-&gt;p_textvp;
+	p-&gt;p_textvp = NULL;
+	<span class="enscript-keyword">if</span> (tvp != NULLVP) {
+		vnode_rele(tvp);
+	}
+
+	<span class="enscript-comment">/*
+	 * Save exit status and final rusage info, adding in child rusage
+	 * info and self times.  If we were unable to allocate a zombie
+	 * structure, this information is lost.
+	 */</span>
+	<span class="enscript-keyword">if</span> (p-&gt;p_ru != NULL) {
+	    calcru(p, &amp;p-&gt;p_stats-&gt;p_ru.ru_utime, &amp;p-&gt;p_stats-&gt;p_ru.ru_stime, NULL);
+	    p-&gt;p_ru-&gt;ru = p-&gt;p_stats-&gt;p_ru;
+
+	    ruadd(&amp;(p-&gt;p_ru-&gt;ru), &amp;p-&gt;p_stats-&gt;p_cru);
+	}
+
+	<span class="enscript-comment">/*
+	 * Free up profiling buffers.
+	 */</span>
+	{
+		<span class="enscript-type">struct</span> uprof *p0 = &amp;p-&gt;p_stats-&gt;p_prof, *p1, *pn;
+
+		p1 = p0-&gt;pr_next;
+		p0-&gt;pr_next = NULL;
+		p0-&gt;pr_scale = 0;
+
+		<span class="enscript-keyword">for</span> (; p1 != NULL; p1 = pn) {
+			pn = p1-&gt;pr_next;
+			kfree(p1, <span class="enscript-keyword">sizeof</span> *p1);
+		}
+	}
+
+	proc_spinlock(p);
+	<span class="enscript-keyword">if</span> (thread_call_cancel(p-&gt;p_rcall))
+		p-&gt;p_ractive--;
+
+	<span class="enscript-keyword">while</span> (p-&gt;p_ractive &gt; 0) {
+		proc_spinunlock(p);
+		
+		delay(1);
+
+		proc_spinlock(p);
+	}
+	proc_spinunlock(p);
+
+	thread_call_free(p-&gt;p_rcall);
+	p-&gt;p_rcall = NULL;
+
+	<span class="enscript-comment">/*
+	 * Other substructures are freed from wait().
+	 */</span>
+	FREE_ZONE(p-&gt;p_stats, <span class="enscript-keyword">sizeof</span> *p-&gt;p_stats, M_PSTATS);
+	p-&gt;p_stats = NULL;
+
+	FREE_ZONE(p-&gt;p_sigacts, <span class="enscript-keyword">sizeof</span> *p-&gt;p_sigacts, M_SIGACTS);
+	p-&gt;p_sigacts = NULL;
+
+	proc_limitdrop(p, 1);
+	p-&gt;p_limit = NULL;
+
+	vm_purgeable_disown(p-&gt;task);
+
+	<span class="enscript-comment">/*
+	 * Finish up by terminating the task
+	 * and halt this thread (only if a
+	 * member of the task exiting).
+	 */</span>
+	p-&gt;task = TASK_NULL;
+	set_bsdtask_info(task, NULL);
+
+	knote_hint = NOTE_EXIT | (p-&gt;p_xstat &amp; 0xffff);
+	proc_knote(p, knote_hint);
+
+	<span class="enscript-comment">/* mark the thread as the one that is doing proc_exit
+	 * no need to hold proc lock in uthread_free
+	 */</span>
+	uth-&gt;uu_flag |= UT_PROCEXIT;
+	<span class="enscript-comment">/*
+	 * Notify parent that we're gone.
+	 */</span>
+	pp = proc_parent(p);
+	<span class="enscript-keyword">if</span> (pp-&gt;p_flag &amp; P_NOCLDWAIT) {
+
+		<span class="enscript-keyword">if</span> (p-&gt;p_ru != NULL) {
+			proc_lock(pp);
+#<span class="enscript-reference">if</span> 3839178
+		<span class="enscript-comment">/*
+		 * If the parent is ignoring SIGCHLD, then POSIX requires
+		 * us to not add the resource usage to the parent process -
+		 * we are only going to hand it off to init to get reaped.
+		 * We should contest the standard in this case on the basis
+		 * of RLIMIT_CPU.
+		 */</span>
+#<span class="enscript-reference">else</span>	<span class="enscript-comment">/* !3839178 */</span>
+		<span class="enscript-comment">/*
+		 * Add child resource usage to parent before giving
+		 * zombie to init.  If we were unable to allocate a
+		 * zombie structure, this information is lost.
+		 */</span>
+			ruadd(&amp;pp-&gt;p_stats-&gt;p_cru, &amp;p-&gt;p_ru-&gt;ru);
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* !3839178 */</span>
+			update_rusage_info_child(&amp;pp-&gt;p_stats-&gt;ri_child, &amp;p-&gt;p_ru-&gt;ri);
+			proc_unlock(pp);
+		}
+		
+		<span class="enscript-comment">/* kernel can reap this one, no need to move it to launchd */</span>
+		proc_list_lock();
+		p-&gt;p_listflag |= P_LIST_DEADPARENT;
+		proc_list_unlock();
+	}
+	<span class="enscript-keyword">if</span> ((p-&gt;p_listflag &amp; P_LIST_DEADPARENT) == 0 || p-&gt;p_oppid) {
+		<span class="enscript-keyword">if</span> (pp != initproc) {
+			proc_lock(pp);
+			pp-&gt;si_pid = p-&gt;p_pid;
+			pp-&gt;si_status = p-&gt;p_xstat;
+			pp-&gt;si_code = CLD_EXITED;
+			<span class="enscript-comment">/*
+			 * p_ucred usage is safe as it is an exiting process
+			 * and reference is dropped in reap
+			 */</span>
+			pp-&gt;si_uid = kauth_cred_getruid(p-&gt;p_ucred);
+			proc_unlock(pp);
+		}
+		<span class="enscript-comment">/* mark as a zombie */</span>
+		<span class="enscript-comment">/* No need to take proc lock as all refs are drained and
+		 * no one except parent (reaping ) can look at this.
+		 * The write is to an int and is coherent. Also parent is
+		 *  keyed off of list lock for reaping
+		 */</span>
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_COMMON,
+			BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXIT) | DBG_FUNC_END,
+			pid, exitval, 0, 0, 0);
+		p-&gt;p_stat = SZOMB;
+		<span class="enscript-comment">/* 
+		 * The current process can be reaped so, no one
+		 * can depend on this
+		 */</span>
+
+		psignal(pp, SIGCHLD);
+	
+		<span class="enscript-comment">/* and now wakeup the parent */</span>
+		proc_list_lock();
+		wakeup((caddr_t)pp);
+		proc_list_unlock();
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* should be fine as parent proc would be initproc */</span>
+		<span class="enscript-comment">/* mark as a zombie */</span>
+		<span class="enscript-comment">/* No need to take proc lock as all refs are drained and
+		 * no one except parent (reaping ) can look at this.
+		 * The write is to an int and is coherent. Also parent is
+		 *  keyed off of list lock for reaping
+		 */</span>
+		proc_list_lock();
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_COMMON,
+			BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXIT) | DBG_FUNC_END,
+			pid, exitval, 0, 0, 0);
+		<span class="enscript-comment">/* check for sysctl zomb lookup */</span>
+		<span class="enscript-keyword">while</span> ((p-&gt;p_listflag &amp; P_LIST_WAITING) == P_LIST_WAITING) {
+			msleep(&amp;p-&gt;p_stat, proc_list_mlock, PWAIT, <span class="enscript-string">&quot;waitcoll&quot;</span>, 0);
+		}
+		<span class="enscript-comment">/* safe to use p as this is a system reap */</span>
+		p-&gt;p_stat = SZOMB;
+		p-&gt;p_listflag |= P_LIST_WAITING;
+
+		<span class="enscript-comment">/*
+		 * This is a named reference and it is not granted
+		 * if the reap is already in progress. So we get
+		 * the reference here exclusively and their can be
+		 * no waiters. So there is no need for a wakeup
+		 * after we are done. AlsO  the reap frees the structure
+		 * and the proc struct cannot be used for wakeups as well. 
+		 * It is safe to use p here as this is system reap
+		 */</span>
+		(<span class="enscript-type">void</span>)reap_child_locked(pp, p, 1, 0, 1, 1);
+		<span class="enscript-comment">/* list lock dropped by reap_child_locked */</span>
+	}
+	<span class="enscript-keyword">if</span> (uth-&gt;uu_lowpri_window) {
+	        <span class="enscript-comment">/*
+		 * task is marked as a low priority I/O type and we've
+		 * somehow picked up another throttle during exit processing...
+		 * no need to throttle this thread since its going away
+		 * but we do need to update our bookeeping w/r to throttled threads
+		 */</span>
+		throttle_lowpri_io(0);
+	}
+
+	proc_rele(pp);
+
+}
+
+
+<span class="enscript-comment">/*
+ * reap_child_locked
+ *
+ * Description:	Given a process from which all status information needed
+ *		has already been extracted, if the process is a ptrace
+ *		attach process, detach it and give it back to its real
+ *		parent, else recover all resources remaining associated
+ *		with it.
+ *
+ * Parameters:	proc_t parent		Parent of process being reaped
+ *		proc_t child		Process to reap
+ *
+ * Returns:	0			Process was not reaped because it
+ *					came from an attach
+ *		1			Process was reaped
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">reap_child_locked</span>(proc_t parent, proc_t child, <span class="enscript-type">int</span> deadparent, <span class="enscript-type">int</span> reparentedtoinit, <span class="enscript-type">int</span> locked, <span class="enscript-type">int</span> droplock)
+{
+	proc_t trace_parent = PROC_NULL;	<span class="enscript-comment">/* Traced parent process, if tracing */</span>
+
+	<span class="enscript-keyword">if</span> (locked == 1)
+		proc_list_unlock();
+	
+	<span class="enscript-comment">/*
+	 * If we got the child via a ptrace 'attach',
+	 * we need to give it back to the old parent.
+	 *
+	 * Exception: someone who has been reparented to launchd before being
+	 * ptraced can simply be reaped, refer to radar 5677288
+	 * 	p_oppid 		 -&gt; ptraced
+	 * 	trace_parent == initproc -&gt; away from launchd
+	 * 	reparentedtoinit	 -&gt; came to launchd by reparenting
+	 */</span>
+	<span class="enscript-keyword">if</span> (child-&gt;p_oppid) {
+		<span class="enscript-type">int</span> knote_hint;
+		pid_t oppid;
+
+		proc_lock(child);
+		oppid = child-&gt;p_oppid;
+		child-&gt;p_oppid = 0;
+		knote_hint = NOTE_EXIT | (child-&gt;p_xstat &amp; 0xffff);
+		proc_unlock(child);
+
+		<span class="enscript-keyword">if</span> ((trace_parent = proc_find(oppid))
+			&amp;&amp; !((trace_parent == initproc) &amp;&amp; reparentedtoinit)) {
+				
+			<span class="enscript-keyword">if</span> (trace_parent != initproc) {
+				<span class="enscript-comment">/* 
+				 * proc internal fileds  and p_ucred usage safe 
+				 * here as child is dead and is not reaped or 
+				 * reparented yet 
+				 */</span>
+				proc_lock(trace_parent);
+				trace_parent-&gt;si_pid = child-&gt;p_pid;
+				trace_parent-&gt;si_status = child-&gt;p_xstat;
+				trace_parent-&gt;si_code = CLD_CONTINUED;
+				trace_parent-&gt;si_uid = kauth_cred_getruid(child-&gt;p_ucred);
+				proc_unlock(trace_parent);
+			}
+			proc_reparentlocked(child, trace_parent, 1, 0);
+			
+			<span class="enscript-comment">/* resend knote to original parent (and others) after reparenting */</span>
+			proc_knote(child, knote_hint);
+			
+			psignal(trace_parent, SIGCHLD);
+			proc_list_lock();
+			wakeup((caddr_t)trace_parent);
+			child-&gt;p_listflag &amp;= ~P_LIST_WAITING;
+			wakeup(&amp;child-&gt;p_stat);
+			proc_list_unlock();
+			proc_rele(trace_parent);
+			<span class="enscript-keyword">if</span> ((locked == 1) &amp;&amp; (droplock == 0))
+				proc_list_lock();
+			<span class="enscript-keyword">return</span> (0);
+		}
+
+		<span class="enscript-comment">/*
+		 * If we can't reparent (e.g. the original parent exited while child was being debugged, or
+		 * original parent is the same as the debugger currently exiting), we still need to satisfy
+		 * the knote lifecycle for other observers on the system. While the debugger was attached,
+		 * the NOTE_EXIT would not have been broadcast during initial child termination.
+		 */</span>
+		proc_knote(child, knote_hint);
+
+		<span class="enscript-keyword">if</span> (trace_parent != PROC_NULL) {
+			proc_rele(trace_parent);
+		}
+	}
+	
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">clang</span> <span class="enscript-variable-name">diagnostic</span> <span class="enscript-variable-name">push</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">clang</span> <span class="enscript-variable-name">diagnostic</span> <span class="enscript-variable-name">ignored</span> <span class="enscript-string">&quot;-Wdeprecated-declarations&quot;</span>
+	proc_knote(child, NOTE_REAP);
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">clang</span> <span class="enscript-variable-name">diagnostic</span> <span class="enscript-variable-name">pop</span>
+
+	proc_knote_drain(child);
+
+	child-&gt;p_xstat = 0;
+	<span class="enscript-keyword">if</span> (child-&gt;p_ru) {
+		proc_lock(parent);
+#<span class="enscript-reference">if</span> 3839178
+		<span class="enscript-comment">/*
+		 * If the parent is ignoring SIGCHLD, then POSIX requires
+		 * us to not add the resource usage to the parent process -
+		 * we are only going to hand it off to init to get reaped.
+		 * We should contest the standard in this case on the basis
+		 * of RLIMIT_CPU.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!(parent-&gt;p_flag &amp; P_NOCLDWAIT))
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* 3839178 */</span>
+			ruadd(&amp;parent-&gt;p_stats-&gt;p_cru, &amp;child-&gt;p_ru-&gt;ru);
+		update_rusage_info_child(&amp;parent-&gt;p_stats-&gt;ri_child, &amp;child-&gt;p_ru-&gt;ri);
+		proc_unlock(parent);
+		FREE_ZONE(child-&gt;p_ru, <span class="enscript-keyword">sizeof</span> *child-&gt;p_ru, M_ZOMBIE);
+		child-&gt;p_ru = NULL;
+	} <span class="enscript-keyword">else</span> {
+		printf(<span class="enscript-string">&quot;Warning : lost p_ru for %s\n&quot;</span>, child-&gt;p_comm);
+	}
+
+	AUDIT_SESSION_PROCEXIT(child);
+
+	<span class="enscript-comment">/*
+	 * Decrement the count of procs running with this uid.
+	 * p_ucred usage is safe here as it is an exited process.
+	 * and refernce is dropped after these calls down below
+	 * (locking protection is provided by list lock held in chgproccnt)
+	 */</span>
+
+	(<span class="enscript-type">void</span>)chgproccnt(kauth_cred_getruid(child-&gt;p_ucred), -1);
+
+	<span class="enscript-comment">/*
+	 * Free up credentials.
+	 */</span>
+	<span class="enscript-keyword">if</span> (IS_VALID_CRED(child-&gt;p_ucred)) {
+		kauth_cred_unref(&amp;child-&gt;p_ucred);
+	}
+
+	<span class="enscript-comment">/*  XXXX Note NOT SAFE TO USE p_ucred from this point onwards */</span>
+
+	<span class="enscript-comment">/*
+	 * Finally finished with old proc entry.
+	 * Unlink it from its process group and free it.
+	 */</span>
+	leavepgrp(child);
+
+	proc_list_lock();
+	LIST_REMOVE(child, p_list);	<span class="enscript-comment">/* off zombproc */</span>
+	parent-&gt;p_childrencnt--;
+	LIST_REMOVE(child, p_sibling);
+	<span class="enscript-comment">/* If there are no more children wakeup parent */</span>
+	<span class="enscript-keyword">if</span> ((deadparent != 0) &amp;&amp; (LIST_EMPTY(&amp;parent-&gt;p_children)))
+		wakeup((caddr_t)parent);	<span class="enscript-comment">/* with list lock held */</span>
+	child-&gt;p_listflag &amp;= ~P_LIST_WAITING;
+	wakeup(&amp;child-&gt;p_stat);
+
+	<span class="enscript-comment">/* Take it out of process hash */</span>
+	LIST_REMOVE(child, p_hash);
+	child-&gt;p_listflag &amp;= ~P_LIST_INHASH;
+	proc_checkdeadrefs(child);
+	nprocs--;
+
+	<span class="enscript-keyword">if</span> (deadparent) {
+		<span class="enscript-comment">/*
+		 * If a child zombie is being reaped because its parent
+		 * is exiting, make sure we update the list flag
+		 */</span>
+		child-&gt;p_listflag |= P_LIST_DEADPARENT;
+	}
+
+	proc_list_unlock();
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_FINE_LOCK_GROUPS</span>
+	lck_mtx_destroy(&amp;child-&gt;p_mlock, proc_mlock_grp);
+	lck_mtx_destroy(&amp;child-&gt;p_fdmlock, proc_fdmlock_grp);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+	lck_mtx_destroy(&amp;child-&gt;p_dtrace_sprlock, proc_lck_grp);
+#<span class="enscript-reference">endif</span>
+	lck_spin_destroy(&amp;child-&gt;p_slock, proc_slock_grp);
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* CONFIG_FINE_LOCK_GROUPS */</span>
+	lck_mtx_destroy(&amp;child-&gt;p_mlock, proc_lck_grp);
+	lck_mtx_destroy(&amp;child-&gt;p_fdmlock, proc_lck_grp);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+	lck_mtx_destroy(&amp;child-&gt;p_dtrace_sprlock, proc_lck_grp);
+#<span class="enscript-reference">endif</span>
+	lck_spin_destroy(&amp;child-&gt;p_slock, proc_lck_grp);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_FINE_LOCK_GROUPS */</span>
+	workqueue_destroy_lock(child);
+
+	FREE_ZONE(child, <span class="enscript-keyword">sizeof</span> *child, M_PROC);
+	<span class="enscript-keyword">if</span> ((locked == 1) &amp;&amp; (droplock == 0))
+		proc_list_lock();
+
+	<span class="enscript-keyword">return</span> (1);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">wait1continue</span>(<span class="enscript-type">int</span> result)
+{
+	proc_t p;
+	thread_t thread;
+	uthread_t uth;
+	<span class="enscript-type">struct</span> _wait4_data *wait4_data;
+	<span class="enscript-type">struct</span> wait4_nocancel_args *uap;
+	<span class="enscript-type">int</span> *retval;
+
+	<span class="enscript-keyword">if</span> (result)
+		<span class="enscript-keyword">return</span>(result);
+
+	p = current_proc();
+	thread = current_thread();
+	uth = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(thread);
+
+	wait4_data = &amp;uth-&gt;uu_kevent.uu_wait4_data;
+	uap = wait4_data-&gt;args;
+	retval = wait4_data-&gt;retval;
+	<span class="enscript-keyword">return</span>(wait4_nocancel(p, uap, retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">wait4</span>(proc_t q, <span class="enscript-type">struct</span> wait4_args *uap, int32_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span>(wait4_nocancel(q, (<span class="enscript-type">struct</span> wait4_nocancel_args *)uap, retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">wait4_nocancel</span>(proc_t q, <span class="enscript-type">struct</span> wait4_nocancel_args *uap, int32_t *retval)
+{
+	<span class="enscript-type">int</span> nfound;
+	<span class="enscript-type">int</span> sibling_count;
+	proc_t p;
+	<span class="enscript-type">int</span> status, error;
+	uthread_t uth;
+	<span class="enscript-type">struct</span> _wait4_data *wait4_data;
+
+	AUDIT_ARG(pid, uap-&gt;pid);
+
+	<span class="enscript-keyword">if</span> (uap-&gt;pid == 0)
+		uap-&gt;pid = -q-&gt;p_pgrpid;
+
+<span class="enscript-reference">loop</span>:
+	proc_list_lock();
+<span class="enscript-reference">loop1</span>:
+	nfound = 0;
+	sibling_count = 0;
+
+	<span class="enscript-keyword">for</span> (p = q-&gt;p_children.lh_first; p != 0; p = p-&gt;p_sibling.le_next) {
+		<span class="enscript-keyword">if</span> ( p-&gt;p_sibling.le_next != 0 )
+			sibling_count++;
+		<span class="enscript-keyword">if</span> (uap-&gt;pid != WAIT_ANY &amp;&amp;
+		    p-&gt;p_pid != uap-&gt;pid &amp;&amp;
+		    p-&gt;p_pgrpid != -(uap-&gt;pid))
+			<span class="enscript-keyword">continue</span>;
+
+		nfound++;
+
+		<span class="enscript-comment">/* XXX This is racy because we don't get the lock!!!! */</span>
+
+		<span class="enscript-keyword">if</span> (p-&gt;p_listflag &amp; P_LIST_WAITING) {
+			(<span class="enscript-type">void</span>)msleep(&amp;p-&gt;p_stat, proc_list_mlock, PWAIT, <span class="enscript-string">&quot;waitcoll&quot;</span>, 0);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop1</span>;
+		}
+		p-&gt;p_listflag |= P_LIST_WAITING;   <span class="enscript-comment">/* only allow single thread to wait() */</span>
+
+
+		<span class="enscript-keyword">if</span> (p-&gt;p_stat == SZOMB) {
+			<span class="enscript-type">int</span> reparentedtoinit = (p-&gt;p_listflag &amp; P_LIST_DEADPARENT) ? 1 : 0;
+
+			proc_list_unlock();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+			<span class="enscript-keyword">if</span> ((error = mac_proc_check_wait(q, p)) != 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+#<span class="enscript-reference">endif</span>
+			retval[0] = p-&gt;p_pid;
+			<span class="enscript-keyword">if</span> (uap-&gt;status) {
+				<span class="enscript-comment">/* Legacy apps expect only 8 bits of status */</span>
+				status = 0xffff &amp; p-&gt;p_xstat;	<span class="enscript-comment">/* convert to int */</span>
+				error = copyout((caddr_t)&amp;status,
+				   			uap-&gt;status,
+						    <span class="enscript-keyword">sizeof</span>(status));
+				<span class="enscript-keyword">if</span> (error) 
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			<span class="enscript-keyword">if</span> (uap-&gt;rusage) {
+				<span class="enscript-keyword">if</span> (p-&gt;p_ru == NULL) {
+					error = ENOMEM;
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(q)) {
+						<span class="enscript-type">struct</span> user64_rusage	my_rusage;
+						munge_user64_rusage(&amp;p-&gt;p_ru-&gt;ru, &amp;my_rusage);
+						error = copyout((caddr_t)&amp;my_rusage,
+							uap-&gt;rusage,
+							<span class="enscript-keyword">sizeof</span> (my_rusage));
+					}
+					<span class="enscript-keyword">else</span> {
+						<span class="enscript-type">struct</span> user32_rusage	my_rusage;
+						munge_user32_rusage(&amp;p-&gt;p_ru-&gt;ru, &amp;my_rusage);
+						error = copyout((caddr_t)&amp;my_rusage,
+							uap-&gt;rusage,
+							<span class="enscript-keyword">sizeof</span> (my_rusage));
+					}
+				}
+				<span class="enscript-comment">/* information unavailable? */</span>
+				<span class="enscript-keyword">if</span> (error) 
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+
+			<span class="enscript-comment">/* Conformance change for 6577252.
+			 * When SIGCHLD is blocked and wait() returns because the status
+			 * of a child process is available and there are no other 
+			 * children processes, then any pending SIGCHLD signal is cleared.
+			 */</span>
+			<span class="enscript-keyword">if</span> ( sibling_count == 0 ) {
+				<span class="enscript-type">int</span> mask = sigmask(SIGCHLD);
+				uth = current_uthread();
+
+				<span class="enscript-keyword">if</span> ( (uth-&gt;uu_sigmask &amp; mask) != 0 ) {
+					<span class="enscript-comment">/* we are blocking SIGCHLD signals.  clear any pending SIGCHLD.
+					 * This locking looks funny but it is protecting access to the 
+					 * thread via p_uthlist.
+					 */</span>
+					proc_lock(q); 
+					uth-&gt;uu_siglist &amp;= ~mask;	<span class="enscript-comment">/* clear pending signal */</span>
+					proc_unlock(q);
+				}
+			}
+			
+			<span class="enscript-comment">/* Clean up */</span>
+			(<span class="enscript-type">void</span>)reap_child_locked(q, p, 0, reparentedtoinit, 0, 0);
+
+			<span class="enscript-keyword">return</span> (0);
+		}
+		<span class="enscript-keyword">if</span> (p-&gt;p_stat == SSTOP &amp;&amp; (p-&gt;p_lflag &amp; P_LWAITED) == 0 &amp;&amp;
+		    (p-&gt;p_lflag &amp; P_LTRACED || uap-&gt;options &amp; WUNTRACED)) {
+			proc_list_unlock();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+			<span class="enscript-keyword">if</span> ((error = mac_proc_check_wait(q, p)) != 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+#<span class="enscript-reference">endif</span>
+			proc_lock(p);
+			p-&gt;p_lflag |= P_LWAITED;
+			proc_unlock(p);
+			retval[0] = p-&gt;p_pid;
+			<span class="enscript-keyword">if</span> (uap-&gt;status) {
+				status = W_STOPCODE(p-&gt;p_xstat);
+				error = copyout((caddr_t)&amp;status,
+					uap-&gt;status,
+				    <span class="enscript-keyword">sizeof</span>(status));
+			} <span class="enscript-keyword">else</span>
+				error = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-comment">/*
+		 * If we are waiting for continued processses, and this
+		 * process was continued
+		 */</span>
+		<span class="enscript-keyword">if</span> ((uap-&gt;options &amp; WCONTINUED) &amp;&amp;
+		    (p-&gt;p_flag &amp; P_CONTINUED)) {
+			proc_list_unlock();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+			<span class="enscript-keyword">if</span> ((error = mac_proc_check_wait(q, p)) != 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+#<span class="enscript-reference">endif</span>
+
+			<span class="enscript-comment">/* Prevent other process for waiting for this event */</span>
+			OSBitAndAtomic(~((uint32_t)P_CONTINUED), &amp;p-&gt;p_flag);
+			retval[0] = p-&gt;p_pid;
+			<span class="enscript-keyword">if</span> (uap-&gt;status) {
+				status = W_STOPCODE(SIGCONT);
+				error = copyout((caddr_t)&amp;status,
+					uap-&gt;status,
+				    <span class="enscript-keyword">sizeof</span>(status));
+			} <span class="enscript-keyword">else</span>
+				error = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		p-&gt;p_listflag &amp;= ~P_LIST_WAITING;
+		wakeup(&amp;p-&gt;p_stat);
+	}
+	<span class="enscript-comment">/* list lock is held when we get here any which way */</span>
+	<span class="enscript-keyword">if</span> (nfound == 0) {
+		proc_list_unlock();
+		<span class="enscript-keyword">return</span> (ECHILD);
+	}
+
+	<span class="enscript-keyword">if</span> (uap-&gt;options &amp; WNOHANG) {
+		retval[0] = 0;
+		proc_list_unlock();
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-comment">/* Save arguments for continuation. Backing storage is in uthread-&gt;uu_arg, and will not be deallocated */</span>
+	uth = current_uthread();
+	wait4_data = &amp;uth-&gt;uu_kevent.uu_wait4_data;
+	wait4_data-&gt;args = uap;
+	wait4_data-&gt;retval = retval;
+
+	<span class="enscript-keyword">if</span> ((error = msleep0((caddr_t)q, proc_list_mlock, PWAIT | PCATCH | PDROP, <span class="enscript-string">&quot;wait&quot;</span>, 0, wait1continue)))
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop</span>;
+<span class="enscript-reference">out</span>:
+	proc_list_lock();
+	p-&gt;p_listflag &amp;= ~P_LIST_WAITING;
+	wakeup(&amp;p-&gt;p_stat);
+	proc_list_unlock();
+	<span class="enscript-keyword">return</span> (error);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ASSERT_LCK_MTX_OWNED</span>(lock)	\
+				lck_mtx_assert(lock, LCK_MTX_ASSERT_OWNED)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ASSERT_LCK_MTX_OWNED</span>(lock)	<span class="enscript-comment">/* nothing */</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">waitidcontinue</span>(<span class="enscript-type">int</span> result)
+{
+	proc_t p;
+	thread_t thread;
+	uthread_t uth;
+	<span class="enscript-type">struct</span> _waitid_data *waitid_data;
+	<span class="enscript-type">struct</span> waitid_nocancel_args *uap;
+	<span class="enscript-type">int</span> *retval;
+
+	<span class="enscript-keyword">if</span> (result)
+		<span class="enscript-keyword">return</span> (result);
+
+	p = current_proc();
+	thread = current_thread();
+	uth = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(thread);
+
+	waitid_data = &amp;uth-&gt;uu_kevent.uu_waitid_data;
+	uap = waitid_data-&gt;args;
+	retval = waitid_data-&gt;retval;
+	<span class="enscript-keyword">return</span>(waitid_nocancel(p, uap, retval));
+}
+
+<span class="enscript-comment">/*
+ * Description:	Suspend the calling thread until one child of the process
+ *		containing the calling thread changes state.
+ *
+ * Parameters:	uap-&gt;idtype		one of P_PID, P_PGID, P_ALL
+ *		uap-&gt;id			pid_t or gid_t or ignored
+ *		uap-&gt;infop		Address of siginfo_t struct in
+ *					user space into which to return status
+ *		uap-&gt;options		flag values
+ *
+ * Returns:	0			Success
+ *		!0			Error returning status to user space
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">waitid</span>(proc_t q, <span class="enscript-type">struct</span> waitid_args *uap, int32_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span> (waitid_nocancel(q, (<span class="enscript-type">struct</span> waitid_nocancel_args *)uap, retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">waitid_nocancel</span>(proc_t q, <span class="enscript-type">struct</span> waitid_nocancel_args *uap,
+	__unused int32_t *retval)
+{
+	user_siginfo_t	siginfo;	<span class="enscript-comment">/* siginfo data to return to caller */</span>
+	boolean_t caller64 = IS_64BIT_PROCESS(q);
+	<span class="enscript-type">int</span> nfound;
+	proc_t p;
+	<span class="enscript-type">int</span> error;
+	uthread_t uth;
+	<span class="enscript-type">struct</span> _waitid_data *waitid_data;
+
+	<span class="enscript-keyword">if</span> (uap-&gt;options == 0 ||
+	    (uap-&gt;options &amp; ~(WNOHANG|WNOWAIT|WCONTINUED|WSTOPPED|WEXITED)))
+		<span class="enscript-keyword">return</span> (EINVAL);	<span class="enscript-comment">/* bits set that aren't recognized */</span>
+
+	<span class="enscript-keyword">switch</span> (uap-&gt;idtype) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">P_PID</span>:	<span class="enscript-comment">/* child with process ID equal to... */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">P_PGID</span>:	<span class="enscript-comment">/* child with process group ID equal to... */</span>
+		<span class="enscript-keyword">if</span> (((<span class="enscript-type">int</span>)uap-&gt;id) &lt; 0)
+			<span class="enscript-keyword">return</span> (EINVAL);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">P_ALL</span>:	<span class="enscript-comment">/* any child */</span>
+		<span class="enscript-keyword">break</span>;
+	}
+
+<span class="enscript-reference">loop</span>:
+	proc_list_lock();
+<span class="enscript-reference">loop1</span>:
+	nfound = 0;
+	<span class="enscript-keyword">for</span> (p = q-&gt;p_children.lh_first; p != 0; p = p-&gt;p_sibling.le_next) {
+
+		<span class="enscript-keyword">switch</span> (uap-&gt;idtype) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">P_PID</span>:	<span class="enscript-comment">/* child with process ID equal to... */</span>
+			<span class="enscript-keyword">if</span> (p-&gt;p_pid != (pid_t)uap-&gt;id)
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">P_PGID</span>:	<span class="enscript-comment">/* child with process group ID equal to... */</span>
+			<span class="enscript-keyword">if</span> (p-&gt;p_pgrpid != (pid_t)uap-&gt;id)
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">P_ALL</span>:	<span class="enscript-comment">/* any child */</span>
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/* XXX This is racy because we don't get the lock!!!! */</span>
+
+		<span class="enscript-comment">/*
+		 * Wait collision; go to sleep and restart; used to maintain
+		 * the single return for waited process guarantee.
+		 */</span>
+		<span class="enscript-keyword">if</span> (p-&gt;p_listflag &amp; P_LIST_WAITING) {
+			(<span class="enscript-type">void</span>) msleep(&amp;p-&gt;p_stat, proc_list_mlock,
+				PWAIT, <span class="enscript-string">&quot;waitidcoll&quot;</span>, 0);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop1</span>;
+		}
+		p-&gt;p_listflag |= P_LIST_WAITING;		<span class="enscript-comment">/* mark busy */</span>
+
+		nfound++;
+
+		bzero(&amp;siginfo, <span class="enscript-keyword">sizeof</span> (siginfo));
+
+		<span class="enscript-keyword">switch</span> (p-&gt;p_stat) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SZOMB</span>:		<span class="enscript-comment">/* Exited */</span>
+			<span class="enscript-keyword">if</span> (!(uap-&gt;options &amp; WEXITED))
+				<span class="enscript-keyword">break</span>;
+			proc_list_unlock();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+			<span class="enscript-keyword">if</span> ((error = mac_proc_check_wait(q, p)) != 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+#<span class="enscript-reference">endif</span>
+			siginfo.si_signo = SIGCHLD;
+			siginfo.si_pid = p-&gt;p_pid;
+			siginfo.si_status = WEXITSTATUS(p-&gt;p_xstat);
+			<span class="enscript-keyword">if</span> (WIFSIGNALED(p-&gt;p_xstat)) {
+				siginfo.si_code = WCOREDUMP(p-&gt;p_xstat) ?
+					CLD_DUMPED : CLD_KILLED;
+			} <span class="enscript-keyword">else</span>
+				siginfo.si_code = CLD_EXITED;
+
+			<span class="enscript-keyword">if</span> ((error = copyoutsiginfo(&amp;siginfo,
+			    caller64, uap-&gt;infop)) != 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+			<span class="enscript-comment">/* Prevent other process for waiting for this event? */</span>
+			<span class="enscript-keyword">if</span> (!(uap-&gt;options &amp; WNOWAIT)) {
+				(<span class="enscript-type">void</span>) reap_child_locked(q, p, 0, 0, 0, 0);
+				<span class="enscript-keyword">return</span> (0);
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SSTOP</span>:		<span class="enscript-comment">/* Stopped */</span>
+			<span class="enscript-comment">/*
+			 * If we are not interested in stopped processes, then
+			 * ignore this one.
+			 */</span>
+			<span class="enscript-keyword">if</span> (!(uap-&gt;options &amp; WSTOPPED))
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-comment">/*
+			 * If someone has already waited it, we lost a race
+			 * to be the one to return status.
+			 */</span>
+			<span class="enscript-keyword">if</span> ((p-&gt;p_lflag &amp; P_LWAITED) != 0)
+				<span class="enscript-keyword">break</span>;
+			proc_list_unlock();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+			<span class="enscript-keyword">if</span> ((error = mac_proc_check_wait(q, p)) != 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+#<span class="enscript-reference">endif</span>
+			siginfo.si_signo = SIGCHLD;
+			siginfo.si_pid = p-&gt;p_pid;
+			siginfo.si_status = p-&gt;p_xstat;	<span class="enscript-comment">/* signal number */</span>
+			siginfo.si_code = CLD_STOPPED;
+
+			<span class="enscript-keyword">if</span> ((error = copyoutsiginfo(&amp;siginfo,
+			    caller64, uap-&gt;infop)) != 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+			<span class="enscript-comment">/* Prevent other process for waiting for this event? */</span>
+			<span class="enscript-keyword">if</span> (!(uap-&gt;options &amp; WNOWAIT)) {
+				proc_lock(p);
+				p-&gt;p_lflag |= P_LWAITED;
+				proc_unlock(p);
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		<span class="enscript-reference">default</span>:		<span class="enscript-comment">/* All other states =&gt; Continued */</span>
+			<span class="enscript-keyword">if</span> (!(uap-&gt;options &amp; WCONTINUED))
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-comment">/*
+			 * If the flag isn't set, then this process has not
+			 * been stopped and continued, or the status has
+			 * already been reaped by another caller of waitid().
+			 */</span>
+			<span class="enscript-keyword">if</span> ((p-&gt;p_flag &amp; P_CONTINUED) == 0)
+				<span class="enscript-keyword">break</span>;
+			proc_list_unlock();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+			<span class="enscript-keyword">if</span> ((error = mac_proc_check_wait(q, p)) != 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+#<span class="enscript-reference">endif</span>
+			siginfo.si_signo = SIGCHLD;
+			siginfo.si_code = CLD_CONTINUED;
+			proc_lock(p);
+			siginfo.si_pid = p-&gt;p_contproc;
+			siginfo.si_status = p-&gt;p_xstat;
+			proc_unlock(p);
+
+			<span class="enscript-keyword">if</span> ((error = copyoutsiginfo(&amp;siginfo,
+			    caller64, uap-&gt;infop)) != 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+			<span class="enscript-comment">/* Prevent other process for waiting for this event? */</span>
+			<span class="enscript-keyword">if</span> (!(uap-&gt;options &amp; WNOWAIT)) {
+				OSBitAndAtomic(~((uint32_t)P_CONTINUED),
+				    &amp;p-&gt;p_flag);
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		ASSERT_LCK_MTX_OWNED(proc_list_mlock);
+
+		<span class="enscript-comment">/* Not a process we are interested in; go on to next child */</span>
+
+		p-&gt;p_listflag &amp;= ~P_LIST_WAITING;
+		wakeup(&amp;p-&gt;p_stat);
+	}
+	ASSERT_LCK_MTX_OWNED(proc_list_mlock);
+
+	<span class="enscript-comment">/* No child processes that could possibly satisfy the request? */</span>
+
+	<span class="enscript-keyword">if</span> (nfound == 0) {
+		proc_list_unlock();
+		<span class="enscript-keyword">return</span> (ECHILD);
+	}
+
+	<span class="enscript-keyword">if</span> (uap-&gt;options &amp; WNOHANG) {
+		proc_list_unlock();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+		<span class="enscript-keyword">if</span> ((error = mac_proc_check_wait(q, p)) != 0)
+			<span class="enscript-keyword">return</span> (error);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-comment">/*
+		 * The state of the siginfo structure in this case
+		 * is undefined.  Some implementations bzero it, some
+		 * (like here) leave it untouched for efficiency.
+		 *
+		 * Thus the most portable check for &quot;no matching pid with
+		 * WNOHANG&quot; is to store a zero into si_pid before
+		 * invocation, then check for a non-zero value afterwards.
+		 */</span>
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-comment">/* Save arguments for continuation. Backing storage is in uthread-&gt;uu_arg, and will not be deallocated */</span>
+	uth = current_uthread();
+	waitid_data = &amp;uth-&gt;uu_kevent.uu_waitid_data;
+	waitid_data-&gt;args = uap;
+	waitid_data-&gt;retval = retval;
+
+	<span class="enscript-keyword">if</span> ((error = msleep0(q, proc_list_mlock,
+	    PWAIT | PCATCH | PDROP, <span class="enscript-string">&quot;waitid&quot;</span>, 0, waitidcontinue)) != 0)
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop</span>;
+<span class="enscript-reference">out</span>:
+	proc_list_lock();
+	p-&gt;p_listflag &amp;= ~P_LIST_WAITING;
+	wakeup(&amp;p-&gt;p_stat);
+	proc_list_unlock();
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * make process 'parent' the new parent of process 'child'.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_reparentlocked</span>(proc_t child, proc_t parent, <span class="enscript-type">int</span> cansignal, <span class="enscript-type">int</span> locked)
+{
+	proc_t oldparent = PROC_NULL;
+
+	<span class="enscript-keyword">if</span> (child-&gt;p_pptr == parent)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (locked == 0)
+		proc_list_lock();
+
+	oldparent = child-&gt;p_pptr;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__PROC_INTERNAL_DEBUG</span>
+	<span class="enscript-keyword">if</span> (oldparent == PROC_NULL)
+		panic(<span class="enscript-string">&quot;proc_reparent: process %p does not have a parent\n&quot;</span>, child);
+#<span class="enscript-reference">endif</span>
+
+	LIST_REMOVE(child, p_sibling);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__PROC_INTERNAL_DEBUG</span>
+	<span class="enscript-keyword">if</span> (oldparent-&gt;p_childrencnt == 0)
+		panic(<span class="enscript-string">&quot;process children count already 0\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+	oldparent-&gt;p_childrencnt--;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__PROC_INTERNAL_DEBUG1</span>
+	<span class="enscript-keyword">if</span> (oldparent-&gt;p_childrencnt &lt; 0)
+		panic(<span class="enscript-string">&quot;process children count -ve\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+	LIST_INSERT_HEAD(&amp;parent-&gt;p_children, child, p_sibling);
+	parent-&gt;p_childrencnt++;	
+	child-&gt;p_pptr = parent;
+	child-&gt;p_ppid = parent-&gt;p_pid;
+
+	proc_list_unlock();
+
+	<span class="enscript-keyword">if</span> ((cansignal != 0) &amp;&amp; (initproc == parent) &amp;&amp; (child-&gt;p_stat == SZOMB))
+		psignal(initproc, SIGCHLD);
+	<span class="enscript-keyword">if</span> (locked == 1)
+		proc_list_lock();
+}
+
+<span class="enscript-comment">/*
+ * Exit: deallocate address space and other resources, change proc state
+ * to zombie, and unlink proc from allproc and parent's lists.  Save exit
+ * status and rusage for wait().  Check for child processes and orphan them.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vfork_exit</span>(proc_t p, <span class="enscript-type">int</span> rv)
+{
+	vfork_exit_internal(p, rv, 0);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vfork_exit_internal</span>(proc_t p, <span class="enscript-type">int</span> rv, <span class="enscript-type">int</span> forceexit)
+{
+	thread_t self = current_thread();
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">FIXME</span>
+	<span class="enscript-type">struct</span> task *task = p-&gt;task;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-type">struct</span> uthread *ut;
+
+	<span class="enscript-comment">/*
+	 * If a thread in this task has already
+	 * called exit(), then halt any others
+	 * right here.
+	 */</span>
+
+	 ut = get_bsdthread_info(self);
+
+
+	proc_lock(p);
+	 <span class="enscript-keyword">if</span> ((p-&gt;p_lflag &amp; P_LPEXIT) == P_LPEXIT) {
+		<span class="enscript-comment">/* 
+	 	* This happens when a parent exits/killed and vfork is in progress  
+		* other threads. But shutdown code for ex has already called exit1()
+	 	*/</span>
+		proc_unlock(p);
+		<span class="enscript-keyword">return</span>;
+	}
+	p-&gt;p_lflag |= (P_LEXIT | P_LPEXIT);
+	proc_unlock(p);
+
+	<span class="enscript-keyword">if</span> (forceexit == 0) {
+		<span class="enscript-comment">/*
+		 * parent of a vfork child has already called exit() and the 
+		 * thread that has vfork in proress terminates. So there is no
+		 * separate address space here and it has already been marked for
+		 * termination. This was never covered before and could cause problems
+		 * if we block here for outside code.
+		 */</span>
+		<span class="enscript-comment">/* Notify the perf server */</span>
+		(<span class="enscript-type">void</span>)sys_perf_notify(self, p-&gt;p_pid);
+	}
+
+	<span class="enscript-comment">/*
+	 * Remove proc from allproc queue and from pidhash chain.
+	 * Need to do this before we do anything that can block.
+	 * Not doing causes things like mount() find this on allproc
+	 * in partially cleaned state.
+	 */</span>
+
+	proc_list_lock();
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>
+	memorystatus_remove(p, TRUE);
+#<span class="enscript-reference">endif</span>
+
+	LIST_REMOVE(p, p_list);
+	LIST_INSERT_HEAD(&amp;zombproc, p, p_list);	<span class="enscript-comment">/* Place onto zombproc. */</span>
+	<span class="enscript-comment">/* will not be visible via proc_find */</span>
+	p-&gt;p_listflag |= P_LIST_EXITED;
+
+	proc_list_unlock();
+
+	proc_lock(p);
+	p-&gt;p_xstat = rv;
+	p-&gt;p_lflag &amp;= ~(P_LTRACED | P_LPPWAIT);
+	p-&gt;p_sigignore = ~0;
+	proc_unlock(p);
+
+	proc_spinlock(p);
+	<span class="enscript-keyword">if</span> (thread_call_cancel(p-&gt;p_rcall))
+		p-&gt;p_ractive--;
+
+	<span class="enscript-keyword">while</span> (p-&gt;p_ractive &gt; 0) {
+		proc_spinunlock(p);
+		
+		delay(1);
+
+		proc_spinlock(p);
+	}
+	proc_spinunlock(p);
+
+	thread_call_free(p-&gt;p_rcall);
+	p-&gt;p_rcall = NULL;
+
+	ut-&gt;uu_siglist = 0;
+
+	vproc_exit(p);
+}
+
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">vproc_exit</span>(proc_t p)
+{
+	proc_t q;
+	proc_t pp;
+	
+	vnode_t tvp;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">FIXME</span>
+	<span class="enscript-type">struct</span> task *task = p-&gt;task;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-type">struct</span> pgrp * pg;
+	<span class="enscript-type">struct</span> session *sessp;
+	<span class="enscript-type">struct</span> rusage_superset *rup;
+
+	<span class="enscript-comment">/* XXX Zombie allocation may fail, in which case stats get lost */</span>
+	MALLOC_ZONE(rup, <span class="enscript-type">struct</span> rusage_superset *,
+			<span class="enscript-keyword">sizeof</span> (*rup), M_ZOMBIE, M_WAITOK);
+
+	proc_refdrain(p);
+
+	<span class="enscript-comment">/*
+	 * Close open files and release open-file table.
+	 * This may block!
+	 */</span>
+	fdfree(p);
+
+	sessp = proc_session(p);
+	<span class="enscript-keyword">if</span> (SESS_LEADER(p, sessp)) {
+		
+		<span class="enscript-keyword">if</span> (sessp-&gt;s_ttyvp != NULLVP) {
+			<span class="enscript-type">struct</span> vnode *ttyvp;
+			<span class="enscript-type">int</span> ttyvid;
+			<span class="enscript-type">int</span> cttyflag = 0;
+			<span class="enscript-type">struct</span> vfs_context context;
+			<span class="enscript-type">struct</span> tty *tp;
+
+			<span class="enscript-comment">/*
+			 * Controlling process.
+			 * Signal foreground pgrp,
+			 * drain controlling terminal
+			 * and revoke access to controlling terminal.
+			 */</span>
+			session_lock(sessp);
+			tp = SESSION_TP(sessp);
+			<span class="enscript-keyword">if</span> ((tp != TTY_NULL) &amp;&amp; (tp-&gt;t_session == sessp)) {
+				session_unlock(sessp);
+
+				<span class="enscript-comment">/*
+				 * We're going to SIGHUP the foreground process
+				 * group. It can't change from this point on
+				 * until the revoke is complete.
+				 * The process group changes under both the tty
+				 * lock and proc_list_lock but we need only one
+				 */</span>
+				tty_lock(tp);
+				ttysetpgrphup(tp);
+				tty_unlock(tp);
+
+				tty_pgsignal(tp, SIGHUP, 1);
+
+				session_lock(sessp);
+				tp = SESSION_TP(sessp);
+			}
+			cttyflag = sessp-&gt;s_flags &amp; S_CTTYREF;
+			sessp-&gt;s_flags &amp;= ~S_CTTYREF;
+			ttyvp = sessp-&gt;s_ttyvp;
+			ttyvid = sessp-&gt;s_ttyvid;
+			sessp-&gt;s_ttyvp = NULL;
+			sessp-&gt;s_ttyvid = 0;
+			sessp-&gt;s_ttyp = TTY_NULL;
+			sessp-&gt;s_ttypgrpid = NO_PID;
+			session_unlock(sessp);
+
+		       <span class="enscript-keyword">if</span> ((ttyvp != NULLVP) &amp;&amp; (vnode_getwithvid(ttyvp, ttyvid) == 0)) {
+			        <span class="enscript-keyword">if</span> (tp != TTY_NULL) {
+					tty_lock(tp);
+					(<span class="enscript-type">void</span>) ttywait(tp);
+					tty_unlock(tp);
+				}
+				context.vc_thread = proc_thread(p); <span class="enscript-comment">/* XXX */</span>
+				context.vc_ucred = kauth_cred_proc_ref(p);
+				VNOP_REVOKE(ttyvp, REVOKEALL, &amp;context);
+				<span class="enscript-keyword">if</span> (cttyflag) {
+					<span class="enscript-comment">/*
+					 * Release the extra usecount taken in cttyopen.
+					 * usecount should be released after VNOP_REVOKE is called.
+					 * This usecount was taken to ensure that
+					 * the VNOP_REVOKE results in a close to
+					 * the tty since cttyclose is a no-op.
+					 */</span>
+					vnode_rele(ttyvp);
+				}
+				vnode_put(ttyvp);
+				kauth_cred_unref(&amp;context.vc_ucred);
+				ttyvp = NULLVP;
+			}
+			<span class="enscript-keyword">if</span> (tp) {
+				<span class="enscript-comment">/*
+				 * This is cleared even if not set. This is also done in
+				 * spec_close to ensure that the flag is cleared.
+				 */</span>
+				tty_lock(tp);
+				ttyclrpgrphup(tp);
+				tty_unlock(tp);
+
+				ttyfree(tp);
+			}
+		}
+		session_lock(sessp);
+		sessp-&gt;s_leader = NULL;
+		session_unlock(sessp);
+	}
+	session_rele(sessp);
+
+	pg = proc_pgrp(p);
+	fixjobc(p, pg, 0);
+	pg_rele(pg);
+
+	p-&gt;p_rlimit[RLIMIT_FSIZE].rlim_cur = RLIM_INFINITY;
+
+	proc_list_lock();
+	proc_childdrainstart(p);
+	<span class="enscript-keyword">while</span> ((q = p-&gt;p_children.lh_first) != NULL) {
+		<span class="enscript-keyword">if</span> (q-&gt;p_stat == SZOMB) {
+			<span class="enscript-keyword">if</span> (p != q-&gt;p_pptr)
+				panic(<span class="enscript-string">&quot;parent child linkage broken&quot;</span>);
+			<span class="enscript-comment">/* check for lookups by zomb sysctl */</span>
+			<span class="enscript-keyword">while</span> ((q-&gt;p_listflag &amp; P_LIST_WAITING) == P_LIST_WAITING) {
+				msleep(&amp;q-&gt;p_stat, proc_list_mlock, PWAIT, <span class="enscript-string">&quot;waitcoll&quot;</span>, 0);
+			}
+			q-&gt;p_listflag |= P_LIST_WAITING;
+			<span class="enscript-comment">/*
+			 * This is a named reference and it is not granted
+			 * if the reap is already in progress. So we get
+			 * the reference here exclusively and their can be
+			 * no waiters. So there is no need for a wakeup
+			 * after we are done. AlsO  the reap frees the structure
+			 * and the proc struct cannot be used for wakeups as well. 
+			 * It is safe to use q here as this is system reap
+			 */</span>
+			(<span class="enscript-type">void</span>)reap_child_locked(p, q, 1, 0, 1, 0);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+		 	* Traced processes are killed
+		 	* since their existence means someone is messing up.
+		 	*/</span>
+			<span class="enscript-keyword">if</span> (q-&gt;p_lflag &amp; P_LTRACED) {
+				<span class="enscript-type">struct</span> proc *opp;
+
+				proc_list_unlock();
+
+				opp = proc_find(q-&gt;p_oppid);
+				<span class="enscript-keyword">if</span> (opp != PROC_NULL) {
+					proc_list_lock();
+					q-&gt;p_oppid = 0;
+					proc_list_unlock();
+					proc_reparentlocked(q, opp, 0, 0);
+					proc_rele(opp);
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-comment">/* original parent exited while traced */</span>
+					proc_list_lock();
+					q-&gt;p_listflag |= P_LIST_DEADPARENT;
+					q-&gt;p_oppid = 0;
+					proc_list_unlock();
+					proc_reparentlocked(q, initproc, 0, 0);
+				}
+
+				proc_lock(q);
+				q-&gt;p_lflag &amp;= ~P_LTRACED;
+
+				<span class="enscript-keyword">if</span> (q-&gt;sigwait_thread) {
+					thread_t thread = q-&gt;sigwait_thread;
+
+					proc_unlock(q);
+					<span class="enscript-comment">/*
+				 	* The sigwait_thread could be stopped at a
+				 	* breakpoint. Wake it up to kill.
+				 	* Need to do this as it could be a thread which is not
+				 	* the first thread in the task. So any attempts to kill
+				 	* the process would result into a deadlock on q-&gt;sigwait.
+				 	*/</span>
+					thread_resume(thread);
+					clear_wait(thread, THREAD_INTERRUPTED);
+					threadsignal(thread, SIGKILL, 0);
+				} <span class="enscript-keyword">else</span> {
+					proc_unlock(q);
+				}
+
+				psignal(q, SIGKILL);
+				proc_list_lock();
+			} <span class="enscript-keyword">else</span> {
+				q-&gt;p_listflag |= P_LIST_DEADPARENT;
+				proc_reparentlocked(q, initproc, 0, 1);
+			}
+		}
+	}
+
+	proc_childdrainend(p);
+	proc_list_unlock();
+
+	<span class="enscript-comment">/*
+	 * Release reference to text vnode
+	 */</span>
+	tvp = p-&gt;p_textvp;
+	p-&gt;p_textvp = NULL;
+	<span class="enscript-keyword">if</span> (tvp != NULLVP) {
+		vnode_rele(tvp);
+	}
+
+	<span class="enscript-comment">/*
+	 * Save exit status and final rusage info, adding in child rusage
+	 * info and self times.  If we were unable to allocate a zombie
+	 * structure, this information is lost.
+	 */</span>
+	<span class="enscript-keyword">if</span> (rup != NULL) {
+	    rup-&gt;ru = p-&gt;p_stats-&gt;p_ru;
+	    timerclear(&amp;rup-&gt;ru.ru_utime);
+	    timerclear(&amp;rup-&gt;ru.ru_stime);
+
+#<span class="enscript-reference">ifdef</span>  <span class="enscript-variable-name">FIXME</span>
+	    <span class="enscript-keyword">if</span> (task) {
+		mach_task_basic_info_data_t tinfo;
+		task_thread_times_info_data_t ttimesinfo;
+		<span class="enscript-type">int</span> task_info_stuff, task_ttimes_stuff;
+		<span class="enscript-type">struct</span> timeval ut,st;
+
+		task_info_stuff	= MACH_TASK_BASIC_INFO_COUNT;
+		task_info(task, MACH_TASK_BASIC_INFO,
+			  &amp;tinfo, &amp;task_info_stuff);
+		p-&gt;p_ru-&gt;ru.ru_utime.tv_sec = tinfo.user_time.seconds;
+		p-&gt;p_ru-&gt;ru.ru_utime.tv_usec = tinfo.user_time.microseconds;
+		p-&gt;p_ru-&gt;ru.ru_stime.tv_sec = tinfo.system_time.seconds;
+		p-&gt;p_ru-&gt;ru.ru_stime.tv_usec = tinfo.system_time.microseconds;
+
+		task_ttimes_stuff = TASK_THREAD_TIMES_INFO_COUNT;
+		task_info(task, TASK_THREAD_TIMES_INFO,
+			  &amp;ttimesinfo, &amp;task_ttimes_stuff);
+
+		ut.tv_sec = ttimesinfo.user_time.seconds;
+		ut.tv_usec = ttimesinfo.user_time.microseconds;
+		st.tv_sec = ttimesinfo.system_time.seconds;
+		st.tv_usec = ttimesinfo.system_time.microseconds;
+		timeradd(&amp;ut,&amp;p-&gt;p_ru-&gt;ru.ru_utime,&amp;p-&gt;p_ru-&gt;ru.ru_utime);
+			timeradd(&amp;st,&amp;p-&gt;p_ru-&gt;ru.ru_stime,&amp;p-&gt;p_ru-&gt;ru.ru_stime);
+	    }
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* FIXME */</span>
+
+	    ruadd(&amp;rup-&gt;ru, &amp;p-&gt;p_stats-&gt;p_cru);
+
+		gather_rusage_info(p, &amp;rup-&gt;ri, RUSAGE_INFO_CURRENT);
+		rup-&gt;ri.ri_phys_footprint = 0;
+		rup-&gt;ri.ri_proc_exit_abstime = mach_absolute_time();
+
+		<span class="enscript-comment">/*
+		 * Now that we have filled in the rusage info, make it
+		 * visible to an external observer via proc_pid_rusage().
+		 */</span>
+		p-&gt;p_ru = rup;
+	}
+
+	<span class="enscript-comment">/*
+	 * Free up profiling buffers.
+	 */</span>
+	{
+		<span class="enscript-type">struct</span> uprof *p0 = &amp;p-&gt;p_stats-&gt;p_prof, *p1, *pn;
+
+		p1 = p0-&gt;pr_next;
+		p0-&gt;pr_next = NULL;
+		p0-&gt;pr_scale = 0;
+
+		<span class="enscript-keyword">for</span> (; p1 != NULL; p1 = pn) {
+			pn = p1-&gt;pr_next;
+			kfree(p1, <span class="enscript-keyword">sizeof</span> *p1);
+		}
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PSYNCH</span>
+	pth_proc_hashdelete(p);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PSYNCH */</span>
+
+	<span class="enscript-comment">/*
+	 * Other substructures are freed from wait().
+	 */</span>
+	FREE_ZONE(p-&gt;p_stats, <span class="enscript-keyword">sizeof</span> *p-&gt;p_stats, M_PSTATS);
+	p-&gt;p_stats = NULL;
+
+	FREE_ZONE(p-&gt;p_sigacts, <span class="enscript-keyword">sizeof</span> *p-&gt;p_sigacts, M_SIGACTS);
+	p-&gt;p_sigacts = NULL;
+
+	proc_limitdrop(p, 1);
+	p-&gt;p_limit = NULL;
+
+	<span class="enscript-comment">/*
+	 * Finish up by terminating the task
+	 * and halt this thread (only if a
+	 * member of the task exiting).
+	 */</span>
+	p-&gt;task = TASK_NULL;
+
+	<span class="enscript-comment">/*
+	 * Notify parent that we're gone.
+	 */</span>
+	pp = proc_parent(p);
+	<span class="enscript-keyword">if</span> ((p-&gt;p_listflag &amp; P_LIST_DEADPARENT) == 0) {
+		<span class="enscript-keyword">if</span> (pp != initproc) {
+			proc_lock(pp);
+			pp-&gt;si_pid = p-&gt;p_pid;
+			pp-&gt;si_status = p-&gt;p_xstat;
+			pp-&gt;si_code = CLD_EXITED;
+			<span class="enscript-comment">/*
+			 * p_ucred usage is safe as it is an exiting process
+			 * and reference is dropped in reap
+			 */</span>
+			pp-&gt;si_uid = kauth_cred_getruid(p-&gt;p_ucred);
+			proc_unlock(pp);
+		}
+		<span class="enscript-comment">/* mark as a zombie */</span>
+		<span class="enscript-comment">/* mark as a zombie */</span>
+		<span class="enscript-comment">/* No need to take proc lock as all refs are drained and
+		 * no one except parent (reaping ) can look at this.
+		 * The write is to an int and is coherent. Also parent is
+		 *  keyed off of list lock for reaping
+		 */</span>
+		p-&gt;p_stat = SZOMB;
+
+		psignal(pp, SIGCHLD);
+
+		<span class="enscript-comment">/* and now wakeup the parent */</span>
+		proc_list_lock();
+		wakeup((caddr_t)pp);
+		proc_list_unlock();
+	} <span class="enscript-keyword">else</span> {
+		proc_list_lock();
+		<span class="enscript-comment">/* check for lookups by zomb sysctl */</span>
+		<span class="enscript-keyword">while</span> ((p-&gt;p_listflag &amp; P_LIST_WAITING) == P_LIST_WAITING) {
+			msleep(&amp;p-&gt;p_stat, proc_list_mlock, PWAIT, <span class="enscript-string">&quot;waitcoll&quot;</span>, 0);
+		}
+		p-&gt;p_stat = SZOMB;
+		p-&gt;p_listflag |= P_LIST_WAITING;
+
+		<span class="enscript-comment">/*
+		 * This is a named reference and it is not granted
+		 * if the reap is already in progress. So we get
+		 * the reference here exclusively and their can be
+		 * no waiters. So there is no need for a wakeup
+		 * after we are done. AlsO  the reap frees the structure
+		 * and the proc struct cannot be used for wakeups as well. 
+		 * It is safe to use p here as this is system reap
+		 */</span>
+		(<span class="enscript-type">void</span>)reap_child_locked(pp, p, 0, 0, 1, 1);
+		<span class="enscript-comment">/* list lock dropped by reap_child_locked */</span>
+	}
+	proc_rele(pp);
+}
+
+						
+<span class="enscript-comment">/*
+ * munge_rusage
+ *	LP64 support - long is 64 bits if we are dealing with a 64 bit user
+ *	process.  We munge the kernel version of rusage into the
+ *	64 bit version.
+ */</span>
+__private_extern__  <span class="enscript-type">void</span> 
+<span class="enscript-function-name">munge_user64_rusage</span>(<span class="enscript-type">struct</span> rusage *a_rusage_p, <span class="enscript-type">struct</span> user64_rusage *a_user_rusage_p)
+{
+	<span class="enscript-comment">/* timeval changes size, so utime and stime need special handling */</span>
+	a_user_rusage_p-&gt;ru_utime.tv_sec = a_rusage_p-&gt;ru_utime.tv_sec;
+	a_user_rusage_p-&gt;ru_utime.tv_usec = a_rusage_p-&gt;ru_utime.tv_usec;
+	a_user_rusage_p-&gt;ru_stime.tv_sec = a_rusage_p-&gt;ru_stime.tv_sec;
+	a_user_rusage_p-&gt;ru_stime.tv_usec = a_rusage_p-&gt;ru_stime.tv_usec;
+	<span class="enscript-comment">/*
+	 * everything else can be a direct assign, since there is no loss
+	 * of precision implied boing 32-&gt;64.
+	 */</span>
+	a_user_rusage_p-&gt;ru_maxrss = a_rusage_p-&gt;ru_maxrss;
+	a_user_rusage_p-&gt;ru_ixrss = a_rusage_p-&gt;ru_ixrss;
+	a_user_rusage_p-&gt;ru_idrss = a_rusage_p-&gt;ru_idrss;
+	a_user_rusage_p-&gt;ru_isrss = a_rusage_p-&gt;ru_isrss;
+	a_user_rusage_p-&gt;ru_minflt = a_rusage_p-&gt;ru_minflt;
+	a_user_rusage_p-&gt;ru_majflt = a_rusage_p-&gt;ru_majflt;
+	a_user_rusage_p-&gt;ru_nswap = a_rusage_p-&gt;ru_nswap;
+	a_user_rusage_p-&gt;ru_inblock = a_rusage_p-&gt;ru_inblock;
+	a_user_rusage_p-&gt;ru_oublock = a_rusage_p-&gt;ru_oublock;
+	a_user_rusage_p-&gt;ru_msgsnd = a_rusage_p-&gt;ru_msgsnd;
+	a_user_rusage_p-&gt;ru_msgrcv = a_rusage_p-&gt;ru_msgrcv;
+	a_user_rusage_p-&gt;ru_nsignals = a_rusage_p-&gt;ru_nsignals;
+	a_user_rusage_p-&gt;ru_nvcsw = a_rusage_p-&gt;ru_nvcsw;
+	a_user_rusage_p-&gt;ru_nivcsw = a_rusage_p-&gt;ru_nivcsw;
+}
+
+<span class="enscript-comment">/* For a 64-bit kernel and 32-bit userspace, munging may be needed */</span>
+__private_extern__  <span class="enscript-type">void</span> 
+<span class="enscript-function-name">munge_user32_rusage</span>(<span class="enscript-type">struct</span> rusage *a_rusage_p, <span class="enscript-type">struct</span> user32_rusage *a_user_rusage_p)
+{
+	<span class="enscript-comment">/* timeval changes size, so utime and stime need special handling */</span>
+	a_user_rusage_p-&gt;ru_utime.tv_sec = a_rusage_p-&gt;ru_utime.tv_sec;
+	a_user_rusage_p-&gt;ru_utime.tv_usec = a_rusage_p-&gt;ru_utime.tv_usec;
+	a_user_rusage_p-&gt;ru_stime.tv_sec = a_rusage_p-&gt;ru_stime.tv_sec;
+	a_user_rusage_p-&gt;ru_stime.tv_usec = a_rusage_p-&gt;ru_stime.tv_usec;
+	<span class="enscript-comment">/*
+	 * everything else can be a direct assign. We currently ignore
+	 * the loss of precision
+	 */</span>
+	a_user_rusage_p-&gt;ru_maxrss = a_rusage_p-&gt;ru_maxrss;
+	a_user_rusage_p-&gt;ru_ixrss = a_rusage_p-&gt;ru_ixrss;
+	a_user_rusage_p-&gt;ru_idrss = a_rusage_p-&gt;ru_idrss;
+	a_user_rusage_p-&gt;ru_isrss = a_rusage_p-&gt;ru_isrss;
+	a_user_rusage_p-&gt;ru_minflt = a_rusage_p-&gt;ru_minflt;
+	a_user_rusage_p-&gt;ru_majflt = a_rusage_p-&gt;ru_majflt;
+	a_user_rusage_p-&gt;ru_nswap = a_rusage_p-&gt;ru_nswap;
+	a_user_rusage_p-&gt;ru_inblock = a_rusage_p-&gt;ru_inblock;
+	a_user_rusage_p-&gt;ru_oublock = a_rusage_p-&gt;ru_oublock;
+	a_user_rusage_p-&gt;ru_msgsnd = a_rusage_p-&gt;ru_msgsnd;
+	a_user_rusage_p-&gt;ru_msgrcv = a_rusage_p-&gt;ru_msgrcv;
+	a_user_rusage_p-&gt;ru_nsignals = a_rusage_p-&gt;ru_nsignals;
+	a_user_rusage_p-&gt;ru_nvcsw = a_rusage_p-&gt;ru_nvcsw;
+	a_user_rusage_p-&gt;ru_nivcsw = a_rusage_p-&gt;ru_nivcsw;
+}
+</pre>
+<hr />
+</body></html>

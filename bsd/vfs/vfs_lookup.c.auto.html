@@ -1,0 +1,1929 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>vfs_lookup.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">vfs_lookup.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1989, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ * (c) UNIX System Laboratories, Inc.
+ * All or some portions of this file are derived from material licensed
+ * to the University of California by American Telephone and Telegraph
+ * Co. or Unix System Laboratories, Inc. and are reproduced herein with
+ * the permission of UNIX System Laboratories, Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)vfs_lookup.c	8.10 (Berkeley) 5/27/95
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslimits.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/filedesc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/unistd.h&gt;</span>		<span class="enscript-comment">/* For _PC_NAME_MAX */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace.h&gt;</span>        <span class="enscript-comment">/* to get the prototype for strstr() in sys/dtrace_glue.h */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NAMEDRSRCFORK</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/xattr.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+<span class="enscript-comment">/*
+ * The minimum volfs-style pathname is 9.
+ * Example:  &quot;/.vol/1/2&quot;
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VOLFS_MIN_PATH_LEN</span>  9
+
+
+<span class="enscript-type">static</span>	<span class="enscript-type">void</span> kdebug_lookup(<span class="enscript-type">struct</span> vnode *dp, <span class="enscript-type">struct</span> componentname *cnp);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_VOLFS</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">vfs_getrealpath</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> * path, <span class="enscript-type">char</span> * realpath, size_t bufsize, vfs_context_t ctx);
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_VOLFS_RESTARTS</span> 5
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>		lookup_traverse_mountpoints(<span class="enscript-type">struct</span> nameidata *ndp, <span class="enscript-type">struct</span> componentname *cnp, vnode_t dp, <span class="enscript-type">int</span> vbusyflags, vfs_context_t ctx);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 		lookup_handle_symlink(<span class="enscript-type">struct</span> nameidata *ndp, vnode_t *new_dp, vfs_context_t ctx);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>		lookup_authorize_search(vnode_t dp, <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">int</span> dp_authorized_in_cache, vfs_context_t ctx);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>		lookup_consider_update_cache(vnode_t dvp, vnode_t vp, <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">int</span> nc_generation);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>		lookup_handle_found_vnode(<span class="enscript-type">struct</span> nameidata *ndp, <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">int</span> rdonly, 
+			<span class="enscript-type">int</span> vbusyflags, <span class="enscript-type">int</span> *keep_going, <span class="enscript-type">int</span> nc_generation,
+			<span class="enscript-type">int</span> wantparent, <span class="enscript-type">int</span> atroot, vfs_context_t ctx);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 		lookup_handle_emptyname(<span class="enscript-type">struct</span> nameidata *ndp, <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">int</span> wantparent);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NAMEDRSRCFORK</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>		lookup_handle_rsrc_fork(vnode_t dp, <span class="enscript-type">struct</span> nameidata *ndp, <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">int</span> wantparent, vfs_context_t ctx);
+#<span class="enscript-reference">endif</span>
+
+
+
+<span class="enscript-comment">/*
+ * Convert a pathname into a pointer to a locked inode.
+ *
+ * The FOLLOW flag is set when symbolic links are to be followed
+ * when they occur at the end of the name translation process.
+ * Symbolic links are always followed for all other pathname
+ * components other than the last.
+ *
+ * The segflg defines whether the name is to be copied from user
+ * space or kernel space.
+ *
+ * Overall outline of namei:
+ *
+ *	copy in name
+ *	get starting directory
+ *	while (!done &amp;&amp; !error) {
+ *		call lookup to search path.
+ *		if symbolic link, massage name in buffer and continue
+ *	}
+ *
+ * Returns:	0			Success
+ *		ENOENT			No such file or directory
+ *		ELOOP			Too many levels of symbolic links
+ *		ENAMETOOLONG		Filename too long
+ *		copyinstr:EFAULT	Bad address
+ *		copyinstr:ENAMETOOLONG	Filename too long
+ *		lookup:EBADF		Bad file descriptor
+ *		lookup:EROFS
+ *		lookup:EACCES
+ *		lookup:EPERM
+ *		lookup:ERECYCLE	 vnode was recycled from underneath us in lookup.
+ *						 This means we should re-drive lookup from this point.
+ *		lookup: ???
+ *		VNOP_READLINK:???
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">namei</span>(<span class="enscript-type">struct</span> nameidata *ndp)
+{
+	<span class="enscript-type">struct</span> filedesc *fdp;	<span class="enscript-comment">/* pointer to file descriptor state */</span>
+	<span class="enscript-type">struct</span> vnode *dp;	<span class="enscript-comment">/* the directory we are searching */</span>
+	<span class="enscript-type">struct</span> vnode *usedvp = ndp-&gt;ni_dvp;  <span class="enscript-comment">/* store pointer to vp in case we must loop due to
+										   	heavy vnode pressure */</span>
+	u_long cnpflags = ndp-&gt;ni_cnd.cn_flags; <span class="enscript-comment">/* store in case we have to restore after loop */</span>
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> componentname *cnp = &amp;ndp-&gt;ni_cnd;
+	vfs_context_t ctx = cnp-&gt;cn_context;
+	proc_t p = vfs_context_proc(ctx);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_AUDIT</span>
+<span class="enscript-comment">/* XXX ut should be from context */</span>
+	uthread_t ut = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(current_thread());
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_VOLFS</span>
+	<span class="enscript-type">int</span> volfs_restarts = 0;
+#<span class="enscript-reference">endif</span>
+
+	fdp = p-&gt;p_fd;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-keyword">if</span> (!vfs_context_ucred(ctx) || !p)
+		panic (<span class="enscript-string">&quot;namei: bad cred/proc&quot;</span>);
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_nameiop &amp; (~OPMASK))
+		panic (<span class="enscript-string">&quot;namei: nameiop contaminated with flags&quot;</span>);
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; OPMASK)
+		panic (<span class="enscript-string">&quot;namei: flags contaminated with nameiops&quot;</span>);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * A compound VNOP found something that needs further processing:
+	 * either a trigger vnode, a covered directory, or a symlink.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ndp-&gt;ni_flag &amp; NAMEI_CONTLOOKUP) {
+		<span class="enscript-type">int</span> rdonly, vbusyflags, keep_going, wantparent;
+
+		rdonly = cnp-&gt;cn_flags &amp; RDONLY;
+		vbusyflags = ((cnp-&gt;cn_flags &amp; CN_NBMOUNTLOOK) != 0) ? LK_NOWAIT : 0;
+		keep_going = 0;
+		wantparent = cnp-&gt;cn_flags &amp; (LOCKPARENT | WANTPARENT);
+
+		ndp-&gt;ni_flag &amp;= ~(NAMEI_CONTLOOKUP);
+
+		error = lookup_handle_found_vnode(ndp, &amp;ndp-&gt;ni_cnd, rdonly, vbusyflags, 
+				&amp;keep_going, ndp-&gt;ni_ncgeneration, wantparent, 0, ctx);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_drop</span>;
+		<span class="enscript-keyword">if</span> (keep_going) {
+			<span class="enscript-keyword">if</span> ((cnp-&gt;cn_flags &amp; ISSYMLINK) == 0) {
+				panic(<span class="enscript-string">&quot;We need to keep going on a continued lookup, but for vp type %d (tag %d)\n&quot;</span>, ndp-&gt;ni_vp-&gt;v_type, ndp-&gt;ni_vp-&gt;v_tag);
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">continue_symlink</span>;
+		}
+
+		<span class="enscript-keyword">return</span> 0;
+
+	}
+
+<span class="enscript-reference">vnode_recycled</span>:
+
+	<span class="enscript-comment">/*
+	 * Get a buffer for the name to be translated, and copy the
+	 * name into the buffer.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((cnp-&gt;cn_flags &amp; HASBUF) == 0) {
+		cnp-&gt;cn_pnbuf = ndp-&gt;ni_pathbuf;
+		cnp-&gt;cn_pnlen = PATHBUFLEN;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">LP64_DEBUG</span>
+	<span class="enscript-keyword">if</span> ((UIO_SEG_IS_USER_SPACE(ndp-&gt;ni_segflg) == 0)
+		&amp;&amp; (ndp-&gt;ni_segflg != UIO_SYSSPACE)
+		&amp;&amp; (ndp-&gt;ni_segflg != UIO_SYSSPACE32)) {
+		panic(<span class="enscript-string">&quot;%s :%d - invalid ni_segflg\n&quot;</span>, __FILE__, __LINE__); 
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* LP64_DEBUG */</span>
+
+<span class="enscript-reference">retry_copy</span>:
+	<span class="enscript-keyword">if</span> (UIO_SEG_IS_USER_SPACE(ndp-&gt;ni_segflg)) {
+		error = copyinstr(ndp-&gt;ni_dirp, cnp-&gt;cn_pnbuf,
+			    cnp-&gt;cn_pnlen, (size_t *)&amp;ndp-&gt;ni_pathlen);
+	} <span class="enscript-keyword">else</span> {
+		error = copystr(CAST_DOWN(<span class="enscript-type">void</span> *, ndp-&gt;ni_dirp), cnp-&gt;cn_pnbuf,
+			    cnp-&gt;cn_pnlen, (size_t *)&amp;ndp-&gt;ni_pathlen);
+	}
+	<span class="enscript-keyword">if</span> (error == ENAMETOOLONG &amp;&amp; !(cnp-&gt;cn_flags &amp; HASBUF)) {
+		MALLOC_ZONE(cnp-&gt;cn_pnbuf, caddr_t, MAXPATHLEN, M_NAMEI, M_WAITOK);
+		<span class="enscript-keyword">if</span> (cnp-&gt;cn_pnbuf == NULL) {
+			error = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_out</span>;
+		}
+
+		cnp-&gt;cn_flags |= HASBUF;
+		cnp-&gt;cn_pnlen = MAXPATHLEN;
+		
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry_copy</span>;
+	}
+	<span class="enscript-keyword">if</span> (error)
+	        <span class="enscript-keyword">goto</span> <span class="enscript-reference">error_out</span>;
+
+	<span class="enscript-comment">/*
+	 * Since the name cache may contain positive entries of
+	 * the incorrect case, force lookup() to bypass the cache
+	 * and call directly into the filesystem for each path
+	 * component. Note: the FS may still consult the cache,
+	 * but can apply rules to validate the results.
+	 */</span>
+	<span class="enscript-keyword">if</span> (proc_is_forcing_hfs_case_sensitivity(p))
+		cnp-&gt;cn_flags |= CN_SKIPNAMECACHE;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_VOLFS</span>
+ 	<span class="enscript-comment">/*
+	 * Check for legacy volfs style pathnames.
+	 *
+	 * For compatibility reasons we currently allow these paths,
+	 * but future versions of the OS may not support them.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ndp-&gt;ni_pathlen &gt;= VOLFS_MIN_PATH_LEN &amp;&amp;
+	    cnp-&gt;cn_pnbuf[0] == <span class="enscript-string">'/'</span> &amp;&amp;
+	    cnp-&gt;cn_pnbuf[1] == <span class="enscript-string">'.'</span> &amp;&amp;
+	    cnp-&gt;cn_pnbuf[2] == <span class="enscript-string">'v'</span> &amp;&amp;
+	    cnp-&gt;cn_pnbuf[3] == <span class="enscript-string">'o'</span> &amp;&amp;
+	    cnp-&gt;cn_pnbuf[4] == <span class="enscript-string">'l'</span> &amp;&amp;
+	    cnp-&gt;cn_pnbuf[5] == <span class="enscript-string">'/'</span> ) {
+		<span class="enscript-type">char</span> * realpath;
+		<span class="enscript-type">int</span> realpath_err;
+		<span class="enscript-comment">/* Attempt to resolve a legacy volfs style pathname. */</span>
+		MALLOC_ZONE(realpath, caddr_t, MAXPATHLEN, M_NAMEI, M_WAITOK);
+		<span class="enscript-keyword">if</span> (realpath) {
+			<span class="enscript-comment">/* 
+			 * We only error out on the ENAMETOOLONG cases where we know that
+			 * vfs_getrealpath translation succeeded but the path could not fit into
+			 * MAXPATHLEN characters.  In other failure cases, we may be dealing with a path
+			 * that legitimately looks like /.vol/1234/567 and is not meant to be translated
+			 */</span>
+			<span class="enscript-keyword">if</span> ((realpath_err= vfs_getrealpath(&amp;cnp-&gt;cn_pnbuf[6], realpath, MAXPATHLEN, ctx))) {
+				FREE_ZONE(realpath, MAXPATHLEN, M_NAMEI);
+				<span class="enscript-keyword">if</span> (realpath_err == ENOSPC || realpath_err == ENAMETOOLONG){
+					error = ENAMETOOLONG;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_out</span>;
+				}
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; HASBUF) {
+					FREE_ZONE(cnp-&gt;cn_pnbuf, cnp-&gt;cn_pnlen, M_NAMEI);
+				}
+				cnp-&gt;cn_pnbuf = realpath;
+				cnp-&gt;cn_pnlen = MAXPATHLEN;
+				ndp-&gt;ni_pathlen = strlen(realpath) + 1;
+				cnp-&gt;cn_flags |= HASBUF | CN_VOLFSPATH;
+			}
+		}
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_VOLFS */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_AUDIT</span>
+	<span class="enscript-comment">/* If we are auditing the kernel pathname, save the user pathname */</span>
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; AUDITVNPATH1)
+		AUDIT_ARG(upath, ut-&gt;uu_cdir, cnp-&gt;cn_pnbuf, ARG_UPATH1); 
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; AUDITVNPATH2)
+		AUDIT_ARG(upath, ut-&gt;uu_cdir, cnp-&gt;cn_pnbuf, ARG_UPATH2); 
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_AUDIT */</span>
+
+	<span class="enscript-comment">/*
+	 * Do not allow empty pathnames
+	 */</span>
+	<span class="enscript-keyword">if</span> (*cnp-&gt;cn_pnbuf == <span class="enscript-string">'\0'</span>) {
+		error = ENOENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_out</span>;
+	}
+	ndp-&gt;ni_loopcnt = 0;
+
+	<span class="enscript-comment">/*
+	 * determine the starting point for the translation.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((ndp-&gt;ni_rootdir = fdp-&gt;fd_rdir) == NULLVP) {
+	        <span class="enscript-keyword">if</span> ( !(fdp-&gt;fd_flags &amp; FD_CHROOT))
+		        ndp-&gt;ni_rootdir = rootvnode;
+	}
+	cnp-&gt;cn_nameptr = cnp-&gt;cn_pnbuf;
+
+	ndp-&gt;ni_usedvp = NULLVP;
+
+	<span class="enscript-keyword">if</span> (*(cnp-&gt;cn_nameptr) == <span class="enscript-string">'/'</span>) {
+	        <span class="enscript-keyword">while</span> (*(cnp-&gt;cn_nameptr) == <span class="enscript-string">'/'</span>) {
+		        cnp-&gt;cn_nameptr++;
+			ndp-&gt;ni_pathlen--;
+		}
+		dp = ndp-&gt;ni_rootdir;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; USEDVP) {
+	        dp = ndp-&gt;ni_dvp;
+		ndp-&gt;ni_usedvp = dp;
+	} <span class="enscript-keyword">else</span>
+	        dp = vfs_context_cwd(ctx);
+
+	<span class="enscript-keyword">if</span> (dp == NULLVP || (dp-&gt;v_lflag &amp; VL_DEAD)) {
+	        error = ENOENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_out</span>;
+	}
+	ndp-&gt;ni_dvp = NULLVP;
+	ndp-&gt;ni_vp  = NULLVP;
+
+	<span class="enscript-keyword">for</span> (;;) {
+		ndp-&gt;ni_startdir = dp;
+
+		<span class="enscript-keyword">if</span> ( (error = lookup(ndp)) ) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_out</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Check for symbolic link
+		 */</span>
+		<span class="enscript-keyword">if</span> ((cnp-&gt;cn_flags &amp; ISSYMLINK) == 0) {
+			<span class="enscript-keyword">return</span> (0);
+		}
+
+<span class="enscript-reference">continue_symlink</span>:
+		<span class="enscript-comment">/* Gives us a new path to process, and a starting dir */</span>
+		error = lookup_handle_symlink(ndp, &amp;dp, ctx);
+		<span class="enscript-keyword">if</span> (error != 0) {
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-comment">/*
+	 * only come here if we fail to handle a SYMLINK...
+	 * if either ni_dvp or ni_vp is non-NULL, then
+	 * we need to drop the iocount that was picked
+	 * up in the lookup routine
+	 */</span>
+<span class="enscript-reference">out_drop</span>:
+	<span class="enscript-keyword">if</span> (ndp-&gt;ni_dvp)
+	        vnode_put(ndp-&gt;ni_dvp);
+	<span class="enscript-keyword">if</span> (ndp-&gt;ni_vp)
+	        vnode_put(ndp-&gt;ni_vp);
+ <span class="enscript-reference">error_out</span>:
+	<span class="enscript-keyword">if</span> ( (cnp-&gt;cn_flags &amp; HASBUF) ) {
+		cnp-&gt;cn_flags &amp;= ~HASBUF;
+		FREE_ZONE(cnp-&gt;cn_pnbuf, cnp-&gt;cn_pnlen, M_NAMEI);
+	}
+	cnp-&gt;cn_pnbuf = NULL;
+	ndp-&gt;ni_vp = NULLVP;
+	ndp-&gt;ni_dvp = NULLVP;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_VOLFS</span>
+	<span class="enscript-comment">/*
+	 * Deal with volfs fallout.  
+	 *
+	 * At this point, if we were originally given a volfs path that
+	 * looks like /.vol/123/456, then we would have had to convert it into
+	 * a full path.  Assuming that part worked properly, we will now attempt
+	 * to conduct a lookup of the item in the namespace.  Under normal 
+	 * circumstances, if a user looked up /tmp/foo and it was not there, it 
+	 * would be permissible to return ENOENT.  
+	 *
+	 * However, we may not want to do that here.  Specifically, the volfs path
+	 * uniquely identifies a certain item in the namespace regardless of where it
+	 * lives.  If the item has moved in between the time we constructed the
+	 * path and now, when we're trying to do a lookup/authorization on the full
+	 * path, we may have gotten an ENOENT.  
+	 *
+	 * At this point we can no longer tell if the path no longer exists 
+	 * or if the item in question no longer exists. It could have been renamed 
+	 * away, in which case the /.vol identifier is still valid. 
+	 * 
+	 * Do this dance a maximum of MAX_VOLFS_RESTARTS times.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((error == ENOENT) &amp;&amp; (ndp-&gt;ni_cnd.cn_flags &amp; CN_VOLFSPATH)) {
+		<span class="enscript-keyword">if</span> (volfs_restarts &lt; MAX_VOLFS_RESTARTS) {
+			volfs_restarts++;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">vnode_recycled</span>;
+		}
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (error == ERECYCLE){
+		<span class="enscript-comment">/* vnode was recycled underneath us. re-drive lookup to start at 
+		   the beginning again, since recycling invalidated last lookup*/</span>
+		ndp-&gt;ni_cnd.cn_flags = cnpflags;
+		ndp-&gt;ni_dvp = usedvp;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">vnode_recycled</span>;
+	}
+
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>		
+<span class="enscript-function-name">namei_compound_available</span>(vnode_t dp, <span class="enscript-type">struct</span> nameidata *ndp)
+{
+	<span class="enscript-keyword">if</span> ((ndp-&gt;ni_flag &amp; NAMEI_COMPOUNDOPEN) != 0) {
+		<span class="enscript-keyword">return</span> vnode_compound_open_available(dp);
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">lookup_authorize_search</span>(vnode_t dp, <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">int</span> dp_authorized_in_cache, vfs_context_t ctx)
+{
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">cnp</span>)
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (!dp_authorized_in_cache) {
+		error = vnode_authorize(dp, NULL, KAUTH_VNODE_SEARCH, ctx);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> error;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_vnode_check_lookup(ctx, dp, cnp);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_MACF */</span>
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 
+<span class="enscript-function-name">lookup_consider_update_cache</span>(vnode_t dvp, vnode_t vp, <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">int</span> nc_generation) 
+{
+	<span class="enscript-type">int</span> isdot_or_dotdot;
+	isdot_or_dotdot = (cnp-&gt;cn_namelen == 1 &amp;&amp; cnp-&gt;cn_nameptr[0] == <span class="enscript-string">'.'</span>) || (cnp-&gt;cn_flags &amp; ISDOTDOT);
+
+	<span class="enscript-keyword">if</span> (vp-&gt;v_name == NULL || vp-&gt;v_parent == NULLVP) {
+		<span class="enscript-type">int</span>  update_flags = 0;
+
+		<span class="enscript-keyword">if</span> (isdot_or_dotdot == 0) {
+			<span class="enscript-keyword">if</span> (vp-&gt;v_name == NULL)
+				update_flags |= VNODE_UPDATE_NAME;
+			<span class="enscript-keyword">if</span> (dvp != NULLVP &amp;&amp; vp-&gt;v_parent == NULLVP)
+				update_flags |= VNODE_UPDATE_PARENT;
+
+			<span class="enscript-keyword">if</span> (update_flags)
+				vnode_update_identity(vp, dvp, cnp-&gt;cn_nameptr, cnp-&gt;cn_namelen, cnp-&gt;cn_hash, update_flags);
+		}
+	}
+	<span class="enscript-keyword">if</span> ( (cnp-&gt;cn_flags &amp; MAKEENTRY) &amp;&amp; (vp-&gt;v_flag &amp; VNCACHEABLE) &amp;&amp; LIST_FIRST(&amp;vp-&gt;v_nclinks) == NULL) {
+		<span class="enscript-comment">/*
+		 * missing from name cache, but should
+		 * be in it... this can happen if volfs
+		 * causes the vnode to be created or the
+		 * name cache entry got recycled but the
+		 * vnode didn't...
+		 * check to make sure that ni_dvp is valid
+		 * cache_lookup_path may return a NULL
+		 * do a quick check to see if the generation of the
+		 * directory matches our snapshot... this will get
+		 * rechecked behind the name cache lock, but if it
+		 * already fails to match, no need to go any further
+		 */</span>
+		<span class="enscript-keyword">if</span> (dvp != NULLVP &amp;&amp; (nc_generation == dvp-&gt;v_nc_generation) &amp;&amp; (!isdot_or_dotdot))
+			cache_enter_with_gen(dvp, vp, cnp, nc_generation);
+	}
+
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NAMEDRSRCFORK</span>
+<span class="enscript-comment">/*
+ * Can change ni_dvp and ni_vp.  On success, returns with iocounts on stream vnode (always) and
+ * data fork if requested.  On failure, returns with iocount data fork (always) and its parent directory 
+ * (if one was provided).
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">lookup_handle_rsrc_fork</span>(vnode_t dp, <span class="enscript-type">struct</span> nameidata *ndp, <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">int</span> wantparent, vfs_context_t ctx)
+{
+	vnode_t svp = NULLVP;
+	<span class="enscript-type">enum</span> nsoperation nsop;
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (dp-&gt;v_type != VREG) {
+		error = ENOENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">switch</span> (cnp-&gt;cn_nameiop) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DELETE</span>:
+			<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; CN_ALLOWRSRCFORK) {
+				nsop = NS_DELETE;
+			} <span class="enscript-keyword">else</span> {
+				error = EPERM;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CREATE</span>:
+			<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; CN_ALLOWRSRCFORK) {
+				nsop = NS_CREATE;
+			} <span class="enscript-keyword">else</span> {
+				error = EPERM;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">LOOKUP</span>:
+			<span class="enscript-comment">/* Make sure our lookup of &quot;/..namedfork/rsrc&quot; is allowed. */</span>
+			<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; CN_ALLOWRSRCFORK) {
+				nsop = NS_OPEN;
+			} <span class="enscript-keyword">else</span> {
+				error = EPERM;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			error = EPERM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-comment">/* Ask the file system for the resource fork. */</span>
+	error = vnode_getnamedstream(dp, &amp;svp, XATTR_RESOURCEFORK_NAME, nsop, 0, ctx);
+
+	<span class="enscript-comment">/* During a create, it OK for stream vnode to be missing. */</span>
+	<span class="enscript-keyword">if</span> (error == ENOATTR || error == ENOENT) {
+		error = (nsop == NS_CREATE) ? 0 : ENOENT;
+	}		
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-comment">/* The &quot;parent&quot; of the stream is the file. */</span>
+	<span class="enscript-keyword">if</span> (wantparent) {
+		<span class="enscript-keyword">if</span> (ndp-&gt;ni_dvp) {
+			vnode_put(ndp-&gt;ni_dvp);
+		}
+		ndp-&gt;ni_dvp = dp;
+	} <span class="enscript-keyword">else</span> {
+		vnode_put(dp);
+	}
+	ndp-&gt;ni_vp = svp;  <span class="enscript-comment">/* on create this may be null */</span>
+
+	<span class="enscript-comment">/* Restore the truncated pathname buffer (for audits). */</span>
+	<span class="enscript-keyword">if</span> (ndp-&gt;ni_pathlen == 1 &amp;&amp; ndp-&gt;ni_next[0] == <span class="enscript-string">'\0'</span>) {
+		ndp-&gt;ni_next[0] = <span class="enscript-string">'/'</span>;
+	}
+	cnp-&gt;cn_flags  &amp;= ~MAKEENTRY;
+
+	<span class="enscript-keyword">return</span> 0;
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> error;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* NAMEDRSRCFORK */</span>
+
+<span class="enscript-comment">/*
+ * iocounts in:
+ * 	--One on ni_vp.  One on ni_dvp if there is more path, or we didn't come through the
+ * 	cache, or we came through the cache and the caller doesn't want the parent.
+ *
+ * iocounts out:
+ *	--Leaves us in the correct state for the next step, whatever that might be.
+ *	--If we find a symlink, returns with iocounts on both ni_vp and ni_dvp.
+ *	--If we are to look up another component, then we have an iocount on ni_vp and
+ *	nothing else.  
+ *	--If we are done, returns an iocount on ni_vp, and possibly on ni_dvp depending on nameidata flags.
+ *	--In the event of an error, may return with ni_dvp NULL'ed out (in which case, iocount
+ *	was dropped).
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>		
+<span class="enscript-function-name">lookup_handle_found_vnode</span>(<span class="enscript-type">struct</span> nameidata *ndp, <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">int</span> rdonly, 
+		<span class="enscript-type">int</span> vbusyflags, <span class="enscript-type">int</span> *keep_going, <span class="enscript-type">int</span> nc_generation,
+		<span class="enscript-type">int</span> wantparent, <span class="enscript-type">int</span> atroot, vfs_context_t ctx)
+{
+	vnode_t dp;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">char</span> *cp;
+
+	dp = ndp-&gt;ni_vp;
+	*keep_going = 0;
+
+	<span class="enscript-keyword">if</span> (ndp-&gt;ni_vp == NULLVP) {
+		panic(<span class="enscript-string">&quot;NULL ni_vp in %s\n&quot;</span>, __FUNCTION__);
+	}
+
+	<span class="enscript-keyword">if</span> (atroot) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">nextname</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Take into account any additional components consumed by
+	 * the underlying filesystem.
+	 */</span>
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_consume &gt; 0) {
+		cnp-&gt;cn_nameptr += cnp-&gt;cn_consume;
+		ndp-&gt;ni_next += cnp-&gt;cn_consume;
+		ndp-&gt;ni_pathlen -= cnp-&gt;cn_consume;
+		cnp-&gt;cn_consume = 0;
+	} <span class="enscript-keyword">else</span> {
+		lookup_consider_update_cache(ndp-&gt;ni_dvp, dp, cnp, nc_generation);
+	}
+
+	<span class="enscript-comment">/*
+	 * Check to see if the vnode has been mounted on...
+	 * if so find the root of the mounted file system.
+	 * Updates ndp-&gt;ni_vp.
+	 */</span>
+	error = lookup_traverse_mountpoints(ndp, cnp, dp, vbusyflags, ctx);
+	dp = ndp-&gt;ni_vp;
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-keyword">if</span> (vfs_flags(vnode_mount(dp)) &amp; MNT_MULTILABEL) {
+		error = vnode_label(vnode_mount(dp), NULL, dp, NULL, 0, ctx);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * Check for symbolic link
+	 */</span>
+	<span class="enscript-keyword">if</span> ((dp-&gt;v_type == VLNK) &amp;&amp;
+	    ((cnp-&gt;cn_flags &amp; FOLLOW) || (ndp-&gt;ni_flag &amp; NAMEI_TRAILINGSLASH) || *ndp-&gt;ni_next == <span class="enscript-string">'/'</span>)) {
+		cnp-&gt;cn_flags |= ISSYMLINK;
+		*keep_going = 1;
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-comment">/*
+	 * Check for bogus trailing slashes.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((ndp-&gt;ni_flag &amp; NAMEI_TRAILINGSLASH)) {
+		<span class="enscript-keyword">if</span> (dp-&gt;v_type != VDIR) {
+			error = ENOTDIR;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		ndp-&gt;ni_flag &amp;= ~(NAMEI_TRAILINGSLASH);
+	} 
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NAMEDSTREAMS</span>
+	<span class="enscript-comment">/* 
+	 * Deny namei/lookup requests to resolve paths that point to shadow files.
+	 * Access to shadow files must be conducted by explicit calls to VNOP_LOOKUP
+	 * directly, and not use lookup/namei
+	 */</span>
+	<span class="enscript-keyword">if</span> (vnode_isshadow (dp)) {
+		error = ENOENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-reference">nextname</span>:
+	<span class="enscript-comment">/*
+	 * Not a symbolic link.  If more pathname,
+	 * continue at next component, else return.
+	 *
+	 * Definitely have a dvp if there's another slash 
+	 */</span>
+	<span class="enscript-keyword">if</span> (*ndp-&gt;ni_next == <span class="enscript-string">'/'</span>) {
+		cnp-&gt;cn_nameptr = ndp-&gt;ni_next + 1;
+		ndp-&gt;ni_pathlen--;
+		<span class="enscript-keyword">while</span> (*cnp-&gt;cn_nameptr == <span class="enscript-string">'/'</span>) {
+			cnp-&gt;cn_nameptr++;
+			ndp-&gt;ni_pathlen--;
+		}
+
+		cp = cnp-&gt;cn_nameptr;
+		vnode_put(ndp-&gt;ni_dvp);
+		ndp-&gt;ni_dvp = NULLVP;
+
+		<span class="enscript-keyword">if</span> (*cp == <span class="enscript-string">'\0'</span>) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">emptyname</span>;
+		}
+
+		*keep_going = 1;
+		<span class="enscript-keyword">return</span> 0;
+	}
+				  
+	<span class="enscript-comment">/*
+	 * Disallow directory write attempts on read-only file systems.
+	 */</span>
+	<span class="enscript-keyword">if</span> (rdonly &amp;&amp;
+	    (cnp-&gt;cn_nameiop == DELETE || cnp-&gt;cn_nameiop == RENAME)) {
+		error = EROFS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	
+	<span class="enscript-comment">/* If SAVESTART is set, we should have a dvp */</span>
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; SAVESTART) {
+	        <span class="enscript-comment">/*	
+		 * note that we already hold a reference
+		 * on both dp and ni_dvp, but for some reason
+		 * can't get another one... in this case we
+		 * need to do vnode_put on dp in 'bad2'
+		 */</span>
+	        <span class="enscript-keyword">if</span> ( (vnode_get(ndp-&gt;ni_dvp)) ) {
+		        error = ENOENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		ndp-&gt;ni_startdir = ndp-&gt;ni_dvp;
+	}
+	<span class="enscript-keyword">if</span> (!wantparent &amp;&amp; ndp-&gt;ni_dvp) {
+		vnode_put(ndp-&gt;ni_dvp);
+		ndp-&gt;ni_dvp = NULLVP;
+	}
+
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; AUDITVNPATH1)
+		AUDIT_ARG(vnpath, dp, ARG_VNODE1);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; AUDITVNPATH2)
+		AUDIT_ARG(vnpath, dp, ARG_VNODE2);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NAMEDRSRCFORK</span>
+	<span class="enscript-comment">/*
+	 * Caller wants the resource fork.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((cnp-&gt;cn_flags &amp; CN_WANTSRSRCFORK) &amp;&amp; (dp != NULLVP)) {
+		error = lookup_handle_rsrc_fork(dp, ndp, cnp, wantparent, ctx);
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		dp = ndp-&gt;ni_vp;
+	}
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (kdebug_enable)
+	        kdebug_lookup(ndp-&gt;ni_vp, cnp);
+
+	<span class="enscript-keyword">return</span> 0;
+
+<span class="enscript-reference">emptyname</span>:
+	error = lookup_handle_emptyname(ndp, cnp, wantparent);
+	<span class="enscript-keyword">if</span> (error != 0) 
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	<span class="enscript-keyword">return</span> 0;
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> error;
+
+}
+
+<span class="enscript-comment">/*
+ * Comes in iocount on ni_vp.  May overwrite ni_dvp, but doesn't interpret incoming value.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 
+<span class="enscript-function-name">lookup_handle_emptyname</span>(<span class="enscript-type">struct</span> nameidata *ndp, <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">int</span> wantparent)
+{
+	vnode_t dp;
+	<span class="enscript-type">int</span> error = 0;
+
+	dp = ndp-&gt;ni_vp;
+	cnp-&gt;cn_namelen = 0;
+	<span class="enscript-comment">/*
+	 * A degenerate name (e.g. / or &quot;&quot;) which is a way of
+	 * talking about a directory, e.g. like &quot;/.&quot; or &quot;.&quot;.
+	 */</span>
+	<span class="enscript-keyword">if</span> (dp-&gt;v_type != VDIR) {
+		error = ENOTDIR;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_nameiop != LOOKUP) {
+		error = EISDIR;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (wantparent) {
+	        <span class="enscript-comment">/*	
+		 * note that we already hold a reference
+		 * on dp, but for some reason can't
+		 * get another one... in this case we
+		 * need to do vnode_put on dp in 'bad'
+		 */</span>
+	        <span class="enscript-keyword">if</span> ( (vnode_get(dp)) ) {
+		        error = ENOENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		ndp-&gt;ni_dvp = dp;
+	}
+	cnp-&gt;cn_flags &amp;= ~ISDOTDOT;
+	cnp-&gt;cn_flags |= ISLASTCN;
+	ndp-&gt;ni_next = cnp-&gt;cn_nameptr;
+	ndp-&gt;ni_vp = dp;
+
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; AUDITVNPATH1)
+		AUDIT_ARG(vnpath, dp, ARG_VNODE1);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; AUDITVNPATH2)
+		AUDIT_ARG(vnpath, dp, ARG_VNODE2);
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; SAVESTART)
+		panic(<span class="enscript-string">&quot;lookup: SAVESTART&quot;</span>);
+
+	<span class="enscript-keyword">return</span> 0;
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> error;
+}
+<span class="enscript-comment">/*
+ * Search a pathname.
+ * This is a very central and rather complicated routine.
+ *
+ * The pathname is pointed to by ni_ptr and is of length ni_pathlen.
+ * The starting directory is taken from ni_startdir. The pathname is
+ * descended until done, or a symbolic link is encountered. The variable
+ * ni_more is clear if the path is completed; it is set to one if a
+ * symbolic link needing interpretation is encountered.
+ *
+ * The flag argument is LOOKUP, CREATE, RENAME, or DELETE depending on
+ * whether the name is to be looked up, created, renamed, or deleted.
+ * When CREATE, RENAME, or DELETE is specified, information usable in
+ * creating, renaming, or deleting a directory entry may be calculated.
+ * If flag has LOCKPARENT or'ed into it, the parent directory is returned
+ * locked. If flag has WANTPARENT or'ed into it, the parent directory is
+ * returned unlocked. Otherwise the parent directory is not returned. If
+ * the target of the pathname exists and LOCKLEAF is or'ed into the flag
+ * the target is returned locked, otherwise it is returned unlocked.
+ * When creating or renaming and LOCKPARENT is specified, the target may not
+ * be &quot;.&quot;.  When deleting and LOCKPARENT is specified, the target may be &quot;.&quot;.
+ * 
+ * Overall outline of lookup:
+ *
+ * dirloop:
+ *	identify next component of name at ndp-&gt;ni_ptr
+ *	handle degenerate case where name is null string
+ *	if .. and crossing mount points and on mounted filesys, find parent
+ *	call VNOP_LOOKUP routine for next component name
+ *	    directory vnode returned in ni_dvp, unlocked unless LOCKPARENT set
+ *	    component vnode returned in ni_vp (if it exists), locked.
+ *	if result vnode is mounted on and crossing mount points,
+ *	    find mounted on vnode
+ *	if more components of name, do next level at dirloop
+ *	return the answer in ni_vp, locked if LOCKLEAF set
+ *	    if LOCKPARENT set, return locked parent in ni_dvp
+ *	    if WANTPARENT set, return unlocked parent in ni_dvp
+ *
+ * Returns:	0			Success
+ *		ENOENT			No such file or directory
+ *		EBADF			Bad file descriptor
+ *		ENOTDIR			Not a directory
+ *		EROFS			Read-only file system [CREATE]
+ *		EISDIR			Is a directory [CREATE]
+ *		cache_lookup_path:ERECYCLE  (vnode was recycled from underneath us, redrive lookup again)
+ *		vnode_authorize:EROFS
+ *		vnode_authorize:EACCES
+ *		vnode_authorize:EPERM
+ *		vnode_authorize:???
+ *		VNOP_LOOKUP:ENOENT	No such file or directory
+ *		VNOP_LOOKUP:EJUSTRETURN	Restart system call (INTERNAL)
+ *		VNOP_LOOKUP:???
+ *		VFS_ROOT:ENOTSUP
+ *		VFS_ROOT:ENOENT
+ *		VFS_ROOT:???
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">lookup</span>(<span class="enscript-type">struct</span> nameidata *ndp)
+{
+	<span class="enscript-type">char</span>	*cp;		<span class="enscript-comment">/* pointer into pathname argument */</span>
+	vnode_t		tdp;		<span class="enscript-comment">/* saved dp */</span>
+	vnode_t		dp;		<span class="enscript-comment">/* the directory we are searching */</span>
+	<span class="enscript-type">int</span> docache = 1;		<span class="enscript-comment">/* == 0 do not cache last component */</span>
+	<span class="enscript-type">int</span> wantparent;			<span class="enscript-comment">/* 1 =&gt; wantparent or lockparent flag */</span>
+	<span class="enscript-type">int</span> rdonly;			<span class="enscript-comment">/* lookup read-only flag bit */</span>
+	<span class="enscript-type">int</span> dp_authorized = 0;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> componentname *cnp = &amp;ndp-&gt;ni_cnd;
+	vfs_context_t ctx = cnp-&gt;cn_context;
+	<span class="enscript-type">int</span> vbusyflags = 0;
+	<span class="enscript-type">int</span> nc_generation = 0;
+	vnode_t last_dp = NULLVP;
+	<span class="enscript-type">int</span> keep_going;
+	<span class="enscript-type">int</span> atroot;
+
+	<span class="enscript-comment">/*
+	 * Setup: break out flag bits into variables.
+	 */</span>
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; NOCACHE) {
+	        docache = 0;
+	}
+	wantparent = cnp-&gt;cn_flags &amp; (LOCKPARENT | WANTPARENT);
+	rdonly = cnp-&gt;cn_flags &amp; RDONLY;
+	cnp-&gt;cn_flags &amp;= ~ISSYMLINK;
+	cnp-&gt;cn_consume = 0;
+
+	dp = ndp-&gt;ni_startdir;
+	ndp-&gt;ni_startdir = NULLVP;
+
+	<span class="enscript-keyword">if</span> ((cnp-&gt;cn_flags &amp; CN_NBMOUNTLOOK) != 0)
+			vbusyflags = LK_NOWAIT;
+	cp = cnp-&gt;cn_nameptr;
+
+	<span class="enscript-keyword">if</span> (*cp == <span class="enscript-string">'\0'</span>) {
+	        <span class="enscript-keyword">if</span> ( (vnode_getwithref(dp)) ) {
+			dp = NULLVP;
+		        error = ENOENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		ndp-&gt;ni_vp = dp;
+		error = lookup_handle_emptyname(ndp, cnp, wantparent);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+
+		<span class="enscript-keyword">return</span> 0;
+	}
+<span class="enscript-reference">dirloop</span>: 
+	atroot = 0;
+	ndp-&gt;ni_vp = NULLVP;
+
+	<span class="enscript-keyword">if</span> ( (error = cache_lookup_path(ndp, cnp, dp, ctx, &amp;dp_authorized, last_dp)) ) {
+		dp = NULLVP;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+	<span class="enscript-keyword">if</span> ((cnp-&gt;cn_flags &amp; ISLASTCN)) {
+	        <span class="enscript-keyword">if</span> (docache)
+		        cnp-&gt;cn_flags |= MAKEENTRY;
+	} <span class="enscript-keyword">else</span>
+	        cnp-&gt;cn_flags |= MAKEENTRY;
+
+	dp = ndp-&gt;ni_dvp;
+
+	<span class="enscript-keyword">if</span> (ndp-&gt;ni_vp != NULLVP) {
+	        <span class="enscript-comment">/*
+		 * cache_lookup_path returned a non-NULL ni_vp then,
+		 * we're guaranteed that the dp is a VDIR, it's 
+		 * been authorized, and vp is not &quot;..&quot;
+		 *
+		 * make sure we don't try to enter the name back into
+		 * the cache if this vp is purged before we get to that
+		 * check since we won't have serialized behind whatever
+		 * activity is occurring in the FS that caused the purge
+		 */</span>
+	        <span class="enscript-keyword">if</span> (dp != NULLVP)
+		        nc_generation = dp-&gt;v_nc_generation - 1;
+
+	        <span class="enscript-keyword">goto</span> <span class="enscript-reference">returned_from_lookup_path</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Handle &quot;..&quot;: two special cases.
+	 * 1. If at root directory (e.g. after chroot)
+	 *    or at absolute root directory
+	 *    then ignore it so can't get out.
+	 * 2. If this vnode is the root of a mounted
+	 *    filesystem, then replace it with the
+	 *    vnode which was mounted on so we take the
+	 *    .. in the other file system.
+	 */</span>
+	<span class="enscript-keyword">if</span> ( (cnp-&gt;cn_flags &amp; ISDOTDOT) ) {
+		<span class="enscript-keyword">for</span> (;;) {
+		        <span class="enscript-keyword">if</span> (dp == ndp-&gt;ni_rootdir || dp == rootvnode) {
+			        ndp-&gt;ni_dvp = dp;
+				ndp-&gt;ni_vp = dp;
+				<span class="enscript-comment">/*
+				 * we're pinned at the root
+				 * we've already got one reference on 'dp'
+				 * courtesy of cache_lookup_path... take
+				 * another one for the &quot;..&quot;
+				 * if we fail to get the new reference, we'll
+				 * drop our original down in 'bad'
+				 */</span>
+				<span class="enscript-keyword">if</span> ( (vnode_get(dp)) ) {
+					error = ENOENT;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+				}
+				atroot = 1;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">returned_from_lookup_path</span>;
+			}
+			<span class="enscript-keyword">if</span> ((dp-&gt;v_flag &amp; VROOT) == 0 ||
+			    (cnp-&gt;cn_flags &amp; NOCROSSMOUNT))
+			        <span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">if</span> (dp-&gt;v_mount == NULL) {	<span class="enscript-comment">/* forced umount */</span>
+			        error = EBADF;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+			tdp = dp;
+			dp = tdp-&gt;v_mount-&gt;mnt_vnodecovered;
+
+			vnode_put(tdp);
+
+			<span class="enscript-keyword">if</span> ( (vnode_getwithref(dp)) ) {
+			        dp = NULLVP;
+				error = ENOENT;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+			ndp-&gt;ni_dvp = dp;
+			dp_authorized = 0;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * We now have a segment name to search for, and a directory to search.
+	 */</span>
+<span class="enscript-reference">unionlookup</span>:
+	ndp-&gt;ni_vp = NULLVP;
+
+	<span class="enscript-keyword">if</span> (dp-&gt;v_type != VDIR) {
+	        error = ENOTDIR;
+	        <span class="enscript-keyword">goto</span> <span class="enscript-reference">lookup_error</span>;
+	}
+	<span class="enscript-keyword">if</span> ( (cnp-&gt;cn_flags &amp; DONOTAUTH) != DONOTAUTH ) {
+		error = lookup_authorize_search(dp, cnp, dp_authorized, ctx);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">lookup_error</span>;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Now that we've authorized a lookup, can bail out if the filesystem
+	 * will be doing a batched operation.  Return an iocount on dvp.
+	 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NAMEDRSRCFORK</span>
+	<span class="enscript-keyword">if</span> ((cnp-&gt;cn_flags &amp; ISLASTCN) &amp;&amp; namei_compound_available(dp, ndp) &amp;&amp; !(cnp-&gt;cn_flags &amp; CN_WANTSRSRCFORK)) { 
+#<span class="enscript-reference">else</span> 
+	<span class="enscript-keyword">if</span> ((cnp-&gt;cn_flags &amp; ISLASTCN) &amp;&amp; namei_compound_available(dp, ndp)) {
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* NAMEDRSRCFORK */</span>
+		ndp-&gt;ni_flag |= NAMEI_UNFINISHED;
+		ndp-&gt;ni_ncgeneration = dp-&gt;v_nc_generation;
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+        nc_generation = dp-&gt;v_nc_generation;
+
+	<span class="enscript-comment">/*
+	 * Note: 
+	 * Filesystems that support hardlinks may want to call vnode_update_identity
+	 * if the lookup operation below will modify the in-core vnode to belong to a new point
+	 * in the namespace.  VFS cannot infer whether or not the look up operation makes the vnode
+	 * name change or change parents.  Without this, the lookup may make update
+	 * filesystem-specific in-core metadata but fail to update the v_parent or v_name
+	 * fields in the vnode.  If VFS were to do this, it would be necessary to call
+	 * vnode_update_identity on every lookup operation -- expensive!
+	 *
+	 * However, even with this in place, multiple lookups may occur in between this lookup
+	 * and the subsequent vnop, so, at best, we could only guarantee that you would get a
+	 * valid path back, and not necessarily the one that you wanted. 
+	 *
+	 * Example: 
+	 * /tmp/a == /foo/b
+	 * 
+	 * If you are now looking up /foo/b and the vnode for this link represents /tmp/a, 
+	 * vnode_update_identity will fix the parentage so that you can get /foo/b back 
+	 * through the v_parent chain (preventing you from getting /tmp/b back). It would 
+	 * not fix whether or not you should or should not get /tmp/a vs. /foo/b.
+	 */</span>
+
+	error = VNOP_LOOKUP(dp, &amp;ndp-&gt;ni_vp, cnp, ctx);
+
+	<span class="enscript-keyword">if</span> ( error ) {
+<span class="enscript-reference">lookup_error</span>:
+		<span class="enscript-keyword">if</span> ((error == ENOENT) &amp;&amp;
+		    (dp-&gt;v_mount != NULL) &amp;&amp;
+		    (dp-&gt;v_mount-&gt;mnt_flag &amp; MNT_UNION)) {
+			tdp = dp;
+			error = lookup_traverse_union(tdp, &amp;dp, ctx);
+			vnode_put(tdp);
+			<span class="enscript-keyword">if</span> (error) {
+			        dp = NULLVP;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+
+			ndp-&gt;ni_dvp = dp;
+			dp_authorized = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">unionlookup</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (error != EJUSTRETURN)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+		<span class="enscript-keyword">if</span> (ndp-&gt;ni_vp != NULLVP)
+			panic(<span class="enscript-string">&quot;leaf should be empty&quot;</span>);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NAMEDRSRCFORK</span>
+		<span class="enscript-comment">/* 
+		 * At this point, error should be EJUSTRETURN.
+		 * 
+		 * If CN_WANTSRSRCFORK is set, that implies that the 
+		 * underlying filesystem could not find the &quot;parent&quot; of the
+		 * resource fork (the data fork), and we are doing a lookup 
+		 * for a CREATE event.
+		 *
+		 * However, this should be converted to an error, as the
+		 * failure to find this parent should disallow further
+		 * progress to try and acquire a resource fork vnode. 
+		 */</span>
+		<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; CN_WANTSRSRCFORK) {
+			error = ENOENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+#<span class="enscript-reference">endif</span>
+
+		error = lookup_validate_creation_path(ndp);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		<span class="enscript-comment">/*
+		 * We return with ni_vp NULL to indicate that the entry
+		 * doesn't currently exist, leaving a pointer to the
+		 * referenced directory vnode in ndp-&gt;ni_dvp.
+		 */</span>
+		<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; SAVESTART) {
+			<span class="enscript-keyword">if</span> ( (vnode_get(ndp-&gt;ni_dvp)) ) {
+				error = ENOENT;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+			ndp-&gt;ni_startdir = ndp-&gt;ni_dvp;
+		}
+		<span class="enscript-keyword">if</span> (!wantparent)
+		        vnode_put(ndp-&gt;ni_dvp);
+
+		<span class="enscript-keyword">if</span> (kdebug_enable)
+		        kdebug_lookup(ndp-&gt;ni_dvp, cnp);
+		<span class="enscript-keyword">return</span> (0);
+	}
+<span class="enscript-reference">returned_from_lookup_path</span>:
+	<span class="enscript-comment">/* We'll always have an iocount on ni_vp when this finishes. */</span>
+	error = lookup_handle_found_vnode(ndp, cnp, rdonly, vbusyflags, &amp;keep_going, nc_generation, wantparent, atroot, ctx);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad2</span>; 
+	}
+
+	<span class="enscript-keyword">if</span> (keep_going) {
+		dp = ndp-&gt;ni_vp;
+
+		<span class="enscript-comment">/* namei() will handle symlinks */</span>
+		<span class="enscript-keyword">if</span> ((dp-&gt;v_type == VLNK) &amp;&amp;
+				((cnp-&gt;cn_flags &amp; FOLLOW) || (ndp-&gt;ni_flag &amp; NAMEI_TRAILINGSLASH) || *ndp-&gt;ni_next == <span class="enscript-string">'/'</span>)) {
+			<span class="enscript-keyword">return</span> 0; 
+		}
+
+		<span class="enscript-comment">/*
+		 * Otherwise, there's more path to process.  
+		 * cache_lookup_path is now responsible for dropping io ref on dp
+		 * when it is called again in the dirloop.  This ensures we hold
+		 * a ref on dp until we complete the next round of lookup.
+		 */</span>
+		last_dp = dp;
+
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">dirloop</span>;
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+<span class="enscript-reference">bad2</span>:
+	<span class="enscript-keyword">if</span> (ndp-&gt;ni_dvp)
+		vnode_put(ndp-&gt;ni_dvp);
+
+	vnode_put(ndp-&gt;ni_vp);
+	ndp-&gt;ni_vp = NULLVP;
+
+	<span class="enscript-keyword">if</span> (kdebug_enable)
+	        kdebug_lookup(dp, cnp);
+	<span class="enscript-keyword">return</span> (error);
+
+<span class="enscript-reference">bad</span>:
+	<span class="enscript-keyword">if</span> (dp)
+	        vnode_put(dp);
+	ndp-&gt;ni_vp = NULLVP;
+
+	<span class="enscript-keyword">if</span> (kdebug_enable)
+	        kdebug_lookup(dp, cnp);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Given a vnode in a union mount, traverse to the equivalent
+ * vnode in the underlying mount.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">lookup_traverse_union</span>(vnode_t dvp, vnode_t *new_dvp, vfs_context_t ctx)
+{
+	<span class="enscript-type">char</span> *path = NULL, *pp;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, *np;
+	<span class="enscript-type">int</span> len;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> nameidata nd;
+	vnode_t vp = dvp;
+
+	*new_dvp = NULL;
+
+	<span class="enscript-keyword">if</span> (vp &amp;&amp; vp-&gt;v_flag &amp; VROOT) {
+		*new_dvp = vp-&gt;v_mount-&gt;mnt_vnodecovered;
+		<span class="enscript-keyword">if</span> (vnode_getwithref(*new_dvp))
+			<span class="enscript-keyword">return</span> ENOENT;
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	path = (<span class="enscript-type">char</span> *) kalloc(MAXPATHLEN);
+	<span class="enscript-keyword">if</span> (path == NULL) {
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Walk back up to the mountpoint following the
+	 * v_parent chain and build a slash-separated path.
+	 * Then lookup that path starting with the covered vnode.
+	 */</span>
+	pp = path + (MAXPATHLEN - 1);
+	*pp = <span class="enscript-string">'\0'</span>;
+
+	<span class="enscript-keyword">while</span> (1) {
+		name = vnode_getname(vp);
+		<span class="enscript-keyword">if</span> (name == NULL) {
+			printf(<span class="enscript-string">&quot;lookup_traverse_union: null parent name: .%s\n&quot;</span>, pp);
+			error = ENOENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		len = strlen(name);
+		<span class="enscript-keyword">if</span> ((len + 1) &gt; (pp - path)) {		<span class="enscript-comment">// Enough space for this name ?
+</span>			error = ENAMETOOLONG;
+			vnode_putname(name);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		<span class="enscript-keyword">for</span> (np = name + len; len &gt; 0; len--)	<span class="enscript-comment">// Copy name backwards
+</span>			*--pp = *--np;
+		vnode_putname(name);
+		vp = vp-&gt;v_parent;
+		<span class="enscript-keyword">if</span> (vp == NULLVP || vp-&gt;v_flag &amp; VROOT)
+			<span class="enscript-keyword">break</span>;
+		*--pp = <span class="enscript-string">'/'</span>;
+	}
+
+	<span class="enscript-comment">/* Evaluate the path in the underlying mount */</span>
+	NDINIT(&amp;nd, LOOKUP, OP_LOOKUP, USEDVP, UIO_SYSSPACE, CAST_USER_ADDR_T(pp), ctx);
+	nd.ni_dvp = dvp-&gt;v_mount-&gt;mnt_vnodecovered;
+	error = namei(&amp;nd);
+	<span class="enscript-keyword">if</span> (error == 0)
+		*new_dvp = nd.ni_vp;
+	nameidone(&amp;nd);
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (path)
+		kfree(path, MAXPATHLEN);
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">lookup_validate_creation_path</span>(<span class="enscript-type">struct</span> nameidata *ndp)
+{
+	<span class="enscript-type">struct</span> componentname *cnp = &amp;ndp-&gt;ni_cnd;
+
+	<span class="enscript-comment">/*
+	 * If creating and at end of pathname, then can consider
+	 * allowing file to be created.
+	 */</span>
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; RDONLY) {
+		<span class="enscript-keyword">return</span> EROFS;
+	}
+	<span class="enscript-keyword">if</span> ((cnp-&gt;cn_flags &amp; ISLASTCN) &amp;&amp; (ndp-&gt;ni_flag &amp; NAMEI_TRAILINGSLASH) &amp;&amp; !(cnp-&gt;cn_flags &amp; WILLBEDIR)) {
+		<span class="enscript-keyword">return</span> ENOENT;
+	}
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Modifies only ni_vp.  Always returns with ni_vp still valid (iocount held).
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">lookup_traverse_mountpoints</span>(<span class="enscript-type">struct</span> nameidata *ndp, <span class="enscript-type">struct</span> componentname *cnp, vnode_t dp, 
+		<span class="enscript-type">int</span> vbusyflags, vfs_context_t ctx)
+{
+	mount_t mp;
+	vnode_t tdp;
+	<span class="enscript-type">int</span> error = 0;
+	uint32_t depth = 0;
+	vnode_t	mounted_on_dp;
+	<span class="enscript-type">int</span> current_mount_generation = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TRIGGERS</span>
+	vnode_t triggered_dp = NULLVP;
+	<span class="enscript-type">int</span> retry_cnt = 0;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_TRIGGER_RETRIES</span> 1
+#<span class="enscript-reference">endif</span>
+	
+	<span class="enscript-keyword">if</span> (dp-&gt;v_type != VDIR || cnp-&gt;cn_flags &amp; NOCROSSMOUNT)
+		<span class="enscript-keyword">return</span> 0;
+
+	mounted_on_dp = dp;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TRIGGERS</span>
+<span class="enscript-reference">restart</span>:
+#<span class="enscript-reference">endif</span>
+	current_mount_generation = mount_generation;
+
+	<span class="enscript-keyword">while</span> (dp-&gt;v_mountedhere) {
+		vnode_lock_spin(dp);
+		<span class="enscript-keyword">if</span> ((mp = dp-&gt;v_mountedhere)) {
+			mp-&gt;mnt_crossref++;
+			vnode_unlock(dp);
+		} <span class="enscript-keyword">else</span> {
+			vnode_unlock(dp);
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (ISSET(mp-&gt;mnt_lflag, MNT_LFORCE)) {
+			mount_dropcrossref(mp, dp, 0);
+			<span class="enscript-keyword">break</span>;	<span class="enscript-comment">// don't traverse into a forced unmount
+</span>		}
+
+
+		<span class="enscript-keyword">if</span> (vfs_busy(mp, vbusyflags)) {
+			mount_dropcrossref(mp, dp, 0);
+			<span class="enscript-keyword">if</span> (vbusyflags == LK_NOWAIT) {
+				error = ENOENT;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		error = VFS_ROOT(mp, &amp;tdp, ctx);
+
+		mount_dropcrossref(mp, dp, 0);
+		vfs_unbusy(mp);
+
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+
+		vnode_put(dp);
+		ndp-&gt;ni_vp = dp = tdp;
+		<span class="enscript-keyword">if</span> (dp-&gt;v_type != VDIR) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+			panic(<span class="enscript-string">&quot;%s : Root of filesystem not a directory\n&quot;</span>,
+			    __FUNCTION__);
+#<span class="enscript-reference">else</span>
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+		}
+		depth++;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TRIGGERS</span>
+	<span class="enscript-comment">/*
+	 * The triggered_dp check here is required but is susceptible to a
+	 * (unlikely) race in which trigger mount is done from here and is
+	 * unmounted before we get past vfs_busy above. We retry to deal with
+	 * that case but it has the side effect of unwanted retries for
+	 * &quot;special&quot; processes which don't want to trigger mounts.
+	 */</span>
+	<span class="enscript-keyword">if</span> (dp-&gt;v_resolve &amp;&amp; retry_cnt &lt; MAX_TRIGGER_RETRIES) {
+		error = vnode_trigger_resolve(dp, ndp, ctx);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		<span class="enscript-keyword">if</span> (dp == triggered_dp)
+			retry_cnt += 1;
+		<span class="enscript-keyword">else</span>
+			retry_cnt = 0;
+		triggered_dp = dp;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">restart</span>;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_TRIGGERS */</span>
+
+	<span class="enscript-keyword">if</span> (depth) {
+	        mp = mounted_on_dp-&gt;v_mountedhere;
+
+		<span class="enscript-keyword">if</span> (mp) {
+		        mount_lock_spin(mp);
+			mp-&gt;mnt_realrootvp_vid = dp-&gt;v_id;
+			mp-&gt;mnt_realrootvp = dp;
+			mp-&gt;mnt_generation = current_mount_generation;
+			mount_unlock(mp);
+		}
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-comment">/*
+ * Takes ni_vp and ni_dvp non-NULL.  Returns with *new_dp set to the location
+ * at which to start a lookup with a resolved path, and all other iocounts dropped.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 
+<span class="enscript-function-name">lookup_handle_symlink</span>(<span class="enscript-type">struct</span> nameidata *ndp, vnode_t *new_dp, vfs_context_t ctx)
+{
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">char</span> *cp;		<span class="enscript-comment">/* pointer into pathname argument */</span>
+	uio_t auio;
+	<span class="enscript-type">char</span> uio_buf[ UIO_SIZEOF(1) ];
+	<span class="enscript-type">int</span> need_newpathbuf;
+	u_int linklen;
+	<span class="enscript-type">struct</span> componentname *cnp = &amp;ndp-&gt;ni_cnd;
+	vnode_t dp;
+	<span class="enscript-type">char</span> *tmppn;
+
+	<span class="enscript-keyword">if</span> (ndp-&gt;ni_loopcnt++ &gt;= MAXSYMLINKS) {
+		<span class="enscript-keyword">return</span> ELOOP;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-keyword">if</span> ((error = mac_vnode_check_readlink(ctx, ndp-&gt;ni_vp)) != 0)
+		<span class="enscript-keyword">return</span> error;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC */</span>
+	<span class="enscript-keyword">if</span> (ndp-&gt;ni_pathlen &gt; 1 || !(cnp-&gt;cn_flags &amp; HASBUF))
+		need_newpathbuf = 1;
+	<span class="enscript-keyword">else</span>
+		need_newpathbuf = 0;
+
+	<span class="enscript-keyword">if</span> (need_newpathbuf) {
+		MALLOC_ZONE(cp, <span class="enscript-type">char</span> *, MAXPATHLEN, M_NAMEI, M_WAITOK);
+		<span class="enscript-keyword">if</span> (cp == NULL) {
+			<span class="enscript-keyword">return</span> ENOMEM;
+		}
+	} <span class="enscript-keyword">else</span> {
+		cp = cnp-&gt;cn_pnbuf;
+	}
+	auio = uio_createwithbuffer(1, 0, UIO_SYSSPACE, UIO_READ, &amp;uio_buf[0], <span class="enscript-keyword">sizeof</span>(uio_buf));
+
+	uio_addiov(auio, CAST_USER_ADDR_T(cp), MAXPATHLEN);
+
+	error = VNOP_READLINK(ndp-&gt;ni_vp, auio, ctx);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (need_newpathbuf)
+			FREE_ZONE(cp, MAXPATHLEN, M_NAMEI);
+		<span class="enscript-keyword">return</span> error;
+	}
+
+	<span class="enscript-comment">/* 
+	 * Safe to set unsigned with a [larger] signed type here
+	 * because 0 &lt;= uio_resid &lt;= MAXPATHLEN and MAXPATHLEN
+	 * is only 1024.
+	 */</span>
+	linklen = MAXPATHLEN - (u_int)uio_resid(auio);
+	<span class="enscript-keyword">if</span> (linklen + ndp-&gt;ni_pathlen &gt; MAXPATHLEN) {
+		<span class="enscript-keyword">if</span> (need_newpathbuf)
+			FREE_ZONE(cp, MAXPATHLEN, M_NAMEI);
+
+		<span class="enscript-keyword">return</span> ENAMETOOLONG;
+	}
+	<span class="enscript-keyword">if</span> (need_newpathbuf) {
+		<span class="enscript-type">long</span> len = cnp-&gt;cn_pnlen;
+
+		tmppn = cnp-&gt;cn_pnbuf;
+		bcopy(ndp-&gt;ni_next, cp + linklen, ndp-&gt;ni_pathlen);
+		cnp-&gt;cn_pnbuf = cp;
+		cnp-&gt;cn_pnlen = MAXPATHLEN;
+
+		<span class="enscript-keyword">if</span> ( (cnp-&gt;cn_flags &amp; HASBUF) )
+			FREE_ZONE(tmppn, len, M_NAMEI);
+		<span class="enscript-keyword">else</span>
+			cnp-&gt;cn_flags |= HASBUF;
+	} <span class="enscript-keyword">else</span>
+		cnp-&gt;cn_pnbuf[linklen] = <span class="enscript-string">'\0'</span>;
+
+	ndp-&gt;ni_pathlen += linklen;
+	cnp-&gt;cn_nameptr = cnp-&gt;cn_pnbuf;
+
+	<span class="enscript-comment">/*
+	 * starting point for 'relative'
+	 * symbolic link path
+	 */</span>
+	dp = ndp-&gt;ni_dvp;
+
+	<span class="enscript-comment">/*
+	 * get rid of references returned via 'lookup'
+	 */</span>
+	vnode_put(ndp-&gt;ni_vp);
+	vnode_put(ndp-&gt;ni_dvp);	<span class="enscript-comment">/* ALWAYS have a dvp for a symlink */</span>
+
+	ndp-&gt;ni_vp = NULLVP;
+	ndp-&gt;ni_dvp = NULLVP;
+
+	<span class="enscript-comment">/*
+	 * Check if symbolic link restarts us at the root
+	 */</span>
+	<span class="enscript-keyword">if</span> (*(cnp-&gt;cn_nameptr) == <span class="enscript-string">'/'</span>) {
+		<span class="enscript-keyword">while</span> (*(cnp-&gt;cn_nameptr) == <span class="enscript-string">'/'</span>) {
+			cnp-&gt;cn_nameptr++;
+			ndp-&gt;ni_pathlen--;
+		}
+		<span class="enscript-keyword">if</span> ((dp = ndp-&gt;ni_rootdir) == NULLVP) {
+			<span class="enscript-keyword">return</span> ENOENT;
+		}
+	}
+
+	*new_dp = dp;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * relookup - lookup a path name component
+ *    Used by lookup to re-aquire things.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">relookup</span>(<span class="enscript-type">struct</span> vnode *dvp, <span class="enscript-type">struct</span> vnode **vpp, <span class="enscript-type">struct</span> componentname *cnp)
+{
+	<span class="enscript-type">struct</span> vnode *dp = NULL;		<span class="enscript-comment">/* the directory we are searching */</span>
+	<span class="enscript-type">int</span> wantparent;			<span class="enscript-comment">/* 1 =&gt; wantparent or lockparent flag */</span>
+	<span class="enscript-type">int</span> rdonly;			<span class="enscript-comment">/* lookup read-only flag bit */</span>
+	<span class="enscript-type">int</span> error = 0;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NAMEI_DIAGNOSTIC</span>
+	<span class="enscript-type">int</span> i, newhash;			<span class="enscript-comment">/* DEBUG: check name hash */</span>
+	<span class="enscript-type">char</span> *cp;			<span class="enscript-comment">/* DEBUG: check name ptr/len */</span>
+#<span class="enscript-reference">endif</span>
+	vfs_context_t ctx = cnp-&gt;cn_context;;
+
+	<span class="enscript-comment">/*
+	 * Setup: break out flag bits into variables.
+	 */</span>
+	wantparent = cnp-&gt;cn_flags &amp; (LOCKPARENT|WANTPARENT);
+	rdonly = cnp-&gt;cn_flags &amp; RDONLY;
+	cnp-&gt;cn_flags &amp;= ~ISSYMLINK;
+
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; NOCACHE)
+	        cnp-&gt;cn_flags &amp;= ~MAKEENTRY;
+	<span class="enscript-keyword">else</span>
+	        cnp-&gt;cn_flags |= MAKEENTRY;
+
+	dp = dvp;
+
+	<span class="enscript-comment">/*
+	 * Check for degenerate name (e.g. / or &quot;&quot;)
+	 * which is a way of talking about a directory,
+	 * e.g. like &quot;/.&quot; or &quot;.&quot;.
+	 */</span>
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_nameptr[0] == <span class="enscript-string">'\0'</span>) {
+		<span class="enscript-keyword">if</span> (cnp-&gt;cn_nameiop != LOOKUP || wantparent) {
+			error = EISDIR;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		<span class="enscript-keyword">if</span> (dp-&gt;v_type != VDIR) {
+			error = ENOTDIR;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		<span class="enscript-keyword">if</span> ( (vnode_get(dp)) ) {
+		        error = ENOENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		*vpp = dp;
+
+		<span class="enscript-keyword">if</span> (cnp-&gt;cn_flags &amp; SAVESTART)
+			panic(<span class="enscript-string">&quot;lookup: SAVESTART&quot;</span>);
+		<span class="enscript-keyword">return</span> (0);
+	}
+	<span class="enscript-comment">/*
+	 * We now have a segment name to search for, and a directory to search.
+	 */</span>
+	<span class="enscript-keyword">if</span> ( (error = VNOP_LOOKUP(dp, vpp, cnp, ctx)) ) {
+		<span class="enscript-keyword">if</span> (error != EJUSTRETURN)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+		<span class="enscript-keyword">if</span> (*vpp != NULL)
+			panic(<span class="enscript-string">&quot;leaf should be empty&quot;</span>);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-comment">/*
+		 * If creating and at end of pathname, then can consider
+		 * allowing file to be created.
+		 */</span>
+		<span class="enscript-keyword">if</span> (rdonly) {
+			error = EROFS;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		<span class="enscript-comment">/*
+		 * We return with ni_vp NULL to indicate that the entry
+		 * doesn't currently exist, leaving a pointer to the
+		 * (possibly locked) directory inode in ndp-&gt;ni_dvp.
+		 */</span>
+		<span class="enscript-keyword">return</span> (0);
+	}
+	dp = *vpp;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-comment">/*
+	 * Check for symbolic link
+	 */</span>
+	<span class="enscript-keyword">if</span> (dp-&gt;v_type == VLNK &amp;&amp; (cnp-&gt;cn_flags &amp; FOLLOW))
+		panic (<span class="enscript-string">&quot;relookup: symlink found.\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * Disallow directory write attempts on read-only file systems.
+	 */</span>
+	<span class="enscript-keyword">if</span> (rdonly &amp;&amp;
+	    (cnp-&gt;cn_nameiop == DELETE || cnp-&gt;cn_nameiop == RENAME)) {
+		error = EROFS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad2</span>;
+	}
+	<span class="enscript-comment">/* ASSERT(dvp == ndp-&gt;ni_startdir) */</span>
+	
+	<span class="enscript-keyword">return</span> (0);
+
+<span class="enscript-reference">bad2</span>:
+	vnode_put(dp);
+<span class="enscript-reference">bad</span>:	
+	*vpp = NULL;
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Free pathname buffer
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nameidone</span>(<span class="enscript-type">struct</span> nameidata *ndp)
+{
+	<span class="enscript-keyword">if</span> (ndp-&gt;ni_cnd.cn_flags &amp; HASBUF) {
+		<span class="enscript-type">char</span> *tmp = ndp-&gt;ni_cnd.cn_pnbuf;
+
+		ndp-&gt;ni_cnd.cn_pnbuf = NULL;
+		ndp-&gt;ni_cnd.cn_flags &amp;= ~HASBUF;
+		FREE_ZONE(tmp, ndp-&gt;ni_cnd.cn_pnlen, M_NAMEI);
+	}
+}
+
+
+<span class="enscript-comment">/*
+ * Log (part of) a pathname using the KERNEL_DEBUG_CONSTANT mechanism, as used
+ * by fs_usage.  The path up to and including the current component name are
+ * logged.  Up to NUMPARMS*4 bytes of pathname will be logged.  If the path
+ * to be logged is longer than that, then the last NUMPARMS*4 bytes are logged.
+ * That is, the truncation removes the leading portion of the path.
+ *
+ * The logging is done via multiple KERNEL_DEBUG_CONSTANT calls.  The first one
+ * is marked with DBG_FUNC_START.  The last one is marked with DBG_FUNC_END
+ * (in addition to DBG_FUNC_START if it is also the first).  There may be
+ * intermediate ones with neither DBG_FUNC_START nor DBG_FUNC_END.
+ *
+ * The first KERNEL_DEBUG_CONSTANT passes the vnode pointer and 12 bytes of
+ * pathname.  The remaining KERNEL_DEBUG_CONSTANT calls add 16 bytes of pathname
+ * each.  The minimum number of KERNEL_DEBUG_CONSTANT calls required to pass
+ * the path are used.  Any excess padding in the final KERNEL_DEBUG_CONSTANT
+ * (because not all of the 12 or 16 bytes are needed for the remainder of the
+ * path) is set to zero bytes, or '&gt;' if there is more path beyond the
+ * current component name (usually because an intermediate component was not
+ * found).
+ *
+ * NOTE: If the path length is greater than NUMPARMS*4, or is not of the form
+ * 12+N*16, there will be no padding.
+ *
+ * TODO: If there is more path beyond the current component name, should we
+ * force some padding?  For example, a lookup for /foo_bar_baz/spam that
+ * fails because /foo_bar_baz is not found will only log &quot;/foo_bar_baz&quot;, with
+ * no '&gt;' padding.  But /foo_bar/spam would log &quot;/foo_bar&gt;&gt;&gt;&gt;&quot;.
+ */</span>
+#<span class="enscript-reference">if</span> (<span class="enscript-variable-name">KDEBUG_LEVEL</span> &gt;= <span class="enscript-variable-name">KDEBUG_LEVEL_IST</span>)
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_lookup_gen_events</span>(<span class="enscript-type">long</span> *dbg_parms, <span class="enscript-type">int</span> dbg_namelen, <span class="enscript-type">void</span> *dp, boolean_t lookup)
+{
+	<span class="enscript-type">int</span> code;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+
+	<span class="enscript-comment">/*
+	 * In the event that we collect multiple, consecutive pathname
+	 * entries, we must mark the start of the path's string and the end.
+	 */</span>
+	<span class="enscript-keyword">if</span> (lookup == TRUE)
+		code = VFS_LOOKUP | DBG_FUNC_START;
+	<span class="enscript-keyword">else</span>
+		code = VFS_LOOKUP_DONE | DBG_FUNC_START;
+
+	<span class="enscript-keyword">if</span> (dbg_namelen &lt;= (<span class="enscript-type">int</span>)(3 * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span>)))
+		code |= DBG_FUNC_END;
+
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, code, VM_KERNEL_ADDRPERM(dp), dbg_parms[0], dbg_parms[1], dbg_parms[2], 0);
+
+	code &amp;= ~DBG_FUNC_START;
+
+	<span class="enscript-keyword">for</span> (i=3, dbg_namelen -= (3 * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span>)); dbg_namelen &gt; 0; i+=4, dbg_namelen -= (4 * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span>))) {
+		<span class="enscript-keyword">if</span> (dbg_namelen &lt;= (<span class="enscript-type">int</span>)(4 * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span>)))
+			code |= DBG_FUNC_END;
+
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, code, dbg_parms[i], dbg_parms[i+1], dbg_parms[i+2], dbg_parms[i+3], 0);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_lookup</span>(vnode_t dp, <span class="enscript-type">struct</span> componentname *cnp)
+{
+	<span class="enscript-type">int</span> dbg_namelen;
+	<span class="enscript-type">char</span> *dbg_nameptr;
+	<span class="enscript-type">long</span> dbg_parms[NUMPARMS];
+
+	<span class="enscript-comment">/* Collect the pathname for tracing */</span>
+	dbg_namelen = (cnp-&gt;cn_nameptr - cnp-&gt;cn_pnbuf) + cnp-&gt;cn_namelen;
+	dbg_nameptr = cnp-&gt;cn_nameptr + cnp-&gt;cn_namelen;
+
+	<span class="enscript-keyword">if</span> (dbg_namelen &gt; (<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(dbg_parms))
+		dbg_namelen = <span class="enscript-keyword">sizeof</span>(dbg_parms);
+	dbg_nameptr -= dbg_namelen;
+	
+	<span class="enscript-comment">/* Copy the (possibly truncated) path itself */</span>
+	memcpy(dbg_parms, dbg_nameptr, dbg_namelen);
+	
+	<span class="enscript-comment">/* Pad with '\0' or '&gt;' */</span>
+	<span class="enscript-keyword">if</span> (dbg_namelen &lt; (<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(dbg_parms)) {
+		memset((<span class="enscript-type">char</span> *)dbg_parms + dbg_namelen,
+		       *(cnp-&gt;cn_nameptr + cnp-&gt;cn_namelen) ? <span class="enscript-string">'&gt;'</span> : 0,
+		       <span class="enscript-keyword">sizeof</span>(dbg_parms) - dbg_namelen);
+	}
+	kdebug_lookup_gen_events(dbg_parms, dbg_namelen, (<span class="enscript-type">void</span> *)dp, TRUE);
+}	
+
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* (KDEBUG_LEVEL &gt;= KDEBUG_LEVEL_IST) */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_lookup_gen_events</span>(<span class="enscript-type">long</span> *dbg_parms __unused, <span class="enscript-type">int</span> dbg_namelen __unused, <span class="enscript-type">void</span> *dp __unused)
+{
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_lookup</span>(<span class="enscript-type">struct</span> vnode *dp __unused, <span class="enscript-type">struct</span> componentname *cnp __unused)
+{
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* (KDEBUG_LEVEL &gt;= KDEBUG_LEVEL_IST) */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">vfs_getbyid</span>(fsid_t *fsid, ino64_t ino, vnode_t *vpp, vfs_context_t ctx)
+{
+	mount_t mp;
+	<span class="enscript-type">int</span> error;
+	
+	mp = mount_lookupby_volfsid(fsid-&gt;val[0], 1);
+	<span class="enscript-keyword">if</span> (mp == NULL) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-comment">/* Get the target vnode. */</span>
+	<span class="enscript-keyword">if</span> (ino == 2) {
+		error = VFS_ROOT(mp, vpp, ctx);
+	} <span class="enscript-keyword">else</span> {
+		error = VFS_VGET(mp, ino, vpp, ctx);
+	}
+
+	vfs_unbusy(mp);
+	<span class="enscript-keyword">return</span> error;
+}
+<span class="enscript-comment">/*
+ * Obtain the real path from a legacy volfs style path.
+ *
+ * Valid formats of input path:
+ *
+ *	&quot;555/@&quot;
+ *	&quot;555/2&quot;
+ *	&quot;555/123456&quot;
+ *	&quot;555/123456/foobar&quot;
+ *
+ * Where:
+ *	555 represents the volfs file system id
+ *	'@' and '2' are aliases to the root of a file system
+ *	123456 represents a file id
+ *	&quot;foobar&quot; represents a file name
+ */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_VOLFS</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vfs_getrealpath</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> * path, <span class="enscript-type">char</span> * realpath, size_t bufsize, vfs_context_t ctx)
+{
+	vnode_t vp;
+	<span class="enscript-type">struct</span> mount *mp = NULL;
+	<span class="enscript-type">char</span>  *str;
+	<span class="enscript-type">char</span> ch;
+	uint32_t  id;
+	ino64_t ino;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> length;
+
+	<span class="enscript-comment">/* Get file system id and move str to next component. */</span>
+	id = strtoul(path, &amp;str, 10);
+	<span class="enscript-keyword">if</span> (id == 0 || str[0] != <span class="enscript-string">'/'</span>) {
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+	<span class="enscript-keyword">while</span> (*str == <span class="enscript-string">'/'</span>) {
+		str++;
+	}
+	ch = *str;
+
+	mp = mount_lookupby_volfsid(id, 1);
+	<span class="enscript-keyword">if</span> (mp == NULL) {
+		<span class="enscript-keyword">return</span> (EINVAL);  <span class="enscript-comment">/* unexpected failure */</span>
+	}
+	<span class="enscript-comment">/* Check for an alias to a file system root. */</span>
+	<span class="enscript-keyword">if</span> (ch == <span class="enscript-string">'@'</span> &amp;&amp; str[1] == <span class="enscript-string">'\0'</span>) {
+		ino = 2;
+		str++;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* Get file id and move str to next component. */</span>
+	    ino = strtouq(str, &amp;str, 10);
+	}
+
+	<span class="enscript-comment">/* Get the target vnode. */</span>
+	<span class="enscript-keyword">if</span> (ino == 2) {
+		error = VFS_ROOT(mp, &amp;vp, ctx);
+	} <span class="enscript-keyword">else</span> {
+		error = VFS_VGET(mp, ino, &amp;vp, ctx);
+	}
+	vfs_unbusy(mp);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	realpath[0] = <span class="enscript-string">'\0'</span>;
+
+	<span class="enscript-comment">/* Get the absolute path to this vnode. */</span>
+	error = build_path(vp, realpath, bufsize, &amp;length, 0, ctx);
+	vnode_put(vp);
+
+	<span class="enscript-keyword">if</span> (error == 0 &amp;&amp; *str != <span class="enscript-string">'\0'</span>) {
+		<span class="enscript-type">int</span> attempt = strlcat(realpath, str, MAXPATHLEN);
+		<span class="enscript-keyword">if</span> (attempt &gt; MAXPATHLEN){
+			error = ENAMETOOLONG;
+		}
+	}
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">lookup_compound_vnop_post_hook</span>(<span class="enscript-type">int</span> error, vnode_t dvp, vnode_t vp, <span class="enscript-type">struct</span> nameidata *ndp, <span class="enscript-type">int</span> did_create)
+{
+	<span class="enscript-keyword">if</span> (error == 0 &amp;&amp; vp == NULLVP) {
+		panic(<span class="enscript-string">&quot;NULL vp with error == 0.\n&quot;</span>);
+	}
+
+	<span class="enscript-comment">/* 
+	 * We don't want to do any of this if we didn't use the compound vnop
+	 * to perform the lookup... i.e. if we're allowing and using the legacy pattern,
+	 * where we did a full lookup.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((ndp-&gt;ni_flag &amp; NAMEI_COMPOUND_OP_MASK) == 0) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* 
+	 * If we're going to continue the lookup, we'll handle
+	 * all lookup-related updates at that time.
+	 */</span>
+	<span class="enscript-keyword">if</span> (error == EKEEPLOOKING) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Only audit or update cache for *found* vnodes.  For creation
+	 * neither would happen in the non-compound-vnop case.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((vp != NULLVP) &amp;&amp; !did_create) {
+		<span class="enscript-comment">/* 
+		 * If MAKEENTRY isn't set, and we've done a successful compound VNOP, 
+		 * then we certainly don't want to update cache or identity.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((error != 0) || (ndp-&gt;ni_cnd.cn_flags &amp; MAKEENTRY)) {
+			lookup_consider_update_cache(dvp, vp, &amp;ndp-&gt;ni_cnd, ndp-&gt;ni_ncgeneration);
+		}
+		<span class="enscript-keyword">if</span> (ndp-&gt;ni_cnd.cn_flags &amp; AUDITVNPATH1)
+			AUDIT_ARG(vnpath, vp, ARG_VNODE1);
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ndp-&gt;ni_cnd.cn_flags &amp; AUDITVNPATH2)
+			AUDIT_ARG(vnpath, vp, ARG_VNODE2);
+	}
+
+	<span class="enscript-comment">/* 
+	 * If you created (whether you opened or not), cut a lookup tracepoint 
+	 * for the parent dir (as would happen without a compound vnop).  Note: we may need
+	 * a vnode despite failure in this case!
+	 *
+	 * If you did not create:
+	 * 	Found child (succeeded or not): cut a tracepoint for the child.  
+	 * 	Did not find child: cut a tracepoint with the parent.
+	 */</span>
+	<span class="enscript-keyword">if</span> (kdebug_enable) {
+	        kdebug_lookup(vp ? vp : dvp, &amp;ndp-&gt;ni_cnd); 
+	}
+}
+</pre>
+<hr />
+</body></html>

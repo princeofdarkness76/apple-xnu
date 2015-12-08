@@ -1,0 +1,331 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mac_inet.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mac_inet.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007-2011 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*-
+ * Copyright (c) 1999-2002 Robert N. M. Watson
+ * Copyright (c) 2001 Ilmar S. Habibulin
+ * Copyright (c) 2001-2004 Networks Associates Technology, Inc.
+ * Copyright (c) 2006-2007 SPARTA, Inc.
+ * All rights reserved.
+ *
+ * This software was developed by Robert Watson and Ilmar Habibulin for the
+ * TrustedBSD Project.
+ *
+ * This software was developed for the FreeBSD Project in part by Network
+ * Associates Laboratories, the Security Research Division of Network
+ * Associates, Inc. under DARPA/SPAWAR contract N66001-01-C-8035 (&quot;CBOSS&quot;),
+ * as part of the DARPA CHATS research program.
+ *
+ * This software was enhanced by SPARTA ISSO under SPAWAR contract
+ * N66001-04-C-6019 (&quot;SEFOS&quot;).
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_internal.h&gt;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> label *
+<span class="enscript-function-name">mac_inpcb_label_alloc</span>(<span class="enscript-type">int</span> flag)
+{
+	<span class="enscript-type">struct</span> label *label;
+	<span class="enscript-type">int</span> error;
+
+	label = mac_labelzone_alloc(flag);
+	<span class="enscript-keyword">if</span> (label == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+	MAC_CHECK(inpcb_label_init, label, flag);
+	<span class="enscript-keyword">if</span> (error) {
+		MAC_PERFORM(inpcb_label_destroy, label);
+		mac_labelzone_free(label);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	<span class="enscript-keyword">return</span> (label);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_inpcb_label_init</span>(<span class="enscript-type">struct</span> inpcb *inp, <span class="enscript-type">int</span> flag)
+{
+
+	inp-&gt;inp_label = mac_inpcb_label_alloc(flag);
+	<span class="enscript-keyword">if</span> (inp-&gt;inp_label == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> label *
+<span class="enscript-function-name">mac_ipq_label_alloc</span>(<span class="enscript-type">int</span> flag)
+{
+	<span class="enscript-type">struct</span> label *label;
+	<span class="enscript-type">int</span> error;
+
+	label = mac_labelzone_alloc(flag);
+	<span class="enscript-keyword">if</span> (label == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	MAC_CHECK(ipq_label_init, label, flag);
+	<span class="enscript-keyword">if</span> (error) {
+		MAC_PERFORM(ipq_label_destroy, label);
+		mac_labelzone_free(label);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	<span class="enscript-keyword">return</span> (label);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_ipq_label_init</span>(<span class="enscript-type">struct</span> ipq *ipq, <span class="enscript-type">int</span> flag)
+{
+
+	ipq-&gt;ipq_label = mac_ipq_label_alloc(flag);
+	<span class="enscript-keyword">if</span> (ipq-&gt;ipq_label == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_inpcb_label_free</span>(<span class="enscript-type">struct</span> label *label)
+{
+
+	MAC_PERFORM(inpcb_label_destroy, label);
+	mac_labelzone_free(label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_inpcb_label_destroy</span>(<span class="enscript-type">struct</span> inpcb *inp)
+{
+
+	mac_inpcb_label_free(inp-&gt;inp_label);
+	inp-&gt;inp_label = NULL;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_inpcb_label_recycle</span>(<span class="enscript-type">struct</span> inpcb *inp)
+{
+
+	MAC_PERFORM(inpcb_label_recycle, inp-&gt;inp_label);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_ipq_label_free</span>(<span class="enscript-type">struct</span> label *label)
+{
+
+	MAC_PERFORM(ipq_label_destroy, label);
+	mac_labelzone_free(label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_ipq_label_destroy</span>(<span class="enscript-type">struct</span> ipq *ipq)
+{
+
+	mac_ipq_label_free(ipq-&gt;ipq_label);
+	ipq-&gt;ipq_label = NULL;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_inpcb_label_associate</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> inpcb *inp)
+{
+
+	MAC_PERFORM(inpcb_label_associate, so, so-&gt;so_label, inp,
+	    inp-&gt;inp_label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mbuf_label_associate_ipq</span>(<span class="enscript-type">struct</span> ipq *ipq, <span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_mbuf_to_label(m);
+
+	MAC_PERFORM(mbuf_label_associate_ipq, ipq, ipq-&gt;ipq_label, m, label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_netinet_fragment</span>(<span class="enscript-type">struct</span> mbuf *datagram, <span class="enscript-type">struct</span> mbuf *fragment)
+{
+	<span class="enscript-type">struct</span> label *datagramlabel, *fragmentlabel;
+
+	datagramlabel = mac_mbuf_to_label(datagram);
+	fragmentlabel = mac_mbuf_to_label(fragment);
+
+	MAC_PERFORM(netinet_fragment, datagram, datagramlabel, fragment,
+	    fragmentlabel);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_ipq_label_associate</span>(<span class="enscript-type">struct</span> mbuf *fragment, <span class="enscript-type">struct</span> ipq *ipq)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_mbuf_to_label(fragment);
+
+	MAC_PERFORM(ipq_label_associate, fragment, label, ipq, ipq-&gt;ipq_label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mbuf_label_associate_inpcb</span>(<span class="enscript-type">struct</span> inpcb *inp, <span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">struct</span> label *mlabel;
+
+	<span class="enscript-comment">/* INP_LOCK_ASSERT(inp); */</span>
+	mlabel = mac_mbuf_to_label(m);
+
+	MAC_PERFORM(mbuf_label_associate_inpcb, inp, inp-&gt;inp_label, m, mlabel);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_ipq_label_compare</span>(<span class="enscript-type">struct</span> mbuf *fragment, <span class="enscript-type">struct</span> ipq *ipq)
+{
+	<span class="enscript-type">struct</span> label *label;
+	<span class="enscript-type">int</span> result;
+
+	label = mac_mbuf_to_label(fragment);
+
+	result = 1;
+	MAC_BOOLEAN(ipq_label_compare, &amp;&amp;, fragment, label, ipq, ipq-&gt;ipq_label);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_netinet_icmp_reply</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_mbuf_to_label(m);
+
+	MAC_PERFORM(netinet_icmp_reply, m, label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_netinet_tcp_reply</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_mbuf_to_label(m);
+
+	MAC_PERFORM(netinet_tcp_reply, m, label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_ipq_label_update</span>(<span class="enscript-type">struct</span> mbuf *fragment, <span class="enscript-type">struct</span> ipq *ipq)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_mbuf_to_label(fragment);
+
+	MAC_PERFORM(ipq_label_update, fragment, label, ipq, ipq-&gt;ipq_label);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_inpcb_check_deliver</span>(<span class="enscript-type">struct</span> inpcb *inp, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> family, <span class="enscript-type">int</span> type)
+{
+	<span class="enscript-type">struct</span> label *label;
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> ((m-&gt;m_flags &amp; M_PKTHDR) == 0)
+		panic(<span class="enscript-string">&quot;%s: no mbuf packet header!&quot;</span>, __func__);
+
+	label = mac_mbuf_to_label(m);
+
+	MAC_CHECK(inpcb_check_deliver, inp, inp-&gt;inp_label, m, label,
+	    family, type);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Propagate a change in the socket label to the inpcb label.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_inpcb_label_update</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> inpcb *inp;
+
+	<span class="enscript-comment">/* XXX: assert socket lock. */</span>
+	inp = sotoinpcb(so);	<span class="enscript-comment">/* XXX: inp locking */</span>
+
+	<span class="enscript-keyword">if</span> (inp != NULL) {
+		<span class="enscript-comment">/* INP_LOCK_ASSERT(inp); */</span>
+		MAC_PERFORM(inpcb_label_update, so, so-&gt;so_label, inp,
+		    inp-&gt;inp_label);
+	}
+}
+</pre>
+<hr />
+</body></html>

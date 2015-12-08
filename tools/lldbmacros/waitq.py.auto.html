@@ -1,0 +1,1089 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>waitq.py</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">waitq.py&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-keyword">from</span> xnu <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> utils <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> core.configuration <span class="enscript-keyword">import</span> *
+
+<span class="enscript-keyword">import</span> sys
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetWaitqStateStr</span>(waitq):
+    wq_types = {
+            0: <span class="enscript-string">'INV'</span>,
+            1: <span class="enscript-string">'???'</span>,
+            2: <span class="enscript-string">'  Q'</span>,
+            3: <span class="enscript-string">'SET'</span>
+    }
+    <span class="enscript-keyword">return</span> wq_types[int(waitq.waitq_type)]
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetWaitqBitsStr</span>(waitq):
+    out_str = <span class="enscript-string">&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> (Cast(waitq.waitq_interlock, <span class="enscript-string">'int'</span>) != 0):
+        <span class="enscript-keyword">if</span> waitq.waitq_irq:
+            out_str += <span class="enscript-string">'!'</span>
+        <span class="enscript-keyword">else</span>:
+            out_str += <span class="enscript-string">'*'</span>
+    <span class="enscript-keyword">if</span> waitq.waitq_fifo:
+        out_str += <span class="enscript-string">'F'</span>
+    <span class="enscript-keyword">if</span> waitq.waitq_prepost:
+        out_str += <span class="enscript-string">'P'</span>
+    <span class="enscript-keyword">if</span> waitq.waitq_irq:
+        out_str += <span class="enscript-string">'I'</span>
+    <span class="enscript-keyword">return</span> out_str
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WaitqTableElemType</span>(e):
+    type = (e.wqte.wqt_bits &gt;&gt; 29) &amp; 0x3
+    wqe_type = {
+            0: <span class="enscript-string">'FREE'</span>,
+            1: <span class="enscript-string">'ELEM'</span>,
+            2: <span class="enscript-string">'LINK'</span>,
+            3: <span class="enscript-string">'RSVD'</span>
+    }
+    <span class="enscript-keyword">return</span> wqe_type[type]
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WaitqTableElemId</span>(e):
+    <span class="enscript-keyword">return</span> e.wqte.wqt_id.id
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WaitqTableElemValid</span>(e):
+    <span class="enscript-keyword">if</span> unsigned(e) == 0:
+        <span class="enscript-keyword">return</span> 0
+    <span class="enscript-keyword">return</span> (e.wqte.wqt_bits &amp; 0x80000000) == 0x80000000
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WaitqTableElemRefcnt</span>(e):
+    <span class="enscript-keyword">return</span> (e.wqte.wqt_bits &amp; 0x1fffffff)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WaitqTableIdxFromId</span>(id):
+    <span class="enscript-keyword">if</span> hasattr(kern.globals, <span class="enscript-string">'g_wqt_idx_max'</span>):
+        idx = id &amp; unsigned(kern.globals.g_wqt_idx_max)
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-comment"># best guess
+</span>        idx = id &amp; 0x000000000003ffff
+    <span class="enscript-keyword">return</span> int(idx)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WaitqTableGenFromId</span>(id):
+    <span class="enscript-keyword">if</span> hasattr(kern.globals, <span class="enscript-string">'g_wqt_idx_max'</span>):
+        msk = ~unsigned(kern.globals.g_wqt_idx_max)
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-comment"># best guess
+</span>        msk = ~0x000000000003ffff
+    shift = 0
+    <span class="enscript-keyword">while</span> (msk &amp; 0x1) == 0:
+        msk &gt;&gt;= 1
+        shift += 1
+    <span class="enscript-keyword">return</span> (unsigned(id) &gt;&gt; shift) &amp; msk
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetWaitqLink</span>(id):
+    <span class="enscript-keyword">if</span> int(id) == 0:
+        <span class="enscript-keyword">return</span> 0, <span class="enscript-string">&quot;NULL link id&quot;</span>
+    idx = WaitqTableIdxFromId(id)
+    <span class="enscript-keyword">if</span> idx &gt;= kern.globals.g_linktable.nelem:
+        <span class="enscript-keyword">return</span> 0, <span class="enscript-string">&quot;Invalid waitq link table id: {:d}&quot;</span>.format(id)
+    slab_slot = idx / kern.globals.g_linktable.slab_elem;
+    slab = kern.globals.g_linktable.table[int(slab_slot)]
+    <span class="enscript-keyword">if</span> slab == 0:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Invalid waitq link table id:&quot;</span>, str(id), <span class="enscript-string">&quot; (invalid slab)&quot;</span>
+    first_elem = Cast(slab, <span class="enscript-string">'wqt_elem *'</span>)
+    addr = int(slab) + ((idx - first_elem.wqt_id.idx) * int(kern.globals.g_linktable.elem_sz))
+    link = kern.GetValueFromAddress(addr, <span class="enscript-string">'setid_link *'</span>)
+    gen = WaitqTableGenFromId(id)
+    warn_str = <span class="enscript-string">''</span>
+    <span class="enscript-keyword">if</span> gen &gt; 0 <span class="enscript-keyword">and</span> link.wqte.wqt_id.generation != gen:
+        warn_str = <span class="enscript-string">&quot;WARNING: found idx:{:d}/gen:{:d}, but requested idx:{:d}/gen:{:d}&quot;</span>.format(link.wqte.wqt_id.idx, link.wqte.wqt_id.generation, idx, gen)
+        link = 0
+    <span class="enscript-keyword">return</span> link, warn_str
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetWaitqPrepost</span>(id):
+    idx = WaitqTableIdxFromId(id)
+    <span class="enscript-keyword">if</span> idx &gt; int(kern.globals.g_prepost_table.nelem):
+        warn_str = <span class="enscript-string">&quot;Invalid waitq prepost table id {:s}&quot;</span>.format(str(id))
+        <span class="enscript-keyword">return</span> 0, warn_str
+    slab_slot = idx / kern.globals.g_prepost_table.slab_elem;
+    slab = kern.globals.g_prepost_table.table[int(slab_slot)]
+    <span class="enscript-keyword">if</span> slab == 0:
+        warn_str = <span class="enscript-string">&quot;Invalid waitq prepost table id:&quot;</span>, str(id), <span class="enscript-string">&quot; (invalid slab)&quot;</span>
+        <span class="enscript-keyword">return</span> 0, warn_str
+    first_elem = Cast(slab, <span class="enscript-string">'wqt_elem *'</span>)
+    addr = int(slab) + ((idx - first_elem.wqt_id.idx) * int(kern.globals.g_prepost_table.elem_sz))
+    wqp = kern.GetValueFromAddress(addr, <span class="enscript-string">'wq_prepost *'</span>)
+    gen = WaitqTableGenFromId(id)
+    warn_str = <span class="enscript-string">''</span>
+    <span class="enscript-keyword">if</span> gen &gt; 0 <span class="enscript-keyword">and</span> wqp.wqte.wqt_id.generation != gen:
+        warn_str = <span class="enscript-string">&quot;WARNING: found idx:{:d}/gen:{:d}, but requested idx:{:d}/gen:{:d}&quot;</span>.format(wqp.wqte.wqt_id.idx, wqp.wqte.wqt_id.generation, idx, gen)
+        wqp = 0
+    <span class="enscript-keyword">return</span> wqp, warn_str
+
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetWaitqSetidString</span>(setid):
+    idx = WaitqTableIdxFromId(setid)
+    gen = WaitqTableGenFromId(setid)
+    <span class="enscript-comment"># This must match the format used in WaitqSetsFromLink
+</span>    str = <span class="enscript-string">&quot;{:&gt;7d}/{:&lt;#14x}&quot;</span>.format(unsigned(idx), unsigned(gen))
+    <span class="enscript-keyword">return</span> str
+
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WaitqSetsFromLink</span>(link, sets, depth):
+    <span class="enscript-keyword">if</span> int(link) == 0:
+        sets.append(<span class="enscript-string">&quot;{: &lt;22s}&quot;</span>.format(<span class="enscript-string">&quot;&lt;link:NULL&gt;&quot;</span>))
+        <span class="enscript-keyword">return</span>
+    <span class="enscript-keyword">if</span> WaitqTableElemType(link) == <span class="enscript-string">&quot;ELEM&quot;</span>:
+        <span class="enscript-comment">#sets.append(&quot;{: &lt;#18x}&quot;.format(unsigned(link.sl_wqs.sl_set)))
+</span>        <span class="enscript-comment">#sets.append(&quot;{:&gt;7d}/{:&lt;#14x}&quot;.format(unsigned(id.idx),unsigned(id.generation)))
+</span>        sets.append(GetWaitqSetidString(link.wqte.wqt_id.id))
+        <span class="enscript-keyword">return</span>
+    <span class="enscript-keyword">if</span> depth &gt;= 950:
+        sets.append(<span class="enscript-string">&quot;{: &lt;22s}&quot;</span>.format(<span class="enscript-string">&quot;!recursion limit!&quot;</span>))
+        <span class="enscript-keyword">return</span>
+    left_link = GetWaitqLink(link.sl_link.sl_left_setid)[0]
+    right_link = GetWaitqLink(link.sl_link.sl_right_setid)[0]
+    WaitqSetsFromLink(left_link, sets, depth + 1)
+    WaitqSetsFromLink(right_link, sets, depth + 1)
+    <span class="enscript-keyword">return</span>
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetWaitqSets</span>(waitq):
+    sets = []
+    <span class="enscript-keyword">if</span> int(waitq) == 0:
+        <span class="enscript-keyword">return</span> sets
+    <span class="enscript-keyword">if</span> waitq.waitq_set_id == 0:
+        <span class="enscript-keyword">return</span> sets
+    link = GetWaitqLink(waitq.waitq_set_id)[0]
+    WaitqSetsFromLink(link, sets, 0)
+    <span class="enscript-keyword">return</span> sets
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetFrameString</span>(pc, compact=True):
+    str = GetSourceInformationForAddress(unsigned(pc))
+    <span class="enscript-keyword">if</span> compact:
+        <span class="enscript-keyword">return</span> re.sub(r<span class="enscript-string">'.*0x[0-9a-f]+\s+&lt;(\w+)( \+ 0x[0-9a-f]+)*&gt;.*'</span>, r<span class="enscript-string">'\1'</span>, str, re.UNICODE)
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">return</span> re.sub(r<span class="enscript-string">'.*(0x[0-9a-f]+)\s+&lt;(\w+)( \+ 0x[0-9a-f]+)*&gt;.*'</span>, r<span class="enscript-string">'\2(\1)'</span>, str, re.UNICODE)
+
+@lldb_type_summary([<span class="enscript-string">'setid_link'</span>, <span class="enscript-string">'setid_link *'</span>])
+@header(<span class="enscript-string">&quot;{:&lt;18s} {:&lt;18s} {:&lt;19s} {:&lt;10s} {:&lt;1s} {:&lt;4s} {:&lt;10s} {:&lt;20s}&quot;</span>.format(<span class="enscript-string">'addr'</span>,<span class="enscript-string">'id'</span>,<span class="enscript-string">'idx'</span>,<span class="enscript-string">'gen'</span>,<span class="enscript-string">'V'</span>,<span class="enscript-string">'type'</span>,<span class="enscript-string">'refcnt'</span>,<span class="enscript-string">'info'</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetWaitqSetidLinkSummary</span>(link, verbose=False):
+    has_stats = 0
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> link:
+        <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;&quot;</span>
+    fmt_str = <span class="enscript-string">&quot;{l: &lt;#18x} {l.wqte.wqt_id.id: &lt;#18x} {l.wqte.wqt_id.idx: &lt;7d} (-&gt;{l.wqte.wqt_next_idx: &lt;7d}) {l.wqte.wqt_id.generation: &lt;#10x} {v: &lt;1s} {t: &lt;4s} {rcnt: &lt;10d} &quot;</span>
+    <span class="enscript-keyword">if</span> hasattr(link, <span class="enscript-string">'sl_alloc_task'</span>):
+        has_stats = 1
+        fmt_str += <span class="enscript-string">&quot;owner:{l.sl_alloc_task: &lt;#x}/th:{l.sl_alloc_th: &lt;#x}\n&quot;</span>
+        fmt_str += <span class="enscript-string">' '</span>*87
+        <span class="enscript-keyword">try</span>:
+            pid = GetProcPIDForTask(link.sl_alloc_task)
+        <span class="enscript-keyword">except</span>:
+            pid = unsigned(link.sl_alloc_task.audit_token.val[5])
+        pidnm = <span class="enscript-string">&quot;&quot;</span>
+        <span class="enscript-keyword">if</span> pid &lt; 0:
+            pidnm = <span class="enscript-string">&quot;DEAD:{:s}&quot;</span>.format(GetProcNameForTask(link.sl_alloc_task))
+        <span class="enscript-keyword">else</span>:
+            pidnm += GetProcNameForPid(pid)
+        fmt_str += <span class="enscript-string">&quot;      ({:d}/{:s}), &quot;</span>.format(pid, pidnm)
+    type = WaitqTableElemType(link)
+    <span class="enscript-keyword">if</span> type == <span class="enscript-string">&quot;ELEM&quot;</span>:
+        type = <span class="enscript-string">&quot;WQS&quot;</span>
+    v = <span class="enscript-string">&quot;F&quot;</span>
+    <span class="enscript-keyword">if</span> WaitqTableElemValid(link):
+        v = <span class="enscript-string">&quot;T&quot;</span>
+    refcnt = WaitqTableElemRefcnt(link)
+    out_str = fmt_str.format(l=link, v=v, t=type, rcnt=refcnt)
+    <span class="enscript-keyword">if</span> type == <span class="enscript-string">&quot;WQS&quot;</span>:
+        out_str += <span class="enscript-string">&quot;wqs:{0: &lt;#18x}&quot;</span>.format(unsigned(link.sl_wqs.sl_set))
+    <span class="enscript-keyword">elif</span> type == <span class="enscript-string">&quot;LINK&quot;</span>:
+        lID = link.sl_link.sl_left_setid
+        rID = link.sl_link.sl_right_setid
+        left = GetWaitqLink(lID)[0]
+        right = GetWaitqLink(rID)[0]
+        ltype = <span class="enscript-string">&quot;&lt;invalid&gt;&quot;</span>
+        <span class="enscript-keyword">if</span> WaitqTableElemValid(left):
+            ltype = WaitqTableElemType(left)
+            <span class="enscript-keyword">if</span> ltype == <span class="enscript-string">&quot;ELEM&quot;</span>:
+                ltype = <span class="enscript-string">&quot;WQS&quot;</span>
+        rtype = <span class="enscript-string">&quot;&lt;invalid&gt;&quot;</span>
+        <span class="enscript-keyword">if</span> WaitqTableElemValid(right):
+            rtype = WaitqTableElemType(right)
+            <span class="enscript-keyword">if</span> rtype == <span class="enscript-string">&quot;ELEM&quot;</span>:
+                rtype = <span class="enscript-string">&quot;WQS&quot;</span>
+        out_str += <span class="enscript-string">&quot;left:{:&lt;#x}({:s}), right:{:&lt;#x}({:s})&quot;</span>.format(lID, ltype, rID, rtype)
+    <span class="enscript-keyword">if</span> hasattr(link, <span class="enscript-string">'sl_alloc_bt'</span>) <span class="enscript-keyword">and</span> unsigned(link.sl_alloc_bt[0]) &gt; 0:
+        fmt_str = <span class="enscript-string">&quot;\n{:s}alloc_bt({:d}):[&quot;</span>.format(<span class="enscript-string">' '</span>*87, link.sl_alloc_ts)
+        f = 0
+        <span class="enscript-keyword">while</span> f &lt; kern.globals.g_nwaitq_btframes:
+            fstr = GetFrameString(link.sl_alloc_bt[f], <span class="enscript-keyword">not</span> verbose)
+            f += 1
+            <span class="enscript-keyword">if</span> f == kern.globals.g_nwaitq_btframes:
+                fmt_str += <span class="enscript-string">&quot;{:&lt;s}&quot;</span>.format(fstr)
+            <span class="enscript-keyword">else</span>:
+                fmt_str += <span class="enscript-string">&quot;{:&lt;s} &lt;- &quot;</span>.format(fstr)
+        fmt_str += <span class="enscript-string">&quot;]&quot;</span>
+        out_str += fmt_str
+    <span class="enscript-keyword">if</span> hasattr(link, <span class="enscript-string">'sl_mkvalid_bt'</span>) <span class="enscript-keyword">and</span> unsigned(link.sl_mkvalid_bt[0]) &gt; 0:
+        fmt_str = <span class="enscript-string">&quot;\n{:s}mkvalid_bt({:d}):[&quot;</span>.format(<span class="enscript-string">' '</span>*87, link.sl_mkvalid_ts)
+        f = 0
+        <span class="enscript-keyword">while</span> f &lt; kern.globals.g_nwaitq_btframes:
+            fstr = GetFrameString(link.sl_mkvalid_bt[f], <span class="enscript-keyword">not</span> verbose)
+            f += 1
+            <span class="enscript-keyword">if</span> f == kern.globals.g_nwaitq_btframes:
+                fmt_str += <span class="enscript-string">&quot;{:&lt;s}&quot;</span>.format(fstr)
+            <span class="enscript-keyword">else</span>:
+                fmt_str += <span class="enscript-string">&quot;{:&lt;s} &lt;- &quot;</span>.format(fstr)
+        fmt_str += <span class="enscript-string">&quot;]&quot;</span>
+        out_str += fmt_str
+    <span class="enscript-keyword">if</span> hasattr(link, <span class="enscript-string">'sl_invalidate_bt'</span>) <span class="enscript-keyword">and</span> unsigned(link.sl_invalidate_bt[0]) &gt; 0:
+        fmt_str = <span class="enscript-string">&quot;\n{:s}invalidate_bt({:d}):[&quot;</span>.format(<span class="enscript-string">' '</span>*87, link.sl_invalidate_ts)
+        f = 0
+        <span class="enscript-keyword">while</span> f &lt; kern.globals.g_nwaitq_btframes:
+            fstr = GetFrameString(link.sl_invalidate_bt[f], <span class="enscript-keyword">not</span> verbose)
+            f += 1
+            <span class="enscript-keyword">if</span> f == kern.globals.g_nwaitq_btframes:
+                fmt_str += <span class="enscript-string">&quot;{:&lt;s}&quot;</span>.format(fstr)
+            <span class="enscript-keyword">else</span>:
+                fmt_str += <span class="enscript-string">&quot;{:&lt;s} &lt;- &quot;</span>.format(fstr)
+        fmt_str += <span class="enscript-string">&quot;]&quot;</span>
+        out_str += fmt_str
+    <span class="enscript-keyword">return</span> out_str
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">PrintWaitqSetidLinkTree</span>(link, verbose, sets, indent=87):
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> WaitqTableElemType(link) == <span class="enscript-string">&quot;LINK&quot;</span>:
+        <span class="enscript-keyword">return</span>
+    lID = link.sl_link.sl_left_setid
+    rID = link.sl_link.sl_right_setid
+    left = GetWaitqLink(lID)[0]
+    right = GetWaitqLink(rID)[0]
+
+    ltype = <span class="enscript-string">&quot;&lt;invalid&gt;&quot;</span>
+    <span class="enscript-keyword">if</span> WaitqTableElemValid(left):
+        ltype = WaitqTableElemType(left)
+        <span class="enscript-keyword">if</span> ltype == <span class="enscript-string">&quot;ELEM&quot;</span>:
+            ltype = <span class="enscript-string">&quot;WQS&quot;</span>
+    lstr = <span class="enscript-string">&quot;L:{:&lt;#x}({:s})&quot;</span>.format(lID, ltype)
+
+    rtype = <span class="enscript-string">&quot;&lt;invalid&gt;&quot;</span>
+    <span class="enscript-keyword">if</span> WaitqTableElemValid(right):
+        rtype = WaitqTableElemType(right)
+        <span class="enscript-keyword">if</span> rtype == <span class="enscript-string">&quot;ELEM&quot;</span>:
+            rtype = <span class="enscript-string">&quot;WQS&quot;</span>
+    rstr = <span class="enscript-string">&quot;R:{:&lt;#x}({:s})&quot;</span>.format(rID, rtype)
+
+    <span class="enscript-keyword">if</span> ltype == <span class="enscript-string">&quot;WQS&quot;</span>:
+        sets.append(addressof(left.sl_wqs.sl_set.wqset_q))
+    <span class="enscript-keyword">if</span> rtype == <span class="enscript-string">&quot;WQS&quot;</span>:
+        sets.append(addressof(right.sl_wqs.sl_set.wqset_q))
+
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{:s}`-&gt;{:s}, {:s}&quot;</span>.format(<span class="enscript-string">' '</span>*indent, lstr, rstr)
+    <span class="enscript-keyword">if</span> ltype == <span class="enscript-string">&quot;WQS&quot;</span>:
+        PrintWaitqSetidLinkTree(right, verbose, sets, indent + len(lstr) + 6);
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{:s}`-&gt;{:s}, {:s}&quot;</span>.format(<span class="enscript-string">' '</span>*indent, lstr, rstr)
+        PrintWaitqSetidLinkTree(left, verbose, sets, indent + 4);
+        PrintWaitqSetidLinkTree(right, verbose, sets, indent + len(lstr) + 6)
+    <span class="enscript-keyword">return</span>
+
+<span class="enscript-comment"># Macro: showsetidlink
+</span>@lldb_command(<span class="enscript-string">'showsetidlink'</span>, <span class="enscript-string">&quot;S:FT&quot;</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowSetidLink</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Print setid_link structure summary
+
+        Note: you can pass either a complete ID (generation + index), or
+              just the index to the -S argument.
+
+        usage: showsetidlink [-F] [-S ID] [0xaddr]
+            -S {ID} : show the setid link whose ID is {ID}
+            -F      : follow the chain of setid structures
+                      and print a summary of each one
+            -T      : print the tree of setidlinks in table format
+    &quot;&quot;&quot;</span>
+    link = 0
+    followchain = 0
+    showtree = 0
+    verbose = False
+    <span class="enscript-keyword">if</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vHUMAN:
+        verbose = True
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-T&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        showtree = 1
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-S&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        id = unsigned(kern.GetValueFromAddress(cmd_options[<span class="enscript-string">&quot;-S&quot;</span>], <span class="enscript-string">'uint64_t *'</span>))
+        link, warn_str = GetWaitqLink(id)
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> link:
+            <span class="enscript-keyword">if</span> warn_str != <span class="enscript-string">''</span>:
+                <span class="enscript-keyword">raise</span> LookupError(warn_str)
+            <span class="enscript-keyword">else</span>:
+                <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid link ID {:d}({:&lt;#x}&quot;</span>.format(id, id))
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-F&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        followchain = 1
+    <span class="enscript-keyword">if</span> link == 0:
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+            <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Please pass the address of a setid_link object&quot;</span>)
+        link = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'setid_link *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> link:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid setid_link {:s}&quot;</span>.format(cmd_args[0]))
+
+    <span class="enscript-keyword">print</span> GetWaitqSetidLinkSummary.header
+    <span class="enscript-keyword">print</span> GetWaitqSetidLinkSummary(link, verbose)
+    <span class="enscript-keyword">if</span> followchain == 1:
+        next_id = link.wqte.wqt_next_idx
+        max_elem = int(kern.globals.g_linktable.nelem)
+        <span class="enscript-keyword">if</span> hasattr(kern.globals, <span class="enscript-string">'g_wqt_idx_max'</span>):
+            max_elem = unsigned(kern.globals.g_wqt_idx_max)
+        <span class="enscript-keyword">while</span> link != 0 <span class="enscript-keyword">and</span> next_id &lt; max_elem:
+            link, warn_str = GetWaitqLink(unsigned(next_id))
+            <span class="enscript-keyword">if</span> link != 0:
+                <span class="enscript-keyword">print</span> GetWaitqSetidLinkSummary(link, verbose)
+                next_id = link.wqte.wqt_next_idx
+    <span class="enscript-keyword">if</span> showtree == 1:
+        sets = []
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\nLinkTree:{:&lt;#x}({:s})&quot;</span>.format(link.wqte.wqt_id.id, WaitqTableElemType(link))
+        PrintWaitqSetidLinkTree(link, verbose, sets, 9)
+        <span class="enscript-keyword">if</span> len(sets) &gt; 0:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{:d} Sets:&quot;</span>.format(len(sets))
+            <span class="enscript-keyword">for</span> wq <span class="enscript-keyword">in</span> sets:
+                pp_str = GetWaitqPreposts(wq)
+                npreposts = len(pp_str)
+                nps = <span class="enscript-string">&quot;&quot;</span>
+                <span class="enscript-keyword">if</span> npreposts &gt; 0:
+                    <span class="enscript-keyword">if</span> npreposts &gt; 1:
+                        nps = <span class="enscript-string">&quot;s: &quot;</span>
+                    <span class="enscript-keyword">else</span>:
+                        nps = <span class="enscript-string">&quot;: &quot;</span>
+                    nps += <span class="enscript-string">';'</span>.join(pp_str)
+                <span class="enscript-keyword">else</span>:
+                    nps = <span class="enscript-string">&quot;s&quot;</span>
+                <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\tWQS:{:&lt;#x} ({:d} prepost{:s})&quot;</span>.format(unsigned(wq),npreposts,nps)
+<span class="enscript-comment"># EndMacro: showsetidlink
+</span>
+
+<span class="enscript-comment"># Macro: showallsetidlinks
+</span>@lldb_command(<span class="enscript-string">'showallsetidlinks'</span>, <span class="enscript-string">'V:T:S:F:XQ'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllSetidLinks</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Dump / summarize all waitq set linktable elements
+
+        usage: showallsetidlinks [options]
+            -V {0,1}  : only show [1 == valid/live links, 0 == invalid links]
+            -T {type} : only display objects of type {type}
+            -S {desc} : only display objects of type {type} which fit {desc}
+                        -T LINK -S {desc} can be:
+                            iL   : Invalid left-link pointer (only)
+                            iR   : Invalid right-link pointer (only)
+                            iLR  : Invalid left+right link pointers
+                            iLRI : Invalid left+right link pointers AND dead allocating process
+                        w/o &quot;-T&quot; -S {desc} can be:
+                            iP   : Invalid / Dead allocating process
+            -F n      : summarize the backtraces at frame level 'n'
+            -X        : cross-check waitq pointers in link table
+            -Q        : be quiet, only summarize
+    &quot;&quot;&quot;</span>
+    opt_summary = 0
+    opt_type_filt = <span class="enscript-string">&quot;&quot;</span>
+    opt_valid_only = 0
+    opt_invalid_only = 0
+    opt_bt_idx = 0
+    opt_cross_check = 0
+    opt_validate_links = 0
+    opt_subtype_filter = 0
+    verbose = False
+    <span class="enscript-keyword">if</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vHUMAN:
+        verbose = True
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-Q&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        opt_summary = 1
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-V&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        <span class="enscript-keyword">if</span> int(cmd_options[<span class="enscript-string">&quot;-V&quot;</span>]) == 1:
+            opt_valid_only = 1
+        <span class="enscript-keyword">elif</span> int(cmd_options[<span class="enscript-string">&quot;-V&quot;</span>]) == 0:
+            opt_invalid_only = 1
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid parameter to -V '{:s}': expecting 0 or 1&quot;</span>.format(cmd_options[<span class="enscript-string">&quot;-V&quot;</span>]))
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-X&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        opt_cross_check = 1
+        nunique_wqs = 0
+        nduplicated_wqs = 0
+        max_wqs_dupes = 0
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-F&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        opt_bt_idx = unsigned(cmd_options[<span class="enscript-string">&quot;-F&quot;</span>])
+        <span class="enscript-keyword">if</span> hasattr(kern.globals, <span class="enscript-string">&quot;g_nwaitq_btframes&quot;</span>):
+            <span class="enscript-keyword">if</span> opt_bt_idx &gt;= unsigned(kern.globals.g_nwaitq_btframes):
+                <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid BT index '{:s}' max:{:d}&quot;</span>.format(cmd_options[<span class="enscript-string">&quot;-F&quot;</span>], unsigned(kern.globals.g_nwaitq_btframes) - 1))
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-T&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        opt_type_filt = cmd_options[<span class="enscript-string">&quot;-T&quot;</span>]
+        <span class="enscript-keyword">if</span> opt_type_filt == <span class="enscript-string">&quot;FREE&quot;</span> <span class="enscript-keyword">or</span> opt_type_filt == <span class="enscript-string">&quot;RSVD&quot;</span> <span class="enscript-keyword">or</span> opt_type_filt == <span class="enscript-string">&quot;LINK&quot;</span>:
+            <span class="enscript-keyword">pass</span>
+        <span class="enscript-keyword">elif</span> opt_type_filt == <span class="enscript-string">&quot;WQS&quot;</span>:
+            opt_type_filt = <span class="enscript-string">&quot;ELEM&quot;</span>
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid type filter'{:s}'&quot;</span>.format(cmd_options[<span class="enscript-string">&quot;-T&quot;</span>]))
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-S&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        opt_subtype_filter = cmd_options[<span class="enscript-string">&quot;-S&quot;</span>]
+        <span class="enscript-keyword">if</span> opt_type_filt == <span class="enscript-string">&quot;LINK&quot;</span>:
+            <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> (opt_subtype_filter == <span class="enscript-string">&quot;iL&quot;</span> <span class="enscript-keyword">or</span> \
+                    opt_subtype_filter == <span class="enscript-string">&quot;iR&quot;</span> <span class="enscript-keyword">or</span> \
+                    opt_subtype_filter == <span class="enscript-string">&quot;iLR&quot;</span> <span class="enscript-keyword">or</span> \
+                    opt_subtype_filter == <span class="enscript-string">&quot;iLRI&quot;</span>):
+                <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid LINK sub-type filter \{desc\}: {:s}&quot;</span>.format(opt_subtype_filter))
+        <span class="enscript-keyword">elif</span> opt_type_filt == <span class="enscript-string">&quot;&quot;</span>:
+            <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> opt_subtype_filter == <span class="enscript-string">&quot;iP&quot;</span>:
+                <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid sub-type filter \{desc\}: {:s}&quot;</span>.format(opt_subtype_filter))
+    table = kern.globals.g_linktable
+    nelem = int(table.nelem)
+    wq_ptr = {}
+    bt_summary = {}
+    nfree = 0
+    ninv = 0
+    nwqs = 0
+    nlink = 0
+    nrsvd = 0
+    hdr_str = <span class="enscript-string">&quot;Looking through {:d} setid_link objects from g_linktable@{:&lt;#x}&quot;</span>.format(nelem, addressof(kern.globals.g_linktable))
+    <span class="enscript-keyword">if</span> opt_type_filt != <span class="enscript-string">&quot;&quot;</span> <span class="enscript-keyword">or</span> opt_valid_only != 0:
+        hdr_str += <span class="enscript-string">&quot;\n\t`-&gt; for &quot;</span>
+        <span class="enscript-keyword">if</span> opt_valid_only:
+            hdr_str += <span class="enscript-string">&quot;valid &quot;</span>
+        <span class="enscript-keyword">else</span>:
+            hdr_str += <span class="enscript-string">&quot;all &quot;</span>
+        <span class="enscript-keyword">if</span> opt_type_filt == <span class="enscript-string">&quot;&quot;</span>:
+            hdr_str += <span class="enscript-string">&quot;objects&quot;</span>
+        <span class="enscript-keyword">else</span>:
+            hdr_str += <span class="enscript-string">&quot;{:s} objects&quot;</span>.format(opt_type_filt)
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">if</span> opt_valid_only:
+            hdr_str += <span class="enscript-string">&quot;\n\t`-&gt; showing only VALID links&quot;</span>
+        <span class="enscript-keyword">elif</span> opt_invalid_only:
+            hdr_str += <span class="enscript-string">&quot;\n\t`-&gt; showing only INVALID links&quot;</span>
+    <span class="enscript-keyword">if</span> opt_subtype_filter != 0:
+        <span class="enscript-keyword">if</span> opt_type_filt != <span class="enscript-string">&quot;LINK&quot;</span> <span class="enscript-keyword">and</span> opt_type_filt != <span class="enscript-string">&quot;&quot;</span>:
+            <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Subtype (-S {desc}) can only be used with (-T LINK) or no type filter at all&quot;</span>)
+        hdr_str += <span class="enscript-string">&quot;\n\t`-&gt; filtering {:s} objects through '{:s}'&quot;</span>.format(opt_type_filt, opt_subtype_filter)
+    <span class="enscript-keyword">if</span> opt_cross_check:
+        hdr_str += <span class="enscript-string">&quot;\n\t`-&gt; cross-checking WQS elements for duplicates&quot;</span>
+    hdr_str += <span class="enscript-string">&quot;\n\n&quot;</span>
+    <span class="enscript-keyword">print</span> hdr_str
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> opt_summary:
+        <span class="enscript-keyword">print</span> GetWaitqSetidLinkSummary.header
+    id = 0
+    <span class="enscript-keyword">while</span> id &lt; nelem:
+        <span class="enscript-keyword">if</span> id == 0:
+            <span class="enscript-comment"># Set a generation count to differentiate from an invalid ID
+</span>            first_entry = Cast(kern.globals.g_linktable.table[0], <span class="enscript-string">'wqt_elem *'</span>)
+            link = GetWaitqLink(first_entry.wqt_id.id)[0]
+        <span class="enscript-keyword">else</span>:
+            link = GetWaitqLink(id)[0]
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> link:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;&lt;&lt;&lt;invalid link:{:d}&gt;&gt;&gt;&quot;</span>.format(id)
+            ninv += 1
+        <span class="enscript-keyword">else</span>:
+            lt = WaitqTableElemType(link)
+            isvalid = WaitqTableElemValid(link)
+            inconsistent = 0
+            do_print = <span class="enscript-keyword">not</span> ( (isvalid <span class="enscript-keyword">and</span> opt_invalid_only) <span class="enscript-keyword">or</span> (<span class="enscript-keyword">not</span> isvalid <span class="enscript-keyword">and</span> opt_valid_only) )
+            <span class="enscript-keyword">if</span> do_print <span class="enscript-keyword">and</span> opt_subtype_filter != 0 <span class="enscript-keyword">and</span> lt == <span class="enscript-string">&quot;LINK&quot;</span>:
+                lID = link.sl_link.sl_left_setid
+                rID = link.sl_link.sl_right_setid
+                left = GetWaitqLink(lID)[0]
+                right = GetWaitqLink(rID)[0]
+                lValid = WaitqTableElemValid(left)
+                rValid = WaitqTableElemValid(right)
+                <span class="enscript-keyword">if</span> opt_subtype_filter == <span class="enscript-string">&quot;iL&quot;</span>:
+                    <span class="enscript-keyword">if</span> lValid <span class="enscript-keyword">or</span> (<span class="enscript-keyword">not</span> lValid <span class="enscript-keyword">and</span> <span class="enscript-keyword">not</span> rValid):
+                        do_print = False
+                <span class="enscript-keyword">elif</span> opt_subtype_filter == <span class="enscript-string">&quot;iR&quot;</span>:
+                    <span class="enscript-keyword">if</span> rValid <span class="enscript-keyword">or</span> (<span class="enscript-keyword">not</span> rValid <span class="enscript-keyword">and</span> <span class="enscript-keyword">not</span> lValid):
+                        do_print = False
+                <span class="enscript-keyword">elif</span> opt_subtype_filter == <span class="enscript-string">&quot;iLR&quot;</span>:
+                    <span class="enscript-keyword">if</span> rValid <span class="enscript-keyword">or</span> lValid:
+                        do_print = False
+                <span class="enscript-keyword">elif</span> opt_subtype_filter == <span class="enscript-string">&quot;iLRI&quot;</span> <span class="enscript-keyword">and</span> hasattr(link, <span class="enscript-string">'sl_alloc_task'</span>):
+                    <span class="enscript-comment"># only print this if both left and right are invalid
+</span>                    <span class="enscript-comment"># and the allocating task is unknown/dead
+</span>                    do_print = False
+                    is_dead = 0
+                    pid = -1
+                    <span class="enscript-keyword">try</span>:
+                        pid = GetProcPIDForTask(link.sl_alloc_task)
+                    <span class="enscript-keyword">except</span>:
+                        <span class="enscript-keyword">if</span> link.sl_alloc_task:
+                            pid = unsigned(link.sl_alloc_task.audit_token.val[5])
+                    <span class="enscript-keyword">if</span> pid &lt; 0:
+                        is_dead = 1
+                    <span class="enscript-keyword">else</span>:
+                        pidnm = GetProcNameForPid(pid)
+                        <span class="enscript-keyword">if</span> pidnm == <span class="enscript-string">&quot;Unknown&quot;</span>:
+                            is_dead = 1
+                    <span class="enscript-keyword">if</span> (<span class="enscript-keyword">not</span> rValid) <span class="enscript-keyword">and</span> (<span class="enscript-keyword">not</span> lValid) <span class="enscript-keyword">and</span> is_dead:
+                        do_print = True
+
+            <span class="enscript-keyword">if</span> do_print <span class="enscript-keyword">and</span> opt_type_filt == <span class="enscript-string">&quot;&quot;</span> <span class="enscript-keyword">and</span> opt_subtype_filter == <span class="enscript-string">&quot;iP&quot;</span> <span class="enscript-keyword">and</span> hasattr(link, <span class="enscript-string">'sl_alloc_task'</span>):
+                <span class="enscript-comment"># Only print non-free table objects that were allocated by
+</span>                <span class="enscript-comment"># dead processes
+</span>                do_print = False
+                is_dead = 0
+                pid = -1
+                <span class="enscript-keyword">try</span>:
+                    pid = GetProcPIDForTask(link.sl_alloc_task)
+                <span class="enscript-keyword">except</span>:
+                    <span class="enscript-keyword">if</span> link.sl_alloc_task:
+                        pid = unsigned(link.sl_alloc_task.audit_token.val[5])
+                <span class="enscript-keyword">if</span> pid &lt; 0:
+                    is_dead = 1
+                <span class="enscript-keyword">else</span>:
+                    pidnm = GetProcNameForPid(pid)
+                    <span class="enscript-keyword">if</span> pidnm == <span class="enscript-string">&quot;Unknown&quot;</span>:
+                        is_dead = 1
+                <span class="enscript-keyword">if</span> is_dead:
+                    do_print = True
+
+            <span class="enscript-keyword">if</span> (opt_type_filt == <span class="enscript-string">&quot;&quot;</span> <span class="enscript-keyword">or</span> opt_type_filt == lt) <span class="enscript-keyword">and</span> do_print:
+                <span class="enscript-keyword">if</span> lt == <span class="enscript-string">&quot;ELEM&quot;</span>:
+                    nwqs += 1
+                <span class="enscript-keyword">elif</span> lt == <span class="enscript-string">&quot;LINK&quot;</span>:
+                    nlink += 1
+                <span class="enscript-keyword">elif</span> lt == <span class="enscript-string">&quot;RSVD&quot;</span>:
+                    nrsvd += 1
+                <span class="enscript-keyword">elif</span> lt == <span class="enscript-string">&quot;FREE&quot;</span>:
+                    nfree += 1
+                <span class="enscript-keyword">else</span>:
+                    ninv += 1
+                    inconsistent = 1
+                <span class="enscript-keyword">if</span> hasattr(link, <span class="enscript-string">'sl_alloc_bt'</span>):
+                    pc = unsigned(link.sl_alloc_bt[opt_bt_idx])
+                    pc_str = str(pc)
+                    <span class="enscript-keyword">if</span> pc &gt; 0:
+                        <span class="enscript-keyword">if</span> pc_str <span class="enscript-keyword">in</span> bt_summary:
+                            bt_summary[pc_str] += 1
+                        <span class="enscript-keyword">else</span>:
+                            bt_summary[pc_str] = 1
+                <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> opt_summary:
+                    <span class="enscript-keyword">print</span> GetWaitqSetidLinkSummary(link, verbose)
+                <span class="enscript-keyword">if</span> inconsistent:
+                    ninconsistent += 1
+                    <span class="enscript-comment"># print out warnings about inconsistent state as we parse
+</span>                    <span class="enscript-comment"># the list - even if the caller wants a summary
+</span>                    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;[WARNING] inconsistent state in idx: {:d} ({:s} element)&quot;</span>.format(link.wqte.wqt_id.idx, lt)
+            <span class="enscript-keyword">if</span> opt_cross_check == 1 <span class="enscript-keyword">and</span> lt == <span class="enscript-string">&quot;ELEM&quot;</span>:
+                wq = unsigned(addressof(link.sl_wqs.sl_set.wqset_q))
+                <span class="enscript-keyword">if</span> wq <span class="enscript-keyword">in</span> wq_ptr:
+                    wq_ptr[wq].append(id)
+                    l = len(wq_ptr[wq])
+                    <span class="enscript-keyword">if</span> l == 2:
+                        nduplicated_wqs += 1
+                    <span class="enscript-keyword">if</span> l &gt; max_wqs_dupes:
+                        max_wqs_dupes = l
+                <span class="enscript-keyword">else</span>:
+                    wq_ptr[wq] = [ id ]
+                    nunique_wqs += 1
+        id += 1
+        <span class="enscript-keyword">if</span> opt_summary <span class="enscript-keyword">or</span> verbose:
+            <span class="enscript-keyword">if</span> verbose <span class="enscript-keyword">and</span> opt_cross_check:
+                sys.stderr.write(<span class="enscript-string">'[{:d}|{:d}|{:d}] id: {:d}/{:d}...          \r'</span>.format(nunique_wqs, nduplicated_wqs, max_wqs_dupes, id, nelem))
+            <span class="enscript-keyword">else</span>:
+                sys.stderr.write(<span class="enscript-string">'id: {:d}/{:d}...          \r'</span>.format(id, nelem))
+
+    nused = nwqs + nlink + nrsvd
+    nfound = nused + nfree + ninv
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\n\nFound {:d} objects: {:d} WQS, {:d} LINK, {:d} RSVD, {:d} FREE&quot;</span>.format(nfound, nwqs, nlink, nrsvd, nfree)
+    <span class="enscript-keyword">if</span> (opt_type_filt == <span class="enscript-string">&quot;&quot;</span> <span class="enscript-keyword">and</span> opt_valid_only == 0) <span class="enscript-keyword">and</span> (nused != table.used_elem):
+        <span class="enscript-keyword">print</span><span class="enscript-string">&quot;\tWARNING: inconsistent state! Table reports {:d}/{:d} used elem, found {:d}/{:d}&quot;</span>.format(table.used_elem, nelem, nused, nfound)
+    <span class="enscript-keyword">if</span> len(bt_summary) &gt; 0:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Link allocation BT (frame={:d})&quot;</span>.format(opt_bt_idx)
+    <span class="enscript-keyword">for</span> k,v <span class="enscript-keyword">in</span> bt_summary.iteritems():
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\t[{:d}] from: {:s}&quot;</span>.format(v, GetSourceInformationForAddress(unsigned(k)))
+    <span class="enscript-keyword">if</span> opt_cross_check:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\n{:d} Duplicated WQS objects:&quot;</span>.format(nduplicated_wqs)
+        <span class="enscript-keyword">for</span> wq <span class="enscript-keyword">in</span> wq_ptr:
+            l = len(wq_ptr[wq])
+            <span class="enscript-keyword">if</span> l &gt; 1:
+                <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\tWQS:{:#x} ({:d} {:s}&quot;</span>.format(wq, l, str(wq_ptr[wq]))
+<span class="enscript-comment"># EndMacro: showallsetidlinks
+</span>
+
+<span class="enscript-comment"># Macro: showallpreposts
+</span>@lldb_command(<span class="enscript-string">'showallpreposts'</span>, <span class="enscript-string">'VQT:F:Y:'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllPreposts</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Dump / summarize all waitq prepost linkage elements
+
+        usage: showallpreposts [-V] [-T {type}] [-Y n] [-F n] [-Q]
+            -V        : only show valid / live links
+            -T {type} : only display objects of type {type}
+            -Y {0|1}  : only only show POST objects that are
+                        valid (-Y 1) or invalid (-Y 0)
+            -F n      : summarize the backtraces at frame level 'n'
+            -Q        : be quiet, only summarize
+    &quot;&quot;&quot;</span>
+    opt_summary = 0
+    opt_type_filt = <span class="enscript-string">&quot;&quot;</span>
+    opt_valid_only = 0
+    opt_post_type = -1
+    opt_bt_idx = 0
+    verbose = False
+    <span class="enscript-keyword">if</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vHUMAN:
+        verbose = True
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-Q&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        opt_summary = 1
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-V&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        opt_valid_only = 1
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-Y&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        opt_post_type = unsigned(cmd_options[<span class="enscript-string">&quot;-Y&quot;</span>])
+        <span class="enscript-keyword">if</span> opt_post_type != 0 <span class="enscript-keyword">and</span> opt_post_type != 1:
+            <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid POST obj specifier [-Y %d] (expected 0 or 1)&quot;</span> % cmd_options[<span class="enscript-string">&quot;-Y&quot;</span>])
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-F&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        opt_bt_idx = unsigned(cmd_options[<span class="enscript-string">&quot;-F&quot;</span>])
+        <span class="enscript-keyword">if</span> hasattr(kern.globals, <span class="enscript-string">&quot;g_nwaitq_btframes&quot;</span>):
+            <span class="enscript-keyword">if</span> opt_bt_idx &gt;= unsigned(kern.globals.g_nwaitq_btframes):
+                <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid BT index '{:s}' max:{:d}&quot;</span>.format(cmd_options[<span class="enscript-string">&quot;-F&quot;</span>], unsigned(kern.globals.g_nwaitq_btframes) - 1))
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-T&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        opt_type_filt = cmd_options[<span class="enscript-string">&quot;-T&quot;</span>]
+        <span class="enscript-keyword">if</span> opt_type_filt == <span class="enscript-string">&quot;FREE&quot;</span> <span class="enscript-keyword">or</span> opt_type_filt == <span class="enscript-string">&quot;RSVD&quot;</span>:
+            <span class="enscript-keyword">pass</span>
+        <span class="enscript-keyword">elif</span> opt_type_filt == <span class="enscript-string">&quot;POST&quot;</span>:
+            opt_type_filt = <span class="enscript-string">&quot;LINK&quot;</span>
+        <span class="enscript-keyword">elif</span> opt_type_filt == <span class="enscript-string">&quot;WQ&quot;</span>:
+            opt_type_filt = <span class="enscript-string">&quot;ELEM&quot;</span>
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid type filter'{:s}'&quot;</span>.format(cmd_options[<span class="enscript-string">&quot;-T&quot;</span>]))
+    table = kern.globals.g_prepost_table
+    nelem = int(table.nelem)
+    bt_summary = {}
+    nfree = 0
+    ninv = 0
+    nwq = 0
+    npost = 0
+    nrsvd = 0
+    hdr_str = <span class="enscript-string">&quot;Looking through {:d} objects from g_prepost_table@{:&lt;#x}&quot;</span>.format(nelem, addressof(kern.globals.g_prepost_table))
+    <span class="enscript-keyword">if</span> opt_type_filt != <span class="enscript-string">&quot;&quot;</span> <span class="enscript-keyword">or</span> opt_valid_only != 0:
+        hdr_str += <span class="enscript-string">&quot;\n\t`-&gt; for &quot;</span>
+        <span class="enscript-keyword">if</span> opt_valid_only:
+            hdr_str += <span class="enscript-string">&quot;valid &quot;</span>
+        <span class="enscript-keyword">else</span>:
+            hdr_str += <span class="enscript-string">&quot;all &quot;</span>
+        <span class="enscript-keyword">if</span> opt_type_filt == <span class="enscript-string">&quot;&quot;</span>:
+            hdr_str += <span class="enscript-string">&quot;objects&quot;</span>
+        <span class="enscript-keyword">else</span>:
+            hdr_str += <span class="enscript-string">&quot;{:s} objects&quot;</span>.format(cmd_options[<span class="enscript-string">&quot;-T&quot;</span>])
+    <span class="enscript-keyword">print</span> hdr_str
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> opt_summary:
+        <span class="enscript-keyword">print</span> GetWaitqPrepostSummary.header
+    id = 0
+    <span class="enscript-keyword">while</span> id &lt; nelem:
+        wqp = GetWaitqPrepost(id)[0]
+        <span class="enscript-keyword">if</span> wqp == 0:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;&lt;&lt;&lt;invalid prepost:{:d}&gt;&gt;&gt;&quot;</span>.format(id)
+            ninv += 1
+        <span class="enscript-keyword">else</span>:
+            lt = WaitqTableElemType(wqp)
+            isvalid = WaitqTableElemValid(wqp)
+            should_count = 1
+            <span class="enscript-keyword">if</span> isvalid <span class="enscript-keyword">and</span> opt_post_type &gt; -1 <span class="enscript-keyword">and</span> lt == <span class="enscript-string">&quot;LINK&quot;</span>:
+                post_wqp = GetWaitqPrepost(wqp.wqp_post.wqp_wq_id)[0]
+                post_valid = WaitqTableElemValid(post_wqp)
+                <span class="enscript-keyword">if</span> opt_post_type == 0 <span class="enscript-keyword">and</span> post_valid: <span class="enscript-comment"># only count _invalid_ POST objects
+</span>                    should_count = 0
+                <span class="enscript-keyword">elif</span> opt_post_type == 1 <span class="enscript-keyword">and</span> <span class="enscript-keyword">not</span> post_valid: <span class="enscript-comment"># only count _valid_ POST objects
+</span>                    should_count = 0
+            <span class="enscript-keyword">if</span> should_count <span class="enscript-keyword">and</span> (opt_type_filt == <span class="enscript-string">&quot;&quot;</span> <span class="enscript-keyword">or</span> opt_type_filt == lt) <span class="enscript-keyword">and</span> ((opt_valid_only == 0 <span class="enscript-keyword">or</span> isvalid)):
+                <span class="enscript-keyword">if</span> lt == <span class="enscript-string">&quot;ELEM&quot;</span>:
+                    nwq += 1
+                <span class="enscript-keyword">elif</span> lt == <span class="enscript-string">&quot;LINK&quot;</span>:
+                    npost += 1
+                <span class="enscript-keyword">elif</span> lt == <span class="enscript-string">&quot;RSVD&quot;</span>:
+                    nrsvd += 1
+                <span class="enscript-keyword">elif</span> lt == <span class="enscript-string">&quot;FREE&quot;</span>:
+                    nfree += 1
+                <span class="enscript-keyword">else</span>:
+                    ninv += 1
+                <span class="enscript-keyword">if</span> hasattr(wqp, <span class="enscript-string">'wqp_alloc_bt'</span>):
+                    pc = unsigned(wqp.wqp_alloc_bt[opt_bt_idx])
+                    pc_str = str(pc)
+                    <span class="enscript-keyword">if</span> pc &gt; 0:
+                        <span class="enscript-keyword">if</span> pc_str <span class="enscript-keyword">in</span> bt_summary:
+                            bt_summary[pc_str] += 1
+                        <span class="enscript-keyword">else</span>:
+                            bt_summary[pc_str] = 1
+                <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> opt_summary:
+                    <span class="enscript-keyword">print</span> GetWaitqPrepostSummary(wqp)
+        <span class="enscript-keyword">if</span> verbose:
+            sys.stderr.write(<span class="enscript-string">'id: {:d}/{:d}...          \r'</span>.format(id, nelem))
+        id += 1
+    nused = nwq + npost + nrsvd
+    nfound = nused + nfree + ninv
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\nFound {:d} objects: {:d} WQ, {:d} POST, {:d} RSVD, {:d} FREE&quot;</span>.format(nfound, nwq, npost, nrsvd, nfree)
+    <span class="enscript-keyword">if</span> (opt_type_filt == <span class="enscript-string">&quot;&quot;</span> <span class="enscript-keyword">and</span> opt_valid_only == 0) <span class="enscript-keyword">and</span> (nused != table.used_elem):
+        <span class="enscript-keyword">print</span><span class="enscript-string">&quot;\tWARNING: inconsistent state! Table reports {:d}/{:d} used elem, found {:d}/{:d}&quot;</span>.format(table.used_elem, nelem, nused, nfound)
+    <span class="enscript-keyword">if</span> len(bt_summary) &gt; 0:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Link allocation BT (frame={:d})&quot;</span>.format(opt_bt_idx)
+    <span class="enscript-keyword">for</span> k,v <span class="enscript-keyword">in</span> bt_summary.iteritems():
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\t[{:d}] from: {:s}&quot;</span>.format(v, GetSourceInformationForAddress(unsigned(k)))
+<span class="enscript-comment"># EndMacro: showallpreposts
+</span>
+
+@lldb_type_summary([<span class="enscript-string">'wq_prepost'</span>, <span class="enscript-string">'wq_prepost *'</span>])
+@header(<span class="enscript-string">&quot;{:&lt;18s} {:&lt;18s} {:&lt;19s} {:&lt;10s} {:&lt;1s} {:&lt;4s} {:&lt;10s} {:&lt;20s}&quot;</span>.format(<span class="enscript-string">'addr'</span>,<span class="enscript-string">'id'</span>,<span class="enscript-string">'idx'</span>,<span class="enscript-string">'gen'</span>,<span class="enscript-string">'V'</span>,<span class="enscript-string">'type'</span>,<span class="enscript-string">'refcnt'</span>,<span class="enscript-string">'info'</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetWaitqPrepostSummary</span>(wqp):
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> wqp:
+        <span class="enscript-keyword">return</span>
+    fmt_str = <span class="enscript-string">&quot;{w: &lt;#18x} {w.wqte.wqt_id.id: &lt;#18x} {w.wqte.wqt_id.idx: &lt;7d} (-&gt;{w.wqte.wqt_next_idx: &lt;7d}) {w.wqte.wqt_id.generation: &lt;#10x} {v: &lt;1s} {t: &lt;4s} {rcnt: &lt;10d} &quot;</span>
+    type = WaitqTableElemType(wqp)
+    <span class="enscript-keyword">if</span> type == <span class="enscript-string">&quot;ELEM&quot;</span>:
+        type = <span class="enscript-string">&quot;WQ&quot;</span>
+    <span class="enscript-keyword">elif</span> type == <span class="enscript-string">&quot;LINK&quot;</span>:
+        type = <span class="enscript-string">&quot;POST&quot;</span>
+    v = <span class="enscript-string">&quot;F&quot;</span>
+    <span class="enscript-keyword">if</span> WaitqTableElemValid(wqp):
+        v = <span class="enscript-string">&quot;T&quot;</span>
+    refcnt = WaitqTableElemRefcnt(wqp)
+    out_str = fmt_str.format(w=wqp, v=v, t=type, rcnt=refcnt)
+    <span class="enscript-keyword">if</span> type == <span class="enscript-string">&quot;WQ&quot;</span>:
+        out_str += <span class="enscript-string">&quot;wq:{0: &lt;#18x}&quot;</span>.format(unsigned(wqp.wqp_wq.wqp_wq_ptr))
+    <span class="enscript-keyword">elif</span> type == <span class="enscript-string">&quot;POST&quot;</span>:
+        out_str += <span class="enscript-string">&quot;next:{0: &lt;#18x}, wqid:{1: &lt;#18x}&quot;</span>.format(wqp.wqp_post.wqp_next_id, wqp.wqp_post.wqp_wq_id)
+        post_wqp = GetWaitqPrepost(wqp.wqp_post.wqp_wq_id)[0]
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> WaitqTableElemValid(post_wqp):
+            out_str += <span class="enscript-string">&quot;(&lt;invalid&gt;)&quot;</span>
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">if</span> WaitqTableElemType(post_wqp) != <span class="enscript-string">&quot;ELEM&quot;</span>:
+                out_str += <span class="enscript-string">&quot;(!WQP_WQ?)&quot;</span>
+            <span class="enscript-keyword">else</span>:
+                out_str += <span class="enscript-string">&quot;({0: &lt;#18x})&quot;</span>.format(unsigned(post_wqp.wqp_wq.wqp_wq_ptr))
+    <span class="enscript-keyword">return</span> out_str
+
+
+<span class="enscript-comment"># Macro: showprepost
+</span>@lldb_command(<span class="enscript-string">'showprepost'</span>, <span class="enscript-string">&quot;P:&quot;</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowPrepost</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Print prepost structure summary
+
+        Note: you can pass either a complete ID (generation + index), or
+              just the index to the -P argument.
+
+        usage: showprepost [-P ID] [0xaddr]
+            -P {ID} : show prepost structure whose ID is {ID}
+    &quot;&quot;&quot;</span>
+    wqp = 0
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-P&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        wqp, warn_str = GetWaitqPrepost(unsigned(kern.GetValueFromAddress(cmd_options[<span class="enscript-string">&quot;-P&quot;</span>], <span class="enscript-string">'uint64_t *'</span>)))
+        <span class="enscript-keyword">if</span> wqp == 0:
+            <span class="enscript-keyword">if</span> warn_str != <span class="enscript-string">''</span>:
+                <span class="enscript-keyword">raise</span> LookupError(warn_str)
+            <span class="enscript-keyword">else</span>:
+                <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid prepost ID {:s}&quot;</span>.format(cmd_options[<span class="enscript-string">&quot;-P&quot;</span>]))
+    <span class="enscript-keyword">if</span> wqp == 0:
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+            <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Please pass the address of a prepost object&quot;</span>)
+        wqp = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'wq_prepost *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> wqp:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid prepost {:s}&quot;</span>.format(cmd_args[0]))
+
+    <span class="enscript-keyword">print</span> GetWaitqPrepostSummary.header
+    <span class="enscript-keyword">print</span> GetWaitqPrepostSummary(wqp)
+<span class="enscript-comment"># EndMacro: showprepost
+</span>
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WaitqPrepostFromObj</span>(wqp, head_id, inv_ok, prepost_str, pp_arr = 0, depth = 0):
+    <span class="enscript-keyword">if</span> pp_arr != 0:
+        pp_arr.append(wqp)
+    etype = WaitqTableElemType(wqp)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> WaitqTableElemValid(wqp) <span class="enscript-keyword">and</span> <span class="enscript-keyword">not</span> inv_ok:
+        id = 0
+        <span class="enscript-keyword">if</span> wqp:
+            id = wqp.wqte.wqt_id.id
+        prepost_str.append(<span class="enscript-string">&quot;{0: &lt;#18x}:{1: &lt;18s}&quot;</span>.format(id, <span class="enscript-string">&quot;&lt;invalid&gt;&quot;</span>))
+        <span class="enscript-keyword">return</span>
+    <span class="enscript-keyword">if</span> etype == <span class="enscript-string">&quot;ELEM&quot;</span>: <span class="enscript-comment"># WQP_WQ
+</span>        prepost_str.append(<span class="enscript-string">&quot;{0: &lt;#18x}:{1: &lt;#18x}&quot;</span>.format(wqp.wqte.wqt_id.id, unsigned(wqp.wqp_wq.wqp_wq_ptr)))
+        <span class="enscript-keyword">return</span>
+
+    post_wq = 0
+
+    <span class="enscript-keyword">if</span> etype == <span class="enscript-string">&quot;LINK&quot;</span>: <span class="enscript-comment"># WQP_POST
+</span>        next_id = wqp.wqp_post.wqp_next_id
+        post_wq = GetWaitqPrepost(wqp.wqp_post.wqp_wq_id)[0]
+        <span class="enscript-keyword">if</span> WaitqTableElemValid(post_wq):
+            <span class="enscript-keyword">if</span> WaitqTableElemType(post_wq) != <span class="enscript-string">&quot;ELEM&quot;</span>:
+                prepost_str.append(<span class="enscript-string">&quot;{0: &lt;#18x}:{1: &lt;18s}&quot;</span>.format(post_wq.wqte.wqt_id.id, <span class="enscript-string">&quot;&lt;invalid post&gt;&quot;</span>))
+            <span class="enscript-keyword">else</span>:
+                prepost_str.append(<span class="enscript-string">&quot;{0: &lt;#18x}:{1: &lt;#18x}&quot;</span>.format(wqp.wqte.wqt_id.id, unsigned(post_wq.wqp_wq.wqp_wq_ptr)))
+        <span class="enscript-keyword">if</span> next_id &gt; 0 <span class="enscript-keyword">and</span> next_id != head_id:
+            <span class="enscript-keyword">if</span> depth &gt;= 950:
+                prepost_str.append(<span class="enscript-string">&quot;{: &lt;37s}&quot;</span>.format(<span class="enscript-string">&quot;!recursion limit!&quot;</span>))
+                <span class="enscript-keyword">return</span>
+            WaitqPrepostFromObj(GetWaitqPrepost(next_id)[0], head_id, inv_ok, prepost_str, pp_arr, depth + 1)
+    <span class="enscript-keyword">else</span>: <span class="enscript-comment">#  &quot;RSVD&quot; or &quot;FREE&quot;:
+</span>        prepost_str.append(<span class="enscript-string">&quot;{0: &lt;#18x} -&gt; {1: &lt;15d}&quot;</span>.format(wqp.wqte.wqt_id.id, wqp.wqte.wqt_next_idx))
+        next_id = wqp.wqte.wqt_next_idx
+        max_elem = int(kern.globals.g_prepost_table.nelem)
+        <span class="enscript-keyword">if</span> hasattr(kern.globals, <span class="enscript-string">'g_wqt_idx_max'</span>):
+            max_elem = unsigned(kern.globals.g_wqt_idx_max)
+        <span class="enscript-keyword">if</span> next_id &lt; max_elem:
+            <span class="enscript-keyword">if</span> depth &gt;= 950:
+                prepost_str.append(<span class="enscript-string">&quot;{: &lt;37s}&quot;</span>.format(<span class="enscript-string">&quot;!recursion limit!&quot;</span>))
+                <span class="enscript-keyword">return</span>
+            WaitqPrepostFromObj(GetWaitqPrepost(next_id)[0], head_id, inv_ok, prepost_str, pp_arr, depth + 1)
+    <span class="enscript-keyword">return</span>
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetPrepostChain</span>(head_id, inv_ok = False, pp_arr = 0):
+    pp = []
+    <span class="enscript-keyword">if</span> unsigned(head_id) == 0:
+        <span class="enscript-keyword">return</span> [ <span class="enscript-string">&quot;{0: &lt;#18x}:{1: &lt;18s}&quot;</span>.format(head_id, <span class="enscript-string">&quot;&lt;invalid&gt;&quot;</span>) ]
+    wqp = GetWaitqPrepost(head_id)[0]
+    <span class="enscript-keyword">if</span> wqp != 0:
+        WaitqPrepostFromObj(wqp, head_id, inv_ok, pp, pp_arr)
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">return</span> [ <span class="enscript-string">&quot;{0: &lt;#18x}:{1: &lt;18s}&quot;</span>.format(head_id, <span class="enscript-string">&quot;&lt;invalid&gt;&quot;</span>) ]
+    <span class="enscript-keyword">return</span> pp
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetWaitqPreposts</span>(waitq):
+    <span class="enscript-keyword">if</span> GetWaitqStateStr(waitq) != <span class="enscript-string">&quot;SET&quot;</span>:
+        <span class="enscript-keyword">return</span> []
+    wqset = Cast(waitq, <span class="enscript-string">'waitq_set *'</span>)
+    <span class="enscript-keyword">if</span> wqset.wqset_prepost_id == 0:
+        <span class="enscript-keyword">return</span> []
+    <span class="enscript-keyword">return</span> GetPrepostChain(wqset.wqset_prepost_id)
+
+
+<span class="enscript-comment"># Macro: showprepostchain
+</span>@lldb_command(<span class="enscript-string">'showprepostchain'</span>, <span class="enscript-string">&quot;P:&quot;</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowPrepostChain</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Follow a chain of preposts, printing each one.
+        Note that prepost chains are circular, so this will print
+        the entire chain given a single element.
+
+        Note: you can pass either a complete ID (generation + index), or
+              just the index to the -P argument.
+
+        usage: showprepostchain [-P ID] [0xaddr]
+            -P {ID} : start printing with the prepost whose ID is {ID}
+    &quot;&quot;&quot;</span>
+    wqp = 0
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-P&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        wqp, warn_str = GetWaitqPrepost(unsigned(kern.GetValueFromAddress(cmd_options[<span class="enscript-string">&quot;-P&quot;</span>], <span class="enscript-string">'uint64_t *'</span>)))
+        <span class="enscript-keyword">if</span> wqp == 0:
+            <span class="enscript-keyword">if</span> warn_str != <span class="enscript-string">''</span>:
+                <span class="enscript-keyword">raise</span> LookupError(warn_str)
+            <span class="enscript-keyword">else</span>:
+                <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid prepost ID {:s}&quot;</span>.format(cmd_options[<span class="enscript-string">&quot;-P&quot;</span>]))
+    <span class="enscript-keyword">if</span> wqp == 0:
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+            <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Please pass the address of a prepost object&quot;</span>)
+        wqp = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'wq_prepost *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> wqp:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid prepost {:s}&quot;</span>.format(cmd_args[0]))
+
+    pp_arr = []
+    GetPrepostChain(wqp.wqte.wqt_id.id, True, pp_arr)
+    pp_cnt = len(pp_arr)
+    idx = 0
+    nvalid = 0
+    ninvalid = 0
+    <span class="enscript-keyword">print</span> GetWaitqPrepostSummary.header
+    <span class="enscript-keyword">while</span> idx &lt; pp_cnt:
+        <span class="enscript-keyword">print</span> GetWaitqPrepostSummary(pp_arr[idx])
+        <span class="enscript-keyword">if</span> pp_arr[idx] != 0:
+            type = WaitqTableElemType(pp_arr[idx])
+            <span class="enscript-keyword">if</span> type == <span class="enscript-string">&quot;LINK&quot;</span>:
+                post_wqp = GetWaitqPrepost(pp_arr[idx].wqp_post.wqp_wq_id)[0]
+                <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> WaitqTableElemValid(post_wqp):
+                    ninvalid += 1
+                <span class="enscript-keyword">else</span>:
+                    nvalid += 1
+            <span class="enscript-keyword">else</span>:
+                nvalid += 1
+        idx += 1
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;%s&quot;</span> % <span class="enscript-string">'-'</span>*86
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Total: {:d} ({:d} valid, {:d} invalid)&quot;</span>.format(len(pp_arr), nvalid, ninvalid)
+<span class="enscript-comment"># EndMacro: showprepostchain
+</span>
+
+@lldb_type_summary([<span class="enscript-string">'waitq'</span>, <span class="enscript-string">'waitq *'</span>])
+@header(<span class="enscript-string">&quot;{: &lt;16s} {: &lt;3s} {: &lt;4s} {: &lt;17s} {: &lt;18s} {: &lt;18s} {: &lt;37s} {: &lt;22s} {: &lt;10s}&quot;</span>.format(<span class="enscript-string">'waitq'</span>, <span class="enscript-string">'typ'</span>, <span class="enscript-string">'bits'</span>, <span class="enscript-string">'evtmask'</span>, <span class="enscript-string">'setid'</span>, <span class="enscript-string">'wq_wqp'</span>, <span class="enscript-string">'preposts'</span>, <span class="enscript-string">'member_of'</span>, <span class="enscript-string">'threads'</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetWaitqSummary</span>(waitq):
+    fmt_str = <span class="enscript-string">&quot;{q: &lt;16x} {state: &lt;3s} {bits: &lt;4s} {q.waitq_eventmask: &lt;#17x} {setid: &lt;#18x} {q.waitq_prepost_id: &lt;#18x}&quot;</span>
+    th_str = []
+    <span class="enscript-keyword">if</span> waitq.waitq_queue.next <span class="enscript-keyword">and</span> waitq.waitq_queue.prev:
+        <span class="enscript-keyword">for</span> thread <span class="enscript-keyword">in</span> IterateLinkageChain(addressof(waitq.waitq_queue), <span class="enscript-string">'thread *'</span>, <span class="enscript-string">'links'</span>):
+            th_str.append(<span class="enscript-string">&quot;{: &lt;18s} e:{: &lt;#18x}&quot;</span>.format(hex(thread), thread.wait_event))
+    <span class="enscript-keyword">else</span>:
+        th_str.append(<span class="enscript-string">&quot;{: &lt;39s}&quot;</span>.format(<span class="enscript-string">'&lt;invalid (NULL) queue&gt;'</span>))
+    th_cnt = len(th_str)
+    set_str = GetWaitqSets(waitq)
+    set_cnt = len(set_str)
+    pp_str = GetWaitqPreposts(waitq)
+    pp_cnt = len(pp_str)
+    last_str = <span class="enscript-string">''</span>
+    idx = 0;
+    <span class="enscript-keyword">while</span> idx &lt; pp_cnt <span class="enscript-keyword">or</span> idx &lt; set_cnt <span class="enscript-keyword">or</span> idx &lt; th_cnt:
+        p = <span class="enscript-string">&quot;&quot;</span>
+        s = <span class="enscript-string">&quot;&quot;</span>
+        t = <span class="enscript-string">&quot;&quot;</span>
+        <span class="enscript-keyword">if</span> idx &lt; pp_cnt:
+            p = pp_str[idx]
+        <span class="enscript-keyword">if</span> idx &lt; set_cnt:
+            s = set_str[idx]
+        <span class="enscript-keyword">if</span> idx &lt; th_cnt:
+            t = th_str[idx]
+        <span class="enscript-keyword">if</span> idx == 0:
+            last_str += <span class="enscript-string">&quot;{0: &lt;37s} {1: &lt;22s} {2: &lt;39s}&quot;</span>.format(p, s, t)
+        <span class="enscript-keyword">else</span>:
+            last_str += <span class="enscript-string">&quot;\n{0: &lt;80s} {1: &lt;37s} {2: &lt;22s} {3: &lt;39s}&quot;</span>.format(<span class="enscript-string">''</span>, p, s, t)
+        idx += 1
+    <span class="enscript-keyword">if</span> pp_cnt &gt; 0 <span class="enscript-keyword">or</span> set_cnt &gt; 0 <span class="enscript-keyword">or</span> th_cnt &gt; 0:
+        last_str += <span class="enscript-string">&quot;\n{:&lt;80s} {: &lt;37s} {: &lt;22s} {: &lt;39s}&quot;</span>.format(<span class="enscript-string">''</span>, <span class="enscript-string">'-'</span>*37, <span class="enscript-string">'-'</span>*20, <span class="enscript-string">'-'</span>*39)
+        last_str += <span class="enscript-string">&quot;\n{0: &lt;80s} {1: &lt;37d} {2: &lt;22d} {3: &lt;39d}&quot;</span>.format(<span class="enscript-string">''</span>, pp_cnt, set_cnt, th_cnt)
+
+    state = GetWaitqStateStr(waitq)
+    setid = 0
+    <span class="enscript-keyword">if</span> state == <span class="enscript-string">&quot;SET&quot;</span>:
+        setid = Cast(waitq, <span class="enscript-string">'waitq_set *'</span>).wqset_id
+    out_str = fmt_str.format(q=waitq, state=state, bits=GetWaitqBitsStr(waitq), setid=setid)
+    out_str += last_str
+    <span class="enscript-keyword">return</span> out_str
+
+<span class="enscript-comment"># Macro: showwaitq
+</span>@lldb_command(<span class="enscript-string">'showwaitq'</span>, <span class="enscript-string">&quot;P:S:&quot;</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowWaitq</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Print waitq structure summary.
+        Lookup the waitq either by address, by Set ID, or indirectly
+        through a prepost object that points to the waitq.
+
+        Note: you can pass either a complete ID (generation + index), or
+              just the index to the -P and -S arguments.
+
+        usage: showwaitq [-P PrePostID] [-S SetID] [0xaddr]
+            -P {ID}  : prepost ID that points to a waitq
+            -S {ID}  : waitq_set ID
+    &quot;&quot;&quot;</span>
+    waitq = 0
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-P&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        wqp, warn_str = GetWaitqPrepost(unsigned(kern.GetValueFromAddress(cmd_options[<span class="enscript-string">&quot;-P&quot;</span>], <span class="enscript-string">'uint64_t *'</span>)))
+        <span class="enscript-keyword">if</span> wqp == 0:
+            <span class="enscript-keyword">if</span> warn_str:
+                <span class="enscript-keyword">raise</span> LookupError(warn_str)
+            <span class="enscript-keyword">else</span>:
+                <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid prepost ID {:s}&quot;</span>.format(cmd_options[<span class="enscript-string">&quot;-P&quot;</span>]))
+        <span class="enscript-keyword">if</span> WaitqTableElemType(wqp) != <span class="enscript-string">&quot;ELEM&quot;</span>:
+            <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Prepost ID {:s} points to a WQP_POST object, not a WQP_WQ!&quot;</span>.format(cmd_options[<span class="enscript-string">&quot;-P&quot;</span>]))
+        waitq = wqp.wqp_wq.wqp_wq_ptr
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-S&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        <span class="enscript-keyword">if</span> waitq:
+            <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Please pass only one of '-S' or '-P'!&quot;</span>)
+        link, warn_str = GetWaitqLink(unsigned(kern.GetValueFromAddress(cmd_options[<span class="enscript-string">&quot;-S&quot;</span>],<span class="enscript-string">'uint64_t *'</span>)))
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> link:
+            <span class="enscript-keyword">if</span> warn_str != <span class="enscript-string">''</span>:
+                <span class="enscript-keyword">raise</span> LookupError(warn_str)
+            <span class="enscript-keyword">else</span>:
+                <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid link ID {:s}&quot;</span>.format(cmd_options[<span class="enscript-string">&quot;-S&quot;</span>]))
+        <span class="enscript-keyword">if</span> WaitqTableElemType(link) != <span class="enscript-string">&quot;ELEM&quot;</span>:
+            <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Link ID {:s} points to a SLT_LINK object, not an SLT_WQS!&quot;</span>.format(cmd_options[<span class="enscript-string">&quot;-S&quot;</span>]))
+        waitq = addressof(link.sl_wqs.sl_set.wqset_q)
+
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> waitq <span class="enscript-keyword">and</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Please pass the address of a waitq!&quot;</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> waitq:
+        waitq = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'waitq *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> waitq:
+        <span class="enscript-keyword">raise</span> (<span class="enscript-string">&quot;Unknown arguments: %r %r&quot;</span> % (cmd_args, cmd_options))
+    <span class="enscript-keyword">print</span> GetWaitqSummary.header
+    <span class="enscript-keyword">print</span> GetWaitqSummary(waitq)
+<span class="enscript-comment"># EndMacro: showwaitq
+</span>
+
+<span class="enscript-comment"># Macro: showglobalwaitqs
+</span>@lldb_command(<span class="enscript-string">'showglobalwaitqs'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowGlobalWaitqs</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Summarize global waitq usage
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> kern
+    q = 0
+
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Global waitq objects&quot;</span>
+    <span class="enscript-keyword">print</span> GetWaitqSummary.header
+
+    <span class="enscript-keyword">while</span> q &lt; kern.globals.g_num_waitqs:
+        <span class="enscript-keyword">print</span> GetWaitqSummary(addressof(kern.globals.global_waitqs[q]))
+        q = q + 1
+<span class="enscript-comment"># EndMacro: showglobalwaitqs
+</span>
+
+<span class="enscript-comment"># Macro: showglobalqstats
+</span>@lldb_command(<span class="enscript-string">'showglobalqstats'</span>, <span class="enscript-string">&quot;OF&quot;</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowGlobalQStats</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Summarize global waitq statistics
+
+        usage: showglobalqstats [-O] [-F]
+            -O  : only output waitqs with outstanding waits
+            -F  : output as much backtrace as was recorded
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> kern
+    q = 0
+
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> hasattr(kern.globals, <span class="enscript-string">'g_waitq_stats'</span>):
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No waitq stats support (use DEVELOPMENT kernel)!&quot;</span>
+        <span class="enscript-keyword">return</span>
+
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Global waitq stats&quot;</span>
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{0: &lt;18s} {1: &lt;8s} {2: &lt;8s} {3: &lt;8s} {4: &lt;8s} {5: &lt;8s} {6: &lt;32s}&quot;</span>.format(<span class="enscript-string">'waitq'</span>, <span class="enscript-string">'#waits'</span>, <span class="enscript-string">'#wakes'</span>, <span class="enscript-string">'#diff'</span>, <span class="enscript-string">'#fails'</span>, <span class="enscript-string">'#clears'</span>, <span class="enscript-string">'backtraces'</span>)
+
+    waiters_only = False
+    full_bt = False
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-O&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        waiters_only = True
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-F&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        full_bt = True
+
+    fmt_str = <span class="enscript-string">&quot;{q: &lt;#18x} {stats.waits: &lt;8d} {stats.wakeups: &lt;8d} {diff: &lt;8d} {stats.failed_wakeups: &lt;8d} {stats.clears: &lt;8d} {bt_str: &lt;s}&quot;</span>
+    <span class="enscript-keyword">while</span> q &lt; kern.globals.g_num_waitqs:
+        waitq = kern.globals.global_waitqs[q]
+        stats = kern.globals.g_waitq_stats[q]
+        diff = stats.waits - stats.wakeups
+        <span class="enscript-keyword">if</span> diff == 0 <span class="enscript-keyword">and</span> waiters_only:
+            q = q + 1
+            <span class="enscript-keyword">continue</span>
+        last_waitstr = <span class="enscript-string">''</span>
+        last_wakestr = <span class="enscript-string">''</span>
+        fw_str = <span class="enscript-string">''</span>
+        <span class="enscript-keyword">if</span> (stats.last_wait[0]):
+            last_waitstr = GetSourceInformationForAddress(unsigned(stats.last_wait[0]))
+        <span class="enscript-keyword">if</span> (stats.last_wakeup[0]):
+            last_wakestr = GetSourceInformationForAddress(unsigned(stats.last_wakeup[0]))
+        <span class="enscript-keyword">if</span> (stats.last_failed_wakeup[0]):
+            fw_str = GetSourceInformationForAddress(unsigned(stats.last_failed_wakeup[0]))
+
+        <span class="enscript-keyword">if</span> full_bt:
+            f = 1
+            <span class="enscript-keyword">while</span> f &lt; kern.globals.g_nwaitq_btframes:
+                <span class="enscript-keyword">if</span> stats.last_wait[f]:
+                    last_waitstr = <span class="enscript-string">&quot;{0}-&gt;{1}&quot;</span>.format(GetSourceInformationForAddress(unsigned(stats.last_wait[f])), last_waitstr)
+                <span class="enscript-keyword">if</span> stats.last_wakeup[f]:
+                    last_wakestr = <span class="enscript-string">&quot;{0}-&gt;{1}&quot;</span>.format(GetSourceInformationForAddress(unsigned(stats.last_wakeup[f])), last_wakestr)
+                <span class="enscript-keyword">if</span> stats.last_failed_wakeup[f]:
+                    fw_str = <span class="enscript-string">&quot;{0}-&gt;{1}&quot;</span>.format(GetSourceInformationForAddress(unsigned(stats.last_failed_wakeup[f])), fw_str)
+                f = f + 1
+        bt_str = <span class="enscript-string">''</span>
+        <span class="enscript-keyword">if</span> last_waitstr:
+            bt_str += <span class="enscript-string">&quot;wait : &quot;</span> + last_waitstr
+        <span class="enscript-keyword">if</span> last_wakestr:
+            <span class="enscript-keyword">if</span> bt_str:
+                bt_str += <span class="enscript-string">&quot;\n{0: &lt;70s} &quot;</span>.format(<span class="enscript-string">''</span>)
+            bt_str += <span class="enscript-string">&quot;wake : &quot;</span> + last_wakestr
+        <span class="enscript-keyword">if</span> fw_str:
+            <span class="enscript-keyword">if</span> bt_str:
+                bt_str += <span class="enscript-string">&quot;\n{0: &lt;70s} &quot;</span>.format(<span class="enscript-string">''</span>)
+            bt_str += <span class="enscript-string">&quot;fails: &quot;</span> + fw_str
+
+        <span class="enscript-keyword">print</span> fmt_str.format(q=addressof(waitq), stats=stats, diff=diff, bt_str=bt_str)
+        q = q + 1
+<span class="enscript-comment"># EndMacro: showglobalqstats
+</span></pre>
+<hr />
+</body></html>

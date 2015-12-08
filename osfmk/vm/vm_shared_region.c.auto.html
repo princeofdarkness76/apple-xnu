@@ -1,0 +1,2213 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>vm_shared_region.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">vm_shared_region.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this
+ * file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * Shared region (... and comm page)
+ *
+ * This file handles the VM shared region and comm page.
+ *
+ */</span>
+<span class="enscript-comment">/*
+ * SHARED REGIONS
+ * --------------
+ *
+ * A shared region is a submap that contains the most common system shared
+ * libraries for a given environment.
+ * An environment is defined by (cpu-type, 64-bitness, root directory).
+ *
+ * The point of a shared region is to reduce the setup overhead when exec'ing
+ * a new process.
+ * A shared region uses a shared VM submap that gets mapped automatically
+ * at exec() time (see vm_map_exec()).  The first process of a given
+ * environment sets up the shared region and all further processes in that
+ * environment can re-use that shared region without having to re-create
+ * the same mappings in their VM map.  All they need is contained in the shared
+ * region.
+ * It can also shared a pmap (mostly for read-only parts but also for the
+ * initial version of some writable parts), which gets &quot;nested&quot; into the 
+ * process's pmap.  This reduces the number of soft faults:  once one process
+ * brings in a page in the shared region, all the other processes can access
+ * it without having to enter it in their own pmap.
+ *
+ *
+ * When a process is being exec'ed, vm_map_exec() calls vm_shared_region_enter()
+ * to map the appropriate shared region in the process's address space.
+ * We look up the appropriate shared region for the process's environment.
+ * If we can't find one, we create a new (empty) one and add it to the list.
+ * Otherwise, we just take an extra reference on the shared region we found.
+ *
+ * The &quot;dyld&quot; runtime (mapped into the process's address space at exec() time)
+ * will then use the shared_region_check_np() and shared_region_map_np()
+ * system call to validate and/or populate the shared region with the
+ * appropriate dyld_shared_cache file.
+ *
+ * The shared region is inherited on fork() and the child simply takes an
+ * extra reference on its parent's shared region.
+ *
+ * When the task terminates, we release a reference on its shared region.
+ * When the last reference is released, we destroy the shared region.
+ *
+ * After a chroot(), the calling process keeps using its original shared region,
+ * since that's what was mapped when it was started.  But its children
+ * will use a different shared region, because they need to use the shared
+ * cache that's relative to the new root directory.
+ */</span>
+<span class="enscript-comment">/*
+ * COMM PAGE
+ *
+ * A &quot;comm page&quot; is an area of memory that is populated by the kernel with
+ * the appropriate platform-specific version of some commonly used code.
+ * There is one &quot;comm page&quot; per platform (cpu-type, 64-bitness) but only
+ * for the native cpu-type.  No need to overly optimize translated code
+ * for hardware that is not really there !
+ *
+ * The comm pages are created and populated at boot time.
+ *
+ * The appropriate comm page is mapped into a process's address space
+ * at exec() time, in vm_map_exec().
+ * It is then inherited on fork().
+ *
+ * The comm page is shared between the kernel and all applications of
+ * a given platform.  Only the kernel can modify it.
+ *
+ * Applications just branch to fixed addresses in the comm page and find
+ * the right version of the code for the platform.  There is also some
+ * data provided and updated by the kernel for processes to retrieve easily
+ * without having to do a system call.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;debug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_tt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread_call.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_shared_region.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/commpage.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/cpu_capabilities.h&gt;</span>
+
+<span class="enscript-comment">/* &quot;dyld&quot; uses this to figure out what the kernel supports */</span>
+<span class="enscript-type">int</span> shared_region_version = 3;
+
+<span class="enscript-comment">/* trace level, output is sent to the system log file */</span>
+<span class="enscript-type">int</span> shared_region_trace_level = SHARED_REGION_TRACE_ERROR_LVL;
+
+<span class="enscript-comment">/* should local (non-chroot) shared regions persist when no task uses them ? */</span>
+<span class="enscript-type">int</span> shared_region_persistence = 0;	<span class="enscript-comment">/* no by default */</span>
+
+<span class="enscript-comment">/* delay before reclaiming an unused shared region */</span>
+<span class="enscript-type">int</span> shared_region_destroy_delay = 120; <span class="enscript-comment">/* in seconds */</span>
+
+<span class="enscript-comment">/* 
+ * Only one cache gets to slide on Desktop, since we can't
+ * tear down slide info properly today and the desktop actually 
+ * produces lots of shared caches.
+ */</span>
+boolean_t shared_region_completed_slide = FALSE;
+
+<span class="enscript-comment">/* this lock protects all the shared region data structures */</span>
+lck_grp_t *vm_shared_region_lck_grp;
+lck_mtx_t vm_shared_region_lock;
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">vm_shared_region_lock</span>() lck_mtx_lock(&amp;vm_shared_region_lock)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">vm_shared_region_unlock</span>() lck_mtx_unlock(&amp;vm_shared_region_lock)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">vm_shared_region_sleep</span>(event, interruptible)			\
+	lck_mtx_sleep(&amp;vm_shared_region_lock,				\
+		      LCK_SLEEP_DEFAULT,				\
+		      (event_t) (event),				\
+		      (interruptible))
+
+<span class="enscript-comment">/* the list of currently available shared regions (one per environment) */</span>
+queue_head_t	vm_shared_region_queue;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">vm_shared_region_reference_locked</span>(vm_shared_region_t shared_region);
+<span class="enscript-type">static</span> vm_shared_region_t <span class="enscript-function-name">vm_shared_region_create</span>(
+	<span class="enscript-type">void</span>			*root_dir,
+	cpu_type_t		cputype,
+	boolean_t		is_64bit);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">vm_shared_region_destroy</span>(vm_shared_region_t shared_region);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">vm_shared_region_timeout</span>(thread_call_param_t param0,
+				     thread_call_param_t param1);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> __commpage_setup = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> __system_power_source = 1;	<span class="enscript-comment">/* init to extrnal power source */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">post_sys_powersource_internal</span>(<span class="enscript-type">int</span> i, <span class="enscript-type">int</span> internal);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __i386__ || __x86_64__ */</span>
+
+
+<span class="enscript-comment">/*
+ * Initialize the module...
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_shared_region_init</span>(<span class="enscript-type">void</span>)
+{
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; init\n&quot;</span>));
+
+	vm_shared_region_lck_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;vm shared region&quot;</span>,
+						      LCK_GRP_ATTR_NULL);
+	lck_mtx_init(&amp;vm_shared_region_lock,
+		     vm_shared_region_lck_grp,
+		     LCK_ATTR_NULL);
+
+	queue_init(&amp;vm_shared_region_queue);
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: &lt;- init\n&quot;</span>));
+}
+
+<span class="enscript-comment">/*
+ * Retrieve a task's shared region and grab an extra reference to 
+ * make sure it doesn't disappear while the caller is using it.	
+ * The caller is responsible for consuming that extra reference if
+ * necessary.
+ */</span>
+vm_shared_region_t
+<span class="enscript-function-name">vm_shared_region_get</span>(
+	task_t		task)
+{
+	vm_shared_region_t	shared_region;
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; get(%p)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task)));
+
+	task_lock(task);
+	vm_shared_region_lock();
+	shared_region = task-&gt;shared_region;
+	<span class="enscript-keyword">if</span> (shared_region) {
+		assert(shared_region-&gt;sr_ref_count &gt; 0);
+		vm_shared_region_reference_locked(shared_region);
+	}
+	vm_shared_region_unlock();
+	task_unlock(task);
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: get(%p) &lt;- %p\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region)));
+
+	<span class="enscript-keyword">return</span> shared_region;
+}
+
+<span class="enscript-comment">/*
+ * Get the base address of the shared region.
+ * That's the address at which it needs to be mapped in the process's address
+ * space.
+ * No need to lock since this data is set when the shared region is
+ * created and is never modified after that.  The caller must hold an extra
+ * reference on the shared region to prevent it from being destroyed.
+ */</span>
+mach_vm_offset_t
+<span class="enscript-function-name">vm_shared_region_base_address</span>(
+	vm_shared_region_t	shared_region)
+{
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; base_address(%p)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region)));
+	assert(shared_region-&gt;sr_ref_count &gt; 1);
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: base_address(%p) &lt;- 0x%llx\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region),
+		 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)shared_region-&gt;sr_base_address));
+	<span class="enscript-keyword">return</span> shared_region-&gt;sr_base_address;
+}
+
+<span class="enscript-comment">/*
+ * Get the size of the shared region.
+ * That's the size that needs to be mapped in the process's address
+ * space.
+ * No need to lock since this data is set when the shared region is
+ * created and is never modified after that.  The caller must hold an extra
+ * reference on the shared region to prevent it from being destroyed.
+ */</span>
+mach_vm_size_t
+<span class="enscript-function-name">vm_shared_region_size</span>(
+	vm_shared_region_t	shared_region)
+{
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; size(%p)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region)));
+	assert(shared_region-&gt;sr_ref_count &gt; 1);
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: size(%p) &lt;- 0x%llx\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region),
+		 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)shared_region-&gt;sr_size));
+	<span class="enscript-keyword">return</span> shared_region-&gt;sr_size;
+}
+
+<span class="enscript-comment">/*
+ * Get the memory entry of the shared region.
+ * That's the &quot;memory object&quot; that needs to be mapped in the process's address
+ * space.
+ * No need to lock since this data is set when the shared region is
+ * created and is never modified after that.  The caller must hold an extra
+ * reference on the shared region to prevent it from being destroyed.
+ */</span>
+ipc_port_t
+<span class="enscript-function-name">vm_shared_region_mem_entry</span>(
+	vm_shared_region_t	shared_region)
+{
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; mem_entry(%p)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region)));
+	assert(shared_region-&gt;sr_ref_count &gt; 1);
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: mem_entry(%p) &lt;- %p\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region-&gt;sr_mem_entry)));
+	<span class="enscript-keyword">return</span> shared_region-&gt;sr_mem_entry;
+}
+
+uint32_t
+<span class="enscript-function-name">vm_shared_region_get_slide</span>(
+	vm_shared_region_t	shared_region)
+{
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; vm_shared_region_get_slide(%p)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region)));
+	assert(shared_region-&gt;sr_ref_count &gt; 1);
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: vm_shared_region_get_slide(%p) &lt;- %u\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region),
+		 shared_region-&gt;sr_slide_info.slide));
+
+	<span class="enscript-comment">/* 0 if we haven't slid */</span>
+	assert(shared_region-&gt;sr_slide_info.slide_object != NULL || 
+			shared_region-&gt;sr_slide_info.slide == 0);
+
+	<span class="enscript-keyword">return</span> shared_region-&gt;sr_slide_info.slide; 
+}
+
+vm_shared_region_slide_info_t
+<span class="enscript-function-name">vm_shared_region_get_slide_info</span>(
+	vm_shared_region_t	shared_region)
+{
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; vm_shared_region_get_slide_info(%p)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region)));
+	assert(shared_region-&gt;sr_ref_count &gt; 1);
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: vm_shared_region_get_slide_info(%p) &lt;- %p\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(&amp;shared_region-&gt;sr_slide_info)));
+	<span class="enscript-keyword">return</span> &amp;shared_region-&gt;sr_slide_info;
+}
+
+<span class="enscript-comment">/*
+ * Set the shared region the process should use.
+ * A NULL new shared region means that we just want to release the old
+ * shared region.
+ * The caller should already have an extra reference on the new shared region
+ * (if any).  We release a reference on the old shared region (if any).
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_shared_region_set</span>(
+	task_t			task,
+	vm_shared_region_t	new_shared_region)
+{
+	vm_shared_region_t	old_shared_region;
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; set(%p, %p)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(new_shared_region)));
+
+	task_lock(task);
+	vm_shared_region_lock();
+
+	old_shared_region = task-&gt;shared_region;
+	<span class="enscript-keyword">if</span> (new_shared_region) {
+		assert(new_shared_region-&gt;sr_ref_count &gt; 0);
+	}
+
+	task-&gt;shared_region = new_shared_region;
+
+	vm_shared_region_unlock();
+	task_unlock(task);
+
+	<span class="enscript-keyword">if</span> (old_shared_region) {
+		assert(old_shared_region-&gt;sr_ref_count &gt; 0);
+		vm_shared_region_deallocate(old_shared_region);
+	}
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: set(%p) &lt;- old=%p new=%p\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(old_shared_region),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(new_shared_region)));
+}
+
+<span class="enscript-comment">/*
+ * Lookup up the shared region for the desired environment.
+ * If none is found, create a new (empty) one.
+ * Grab an extra reference on the returned shared region, to make sure
+ * it doesn't get destroyed before the caller is done with it.  The caller
+ * is responsible for consuming that extra reference if necessary.
+ */</span>
+vm_shared_region_t
+<span class="enscript-function-name">vm_shared_region_lookup</span>(
+	<span class="enscript-type">void</span>		*root_dir,
+	cpu_type_t	cputype,
+	boolean_t	is_64bit)
+{
+	vm_shared_region_t	shared_region;
+	vm_shared_region_t	new_shared_region;
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; lookup(root=%p,cpu=%d,64bit=%d)\n&quot;</span>,
+
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(root_dir), cputype, is_64bit));
+
+	shared_region = NULL;
+	new_shared_region = NULL;
+
+	vm_shared_region_lock();
+	<span class="enscript-keyword">for</span> (;;) {
+		queue_iterate(&amp;vm_shared_region_queue,
+			      shared_region,
+			      vm_shared_region_t,
+			      sr_q) {
+			assert(shared_region-&gt;sr_ref_count &gt; 0);
+			<span class="enscript-keyword">if</span> (shared_region-&gt;sr_cpu_type == cputype &amp;&amp;
+			    shared_region-&gt;sr_root_dir == root_dir &amp;&amp;
+			    shared_region-&gt;sr_64bit == is_64bit) {
+				<span class="enscript-comment">/* found a match ! */</span>
+				vm_shared_region_reference_locked(shared_region);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+			}
+		}
+		<span class="enscript-keyword">if</span> (new_shared_region == NULL) {
+			<span class="enscript-comment">/* no match: create a new one */</span>
+			vm_shared_region_unlock();
+			new_shared_region = vm_shared_region_create(root_dir,
+								    cputype,
+								    is_64bit);
+			<span class="enscript-comment">/* do the lookup again, in case we lost a race */</span>
+			vm_shared_region_lock();
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-comment">/* still no match: use our new one */</span>
+		shared_region = new_shared_region;
+		new_shared_region = NULL;
+		queue_enter(&amp;vm_shared_region_queue,
+			    shared_region,
+			    vm_shared_region_t,
+			    sr_q);
+		<span class="enscript-keyword">break</span>;
+	}
+
+<span class="enscript-reference">done</span>:
+	vm_shared_region_unlock();
+
+	<span class="enscript-keyword">if</span> (new_shared_region) {
+		<span class="enscript-comment">/*
+		 * We lost a race with someone else to create a new shared
+		 * region for that environment.  Get rid of our unused one.
+		 */</span>
+		assert(new_shared_region-&gt;sr_ref_count == 1);
+		new_shared_region-&gt;sr_ref_count--;
+		vm_shared_region_destroy(new_shared_region);
+		new_shared_region = NULL;
+	}
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: lookup(root=%p,cpu=%d,64bit=%d) &lt;- %p\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(root_dir),
+		 cputype, is_64bit,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region)));
+
+	assert(shared_region-&gt;sr_ref_count &gt; 0);
+	<span class="enscript-keyword">return</span> shared_region;
+}
+
+<span class="enscript-comment">/*
+ * Take an extra reference on a shared region.
+ * The vm_shared_region_lock should already be held by the caller.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_shared_region_reference_locked</span>(
+	vm_shared_region_t	shared_region)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	lck_mtx_assert(&amp;vm_shared_region_lock, LCK_MTX_ASSERT_OWNED);
+#<span class="enscript-reference">endif</span>
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; reference_locked(%p)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region)));
+	assert(shared_region-&gt;sr_ref_count &gt; 0);
+	shared_region-&gt;sr_ref_count++;
+
+	<span class="enscript-keyword">if</span> (shared_region-&gt;sr_timer_call != NULL) {
+		boolean_t cancelled;
+
+		<span class="enscript-comment">/* cancel and free any pending timeout */</span>
+		cancelled = thread_call_cancel(shared_region-&gt;sr_timer_call);
+		<span class="enscript-keyword">if</span> (cancelled) {
+			thread_call_free(shared_region-&gt;sr_timer_call);
+			shared_region-&gt;sr_timer_call = NULL;
+			<span class="enscript-comment">/* release the reference held by the cancelled timer */</span>
+			shared_region-&gt;sr_ref_count--;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* the timer will drop the reference and free itself */</span>
+		}
+	}
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: reference_locked(%p) &lt;- %d\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region),
+		 shared_region-&gt;sr_ref_count));
+}
+
+<span class="enscript-comment">/*
+ * Release a reference on the shared region.
+ * Destroy it if there are no references left.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_shared_region_deallocate</span>(
+	vm_shared_region_t	shared_region)
+{
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; deallocate(%p)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region)));
+
+	vm_shared_region_lock();
+	
+	assert(shared_region-&gt;sr_ref_count &gt; 0);
+
+	<span class="enscript-keyword">if</span> (shared_region-&gt;sr_root_dir == NULL) {
+		<span class="enscript-comment">/*
+		 * Local (i.e. based on the boot volume) shared regions
+		 * can persist or not based on the &quot;shared_region_persistence&quot;
+		 * sysctl.
+		 * Make sure that this one complies.
+		 *
+		 * See comments in vm_shared_region_slide() for notes about
+		 * shared regions we have slid (which are not torn down currently).
+		 */</span>
+		<span class="enscript-keyword">if</span> (shared_region_persistence &amp;&amp;
+		    !shared_region-&gt;sr_persists) {
+			<span class="enscript-comment">/* make this one persistent */</span>
+			shared_region-&gt;sr_ref_count++;
+			shared_region-&gt;sr_persists = TRUE;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!shared_region_persistence &amp;&amp;
+			   shared_region-&gt;sr_persists) {
+			<span class="enscript-comment">/* make this one no longer persistent */</span>
+			assert(shared_region-&gt;sr_ref_count &gt; 1);
+			shared_region-&gt;sr_ref_count--;
+			shared_region-&gt;sr_persists = FALSE;
+		}
+	}
+
+	assert(shared_region-&gt;sr_ref_count &gt; 0);
+	shared_region-&gt;sr_ref_count--;
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: deallocate(%p): ref now %d\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region),
+		 shared_region-&gt;sr_ref_count));
+
+	<span class="enscript-keyword">if</span> (shared_region-&gt;sr_ref_count == 0) {
+		uint64_t deadline;
+
+		assert(!shared_region-&gt;sr_slid);
+
+		<span class="enscript-keyword">if</span> (shared_region-&gt;sr_timer_call == NULL) {
+			<span class="enscript-comment">/* hold one reference for the timer */</span>
+			assert(! shared_region-&gt;sr_mapping_in_progress);
+			shared_region-&gt;sr_ref_count++;
+
+			<span class="enscript-comment">/* set up the timer */</span>
+			shared_region-&gt;sr_timer_call = thread_call_allocate(
+				(thread_call_func_t) vm_shared_region_timeout,
+				(thread_call_param_t) shared_region);
+
+			<span class="enscript-comment">/* schedule the timer */</span>
+			clock_interval_to_deadline(shared_region_destroy_delay,
+						   1000 * 1000 * 1000,
+						   &amp;deadline);
+			thread_call_enter_delayed(shared_region-&gt;sr_timer_call,
+						  deadline);
+
+			SHARED_REGION_TRACE_DEBUG(
+				(<span class="enscript-string">&quot;shared_region: deallocate(%p): armed timer\n&quot;</span>,
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region)));
+
+			vm_shared_region_unlock();
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* timer expired: let go of this shared region */</span>
+
+			<span class="enscript-comment">/* 
+			 * We can't properly handle teardown of a slid object today.
+			 */</span>
+			assert(!shared_region-&gt;sr_slid);
+
+			<span class="enscript-comment">/*
+			 * Remove it from the queue first, so no one can find
+			 * it...
+			 */</span>
+			queue_remove(&amp;vm_shared_region_queue,
+				     shared_region,
+				     vm_shared_region_t,
+				     sr_q);
+			vm_shared_region_unlock();
+
+			<span class="enscript-comment">/* ... and destroy it */</span>
+			vm_shared_region_destroy(shared_region);
+			shared_region = NULL;
+		}
+	} <span class="enscript-keyword">else</span> {
+		vm_shared_region_unlock();
+	}
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: deallocate(%p) &lt;-\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region)));
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_shared_region_timeout</span>(
+	thread_call_param_t	param0,
+	__unused thread_call_param_t	param1)
+{
+	vm_shared_region_t	shared_region;
+
+	shared_region = (vm_shared_region_t) param0;
+
+	vm_shared_region_deallocate(shared_region);
+}
+
+<span class="enscript-comment">/*
+ * Create a new (empty) shared region for a new environment.
+ */</span>
+<span class="enscript-type">static</span> vm_shared_region_t
+<span class="enscript-function-name">vm_shared_region_create</span>(
+	<span class="enscript-type">void</span>			*root_dir,
+	cpu_type_t		cputype,
+	boolean_t		is_64bit)
+{
+	kern_return_t		kr;
+	vm_named_entry_t	mem_entry;
+	ipc_port_t		mem_entry_port;
+	vm_shared_region_t	shared_region;
+	vm_shared_region_slide_info_t si;
+	vm_map_t		sub_map;
+	mach_vm_offset_t	base_address, pmap_nesting_start;
+	mach_vm_size_t		size, pmap_nesting_size;
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; create(root=%p,cpu=%d,64bit=%d)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(root_dir), cputype, is_64bit));
+
+	base_address = 0;
+	size = 0;
+	mem_entry = NULL;
+	mem_entry_port = IPC_PORT_NULL;
+	sub_map = VM_MAP_NULL;
+
+	<span class="enscript-comment">/* create a new shared region structure... */</span>
+	shared_region = kalloc(<span class="enscript-keyword">sizeof</span> (*shared_region));
+	<span class="enscript-keyword">if</span> (shared_region == NULL) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: create: couldn't allocate\n&quot;</span>));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* figure out the correct settings for the desired environment */</span>
+	<span class="enscript-keyword">if</span> (is_64bit) {
+		<span class="enscript-keyword">switch</span> (cputype) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CPU_TYPE_I386</span>:
+			base_address = SHARED_REGION_BASE_X86_64;
+			size = SHARED_REGION_SIZE_X86_64;
+			pmap_nesting_start = SHARED_REGION_NESTING_BASE_X86_64;
+			pmap_nesting_size = SHARED_REGION_NESTING_SIZE_X86_64;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CPU_TYPE_POWERPC</span>:
+			base_address = SHARED_REGION_BASE_PPC64;
+			size = SHARED_REGION_SIZE_PPC64;
+			pmap_nesting_start = SHARED_REGION_NESTING_BASE_PPC64;
+			pmap_nesting_size = SHARED_REGION_NESTING_SIZE_PPC64;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			SHARED_REGION_TRACE_ERROR(
+				(<span class="enscript-string">&quot;shared_region: create: unknown cpu type %d\n&quot;</span>,
+				 cputype));
+			kfree(shared_region, <span class="enscript-keyword">sizeof</span> (*shared_region));
+			shared_region = NULL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">switch</span> (cputype) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CPU_TYPE_I386</span>:
+			base_address = SHARED_REGION_BASE_I386;
+			size = SHARED_REGION_SIZE_I386;
+			pmap_nesting_start = SHARED_REGION_NESTING_BASE_I386;
+			pmap_nesting_size = SHARED_REGION_NESTING_SIZE_I386;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CPU_TYPE_POWERPC</span>:
+			base_address = SHARED_REGION_BASE_PPC;
+			size = SHARED_REGION_SIZE_PPC;
+			pmap_nesting_start = SHARED_REGION_NESTING_BASE_PPC;
+			pmap_nesting_size = SHARED_REGION_NESTING_SIZE_PPC;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			SHARED_REGION_TRACE_ERROR(
+				(<span class="enscript-string">&quot;shared_region: create: unknown cpu type %d\n&quot;</span>,
+				 cputype));
+			kfree(shared_region, <span class="enscript-keyword">sizeof</span> (*shared_region));
+			shared_region = NULL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+	}
+
+	<span class="enscript-comment">/* create a memory entry structure and a Mach port handle */</span>
+	kr = mach_memory_entry_allocate(&amp;mem_entry,
+					&amp;mem_entry_port);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		kfree(shared_region, <span class="enscript-keyword">sizeof</span> (*shared_region));
+		shared_region = NULL;
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: create: &quot;</span>
+			 <span class="enscript-string">&quot;couldn't allocate mem_entry\n&quot;</span>));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* create a VM sub map and its pmap */</span>
+	sub_map = vm_map_create(pmap_create(NULL, 0, is_64bit),
+				0, size,
+				TRUE);
+	<span class="enscript-keyword">if</span> (sub_map == VM_MAP_NULL) {
+		ipc_port_release_send(mem_entry_port);
+		kfree(shared_region, <span class="enscript-keyword">sizeof</span> (*shared_region));
+		shared_region = NULL;
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: create: &quot;</span>
+			 <span class="enscript-string">&quot;couldn't allocate map\n&quot;</span>));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* make the memory entry point to the VM sub map */</span>
+	mem_entry-&gt;is_sub_map = TRUE;
+	mem_entry-&gt;backing.map = sub_map;
+	mem_entry-&gt;size = size;
+	mem_entry-&gt;protection = VM_PROT_ALL;
+
+	<span class="enscript-comment">/* make the shared region point at the memory entry */</span>
+	shared_region-&gt;sr_mem_entry = mem_entry_port;
+
+	<span class="enscript-comment">/* fill in the shared region's environment and settings */</span>
+	shared_region-&gt;sr_base_address = base_address;
+	shared_region-&gt;sr_size = size;
+	shared_region-&gt;sr_pmap_nesting_start = pmap_nesting_start;
+	shared_region-&gt;sr_pmap_nesting_size = pmap_nesting_size;
+	shared_region-&gt;sr_cpu_type = cputype;
+	shared_region-&gt;sr_64bit = is_64bit;
+	shared_region-&gt;sr_root_dir = root_dir;
+
+	queue_init(&amp;shared_region-&gt;sr_q);
+	shared_region-&gt;sr_mapping_in_progress = FALSE;
+	shared_region-&gt;sr_slide_in_progress = FALSE;
+	shared_region-&gt;sr_persists = FALSE;
+	shared_region-&gt;sr_slid = FALSE;
+	shared_region-&gt;sr_timer_call = NULL;
+	shared_region-&gt;sr_first_mapping = (mach_vm_offset_t) -1;
+
+	<span class="enscript-comment">/* grab a reference for the caller */</span>
+	shared_region-&gt;sr_ref_count = 1;
+
+	<span class="enscript-comment">/* And set up slide info */</span>
+	si = &amp;shared_region-&gt;sr_slide_info;
+	si-&gt;start = 0;
+	si-&gt;end = 0;
+	si-&gt;slide = 0;
+	si-&gt;slide_object = NULL;
+	si-&gt;slide_info_size = 0;
+	si-&gt;slide_info_entry = NULL;
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (shared_region) {
+		SHARED_REGION_TRACE_INFO(
+			(<span class="enscript-string">&quot;shared_region: create(root=%p,cpu=%d,64bit=%d,&quot;</span>
+			 <span class="enscript-string">&quot;base=0x%llx,size=0x%llx) &lt;- &quot;</span>
+			 <span class="enscript-string">&quot;%p mem=(%p,%p) map=%p pmap=%p\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(root_dir),
+			 cputype, is_64bit, (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)base_address,
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)size,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region),
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(mem_entry_port),
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(mem_entry),
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(sub_map),
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(sub_map-&gt;pmap)));
+	} <span class="enscript-keyword">else</span> {
+		SHARED_REGION_TRACE_INFO(
+			(<span class="enscript-string">&quot;shared_region: create(root=%p,cpu=%d,64bit=%d,&quot;</span>
+			 <span class="enscript-string">&quot;base=0x%llx,size=0x%llx) &lt;- NULL&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(root_dir),
+			 cputype, is_64bit, (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)base_address,
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)size));
+	}
+	<span class="enscript-keyword">return</span> shared_region;
+}
+
+<span class="enscript-comment">/*
+ * Destroy a now-unused shared region.
+ * The shared region is no longer in the queue and can not be looked up.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_shared_region_destroy</span>(
+	vm_shared_region_t	shared_region)
+{
+	vm_named_entry_t	mem_entry;
+	vm_map_t		map;
+
+	SHARED_REGION_TRACE_INFO(
+		(<span class="enscript-string">&quot;shared_region: -&gt; destroy(%p) (root=%p,cpu=%d,64bit=%d)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region-&gt;sr_root_dir),
+		 shared_region-&gt;sr_cpu_type,
+		 shared_region-&gt;sr_64bit));
+
+	assert(shared_region-&gt;sr_ref_count == 0);
+	assert(!shared_region-&gt;sr_persists);
+	assert(!shared_region-&gt;sr_slid);
+
+	mem_entry = (vm_named_entry_t) shared_region-&gt;sr_mem_entry-&gt;ip_kobject;
+	assert(mem_entry-&gt;is_sub_map);
+	assert(!mem_entry-&gt;internal);
+	assert(!mem_entry-&gt;is_pager);
+	assert(!mem_entry-&gt;is_copy);
+	map = mem_entry-&gt;backing.map;
+
+	<span class="enscript-comment">/*
+	 * Clean up the pmap first.  The virtual addresses that were
+	 * entered in this possibly &quot;nested&quot; pmap may have different values
+	 * than the VM map's min and max offsets, if the VM sub map was
+	 * mapped at a non-zero offset in the processes' main VM maps, which
+	 * is usually the case, so the clean-up we do in vm_map_destroy() would
+	 * not be enough.
+	 */</span>
+	<span class="enscript-keyword">if</span> (map-&gt;pmap) {
+		pmap_remove(map-&gt;pmap,
+			    shared_region-&gt;sr_base_address,
+			    (shared_region-&gt;sr_base_address +
+			     shared_region-&gt;sr_size));
+	}
+
+	<span class="enscript-comment">/*
+	 * Release our (one and only) handle on the memory entry.
+	 * This will generate a no-senders notification, which will be processed
+	 * by ipc_kobject_notify(), which will release the one and only
+	 * reference on the memory entry and cause it to be destroyed, along
+	 * with the VM sub map and its pmap.
+	 */</span>
+	mach_memory_entry_port_release(shared_region-&gt;sr_mem_entry);
+	mem_entry = NULL;
+	shared_region-&gt;sr_mem_entry = IPC_PORT_NULL;
+
+	<span class="enscript-keyword">if</span> (shared_region-&gt;sr_timer_call) {
+		thread_call_free(shared_region-&gt;sr_timer_call);
+	}
+
+#<span class="enscript-reference">if</span> 0
+	<span class="enscript-comment">/* 
+	 * If slid, free those resources.  We'll want this eventually,
+	 * but can't handle it properly today.
+	 */</span>
+	si = &amp;shared_region-&gt;sr_slide_info;
+	<span class="enscript-keyword">if</span> (si-&gt;slide_info_entry) {
+		kmem_free(kernel_map,
+			  (vm_offset_t) si-&gt;slide_info_entry,
+			  (vm_size_t) si-&gt;slide_info_size);
+		vm_object_deallocate(si-&gt;slide_object);
+	}
+#<span class="enscript-reference">endif</span> 
+
+	<span class="enscript-comment">/* release the shared region structure... */</span>
+	kfree(shared_region, <span class="enscript-keyword">sizeof</span> (*shared_region));
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: destroy(%p) &lt;-\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region)));
+	shared_region = NULL;
+
+}
+
+<span class="enscript-comment">/*
+ * Gets the address of the first (in time) mapping in the shared region.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">vm_shared_region_start_address</span>(
+	vm_shared_region_t	shared_region,
+	mach_vm_offset_t	*start_address)
+{
+	kern_return_t		kr;
+	mach_vm_offset_t	sr_base_address;
+	mach_vm_offset_t	sr_first_mapping;
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; start_address(%p)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region)));
+	assert(shared_region-&gt;sr_ref_count &gt; 1);
+
+	vm_shared_region_lock();
+
+	<span class="enscript-comment">/*
+	 * Wait if there's another thread establishing a mapping
+	 * in this shared region right when we're looking at it.
+	 * We want a consistent view of the map...
+	 */</span>
+	<span class="enscript-keyword">while</span> (shared_region-&gt;sr_mapping_in_progress) {
+		<span class="enscript-comment">/* wait for our turn... */</span>
+		assert(shared_region-&gt;sr_ref_count &gt; 1);
+		vm_shared_region_sleep(&amp;shared_region-&gt;sr_mapping_in_progress,
+				       THREAD_UNINT);
+	}
+	assert(! shared_region-&gt;sr_mapping_in_progress);
+	assert(shared_region-&gt;sr_ref_count &gt; 1);
+	
+	sr_base_address = shared_region-&gt;sr_base_address;
+	sr_first_mapping = shared_region-&gt;sr_first_mapping;
+
+	<span class="enscript-keyword">if</span> (sr_first_mapping == (mach_vm_offset_t) -1) {
+		<span class="enscript-comment">/* shared region is empty */</span>
+		kr = KERN_INVALID_ADDRESS;
+	} <span class="enscript-keyword">else</span> {
+		kr = KERN_SUCCESS;
+		*start_address = sr_base_address + sr_first_mapping;
+	}
+
+	vm_shared_region_unlock();
+	
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: start_address(%p) &lt;- 0x%llx\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region),
+		 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)shared_region-&gt;sr_base_address));
+
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_shared_region_undo_mappings</span>(
+	vm_map_t sr_map,
+	mach_vm_offset_t sr_base_address,
+	<span class="enscript-type">struct</span> shared_file_mapping_np *mappings,
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> mappings_count)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		j = 0;
+	vm_shared_region_t	shared_region = NULL;
+	boolean_t		reset_shared_region_state = FALSE;
+
+	shared_region = vm_shared_region_get(current_task());
+	<span class="enscript-keyword">if</span> (shared_region == NULL) {
+		printf(<span class="enscript-string">&quot;Failed to undo mappings because of NULL shared region.\n&quot;</span>);
+		<span class="enscript-keyword">return</span>;
+	}
+	
+
+	<span class="enscript-keyword">if</span> (sr_map == NULL) {
+		ipc_port_t		sr_handle;
+		vm_named_entry_t	sr_mem_entry;
+
+		vm_shared_region_lock();
+		assert(shared_region-&gt;sr_ref_count &gt; 1);
+
+		<span class="enscript-keyword">while</span> (shared_region-&gt;sr_mapping_in_progress) {
+			<span class="enscript-comment">/* wait for our turn... */</span>
+			vm_shared_region_sleep(&amp;shared_region-&gt;sr_mapping_in_progress,
+					       THREAD_UNINT);
+		}
+		assert(! shared_region-&gt;sr_mapping_in_progress);
+		assert(shared_region-&gt;sr_ref_count &gt; 1);
+		<span class="enscript-comment">/* let others know we're working in this shared region */</span>
+		shared_region-&gt;sr_mapping_in_progress = TRUE;
+
+		vm_shared_region_unlock();
+
+		reset_shared_region_state = TRUE;
+
+		<span class="enscript-comment">/* no need to lock because this data is never modified... */</span>
+		sr_handle = shared_region-&gt;sr_mem_entry;
+		sr_mem_entry = (vm_named_entry_t) sr_handle-&gt;ip_kobject;
+		sr_map = sr_mem_entry-&gt;backing.map;
+		sr_base_address = shared_region-&gt;sr_base_address;
+	}
+	<span class="enscript-comment">/*
+	 * Undo the mappings we've established so far.
+	 */</span>
+	<span class="enscript-keyword">for</span> (j = 0; j &lt; mappings_count; j++) {
+		kern_return_t kr2;
+
+		<span class="enscript-keyword">if</span> (mappings[j].sfm_size == 0) {
+			<span class="enscript-comment">/*
+			 * We didn't establish this
+			 * mapping, so nothing to undo.
+			 */</span>
+			<span class="enscript-keyword">continue</span>;
+		}
+		SHARED_REGION_TRACE_INFO(
+			(<span class="enscript-string">&quot;shared_region: mapping[%d]: &quot;</span>
+			 <span class="enscript-string">&quot;address:0x%016llx &quot;</span>
+			 <span class="enscript-string">&quot;size:0x%016llx &quot;</span>
+			 <span class="enscript-string">&quot;offset:0x%016llx &quot;</span>
+			 <span class="enscript-string">&quot;maxprot:0x%x prot:0x%x: &quot;</span>
+			 <span class="enscript-string">&quot;undoing...\n&quot;</span>,
+			 j,
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[j].sfm_address,
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[j].sfm_size,
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[j].sfm_file_offset,
+			 mappings[j].sfm_max_prot,
+			 mappings[j].sfm_init_prot));
+		kr2 = mach_vm_deallocate(
+			sr_map,
+			(mappings[j].sfm_address -
+			 sr_base_address),
+			mappings[j].sfm_size);
+		assert(kr2 == KERN_SUCCESS);
+	}
+
+	<span class="enscript-keyword">if</span> (reset_shared_region_state) {
+		vm_shared_region_lock();
+		assert(shared_region-&gt;sr_ref_count &gt; 1);
+		assert(shared_region-&gt;sr_mapping_in_progress);
+		<span class="enscript-comment">/* we're done working on that shared region */</span>
+		shared_region-&gt;sr_mapping_in_progress = FALSE;
+		thread_wakeup((event_t) &amp;shared_region-&gt;sr_mapping_in_progress);
+		vm_shared_region_unlock();
+		reset_shared_region_state = FALSE;
+	}
+
+	vm_shared_region_deallocate(shared_region);
+}
+
+<span class="enscript-comment">/*
+ * Establish some mappings of a file in the shared region.
+ * This is used by &quot;dyld&quot; via the shared_region_map_np() system call
+ * to populate the shared region with the appropriate shared cache.
+ *
+ * One could also call it several times to incrementally load several
+ * libraries, as long as they do not overlap.  
+ * It will return KERN_SUCCESS if the mappings were successfully established
+ * or if they were already established identically by another process.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">vm_shared_region_map_file</span>(
+	vm_shared_region_t		shared_region,
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>			mappings_count,
+	<span class="enscript-type">struct</span> shared_file_mapping_np	*mappings,
+	memory_object_control_t		file_control,
+	memory_object_size_t		file_size,
+	<span class="enscript-type">void</span>				*root_dir,
+	uint32_t			slide,
+	user_addr_t			slide_start,
+	user_addr_t			slide_size)
+{
+	kern_return_t		kr;
+	vm_object_t		file_object;
+	ipc_port_t		sr_handle;
+	vm_named_entry_t	sr_mem_entry;
+	vm_map_t		sr_map;
+	mach_vm_offset_t	sr_base_address;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		i;
+	mach_port_t		map_port;
+	vm_map_offset_t		target_address;
+	vm_object_t		object;
+	vm_object_size_t	obj_size;
+	<span class="enscript-type">struct</span> shared_file_mapping_np	*mapping_to_slide = NULL;
+	mach_vm_offset_t	first_mapping = (mach_vm_offset_t) -1;
+
+
+
+	kr = KERN_SUCCESS;
+
+	vm_shared_region_lock();
+	assert(shared_region-&gt;sr_ref_count &gt; 1);
+
+	<span class="enscript-keyword">if</span> (shared_region-&gt;sr_root_dir != root_dir) {
+		<span class="enscript-comment">/*
+		 * This shared region doesn't match the current root
+		 * directory of this process.  Deny the mapping to
+		 * avoid tainting the shared region with something that	
+		 * doesn't quite belong into it.
+		 */</span>
+		vm_shared_region_unlock();
+		kr = KERN_PROTECTION_FAILURE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Make sure we handle only one mapping at a time in a given
+	 * shared region, to avoid race conditions.  This should not
+	 * happen frequently...
+	 */</span>
+	<span class="enscript-keyword">while</span> (shared_region-&gt;sr_mapping_in_progress) {
+		<span class="enscript-comment">/* wait for our turn... */</span>
+		vm_shared_region_sleep(&amp;shared_region-&gt;sr_mapping_in_progress,
+				       THREAD_UNINT);
+	}
+	assert(! shared_region-&gt;sr_mapping_in_progress);
+	assert(shared_region-&gt;sr_ref_count &gt; 1);
+	<span class="enscript-comment">/* let others know we're working in this shared region */</span>
+	shared_region-&gt;sr_mapping_in_progress = TRUE;
+
+	vm_shared_region_unlock();
+
+	<span class="enscript-comment">/* no need to lock because this data is never modified... */</span>
+	sr_handle = shared_region-&gt;sr_mem_entry;
+	sr_mem_entry = (vm_named_entry_t) sr_handle-&gt;ip_kobject;
+	sr_map = sr_mem_entry-&gt;backing.map;
+	sr_base_address = shared_region-&gt;sr_base_address;
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; map(%p,%d,%p,%p,0x%llx)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region), mappings_count,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(mappings),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(file_control), file_size));
+
+	<span class="enscript-comment">/* get the VM object associated with the file to be mapped */</span>
+	file_object = memory_object_control_to_vm_object(file_control);
+
+	<span class="enscript-comment">/* establish the mappings */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; mappings_count; i++) {
+		SHARED_REGION_TRACE_INFO(
+			(<span class="enscript-string">&quot;shared_region: mapping[%d]: &quot;</span>
+			 <span class="enscript-string">&quot;address:0x%016llx size:0x%016llx offset:0x%016llx &quot;</span>
+			 <span class="enscript-string">&quot;maxprot:0x%x prot:0x%x\n&quot;</span>,
+			 i,
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[i].sfm_address,
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[i].sfm_size,
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[i].sfm_file_offset,
+			 mappings[i].sfm_max_prot,
+			 mappings[i].sfm_init_prot));
+
+		<span class="enscript-keyword">if</span> (mappings[i].sfm_init_prot &amp; VM_PROT_ZF) {
+			<span class="enscript-comment">/* zero-filled memory */</span>
+			map_port = MACH_PORT_NULL;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* file-backed memory */</span>
+			__IGNORE_WCASTALIGN(map_port = (ipc_port_t) file_object-&gt;pager);
+		}
+		
+		<span class="enscript-keyword">if</span> (mappings[i].sfm_init_prot &amp; VM_PROT_SLIDE) {
+			<span class="enscript-comment">/*
+			 * This is the mapping that needs to be slid.
+			 */</span>
+			<span class="enscript-keyword">if</span> (mapping_to_slide != NULL) {
+				SHARED_REGION_TRACE_INFO(
+					(<span class="enscript-string">&quot;shared_region: mapping[%d]: &quot;</span>
+					 <span class="enscript-string">&quot;address:0x%016llx size:0x%016llx &quot;</span>
+					 <span class="enscript-string">&quot;offset:0x%016llx &quot;</span>
+					 <span class="enscript-string">&quot;maxprot:0x%x prot:0x%x &quot;</span>
+					 <span class="enscript-string">&quot;will not be slid as only one such mapping is allowed...\n&quot;</span>,
+					 i,
+					 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[i].sfm_address,
+					 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[i].sfm_size,
+					 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[i].sfm_file_offset,
+					 mappings[i].sfm_max_prot,
+					 mappings[i].sfm_init_prot));
+			} <span class="enscript-keyword">else</span> {
+				mapping_to_slide = &amp;mappings[i];
+			}
+		}
+
+		<span class="enscript-comment">/* mapping's address is relative to the shared region base */</span>
+		target_address =
+			mappings[i].sfm_address - sr_base_address;
+
+		<span class="enscript-comment">/* establish that mapping, OK if it's &quot;already&quot; there */</span>
+		<span class="enscript-keyword">if</span> (map_port == MACH_PORT_NULL) {
+			<span class="enscript-comment">/*
+			 * We want to map some anonymous memory in a
+			 * shared region.
+			 * We have to create the VM object now, so that it
+			 * can be mapped &quot;copy-on-write&quot;.
+			 */</span>
+			obj_size = vm_map_round_page(mappings[i].sfm_size,
+						     VM_MAP_PAGE_MASK(sr_map));
+			object = vm_object_allocate(obj_size);
+			<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL) {
+				kr = KERN_RESOURCE_SHORTAGE;
+			} <span class="enscript-keyword">else</span> {
+				kr = vm_map_enter(
+					sr_map,
+					&amp;target_address,
+					vm_map_round_page(mappings[i].sfm_size,
+							  VM_MAP_PAGE_MASK(sr_map)),
+					0,
+					VM_FLAGS_FIXED | VM_FLAGS_ALREADY,
+					object,
+					0,
+					TRUE,
+					mappings[i].sfm_init_prot &amp; VM_PROT_ALL,
+					mappings[i].sfm_max_prot &amp; VM_PROT_ALL,
+					VM_INHERIT_DEFAULT);
+			}
+		} <span class="enscript-keyword">else</span> {
+			object = VM_OBJECT_NULL; <span class="enscript-comment">/* no anonymous memory here */</span>
+			kr = vm_map_enter_mem_object(
+				sr_map,
+				&amp;target_address,
+				vm_map_round_page(mappings[i].sfm_size,
+						  VM_MAP_PAGE_MASK(sr_map)),
+				0,
+				VM_FLAGS_FIXED | VM_FLAGS_ALREADY,
+				map_port,
+				mappings[i].sfm_file_offset,
+				TRUE,
+				mappings[i].sfm_init_prot &amp; VM_PROT_ALL,
+				mappings[i].sfm_max_prot &amp; VM_PROT_ALL,
+				VM_INHERIT_DEFAULT);
+		}
+
+		<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS) {
+			<span class="enscript-comment">/*
+			 * Record the first (chronologically) successful
+			 * mapping in this shared region.
+			 * We're protected by &quot;sr_mapping_in_progress&quot; here,
+			 * so no need to lock &quot;shared_region&quot;.
+			 */</span>
+			<span class="enscript-keyword">if</span> (first_mapping == (mach_vm_offset_t) -1) {
+				first_mapping = target_address;
+			}
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (map_port == MACH_PORT_NULL) {
+				<span class="enscript-comment">/*
+				 * Get rid of the VM object we just created
+				 * but failed to map.
+				 */</span>
+				vm_object_deallocate(object);
+				object = VM_OBJECT_NULL;
+			}
+			<span class="enscript-keyword">if</span> (kr == KERN_MEMORY_PRESENT) {
+				<span class="enscript-comment">/*
+				 * This exact mapping was already there:
+				 * that's fine.
+				 */</span>
+				SHARED_REGION_TRACE_INFO(
+					(<span class="enscript-string">&quot;shared_region: mapping[%d]: &quot;</span>
+					 <span class="enscript-string">&quot;address:0x%016llx size:0x%016llx &quot;</span>
+					 <span class="enscript-string">&quot;offset:0x%016llx &quot;</span>
+					 <span class="enscript-string">&quot;maxprot:0x%x prot:0x%x &quot;</span>
+					 <span class="enscript-string">&quot;already mapped...\n&quot;</span>,
+					 i,
+					 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[i].sfm_address,
+					 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[i].sfm_size,
+					 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[i].sfm_file_offset,
+					 mappings[i].sfm_max_prot,
+					 mappings[i].sfm_init_prot));
+				<span class="enscript-comment">/*
+				 * We didn't establish this mapping ourselves;
+				 * let's reset its size, so that we do not
+				 * attempt to undo it if an error occurs later.
+				 */</span>
+				mappings[i].sfm_size = 0;
+				kr = KERN_SUCCESS;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* this mapping failed ! */</span>
+				SHARED_REGION_TRACE_ERROR(
+					(<span class="enscript-string">&quot;shared_region: mapping[%d]: &quot;</span>
+					 <span class="enscript-string">&quot;address:0x%016llx size:0x%016llx &quot;</span>
+					 <span class="enscript-string">&quot;offset:0x%016llx &quot;</span>
+					 <span class="enscript-string">&quot;maxprot:0x%x prot:0x%x failed 0x%x\n&quot;</span>,
+					 i,
+					 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[i].sfm_address,
+					 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[i].sfm_size,
+					 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mappings[i].sfm_file_offset,
+					 mappings[i].sfm_max_prot,
+					 mappings[i].sfm_init_prot,
+					 kr));
+
+				vm_shared_region_undo_mappings(sr_map, sr_base_address, mappings, i);
+				<span class="enscript-keyword">break</span>;
+			}
+
+		}
+
+	}
+
+	<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS &amp;&amp;
+	    slide &amp;&amp;
+	    mapping_to_slide != NULL) {
+		kr = vm_shared_region_slide(slide, 
+					    mapping_to_slide-&gt;sfm_file_offset, 
+					    mapping_to_slide-&gt;sfm_size, 
+					    slide_start, 
+					    slide_size, 
+					    file_control);
+		<span class="enscript-keyword">if</span> (kr  != KERN_SUCCESS) {
+			SHARED_REGION_TRACE_ERROR(
+				(<span class="enscript-string">&quot;shared_region: region_slide(&quot;</span>
+				 <span class="enscript-string">&quot;slide:0x%x start:0x%016llx &quot;</span>
+				 <span class="enscript-string">&quot;size:0x%016llx) failed 0x%x\n&quot;</span>,
+				 slide,
+				 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)slide_start,
+				 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)slide_size,
+				 kr));
+			vm_shared_region_undo_mappings(sr_map,
+						       sr_base_address,
+						       mappings,
+						       mappings_count);
+		}
+	}
+
+	vm_shared_region_lock();
+	assert(shared_region-&gt;sr_ref_count &gt; 1);
+	assert(shared_region-&gt;sr_mapping_in_progress);
+	<span class="enscript-comment">/* set &quot;sr_first_mapping&quot;; dyld uses it to validate the shared cache */</span> 
+	<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS &amp;&amp;
+	    shared_region-&gt;sr_first_mapping == (mach_vm_offset_t) -1) {
+		shared_region-&gt;sr_first_mapping = first_mapping;
+	}
+	<span class="enscript-comment">/* we're done working on that shared region */</span>
+	shared_region-&gt;sr_mapping_in_progress = FALSE;
+	thread_wakeup((event_t) &amp;shared_region-&gt;sr_mapping_in_progress);
+	vm_shared_region_unlock();
+
+<span class="enscript-reference">done</span>:
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: map(%p,%d,%p,%p,0x%llx) &lt;- 0x%x \n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(shared_region), mappings_count,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(mappings),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(file_control), file_size, kr));
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ * Enter the appropriate shared region into &quot;map&quot; for &quot;task&quot;.
+ * This involves looking up the shared region (and possibly creating a new
+ * one) for the desired environment, then mapping the VM sub map into the
+ * task's VM &quot;map&quot;, with the appropriate level of pmap-nesting.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">vm_shared_region_enter</span>(
+	<span class="enscript-type">struct</span> _vm_map		*map,
+	<span class="enscript-type">struct</span> task		*task,
+	<span class="enscript-type">void</span>			*fsroot,
+	cpu_type_t		cpu)
+{
+	kern_return_t		kr;
+	vm_shared_region_t	shared_region;
+	vm_map_offset_t		sr_address, sr_offset, target_address;
+	vm_map_size_t		sr_size, mapping_size;
+	vm_map_offset_t		sr_pmap_nesting_start;
+	vm_map_size_t		sr_pmap_nesting_size;
+	ipc_port_t		sr_handle;
+	boolean_t		is_64bit;
+
+	is_64bit = task_has_64BitAddr(task);
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: -&gt; &quot;</span>
+		 <span class="enscript-string">&quot;enter(map=%p,task=%p,root=%p,cpu=%d,64bit=%d)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(map),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(fsroot), cpu, is_64bit));
+
+	<span class="enscript-comment">/* lookup (create if needed) the shared region for this environment */</span>
+	shared_region = vm_shared_region_lookup(fsroot, cpu, is_64bit);
+	<span class="enscript-keyword">if</span> (shared_region == NULL) {
+		<span class="enscript-comment">/* this should not happen ! */</span>
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: -&gt; &quot;</span>
+			 <span class="enscript-string">&quot;enter(map=%p,task=%p,root=%p,cpu=%d,64bit=%d): &quot;</span>
+			 <span class="enscript-string">&quot;lookup failed !\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(map),
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task),
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(fsroot), cpu, is_64bit));
+		<span class="enscript-comment">//panic(&quot;shared_region_enter: lookup failed\n&quot;);
+</span>		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+	
+	<span class="enscript-comment">/* let the task use that shared region */</span>
+	vm_shared_region_set(task, shared_region);
+
+	kr = KERN_SUCCESS;
+	<span class="enscript-comment">/* no need to lock since this data is never modified */</span>
+	sr_address = shared_region-&gt;sr_base_address;
+	sr_size = shared_region-&gt;sr_size;
+	sr_handle = shared_region-&gt;sr_mem_entry;
+	sr_pmap_nesting_start = shared_region-&gt;sr_pmap_nesting_start;
+	sr_pmap_nesting_size = shared_region-&gt;sr_pmap_nesting_size;
+
+	<span class="enscript-comment">/*
+	 * Start mapping the shared region's VM sub map into the task's VM map.
+	 */</span>
+	sr_offset = 0;
+
+	<span class="enscript-keyword">if</span> (sr_pmap_nesting_start &gt; sr_address) {
+		<span class="enscript-comment">/* we need to map a range without pmap-nesting first */</span>
+		target_address = sr_address;
+		mapping_size = sr_pmap_nesting_start - sr_address;
+		kr = vm_map_enter_mem_object(
+			map,
+			&amp;target_address,
+			mapping_size,
+			0,
+			VM_FLAGS_FIXED,
+			sr_handle,
+			sr_offset,
+			TRUE,
+			VM_PROT_READ,
+			VM_PROT_ALL,
+			VM_INHERIT_SHARE);
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+			SHARED_REGION_TRACE_ERROR(
+				(<span class="enscript-string">&quot;shared_region: enter(%p,%p,%p,%d,%d): &quot;</span>
+				 <span class="enscript-string">&quot;vm_map_enter(0x%llx,0x%llx,%p) error 0x%x\n&quot;</span>,
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(map),
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task),
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(fsroot),
+				 cpu, is_64bit,
+				 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)target_address,
+				 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mapping_size,
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(sr_handle), kr));
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		SHARED_REGION_TRACE_DEBUG(
+			(<span class="enscript-string">&quot;shared_region: enter(%p,%p,%p,%d,%d): &quot;</span>
+			 <span class="enscript-string">&quot;vm_map_enter(0x%llx,0x%llx,%p) error 0x%x\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(map),
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task),
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(fsroot), cpu, is_64bit,
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)target_address, (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mapping_size,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(sr_handle), kr));
+		sr_offset += mapping_size;
+		sr_size -= mapping_size;
+	}
+	<span class="enscript-comment">/*
+	 * We may need to map several pmap-nested portions, due to platform
+	 * specific restrictions on pmap nesting.
+	 * The pmap-nesting is triggered by the &quot;VM_MEMORY_SHARED_PMAP&quot; alias...
+	 */</span>
+	<span class="enscript-keyword">for</span> (;
+	     sr_pmap_nesting_size &gt; 0;
+	     sr_offset += mapping_size,
+		     sr_size -= mapping_size,
+		     sr_pmap_nesting_size -= mapping_size) {
+		target_address = sr_address + sr_offset;
+		mapping_size = sr_pmap_nesting_size;
+		<span class="enscript-keyword">if</span> (mapping_size &gt; pmap_nesting_size_max) {
+			mapping_size = (vm_map_offset_t) pmap_nesting_size_max;
+		}
+		kr = vm_map_enter_mem_object(
+			map,
+			&amp;target_address,
+			mapping_size,
+			0,
+			(VM_FLAGS_FIXED | VM_MAKE_TAG(VM_MEMORY_SHARED_PMAP)),
+			sr_handle,
+			sr_offset,
+			TRUE,
+			VM_PROT_READ,
+			VM_PROT_ALL,
+			VM_INHERIT_SHARE);
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+			SHARED_REGION_TRACE_ERROR(
+				(<span class="enscript-string">&quot;shared_region: enter(%p,%p,%p,%d,%d): &quot;</span>
+				 <span class="enscript-string">&quot;vm_map_enter(0x%llx,0x%llx,%p) error 0x%x\n&quot;</span>,
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(map),
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task),
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(fsroot),
+				 cpu, is_64bit,
+				 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)target_address,
+				 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mapping_size,
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(sr_handle), kr));
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		SHARED_REGION_TRACE_DEBUG(
+			(<span class="enscript-string">&quot;shared_region: enter(%p,%p,%p,%d,%d): &quot;</span>
+			 <span class="enscript-string">&quot;nested vm_map_enter(0x%llx,0x%llx,%p) error 0x%x\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(map),
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task),
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(fsroot), cpu, is_64bit,
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)target_address, (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mapping_size,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(sr_handle), kr));
+	}
+	<span class="enscript-keyword">if</span> (sr_size &gt; 0) {
+		<span class="enscript-comment">/* and there's some left to be mapped without pmap-nesting */</span>
+		target_address = sr_address + sr_offset;
+		mapping_size = sr_size;
+		kr = vm_map_enter_mem_object(
+			map,
+			&amp;target_address,
+			mapping_size,
+			0,
+			VM_FLAGS_FIXED,
+			sr_handle,
+			sr_offset,
+			TRUE,
+			VM_PROT_READ,
+			VM_PROT_ALL,
+			VM_INHERIT_SHARE);
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+			SHARED_REGION_TRACE_ERROR(
+				(<span class="enscript-string">&quot;shared_region: enter(%p,%p,%p,%d,%d): &quot;</span>
+				 <span class="enscript-string">&quot;vm_map_enter(0x%llx,0x%llx,%p) error 0x%x\n&quot;</span>,
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(map),
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task),
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(fsroot),
+				 cpu, is_64bit,
+				 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)target_address,
+				 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mapping_size,
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(sr_handle), kr));
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		SHARED_REGION_TRACE_DEBUG(
+			(<span class="enscript-string">&quot;shared_region: enter(%p,%p,%p,%d,%d): &quot;</span>
+			 <span class="enscript-string">&quot;vm_map_enter(0x%llx,0x%llx,%p) error 0x%x\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(map),
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task),
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(fsroot), cpu, is_64bit,
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)target_address, (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)mapping_size,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(sr_handle), kr));
+		sr_offset += mapping_size;
+		sr_size -= mapping_size;
+	}
+	assert(sr_size == 0);
+
+<span class="enscript-reference">done</span>:
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: enter(%p,%p,%p,%d,%d) &lt;- 0x%x\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(map),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(fsroot), cpu, is_64bit, kr));
+	<span class="enscript-keyword">return</span> kr;
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SANE_SLIDE_INFO_SIZE</span>		(2048*1024) <span class="enscript-comment">/*Can be changed if needed*/</span>
+<span class="enscript-type">struct</span> vm_shared_region_slide_info	slide_info;
+
+kern_return_t
+<span class="enscript-function-name">vm_shared_region_sliding_valid</span>(uint32_t slide) 
+{
+	kern_return_t kr = KERN_SUCCESS;
+	vm_shared_region_t sr = vm_shared_region_get(current_task());
+
+	<span class="enscript-comment">/* No region yet? we're fine. */</span>
+	<span class="enscript-keyword">if</span> (sr == NULL) {
+		<span class="enscript-keyword">return</span> kr;
+	}
+
+	<span class="enscript-keyword">if</span> ((sr-&gt;sr_slid == TRUE) &amp;&amp; slide) {
+	        <span class="enscript-keyword">if</span> (slide != vm_shared_region_get_slide_info(sr)-&gt;slide) {
+			printf(<span class="enscript-string">&quot;Only one shared region can be slid\n&quot;</span>);
+			kr = KERN_FAILURE;	
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * Request for sliding when we've
+			 * already done it with exactly the
+			 * same slide value before.
+			 * This isn't wrong technically but
+			 * we don't want to slide again and
+			 * so we return this value.
+			 */</span>
+			kr = KERN_INVALID_ARGUMENT; 
+		}
+	}
+	vm_shared_region_deallocate(sr);
+	<span class="enscript-keyword">return</span> kr;
+}
+
+kern_return_t
+<span class="enscript-function-name">vm_shared_region_slide_init</span>(
+		vm_shared_region_t sr,
+		mach_vm_size_t	slide_info_size,
+		mach_vm_offset_t start,
+		mach_vm_size_t size,
+		uint32_t slide,
+		memory_object_control_t	sr_file_control)
+{
+	kern_return_t kr = KERN_SUCCESS;
+	vm_object_t object = VM_OBJECT_NULL;
+	vm_object_offset_t offset = 0;
+	vm_shared_region_slide_info_t si = vm_shared_region_get_slide_info(sr);
+	vm_offset_t slide_info_entry;
+	
+	vm_map_t map = NULL, cur_map = NULL;
+	boolean_t	is_map_locked = FALSE;
+
+	assert(sr-&gt;sr_slide_in_progress);
+	assert(!sr-&gt;sr_slid);
+	assert(si-&gt;slide_object == NULL);
+	assert(si-&gt;slide_info_entry == NULL);
+
+	<span class="enscript-keyword">if</span> (slide_info_size &gt; SANE_SLIDE_INFO_SIZE) {
+		printf(<span class="enscript-string">&quot;Slide_info_size too large: %lx\n&quot;</span>, (uintptr_t)slide_info_size);
+		kr = KERN_FAILURE;
+		<span class="enscript-keyword">return</span> kr;
+	}
+
+	kr = kmem_alloc(kernel_map,
+			(vm_offset_t *) &amp;slide_info_entry,
+			(vm_size_t) slide_info_size, VM_KERN_MEMORY_OSFMK);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		<span class="enscript-keyword">return</span> kr;
+	}
+
+	<span class="enscript-keyword">if</span> (sr_file_control != MEMORY_OBJECT_CONTROL_NULL) {
+
+		object = memory_object_control_to_vm_object(sr_file_control);
+		vm_object_reference(object);
+		offset = start;
+
+		vm_object_lock(object);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * Remove this entire &quot;else&quot; block and all &quot;map&quot; references
+		 * once we get rid of the shared_region_slide_np()
+		 * system call. 
+		 */</span> 
+		vm_map_entry_t entry = VM_MAP_ENTRY_NULL;
+		map = current_map();
+		vm_map_lock_read(map);
+		is_map_locked = TRUE;
+	<span class="enscript-reference">Retry</span>:
+		cur_map = map;
+		<span class="enscript-keyword">if</span>(!vm_map_lookup_entry(map, start, &amp;entry)) {
+			kr = KERN_INVALID_ARGUMENT;
+		} <span class="enscript-keyword">else</span> {
+			vm_object_t shadow_obj = VM_OBJECT_NULL;
+	 
+			<span class="enscript-keyword">if</span> (entry-&gt;is_sub_map == TRUE) { 
+				map = VME_SUBMAP(entry);
+				start -= entry-&gt;vme_start;
+				start += VME_OFFSET(entry);
+				vm_map_lock_read(map);
+				vm_map_unlock_read(cur_map);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">Retry</span>;
+			} <span class="enscript-keyword">else</span> {
+				object = VME_OBJECT(entry);
+				offset = ((start - entry-&gt;vme_start) +
+					  VME_OFFSET(entry));
+			}
+	 
+			vm_object_lock(object);
+			<span class="enscript-keyword">while</span> (object-&gt;shadow != VM_OBJECT_NULL) {
+				shadow_obj = object-&gt;shadow;
+				vm_object_lock(shadow_obj);
+				vm_object_unlock(object);
+				object = shadow_obj;		
+			}
+		}
+	}
+		
+	<span class="enscript-keyword">if</span> (object-&gt;internal == TRUE) {
+		kr = KERN_INVALID_ADDRESS;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (object-&gt;object_slid) {
+		<span class="enscript-comment">/* Can only be slid once */</span>
+		printf(<span class="enscript-string">&quot;%s: found vm_object %p already slid?\n&quot;</span>, __FUNCTION__, object);
+		kr = KERN_FAILURE;
+	} <span class="enscript-keyword">else</span> {
+
+		si-&gt;slide_info_entry = (vm_shared_region_slide_info_entry_t)slide_info_entry;
+		si-&gt;slide_info_size = slide_info_size;
+		si-&gt;slide_object = object;
+		si-&gt;start = offset;
+		si-&gt;end = si-&gt;start + size;	
+		si-&gt;slide = slide;
+
+		<span class="enscript-comment">/*
+		 * If we want to have this region get deallocated/freed
+		 * then we will have to make sure that we msync(..MS_INVALIDATE..)
+		 * the pages associated with this shared region. Those pages would
+		 * have been slid with an older slide value.
+		 */</span>
+
+		<span class="enscript-comment">/* 
+		 * Pointers in object are held without references; they
+		 * are disconnected at the time that we destroy the
+		 * shared region, and since the shared region holds 
+		 * a reference on the object, no references in the other
+		 * direction are required.
+		 */</span>
+		object-&gt;object_slid = TRUE;
+		object-&gt;vo_slide_info = si;
+	}
+
+	vm_object_unlock(object);
+	<span class="enscript-keyword">if</span> (is_map_locked == TRUE) {
+		vm_map_unlock_read(map);
+	}
+
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		kmem_free(kernel_map, slide_info_entry, slide_info_size);
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-type">void</span>* 
+<span class="enscript-function-name">vm_shared_region_get_slide_info_entry</span>(vm_shared_region_t sr) {
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">void</span>*)sr-&gt;sr_slide_info.slide_info_entry;
+}
+
+
+kern_return_t
+<span class="enscript-function-name">vm_shared_region_slide_sanity_check</span>(vm_shared_region_t sr)
+{
+	uint32_t pageIndex=0;
+	uint16_t entryIndex=0;
+	uint16_t *toc = NULL;
+	vm_shared_region_slide_info_t si;
+	vm_shared_region_slide_info_entry_t s_info;
+	kern_return_t kr;
+
+	si = vm_shared_region_get_slide_info(sr);
+	s_info = si-&gt;slide_info_entry;
+	toc = (uint16_t*)((uintptr_t)s_info + s_info-&gt;toc_offset);
+
+	kr = mach_vm_protect(kernel_map,
+			     (mach_vm_offset_t)(vm_offset_t)s_info,
+			     (mach_vm_size_t) si-&gt;slide_info_size,
+			     TRUE, VM_PROT_READ);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		panic(<span class="enscript-string">&quot;vm_shared_region_slide_sanity_check: vm_protect() error 0x%x\n&quot;</span>, kr);
+	}
+
+	<span class="enscript-keyword">for</span> (;pageIndex &lt; s_info-&gt;toc_count; pageIndex++) {
+
+		entryIndex =  (uint16_t)(toc[pageIndex]);
+		
+		<span class="enscript-keyword">if</span> (entryIndex &gt;= s_info-&gt;entry_count) {
+			printf(<span class="enscript-string">&quot;No sliding bitmap entry for pageIndex: %d at entryIndex: %d amongst %d entries\n&quot;</span>, pageIndex, entryIndex, s_info-&gt;entry_count);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+
+	}
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+<span class="enscript-reference">fail</span>:
+	<span class="enscript-keyword">if</span> (si-&gt;slide_info_entry != NULL) {
+		kmem_free(kernel_map,
+			  (vm_offset_t) si-&gt;slide_info_entry,
+			  (vm_size_t) si-&gt;slide_info_size);
+		
+		vm_object_lock(si-&gt;slide_object);
+		si-&gt;slide_object-&gt;object_slid = FALSE;
+		si-&gt;slide_object-&gt;vo_slide_info = NULL;
+		vm_object_unlock(si-&gt;slide_object);
+		
+		vm_object_deallocate(si-&gt;slide_object);
+	        si-&gt;slide_object	= NULL;
+		si-&gt;start = 0;
+		si-&gt;end = 0;	
+		si-&gt;slide = 0;
+		si-&gt;slide_info_entry = NULL;
+		si-&gt;slide_info_size = 0;
+	}
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+kern_return_t
+<span class="enscript-function-name">vm_shared_region_slide_page</span>(vm_shared_region_slide_info_t si, vm_offset_t vaddr, uint32_t pageIndex)
+{
+	uint16_t *toc = NULL;
+	slide_info_entry_toc_t bitmap = NULL;
+	uint32_t i=0, j=0;
+	uint8_t b = 0;
+	uint32_t slide = si-&gt;slide;
+	<span class="enscript-type">int</span> is_64 = task_has_64BitAddr(current_task());
+
+	vm_shared_region_slide_info_entry_t s_info = si-&gt;slide_info_entry;
+	toc = (uint16_t*)((uintptr_t)s_info + s_info-&gt;toc_offset);
+	
+	<span class="enscript-keyword">if</span> (pageIndex &gt;= s_info-&gt;toc_count) {
+		printf(<span class="enscript-string">&quot;No slide entry for this page in toc. PageIndex: %d Toc Count: %d\n&quot;</span>, pageIndex, s_info-&gt;toc_count);
+	} <span class="enscript-keyword">else</span> {
+		uint16_t entryIndex =  (uint16_t)(toc[pageIndex]);
+		slide_info_entry_toc_t slide_info_entries = (slide_info_entry_toc_t)((uintptr_t)s_info + s_info-&gt;entry_offset);
+		
+		<span class="enscript-keyword">if</span> (entryIndex &gt;= s_info-&gt;entry_count) {
+			printf(<span class="enscript-string">&quot;No sliding bitmap entry for entryIndex: %d amongst %d entries\n&quot;</span>, entryIndex, s_info-&gt;entry_count);
+		} <span class="enscript-keyword">else</span> {
+			bitmap = &amp;slide_info_entries[entryIndex];
+
+			<span class="enscript-keyword">for</span>(i=0; i &lt; NUM_SLIDING_BITMAPS_PER_PAGE; ++i) {
+				b = bitmap-&gt;entry[i];
+				<span class="enscript-keyword">if</span> (b!=0) {
+					<span class="enscript-keyword">for</span> (j=0; j &lt;8; ++j) {
+						<span class="enscript-keyword">if</span> (b &amp; (1 &lt;&lt;j)){
+							uint32_t *ptr_to_slide;
+							uint32_t old_value;
+
+							ptr_to_slide = (uint32_t*)((uintptr_t)(vaddr)+(<span class="enscript-keyword">sizeof</span>(uint32_t)*(i*8 +j)));
+							old_value = *ptr_to_slide;
+							*ptr_to_slide += slide;
+							<span class="enscript-keyword">if</span> (is_64 &amp;&amp; *ptr_to_slide &lt; old_value) {
+								<span class="enscript-comment">/*
+								 * We just slid the low 32 bits of a 64-bit pointer
+								 * and it looks like there should have been a carry-over
+								 * to the upper 32 bits.
+								 * The sliding failed...
+								 */</span>
+								printf(<span class="enscript-string">&quot;vm_shared_region_slide() carry over: i=%d j=%d b=0x%x slide=0x%x old=0x%x new=0x%x\n&quot;</span>,
+								       i, j, b, slide, old_value, *ptr_to_slide);
+								<span class="enscript-keyword">return</span> KERN_FAILURE;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/******************************************************************************/</span>
+<span class="enscript-comment">/* Comm page support                                                          */</span>
+<span class="enscript-comment">/******************************************************************************/</span>
+
+ipc_port_t commpage32_handle = IPC_PORT_NULL;
+ipc_port_t commpage64_handle = IPC_PORT_NULL;
+vm_named_entry_t commpage32_entry = NULL;
+vm_named_entry_t commpage64_entry = NULL;
+vm_map_t commpage32_map = VM_MAP_NULL;
+vm_map_t commpage64_map = VM_MAP_NULL;
+
+ipc_port_t commpage_text32_handle = IPC_PORT_NULL;
+ipc_port_t commpage_text64_handle = IPC_PORT_NULL;
+vm_named_entry_t commpage_text32_entry = NULL;
+vm_named_entry_t commpage_text64_entry = NULL;
+vm_map_t commpage_text32_map = VM_MAP_NULL;
+vm_map_t commpage_text64_map = VM_MAP_NULL;
+
+user32_addr_t commpage_text32_location = (user32_addr_t) _COMM_PAGE32_TEXT_START;
+user64_addr_t commpage_text64_location = (user64_addr_t) _COMM_PAGE64_TEXT_START;
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+<span class="enscript-comment">/*
+ * Create a memory entry, VM submap and pmap for one commpage.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">_vm_commpage_init</span>(
+	ipc_port_t	*handlep,
+	vm_map_size_t	size)
+{
+	kern_return_t		kr;
+	vm_named_entry_t	mem_entry;
+	vm_map_t		new_map;
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;commpage: -&gt; _init(0x%llx)\n&quot;</span>,
+		 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)size));
+
+	kr = mach_memory_entry_allocate(&amp;mem_entry,
+					handlep);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		panic(<span class="enscript-string">&quot;_vm_commpage_init: could not allocate mem_entry&quot;</span>);
+	}
+	new_map = vm_map_create(pmap_create(NULL, 0, 0), 0, size, TRUE);
+	<span class="enscript-keyword">if</span> (new_map == VM_MAP_NULL) {
+		panic(<span class="enscript-string">&quot;_vm_commpage_init: could not allocate VM map&quot;</span>);
+	}
+	mem_entry-&gt;backing.map = new_map;
+	mem_entry-&gt;internal = TRUE;
+	mem_entry-&gt;is_sub_map = TRUE;
+	mem_entry-&gt;offset = 0;
+	mem_entry-&gt;protection = VM_PROT_ALL;
+	mem_entry-&gt;size = size;
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;commpage: _init(0x%llx) &lt;- %p\n&quot;</span>,
+		 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)size, (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(*handlep)));
+}
+#<span class="enscript-reference">endif</span>
+
+
+<span class="enscript-comment">/*
+ *Initialize the comm text pages at boot time
+ */</span>
+ <span class="enscript-type">extern</span> u_int32_t random(<span class="enscript-type">void</span>);
+ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_commpage_text_init</span>(<span class="enscript-type">void</span>)
+{
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;commpage text: -&gt;init()\n&quot;</span>));
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+	<span class="enscript-comment">/* create the 32 bit comm text page */</span>
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> offset = (random() % _PFZ32_SLIDE_RANGE) &lt;&lt; PAGE_SHIFT; <span class="enscript-comment">/* restricting to 32bMAX-2PAGE */</span>
+	_vm_commpage_init(&amp;commpage_text32_handle, _COMM_PAGE_TEXT_AREA_LENGTH);
+	commpage_text32_entry = (vm_named_entry_t) commpage_text32_handle-&gt;ip_kobject;
+	commpage_text32_map = commpage_text32_entry-&gt;backing.map;
+	commpage_text32_location = (user32_addr_t) (_COMM_PAGE32_TEXT_START + offset);
+	<span class="enscript-comment">/* XXX if (cpu_is_64bit_capable()) ? */</span>
+        <span class="enscript-comment">/* create the 64-bit comm page */</span>
+	offset = (random() % _PFZ64_SLIDE_RANGE) &lt;&lt; PAGE_SHIFT; <span class="enscript-comment">/* restricting sliding upto 2Mb range */</span>
+        _vm_commpage_init(&amp;commpage_text64_handle, _COMM_PAGE_TEXT_AREA_LENGTH);
+        commpage_text64_entry = (vm_named_entry_t) commpage_text64_handle-&gt;ip_kobject;
+        commpage_text64_map = commpage_text64_entry-&gt;backing.map;
+	commpage_text64_location = (user64_addr_t) (_COMM_PAGE64_TEXT_START + offset);
+
+	commpage_text_populate();
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">Unknown</span> <span class="enscript-variable-name">architecture</span>.
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __i386__ || __x86_64__ */</span>
+	<span class="enscript-comment">/* populate the routines in here */</span>
+	SHARED_REGION_TRACE_DEBUG(
+                (<span class="enscript-string">&quot;commpage text: init() &lt;-\n&quot;</span>));
+
+}
+
+<span class="enscript-comment">/*
+ * Initialize the comm pages at boot time.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_commpage_init</span>(<span class="enscript-type">void</span>)
+{
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;commpage: -&gt; init()\n&quot;</span>));
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+	<span class="enscript-comment">/* create the 32-bit comm page */</span>
+	_vm_commpage_init(&amp;commpage32_handle, _COMM_PAGE32_AREA_LENGTH);
+	commpage32_entry = (vm_named_entry_t) commpage32_handle-&gt;ip_kobject;
+	commpage32_map = commpage32_entry-&gt;backing.map;
+
+	<span class="enscript-comment">/* XXX if (cpu_is_64bit_capable()) ? */</span>
+	<span class="enscript-comment">/* create the 64-bit comm page */</span>
+	_vm_commpage_init(&amp;commpage64_handle, _COMM_PAGE64_AREA_LENGTH);
+	commpage64_entry = (vm_named_entry_t) commpage64_handle-&gt;ip_kobject;
+	commpage64_map = commpage64_entry-&gt;backing.map;
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __i386__ || __x86_64__ */</span>
+
+	<span class="enscript-comment">/* populate them according to this specific platform */</span>
+	commpage_populate();
+	__commpage_setup = 1;
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+	<span class="enscript-keyword">if</span> (__system_power_source == 0) {
+		post_sys_powersource_internal(0, 1);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __i386__ || __x86_64__ */</span>
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;commpage: init() &lt;-\n&quot;</span>));
+}
+
+<span class="enscript-comment">/*
+ * Enter the appropriate comm page into the task's address space.
+ * This is called at exec() time via vm_map_exec().
+ */</span>
+kern_return_t
+<span class="enscript-function-name">vm_commpage_enter</span>(
+	vm_map_t	map,
+	task_t		task)
+{
+	ipc_port_t		commpage_handle, commpage_text_handle;
+	vm_map_offset_t		commpage_address, objc_address, commpage_text_address;
+	vm_map_size_t		commpage_size, objc_size, commpage_text_size;
+	<span class="enscript-type">int</span>			vm_flags;
+	kern_return_t		kr;
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;commpage: -&gt; enter(%p,%p)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(map),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task)));
+
+	commpage_text_size = _COMM_PAGE_TEXT_AREA_LENGTH;
+	<span class="enscript-comment">/* the comm page is likely to be beyond the actual end of the VM map */</span>
+	vm_flags = VM_FLAGS_FIXED | VM_FLAGS_BEYOND_MAX;
+
+	<span class="enscript-comment">/* select the appropriate comm page for this task */</span>
+	assert(! (task_has_64BitAddr(task) ^ vm_map_is_64bit(map)));
+	<span class="enscript-keyword">if</span> (task_has_64BitAddr(task)) {
+		commpage_handle = commpage64_handle;
+		commpage_address = (vm_map_offset_t) _COMM_PAGE64_BASE_ADDRESS;
+		commpage_size = _COMM_PAGE64_AREA_LENGTH;
+		objc_size = _COMM_PAGE64_OBJC_SIZE;
+		objc_address = _COMM_PAGE64_OBJC_BASE;
+		commpage_text_handle = commpage_text64_handle;
+		commpage_text_address = (vm_map_offset_t) commpage_text64_location;
+	} <span class="enscript-keyword">else</span> {
+		commpage_handle = commpage32_handle;
+		commpage_address =
+			(vm_map_offset_t)(<span class="enscript-type">unsigned</span>) _COMM_PAGE32_BASE_ADDRESS;
+		commpage_size = _COMM_PAGE32_AREA_LENGTH;
+		objc_size = _COMM_PAGE32_OBJC_SIZE;
+		objc_address = _COMM_PAGE32_OBJC_BASE;
+		commpage_text_handle = commpage_text32_handle;
+		commpage_text_address = (vm_map_offset_t) commpage_text32_location;
+	}
+
+	<span class="enscript-keyword">if</span> ((commpage_address &amp; (pmap_nesting_size_min - 1)) == 0 &amp;&amp;
+	    (commpage_size &amp; (pmap_nesting_size_min - 1)) == 0) {
+		<span class="enscript-comment">/* the commpage is properly aligned or sized for pmap-nesting */</span>
+		vm_flags |= VM_MAKE_TAG(VM_MEMORY_SHARED_PMAP);
+	}
+	<span class="enscript-comment">/* map the comm page in the task's address space */</span>
+	assert(commpage_handle != IPC_PORT_NULL);
+	kr = vm_map_enter_mem_object(
+		map,
+		&amp;commpage_address,
+		commpage_size,
+		0,
+		vm_flags,
+		commpage_handle,
+		0,
+		FALSE,
+		VM_PROT_READ,
+		VM_PROT_READ,
+		VM_INHERIT_SHARE);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;commpage: enter(%p,0x%llx,0x%llx) &quot;</span>
+			 <span class="enscript-string">&quot;commpage %p mapping failed 0x%x\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(map),
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)commpage_address,
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)commpage_size,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(commpage_handle), kr));
+	}
+
+	<span class="enscript-comment">/* map the comm text page in the task's address space */</span>
+	assert(commpage_text_handle != IPC_PORT_NULL);
+	kr = vm_map_enter_mem_object(
+		map,
+		&amp;commpage_text_address,
+		commpage_text_size,
+		0,
+		vm_flags,
+		commpage_text_handle,
+		0,
+		FALSE,
+		VM_PROT_READ|VM_PROT_EXECUTE,
+		VM_PROT_READ|VM_PROT_EXECUTE,
+		VM_INHERIT_SHARE);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;commpage text: enter(%p,0x%llx,0x%llx) &quot;</span>
+			 <span class="enscript-string">&quot;commpage text %p mapping failed 0x%x\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(map),
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)commpage_text_address,
+			 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)commpage_text_size,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(commpage_text_handle), kr));
+	}
+
+	<span class="enscript-comment">/*
+	 * Since we're here, we also pre-allocate some virtual space for the
+	 * Objective-C run-time, if needed...
+	 */</span>
+	<span class="enscript-keyword">if</span> (objc_size != 0) {
+		kr = vm_map_enter_mem_object(
+			map,
+			&amp;objc_address,
+			objc_size,
+			0,
+			VM_FLAGS_FIXED | VM_FLAGS_BEYOND_MAX,
+			IPC_PORT_NULL,
+			0,
+			FALSE,
+			VM_PROT_ALL,
+			VM_PROT_ALL,
+			VM_INHERIT_DEFAULT);
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+			SHARED_REGION_TRACE_ERROR(
+				(<span class="enscript-string">&quot;commpage: enter(%p,0x%llx,0x%llx) &quot;</span>
+				 <span class="enscript-string">&quot;objc mapping failed 0x%x\n&quot;</span>,
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(map),
+				 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)objc_address,
+				 (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)objc_size, kr));
+		}
+	}
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;commpage: enter(%p,%p) &lt;- 0x%x\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(map),
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(task), kr));
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">vm_shared_region_slide</span>(uint32_t slide,
+			mach_vm_offset_t	entry_start_address,
+			mach_vm_size_t		entry_size,
+			mach_vm_offset_t	slide_start,
+			mach_vm_size_t		slide_size,
+			memory_object_control_t	sr_file_control)
+{
+	<span class="enscript-type">void</span> *slide_info_entry = NULL;
+	<span class="enscript-type">int</span>			error;
+	vm_shared_region_t	sr;
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;vm_shared_region_slide: -&gt; slide %#x, entry_start %#llx, entry_size %#llx, slide_start %#llx, slide_size %#llx\n&quot;</span>,
+		 slide, entry_start_address, entry_size, slide_start, slide_size));
+
+	sr = vm_shared_region_get(current_task());
+	<span class="enscript-keyword">if</span> (sr == NULL) {
+		printf(<span class="enscript-string">&quot;%s: no shared region?\n&quot;</span>, __FUNCTION__);
+		SHARED_REGION_TRACE_DEBUG(
+			(<span class="enscript-string">&quot;vm_shared_region_slide: &lt;- %d (no shared region)\n&quot;</span>,
+			 KERN_FAILURE));
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+
+	<span class="enscript-comment">/*
+	 * Protect from concurrent access.
+	 */</span>
+	vm_shared_region_lock();
+	<span class="enscript-keyword">while</span>(sr-&gt;sr_slide_in_progress) {
+		vm_shared_region_sleep(&amp;sr-&gt;sr_slide_in_progress, THREAD_UNINT);
+	}
+	<span class="enscript-keyword">if</span> (sr-&gt;sr_slid
+			|| shared_region_completed_slide
+			) {
+		vm_shared_region_unlock();
+
+		vm_shared_region_deallocate(sr);
+		printf(<span class="enscript-string">&quot;%s: shared region already slid?\n&quot;</span>, __FUNCTION__);
+		SHARED_REGION_TRACE_DEBUG(
+			(<span class="enscript-string">&quot;vm_shared_region_slide: &lt;- %d (already slid)\n&quot;</span>,
+			 KERN_FAILURE));
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+
+	sr-&gt;sr_slide_in_progress = TRUE;
+	vm_shared_region_unlock();
+
+	<span class="enscript-keyword">if</span>((error = vm_shared_region_slide_init(sr, slide_size, entry_start_address, entry_size, slide, sr_file_control))) {
+		printf(<span class="enscript-string">&quot;slide_info initialization failed with kr=%d\n&quot;</span>, error);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	slide_info_entry = vm_shared_region_get_slide_info_entry(sr);
+	<span class="enscript-keyword">if</span> (slide_info_entry == NULL){
+		error = KERN_FAILURE;
+	} <span class="enscript-keyword">else</span> {	
+		error = copyin((user_addr_t)slide_start,
+			       slide_info_entry,
+			       (vm_size_t)slide_size);
+		<span class="enscript-keyword">if</span> (error) { 
+			error = KERN_INVALID_ADDRESS;
+		}
+	}
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+ 
+	<span class="enscript-keyword">if</span> (vm_shared_region_slide_sanity_check(sr) != KERN_SUCCESS) {
+ 		error = KERN_INVALID_ARGUMENT; 
+ 		printf(<span class="enscript-string">&quot;Sanity Check failed for slide_info\n&quot;</span>);
+ 	} <span class="enscript-keyword">else</span> {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+		printf(<span class="enscript-string">&quot;Succesfully init slide_info with start_address: %p region_size: %ld slide_header_size: %ld\n&quot;</span>,
+ 				(<span class="enscript-type">void</span>*)(uintptr_t)entry_start_address, 
+ 				(<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)entry_size, 
+ 				(<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)slide_size);
+#<span class="enscript-reference">endif</span>
+	}
+<span class="enscript-reference">done</span>:
+	vm_shared_region_lock();
+
+	assert(sr-&gt;sr_slide_in_progress);
+	assert(sr-&gt;sr_slid == FALSE);
+	sr-&gt;sr_slide_in_progress = FALSE;
+	thread_wakeup(&amp;sr-&gt;sr_slide_in_progress);
+
+	<span class="enscript-keyword">if</span> (error == KERN_SUCCESS) {
+		sr-&gt;sr_slid = TRUE;
+
+		<span class="enscript-comment">/*
+		 * We don't know how to tear down a slid shared region today, because
+		 * we would have to invalidate all the pages that have been slid
+		 * atomically with respect to anyone mapping the shared region afresh.  
+		 * Therefore, take a dangling reference to prevent teardown.  
+		 */</span>
+		sr-&gt;sr_ref_count++; 
+		shared_region_completed_slide = TRUE;
+	}
+	vm_shared_region_unlock();
+
+	vm_shared_region_deallocate(sr);
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;vm_shared_region_slide: &lt;- %d\n&quot;</span>,
+		 error));
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-comment">/* 
+ * This is called from powermanagement code to let kernel know the current source of power.
+ * 0 if it is external source (connected to power )
+ * 1 if it is internal power source ie battery
+ */</span>
+<span class="enscript-type">void</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+<span class="enscript-function-name">post_sys_powersource</span>(<span class="enscript-type">int</span> i)
+#<span class="enscript-reference">else</span>
+<span class="enscript-function-name">post_sys_powersource</span>(__unused <span class="enscript-type">int</span> i)
+#<span class="enscript-reference">endif</span>
+{
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+	post_sys_powersource_internal(i, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __i386__ || __x86_64__ */</span>
+}
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">post_sys_powersource_internal</span>(<span class="enscript-type">int</span> i, <span class="enscript-type">int</span> internal)
+{
+	<span class="enscript-keyword">if</span> (internal == 0)
+		__system_power_source = i;
+
+	<span class="enscript-keyword">if</span> (__commpage_setup != 0) {
+		<span class="enscript-keyword">if</span> (__system_power_source != 0)
+			commpage_set_spin_count(0);
+		<span class="enscript-keyword">else</span>
+			commpage_set_spin_count(MP_SPIN_TRIES);
+	}
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __i386__ || __x86_64__ */</span>
+
+</pre>
+<hr />
+</body></html>

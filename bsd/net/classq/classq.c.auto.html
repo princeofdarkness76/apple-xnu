@@ -1,0 +1,391 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>classq.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">classq.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright (c) 1991-1997 Regents of the University of California.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the Network Research
+ *      Group at Lawrence Berkeley Laboratory.
+ * 4. Neither the name of the University nor of the Laboratory may be used
+ *    to endorse or promote products derived from this software without
+ *    specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/random.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/classq/classq.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+
+u_int32_t classq_verbose = 0;	<span class="enscript-comment">/* more noise if greater than 1 */</span>
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net, OID_AUTO, classq, CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;classq&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_UINT</span>(_net_classq, OID_AUTO, verbose, CTLFLAG_RW|CTLFLAG_LOCKED,
+	&amp;classq_verbose, 0, <span class="enscript-string">&quot;Class queue verbosity level&quot;</span>);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">_qinit</span>(class_queue_t *q, <span class="enscript-type">int</span> type, <span class="enscript-type">int</span> lim)
+{
+	MBUFQ_INIT(&amp;q-&gt;mbufq);
+	qlimit(q) = lim;
+	qlen(q) = 0;
+	qsize(q) = 0;
+	qtype(q) = type;
+	qstate(q) = QS_RUNNING;
+}
+
+<span class="enscript-comment">/* add a packet at the tail of the queue */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">_addq</span>(class_queue_t *q, <span class="enscript-type">struct</span> mbuf *m)
+{
+	MBUFQ_ENQUEUE(&amp;q-&gt;mbufq, m);
+	qlen(q)++;
+	VERIFY(qlen(q) != 0);
+	qsize(q) += m_length(m);
+}
+
+<span class="enscript-comment">/* add one or more packets at the tail of the queue */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">_addq_multi</span>(class_queue_t *q, <span class="enscript-type">struct</span> mbuf *m_head, <span class="enscript-type">struct</span> mbuf *m_tail,
+    u_int32_t cnt, u_int32_t size)
+{
+	MBUFQ_ENQUEUE_MULTI(&amp;q-&gt;mbufq, m_head, m_tail);
+	qlen(q) += cnt;
+	qsize(q) += size;
+}
+
+<span class="enscript-comment">/* get a packet at the head of the queue */</span>
+<span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">_getq</span>(class_queue_t *q)
+{
+	<span class="enscript-type">struct</span> mbuf *m;
+
+	MBUFQ_DEQUEUE(&amp;q-&gt;mbufq, m);
+	<span class="enscript-keyword">if</span> (m == NULL) {
+		VERIFY(qlen(q) == 0);
+		<span class="enscript-keyword">if</span> (qsize(q) &gt; 0)
+			qsize(q) = 0;
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	VERIFY(qlen(q) &gt; 0);
+	qlen(q)--;
+
+	<span class="enscript-comment">/* qsize is an approximation, so adjust if necessary */</span>
+	<span class="enscript-keyword">if</span> (((<span class="enscript-type">int</span>)qsize(q) - m_length(m)) &gt; 0)
+		qsize(q) -= m_length(m);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (qsize(q) != 0)
+		qsize(q) = 0;
+
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-comment">/* get a packet of a specific flow beginning from the head of the queue */</span>
+<span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">_getq_flow</span>(class_queue_t *q, u_int32_t flow)
+{
+	<span class="enscript-type">struct</span> mbuf *m, *m_tmp;
+
+	MBUFQ_FOREACH_SAFE(m, &amp;q-&gt;mbufq, m_tmp) {
+		<span class="enscript-keyword">if</span> (flow == 0 || ((m-&gt;m_flags &amp; M_PKTHDR) &amp;&amp;
+		    m-&gt;m_pkthdr.pkt_flowid == flow)) {
+			<span class="enscript-comment">/* remove it from the class queue */</span>
+			MBUFQ_REMOVE(&amp;q-&gt;mbufq, m);
+			MBUFQ_NEXT(m) = NULL;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (m != NULL) {
+		u_int32_t l = m_length(m);
+
+		VERIFY(qlen(q) &gt; 0);
+		qlen(q)--;
+
+		<span class="enscript-comment">/* qsize is an approximation, so adjust if necessary */</span>
+		<span class="enscript-keyword">if</span> (((<span class="enscript-type">int</span>)qsize(q) - l) &gt; 0)
+			qsize(q) -= l;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (qsize(q) != 0)
+			qsize(q) = 0;
+	}
+
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-comment">/* get all packets starting from the head of the queue */</span>
+<span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">_getq_all</span>(class_queue_t *q)
+{
+	<span class="enscript-type">struct</span> mbuf *m;
+
+	m = MBUFQ_FIRST(&amp;q-&gt;mbufq);
+	MBUFQ_INIT(&amp;q-&gt;mbufq);
+	qlen(q) = 0;
+	qsize(q) = 0;
+
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-comment">/* drop a packet at the tail of the queue */</span>
+<span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">_getq_tail</span>(class_queue_t *q)
+{
+	<span class="enscript-type">struct</span> mq_head *head = &amp;q-&gt;mbufq;
+	<span class="enscript-type">struct</span> mbuf *m = MBUFQ_LAST(head);
+
+	<span class="enscript-keyword">if</span> (m != NULL) {
+		<span class="enscript-type">struct</span> mbuf *n = MBUFQ_FIRST(head);
+
+		<span class="enscript-keyword">while</span> (n != NULL) {
+			<span class="enscript-type">struct</span> mbuf *next = MBUFQ_NEXT(n);
+			<span class="enscript-keyword">if</span> (next == m) {
+				MBUFQ_NEXT(n) = NULL;
+				<span class="enscript-keyword">break</span>;
+			}
+			n = next;
+		}
+		VERIFY(n != NULL ||
+		    (qlen(q) == 1 &amp;&amp; m == MBUFQ_FIRST(head)));
+		VERIFY(qlen(q) &gt; 0);
+		--qlen(q);
+
+		<span class="enscript-comment">/* qsize is an approximation, so adjust if necessary */</span>
+		<span class="enscript-keyword">if</span> (((<span class="enscript-type">int</span>)qsize(q) - m_length(m)) &gt; 0)
+			qsize(q) -= m_length(m);
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (qsize(q) != 0)
+			qsize(q) = 0;
+
+		<span class="enscript-keyword">if</span> (qempty(q)) {
+			VERIFY(MBUFQ_EMPTY(head));
+			MBUFQ_INIT(head);
+		} <span class="enscript-keyword">else</span> {
+			VERIFY(n != NULL);
+			head-&gt;mq_last = &amp;MBUFQ_NEXT(n);
+		}
+	}
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-comment">/* randomly select a packet in the queue */</span>
+<span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">_getq_random</span>(class_queue_t *q)
+{
+	<span class="enscript-type">struct</span> mq_head *head = &amp;q-&gt;mbufq;
+	<span class="enscript-type">struct</span> mbuf *m = NULL;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> n;
+	u_int32_t rnd;
+
+	n = qlen(q);
+	<span class="enscript-keyword">if</span> (n == 0) {
+		VERIFY(MBUFQ_EMPTY(head));
+		<span class="enscript-keyword">if</span> (qsize(q) &gt; 0)
+			qsize(q) = 0;
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	m = MBUFQ_FIRST(head);
+	read_random(&amp;rnd, <span class="enscript-keyword">sizeof</span> (rnd));
+	n = (rnd % n) + 1;
+
+	<span class="enscript-keyword">if</span> (n == 1) {
+		<span class="enscript-keyword">if</span> ((MBUFQ_FIRST(head) = MBUFQ_NEXT(m)) == NULL)
+			(head)-&gt;mq_last = &amp;MBUFQ_FIRST(head);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> mbuf *p = NULL;
+
+		VERIFY(n &gt; 1);
+		<span class="enscript-keyword">while</span> (n--) {
+			<span class="enscript-keyword">if</span> (MBUFQ_NEXT(m) == NULL)
+				<span class="enscript-keyword">break</span>;
+			p = m;
+			m = MBUFQ_NEXT(m);
+		}
+		VERIFY(p != NULL &amp;&amp; MBUFQ_NEXT(p) == m);
+
+		<span class="enscript-keyword">if</span> ((MBUFQ_NEXT(p) = MBUFQ_NEXT(m)) == NULL)
+			(head)-&gt;mq_last = &amp;MBUFQ_NEXT(p);
+	}
+
+	VERIFY(qlen(q) &gt; 0);
+	--qlen(q);
+
+	<span class="enscript-comment">/* qsize is an approximation, so adjust if necessary */</span>
+	<span class="enscript-keyword">if</span> (((<span class="enscript-type">int</span>)qsize(q) - m_length(m)) &gt; 0)
+		qsize(q) -= m_length(m);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (qsize(q) != 0)
+		qsize(q) = 0;
+
+	MBUFQ_NEXT(m) = NULL;
+
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-comment">/* remove a packet from the queue */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">_removeq</span>(class_queue_t *q, <span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">struct</span> mq_head *head = &amp;q-&gt;mbufq;
+	<span class="enscript-type">struct</span> mbuf *m0, **mtail;
+
+	m0 = MBUFQ_FIRST(head);
+	<span class="enscript-keyword">if</span> (m0 == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (m0 != m) {
+		<span class="enscript-keyword">while</span> (MBUFQ_NEXT(m0) != m) {
+			<span class="enscript-keyword">if</span> (m0 == NULL)
+				<span class="enscript-keyword">return</span>;
+			m0 = MBUFQ_NEXT(m0);
+		}
+		mtail = &amp;MBUFQ_NEXT(m0);
+	} <span class="enscript-keyword">else</span> {
+		mtail = &amp;MBUFQ_FIRST(head);
+	}
+
+	*mtail = MBUFQ_NEXT(m);
+	<span class="enscript-keyword">if</span> (*mtail == NULL)
+		head-&gt;mq_last = mtail;
+
+	VERIFY(qlen(q) &gt; 0);
+	--qlen(q);
+
+	<span class="enscript-comment">/* qsize is an approximation, so adjust if necessary */</span>
+	<span class="enscript-keyword">if</span> (((<span class="enscript-type">int</span>)qsize(q) - m_length(m)) &gt; 0)
+		qsize(q) -= m_length(m);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (qsize(q) != 0)
+		qsize(q) = 0;
+
+	MBUFQ_NEXT(m) = NULL;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">_flushq</span>(class_queue_t *q)
+{
+	(<span class="enscript-type">void</span>) _flushq_flow(q, 0, NULL, NULL);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">_flushq_flow</span>(class_queue_t *q, u_int32_t flow, u_int32_t *cnt, u_int32_t *len)
+{
+	MBUFQ_HEAD(mq_freeq) freeq;
+	<span class="enscript-type">struct</span> mbuf *m, *m_tmp;
+	u_int32_t c = 0, l = 0;
+
+	MBUFQ_INIT(&amp;freeq);
+
+	MBUFQ_FOREACH_SAFE(m, &amp;q-&gt;mbufq, m_tmp) {
+		<span class="enscript-keyword">if</span> (flow == 0 || ((m-&gt;m_flags &amp; M_PKTHDR) &amp;&amp;
+		    m-&gt;m_pkthdr.pkt_flowid == flow)) {
+			<span class="enscript-comment">/* remove it from the class queue */</span>
+			MBUFQ_REMOVE(&amp;q-&gt;mbufq, m);
+			MBUFQ_NEXT(m) = NULL;
+
+			<span class="enscript-comment">/* and add it to the free queue */</span>
+			MBUFQ_ENQUEUE(&amp;freeq, m);
+
+			l += m_length(m);
+			c++;
+		}
+	}
+	VERIFY(c == 0 || !MBUFQ_EMPTY(&amp;freeq));
+
+	<span class="enscript-keyword">if</span> (c &gt; 0) {
+		VERIFY(qlen(q) &gt;= c);
+		qlen(q) -= c;
+
+		<span class="enscript-comment">/* qsize is an approximation, so adjust if necessary */</span>
+		<span class="enscript-keyword">if</span> (((<span class="enscript-type">int</span>)qsize(q) - l) &gt; 0)
+			qsize(q) -= l;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (qsize(q) != 0)
+			qsize(q) = 0;
+	}
+
+	<span class="enscript-keyword">if</span> (!MBUFQ_EMPTY(&amp;freeq))
+		m_freem_list(MBUFQ_FIRST(&amp;freeq));
+
+	<span class="enscript-keyword">if</span> (cnt != NULL)
+		*cnt = c;
+	<span class="enscript-keyword">if</span> (len != NULL)
+		*len = l;
+}
+</pre>
+<hr />
+</body></html>

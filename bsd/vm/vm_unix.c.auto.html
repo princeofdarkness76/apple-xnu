@@ -1,0 +1,1816 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>vm_unix.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">vm_unix.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1987 Carnegie-Mellon University
+ * All rights reserved.  The CMU software License Agreement specifies
+ * the terms and conditions for use and redistribution.
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2006 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;meta_features.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_options.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/extmod_statistics.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_traps.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task_access.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task_special_ports.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/time_value.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_prot.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dir.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/trace.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ubc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mman.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cprotect.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kpi_socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kas_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit_kevents.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/spl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/shared_region.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_shared_region.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kern_memorystatus.h&gt;</span>
+
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">_shared_region_map_and_slide</span>(<span class="enscript-type">struct</span> proc*, <span class="enscript-type">int</span>, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>, <span class="enscript-type">struct</span> shared_file_mapping_np*, uint32_t, user_addr_t, user_addr_t);
+<span class="enscript-type">int</span> <span class="enscript-function-name">shared_region_copyin_mappings</span>(<span class="enscript-type">struct</span> proc*, user_addr_t, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>, <span class="enscript-type">struct</span> shared_file_mapping_np *);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> radar_20146450;
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, radar_20146450, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;radar_20146450, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> macho_printf;
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, macho_printf, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;macho_printf, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> apple_protect_pager_data_request_debug;
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, apple_protect_pager_data_request_debug, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;apple_protect_pager_data_request_debug, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEVELOPMENT || DEBUG */</span>
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, vm_do_collapse_compressor, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_counters.do_collapse_compressor, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, vm_do_collapse_compressor_pages, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_counters.do_collapse_compressor_pages, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, vm_do_collapse_terminate, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_counters.do_collapse_terminate, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, vm_do_collapse_terminate_failure, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_counters.do_collapse_terminate_failure, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, vm_should_cow_but_wired, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_counters.should_cow_but_wired, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, vm_create_upl_extra_cow, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_counters.create_upl_extra_cow, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, vm_create_upl_extra_cow_pages, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_counters.create_upl_extra_cow_pages, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, vm_create_upl_lookup_failure_write, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_counters.create_upl_lookup_failure_write, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, vm_create_upl_lookup_failure_copy, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_counters.create_upl_lookup_failure_copy, 0, <span class="enscript-string">&quot;&quot;</span>);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">VM_SCAN_FOR_SHADOW_CHAIN</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> vm_shadow_max_enabled = 0;    <span class="enscript-comment">/* Disabled by default */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">proc_shadow_max</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+vm_shadow_max SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>, <span class="enscript-variable-name">oidp</span>)
+	<span class="enscript-type">int</span> value = 0;
+
+	<span class="enscript-keyword">if</span> (vm_shadow_max_enabled)
+		value = proc_shadow_max();
+
+	<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;value, <span class="enscript-keyword">sizeof</span>(value));
+}
+<span class="enscript-function-name">SYSCTL_PROC</span>(_vm, OID_AUTO, vm_shadow_max, CTLTYPE_INT|CTLFLAG_RD|CTLFLAG_LOCKED,
+    0, 0, &amp;vm_shadow_max, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, vm_shadow_max_enabled, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;vm_shadow_max_enabled, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* VM_SCAN_FOR_SHADOW_CHAIN */</span>
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, vm_debug_events, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;vm_debug_events, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">int</span> __KERNEL_WAITING_ON_TASKGATED_CHECK_ACCESS_UPCALL__(
+	mach_port_t task_access_port, int32_t calling_pid, uint32_t calling_gid, int32_t target_pid);
+<span class="enscript-comment">/*
+ * Sysctl's related to data/stack execution.  See osfmk/vm/vm_map.c
+ */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">SECURE_KERNEL</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> allow_stack_exec, allow_data_exec;
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, allow_stack_exec, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;allow_stack_exec, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, allow_data_exec, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;allow_data_exec, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !SECURE_KERNEL */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *prot_values[] = {
+	<span class="enscript-string">&quot;none&quot;</span>,
+	<span class="enscript-string">&quot;read-only&quot;</span>,
+	<span class="enscript-string">&quot;write-only&quot;</span>,
+	<span class="enscript-string">&quot;read-write&quot;</span>,
+	<span class="enscript-string">&quot;execute-only&quot;</span>,
+	<span class="enscript-string">&quot;read-execute&quot;</span>,
+	<span class="enscript-string">&quot;write-execute&quot;</span>,
+	<span class="enscript-string">&quot;read-write-execute&quot;</span>
+};
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">log_stack_execution_failure</span>(addr64_t vaddr, vm_prot_t prot)
+{
+	printf(<span class="enscript-string">&quot;Data/Stack execution not permitted: %s[pid %d] at virtual address 0x%qx, protections were %s\n&quot;</span>, 
+		current_proc()-&gt;p_comm, current_proc()-&gt;p_pid, vaddr, prot_values[prot &amp; VM_PROT_ALL]);
+}
+
+<span class="enscript-type">int</span> shared_region_unnest_logging = 1;
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, shared_region_unnest_logging, CTLFLAG_RW | CTLFLAG_LOCKED,
+	   &amp;shared_region_unnest_logging, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">int</span> vm_shared_region_unnest_log_interval = 10;
+<span class="enscript-type">int</span> shared_region_unnest_log_count_threshold = 5;
+
+<span class="enscript-comment">/*
+ * Shared cache path enforcement.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> scdir_enforce = 1;
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> scdir_path[] = <span class="enscript-string">&quot;/var/db/dyld/&quot;</span>;
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">SECURE_KERNEL</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, enforce_shared_cache_dir, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;scdir_enforce, 0, <span class="enscript-string">&quot;&quot;</span>);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* These log rate throttling state variables aren't thread safe, but
+ * are sufficient unto the task.
+ */</span>
+<span class="enscript-type">static</span> int64_t last_unnest_log_time = 0; 
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> shared_region_unnest_log_count = 0;
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">log_unnest_badness</span>(
+	vm_map_t	m,
+	vm_map_offset_t s,
+	vm_map_offset_t e) {
+	<span class="enscript-type">struct</span> timeval	tv;
+
+	<span class="enscript-keyword">if</span> (shared_region_unnest_logging == 0)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (shared_region_unnest_logging == 1) {
+		microtime(&amp;tv);
+		<span class="enscript-keyword">if</span> ((tv.tv_sec - last_unnest_log_time) &lt; vm_shared_region_unnest_log_interval) {
+			<span class="enscript-keyword">if</span> (shared_region_unnest_log_count++ &gt; shared_region_unnest_log_count_threshold)
+				<span class="enscript-keyword">return</span>;
+		}
+		<span class="enscript-keyword">else</span> {
+			last_unnest_log_time = tv.tv_sec;
+			shared_region_unnest_log_count = 0;
+		}
+	}
+
+	printf(<span class="enscript-string">&quot;%s[%d] triggered unnest of range 0x%qx-&gt;0x%qx of DYLD shared region in VM map %p. While not abnormal for debuggers, this increases system memory footprint until the target exits.\n&quot;</span>, current_proc()-&gt;p_comm, current_proc()-&gt;p_pid, (uint64_t)s, (uint64_t)e, (<span class="enscript-type">void</span> *) VM_KERNEL_ADDRPERM(m));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">useracc</span>(
+	user_addr_t	addr,
+	user_size_t	len,
+	<span class="enscript-type">int</span>	prot)
+{
+	vm_map_t	map;
+
+	map = current_map();
+	<span class="enscript-keyword">return</span> (vm_map_check_protection(
+			map,
+			vm_map_trunc_page(addr,
+					  vm_map_page_mask(map)),
+			vm_map_round_page(addr+len,
+					  vm_map_page_mask(map)),
+			prot == B_READ ? VM_PROT_READ : VM_PROT_WRITE));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">vslock</span>(
+	user_addr_t	addr,
+	user_size_t	len)
+{
+	kern_return_t	kret;
+	vm_map_t	map;
+
+	map = current_map();
+	kret = vm_map_wire(map,
+			   vm_map_trunc_page(addr,
+					     vm_map_page_mask(map)),
+			   vm_map_round_page(addr+len,
+					     vm_map_page_mask(map)), 
+			   VM_PROT_READ | VM_PROT_WRITE | VM_PROT_MEMORY_TAG_MAKE(VM_KERN_MEMORY_BSD),
+			   FALSE);
+
+	<span class="enscript-keyword">switch</span> (kret) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_SUCCESS</span>:
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ADDRESS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NO_SPACE</span>:
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_PROTECTION_FAILURE</span>:
+		<span class="enscript-keyword">return</span> (EACCES);
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">vsunlock</span>(
+	user_addr_t addr,
+	user_size_t len,
+	__unused <span class="enscript-type">int</span> dirtied)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">FIXME</span>  <span class="enscript-comment">/* [ */</span>
+	pmap_t		pmap;
+	vm_page_t	pg;
+	vm_map_offset_t	vaddr;
+	ppnum_t		paddr;
+#<span class="enscript-reference">endif</span>  <span class="enscript-comment">/* FIXME ] */</span>
+	kern_return_t	kret;
+	vm_map_t	map;
+
+	map = current_map();
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">FIXME</span>  <span class="enscript-comment">/* [ */</span>
+	<span class="enscript-keyword">if</span> (dirtied) {
+		pmap = get_task_pmap(current_task());
+		<span class="enscript-keyword">for</span> (vaddr = vm_map_trunc_page(addr, PAGE_MASK);
+		     vaddr &lt; vm_map_round_page(addr+len, PAGE_MASK);
+		     vaddr += PAGE_SIZE) {
+			paddr = pmap_extract(pmap, vaddr);
+			pg = PHYS_TO_VM_PAGE(paddr);
+			vm_page_set_modified(pg);
+		}
+	}
+#<span class="enscript-reference">endif</span>  <span class="enscript-comment">/* FIXME ] */</span>
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">lint</span>
+	dirtied++;
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* lint */</span>
+	kret = vm_map_unwire(map,
+			     vm_map_trunc_page(addr,
+					       vm_map_page_mask(map)),
+			     vm_map_round_page(addr+len,
+					       vm_map_page_mask(map)),
+			     FALSE);
+	<span class="enscript-keyword">switch</span> (kret) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_SUCCESS</span>:
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ADDRESS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NO_SPACE</span>:
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_PROTECTION_FAILURE</span>:
+		<span class="enscript-keyword">return</span> (EACCES);
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">subyte</span>(
+	user_addr_t addr,
+	<span class="enscript-type">int</span> byte)
+{
+	<span class="enscript-type">char</span> character;
+	
+	character = (<span class="enscript-type">char</span>)byte;
+	<span class="enscript-keyword">return</span> (copyout((<span class="enscript-type">void</span> *)&amp;(character), addr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">char</span>)) == 0 ? 0 : -1);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">suibyte</span>(
+	user_addr_t addr,
+	<span class="enscript-type">int</span> byte)
+{
+	<span class="enscript-type">char</span> character;
+	
+	character = (<span class="enscript-type">char</span>)byte;
+	<span class="enscript-keyword">return</span> (copyout((<span class="enscript-type">void</span> *)&amp;(character), addr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">char</span>)) == 0 ? 0 : -1);
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">fubyte</span>(user_addr_t addr)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> byte;
+
+	<span class="enscript-keyword">if</span> (copyin(addr, (<span class="enscript-type">void</span> *) &amp;byte, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">char</span>)))
+		<span class="enscript-keyword">return</span>(-1);
+	<span class="enscript-keyword">return</span>(byte);
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">fuibyte</span>(user_addr_t addr)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> byte;
+
+	<span class="enscript-keyword">if</span> (copyin(addr, (<span class="enscript-type">void</span> *) &amp;(byte), <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">char</span>)))
+		<span class="enscript-keyword">return</span>(-1);
+	<span class="enscript-keyword">return</span>(byte);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">suword</span>(
+	user_addr_t addr,
+	<span class="enscript-type">long</span> word)
+{
+	<span class="enscript-keyword">return</span> (copyout((<span class="enscript-type">void</span> *) &amp;word, addr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)) == 0 ? 0 : -1);
+}
+
+<span class="enscript-type">long</span> <span class="enscript-function-name">fuword</span>(user_addr_t addr)
+{
+	<span class="enscript-type">long</span> word = 0;
+
+	<span class="enscript-keyword">if</span> (copyin(addr, (<span class="enscript-type">void</span> *) &amp;word, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)))
+		<span class="enscript-keyword">return</span>(-1);
+	<span class="enscript-keyword">return</span>(word);
+}
+
+<span class="enscript-comment">/* suiword and fuiword are the same as suword and fuword, respectively */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">suiword</span>(
+	user_addr_t addr,
+	<span class="enscript-type">long</span> word)
+{
+	<span class="enscript-keyword">return</span> (copyout((<span class="enscript-type">void</span> *) &amp;word, addr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)) == 0 ? 0 : -1);
+}
+
+<span class="enscript-type">long</span> <span class="enscript-function-name">fuiword</span>(user_addr_t addr)
+{
+	<span class="enscript-type">long</span> word = 0;
+
+	<span class="enscript-keyword">if</span> (copyin(addr, (<span class="enscript-type">void</span> *) &amp;word, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)))
+		<span class="enscript-keyword">return</span>(-1);
+	<span class="enscript-keyword">return</span>(word);
+}
+
+<span class="enscript-comment">/*
+ * With a 32-bit kernel and mixed 32/64-bit user tasks, this interface allows the
+ * fetching and setting of process-sized size_t and pointer values.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sulong</span>(user_addr_t addr, int64_t word)
+{
+
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(current_proc())) {
+		<span class="enscript-keyword">return</span>(copyout((<span class="enscript-type">void</span> *)&amp;word, addr, <span class="enscript-keyword">sizeof</span>(word)) == 0 ? 0 : -1);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span>(suiword(addr, (<span class="enscript-type">long</span>)word));
+	}
+}
+
+int64_t
+<span class="enscript-function-name">fulong</span>(user_addr_t addr)
+{
+	int64_t longword;
+
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(current_proc())) {
+		<span class="enscript-keyword">if</span> (copyin(addr, (<span class="enscript-type">void</span> *)&amp;longword, <span class="enscript-keyword">sizeof</span>(longword)) != 0)
+			<span class="enscript-keyword">return</span>(-1);
+		<span class="enscript-keyword">return</span>(longword);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span>((int64_t)fuiword(addr));
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">suulong</span>(user_addr_t addr, uint64_t uword)
+{
+
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(current_proc())) {
+		<span class="enscript-keyword">return</span>(copyout((<span class="enscript-type">void</span> *)&amp;uword, addr, <span class="enscript-keyword">sizeof</span>(uword)) == 0 ? 0 : -1);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span>(suiword(addr, (uint32_t)uword));
+	}
+}
+
+uint64_t
+<span class="enscript-function-name">fuulong</span>(user_addr_t addr)
+{
+	uint64_t ulongword;
+
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(current_proc())) {
+		<span class="enscript-keyword">if</span> (copyin(addr, (<span class="enscript-type">void</span> *)&amp;ulongword, <span class="enscript-keyword">sizeof</span>(ulongword)) != 0)
+			<span class="enscript-keyword">return</span>(-1ULL);
+		<span class="enscript-keyword">return</span>(ulongword);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span>((uint64_t)fuiword(addr));
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">swapon</span>(__unused proc_t procp, __unused <span class="enscript-type">struct</span> swapon_args *uap, __unused <span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-keyword">return</span>(ENOTSUP);
+}
+
+<span class="enscript-comment">/*
+ * pid_for_task
+ *
+ * Find the BSD process ID for the Mach task associated with the given Mach port 
+ * name
+ *
+ * Parameters:	args		User argument descriptor (see below)
+ *
+ * Indirect parameters:	args-&gt;t		Mach port name
+ * 			args-&gt;pid	Process ID (returned value; see below)
+ *
+ * Returns:	KERL_SUCCESS	Success
+ * 		KERN_FAILURE	Not success           
+ *
+ * Implicit returns: args-&gt;pid		Process ID
+ *
+ */</span>
+kern_return_t
+<span class="enscript-function-name">pid_for_task</span>(
+	<span class="enscript-type">struct</span> pid_for_task_args *args)
+{
+	mach_port_name_t	t = args-&gt;t;
+	user_addr_t		pid_addr  = args-&gt;pid;  
+	proc_t p;
+	task_t		t1;
+	<span class="enscript-type">int</span>	pid = -1;
+	kern_return_t	err = KERN_SUCCESS;
+
+	AUDIT_MACH_SYSCALL_ENTER(AUE_PIDFORTASK);
+	AUDIT_ARG(mach_port1, t);
+
+	t1 = port_name_to_task(t);
+
+	<span class="enscript-keyword">if</span> (t1 == TASK_NULL) {
+		err = KERN_FAILURE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">pftout</span>;
+	} <span class="enscript-keyword">else</span> {
+		p = get_bsdtask_info(t1);
+		<span class="enscript-keyword">if</span> (p) {
+			pid  = proc_pid(p);
+			err = KERN_SUCCESS;
+		} <span class="enscript-keyword">else</span> {
+			err = KERN_FAILURE;
+		}
+	}
+	task_deallocate(t1);
+<span class="enscript-reference">pftout</span>:
+	AUDIT_ARG(pid, pid);
+	(<span class="enscript-type">void</span>) copyout((<span class="enscript-type">char</span> *) &amp;pid, pid_addr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+	AUDIT_MACH_SYSCALL_EXIT(err);
+	<span class="enscript-keyword">return</span>(err);
+}
+
+<span class="enscript-comment">/* 
+ *
+ * tfp_policy = KERN_TFP_POLICY_DENY; Deny Mode: None allowed except for self
+ * tfp_policy = KERN_TFP_POLICY_DEFAULT; default mode: all posix checks and upcall via task port for authentication
+ *
+ */</span>
+<span class="enscript-type">static</span>  <span class="enscript-type">int</span> tfp_policy = KERN_TFP_POLICY_DEFAULT;
+
+<span class="enscript-comment">/*
+ *	Routine:	task_for_pid_posix_check
+ *	Purpose:
+ *			Verify that the current process should be allowed to
+ *			get the target process's task port. This is only 
+ *			permitted if:
+ *			- The current process is root
+ *			OR all of the following are true:
+ *			- The target process's real, effective, and saved uids
+ *			  are the same as the current proc's euid,
+ *			- The target process's group set is a subset of the
+ *			  calling process's group set, and
+ *			- The target process hasn't switched credentials.
+ *
+ *	Returns:	TRUE: permitted
+ *			FALSE: denied
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">task_for_pid_posix_check</span>(proc_t target)
+{
+	kauth_cred_t targetcred, mycred;
+	uid_t myuid;
+	<span class="enscript-type">int</span> allowed; 
+
+	<span class="enscript-comment">/* No task_for_pid on bad targets */</span>
+	<span class="enscript-keyword">if</span> (target-&gt;p_stat == SZOMB) {
+		<span class="enscript-keyword">return</span> FALSE;
+	}
+
+	mycred = kauth_cred_get();
+	myuid = kauth_cred_getuid(mycred);
+
+	<span class="enscript-comment">/* If we're running as root, the check passes */</span>
+	<span class="enscript-keyword">if</span> (kauth_cred_issuser(mycred))
+		<span class="enscript-keyword">return</span> TRUE;
+
+	<span class="enscript-comment">/* We're allowed to get our own task port */</span>
+	<span class="enscript-keyword">if</span> (target == current_proc())
+		<span class="enscript-keyword">return</span> TRUE;
+
+	<span class="enscript-comment">/* 
+	 * Under DENY, only root can get another proc's task port,
+	 * so no more checks are needed.
+	 */</span>
+	<span class="enscript-keyword">if</span> (tfp_policy == KERN_TFP_POLICY_DENY) { 
+		<span class="enscript-keyword">return</span> FALSE;
+	}
+
+	targetcred = kauth_cred_proc_ref(target);
+	allowed = TRUE;
+
+	<span class="enscript-comment">/* Do target's ruid, euid, and saved uid match my euid? */</span>
+	<span class="enscript-keyword">if</span> ((kauth_cred_getuid(targetcred) != myuid) || 
+			(kauth_cred_getruid(targetcred) != myuid) ||
+			(kauth_cred_getsvuid(targetcred) != myuid)) {
+		allowed = FALSE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/* Are target's groups a subset of my groups? */</span>
+	<span class="enscript-keyword">if</span> (kauth_cred_gid_subset(targetcred, mycred, &amp;allowed) ||
+			allowed == 0) {
+		allowed = FALSE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/* Has target switched credentials? */</span>
+	<span class="enscript-keyword">if</span> (target-&gt;p_flag &amp; P_SUGID) {
+		allowed = FALSE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	
+<span class="enscript-reference">out</span>:
+	kauth_cred_unref(&amp;targetcred);
+	<span class="enscript-keyword">return</span> allowed;
+}
+
+<span class="enscript-comment">/*
+ *	__KERNEL_WAITING_ON_TASKGATED_CHECK_ACCESS_UPCALL__
+ *
+ *	Description:	Waits for the user space daemon to respond to the request
+ *			we made. Function declared non inline to be visible in
+ *			stackshots and spindumps as well as debugging.
+ */</span>
+<span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">int</span> __KERNEL_WAITING_ON_TASKGATED_CHECK_ACCESS_UPCALL__(
+	mach_port_t task_access_port, int32_t calling_pid, uint32_t calling_gid, int32_t target_pid)
+{
+	<span class="enscript-keyword">return</span> check_task_access(task_access_port, calling_pid, calling_gid, target_pid);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	task_for_pid
+ *	Purpose:
+ *		Get the task port for another &quot;process&quot;, named by its
+ *		process ID on the same host as &quot;target_task&quot;.
+ *
+ *		Only permitted to privileged processes, or processes
+ *		with the same user ID.
+ *
+ *		Note: if pid == 0, an error is return no matter who is calling.
+ *
+ * XXX This should be a BSD system call, not a Mach trap!!!
+ */</span>
+kern_return_t
+<span class="enscript-function-name">task_for_pid</span>(
+	<span class="enscript-type">struct</span> task_for_pid_args *args)
+{
+	mach_port_name_t	target_tport = args-&gt;target_tport;
+	<span class="enscript-type">int</span>			pid = args-&gt;pid;
+	user_addr_t		task_addr = args-&gt;t;
+	proc_t 			p = PROC_NULL;
+	task_t			t1 = TASK_NULL;
+	mach_port_name_t	tret = MACH_PORT_NULL;
+ 	ipc_port_t 		tfpport;
+	<span class="enscript-type">void</span> * sright;
+	<span class="enscript-type">int</span> error = 0;
+
+	AUDIT_MACH_SYSCALL_ENTER(AUE_TASKFORPID);
+	AUDIT_ARG(pid, pid);
+	AUDIT_ARG(mach_port1, target_tport);
+
+	<span class="enscript-comment">/* Always check if pid == 0 */</span>
+	<span class="enscript-keyword">if</span> (pid == 0) {
+		(<span class="enscript-type">void</span> ) copyout((<span class="enscript-type">char</span> *)&amp;t1, task_addr, <span class="enscript-keyword">sizeof</span>(mach_port_name_t));
+		AUDIT_MACH_SYSCALL_EXIT(KERN_FAILURE);
+		<span class="enscript-keyword">return</span>(KERN_FAILURE);
+	}
+
+	t1 = port_name_to_task(target_tport);
+	<span class="enscript-keyword">if</span> (t1 == TASK_NULL) {
+		(<span class="enscript-type">void</span>) copyout((<span class="enscript-type">char</span> *)&amp;t1, task_addr, <span class="enscript-keyword">sizeof</span>(mach_port_name_t));
+		AUDIT_MACH_SYSCALL_EXIT(KERN_FAILURE);
+		<span class="enscript-keyword">return</span>(KERN_FAILURE);
+	} 
+
+
+	p = proc_find(pid);
+	<span class="enscript-keyword">if</span> (p == PROC_NULL) {
+		error = KERN_FAILURE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">tfpout</span>;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_AUDIT</span>
+	AUDIT_ARG(process, p);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (!(task_for_pid_posix_check(p))) {
+		error = KERN_FAILURE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">tfpout</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (p-&gt;task != TASK_NULL) {
+		<span class="enscript-comment">/* If we aren't root and target's task access port is set... */</span>
+		<span class="enscript-keyword">if</span> (!kauth_cred_issuser(kauth_cred_get()) &amp;&amp;
+			p != current_proc() &amp;&amp;
+			(task_get_task_access_port(p-&gt;task, &amp;tfpport) == 0) &amp;&amp;
+			(tfpport != IPC_PORT_NULL)) {
+
+			<span class="enscript-keyword">if</span> (tfpport == IPC_PORT_DEAD) {
+				error = KERN_PROTECTION_FAILURE;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">tfpout</span>;
+			}
+
+			<span class="enscript-comment">/* Call up to the task access server */</span>
+			error = __KERNEL_WAITING_ON_TASKGATED_CHECK_ACCESS_UPCALL__(tfpport, proc_selfpid(), kauth_getgid(), pid);
+
+			<span class="enscript-keyword">if</span> (error != MACH_MSG_SUCCESS) {
+				<span class="enscript-keyword">if</span> (error == MACH_RCV_INTERRUPTED)
+					error = KERN_ABORTED;
+				<span class="enscript-keyword">else</span>
+					error = KERN_FAILURE;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">tfpout</span>;
+			}
+		}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+		error = mac_proc_check_get_task(kauth_cred_get(), p);
+		<span class="enscript-keyword">if</span> (error) {
+			error = KERN_FAILURE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">tfpout</span>;
+		}
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-comment">/* Grant task port access */</span>
+		task_reference(p-&gt;task);
+		extmod_statistics_incr_task_for_pid(p-&gt;task);
+
+		sright = (<span class="enscript-type">void</span> *) convert_task_to_port(p-&gt;task);
+		tret = ipc_port_copyout_send(
+				sright, 
+				get_task_ipcspace(current_task()));
+	} 
+	error = KERN_SUCCESS;
+
+<span class="enscript-reference">tfpout</span>:
+	task_deallocate(t1);
+	AUDIT_ARG(mach_port2, tret);
+	(<span class="enscript-type">void</span>) copyout((<span class="enscript-type">char</span> *) &amp;tret, task_addr, <span class="enscript-keyword">sizeof</span>(mach_port_name_t));
+	<span class="enscript-keyword">if</span> (p != PROC_NULL)
+		proc_rele(p);
+	AUDIT_MACH_SYSCALL_EXIT(error);
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	task_name_for_pid
+ *	Purpose:
+ *		Get the task name port for another &quot;process&quot;, named by its
+ *		process ID on the same host as &quot;target_task&quot;.
+ *
+ *		Only permitted to privileged processes, or processes
+ *		with the same user ID.
+ *
+ * XXX This should be a BSD system call, not a Mach trap!!!
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">task_name_for_pid</span>(
+	<span class="enscript-type">struct</span> task_name_for_pid_args *args)
+{
+	mach_port_name_t	target_tport = args-&gt;target_tport;
+	<span class="enscript-type">int</span>			pid = args-&gt;pid;
+	user_addr_t		task_addr = args-&gt;t;
+	proc_t		p = PROC_NULL;
+	task_t		t1;
+	mach_port_name_t	tret;
+	<span class="enscript-type">void</span> * sright;
+	<span class="enscript-type">int</span> error = 0, refheld = 0;
+	kauth_cred_t target_cred;
+
+	AUDIT_MACH_SYSCALL_ENTER(AUE_TASKNAMEFORPID);
+	AUDIT_ARG(pid, pid);
+	AUDIT_ARG(mach_port1, target_tport);
+
+	t1 = port_name_to_task(target_tport);
+	<span class="enscript-keyword">if</span> (t1 == TASK_NULL) {
+		(<span class="enscript-type">void</span>) copyout((<span class="enscript-type">char</span> *)&amp;t1, task_addr, <span class="enscript-keyword">sizeof</span>(mach_port_name_t));
+		AUDIT_MACH_SYSCALL_EXIT(KERN_FAILURE);
+		<span class="enscript-keyword">return</span>(KERN_FAILURE);
+	} 
+
+	p = proc_find(pid);
+	<span class="enscript-keyword">if</span> (p != PROC_NULL) {
+		AUDIT_ARG(process, p);
+		target_cred = kauth_cred_proc_ref(p);
+		refheld = 1;
+
+		<span class="enscript-keyword">if</span> ((p-&gt;p_stat != SZOMB)
+		    &amp;&amp; ((current_proc() == p)
+			|| kauth_cred_issuser(kauth_cred_get()) 
+			|| ((kauth_cred_getuid(target_cred) == kauth_cred_getuid(kauth_cred_get())) &amp;&amp; 
+			    ((kauth_cred_getruid(target_cred) == kauth_getruid()))))) {
+
+			<span class="enscript-keyword">if</span> (p-&gt;task != TASK_NULL) {
+				task_reference(p-&gt;task);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+				error = mac_proc_check_get_task_name(kauth_cred_get(),  p);
+				<span class="enscript-keyword">if</span> (error) {
+					task_deallocate(p-&gt;task);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">noperm</span>;
+				}
+#<span class="enscript-reference">endif</span>
+				sright = (<span class="enscript-type">void</span> *)convert_task_name_to_port(p-&gt;task);
+				tret = ipc_port_copyout_send(sright, 
+						get_task_ipcspace(current_task()));
+			} <span class="enscript-keyword">else</span>
+				tret  = MACH_PORT_NULL;
+
+			AUDIT_ARG(mach_port2, tret);
+			(<span class="enscript-type">void</span>) copyout((<span class="enscript-type">char</span> *)&amp;tret, task_addr, <span class="enscript-keyword">sizeof</span>(mach_port_name_t));
+			task_deallocate(t1);
+			error = KERN_SUCCESS;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">tnfpout</span>;
+		}
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+<span class="enscript-reference">noperm</span>:
+#<span class="enscript-reference">endif</span>
+    task_deallocate(t1);
+	tret = MACH_PORT_NULL;
+	(<span class="enscript-type">void</span>) copyout((<span class="enscript-type">char</span> *) &amp;tret, task_addr, <span class="enscript-keyword">sizeof</span>(mach_port_name_t));
+	error = KERN_FAILURE;
+<span class="enscript-reference">tnfpout</span>:
+	<span class="enscript-keyword">if</span> (refheld != 0)
+		kauth_cred_unref(&amp;target_cred);
+	<span class="enscript-keyword">if</span> (p != PROC_NULL)
+		proc_rele(p);
+	AUDIT_MACH_SYSCALL_EXIT(error);
+	<span class="enscript-keyword">return</span>(error);
+}
+
+kern_return_t
+<span class="enscript-function-name">pid_suspend</span>(<span class="enscript-type">struct</span> proc *p __unused, <span class="enscript-type">struct</span> pid_suspend_args *args, <span class="enscript-type">int</span> *ret)
+{
+	task_t	target = NULL;
+	proc_t	targetproc = PROC_NULL;
+	<span class="enscript-type">int</span> 	pid = args-&gt;pid;
+	<span class="enscript-type">int</span> 	error = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_proc_check_suspend_resume(p, MAC_PROC_CHECK_SUSPEND);
+	<span class="enscript-keyword">if</span> (error) {
+		error = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (pid == 0) {
+		error = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	targetproc = proc_find(pid);
+	<span class="enscript-keyword">if</span> (targetproc == PROC_NULL) {
+		error = ESRCH;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (!task_for_pid_posix_check(targetproc)) {
+		error = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	target = targetproc-&gt;task;
+	<span class="enscript-keyword">if</span> (target != TASK_NULL) {
+		mach_port_t tfpport;
+
+		<span class="enscript-comment">/* If we aren't root and target's task access port is set... */</span>
+		<span class="enscript-keyword">if</span> (!kauth_cred_issuser(kauth_cred_get()) &amp;&amp;
+			targetproc != current_proc() &amp;&amp;
+			(task_get_task_access_port(target, &amp;tfpport) == 0) &amp;&amp;
+			(tfpport != IPC_PORT_NULL)) {
+
+			<span class="enscript-keyword">if</span> (tfpport == IPC_PORT_DEAD) {
+				error = EACCES;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+
+			<span class="enscript-comment">/* Call up to the task access server */</span>
+			error = __KERNEL_WAITING_ON_TASKGATED_CHECK_ACCESS_UPCALL__(tfpport, proc_selfpid(), kauth_getgid(), pid);
+
+			<span class="enscript-keyword">if</span> (error != MACH_MSG_SUCCESS) {
+				<span class="enscript-keyword">if</span> (error == MACH_RCV_INTERRUPTED)
+					error = EINTR;
+				<span class="enscript-keyword">else</span>
+					error = EPERM;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+		}
+	}
+
+	task_reference(target);
+	error = task_pidsuspend(target);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (error == KERN_INVALID_ARGUMENT) {
+			error = EINVAL;
+		} <span class="enscript-keyword">else</span> {
+			error = EPERM;
+		}
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>
+	<span class="enscript-keyword">else</span> {
+		memorystatus_on_suspend(targetproc);
+	}
+#<span class="enscript-reference">endif</span>
+
+	task_deallocate(target);
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (targetproc != PROC_NULL)
+		proc_rele(targetproc);
+	*ret = error;
+	<span class="enscript-keyword">return</span> error;
+}
+
+kern_return_t
+<span class="enscript-function-name">pid_resume</span>(<span class="enscript-type">struct</span> proc *p __unused, <span class="enscript-type">struct</span> pid_resume_args *args, <span class="enscript-type">int</span> *ret)
+{
+	task_t	target = NULL;
+	proc_t	targetproc = PROC_NULL;
+	<span class="enscript-type">int</span> 	pid = args-&gt;pid;
+	<span class="enscript-type">int</span> 	error = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_proc_check_suspend_resume(p, MAC_PROC_CHECK_RESUME);
+	<span class="enscript-keyword">if</span> (error) {
+		error = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (pid == 0) {
+		error = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	targetproc = proc_find(pid);
+	<span class="enscript-keyword">if</span> (targetproc == PROC_NULL) {
+		error = ESRCH;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (!task_for_pid_posix_check(targetproc)) {
+		error = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	target = targetproc-&gt;task;
+	<span class="enscript-keyword">if</span> (target != TASK_NULL) {
+		mach_port_t tfpport;
+
+		<span class="enscript-comment">/* If we aren't root and target's task access port is set... */</span>
+		<span class="enscript-keyword">if</span> (!kauth_cred_issuser(kauth_cred_get()) &amp;&amp;
+			targetproc != current_proc() &amp;&amp;
+			(task_get_task_access_port(target, &amp;tfpport) == 0) &amp;&amp;
+			(tfpport != IPC_PORT_NULL)) {
+
+			<span class="enscript-keyword">if</span> (tfpport == IPC_PORT_DEAD) {
+				error = EACCES;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+
+			<span class="enscript-comment">/* Call up to the task access server */</span>
+			error = __KERNEL_WAITING_ON_TASKGATED_CHECK_ACCESS_UPCALL__(tfpport, proc_selfpid(), kauth_getgid(), pid);
+
+			<span class="enscript-keyword">if</span> (error != MACH_MSG_SUCCESS) {
+				<span class="enscript-keyword">if</span> (error == MACH_RCV_INTERRUPTED)
+					error = EINTR;
+				<span class="enscript-keyword">else</span>
+					error = EPERM;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+		}
+	}
+
+
+	task_reference(target);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>
+	memorystatus_on_resume(targetproc);
+#<span class="enscript-reference">endif</span>
+
+	error = task_pidresume(target);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (error == KERN_INVALID_ARGUMENT) {
+			error = EINVAL;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (error == KERN_MEMORY_ERROR) {
+				psignal(targetproc, SIGKILL);
+				error = EIO;
+			} <span class="enscript-keyword">else</span>
+				error = EPERM;
+		}
+	}
+	
+	task_deallocate(target);
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (targetproc != PROC_NULL)
+		proc_rele(targetproc);
+	
+	*ret = error;
+	<span class="enscript-keyword">return</span> error;
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_settfp_policy</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1,
+    __unused <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req)
+{
+    <span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> new_value;
+
+    error = SYSCTL_OUT(req, arg1, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+    <span class="enscript-keyword">if</span> (error || req-&gt;newptr == USER_ADDR_NULL)
+        <span class="enscript-keyword">return</span>(error);
+
+	<span class="enscript-keyword">if</span> (!kauth_cred_issuser(kauth_cred_get()))
+		<span class="enscript-keyword">return</span>(EPERM);
+
+	<span class="enscript-keyword">if</span> ((error = SYSCTL_IN(req, &amp;new_value, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)))) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> ((new_value == KERN_TFP_POLICY_DENY) 
+		|| (new_value == KERN_TFP_POLICY_DEFAULT))
+			tfp_policy = new_value;
+	<span class="enscript-keyword">else</span>
+			error = EINVAL;		
+<span class="enscript-reference">out</span>:
+    <span class="enscript-keyword">return</span>(error);
+
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">SECURE_KERNEL</span>)
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> kern_secure_kernel = 1;
+#<span class="enscript-reference">else</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> kern_secure_kernel = 0;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_kern, OID_AUTO, secure_kernel, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;kern_secure_kernel, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_kern, KERN_TFP, tfp, CTLFLAG_RW | CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;tfp&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern_tfp, KERN_TFP_POLICY, policy, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;tfp_policy, <span class="enscript-keyword">sizeof</span>(uint32_t), &amp;sysctl_settfp_policy ,<span class="enscript-string">&quot;I&quot;</span>,<span class="enscript-string">&quot;policy&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, shared_region_trace_level, CTLFLAG_RW | CTLFLAG_LOCKED,
+	   &amp;shared_region_trace_level, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, shared_region_version, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;shared_region_version, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, shared_region_persistence, CTLFLAG_RW | CTLFLAG_LOCKED,
+	   &amp;shared_region_persistence, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-comment">/*
+ * shared_region_check_np:
+ *
+ * This system call is intended for dyld.
+ *
+ * dyld calls this when any process starts to see if the process's shared
+ * region is already set up and ready to use.
+ * This call returns the base address of the first mapping in the
+ * process's shared region's first mapping.
+ * dyld will then check what's mapped at that address.
+ *
+ * If the shared region is empty, dyld will then attempt to map the shared
+ * cache file in the shared region via the shared_region_map_np() system call.
+ *
+ * If something's already mapped in the shared region, dyld will check if it
+ * matches the shared cache it would like to use for that process.
+ * If it matches, evrything's ready and the process can proceed and use the
+ * shared region.
+ * If it doesn't match, dyld will unmap the shared region and map the shared
+ * cache into the process's address space via mmap().
+ *
+ * ERROR VALUES
+ * EINVAL	no shared region
+ * ENOMEM	shared region is empty
+ * EFAULT	bad address for &quot;start_address&quot;
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">shared_region_check_np</span>(
+	__unused <span class="enscript-type">struct</span> proc			*p,
+	<span class="enscript-type">struct</span> shared_region_check_np_args	*uap,
+	__unused <span class="enscript-type">int</span>				*retvalp)
+{
+	vm_shared_region_t	shared_region;
+	mach_vm_offset_t	start_address = 0;
+	<span class="enscript-type">int</span>			error;
+	kern_return_t		kr;
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] -&gt; check_np(0x%llx)\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+		 p-&gt;p_pid, p-&gt;p_comm,
+		 (uint64_t)uap-&gt;start_address));
+
+	<span class="enscript-comment">/* retrieve the current tasks's shared region */</span>
+	shared_region = vm_shared_region_get(current_task());
+	<span class="enscript-keyword">if</span> (shared_region != NULL) {
+		<span class="enscript-comment">/* retrieve address of its first mapping... */</span>
+		kr = vm_shared_region_start_address(shared_region,
+						    &amp;start_address);
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+			error = ENOMEM;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* ... and give it to the caller */</span>
+			error = copyout(&amp;start_address,
+					(user_addr_t) uap-&gt;start_address,
+					<span class="enscript-keyword">sizeof</span> (start_address));
+			<span class="enscript-keyword">if</span> (error) {
+				SHARED_REGION_TRACE_ERROR(
+					(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] &quot;</span>
+					 <span class="enscript-string">&quot;check_np(0x%llx) &quot;</span>
+					 <span class="enscript-string">&quot;copyout(0x%llx) error %d\n&quot;</span>,
+					 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+					 p-&gt;p_pid, p-&gt;p_comm,
+					 (uint64_t)uap-&gt;start_address, (uint64_t)start_address,
+					 error));
+			}
+		}
+		vm_shared_region_deallocate(shared_region);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* no shared region ! */</span>
+		error = EINVAL;
+	}
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] check_np(0x%llx) &lt;- 0x%llx %d\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+		 p-&gt;p_pid, p-&gt;p_comm,
+		 (uint64_t)uap-&gt;start_address, (uint64_t)start_address, error));
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">shared_region_copyin_mappings</span>(
+		<span class="enscript-type">struct</span> proc			*p,
+		user_addr_t			user_mappings,
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>			mappings_count,
+		<span class="enscript-type">struct</span> shared_file_mapping_np	*mappings)
+{
+	<span class="enscript-type">int</span>		error = 0;
+	vm_size_t	mappings_size = 0;
+
+	<span class="enscript-comment">/* get the list of mappings the caller wants us to establish */</span>
+	mappings_size = (vm_size_t) (mappings_count * <span class="enscript-keyword">sizeof</span> (mappings[0]));
+	error = copyin(user_mappings,
+		       mappings,
+		       mappings_size);
+	<span class="enscript-keyword">if</span> (error) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map(): &quot;</span>
+			 <span class="enscript-string">&quot;copyin(0x%llx, %d) failed (error=%d)\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm,
+			 (uint64_t)user_mappings, mappings_count, error));
+	}
+	<span class="enscript-keyword">return</span> error;
+}
+<span class="enscript-comment">/*
+ * shared_region_map_np()
+ *
+ * This system call is intended for dyld.
+ *
+ * dyld uses this to map a shared cache file into a shared region.
+ * This is usually done only the first time a shared cache is needed.
+ * Subsequent processes will just use the populated shared region without
+ * requiring any further setup.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">_shared_region_map_and_slide</span>(
+	<span class="enscript-type">struct</span> proc				*p,
+	<span class="enscript-type">int</span>					fd,
+	uint32_t				mappings_count,
+	<span class="enscript-type">struct</span> shared_file_mapping_np		*mappings,
+	uint32_t				slide,
+	user_addr_t				slide_start,
+	user_addr_t				slide_size)
+{
+	<span class="enscript-type">int</span>				error;
+	kern_return_t			kr;
+	<span class="enscript-type">struct</span> fileproc			*fp;
+	<span class="enscript-type">struct</span> vnode			*vp, *root_vp, *scdir_vp;
+	<span class="enscript-type">struct</span> vnode_attr		va;
+	off_t				fs;
+	memory_object_size_t		file_size;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	vm_prot_t			maxprot = VM_PROT_ALL;
+#<span class="enscript-reference">endif</span>
+	memory_object_control_t		file_control;
+	<span class="enscript-type">struct</span> vm_shared_region		*shared_region;
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] -&gt; map\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+		 p-&gt;p_pid, p-&gt;p_comm));
+
+	shared_region = NULL;
+	fp = NULL;
+	vp = NULL;
+	scdir_vp = NULL;
+
+	<span class="enscript-comment">/* get file structure from file descriptor */</span>
+	error = fp_lookup(p, fd, &amp;fp, 0);
+	<span class="enscript-keyword">if</span> (error) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map: &quot;</span>
+			 <span class="enscript-string">&quot;fd=%d lookup failed (error=%d)\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm, fd, error));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* make sure we're attempting to map a vnode */</span>
+	<span class="enscript-keyword">if</span> (FILEGLOB_DTYPE(fp-&gt;f_fglob) != DTYPE_VNODE) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map: &quot;</span>
+			 <span class="enscript-string">&quot;fd=%d not a vnode (type=%d)\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm,
+			 fd, FILEGLOB_DTYPE(fp-&gt;f_fglob)));
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* we need at least read permission on the file */</span>
+	<span class="enscript-keyword">if</span> (! (fp-&gt;f_fglob-&gt;fg_flag &amp; FREAD)) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map: &quot;</span>
+			 <span class="enscript-string">&quot;fd=%d not readable\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm, fd));
+		error = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* get vnode from file structure */</span>
+	error = vnode_getwithref((vnode_t) fp-&gt;f_fglob-&gt;fg_data);
+	<span class="enscript-keyword">if</span> (error) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map: &quot;</span>
+			 <span class="enscript-string">&quot;fd=%d getwithref failed (error=%d)\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm, fd, error));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	vp = (<span class="enscript-type">struct</span> vnode *) fp-&gt;f_fglob-&gt;fg_data;
+
+	<span class="enscript-comment">/* make sure the vnode is a regular file */</span>
+	<span class="enscript-keyword">if</span> (vp-&gt;v_type != VREG) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map(%p:'%s'): &quot;</span>
+			 <span class="enscript-string">&quot;not a file (type=%d)\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(vp),
+			 vp-&gt;v_name, vp-&gt;v_type));
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-comment">/* pass in 0 for the offset argument because AMFI does not need the offset
+		of the shared cache */</span>
+	error = mac_file_check_mmap(vfs_context_ucred(vfs_context_current()),
+			fp-&gt;f_fglob, VM_PROT_ALL, MAP_FILE, 0, &amp;maxprot);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_PROTECT</span>
+	<span class="enscript-comment">/* check for content protection access */</span>
+	{
+		error = cp_handle_vnop(vp, CP_READ_ACCESS | CP_WRITE_ACCESS, 0);
+		<span class="enscript-keyword">if</span> (error) { 
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_PROTECT */</span>
+
+	<span class="enscript-comment">/* make sure vnode is on the process's root volume */</span>
+	root_vp = p-&gt;p_fd-&gt;fd_rdir;
+	<span class="enscript-keyword">if</span> (root_vp == NULL) {
+		root_vp = rootvnode;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * Chroot-ed processes can't use the shared_region.
+		 */</span>
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (vp-&gt;v_mount != root_vp-&gt;v_mount) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map(%p:'%s'): &quot;</span>
+			 <span class="enscript-string">&quot;not on process's root volume\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(vp), vp-&gt;v_name));
+		error = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* make sure vnode is owned by &quot;root&quot; */</span>
+	VATTR_INIT(&amp;va);
+	VATTR_WANTED(&amp;va, va_uid);
+	error = vnode_getattr(vp, &amp;va, vfs_context_current());
+	<span class="enscript-keyword">if</span> (error) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map(%p:'%s'): &quot;</span>
+			 <span class="enscript-string">&quot;vnode_getattr(%p) failed (error=%d)\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(vp), vp-&gt;v_name,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(vp), error));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">if</span> (va.va_uid != 0) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map(%p:'%s'): &quot;</span>
+			 <span class="enscript-string">&quot;owned by uid=%d instead of 0\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(vp),
+			 vp-&gt;v_name, va.va_uid));
+		error = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (scdir_enforce) {
+		<span class="enscript-comment">/* get vnode for scdir_path */</span>
+		error = vnode_lookup(scdir_path, 0, &amp;scdir_vp, vfs_context_current());
+		<span class="enscript-keyword">if</span> (error) {
+			SHARED_REGION_TRACE_ERROR(
+				(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map(%p:'%s'): &quot;</span>
+				 <span class="enscript-string">&quot;vnode_lookup(%s) failed (error=%d)\n&quot;</span>,
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+				 p-&gt;p_pid, p-&gt;p_comm,
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(vp), vp-&gt;v_name,
+				 scdir_path, error));
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+
+		<span class="enscript-comment">/* ensure parent is scdir_vp */</span>
+		<span class="enscript-keyword">if</span> (vnode_parent(vp) != scdir_vp) {
+			SHARED_REGION_TRACE_ERROR(
+				(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map(%p:'%s'): &quot;</span>
+				 <span class="enscript-string">&quot;shared cache file not in %s\n&quot;</span>,
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+				 p-&gt;p_pid, p-&gt;p_comm,
+				 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(vp),
+				 vp-&gt;v_name, scdir_path));
+			error = EPERM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+	}
+
+	<span class="enscript-comment">/* get vnode size */</span>
+	error = vnode_size(vp, &amp;fs, vfs_context_current());
+	<span class="enscript-keyword">if</span> (error) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map(%p:'%s'): &quot;</span>
+			 <span class="enscript-string">&quot;vnode_size(%p) failed (error=%d)\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(vp), vp-&gt;v_name,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(vp), error));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	file_size = fs;
+
+	<span class="enscript-comment">/* get the file's memory object handle */</span>
+	file_control = ubc_getobject(vp, UBC_HOLDOBJECT);
+	<span class="enscript-keyword">if</span> (file_control == MEMORY_OBJECT_CONTROL_NULL) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map(%p:'%s'): &quot;</span>
+			 <span class="enscript-string">&quot;no memory object\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(vp), vp-&gt;v_name));
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+
+	<span class="enscript-comment">/* get the process's shared region (setup in vm_map_exec()) */</span>
+	shared_region = vm_shared_region_get(current_task());
+	<span class="enscript-keyword">if</span> (shared_region == NULL) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map(%p:'%s'): &quot;</span>
+			 <span class="enscript-string">&quot;no shared region\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(vp), vp-&gt;v_name));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* map the file into that shared region's submap */</span>
+	kr = vm_shared_region_map_file(shared_region,
+				       mappings_count,
+				       mappings,
+				       file_control,
+				       file_size,
+				       (<span class="enscript-type">void</span> *) p-&gt;p_fd-&gt;fd_rdir,
+				       slide,
+				       slide_start,
+				       slide_size);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map(%p:'%s'): &quot;</span>
+			 <span class="enscript-string">&quot;vm_shared_region_map_file() failed kr=0x%x\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(vp), vp-&gt;v_name, kr));
+		<span class="enscript-keyword">switch</span> (kr) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ADDRESS</span>:
+			error = EFAULT;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_PROTECTION_FAILURE</span>:
+			error = EPERM;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NO_SPACE</span>:
+			error = ENOMEM;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_FAILURE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ARGUMENT</span>:
+		<span class="enscript-reference">default</span>:
+			error = EINVAL;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	error = 0;
+
+	vnode_lock_spin(vp);
+
+	vp-&gt;v_flag |= VSHARED_DYLD;
+
+	vnode_unlock(vp);
+
+	<span class="enscript-comment">/* update the vnode's access time */</span>
+	<span class="enscript-keyword">if</span> (! (vnode_vfsvisflags(vp) &amp; MNT_NOATIME)) {
+		VATTR_INIT(&amp;va);
+		nanotime(&amp;va.va_access_time);
+		VATTR_SET_ACTIVE(&amp;va, va_access_time);
+		vnode_setattr(vp, &amp;va, vfs_context_current());
+	}
+
+	<span class="enscript-keyword">if</span> (p-&gt;p_flag &amp; P_NOSHLIB) {
+		<span class="enscript-comment">/* signal that this process is now using split libraries */</span>
+		OSBitAndAtomic(~((uint32_t)P_NOSHLIB), &amp;p-&gt;p_flag);
+	}
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (vp != NULL) {
+		<span class="enscript-comment">/*
+		 * release the vnode...
+		 * ubc_map() still holds it for us in the non-error case
+		 */</span>
+		(<span class="enscript-type">void</span>) vnode_put(vp);
+		vp = NULL;
+	}
+	<span class="enscript-keyword">if</span> (fp != NULL) {
+		<span class="enscript-comment">/* release the file descriptor */</span>
+		fp_drop(p, fd, fp, 0);
+		fp = NULL;
+	}
+	<span class="enscript-keyword">if</span> (scdir_vp != NULL) {
+		(<span class="enscript-type">void</span>)vnode_put(scdir_vp);
+		scdir_vp = NULL;
+	}
+
+	<span class="enscript-keyword">if</span> (shared_region != NULL) {
+		vm_shared_region_deallocate(shared_region);
+	}
+
+	SHARED_REGION_TRACE_DEBUG(
+		(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] &lt;- map\n&quot;</span>,
+		 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+		 p-&gt;p_pid, p-&gt;p_comm));
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">shared_region_map_and_slide_np</span>(
+	<span class="enscript-type">struct</span> proc				*p,
+	<span class="enscript-type">struct</span> shared_region_map_and_slide_np_args	*uap,
+	__unused <span class="enscript-type">int</span>					*retvalp)
+{
+	<span class="enscript-type">struct</span> shared_file_mapping_np	*mappings;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>			mappings_count = uap-&gt;count;
+	kern_return_t			kr = KERN_SUCCESS;
+	uint32_t			slide = uap-&gt;slide;
+	
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SFM_MAX_STACK</span>	8
+	<span class="enscript-type">struct</span> shared_file_mapping_np	stack_mappings[SFM_MAX_STACK];
+
+	<span class="enscript-comment">/* Is the process chrooted?? */</span>
+	<span class="enscript-keyword">if</span> (p-&gt;p_fd-&gt;fd_rdir != NULL) {
+		kr = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+		
+	<span class="enscript-keyword">if</span> ((kr = vm_shared_region_sliding_valid(slide)) != KERN_SUCCESS) {
+		<span class="enscript-keyword">if</span> (kr == KERN_INVALID_ARGUMENT) {
+			<span class="enscript-comment">/*
+			 * This will happen if we request sliding again 
+			 * with the same slide value that was used earlier
+			 * for the very first sliding.
+			 */</span>
+			kr = KERN_SUCCESS;
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (mappings_count == 0) {
+		SHARED_REGION_TRACE_INFO(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map(): &quot;</span>
+			 <span class="enscript-string">&quot;no mappings\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm));
+		kr = 0;	<span class="enscript-comment">/* no mappings: we're done ! */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (mappings_count &lt;= SFM_MAX_STACK) {
+		mappings = &amp;stack_mappings[0];
+	} <span class="enscript-keyword">else</span> {
+		SHARED_REGION_TRACE_ERROR(
+			(<span class="enscript-string">&quot;shared_region: %p [%d(%s)] map(): &quot;</span>
+			 <span class="enscript-string">&quot;too many mappings (%d)\n&quot;</span>,
+			 (<span class="enscript-type">void</span> *)VM_KERNEL_ADDRPERM(current_thread()),
+			 p-&gt;p_pid, p-&gt;p_comm,
+			 mappings_count));
+		kr = KERN_FAILURE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ( (kr = shared_region_copyin_mappings(p, uap-&gt;mappings, uap-&gt;count, mappings))) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+
+	kr = _shared_region_map_and_slide(p, uap-&gt;fd, mappings_count, mappings,
+					  slide,
+					  uap-&gt;slide_start, uap-&gt;slide_size);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		<span class="enscript-keyword">return</span> kr;
+	}
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/* sysctl overflow room */</span>
+
+<span class="enscript-function-name">SYSCTL_INT</span> (_vm, OID_AUTO, pagesize, CTLFLAG_RD | CTLFLAG_LOCKED,
+	    (<span class="enscript-type">int</span> *) &amp;page_size, 0, <span class="enscript-string">&quot;vm page size&quot;</span>);
+
+<span class="enscript-comment">/* vm_page_free_target is provided as a makeshift solution for applications that want to
+	allocate buffer space, possibly purgeable memory, but not cause inactive pages to be
+	reclaimed. It allows the app to calculate how much memory is free outside the free target. */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	vm_page_free_target;
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, vm_page_free_target, CTLFLAG_RD | CTLFLAG_LOCKED, 
+		   &amp;vm_page_free_target, 0, <span class="enscript-string">&quot;Pageout daemon free target&quot;</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	vm_memory_pressure;
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, memory_pressure, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_memory_pressure, 0, <span class="enscript-string">&quot;Memory pressure indicator&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+vm_ctl_page_free_wanted SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> page_free_wanted;
+
+	page_free_wanted = mach_vm_ctl_page_free_wanted();
+	<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;page_free_wanted, <span class="enscript-keyword">sizeof</span> (page_free_wanted));
+}
+<span class="enscript-function-name">SYSCTL_PROC</span>(_vm, OID_AUTO, page_free_wanted,
+	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED,
+	    0, 0, vm_ctl_page_free_wanted, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	vm_page_purgeable_count;
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, page_purgeable_count, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_purgeable_count, 0, <span class="enscript-string">&quot;Purgeable page count&quot;</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	vm_page_purgeable_wired_count;
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, page_purgeable_wired_count, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_purgeable_wired_count, 0, <span class="enscript-string">&quot;Wired purgeable page count&quot;</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	vm_pageout_purged_objects;
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, pageout_purged_objects, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_pageout_purged_objects, 0, <span class="enscript-string">&quot;System purged object count&quot;</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> madvise_free_debug;
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, madvise_free_debug, CTLFLAG_RW | CTLFLAG_LOCKED,
+	   &amp;madvise_free_debug, 0, <span class="enscript-string">&quot;zero-fill on madvise(MADV_FREE*)&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, page_reusable_count, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_stats_reusable.reusable_count, 0, <span class="enscript-string">&quot;Reusable page count&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_vm, OID_AUTO, reusable_success, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_stats_reusable.reusable_pages_success, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_vm, OID_AUTO, reusable_failure, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_stats_reusable.reusable_pages_failure, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_vm, OID_AUTO, reusable_shared, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_stats_reusable.reusable_pages_shared, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_vm, OID_AUTO, all_reusable_calls, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_stats_reusable.all_reusable_calls, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_vm, OID_AUTO, partial_reusable_calls, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_stats_reusable.partial_reusable_calls, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_vm, OID_AUTO, reuse_success, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_stats_reusable.reuse_pages_success, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_vm, OID_AUTO, reuse_failure, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_stats_reusable.reuse_pages_failure, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_vm, OID_AUTO, all_reuse_calls, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_stats_reusable.all_reuse_calls, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_vm, OID_AUTO, partial_reuse_calls, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_stats_reusable.partial_reuse_calls, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_vm, OID_AUTO, can_reuse_success, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_stats_reusable.can_reuse_success, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_vm, OID_AUTO, can_reuse_failure, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_stats_reusable.can_reuse_failure, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_vm, OID_AUTO, reusable_reclaimed, CTLFLAG_RD | CTLFLAG_LOCKED,
+	   &amp;vm_page_stats_reusable.reusable_reclaimed, <span class="enscript-string">&quot;&quot;</span>);
+
+
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> vm_page_free_count, vm_page_speculative_count;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, page_free_count, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_page_free_count, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, page_speculative_count, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_page_speculative_count, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> vm_page_cleaned_count;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, page_cleaned_count, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_page_cleaned_count, 0, <span class="enscript-string">&quot;Cleaned queue size&quot;</span>);
+
+<span class="enscript-comment">/* pageout counts */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> vm_pageout_inactive_dirty_internal, vm_pageout_inactive_dirty_external, vm_pageout_inactive_clean, vm_pageout_speculative_clean, vm_pageout_inactive_used;
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> vm_pageout_freed_from_inactive_clean, vm_pageout_freed_from_speculative;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_inactive_dirty_internal, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_inactive_dirty_internal, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_inactive_dirty_external, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_inactive_dirty_external, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_inactive_clean, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_inactive_clean, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_speculative_clean, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_speculative_clean, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_inactive_used, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_inactive_used, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_freed_from_inactive_clean, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_freed_from_inactive_clean, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_freed_from_speculative, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_freed_from_speculative, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> vm_pageout_freed_from_cleaned;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_freed_from_cleaned, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_freed_from_cleaned, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-comment">/* counts of pages entering the cleaned queue */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> vm_pageout_enqueued_cleaned, vm_pageout_enqueued_cleaned_from_inactive_clean, vm_pageout_enqueued_cleaned_from_inactive_dirty;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_enqueued_cleaned, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_enqueued_cleaned, 0, <span class="enscript-string">&quot;&quot;</span>); <span class="enscript-comment">/* sum of next two */</span>
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_enqueued_cleaned_from_inactive_clean, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_enqueued_cleaned_from_inactive_clean, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_enqueued_cleaned_from_inactive_dirty, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_enqueued_cleaned_from_inactive_dirty, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-comment">/* counts of pages leaving the cleaned queue */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> vm_pageout_cleaned_reclaimed, vm_pageout_cleaned_reactivated, vm_pageout_cleaned_reference_reactivated, vm_pageout_cleaned_volatile_reactivated, vm_pageout_cleaned_fault_reactivated, vm_pageout_cleaned_commit_reactivated, vm_pageout_cleaned_busy, vm_pageout_cleaned_nolock;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_cleaned, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_cleaned_reclaimed, 0, <span class="enscript-string">&quot;Cleaned pages reclaimed&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_cleaned_reactivated, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_cleaned_reactivated, 0, <span class="enscript-string">&quot;Cleaned pages reactivated&quot;</span>); <span class="enscript-comment">/* sum of all reactivated AND busy and nolock (even though those actually get reDEactivated */</span>
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_cleaned_reference_reactivated, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_cleaned_reference_reactivated, 0, <span class="enscript-string">&quot;Cleaned pages reference reactivated&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_cleaned_volatile_reactivated, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_cleaned_volatile_reactivated, 0, <span class="enscript-string">&quot;Cleaned pages volatile reactivated&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_cleaned_fault_reactivated, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_cleaned_fault_reactivated, 0, <span class="enscript-string">&quot;Cleaned pages fault reactivated&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_cleaned_commit_reactivated, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_cleaned_commit_reactivated, 0, <span class="enscript-string">&quot;Cleaned pages commit reactivated&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_cleaned_busy, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_cleaned_busy, 0, <span class="enscript-string">&quot;Cleaned pages busy (deactivated)&quot;</span>);
+<span class="enscript-function-name">SYSCTL_UINT</span>(_vm, OID_AUTO, pageout_cleaned_nolock, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;vm_pageout_cleaned_nolock, 0, <span class="enscript-string">&quot;Cleaned pages no-lock (deactivated)&quot;</span>);
+
+<span class="enscript-comment">/* counts of pages prefaulted when entering a memory object */</span>
+<span class="enscript-type">extern</span> int64_t vm_prefault_nb_pages, vm_prefault_nb_bailout;
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_vm, OID_AUTO, prefault_nb_pages, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;vm_prefault_nb_pages, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_vm, OID_AUTO, prefault_nb_bailout, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;vm_prefault_nb_bailout, <span class="enscript-string">&quot;&quot;</span>);
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_pageout_io_throttle</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_pageout_io_throttle</span>(<span class="enscript-type">void</span>) {
+	<span class="enscript-type">struct</span> uthread *uthread = get_bsdthread_info(current_thread());
+ 
+               <span class="enscript-comment">/*
+                * thread is marked as a low priority I/O type
+                * and the I/O we issued while in this cleaning operation
+                * collided with normal I/O operations... we'll
+                * delay in order to mitigate the impact of this
+                * task on the normal operation of the system
+                */</span>
+
+	<span class="enscript-keyword">if</span> (uthread-&gt;uu_lowpri_window) {
+		throttle_lowpri_io(1);
+	}
+
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">vm_pressure_monitor</span>(
+	__unused <span class="enscript-type">struct</span> proc *p,
+	<span class="enscript-type">struct</span> vm_pressure_monitor_args *uap,
+	<span class="enscript-type">int</span> *retval)
+{
+	kern_return_t	kr;
+	uint32_t	pages_reclaimed;
+	uint32_t	pages_wanted;
+
+	kr = mach_vm_pressure_monitor(
+		(boolean_t) uap-&gt;wait_for_pressure,
+		uap-&gt;nsecs_monitored,
+		(uap-&gt;pages_reclaimed) ? &amp;pages_reclaimed : NULL,
+		&amp;pages_wanted);
+
+	<span class="enscript-keyword">switch</span> (kr) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_SUCCESS</span>:
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_ABORTED</span>:
+		<span class="enscript-keyword">return</span> EINTR;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-keyword">if</span> (uap-&gt;pages_reclaimed) {
+		<span class="enscript-keyword">if</span> (copyout((<span class="enscript-type">void</span> *)&amp;pages_reclaimed,
+			    uap-&gt;pages_reclaimed,
+			    <span class="enscript-keyword">sizeof</span> (pages_reclaimed)) != 0) {
+			<span class="enscript-keyword">return</span> EFAULT;
+		}
+	}
+
+	*retval = (<span class="enscript-type">int</span>) pages_wanted;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kas_info</span>(<span class="enscript-type">struct</span> proc *p,
+			  <span class="enscript-type">struct</span> kas_info_args *uap,
+			  <span class="enscript-type">int</span> *retval __unused)
+{
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">SECURE_KERNEL</span>
+	(<span class="enscript-type">void</span>)p;
+	(<span class="enscript-type">void</span>)uap;
+	<span class="enscript-keyword">return</span> ENOTSUP;
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !SECURE_KERNEL */</span>
+	<span class="enscript-type">int</span>			selector = uap-&gt;selector;
+	user_addr_t	valuep = uap-&gt;value;
+	user_addr_t	sizep = uap-&gt;size;
+	user_size_t size;
+	<span class="enscript-type">int</span>			error;
+
+	<span class="enscript-keyword">if</span> (!kauth_cred_issuser(kauth_cred_get())) {
+		<span class="enscript-keyword">return</span> EPERM;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_system_check_kas_info(kauth_cred_get(), selector);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">return</span> error;
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+		user64_size_t size64;
+		error = copyin(sizep, &amp;size64, <span class="enscript-keyword">sizeof</span>(size64));
+		size = (user_size_t)size64;
+	} <span class="enscript-keyword">else</span> {
+		user32_size_t size32;
+		error = copyin(sizep, &amp;size32, <span class="enscript-keyword">sizeof</span>(size32));
+		size = (user_size_t)size32;
+	}
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">return</span> error;
+	}
+
+	<span class="enscript-keyword">switch</span> (selector) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KAS_INFO_KERNEL_TEXT_SLIDE_SELECTOR</span>:
+			{
+				uint64_t slide = vm_kernel_slide;
+
+				<span class="enscript-keyword">if</span> (<span class="enscript-keyword">sizeof</span>(slide) != size) {
+					<span class="enscript-keyword">return</span> EINVAL;
+				}
+				
+				<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+					user64_size_t size64 = (user64_size_t)size;
+					error = copyout(&amp;size64, sizep, <span class="enscript-keyword">sizeof</span>(size64));
+				} <span class="enscript-keyword">else</span> {
+					user32_size_t size32 = (user32_size_t)size;
+					error = copyout(&amp;size32, sizep, <span class="enscript-keyword">sizeof</span>(size32));
+				}
+				<span class="enscript-keyword">if</span> (error) {
+					<span class="enscript-keyword">return</span> error;
+				}
+				
+				error = copyout(&amp;slide, valuep, <span class="enscript-keyword">sizeof</span>(slide));
+				<span class="enscript-keyword">if</span> (error) {
+					<span class="enscript-keyword">return</span> error;
+				}
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !SECURE_KERNEL */</span>
+}
+</pre>
+<hr />
+</body></html>

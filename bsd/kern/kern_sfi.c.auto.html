@@ -1,0 +1,283 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kern_sfi.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kern_sfi.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ *
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sfi.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sfi.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/priv.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * This file provides the syscall-based configuration facility
+ * for Selective Forced Idle (SFI). Input arguments have basic checking
+ * applied here, although more specific semantic checking is done in
+ * osfmk/kern/sfi.c. All copyin()/copyout() operations are performed
+ * in this source file.
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SFI_DEBUG</span> 0
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SFI_DEBUG</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">dprintf</span>(...) printf(__VA_ARGS__)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">dprintf</span>(...) do { } while(0)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">proc_apply_sfi_managed</span>(proc_t p, <span class="enscript-type">void</span> * arg);
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">sfi_ctl</span>(<span class="enscript-type">struct</span> proc *p __unused, <span class="enscript-type">struct</span> sfi_ctl_args *uap, int32_t *retval __unused)
+{
+	uint32_t	operation = uap-&gt;operation;
+	<span class="enscript-type">int</span>			error = 0;
+	kern_return_t	kret = KERN_SUCCESS;
+	uint64_t	out_time = 0;
+
+	<span class="enscript-keyword">switch</span> (operation) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SFI_CTL_OPERATION_SFI_SET_WINDOW</span>:
+			<span class="enscript-keyword">if</span> (uap-&gt;out_time != USER_ADDR_NULL) {
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+			<span class="enscript-keyword">if</span> (uap-&gt;sfi_class != SFI_CLASS_UNSPECIFIED) {
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+
+			error = priv_check_cred(kauth_cred_get(), PRIV_SELECTIVE_FORCED_IDLE, 0);
+			<span class="enscript-keyword">if</span> (error) {
+				dprintf(<span class="enscript-string">&quot;%s failed privilege check for sfi_ctl: %d\n&quot;</span>, p-&gt;p_comm, error);
+				<span class="enscript-keyword">return</span> (error);
+			} <span class="enscript-keyword">else</span> {
+				dprintf(<span class="enscript-string">&quot;%s succeeded privilege check for sfi_ctl\n&quot;</span>, p-&gt;p_comm);
+			}
+
+			<span class="enscript-keyword">if</span> (uap-&gt;time == 0) {
+				<span class="enscript-comment">/* actually a cancel */</span>
+				kret = sfi_window_cancel();
+			} <span class="enscript-keyword">else</span> {
+				kret = sfi_set_window(uap-&gt;time);
+			}
+
+			<span class="enscript-keyword">if</span> (kret) {
+				error = EINVAL;
+			}
+
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SFI_CTL_OPERATION_SFI_GET_WINDOW</span>:
+			<span class="enscript-keyword">if</span> (uap-&gt;time != 0) {
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+			<span class="enscript-keyword">if</span> (uap-&gt;sfi_class != SFI_CLASS_UNSPECIFIED) {
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+
+			kret = sfi_get_window(&amp;out_time);
+			<span class="enscript-keyword">if</span> (kret == KERN_SUCCESS) {
+				error = copyout(&amp;out_time, uap-&gt;out_time, <span class="enscript-keyword">sizeof</span>(out_time));
+			} <span class="enscript-keyword">else</span> {
+				error = EINVAL;
+			}
+
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SFI_CTL_OPERATION_SET_CLASS_OFFTIME</span>:
+			<span class="enscript-keyword">if</span> (uap-&gt;out_time != USER_ADDR_NULL) {
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+
+			error = priv_check_cred(kauth_cred_get(), PRIV_SELECTIVE_FORCED_IDLE, 0);
+			<span class="enscript-keyword">if</span> (error) {
+				dprintf(<span class="enscript-string">&quot;%s failed privilege check for sfi_ctl: %d\n&quot;</span>, p-&gt;p_comm, error);
+				<span class="enscript-keyword">return</span> (error);
+			} <span class="enscript-keyword">else</span> {
+				dprintf(<span class="enscript-string">&quot;%s succeeded privilege check for sfi_ctl\n&quot;</span>, p-&gt;p_comm);
+			}
+
+			<span class="enscript-keyword">if</span> (uap-&gt;time == 0) {
+				<span class="enscript-comment">/* actually a cancel */</span>
+				kret = sfi_class_offtime_cancel(uap-&gt;sfi_class);
+			} <span class="enscript-keyword">else</span> {
+				kret = sfi_set_class_offtime(uap-&gt;sfi_class, uap-&gt;time);
+			}
+
+			<span class="enscript-keyword">if</span> (kret) {
+				error = EINVAL;
+			}
+
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SFI_CTL_OPERATION_GET_CLASS_OFFTIME</span>:
+			<span class="enscript-keyword">if</span> (uap-&gt;time != 0) {
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+
+			kret = sfi_get_class_offtime(uap-&gt;sfi_class, &amp;out_time);
+			<span class="enscript-keyword">if</span> (kret == KERN_SUCCESS) {
+				error = copyout(&amp;out_time, uap-&gt;out_time, <span class="enscript-keyword">sizeof</span>(out_time));
+			} <span class="enscript-keyword">else</span> {
+				error = EINVAL;
+			}
+
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			error = ENOTSUP;
+			<span class="enscript-keyword">break</span>;
+	}			
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">proc_apply_sfi_managed</span>(proc_t p, <span class="enscript-type">void</span> * arg)
+{
+	uint32_t flags = *(uint32_t *)arg;
+	pid_t pid = p-&gt;p_pid;
+	boolean_t managed_enabled = (flags == SFI_PROCESS_SET_MANAGED)? TRUE : FALSE;
+	
+	<span class="enscript-keyword">if</span> (pid == 0) {		<span class="enscript-comment">/* ignore setting on kernproc */</span>
+		<span class="enscript-keyword">return</span> PROC_RETURNED;
+	}
+
+	<span class="enscript-keyword">if</span> (managed_enabled) {
+		KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_PID_SET_MANAGED) | DBG_FUNC_NONE, pid, 0, 0, 0, 0);
+	} <span class="enscript-keyword">else</span> {
+		KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_PID_CLEAR_MANAGED) | DBG_FUNC_NONE, pid, 0, 0, 0, 0);
+	}
+	
+	proc_set_task_policy(p-&gt;task, THREAD_NULL,
+								 TASK_POLICY_ATTRIBUTE, TASK_POLICY_SFI_MANAGED,
+								 managed_enabled ? TASK_POLICY_ENABLE : TASK_POLICY_DISABLE);
+	<span class="enscript-keyword">return</span> PROC_RETURNED;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">sfi_pidctl</span>(<span class="enscript-type">struct</span> proc *p __unused, <span class="enscript-type">struct</span> sfi_pidctl_args *uap, int32_t *retval __unused)
+{
+	uint32_t	operation = uap-&gt;operation;
+	pid_t		pid = uap-&gt;pid;
+	<span class="enscript-type">int</span>			error = 0;
+	uint32_t	out_flags = 0;
+	boolean_t	managed_enabled;
+	proc_t		targetp;
+
+	<span class="enscript-keyword">switch</span> (operation) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SFI_PIDCTL_OPERATION_PID_SET_FLAGS</span>:
+			<span class="enscript-keyword">if</span> (uap-&gt;out_sfi_flags != USER_ADDR_NULL
+			    || !(uap-&gt;sfi_flags &amp; SFI_PROCESS_SET_MANAGED_MASK)
+			    || uap-&gt;sfi_flags == SFI_PROCESS_SET_MANAGED_MASK) {
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+
+			error = priv_check_cred(kauth_cred_get(), PRIV_SELECTIVE_FORCED_IDLE, 0);
+			<span class="enscript-keyword">if</span> (error) {
+				dprintf(<span class="enscript-string">&quot;%s failed privilege check for sfi_pidctl: %d\n&quot;</span>, p-&gt;p_comm, error);
+				<span class="enscript-keyword">return</span> (error);
+			} <span class="enscript-keyword">else</span> {
+				dprintf(<span class="enscript-string">&quot;%s succeeded privilege check for sfi_pidctl\n&quot;</span>, p-&gt;p_comm);
+			}
+
+			<span class="enscript-keyword">if</span> (uap-&gt;pid == 0) {
+				<span class="enscript-comment">/* only allow SFI_PROCESS_SET_UNMANAGED for pid 0 */</span>
+				<span class="enscript-keyword">if</span> (uap-&gt;sfi_flags != SFI_PROCESS_SET_UNMANAGED) {
+					<span class="enscript-keyword">return</span> EINVAL;
+				}
+
+				proc_iterate(PROC_ALLPROCLIST, proc_apply_sfi_managed, (<span class="enscript-type">void</span> *)&amp;uap-&gt;sfi_flags, NULL, NULL);
+				<span class="enscript-keyword">break</span>;
+			}
+
+			targetp = proc_find(pid);
+			<span class="enscript-keyword">if</span> (!targetp) {
+				error = ESRCH;
+				<span class="enscript-keyword">break</span>;
+			}
+			
+			proc_apply_sfi_managed(targetp, (<span class="enscript-type">void</span> *)&amp;uap-&gt;sfi_flags);
+			
+			proc_rele(targetp);
+
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SFI_PIDCTL_OPERATION_PID_GET_FLAGS</span>:
+			<span class="enscript-keyword">if</span> (uap-&gt;sfi_flags != 0) {
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+			<span class="enscript-keyword">if</span> (uap-&gt;pid == 0) {
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+
+			targetp = proc_find(pid);
+			<span class="enscript-keyword">if</span> (!targetp) {
+				error = ESRCH;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			managed_enabled = proc_get_task_policy(targetp-&gt;task, THREAD_NULL, TASK_POLICY_ATTRIBUTE, TASK_POLICY_SFI_MANAGED);
+
+			proc_rele(targetp);
+
+			out_flags = managed_enabled ? SFI_PROCESS_SET_MANAGED : SFI_PROCESS_SET_UNMANAGED;
+
+			error = copyout(&amp;out_flags, uap-&gt;out_sfi_flags, <span class="enscript-keyword">sizeof</span>(out_flags));
+
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			error = ENOTSUP;
+			<span class="enscript-keyword">break</span>;
+	}			
+
+	<span class="enscript-keyword">return</span> error;
+}
+</pre>
+<hr />
+</body></html>

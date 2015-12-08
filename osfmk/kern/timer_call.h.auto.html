@@ -1,0 +1,193 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>timer_call.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">timer_call.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1993-1995, 1999-2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Declarations for timer interrupt callouts.
+ */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_KERN_TIMER_CALL_H_</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_KERN_TIMER_CALL_H_</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">XNU_KERNEL_PRIVATE</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/call_entry.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/simple_lock.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MACH_KERNEL_PRIVATE</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+
+<span class="enscript-type">extern</span> boolean_t mach_timer_coalescing_enabled;
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">timer_call_queue_init</span>(mpqueue_head_t *);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * NOTE: for now, bsd/dev/dtrace/dtrace_glue.c has its own definition
+ * of this data structure, and the two had better match.
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> timer_call {
+	<span class="enscript-type">struct</span> call_entry 	call_entry;
+	decl_simple_lock_data( ,lock);		<span class="enscript-comment">/* protects call_entry queue */</span>
+	uint64_t		soft_deadline;
+	uint32_t		flags;
+	boolean_t		async_dequeue;	<span class="enscript-comment">/* this field is protected by
+						   call_entry queue's lock */</span>
+	uint64_t		ttd; <span class="enscript-comment">/* Time to deadline at creation */</span>
+} timer_call_data_t, *timer_call_t;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">EndOfAllTime</span>		0xFFFFFFFFFFFFFFFFULL
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">void</span>		*timer_call_param_t;
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">void</span>		(*timer_call_func_t)(
+				timer_call_param_t	param0,
+				timer_call_param_t	param1);
+
+<span class="enscript-comment">/*
+ * Flags to alter the default timer/timeout coalescing behavior
+ * on a per-timer_call basis.
+ *
+ * The SYS urgency classes indicate that the timer_call is not
+ * directly related to the current thread at the time the timer_call
+ * is entered, so it is ignored in the calculation entirely (only
+ * the subclass specified is used).
+ *
+ * The USER flags indicate that both the current thread scheduling and QoS
+ * attributes, in addition to the per-timer_call urgency specification,
+ * are used to establish coalescing behavior.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TIMER_CALL_SYS_NORMAL</span>		TIMEOUT_URGENCY_SYS_NORMAL
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TIMER_CALL_SYS_CRITICAL</span>		TIMEOUT_URGENCY_SYS_CRITICAL
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TIMER_CALL_SYS_BACKGROUND</span>	TIMEOUT_URGENCY_SYS_BACKGROUND
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TIMER_CALL_USER_MASK</span>		TIMEOUT_URGENCY_USER_MASK
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TIMER_CALL_USER_NORMAL</span>		TIMEOUT_URGENCY_USER_NORMAL
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TIMER_CALL_USER_CRITICAL</span>	TIMEOUT_URGENCY_USER_CRITICAL
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TIMER_CALL_USER_BACKGROUND</span>	TIMEOUT_URGENCY_USER_BACKGROUND
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TIMER_CALL_URGENCY_MASK</span>		TIMEOUT_URGENCY_MASK
+
+<span class="enscript-comment">/*
+ * Indicate that a specific leeway value is being provided (otherwise
+ * the leeway parameter is ignored).  This supplied value can currently
+ * only be used to extend the leeway calculated internally from the
+ * urgency class provided.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TIMER_CALL_LEEWAY</span>		TIMEOUT_URGENCY_LEEWAY
+
+<span class="enscript-comment">/*
+ * Non-migratable timer_call
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TIMER_CALL_LOCAL</span>		TIMEOUT_URGENCY_FIRST_AVAIL
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TIMER_CALL_RATELIMITED</span>		TIMEOUT_URGENCY_RATELIMITED
+<span class="enscript-type">extern</span> boolean_t	timer_call_enter(
+				timer_call_t	call,
+				uint64_t	deadline,
+				uint32_t	flags);
+
+<span class="enscript-type">extern</span> boolean_t	timer_call_enter1(
+				timer_call_t		call,
+				timer_call_param_t	param1,
+				uint64_t		deadline,
+				uint32_t 		flags);
+
+<span class="enscript-type">extern</span> boolean_t	timer_call_enter_with_leeway(
+						timer_call_t		call,
+						timer_call_param_t	param1,
+						uint64_t		deadline,
+						uint64_t		leeway,
+						uint32_t 		flags,
+						boolean_t		ratelimited);
+
+<span class="enscript-type">extern</span> boolean_t	timer_call_cancel(
+				timer_call_t	call);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		timer_call_init(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		timer_call_setup(
+				timer_call_t		call,
+				timer_call_func_t	func,
+				timer_call_param_t	param0);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">timer_get_user_idle_level</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">timer_set_user_idle_level</span>(<span class="enscript-type">int</span> ilevel);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NUM_LATENCY_QOS_TIERS</span> (6)
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	uint32_t powergate_latency_abstime;
+
+	uint32_t idle_entry_timer_processing_hdeadline_threshold_abstime;
+	uint32_t interrupt_timer_coalescing_ilat_threshold_abstime;
+	uint32_t timer_resort_threshold_abstime;
+
+	int32_t timer_coalesce_rt_shift;
+	int32_t timer_coalesce_bg_shift;
+	int32_t timer_coalesce_kt_shift;
+	int32_t timer_coalesce_fp_shift;
+	int32_t timer_coalesce_ts_shift;
+
+	uint64_t timer_coalesce_rt_abstime_max;
+	uint64_t timer_coalesce_bg_abstime_max;
+	uint64_t timer_coalesce_kt_abstime_max;
+	uint64_t timer_coalesce_fp_abstime_max;
+	uint64_t timer_coalesce_ts_abstime_max;
+
+	uint32_t latency_qos_scale[NUM_LATENCY_QOS_TIERS];
+	uint64_t latency_qos_abstime_max[NUM_LATENCY_QOS_TIERS];
+	boolean_t latency_tier_rate_limited[NUM_LATENCY_QOS_TIERS];
+} timer_coalescing_priority_params_t;
+<span class="enscript-type">extern</span> timer_coalescing_priority_params_t tcoal_prio_params;
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* XNU_KERNEL_PRIVATE */</span>
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* _KERN_TIMER_CALL_H_ */</span>
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,548 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kern_mib.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kern_mib.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*-
+ * Copyright (c) 1982, 1986, 1989, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * Mike Karels at Berkeley Software Design, Inc.
+ *
+ * Quite extensively rewritten by Poul-Henning Kamp of the FreeBSD
+ * project, to make these variables more userfriendly.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)kern_sysctl.c	8.4 (Berkeley) 4/14/94
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/unistd.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">SMP</span>)
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/smp.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>  <span class="enscript-comment">/* XXX prune includes */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/tty.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/disklabel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/pms.h&gt;</span>
+
+<span class="enscript-type">extern</span> vm_map_t bsd_pageable_map;
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOPlatformExpert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/cpu_capabilities.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_host.h&gt;</span>		<span class="enscript-comment">/* for host_info() */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpuid.h&gt;</span>	<span class="enscript-comment">/* for cpuid_info() */</span>
+#<span class="enscript-reference">endif</span>
+
+
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">MAX</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MAX</span>(a,b) (a &gt;= b ? a : b)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* XXX This should be in a BSD accessible Mach header, but isn't. */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> vm_page_wire_count;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	cputype, cpusubtype, cputhreadtype, cpufamily, cpu64bit;
+<span class="enscript-type">static</span> uint64_t	cacheconfig[10], cachesize[10];
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	packages;
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(, 0,	  sysctl, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+	<span class="enscript-string">&quot;Sysctl internal magic&quot;</span>);
+<span class="enscript-function-name">SYSCTL_NODE</span>(, CTL_KERN,	  kern,   CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+	<span class="enscript-string">&quot;High kernel, proc, limits &amp;c&quot;</span>);
+<span class="enscript-function-name">SYSCTL_NODE</span>(, CTL_VM,	  vm,     CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+	<span class="enscript-string">&quot;Virtual memory&quot;</span>);
+<span class="enscript-function-name">SYSCTL_NODE</span>(, CTL_VFS,	  vfs,     CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+	<span class="enscript-string">&quot;File system&quot;</span>);
+<span class="enscript-function-name">SYSCTL_NODE</span>(, CTL_NET,	  net,    CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+	<span class="enscript-string">&quot;Network, (see socket.h)&quot;</span>);
+<span class="enscript-function-name">SYSCTL_NODE</span>(, CTL_DEBUG,  debug,  CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+	<span class="enscript-string">&quot;Debugging&quot;</span>);
+<span class="enscript-function-name">SYSCTL_NODE</span>(, CTL_HW,	  hw,     CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+	<span class="enscript-string">&quot;hardware&quot;</span>);
+<span class="enscript-function-name">SYSCTL_NODE</span>(, CTL_MACHDEP, machdep, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+	<span class="enscript-string">&quot;machine dependent&quot;</span>);
+<span class="enscript-function-name">SYSCTL_NODE</span>(, CTL_USER,	  user,   CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+	<span class="enscript-string">&quot;user-level&quot;</span>);
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SYSCTL_RETURN</span>(r, x)	SYSCTL_OUT(r, &amp;x, sizeof(x))
+
+<span class="enscript-comment">/******************************************************************************
+ * hw.* MIB
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">CTLHW_RETQUAD</span>	(1 &lt;&lt; 31)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">CTLHW_LOCAL</span>	(1 &lt;&lt; 30)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">HW_LOCAL_CPUTHREADTYPE</span>	(1 | CTLHW_LOCAL)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">HW_LOCAL_PHYSICALCPU</span>	(2 | CTLHW_LOCAL)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">HW_LOCAL_PHYSICALCPUMAX</span>	(3 | CTLHW_LOCAL)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">HW_LOCAL_LOGICALCPU</span>	(4 | CTLHW_LOCAL)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">HW_LOCAL_LOGICALCPUMAX</span>	(5 | CTLHW_LOCAL)
+
+
+<span class="enscript-comment">/*
+ * Supporting some variables requires us to do &quot;real&quot; work.  We 
+ * gather some of that here.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_hw_generic</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, __unused <span class="enscript-type">void</span> *arg1,
+	<span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-type">char</span> dummy[65];
+	<span class="enscript-type">int</span>  epochTemp;
+	ml_cpu_info_t cpu_info;
+	<span class="enscript-type">int</span> val, doquad;
+	<span class="enscript-type">long</span> <span class="enscript-type">long</span> qval;
+	host_basic_info_data_t hinfo;
+	kern_return_t kret;
+	mach_msg_type_number_t count = HOST_BASIC_INFO_COUNT;
+
+	<span class="enscript-comment">/*
+	 * Test and mask off the 'return quad' flag.
+	 * Note that only some things here support it.
+	 */</span>
+	doquad = arg2 &amp; CTLHW_RETQUAD;
+	arg2 &amp;= ~CTLHW_RETQUAD;
+
+	ml_cpu_get_info(&amp;cpu_info);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BSD_HOST</span> 1
+	kret = host_info((host_t)BSD_HOST, HOST_BASIC_INFO, (host_info_t)&amp;hinfo, &amp;count);
+
+	<span class="enscript-comment">/*
+	 * Handle various OIDs.
+	 *
+	 * OIDs that can return int or quad set val and qval and then break.
+	 * Errors and int-only values return inline.
+	 */</span>
+	<span class="enscript-keyword">switch</span> (arg2) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_NCPU</span>:
+		<span class="enscript-keyword">if</span> (kret == KERN_SUCCESS) {
+			<span class="enscript-keyword">return</span>(SYSCTL_RETURN(req, hinfo.max_cpus));
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span>(EINVAL);
+		}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_AVAILCPU</span>:
+		<span class="enscript-keyword">if</span> (kret == KERN_SUCCESS) {
+			<span class="enscript-keyword">return</span>(SYSCTL_RETURN(req, hinfo.avail_cpus));
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span>(EINVAL);
+		}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_LOCAL_PHYSICALCPU</span>:
+		<span class="enscript-keyword">if</span> (kret == KERN_SUCCESS) {
+			<span class="enscript-keyword">return</span>(SYSCTL_RETURN(req, hinfo.physical_cpu));
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span>(EINVAL);
+		}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_LOCAL_PHYSICALCPUMAX</span>:
+		<span class="enscript-keyword">if</span> (kret == KERN_SUCCESS) {
+			<span class="enscript-keyword">return</span>(SYSCTL_RETURN(req, hinfo.physical_cpu_max));
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span>(EINVAL);
+		}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_LOCAL_LOGICALCPU</span>:
+		<span class="enscript-keyword">if</span> (kret == KERN_SUCCESS) {
+			<span class="enscript-keyword">return</span>(SYSCTL_RETURN(req, hinfo.logical_cpu));
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span>(EINVAL);
+		}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_LOCAL_LOGICALCPUMAX</span>:
+		<span class="enscript-keyword">if</span> (kret == KERN_SUCCESS) {
+			<span class="enscript-keyword">return</span>(SYSCTL_RETURN(req, hinfo.logical_cpu_max));
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span>(EINVAL);
+		}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_PAGESIZE</span>:
+	{
+		vm_map_t map = get_task_map(current_task());
+		val = vm_map_page_size(map);
+		qval = (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)val;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_CACHELINE</span>:
+		val = cpu_info.cache_line_size;
+		qval = (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)val;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_L1ICACHESIZE</span>:
+		val = cpu_info.l1_icache_size;
+		qval = (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)val;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_L1DCACHESIZE</span>:
+		val = cpu_info.l1_dcache_size;
+		qval = (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)val;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_L2CACHESIZE</span>:
+		<span class="enscript-keyword">if</span> (cpu_info.l2_cache_size == 0xFFFFFFFF)
+			<span class="enscript-keyword">return</span>(EINVAL);
+		val = cpu_info.l2_cache_size;
+		qval = (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)val;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_L3CACHESIZE</span>:
+		<span class="enscript-keyword">if</span> (cpu_info.l3_cache_size == 0xFFFFFFFF)
+			<span class="enscript-keyword">return</span>(EINVAL);
+		val = cpu_info.l3_cache_size;
+		qval = (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)val;
+		<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-comment">/*
+		 * Deprecated variables.  We still support these for
+		 * backwards compatibility purposes only.
+		 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_MACHINE</span>:
+		bzero(dummy, <span class="enscript-keyword">sizeof</span>(dummy));
+		<span class="enscript-keyword">if</span>(!PEGetMachineName(dummy,64))
+			<span class="enscript-keyword">return</span>(EINVAL);
+		dummy[64] = 0;
+		<span class="enscript-keyword">return</span>(SYSCTL_OUT(req, dummy, strlen(dummy) + 1));
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_MODEL</span>:
+		bzero(dummy, <span class="enscript-keyword">sizeof</span>(dummy));
+		<span class="enscript-keyword">if</span>(!PEGetModelName(dummy,64))
+			<span class="enscript-keyword">return</span>(EINVAL);
+		dummy[64] = 0;
+		<span class="enscript-keyword">return</span>(SYSCTL_OUT(req, dummy, strlen(dummy) + 1));
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_USERMEM</span>:
+		{
+		<span class="enscript-type">int</span> usermem = mem_size - vm_page_wire_count * page_size;
+
+			<span class="enscript-keyword">return</span>(SYSCTL_RETURN(req, usermem));
+		}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_EPOCH</span>:
+	        epochTemp = PEGetPlatformEpoch();
+		<span class="enscript-keyword">if</span> (epochTemp == -1)
+			<span class="enscript-keyword">return</span>(EINVAL);
+		<span class="enscript-keyword">return</span>(SYSCTL_RETURN(req, epochTemp));
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_VECTORUNIT</span>: {
+		<span class="enscript-type">int</span> vector = cpu_info.vector_unit == 0? 0 : 1;
+		<span class="enscript-keyword">return</span>(SYSCTL_RETURN(req, vector));
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_L2SETTINGS</span>:
+		<span class="enscript-keyword">if</span> (cpu_info.l2_cache_size == 0xFFFFFFFF)
+			<span class="enscript-keyword">return</span>(EINVAL);
+		<span class="enscript-keyword">return</span>(SYSCTL_RETURN(req, cpu_info.l2_settings));
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">HW_L3SETTINGS</span>:
+		<span class="enscript-keyword">if</span> (cpu_info.l3_cache_size == 0xFFFFFFFF)
+			<span class="enscript-keyword">return</span>(EINVAL);
+		<span class="enscript-keyword">return</span>(SYSCTL_RETURN(req, cpu_info.l3_settings));
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span>(ENOTSUP);
+	}
+	<span class="enscript-comment">/*
+	 * Callers may come to us with either int or quad buffers.
+	 */</span>
+	<span class="enscript-keyword">if</span> (doquad) {
+		<span class="enscript-keyword">return</span>(SYSCTL_RETURN(req, qval));
+	}
+	<span class="enscript-keyword">return</span>(SYSCTL_RETURN(req, val));
+}
+
+<span class="enscript-comment">/* hw.pagesize and hw.tbfrequency are expected as 64 bit values */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+sysctl_pagesize
+(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, __unused <span class="enscript-type">void</span> *arg1, __unused <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	vm_map_t map = get_task_map(current_task());
+	<span class="enscript-type">long</span> <span class="enscript-type">long</span> l = vm_map_page_size(map);
+	<span class="enscript-keyword">return</span> sysctl_io_number(req, l, <span class="enscript-keyword">sizeof</span>(l), NULL, NULL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+sysctl_pagesize32
+(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, __unused <span class="enscript-type">void</span> *arg1, __unused <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-type">long</span> <span class="enscript-type">long</span> l;
+	l = (<span class="enscript-type">long</span> <span class="enscript-type">long</span>) PAGE_SIZE;
+	<span class="enscript-keyword">return</span> sysctl_io_number(req, l, <span class="enscript-keyword">sizeof</span>(l), NULL, NULL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+sysctl_tbfrequency
+(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, __unused <span class="enscript-type">void</span> *arg1, __unused <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-type">long</span> <span class="enscript-type">long</span> l = gPEClockFrequencyInfo.timebase_frequency_hz;
+	<span class="enscript-keyword">return</span> sysctl_io_number(req, l, <span class="enscript-keyword">sizeof</span>(l), NULL, NULL);
+}
+
+<span class="enscript-comment">/*
+ * hw.* MIB variables.
+ */</span>
+<span class="enscript-function-name">SYSCTL_PROC</span>    (_hw, HW_NCPU, ncpu, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, HW_NCPU, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>    (_hw, HW_AVAILCPU, activecpu, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, HW_AVAILCPU, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>    (_hw, OID_AUTO, physicalcpu, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, HW_LOCAL_PHYSICALCPU, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>    (_hw, OID_AUTO, physicalcpu_max, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, HW_LOCAL_PHYSICALCPUMAX, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>    (_hw, OID_AUTO, logicalcpu, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, HW_LOCAL_LOGICALCPU, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>    (_hw, OID_AUTO, logicalcpu_max, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, HW_LOCAL_LOGICALCPUMAX, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>     (_hw, HW_BYTEORDER, byteorder, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">int</span> *)NULL, BYTE_ORDER, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>     (_hw, OID_AUTO, cputype, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &amp;cputype, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>     (_hw, OID_AUTO, cpusubtype, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &amp;cpusubtype, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>     (_hw, OID_AUTO, cpu64bit_capable, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &amp;cpu64bit, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>     (_hw, OID_AUTO, cpufamily, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &amp;cpufamily, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_OPAQUE</span>  (_hw, OID_AUTO, cacheconfig, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;cacheconfig, <span class="enscript-keyword">sizeof</span>(cacheconfig), <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_OPAQUE</span>  (_hw, OID_AUTO, cachesize, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;cachesize, <span class="enscript-keyword">sizeof</span>(cachesize), <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>	   (_hw, OID_AUTO, pagesize, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, 0, sysctl_pagesize, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>	   (_hw, OID_AUTO, pagesize32, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, 0, sysctl_pagesize32, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>    (_hw, OID_AUTO, busfrequency, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &amp;gPEClockFrequencyInfo.bus_frequency_hz, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>    (_hw, OID_AUTO, busfrequency_min, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &amp;gPEClockFrequencyInfo.bus_frequency_min_hz, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>    (_hw, OID_AUTO, busfrequency_max, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &amp;gPEClockFrequencyInfo.bus_frequency_max_hz, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>    (_hw, OID_AUTO, cpufrequency, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &amp;gPEClockFrequencyInfo.cpu_frequency_hz, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>    (_hw, OID_AUTO, cpufrequency_min, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &amp;gPEClockFrequencyInfo.cpu_frequency_min_hz, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>    (_hw, OID_AUTO, cpufrequency_max, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &amp;gPEClockFrequencyInfo.cpu_frequency_max_hz, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>    (_hw, OID_AUTO, cachelinesize, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, HW_CACHELINE | CTLHW_RETQUAD, sysctl_hw_generic, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>    (_hw, OID_AUTO, l1icachesize, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, HW_L1ICACHESIZE | CTLHW_RETQUAD, sysctl_hw_generic, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>    (_hw, OID_AUTO, l1dcachesize, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, HW_L1DCACHESIZE | CTLHW_RETQUAD, sysctl_hw_generic, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>    (_hw, OID_AUTO, l2cachesize, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, HW_L2CACHESIZE | CTLHW_RETQUAD, sysctl_hw_generic, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>    (_hw, OID_AUTO, l3cachesize, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, HW_L3CACHESIZE | CTLHW_RETQUAD, sysctl_hw_generic, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw, OID_AUTO, tbfrequency, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, 0, sysctl_tbfrequency, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>    (_hw, HW_MEMSIZE, memsize, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &amp;max_mem, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>     (_hw, OID_AUTO, packages, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &amp;packages, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-comment">/*
+ * Optional features can register nodes below hw.optional.
+ *
+ * If the feature is not present, the node should either not be registered,
+ * or it should return -1.  If the feature is present, the node should return
+ * 0.  If the feature is present and its use is advised, the node should 
+ * return 1.
+ */</span>
+<span class="enscript-function-name">SYSCTL_NODE</span>(_hw, OID_AUTO, optional, CTLFLAG_RW|CTLFLAG_LOCKED, NULL, <span class="enscript-string">&quot;optional features&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_hw_optional, OID_AUTO, floatingpoint, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">int</span> *)NULL, 1, <span class="enscript-string">&quot;&quot;</span>);	<span class="enscript-comment">/* always set */</span>
+
+<span class="enscript-comment">/*
+ * Deprecated variables.  These are supported for backwards compatibility
+ * purposes only.  The MASKED flag requests that the variables not be
+ * printed by sysctl(8) and similar utilities.
+ *
+ * The variables named *_compat here are int-sized versions of variables
+ * that are now exported as quads.  The int-sized versions are normally
+ * looked up only by number, wheras the quad-sized versions should be
+ * looked up by name.
+ *
+ * The *_compat nodes are *NOT* visible within the kernel.
+ */</span>
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw, HW_PAGESIZE,     pagesize_compat, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, 0, HW_PAGESIZE, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_COMPAT_INT</span> (_hw, HW_BUS_FREQ,     busfrequency_compat, CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, &amp;gPEClockFrequencyInfo.bus_clock_rate_hz, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_COMPAT_INT</span> (_hw, HW_CPU_FREQ,     cpufrequency_compat, CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, &amp;gPEClockFrequencyInfo.cpu_clock_rate_hz, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw, HW_CACHELINE,    cachelinesize_compat, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, 0, HW_CACHELINE, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw, HW_L1ICACHESIZE, l1icachesize_compat, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, 0, HW_L1ICACHESIZE, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw, HW_L1DCACHESIZE, l1dcachesize_compat, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, 0, HW_L1DCACHESIZE, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw, HW_L2CACHESIZE,  l2cachesize_compat, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, 0, HW_L2CACHESIZE, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw, HW_L3CACHESIZE,  l3cachesize_compat, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, 0, HW_L3CACHESIZE, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_COMPAT_INT</span> (_hw, HW_TB_FREQ,      tbfrequency_compat, CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, &amp;gPEClockFrequencyInfo.timebase_frequency_hz, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw, HW_MACHINE,      machine, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, 0, HW_MACHINE, sysctl_hw_generic, <span class="enscript-string">&quot;A&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw, HW_MODEL,        model, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, 0, HW_MODEL, sysctl_hw_generic, <span class="enscript-string">&quot;A&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_COMPAT_UINT</span>(_hw, HW_PHYSMEM,      physmem, CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, &amp;mem_size, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw, HW_USERMEM,      usermem, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, 0, HW_USERMEM,	sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw, HW_EPOCH,        epoch, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, 0, HW_EPOCH, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw, HW_VECTORUNIT,   vectorunit, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, 0, HW_VECTORUNIT, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw, HW_L2SETTINGS,   l2settings, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, 0, HW_L2SETTINGS, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw, HW_L3SETTINGS,   l3settings, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, 0, HW_L3SETTINGS, sysctl_hw_generic, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span> (_hw, OID_AUTO, cputhreadtype, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN | CTLFLAG_LOCKED, &amp;cputhreadtype, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+sysctl_cpu_capability
+(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1, __unused <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	uint64_t	mask = (uint64_t) (uintptr_t) arg1;
+	boolean_t	is_capable = (_get_cpu_capabilities() &amp; mask) != 0;
+ 
+	<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;is_capable, <span class="enscript-keyword">sizeof</span>(is_capable));
+
+}
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, mmx,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasMMX, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, sse,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasSSE, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, sse2,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasSSE2, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, sse3,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasSSE3, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, supplementalsse3,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasSupplementalSSE3, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, sse4_1,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasSSE4_1, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, sse4_2,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasSSE4_2, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-comment">/* &quot;x86_64&quot; is actually a preprocessor symbol on the x86_64 kernel, so we have to hack this */</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">x86_64</span>
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, x86_64,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) k64Bit, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, aes,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasAES, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, avx1_0,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasAVX1_0, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, rdrand,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasRDRAND, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, f16c,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasF16C, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, enfstrg,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasENFSTRG, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, fma,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasFMA, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, avx2_0,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasAVX2_0, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, bmi1,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasBMI1, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, bmi2,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasBMI2, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, rtm,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasRTM, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, hle,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasHLE, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_hw_optional, OID_AUTO, adx,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (<span class="enscript-type">void</span> *) kHasADX, 0, sysctl_cpu_capability, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">Unsupported</span> <span class="enscript-variable-name">arch</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !__i386__ &amp;&amp; !__x86_64 &amp;&amp; !__arm__ &amp;&amp; ! __arm64__ */</span>
+
+
+<span class="enscript-comment">/******************************************************************************
+ * Generic MIB initialisation.
+ *
+ * This is a hack, and should be replaced with SYSINITs
+ * at some point.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sysctl_mib_init</span>(<span class="enscript-type">void</span>)
+{
+	cputype = cpu_type();
+	cpusubtype = cpu_subtype();
+	cputhreadtype = cpu_threadtype();
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-variable-name">defined</span> (<span class="enscript-variable-name">__x86_64__</span>)
+	cpu64bit = (_get_cpu_capabilities() &amp; k64Bit) == k64Bit;
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">Unsupported</span> <span class="enscript-variable-name">arch</span>
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * Populate the optional portion of the hw.* MIB.
+	 *
+	 * XXX This could be broken out into parts of the code
+	 *     that actually directly relate to the functions in
+	 *     question.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (cputhreadtype != CPU_THREADTYPE_NONE) {
+		sysctl_register_oid(&amp;sysctl__hw_cputhreadtype);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">defined</span> (<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-variable-name">defined</span> (<span class="enscript-variable-name">__x86_64__</span>)
+	<span class="enscript-comment">/* hw.cpufamily */</span>
+	cpufamily = cpuid_cpufamily();
+
+	<span class="enscript-comment">/* hw.cacheconfig */</span>
+	cacheconfig[0] = ml_cpu_cache_sharing(0);
+	cacheconfig[1] = ml_cpu_cache_sharing(1);
+	cacheconfig[2] = ml_cpu_cache_sharing(2);
+	cacheconfig[3] = ml_cpu_cache_sharing(3);
+	cacheconfig[4] = 0;
+
+	<span class="enscript-comment">/* hw.cachesize */</span>
+	cachesize[0] = ml_cpu_cache_size(0);
+	cachesize[1] = ml_cpu_cache_size(1);
+	cachesize[2] = ml_cpu_cache_size(2);
+	cachesize[3] = ml_cpu_cache_size(3);
+	cachesize[4] = 0;
+
+	<span class="enscript-comment">/* hw.packages */</span>
+	packages = roundup(ml_cpu_cache_sharing(0), cpuid_info()-&gt;thread_count)
+			/ cpuid_info()-&gt;thread_count;
+
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">unknown</span> <span class="enscript-variable-name">architecture</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !__i386__ &amp;&amp; !__x86_64 &amp;&amp; !__arm__ &amp;&amp; !__arm64__ */</span>
+
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,136 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>init.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">init.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/init.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+
+<span class="enscript-type">struct</span> init_list_entry {
+	<span class="enscript-type">struct</span> init_list_entry	*next;
+	net_init_func_ptr		func;
+};
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LIST_RAN</span> ((struct init_list_entry*)0xffffffff)
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> init_list_entry	*list_head = 0;
+
+errno_t
+<span class="enscript-function-name">net_init_add</span>(
+	net_init_func_ptr init_func)
+{
+	<span class="enscript-type">struct</span> init_list_entry	*entry;
+	
+	<span class="enscript-keyword">if</span> (init_func == 0) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+	<span class="enscript-comment">/* Check if we've already started */</span>
+	<span class="enscript-keyword">if</span> (list_head == LIST_RAN) {
+		<span class="enscript-keyword">return</span> EALREADY;
+	}
+	
+	entry = kalloc(<span class="enscript-keyword">sizeof</span>(*entry));
+	<span class="enscript-keyword">if</span> (entry == 0) {
+		printf(<span class="enscript-string">&quot;net_init_add: no memory\n&quot;</span>);
+		<span class="enscript-keyword">return</span> ENOMEM;
+	}
+	
+	bzero(entry, <span class="enscript-keyword">sizeof</span>(*entry));
+	entry-&gt;func = init_func;
+	
+	<span class="enscript-keyword">do</span> {
+		entry-&gt;next = list_head;
+		
+		<span class="enscript-keyword">if</span> (entry-&gt;next == LIST_RAN) {
+			<span class="enscript-comment">/* List already ran, cleanup and call the function */</span>
+			kfree(entry, <span class="enscript-keyword">sizeof</span>(*entry));
+			<span class="enscript-keyword">return</span> EALREADY;
+		}
+	} <span class="enscript-keyword">while</span>(!OSCompareAndSwapPtr(entry-&gt;next, entry, &amp;list_head));
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">net_init_run</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> init_list_entry	*backward_head = 0;
+	<span class="enscript-type">struct</span> init_list_entry	*forward_head = 0;
+	<span class="enscript-type">struct</span> init_list_entry	*current = 0;
+	
+	<span class="enscript-comment">/*
+	 * Grab the list, replacing the head with 0xffffffff to indicate
+	 * that we've already run.
+	 */</span>
+	<span class="enscript-keyword">do</span> {
+		backward_head = list_head;
+	} <span class="enscript-keyword">while</span> (!OSCompareAndSwapPtr(backward_head, LIST_RAN, &amp;list_head));
+	
+	<span class="enscript-comment">/* Reverse the order of the list */</span>
+	<span class="enscript-keyword">while</span> (backward_head != 0) {
+		current = backward_head;
+		backward_head = current-&gt;next;
+		current-&gt;next = forward_head;
+		forward_head = current;
+	}
+	
+	<span class="enscript-comment">/* Call each function pointer registered */</span>
+	<span class="enscript-keyword">while</span> (forward_head != 0) {
+		current = forward_head;
+		forward_head = current-&gt;next;
+		current-&gt;func();
+		kfree(current, <span class="enscript-keyword">sizeof</span>(*current));
+	}
+}
+</pre>
+<hr />
+</body></html>

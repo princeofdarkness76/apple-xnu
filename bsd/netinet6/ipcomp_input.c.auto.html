@@ -1,0 +1,380 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ipcomp_input.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ipcomp_input.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*	$FreeBSD: src/sys/netinet6/ipcomp_input.c,v 1.1.2.2 2001/07/03 11:01:54 ume Exp $	*/</span>
+<span class="enscript-comment">/*	$KAME: ipcomp_input.c,v 1.25 2001/03/01 09:12:09 itojun Exp $	*/</span>
+
+<span class="enscript-comment">/*
+ * Copyright (C) 1999 WIDE Project.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the project nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+<span class="enscript-comment">/*
+ * RFC2393 IP payload compression protocol (IPComp).
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/zlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_ecn.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/kpi_ipfilter_var.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_var.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipcomp.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipcomp6.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipsec.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipsec6.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netkey/key.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netkey/keydb.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/sdt.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IPLEN_FLIPPED</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipcomp4_input</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> off)
+{
+	<span class="enscript-type">struct</span> mbuf *md;
+	<span class="enscript-type">struct</span> ip *ip;
+	<span class="enscript-type">struct</span> ipcomp *ipcomp;
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ipcomp_algorithm *algo;
+	u_int16_t cpi;	<span class="enscript-comment">/* host order */</span>
+	u_int16_t nxt;
+	size_t hlen;
+	<span class="enscript-type">int</span> error;
+	size_t newlen, olen;
+	<span class="enscript-type">struct</span> secasvar *sav = NULL;
+
+	<span class="enscript-keyword">if</span> (m-&gt;m_pkthdr.len &lt; off + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipcomp)) {
+		ipseclog((LOG_DEBUG, <span class="enscript-string">&quot;IPv4 IPComp input: assumption failed &quot;</span>
+		    <span class="enscript-string">&quot;(packet too short)\n&quot;</span>));
+		IPSEC_STAT_INCREMENT(ipsecstat.in_inval);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+
+	md = m_pulldown(m, off, <span class="enscript-keyword">sizeof</span>(*ipcomp), NULL);
+	<span class="enscript-keyword">if</span> (!md) {
+		m = NULL;	<span class="enscript-comment">/*already freed*/</span>
+		ipseclog((LOG_DEBUG, <span class="enscript-string">&quot;IPv4 IPComp input: assumption failed &quot;</span>
+		    <span class="enscript-string">&quot;(pulldown failure)\n&quot;</span>));
+		IPSEC_STAT_INCREMENT(ipsecstat.in_inval);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+	ipcomp = mtod(md, <span class="enscript-type">struct</span> ipcomp *);
+
+	<span class="enscript-comment">/* Expect 32-bit aligned data pointer on strict-align platforms */</span>
+	MBUF_STRICT_DATA_ALIGNMENT_CHECK_32(m);
+
+	ip = mtod(m, <span class="enscript-type">struct</span> ip *);
+	nxt = ipcomp-&gt;comp_nxt;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_IP_VHL</span>
+	hlen = IP_VHL_HL(ip-&gt;ip_vhl) &lt;&lt; 2;
+#<span class="enscript-reference">else</span>
+	hlen = ip-&gt;ip_hl &lt;&lt; 2;
+#<span class="enscript-reference">endif</span>
+
+	cpi = ntohs(ipcomp-&gt;comp_cpi);
+
+	<span class="enscript-keyword">if</span> (cpi &gt;= IPCOMP_CPI_NEGOTIATE_MIN) {
+		sav = key_allocsa(AF_INET, (caddr_t)&amp;ip-&gt;ip_src,
+			(caddr_t)&amp;ip-&gt;ip_dst, IPPROTO_IPCOMP, htonl(cpi));
+		<span class="enscript-keyword">if</span> (sav != NULL
+		 &amp;&amp; (sav-&gt;state == SADB_SASTATE_MATURE
+		  || sav-&gt;state == SADB_SASTATE_DYING)) {
+			cpi = sav-&gt;alg_enc;	<span class="enscript-comment">/*XXX*/</span>
+			<span class="enscript-comment">/* other parameters to look at? */</span>
+		}
+	}
+	algo = ipcomp_algorithm_lookup(cpi);
+	<span class="enscript-keyword">if</span> (!algo) {
+		ipseclog((LOG_WARNING, <span class="enscript-string">&quot;IPv4 IPComp input: unknown cpi %u\n&quot;</span>,
+			cpi));
+		IPSEC_STAT_INCREMENT(ipsecstat.in_nosa);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+
+	<span class="enscript-comment">/* chop ipcomp header */</span>
+	ipcomp = NULL;
+	md-&gt;m_data += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipcomp);
+	md-&gt;m_len -= <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipcomp);
+	m-&gt;m_pkthdr.len -= <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipcomp);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IPLEN_FLIPPED</span>
+	ip-&gt;ip_len -= <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipcomp);
+#<span class="enscript-reference">else</span>
+	ip-&gt;ip_len = htons(ntohs(ip-&gt;ip_len) - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipcomp));
+#<span class="enscript-reference">endif</span>
+
+	olen = m-&gt;m_pkthdr.len;
+	newlen = m-&gt;m_pkthdr.len - off;
+	error = (*algo-&gt;decompress)(m, m-&gt;m_next, &amp;newlen);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		<span class="enscript-keyword">if</span> (error == EINVAL) {
+			IPSEC_STAT_INCREMENT(ipsecstat.in_inval);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (error == ENOBUFS)
+			IPSEC_STAT_INCREMENT(ipsecstat.in_nomem);
+		m = NULL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+	IPSEC_STAT_INCREMENT(ipsecstat.in_comphist[cpi]);
+
+	<span class="enscript-comment">/*
+	 * returning decompressed packet onto icmp is meaningless.
+	 * mark it decrypted to prevent icmp from attaching original packet.
+	 */</span>
+	m-&gt;m_flags |= M_DECRYPTED;
+
+	m-&gt;m_pkthdr.len = off + newlen;
+	ip = mtod(m, <span class="enscript-type">struct</span> ip *);
+    {
+	size_t len;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IPLEN_FLIPPED</span>
+	len = ip-&gt;ip_len;
+#<span class="enscript-reference">else</span>
+	len = ntohs(ip-&gt;ip_len);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-comment">/*
+	 * be careful about underflow.  also, do not assign exact value
+	 * as ip_len is manipulated differently on *BSDs.
+	 */</span>
+	len += m-&gt;m_pkthdr.len;
+	len -= olen;
+	<span class="enscript-keyword">if</span> (len &amp; ~0xffff) {
+		<span class="enscript-comment">/* packet too big after decompress */</span>
+		IPSEC_STAT_INCREMENT(ipsecstat.in_inval);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IPLEN_FLIPPED</span>
+	ip-&gt;ip_len = len &amp; 0xffff;
+#<span class="enscript-reference">else</span>
+	ip-&gt;ip_len = htons(len &amp; 0xffff);
+#<span class="enscript-reference">endif</span>
+	ip-&gt;ip_p = nxt;
+    }
+
+	<span class="enscript-keyword">if</span> (sav) {
+		key_sa_recordxfer(sav, m);
+		<span class="enscript-keyword">if</span> (ipsec_addhist(m, IPPROTO_IPCOMP, (u_int32_t)cpi) != 0) {
+			IPSEC_STAT_INCREMENT(ipsecstat.in_nomem);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+		key_freesav(sav, KEY_SADB_UNLOCKED);
+		sav = NULL;
+	}
+
+	<span class="enscript-keyword">if</span> (nxt != IPPROTO_DONE) {
+		<span class="enscript-keyword">if</span> ((ip_protox[nxt]-&gt;pr_flags &amp; PR_LASTHDR) != 0 &amp;&amp;
+		    ipsec4_in_reject(m, NULL)) {
+			IPSEC_STAT_INCREMENT(ipsecstat.in_polvio);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+
+		DTRACE_IP6(receive, <span class="enscript-type">struct</span> mbuf *, m, <span class="enscript-type">struct</span> inpcb *, NULL,
+                        <span class="enscript-type">struct</span> ip *, ip, <span class="enscript-type">struct</span> ifnet *, m-&gt;m_pkthdr.rcvif,
+                        <span class="enscript-type">struct</span> ip *, ip, <span class="enscript-type">struct</span> ip6_hdr *, NULL);
+
+		ip_proto_dispatch_in(m, off, nxt, 0);
+	} <span class="enscript-keyword">else</span>
+		m_freem(m);
+	m = NULL;
+
+	IPSEC_STAT_INCREMENT(ipsecstat.in_success);
+	<span class="enscript-keyword">return</span>;
+
+<span class="enscript-reference">fail</span>:
+	<span class="enscript-keyword">if</span> (sav)
+		key_freesav(sav, KEY_SADB_UNLOCKED);
+
+	<span class="enscript-keyword">if</span> (m)
+		m_freem(m);
+	<span class="enscript-keyword">return</span>;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ipcomp6_input</span>(<span class="enscript-type">struct</span> mbuf **mp, <span class="enscript-type">int</span> *offp, <span class="enscript-type">int</span> proto)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">proto</span>)
+	<span class="enscript-type">struct</span> mbuf *m, *md;
+	<span class="enscript-type">int</span> off;
+	<span class="enscript-type">struct</span> ip6_hdr *ip6;
+	<span class="enscript-type">struct</span> ipcomp *ipcomp;
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ipcomp_algorithm *algo;
+	u_int16_t cpi;	<span class="enscript-comment">/* host order */</span>
+	u_int16_t nxt;
+	<span class="enscript-type">int</span> error;
+	size_t newlen;
+	<span class="enscript-type">struct</span> secasvar *sav = NULL;
+	<span class="enscript-type">char</span> *prvnxtp;
+
+	m = *mp;
+	off = *offp;
+
+	md = m_pulldown(m, off, <span class="enscript-keyword">sizeof</span>(*ipcomp), NULL);
+	<span class="enscript-keyword">if</span> (!md) {
+		m = NULL;	<span class="enscript-comment">/*already freed*/</span>
+		ipseclog((LOG_DEBUG, <span class="enscript-string">&quot;IPv6 IPComp input: assumption failed &quot;</span>
+		    <span class="enscript-string">&quot;(pulldown failure)\n&quot;</span>));
+		IPSEC_STAT_INCREMENT(ipsec6stat.in_inval);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+	ipcomp = mtod(md, <span class="enscript-type">struct</span> ipcomp *);
+
+	<span class="enscript-comment">/* Expect 32-bit aligned data pointer on strict-align platforms */</span>
+	MBUF_STRICT_DATA_ALIGNMENT_CHECK_32(m);
+
+	ip6 = mtod(m, <span class="enscript-type">struct</span> ip6_hdr *);
+	nxt = ipcomp-&gt;comp_nxt;
+
+	cpi = ntohs(ipcomp-&gt;comp_cpi);
+
+	<span class="enscript-keyword">if</span> (cpi &gt;= IPCOMP_CPI_NEGOTIATE_MIN) {
+		sav = key_allocsa(AF_INET6, (caddr_t)&amp;ip6-&gt;ip6_src,
+			(caddr_t)&amp;ip6-&gt;ip6_dst, IPPROTO_IPCOMP, htonl(cpi));
+		<span class="enscript-keyword">if</span> (sav != NULL
+		 &amp;&amp; (sav-&gt;state == SADB_SASTATE_MATURE
+		  || sav-&gt;state == SADB_SASTATE_DYING)) {
+			cpi = sav-&gt;alg_enc;	<span class="enscript-comment">/*XXX*/</span>
+			<span class="enscript-comment">/* other parameters to look at? */</span>
+		}
+	}
+	algo = ipcomp_algorithm_lookup(cpi);
+	<span class="enscript-keyword">if</span> (!algo) {
+		ipseclog((LOG_WARNING, <span class="enscript-string">&quot;IPv6 IPComp input: unknown cpi %u; &quot;</span>
+			<span class="enscript-string">&quot;dropping the packet for simplicity\n&quot;</span>, cpi));
+		IPSEC_STAT_INCREMENT(ipsec6stat.in_nosa);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+
+	<span class="enscript-comment">/* chop ipcomp header */</span>
+	ipcomp = NULL;
+	md-&gt;m_data += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipcomp);
+	md-&gt;m_len -= <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipcomp);
+	m-&gt;m_pkthdr.len -= <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipcomp);
+
+	newlen = m-&gt;m_pkthdr.len - off;
+	error = (*algo-&gt;decompress)(m, md, &amp;newlen);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		<span class="enscript-keyword">if</span> (error == EINVAL) {
+			IPSEC_STAT_INCREMENT(ipsec6stat.in_inval);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (error == ENOBUFS)
+			IPSEC_STAT_INCREMENT(ipsec6stat.in_nomem);
+		m = NULL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+	IPSEC_STAT_INCREMENT(ipsec6stat.in_comphist[cpi]);
+	m-&gt;m_pkthdr.len = off + newlen;
+
+	<span class="enscript-comment">/*
+	 * returning decompressed packet onto icmp is meaningless.
+	 * mark it decrypted to prevent icmp from attaching original packet.
+	 */</span>
+	m-&gt;m_flags |= M_DECRYPTED;
+
+	<span class="enscript-comment">/* update next header field */</span>
+	prvnxtp = ip6_get_prevhdr(m, off);
+	*prvnxtp = nxt;
+
+	<span class="enscript-comment">/*
+	 * no need to adjust payload length, as all the IPv6 protocols
+	 * look at m-&gt;m_pkthdr.len
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (sav) {
+		key_sa_recordxfer(sav, m);
+		<span class="enscript-keyword">if</span> (ipsec_addhist(m, IPPROTO_IPCOMP, (u_int32_t)cpi) != 0) {
+			IPSEC_STAT_INCREMENT(ipsec6stat.in_nomem);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+		key_freesav(sav, KEY_SADB_UNLOCKED);
+		sav = NULL;
+	}
+	*offp = off;
+	*mp = m;
+	IPSEC_STAT_INCREMENT(ipsec6stat.in_success);
+	<span class="enscript-keyword">return</span> nxt;
+
+<span class="enscript-reference">fail</span>:
+	<span class="enscript-keyword">if</span> (m)
+		m_freem(m);
+	<span class="enscript-keyword">if</span> (sav)
+		key_freesav(sav, KEY_SADB_UNLOCKED);
+	<span class="enscript-keyword">return</span> IPPROTO_DONE;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+</pre>
+<hr />
+</body></html>

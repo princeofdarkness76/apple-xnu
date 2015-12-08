@@ -1,0 +1,219 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mutex.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mutex.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms
+ * of the Common Development and Distribution License
+ * (the &quot;License&quot;).  You may not use this file except
+ * in compliance with the License.
+ *
+ * You can obtain a copy of the license at
+ * src/OPENSOLARIS.LICENSE
+ * or <a href="http://www.opensolaris.org/os/licensing.">http://www.opensolaris.org/os/licensing.</a>
+ * See the License for the specific language governing
+ * permissions and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL
+ * HEADER in each file and include the License file at
+ * usr/src/OPENSOLARIS.LICENSE.  If applicable,
+ * add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets &quot;[]&quot; replaced with your
+ * own identifying information: Portions Copyright [yyyy]
+ * [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Use is subject to license terms.
+ */</span>
+
+<span class="enscript-comment">/*
+ * mutex
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pthread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mman.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;libmicro.h&quot;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			optt = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			optp = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			opth = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			opto = 0;
+
+pthread_mutex_t			*lock;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	<span class="enscript-type">int</span>			ts_once;
+	pthread_mutex_t		*ts_lock;
+} tsd_t;
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_init</span>()
+{
+	lm_tsdsize = <span class="enscript-keyword">sizeof</span> (tsd_t);
+
+	(<span class="enscript-type">void</span>) sprintf(lm_usage,
+	    <span class="enscript-string">&quot;       [-t] (create dummy thread so we are multithreaded)\n&quot;</span>
+	    <span class="enscript-string">&quot;       [-p] (use inter-process mutex (not support everywhere))\n&quot;</span>
+	    <span class="enscript-string">&quot;       [-h usecs] (specify mutex hold time (default 0)\n&quot;</span>
+	    <span class="enscript-string">&quot;notes: measures uncontended pthread_mutex_[un,]lock\n&quot;</span>);
+
+	(<span class="enscript-type">void</span>) sprintf(lm_optstr, <span class="enscript-string">&quot;tph:o:&quot;</span>);
+
+	(<span class="enscript-type">void</span>) sprintf(lm_header, <span class="enscript-string">&quot;%8s&quot;</span>, <span class="enscript-string">&quot;holdtime&quot;</span>);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_optswitch</span>(<span class="enscript-type">int</span> opt, <span class="enscript-type">char</span> *optarg)
+{
+	<span class="enscript-keyword">switch</span> (opt) {
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'p'</span>:
+		optp = 1;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'t'</span>:
+		optt = 1;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'h'</span>:
+		opth = sizetoint(optarg);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'o'</span>:
+		opto = sizetoint(optarg);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">dummy</span>(<span class="enscript-type">void</span> *arg)
+{
+	(<span class="enscript-type">void</span>) pause();
+	<span class="enscript-keyword">return</span> (arg);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initrun</span>()
+{
+	pthread_mutexattr_t	attr;
+	<span class="enscript-type">int</span> errors = 0;
+
+	<span class="enscript-comment">/*LINTED*/</span>
+	lock = (pthread_mutex_t *)mmap(NULL,
+	    getpagesize(),
+	    PROT_READ | PROT_WRITE,
+	    optp?(MAP_ANON | MAP_SHARED):MAP_ANON|MAP_PRIVATE,
+	    -1, 0L) + opto;
+
+	<span class="enscript-keyword">if</span> (lock == MAP_FAILED) {
+		errors++;
+	} <span class="enscript-keyword">else</span> {
+		(<span class="enscript-type">void</span>) pthread_mutexattr_init(&amp;attr);
+		<span class="enscript-keyword">if</span> (optp)
+			(<span class="enscript-type">void</span>) pthread_mutexattr_setpshared(&amp;attr,
+			    PTHREAD_PROCESS_SHARED);
+
+		<span class="enscript-keyword">if</span> (pthread_mutex_init(lock, &amp;attr) != 0)
+			errors++;
+	}
+
+	<span class="enscript-keyword">return</span> (errors);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initworker</span>(<span class="enscript-type">void</span> *tsd)
+{
+	<span class="enscript-type">int</span> errors = 0;
+	tsd_t			*ts = (tsd_t *)tsd;
+
+
+	<span class="enscript-keyword">if</span> (optt) {
+		pthread_t		tid;
+
+
+
+		<span class="enscript-keyword">if</span> (pthread_create(&amp;tid, NULL, dummy, NULL) != 0) {
+			errors++;
+		}
+	}
+
+	ts-&gt;ts_lock = lock;
+
+	<span class="enscript-keyword">return</span> (errors);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">spinme</span>(<span class="enscript-type">int</span> usecs)
+{
+	<span class="enscript-type">long</span> <span class="enscript-type">long</span> s = getusecs();
+
+	<span class="enscript-keyword">while</span> (getusecs() - s &lt; usecs)
+		;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark</span>(<span class="enscript-type">void</span> *tsd, result_t *res)
+{
+	tsd_t			*ts = (tsd_t *)tsd;
+	<span class="enscript-type">int</span>			i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; lm_optB; i ++) {
+
+		(<span class="enscript-type">void</span>) pthread_mutex_lock(ts-&gt;ts_lock);
+		<span class="enscript-keyword">if</span> (opth)
+			spinme(opth);
+		(<span class="enscript-type">void</span>) pthread_mutex_unlock(ts-&gt;ts_lock);
+
+	}
+
+	res-&gt;re_count = lm_optB;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">char</span> *
+<span class="enscript-function-name">benchmark_result</span>()
+{
+	<span class="enscript-type">static</span> <span class="enscript-type">char</span>		result[256];
+
+	(<span class="enscript-type">void</span>) sprintf(result, <span class="enscript-string">&quot;%8d&quot;</span>, opth);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+</pre>
+<hr />
+</body></html>

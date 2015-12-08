@@ -1,0 +1,885 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>i386_vm_init.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">i386_vm_init.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2003-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989, 1988 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/i386/vm_param.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_prot.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/time_value.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_page.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpuid.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_status.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/i386/efi.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/i386_lowmem.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;x86_64/lowglobals.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pal_routines.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/loader.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/kernel_mach_header.h&gt;</span>
+
+
+vm_size_t	mem_size = 0; 
+pmap_paddr_t	first_avail = 0;<span class="enscript-comment">/* first after page tables */</span>
+
+uint64_t	max_mem;        <span class="enscript-comment">/* Size of physical memory (bytes), adjusted by maxmem */</span>
+uint64_t        mem_actual;
+uint64_t	sane_size = 0;  <span class="enscript-comment">/* Memory size for defaults calculations */</span>
+
+<span class="enscript-comment">/*
+ * KASLR parameters
+ */</span>
+ppnum_t		vm_kernel_base_page;
+vm_offset_t	vm_kernel_base;
+vm_offset_t	vm_kernel_top;
+vm_offset_t	vm_kernel_stext;
+vm_offset_t	vm_kernel_etext;
+vm_offset_t	vm_kernel_slide;
+vm_offset_t vm_hib_base;
+vm_offset_t	vm_kext_base = VM_MIN_KERNEL_AND_KEXT_ADDRESS;
+vm_offset_t	vm_kext_top = VM_MIN_KERNEL_ADDRESS;
+
+vm_offset_t vm_prelink_stext;
+vm_offset_t vm_prelink_etext;
+vm_offset_t vm_prelink_sinfo;
+vm_offset_t vm_prelink_einfo;
+vm_offset_t vm_slinkedit;
+vm_offset_t vm_elinkedit;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAXLORESERVE</span>	(32 * 1024 * 1024)
+
+ppnum_t		max_ppnum = 0;
+ppnum_t		lowest_lo = 0;
+ppnum_t		lowest_hi = 0;
+ppnum_t		highest_hi = 0;
+
+<span class="enscript-type">enum</span> {PMAP_MAX_RESERVED_RANGES = 32};
+uint32_t pmap_reserved_pages_allocated = 0;
+uint32_t pmap_reserved_range_indices[PMAP_MAX_RESERVED_RANGES];
+uint32_t pmap_last_reserved_range_index = 0;
+uint32_t pmap_reserved_ranges = 0;
+
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> <span class="enscript-function-name">bsd_mbuf_cluster_reserve</span>(boolean_t *);
+
+pmap_paddr_t     avail_start, avail_end;
+vm_offset_t	virtual_avail, virtual_end;
+<span class="enscript-type">static</span> pmap_paddr_t	avail_remaining;
+vm_offset_t     static_memory_end = 0;
+
+vm_offset_t	sHIB, eHIB, stext, etext, sdata, edata, sconstdata, econstdata, end;
+
+<span class="enscript-comment">/*
+ * _mh_execute_header is the mach_header for the currently executing kernel
+ */</span>
+vm_offset_t segTEXTB; <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> segSizeTEXT;
+vm_offset_t segDATAB; <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> segSizeDATA;
+vm_offset_t segLINKB; <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> segSizeLINK;
+vm_offset_t segPRELINKB; <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> segSizePRELINK;
+vm_offset_t segPRELINKINFOB; <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> segSizePRELINKINFO;
+vm_offset_t segHIBB; <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> segSizeHIB;
+vm_offset_t sectCONSTB; <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> sectSizeConst;
+
+boolean_t doconstro_override = FALSE;
+
+<span class="enscript-type">static</span> kernel_segment_command_t *segTEXT, *segDATA;
+<span class="enscript-type">static</span> kernel_section_t *cursectTEXT, *lastsectTEXT;
+<span class="enscript-type">static</span> kernel_section_t *sectDCONST;
+
+<span class="enscript-type">extern</span> uint64_t firmware_Conventional_bytes;
+<span class="enscript-type">extern</span> uint64_t firmware_RuntimeServices_bytes;
+<span class="enscript-type">extern</span> uint64_t firmware_ACPIReclaim_bytes;
+<span class="enscript-type">extern</span> uint64_t firmware_ACPINVS_bytes;
+<span class="enscript-type">extern</span> uint64_t firmware_PalCode_bytes;
+<span class="enscript-type">extern</span> uint64_t firmware_Reserved_bytes;
+<span class="enscript-type">extern</span> uint64_t firmware_Unusable_bytes;
+<span class="enscript-type">extern</span> uint64_t firmware_other_bytes;
+uint64_t firmware_MMIO_bytes;
+
+<span class="enscript-comment">/*
+ * Linker magic to establish the highest address in the kernel.
+ */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> 	*last_kernel_symbol;
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">DEBUG</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PRINT_PMAP_MEMORY_TABLE</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DBG</span>(x...)       kprintf(x)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DBG</span>(x...)
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+<span class="enscript-comment">/*
+ * Basic VM initialization.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">i386_vm_init</span>(uint64_t	maxmem,
+	     boolean_t	IA32e,
+	     boot_args	*args)
+{
+	pmap_memory_region_t *pmptr;
+        pmap_memory_region_t *prev_pmptr;
+	EfiMemoryRange *mptr;
+        <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> mcount;
+        <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> msize;
+	ppnum_t fap;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+	ppnum_t maxpg = 0;
+        uint32_t pmap_type;
+	uint32_t maxloreserve;
+	uint32_t maxdmaaddr;
+	uint32_t  mbuf_reserve = 0;
+	boolean_t mbuf_override = FALSE;
+	boolean_t coalescing_permitted;
+	vm_kernel_base_page = i386_btop(args-&gt;kaddr);
+	vm_offset_t base_address;
+	vm_offset_t static_base_address;
+    
+	<span class="enscript-comment">/*
+	 * Establish the KASLR parameters.
+	 */</span>
+	static_base_address = ml_static_ptovirt(KERNEL_BASE_OFFSET);
+	base_address        = ml_static_ptovirt(args-&gt;kaddr);
+	vm_kernel_slide     = base_address - static_base_address;
+	<span class="enscript-keyword">if</span> (args-&gt;kslide) {
+		kprintf(<span class="enscript-string">&quot;KASLR slide: 0x%016lx dynamic\n&quot;</span>, vm_kernel_slide);
+		<span class="enscript-keyword">if</span> (vm_kernel_slide != ((vm_offset_t)args-&gt;kslide))
+			panic(<span class="enscript-string">&quot;Kernel base inconsistent with slide - rebased?&quot;</span>);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* No slide relative to on-disk symbols */</span>
+		kprintf(<span class="enscript-string">&quot;KASLR slide: 0x%016lx static and ignored\n&quot;</span>,
+			vm_kernel_slide);
+		vm_kernel_slide = 0;
+	}
+
+	<span class="enscript-comment">/*
+	 * Zero out local relocations to avoid confusing kxld.
+	 * TODO: might be better to move this code to OSKext::initialize
+	 */</span>
+	<span class="enscript-keyword">if</span> (_mh_execute_header.flags &amp; MH_PIE) {
+		<span class="enscript-type">struct</span> load_command *loadcmd;
+		uint32_t cmd;
+
+		loadcmd = (<span class="enscript-type">struct</span> load_command *)((uintptr_t)&amp;_mh_execute_header +
+						  <span class="enscript-keyword">sizeof</span> (_mh_execute_header));
+
+		<span class="enscript-keyword">for</span> (cmd = 0; cmd &lt; _mh_execute_header.ncmds; cmd++) {
+			<span class="enscript-keyword">if</span> (loadcmd-&gt;cmd == LC_DYSYMTAB) {
+				<span class="enscript-type">struct</span> dysymtab_command *dysymtab;
+
+				dysymtab = (<span class="enscript-type">struct</span> dysymtab_command *)loadcmd;
+				dysymtab-&gt;nlocrel = 0;
+				dysymtab-&gt;locreloff = 0;
+				kprintf(<span class="enscript-string">&quot;Hiding local relocations\n&quot;</span>);
+				<span class="enscript-keyword">break</span>;
+			}
+			loadcmd = (<span class="enscript-type">struct</span> load_command *)((uintptr_t)loadcmd + loadcmd-&gt;cmdsize);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Now retrieve addresses for end, edata, and etext 
+	 * from MACH-O headers.
+	 */</span>
+	segTEXTB = (vm_offset_t) getsegdatafromheader(&amp;_mh_execute_header,
+					<span class="enscript-string">&quot;__TEXT&quot;</span>, &amp;segSizeTEXT);
+	segDATAB = (vm_offset_t) getsegdatafromheader(&amp;_mh_execute_header,
+					<span class="enscript-string">&quot;__DATA&quot;</span>, &amp;segSizeDATA);
+	segLINKB = (vm_offset_t) getsegdatafromheader(&amp;_mh_execute_header,
+					<span class="enscript-string">&quot;__LINKEDIT&quot;</span>, &amp;segSizeLINK);
+	segHIBB  = (vm_offset_t) getsegdatafromheader(&amp;_mh_execute_header,
+					<span class="enscript-string">&quot;__HIB&quot;</span>, &amp;segSizeHIB);
+    segPRELINKB = (vm_offset_t) getsegdatafromheader(&amp;_mh_execute_header,
+                                                     <span class="enscript-string">&quot;__PRELINK_TEXT&quot;</span>, &amp;segSizePRELINK);
+    segPRELINKINFOB = (vm_offset_t) getsegdatafromheader(&amp;_mh_execute_header,
+                                                     <span class="enscript-string">&quot;__PRELINK_INFO&quot;</span>, &amp;segSizePRELINKINFO);
+	segTEXT = getsegbynamefromheader(&amp;_mh_execute_header,
+					<span class="enscript-string">&quot;__TEXT&quot;</span>);
+	segDATA = getsegbynamefromheader(&amp;_mh_execute_header,
+					<span class="enscript-string">&quot;__DATA&quot;</span>);
+	sectDCONST = getsectbynamefromheader(&amp;_mh_execute_header,
+					<span class="enscript-string">&quot;__DATA&quot;</span>, <span class="enscript-string">&quot;__const&quot;</span>);
+	cursectTEXT = lastsectTEXT = firstsect(segTEXT);
+	<span class="enscript-comment">/* Discover the last TEXT section within the TEXT segment */</span>
+	<span class="enscript-keyword">while</span> ((cursectTEXT = nextsect(segTEXT, cursectTEXT)) != NULL) {
+		lastsectTEXT = cursectTEXT;
+	}
+
+	sHIB  = segHIBB;
+	eHIB  = segHIBB + segSizeHIB;
+	vm_hib_base = sHIB;
+	<span class="enscript-comment">/* Zero-padded from ehib to stext if text is 2M-aligned */</span>
+	stext = segTEXTB;
+	lowGlo.lgStext = stext;
+	etext = (vm_offset_t) round_page_64(lastsectTEXT-&gt;addr + lastsectTEXT-&gt;size);
+	<span class="enscript-comment">/* Zero-padded from etext to sdata if text is 2M-aligned */</span>
+	sdata = segDATAB;
+	edata = segDATAB + segSizeDATA;
+
+	sectCONSTB = (vm_offset_t) sectDCONST-&gt;addr;
+	sectSizeConst = sectDCONST-&gt;size;
+	sconstdata = sectCONSTB;
+	econstdata = sectCONSTB + sectSizeConst;
+
+	<span class="enscript-keyword">if</span> (sectSizeConst &amp; PAGE_MASK) {
+		kernel_section_t *ns = nextsect(segDATA, sectDCONST);
+		<span class="enscript-keyword">if</span> (ns &amp;&amp; !(ns-&gt;addr &amp; PAGE_MASK))
+			doconstro_override = TRUE;
+	} <span class="enscript-keyword">else</span>
+		doconstro_override = TRUE;
+
+	DBG(<span class="enscript-string">&quot;segTEXTB    = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) segTEXTB);
+	DBG(<span class="enscript-string">&quot;segDATAB    = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) segDATAB);
+	DBG(<span class="enscript-string">&quot;segLINKB    = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) segLINKB);
+	DBG(<span class="enscript-string">&quot;segHIBB     = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) segHIBB);
+	DBG(<span class="enscript-string">&quot;segPRELINKB = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) segPRELINKB);
+	DBG(<span class="enscript-string">&quot;segPRELINKINFOB = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) segPRELINKINFOB);
+	DBG(<span class="enscript-string">&quot;sHIB        = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) sHIB);
+	DBG(<span class="enscript-string">&quot;eHIB        = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) eHIB);
+	DBG(<span class="enscript-string">&quot;stext       = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) stext);
+	DBG(<span class="enscript-string">&quot;etext       = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) etext);
+	DBG(<span class="enscript-string">&quot;sdata       = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) sdata);
+	DBG(<span class="enscript-string">&quot;edata       = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) edata);
+	DBG(<span class="enscript-string">&quot;sconstdata  = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) sconstdata);
+	DBG(<span class="enscript-string">&quot;econstdata  = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) econstdata);
+	DBG(<span class="enscript-string">&quot;kernel_top  = %p\n&quot;</span>, (<span class="enscript-type">void</span> *) &amp;last_kernel_symbol);
+
+	vm_kernel_base  = sHIB;
+	vm_kernel_top   = (vm_offset_t) &amp;last_kernel_symbol;
+	vm_kernel_stext = stext;
+	vm_kernel_etext = etext;
+
+    vm_prelink_stext = segPRELINKB;
+    vm_prelink_etext = segPRELINKB + segSizePRELINK;
+    vm_prelink_sinfo = segPRELINKINFOB;
+    vm_prelink_einfo = segPRELINKINFOB + segSizePRELINKINFO;
+    vm_slinkedit = segLINKB;
+    vm_elinkedit = segLINKB + segSizePRELINK;
+
+	vm_set_page_size();
+
+	<span class="enscript-comment">/*
+	 * Compute the memory size.
+	 */</span>
+
+	avail_remaining = 0;
+	avail_end = 0;
+	pmptr = pmap_memory_regions;
+        prev_pmptr = 0;
+	pmap_memory_region_count = pmap_memory_region_current = 0;
+	fap = (ppnum_t) i386_btop(first_avail);
+
+	mptr = (EfiMemoryRange *)ml_static_ptovirt((vm_offset_t)args-&gt;MemoryMap);
+        <span class="enscript-keyword">if</span> (args-&gt;MemoryMapDescriptorSize == 0)
+	        panic(<span class="enscript-string">&quot;Invalid memory map descriptor size&quot;</span>);
+        msize = args-&gt;MemoryMapDescriptorSize;
+        mcount = args-&gt;MemoryMapSize / msize;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">FOURGIG</span> 0x0000000100000000ULL
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ONEGIG</span>  0x0000000040000000ULL
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; mcount; i++, mptr = (EfiMemoryRange *)(((vm_offset_t)mptr) + msize)) {
+	        ppnum_t base, top;
+		uint64_t region_bytes = 0;
+
+		<span class="enscript-keyword">if</span> (pmap_memory_region_count &gt;= PMAP_MEMORY_REGIONS_SIZE) {
+		        kprintf(<span class="enscript-string">&quot;WARNING: truncating memory region count at %d\n&quot;</span>, pmap_memory_region_count);
+			<span class="enscript-keyword">break</span>;
+		}
+		base = (ppnum_t) (mptr-&gt;PhysicalStart &gt;&gt; I386_PGSHIFT);
+		top = (ppnum_t) (((mptr-&gt;PhysicalStart) &gt;&gt; I386_PGSHIFT) + mptr-&gt;NumberOfPages - 1);
+
+		<span class="enscript-keyword">if</span> (base == 0) {
+			<span class="enscript-comment">/*
+			 * Avoid having to deal with the edge case of the 
+			 * very first possible physical page and the roll-over
+			 * to -1; just ignore that page.
+			 */</span>
+			kprintf(<span class="enscript-string">&quot;WARNING: ignoring first page in [0x%llx:0x%llx]\n&quot;</span>, (uint64_t) base, (uint64_t) top);
+			base++;
+		}
+		<span class="enscript-keyword">if</span> (top + 1 == 0) {
+			<span class="enscript-comment">/*
+			 * Avoid having to deal with the edge case of the 
+			 * very last possible physical page and the roll-over
+			 * to 0; just ignore that page.
+			 */</span>
+			kprintf(<span class="enscript-string">&quot;WARNING: ignoring last page in [0x%llx:0x%llx]\n&quot;</span>, (uint64_t) base, (uint64_t) top);
+			top--;
+		}
+		<span class="enscript-keyword">if</span> (top &lt; base) {
+			<span class="enscript-comment">/*
+			 * That was the only page in that region, so
+			 * ignore the whole region.
+			 */</span>
+			<span class="enscript-keyword">continue</span>;
+		}
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MR_RSV_TEST</span>
+		<span class="enscript-type">static</span> uint32_t nmr = 0;
+		<span class="enscript-keyword">if</span> ((base &gt; 0x20000) &amp;&amp; (nmr++ &lt; 4))
+			mptr-&gt;Attribute |= EFI_MEMORY_KERN_RESERVED;
+#<span class="enscript-reference">endif</span>
+		region_bytes = (uint64_t)(mptr-&gt;NumberOfPages &lt;&lt; I386_PGSHIFT);
+		pmap_type = mptr-&gt;Type;
+
+		<span class="enscript-keyword">switch</span> (mptr-&gt;Type) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiLoaderCode</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiLoaderData</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiBootServicesCode</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiBootServicesData</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiConventionalMemory</span>:
+		        <span class="enscript-comment">/*
+			 * Consolidate usable memory types into one.
+			 */</span>
+		        pmap_type = kEfiConventionalMemory;
+		        sane_size += region_bytes;
+			firmware_Conventional_bytes += region_bytes;
+			<span class="enscript-keyword">break</span>;
+			<span class="enscript-comment">/*
+			 * sane_size should reflect the total amount of physical
+			 * RAM in the system, not just the amount that is
+			 * available for the OS to use.
+			 * We now get this value from SMBIOS tables
+			 * rather than reverse engineering the memory map.
+			 * But the legacy computation of &quot;sane_size&quot; is kept
+			 * for diagnostic information.
+			 */</span>
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiRuntimeServicesCode</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiRuntimeServicesData</span>:
+			firmware_RuntimeServices_bytes += region_bytes;
+			sane_size += region_bytes;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiACPIReclaimMemory</span>:
+			firmware_ACPIReclaim_bytes += region_bytes;
+			sane_size += region_bytes;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiACPIMemoryNVS</span>:
+			firmware_ACPINVS_bytes += region_bytes;
+			sane_size += region_bytes;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiPalCode</span>:
+			firmware_PalCode_bytes += region_bytes;
+		        sane_size += region_bytes;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiReservedMemoryType</span>:
+			firmware_Reserved_bytes += region_bytes;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiUnusableMemory</span>:
+			firmware_Unusable_bytes += region_bytes;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiMemoryMappedIO</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kEfiMemoryMappedIOPortSpace</span>:
+			firmware_MMIO_bytes += region_bytes;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			firmware_other_bytes += region_bytes;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		DBG(<span class="enscript-string">&quot;EFI region %d: type %u/%d, base 0x%x, top 0x%x %s\n&quot;</span>,
+		    i, mptr-&gt;Type, pmap_type, base, top,
+		    (mptr-&gt;Attribute&amp;EFI_MEMORY_KERN_RESERVED)? <span class="enscript-string">&quot;RESERVED&quot;</span> :
+		    (mptr-&gt;Attribute&amp;EFI_MEMORY_RUNTIME)? <span class="enscript-string">&quot;RUNTIME&quot;</span> : <span class="enscript-string">&quot;&quot;</span>);
+
+		<span class="enscript-keyword">if</span> (maxpg) {
+		        <span class="enscript-keyword">if</span> (base &gt;= maxpg)
+				<span class="enscript-keyword">break</span>;
+		        top = (top &gt; maxpg) ? maxpg : top;
+		}
+
+		<span class="enscript-comment">/*
+		 * handle each region
+		 */</span>
+		<span class="enscript-keyword">if</span> ((mptr-&gt;Attribute &amp; EFI_MEMORY_RUNTIME) == EFI_MEMORY_RUNTIME ||
+		    pmap_type != kEfiConventionalMemory) {
+		        prev_pmptr = 0;
+			<span class="enscript-keyword">continue</span>;
+		} <span class="enscript-keyword">else</span> {
+		        <span class="enscript-comment">/*
+			 * Usable memory region
+			 */</span>
+		        <span class="enscript-keyword">if</span> (top &lt; I386_LOWMEM_RESERVED ||
+			    !pal_is_usable_memory(base, top)) {
+			        prev_pmptr = 0;
+				<span class="enscript-keyword">continue</span>;
+			}
+			<span class="enscript-comment">/*
+			 * A range may be marked with with the
+			 * EFI_MEMORY_KERN_RESERVED attribute
+			 * on some systems, to indicate that the range
+			 * must not be made available to devices.
+			 */</span>
+
+			<span class="enscript-keyword">if</span> (mptr-&gt;Attribute &amp; EFI_MEMORY_KERN_RESERVED) {
+				<span class="enscript-keyword">if</span> (++pmap_reserved_ranges &gt; PMAP_MAX_RESERVED_RANGES) {
+					panic(<span class="enscript-string">&quot;Too many reserved ranges %u\n&quot;</span>, pmap_reserved_ranges);
+				}
+			}
+
+			<span class="enscript-keyword">if</span> (top &lt; fap) {
+			        <span class="enscript-comment">/*
+				 * entire range below first_avail
+			         * salvage some low memory pages
+				 * we use some very low memory at startup
+				 * mark as already allocated here
+				 */</span>
+			        <span class="enscript-keyword">if</span> (base &gt;= I386_LOWMEM_RESERVED)
+				        pmptr-&gt;base = base;
+				<span class="enscript-keyword">else</span>
+				        pmptr-&gt;base = I386_LOWMEM_RESERVED;
+
+				pmptr-&gt;end = top;
+
+
+				<span class="enscript-keyword">if</span> ((mptr-&gt;Attribute &amp; EFI_MEMORY_KERN_RESERVED) &amp;&amp;
+				    (top &lt; vm_kernel_base_page)) {
+					pmptr-&gt;alloc_up = pmptr-&gt;base;
+					pmptr-&gt;alloc_down = pmptr-&gt;end;
+					pmap_reserved_range_indices[pmap_last_reserved_range_index++] = pmap_memory_region_count;
+				}
+				<span class="enscript-keyword">else</span> {
+					<span class="enscript-comment">/*
+					 * mark as already mapped
+					 */</span>
+					pmptr-&gt;alloc_up = top + 1;
+					pmptr-&gt;alloc_down = top;
+				}
+				pmptr-&gt;type = pmap_type;
+				pmptr-&gt;attribute = mptr-&gt;Attribute;
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( (base &lt; fap) &amp;&amp; (top &gt; fap) ) {
+			        <span class="enscript-comment">/*
+				 * spans first_avail
+				 * put mem below first avail in table but
+				 * mark already allocated
+				 */</span>
+			        pmptr-&gt;base = base;
+				pmptr-&gt;end = (fap - 1);
+				pmptr-&gt;alloc_up = pmptr-&gt;end + 1;
+				pmptr-&gt;alloc_down = pmptr-&gt;end;
+				pmptr-&gt;type = pmap_type;
+				pmptr-&gt;attribute = mptr-&gt;Attribute;
+				<span class="enscript-comment">/*
+				 * we bump these here inline so the accounting
+				 * below works correctly
+				 */</span>
+				pmptr++;
+				pmap_memory_region_count++;
+
+				pmptr-&gt;alloc_up = pmptr-&gt;base = fap;
+				pmptr-&gt;type = pmap_type;
+				pmptr-&gt;attribute = mptr-&gt;Attribute;
+				pmptr-&gt;alloc_down = pmptr-&gt;end = top;
+
+				<span class="enscript-keyword">if</span> (mptr-&gt;Attribute &amp; EFI_MEMORY_KERN_RESERVED)
+					pmap_reserved_range_indices[pmap_last_reserved_range_index++] = pmap_memory_region_count;
+			} <span class="enscript-keyword">else</span> {
+			        <span class="enscript-comment">/*
+				 * entire range useable
+				 */</span>
+			        pmptr-&gt;alloc_up = pmptr-&gt;base = base;
+				pmptr-&gt;type = pmap_type;
+				pmptr-&gt;attribute = mptr-&gt;Attribute;
+				pmptr-&gt;alloc_down = pmptr-&gt;end = top;
+				<span class="enscript-keyword">if</span> (mptr-&gt;Attribute &amp; EFI_MEMORY_KERN_RESERVED)
+					pmap_reserved_range_indices[pmap_last_reserved_range_index++] = pmap_memory_region_count;
+			}
+
+			<span class="enscript-keyword">if</span> (i386_ptob(pmptr-&gt;end) &gt; avail_end )
+			        avail_end = i386_ptob(pmptr-&gt;end);
+
+			avail_remaining += (pmptr-&gt;end - pmptr-&gt;base);
+			coalescing_permitted = (prev_pmptr &amp;&amp; (pmptr-&gt;attribute == prev_pmptr-&gt;attribute) &amp;&amp; ((pmptr-&gt;attribute &amp; EFI_MEMORY_KERN_RESERVED) == 0));
+			<span class="enscript-comment">/*
+			 * Consolidate contiguous memory regions, if possible
+			 */</span>
+			<span class="enscript-keyword">if</span> (prev_pmptr &amp;&amp;
+			    (pmptr-&gt;type == prev_pmptr-&gt;type) &amp;&amp;
+			    (coalescing_permitted) &amp;&amp;
+			    (pmptr-&gt;base == pmptr-&gt;alloc_up) &amp;&amp;
+			    (prev_pmptr-&gt;end == prev_pmptr-&gt;alloc_down) &amp;&amp;
+			    (pmptr-&gt;base == (prev_pmptr-&gt;end + 1)))
+			{
+				prev_pmptr-&gt;end = pmptr-&gt;end;
+				prev_pmptr-&gt;alloc_down = pmptr-&gt;alloc_down;
+			} <span class="enscript-keyword">else</span> {
+			        pmap_memory_region_count++;
+				prev_pmptr = pmptr;
+				pmptr++;
+			}
+		}
+	}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">PRINT_PMAP_MEMORY_TABLE</span>
+	{
+        <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> j;
+        pmap_memory_region_t *p = pmap_memory_regions;
+        addr64_t region_start, region_end;
+        addr64_t efi_start, efi_end;
+        <span class="enscript-keyword">for</span> (j=0;j&lt;pmap_memory_region_count;j++, p++) {
+            kprintf(<span class="enscript-string">&quot;pmap region %d type %d base 0x%llx alloc_up 0x%llx alloc_down 0x%llx top 0x%llx\n&quot;</span>,
+		    j, p-&gt;type,
+                    (addr64_t) p-&gt;base  &lt;&lt; I386_PGSHIFT,
+		    (addr64_t) p-&gt;alloc_up &lt;&lt; I386_PGSHIFT,
+		    (addr64_t) p-&gt;alloc_down &lt;&lt; I386_PGSHIFT,
+		    (addr64_t) p-&gt;end   &lt;&lt; I386_PGSHIFT);
+            region_start = (addr64_t) p-&gt;base &lt;&lt; I386_PGSHIFT;
+            region_end = ((addr64_t) p-&gt;end &lt;&lt; I386_PGSHIFT) - 1;
+	    mptr = (EfiMemoryRange *) ml_static_ptovirt((vm_offset_t)args-&gt;MemoryMap);
+            <span class="enscript-keyword">for</span> (i=0; i&lt;mcount; i++, mptr = (EfiMemoryRange *)(((vm_offset_t)mptr) + msize)) {
+                <span class="enscript-keyword">if</span> (mptr-&gt;Type != kEfiLoaderCode &amp;&amp;
+                    mptr-&gt;Type != kEfiLoaderData &amp;&amp;
+                    mptr-&gt;Type != kEfiBootServicesCode &amp;&amp;
+                    mptr-&gt;Type != kEfiBootServicesData &amp;&amp;
+                    mptr-&gt;Type != kEfiConventionalMemory) {
+                efi_start = (addr64_t)mptr-&gt;PhysicalStart;
+                efi_end = efi_start + ((vm_offset_t)mptr-&gt;NumberOfPages &lt;&lt; I386_PGSHIFT) - 1;
+                <span class="enscript-keyword">if</span> ((efi_start &gt;= region_start &amp;&amp; efi_start &lt;= region_end) ||
+                    (efi_end &gt;= region_start &amp;&amp; efi_end &lt;= region_end)) {
+                    kprintf(<span class="enscript-string">&quot; *** Overlapping region with EFI runtime region %d\n&quot;</span>, i);
+                }
+              }
+            }
+          }
+	}
+#<span class="enscript-reference">endif</span>
+
+	avail_start = first_avail;
+	mem_actual = args-&gt;PhysicalMemorySize;
+
+	<span class="enscript-comment">/*
+	 * For user visible memory size, round up to 128 Mb
+	 * - accounting for the various stolen memory not reported by EFI.
+	 * This is maintained for historical, comparison purposes but
+	 * we now use the memory size reported by EFI/Booter.
+	 */</span>
+	sane_size = (sane_size + 128 * MB - 1) &amp; ~((uint64_t)(128 * MB - 1));
+	<span class="enscript-keyword">if</span> (sane_size != mem_actual)
+		printf(<span class="enscript-string">&quot;mem_actual: 0x%llx\n legacy sane_size: 0x%llx\n&quot;</span>,
+			mem_actual, sane_size);
+	sane_size = mem_actual;
+
+	<span class="enscript-comment">/*
+	 * We cap at KERNEL_MAXMEM bytes (currently 32GB for K32, 96GB for K64).
+	 * Unless overriden by the maxmem= boot-arg
+	 * -- which is a non-zero maxmem argument to this function.
+	 */</span>
+	<span class="enscript-keyword">if</span> (maxmem == 0 &amp;&amp; sane_size &gt; KERNEL_MAXMEM) {
+		maxmem = KERNEL_MAXMEM;
+		printf(<span class="enscript-string">&quot;Physical memory %lld bytes capped at %dGB\n&quot;</span>,
+			sane_size, (uint32_t) (KERNEL_MAXMEM/GB));
+	}
+
+	<span class="enscript-comment">/*
+	 * if user set maxmem, reduce memory sizes
+	 */</span>
+	<span class="enscript-keyword">if</span> ( (maxmem &gt; (uint64_t)first_avail) &amp;&amp; (maxmem &lt; sane_size)) {
+		ppnum_t discarded_pages  = (ppnum_t)((sane_size - maxmem) &gt;&gt; I386_PGSHIFT);
+		ppnum_t	highest_pn = 0;
+		ppnum_t	cur_end  = 0;
+		uint64_t	pages_to_use;
+		<span class="enscript-type">unsigned</span>	cur_region = 0;
+
+		sane_size = maxmem;
+
+		<span class="enscript-keyword">if</span> (avail_remaining &gt; discarded_pages)
+			avail_remaining -= discarded_pages;
+		<span class="enscript-keyword">else</span>
+			avail_remaining = 0;
+		
+		pages_to_use = avail_remaining;
+
+		<span class="enscript-keyword">while</span> (cur_region &lt; pmap_memory_region_count &amp;&amp; pages_to_use) {
+		        <span class="enscript-keyword">for</span> (cur_end = pmap_memory_regions[cur_region].base;
+			     cur_end &lt; pmap_memory_regions[cur_region].end &amp;&amp; pages_to_use;
+			     cur_end++) {
+			        <span class="enscript-keyword">if</span> (cur_end &gt; highest_pn)
+				        highest_pn = cur_end;
+				pages_to_use--;
+			}
+			<span class="enscript-keyword">if</span> (pages_to_use == 0) {
+			        pmap_memory_regions[cur_region].end = cur_end;
+			        pmap_memory_regions[cur_region].alloc_down = cur_end;
+			}
+
+			cur_region++;
+		}
+		pmap_memory_region_count = cur_region;
+
+		avail_end = i386_ptob(highest_pn + 1);
+	}
+
+	<span class="enscript-comment">/*
+	 * mem_size is only a 32 bit container... follow the PPC route
+	 * and pin it to a 2 Gbyte maximum
+	 */</span>
+	<span class="enscript-keyword">if</span> (sane_size &gt; (FOURGIG &gt;&gt; 1))
+	        mem_size = (vm_size_t)(FOURGIG &gt;&gt; 1);
+	<span class="enscript-keyword">else</span>
+	        mem_size = (vm_size_t)sane_size;
+	max_mem = sane_size;
+
+	kprintf(<span class="enscript-string">&quot;Physical memory %llu MB\n&quot;</span>, sane_size/MB);
+
+	max_valid_low_ppnum = (2 * GB) / PAGE_SIZE;
+
+	<span class="enscript-keyword">if</span> (!PE_parse_boot_argn(<span class="enscript-string">&quot;max_valid_dma_addr&quot;</span>, &amp;maxdmaaddr, <span class="enscript-keyword">sizeof</span> (maxdmaaddr))) {
+	        max_valid_dma_address = (uint64_t)4 * (uint64_t)GB;
+	} <span class="enscript-keyword">else</span> {
+	        max_valid_dma_address = ((uint64_t) maxdmaaddr) * MB;
+
+		<span class="enscript-keyword">if</span> ((max_valid_dma_address / PAGE_SIZE) &lt; max_valid_low_ppnum)
+			max_valid_low_ppnum = (ppnum_t)(max_valid_dma_address / PAGE_SIZE);
+	}
+	<span class="enscript-keyword">if</span> (avail_end &gt;= max_valid_dma_address) {
+
+		<span class="enscript-keyword">if</span> (!PE_parse_boot_argn(<span class="enscript-string">&quot;maxloreserve&quot;</span>, &amp;maxloreserve, <span class="enscript-keyword">sizeof</span> (maxloreserve))) {
+
+			<span class="enscript-keyword">if</span> (sane_size &gt;= (ONEGIG * 15))
+				maxloreserve = (MAXLORESERVE / PAGE_SIZE) * 4;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sane_size &gt;= (ONEGIG * 7))
+				maxloreserve = (MAXLORESERVE / PAGE_SIZE) * 2;
+			<span class="enscript-keyword">else</span>
+				maxloreserve = MAXLORESERVE / PAGE_SIZE;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SOCKETS</span>
+			mbuf_reserve = bsd_mbuf_cluster_reserve(&amp;mbuf_override) / PAGE_SIZE;
+#<span class="enscript-reference">endif</span>
+		} <span class="enscript-keyword">else</span>
+			maxloreserve = (maxloreserve * (1024 * 1024)) / PAGE_SIZE;
+
+		<span class="enscript-keyword">if</span> (maxloreserve) {
+		        vm_lopage_free_limit = maxloreserve;
+			
+			<span class="enscript-keyword">if</span> (mbuf_override == TRUE) {
+				vm_lopage_free_limit += mbuf_reserve;
+				vm_lopage_lowater = 0;
+			} <span class="enscript-keyword">else</span>
+				vm_lopage_lowater = vm_lopage_free_limit / 16;
+
+			vm_lopage_refill = TRUE;
+			vm_lopage_needed = TRUE;
+		}
+	}
+	
+	<span class="enscript-comment">/*
+	 *	Initialize kernel physical map.
+	 *	Kernel virtual address starts at VM_KERNEL_MIN_ADDRESS.
+	 */</span>
+	kprintf(<span class="enscript-string">&quot;avail_remaining = 0x%lx\n&quot;</span>, (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)avail_remaining);
+	pmap_bootstrap(0, IA32e);
+}
+
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pmap_free_pages</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)avail_remaining;
+}
+
+
+boolean_t <span class="enscript-function-name">pmap_next_page_reserved</span>(ppnum_t *);
+
+<span class="enscript-comment">/*
+ * Pick a page from a &quot;kernel private&quot; reserved range; works around
+ * errata on some hardware.
+ */</span>
+boolean_t
+<span class="enscript-function-name">pmap_next_page_reserved</span>(ppnum_t *pn) {
+	<span class="enscript-keyword">if</span> (pmap_reserved_ranges) {
+		uint32_t n;
+		pmap_memory_region_t *region;
+		<span class="enscript-keyword">for</span> (n = 0; n &lt; pmap_last_reserved_range_index; n++) {
+			uint32_t reserved_index = pmap_reserved_range_indices[n];
+			region = &amp;pmap_memory_regions[reserved_index];
+			<span class="enscript-keyword">if</span> (region-&gt;alloc_up &lt;= region-&gt;alloc_down) {
+				*pn = region-&gt;alloc_up++;
+				avail_remaining--;
+
+				<span class="enscript-keyword">if</span> (*pn &gt; max_ppnum)
+					max_ppnum = *pn;
+
+				<span class="enscript-keyword">if</span> (lowest_lo == 0 || *pn &lt; lowest_lo)
+					lowest_lo = *pn;
+
+				pmap_reserved_pages_allocated++;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+				<span class="enscript-keyword">if</span> (region-&gt;alloc_up &gt; region-&gt;alloc_down) {
+					kprintf(<span class="enscript-string">&quot;Exhausted reserved range index: %u, base: 0x%x end: 0x%x, type: 0x%x, attribute: 0x%llx\n&quot;</span>, reserved_index, region-&gt;base, region-&gt;end, region-&gt;type, region-&gt;attribute);
+				}
+#<span class="enscript-reference">endif</span>
+				<span class="enscript-keyword">return</span> TRUE;
+			}
+		}
+	}
+	<span class="enscript-keyword">return</span> FALSE;
+}
+
+
+boolean_t
+<span class="enscript-function-name">pmap_next_page_hi</span>(
+	          ppnum_t *pn)
+{
+	pmap_memory_region_t *region;
+	<span class="enscript-type">int</span>	n;
+
+	<span class="enscript-keyword">if</span> (pmap_next_page_reserved(pn))
+		<span class="enscript-keyword">return</span> TRUE;
+
+	<span class="enscript-keyword">if</span> (avail_remaining) {
+		<span class="enscript-keyword">for</span> (n = pmap_memory_region_count - 1; n &gt;= 0; n--) {
+			region = &amp;pmap_memory_regions[n];
+
+			<span class="enscript-keyword">if</span> (region-&gt;alloc_down &gt;= region-&gt;alloc_up) {
+				*pn = region-&gt;alloc_down--;
+				avail_remaining--;
+
+				<span class="enscript-keyword">if</span> (*pn &gt; max_ppnum)
+					max_ppnum = *pn;
+
+                                <span class="enscript-keyword">if</span> (lowest_lo == 0 || *pn &lt; lowest_lo)
+                                        lowest_lo = *pn;
+
+                                <span class="enscript-keyword">if</span> (lowest_hi == 0 || *pn &lt; lowest_hi)
+                                        lowest_hi = *pn;
+
+                                <span class="enscript-keyword">if</span> (*pn &gt; highest_hi)
+                                        highest_hi = *pn;
+
+				<span class="enscript-keyword">return</span> TRUE;
+			}
+		}
+	}
+	<span class="enscript-keyword">return</span> FALSE;
+}
+
+
+boolean_t
+<span class="enscript-function-name">pmap_next_page</span>(
+	       ppnum_t *pn)
+{
+	<span class="enscript-keyword">if</span> (avail_remaining) <span class="enscript-keyword">while</span> (pmap_memory_region_current &lt; pmap_memory_region_count) {
+		<span class="enscript-keyword">if</span> (pmap_memory_regions[pmap_memory_region_current].alloc_up &gt;
+		    pmap_memory_regions[pmap_memory_region_current].alloc_down) {
+			pmap_memory_region_current++;
+			<span class="enscript-keyword">continue</span>;
+		}
+		*pn = pmap_memory_regions[pmap_memory_region_current].alloc_up++;
+		avail_remaining--;
+
+		<span class="enscript-keyword">if</span> (*pn &gt; max_ppnum)
+			max_ppnum = *pn;
+
+		<span class="enscript-keyword">if</span> (lowest_lo == 0 || *pn &lt; lowest_lo)
+			lowest_lo = *pn;
+
+		<span class="enscript-keyword">return</span> TRUE;
+	}
+	<span class="enscript-keyword">return</span> FALSE;
+}
+
+
+boolean_t
+<span class="enscript-function-name">pmap_valid_page</span>(
+	ppnum_t pn)
+{
+        <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+	pmap_memory_region_t *pmptr = pmap_memory_regions;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; pmap_memory_region_count; i++, pmptr++) {
+	        <span class="enscript-keyword">if</span> ( (pn &gt;= pmptr-&gt;base) &amp;&amp; (pn &lt;= pmptr-&gt;end) )
+	                <span class="enscript-keyword">return</span> TRUE;
+	}
+	<span class="enscript-keyword">return</span> FALSE;
+}
+
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,3970 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>content_filter.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">content_filter.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2013-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this
+ * file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * THEORY OF OPERATION
+ *
+ * The socket content filter subsystem provides a way for user space agents to
+ * make filtering decisions based on the content of the data being sent and
+ * received by TCP/IP sockets.
+ *
+ * A content filter user space agents gets a copy of the data and the data is
+ * also kept in kernel buffer until the user space agents makes a pass or drop
+ * decision. This unidirectional flow of content avoids unnecessary data copies
+ * back to the kernel.
+ * *
+ * A user space filter agent opens a kernel control socket with the name
+ * CONTENT_FILTER_CONTROL_NAME to attach to the socket content filter subsystem.
+ * When connected, a &quot;struct content_filter&quot; is created and set as the
+ * &quot;unitinfo&quot; of the corresponding kernel control socket instance.
+ *
+ * The socket content filter subsystem exchanges messages with the user space
+ * filter agent until an ultimate pass or drop decision is made by the
+ * user space filter agent.
+ *
+ * It should be noted that messages about many TCP/IP sockets can be multiplexed
+ * over a single kernel control socket.
+ *
+ * Notes:
+ * - The current implementation is limited to TCP sockets.
+ * - The current implementation supports up to two simultaneous content filters
+ *   for the sake of simplicity of the implementation.
+ *
+ *
+ * NECP FILTER CONTROL UNIT
+ *
+ * A user space filter agent uses the Network Extension Control Policy (NECP)
+ * database specify which TCP/IP sockets needs to be filtered. The NECP
+ * criteria may be based on a variety of properties like user ID or proc UUID.
+ *
+ * The NECP &quot;filter control unit&quot; is used by the socket content filter subsystem
+ * to deliver the relevant TCP/IP content information to the appropriate
+ * user space filter agent via its kernel control socket instance.
+ * This works as follows:
+ *
+ * 1) The user space filter agent specifies an NECP filter control unit when
+ *    in adds its filtering rules to the NECP database.
+ *
+ * 2) The user space filter agent also sets its NECP filter control unit on the
+ *    content filter kernel control socket via the socket option
+ *    CFIL_OPT_NECP_CONTROL_UNIT.
+ *
+ * 3) The NECP database is consulted to find out if a given TCP/IP socket
+ *    needs to be subjected to content filtering and returns the corresponding
+ *    NECP filter control unit  -- the NECP filter control unit is actually
+ *    stored in the TCP/IP socket structure so the NECP lookup is really simple.
+ *
+ * 4) The NECP filter control unit is then used to find the corresponding
+ *    kernel control socket instance.
+ *
+ * Note: NECP currently supports a ingle filter control unit per TCP/IP socket
+ *       but this restriction may be soon lifted.
+ *
+ *
+ * THE MESSAGING PROTOCOL
+ *
+ * The socket content filter subsystem and a user space filter agent
+ * communicate over the kernel control socket via an asynchronous
+ * messaging protocol (this is not a request-response protocol).
+ * The socket content filter subsystem sends event messages to the user
+ * space filter agent about the TCP/IP sockets it is interested to filter.
+ * The user space filter agent sends action messages to either allow
+ * data to pass or to disallow the data flow (and drop the connection).
+ *
+ * All messages over a content filter kernel control socket share the same
+ * common header of type &quot;struct cfil_msg_hdr&quot;. The message type tells if
+ * it's a event message &quot;CFM_TYPE_EVENT&quot; or a action message &quot;CFM_TYPE_ACTION&quot;.
+ * The message header field &quot;cfm_sock_id&quot; identifies a given TCP/IP socket.
+ * Note the message header length field may be padded for alignment and can
+ * be larger than the actual content of the message.
+ * The field &quot;cfm_op&quot; describe the kind of event or action.
+ *
+ * Here are the kinds of content filter events:
+ * - CFM_OP_SOCKET_ATTACHED: a new TCP/IP socket is being filtered
+ * - CFM_OP_SOCKET_CLOSED: A TCP/IP socket is closed
+ * - CFM_OP_DATA_OUT: A span of data is being sent on a TCP/IP socket
+ * - CFM_OP_DATA_IN: A span of data is being or received on a TCP/IP socket
+ *
+ *
+ * EVENT MESSAGES
+ *
+ * The CFM_OP_DATA_OUT and CFM_OP_DATA_IN event messages contains a span of
+ * data that is being sent or received. The position of this span of data
+ * in the data flow is described by a set of start and end offsets. These
+ * are absolute 64 bits offsets. The first byte sent (or received) starts
+ * at offset 0 and ends at offset 1. The length of the content data
+ * is given by the difference between the end offset and the start offset.
+ *
+ * After a CFM_OP_SOCKET_ATTACHED is delivered, CFM_OP_DATA_OUT and
+ * CFM_OP_DATA_OUT events are not delivered until a CFM_OP_DATA_UPDATE
+ * action message is send by the user space filter agent.
+ *
+ * Note: absolute 64 bits offsets should be large enough for the foreseeable
+ * future.  A 64-bits counter will wrap after 468 years are 10 Gbit/sec:
+ *   2E64 / ((10E9 / 8) * 60 * 60 * 24 * 365.25) = 467.63
+ *
+ * They are two kinds of content filter actions:
+ * - CFM_OP_DATA_UPDATE: to update pass or peek offsets for each direction.
+ * - CFM_OP_DROP: to shutdown socket and disallow further data flow
+ *
+ *
+ * ACTION MESSAGES
+ *
+ * The CFM_OP_DATA_UPDATE action messages let the user space filter
+ * agent allow data to flow up to the specified pass offset -- there
+ * is a pass offset for outgoing data and  a pass offset for incoming data.
+ * When a new TCP/IP socket is attached to the content filter, each pass offset
+ * is initially set to 0 so not data is allowed to pass by default.
+ * When the pass offset is set to CFM_MAX_OFFSET via a CFM_OP_DATA_UPDATE
+ * then the data flow becomes unrestricted.
+ *
+ * Note that pass offsets can only be incremented. A CFM_OP_DATA_UPDATE message
+ * with a pass offset smaller than the pass offset of a previous
+ * CFM_OP_DATA_UPDATE message is silently ignored.
+ *
+ * A user space filter agent also uses CFM_OP_DATA_UPDATE action messages
+ * to tell the kernel how much data it wants to see by using the peek offsets.
+ * Just like pass offsets, there is a peek offset for each direction.
+ * When a new TCP/IP socket is attached to the content filter, each peek offset
+ * is initially set to 0 so no CFM_OP_DATA_OUT and CFM_OP_DATA_IN event
+ * messages are dispatched by default until a CFM_OP_DATA_UPDATE action message
+ * with a greater than 0 peek offset is sent by the user space filter agent.
+ * When the peek offset is set to CFM_MAX_OFFSET via a CFM_OP_DATA_UPDATE
+ * then the flow of update data events becomes unrestricted.
+ *
+ * Note that peek offsets cannot be smaller than the corresponding pass offset.
+ * Also a peek offsets cannot be smaller than the corresponding end offset
+ * of the last CFM_OP_DATA_OUT/CFM_OP_DATA_IN message dispatched. Trying
+ * to set a too small peek value is silently ignored.
+ *
+ *
+ * PER SOCKET &quot;struct cfil_info&quot;
+ *
+ * As soon as a TCP/IP socket gets attached to a content filter, a
+ * &quot;struct cfil_info&quot; is created to hold the content filtering state for this
+ * socket.
+ *
+ * The content filtering state is made of the following information
+ * for each direction:
+ * - The current pass offset;
+ * - The first and last offsets of the data pending, waiting for a filtering
+ *   decision;
+ * - The inject queue for data that passed the filters and that needs
+ *   to be re-injected;
+ * - A content filter specific state in a set of  &quot;struct cfil_entry&quot;
+ *
+ *
+ * CONTENT FILTER STATE &quot;struct cfil_entry&quot;
+ *
+ * The &quot;struct cfil_entry&quot; maintains the information most relevant to the
+ * message handling over a kernel control socket with a user space filter agent.
+ *
+ * The &quot;struct cfil_entry&quot; holds the NECP filter control unit that corresponds
+ * to the kernel control socket unit it corresponds to and also has a pointer
+ * to the corresponding &quot;struct content_filter&quot;.
+ *
+ * For each direction, &quot;struct cfil_entry&quot; maintains the following information:
+ * - The pass offset
+ * - The peek offset
+ * - The offset of the last data peeked at by the filter
+ * - A queue of data that's waiting to be delivered to the  user space filter
+ *   agent on the kernel control socket
+ * - A queue of data for which event messages have been sent on the kernel
+ *   control socket and are pending for a filtering decision.
+ *
+ *
+ * CONTENT FILTER QUEUES
+ *
+ * Data that is being filtered is steered away from the TCP/IP socket buffer
+ * and instead will sit in one of three content filter queue until the data
+ * can be re-injected into the TCP/IP socket buffer.
+ *
+ * A content filter queue is represented by &quot;struct cfil_queue&quot; that contains
+ * a list of mbufs and the start and end offset of the data span of
+ * the list of mbufs.
+ *
+ * The data moves into the three content filter queues according to this
+ * sequence:
+ * a) The &quot;cfe_ctl_q&quot; of &quot;struct cfil_entry&quot;
+ * b) The &quot;cfe_pending_q&quot; of &quot;struct cfil_entry&quot;
+ * c) The &quot;cfi_inject_q&quot; of &quot;struct cfil_info&quot;
+ *
+ * Note: The seqyence (a),(b) may be repeated several times if there are more
+ * than one content filter attached to the TCP/IP socket.
+ *
+ * The &quot;cfe_ctl_q&quot; queue holds data than cannot be delivered to the
+ * kernel conntrol socket for two reasons:
+ * - The peek offset is less that the end offset of the mbuf data
+ * - The kernel control socket is flow controlled
+ *
+ * The &quot;cfe_pending_q&quot; queue holds data for which CFM_OP_DATA_OUT or
+ * CFM_OP_DATA_IN have been successfully dispatched to the kernel control
+ * socket and are waiting for a pass action message fromn the user space
+ * filter agent. An mbuf length must be fully allowed to pass to be removed
+ * from the cfe_pending_q.
+ *
+ * The &quot;cfi_inject_q&quot; queue holds data that has been fully allowed to pass
+ * by the user space filter agent and that needs to be re-injected into the
+ * TCP/IP socket.
+ *
+ *
+ * IMPACT ON FLOW CONTROL
+ *
+ * An essential aspect of the content filer subsystem is to minimize the
+ * impact on flow control of the TCP/IP sockets being filtered.
+ *
+ * The processing overhead of the content filtering may have an effect on
+ * flow control by adding noticeable delays and cannot be eliminated --
+ * care must be taken by the user space filter agent to minimize the
+ * processing delays.
+ *
+ * The amount of data being filtered is kept in buffers while waiting for
+ * a decision by the user space filter agent. This amount of data pending
+ * needs to be subtracted from the amount of data available in the
+ * corresponding TCP/IP socket buffer. This is done by modifying
+ * sbspace() and tcp_sbspace() to account for amount of data pending
+ * in the content filter.
+ *
+ *
+ * LOCKING STRATEGY
+ *
+ * The global state of content filter subsystem is protected by a single
+ * read-write lock &quot;cfil_lck_rw&quot;. The data flow can be done with the
+ * cfil read-write lock held as shared so it can be re-entered from multiple
+ * threads.
+ *
+ * The per TCP/IP socket content filterstate -- &quot;struct cfil_info&quot; -- is
+ * protected by the socket lock.
+ *
+ * A TCP/IP socket lock cannot be taken while the cfil read-write lock
+ * is held. That's why we have some sequences where we drop the cfil read-write
+ * lock before taking the TCP/IP lock.
+ *
+ * It is also important to lock the TCP/IP socket buffer while the content
+ * filter is modifying the amount of pending data. Otherwise the calculations
+ * in sbspace() and tcp_sbspace()  could be wrong.
+ *
+ * The &quot;cfil_lck_rw&quot; protects &quot;struct content_filter&quot; and also the fields
+ * &quot;cfe_link&quot; and &quot;cfe_filter&quot; of &quot;struct cfil_entry&quot;.
+ *
+ * Actually &quot;cfe_link&quot; and &quot;cfe_filter&quot; are protected by both by
+ * &quot;cfil_lck_rw&quot; and the socket lock: they may be modified only when
+ * &quot;cfil_lck_rw&quot; is exclusive and the socket is locked.
+ *
+ * To read the other fields of &quot;struct content_filter&quot; we have to take
+ * &quot;cfil_lck_rw&quot; in shared mode.
+ *
+ *
+ * LIMITATIONS
+ *
+ * - For TCP sockets only
+ *
+ * - Does not support TCP unordered messages
+ */</span>
+
+<span class="enscript-comment">/*
+ *	TO DO LIST
+ *
+ *	SOONER:
+ *
+ *	Deal with OOB
+ *
+ *	LATER:
+ *
+ *	If support datagram, enqueue control and address mbufs as well
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kern_control.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/content_filter.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MAX_CONTENT_FILTER</span> 2
+
+<span class="enscript-type">struct</span> cfil_entry;
+
+<span class="enscript-comment">/*
+ * The structure content_filter represents a user space content filter
+ * It's created and associated with a kernel control socket instance
+ */</span>
+<span class="enscript-type">struct</span> content_filter {
+	kern_ctl_ref		cf_kcref;
+	u_int32_t		cf_kcunit;
+	u_int32_t		cf_flags;
+
+	uint32_t		cf_necp_control_unit;
+
+	uint32_t		cf_sock_count;
+	TAILQ_HEAD(, cfil_entry) cf_sock_entries;
+};
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFF_ACTIVE</span>		0x01
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFF_DETACHING</span>		0x02
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFF_FLOW_CONTROLLED</span>	0x04
+
+<span class="enscript-type">struct</span> content_filter **content_filters = NULL;
+uint32_t cfil_active_count = 0;	<span class="enscript-comment">/* Number of active content filters */</span>
+uint32_t cfil_sock_attached_count = 0;	<span class="enscript-comment">/* Number of sockets attachements */</span>
+uint32_t cfil_close_wait_timeout = 1000; <span class="enscript-comment">/* in milliseconds */</span>
+
+<span class="enscript-type">static</span> kern_ctl_ref cfil_kctlref = NULL;
+
+<span class="enscript-type">static</span> lck_grp_attr_t *cfil_lck_grp_attr = NULL;
+<span class="enscript-type">static</span> lck_attr_t *cfil_lck_attr = NULL;
+<span class="enscript-type">static</span> lck_grp_t *cfil_lck_grp = NULL;
+<span class="enscript-function-name">decl_lck_rw_data</span>(<span class="enscript-type">static</span>, cfil_lck_rw);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFIL_RW_LCK_MAX</span> 8
+
+<span class="enscript-type">int</span> cfil_rw_nxt_lck = 0;
+<span class="enscript-type">void</span>* cfil_rw_lock_history[CFIL_RW_LCK_MAX];
+
+<span class="enscript-type">int</span> cfil_rw_nxt_unlck = 0;
+<span class="enscript-type">void</span>* cfil_rw_unlock_history[CFIL_RW_LCK_MAX];
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CONTENT_FILTER_ZONE_NAME</span>	<span class="enscript-string">&quot;content_filter&quot;</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CONTENT_FILTER_ZONE_MAX</span>		10
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *content_filter_zone = NULL;	<span class="enscript-comment">/* zone for content_filter */</span>
+
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFIL_INFO_ZONE_NAME</span>	<span class="enscript-string">&quot;cfil_info&quot;</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFIL_INFO_ZONE_MAX</span>	1024
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *cfil_info_zone = NULL;	<span class="enscript-comment">/* zone for cfil_info */</span>
+
+<span class="enscript-function-name">MBUFQ_HEAD</span>(cfil_mqhead);
+
+<span class="enscript-type">struct</span> cfil_queue {
+	uint64_t		q_start; <span class="enscript-comment">/* offset of first byte in queue */</span>
+	uint64_t		q_end; <span class="enscript-comment">/* offset of last byte in queue */</span>
+	<span class="enscript-type">struct</span> cfil_mqhead	q_mq;
+};
+
+<span class="enscript-comment">/*
+ * struct cfil_entry
+ *
+ * The is one entry per content filter
+ */</span>
+<span class="enscript-type">struct</span> cfil_entry {
+	TAILQ_ENTRY(cfil_entry) cfe_link;
+	<span class="enscript-type">struct</span> content_filter	*cfe_filter;
+
+	<span class="enscript-type">struct</span> cfil_info	*cfe_cfil_info;
+	uint32_t		cfe_flags;
+	uint32_t		cfe_necp_control_unit;
+	<span class="enscript-type">struct</span> timeval		cfe_last_event; <span class="enscript-comment">/* To user space */</span>
+	<span class="enscript-type">struct</span> timeval		cfe_last_action; <span class="enscript-comment">/* From user space */</span>
+
+	<span class="enscript-type">struct</span> cfe_buf {
+		<span class="enscript-comment">/*
+		 * cfe_pending_q holds data that has been delivered to
+		 * the filter and for which we are waiting for an action
+		 */</span>
+		<span class="enscript-type">struct</span> cfil_queue	cfe_pending_q;
+		<span class="enscript-comment">/*
+		 * This queue is for data that has not be delivered to
+		 * the content filter (new data, pass peek or flow control)
+		 */</span>
+		<span class="enscript-type">struct</span> cfil_queue	cfe_ctl_q;
+
+		uint64_t		cfe_pass_offset;
+		uint64_t		cfe_peek_offset;
+		uint64_t		cfe_peeked;
+	} cfe_snd, cfe_rcv;
+};
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFEF_CFIL_ATTACHED</span>		0x0001	<span class="enscript-comment">/* was attached to filter */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFEF_SENT_SOCK_ATTACHED</span>		0x0002	<span class="enscript-comment">/* sock attach event was sent */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFEF_DATA_START</span>			0x0004	<span class="enscript-comment">/* can send data event */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFEF_FLOW_CONTROLLED</span>		0x0008	<span class="enscript-comment">/* wait for flow control lift */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFEF_SENT_DISCONNECT_IN</span>		0x0010	<span class="enscript-comment">/* event was sent */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFEF_SENT_DISCONNECT_OUT</span>	0x0020	<span class="enscript-comment">/* event was sent */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFEF_SENT_SOCK_CLOSED</span>		0x0040	<span class="enscript-comment">/* closed event was sent */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFEF_CFIL_DETACHED</span>		0x0080	<span class="enscript-comment">/* filter was detached */</span>
+
+<span class="enscript-comment">/*
+ * struct cfil_info
+ *
+ * There is a struct cfil_info per socket
+ */</span>
+<span class="enscript-type">struct</span> cfil_info {
+	TAILQ_ENTRY(cfil_info)	cfi_link;
+	<span class="enscript-type">struct</span> socket		*cfi_so;
+	uint64_t		cfi_flags;
+	uint64_t		cfi_sock_id;
+
+	<span class="enscript-type">struct</span> cfi_buf {
+		<span class="enscript-comment">/*
+		 * cfi_pending_first and cfi_pending_last describe the total
+		 * amount of data outstanding for all the filters on
+		 * this socket and data in the flow queue
+		 * cfi_pending_mbcnt counts in sballoc() &quot;chars of mbufs used&quot;
+		 */</span>
+		uint64_t		cfi_pending_first;
+		uint64_t		cfi_pending_last;
+		<span class="enscript-type">int</span>			cfi_pending_mbcnt;
+		<span class="enscript-comment">/*
+		 * cfi_pass_offset is the minimum of all the filters
+		 */</span>
+		uint64_t		cfi_pass_offset;
+		<span class="enscript-comment">/*
+		 * cfi_inject_q holds data that needs to be re-injected
+		 * into the socket after filtering and that can
+		 * be queued because of flow control
+		 */</span>
+		<span class="enscript-type">struct</span> cfil_queue	cfi_inject_q;
+	} cfi_snd, cfi_rcv;
+
+	<span class="enscript-type">struct</span> cfil_entry	cfi_entries[MAX_CONTENT_FILTER];
+};
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFIF_DROP</span>		0x0001	<span class="enscript-comment">/* drop action applied */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFIF_CLOSE_WAIT</span>		0x0002	<span class="enscript-comment">/* waiting for filter to close */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFIF_SOCK_CLOSED</span>	0x0004	<span class="enscript-comment">/* socket is closed */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFIF_RETRY_INJECT_IN</span>	0x0010	<span class="enscript-comment">/* inject in failed */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFIF_RETRY_INJECT_OUT</span>	0x0020	<span class="enscript-comment">/* inject out failed */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFIF_SHUT_WR</span>		0x0040	<span class="enscript-comment">/* shutdown write */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFIF_SHUT_RD</span>		0x0080	<span class="enscript-comment">/* shutdown read */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFI_MASK_GENCNT</span>		0xFFFFFFFF00000000	<span class="enscript-comment">/* upper 32 bits */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFI_SHIFT_GENCNT</span>	32
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFI_MASK_FLOWHASH</span>	0x00000000FFFFFFFF	<span class="enscript-comment">/* lower 32 bits */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CFI_SHIFT_FLOWHASH</span>	0
+
+<span class="enscript-function-name">TAILQ_HEAD</span>(cfil_sock_head, cfil_info) cfil_sock_head;
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">CFIL_QUEUE_VERIFY</span>(x) if (cfil_debug) cfil_queue_verify(x)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">CFIL_INFO_VERIFY</span>(x) if (cfil_debug) cfil_info_verify(x)
+
+<span class="enscript-comment">/*
+ * Statistics
+ */</span>
+
+<span class="enscript-type">struct</span> cfil_stats cfil_stats;
+
+<span class="enscript-comment">/*
+ * For troubleshooting
+ */</span>
+<span class="enscript-type">int</span> cfil_log_level = LOG_ERR;
+<span class="enscript-type">int</span> cfil_debug = 1;
+
+<span class="enscript-comment">/*
+ * Sysctls for logs and statistics
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_cfil_filter_list</span>(<span class="enscript-type">struct</span> sysctl_oid *, <span class="enscript-type">void</span> *, <span class="enscript-type">int</span>,
+	<span class="enscript-type">struct</span> sysctl_req *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_cfil_sock_list</span>(<span class="enscript-type">struct</span> sysctl_oid *, <span class="enscript-type">void</span> *, <span class="enscript-type">int</span>,
+	<span class="enscript-type">struct</span> sysctl_req *);
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net, OID_AUTO, cfil, CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;cfil&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_cfil, OID_AUTO, log, CTLFLAG_RW|CTLFLAG_LOCKED,
+	&amp;cfil_log_level, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_cfil, OID_AUTO, debug, CTLFLAG_RW|CTLFLAG_LOCKED,
+	&amp;cfil_debug, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_UINT</span>(_net_cfil, OID_AUTO, sock_attached_count, CTLFLAG_RD|CTLFLAG_LOCKED,
+	&amp;cfil_sock_attached_count, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_UINT</span>(_net_cfil, OID_AUTO, active_count, CTLFLAG_RD|CTLFLAG_LOCKED,
+	&amp;cfil_active_count, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_UINT</span>(_net_cfil, OID_AUTO, close_wait_timeout, CTLFLAG_RW|CTLFLAG_LOCKED,
+	&amp;cfil_close_wait_timeout, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> cfil_sbtrim = 1;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_net_cfil, OID_AUTO, sbtrim, CTLFLAG_RW|CTLFLAG_LOCKED,
+	&amp;cfil_sbtrim, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_net_cfil, OID_AUTO, filter_list, CTLFLAG_RD|CTLFLAG_LOCKED,
+	0, 0, sysctl_cfil_filter_list, <span class="enscript-string">&quot;S,cfil_filter_stat&quot;</span>,  <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_net_cfil, OID_AUTO, sock_list, CTLFLAG_RD|CTLFLAG_LOCKED,
+	0, 0, sysctl_cfil_sock_list, <span class="enscript-string">&quot;S,cfil_sock_stat&quot;</span>,  <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_STRUCT</span>(_net_cfil, OID_AUTO, stats, CTLFLAG_RD|CTLFLAG_LOCKED,
+	&amp;cfil_stats, cfil_stats, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-comment">/*
+ * Forward declaration to appease the compiler
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cfil_action_data_pass</span>(<span class="enscript-type">struct</span> socket *, uint32_t, <span class="enscript-type">int</span>,
+	uint64_t, uint64_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cfil_action_drop</span>(<span class="enscript-type">struct</span> socket *, uint32_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cfil_dispatch_closed_event</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cfil_data_common</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">int</span>, <span class="enscript-type">struct</span> sockaddr *,
+	<span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">struct</span> mbuf *, uint32_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cfil_data_filter</span>(<span class="enscript-type">struct</span> socket *, uint32_t, <span class="enscript-type">int</span>,
+	<span class="enscript-type">struct</span> mbuf *, uint64_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">fill_ip_sockaddr_4_6</span>(<span class="enscript-type">union</span> sockaddr_in_4_6 *,
+	<span class="enscript-type">struct</span> in_addr, u_int16_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">fill_ip6_sockaddr_4_6</span>(<span class="enscript-type">union</span> sockaddr_in_4_6 *,
+	<span class="enscript-type">struct</span> in6_addr *, u_int16_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cfil_dispatch_attach_event</span>(<span class="enscript-type">struct</span> socket *, uint32_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">cfil_info_free</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">struct</span> cfil_info *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> cfil_info * <span class="enscript-function-name">cfil_info_alloc</span>(<span class="enscript-type">struct</span> socket *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cfil_info_attach_unit</span>(<span class="enscript-type">struct</span> socket *, uint32_t);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> socket * <span class="enscript-function-name">cfil_socket_from_sock_id</span>(cfil_sock_id_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cfil_service_pending_queue</span>(<span class="enscript-type">struct</span> socket *, uint32_t, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cfil_data_service_ctl_q</span>(<span class="enscript-type">struct</span> socket *, uint32_t, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">cfil_info_verify</span>(<span class="enscript-type">struct</span> cfil_info *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cfil_update_data_offsets</span>(<span class="enscript-type">struct</span> socket *, uint32_t, <span class="enscript-type">int</span>,
+	uint64_t, uint64_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cfil_acquire_sockbuf</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">cfil_release_sockbuf</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cfil_filters_attached</span>(<span class="enscript-type">struct</span> socket *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">cfil_rw_lock_exclusive</span>(lck_rw_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">cfil_rw_unlock_exclusive</span>(lck_rw_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">cfil_rw_lock_shared</span>(lck_rw_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">cfil_rw_unlock_shared</span>(lck_rw_t *);
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">cfil_rw_lock_shared_to_exclusive</span>(lck_rw_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">cfil_rw_lock_exclusive_to_shared</span>(lck_rw_t *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cfil_data_length</span>(<span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">int</span> *);
+
+<span class="enscript-comment">/*
+ * Content filter global read write lock
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_rw_lock_exclusive</span>(lck_rw_t *lck)
+{
+	<span class="enscript-type">void</span> *lr_saved;
+
+	lr_saved = __builtin_return_address(0);
+
+	lck_rw_lock_exclusive(lck);
+
+	cfil_rw_lock_history[cfil_rw_nxt_lck] = lr_saved;
+	cfil_rw_nxt_lck = (cfil_rw_nxt_lck + 1) % CFIL_RW_LCK_MAX;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_rw_unlock_exclusive</span>(lck_rw_t *lck)
+{
+	<span class="enscript-type">void</span> *lr_saved;
+
+	lr_saved = __builtin_return_address(0);
+
+	lck_rw_unlock_exclusive(lck);
+
+	cfil_rw_unlock_history[cfil_rw_nxt_unlck] = lr_saved;
+	cfil_rw_nxt_unlck = (cfil_rw_nxt_unlck + 1) % CFIL_RW_LCK_MAX;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_rw_lock_shared</span>(lck_rw_t *lck)
+{
+	<span class="enscript-type">void</span> *lr_saved;
+
+	lr_saved = __builtin_return_address(0);
+
+	lck_rw_lock_shared(lck);
+
+	cfil_rw_lock_history[cfil_rw_nxt_lck] = lr_saved;
+	cfil_rw_nxt_lck = (cfil_rw_nxt_lck + 1) % CFIL_RW_LCK_MAX;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_rw_unlock_shared</span>(lck_rw_t *lck)
+{
+	<span class="enscript-type">void</span> *lr_saved;
+
+	lr_saved = __builtin_return_address(0);
+
+	lck_rw_unlock_shared(lck);
+
+	cfil_rw_unlock_history[cfil_rw_nxt_unlck] = lr_saved;
+	cfil_rw_nxt_unlck = (cfil_rw_nxt_unlck + 1) % CFIL_RW_LCK_MAX;
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">cfil_rw_lock_shared_to_exclusive</span>(lck_rw_t *lck)
+{
+	<span class="enscript-type">void</span> *lr_saved;
+	boolean_t upgraded;
+
+	lr_saved = __builtin_return_address(0);
+
+	upgraded = lck_rw_lock_shared_to_exclusive(lck);
+	<span class="enscript-keyword">if</span> (upgraded) {
+		cfil_rw_unlock_history[cfil_rw_nxt_unlck] = lr_saved;
+		cfil_rw_nxt_unlck = (cfil_rw_nxt_unlck + 1) % CFIL_RW_LCK_MAX;
+	}
+	<span class="enscript-keyword">return</span> (upgraded);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_rw_lock_exclusive_to_shared</span>(lck_rw_t *lck)
+{
+	<span class="enscript-type">void</span> *lr_saved;
+
+	lr_saved = __builtin_return_address(0);
+
+	lck_rw_lock_exclusive_to_shared(lck);
+
+	cfil_rw_lock_history[cfil_rw_nxt_lck] = lr_saved;
+	cfil_rw_nxt_lck = (cfil_rw_nxt_lck + 1) % CFIL_RW_LCK_MAX;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_rw_lock_assert_held</span>(lck_rw_t *lck, <span class="enscript-type">int</span> exclusive)
+{
+	lck_rw_assert(lck,
+	    exclusive ? LCK_RW_ASSERT_EXCLUSIVE : LCK_RW_ASSERT_HELD);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">socket_lock_assert_owned</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	lck_mtx_t *mutex_held;
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_getlock != NULL)
+		mutex_held = (*so-&gt;so_proto-&gt;pr_getlock)(so, 0);
+	<span class="enscript-keyword">else</span>
+		mutex_held = so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+
+	lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+}
+
+<span class="enscript-comment">/*
+ * Return the number of bytes in the mbuf chain using the same
+ * method as m_length() or sballoc()
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_data_length</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> *retmbcnt)
+{
+	<span class="enscript-type">struct</span> mbuf *m0;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> pktlen;
+	<span class="enscript-type">int</span> mbcnt;
+
+	<span class="enscript-keyword">if</span> (retmbcnt == NULL)
+		<span class="enscript-keyword">return</span> (m_length(m));
+
+	pktlen = 0;
+	mbcnt = 0;
+	<span class="enscript-keyword">for</span> (m0 = m; m0 != NULL; m0 = m0-&gt;m_next) {
+		pktlen += m0-&gt;m_len;
+		mbcnt += MSIZE;
+		<span class="enscript-keyword">if</span> (m0-&gt;m_flags &amp; M_EXT)
+			mbcnt += m0-&gt;m_ext.ext_size;
+	}
+	*retmbcnt = mbcnt;
+	<span class="enscript-keyword">return</span> (pktlen);
+}
+
+<span class="enscript-comment">/*
+ * Common mbuf queue utilities
+ */</span>
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_queue_init</span>(<span class="enscript-type">struct</span> cfil_queue *cfq)
+{
+	cfq-&gt;q_start = 0;
+	cfq-&gt;q_end = 0;
+	MBUFQ_INIT(&amp;cfq-&gt;q_mq);
+}
+
+<span class="enscript-type">static</span> inline uint64_t
+<span class="enscript-function-name">cfil_queue_drain</span>(<span class="enscript-type">struct</span> cfil_queue *cfq)
+{
+	uint64_t drained = cfq-&gt;q_start - cfq-&gt;q_end;
+	cfq-&gt;q_start = 0;
+	cfq-&gt;q_end = 0;
+	MBUFQ_DRAIN(&amp;cfq-&gt;q_mq);
+
+	<span class="enscript-keyword">return</span> (drained);
+}
+
+<span class="enscript-comment">/* Return 1 when empty, 0 otherwise */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_queue_empty</span>(<span class="enscript-type">struct</span> cfil_queue *cfq)
+{
+	<span class="enscript-keyword">return</span> (MBUFQ_EMPTY(&amp;cfq-&gt;q_mq));
+}
+
+<span class="enscript-type">static</span> inline uint64_t
+<span class="enscript-function-name">cfil_queue_offset_first</span>(<span class="enscript-type">struct</span> cfil_queue *cfq)
+{
+	<span class="enscript-keyword">return</span> (cfq-&gt;q_start);
+}
+
+<span class="enscript-type">static</span> inline uint64_t
+<span class="enscript-function-name">cfil_queue_offset_last</span>(<span class="enscript-type">struct</span> cfil_queue *cfq)
+{
+	<span class="enscript-keyword">return</span> (cfq-&gt;q_end);
+}
+
+<span class="enscript-type">static</span> inline uint64_t
+<span class="enscript-function-name">cfil_queue_len</span>(<span class="enscript-type">struct</span> cfil_queue *cfq)
+{
+	<span class="enscript-keyword">return</span> (cfq-&gt;q_end - cfq-&gt;q_start);
+}
+
+<span class="enscript-comment">/*
+ * Routines to verify some fundamental assumptions
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_queue_verify</span>(<span class="enscript-type">struct</span> cfil_queue *cfq)
+{
+	mbuf_t m;
+	mbuf_t n;
+	uint64_t queuesize = 0;
+
+	<span class="enscript-comment">/* Verify offset are ordered */</span>
+	VERIFY(cfq-&gt;q_start &lt;= cfq-&gt;q_end);
+
+	<span class="enscript-comment">/*
+	 * When queue is empty, the offsets are equal otherwise the offsets
+	 * are different
+	 */</span>
+	VERIFY((MBUFQ_EMPTY(&amp;cfq-&gt;q_mq) &amp;&amp; cfq-&gt;q_start == cfq-&gt;q_end) ||
+		(!MBUFQ_EMPTY(&amp;cfq-&gt;q_mq) &amp;&amp;
+		cfq-&gt;q_start != cfq-&gt;q_end));
+
+	MBUFQ_FOREACH(m, &amp;cfq-&gt;q_mq) {
+		size_t chainsize = 0;
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> mlen = m_length(m);
+
+		<span class="enscript-keyword">if</span> (m == (<span class="enscript-type">void</span> *)M_TAG_FREE_PATTERN ||
+			m-&gt;m_next == (<span class="enscript-type">void</span> *)M_TAG_FREE_PATTERN ||
+			m-&gt;m_nextpkt == (<span class="enscript-type">void</span> *)M_TAG_FREE_PATTERN)
+			panic(<span class="enscript-string">&quot;%s - mq %p is free at %p&quot;</span>, __func__,
+				&amp;cfq-&gt;q_mq, m);
+		<span class="enscript-keyword">for</span> (n = m; n != NULL; n = n-&gt;m_next) {
+			<span class="enscript-keyword">if</span> (n-&gt;m_type != MT_DATA &amp;&amp;
+				n-&gt;m_type != MT_HEADER &amp;&amp;
+				n-&gt;m_type != MT_OOBDATA)
+			panic(<span class="enscript-string">&quot;%s - %p unsupported type %u&quot;</span>, __func__,
+				n, n-&gt;m_type);
+			chainsize += n-&gt;m_len;
+		}
+		<span class="enscript-keyword">if</span> (mlen != chainsize)
+			panic(<span class="enscript-string">&quot;%s - %p m_length() %u != chainsize %lu&quot;</span>,
+				__func__, m, mlen, chainsize);
+		queuesize += chainsize;
+	}
+	<span class="enscript-keyword">if</span> (queuesize != cfq-&gt;q_end - cfq-&gt;q_start)
+		panic(<span class="enscript-string">&quot;%s - %p queuesize %llu != offsetdiffs %llu&quot;</span>, __func__,
+			m, queuesize, cfq-&gt;q_end - cfq-&gt;q_start);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_queue_enqueue</span>(<span class="enscript-type">struct</span> cfil_queue *cfq, mbuf_t m, size_t len)
+{
+	CFIL_QUEUE_VERIFY(cfq);
+
+	MBUFQ_ENQUEUE(&amp;cfq-&gt;q_mq, m);
+	cfq-&gt;q_end += len;
+
+	CFIL_QUEUE_VERIFY(cfq);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_queue_remove</span>(<span class="enscript-type">struct</span> cfil_queue *cfq, mbuf_t m, size_t len)
+{
+	CFIL_QUEUE_VERIFY(cfq);
+
+	VERIFY(m_length(m) == len);
+
+	MBUFQ_REMOVE(&amp;cfq-&gt;q_mq, m);
+	MBUFQ_NEXT(m) = NULL;
+	cfq-&gt;q_start += len;
+
+	CFIL_QUEUE_VERIFY(cfq);
+}
+
+<span class="enscript-type">static</span> mbuf_t
+<span class="enscript-function-name">cfil_queue_first</span>(<span class="enscript-type">struct</span> cfil_queue *cfq)
+{
+	<span class="enscript-keyword">return</span> (MBUFQ_FIRST(&amp;cfq-&gt;q_mq));
+}
+
+<span class="enscript-type">static</span> mbuf_t
+<span class="enscript-function-name">cfil_queue_next</span>(<span class="enscript-type">struct</span> cfil_queue *cfq, mbuf_t m)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">cfq</span>)
+	<span class="enscript-keyword">return</span> (MBUFQ_NEXT(m));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_entry_buf_verify</span>(<span class="enscript-type">struct</span> cfe_buf *cfe_buf)
+{
+	CFIL_QUEUE_VERIFY(&amp;cfe_buf-&gt;cfe_ctl_q);
+	CFIL_QUEUE_VERIFY(&amp;cfe_buf-&gt;cfe_pending_q);
+
+	<span class="enscript-comment">/* Verify the queues are ordered so that pending is before ctl */</span>
+	VERIFY(cfe_buf-&gt;cfe_ctl_q.q_start &gt;= cfe_buf-&gt;cfe_pending_q.q_end);
+
+	<span class="enscript-comment">/* The peek offset cannot be less than the pass offset */</span>
+	VERIFY(cfe_buf-&gt;cfe_peek_offset &gt;= cfe_buf-&gt;cfe_pass_offset);
+
+	<span class="enscript-comment">/* Make sure we've updated the offset we peeked at  */</span>
+	VERIFY(cfe_buf-&gt;cfe_ctl_q.q_start &lt;= cfe_buf-&gt;cfe_peeked);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_entry_verify</span>(<span class="enscript-type">struct</span> cfil_entry *entry)
+{
+	cfil_entry_buf_verify(&amp;entry-&gt;cfe_snd);
+	cfil_entry_buf_verify(&amp;entry-&gt;cfe_rcv);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_info_buf_verify</span>(<span class="enscript-type">struct</span> cfi_buf *cfi_buf)
+{
+	CFIL_QUEUE_VERIFY(&amp;cfi_buf-&gt;cfi_inject_q);
+
+	VERIFY(cfi_buf-&gt;cfi_pending_first &lt;= cfi_buf-&gt;cfi_pending_last);
+	VERIFY(cfi_buf-&gt;cfi_pending_mbcnt &gt;= 0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_info_verify</span>(<span class="enscript-type">struct</span> cfil_info *cfil_info)
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">if</span> (cfil_info == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	cfil_info_buf_verify(&amp;cfil_info-&gt;cfi_snd);
+	cfil_info_buf_verify(&amp;cfil_info-&gt;cfi_rcv);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; MAX_CONTENT_FILTER; i++)
+		cfil_entry_verify(&amp;cfil_info-&gt;cfi_entries[i]);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">verify_content_filter</span>(<span class="enscript-type">struct</span> content_filter *cfc)
+{
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+	uint32_t count = 0;
+
+	VERIFY(cfc-&gt;cf_sock_count &gt;= 0);
+
+	TAILQ_FOREACH(entry, &amp;cfc-&gt;cf_sock_entries, cfe_link) {
+		count++;
+		VERIFY(cfc == entry-&gt;cfe_filter);
+	}
+	VERIFY(count == cfc-&gt;cf_sock_count);
+}
+
+<span class="enscript-comment">/*
+ * Kernel control socket callbacks
+ */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">cfil_ctl_connect</span>(kern_ctl_ref kctlref, <span class="enscript-type">struct</span> sockaddr_ctl *sac,
+		<span class="enscript-type">void</span> **unitinfo)
+{
+	errno_t	error = 0;
+	<span class="enscript-type">struct</span> content_filter *cfc = NULL;
+
+	CFIL_LOG(LOG_NOTICE, <span class="enscript-string">&quot;&quot;</span>);
+
+	cfc = zalloc(content_filter_zone);
+	<span class="enscript-keyword">if</span> (cfc == NULL) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;zalloc failed&quot;</span>);
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	bzero(cfc, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> content_filter));
+
+	cfil_rw_lock_exclusive(&amp;cfil_lck_rw);
+	<span class="enscript-keyword">if</span> (content_filters == NULL) {
+		<span class="enscript-type">struct</span> content_filter **tmp;
+
+		cfil_rw_unlock_exclusive(&amp;cfil_lck_rw);
+
+		MALLOC(tmp,
+			<span class="enscript-type">struct</span> content_filter **,
+			MAX_CONTENT_FILTER * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> content_filter *),
+			M_TEMP,
+			M_WAITOK | M_ZERO);
+
+		cfil_rw_lock_exclusive(&amp;cfil_lck_rw);
+
+		<span class="enscript-keyword">if</span> (tmp == NULL &amp;&amp; content_filters == NULL) {
+			error = ENOMEM;
+			cfil_rw_unlock_exclusive(&amp;cfil_lck_rw);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		<span class="enscript-comment">/* Another thread may have won the race */</span>
+		<span class="enscript-keyword">if</span> (content_filters != NULL)
+			FREE(tmp, M_TEMP);
+		<span class="enscript-keyword">else</span>
+			content_filters = tmp;
+	}
+
+	<span class="enscript-keyword">if</span> (sac-&gt;sc_unit == 0 || sac-&gt;sc_unit &gt; MAX_CONTENT_FILTER) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;bad sc_unit %u&quot;</span>, sac-&gt;sc_unit);
+		error = EINVAL;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (content_filters[sac-&gt;sc_unit - 1] != NULL) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;sc_unit %u in use&quot;</span>, sac-&gt;sc_unit);
+		error = EADDRINUSE;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * kernel control socket kcunit numbers start at 1
+		 */</span>
+		content_filters[sac-&gt;sc_unit - 1] = cfc;
+
+		cfc-&gt;cf_kcref = kctlref;
+		cfc-&gt;cf_kcunit = sac-&gt;sc_unit;
+		TAILQ_INIT(&amp;cfc-&gt;cf_sock_entries);
+
+		*unitinfo = cfc;
+		cfil_active_count++;
+	}
+	cfil_rw_unlock_exclusive(&amp;cfil_lck_rw);
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (error != 0 &amp;&amp; cfc != NULL)
+		zfree(content_filter_zone, cfc);
+
+	<span class="enscript-keyword">if</span> (error == 0)
+		OSIncrementAtomic(&amp;cfil_stats.cfs_ctl_connect_ok);
+	<span class="enscript-keyword">else</span>
+		OSIncrementAtomic(&amp;cfil_stats.cfs_ctl_connect_fail);
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;return %d cfil_active_count %u kcunit %u&quot;</span>,
+		error, cfil_active_count, sac-&gt;sc_unit);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">cfil_ctl_disconnect</span>(kern_ctl_ref kctlref, u_int32_t kcunit, <span class="enscript-type">void</span> *unitinfo)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">kctlref</span>)
+	errno_t	error = 0;
+	<span class="enscript-type">struct</span> content_filter *cfc;
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+
+	CFIL_LOG(LOG_NOTICE, <span class="enscript-string">&quot;&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (content_filters == NULL) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;no content filter&quot;</span>);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">if</span> (kcunit &gt; MAX_CONTENT_FILTER) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;kcunit %u &gt; MAX_CONTENT_FILTER (%d)&quot;</span>,
+			kcunit, MAX_CONTENT_FILTER);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	cfc = (<span class="enscript-type">struct</span> content_filter *)unitinfo;
+	<span class="enscript-keyword">if</span> (cfc == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	cfil_rw_lock_exclusive(&amp;cfil_lck_rw);
+	<span class="enscript-keyword">if</span> (content_filters[kcunit - 1] != cfc || cfc-&gt;cf_kcunit != kcunit) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;bad unit info %u)&quot;</span>,
+			kcunit);
+		cfil_rw_unlock_exclusive(&amp;cfil_lck_rw);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	cfc-&gt;cf_flags |= CFF_DETACHING;
+	<span class="enscript-comment">/*
+	 * Remove all sockets from the filter
+	 */</span>
+	<span class="enscript-keyword">while</span> ((entry = TAILQ_FIRST(&amp;cfc-&gt;cf_sock_entries)) != NULL) {
+		cfil_rw_lock_assert_held(&amp;cfil_lck_rw, 1);
+
+		verify_content_filter(cfc);
+		<span class="enscript-comment">/*
+		 * Accept all outstanding data by pushing to next filter
+		 * or back to socket
+		 *
+		 * TBD: Actually we should make sure all data has been pushed
+		 * back to socket
+		 */</span>
+		<span class="enscript-keyword">if</span> (entry-&gt;cfe_cfil_info &amp;&amp; entry-&gt;cfe_cfil_info-&gt;cfi_so) {
+			<span class="enscript-type">struct</span> cfil_info *cfil_info = entry-&gt;cfe_cfil_info;
+			<span class="enscript-type">struct</span> socket *so = cfil_info-&gt;cfi_so;
+
+			<span class="enscript-comment">/* Need to let data flow immediately */</span>
+			entry-&gt;cfe_flags |= CFEF_SENT_SOCK_ATTACHED |
+				CFEF_DATA_START;
+
+			<span class="enscript-comment">/*
+			 * Respect locking hierarchy
+			 */</span>
+			cfil_rw_unlock_exclusive(&amp;cfil_lck_rw);
+
+			socket_lock(so, 1);
+
+			<span class="enscript-comment">/*
+			 * When cfe_filter is NULL the filter is detached
+			 * and the entry has been removed from cf_sock_entries
+			 */</span>
+			<span class="enscript-keyword">if</span> (so-&gt;so_cfil == NULL || entry-&gt;cfe_filter == NULL) {
+				cfil_rw_lock_exclusive(&amp;cfil_lck_rw);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+			}
+			(<span class="enscript-type">void</span>) cfil_action_data_pass(so, kcunit, 1,
+					CFM_MAX_OFFSET,
+					CFM_MAX_OFFSET);
+
+			(<span class="enscript-type">void</span>) cfil_action_data_pass(so, kcunit, 0,
+					CFM_MAX_OFFSET,
+					CFM_MAX_OFFSET);
+
+			cfil_rw_lock_exclusive(&amp;cfil_lck_rw);
+
+			<span class="enscript-comment">/*
+			 * Check again as the socket may have been unlocked
+			 * when when calling cfil_acquire_sockbuf()
+			 */</span>
+			<span class="enscript-keyword">if</span> (so-&gt;so_cfil == NULL || entry-&gt;cfe_filter == NULL)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+
+			<span class="enscript-comment">/* The filter is now detached */</span>
+			entry-&gt;cfe_flags |= CFEF_CFIL_DETACHED;
+			CFIL_LOG(LOG_NOTICE, <span class="enscript-string">&quot;so %llx detached %u&quot;</span>,
+				(uint64_t)VM_KERNEL_ADDRPERM(so), kcunit);
+
+			<span class="enscript-keyword">if</span> ((so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_CLOSE_WAIT) &amp;&amp;
+			    cfil_filters_attached(so) == 0) {
+				CFIL_LOG(LOG_NOTICE, <span class="enscript-string">&quot;so %llx waking&quot;</span>,
+					(uint64_t)VM_KERNEL_ADDRPERM(so));
+				wakeup((caddr_t)&amp;so-&gt;so_cfil);
+			}
+
+			<span class="enscript-comment">/*
+			 * Remove the filter entry from the content filter
+			 * but leave the rest of the state intact as the queues
+			 * may not be empty yet
+			 */</span>
+			entry-&gt;cfe_filter = NULL;
+			entry-&gt;cfe_necp_control_unit = 0;
+
+			TAILQ_REMOVE(&amp;cfc-&gt;cf_sock_entries, entry, cfe_link);
+			cfc-&gt;cf_sock_count--;
+<span class="enscript-reference">release</span>:
+			socket_unlock(so, 1);
+		}
+	}
+	verify_content_filter(cfc);
+
+	VERIFY(cfc-&gt;cf_sock_count == 0);
+
+	<span class="enscript-comment">/*
+	 * Make filter inactive
+	 */</span>
+	content_filters[kcunit - 1] = NULL;
+	cfil_active_count--;
+	cfil_rw_unlock_exclusive(&amp;cfil_lck_rw);
+
+	zfree(content_filter_zone, cfc);
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (error == 0)
+		OSIncrementAtomic(&amp;cfil_stats.cfs_ctl_disconnect_ok);
+	<span class="enscript-keyword">else</span>
+		OSIncrementAtomic(&amp;cfil_stats.cfs_ctl_disconnect_fail);
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;return %d cfil_active_count %u kcunit %u&quot;</span>,
+		error, cfil_active_count, kcunit);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * cfil_acquire_sockbuf()
+ *
+ * Prevent any other thread from acquiring the sockbuf
+ * We use sb_cfil_thread as a semaphore to prevent other threads from
+ * messing with the sockbuf -- see sblock()
+ * Note: We do not set SB_LOCK here because the thread may check or modify
+ * SB_LOCK several times until it calls cfil_release_sockbuf() -- currently
+ * sblock(), sbunlock() or sodefunct()
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_acquire_sockbuf</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> outgoing)
+{
+	thread_t tp = current_thread();
+	<span class="enscript-type">struct</span> sockbuf *sb = outgoing ? &amp;so-&gt;so_snd : &amp;so-&gt;so_rcv;
+	lck_mtx_t *mutex_held;
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-comment">/*
+	 * Wait until no thread is holding the sockbuf and other content
+	 * filter threads have released the sockbuf
+	 */</span>
+	<span class="enscript-keyword">while</span> ((sb-&gt;sb_flags &amp; SB_LOCK) ||
+		(sb-&gt;sb_cfil_thread != NULL &amp;&amp; sb-&gt;sb_cfil_thread != tp)) {
+		<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_getlock != NULL)
+			mutex_held = (*so-&gt;so_proto-&gt;pr_getlock)(so, 0);
+		<span class="enscript-keyword">else</span>
+			mutex_held = so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+
+		lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+
+		sb-&gt;sb_wantlock++;
+		VERIFY(sb-&gt;sb_wantlock != 0);
+
+		msleep(&amp;sb-&gt;sb_flags, mutex_held, PSOCK, <span class="enscript-string">&quot;cfil_acquire_sockbuf&quot;</span>,
+			NULL);
+
+		VERIFY(sb-&gt;sb_wantlock != 0);
+		sb-&gt;sb_wantlock--;
+	}
+	<span class="enscript-comment">/*
+	 * Use reference count for repetitive calls on same thread
+	 */</span>
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_cfil_refs == 0) {
+		VERIFY(sb-&gt;sb_cfil_thread == NULL);
+		VERIFY((sb-&gt;sb_flags &amp; SB_LOCK) == 0);
+
+		sb-&gt;sb_cfil_thread = tp;
+		sb-&gt;sb_flags |= SB_LOCK;
+	}
+	sb-&gt;sb_cfil_refs++;
+
+	<span class="enscript-comment">/* We acquire the socket buffer when we need to cleanup */</span>
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil == NULL) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;so %llx cfil detached&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		error = 0;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_DROP) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;so %llx drop set&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		error = EPIPE;
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_release_sockbuf</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> outgoing)
+{
+	<span class="enscript-type">struct</span> sockbuf *sb = outgoing ? &amp;so-&gt;so_snd : &amp;so-&gt;so_rcv;
+	thread_t tp = current_thread();
+
+	socket_lock_assert_owned(so);
+
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_cfil_thread != NULL &amp;&amp; sb-&gt;sb_cfil_thread != tp)
+		panic(<span class="enscript-string">&quot;%s sb_cfil_thread %p not current %p&quot;</span>, __func__,
+			sb-&gt;sb_cfil_thread, tp);
+	<span class="enscript-comment">/*
+	 * Don't panic if we are defunct because SB_LOCK has
+	 * been cleared by sodefunct()
+	 */</span>
+	<span class="enscript-keyword">if</span> (!(so-&gt;so_flags &amp; SOF_DEFUNCT) &amp;&amp; !(sb-&gt;sb_flags &amp; SB_LOCK))
+		panic(<span class="enscript-string">&quot;%s SB_LOCK not set on %p&quot;</span>, __func__,
+			sb);
+	<span class="enscript-comment">/*
+	 * We can unlock when the thread unwinds to the last reference
+	 */</span>
+	sb-&gt;sb_cfil_refs--;
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_cfil_refs == 0) {
+		sb-&gt;sb_cfil_thread = NULL;
+		sb-&gt;sb_flags &amp;= ~SB_LOCK;
+
+		<span class="enscript-keyword">if</span> (sb-&gt;sb_wantlock &gt; 0)
+			wakeup(&amp;sb-&gt;sb_flags);
+	}
+}
+
+cfil_sock_id_t
+<span class="enscript-function-name">cfil_sock_id_from_socket</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) &amp;&amp; so-&gt;so_cfil)
+		<span class="enscript-keyword">return</span> (so-&gt;so_cfil-&gt;cfi_sock_id);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> (CFIL_SOCK_ID_NONE);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> socket *
+<span class="enscript-function-name">cfil_socket_from_sock_id</span>(cfil_sock_id_t cfil_sock_id)
+{
+	<span class="enscript-type">struct</span> socket *so = NULL;
+	u_int64_t gencnt = cfil_sock_id &gt;&gt; 32;
+	u_int32_t flowhash = (u_int32_t)(cfil_sock_id &amp; 0x0ffffffff);
+	<span class="enscript-type">struct</span> inpcb *inp = NULL;
+	<span class="enscript-type">struct</span> inpcbinfo *pcbinfo = &amp;tcbinfo;
+
+	lck_rw_lock_shared(pcbinfo-&gt;ipi_lock);
+	LIST_FOREACH(inp, pcbinfo-&gt;ipi_listhead, inp_list) {
+		<span class="enscript-keyword">if</span> (inp-&gt;inp_state != INPCB_STATE_DEAD &amp;&amp;
+			inp-&gt;inp_socket != NULL &amp;&amp;
+			inp-&gt;inp_flowhash == flowhash &amp;&amp;
+			(inp-&gt;inp_socket-&gt;so_gencnt &amp; 0x0ffffffff) == gencnt &amp;&amp;
+			inp-&gt;inp_socket-&gt;so_cfil != NULL) {
+			so = inp-&gt;inp_socket;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	lck_rw_done(pcbinfo-&gt;ipi_lock);
+
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		OSIncrementAtomic(&amp;cfil_stats.cfs_sock_id_not_found);
+		CFIL_LOG(LOG_DEBUG,
+			<span class="enscript-string">&quot;no socket for sock_id %llx gencnt %llx flowhash %x&quot;</span>,
+			cfil_sock_id, gencnt, flowhash);
+	}
+
+	<span class="enscript-keyword">return</span> (so);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">cfil_ctl_send</span>(kern_ctl_ref kctlref, u_int32_t kcunit, <span class="enscript-type">void</span> *unitinfo, mbuf_t m,
+		<span class="enscript-type">int</span> flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">kctlref</span>, <span class="enscript-variable-name">flags</span>)
+	errno_t	error = 0;
+	<span class="enscript-type">struct</span> cfil_msg_hdr *msghdr;
+	<span class="enscript-type">struct</span> content_filter *cfc = (<span class="enscript-type">struct</span> content_filter *)unitinfo;
+	<span class="enscript-type">struct</span> socket *so;
+	<span class="enscript-type">struct</span> cfil_msg_action *action_msg;
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (content_filters == NULL) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;no content filter&quot;</span>);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">if</span> (kcunit &gt; MAX_CONTENT_FILTER) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;kcunit %u &gt; MAX_CONTENT_FILTER (%d)&quot;</span>,
+			kcunit, MAX_CONTENT_FILTER);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (m_length(m) &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_msg_hdr)) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;too short %u&quot;</span>, m_length(m));
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	msghdr = (<span class="enscript-type">struct</span> cfil_msg_hdr *)mbuf_data(m);
+	<span class="enscript-keyword">if</span> (msghdr-&gt;cfm_version != CFM_VERSION_CURRENT) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;bad version %u&quot;</span>, msghdr-&gt;cfm_version);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">if</span> (msghdr-&gt;cfm_type != CFM_TYPE_ACTION) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;bad type %u&quot;</span>, msghdr-&gt;cfm_type);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-comment">/* Validate action operation */</span>
+	<span class="enscript-keyword">switch</span> (msghdr-&gt;cfm_op) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CFM_OP_DATA_UPDATE</span>:
+			OSIncrementAtomic(
+				&amp;cfil_stats.cfs_ctl_action_data_update);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CFM_OP_DROP</span>:
+			OSIncrementAtomic(&amp;cfil_stats.cfs_ctl_action_drop);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			OSIncrementAtomic(&amp;cfil_stats.cfs_ctl_action_bad_op);
+			CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;bad op %u&quot;</span>, msghdr-&gt;cfm_op);
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		<span class="enscript-keyword">if</span> (msghdr-&gt;cfm_len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_msg_action)) {
+			OSIncrementAtomic(&amp;cfil_stats.cfs_ctl_action_bad_len);
+				error = EINVAL;
+				CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;bad len: %u for op %u&quot;</span>,
+					msghdr-&gt;cfm_len,
+					msghdr-&gt;cfm_op);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+			}
+	cfil_rw_lock_shared(&amp;cfil_lck_rw);
+	<span class="enscript-keyword">if</span> (cfc != (<span class="enscript-type">void</span> *)content_filters[kcunit - 1]) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;unitinfo does not match for kcunit %u&quot;</span>,
+			kcunit);
+		error = EINVAL;
+		cfil_rw_unlock_shared(&amp;cfil_lck_rw);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	so = cfil_socket_from_sock_id(msghdr-&gt;cfm_sock_id);
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		CFIL_LOG(LOG_NOTICE, <span class="enscript-string">&quot;bad sock_id %llx&quot;</span>,
+			msghdr-&gt;cfm_sock_id);
+		error = EINVAL;
+		cfil_rw_unlock_shared(&amp;cfil_lck_rw);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	cfil_rw_unlock_shared(&amp;cfil_lck_rw);
+
+	socket_lock(so, 1);
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil == NULL) {
+		CFIL_LOG(LOG_NOTICE, <span class="enscript-string">&quot;so %llx not attached&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">unlock</span>;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_DROP) {
+		CFIL_LOG(LOG_NOTICE, <span class="enscript-string">&quot;so %llx drop set&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">unlock</span>;
+	}
+	entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+	<span class="enscript-keyword">if</span> (entry-&gt;cfe_filter == NULL) {
+		CFIL_LOG(LOG_NOTICE, <span class="enscript-string">&quot;so %llx no filter&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">unlock</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (entry-&gt;cfe_flags &amp; CFEF_SENT_SOCK_ATTACHED)
+		entry-&gt;cfe_flags |= CFEF_DATA_START;
+	<span class="enscript-keyword">else</span> {
+		CFIL_LOG(LOG_ERR,
+			<span class="enscript-string">&quot;so %llx attached not sent for %u&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so), kcunit);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">unlock</span>;
+	}
+
+	microuptime(&amp;entry-&gt;cfe_last_action);
+
+	action_msg = (<span class="enscript-type">struct</span> cfil_msg_action *)msghdr;
+
+	<span class="enscript-keyword">switch</span> (msghdr-&gt;cfm_op) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CFM_OP_DATA_UPDATE</span>:
+			<span class="enscript-keyword">if</span> (action_msg-&gt;cfa_out_peek_offset != 0 ||
+				action_msg-&gt;cfa_out_pass_offset != 0)
+				error = cfil_action_data_pass(so, kcunit, 1,
+					action_msg-&gt;cfa_out_pass_offset,
+					action_msg-&gt;cfa_out_peek_offset);
+			<span class="enscript-keyword">if</span> (error == EJUSTRETURN)
+				error = 0;
+			<span class="enscript-keyword">if</span> (error != 0)
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">if</span> (action_msg-&gt;cfa_in_peek_offset != 0 ||
+				action_msg-&gt;cfa_in_pass_offset != 0)
+				error = cfil_action_data_pass(so, kcunit, 0,
+					action_msg-&gt;cfa_in_pass_offset,
+					action_msg-&gt;cfa_in_peek_offset);
+			<span class="enscript-keyword">if</span> (error == EJUSTRETURN)
+				error = 0;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CFM_OP_DROP</span>:
+			error = cfil_action_drop(so, kcunit);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:
+			error = EINVAL;
+			<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">unlock</span>:
+	socket_unlock(so, 1);
+<span class="enscript-reference">done</span>:
+	mbuf_freem(m);
+
+	<span class="enscript-keyword">if</span> (error == 0)
+		OSIncrementAtomic(&amp;cfil_stats.cfs_ctl_send_ok);
+	<span class="enscript-keyword">else</span>
+		OSIncrementAtomic(&amp;cfil_stats.cfs_ctl_send_bad);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">cfil_ctl_getopt</span>(kern_ctl_ref kctlref, u_int32_t kcunit, <span class="enscript-type">void</span> *unitinfo,
+		<span class="enscript-type">int</span> opt, <span class="enscript-type">void</span> *data, size_t *len)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">kctlref</span>, <span class="enscript-variable-name">opt</span>)
+	errno_t	error = 0;
+	<span class="enscript-type">struct</span> content_filter *cfc = (<span class="enscript-type">struct</span> content_filter *)unitinfo;
+
+	CFIL_LOG(LOG_NOTICE, <span class="enscript-string">&quot;&quot;</span>);
+
+	cfil_rw_lock_shared(&amp;cfil_lck_rw);
+
+	<span class="enscript-keyword">if</span> (content_filters == NULL) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;no content filter&quot;</span>);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">if</span> (kcunit &gt; MAX_CONTENT_FILTER) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;kcunit %u &gt; MAX_CONTENT_FILTER (%d)&quot;</span>,
+			kcunit, MAX_CONTENT_FILTER);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">if</span> (cfc != (<span class="enscript-type">void</span> *)content_filters[kcunit - 1]) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;unitinfo does not match for kcunit %u&quot;</span>,
+			kcunit);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">switch</span> (opt) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CFIL_OPT_NECP_CONTROL_UNIT</span>:
+			<span class="enscript-keyword">if</span> (*len &lt; <span class="enscript-keyword">sizeof</span>(uint32_t)) {
+				CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;len too small %lu&quot;</span>, *len);
+				error = EINVAL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+			}
+			<span class="enscript-keyword">if</span> (data != NULL)
+				*(uint32_t *)data = cfc-&gt;cf_necp_control_unit;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			error = ENOPROTOOPT;
+			<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">done</span>:
+	cfil_rw_unlock_shared(&amp;cfil_lck_rw);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">cfil_ctl_setopt</span>(kern_ctl_ref kctlref, u_int32_t kcunit, <span class="enscript-type">void</span> *unitinfo,
+		<span class="enscript-type">int</span> opt, <span class="enscript-type">void</span> *data, size_t len)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">kctlref</span>, <span class="enscript-variable-name">opt</span>)
+	errno_t	error = 0;
+	<span class="enscript-type">struct</span> content_filter *cfc = (<span class="enscript-type">struct</span> content_filter *)unitinfo;
+
+	CFIL_LOG(LOG_NOTICE, <span class="enscript-string">&quot;&quot;</span>);
+
+	cfil_rw_lock_exclusive(&amp;cfil_lck_rw);
+
+	<span class="enscript-keyword">if</span> (content_filters == NULL) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;no content filter&quot;</span>);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">if</span> (kcunit &gt; MAX_CONTENT_FILTER) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;kcunit %u &gt; MAX_CONTENT_FILTER (%d)&quot;</span>,
+			kcunit, MAX_CONTENT_FILTER);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">if</span> (cfc != (<span class="enscript-type">void</span> *)content_filters[kcunit - 1]) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;unitinfo does not match for kcunit %u&quot;</span>,
+			kcunit);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">switch</span> (opt) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CFIL_OPT_NECP_CONTROL_UNIT</span>:
+			<span class="enscript-keyword">if</span> (len &lt; <span class="enscript-keyword">sizeof</span>(uint32_t)) {
+				CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;CFIL_OPT_NECP_CONTROL_UNIT &quot;</span>
+					<span class="enscript-string">&quot;len too small %lu&quot;</span>, len);
+				error = EINVAL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+			}
+			<span class="enscript-keyword">if</span> (cfc-&gt;cf_necp_control_unit != 0) {
+				CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;CFIL_OPT_NECP_CONTROL_UNIT &quot;</span>
+					<span class="enscript-string">&quot;already set %u&quot;</span>,
+					cfc-&gt;cf_necp_control_unit);
+				error = EINVAL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+			}
+			cfc-&gt;cf_necp_control_unit = *(uint32_t *)data;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			error = ENOPROTOOPT;
+			<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">done</span>:
+	cfil_rw_unlock_exclusive(&amp;cfil_lck_rw);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_ctl_rcvd</span>(kern_ctl_ref kctlref, u_int32_t kcunit, <span class="enscript-type">void</span> *unitinfo, <span class="enscript-type">int</span> flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">kctlref</span>, <span class="enscript-variable-name">flags</span>)
+	<span class="enscript-type">struct</span> content_filter *cfc = (<span class="enscript-type">struct</span> content_filter *)unitinfo;
+	<span class="enscript-type">struct</span> socket *so = NULL;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (content_filters == NULL) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;no content filter&quot;</span>);
+		OSIncrementAtomic(&amp;cfil_stats.cfs_ctl_rcvd_bad);
+		<span class="enscript-keyword">return</span>;
+	}
+	<span class="enscript-keyword">if</span> (kcunit &gt; MAX_CONTENT_FILTER) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;kcunit %u &gt; MAX_CONTENT_FILTER (%d)&quot;</span>,
+			kcunit, MAX_CONTENT_FILTER);
+		OSIncrementAtomic(&amp;cfil_stats.cfs_ctl_rcvd_bad);
+		<span class="enscript-keyword">return</span>;
+	}
+	cfil_rw_lock_shared(&amp;cfil_lck_rw);
+	<span class="enscript-keyword">if</span> (cfc != (<span class="enscript-type">void</span> *)content_filters[kcunit - 1]) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;unitinfo does not match for kcunit %u&quot;</span>,
+			kcunit);
+		OSIncrementAtomic(&amp;cfil_stats.cfs_ctl_rcvd_bad);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-comment">/* Let's assume the flow control is lifted */</span>
+	<span class="enscript-keyword">if</span> (cfc-&gt;cf_flags &amp; CFF_FLOW_CONTROLLED) {
+		<span class="enscript-keyword">if</span> (!cfil_rw_lock_shared_to_exclusive(&amp;cfil_lck_rw))
+			cfil_rw_lock_exclusive(&amp;cfil_lck_rw);
+
+	cfc-&gt;cf_flags &amp;= ~CFF_FLOW_CONTROLLED;
+
+		cfil_rw_lock_exclusive_to_shared(&amp;cfil_lck_rw);
+		lck_rw_assert(&amp;cfil_lck_rw, LCK_RW_ASSERT_SHARED);
+	}
+	<span class="enscript-comment">/*
+	 * Flow control will be raised again as soon as an entry cannot enqueue
+	 * to the kernel control socket
+	 */</span>
+	<span class="enscript-keyword">while</span> ((cfc-&gt;cf_flags &amp; CFF_FLOW_CONTROLLED) == 0) {
+		verify_content_filter(cfc);
+
+		cfil_rw_lock_assert_held(&amp;cfil_lck_rw, 0);
+
+		<span class="enscript-comment">/* Find an entry that is flow controlled */</span>
+		TAILQ_FOREACH(entry, &amp;cfc-&gt;cf_sock_entries, cfe_link) {
+			<span class="enscript-keyword">if</span> (entry-&gt;cfe_cfil_info == NULL ||
+				entry-&gt;cfe_cfil_info-&gt;cfi_so == NULL)
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-keyword">if</span> ((entry-&gt;cfe_flags &amp; CFEF_FLOW_CONTROLLED) == 0)
+				<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> (entry == NULL)
+			<span class="enscript-keyword">break</span>;
+
+		OSIncrementAtomic(&amp;cfil_stats.cfs_ctl_rcvd_flow_lift);
+
+		so = entry-&gt;cfe_cfil_info-&gt;cfi_so;
+
+		cfil_rw_unlock_shared(&amp;cfil_lck_rw);
+		socket_lock(so, 1);
+
+		<span class="enscript-keyword">do</span> {
+			error = cfil_acquire_sockbuf(so, 1);
+			<span class="enscript-keyword">if</span> (error == 0)
+				error = cfil_data_service_ctl_q(so, kcunit, 1);
+			cfil_release_sockbuf(so, 1);
+			<span class="enscript-keyword">if</span> (error != 0)
+				<span class="enscript-keyword">break</span>;
+
+			error = cfil_acquire_sockbuf(so, 0);
+			<span class="enscript-keyword">if</span> (error == 0)
+				error = cfil_data_service_ctl_q(so, kcunit, 0);
+			cfil_release_sockbuf(so, 0);
+		} <span class="enscript-keyword">while</span> (0);
+
+		socket_lock_assert_owned(so);
+		socket_unlock(so, 1);
+
+		cfil_rw_lock_shared(&amp;cfil_lck_rw);
+	}
+<span class="enscript-reference">done</span>:
+	cfil_rw_unlock_shared(&amp;cfil_lck_rw);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> kern_ctl_reg kern_ctl;
+	errno_t	error = 0;
+	vm_size_t content_filter_size = 0;	<span class="enscript-comment">/* size of content_filter */</span>
+	vm_size_t cfil_info_size = 0;	<span class="enscript-comment">/* size of cfil_info */</span>
+
+	CFIL_LOG(LOG_NOTICE, <span class="enscript-string">&quot;&quot;</span>);
+
+	<span class="enscript-comment">/*
+	 * Compile time verifications
+	 */</span>
+	_CASSERT(CFIL_MAX_FILTER_COUNT == MAX_CONTENT_FILTER);
+	_CASSERT(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_filter_stat) % <span class="enscript-keyword">sizeof</span>(uint32_t) == 0);
+	_CASSERT(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_entry_stat) % <span class="enscript-keyword">sizeof</span>(uint32_t) == 0);
+	_CASSERT(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_sock_stat) % <span class="enscript-keyword">sizeof</span>(uint32_t) == 0);
+
+	<span class="enscript-comment">/*
+	 * Runtime time verifications
+	 */</span>
+	VERIFY(IS_P2ALIGNED(&amp;cfil_stats.cfs_ctl_q_in_enqueued,
+		<span class="enscript-keyword">sizeof</span>(uint32_t)));
+	VERIFY(IS_P2ALIGNED(&amp;cfil_stats.cfs_ctl_q_out_enqueued,
+		<span class="enscript-keyword">sizeof</span>(uint32_t)));
+	VERIFY(IS_P2ALIGNED(&amp;cfil_stats.cfs_ctl_q_in_peeked,
+		<span class="enscript-keyword">sizeof</span>(uint32_t)));
+	VERIFY(IS_P2ALIGNED(&amp;cfil_stats.cfs_ctl_q_out_peeked,
+		<span class="enscript-keyword">sizeof</span>(uint32_t)));
+
+	VERIFY(IS_P2ALIGNED(&amp;cfil_stats.cfs_pending_q_in_enqueued,
+		<span class="enscript-keyword">sizeof</span>(uint32_t)));
+	VERIFY(IS_P2ALIGNED(&amp;cfil_stats.cfs_pending_q_out_enqueued,
+		<span class="enscript-keyword">sizeof</span>(uint32_t)));
+
+	VERIFY(IS_P2ALIGNED(&amp;cfil_stats.cfs_inject_q_in_enqueued,
+		<span class="enscript-keyword">sizeof</span>(uint32_t)));
+	VERIFY(IS_P2ALIGNED(&amp;cfil_stats.cfs_inject_q_out_enqueued,
+		<span class="enscript-keyword">sizeof</span>(uint32_t)));
+	VERIFY(IS_P2ALIGNED(&amp;cfil_stats.cfs_inject_q_in_passed,
+		<span class="enscript-keyword">sizeof</span>(uint32_t)));
+	VERIFY(IS_P2ALIGNED(&amp;cfil_stats.cfs_inject_q_out_passed,
+		<span class="enscript-keyword">sizeof</span>(uint32_t)));
+
+	<span class="enscript-comment">/*
+	 * Zone for content filters kernel control sockets
+	 */</span>
+	content_filter_size = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> content_filter);
+	content_filter_zone = zinit(content_filter_size,
+				CONTENT_FILTER_ZONE_MAX * content_filter_size,
+				0,
+				CONTENT_FILTER_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (content_filter_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: zinit(%s) failed&quot;</span>, __func__,
+			CONTENT_FILTER_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(content_filter_zone, Z_CALLERACCT, FALSE);
+	zone_change(content_filter_zone, Z_EXPAND, TRUE);
+
+	<span class="enscript-comment">/*
+	 * Zone for per socket content filters
+	 */</span>
+	cfil_info_size = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_info);
+	cfil_info_zone = zinit(cfil_info_size,
+				CFIL_INFO_ZONE_MAX * cfil_info_size,
+				0,
+				CFIL_INFO_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (cfil_info_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: zinit(%s) failed&quot;</span>, __func__, CFIL_INFO_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(cfil_info_zone, Z_CALLERACCT, FALSE);
+	zone_change(cfil_info_zone, Z_EXPAND, TRUE);
+
+	<span class="enscript-comment">/*
+	 * Allocate locks
+	 */</span>
+	cfil_lck_grp_attr = lck_grp_attr_alloc_init();
+	<span class="enscript-keyword">if</span> (cfil_lck_grp_attr == NULL) {
+		panic(<span class="enscript-string">&quot;%s: lck_grp_attr_alloc_init failed&quot;</span>, __func__);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	cfil_lck_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;content filter&quot;</span>,
+					cfil_lck_grp_attr);
+	<span class="enscript-keyword">if</span> (cfil_lck_grp == NULL) {
+		panic(<span class="enscript-string">&quot;%s: lck_grp_alloc_init failed&quot;</span>, __func__);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	cfil_lck_attr = lck_attr_alloc_init();
+	<span class="enscript-keyword">if</span> (cfil_lck_attr == NULL) {
+		panic(<span class="enscript-string">&quot;%s: lck_attr_alloc_init failed&quot;</span>, __func__);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	lck_rw_init(&amp;cfil_lck_rw, cfil_lck_grp, cfil_lck_attr);
+
+	TAILQ_INIT(&amp;cfil_sock_head);
+
+	<span class="enscript-comment">/*
+	 * Register kernel control
+	 */</span>
+	bzero(&amp;kern_ctl, <span class="enscript-keyword">sizeof</span>(kern_ctl));
+	strlcpy(kern_ctl.ctl_name, CONTENT_FILTER_CONTROL_NAME,
+		<span class="enscript-keyword">sizeof</span>(kern_ctl.ctl_name));
+	kern_ctl.ctl_flags = CTL_FLAG_PRIVILEGED | CTL_FLAG_REG_EXTENDED;
+	kern_ctl.ctl_sendsize = 512 * 1024; <span class="enscript-comment">/* enough? */</span>
+	kern_ctl.ctl_recvsize = 512 * 1024; <span class="enscript-comment">/* enough? */</span>
+	kern_ctl.ctl_connect = cfil_ctl_connect;
+	kern_ctl.ctl_disconnect = cfil_ctl_disconnect;
+	kern_ctl.ctl_send = cfil_ctl_send;
+	kern_ctl.ctl_getopt = cfil_ctl_getopt;
+	kern_ctl.ctl_setopt = cfil_ctl_setopt;
+	kern_ctl.ctl_rcvd = cfil_ctl_rcvd;
+	error = ctl_register(&amp;kern_ctl, &amp;cfil_kctlref);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;ctl_register failed: %d&quot;</span>, error);
+		<span class="enscript-keyword">return</span>;
+	}
+}
+
+<span class="enscript-type">struct</span> cfil_info *
+<span class="enscript-function-name">cfil_info_alloc</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">int</span> kcunit;
+	<span class="enscript-type">struct</span> cfil_info *cfil_info = NULL;
+	<span class="enscript-type">struct</span> inpcb *inp = sotoinpcb(so);
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;&quot;</span>);
+
+	socket_lock_assert_owned(so);
+
+	cfil_info = zalloc(cfil_info_zone);
+	<span class="enscript-keyword">if</span> (cfil_info == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	bzero(cfil_info, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_info));
+
+	cfil_queue_init(&amp;cfil_info-&gt;cfi_snd.cfi_inject_q);
+	cfil_queue_init(&amp;cfil_info-&gt;cfi_rcv.cfi_inject_q);
+
+	<span class="enscript-keyword">for</span> (kcunit = 1; kcunit &lt;= MAX_CONTENT_FILTER; kcunit++) {
+		<span class="enscript-type">struct</span> cfil_entry *entry;
+
+		entry = &amp;cfil_info-&gt;cfi_entries[kcunit - 1];
+		entry-&gt;cfe_cfil_info = cfil_info;
+
+		<span class="enscript-comment">/* Initialize the filter entry */</span>
+		entry-&gt;cfe_filter = NULL;
+		entry-&gt;cfe_flags = 0;
+		entry-&gt;cfe_necp_control_unit = 0;
+		entry-&gt;cfe_snd.cfe_pass_offset = 0;
+		entry-&gt;cfe_snd.cfe_peek_offset = 0;
+		entry-&gt;cfe_snd.cfe_peeked = 0;
+		entry-&gt;cfe_rcv.cfe_pass_offset = 0;
+		entry-&gt;cfe_rcv.cfe_peek_offset = 0;
+		entry-&gt;cfe_rcv.cfe_peeked = 0;
+
+		cfil_queue_init(&amp;entry-&gt;cfe_snd.cfe_pending_q);
+		cfil_queue_init(&amp;entry-&gt;cfe_rcv.cfe_pending_q);
+		cfil_queue_init(&amp;entry-&gt;cfe_snd.cfe_ctl_q);
+		cfil_queue_init(&amp;entry-&gt;cfe_rcv.cfe_ctl_q);
+	}
+
+	cfil_rw_lock_exclusive(&amp;cfil_lck_rw);
+
+	so-&gt;so_cfil = cfil_info;
+	cfil_info-&gt;cfi_so = so;
+	<span class="enscript-comment">/*
+	 * Create a cfi_sock_id that's not the socket pointer!
+	 */</span>
+	<span class="enscript-keyword">if</span> (inp-&gt;inp_flowhash == 0)
+		inp-&gt;inp_flowhash = inp_calc_flowhash(inp);
+	cfil_info-&gt;cfi_sock_id =
+		((so-&gt;so_gencnt &lt;&lt; 32) | inp-&gt;inp_flowhash);
+
+	TAILQ_INSERT_TAIL(&amp;cfil_sock_head, cfil_info, cfi_link);
+
+	cfil_sock_attached_count++;
+
+	cfil_rw_unlock_exclusive(&amp;cfil_lck_rw);
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (cfil_info != NULL)
+		OSIncrementAtomic(&amp;cfil_stats.cfs_cfi_alloc_ok);
+	<span class="enscript-keyword">else</span>
+		OSIncrementAtomic(&amp;cfil_stats.cfs_cfi_alloc_fail);
+
+	<span class="enscript-keyword">return</span> (cfil_info);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_info_attach_unit</span>(<span class="enscript-type">struct</span> socket *so, uint32_t filter_control_unit)
+{
+	<span class="enscript-type">int</span> kcunit;
+	<span class="enscript-type">struct</span> cfil_info *cfil_info = so-&gt;so_cfil;
+	<span class="enscript-type">int</span> attached = 0;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;&quot;</span>);
+
+	socket_lock_assert_owned(so);
+
+	cfil_rw_lock_exclusive(&amp;cfil_lck_rw);
+
+	<span class="enscript-keyword">for</span> (kcunit = 1;
+		content_filters != NULL &amp;&amp; kcunit &lt;= MAX_CONTENT_FILTER;
+		kcunit++) {
+		<span class="enscript-type">struct</span> content_filter *cfc = content_filters[kcunit - 1];
+		<span class="enscript-type">struct</span> cfil_entry *entry;
+
+		<span class="enscript-keyword">if</span> (cfc == NULL)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (cfc-&gt;cf_necp_control_unit != filter_control_unit)
+			<span class="enscript-keyword">continue</span>;
+
+		entry = &amp;cfil_info-&gt;cfi_entries[kcunit - 1];
+
+		entry-&gt;cfe_filter = cfc;
+		entry-&gt;cfe_necp_control_unit = filter_control_unit;
+		TAILQ_INSERT_TAIL(&amp;cfc-&gt;cf_sock_entries, entry, cfe_link);
+		cfc-&gt;cf_sock_count++;
+		verify_content_filter(cfc);
+		attached = 1;
+		entry-&gt;cfe_flags |= CFEF_CFIL_ATTACHED;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	cfil_rw_unlock_exclusive(&amp;cfil_lck_rw);
+
+	<span class="enscript-keyword">return</span> (attached);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_info_free</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> cfil_info *cfil_info)
+{
+	<span class="enscript-type">int</span> kcunit;
+	uint64_t in_drain = 0;
+	uint64_t out_drained = 0;
+
+	so-&gt;so_cfil = NULL;
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_flags &amp; SOF_CONTENT_FILTER) {
+		so-&gt;so_flags &amp;= ~SOF_CONTENT_FILTER;
+		so-&gt;so_usecount--;
+	}
+	<span class="enscript-keyword">if</span> (cfil_info == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;&quot;</span>);
+
+	cfil_rw_lock_exclusive(&amp;cfil_lck_rw);
+
+	<span class="enscript-keyword">for</span> (kcunit = 1;
+		content_filters != NULL &amp;&amp; kcunit &lt;= MAX_CONTENT_FILTER;
+		kcunit++) {
+		<span class="enscript-type">struct</span> cfil_entry *entry;
+		<span class="enscript-type">struct</span> content_filter *cfc;
+
+		entry = &amp;cfil_info-&gt;cfi_entries[kcunit - 1];
+
+		<span class="enscript-comment">/* Don't be silly and try to detach twice */</span>
+		<span class="enscript-keyword">if</span> (entry-&gt;cfe_filter == NULL)
+			<span class="enscript-keyword">continue</span>;
+
+		cfc = content_filters[kcunit - 1];
+
+		VERIFY(cfc == entry-&gt;cfe_filter);
+
+		entry-&gt;cfe_filter = NULL;
+		entry-&gt;cfe_necp_control_unit = 0;
+		TAILQ_REMOVE(&amp;cfc-&gt;cf_sock_entries, entry, cfe_link);
+		cfc-&gt;cf_sock_count--;
+
+		verify_content_filter(cfc);
+	}
+	cfil_sock_attached_count--;
+	TAILQ_REMOVE(&amp;cfil_sock_head, cfil_info, cfi_link);
+
+	out_drained += cfil_queue_drain(&amp;cfil_info-&gt;cfi_snd.cfi_inject_q);
+	in_drain += cfil_queue_drain(&amp;cfil_info-&gt;cfi_rcv.cfi_inject_q);
+
+	<span class="enscript-keyword">for</span> (kcunit = 1; kcunit &lt;= MAX_CONTENT_FILTER; kcunit++) {
+		<span class="enscript-type">struct</span> cfil_entry *entry;
+
+		entry = &amp;cfil_info-&gt;cfi_entries[kcunit - 1];
+		out_drained += cfil_queue_drain(&amp;entry-&gt;cfe_snd.cfe_pending_q);
+		in_drain += cfil_queue_drain(&amp;entry-&gt;cfe_rcv.cfe_pending_q);
+		out_drained += cfil_queue_drain(&amp;entry-&gt;cfe_snd.cfe_ctl_q);
+		in_drain += cfil_queue_drain(&amp;entry-&gt;cfe_rcv.cfe_ctl_q);
+	}
+	cfil_rw_unlock_exclusive(&amp;cfil_lck_rw);
+
+	<span class="enscript-keyword">if</span> (out_drained)
+		OSIncrementAtomic(&amp;cfil_stats.cfs_flush_out_free);
+	<span class="enscript-keyword">if</span> (in_drain)
+		OSIncrementAtomic(&amp;cfil_stats.cfs_flush_in_free);
+
+	zfree(cfil_info_zone, cfil_info);
+}
+
+<span class="enscript-comment">/*
+ * Entry point from Sockets layer
+ * The socket is locked.
+ */</span>
+errno_t
+<span class="enscript-function-name">cfil_sock_attach</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	errno_t error = 0;
+	uint32_t filter_control_unit;
+
+	socket_lock_assert_owned(so);
+
+	<span class="enscript-comment">/* Limit ourselves to TCP */</span>
+	<span class="enscript-keyword">if</span> ((so-&gt;so_proto-&gt;pr_domain-&gt;dom_family != PF_INET &amp;&amp;
+		so-&gt;so_proto-&gt;pr_domain-&gt;dom_family != PF_INET6) ||
+		so-&gt;so_proto-&gt;pr_type != SOCK_STREAM ||
+		so-&gt;so_proto-&gt;pr_protocol != IPPROTO_TCP)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	filter_control_unit = necp_socket_get_content_filter_control_unit(so);
+	<span class="enscript-keyword">if</span> (filter_control_unit == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-keyword">if</span> ((filter_control_unit &amp; NECP_MASK_USERSPACE_ONLY) != 0) {
+		OSIncrementAtomic(&amp;cfil_stats.cfs_sock_userspace_only);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">if</span> (cfil_active_count == 0) {
+		OSIncrementAtomic(&amp;cfil_stats.cfs_sock_attach_in_vain);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil != NULL) {
+		OSIncrementAtomic(&amp;cfil_stats.cfs_sock_attach_already);
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;already attached&quot;</span>);
+	} <span class="enscript-keyword">else</span> {
+		cfil_info_alloc(so);
+		<span class="enscript-keyword">if</span> (so-&gt;so_cfil == NULL) {
+			error = ENOMEM;
+			OSIncrementAtomic(&amp;cfil_stats.cfs_sock_attach_no_mem);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (cfil_info_attach_unit(so, filter_control_unit) == 0) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;cfil_info_attach_unit(%u) failed&quot;</span>,
+			filter_control_unit);
+		OSIncrementAtomic(&amp;cfil_stats.cfs_sock_attach_failed);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx filter_control_unit %u sockid %llx&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so),
+		filter_control_unit, so-&gt;so_cfil-&gt;cfi_sock_id);
+
+	so-&gt;so_flags |= SOF_CONTENT_FILTER;
+	OSIncrementAtomic(&amp;cfil_stats.cfs_sock_attached);
+
+	<span class="enscript-comment">/* Hold a reference on the socket */</span>
+	so-&gt;so_usecount++;
+
+	error = cfil_dispatch_attach_event(so, filter_control_unit);
+	<span class="enscript-comment">/* We can recover from flow control or out of memory errors */</span>
+	<span class="enscript-keyword">if</span> (error == ENOBUFS || error == ENOMEM)
+		error = 0;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (error != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	CFIL_INFO_VERIFY(so-&gt;so_cfil);
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Entry point from Sockets layer
+ * The socket is locked.
+ */</span>
+errno_t
+<span class="enscript-function-name">cfil_sock_detach</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil) {
+		cfil_info_free(so, so-&gt;so_cfil);
+		OSIncrementAtomic(&amp;cfil_stats.cfs_sock_detached);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_dispatch_attach_event</span>(<span class="enscript-type">struct</span> socket *so, uint32_t filter_control_unit)
+{
+	errno_t error = 0;
+	<span class="enscript-type">struct</span> cfil_entry *entry = NULL;
+	<span class="enscript-type">struct</span> cfil_msg_sock_attached msg_attached;
+	uint32_t kcunit;
+	<span class="enscript-type">struct</span> content_filter *cfc;
+
+	socket_lock_assert_owned(so);
+
+	cfil_rw_lock_shared(&amp;cfil_lck_rw);
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto == NULL || so-&gt;so_proto-&gt;pr_domain == NULL) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-comment">/*
+	 * Find the matching filter unit
+	 */</span>
+	<span class="enscript-keyword">for</span> (kcunit = 1; kcunit &lt;= MAX_CONTENT_FILTER; kcunit++) {
+		cfc = content_filters[kcunit - 1];
+
+		<span class="enscript-keyword">if</span> (cfc == NULL)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (cfc-&gt;cf_necp_control_unit != filter_control_unit)
+			<span class="enscript-keyword">continue</span>;
+		entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+		<span class="enscript-keyword">if</span> (entry-&gt;cfe_filter == NULL)
+			<span class="enscript-keyword">continue</span>;
+
+		VERIFY(cfc == entry-&gt;cfe_filter);
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (entry == NULL || entry-&gt;cfe_filter == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-keyword">if</span> ((entry-&gt;cfe_flags &amp; CFEF_SENT_SOCK_ATTACHED))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx filter_control_unit %u kcunit %u&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so), filter_control_unit, kcunit);
+
+	<span class="enscript-comment">/* Would be wasteful to try when flow controlled */</span>
+	<span class="enscript-keyword">if</span> (cfc-&gt;cf_flags &amp; CFF_FLOW_CONTROLLED) {
+		error = ENOBUFS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	bzero(&amp;msg_attached, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_msg_sock_attached));
+	msg_attached.cfs_msghdr.cfm_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_msg_sock_attached);
+	msg_attached.cfs_msghdr.cfm_version = CFM_VERSION_CURRENT;
+	msg_attached.cfs_msghdr.cfm_type = CFM_TYPE_EVENT;
+	msg_attached.cfs_msghdr.cfm_op = CFM_OP_SOCKET_ATTACHED;
+	msg_attached.cfs_msghdr.cfm_sock_id = entry-&gt;cfe_cfil_info-&gt;cfi_sock_id;
+
+	msg_attached.cfs_sock_family = so-&gt;so_proto-&gt;pr_domain-&gt;dom_family;
+	msg_attached.cfs_sock_type = so-&gt;so_proto-&gt;pr_type;
+	msg_attached.cfs_sock_protocol = so-&gt;so_proto-&gt;pr_protocol;
+	msg_attached.cfs_pid = so-&gt;last_pid;
+	memcpy(msg_attached.cfs_uuid, so-&gt;last_uuid, <span class="enscript-keyword">sizeof</span>(uuid_t));
+	<span class="enscript-keyword">if</span> (so-&gt;so_flags &amp; SOF_DELEGATED) {
+		msg_attached.cfs_e_pid = so-&gt;e_pid;
+		memcpy(msg_attached.cfs_e_uuid, so-&gt;e_uuid, <span class="enscript-keyword">sizeof</span>(uuid_t));
+	} <span class="enscript-keyword">else</span> {
+		msg_attached.cfs_e_pid = so-&gt;last_pid;
+		memcpy(msg_attached.cfs_e_uuid, so-&gt;last_uuid, <span class="enscript-keyword">sizeof</span>(uuid_t));
+	}
+	error = ctl_enqueuedata(entry-&gt;cfe_filter-&gt;cf_kcref,
+				entry-&gt;cfe_filter-&gt;cf_kcunit,
+				&amp;msg_attached,
+				<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_msg_sock_attached),
+				CTL_DATA_EOR);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;ctl_enqueuedata() failed: %d&quot;</span>, error);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	microuptime(&amp;entry-&gt;cfe_last_event);
+	entry-&gt;cfe_flags |= CFEF_SENT_SOCK_ATTACHED;
+	OSIncrementAtomic(&amp;cfil_stats.cfs_attach_event_ok);
+<span class="enscript-reference">done</span>:
+
+	<span class="enscript-comment">/* We can recover from flow control */</span>
+	<span class="enscript-keyword">if</span> (error == ENOBUFS) {
+		entry-&gt;cfe_flags |= CFEF_FLOW_CONTROLLED;
+		OSIncrementAtomic(&amp;cfil_stats.cfs_attach_event_flow_control);
+
+		<span class="enscript-keyword">if</span> (!cfil_rw_lock_shared_to_exclusive(&amp;cfil_lck_rw))
+			cfil_rw_lock_exclusive(&amp;cfil_lck_rw);
+
+		cfc-&gt;cf_flags |= CFF_FLOW_CONTROLLED;
+
+		cfil_rw_unlock_exclusive(&amp;cfil_lck_rw);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (error != 0)
+			OSIncrementAtomic(&amp;cfil_stats.cfs_attach_event_fail);
+
+		cfil_rw_unlock_shared(&amp;cfil_lck_rw);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_dispatch_disconnect_event</span>(<span class="enscript-type">struct</span> socket *so, uint32_t kcunit, <span class="enscript-type">int</span> outgoing)
+{
+	errno_t error = 0;
+	<span class="enscript-type">struct</span> mbuf *msg = NULL;
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+	<span class="enscript-type">struct</span> cfe_buf *entrybuf;
+	<span class="enscript-type">struct</span> cfil_msg_hdr msg_disconnected;
+	<span class="enscript-type">struct</span> content_filter *cfc;
+
+	socket_lock_assert_owned(so);
+
+	cfil_rw_lock_shared(&amp;cfil_lck_rw);
+
+	entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+	<span class="enscript-keyword">if</span> (outgoing)
+		entrybuf = &amp;entry-&gt;cfe_snd;
+	<span class="enscript-keyword">else</span>
+		entrybuf = &amp;entry-&gt;cfe_rcv;
+
+	cfc = entry-&gt;cfe_filter;
+	<span class="enscript-keyword">if</span> (cfc == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx kcunit %u outgoing %d&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so), kcunit, outgoing);
+
+	<span class="enscript-comment">/*
+	 * Send the disconnection event once
+	 */</span>
+	<span class="enscript-keyword">if</span> ((outgoing &amp;&amp; (entry-&gt;cfe_flags &amp; CFEF_SENT_DISCONNECT_OUT)) ||
+		(!outgoing &amp;&amp; (entry-&gt;cfe_flags &amp; CFEF_SENT_DISCONNECT_IN))) {
+		CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx disconnect already sent&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * We're not disconnected as long as some data is waiting
+	 * to be delivered to the filter
+	 */</span>
+	<span class="enscript-keyword">if</span> (outgoing &amp;&amp; cfil_queue_empty(&amp;entrybuf-&gt;cfe_ctl_q) == 0) {
+		CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx control queue not empty&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		error = EBUSY;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-comment">/* Would be wasteful to try when flow controlled */</span>
+	<span class="enscript-keyword">if</span> (cfc-&gt;cf_flags &amp; CFF_FLOW_CONTROLLED) {
+		error = ENOBUFS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	bzero(&amp;msg_disconnected, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_msg_hdr));
+	msg_disconnected.cfm_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_msg_hdr);
+	msg_disconnected.cfm_version = CFM_VERSION_CURRENT;
+	msg_disconnected.cfm_type = CFM_TYPE_EVENT;
+	msg_disconnected.cfm_op = outgoing ? CFM_OP_DISCONNECT_OUT :
+		CFM_OP_DISCONNECT_IN;
+	msg_disconnected.cfm_sock_id = entry-&gt;cfe_cfil_info-&gt;cfi_sock_id;
+	error = ctl_enqueuedata(entry-&gt;cfe_filter-&gt;cf_kcref,
+				entry-&gt;cfe_filter-&gt;cf_kcunit,
+				&amp;msg_disconnected,
+				<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_msg_hdr),
+				CTL_DATA_EOR);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;ctl_enqueuembuf() failed: %d&quot;</span>, error);
+		mbuf_freem(msg);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	microuptime(&amp;entry-&gt;cfe_last_event);
+
+	<span class="enscript-comment">/* Remember we have sent the disconnection message */</span>
+	<span class="enscript-keyword">if</span> (outgoing) {
+		entry-&gt;cfe_flags |= CFEF_SENT_DISCONNECT_OUT;
+		OSIncrementAtomic(&amp;cfil_stats.cfs_disconnect_out_event_ok);
+	} <span class="enscript-keyword">else</span> {
+		entry-&gt;cfe_flags |= CFEF_SENT_DISCONNECT_IN;
+		OSIncrementAtomic(&amp;cfil_stats.cfs_disconnect_in_event_ok);
+	}
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (error == ENOBUFS) {
+		entry-&gt;cfe_flags |= CFEF_FLOW_CONTROLLED;
+		OSIncrementAtomic(
+			&amp;cfil_stats.cfs_disconnect_event_flow_control);
+
+		<span class="enscript-keyword">if</span> (!cfil_rw_lock_shared_to_exclusive(&amp;cfil_lck_rw))
+			cfil_rw_lock_exclusive(&amp;cfil_lck_rw);
+
+		cfc-&gt;cf_flags |= CFF_FLOW_CONTROLLED;
+
+		cfil_rw_unlock_exclusive(&amp;cfil_lck_rw);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (error != 0)
+			OSIncrementAtomic(
+				&amp;cfil_stats.cfs_disconnect_event_fail);
+
+		cfil_rw_unlock_shared(&amp;cfil_lck_rw);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_dispatch_closed_event</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> kcunit)
+{
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+	<span class="enscript-type">struct</span> cfil_msg_hdr msg_closed;
+	errno_t error = 0;
+	<span class="enscript-type">struct</span> content_filter *cfc;
+
+	socket_lock_assert_owned(so);
+
+	cfil_rw_lock_shared(&amp;cfil_lck_rw);
+
+	entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+	cfc = entry-&gt;cfe_filter;
+	<span class="enscript-keyword">if</span> (cfc == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx kcunit %d&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so), kcunit);
+
+	<span class="enscript-comment">/* Would be wasteful to try when flow controlled */</span>
+	<span class="enscript-keyword">if</span> (cfc-&gt;cf_flags &amp; CFF_FLOW_CONTROLLED) {
+		error = ENOBUFS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-comment">/*
+	 * Send a single closed message per filter
+	 */</span>
+	<span class="enscript-keyword">if</span> ((entry-&gt;cfe_flags &amp; CFEF_SENT_SOCK_CLOSED) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	<span class="enscript-keyword">if</span> ((entry-&gt;cfe_flags &amp; CFEF_SENT_SOCK_ATTACHED) == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	bzero(&amp;msg_closed, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_msg_hdr));
+	msg_closed.cfm_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_msg_hdr);
+	msg_closed.cfm_version = CFM_VERSION_CURRENT;
+	msg_closed.cfm_type = CFM_TYPE_EVENT;
+	msg_closed.cfm_op = CFM_OP_SOCKET_CLOSED;
+	msg_closed.cfm_sock_id = entry-&gt;cfe_cfil_info-&gt;cfi_sock_id;
+	error = ctl_enqueuedata(entry-&gt;cfe_filter-&gt;cf_kcref,
+				entry-&gt;cfe_filter-&gt;cf_kcunit,
+				&amp;msg_closed,
+				<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_msg_hdr),
+				CTL_DATA_EOR);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;ctl_enqueuedata() failed: %d&quot;</span>,
+			error);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	microuptime(&amp;entry-&gt;cfe_last_event);
+	entry-&gt;cfe_flags |= CFEF_SENT_SOCK_CLOSED;
+	OSIncrementAtomic(&amp;cfil_stats.cfs_closed_event_ok);
+<span class="enscript-reference">done</span>:
+	<span class="enscript-comment">/* We can recover from flow control */</span>
+	<span class="enscript-keyword">if</span> (error == ENOBUFS) {
+		entry-&gt;cfe_flags |= CFEF_FLOW_CONTROLLED;
+		OSIncrementAtomic(&amp;cfil_stats.cfs_closed_event_flow_control);
+
+		<span class="enscript-keyword">if</span> (!cfil_rw_lock_shared_to_exclusive(&amp;cfil_lck_rw))
+			cfil_rw_lock_exclusive(&amp;cfil_lck_rw);
+
+		cfc-&gt;cf_flags |= CFF_FLOW_CONTROLLED;
+
+		cfil_rw_unlock_exclusive(&amp;cfil_lck_rw);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (error != 0)
+			OSIncrementAtomic(&amp;cfil_stats.cfs_closed_event_fail);
+
+		cfil_rw_unlock_shared(&amp;cfil_lck_rw);
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fill_ip6_sockaddr_4_6</span>(<span class="enscript-type">union</span> sockaddr_in_4_6 *sin46,
+	<span class="enscript-type">struct</span> in6_addr *ip6, u_int16_t port)
+{
+	<span class="enscript-type">struct</span> sockaddr_in6 *sin6 = &amp;sin46-&gt;sin6;
+
+	sin6-&gt;sin6_family = AF_INET6;
+	sin6-&gt;sin6_len = <span class="enscript-keyword">sizeof</span>(*sin6);
+	sin6-&gt;sin6_port = port;
+	sin6-&gt;sin6_addr = *ip6;
+	<span class="enscript-keyword">if</span> (IN6_IS_SCOPE_EMBED(&amp;sin6-&gt;sin6_addr)) {
+		sin6-&gt;sin6_scope_id = ntohs(sin6-&gt;sin6_addr.s6_addr16[1]);
+		sin6-&gt;sin6_addr.s6_addr16[1] = 0;
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fill_ip_sockaddr_4_6</span>(<span class="enscript-type">union</span> sockaddr_in_4_6 *sin46,
+	<span class="enscript-type">struct</span> in_addr ip, u_int16_t port)
+{
+	<span class="enscript-type">struct</span> sockaddr_in *sin = &amp;sin46-&gt;sin;
+
+	sin-&gt;sin_family = AF_INET;
+	sin-&gt;sin_len = <span class="enscript-keyword">sizeof</span>(*sin);
+	sin-&gt;sin_port = port;
+	sin-&gt;sin_addr.s_addr = ip.s_addr;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_dispatch_data_event</span>(<span class="enscript-type">struct</span> socket *so, uint32_t kcunit, <span class="enscript-type">int</span> outgoing,
+	<span class="enscript-type">struct</span> mbuf *data, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> copyoffset, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> copylen)
+{
+	errno_t error = 0;
+	<span class="enscript-type">struct</span> mbuf *copy = NULL;
+	<span class="enscript-type">struct</span> mbuf *msg = NULL;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> one = 1;
+	<span class="enscript-type">struct</span> cfil_msg_data_event *data_req;
+	size_t hdrsize;
+	<span class="enscript-type">struct</span> inpcb *inp = (<span class="enscript-type">struct</span> inpcb *)so-&gt;so_pcb;
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+	<span class="enscript-type">struct</span> cfe_buf *entrybuf;
+	<span class="enscript-type">struct</span> content_filter *cfc;
+
+	cfil_rw_lock_shared(&amp;cfil_lck_rw);
+
+	entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+	<span class="enscript-keyword">if</span> (outgoing)
+		entrybuf = &amp;entry-&gt;cfe_snd;
+	<span class="enscript-keyword">else</span>
+		entrybuf = &amp;entry-&gt;cfe_rcv;
+
+	cfc = entry-&gt;cfe_filter;
+	<span class="enscript-keyword">if</span> (cfc == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx kcunit %u outgoing %d&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so), kcunit, outgoing);
+
+	socket_lock_assert_owned(so);
+
+	<span class="enscript-comment">/* Would be wasteful to try */</span>
+	<span class="enscript-keyword">if</span> (cfc-&gt;cf_flags &amp; CFF_FLOW_CONTROLLED) {
+		error = ENOBUFS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* Make a copy of the data to pass to kernel control socket */</span>
+	copy = m_copym_mode(data, copyoffset, copylen, M_DONTWAIT,
+		M_COPYM_NOOP_HDR);
+	<span class="enscript-keyword">if</span> (copy == NULL) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;m_copym_mode() failed&quot;</span>);
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* We need an mbuf packet for the message header */</span>
+	hdrsize = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_msg_data_event);
+	error = mbuf_allocpacket(MBUF_DONTWAIT, hdrsize, &amp;one, &amp;msg);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;mbuf_allocpacket() failed&quot;</span>);
+		m_freem(copy);
+		<span class="enscript-comment">/*
+		 * ENOBUFS is to indicate flow control
+		 */</span>
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	mbuf_setlen(msg, hdrsize);
+	mbuf_pkthdr_setlen(msg, hdrsize + copylen);
+	msg-&gt;m_next = copy;
+	data_req = (<span class="enscript-type">struct</span> cfil_msg_data_event *)mbuf_data(msg);
+	bzero(data_req, hdrsize);
+	data_req-&gt;cfd_msghdr.cfm_len = hdrsize + copylen;
+	data_req-&gt;cfd_msghdr.cfm_version = 1;
+	data_req-&gt;cfd_msghdr.cfm_type = CFM_TYPE_EVENT;
+	data_req-&gt;cfd_msghdr.cfm_op =
+		outgoing ? CFM_OP_DATA_OUT : CFM_OP_DATA_IN;
+	data_req-&gt;cfd_msghdr.cfm_sock_id =
+		entry-&gt;cfe_cfil_info-&gt;cfi_sock_id;
+	data_req-&gt;cfd_start_offset = entrybuf-&gt;cfe_peeked;
+	data_req-&gt;cfd_end_offset = entrybuf-&gt;cfe_peeked + copylen;
+
+	<span class="enscript-comment">/*
+	 * TBD:
+	 * For non connected sockets need to copy addresses from passed
+	 * parameters
+	 */</span>
+	<span class="enscript-keyword">if</span> (inp-&gt;inp_vflag &amp; INP_IPV6) {
+		<span class="enscript-keyword">if</span> (outgoing) {
+			fill_ip6_sockaddr_4_6(&amp;data_req-&gt;cfc_src,
+				&amp;inp-&gt;in6p_laddr, inp-&gt;inp_lport);
+			fill_ip6_sockaddr_4_6(&amp;data_req-&gt;cfc_dst,
+				&amp;inp-&gt;in6p_faddr, inp-&gt;inp_fport);
+		} <span class="enscript-keyword">else</span> {
+			fill_ip6_sockaddr_4_6(&amp;data_req-&gt;cfc_src,
+				&amp;inp-&gt;in6p_faddr, inp-&gt;inp_fport);
+			fill_ip6_sockaddr_4_6(&amp;data_req-&gt;cfc_dst,
+				&amp;inp-&gt;in6p_laddr, inp-&gt;inp_lport);
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (inp-&gt;inp_vflag &amp; INP_IPV4) {
+		<span class="enscript-keyword">if</span> (outgoing) {
+			fill_ip_sockaddr_4_6(&amp;data_req-&gt;cfc_src,
+				inp-&gt;inp_laddr, inp-&gt;inp_lport);
+			fill_ip_sockaddr_4_6(&amp;data_req-&gt;cfc_dst,
+				inp-&gt;inp_faddr, inp-&gt;inp_fport);
+		} <span class="enscript-keyword">else</span> {
+			fill_ip_sockaddr_4_6(&amp;data_req-&gt;cfc_src,
+				inp-&gt;inp_faddr, inp-&gt;inp_fport);
+			fill_ip_sockaddr_4_6(&amp;data_req-&gt;cfc_dst,
+				inp-&gt;inp_laddr, inp-&gt;inp_lport);
+		}
+	}
+
+	<span class="enscript-comment">/* Pass the message to the content filter */</span>
+	error = ctl_enqueuembuf(entry-&gt;cfe_filter-&gt;cf_kcref,
+				entry-&gt;cfe_filter-&gt;cf_kcunit,
+				msg, CTL_DATA_EOR);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;ctl_enqueuembuf() failed: %d&quot;</span>, error);
+		mbuf_freem(msg);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	entry-&gt;cfe_flags &amp;= ~CFEF_FLOW_CONTROLLED;
+	OSIncrementAtomic(&amp;cfil_stats.cfs_data_event_ok);
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (error == ENOBUFS) {
+		entry-&gt;cfe_flags |= CFEF_FLOW_CONTROLLED;
+		OSIncrementAtomic(
+			&amp;cfil_stats.cfs_data_event_flow_control);
+
+		<span class="enscript-keyword">if</span> (!cfil_rw_lock_shared_to_exclusive(&amp;cfil_lck_rw))
+			cfil_rw_lock_exclusive(&amp;cfil_lck_rw);
+
+		cfc-&gt;cf_flags |= CFF_FLOW_CONTROLLED;
+
+		cfil_rw_unlock_exclusive(&amp;cfil_lck_rw);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (error != 0)
+			OSIncrementAtomic(&amp;cfil_stats.cfs_data_event_fail);
+
+		cfil_rw_unlock_shared(&amp;cfil_lck_rw);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Process the queue of data waiting to be delivered to content filter
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_data_service_ctl_q</span>(<span class="enscript-type">struct</span> socket *so, uint32_t kcunit, <span class="enscript-type">int</span> outgoing)
+{
+	errno_t error = 0;
+	<span class="enscript-type">struct</span> mbuf *data, *tmp = NULL;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> datalen = 0, copylen = 0, copyoffset = 0;
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+	<span class="enscript-type">struct</span> cfe_buf *entrybuf;
+	uint64_t currentoffset = 0;
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil == NULL)
+		<span class="enscript-keyword">return</span> (0);
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx kcunit %u outgoing %d&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so), kcunit, outgoing);
+
+	socket_lock_assert_owned(so);
+
+	entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+	<span class="enscript-keyword">if</span> (outgoing)
+		entrybuf = &amp;entry-&gt;cfe_snd;
+	<span class="enscript-keyword">else</span>
+		entrybuf = &amp;entry-&gt;cfe_rcv;
+
+	<span class="enscript-comment">/* Send attached message if not yet done */</span>
+	<span class="enscript-keyword">if</span> ((entry-&gt;cfe_flags &amp; CFEF_SENT_SOCK_ATTACHED) == 0) {
+		error = cfil_dispatch_attach_event(so, kcunit);
+		<span class="enscript-keyword">if</span> (error != 0) {
+			<span class="enscript-comment">/* We can recover from flow control */</span>
+			<span class="enscript-keyword">if</span> (error == ENOBUFS || error == ENOMEM)
+				error = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((entry-&gt;cfe_flags &amp; CFEF_DATA_START) == 0) {
+		OSIncrementAtomic(&amp;cfil_stats.cfs_ctl_q_not_started);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	CFIL_LOG(LOG_DEBUG, <span class="enscript-string">&quot;pass_offset %llu peeked %llu peek_offset %llu&quot;</span>,
+		entrybuf-&gt;cfe_pass_offset,
+		entrybuf-&gt;cfe_peeked,
+		entrybuf-&gt;cfe_peek_offset);
+
+	<span class="enscript-comment">/* Move all data that can pass */</span>
+	<span class="enscript-keyword">while</span> ((data = cfil_queue_first(&amp;entrybuf-&gt;cfe_ctl_q)) != NULL &amp;&amp;
+		entrybuf-&gt;cfe_ctl_q.q_start &lt; entrybuf-&gt;cfe_pass_offset) {
+		datalen = cfil_data_length(data, NULL);
+		tmp = data;
+
+		<span class="enscript-keyword">if</span> (entrybuf-&gt;cfe_ctl_q.q_start + datalen &lt;=
+			entrybuf-&gt;cfe_pass_offset) {
+			<span class="enscript-comment">/*
+			 * The first mbuf can fully pass
+			 */</span>
+			copylen = datalen;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * The first mbuf can partially pass
+			 */</span>
+			copylen = entrybuf-&gt;cfe_pass_offset -
+				entrybuf-&gt;cfe_ctl_q.q_start;
+		}
+		VERIFY(copylen &lt;= datalen);
+
+		CFIL_LOG(LOG_DEBUG,
+			<span class="enscript-string">&quot;%llx first %llu peeked %llu pass %llu peek %llu&quot;</span>
+			<span class="enscript-string">&quot;datalen %u copylen %u&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(tmp),
+			entrybuf-&gt;cfe_ctl_q.q_start,
+			entrybuf-&gt;cfe_peeked,
+			entrybuf-&gt;cfe_pass_offset,
+			entrybuf-&gt;cfe_peek_offset,
+			datalen, copylen);
+
+		<span class="enscript-comment">/*
+		 * Data that passes has been peeked at explicitly or
+		 * implicitly
+		 */</span>
+		<span class="enscript-keyword">if</span> (entrybuf-&gt;cfe_ctl_q.q_start + copylen &gt;
+			entrybuf-&gt;cfe_peeked)
+			entrybuf-&gt;cfe_peeked =
+				entrybuf-&gt;cfe_ctl_q.q_start + copylen;
+		<span class="enscript-comment">/*
+		 * Stop on partial pass
+		 */</span>
+		<span class="enscript-keyword">if</span> (copylen &lt; datalen)
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-comment">/* All good, move full data from ctl queue to pending queue */</span>
+		cfil_queue_remove(&amp;entrybuf-&gt;cfe_ctl_q, data, datalen);
+
+		cfil_queue_enqueue(&amp;entrybuf-&gt;cfe_pending_q, data, datalen);
+		<span class="enscript-keyword">if</span> (outgoing)
+			OSAddAtomic64(datalen,
+				&amp;cfil_stats.cfs_pending_q_out_enqueued);
+		<span class="enscript-keyword">else</span>
+			OSAddAtomic64(datalen,
+				&amp;cfil_stats.cfs_pending_q_in_enqueued);
+	}
+	CFIL_INFO_VERIFY(so-&gt;so_cfil);
+	<span class="enscript-keyword">if</span> (tmp != NULL)
+		CFIL_LOG(LOG_DEBUG,
+			<span class="enscript-string">&quot;%llx first %llu peeked %llu pass %llu peek %llu&quot;</span>
+			<span class="enscript-string">&quot;datalen %u copylen %u&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(tmp),
+			entrybuf-&gt;cfe_ctl_q.q_start,
+			entrybuf-&gt;cfe_peeked,
+			entrybuf-&gt;cfe_pass_offset,
+			entrybuf-&gt;cfe_peek_offset,
+			datalen, copylen);
+	tmp = NULL;
+
+	<span class="enscript-comment">/* Now deal with remaining data the filter wants to peek at */</span>
+	<span class="enscript-keyword">for</span> (data = cfil_queue_first(&amp;entrybuf-&gt;cfe_ctl_q),
+		currentoffset = entrybuf-&gt;cfe_ctl_q.q_start;
+		data != NULL &amp;&amp; currentoffset &lt; entrybuf-&gt;cfe_peek_offset;
+		data = cfil_queue_next(&amp;entrybuf-&gt;cfe_ctl_q, data),
+		currentoffset += datalen) {
+		datalen = cfil_data_length(data, NULL);
+		tmp = data;
+
+		<span class="enscript-comment">/* We've already peeked at this mbuf */</span>
+		<span class="enscript-keyword">if</span> (currentoffset + datalen &lt;= entrybuf-&gt;cfe_peeked)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-comment">/*
+		 * The data in the first mbuf may have been
+		 * partially peeked at
+		 */</span>
+		copyoffset = entrybuf-&gt;cfe_peeked - currentoffset;
+		VERIFY(copyoffset &lt; datalen);
+		copylen = datalen - copyoffset;
+		VERIFY(copylen &lt;= datalen);
+		<span class="enscript-comment">/*
+		 * Do not copy more than needed
+		 */</span>
+		<span class="enscript-keyword">if</span> (currentoffset + copyoffset + copylen &gt;
+			entrybuf-&gt;cfe_peek_offset) {
+			copylen = entrybuf-&gt;cfe_peek_offset -
+				(currentoffset + copyoffset);
+		}
+
+		CFIL_LOG(LOG_DEBUG,
+			<span class="enscript-string">&quot;%llx current %llu peeked %llu pass %llu peek %llu&quot;</span>
+			<span class="enscript-string">&quot;datalen %u copylen %u copyoffset %u&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(tmp),
+			currentoffset,
+			entrybuf-&gt;cfe_peeked,
+			entrybuf-&gt;cfe_pass_offset,
+			entrybuf-&gt;cfe_peek_offset,
+			datalen, copylen, copyoffset);
+
+		<span class="enscript-comment">/*
+		 * Stop if there is nothing more to peek at
+		 */</span>
+		<span class="enscript-keyword">if</span> (copylen == 0)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-comment">/*
+		 * Let the filter get a peek at this span of data
+		 */</span>
+		error = cfil_dispatch_data_event(so, kcunit,
+			outgoing, data, copyoffset, copylen);
+		<span class="enscript-keyword">if</span> (error != 0) {
+			<span class="enscript-comment">/* On error, leave data in ctl_q */</span>
+			<span class="enscript-keyword">break</span>;
+		}
+		entrybuf-&gt;cfe_peeked += copylen;
+		<span class="enscript-keyword">if</span> (outgoing)
+			OSAddAtomic64(copylen,
+				&amp;cfil_stats.cfs_ctl_q_out_peeked);
+		<span class="enscript-keyword">else</span>
+			OSAddAtomic64(copylen,
+				&amp;cfil_stats.cfs_ctl_q_in_peeked);
+
+		<span class="enscript-comment">/* Stop when data could not be fully peeked at */</span>
+		<span class="enscript-keyword">if</span> (copylen + copyoffset &lt; datalen)
+			<span class="enscript-keyword">break</span>;
+	}
+	CFIL_INFO_VERIFY(so-&gt;so_cfil);
+	<span class="enscript-keyword">if</span> (tmp != NULL)
+		CFIL_LOG(LOG_DEBUG,
+			<span class="enscript-string">&quot;%llx first %llu peeked %llu pass %llu peek %llu&quot;</span>
+			<span class="enscript-string">&quot;datalen %u copylen %u copyoffset %u&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(tmp),
+			currentoffset,
+			entrybuf-&gt;cfe_peeked,
+			entrybuf-&gt;cfe_pass_offset,
+			entrybuf-&gt;cfe_peek_offset,
+			datalen, copylen, copyoffset);
+
+	<span class="enscript-comment">/*
+	 * Process data that has passed the filter
+	 */</span>
+	error = cfil_service_pending_queue(so, kcunit, outgoing);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;cfil_service_pending_queue() error %d&quot;</span>,
+			error);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Dispatch disconnect events that could not be sent
+	 */</span>
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (outgoing) {
+		<span class="enscript-keyword">if</span> ((so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_SHUT_WR) &amp;&amp;
+		    !(entry-&gt;cfe_flags &amp; CFEF_SENT_DISCONNECT_OUT))
+			cfil_dispatch_disconnect_event(so, kcunit, 1);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> ((so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_SHUT_RD) &amp;&amp;
+		    !(entry-&gt;cfe_flags &amp; CFEF_SENT_DISCONNECT_IN))
+			cfil_dispatch_disconnect_event(so, kcunit, 0);
+	}
+
+<span class="enscript-reference">done</span>:
+	CFIL_LOG(LOG_DEBUG,
+		<span class="enscript-string">&quot;first %llu peeked %llu pass %llu peek %llu&quot;</span>,
+		entrybuf-&gt;cfe_ctl_q.q_start,
+		entrybuf-&gt;cfe_peeked,
+		entrybuf-&gt;cfe_pass_offset,
+		entrybuf-&gt;cfe_peek_offset);
+
+	CFIL_INFO_VERIFY(so-&gt;so_cfil);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * cfil_data_filter()
+ *
+ * Process data for a content filter installed on a socket
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_data_filter</span>(<span class="enscript-type">struct</span> socket *so, uint32_t kcunit, <span class="enscript-type">int</span> outgoing,
+	<span class="enscript-type">struct</span> mbuf *data, uint64_t datalen)
+{
+	errno_t error = 0;
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+	<span class="enscript-type">struct</span> cfe_buf *entrybuf;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx kcunit %u outgoing %d&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so), kcunit, outgoing);
+
+	socket_lock_assert_owned(so);
+
+	entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+	<span class="enscript-keyword">if</span> (outgoing)
+		entrybuf = &amp;entry-&gt;cfe_snd;
+	<span class="enscript-keyword">else</span>
+		entrybuf = &amp;entry-&gt;cfe_rcv;
+
+	<span class="enscript-comment">/* Are we attached to the filter? */</span>
+	<span class="enscript-keyword">if</span> (entry-&gt;cfe_filter == NULL) {
+		error = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* Dispatch to filters */</span>
+	cfil_queue_enqueue(&amp;entrybuf-&gt;cfe_ctl_q, data, datalen);
+	<span class="enscript-keyword">if</span> (outgoing)
+		OSAddAtomic64(datalen,
+			&amp;cfil_stats.cfs_ctl_q_out_enqueued);
+	<span class="enscript-keyword">else</span>
+		OSAddAtomic64(datalen,
+			&amp;cfil_stats.cfs_ctl_q_in_enqueued);
+
+	error = cfil_data_service_ctl_q(so, kcunit, outgoing);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;cfil_data_service_ctl_q() error %d&quot;</span>,
+			error);
+	}
+	<span class="enscript-comment">/*
+	 * We have to return EJUSTRETURN in all cases to avoid double free
+	 * by socket layer
+	 */</span>
+	error = EJUSTRETURN;
+<span class="enscript-reference">done</span>:
+	CFIL_INFO_VERIFY(so-&gt;so_cfil);
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;return %d&quot;</span>, error);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * cfil_service_inject_queue() re-inject data that passed the
+ * content filters
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_service_inject_queue</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> outgoing)
+{
+	mbuf_t data;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> datalen;
+	<span class="enscript-type">int</span> mbcnt;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> copylen;
+	errno_t error = 0;
+	<span class="enscript-type">struct</span> mbuf *copy = NULL;
+	<span class="enscript-type">struct</span> cfi_buf *cfi_buf;
+	<span class="enscript-type">struct</span> cfil_queue *inject_q;
+	<span class="enscript-type">int</span> need_rwakeup = 0;
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil == NULL)
+		<span class="enscript-keyword">return</span> (0);
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx outgoing %d&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so), outgoing);
+
+	socket_lock_assert_owned(so);
+
+	<span class="enscript-keyword">if</span> (outgoing) {
+		cfi_buf = &amp;so-&gt;so_cfil-&gt;cfi_snd;
+		so-&gt;so_cfil-&gt;cfi_flags &amp;= ~CFIF_RETRY_INJECT_OUT;
+	} <span class="enscript-keyword">else</span> {
+		cfi_buf = &amp;so-&gt;so_cfil-&gt;cfi_rcv;
+		so-&gt;so_cfil-&gt;cfi_flags &amp;= ~CFIF_RETRY_INJECT_IN;
+	}
+	inject_q = &amp;cfi_buf-&gt;cfi_inject_q;
+
+	<span class="enscript-keyword">while</span> ((data = cfil_queue_first(inject_q)) != NULL) {
+		datalen = cfil_data_length(data, &amp;mbcnt);
+
+		CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;data %llx datalen %u&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(data), datalen);
+
+		<span class="enscript-comment">/* Make a copy in case of injection error */</span>
+		copy = m_copym_mode(data, 0, M_COPYALL, M_DONTWAIT,
+			M_COPYM_COPY_HDR);
+		<span class="enscript-keyword">if</span> (copy == NULL) {
+			CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;m_copym_mode() failed&quot;</span>);
+			error = ENOMEM;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> ((copylen = m_length(copy)) != datalen)
+			panic(<span class="enscript-string">&quot;%s so %p copylen %d != datalen %d&quot;</span>,
+				__func__, so, copylen, datalen);
+
+		<span class="enscript-keyword">if</span> (outgoing) {
+			socket_unlock(so, 0);
+
+			<span class="enscript-comment">/*
+			 * Set both DONTWAIT and NBIO flags are we really
+			 * do not want to block
+			 */</span>
+			error = sosend(so, NULL, NULL,
+					copy, NULL,
+					MSG_SKIPCFIL | MSG_DONTWAIT | MSG_NBIO);
+
+			socket_lock(so, 0);
+
+			<span class="enscript-keyword">if</span> (error != 0) {
+				CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;sosend() failed %d&quot;</span>,
+					error);
+			}
+		} <span class="enscript-keyword">else</span> {
+			copy-&gt;m_flags |= M_SKIPCFIL;
+
+			<span class="enscript-comment">/*
+			 * NOTE:
+			 * This work only because we support plain TCP
+			 * For UDP, RAWIP, MPTCP and message TCP we'll
+			 * need to call the appropriate sbappendxxx()
+			 * of fix sock_inject_data_in()
+			 */</span>
+			<span class="enscript-keyword">if</span> (sbappendstream(&amp;so-&gt;so_rcv, copy))
+				need_rwakeup = 1;
+		}
+
+		<span class="enscript-comment">/* Need to reassess if filter is still attached after unlock */</span>
+		<span class="enscript-keyword">if</span> (so-&gt;so_cfil == NULL) {
+			CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;so %llx cfil detached&quot;</span>,
+				(uint64_t)VM_KERNEL_ADDRPERM(so));
+			OSIncrementAtomic(&amp;cfil_stats.cfs_inject_q_detached);
+			error = 0;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-comment">/* Injection successful */</span>
+		cfil_queue_remove(inject_q, data, datalen);
+		mbuf_freem(data);
+
+		cfi_buf-&gt;cfi_pending_first += datalen;
+		cfi_buf-&gt;cfi_pending_mbcnt -= mbcnt;
+		cfil_info_buf_verify(cfi_buf);
+
+		<span class="enscript-keyword">if</span> (outgoing)
+			OSAddAtomic64(datalen,
+				&amp;cfil_stats.cfs_inject_q_out_passed);
+		<span class="enscript-keyword">else</span>
+			OSAddAtomic64(datalen,
+				&amp;cfil_stats.cfs_inject_q_in_passed);
+	}
+
+	<span class="enscript-comment">/* A single wakeup is for several packets is more efficient */</span>
+	<span class="enscript-keyword">if</span> (need_rwakeup)
+		sorwakeup(so);
+
+	<span class="enscript-keyword">if</span> (error != 0 &amp;&amp; so-&gt;so_cfil) {
+		<span class="enscript-keyword">if</span> (error == ENOBUFS)
+			OSIncrementAtomic(&amp;cfil_stats.cfs_inject_q_nobufs);
+		<span class="enscript-keyword">if</span> (error == ENOMEM)
+			OSIncrementAtomic(&amp;cfil_stats.cfs_inject_q_nomem);
+
+		<span class="enscript-keyword">if</span> (outgoing) {
+			so-&gt;so_cfil-&gt;cfi_flags |= CFIF_RETRY_INJECT_OUT;
+			OSIncrementAtomic(&amp;cfil_stats.cfs_inject_q_out_fail);
+		} <span class="enscript-keyword">else</span> {
+			so-&gt;so_cfil-&gt;cfi_flags |= CFIF_RETRY_INJECT_IN;
+			OSIncrementAtomic(&amp;cfil_stats.cfs_inject_q_in_fail);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Notify
+	 */</span>
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil &amp;&amp; (so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_SHUT_WR)) {
+		cfil_sock_notify_shutdown(so, SHUT_WR);
+		<span class="enscript-keyword">if</span> (cfil_sock_data_pending(&amp;so-&gt;so_snd) == 0)
+			soshutdownlock_final(so, SHUT_WR);
+	}
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil &amp;&amp; (so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_CLOSE_WAIT)) {
+		<span class="enscript-keyword">if</span> (cfil_filters_attached(so) == 0) {
+			CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx waking&quot;</span>,
+				(uint64_t)VM_KERNEL_ADDRPERM(so));
+			wakeup((caddr_t)&amp;so-&gt;so_cfil);
+		}
+	}
+
+	CFIL_INFO_VERIFY(so-&gt;so_cfil);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_service_pending_queue</span>(<span class="enscript-type">struct</span> socket *so, uint32_t kcunit, <span class="enscript-type">int</span> outgoing)
+{
+	uint64_t passlen, curlen;
+	mbuf_t data;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> datalen;
+	errno_t error = 0;
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+	<span class="enscript-type">struct</span> cfe_buf *entrybuf;
+	<span class="enscript-type">struct</span> cfil_queue *pending_q;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx kcunit %u outgoing %d&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so), kcunit, outgoing);
+
+	socket_lock_assert_owned(so);
+
+	entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+	<span class="enscript-keyword">if</span> (outgoing)
+		entrybuf = &amp;entry-&gt;cfe_snd;
+	<span class="enscript-keyword">else</span>
+		entrybuf = &amp;entry-&gt;cfe_rcv;
+
+	pending_q = &amp;entrybuf-&gt;cfe_pending_q;
+
+	passlen = entrybuf-&gt;cfe_pass_offset - pending_q-&gt;q_start;
+
+	<span class="enscript-comment">/*
+	 * Locate the chunks of data that we can pass to the next filter
+	 * A data chunk must be on mbuf boundaries
+	 */</span>
+	curlen = 0;
+	<span class="enscript-keyword">while</span> ((data = cfil_queue_first(pending_q)) != NULL) {
+		datalen = cfil_data_length(data, NULL);
+
+		CFIL_LOG(LOG_INFO,
+			<span class="enscript-string">&quot;data %llx datalen %u passlen %llu curlen %llu&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(data), datalen,
+			passlen, curlen);
+
+		<span class="enscript-keyword">if</span> (curlen + datalen &gt; passlen)
+			<span class="enscript-keyword">break</span>;
+
+		cfil_queue_remove(pending_q, data, datalen);
+
+		curlen += datalen;
+
+		<span class="enscript-keyword">for</span> (kcunit += 1;
+			kcunit &lt;= MAX_CONTENT_FILTER;
+			kcunit++) {
+			error = cfil_data_filter(so, kcunit, outgoing,
+				data, datalen);
+			<span class="enscript-comment">/* 0 means passed so we can continue */</span>
+			<span class="enscript-keyword">if</span> (error != 0)
+				<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/* When data has passed all filters, re-inject */</span>
+		<span class="enscript-keyword">if</span> (error == 0) {
+			<span class="enscript-keyword">if</span> (outgoing) {
+				cfil_queue_enqueue(
+					&amp;so-&gt;so_cfil-&gt;cfi_snd.cfi_inject_q,
+					data, datalen);
+				OSAddAtomic64(datalen,
+					&amp;cfil_stats.cfs_inject_q_out_enqueued);
+			} <span class="enscript-keyword">else</span> {
+				cfil_queue_enqueue(
+					&amp;so-&gt;so_cfil-&gt;cfi_rcv.cfi_inject_q,
+					data, datalen);
+				OSAddAtomic64(datalen,
+					&amp;cfil_stats.cfs_inject_q_in_enqueued);
+			}
+		}
+	}
+
+	CFIL_INFO_VERIFY(so-&gt;so_cfil);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_update_data_offsets</span>(<span class="enscript-type">struct</span> socket *so, uint32_t kcunit, <span class="enscript-type">int</span> outgoing,
+	uint64_t pass_offset, uint64_t peek_offset)
+{
+	errno_t error = 0;
+	<span class="enscript-type">struct</span> cfil_entry *entry = NULL;
+	<span class="enscript-type">struct</span> cfe_buf *entrybuf;
+	<span class="enscript-type">int</span> updated = 0;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;pass %llu peek %llu&quot;</span>, pass_offset, peek_offset);
+
+	socket_lock_assert_owned(so);
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil == NULL) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;so %llx cfil detached&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		error = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_DROP) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;so %llx drop set&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		error = EPIPE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+	<span class="enscript-keyword">if</span> (outgoing)
+		entrybuf = &amp;entry-&gt;cfe_snd;
+	<span class="enscript-keyword">else</span>
+		entrybuf = &amp;entry-&gt;cfe_rcv;
+
+	<span class="enscript-comment">/* Record updated offsets for this content filter */</span>
+	<span class="enscript-keyword">if</span> (pass_offset &gt; entrybuf-&gt;cfe_pass_offset) {
+		entrybuf-&gt;cfe_pass_offset = pass_offset;
+
+		<span class="enscript-keyword">if</span> (entrybuf-&gt;cfe_peek_offset &lt; entrybuf-&gt;cfe_pass_offset)
+			entrybuf-&gt;cfe_peek_offset = entrybuf-&gt;cfe_pass_offset;
+		updated = 1;
+	} <span class="enscript-keyword">else</span> {
+		CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;pass_offset %llu &lt;= cfe_pass_offset %llu&quot;</span>,
+			pass_offset, entrybuf-&gt;cfe_pass_offset);
+	}
+	<span class="enscript-comment">/* Filter does not want or need to see data that's allowed to pass */</span>
+	<span class="enscript-keyword">if</span> (peek_offset &gt; entrybuf-&gt;cfe_pass_offset &amp;&amp;
+		peek_offset &gt; entrybuf-&gt;cfe_peek_offset) {
+		entrybuf-&gt;cfe_peek_offset = peek_offset;
+		updated = 1;
+	}
+	<span class="enscript-comment">/* Nothing to do */</span>
+	<span class="enscript-keyword">if</span> (updated == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-comment">/* Move data held in control queue to pending queue if needed */</span>
+	error = cfil_data_service_ctl_q(so, kcunit, outgoing);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;cfil_data_service_ctl_q() error %d&quot;</span>,
+			error);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	error = EJUSTRETURN;
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-comment">/*
+	 * The filter is effectively detached when pass all from both sides
+	 * or when the socket is closed and no more data is waiting
+	 * to be delivered to the filter
+	 */</span>
+	<span class="enscript-keyword">if</span> (entry != NULL &amp;&amp;
+	    ((entry-&gt;cfe_snd.cfe_pass_offset == CFM_MAX_OFFSET &amp;&amp;
+	    entry-&gt;cfe_rcv.cfe_pass_offset == CFM_MAX_OFFSET) ||
+	    ((so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_CLOSE_WAIT) &amp;&amp;
+	    cfil_queue_empty(&amp;entry-&gt;cfe_snd.cfe_ctl_q) &amp;&amp;
+	    cfil_queue_empty(&amp;entry-&gt;cfe_rcv.cfe_ctl_q)))) {
+		entry-&gt;cfe_flags |= CFEF_CFIL_DETACHED;
+		CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx detached %u&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so), kcunit);
+		<span class="enscript-keyword">if</span> ((so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_CLOSE_WAIT) &amp;&amp;
+		    cfil_filters_attached(so) == 0) {
+			CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx waking&quot;</span>,
+				(uint64_t)VM_KERNEL_ADDRPERM(so));
+			wakeup((caddr_t)&amp;so-&gt;so_cfil);
+		}
+	}
+	CFIL_INFO_VERIFY(so-&gt;so_cfil);
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;return %d&quot;</span>, error);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Update pass offset for socket when no data is pending
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_set_socket_pass_offset</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> outgoing)
+{
+	<span class="enscript-type">struct</span> cfi_buf *cfi_buf;
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+	<span class="enscript-type">struct</span> cfe_buf *entrybuf;
+	uint32_t kcunit;
+	uint64_t pass_offset = 0;
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil == NULL)
+		<span class="enscript-keyword">return</span> (0);
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx outgoing %d&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so), outgoing);
+
+	socket_lock_assert_owned(so);
+
+	<span class="enscript-keyword">if</span> (outgoing)
+		cfi_buf = &amp;so-&gt;so_cfil-&gt;cfi_snd;
+	<span class="enscript-keyword">else</span>
+		cfi_buf = &amp;so-&gt;so_cfil-&gt;cfi_rcv;
+
+	<span class="enscript-keyword">if</span> (cfi_buf-&gt;cfi_pending_last - cfi_buf-&gt;cfi_pending_first == 0) {
+		<span class="enscript-keyword">for</span> (kcunit = 1; kcunit &lt;= MAX_CONTENT_FILTER; kcunit++) {
+			entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+
+			<span class="enscript-comment">/* Are we attached to a filter? */</span>
+			<span class="enscript-keyword">if</span> (entry-&gt;cfe_filter == NULL)
+				<span class="enscript-keyword">continue</span>;
+
+			<span class="enscript-keyword">if</span> (outgoing)
+				entrybuf = &amp;entry-&gt;cfe_snd;
+			<span class="enscript-keyword">else</span>
+				entrybuf = &amp;entry-&gt;cfe_rcv;
+
+			<span class="enscript-keyword">if</span> (pass_offset == 0 ||
+			    entrybuf-&gt;cfe_pass_offset &lt; pass_offset)
+				pass_offset = entrybuf-&gt;cfe_pass_offset;
+		}
+		cfi_buf-&gt;cfi_pass_offset = pass_offset;
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_action_data_pass</span>(<span class="enscript-type">struct</span> socket *so, uint32_t kcunit, <span class="enscript-type">int</span> outgoing,
+	uint64_t pass_offset, uint64_t peek_offset)
+{
+	errno_t error = 0;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;&quot;</span>);
+
+	socket_lock_assert_owned(so);
+
+	error = cfil_acquire_sockbuf(so, outgoing);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx %s dropped&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so),
+			outgoing ? <span class="enscript-string">&quot;out&quot;</span> : <span class="enscript-string">&quot;in&quot;</span>);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+	}
+
+	error = cfil_update_data_offsets(so, kcunit, outgoing,
+		pass_offset, peek_offset);
+
+	cfil_service_inject_queue(so, outgoing);
+
+	cfil_set_socket_pass_offset(so, outgoing);
+<span class="enscript-reference">release</span>:
+	CFIL_INFO_VERIFY(so-&gt;so_cfil);
+	cfil_release_sockbuf(so, outgoing);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_flush_queues</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+	<span class="enscript-type">int</span> kcunit;
+	uint64_t drained;
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) == 0 || so-&gt;so_cfil == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	socket_lock_assert_owned(so);
+
+	<span class="enscript-comment">/*
+	 * Flush the output queues and ignore errors as long as
+	 * we are attached
+	 */</span>
+	(<span class="enscript-type">void</span>) cfil_acquire_sockbuf(so, 1);
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil != NULL) {
+		drained = 0;
+		<span class="enscript-keyword">for</span> (kcunit = 1; kcunit &lt;= MAX_CONTENT_FILTER; kcunit++) {
+			entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+
+			drained += cfil_queue_drain(&amp;entry-&gt;cfe_snd.cfe_ctl_q);
+			drained += cfil_queue_drain(
+			    &amp;entry-&gt;cfe_snd.cfe_pending_q);
+		}
+		drained += cfil_queue_drain(&amp;so-&gt;so_cfil-&gt;cfi_snd.cfi_inject_q);
+		<span class="enscript-keyword">if</span> (drained) {
+			<span class="enscript-keyword">if</span> (so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_DROP)
+				OSIncrementAtomic(
+					&amp;cfil_stats.cfs_flush_out_drop);
+			<span class="enscript-keyword">else</span>
+				OSIncrementAtomic(
+					&amp;cfil_stats.cfs_flush_out_close);
+		}
+	}
+	cfil_release_sockbuf(so, 1);
+
+	<span class="enscript-comment">/*
+	 * Flush the input queues
+	 */</span>
+	(<span class="enscript-type">void</span>) cfil_acquire_sockbuf(so, 0);
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil != NULL) {
+		drained = 0;
+		<span class="enscript-keyword">for</span> (kcunit = 1; kcunit &lt;= MAX_CONTENT_FILTER; kcunit++) {
+			entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+
+				drained += cfil_queue_drain(
+					&amp;entry-&gt;cfe_rcv.cfe_ctl_q);
+				drained += cfil_queue_drain(
+					&amp;entry-&gt;cfe_rcv.cfe_pending_q);
+		}
+		drained += cfil_queue_drain(&amp;so-&gt;so_cfil-&gt;cfi_rcv.cfi_inject_q);
+		<span class="enscript-keyword">if</span> (drained) {
+			<span class="enscript-keyword">if</span> (so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_DROP)
+				OSIncrementAtomic(
+					&amp;cfil_stats.cfs_flush_in_drop);
+			<span class="enscript-keyword">else</span>
+				OSIncrementAtomic(
+					&amp;cfil_stats.cfs_flush_in_close);
+		}
+	}
+	cfil_release_sockbuf(so, 0);
+<span class="enscript-reference">done</span>:
+	CFIL_INFO_VERIFY(so-&gt;so_cfil);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_action_drop</span>(<span class="enscript-type">struct</span> socket *so, uint32_t kcunit)
+{
+	errno_t error = 0;
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+	<span class="enscript-type">struct</span> proc *p;
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) == 0 || so-&gt;so_cfil == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	socket_lock_assert_owned(so);
+
+	entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+
+	<span class="enscript-comment">/* Are we attached to the filter? */</span>
+	<span class="enscript-keyword">if</span> (entry-&gt;cfe_filter == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	so-&gt;so_cfil-&gt;cfi_flags |= CFIF_DROP;
+
+	p = current_proc();
+
+	<span class="enscript-comment">/*
+	 * Force the socket to be marked defunct
+	 * (forcing fixed along with rdar://19391339)
+	 */</span>
+	error = sosetdefunct(p, so,
+		SHUTDOWN_SOCKET_LEVEL_DISCONNECT_ALL, FALSE);
+
+	<span class="enscript-comment">/* Flush the socket buffer and disconnect */</span>
+	<span class="enscript-keyword">if</span> (error == 0)
+		error = sodefunct(p, so, SHUTDOWN_SOCKET_LEVEL_DISCONNECT_ALL);
+
+	<span class="enscript-comment">/* The filter is done, mark as detached */</span>
+	entry-&gt;cfe_flags |= CFEF_CFIL_DETACHED;
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx detached %u&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so), kcunit);
+
+	<span class="enscript-comment">/* Pending data needs to go */</span>
+	cfil_flush_queues(so);
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil &amp;&amp; (so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_CLOSE_WAIT)) {
+		<span class="enscript-keyword">if</span> (cfil_filters_attached(so) == 0) {
+			CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx waking&quot;</span>,
+				(uint64_t)VM_KERNEL_ADDRPERM(so));
+			wakeup((caddr_t)&amp;so-&gt;so_cfil);
+		}
+	}
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_update_entry_offsets</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> outgoing, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> datalen)
+{
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+	<span class="enscript-type">struct</span> cfe_buf *entrybuf;
+	uint32_t kcunit;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx outgoing %d datalen %u&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so), outgoing, datalen);
+
+	<span class="enscript-keyword">for</span> (kcunit = 1; kcunit &lt;= MAX_CONTENT_FILTER; kcunit++) {
+		entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+
+		<span class="enscript-comment">/* Are we attached to the filter? */</span>
+		<span class="enscript-keyword">if</span> (entry-&gt;cfe_filter == NULL)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (outgoing)
+			entrybuf = &amp;entry-&gt;cfe_snd;
+		<span class="enscript-keyword">else</span>
+			entrybuf = &amp;entry-&gt;cfe_rcv;
+
+		entrybuf-&gt;cfe_ctl_q.q_start += datalen;
+		entrybuf-&gt;cfe_pass_offset = entrybuf-&gt;cfe_ctl_q.q_start;
+		entrybuf-&gt;cfe_peeked = entrybuf-&gt;cfe_ctl_q.q_start;
+		<span class="enscript-keyword">if</span> (entrybuf-&gt;cfe_peek_offset &lt; entrybuf-&gt;cfe_pass_offset)
+			entrybuf-&gt;cfe_peek_offset = entrybuf-&gt;cfe_pass_offset;
+
+		entrybuf-&gt;cfe_ctl_q.q_end += datalen;
+
+		entrybuf-&gt;cfe_pending_q.q_start += datalen;
+		entrybuf-&gt;cfe_pending_q.q_end += datalen;
+	}
+	CFIL_INFO_VERIFY(so-&gt;so_cfil);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_data_common</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> outgoing, <span class="enscript-type">struct</span> sockaddr *to,
+		<span class="enscript-type">struct</span> mbuf *data, <span class="enscript-type">struct</span> mbuf *control, uint32_t flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">to</span>, <span class="enscript-variable-name">control</span>, <span class="enscript-variable-name">flags</span>)
+	errno_t error = 0;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> datalen;
+	<span class="enscript-type">int</span> mbcnt;
+	<span class="enscript-type">int</span> kcunit;
+	<span class="enscript-type">struct</span> cfi_buf *cfi_buf;
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil == NULL) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;so %llx cfil detached&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		error = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_DROP) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;so %llx drop set&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		error = EPIPE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	datalen = cfil_data_length(data, &amp;mbcnt);
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx %s m %llx len %u flags 0x%x nextpkt %llx&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so),
+		outgoing ? <span class="enscript-string">&quot;out&quot;</span> : <span class="enscript-string">&quot;in&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(data), datalen, data-&gt;m_flags,
+		(uint64_t)VM_KERNEL_ADDRPERM(data-&gt;m_nextpkt));
+
+	<span class="enscript-keyword">if</span> (outgoing)
+		cfi_buf = &amp;so-&gt;so_cfil-&gt;cfi_snd;
+	<span class="enscript-keyword">else</span>
+		cfi_buf = &amp;so-&gt;so_cfil-&gt;cfi_rcv;
+
+	cfi_buf-&gt;cfi_pending_last += datalen;
+	cfi_buf-&gt;cfi_pending_mbcnt += mbcnt;
+	cfil_info_buf_verify(cfi_buf);
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx cfi_pending_last %llu cfi_pass_offset %llu&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so),
+		cfi_buf-&gt;cfi_pending_last,
+		cfi_buf-&gt;cfi_pass_offset);
+
+	<span class="enscript-comment">/* Fast path when below pass offset */</span>
+	<span class="enscript-keyword">if</span> (cfi_buf-&gt;cfi_pending_last &lt;= cfi_buf-&gt;cfi_pass_offset) {
+		cfil_update_entry_offsets(so, outgoing, datalen);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">for</span> (kcunit = 1; kcunit &lt;= MAX_CONTENT_FILTER; kcunit++) {
+			error = cfil_data_filter(so, kcunit, outgoing, data,
+				datalen);
+			<span class="enscript-comment">/* 0 means passed so continue with next filter */</span>
+			<span class="enscript-keyword">if</span> (error != 0)
+				<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-comment">/* Move cursor if no filter claimed the data */</span>
+	<span class="enscript-keyword">if</span> (error == 0) {
+		cfi_buf-&gt;cfi_pending_first += datalen;
+		cfi_buf-&gt;cfi_pending_mbcnt -= mbcnt;
+		cfil_info_buf_verify(cfi_buf);
+	}
+<span class="enscript-reference">done</span>:
+	CFIL_INFO_VERIFY(so-&gt;so_cfil);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Callback from socket layer sosendxxx()
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_sock_data_out</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr  *to,
+		<span class="enscript-type">struct</span> mbuf *data, <span class="enscript-type">struct</span> mbuf *control, uint32_t flags)
+{
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) == 0 || so-&gt;so_cfil == NULL)
+		<span class="enscript-keyword">return</span> (0);
+
+	socket_lock_assert_owned(so);
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_DROP) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;so %llx drop set&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		<span class="enscript-keyword">return</span> (EPIPE);
+	}
+	<span class="enscript-keyword">if</span> (control != NULL) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;so %llx control&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		OSIncrementAtomic(&amp;cfil_stats.cfs_data_out_control);
+	}
+	<span class="enscript-keyword">if</span> ((flags &amp; MSG_OOB)) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;so %llx MSG_OOB&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		OSIncrementAtomic(&amp;cfil_stats.cfs_data_out_oob);
+	}
+	<span class="enscript-keyword">if</span> ((so-&gt;so_snd.sb_flags &amp; SB_LOCK) == 0)
+		panic(<span class="enscript-string">&quot;so %p SB_LOCK not set&quot;</span>, so);
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_snd.sb_cfil_thread != NULL)
+		panic(<span class="enscript-string">&quot;%s sb_cfil_thread %p not NULL&quot;</span>, __func__,
+			so-&gt;so_snd.sb_cfil_thread);
+
+	error = cfil_data_common(so, 1, to, data, control, flags);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Callback from socket layer sbappendxxx()
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_sock_data_in</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr *from,
+	<span class="enscript-type">struct</span> mbuf *data, <span class="enscript-type">struct</span> mbuf *control, uint32_t flags)
+{
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) == 0 || so-&gt;so_cfil == NULL)
+		<span class="enscript-keyword">return</span> (0);
+
+	socket_lock_assert_owned(so);
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_DROP) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;so %llx drop set&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		<span class="enscript-keyword">return</span> (EPIPE);
+	}
+	<span class="enscript-keyword">if</span> (control != NULL) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;so %llx control&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		OSIncrementAtomic(&amp;cfil_stats.cfs_data_in_control);
+	}
+	<span class="enscript-keyword">if</span> (data-&gt;m_type == MT_OOBDATA) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;so %llx MSG_OOB&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		OSIncrementAtomic(&amp;cfil_stats.cfs_data_in_oob);
+	}
+	error = cfil_data_common(so, 0, from, data, control, flags);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Callback from socket layer soshutdownxxx()
+ *
+ * We may delay the shutdown write if there's outgoing data in process.
+ *
+ * There is no point in delaying the shutdown read because the process
+ * indicated that it does not want to read anymore data.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_sock_shutdown</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> *how)
+{
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) == 0 || so-&gt;so_cfil == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	socket_lock_assert_owned(so);
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx how %d&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so), *how);
+
+	<span class="enscript-comment">/*
+	 * Check the state of the socket before the content filter
+	 */</span>
+	<span class="enscript-keyword">if</span> (*how != SHUT_WR &amp;&amp; (so-&gt;so_state &amp; SS_CANTRCVMORE) != 0) {
+		<span class="enscript-comment">/* read already shut down */</span>
+		error = ENOTCONN;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">if</span> (*how != SHUT_RD &amp;&amp; (so-&gt;so_state &amp; SS_CANTSENDMORE) != 0) {
+		<span class="enscript-comment">/* write already shut down */</span>
+		error = ENOTCONN;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_DROP) != 0) {
+		CFIL_LOG(LOG_ERR, <span class="enscript-string">&quot;so %llx drop set&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * shutdown read: SHUT_RD or SHUT_RDWR
+	 */</span>
+	<span class="enscript-keyword">if</span> (*how != SHUT_WR) {
+		<span class="enscript-keyword">if</span> (so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_SHUT_RD) {
+			error = ENOTCONN;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		so-&gt;so_cfil-&gt;cfi_flags |= CFIF_SHUT_RD;
+		cfil_sock_notify_shutdown(so, SHUT_RD);
+	}
+	<span class="enscript-comment">/*
+	 * shutdown write: SHUT_WR or SHUT_RDWR
+	 */</span>
+	<span class="enscript-keyword">if</span> (*how != SHUT_RD) {
+		<span class="enscript-keyword">if</span> (so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_SHUT_WR) {
+			error = ENOTCONN;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		so-&gt;so_cfil-&gt;cfi_flags |= CFIF_SHUT_WR;
+		cfil_sock_notify_shutdown(so, SHUT_WR);
+		<span class="enscript-comment">/*
+		 * When outgoing data is pending, we delay the shutdown at the
+		 * protocol level until the content filters give the final
+		 * verdict on the pending data.
+		 */</span>
+		<span class="enscript-keyword">if</span> (cfil_sock_data_pending(&amp;so-&gt;so_snd) != 0) {
+			<span class="enscript-comment">/*
+			 * When shutting down the read and write sides at once
+			 * we can proceed to the final shutdown of the read
+			 * side. Otherwise, we just return.
+			 */</span>
+			<span class="enscript-keyword">if</span> (*how == SHUT_WR) {
+				error = EJUSTRETURN;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (*how == SHUT_RDWR) {
+				*how = SHUT_RD;
+			}
+		}
+	}
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * This is called when the socket is closed and there is no more
+ * opportunity for filtering
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_sock_is_closed</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	errno_t error = 0;
+	<span class="enscript-type">int</span> kcunit;
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) == 0 || so-&gt;so_cfil == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx&quot;</span>, (uint64_t)VM_KERNEL_ADDRPERM(so));
+
+	socket_lock_assert_owned(so);
+
+	<span class="enscript-keyword">for</span> (kcunit = 1; kcunit &lt;= MAX_CONTENT_FILTER; kcunit++) {
+		<span class="enscript-comment">/* Let the filters know of the closing */</span>
+		error = cfil_dispatch_closed_event(so, kcunit);
+	}
+
+	<span class="enscript-comment">/* Last chance to push passed data out */</span>
+	error = cfil_acquire_sockbuf(so, 1);
+	<span class="enscript-keyword">if</span> (error == 0)
+		cfil_service_inject_queue(so, 1);
+	cfil_release_sockbuf(so, 1);
+
+	so-&gt;so_cfil-&gt;cfi_flags |= CFIF_SOCK_CLOSED;
+
+	<span class="enscript-comment">/* Pending data needs to go */</span>
+	cfil_flush_queues(so);
+
+	CFIL_INFO_VERIFY(so-&gt;so_cfil);
+}
+
+<span class="enscript-comment">/*
+ * This is called when the socket is disconnected so let the filters
+ * know about the disconnection and that no more data will come
+ *
+ * The how parameter has the same values as soshutown()
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_sock_notify_shutdown</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> how)
+{
+	errno_t error = 0;
+	<span class="enscript-type">int</span> kcunit;
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) == 0 || so-&gt;so_cfil == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx how %d&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so), how);
+
+	socket_lock_assert_owned(so);
+
+	<span class="enscript-keyword">for</span> (kcunit = 1; kcunit &lt;= MAX_CONTENT_FILTER; kcunit++) {
+		<span class="enscript-comment">/* Disconnect incoming side */</span>
+		<span class="enscript-keyword">if</span> (how != SHUT_WR)
+			error = cfil_dispatch_disconnect_event(so, kcunit, 0);
+		<span class="enscript-comment">/* Disconnect outgoing side */</span>
+		<span class="enscript-keyword">if</span> (how != SHUT_RD)
+			error = cfil_dispatch_disconnect_event(so, kcunit, 1);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cfil_filters_attached</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> cfil_entry *entry;
+	uint32_t kcunit;
+	<span class="enscript-type">int</span> attached = 0;
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) == 0 || so-&gt;so_cfil == NULL)
+		<span class="enscript-keyword">return</span> (0);
+
+	socket_lock_assert_owned(so);
+
+	<span class="enscript-keyword">for</span> (kcunit = 1; kcunit &lt;= MAX_CONTENT_FILTER; kcunit++) {
+		entry = &amp;so-&gt;so_cfil-&gt;cfi_entries[kcunit - 1];
+
+		<span class="enscript-comment">/* Are we attached to the filter? */</span>
+		<span class="enscript-keyword">if</span> (entry-&gt;cfe_filter == NULL)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> ((entry-&gt;cfe_flags &amp; CFEF_SENT_SOCK_ATTACHED) == 0)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> ((entry-&gt;cfe_flags &amp; CFEF_CFIL_DETACHED) != 0)
+			<span class="enscript-keyword">continue</span>;
+		attached = 1;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> (attached);
+}
+
+<span class="enscript-comment">/*
+ * This is called when the socket is closed and we are waiting for
+ * the filters to gives the final pass or drop
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_sock_close_wait</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	lck_mtx_t *mutex_held;
+	<span class="enscript-type">struct</span> timespec ts;
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) == 0 || so-&gt;so_cfil == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx&quot;</span>, (uint64_t)VM_KERNEL_ADDRPERM(so));
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_getlock != NULL)
+		mutex_held = (*so-&gt;so_proto-&gt;pr_getlock)(so, 0);
+	<span class="enscript-keyword">else</span>
+		mutex_held = so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+	lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">while</span> (cfil_filters_attached(so)) {
+		<span class="enscript-comment">/*
+		 * Notify the filters we are going away so they can detach
+		 */</span>
+		cfil_sock_notify_shutdown(so, SHUT_RDWR);
+
+		<span class="enscript-comment">/*
+		 * Make sure we need to wait after the filter are notified
+		 * of the disconnection
+		 */</span>
+		<span class="enscript-keyword">if</span> (cfil_filters_attached(so) == 0)
+			<span class="enscript-keyword">break</span>;
+
+		CFIL_LOG(LOG_INFO, <span class="enscript-string">&quot;so %llx waiting&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so));
+
+		ts.tv_sec = cfil_close_wait_timeout / 1000;
+		ts.tv_nsec = (cfil_close_wait_timeout % 1000) *
+			NSEC_PER_USEC * 1000;
+
+		OSIncrementAtomic(&amp;cfil_stats.cfs_close_wait);
+		so-&gt;so_cfil-&gt;cfi_flags |= CFIF_CLOSE_WAIT;
+		error = msleep((caddr_t)&amp;so-&gt;so_cfil, mutex_held,
+			PSOCK | PCATCH, <span class="enscript-string">&quot;cfil_sock_close_wait&quot;</span>, &amp;ts);
+		so-&gt;so_cfil-&gt;cfi_flags &amp;= ~CFIF_CLOSE_WAIT;
+
+		CFIL_LOG(LOG_NOTICE, <span class="enscript-string">&quot;so %llx timed out %d&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(so), (error != 0));
+
+		<span class="enscript-comment">/*
+		 * Force close in case of timeout
+		 */</span>
+		<span class="enscript-keyword">if</span> (error != 0) {
+			OSIncrementAtomic(&amp;cfil_stats.cfs_close_wait_timeout);
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+}
+
+<span class="enscript-comment">/*
+ * Returns the size of the data held by the content filter by using
+ */</span>
+int32_t
+<span class="enscript-function-name">cfil_sock_data_pending</span>(<span class="enscript-type">struct</span> sockbuf *sb)
+{
+	<span class="enscript-type">struct</span> socket *so = sb-&gt;sb_so;
+	uint64_t pending = 0;
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) != 0 &amp;&amp; so-&gt;so_cfil != NULL) {
+		<span class="enscript-type">struct</span> cfi_buf *cfi_buf;
+
+		socket_lock_assert_owned(so);
+
+		<span class="enscript-keyword">if</span> ((sb-&gt;sb_flags &amp; SB_RECV) == 0)
+			cfi_buf = &amp;so-&gt;so_cfil-&gt;cfi_snd;
+		<span class="enscript-keyword">else</span>
+			cfi_buf = &amp;so-&gt;so_cfil-&gt;cfi_rcv;
+
+		pending = cfi_buf-&gt;cfi_pending_last -
+			cfi_buf-&gt;cfi_pending_first;
+
+		<span class="enscript-comment">/*
+		 * If we are limited by the &quot;chars of mbufs used&quot; roughly
+		 * adjust so we won't overcommit
+		 */</span>
+		<span class="enscript-keyword">if</span> (pending &gt; (uint64_t)cfi_buf-&gt;cfi_pending_mbcnt)
+			pending = cfi_buf-&gt;cfi_pending_mbcnt;
+	}
+
+	VERIFY(pending &lt; INT32_MAX);
+
+	<span class="enscript-keyword">return</span> (int32_t)(pending);
+}
+
+<span class="enscript-comment">/*
+ * Return the socket buffer space used by data being held by content filters
+ * so processes won't clog the socket buffer
+ */</span>
+int32_t
+<span class="enscript-function-name">cfil_sock_data_space</span>(<span class="enscript-type">struct</span> sockbuf *sb)
+{
+	<span class="enscript-type">struct</span> socket *so = sb-&gt;sb_so;
+	uint64_t pending = 0;
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) != 0 &amp;&amp; so-&gt;so_cfil != NULL &amp;&amp;
+		so-&gt;so_snd.sb_cfil_thread != current_thread()) {
+		<span class="enscript-type">struct</span> cfi_buf *cfi_buf;
+
+		socket_lock_assert_owned(so);
+
+		<span class="enscript-keyword">if</span> ((sb-&gt;sb_flags &amp; SB_RECV) == 0)
+			cfi_buf = &amp;so-&gt;so_cfil-&gt;cfi_snd;
+		<span class="enscript-keyword">else</span>
+			cfi_buf = &amp;so-&gt;so_cfil-&gt;cfi_rcv;
+
+		pending = cfi_buf-&gt;cfi_pending_last -
+			cfi_buf-&gt;cfi_pending_first;
+
+		<span class="enscript-comment">/*
+		 * If we are limited by the &quot;chars of mbufs used&quot; roughly
+		 * adjust so we won't overcommit
+		 */</span>
+		<span class="enscript-keyword">if</span> ((uint64_t)cfi_buf-&gt;cfi_pending_mbcnt &gt; pending)
+			pending = cfi_buf-&gt;cfi_pending_mbcnt;
+	}
+
+	VERIFY(pending &lt; INT32_MAX);
+
+	<span class="enscript-keyword">return</span> (int32_t)(pending);
+}
+
+<span class="enscript-comment">/*
+ * A callback from the socket and protocol layer when data becomes
+ * available in the socket buffer to give a chance for the content filter
+ * to re-inject data that was held back
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cfil_sock_buf_update</span>(<span class="enscript-type">struct</span> sockbuf *sb)
+{
+	<span class="enscript-type">int</span> outgoing;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> socket *so = sb-&gt;sb_so;
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_flags &amp; SOF_CONTENT_FILTER) == 0 || so-&gt;so_cfil == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (!cfil_sbtrim)
+		<span class="enscript-keyword">return</span>;
+
+	socket_lock_assert_owned(so);
+
+	<span class="enscript-keyword">if</span> ((sb-&gt;sb_flags &amp; SB_RECV) == 0) {
+		<span class="enscript-keyword">if</span> ((so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_RETRY_INJECT_OUT) == 0)
+			<span class="enscript-keyword">return</span>;
+		outgoing = 1;
+		OSIncrementAtomic(&amp;cfil_stats.cfs_inject_q_out_retry);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> ((so-&gt;so_cfil-&gt;cfi_flags &amp; CFIF_RETRY_INJECT_IN) == 0)
+			<span class="enscript-keyword">return</span>;
+		outgoing = 0;
+		OSIncrementAtomic(&amp;cfil_stats.cfs_inject_q_in_retry);
+	}
+
+	CFIL_LOG(LOG_NOTICE, <span class="enscript-string">&quot;so %llx outgoing %d&quot;</span>,
+		(uint64_t)VM_KERNEL_ADDRPERM(so), outgoing);
+
+	error = cfil_acquire_sockbuf(so, outgoing);
+	<span class="enscript-keyword">if</span> (error == 0)
+		cfil_service_inject_queue(so, outgoing);
+	cfil_release_sockbuf(so, outgoing);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_cfil_filter_list</span>(<span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1, <span class="enscript-type">int</span> arg2,
+	<span class="enscript-type">struct</span> sysctl_req *req)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error = 0;
+	size_t len = 0;
+	u_int32_t i;
+
+	<span class="enscript-comment">/* Read only  */</span>
+	<span class="enscript-keyword">if</span> (req-&gt;newptr != USER_ADDR_NULL)
+		<span class="enscript-keyword">return</span> (EPERM);
+
+	cfil_rw_lock_shared(&amp;cfil_lck_rw);
+
+	<span class="enscript-keyword">for</span> (i = 0; content_filters != NULL &amp;&amp; i &lt; MAX_CONTENT_FILTER; i++) {
+		<span class="enscript-type">struct</span> cfil_filter_stat filter_stat;
+		<span class="enscript-type">struct</span> content_filter *cfc = content_filters[i];
+
+		<span class="enscript-keyword">if</span> (cfc == NULL)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-comment">/* If just asking for the size */</span>
+		<span class="enscript-keyword">if</span> (req-&gt;oldptr == USER_ADDR_NULL) {
+			len += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_filter_stat);
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		bzero(&amp;filter_stat, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_filter_stat));
+		filter_stat.cfs_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_filter_stat);
+		filter_stat.cfs_filter_id = cfc-&gt;cf_kcunit;
+		filter_stat.cfs_flags = cfc-&gt;cf_flags;
+		filter_stat.cfs_sock_count = cfc-&gt;cf_sock_count;
+		filter_stat.cfs_necp_control_unit = cfc-&gt;cf_necp_control_unit;
+
+		error = SYSCTL_OUT(req, &amp;filter_stat,
+			<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> cfil_filter_stat));
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-comment">/* If just asking for the size */</span>
+	<span class="enscript-keyword">if</span> (req-&gt;oldptr == USER_ADDR_NULL)
+		req-&gt;oldidx = len;
+
+	cfil_rw_unlock_shared(&amp;cfil_lck_rw);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_cfil_sock_list</span>(<span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1, <span class="enscript-type">int</span> arg2,
+	<span class="enscript-type">struct</span> sysctl_req *req)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error = 0;
+	u_int32_t i;
+	<span class="enscript-type">struct</span> cfil_info *cfi;
+
+	<span class="enscript-comment">/* Read only  */</span>
+	<span class="enscript-keyword">if</span> (req-&gt;newptr != USER_ADDR_NULL)
+		<span class="enscript-keyword">return</span> (EPERM);
+
+	cfil_rw_lock_shared(&amp;cfil_lck_rw);
+
+	<span class="enscript-comment">/*
+	 * If just asking for the size,
+	 */</span>
+	<span class="enscript-keyword">if</span> (req-&gt;oldptr == USER_ADDR_NULL) {
+		req-&gt;oldidx = cfil_sock_attached_count *
+			<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_sock_stat);
+		<span class="enscript-comment">/* Bump the length in case new sockets gets attached */</span>
+		req-&gt;oldidx += req-&gt;oldidx &gt;&gt; 3;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	TAILQ_FOREACH(cfi, &amp;cfil_sock_head, cfi_link) {
+		<span class="enscript-type">struct</span> cfil_entry *entry;
+		<span class="enscript-type">struct</span> cfil_sock_stat stat;
+		<span class="enscript-type">struct</span> socket *so = cfi-&gt;cfi_so;
+
+		bzero(&amp;stat, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_sock_stat));
+		stat.cfs_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_sock_stat);
+		stat.cfs_sock_id = cfi-&gt;cfi_sock_id;
+		stat.cfs_flags = cfi-&gt;cfi_flags;
+
+		<span class="enscript-keyword">if</span> (so != NULL) {
+			stat.cfs_pid = so-&gt;last_pid;
+			memcpy(stat.cfs_uuid, so-&gt;last_uuid,
+				<span class="enscript-keyword">sizeof</span>(uuid_t));
+			<span class="enscript-keyword">if</span> (so-&gt;so_flags &amp; SOF_DELEGATED) {
+				stat.cfs_e_pid = so-&gt;e_pid;
+				memcpy(stat.cfs_e_uuid, so-&gt;e_uuid,
+					<span class="enscript-keyword">sizeof</span>(uuid_t));
+			} <span class="enscript-keyword">else</span> {
+				stat.cfs_e_pid = so-&gt;last_pid;
+				memcpy(stat.cfs_e_uuid, so-&gt;last_uuid,
+					<span class="enscript-keyword">sizeof</span>(uuid_t));
+			}
+		}
+
+		stat.cfs_snd.cbs_pending_first =
+			cfi-&gt;cfi_snd.cfi_pending_first;
+		stat.cfs_snd.cbs_pending_last =
+			cfi-&gt;cfi_snd.cfi_pending_last;
+		stat.cfs_snd.cbs_inject_q_len =
+			cfil_queue_len(&amp;cfi-&gt;cfi_snd.cfi_inject_q);
+		stat.cfs_snd.cbs_pass_offset =
+			cfi-&gt;cfi_snd.cfi_pass_offset;
+
+		stat.cfs_rcv.cbs_pending_first =
+			cfi-&gt;cfi_rcv.cfi_pending_first;
+		stat.cfs_rcv.cbs_pending_last =
+			cfi-&gt;cfi_rcv.cfi_pending_last;
+		stat.cfs_rcv.cbs_inject_q_len =
+			cfil_queue_len(&amp;cfi-&gt;cfi_rcv.cfi_inject_q);
+		stat.cfs_rcv.cbs_pass_offset =
+			cfi-&gt;cfi_rcv.cfi_pass_offset;
+
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; MAX_CONTENT_FILTER; i++) {
+			<span class="enscript-type">struct</span> cfil_entry_stat *estat;
+			<span class="enscript-type">struct</span> cfe_buf *ebuf;
+			<span class="enscript-type">struct</span> cfe_buf_stat *sbuf;
+
+			entry = &amp;cfi-&gt;cfi_entries[i];
+
+			estat = &amp;stat.ces_entries[i];
+
+			estat-&gt;ces_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cfil_entry_stat);
+			estat-&gt;ces_filter_id = entry-&gt;cfe_filter ?
+				entry-&gt;cfe_filter-&gt;cf_kcunit : 0;
+			estat-&gt;ces_flags = entry-&gt;cfe_flags;
+			estat-&gt;ces_necp_control_unit =
+				entry-&gt;cfe_necp_control_unit;
+
+			estat-&gt;ces_last_event.tv_sec =
+				(int64_t)entry-&gt;cfe_last_event.tv_sec;
+			estat-&gt;ces_last_event.tv_usec =
+				(int64_t)entry-&gt;cfe_last_event.tv_usec;
+
+			estat-&gt;ces_last_action.tv_sec =
+				(int64_t)entry-&gt;cfe_last_action.tv_sec;
+			estat-&gt;ces_last_action.tv_usec =
+				(int64_t)entry-&gt;cfe_last_action.tv_usec;
+
+			ebuf = &amp;entry-&gt;cfe_snd;
+			sbuf = &amp;estat-&gt;ces_snd;
+			sbuf-&gt;cbs_pending_first =
+				cfil_queue_offset_first(&amp;ebuf-&gt;cfe_pending_q);
+			sbuf-&gt;cbs_pending_last =
+				cfil_queue_offset_last(&amp;ebuf-&gt;cfe_pending_q);
+			sbuf-&gt;cbs_ctl_first =
+				cfil_queue_offset_first(&amp;ebuf-&gt;cfe_ctl_q);
+			sbuf-&gt;cbs_ctl_last =
+				cfil_queue_offset_last(&amp;ebuf-&gt;cfe_ctl_q);
+			sbuf-&gt;cbs_pass_offset =  ebuf-&gt;cfe_pass_offset;
+			sbuf-&gt;cbs_peek_offset =  ebuf-&gt;cfe_peek_offset;
+			sbuf-&gt;cbs_peeked =  ebuf-&gt;cfe_peeked;
+
+			ebuf = &amp;entry-&gt;cfe_rcv;
+			sbuf = &amp;estat-&gt;ces_rcv;
+			sbuf-&gt;cbs_pending_first =
+				cfil_queue_offset_first(&amp;ebuf-&gt;cfe_pending_q);
+			sbuf-&gt;cbs_pending_last =
+				cfil_queue_offset_last(&amp;ebuf-&gt;cfe_pending_q);
+			sbuf-&gt;cbs_ctl_first =
+				cfil_queue_offset_first(&amp;ebuf-&gt;cfe_ctl_q);
+			sbuf-&gt;cbs_ctl_last =
+				cfil_queue_offset_last(&amp;ebuf-&gt;cfe_ctl_q);
+			sbuf-&gt;cbs_pass_offset =  ebuf-&gt;cfe_pass_offset;
+			sbuf-&gt;cbs_peek_offset =  ebuf-&gt;cfe_peek_offset;
+			sbuf-&gt;cbs_peeked =  ebuf-&gt;cfe_peeked;
+		}
+		error = SYSCTL_OUT(req, &amp;stat,
+			<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> cfil_sock_stat));
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">done</span>:
+	cfil_rw_unlock_shared(&amp;cfil_lck_rw);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+</pre>
+<hr />
+</body></html>

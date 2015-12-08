@@ -1,0 +1,718 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kpc_x86.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kpc_x86.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpuid.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/proc_reg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/lapic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/buffer.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kpc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/kperf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/sample.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/context.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/action.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;chud/chud_xnu.h&gt;</span>
+
+
+
+<span class="enscript-comment">/* Fixed counter mask -- three counters, each with OS and USER */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IA32_FIXED_CTR_ENABLE_ALL_CTRS_ALL_RINGS</span> (0x333)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IA32_FIXED_CTR_ENABLE_ALL_PMI</span> (0x888)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IA32_PERFEVTSEL_PMI</span> (1ull &lt;&lt; 20)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IA32_PERFEVTSEL_EN</span> (1ull &lt;&lt; 22)
+
+<span class="enscript-comment">/* Non-serialising */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">USE_RDPMC</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">RDPMC_FIXED_COUNTER_SELECTOR</span> (1ULL&lt;&lt;30)
+
+<span class="enscript-comment">/* track the last config we enabled */</span>
+<span class="enscript-type">static</span> uint64_t kpc_running_cfg_pmc_mask = 0;
+<span class="enscript-type">static</span> uint32_t kpc_running_classes = 0;
+
+<span class="enscript-comment">/* PMC / MSR accesses */</span>
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">IA32_FIXED_CTR_CTRL</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> rdmsr64( MSR_IA32_PERF_FIXED_CTR_CTRL );
+}
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">IA32_FIXED_CTRx</span>(uint32_t ctr)
+{
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">USE_RDPMC</span>
+	<span class="enscript-keyword">return</span> rdpmc64(RDPMC_FIXED_COUNTER_SELECTOR | ctr);
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !USE_RDPMC */</span>
+	<span class="enscript-keyword">return</span> rdmsr64(MSR_IA32_PERF_FIXED_CTR0 + ctr);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !USE_RDPMC */</span>
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">FIXED_COUNTER_RELOAD</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">wrIA32_FIXED_CTRx</span>(uint32_t ctr, uint64_t value)
+{
+	<span class="enscript-keyword">return</span> wrmsr64(MSR_IA32_PERF_FIXED_CTR0 + ctr, value);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">IA32_PMCx</span>(uint32_t ctr)
+{
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">USE_RDPMC</span>
+	<span class="enscript-keyword">return</span> rdpmc64(ctr);
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !USE_RDPMC */</span>
+	<span class="enscript-keyword">return</span> rdmsr64(MSR_IA32_PERFCTR0 + ctr);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !USE_RDPMC */</span>
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">wrIA32_PMCx</span>(uint32_t ctr, uint64_t value)
+{
+	<span class="enscript-keyword">return</span> wrmsr64(MSR_IA32_PERFCTR0 + ctr, value);
+}
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">IA32_PERFEVTSELx</span>(uint32_t ctr)
+{
+	<span class="enscript-keyword">return</span> rdmsr64(MSR_IA32_EVNTSEL0 + ctr);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">wrIA32_PERFEVTSELx</span>(uint32_t ctr, uint64_t value)
+{
+	wrmsr64(MSR_IA32_EVNTSEL0 + ctr, value);
+}
+
+
+<span class="enscript-comment">/* internal functions */</span>
+
+boolean_t
+<span class="enscript-function-name">kpc_is_running_fixed</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (kpc_running_classes &amp; KPC_CLASS_FIXED_MASK) == KPC_CLASS_FIXED_MASK;
+}
+
+boolean_t
+<span class="enscript-function-name">kpc_is_running_configurable</span>(uint64_t pmc_mask)
+{
+	assert(kpc_popcount(pmc_mask) &lt;= kpc_configurable_count());
+	<span class="enscript-keyword">return</span> ((kpc_running_classes &amp; KPC_CLASS_CONFIGURABLE_MASK) == KPC_CLASS_CONFIGURABLE_MASK) &amp;&amp;
+	       ((kpc_running_cfg_pmc_mask &amp; pmc_mask) == pmc_mask);
+}
+
+uint32_t
+<span class="enscript-function-name">kpc_fixed_count</span>(<span class="enscript-type">void</span>)
+{
+	i386_cpu_info_t	*info = NULL;
+	info = cpuid_info();
+	<span class="enscript-keyword">return</span> info-&gt;cpuid_arch_perf_leaf.fixed_number;
+}
+
+uint32_t
+<span class="enscript-function-name">kpc_configurable_count</span>(<span class="enscript-type">void</span>)
+{
+	i386_cpu_info_t	*info = NULL;
+	info = cpuid_info();
+	<span class="enscript-keyword">return</span> info-&gt;cpuid_arch_perf_leaf.number;
+}
+
+uint32_t
+<span class="enscript-function-name">kpc_fixed_config_count</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> KPC_X86_64_FIXED_CONFIGS;
+}
+
+uint32_t
+<span class="enscript-function-name">kpc_configurable_config_count</span>(uint64_t pmc_mask)
+{
+	assert(kpc_popcount(pmc_mask) &lt;= kpc_configurable_count());
+	<span class="enscript-keyword">return</span> kpc_popcount(pmc_mask);
+}
+
+uint32_t
+<span class="enscript-function-name">kpc_rawpmu_config_count</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">// RAW PMU access not implemented.
+</span>	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kpc_get_rawpmu_config</span>(__unused kpc_config_t *configv)
+{
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> uint8_t
+<span class="enscript-function-name">kpc_fixed_width</span>(<span class="enscript-type">void</span>)
+{
+	i386_cpu_info_t	*info = NULL;
+ 
+	info = cpuid_info();
+
+	<span class="enscript-keyword">return</span> info-&gt;cpuid_arch_perf_leaf.fixed_width;
+}
+
+<span class="enscript-type">static</span> uint8_t
+<span class="enscript-function-name">kpc_configurable_width</span>(<span class="enscript-type">void</span>)
+{
+	i386_cpu_info_t	*info = NULL;
+
+	info = cpuid_info();
+
+	<span class="enscript-keyword">return</span> info-&gt;cpuid_arch_perf_leaf.width;
+}
+
+uint64_t
+<span class="enscript-function-name">kpc_fixed_max</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (1ULL &lt;&lt; kpc_fixed_width()) - 1;
+}
+
+uint64_t
+<span class="enscript-function-name">kpc_configurable_max</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (1ULL &lt;&lt; kpc_configurable_width()) - 1;
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">FIXED_COUNTER_SHADOW</span>
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">kpc_reload_fixed</span>(<span class="enscript-type">int</span> ctr)
+{
+	uint64_t old = IA32_FIXED_CTRx(ctr);
+	wrIA32_FIXED_CTRx(ctr, FIXED_RELOAD(ctr));
+	<span class="enscript-keyword">return</span> old;
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">kpc_reload_configurable</span>(<span class="enscript-type">int</span> ctr)
+{
+	uint64_t cfg = IA32_PERFEVTSELx(ctr);
+
+	<span class="enscript-comment">/* counters must be disabled before they can be written to */</span>
+	uint64_t old = IA32_PMCx(ctr);
+	wrIA32_PERFEVTSELx(ctr, cfg &amp; ~IA32_PERFEVTSEL_EN);
+	wrIA32_PMCx(ctr, CONFIGURABLE_RELOAD(ctr));
+	wrIA32_PERFEVTSELx(ctr, cfg);
+	<span class="enscript-keyword">return</span> old;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">kpc_pmi_handler</span>(x86_saved_state_t *state);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">set_running_fixed</span>(boolean_t on)
+{
+	uint64_t global = 0, mask = 0, fixed_ctrl = 0;
+	<span class="enscript-type">int</span> i;
+	boolean_t enabled;
+
+	<span class="enscript-keyword">if</span>( on )
+		<span class="enscript-comment">/* these are per-thread in SMT */</span>
+		fixed_ctrl = IA32_FIXED_CTR_ENABLE_ALL_CTRS_ALL_RINGS | IA32_FIXED_CTR_ENABLE_ALL_PMI;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-comment">/* don't allow disabling fixed counters */</span>
+		<span class="enscript-keyword">return</span>;
+
+	wrmsr64( MSR_IA32_PERF_FIXED_CTR_CTRL, fixed_ctrl );
+
+	enabled = ml_set_interrupts_enabled(FALSE);
+
+	<span class="enscript-comment">/* rmw the global control */</span>
+	global = rdmsr64(MSR_IA32_PERF_GLOBAL_CTRL);
+	<span class="enscript-keyword">for</span>( i = 0; i &lt; (<span class="enscript-type">int</span>) kpc_fixed_count(); i++ )
+		mask |= (1ULL&lt;&lt;(32+i));
+
+	<span class="enscript-keyword">if</span>( on )
+		global |= mask;
+	<span class="enscript-keyword">else</span>
+		global &amp;= ~mask;
+
+	wrmsr64(MSR_IA32_PERF_GLOBAL_CTRL, global);
+
+	ml_set_interrupts_enabled(enabled);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">set_running_configurable</span>(uint64_t target_mask, uint64_t state_mask)
+{
+	uint32_t cfg_count = kpc_configurable_count();
+	uint64_t global = 0ULL, cfg = 0ULL, save = 0ULL;
+	boolean_t enabled;
+
+	enabled = ml_set_interrupts_enabled(FALSE);
+
+	<span class="enscript-comment">/* rmw the global control */</span>
+	global = rdmsr64(MSR_IA32_PERF_GLOBAL_CTRL);
+
+	<span class="enscript-comment">/* need to save and restore counter since it resets when reconfigured */</span>
+	<span class="enscript-keyword">for</span> (uint32_t i = 0; i &lt; cfg_count; ++i) {
+		cfg = IA32_PERFEVTSELx(i);
+		save = IA32_PMCx(i);
+		wrIA32_PERFEVTSELx(i, cfg | IA32_PERFEVTSEL_PMI | IA32_PERFEVTSEL_EN);
+		wrIA32_PMCx(i, save);
+	}
+
+	<span class="enscript-comment">/* update the global control value */</span>
+	global &amp;= ~target_mask;	<span class="enscript-comment">/* clear the targeted PMCs bits */</span>
+	global |= state_mask;	<span class="enscript-comment">/* update the targeted PMCs bits with their new states */</span>
+	wrmsr64(MSR_IA32_PERF_GLOBAL_CTRL, global);
+
+	ml_set_interrupts_enabled(enabled);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kpc_set_running_mp_call</span>( <span class="enscript-type">void</span> *vstate )
+{
+	<span class="enscript-type">struct</span> kpc_running_remote *mp_config = (<span class="enscript-type">struct</span> kpc_running_remote*) vstate;
+	assert(mp_config);
+
+	<span class="enscript-keyword">if</span> (kpc_controls_fixed_counters())
+		set_running_fixed(mp_config-&gt;classes &amp; KPC_CLASS_FIXED_MASK);
+
+	set_running_configurable(mp_config-&gt;cfg_target_mask,
+				 mp_config-&gt;cfg_state_mask);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kpc_get_fixed_config</span>(kpc_config_t *configv)
+{
+	configv[0] = IA32_FIXED_CTR_CTRL();
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kpc_set_fixed_config</span>(kpc_config_t *configv)
+{
+	(<span class="enscript-type">void</span>) configv;
+
+	<span class="enscript-comment">/* NYI */</span>
+	<span class="enscript-keyword">return</span> -1;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kpc_get_fixed_counters</span>(uint64_t *counterv)
+{
+	<span class="enscript-type">int</span> i, n = kpc_fixed_count();
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">FIXED_COUNTER_SHADOW</span>
+	uint64_t status;
+
+	<span class="enscript-comment">/* snap the counters */</span>
+	<span class="enscript-keyword">for</span>( i = 0; i &lt; n; i++ ) {
+		counterv[i] = FIXED_SHADOW(ctr) +
+			(IA32_FIXED_CTRx(i) - FIXED_RELOAD(ctr));
+	}
+
+	<span class="enscript-comment">/* Grab the overflow bits */</span>
+	status = rdmsr64(MSR_IA32_PERF_GLOBAL_STATUS);
+
+	<span class="enscript-comment">/* If the overflow bit is set for a counter, our previous read may or may not have been
+	 * before the counter overflowed. Re-read any counter with it's overflow bit set so
+	 * we know for sure that it has overflowed. The reason this matters is that the math
+	 * is different for a counter that has overflowed. */</span>
+	<span class="enscript-keyword">for</span>( i = 0; i &lt; n; i++ ) {
+		<span class="enscript-keyword">if</span> ((1ull &lt;&lt; (i + 32)) &amp; status)
+			counterv[i] = FIXED_SHADOW(ctr) +
+				(kpc_fixed_max() - FIXED_RELOAD(ctr) + 1 <span class="enscript-comment">/* Wrap */</span>) + IA32_FIXED_CTRx(i);
+	}
+#<span class="enscript-reference">else</span>
+	<span class="enscript-keyword">for</span>( i = 0; i &lt; n; i++ )
+		counterv[i] = IA32_FIXED_CTRx(i);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kpc_get_configurable_config</span>(kpc_config_t *configv, uint64_t pmc_mask)
+{
+	uint32_t cfg_count = kpc_configurable_count();
+
+	assert(configv);
+
+	<span class="enscript-keyword">for</span> (uint32_t i = 0; i &lt; cfg_count; ++i)
+		<span class="enscript-keyword">if</span> ((1ULL &lt;&lt; i) &amp; pmc_mask)
+			*configv++  = IA32_PERFEVTSELx(i);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kpc_set_configurable_config</span>(kpc_config_t *configv, uint64_t pmc_mask)
+{
+	uint32_t cfg_count = kpc_configurable_count();
+	uint64_t save;
+
+	<span class="enscript-keyword">for</span> (uint32_t i = 0; i &lt; cfg_count; i++ ) {
+		<span class="enscript-keyword">if</span> (((1ULL &lt;&lt; i) &amp; pmc_mask) == 0)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-comment">/* need to save and restore counter since it resets when reconfigured */</span>
+		save = IA32_PMCx(i);
+
+		<span class="enscript-comment">/*
+		 * Some bits are not safe to set from user space.
+		 * Allow these bits to be set:
+		 *
+		 *   0-7    Event select
+		 *   8-15   UMASK
+		 *   16     USR
+		 *   17     OS
+		 *   18     E
+		 *   22     EN
+		 *   23     INV
+		 *   24-31  CMASK
+		 *
+		 * Excluding:
+		 *
+		 *   19     PC
+		 *   20     INT
+		 *   21     AnyThread
+		 *   32     IN_TX
+		 *   33     IN_TXCP
+		 *   34-63  Reserved
+		 */</span>
+		wrIA32_PERFEVTSELx(i, *configv &amp; 0xffc7ffffull);
+		wrIA32_PMCx(i, save);
+
+		<span class="enscript-comment">/* next configuration word */</span>
+		configv++;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kpc_get_configurable_counters</span>(uint64_t *counterv, uint64_t pmc_mask)
+{
+	uint32_t cfg_count = kpc_configurable_count();
+	uint64_t status, *it_counterv = counterv;
+
+	<span class="enscript-comment">/* snap the counters */</span>
+	<span class="enscript-keyword">for</span> (uint32_t i = 0; i &lt; cfg_count; ++i) {
+		<span class="enscript-keyword">if</span> ((1ULL &lt;&lt; i) &amp; pmc_mask) {
+			*it_counterv++ = CONFIGURABLE_SHADOW(i) +
+			                 (IA32_PMCx(i) - CONFIGURABLE_RELOAD(i));
+		}
+	}
+
+	<span class="enscript-comment">/* Grab the overflow bits */</span>
+	status = rdmsr64(MSR_IA32_PERF_GLOBAL_STATUS);
+
+	<span class="enscript-comment">/* reset the iterator */</span>
+	it_counterv = counterv;
+
+	<span class="enscript-comment">/*
+	 * If the overflow bit is set for a counter, our previous read may or may not have been
+	 * before the counter overflowed. Re-read any counter with it's overflow bit set so
+	 * we know for sure that it has overflowed. The reason this matters is that the math
+	 * is different for a counter that has overflowed.
+	 */</span>
+	<span class="enscript-keyword">for</span> (uint32_t i = 0; i &lt; cfg_count; ++i) {
+		<span class="enscript-keyword">if</span> (((1ULL &lt;&lt; i) &amp; pmc_mask) &amp;&amp;
+		    ((1ULL &lt;&lt; i) &amp; status))
+		{
+			*it_counterv++ = CONFIGURABLE_SHADOW(i) +
+			                 (kpc_configurable_max() - CONFIGURABLE_RELOAD(i)) + IA32_PMCx(i);
+		}
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kpc_get_curcpu_counters_mp_call</span>(<span class="enscript-type">void</span> *args)
+{
+	<span class="enscript-type">struct</span> kpc_get_counters_remote *handler = args;
+	<span class="enscript-type">int</span> offset=0, r=0;
+
+	assert(handler);
+	assert(handler-&gt;buf);
+
+	offset = cpu_number() * handler-&gt;buf_stride;
+	r = kpc_get_curcpu_counters(handler-&gt;classes, NULL, &amp;handler-&gt;buf[offset]);
+
+	<span class="enscript-comment">/* number of counters added by this CPU, needs to be atomic  */</span>
+	hw_atomic_add(&amp;(handler-&gt;nb_counters), r);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kpc_get_all_cpus_counters</span>(uint32_t classes, <span class="enscript-type">int</span> *curcpu, uint64_t *buf)
+{
+	<span class="enscript-type">int</span> enabled = 0;
+
+	<span class="enscript-type">struct</span> kpc_get_counters_remote hdl = {
+		.classes = classes, .nb_counters = 0,
+		.buf_stride = kpc_get_counter_count(classes), .buf = buf
+	};
+
+	assert(buf);
+
+	enabled = ml_set_interrupts_enabled(FALSE);
+
+	<span class="enscript-keyword">if</span> (curcpu)
+		*curcpu = current_processor()-&gt;cpu_id;
+	mp_cpus_call(CPUMASK_ALL, ASYNC, kpc_get_curcpu_counters_mp_call, &amp;hdl);
+
+	ml_set_interrupts_enabled(enabled);
+
+	<span class="enscript-keyword">return</span> hdl.nb_counters;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kpc_set_config_mp_call</span>(<span class="enscript-type">void</span> *vmp_config)
+{
+
+	<span class="enscript-type">struct</span> kpc_config_remote *mp_config = vmp_config;
+	kpc_config_t *new_config = NULL;
+	uint32_t classes = 0, count = 0;
+	boolean_t enabled;
+
+	assert(mp_config);
+	assert(mp_config-&gt;configv);
+	classes = mp_config-&gt;classes;
+	new_config = mp_config-&gt;configv;
+
+	enabled = ml_set_interrupts_enabled(FALSE);
+	
+	<span class="enscript-keyword">if</span> (classes &amp; KPC_CLASS_FIXED_MASK)
+	{
+		kpc_set_fixed_config(&amp;new_config[count]);
+		count += kpc_get_config_count(KPC_CLASS_FIXED_MASK);
+	}
+
+	<span class="enscript-keyword">if</span> (classes &amp; KPC_CLASS_CONFIGURABLE_MASK) {
+		kpc_set_configurable_config(&amp;new_config[count], mp_config-&gt;pmc_mask);
+		count += kpc_popcount(mp_config-&gt;pmc_mask);
+	}
+
+	ml_set_interrupts_enabled(enabled);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kpc_set_reload_mp_call</span>(<span class="enscript-type">void</span> *vmp_config)
+{
+	<span class="enscript-type">struct</span> kpc_config_remote *mp_config = vmp_config;
+	uint64_t *new_period = NULL, max = kpc_configurable_max();
+	uint32_t classes = 0, count = 0;
+	boolean_t enabled;
+
+	assert(mp_config);
+	assert(mp_config-&gt;configv);
+	classes = mp_config-&gt;classes;
+	new_period = mp_config-&gt;configv;
+
+	enabled = ml_set_interrupts_enabled(FALSE);
+
+	<span class="enscript-keyword">if</span> (classes &amp; KPC_CLASS_CONFIGURABLE_MASK) {
+		<span class="enscript-comment">/*
+		 * Update _all_ shadow counters, this cannot be done for only
+		 * selected PMCs. Otherwise, we would corrupt the configurable
+		 * shadow buffer since the PMCs are muxed according to the pmc
+		 * mask.
+		 */</span>
+		uint64_t all_cfg_mask = (1ULL &lt;&lt; kpc_configurable_count()) - 1;
+		kpc_get_configurable_counters(&amp;CONFIGURABLE_SHADOW(0), all_cfg_mask);
+
+		<span class="enscript-comment">/* set the new period */</span>
+		count = kpc_configurable_count();
+		<span class="enscript-keyword">for</span> (uint32_t i = 0; i &lt; count; ++i) {
+			<span class="enscript-comment">/* ignore the counter */</span>
+			<span class="enscript-keyword">if</span> (((1ULL &lt;&lt; i) &amp; mp_config-&gt;pmc_mask) == 0)
+				<span class="enscript-keyword">continue</span>;
+
+			<span class="enscript-keyword">if</span> (*new_period == 0)
+				*new_period = kpc_configurable_max();
+
+			CONFIGURABLE_RELOAD(i) = max - *new_period;
+
+			<span class="enscript-comment">/* reload the counter */</span>
+			kpc_reload_configurable(i);
+
+			<span class="enscript-comment">/* clear overflow bit just in case */</span>
+			wrmsr64(MSR_IA32_PERF_GLOBAL_OVF_CTRL, 1ull &lt;&lt; i);
+
+			<span class="enscript-comment">/* next period value */</span>
+			new_period++;
+		}
+	}
+
+	ml_set_interrupts_enabled(enabled);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kpc_set_period_arch</span>( <span class="enscript-type">struct</span> kpc_config_remote *mp_config )
+{
+	mp_cpus_call( CPUMASK_ALL, ASYNC, kpc_set_reload_mp_call, mp_config );
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-comment">/* interface functions */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kpc_arch_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">/* No-op */</span>
+}
+
+uint32_t
+<span class="enscript-function-name">kpc_get_classes</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> KPC_CLASS_FIXED_MASK | KPC_CLASS_CONFIGURABLE_MASK;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kpc_set_running_arch</span>(<span class="enscript-type">struct</span> kpc_running_remote *mp_config)
+{
+	assert(mp_config);
+
+	lapic_set_pmi_func((i386_intr_func_t)kpc_pmi_handler);
+
+	<span class="enscript-comment">/* dispatch to all CPUs */</span>
+	mp_cpus_call(CPUMASK_ALL, ASYNC, kpc_set_running_mp_call, mp_config);
+
+	kpc_running_cfg_pmc_mask = mp_config-&gt;cfg_state_mask;
+	kpc_running_classes = mp_config-&gt;classes;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kpc_set_config_arch</span>(<span class="enscript-type">struct</span> kpc_config_remote *mp_config)
+{
+	mp_cpus_call( CPUMASK_ALL, ASYNC, kpc_set_config_mp_call, mp_config );
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* PMI stuff */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">kpc_pmi_handler</span>(__unused x86_saved_state_t *state)
+{
+	uint64_t status, extra;
+	uint32_t ctr;
+	<span class="enscript-type">int</span> enabled;
+
+	enabled = ml_set_interrupts_enabled(FALSE);
+
+	status = rdmsr64(MSR_IA32_PERF_GLOBAL_STATUS);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">FIXED_COUNTER_SHADOW</span>
+	<span class="enscript-keyword">for</span> (ctr = 0; ctr &lt; kpc_fixed_count(); ctr++) {
+		<span class="enscript-keyword">if</span> ((1ULL &lt;&lt; (ctr + 32)) &amp; status) {
+			extra = kpc_reload_fixed(ctr);
+
+			FIXED_SHADOW(ctr)
+				+= (kpc_fixed_max() - FIXED_RELOAD(ctr) + 1 <span class="enscript-comment">/* Wrap */</span>) + extra;
+
+			BUF_INFO(PERF_KPC_FCOUNTER, ctr, FIXED_SHADOW(ctr), extra, FIXED_ACTIONID(ctr));
+
+			<span class="enscript-keyword">if</span> (FIXED_ACTIONID(ctr))
+				kpc_sample_kperf(FIXED_ACTIONID(ctr));
+		}
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">for</span> (ctr = 0; ctr &lt; kpc_configurable_count(); ctr++) {
+		<span class="enscript-keyword">if</span> ((1ULL &lt;&lt; ctr) &amp; status) {
+			extra = kpc_reload_configurable(ctr);
+
+			CONFIGURABLE_SHADOW(ctr)
+				+= kpc_configurable_max() - CONFIGURABLE_RELOAD(ctr) + extra;
+
+			<span class="enscript-comment">/* kperf can grab the PMCs when it samples so we need to make sure the overflow
+			 * bits are in the correct state before the call to kperf_sample */</span>
+			wrmsr64(MSR_IA32_PERF_GLOBAL_OVF_CTRL, 1ull &lt;&lt; ctr);
+
+			BUF_INFO(PERF_KPC_COUNTER, ctr, CONFIGURABLE_SHADOW(ctr), extra, CONFIGURABLE_ACTIONID(ctr));
+			
+			<span class="enscript-keyword">if</span> (CONFIGURABLE_ACTIONID(ctr))
+				kpc_sample_kperf(CONFIGURABLE_ACTIONID(ctr));
+		}
+	}
+
+	ml_set_interrupts_enabled(enabled);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kpc_set_sw_inc</span>( uint32_t mask __unused )
+{
+	<span class="enscript-keyword">return</span> ENOTSUP;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kpc_get_pmu_version</span>(<span class="enscript-type">void</span>)
+{
+	i386_cpu_info_t *info = cpuid_info();
+
+	uint8_t version_id = info-&gt;cpuid_arch_perf_leaf.version;
+
+	<span class="enscript-keyword">if</span> (version_id == 3) {
+		<span class="enscript-keyword">return</span> KPC_PMU_INTEL_V3;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (version_id == 2) {
+		<span class="enscript-keyword">return</span> KPC_PMU_INTEL_V2;
+	}
+
+	<span class="enscript-keyword">return</span> KPC_PMU_ERROR;
+}
+
+</pre>
+<hr />
+</body></html>

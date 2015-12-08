@@ -1,0 +1,647 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>iokit_rpc.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">iokit_rpc.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;zone_debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mig_errors.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/notify.h&gt;</span>
+<span class="enscript-comment">//#include &lt;mach/mach_host_server.h&gt;
+</span>#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machparam.h&gt;</span>		<span class="enscript-comment">/* spl definitions */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_space.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/counters.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;device/device_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;device/device_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;device/device_server.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machparam.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmap.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOTypes.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">EXTERN</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MIGEXTERN</span>
+
+<span class="enscript-comment">/*
+ * Functions in iokit:IOUserClient.cpp
+ */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">iokit_add_reference</span>( io_object_t obj );
+
+<span class="enscript-type">extern</span> ipc_port_t <span class="enscript-function-name">iokit_port_for_object</span>( io_object_t obj,
+			ipc_kobject_type_t type );
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">iokit_client_died</span>( io_object_t obj,
+                        ipc_port_t port, ipc_kobject_type_t type, mach_port_mscount_t * mscount );
+
+<span class="enscript-type">extern</span> kern_return_t
+<span class="enscript-function-name">iokit_client_memory_for_type</span>(
+	io_object_t	connect,
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	type,
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *	flags,
+	vm_address_t *	address,
+	vm_size_t    *	size );
+
+
+<span class="enscript-type">extern</span> ppnum_t <span class="enscript-function-name">IOGetLastPageNumber</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/*
+ * Functions imported by iokit:IOUserClient.cpp
+ */</span>
+
+<span class="enscript-type">extern</span> ipc_port_t <span class="enscript-function-name">iokit_alloc_object_port</span>( io_object_t obj,
+			ipc_kobject_type_t type );
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">iokit_destroy_object_port</span>( ipc_port_t port );
+
+<span class="enscript-type">extern</span> mach_port_name_t <span class="enscript-function-name">iokit_make_send_right</span>( task_t task,
+				io_object_t obj, ipc_kobject_type_t type );
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">iokit_mod_send_right</span>( task_t task, mach_port_name_t name, mach_port_delta_t delta );
+
+<span class="enscript-type">extern</span> io_object_t <span class="enscript-function-name">iokit_lookup_connect_ref</span>(io_object_t clientRef, ipc_space_t task);
+
+<span class="enscript-type">extern</span> io_object_t <span class="enscript-function-name">iokit_lookup_connect_ref_current_task</span>(io_object_t clientRef);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">iokit_retain_port</span>( ipc_port_t port );
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">iokit_release_port</span>( ipc_port_t port );
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">iokit_release_port_send</span>( ipc_port_t port );
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">iokit_lock_port</span>(ipc_port_t port);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">iokit_unlock_port</span>(ipc_port_t port);
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">iokit_switch_object_port</span>( ipc_port_t port, io_object_t obj, ipc_kobject_type_t type );
+
+<span class="enscript-comment">/*
+ * Functions imported by iokit:IOMemoryDescriptor.cpp
+ */</span>
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">IOMapPages</span>(vm_map_t map, mach_vm_address_t va, mach_vm_address_t pa,
+                                 mach_vm_size_t length, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> mapFlags);
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">IOUnmapPages</span>(vm_map_t map, mach_vm_address_t va, mach_vm_size_t length);
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">IOProtectCacheMode</span>(vm_map_t map, mach_vm_address_t va,
+					mach_vm_size_t length, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> options);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> <span class="enscript-function-name">IODefaultCacheBits</span>(addr64_t pa);
+
+<span class="enscript-comment">/*
+ * Lookup a device by its port.
+ * Doesn't consume the naked send right; produces a device reference.
+ */</span>
+MIGEXTERN io_object_t
+<span class="enscript-function-name">iokit_lookup_object_port</span>(
+	ipc_port_t	port)
+{
+	<span class="enscript-type">register</span> io_object_t	obj;
+
+	<span class="enscript-keyword">if</span> (!IP_VALID(port))
+	    <span class="enscript-keyword">return</span> (NULL);
+
+	iokit_lock_port(port);
+	<span class="enscript-keyword">if</span> (ip_active(port) &amp;&amp; (ip_kotype(port) == IKOT_IOKIT_OBJECT)) {
+	    obj = (io_object_t) port-&gt;ip_kobject;
+	    iokit_add_reference( obj );
+	}
+	<span class="enscript-keyword">else</span>
+	    obj = NULL;
+
+	iokit_unlock_port(port);
+
+	<span class="enscript-keyword">return</span>( obj );
+}
+
+MIGEXTERN io_object_t
+<span class="enscript-function-name">iokit_lookup_connect_port</span>(
+	ipc_port_t	port)
+{
+	<span class="enscript-type">register</span> io_object_t	obj;
+
+	<span class="enscript-keyword">if</span> (!IP_VALID(port))
+	    <span class="enscript-keyword">return</span> (NULL);
+
+	iokit_lock_port(port);
+	<span class="enscript-keyword">if</span> (ip_active(port) &amp;&amp; (ip_kotype(port) == IKOT_IOKIT_CONNECT)) {
+	    obj = (io_object_t) port-&gt;ip_kobject;
+	    iokit_add_reference( obj );
+	}
+	<span class="enscript-keyword">else</span>
+	    obj = NULL;
+
+	iokit_unlock_port(port);
+
+	<span class="enscript-keyword">return</span>( obj );
+}
+
+EXTERN io_object_t
+<span class="enscript-function-name">iokit_lookup_connect_ref</span>(io_object_t connectRef, ipc_space_t space)
+{
+	io_object_t obj = NULL;
+
+	<span class="enscript-keyword">if</span> (connectRef &amp;&amp; MACH_PORT_VALID(CAST_MACH_PORT_TO_NAME(connectRef))) {
+		ipc_port_t port;
+		kern_return_t kr;
+
+		kr = ipc_object_translate(space, CAST_MACH_PORT_TO_NAME(connectRef), MACH_PORT_RIGHT_SEND, (ipc_object_t *)&amp;port);
+
+		<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS) {
+			assert(IP_VALID(port));
+
+			ip_reference(port);
+			ip_unlock(port);
+
+			iokit_lock_port(port);
+			<span class="enscript-keyword">if</span> (ip_active(port) &amp;&amp; (ip_kotype(port) == IKOT_IOKIT_CONNECT)) {
+				obj = (io_object_t) port-&gt;ip_kobject;
+				iokit_add_reference(obj);
+			}
+			iokit_unlock_port(port);
+
+			ip_release(port);
+		}
+	}
+
+	<span class="enscript-keyword">return</span> obj;
+}
+
+EXTERN io_object_t
+<span class="enscript-function-name">iokit_lookup_connect_ref_current_task</span>(io_object_t connectRef)
+{
+	<span class="enscript-keyword">return</span> iokit_lookup_connect_ref(connectRef, current_space());
+}
+
+EXTERN <span class="enscript-type">void</span>
+<span class="enscript-function-name">iokit_retain_port</span>( ipc_port_t port )
+{
+    ipc_port_reference( port );
+}
+
+EXTERN <span class="enscript-type">void</span>
+<span class="enscript-function-name">iokit_release_port</span>( ipc_port_t port )
+{
+    ipc_port_release( port );
+}
+
+EXTERN <span class="enscript-type">void</span>
+<span class="enscript-function-name">iokit_release_port_send</span>( ipc_port_t port )
+{
+    ipc_port_release_send( port );
+}
+
+<span class="enscript-type">extern</span> lck_mtx_t iokit_obj_to_port_binding_lock;
+
+EXTERN <span class="enscript-type">void</span>
+<span class="enscript-function-name">iokit_lock_port</span>( __unused ipc_port_t port )
+{
+    lck_mtx_lock(&amp;iokit_obj_to_port_binding_lock);
+}
+
+EXTERN <span class="enscript-type">void</span>
+<span class="enscript-function-name">iokit_unlock_port</span>( __unused ipc_port_t port )
+{
+    lck_mtx_unlock(&amp;iokit_obj_to_port_binding_lock);
+}
+
+<span class="enscript-comment">/*
+ * Get the port for a device.
+ * Consumes a device reference; produces a naked send right.
+ */</span>
+MIGEXTERN ipc_port_t
+<span class="enscript-function-name">iokit_make_object_port</span>(
+	io_object_t	obj )
+{
+    <span class="enscript-type">register</span> ipc_port_t	port;
+    <span class="enscript-type">register</span> ipc_port_t	sendPort;
+
+    <span class="enscript-keyword">if</span>( obj == NULL)
+        <span class="enscript-keyword">return</span> IP_NULL;
+
+    port = iokit_port_for_object( obj, IKOT_IOKIT_OBJECT );
+    <span class="enscript-keyword">if</span>( port) {
+	sendPort = ipc_port_make_send( port);
+	iokit_release_port( port );
+    } <span class="enscript-keyword">else</span>
+	sendPort = IP_NULL;
+
+    iokit_remove_reference( obj );
+
+    <span class="enscript-keyword">return</span>( sendPort);
+}
+
+MIGEXTERN ipc_port_t
+<span class="enscript-function-name">iokit_make_connect_port</span>(
+	io_object_t	obj )
+{
+    <span class="enscript-type">register</span> ipc_port_t	port;
+    <span class="enscript-type">register</span> ipc_port_t	sendPort;
+
+    <span class="enscript-keyword">if</span>( obj == NULL)
+        <span class="enscript-keyword">return</span> IP_NULL;
+
+    port = iokit_port_for_object( obj, IKOT_IOKIT_CONNECT );
+    <span class="enscript-keyword">if</span>( port) {
+	sendPort = ipc_port_make_send( port);
+	iokit_release_port( port );
+    } <span class="enscript-keyword">else</span>
+	sendPort = IP_NULL;
+
+    iokit_remove_reference( obj );
+
+    <span class="enscript-keyword">return</span>( sendPort);
+}
+
+<span class="enscript-type">int</span> gIOKitPortCount;
+
+EXTERN ipc_port_t
+<span class="enscript-function-name">iokit_alloc_object_port</span>( io_object_t obj, ipc_kobject_type_t type )
+{
+    ipc_port_t		notify;
+    ipc_port_t		port;
+
+    <span class="enscript-keyword">do</span> {
+
+	<span class="enscript-comment">/* Allocate port, keeping a reference for it. */</span>
+        port = ipc_port_alloc_kernel();
+        <span class="enscript-keyword">if</span>( port == IP_NULL)
+            <span class="enscript-keyword">continue</span>;
+
+        <span class="enscript-comment">/* set kobject &amp; type */</span>
+<span class="enscript-comment">//	iokit_add_reference( obj );
+</span>	ipc_kobject_set( port, (ipc_kobject_t) obj, type);
+
+        <span class="enscript-comment">/* Request no-senders notifications on the port. */</span>
+        ip_lock( port);
+        notify = ipc_port_make_sonce_locked( port);
+        ipc_port_nsrequest( port, 1, notify, &amp;notify);
+	<span class="enscript-comment">/* port unlocked */</span>
+        assert( notify == IP_NULL);
+	gIOKitPortCount++;
+
+    } <span class="enscript-keyword">while</span>( FALSE);
+
+    <span class="enscript-keyword">return</span>( port );
+}
+
+
+EXTERN kern_return_t
+<span class="enscript-function-name">iokit_destroy_object_port</span>( ipc_port_t port )
+{
+
+    iokit_lock_port(port);
+    ipc_kobject_set( port, IKO_NULL, IKOT_NONE);
+
+<span class="enscript-comment">//    iokit_remove_reference( obj );
+</span>    iokit_unlock_port(port);
+    ipc_port_dealloc_kernel( port);
+    gIOKitPortCount--;
+
+    <span class="enscript-keyword">return</span>( KERN_SUCCESS);
+}
+
+EXTERN kern_return_t
+<span class="enscript-function-name">iokit_switch_object_port</span>( ipc_port_t port, io_object_t obj, ipc_kobject_type_t type )
+{
+    iokit_lock_port(port);
+    ipc_kobject_set( port, (ipc_kobject_t) obj, type);
+    iokit_unlock_port(port);
+
+    <span class="enscript-keyword">return</span>( KERN_SUCCESS);
+}
+
+EXTERN mach_port_name_t
+<span class="enscript-function-name">iokit_make_send_right</span>( task_t task, io_object_t obj, ipc_kobject_type_t type )
+{
+    ipc_port_t		port;
+    ipc_port_t		sendPort;
+    mach_port_name_t	name = 0;
+
+    <span class="enscript-keyword">if</span>( obj == NULL)
+        <span class="enscript-keyword">return</span> MACH_PORT_NULL;
+
+    port = iokit_port_for_object( obj, type );
+    <span class="enscript-keyword">if</span>( port) {
+	sendPort = ipc_port_make_send( port);
+	iokit_release_port( port );
+    } <span class="enscript-keyword">else</span>
+	sendPort = IP_NULL;
+
+    <span class="enscript-keyword">if</span> (IP_VALID( sendPort )) {
+    	kern_return_t	kr;
+    	kr = ipc_object_copyout( task-&gt;itk_space, (ipc_object_t) sendPort,
+				MACH_MSG_TYPE_PORT_SEND, TRUE, &amp;name);
+	<span class="enscript-keyword">if</span> ( kr != KERN_SUCCESS) {
+	    ipc_port_release_send( sendPort );
+	    name = MACH_PORT_NULL;
+	}
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( sendPort == IP_NULL)
+        name = MACH_PORT_NULL;
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( sendPort == IP_DEAD)
+    	name = MACH_PORT_DEAD;
+
+    iokit_remove_reference( obj );
+
+    <span class="enscript-keyword">return</span>( name );
+}
+
+EXTERN kern_return_t
+<span class="enscript-function-name">iokit_mod_send_right</span>( task_t task, mach_port_name_t name, mach_port_delta_t delta )
+{
+    <span class="enscript-keyword">return</span> (mach_port_mod_refs( task-&gt;itk_space, name, MACH_PORT_RIGHT_SEND, delta ));
+}
+
+<span class="enscript-comment">/*
+ * Handle the No-More_Senders notification generated from a device port destroy.
+ * Since there are no longer any tasks which hold a send right to this device
+ * port a NMS notification has been generated. 
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">iokit_no_senders</span>( mach_no_senders_notification_t * notification )
+{
+    ipc_port_t		port;
+    io_object_t		obj = NULL;
+    ipc_kobject_type_t	type = IKOT_NONE;
+    ipc_port_t		notify;
+
+    port = (ipc_port_t) notification-&gt;not_header.msgh_remote_port;
+
+    <span class="enscript-comment">// convert a port to io_object_t.
+</span>    <span class="enscript-keyword">if</span>( IP_VALID(port)) {
+        iokit_lock_port(port);
+        <span class="enscript-keyword">if</span>( ip_active(port)) {
+            obj = (io_object_t) port-&gt;ip_kobject;
+	    type = ip_kotype( port );
+            <span class="enscript-keyword">if</span>( (IKOT_IOKIT_OBJECT  == type)
+	     || (IKOT_IOKIT_CONNECT == type))
+                iokit_add_reference( obj );
+            <span class="enscript-keyword">else</span>
+                obj = NULL;
+	}
+        iokit_unlock_port(port);
+
+        <span class="enscript-keyword">if</span>( obj ) {
+
+	    mach_port_mscount_t mscount = notification-&gt;not_count;
+
+            <span class="enscript-keyword">if</span>( KERN_SUCCESS != iokit_client_died( obj, port, type, &amp;mscount ))
+	    {
+		<span class="enscript-comment">/* Re-request no-senders notifications on the port (if still active) */</span>
+		ip_lock(port);
+		<span class="enscript-keyword">if</span> (ip_active(port)) {
+			notify = ipc_port_make_sonce_locked(port);
+			ipc_port_nsrequest( port, mscount + 1, notify, &amp;notify);
+			<span class="enscript-comment">/* port unlocked */</span>
+			<span class="enscript-keyword">if</span> ( notify != IP_NULL)
+				ipc_port_release_sonce(notify);
+		} <span class="enscript-keyword">else</span> {
+			ip_unlock(port);
+		}
+	    }
+            iokit_remove_reference( obj );
+        }
+    }
+}
+
+
+EXTERN
+boolean_t
+<span class="enscript-function-name">iokit_notify</span>( mach_msg_header_t * msg )
+{
+    <span class="enscript-keyword">switch</span> (msg-&gt;msgh_id) {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_NOTIFY_NO_SENDERS</span>:
+            iokit_no_senders((mach_no_senders_notification_t *) msg);
+            <span class="enscript-keyword">return</span> TRUE;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_NOTIFY_PORT_DELETED</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_NOTIFY_PORT_DESTROYED</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_NOTIFY_SEND_ONCE</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_NOTIFY_DEAD_NAME</span>:
+        <span class="enscript-reference">default</span>:
+            printf(<span class="enscript-string">&quot;iokit_notify: strange notification %d\n&quot;</span>, msg-&gt;msgh_id);
+            <span class="enscript-keyword">return</span> FALSE;
+    }
+}
+
+<span class="enscript-comment">/* need to create a pmap function to generalize */</span>
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> <span class="enscript-function-name">IODefaultCacheBits</span>(addr64_t pa)
+{
+	<span class="enscript-keyword">return</span>(pmap_cache_attributes((ppnum_t)(pa &gt;&gt; PAGE_SHIFT)));
+}
+
+kern_return_t <span class="enscript-function-name">IOMapPages</span>(vm_map_t map, mach_vm_address_t va, mach_vm_address_t pa,
+			mach_vm_size_t length, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> options)
+{
+    vm_prot_t	 prot;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> flags;
+    ppnum_t	 pagenum;
+    pmap_t 	 pmap = map-&gt;pmap;
+
+    prot = (options &amp; kIOMapReadOnly)
+		? VM_PROT_READ : (VM_PROT_READ|VM_PROT_WRITE);
+
+    pagenum = (ppnum_t)atop_64(pa);
+
+    <span class="enscript-keyword">switch</span>(options &amp; kIOMapCacheMask ) {			<span class="enscript-comment">/* What cache mode do we need? */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOMapDefaultCache</span>:
+	<span class="enscript-reference">default</span>:
+	    flags = IODefaultCacheBits(pa);
+	    <span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOMapInhibitCache</span>:
+	    flags = VM_WIMG_IO;
+	    <span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOMapWriteThruCache</span>:
+	    flags = VM_WIMG_WTHRU;
+	    <span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOMapWriteCombineCache</span>:
+	    flags = VM_WIMG_WCOMB;
+	    <span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOMapCopybackCache</span>:
+	    flags = VM_WIMG_COPYBACK;
+	    <span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOMapCopybackInnerCache</span>:
+	    flags = VM_WIMG_INNERWBACK;
+	    <span class="enscript-keyword">break</span>;
+    }
+
+    pmap_set_cache_attributes(pagenum, flags);
+
+    vm_map_set_cache_attr(map, (vm_map_offset_t)va);
+
+
+    <span class="enscript-comment">// Set up a block mapped area
+</span>    pmap_map_block(pmap, va, pagenum, (uint32_t) atop_64(round_page_64(length)), prot, 0, 0);
+
+    <span class="enscript-keyword">return</span>( KERN_SUCCESS );
+}
+
+kern_return_t <span class="enscript-function-name">IOUnmapPages</span>(vm_map_t map, mach_vm_address_t va, mach_vm_size_t length)
+{
+    pmap_t	pmap = map-&gt;pmap;
+
+    pmap_remove(pmap, trunc_page_64(va), round_page_64(va + length));
+
+    <span class="enscript-keyword">return</span>( KERN_SUCCESS );
+}
+
+kern_return_t <span class="enscript-function-name">IOProtectCacheMode</span>(vm_map_t __unused map, mach_vm_address_t __unused va,
+					mach_vm_size_t __unused length, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> __unused options)
+{
+    mach_vm_size_t off;
+    vm_prot_t	   prot;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>   flags;
+    pmap_t 	   pmap = map-&gt;pmap;
+    pmap_flush_context	pmap_flush_context_storage;
+    boolean_t		delayed_pmap_flush = FALSE;
+
+    prot = (options &amp; kIOMapReadOnly)
+		? VM_PROT_READ : (VM_PROT_READ|VM_PROT_WRITE);
+
+    <span class="enscript-keyword">switch</span> (options &amp; kIOMapCacheMask)
+    {
+	<span class="enscript-comment">// what cache mode do we need?
+</span>	<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOMapDefaultCache</span>:
+	<span class="enscript-reference">default</span>:
+	    <span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOMapInhibitCache</span>:
+	    flags = VM_WIMG_IO;
+	    <span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOMapWriteThruCache</span>:
+	    flags = VM_WIMG_WTHRU;
+	    <span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOMapWriteCombineCache</span>:
+	    flags = VM_WIMG_WCOMB;
+	    <span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOMapCopybackCache</span>:
+	    flags = VM_WIMG_COPYBACK;
+	    <span class="enscript-keyword">break</span>;
+    }
+
+    pmap_flush_context_init(&amp;pmap_flush_context_storage);
+    delayed_pmap_flush = FALSE;
+
+    <span class="enscript-comment">//  enter each page's physical address in the target map
+</span>    <span class="enscript-keyword">for</span> (off = 0; off &lt; length; off += page_size)
+    {
+	ppnum_t ppnum = pmap_find_phys(pmap, va + off);
+	<span class="enscript-keyword">if</span> (ppnum) {
+		pmap_enter_options(pmap, va + off, ppnum, prot, VM_PROT_NONE, flags, TRUE, 
+				   PMAP_OPTIONS_NOFLUSH, (<span class="enscript-type">void</span> *)&amp;pmap_flush_context_storage);
+		delayed_pmap_flush = TRUE;
+	}
+    }
+    <span class="enscript-keyword">if</span> (delayed_pmap_flush == TRUE)
+	    pmap_flush(&amp;pmap_flush_context_storage);
+
+    <span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+ppnum_t <span class="enscript-function-name">IOGetLastPageNumber</span>(<span class="enscript-type">void</span>)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__i386__</span> || <span class="enscript-variable-name">__x86_64__</span>
+	ppnum_t	 lastPage, highest = 0;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> idx;
+
+	<span class="enscript-keyword">for</span> (idx = 0; idx &lt; pmap_memory_region_count; idx++)
+	{
+		lastPage = pmap_memory_regions[idx].end - 1;
+		<span class="enscript-keyword">if</span> (lastPage &gt; highest)
+			highest = lastPage;
+	}
+	<span class="enscript-keyword">return</span> (highest);
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">unknown</span> <span class="enscript-variable-name">arch</span>
+#<span class="enscript-reference">endif</span>
+}
+
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOGetTime</span>( mach_timespec_t * clock_time);
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOGetTime</span>( mach_timespec_t * clock_time)
+{
+	clock_sec_t sec;
+	clock_nsec_t nsec;
+	clock_get_system_nanotime(&amp;sec, &amp;nsec);
+	clock_time-&gt;tv_sec = (typeof(clock_time-&gt;tv_sec))sec;
+	clock_time-&gt;tv_nsec = nsec;
+}
+
+</pre>
+<hr />
+</body></html>

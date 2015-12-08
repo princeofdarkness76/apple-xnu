@@ -1,0 +1,1032 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>systrace.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">systrace.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the &quot;License&quot;).
+ * You may not use this file except in compliance with the License.
+ *
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or <a href="http://www.opensolaris.org/os/licensing.">http://www.opensolaris.org/os/licensing.</a>
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets &quot;[]&quot; replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
+ * Use is subject to license terms.
+ */</span>
+
+<span class="enscript-comment">/* #pragma ident	&quot;@(#)systrace.c	1.6	06/09/19 SMI&quot; */</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_KERNEL</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_KERNEL</span> <span class="enscript-comment">/* Solaris vs. Darwin */</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_status.h&gt;</span>
+
+<span class="enscript-comment">/* XXX All of these should really be derived from syscall_sw.h */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">defined</span> (<span class="enscript-variable-name">__x86_64__</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SYSCALL_CLASS_SHIFT</span> 24
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SYSCALL_CLASS_MASK</span>  (0xFF &lt;&lt; SYSCALL_CLASS_SHIFT)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SYSCALL_NUMBER_MASK</span> (~SYSCALL_CLASS_MASK)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">I386_SYSCALL_NUMBER_MASK</span> (0xFFFF)
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/devfs/devfs.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_impl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;systrace.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/pal_routines.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">defined</span> (<span class="enscript-variable-name">__x86_64__</span>)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SYSTRACE_ARTIFICIAL_FRAMES</span>	2
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MACHTRACE_ARTIFICIAL_FRAMES</span> 3
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">Unknown</span> <span class="enscript-variable-name">Architecture</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysent.h&gt;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">sy_callc</span> sy_call <span class="enscript-comment">/* Map Solaris slot name to Darwin's */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NSYSCALL</span> nsysent <span class="enscript-comment">/* and is less than 500 or so */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *syscallnames[];
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_glue.h&gt;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">casptr</span> dtrace_casptr
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">membar_enter</span> dtrace_membar_producer
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">LOADABLE_SYSCALL</span>(a) 0 <span class="enscript-comment">/* Not pertinent to Darwin. */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">LOADED_SYSCALL</span>(a) 1 <span class="enscript-comment">/* Not pertinent to Darwin. */</span>
+
+<span class="enscript-type">extern</span> lck_attr_t* dtrace_lck_attr;
+<span class="enscript-type">extern</span> lck_grp_t* dtrace_lck_grp;
+<span class="enscript-type">static</span> lck_mtx_t	dtrace_systrace_lock;		<span class="enscript-comment">/* probe state lock */</span>
+
+systrace_sysent_t *systrace_sysent = NULL;
+<span class="enscript-function-name">void</span> (*systrace_probe)(dtrace_id_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+
+<span class="enscript-type">static</span> uint64_t <span class="enscript-function-name">systrace_getarg</span>(<span class="enscript-type">void</span> *, dtrace_id_t, <span class="enscript-type">void</span> *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);	
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">systrace_stub</span>(dtrace_id_t id, uint64_t arg0, uint64_t arg1,
+    uint64_t arg2, uint64_t arg3, uint64_t arg4)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">id</span>,<span class="enscript-variable-name">arg0</span>,<span class="enscript-variable-name">arg1</span>,<span class="enscript-variable-name">arg2</span>,<span class="enscript-variable-name">arg3</span>,<span class="enscript-variable-name">arg4</span>)
+}
+
+int32_t
+<span class="enscript-function-name">dtrace_systrace_syscall</span>(<span class="enscript-type">struct</span> proc *pp, <span class="enscript-type">void</span> *uap, <span class="enscript-type">int</span> *rv)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">short</span>      code;	<span class="enscript-comment">/* The system call number */</span>
+
+	systrace_sysent_t *sy;
+	dtrace_id_t id;
+	int32_t rval;
+#<span class="enscript-reference">if</span> 0 <span class="enscript-comment">/* XXX */</span>
+	proc_t *p;
+#<span class="enscript-reference">endif</span>
+	syscall_arg_t *ip = (syscall_arg_t *)uap;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">defined</span> (<span class="enscript-variable-name">__x86_64__</span>)
+	{
+		pal_register_cache_state(current_thread(), VALID);
+		x86_saved_state_t   *tagged_regs = (x86_saved_state_t *)find_user_regs(current_thread());
+
+		<span class="enscript-keyword">if</span> (is_saved_state64(tagged_regs)) {
+			x86_saved_state64_t *regs = saved_state64(tagged_regs);
+			code = regs-&gt;rax &amp; SYSCALL_NUMBER_MASK;
+			<span class="enscript-comment">/*
+			 * Check for indirect system call... system call number
+			 * passed as 'arg0'
+			 */</span>
+			<span class="enscript-keyword">if</span> (code == 0) {
+				code = regs-&gt;rdi;
+			}
+		} <span class="enscript-keyword">else</span> {
+			code = saved_state32(tagged_regs)-&gt;eax &amp; I386_SYSCALL_NUMBER_MASK;
+
+			<span class="enscript-keyword">if</span> (code == 0) {
+				vm_offset_t params = (vm_offset_t) (saved_state32(tagged_regs)-&gt;uesp + <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>));
+				code = fuword(params);
+			}
+		}
+	}
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">Unknown</span> <span class="enscript-variable-name">Architecture</span>
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">// Bounds &quot;check&quot; the value of code a la unix_syscall
+</span>	sy = (code &gt;= NUM_SYSENT) ? &amp;systrace_sysent[63] : &amp;systrace_sysent[code];
+
+	<span class="enscript-keyword">if</span> ((id = sy-&gt;stsy_entry) != DTRACE_IDNONE) {
+		uthread_t uthread = (uthread_t)get_bsdthread_info(current_thread());		
+		<span class="enscript-keyword">if</span> (uthread)
+			uthread-&gt;t_dtrace_syscall_args = (<span class="enscript-type">void</span> *)ip;
+		
+		<span class="enscript-keyword">if</span> (ip)
+			(*systrace_probe)(id, *ip, *(ip+1), *(ip+2), *(ip+3), *(ip+4));
+		<span class="enscript-keyword">else</span>
+			(*systrace_probe)(id, 0, 0, 0, 0, 0);
+		
+		<span class="enscript-keyword">if</span> (uthread)
+			uthread-&gt;t_dtrace_syscall_args = (<span class="enscript-type">void</span> *)0;
+	}
+
+#<span class="enscript-reference">if</span> 0 <span class="enscript-comment">/* XXX */</span>
+	<span class="enscript-comment">/*
+	 * APPLE NOTE: Not implemented.
+	 * We want to explicitly allow DTrace consumers to stop a process
+	 * before it actually executes the meat of the syscall.
+	 */</span>
+	p = ttoproc(curthread);
+	mutex_enter(&amp;p-&gt;p_lock);
+	<span class="enscript-keyword">if</span> (curthread-&gt;t_dtrace_stop &amp;&amp; !curthread-&gt;t_lwp-&gt;lwp_nostop) {
+		curthread-&gt;t_dtrace_stop = 0;
+		stop(PR_REQUESTED, 0);
+	}
+	mutex_exit(&amp;p-&gt;p_lock);
+#<span class="enscript-reference">endif</span>
+
+	rval = (*sy-&gt;stsy_underlying)(pp, uap, rv);
+
+	<span class="enscript-keyword">if</span> ((id = sy-&gt;stsy_return) != DTRACE_IDNONE) {
+		uint64_t munged_rv0, munged_rv1;
+    	uthread_t uthread = (uthread_t)get_bsdthread_info(current_thread());
+
+		<span class="enscript-keyword">if</span> (uthread)
+			uthread-&gt;t_dtrace_errno = rval; <span class="enscript-comment">/* Establish t_dtrace_errno now in case this enabling refers to it. */</span>
+
+		<span class="enscript-comment">/*
+	 	 * &quot;Decode&quot; rv for use in the call to dtrace_probe()
+	 	 */</span>
+		<span class="enscript-keyword">if</span> (rval == ERESTART) {
+			munged_rv0 = -1LL; <span class="enscript-comment">/* System call will be reissued in user mode. Make DTrace report a -1 return. */</span>
+			munged_rv1 = -1LL;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (rval != EJUSTRETURN) {
+			<span class="enscript-keyword">if</span> (rval) {
+				munged_rv0 = -1LL; <span class="enscript-comment">/* Mimic what libc will do. */</span>
+				munged_rv1 = -1LL;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">switch</span> (sy-&gt;stsy_return_type) {
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_INT_T</span>:
+					munged_rv0 = rv[0];
+					munged_rv1 = rv[1];
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_UINT_T</span>:
+					munged_rv0 = ((u_int)rv[0]);
+					munged_rv1 = ((u_int)rv[1]);
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_OFF_T</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_UINT64_T</span>:
+					munged_rv0 = *(u_int64_t *)rv;
+					munged_rv1 = 0LL;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_ADDR_T</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_SIZE_T</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_SSIZE_T</span>:
+					munged_rv0 = *(user_addr_t *)rv;
+					munged_rv1 = 0LL;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_NONE</span>:
+					munged_rv0 = 0LL;
+					munged_rv1 = 0LL;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-reference">default</span>:
+					munged_rv0 = 0LL;
+					munged_rv1 = 0LL;
+					<span class="enscript-keyword">break</span>;
+				}
+			}
+		} <span class="enscript-keyword">else</span> {
+			munged_rv0 = 0LL;
+			munged_rv1 = 0LL;
+		}
+
+		<span class="enscript-comment">/*
+		 * &lt;<a href="http://mail.opensolaris.org/pipermail/dtrace-discuss/2007-January/003276.html">http://mail.opensolaris.org/pipermail/dtrace-discuss/2007-January/003276.html</a>&gt; says:
+		 *
+		 * &quot;This is a bit of an historical artifact. At first, the syscall provider just
+		 * had its return value in arg0, and the fbt and pid providers had their return
+		 * values in arg1 (so that we could use arg0 for the offset of the return site).
+		 * 
+		 * We inevitably started writing scripts where we wanted to see the return
+		 * values from probes in all three providers, and we made this script easier
+		 * to write by replicating the syscall return values in arg1 to match fbt and
+		 * pid. We debated briefly about removing the return value from arg0, but
+		 * decided that it would be less confusing to have the same data in two places
+		 * than to have some non-helpful, non-intuitive value in arg0.
+		 * 
+		 * This change was made 4/23/2003 according to the DTrace project's putback log.&quot;
+		 */</span> 
+		(*systrace_probe)(id, munged_rv0, munged_rv0, munged_rv1, (uint64_t)rval, 0);
+	}
+
+	<span class="enscript-keyword">return</span> (rval);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_systrace_syscall_return</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> code, <span class="enscript-type">int</span> rval, <span class="enscript-type">int</span> *rv)
+{
+	systrace_sysent_t *sy;
+	dtrace_id_t id;
+
+	<span class="enscript-comment">// Bounds &quot;check&quot; the value of code a la unix_syscall_return
+</span>	sy = (code &gt;= NUM_SYSENT) ? &amp;systrace_sysent[63] : &amp;systrace_sysent[code];
+
+	<span class="enscript-keyword">if</span> ((id = sy-&gt;stsy_return) != DTRACE_IDNONE) {
+		uint64_t munged_rv0, munged_rv1;
+    	uthread_t uthread = (uthread_t)get_bsdthread_info(current_thread());
+
+		<span class="enscript-keyword">if</span> (uthread)
+			uthread-&gt;t_dtrace_errno = rval; <span class="enscript-comment">/* Establish t_dtrace_errno now in case this enabling refers to it. */</span>
+
+		<span class="enscript-comment">/*
+	 	 * &quot;Decode&quot; rv for use in the call to dtrace_probe()
+	 	 */</span>
+		<span class="enscript-keyword">if</span> (rval == ERESTART) {
+			munged_rv0 = -1LL; <span class="enscript-comment">/* System call will be reissued in user mode. Make DTrace report a -1 return. */</span>
+			munged_rv1 = -1LL;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (rval != EJUSTRETURN) {
+			<span class="enscript-keyword">if</span> (rval) {
+				munged_rv0 = -1LL; <span class="enscript-comment">/* Mimic what libc will do. */</span>
+				munged_rv1 = -1LL;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">switch</span> (sy-&gt;stsy_return_type) {
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_INT_T</span>:
+					munged_rv0 = rv[0];
+					munged_rv1 = rv[1];
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_UINT_T</span>:
+					munged_rv0 = ((u_int)rv[0]);
+					munged_rv1 = ((u_int)rv[1]);
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_OFF_T</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_UINT64_T</span>:
+					munged_rv0 = *(u_int64_t *)rv;
+					munged_rv1 = 0LL;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_ADDR_T</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_SIZE_T</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_SSIZE_T</span>:
+					munged_rv0 = *(user_addr_t *)rv;
+					munged_rv1 = 0LL;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">_SYSCALL_RET_NONE</span>:
+					munged_rv0 = 0LL;
+					munged_rv1 = 0LL;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-reference">default</span>:
+					munged_rv0 = 0LL;
+					munged_rv1 = 0LL;
+					<span class="enscript-keyword">break</span>;
+				}
+			}
+		} <span class="enscript-keyword">else</span> {
+			munged_rv0 = 0LL;
+			munged_rv1 = 0LL;
+		}
+
+		(*systrace_probe)(id, munged_rv0, munged_rv0, munged_rv1, (uint64_t)rval, 0);
+	}
+}
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SYSTRACE_SHIFT</span>			16
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SYSTRACE_ISENTRY</span>(x)		((int)(x) &gt;&gt; SYSTRACE_SHIFT)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SYSTRACE_SYSNUM</span>(x)		((int)(x) &amp; ((1 &lt;&lt; SYSTRACE_SHIFT) - 1))
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SYSTRACE_ENTRY</span>(id)		((1 &lt;&lt; SYSTRACE_SHIFT) | (id))
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SYSTRACE_RETURN</span>(id)		(id)
+
+#<span class="enscript-reference">if</span> ((1 &lt;&lt; <span class="enscript-variable-name">SYSTRACE_SHIFT</span>) &lt;= <span class="enscript-variable-name">NSYSCALL</span>)
+#<span class="enscript-reference">error</span> 1 &lt;&lt; <span class="enscript-variable-name">SYSTRACE_SHIFT</span> <span class="enscript-variable-name">must</span> <span class="enscript-variable-name">exceed</span> <span class="enscript-variable-name">number</span> <span class="enscript-variable-name">of</span> <span class="enscript-variable-name">system</span> <span class="enscript-variable-name">calls</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> dev_info_t *systrace_devi;
+<span class="enscript-type">static</span> dtrace_provider_id_t systrace_id;
+
+<span class="enscript-comment">/*
+ * APPLE NOTE: Avoid name clash with Darwin automagic conf symbol.
+ * See balanced undef below.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">systrace_init</span> _systrace_init
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">systrace_init</span>(<span class="enscript-type">struct</span> sysent *actual, systrace_sysent_t **interposed)
+{
+
+	systrace_sysent_t *ssysent = *interposed;  <span class="enscript-comment">/* Avoid sysent shadow warning
+							   from bsd/sys/sysent.h */</span>
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">if</span> (ssysent == NULL) {
+		*interposed = ssysent = kmem_zalloc(<span class="enscript-keyword">sizeof</span> (systrace_sysent_t) *
+		    NSYSCALL, KM_SLEEP);
+	}
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; NSYSCALL; i++) {
+		<span class="enscript-type">struct</span> sysent *a = &amp;actual[i];
+		systrace_sysent_t *s = &amp;ssysent[i];
+
+		<span class="enscript-keyword">if</span> (LOADABLE_SYSCALL(a) &amp;&amp; !LOADED_SYSCALL(a))
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (a-&gt;sy_callc == dtrace_systrace_syscall)
+			<span class="enscript-keyword">continue</span>;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_SYSCALL32_IMPL</span>
+		<span class="enscript-keyword">if</span> (a-&gt;sy_callc == dtrace_systrace_syscall32)
+			<span class="enscript-keyword">continue</span>;
+#<span class="enscript-reference">endif</span>
+
+		s-&gt;stsy_underlying = a-&gt;sy_callc;
+		s-&gt;stsy_return_type = a-&gt;sy_return_type;
+	}
+	lck_mtx_init(&amp;dtrace_systrace_lock, dtrace_lck_grp, dtrace_lck_attr);
+}
+
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">systrace_provide</span>(<span class="enscript-type">void</span> *arg, <span class="enscript-type">const</span> dtrace_probedesc_t *desc)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>) <span class="enscript-comment">/* __APPLE__ */</span>
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">if</span> (desc != NULL)
+		<span class="enscript-keyword">return</span>;
+
+	systrace_init(sysent, &amp;systrace_sysent);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_SYSCALL32_IMPL</span>
+	systrace_init(sysent32, &amp;systrace_sysent32);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; NSYSCALL; i++) {
+		<span class="enscript-keyword">if</span> (systrace_sysent[i].stsy_underlying == NULL)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (dtrace_probe_lookup(systrace_id, NULL,
+		    syscallnames[i], <span class="enscript-string">&quot;entry&quot;</span>) != 0)
+			<span class="enscript-keyword">continue</span>;
+
+		(<span class="enscript-type">void</span>) dtrace_probe_create(systrace_id, NULL, syscallnames[i],
+		    <span class="enscript-string">&quot;entry&quot;</span>, SYSTRACE_ARTIFICIAL_FRAMES,
+		    (<span class="enscript-type">void</span> *)((uintptr_t)SYSTRACE_ENTRY(i)));
+		(<span class="enscript-type">void</span>) dtrace_probe_create(systrace_id, NULL, syscallnames[i],
+		    <span class="enscript-string">&quot;return&quot;</span>, SYSTRACE_ARTIFICIAL_FRAMES,
+		    (<span class="enscript-type">void</span> *)((uintptr_t)SYSTRACE_RETURN(i)));
+
+		systrace_sysent[i].stsy_entry = DTRACE_IDNONE;
+		systrace_sysent[i].stsy_return = DTRACE_IDNONE;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_SYSCALL32_IMPL</span>
+		systrace_sysent32[i].stsy_entry = DTRACE_IDNONE;
+		systrace_sysent32[i].stsy_return = DTRACE_IDNONE;
+#<span class="enscript-reference">endif</span>
+	}
+}
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">systrace_init</span>
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">systrace_destroy</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>,<span class="enscript-variable-name">id</span>) <span class="enscript-comment">/* __APPLE__ */</span>
+
+	<span class="enscript-type">int</span> sysnum = SYSTRACE_SYSNUM((uintptr_t)parg);
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">sysnum</span>)  <span class="enscript-comment">/* __APPLE__ */</span>
+	<span class="enscript-comment">/*
+	 * There's nothing to do here but assert that we have actually been
+	 * disabled.
+	 */</span>
+	<span class="enscript-keyword">if</span> (SYSTRACE_ISENTRY((uintptr_t)parg)) {
+		ASSERT(systrace_sysent[sysnum].stsy_entry == DTRACE_IDNONE);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_SYSCALL32_IMPL</span>
+		ASSERT(systrace_sysent32[sysnum].stsy_entry == DTRACE_IDNONE);
+#<span class="enscript-reference">endif</span>
+	} <span class="enscript-keyword">else</span> {
+		ASSERT(systrace_sysent[sysnum].stsy_return == DTRACE_IDNONE);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_SYSCALL32_IMPL</span>
+		ASSERT(systrace_sysent32[sysnum].stsy_return == DTRACE_IDNONE);
+#<span class="enscript-reference">endif</span>
+	}
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">systrace_enable</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>) <span class="enscript-comment">/* __APPLE__ */</span>
+    
+	<span class="enscript-type">int</span> sysnum = SYSTRACE_SYSNUM((uintptr_t)parg);
+	<span class="enscript-type">int</span> enabled = (systrace_sysent[sysnum].stsy_entry != DTRACE_IDNONE ||
+	    systrace_sysent[sysnum].stsy_return != DTRACE_IDNONE);
+
+	<span class="enscript-keyword">if</span> (SYSTRACE_ISENTRY((uintptr_t)parg)) {
+		systrace_sysent[sysnum].stsy_entry = id;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_SYSCALL32_IMPL</span>
+		systrace_sysent32[sysnum].stsy_entry = id;
+#<span class="enscript-reference">endif</span>
+	} <span class="enscript-keyword">else</span> {
+		systrace_sysent[sysnum].stsy_return = id;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_SYSCALL32_IMPL</span>
+		systrace_sysent32[sysnum].stsy_return = id;
+#<span class="enscript-reference">endif</span>
+	}
+
+	<span class="enscript-keyword">if</span> (enabled) {
+		ASSERT(sysent[sysnum].sy_callc == dtrace_systrace_syscall);
+		<span class="enscript-keyword">return</span>(0);
+	}
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_SYSCALL32_IMPL</span>
+	(<span class="enscript-type">void</span>) casptr(&amp;sysent32[sysnum].sy_callc,
+	    (<span class="enscript-type">void</span> *)systrace_sysent32[sysnum].stsy_underlying,
+	    (<span class="enscript-type">void</span> *)dtrace_systrace_syscall32);
+#<span class="enscript-reference">endif</span>
+
+	lck_mtx_lock(&amp;dtrace_systrace_lock);
+	<span class="enscript-keyword">if</span> (sysent[sysnum].sy_callc == systrace_sysent[sysnum].stsy_underlying) {
+		vm_offset_t dss = (vm_offset_t)&amp;dtrace_systrace_syscall;
+		ml_nofault_copy((vm_offset_t)&amp;dss, (vm_offset_t)&amp;sysent[sysnum].sy_callc, <span class="enscript-keyword">sizeof</span>(vm_offset_t));
+	}
+	lck_mtx_unlock(&amp;dtrace_systrace_lock);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">systrace_disable</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>,<span class="enscript-variable-name">id</span>) <span class="enscript-comment">/* __APPLE__ */</span>
+    
+	<span class="enscript-type">int</span> sysnum = SYSTRACE_SYSNUM((uintptr_t)parg);
+	<span class="enscript-type">int</span> disable = (systrace_sysent[sysnum].stsy_entry == DTRACE_IDNONE ||
+	    systrace_sysent[sysnum].stsy_return == DTRACE_IDNONE);
+
+	<span class="enscript-keyword">if</span> (disable) {
+		lck_mtx_lock(&amp;dtrace_systrace_lock);
+		<span class="enscript-keyword">if</span> (sysent[sysnum].sy_callc == dtrace_systrace_syscall)
+			ml_nofault_copy((vm_offset_t)&amp;systrace_sysent[sysnum].stsy_underlying, (vm_offset_t)&amp;sysent[sysnum].sy_callc, <span class="enscript-keyword">sizeof</span>(systrace_sysent[sysnum].stsy_underlying));
+		lck_mtx_unlock(&amp;dtrace_systrace_lock);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_SYSCALL32_IMPL</span>
+		(<span class="enscript-type">void</span>) casptr(&amp;sysent32[sysnum].sy_callc,
+		    (<span class="enscript-type">void</span> *)dtrace_systrace_syscall32,
+		    (<span class="enscript-type">void</span> *)systrace_sysent32[sysnum].stsy_underlying);
+#<span class="enscript-reference">endif</span>
+	}
+
+	<span class="enscript-keyword">if</span> (SYSTRACE_ISENTRY((uintptr_t)parg)) {
+		systrace_sysent[sysnum].stsy_entry = DTRACE_IDNONE;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_SYSCALL32_IMPL</span>
+		systrace_sysent32[sysnum].stsy_entry = DTRACE_IDNONE;
+#<span class="enscript-reference">endif</span>
+	} <span class="enscript-keyword">else</span> {
+		systrace_sysent[sysnum].stsy_return = DTRACE_IDNONE;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_SYSCALL32_IMPL</span>
+		systrace_sysent32[sysnum].stsy_return = DTRACE_IDNONE;
+#<span class="enscript-reference">endif</span>
+	}
+}
+
+<span class="enscript-type">static</span> dtrace_pattr_t systrace_attr = {
+{ DTRACE_STABILITY_EVOLVING, DTRACE_STABILITY_EVOLVING, DTRACE_CLASS_COMMON },
+{ DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_UNKNOWN },
+{ DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_ISA },
+{ DTRACE_STABILITY_EVOLVING, DTRACE_STABILITY_EVOLVING, DTRACE_CLASS_COMMON },
+{ DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_ISA },
+};
+
+<span class="enscript-type">static</span> dtrace_pops_t systrace_pops = {
+	systrace_provide,
+	NULL,
+	systrace_enable,
+	systrace_disable,
+	NULL,
+	NULL,
+	NULL,
+	systrace_getarg,
+	NULL,
+	systrace_destroy
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">systrace_attach</span>(dev_info_t *devi, ddi_attach_cmd_t cmd)
+{
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DDI_ATTACH</span>:
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DDI_RESUME</span>:
+		<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (DDI_FAILURE);
+	}
+
+	systrace_probe = (<span class="enscript-type">void</span>(*))&amp;dtrace_probe;
+	membar_enter();
+
+	<span class="enscript-keyword">if</span> (ddi_create_minor_node(devi, <span class="enscript-string">&quot;systrace&quot;</span>, S_IFCHR, 0,
+	    DDI_PSEUDO, 0) == DDI_FAILURE ||
+	    dtrace_register(<span class="enscript-string">&quot;syscall&quot;</span>, &amp;systrace_attr, DTRACE_PRIV_USER, NULL,
+	    &amp;systrace_pops, NULL, &amp;systrace_id) != 0) {
+		systrace_probe = systrace_stub;
+		ddi_remove_minor_node(devi, NULL);
+		<span class="enscript-keyword">return</span> (DDI_FAILURE);
+	}
+
+	ddi_report_dev(devi);
+	systrace_devi = devi;
+
+	<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+}
+
+
+<span class="enscript-comment">/*
+ * APPLE NOTE:  systrace_detach not implemented
+ */</span>
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__APPLE__</span>)
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">systrace_detach</span>(dev_info_t *devi, ddi_detach_cmd_t cmd)
+{
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DDI_DETACH</span>:
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DDI_SUSPEND</span>:
+		<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (DDI_FAILURE);
+	}
+
+	<span class="enscript-keyword">if</span> (dtrace_unregister(systrace_id) != 0)
+		<span class="enscript-keyword">return</span> (DDI_FAILURE);
+
+	ddi_remove_minor_node(devi, NULL);
+	systrace_probe = systrace_stub;
+	<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE__ */</span>
+
+
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">kern_return_t</span> (*mach_call_t)(<span class="enscript-type">void</span> *);
+
+<span class="enscript-comment">/* APPLE NOTE: From #include &lt;kern/syscall_sw.h&gt; which may be changed for 64 bit! */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">void</span>    <span class="enscript-function-name">mach_munge_t</span>(<span class="enscript-type">void</span> *);
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	<span class="enscript-type">int</span>			mach_trap_arg_count;
+	kern_return_t		(*mach_trap_function)(<span class="enscript-type">void</span> *);
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__arm64__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+	mach_munge_t		*mach_trap_arg_munge32; <span class="enscript-comment">/* system call arguments for 32-bit */</span>
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-type">int</span>			mach_trap_u32_words;
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MACH_ASSERT</span>
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>*		mach_trap_name;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MACH_ASSERT */</span>
+} mach_trap_t;
+
+<span class="enscript-type">extern</span> <span class="enscript-type">const</span> mach_trap_t              mach_trap_table[]; <span class="enscript-comment">/* syscall_sw.h now declares this as const */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>                      mach_trap_count;
+
+<span class="enscript-type">extern</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *mach_syscall_name_table[];
+
+<span class="enscript-comment">/* XXX From osfmk/i386/bsd_i386.c */</span>
+<span class="enscript-type">struct</span> mach_call_args {
+        syscall_arg_t arg1;
+        syscall_arg_t arg2;
+        syscall_arg_t arg3;
+        syscall_arg_t arg4;
+        syscall_arg_t arg5;
+        syscall_arg_t arg6;
+        syscall_arg_t arg7;
+        syscall_arg_t arg8;
+        syscall_arg_t arg9;
+};
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">NSYSCALL</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NSYSCALL</span> mach_trap_count
+
+#<span class="enscript-reference">if</span> ((1 &lt;&lt; <span class="enscript-variable-name">SYSTRACE_SHIFT</span>) &lt;= <span class="enscript-variable-name">NSYSCALL</span>)
+#<span class="enscript-reference">error</span> 1 &lt;&lt; <span class="enscript-variable-name">SYSTRACE_SHIFT</span> <span class="enscript-variable-name">must</span> <span class="enscript-variable-name">exceed</span> <span class="enscript-variable-name">number</span> <span class="enscript-variable-name">of</span> <span class="enscript-variable-name">Mach</span> <span class="enscript-variable-name">traps</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> machtrace_sysent {
+	dtrace_id_t	stsy_entry;
+	dtrace_id_t	stsy_return;
+	kern_return_t	(*stsy_underlying)(<span class="enscript-type">void</span> *);
+	int32_t		stsy_return_type;
+} machtrace_sysent_t;
+
+<span class="enscript-type">static</span> machtrace_sysent_t *machtrace_sysent = NULL;
+
+<span class="enscript-function-name">void</span> (*machtrace_probe)(dtrace_id_t, uint64_t, uint64_t,
+    uint64_t, uint64_t, uint64_t);
+
+<span class="enscript-type">static</span> uint64_t <span class="enscript-function-name">machtrace_getarg</span>(<span class="enscript-type">void</span> *, dtrace_id_t, <span class="enscript-type">void</span> *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);	
+
+<span class="enscript-type">static</span> dev_info_t *machtrace_devi;
+<span class="enscript-type">static</span> dtrace_provider_id_t machtrace_id;
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">dtrace_machtrace_syscall</span>(<span class="enscript-type">struct</span> mach_call_args *args)
+{
+	<span class="enscript-type">int</span> code;	<span class="enscript-comment">/* The mach call number */</span>
+
+	machtrace_sysent_t *sy;
+	dtrace_id_t id;
+	kern_return_t rval;
+#<span class="enscript-reference">if</span> 0 <span class="enscript-comment">/* XXX */</span>
+	proc_t *p;
+#<span class="enscript-reference">endif</span>
+	syscall_arg_t *ip = (syscall_arg_t *)args;
+	mach_call_t mach_call;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">defined</span> (<span class="enscript-variable-name">__x86_64__</span>)
+	{
+		pal_register_cache_state(current_thread(), VALID);
+		x86_saved_state_t   *tagged_regs = (x86_saved_state_t *)find_user_regs(current_thread());
+
+		<span class="enscript-keyword">if</span> (is_saved_state64(tagged_regs)) {
+			code = saved_state64(tagged_regs)-&gt;rax &amp; SYSCALL_NUMBER_MASK;
+		} <span class="enscript-keyword">else</span> {
+			code = -saved_state32(tagged_regs)-&gt;eax;
+		}
+	}
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">Unknown</span> <span class="enscript-variable-name">Architecture</span>
+#<span class="enscript-reference">endif</span>
+
+	sy = &amp;machtrace_sysent[code];
+
+	<span class="enscript-keyword">if</span> ((id = sy-&gt;stsy_entry) != DTRACE_IDNONE) {
+		uthread_t uthread = (uthread_t)get_bsdthread_info(current_thread());	
+
+		<span class="enscript-keyword">if</span> (uthread)
+			uthread-&gt;t_dtrace_syscall_args = (<span class="enscript-type">void</span> *)ip;
+		
+		(*machtrace_probe)(id, *ip, *(ip+1), *(ip+2), *(ip+3), *(ip+4));
+		
+		<span class="enscript-keyword">if</span> (uthread)
+			uthread-&gt;t_dtrace_syscall_args = (<span class="enscript-type">void</span> *)0;		
+	}
+
+#<span class="enscript-reference">if</span> 0 <span class="enscript-comment">/* XXX */</span>
+	<span class="enscript-comment">/*
+	 * APPLE NOTE:  Not implemented.
+	 * We want to explicitly allow DTrace consumers to stop a process
+	 * before it actually executes the meat of the syscall.
+	 */</span>
+	p = ttoproc(curthread);
+	mutex_enter(&amp;p-&gt;p_lock);
+	<span class="enscript-keyword">if</span> (curthread-&gt;t_dtrace_stop &amp;&amp; !curthread-&gt;t_lwp-&gt;lwp_nostop) {
+		curthread-&gt;t_dtrace_stop = 0;
+		stop(PR_REQUESTED, 0);
+	}
+	mutex_exit(&amp;p-&gt;p_lock);
+#<span class="enscript-reference">endif</span>
+
+	mach_call = (mach_call_t)(*sy-&gt;stsy_underlying);
+	rval = mach_call(args);
+
+	<span class="enscript-keyword">if</span> ((id = sy-&gt;stsy_return) != DTRACE_IDNONE)
+		(*machtrace_probe)(id, (uint64_t)rval, 0, 0, 0, 0);
+
+	<span class="enscript-keyword">return</span> (rval);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">machtrace_init</span>(<span class="enscript-type">const</span> mach_trap_t *actual, machtrace_sysent_t **interposed)
+{
+	machtrace_sysent_t *msysent = *interposed;
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">if</span> (msysent == NULL) {
+		*interposed = msysent = kmem_zalloc(<span class="enscript-keyword">sizeof</span> (machtrace_sysent_t) *
+				NSYSCALL, KM_SLEEP);
+	}
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; NSYSCALL; i++) {
+		<span class="enscript-type">const</span> mach_trap_t *a = &amp;actual[i];
+		machtrace_sysent_t *s = &amp;msysent[i];
+
+		<span class="enscript-keyword">if</span> (LOADABLE_SYSCALL(a) &amp;&amp; !LOADED_SYSCALL(a))
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (a-&gt;mach_trap_function == (mach_call_t)(dtrace_machtrace_syscall))
+			<span class="enscript-keyword">continue</span>;
+
+		s-&gt;stsy_underlying = a-&gt;mach_trap_function;
+	}
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">machtrace_provide</span>(<span class="enscript-type">void</span> *arg, <span class="enscript-type">const</span> dtrace_probedesc_t *desc)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>) <span class="enscript-comment">/* __APPLE__ */</span>
+    
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">if</span> (desc != NULL)
+		<span class="enscript-keyword">return</span>;
+
+	machtrace_init(mach_trap_table, &amp;machtrace_sysent);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; NSYSCALL; i++) {
+		
+		<span class="enscript-keyword">if</span> (machtrace_sysent[i].stsy_underlying == NULL)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (dtrace_probe_lookup(machtrace_id, NULL,
+					mach_syscall_name_table[i], <span class="enscript-string">&quot;entry&quot;</span>) != 0)
+			<span class="enscript-keyword">continue</span>;
+
+		(<span class="enscript-type">void</span>) dtrace_probe_create(machtrace_id, NULL, mach_syscall_name_table[i],
+					   <span class="enscript-string">&quot;entry&quot;</span>, MACHTRACE_ARTIFICIAL_FRAMES,
+					   (<span class="enscript-type">void</span> *)((uintptr_t)SYSTRACE_ENTRY(i)));
+		(<span class="enscript-type">void</span>) dtrace_probe_create(machtrace_id, NULL, mach_syscall_name_table[i],
+					   <span class="enscript-string">&quot;return&quot;</span>, MACHTRACE_ARTIFICIAL_FRAMES,
+					   (<span class="enscript-type">void</span> *)((uintptr_t)SYSTRACE_RETURN(i)));
+
+		machtrace_sysent[i].stsy_entry = DTRACE_IDNONE;
+		machtrace_sysent[i].stsy_return = DTRACE_IDNONE;
+	}
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">machtrace_destroy</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>,<span class="enscript-variable-name">id</span>) <span class="enscript-comment">/* __APPLE__ */</span>
+	<span class="enscript-type">int</span> sysnum = SYSTRACE_SYSNUM((uintptr_t)parg);
+	
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">sysnum</span>) <span class="enscript-comment">/* __APPLE__ */</span>
+
+	<span class="enscript-comment">/*
+	 * There's nothing to do here but assert that we have actually been
+	 * disabled.
+	 */</span>
+	<span class="enscript-keyword">if</span> (SYSTRACE_ISENTRY((uintptr_t)parg)) {
+		ASSERT(machtrace_sysent[sysnum].stsy_entry == DTRACE_IDNONE);
+	} <span class="enscript-keyword">else</span> {
+		ASSERT(machtrace_sysent[sysnum].stsy_return == DTRACE_IDNONE);
+	}
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">machtrace_enable</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>) <span class="enscript-comment">/* __APPLE__ */</span>
+    
+	<span class="enscript-type">int</span> sysnum = SYSTRACE_SYSNUM((uintptr_t)parg);
+	<span class="enscript-type">int</span> enabled = (machtrace_sysent[sysnum].stsy_entry != DTRACE_IDNONE ||
+			machtrace_sysent[sysnum].stsy_return != DTRACE_IDNONE);
+
+	<span class="enscript-keyword">if</span> (SYSTRACE_ISENTRY((uintptr_t)parg)) {
+		machtrace_sysent[sysnum].stsy_entry = id;
+	} <span class="enscript-keyword">else</span> {
+		machtrace_sysent[sysnum].stsy_return = id;
+	}
+
+	<span class="enscript-keyword">if</span> (enabled) {
+	    ASSERT(mach_trap_table[sysnum].mach_trap_function == (<span class="enscript-type">void</span> *)dtrace_machtrace_syscall);
+	    <span class="enscript-keyword">return</span>(0);
+	}
+
+	lck_mtx_lock(&amp;dtrace_systrace_lock);
+
+	<span class="enscript-keyword">if</span> (mach_trap_table[sysnum].mach_trap_function == machtrace_sysent[sysnum].stsy_underlying) {
+		vm_offset_t dss = (vm_offset_t)&amp;dtrace_machtrace_syscall;
+		ml_nofault_copy((vm_offset_t)&amp;dss, (vm_offset_t)&amp;mach_trap_table[sysnum].mach_trap_function, <span class="enscript-keyword">sizeof</span>(vm_offset_t));
+	}
+
+	lck_mtx_unlock(&amp;dtrace_systrace_lock);
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">machtrace_disable</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>,<span class="enscript-variable-name">id</span>) <span class="enscript-comment">/* __APPLE__ */</span>
+      
+	<span class="enscript-type">int</span> sysnum = SYSTRACE_SYSNUM((uintptr_t)parg);
+	<span class="enscript-type">int</span> disable = (machtrace_sysent[sysnum].stsy_entry == DTRACE_IDNONE ||
+			machtrace_sysent[sysnum].stsy_return == DTRACE_IDNONE);
+
+	<span class="enscript-keyword">if</span> (disable) {
+
+		lck_mtx_lock(&amp;dtrace_systrace_lock);
+
+		<span class="enscript-keyword">if</span> (mach_trap_table[sysnum].mach_trap_function == (mach_call_t)dtrace_machtrace_syscall) {
+			ml_nofault_copy((vm_offset_t)&amp;machtrace_sysent[sysnum].stsy_underlying, (vm_offset_t)&amp;mach_trap_table[sysnum].mach_trap_function, <span class="enscript-keyword">sizeof</span>(vm_offset_t));
+		}
+		lck_mtx_unlock(&amp;dtrace_systrace_lock);
+	}
+
+	<span class="enscript-keyword">if</span> (SYSTRACE_ISENTRY((uintptr_t)parg)) {
+		machtrace_sysent[sysnum].stsy_entry = DTRACE_IDNONE;
+	} <span class="enscript-keyword">else</span> {
+		machtrace_sysent[sysnum].stsy_return = DTRACE_IDNONE;
+	}
+}
+
+<span class="enscript-type">static</span> dtrace_pattr_t machtrace_attr = {
+{ DTRACE_STABILITY_EVOLVING, DTRACE_STABILITY_EVOLVING, DTRACE_CLASS_COMMON },
+{ DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_UNKNOWN },
+{ DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_ISA },
+{ DTRACE_STABILITY_EVOLVING, DTRACE_STABILITY_EVOLVING, DTRACE_CLASS_COMMON },
+{ DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_ISA },
+};
+
+<span class="enscript-type">static</span> dtrace_pops_t machtrace_pops = {
+	machtrace_provide,
+	NULL,
+	machtrace_enable,
+	machtrace_disable,
+	NULL,
+	NULL,
+	NULL,
+	machtrace_getarg,
+	NULL,
+	machtrace_destroy
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">machtrace_attach</span>(dev_info_t *devi, ddi_attach_cmd_t cmd)
+{
+	<span class="enscript-keyword">switch</span> (cmd) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DDI_ATTACH</span>:
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DDI_RESUME</span>:
+			<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> (DDI_FAILURE);
+	}
+
+	machtrace_probe = dtrace_probe;
+	membar_enter();
+	
+	<span class="enscript-keyword">if</span> (ddi_create_minor_node(devi, <span class="enscript-string">&quot;machtrace&quot;</span>, S_IFCHR, 0,
+				DDI_PSEUDO, 0) == DDI_FAILURE ||
+			dtrace_register(<span class="enscript-string">&quot;mach_trap&quot;</span>, &amp;machtrace_attr, DTRACE_PRIV_USER, NULL,
+				&amp;machtrace_pops, NULL, &amp;machtrace_id) != 0) {
+                machtrace_probe = (<span class="enscript-type">void</span> (*))&amp;systrace_stub;
+		ddi_remove_minor_node(devi, NULL);
+		<span class="enscript-keyword">return</span> (DDI_FAILURE);
+	}
+
+	ddi_report_dev(devi);
+	machtrace_devi = devi;
+
+	<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+}
+
+d_open_t _systrace_open;
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">_systrace_open</span>(dev_t dev, <span class="enscript-type">int</span> flags, <span class="enscript-type">int</span> devtype, <span class="enscript-type">struct</span> proc *p)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">dev</span>,<span class="enscript-variable-name">flags</span>,<span class="enscript-variable-name">devtype</span>,<span class="enscript-variable-name">p</span>)
+	<span class="enscript-keyword">return</span> 0;
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SYSTRACE_MAJOR</span>  -24 <span class="enscript-comment">/* let the kernel pick the device number */</span>
+
+<span class="enscript-comment">/*
+ * A struct describing which functions will get invoked for certain
+ * actions.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> cdevsw systrace_cdevsw =
+{
+	_systrace_open,		<span class="enscript-comment">/* open */</span>
+	eno_opcl,		<span class="enscript-comment">/* close */</span>
+	eno_rdwrt,			<span class="enscript-comment">/* read */</span>
+	eno_rdwrt,			<span class="enscript-comment">/* write */</span>
+	eno_ioctl,		<span class="enscript-comment">/* ioctl */</span>
+	(stop_fcn_t *)nulldev, <span class="enscript-comment">/* stop */</span>
+	(reset_fcn_t *)nulldev, <span class="enscript-comment">/* reset */</span>
+	NULL,				<span class="enscript-comment">/* tty's */</span>
+	eno_select,			<span class="enscript-comment">/* select */</span>
+	eno_mmap,			<span class="enscript-comment">/* mmap */</span>
+	eno_strat,			<span class="enscript-comment">/* strategy */</span>
+	eno_getc,			<span class="enscript-comment">/* getc */</span>
+	eno_putc,			<span class="enscript-comment">/* putc */</span>
+	0					<span class="enscript-comment">/* type */</span>
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> gSysTraceInited = 0;
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">systrace_init</span>( <span class="enscript-type">void</span> );
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">systrace_init</span>( <span class="enscript-type">void</span> )
+{
+	<span class="enscript-keyword">if</span> (0 == gSysTraceInited) {
+		<span class="enscript-type">int</span> majdevno = cdevsw_add(SYSTRACE_MAJOR, &amp;systrace_cdevsw);
+
+		<span class="enscript-keyword">if</span> (majdevno &lt; 0) {
+			printf(<span class="enscript-string">&quot;systrace_init: failed to allocate a major number!\n&quot;</span>);
+			gSysTraceInited = 0;
+			<span class="enscript-keyword">return</span>;
+		}
+
+		systrace_attach( (dev_info_t	*)(uintptr_t)majdevno, DDI_ATTACH );
+		machtrace_attach( (dev_info_t	*)(uintptr_t)majdevno, DDI_ATTACH );
+
+		gSysTraceInited = 1;
+	} <span class="enscript-keyword">else</span>
+		panic(<span class="enscript-string">&quot;systrace_init: called twice!\n&quot;</span>);
+}
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">SYSTRACE_MAJOR</span>
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">systrace_getarg</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg, <span class="enscript-type">int</span> argno, <span class="enscript-type">int</span> aframes)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>,<span class="enscript-variable-name">id</span>,<span class="enscript-variable-name">parg</span>,<span class="enscript-variable-name">aframes</span>)     <span class="enscript-comment">/* __APPLE__ */</span>
+	uint64_t val = 0;
+	syscall_arg_t *stack = (syscall_arg_t *)NULL;
+
+	uthread_t uthread = (uthread_t)get_bsdthread_info(current_thread());	
+
+	<span class="enscript-keyword">if</span> (uthread)
+		stack = (syscall_arg_t *)uthread-&gt;t_dtrace_syscall_args;
+
+	<span class="enscript-keyword">if</span> (!stack)
+		<span class="enscript-keyword">return</span>(0);
+
+	DTRACE_CPUFLAG_SET(CPU_DTRACE_NOFAULT);
+	<span class="enscript-comment">/* dtrace_probe arguments arg0 .. arg4 are 64bits wide */</span>
+	val = (uint64_t)*(stack+argno);
+	DTRACE_CPUFLAG_CLEAR(CPU_DTRACE_NOFAULT);
+	<span class="enscript-keyword">return</span> (val);
+}
+
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">machtrace_getarg</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg, <span class="enscript-type">int</span> argno, <span class="enscript-type">int</span> aframes)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>,<span class="enscript-variable-name">id</span>,<span class="enscript-variable-name">parg</span>,<span class="enscript-variable-name">aframes</span>)     <span class="enscript-comment">/* __APPLE__ */</span>
+	uint64_t val = 0;
+	syscall_arg_t *stack = (syscall_arg_t *)NULL;
+
+	uthread_t uthread = (uthread_t)get_bsdthread_info(current_thread());
+	
+	<span class="enscript-keyword">if</span> (uthread)
+		stack = (syscall_arg_t *)uthread-&gt;t_dtrace_syscall_args;
+	
+	<span class="enscript-keyword">if</span> (!stack)
+		<span class="enscript-keyword">return</span>(0);
+
+	DTRACE_CPUFLAG_SET(CPU_DTRACE_NOFAULT);
+	<span class="enscript-comment">/* dtrace_probe arguments arg0 .. arg4 are 64bits wide */</span>
+	val = (uint64_t)*(stack+argno);	
+	DTRACE_CPUFLAG_CLEAR(CPU_DTRACE_NOFAULT);
+	<span class="enscript-keyword">return</span> (val);
+}
+
+</pre>
+<hr />
+</body></html>

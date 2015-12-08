@@ -1,0 +1,694 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>if_llreach.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">if_llreach.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2011-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * Link-layer Reachability Record
+ *
+ * Each interface maintains a red-black tree which contains records related
+ * to the on-link nodes which we are interested in communicating with.  Each
+ * record gets allocated and inserted into the tree in the following manner:
+ * upon processing an ARP announcement or reply from a known node (i.e. there
+ * exists a ARP route entry for the node), and if a link-layer reachability
+ * record for the node doesn't yet exist; and, upon processing a ND6 RS/RA/
+ * NS/NA/redirect from a node, and if a link-layer reachability record for the
+ * node doesn't yet exist.
+ *
+ * Each newly created record is then referred to by the resolver route entry;
+ * if a record already exists, its reference count gets increased for the new
+ * resolver entry which now refers to it.  A record gets removed from the tree
+ * and freed once its reference counts drops to zero, i.e. when there is no
+ * more resolver entry referring to it.
+ *
+ * A record contains the link-layer protocol (e.g. Ethertype IP/IPv6), the
+ * HW address of the sender, the &quot;last heard from&quot; timestamp (lr_lastrcvd) and
+ * the number of references made to it (lr_reqcnt).  Because the key for each
+ * record in the red-black tree consists of the link-layer protocol, therefore
+ * the namespace for the records is partitioned based on the type of link-layer
+ * protocol, i.e. an Ethertype IP link-layer record is only referred to by one
+ * or more ARP entries; an Ethernet IPv6 link-layer record is only referred to
+ * by one or more ND6 entries.  Therefore, lr_reqcnt represents the number of
+ * resolver entry references to the record for the same protocol family.
+ *
+ * Upon receiving packets from the network, the protocol's input callback
+ * (e.g. ether_inet{6}_input) informs the corresponding resolver (ARP/ND6)
+ * about the (link-layer) origin of the packet.  This results in searching
+ * for a matching record in the red-black tree for the interface where the
+ * packet arrived on.  If there's no match, no further processing takes place.
+ * Otherwise, the lr_lastrcvd timestamp of the record is updated.
+ *
+ * When an IP/IPv6 packet is transmitted to the resolver (i.e. the destination
+ * is on-link), ARP/ND6 records the &quot;last spoken to&quot; timestamp in the route
+ * entry ({la,ln}_lastused).
+ *
+ * The reachability of the on-link node is determined by the following logic,
+ * upon sending a packet thru the resolver:
+ *
+ *   a) If the record is only used by exactly one resolver entry (lr_reqcnt
+ *	is 1), i.e. the target host does not have IP/IPv6 aliases that we know
+ *	of, check if lr_lastrcvd is &quot;recent.&quot;  If so, simply send the packet;
+ *	otherwise, re-resolve the target node.
+ *
+ *   b) If the record is shared by multiple resolver entries (lr_reqcnt is
+ *	greater than 1), i.e. the target host has more than one IP/IPv6 aliases
+ *	on the same network interface, we can't rely on lr_lastrcvd alone, as
+ *	one of the IP/IPv6 aliases could have been silently moved to another
+ *	node for which we don't have a link-layer record.  If lr_lastrcvd is
+ *	not &quot;recent&quot;, we re-resolve the target node.  Otherwise, we perform
+ *	an additional check against {la,ln}_lastused to see whether it is also
+ *	&quot;recent&quot;, relative to lr_lastrcvd.  If so, simply send the packet;
+ *	otherwise, re-resolve the target node.
+ *
+ * The value for &quot;recent&quot; is configurable by adjusting the basetime value for
+ * net.link.ether.inet.arp_llreach_base or net.inet6.icmp6.nd6_llreach_base.
+ * The default basetime value is 30 seconds, and the actual expiration time
+ * is calculated by multiplying the basetime value with some random factor,
+ * which results in a number between 15 to 45 seconds.  Setting the basetime
+ * value to 0 effectively disables this feature for the corresponding resolver.
+ *
+ * Assumptions:
+ *
+ * The above logic is based upon the following assumptions:
+ *
+ *   i) Network traffics are mostly bi-directional, i.e. the act of sending
+ *	packets to an on-link node would most likely cause us to receive
+ *	packets from that node.
+ *
+ *  ii) If the on-link node's IP/IPv6 address silently moves to another
+ *	on-link node for which we are not aware of, non-unicast packets
+ *	from the old node would trigger the record's lr_lastrcvd to be
+ *	kept recent.
+ *
+ * We can mitigate the above by having the resolver check its {la,ln}_lastused
+ * timestamp at all times, i.e. not only when lr_reqcnt is greater than 1; but
+ * we currently optimize for the common cases.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/tree.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;dev/random/randomdev.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_dl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_llreach.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/dlil.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_interface.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/in6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/nd6.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> iflr_size;		<span class="enscript-comment">/* size of if_llreach */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *iflr_zone;		<span class="enscript-comment">/* zone for if_llreach */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">IFLR_ZONE_MAX</span>		128		<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">IFLR_ZONE_NAME</span>		<span class="enscript-string">&quot;if_llreach&quot;</span>	<span class="enscript-comment">/* zone name */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> if_llreach *<span class="enscript-function-name">iflr_alloc</span>(<span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">iflr_free</span>(<span class="enscript-type">struct</span> if_llreach *);
+<span class="enscript-type">static</span> __inline <span class="enscript-type">int</span> <span class="enscript-function-name">iflr_cmp</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> if_llreach *,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> if_llreach *);
+<span class="enscript-type">static</span> __inline <span class="enscript-type">int</span> <span class="enscript-function-name">iflr_reachable</span>(<span class="enscript-type">struct</span> if_llreach *, <span class="enscript-type">int</span>, u_int64_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> sysctl_llreach_ifinfo SYSCTL_HANDLER_ARGS;
+
+<span class="enscript-comment">/* The following is protected by if_llreach_lock */</span>
+<span class="enscript-function-name">RB_GENERATE_PREV</span>(ll_reach_tree, if_llreach, lr_link, iflr_cmp);
+
+<span class="enscript-function-name">SYSCTL_DECL</span>(_net_link_generic_system);
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_link_generic_system, OID_AUTO, llreach_info,
+    CTLFLAG_RD | CTLFLAG_LOCKED, sysctl_llreach_ifinfo,
+    <span class="enscript-string">&quot;Per-interface tree of source link-layer reachability records&quot;</span>);
+
+<span class="enscript-comment">/*
+ * Link-layer reachability is based off node constants in RFC4861.
+ */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">LL_COMPUTE_RTIME</span>(x)	ND_COMPUTE_RTIME(x)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LL_MIN_RANDOM_FACTOR</span>	512	<span class="enscript-comment">/* 1024 * 0.5 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LL_MAX_RANDOM_FACTOR</span>	1536	<span class="enscript-comment">/* 1024 * 1.5 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">LL_COMPUTE_RTIME</span>(x)						\
+	(((LL_MIN_RANDOM_FACTOR * (x &gt;&gt; 10)) + (RandomULong() &amp;		\
+	((LL_MAX_RANDOM_FACTOR - LL_MIN_RANDOM_FACTOR) * (x &gt;&gt; 10)))) / 1000)
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !INET6 */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ifnet_llreach_init</span>(<span class="enscript-type">void</span>)
+{
+	iflr_size = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> if_llreach);
+	iflr_zone = zinit(iflr_size,
+	    IFLR_ZONE_MAX * iflr_size, 0, IFLR_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (iflr_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, IFLR_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(iflr_zone, Z_EXPAND, TRUE);
+	zone_change(iflr_zone, Z_CALLERACCT, FALSE);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ifnet_llreach_ifattach</span>(<span class="enscript-type">struct</span> ifnet *ifp, boolean_t reuse)
+{
+	lck_rw_lock_exclusive(&amp;ifp-&gt;if_llreach_lock);
+	<span class="enscript-comment">/* Initialize link-layer source tree (if not already) */</span>
+	<span class="enscript-keyword">if</span> (!reuse)
+		RB_INIT(&amp;ifp-&gt;if_ll_srcs);
+	lck_rw_done(&amp;ifp-&gt;if_llreach_lock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ifnet_llreach_ifdetach</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">ifp</span>)
+	<span class="enscript-comment">/*
+	 * Nothing to do for now; the link-layer source tree might
+	 * contain entries at this point, that are still referred
+	 * to by route entries pointing to this ifp.
+	 */</span>
+}
+
+<span class="enscript-comment">/*
+ * Link-layer source tree comparison function.
+ *
+ * An ordered predicate is necessary; bcmp() is not documented to return
+ * an indication of order, memcmp() is, and is an ISO C99 requirement.
+ */</span>
+<span class="enscript-type">static</span> __inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">iflr_cmp</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> if_llreach *a, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> if_llreach *b)
+{
+	<span class="enscript-keyword">return</span> (memcmp(&amp;a-&gt;lr_key, &amp;b-&gt;lr_key, <span class="enscript-keyword">sizeof</span> (a-&gt;lr_key)));
+}
+
+<span class="enscript-type">static</span> __inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">iflr_reachable</span>(<span class="enscript-type">struct</span> if_llreach *lr, <span class="enscript-type">int</span> cmp_delta, u_int64_t tval)
+{
+	u_int64_t now;
+	u_int64_t expire;
+
+	now = net_uptime();		<span class="enscript-comment">/* current approx. uptime */</span>
+	<span class="enscript-comment">/*
+	 * No need for lr_lock; atomically read the last rcvd uptime.
+	 */</span>
+	expire = lr-&gt;lr_lastrcvd + lr-&gt;lr_reachable;
+	<span class="enscript-comment">/*
+	 * If we haven't heard back from the local host for over
+	 * lr_reachable seconds, consider that the host is no
+	 * longer reachable.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!cmp_delta)
+		<span class="enscript-keyword">return</span> (expire &gt;= now);
+	<span class="enscript-comment">/*
+	 * If the caller supplied a reference time, consider the
+	 * host is reachable if the record hasn't expired (see above)
+	 * and if the reference time is within the past lr_reachable
+	 * seconds.
+	 */</span>
+	<span class="enscript-keyword">return</span> ((expire &gt;= now) &amp;&amp; (now - tval) &lt; lr-&gt;lr_reachable);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ifnet_llreach_reachable</span>(<span class="enscript-type">struct</span> if_llreach *lr)
+{
+	<span class="enscript-comment">/*
+	 * Check whether the cache is too old to be trusted.
+	 */</span>
+	<span class="enscript-keyword">return</span> (iflr_reachable(lr, 0, 0));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ifnet_llreach_reachable_delta</span>(<span class="enscript-type">struct</span> if_llreach *lr, u_int64_t tval)
+{
+	<span class="enscript-comment">/*
+	 * Check whether the cache is too old to be trusted.
+	 */</span>
+	<span class="enscript-keyword">return</span> (iflr_reachable(lr, 1, tval));
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ifnet_llreach_set_reachable</span>(<span class="enscript-type">struct</span> ifnet *ifp, u_int16_t llproto, <span class="enscript-type">void</span> *addr,
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> alen)
+{
+	<span class="enscript-type">struct</span> if_llreach find, *lr;
+
+	VERIFY(alen == IF_LLREACH_MAXLEN);	<span class="enscript-comment">/* for now */</span>
+
+	find.lr_key.proto = llproto;
+	bcopy(addr, &amp;find.lr_key.addr, IF_LLREACH_MAXLEN);
+
+	lck_rw_lock_shared(&amp;ifp-&gt;if_llreach_lock);
+	lr = RB_FIND(ll_reach_tree, &amp;ifp-&gt;if_ll_srcs, &amp;find);
+	<span class="enscript-keyword">if</span> (lr == NULL) {
+		lck_rw_done(&amp;ifp-&gt;if_llreach_lock);
+		<span class="enscript-keyword">return</span>;
+	}
+	<span class="enscript-comment">/*
+	 * No need for lr_lock; atomically update the last rcvd uptime.
+	 */</span>
+	lr-&gt;lr_lastrcvd = net_uptime();
+	lck_rw_done(&amp;ifp-&gt;if_llreach_lock);
+}
+
+<span class="enscript-type">struct</span> if_llreach *
+<span class="enscript-function-name">ifnet_llreach_alloc</span>(<span class="enscript-type">struct</span> ifnet *ifp, u_int16_t llproto, <span class="enscript-type">void</span> *addr,
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> alen, u_int64_t llreach_base)
+{
+	<span class="enscript-type">struct</span> if_llreach find, *lr;
+	<span class="enscript-type">struct</span> timeval cnow;
+
+	<span class="enscript-keyword">if</span> (llreach_base == 0)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	VERIFY(alen == IF_LLREACH_MAXLEN);	<span class="enscript-comment">/* for now */</span>
+
+	find.lr_key.proto = llproto;
+	bcopy(addr, &amp;find.lr_key.addr, IF_LLREACH_MAXLEN);
+
+	lck_rw_lock_shared(&amp;ifp-&gt;if_llreach_lock);
+	lr = RB_FIND(ll_reach_tree, &amp;ifp-&gt;if_ll_srcs, &amp;find);
+	<span class="enscript-keyword">if</span> (lr != NULL) {
+<span class="enscript-reference">found</span>:
+		IFLR_LOCK(lr);
+		VERIFY(lr-&gt;lr_reqcnt &gt;= 1);
+		lr-&gt;lr_reqcnt++;
+		VERIFY(lr-&gt;lr_reqcnt != 0);
+		IFLR_ADDREF_LOCKED(lr);		<span class="enscript-comment">/* for caller */</span>
+		lr-&gt;lr_lastrcvd = net_uptime();	<span class="enscript-comment">/* current approx. uptime */</span>
+		IFLR_UNLOCK(lr);
+		lck_rw_done(&amp;ifp-&gt;if_llreach_lock);
+		<span class="enscript-keyword">return</span> (lr);
+	}
+
+	<span class="enscript-keyword">if</span> (!lck_rw_lock_shared_to_exclusive(&amp;ifp-&gt;if_llreach_lock))
+		lck_rw_lock_exclusive(&amp;ifp-&gt;if_llreach_lock);
+
+	lck_rw_assert(&amp;ifp-&gt;if_llreach_lock, LCK_RW_ASSERT_EXCLUSIVE);
+
+	<span class="enscript-comment">/* in case things have changed while becoming writer */</span>
+	lr = RB_FIND(ll_reach_tree, &amp;ifp-&gt;if_ll_srcs, &amp;find);
+	<span class="enscript-keyword">if</span> (lr != NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">found</span>;
+
+	lr = iflr_alloc(M_WAITOK);
+	<span class="enscript-keyword">if</span> (lr == NULL) {
+		lck_rw_done(&amp;ifp-&gt;if_llreach_lock);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	IFLR_LOCK(lr);
+	lr-&gt;lr_reqcnt++;
+	VERIFY(lr-&gt;lr_reqcnt == 1);
+	IFLR_ADDREF_LOCKED(lr);			<span class="enscript-comment">/* for RB tree */</span>
+	IFLR_ADDREF_LOCKED(lr);			<span class="enscript-comment">/* for caller */</span>
+	lr-&gt;lr_lastrcvd = net_uptime();		<span class="enscript-comment">/* current approx. uptime */</span>
+	lr-&gt;lr_baseup = lr-&gt;lr_lastrcvd;	<span class="enscript-comment">/* base uptime */</span>
+	getmicrotime(&amp;cnow);
+	lr-&gt;lr_basecal = cnow.tv_sec;		<span class="enscript-comment">/* base calendar time */</span>
+	lr-&gt;lr_basereachable = llreach_base;
+	lr-&gt;lr_reachable = LL_COMPUTE_RTIME(lr-&gt;lr_basereachable * 1000);
+	lr-&gt;lr_debug |= IFD_ATTACHED;
+	lr-&gt;lr_ifp = ifp;
+	lr-&gt;lr_key.proto = llproto;
+	bcopy(addr, &amp;lr-&gt;lr_key.addr, IF_LLREACH_MAXLEN);
+	lr-&gt;lr_rssi = IFNET_RSSI_UNKNOWN;
+	lr-&gt;lr_lqm = IFNET_LQM_THRESH_UNKNOWN;
+	lr-&gt;lr_npm = IFNET_NPM_THRESH_UNKNOWN;
+	RB_INSERT(ll_reach_tree, &amp;ifp-&gt;if_ll_srcs, lr);
+	IFLR_UNLOCK(lr);
+	lck_rw_done(&amp;ifp-&gt;if_llreach_lock);
+
+	<span class="enscript-keyword">return</span> (lr);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ifnet_llreach_free</span>(<span class="enscript-type">struct</span> if_llreach *lr)
+{
+	<span class="enscript-type">struct</span> ifnet *ifp;
+
+	<span class="enscript-comment">/* no need to lock here; lr_ifp never changes */</span>
+	ifp = lr-&gt;lr_ifp;
+
+	lck_rw_lock_exclusive(&amp;ifp-&gt;if_llreach_lock);
+	IFLR_LOCK(lr);
+	<span class="enscript-keyword">if</span> (lr-&gt;lr_reqcnt == 0) {
+		panic(<span class="enscript-string">&quot;%s: lr=%p negative reqcnt&quot;</span>, __func__, lr);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	--lr-&gt;lr_reqcnt;
+	<span class="enscript-keyword">if</span> (lr-&gt;lr_reqcnt &gt; 0) {
+		IFLR_UNLOCK(lr);
+		lck_rw_done(&amp;ifp-&gt;if_llreach_lock);
+		IFLR_REMREF(lr);		<span class="enscript-comment">/* for caller */</span>
+		<span class="enscript-keyword">return</span>;
+	}
+	<span class="enscript-keyword">if</span> (!(lr-&gt;lr_debug &amp; IFD_ATTACHED)) {
+		panic(<span class="enscript-string">&quot;%s: Attempt to detach an unattached llreach lr=%p&quot;</span>,
+		    __func__, lr);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	lr-&gt;lr_debug &amp;= ~IFD_ATTACHED;
+	RB_REMOVE(ll_reach_tree, &amp;ifp-&gt;if_ll_srcs, lr);
+	IFLR_UNLOCK(lr);
+	lck_rw_done(&amp;ifp-&gt;if_llreach_lock);
+
+	IFLR_REMREF(lr);			<span class="enscript-comment">/* for RB tree */</span>
+	IFLR_REMREF(lr);			<span class="enscript-comment">/* for caller */</span>
+}
+
+u_int64_t
+<span class="enscript-function-name">ifnet_llreach_up2calexp</span>(<span class="enscript-type">struct</span> if_llreach *lr, u_int64_t uptime)
+{
+	u_int64_t calendar = 0;
+
+	<span class="enscript-keyword">if</span> (uptime != 0) {
+		<span class="enscript-type">struct</span> timeval cnow;
+		u_int64_t unow;
+
+		getmicrotime(&amp;cnow);	<span class="enscript-comment">/* current calendar time */</span>
+		unow = net_uptime();	<span class="enscript-comment">/* current approx. uptime */</span>
+		<span class="enscript-comment">/*
+		 * Take into account possible calendar time changes;
+		 * adjust base calendar value if necessary, i.e.
+		 * the calendar skew should equate to the uptime skew.
+		 */</span>
+		lr-&gt;lr_basecal += (cnow.tv_sec - lr-&gt;lr_basecal) -
+		    (unow - lr-&gt;lr_baseup);
+
+		calendar = lr-&gt;lr_basecal + lr-&gt;lr_reachable +
+		    (uptime - lr-&gt;lr_baseup);
+	}
+
+	<span class="enscript-keyword">return</span> (calendar);
+}
+
+u_int64_t
+<span class="enscript-function-name">ifnet_llreach_up2upexp</span>(<span class="enscript-type">struct</span> if_llreach *lr, u_int64_t uptime)
+{
+	<span class="enscript-keyword">return</span> (lr-&gt;lr_reachable + uptime);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ifnet_llreach_get_defrouter</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">int</span> af,
+    <span class="enscript-type">struct</span> ifnet_llreach_info *iflri)
+{
+	<span class="enscript-type">struct</span> radix_node_head *rnh;
+	<span class="enscript-type">struct</span> sockaddr_storage dst_ss, mask_ss;
+	<span class="enscript-type">struct</span> rtentry *rt;
+	<span class="enscript-type">int</span> error = ESRCH;
+
+	VERIFY(ifp != NULL &amp;&amp; iflri != NULL &amp;&amp;
+	    (af == AF_INET || af == AF_INET6));
+
+	bzero(iflri, <span class="enscript-keyword">sizeof</span> (*iflri));
+
+	<span class="enscript-keyword">if</span> ((rnh = rt_tables[af]) == NULL)
+		<span class="enscript-keyword">return</span> (error);
+
+	bzero(&amp;dst_ss, <span class="enscript-keyword">sizeof</span> (dst_ss));
+	bzero(&amp;mask_ss, <span class="enscript-keyword">sizeof</span> (mask_ss));
+	dst_ss.ss_family = af;
+	dst_ss.ss_len = (af == AF_INET) ? <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in) :
+	    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in6);
+
+	lck_mtx_lock(rnh_lock);
+	rt = rt_lookup(TRUE, SA(&amp;dst_ss), SA(&amp;mask_ss), rnh, ifp-&gt;if_index);
+	<span class="enscript-keyword">if</span> (rt != NULL) {
+		<span class="enscript-type">struct</span> rtentry *gwrt;
+
+		RT_LOCK(rt);
+		<span class="enscript-keyword">if</span> ((rt-&gt;rt_flags &amp; RTF_GATEWAY) &amp;&amp;
+		    (gwrt = rt-&gt;rt_gwroute) != NULL &amp;&amp;
+		    rt_key(rt)-&gt;sa_family == rt_key(gwrt)-&gt;sa_family &amp;&amp;
+		    (gwrt-&gt;rt_flags &amp; RTF_UP)) {
+			RT_UNLOCK(rt);
+			RT_LOCK(gwrt);
+			<span class="enscript-keyword">if</span> (gwrt-&gt;rt_llinfo_get_iflri != NULL) {
+				(*gwrt-&gt;rt_llinfo_get_iflri)(gwrt, iflri);
+				error = 0;
+			}
+			RT_UNLOCK(gwrt);
+		} <span class="enscript-keyword">else</span> {
+			RT_UNLOCK(rt);
+		}
+		rtfree_locked(rt);
+	}
+	lck_mtx_unlock(rnh_lock);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> if_llreach *
+<span class="enscript-function-name">iflr_alloc</span>(<span class="enscript-type">int</span> how)
+{
+	<span class="enscript-type">struct</span> if_llreach *lr;
+
+	lr = (how == M_WAITOK) ? zalloc(iflr_zone) : zalloc_noblock(iflr_zone);
+	<span class="enscript-keyword">if</span> (lr != NULL) {
+		bzero(lr, iflr_size);
+		lck_mtx_init(&amp;lr-&gt;lr_lock, ifnet_lock_group, ifnet_lock_attr);
+		lr-&gt;lr_debug |= IFD_ALLOC;
+	}
+	<span class="enscript-keyword">return</span> (lr);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">iflr_free</span>(<span class="enscript-type">struct</span> if_llreach *lr)
+{
+	IFLR_LOCK(lr);
+	<span class="enscript-keyword">if</span> (lr-&gt;lr_debug &amp; IFD_ATTACHED) {
+		panic(<span class="enscript-string">&quot;%s: attached lr=%p is being freed&quot;</span>, __func__, lr);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!(lr-&gt;lr_debug &amp; IFD_ALLOC)) {
+		panic(<span class="enscript-string">&quot;%s: lr %p cannot be freed&quot;</span>, __func__, lr);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (lr-&gt;lr_refcnt != 0) {
+		panic(<span class="enscript-string">&quot;%s: non-zero refcount lr=%p&quot;</span>, __func__, lr);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (lr-&gt;lr_reqcnt != 0) {
+		panic(<span class="enscript-string">&quot;%s: non-zero reqcnt lr=%p&quot;</span>, __func__, lr);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	lr-&gt;lr_debug &amp;= ~IFD_ALLOC;
+	IFLR_UNLOCK(lr);
+
+	lck_mtx_destroy(&amp;lr-&gt;lr_lock, ifnet_lock_group);
+	zfree(iflr_zone, lr);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">iflr_addref</span>(<span class="enscript-type">struct</span> if_llreach *lr, <span class="enscript-type">int</span> locked)
+{
+	<span class="enscript-keyword">if</span> (!locked)
+		IFLR_LOCK(lr);
+	<span class="enscript-keyword">else</span>
+		IFLR_LOCK_ASSERT_HELD(lr);
+
+	<span class="enscript-keyword">if</span> (++lr-&gt;lr_refcnt == 0) {
+		panic(<span class="enscript-string">&quot;%s: lr=%p wraparound refcnt&quot;</span>, __func__, lr);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	<span class="enscript-keyword">if</span> (!locked)
+		IFLR_UNLOCK(lr);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">iflr_remref</span>(<span class="enscript-type">struct</span> if_llreach *lr)
+{
+	IFLR_LOCK(lr);
+	<span class="enscript-keyword">if</span> (lr-&gt;lr_refcnt == 0) {
+		panic(<span class="enscript-string">&quot;%s: lr=%p negative refcnt&quot;</span>, __func__, lr);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	--lr-&gt;lr_refcnt;
+	<span class="enscript-keyword">if</span> (lr-&gt;lr_refcnt &gt; 0) {
+		IFLR_UNLOCK(lr);
+		<span class="enscript-keyword">return</span>;
+	}
+	IFLR_UNLOCK(lr);
+
+	iflr_free(lr);	<span class="enscript-comment">/* deallocate it */</span>
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ifnet_lr2ri</span>(<span class="enscript-type">struct</span> if_llreach *lr, <span class="enscript-type">struct</span> rt_reach_info *ri)
+{
+	<span class="enscript-type">struct</span> if_llreach_info lri;
+
+	IFLR_LOCK_ASSERT_HELD(lr);
+
+	bzero(ri, <span class="enscript-keyword">sizeof</span> (*ri));
+	ifnet_lr2lri(lr, &amp;lri);
+	ri-&gt;ri_refcnt = lri.lri_refcnt;
+	ri-&gt;ri_probes = lri.lri_probes;
+	ri-&gt;ri_rcv_expire = lri.lri_expire;
+	ri-&gt;ri_rssi = lri.lri_rssi;
+	ri-&gt;ri_lqm = lri.lri_lqm;
+	ri-&gt;ri_npm = lri.lri_npm;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ifnet_lr2iflri</span>(<span class="enscript-type">struct</span> if_llreach *lr, <span class="enscript-type">struct</span> ifnet_llreach_info *iflri)
+{
+	IFLR_LOCK_ASSERT_HELD(lr);
+
+	bzero(iflri, <span class="enscript-keyword">sizeof</span> (*iflri));
+	<span class="enscript-comment">/*
+	 * Note here we return request count, not actual memory refcnt.
+	 */</span>
+	iflri-&gt;iflri_refcnt = lr-&gt;lr_reqcnt;
+	iflri-&gt;iflri_probes = lr-&gt;lr_probes;
+	iflri-&gt;iflri_rcv_expire = ifnet_llreach_up2upexp(lr, lr-&gt;lr_lastrcvd);
+	iflri-&gt;iflri_curtime = net_uptime();
+	<span class="enscript-keyword">switch</span> (lr-&gt;lr_key.proto) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ETHERTYPE_IP</span>:
+		iflri-&gt;iflri_netproto = PF_INET;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ETHERTYPE_IPV6</span>:
+		iflri-&gt;iflri_netproto = PF_INET6;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-comment">/*
+		 * This shouldn't be possible for the time being,
+		 * since link-layer reachability records are only
+		 * kept for ARP and ND6.
+		 */</span>
+		iflri-&gt;iflri_netproto = PF_UNSPEC;
+		<span class="enscript-keyword">break</span>;
+	}
+	bcopy(&amp;lr-&gt;lr_key.addr, &amp;iflri-&gt;iflri_addr, IF_LLREACH_MAXLEN);
+	iflri-&gt;iflri_rssi = lr-&gt;lr_rssi;
+	iflri-&gt;iflri_lqm = lr-&gt;lr_lqm;
+	iflri-&gt;iflri_npm = lr-&gt;lr_npm;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ifnet_lr2lri</span>(<span class="enscript-type">struct</span> if_llreach *lr, <span class="enscript-type">struct</span> if_llreach_info *lri)
+{
+	IFLR_LOCK_ASSERT_HELD(lr);
+
+	bzero(lri, <span class="enscript-keyword">sizeof</span> (*lri));
+	<span class="enscript-comment">/*
+	 * Note here we return request count, not actual memory refcnt.
+	 */</span>
+	lri-&gt;lri_refcnt	= lr-&gt;lr_reqcnt;
+	lri-&gt;lri_ifindex = lr-&gt;lr_ifp-&gt;if_index;
+	lri-&gt;lri_probes	= lr-&gt;lr_probes;
+	lri-&gt;lri_expire = ifnet_llreach_up2calexp(lr, lr-&gt;lr_lastrcvd);
+	lri-&gt;lri_proto = lr-&gt;lr_key.proto;
+	bcopy(&amp;lr-&gt;lr_key.addr, &amp;lri-&gt;lri_addr, IF_LLREACH_MAXLEN);
+	lri-&gt;lri_rssi = lr-&gt;lr_rssi;
+	lri-&gt;lri_lqm = lr-&gt;lr_lqm;
+	lri-&gt;lri_npm = lr-&gt;lr_npm;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+sysctl_llreach_ifinfo SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>)
+	<span class="enscript-type">int</span>		*name, retval = 0;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	namelen;
+	uint32_t	ifindex;
+	<span class="enscript-type">struct</span> if_llreach *lr;
+	<span class="enscript-type">struct</span> if_llreach_info lri;
+	<span class="enscript-type">struct</span> ifnet	*ifp;
+
+	name = (<span class="enscript-type">int</span> *)arg1;
+	namelen = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)arg2;
+
+	<span class="enscript-keyword">if</span> (req-&gt;newptr != USER_ADDR_NULL)
+		<span class="enscript-keyword">return</span> (EPERM);
+
+	<span class="enscript-keyword">if</span> (namelen != 1)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	ifindex = name[0];
+	ifnet_head_lock_shared();
+	<span class="enscript-keyword">if</span> (ifindex &lt;= 0 || ifindex &gt; (u_int)if_index) {
+		printf(<span class="enscript-string">&quot;%s: ifindex %u out of range\n&quot;</span>, __func__, ifindex);
+		ifnet_head_done();
+		<span class="enscript-keyword">return</span> (ENOENT);
+	}
+
+	ifp = ifindex2ifnet[ifindex];
+	ifnet_head_done();
+	<span class="enscript-keyword">if</span> (ifp == NULL) {
+		printf(<span class="enscript-string">&quot;%s: no ifp for ifindex %u\n&quot;</span>, __func__, ifindex);
+		<span class="enscript-keyword">return</span> (ENOENT);
+	}
+
+	lck_rw_lock_shared(&amp;ifp-&gt;if_llreach_lock);
+	RB_FOREACH(lr, ll_reach_tree, &amp;ifp-&gt;if_ll_srcs) {
+		<span class="enscript-comment">/* Export to if_llreach_info structure */</span>
+		IFLR_LOCK(lr);
+		ifnet_lr2lri(lr, &amp;lri);
+		IFLR_UNLOCK(lr);
+
+		<span class="enscript-keyword">if</span> ((retval = SYSCTL_OUT(req, &amp;lri, <span class="enscript-keyword">sizeof</span> (lri))) != 0)
+			<span class="enscript-keyword">break</span>;
+	}
+	lck_rw_done(&amp;ifp-&gt;if_llreach_lock);
+
+	<span class="enscript-keyword">return</span> (retval);
+}
+</pre>
+<hr />
+</body></html>

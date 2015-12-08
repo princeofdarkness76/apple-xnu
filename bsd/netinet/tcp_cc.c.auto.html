@@ -1,0 +1,498 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>tcp_cc.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">tcp_cc.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2013-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kern_control.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_cc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/sdt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+<span class="enscript-type">struct</span> tcp_cc_debug_state {
+	u_int64_t ccd_tsns;
+	<span class="enscript-type">char</span> ccd_srcaddr[INET6_ADDRSTRLEN];
+	uint16_t ccd_srcport;
+	<span class="enscript-type">char</span> ccd_destaddr[INET6_ADDRSTRLEN];
+	uint16_t ccd_destport;
+	uint32_t ccd_snd_cwnd;
+	uint32_t ccd_snd_wnd;
+	uint32_t ccd_snd_ssthresh;
+	uint32_t ccd_pipeack;
+	uint32_t ccd_rttcur;
+	uint32_t ccd_rxtcur;
+	uint32_t ccd_srtt;
+	uint32_t ccd_event;
+	uint32_t ccd_sndcc;
+	uint32_t ccd_sndhiwat;
+	uint32_t ccd_bytes_acked;
+	<span class="enscript-type">union</span> {
+		<span class="enscript-type">struct</span> {
+			uint32_t ccd_last_max;
+			uint32_t ccd_tcp_win;
+			uint32_t ccd_target_win;
+			uint32_t ccd_avg_lastmax;
+			uint32_t ccd_mean_deviation;
+		} cubic_state;
+	} u;
+};
+
+<span class="enscript-type">int</span> tcp_cc_debug = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, cc_debug, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;tcp_cc_debug, 0, <span class="enscript-string">&quot;Enable debug data collection&quot;</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> tcp_cc_algo tcp_cc_newreno;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, newreno_sockets,
+	CTLFLAG_RD | CTLFLAG_LOCKED, &amp;tcp_cc_newreno.num_sockets,
+	0, <span class="enscript-string">&quot;Number of sockets using newreno&quot;</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> tcp_cc_algo tcp_cc_ledbat;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, background_sockets,
+	CTLFLAG_RD | CTLFLAG_LOCKED, &amp;tcp_cc_ledbat.num_sockets,
+	0, <span class="enscript-string">&quot;Number of sockets using background transport&quot;</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> tcp_cc_algo tcp_cc_cubic;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, cubic_sockets,
+	CTLFLAG_RD | CTLFLAG_LOCKED,&amp;tcp_cc_cubic.num_sockets, 
+	0, <span class="enscript-string">&quot;Number of sockets using cubic&quot;</span>);
+
+<span class="enscript-type">int</span> tcp_use_newreno = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, use_newreno,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;tcp_use_newreno, 0, 
+	<span class="enscript-string">&quot;Use TCP NewReno by default&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> tcp_check_cwnd_nonvalidated = 1;
+#<span class="enscript-reference">if</span> (<span class="enscript-variable-name">DEBUG</span> || <span class="enscript-variable-name">DEVELOPMENT</span>)
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, cwnd_nonvalidated,
+    CTLFLAG_RW | CTLFLAG_LOCKED, &amp;tcp_check_cwnd_nonvalidated, 0,
+    <span class="enscript-string">&quot;Check if congestion window is non-validated&quot;</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* (DEBUG || DEVELOPMENT) */</span>
+
+ #define SET_SNDSB_IDEAL_SIZE(sndsb, size) \
+	sndsb-&gt;sb_idealsize = min(max(tcp_sendspace, tp-&gt;snd_ssthresh), \
+	tcp_autosndbuf_max);
+
+<span class="enscript-comment">/* Array containing pointers to currently implemented TCP CC algorithms */</span>
+<span class="enscript-type">struct</span> tcp_cc_algo* tcp_cc_algo_list[TCP_CC_ALGO_COUNT];
+<span class="enscript-type">struct</span> zone *tcp_cc_zone;
+
+<span class="enscript-comment">/* Information for colelcting TCP debug information using control socket */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCP_CCDEBUG_CONTROL_NAME</span> <span class="enscript-string">&quot;com.apple.network.tcp_ccdebug&quot;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCP_CCDBG_NOUNIT</span> 0xffffffff
+<span class="enscript-type">static</span> kern_ctl_ref tcp_ccdbg_ctlref = NULL;
+<span class="enscript-type">volatile</span> UInt32 tcp_ccdbg_unit = TCP_CCDBG_NOUNIT;
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">tcp_cc_init</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">tcp_cc_control_register</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">tcp_ccdbg_control_connect</span>(kern_ctl_ref kctl,
+	<span class="enscript-type">struct</span> sockaddr_ctl *sac, <span class="enscript-type">void</span> **uinfo);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">tcp_ccdbg_control_disconnect</span>(kern_ctl_ref kctl,
+	u_int32_t unit, <span class="enscript-type">void</span> *uinfo);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> tcp_cc_algo tcp_cc_algo_none;
+<span class="enscript-comment">/*
+ * Initialize TCP congestion control algorithms.
+ */</span>
+ 
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_cc_init</span>(<span class="enscript-type">void</span>)
+{
+	bzero(&amp;tcp_cc_algo_list, <span class="enscript-keyword">sizeof</span>(tcp_cc_algo_list));
+	bzero(&amp;tcp_cc_algo_none, <span class="enscript-keyword">sizeof</span>(tcp_cc_algo_none));
+
+	tcp_cc_algo_list[TCP_CC_ALGO_NONE] = &amp;tcp_cc_algo_none;
+	tcp_cc_algo_list[TCP_CC_ALGO_NEWRENO_INDEX] = &amp;tcp_cc_newreno;
+	tcp_cc_algo_list[TCP_CC_ALGO_BACKGROUND_INDEX] = &amp;tcp_cc_ledbat;
+	tcp_cc_algo_list[TCP_CC_ALGO_CUBIC_INDEX] = &amp;tcp_cc_cubic;
+
+	tcp_cc_control_register();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_cc_control_register</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> kern_ctl_reg ccdbg_control;
+	errno_t err;
+
+	bzero(&amp;ccdbg_control, <span class="enscript-keyword">sizeof</span>(ccdbg_control));
+	strlcpy(ccdbg_control.ctl_name, TCP_CCDEBUG_CONTROL_NAME,
+	    <span class="enscript-keyword">sizeof</span>(ccdbg_control.ctl_name));
+	ccdbg_control.ctl_connect = tcp_ccdbg_control_connect;
+	ccdbg_control.ctl_disconnect = tcp_ccdbg_control_disconnect;
+	ccdbg_control.ctl_flags |= CTL_FLAG_PRIVILEGED;
+	ccdbg_control.ctl_flags |= CTL_FLAG_REG_SOCK_STREAM;
+
+	err = ctl_register(&amp;ccdbg_control, &amp;tcp_ccdbg_ctlref);
+	<span class="enscript-keyword">if</span> (err != 0) {
+		log(LOG_ERR, <span class="enscript-string">&quot;failed to register tcp_cc debug control&quot;</span>);
+	}
+}
+
+<span class="enscript-comment">/* Allow only one socket to connect at any time for debugging */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">tcp_ccdbg_control_connect</span>(kern_ctl_ref kctl, <span class="enscript-type">struct</span> sockaddr_ctl *sac,
+	<span class="enscript-type">void</span> **uinfo)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">kctl</span>)
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">uinfo</span>)
+
+	UInt32 old_value = TCP_CCDBG_NOUNIT;
+	UInt32 new_value = sac-&gt;sc_unit;
+
+	<span class="enscript-keyword">if</span> (tcp_ccdbg_unit != old_value)
+		<span class="enscript-keyword">return</span> (EALREADY);
+
+	<span class="enscript-keyword">if</span> (OSCompareAndSwap(old_value, new_value, &amp;tcp_ccdbg_unit))
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> (EALREADY);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">tcp_ccdbg_control_disconnect</span>(kern_ctl_ref kctl, u_int32_t unit, <span class="enscript-type">void</span> *uinfo)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">kctl</span>, <span class="enscript-variable-name">unit</span>, <span class="enscript-variable-name">uinfo</span>)
+
+	<span class="enscript-keyword">if</span> (unit == tcp_ccdbg_unit) {
+		UInt32 old_value = tcp_ccdbg_unit;
+		UInt32 new_value = TCP_CCDBG_NOUNIT;
+		<span class="enscript-keyword">if</span> (tcp_ccdbg_unit == new_value)
+			<span class="enscript-keyword">return</span> (0);
+
+		<span class="enscript-keyword">if</span> (!OSCompareAndSwap(old_value, new_value,
+			&amp;tcp_ccdbg_unit))
+			log(LOG_DEBUG, 
+			    <span class="enscript-string">&quot;failed to disconnect tcp_cc debug control&quot;</span>);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_ccdbg_trace</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th, int32_t event)
+{
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CONFIG_DTRACE</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">th</span>)
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !CONFIG_DTRACE */</span>
+	<span class="enscript-type">struct</span> inpcb *inp = tp-&gt;t_inpcb;
+
+	<span class="enscript-keyword">if</span> (tcp_cc_debug &amp;&amp; tcp_ccdbg_unit &gt; 0) {
+		<span class="enscript-type">struct</span> tcp_cc_debug_state dbg_state;
+		<span class="enscript-type">struct</span> timespec tv;
+
+		bzero(&amp;dbg_state, <span class="enscript-keyword">sizeof</span>(dbg_state));
+		
+		nanotime(&amp;tv);
+		<span class="enscript-comment">/* Take time in seconds */</span>
+		dbg_state.ccd_tsns = (tv.tv_sec * 1000000000) + tv.tv_nsec;
+		inet_ntop(SOCK_DOM(inp-&gt;inp_socket), 
+		    ((SOCK_DOM(inp-&gt;inp_socket) == PF_INET) ?
+		    (<span class="enscript-type">void</span> *)&amp;inp-&gt;inp_laddr.s_addr :
+		    (<span class="enscript-type">void</span> *)&amp;inp-&gt;in6p_laddr), dbg_state.ccd_srcaddr,
+		    <span class="enscript-keyword">sizeof</span>(dbg_state.ccd_srcaddr));
+		dbg_state.ccd_srcport = ntohs(inp-&gt;inp_lport);
+		inet_ntop(SOCK_DOM(inp-&gt;inp_socket),
+		    ((SOCK_DOM(inp-&gt;inp_socket) == PF_INET) ?
+		    (<span class="enscript-type">void</span> *)&amp;inp-&gt;inp_faddr.s_addr :
+		    (<span class="enscript-type">void</span> *)&amp;inp-&gt;in6p_faddr), dbg_state.ccd_destaddr,
+		    <span class="enscript-keyword">sizeof</span>(dbg_state.ccd_destaddr));
+		dbg_state.ccd_destport = ntohs(inp-&gt;inp_fport);
+
+		dbg_state.ccd_snd_cwnd = tp-&gt;snd_cwnd;
+		dbg_state.ccd_snd_wnd = tp-&gt;snd_wnd;
+		dbg_state.ccd_snd_ssthresh = tp-&gt;snd_ssthresh;
+		dbg_state.ccd_pipeack = tp-&gt;t_pipeack;
+		dbg_state.ccd_rttcur = tp-&gt;t_rttcur;
+		dbg_state.ccd_rxtcur = tp-&gt;t_rxtcur;
+		dbg_state.ccd_srtt = tp-&gt;t_srtt &gt;&gt; TCP_RTT_SHIFT;
+		dbg_state.ccd_event = event;
+		dbg_state.ccd_sndcc = inp-&gt;inp_socket-&gt;so_snd.sb_cc;
+		dbg_state.ccd_sndhiwat = inp-&gt;inp_socket-&gt;so_snd.sb_hiwat;
+		dbg_state.ccd_bytes_acked = tp-&gt;t_bytes_acked;
+		<span class="enscript-keyword">switch</span> (tp-&gt;tcp_cc_index) {
+		    <span class="enscript-keyword">case</span> <span class="enscript-reference">TCP_CC_ALGO_CUBIC_INDEX</span>:
+			dbg_state.u.cubic_state.ccd_last_max =
+			    tp-&gt;t_ccstate-&gt;cub_last_max;
+			dbg_state.u.cubic_state.ccd_tcp_win =
+			    tp-&gt;t_ccstate-&gt;cub_tcp_win;
+			dbg_state.u.cubic_state.ccd_target_win =
+			    tp-&gt;t_ccstate-&gt;cub_target_win;
+			dbg_state.u.cubic_state.ccd_avg_lastmax =
+			    tp-&gt;t_ccstate-&gt;cub_avg_lastmax;
+			dbg_state.u.cubic_state.ccd_mean_deviation =
+			    tp-&gt;t_ccstate-&gt;cub_mean_dev;
+			<span class="enscript-keyword">break</span>;
+		    <span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">break</span>;
+		}
+
+		ctl_enqueuedata(tcp_ccdbg_ctlref, tcp_ccdbg_unit,
+			&amp;dbg_state, <span class="enscript-keyword">sizeof</span>(dbg_state), 0);
+	}
+	DTRACE_TCP5(cc, <span class="enscript-type">void</span>, NULL, <span class="enscript-type">struct</span> inpcb *, inp,
+		<span class="enscript-type">struct</span> tcpcb *, tp, <span class="enscript-type">struct</span> tcphdr *, th, int32_t, event);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">tcp_cc_resize_sndbuf</span>(<span class="enscript-type">struct</span> tcpcb *tp)
+{
+	<span class="enscript-type">struct</span> sockbuf *sb;
+	<span class="enscript-comment">/*
+	 * If the send socket buffer size is bigger than ssthresh,
+	 * it is time to trim it because we do not want to hold
+	 * too many mbufs in the socket buffer
+	 */</span>
+	sb = &amp;tp-&gt;t_inpcb-&gt;inp_socket-&gt;so_snd;
+	<span class="enscript-keyword">if</span> (sb-&gt;sb_hiwat &gt; tp-&gt;snd_ssthresh &amp;&amp;
+		(sb-&gt;sb_flags &amp; SB_AUTOSIZE)) {
+		<span class="enscript-keyword">if</span> (sb-&gt;sb_idealsize &gt; tp-&gt;snd_ssthresh) {
+			SET_SNDSB_IDEAL_SIZE(sb, tp-&gt;snd_ssthresh);
+		}
+		sb-&gt;sb_flags |= SB_TRIM;
+	}
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">tcp_bad_rexmt_fix_sndbuf</span>(<span class="enscript-type">struct</span> tcpcb *tp)
+{
+	<span class="enscript-type">struct</span> sockbuf *sb;
+	sb = &amp;tp-&gt;t_inpcb-&gt;inp_socket-&gt;so_snd;
+	<span class="enscript-keyword">if</span> ((sb-&gt;sb_flags &amp; (SB_TRIM|SB_AUTOSIZE)) == (SB_TRIM|SB_AUTOSIZE)) {
+		<span class="enscript-comment">/*
+		 * If there was a retransmission that was not necessary 
+		 * then the size of socket buffer can be restored to
+		 * what it was before
+		 */</span>
+		SET_SNDSB_IDEAL_SIZE(sb, tp-&gt;snd_ssthresh);
+		<span class="enscript-keyword">if</span> (sb-&gt;sb_hiwat &lt;= sb-&gt;sb_idealsize) {
+			sbreserve(sb, sb-&gt;sb_idealsize);
+			sb-&gt;sb_flags &amp;= ~SB_TRIM;
+		}
+	}
+}
+
+<span class="enscript-comment">/*
+ * Calculate initial cwnd according to RFC3390.
+ *
+ * Keep the old ss_fltsz sysctl for ABI compabitility issues.
+ * but it will be overriden if tcp_do_rfc3390 sysctl when it is set.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_cc_cwnd_init_or_reset</span>(<span class="enscript-type">struct</span> tcpcb *tp)
+{
+	<span class="enscript-keyword">if</span> (tp-&gt;t_flags &amp; TF_LOCAL) {
+		tp-&gt;snd_cwnd = tp-&gt;t_maxseg * ss_fltsz_local;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* initial congestion window according to RFC 3390 */</span>
+		<span class="enscript-keyword">if</span> (tcp_do_rfc3390)
+			tp-&gt;snd_cwnd = min(4 * tp-&gt;t_maxseg,
+				max(2 * tp-&gt;t_maxseg, TCP_CC_CWND_INIT_BYTES));
+		<span class="enscript-keyword">else</span>
+			tp-&gt;snd_cwnd = tp-&gt;t_maxseg * ss_fltsz;
+	}
+}
+
+<span class="enscript-comment">/*
+ * Indicate whether this ack should be delayed.
+ * Here is the explanation for different settings of tcp_delack_enabled:
+ *  - when set to 1, the bhavior is same as when set to 2. We kept this 
+ *    for binary compatibility.
+ *  - when set to 2, will &quot;ack every other packet&quot;
+ *      - if our last ack wasn't a 0-sized window.
+ *      - if the peer hasn't sent us a TH_PUSH data packet (radar 3649245). 
+ *              If TH_PUSH is set, take this as a clue that we need to ACK 
+ *              with no delay. This helps higher level protocols who 
+ *              won't send us more data even if the window is open 
+ *              because their last &quot;segment&quot; hasn't been ACKed
+ *  - when set to 3,  will do &quot;streaming detection&quot; 
+ *      - if we receive more than &quot;maxseg_unacked&quot; full packets 
+ *        in the last 100ms
+ *      - if the connection is not in slow-start or idle or 
+ *        loss/recovery states
+ *      - if those criteria aren't met, it will ack every other packet.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">tcp_cc_delay_ack</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th)
+{
+	<span class="enscript-comment">/* If any flags other than TH_ACK is set, set &quot;end-of-write&quot; bit */</span>
+	<span class="enscript-keyword">if</span> ((th-&gt;th_flags &amp; ~TH_ACK))
+		tp-&gt;t_flagsext |= TF_STREAMEOW;
+	<span class="enscript-keyword">else</span>    
+		tp-&gt;t_flagsext &amp;= ~(TF_STREAMEOW);
+    
+	<span class="enscript-keyword">switch</span> (tcp_delack_enabled) {
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">1</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">2</span>:
+		<span class="enscript-keyword">if</span> ((tp-&gt;t_flags &amp; TF_RXWIN0SENT) == 0 &amp;&amp;
+		    (th-&gt;th_flags &amp; TH_PUSH) == 0 &amp;&amp;
+		    (tp-&gt;t_unacksegs == 1))
+			<span class="enscript-keyword">return</span>(1);
+		<span class="enscript-keyword">break</span>;  
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">3</span>:
+		<span class="enscript-keyword">if</span> ((tp-&gt;t_flags &amp; TF_RXWIN0SENT) == 0 &amp;&amp;
+		    (th-&gt;th_flags &amp; TH_PUSH) == 0 &amp;&amp;
+		    ((tp-&gt;t_unacksegs == 1) ||
+		    ((tp-&gt;t_flags &amp; TF_STRETCHACK) != 0 &amp;&amp;
+			tp-&gt;t_unacksegs &lt; (maxseg_unacked))))
+			<span class="enscript-keyword">return</span>(1);
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_cc_allocate_state</span>(<span class="enscript-type">struct</span> tcpcb *tp)
+{
+	<span class="enscript-keyword">if</span> (tp-&gt;tcp_cc_index == TCP_CC_ALGO_CUBIC_INDEX &amp;&amp;
+		tp-&gt;t_ccstate == NULL) {
+		tp-&gt;t_ccstate = (<span class="enscript-type">struct</span> tcp_ccstate *)zalloc(tcp_cc_zone);
+
+		<span class="enscript-comment">/*
+		 * If we could not allocate memory for congestion control
+		 * state, revert to using TCP NewReno as it does not
+		 * require any state
+		 */</span>
+		<span class="enscript-keyword">if</span> (tp-&gt;t_ccstate == NULL)
+			tp-&gt;tcp_cc_index = TCP_CC_ALGO_NEWRENO_INDEX;
+		<span class="enscript-keyword">else</span>
+			bzero(tp-&gt;t_ccstate, <span class="enscript-keyword">sizeof</span>(*tp-&gt;t_ccstate));
+	}
+}
+
+<span class="enscript-comment">/*
+ * If stretch ack was disabled automatically on long standing connections, 
+ * re-evaluate the situation after 15 minutes to enable it.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCP_STRETCHACK_DISABLE_WIN</span>	(15 * 60 * TCP_RETRANSHZ)
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_cc_after_idle_stretchack</span>(<span class="enscript-type">struct</span> tcpcb *tp)
+{
+	int32_t tdiff;
+
+	<span class="enscript-keyword">if</span> (!(tp-&gt;t_flagsext &amp; TF_DISABLE_STRETCHACK))
+		<span class="enscript-keyword">return</span>;
+
+	tdiff = timer_diff(tcp_now, 0, tp-&gt;rcv_nostrack_ts, 0);
+	<span class="enscript-keyword">if</span> (tdiff &lt; 0)
+		tdiff = -tdiff;
+
+	<span class="enscript-keyword">if</span> (tdiff &gt; TCP_STRETCHACK_DISABLE_WIN) {
+		tp-&gt;t_flagsext &amp;= ~TF_DISABLE_STRETCHACK;
+		tp-&gt;t_stretchack_delayed = 0;
+
+		tcp_reset_stretch_ack(tp);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Detect if the congestion window is non-vlidated according to
+ * draft-ietf-tcpm-newcwv-07
+ */</span>
+
+inline uint32_t
+<span class="enscript-function-name">tcp_cc_is_cwnd_nonvalidated</span>(<span class="enscript-type">struct</span> tcpcb *tp)
+{
+	<span class="enscript-keyword">if</span> (tp-&gt;t_pipeack == 0 || tcp_check_cwnd_nonvalidated == 0) {
+		tp-&gt;t_flagsext &amp;= ~TF_CWND_NONVALIDATED;
+		<span class="enscript-keyword">return</span> (0);
+	}
+	<span class="enscript-keyword">if</span> (tp-&gt;t_pipeack &gt;= (tp-&gt;snd_cwnd) &gt;&gt; 1)
+		tp-&gt;t_flagsext &amp;= ~TF_CWND_NONVALIDATED;
+	<span class="enscript-keyword">else</span>
+		tp-&gt;t_flagsext |= TF_CWND_NONVALIDATED;
+	<span class="enscript-keyword">return</span> (tp-&gt;t_flagsext &amp; TF_CWND_NONVALIDATED);
+}
+
+<span class="enscript-comment">/*
+ * Adjust congestion window in response to congestion in non-validated
+ * phase.
+ */</span>
+inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_cc_adjust_nonvalidated_cwnd</span>(<span class="enscript-type">struct</span> tcpcb *tp)
+{
+	tp-&gt;t_pipeack = tcp_get_max_pipeack(tp);
+	tcp_clear_pipeack_state(tp);
+	tp-&gt;snd_cwnd = (max(tp-&gt;t_pipeack, tp-&gt;t_lossflightsize) &gt;&gt; 1);
+	tp-&gt;snd_cwnd = max(tp-&gt;snd_cwnd, TCP_CC_CWND_INIT_BYTES);
+	tp-&gt;snd_cwnd += tp-&gt;t_maxseg * tcprexmtthresh;
+	tp-&gt;t_flagsext &amp;= ~TF_CWND_NONVALIDATED;
+}
+
+<span class="enscript-comment">/*
+ * Return maximum of all the pipeack samples. Since the number of samples
+ * TCP_PIPEACK_SAMPLE_COUNT is 3 at this time, it will be simpler to do
+ * a comparision. We should change ths if the number of samples increases.
+ */</span>
+inline u_int32_t
+<span class="enscript-function-name">tcp_get_max_pipeack</span>(<span class="enscript-type">struct</span> tcpcb *tp)
+{
+	u_int32_t max_pipeack = 0;
+	max_pipeack = (tp-&gt;t_pipeack_sample[0] &gt; tp-&gt;t_pipeack_sample[1]) ?
+	    tp-&gt;t_pipeack_sample[0] : tp-&gt;t_pipeack_sample[1];
+	max_pipeack = (tp-&gt;t_pipeack_sample[2] &gt; max_pipeack) ?
+	    tp-&gt;t_pipeack_sample[2] : max_pipeack;
+
+	<span class="enscript-keyword">return</span> (max_pipeack);
+}
+
+inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_clear_pipeack_state</span>(<span class="enscript-type">struct</span> tcpcb *tp)
+{
+	bzero(tp-&gt;t_pipeack_sample, <span class="enscript-keyword">sizeof</span>(tp-&gt;t_pipeack_sample));
+	tp-&gt;t_pipeack_ind = 0;
+	tp-&gt;t_lossflightsize = 0;
+}
+</pre>
+<hr />
+</body></html>

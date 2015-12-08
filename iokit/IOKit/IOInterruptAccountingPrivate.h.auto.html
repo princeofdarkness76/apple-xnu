@@ -1,0 +1,226 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOInterruptAccountingPrivate.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOInterruptAccountingPrivate.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2014 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__IOKIT_IOINTERRUPTACCOUNTING_PRIVATE_H</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">__IOKIT_IOINTERRUPTACCOUNTING_PRIVATE_H</span>
+
+<span class="enscript-comment">/*
+ * Header containing interrupt accounting related prototypes/defines that should be kept private to
+ * xnu itself (no userspace, no kexts, no nothing!).
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdint.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOInterruptAccounting.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+
+class OSObject;
+class IOSimpleReporter;
+
+<span class="enscript-comment">/*
+ * A brief overview.  Interrupt accounting (as implemented in IOKit) pertains to infrastructure for
+ * gathering information (currently, statistics only) on interrupts, and allowing them to be reported
+ * (either to userspace through IOReporting, or through lldb; lldb macros have yet to be implemented).
+ *
+ * Currently, interrupt accounting consists of of a relationship between an IOService (a nub, which
+ * will contain interrupt specifiers), an IOInterruptEventSource (if we add other interrupt target
+ * abstractions, support could be added for them as well), and objects necessary to support them.  An
+ * interrupt is &quot;named&quot; by a tuple of {provider, interrupt index}; no nub should ever have more than
+ * one interrupt registered for a given index, so this tuple should be unique.
+ *
+ * The &quot;additional objects&quot; mentioned above consist of an IOReporter object (lazily allocated and
+ * tied to the nub; once allocated it will live until the nub is freed), and a statistics object
+ * (effectively part of the IOIES in terms of lifecycle).  The statistics object is used by the
+ * interrupt codepath itself, and by the nub when it needs to update the reporter; the reporter is
+ * used to report values to userspace.
+ *
+ * As a consequence of the above relationship, we do not track statistics for directly registered
+ * interrupt handlers.  We have no guarantees what the handler or the target may be; if you don't
+ * follow the generic IOKit interrupt model, you will not be tracked by interrupt accounting.  For
+ * now, this means you must use an IOIES to be eligible for interrupt accounting.  We also do not
+ * track IOIES' that do not have providers (this is indicative that it is only being used to drive
+ * workloop activity, and is not actually handling interrupts).
+ */</span>
+
+<span class="enscript-comment">/*
+ * This is meant to let us set up the set of interrupt statistics we are actually interested in, by
+ * setting a boot-arg.  If we want to track a statistic, the bit corresponding to the index for that
+ * statistic should be set in the bitmask.
+ *
+ * There is a bit of a mismatch here, in that our IOReporting channel namespace allows for 256 statistics,
+ * but this bitmask actually limits it to 32.
+ */</span>
+<span class="enscript-type">extern</span> uint32_t gInterruptAccountingStatisticBitmask;
+
+<span class="enscript-comment">/*
+ * Check the bitmask by statistic index; useful for setting the initial value and conditionalizing code.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IA_GET_ENABLE_BIT</span>(statisticIndex) \
+    (((uint32_t) 1) &lt;&lt; ((uint32_t) statisticIndex))
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IA_GET_STATISTIC_ENABLED</span>(statisticIndex) \
+    (IA_GET_ENABLE_BIT(statisticIndex) &amp; gInterruptAccountingStatisticBitmask)
+
+<span class="enscript-comment">/*
+ * Check if any valid statistics are enabled.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IA_ANY_STATISTICS_ENABLED</span> \
+    ((IA_GET_ENABLE_BIT(kInterruptAccountingInvalidStatisticIndex) - 1) &amp; gInterruptAccountingStatisticBitmask)
+
+<span class="enscript-comment">/*
+ * Actual string names for the statistics we gather.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kInterruptAccountingChannelNameFirstLevelCount</span>       (<span class="enscript-string">&quot;               First Level Interrupt Handler Count&quot;</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kInterruptAccountingChannelNameSecondLevelCount</span>      (<span class="enscript-string">&quot;              Second Level Interrupt Handler Count&quot;</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kInterruptAccountingChannelNameFirstLevelTime</span>        (<span class="enscript-string">&quot;        First Level Interrupt Handler Time (MATUs)&quot;</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kInterruptAccountingChannelNameSecondLevelCPUTime</span>    (<span class="enscript-string">&quot;   Second Level Interrupt Handler CPU Time (MATUs)&quot;</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kInterruptAccountingChannelNameSecondLevelSystemTime</span> (<span class="enscript-string">&quot;Second Level Interrupt Handler System Time (MATUs)&quot;</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kInterruptAccountingChannelNameNoThreadWakeups</span>       (<span class="enscript-string">&quot;      Interrupts that did not try to wake a thread&quot;</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kInterruptAccountingChannelNameTotalThreadWakeups</span>    (<span class="enscript-string">&quot;       Sleeping threads woken up by this interrupt&quot;</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kInterruptAccountingChannelNamePackageWakeups</span>        (<span class="enscript-string">&quot;          Package wakeups caused by this interrupt&quot;</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kInterruptAccountingChannelNameCPUWakeups</span>            (<span class="enscript-string">&quot;              CPU wakeups caused by this interrupt&quot;</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kInterruptAccountingChannelNameIdleExits</span>             (<span class="enscript-string">&quot;               Idle exits caused by this interrupt&quot;</span>)
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> * <span class="enscript-type">const</span> kInterruptAccountingStatisticNameArray[IA_NUM_INTERRUPT_ACCOUNTING_STATISTICS] = {
+    [kInterruptAccountingFirstLevelCountIndex] = kInterruptAccountingChannelNameFirstLevelCount,
+    [kInterruptAccountingSecondLevelCountIndex] = kInterruptAccountingChannelNameSecondLevelCount,
+    [kInterruptAccountingFirstLevelTimeIndex] = kInterruptAccountingChannelNameFirstLevelTime,
+    [kInterruptAccountingSecondLevelCPUTimeIndex] = kInterruptAccountingChannelNameSecondLevelCPUTime,
+    [kInterruptAccountingSecondLevelSystemTimeIndex] = kInterruptAccountingChannelNameSecondLevelSystemTime,
+    [kInterruptAccountingNoThreadWakeupsIndex] = kInterruptAccountingChannelNameNoThreadWakeups,
+    [kInterruptAccountingTotalThreadWakeupsIndex] = kInterruptAccountingChannelNameTotalThreadWakeups,
+    [kInterruptAccountingPackageWakeupsIndex] = kInterruptAccountingChannelNamePackageWakeups,
+    [kInterruptAccountingCPUWakeupsIndex] = kInterruptAccountingChannelNameCPUWakeups,
+    [kInterruptAccountingIdleExitsIndex] = kInterruptAccountingChannelNameIdleExits,
+};
+
+<span class="enscript-comment">/*
+ * For updating the statistics in the data structure.  We cannot guarantee all of our platforms will be
+ * able to do a 64-bit store in a single transaction.  So, for new platforms, call out to the hardware
+ * atomic add routine; it will either be unsupported, or do the right thing.  For architectures or
+ * platforms that do support it; just do regular assignment.
+ *
+ * We use this routine instead of a lock because at the moment, there is no way (in the interrupt context)
+ * to reconcile a lock (even a spinlock) with the IOReporting synchonization (as we have no guarantee that
+ * IOReporting will not block on a mutex, which would result in a panic if it held a spinlock).  This
+ * means that reported values may have a disparity if we update the reporter values while an interrupt is
+ * being handled.
+ *
+ * Atomic modification should not be strictly required, as a given interrupt should not be dispatched to
+ * two processors at once (and the interrupt should serve to force out stores), and the second level
+ * handler should be synchonized by the work loop it runs on.
+ */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__x86_64__</span> || <span class="enscript-variable-name">__arm64</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IA_ADD_VALUE</span>(target, value) \
+    (*(target) += (value))
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IA_ADD_VALUE</span>(target, value) \
+    (OSAddAtomic64((value), (target)))
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * TODO: Should this be an OSObject?  Or properly pull in its methods as member functions?
+ */</span>
+<span class="enscript-type">struct</span> IOInterruptAccountingData {
+    OSObject * owner; <span class="enscript-comment">/* The owner of the statistics; currently always an IOIES or a subclass of it */</span>
+    queue_chain_t chain;
+    <span class="enscript-comment">/*
+     * We have no guarantee that the owner will not temporarily mutate its index value (i.e, in setWorkLoop
+     * for IOIES).  To ensure we can properly recalculate our own identity (and our channel IDs for the
+     * reporter), stash the index we set up the reporter with here.
+     *
+     * Note that we should never remap the interrupt (point it to a different specifier).  The mutation of
+     * the index value is usually to negate it; I am uncertain of the reason for this at the moment.  The
+     * practical impact being that we should never need to update the stashed index value; it should stay
+     * valid for the lifetime of the owner.
+     */</span>
+    <span class="enscript-type">int</span> interruptIndex;
+
+    <span class="enscript-comment">/*
+     * As long as we are based on the simple reporter, all our channels will be 64 bits.  Align the data
+     * to allow for safe atomic updates (we don't want to cross a cache line on any platform, but for some
+     * it would cause a panic).
+     */</span>
+    <span class="enscript-type">volatile</span> uint64_t interruptStatistics[IA_NUM_INTERRUPT_ACCOUNTING_STATISTICS] __attribute__((aligned(8)));
+};
+
+<span class="enscript-comment">/*
+ * Initializes global values/structures related to interrupt accounting.
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">interruptAccountingInit</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/*
+ * Routines for adding and removing objects from the global queue of IOInterruptAccountingData objects;
+ * the queue exists as a debugging aid (no entities other than these routines should care about the
+ * queue at runtime).
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">interruptAccountingDataAddToList</span>(IOInterruptAccountingData * data);
+<span class="enscript-type">void</span> <span class="enscript-function-name">interruptAccountingDataRemoveFromList</span>(IOInterruptAccountingData * data);
+
+<span class="enscript-comment">/*
+ * Updates reporter with the statistics contained within data.  Invoked when IOReporting has been asked
+ * for updated statistics; requiring explicit synchronization of data between the statistic fields and
+ * the reporter helps keep interrupt accounting overhead down.
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">interruptAccountingDataUpdateChannels</span>(IOInterruptAccountingData * data, IOSimpleReporter * reporter);
+
+<span class="enscript-comment">/*
+ * Initializes the statistics in data using the statistics currently held by reporter.  Typically invoked
+ * when data is first associated with reporter.  The nub that an interrupt is associated with will be
+ * longer lived than the interrupt; as a result, our owner may not be the first to register for a
+ * particular interrupt index with that nub, so we need to inherit the existing statistics (as we describe
+ * statistics in terms of {nub id, index}, not in terms of our owner).
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">interruptAccountingDataInheritChannels</span>(IOInterruptAccountingData * data, IOSimpleReporter * reporter);
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __IOKIT_IOINTERRUPTACCOUNTING_PRIVATE_H */</span>
+
+</pre>
+<hr />
+</body></html>

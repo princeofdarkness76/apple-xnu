@@ -1,0 +1,1733 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ah_core.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ah_core.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008-2011 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*	$FreeBSD: src/sys/netinet6/ah_core.c,v 1.2.2.4 2001/07/03 11:01:49 ume Exp $	*/</span>
+<span class="enscript-comment">/*	$KAME: ah_core.c,v 1.44 2001/03/12 11:24:39 itojun Exp $	*/</span>
+
+<span class="enscript-comment">/*
+ * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the project nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+<span class="enscript-comment">/*
+ * RFC1826/2402 authentication header.
+ */</span>
+
+<span class="enscript-comment">/* TODO: have shared routines  for hmac-* algorithms */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/icmp6.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipsec.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipsec6.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ah.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ah6.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPSEC_ESP</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/esp.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/esp6.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/pfkeyv2.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netkey/keydb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/crypto/md5.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/crypto/sha1.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/crypto/sha2.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">HMACSIZE</span>	16
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_sumsiz_1216</span>(<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_sumsiz_zero</span>(<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_none_mature</span>(<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_none_init</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, <span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_none_loop</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_none_result</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_keyed_md5_mature</span>(<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_keyed_md5_init</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, <span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_keyed_md5_loop</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_keyed_md5_result</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_keyed_sha1_mature</span>(<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_keyed_sha1_init</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, <span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_keyed_sha1_loop</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_keyed_sha1_result</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_hmac_md5_mature</span>(<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_hmac_md5_init</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, <span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_hmac_md5_loop</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_hmac_md5_result</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_hmac_sha1_mature</span>(<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_hmac_sha1_init</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, <span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_hmac_sha1_loop</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_hmac_sha1_result</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">AH_ALL_CRYPTO</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_sumsiz_sha2_256</span>(<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_hmac_sha2_256_mature</span>(<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_hmac_sha2_256_init</span>(<span class="enscript-type">struct</span> ah_algorithm_state *,
+	<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_hmac_sha2_256_loop</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_hmac_sha2_256_result</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_sumsiz_sha2_384</span>(<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_hmac_sha2_384_mature</span>(<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_hmac_sha2_384_init</span>(<span class="enscript-type">struct</span> ah_algorithm_state *,
+	<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_hmac_sha2_384_loop</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_hmac_sha2_384_result</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_sumsiz_sha2_512</span>(<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_hmac_sha2_512_mature</span>(<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ah_hmac_sha2_512_init</span>(<span class="enscript-type">struct</span> ah_algorithm_state *,
+	<span class="enscript-type">struct</span> secasvar *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_hmac_sha2_512_loop</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_hmac_sha2_512_result</span>(<span class="enscript-type">struct</span> ah_algorithm_state *, caddr_t, size_t);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* AH_ALL_CRYPTO */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ah_update_mbuf</span>(<span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>,
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ah_algorithm *, <span class="enscript-type">struct</span> ah_algorithm_state *);
+
+<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ah_algorithm *
+<span class="enscript-function-name">ah_algorithm_lookup</span>(idx)
+	<span class="enscript-type">int</span> idx;
+{
+	<span class="enscript-comment">/* checksum algorithms */</span>
+	<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ah_algorithm hmac_md5 =
+		{ ah_sumsiz_1216, ah_hmac_md5_mature, 128, 128, <span class="enscript-string">&quot;hmac-md5&quot;</span>,
+			ah_hmac_md5_init, ah_hmac_md5_loop,
+			ah_hmac_md5_result, };
+	<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ah_algorithm keyed_md5 =
+		{ ah_sumsiz_1216, ah_keyed_md5_mature, 128, 128, <span class="enscript-string">&quot;keyed-md5&quot;</span>,
+			ah_keyed_md5_init, ah_keyed_md5_loop,
+			ah_keyed_md5_result, };
+	<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ah_algorithm hmac_sha1 =
+		{ ah_sumsiz_1216, ah_hmac_sha1_mature, 160, 160, <span class="enscript-string">&quot;hmac-sha1&quot;</span>,
+			ah_hmac_sha1_init, ah_hmac_sha1_loop,
+			ah_hmac_sha1_result, };
+	<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ah_algorithm keyed_sha1 =
+		{ ah_sumsiz_1216, ah_keyed_sha1_mature, 160, 160, <span class="enscript-string">&quot;keyed-sha1&quot;</span>,
+			ah_keyed_sha1_init, ah_keyed_sha1_loop,
+			ah_keyed_sha1_result, };
+	<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ah_algorithm ah_none =
+		{ ah_sumsiz_zero, ah_none_mature, 0, 2048, <span class="enscript-string">&quot;none&quot;</span>,
+			ah_none_init, ah_none_loop, ah_none_result, };
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">AH_ALL_CRYPTO</span>
+	<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ah_algorithm hmac_sha2_256 =
+		{ ah_sumsiz_sha2_256, ah_hmac_sha2_256_mature, 256, 256,
+			<span class="enscript-string">&quot;hmac-sha2-256&quot;</span>,
+			ah_hmac_sha2_256_init, ah_hmac_sha2_256_loop,
+			ah_hmac_sha2_256_result, };
+	<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ah_algorithm hmac_sha2_384 =
+		{ ah_sumsiz_sha2_384, ah_hmac_sha2_384_mature, 384, 384,
+			<span class="enscript-string">&quot;hmac-sha2-384&quot;</span>,
+			ah_hmac_sha2_384_init, ah_hmac_sha2_384_loop,
+			ah_hmac_sha2_384_result, };
+	<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ah_algorithm hmac_sha2_512 =
+		{ ah_sumsiz_sha2_512, ah_hmac_sha2_512_mature, 512, 512,
+			<span class="enscript-string">&quot;hmac-sha2-512&quot;</span>,
+			ah_hmac_sha2_512_init, ah_hmac_sha2_512_loop,
+			ah_hmac_sha2_512_result, };
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* AH_ALL_CRYPTO */</span>
+
+	<span class="enscript-keyword">switch</span> (idx) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_AALG_MD5HMAC</span>:
+		<span class="enscript-keyword">return</span> &amp;hmac_md5;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_AALG_SHA1HMAC</span>:
+		<span class="enscript-keyword">return</span> &amp;hmac_sha1;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_X_AALG_MD5</span>:
+		<span class="enscript-keyword">return</span> &amp;keyed_md5;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_X_AALG_SHA</span>:
+		<span class="enscript-keyword">return</span> &amp;keyed_sha1;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_X_AALG_NULL</span>:
+		<span class="enscript-keyword">return</span> &amp;ah_none;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">AH_ALL_CRYPTO</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_X_AALG_SHA2_256</span>:
+		<span class="enscript-keyword">return</span> &amp;hmac_sha2_256;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_X_AALG_SHA2_384</span>:
+		<span class="enscript-keyword">return</span> &amp;hmac_sha2_384;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_X_AALG_SHA2_512</span>:
+		<span class="enscript-keyword">return</span> &amp;hmac_sha2_512;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* AH_ALL_CRYPTO */</span>
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> NULL;
+	}
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_sumsiz_1216</span>(sav)
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-keyword">if</span> (!sav)
+		<span class="enscript-keyword">return</span> -1;
+	<span class="enscript-keyword">if</span> (sav-&gt;flags &amp; SADB_X_EXT_OLD)
+		<span class="enscript-keyword">return</span> 16;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> 12;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_sumsiz_zero</span>(sav)
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-keyword">if</span> (!sav)
+		<span class="enscript-keyword">return</span> -1;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_none_mature</span>(sav)
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-keyword">if</span> (sav-&gt;sah-&gt;saidx.proto == IPPROTO_AH) {
+		ipseclog((LOG_ERR,
+		    <span class="enscript-string">&quot;ah_none_mature: protocol and algorithm mismatch.\n&quot;</span>));
+		<span class="enscript-keyword">return</span> 1;
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_none_init</span>(
+	<span class="enscript-type">struct</span> ah_algorithm_state *state,
+	__unused <span class="enscript-type">struct</span> secasvar *sav)
+{
+	state-&gt;foo = NULL;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_none_loop</span>(
+	__unused <span class="enscript-type">struct</span> ah_algorithm_state *state,
+	__unused caddr_t addr,
+	__unused size_t len)
+{
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_none_result</span>(
+	__unused <span class="enscript-type">struct</span> ah_algorithm_state *state,
+	__unused caddr_t addr,
+	__unused size_t l)
+{
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_keyed_md5_mature</span>(
+	__unused <span class="enscript-type">struct</span> secasvar *sav)
+{
+	<span class="enscript-comment">/* anything is okay */</span>
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_keyed_md5_init</span>(state, sav)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	size_t padlen;
+	size_t keybitlen;
+	u_int8_t buf[32] __attribute__((aligned(4)));
+
+	<span class="enscript-keyword">if</span> (!state)
+		panic(<span class="enscript-string">&quot;ah_keyed_md5_init: what?&quot;</span>);
+
+	state-&gt;sav = sav;
+	state-&gt;foo = (<span class="enscript-type">void</span> *)_MALLOC(<span class="enscript-keyword">sizeof</span>(MD5_CTX), M_TEMP, M_NOWAIT);
+	<span class="enscript-keyword">if</span> (state-&gt;foo == NULL)
+		<span class="enscript-keyword">return</span> ENOBUFS;
+
+	MD5Init((MD5_CTX *)state-&gt;foo);
+	<span class="enscript-keyword">if</span> (state-&gt;sav) {
+		MD5Update((MD5_CTX *)state-&gt;foo,
+			(u_int8_t *)_KEYBUF(state-&gt;sav-&gt;key_auth),
+			(u_int)_KEYLEN(state-&gt;sav-&gt;key_auth));
+
+		<span class="enscript-comment">/*
+		 * Pad after the key.
+		 * We cannot simply use md5_pad() since the function
+		 * won't update the total length.
+		 */</span>
+		<span class="enscript-keyword">if</span> (_KEYLEN(state-&gt;sav-&gt;key_auth) &lt; 56)
+			padlen = 64 - 8 - _KEYLEN(state-&gt;sav-&gt;key_auth);
+		<span class="enscript-keyword">else</span>
+			padlen = 64 + 64 - 8 - _KEYLEN(state-&gt;sav-&gt;key_auth);
+		keybitlen = _KEYLEN(state-&gt;sav-&gt;key_auth);
+		keybitlen *= 8;
+
+		buf[0] = 0x80;
+		MD5Update((MD5_CTX *)state-&gt;foo, &amp;buf[0], 1);
+		padlen--;
+
+		bzero(buf, <span class="enscript-keyword">sizeof</span>(buf));
+		<span class="enscript-keyword">while</span> (<span class="enscript-keyword">sizeof</span>(buf) &lt; padlen) {
+			MD5Update((MD5_CTX *)state-&gt;foo, &amp;buf[0], <span class="enscript-keyword">sizeof</span>(buf));
+			padlen -= <span class="enscript-keyword">sizeof</span>(buf);
+		}
+		<span class="enscript-keyword">if</span> (padlen) {
+			MD5Update((MD5_CTX *)state-&gt;foo, &amp;buf[0], padlen);
+		}
+
+		buf[0] = (keybitlen &gt;&gt; 0) &amp; 0xff;
+		buf[1] = (keybitlen &gt;&gt; 8) &amp; 0xff;
+		buf[2] = (keybitlen &gt;&gt; 16) &amp; 0xff;
+		buf[3] = (keybitlen &gt;&gt; 24) &amp; 0xff;
+		MD5Update((MD5_CTX *)state-&gt;foo, buf, 8);
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_keyed_md5_loop</span>(state, addr, len)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	caddr_t addr;
+	size_t len;
+{
+	<span class="enscript-keyword">if</span> (!state)
+		panic(<span class="enscript-string">&quot;ah_keyed_md5_loop: what?&quot;</span>);
+
+	MD5Update((MD5_CTX *)state-&gt;foo, addr, len);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_keyed_md5_result</span>(state, addr, l)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	caddr_t addr;
+	size_t l;
+{
+	u_char digest[16] __attribute__((aligned(4)));
+
+	<span class="enscript-keyword">if</span> (!state)
+		panic(<span class="enscript-string">&quot;ah_keyed_md5_result: what?&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (state-&gt;sav) {
+		MD5Update((MD5_CTX *)state-&gt;foo,
+			(u_int8_t *)_KEYBUF(state-&gt;sav-&gt;key_auth),
+			(u_int)_KEYLEN(state-&gt;sav-&gt;key_auth));
+	}
+	MD5Final(&amp;digest[0], (MD5_CTX *)state-&gt;foo);
+	FREE(state-&gt;foo, M_TEMP);
+	bcopy(&amp;digest[0], (<span class="enscript-type">void</span> *)addr, <span class="enscript-keyword">sizeof</span>(digest) &gt; l ? l : <span class="enscript-keyword">sizeof</span>(digest));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_keyed_sha1_mature</span>(sav)
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ah_algorithm *algo;
+
+	<span class="enscript-keyword">if</span> (!sav-&gt;key_auth) {
+		ipseclog((LOG_ERR, <span class="enscript-string">&quot;ah_keyed_sha1_mature: no key is given.\n&quot;</span>));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	algo = ah_algorithm_lookup(sav-&gt;alg_auth);
+	<span class="enscript-keyword">if</span> (!algo) {
+		ipseclog((LOG_ERR, <span class="enscript-string">&quot;ah_keyed_sha1_mature: unsupported algorithm.\n&quot;</span>));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	<span class="enscript-keyword">if</span> (sav-&gt;key_auth-&gt;sadb_key_bits &lt; algo-&gt;keymin
+	 || algo-&gt;keymax &lt; sav-&gt;key_auth-&gt;sadb_key_bits) {
+		ipseclog((LOG_ERR,
+		    <span class="enscript-string">&quot;ah_keyed_sha1_mature: invalid key length %d.\n&quot;</span>,
+		    sav-&gt;key_auth-&gt;sadb_key_bits));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_keyed_sha1_init</span>(state, sav)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	SHA1_CTX *ctxt;
+	size_t padlen;
+	size_t keybitlen;
+	u_int8_t buf[32] __attribute__((aligned(4)));
+
+	<span class="enscript-keyword">if</span> (!state)
+		panic(<span class="enscript-string">&quot;ah_keyed_sha1_init: what?&quot;</span>);
+
+	state-&gt;sav = sav;
+	state-&gt;foo = (<span class="enscript-type">void</span> *)_MALLOC(<span class="enscript-keyword">sizeof</span>(SHA1_CTX), M_TEMP, M_NOWAIT);
+	<span class="enscript-keyword">if</span> (!state-&gt;foo)
+		<span class="enscript-keyword">return</span> ENOBUFS;
+
+	ctxt = (SHA1_CTX *)state-&gt;foo;
+	SHA1Init(ctxt);
+
+	<span class="enscript-keyword">if</span> (state-&gt;sav) {
+		SHA1Update(ctxt, (u_int8_t *)_KEYBUF(state-&gt;sav-&gt;key_auth),
+			(u_int)_KEYLEN(state-&gt;sav-&gt;key_auth));
+
+		<span class="enscript-comment">/*
+		 * Pad after the key.
+		 */</span>
+		<span class="enscript-keyword">if</span> (_KEYLEN(state-&gt;sav-&gt;key_auth) &lt; 56)
+			padlen = 64 - 8 - _KEYLEN(state-&gt;sav-&gt;key_auth);
+		<span class="enscript-keyword">else</span>
+			padlen = 64 + 64 - 8 - _KEYLEN(state-&gt;sav-&gt;key_auth);
+		keybitlen = _KEYLEN(state-&gt;sav-&gt;key_auth);
+		keybitlen *= 8;
+
+		buf[0] = 0x80;
+		SHA1Update(ctxt, &amp;buf[0], 1);
+		padlen--;
+
+		bzero(buf, <span class="enscript-keyword">sizeof</span>(buf));
+		<span class="enscript-keyword">while</span> (<span class="enscript-keyword">sizeof</span>(buf) &lt; padlen) {
+			SHA1Update(ctxt, &amp;buf[0], <span class="enscript-keyword">sizeof</span>(buf));
+			padlen -= <span class="enscript-keyword">sizeof</span>(buf);
+		}
+		<span class="enscript-keyword">if</span> (padlen) {
+			SHA1Update(ctxt, &amp;buf[0], padlen);
+		}
+
+		buf[0] = (keybitlen &gt;&gt; 0) &amp; 0xff;
+		buf[1] = (keybitlen &gt;&gt; 8) &amp; 0xff;
+		buf[2] = (keybitlen &gt;&gt; 16) &amp; 0xff;
+		buf[3] = (keybitlen &gt;&gt; 24) &amp; 0xff;
+		SHA1Update(ctxt, buf, 8);
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_keyed_sha1_loop</span>(state, addr, len)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	caddr_t addr;
+	size_t len;
+{
+	SHA1_CTX *ctxt;
+
+	<span class="enscript-keyword">if</span> (!state || !state-&gt;foo)
+		panic(<span class="enscript-string">&quot;ah_keyed_sha1_loop: what?&quot;</span>);
+	ctxt = (SHA1_CTX *)state-&gt;foo;
+
+	SHA1Update(ctxt, (caddr_t)addr, (size_t)len);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_keyed_sha1_result</span>(state, addr, l)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	caddr_t addr;
+	size_t l;
+{
+	u_char digest[SHA1_RESULTLEN] __attribute__((aligned(4)));	<span class="enscript-comment">/* SHA-1 generates 160 bits */</span>
+	SHA1_CTX *ctxt;
+
+	<span class="enscript-keyword">if</span> (!state || !state-&gt;foo)
+		panic(<span class="enscript-string">&quot;ah_keyed_sha1_result: what?&quot;</span>);
+	ctxt = (SHA1_CTX *)state-&gt;foo;
+
+	<span class="enscript-keyword">if</span> (state-&gt;sav) {
+		SHA1Update(ctxt, (u_int8_t *)_KEYBUF(state-&gt;sav-&gt;key_auth),
+			(u_int)_KEYLEN(state-&gt;sav-&gt;key_auth));
+	}
+	SHA1Final((caddr_t)&amp;digest[0], ctxt);
+	bcopy(&amp;digest[0], (<span class="enscript-type">void</span> *)addr, <span class="enscript-keyword">sizeof</span>(digest) &gt; l ? l : <span class="enscript-keyword">sizeof</span>(digest));
+
+	FREE(state-&gt;foo, M_TEMP);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_hmac_md5_mature</span>(sav)
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ah_algorithm *algo;
+
+	<span class="enscript-keyword">if</span> (!sav-&gt;key_auth) {
+		ipseclog((LOG_ERR, <span class="enscript-string">&quot;ah_hmac_md5_mature: no key is given.\n&quot;</span>));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	algo = ah_algorithm_lookup(sav-&gt;alg_auth);
+	<span class="enscript-keyword">if</span> (!algo) {
+		ipseclog((LOG_ERR, <span class="enscript-string">&quot;ah_hmac_md5_mature: unsupported algorithm.\n&quot;</span>));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	<span class="enscript-keyword">if</span> (sav-&gt;key_auth-&gt;sadb_key_bits &lt; algo-&gt;keymin
+	 || algo-&gt;keymax &lt; sav-&gt;key_auth-&gt;sadb_key_bits) {
+		ipseclog((LOG_ERR,
+		    <span class="enscript-string">&quot;ah_hmac_md5_mature: invalid key length %d.\n&quot;</span>,
+		    sav-&gt;key_auth-&gt;sadb_key_bits));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_hmac_md5_init</span>(state, sav)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	u_char *ipad;
+	u_char *opad;
+	u_char tk[16] __attribute__((aligned(4)));
+	u_char *key;
+	size_t keylen;
+	size_t i;
+	MD5_CTX *ctxt;
+
+	<span class="enscript-keyword">if</span> (!state)
+		panic(<span class="enscript-string">&quot;ah_hmac_md5_init: what?&quot;</span>);
+
+	state-&gt;sav = sav;
+	state-&gt;foo = (<span class="enscript-type">void</span> *)_MALLOC(64 + 64 + <span class="enscript-keyword">sizeof</span>(MD5_CTX), M_TEMP, M_NOWAIT);
+	<span class="enscript-keyword">if</span> (!state-&gt;foo)
+		<span class="enscript-keyword">return</span> ENOBUFS;
+
+	ipad = (u_char *)state-&gt;foo;
+	opad = (u_char *)(ipad + 64);
+	ctxt = (MD5_CTX *)(<span class="enscript-type">void</span> *)(opad + 64);
+
+	<span class="enscript-comment">/* compress the key if necessery */</span>
+	<span class="enscript-keyword">if</span> (64 &lt; _KEYLEN(state-&gt;sav-&gt;key_auth)) {
+		MD5Init(ctxt);
+		MD5Update(ctxt, _KEYBUF(state-&gt;sav-&gt;key_auth),
+			_KEYLEN(state-&gt;sav-&gt;key_auth));
+		MD5Final(&amp;tk[0], ctxt);
+		key = &amp;tk[0];
+		keylen = 16;
+	} <span class="enscript-keyword">else</span> {
+		key = (u_char *) _KEYBUF(state-&gt;sav-&gt;key_auth);
+		keylen = _KEYLEN(state-&gt;sav-&gt;key_auth);
+	}
+
+	bzero(ipad, 64);
+	bzero(opad, 64);
+	bcopy(key, ipad, keylen);
+	bcopy(key, opad, keylen);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; 64; i++) {
+		ipad[i] ^= 0x36;
+		opad[i] ^= 0x5c;
+	}
+
+	MD5Init(ctxt);
+	MD5Update(ctxt, ipad, 64);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_hmac_md5_loop</span>(state, addr, len)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	caddr_t addr;
+	size_t len;
+{
+	MD5_CTX *ctxt;
+
+	<span class="enscript-keyword">if</span> (!state || !state-&gt;foo)
+		panic(<span class="enscript-string">&quot;ah_hmac_md5_loop: what?&quot;</span>);
+	ctxt = (MD5_CTX *)(<span class="enscript-type">void</span> *)(((caddr_t)state-&gt;foo) + 128);
+	MD5Update(ctxt, addr, len);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_hmac_md5_result</span>(state, addr, l)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	caddr_t addr;
+	size_t l;
+{
+	u_char digest[16] __attribute__((aligned(4)));
+	u_char *ipad;
+	u_char *opad;
+	MD5_CTX *ctxt;
+
+	<span class="enscript-keyword">if</span> (!state || !state-&gt;foo)
+		panic(<span class="enscript-string">&quot;ah_hmac_md5_result: what?&quot;</span>);
+
+	ipad = (u_char *)state-&gt;foo;
+	opad = (u_char *)(ipad + 64);
+	ctxt = (MD5_CTX *)(<span class="enscript-type">void</span> *)(opad + 64);
+
+	MD5Final(&amp;digest[0], ctxt);
+
+	MD5Init(ctxt);
+	MD5Update(ctxt, opad, 64);
+	MD5Update(ctxt, &amp;digest[0], <span class="enscript-keyword">sizeof</span>(digest));
+	MD5Final(&amp;digest[0], ctxt);
+
+	bcopy(&amp;digest[0], (<span class="enscript-type">void</span> *)addr, <span class="enscript-keyword">sizeof</span>(digest) &gt; l ? l : <span class="enscript-keyword">sizeof</span>(digest));
+
+	FREE(state-&gt;foo, M_TEMP);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_hmac_sha1_mature</span>(sav)
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ah_algorithm *algo;
+
+	<span class="enscript-keyword">if</span> (!sav-&gt;key_auth) {
+		ipseclog((LOG_ERR, <span class="enscript-string">&quot;ah_hmac_sha1_mature: no key is given.\n&quot;</span>));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	algo = ah_algorithm_lookup(sav-&gt;alg_auth);
+	<span class="enscript-keyword">if</span> (!algo) {
+		ipseclog((LOG_ERR, <span class="enscript-string">&quot;ah_hmac_sha1_mature: unsupported algorithm.\n&quot;</span>));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	<span class="enscript-keyword">if</span> (sav-&gt;key_auth-&gt;sadb_key_bits &lt; algo-&gt;keymin
+	 || algo-&gt;keymax &lt; sav-&gt;key_auth-&gt;sadb_key_bits) {
+		ipseclog((LOG_ERR,
+		    <span class="enscript-string">&quot;ah_hmac_sha1_mature: invalid key length %d.\n&quot;</span>,
+		    sav-&gt;key_auth-&gt;sadb_key_bits));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_hmac_sha1_init</span>(state, sav)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	u_char *ipad;
+	u_char *opad;
+	SHA1_CTX *ctxt;
+	u_char tk[SHA1_RESULTLEN] __attribute__((aligned(4)));	<span class="enscript-comment">/* SHA-1 generates 160 bits */</span>
+	u_char *key;
+	size_t keylen;
+	size_t i;
+
+	<span class="enscript-keyword">if</span> (!state)
+		panic(<span class="enscript-string">&quot;ah_hmac_sha1_init: what?&quot;</span>);
+
+	state-&gt;sav = sav;
+	state-&gt;foo = (<span class="enscript-type">void</span> *)_MALLOC(64 + 64 + <span class="enscript-keyword">sizeof</span>(SHA1_CTX),
+			M_TEMP, M_NOWAIT);
+	<span class="enscript-keyword">if</span> (!state-&gt;foo)
+		<span class="enscript-keyword">return</span> ENOBUFS;
+
+	ipad = (u_char *)state-&gt;foo;
+	opad = (u_char *)(ipad + 64);
+	ctxt = (SHA1_CTX *)(<span class="enscript-type">void</span> *)(opad + 64);
+
+	<span class="enscript-comment">/* compress the key if necessery */</span>
+	<span class="enscript-keyword">if</span> (64 &lt; _KEYLEN(state-&gt;sav-&gt;key_auth)) {
+		SHA1Init(ctxt);
+		SHA1Update(ctxt, _KEYBUF(state-&gt;sav-&gt;key_auth),
+			_KEYLEN(state-&gt;sav-&gt;key_auth));
+		SHA1Final(&amp;tk[0], ctxt);
+		key = &amp;tk[0];
+		keylen = SHA1_RESULTLEN;
+	} <span class="enscript-keyword">else</span> {
+		key = (u_char *) _KEYBUF(state-&gt;sav-&gt;key_auth);
+		keylen = _KEYLEN(state-&gt;sav-&gt;key_auth);
+	}
+
+	bzero(ipad, 64);
+	bzero(opad, 64);
+	bcopy(key, ipad, keylen);
+	bcopy(key, opad, keylen);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; 64; i++) {
+		ipad[i] ^= 0x36;
+		opad[i] ^= 0x5c;
+	}
+
+	SHA1Init(ctxt);
+	SHA1Update(ctxt, ipad, 64);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_hmac_sha1_loop</span>(state, addr, len)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	caddr_t addr;
+	size_t len;
+{
+	SHA1_CTX *ctxt;
+
+	<span class="enscript-keyword">if</span> (!state || !state-&gt;foo)
+		panic(<span class="enscript-string">&quot;ah_hmac_sha1_loop: what?&quot;</span>);
+
+	ctxt = (SHA1_CTX *)(<span class="enscript-type">void</span> *)(((u_char *)state-&gt;foo) + 128);
+	SHA1Update(ctxt, (caddr_t)addr, (size_t)len);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_hmac_sha1_result</span>(state, addr, l)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	caddr_t addr;
+	size_t l;
+{
+	u_char digest[SHA1_RESULTLEN] __attribute__((aligned(4)));	<span class="enscript-comment">/* SHA-1 generates 160 bits */</span>
+	u_char *ipad;
+	u_char *opad;
+	SHA1_CTX *ctxt;
+
+	<span class="enscript-keyword">if</span> (!state || !state-&gt;foo)
+		panic(<span class="enscript-string">&quot;ah_hmac_sha1_result: what?&quot;</span>);
+
+	ipad = (u_char *)state-&gt;foo;
+	opad = (u_char *)(ipad + 64);
+	ctxt = (SHA1_CTX *)(<span class="enscript-type">void</span> *)(opad + 64);
+
+	SHA1Final((caddr_t)&amp;digest[0], ctxt);
+
+	SHA1Init(ctxt);
+	SHA1Update(ctxt, opad, 64);
+	SHA1Update(ctxt, (caddr_t)&amp;digest[0], <span class="enscript-keyword">sizeof</span>(digest));
+	SHA1Final((caddr_t)&amp;digest[0], ctxt);
+
+	bcopy(&amp;digest[0], (<span class="enscript-type">void</span> *)addr, <span class="enscript-keyword">sizeof</span>(digest) &gt; l ? l : <span class="enscript-keyword">sizeof</span>(digest));
+
+	FREE(state-&gt;foo, M_TEMP);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">AH_ALL_CRYPTO</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_sumsiz_sha2_256</span>(sav)
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-keyword">if</span> (!sav)
+		<span class="enscript-keyword">return</span> -1;
+	<span class="enscript-comment">// return half the output size (in bytes), as per rfc 4868
+</span>	<span class="enscript-keyword">return</span> 16; <span class="enscript-comment">// 256/(8*2)
+</span>}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_hmac_sha2_256_mature</span>(sav)
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ah_algorithm *algo;
+
+	<span class="enscript-keyword">if</span> (!sav-&gt;key_auth) {
+		ipseclog((LOG_ERR,
+		    <span class="enscript-string">&quot;ah_hmac_sha2_256_mature: no key is given.\n&quot;</span>));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	algo = ah_algorithm_lookup(sav-&gt;alg_auth);
+	<span class="enscript-keyword">if</span> (!algo) {
+		ipseclog((LOG_ERR,
+		    <span class="enscript-string">&quot;ah_hmac_sha2_256_mature: unsupported algorithm.\n&quot;</span>));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	<span class="enscript-keyword">if</span> (sav-&gt;key_auth-&gt;sadb_key_bits &lt; algo-&gt;keymin ||
+	    algo-&gt;keymax &lt; sav-&gt;key_auth-&gt;sadb_key_bits) {
+		ipseclog((LOG_ERR,
+		    <span class="enscript-string">&quot;ah_hmac_sha2_256_mature: invalid key length %d.\n&quot;</span>,
+		    sav-&gt;key_auth-&gt;sadb_key_bits));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_hmac_sha2_256_init</span>(state, sav)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	u_char *ipad;
+	u_char *opad;
+	SHA256_CTX *ctxt;
+	u_char tk[SHA256_DIGEST_LENGTH] __attribute__((aligned(4)));
+	u_char *key;
+	size_t keylen;
+	size_t i;
+
+	<span class="enscript-keyword">if</span> (!state)
+		panic(<span class="enscript-string">&quot;ah_hmac_sha2_256_init: what?&quot;</span>);
+
+	state-&gt;sav = sav;
+	state-&gt;foo = (<span class="enscript-type">void</span> *)_MALLOC(64 + 64 + <span class="enscript-keyword">sizeof</span>(SHA256_CTX),
+	    M_TEMP, M_NOWAIT);
+	<span class="enscript-keyword">if</span> (!state-&gt;foo)
+		<span class="enscript-keyword">return</span> ENOBUFS;
+
+	ipad = (u_char *)state-&gt;foo;
+	opad = (u_char *)(ipad + 64);
+	ctxt = (SHA256_CTX *)(<span class="enscript-type">void</span> *)(opad + 64);
+
+	<span class="enscript-comment">/* compress the key if necessery */</span>
+	<span class="enscript-keyword">if</span> (64 &lt; _KEYLEN(state-&gt;sav-&gt;key_auth)) {
+		bzero(tk, <span class="enscript-keyword">sizeof</span>(tk));
+		bzero(ctxt, <span class="enscript-keyword">sizeof</span>(*ctxt));
+		SHA256_Init(ctxt);
+		SHA256_Update(ctxt, (<span class="enscript-type">const</span> u_int8_t *) _KEYBUF(state-&gt;sav-&gt;key_auth),
+		    _KEYLEN(state-&gt;sav-&gt;key_auth));
+		SHA256_Final(&amp;tk[0], ctxt);
+		key = &amp;tk[0];
+		keylen = <span class="enscript-keyword">sizeof</span>(tk) &lt; 64 ? <span class="enscript-keyword">sizeof</span>(tk) : 64;
+	} <span class="enscript-keyword">else</span> {
+		key = (u_char *) _KEYBUF(state-&gt;sav-&gt;key_auth);
+		keylen = _KEYLEN(state-&gt;sav-&gt;key_auth);
+	}
+
+	bzero(ipad, 64);
+	bzero(opad, 64);
+	bcopy(key, ipad, keylen);
+	bcopy(key, opad, keylen);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; 64; i++) {
+		ipad[i] ^= 0x36;
+		opad[i] ^= 0x5c;
+	}
+
+	bzero(ctxt, <span class="enscript-keyword">sizeof</span>(*ctxt));
+	SHA256_Init(ctxt);
+	SHA256_Update(ctxt, ipad, 64);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_hmac_sha2_256_loop</span>(state, addr, len)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	caddr_t addr;
+	size_t len;
+{
+	SHA256_CTX *ctxt;
+
+	<span class="enscript-keyword">if</span> (!state || !state-&gt;foo)
+		panic(<span class="enscript-string">&quot;ah_hmac_sha2_256_loop: what?&quot;</span>);
+
+	ctxt = (SHA256_CTX *)(<span class="enscript-type">void</span> *)(((u_char *)state-&gt;foo) + 128);
+	SHA256_Update(ctxt, (<span class="enscript-type">const</span> u_int8_t *)addr, (size_t)len);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_hmac_sha2_256_result</span>(state, addr, l)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	caddr_t addr;
+	size_t l;
+{
+	u_char digest[SHA256_DIGEST_LENGTH] __attribute__((aligned(4)));
+	u_char *ipad;
+	u_char *opad;
+	SHA256_CTX *ctxt;
+
+	<span class="enscript-keyword">if</span> (!state || !state-&gt;foo)
+		panic(<span class="enscript-string">&quot;ah_hmac_sha2_256_result: what?&quot;</span>);
+
+	ipad = (u_char *)state-&gt;foo;
+	opad = (u_char *)(ipad + 64);
+	ctxt = (SHA256_CTX *)(<span class="enscript-type">void</span> *)(opad + 64);
+
+	SHA256_Final((u_int8_t *)digest, ctxt);
+
+	SHA256_Init(ctxt);
+	SHA256_Update(ctxt, opad, 64);
+	SHA256_Update(ctxt, (<span class="enscript-type">const</span> u_int8_t *)digest, <span class="enscript-keyword">sizeof</span>(digest));
+	SHA256_Final((u_int8_t *)digest, ctxt);
+
+	bcopy(&amp;digest[0], (<span class="enscript-type">void</span> *)addr, <span class="enscript-keyword">sizeof</span>(digest) &gt; l ? l : <span class="enscript-keyword">sizeof</span>(digest));
+
+	FREE(state-&gt;foo, M_TEMP);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_sumsiz_sha2_384</span>(sav)
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-keyword">if</span> (!sav)
+		<span class="enscript-keyword">return</span> -1;
+	<span class="enscript-comment">// return half the output size (in bytes), as per rfc 4868
+</span>	<span class="enscript-keyword">return</span> 24; <span class="enscript-comment">// 384/(8*2)
+</span>}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_hmac_sha2_384_mature</span>(sav)
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ah_algorithm *algo;
+
+	<span class="enscript-keyword">if</span> (!sav-&gt;key_auth) {
+		ipseclog((LOG_ERR,
+		    <span class="enscript-string">&quot;ah_hmac_sha2_384_mature: no key is given.\n&quot;</span>));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	algo = ah_algorithm_lookup(sav-&gt;alg_auth);
+	<span class="enscript-keyword">if</span> (!algo) {
+		ipseclog((LOG_ERR,
+		    <span class="enscript-string">&quot;ah_hmac_sha2_384_mature: unsupported algorithm.\n&quot;</span>));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	<span class="enscript-keyword">if</span> (sav-&gt;key_auth-&gt;sadb_key_bits &lt; algo-&gt;keymin ||
+	    algo-&gt;keymax &lt; sav-&gt;key_auth-&gt;sadb_key_bits) {
+		ipseclog((LOG_ERR,
+		    <span class="enscript-string">&quot;ah_hmac_sha2_384_mature: invalid key length %d.\n&quot;</span>,
+		    sav-&gt;key_auth-&gt;sadb_key_bits));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_hmac_sha2_384_init</span>(state, sav)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	u_char *ipad;
+	u_char *opad;
+	SHA384_CTX *ctxt;
+	u_char tk[SHA384_DIGEST_LENGTH] __attribute__((aligned(4)));
+	u_char *key;
+	size_t keylen;
+	size_t i;
+
+	<span class="enscript-keyword">if</span> (!state)
+		panic(<span class="enscript-string">&quot;ah_hmac_sha2_384_init: what?&quot;</span>);
+
+	state-&gt;sav = sav;
+	state-&gt;foo = (<span class="enscript-type">void</span> *)_MALLOC(128 + 128 + <span class="enscript-keyword">sizeof</span>(SHA384_CTX),
+	    M_TEMP, M_NOWAIT | M_ZERO);
+	<span class="enscript-keyword">if</span> (!state-&gt;foo)
+		<span class="enscript-keyword">return</span> ENOBUFS;
+
+	ipad = (u_char *)state-&gt;foo;
+	opad = (u_char *)(ipad + 128);
+	ctxt = (SHA384_CTX *)(<span class="enscript-type">void</span> *)(opad + 128);
+
+	<span class="enscript-comment">/* compress the key if necessery */</span>
+	<span class="enscript-keyword">if</span> (128 &lt; _KEYLEN(state-&gt;sav-&gt;key_auth)) {
+		bzero(tk, <span class="enscript-keyword">sizeof</span>(tk));
+		bzero(ctxt, <span class="enscript-keyword">sizeof</span>(*ctxt));
+		SHA384_Init(ctxt);
+		SHA384_Update(ctxt, (<span class="enscript-type">const</span> u_int8_t *) _KEYBUF(state-&gt;sav-&gt;key_auth),
+		    _KEYLEN(state-&gt;sav-&gt;key_auth));
+		SHA384_Final(&amp;tk[0], ctxt);
+		key = &amp;tk[0];
+		keylen = <span class="enscript-keyword">sizeof</span>(tk) &lt; 128 ? <span class="enscript-keyword">sizeof</span>(tk) : 128;
+	} <span class="enscript-keyword">else</span> {
+		key = (u_char *) _KEYBUF(state-&gt;sav-&gt;key_auth);
+		keylen = _KEYLEN(state-&gt;sav-&gt;key_auth);
+	}
+
+	bzero(ipad, 128);
+	bzero(opad, 128);
+	bcopy(key, ipad, keylen);
+	bcopy(key, opad, keylen);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; 128; i++) {
+		ipad[i] ^= 0x36;
+		opad[i] ^= 0x5c;
+	}
+
+	bzero(ctxt, <span class="enscript-keyword">sizeof</span>(*ctxt));
+	SHA384_Init(ctxt);
+	SHA384_Update(ctxt, ipad, 128);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_hmac_sha2_384_loop</span>(state, addr, len)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	caddr_t addr;
+	size_t len;
+{
+	SHA384_CTX *ctxt;
+
+	<span class="enscript-keyword">if</span> (!state || !state-&gt;foo)
+		panic(<span class="enscript-string">&quot;ah_hmac_sha2_384_loop: what?&quot;</span>);
+
+	ctxt = (SHA384_CTX *)(<span class="enscript-type">void</span> *)(((u_char *)state-&gt;foo) + 256);
+	SHA384_Update(ctxt, (<span class="enscript-type">const</span> u_int8_t *)addr, (size_t)len);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_hmac_sha2_384_result</span>(state, addr, l)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	caddr_t addr;
+	size_t l;
+{
+	u_char digest[SHA384_DIGEST_LENGTH];
+	u_char *ipad;
+	u_char *opad;
+	SHA384_CTX *ctxt;
+
+	<span class="enscript-keyword">if</span> (!state || !state-&gt;foo)
+		panic(<span class="enscript-string">&quot;ah_hmac_sha2_384_result: what?&quot;</span>);
+
+	ipad = (u_char *)state-&gt;foo;
+	opad = (u_char *)(ipad + 128);
+	ctxt = (SHA384_CTX *)(<span class="enscript-type">void</span> *)(opad + 128);
+
+	SHA384_Final((u_int8_t *)digest, ctxt);
+
+	SHA384_Init(ctxt);
+	SHA384_Update(ctxt, opad, 128);
+	SHA384_Update(ctxt, (<span class="enscript-type">const</span> u_int8_t *)digest, <span class="enscript-keyword">sizeof</span>(digest));
+	SHA384_Final((u_int8_t *)digest, ctxt);
+
+	bcopy(&amp;digest[0], (<span class="enscript-type">void</span> *)addr, <span class="enscript-keyword">sizeof</span>(digest) &gt; l ? l : <span class="enscript-keyword">sizeof</span>(digest));
+
+	FREE(state-&gt;foo, M_TEMP);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_sumsiz_sha2_512</span>(sav)
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-keyword">if</span> (!sav)
+		<span class="enscript-keyword">return</span> -1;
+	<span class="enscript-comment">// return half the output size (in bytes), as per rfc 4868
+</span>	<span class="enscript-keyword">return</span> 32; <span class="enscript-comment">// 512/(8*2)
+</span>}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_hmac_sha2_512_mature</span>(sav)
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ah_algorithm *algo;
+
+	<span class="enscript-keyword">if</span> (!sav-&gt;key_auth) {
+		ipseclog((LOG_ERR,
+		    <span class="enscript-string">&quot;ah_hmac_sha2_512_mature: no key is given.\n&quot;</span>));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	algo = ah_algorithm_lookup(sav-&gt;alg_auth);
+	<span class="enscript-keyword">if</span> (!algo) {
+		ipseclog((LOG_ERR,
+		    <span class="enscript-string">&quot;ah_hmac_sha2_512_mature: unsupported algorithm.\n&quot;</span>));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	<span class="enscript-keyword">if</span> (sav-&gt;key_auth-&gt;sadb_key_bits &lt; algo-&gt;keymin ||
+	    algo-&gt;keymax &lt; sav-&gt;key_auth-&gt;sadb_key_bits) {
+		ipseclog((LOG_ERR,
+		    <span class="enscript-string">&quot;ah_hmac_sha2_512_mature: invalid key length %d.\n&quot;</span>,
+		    sav-&gt;key_auth-&gt;sadb_key_bits));
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ah_hmac_sha2_512_init</span>(state, sav)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	u_char *ipad;
+	u_char *opad;
+	SHA512_CTX *ctxt;
+	u_char tk[SHA512_DIGEST_LENGTH] __attribute__((aligned(4)));
+	u_char *key;
+	size_t keylen;
+	size_t i;
+
+	<span class="enscript-keyword">if</span> (!state)
+		panic(<span class="enscript-string">&quot;ah_hmac_sha2_512_init: what?&quot;</span>);
+
+	state-&gt;sav = sav;
+	state-&gt;foo = (<span class="enscript-type">void</span> *)_MALLOC(128 + 128 + <span class="enscript-keyword">sizeof</span>(SHA512_CTX),
+	    M_TEMP, M_NOWAIT | M_ZERO);
+	<span class="enscript-keyword">if</span> (!state-&gt;foo)
+		<span class="enscript-keyword">return</span> ENOBUFS;
+
+	ipad = (u_char *)state-&gt;foo;
+	opad = (u_char *)(ipad + 128);
+	ctxt = (SHA512_CTX *)(<span class="enscript-type">void</span> *)(opad + 128);
+
+	<span class="enscript-comment">/* compress the key if necessery */</span>
+	<span class="enscript-keyword">if</span> (128 &lt; _KEYLEN(state-&gt;sav-&gt;key_auth)) {
+		bzero(tk, <span class="enscript-keyword">sizeof</span>(tk));
+		bzero(ctxt, <span class="enscript-keyword">sizeof</span>(*ctxt));
+		SHA512_Init(ctxt);
+		SHA512_Update(ctxt, (<span class="enscript-type">const</span> u_int8_t *) _KEYBUF(state-&gt;sav-&gt;key_auth),
+		    _KEYLEN(state-&gt;sav-&gt;key_auth));
+		SHA512_Final(&amp;tk[0], ctxt);
+		key = &amp;tk[0];
+		keylen = <span class="enscript-keyword">sizeof</span>(tk) &lt; 128 ? <span class="enscript-keyword">sizeof</span>(tk) : 128;
+	} <span class="enscript-keyword">else</span> {
+		key = (u_char *) _KEYBUF(state-&gt;sav-&gt;key_auth);
+		keylen = _KEYLEN(state-&gt;sav-&gt;key_auth);
+	}
+
+	bzero(ipad, 128);
+	bzero(opad, 128);
+	bcopy(key, ipad, keylen);
+	bcopy(key, opad, keylen);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; 128; i++) {
+		ipad[i] ^= 0x36;
+		opad[i] ^= 0x5c;
+	}
+
+	bzero(ctxt, <span class="enscript-keyword">sizeof</span>(*ctxt));
+	SHA512_Init(ctxt);
+	SHA512_Update(ctxt, ipad, 128);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_hmac_sha2_512_loop</span>(state, addr, len)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	caddr_t addr;
+	size_t len;
+{
+	SHA512_CTX *ctxt;
+
+	<span class="enscript-keyword">if</span> (!state || !state-&gt;foo)
+		panic(<span class="enscript-string">&quot;ah_hmac_sha2_512_loop: what?&quot;</span>);
+
+	ctxt = (SHA512_CTX *)(<span class="enscript-type">void</span> *)(((u_char *)state-&gt;foo) + 256);
+	SHA512_Update(ctxt, (<span class="enscript-type">const</span> u_int8_t *) addr, (size_t)len);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_hmac_sha2_512_result</span>(state, addr, l)
+	<span class="enscript-type">struct</span> ah_algorithm_state *state;
+	caddr_t addr;
+	size_t l;
+{
+	u_char digest[SHA512_DIGEST_LENGTH] __attribute__((aligned(4)));
+	u_char *ipad;
+	u_char *opad;
+	SHA512_CTX *ctxt;
+
+	<span class="enscript-keyword">if</span> (!state || !state-&gt;foo)
+		panic(<span class="enscript-string">&quot;ah_hmac_sha2_512_result: what?&quot;</span>);
+
+	ipad = (u_char *)state-&gt;foo;
+	opad = (u_char *)(ipad + 128);
+	ctxt = (SHA512_CTX *)(<span class="enscript-type">void</span> *)(opad + 128);
+
+	SHA512_Final((u_int8_t *)digest, ctxt);
+
+	SHA512_Init(ctxt);
+	SHA512_Update(ctxt, opad, 128);
+	SHA512_Update(ctxt, (<span class="enscript-type">const</span> u_int8_t *)digest, <span class="enscript-keyword">sizeof</span>(digest));
+	SHA512_Final((u_int8_t *)digest, ctxt);
+
+	bcopy(&amp;digest[0], (<span class="enscript-type">void</span> *)addr, <span class="enscript-keyword">sizeof</span>(digest) &gt; l ? l : <span class="enscript-keyword">sizeof</span>(digest));
+
+	FREE(state-&gt;foo, M_TEMP);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* AH_ALL_CRYPTO */</span>
+
+<span class="enscript-comment">/*------------------------------------------------------------*/</span>
+
+<span class="enscript-comment">/*
+ * go generate the checksum.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ah_update_mbuf</span>(m, off, len, algo, algos)
+	<span class="enscript-type">struct</span> mbuf *m;
+	<span class="enscript-type">int</span> off;
+	<span class="enscript-type">int</span> len;
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ah_algorithm *algo;
+	<span class="enscript-type">struct</span> ah_algorithm_state *algos;
+{
+	<span class="enscript-type">struct</span> mbuf *n;
+	<span class="enscript-type">int</span> tlen;
+
+	<span class="enscript-comment">/* easy case first */</span>
+	<span class="enscript-keyword">if</span> (off + len &lt;= m-&gt;m_len) {
+		(algo-&gt;update)(algos, mtod(m, caddr_t) + off, len);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">for</span> (n = m; n; n = n-&gt;m_next) {
+		<span class="enscript-keyword">if</span> (off &lt; n-&gt;m_len)
+			<span class="enscript-keyword">break</span>;
+
+		off -= n-&gt;m_len;
+	}
+
+	<span class="enscript-keyword">if</span> (!n)
+		panic(<span class="enscript-string">&quot;ah_update_mbuf: wrong offset specified&quot;</span>);
+
+	<span class="enscript-keyword">for</span> (<span class="enscript-comment">/*nothing*/</span>; n &amp;&amp; len &gt; 0; n = n-&gt;m_next) {
+		<span class="enscript-keyword">if</span> (n-&gt;m_len == 0)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (n-&gt;m_len - off &lt; len)
+			tlen = n-&gt;m_len - off;
+		<span class="enscript-keyword">else</span>
+			tlen = len;
+
+		(algo-&gt;update)(algos, mtod(n, caddr_t) + off, tlen);
+
+		len -= tlen;
+		off = 0;
+	}
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+<span class="enscript-comment">/*
+ * Go generate the checksum. This function won't modify the mbuf chain
+ * except AH itself.
+ *
+ * NOTE: the function does not free mbuf on failure.
+ * Don't use m_copy(), it will try to share cluster mbuf by using refcnt.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ah4_calccksum</span>(m, ahdat, len, algo, sav)
+	<span class="enscript-type">struct</span> mbuf *m;
+	caddr_t ahdat;
+	size_t len;
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ah_algorithm *algo;
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-type">int</span> off;
+	<span class="enscript-type">int</span> hdrtype;
+	size_t advancewidth;
+	<span class="enscript-type">struct</span> ah_algorithm_state algos;
+	u_char sumbuf[AH_MAXSUMSIZE] __attribute__((aligned(4)));
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> ahseen;
+	<span class="enscript-type">struct</span> mbuf *n = NULL;
+
+	<span class="enscript-keyword">if</span> ((m-&gt;m_flags &amp; M_PKTHDR) == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	ahseen = 0;
+	hdrtype = -1;	<span class="enscript-comment">/*dummy, it is called IPPROTO_IP*/</span>
+
+	off = 0;
+
+	error = (algo-&gt;init)(&amp;algos, sav);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+
+	advancewidth = 0;	<span class="enscript-comment">/*safety*/</span>
+
+<span class="enscript-reference">again</span>:
+	<span class="enscript-comment">/* gory. */</span>
+	<span class="enscript-keyword">switch</span> (hdrtype) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">-1</span>:	<span class="enscript-comment">/*first one only*/</span>
+	    {
+		<span class="enscript-comment">/*
+		 * copy ip hdr, modify to fit the AH checksum rule,
+		 * then take a checksum.
+		 */</span>
+		<span class="enscript-type">struct</span> ip iphdr;
+		size_t hlen;
+
+		m_copydata(m, off, <span class="enscript-keyword">sizeof</span>(iphdr), (caddr_t)&amp;iphdr);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">_IP_VHL</span>
+		hlen = IP_VHL_HL(iphdr.ip_vhl) &lt;&lt; 2;
+#<span class="enscript-reference">else</span>
+		hlen = iphdr.ip_hl &lt;&lt; 2;
+#<span class="enscript-reference">endif</span>
+		iphdr.ip_ttl = 0;
+		iphdr.ip_sum = htons(0);
+		<span class="enscript-keyword">if</span> (ip4_ah_cleartos)
+			iphdr.ip_tos = 0;
+		iphdr.ip_off = htons(ntohs(iphdr.ip_off) &amp; ip4_ah_offsetmask);
+		(algo-&gt;update)(&amp;algos, (caddr_t)&amp;iphdr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip));
+
+		<span class="enscript-keyword">if</span> (hlen != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip)) {
+			u_char *p;
+			<span class="enscript-type">int</span> i, l, skip;
+
+			<span class="enscript-keyword">if</span> (hlen &gt; MCLBYTES) {
+				error = EMSGSIZE;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+			}
+			MGET(n, M_DONTWAIT, MT_DATA);
+			<span class="enscript-keyword">if</span> (n &amp;&amp; hlen &gt; MLEN) {
+				MCLGET(n, M_DONTWAIT);
+				<span class="enscript-keyword">if</span> ((n-&gt;m_flags &amp; M_EXT) == 0) {
+					m_free(n);
+					n = NULL;
+				}
+			}
+			<span class="enscript-keyword">if</span> (n == NULL) {
+				error = ENOBUFS;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+			}
+			m_copydata(m, off, hlen, mtod(n, caddr_t));
+
+			<span class="enscript-comment">/*
+			 * IP options processing.
+			 * See RFC2402 appendix A.
+			 */</span>
+			p = mtod(n, u_char *);
+			i = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip);
+			<span class="enscript-keyword">while</span> (i &lt; hlen) {
+				<span class="enscript-keyword">if</span> (i + IPOPT_OPTVAL &gt;= hlen) {
+					ipseclog((LOG_ERR, <span class="enscript-string">&quot;ah4_calccksum: &quot;</span>
+					    <span class="enscript-string">&quot;invalid IP option\n&quot;</span>));
+					error = EINVAL;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+				}
+				<span class="enscript-keyword">if</span> (p[i + IPOPT_OPTVAL] == IPOPT_EOL ||
+				    p[i + IPOPT_OPTVAL] == IPOPT_NOP ||
+				    i + IPOPT_OLEN &lt; hlen)
+					;
+				<span class="enscript-keyword">else</span> {
+					ipseclog((LOG_ERR,
+					    <span class="enscript-string">&quot;ah4_calccksum: invalid IP option &quot;</span>
+					    <span class="enscript-string">&quot;(type=%02x)\n&quot;</span>,
+					    p[i + IPOPT_OPTVAL]));
+					error = EINVAL;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+				}
+
+				skip = 1;
+				<span class="enscript-keyword">switch</span> (p[i + IPOPT_OPTVAL]) {
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">IPOPT_EOL</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">IPOPT_NOP</span>:
+					l = 1;
+					skip = 0;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">IPOPT_SECURITY</span>:	<span class="enscript-comment">/* 0x82 */</span>
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">0x85</span>:	<span class="enscript-comment">/* Extended security */</span>
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">0x86</span>:	<span class="enscript-comment">/* Commercial security */</span>
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">0x94</span>:	<span class="enscript-comment">/* Router alert */</span>
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">0x95</span>:	<span class="enscript-comment">/* RFC1770 */</span>
+					l = p[i + IPOPT_OLEN];
+					<span class="enscript-keyword">if</span> (l &lt; 2)
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalopt</span>;
+					skip = 0;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-reference">default</span>:
+					l = p[i + IPOPT_OLEN];
+					<span class="enscript-keyword">if</span> (l &lt; 2)
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">invalopt</span>;
+					skip = 1;
+					<span class="enscript-keyword">break</span>;
+				}
+				<span class="enscript-keyword">if</span> (l &lt; 1 || hlen - i &lt; l) {
+			<span class="enscript-reference">invalopt</span>:
+					ipseclog((LOG_ERR,
+					    <span class="enscript-string">&quot;ah4_calccksum: invalid IP option &quot;</span>
+					    <span class="enscript-string">&quot;(type=%02x len=%02x)\n&quot;</span>,
+					    p[i + IPOPT_OPTVAL],
+					    p[i + IPOPT_OLEN]));
+					error = EINVAL;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+				}
+				<span class="enscript-keyword">if</span> (skip)
+					bzero(p + i, l);
+				<span class="enscript-keyword">if</span> (p[i + IPOPT_OPTVAL] == IPOPT_EOL)
+					<span class="enscript-keyword">break</span>;
+				i += l;
+			}
+
+			p = mtod(n, u_char *) + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip);
+			(algo-&gt;update)(&amp;algos, (caddr_t)p, hlen - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip));
+
+			m_free(n);
+			n = NULL;
+		}
+
+		hdrtype = (iphdr.ip_p) &amp; 0xff;
+		advancewidth = hlen;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPPROTO_AH</span>:
+	    {
+		<span class="enscript-type">struct</span> ah ah;
+		<span class="enscript-type">int</span> siz;
+		<span class="enscript-type">int</span> hdrsiz;
+		<span class="enscript-type">int</span> totlen;
+
+		m_copydata(m, off, <span class="enscript-keyword">sizeof</span>(ah), (caddr_t)&amp;ah);
+		hdrsiz = (sav-&gt;flags &amp; SADB_X_EXT_OLD)
+				? <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ah)
+				: <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> newah);
+		siz = (*algo-&gt;sumsiz)(sav);
+		totlen = (ah.ah_len + 2) &lt;&lt; 2;
+
+		<span class="enscript-comment">/*
+		 * special treatment is necessary for the first one, not others
+		 */</span>
+		<span class="enscript-keyword">if</span> (!ahseen) {
+			<span class="enscript-keyword">if</span> (totlen &gt; m-&gt;m_pkthdr.len - off ||
+			    totlen &gt; MCLBYTES) {
+				error = EMSGSIZE;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+			}
+			MGET(n, M_DONTWAIT, MT_DATA);
+			<span class="enscript-keyword">if</span> (n &amp;&amp; totlen &gt; MLEN) {
+				MCLGET(n, M_DONTWAIT);
+				<span class="enscript-keyword">if</span> ((n-&gt;m_flags &amp; M_EXT) == 0) {
+					m_free(n);
+					n = NULL;
+				}
+			}
+			<span class="enscript-keyword">if</span> (n == NULL) {
+				error = ENOBUFS;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+			}
+			m_copydata(m, off, totlen, mtod(n, caddr_t));
+			n-&gt;m_len = totlen;
+			bzero(mtod(n, caddr_t) + hdrsiz, siz);
+			(algo-&gt;update)(&amp;algos, mtod(n, caddr_t), n-&gt;m_len);
+			m_free(n);
+			n = NULL;
+		} <span class="enscript-keyword">else</span>
+			ah_update_mbuf(m, off, totlen, algo, &amp;algos);
+		ahseen++;
+
+		hdrtype = ah.ah_nxt;
+		advancewidth = totlen;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	<span class="enscript-reference">default</span>:
+		ah_update_mbuf(m, off, m-&gt;m_pkthdr.len - off, algo, &amp;algos);
+		advancewidth = m-&gt;m_pkthdr.len - off;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	off += advancewidth;
+	<span class="enscript-keyword">if</span> (off &lt; m-&gt;m_pkthdr.len)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+
+	<span class="enscript-keyword">if</span> (len &lt; (*algo-&gt;sumsiz)(sav)) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+
+	(algo-&gt;result)(&amp;algos, (caddr_t) &amp;sumbuf[0], <span class="enscript-keyword">sizeof</span>(sumbuf));
+	bcopy(&amp;sumbuf[0], ahdat, (*algo-&gt;sumsiz)(sav));
+
+	<span class="enscript-keyword">if</span> (n)
+		m_free(n);
+	<span class="enscript-keyword">return</span> error;
+
+<span class="enscript-reference">fail</span>:
+	<span class="enscript-keyword">if</span> (n)
+		m_free(n);
+	<span class="enscript-keyword">return</span> error;
+}
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+<span class="enscript-comment">/*
+ * Go generate the checksum. This function won't modify the mbuf chain
+ * except AH itself.
+ *
+ * NOTE: the function does not free mbuf on failure.
+ * Don't use m_copy(), it will try to share cluster mbuf by using refcnt.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ah6_calccksum</span>(m, ahdat, len, algo, sav)
+	<span class="enscript-type">struct</span> mbuf *m;
+	caddr_t ahdat;
+	size_t len;
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ah_algorithm *algo;
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-type">int</span> newoff, off;
+	<span class="enscript-type">int</span> proto, nxt;
+	<span class="enscript-type">struct</span> mbuf *n = NULL;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> ahseen;
+	<span class="enscript-type">struct</span> ah_algorithm_state algos;
+	u_char sumbuf[AH_MAXSUMSIZE] __attribute__((aligned(4)));
+
+	<span class="enscript-keyword">if</span> ((m-&gt;m_flags &amp; M_PKTHDR) == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	error = (algo-&gt;init)(&amp;algos, sav);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+
+	off = 0;
+	proto = IPPROTO_IPV6;
+	nxt = -1;
+	ahseen = 0;
+
+ <span class="enscript-reference">again</span>:
+	newoff = ip6_nexthdr(m, off, proto, &amp;nxt);
+	<span class="enscript-keyword">if</span> (newoff &lt; 0)
+		newoff = m-&gt;m_pkthdr.len;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (newoff &lt;= off) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+
+	<span class="enscript-keyword">switch</span> (proto) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPPROTO_IPV6</span>:
+		<span class="enscript-comment">/*
+		 * special treatment is necessary for the first one, not others
+		 */</span>
+		<span class="enscript-keyword">if</span> (off == 0) {
+			<span class="enscript-type">struct</span> ip6_hdr ip6copy;
+
+			<span class="enscript-keyword">if</span> (newoff - off != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_hdr)) {
+				error = EINVAL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+			}
+
+			m_copydata(m, off, newoff - off, (caddr_t)&amp;ip6copy);
+			<span class="enscript-comment">/* RFC2402 */</span>
+			ip6copy.ip6_flow = 0;
+			ip6copy.ip6_vfc &amp;= ~IPV6_VERSION_MASK;
+			ip6copy.ip6_vfc |= IPV6_VERSION;
+			ip6copy.ip6_hlim = 0;
+			<span class="enscript-keyword">if</span> (IN6_IS_ADDR_LINKLOCAL(&amp;ip6copy.ip6_src))
+				ip6copy.ip6_src.s6_addr16[1] = 0x0000;
+			<span class="enscript-keyword">if</span> (IN6_IS_ADDR_LINKLOCAL(&amp;ip6copy.ip6_dst))
+				ip6copy.ip6_dst.s6_addr16[1] = 0x0000;
+			(algo-&gt;update)(&amp;algos, (caddr_t)&amp;ip6copy,
+				       <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_hdr));
+		} <span class="enscript-keyword">else</span> {
+			newoff = m-&gt;m_pkthdr.len;
+			ah_update_mbuf(m, off, m-&gt;m_pkthdr.len - off, algo,
+			    &amp;algos);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPPROTO_AH</span>:
+	    {
+		<span class="enscript-type">int</span> siz;
+		<span class="enscript-type">int</span> hdrsiz;
+
+		hdrsiz = (sav-&gt;flags &amp; SADB_X_EXT_OLD)
+				? <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ah)
+				: <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> newah);
+		siz = (*algo-&gt;sumsiz)(sav);
+
+		<span class="enscript-comment">/*
+		 * special treatment is necessary for the first one, not others
+		 */</span>
+		<span class="enscript-keyword">if</span> (!ahseen) {
+			<span class="enscript-keyword">if</span> (newoff - off &gt; MCLBYTES) {
+				error = EMSGSIZE;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+			}
+			MGET(n, M_DONTWAIT, MT_DATA);
+			<span class="enscript-keyword">if</span> (n &amp;&amp; newoff - off &gt; MLEN) {
+				MCLGET(n, M_DONTWAIT);
+				<span class="enscript-keyword">if</span> ((n-&gt;m_flags &amp; M_EXT) == 0) {
+					m_free(n);
+					n = NULL;
+				}
+			}
+			<span class="enscript-keyword">if</span> (n == NULL) {
+				error = ENOBUFS;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+			}
+			m_copydata(m, off, newoff - off, mtod(n, caddr_t));
+			n-&gt;m_len = newoff - off;
+			bzero(mtod(n, caddr_t) + hdrsiz, siz);
+			(algo-&gt;update)(&amp;algos, mtod(n, caddr_t), n-&gt;m_len);
+			m_free(n);
+			n = NULL;
+		} <span class="enscript-keyword">else</span>
+			ah_update_mbuf(m, off, newoff - off, algo, &amp;algos);
+		ahseen++;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	 <span class="enscript-keyword">case</span> <span class="enscript-reference">IPPROTO_HOPOPTS</span>:
+	 <span class="enscript-keyword">case</span> <span class="enscript-reference">IPPROTO_DSTOPTS</span>:
+	 {
+		<span class="enscript-type">struct</span> ip6_ext *ip6e;
+		<span class="enscript-type">int</span> hdrlen, optlen;
+		u_int8_t *p, *optend, *optp;
+
+		<span class="enscript-keyword">if</span> (newoff - off &gt; MCLBYTES) {
+			error = EMSGSIZE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+		MGET(n, M_DONTWAIT, MT_DATA);
+		<span class="enscript-keyword">if</span> (n &amp;&amp; newoff - off &gt; MLEN) {
+			MCLGET(n, M_DONTWAIT);
+			<span class="enscript-keyword">if</span> ((n-&gt;m_flags &amp; M_EXT) == 0) {
+				m_free(n);
+				n = NULL;
+			}
+		}
+		<span class="enscript-keyword">if</span> (n == NULL) {
+			error = ENOBUFS;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+		m_copydata(m, off, newoff - off, mtod(n, caddr_t));
+		n-&gt;m_len = newoff - off;
+
+		ip6e = mtod(n, <span class="enscript-type">struct</span> ip6_ext *);
+		hdrlen = (ip6e-&gt;ip6e_len + 1) &lt;&lt; 3;
+		<span class="enscript-keyword">if</span> (newoff - off &lt; hdrlen) {
+			 error = EINVAL;
+			 m_free(n);
+			 n = NULL;
+			 <span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+		p = mtod(n, u_int8_t *);
+		optend = p + hdrlen;
+
+		<span class="enscript-comment">/*
+		 * ICV calculation for the options header including all
+		 * options.  This part is a little tricky since there are
+		 * two type of options; mutable and immutable.  We try to
+		 * null-out mutable ones here.
+		 */</span>
+		optp = p + 2;
+		<span class="enscript-keyword">while</span> (optp &lt; optend) {
+			<span class="enscript-keyword">if</span> (optp[0] == IP6OPT_PAD1)
+				optlen = 1;
+			<span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> (optp + 2 &gt; optend) {
+					error = EINVAL;
+					m_free(n);
+					n = NULL;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+				}
+				optlen = optp[1] + 2;
+
+				<span class="enscript-keyword">if</span> (optp[0] &amp; IP6OPT_MUTABLE)
+					bzero(optp + 2, optlen - 2);
+			}
+
+			optp += optlen;
+		}
+
+		(algo-&gt;update)(&amp;algos, mtod(n, caddr_t), n-&gt;m_len);
+		m_free(n);
+		n = NULL;
+		<span class="enscript-keyword">break</span>;
+	 }
+
+	 <span class="enscript-keyword">case</span> <span class="enscript-reference">IPPROTO_ROUTING</span>:
+		<span class="enscript-comment">/*
+		 * For an input packet, we can just calculate `as is'.
+		 * For an output packet, we assume ip6_output have already
+		 * made packet how it will be received at the final
+		 * destination.
+		 */</span>
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+
+	<span class="enscript-reference">default</span>:
+		ah_update_mbuf(m, off, newoff - off, algo, &amp;algos);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (newoff &lt; m-&gt;m_pkthdr.len) {
+		proto = nxt;
+		off = newoff;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (len &lt; (*algo-&gt;sumsiz)(sav)) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+
+	(algo-&gt;result)(&amp;algos, (caddr_t) &amp;sumbuf[0], <span class="enscript-keyword">sizeof</span>(sumbuf));
+	bcopy(&amp;sumbuf[0], ahdat, (*algo-&gt;sumsiz)(sav));
+
+	<span class="enscript-comment">/* just in case */</span>
+	<span class="enscript-keyword">if</span> (n)
+		m_free(n);
+	<span class="enscript-keyword">return</span> 0;
+<span class="enscript-reference">fail</span>:
+	<span class="enscript-comment">/* just in case */</span>
+	<span class="enscript-keyword">if</span> (n)
+		m_free(n);
+	<span class="enscript-keyword">return</span> error;
+}
+#<span class="enscript-reference">endif</span>
+</pre>
+<hr />
+</body></html>

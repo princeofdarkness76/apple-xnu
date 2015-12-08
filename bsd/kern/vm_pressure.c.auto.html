@@ -1,0 +1,754 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>vm_pressure.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">vm_pressure.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2009-2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/event.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/eventvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/vm_pressure.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kern_memorystatus.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* 
+ * This value is the threshold that a process must meet to be considered for scavenging.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VM_PRESSURE_MINIMUM_RSIZE</span>		10	<span class="enscript-comment">/* MB */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VM_PRESSURE_NOTIFY_WAIT_PERIOD</span>		10000	<span class="enscript-comment">/* milliseconds */</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_pressure_klist_lock</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_pressure_klist_unlock</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">vm_dispatch_memory_pressure</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_reset_active_list</span>(<span class="enscript-type">void</span>);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">vm_try_pressure_candidates</span>(boolean_t target_foreground_process);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> lck_mtx_t vm_pressure_klist_mutex;
+
+<span class="enscript-type">struct</span> klist vm_pressure_klist;
+<span class="enscript-type">struct</span> klist vm_pressure_klist_dormant;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">VM_PRESSURE_DEBUG</span>(cond, format, ...)      \
+<span class="enscript-keyword">do</span> {                                              \
+	<span class="enscript-keyword">if</span> (cond) { printf(format, ##__VA_ARGS__); } \
+} <span class="enscript-keyword">while</span>(0)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">VM_PRESSURE_DEBUG</span>(cond, format, ...)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_pressure_init</span>(lck_grp_t *grp, lck_attr_t *attr) {
+	lck_mtx_init(&amp;vm_pressure_klist_mutex, grp, attr);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_pressure_klist_lock</span>(<span class="enscript-type">void</span>) {
+	lck_mtx_lock(&amp;vm_pressure_klist_mutex);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_pressure_klist_unlock</span>(<span class="enscript-type">void</span>) {
+	lck_mtx_unlock(&amp;vm_pressure_klist_mutex);
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">vm_knote_register</span>(<span class="enscript-type">struct</span> knote *kn) {
+	<span class="enscript-type">int</span> rv = 0;
+	
+	vm_pressure_klist_lock();
+	
+	<span class="enscript-keyword">if</span> ((kn-&gt;kn_sfflags) &amp; (NOTE_VM_PRESSURE)) {
+		KNOTE_ATTACH(&amp;vm_pressure_klist, kn);
+	} <span class="enscript-keyword">else</span> {	  
+		rv = ENOTSUP;
+	}
+	
+	vm_pressure_klist_unlock();
+	
+	<span class="enscript-keyword">return</span> rv;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_knote_unregister</span>(<span class="enscript-type">struct</span> knote *kn) {
+	<span class="enscript-type">struct</span> knote *kn_temp;
+	
+	vm_pressure_klist_lock();
+	
+	VM_PRESSURE_DEBUG(0, <span class="enscript-string">&quot;[vm_pressure] process %d cancelling pressure notification\n&quot;</span>, kn-&gt;kn_kq-&gt;kq_p-&gt;p_pid);
+	
+	SLIST_FOREACH(kn_temp, &amp;vm_pressure_klist, kn_selnext) {
+		<span class="enscript-keyword">if</span> (kn_temp == kn) {
+			KNOTE_DETACH(&amp;vm_pressure_klist, kn);
+			vm_pressure_klist_unlock();
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+
+	SLIST_FOREACH(kn_temp, &amp;vm_pressure_klist_dormant, kn_selnext) {
+		<span class="enscript-keyword">if</span> (kn_temp == kn) {
+			KNOTE_DETACH(&amp;vm_pressure_klist_dormant, kn);
+			vm_pressure_klist_unlock();
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+	
+	vm_pressure_klist_unlock();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_pressure_proc_cleanup</span>(proc_t p)
+{
+	<span class="enscript-type">struct</span> knote *kn = NULL;
+
+	vm_pressure_klist_lock();
+	
+	VM_PRESSURE_DEBUG(0, <span class="enscript-string">&quot;[vm_pressure] process %d exiting pressure notification\n&quot;</span>, p-&gt;p_pid);
+	
+	SLIST_FOREACH(kn, &amp;vm_pressure_klist, kn_selnext) {
+		<span class="enscript-keyword">if</span> (kn-&gt;kn_kq-&gt;kq_p == p) {
+			KNOTE_DETACH(&amp;vm_pressure_klist, kn);
+			vm_pressure_klist_unlock();
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+	
+	SLIST_FOREACH(kn, &amp;vm_pressure_klist_dormant, kn_selnext) {
+		<span class="enscript-keyword">if</span> (kn-&gt;kn_kq-&gt;kq_p == p) {
+			KNOTE_DETACH(&amp;vm_pressure_klist_dormant, kn);
+			vm_pressure_klist_unlock();
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+	
+	vm_pressure_klist_unlock();
+}
+
+<span class="enscript-comment">/*
+ * Used by the vm_pressure_thread which is
+ * signalled from within vm_pageout_scan().
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">consider_vm_pressure_events</span>(<span class="enscript-type">void</span>)
+{
+	vm_dispatch_memory_pressure();
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>
+
+<span class="enscript-comment">/* Jetsam aware version. Called with lock held */</span>
+
+<span class="enscript-type">struct</span> knote *<span class="enscript-function-name">vm_find_knote_from_pid</span>(pid_t, <span class="enscript-type">struct</span> klist *);
+
+<span class="enscript-type">struct</span> knote *<span class="enscript-function-name">vm_find_knote_from_pid</span>(pid_t pid, <span class="enscript-type">struct</span> klist *list) {
+	<span class="enscript-type">struct</span> knote *kn = NULL;
+    
+	SLIST_FOREACH(kn, list, kn_selnext) {
+		<span class="enscript-type">struct</span> proc *p;
+		pid_t current_pid;
+
+		p = kn-&gt;kn_kq-&gt;kq_p;
+		current_pid = p-&gt;p_pid;
+
+		<span class="enscript-keyword">if</span> (current_pid == pid) {
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+    
+	<span class="enscript-keyword">return</span> kn;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">vm_dispatch_pressure_note_to_pid</span>(pid_t pid, boolean_t locked) {
+	<span class="enscript-type">int</span> ret = EINVAL;
+	<span class="enscript-type">struct</span> knote *kn;
+    
+	VM_PRESSURE_DEBUG(1, <span class="enscript-string">&quot;vm_dispatch_pressure_note_to_pid(): pid %d\n&quot;</span>, pid);
+	
+	<span class="enscript-keyword">if</span> (!locked) {
+		vm_pressure_klist_lock();	    
+	}
+    
+	<span class="enscript-comment">/* 
+	 * Because we're specifically targeting a process here, we don't care
+	 * if a warning has already been sent and it's moved to the dormant
+	 * list; check that too.
+	 */</span>
+	kn = vm_find_knote_from_pid(pid, &amp;vm_pressure_klist);
+	<span class="enscript-keyword">if</span> (kn) {
+    		KNOTE(&amp;vm_pressure_klist, pid);
+    		ret = 0;
+	} <span class="enscript-keyword">else</span> {	
+	        kn = vm_find_knote_from_pid(pid, &amp;vm_pressure_klist_dormant);
+	        <span class="enscript-keyword">if</span> (kn) {
+        		KNOTE(&amp;vm_pressure_klist_dormant, pid);
+			ret = 0;
+	        }
+	}
+
+	<span class="enscript-keyword">if</span> (!locked) {
+		vm_pressure_klist_unlock();	    
+	}
+
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_find_pressure_foreground_candidates</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> knote *kn, *kn_tmp;
+	<span class="enscript-type">struct</span> klist dispatch_klist = { NULL };
+
+	vm_pressure_klist_lock();
+	proc_list_lock();
+	
+	<span class="enscript-comment">/* Find the foreground processes. */</span>
+	SLIST_FOREACH_SAFE(kn, &amp;vm_pressure_klist, kn_selnext, kn_tmp) {
+		proc_t p = kn-&gt;kn_kq-&gt;kq_p;
+
+		<span class="enscript-keyword">if</span> (memorystatus_is_foreground_locked(p)) {
+			KNOTE_DETACH(&amp;vm_pressure_klist, kn);  
+			KNOTE_ATTACH(&amp;dispatch_klist, kn);          
+		}
+	}
+
+	SLIST_FOREACH_SAFE(kn, &amp;vm_pressure_klist_dormant, kn_selnext, kn_tmp) {
+		proc_t p = kn-&gt;kn_kq-&gt;kq_p;
+
+		<span class="enscript-keyword">if</span> (memorystatus_is_foreground_locked(p)) {
+			KNOTE_DETACH(&amp;vm_pressure_klist_dormant, kn);  
+			KNOTE_ATTACH(&amp;dispatch_klist, kn);          
+		}
+	}
+
+	proc_list_unlock();
+
+	<span class="enscript-comment">/* Dispatch pressure notifications accordingly */</span>
+	SLIST_FOREACH_SAFE(kn, &amp;dispatch_klist, kn_selnext, kn_tmp) {
+		proc_t p = kn-&gt;kn_kq-&gt;kq_p;
+
+		proc_list_lock();
+		<span class="enscript-keyword">if</span> (p != proc_ref_locked(p)) {
+			proc_list_unlock();
+			KNOTE_DETACH(&amp;dispatch_klist, kn);
+			KNOTE_ATTACH(&amp;vm_pressure_klist_dormant, kn);
+			<span class="enscript-keyword">continue</span>;
+		}
+		proc_list_unlock();
+  
+		VM_PRESSURE_DEBUG(1, <span class="enscript-string">&quot;[vm_pressure] sending event to pid %d\n&quot;</span>, kn-&gt;kn_kq-&gt;kq_p-&gt;p_pid);
+		KNOTE(&amp;dispatch_klist, p-&gt;p_pid);
+		KNOTE_DETACH(&amp;dispatch_klist, kn);
+		KNOTE_ATTACH(&amp;vm_pressure_klist_dormant, kn);
+		microuptime(&amp;p-&gt;vm_pressure_last_notify_tstamp);
+		memorystatus_send_pressure_note(p-&gt;p_pid);
+		proc_rele(p);
+	}
+
+	vm_pressure_klist_unlock();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_find_pressure_candidate</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> knote *kn = NULL, *kn_max = NULL;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> resident_max = 0;
+	pid_t target_pid = -1;
+	<span class="enscript-type">struct</span> klist dispatch_klist = { NULL };
+	<span class="enscript-type">struct</span> timeval curr_tstamp = {0, 0};
+	<span class="enscript-type">int</span> elapsed_msecs = 0;
+	proc_t target_proc = PROC_NULL;
+	kern_return_t kr = KERN_SUCCESS;
+
+	microuptime(&amp;curr_tstamp);
+	
+	vm_pressure_klist_lock();
+	
+	SLIST_FOREACH(kn, &amp;vm_pressure_klist, kn_selnext) {\
+	    <span class="enscript-type">struct</span> mach_task_basic_info basic_info;
+	    mach_msg_type_number_t  size = MACH_TASK_BASIC_INFO_COUNT;
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		resident_size = 0;
+		proc_t			p = PROC_NULL;
+		<span class="enscript-type">struct</span> task*		t = TASK_NULL;
+
+		p = kn-&gt;kn_kq-&gt;kq_p;
+		proc_list_lock();
+		<span class="enscript-keyword">if</span> (p != proc_ref_locked(p)) {
+			p = PROC_NULL;
+			proc_list_unlock();
+			<span class="enscript-keyword">continue</span>;
+		}
+		proc_list_unlock();
+
+		t = (<span class="enscript-type">struct</span> task *)(p-&gt;task);
+		
+		timevalsub(&amp;curr_tstamp, &amp;p-&gt;vm_pressure_last_notify_tstamp);
+		elapsed_msecs = curr_tstamp.tv_sec * 1000 + curr_tstamp.tv_usec / 1000;
+							
+		<span class="enscript-keyword">if</span> (elapsed_msecs &lt; VM_PRESSURE_NOTIFY_WAIT_PERIOD) {
+			proc_rele(p);
+			<span class="enscript-keyword">continue</span>;
+		}
+		
+		<span class="enscript-keyword">if</span> (!memorystatus_bg_pressure_eligible(p)) {
+			VM_PRESSURE_DEBUG(1, <span class="enscript-string">&quot;[vm_pressure] skipping process %d\n&quot;</span>, p-&gt;p_pid);
+			proc_rele(p);
+			<span class="enscript-keyword">continue</span>;			
+		}
+
+		<span class="enscript-keyword">if</span>( ( kr = task_info(t, MACH_TASK_BASIC_INFO, (task_info_t)(&amp;basic_info), &amp;size)) != KERN_SUCCESS ) {
+			VM_PRESSURE_DEBUG(1, <span class="enscript-string">&quot;[vm_pressure] task_info for pid %d failed\n&quot;</span>, p-&gt;p_pid);
+			proc_rele(p);
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/* 
+		 * We don't want a small process to block large processes from 
+		 * being notified again. &lt;rdar://problem/7955532&gt;
+		 */</span>
+		resident_size = (basic_info.resident_size)/(1024 * 1024);
+		<span class="enscript-keyword">if</span> (resident_size &gt;= VM_PRESSURE_MINIMUM_RSIZE) {
+			<span class="enscript-keyword">if</span> (resident_size &gt; resident_max) {
+				resident_max = resident_size;
+				kn_max = kn;
+				target_pid = p-&gt;p_pid;
+				target_proc = p;
+			}
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* There was no candidate with enough resident memory to scavenge */</span>
+			VM_PRESSURE_DEBUG(1, <span class="enscript-string">&quot;[vm_pressure] threshold failed for pid %d with %u resident...\n&quot;</span>, p-&gt;p_pid, resident_size);
+		}
+		proc_rele(p);
+	}
+
+	<span class="enscript-keyword">if</span> (kn_max == NULL || target_pid == -1) {
+		VM_PRESSURE_DEBUG(1, <span class="enscript-string">&quot;[vm_pressure] - no target found!\n&quot;</span>);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	VM_DEBUG_CONSTANT_EVENT(vm_pressure_event, VM_PRESSURE_EVENT, DBG_FUNC_NONE, target_pid, resident_max, 0, 0);
+	VM_PRESSURE_DEBUG(1, <span class="enscript-string">&quot;[vm_pressure] sending event to pid %d with %u resident\n&quot;</span>, kn_max-&gt;kn_kq-&gt;kq_p-&gt;p_pid, resident_max);
+
+	KNOTE_DETACH(&amp;vm_pressure_klist, kn_max);
+
+	target_proc = proc_find(target_pid);
+	<span class="enscript-keyword">if</span> (target_proc != PROC_NULL) {
+		KNOTE_ATTACH(&amp;dispatch_klist, kn_max);
+		KNOTE(&amp;dispatch_klist, target_pid);
+		KNOTE_ATTACH(&amp;vm_pressure_klist_dormant, kn_max);
+		memorystatus_send_pressure_note(target_pid);
+		microuptime(&amp;target_proc-&gt;vm_pressure_last_notify_tstamp);
+		proc_rele(target_proc);
+	}
+
+<span class="enscript-reference">exit</span>:
+	vm_pressure_klist_unlock();
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_MEMORYSTATUS */</span>
+
+
+<span class="enscript-type">struct</span> knote *
+<span class="enscript-function-name">vm_pressure_select_optimal_candidate_to_notify</span>(<span class="enscript-type">struct</span> klist *candidate_list, <span class="enscript-type">int</span> level, boolean_t target_foreground_process);
+
+kern_return_t <span class="enscript-function-name">vm_pressure_notification_without_levels</span>(boolean_t target_foreground_process);
+kern_return_t <span class="enscript-function-name">vm_pressure_notify_dispatch_vm_clients</span>(boolean_t target_foreground_process);
+
+kern_return_t
+<span class="enscript-function-name">vm_pressure_notify_dispatch_vm_clients</span>(boolean_t target_foreground_process)
+{
+	vm_pressure_klist_lock();
+	
+	<span class="enscript-keyword">if</span> (SLIST_EMPTY(&amp;vm_pressure_klist)) {
+		vm_reset_active_list();
+	}
+	
+	<span class="enscript-keyword">if</span> (!SLIST_EMPTY(&amp;vm_pressure_klist)) {
+		
+		VM_PRESSURE_DEBUG(1, <span class="enscript-string">&quot;[vm_pressure] vm_dispatch_memory_pressure\n&quot;</span>);
+		
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS == vm_try_pressure_candidates(target_foreground_process)) {
+			vm_pressure_klist_unlock();
+			<span class="enscript-keyword">return</span> KERN_SUCCESS;
+		}
+	}
+	
+	VM_PRESSURE_DEBUG(1, <span class="enscript-string">&quot;[vm_pressure] could not find suitable event candidate\n&quot;</span>);
+	
+	vm_pressure_klist_unlock();
+
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">vm_dispatch_memory_pressure</span>(<span class="enscript-type">void</span>)
+{
+	memorystatus_update_vm_pressure(FALSE);
+}
+
+<span class="enscript-type">extern</span> vm_pressure_level_t
+<span class="enscript-function-name">convert_internal_pressure_level_to_dispatch_level</span>(vm_pressure_level_t);
+
+<span class="enscript-type">struct</span> knote *
+<span class="enscript-function-name">vm_pressure_select_optimal_candidate_to_notify</span>(<span class="enscript-type">struct</span> klist *candidate_list, <span class="enscript-type">int</span> level, boolean_t target_foreground_process)
+{
+	<span class="enscript-type">struct</span> knote	*kn = NULL, *kn_max = NULL;
+        <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	resident_max = 0;
+	<span class="enscript-type">struct</span> timeval	curr_tstamp = {0, 0};
+	<span class="enscript-type">int</span>		elapsed_msecs = 0;
+	<span class="enscript-type">int</span>		selected_task_importance = 0;
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span>	pressure_snapshot = -1;
+	boolean_t	pressure_increase = FALSE;
+
+	<span class="enscript-keyword">if</span> (level != -1) {
+	
+		<span class="enscript-keyword">if</span> (pressure_snapshot == -1) {
+			<span class="enscript-comment">/*
+			 * Initial snapshot.
+		 	*/</span>
+			pressure_snapshot = level;
+			pressure_increase = TRUE;
+		} <span class="enscript-keyword">else</span> {
+			
+			<span class="enscript-keyword">if</span> (level &gt;= pressure_snapshot) {
+				pressure_increase = TRUE;
+			} <span class="enscript-keyword">else</span> {
+				pressure_increase = FALSE;
+			}
+
+			pressure_snapshot = level;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> ((level &gt; 0) &amp;&amp; (pressure_increase) == TRUE) {
+		<span class="enscript-comment">/*
+		 * We'll start by considering the largest
+		 * unimportant task in our list.
+		 */</span>
+		selected_task_importance = INT_MAX;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * We'll start by considering the largest
+		 * important task in our list.
+		 */</span>
+		selected_task_importance = 0;
+	}
+
+	microuptime(&amp;curr_tstamp);
+
+        SLIST_FOREACH(kn, candidate_list, kn_selnext) {
+
+                <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		resident_size = 0;
+		proc_t			p = PROC_NULL;
+		<span class="enscript-type">struct</span> task*		t = TASK_NULL;
+		<span class="enscript-type">int</span>			curr_task_importance = 0;
+		boolean_t		consider_knote = FALSE;
+		boolean_t		privileged_listener = FALSE;
+
+		p = kn-&gt;kn_kq-&gt;kq_p;
+		proc_list_lock();
+		<span class="enscript-keyword">if</span> (p != proc_ref_locked(p)) {
+			p = PROC_NULL;
+			proc_list_unlock();
+			<span class="enscript-keyword">continue</span>;
+		}
+		proc_list_unlock();
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>		
+		<span class="enscript-keyword">if</span> (target_foreground_process == TRUE &amp;&amp; !memorystatus_is_foreground_locked(p)) {
+			<span class="enscript-comment">/*
+			 * Skip process not marked foreground.
+			 */</span>
+			proc_rele(p);
+			<span class="enscript-keyword">continue</span>;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_MEMORYSTATUS */</span>
+
+		t = (<span class="enscript-type">struct</span> task *)(p-&gt;task);
+		
+		timevalsub(&amp;curr_tstamp, &amp;p-&gt;vm_pressure_last_notify_tstamp);
+		elapsed_msecs = curr_tstamp.tv_sec * 1000 + curr_tstamp.tv_usec / 1000;
+		
+		<span class="enscript-keyword">if</span> ((level == -1) &amp;&amp; (elapsed_msecs &lt; VM_PRESSURE_NOTIFY_WAIT_PERIOD)) { 
+			proc_rele(p);
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (level != -1) {
+			<span class="enscript-comment">/*
+			 * For the level based notifications, check and see if this knote is
+			 * registered for the current level.
+			 */</span>
+			vm_pressure_level_t dispatch_level = convert_internal_pressure_level_to_dispatch_level(level);
+			
+			<span class="enscript-keyword">if</span> ((kn-&gt;kn_sfflags &amp; dispatch_level) == 0) {
+				proc_rele(p);
+				<span class="enscript-keyword">continue</span>;
+			}
+		}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>
+		<span class="enscript-keyword">if</span> (target_foreground_process == FALSE &amp;&amp; !memorystatus_bg_pressure_eligible(p)) {
+			VM_PRESSURE_DEBUG(1, <span class="enscript-string">&quot;[vm_pressure] skipping process %d\n&quot;</span>, p-&gt;p_pid);
+			proc_rele(p);
+			<span class="enscript-keyword">continue</span>;			
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_MEMORYSTATUS */</span>
+
+		curr_task_importance = task_importance_estimate(t);
+
+		<span class="enscript-comment">/*
+		 * Privileged listeners are only considered in the multi-level pressure scheme
+		 * AND only if the pressure is increasing.
+		 */</span>
+		<span class="enscript-keyword">if</span> (level &gt; 0) {
+
+			<span class="enscript-keyword">if</span> (task_has_been_notified(t, level) == FALSE) {
+
+				<span class="enscript-comment">/*
+				 * Is this a privileged listener?
+				 */</span>
+				<span class="enscript-keyword">if</span> (task_low_mem_privileged_listener(t, FALSE, &amp;privileged_listener) == 0) {
+
+					<span class="enscript-keyword">if</span> (privileged_listener) {
+						kn_max = kn;
+						proc_rele(p);
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">done_scanning</span>;
+					}
+				}
+			} <span class="enscript-keyword">else</span> {
+				proc_rele(p);
+				<span class="enscript-keyword">continue</span>;
+			}
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (level == 0) {
+
+			<span class="enscript-comment">/*
+			 * Task wasn't notified when the pressure was increasing and so
+			 * no need to notify it that the pressure is decreasing.
+			 */</span>
+			<span class="enscript-keyword">if</span> ((task_has_been_notified(t, kVMPressureWarning) == FALSE) &amp;&amp; (task_has_been_notified(t, kVMPressureCritical) == FALSE)) {
+				proc_rele(p);
+				<span class="enscript-keyword">continue</span>;
+			}
+		}
+
+		<span class="enscript-comment">/*
+                 * We don't want a small process to block large processes from 
+                 * being notified again. &lt;rdar://problem/7955532&gt;
+                 */</span>
+                resident_size = (get_task_phys_footprint(t))/(1024*1024ULL); <span class="enscript-comment">//(MB);
+</span>
+                <span class="enscript-keyword">if</span> (resident_size &gt;= VM_PRESSURE_MINIMUM_RSIZE) {
+
+			<span class="enscript-keyword">if</span> (level &gt; 0) {
+				<span class="enscript-comment">/*
+				 * Warning or Critical Pressure.
+				 */</span>
+                        	<span class="enscript-keyword">if</span> (pressure_increase) {
+					<span class="enscript-keyword">if</span> ((curr_task_importance &lt; selected_task_importance) || 
+					    ((curr_task_importance == selected_task_importance) &amp;&amp; (resident_size &gt; resident_max))) {
+
+						<span class="enscript-comment">/*
+ 						 * We have found a candidate process which is:
+						 * a) at a lower importance than the current selected process
+						 * OR
+						 * b) has importance equal to that of the current selected process but is larger
+						 */</span>
+
+						consider_knote = TRUE;
+					}
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-keyword">if</span> ((curr_task_importance &gt; selected_task_importance) ||
+					    ((curr_task_importance == selected_task_importance) &amp;&amp; (resident_size &gt; resident_max))) {
+						
+						<span class="enscript-comment">/*
+ 						 * We have found a candidate process which is:
+						 * a) at a higher importance than the current selected process
+						 * OR
+						 * b) has importance equal to that of the current selected process but is larger
+						 */</span>
+
+						consider_knote = TRUE;
+					}
+				}
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (level == 0) {
+                        	<span class="enscript-comment">/*
+				 * Pressure back to normal.
+				 */</span>
+				<span class="enscript-keyword">if</span> ((curr_task_importance &gt; selected_task_importance) ||
+				    ((curr_task_importance == selected_task_importance) &amp;&amp; (resident_size &gt; resident_max))) {
+
+					consider_knote = TRUE;
+				}
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (level == -1) {
+
+				<span class="enscript-comment">/*
+				 * Simple (importance and level)-free behavior based solely on RSIZE.
+				 */</span>
+				<span class="enscript-keyword">if</span> (resident_size &gt; resident_max) {
+					consider_knote = TRUE;
+				}
+			}
+
+				
+			<span class="enscript-keyword">if</span> (consider_knote) {
+				resident_max = resident_size;
+				kn_max = kn;
+				selected_task_importance = curr_task_importance;
+				consider_knote = FALSE; <span class="enscript-comment">/* reset for the next candidate */</span>
+			}
+                } <span class="enscript-keyword">else</span> {
+                        <span class="enscript-comment">/* There was no candidate with enough resident memory to scavenge */</span>
+                        VM_PRESSURE_DEBUG(0, <span class="enscript-string">&quot;[vm_pressure] threshold failed for pid %d with %u resident...\n&quot;</span>, p-&gt;p_pid, resident_size);
+                }
+		proc_rele(p);
+        }
+
+<span class="enscript-reference">done_scanning</span>:
+	<span class="enscript-keyword">if</span> (kn_max) {
+		VM_DEBUG_CONSTANT_EVENT(vm_pressure_event, VM_PRESSURE_EVENT, DBG_FUNC_NONE, kn_max-&gt;kn_kq-&gt;kq_p-&gt;p_pid, resident_max, 0, 0);
+		VM_PRESSURE_DEBUG(1, <span class="enscript-string">&quot;[vm_pressure] sending event to pid %d with %u resident\n&quot;</span>, kn_max-&gt;kn_kq-&gt;kq_p-&gt;p_pid, resident_max);
+	}
+
+	<span class="enscript-keyword">return</span> kn_max;
+}
+
+<span class="enscript-comment">/*
+ * vm_pressure_klist_lock is held for this routine.
+ */</span>
+kern_return_t <span class="enscript-function-name">vm_pressure_notification_without_levels</span>(boolean_t target_foreground_process)
+{
+	<span class="enscript-type">struct</span> knote *kn_max = NULL;
+        pid_t target_pid = -1;
+        <span class="enscript-type">struct</span> klist dispatch_klist = { NULL };
+	proc_t	target_proc = PROC_NULL;
+	<span class="enscript-type">struct</span> klist *candidate_list = NULL;
+
+	candidate_list = &amp;vm_pressure_klist;
+	
+	kn_max = vm_pressure_select_optimal_candidate_to_notify(candidate_list, -1, target_foreground_process);
+
+        <span class="enscript-keyword">if</span> (kn_max == NULL) {
+		<span class="enscript-keyword">if</span> (target_foreground_process) {
+			<span class="enscript-comment">/*
+			 * Doesn't matter if the process had been notified earlier on.
+			 * This is a very specific request. Deliver it.
+			 */</span>
+			candidate_list = &amp;vm_pressure_klist_dormant;
+			kn_max = vm_pressure_select_optimal_candidate_to_notify(candidate_list, -1, target_foreground_process);
+		}
+
+		<span class="enscript-keyword">if</span> (kn_max == NULL) {
+			<span class="enscript-keyword">return</span> KERN_FAILURE;
+		}
+	}
+		
+	target_proc = kn_max-&gt;kn_kq-&gt;kq_p;
+	
+        KNOTE_DETACH(candidate_list, kn_max);
+
+	<span class="enscript-keyword">if</span> (target_proc != PROC_NULL) {
+	
+		target_pid = target_proc-&gt;p_pid;
+
+		memoryshot(VM_PRESSURE_EVENT, DBG_FUNC_NONE);
+
+        	KNOTE_ATTACH(&amp;dispatch_klist, kn_max);
+        	KNOTE(&amp;dispatch_klist, target_pid);
+        	KNOTE_ATTACH(&amp;vm_pressure_klist_dormant, kn_max);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>
+		memorystatus_send_pressure_note(target_pid);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_MEMORYSTATUS */</span>
+
+		microuptime(&amp;target_proc-&gt;vm_pressure_last_notify_tstamp);
+	}
+
+        <span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">vm_try_pressure_candidates</span>(boolean_t target_foreground_process)
+{
+	<span class="enscript-comment">/*
+	 * This takes care of candidates that use NOTE_VM_PRESSURE.
+	 * It's a notification without indication of the level
+	 * of memory pressure.
+	 */</span>
+	<span class="enscript-keyword">return</span> (vm_pressure_notification_without_levels(target_foreground_process));
+}
+
+<span class="enscript-comment">/*
+ * Remove all elements from the dormant list and place them on the active list.
+ * Called with klist lock held.
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_reset_active_list</span>(<span class="enscript-type">void</span>) {
+	<span class="enscript-comment">/* Re-charge the main list from the dormant list if possible */</span>
+	<span class="enscript-keyword">if</span> (!SLIST_EMPTY(&amp;vm_pressure_klist_dormant)) {
+		<span class="enscript-type">struct</span> knote *kn;
+
+		VM_PRESSURE_DEBUG(1, <span class="enscript-string">&quot;[vm_pressure] recharging main list from dormant list\n&quot;</span>);
+        
+		<span class="enscript-keyword">while</span> (!SLIST_EMPTY(&amp;vm_pressure_klist_dormant)) {
+			kn = SLIST_FIRST(&amp;vm_pressure_klist_dormant);
+			SLIST_REMOVE_HEAD(&amp;vm_pressure_klist_dormant, kn_selnext);
+			SLIST_INSERT_HEAD(&amp;vm_pressure_klist, kn, kn_selnext);
+		}
+	}
+}
+</pre>
+<hr />
+</body></html>

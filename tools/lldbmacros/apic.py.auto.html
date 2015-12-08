@@ -1,0 +1,379 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>apic.py</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">apic.py&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-keyword">from</span> xnu <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> misc <span class="enscript-keyword">import</span> DoReadMsr64, DoWriteMsr64
+
+<span class="enscript-comment">######################################
+</span><span class="enscript-comment"># Globals
+</span><span class="enscript-comment">######################################
+</span>lapic_base_addr = 0xfee00000
+ioapic_base_addr = 0xfec00000
+ioapic_index_off = 0x0
+ioapic_data_off = 0x10
+
+
+<span class="enscript-comment">######################################
+</span><span class="enscript-comment"># LAPIC Helper functions
+</span><span class="enscript-comment">######################################
+</span><span class="enscript-keyword">def</span> <span class="enscript-function-name">IsArchX86_64</span>():
+    <span class="enscript-string">&quot;&quot;&quot; Determines if target machine is x86_64  
+        Returns:
+            True if running on x86_64, False otherwise
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">return</span> kern.arch == <span class="enscript-string">&quot;x86_64&quot;</span>
+        
+
+@static_var(<span class="enscript-string">'x2apic_enabled'</span>, -1)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">IsX2ApicEnabled</span>():
+    <span class="enscript-string">&quot;&quot;&quot; Reads the APIC configuration MSR to determine if APIC is operating
+        in x2APIC mode. The MSR is read the first time this function is
+        called, and the answer is remembered for all subsequent calls.
+        Returns:
+            True if APIC is x2APIC mode
+            False if not
+    &quot;&quot;&quot;</span>
+    apic_cfg_msr = 0x1b
+    apic_cfg_msr_x2en_mask = 0xc00
+    <span class="enscript-keyword">if</span> IsX2ApicEnabled.x2apic_enabled &lt; 0:
+        <span class="enscript-keyword">if</span> (int(DoReadMsr64(apic_cfg_msr, xnudefines.lcpu_self)) &amp; apic_cfg_msr_x2en_mask == 
+            apic_cfg_msr_x2en_mask):
+            IsX2ApicEnabled.x2apic_enabled = 1
+        <span class="enscript-keyword">else</span>:
+            IsX2ApicEnabled.x2apic_enabled = 0
+    <span class="enscript-keyword">return</span> IsX2ApicEnabled.x2apic_enabled == 1
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">DoLapicRead32</span>(offset, cpu):
+    <span class="enscript-string">&quot;&quot;&quot; Read the specified 32-bit LAPIC register
+        Params:
+            offset: int - index of LAPIC register to read
+            cpu: int - cpu ID
+        Returns:
+            The 32-bit LAPIC register value
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> IsX2ApicEnabled():
+        <span class="enscript-keyword">return</span> DoReadMsr64(offset &gt;&gt; 4, cpu)
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">return</span> ReadPhysInt(lapic_base_addr + offset, 32, cpu)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">DoLapicWrite32</span>(offset, val, cpu):
+    <span class="enscript-string">&quot;&quot;&quot; Write the specified 32-bit LAPIC register
+        Params:
+            offset: int - index of LAPIC register to write
+            val: int - write value
+            cpu: int - cpu ID
+        Returns:
+            True if success, False if error
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> IsX2ApicEnabled():
+        <span class="enscript-keyword">return</span> DoWriteMsr64(offset &gt;&gt; 4, cpu, val)
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">return</span> WritePhysInt(lapic_base_addr + offset, val, 32)
+
+<span class="enscript-comment">######################################
+</span><span class="enscript-comment"># LAPIC Register Print functions
+</span><span class="enscript-comment">######################################
+</span><span class="enscript-keyword">def</span> <span class="enscript-function-name">GetLapicVersionFields</span>(reg_val):
+    <span class="enscript-string">&quot;&quot;&quot; Helper function for DoLapicDump that prints the fields of the
+        version register. 
+        Params:
+            reg_val: int - the value of the version register to print
+        Returns:   
+            string showing the fields
+    &quot;&quot;&quot;</span>
+    lvt_num = (reg_val &gt;&gt; 16) + 1
+    version = reg_val &amp; 0xff
+    <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;[VERSION={:d} MaxLVT={:d}]&quot;</span>.format(lvt_num, version)
+    
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetLapicSpuriousVectorFields</span>(reg_val):
+    <span class="enscript-string">&quot;&quot;&quot; Helper function for DoLapicDump that prints the fields of the
+        spurious vector register.
+        Params:
+            reg_val: int - the value of the spurious vector registre to print
+        Returns:   
+            string showing the fields
+    &quot;&quot;&quot;</span>
+    vector = reg_val &amp; 0xff
+    enabled = (reg_val &amp; 0x100) &gt;&gt; 8
+    <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;[VEC={:3d} ENABLED={:d}]&quot;</span>.format(vector, enabled)
+  
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetLapicIcrHiFields</span>(reg_val):
+    <span class="enscript-string">&quot;&quot;&quot; Helper function for DoLapicDump that prints the fields of the 
+        upper 32-bits of the Interrupt Control Register (ICR).
+        Params:
+            reg_val: int - the value of the ICR to show
+        Returns:   
+            string showing the fields
+    &quot;&quot;&quot;</span>
+    dest = reg_val &gt;&gt; 24
+    <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;[DEST={:d}]&quot;</span>.format(dest)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetLapicTimerDivideFields</span>(reg_val):
+    <span class="enscript-string">&quot;&quot;&quot; Helper function for DoLapicDump that prints the fields of the
+        timer divide register.
+        Params:
+            reg_val: int - the value of the timer divide register
+        Returns:   
+            string showing the fields
+    &quot;&quot;&quot;</span>
+    divide_val = ((reg_val &amp; 0x8) &gt;&gt; 1) | (reg_val &amp; 0x3)
+    <span class="enscript-keyword">if</span> divide_val == 0x7:
+        divide_by = 1
+    <span class="enscript-keyword">else</span>:
+        divide_by = 2 &lt;&lt; divide_val
+    <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;[Divide by {:d}]&quot;</span>.format(divide_by)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetApicFields</span>(reg_val):
+    <span class="enscript-string">&quot;&quot;&quot; Helper function for DoLapicDump and DoIoapicDump that prints the
+        fields of the APIC register.
+        Params:
+            reg_val: int - the value of the APIC register to print
+        Returns:   
+            string showing the fields
+    &quot;&quot;&quot;</span>
+    vector = reg_val &amp; 0xff
+    tsc_deadline = reg_val &amp; 0x40000
+    periodic = reg_val &amp; 0x20000
+    masked = reg_val &amp; 0x10000
+    trigger = reg_val &amp; 0x8000
+    polarity = reg_val &amp; 0x2000
+    pending = reg_val &amp; 0x1000
+
+    ret_str = <span class="enscript-string">&quot;[VEC={:3d} MASK={:3s} TRIG={:5s} POL={:4s} PEND={:3s}&quot;</span>.format( 
+        vector,
+        <span class="enscript-string">&quot;no&quot;</span> <span class="enscript-keyword">if</span> masked == 0 <span class="enscript-keyword">else</span> <span class="enscript-string">&quot;yes&quot;</span>,
+        <span class="enscript-string">&quot;edge&quot;</span> <span class="enscript-keyword">if</span> trigger == 0 <span class="enscript-keyword">else</span> <span class="enscript-string">&quot;level&quot;</span>,
+        <span class="enscript-string">&quot;low&quot;</span> <span class="enscript-keyword">if</span> polarity == 0 <span class="enscript-keyword">else</span> <span class="enscript-string">&quot;high&quot;</span>,
+        <span class="enscript-string">&quot;no&quot;</span> <span class="enscript-keyword">if</span> pending == 0 <span class="enscript-keyword">else</span> <span class="enscript-string">&quot;yes&quot;</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> periodic == 0:
+        ret_str += <span class="enscript-string">&quot; PERIODIC&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> tsc_deadline == 0:
+        ret_str += <span class="enscript-string">&quot; TSC_DEADLINE&quot;</span>
+    ret_str += <span class="enscript-string">&quot;]&quot;</span>
+    <span class="enscript-keyword">return</span> ret_str
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">DoLapicDump</span>():
+    <span class="enscript-string">&quot;&quot;&quot; Prints all LAPIC registers
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;LAPIC operating mode: {:s}&quot;</span>.format(
+        <span class="enscript-string">&quot;x2APIC&quot;</span> <span class="enscript-keyword">if</span> IsX2ApicEnabled() <span class="enscript-keyword">else</span> <span class="enscript-string">&quot;xAPIC&quot;</span>)
+    <span class="enscript-comment"># LAPIC register offset, register name, field formatting function
+</span>    lapic_dump_table = [
+        (0x020, <span class="enscript-string">&quot;ID&quot;</span>, None),
+        (0x030, <span class="enscript-string">&quot;VERSION&quot;</span>, GetLapicVersionFields),
+        (0x080, <span class="enscript-string">&quot;TASK PRIORITY&quot;</span>, None),
+        (0x0A0, <span class="enscript-string">&quot;PROCESSOR PRIORITY&quot;</span>, None),
+        (0x0D0, <span class="enscript-string">&quot;LOGICAL DEST&quot;</span>, None),
+        (0x0E0, <span class="enscript-string">&quot;DEST FORMAT&quot;</span>, None),
+        (0x0F0, <span class="enscript-string">&quot;SPURIOUS VECTOR&quot;</span>, GetLapicSpuriousVectorFields),
+        (0x100, <span class="enscript-string">&quot;ISR[031:000]&quot;</span>, None),
+        (0x110, <span class="enscript-string">&quot;ISR[063:032]&quot;</span>, None),
+        (0x120, <span class="enscript-string">&quot;ISR[095:064]&quot;</span>, None),
+        (0x130, <span class="enscript-string">&quot;ISR[127:096]&quot;</span>, None),
+        (0x140, <span class="enscript-string">&quot;ISR[159:128]&quot;</span>, None),
+        (0x150, <span class="enscript-string">&quot;ISR[191:160]&quot;</span>, None),
+        (0x160, <span class="enscript-string">&quot;ISR[223:192]&quot;</span>, None),
+        (0x170, <span class="enscript-string">&quot;ISR[225:224]&quot;</span>, None),
+        (0x180, <span class="enscript-string">&quot;TMR[031:000]&quot;</span>, None),
+        (0x190, <span class="enscript-string">&quot;TMR[063:032]&quot;</span>, None),
+        (0x1A0, <span class="enscript-string">&quot;TMR[095:064]&quot;</span>, None),
+        (0x1B0, <span class="enscript-string">&quot;TMR[127:096]&quot;</span>, None),
+        (0x1C0, <span class="enscript-string">&quot;TMR[159:128]&quot;</span>, None),
+        (0x1D0, <span class="enscript-string">&quot;TMR[191:160]&quot;</span>, None),
+        (0x1E0, <span class="enscript-string">&quot;TMR[223:192]&quot;</span>, None),
+        (0x1F0, <span class="enscript-string">&quot;TMR[225:224]&quot;</span>, None),
+        (0x200, <span class="enscript-string">&quot;IRR[031:000]&quot;</span>, None),
+        (0x210, <span class="enscript-string">&quot;IRR[063:032]&quot;</span>, None),
+        (0x220, <span class="enscript-string">&quot;IRR[095:064]&quot;</span>, None),
+        (0x230, <span class="enscript-string">&quot;IRR[127:096]&quot;</span>, None),
+        (0x240, <span class="enscript-string">&quot;IRR[159:128]&quot;</span>, None),
+        (0x250, <span class="enscript-string">&quot;IRR[191:160]&quot;</span>, None),
+        (0x260, <span class="enscript-string">&quot;IRR[223:192]&quot;</span>, None),
+        (0x270, <span class="enscript-string">&quot;IRR[225:224]&quot;</span>, None),
+        (0x280, <span class="enscript-string">&quot;ERROR STATUS&quot;</span>, None),
+        (0x300, <span class="enscript-string">&quot;Interrupt Command LO&quot;</span>, GetApicFields),
+        (0x310, <span class="enscript-string">&quot;Interrupt Command HI&quot;</span>, GetLapicIcrHiFields),
+        (0x320, <span class="enscript-string">&quot;LVT Timer&quot;</span>, GetApicFields),
+        (0x350, <span class="enscript-string">&quot;LVT LINT0&quot;</span>, GetApicFields),
+        (0x360, <span class="enscript-string">&quot;LVT LINT1&quot;</span>, GetApicFields),
+        (0x370, <span class="enscript-string">&quot;LVT Error&quot;</span>, GetApicFields),
+        (0x340, <span class="enscript-string">&quot;LVT PerfMon&quot;</span>, GetApicFields),
+        (0x330, <span class="enscript-string">&quot;LVT Thermal&quot;</span>, GetApicFields),
+        (0x3e0, <span class="enscript-string">&quot;Timer Divide&quot;</span>, GetLapicTimerDivideFields),
+        (0x380, <span class="enscript-string">&quot;Timer Init Count&quot;</span>, None),
+        (0x390, <span class="enscript-string">&quot;Timer Cur Count&quot;</span>, None)]
+    <span class="enscript-keyword">for</span> reg <span class="enscript-keyword">in</span> lapic_dump_table:
+        reg_val = DoLapicRead32(reg[0], xnudefines.lcpu_self)
+        <span class="enscript-keyword">if</span> reg[2] == None:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;LAPIC[{:#05x}] {:21s}: {:#010x}&quot;</span>.format(reg[0], reg[1], reg_val)
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;LAPIC[{:#05x}] {:21s}: {:#010x} {:s}&quot;</span>.format(reg[0], reg[1],
+                reg_val, reg[2](reg_val))
+
+<span class="enscript-comment">######################################
+</span><span class="enscript-comment"># IOAPIC Helper functions
+</span><span class="enscript-comment">######################################
+</span><span class="enscript-keyword">def</span> <span class="enscript-function-name">DoIoApicRead</span>(offset):
+    <span class="enscript-string">&quot;&quot;&quot; Read the specified IOAPIC register
+        Params:
+            offset: int - index of IOAPIC register to read
+        Returns:
+            int 32-bit read value
+    &quot;&quot;&quot;</span>
+    WritePhysInt(ioapic_base_addr + ioapic_index_off, offset, 8)
+    <span class="enscript-keyword">return</span> ReadPhysInt(ioapic_base_addr + ioapic_data_off, 32)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">DoIoApicWrite</span>(offset, val):
+    <span class="enscript-string">&quot;&quot;&quot; Write the specified IOAPIC register
+        Params:
+            offset: int - index of IOAPIC register to write
+        Returns:
+            True if success, False if error
+    &quot;&quot;&quot;</span>
+    WritePhysInt(ioapic_base_addr + ioapic_index_off, offset, 8)
+    <span class="enscript-keyword">return</span> WritePhysInt(ioapic_base_addr + ioapic_data_off, val, 32)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">DoIoApicDump</span>():
+    <span class="enscript-string">&quot;&quot;&quot; Prints all IOAPIC registers
+    &quot;&quot;&quot;</span>
+    <span class="enscript-comment"># Show IOAPIC ID register
+</span>    ioapic_id = DoIoApicRead(0)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;IOAPIC[0x00] {:9s}: {:#010x}&quot;</span>.format(<span class="enscript-string">&quot;ID&quot;</span>, ioapic_id)
+    <span class="enscript-comment"># Show IOAPIC Version register
+</span>    ioapic_ver = DoIoApicRead(1)
+    maxredir = ((ioapic_ver &gt;&gt; 16) &amp; 0xff) + 1
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;IOAPIC[0x01] {:9s}: {:#010x}&quot;</span>.format(<span class="enscript-string">&quot;VERSION&quot;</span>, ioapic_ver) +\
+        <span class="enscript-string">&quot;       [MAXREDIR={:02d} PRQ={:d} VERSION={:#04x}]&quot;</span>.format(
+            maxredir,
+            ioapic_ver &gt;&gt; 15 &amp; 0x1,
+            ioapic_ver &amp; 0xff)
+    <span class="enscript-comment"># Show IOAPIC redirect regsiters
+</span>    <span class="enscript-keyword">for</span> redir <span class="enscript-keyword">in</span> range(maxredir):
+        redir_val_lo = DoIoApicRead(0x10 + redir * 2)
+        redir_val_hi = DoIoApicRead(0x10 + (redir * 2) + 1)
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;IOAPIC[{:#04x}] IOREDIR{:02d}: {:#08x}{:08x} {:s}&quot;</span>.format(
+            0x10 + (redir * 2),
+            redir, 
+            redir_val_hi,
+            redir_val_lo,
+            GetApicFields(redir_val_lo))
+
+<span class="enscript-comment">######################################
+</span><span class="enscript-comment"># LLDB commands
+</span><span class="enscript-comment">######################################
+</span>@lldb_command(<span class="enscript-string">'lapic_read32'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">LapicRead32</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Read the LAPIC register at the specified offset. The CPU can
+        be optionally specified
+        Syntax: lapic_read32 &lt;offset&gt; [lcpu]
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> cmd_args == None <span class="enscript-keyword">or</span> len(cmd_args) &lt; 1:
+        <span class="enscript-keyword">print</span> LapicRead32.__doc__
+        <span class="enscript-keyword">return</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> IsArchX86_64():
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;lapic_read32 not supported on this architecture.&quot;</span>
+        <span class="enscript-keyword">return</span>
+    
+    lcpu = xnudefines.lcpu_self
+    <span class="enscript-keyword">if</span> len(cmd_args) &gt; 1:
+        lcpu = ArgumentStringToInt(cmd_args[1])
+
+    offset = ArgumentStringToInt(cmd_args[0])
+    read_val = DoLapicRead32(offset, lcpu)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;LAPIC[{:#05x}]: {:#010x}&quot;</span>.format(offset, read_val)
+
+@lldb_command(<span class="enscript-string">'lapic_write32'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">LapicWrite32</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Write the LAPIC register at the specified offset. The CPU can
+        be optionally specified. Prints an error message if there was a
+        failure. Prints nothing upon success.
+        Syntax: lapic_write32 &lt;offset&gt; &lt;val&gt; [lcpu]
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> cmd_args == None <span class="enscript-keyword">or</span> len(cmd_args) &lt; 2:
+        <span class="enscript-keyword">print</span> LapicWrite32.__doc__
+        <span class="enscript-keyword">return</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> IsArchX86_64():
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;lapic_write32 not supported on this architecture.&quot;</span>
+        <span class="enscript-keyword">return</span>
+    offset = ArgumentStringToInt(cmd_args[0])
+    write_val = ArgumentStringToInt(cmd_args[1])
+    lcpu = xnudefines.lcpu_self
+    <span class="enscript-keyword">if</span> len(cmd_args) &gt; 2:
+        lcpu = ArgumentStringToInt(cmd_args[2])
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> DoLapicWrite32(offset, write_val, lcpu):
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;lapic_write32 FAILED&quot;</span>
+
+@lldb_command(<span class="enscript-string">'lapic_dump'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">LapicDump</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Prints all LAPIC entries
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> IsArchX86_64():
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;lapic_dump not supported on this architecture.&quot;</span>
+        <span class="enscript-keyword">return</span>
+    DoLapicDump()
+
+@lldb_command(<span class="enscript-string">'ioapic_read32'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">IoApicRead32</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Read the IOAPIC register at the specified offset.
+        Syntax: ioapic_read32 &lt;offset&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> cmd_args == None <span class="enscript-keyword">or</span> len(cmd_args) &lt; 1:
+        <span class="enscript-keyword">print</span> IoApicRead32.__doc__
+        <span class="enscript-keyword">return</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> IsArchX86_64():
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;ioapic_read32 not supported on this architecture.&quot;</span>
+        <span class="enscript-keyword">return</span>
+
+    offset = ArgumentStringToInt(cmd_args[0])
+    read_val = DoIoApicRead(offset)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;IOAPIC[{:#04x}]: {:#010x}&quot;</span>.format(offset, read_val)
+
+@lldb_command(<span class="enscript-string">'ioapic_write32'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">IoApicWrite32</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Write the IOAPIC register at the specified offset.
+        Syntax: ioapic_write32 &lt;offset&gt; &lt;val&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> cmd_args == None <span class="enscript-keyword">or</span> len(cmd_args) &lt; 2:
+        <span class="enscript-keyword">print</span> IoApicWrite32.__doc__
+        <span class="enscript-keyword">return</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> IsArchX86_64():
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;ioapic_write32 not supported on this architecture.&quot;</span>
+        <span class="enscript-keyword">return</span>
+
+    offset = ArgumentStringToInt(cmd_args[0])
+    write_val = ArgumentStringToInt(cmd_args[1])
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> DoIoApicWrite(offset, write_val):
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;ioapic_write32 FAILED&quot;</span>
+    <span class="enscript-keyword">return</span>
+
+@lldb_command(<span class="enscript-string">'ioapic_dump'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">IoApicDump</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Prints all IOAPIC entries
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> IsArchX86_64():
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;ioapic_dump not supported on this architecture.&quot;</span>
+        <span class="enscript-keyword">return</span>
+    DoIoApicDump()
+
+</pre>
+<hr />
+</body></html>

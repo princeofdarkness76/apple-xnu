@@ -1,0 +1,2102 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pktsched_qfq.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pktsched_qfq.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2011-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright (c) 2010 Fabio Checconi, Luigi Rizzo, Paolo Valente
+ * All rights reserved
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Quick Fair Queueing is described in
+ * &quot;QFQ: Efficient Packet Scheduling with Tight Bandwidth Distribution
+ * Guarantees&quot; by Fabio Checconi, Paolo Valente, and Luigi Rizzo.
+ *
+ * This code is ported from the dummynet(4) QFQ implementation.
+ * See also <a href="http://info.iet.unipi.it/~luigi/qfq/">http://info.iet.unipi.it/~luigi/qfq/</a>
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/pktsched/pktsched_qfq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * function prototypes
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">qfq_enqueue_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *, <span class="enscript-type">struct</span> mbuf *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">qfq_dequeue_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *, cqdq_op_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">qfq_request_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *, cqrq_t, <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">qfq_clear_interface</span>(<span class="enscript-type">struct</span> qfq_if *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> qfq_class *<span class="enscript-function-name">qfq_class_create</span>(<span class="enscript-type">struct</span> qfq_if *, u_int32_t,
+    u_int32_t, u_int32_t, u_int32_t, u_int32_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">qfq_class_destroy</span>(<span class="enscript-type">struct</span> qfq_if *, <span class="enscript-type">struct</span> qfq_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">qfq_destroy_locked</span>(<span class="enscript-type">struct</span> qfq_if *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span> <span class="enscript-function-name">qfq_addq</span>(<span class="enscript-type">struct</span> qfq_class *, <span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">struct</span> pf_mtag *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">qfq_getq</span>(<span class="enscript-type">struct</span> qfq_class *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">qfq_pollq</span>(<span class="enscript-type">struct</span> qfq_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_purgeq</span>(<span class="enscript-type">struct</span> qfq_if *, <span class="enscript-type">struct</span> qfq_class *, u_int32_t,
+    u_int32_t *, u_int32_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_purge_sc</span>(<span class="enscript-type">struct</span> qfq_if *, cqrq_purge_sc_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_updateq</span>(<span class="enscript-type">struct</span> qfq_if *, <span class="enscript-type">struct</span> qfq_class *, cqev_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">qfq_throttle</span>(<span class="enscript-type">struct</span> qfq_if *, cqrq_throttle_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">qfq_resumeq</span>(<span class="enscript-type">struct</span> qfq_if *, <span class="enscript-type">struct</span> qfq_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">qfq_suspendq</span>(<span class="enscript-type">struct</span> qfq_if *, <span class="enscript-type">struct</span> qfq_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">qfq_stat_sc</span>(<span class="enscript-type">struct</span> qfq_if *, cqrq_stat_sc_t *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> qfq_class *<span class="enscript-function-name">qfq_clh_to_clp</span>(<span class="enscript-type">struct</span> qfq_if *, u_int32_t);
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *<span class="enscript-function-name">qfq_style</span>(<span class="enscript-type">struct</span> qfq_if *);
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span> <span class="enscript-function-name">qfq_gt</span>(u_int64_t, u_int64_t);
+<span class="enscript-type">static</span> inline u_int64_t <span class="enscript-function-name">qfq_round_down</span>(u_int64_t, u_int32_t);
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> qfq_group *<span class="enscript-function-name">qfq_ffs</span>(<span class="enscript-type">struct</span> qfq_if *, pktsched_bitmap_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">qfq_calc_index</span>(<span class="enscript-type">struct</span> qfq_class *, u_int32_t, u_int32_t);
+<span class="enscript-type">static</span> inline pktsched_bitmap_t <span class="enscript-function-name">mask_from</span>(pktsched_bitmap_t, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> inline u_int32_t <span class="enscript-function-name">qfq_calc_state</span>(<span class="enscript-type">struct</span> qfq_if *, <span class="enscript-type">struct</span> qfq_group *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_move_groups</span>(<span class="enscript-type">struct</span> qfq_if *, pktsched_bitmap_t,
+    <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_unblock_groups</span>(<span class="enscript-type">struct</span> qfq_if *, <span class="enscript-type">int</span>, u_int64_t);
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_make_eligible</span>(<span class="enscript-type">struct</span> qfq_if *, u_int64_t);
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_slot_insert</span>(<span class="enscript-type">struct</span> qfq_if *, <span class="enscript-type">struct</span> qfq_group *,
+    <span class="enscript-type">struct</span> qfq_class *, u_int64_t);
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_front_slot_remove</span>(<span class="enscript-type">struct</span> qfq_group *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> qfq_class *<span class="enscript-function-name">qfq_slot_scan</span>(<span class="enscript-type">struct</span> qfq_if *,
+    <span class="enscript-type">struct</span> qfq_group *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_slot_rotate</span>(<span class="enscript-type">struct</span> qfq_if *, <span class="enscript-type">struct</span> qfq_group *,
+    u_int64_t);
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_update_eligible</span>(<span class="enscript-type">struct</span> qfq_if *, u_int64_t);
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span> <span class="enscript-function-name">qfq_update_class</span>(<span class="enscript-type">struct</span> qfq_if *, <span class="enscript-type">struct</span> qfq_group *,
+    <span class="enscript-type">struct</span> qfq_class *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_update_start</span>(<span class="enscript-type">struct</span> qfq_if *, <span class="enscript-type">struct</span> qfq_class *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_slot_remove</span>(<span class="enscript-type">struct</span> qfq_if *, <span class="enscript-type">struct</span> qfq_group *,
+    <span class="enscript-type">struct</span> qfq_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_deactivate_class</span>(<span class="enscript-type">struct</span> qfq_if *, <span class="enscript-type">struct</span> qfq_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *<span class="enscript-function-name">qfq_state2str</span>(<span class="enscript-type">int</span>);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">QFQ_DEBUG</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_dump_groups</span>(<span class="enscript-type">struct</span> qfq_if *, u_int32_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">qfq_dump_sched</span>(<span class="enscript-type">struct</span> qfq_if *, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* QFQ_DEBUG */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">QFQ_ZONE_MAX</span>	32		<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">QFQ_ZONE_NAME</span>	<span class="enscript-string">&quot;pktsched_qfq&quot;</span>	<span class="enscript-comment">/* zone name */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> qfq_size;		<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *qfq_zone;		<span class="enscript-comment">/* zone for qfq */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">QFQ_CL_ZONE_MAX</span>	32	<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">QFQ_CL_ZONE_NAME</span>	<span class="enscript-string">&quot;pktsched_qfq_cl&quot;</span> <span class="enscript-comment">/* zone name */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> qfq_cl_size;	<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *qfq_cl_zone;	<span class="enscript-comment">/* zone for qfq_class */</span>
+
+<span class="enscript-comment">/*
+ * Maximum number of consecutive slots occupied by backlogged classes
+ * inside a group.  This is approx lmax/lmin + 5.  Used when ALTQ is
+ * available.
+ *
+ * XXX check because it poses constraints on MAX_INDEX
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">QFQ_MAX_SLOTS</span>	32	<span class="enscript-comment">/* default when ALTQ is available */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_init</span>(<span class="enscript-type">void</span>)
+{
+	qfq_size = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> qfq_if);
+	qfq_zone = zinit(qfq_size, QFQ_ZONE_MAX * qfq_size,
+	    0, QFQ_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (qfq_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, QFQ_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(qfq_zone, Z_EXPAND, TRUE);
+	zone_change(qfq_zone, Z_CALLERACCT, TRUE);
+
+	qfq_cl_size = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> qfq_class);
+	qfq_cl_zone = zinit(qfq_cl_size, QFQ_CL_ZONE_MAX * qfq_cl_size,
+	    0, QFQ_CL_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (qfq_cl_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, QFQ_CL_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(qfq_cl_zone, Z_EXPAND, TRUE);
+	zone_change(qfq_cl_zone, Z_CALLERACCT, TRUE);
+}
+
+<span class="enscript-type">struct</span> qfq_if *
+<span class="enscript-function-name">qfq_alloc</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">int</span> how, boolean_t altq)
+{
+	<span class="enscript-type">struct</span> qfq_if	*qif;
+
+	qif = (how == M_WAITOK) ? zalloc(qfq_zone) : zalloc_noblock(qfq_zone);
+	<span class="enscript-keyword">if</span> (qif == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	bzero(qif, qfq_size);
+	qif-&gt;qif_ifq = &amp;ifp-&gt;if_snd;
+	<span class="enscript-keyword">if</span> (altq) {
+		qif-&gt;qif_maxclasses = QFQ_MAX_CLASSES;
+		qif-&gt;qif_maxslots = QFQ_MAX_SLOTS;
+		qif-&gt;qif_flags |= QFQIFF_ALTQ;
+	} <span class="enscript-keyword">else</span> {
+		qif-&gt;qif_maxclasses = IFCQ_SC_MAX;
+		<span class="enscript-comment">/*
+		 * TODO: <a href="mailto:adi@apple.com">adi@apple.com</a>
+		 *
+		 * Ideally I would like to have the following
+		 * but QFQ needs further modifications.
+		 *
+		 *	qif-&gt;qif_maxslots = IFCQ_SC_MAX;
+		 */</span>
+		qif-&gt;qif_maxslots = QFQ_MAX_SLOTS;
+	}
+
+	<span class="enscript-keyword">if</span> ((qif-&gt;qif_class_tbl = _MALLOC(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> qfq_class *) *
+	    qif-&gt;qif_maxclasses, M_DEVBUF, M_WAITOK|M_ZERO)) == NULL) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s unable to allocate class table array\n&quot;</span>,
+		    if_name(ifp), qfq_style(qif));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ((qif-&gt;qif_groups = _MALLOC(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> qfq_group *) *
+	    (QFQ_MAX_INDEX + 1), M_DEVBUF, M_WAITOK|M_ZERO)) == NULL) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s unable to allocate group array\n&quot;</span>,
+		    if_name(ifp), qfq_style(qif));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s scheduler allocated\n&quot;</span>,
+		    if_name(ifp), qfq_style(qif));
+	}
+
+	<span class="enscript-keyword">return</span> (qif);
+
+<span class="enscript-reference">error</span>:
+	<span class="enscript-keyword">if</span> (qif-&gt;qif_class_tbl != NULL) {
+		_FREE(qif-&gt;qif_class_tbl, M_DEVBUF);
+		qif-&gt;qif_class_tbl = NULL;
+	}
+	<span class="enscript-keyword">if</span> (qif-&gt;qif_groups != NULL) {
+		_FREE(qif-&gt;qif_groups, M_DEVBUF);
+		qif-&gt;qif_groups = NULL;
+	}
+	zfree(qfq_zone, qif);
+
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_destroy</span>(<span class="enscript-type">struct</span> qfq_if *qif)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = qif-&gt;qif_ifq;
+	<span class="enscript-type">int</span> err;
+
+	IFCQ_LOCK(ifq);
+	err = qfq_destroy_locked(qif);
+	IFCQ_UNLOCK(ifq);
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_destroy_locked</span>(<span class="enscript-type">struct</span> qfq_if *qif)
+{
+	<span class="enscript-type">int</span> i;
+
+	IFCQ_LOCK_ASSERT_HELD(qif-&gt;qif_ifq);
+
+	(<span class="enscript-type">void</span>) qfq_clear_interface(qif);
+
+	VERIFY(qif-&gt;qif_class_tbl != NULL);
+	_FREE(qif-&gt;qif_class_tbl, M_DEVBUF);
+	qif-&gt;qif_class_tbl = NULL;
+
+	VERIFY(qif-&gt;qif_groups != NULL);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt;= QFQ_MAX_INDEX; i++) {
+		<span class="enscript-type">struct</span> qfq_group *grp = qif-&gt;qif_groups[i];
+
+		<span class="enscript-keyword">if</span> (grp != NULL) {
+			VERIFY(grp-&gt;qfg_slots != NULL);
+			_FREE(grp-&gt;qfg_slots, M_DEVBUF);
+			grp-&gt;qfg_slots = NULL;
+			_FREE(grp, M_DEVBUF);
+			qif-&gt;qif_groups[i] = NULL;
+		}
+	}
+	_FREE(qif-&gt;qif_groups, M_DEVBUF);
+	qif-&gt;qif_groups = NULL;
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s scheduler destroyed\n&quot;</span>,
+		    if_name(QFQIF_IFP(qif)), qfq_style(qif));
+	}
+
+	zfree(qfq_zone, qif);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * bring the interface back to the initial state by discarding
+ * all the filters and classes.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_clear_interface</span>(<span class="enscript-type">struct</span> qfq_if *qif)
+{
+	<span class="enscript-type">struct</span> qfq_class *cl;
+	<span class="enscript-type">int</span> i;
+
+	IFCQ_LOCK_ASSERT_HELD(qif-&gt;qif_ifq);
+
+	<span class="enscript-comment">/* clear out the classes */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; qif-&gt;qif_maxclasses; i++)
+		<span class="enscript-keyword">if</span> ((cl = qif-&gt;qif_class_tbl[i]) != NULL)
+			qfq_class_destroy(qif, cl);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* discard all the queued packets on the interface */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_purge</span>(<span class="enscript-type">struct</span> qfq_if *qif)
+{
+	<span class="enscript-type">struct</span> qfq_class *cl;
+	<span class="enscript-type">int</span> i;
+
+	IFCQ_LOCK_ASSERT_HELD(qif-&gt;qif_ifq);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; qif-&gt;qif_maxclasses; i++) {
+		<span class="enscript-keyword">if</span> ((cl = qif-&gt;qif_class_tbl[i]) != NULL)
+			qfq_purgeq(qif, cl, 0, NULL, NULL);
+	}
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">PF_ALTQ</span>
+	<span class="enscript-comment">/*
+	 * This assertion is safe to be made only when PF_ALTQ is not
+	 * configured; otherwise, IFCQ_LEN represents the sum of the
+	 * packets managed by ifcq_disc and altq_disc instances, which
+	 * is possible when transitioning between the two.
+	 */</span>
+	VERIFY(IFCQ_LEN(qif-&gt;qif_ifq) == 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !PF_ALTQ */</span>
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_purge_sc</span>(<span class="enscript-type">struct</span> qfq_if *qif, cqrq_purge_sc_t *pr)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = qif-&gt;qif_ifq;
+	u_int32_t i;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	VERIFY(pr-&gt;sc == MBUF_SC_UNSPEC || MBUF_VALID_SC(pr-&gt;sc));
+	VERIFY(pr-&gt;flow != 0);
+
+	<span class="enscript-keyword">if</span> (pr-&gt;sc != MBUF_SC_UNSPEC) {
+		i = MBUF_SCIDX(pr-&gt;sc);
+		VERIFY(i &lt; IFCQ_SC_MAX);
+
+		qfq_purgeq(qif, ifq-&gt;ifcq_disc_slots[i].cl,
+		    pr-&gt;flow, &amp;pr-&gt;packets, &amp;pr-&gt;bytes);
+	} <span class="enscript-keyword">else</span> {
+		u_int32_t cnt, len;
+
+		pr-&gt;packets = 0;
+		pr-&gt;bytes = 0;
+
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; IFCQ_SC_MAX; i++) {
+			qfq_purgeq(qif, ifq-&gt;ifcq_disc_slots[i].cl,
+			    pr-&gt;flow, &amp;cnt, &amp;len);
+			pr-&gt;packets += cnt;
+			pr-&gt;bytes += len;
+		}
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_event</span>(<span class="enscript-type">struct</span> qfq_if *qif, cqev_t ev)
+{
+	<span class="enscript-type">struct</span> qfq_class *cl;
+	<span class="enscript-type">int</span> i;
+
+	IFCQ_LOCK_ASSERT_HELD(qif-&gt;qif_ifq);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; qif-&gt;qif_maxclasses; i++)
+		<span class="enscript-keyword">if</span> ((cl = qif-&gt;qif_class_tbl[i]) != NULL)
+			qfq_updateq(qif, cl, ev);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_add_queue</span>(<span class="enscript-type">struct</span> qfq_if *qif, u_int32_t qlimit, u_int32_t weight,
+    u_int32_t maxsz, u_int32_t flags, u_int32_t qid, <span class="enscript-type">struct</span> qfq_class **clp)
+{
+	<span class="enscript-type">struct</span> qfq_class *cl;
+	u_int32_t w;
+
+	IFCQ_LOCK_ASSERT_HELD(qif-&gt;qif_ifq);
+
+	<span class="enscript-keyword">if</span> (qfq_clh_to_clp(qif, qid) != NULL)
+		<span class="enscript-keyword">return</span> (EBUSY);
+
+	<span class="enscript-comment">/* check parameters */</span>
+	<span class="enscript-keyword">if</span> (weight == 0 || weight &gt; QFQ_MAX_WEIGHT)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	w = (QFQ_ONE_FP / (QFQ_ONE_FP / weight));
+	<span class="enscript-keyword">if</span> (qif-&gt;qif_wsum + w &gt; QFQ_MAX_WSUM)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">if</span> (maxsz == 0 || maxsz &gt; (1 &lt;&lt; QFQ_MTU_SHIFT))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	cl = qfq_class_create(qif, weight, qlimit, flags, maxsz, qid);
+	<span class="enscript-keyword">if</span> (cl == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	<span class="enscript-keyword">if</span> (clp != NULL)
+		*clp = cl;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> qfq_class *
+<span class="enscript-function-name">qfq_class_create</span>(<span class="enscript-type">struct</span> qfq_if *qif, u_int32_t weight, u_int32_t qlimit,
+    u_int32_t flags, u_int32_t maxsz, u_int32_t qid)
+{
+	<span class="enscript-type">struct</span> ifnet *ifp;
+	<span class="enscript-type">struct</span> ifclassq *ifq;
+	<span class="enscript-type">struct</span> qfq_group *grp;
+	<span class="enscript-type">struct</span> qfq_class *cl;
+	u_int32_t w;			<span class="enscript-comment">/* approximated weight */</span>
+	<span class="enscript-type">int</span> i;
+
+	IFCQ_LOCK_ASSERT_HELD(qif-&gt;qif_ifq);
+
+	<span class="enscript-comment">/* Sanitize flags unless internally configured */</span>
+	<span class="enscript-keyword">if</span> (qif-&gt;qif_flags &amp; QFQIFF_ALTQ)
+		flags &amp;= QFCF_USERFLAGS;
+
+	<span class="enscript-keyword">if</span> (qif-&gt;qif_classes &gt;= qif-&gt;qif_maxclasses) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s out of classes! (max %d)\n&quot;</span>,
+		    if_name(QFQIF_IFP(qif)), qfq_style(qif),
+		    qif-&gt;qif_maxclasses);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (flags &amp; QFCF_RED) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s RED not available!\n&quot;</span>,
+		    if_name(QFQIF_IFP(qif)), qfq_style(qif));
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !CLASSQ_RED */</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (flags &amp; QFCF_RIO) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s RIO not available!\n&quot;</span>,
+		    if_name(QFQIF_IFP(qif)), qfq_style(qif));
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (flags &amp; QFCF_BLUE) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s BLUE not available!\n&quot;</span>,
+		    if_name(QFQIF_IFP(qif)), qfq_style(qif));
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+
+	<span class="enscript-comment">/* These are mutually exclusive */</span>
+	<span class="enscript-keyword">if</span> ((flags &amp; (QFCF_RED|QFCF_RIO|QFCF_BLUE|QFCF_SFB)) &amp;&amp;
+	    (flags &amp; (QFCF_RED|QFCF_RIO|QFCF_BLUE|QFCF_SFB)) != QFCF_RED &amp;&amp;
+	    (flags &amp; (QFCF_RED|QFCF_RIO|QFCF_BLUE|QFCF_SFB)) != QFCF_RIO &amp;&amp;
+	    (flags &amp; (QFCF_RED|QFCF_RIO|QFCF_BLUE|QFCF_SFB)) != QFCF_BLUE &amp;&amp;
+	    (flags &amp; (QFCF_RED|QFCF_RIO|QFCF_BLUE|QFCF_SFB)) != QFCF_SFB) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s more than one RED|RIO|BLUE|SFB\n&quot;</span>,
+		    if_name(QFQIF_IFP(qif)), qfq_style(qif));
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	ifq = qif-&gt;qif_ifq;
+	ifp = QFQIF_IFP(qif);
+
+	cl = zalloc(qfq_cl_zone);
+	<span class="enscript-keyword">if</span> (cl == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	bzero(cl, qfq_cl_size);
+
+	<span class="enscript-keyword">if</span> (qlimit == 0 || qlimit &gt; IFCQ_MAXLEN(ifq)) {
+		qlimit = IFCQ_MAXLEN(ifq);
+		<span class="enscript-keyword">if</span> (qlimit == 0)
+			qlimit = DEFAULT_QLIMIT;  <span class="enscript-comment">/* use default */</span>
+	}
+	_qinit(&amp;cl-&gt;cl_q, Q_DROPTAIL, qlimit);
+	cl-&gt;cl_qif = qif;
+	cl-&gt;cl_flags = flags;
+	cl-&gt;cl_handle = qid;
+
+	<span class="enscript-comment">/*
+	 * Find a free slot in the class table.  If the slot matching
+	 * the lower bits of qid is free, use this slot.  Otherwise,
+	 * use the first free slot.
+	 */</span>
+	i = qid % qif-&gt;qif_maxclasses;
+	<span class="enscript-keyword">if</span> (qif-&gt;qif_class_tbl[i] == NULL) {
+		qif-&gt;qif_class_tbl[i] = cl;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; qif-&gt;qif_maxclasses; i++) {
+			<span class="enscript-keyword">if</span> (qif-&gt;qif_class_tbl[i] == NULL) {
+				qif-&gt;qif_class_tbl[i] = cl;
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+		<span class="enscript-keyword">if</span> (i == qif-&gt;qif_maxclasses) {
+			zfree(qfq_cl_zone, cl);
+			<span class="enscript-keyword">return</span> (NULL);
+		}
+	}
+
+	w = weight;
+	VERIFY(w &gt; 0 &amp;&amp; w &lt;= QFQ_MAX_WEIGHT);
+	cl-&gt;cl_lmax = maxsz;
+	cl-&gt;cl_inv_w = (QFQ_ONE_FP / w);
+	w = (QFQ_ONE_FP / cl-&gt;cl_inv_w);
+	VERIFY(qif-&gt;qif_wsum + w &lt;= QFQ_MAX_WSUM);
+
+	i = qfq_calc_index(cl, cl-&gt;cl_inv_w, cl-&gt;cl_lmax);
+	VERIFY(i &lt;= QFQ_MAX_INDEX);
+	grp = qif-&gt;qif_groups[i];
+	<span class="enscript-keyword">if</span> (grp == NULL) {
+		grp = _MALLOC(<span class="enscript-keyword">sizeof</span> (*grp), M_DEVBUF, M_WAITOK|M_ZERO);
+		<span class="enscript-keyword">if</span> (grp != NULL) {
+			grp-&gt;qfg_index = i;
+			grp-&gt;qfg_slot_shift =
+			    QFQ_MTU_SHIFT + QFQ_FRAC_BITS - (QFQ_MAX_INDEX - i);
+			grp-&gt;qfg_slots = _MALLOC(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> qfq_class *) *
+			    qif-&gt;qif_maxslots, M_DEVBUF, M_WAITOK|M_ZERO);
+			<span class="enscript-keyword">if</span> (grp-&gt;qfg_slots == NULL) {
+				log(LOG_ERR, <span class="enscript-string">&quot;%s: %s unable to allocate group &quot;</span>
+				    <span class="enscript-string">&quot;slots for index %d\n&quot;</span>, if_name(ifp),
+				    qfq_style(qif), i);
+			}
+		} <span class="enscript-keyword">else</span> {
+			log(LOG_ERR, <span class="enscript-string">&quot;%s: %s unable to allocate group for &quot;</span>
+			    <span class="enscript-string">&quot;qid=%d\n&quot;</span>, if_name(ifp), qfq_style(qif),
+			    cl-&gt;cl_handle);
+		}
+		<span class="enscript-keyword">if</span> (grp == NULL || grp-&gt;qfg_slots == NULL) {
+			qif-&gt;qif_class_tbl[qid % qif-&gt;qif_maxclasses] = NULL;
+			<span class="enscript-keyword">if</span> (grp != NULL)
+				_FREE(grp, M_DEVBUF);
+			zfree(qfq_cl_zone, cl);
+			<span class="enscript-keyword">return</span> (NULL);
+		} <span class="enscript-keyword">else</span> {
+			qif-&gt;qif_groups[i] = grp;
+		}
+	}
+	cl-&gt;cl_grp = grp;
+	qif-&gt;qif_wsum += w;
+	<span class="enscript-comment">/* XXX cl-&gt;cl_S = qif-&gt;qif_V; ? */</span>
+	<span class="enscript-comment">/* XXX compute qif-&gt;qif_i_wsum */</span>
+
+	qif-&gt;qif_classes++;
+
+	<span class="enscript-keyword">if</span> (flags &amp; QFCF_DEFAULTCLASS)
+		qif-&gt;qif_default = cl;
+
+	<span class="enscript-keyword">if</span> (flags &amp; (QFCF_RED|QFCF_RIO|QFCF_BLUE|QFCF_SFB)) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span> || <span class="enscript-variable-name">CLASSQ_RIO</span>
+		u_int64_t ifbandwidth = ifnet_output_linkrate(ifp);
+		<span class="enscript-type">int</span> pkttime;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED || CLASSQ_RIO */</span>
+
+		cl-&gt;cl_qflags = 0;
+		<span class="enscript-keyword">if</span> (flags &amp; QFCF_ECN) {
+			<span class="enscript-keyword">if</span> (flags &amp; QFCF_BLUE)
+				cl-&gt;cl_qflags |= BLUEF_ECN;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; QFCF_SFB)
+				cl-&gt;cl_qflags |= SFBF_ECN;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; QFCF_RED)
+				cl-&gt;cl_qflags |= REDF_ECN;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; QFCF_RIO)
+				cl-&gt;cl_qflags |= RIOF_ECN;
+		}
+		<span class="enscript-keyword">if</span> (flags &amp; QFCF_FLOWCTL) {
+			<span class="enscript-keyword">if</span> (flags &amp; QFCF_SFB)
+				cl-&gt;cl_qflags |= SFBF_FLOWCTL;
+		}
+		<span class="enscript-keyword">if</span> (flags &amp; QFCF_DELAYBASED) {
+			<span class="enscript-keyword">if</span> (flags &amp; QFCF_SFB)
+				cl-&gt;cl_qflags |= SFBF_DELAYBASED;
+		}
+		<span class="enscript-keyword">if</span> (flags &amp; QFCF_CLEARDSCP) {
+			<span class="enscript-keyword">if</span> (flags &amp; QFCF_RIO)
+				cl-&gt;cl_qflags |= RIOF_CLEARDSCP;
+		}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span> || <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-comment">/*
+		 * XXX: RED &amp; RIO should be watching link speed and MTU
+		 *	events and recompute pkttime accordingly.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ifbandwidth &lt; 8)
+			pkttime = 1000 * 1000 * 1000; <span class="enscript-comment">/* 1 sec */</span>
+		<span class="enscript-keyword">else</span>
+			pkttime = (int64_t)ifp-&gt;if_mtu * 1000 * 1000 * 1000 /
+			    (ifbandwidth / 8);
+
+		<span class="enscript-comment">/* Test for exclusivity {RED,RIO,BLUE,SFB} was done above */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+		<span class="enscript-keyword">if</span> (flags &amp; QFCF_RED) {
+			cl-&gt;cl_red = red_alloc(ifp, 0, 0,
+			    qlimit(&amp;cl-&gt;cl_q) * 10/100,
+			    qlimit(&amp;cl-&gt;cl_q) * 30/100,
+			    cl-&gt;cl_qflags, pkttime);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_red != NULL)
+				qtype(&amp;cl-&gt;cl_q) = Q_RED;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-keyword">if</span> (flags &amp; QFCF_RIO) {
+			cl-&gt;cl_rio =
+			    rio_alloc(ifp, 0, NULL, cl-&gt;cl_qflags, pkttime);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_rio != NULL)
+				qtype(&amp;cl-&gt;cl_q) = Q_RIO;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED || CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+		<span class="enscript-keyword">if</span> (flags &amp; QFCF_BLUE) {
+			cl-&gt;cl_blue = blue_alloc(ifp, 0, 0, cl-&gt;cl_qflags);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_blue != NULL)
+				qtype(&amp;cl-&gt;cl_q) = Q_BLUE;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+		<span class="enscript-keyword">if</span> (flags &amp; QFCF_SFB) {
+			<span class="enscript-keyword">if</span> (!(cl-&gt;cl_flags &amp; QFCF_LAZY))
+				cl-&gt;cl_sfb = sfb_alloc(ifp, cl-&gt;cl_handle,
+				    qlimit(&amp;cl-&gt;cl_q), cl-&gt;cl_qflags);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_sfb != NULL || (cl-&gt;cl_flags &amp; QFCF_LAZY))
+				qtype(&amp;cl-&gt;cl_q) = Q_SFB;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s created qid=%d grp=%d weight=%d &quot;</span>
+		    <span class="enscript-string">&quot;qlimit=%d flags=%b\n&quot;</span>, if_name(ifp), qfq_style(qif),
+		    cl-&gt;cl_handle, cl-&gt;cl_grp-&gt;qfg_index, weight, qlimit,
+		    flags, QFCF_BITS);
+	}
+
+	<span class="enscript-keyword">return</span> (cl);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_remove_queue</span>(<span class="enscript-type">struct</span> qfq_if *qif, u_int32_t qid)
+{
+	<span class="enscript-type">struct</span> qfq_class *cl;
+
+	IFCQ_LOCK_ASSERT_HELD(qif-&gt;qif_ifq);
+
+	<span class="enscript-keyword">if</span> ((cl = qfq_clh_to_clp(qif, qid)) == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">return</span> (qfq_class_destroy(qif, cl));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_class_destroy</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">struct</span> qfq_class *cl)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = qif-&gt;qif_ifq;
+	<span class="enscript-type">int</span> i;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	qfq_purgeq(qif, cl, 0, NULL, NULL);
+
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_inv_w != 0) {
+		qif-&gt;qif_wsum -= (QFQ_ONE_FP / cl-&gt;cl_inv_w);
+		cl-&gt;cl_inv_w = 0;	<span class="enscript-comment">/* reset weight to avoid run twice */</span>
+	}
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; qif-&gt;qif_maxclasses; i++) {
+		<span class="enscript-keyword">if</span> (qif-&gt;qif_class_tbl[i] == cl) {
+			qif-&gt;qif_class_tbl[i] = NULL;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	qif-&gt;qif_classes--;
+
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_qalg.ptr != NULL) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+			rio_destroy(cl-&gt;cl_rio);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+		<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+			red_destroy(cl-&gt;cl_red);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+		<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+			blue_destroy(cl-&gt;cl_blue);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+		<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q) &amp;&amp; cl-&gt;cl_sfb != NULL)
+			sfb_destroy(cl-&gt;cl_sfb);
+		cl-&gt;cl_qalg.ptr = NULL;
+		qtype(&amp;cl-&gt;cl_q) = Q_DROPTAIL;
+		qstate(&amp;cl-&gt;cl_q) = QS_RUNNING;
+	}
+
+	<span class="enscript-keyword">if</span> (qif-&gt;qif_default == cl)
+		qif-&gt;qif_default = NULL;
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s destroyed qid=%d\n&quot;</span>,
+		    if_name(QFQIF_IFP(qif)), qfq_style(qif), cl-&gt;cl_handle);
+	}
+
+	zfree(qfq_cl_zone, cl);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Calculate a mask to mimic what would be ffs_from()
+ */</span>
+<span class="enscript-type">static</span> inline pktsched_bitmap_t
+<span class="enscript-function-name">mask_from</span>(pktsched_bitmap_t bitmap, <span class="enscript-type">int</span> from)
+{
+	<span class="enscript-keyword">return</span> (bitmap &amp; ~((1UL &lt;&lt; from) - 1));
+}
+
+<span class="enscript-comment">/*
+ * The state computation relies on ER=0, IR=1, EB=2, IB=3
+ * First compute eligibility comparing grp-&gt;qfg_S, qif-&gt;qif_V,
+ * then check if someone is blocking us and possibly add EB
+ */</span>
+<span class="enscript-type">static</span> inline u_int32_t
+<span class="enscript-function-name">qfq_calc_state</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">struct</span> qfq_group *grp)
+{
+	<span class="enscript-comment">/* if S &gt; V we are not eligible */</span>
+	u_int32_t state = qfq_gt(grp-&gt;qfg_S, qif-&gt;qif_V);
+	pktsched_bitmap_t mask = mask_from(qif-&gt;qif_bitmaps[ER],
+	    grp-&gt;qfg_index);
+	<span class="enscript-type">struct</span> qfq_group *next;
+
+	<span class="enscript-keyword">if</span> (mask) {
+		next = qfq_ffs(qif, mask);
+		<span class="enscript-keyword">if</span> (qfq_gt(grp-&gt;qfg_F, next-&gt;qfg_F))
+			state |= EB;
+	}
+
+	<span class="enscript-keyword">return</span> (state);
+}
+
+<span class="enscript-comment">/*
+ * In principle
+ *	qif-&gt;qif_bitmaps[dst] |= qif-&gt;qif_bitmaps[src] &amp; mask;
+ *	qif-&gt;qif_bitmaps[src] &amp;= ~mask;
+ * but we should make sure that src != dst
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_move_groups</span>(<span class="enscript-type">struct</span> qfq_if *qif, pktsched_bitmap_t mask, <span class="enscript-type">int</span> src, <span class="enscript-type">int</span> dst)
+{
+	qif-&gt;qif_bitmaps[dst] |= qif-&gt;qif_bitmaps[src] &amp; mask;
+	qif-&gt;qif_bitmaps[src] &amp;= ~mask;
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_unblock_groups</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">int</span> index, u_int64_t old_finish)
+{
+	pktsched_bitmap_t mask = mask_from(qif-&gt;qif_bitmaps[ER], index + 1);
+	<span class="enscript-type">struct</span> qfq_group *next;
+
+	<span class="enscript-keyword">if</span> (mask) {
+		next = qfq_ffs(qif, mask);
+		<span class="enscript-keyword">if</span> (!qfq_gt(next-&gt;qfg_F, old_finish))
+			<span class="enscript-keyword">return</span>;
+	}
+
+	mask = (1UL &lt;&lt; index) - 1;
+	qfq_move_groups(qif, mask, EB, ER);
+	qfq_move_groups(qif, mask, IB, IR);
+}
+
+<span class="enscript-comment">/*
+ * perhaps
+ *
+ *	old_V ^= qif-&gt;qif_V;
+ *	old_V &gt;&gt;= QFQ_MIN_SLOT_SHIFT;
+ *	if (old_V) {
+ *		...
+ *	}
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_make_eligible</span>(<span class="enscript-type">struct</span> qfq_if *qif, u_int64_t old_V)
+{
+	pktsched_bitmap_t mask, vslot, old_vslot;
+
+	vslot = qif-&gt;qif_V &gt;&gt; QFQ_MIN_SLOT_SHIFT;
+	old_vslot = old_V &gt;&gt; QFQ_MIN_SLOT_SHIFT;
+
+	<span class="enscript-keyword">if</span> (vslot != old_vslot) {
+		mask = (2UL &lt;&lt; (__fls(vslot ^ old_vslot))) - 1;
+		qfq_move_groups(qif, mask, IR, ER);
+		qfq_move_groups(qif, mask, IB, EB);
+	}
+}
+
+<span class="enscript-comment">/*
+ * XXX we should make sure that slot becomes less than 32.
+ * This is guaranteed by the input values.
+ * roundedS is always cl-&gt;qfg_S rounded on grp-&gt;qfg_slot_shift bits.
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_slot_insert</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">struct</span> qfq_group *grp,
+    <span class="enscript-type">struct</span> qfq_class *cl, u_int64_t roundedS)
+{
+	u_int64_t slot = (roundedS - grp-&gt;qfg_S) &gt;&gt; grp-&gt;qfg_slot_shift;
+	u_int32_t i = (grp-&gt;qfg_front + slot) % qif-&gt;qif_maxslots;
+
+	cl-&gt;cl_next = grp-&gt;qfg_slots[i];
+	grp-&gt;qfg_slots[i] = cl;
+	pktsched_bit_set(slot, &amp;grp-&gt;qfg_full_slots);
+}
+
+<span class="enscript-comment">/*
+ * remove the entry from the slot
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_front_slot_remove</span>(<span class="enscript-type">struct</span> qfq_group *grp)
+{
+	<span class="enscript-type">struct</span> qfq_class **h = &amp;grp-&gt;qfg_slots[grp-&gt;qfg_front];
+
+	*h = (*h)-&gt;cl_next;
+	<span class="enscript-keyword">if</span> (!*h)
+		pktsched_bit_clr(0, &amp;grp-&gt;qfg_full_slots);
+}
+
+<span class="enscript-comment">/*
+ * Returns the first full queue in a group. As a side effect,
+ * adjust the bucket list so the first non-empty bucket is at
+ * position 0 in qfg_full_slots.
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> qfq_class *
+<span class="enscript-function-name">qfq_slot_scan</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">struct</span> qfq_group *grp)
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose &gt; 2) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s grp=%d full_slots=0x%x\n&quot;</span>,
+		    if_name(QFQIF_IFP(qif)), qfq_style(qif), grp-&gt;qfg_index,
+		    grp-&gt;qfg_full_slots);
+	}
+
+	<span class="enscript-keyword">if</span> (grp-&gt;qfg_full_slots == 0)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	i = pktsched_ffs(grp-&gt;qfg_full_slots) - 1; <span class="enscript-comment">/* zero-based */</span>
+	<span class="enscript-keyword">if</span> (i &gt; 0) {
+		grp-&gt;qfg_front = (grp-&gt;qfg_front + i) % qif-&gt;qif_maxslots;
+		grp-&gt;qfg_full_slots &gt;&gt;= i;
+	}
+
+	<span class="enscript-keyword">return</span> (grp-&gt;qfg_slots[grp-&gt;qfg_front]);
+}
+
+<span class="enscript-comment">/*
+ * adjust the bucket list. When the start time of a group decreases,
+ * we move the index down (modulo qif-&gt;qif_maxslots) so we don't need to
+ * move the objects. The mask of occupied slots must be shifted
+ * because we use ffs() to find the first non-empty slot.
+ * This covers decreases in the group's start time, but what about
+ * increases of the start time ?
+ * Here too we should make sure that i is less than 32
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_slot_rotate</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">struct</span> qfq_group *grp, u_int64_t roundedS)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">qif</span>)
+	u_int32_t i = (grp-&gt;qfg_S - roundedS) &gt;&gt; grp-&gt;qfg_slot_shift;
+
+	grp-&gt;qfg_full_slots &lt;&lt;= i;
+	grp-&gt;qfg_front = (grp-&gt;qfg_front - i) % qif-&gt;qif_maxslots;
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_update_eligible</span>(<span class="enscript-type">struct</span> qfq_if *qif, u_int64_t old_V)
+{
+	pktsched_bitmap_t ineligible;
+
+	ineligible = qif-&gt;qif_bitmaps[IR] | qif-&gt;qif_bitmaps[IB];
+	<span class="enscript-keyword">if</span> (ineligible) {
+		<span class="enscript-keyword">if</span> (!qif-&gt;qif_bitmaps[ER]) {
+			<span class="enscript-type">struct</span> qfq_group *grp;
+			grp = qfq_ffs(qif, ineligible);
+			<span class="enscript-keyword">if</span> (qfq_gt(grp-&gt;qfg_S, qif-&gt;qif_V))
+				qif-&gt;qif_V = grp-&gt;qfg_S;
+		}
+		qfq_make_eligible(qif, old_V);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Updates the class, returns true if also the group needs to be updated.
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_update_class</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">struct</span> qfq_group *grp,
+    <span class="enscript-type">struct</span> qfq_class *cl)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">qif</span>)
+	cl-&gt;cl_S = cl-&gt;cl_F;
+	<span class="enscript-keyword">if</span> (qempty(&amp;cl-&gt;cl_q))  {
+		qfq_front_slot_remove(grp);
+	} <span class="enscript-keyword">else</span> {
+		u_int32_t len;
+		u_int64_t roundedS;
+
+		len = m_pktlen(qhead(&amp;cl-&gt;cl_q));
+		cl-&gt;cl_F = cl-&gt;cl_S + (u_int64_t)len * cl-&gt;cl_inv_w;
+		roundedS = qfq_round_down(cl-&gt;cl_S, grp-&gt;qfg_slot_shift);
+		<span class="enscript-keyword">if</span> (roundedS == grp-&gt;qfg_S)
+			<span class="enscript-keyword">return</span> (0);
+
+		qfq_front_slot_remove(grp);
+		qfq_slot_insert(qif, grp, cl, roundedS);
+	}
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/*
+ * note: CLASSQDQ_POLL returns the next packet without removing the packet
+ *	from the queue.  CLASSQDQ_REMOVE is a normal dequeue operation.
+ *	CLASSQDQ_REMOVE must return the same packet if called immediately
+ *	after CLASSQDQ_POLL.
+ */</span>
+<span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">qfq_dequeue</span>(<span class="enscript-type">struct</span> qfq_if *qif, cqdq_op_t op)
+{
+	pktsched_bitmap_t er_bits = qif-&gt;qif_bitmaps[ER];
+	<span class="enscript-type">struct</span> ifclassq *ifq = qif-&gt;qif_ifq;
+	<span class="enscript-type">struct</span> qfq_group *grp;
+	<span class="enscript-type">struct</span> qfq_class *cl;
+	<span class="enscript-type">struct</span> mbuf *m;
+	u_int64_t old_V;
+	u_int32_t len;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	<span class="enscript-keyword">for</span> (;;) {
+		<span class="enscript-keyword">if</span> (er_bits == 0) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">QFQ_DEBUG</span>
+			<span class="enscript-keyword">if</span> (qif-&gt;qif_queued &amp;&amp; pktsched_verbose &gt; 1)
+				qfq_dump_sched(qif, <span class="enscript-string">&quot;start dequeue&quot;</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* QFQ_DEBUG */</span>
+			<span class="enscript-comment">/* no eligible and ready packet */</span>
+			<span class="enscript-keyword">return</span> (NULL);
+		}
+		grp = qfq_ffs(qif, er_bits);
+		<span class="enscript-comment">/* if group is non-empty, use it */</span>
+		<span class="enscript-keyword">if</span> (grp-&gt;qfg_full_slots != 0)
+			<span class="enscript-keyword">break</span>;
+		pktsched_bit_clr(grp-&gt;qfg_index, &amp;er_bits);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">QFQ_DEBUG</span>
+		qif-&gt;qif_emptygrp++;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* QFQ_DEBUG */</span>
+	}
+	VERIFY(!IFCQ_IS_EMPTY(ifq));
+
+	cl = grp-&gt;qfg_slots[grp-&gt;qfg_front];
+	VERIFY(cl != NULL &amp;&amp; !qempty(&amp;cl-&gt;cl_q));
+
+	<span class="enscript-keyword">if</span> (op == CLASSQDQ_POLL)
+		<span class="enscript-keyword">return</span> (qfq_pollq(cl));
+
+	m = qfq_getq(cl);
+	VERIFY(m != NULL);	<span class="enscript-comment">/* qalg must be work conserving */</span>
+	len = m_pktlen(m);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">QFQ_DEBUG</span>
+	qif-&gt;qif_queued--;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* QFQ_DEBUG */</span>
+
+	IFCQ_DEC_LEN(ifq);
+	IFCQ_DEC_BYTES(ifq, len);
+	<span class="enscript-keyword">if</span> (qempty(&amp;cl-&gt;cl_q))
+		cl-&gt;cl_period++;
+	PKTCNTR_ADD(&amp;cl-&gt;cl_xmitcnt, 1, len);
+	IFCQ_XMIT_ADD(ifq, 1, len);
+
+	old_V = qif-&gt;qif_V;
+	qif-&gt;qif_V += (u_int64_t)len * QFQ_IWSUM;
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose &gt; 2) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s qid=%d dequeue m=0x%llx F=0x%llx &quot;</span>
+		    <span class="enscript-string">&quot;V=0x%llx&quot;</span>, if_name(QFQIF_IFP(qif)), qfq_style(qif),
+		    cl-&gt;cl_handle, (uint64_t)VM_KERNEL_ADDRPERM(m), cl-&gt;cl_F,
+		    qif-&gt;qif_V);
+	}
+
+	<span class="enscript-keyword">if</span> (qfq_update_class(qif, grp, cl)) {
+		u_int64_t old_F = grp-&gt;qfg_F;
+
+		cl = qfq_slot_scan(qif, grp);
+		<span class="enscript-keyword">if</span> (!cl) { <span class="enscript-comment">/* group gone, remove from ER */</span>
+			pktsched_bit_clr(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[ER]);
+		} <span class="enscript-keyword">else</span> {
+			u_int32_t s;
+			u_int64_t roundedS =
+			    qfq_round_down(cl-&gt;cl_S, grp-&gt;qfg_slot_shift);
+
+			<span class="enscript-keyword">if</span> (grp-&gt;qfg_S == roundedS)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">skip_unblock</span>;
+
+			grp-&gt;qfg_S = roundedS;
+			grp-&gt;qfg_F = roundedS + (2ULL &lt;&lt; grp-&gt;qfg_slot_shift);
+
+			<span class="enscript-comment">/* remove from ER and put in the new set */</span>
+			pktsched_bit_clr(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[ER]);
+			s = qfq_calc_state(qif, grp);
+			pktsched_bit_set(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[s]);
+		}
+		<span class="enscript-comment">/* we need to unblock even if the group has gone away */</span>
+		qfq_unblock_groups(qif, grp-&gt;qfg_index, old_F);
+	}
+
+<span class="enscript-reference">skip_unblock</span>:
+	qfq_update_eligible(qif, old_V);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">QFQ_DEBUG</span>
+	<span class="enscript-keyword">if</span> (!qif-&gt;qif_bitmaps[ER] &amp;&amp; qif-&gt;qif_queued &amp;&amp; pktsched_verbose &gt; 1)
+		qfq_dump_sched(qif, <span class="enscript-string">&quot;end dequeue&quot;</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* QFQ_DEBUG */</span>
+
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-comment">/*
+ * Assign a reasonable start time for a new flow k in group i.
+ * Admissible values for hat(F) are multiples of sigma_i
+ * no greater than V+sigma_i . Larger values mean that
+ * we had a wraparound so we consider the timestamp to be stale.
+ *
+ * If F is not stale and F &gt;= V then we set S = F.
+ * Otherwise we should assign S = V, but this may violate
+ * the ordering in ER. So, if we have groups in ER, set S to
+ * the F_j of the first group j which would be blocking us.
+ * We are guaranteed not to move S backward because
+ * otherwise our group i would still be blocked.
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_update_start</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">struct</span> qfq_class *cl)
+{
+	pktsched_bitmap_t mask;
+	u_int64_t limit, roundedF;
+	<span class="enscript-type">int</span> slot_shift = cl-&gt;cl_grp-&gt;qfg_slot_shift;
+
+	roundedF = qfq_round_down(cl-&gt;cl_F, slot_shift);
+	limit = qfq_round_down(qif-&gt;qif_V, slot_shift) + (1UL &lt;&lt; slot_shift);
+
+	<span class="enscript-keyword">if</span> (!qfq_gt(cl-&gt;cl_F, qif-&gt;qif_V) || qfq_gt(roundedF, limit)) {
+		<span class="enscript-comment">/* timestamp was stale */</span>
+		mask = mask_from(qif-&gt;qif_bitmaps[ER], cl-&gt;cl_grp-&gt;qfg_index);
+		<span class="enscript-keyword">if</span> (mask) {
+			<span class="enscript-type">struct</span> qfq_group *next = qfq_ffs(qif, mask);
+			<span class="enscript-keyword">if</span> (qfq_gt(roundedF, next-&gt;qfg_F)) {
+				cl-&gt;cl_S = next-&gt;qfg_F;
+				<span class="enscript-keyword">return</span>;
+			}
+		}
+		cl-&gt;cl_S = qif-&gt;qif_V;
+	} <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* timestamp is not stale */</span>
+		cl-&gt;cl_S = cl-&gt;cl_F;
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_enqueue</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">struct</span> qfq_class *cl, <span class="enscript-type">struct</span> mbuf *m,
+    <span class="enscript-type">struct</span> pf_mtag *t)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = qif-&gt;qif_ifq;
+	<span class="enscript-type">struct</span> qfq_group *grp;
+	u_int64_t roundedS;
+	<span class="enscript-type">int</span> len, ret, s;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(cl == NULL || cl-&gt;cl_qif == qif);
+
+	<span class="enscript-keyword">if</span> (cl == NULL) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PF_ALTQ</span>
+		cl = qfq_clh_to_clp(qif, t-&gt;pftag_qid);
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !PF_ALTQ */</span>
+		cl = qfq_clh_to_clp(qif, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !PF_ALTQ */</span>
+		<span class="enscript-keyword">if</span> (cl == NULL) {
+			cl = qif-&gt;qif_default;
+			<span class="enscript-keyword">if</span> (cl == NULL) {
+				IFCQ_CONVERT_LOCK(ifq);
+				m_freem(m);
+				<span class="enscript-keyword">return</span> (ENOBUFS);
+			}
+		}
+	}
+
+	len = m_pktlen(m);
+
+	ret = qfq_addq(cl, m, t);
+	<span class="enscript-keyword">if</span> (ret != 0) {
+		<span class="enscript-keyword">if</span> (ret == CLASSQEQ_SUCCESS_FC) {
+			<span class="enscript-comment">/* packet enqueued, return advisory feedback */</span>
+			ret = EQFULL;
+		} <span class="enscript-keyword">else</span> {
+			VERIFY(ret == CLASSQEQ_DROPPED ||
+			    ret == CLASSQEQ_DROPPED_FC ||
+			    ret == CLASSQEQ_DROPPED_SP);
+			<span class="enscript-comment">/* packet has been freed in qfq_addq */</span>
+			PKTCNTR_ADD(&amp;cl-&gt;cl_dropcnt, 1, len);
+			IFCQ_DROP_ADD(ifq, 1, len);
+			<span class="enscript-keyword">switch</span> (ret) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQEQ_DROPPED</span>:
+				<span class="enscript-keyword">return</span> (ENOBUFS);
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQEQ_DROPPED_FC</span>:
+				<span class="enscript-keyword">return</span> (EQFULL);
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQEQ_DROPPED_SP</span>:
+				<span class="enscript-keyword">return</span> (EQSUSPENDED);
+			}
+			<span class="enscript-comment">/* NOT REACHED */</span>
+		}
+	}
+	IFCQ_INC_LEN(ifq);
+	IFCQ_INC_BYTES(ifq, len);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">QFQ_DEBUG</span>
+	qif-&gt;qif_queued++;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* QFQ_DEBUG */</span>
+
+	<span class="enscript-comment">/* queue was not idle, we're done */</span>
+	<span class="enscript-keyword">if</span> (qlen(&amp;cl-&gt;cl_q) &gt; 1)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-comment">/* queue was idle */</span>
+	grp = cl-&gt;cl_grp;
+	qfq_update_start(qif, cl);	<span class="enscript-comment">/* adjust start time */</span>
+
+	<span class="enscript-comment">/* compute new finish time and rounded start */</span>
+	cl-&gt;cl_F = cl-&gt;cl_S + (u_int64_t)len * cl-&gt;cl_inv_w;
+	roundedS = qfq_round_down(cl-&gt;cl_S, grp-&gt;qfg_slot_shift);
+
+	<span class="enscript-comment">/*
+	 * Insert cl in the correct bucket.
+	 *
+	 * If cl-&gt;cl_S &gt;= grp-&gt;qfg_S we don't need to adjust the bucket list
+	 * and simply go to the insertion phase.  Otherwise grp-&gt;qfg_S is
+	 * decreasing, we must make room in the bucket list, and also
+	 * recompute the group state.  Finally, if there were no flows
+	 * in this group and nobody was in ER make sure to adjust V.
+	 */</span>
+	<span class="enscript-keyword">if</span> (grp-&gt;qfg_full_slots != 0) {
+		<span class="enscript-keyword">if</span> (!qfq_gt(grp-&gt;qfg_S, cl-&gt;cl_S))
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">skip_update</span>;
+
+		<span class="enscript-comment">/* create a slot for this cl-&gt;cl_S */</span>
+		qfq_slot_rotate(qif, grp, roundedS);
+
+		<span class="enscript-comment">/* group was surely ineligible, remove */</span>
+		pktsched_bit_clr(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[IR]);
+		pktsched_bit_clr(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[IB]);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!qif-&gt;qif_bitmaps[ER] &amp;&amp; qfq_gt(roundedS, qif-&gt;qif_V)) {
+		qif-&gt;qif_V = roundedS;
+	}
+
+	grp-&gt;qfg_S = roundedS;
+	grp-&gt;qfg_F =
+	    roundedS + (2ULL &lt;&lt; grp-&gt;qfg_slot_shift); <span class="enscript-comment">/* i.e. 2 sigma_i */</span>
+	s = qfq_calc_state(qif, grp);
+	pktsched_bit_set(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[s]);
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose &gt; 2) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s qid=%d enqueue m=0x%llx state=%s 0x%x &quot;</span>
+		    <span class="enscript-string">&quot;S=0x%llx F=0x%llx V=0x%llx\n&quot;</span>, if_name(QFQIF_IFP(qif)),
+		    qfq_style(qif), cl-&gt;cl_handle,
+		    (uint64_t)VM_KERNEL_ADDRPERM(m), qfq_state2str(s),
+		    qif-&gt;qif_bitmaps[s], cl-&gt;cl_S, cl-&gt;cl_F, qif-&gt;qif_V);
+	}
+
+<span class="enscript-reference">skip_update</span>:
+	qfq_slot_insert(qif, grp, cl, roundedS);
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-comment">/* successfully queued. */</span>
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_slot_remove</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">struct</span> qfq_group *grp,
+    <span class="enscript-type">struct</span> qfq_class *cl)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">qif</span>)
+	<span class="enscript-type">struct</span> qfq_class **pprev;
+	u_int32_t i, offset;
+	u_int64_t roundedS;
+
+	roundedS = qfq_round_down(cl-&gt;cl_S, grp-&gt;qfg_slot_shift);
+	offset = (roundedS - grp-&gt;qfg_S) &gt;&gt; grp-&gt;qfg_slot_shift;
+	i = (grp-&gt;qfg_front + offset) % qif-&gt;qif_maxslots;
+
+	pprev = &amp;grp-&gt;qfg_slots[i];
+	<span class="enscript-keyword">while</span> (*pprev &amp;&amp; *pprev != cl)
+		pprev = &amp;(*pprev)-&gt;cl_next;
+
+	*pprev = cl-&gt;cl_next;
+	<span class="enscript-keyword">if</span> (!grp-&gt;qfg_slots[i])
+		pktsched_bit_clr(offset, &amp;grp-&gt;qfg_full_slots);
+}
+
+<span class="enscript-comment">/*
+ * Called to forcibly destroy a queue.
+ * If the queue is not in the front bucket, or if it has
+ * other queues in the front bucket, we can simply remove
+ * the queue with no other side effects.
+ * Otherwise we must propagate the event up.
+ * XXX description to be completed.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_deactivate_class</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">struct</span> qfq_class *cl)
+{
+	<span class="enscript-type">struct</span> qfq_group *grp = cl-&gt;cl_grp;
+	pktsched_bitmap_t mask;
+	u_int64_t roundedS;
+	<span class="enscript-type">int</span> s;
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s deactivate qid=%d grp=%d &quot;</span>
+		    <span class="enscript-string">&quot;full_slots=0x%x front=%d bitmaps={ER=0x%x,EB=0x%x,&quot;</span>
+		    <span class="enscript-string">&quot;IR=0x%x,IB=0x%x}\n&quot;</span>,
+		    if_name(QFQIF_IFP(cl-&gt;cl_qif)), qfq_style(cl-&gt;cl_qif),
+		    cl-&gt;cl_handle, grp-&gt;qfg_index, grp-&gt;qfg_full_slots,
+		    grp-&gt;qfg_front, qif-&gt;qif_bitmaps[ER], qif-&gt;qif_bitmaps[EB],
+		    qif-&gt;qif_bitmaps[IR], qif-&gt;qif_bitmaps[IB]);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">QFQ_DEBUG</span>
+		<span class="enscript-keyword">if</span> (pktsched_verbose &gt; 1)
+			qfq_dump_sched(qif, <span class="enscript-string">&quot;start deactivate&quot;</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* QFQ_DEBUG */</span>
+	}
+
+	cl-&gt;cl_F = cl-&gt;cl_S;	<span class="enscript-comment">/* not needed if the class goes away */</span>
+	qfq_slot_remove(qif, grp, cl);
+
+	<span class="enscript-keyword">if</span> (grp-&gt;qfg_full_slots == 0) {
+		<span class="enscript-comment">/*
+		 * Nothing left in the group, remove from all sets.
+		 * Do ER last because if we were blocking other groups
+		 * we must unblock them.
+		 */</span>
+		pktsched_bit_clr(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[IR]);
+		pktsched_bit_clr(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[EB]);
+		pktsched_bit_clr(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[IB]);
+
+		<span class="enscript-keyword">if</span> (pktsched_bit_tst(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[ER]) &amp;&amp;
+		    !(qif-&gt;qif_bitmaps[ER] &amp; ~((1UL &lt;&lt; grp-&gt;qfg_index) - 1))) {
+			mask = qif-&gt;qif_bitmaps[ER] &amp;
+			    ((1UL &lt;&lt; grp-&gt;qfg_index) - 1);
+			<span class="enscript-keyword">if</span> (mask)
+				mask = ~((1UL &lt;&lt; __fls(mask)) - 1);
+			<span class="enscript-keyword">else</span>
+				mask = (pktsched_bitmap_t)~0UL;
+			qfq_move_groups(qif, mask, EB, ER);
+			qfq_move_groups(qif, mask, IB, IR);
+		}
+		pktsched_bit_clr(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[ER]);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!grp-&gt;qfg_slots[grp-&gt;qfg_front]) {
+		cl = qfq_slot_scan(qif, grp);
+		roundedS = qfq_round_down(cl-&gt;cl_S, grp-&gt;qfg_slot_shift);
+		<span class="enscript-keyword">if</span> (grp-&gt;qfg_S != roundedS) {
+			pktsched_bit_clr(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[ER]);
+			pktsched_bit_clr(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[IR]);
+			pktsched_bit_clr(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[EB]);
+			pktsched_bit_clr(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[IB]);
+			grp-&gt;qfg_S = roundedS;
+			grp-&gt;qfg_F = roundedS + (2ULL &lt;&lt; grp-&gt;qfg_slot_shift);
+			s = qfq_calc_state(qif, grp);
+			pktsched_bit_set(grp-&gt;qfg_index, &amp;qif-&gt;qif_bitmaps[s]);
+		}
+	}
+	qfq_update_eligible(qif, qif-&gt;qif_V);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">QFQ_DEBUG</span>
+	<span class="enscript-keyword">if</span> (pktsched_verbose &gt; 1)
+		qfq_dump_sched(qif, <span class="enscript-string">&quot;end deactivate&quot;</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* QFQ_DEBUG */</span>
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">qfq_state2str</span>(<span class="enscript-type">int</span> s)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *c;
+
+	<span class="enscript-keyword">switch</span> (s) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ER</span>:
+		c = <span class="enscript-string">&quot;ER&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IR</span>:
+		c = <span class="enscript-string">&quot;IR&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EB</span>:
+		c = <span class="enscript-string">&quot;EB&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IB</span>:
+		c = <span class="enscript-string">&quot;IB&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		c = <span class="enscript-string">&quot;?&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span> (c);
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_addq</span>(<span class="enscript-type">struct</span> qfq_class *cl, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> pf_mtag *t)
+{
+	<span class="enscript-type">struct</span> qfq_if	*qif = cl-&gt;cl_qif;
+	<span class="enscript-type">struct</span> ifclassq *ifq = qif-&gt;qif_ifq;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (rio_addq(cl-&gt;cl_rio, &amp;cl-&gt;cl_q, m, t));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (red_addq(cl-&gt;cl_red, &amp;cl-&gt;cl_q, m, t));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (blue_addq(cl-&gt;cl_blue, &amp;cl-&gt;cl_q, m, t));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q)) {
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_sfb == NULL) {
+			<span class="enscript-type">struct</span> ifnet *ifp = QFQIF_IFP(qif);
+
+			VERIFY(cl-&gt;cl_flags &amp; QFCF_LAZY);
+			cl-&gt;cl_flags &amp;= ~QFCF_LAZY;
+			IFCQ_CONVERT_LOCK(ifq);
+
+			cl-&gt;cl_sfb = sfb_alloc(ifp, cl-&gt;cl_handle,
+			    qlimit(&amp;cl-&gt;cl_q), cl-&gt;cl_qflags);
+			<span class="enscript-keyword">if</span> (cl-&gt;cl_sfb == NULL) {
+				<span class="enscript-comment">/* fall back to droptail */</span>
+				qtype(&amp;cl-&gt;cl_q) = Q_DROPTAIL;
+				cl-&gt;cl_flags &amp;= ~QFCF_SFB;
+				cl-&gt;cl_qflags &amp;= ~(SFBF_ECN | SFBF_FLOWCTL);
+
+				log(LOG_ERR, <span class="enscript-string">&quot;%s: %s SFB lazy allocation &quot;</span>
+				    <span class="enscript-string">&quot;failed for qid=%d grp=%d, falling back &quot;</span>
+				    <span class="enscript-string">&quot;to DROPTAIL\n&quot;</span>, if_name(ifp),
+				    qfq_style(qif), cl-&gt;cl_handle,
+				    cl-&gt;cl_grp-&gt;qfg_index);
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (qif-&gt;qif_throttle != IFNET_THROTTLE_OFF) {
+				<span class="enscript-comment">/* if there's pending throttling, set it */</span>
+				cqrq_throttle_t tr = { 1, qif-&gt;qif_throttle };
+				<span class="enscript-type">int</span> err = qfq_throttle(qif, &amp;tr);
+
+				<span class="enscript-keyword">if</span> (err == EALREADY)
+					err = 0;
+				<span class="enscript-keyword">if</span> (err != 0) {
+					tr.level = IFNET_THROTTLE_OFF;
+					(<span class="enscript-type">void</span>) qfq_throttle(qif, &amp;tr);
+				}
+			}
+		}
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_sfb != NULL)
+			<span class="enscript-keyword">return</span> (sfb_addq(cl-&gt;cl_sfb, &amp;cl-&gt;cl_q, m, t));
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (qlen(&amp;cl-&gt;cl_q) &gt;= qlimit(&amp;cl-&gt;cl_q)) {
+		IFCQ_CONVERT_LOCK(ifq);
+		m_freem(m);
+		<span class="enscript-keyword">return</span> (CLASSQEQ_DROPPED);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PF_ECN</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;cl_flags &amp; QFCF_CLEARDSCP)
+		write_dsfield(m, t, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PF_ECN */</span>
+
+	_addq(&amp;cl-&gt;cl_q, m);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">qfq_getq</span>(<span class="enscript-type">struct</span> qfq_class *cl)
+{
+	IFCQ_LOCK_ASSERT_HELD(cl-&gt;cl_qif-&gt;qif_ifq);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (rio_getq(cl-&gt;cl_rio, &amp;cl-&gt;cl_q));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (red_getq(cl-&gt;cl_red, &amp;cl-&gt;cl_q));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (blue_getq(cl-&gt;cl_blue, &amp;cl-&gt;cl_q));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q) &amp;&amp; cl-&gt;cl_sfb != NULL)
+		<span class="enscript-keyword">return</span> (sfb_getq(cl-&gt;cl_sfb, &amp;cl-&gt;cl_q));
+
+	<span class="enscript-keyword">return</span> (_getq(&amp;cl-&gt;cl_q));
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">qfq_pollq</span>(<span class="enscript-type">struct</span> qfq_class *cl)
+{
+	IFCQ_LOCK_ASSERT_HELD(cl-&gt;cl_qif-&gt;qif_ifq);
+
+	<span class="enscript-keyword">return</span> (qhead(&amp;cl-&gt;cl_q));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_purgeq</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">struct</span> qfq_class *cl, u_int32_t flow,
+    u_int32_t *packets, u_int32_t *bytes)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = qif-&gt;qif_ifq;
+	u_int32_t cnt = 0, len = 0, qlen;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	<span class="enscript-keyword">if</span> ((qlen = qlen(&amp;cl-&gt;cl_q)) == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-comment">/* become regular mutex before freeing mbufs */</span>
+	IFCQ_CONVERT_LOCK(ifq);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+		rio_purgeq(cl-&gt;cl_rio, &amp;cl-&gt;cl_q, flow, &amp;cnt, &amp;len);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+		red_purgeq(cl-&gt;cl_red, &amp;cl-&gt;cl_q, flow, &amp;cnt, &amp;len);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+		blue_purgeq(cl-&gt;cl_blue, &amp;cl-&gt;cl_q, flow, &amp;cnt, &amp;len);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q) &amp;&amp; cl-&gt;cl_sfb != NULL)
+		sfb_purgeq(cl-&gt;cl_sfb, &amp;cl-&gt;cl_q, flow, &amp;cnt, &amp;len);
+	<span class="enscript-keyword">else</span>
+		_flushq_flow(&amp;cl-&gt;cl_q, flow, &amp;cnt, &amp;len);
+
+	<span class="enscript-keyword">if</span> (cnt &gt; 0) {
+		VERIFY(qlen(&amp;cl-&gt;cl_q) == (qlen - cnt));
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">QFQ_DEBUG</span>
+		VERIFY(qif-&gt;qif_queued &gt;= cnt);
+		qif-&gt;qif_queued -= cnt;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* QFQ_DEBUG */</span>
+
+		PKTCNTR_ADD(&amp;cl-&gt;cl_dropcnt, cnt, len);
+		IFCQ_DROP_ADD(ifq, cnt, len);
+
+		VERIFY(((<span class="enscript-type">signed</span>)IFCQ_LEN(ifq) - cnt) &gt;= 0);
+		IFCQ_LEN(ifq) -= cnt;
+
+		<span class="enscript-keyword">if</span> (qempty(&amp;cl-&gt;cl_q))
+			qfq_deactivate_class(qif, cl);
+
+		<span class="enscript-keyword">if</span> (pktsched_verbose) {
+			log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s purge qid=%d weight=%d &quot;</span>
+			    <span class="enscript-string">&quot;qlen=[%d,%d] cnt=%d len=%d flow=0x%x\n&quot;</span>,
+			    if_name(QFQIF_IFP(qif)),
+			    qfq_style(qif), cl-&gt;cl_handle,
+			    (u_int32_t)(QFQ_ONE_FP / cl-&gt;cl_inv_w), qlen,
+			    qlen(&amp;cl-&gt;cl_q), cnt, len, flow);
+		}
+	}
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (packets != NULL)
+		*packets = cnt;
+	<span class="enscript-keyword">if</span> (bytes != NULL)
+		*bytes = len;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_updateq</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">struct</span> qfq_class *cl, cqev_t ev)
+{
+	IFCQ_LOCK_ASSERT_HELD(qif-&gt;qif_ifq);
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s update qid=%d weight=%d event=%s\n&quot;</span>,
+		    if_name(QFQIF_IFP(qif)), qfq_style(qif),
+		    cl-&gt;cl_handle, (u_int32_t)(QFQ_ONE_FP / cl-&gt;cl_inv_w),
+		    ifclassq_ev2str(ev));
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (rio_updateq(cl-&gt;cl_rio, ev));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (red_updateq(cl-&gt;cl_red, ev));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+		<span class="enscript-keyword">return</span> (blue_updateq(cl-&gt;cl_blue, ev));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q) &amp;&amp; cl-&gt;cl_sfb != NULL)
+		<span class="enscript-keyword">return</span> (sfb_updateq(cl-&gt;cl_sfb, ev));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_get_class_stats</span>(<span class="enscript-type">struct</span> qfq_if *qif, u_int32_t qid,
+    <span class="enscript-type">struct</span> qfq_classstats *sp)
+{
+	<span class="enscript-type">struct</span> qfq_class *cl;
+
+	IFCQ_LOCK_ASSERT_HELD(qif-&gt;qif_ifq);
+
+	<span class="enscript-keyword">if</span> ((cl = qfq_clh_to_clp(qif, qid)) == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	sp-&gt;class_handle = cl-&gt;cl_handle;
+	sp-&gt;index = cl-&gt;cl_grp-&gt;qfg_index;
+	sp-&gt;weight = (QFQ_ONE_FP / cl-&gt;cl_inv_w);
+	sp-&gt;lmax = cl-&gt;cl_lmax;
+	sp-&gt;qlength = qlen(&amp;cl-&gt;cl_q);
+	sp-&gt;qlimit = qlimit(&amp;cl-&gt;cl_q);
+	sp-&gt;period = cl-&gt;cl_period;
+	sp-&gt;xmitcnt = cl-&gt;cl_xmitcnt;
+	sp-&gt;dropcnt = cl-&gt;cl_dropcnt;
+
+	sp-&gt;qtype = qtype(&amp;cl-&gt;cl_q);
+	sp-&gt;qstate = qstate(&amp;cl-&gt;cl_q);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+		red_getstats(cl-&gt;cl_red, &amp;sp-&gt;red[0]);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+		rio_getstats(cl-&gt;cl_rio, &amp;sp-&gt;red[0]);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+		blue_getstats(cl-&gt;cl_blue, &amp;sp-&gt;blue);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q) &amp;&amp; cl-&gt;cl_sfb != NULL)
+		sfb_getstats(cl-&gt;cl_sfb, &amp;sp-&gt;sfb);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_stat_sc</span>(<span class="enscript-type">struct</span> qfq_if *qif, cqrq_stat_sc_t *sr)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = qif-&gt;qif_ifq;
+	<span class="enscript-type">struct</span> qfq_class *cl;
+	u_int32_t i;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	VERIFY(sr-&gt;sc == MBUF_SC_UNSPEC || MBUF_VALID_SC(sr-&gt;sc));
+
+	i = MBUF_SCIDX(sr-&gt;sc);
+	VERIFY(i &lt; IFCQ_SC_MAX);
+
+	cl = ifq-&gt;ifcq_disc_slots[i].cl;
+	sr-&gt;packets = qlen(&amp;cl-&gt;cl_q);
+	sr-&gt;bytes = qsize(&amp;cl-&gt;cl_q);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* convert a class handle to the corresponding class pointer */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> qfq_class *
+<span class="enscript-function-name">qfq_clh_to_clp</span>(<span class="enscript-type">struct</span> qfq_if *qif, u_int32_t chandle)
+{
+	<span class="enscript-type">struct</span> qfq_class *cl;
+	<span class="enscript-type">int</span> i;
+
+	IFCQ_LOCK_ASSERT_HELD(qif-&gt;qif_ifq);
+
+	<span class="enscript-comment">/*
+	 * First, try optimistically the slot matching the lower bits of
+	 * the handle.  If it fails, do the linear table search.
+	 */</span>
+	i = chandle % qif-&gt;qif_maxclasses;
+	<span class="enscript-keyword">if</span> ((cl = qif-&gt;qif_class_tbl[i]) != NULL &amp;&amp; cl-&gt;cl_handle == chandle)
+		<span class="enscript-keyword">return</span> (cl);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; qif-&gt;qif_maxclasses; i++)
+		<span class="enscript-keyword">if</span> ((cl = qif-&gt;qif_class_tbl[i]) != NULL &amp;&amp;
+		    cl-&gt;cl_handle == chandle)
+			<span class="enscript-keyword">return</span> (cl);
+
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">qfq_style</span>(<span class="enscript-type">struct</span> qfq_if *qif)
+{
+	<span class="enscript-keyword">return</span> ((qif-&gt;qif_flags &amp; QFQIFF_ALTQ) ? <span class="enscript-string">&quot;ALTQ_QFQ&quot;</span> : <span class="enscript-string">&quot;QFQ&quot;</span>);
+}
+
+<span class="enscript-comment">/*
+ * Generic comparison function, handling wraparound
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_gt</span>(u_int64_t a, u_int64_t b)
+{
+	<span class="enscript-keyword">return</span> ((int64_t)(a - b) &gt; 0);
+}
+
+<span class="enscript-comment">/*
+ * Round a precise timestamp to its slotted value
+ */</span>
+<span class="enscript-type">static</span> inline u_int64_t
+<span class="enscript-function-name">qfq_round_down</span>(u_int64_t ts, u_int32_t shift)
+{
+	<span class="enscript-keyword">return</span> (ts &amp; ~((1ULL &lt;&lt; shift) - 1));
+}
+
+<span class="enscript-comment">/*
+ * Return the pointer to the group with lowest index in the bitmap
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> qfq_group *
+<span class="enscript-function-name">qfq_ffs</span>(<span class="enscript-type">struct</span> qfq_if *qif, pktsched_bitmap_t bitmap)
+{
+	<span class="enscript-type">int</span> index = pktsched_ffs(bitmap) - 1;	<span class="enscript-comment">/* zero-based */</span>
+	VERIFY(index &gt;= 0 &amp;&amp; index &lt;= QFQ_MAX_INDEX &amp;&amp;
+	    qif-&gt;qif_groups[index] != NULL);
+	<span class="enscript-keyword">return</span> (qif-&gt;qif_groups[index]);
+}
+
+<span class="enscript-comment">/*
+ * Calculate a flow index, given its weight and maximum packet length.
+ * index = log_2(maxlen/weight) but we need to apply the scaling.
+ * This is used only once at flow creation.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_calc_index</span>(<span class="enscript-type">struct</span> qfq_class *cl, u_int32_t inv_w, u_int32_t maxlen)
+{
+	u_int64_t slot_size = (u_int64_t)maxlen *inv_w;
+	pktsched_bitmap_t size_map;
+	<span class="enscript-type">int</span> index = 0;
+
+	size_map = (pktsched_bitmap_t)(slot_size &gt;&gt; QFQ_MIN_SLOT_SHIFT);
+	<span class="enscript-keyword">if</span> (!size_map)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	index = __fls(size_map) + 1;	<span class="enscript-comment">/* basically a log_2() */</span>
+	index -= !(slot_size - (1ULL &lt;&lt; (index + QFQ_MIN_SLOT_SHIFT - 1)));
+
+	<span class="enscript-keyword">if</span> (index &lt; 0)
+		index = 0;
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s qid=%d grp=%d W=%u, L=%u, I=%d\n&quot;</span>,
+		    if_name(QFQIF_IFP(cl-&gt;cl_qif)), qfq_style(cl-&gt;cl_qif),
+		    cl-&gt;cl_handle, index, (u_int32_t)(QFQ_ONE_FP/inv_w),
+		    maxlen, index);
+	}
+	<span class="enscript-keyword">return</span> (index);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">QFQ_DEBUG</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_dump_groups</span>(<span class="enscript-type">struct</span> qfq_if *qif, u_int32_t mask)
+{
+	<span class="enscript-type">int</span> i, j;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; QFQ_MAX_INDEX + 1; i++) {
+		<span class="enscript-type">struct</span> qfq_group *g = qif-&gt;qif_groups[i];
+
+		<span class="enscript-keyword">if</span> (0 == (mask &amp; (1 &lt;&lt; i)))
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (g == NULL)
+			<span class="enscript-keyword">continue</span>;
+
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s [%2d] full_slots 0x%x\n&quot;</span>,
+		    if_name(QFQIF_IFP(qif)), qfq_style(qif), i,
+		    g-&gt;qfg_full_slots);
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s             S 0x%20llx F 0x%llx %c\n&quot;</span>,
+		    if_name(QFQIF_IFP(qif)), qfq_style(qif),
+		    g-&gt;qfg_S, g-&gt;qfg_F, mask &amp; (1 &lt;&lt; i) ? <span class="enscript-string">'1'</span> : <span class="enscript-string">'0'</span>);
+
+		<span class="enscript-keyword">for</span> (j = 0; j &lt; qif-&gt;qif_maxslots; j++) {
+			<span class="enscript-keyword">if</span> (g-&gt;qfg_slots[j]) {
+				log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s      bucket %d 0x%llx &quot;</span>
+				    <span class="enscript-string">&quot;qid %d\n&quot;</span>, if_name(QFQIF_IFP(qif)),
+				    qfq_style(qif), j,
+				    (uint64_t)VM_KERNEL_ADDRPERM(
+				    g-&gt;qfg_slots[j]),
+				    g-&gt;qfg_slots[j]-&gt;cl_handle);
+			}
+		}
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">qfq_dump_sched</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *msg)
+{
+	log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s --- in %s: ---\n&quot;</span>,
+	    if_name(QFQIF_IFP(qif)), qfq_style(qif), msg);
+	log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s emptygrp %d queued %d V 0x%llx\n&quot;</span>,
+	    if_name(QFQIF_IFP(qif)), qfq_style(qif), qif-&gt;qif_emptygrp,
+	    qif-&gt;qif_queued, qif-&gt;qif_V);
+	log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s      ER 0x%08x\n&quot;</span>,
+	    if_name(QFQIF_IFP(qif)), qfq_style(qif), qif-&gt;qif_bitmaps[ER]);
+	log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s      EB 0x%08x\n&quot;</span>,
+	    if_name(QFQIF_IFP(qif)), qfq_style(qif), qif-&gt;qif_bitmaps[EB]);
+	log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s      IR 0x%08x\n&quot;</span>,
+	    if_name(QFQIF_IFP(qif)), qfq_style(qif), qif-&gt;qif_bitmaps[IR]);
+	log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s      IB 0x%08x\n&quot;</span>,
+	    if_name(QFQIF_IFP(qif)), qfq_style(qif), qif-&gt;qif_bitmaps[IB]);
+	qfq_dump_groups(qif, 0xffffffff);
+};
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* QFQ_DEBUG */</span>
+
+<span class="enscript-comment">/*
+ * qfq_enqueue_ifclassq is an enqueue function to be registered to
+ * (*ifcq_enqueue) in struct ifclassq.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_enqueue_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq, <span class="enscript-type">struct</span> mbuf *m)
+{
+	u_int32_t i;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	<span class="enscript-keyword">if</span> (!(m-&gt;m_flags &amp; M_PKTHDR)) {
+		<span class="enscript-comment">/* should not happen */</span>
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: packet does not have pkthdr\n&quot;</span>,
+		    if_name(ifq-&gt;ifcq_ifp));
+		IFCQ_CONVERT_LOCK(ifq);
+		m_freem(m);
+		<span class="enscript-keyword">return</span> (ENOBUFS);
+	}
+
+	i = MBUF_SCIDX(mbuf_get_service_class(m));
+	VERIFY((u_int32_t)i &lt; IFCQ_SC_MAX);
+
+	<span class="enscript-keyword">return</span> (qfq_enqueue(ifq-&gt;ifcq_disc,
+	    ifq-&gt;ifcq_disc_slots[i].cl, m, m_pftag(m)));
+}
+
+<span class="enscript-comment">/*
+ * qfq_dequeue_ifclassq is a dequeue function to be registered to
+ * (*ifcq_dequeue) in struct ifclass.
+ *
+ * note: CLASSQDQ_POLL returns the next packet without removing the packet
+ *	from the queue.  CLASSQDQ_REMOVE is a normal dequeue operation.
+ *	CLASSQDQ_REMOVE must return the same packet if called immediately
+ *	after CLASSQDQ_POLL.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">qfq_dequeue_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq, cqdq_op_t op)
+{
+	<span class="enscript-keyword">return</span> (qfq_dequeue(ifq-&gt;ifcq_disc, op));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_request_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq, cqrq_t req, <span class="enscript-type">void</span> *arg)
+{
+	<span class="enscript-type">struct</span> qfq_if *qif = (<span class="enscript-type">struct</span> qfq_if *)ifq-&gt;ifcq_disc;
+	<span class="enscript-type">int</span> err = 0;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	<span class="enscript-keyword">switch</span> (req) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQRQ_PURGE</span>:
+		qfq_purge(qif);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQRQ_PURGE_SC</span>:
+		qfq_purge_sc(qif, (cqrq_purge_sc_t *)arg);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQRQ_EVENT</span>:
+		qfq_event(qif, (cqev_t)arg);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQRQ_THROTTLE</span>:
+		err = qfq_throttle(qif, (cqrq_throttle_t *)arg);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQRQ_STAT_SC</span>:
+		err = qfq_stat_sc(qif, (cqrq_stat_sc_t *)arg);
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_setup_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq, u_int32_t flags)
+{
+	<span class="enscript-type">struct</span> ifnet *ifp = ifq-&gt;ifcq_ifp;
+	<span class="enscript-type">struct</span> qfq_class *cl0, *cl1, *cl2, *cl3, *cl4;
+	<span class="enscript-type">struct</span> qfq_class *cl5, *cl6, *cl7, *cl8, *cl9;
+	<span class="enscript-type">struct</span> qfq_if *qif;
+	u_int32_t maxlen = 0, qflags = 0;
+	<span class="enscript-type">int</span> err = 0;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(ifq-&gt;ifcq_disc == NULL);
+	VERIFY(ifq-&gt;ifcq_type == PKTSCHEDT_NONE);
+
+	<span class="enscript-keyword">if</span> (flags &amp; PKTSCHEDF_QALG_RED)
+		qflags |= QFCF_RED;
+	<span class="enscript-keyword">if</span> (flags &amp; PKTSCHEDF_QALG_RIO)
+		qflags |= QFCF_RIO;
+	<span class="enscript-keyword">if</span> (flags &amp; PKTSCHEDF_QALG_BLUE)
+		qflags |= QFCF_BLUE;
+	<span class="enscript-keyword">if</span> (flags &amp; PKTSCHEDF_QALG_SFB)
+		qflags |= QFCF_SFB;
+	<span class="enscript-keyword">if</span> (flags &amp; PKTSCHEDF_QALG_ECN)
+		qflags |= QFCF_ECN;
+	<span class="enscript-keyword">if</span> (flags &amp; PKTSCHEDF_QALG_FLOWCTL)
+		qflags |= QFCF_FLOWCTL;
+	<span class="enscript-keyword">if</span> (flags &amp; PKTSCHEDF_QALG_DELAYBASED)
+		qflags |= QFCF_DELAYBASED;
+
+	qif = qfq_alloc(ifp, M_WAITOK, FALSE);
+	<span class="enscript-keyword">if</span> (qif == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	<span class="enscript-keyword">if</span> ((maxlen = IFCQ_MAXLEN(ifq)) == 0)
+		maxlen = if_sndq_maxlen;
+
+	<span class="enscript-keyword">if</span> ((err = qfq_add_queue(qif, maxlen, 300, 1200,
+	    qflags | QFCF_LAZY, SCIDX_BK_SYS, &amp;cl0)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = qfq_add_queue(qif, maxlen, 600, 1400,
+	    qflags | QFCF_LAZY, SCIDX_BK, &amp;cl1)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = qfq_add_queue(qif, maxlen, 2400, 600,
+	    qflags | QFCF_DEFAULTCLASS, SCIDX_BE, &amp;cl2)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = qfq_add_queue(qif, maxlen, 2700, 600,
+	    qflags | QFCF_LAZY, SCIDX_RD, &amp;cl3)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = qfq_add_queue(qif, maxlen, 3000, 400,
+	    qflags | QFCF_LAZY, SCIDX_OAM, &amp;cl4)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = qfq_add_queue(qif, maxlen, 8000, 1000,
+	    qflags | QFCF_LAZY, SCIDX_AV, &amp;cl5)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = qfq_add_queue(qif, maxlen, 15000, 1200,
+	    qflags | QFCF_LAZY, SCIDX_RV, &amp;cl6)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = qfq_add_queue(qif, maxlen, 20000, 1400,
+	    qflags | QFCF_LAZY, SCIDX_VI, &amp;cl7)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = qfq_add_queue(qif, maxlen, 23000, 200,
+	    qflags | QFCF_LAZY, SCIDX_VO, &amp;cl8)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	<span class="enscript-keyword">if</span> ((err = qfq_add_queue(qif, maxlen, 25000, 200,
+	    qflags, SCIDX_CTL, &amp;cl9)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+
+	err = ifclassq_attach(ifq, PKTSCHEDT_QFQ, qif,
+	    qfq_enqueue_ifclassq, qfq_dequeue_ifclassq, NULL,
+	    qfq_request_ifclassq);
+
+	<span class="enscript-comment">/* cache these for faster lookup */</span>
+	<span class="enscript-keyword">if</span> (err == 0) {
+		ifq-&gt;ifcq_disc_slots[SCIDX_BK_SYS].qid = SCIDX_BK_SYS;
+		ifq-&gt;ifcq_disc_slots[SCIDX_BK_SYS].cl = cl0;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_BK].qid = SCIDX_BK;
+		ifq-&gt;ifcq_disc_slots[SCIDX_BK].cl = cl1;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_BE].qid = SCIDX_BE;
+		ifq-&gt;ifcq_disc_slots[SCIDX_BE].cl = cl2;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_RD].qid = SCIDX_RD;
+		ifq-&gt;ifcq_disc_slots[SCIDX_RD].cl = cl3;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_OAM].qid = SCIDX_OAM;
+		ifq-&gt;ifcq_disc_slots[SCIDX_OAM].cl = cl4;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_AV].qid = SCIDX_AV;
+		ifq-&gt;ifcq_disc_slots[SCIDX_AV].cl = cl5;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_RV].qid = SCIDX_RV;
+		ifq-&gt;ifcq_disc_slots[SCIDX_RV].cl = cl6;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_VI].qid = SCIDX_VI;
+		ifq-&gt;ifcq_disc_slots[SCIDX_VI].cl = cl7;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_VO].qid = SCIDX_VO;
+		ifq-&gt;ifcq_disc_slots[SCIDX_VO].cl = cl8;
+
+		ifq-&gt;ifcq_disc_slots[SCIDX_CTL].qid = SCIDX_CTL;
+		ifq-&gt;ifcq_disc_slots[SCIDX_CTL].cl = cl9;
+	}
+
+<span class="enscript-reference">cleanup</span>:
+	<span class="enscript-keyword">if</span> (err != 0)
+		(<span class="enscript-type">void</span>) qfq_destroy_locked(qif);
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_teardown_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq)
+{
+	<span class="enscript-type">struct</span> qfq_if *qif = ifq-&gt;ifcq_disc;
+	<span class="enscript-type">int</span> i;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(qif != NULL &amp;&amp; ifq-&gt;ifcq_type == PKTSCHEDT_QFQ);
+
+	(<span class="enscript-type">void</span>) qfq_destroy_locked(qif);
+
+	ifq-&gt;ifcq_disc = NULL;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; IFCQ_SC_MAX; i++) {
+		ifq-&gt;ifcq_disc_slots[i].qid = 0;
+		ifq-&gt;ifcq_disc_slots[i].cl = NULL;
+	}
+
+	<span class="enscript-keyword">return</span> (ifclassq_detach(ifq));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_getqstats_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq, u_int32_t slot,
+    <span class="enscript-type">struct</span> if_ifclassq_stats *ifqs)
+{
+	<span class="enscript-type">struct</span> qfq_if *qif = ifq-&gt;ifcq_disc;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(ifq-&gt;ifcq_type == PKTSCHEDT_QFQ);
+
+	<span class="enscript-keyword">if</span> (slot &gt;= IFCQ_SC_MAX)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">return</span> (qfq_get_class_stats(qif, ifq-&gt;ifcq_disc_slots[slot].qid,
+	    &amp;ifqs-&gt;ifqs_qfq_stats));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_throttle</span>(<span class="enscript-type">struct</span> qfq_if *qif, cqrq_throttle_t *tr)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = qif-&gt;qif_ifq;
+	<span class="enscript-type">struct</span> qfq_class *cl;
+	<span class="enscript-type">int</span> err = 0;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(!(qif-&gt;qif_flags &amp; QFQIFF_ALTQ));
+
+	<span class="enscript-keyword">if</span> (!tr-&gt;set) {
+		tr-&gt;level = qif-&gt;qif_throttle;
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">if</span> (tr-&gt;level == qif-&gt;qif_throttle)
+		<span class="enscript-keyword">return</span> (EALREADY);
+
+	<span class="enscript-comment">/* Current throttling levels only involve BK_SYS class */</span>
+	cl = ifq-&gt;ifcq_disc_slots[SCIDX_BK_SYS].cl;
+
+	<span class="enscript-keyword">switch</span> (tr-&gt;level) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFNET_THROTTLE_OFF</span>:
+		err = qfq_resumeq(qif, cl);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFNET_THROTTLE_OPPORTUNISTIC</span>:
+		err = qfq_suspendq(qif, cl);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		VERIFY(0);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-keyword">if</span> (err == 0 || err == ENXIO) {
+		<span class="enscript-keyword">if</span> (pktsched_verbose) {
+			log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s throttling level %sset %d-&gt;%d\n&quot;</span>,
+			    if_name(QFQIF_IFP(qif)), qfq_style(qif),
+			    (err == 0) ? <span class="enscript-string">&quot;&quot;</span> : <span class="enscript-string">&quot;lazy &quot;</span>, qif-&gt;qif_throttle,
+			    tr-&gt;level);
+		}
+		qif-&gt;qif_throttle = tr-&gt;level;
+		<span class="enscript-keyword">if</span> (err != 0)
+			err = 0;
+		<span class="enscript-keyword">else</span>
+			qfq_purgeq(qif, cl, 0, NULL, NULL);
+	} <span class="enscript-keyword">else</span> {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s unable to set throttling level &quot;</span>
+		    <span class="enscript-string">&quot;%d-&gt;%d [error=%d]\n&quot;</span>, if_name(QFQIF_IFP(qif)),
+		    qfq_style(qif), qif-&gt;qif_throttle, tr-&gt;level, err);
+	}
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_resumeq</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">struct</span> qfq_class *cl)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = qif-&gt;qif_ifq;
+	<span class="enscript-type">int</span> err = 0;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+		err = rio_suspendq(cl-&gt;cl_rio, &amp;cl-&gt;cl_q, FALSE);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+		err = red_suspendq(cl-&gt;cl_red, &amp;cl-&gt;cl_q, FALSE);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+		err = blue_suspendq(cl-&gt;cl_blue, &amp;cl-&gt;cl_q, FALSE);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q) &amp;&amp; cl-&gt;cl_sfb != NULL)
+		err = sfb_suspendq(cl-&gt;cl_sfb, &amp;cl-&gt;cl_q, FALSE);
+
+	<span class="enscript-keyword">if</span> (err == 0)
+		qstate(&amp;cl-&gt;cl_q) = QS_RUNNING;
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">qfq_suspendq</span>(<span class="enscript-type">struct</span> qfq_if *qif, <span class="enscript-type">struct</span> qfq_class *cl)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = qif-&gt;qif_ifq;
+	<span class="enscript-type">int</span> err = 0;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;cl_q))
+		err = rio_suspendq(cl-&gt;cl_rio, &amp;cl-&gt;cl_q, TRUE);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;cl_q))
+		err = red_suspendq(cl-&gt;cl_red, &amp;cl-&gt;cl_q, TRUE);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;cl_q))
+		err = blue_suspendq(cl-&gt;cl_blue, &amp;cl-&gt;cl_q, TRUE);
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;cl_q)) {
+		<span class="enscript-keyword">if</span> (cl-&gt;cl_sfb != NULL) {
+			err = sfb_suspendq(cl-&gt;cl_sfb, &amp;cl-&gt;cl_q, TRUE);
+		} <span class="enscript-keyword">else</span> {
+			VERIFY(cl-&gt;cl_flags &amp; QFCF_LAZY);
+			err = ENXIO;	<span class="enscript-comment">/* delayed throttling */</span>
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (err == 0 || err == ENXIO)
+		qstate(&amp;cl-&gt;cl_q) = QS_SUSPENDED;
+
+	<span class="enscript-keyword">return</span> (err);
+}
+</pre>
+<hr />
+</body></html>

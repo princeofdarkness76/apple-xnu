@@ -1,0 +1,284 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mockfs_vfsops.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mockfs_vfsops.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/mockfs/mockfs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/mockfs/mockfs_fsnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/mockfs/mockfs_vnops.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/specfs/specdev.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/disk.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+
+lck_attr_t * mockfs_mtx_attr = (lck_attr_t *) 0;
+lck_grp_attr_t * mockfs_grp_attr = (lck_grp_attr_t *) 0;
+lck_grp_t * mockfs_mtx_grp = (lck_grp_t *) 0;
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_mountroot</span>(mount_t mp, vnode_t rvp, __unused vfs_context_t ctx);
+
+<span class="enscript-comment">/*
+ * Functions that are part of the mockfs_vfsops structure.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_unmount</span>(__unused <span class="enscript-type">struct</span> mount *mp, __unused <span class="enscript-type">int</span> mntflags, __unused vfs_context_t ctx);
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_root</span>(mount_t mp, vnode_t * vpp, __unused vfs_context_t ctx);
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_sync</span>(__unused <span class="enscript-type">struct</span> mount *mp, __unused <span class="enscript-type">int</span> waitfor, __unused vfs_context_t ctx);
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_init</span>(__unused <span class="enscript-type">struct</span> vfsconf * vfsc);
+
+<span class="enscript-comment">/*
+ * mockfs_mountroot:
+ *   Given a mount (mp) and a vnode for the root device (rvp), builds a fake filesystem for rvp.  This consists
+ *   of three nodes; a directory node (to serve as a mountpoint for devfs), a file node meant to serve as an
+ *   executable frontend for rootvp (we will assume that rootvp is an executable, that the kernel can subsequently
+ *   run), and the root node for the mockfs filesystem.  The structure of mockfs is memory-backed; only the
+ *   contents of the file node refer to the backing device.
+ *
+ * Returns 0 on success, or an error.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_mountroot</span>(mount_t mp, vnode_t rvp, __unused vfs_context_t ctx)
+{
+	<span class="enscript-type">int</span> rvalue = 0;
+	mockfs_fsnode_t root_fsnode = NULL;
+	mockfs_fsnode_t dev_fsnode = NULL;
+	mockfs_fsnode_t file_fsnode = NULL;
+	mockfs_mount_t mockfs_mount_data = NULL;
+	dk_memdev_info_t memdev_info;
+
+	<span class="enscript-comment">/*
+	 * TODO: Validate that the device at least LOOKS like a mach-o (has a sane header); this would prevent us
+	 *   from causing EBADMACHO panics further along the boot path.
+	 */</span>
+
+	<span class="enscript-comment">/*
+	 * There are no M_MOCKFS* definitions at the moment, just use M_TEMP.
+	 */</span>
+
+	MALLOC(mockfs_mount_data, mockfs_mount_t, <span class="enscript-keyword">sizeof</span>(*mockfs_mount_data), M_TEMP, M_WAITOK | M_ZERO);
+	mockfs_fsnode_create(mp, MOCKFS_ROOT, &amp;root_fsnode);
+	mockfs_fsnode_create(mp, MOCKFS_DEV, &amp;dev_fsnode);
+	mockfs_fsnode_create(mp, MOCKFS_FILE, &amp;file_fsnode);
+
+	<span class="enscript-keyword">if</span> (!mockfs_mount_data || !root_fsnode || !dev_fsnode || !file_fsnode) {
+		rvalue = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * If rvp is a memory device (with a few caveats), we can point to the same physical memory as the device
+	 *   and avoid pointless paging/copying; query the device node for the information we need to determine
+	 *   if we can do this.
+	 */</span>
+	bzero(&amp;memdev_info, <span class="enscript-keyword">sizeof</span>(memdev_info));
+
+	<span class="enscript-keyword">if</span> (!VNOP_IOCTL(rvp, DKIOCGETMEMDEVINFO, (caddr_t)&amp;memdev_info, 0, NULL)) {
+		<span class="enscript-comment">/*
+		 * For the moment, we won't try to optimize when mi_phys is true.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!mockfs_mount_data-&gt;mockfs_physical_memory) {
+			mockfs_mount_data-&gt;mockfs_memory_backed = memdev_info.mi_mdev;
+			mockfs_mount_data-&gt;mockfs_physical_memory = memdev_info.mi_phys;
+			mockfs_mount_data-&gt;mockfs_memdev_base = memdev_info.mi_base;
+			mockfs_mount_data-&gt;mockfs_memdev_size = memdev_info.mi_size;
+		}
+	}
+
+	lck_mtx_init(&amp;mockfs_mount_data-&gt;mockfs_mnt_mtx, mockfs_mtx_grp, mockfs_mtx_attr);
+
+	<span class="enscript-comment">/*
+	 * All of the needed nodes/structures have been set up; now we just need to establish the relationships
+	 *   between the various mockfs nodes.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((rvalue = mockfs_fsnode_adopt(root_fsnode, dev_fsnode)))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-keyword">if</span> ((rvalue = mockfs_fsnode_adopt(root_fsnode, file_fsnode)))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	mockfs_mount_data-&gt;mockfs_root = root_fsnode;
+	mp-&gt;mnt_data = (typeof(mp-&gt;mnt_data)) mockfs_mount_data;
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (rvalue) {
+		<span class="enscript-keyword">if</span> (file_fsnode)
+			mockfs_fsnode_destroy(file_fsnode);
+		<span class="enscript-keyword">if</span> (dev_fsnode)
+			mockfs_fsnode_destroy(dev_fsnode);
+		<span class="enscript-keyword">if</span> (root_fsnode)
+			mockfs_fsnode_destroy(root_fsnode);
+		<span class="enscript-keyword">if</span> (mockfs_mount_data) {
+			lck_mtx_destroy(&amp;mockfs_mount_data-&gt;mockfs_mnt_mtx, mockfs_mtx_grp);
+			FREE(mockfs_mount_data, M_TEMP);
+		}
+	}
+
+	<span class="enscript-keyword">return</span> rvalue;
+}
+
+<span class="enscript-comment">/*
+ * mockfs_unmount:
+ *   Given a mount (mp), and associated flags (mntflags), performs the necessary teardown to destroy the mount.
+ *
+ * Returns 0 on success, or an error.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_unmount</span>(<span class="enscript-type">struct</span> mount *mp, <span class="enscript-type">int</span> mntflags, __unused vfs_context_t ctx)
+{
+	<span class="enscript-type">int</span> rvalue;
+	<span class="enscript-type">int</span> vflush_flags;
+	mockfs_fsnode_t root_fsnode;
+	mockfs_mount_t mockfs_mnt;
+
+	vflush_flags = 0;
+	mockfs_mnt = (mockfs_mount_t) mp-&gt;mnt_data;
+
+	<span class="enscript-comment">/*
+	 * Reclaim the vnodes for the mount (forcibly, if requested; given that mockfs only support mountroot
+	 *   at the moment, this should ALWAYS be forced), 
+	 */</span>
+	<span class="enscript-keyword">if</span> (mntflags &amp; MNT_FORCE) {
+		vflush_flags |= FORCECLOSE;
+	}
+
+	rvalue = vflush(mp, NULL, vflush_flags);
+
+	<span class="enscript-keyword">if</span> (rvalue)
+		<span class="enscript-keyword">return</span> rvalue;
+
+	<span class="enscript-comment">/*
+	 * Past this point, errors are likely to be unrecoverable, so panic if we're given any excuse; we
+	 *   need to teardown the mockfs_mnt data now, so that VFS can cleanup the mount structure.  Note
+	 *   that clearing mockfs_root before destroying the fsnode tree is related to an implementation
+	 *   detail of mockfs_fsnode_destroy (which will refuse to destroy the root node).
+	 */</span>
+	root_fsnode = mockfs_mnt-&gt;mockfs_root;
+	mockfs_mnt-&gt;mockfs_root = NULL;
+	rvalue = mockfs_fsnode_destroy(root_fsnode);
+
+	<span class="enscript-keyword">if</span> (rvalue)
+		panic(<span class="enscript-string">&quot;mockfs_unmount: Failed to destroy the fsnode tree&quot;</span>);
+
+	lck_mtx_destroy(&amp;mockfs_mnt-&gt;mockfs_mnt_mtx, mockfs_mtx_grp);
+	FREE(mockfs_mnt, M_TEMP);
+	mp-&gt;mnt_data = NULL;
+
+	<span class="enscript-keyword">return</span> rvalue;
+}
+
+<span class="enscript-comment">/*
+ * mockfs_root:
+ *   Given a mount (mp), returns the root vnode (*vpp) for that mount with an iocount.
+ *
+ * Returns 0 on success, or an error.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_root</span>(mount_t mp, vnode_t * vpp, __unused vfs_context_t ctx)
+{
+	<span class="enscript-type">int</span> rvalue;
+
+	rvalue = mockfs_fsnode_vnode(((mockfs_mount_t) mp-&gt;mnt_data)-&gt;mockfs_root, vpp);
+	<span class="enscript-keyword">return</span> rvalue;
+}
+
+<span class="enscript-comment">/*
+ * mockfs_sync:
+ *  Returns success because we're a read-only filesystem.
+ *
+ * Returns 0.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_sync</span>(__unused <span class="enscript-type">struct</span> mount *mp, __unused <span class="enscript-type">int</span> waitfor, __unused vfs_context_t ctx)
+{
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * mockfs_init:
+ *   Run once (during VFS initialization); takes care of generic mockfs initialization (which for now, means
+ *   global lock information).
+ *
+ * Returns 0 on success, or an error.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_init</span>(__unused <span class="enscript-type">struct</span> vfsconf * vfsc)
+{
+	mockfs_mtx_attr = lck_attr_alloc_init();
+	mockfs_grp_attr = lck_grp_attr_alloc_init();
+	mockfs_mtx_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;mockfs-mutex&quot;</span>, mockfs_grp_attr);
+
+	<span class="enscript-comment">/*
+	 * If we've failed to allocate this early in boot, something is horrendously wrong; it should be fine to
+	 *   panic (for now).
+	 */</span>
+	<span class="enscript-keyword">if</span> (!mockfs_mtx_attr || !mockfs_grp_attr || !mockfs_mtx_grp) {
+		panic(<span class="enscript-string">&quot;mockfs_init failed to allocate lock information&quot;</span>);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">struct</span> vfsops mockfs_vfsops = {
+	NULL, <span class="enscript-comment">/* mount */</span>
+	NULL, <span class="enscript-comment">/* start */</span>
+	mockfs_unmount, <span class="enscript-comment">/* unmount */</span>
+	mockfs_root, <span class="enscript-comment">/* root */</span>
+	NULL, <span class="enscript-comment">/* quotactl */</span>
+	NULL, <span class="enscript-comment">/* getattr */</span>
+	mockfs_sync, <span class="enscript-comment">/* sync */</span>
+	NULL, <span class="enscript-comment">/* vget */</span>
+	NULL, <span class="enscript-comment">/* fhtovp */</span>
+	NULL, <span class="enscript-comment">/* vptofh */</span>
+	mockfs_init, <span class="enscript-comment">/* init */</span>
+	NULL, <span class="enscript-comment">/* sysctl */</span>
+	NULL, <span class="enscript-comment">/* setattr */</span>
+	{NULL}
+};
+
+</pre>
+<hr />
+</body></html>

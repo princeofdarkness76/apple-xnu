@@ -1,0 +1,110 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>rtclock_asm_native.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">rtclock_asm_native.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2010-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/*
+ * @APPLE_FREE_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/*
+ *	File:		rtclock_asm_native.h
+ *	Purpose:	Native routines for reading nanotime
+ */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_PAL_RTCLOCK_ASM_NATIVE_H_</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_PAL_RTCLOCK_ASM_NATIVE_H_</span>
+
+<span class="enscript-comment">/*
+ * Assembly snippet included in exception handlers and rtc_nanotime_read()
+ *
+ *
+ * Warning!  There are several copies of this code in the trampolines found in
+ * osfmk/x86_64/idt64.s, coming from the various TIMER macros in rtclock_asm.h.
+ * They're all kept in sync by using the RTC_NANOTIME_READ() macro.
+ *
+ * The algorithm we use is:
+ *
+ *	ns = ((((rdtsc - rnt_tsc_base)&lt;&lt;rnt_shift)*rnt_tsc_scale) / 2**32) + rnt_ns_base;
+ *
+ * rnt_shift, a constant computed during initialization, is the smallest value for which:
+ *
+ *	(tscFreq &lt;&lt; rnt_shift) &gt; SLOW_TSC_THRESHOLD
+ *
+ * Where SLOW_TSC_THRESHOLD is about 10e9.  Since most processor's tscFreqs are greater
+ * than 1GHz, rnt_shift is usually 0.  rnt_tsc_scale is also a 32-bit constant:
+ *
+ *	rnt_tsc_scale = (10e9 * 2**32) / (tscFreq &lt;&lt; rnt_shift);
+ *
+ * %rdi points to nanotime info struct.
+ * %rax returns nanotime
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PAL_RTC_NANOTIME_READ_FAST</span>()					  \
+<span class="enscript-reference">0</span>:	movl	RNT_GENERATION(%rdi),%esi				; \
+	test        %esi,%esi		<span class="enscript-comment">/* info updating? */</span>		; \
+        jz        0b			<span class="enscript-comment">/* - wait if so */</span>		; \
+	lfence								; \
+	rdtsc								; \
+	lfence								; \
+	shlq	$32,%rdx						; \
+	movl    RNT_SHIFT(%rdi),%ecx					; \
+	orq	%rdx,%rax			<span class="enscript-comment">/* %rax := tsc */</span>	; \
+	subq	RNT_TSC_BASE(%rdi),%rax		<span class="enscript-comment">/* tsc - tsc_base */</span>	; \
+	shlq    %cl,%rax						; \
+	movl	RNT_SCALE(%rdi),%ecx					; \
+	mulq	%rcx				<span class="enscript-comment">/* delta * scale */</span>	; \
+	shrdq	$32,%rdx,%rax			<span class="enscript-comment">/* %rdx:%rax &gt;&gt;= 32 */</span>	; \
+	addq	RNT_NS_BASE(%rdi),%rax		<span class="enscript-comment">/* add ns_base */</span>	; \
+	cmpl	RNT_GENERATION(%rdi),%esi	<span class="enscript-comment">/* repeat if changed */</span> ; \
+	jne	0b
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* _PAL_RTCLOCK_ASM_NATIVE_H_ */</span>
+</pre>
+<hr />
+</body></html>

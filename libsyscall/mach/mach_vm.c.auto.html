@@ -1,0 +1,344 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mach_vm.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mach_vm.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * Make sure we don't accidentally include the external definitions of
+ * the routines we're interposing on below.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_vm_map_user_</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_mach_vm_user_</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_traps.h&gt;</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">_vm_map_user_</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map_internal.h&gt;</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">_mach_vm_user_</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm_internal.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;stack_logging_internal.h&quot;</span>
+
+malloc_logger_t *__syscall_logger = NULL;   <span class="enscript-comment">// This may get set by Libc's malloc stack logging initialization code.
+</span>
+kern_return_t
+<span class="enscript-function-name">mach_vm_allocate</span>(
+	mach_port_name_t target,
+	mach_vm_address_t *address,
+	mach_vm_size_t size,
+	<span class="enscript-type">int</span> flags)
+{
+	kern_return_t rv;
+
+	rv = _kernelrpc_mach_vm_allocate_trap(target, address, size, flags);
+
+	<span class="enscript-keyword">if</span> (rv == MACH_SEND_INVALID_DEST)
+		rv = _kernelrpc_mach_vm_allocate(target, address, size, flags);
+
+	<span class="enscript-keyword">if</span> (__syscall_logger) {
+		<span class="enscript-type">int</span> userTagFlags = flags &amp; VM_FLAGS_ALIAS_MASK;
+		__syscall_logger(stack_logging_type_vm_allocate | userTagFlags, (uintptr_t)target, (uintptr_t)size, 0, (uintptr_t)*address, 0);
+	}
+
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+kern_return_t
+<span class="enscript-function-name">mach_vm_deallocate</span>(
+	mach_port_name_t target,
+	mach_vm_address_t address,
+	mach_vm_size_t size)
+{
+	kern_return_t rv;
+
+	rv = _kernelrpc_mach_vm_deallocate_trap(target, address, size);
+
+	<span class="enscript-keyword">if</span> (rv == MACH_SEND_INVALID_DEST)
+		rv = _kernelrpc_mach_vm_deallocate(target, address, size);
+
+	<span class="enscript-keyword">if</span> (__syscall_logger) {
+		__syscall_logger(stack_logging_type_vm_deallocate, (uintptr_t)target, (uintptr_t)address, (uintptr_t)size, 0, 0);
+	}
+
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+kern_return_t
+<span class="enscript-function-name">mach_vm_protect</span>(
+	mach_port_name_t task,
+	mach_vm_address_t address,
+	mach_vm_size_t size,
+	boolean_t set_maximum,
+	vm_prot_t new_protection)
+{
+	kern_return_t rv;
+
+	rv = _kernelrpc_mach_vm_protect_trap(task, address, size, set_maximum,
+		new_protection);
+
+	<span class="enscript-keyword">if</span> (rv == MACH_SEND_INVALID_DEST)
+		rv = _kernelrpc_mach_vm_protect(task, address, size,
+			set_maximum, new_protection);
+
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+kern_return_t
+<span class="enscript-function-name">vm_allocate</span>(
+	mach_port_name_t task,
+	vm_address_t *address,
+	vm_size_t size,
+	<span class="enscript-type">int</span> flags)
+{
+	kern_return_t rv;
+	mach_vm_address_t mach_addr;
+
+	mach_addr = (mach_vm_address_t)*address;
+	rv = mach_vm_allocate(task, &amp;mach_addr, size, flags);
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+	*address = mach_addr;
+#<span class="enscript-reference">else</span>
+	*address = (vm_address_t)(mach_addr &amp; ((vm_address_t)-1));
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+kern_return_t
+<span class="enscript-function-name">vm_deallocate</span>(
+	mach_port_name_t task,
+	vm_address_t address,
+	vm_size_t size)
+{
+	kern_return_t rv;
+
+	rv = mach_vm_deallocate(task, address, size);
+
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+kern_return_t
+<span class="enscript-function-name">vm_protect</span>(
+	mach_port_name_t task,
+	vm_address_t address,
+	vm_size_t size,
+	boolean_t set_maximum,
+	vm_prot_t new_protection)
+{
+	kern_return_t rv;
+
+	rv = mach_vm_protect(task, address, size, set_maximum, new_protection);
+
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+kern_return_t
+<span class="enscript-function-name">mach_vm_map</span>(
+	mach_port_name_t target,
+	mach_vm_address_t *address,
+	mach_vm_size_t size,
+	mach_vm_offset_t mask,
+	<span class="enscript-type">int</span> flags,
+	mem_entry_name_port_t object,
+	memory_object_offset_t offset,
+	boolean_t copy,
+	vm_prot_t cur_protection,
+	vm_prot_t max_protection,
+	vm_inherit_t inheritance)
+{
+	kern_return_t rv = MACH_SEND_INVALID_DEST;
+
+	<span class="enscript-keyword">if</span> (object == MEMORY_OBJECT_NULL &amp;&amp; max_protection == VM_PROT_ALL &amp;&amp;
+			inheritance == VM_INHERIT_DEFAULT)
+		rv = _kernelrpc_mach_vm_map_trap(target, address, size, mask, flags,
+				cur_protection);
+
+	<span class="enscript-keyword">if</span> (rv == MACH_SEND_INVALID_DEST)
+		rv = _kernelrpc_mach_vm_map(target, address, size, mask, flags, object,
+			offset, copy, cur_protection, max_protection, inheritance);
+
+	<span class="enscript-keyword">if</span> (__syscall_logger) {
+		<span class="enscript-type">int</span> eventTypeFlags = stack_logging_type_vm_allocate | stack_logging_type_mapped_file_or_shared_mem;
+		<span class="enscript-type">int</span> userTagFlags = flags &amp; VM_FLAGS_ALIAS_MASK;
+		__syscall_logger(eventTypeFlags | userTagFlags, (uintptr_t)target, (uintptr_t)size, 0, (uintptr_t)*address, 0);
+	}
+
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+kern_return_t
+<span class="enscript-function-name">mach_vm_remap</span>(
+	mach_port_name_t target,
+	mach_vm_address_t *address,
+	mach_vm_size_t size,
+	mach_vm_offset_t mask,
+	<span class="enscript-type">int</span> flags,
+	mach_port_name_t src_task,
+	mach_vm_address_t src_address,
+	boolean_t copy,
+	vm_prot_t *cur_protection,
+	vm_prot_t *max_protection,
+        vm_inherit_t inheritance)
+{
+	kern_return_t rv;
+
+	rv = _kernelrpc_mach_vm_remap(target, address, size, mask, flags,
+		src_task, src_address, copy, cur_protection, max_protection,
+		inheritance);
+
+	<span class="enscript-keyword">if</span> (__syscall_logger) {
+		<span class="enscript-type">int</span> eventTypeFlags = stack_logging_type_vm_allocate | stack_logging_type_mapped_file_or_shared_mem;
+		<span class="enscript-type">int</span> userTagFlags = flags &amp; VM_FLAGS_ALIAS_MASK;
+		__syscall_logger(eventTypeFlags | userTagFlags, (uintptr_t)target, (uintptr_t)size, 0, (uintptr_t)*address, 0);
+	}
+
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+kern_return_t
+<span class="enscript-function-name">mach_vm_read</span>(
+	mach_port_name_t target,
+	mach_vm_address_t address,
+	mach_vm_size_t size,
+	vm_offset_t *data,
+	mach_msg_type_number_t *dataCnt)
+{
+	kern_return_t rv;
+
+	rv = _kernelrpc_mach_vm_read(target, address, size, data, dataCnt);
+
+	<span class="enscript-keyword">if</span> (__syscall_logger) {
+		<span class="enscript-type">int</span> eventTypeFlags = stack_logging_type_vm_allocate | stack_logging_type_mapped_file_or_shared_mem;
+		<span class="enscript-comment">// The target argument is the remote task from which data is being read,
+</span>		<span class="enscript-comment">// so pass mach_task_self() as the destination task receiving the allocation.
+</span>		__syscall_logger(eventTypeFlags, (uintptr_t)mach_task_self(), (uintptr_t)*dataCnt, 0, *data, 0);
+	}
+
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+kern_return_t
+<span class="enscript-function-name">vm_map</span>(
+	mach_port_name_t target,
+	vm_address_t *address,
+	vm_size_t size,
+	vm_offset_t mask,
+	<span class="enscript-type">int</span> flags,
+	mem_entry_name_port_t object,
+	vm_offset_t offset,
+	boolean_t copy,
+	vm_prot_t cur_protection,
+	vm_prot_t max_protection,
+	vm_inherit_t inheritance)
+{
+	kern_return_t rv;
+
+	rv = _kernelrpc_vm_map(target, address, size, mask, flags, object,
+		offset, copy, cur_protection, max_protection, inheritance);
+
+	<span class="enscript-keyword">if</span> (__syscall_logger) {
+		<span class="enscript-type">int</span> eventTypeFlags = stack_logging_type_vm_allocate | stack_logging_type_mapped_file_or_shared_mem;
+		<span class="enscript-type">int</span> userTagFlags = flags &amp; VM_FLAGS_ALIAS_MASK;
+		__syscall_logger(eventTypeFlags | userTagFlags, (uintptr_t)target, (uintptr_t)size, 0, (uintptr_t)*address, 0);
+	}
+
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+kern_return_t
+<span class="enscript-function-name">vm_remap</span>(
+	mach_port_name_t target,
+	vm_address_t *address,
+	vm_size_t size,
+	vm_offset_t mask,
+	<span class="enscript-type">int</span> flags,
+	mach_port_name_t src_task,
+	vm_address_t src_address,
+	boolean_t copy,
+	vm_prot_t *cur_protection,
+	vm_prot_t *max_protection,
+        vm_inherit_t inheritance)
+{
+	kern_return_t rv;
+
+	rv = _kernelrpc_vm_remap(target, address, size, mask, flags,
+		src_task, src_address, copy, cur_protection, max_protection,
+		inheritance);
+
+	<span class="enscript-keyword">if</span> (__syscall_logger) {
+		<span class="enscript-type">int</span> eventTypeFlags = stack_logging_type_vm_allocate | stack_logging_type_mapped_file_or_shared_mem;
+		<span class="enscript-type">int</span> userTagFlags = flags &amp; VM_FLAGS_ALIAS_MASK;
+		__syscall_logger(eventTypeFlags | userTagFlags, (uintptr_t)target, (uintptr_t)size, 0, (uintptr_t)*address, 0);
+	}
+
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+kern_return_t
+<span class="enscript-function-name">vm_read</span>(
+	mach_port_name_t target,
+	vm_address_t address,
+	vm_size_t size,
+	vm_offset_t *data,
+	mach_msg_type_number_t *dataCnt)
+{
+	kern_return_t rv;
+
+	rv = _kernelrpc_vm_read(target, address, size, data, dataCnt);
+
+	<span class="enscript-keyword">if</span> (__syscall_logger) {
+		<span class="enscript-type">int</span> eventTypeFlags = stack_logging_type_vm_allocate | stack_logging_type_mapped_file_or_shared_mem;
+		<span class="enscript-comment">// The target argument is the remote task from which data is being read,
+</span>		<span class="enscript-comment">// so pass mach_task_self() as the destination task receiving the allocation.
+</span>		__syscall_logger(eventTypeFlags, (uintptr_t)mach_task_self(), (uintptr_t)*dataCnt, 0, *data, 0);
+	}
+
+	<span class="enscript-keyword">return</span> (rv);
+}
+</pre>
+<hr />
+</body></html>

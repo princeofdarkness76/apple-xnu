@@ -1,0 +1,138 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>work_interval.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">work_interval.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this
+ * file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/work_interval.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+
+<span class="enscript-type">struct</span> work_interval {
+	uint64_t thread_id;
+	uint64_t work_interval_id;
+};
+
+<span class="enscript-type">extern</span> uint64_t <span class="enscript-function-name">__thread_selfid</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/* Create a new work interval handle (currently for the current thread only). Flags is unused */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">work_interval_create</span>(work_interval_t *interval_handle, uint32_t flags __unused)
+{
+	<span class="enscript-type">int</span> ret;
+	uint64_t work_interval_id;
+	work_interval_t handle;
+
+	ret = __work_interval_ctl(WORK_INTERVAL_OPERATION_CREATE, 0, &amp;work_interval_id, <span class="enscript-keyword">sizeof</span>(work_interval_id));
+	<span class="enscript-keyword">if</span> (ret == -1) {
+		<span class="enscript-keyword">return</span> ret;
+	}
+
+	handle = malloc(<span class="enscript-keyword">sizeof</span>(*handle));
+	<span class="enscript-keyword">if</span> (handle == NULL) {
+		errno = ENOMEM;
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	handle-&gt;thread_id = __thread_selfid();
+	handle-&gt;work_interval_id = work_interval_id;
+
+	*interval_handle = handle;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">work_interval_notify</span>(work_interval_t interval_handle, uint64_t start, uint64_t finish, uint64_t deadline, uint64_t next_start, uint32_t flags)
+{
+	<span class="enscript-type">int</span> ret;
+	uint64_t work_interval_id;
+	<span class="enscript-type">struct</span> work_interval_notification notification = {
+		.start = start,
+		.finish = finish,
+		.deadline = deadline,
+		.next_start = next_start,
+		.flags = flags,
+		.unused1 = 0
+	};
+
+	<span class="enscript-keyword">if</span> (interval_handle == NULL) {
+		errno = EINVAL;
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	work_interval_id = interval_handle-&gt;work_interval_id;
+
+	ret = __work_interval_ctl(WORK_INTERVAL_OPERATION_NOTIFY, work_interval_id, &amp;notification, <span class="enscript-keyword">sizeof</span>(notification));
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">work_interval_notify_simple</span>(work_interval_t interval_handle, uint64_t start, uint64_t deadline, uint64_t next_start)
+{
+	<span class="enscript-keyword">return</span> work_interval_notify(interval_handle, start, mach_absolute_time(), deadline, next_start, 0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">work_interval_destroy</span>(work_interval_t interval_handle)
+{
+	<span class="enscript-type">int</span> ret, saved_errno;
+	uint64_t work_interval_id;
+
+	<span class="enscript-keyword">if</span> (interval_handle == NULL) {
+		errno = EINVAL;
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	work_interval_id = interval_handle-&gt;work_interval_id;
+
+	ret = __work_interval_ctl(WORK_INTERVAL_OPERATION_DESTROY, work_interval_id, NULL, 0);
+	saved_errno = errno;
+	free(interval_handle);
+	errno = saved_errno;
+
+	<span class="enscript-keyword">return</span> ret;
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,161 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>extmod_statistics.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">extmod_statistics.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2011 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/extmod_statistics.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;uuid/uuid.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * This code module adds statistics to track when
+ * a userspace task is modified by another userspace
+ * task. This can facilitate triage of crashes
+ * and abberant behavior, which are not expected
+ * to occur when the program is running in its
+ * qualified environment.
+ *
+ * We assume the target task has a lifecycle lock
+ * that will prevent it from exiting
+ * (task_reference/task_reference_internal), which
+ * should be called either explicitly, or implicitly
+ * via MIG glue code (convert_port_to_task).
+ *
+ * Host-wide statistics don't asssume any locks are
+ * held, and use atomic operations.
+ *
+ * If we can detect that the kernel proper is
+ * performing these operations, don't count
+ * it as an external modification. Some of the
+ * external modification routines are called
+ * by the kernel during thread setup, in which
+ * case we rename the userspace entrypoint called
+ * by the MIG demuxer to have a &quot;_from_user&quot; suffix.
+ */</span>
+
+<span class="enscript-comment">/* externs for BSD kernel */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">fslog_extmod_msgtracer</span>(<span class="enscript-type">void</span> *, <span class="enscript-type">void</span> *);
+
+<span class="enscript-comment">/* local routines */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">extmod_statistics_log</span>(task_t current_task, task_t target);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">extmod_statistics_incr_task_for_pid</span>(task_t target)
+{
+	task_t ctask = current_task();
+
+	<span class="enscript-keyword">if</span> ((ctask == kernel_task) || (target == TASK_NULL))
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (target != ctask) {
+		ctask-&gt;extmod_statistics.task_for_pid_caller_count++;
+		target-&gt;extmod_statistics.task_for_pid_count++;
+		OSIncrementAtomic64(&amp;host_extmod_statistics.task_for_pid_count);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">extmod_statistics_incr_thread_set_state</span>(thread_t target)
+{
+	task_t ctask = current_task();
+	task_t ttask;
+
+	<span class="enscript-keyword">if</span> ((ctask == kernel_task) || (target == THREAD_NULL))
+		<span class="enscript-keyword">return</span>;
+
+	ttask = get_threadtask(target);
+
+	<span class="enscript-keyword">if</span> (ttask == TASK_NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (ttask != ctask) {
+		ctask-&gt;extmod_statistics.thread_set_state_caller_count++;
+		ttask-&gt;extmod_statistics.thread_set_state_count++;
+		OSIncrementAtomic64(&amp;host_extmod_statistics.thread_set_state_count);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">extmod_statistics_incr_thread_create</span>(task_t target)
+{
+	task_t ctask = current_task();
+
+	<span class="enscript-keyword">if</span> ((ctask == kernel_task) || (target == TASK_NULL))
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (target != ctask) {
+		ctask-&gt;extmod_statistics.thread_creation_caller_count++;
+		target-&gt;extmod_statistics.thread_creation_count++;
+		OSIncrementAtomic64(&amp;host_extmod_statistics.thread_creation_count);
+
+		extmod_statistics_log(ctask, target);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">extmod_statistics_log</span>(task_t current_task, task_t target)
+{
+	<span class="enscript-type">void</span> *c_proc;
+	<span class="enscript-type">void</span> *t_proc;
+
+	c_proc = get_bsdtask_info(current_task);
+	t_proc = get_bsdtask_info(target);
+	<span class="enscript-keyword">if</span> (c_proc &amp;&amp; t_proc) {
+		fslog_extmod_msgtracer(c_proc, t_proc);
+	}
+}
+</pre>
+<hr />
+</body></html>

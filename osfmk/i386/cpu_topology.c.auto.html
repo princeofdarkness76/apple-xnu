@@ -1,0 +1,303 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>cpu_topology.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">cpu_topology.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007-2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_affinity.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_topology.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_threads.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_cpu.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/bit_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/lapic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_routines.h&gt;</span>
+
+__private_extern__ <span class="enscript-type">void</span> qsort(
+    <span class="enscript-type">void</span> * array,
+    size_t nmembers,
+    size_t member_size,
+    <span class="enscript-type">int</span> (*)(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *));
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">lapicid_cmp</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *x, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *y);
+<span class="enscript-type">static</span> x86_affinity_set_t *<span class="enscript-function-name">find_cache_affinity</span>(x86_cpu_cache_t *L2_cachep);
+
+x86_affinity_set_t	*x86_affinities = NULL;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>		x86_affinity_count = 0;
+
+<span class="enscript-comment">/*
+ * cpu_topology_sort() is called after all processors have been registered
+ * but before any non-boot processor id started.
+ * We establish canonical logical processor numbering - logical cpus must be
+ * contiguous, zero-based and assigned in physical (local apic id) order.
+ * This step is required because the discovery/registration order is
+ * non-deterministic - cores are registered in differing orders over boots.
+ * Enforcing canonical numbering simplifies identification
+ * of processors - in particular, for stopping/starting from CHUD.
+ */</span> 
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cpu_topology_sort</span>(<span class="enscript-type">int</span> ncpus)
+{
+	<span class="enscript-type">int</span>		i;
+	boolean_t	istate;
+	processor_t		lprim = NULL;
+
+	assert(machine_info.physical_cpu == 1);
+	assert(machine_info.logical_cpu == 1);
+	assert(master_cpu == 0);
+	assert(cpu_number() == 0);
+	assert(cpu_datap(0)-&gt;cpu_number == 0);
+
+	<span class="enscript-comment">/* Lights out for this */</span>
+	istate = ml_set_interrupts_enabled(FALSE);
+
+	<span class="enscript-keyword">if</span> (topo_dbg) {
+		TOPO_DBG(<span class="enscript-string">&quot;cpu_topology_start() %d cpu%s registered\n&quot;</span>,
+			ncpus, (ncpus &gt; 1) ? <span class="enscript-string">&quot;s&quot;</span> : <span class="enscript-string">&quot;&quot;</span>);
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; ncpus; i++) {
+			cpu_data_t	*cpup = cpu_datap(i);
+			TOPO_DBG(<span class="enscript-string">&quot;\tcpu_data[%d]:%p local apic 0x%x\n&quot;</span>,
+				i, (<span class="enscript-type">void</span> *) cpup, cpup-&gt;cpu_phys_number);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Re-order the cpu_data_ptr vector sorting by physical id.
+	 * Skip the boot processor, it's required to be correct.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ncpus &gt; 1) {
+		qsort((<span class="enscript-type">void</span> *) &amp;cpu_data_ptr[1],
+			ncpus - 1,
+			<span class="enscript-keyword">sizeof</span>(cpu_data_t *),
+			lapicid_cmp);
+	}
+	<span class="enscript-keyword">if</span> (topo_dbg) {
+		TOPO_DBG(<span class="enscript-string">&quot;cpu_topology_start() after sorting:\n&quot;</span>);
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; ncpus; i++) {
+			cpu_data_t	*cpup = cpu_datap(i);
+			TOPO_DBG(<span class="enscript-string">&quot;\tcpu_data[%d]:%p local apic 0x%x\n&quot;</span>,
+				i, (<span class="enscript-type">void</span> *) cpup, cpup-&gt;cpu_phys_number);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Finalize logical numbers and map kept by the lapic code.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; ncpus; i++) {
+		cpu_data_t	*cpup = cpu_datap(i);
+
+		<span class="enscript-keyword">if</span> (cpup-&gt;cpu_number != i) {
+			kprintf(<span class="enscript-string">&quot;cpu_datap(%d):%p local apic id 0x%x &quot;</span>
+				<span class="enscript-string">&quot;remapped from %d\n&quot;</span>,
+				i, cpup, cpup-&gt;cpu_phys_number,
+				cpup-&gt;cpu_number);
+		}
+		cpup-&gt;cpu_number = i;
+		lapic_cpu_map(cpup-&gt;cpu_phys_number, i);
+		x86_set_logical_topology(&amp;cpup-&gt;lcpu, cpup-&gt;cpu_phys_number, i);
+	}
+
+	x86_validate_topology();
+
+	ml_set_interrupts_enabled(istate);
+	TOPO_DBG(<span class="enscript-string">&quot;cpu_topology_start() LLC is L%d\n&quot;</span>, topoParms.LLCDepth + 1);
+
+	<span class="enscript-comment">/*
+	 * Let the CPU Power Management know that the topology is stable.
+	 */</span>
+	topoParms.stable = TRUE;
+	pmCPUStateInit();
+
+	<span class="enscript-comment">/*
+	 * Iterate over all logical cpus finding or creating the affinity set
+	 * for their LLC cache. Each affinity set possesses a processor set
+	 * into which each logical processor is added.
+	 */</span>
+	TOPO_DBG(<span class="enscript-string">&quot;cpu_topology_start() creating affinity sets:\n&quot;</span>);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; ncpus; i++) {
+		cpu_data_t		*cpup = cpu_datap(i);
+		x86_lcpu_t		*lcpup = cpu_to_lcpu(i);
+		x86_cpu_cache_t		*LLC_cachep;
+		x86_affinity_set_t	*aset;
+
+		LLC_cachep = lcpup-&gt;caches[topoParms.LLCDepth];
+		assert(LLC_cachep-&gt;type == CPU_CACHE_TYPE_UNIF);
+		aset = find_cache_affinity(LLC_cachep); 
+		<span class="enscript-keyword">if</span> (aset == NULL) {
+			aset = (x86_affinity_set_t *) kalloc(<span class="enscript-keyword">sizeof</span>(*aset));
+			<span class="enscript-keyword">if</span> (aset == NULL)
+				panic(<span class="enscript-string">&quot;cpu_topology_start() failed aset alloc&quot;</span>);
+			aset-&gt;next = x86_affinities;
+			x86_affinities = aset;
+			aset-&gt;num = x86_affinity_count++;
+			aset-&gt;cache = LLC_cachep;
+			aset-&gt;pset = (i == master_cpu) ?
+					processor_pset(master_processor) :
+					pset_create(pset_node_root());
+			<span class="enscript-keyword">if</span> (aset-&gt;pset == PROCESSOR_SET_NULL)
+				panic(<span class="enscript-string">&quot;cpu_topology_start: pset_create&quot;</span>);
+			TOPO_DBG(<span class="enscript-string">&quot;\tnew set %p(%d) pset %p for cache %p\n&quot;</span>,
+				aset, aset-&gt;num, aset-&gt;pset, aset-&gt;cache);
+		}
+
+		TOPO_DBG(<span class="enscript-string">&quot;\tprocessor_init set %p(%d) lcpup %p(%d) cpu %p processor %p\n&quot;</span>,
+			aset, aset-&gt;num, lcpup, lcpup-&gt;cpu_num, cpup, cpup-&gt;cpu_processor);
+
+		<span class="enscript-keyword">if</span> (i != master_cpu)
+			processor_init(cpup-&gt;cpu_processor, i, aset-&gt;pset);
+
+		<span class="enscript-keyword">if</span> (lcpup-&gt;core-&gt;num_lcpus &gt; 1) {
+			<span class="enscript-keyword">if</span> (lcpup-&gt;lnum == 0)
+				lprim = cpup-&gt;cpu_processor;
+
+			processor_set_primary(cpup-&gt;cpu_processor, lprim);
+		}
+	}
+}
+
+<span class="enscript-comment">/* We got a request to start a CPU. Check that this CPU is within the
+ * max cpu limit set before we do.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">cpu_topology_start_cpu</span>( <span class="enscript-type">int</span> cpunum )
+{
+	<span class="enscript-type">int</span>		ncpus = machine_info.max_cpus;
+	<span class="enscript-type">int</span>		i = cpunum;
+
+	<span class="enscript-comment">/* Decide whether to start a CPU, and actually start it */</span>
+	TOPO_DBG(<span class="enscript-string">&quot;cpu_topology_start() processor_start():\n&quot;</span>);
+	<span class="enscript-keyword">if</span>( i &lt; ncpus)
+	{
+		TOPO_DBG(<span class="enscript-string">&quot;\tlcpu %d\n&quot;</span>, cpu_datap(i)-&gt;cpu_number);
+		processor_start(cpu_datap(i)-&gt;cpu_processor); 
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+	<span class="enscript-keyword">else</span>
+	    <span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">lapicid_cmp</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *x, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *y)
+{
+	cpu_data_t	*cpu_x = *((cpu_data_t **)(uintptr_t)x);
+	cpu_data_t	*cpu_y = *((cpu_data_t **)(uintptr_t)y);
+
+	TOPO_DBG(<span class="enscript-string">&quot;lapicid_cmp(%p,%p) (%d,%d)\n&quot;</span>,
+		x, y, cpu_x-&gt;cpu_phys_number, cpu_y-&gt;cpu_phys_number);
+	<span class="enscript-keyword">if</span> (cpu_x-&gt;cpu_phys_number &lt; cpu_y-&gt;cpu_phys_number)
+		<span class="enscript-keyword">return</span> -1;
+	<span class="enscript-keyword">if</span> (cpu_x-&gt;cpu_phys_number == cpu_y-&gt;cpu_phys_number)
+		<span class="enscript-keyword">return</span> 0;
+	<span class="enscript-keyword">return</span> 1;
+}
+
+<span class="enscript-type">static</span> x86_affinity_set_t *
+<span class="enscript-function-name">find_cache_affinity</span>(x86_cpu_cache_t *l2_cachep)
+{
+	x86_affinity_set_t	*aset;
+
+	<span class="enscript-keyword">for</span> (aset = x86_affinities; aset != NULL; aset = aset-&gt;next) {
+		<span class="enscript-keyword">if</span> (l2_cachep == aset-&gt;cache)
+			<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span> aset;			
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ml_get_max_affinity_sets</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> x86_affinity_count;
+}
+
+processor_set_t
+<span class="enscript-function-name">ml_affinity_to_pset</span>(uint32_t affinity_num) 
+{
+	x86_affinity_set_t	*aset;
+
+	<span class="enscript-keyword">for</span> (aset = x86_affinities; aset != NULL; aset = aset-&gt;next) {
+		<span class="enscript-keyword">if</span> (affinity_num == aset-&gt;num)
+			<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span> (aset == NULL) ? PROCESSOR_SET_NULL : aset-&gt;pset;
+}
+
+uint64_t
+<span class="enscript-function-name">ml_cpu_cache_size</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> level)
+{
+	x86_cpu_cache_t	*cachep;
+
+	<span class="enscript-keyword">if</span> (level == 0) {
+		<span class="enscript-keyword">return</span> machine_info.max_mem;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( 1 &lt;= level &amp;&amp; level &lt;= MAX_CACHE_DEPTH) {
+		cachep = current_cpu_datap()-&gt;lcpu.caches[level-1];
+		<span class="enscript-keyword">return</span> cachep ? cachep-&gt;cache_size : 0;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span> 0;
+	}
+}
+
+uint64_t
+<span class="enscript-function-name">ml_cpu_cache_sharing</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> level)
+{
+	x86_cpu_cache_t	*cachep;
+
+	<span class="enscript-keyword">if</span> (level == 0) {
+		<span class="enscript-keyword">return</span> machine_info.max_cpus;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( 1 &lt;= level &amp;&amp; level &lt;= MAX_CACHE_DEPTH) {
+		cachep = current_cpu_datap()-&gt;lcpu.caches[level-1];
+		<span class="enscript-keyword">return</span> cachep ? cachep-&gt;nlcpus : 0;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span> 0;
+	}
+}
+
+</pre>
+<hr />
+</body></html>

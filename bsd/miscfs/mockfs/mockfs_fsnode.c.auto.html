@@ -1,0 +1,419 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mockfs_fsnode.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mockfs_fsnode.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/mockfs/mockfs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/mockfs/mockfs_fsnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/mockfs/mockfs_vnops.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/specfs/specdev.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/disk.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ubc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * For the moment, most operations that change the fsnode will be called only in the context of
+ *   mockfs_mountroot, so they should not need to use a mutex.  The exceptions are mockfs_fsnode_vnode,
+ *   and mockfs_fsnode_drop_vnode, which will use a tree-wide mutex (that lives in the mockfs_mount_t
+ *   for the mount).
+ *
+ * mockfs_fsnode_child_by_type doesn't require locking right now (we're only looking at the structure of
+ *   the node tree, which should not change during VNOP operations.
+ */</span>
+
+<span class="enscript-comment">/* mockfs_fsnode_create:
+ *   Given a mount (mp) and mockfs node type (type), creates a new fsnode for that mountpoint (*fsnpp).
+ *   For the moment (while type == fileid) we should have at most one node of any given type.
+ *
+ * Returns 0 on success, or an error.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_fsnode_create</span>(mount_t mp, uint8_t type, mockfs_fsnode_t * fsnpp)
+{
+	<span class="enscript-type">int</span> rvalue;
+	uint64_t new_size;
+
+	rvalue = 0;
+	new_size = 0;
+
+	<span class="enscript-keyword">if</span> (!fsnpp || !mp) {
+		rvalue = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">switch</span> (type) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MOCKFS_ROOT</span>:
+			<span class="enscript-keyword">break</span>;	
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MOCKFS_DEV</span>:
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MOCKFS_FILE</span>:
+			<span class="enscript-comment">/*
+			 * For a regular file, size is meaningful, but it will always be equal to the
+			 * size of the backing device.
+			 */</span>
+			new_size = mp-&gt;mnt_devvp-&gt;v_specinfo-&gt;si_devsize;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			rvalue = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	MALLOC(*fsnpp, typeof(*fsnpp), <span class="enscript-keyword">sizeof</span>(**fsnpp), M_TEMP, M_WAITOK | M_ZERO);
+
+	<span class="enscript-keyword">if</span> (!*fsnpp) {
+		rvalue = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	(*fsnpp)-&gt;size = new_size;
+	(*fsnpp)-&gt;type = type;
+	(*fsnpp)-&gt;mnt = mp;
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> rvalue;
+}
+
+<span class="enscript-comment">/*
+ * mockfs_fsnode_destroy:
+ *   Given a node (fsnp), tears down and deallocates that node and the entire subtree that it is the
+ *   root of (deallocates you, and your children, and your children's children! ...for three months).
+ *
+ * Returns 0 on success, or an error.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_fsnode_destroy</span>(mockfs_fsnode_t fsnp)
+{
+	<span class="enscript-type">int</span> rvalue;
+
+	rvalue = 0;
+
+	<span class="enscript-comment">/*
+	 * We will not destroy a root node that is actively pointed to by the mount structure; the
+	 *   mount must drop the reference to the mockfs tree before we can deallocate it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!fsnp || (((mockfs_mount_t)fsnp-&gt;mnt-&gt;mnt_data)-&gt;mockfs_root == fsnp)) {
+		rvalue = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * For now, panic in this case; I don't expect anyone to ask us to destroy a node with a live
+	 *   vfs reference, but this will tell me if that assumption is untrue.
+	 */</span>
+	<span class="enscript-keyword">if</span> (fsnp-&gt;vp)
+		panic(<span class="enscript-string">&quot;mockfs_fsnode_destroy called on node with live vnode; fsnp = %p (in case gdb is screwing with you)&quot;</span>, fsnp);
+
+	<span class="enscript-comment">/*
+	 * If this node has children, we need to destroy them.
+	 *
+	 * At least for now, we aren't guaranteeing destroy will be clean; we may get partway through
+	 *   and encounter an error, in which case we will panic (we may still have a sane tree, but
+	 *   we've failed to destroy the subtree, which means someone called destroy when they should
+	 *   not have done so).
+	 */</span>
+	<span class="enscript-keyword">if</span> (fsnp-&gt;child_a)
+		<span class="enscript-keyword">if</span> ((rvalue = mockfs_fsnode_destroy(fsnp-&gt;child_a)))
+			panic(<span class="enscript-string">&quot;mockfs_fsnode_destroy failed on child_a; fsnp = %p (in case gdb is screwing with you), rvalue = %d&quot;</span>, fsnp, rvalue);
+
+	<span class="enscript-keyword">if</span> (fsnp-&gt;child_b)
+		<span class="enscript-keyword">if</span> ((rvalue = mockfs_fsnode_destroy(fsnp-&gt;child_b)))
+			panic(<span class="enscript-string">&quot;mockfs_fsnode_destroy failed on child_b; fsnp = %p (in case gdb is screwing with you), rvalue = %d&quot;</span>, fsnp, rvalue);
+
+	<span class="enscript-comment">/*
+	 * We need to orphan this node before we destroy it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (fsnp-&gt;parent)
+		<span class="enscript-keyword">if</span> ((rvalue = mockfs_fsnode_orphan(fsnp)))
+			panic(<span class="enscript-string">&quot;mockfs_fsnode_orphan failed during destroy; fsnp = %p (in case gdb is screwing with you), rvalue = %d&quot;</span>, fsnp, rvalue);
+
+	FREE(fsnp, M_TEMP);
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> rvalue;
+}
+
+<span class="enscript-comment">/*
+ * mockfs_fsnode_adopt:
+ *   Given two nodes (parent, child), makes one node the child of the other node.
+ *
+ * Returns 0 on success, or an error.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_fsnode_adopt</span>(mockfs_fsnode_t parent, mockfs_fsnode_t child)
+{
+	<span class="enscript-type">int</span> rvalue;
+
+	rvalue = 0;
+
+	<span class="enscript-comment">/*
+	 * The child must be an orphan, and the parent cannot be the child.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((!parent || !child || child-&gt;parent) &amp;&amp; (parent != child)) {
+		rvalue = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Nodes are actually tied to a specific mount, so assert that both nodes belong to the same mount.
+	 */</span>
+	<span class="enscript-keyword">if</span> (parent-&gt;mnt != child-&gt;mnt) {
+		rvalue = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * TODO: Get rid of this check if I ever get around to making the tree non-binary.
+	 * TODO: Enforce that the parent cannot have two children of the same type (for the moment, this is
+	 *   implicit in the structure of the tree constructed by mockfs_mountroot, so we don't need to
+	 *   worry about it).
+	 * 
+	 * Can the parent support another child (food, shelter, unused pointers)?
+	 */</span>
+	<span class="enscript-keyword">if</span> (!parent-&gt;child_a) {
+		parent-&gt;child_a = child;
+		child-&gt;parent = parent;
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!parent-&gt;child_b) {
+		parent-&gt;child_b = child;
+		child-&gt;parent = parent;
+	}
+	<span class="enscript-keyword">else</span> {
+		rvalue = ENOMEM;
+	}
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> rvalue;
+}
+
+<span class="enscript-comment">/*
+ * mockfs_fsnode_orphan:
+ *
+ * Returns 0 on success, or an error.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_fsnode_orphan</span>(mockfs_fsnode_t fsnp)
+{
+	<span class="enscript-type">int</span> rvalue;
+	mockfs_fsnode_t parent;
+
+	rvalue = 0;
+
+	<span class="enscript-keyword">if</span> (!fsnp || !fsnp-&gt;parent) {
+		rvalue = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Disallow orphaning a node with a live vnode for now.
+	 */</span>
+	<span class="enscript-keyword">if</span> (fsnp-&gt;vp)
+		panic(<span class="enscript-string">&quot;mockfs_fsnode_orphan called on node with live vnode; fsnp = %p (in case gdb is screwing with you)&quot;</span>, fsnp);
+
+	parent = fsnp-&gt;parent;
+
+	<span class="enscript-keyword">if</span> (parent-&gt;child_a == fsnp) {
+		parent-&gt;child_a = NULL;
+		fsnp-&gt;parent = NULL;
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (parent-&gt;child_b == fsnp) {
+		parent-&gt;child_b = NULL;
+		fsnp-&gt;parent = NULL;
+	}
+	<span class="enscript-keyword">else</span>
+		panic(<span class="enscript-string">&quot;mockfs_fsnode_orphan insanity, fsnp-&gt;parent != parent-&gt;child; fsnp = %p (in case gdb is screwing with you)&quot;</span>, fsnp);
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> rvalue;
+}
+
+<span class="enscript-comment">/*
+ * mockfs_fsnode_child_by_type:
+ *   Given a node (parent) and a type (type), returns the first child (*child) found corresponding to the
+ *   requested type.  This method exists to support lookup (which is responsible for mapping names, which
+ *   we have no conception of currently, onto vnodes).
+ *
+ * This should be safe, as we are walking the read-only parts of the filesystem structure (not touching 
+ *   the vnode).
+ *
+ * Returns 0 on success, or an error.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_fsnode_child_by_type</span>(mockfs_fsnode_t parent, uint8_t type, mockfs_fsnode_t * child)
+{
+	<span class="enscript-type">int</span> rvalue;
+	
+	rvalue = 0;
+	
+	<span class="enscript-keyword">if</span> (!parent || !child) {
+		rvalue = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ((parent-&gt;child_a) &amp;&amp; (parent-&gt;child_a-&gt;type == type))
+		*child = parent-&gt;child_a;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((parent-&gt;child_b) &amp;&amp; (parent-&gt;child_b-&gt;type == type))
+		*child = parent-&gt;child_b;
+	<span class="enscript-keyword">else</span>
+		rvalue = ENOENT;
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> rvalue;
+}
+
+<span class="enscript-comment">/*
+ * mockfs_fsnode_vnode:
+ *   Given a mockfs node (fsnp), returns a vnode (*vpp) corresponding to the mockfs node; the vnode will
+ *   have an iocount on it.
+ *
+ * Returns 0 on success, or an error.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_fsnode_vnode</span>(mockfs_fsnode_t fsnp, vnode_t * vpp)
+{
+	<span class="enscript-type">int</span> rvalue;
+	memory_object_control_t ubc_mem_object;
+	mockfs_mount_t mockfs_mnt;
+	<span class="enscript-type">struct</span> vnode_fsparam vnfs_param;
+
+	<span class="enscript-keyword">if</span> ((!fsnp) || (!vpp)) {
+		rvalue = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	mockfs_mnt = ((mockfs_mount_t) fsnp-&gt;mnt-&gt;mnt_data);
+	lck_mtx_lock(&amp;mockfs_mnt-&gt;mockfs_mnt_mtx);
+
+	<span class="enscript-keyword">if</span> (fsnp-&gt;vp) {
+		<span class="enscript-comment">/*
+		 * The vnode already exists; this should be easy.
+		 */</span>
+		rvalue = vnode_get(fsnp-&gt;vp);
+		<span class="enscript-keyword">if</span> (!rvalue) {
+			*vpp = fsnp-&gt;vp;
+		}
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * We need to create the vnode; this will be unpleasant.
+		 */</span>
+		vnfs_param.vnfs_mp = fsnp-&gt;mnt;
+		vnfs_param.vnfs_vtype = (fsnp-&gt;type == MOCKFS_FILE) ? VREG : VDIR;
+		vnfs_param.vnfs_str = <span class="enscript-string">&quot;mockfs&quot;</span>;
+		vnfs_param.vnfs_dvp = (fsnp-&gt;type == MOCKFS_ROOT) ? NULL : fsnp-&gt;parent-&gt;vp;
+		vnfs_param.vnfs_fsnode = fsnp;
+		vnfs_param.vnfs_vops = mockfs_vnodeop_p;
+		vnfs_param.vnfs_markroot = (fsnp-&gt;type == MOCKFS_ROOT);
+		vnfs_param.vnfs_marksystem = 0;
+		vnfs_param.vnfs_rdev = 0;
+		vnfs_param.vnfs_filesize = fsnp-&gt;size;
+		vnfs_param.vnfs_cnp = NULL;
+		vnfs_param.vnfs_flags = VNFS_CANTCACHE | VNFS_NOCACHE;
+		rvalue = vnode_create(VNCREATE_FLAVOR, VCREATESIZE, &amp;vnfs_param, &amp;fsnp-&gt;vp);
+
+		<span class="enscript-keyword">if</span> ((!rvalue) &amp;&amp; (fsnp-&gt;type == MOCKFS_FILE) &amp;&amp; (mockfs_mnt-&gt;mockfs_memory_backed)) {
+			<span class="enscript-comment">/*
+			 * We're memory backed; point the pager towards the backing store of the device.
+			 */</span>
+			ubc_mem_object = ubc_getobject(fsnp-&gt;vp, 0);
+
+			<span class="enscript-keyword">if</span> (!ubc_mem_object)
+				panic(<span class="enscript-string">&quot;mockfs_fsvnode failed to get ubc_mem_object for a new vnode&quot;</span>);
+
+			rvalue = pager_map_to_phys_contiguous(ubc_mem_object, 0, (mockfs_mnt-&gt;mockfs_memdev_base &lt;&lt; PAGE_SHIFT), fsnp-&gt;size);
+
+			<span class="enscript-keyword">if</span> (rvalue)
+				panic(<span class="enscript-string">&quot;mockfs_fsnode_vnode failed to create fictitious pages for a memory-backed device; rvalue = %d&quot;</span>, rvalue);
+		}
+
+		<span class="enscript-keyword">if</span> (!rvalue)
+			*vpp = fsnp-&gt;vp;
+	}
+
+	lck_mtx_unlock(&amp;mockfs_mnt-&gt;mockfs_mnt_mtx);
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> rvalue;
+}
+
+<span class="enscript-comment">/*
+ * mockfs_fsnode_vnode:
+ *   Given a mockfs node (fsnp) that has a vnode associated with it, causes them to drop their
+ *   references to each other.  This exists to support mockfs_reclaim.  This method will grab the tree
+ *   mutex, as this will mutate the tree.
+ *
+ * Returns 0 on success, or an error.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">mockfs_fsnode_drop_vnode</span>(mockfs_fsnode_t fsnp)
+{
+	<span class="enscript-type">int</span> rvalue;
+	mockfs_mount_t mockfs_mnt;
+	vnode_t vp;
+
+	rvalue = 0;
+
+	<span class="enscript-keyword">if</span> (!fsnp) {
+		rvalue = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	mockfs_mnt = ((mockfs_mount_t) fsnp-&gt;mnt-&gt;mnt_data);
+	lck_mtx_lock(&amp;mockfs_mnt-&gt;mockfs_mnt_mtx);
+
+	<span class="enscript-keyword">if</span> (!(fsnp-&gt;vp)) {
+		panic(<span class="enscript-string">&quot;mock_fsnode_drop_vnode: target fsnode does not have an associated vnode&quot;</span>);
+	}
+
+	vp = fsnp-&gt;vp;
+	fsnp-&gt;vp = NULL;
+	vnode_clearfsnode(vp);
+
+	lck_mtx_unlock(&amp;mockfs_mnt-&gt;mockfs_mnt_mtx);
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> rvalue;
+}
+
+</pre>
+<hr />
+</body></html>

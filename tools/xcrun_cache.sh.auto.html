@@ -1,0 +1,301 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>xcrun_cache.sh</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">xcrun_cache.sh&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-reference">#!/bin/sh
+</span>
+<span class="enscript-comment">#
+</span><span class="enscript-comment"># This shell-script is argument-compatible with xcrun(1) as invoked
+</span><span class="enscript-comment"># by xnu's Makefiles. Additionally, it supports caching tools
+</span><span class="enscript-comment"># in the local build directory. It is tightly coupled to exactly
+</span><span class="enscript-comment"># the queries that MakeInc.cmd makes, in exactly the order it makes
+</span><span class="enscript-comment"># them. ./tools/remote_build.sh invokes this indirectly in caching
+</span><span class="enscript-comment"># mode, so '$(XCRUN) -sdk foo -find bar' copies 'bar' from wherever
+</span><span class="enscript-comment"># it is on-disk into ./BUILD/BuildData, and returns that path to the
+</span><span class="enscript-comment"># caller. In '-u' mode on a remote build server, cache tools
+</span><span class="enscript-comment"># relative to the current build directory are returned without
+</span><span class="enscript-comment"># actually calling through to xcrun(1), since the remote build
+</span><span class="enscript-comment"># server may not even have Xcode installed.
+</span><span class="enscript-comment">#
+</span>
+SDKROOT=<span class="enscript-string">&quot;&quot;</span>
+FINDTOOL=<span class="enscript-string">&quot;&quot;</span>
+SDKQUERY=<span class="enscript-string">&quot;&quot;</span>
+VERBOSE=<span class="enscript-string">&quot;&quot;</span>
+OBJROOT=<span class="enscript-string">&quot;&quot;</span>
+CACHE=0
+
+<span class="enscript-comment"># echo &quot;Calling $0 $@&quot; 1&gt;&amp;2
+</span>
+<span class="enscript-keyword">while</span> [ $<span class="enscript-comment"># -gt 0 ]; do
+</span>    <span class="enscript-keyword">case</span> <span class="enscript-string">&quot;$1&quot;</span> <span class="enscript-keyword">in</span>
+	-c)
+	    CACHE=1
+	    <span class="enscript-keyword">shift</span>
+	    OBJROOT=<span class="enscript-string">&quot;$1&quot;</span>
+	    <span class="enscript-keyword">shift</span>
+	    ;;
+	-u)
+	    CACHE=0
+	    <span class="enscript-keyword">shift</span>
+	    OBJROOT=<span class="enscript-string">&quot;$1&quot;</span>
+	    <span class="enscript-keyword">shift</span>
+	    ;;
+	-sdk)
+	    <span class="enscript-keyword">shift</span>
+	    SDKROOT=<span class="enscript-string">&quot;$1&quot;</span>
+	    <span class="enscript-keyword">shift</span>
+	    ;;
+	-verbose)
+	    VERBOSE=<span class="enscript-string">&quot;$1&quot;</span>
+	    <span class="enscript-keyword">shift</span>
+	    <span class="enscript-keyword">set</span> -x
+	    ;;
+	-find)
+	    <span class="enscript-keyword">shift</span>
+	    FINDTOOL=<span class="enscript-string">&quot;$1&quot;</span>
+	    <span class="enscript-keyword">shift</span>
+	    ;;
+	-show-sdk-path)
+	    SDKQUERY=<span class="enscript-string">&quot;$1&quot;</span>
+	    <span class="enscript-keyword">shift</span>
+	    ;;
+	-show-sdk-platform-path)
+	    SDKQUERY=<span class="enscript-string">&quot;$1&quot;</span>
+	    <span class="enscript-keyword">shift</span>
+	    ;;
+	-show-sdk-version)
+	    SDKQUERY=<span class="enscript-string">&quot;$1&quot;</span>
+	    <span class="enscript-keyword">shift</span>
+	    ;;
+	*)
+	    <span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;Unrecognized argument $1&quot;</span> 1&gt;&amp;2
+	    <span class="enscript-keyword">exit</span> 1
+    <span class="enscript-keyword">esac</span>    
+<span class="enscript-keyword">done</span>
+
+function CreateFile() {
+    local string=<span class="enscript-string">&quot;$1&quot;</span>
+    local filepath=<span class="enscript-string">&quot;$2&quot;</span>
+    <span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;${string}&quot;</span> &gt; <span class="enscript-string">&quot;${filepath}.new&quot;</span>
+    cmp -s <span class="enscript-string">&quot;${filepath}&quot;</span> <span class="enscript-string">&quot;${filepath}.new&quot;</span>
+    <span class="enscript-keyword">if</span> [ $? -eq 0 ]; <span class="enscript-keyword">then</span>
+	rm <span class="enscript-string">&quot;${filepath}.new&quot;</span>
+    <span class="enscript-keyword">else</span>
+	mv <span class="enscript-string">&quot;${filepath}.new&quot;</span> <span class="enscript-string">&quot;${filepath}&quot;</span>
+    <span class="enscript-keyword">fi</span>
+}
+
+<span class="enscript-keyword">if</span> [ $CACHE -eq 1 ]; <span class="enscript-keyword">then</span>
+
+    <span class="enscript-keyword">if</span> [ -n <span class="enscript-string">&quot;$SDKQUERY&quot;</span> ]; <span class="enscript-keyword">then</span>
+	<span class="enscript-comment"># MakeInc.cmd makes SDK queries up-front first. Generally the
+</span>	<span class="enscript-comment"># SDKROOT that is an input to these are one of:
+</span>	<span class="enscript-comment"># &quot;macosx&quot; =&gt; Host SDK
+</span>	<span class="enscript-comment"># &quot;iphonehostXXX&quot; =&gt; iPhone Host SDK
+</span>	<span class="enscript-comment"># other shortcut or full path =&gt; Target SDK
+</span>	<span class="enscript-comment">#
+</span>	<span class="enscript-comment"># Once an initial lookup is made, subsequent SDKROOTs for
+</span>	<span class="enscript-comment"># that same SDK may use a full path or cached path
+</span>	SDKTYPE=<span class="enscript-string">&quot;&quot;</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-string">&quot;$SDKROOT&quot;</span> <span class="enscript-keyword">in</span>
+	    macosx)
+		SDKTYPE=<span class="enscript-string">&quot;host&quot;</span>
+		;;
+	    iphonehost*)
+		SDKTYPE=<span class="enscript-string">&quot;iphonehost&quot;</span>
+		;;
+	    *)
+		<span class="enscript-keyword">if</span> [ -f <span class="enscript-string">&quot;$SDKROOT/.sdktype&quot;</span> ]; <span class="enscript-keyword">then</span>
+		    SDKTYPE=`cat <span class="enscript-string">&quot;$SDKROOT/.sdktype&quot;</span>`
+		<span class="enscript-keyword">else</span>
+		    SDKTYPE=<span class="enscript-string">&quot;target&quot;</span>
+		<span class="enscript-keyword">fi</span>
+		;;
+	<span class="enscript-keyword">esac</span>
+
+	<span class="enscript-comment"># A cached SDK path can be passed to xcrun, so
+</span>	<span class="enscript-comment"># we need the original on-disk path
+</span>	<span class="enscript-keyword">if</span> [ -f <span class="enscript-string">&quot;$SDKROOT/.realsdkpath&quot;</span> ]; <span class="enscript-keyword">then</span>
+	    REALSDKROOT=`cat <span class="enscript-string">&quot;$SDKROOT/.realsdkpath&quot;</span>`
+	<span class="enscript-keyword">else</span>
+	    REALSDKROOT=<span class="enscript-string">&quot;$SDKROOT&quot;</span>
+	<span class="enscript-keyword">fi</span>
+
+	SDKPROPERTY=`/usr/bin/xcrun $VERBOSE -sdk <span class="enscript-string">&quot;$REALSDKROOT&quot;</span> <span class="enscript-string">&quot;$SDKQUERY&quot;</span>`
+	<span class="enscript-keyword">if</span> [ $? -ne 0 ]; <span class="enscript-keyword">then</span>
+	    <span class="enscript-keyword">exit</span> $?
+	<span class="enscript-keyword">fi</span>
+	
+	<span class="enscript-keyword">case</span> $SDKQUERY <span class="enscript-keyword">in</span>
+	    -show-sdk-path)
+		<span class="enscript-comment"># Cache the SDK locally, and transform the resulting SDKPROPERTY
+</span>		<span class="enscript-keyword">if</span> [ -z <span class="enscript-string">&quot;$SDKPROPERTY&quot;</span> ]; <span class="enscript-keyword">then</span>
+		    SDKPROPERTY=<span class="enscript-string">&quot;/&quot;</span>
+		    SDKNAME=<span class="enscript-string">&quot;Slash.sdk&quot;</span>
+		<span class="enscript-keyword">else</span>
+		    SDKNAME=$(basename <span class="enscript-string">&quot;${SDKPROPERTY}&quot;</span>)
+		<span class="enscript-keyword">fi</span>
+		mkdir -p <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}&quot;</span>
+		mkdir -p <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}/usr/include&quot;</span>
+		rsync -aq --exclude=c++ --exclude=php --exclude=soc <span class="enscript-string">&quot;${SDKPROPERTY}/usr/include/&quot;</span> <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}/usr/include/&quot;</span>
+		<span class="enscript-keyword">if</span> [ <span class="enscript-string">&quot;$SDKTYPE&quot;</span> = <span class="enscript-string">&quot;iphonehost&quot;</span> ]; <span class="enscript-keyword">then</span>
+		    mkdir -p <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}/usr/local/lib/system&quot;</span>
+		    rsync -aq <span class="enscript-string">&quot;${SDKPROPERTY}/usr/local/lib/system/&quot;</span> <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}/usr/local/lib/system/&quot;</span>
+		<span class="enscript-keyword">else</span>
+		    mkdir -p <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}/usr/lib&quot;</span>
+		    rsync -aq <span class="enscript-string">&quot;${SDKPROPERTY}/usr/lib/libSystem&quot;</span>* <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}/usr/lib/&quot;</span>
+		    rsync -aq <span class="enscript-string">&quot;${SDKPROPERTY}/usr/lib/libc++&quot;</span>* <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}/usr/lib/&quot;</span>
+		    rsync -aq <span class="enscript-string">&quot;${SDKPROPERTY}/usr/lib/libstdc++&quot;</span>* <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}/usr/lib/&quot;</span>
+		    mkdir -p <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}/usr/lib/system&quot;</span>
+		    rsync -aq --exclude=\*_debug.dylib --exclude=\*_profile.dylib <span class="enscript-string">&quot;${SDKPROPERTY}/usr/lib/system/&quot;</span> <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}/usr/lib/system/&quot;</span>
+		<span class="enscript-keyword">fi</span>
+		<span class="enscript-keyword">if</span> [ -f <span class="enscript-string">&quot;${SDKPROPERTY}/usr/local/libexec/availability.pl&quot;</span> ]; <span class="enscript-keyword">then</span>
+		    mkdir -p <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}/usr/local/libexec&quot;</span>
+		    rsync -aq <span class="enscript-string">&quot;${SDKPROPERTY}/usr/local/libexec/availability.pl&quot;</span> <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}/usr/local/libexec/&quot;</span>
+		<span class="enscript-keyword">fi</span>
+		CreateFile <span class="enscript-string">&quot;${SDKPROPERTY}&quot;</span> <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}/.realsdkpath&quot;</span>
+		CreateFile <span class="enscript-string">&quot;${SDKTYPE}&quot;</span> <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}/.sdktype&quot;</span>
+		CreateFile <span class="enscript-string">&quot;BuildTools/${SDKNAME}&quot;</span> <span class="enscript-string">&quot;${OBJROOT}/BuildTools/.${SDKTYPE}sdk&quot;</span>
+		<span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${SDKNAME}&quot;</span>
+		<span class="enscript-keyword">exit</span> 0
+		;;
+	    -show-sdk-platform-path)
+		PLATFORMNAME=$(basename <span class="enscript-string">&quot;${SDKPROPERTY}&quot;</span>)
+		mkdir -p <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${PLATFORMNAME}&quot;</span>
+		<span class="enscript-keyword">if</span> [ -f <span class="enscript-string">&quot;${SDKPROPERTY}/usr/local/standalone/firmware/device_map.db&quot;</span> ]; <span class="enscript-keyword">then</span>
+		    mkdir -p <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${PLATFORMNAME}/usr/local/standalone/firmware&quot;</span>
+		    rsync -aq <span class="enscript-string">&quot;${SDKPROPERTY}/usr/local/standalone/firmware/device_map.db&quot;</span> \
+			<span class="enscript-string">&quot;${OBJROOT}/BuildTools/${PLATFORMNAME}/usr/local/standalone/firmware/&quot;</span>
+		<span class="enscript-keyword">fi</span>
+		CreateFile <span class="enscript-string">&quot;BuildTools/${PLATFORMNAME}&quot;</span> <span class="enscript-string">&quot;${OBJROOT}/BuildTools/.targetplatform&quot;</span>
+		<span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;${OBJROOT}/BuildTools/${PLATFORMNAME}&quot;</span>
+		<span class="enscript-keyword">exit</span> 0
+		;;
+	    -show-sdk-version)
+		CreateFile <span class="enscript-string">&quot;${SDKPROPERTY}&quot;</span> <span class="enscript-string">&quot;${OBJROOT}/BuildTools/.targetsdkversion&quot;</span>
+		<span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;${SDKPROPERTY}&quot;</span>
+		<span class="enscript-keyword">exit</span> 0
+		;;
+	<span class="enscript-keyword">esac</span>
+
+    elif [ -n <span class="enscript-string">&quot;$FINDTOOL&quot;</span> ]; <span class="enscript-keyword">then</span>
+
+	<span class="enscript-comment"># We assume SDK Queries have been performed first and subsequent
+</span>	<span class="enscript-comment"># SDKROOTs used to find tools are all using cached SDKs in
+</span>	<span class="enscript-comment"># the build directory, in which case metadata is present
+</span>
+	<span class="enscript-keyword">if</span> [ ! -f <span class="enscript-string">&quot;$SDKROOT/.realsdkpath&quot;</span> ]; <span class="enscript-keyword">then</span>
+	    <span class="enscript-keyword">exit</span> 1
+	<span class="enscript-keyword">fi</span>
+	REALSDKROOT=`cat <span class="enscript-string">&quot;$SDKROOT/.realsdkpath&quot;</span>`
+
+	<span class="enscript-keyword">if</span> [ ! -f <span class="enscript-string">&quot;$SDKROOT/.sdktype&quot;</span> ]; <span class="enscript-keyword">then</span>
+	    <span class="enscript-keyword">exit</span> 1
+	<span class="enscript-keyword">fi</span>
+	SDKTYPE=`cat <span class="enscript-string">&quot;$SDKROOT/.sdktype&quot;</span>`
+
+	TOOLPATH=`/usr/bin/xcrun $VERBOSE -sdk <span class="enscript-string">&quot;$REALSDKROOT&quot;</span> -find <span class="enscript-string">&quot;$FINDTOOL&quot;</span>`
+	<span class="enscript-keyword">if</span> [ $? -ne 0 ]; <span class="enscript-keyword">then</span>
+	    <span class="enscript-keyword">exit</span> $?
+	<span class="enscript-keyword">fi</span>
+
+	<span class="enscript-comment"># Keep the parent directory when caching tools, along with Host vs. Target
+</span>	TOOLNAME=$(basename <span class="enscript-string">&quot;${TOOLPATH}&quot;</span>)
+	TOOLDIR=$(basename $(dirname <span class="enscript-string">&quot;${TOOLPATH}&quot;</span>))
+	<span class="enscript-keyword">if</span> [ <span class="enscript-string">&quot;$SDKTYPE&quot;</span> = <span class="enscript-string">&quot;host&quot;</span> ]; <span class="enscript-keyword">then</span>
+	    NEWTOOLPATH=<span class="enscript-string">&quot;${OBJROOT}/BuildTools/Host/${TOOLDIR}/${TOOLNAME}&quot;</span>
+	    mkdir -p <span class="enscript-string">&quot;${OBJROOT}/BuildTools/Host&quot;</span>
+	    CreateFile <span class="enscript-string">&quot;BuildTools/Host/${TOOLDIR}/${TOOLNAME}&quot;</span> <span class="enscript-string">&quot;${OBJROOT}/BuildTools/Host/.${TOOLNAME}&quot;</span>
+	<span class="enscript-keyword">else</span>
+	    NEWTOOLPATH=<span class="enscript-string">&quot;${OBJROOT}/BuildTools/Target/${TOOLDIR}/${TOOLNAME}&quot;</span>
+	    mkdir -p <span class="enscript-string">&quot;${OBJROOT}/BuildTools/Target&quot;</span>
+	    CreateFile <span class="enscript-string">&quot;BuildTools/Target/${TOOLDIR}/${TOOLNAME}&quot;</span> <span class="enscript-string">&quot;${OBJROOT}/BuildTools/Target/.${TOOLNAME}&quot;</span>
+	<span class="enscript-keyword">fi</span>
+	mkdir -p $(dirname <span class="enscript-string">&quot;${NEWTOOLPATH}&quot;</span>)
+	rsync -aq <span class="enscript-string">&quot;${TOOLPATH}&quot;</span> <span class="enscript-string">&quot;${NEWTOOLPATH}&quot;</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-string">&quot;${TOOLNAME}&quot;</span> <span class="enscript-keyword">in</span>
+	    clang)
+		mkdir -p $(dirname $(dirname <span class="enscript-string">&quot;${NEWTOOLPATH}&quot;</span>))/lib/clang
+		rsync -aq $(dirname <span class="enscript-string">&quot;${TOOLPATH}&quot;</span>)/ld $(dirname <span class="enscript-string">&quot;${NEWTOOLPATH}&quot;</span>)/ld
+		rsync -aq $(dirname $(dirname <span class="enscript-string">&quot;${TOOLPATH}&quot;</span>))/lib/clang/ $(dirname $(dirname <span class="enscript-string">&quot;${NEWTOOLPATH}&quot;</span>))/lib/clang/
+		rsync -aq $(dirname $(dirname <span class="enscript-string">&quot;${TOOLPATH}&quot;</span>))/lib/libLTO.dylib $(dirname $(dirname <span class="enscript-string">&quot;${NEWTOOLPATH}&quot;</span>))/lib/libLTO.dylib
+		;;
+	    bison)
+		mkdir -p $(dirname $(dirname <span class="enscript-string">&quot;${NEWTOOLPATH}&quot;</span>))/share/bison
+		rsync -aq $(dirname $(dirname <span class="enscript-string">&quot;${TOOLPATH}&quot;</span>))/share/bison/ $(dirname $(dirname <span class="enscript-string">&quot;${NEWTOOLPATH}&quot;</span>))/share/bison/
+		;;
+	<span class="enscript-keyword">esac</span>
+
+	<span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;${NEWTOOLPATH}&quot;</span>
+	<span class="enscript-keyword">exit</span> 0
+    <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;Unrecognized option&quot;</span> 1&gt;&amp;2
+	<span class="enscript-keyword">exit</span> 1
+    <span class="enscript-keyword">fi</span>
+<span class="enscript-keyword">fi</span>
+
+<span class="enscript-comment"># When using cached SDK information, first try to do
+</span><span class="enscript-comment"># an initial classification, and then read properties from
+</span><span class="enscript-comment"># cached locations
+</span>SDKTYPE=<span class="enscript-string">&quot;&quot;</span>
+<span class="enscript-keyword">case</span> <span class="enscript-string">&quot;$SDKROOT&quot;</span> <span class="enscript-keyword">in</span>
+    macosx)
+	SDKTYPE=<span class="enscript-string">&quot;host&quot;</span>
+	;;
+    iphonehost*)
+	SDKTYPE=<span class="enscript-string">&quot;iphonehost&quot;</span>
+	;;
+    *)
+	<span class="enscript-keyword">if</span> [ -f <span class="enscript-string">&quot;$SDKROOT/.sdktype&quot;</span> ]; <span class="enscript-keyword">then</span>
+	    SDKTYPE=`cat <span class="enscript-string">&quot;$SDKROOT/.sdktype&quot;</span>`
+	<span class="enscript-keyword">else</span>
+	    SDKTYPE=<span class="enscript-string">&quot;target&quot;</span>
+	<span class="enscript-keyword">fi</span>
+	;;
+<span class="enscript-keyword">esac</span>
+
+<span class="enscript-keyword">if</span> [ -n <span class="enscript-string">&quot;$FINDTOOL&quot;</span> ]; <span class="enscript-keyword">then</span>
+    TOOLNAME=$(basename <span class="enscript-string">&quot;${FINDTOOL}&quot;</span>)
+    <span class="enscript-keyword">if</span> [ <span class="enscript-string">&quot;${SDKTYPE}&quot;</span> = <span class="enscript-string">&quot;host&quot;</span> ]; <span class="enscript-keyword">then</span>
+	RELPATH=`cat ${OBJROOT}/BuildTools/Host/.${TOOLNAME}`
+    <span class="enscript-keyword">else</span>
+	RELPATH=`cat ${OBJROOT}/BuildTools/Target/.${TOOLNAME}`
+    <span class="enscript-keyword">fi</span>
+    <span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;${OBJROOT}/${RELPATH}&quot;</span>
+<span class="enscript-keyword">else</span>	
+    <span class="enscript-keyword">case</span> $SDKQUERY <span class="enscript-keyword">in</span>
+	-show-sdk-path)
+	    RELPATH=`cat ${OBJROOT}/BuildTools/.${SDKTYPE}sdk`
+	    <span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;${OBJROOT}/${RELPATH}&quot;</span>
+	    ;;
+	-show-sdk-platform-path)
+	    RELPATH=`cat ${OBJROOT}/BuildTools/.targetplatform`
+	    <span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;${OBJROOT}/${RELPATH}&quot;</span>
+	    ;;
+	-show-sdk-version)
+	    <span class="enscript-keyword">echo</span> `cat ${OBJROOT}/BuildTools/.targetsdkversion`
+	    ;;
+    <span class="enscript-keyword">esac</span>
+<span class="enscript-keyword">fi</span>
+</pre>
+<hr />
+</body></html>

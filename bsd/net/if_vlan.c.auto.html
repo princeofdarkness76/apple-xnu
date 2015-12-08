@@ -1,0 +1,2233 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>if_vlan.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">if_vlan.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2003-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright 1998 Massachusetts Institute of Technology
+ *
+ * Permission to use, copy, modify, and distribute this software and
+ * its documentation for any purpose and without fee is hereby
+ * granted, provided that both the above copyright notice and this
+ * permission notice appear in all copies, that both the above
+ * copyright notice and this permission notice appear in all
+ * supporting documentation, and that the name of M.I.T. not be used
+ * in advertising or publicity pertaining to distribution of the
+ * software without specific, written prior permission.  M.I.T. makes
+ * no representations about the suitability of this software for any
+ * purpose.  It is provided &quot;as is&quot; without express or implied
+ * warranty.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY M.I.T. ``AS IS''.  M.I.T. DISCLAIMS
+ * ALL EXPRESS OR IMPLIED WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. IN NO EVENT
+ * SHALL M.I.T. BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+ * USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/net/if_vlan.c,v 1.54 2003/10/31 18:32:08 brooks Exp $
+ */</span>
+
+<span class="enscript-comment">/*
+ * if_vlan.c - pseudo-device driver for IEEE 802.1Q virtual LANs.
+ * Might be extended some day to also handle IEEE 802.1p priority
+ * tagging.  This is sort of sneaky in the implementation, since
+ * we need to pretend to be enough of an Ethernet implementation
+ * to make arp work.  The way we do this is by telling everyone
+ * that we are an Ethernet, and then catch the packets that
+ * ether_output() left on our output queue when it calls
+ * if_start(), rewrite them for use by the real outgoing interface,
+ * and ask it to send them.
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sockio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kern_event.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/bpf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/ethernet.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_arp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_dl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_ether.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_vlan_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/dlil.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_interface.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_protocol.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">INET</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/if_ether.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_media.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/multicast_list.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/ether_if_module.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VLANNAME</span>	<span class="enscript-string">&quot;vlan&quot;</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">int</span> (bpf_callback_func)(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">struct</span> mbuf *);
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">int</span> (if_set_bpf_tap_func)(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">int</span> mode, bpf_callback_func * func);
+
+<span class="enscript-comment">/**
+ ** vlan locks
+ **/</span>
+<span class="enscript-type">static</span> __inline__ lck_grp_t *
+<span class="enscript-function-name">my_lck_grp_alloc_init</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> * grp_name)
+{
+    lck_grp_t *		grp;
+    lck_grp_attr_t *	grp_attrs;
+    
+    grp_attrs = lck_grp_attr_alloc_init();
+    grp = lck_grp_alloc_init(grp_name, grp_attrs);
+    lck_grp_attr_free(grp_attrs);
+    <span class="enscript-keyword">return</span> (grp);
+}
+
+<span class="enscript-type">static</span> __inline__ lck_mtx_t *
+<span class="enscript-function-name">my_lck_mtx_alloc_init</span>(lck_grp_t * lck_grp)
+{
+    lck_attr_t * 	lck_attrs;
+    lck_mtx_t *		lck_mtx;
+
+    lck_attrs = lck_attr_alloc_init();
+    lck_mtx = lck_mtx_alloc_init(lck_grp, lck_attrs);
+    lck_attr_free(lck_attrs);
+    <span class="enscript-keyword">return</span> (lck_mtx);
+}
+
+<span class="enscript-type">static</span> lck_mtx_t * 	vlan_lck_mtx;
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_lock_init</span>(<span class="enscript-type">void</span>)
+{
+    lck_grp_t *		vlan_lck_grp;
+
+    vlan_lck_grp = my_lck_grp_alloc_init(<span class="enscript-string">&quot;if_vlan&quot;</span>);
+    vlan_lck_mtx = my_lck_mtx_alloc_init(vlan_lck_grp);
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_assert_lock_held</span>(<span class="enscript-type">void</span>)
+{
+    lck_mtx_assert(vlan_lck_mtx, LCK_MTX_ASSERT_OWNED);
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_assert_lock_not_held</span>(<span class="enscript-type">void</span>)
+{
+    lck_mtx_assert(vlan_lck_mtx, LCK_MTX_ASSERT_NOTOWNED);
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_lock</span>(<span class="enscript-type">void</span>)
+{
+    lck_mtx_lock(vlan_lck_mtx);
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_unlock</span>(<span class="enscript-type">void</span>)
+{
+    lck_mtx_unlock(vlan_lck_mtx);
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/**
+ ** vlan structures, types
+ **/</span>
+<span class="enscript-type">struct</span> vlan_parent;
+<span class="enscript-function-name">LIST_HEAD</span>(vlan_parent_list, vlan_parent);
+<span class="enscript-type">struct</span> ifvlan;
+<span class="enscript-function-name">LIST_HEAD</span>(ifvlan_list, ifvlan);
+
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">LIST_ENTRY</span>(vlan_parent) 
+vlan_parent_entry;
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">LIST_ENTRY</span>(ifvlan) 
+ifvlan_entry;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VLP_SIGNATURE</span>		0xfaceface
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> vlan_parent {
+    vlan_parent_entry		vlp_parent_list;<span class="enscript-comment">/* list of parents */</span>
+    <span class="enscript-type">struct</span> ifnet *		vlp_ifp;	<span class="enscript-comment">/* interface */</span>
+    <span class="enscript-type">struct</span> ifvlan_list		vlp_vlan_list;	<span class="enscript-comment">/* list of VLAN's */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VLPF_SUPPORTS_VLAN_MTU</span>		0x00000001
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VLPF_CHANGE_IN_PROGRESS</span>		0x00000002
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VLPF_DETACHING</span>			0x00000004
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VLPF_LINK_EVENT_REQUIRED</span>	0x00000008
+    u_int32_t			vlp_flags;
+    u_int32_t			vlp_event_code;
+    <span class="enscript-type">struct</span> ifdevmtu		vlp_devmtu;
+    int32_t			vlp_retain_count;
+    u_int32_t			vlp_signature;	<span class="enscript-comment">/* VLP_SIGNATURE */</span>
+} vlan_parent, * vlan_parent_ref;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IFV_SIGNATURE</span>		0xbeefbeef
+<span class="enscript-type">struct</span> ifvlan {
+    ifvlan_entry 		ifv_vlan_list;
+    <span class="enscript-type">char</span>			ifv_name[IFNAMSIZ]; <span class="enscript-comment">/* our unique id */</span>
+    <span class="enscript-type">struct</span> ifnet *		ifv_ifp;	<span class="enscript-comment">/* our interface */</span>
+    vlan_parent_ref		ifv_vlp;	<span class="enscript-comment">/* parent information */</span>
+    <span class="enscript-type">struct</span>	ifv_linkmib {
+	u_int16_t ifvm_encaplen;<span class="enscript-comment">/* encapsulation length */</span>
+	u_int16_t ifvm_mtufudge;<span class="enscript-comment">/* MTU fudged by this much */</span>
+	u_int16_t ifvm_proto;	<span class="enscript-comment">/* encapsulation ethertype */</span>
+	u_int16_t ifvm_tag; 	<span class="enscript-comment">/* tag to apply on packets leaving if */</span>
+    }	ifv_mib;
+    <span class="enscript-type">struct</span> multicast_list 	ifv_multicast;
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">IFVF_PROMISC</span>		0x1		<span class="enscript-comment">/* promiscuous mode enabled */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IFVF_DETACHING</span>		0x2		<span class="enscript-comment">/* interface is detaching */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IFVF_READY</span>		0x4		<span class="enscript-comment">/* interface is ready */</span>
+    u_int32_t			ifv_flags;
+    bpf_packet_func		ifv_bpf_input;
+    bpf_packet_func		ifv_bpf_output;
+    int32_t			ifv_retain_count;
+    u_int32_t			ifv_signature;	<span class="enscript-comment">/* IFV_SIGNATURE */</span>
+};
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> ifvlan * ifvlan_ref;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> vlan_globals_s {
+    <span class="enscript-type">struct</span> vlan_parent_list	parent_list;
+    <span class="enscript-type">int</span>				verbose;
+} * vlan_globals_ref;
+    
+<span class="enscript-type">static</span> vlan_globals_ref	g_vlan;
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ifv_tag</span>		ifv_mib.ifvm_tag
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ifv_encaplen</span>	ifv_mib.ifvm_encaplen
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ifv_mtufudge</span>	ifv_mib.ifvm_mtufudge
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_retain</span>(vlan_parent_ref vlp);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_release</span>(vlan_parent_ref vlp);
+
+<span class="enscript-comment">/**
+ ** vlan_parent_ref vlp_flags in-lines
+ **/</span>
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_parent_flags_supports_vlan_mtu</span>(vlan_parent_ref vlp)
+{
+    <span class="enscript-keyword">return</span> ((vlp-&gt;vlp_flags &amp; VLPF_SUPPORTS_VLAN_MTU) != 0);
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_flags_set_supports_vlan_mtu</span>(vlan_parent_ref vlp)
+{
+    vlp-&gt;vlp_flags |= VLPF_SUPPORTS_VLAN_MTU;
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_parent_flags_change_in_progress</span>(vlan_parent_ref vlp)
+{
+    <span class="enscript-keyword">return</span> ((vlp-&gt;vlp_flags &amp; VLPF_CHANGE_IN_PROGRESS) != 0);
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_flags_set_change_in_progress</span>(vlan_parent_ref vlp)
+{
+    vlp-&gt;vlp_flags |= VLPF_CHANGE_IN_PROGRESS;
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_flags_clear_change_in_progress</span>(vlan_parent_ref vlp)
+{
+    vlp-&gt;vlp_flags &amp;= ~VLPF_CHANGE_IN_PROGRESS;
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_parent_flags_detaching</span>(<span class="enscript-type">struct</span> vlan_parent * vlp)
+{
+    <span class="enscript-keyword">return</span> ((vlp-&gt;vlp_flags &amp; VLPF_DETACHING) != 0);
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_flags_set_detaching</span>(<span class="enscript-type">struct</span> vlan_parent * vlp)
+{
+    vlp-&gt;vlp_flags |= VLPF_DETACHING;
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_parent_flags_link_event_required</span>(vlan_parent_ref vlp)
+{
+    <span class="enscript-keyword">return</span> ((vlp-&gt;vlp_flags &amp; VLPF_LINK_EVENT_REQUIRED) != 0);
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_flags_set_link_event_required</span>(vlan_parent_ref vlp)
+{
+    vlp-&gt;vlp_flags |= VLPF_LINK_EVENT_REQUIRED;
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_flags_clear_link_event_required</span>(vlan_parent_ref vlp)
+{
+    vlp-&gt;vlp_flags &amp;= ~VLPF_LINK_EVENT_REQUIRED;
+    <span class="enscript-keyword">return</span>;
+}
+
+
+<span class="enscript-comment">/**
+ ** ifvlan_flags in-lines routines
+ **/</span>
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ifvlan_flags_promisc</span>(ifvlan_ref ifv)
+{
+    <span class="enscript-keyword">return</span> ((ifv-&gt;ifv_flags &amp; IFVF_PROMISC) != 0);
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">ifvlan_flags_set_promisc</span>(ifvlan_ref ifv)
+{
+    ifv-&gt;ifv_flags |= IFVF_PROMISC;
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">ifvlan_flags_clear_promisc</span>(ifvlan_ref ifv)
+{
+    ifv-&gt;ifv_flags &amp;= ~IFVF_PROMISC;
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ifvlan_flags_ready</span>(ifvlan_ref ifv)
+{
+    <span class="enscript-keyword">return</span> ((ifv-&gt;ifv_flags &amp; IFVF_READY) != 0);
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">ifvlan_flags_set_ready</span>(ifvlan_ref ifv)
+{
+    ifv-&gt;ifv_flags |= IFVF_READY;
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ifvlan_flags_detaching</span>(ifvlan_ref ifv)
+{
+    <span class="enscript-keyword">return</span> ((ifv-&gt;ifv_flags &amp; IFVF_DETACHING) != 0);
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">ifvlan_flags_set_detaching</span>(ifvlan_ref ifv)
+{
+    ifv-&gt;ifv_flags |= IFVF_DETACHING;
+    <span class="enscript-keyword">return</span>;
+}
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-function-name">SYSCTL_DECL</span>(_net_link);
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_link, IFT_L2VLAN, vlan, CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;IEEE 802.1Q VLAN&quot;</span>);
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_link_vlan, PF_LINK, link, CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;for consistency&quot;</span>);
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">M_VLAN</span> 		M_DEVBUF
+
+<span class="enscript-type">static</span>	<span class="enscript-type">int</span> vlan_clone_create(<span class="enscript-type">struct</span> if_clone *, u_int32_t, <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span>	<span class="enscript-type">int</span> vlan_clone_destroy(<span class="enscript-type">struct</span> ifnet *);
+<span class="enscript-type">static</span>	<span class="enscript-type">int</span> vlan_input(ifnet_t ifp, protocol_family_t protocol,
+					   mbuf_t m, <span class="enscript-type">char</span> *frame_header);
+<span class="enscript-type">static</span>	<span class="enscript-type">int</span> vlan_output(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> mbuf *m);
+<span class="enscript-type">static</span>	<span class="enscript-type">int</span> vlan_ioctl(ifnet_t ifp, u_long cmd, <span class="enscript-type">void</span> * addr);
+<span class="enscript-type">static</span>  <span class="enscript-type">int</span> <span class="enscript-function-name">vlan_set_bpf_tap</span>(ifnet_t ifp, bpf_tap_mode mode,
+			     bpf_packet_func func);
+<span class="enscript-type">static</span> 	<span class="enscript-type">int</span> vlan_attach_protocol(<span class="enscript-type">struct</span> ifnet *ifp);
+<span class="enscript-type">static</span>	<span class="enscript-type">int</span> vlan_detach_protocol(<span class="enscript-type">struct</span> ifnet *ifp);
+<span class="enscript-type">static</span>	<span class="enscript-type">int</span> vlan_setmulti(<span class="enscript-type">struct</span> ifnet *ifp);
+<span class="enscript-type">static</span>	<span class="enscript-type">int</span> vlan_unconfig(ifvlan_ref ifv, <span class="enscript-type">int</span> need_to_wait);
+<span class="enscript-type">static</span> 	<span class="enscript-type">int</span> vlan_config(<span class="enscript-type">struct</span> ifnet * ifp, <span class="enscript-type">struct</span> ifnet * p, <span class="enscript-type">int</span> tag);
+<span class="enscript-type">static</span>	<span class="enscript-type">void</span> vlan_if_free(<span class="enscript-type">struct</span> ifnet * ifp);
+<span class="enscript-type">static</span> 	<span class="enscript-type">int</span> vlan_remove(ifvlan_ref ifv, <span class="enscript-type">int</span> need_to_wait);
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> if_clone vlan_cloner = IF_CLONE_INITIALIZER(VLANNAME,
+							  vlan_clone_create, 
+							  vlan_clone_destroy, 
+							  0, 
+							  IF_MAXUNIT);
+<span class="enscript-type">static</span>	<span class="enscript-type">void</span> interface_link_event(<span class="enscript-type">struct</span> ifnet * ifp, u_int32_t event_code);
+<span class="enscript-type">static</span>	<span class="enscript-type">void</span> vlan_parent_link_event(<span class="enscript-type">struct</span> ifnet * p,
+				    u_int32_t event_code);
+
+<span class="enscript-type">static</span> 	<span class="enscript-type">int</span> ifvlan_new_mtu(ifvlan_ref ifv, <span class="enscript-type">int</span> mtu);
+
+<span class="enscript-comment">/**
+ ** ifvlan_ref routines
+ **/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ifvlan_retain</span>(ifvlan_ref ifv)
+{
+    <span class="enscript-keyword">if</span> (ifv-&gt;ifv_signature != IFV_SIGNATURE) {
+	panic(<span class="enscript-string">&quot;ifvlan_retain: bad signature\n&quot;</span>);
+    }
+    <span class="enscript-keyword">if</span> (ifv-&gt;ifv_retain_count == 0) {
+	panic(<span class="enscript-string">&quot;ifvlan_retain: retain count is 0\n&quot;</span>);
+    }
+    OSIncrementAtomic(&amp;ifv-&gt;ifv_retain_count);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ifvlan_release</span>(ifvlan_ref ifv)
+{
+    u_int32_t		old_retain_count;
+
+    <span class="enscript-keyword">if</span> (ifv-&gt;ifv_signature != IFV_SIGNATURE) {
+	panic(<span class="enscript-string">&quot;ifvlan_release: bad signature\n&quot;</span>);
+    }
+    old_retain_count = OSDecrementAtomic(&amp;ifv-&gt;ifv_retain_count);
+    <span class="enscript-keyword">switch</span> (old_retain_count) {
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+	panic(<span class="enscript-string">&quot;ifvlan_release: retain count is 0\n&quot;</span>);
+	<span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">1</span>:
+	<span class="enscript-keyword">if</span> (g_vlan-&gt;verbose) {
+	    printf(<span class="enscript-string">&quot;ifvlan_release(%s)\n&quot;</span>, ifv-&gt;ifv_name);
+	}
+	ifv-&gt;ifv_signature = 0;
+	FREE(ifv, M_VLAN);
+	<span class="enscript-keyword">break</span>;
+    <span class="enscript-reference">default</span>:
+	<span class="enscript-keyword">break</span>;
+    }
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> vlan_parent_ref
+<span class="enscript-function-name">ifvlan_get_vlan_parent_retained</span>(ifvlan_ref ifv)
+{
+    vlan_parent_ref	vlp = ifv-&gt;ifv_vlp;
+
+    <span class="enscript-keyword">if</span> (vlp == NULL || vlan_parent_flags_detaching(vlp)) {
+	<span class="enscript-keyword">return</span> (NULL);
+    }
+    vlan_parent_retain(vlp);
+    <span class="enscript-keyword">return</span> (vlp);
+}
+
+<span class="enscript-comment">/**
+ ** ifnet_* routines
+ **/</span>
+
+<span class="enscript-type">static</span> ifvlan_ref
+<span class="enscript-function-name">ifnet_get_ifvlan</span>(<span class="enscript-type">struct</span> ifnet * ifp)
+{
+    ifvlan_ref		ifv;
+
+    ifv = (ifvlan_ref)ifnet_softc(ifp);
+    <span class="enscript-keyword">return</span> (ifv);
+}
+
+<span class="enscript-type">static</span> ifvlan_ref
+<span class="enscript-function-name">ifnet_get_ifvlan_retained</span>(<span class="enscript-type">struct</span> ifnet * ifp)
+{
+    ifvlan_ref		ifv;
+
+    ifv = ifnet_get_ifvlan(ifp);
+    <span class="enscript-keyword">if</span> (ifv == NULL) {
+	<span class="enscript-keyword">return</span> (NULL);
+    }
+    <span class="enscript-keyword">if</span> (ifvlan_flags_detaching(ifv)) {
+	<span class="enscript-keyword">return</span> (NULL);
+    }
+    ifvlan_retain(ifv);
+    <span class="enscript-keyword">return</span> (ifv);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ifnet_ifvlan_vlan_parent_ok</span>(<span class="enscript-type">struct</span> ifnet * ifp, ifvlan_ref ifv,
+			    vlan_parent_ref vlp)
+{
+    ifvlan_ref		check_ifv;
+
+    check_ifv = ifnet_get_ifvlan(ifp);
+    <span class="enscript-keyword">if</span> (check_ifv != ifv || ifvlan_flags_detaching(ifv)) {
+	<span class="enscript-comment">/* ifvlan_ref no longer valid */</span>
+	<span class="enscript-keyword">return</span> (FALSE);
+    }
+    <span class="enscript-keyword">if</span> (ifv-&gt;ifv_vlp != vlp) {
+	<span class="enscript-comment">/* vlan_parent no longer valid */</span>
+	<span class="enscript-keyword">return</span> (FALSE);
+    }
+    <span class="enscript-keyword">if</span> (vlan_parent_flags_detaching(vlp)) {
+	<span class="enscript-comment">/* parent is detaching */</span>
+	<span class="enscript-keyword">return</span> (FALSE);
+    }
+    <span class="enscript-keyword">return</span> (TRUE);
+}
+
+<span class="enscript-comment">/**
+ ** vlan, etc. routines
+ **/</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_globals_init</span>(<span class="enscript-type">void</span>)
+{
+    vlan_globals_ref	v;
+
+    vlan_assert_lock_not_held();
+
+    <span class="enscript-keyword">if</span> (g_vlan != NULL) {
+	<span class="enscript-keyword">return</span> (0);
+    }
+    v = _MALLOC(<span class="enscript-keyword">sizeof</span>(*v), M_VLAN, M_WAITOK);
+    <span class="enscript-keyword">if</span> (v != NULL) {
+	LIST_INIT(&amp;v-&gt;parent_list);
+	v-&gt;verbose = 0;
+    }
+    vlan_lock();
+    <span class="enscript-keyword">if</span> (g_vlan != NULL) {
+	vlan_unlock();
+	<span class="enscript-keyword">if</span> (v != NULL) {
+	    _FREE(v, M_VLAN);
+	}
+	<span class="enscript-keyword">return</span> (0);
+    }
+    g_vlan = v;
+    vlan_unlock();
+    <span class="enscript-keyword">if</span> (v == NULL) {
+	<span class="enscript-keyword">return</span> (ENOMEM);
+    }
+    <span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">siocgifdevmtu</span>(<span class="enscript-type">struct</span> ifnet * ifp, <span class="enscript-type">struct</span> ifdevmtu * ifdm_p)
+{
+    <span class="enscript-type">struct</span> ifreq	ifr;
+    <span class="enscript-type">int</span> 		error;
+
+    bzero(&amp;ifr, <span class="enscript-keyword">sizeof</span>(ifr));
+    error = ifnet_ioctl(ifp, 0,SIOCGIFDEVMTU, &amp;ifr);
+    <span class="enscript-keyword">if</span> (error == 0) {
+	*ifdm_p = ifr.ifr_devmtu;
+    }
+    <span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">siocsifaltmtu</span>(<span class="enscript-type">struct</span> ifnet * ifp, <span class="enscript-type">int</span> mtu)
+{
+    <span class="enscript-type">struct</span> ifreq	ifr;
+
+    bzero(&amp;ifr, <span class="enscript-keyword">sizeof</span>(ifr));
+    ifr.ifr_mtu = mtu;
+    <span class="enscript-keyword">return</span> (ifnet_ioctl(ifp, 0, SIOCSIFALTMTU, &amp;ifr));
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span> 
+<span class="enscript-function-name">vlan_bpf_output</span>(<span class="enscript-type">struct</span> ifnet * ifp, <span class="enscript-type">struct</span> mbuf * m, 
+		bpf_packet_func func)
+{
+    <span class="enscript-keyword">if</span> (func != NULL) {
+	(*func)(ifp, m);
+    }
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span> 
+<span class="enscript-function-name">vlan_bpf_input</span>(<span class="enscript-type">struct</span> ifnet * ifp, <span class="enscript-type">struct</span> mbuf * m, 
+	       bpf_packet_func func, <span class="enscript-type">char</span> * frame_header,
+	       <span class="enscript-type">int</span> frame_header_len, <span class="enscript-type">int</span> encap_len)
+{
+    <span class="enscript-keyword">if</span> (func != NULL) {
+	<span class="enscript-keyword">if</span> (encap_len &gt; 0) {
+	    <span class="enscript-comment">/* present the right header to bpf */</span>
+	    bcopy(frame_header, frame_header + encap_len, frame_header_len);
+	}
+	m-&gt;m_data -= frame_header_len;
+	m-&gt;m_len += frame_header_len;
+	(*func)(ifp, m);
+	m-&gt;m_data += frame_header_len;
+	m-&gt;m_len -= frame_header_len;
+	<span class="enscript-keyword">if</span> (encap_len &gt; 0) {
+	    <span class="enscript-comment">/* restore the header */</span>
+	    bcopy(frame_header + encap_len, frame_header, frame_header_len);
+	}
+    }
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/**
+ ** vlan_parent synchronization routines
+ **/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_retain</span>(vlan_parent_ref vlp)
+{
+    <span class="enscript-keyword">if</span> (vlp-&gt;vlp_signature != VLP_SIGNATURE) {
+	panic(<span class="enscript-string">&quot;vlan_parent_retain: signature is bad\n&quot;</span>);
+    }
+    <span class="enscript-keyword">if</span> (vlp-&gt;vlp_retain_count == 0) {
+	panic(<span class="enscript-string">&quot;vlan_parent_retain: retain count is 0\n&quot;</span>);
+    }
+    OSIncrementAtomic(&amp;vlp-&gt;vlp_retain_count);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_release</span>(vlan_parent_ref vlp)
+{
+    u_int32_t		old_retain_count;
+
+    <span class="enscript-keyword">if</span> (vlp-&gt;vlp_signature != VLP_SIGNATURE) {
+	panic(<span class="enscript-string">&quot;vlan_parent_release: signature is bad\n&quot;</span>);
+    }
+    old_retain_count = OSDecrementAtomic(&amp;vlp-&gt;vlp_retain_count);
+    <span class="enscript-keyword">switch</span> (old_retain_count) {
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+	panic(<span class="enscript-string">&quot;vlan_parent_release: retain count is 0\n&quot;</span>);
+	<span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">1</span>:
+	<span class="enscript-keyword">if</span> (g_vlan-&gt;verbose) {
+	    <span class="enscript-type">struct</span> ifnet * ifp = vlp-&gt;vlp_ifp;
+	    printf(<span class="enscript-string">&quot;vlan_parent_release(%s%d)\n&quot;</span>, ifnet_name(ifp),
+		   ifnet_unit(ifp));
+	}
+	vlp-&gt;vlp_signature = 0;
+	FREE(vlp, M_VLAN);
+	<span class="enscript-keyword">break</span>;
+    <span class="enscript-reference">default</span>:
+	<span class="enscript-keyword">break</span>;
+    }
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * Function: vlan_parent_wait
+ * Purpose:
+ *   Allows a single thread to gain exclusive access to the vlan_parent
+ *   data structure.  Some operations take a long time to complete, 
+ *   and some have side-effects that we can't predict.  Holding the
+ *   vlan_lock() across such operations is not possible.
+ *
+ * Notes:
+ *   Before calling, you must be holding the vlan_lock and have taken
+ *   a reference on the vlan_parent_ref.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_wait</span>(vlan_parent_ref vlp, <span class="enscript-type">const</span> <span class="enscript-type">char</span> * msg)
+{
+    <span class="enscript-type">int</span>		waited = 0;
+
+    <span class="enscript-comment">/* other add/remove/multicast-change in progress */</span>
+    <span class="enscript-keyword">while</span> (vlan_parent_flags_change_in_progress(vlp)) {
+	<span class="enscript-keyword">if</span> (g_vlan-&gt;verbose) {
+	    <span class="enscript-type">struct</span> ifnet * ifp = vlp-&gt;vlp_ifp;
+
+	    printf(<span class="enscript-string">&quot;%s%d: %s msleep\n&quot;</span>, ifnet_name(ifp), ifnet_unit(ifp), msg);
+	}
+	waited = 1;
+	(<span class="enscript-type">void</span>)msleep(vlp, vlan_lck_mtx, PZERO, msg, 0);
+    }
+    <span class="enscript-comment">/* prevent other vlan parent remove/add from taking place */</span>
+    vlan_parent_flags_set_change_in_progress(vlp);
+    <span class="enscript-keyword">if</span> (g_vlan-&gt;verbose &amp;&amp; waited) {
+	<span class="enscript-type">struct</span> ifnet * ifp = vlp-&gt;vlp_ifp;
+
+	printf(<span class="enscript-string">&quot;%s%d: %s woke up\n&quot;</span>, ifnet_name(ifp), ifnet_unit(ifp), msg);
+    }
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * Function: vlan_parent_signal
+ * Purpose:
+ *   Allows the thread that previously invoked vlan_parent_wait() to 
+ *   give up exclusive access to the vlan_parent data structure, and wake up
+ *   any other threads waiting to access
+ * Notes:
+ *   Before calling, you must be holding the vlan_lock and have taken
+ *   a reference on the vlan_parent_ref.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_signal</span>(vlan_parent_ref vlp, <span class="enscript-type">const</span> <span class="enscript-type">char</span> * msg)
+{
+    <span class="enscript-type">struct</span> ifnet * vlp_ifp = vlp-&gt;vlp_ifp;
+
+    <span class="enscript-keyword">if</span> (vlan_parent_flags_link_event_required(vlp)) {
+	vlan_parent_flags_clear_link_event_required(vlp);
+	<span class="enscript-keyword">if</span> (!vlan_parent_flags_detaching(vlp)) {
+	    u_int32_t		event_code = vlp-&gt;vlp_event_code;
+	    ifvlan_ref 		ifv;
+
+	    vlan_unlock();
+
+	    <span class="enscript-comment">/* we can safely walk the list unlocked */</span>
+	    LIST_FOREACH(ifv, &amp;vlp-&gt;vlp_vlan_list, ifv_vlan_list) {
+		<span class="enscript-type">struct</span> ifnet *	ifp = ifv-&gt;ifv_ifp;
+		
+		interface_link_event(ifp, event_code);
+	    }
+	    <span class="enscript-keyword">if</span> (g_vlan-&gt;verbose) {
+		printf(<span class="enscript-string">&quot;%s%d: propagated link event to vlans\n&quot;</span>,
+		       ifnet_name(vlp_ifp), ifnet_unit(vlp_ifp));
+	    }
+	    vlan_lock();
+	}
+    }
+    vlan_parent_flags_clear_change_in_progress(vlp);
+    wakeup((caddr_t)vlp);
+    <span class="enscript-keyword">if</span> (g_vlan-&gt;verbose) {
+	printf(<span class="enscript-string">&quot;%s%d: %s wakeup\n&quot;</span>,
+	       ifnet_name(vlp_ifp), ifnet_unit(vlp_ifp), msg);
+    }
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * Program our multicast filter. What we're actually doing is
+ * programming the multicast filter of the parent. This has the
+ * side effect of causing the parent interface to receive multicast
+ * traffic that it doesn't really want, which ends up being discarded
+ * later by the upper protocol layers. Unfortunately, there's no way
+ * to avoid this: there really is only one physical interface.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_setmulti</span>(<span class="enscript-type">struct</span> ifnet * ifp)
+{
+    <span class="enscript-type">int</span>			error = 0;
+    ifvlan_ref 		ifv;
+    <span class="enscript-type">struct</span> ifnet *	p;
+    vlan_parent_ref	vlp = NULL;
+
+    vlan_lock();
+    ifv = ifnet_get_ifvlan_retained(ifp);
+    <span class="enscript-keyword">if</span> (ifv == NULL) {
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">unlock_done</span>;
+    }
+    vlp = ifvlan_get_vlan_parent_retained(ifv);
+    <span class="enscript-keyword">if</span> (vlp == NULL) {
+	<span class="enscript-comment">/* no parent, no need to program the multicast filter */</span>
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">unlock_done</span>;
+    }
+    vlan_parent_wait(vlp, <span class="enscript-string">&quot;vlan_setmulti&quot;</span>);
+
+    <span class="enscript-comment">/* check again, things could have changed */</span>
+    <span class="enscript-keyword">if</span> (ifnet_ifvlan_vlan_parent_ok(ifp, ifv, vlp) == FALSE) {
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">signal_done</span>;
+    }
+    p = vlp-&gt;vlp_ifp;
+    vlan_unlock();
+
+    <span class="enscript-comment">/* update parent interface with our multicast addresses */</span>
+    error = multicast_list_program(&amp;ifv-&gt;ifv_multicast, ifp, p);
+
+    vlan_lock();
+
+ <span class="enscript-reference">signal_done</span>:
+    vlan_parent_signal(vlp, <span class="enscript-string">&quot;vlan_setmulti&quot;</span>);
+
+ <span class="enscript-reference">unlock_done</span>:
+    vlan_unlock();
+    <span class="enscript-keyword">if</span> (ifv != NULL) {
+	ifvlan_release(ifv);
+    }
+    <span class="enscript-keyword">if</span> (vlp != NULL) {
+	vlan_parent_release(vlp);
+    }
+    <span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/**
+ ** vlan_parent list manipulation/lookup routines
+ **/</span>
+<span class="enscript-type">static</span> vlan_parent_ref
+<span class="enscript-function-name">parent_list_lookup</span>(<span class="enscript-type">struct</span> ifnet * p)
+{
+    vlan_parent_ref	vlp;
+
+    LIST_FOREACH(vlp, &amp;g_vlan-&gt;parent_list, vlp_parent_list) {
+	<span class="enscript-keyword">if</span> (vlp-&gt;vlp_ifp == p) {
+	    <span class="enscript-keyword">return</span> (vlp);
+	}
+    }
+    <span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-type">static</span> ifvlan_ref
+<span class="enscript-function-name">vlan_parent_lookup_tag</span>(vlan_parent_ref vlp, <span class="enscript-type">int</span> tag)
+{
+    ifvlan_ref		ifv;
+
+    LIST_FOREACH(ifv, &amp;vlp-&gt;vlp_vlan_list, ifv_vlan_list) {
+	<span class="enscript-keyword">if</span> (tag == ifv-&gt;ifv_tag) {
+	    <span class="enscript-keyword">return</span> (ifv);
+	}
+    }
+    <span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-type">static</span> ifvlan_ref 
+<span class="enscript-function-name">vlan_lookup_parent_and_tag</span>(<span class="enscript-type">struct</span> ifnet * p, <span class="enscript-type">int</span> tag)
+{
+    vlan_parent_ref	vlp;
+
+    vlp = parent_list_lookup(p);
+    <span class="enscript-keyword">if</span> (vlp != NULL) {
+	<span class="enscript-keyword">return</span> (vlan_parent_lookup_tag(vlp, tag));
+    }
+    <span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_parent_find_max_mtu</span>(vlan_parent_ref vlp, ifvlan_ref exclude_ifv)
+{
+    <span class="enscript-type">int</span>			max_mtu = 0;
+    ifvlan_ref		ifv;
+
+    LIST_FOREACH(ifv, &amp;vlp-&gt;vlp_vlan_list, ifv_vlan_list) {
+	<span class="enscript-type">int</span>	req_mtu;
+
+	<span class="enscript-keyword">if</span> (exclude_ifv == ifv) {
+	    <span class="enscript-keyword">continue</span>;
+	}
+	req_mtu = ifnet_mtu(ifv-&gt;ifv_ifp) + ifv-&gt;ifv_mtufudge;
+	<span class="enscript-keyword">if</span> (req_mtu &gt; max_mtu) {
+	    max_mtu = req_mtu;
+	}
+    }
+    <span class="enscript-keyword">return</span> (max_mtu);
+}
+
+<span class="enscript-comment">/*
+ * Function: vlan_parent_create
+ * Purpose:
+ *   Create a vlan_parent structure to hold the VLAN's for the given
+ *   interface.  Add it to the list of VLAN parents.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_parent_create</span>(<span class="enscript-type">struct</span> ifnet * p, vlan_parent_ref * ret_vlp)
+{
+    <span class="enscript-type">int</span>			error;
+    vlan_parent_ref	vlp;
+
+    *ret_vlp = NULL;
+    vlp = _MALLOC(<span class="enscript-keyword">sizeof</span>(*vlp), M_VLAN, M_WAITOK | M_ZERO);
+    <span class="enscript-keyword">if</span> (vlp == NULL) {
+	<span class="enscript-keyword">return</span> (ENOMEM);
+    }
+    error = siocgifdevmtu(p, &amp;vlp-&gt;vlp_devmtu);
+    <span class="enscript-keyword">if</span> (error != 0) {
+	printf(<span class="enscript-string">&quot;vlan_parent_create (%s%d): siocgifdevmtu failed, %d\n&quot;</span>,
+	       ifnet_name(p), ifnet_unit(p), error);
+	FREE(vlp, M_VLAN);
+	<span class="enscript-keyword">return</span> (error);
+    }
+    LIST_INIT(&amp;vlp-&gt;vlp_vlan_list);
+    vlp-&gt;vlp_ifp = p;
+    vlp-&gt;vlp_retain_count = 1;
+    vlp-&gt;vlp_signature = VLP_SIGNATURE;
+    <span class="enscript-keyword">if</span> (ifnet_offload(p)
+	&amp; (IF_HWASSIST_VLAN_MTU | IF_HWASSIST_VLAN_TAGGING)) {
+	vlan_parent_flags_set_supports_vlan_mtu(vlp);
+    }
+    *ret_vlp = vlp;
+    <span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_remove_all_vlans</span>(<span class="enscript-type">struct</span> ifnet * p)
+{
+    ifvlan_ref 		ifv;
+    <span class="enscript-type">int</span>			need_vlp_release = 0;
+    ifvlan_ref		next;
+    vlan_parent_ref	vlp;
+
+    vlan_lock();
+    vlp = parent_list_lookup(p);
+    <span class="enscript-keyword">if</span> (vlp == NULL || vlan_parent_flags_detaching(vlp)) {
+	<span class="enscript-comment">/* no VLAN's */</span>
+	vlan_unlock();
+	<span class="enscript-keyword">return</span>;
+    }
+    vlan_parent_flags_set_detaching(vlp);
+    vlan_parent_retain(vlp);
+    vlan_parent_wait(vlp, <span class="enscript-string">&quot;vlan_parent_remove_all_vlans&quot;</span>);
+    need_vlp_release++;
+    vlp = parent_list_lookup(p);
+    <span class="enscript-comment">/* check again */</span>
+    <span class="enscript-keyword">if</span> (vlp == NULL) {
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">signal_done</span>;
+    }
+
+    <span class="enscript-keyword">for</span> (ifv = LIST_FIRST(&amp;vlp-&gt;vlp_vlan_list); ifv != NULL; ifv = next) {
+	<span class="enscript-type">struct</span> ifnet *	ifp = ifv-&gt;ifv_ifp;
+	<span class="enscript-type">int</span>		removed;
+
+	next = LIST_NEXT(ifv, ifv_vlan_list);
+	removed = vlan_remove(ifv, FALSE);
+	<span class="enscript-keyword">if</span> (removed) {
+	    vlan_unlock();
+	    ifnet_detach(ifp);
+	    vlan_lock();
+	}
+    }
+
+    <span class="enscript-comment">/* the vlan parent has no more VLAN's */</span>
+    ifnet_set_eflags(p, 0, IFEF_VLAN); <span class="enscript-comment">/* clear IFEF_VLAN */</span>
+
+    LIST_REMOVE(vlp, vlp_parent_list);
+    need_vlp_release++;	<span class="enscript-comment">/* one for being in the list */</span>
+    need_vlp_release++; <span class="enscript-comment">/* final reference */</span>
+
+ <span class="enscript-reference">signal_done</span>:
+    vlan_parent_signal(vlp, <span class="enscript-string">&quot;vlan_parent_remove_all_vlans&quot;</span>);
+    vlan_unlock();
+
+    <span class="enscript-keyword">while</span> (need_vlp_release--) {
+	vlan_parent_release(vlp);
+    }
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_parent_no_vlans</span>(vlan_parent_ref vlp)
+{
+    <span class="enscript-keyword">return</span> (LIST_EMPTY(&amp;vlp-&gt;vlp_vlan_list));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_add_vlan</span>(vlan_parent_ref vlp, ifvlan_ref ifv, <span class="enscript-type">int</span> tag)
+{
+    LIST_INSERT_HEAD(&amp;vlp-&gt;vlp_vlan_list, ifv, ifv_vlan_list);
+    ifv-&gt;ifv_vlp = vlp;
+    ifv-&gt;ifv_tag = tag;
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_remove_vlan</span>(__unused vlan_parent_ref vlp, ifvlan_ref ifv)
+{
+    ifv-&gt;ifv_vlp = NULL;
+    LIST_REMOVE(ifv, ifv_vlan_list);
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_clone_attach</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-type">int</span> error;
+
+    error = if_clone_attach(&amp;vlan_cloner);
+    <span class="enscript-keyword">if</span> (error != 0)
+        <span class="enscript-keyword">return</span> error;
+    vlan_lock_init();
+    <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_clone_create</span>(<span class="enscript-type">struct</span> if_clone *ifc, u_int32_t unit, __unused <span class="enscript-type">void</span> *params)
+{
+	<span class="enscript-type">int</span>							error;
+	ifvlan_ref					ifv;
+	ifnet_t						ifp;
+	<span class="enscript-type">struct</span> ifnet_init_eparams	vlan_init;
+	
+	error = vlan_globals_init();
+	<span class="enscript-keyword">if</span> (error != 0) {
+		<span class="enscript-keyword">return</span> (error);
+	}
+	ifv = _MALLOC(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ifvlan), M_VLAN, M_WAITOK | M_ZERO);
+	<span class="enscript-keyword">if</span> (ifv == NULL)
+		<span class="enscript-keyword">return</span> ENOBUFS;
+	ifv-&gt;ifv_retain_count = 1;
+	ifv-&gt;ifv_signature = IFV_SIGNATURE;
+	multicast_list_init(&amp;ifv-&gt;ifv_multicast);
+	
+	<span class="enscript-comment">/* use the interface name as the unique id for ifp recycle */</span>
+	<span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)
+	    snprintf(ifv-&gt;ifv_name, <span class="enscript-keyword">sizeof</span>(ifv-&gt;ifv_name), <span class="enscript-string">&quot;%s%d&quot;</span>,
+		     ifc-&gt;ifc_name, unit) &gt;= <span class="enscript-keyword">sizeof</span>(ifv-&gt;ifv_name)) {
+	    ifvlan_release(ifv);
+	    <span class="enscript-keyword">return</span> (EINVAL);
+	}
+	
+	bzero(&amp;vlan_init, <span class="enscript-keyword">sizeof</span>(vlan_init));
+	vlan_init.ver = IFNET_INIT_CURRENT_VERSION;
+	vlan_init.len = <span class="enscript-keyword">sizeof</span> (vlan_init);
+	vlan_init.flags = IFNET_INIT_LEGACY;
+	vlan_init.uniqueid = ifv-&gt;ifv_name;
+	vlan_init.uniqueid_len = strlen(ifv-&gt;ifv_name);
+	vlan_init.name = ifc-&gt;ifc_name;
+	vlan_init.unit = unit;
+	vlan_init.family = IFNET_FAMILY_VLAN;
+	vlan_init.type = IFT_L2VLAN;
+	vlan_init.output = vlan_output;
+	vlan_init.demux = ether_demux;
+	vlan_init.add_proto = ether_add_proto;
+	vlan_init.del_proto = ether_del_proto;
+	vlan_init.check_multi = ether_check_multi;
+	vlan_init.framer_extended = ether_frameout_extended;
+	vlan_init.softc = ifv;
+	vlan_init.ioctl = vlan_ioctl;
+	vlan_init.set_bpf_tap = vlan_set_bpf_tap;
+	vlan_init.detach = vlan_if_free;
+	vlan_init.broadcast_addr = etherbroadcastaddr;
+	vlan_init.broadcast_len = ETHER_ADDR_LEN;
+	error = ifnet_allocate_extended(&amp;vlan_init, &amp;ifp);
+	
+	<span class="enscript-keyword">if</span> (error) {
+	    ifvlan_release(ifv);
+	    <span class="enscript-keyword">return</span> (error);
+	}
+	
+	ifnet_set_offload(ifp, 0);
+	ifnet_set_addrlen(ifp, ETHER_ADDR_LEN); <span class="enscript-comment">/* XXX ethernet specific */</span>
+	ifnet_set_baudrate(ifp, 0);
+	ifnet_set_hdrlen(ifp, ETHER_VLAN_ENCAP_LEN);
+	
+	error = ifnet_attach(ifp, NULL);
+	<span class="enscript-keyword">if</span> (error) {
+	    ifnet_release(ifp);
+	    ifvlan_release(ifv);
+	    <span class="enscript-keyword">return</span> (error);
+	}
+	ifv-&gt;ifv_ifp = ifp;
+	
+	<span class="enscript-comment">/* attach as ethernet */</span>
+	bpfattach(ifp, DLT_EN10MB, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ether_header));
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_remove</span>(ifvlan_ref ifv, <span class="enscript-type">int</span> need_to_wait)
+{
+    vlan_assert_lock_held();
+    <span class="enscript-keyword">if</span> (ifvlan_flags_detaching(ifv)) {
+	<span class="enscript-keyword">return</span> (0);
+    }
+    ifvlan_flags_set_detaching(ifv);
+    vlan_unconfig(ifv, need_to_wait);
+    <span class="enscript-keyword">return</span> (1);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_clone_destroy</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+    ifvlan_ref ifv;
+
+    vlan_lock();
+    ifv = ifnet_get_ifvlan_retained(ifp);
+    <span class="enscript-keyword">if</span> (ifv == NULL) {
+	vlan_unlock();
+	<span class="enscript-keyword">return</span> 0;
+    }
+    <span class="enscript-keyword">if</span> (vlan_remove(ifv, TRUE) == 0) {
+	vlan_unlock();
+	ifvlan_release(ifv);
+	<span class="enscript-keyword">return</span> 0;
+    }
+    vlan_unlock();
+    ifvlan_release(ifv);
+    ifnet_detach(ifp);
+
+    <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 
+<span class="enscript-function-name">vlan_set_bpf_tap</span>(ifnet_t ifp, bpf_tap_mode mode, bpf_packet_func func)
+{
+    ifvlan_ref	ifv;
+
+    vlan_lock();
+    ifv = ifnet_get_ifvlan_retained(ifp);
+    <span class="enscript-keyword">if</span> (ifv == NULL) {
+	vlan_unlock();
+	<span class="enscript-keyword">return</span> (ENODEV);
+    }
+    <span class="enscript-keyword">switch</span> (mode) {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_TAP_DISABLE</span>:
+            ifv-&gt;ifv_bpf_input = ifv-&gt;ifv_bpf_output = NULL;
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_TAP_INPUT</span>:
+            ifv-&gt;ifv_bpf_input = func;
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_TAP_OUTPUT</span>:
+	    ifv-&gt;ifv_bpf_output = func;
+            <span class="enscript-keyword">break</span>;
+        
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_TAP_INPUT_OUTPUT</span>:
+            ifv-&gt;ifv_bpf_input = ifv-&gt;ifv_bpf_output = func;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-reference">default</span>:
+            <span class="enscript-keyword">break</span>;
+    }
+    vlan_unlock();
+    ifvlan_release(ifv);
+    <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_output</span>(<span class="enscript-type">struct</span> ifnet * ifp, <span class="enscript-type">struct</span> mbuf * m)
+{
+    bpf_packet_func 		bpf_func;
+    <span class="enscript-type">struct</span> ether_vlan_header *	evl;
+    <span class="enscript-type">int</span>				encaplen;
+    ifvlan_ref			ifv;
+    <span class="enscript-type">struct</span> ifnet *		p;
+    <span class="enscript-type">int</span> 			soft_vlan;
+    u_short			tag;
+    vlan_parent_ref		vlp = NULL;
+    <span class="enscript-type">int</span>				err;
+    <span class="enscript-type">struct</span> flowadv		adv = { FADV_SUCCESS };
+	
+    <span class="enscript-keyword">if</span> (m == 0) {
+	<span class="enscript-keyword">return</span> (0);
+    }
+    <span class="enscript-keyword">if</span> ((m-&gt;m_flags &amp; M_PKTHDR) == 0) {
+	m_freem_list(m);
+	<span class="enscript-keyword">return</span> (0);
+    }
+    vlan_lock();
+    ifv = ifnet_get_ifvlan_retained(ifp);
+    <span class="enscript-keyword">if</span> (ifv == NULL || ifvlan_flags_ready(ifv) == 0) {
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">unlock_done</span>;
+    }
+    vlp = ifvlan_get_vlan_parent_retained(ifv);
+    <span class="enscript-keyword">if</span> (vlp == NULL) {
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">unlock_done</span>;
+    }
+    p = vlp-&gt;vlp_ifp;
+    (<span class="enscript-type">void</span>)ifnet_stat_increment_out(ifp, 1, m-&gt;m_pkthdr.len, 0);
+    soft_vlan = (ifnet_offload(p) &amp; IF_HWASSIST_VLAN_TAGGING) == 0;
+    bpf_func = ifv-&gt;ifv_bpf_output;
+    tag = ifv-&gt;ifv_tag;
+    encaplen = ifv-&gt;ifv_encaplen;
+    vlan_unlock();
+
+    ifvlan_release(ifv);
+    vlan_parent_release(vlp);
+
+    vlan_bpf_output(ifp, m, bpf_func);
+	
+    <span class="enscript-comment">/* do not run parent's if_output() if the parent is not up */</span>
+    <span class="enscript-keyword">if</span> ((ifnet_flags(p) &amp; (IFF_UP | IFF_RUNNING)) != (IFF_UP | IFF_RUNNING)) {
+	m_freem(m);
+	atomic_add_64(&amp;ifp-&gt;if_collisions, 1);
+	<span class="enscript-keyword">return</span> (0);
+    }
+    <span class="enscript-comment">/*
+     * If underlying interface can do VLAN tag insertion itself,
+     * just pass the packet along. However, we need some way to
+     * tell the interface where the packet came from so that it
+     * knows how to find the VLAN tag to use.  We use a field in
+     * the mbuf header to store the VLAN tag, and a bit in the
+     * csum_flags field to mark the field as valid.
+     */</span>
+    <span class="enscript-keyword">if</span> (soft_vlan == 0) {
+	m-&gt;m_pkthdr.csum_flags |= CSUM_VLAN_TAG_VALID;
+	m-&gt;m_pkthdr.vlan_tag = tag;
+    } <span class="enscript-keyword">else</span> {
+	M_PREPEND(m, encaplen, M_DONTWAIT, 1);
+	<span class="enscript-keyword">if</span> (m == NULL) {
+	    printf(<span class="enscript-string">&quot;%s%d: unable to prepend VLAN header\n&quot;</span>, ifnet_name(ifp),
+		   ifnet_unit(ifp));
+	    atomic_add_64(&amp;ifp-&gt;if_oerrors, 1);
+	    <span class="enscript-keyword">return</span> (0);
+	}
+	<span class="enscript-comment">/* M_PREPEND takes care of m_len, m_pkthdr.len for us */</span>
+	<span class="enscript-keyword">if</span> (m-&gt;m_len &lt; (<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(*evl)) {
+	    m = m_pullup(m, <span class="enscript-keyword">sizeof</span>(*evl));
+	    <span class="enscript-keyword">if</span> (m == NULL) {
+		printf(<span class="enscript-string">&quot;%s%d: unable to pullup VLAN header\n&quot;</span>, ifnet_name(ifp),
+		       ifnet_unit(ifp));
+		atomic_add_64(&amp;ifp-&gt;if_oerrors, 1);
+		<span class="enscript-keyword">return</span> (0);
+	    }
+	}
+		
+	<span class="enscript-comment">/*
+	 * Transform the Ethernet header into an Ethernet header
+	 * with 802.1Q encapsulation.
+	 */</span>
+	bcopy(mtod(m, <span class="enscript-type">char</span> *) + encaplen,
+	      mtod(m, <span class="enscript-type">char</span> *), ETHER_HDR_LEN);
+	evl = mtod(m, <span class="enscript-type">struct</span> ether_vlan_header *);
+	evl-&gt;evl_proto = evl-&gt;evl_encap_proto;
+	evl-&gt;evl_encap_proto = htons(ETHERTYPE_VLAN);
+	evl-&gt;evl_tag = htons(tag);
+    }
+
+    err = dlil_output(p, PF_VLAN, m, NULL, NULL, 1, &amp;adv);
+
+    <span class="enscript-keyword">if</span> (err == 0) {
+	<span class="enscript-keyword">if</span> (adv.code == FADV_FLOW_CONTROLLED) {
+	    err = EQFULL;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (adv.code == FADV_SUSPENDED) {
+	    err = EQSUSPENDED;
+	}
+    }
+
+    <span class="enscript-keyword">return</span> (err);
+
+ <span class="enscript-reference">unlock_done</span>:
+    vlan_unlock();
+    <span class="enscript-keyword">if</span> (ifv != NULL) {
+	ifvlan_release(ifv);
+    }
+    <span class="enscript-keyword">if</span> (vlp != NULL) {
+	vlan_parent_release(vlp);
+    }
+    m_freem_list(m);
+    <span class="enscript-keyword">return</span> (0);
+
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_input</span>(ifnet_t p, __unused protocol_family_t protocol,
+					   mbuf_t m, <span class="enscript-type">char</span> *frame_header)
+{
+    bpf_packet_func 		bpf_func = NULL;
+    <span class="enscript-type">struct</span> ether_vlan_header *	evl;
+    <span class="enscript-type">struct</span> ifnet *		ifp = NULL;
+    <span class="enscript-type">int</span> 			soft_vlan = 0;
+    u_int 			tag = 0;
+
+    <span class="enscript-keyword">if</span> (m-&gt;m_pkthdr.csum_flags &amp; CSUM_VLAN_TAG_VALID) {
+	<span class="enscript-comment">/*
+	 * Packet is tagged, m contains a normal
+	 * Ethernet frame; the tag is stored out-of-band.
+	 */</span>
+	m-&gt;m_pkthdr.csum_flags &amp;= ~CSUM_VLAN_TAG_VALID;
+	tag = EVL_VLANOFTAG(m-&gt;m_pkthdr.vlan_tag);
+	m-&gt;m_pkthdr.vlan_tag = 0;
+    } <span class="enscript-keyword">else</span> {
+	soft_vlan = 1;
+	<span class="enscript-keyword">switch</span> (ifnet_type(p)) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_ETHER</span>:
+	    <span class="enscript-keyword">if</span> (m-&gt;m_len &lt; ETHER_VLAN_ENCAP_LEN) {
+		m_freem(m);
+		<span class="enscript-keyword">return</span> 0;
+	    }
+	    evl = (<span class="enscript-type">struct</span> ether_vlan_header *)(<span class="enscript-type">void</span> *)frame_header;
+	    <span class="enscript-keyword">if</span> (ntohs(evl-&gt;evl_proto) == ETHERTYPE_VLAN) {
+		<span class="enscript-comment">/* don't allow VLAN within VLAN */</span>
+		m_freem(m);
+		<span class="enscript-keyword">return</span> (0);
+	    }
+	    tag = EVL_VLANOFTAG(ntohs(evl-&gt;evl_tag));
+		
+	    <span class="enscript-comment">/*
+	     * Restore the original ethertype.  We'll remove
+	     * the encapsulation after we've found the vlan
+	     * interface corresponding to the tag.
+	     */</span>
+	    evl-&gt;evl_encap_proto = evl-&gt;evl_proto;
+	    <span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+	    printf(<span class="enscript-string">&quot;vlan_demux: unsupported if type %u&quot;</span>, 
+		   ifnet_type(p));
+	    m_freem(m);
+	    <span class="enscript-keyword">return</span> 0;
+	    <span class="enscript-keyword">break</span>;
+	}
+    }
+    <span class="enscript-keyword">if</span> (tag != 0) {
+	ifvlan_ref		ifv;
+
+	<span class="enscript-keyword">if</span> ((ifnet_eflags(p) &amp; IFEF_VLAN) == 0) {
+	    <span class="enscript-comment">/* don't bother looking through the VLAN list */</span>
+	    m_freem(m);
+	    <span class="enscript-keyword">return</span> 0;
+	}
+	vlan_lock();
+	ifv = vlan_lookup_parent_and_tag(p, tag);
+	<span class="enscript-keyword">if</span> (ifv != NULL) {
+	    ifp = ifv-&gt;ifv_ifp;
+	}
+	<span class="enscript-keyword">if</span> (ifv == NULL 
+	    || ifvlan_flags_ready(ifv) == 0
+	    || (ifnet_flags(ifp) &amp; IFF_UP) == 0) {
+	    vlan_unlock();
+	    m_freem(m);
+	    <span class="enscript-keyword">return</span> 0;
+	}
+	bpf_func = ifv-&gt;ifv_bpf_input;
+	vlan_unlock();
+    }
+    <span class="enscript-keyword">if</span> (soft_vlan) {
+	<span class="enscript-comment">/*
+	 * Packet had an in-line encapsulation header;
+	 * remove it.  The original header has already
+	 * been fixed up above.
+	 */</span>
+	m-&gt;m_len -= ETHER_VLAN_ENCAP_LEN;
+	m-&gt;m_data += ETHER_VLAN_ENCAP_LEN;
+	m-&gt;m_pkthdr.len -= ETHER_VLAN_ENCAP_LEN;
+	m-&gt;m_pkthdr.csum_flags = 0; <span class="enscript-comment">/* can't trust hardware checksum */</span>
+    }
+    <span class="enscript-keyword">if</span> (tag != 0) {
+	m-&gt;m_pkthdr.rcvif = ifp;
+	m-&gt;m_pkthdr.pkt_hdr = frame_header;
+	(<span class="enscript-type">void</span>)ifnet_stat_increment_in(ifp, 1, 
+				      m-&gt;m_pkthdr.len + ETHER_HDR_LEN, 0);
+	vlan_bpf_input(ifp, m, bpf_func, frame_header, ETHER_HDR_LEN, 
+		       soft_vlan ? ETHER_VLAN_ENCAP_LEN : 0);
+	<span class="enscript-comment">/* We found a vlan interface, inject on that interface. */</span>
+	dlil_input_packet_list(ifp, m);
+    } <span class="enscript-keyword">else</span> {
+	m-&gt;m_pkthdr.pkt_hdr = frame_header;
+	<span class="enscript-comment">/* Send priority-tagged packet up through the parent */</span>
+	dlil_input_packet_list(p, m);
+    }
+    <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_config</span>(<span class="enscript-type">struct</span> ifnet * ifp, <span class="enscript-type">struct</span> ifnet * p, <span class="enscript-type">int</span> tag)
+{
+    <span class="enscript-type">int</span>			error;
+    <span class="enscript-type">int</span>			first_vlan = FALSE;
+    ifvlan_ref 		ifv = NULL;
+    <span class="enscript-type">int</span>			ifv_added = FALSE;
+    <span class="enscript-type">int</span>			need_vlp_release = 0;
+    vlan_parent_ref	new_vlp = NULL;
+    ifnet_offload_t	offload;
+    u_int16_t		parent_flags;
+    vlan_parent_ref	vlp = NULL;
+
+    <span class="enscript-comment">/* pre-allocate space for vlan_parent, in case we're first */</span>
+    error = vlan_parent_create(p, &amp;new_vlp);
+    <span class="enscript-keyword">if</span> (error != 0) {
+	<span class="enscript-keyword">return</span> (error);
+    }
+
+    vlan_lock();
+    ifv = ifnet_get_ifvlan_retained(ifp);
+    <span class="enscript-keyword">if</span> (ifv == NULL || ifv-&gt;ifv_vlp != NULL) {
+	vlan_unlock();
+	<span class="enscript-keyword">if</span> (ifv != NULL) {
+	    ifvlan_release(ifv);
+	}
+	vlan_parent_release(new_vlp);
+	<span class="enscript-keyword">return</span> (EBUSY);
+    }
+    vlp = parent_list_lookup(p);
+    <span class="enscript-keyword">if</span> (vlp != NULL) {
+	vlan_parent_retain(vlp);
+	need_vlp_release++;
+	<span class="enscript-keyword">if</span> (vlan_parent_lookup_tag(vlp, tag) != NULL) {
+	    <span class="enscript-comment">/* already a VLAN with that tag on this interface */</span>
+	    error = EADDRINUSE;
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">unlock_done</span>;
+	}
+    }
+    <span class="enscript-keyword">else</span> {
+	<span class="enscript-comment">/* one for being in the list */</span>
+	vlan_parent_retain(new_vlp);
+
+	<span class="enscript-comment">/* we're the first VLAN on this interface */</span>
+	LIST_INSERT_HEAD(&amp;g_vlan-&gt;parent_list, new_vlp, vlp_parent_list);
+	vlp = new_vlp;
+
+	vlan_parent_retain(vlp);
+	need_vlp_release++;
+    }
+
+    <span class="enscript-comment">/* need to wait to ensure no one else is trying to add/remove */</span>
+    vlan_parent_wait(vlp, <span class="enscript-string">&quot;vlan_config&quot;</span>);
+
+    <span class="enscript-keyword">if</span> (ifnet_get_ifvlan(ifp) != ifv) {
+	error = EINVAL;
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">signal_done</span>;
+    }
+
+    <span class="enscript-comment">/* check again because someone might have gotten in */</span>
+    <span class="enscript-keyword">if</span> (parent_list_lookup(p) != vlp) {
+	error = EBUSY;
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">signal_done</span>;
+    }
+
+    <span class="enscript-keyword">if</span> (vlan_parent_flags_detaching(vlp)
+	|| ifvlan_flags_detaching(ifv) || ifv-&gt;ifv_vlp != NULL) {
+	error = EBUSY;
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">signal_done</span>;
+    }
+
+    <span class="enscript-comment">/* check again because someone might have gotten the tag */</span>
+    <span class="enscript-keyword">if</span> (vlan_parent_lookup_tag(vlp, tag) != NULL) {
+	<span class="enscript-comment">/* already a VLAN with that tag on this interface */</span>
+	error = EADDRINUSE;
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">signal_done</span>;
+    }
+
+    <span class="enscript-keyword">if</span> (vlan_parent_no_vlans(vlp)) {
+	first_vlan = TRUE;
+    }
+    vlan_parent_add_vlan(vlp, ifv, tag);
+    ifvlan_retain(ifv);	<span class="enscript-comment">/* parent references ifv */</span>
+    ifv_added = TRUE;
+
+    <span class="enscript-comment">/* check whether bond interface is using parent interface */</span>
+    ifnet_lock_exclusive(p);
+    <span class="enscript-keyword">if</span> ((ifnet_eflags(p) &amp; IFEF_BOND) != 0) {
+	ifnet_lock_done(p);
+	<span class="enscript-comment">/* don't allow VLAN over interface that's already part of a bond */</span>
+	error = EBUSY;
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">signal_done</span>;
+    }
+    <span class="enscript-comment">/* prevent BOND interface from using it */</span>
+    <span class="enscript-comment">/* Can't use ifnet_set_eflags because that would take the lock */</span>
+    p-&gt;if_eflags |= IFEF_VLAN;
+    ifnet_lock_done(p);
+    vlan_unlock();
+
+    <span class="enscript-keyword">if</span> (first_vlan) {
+	<span class="enscript-comment">/* attach our VLAN &quot;protocol&quot; to the interface */</span>
+	error = vlan_attach_protocol(p);
+	<span class="enscript-keyword">if</span> (error) {
+	    vlan_lock();
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">signal_done</span>;
+	}
+    }
+
+    <span class="enscript-comment">/* configure parent to receive our multicast addresses */</span>
+    error = multicast_list_program(&amp;ifv-&gt;ifv_multicast, ifp, p);
+    <span class="enscript-keyword">if</span> (error != 0) {
+	<span class="enscript-keyword">if</span> (first_vlan) {
+	    (<span class="enscript-type">void</span>)vlan_detach_protocol(p);
+	}
+	vlan_lock();
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">signal_done</span>;
+    }
+
+    <span class="enscript-comment">/* set our ethernet address to that of the parent */</span>
+    ifnet_set_lladdr_and_type(ifp, IF_LLADDR(p), ETHER_ADDR_LEN, IFT_ETHER);
+
+    <span class="enscript-comment">/* no failures past this point */</span>
+    vlan_lock();
+
+    ifv-&gt;ifv_encaplen = ETHER_VLAN_ENCAP_LEN;
+    ifv-&gt;ifv_flags = 0;
+    <span class="enscript-keyword">if</span> (vlan_parent_flags_supports_vlan_mtu(vlp)) {
+	ifv-&gt;ifv_mtufudge = 0;
+    } <span class="enscript-keyword">else</span> {
+	<span class="enscript-comment">/*
+	 * Fudge the MTU by the encapsulation size.  This
+	 * makes us incompatible with strictly compliant
+	 * 802.1Q implementations, but allows us to use
+	 * the feature with other NetBSD implementations,
+	 * which might still be useful.
+	 */</span>
+	ifv-&gt;ifv_mtufudge = ifv-&gt;ifv_encaplen;
+    }
+    ifnet_set_mtu(ifp, ETHERMTU - ifv-&gt;ifv_mtufudge);
+
+    <span class="enscript-comment">/*
+     * Copy only a selected subset of flags from the parent.
+     * Other flags are none of our business.
+     */</span>
+    parent_flags = ifnet_flags(p) 
+	&amp; (IFF_BROADCAST | IFF_MULTICAST | IFF_SIMPLEX);
+    ifnet_set_flags(ifp, parent_flags,
+		    IFF_BROADCAST | IFF_MULTICAST | IFF_SIMPLEX);
+
+    <span class="enscript-comment">/* use hwassist bits from parent interface, but exclude VLAN bits */</span>
+    offload = ifnet_offload(p) &amp; ~(IFNET_VLAN_TAGGING | IFNET_VLAN_MTU);
+    ifnet_set_offload(ifp, offload);
+
+    ifnet_set_flags(ifp, IFF_RUNNING, IFF_RUNNING);
+    ifvlan_flags_set_ready(ifv);
+    vlan_parent_signal(vlp, <span class="enscript-string">&quot;vlan_config&quot;</span>);
+    vlan_unlock();
+    <span class="enscript-keyword">if</span> (new_vlp != vlp) {
+	<span class="enscript-comment">/* throw it away, it wasn't needed */</span>
+	vlan_parent_release(new_vlp);
+    }
+    <span class="enscript-keyword">if</span> (ifv != NULL) {
+	ifvlan_release(ifv);
+    }
+    <span class="enscript-keyword">if</span> (first_vlan) {
+	<span class="enscript-comment">/* mark the parent interface up */</span>
+	ifnet_set_flags(p, IFF_UP, IFF_UP);
+	(<span class="enscript-type">void</span>)ifnet_ioctl(p, 0, SIOCSIFFLAGS, (caddr_t)NULL);
+    }
+    <span class="enscript-keyword">return</span> 0;
+
+ <span class="enscript-reference">signal_done</span>:
+    vlan_assert_lock_held();
+
+    <span class="enscript-keyword">if</span> (ifv_added) {
+	vlan_parent_remove_vlan(vlp, ifv);
+	<span class="enscript-keyword">if</span> (!vlan_parent_flags_detaching(vlp) &amp;&amp; vlan_parent_no_vlans(vlp)) {
+	    <span class="enscript-comment">/* the vlan parent has no more VLAN's */</span>
+	    ifnet_set_eflags(p, 0, IFEF_VLAN);
+	    LIST_REMOVE(vlp, vlp_parent_list);
+	    <span class="enscript-comment">/* release outside of the lock below */</span>
+	    need_vlp_release++;
+
+	    <span class="enscript-comment">/* one for being in the list */</span>
+	    need_vlp_release++;
+	}
+    }
+    vlan_parent_signal(vlp, <span class="enscript-string">&quot;vlan_config&quot;</span>);
+
+ <span class="enscript-reference">unlock_done</span>:
+    vlan_unlock();
+
+    <span class="enscript-keyword">while</span> (need_vlp_release--) {
+	vlan_parent_release(vlp);
+    }
+    <span class="enscript-keyword">if</span> (new_vlp != vlp) {
+	vlan_parent_release(new_vlp);
+    }
+    <span class="enscript-keyword">if</span> (ifv != NULL) {
+	<span class="enscript-keyword">if</span> (ifv_added) {
+	    ifvlan_release(ifv);
+	}
+	ifvlan_release(ifv);
+    }
+    <span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_link_event</span>(<span class="enscript-type">struct</span> ifnet * ifp, <span class="enscript-type">struct</span> ifnet * p)
+{
+    <span class="enscript-type">struct</span> ifmediareq ifmr;
+
+    <span class="enscript-comment">/* generate a link event based on the state of the underlying interface */</span>
+    bzero(&amp;ifmr, <span class="enscript-keyword">sizeof</span>(ifmr));
+    snprintf(ifmr.ifm_name, <span class="enscript-keyword">sizeof</span>(ifmr.ifm_name),
+	     <span class="enscript-string">&quot;%s%d&quot;</span>, ifnet_name(p), ifnet_unit(p));
+    <span class="enscript-keyword">if</span> (ifnet_ioctl(p, 0, SIOCGIFMEDIA, &amp;ifmr) == 0
+	&amp;&amp; ifmr.ifm_count &gt; 0 &amp;&amp; ifmr.ifm_status &amp; IFM_AVALID) {
+	u_int32_t	event;
+	
+	event = (ifmr.ifm_status &amp; IFM_ACTIVE)
+	    ? KEV_DL_LINK_ON : KEV_DL_LINK_OFF;
+	interface_link_event(ifp, event);
+    }
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_unconfig</span>(ifvlan_ref ifv, <span class="enscript-type">int</span> need_to_wait)
+{
+    <span class="enscript-type">struct</span> ifnet *	ifp = ifv-&gt;ifv_ifp;
+    <span class="enscript-type">int</span>			last_vlan = FALSE;
+    <span class="enscript-type">int</span>			need_ifv_release = 0;
+    <span class="enscript-type">int</span>			need_vlp_release = 0;
+    <span class="enscript-type">struct</span> ifnet *	p;
+    vlan_parent_ref	vlp;
+
+    vlan_assert_lock_held();
+    vlp = ifv-&gt;ifv_vlp;
+    <span class="enscript-keyword">if</span> (vlp == NULL) {
+	<span class="enscript-keyword">return</span> (0);
+    }
+    <span class="enscript-keyword">if</span> (need_to_wait) {
+	need_vlp_release++;
+	vlan_parent_retain(vlp);
+	vlan_parent_wait(vlp, <span class="enscript-string">&quot;vlan_unconfig&quot;</span>);
+
+        <span class="enscript-comment">/* check again because another thread could be in vlan_unconfig */</span>
+	<span class="enscript-keyword">if</span> (ifv != ifnet_get_ifvlan(ifp)) {
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">signal_done</span>;
+	}
+	<span class="enscript-keyword">if</span> (ifv-&gt;ifv_vlp != vlp) {
+	    <span class="enscript-comment">/* vlan parent changed */</span>
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">signal_done</span>;
+	}
+    }
+
+    <span class="enscript-comment">/* ifv has a reference on vlp, need to remove it */</span>
+    need_vlp_release++;
+    p = vlp-&gt;vlp_ifp;
+
+    <span class="enscript-comment">/* remember whether we're the last VLAN on the parent */</span>
+    <span class="enscript-keyword">if</span> (LIST_NEXT(LIST_FIRST(&amp;vlp-&gt;vlp_vlan_list), ifv_vlan_list) == NULL) {
+	<span class="enscript-keyword">if</span> (g_vlan-&gt;verbose) {
+	    printf(<span class="enscript-string">&quot;vlan_unconfig: last vlan on %s%d\n&quot;</span>,
+		   ifnet_name(p), ifnet_unit(p));
+	}
+	last_vlan = TRUE;
+    }
+
+    <span class="enscript-comment">/* back-out any effect our mtu might have had on the parent */</span>
+    (<span class="enscript-type">void</span>)ifvlan_new_mtu(ifv, ETHERMTU - ifv-&gt;ifv_mtufudge);
+
+    vlan_unlock();
+
+    <span class="enscript-comment">/* un-join multicast on parent interface */</span>
+    (<span class="enscript-type">void</span>)multicast_list_remove(&amp;ifv-&gt;ifv_multicast);
+
+    <span class="enscript-comment">/* Clear our MAC address. */</span>
+    ifnet_set_lladdr_and_type(ifp, NULL, 0, IFT_L2VLAN);
+
+    <span class="enscript-comment">/* detach VLAN &quot;protocol&quot; */</span>
+    <span class="enscript-keyword">if</span> (last_vlan) {
+	(<span class="enscript-type">void</span>)vlan_detach_protocol(p);
+    }
+
+    vlan_lock();
+
+    <span class="enscript-comment">/* return to the state we were in before SIFVLAN */</span>
+    ifnet_set_mtu(ifp, 0);
+    ifnet_set_flags(ifp, 0, 
+		    IFF_BROADCAST | IFF_MULTICAST | IFF_SIMPLEX | IFF_RUNNING);
+    ifnet_set_offload(ifp, 0);
+    ifv-&gt;ifv_mtufudge = 0;
+
+    <span class="enscript-comment">/* Disconnect from parent. */</span>
+    vlan_parent_remove_vlan(vlp, ifv);
+    ifv-&gt;ifv_flags = 0;
+
+    <span class="enscript-comment">/* vlan_parent has reference to ifv, remove it */</span>
+    need_ifv_release++;
+
+    <span class="enscript-comment">/* from this point on, no more referencing ifv */</span>
+    <span class="enscript-keyword">if</span> (last_vlan &amp;&amp; !vlan_parent_flags_detaching(vlp)) {
+	<span class="enscript-comment">/* the vlan parent has no more VLAN's */</span>
+	ifnet_set_eflags(p, 0, IFEF_VLAN);
+	LIST_REMOVE(vlp, vlp_parent_list);
+
+	<span class="enscript-comment">/* one for being in the list */</span>
+	need_vlp_release++;
+
+	<span class="enscript-comment">/* release outside of the lock below */</span>
+	need_vlp_release++;
+    }
+
+ <span class="enscript-reference">signal_done</span>:
+    <span class="enscript-keyword">if</span> (need_to_wait) {
+	vlan_parent_signal(vlp, <span class="enscript-string">&quot;vlan_unconfig&quot;</span>);
+    }
+    vlan_unlock();
+    <span class="enscript-keyword">while</span> (need_ifv_release--) {
+	ifvlan_release(ifv);
+    }
+    <span class="enscript-keyword">while</span> (need_vlp_release--) {	<span class="enscript-comment">/* references to vlp */</span>
+	vlan_parent_release(vlp);
+    }
+    vlan_lock();
+    <span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_set_promisc</span>(<span class="enscript-type">struct</span> ifnet * ifp)
+{
+    <span class="enscript-type">int</span> 			error = 0;
+    ifvlan_ref			ifv;
+    vlan_parent_ref		vlp;
+
+    vlan_lock();
+    ifv = ifnet_get_ifvlan_retained(ifp);
+    <span class="enscript-keyword">if</span> (ifv == NULL) {
+	error = EBUSY;
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+    }
+
+    vlp = ifv-&gt;ifv_vlp;
+    <span class="enscript-keyword">if</span> (vlp == NULL) {
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+    }
+    <span class="enscript-keyword">if</span> ((ifnet_flags(ifp) &amp; IFF_PROMISC) != 0) {
+	<span class="enscript-keyword">if</span> (!ifvlan_flags_promisc(ifv)) {
+	    error = ifnet_set_promiscuous(vlp-&gt;vlp_ifp, 1);
+	    <span class="enscript-keyword">if</span> (error == 0) {
+		ifvlan_flags_set_promisc(ifv);
+	    }
+	}
+    } <span class="enscript-keyword">else</span> {
+	<span class="enscript-keyword">if</span> (ifvlan_flags_promisc(ifv)) {
+	    error = ifnet_set_promiscuous(vlp-&gt;vlp_ifp, 0);
+	    <span class="enscript-keyword">if</span> (error == 0) {
+		ifvlan_flags_clear_promisc(ifv);
+	    }
+	}
+    }
+ <span class="enscript-reference">done</span>:
+    vlan_unlock();
+    <span class="enscript-keyword">if</span> (ifv != NULL) {
+	ifvlan_release(ifv);
+    }
+    <span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ifvlan_new_mtu</span>(ifvlan_ref ifv, <span class="enscript-type">int</span> mtu)
+{
+    <span class="enscript-type">struct</span> ifdevmtu *	devmtu_p;
+    <span class="enscript-type">int</span>			error = 0;
+    <span class="enscript-type">struct</span> ifnet * 	ifp = ifv-&gt;ifv_ifp;
+    <span class="enscript-type">int</span>			max_mtu;
+    <span class="enscript-type">int</span>			new_mtu = 0;
+    <span class="enscript-type">int</span>			req_mtu;
+    vlan_parent_ref	vlp;
+
+    vlan_assert_lock_held();
+    vlp = ifv-&gt;ifv_vlp;
+    devmtu_p = &amp;vlp-&gt;vlp_devmtu;
+    req_mtu = mtu + ifv-&gt;ifv_mtufudge;
+    <span class="enscript-keyword">if</span> (req_mtu &gt; devmtu_p-&gt;ifdm_max || req_mtu &lt; devmtu_p-&gt;ifdm_min) {
+	<span class="enscript-keyword">return</span> (EINVAL);
+    }
+    max_mtu = vlan_parent_find_max_mtu(vlp, ifv);
+    <span class="enscript-keyword">if</span> (req_mtu &gt; max_mtu) {
+	new_mtu = req_mtu;
+    }
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (max_mtu &lt; devmtu_p-&gt;ifdm_current) {
+	new_mtu = max_mtu;
+    }
+    <span class="enscript-keyword">if</span> (new_mtu != 0) {
+	<span class="enscript-type">struct</span> ifnet * 	p = vlp-&gt;vlp_ifp;
+	vlan_unlock();
+	error = siocsifaltmtu(p, new_mtu);
+	vlan_lock();
+    }
+    <span class="enscript-keyword">if</span> (error == 0) {
+	<span class="enscript-keyword">if</span> (new_mtu != 0) {
+	    devmtu_p-&gt;ifdm_current = new_mtu;
+	}
+	ifnet_set_mtu(ifp, mtu);
+    }
+    <span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_set_mtu</span>(<span class="enscript-type">struct</span> ifnet * ifp, <span class="enscript-type">int</span> mtu)
+{
+    <span class="enscript-type">int</span>			error = 0;
+    ifvlan_ref		ifv;
+    vlan_parent_ref	vlp;
+
+    <span class="enscript-keyword">if</span> (mtu &lt; IF_MINMTU) {
+	<span class="enscript-keyword">return</span> (EINVAL);
+    }
+    vlan_lock();
+    ifv = ifnet_get_ifvlan_retained(ifp);
+    <span class="enscript-keyword">if</span> (ifv == NULL) {
+	vlan_unlock();
+	<span class="enscript-keyword">return</span> (EBUSY);
+    }
+    vlp = ifvlan_get_vlan_parent_retained(ifv);
+    <span class="enscript-keyword">if</span> (vlp == NULL) {
+	vlan_unlock();
+	ifvlan_release(ifv);
+	<span class="enscript-keyword">if</span> (mtu != 0) {
+	    <span class="enscript-keyword">return</span> (EINVAL);
+	}
+	<span class="enscript-keyword">return</span> (0);
+    }
+    vlan_parent_wait(vlp, <span class="enscript-string">&quot;vlan_set_mtu&quot;</span>);
+
+    <span class="enscript-comment">/* check again, something might have changed */</span>
+    <span class="enscript-keyword">if</span> (ifnet_get_ifvlan(ifp) != ifv
+	|| ifvlan_flags_detaching(ifv)) {
+	error = EBUSY;
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">signal_done</span>;
+    }
+    <span class="enscript-keyword">if</span> (ifv-&gt;ifv_vlp != vlp) {
+	<span class="enscript-comment">/* vlan parent changed */</span>
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">signal_done</span>;
+    }
+    <span class="enscript-keyword">if</span> (vlan_parent_flags_detaching(vlp)) {
+	<span class="enscript-keyword">if</span> (mtu != 0) {
+	    error = EINVAL;
+	}
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">signal_done</span>;
+    }
+    error = ifvlan_new_mtu(ifv, mtu);
+
+ <span class="enscript-reference">signal_done</span>:
+    vlan_parent_signal(vlp, <span class="enscript-string">&quot;vlan_set_mtu&quot;</span>);
+    vlan_unlock();
+    vlan_parent_release(vlp);
+    ifvlan_release(ifv);
+
+    <span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_ioctl</span>(ifnet_t ifp, u_long cmd, <span class="enscript-type">void</span> * data)
+{
+    <span class="enscript-type">struct</span> ifdevmtu *	devmtu_p;
+    <span class="enscript-type">int</span> 		error = 0;
+    <span class="enscript-type">struct</span> ifaddr *	ifa;
+    <span class="enscript-type">struct</span> ifmediareq	*ifmr;
+    <span class="enscript-type">struct</span> ifreq *	ifr;
+    ifvlan_ref		ifv;
+    <span class="enscript-type">struct</span> ifnet *	p;
+    u_short		tag;
+    user_addr_t		user_addr;
+    vlan_parent_ref	vlp;
+    <span class="enscript-type">struct</span> vlanreq 	vlr;
+
+    <span class="enscript-keyword">if</span> (ifnet_type(ifp) != IFT_L2VLAN) {
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+    }
+    ifr = (<span class="enscript-type">struct</span> ifreq *)data;
+    ifa = (<span class="enscript-type">struct</span> ifaddr *)data;
+
+    <span class="enscript-keyword">switch</span> (cmd) {
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFADDR</span>:
+    ifnet_set_flags(ifp, IFF_UP, IFF_UP);
+	<span class="enscript-keyword">break</span>;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFMEDIA32</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFMEDIA64</span>:
+	vlan_lock();
+	ifv = (ifvlan_ref)ifnet_softc(ifp);
+	<span class="enscript-keyword">if</span> (ifv == NULL || ifvlan_flags_detaching(ifv)) {
+	    vlan_unlock();
+	    <span class="enscript-keyword">return</span> (ifv == NULL ? EOPNOTSUPP : EBUSY);
+	}
+	p = (ifv-&gt;ifv_vlp == NULL) ? NULL : ifv-&gt;ifv_vlp-&gt;vlp_ifp;
+	vlan_unlock();
+	ifmr = (<span class="enscript-type">struct</span> ifmediareq *)data;
+	user_addr =  (cmd == SIOCGIFMEDIA64) ?
+	    ((<span class="enscript-type">struct</span> ifmediareq64 *)ifmr)-&gt;ifmu_ulist :
+	    CAST_USER_ADDR_T(((<span class="enscript-type">struct</span> ifmediareq32 *)ifmr)-&gt;ifmu_ulist);
+	<span class="enscript-keyword">if</span> (p != NULL) {
+	    <span class="enscript-type">struct</span> ifmediareq p_ifmr;
+
+	    bzero(&amp;p_ifmr, <span class="enscript-keyword">sizeof</span>(p_ifmr));
+	    error = ifnet_ioctl(p, 0, SIOCGIFMEDIA, &amp;p_ifmr);
+	    <span class="enscript-keyword">if</span> (error == 0) {
+		ifmr-&gt;ifm_active = p_ifmr.ifm_active;
+		ifmr-&gt;ifm_current = p_ifmr.ifm_current;
+		ifmr-&gt;ifm_mask = p_ifmr.ifm_mask;
+		ifmr-&gt;ifm_status = p_ifmr.ifm_status;
+		ifmr-&gt;ifm_count = p_ifmr.ifm_count;
+		<span class="enscript-comment">/* Limit the result to the parent's current config. */</span>
+		<span class="enscript-keyword">if</span> (ifmr-&gt;ifm_count &gt;= 1 &amp;&amp; user_addr != USER_ADDR_NULL) {
+		    ifmr-&gt;ifm_count = 1;
+		    error = copyout(&amp;ifmr-&gt;ifm_current, user_addr, 
+				    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+		}
+	    }
+	} <span class="enscript-keyword">else</span> {
+	    ifmr-&gt;ifm_active = ifmr-&gt;ifm_current = IFM_NONE;
+	    ifmr-&gt;ifm_mask = 0;
+	    ifmr-&gt;ifm_status = IFM_AVALID;
+	    ifmr-&gt;ifm_count = 1;
+	    <span class="enscript-keyword">if</span> (user_addr != USER_ADDR_NULL) {
+		error = copyout(&amp;ifmr-&gt;ifm_current, user_addr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+	    }
+	}
+	<span class="enscript-keyword">break</span>;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFMEDIA</span>:
+	error = EOPNOTSUPP;
+	<span class="enscript-keyword">break</span>;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFDEVMTU</span>:
+	vlan_lock();
+	ifv = (ifvlan_ref)ifnet_softc(ifp);
+	<span class="enscript-keyword">if</span> (ifv == NULL || ifvlan_flags_detaching(ifv)) {
+	    vlan_unlock();
+	    <span class="enscript-keyword">return</span> (ifv == NULL ? EOPNOTSUPP : EBUSY);
+	}
+	vlp = ifv-&gt;ifv_vlp;
+	<span class="enscript-keyword">if</span> (vlp != NULL) {
+	    <span class="enscript-type">int</span>		min_mtu = vlp-&gt;vlp_devmtu.ifdm_min - ifv-&gt;ifv_mtufudge;
+	    devmtu_p = &amp;ifr-&gt;ifr_devmtu;
+	    devmtu_p-&gt;ifdm_current = ifnet_mtu(ifp);
+	    devmtu_p-&gt;ifdm_min = max(min_mtu, IF_MINMTU);
+	    devmtu_p-&gt;ifdm_max = vlp-&gt;vlp_devmtu.ifdm_max - ifv-&gt;ifv_mtufudge;
+	}
+	<span class="enscript-keyword">else</span> {
+	    devmtu_p = &amp;ifr-&gt;ifr_devmtu;
+	    devmtu_p-&gt;ifdm_current = 0;
+	    devmtu_p-&gt;ifdm_min = 0;
+	    devmtu_p-&gt;ifdm_max = 0;
+	}
+	vlan_unlock();
+	<span class="enscript-keyword">break</span>;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFMTU</span>:
+	error = vlan_set_mtu(ifp, ifr-&gt;ifr_mtu);
+	<span class="enscript-keyword">break</span>;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFVLAN</span>:
+	user_addr = proc_is64bit(current_proc()) 
+	    ? ifr-&gt;ifr_data64 : CAST_USER_ADDR_T(ifr-&gt;ifr_data);
+	error = copyin(user_addr, &amp;vlr, <span class="enscript-keyword">sizeof</span>(vlr));
+	<span class="enscript-keyword">if</span> (error) {
+	    <span class="enscript-keyword">break</span>;
+	}
+	p = NULL;
+	<span class="enscript-keyword">if</span> (vlr.vlr_parent[0] != <span class="enscript-string">'\0'</span>) {
+	    <span class="enscript-keyword">if</span> (vlr.vlr_tag &amp; ~EVL_VLID_MASK) {
+		<span class="enscript-comment">/*
+		 * Don't let the caller set up a VLAN tag with
+		 * anything except VLID bits.
+		 */</span>
+		error = EINVAL;
+		<span class="enscript-keyword">break</span>;
+	    }
+	    p = ifunit(vlr.vlr_parent);
+	    <span class="enscript-keyword">if</span> (p == NULL) {
+		error = ENXIO;
+		<span class="enscript-keyword">break</span>;
+	    }
+	    <span class="enscript-comment">/* can't do VLAN over anything but ethernet or ethernet aggregate */</span>
+	    <span class="enscript-keyword">if</span> (ifnet_type(p) != IFT_ETHER 
+		&amp;&amp; ifnet_type(p) != IFT_IEEE8023ADLAG) {
+		error = EPROTONOSUPPORT;
+		<span class="enscript-keyword">break</span>;
+	    }
+	    error = vlan_config(ifp, p, vlr.vlr_tag);
+	    <span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">break</span>;
+	    }
+	    
+	    <span class="enscript-comment">/* Update promiscuous mode, if necessary. */</span>
+	    (<span class="enscript-type">void</span>)vlan_set_promisc(ifp);
+	    
+	    <span class="enscript-comment">/* generate a link event based on the state of the parent */</span>
+	    vlan_link_event(ifp, p);
+	} 
+	<span class="enscript-keyword">else</span> {
+	    <span class="enscript-type">int</span>		need_link_event = FALSE;
+
+	    vlan_lock();
+	    ifv = (ifvlan_ref)ifnet_softc(ifp);
+	    <span class="enscript-keyword">if</span> (ifv == NULL || ifvlan_flags_detaching(ifv)) {
+		vlan_unlock();
+		error = (ifv == NULL ? EOPNOTSUPP : EBUSY);
+		<span class="enscript-keyword">break</span>;
+	    }
+	    need_link_event = vlan_remove(ifv, TRUE);
+	    vlan_unlock();
+	    <span class="enscript-keyword">if</span> (need_link_event) {
+		interface_link_event(ifp, KEV_DL_LINK_OFF);
+	    }
+	}
+	<span class="enscript-keyword">break</span>;
+		
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFVLAN</span>:
+	bzero(&amp;vlr, <span class="enscript-keyword">sizeof</span> vlr);
+	vlan_lock();
+	ifv = (ifvlan_ref)ifnet_softc(ifp);
+	<span class="enscript-keyword">if</span> (ifv == NULL || ifvlan_flags_detaching(ifv)) {
+	    vlan_unlock();
+	    <span class="enscript-keyword">return</span> (ifv == NULL ? EOPNOTSUPP : EBUSY);
+	}
+	p = (ifv-&gt;ifv_vlp == NULL) ? NULL : ifv-&gt;ifv_vlp-&gt;vlp_ifp;
+	tag = ifv-&gt;ifv_tag;
+	vlan_unlock();
+	<span class="enscript-keyword">if</span> (p != NULL) {
+	    snprintf(vlr.vlr_parent, <span class="enscript-keyword">sizeof</span>(vlr.vlr_parent),
+		     <span class="enscript-string">&quot;%s%d&quot;</span>, ifnet_name(p), ifnet_unit(p));
+	    vlr.vlr_tag = tag;
+	}
+	user_addr = proc_is64bit(current_proc()) 
+	    ? ifr-&gt;ifr_data64 : CAST_USER_ADDR_T(ifr-&gt;ifr_data);
+	error = copyout(&amp;vlr, user_addr, <span class="enscript-keyword">sizeof</span>(vlr));
+	<span class="enscript-keyword">break</span>;
+		
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFFLAGS</span>:
+	<span class="enscript-comment">/*
+	 * For promiscuous mode, we enable promiscuous mode on
+	 * the parent if we need promiscuous on the VLAN interface.
+	 */</span>
+	error = vlan_set_promisc(ifp);
+	<span class="enscript-keyword">break</span>;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCADDMULTI</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCDELMULTI</span>:
+	error = vlan_setmulti(ifp);
+	<span class="enscript-keyword">break</span>;
+    <span class="enscript-reference">default</span>:
+	error = EOPNOTSUPP;
+    }
+    <span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 
+<span class="enscript-function-name">vlan_if_free</span>(<span class="enscript-type">struct</span> ifnet * ifp)
+{
+    ifvlan_ref	ifv;
+
+    <span class="enscript-keyword">if</span> (ifp == NULL) {
+	<span class="enscript-keyword">return</span>;
+    }
+    ifv = (ifvlan_ref)ifnet_softc(ifp);
+    <span class="enscript-keyword">if</span> (ifv == NULL) {
+	<span class="enscript-keyword">return</span>;
+    }
+    ifvlan_release(ifv);
+    ifnet_release(ifp);
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_event</span>(<span class="enscript-type">struct</span> ifnet	* p, __unused protocol_family_t protocol,
+		   <span class="enscript-type">const</span> <span class="enscript-type">struct</span> kev_msg * event)
+{
+    <span class="enscript-type">int</span>			event_code;
+
+    <span class="enscript-comment">/* Check if the interface we are attached to is being detached */</span>
+    <span class="enscript-keyword">if</span> (event-&gt;vendor_code != KEV_VENDOR_APPLE
+	|| event-&gt;kev_class != KEV_NETWORK_CLASS
+	|| event-&gt;kev_subclass != KEV_DL_SUBCLASS) {
+	<span class="enscript-keyword">return</span>;
+    }
+    event_code = event-&gt;event_code;
+    <span class="enscript-keyword">switch</span> (event_code) {
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">KEV_DL_LINK_OFF</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">KEV_DL_LINK_ON</span>:
+	vlan_parent_link_event(p, event_code);
+	<span class="enscript-keyword">break</span>;
+    <span class="enscript-reference">default</span>:
+	<span class="enscript-keyword">return</span>;
+    }
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">vlan_detached</span>(ifnet_t p, __unused protocol_family_t protocol)
+{
+    <span class="enscript-keyword">if</span> (ifnet_is_attached(p, 0) == 0) {
+	<span class="enscript-comment">/* if the parent isn't attached, remove all VLANs */</span>
+	vlan_parent_remove_all_vlans(p);
+    }
+    <span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">interface_link_event</span>(<span class="enscript-type">struct</span> ifnet * ifp, u_int32_t event_code)
+{
+    <span class="enscript-type">struct</span> {
+	<span class="enscript-type">struct</span> kern_event_msg	header;
+	u_int32_t			unit;
+	<span class="enscript-type">char</span>			if_name[IFNAMSIZ];
+    } event;
+
+    bzero(&amp;event, <span class="enscript-keyword">sizeof</span>(event));
+    event.header.total_size    = <span class="enscript-keyword">sizeof</span>(event);
+    event.header.vendor_code   = KEV_VENDOR_APPLE;
+    event.header.kev_class     = KEV_NETWORK_CLASS;
+    event.header.kev_subclass  = KEV_DL_SUBCLASS;
+    event.header.event_code    = event_code;
+    event.header.event_data[0] = ifnet_family(ifp);
+    event.unit                 = (u_int32_t) ifnet_unit(ifp);
+    strlcpy(event.if_name, ifnet_name(ifp), IFNAMSIZ);
+    ifnet_event(ifp, &amp;event.header);
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_parent_link_event</span>(<span class="enscript-type">struct</span> ifnet * p, u_int32_t event_code)
+{
+    vlan_parent_ref 	vlp;
+
+    vlan_lock();
+    <span class="enscript-keyword">if</span> ((ifnet_eflags(p) &amp; IFEF_VLAN) == 0) {
+	vlan_unlock();
+	<span class="enscript-comment">/* no VLAN's */</span>
+	<span class="enscript-keyword">return</span>;
+    }
+    vlp = parent_list_lookup(p);
+    <span class="enscript-keyword">if</span> (vlp == NULL) {
+	<span class="enscript-comment">/* no VLAN's */</span>
+	vlan_unlock();
+	<span class="enscript-keyword">return</span>;
+    }
+    vlan_parent_flags_set_link_event_required(vlp);
+    vlp-&gt;vlp_event_code = event_code;
+    <span class="enscript-keyword">if</span> (vlan_parent_flags_change_in_progress(vlp)) {
+	<span class="enscript-comment">/* don't block waiting to generate an event */</span>
+	vlan_unlock();
+	<span class="enscript-keyword">return</span>;
+    }
+    vlan_parent_retain(vlp);
+    vlan_parent_wait(vlp, <span class="enscript-string">&quot;vlan_parent_link_event&quot;</span>);
+    vlan_parent_signal(vlp, <span class="enscript-string">&quot;vlan_parent_link_event&quot;</span>);
+    vlan_unlock();
+    vlan_parent_release(vlp);
+    <span class="enscript-keyword">return</span>;
+
+}
+
+<span class="enscript-comment">/*
+ * Function: vlan_attach_protocol
+ * Purpose:
+ *   Attach a DLIL protocol to the interface, using the ETHERTYPE_VLAN
+ *   demux ether type.
+ *
+ *	 The ethernet demux actually special cases VLAN to support hardware.
+ *	 The demux here isn't used. The demux will return PF_VLAN for the
+ *	 appropriate packets and our vlan_input function will be called.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_attach_protocol</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+    <span class="enscript-type">int</span>								error;
+    <span class="enscript-type">struct</span> ifnet_attach_proto_param	reg;
+	
+    bzero(&amp;reg, <span class="enscript-keyword">sizeof</span>(reg));
+    reg.input            = vlan_input;
+    reg.event            = vlan_event;
+    reg.detached         = vlan_detached;
+    error = ifnet_attach_protocol(ifp, PF_VLAN, &amp;reg);
+    <span class="enscript-keyword">if</span> (error) {
+	printf(<span class="enscript-string">&quot;vlan_proto_attach(%s%d) ifnet_attach_protocol failed, %d\n&quot;</span>,
+	       ifnet_name(ifp), ifnet_unit(ifp), error);
+    }
+    <span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Function: vlan_detach_protocol
+ * Purpose:
+ *   Detach our DLIL protocol from an interface
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_detach_protocol</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+    <span class="enscript-type">int</span>         error;
+
+    error = ifnet_detach_protocol(ifp, PF_VLAN);
+    <span class="enscript-keyword">if</span> (error) {
+	printf(<span class="enscript-string">&quot;vlan_proto_detach(%s%d) ifnet_detach_protocol failed, %d\n&quot;</span>,
+	       ifnet_name(ifp), ifnet_unit(ifp), error);
+    }
+	
+    <span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * DLIL interface family functions
+ *   We use the ethernet plumb functions, since that's all we support.
+ *   If we wanted to handle multiple LAN types (tokenring, etc.), we'd
+ *   call the appropriate routines for that LAN type instead of hard-coding
+ *   ethernet.
+ */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">vlan_attach_inet</span>(<span class="enscript-type">struct</span> ifnet *ifp, protocol_family_t protocol_family)
+{
+    <span class="enscript-keyword">return</span> (ether_attach_inet(ifp, protocol_family));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_detach_inet</span>(<span class="enscript-type">struct</span> ifnet *ifp, protocol_family_t protocol_family)
+{
+    ether_detach_inet(ifp, protocol_family);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">vlan_attach_inet6</span>(<span class="enscript-type">struct</span> ifnet *ifp, protocol_family_t protocol_family)
+{
+    <span class="enscript-keyword">return</span> (ether_attach_inet6(ifp, protocol_family));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vlan_detach_inet6</span>(<span class="enscript-type">struct</span> ifnet *ifp, protocol_family_t protocol_family)
+{
+    ether_detach_inet6(ifp, protocol_family);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">vlan_family_init</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-type">int</span> error=0;
+
+    error = proto_register_plumber(PF_INET, IFNET_FAMILY_VLAN, 
+				   vlan_attach_inet, vlan_detach_inet);
+    <span class="enscript-keyword">if</span> (error != 0) {
+	printf(<span class="enscript-string">&quot;proto_register_plumber failed for AF_INET error=%d\n&quot;</span>,
+	       error);
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+    }
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+    error = proto_register_plumber(PF_INET6, IFNET_FAMILY_VLAN, 
+				   vlan_attach_inet6, vlan_detach_inet6);
+    <span class="enscript-keyword">if</span> (error != 0) {
+	printf(<span class="enscript-string">&quot;proto_register_plumber failed for AF_INET6 error=%d\n&quot;</span>,
+	       error);
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+    }
+#<span class="enscript-reference">endif</span>
+    error = vlan_clone_attach();
+    <span class="enscript-keyword">if</span> (error != 0) {
+        printf(<span class="enscript-string">&quot;proto_register_plumber failed vlan_clone_attach error=%d\n&quot;</span>,
+               error);
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+    }
+
+
+ <span class="enscript-reference">done</span>:
+    <span class="enscript-keyword">return</span> (error);
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,557 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mac_net.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mac_net.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*-
+ * Copyright (c) 1999-2002 Robert N. M. Watson
+ * Copyright (c) 2001 Ilmar S. Habibulin
+ * Copyright (c) 2001-2004 Networks Associates Technology, Inc.
+ * Copyright (c) 2006 SPARTA, Inc.
+ * All rights reserved.
+ *
+ * This software was developed by Robert Watson and Ilmar Habibulin for the
+ * TrustedBSD Project.
+ *
+ * This software was developed for the FreeBSD Project in part by Network
+ * Associates Laboratories, the Security Research Division of Network
+ * Associates, Inc. under DARPA/SPAWAR contract N66001-01-C-8035 (&quot;CBOSS&quot;),
+ * as part of the DARPA CHATS research program.
+ *
+ * This software was enhanced by SPARTA ISSO under SPAWAR contract
+ * N66001-04-C-6019 (&quot;SEFOS&quot;).
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/bpf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsd/bsm/audit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsd/security/audit/audit.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_internal.h&gt;</span>
+
+<span class="enscript-type">struct</span> label *
+<span class="enscript-function-name">mac_mbuf_to_label</span>(<span class="enscript-type">struct</span> mbuf *mbuf)
+{
+	<span class="enscript-type">struct</span> m_tag *tag;
+	<span class="enscript-type">struct</span> label *label;
+
+	<span class="enscript-keyword">if</span> (mbuf == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	<span class="enscript-keyword">if</span> ((mbuf-&gt;m_flags &amp; M_PKTHDR) == 0) {
+		printf(<span class="enscript-string">&quot;%s() got non-header MBUF!\n&quot;</span>, __func__);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	tag = m_tag_locate(mbuf, KERNEL_MODULE_TAG_ID, KERNEL_TAG_TYPE_MACLABEL,
+			   NULL);
+	<span class="enscript-keyword">if</span> (tag == NULL) {
+		printf(<span class="enscript-string">&quot;%s() m_tag_locate() returned NULL! (m-&gt;flags %04x)\n&quot;</span>,
+			__func__, mbuf-&gt;m_flags);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	label = (<span class="enscript-type">struct</span> label *)(tag+1);
+	<span class="enscript-keyword">return</span> (label);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> label *
+<span class="enscript-function-name">mac_bpfdesc_label_alloc</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_labelzone_alloc(M_WAITOK);
+	<span class="enscript-keyword">if</span> (label == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+	MAC_PERFORM(bpfdesc_label_init, label);
+	<span class="enscript-keyword">return</span> (label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_bpfdesc_label_init</span>(<span class="enscript-type">struct</span> bpf_d *bpf_d)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_bpfdesc_label_alloc();
+	mac_bpfdesc_label_set(bpf_d, label);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> label *
+<span class="enscript-function-name">mac_ifnet_label_alloc</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_labelzone_alloc(M_WAITOK);
+	<span class="enscript-keyword">if</span> (label == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+	MAC_PERFORM(ifnet_label_init, label);
+	<span class="enscript-keyword">return</span> (label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_ifnet_label_init</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+
+	ifp-&gt;if_label = mac_ifnet_label_alloc();
+}
+
+<span class="enscript-comment">/*
+ * On failure, caller should cleanup with m_tag_free().
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_mbuf_tag_init</span>(<span class="enscript-type">struct</span> m_tag *tag, <span class="enscript-type">int</span> flag)
+{
+	<span class="enscript-type">struct</span> label *label;
+	<span class="enscript-type">int</span> error;
+
+	label = (<span class="enscript-type">struct</span> label *) (tag + 1);
+	mac_label_init(label);
+
+	MAC_CHECK(mbuf_label_init, label, flag);
+	<span class="enscript-keyword">if</span> (error)
+		printf(<span class="enscript-string">&quot;%s(): mpo_mbuf_label_init() failed!\n&quot;</span>, __func__);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_bpfdesc_label_free</span>(<span class="enscript-type">struct</span> label *label)
+{
+
+	MAC_PERFORM(bpfdesc_label_destroy, label);
+	mac_labelzone_free(label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_bpfdesc_label_destroy</span>(<span class="enscript-type">struct</span> bpf_d *bpf_d)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_bpfdesc_label_get(bpf_d);
+	mac_bpfdesc_label_free(label);
+	mac_bpfdesc_label_set(bpf_d, NULL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_ifnet_label_free</span>(<span class="enscript-type">struct</span> label *label)
+{
+
+	MAC_PERFORM(ifnet_label_destroy, label);
+	mac_labelzone_free(label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_ifnet_label_destroy</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+
+	mac_ifnet_label_free(ifp-&gt;if_label);
+	ifp-&gt;if_label = NULL;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_ifnet_label_recycle</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+
+	MAC_PERFORM(ifnet_label_recycle, ifp-&gt;if_label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mbuf_tag_destroy</span>(<span class="enscript-type">struct</span> m_tag *tag)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = (<span class="enscript-type">struct</span> label *)(tag + 1);
+	MAC_PERFORM(mbuf_label_destroy, label);
+	mac_label_destroy(label);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mbuf_tag_copy</span>(<span class="enscript-type">struct</span> m_tag *src, <span class="enscript-type">struct</span> m_tag *dest)
+{
+	<span class="enscript-type">struct</span> label *src_label, *dest_label;
+
+	src_label = (<span class="enscript-type">struct</span> label *)(src + 1);
+	dest_label = (<span class="enscript-type">struct</span> label *)(dest + 1);
+
+	<span class="enscript-keyword">if</span> (src_label == NULL || dest_label == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/*
+	 * mac_mbuf_tag_init() is called on the target tag
+	 * in m_tag_copy(), so we don't need to call it here.
+	 */</span>
+	MAC_PERFORM(mbuf_label_copy, src_label, dest_label);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mbuf_label_copy</span>(<span class="enscript-type">struct</span> mbuf *m_from, <span class="enscript-type">struct</span> mbuf *m_to)
+{
+	<span class="enscript-type">struct</span> label *src_label, *dest_label;
+
+	src_label = mac_mbuf_to_label(m_from);
+	dest_label = mac_mbuf_to_label(m_to);
+
+	MAC_PERFORM(mbuf_label_copy, src_label, dest_label);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_ifnet_label_copy</span>(<span class="enscript-type">struct</span> label *src, <span class="enscript-type">struct</span> label *dest)
+{
+
+	MAC_PERFORM(ifnet_label_copy, src, dest);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_ifnet_label_externalize</span>(<span class="enscript-type">struct</span> label *label, <span class="enscript-type">char</span> *elements,
+    <span class="enscript-type">char</span> *outbuf, size_t outbuflen)
+{
+
+	<span class="enscript-keyword">return</span> (MAC_EXTERNALIZE(ifnet, label, elements, outbuf, outbuflen));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_ifnet_label_internalize</span>(<span class="enscript-type">struct</span> label *label, <span class="enscript-type">char</span> *string)
+{
+
+	<span class="enscript-keyword">return</span> (MAC_INTERNALIZE(ifnet, label, string));
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_ifnet_label_associate</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+
+	MAC_PERFORM(ifnet_label_associate, ifp, ifp-&gt;if_label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_bpfdesc_label_associate</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> bpf_d *bpf_d)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_bpfdesc_label_get(bpf_d);
+	MAC_PERFORM(bpfdesc_label_associate, cred, bpf_d, label);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_bpfdesc_check_receive</span>(<span class="enscript-type">struct</span> bpf_d *bpf_d, <span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">struct</span> label *label;
+	<span class="enscript-type">int</span> error;
+
+	label = mac_bpfdesc_label_get(bpf_d);
+	ifnet_lock_shared(ifp);
+	MAC_CHECK(bpfdesc_check_receive, bpf_d, label, ifp,
+	    ifp-&gt;if_label);
+	ifnet_lock_done(ifp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_mbuf_label_init</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> flag)
+{
+	<span class="enscript-type">struct</span> m_tag *tag;
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (mac_label_mbufs == 0)
+		<span class="enscript-keyword">return</span> (0);
+
+	tag = m_tag_create(KERNEL_MODULE_TAG_ID, KERNEL_TAG_TYPE_MACLABEL,
+			  <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> label), flag, m);
+	<span class="enscript-keyword">if</span> (tag == NULL) {
+		printf(<span class="enscript-string">&quot;%s(): m_tag_alloc() failed!\n&quot;</span>, __func__);
+		<span class="enscript-keyword">return</span> (ENOBUFS);
+	}
+	error = mac_mbuf_tag_init(tag, flag);
+	<span class="enscript-keyword">if</span> (error) {
+		printf(<span class="enscript-string">&quot;%s(): mac_mbuf_tag_init() failed!\n&quot;</span>, __func__);
+		m_tag_free(tag);
+		<span class="enscript-keyword">return</span> (error);
+	}
+	m_tag_prepend(m, tag);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mbuf_label_associate_bpfdesc</span>(<span class="enscript-type">struct</span> bpf_d *bpf_d, <span class="enscript-type">struct</span> mbuf *mbuf)
+{
+	<span class="enscript-type">struct</span> label *m_label, *b_label;
+
+	<span class="enscript-comment">/* bpf_d must be locked */</span>
+
+	m_label = mac_mbuf_to_label(mbuf);
+	b_label = mac_bpfdesc_label_get(bpf_d);
+
+	MAC_PERFORM(mbuf_label_associate_bpfdesc, bpf_d, b_label, mbuf,
+	    m_label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mbuf_label_associate_ifnet</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> mbuf *mbuf)
+{
+	<span class="enscript-type">struct</span> label *m_label;
+
+	<span class="enscript-comment">/* ifp must be locked */</span>
+
+	m_label = mac_mbuf_to_label(mbuf);
+
+	MAC_PERFORM(mbuf_label_associate_ifnet, ifp, ifp-&gt;if_label, mbuf,
+	    m_label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mbuf_label_associate_linklayer</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> mbuf *mbuf)
+{
+	<span class="enscript-type">struct</span> label *m_label;
+
+	<span class="enscript-comment">/* ifp must be locked */</span>
+
+	m_label = mac_mbuf_to_label(mbuf);
+
+	MAC_PERFORM(mbuf_label_associate_linklayer, ifp, ifp-&gt;if_label, mbuf,
+	    m_label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mbuf_label_associate_multicast_encap</span>(<span class="enscript-type">struct</span> mbuf *oldmbuf,
+    <span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> mbuf *newmbuf)
+{
+	<span class="enscript-type">struct</span> label *oldmbuflabel, *newmbuflabel;
+
+	oldmbuflabel = mac_mbuf_to_label(oldmbuf);
+	newmbuflabel = mac_mbuf_to_label(newmbuf);
+
+	<span class="enscript-comment">/* ifp must be locked */</span>
+
+	MAC_PERFORM(mbuf_label_associate_multicast_encap, oldmbuf, oldmbuflabel,
+	    ifp, ifp-&gt;if_label, newmbuf, newmbuflabel);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mbuf_label_associate_netlayer</span>(<span class="enscript-type">struct</span> mbuf *oldmbuf, <span class="enscript-type">struct</span> mbuf *newmbuf)
+{
+	<span class="enscript-type">struct</span> label *oldmbuflabel, *newmbuflabel;
+
+	oldmbuflabel = mac_mbuf_to_label(oldmbuf);
+	newmbuflabel = mac_mbuf_to_label(newmbuf);
+
+	MAC_PERFORM(mbuf_label_associate_netlayer, oldmbuf, oldmbuflabel,
+	    newmbuf, newmbuflabel);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mbuf_label_associate_socket</span>(<span class="enscript-type">struct</span> socket *socket, <span class="enscript-type">struct</span> mbuf *mbuf)
+{
+	<span class="enscript-type">struct</span> label *label;
+	<span class="enscript-type">struct</span> xsocket xso;
+
+	<span class="enscript-comment">/* socket must be locked */</span>
+
+	label = mac_mbuf_to_label(mbuf);
+
+	sotoxsocket(socket, &amp;xso);
+	MAC_PERFORM(mbuf_label_associate_socket, &amp;xso, socket-&gt;so_label,
+		    mbuf, label);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_ifnet_check_transmit</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> mbuf *mbuf, <span class="enscript-type">int</span> family,
+    <span class="enscript-type">int</span> type)
+{
+	<span class="enscript-type">struct</span> label *label;
+	<span class="enscript-type">int</span> error;
+
+	label = mac_mbuf_to_label(mbuf);
+
+	ifnet_lock_shared(ifp);
+	MAC_CHECK(ifnet_check_transmit, ifp, ifp-&gt;if_label, mbuf, label,
+	    family, type);
+	ifnet_lock_done(ifp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_ifnet_label_get</span>(__unused <span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> ifreq *ifr,
+    <span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">char</span> *elements, *buffer;
+	<span class="enscript-type">struct</span> label *intlabel;
+	<span class="enscript-type">struct</span> mac mac;
+	<span class="enscript-type">int</span> error;
+	size_t len;
+
+	error = copyin(CAST_USER_ADDR_T(ifr-&gt;ifr_ifru.ifru_data),
+	    &amp;mac, <span class="enscript-keyword">sizeof</span>(mac));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+
+	error = mac_check_structmac_consistent(&amp;mac);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+
+	MALLOC(elements, <span class="enscript-type">char</span> *, mac.m_buflen, M_MACTEMP, M_WAITOK);
+	error = copyinstr(CAST_USER_ADDR_T(mac.m_string), elements,
+	    mac.m_buflen, &amp;len);
+	<span class="enscript-keyword">if</span> (error) {
+		FREE(elements, M_MACTEMP);
+		<span class="enscript-keyword">return</span> (error);
+	}
+	AUDIT_ARG(mac_string, elements);
+
+	MALLOC(buffer, <span class="enscript-type">char</span> *, mac.m_buflen, M_MACTEMP, M_WAITOK | M_ZERO);
+	intlabel = mac_ifnet_label_alloc();
+	ifnet_lock_shared(ifp);
+	mac_ifnet_label_copy(ifp-&gt;if_label, intlabel);
+	ifnet_lock_done(ifp);
+	error = mac_ifnet_label_externalize(intlabel, elements,
+	    buffer, mac.m_buflen);
+	mac_ifnet_label_free(intlabel);
+	FREE(elements, M_MACTEMP);
+
+	<span class="enscript-keyword">if</span> (error == 0)
+		error = copyout(buffer, CAST_USER_ADDR_T(mac.m_string),
+		    strlen(buffer) + 1);
+	FREE(buffer, M_MACTEMP);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_ifnet_label_set</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> ifreq *ifr,
+    <span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">struct</span> label *intlabel;
+	<span class="enscript-type">struct</span> mac mac;
+	<span class="enscript-type">char</span> *buffer;
+	<span class="enscript-type">int</span> error;
+	size_t len;
+
+	error = copyin(CAST_USER_ADDR_T(ifr-&gt;ifr_ifru.ifru_data),
+	    &amp;mac, <span class="enscript-keyword">sizeof</span>(mac));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+
+	error = mac_check_structmac_consistent(&amp;mac);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+
+	MALLOC(buffer, <span class="enscript-type">char</span> *, mac.m_buflen, M_MACTEMP, M_WAITOK);
+	error = copyinstr(CAST_USER_ADDR_T(mac.m_string), buffer,
+	    mac.m_buflen, &amp;len);
+	<span class="enscript-keyword">if</span> (error) {
+		FREE(buffer, M_MACTEMP);
+		<span class="enscript-keyword">return</span> (error);
+	}
+	AUDIT_ARG(mac_string, buffer);
+
+	intlabel = mac_ifnet_label_alloc();
+	error = mac_ifnet_label_internalize(intlabel, buffer);
+	FREE(buffer, M_MACTEMP);
+	<span class="enscript-keyword">if</span> (error) {
+		mac_ifnet_label_free(intlabel);
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	<span class="enscript-comment">/*
+	 * XXX: Note that this is a redundant privilege check, since
+	 * policies impose this check themselves if required by the
+	 * policy.  Eventually, this should go away.
+	 */</span>
+	error = suser(cred, NULL);
+	<span class="enscript-keyword">if</span> (error) {
+		mac_ifnet_label_free(intlabel);
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	ifnet_lock_exclusive(ifp);
+	MAC_CHECK(ifnet_check_label_update, cred, ifp, ifp-&gt;if_label,
+	    intlabel);
+	<span class="enscript-keyword">if</span> (error) {
+		ifnet_lock_done(ifp);
+		mac_ifnet_label_free(intlabel);
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	MAC_PERFORM(ifnet_label_update, cred, ifp, ifp-&gt;if_label, intlabel);
+	ifnet_lock_done(ifp);
+	mac_ifnet_label_free(intlabel);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+</pre>
+<hr />
+</body></html>

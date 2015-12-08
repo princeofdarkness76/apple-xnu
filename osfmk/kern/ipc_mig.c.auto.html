@@ -1,0 +1,938 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ipc_mig.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ipc_mig.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mig.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mig_errors.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_traps.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_tt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_mig.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_kobject.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_kmsg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_entry.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_mqueue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_space.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_pset.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_notify.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+<span class="enscript-comment">/*
+ *	Routine:	mach_msg_send_from_kernel
+ *	Purpose:
+ *		Send a message from the kernel.
+ *
+ *		This is used by the client side of KernelUser interfaces
+ *		to implement SimpleRoutines.  Currently, this includes
+ *		memory_object messages.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Sent the message.
+ *		MACH_SEND_INVALID_DEST	Bad destination port.
+ *		MACH_MSG_SEND_NO_BUFFER Destination port had inuse fixed bufer
+ *		                        or destination is above kernel limit
+ */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IKM_SUPPORT_LEGACY</span>
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">mach_msg_send_from_kernel</span>
+mach_msg_return_t <span class="enscript-function-name">mach_msg_send_from_kernel</span>(
+	mach_msg_header_t	*msg,
+	mach_msg_size_t		send_size);
+
+mach_msg_return_t
+<span class="enscript-function-name">mach_msg_send_from_kernel</span>(
+	mach_msg_header_t	*msg,
+	mach_msg_size_t		send_size)
+{
+	ipc_kmsg_t kmsg;
+	mach_msg_return_t mr;
+
+	mr = ipc_kmsg_get_from_kernel(msg, send_size, &amp;kmsg);
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS)
+		<span class="enscript-keyword">return</span> mr;
+
+	mr = ipc_kmsg_copyin_from_kernel_legacy(kmsg);
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+		ipc_kmsg_free(kmsg);
+		<span class="enscript-keyword">return</span> mr;
+	}		
+
+	mr = ipc_kmsg_send(kmsg, 
+			   MACH_SEND_KERNEL_DEFAULT,
+			   MACH_MSG_TIMEOUT_NONE);
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+		ipc_kmsg_destroy(kmsg);
+	}
+
+	<span class="enscript-keyword">return</span> mr;
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IKM_SUPPORT_LEGACY */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">mach_msg_send_from_kernel_proper</span>(
+	mach_msg_header_t	*msg,
+	mach_msg_size_t		send_size)
+{
+	ipc_kmsg_t kmsg;
+	mach_msg_return_t mr;
+
+	mr = ipc_kmsg_get_from_kernel(msg, send_size, &amp;kmsg);
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS)
+		<span class="enscript-keyword">return</span> mr;
+
+	mr = ipc_kmsg_copyin_from_kernel(kmsg);
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+		ipc_kmsg_free(kmsg);
+		<span class="enscript-keyword">return</span> mr;
+	}
+
+	mr = ipc_kmsg_send(kmsg, 
+			   MACH_SEND_KERNEL_DEFAULT,
+			   MACH_MSG_TIMEOUT_NONE);
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+		ipc_kmsg_destroy(kmsg);
+	}
+
+	<span class="enscript-keyword">return</span> mr;
+}
+
+mach_msg_return_t
+<span class="enscript-function-name">mach_msg_send_from_kernel_with_options</span>(
+	mach_msg_header_t	*msg,
+	mach_msg_size_t		send_size,
+	mach_msg_option_t	option,
+	mach_msg_timeout_t	timeout_val)
+{
+	ipc_kmsg_t kmsg;
+	mach_msg_return_t mr;
+
+	mr = ipc_kmsg_get_from_kernel(msg, send_size, &amp;kmsg);
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS)
+		<span class="enscript-keyword">return</span> mr;
+
+	mr = ipc_kmsg_copyin_from_kernel(kmsg);
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+		ipc_kmsg_free(kmsg);
+		<span class="enscript-keyword">return</span> mr;
+	}
+
+#<span class="enscript-reference">if</span> 11938665
+	<span class="enscript-comment">/*
+	 * Until we are sure of its effects, we are disabling
+	 * importance donation from the kernel-side of user
+	 * threads in importance-donating tasks - unless the
+	 * option to force importance donation is passed in.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((option &amp; MACH_SEND_IMPORTANCE) == 0)
+		option |= MACH_SEND_NOIMPORTANCE;
+#<span class="enscript-reference">endif</span>
+	mr = ipc_kmsg_send(kmsg, option, timeout_val);
+
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+		ipc_kmsg_destroy(kmsg);
+	}
+	
+	<span class="enscript-keyword">return</span> mr;
+}
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IKM_SUPPORT_LEGACY</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">mach_msg_send_from_kernel_with_options_legacy</span>(
+	mach_msg_header_t	*msg,
+	mach_msg_size_t		send_size,
+	mach_msg_option_t	option,
+	mach_msg_timeout_t	timeout_val)
+{
+	ipc_kmsg_t kmsg;
+	mach_msg_return_t mr;
+
+	mr = ipc_kmsg_get_from_kernel(msg, send_size, &amp;kmsg);
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS)
+		<span class="enscript-keyword">return</span> mr;
+
+	mr = ipc_kmsg_copyin_from_kernel_legacy(kmsg);
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+		ipc_kmsg_free(kmsg);
+		<span class="enscript-keyword">return</span> mr;
+	}
+
+#<span class="enscript-reference">if</span> 11938665
+	<span class="enscript-comment">/*
+	 * Until we are sure of its effects, we are disabling
+	 * importance donation from the kernel-side of user
+	 * threads in importance-donating tasks.
+	 */</span>
+	option |= MACH_SEND_NOIMPORTANCE;
+#<span class="enscript-reference">endif</span>
+	mr = ipc_kmsg_send(kmsg, option, timeout_val);
+
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+		ipc_kmsg_destroy(kmsg);
+	}
+	
+	<span class="enscript-keyword">return</span> mr;
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IKM_SUPPORT_LEGACY */</span>
+
+<span class="enscript-comment">/*
+ *	Routine:	mach_msg_rpc_from_kernel
+ *	Purpose:
+ *		Send a message from the kernel and receive a reply.
+ *		Uses ith_rpc_reply for the reply port.
+ *
+ *		This is used by the client side of KernelUser interfaces
+ *		to implement Routines.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Sent the message.
+ *		MACH_RCV_PORT_DIED	The reply port was deallocated.
+ */</span>
+
+mach_msg_return_t <span class="enscript-function-name">mach_msg_rpc_from_kernel_body</span>(mach_msg_header_t *msg, 
+        mach_msg_size_t send_size, mach_msg_size_t rcv_size, boolean_t legacy);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IKM_SUPPORT_LEGACY</span>
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">mach_msg_rpc_from_kernel</span>
+mach_msg_return_t
+<span class="enscript-function-name">mach_msg_rpc_from_kernel</span>(
+	mach_msg_header_t	*msg,
+	mach_msg_size_t		send_size,
+	mach_msg_size_t		rcv_size);
+
+mach_msg_return_t
+<span class="enscript-function-name">mach_msg_rpc_from_kernel</span>(
+	mach_msg_header_t	*msg,
+	mach_msg_size_t		send_size,
+	mach_msg_size_t		rcv_size)
+{
+    <span class="enscript-keyword">return</span> mach_msg_rpc_from_kernel_body(msg, send_size, rcv_size, TRUE);
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IKM_SUPPORT_LEGACY */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">mach_msg_rpc_from_kernel_proper</span>(
+	mach_msg_header_t	*msg,
+	mach_msg_size_t		send_size,
+	mach_msg_size_t		rcv_size)
+{
+    <span class="enscript-keyword">return</span> mach_msg_rpc_from_kernel_body(msg, send_size, rcv_size, FALSE);
+}
+
+mach_msg_return_t
+<span class="enscript-function-name">mach_msg_rpc_from_kernel_body</span>(
+	mach_msg_header_t	*msg,
+	mach_msg_size_t		send_size,
+	mach_msg_size_t		rcv_size,
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">IKM_SUPPORT_LEGACY</span>
+	__unused
+#<span class="enscript-reference">endif</span>
+    boolean_t           legacy)
+{
+	thread_t self = current_thread();
+	ipc_port_t reply;
+	ipc_kmsg_t kmsg;
+	mach_port_seqno_t seqno;
+	mach_msg_return_t mr;
+
+	assert(msg-&gt;msgh_local_port == MACH_PORT_NULL);
+
+	mr = ipc_kmsg_get_from_kernel(msg, send_size, &amp;kmsg);
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS)
+		<span class="enscript-keyword">return</span> mr;
+
+	reply = self-&gt;ith_rpc_reply;
+	<span class="enscript-keyword">if</span> (reply == IP_NULL) {
+		reply = ipc_port_alloc_reply();
+		<span class="enscript-keyword">if</span> ((reply == IP_NULL) ||
+		    (self-&gt;ith_rpc_reply != IP_NULL))
+			panic(<span class="enscript-string">&quot;mach_msg_rpc_from_kernel&quot;</span>);
+		self-&gt;ith_rpc_reply = reply;
+	}
+
+	<span class="enscript-comment">/* insert send-once right for the reply port */</span>
+	kmsg-&gt;ikm_header-&gt;msgh_local_port = reply;
+	kmsg-&gt;ikm_header-&gt;msgh_bits |=
+		MACH_MSGH_BITS(0, MACH_MSG_TYPE_MAKE_SEND_ONCE);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IKM_SUPPORT_LEGACY</span>
+    <span class="enscript-keyword">if</span>(legacy)
+        mr = ipc_kmsg_copyin_from_kernel_legacy(kmsg);
+    <span class="enscript-keyword">else</span>
+        mr = ipc_kmsg_copyin_from_kernel(kmsg);
+#<span class="enscript-reference">else</span>
+    mr = ipc_kmsg_copyin_from_kernel(kmsg);
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+	    ipc_kmsg_free(kmsg);
+	    <span class="enscript-keyword">return</span> mr;
+    }
+	mr = ipc_kmsg_send(kmsg, 
+			   MACH_SEND_KERNEL_DEFAULT,
+			   MACH_MSG_TIMEOUT_NONE);
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+		ipc_kmsg_destroy(kmsg);
+		<span class="enscript-keyword">return</span> mr;
+	}
+
+	<span class="enscript-keyword">for</span> (;;) {
+		ipc_mqueue_t mqueue;
+
+		assert(reply-&gt;ip_in_pset == 0);
+		assert(ip_active(reply));
+
+		<span class="enscript-comment">/* JMM - why this check? */</span>
+		<span class="enscript-keyword">if</span> (!self-&gt;active &amp;&amp; !self-&gt;inspection) {
+			ipc_port_dealloc_reply(reply);
+			self-&gt;ith_rpc_reply = IP_NULL;
+			<span class="enscript-keyword">return</span> MACH_RCV_INTERRUPTED;
+		}
+
+		self-&gt;ith_continuation = (<span class="enscript-type">void</span> (*)(mach_msg_return_t))0;
+
+		mqueue = &amp;reply-&gt;ip_messages;
+		ipc_mqueue_receive(mqueue,
+				   MACH_MSG_OPTION_NONE,
+				   MACH_MSG_SIZE_MAX,
+				   MACH_MSG_TIMEOUT_NONE,
+				   THREAD_INTERRUPTIBLE);
+
+		mr = self-&gt;ith_state;
+		kmsg = self-&gt;ith_kmsg;
+		seqno = self-&gt;ith_seqno;
+
+		<span class="enscript-keyword">if</span> (mr == MACH_MSG_SUCCESS)
+		  {
+			<span class="enscript-keyword">break</span>;
+		  }
+
+		assert(mr == MACH_RCV_INTERRUPTED);
+
+		assert(reply == self-&gt;ith_rpc_reply);
+
+		<span class="enscript-keyword">if</span> (self-&gt;ast &amp; AST_APC) {
+			ipc_port_dealloc_reply(reply);
+			self-&gt;ith_rpc_reply = IP_NULL;
+			<span class="enscript-keyword">return</span>(mr);
+		}
+	}
+
+	<span class="enscript-comment">/* 
+	 * Check to see how much of the message/trailer can be received.
+	 * We chose the maximum trailer that will fit, since we don't
+	 * have options telling us which trailer elements the caller needed.
+	 */</span>
+	<span class="enscript-keyword">if</span> (rcv_size &gt;= kmsg-&gt;ikm_header-&gt;msgh_size) {
+		mach_msg_format_0_trailer_t *trailer =  (mach_msg_format_0_trailer_t *)
+			((vm_offset_t)kmsg-&gt;ikm_header + kmsg-&gt;ikm_header-&gt;msgh_size);
+
+		<span class="enscript-keyword">if</span> (rcv_size &gt;= kmsg-&gt;ikm_header-&gt;msgh_size + MAX_TRAILER_SIZE) {
+			<span class="enscript-comment">/* Enough room for a maximum trailer */</span>
+			trailer-&gt;msgh_trailer_size = MAX_TRAILER_SIZE;
+		} 
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (rcv_size &lt; kmsg-&gt;ikm_header-&gt;msgh_size + 
+			   trailer-&gt;msgh_trailer_size) {
+			<span class="enscript-comment">/* no room for even the basic (default) trailer */</span>
+			trailer-&gt;msgh_trailer_size = 0;
+		}
+		assert(trailer-&gt;msgh_trailer_type == MACH_MSG_TRAILER_FORMAT_0);
+		rcv_size = kmsg-&gt;ikm_header-&gt;msgh_size + trailer-&gt;msgh_trailer_size;
+		mr = MACH_MSG_SUCCESS;
+	} <span class="enscript-keyword">else</span> {
+		mr = MACH_RCV_TOO_LARGE;
+	}
+
+
+	<span class="enscript-comment">/*
+	 *	We want to preserve rights and memory in reply!
+	 *	We don't have to put them anywhere; just leave them
+	 *	as they are.
+	 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IKM_SUPPORT_LEGACY</span>
+    <span class="enscript-keyword">if</span>(legacy)
+        ipc_kmsg_copyout_to_kernel_legacy(kmsg, ipc_space_reply);
+    <span class="enscript-keyword">else</span>
+        ipc_kmsg_copyout_to_kernel(kmsg, ipc_space_reply);
+#<span class="enscript-reference">else</span>
+    ipc_kmsg_copyout_to_kernel(kmsg, ipc_space_reply);
+#<span class="enscript-reference">endif</span>
+	ipc_kmsg_put_to_kernel(msg, kmsg, rcv_size);
+	<span class="enscript-keyword">return</span> mr;
+}
+
+
+<span class="enscript-comment">/************** These Calls are set up for kernel-loaded tasks/threads **************/</span>
+
+<span class="enscript-comment">/*
+ *	Routine:	mach_msg_overwrite
+ *	Purpose:
+ *		Like mach_msg_overwrite_trap except that message buffers
+ *		live in kernel space.  Doesn't handle any options.
+ *
+ *		This is used by in-kernel server threads to make
+ *		kernel calls, to receive request messages, and
+ *		to send reply messages.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">mach_msg_overwrite</span>(
+	mach_msg_header_t		*msg,
+	mach_msg_option_t		option,
+	mach_msg_size_t		send_size,
+	mach_msg_size_t		rcv_size,
+	mach_port_name_t		rcv_name,
+	__unused mach_msg_timeout_t	msg_timeout,
+	__unused mach_port_name_t	notify,
+	__unused mach_msg_header_t	*rcv_msg,
+       __unused mach_msg_size_t	rcv_msg_size)
+{
+	ipc_space_t space = current_space();
+	vm_map_t map = current_map();
+	ipc_kmsg_t kmsg;
+	mach_port_seqno_t seqno;
+	mach_msg_return_t mr;
+	mach_msg_trailer_size_t trailer_size;
+
+	<span class="enscript-keyword">if</span> (option &amp; MACH_SEND_MSG) {
+		mach_msg_size_t	msg_and_trailer_size;
+		mach_msg_max_trailer_t	*max_trailer;
+
+		<span class="enscript-keyword">if</span> ((send_size &lt; <span class="enscript-keyword">sizeof</span>(mach_msg_header_t)) || (send_size &amp; 3))
+			<span class="enscript-keyword">return</span> MACH_SEND_MSG_TOO_SMALL;
+
+		<span class="enscript-keyword">if</span> (send_size &gt; MACH_MSG_SIZE_MAX - MAX_TRAILER_SIZE)
+			<span class="enscript-keyword">return</span> MACH_SEND_TOO_LARGE;
+
+		msg_and_trailer_size = send_size + MAX_TRAILER_SIZE;
+		kmsg = ipc_kmsg_alloc(msg_and_trailer_size);
+
+		<span class="enscript-keyword">if</span> (kmsg == IKM_NULL)
+			<span class="enscript-keyword">return</span> MACH_SEND_NO_BUFFER;
+
+		(<span class="enscript-type">void</span>) memcpy((<span class="enscript-type">void</span> *) kmsg-&gt;ikm_header, (<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) msg, send_size);
+
+		kmsg-&gt;ikm_header-&gt;msgh_size = send_size;
+
+		<span class="enscript-comment">/* 
+		 * Reserve for the trailer the largest space (MAX_TRAILER_SIZE)
+		 * However, the internal size field of the trailer (msgh_trailer_size)
+		 * is initialized to the minimum (sizeof(mach_msg_trailer_t)), to optimize
+		 * the cases where no implicit data is requested.
+		 */</span>
+		max_trailer = (mach_msg_max_trailer_t *) ((vm_offset_t)kmsg-&gt;ikm_header + send_size);
+		max_trailer-&gt;msgh_sender = current_thread()-&gt;task-&gt;sec_token;
+		max_trailer-&gt;msgh_audit = current_thread()-&gt;task-&gt;audit_token;
+		max_trailer-&gt;msgh_trailer_type = MACH_MSG_TRAILER_FORMAT_0;
+		max_trailer-&gt;msgh_trailer_size = MACH_MSG_TRAILER_MINIMUM_SIZE;
+
+		mr = ipc_kmsg_copyin(kmsg, space, map, &amp;option);
+
+		<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+			ipc_kmsg_free(kmsg);
+			<span class="enscript-keyword">return</span> mr;
+		}
+
+		<span class="enscript-keyword">do</span> {
+			mr = ipc_kmsg_send(kmsg, MACH_MSG_OPTION_NONE, MACH_MSG_TIMEOUT_NONE);
+		 } <span class="enscript-keyword">while</span> (mr == MACH_SEND_INTERRUPTED);
+
+		assert(mr == MACH_MSG_SUCCESS);
+	}
+
+	<span class="enscript-keyword">if</span> (option &amp; MACH_RCV_MSG) {
+		thread_t self = current_thread();
+
+		<span class="enscript-keyword">do</span> {
+			ipc_object_t object;
+			ipc_mqueue_t mqueue;
+
+			mr = ipc_mqueue_copyin(space, rcv_name,
+					       &amp;mqueue, &amp;object);
+			<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS)
+				<span class="enscript-keyword">return</span> mr;
+			<span class="enscript-comment">/* hold ref for object */</span>
+
+			self-&gt;ith_continuation = (<span class="enscript-type">void</span> (*)(mach_msg_return_t))0;
+			ipc_mqueue_receive(mqueue,
+					   MACH_MSG_OPTION_NONE,
+					   MACH_MSG_SIZE_MAX,
+					   MACH_MSG_TIMEOUT_NONE,
+					   THREAD_ABORTSAFE);
+			mr = self-&gt;ith_state;
+			kmsg = self-&gt;ith_kmsg;
+			seqno = self-&gt;ith_seqno;
+
+			io_release(object);
+
+		} <span class="enscript-keyword">while</span> (mr == MACH_RCV_INTERRUPTED);
+		<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS)
+			<span class="enscript-keyword">return</span> mr;
+
+
+		trailer_size = ipc_kmsg_add_trailer(kmsg, space, option, current_thread(), seqno, TRUE,
+				kmsg-&gt;ikm_header-&gt;msgh_remote_port-&gt;ip_context);
+
+		<span class="enscript-keyword">if</span> (rcv_size &lt; (kmsg-&gt;ikm_header-&gt;msgh_size + trailer_size)) {
+			ipc_kmsg_copyout_dest(kmsg, space);
+			(<span class="enscript-type">void</span>) memcpy((<span class="enscript-type">void</span> *) msg, (<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) kmsg-&gt;ikm_header, <span class="enscript-keyword">sizeof</span> *msg);
+			ipc_kmsg_free(kmsg);
+			<span class="enscript-keyword">return</span> MACH_RCV_TOO_LARGE;
+		}
+
+		mr = ipc_kmsg_copyout(kmsg, space, map, MACH_MSG_BODY_NULL, option);
+		<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+			<span class="enscript-keyword">if</span> ((mr &amp;~ MACH_MSG_MASK) == MACH_RCV_BODY_ERROR) {
+				ipc_kmsg_put_to_kernel(msg, kmsg,
+						kmsg-&gt;ikm_header-&gt;msgh_size + trailer_size);
+			} <span class="enscript-keyword">else</span> {
+				ipc_kmsg_copyout_dest(kmsg, space);
+				(<span class="enscript-type">void</span>) memcpy((<span class="enscript-type">void</span> *) msg, (<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) kmsg-&gt;ikm_header, <span class="enscript-keyword">sizeof</span> *msg);
+				ipc_kmsg_free(kmsg);
+			}
+
+			<span class="enscript-keyword">return</span> mr;
+		}
+
+		(<span class="enscript-type">void</span>) memcpy((<span class="enscript-type">void</span> *) msg, (<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) kmsg-&gt;ikm_header,
+			      kmsg-&gt;ikm_header-&gt;msgh_size + trailer_size);
+		ipc_kmsg_free(kmsg);
+	}
+
+	<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	mig_get_reply_port
+ *	Purpose:
+ *		Called by client side interfaces living in the kernel
+ *		to get a reply port.
+ */</span>
+mach_port_t
+<span class="enscript-function-name">mig_get_reply_port</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (MACH_PORT_NULL);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	mig_dealloc_reply_port
+ *	Purpose:
+ *		Called by client side interfaces to get rid of a reply port.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mig_dealloc_reply_port</span>(
+	__unused mach_port_t reply_port)
+{
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	mig_put_reply_port
+ *	Purpose:
+ *		Called by client side interfaces after each RPC to 
+ *		let the client recycle the reply port if it wishes.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mig_put_reply_port</span>(
+	__unused mach_port_t reply_port)
+{
+}
+
+<span class="enscript-comment">/*
+ * mig_strncpy.c - by Joshua Block
+ *
+ * mig_strncp -- Bounded string copy.  Does what the library routine strncpy
+ * OUGHT to do:  Copies the (null terminated) string in src into dest, a 
+ * buffer of length len.  Assures that the copy is still null terminated
+ * and doesn't overflow the buffer, truncating the copy if necessary.
+ *
+ * Parameters:
+ * 
+ *     dest - Pointer to destination buffer.
+ * 
+ *     src - Pointer to source string.
+ * 
+ *     len - Length of destination buffer.
+ */</span>
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">mig_strncpy</span>(
+	<span class="enscript-type">char</span>		*dest,
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*src,
+	<span class="enscript-type">int</span>		len)
+{
+    <span class="enscript-type">int</span> i = 0;
+
+    <span class="enscript-keyword">if</span> (len &gt; 0)
+	<span class="enscript-keyword">if</span> (dest != NULL) {
+	    <span class="enscript-keyword">if</span> (src != NULL)
+		   <span class="enscript-keyword">for</span> (i=1; i&lt;len; i++)
+			<span class="enscript-keyword">if</span> (! (*dest++ = *src++))
+			    <span class="enscript-keyword">return</span> i;
+	        *dest = <span class="enscript-string">'\0'</span>;
+	}
+    <span class="enscript-keyword">return</span> i;
+}
+
+<span class="enscript-type">char</span> *
+<span class="enscript-function-name">mig_user_allocate</span>(
+	vm_size_t	size)
+{
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">char</span> *)kalloc(size);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mig_user_deallocate</span>(
+	<span class="enscript-type">char</span>		*data,
+	vm_size_t	size)
+{
+	kfree(data, size);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	mig_object_init
+ *	Purpose:
+ *		Initialize the base class portion of a MIG object.  We
+ *		will lazy init the port, so just clear it for now.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">mig_object_init</span>(
+	mig_object_t		mig_object,
+	<span class="enscript-type">const</span> IMIGObject	*interface)
+{
+	<span class="enscript-keyword">if</span> (mig_object == MIG_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	mig_object-&gt;pVtbl = (<span class="enscript-type">const</span> IMIGObjectVtbl *)interface;
+	mig_object-&gt;port = MACH_PORT_NULL;
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	mig_object_destroy
+ *	Purpose:
+ *		The object is being freed.  This call lets us clean
+ *		up any state we have have built up over the object's
+ *		lifetime.
+ *	Conditions:
+ *		Since notifications and the port hold references on
+ *		on the object, neither can exist when this is called.
+ *		This is a good place to assert() that condition.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mig_object_destroy</span>(
+	__assert_only mig_object_t	mig_object)
+{
+	assert(mig_object-&gt;port == MACH_PORT_NULL);
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	mig_object_reference
+ *	Purpose:
+ *		Pure virtual helper to invoke the MIG object's AddRef
+ *		method.
+ *	Conditions:
+ *		MIG object port may be locked.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mig_object_reference</span>(
+	mig_object_t	mig_object)
+{
+	assert(mig_object != MIG_OBJECT_NULL);
+	mig_object-&gt;pVtbl-&gt;AddRef((IMIGObject *)mig_object);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	mig_object_deallocate
+ *	Purpose:
+ *		Pure virtual helper to invoke the MIG object's Release
+ *		method.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mig_object_deallocate</span>(
+	mig_object_t	mig_object)
+{
+	assert(mig_object != MIG_OBJECT_NULL);
+	mig_object-&gt;pVtbl-&gt;Release((IMIGObject *)mig_object);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	convert_mig_object_to_port [interface]
+ *	Purpose:
+ *		Base implementation of MIG outtrans routine to convert from
+ *		a mig object reference to a new send right on the object's
+ *		port.  The object reference is consumed.
+ *	Returns:
+ *		IP_NULL - Null MIG object supplied
+ *		Otherwise, a newly made send right for the port
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+ipc_port_t
+<span class="enscript-function-name">convert_mig_object_to_port</span>(
+	mig_object_t	mig_object)
+{
+	ipc_port_t	port;
+	boolean_t	deallocate = TRUE;
+
+	<span class="enscript-keyword">if</span> (mig_object == MIG_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> IP_NULL;
+
+	port = mig_object-&gt;port;
+	<span class="enscript-keyword">while</span> ((port == IP_NULL) ||
+	       ((port = ipc_port_make_send(port)) == IP_NULL)) {
+		ipc_port_t	previous;
+
+		<span class="enscript-comment">/*
+		 * Either the port was never set up, or it was just
+		 * deallocated out from under us by the no-senders
+		 * processing.  In either case, we must:
+		 *	Attempt to make one
+		 * 	Arrange for no senders
+		 *	Try to atomically register it with the object
+		 *		Destroy it if we are raced.
+		 */</span>
+		port = ipc_port_alloc_kernel();
+		ip_lock(port);
+		ipc_kobject_set_atomically(port,
+					   (ipc_kobject_t) mig_object,
+					   IKOT_MIG);
+
+		<span class="enscript-comment">/* make a sonce right for the notification */</span>
+		port-&gt;ip_sorights++;
+		ip_reference(port);
+
+		ipc_port_nsrequest(port, 1, port, &amp;previous);
+		<span class="enscript-comment">/* port unlocked */</span>
+
+		assert(previous == IP_NULL);
+
+		<span class="enscript-keyword">if</span> (OSCompareAndSwapPtr((<span class="enscript-type">void</span> *)IP_NULL, (<span class="enscript-type">void</span> *)port,
+											(<span class="enscript-type">void</span> * <span class="enscript-type">volatile</span> *)&amp;mig_object-&gt;port)) {
+			deallocate = FALSE;
+		} <span class="enscript-keyword">else</span> {
+			ipc_port_dealloc_kernel(port);
+			port = mig_object-&gt;port;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (deallocate)
+		mig_object-&gt;pVtbl-&gt;Release((IMIGObject *)mig_object);
+
+	<span class="enscript-keyword">return</span> (port);
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	convert_port_to_mig_object [interface]
+ *	Purpose:
+ *		Base implementation of MIG intrans routine to convert from
+ *		an incoming port reference to a new reference on the
+ *		underlying object. A new reference must be created, because
+ *		the port's reference could go away asynchronously.
+ *	Returns:
+ *		NULL - Not an active MIG object port or iid not supported
+ *		Otherwise, a reference to the underlying MIG interface
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+mig_object_t
+<span class="enscript-function-name">convert_port_to_mig_object</span>(
+	ipc_port_t	port,
+	<span class="enscript-type">const</span> MIGIID	*iid)
+{
+	mig_object_t	mig_object;
+	<span class="enscript-type">void</span> 		*ppv;
+
+	<span class="enscript-keyword">if</span> (!IP_VALID(port))
+		<span class="enscript-keyword">return</span> NULL;
+
+	ip_lock(port);
+	<span class="enscript-keyword">if</span> (!ip_active(port) || (ip_kotype(port) != IKOT_MIG)) {
+		ip_unlock(port);
+		<span class="enscript-keyword">return</span> NULL;
+	}
+
+	<span class="enscript-comment">/*
+	 * Our port points to some MIG object interface.  Now
+	 * query it to get a reference to the desired interface.
+	 */</span>
+	ppv = NULL;
+	mig_object = (mig_object_t)port-&gt;ip_kobject;
+	mig_object-&gt;pVtbl-&gt;QueryInterface((IMIGObject *)mig_object, iid, &amp;ppv);
+	ip_unlock(port);
+	<span class="enscript-keyword">return</span> (mig_object_t)ppv;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	mig_object_no_senders [interface]
+ *	Purpose:
+ *		Base implementation of a no-senders notification handler
+ *		for MIG objects. If there truly are no more senders, must
+ *		destroy the port and drop its reference on the object.
+ *	Returns:
+ *		TRUE  - port deallocate and reference dropped
+ *		FALSE - more senders arrived, re-registered for notification
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+
+boolean_t
+<span class="enscript-function-name">mig_object_no_senders</span>(
+	ipc_port_t		port,
+	mach_port_mscount_t	mscount)
+{
+	mig_object_t		mig_object;
+
+	ip_lock(port);
+	<span class="enscript-keyword">if</span> (port-&gt;ip_mscount &gt; mscount) {
+		ipc_port_t 	previous;
+
+		<span class="enscript-comment">/*
+		 * Somebody created new send rights while the
+		 * notification was in-flight.  Just create a
+		 * new send-once right and re-register with 
+		 * the new (higher) mscount threshold.
+		 */</span>
+		<span class="enscript-comment">/* make a sonce right for the notification */</span>
+		port-&gt;ip_sorights++;
+		ip_reference(port);
+		ipc_port_nsrequest(port, mscount, port, &amp;previous);
+		<span class="enscript-comment">/* port unlocked */</span>
+
+		assert(previous == IP_NULL);
+		<span class="enscript-keyword">return</span> (FALSE);
+	}
+
+	<span class="enscript-comment">/*
+	 * Clear the port pointer while we have it locked.
+	 */</span>
+	mig_object = (mig_object_t)port-&gt;ip_kobject;
+	mig_object-&gt;port = IP_NULL;
+
+	<span class="enscript-comment">/*
+	 * Bring the sequence number and mscount in
+	 * line with ipc_port_destroy assertion.
+	 */</span>
+	port-&gt;ip_mscount = 0;
+	port-&gt;ip_messages.imq_seqno = 0;
+	ipc_port_destroy(port); <span class="enscript-comment">/* releases lock */</span>
+	
+	<span class="enscript-comment">/*
+	 * Release the port's reference on the object.
+	 */</span>
+	mig_object-&gt;pVtbl-&gt;Release((IMIGObject *)mig_object);
+	<span class="enscript-keyword">return</span> (TRUE);
+}	
+
+<span class="enscript-comment">/*
+ * Kernel implementation of the notification chain for MIG object
+ * is kept separate from the actual objects, since there are expected
+ * to be much fewer of them than actual objects.
+ *
+ * The implementation of this part of MIG objects is coming
+ * &quot;Real Soon Now&quot;(TM).
+ */</span>
+</pre>
+<hr />
+</body></html>

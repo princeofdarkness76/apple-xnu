@@ -1,0 +1,885 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>sched_grrr.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">sched_grrr.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/policy.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/sync_policy.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/sched_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_cpu.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/counters.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/macro_help.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/syscall_subr.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/sdt.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_GRRR_CORE</span>)
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">grrr_priority_mapping_init</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">grrr_enqueue</span>(
+				   grrr_run_queue_t			rq,
+				   thread_t			thread);
+				   
+<span class="enscript-type">static</span> thread_t
+<span class="enscript-function-name">grrr_select</span>(
+					grrr_run_queue_t	rq);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">grrr_remove</span>(
+				  grrr_run_queue_t			rq,
+				  thread_t		thread);
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">grrr_sorted_list_insert_group</span>(grrr_run_queue_t rq,
+									grrr_group_t group);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">grrr_rescale_work</span>(grrr_run_queue_t rq);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">grrr_runqueue_init</span>(grrr_run_queue_t		runq);
+
+<span class="enscript-comment">/* Map Mach priorities to ones suitable for proportional sharing */</span>
+<span class="enscript-type">static</span> grrr_proportional_priority_t grrr_priority_mapping[NRQS];
+
+<span class="enscript-comment">/* Map each proportional priority to its group */</span>
+<span class="enscript-type">static</span> grrr_group_index_t grrr_group_mapping[NUM_GRRR_PROPORTIONAL_PRIORITIES];
+
+uint32_t			grrr_rescale_tick;
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(CONFIG_SCHED_GRRR_CORE) */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_GRRR</span>)
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_init</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_timebase_init</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_processor_init</span>(processor_t processor);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_pset_init</span>(processor_set_t pset);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_maintenance_continuation</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> thread_t
+<span class="enscript-function-name">sched_grrr_choose_thread</span>(processor_t		processor,
+							<span class="enscript-type">int</span>				priority,
+							ast_t				reason);
+
+<span class="enscript-type">static</span> thread_t
+<span class="enscript-function-name">sched_grrr_steal_thread</span>(processor_set_t		pset);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sched_grrr_compute_priority</span>(thread_t thread);
+
+<span class="enscript-type">static</span> processor_t
+<span class="enscript-function-name">sched_grrr_choose_processor</span>(	processor_set_t		pset,
+								processor_t			processor,
+								thread_t			thread);
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_grrr_processor_enqueue</span>(
+							 processor_t			processor,
+							 thread_t			thread,
+							 integer_t			options);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_processor_queue_shutdown</span>(
+									 processor_t			processor);
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_grrr_processor_queue_remove</span>(
+						    processor_t			processor,
+							thread_t		thread);
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_grrr_processor_queue_empty</span>(processor_t		processor);
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_grrr_processor_queue_has_priority</span>(processor_t		processor,
+										 <span class="enscript-type">int</span>				priority,
+										 boolean_t		gte);
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_grrr_priority_is_urgent</span>(<span class="enscript-type">int</span> priority);
+
+<span class="enscript-type">static</span> ast_t
+<span class="enscript-function-name">sched_grrr_processor_csw_check</span>(processor_t processor);
+
+<span class="enscript-type">static</span> uint32_t
+<span class="enscript-function-name">sched_grrr_initial_quantum_size</span>(thread_t thread);
+
+<span class="enscript-type">static</span> sched_mode_t
+<span class="enscript-function-name">sched_grrr_initial_thread_sched_mode</span>(task_t parent_task);
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_grrr_can_update_priority</span>(thread_t	thread);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_update_priority</span>(thread_t	thread);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_lightweight_update_priority</span>(thread_t	thread);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sched_grrr_processor_runq_count</span>(processor_t	processor);
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">sched_grrr_processor_runq_stats_count_sum</span>(processor_t   processor);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sched_grrr_processor_bound_count</span>(processor_t	processor);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_thread_update_scan</span>(sched_update_scan_context_t scan_context);
+
+<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sched_dispatch_table sched_grrr_dispatch = {
+	.sched_name                                     = <span class="enscript-string">&quot;grrr&quot;</span>,
+	.init                                           = sched_grrr_init,
+	.timebase_init                                  = sched_grrr_timebase_init,
+	.processor_init                                 = sched_grrr_processor_init,
+	.pset_init                                      = sched_grrr_pset_init,
+	.maintenance_continuation                       = sched_grrr_maintenance_continuation,
+	.choose_thread                                  = sched_grrr_choose_thread,
+	.steal_thread_enabled                           = FALSE,
+	.steal_thread                                   = sched_grrr_steal_thread,
+	.compute_timeshare_priority                     = sched_grrr_compute_priority,
+	.choose_processor                               = sched_grrr_choose_processor,
+	.processor_enqueue                              = sched_grrr_processor_enqueue,
+	.processor_queue_shutdown                       = sched_grrr_processor_queue_shutdown,
+	.processor_queue_remove                         = sched_grrr_processor_queue_remove,
+	.processor_queue_empty                          = sched_grrr_processor_queue_empty,
+	.priority_is_urgent                             = sched_grrr_priority_is_urgent,
+	.processor_csw_check                            = sched_grrr_processor_csw_check,
+	.processor_queue_has_priority                   = sched_grrr_processor_queue_has_priority,
+	.initial_quantum_size                           = sched_grrr_initial_quantum_size,
+	.initial_thread_sched_mode                      = sched_grrr_initial_thread_sched_mode,
+	.can_update_priority                            = sched_grrr_can_update_priority,
+	.update_priority                                = sched_grrr_update_priority,
+	.lightweight_update_priority                    = sched_grrr_lightweight_update_priority,
+	.quantum_expire                                 = sched_default_quantum_expire,
+	.processor_runq_count                           = sched_grrr_processor_runq_count,
+	.processor_runq_stats_count_sum                 = sched_grrr_processor_runq_stats_count_sum,
+	.processor_bound_count                          = sched_grrr_processor_bound_count,
+	.thread_update_scan                             = sched_grrr_thread_update_scan,
+	.direct_dispatch_to_idle_processors             = TRUE,
+	.multiple_psets_enabled                         = TRUE,
+	.sched_groups_enabled                           = FALSE,
+};
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>	max_unsafe_quanta;
+
+<span class="enscript-type">static</span> uint32_t grrr_quantum_us;
+<span class="enscript-type">static</span> uint32_t grrr_quantum;
+
+<span class="enscript-type">static</span> uint64_t			sched_grrr_tick_deadline;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">if</span> (default_preemption_rate &lt; 1)
+		default_preemption_rate = 100;
+	grrr_quantum_us = (1000 * 1000) / default_preemption_rate;
+	
+	printf(<span class="enscript-string">&quot;standard grrr timeslicing quantum is %d us\n&quot;</span>, grrr_quantum_us);
+
+	grrr_priority_mapping_init();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_timebase_init</span>(<span class="enscript-type">void</span>)
+{
+	uint64_t	abstime;
+
+	<span class="enscript-comment">/* standard timeslicing quantum */</span>
+	clock_interval_to_absolutetime_interval(
+											grrr_quantum_us, NSEC_PER_USEC, &amp;abstime);
+	assert((abstime &gt;&gt; 32) == 0 &amp;&amp; (uint32_t)abstime != 0);
+	grrr_quantum = (uint32_t)abstime;
+	
+	thread_depress_time = 1 * grrr_quantum;
+	default_timeshare_computation = grrr_quantum / 2;
+	default_timeshare_constraint = grrr_quantum;
+	
+	max_unsafe_computation = max_unsafe_quanta * grrr_quantum;
+	sched_safe_duration = 2 * max_unsafe_quanta * grrr_quantum;
+
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_processor_init</span>(processor_t processor)
+{
+	grrr_runqueue_init(&amp;processor-&gt;grrr_runq);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_pset_init</span>(processor_set_t pset __unused)
+{
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_maintenance_continuation</span>(<span class="enscript-type">void</span>)
+{
+	uint64_t			abstime = mach_absolute_time();
+	
+	grrr_rescale_tick++;
+    
+	<span class="enscript-comment">/*
+	 *  Compute various averages.
+	 */</span>
+	compute_averages(1);
+	
+	<span class="enscript-keyword">if</span> (sched_grrr_tick_deadline == 0)
+		sched_grrr_tick_deadline = abstime;
+	
+	clock_deadline_for_periodic_event(10*sched_one_second_interval, abstime,
+						&amp;sched_grrr_tick_deadline);
+	
+	assert_wait_deadline((event_t)sched_grrr_maintenance_continuation, THREAD_UNINT, sched_grrr_tick_deadline);
+	thread_block((thread_continue_t)sched_grrr_maintenance_continuation);
+	<span class="enscript-comment">/*NOTREACHED*/</span>
+}
+
+
+<span class="enscript-type">static</span> thread_t
+<span class="enscript-function-name">sched_grrr_choose_thread</span>(processor_t		processor,
+						  <span class="enscript-type">int</span>				priority __unused,
+						  ast_t				reason __unused)
+{
+	grrr_run_queue_t		rq = &amp;processor-&gt;grrr_runq;
+	
+	<span class="enscript-keyword">return</span> 	grrr_select(rq);
+}
+
+<span class="enscript-type">static</span> thread_t
+<span class="enscript-function-name">sched_grrr_steal_thread</span>(processor_set_t		pset)
+{
+	pset_unlock(pset);
+	
+	<span class="enscript-keyword">return</span> (THREAD_NULL);
+	
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sched_grrr_compute_priority</span>(thread_t thread)
+{
+	<span class="enscript-keyword">return</span> thread-&gt;base_pri;
+}
+
+<span class="enscript-type">static</span> processor_t
+<span class="enscript-function-name">sched_grrr_choose_processor</span>(	processor_set_t		pset,
+							 processor_t			processor,
+							 thread_t			thread)
+{
+	<span class="enscript-keyword">return</span> choose_processor(pset, processor, thread);
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_grrr_processor_enqueue</span>(
+							 processor_t			processor,
+							 thread_t			thread,
+							 integer_t			options __unused)
+{
+	grrr_run_queue_t		rq = &amp;processor-&gt;grrr_runq;
+	boolean_t				result;
+	
+	result = grrr_enqueue(rq, thread);
+	
+	thread-&gt;runq = processor;
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_processor_queue_shutdown</span>(
+									 processor_t			processor)
+{
+	processor_set_t		pset = processor-&gt;processor_set;
+	thread_t			thread;
+	queue_head_t		tqueue, bqueue;
+	
+	queue_init(&amp;tqueue);
+	queue_init(&amp;bqueue);
+	
+	<span class="enscript-keyword">while</span> ((thread = sched_grrr_choose_thread(processor, IDLEPRI, AST_NONE)) != THREAD_NULL) {
+		<span class="enscript-keyword">if</span> (thread-&gt;bound_processor == PROCESSOR_NULL) {
+			enqueue_tail(&amp;tqueue, (queue_entry_t)thread);
+		} <span class="enscript-keyword">else</span> {
+			enqueue_tail(&amp;bqueue, (queue_entry_t)thread);				
+		}
+	}
+	
+	<span class="enscript-keyword">while</span> ((thread = (thread_t)(<span class="enscript-type">void</span> *)dequeue_head(&amp;bqueue)) != THREAD_NULL) {
+		sched_grrr_processor_enqueue(processor, thread, SCHED_TAILQ);
+	}	
+	
+	pset_unlock(pset);
+	
+	<span class="enscript-keyword">while</span> ((thread = (thread_t)(<span class="enscript-type">void</span> *)dequeue_head(&amp;tqueue)) != THREAD_NULL) {
+		thread_lock(thread);
+		
+		thread_setrun(thread, SCHED_TAILQ);
+		
+		thread_unlock(thread);
+	}
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_grrr_processor_queue_remove</span>(
+								processor_t			processor,
+								thread_t		thread)
+{
+	<span class="enscript-type">void</span> *			rqlock;
+	
+	rqlock = &amp;processor-&gt;processor_set-&gt;sched_lock;
+	simple_lock(rqlock);
+	
+	<span class="enscript-keyword">if</span> (processor == thread-&gt;runq) {
+		<span class="enscript-comment">/*
+		 *	Thread is on a run queue and we have a lock on
+		 *	that run queue.
+		 */</span>
+		grrr_run_queue_t		rq = &amp;processor-&gt;grrr_runq;
+
+		grrr_remove(rq, thread);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 *	The thread left the run queue before we could
+		 * 	lock the run queue.
+		 */</span>
+		assert(thread-&gt;runq == PROCESSOR_NULL);
+		processor = PROCESSOR_NULL;		
+	}
+	
+	simple_unlock(rqlock);
+	
+	<span class="enscript-keyword">return</span> (processor != PROCESSOR_NULL);	
+}
+				   
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_grrr_processor_queue_empty</span>(processor_t		processor __unused)
+{
+	boolean_t result;
+	
+	result = (processor-&gt;grrr_runq.count == 0);
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_grrr_processor_queue_has_priority</span>(processor_t		processor,
+										 <span class="enscript-type">int</span>				priority,
+										 boolean_t		gte __unused)
+{
+	grrr_run_queue_t		rq = &amp;processor-&gt;grrr_runq;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	i;
+
+	i = grrr_group_mapping[grrr_priority_mapping[priority]];
+	<span class="enscript-keyword">for</span> ( ; i &lt; NUM_GRRR_GROUPS; i++) {
+		<span class="enscript-keyword">if</span> (rq-&gt;groups[i].count &gt; 0)
+			<span class="enscript-keyword">return</span> (TRUE);
+	}
+	
+	<span class="enscript-keyword">return</span> (FALSE);
+}
+
+<span class="enscript-comment">/* Implement sched_preempt_pri in code */</span>
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_grrr_priority_is_urgent</span>(<span class="enscript-type">int</span> priority)
+{
+	<span class="enscript-keyword">if</span> (priority &lt;= BASEPRI_FOREGROUND)
+		<span class="enscript-keyword">return</span> FALSE;
+	
+	<span class="enscript-keyword">if</span> (priority &lt; MINPRI_KERNEL)
+		<span class="enscript-keyword">return</span> TRUE;
+
+	<span class="enscript-keyword">if</span> (priority &gt;= BASEPRI_PREEMPT)
+		<span class="enscript-keyword">return</span> TRUE;
+	
+	<span class="enscript-keyword">return</span> FALSE;
+}
+
+<span class="enscript-type">static</span> ast_t
+<span class="enscript-function-name">sched_grrr_processor_csw_check</span>(processor_t processor)
+{
+	<span class="enscript-type">int</span>				count;
+	
+	count = sched_grrr_processor_runq_count(processor);
+	
+	<span class="enscript-keyword">if</span> (count &gt; 0) {
+		
+		<span class="enscript-keyword">return</span> AST_PREEMPT;
+	}
+	
+	<span class="enscript-keyword">return</span> AST_NONE;
+}
+
+<span class="enscript-type">static</span> uint32_t
+<span class="enscript-function-name">sched_grrr_initial_quantum_size</span>(thread_t thread __unused)
+{
+	<span class="enscript-keyword">return</span> grrr_quantum;
+}
+
+<span class="enscript-type">static</span> sched_mode_t
+<span class="enscript-function-name">sched_grrr_initial_thread_sched_mode</span>(task_t parent_task)
+{
+	<span class="enscript-keyword">if</span> (parent_task == kernel_task)
+		<span class="enscript-keyword">return</span> TH_MODE_FIXED;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> TH_MODE_TIMESHARE;	
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_grrr_can_update_priority</span>(thread_t	thread __unused)
+{
+	<span class="enscript-keyword">return</span> FALSE;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_update_priority</span>(thread_t	thread __unused)
+{
+	
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_lightweight_update_priority</span>(thread_t	thread __unused)
+{
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sched_grrr_processor_runq_count</span>(processor_t	processor)
+{
+	<span class="enscript-keyword">return</span> processor-&gt;grrr_runq.count;
+}
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">sched_grrr_processor_runq_stats_count_sum</span>(processor_t	processor)
+{
+	<span class="enscript-keyword">return</span> processor-&gt;grrr_runq.runq_stats.count_sum;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sched_grrr_processor_bound_count</span>(__unused processor_t	processor)
+{
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_grrr_thread_update_scan</span>(__unused sched_update_scan_context_t scan_context)
+{
+
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(CONFIG_SCHED_GRRR) */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_GRRR_CORE</span>)
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">grrr_priority_mapping_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+	
+	<span class="enscript-comment">/* Map 0-&gt;0 up to 10-&gt;20 */</span>
+	<span class="enscript-keyword">for</span> (i=0; i &lt;= 10; i++) {
+		grrr_priority_mapping[i] = 2*i;
+	}
+	
+	<span class="enscript-comment">/* Map user priorities 11-&gt;33 up to 51 -&gt; 153 */</span>
+	<span class="enscript-keyword">for</span> (i=11; i &lt;= 51; i++) {
+		grrr_priority_mapping[i] = 3*i;
+	}
+	
+	<span class="enscript-comment">/* Map high priorities 52-&gt;180 up to 127-&gt;255 */</span>
+	<span class="enscript-keyword">for</span> (i=52; i &lt;= 127; i++) {
+		grrr_priority_mapping[i] = 128 + i;
+	}
+	
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; NUM_GRRR_PROPORTIONAL_PRIORITIES; i++) {
+		
+#<span class="enscript-reference">if</span> 0		
+		<span class="enscript-type">unsigned</span> j, k;
+		<span class="enscript-comment">/* Calculate log(i); */</span>
+		<span class="enscript-keyword">for</span> (j=0, k=1; k &lt;= i; j++, k *= 2);
+#<span class="enscript-reference">endif</span>
+		
+		<span class="enscript-comment">/* Groups of 4 */</span>
+		grrr_group_mapping[i] = i &gt;&gt; 2;
+	}
+	
+}
+
+<span class="enscript-type">static</span> thread_t
+<span class="enscript-function-name">grrr_intragroup_schedule</span>(grrr_group_t group)
+{
+	thread_t thread;
+
+	<span class="enscript-keyword">if</span> (group-&gt;count == 0) {
+		<span class="enscript-keyword">return</span> THREAD_NULL;
+	}
+	
+	thread = group-&gt;current_client;
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL) {
+		thread = (thread_t)(<span class="enscript-type">void</span> *)queue_first(&amp;group-&gt;clients);
+	}
+	
+	<span class="enscript-keyword">if</span> (1 <span class="enscript-comment">/* deficit */</span>) {
+		group-&gt;current_client = (thread_t)(<span class="enscript-type">void</span> *)queue_next((queue_entry_t)thread);
+		<span class="enscript-keyword">if</span> (queue_end(&amp;group-&gt;clients, (queue_entry_t)group-&gt;current_client)) {
+			group-&gt;current_client = (thread_t)(<span class="enscript-type">void</span> *)queue_first(&amp;group-&gt;clients);
+		}
+		
+		thread = group-&gt;current_client;
+	}
+	
+	<span class="enscript-keyword">return</span> thread;
+}
+
+<span class="enscript-type">static</span> thread_t
+<span class="enscript-function-name">grrr_intergroup_schedule</span>(grrr_run_queue_t rq)
+{
+	thread_t thread;
+	grrr_group_t group;
+	
+	<span class="enscript-keyword">if</span> (rq-&gt;count == 0) {
+		<span class="enscript-keyword">return</span> THREAD_NULL;
+	}
+	
+	group = rq-&gt;current_group;
+	
+	<span class="enscript-keyword">if</span> (group == GRRR_GROUP_NULL) {
+		group = (grrr_group_t)queue_first(&amp;rq-&gt;sorted_group_list);
+	}
+	
+	thread = grrr_intragroup_schedule(group);
+	
+	<span class="enscript-keyword">if</span> ((group-&gt;work &gt;= (UINT32_MAX-256)) || (rq-&gt;last_rescale_tick != grrr_rescale_tick)) {
+		grrr_rescale_work(rq);
+	}
+	group-&gt;work++;
+	
+	<span class="enscript-keyword">if</span> (queue_end(&amp;rq-&gt;sorted_group_list, queue_next((queue_entry_t)group))) {
+		<span class="enscript-comment">/* last group, go back to beginning */</span>
+		group = (grrr_group_t)queue_first(&amp;rq-&gt;sorted_group_list);
+	} <span class="enscript-keyword">else</span> {
+		grrr_group_t nextgroup = (grrr_group_t)queue_next((queue_entry_t)group);
+		uint64_t orderleft, orderright;
+		
+		<span class="enscript-comment">/*
+		 * The well-ordering condition for intergroup selection is:
+		 *
+		 * (group-&gt;work+1) / (nextgroup-&gt;work+1) &gt; (group-&gt;weight) / (nextgroup-&gt;weight)
+		 *
+		 * Multiply both sides by their denominators to avoid division
+		 *
+		 */</span>
+		orderleft = (group-&gt;work + 1) * ((uint64_t)nextgroup-&gt;weight);
+		orderright = (nextgroup-&gt;work + 1) * ((uint64_t)group-&gt;weight);
+		<span class="enscript-keyword">if</span> (orderleft &gt; orderright) {
+			group = nextgroup;
+		} <span class="enscript-keyword">else</span> {
+			group = (grrr_group_t)queue_first(&amp;rq-&gt;sorted_group_list);
+		}
+	}
+	
+	rq-&gt;current_group = group;
+	
+	<span class="enscript-keyword">return</span> thread;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">grrr_runqueue_init</span>(grrr_run_queue_t		runq)
+{
+	grrr_group_index_t index;
+	
+	runq-&gt;count = 0;
+	
+	<span class="enscript-keyword">for</span> (index = 0; index &lt; NUM_GRRR_GROUPS; index++) {
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> prisearch;
+
+		<span class="enscript-keyword">for</span> (prisearch = 0;
+			 prisearch &lt; NUM_GRRR_PROPORTIONAL_PRIORITIES;
+			 prisearch++) {
+			<span class="enscript-keyword">if</span> (grrr_group_mapping[prisearch] == index) {
+				runq-&gt;groups[index].minpriority = (grrr_proportional_priority_t)prisearch;
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+		
+		runq-&gt;groups[index].index = index;
+
+		queue_init(&amp;runq-&gt;groups[index].clients);
+		runq-&gt;groups[index].count = 0;
+		runq-&gt;groups[index].weight = 0;
+		runq-&gt;groups[index].work = 0;
+		runq-&gt;groups[index].current_client = THREAD_NULL;
+	}
+	
+	queue_init(&amp;runq-&gt;sorted_group_list);
+	runq-&gt;weight = 0;
+	runq-&gt;current_group = GRRR_GROUP_NULL;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">grrr_rescale_work</span>(grrr_run_queue_t rq)
+{
+	grrr_group_index_t index;
+
+	<span class="enscript-comment">/* avoid overflow by scaling by 1/8th */</span>
+	<span class="enscript-keyword">for</span> (index = 0; index &lt; NUM_GRRR_GROUPS; index++) {
+		rq-&gt;groups[index].work &gt;&gt;= 3;
+	}
+
+	rq-&gt;last_rescale_tick = grrr_rescale_tick;
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">grrr_enqueue</span>(
+							 grrr_run_queue_t			rq,
+							 thread_t			thread)
+{							 
+	grrr_proportional_priority_t	gpriority;
+	grrr_group_index_t		gindex;
+	grrr_group_t			group;
+
+	gpriority = grrr_priority_mapping[thread-&gt;sched_pri];
+	gindex = grrr_group_mapping[gpriority];
+	group = &amp;rq-&gt;groups[gindex];
+
+#<span class="enscript-reference">if</span> 0
+	thread-&gt;grrr_deficit = 0;
+#<span class="enscript-reference">endif</span>
+	
+	<span class="enscript-keyword">if</span> (group-&gt;count == 0) {
+		<span class="enscript-comment">/* Empty group, this is the first client */</span>
+		enqueue_tail(&amp;group-&gt;clients, (queue_entry_t)thread);
+		group-&gt;count = 1;
+		group-&gt;weight = gpriority;
+		group-&gt;current_client = thread;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* Insert before the current client */</span>
+		<span class="enscript-keyword">if</span> (group-&gt;current_client == THREAD_NULL ||
+			queue_first(&amp;group-&gt;clients) == (queue_entry_t)group-&gt;current_client) {
+			enqueue_head(&amp;group-&gt;clients, (queue_entry_t)thread);
+		} <span class="enscript-keyword">else</span> {
+			insque((queue_entry_t)thread, queue_prev((queue_entry_t)group-&gt;current_client));
+		}
+		SCHED_STATS_RUNQ_CHANGE(&amp;rq-&gt;runq_stats, rq-&gt;count);
+		group-&gt;count++;
+		group-&gt;weight += gpriority;
+
+		<span class="enscript-comment">/* Since there was already a client, this is on the per-processor sorted list already */</span>
+		remqueue((queue_entry_t)group);
+	}
+	
+	grrr_sorted_list_insert_group(rq, group);
+
+	rq-&gt;count++;
+	rq-&gt;weight += gpriority;
+	
+	<span class="enscript-keyword">return</span> (FALSE);
+}
+
+<span class="enscript-type">static</span> thread_t
+<span class="enscript-function-name">grrr_select</span>(grrr_run_queue_t	rq)
+{
+	thread_t		thread;
+
+	thread = grrr_intergroup_schedule(rq);
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL) {
+		grrr_proportional_priority_t	gpriority;
+		grrr_group_index_t		gindex;
+		grrr_group_t			group;
+		
+		gpriority = grrr_priority_mapping[thread-&gt;sched_pri];
+		gindex = grrr_group_mapping[gpriority];
+		group = &amp;rq-&gt;groups[gindex];
+		
+		remqueue((queue_entry_t)thread);
+		SCHED_STATS_RUNQ_CHANGE(&amp;rq-&gt;runq_stats, rq-&gt;count);
+		group-&gt;count--;
+		group-&gt;weight -= gpriority;
+		<span class="enscript-keyword">if</span> (group-&gt;current_client == thread) {
+			group-&gt;current_client = THREAD_NULL;
+		}
+		
+		remqueue((queue_entry_t)group);
+		<span class="enscript-keyword">if</span> (group-&gt;count == 0) {
+			<span class="enscript-keyword">if</span> (rq-&gt;current_group == group) {
+				rq-&gt;current_group = GRRR_GROUP_NULL;
+			}
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* Need to re-insert in sorted location */</span>
+			grrr_sorted_list_insert_group(rq, group);
+		}
+		
+		rq-&gt;count--;
+		rq-&gt;weight -= gpriority;
+		
+		thread-&gt;runq = PROCESSOR_NULL;
+	}		
+	
+	
+	<span class="enscript-keyword">return</span> (thread);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">grrr_remove</span>(
+								 grrr_run_queue_t			rq,
+								 thread_t		thread)
+{				   
+	grrr_proportional_priority_t	gpriority;
+	grrr_group_index_t		gindex;
+	grrr_group_t			group;
+	
+	gpriority = grrr_priority_mapping[thread-&gt;sched_pri];
+	gindex = grrr_group_mapping[gpriority];
+	group = &amp;rq-&gt;groups[gindex];
+	
+	remqueue((queue_entry_t)thread);
+	SCHED_STATS_RUNQ_CHANGE(&amp;rq-&gt;runq_stats, rq-&gt;count);
+	group-&gt;count--;
+	group-&gt;weight -= gpriority;
+	<span class="enscript-keyword">if</span> (group-&gt;current_client == thread) {
+		group-&gt;current_client = THREAD_NULL;
+	}
+	
+	remqueue((queue_entry_t)group);
+	<span class="enscript-keyword">if</span> (group-&gt;count == 0) {
+		<span class="enscript-keyword">if</span> (rq-&gt;current_group == group) {
+			rq-&gt;current_group = GRRR_GROUP_NULL;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* Need to re-insert in sorted location */</span>
+		grrr_sorted_list_insert_group(rq, group);
+	}
+	
+	rq-&gt;count--;
+	rq-&gt;weight -= gpriority;
+	
+	thread-&gt;runq = PROCESSOR_NULL;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">grrr_sorted_list_insert_group</span>(grrr_run_queue_t rq,
+												grrr_group_t group)
+{
+	<span class="enscript-comment">/* Simple insertion sort */</span>
+	<span class="enscript-keyword">if</span> (queue_empty(&amp;rq-&gt;sorted_group_list)) {
+		enqueue_tail(&amp;rq-&gt;sorted_group_list, (queue_entry_t)group);
+	} <span class="enscript-keyword">else</span> {
+		grrr_group_t search_group;
+		
+		<span class="enscript-comment">/* Start searching from the head (heaviest weight) for the first
+		 * element less than us, so we can insert before it
+		 */</span>
+		search_group = (grrr_group_t)queue_first(&amp;rq-&gt;sorted_group_list);
+		<span class="enscript-keyword">while</span> (!queue_end(&amp;rq-&gt;sorted_group_list, (queue_entry_t)search_group) ) {
+			
+			<span class="enscript-keyword">if</span> (search_group-&gt;weight &lt; group-&gt;weight) {
+				<span class="enscript-comment">/* we should be before this */</span>
+				search_group = (grrr_group_t)queue_prev((queue_entry_t)search_group);
+				<span class="enscript-keyword">break</span>;
+			} <span class="enscript-keyword">if</span> (search_group-&gt;weight == group-&gt;weight) {
+				<span class="enscript-comment">/* Use group index as a tie breaker */</span>
+				<span class="enscript-keyword">if</span> (search_group-&gt;index &lt; group-&gt;index) {
+					search_group = (grrr_group_t)queue_prev((queue_entry_t)search_group);
+					<span class="enscript-keyword">break</span>;
+				}
+			}
+			
+			<span class="enscript-comment">/* otherwise, our weight is too small, keep going */</span>
+			search_group = (grrr_group_t)queue_next((queue_entry_t)search_group);
+		}
+		
+		<span class="enscript-keyword">if</span> (queue_end(&amp;rq-&gt;sorted_group_list, (queue_entry_t)search_group)) {
+			enqueue_tail(&amp;rq-&gt;sorted_group_list, (queue_entry_t)group);
+		} <span class="enscript-keyword">else</span> {
+			insque((queue_entry_t)group, (queue_entry_t)search_group);
+		}
+	}
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(CONFIG_SCHED_GRRR_CORE) */</span>
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,4184 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kdebug.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kdebug.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+ *
+ * @Apple_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * &quot;License&quot;).  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * <a href="http://www.apple.com/publicsource">http://www.apple.com/publicsource</a> and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an &quot;AS IS&quot; basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/spl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/bsdtask_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/random.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stackshot.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">HZ</span>      100
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/clock_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/rtclock_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_routines.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/telemetry.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/lock.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ubc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>			<span class="enscript-comment">/* for isset() */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_host.h&gt;</span>		<span class="enscript-comment">/* for host_info() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/pal_routines.h&gt;</span>
+
+<span class="enscript-type">extern</span> boolean_t kdebug_serial;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KDEBUG_MOJO_TRACE</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebugevents.h&gt;</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kdebug_serial_print</span>(	<span class="enscript-comment">/* forward */</span>
+		uint32_t, uint32_t, uint64_t,
+		uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * IOP(s)
+ *
+ * <a href="https://coreoswiki.apple.com/wiki/pages/U6z3i0q9/Consistent_Logging_Implementers_Guide.html">https://coreoswiki.apple.com/wiki/pages/U6z3i0q9/Consistent_Logging_Implementers_Guide.html</a>
+ *
+ * IOP(s) are auxiliary cores that want to participate in kdebug event logging.
+ * They are registered dynamically. Each is assigned a cpu_id at registration.
+ *
+ * NOTE: IOP trace events may not use the same clock hardware as &quot;normal&quot;
+ * cpus. There is an effort made to synchronize the IOP timebase with the
+ * AP, but it should be understood that there may be discrepancies.
+ *
+ * Once registered, an IOP is permanent, it cannot be unloaded/unregistered.
+ * The current implementation depends on this for thread safety.
+ *
+ * New registrations occur by allocating an kd_iop struct and assigning
+ * a provisional cpu_id of list_head-&gt;cpu_id + 1. Then a CAS to claim the
+ * list_head pointer resolves any races.
+ *
+ * You may safely walk the kd_iops list at any time, without holding locks.
+ *
+ * When allocating buffers, the current kd_iops head is captured. Any operations
+ * that depend on the buffer state (such as flushing IOP traces on reads,
+ * etc.) should use the captured list head. This will allow registrations to
+ * take place while trace is in use.
+ */</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> kd_iop {
+	kd_callback_t	callback;
+	uint32_t	cpu_id;
+	uint64_t	last_timestamp; <span class="enscript-comment">/* Prevent timer rollback */</span>
+	<span class="enscript-type">struct</span> kd_iop*	next;
+} kd_iop_t;
+
+<span class="enscript-type">static</span> kd_iop_t* kd_iops = NULL;
+
+<span class="enscript-comment">/* XXX should have prototypes, but Mach does not provide one */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">task_act_iterate_wth_args</span>(task_t, <span class="enscript-type">void</span>(*)(thread_t, <span class="enscript-type">void</span> *), <span class="enscript-type">void</span> *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">cpu_number</span>(<span class="enscript-type">void</span>);	<span class="enscript-comment">/* XXX &lt;machine/...&gt; include path broken */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">commpage_update_kdebug_enable</span>(<span class="enscript-type">void</span>); <span class="enscript-comment">/* XXX sign */</span>
+
+<span class="enscript-comment">/* XXX should probably be static, but it's debugging code... */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_read</span>(user_addr_t, size_t *, vnode_t, vfs_context_t, uint32_t);
+<span class="enscript-type">void</span> <span class="enscript-function-name">kdbg_control_chud</span>(<span class="enscript-type">int</span>, <span class="enscript-type">void</span> *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_control</span>(<span class="enscript-type">int</span> *, u_int, user_addr_t, size_t *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_readcpumap</span>(user_addr_t, size_t *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_readcurcpumap</span>(user_addr_t, size_t *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_readthrmap</span>(user_addr_t, size_t *, vnode_t, vfs_context_t);
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_readthrmap_v3</span>(user_addr_t, size_t *, <span class="enscript-type">int</span>);
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_readcurthrmap</span>(user_addr_t, size_t *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_getreg</span>(kd_regtype *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_setreg</span>(kd_regtype *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_setrtcdec</span>(kd_regtype *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_setpidex</span>(kd_regtype *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_setpid</span>(kd_regtype *);
+<span class="enscript-type">void</span> <span class="enscript-function-name">kdbg_thrmap_init</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_reinit</span>(boolean_t);
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_bootstrap</span>(boolean_t);
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_cpumap_init_internal</span>(kd_iop_t* iops, uint32_t cpu_count,
+                              uint8_t** cpumap, uint32_t* cpumap_size);
+
+kd_threadmap* <span class="enscript-function-name">kdbg_thrmap_init_internal</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> count,
+                                        <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *mapsize,
+                                        <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *mapcount);
+
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">kdebug_current_proc_enabled</span>(uint32_t debugid);
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">kdebug_debugid_enabled</span>(uint32_t debugid);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">kdebug_check_trace_string</span>(uint32_t debugid, uint64_t str_id);
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_write_v3_header</span>(user_addr_t, size_t *, <span class="enscript-type">int</span>);
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_write_v3_chunk_header</span>(user_addr_t buffer, uint32_t tag,
+                               uint32_t sub_tag, uint64_t length,
+                               vnode_t vp, vfs_context_t ctx);
+
+user_addr_t <span class="enscript-function-name">kdbg_write_v3_event_chunk_header</span>(user_addr_t buffer, uint32_t tag,
+                                             uint64_t length, vnode_t vp,
+                                             vfs_context_t ctx);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_enable_typefilter</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_disable_typefilter</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_allocate_typefilter</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">kdbg_deallocate_typefilter</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">create_buffers</span>(boolean_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">delete_buffers</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">IOSleep</span>(<span class="enscript-type">int</span>);
+
+<span class="enscript-comment">/* trace enable status */</span>
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> kdebug_enable = 0;
+
+<span class="enscript-comment">/* A static buffer to record events prior to the start of regular logging */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">KD_EARLY_BUFFER_MAX</span>	 64
+<span class="enscript-type">static</span> kd_buf		kd_early_buffer[KD_EARLY_BUFFER_MAX];
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>		kd_early_index = 0;
+<span class="enscript-type">static</span> boolean_t	kd_early_overflow = FALSE;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SLOW_NOLOG</span>	0x01
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SLOW_CHECKS</span>	0x02
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SLOW_CHUD</span>	0x08
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">EVENTS_PER_STORAGE_UNIT</span>		2048
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MIN_STORAGE_UNITS_PER_CPU</span>	4
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">POINTER_FROM_KDS_PTR</span>(x) (&amp;kd_bufs[x.buffer_index].kdsb_addr[x.offset])
+
+<span class="enscript-type">union</span> kds_ptr {
+	<span class="enscript-type">struct</span> {
+		uint32_t buffer_index:21;
+		uint16_t offset:11;
+	};
+	uint32_t raw;
+};
+
+<span class="enscript-type">struct</span> kd_storage {
+	<span class="enscript-type">union</span>	kds_ptr kds_next;
+	uint32_t kds_bufindx;
+	uint32_t kds_bufcnt;
+	uint32_t kds_readlast;
+	boolean_t kds_lostevents;
+	uint64_t  kds_timestamp;
+
+	kd_buf	kds_records[EVENTS_PER_STORAGE_UNIT];
+};
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_BUFFER_SIZE</span>			(1024 * 1024 * 128)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">N_STORAGE_UNITS_PER_BUFFER</span>	(MAX_BUFFER_SIZE / sizeof(struct kd_storage))
+
+<span class="enscript-type">struct</span> kd_storage_buffers {
+	<span class="enscript-type">struct</span>	kd_storage	*kdsb_addr;
+	uint32_t		kdsb_size;
+};
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KDS_PTR_NULL</span> 0xffffffff
+<span class="enscript-type">struct</span> kd_storage_buffers *kd_bufs = NULL;
+<span class="enscript-type">int</span>	n_storage_units = 0;
+<span class="enscript-type">int</span>	n_storage_buffers = 0;
+<span class="enscript-type">int</span>	n_storage_threshold = 0;
+<span class="enscript-type">int</span>	kds_waiter = 0;
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">pack</span>(0)
+<span class="enscript-type">struct</span> kd_bufinfo {
+	<span class="enscript-type">union</span>  kds_ptr kd_list_head;
+	<span class="enscript-type">union</span>  kds_ptr kd_list_tail;
+	boolean_t kd_lostevents;
+	uint32_t _pad;
+	uint64_t kd_prev_timebase;
+	uint32_t num_bufs;
+} __attribute__(( aligned(MAX_CPU_CACHE_LINE_SIZE) ));
+
+
+<span class="enscript-comment">/*
+ * In principle, this control block can be shared in DRAM with other
+ * coprocessors and runtimes, for configuring what tracing is enabled.
+ */</span>
+<span class="enscript-type">struct</span> kd_ctrl_page_t {
+	<span class="enscript-type">union</span> kds_ptr kds_free_list;
+	uint32_t enabled	:1;
+	uint32_t _pad0		:31;
+	<span class="enscript-type">int</span>			kds_inuse_count;
+	uint32_t kdebug_flags;
+	uint32_t kdebug_slowcheck;
+	<span class="enscript-comment">/*
+	 * The number of kd_bufinfo structs allocated may not match the current
+	 * number of active cpus. We capture the iops list head at initialization
+	 * which we could use to calculate the number of cpus we allocated data for,
+	 * unless it happens to be null. To avoid that case, we explicitly also
+	 * capture a cpu count.
+	 */</span>
+	kd_iop_t* kdebug_iops;
+	uint32_t kdebug_cpus;
+} kd_ctrl_page = { .kds_free_list = {.raw = KDS_PTR_NULL}, .kdebug_slowcheck = SLOW_NOLOG };
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">pack</span>()
+
+<span class="enscript-type">struct</span> kd_bufinfo *kdbip = NULL;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KDCOPYBUF_COUNT</span>	8192
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KDCOPYBUF_SIZE</span>	(KDCOPYBUF_COUNT * sizeof(kd_buf))
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PAGE_4KB</span>	4096
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PAGE_16KB</span>	16384
+
+kd_buf *kdcopybuf = NULL;
+
+boolean_t kdlog_bg_trace = FALSE;
+boolean_t kdlog_bg_trace_running = FALSE;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> bg_nkdbufs = 0;
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> nkdbufs = 0;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> kdlog_beg=0;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> kdlog_end=0;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> kdlog_value1=0;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> kdlog_value2=0;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> kdlog_value3=0;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> kdlog_value4=0;
+
+<span class="enscript-type">static</span> lck_spin_t * kdw_spin_lock;
+<span class="enscript-type">static</span> lck_spin_t * kds_spin_lock;
+<span class="enscript-type">static</span> lck_mtx_t  * kd_trace_mtx_sysctl;
+<span class="enscript-type">static</span> lck_grp_t  * kd_trace_mtx_sysctl_grp;
+<span class="enscript-type">static</span> lck_attr_t * kd_trace_mtx_sysctl_attr;
+<span class="enscript-type">static</span> lck_grp_attr_t   *kd_trace_mtx_sysctl_grp_attr;
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">stack_snapshot2</span>(<span class="enscript-type">int</span> pid, user_addr_t tracebuf, uint32_t tracebuf_size, uint32_t flags, int32_t *retval);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TELEMETRY</span>
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">stack_microstackshot</span>(user_addr_t tracebuf, uint32_t tracebuf_size, uint32_t flags, int32_t *retval);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_TELEMETRY */</span>
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">kern_stack_snapshot_with_reason</span>(<span class="enscript-type">char</span>* reason);
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">kern_stack_snapshot_internal</span>(<span class="enscript-type">int</span> stackshot_config_version, <span class="enscript-type">void</span> *stackshot_config, size_t stackshot_config_size, boolean_t stackshot_from_user);
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">stack_snapshot_from_kernel_internal</span>(<span class="enscript-type">int</span> pid, <span class="enscript-type">void</span> *buf, uint32_t size, uint32_t flags, <span class="enscript-type">unsigned</span> *bytes_traced);
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">stack_snapshot_from_kernel</span>(pid_t pid, <span class="enscript-type">void</span> *buf, uint32_t size, uint32_t flags, <span class="enscript-type">unsigned</span> *bytes_traced);
+
+kd_threadmap *kd_mapptr = 0;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> kd_mapsize = 0;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> kd_mapcount = 0;
+
+off_t	RAW_file_offset = 0;
+<span class="enscript-type">int</span>	RAW_file_written = 0;
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">RAW_FLUSH_SIZE</span>	(2 * 1024 * 1024)
+
+pid_t global_state_pid = -1;       <span class="enscript-comment">/* Used to control exclusive use of kd_buffer */</span>
+
+<span class="enscript-comment">/*
+ * A globally increasing counter for identifying strings in trace.  Starts at
+ * 1 because 0 is a reserved return value.
+ */</span>
+<span class="enscript-function-name">__attribute__</span>((aligned(MAX_CPU_CACHE_LINE_SIZE)))
+<span class="enscript-type">static</span> uint64_t g_curr_str_id = 1;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">STR_ID_SIG_OFFSET</span> (48)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">STR_ID_MASK</span>       ((1ULL &lt;&lt; STR_ID_SIG_OFFSET) - 1)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">STR_ID_SIG_MASK</span>   (~STR_ID_MASK)
+
+<span class="enscript-comment">/*
+ * A bit pattern for identifying string IDs generated by
+ * kdebug_trace_string(2).
+ */</span>
+<span class="enscript-type">static</span> uint64_t g_str_id_signature = (0x70acULL &lt;&lt; STR_ID_SIG_OFFSET);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">INTERRUPT</span>	0x01050000
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MACH_vmfault</span>	0x01300008
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BSC_SysCall</span>	0x040c0000
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MACH_SysCall</span>	0x010c0000
+
+<span class="enscript-comment">/* task to string structure */</span>
+<span class="enscript-type">struct</span> tts
+{
+  task_t    task;            <span class="enscript-comment">/* from procs task */</span>
+  pid_t     pid;             <span class="enscript-comment">/* from procs p_pid  */</span>
+  <span class="enscript-type">char</span>      task_comm[20];   <span class="enscript-comment">/* from procs p_comm */</span>
+};
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> tts tts_t;
+
+<span class="enscript-type">struct</span> krt
+{
+	kd_threadmap *map;    <span class="enscript-comment">/* pointer to the map buffer */</span>
+	<span class="enscript-type">int</span> count;
+	<span class="enscript-type">int</span> maxcount;
+	<span class="enscript-type">struct</span> tts *atts;
+};
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> krt krt_t;
+
+<span class="enscript-comment">/* This is for the CHUD toolkit call */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">void</span> (*kd_chudhook_fn) (uint32_t debugid, uintptr_t arg1,
+				uintptr_t arg2, uintptr_t arg3,
+				uintptr_t arg4, uintptr_t arg5);
+
+<span class="enscript-type">volatile</span> kd_chudhook_fn kdebug_chudhook = 0;   <span class="enscript-comment">/* pointer to CHUD toolkit function */</span>
+
+<span class="enscript-type">static</span> uint8_t *type_filter_bitmap;
+
+<span class="enscript-comment">/*
+ * This allows kperf to swap out the global state pid when kperf ownership is
+ * passed from one process to another. It checks the old global state pid so
+ * that kperf can't accidentally steal control of trace when a non-kperf trace user has
+ * control of trace.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdbg_swap_global_state_pid</span>(pid_t old_pid, pid_t new_pid);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdbg_swap_global_state_pid</span>(pid_t old_pid, pid_t new_pid)
+{
+	<span class="enscript-keyword">if</span> (!(kd_ctrl_page.kdebug_flags &amp; KDBG_LOCKINIT))
+		<span class="enscript-keyword">return</span>;
+
+	lck_mtx_lock(kd_trace_mtx_sysctl);
+
+	<span class="enscript-keyword">if</span> (old_pid == global_state_pid)
+		global_state_pid = new_pid;
+
+	lck_mtx_unlock(kd_trace_mtx_sysctl);
+}
+
+<span class="enscript-type">static</span> uint32_t
+<span class="enscript-function-name">kdbg_cpu_count</span>(boolean_t early_trace)
+{
+	<span class="enscript-keyword">if</span> (early_trace) {
+		<span class="enscript-comment">/*
+		 * we've started tracing before the IOKit has even
+		 * started running... just use the static max value
+		 */</span>
+		<span class="enscript-keyword">return</span> max_ncpus;
+	}
+
+	host_basic_info_data_t hinfo;
+	mach_msg_type_number_t count = HOST_BASIC_INFO_COUNT;
+	host_info((host_t)1 <span class="enscript-comment">/* BSD_HOST */</span>, HOST_BASIC_INFO, (host_info_t)&amp;hinfo, &amp;count);
+	assert(hinfo.logical_cpu_max &gt; 0);
+	<span class="enscript-keyword">return</span> hinfo.logical_cpu_max;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MACH_ASSERT */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdbg_iop_list_callback</span>(kd_iop_t* iop, kd_callback_type type, <span class="enscript-type">void</span>* arg)
+{
+	<span class="enscript-keyword">while</span> (iop) {
+		iop-&gt;callback.func(iop-&gt;callback.context, type, arg);
+		iop = iop-&gt;next;
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdbg_set_tracing_enabled</span>(boolean_t enabled, uint32_t trace_type)
+{
+	<span class="enscript-type">int</span> s = ml_set_interrupts_enabled(FALSE);
+	lck_spin_lock(kds_spin_lock);
+	<span class="enscript-keyword">if</span> (enabled) {
+		kdebug_enable |= trace_type;
+		kd_ctrl_page.kdebug_slowcheck &amp;= ~SLOW_NOLOG;
+		kd_ctrl_page.enabled = 1;
+		commpage_update_kdebug_enable();
+	} <span class="enscript-keyword">else</span> {
+		kdebug_enable &amp;= ~(KDEBUG_ENABLE_TRACE|KDEBUG_ENABLE_PPT);
+		kd_ctrl_page.kdebug_slowcheck |= SLOW_NOLOG;
+		kd_ctrl_page.enabled = 0;
+		commpage_update_kdebug_enable();
+	}
+	lck_spin_unlock(kds_spin_lock);
+	ml_set_interrupts_enabled(s);
+
+	<span class="enscript-keyword">if</span> (enabled) {
+		kdbg_iop_list_callback(kd_ctrl_page.kdebug_iops, KD_CALLBACK_KDEBUG_ENABLED, NULL);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * If you do not flush the IOP trace buffers, they can linger
+		 * for a considerable period; consider code which disables and
+		 * deallocates without a final sync flush.
+		 */</span>
+		kdbg_iop_list_callback(kd_ctrl_page.kdebug_iops, KD_CALLBACK_KDEBUG_DISABLED, NULL);
+		kdbg_iop_list_callback(kd_ctrl_page.kdebug_iops, KD_CALLBACK_SYNC_FLUSH, NULL);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdbg_set_flags</span>(<span class="enscript-type">int</span> slowflag, <span class="enscript-type">int</span> enableflag, boolean_t enabled)
+{
+	<span class="enscript-type">int</span> s = ml_set_interrupts_enabled(FALSE);
+	lck_spin_lock(kds_spin_lock);
+
+	<span class="enscript-keyword">if</span> (enabled) {
+		kd_ctrl_page.kdebug_slowcheck |= slowflag;
+		kdebug_enable |= enableflag;
+	} <span class="enscript-keyword">else</span> {
+		kd_ctrl_page.kdebug_slowcheck &amp;= ~slowflag;
+		kdebug_enable &amp;= ~enableflag;
+	}
+        
+	lck_spin_unlock(kds_spin_lock);
+	ml_set_interrupts_enabled(s);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">disable_wrap</span>(uint32_t *old_slowcheck, uint32_t *old_flags)
+{
+	<span class="enscript-type">int</span> s = ml_set_interrupts_enabled(FALSE);
+	lck_spin_lock(kds_spin_lock);
+
+	*old_slowcheck = kd_ctrl_page.kdebug_slowcheck;
+	*old_flags = kd_ctrl_page.kdebug_flags;
+
+	kd_ctrl_page.kdebug_flags &amp;= ~KDBG_WRAPPED;
+	kd_ctrl_page.kdebug_flags |= KDBG_NOWRAP;
+
+	lck_spin_unlock(kds_spin_lock);
+	ml_set_interrupts_enabled(s);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">enable_wrap</span>(uint32_t old_slowcheck, boolean_t lostevents)
+{
+	<span class="enscript-type">int</span> s = ml_set_interrupts_enabled(FALSE);
+	lck_spin_lock(kds_spin_lock);
+
+	kd_ctrl_page.kdebug_flags &amp;= ~KDBG_NOWRAP;
+
+	<span class="enscript-keyword">if</span> ( !(old_slowcheck &amp; SLOW_NOLOG))
+		kd_ctrl_page.kdebug_slowcheck &amp;= ~SLOW_NOLOG;
+
+	<span class="enscript-keyword">if</span> (lostevents == TRUE)
+		kd_ctrl_page.kdebug_flags |= KDBG_WRAPPED;
+
+	lck_spin_unlock(kds_spin_lock);
+	ml_set_interrupts_enabled(s);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">create_buffers</span>(boolean_t early_trace)
+{
+        <span class="enscript-type">int</span>	i;
+	<span class="enscript-type">int</span>	p_buffer_size;
+	<span class="enscript-type">int</span>	f_buffer_size;
+	<span class="enscript-type">int</span>	f_buffers;
+	<span class="enscript-type">int</span>	error = 0;
+
+	<span class="enscript-comment">/*
+	 * For the duration of this allocation, trace code will only reference
+	 * kdebug_iops. Any iops registered after this enabling will not be
+	 * messaged until the buffers are reallocated.
+	 *
+	 * TLDR; Must read kd_iops once and only once!
+	 */</span>
+	kd_ctrl_page.kdebug_iops = kd_iops;
+
+
+	<span class="enscript-comment">/*
+	 * If the list is valid, it is sorted, newest -&gt; oldest. Each iop entry
+	 * has a cpu_id of &quot;the older entry + 1&quot;, so the highest cpu_id will
+	 * be the list head + 1.
+	 */</span>
+
+	kd_ctrl_page.kdebug_cpus = kd_ctrl_page.kdebug_iops ? kd_ctrl_page.kdebug_iops-&gt;cpu_id + 1 : kdbg_cpu_count(early_trace);
+
+	<span class="enscript-keyword">if</span> (kmem_alloc(kernel_map, (vm_offset_t *)&amp;kdbip, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kd_bufinfo) * kd_ctrl_page.kdebug_cpus, VM_KERN_MEMORY_DIAG) != KERN_SUCCESS) {
+		error = ENOSPC;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (nkdbufs &lt; (kd_ctrl_page.kdebug_cpus * EVENTS_PER_STORAGE_UNIT * MIN_STORAGE_UNITS_PER_CPU))
+		n_storage_units = kd_ctrl_page.kdebug_cpus * MIN_STORAGE_UNITS_PER_CPU;
+	<span class="enscript-keyword">else</span>
+		n_storage_units = nkdbufs / EVENTS_PER_STORAGE_UNIT;
+
+	nkdbufs = n_storage_units * EVENTS_PER_STORAGE_UNIT;
+
+	f_buffers = n_storage_units / N_STORAGE_UNITS_PER_BUFFER;
+	n_storage_buffers = f_buffers;
+
+	f_buffer_size = N_STORAGE_UNITS_PER_BUFFER * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kd_storage);
+	p_buffer_size = (n_storage_units % N_STORAGE_UNITS_PER_BUFFER) * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kd_storage);
+
+	<span class="enscript-keyword">if</span> (p_buffer_size)
+		n_storage_buffers++;
+
+	kd_bufs = NULL;
+
+	<span class="enscript-keyword">if</span> (kdcopybuf == 0) {
+	        <span class="enscript-keyword">if</span> (kmem_alloc(kernel_map, (vm_offset_t *)&amp;kdcopybuf, (vm_size_t)KDCOPYBUF_SIZE, VM_KERN_MEMORY_DIAG) != KERN_SUCCESS) {
+			error = ENOSPC;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (kmem_alloc(kernel_map, (vm_offset_t *)&amp;kd_bufs, (vm_size_t)(n_storage_buffers * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kd_storage_buffers)), VM_KERN_MEMORY_DIAG) != KERN_SUCCESS) {
+		error = ENOSPC;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	bzero(kd_bufs, n_storage_buffers * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kd_storage_buffers));
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; f_buffers; i++) {
+		<span class="enscript-keyword">if</span> (kmem_alloc(kernel_map, (vm_offset_t *)&amp;kd_bufs[i].kdsb_addr, (vm_size_t)f_buffer_size, VM_KERN_MEMORY_DIAG) != KERN_SUCCESS) {
+			error = ENOSPC;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		bzero(kd_bufs[i].kdsb_addr, f_buffer_size);
+
+		kd_bufs[i].kdsb_size = f_buffer_size;
+	}
+	<span class="enscript-keyword">if</span> (p_buffer_size) {
+		<span class="enscript-keyword">if</span> (kmem_alloc(kernel_map, (vm_offset_t *)&amp;kd_bufs[i].kdsb_addr, (vm_size_t)p_buffer_size, VM_KERN_MEMORY_DIAG) != KERN_SUCCESS) {
+			error = ENOSPC;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		bzero(kd_bufs[i].kdsb_addr, p_buffer_size);
+
+		kd_bufs[i].kdsb_size = p_buffer_size;
+	}
+	n_storage_units = 0;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; n_storage_buffers; i++) {
+		<span class="enscript-type">struct</span> kd_storage *kds;
+		<span class="enscript-type">int</span>	n_elements;
+		<span class="enscript-type">int</span>	n;
+
+		n_elements = kd_bufs[i].kdsb_size / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kd_storage);
+		kds = kd_bufs[i].kdsb_addr;
+
+		<span class="enscript-keyword">for</span> (n = 0; n &lt; n_elements; n++) {
+			kds[n].kds_next.buffer_index = kd_ctrl_page.kds_free_list.buffer_index;
+			kds[n].kds_next.offset = kd_ctrl_page.kds_free_list.offset;
+
+			kd_ctrl_page.kds_free_list.buffer_index = i;
+			kd_ctrl_page.kds_free_list.offset = n;
+		}
+		n_storage_units += n_elements;
+	}
+
+	bzero((<span class="enscript-type">char</span> *)kdbip, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kd_bufinfo) * kd_ctrl_page.kdebug_cpus);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; (<span class="enscript-type">int</span>)kd_ctrl_page.kdebug_cpus; i++) {
+		kdbip[i].kd_list_head.raw = KDS_PTR_NULL;
+		kdbip[i].kd_list_tail.raw = KDS_PTR_NULL;
+		kdbip[i].kd_lostevents = FALSE;
+		kdbip[i].num_bufs = 0;
+	}
+        
+	kd_ctrl_page.kdebug_flags |= KDBG_BUFINIT;
+
+	kd_ctrl_page.kds_inuse_count = 0;
+	n_storage_threshold = n_storage_units / 2;
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (error)
+		delete_buffers();
+
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">delete_buffers</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> i;
+	
+	<span class="enscript-keyword">if</span> (kd_bufs) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; n_storage_buffers; i++) {
+			<span class="enscript-keyword">if</span> (kd_bufs[i].kdsb_addr) {
+				kmem_free(kernel_map, (vm_offset_t)kd_bufs[i].kdsb_addr, (vm_size_t)kd_bufs[i].kdsb_size);
+			}
+		}
+		kmem_free(kernel_map, (vm_offset_t)kd_bufs, (vm_size_t)(n_storage_buffers * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kd_storage_buffers)));
+
+		kd_bufs = NULL;
+		n_storage_buffers = 0;
+	}
+	<span class="enscript-keyword">if</span> (kdcopybuf) {
+		kmem_free(kernel_map, (vm_offset_t)kdcopybuf, KDCOPYBUF_SIZE);
+
+		kdcopybuf = NULL;
+	}
+	kd_ctrl_page.kds_free_list.raw = KDS_PTR_NULL;
+
+	<span class="enscript-keyword">if</span> (kdbip) {
+		kmem_free(kernel_map, (vm_offset_t)kdbip, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kd_bufinfo) * kd_ctrl_page.kdebug_cpus);
+		
+		kdbip = NULL;
+	}
+        kd_ctrl_page.kdebug_iops = NULL;
+	kd_ctrl_page.kdebug_cpus = 0;
+	kd_ctrl_page.kdebug_flags &amp;= ~KDBG_BUFINIT;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">release_storage_unit</span>(<span class="enscript-type">int</span> cpu, uint32_t kdsp_raw)
+{
+	<span class="enscript-type">int</span> s = 0;
+	<span class="enscript-type">struct</span>	kd_storage *kdsp_actual;
+	<span class="enscript-type">struct</span> kd_bufinfo *kdbp;
+	<span class="enscript-type">union</span> kds_ptr kdsp;
+
+	kdsp.raw = kdsp_raw;
+
+	s = ml_set_interrupts_enabled(FALSE);
+	lck_spin_lock(kds_spin_lock);
+
+	kdbp = &amp;kdbip[cpu];
+
+	<span class="enscript-keyword">if</span> (kdsp.raw == kdbp-&gt;kd_list_head.raw) {
+		<span class="enscript-comment">/*
+		 * it's possible for the storage unit pointed to
+		 * by kdsp to have already been stolen... so
+		 * check to see if it's still the head of the list
+		 * now that we're behind the lock that protects 
+		 * adding and removing from the queue...
+		 * since we only ever release and steal units from
+		 * that position, if it's no longer the head
+		 * we having nothing to do in this context
+		 */</span>
+		kdsp_actual = POINTER_FROM_KDS_PTR(kdsp);
+		kdbp-&gt;kd_list_head = kdsp_actual-&gt;kds_next;
+
+		kdsp_actual-&gt;kds_next = kd_ctrl_page.kds_free_list;
+		kd_ctrl_page.kds_free_list = kdsp;
+
+		kd_ctrl_page.kds_inuse_count--;
+	}
+	lck_spin_unlock(kds_spin_lock);
+	ml_set_interrupts_enabled(s);
+}
+
+
+boolean_t
+<span class="enscript-function-name">allocate_storage_unit</span>(<span class="enscript-type">int</span> cpu)
+{
+	<span class="enscript-type">union</span>	kds_ptr kdsp;
+	<span class="enscript-type">struct</span>	kd_storage *kdsp_actual, *kdsp_next_actual;
+	<span class="enscript-type">struct</span>  kd_bufinfo *kdbp, *kdbp_vict, *kdbp_try;
+	uint64_t	oldest_ts, ts;
+	boolean_t	retval = TRUE;
+	<span class="enscript-type">int</span>			s = 0;
+		
+	s = ml_set_interrupts_enabled(FALSE);
+	lck_spin_lock(kds_spin_lock);
+
+	kdbp = &amp;kdbip[cpu];
+
+	<span class="enscript-comment">/* If someone beat us to the allocate, return success */</span>
+	<span class="enscript-keyword">if</span> (kdbp-&gt;kd_list_tail.raw != KDS_PTR_NULL) {
+		kdsp_actual = POINTER_FROM_KDS_PTR(kdbp-&gt;kd_list_tail);
+
+		<span class="enscript-keyword">if</span> (kdsp_actual-&gt;kds_bufindx &lt; EVENTS_PER_STORAGE_UNIT)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	
+	<span class="enscript-keyword">if</span> ((kdsp = kd_ctrl_page.kds_free_list).raw != KDS_PTR_NULL) {
+		kdsp_actual = POINTER_FROM_KDS_PTR(kdsp);
+		kd_ctrl_page.kds_free_list = kdsp_actual-&gt;kds_next;
+
+		kd_ctrl_page.kds_inuse_count++;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_NOWRAP) {
+			kd_ctrl_page.kdebug_slowcheck |= SLOW_NOLOG;
+			kdbp-&gt;kd_lostevents = TRUE;
+			retval = FALSE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		kdbp_vict = NULL;
+		oldest_ts = (uint64_t)-1;
+
+		<span class="enscript-keyword">for</span> (kdbp_try = &amp;kdbip[0]; kdbp_try &lt; &amp;kdbip[kd_ctrl_page.kdebug_cpus]; kdbp_try++) {
+
+			<span class="enscript-keyword">if</span> (kdbp_try-&gt;kd_list_head.raw == KDS_PTR_NULL) {
+				<span class="enscript-comment">/*
+				 * no storage unit to steal
+				 */</span>
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			kdsp_actual = POINTER_FROM_KDS_PTR(kdbp_try-&gt;kd_list_head);
+
+			<span class="enscript-keyword">if</span> (kdsp_actual-&gt;kds_bufcnt &lt; EVENTS_PER_STORAGE_UNIT) {
+				<span class="enscript-comment">/*
+				 * make sure we don't steal the storage unit
+				 * being actively recorded to...  need to
+				 * move on because we don't want an out-of-order
+				 * set of events showing up later
+				 */</span>
+				<span class="enscript-keyword">continue</span>;
+			}
+			ts = kdbg_get_timestamp(&amp;kdsp_actual-&gt;kds_records[0]);
+
+			<span class="enscript-keyword">if</span> (ts &lt; oldest_ts) {
+				<span class="enscript-comment">/*
+				 * when 'wrapping', we want to steal the
+				 * storage unit that has the 'earliest' time
+				 * associated with it (first event time)
+				 */</span>
+				oldest_ts = ts;
+				kdbp_vict = kdbp_try;
+			}
+		}
+		<span class="enscript-keyword">if</span> (kdbp_vict == NULL) {
+			kdebug_enable = 0;
+			kd_ctrl_page.enabled = 0;
+			commpage_update_kdebug_enable();
+			retval = FALSE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		kdsp = kdbp_vict-&gt;kd_list_head;
+		kdsp_actual = POINTER_FROM_KDS_PTR(kdsp);
+		kdbp_vict-&gt;kd_list_head = kdsp_actual-&gt;kds_next;
+
+		<span class="enscript-keyword">if</span> (kdbp_vict-&gt;kd_list_head.raw != KDS_PTR_NULL) {
+			kdsp_next_actual = POINTER_FROM_KDS_PTR(kdbp_vict-&gt;kd_list_head);
+			kdsp_next_actual-&gt;kds_lostevents = TRUE;
+		} <span class="enscript-keyword">else</span>
+			kdbp_vict-&gt;kd_lostevents = TRUE;
+
+		kd_ctrl_page.kdebug_flags |= KDBG_WRAPPED;
+	}
+	kdsp_actual-&gt;kds_timestamp = mach_absolute_time();
+	kdsp_actual-&gt;kds_next.raw = KDS_PTR_NULL;
+	kdsp_actual-&gt;kds_bufcnt	  = 0;
+	kdsp_actual-&gt;kds_readlast = 0;
+
+	kdsp_actual-&gt;kds_lostevents = kdbp-&gt;kd_lostevents;
+	kdbp-&gt;kd_lostevents = FALSE;
+	kdsp_actual-&gt;kds_bufindx  = 0;
+
+	<span class="enscript-keyword">if</span> (kdbp-&gt;kd_list_head.raw == KDS_PTR_NULL)
+		kdbp-&gt;kd_list_head = kdsp;
+	<span class="enscript-keyword">else</span>
+		POINTER_FROM_KDS_PTR(kdbp-&gt;kd_list_tail)-&gt;kds_next = kdsp;
+	kdbp-&gt;kd_list_tail = kdsp;
+<span class="enscript-reference">out</span>:
+	lck_spin_unlock(kds_spin_lock);
+	ml_set_interrupts_enabled(s);
+
+	<span class="enscript-keyword">return</span> (retval);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kernel_debug_register_callback</span>(kd_callback_t callback)
+{
+	kd_iop_t* iop;
+	<span class="enscript-keyword">if</span> (kmem_alloc(kernel_map, (vm_offset_t *)&amp;iop, <span class="enscript-keyword">sizeof</span>(kd_iop_t), VM_KERN_MEMORY_DIAG) == KERN_SUCCESS) {
+		memcpy(&amp;iop-&gt;callback, &amp;callback, <span class="enscript-keyword">sizeof</span>(kd_callback_t));
+		
+		<span class="enscript-comment">/*
+		 * &lt;rdar://problem/13351477&gt; Some IOP clients are not providing a name.
+		 *
+		 * Remove when fixed.
+		 */</span>
+		{
+			boolean_t is_valid_name = FALSE;
+			<span class="enscript-keyword">for</span> (uint32_t length=0; length&lt;<span class="enscript-keyword">sizeof</span>(callback.iop_name); ++length) {
+				<span class="enscript-comment">/* This is roughly isprintable(c) */</span>
+				<span class="enscript-keyword">if</span> (callback.iop_name[length] &gt; 0x20 &amp;&amp; callback.iop_name[length] &lt; 0x7F)
+					<span class="enscript-keyword">continue</span>;
+				<span class="enscript-keyword">if</span> (callback.iop_name[length] == 0) {
+					<span class="enscript-keyword">if</span> (length)
+						is_valid_name = TRUE;
+					<span class="enscript-keyword">break</span>;
+				}
+			}
+			
+			<span class="enscript-keyword">if</span> (!is_valid_name) {
+				strlcpy(iop-&gt;callback.iop_name, <span class="enscript-string">&quot;IOP-???&quot;</span>, <span class="enscript-keyword">sizeof</span>(iop-&gt;callback.iop_name));
+			}
+		}
+
+		iop-&gt;last_timestamp = 0;
+		
+		<span class="enscript-keyword">do</span> {
+			<span class="enscript-comment">/*
+			 * We use two pieces of state, the old list head
+			 * pointer, and the value of old_list_head-&gt;cpu_id.
+			 * If we read kd_iops more than once, it can change
+			 * between reads.
+			 *
+			 * TLDR; Must not read kd_iops more than once per loop.
+			 */</span>
+			iop-&gt;next = kd_iops;
+			iop-&gt;cpu_id = iop-&gt;next ? (iop-&gt;next-&gt;cpu_id+1) : kdbg_cpu_count(FALSE);
+
+			<span class="enscript-comment">/*
+			 * Header says OSCompareAndSwapPtr has a memory barrier
+			 */</span>
+		} <span class="enscript-keyword">while</span> (!OSCompareAndSwapPtr(iop-&gt;next, iop, (<span class="enscript-type">void</span>* <span class="enscript-type">volatile</span>*)&amp;kd_iops));
+
+		<span class="enscript-keyword">return</span> iop-&gt;cpu_id;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kernel_debug_enter</span>(
+	uint32_t	coreid,
+	uint32_t	debugid,
+	uint64_t	timestamp,
+	uintptr_t	arg1,
+	uintptr_t	arg2,
+	uintptr_t	arg3,
+	uintptr_t	arg4,
+	uintptr_t	threadid
+	)
+{
+	uint32_t	bindx;
+	kd_buf		*kd;
+	<span class="enscript-type">struct</span> kd_bufinfo *kdbp;
+	<span class="enscript-type">struct</span> kd_storage *kdsp_actual;
+	<span class="enscript-type">union</span>  kds_ptr kds_raw;
+
+	<span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_slowcheck) {
+
+		<span class="enscript-keyword">if</span> ( (kd_ctrl_page.kdebug_slowcheck &amp; SLOW_NOLOG) || !(kdebug_enable &amp; (KDEBUG_ENABLE_TRACE|KDEBUG_ENABLE_PPT)))
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out1</span>;
+	
+		<span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_TYPEFILTER_CHECK) {
+			<span class="enscript-comment">/*
+			 * Recheck if TYPEFILTER is being used, and if so,
+			 * dereference bitmap. If the trace facility is being
+			 * disabled, we have ~100ms of preemption-free CPU
+			 * usage to access the bitmap.
+			 */</span>
+			disable_preemption();
+			<span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_TYPEFILTER_CHECK) {
+				<span class="enscript-keyword">if</span> (isset(type_filter_bitmap, KDBG_EXTRACT_CSC(debugid)))
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">record_event_preempt_disabled</span>;
+			}
+			enable_preemption();
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out1</span>;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_RANGECHECK) {
+			<span class="enscript-keyword">if</span> (debugid &gt;= kdlog_beg &amp;&amp; debugid &lt;= kdlog_end)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">record_event</span>;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out1</span>;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_VALCHECK) {
+			<span class="enscript-keyword">if</span> ((debugid &amp; KDBG_EVENTID_MASK) != kdlog_value1 &amp;&amp;
+				(debugid &amp; KDBG_EVENTID_MASK) != kdlog_value2 &amp;&amp;
+				(debugid &amp; KDBG_EVENTID_MASK) != kdlog_value3 &amp;&amp;
+				(debugid &amp; KDBG_EVENTID_MASK) != kdlog_value4)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out1</span>;
+		}
+	}
+	
+<span class="enscript-reference">record_event</span>:
+
+	disable_preemption();
+
+<span class="enscript-reference">record_event_preempt_disabled</span>:
+	<span class="enscript-keyword">if</span> (kd_ctrl_page.enabled == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	kdbp = &amp;kdbip[coreid];
+	timestamp &amp;= KDBG_TIMESTAMP_MASK;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KDEBUG_MOJO_TRACE</span>
+	<span class="enscript-keyword">if</span> (kdebug_enable &amp; KDEBUG_ENABLE_SERIAL)
+		kdebug_serial_print(coreid, debugid, timestamp,
+				    arg1, arg2, arg3, arg4, threadid);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-reference">retry_q</span>:
+	kds_raw = kdbp-&gt;kd_list_tail;
+
+	<span class="enscript-keyword">if</span> (kds_raw.raw != KDS_PTR_NULL) {
+		kdsp_actual = POINTER_FROM_KDS_PTR(kds_raw);
+		bindx = kdsp_actual-&gt;kds_bufindx;
+	} <span class="enscript-keyword">else</span>
+		kdsp_actual = NULL;
+	
+	<span class="enscript-keyword">if</span> (kdsp_actual == NULL || bindx &gt;= EVENTS_PER_STORAGE_UNIT) {
+		<span class="enscript-keyword">if</span> (allocate_storage_unit(coreid) == FALSE) {
+			<span class="enscript-comment">/*
+			 * this can only happen if wrapping
+			 * has been disabled
+			 */</span>
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry_q</span>;
+	}
+	<span class="enscript-keyword">if</span> ( !OSCompareAndSwap(bindx, bindx + 1, &amp;kdsp_actual-&gt;kds_bufindx))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry_q</span>;
+
+	<span class="enscript-comment">// IOP entries can be allocated before xnu allocates and inits the buffer
+</span>	<span class="enscript-keyword">if</span> (timestamp &lt; kdsp_actual-&gt;kds_timestamp)
+		kdsp_actual-&gt;kds_timestamp = timestamp;
+
+	kd = &amp;kdsp_actual-&gt;kds_records[bindx];
+
+	kd-&gt;debugid = debugid;
+	kd-&gt;arg1 = arg1;
+	kd-&gt;arg2 = arg2;
+	kd-&gt;arg3 = arg3;
+	kd-&gt;arg4 = arg4;
+	kd-&gt;arg5 = threadid;
+	          
+	kdbg_set_timestamp_and_cpu(kd, timestamp, coreid);
+
+	OSAddAtomic(1, &amp;kdsp_actual-&gt;kds_bufcnt);
+<span class="enscript-reference">out</span>:
+	enable_preemption();
+<span class="enscript-reference">out1</span>:
+	<span class="enscript-keyword">if</span> ((kds_waiter &amp;&amp; kd_ctrl_page.kds_inuse_count &gt;= n_storage_threshold)) {
+		boolean_t need_kds_wakeup = FALSE;
+		<span class="enscript-type">int</span>	s;
+
+		<span class="enscript-comment">/*
+		 * try to take the lock here to synchronize with the
+		 * waiter entering the blocked state... use the try
+		 * mode to prevent deadlocks caused by re-entering this
+		 * routine due to various trace points triggered in the
+		 * lck_spin_sleep_xxxx routines used to actually enter
+		 * our wait condition... no problem if we fail,
+		 * there will be lots of additional events coming in that
+		 * will eventually succeed in grabbing this lock
+		 */</span>
+		s = ml_set_interrupts_enabled(FALSE);
+
+		<span class="enscript-keyword">if</span> (lck_spin_try_lock(kdw_spin_lock)) {
+
+			<span class="enscript-keyword">if</span> (kds_waiter &amp;&amp; kd_ctrl_page.kds_inuse_count &gt;= n_storage_threshold) {
+				kds_waiter = 0;
+				need_kds_wakeup = TRUE;
+			}
+			lck_spin_unlock(kdw_spin_lock);
+
+			ml_set_interrupts_enabled(s);
+			
+			<span class="enscript-keyword">if</span> (need_kds_wakeup == TRUE)
+				wakeup(&amp;kds_waiter);
+		}
+	}
+}
+
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kernel_debug_internal</span>(
+	uint32_t	debugid,
+	uintptr_t	arg1,
+	uintptr_t	arg2,
+	uintptr_t	arg3,
+	uintptr_t	arg4,
+	uintptr_t	arg5)
+{
+	<span class="enscript-type">struct</span> proc 	*curproc;
+	uint64_t 	now;
+	uint32_t	bindx;
+	boolean_t	s;
+	kd_buf		*kd;
+	<span class="enscript-type">int</span>		cpu;
+	<span class="enscript-type">struct</span> kd_bufinfo *kdbp;
+	<span class="enscript-type">struct</span> kd_storage *kdsp_actual;
+	<span class="enscript-type">union</span>  kds_ptr kds_raw;
+
+	
+
+	<span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_slowcheck) {
+
+		<span class="enscript-keyword">if</span> (kdebug_enable &amp; KDEBUG_ENABLE_CHUD) {
+			kd_chudhook_fn chudhook;
+			<span class="enscript-comment">/*
+			 * Mask interrupts to minimize the interval across
+			 * which the driver providing the hook could be
+			 * unloaded.
+			 */</span>
+			s = ml_set_interrupts_enabled(FALSE);
+			chudhook = kdebug_chudhook;
+			<span class="enscript-keyword">if</span> (chudhook)
+				chudhook(debugid, arg1, arg2, arg3, arg4, arg5);
+			ml_set_interrupts_enabled(s);
+		}
+		<span class="enscript-keyword">if</span> ( (kd_ctrl_page.kdebug_slowcheck &amp; SLOW_NOLOG) || !(kdebug_enable &amp; (KDEBUG_ENABLE_TRACE|KDEBUG_ENABLE_PPT)))
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out1</span>;
+	
+		<span class="enscript-keyword">if</span> ( !ml_at_interrupt_context()) {
+			<span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_PIDCHECK) {
+				<span class="enscript-comment">/*
+				 * If kdebug flag is not set for current proc, return
+				 */</span>
+				curproc = current_proc();
+
+				<span class="enscript-keyword">if</span> ((curproc &amp;&amp; !(curproc-&gt;p_kdebug)) &amp;&amp;
+				    ((debugid &amp; 0xffff0000) != (MACHDBG_CODE(DBG_MACH_SCHED, 0) | DBG_FUNC_NONE)) &amp;&amp;
+				      (debugid &gt;&gt; 24 != DBG_TRACE))
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out1</span>;
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_PIDEXCLUDE) {
+				<span class="enscript-comment">/*
+				 * If kdebug flag is set for current proc, return
+				 */</span>
+				curproc = current_proc();
+
+				<span class="enscript-keyword">if</span> ((curproc &amp;&amp; curproc-&gt;p_kdebug) &amp;&amp;
+				    ((debugid &amp; 0xffff0000) != (MACHDBG_CODE(DBG_MACH_SCHED, 0) | DBG_FUNC_NONE)) &amp;&amp;
+				      (debugid &gt;&gt; 24 != DBG_TRACE))
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out1</span>;
+			}
+		}
+
+		<span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_TYPEFILTER_CHECK) {
+			<span class="enscript-comment">/* Always record trace system info */</span>
+			<span class="enscript-keyword">if</span> (KDBG_EXTRACT_CLASS(debugid) == DBG_TRACE)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">record_event</span>;
+
+			<span class="enscript-comment">/*
+			 * Recheck if TYPEFILTER is being used, and if so,
+			 * dereference bitmap. If the trace facility is being
+			 * disabled, we have ~100ms of preemption-free CPU
+			 * usage to access the bitmap.
+			 */</span>
+			disable_preemption();
+			<span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_TYPEFILTER_CHECK) {
+				<span class="enscript-keyword">if</span> (isset(type_filter_bitmap, KDBG_EXTRACT_CSC(debugid)))
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">record_event_preempt_disabled</span>;
+			}
+			enable_preemption();
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out1</span>;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_RANGECHECK) {
+			<span class="enscript-comment">/* Always record trace system info */</span>
+			<span class="enscript-keyword">if</span> (KDBG_EXTRACT_CLASS(debugid) == DBG_TRACE)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">record_event</span>;
+				
+			<span class="enscript-keyword">if</span> (debugid &lt; kdlog_beg || debugid &gt; kdlog_end)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out1</span>;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_VALCHECK) {
+			<span class="enscript-comment">/* Always record trace system info */</span>
+			<span class="enscript-keyword">if</span> (KDBG_EXTRACT_CLASS(debugid) == DBG_TRACE)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">record_event</span>;
+		
+			<span class="enscript-keyword">if</span> ((debugid &amp; KDBG_EVENTID_MASK) != kdlog_value1 &amp;&amp;
+			    (debugid &amp; KDBG_EVENTID_MASK) != kdlog_value2 &amp;&amp;
+			    (debugid &amp; KDBG_EVENTID_MASK) != kdlog_value3 &amp;&amp;
+			    (debugid &amp; KDBG_EVENTID_MASK) != kdlog_value4)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out1</span>;
+		}
+	}
+<span class="enscript-reference">record_event</span>:
+	disable_preemption();
+
+<span class="enscript-reference">record_event_preempt_disabled</span>:
+	<span class="enscript-keyword">if</span> (kd_ctrl_page.enabled == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	cpu = cpu_number();
+	kdbp = &amp;kdbip[cpu];
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KDEBUG_MOJO_TRACE</span>
+	<span class="enscript-keyword">if</span> (kdebug_enable &amp; KDEBUG_ENABLE_SERIAL)
+		kdebug_serial_print(cpu, debugid,
+				    mach_absolute_time() &amp; KDBG_TIMESTAMP_MASK,
+				    arg1, arg2, arg3, arg4, arg5);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-reference">retry_q</span>:
+	kds_raw = kdbp-&gt;kd_list_tail;
+
+	<span class="enscript-keyword">if</span> (kds_raw.raw != KDS_PTR_NULL) {
+		kdsp_actual = POINTER_FROM_KDS_PTR(kds_raw);
+		bindx = kdsp_actual-&gt;kds_bufindx;
+	} <span class="enscript-keyword">else</span>
+		kdsp_actual = NULL;
+	
+	<span class="enscript-keyword">if</span> (kdsp_actual == NULL || bindx &gt;= EVENTS_PER_STORAGE_UNIT) {
+		<span class="enscript-keyword">if</span> (allocate_storage_unit(cpu) == FALSE) {
+			<span class="enscript-comment">/*
+			 * this can only happen if wrapping
+			 * has been disabled
+			 */</span>
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry_q</span>;
+	}
+	now = mach_absolute_time() &amp; KDBG_TIMESTAMP_MASK;
+
+	<span class="enscript-keyword">if</span> ( !OSCompareAndSwap(bindx, bindx + 1, &amp;kdsp_actual-&gt;kds_bufindx))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry_q</span>;
+
+	kd = &amp;kdsp_actual-&gt;kds_records[bindx];
+
+	kd-&gt;debugid = debugid;
+	kd-&gt;arg1 = arg1;
+	kd-&gt;arg2 = arg2;
+	kd-&gt;arg3 = arg3;
+	kd-&gt;arg4 = arg4;
+	kd-&gt;arg5 = arg5;
+	          
+	kdbg_set_timestamp_and_cpu(kd, now, cpu);
+
+	OSAddAtomic(1, &amp;kdsp_actual-&gt;kds_bufcnt);
+<span class="enscript-reference">out</span>:
+	enable_preemption();
+<span class="enscript-reference">out1</span>:
+	<span class="enscript-keyword">if</span> (kds_waiter &amp;&amp; kd_ctrl_page.kds_inuse_count &gt;= n_storage_threshold) {
+		uint32_t	etype;
+		uint32_t	stype;
+		
+		etype = debugid &amp; KDBG_EVENTID_MASK;
+		stype = debugid &amp; KDBG_CSC_MASK;
+
+		<span class="enscript-keyword">if</span> (etype == INTERRUPT || etype == MACH_vmfault ||
+		    stype == BSC_SysCall || stype == MACH_SysCall) {
+
+			boolean_t need_kds_wakeup = FALSE;
+
+			<span class="enscript-comment">/*
+			 * try to take the lock here to synchronize with the
+			 * waiter entering the blocked state... use the try
+			 * mode to prevent deadlocks caused by re-entering this
+			 * routine due to various trace points triggered in the
+			 * lck_spin_sleep_xxxx routines used to actually enter
+			 * one of our 2 wait conditions... no problem if we fail,
+			 * there will be lots of additional events coming in that
+			 * will eventually succeed in grabbing this lock
+			 */</span>
+			s = ml_set_interrupts_enabled(FALSE);
+
+			<span class="enscript-keyword">if</span> (lck_spin_try_lock(kdw_spin_lock)) {
+
+				<span class="enscript-keyword">if</span> (kds_waiter &amp;&amp; kd_ctrl_page.kds_inuse_count &gt;= n_storage_threshold) {
+					kds_waiter = 0;
+					need_kds_wakeup = TRUE;
+				}
+				lck_spin_unlock(kdw_spin_lock);
+			}
+			ml_set_interrupts_enabled(s);
+			
+			<span class="enscript-keyword">if</span> (need_kds_wakeup == TRUE)
+				wakeup(&amp;kds_waiter);
+		}
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kernel_debug</span>(
+	uint32_t	debugid,
+	uintptr_t	arg1,
+	uintptr_t	arg2,
+	uintptr_t	arg3,
+	uintptr_t	arg4,
+	__unused uintptr_t arg5)
+{
+	kernel_debug_internal(debugid, arg1, arg2, arg3, arg4, (uintptr_t)thread_tid(current_thread()));
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kernel_debug1</span>(
+	uint32_t	debugid,
+	uintptr_t	arg1,
+	uintptr_t	arg2,
+	uintptr_t	arg3,
+	uintptr_t	arg4,
+	uintptr_t	arg5)
+{
+	kernel_debug_internal(debugid, arg1, arg2, arg3, arg4, arg5);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kernel_debug_string_simple</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *message)
+{
+	uintptr_t arg[4] = {0, 0, 0, 0};
+
+	<span class="enscript-comment">/* Stuff the message string in the args and log it. */</span>
+        strncpy((<span class="enscript-type">char</span> *)arg, message, MIN(<span class="enscript-keyword">sizeof</span>(arg), strlen(message)));
+	KERNEL_DEBUG_EARLY(
+		TRACE_INFO_STRING,
+		arg[0], arg[1], arg[2], arg[3]);
+}
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>	master_cpu;		<span class="enscript-comment">/* MACH_KERNEL_PRIVATE */</span>
+<span class="enscript-comment">/*
+ * Used prior to start_kern_tracing() being called.
+ * Log temporarily into a static buffer.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kernel_debug_early</span>(
+	uint32_t	debugid,
+	uintptr_t	arg1,
+	uintptr_t	arg2,
+	uintptr_t	arg3,
+	uintptr_t	arg4)
+{
+	<span class="enscript-comment">/* If tracing is already initialized, use it */</span>
+	<span class="enscript-keyword">if</span> (nkdbufs) {
+		KERNEL_DEBUG_CONSTANT(debugid, arg1, arg2, arg3, arg4, 0);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* Do nothing if the buffer is full or we're not on the boot cpu */</span> 
+	kd_early_overflow = kd_early_index &gt;= KD_EARLY_BUFFER_MAX;
+	<span class="enscript-keyword">if</span> (kd_early_overflow ||
+	    cpu_number() != master_cpu)
+		<span class="enscript-keyword">return</span>;
+
+	kd_early_buffer[kd_early_index].debugid = debugid;
+	kd_early_buffer[kd_early_index].timestamp = mach_absolute_time();
+	kd_early_buffer[kd_early_index].arg1 = arg1;
+	kd_early_buffer[kd_early_index].arg2 = arg2;
+	kd_early_buffer[kd_early_index].arg3 = arg3;
+	kd_early_buffer[kd_early_index].arg4 = arg4;
+	kd_early_buffer[kd_early_index].arg5 = 0;
+	kd_early_index++;
+}
+
+<span class="enscript-comment">/*
+ * Transfen the contents of the temporary buffer into the trace buffers.
+ * Precede that by logging the rebase time (offset) - the TSC-based time (in ns)
+ * when mach_absolute_time is set to 0.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kernel_debug_early_end</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span>	i;
+
+	<span class="enscript-keyword">if</span> (cpu_number() != master_cpu)
+		panic(<span class="enscript-string">&quot;kernel_debug_early_end() not call on boot processor&quot;</span>);
+
+	<span class="enscript-comment">/* Fake sentinel marking the start of kernel time relative to TSC */</span>
+	kernel_debug_enter(
+		0,
+		TRACE_TIMESTAMPS,
+		0,
+		(uint32_t)(tsc_rebase_abs_time &gt;&gt; 32),
+		(uint32_t)tsc_rebase_abs_time,
+		0,
+		0,
+		0);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; kd_early_index; i++) {
+		kernel_debug_enter(
+			0,
+			kd_early_buffer[i].debugid,
+			kd_early_buffer[i].timestamp,
+			kd_early_buffer[i].arg1,
+			kd_early_buffer[i].arg2,
+			kd_early_buffer[i].arg3,
+			kd_early_buffer[i].arg4,
+			0);
+	}
+
+	<span class="enscript-comment">/* Cut events-lost event on overflow */</span>
+	<span class="enscript-keyword">if</span> (kd_early_overflow)
+		KERNEL_DEBUG_CONSTANT(
+			TRACE_LOST_EVENTS, 0, 0, 0, 0, 0);
+
+	<span class="enscript-comment">/* This trace marks the start of kernel tracing */</span>
+	kernel_debug_string_simple(<span class="enscript-string">&quot;early trace done&quot;</span>);
+}
+
+<span class="enscript-comment">/*
+ * Returns non-zero if debugid is in a reserved class.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kdebug_validate_debugid</span>(uint32_t debugid)
+{
+	uint8_t debugid_class;
+
+	debugid_class = KDBG_EXTRACT_CLASS(debugid);
+	<span class="enscript-keyword">switch</span> (debugid_class) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DBG_TRACE</span>:
+			<span class="enscript-keyword">return</span> EPERM;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Support syscall SYS_kdebug_trace. U64-&gt;K32 args may get truncated in kdebug_trace64
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdebug_trace</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> kdebug_trace_args *uap, int32_t *retval)
+{
+	<span class="enscript-type">struct</span> kdebug_trace64_args uap64;
+
+	uap64.code = uap-&gt;code;
+	uap64.arg1 = uap-&gt;arg1;
+	uap64.arg2 = uap-&gt;arg2;
+	uap64.arg3 = uap-&gt;arg3;
+	uap64.arg4 = uap-&gt;arg4;
+
+	<span class="enscript-keyword">return</span> kdebug_trace64(p, &amp;uap64, retval);
+}
+
+<span class="enscript-comment">/*
+ * Support syscall SYS_kdebug_trace64. 64-bit args on K32 will get truncated to fit in 32-bit record format.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdebug_trace64</span>(__unused <span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> kdebug_trace64_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-type">int</span> err;
+
+	<span class="enscript-keyword">if</span> ((err = kdebug_validate_debugid(uap-&gt;code)) != 0) {
+		<span class="enscript-keyword">return</span> err;
+	}
+
+	<span class="enscript-keyword">if</span> ( __probable(kdebug_enable == 0) )
+		<span class="enscript-keyword">return</span>(0); 
+
+	kernel_debug_internal(uap-&gt;code, (uintptr_t)uap-&gt;arg1, (uintptr_t)uap-&gt;arg2, (uintptr_t)uap-&gt;arg3, (uintptr_t)uap-&gt;arg4, (uintptr_t)thread_tid(current_thread()));
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/*
+ * Adding enough padding to contain a full tracepoint for the last
+ * portion of the string greatly simplifies the logic of splitting the
+ * string between tracepoints.  Full tracepoints can be generated using
+ * the buffer itself, without having to manually add zeros to pad the
+ * arguments.
+ */</span>
+
+<span class="enscript-comment">/* 2 string args in first tracepoint and 9 string data tracepoints */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">STR_BUF_ARGS</span> (2 + (9 * 4))
+<span class="enscript-comment">/* times the size of each arg on K64 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_STR_LEN</span>  (STR_BUF_ARGS * sizeof(uint64_t))
+<span class="enscript-comment">/* on K32, ending straddles a tracepoint, so reserve blanks */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">STR_BUF_SIZE</span> (MAX_STR_LEN + (2 * sizeof(uint32_t)))
+
+<span class="enscript-comment">/*
+ * This function does no error checking and assumes that it is called with
+ * the correct arguments, including that the buffer pointed to by str is at
+ * least STR_BUF_SIZE bytes.  However, str must be aligned to word-size and
+ * be NUL-terminated.  In cases where a string can fit evenly into a final
+ * tracepoint without its NUL-terminator, this function will not end those
+ * strings with a NUL in trace.  It's up to clients to look at the function
+ * qualifier for DBG_FUNC_END in this case, to end the string.
+ */</span>
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">kernel_debug_string_internal</span>(uint32_t debugid, uint64_t str_id, <span class="enscript-type">void</span> *vstr,
+                             size_t str_len)
+{
+	<span class="enscript-comment">/* str must be word-aligned */</span>
+	uintptr_t *str = vstr;
+	size_t written = 0;
+	uintptr_t thread_id;
+	<span class="enscript-type">int</span> i;
+	uint32_t trace_debugid = TRACEDBG_CODE(DBG_TRACE_STRING,
+	                                       TRACE_STRING_GLOBAL);
+
+	thread_id = (uintptr_t)thread_tid(current_thread());
+
+	<span class="enscript-comment">/* if the ID is being invalidated, just emit that */</span>
+	<span class="enscript-keyword">if</span> (str_id != 0 &amp;&amp; str_len == 0) {
+		kernel_debug_internal(trace_debugid | DBG_FUNC_START | DBG_FUNC_END,
+		                      (uintptr_t)debugid, (uintptr_t)str_id, 0, 0,
+		                      thread_id);
+		<span class="enscript-keyword">return</span> str_id;
+	}
+
+	<span class="enscript-comment">/* generate an ID, if necessary */</span>
+	<span class="enscript-keyword">if</span> (str_id == 0) {
+		str_id = OSIncrementAtomic64((SInt64 *)&amp;g_curr_str_id);
+		str_id = (str_id &amp; STR_ID_MASK) | g_str_id_signature;
+	}
+
+	trace_debugid |= DBG_FUNC_START;
+	<span class="enscript-comment">/* string can fit in a single tracepoint */</span>
+	<span class="enscript-keyword">if</span> (str_len &lt;= (2 * <span class="enscript-keyword">sizeof</span>(uintptr_t))) {
+		trace_debugid |= DBG_FUNC_END;
+	}
+
+	kernel_debug_internal(trace_debugid, (uintptr_t)debugid,
+	                      (uintptr_t)str_id, str[0],
+	                                         str[1], thread_id);
+
+	trace_debugid &amp;= KDBG_EVENTID_MASK;
+	i = 2;
+	written += 2 * <span class="enscript-keyword">sizeof</span>(uintptr_t);
+
+	<span class="enscript-keyword">for</span> (; written &lt; str_len; i += 4, written += 4 * <span class="enscript-keyword">sizeof</span>(uintptr_t)) {
+		<span class="enscript-keyword">if</span> ((written + (4 * <span class="enscript-keyword">sizeof</span>(uintptr_t))) &gt;= str_len) {
+			trace_debugid |= DBG_FUNC_END;
+		}
+		kernel_debug_internal(trace_debugid, str[i],
+		                                     str[i + 1],
+		                                     str[i + 2],
+		                                     str[i + 3], thread_id);
+	}
+
+	<span class="enscript-keyword">return</span> str_id;
+}
+
+<span class="enscript-comment">/*
+ * Returns true if the current process can emit events, and false otherwise.
+ * Trace system and scheduling events circumvent this check, as do events
+ * emitted in interrupt context.
+ */</span>
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">kdebug_current_proc_enabled</span>(uint32_t debugid)
+{
+	<span class="enscript-comment">/* can't determine current process in interrupt context */</span>
+	<span class="enscript-keyword">if</span> (ml_at_interrupt_context()) {
+		<span class="enscript-keyword">return</span> TRUE;
+	}
+
+	<span class="enscript-comment">/* always emit trace system and scheduling events */</span>
+	<span class="enscript-keyword">if</span> ((KDBG_EXTRACT_CLASS(debugid) == DBG_TRACE ||
+	    (debugid &amp; KDBG_CSC_MASK) == MACHDBG_CODE(DBG_MACH_SCHED, 0)))
+	{
+		<span class="enscript-keyword">return</span> TRUE;
+	}
+
+	<span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_PIDCHECK) {
+		proc_t cur_proc = current_proc();
+
+		<span class="enscript-comment">/* only the process with the kdebug bit set is allowed */</span>
+		<span class="enscript-keyword">if</span> (cur_proc &amp;&amp; !(cur_proc-&gt;p_kdebug)) {
+			<span class="enscript-keyword">return</span> FALSE;
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_PIDEXCLUDE) {
+		proc_t cur_proc = current_proc();
+
+		<span class="enscript-comment">/* every process except the one with the kdebug bit set is allowed */</span>
+		<span class="enscript-keyword">if</span> (cur_proc &amp;&amp; cur_proc-&gt;p_kdebug) {
+			<span class="enscript-keyword">return</span> FALSE;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> TRUE;
+}
+
+<span class="enscript-comment">/*
+ * Returns true if the debugid is disabled by filters, and false if the
+ * debugid is allowed to be traced.  A debugid may not be traced if the
+ * typefilter disables its class and subclass, it's outside a range
+ * check, or if it's not an allowed debugid in a value check.  Trace
+ * system events bypass this check.
+ */</span>
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">kdebug_debugid_enabled</span>(uint32_t debugid)
+{
+	boolean_t is_enabled = TRUE;
+
+	<span class="enscript-comment">/* if no filtering is enabled */</span>
+	<span class="enscript-keyword">if</span> (!kd_ctrl_page.kdebug_slowcheck) {
+		<span class="enscript-keyword">return</span> TRUE;
+	}
+
+	<span class="enscript-keyword">if</span> (KDBG_EXTRACT_CLASS(debugid) == DBG_TRACE) {
+		<span class="enscript-keyword">return</span> TRUE;
+	}
+
+	<span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_TYPEFILTER_CHECK) {
+		disable_preemption();
+
+		<span class="enscript-comment">/*
+		 * Recheck if typefilter is still being used.  If tracing is being
+		 * disabled, there's a 100ms sleep on the other end to keep the
+		 * bitmap around for this check.
+		 */</span>
+		<span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_TYPEFILTER_CHECK) {
+			<span class="enscript-keyword">if</span> (!(isset(type_filter_bitmap, KDBG_EXTRACT_CSC(debugid)))) {
+				is_enabled = FALSE;
+			}
+		}
+
+		enable_preemption();
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_RANGECHECK) {
+		<span class="enscript-keyword">if</span> (debugid &lt; kdlog_beg || debugid &gt; kdlog_end) {
+			is_enabled = FALSE;
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_VALCHECK) {
+		<span class="enscript-keyword">if</span> ((debugid &amp; KDBG_EVENTID_MASK) != kdlog_value1 &amp;&amp;
+			(debugid &amp; KDBG_EVENTID_MASK) != kdlog_value2 &amp;&amp;
+			(debugid &amp; KDBG_EVENTID_MASK) != kdlog_value3 &amp;&amp;
+			(debugid &amp; KDBG_EVENTID_MASK) != kdlog_value4)
+		{
+			is_enabled = FALSE;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> is_enabled;
+}
+
+<span class="enscript-comment">/*
+ * Returns 0 if a string can be traced with these arguments.  Returns errno
+ * value if error occurred.
+ */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">kdebug_check_trace_string</span>(uint32_t debugid, uint64_t str_id)
+{
+	<span class="enscript-comment">/* if there are function qualifiers on the debugid */</span>
+	<span class="enscript-keyword">if</span> (debugid &amp; ~KDBG_EVENTID_MASK) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-keyword">if</span> (kdebug_validate_debugid(debugid)) {
+		<span class="enscript-keyword">return</span> EPERM;
+	}
+
+	<span class="enscript-keyword">if</span> (str_id != 0 &amp;&amp; (str_id &amp; STR_ID_SIG_MASK) != g_str_id_signature) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Implementation of KPI kernel_debug_string.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kernel_debug_string</span>(uint32_t debugid, uint64_t *str_id, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *str)
+{
+	<span class="enscript-comment">/* arguments to tracepoints must be word-aligned */</span>
+	__attribute__((aligned(<span class="enscript-keyword">sizeof</span>(uintptr_t)))) <span class="enscript-type">char</span> str_buf[STR_BUF_SIZE];
+	assert_static(<span class="enscript-keyword">sizeof</span>(str_buf) &gt; MAX_STR_LEN);
+	vm_size_t len_copied;
+	<span class="enscript-type">int</span> err;
+
+	assert(str_id);
+
+	<span class="enscript-keyword">if</span> (__probable(kdebug_enable == 0)) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">if</span> (!kdebug_current_proc_enabled(debugid)) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">if</span> (!kdebug_debugid_enabled(debugid)) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">if</span> ((err = kdebug_check_trace_string(debugid, *str_id)) != 0) {
+		<span class="enscript-keyword">return</span> err;
+	}
+
+	<span class="enscript-keyword">if</span> (str == NULL) {
+		<span class="enscript-keyword">if</span> (str_id == 0) {
+			<span class="enscript-keyword">return</span> EINVAL;
+		}
+
+		*str_id = kernel_debug_string_internal(debugid, *str_id, NULL, 0);
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	memset(str_buf, 0, <span class="enscript-keyword">sizeof</span>(str_buf));
+	len_copied = strlcpy(str_buf, str, MAX_STR_LEN + 1);
+	*str_id = kernel_debug_string_internal(debugid, *str_id, str_buf,
+	                                       len_copied);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Support syscall kdebug_trace_string.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdebug_trace_string</span>(__unused <span class="enscript-type">struct</span> proc *p,
+                    <span class="enscript-type">struct</span> kdebug_trace_string_args *uap,
+                    uint64_t *retval)
+{
+	__attribute__((aligned(<span class="enscript-keyword">sizeof</span>(uintptr_t)))) <span class="enscript-type">char</span> str_buf[STR_BUF_SIZE];
+	assert_static(<span class="enscript-keyword">sizeof</span>(str_buf) &gt; MAX_STR_LEN);
+	size_t len_copied;
+	<span class="enscript-type">int</span> err;
+
+	<span class="enscript-keyword">if</span> (__probable(kdebug_enable == 0)) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">if</span> (!kdebug_current_proc_enabled(uap-&gt;debugid)) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">if</span> (!kdebug_debugid_enabled(uap-&gt;debugid)) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">if</span> ((err = kdebug_check_trace_string(uap-&gt;debugid, uap-&gt;str_id)) != 0) {
+		<span class="enscript-keyword">return</span> err;
+	}
+
+	<span class="enscript-keyword">if</span> (uap-&gt;str == USER_ADDR_NULL) {
+		<span class="enscript-keyword">if</span> (uap-&gt;str_id == 0) {
+			<span class="enscript-keyword">return</span> EINVAL;
+		}
+
+		*retval = kernel_debug_string_internal(uap-&gt;debugid, uap-&gt;str_id,
+		                                       NULL, 0);
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	memset(str_buf, 0, <span class="enscript-keyword">sizeof</span>(str_buf));
+	err = copyinstr(uap-&gt;str, str_buf, MAX_STR_LEN + 1, &amp;len_copied);
+
+	<span class="enscript-comment">/* it's alright to truncate the string, so allow ENAMETOOLONG */</span>
+	<span class="enscript-keyword">if</span> (err == ENAMETOOLONG) {
+		str_buf[MAX_STR_LEN] = <span class="enscript-string">'\0'</span>;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (err) {
+		<span class="enscript-keyword">return</span> err;
+	}
+
+	<span class="enscript-keyword">if</span> (len_copied &lt;= 1) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-comment">/* convert back to a length */</span>
+	len_copied--;
+
+	*retval = kernel_debug_string_internal(uap-&gt;debugid, uap-&gt;str_id, str_buf,
+	                                       len_copied);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdbg_lock_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_LOCKINIT)
+		<span class="enscript-keyword">return</span>;
+	
+	<span class="enscript-comment">/*
+	 * allocate lock group attribute and group
+	 */</span>
+	kd_trace_mtx_sysctl_grp_attr = lck_grp_attr_alloc_init();
+	kd_trace_mtx_sysctl_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;kdebug&quot;</span>, kd_trace_mtx_sysctl_grp_attr);
+		
+	<span class="enscript-comment">/*
+	 * allocate the lock attribute
+	 */</span>
+	kd_trace_mtx_sysctl_attr = lck_attr_alloc_init();
+
+
+	<span class="enscript-comment">/*
+	 * allocate and initialize mutex's
+	 */</span>
+	kd_trace_mtx_sysctl = lck_mtx_alloc_init(kd_trace_mtx_sysctl_grp, kd_trace_mtx_sysctl_attr);
+	kds_spin_lock = lck_spin_alloc_init(kd_trace_mtx_sysctl_grp, kd_trace_mtx_sysctl_attr);
+	kdw_spin_lock = lck_spin_alloc_init(kd_trace_mtx_sysctl_grp, kd_trace_mtx_sysctl_attr);
+
+	kd_ctrl_page.kdebug_flags |= KDBG_LOCKINIT;
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_bootstrap</span>(boolean_t early_trace)
+{
+        kd_ctrl_page.kdebug_flags &amp;= ~KDBG_WRAPPED;
+
+	<span class="enscript-keyword">return</span> (create_buffers(early_trace));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_reinit</span>(boolean_t early_trace)
+{
+	<span class="enscript-type">int</span> ret = 0;
+
+	<span class="enscript-comment">/*
+	 * Disable trace collecting
+	 * First make sure we're not in
+	 * the middle of cutting a trace
+	 */</span>
+	kdbg_set_tracing_enabled(FALSE, KDEBUG_ENABLE_TRACE);
+
+	<span class="enscript-comment">/*
+	 * make sure the SLOW_NOLOG is seen
+	 * by everyone that might be trying
+	 * to cut a trace..
+	 */</span>
+	IOSleep(100);
+
+	delete_buffers();
+
+	<span class="enscript-keyword">if</span> ((kd_ctrl_page.kdebug_flags &amp; KDBG_MAPINIT) &amp;&amp; kd_mapsize &amp;&amp; kd_mapptr) {
+		kmem_free(kernel_map, (vm_offset_t)kd_mapptr, kd_mapsize);
+		kd_ctrl_page.kdebug_flags &amp;= ~KDBG_MAPINIT;
+		kd_mapsize = 0;
+		kd_mapptr = NULL;
+		kd_mapcount = 0;
+	}  
+	ret = kdbg_bootstrap(early_trace);
+
+	RAW_file_offset = 0;
+	RAW_file_written = 0;
+
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdbg_trace_data</span>(<span class="enscript-type">struct</span> proc *proc, <span class="enscript-type">long</span> *arg_pid)
+{
+	<span class="enscript-keyword">if</span> (!proc)
+		*arg_pid = 0;
+	<span class="enscript-keyword">else</span>
+		*arg_pid = proc-&gt;p_pid;
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdbg_trace_string</span>(<span class="enscript-type">struct</span> proc *proc, <span class="enscript-type">long</span> *arg1, <span class="enscript-type">long</span> *arg2, <span class="enscript-type">long</span> *arg3, <span class="enscript-type">long</span> *arg4)
+{
+	<span class="enscript-type">char</span> *dbg_nameptr; 
+	<span class="enscript-type">int</span> dbg_namelen;
+	<span class="enscript-type">long</span> dbg_parms[4];
+
+	<span class="enscript-keyword">if</span> (!proc) {
+		*arg1 = 0;
+		*arg2 = 0;
+		*arg3 = 0;
+		*arg4 = 0;
+		<span class="enscript-keyword">return</span>;
+	}
+	<span class="enscript-comment">/*
+	 * Collect the pathname for tracing
+	 */</span>
+	dbg_nameptr = proc-&gt;p_comm;
+	dbg_namelen = (<span class="enscript-type">int</span>)strlen(proc-&gt;p_comm);
+	dbg_parms[0]=0L;
+	dbg_parms[1]=0L;
+	dbg_parms[2]=0L;
+	dbg_parms[3]=0L;
+  
+	<span class="enscript-keyword">if</span>(dbg_namelen &gt; (<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(dbg_parms))
+		dbg_namelen = (<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(dbg_parms);
+    
+	strncpy((<span class="enscript-type">char</span> *)dbg_parms, dbg_nameptr, dbg_namelen);
+
+	*arg1=dbg_parms[0];
+	*arg2=dbg_parms[1];
+	*arg3=dbg_parms[2];
+	*arg4=dbg_parms[3];
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdbg_resolve_map</span>(thread_t th_act, <span class="enscript-type">void</span> *opaque)
+{
+	kd_threadmap *mapptr;
+	krt_t *t = (krt_t *)opaque;
+
+	<span class="enscript-keyword">if</span> (t-&gt;count &lt; t-&gt;maxcount) {
+		mapptr = &amp;t-&gt;map[t-&gt;count];
+		mapptr-&gt;thread  = (uintptr_t)thread_tid(th_act);
+
+		(<span class="enscript-type">void</span>) strlcpy (mapptr-&gt;command, t-&gt;atts-&gt;task_comm,
+				<span class="enscript-keyword">sizeof</span>(t-&gt;atts-&gt;task_comm));
+		<span class="enscript-comment">/*
+		 * Some kernel threads have no associated pid.
+		 * We still need to mark the entry as valid.
+		 */</span>
+		<span class="enscript-keyword">if</span> (t-&gt;atts-&gt;pid)
+			mapptr-&gt;valid = t-&gt;atts-&gt;pid;
+		<span class="enscript-keyword">else</span>
+			mapptr-&gt;valid = 1;
+
+		t-&gt;count++;
+	}
+}
+
+<span class="enscript-comment">/*
+ *
+ * Writes a cpumap for the given iops_list/cpu_count to the provided buffer.
+ *
+ * You may provide a buffer and size, or if you set the buffer to NULL, a
+ * buffer of sufficient size will be allocated.
+ *
+ * If you provide a buffer and it is too small, sets cpumap_size to the number
+ * of bytes required and returns EINVAL.
+ *
+ * On success, if you provided a buffer, cpumap_size is set to the number of
+ * bytes written. If you did not provide a buffer, cpumap is set to the newly
+ * allocated buffer and cpumap_size is set to the number of bytes allocated.
+ *
+ * NOTE: It may seem redundant to pass both iops and a cpu_count.
+ *
+ * We may be reporting data from &quot;now&quot;, or from the &quot;past&quot;.
+ *
+ * The &quot;now&quot; data would be for something like kdbg_readcurcpumap().
+ * The &quot;past&quot; data would be for kdbg_readcpumap().
+ *
+ * If we do not pass both iops and cpu_count, and iops is NULL, this function
+ * will need to read &quot;now&quot; state to get the number of cpus, which would be in
+ * error if we were reporting &quot;past&quot; state.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_cpumap_init_internal</span>(kd_iop_t* iops, uint32_t cpu_count, uint8_t** cpumap, uint32_t* cpumap_size)
+{
+	assert(cpumap);
+	assert(cpumap_size);
+	assert(cpu_count);
+	assert(!iops || iops-&gt;cpu_id + 1 == cpu_count);
+
+	uint32_t bytes_needed = <span class="enscript-keyword">sizeof</span>(kd_cpumap_header) + cpu_count * <span class="enscript-keyword">sizeof</span>(kd_cpumap);
+	uint32_t bytes_available = *cpumap_size;
+	*cpumap_size = bytes_needed;
+	
+	<span class="enscript-keyword">if</span> (*cpumap == NULL) {
+		<span class="enscript-keyword">if</span> (kmem_alloc(kernel_map, (vm_offset_t*)cpumap, (vm_size_t)*cpumap_size, VM_KERN_MEMORY_DIAG) != KERN_SUCCESS) {
+			<span class="enscript-keyword">return</span> ENOMEM;
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (bytes_available &lt; bytes_needed) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	kd_cpumap_header* header = (kd_cpumap_header*)(uintptr_t)*cpumap;
+
+	header-&gt;version_no = RAW_VERSION1;
+	header-&gt;cpu_count = cpu_count;
+
+	kd_cpumap* cpus = (kd_cpumap*)&amp;header[1];
+
+	int32_t index = cpu_count - 1;
+	<span class="enscript-keyword">while</span> (iops) {
+		cpus[index].cpu_id = iops-&gt;cpu_id;
+		cpus[index].flags = KDBG_CPUMAP_IS_IOP;
+		bzero(cpus[index].name, <span class="enscript-keyword">sizeof</span>(cpus-&gt;name));
+		strlcpy(cpus[index].name, iops-&gt;callback.iop_name, <span class="enscript-keyword">sizeof</span>(cpus-&gt;name));
+		
+		iops = iops-&gt;next;
+		index--;
+	}
+	
+	<span class="enscript-keyword">while</span> (index &gt;= 0) {
+		cpus[index].cpu_id = index;
+		cpus[index].flags = 0;
+		bzero(cpus[index].name, <span class="enscript-keyword">sizeof</span>(cpus-&gt;name));
+		strlcpy(cpus[index].name, <span class="enscript-string">&quot;AP&quot;</span>, <span class="enscript-keyword">sizeof</span>(cpus-&gt;name));
+
+		index--;
+	}
+	
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdbg_thrmap_init</span>(<span class="enscript-type">void</span>)
+{
+        <span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_MAPINIT)
+		<span class="enscript-keyword">return</span>;
+
+	kd_mapptr = kdbg_thrmap_init_internal(0, &amp;kd_mapsize, &amp;kd_mapcount);
+
+	<span class="enscript-keyword">if</span> (kd_mapptr)
+		kd_ctrl_page.kdebug_flags |= KDBG_MAPINIT;
+}
+
+
+kd_threadmap* <span class="enscript-function-name">kdbg_thrmap_init_internal</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> count, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *mapsize, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *mapcount)
+{
+	kd_threadmap	*mapptr;
+	<span class="enscript-type">struct</span> proc	*p;
+	<span class="enscript-type">struct</span> krt	akrt;
+	<span class="enscript-type">int</span>		tts_count;    <span class="enscript-comment">/* number of task-to-string structures */</span>
+	<span class="enscript-type">struct</span> tts	*tts_mapptr;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	tts_mapsize = 0;
+	<span class="enscript-type">int</span>		i;
+	vm_offset_t	kaddr;
+
+	<span class="enscript-comment">/*
+	 * need to use PROC_SCANPROCLIST with proc_iterate
+	 */</span>
+	proc_list_lock();
+
+	<span class="enscript-comment">/*
+	 * Calculate the sizes of map buffers
+	 */</span>
+	<span class="enscript-keyword">for</span> (p = allproc.lh_first, *mapcount=0, tts_count=0; p; p = p-&gt;p_list.le_next) {
+		*mapcount += get_task_numacts((task_t)p-&gt;task);
+		tts_count++;
+	}
+	proc_list_unlock();
+
+	<span class="enscript-comment">/*
+	 * The proc count could change during buffer allocation,
+	 * so introduce a small fudge factor to bump up the
+	 * buffer sizes. This gives new tasks some chance of 
+	 * making into the tables.  Bump up by 25%.
+	 */</span>
+	*mapcount += *mapcount/4;
+	tts_count += tts_count/4;
+
+	*mapsize = *mapcount * <span class="enscript-keyword">sizeof</span>(kd_threadmap);
+
+	<span class="enscript-keyword">if</span> (count &amp;&amp; count &lt; *mapcount)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">if</span> ((kmem_alloc(kernel_map, &amp;kaddr, (vm_size_t)*mapsize, VM_KERN_MEMORY_DIAG) == KERN_SUCCESS)) {
+		bzero((<span class="enscript-type">void</span> *)kaddr, *mapsize);
+		mapptr = (kd_threadmap *)kaddr;
+	} <span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> (0);
+
+	tts_mapsize = tts_count * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> tts);
+
+	<span class="enscript-keyword">if</span> ((kmem_alloc(kernel_map, &amp;kaddr, (vm_size_t)tts_mapsize, VM_KERN_MEMORY_DIAG) == KERN_SUCCESS)) {
+		bzero((<span class="enscript-type">void</span> *)kaddr, tts_mapsize);
+		tts_mapptr = (<span class="enscript-type">struct</span> tts *)kaddr;
+	} <span class="enscript-keyword">else</span> {
+		kmem_free(kernel_map, (vm_offset_t)mapptr, *mapsize);
+
+		<span class="enscript-keyword">return</span> (0);
+	}
+	<span class="enscript-comment">/* 
+	 * We need to save the procs command string
+	 * and take a reference for each task associated
+	 * with a valid process
+	 */</span>
+
+	proc_list_lock();
+
+	<span class="enscript-comment">/*
+	 * should use proc_iterate
+	 */</span>
+	<span class="enscript-keyword">for</span> (p = allproc.lh_first, i=0; p &amp;&amp; i &lt; tts_count; p = p-&gt;p_list.le_next) {
+		<span class="enscript-keyword">if</span> (p-&gt;p_lflag &amp; P_LEXIT)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (p-&gt;task) {
+			task_reference(p-&gt;task);
+			tts_mapptr[i].task = p-&gt;task;
+			tts_mapptr[i].pid  = p-&gt;p_pid;
+			(<span class="enscript-type">void</span>)strlcpy(tts_mapptr[i].task_comm, p-&gt;p_comm, <span class="enscript-keyword">sizeof</span>(tts_mapptr[i].task_comm));
+			i++;
+		}
+	}
+	tts_count = i;
+
+	proc_list_unlock();
+
+	<span class="enscript-comment">/*
+	 * Initialize thread map data
+	 */</span>
+	akrt.map = mapptr;
+	akrt.count = 0;
+	akrt.maxcount = *mapcount;
+	    
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; tts_count; i++) {
+		akrt.atts = &amp;tts_mapptr[i];
+		task_act_iterate_wth_args(tts_mapptr[i].task, kdbg_resolve_map, &amp;akrt);
+		task_deallocate((task_t) tts_mapptr[i].task);
+	}
+	kmem_free(kernel_map, (vm_offset_t)tts_mapptr, tts_mapsize);
+
+	*mapcount = akrt.count;
+
+	<span class="enscript-keyword">return</span> (mapptr);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdbg_clear</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">/*
+	 * Clean up the trace buffer
+	 * First make sure we're not in
+	 * the middle of cutting a trace
+	 */</span>
+	kdbg_set_tracing_enabled(FALSE, KDEBUG_ENABLE_TRACE);
+	kdbg_disable_typefilter();
+
+	<span class="enscript-comment">/*
+	 * make sure the SLOW_NOLOG is seen
+	 * by everyone that might be trying
+	 * to cut a trace..
+	 */</span>
+	IOSleep(100);
+
+	global_state_pid = -1;
+	kd_ctrl_page.kdebug_flags &amp;= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)~KDBG_CKTYPES;
+	kd_ctrl_page.kdebug_flags &amp;= ~(KDBG_NOWRAP | KDBG_RANGECHECK | KDBG_VALCHECK);
+	kd_ctrl_page.kdebug_flags &amp;= ~(KDBG_PIDCHECK | KDBG_PIDEXCLUDE);
+	
+	kdbg_deallocate_typefilter();
+	delete_buffers();
+	nkdbufs	= 0;
+
+	<span class="enscript-comment">/* Clean up the thread map buffer */</span>
+	kd_ctrl_page.kdebug_flags &amp;= ~KDBG_MAPINIT;
+	<span class="enscript-keyword">if</span> (kd_mapptr) {
+		kmem_free(kernel_map, (vm_offset_t)kd_mapptr, kd_mapsize);
+		kd_mapptr = (kd_threadmap *) 0;
+	}
+	kd_mapsize = 0;
+	kd_mapcount = 0;
+
+	RAW_file_offset = 0;
+	RAW_file_written = 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_setpid</span>(kd_regtype *kdr)
+{
+	pid_t pid;
+	<span class="enscript-type">int</span> flag, ret=0;
+	<span class="enscript-type">struct</span> proc *p;
+
+	pid = (pid_t)kdr-&gt;value1;
+	flag = (<span class="enscript-type">int</span>)kdr-&gt;value2;
+
+	<span class="enscript-keyword">if</span> (pid &gt; 0) {
+		<span class="enscript-keyword">if</span> ((p = proc_find(pid)) == NULL)
+			ret = ESRCH;
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (flag == 1) {
+				<span class="enscript-comment">/*
+				 * turn on pid check for this and all pids
+				 */</span>
+				kd_ctrl_page.kdebug_flags |= KDBG_PIDCHECK;
+				kd_ctrl_page.kdebug_flags &amp;= ~KDBG_PIDEXCLUDE;
+				kdbg_set_flags(SLOW_CHECKS, 0, TRUE);
+
+				p-&gt;p_kdebug = 1;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/*
+				 * turn off pid check for this pid value
+				 * Don't turn off all pid checking though
+				 *
+				 * kd_ctrl_page.kdebug_flags &amp;= ~KDBG_PIDCHECK;
+				 */</span>   
+				p-&gt;p_kdebug = 0;
+			}
+			proc_rele(p);
+		}
+	}
+	<span class="enscript-keyword">else</span>
+		ret = EINVAL;
+
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+<span class="enscript-comment">/* This is for pid exclusion in the trace buffer */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_setpidex</span>(kd_regtype *kdr)
+{
+	pid_t pid;
+	<span class="enscript-type">int</span> flag, ret=0;
+	<span class="enscript-type">struct</span> proc *p;
+
+	pid = (pid_t)kdr-&gt;value1;
+	flag = (<span class="enscript-type">int</span>)kdr-&gt;value2;
+
+	<span class="enscript-keyword">if</span> (pid &gt; 0) {
+		<span class="enscript-keyword">if</span> ((p = proc_find(pid)) == NULL)
+			ret = ESRCH;
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (flag == 1) {
+				<span class="enscript-comment">/*
+				 * turn on pid exclusion
+				 */</span>
+				kd_ctrl_page.kdebug_flags |= KDBG_PIDEXCLUDE;
+				kd_ctrl_page.kdebug_flags &amp;= ~KDBG_PIDCHECK;
+				kdbg_set_flags(SLOW_CHECKS, 0, TRUE);
+
+				p-&gt;p_kdebug = 1;
+			}
+			<span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/*
+				 * turn off pid exclusion for this pid value
+				 * Don't turn off all pid exclusion though
+				 *
+				 * kd_ctrl_page.kdebug_flags &amp;= ~KDBG_PIDEXCLUDE;
+				 */</span>   
+				p-&gt;p_kdebug = 0;
+			}
+			proc_rele(p);
+		}
+	} <span class="enscript-keyword">else</span>
+		ret = EINVAL;
+
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+
+<span class="enscript-comment">/*
+ * This is for setting a maximum decrementer value
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_setrtcdec</span>(kd_regtype *kdr)
+{
+	<span class="enscript-type">int</span> ret = 0;
+	natural_t decval;
+
+	decval = (natural_t)kdr-&gt;value1;
+
+	<span class="enscript-keyword">if</span> (decval &amp;&amp; decval &lt; KDBG_MINRTCDEC)
+		ret = EINVAL;
+	<span class="enscript-keyword">else</span>
+		ret = ENOTSUP;
+
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_enable_typefilter</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> ret;
+
+	<span class="enscript-comment">/* Allocate memory for bitmap if not already allocated */</span>
+	ret = kdbg_allocate_typefilter();
+	<span class="enscript-keyword">if</span> (ret) {
+		<span class="enscript-keyword">return</span> ret;
+	}
+
+	<span class="enscript-comment">/* Turn off range and value checks */</span>
+	kd_ctrl_page.kdebug_flags &amp;= ~(KDBG_RANGECHECK | KDBG_VALCHECK);
+	
+	<span class="enscript-comment">/* Enable filter checking */</span>
+	kd_ctrl_page.kdebug_flags |= KDBG_TYPEFILTER_CHECK;
+	kdbg_set_flags(SLOW_CHECKS, 0, TRUE);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_disable_typefilter</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">/*  Disable filter checking */</span>	
+	kd_ctrl_page.kdebug_flags &amp;= ~KDBG_TYPEFILTER_CHECK;
+
+	<span class="enscript-comment">/*  Turn off slow checks unless pid checks are using them */</span>
+	<span class="enscript-keyword">if</span> ( (kd_ctrl_page.kdebug_flags &amp; (KDBG_PIDCHECK | KDBG_PIDEXCLUDE)) )
+		kdbg_set_flags(SLOW_CHECKS, 0, TRUE);
+	<span class="enscript-keyword">else</span>
+		kdbg_set_flags(SLOW_CHECKS, 0, FALSE);
+
+	<span class="enscript-comment">/* typefilter bitmap will be deallocated later */</span>
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_allocate_typefilter</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">if</span> (type_filter_bitmap == NULL) {
+		vm_offset_t bitmap = 0;
+
+		<span class="enscript-keyword">if</span> (kmem_alloc(kernel_map, &amp;bitmap, KDBG_TYPEFILTER_BITMAP_SIZE, VM_KERN_MEMORY_DIAG) != KERN_SUCCESS) {
+			<span class="enscript-keyword">return</span> ENOSPC;
+		}
+
+		bzero((<span class="enscript-type">void</span> *)bitmap, KDBG_TYPEFILTER_BITMAP_SIZE);
+
+		<span class="enscript-keyword">if</span> (!OSCompareAndSwapPtr(NULL, (<span class="enscript-type">void</span> *)bitmap, &amp;type_filter_bitmap)) {
+			kmem_free(kernel_map, bitmap, KDBG_TYPEFILTER_BITMAP_SIZE);
+			<span class="enscript-keyword">return</span> 0; <span class="enscript-comment">/* someone assigned a buffer */</span>
+		}
+	} <span class="enscript-keyword">else</span> {
+		bzero(type_filter_bitmap, KDBG_TYPEFILTER_BITMAP_SIZE);
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_deallocate_typefilter</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">if</span>(type_filter_bitmap) {
+		vm_offset_t bitmap = (vm_offset_t)type_filter_bitmap;
+
+		<span class="enscript-keyword">if</span> (OSCompareAndSwapPtr((<span class="enscript-type">void</span> *)bitmap, NULL, &amp;type_filter_bitmap)) {
+			kmem_free(kernel_map, bitmap, KDBG_TYPEFILTER_BITMAP_SIZE);
+			<span class="enscript-keyword">return</span> 0;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* already swapped */</span>
+		}
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_setreg</span>(kd_regtype * kdr)
+{
+	<span class="enscript-type">int</span> ret=0;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> val_1, val_2, val;
+	<span class="enscript-keyword">switch</span> (kdr-&gt;type) {
+	
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KDBG_CLASSTYPE</span> :
+		val_1 = (kdr-&gt;value1 &amp; 0xff);
+		val_2 = (kdr-&gt;value2 &amp; 0xff);
+		kdlog_beg = (val_1&lt;&lt;24);
+		kdlog_end = (val_2&lt;&lt;24);
+		kd_ctrl_page.kdebug_flags &amp;= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)~KDBG_CKTYPES;
+		kd_ctrl_page.kdebug_flags &amp;= ~KDBG_VALCHECK;       <span class="enscript-comment">/* Turn off specific value check  */</span>
+		kd_ctrl_page.kdebug_flags |= (KDBG_RANGECHECK | KDBG_CLASSTYPE);
+		kdbg_set_flags(SLOW_CHECKS, 0, TRUE);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KDBG_SUBCLSTYPE</span> :
+		val_1 = (kdr-&gt;value1 &amp; 0xff);
+		val_2 = (kdr-&gt;value2 &amp; 0xff);
+		val = val_2 + 1;
+		kdlog_beg = ((val_1&lt;&lt;24) | (val_2 &lt;&lt; 16));
+		kdlog_end = ((val_1&lt;&lt;24) | (val &lt;&lt; 16));
+		kd_ctrl_page.kdebug_flags &amp;= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)~KDBG_CKTYPES;
+		kd_ctrl_page.kdebug_flags &amp;= ~KDBG_VALCHECK;       <span class="enscript-comment">/* Turn off specific value check  */</span>
+		kd_ctrl_page.kdebug_flags |= (KDBG_RANGECHECK | KDBG_SUBCLSTYPE);
+		kdbg_set_flags(SLOW_CHECKS, 0, TRUE);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KDBG_RANGETYPE</span> :
+		kdlog_beg = (kdr-&gt;value1);
+		kdlog_end = (kdr-&gt;value2);
+		kd_ctrl_page.kdebug_flags &amp;= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)~KDBG_CKTYPES;
+		kd_ctrl_page.kdebug_flags &amp;= ~KDBG_VALCHECK;       <span class="enscript-comment">/* Turn off specific value check  */</span>
+		kd_ctrl_page.kdebug_flags |= (KDBG_RANGECHECK | KDBG_RANGETYPE);
+		kdbg_set_flags(SLOW_CHECKS, 0, TRUE);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KDBG_VALCHECK</span>:
+		kdlog_value1 = (kdr-&gt;value1);
+		kdlog_value2 = (kdr-&gt;value2);
+		kdlog_value3 = (kdr-&gt;value3);
+		kdlog_value4 = (kdr-&gt;value4);
+		kd_ctrl_page.kdebug_flags &amp;= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)~KDBG_CKTYPES;
+		kd_ctrl_page.kdebug_flags &amp;= ~KDBG_RANGECHECK;    <span class="enscript-comment">/* Turn off range check */</span>
+		kd_ctrl_page.kdebug_flags |= KDBG_VALCHECK;       <span class="enscript-comment">/* Turn on specific value check  */</span>
+		kdbg_set_flags(SLOW_CHECKS, 0, TRUE);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KDBG_TYPENONE</span> :
+		kd_ctrl_page.kdebug_flags &amp;= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)~KDBG_CKTYPES;
+
+		<span class="enscript-keyword">if</span> ( (kd_ctrl_page.kdebug_flags &amp; (KDBG_RANGECHECK | KDBG_VALCHECK   | 
+						   KDBG_PIDCHECK   | KDBG_PIDEXCLUDE | 
+						   KDBG_TYPEFILTER_CHECK)) )
+			kdbg_set_flags(SLOW_CHECKS, 0, TRUE);
+		<span class="enscript-keyword">else</span>
+			kdbg_set_flags(SLOW_CHECKS, 0, FALSE);
+
+		kdlog_beg = 0;
+		kdlog_end = 0;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">default</span> :
+		ret = EINVAL;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_getreg</span>(__unused kd_regtype * kdr)
+{
+#<span class="enscript-reference">if</span> 0	
+	<span class="enscript-type">int</span> i,j, ret=0;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> val_1, val_2, val;
+
+	<span class="enscript-keyword">switch</span> (kdr-&gt;type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KDBG_CLASSTYPE</span> :
+		val_1 = (kdr-&gt;value1 &amp; 0xff);
+		val_2 = val_1 + 1;
+		kdlog_beg = (val_1&lt;&lt;24);
+		kdlog_end = (val_2&lt;&lt;24);
+		kd_ctrl_page.kdebug_flags &amp;= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)~KDBG_CKTYPES;
+		kd_ctrl_page.kdebug_flags |= (KDBG_RANGECHECK | KDBG_CLASSTYPE);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KDBG_SUBCLSTYPE</span> :
+		val_1 = (kdr-&gt;value1 &amp; 0xff);
+		val_2 = (kdr-&gt;value2 &amp; 0xff);
+		val = val_2 + 1;
+		kdlog_beg = ((val_1&lt;&lt;24) | (val_2 &lt;&lt; 16));
+		kdlog_end = ((val_1&lt;&lt;24) | (val &lt;&lt; 16));
+		kd_ctrl_page.kdebug_flags &amp;= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)~KDBG_CKTYPES;
+		kd_ctrl_page.kdebug_flags |= (KDBG_RANGECHECK | KDBG_SUBCLSTYPE);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KDBG_RANGETYPE</span> :
+		kdlog_beg = (kdr-&gt;value1);
+		kdlog_end = (kdr-&gt;value2);
+		kd_ctrl_page.kdebug_flags &amp;= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)~KDBG_CKTYPES;
+		kd_ctrl_page.kdebug_flags |= (KDBG_RANGECHECK | KDBG_RANGETYPE);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KDBG_TYPENONE</span> :
+		kd_ctrl_page.kdebug_flags &amp;= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)~KDBG_CKTYPES;
+		kdlog_beg = 0;
+		kdlog_end = 0;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">default</span> :
+		ret = EINVAL;
+		<span class="enscript-keyword">break</span>;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* 0 */</span>
+	<span class="enscript-keyword">return</span>(EINVAL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_write_to_vnode</span>(caddr_t buffer, size_t size, vnode_t vp, vfs_context_t ctx, off_t file_offset)
+{
+	<span class="enscript-keyword">return</span> vn_rdwr(UIO_WRITE, vp, buffer, size, file_offset, UIO_SYSSPACE, IO_NODELOCKED|IO_UNIT,
+			vfs_context_ucred(ctx), (<span class="enscript-type">int</span> *) 0, vfs_context_proc(ctx));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_write_v3_chunk_header</span>(user_addr_t buffer, uint32_t tag, uint32_t sub_tag, uint64_t length, vnode_t vp, vfs_context_t ctx)
+{
+	<span class="enscript-type">int</span> ret = KERN_SUCCESS;
+	kd_chunk_header_v3 header;
+
+	header.tag = tag;
+	header.sub_tag = sub_tag;
+	header.length = length;
+
+	<span class="enscript-comment">// Check that only one of them is valid
+</span>	assert(!buffer ^ !vp);
+	assert((vp == NULL) || (ctx != NULL));
+
+	<span class="enscript-comment">// Write the 8-byte future_chunk_timestamp field in the payload
+</span>	<span class="enscript-keyword">if</span> (buffer || vp) {
+		<span class="enscript-keyword">if</span> (vp) {
+			ret = kdbg_write_to_vnode((caddr_t)&amp;header, <span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3), vp, ctx, RAW_file_offset);
+			<span class="enscript-keyword">if</span> (ret) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">write_error</span>;
+			}
+			RAW_file_offset  += (<span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3));
+		}
+		<span class="enscript-keyword">else</span> {
+			ret = copyout(&amp;header, buffer, <span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3));
+			<span class="enscript-keyword">if</span> (ret) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">write_error</span>;
+			}
+		}
+	}
+<span class="enscript-reference">write_error</span>:
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_write_v3_chunk_header_to_buffer</span>(<span class="enscript-type">void</span> * buffer, uint32_t tag, uint32_t sub_tag, uint64_t length)
+{
+	kd_chunk_header_v3 header;
+
+	header.tag = tag;
+	header.sub_tag = sub_tag;
+	header.length = length;
+
+	<span class="enscript-keyword">if</span> (!buffer) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	memcpy(buffer, &amp;header, <span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3));
+
+	<span class="enscript-keyword">return</span> (<span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_write_v3_chunk_to_fd</span>(uint32_t tag, uint32_t sub_tag, uint64_t length, <span class="enscript-type">void</span> *payload, uint64_t payload_size, <span class="enscript-type">int</span> fd)
+{
+	proc_t p;
+	<span class="enscript-type">struct</span> vfs_context context;
+	<span class="enscript-type">struct</span> fileproc *fp;
+	vnode_t vp;
+	p = current_proc();
+
+	proc_fdlock(p);
+	<span class="enscript-keyword">if</span> ( (fp_lookup(p, fd, &amp;fp, 1)) ) {
+		proc_fdunlock(p);
+		<span class="enscript-keyword">return</span> EFAULT;
+	}
+
+	context.vc_thread = current_thread();
+	context.vc_ucred = fp-&gt;f_fglob-&gt;fg_cred;
+
+	<span class="enscript-keyword">if</span> (FILEGLOB_DTYPE(fp-&gt;f_fglob) != DTYPE_VNODE) {
+		fp_drop(p, fd, fp, 1);
+		proc_fdunlock(p);
+		<span class="enscript-keyword">return</span> EBADF;
+	}
+	vp = (<span class="enscript-type">struct</span> vnode *) fp-&gt;f_fglob-&gt;fg_data;
+	proc_fdunlock(p);
+
+	<span class="enscript-keyword">if</span> ( (vnode_getwithref(vp)) == 0 ) {
+		RAW_file_offset = fp-&gt;f_fglob-&gt;fg_offset;
+
+		kd_chunk_header_v3 chunk_header = { .tag = tag, .sub_tag = sub_tag, .length = length };
+
+		<span class="enscript-type">int</span> ret = kdbg_write_to_vnode((caddr_t)  &amp;chunk_header, <span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3), vp, &amp;context, RAW_file_offset);
+		<span class="enscript-keyword">if</span> (!ret) {
+			RAW_file_offset += <span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3);
+		}
+
+		ret = kdbg_write_to_vnode((caddr_t) payload, (size_t) payload_size, vp, &amp;context, RAW_file_offset);
+		<span class="enscript-keyword">if</span> (!ret) {
+			RAW_file_offset  += payload_size;
+		}
+
+		fp-&gt;f_fglob-&gt;fg_offset = RAW_file_offset;
+		vnode_put(vp);
+	}
+
+	fp_drop(p, fd, fp, 0);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+user_addr_t
+<span class="enscript-function-name">kdbg_write_v3_event_chunk_header</span>(user_addr_t buffer, uint32_t tag, uint64_t length, vnode_t vp, vfs_context_t ctx)
+{
+        uint64_t future_chunk_timestamp = 0;
+        length += <span class="enscript-keyword">sizeof</span>(uint64_t);
+
+        <span class="enscript-keyword">if</span> (kdbg_write_v3_chunk_header(buffer, tag, V3_EVENT_DATA_VERSION, length, vp, ctx)) {
+                <span class="enscript-keyword">return</span> 0;
+        }
+        <span class="enscript-keyword">if</span> (buffer) {
+                buffer += <span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3);
+        }
+
+        <span class="enscript-comment">// Check that only one of them is valid
+</span>        assert(!buffer ^ !vp);
+        assert((vp == NULL) || (ctx != NULL));
+
+        <span class="enscript-comment">// Write the 8-byte future_chunk_timestamp field in the payload
+</span>        <span class="enscript-keyword">if</span> (buffer || vp) {
+                <span class="enscript-keyword">if</span> (vp) {
+                        <span class="enscript-type">int</span> ret = kdbg_write_to_vnode((caddr_t)&amp;future_chunk_timestamp, <span class="enscript-keyword">sizeof</span>(uint64_t), vp, ctx, RAW_file_offset);
+                        <span class="enscript-keyword">if</span> (!ret) {
+                                RAW_file_offset  += (<span class="enscript-keyword">sizeof</span>(uint64_t));
+                        }
+                }
+                <span class="enscript-keyword">else</span> {
+                        <span class="enscript-keyword">if</span> (copyout(&amp;future_chunk_timestamp, buffer, <span class="enscript-keyword">sizeof</span>(uint64_t))) {
+                                <span class="enscript-keyword">return</span> 0;
+                        }
+                }
+        }
+
+        <span class="enscript-keyword">return</span> (buffer + <span class="enscript-keyword">sizeof</span>(uint64_t));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_write_v3_header</span>(user_addr_t user_header, size_t *user_header_size, <span class="enscript-type">int</span> fd)
+{
+        <span class="enscript-type">int</span> ret = KERN_SUCCESS;
+        kd_header_v3 header;
+
+        uint8_t* cpumap = 0;
+        uint32_t cpumap_size = 0;
+        uint32_t thrmap_size = 0;
+
+        size_t bytes_needed = 0;
+
+        <span class="enscript-comment">// Check that only one of them is valid
+</span>        assert(!user_header ^ !fd);
+        assert(user_header_size);
+
+        <span class="enscript-keyword">if</span> ( !(kd_ctrl_page.kdebug_flags &amp; KDBG_BUFINIT) ) {
+                ret = EINVAL;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+        }
+
+        <span class="enscript-keyword">if</span> ( !(user_header || fd) ) {
+                ret = EINVAL;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+        }
+
+        <span class="enscript-comment">// Initialize the cpu map
+</span>        ret = kdbg_cpumap_init_internal(kd_ctrl_page.kdebug_iops, kd_ctrl_page.kdebug_cpus, &amp;cpumap, &amp;cpumap_size);
+        <span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+        }
+
+        <span class="enscript-comment">// Check if a thread map is initialized
+</span>        <span class="enscript-keyword">if</span> ( !kd_mapptr ) {
+                ret = EINVAL;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+        }
+        thrmap_size = kd_mapcount * <span class="enscript-keyword">sizeof</span>(kd_threadmap);
+
+        <span class="enscript-comment">// Setup the header.
+</span>        <span class="enscript-comment">// See v3 header description in sys/kdebug.h for more inforamtion.
+</span>
+        header.tag = RAW_VERSION3;
+        header.sub_tag = V3_HEADER_VERSION;
+        header.length = ( <span class="enscript-keyword">sizeof</span>(kd_header_v3) + cpumap_size - <span class="enscript-keyword">sizeof</span>(kd_cpumap_header));
+
+        mach_timebase_info_data_t timebase = {0, 0};
+        clock_timebase_info(&amp;timebase);
+        header.timebase_numer = timebase.numer;
+        header.timebase_denom = timebase.denom;
+        header.timestamp = 0;
+        header.walltime_secs = 0;
+        header.walltime_usecs = 0;
+        header.timezone_minuteswest = 0;
+        header.timezone_dst = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">defined</span> <span class="enscript-variable-name">__LP64__</span>
+        header.flags = 1;
+#<span class="enscript-reference">else</span>
+        header.flags = 0;
+#<span class="enscript-reference">endif</span>
+
+        <span class="enscript-comment">// If its a buffer, check if we have enough space to copy the header and the maps.
+</span>        <span class="enscript-keyword">if</span> (user_header) {
+                bytes_needed = header.length + thrmap_size + (2 * <span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3));
+                <span class="enscript-keyword">if</span> ( !user_header_size ) {
+                        ret = EINVAL;
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+                }
+                <span class="enscript-keyword">if</span> (*user_header_size &lt; bytes_needed) {
+                        ret = EINVAL;
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+                }
+        }
+
+        <span class="enscript-comment">// Start writing the header
+</span>        <span class="enscript-keyword">if</span> (fd) {
+                <span class="enscript-type">void</span> *hdr_ptr = (<span class="enscript-type">void</span> *)(((uintptr_t) &amp;header) + <span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3));
+                size_t payload_size = (<span class="enscript-keyword">sizeof</span>(kd_header_v3) - <span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3));
+
+                ret = kdbg_write_v3_chunk_to_fd(RAW_VERSION3, V3_HEADER_VERSION, header.length, hdr_ptr, payload_size, fd);
+                <span class="enscript-keyword">if</span> (ret) {
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+                }
+        }
+        <span class="enscript-keyword">else</span> {
+            <span class="enscript-keyword">if</span> (copyout(&amp;header, user_header, <span class="enscript-keyword">sizeof</span>(kd_header_v3))) {
+                    ret = EFAULT;
+                    <span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+            }
+            <span class="enscript-comment">// Update the user pointer
+</span>            user_header += <span class="enscript-keyword">sizeof</span>(kd_header_v3);
+        }
+
+        <span class="enscript-comment">// Write a cpu map. This is a sub chunk of the header
+</span>        cpumap = (uint8_t*)((uintptr_t) cpumap + <span class="enscript-keyword">sizeof</span>(kd_cpumap_header));
+        size_t payload_size = (size_t)(cpumap_size - <span class="enscript-keyword">sizeof</span>(kd_cpumap_header));
+        <span class="enscript-keyword">if</span> (fd) {
+                ret = kdbg_write_v3_chunk_to_fd(V3_CPU_MAP, V3_CPUMAP_VERSION, payload_size, (<span class="enscript-type">void</span> *)cpumap, payload_size, fd);
+                <span class="enscript-keyword">if</span> (ret) {
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+                }
+        }
+        <span class="enscript-keyword">else</span> {
+                ret = kdbg_write_v3_chunk_header(user_header, V3_CPU_MAP, V3_CPUMAP_VERSION, payload_size, NULL, NULL);
+                <span class="enscript-keyword">if</span> (ret) {
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+                }
+                user_header += <span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3);
+                <span class="enscript-keyword">if</span> (copyout(cpumap, user_header, payload_size))  {
+                        ret = EFAULT;
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+                }
+                <span class="enscript-comment">// Update the user pointer
+</span>                user_header += payload_size;
+        }
+
+        <span class="enscript-comment">// Write a thread map
+</span>        <span class="enscript-keyword">if</span> (fd) {
+                ret = kdbg_write_v3_chunk_to_fd(V3_THREAD_MAP, V3_THRMAP_VERSION, thrmap_size, (<span class="enscript-type">void</span> *)kd_mapptr, thrmap_size, fd);
+                <span class="enscript-keyword">if</span> (ret) {
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+                }
+        }
+        <span class="enscript-keyword">else</span> {
+                ret = kdbg_write_v3_chunk_header(user_header, V3_THREAD_MAP, V3_THRMAP_VERSION, thrmap_size, NULL, NULL);
+                <span class="enscript-keyword">if</span> (ret) {
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+                }
+                user_header += <span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3);
+                <span class="enscript-keyword">if</span> (copyout(kd_mapptr, user_header, thrmap_size)) {
+                        ret = EFAULT;
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+                }
+                user_header += thrmap_size;
+        }
+
+        <span class="enscript-keyword">if</span> (fd) {
+                RAW_file_written += bytes_needed;
+        }
+
+        *user_header_size = bytes_needed;
+<span class="enscript-reference">bail</span>:
+        <span class="enscript-keyword">if</span> (cpumap) {
+                kmem_free(kernel_map, (vm_offset_t)cpumap, cpumap_size);
+        }
+        <span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_readcpumap</span>(user_addr_t user_cpumap, size_t *user_cpumap_size)
+{
+	uint8_t* cpumap = NULL;
+	uint32_t cpumap_size = 0;
+	<span class="enscript-type">int</span> ret = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (kd_ctrl_page.kdebug_flags &amp; KDBG_BUFINIT) {
+		<span class="enscript-keyword">if</span> (kdbg_cpumap_init_internal(kd_ctrl_page.kdebug_iops, kd_ctrl_page.kdebug_cpus, &amp;cpumap, &amp;cpumap_size) == KERN_SUCCESS) {
+			<span class="enscript-keyword">if</span> (user_cpumap) {
+				size_t bytes_to_copy = (*user_cpumap_size &gt;= cpumap_size) ? cpumap_size : *user_cpumap_size;
+				<span class="enscript-keyword">if</span> (copyout(cpumap, user_cpumap, (size_t)bytes_to_copy)) {
+					ret = EFAULT;
+				}
+			}
+			*user_cpumap_size = cpumap_size;
+			kmem_free(kernel_map, (vm_offset_t)cpumap, cpumap_size);
+		} <span class="enscript-keyword">else</span>
+			ret = EINVAL;
+	} <span class="enscript-keyword">else</span>
+		ret = EINVAL;
+
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_readcurthrmap</span>(user_addr_t buffer, size_t *bufsize)
+{
+	kd_threadmap *mapptr;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> mapsize;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> mapcount;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> count = 0;
+	<span class="enscript-type">int</span> ret = 0;
+
+	count = *bufsize/<span class="enscript-keyword">sizeof</span>(kd_threadmap);
+	*bufsize = 0;
+
+	<span class="enscript-keyword">if</span> ( (mapptr = kdbg_thrmap_init_internal(count, &amp;mapsize, &amp;mapcount)) ) {
+		<span class="enscript-keyword">if</span> (copyout(mapptr, buffer, mapcount * <span class="enscript-keyword">sizeof</span>(kd_threadmap)))
+			ret = EFAULT;
+		<span class="enscript-keyword">else</span>
+			*bufsize = (mapcount * <span class="enscript-keyword">sizeof</span>(kd_threadmap));
+
+		kmem_free(kernel_map, (vm_offset_t)mapptr, mapsize);
+	} <span class="enscript-keyword">else</span>
+		ret = EINVAL;
+
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_write_v1_plus_header</span>(uint32_t count, vnode_t vp, vfs_context_t ctx)
+{
+	<span class="enscript-type">int</span> ret = 0;
+	RAW_header	header;
+	clock_sec_t	secs;
+	clock_usec_t	usecs;
+	<span class="enscript-type">char</span>	*pad_buf;
+	uint32_t pad_size;
+	uint32_t extra_thread_count = 0;
+	uint32_t cpumap_size;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> mapsize = kd_mapcount * <span class="enscript-keyword">sizeof</span>(kd_threadmap);
+
+	<span class="enscript-comment">/*
+	 * To write a RAW_VERSION1+ file, we
+	 * must embed a cpumap in the &quot;padding&quot;
+	 * used to page align the events following
+	 * the threadmap. If the threadmap happens
+	 * to not require enough padding, we
+	 * artificially increase its footprint
+	 * until it needs enough padding.
+	 */</span>
+
+        assert(vp);
+        assert(ctx);
+
+	pad_size = PAGE_16KB - ((<span class="enscript-keyword">sizeof</span>(RAW_header) + (count * <span class="enscript-keyword">sizeof</span>(kd_threadmap))) &amp; PAGE_MASK_64);
+	cpumap_size = <span class="enscript-keyword">sizeof</span>(kd_cpumap_header) + kd_ctrl_page.kdebug_cpus * <span class="enscript-keyword">sizeof</span>(kd_cpumap);
+
+	<span class="enscript-keyword">if</span> (cpumap_size &gt; pad_size) {
+		<span class="enscript-comment">/* If the cpu map doesn't fit in the current available pad_size,
+		 * we increase the pad_size by 16K. We do this so that the event
+		 * data is always  available on a page aligned boundary for both
+		 * 4k and 16k systems. We enforce this alignment for the event
+		 * data so that we can take advantage of optimized file/disk writes.*/</span>
+		pad_size += PAGE_16KB;
+	}
+
+	<span class="enscript-comment">/* The way we are silently embedding a cpumap in the &quot;padding&quot; is by artificially
+	 * increasing the number of thread entries. However, we'll also need to ensure that
+	 * the cpumap is embedded in the last 4K page before when the event data is expected.
+	 * This way the tools can read the data starting the next page boundary on both
+	 * 4K and 16K systems preserving compatibility with older versions of the tools
+	*/</span>
+	<span class="enscript-keyword">if</span> (pad_size &gt; PAGE_4KB) {
+		pad_size -= PAGE_4KB;
+		extra_thread_count = (pad_size / <span class="enscript-keyword">sizeof</span>(kd_threadmap)) + 1;
+	}
+
+	header.version_no = RAW_VERSION1;
+	header.thread_count = count + extra_thread_count;
+
+	clock_get_calendar_microtime(&amp;secs, &amp;usecs);
+	header.TOD_secs = secs;
+	header.TOD_usecs = usecs;
+
+	ret = vn_rdwr(UIO_WRITE, vp, (caddr_t)&amp;header, <span class="enscript-keyword">sizeof</span>(RAW_header), RAW_file_offset,
+		      UIO_SYSSPACE, IO_NODELOCKED|IO_UNIT, vfs_context_ucred(ctx), (<span class="enscript-type">int</span> *) 0, vfs_context_proc(ctx));
+	<span class="enscript-keyword">if</span> (ret)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">write_error</span>;
+	RAW_file_offset += <span class="enscript-keyword">sizeof</span>(RAW_header);
+
+	ret = vn_rdwr(UIO_WRITE, vp, (caddr_t)kd_mapptr, mapsize, RAW_file_offset,
+		      UIO_SYSSPACE, IO_NODELOCKED|IO_UNIT, vfs_context_ucred(ctx), (<span class="enscript-type">int</span> *) 0, vfs_context_proc(ctx));
+	<span class="enscript-keyword">if</span> (ret)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">write_error</span>;
+	RAW_file_offset += mapsize;
+
+	<span class="enscript-keyword">if</span> (extra_thread_count) {
+		pad_size = extra_thread_count * <span class="enscript-keyword">sizeof</span>(kd_threadmap);
+		pad_buf = (<span class="enscript-type">char</span> *)kalloc(pad_size);
+		<span class="enscript-keyword">if</span> (!pad_buf) {
+			ret = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">write_error</span>;
+		}
+		memset(pad_buf, 0, pad_size);
+
+		ret = vn_rdwr(UIO_WRITE, vp, (caddr_t)pad_buf, pad_size, RAW_file_offset,
+				UIO_SYSSPACE, IO_NODELOCKED|IO_UNIT, vfs_context_ucred(ctx), (<span class="enscript-type">int</span> *) 0, vfs_context_proc(ctx));
+		kfree(pad_buf, pad_size);
+
+		<span class="enscript-keyword">if</span> (ret)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">write_error</span>;
+		RAW_file_offset += pad_size;
+
+	}
+
+	pad_size = PAGE_SIZE - (RAW_file_offset &amp; PAGE_MASK_64);
+	<span class="enscript-keyword">if</span> (pad_size) {
+		pad_buf = (<span class="enscript-type">char</span> *)kalloc(pad_size);
+		<span class="enscript-keyword">if</span> (!pad_buf) {
+			ret = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">write_error</span>;
+		}
+		memset(pad_buf, 0, pad_size);
+
+		<span class="enscript-comment">/*
+		 * embed a cpumap in the padding bytes.
+		 * older code will skip this.
+		 * newer code will know how to read it.
+		 */</span>
+		uint32_t temp = pad_size;
+		<span class="enscript-keyword">if</span> (kdbg_cpumap_init_internal(kd_ctrl_page.kdebug_iops, kd_ctrl_page.kdebug_cpus, (uint8_t**)&amp;pad_buf, &amp;temp) != KERN_SUCCESS) {
+			memset(pad_buf, 0, pad_size);
+		}
+
+		ret = vn_rdwr(UIO_WRITE, vp, (caddr_t)pad_buf, pad_size, RAW_file_offset,
+				UIO_SYSSPACE, IO_NODELOCKED|IO_UNIT, vfs_context_ucred(ctx), (<span class="enscript-type">int</span> *) 0, vfs_context_proc(ctx));
+		kfree(pad_buf, pad_size);
+
+		<span class="enscript-keyword">if</span> (ret)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">write_error</span>;
+		RAW_file_offset += pad_size;
+	}
+	RAW_file_written += <span class="enscript-keyword">sizeof</span>(RAW_header) + mapsize + pad_size;
+
+<span class="enscript-reference">write_error</span>:
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_readthrmap</span>(user_addr_t buffer, size_t *number, vnode_t vp, vfs_context_t ctx)
+{
+
+	<span class="enscript-type">int</span> avail = 0;
+	<span class="enscript-type">int</span> ret = 0;
+	uint32_t count = 0;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> mapsize;
+
+	<span class="enscript-keyword">if</span> ((!vp &amp;&amp; !buffer) || (vp &amp;&amp; buffer)) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	assert(number);
+	assert((vp == NULL) || (ctx != NULL));
+
+	avail = *number;
+	count = avail/<span class="enscript-keyword">sizeof</span> (kd_threadmap);
+	mapsize = kd_mapcount * <span class="enscript-keyword">sizeof</span>(kd_threadmap);
+
+	<span class="enscript-keyword">if</span> (count &amp;&amp; (count &lt;= kd_mapcount)) {
+		<span class="enscript-keyword">if</span> ((kd_ctrl_page.kdebug_flags &amp; KDBG_MAPINIT) &amp;&amp; kd_mapsize &amp;&amp; kd_mapptr) {
+			<span class="enscript-keyword">if</span> (*number &lt; mapsize)
+				ret = EINVAL;
+			<span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> (vp) {
+					ret = kdbg_write_v1_plus_header(count, vp, ctx);
+					<span class="enscript-keyword">if</span> (ret)
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">write_error</span>;
+				}
+				<span class="enscript-keyword">else</span> {
+					<span class="enscript-keyword">if</span> (copyout(kd_mapptr, buffer, mapsize))
+						ret = EINVAL;
+				}
+			}
+		}
+		<span class="enscript-keyword">else</span>
+			ret = EINVAL;
+	}
+	<span class="enscript-keyword">else</span>
+		ret = EINVAL;
+
+	<span class="enscript-keyword">if</span> (ret &amp;&amp; vp)
+	{
+		count = 0;
+
+		ret = kdbg_write_to_vnode((caddr_t)&amp;count, <span class="enscript-keyword">sizeof</span>(uint32_t), vp, ctx, RAW_file_offset);
+		<span class="enscript-keyword">if</span> (!ret) {
+			RAW_file_offset += <span class="enscript-keyword">sizeof</span>(uint32_t);
+			RAW_file_written += <span class="enscript-keyword">sizeof</span>(uint32_t);
+		}
+	}
+<span class="enscript-reference">write_error</span>:
+	<span class="enscript-keyword">if</span> ((kd_ctrl_page.kdebug_flags &amp; KDBG_MAPINIT) &amp;&amp; kd_mapsize &amp;&amp; kd_mapptr)
+	{
+		kmem_free(kernel_map, (vm_offset_t)kd_mapptr, kd_mapsize);
+		kd_ctrl_page.kdebug_flags &amp;= ~KDBG_MAPINIT;
+		kd_mapsize = 0;
+		kd_mapptr = (kd_threadmap *) 0;
+		kd_mapcount = 0;
+	}  
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_readthrmap_v3</span>(user_addr_t buffer, size_t *number, <span class="enscript-type">int</span> fd)
+{
+	<span class="enscript-type">int</span> avail = 0;
+	<span class="enscript-type">int</span> ret = 0;
+	uint32_t count = 0;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> mapsize;
+
+	<span class="enscript-keyword">if</span> ((!fd &amp;&amp; !buffer) || (fd &amp;&amp; buffer)) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	assert(number);
+
+	avail = *number;
+	count = avail/<span class="enscript-keyword">sizeof</span> (kd_threadmap);
+	mapsize = kd_mapcount * <span class="enscript-keyword">sizeof</span>(kd_threadmap);
+
+	<span class="enscript-keyword">if</span> (count &amp;&amp; (count &lt;= kd_mapcount)) {
+		<span class="enscript-keyword">if</span> ((kd_ctrl_page.kdebug_flags &amp; KDBG_MAPINIT) &amp;&amp; kd_mapsize &amp;&amp; kd_mapptr) {
+			<span class="enscript-keyword">if</span> (*number &lt; mapsize) {
+				ret = EINVAL;
+			}
+			<span class="enscript-keyword">else</span> {
+				ret = kdbg_write_v3_header(buffer, number, fd);
+				<span class="enscript-keyword">if</span> (ret) {
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">write_error</span>;
+				}
+			}
+		}
+		<span class="enscript-keyword">else</span> {
+			ret = EINVAL;
+		}
+	}
+	<span class="enscript-keyword">else</span> {
+		ret = EINVAL;
+	}
+<span class="enscript-reference">write_error</span>:
+	<span class="enscript-keyword">if</span> ((kd_ctrl_page.kdebug_flags &amp; KDBG_MAPINIT) &amp;&amp; kd_mapsize &amp;&amp; kd_mapptr) {
+		kmem_free(kernel_map, (vm_offset_t)kd_mapptr, kd_mapsize);
+		kd_ctrl_page.kdebug_flags &amp;= ~KDBG_MAPINIT;
+		kd_mapsize = 0;
+		kd_mapptr = (kd_threadmap *) 0;
+		kd_mapcount = 0;
+	}  
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_set_nkdbufs</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> value)
+{
+        <span class="enscript-comment">/*
+	 * We allow a maximum buffer size of 50% of either ram or max mapped address, whichever is smaller
+	 * 'value' is the desired number of trace entries
+	 */</span>
+        <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> max_entries = (sane_size/2) / <span class="enscript-keyword">sizeof</span>(kd_buf);
+
+	<span class="enscript-keyword">if</span> (value &lt;= max_entries)
+		<span class="enscript-keyword">return</span> (value);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> (max_entries);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_enable_bg_trace</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> ret = 0;
+
+	<span class="enscript-keyword">if</span> (kdlog_bg_trace == TRUE &amp;&amp; kdlog_bg_trace_running == FALSE &amp;&amp; n_storage_buffers == 0) {
+		nkdbufs = bg_nkdbufs;
+		ret = kdbg_reinit(FALSE);
+		<span class="enscript-keyword">if</span> (0 == ret) {
+			kdbg_set_tracing_enabled(TRUE, KDEBUG_ENABLE_TRACE);
+			kdlog_bg_trace_running = TRUE;
+		}
+		wakeup(&amp;kdlog_bg_trace);
+	}
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdbg_disable_bg_trace</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">if</span> (kdlog_bg_trace_running == TRUE) {
+		kdlog_bg_trace_running = FALSE;
+		kdbg_clear();		
+	}
+}
+
+
+
+<span class="enscript-comment">/*
+ * This function is provided for the CHUD toolkit only.
+ *    int val:
+ *        zero disables kdebug_chudhook function call
+ *        non-zero enables kdebug_chudhook function call
+ *    char *fn:
+ *        address of the enabled kdebug_chudhook function
+*/</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdbg_control_chud</span>(<span class="enscript-type">int</span> val, <span class="enscript-type">void</span> *fn)
+{
+	kdbg_lock_init();
+    
+	<span class="enscript-keyword">if</span> (val) {
+		<span class="enscript-comment">/* enable chudhook */</span>
+		kdebug_chudhook = fn;
+		kdbg_set_flags(SLOW_CHUD, KDEBUG_ENABLE_CHUD, TRUE);
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* disable chudhook */</span>
+		kdbg_set_flags(SLOW_CHUD, KDEBUG_ENABLE_CHUD, FALSE);
+		kdebug_chudhook = 0;
+	}
+}
+
+	
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_control</span>(<span class="enscript-type">int</span> *name, u_int namelen, user_addr_t where, size_t *sizep)
+{
+	<span class="enscript-type">int</span> ret = 0;
+	size_t size = *sizep;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> value = 0;
+	kd_regtype kd_Reg;
+	kbufinfo_t kd_bufinfo;
+	pid_t curpid;
+	proc_t p, curproc;
+
+	<span class="enscript-keyword">if</span> (name[0] == KERN_KDGETENTROPY ||
+		name[0] == KERN_KDWRITETR ||
+		name[0] == KERN_KDWRITETR_V3 ||
+		name[0] == KERN_KDWRITEMAP ||
+		name[0] == KERN_KDWRITEMAP_V3 ||
+		name[0] == KERN_KDEFLAGS ||
+		name[0] == KERN_KDDFLAGS ||
+		name[0] == KERN_KDENABLE ||
+		name[0] == KERN_KDENABLE_BG_TRACE ||
+		name[0] == KERN_KDSETBUF) {
+		
+		<span class="enscript-keyword">if</span> ( namelen &lt; 2 )
+			<span class="enscript-keyword">return</span>(EINVAL);
+		value = name[1];
+	}
+	
+	kdbg_lock_init();
+
+	<span class="enscript-keyword">if</span> ( !(kd_ctrl_page.kdebug_flags &amp; KDBG_LOCKINIT))
+		<span class="enscript-keyword">return</span>(ENOSPC);
+
+	lck_mtx_lock(kd_trace_mtx_sysctl);
+
+	<span class="enscript-keyword">switch</span>(name[0]) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDGETBUF</span>:
+			<span class="enscript-comment">/*
+			 * Does not alter the global_state_pid
+			 * This is a passive request.
+			 */</span>
+			<span class="enscript-keyword">if</span> (size &lt; <span class="enscript-keyword">sizeof</span>(kd_bufinfo.nkdbufs)) {
+				<span class="enscript-comment">/*
+				 * There is not enough room to return even
+				 * the first element of the info structure.
+				 */</span>
+				ret = EINVAL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			kd_bufinfo.nkdbufs = nkdbufs;
+			kd_bufinfo.nkdthreads = kd_mapcount;
+			
+			<span class="enscript-keyword">if</span> ( (kd_ctrl_page.kdebug_slowcheck &amp; SLOW_NOLOG) )
+				kd_bufinfo.nolog = 1;
+			<span class="enscript-keyword">else</span>
+				kd_bufinfo.nolog = 0;
+			
+			kd_bufinfo.flags = kd_ctrl_page.kdebug_flags;
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+			kd_bufinfo.flags |= KDBG_LP64;
+#<span class="enscript-reference">endif</span>
+			kd_bufinfo.bufid = global_state_pid;
+			
+			<span class="enscript-keyword">if</span> (size &gt;= <span class="enscript-keyword">sizeof</span>(kd_bufinfo)) {
+				<span class="enscript-comment">/*
+				 * Provide all the info we have
+				 */</span>
+				<span class="enscript-keyword">if</span> (copyout(&amp;kd_bufinfo, where, <span class="enscript-keyword">sizeof</span>(kd_bufinfo)))
+					ret = EINVAL;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/*
+				 * For backwards compatibility, only provide
+				 * as much info as there is room for.
+				 */</span>
+				<span class="enscript-keyword">if</span> (copyout(&amp;kd_bufinfo, where, size))
+					ret = EINVAL;
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDGETENTROPY</span>: {
+			<span class="enscript-comment">/* Obsolescent - just fake with a random buffer */</span>
+			<span class="enscript-type">char</span>	*buffer = (<span class="enscript-type">char</span> *) kalloc(size);
+			read_frandom((<span class="enscript-type">void</span> *) buffer, size);
+			ret = copyout(buffer, where, size);
+			kfree(buffer, size);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+			
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDENABLE_BG_TRACE</span>:
+			bg_nkdbufs = kdbg_set_nkdbufs(value);
+			kdlog_bg_trace = TRUE;
+			ret = kdbg_enable_bg_trace();
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDDISABLE_BG_TRACE</span>:
+			kdlog_bg_trace = FALSE;
+			kdbg_disable_bg_trace();
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDWAIT_BG_TRACE_RESET</span>:
+			<span class="enscript-keyword">if</span> (!kdlog_bg_trace){
+				ret = EINVAL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			wait_result_t wait_result = assert_wait(&amp;kdlog_bg_trace, THREAD_ABORTSAFE);
+			lck_mtx_unlock(kd_trace_mtx_sysctl);
+			<span class="enscript-keyword">if</span> (wait_result == THREAD_WAITING)
+				wait_result = thread_block(THREAD_CONTINUE_NULL);
+			<span class="enscript-keyword">if</span> (wait_result == THREAD_INTERRUPTED)
+				ret = EINTR;
+			lck_mtx_lock(kd_trace_mtx_sysctl);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDSET_BG_TYPEFILTER</span>:
+			<span class="enscript-keyword">if</span> (!kdlog_bg_trace || !kdlog_bg_trace_running){
+				ret = EINVAL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+
+			<span class="enscript-keyword">if</span> (size != KDBG_TYPEFILTER_BITMAP_SIZE) {
+				ret = EINVAL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+
+			<span class="enscript-keyword">if</span> ((kd_ctrl_page.kdebug_flags &amp; KDBG_TYPEFILTER_CHECK) == 0){
+				<span class="enscript-keyword">if</span> ((ret = kdbg_enable_typefilter()))
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+
+			<span class="enscript-keyword">if</span> (copyin(where, type_filter_bitmap, KDBG_TYPEFILTER_BITMAP_SIZE)) {
+				ret = EINVAL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			kdbg_iop_list_callback(kd_ctrl_page.kdebug_iops, KD_CALLBACK_TYPEFILTER_CHANGED, type_filter_bitmap);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	
+	<span class="enscript-keyword">if</span> ((curproc = current_proc()) != NULL)
+		curpid = curproc-&gt;p_pid;
+	<span class="enscript-keyword">else</span> {
+		ret = ESRCH;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (global_state_pid == -1)
+		global_state_pid = curpid;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (global_state_pid != curpid) {
+		<span class="enscript-keyword">if</span> ((p = proc_find(global_state_pid)) == NULL) {
+			<span class="enscript-comment">/*
+			 * The global pid no longer exists
+			 */</span>
+			global_state_pid = curpid;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * The global pid exists, deny this request
+			 */</span>
+			proc_rele(p);
+
+			ret = EBUSY;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+
+	<span class="enscript-keyword">switch</span>(name[0]) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDEFLAGS</span>:
+			kdbg_disable_bg_trace();
+
+			value &amp;= KDBG_USERFLAGS;
+			kd_ctrl_page.kdebug_flags |= value;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDDFLAGS</span>:
+			kdbg_disable_bg_trace();
+
+			value &amp;= KDBG_USERFLAGS;
+			kd_ctrl_page.kdebug_flags &amp;= ~value;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDENABLE</span>:
+			<span class="enscript-comment">/*
+			 * Enable tracing mechanism.  Two types:
+			 * KDEBUG_TRACE is the standard one,
+			 * and KDEBUG_PPT which is a carefully
+			 * chosen subset to avoid performance impact.
+			 */</span>
+			<span class="enscript-keyword">if</span> (value) {
+				<span class="enscript-comment">/*
+				 * enable only if buffer is initialized
+				 */</span>
+				<span class="enscript-keyword">if</span> (!(kd_ctrl_page.kdebug_flags &amp; KDBG_BUFINIT) || 
+				    !(value == KDEBUG_ENABLE_TRACE || value == KDEBUG_ENABLE_PPT)) {
+					ret = EINVAL;
+					<span class="enscript-keyword">break</span>;
+				}
+				kdbg_thrmap_init();
+
+				kdbg_set_tracing_enabled(TRUE, value);
+			}
+			<span class="enscript-keyword">else</span>
+			{
+				kdbg_set_tracing_enabled(FALSE, 0);
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDSETBUF</span>:
+			kdbg_disable_bg_trace();
+
+			nkdbufs = kdbg_set_nkdbufs(value);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDSETUP</span>:
+			kdbg_disable_bg_trace();
+
+			ret = kdbg_reinit(FALSE);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDREMOVE</span>:
+			kdbg_clear();
+			ret = kdbg_enable_bg_trace();
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDSETREG</span>:
+			<span class="enscript-keyword">if</span>(size &lt; <span class="enscript-keyword">sizeof</span>(kd_regtype)) {
+				ret = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (copyin(where, &amp;kd_Reg, <span class="enscript-keyword">sizeof</span>(kd_regtype))) {
+				ret = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			kdbg_disable_bg_trace();
+
+			ret = kdbg_setreg(&amp;kd_Reg);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDGETREG</span>:
+			<span class="enscript-keyword">if</span> (size &lt; <span class="enscript-keyword">sizeof</span>(kd_regtype)) {
+				ret = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			ret = kdbg_getreg(&amp;kd_Reg);
+			<span class="enscript-keyword">if</span> (copyout(&amp;kd_Reg, where, <span class="enscript-keyword">sizeof</span>(kd_regtype))) {
+				ret = EINVAL;
+			}
+			kdbg_disable_bg_trace();
+
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDREADTR</span>:
+			ret = kdbg_read(where, sizep, NULL, NULL, RAW_VERSION1);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDWRITETR</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDWRITETR_V3</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDWRITEMAP</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDWRITEMAP_V3</span>:
+		{
+			<span class="enscript-type">struct</span>	vfs_context context;
+			<span class="enscript-type">struct</span>	fileproc *fp;
+			size_t	number;
+			vnode_t	vp;
+			<span class="enscript-type">int</span>	fd;
+
+			<span class="enscript-keyword">if</span> (name[0] == KERN_KDWRITETR || name[0] == KERN_KDWRITETR_V3) {
+				<span class="enscript-type">int</span> s;
+				<span class="enscript-type">int</span> wait_result = THREAD_AWAKENED;
+				u_int64_t abstime;
+				u_int64_t ns;
+
+				<span class="enscript-keyword">if</span> (*sizep) {
+					ns = ((u_int64_t)*sizep) * (u_int64_t)(1000 * 1000);
+					nanoseconds_to_absolutetime(ns,  &amp;abstime );
+					clock_absolutetime_interval_to_deadline( abstime, &amp;abstime );
+				} <span class="enscript-keyword">else</span>
+					abstime = 0;
+
+				s = ml_set_interrupts_enabled(FALSE);
+				lck_spin_lock(kdw_spin_lock);
+
+				<span class="enscript-keyword">while</span> (wait_result == THREAD_AWAKENED &amp;&amp; kd_ctrl_page.kds_inuse_count &lt; n_storage_threshold) {
+
+					kds_waiter = 1;
+
+					<span class="enscript-keyword">if</span> (abstime)
+						wait_result = lck_spin_sleep_deadline(kdw_spin_lock, 0, &amp;kds_waiter, THREAD_ABORTSAFE, abstime);
+					<span class="enscript-keyword">else</span>
+						wait_result = lck_spin_sleep(kdw_spin_lock, 0, &amp;kds_waiter, THREAD_ABORTSAFE);
+					
+					kds_waiter = 0;
+				}
+				lck_spin_unlock(kdw_spin_lock);
+				ml_set_interrupts_enabled(s);
+			}
+			p = current_proc();
+			fd = value;
+
+			proc_fdlock(p);
+			<span class="enscript-keyword">if</span> ( (ret = fp_lookup(p, fd, &amp;fp, 1)) ) {
+				proc_fdunlock(p);
+				<span class="enscript-keyword">break</span>;
+			}
+			context.vc_thread = current_thread();
+			context.vc_ucred = fp-&gt;f_fglob-&gt;fg_cred;
+
+			<span class="enscript-keyword">if</span> (FILEGLOB_DTYPE(fp-&gt;f_fglob) != DTYPE_VNODE) {
+				fp_drop(p, fd, fp, 1);
+				proc_fdunlock(p);
+
+				ret = EBADF;
+				<span class="enscript-keyword">break</span>;
+			}
+			vp = (<span class="enscript-type">struct</span> vnode *)fp-&gt;f_fglob-&gt;fg_data;
+			proc_fdunlock(p);
+
+			<span class="enscript-keyword">if</span> ((ret = vnode_getwithref(vp)) == 0) {
+				RAW_file_offset = fp-&gt;f_fglob-&gt;fg_offset;
+				<span class="enscript-keyword">if</span> (name[0] == KERN_KDWRITETR || name[0] == KERN_KDWRITETR_V3) {
+					number = nkdbufs * <span class="enscript-keyword">sizeof</span>(kd_buf);
+
+					KERNEL_DEBUG_CONSTANT(TRACE_WRITING_EVENTS | DBG_FUNC_START, 0, 0, 0, 0, 0);
+					<span class="enscript-keyword">if</span> (name[0] == KERN_KDWRITETR_V3)
+						ret = kdbg_read(0, &amp;number, vp, &amp;context, RAW_VERSION3);
+					<span class="enscript-keyword">else</span>
+						ret = kdbg_read(0, &amp;number, vp, &amp;context, RAW_VERSION1);
+					KERNEL_DEBUG_CONSTANT(TRACE_WRITING_EVENTS | DBG_FUNC_END, number, 0, 0, 0, 0);
+
+					*sizep = number;
+				} <span class="enscript-keyword">else</span> {
+					number = kd_mapcount * <span class="enscript-keyword">sizeof</span>(kd_threadmap);
+					<span class="enscript-keyword">if</span> (name[0] == KERN_KDWRITEMAP_V3)
+						kdbg_readthrmap_v3(0, &amp;number, fd);
+					<span class="enscript-keyword">else</span>
+						kdbg_readthrmap(0, &amp;number, vp, &amp;context);
+				}
+				fp-&gt;f_fglob-&gt;fg_offset = RAW_file_offset;
+				vnode_put(vp);
+			}
+			fp_drop(p, fd, fp, 0);
+
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDBUFWAIT</span>:
+		{
+			<span class="enscript-comment">/* WRITETR lite -- just block until there's data */</span>
+			<span class="enscript-type">int</span> s;
+			<span class="enscript-type">int</span> wait_result = THREAD_AWAKENED;
+			u_int64_t abstime;
+			u_int64_t ns;
+			size_t	number = 0;
+
+			kdbg_disable_bg_trace();
+
+
+			<span class="enscript-keyword">if</span> (*sizep) {
+				ns = ((u_int64_t)*sizep) * (u_int64_t)(1000 * 1000);
+				nanoseconds_to_absolutetime(ns,  &amp;abstime );
+				clock_absolutetime_interval_to_deadline( abstime, &amp;abstime );
+			} <span class="enscript-keyword">else</span>
+				abstime = 0;
+
+			s = ml_set_interrupts_enabled(FALSE);
+			<span class="enscript-keyword">if</span>( !s )
+				panic(<span class="enscript-string">&quot;trying to wait with interrupts off&quot;</span>);
+			lck_spin_lock(kdw_spin_lock);
+
+			<span class="enscript-comment">/* drop the mutex so don't exclude others from
+			 * accessing trace
+			 */</span>
+			lck_mtx_unlock(kd_trace_mtx_sysctl);
+
+			<span class="enscript-keyword">while</span> (wait_result == THREAD_AWAKENED &amp;&amp;
+				kd_ctrl_page.kds_inuse_count &lt; n_storage_threshold) {
+
+				kds_waiter = 1;
+
+				<span class="enscript-keyword">if</span> (abstime)
+					wait_result = lck_spin_sleep_deadline(kdw_spin_lock, 0, &amp;kds_waiter, THREAD_ABORTSAFE, abstime);
+				<span class="enscript-keyword">else</span>
+					wait_result = lck_spin_sleep(kdw_spin_lock, 0, &amp;kds_waiter, THREAD_ABORTSAFE);
+				
+				kds_waiter = 0;
+			}
+
+			<span class="enscript-comment">/* check the count under the spinlock */</span>
+			number = (kd_ctrl_page.kds_inuse_count &gt;= n_storage_threshold);
+
+			lck_spin_unlock(kdw_spin_lock);
+			ml_set_interrupts_enabled(s);
+
+			<span class="enscript-comment">/* pick the mutex back up again */</span>
+			lck_mtx_lock(kd_trace_mtx_sysctl);
+
+			<span class="enscript-comment">/* write out whether we've exceeded the threshold */</span>
+			*sizep = number;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDPIDTR</span>:
+			<span class="enscript-keyword">if</span> (size &lt; <span class="enscript-keyword">sizeof</span>(kd_regtype)) {
+				ret = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (copyin(where, &amp;kd_Reg, <span class="enscript-keyword">sizeof</span>(kd_regtype))) {
+				ret = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			kdbg_disable_bg_trace();
+
+			ret = kdbg_setpid(&amp;kd_Reg);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDPIDEX</span>:
+			<span class="enscript-keyword">if</span> (size &lt; <span class="enscript-keyword">sizeof</span>(kd_regtype)) {
+				ret = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (copyin(where, &amp;kd_Reg, <span class="enscript-keyword">sizeof</span>(kd_regtype))) {
+				ret = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			kdbg_disable_bg_trace();
+
+			ret = kdbg_setpidex(&amp;kd_Reg);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDCPUMAP</span>:
+			ret = kdbg_readcpumap(where, sizep);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDTHRMAP</span>:
+			ret = kdbg_readthrmap(where, sizep, NULL, NULL);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDREADCURTHRMAP</span>:
+			ret = kdbg_readcurthrmap(where, sizep);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDSETRTCDEC</span>:
+			<span class="enscript-keyword">if</span> (size &lt; <span class="enscript-keyword">sizeof</span>(kd_regtype)) {
+				ret = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (copyin(where, &amp;kd_Reg, <span class="enscript-keyword">sizeof</span>(kd_regtype))) {
+				ret = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			kdbg_disable_bg_trace();
+
+			ret = kdbg_setrtcdec(&amp;kd_Reg);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_KDSET_TYPEFILTER</span>:
+			kdbg_disable_bg_trace();
+
+			<span class="enscript-keyword">if</span> (size != KDBG_TYPEFILTER_BITMAP_SIZE) {
+				ret = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			<span class="enscript-keyword">if</span> ((kd_ctrl_page.kdebug_flags &amp; KDBG_TYPEFILTER_CHECK) == 0){
+				<span class="enscript-keyword">if</span> ((ret = kdbg_enable_typefilter()))
+					<span class="enscript-keyword">break</span>;
+			}
+
+			<span class="enscript-keyword">if</span> (copyin(where, type_filter_bitmap, KDBG_TYPEFILTER_BITMAP_SIZE)) {
+				ret = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			kdbg_iop_list_callback(kd_ctrl_page.kdebug_iops, KD_CALLBACK_TYPEFILTER_CHANGED, type_filter_bitmap);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			ret = EINVAL;
+	}
+<span class="enscript-reference">out</span>:
+	lck_mtx_unlock(kd_trace_mtx_sysctl);
+
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+
+<span class="enscript-comment">/*
+ * This code can run for the most part concurrently with kernel_debug_internal()...
+ * 'release_storage_unit' will take the kds_spin_lock which may cause us to briefly
+ * synchronize with the recording side of this puzzle... otherwise, we are able to
+ * move through the lists w/o use of any locks
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdbg_read</span>(user_addr_t buffer, size_t *number, vnode_t vp, vfs_context_t ctx, uint32_t file_version)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> count;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> cpu, min_cpu;
+	uint64_t  mintime, t, barrier = 0;
+	<span class="enscript-type">int</span> error = 0;
+	kd_buf *tempbuf;
+	uint32_t rcursor;
+	kd_buf lostevent;
+	<span class="enscript-type">union</span> kds_ptr kdsp;
+	<span class="enscript-type">struct</span> kd_storage *kdsp_actual;
+	<span class="enscript-type">struct</span> kd_bufinfo *kdbp;
+	<span class="enscript-type">struct</span> kd_bufinfo *min_kdbp;
+	uint32_t tempbuf_count;
+	uint32_t tempbuf_number;
+	uint32_t old_kdebug_flags;
+	uint32_t old_kdebug_slowcheck;
+	boolean_t lostevents = FALSE;
+	boolean_t out_of_events = FALSE;
+
+        assert(number);
+	count = *number/<span class="enscript-keyword">sizeof</span>(kd_buf);
+	*number = 0;
+
+	<span class="enscript-keyword">if</span> (count == 0 || !(kd_ctrl_page.kdebug_flags &amp; KDBG_BUFINIT) || kdcopybuf == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	memset(&amp;lostevent, 0, <span class="enscript-keyword">sizeof</span>(lostevent));
+	lostevent.debugid = TRACE_LOST_EVENTS;
+
+	<span class="enscript-comment">/* Capture timestamp. Only sort events that have occured before the timestamp.
+	 * Since the iop is being flushed here, its possible that events occur on the AP
+	 * while running live tracing. If we are disabled, no new events should 
+	 * occur on the AP.
+	*/</span>
+	
+	<span class="enscript-keyword">if</span> (kd_ctrl_page.enabled)
+	{
+		<span class="enscript-comment">// timestamp is non-zero value
+</span>		barrier = mach_absolute_time() &amp; KDBG_TIMESTAMP_MASK;
+	}
+	
+	<span class="enscript-comment">// Request each IOP to provide us with up to date entries before merging buffers together.
+</span>	kdbg_iop_list_callback(kd_ctrl_page.kdebug_iops, KD_CALLBACK_SYNC_FLUSH, NULL);
+
+	<span class="enscript-comment">/*
+	 * because we hold kd_trace_mtx_sysctl, no other control threads can 
+	 * be playing with kdebug_flags... the code that cuts new events could
+	 * be running, but it grabs kds_spin_lock if it needs to acquire a new
+	 * storage chunk which is where it examines kdebug_flags... it its adding
+	 * to the same chunk we're reading from, no problem... 
+	 */</span>
+
+	disable_wrap(&amp;old_kdebug_slowcheck, &amp;old_kdebug_flags);
+
+	<span class="enscript-keyword">if</span> (count &gt; nkdbufs)
+		count = nkdbufs;
+
+	<span class="enscript-keyword">if</span> ((tempbuf_count = count) &gt; KDCOPYBUF_COUNT)
+	        tempbuf_count = KDCOPYBUF_COUNT;
+
+	<span class="enscript-keyword">while</span> (count) {
+		tempbuf = kdcopybuf;
+		tempbuf_number = 0;
+
+		<span class="enscript-comment">// While space
+</span>		<span class="enscript-keyword">while</span> (tempbuf_count) {
+			mintime = 0xffffffffffffffffULL;
+			min_kdbp = NULL;
+			min_cpu = 0;
+
+			<span class="enscript-comment">// Check all CPUs
+</span>			<span class="enscript-keyword">for</span> (cpu = 0, kdbp = &amp;kdbip[0]; cpu &lt; kd_ctrl_page.kdebug_cpus; cpu++, kdbp++) {
+
+				<span class="enscript-comment">// Find one with raw data
+</span>				<span class="enscript-keyword">if</span> ((kdsp = kdbp-&gt;kd_list_head).raw == KDS_PTR_NULL)
+				        <span class="enscript-keyword">continue</span>;
+				<span class="enscript-comment">/* Debugging aid: maintain a copy of the &quot;kdsp&quot;
+				 * index.
+				 */</span>
+				<span class="enscript-type">volatile</span> <span class="enscript-type">union</span> kds_ptr kdsp_shadow;
+
+				kdsp_shadow = kdsp;
+
+				<span class="enscript-comment">// Get from cpu data to buffer header to buffer
+</span>				kdsp_actual = POINTER_FROM_KDS_PTR(kdsp);
+
+				<span class="enscript-type">volatile</span> <span class="enscript-type">struct</span> kd_storage *kdsp_actual_shadow;
+
+				kdsp_actual_shadow = kdsp_actual;
+
+				<span class="enscript-comment">// See if there are actual data left in this buffer
+</span>				rcursor = kdsp_actual-&gt;kds_readlast;
+
+				<span class="enscript-keyword">if</span> (rcursor == kdsp_actual-&gt;kds_bufindx)
+					<span class="enscript-keyword">continue</span>;
+
+				t = kdbg_get_timestamp(&amp;kdsp_actual-&gt;kds_records[rcursor]);
+
+				<span class="enscript-keyword">if</span> ((t &gt; barrier) &amp;&amp; (barrier &gt; 0)) {
+					<span class="enscript-comment">/* 
+					 * Need to wait to flush iop again before we 
+					 * sort any more data from the buffers
+					*/</span>
+					out_of_events = TRUE;
+					<span class="enscript-keyword">break</span>;
+				}	
+				<span class="enscript-keyword">if</span> (t &lt; kdsp_actual-&gt;kds_timestamp) {
+					<span class="enscript-comment">/*
+					 * indicates we've not yet completed filling
+					 * in this event...
+					 * this should only occur when we're looking
+					 * at the buf that the record head is utilizing
+					 * we'll pick these events up on the next
+					 * call to kdbg_read
+					 * we bail at this point so that we don't
+					 * get an out-of-order timestream by continuing
+					 * to read events from the other CPUs' timestream(s)
+					 */</span>
+					out_of_events = TRUE;
+					<span class="enscript-keyword">break</span>;
+				}
+				<span class="enscript-keyword">if</span> (t &lt; mintime) {
+				        mintime = t;
+					min_kdbp = kdbp;
+					min_cpu = cpu;
+				}
+			}
+			<span class="enscript-keyword">if</span> (min_kdbp == NULL || out_of_events == TRUE) {
+				<span class="enscript-comment">/*
+				 * all buffers ran empty
+				 */</span>
+				out_of_events = TRUE;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			<span class="enscript-comment">// Get data
+</span>			kdsp = min_kdbp-&gt;kd_list_head;
+			kdsp_actual = POINTER_FROM_KDS_PTR(kdsp);
+
+			<span class="enscript-keyword">if</span> (kdsp_actual-&gt;kds_lostevents == TRUE) {
+				kdbg_set_timestamp_and_cpu(&amp;lostevent, kdsp_actual-&gt;kds_records[kdsp_actual-&gt;kds_readlast].timestamp, min_cpu);
+				*tempbuf = lostevent;
+				
+				kdsp_actual-&gt;kds_lostevents = FALSE;
+				lostevents = TRUE;
+
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">nextevent</span>;
+			}
+
+			<span class="enscript-comment">// Copy into buffer
+</span>			*tempbuf = kdsp_actual-&gt;kds_records[kdsp_actual-&gt;kds_readlast++];
+
+			<span class="enscript-keyword">if</span> (kdsp_actual-&gt;kds_readlast == EVENTS_PER_STORAGE_UNIT)
+				release_storage_unit(min_cpu, kdsp.raw);
+
+			<span class="enscript-comment">/*
+			 * Watch for out of order timestamps
+			 */</span>	
+			<span class="enscript-keyword">if</span> (mintime &lt; min_kdbp-&gt;kd_prev_timebase) {
+				<span class="enscript-comment">/*
+				 * if so, use the previous timestamp + 1 cycle
+				 */</span>
+				min_kdbp-&gt;kd_prev_timebase++;
+				kdbg_set_timestamp_and_cpu(tempbuf, min_kdbp-&gt;kd_prev_timebase, kdbg_get_cpu(tempbuf));
+			} <span class="enscript-keyword">else</span>
+				min_kdbp-&gt;kd_prev_timebase = mintime;
+<span class="enscript-reference">nextevent</span>:
+			tempbuf_count--;
+			tempbuf_number++;
+			tempbuf++;
+
+			<span class="enscript-keyword">if</span> ((RAW_file_written += <span class="enscript-keyword">sizeof</span>(kd_buf)) &gt;= RAW_FLUSH_SIZE)
+				<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (tempbuf_number) {
+			<span class="enscript-keyword">if</span> (file_version == RAW_VERSION3) {
+				<span class="enscript-keyword">if</span> ( !(kdbg_write_v3_event_chunk_header(buffer, V3_RAW_EVENTS, (tempbuf_number * <span class="enscript-keyword">sizeof</span>(kd_buf)), vp, ctx))) {
+					error = EFAULT;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">check_error</span>;
+				}
+				<span class="enscript-keyword">if</span> (buffer)
+					buffer += (<span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3) + <span class="enscript-keyword">sizeof</span>(uint64_t));
+
+				assert(count &gt;= (<span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3) + <span class="enscript-keyword">sizeof</span>(uint64_t)));
+				count -= (<span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3) + <span class="enscript-keyword">sizeof</span>(uint64_t));
+				*number += (<span class="enscript-keyword">sizeof</span>(kd_chunk_header_v3) + <span class="enscript-keyword">sizeof</span>(uint64_t));
+			}
+			<span class="enscript-keyword">if</span> (vp) {
+				size_t write_size = tempbuf_number * <span class="enscript-keyword">sizeof</span>(kd_buf);
+				error = kdbg_write_to_vnode((caddr_t)kdcopybuf, write_size, vp, ctx, RAW_file_offset);
+				<span class="enscript-keyword">if</span> (!error)
+					RAW_file_offset += write_size;
+	
+				<span class="enscript-keyword">if</span> (RAW_file_written &gt;= RAW_FLUSH_SIZE) {
+					cluster_push(vp, 0);
+
+					RAW_file_written = 0;
+				}
+			} <span class="enscript-keyword">else</span> {
+				error = copyout(kdcopybuf, buffer, tempbuf_number * <span class="enscript-keyword">sizeof</span>(kd_buf));
+				buffer += (tempbuf_number * <span class="enscript-keyword">sizeof</span>(kd_buf));
+			}
+<span class="enscript-reference">check_error</span>:
+			<span class="enscript-keyword">if</span> (error) {
+				*number = 0;
+				error = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			count   -= tempbuf_number;
+			*number += tempbuf_number;
+		}
+		<span class="enscript-keyword">if</span> (out_of_events == TRUE)
+		       <span class="enscript-comment">/*
+			* all trace buffers are empty
+			*/</span>
+		        <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">if</span> ((tempbuf_count = count) &gt; KDCOPYBUF_COUNT)
+		        tempbuf_count = KDCOPYBUF_COUNT;
+	}
+	<span class="enscript-keyword">if</span> ( !(old_kdebug_flags &amp; KDBG_NOWRAP)) {
+		enable_wrap(old_kdebug_slowcheck, lostevents);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *<span class="enscript-function-name">getProcName</span>(<span class="enscript-type">struct</span> proc *proc);
+<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *<span class="enscript-function-name">getProcName</span>(<span class="enscript-type">struct</span> proc *proc) {
+
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *) &amp;proc-&gt;p_comm;	<span class="enscript-comment">/* Return pointer to the proc name */</span>
+
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">stackshot_kern_return_to_bsd_error</span>(kern_return_t kr)
+{
+	<span class="enscript-keyword">switch</span> (kr) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_SUCCESS</span>:
+			<span class="enscript-keyword">return</span> 0;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_RESOURCE_SHORTAGE</span>:
+			<span class="enscript-keyword">return</span> ENOMEM;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NO_SPACE</span>:
+			<span class="enscript-keyword">return</span> ENOSPC;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NO_ACCESS</span>:
+			<span class="enscript-keyword">return</span> EPERM;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_MEMORY_PRESENT</span>:
+			<span class="enscript-keyword">return</span> EEXIST;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NOT_SUPPORTED</span>:
+			<span class="enscript-keyword">return</span> ENOTSUP;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NOT_IN_SET</span>:
+			<span class="enscript-keyword">return</span> ENOENT;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> EINVAL;
+	}
+}
+
+
+<span class="enscript-comment">/*
+ * DEPRECATION WARNING: THIS SYSCALL IS BEING REPLACED WITH SYS_stack_snapshot_with_config and SYS_microstackshot.
+ *
+ * stack_snapshot:   Obtains a coherent set of stack traces for all threads
+ *		     on the system, tracing both kernel and user stacks
+ *		     where available. Uses machine specific trace routines
+ *		     for ppc, ppc64 and x86.
+ * Inputs:	     uap-&gt;pid - process id of process to be traced, or -1
+ *		     for the entire system
+ *		     uap-&gt;tracebuf - address of the user space destination
+ *		     buffer 
+ *		     uap-&gt;tracebuf_size - size of the user space trace buffer
+ *		     uap-&gt;options - various options, including the maximum
+ *		     number of frames to trace.
+ * Outputs:	     EPERM if the caller is not privileged
+ *		     EINVAL if the supplied trace buffer isn't sanely sized
+ *		     ENOMEM if we don't have enough memory to satisfy the
+ *		     request
+ *		     ENOENT if the target pid isn't found
+ *		     ENOSPC if the supplied buffer is insufficient
+ *		     *retval contains the number of bytes traced, if successful
+ *		     and -1 otherwise. If the request failed due to
+ *		     tracebuffer exhaustion, we copyout as much as possible.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">stack_snapshot</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">register</span> <span class="enscript-type">struct</span> stack_snapshot_args *uap, int32_t *retval) {
+	<span class="enscript-type">int</span> error = 0;
+	kern_return_t kr;
+
+	<span class="enscript-keyword">if</span> ((error = suser(kauth_cred_get(), &amp;p-&gt;p_acflag)))
+                <span class="enscript-keyword">return</span>(error);
+
+	kr = stack_snapshot2(uap-&gt;pid, uap-&gt;tracebuf, uap-&gt;tracebuf_size, uap-&gt;flags, retval);
+	<span class="enscript-keyword">return</span> stackshot_kern_return_to_bsd_error(kr);
+}
+
+<span class="enscript-comment">/*
+ * stack_snapshot_with_config:	Obtains a coherent set of stack traces for specified threads on the sysem,
+ *				tracing both kernel and user stacks where available. Allocates a buffer from the
+ *				kernel and maps the buffer into the calling task's address space.
+ *
+ * Inputs:      		uap-&gt;stackshot_config_version - version of the stackshot config that is being passed
+ *				uap-&gt;stackshot_config - pointer to the stackshot config
+ *				uap-&gt;stackshot_config_size- size of the stackshot config being passed
+ * Outputs:			EINVAL if there is a problem with the arguments
+ *				EFAULT if we failed to copy in the arguments succesfully
+ *				EPERM if the caller is not privileged
+ *				ENOTSUP if the caller is passing a version of arguments that is not supported by the kernel
+ *				(indicates libsyscall:kernel mismatch) or if the caller is requesting unsupported flags
+ *				ENOENT if the caller is requesting an existing buffer that doesn't exist or if the
+ *				requested PID isn't found
+ *				ENOMEM if the kernel is unable to allocate enough memory to serve the request
+ *				ENOSPC if there isn't enough space in the caller's address space to remap the buffer
+ *				ESRCH if the target PID isn't found
+ *				returns KERN_SUCCESS on success	
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">stack_snapshot_with_config</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> stack_snapshot_with_config_args *uap, __unused <span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-type">int</span> error = 0;
+	kern_return_t kr;
+
+	<span class="enscript-keyword">if</span> ((error = suser(kauth_cred_get(), &amp;p-&gt;p_acflag)))
+                <span class="enscript-keyword">return</span>(error);
+
+	<span class="enscript-keyword">if</span>((<span class="enscript-type">void</span>*)uap-&gt;stackshot_config == NULL) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-keyword">switch</span> (uap-&gt;stackshot_config_version) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">STACKSHOT_CONFIG_TYPE</span>:
+			<span class="enscript-keyword">if</span> (uap-&gt;stackshot_config_size != <span class="enscript-keyword">sizeof</span>(stackshot_config_t)) {
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+			stackshot_config_t config;
+			error = copyin(uap-&gt;stackshot_config, &amp;config, <span class="enscript-keyword">sizeof</span>(stackshot_config_t));
+			<span class="enscript-keyword">if</span> (error != KERN_SUCCESS)
+			{
+				<span class="enscript-keyword">return</span> EFAULT;
+			}
+			kr = kern_stack_snapshot_internal(uap-&gt;stackshot_config_version, &amp;config, <span class="enscript-keyword">sizeof</span>(stackshot_config_t), TRUE);
+			<span class="enscript-keyword">return</span> stackshot_kern_return_to_bsd_error(kr);
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> ENOTSUP;
+	}
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TELEMETRY</span>
+<span class="enscript-comment">/*
+ * microstackshot:	Catch all system call for microstackshot related operations, including
+ *			enabling/disabling both global and windowed microstackshots as well
+ *			as retrieving windowed or global stackshots and the boot profile.
+ * Inputs:   		uap-&gt;tracebuf - address of the user space destination
+ *			buffer
+ *			uap-&gt;tracebuf_size - size of the user space trace buffer
+ *			uap-&gt;flags - various flags
+ * Outputs:		EPERM if the caller is not privileged
+ *			EINVAL if the supplied mss_args is NULL, mss_args.tracebuf is NULL or mss_args.tracebuf_size is not sane
+ *			ENOMEM if we don't have enough memory to satisfy the request
+ *			*retval contains the number of bytes traced, if successful
+ *			and -1 otherwise.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">microstackshot</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> microstackshot_args *uap, int32_t *retval)
+{
+	<span class="enscript-type">int</span> error = 0;
+	kern_return_t kr;
+
+	<span class="enscript-keyword">if</span> ((error = suser(kauth_cred_get(), &amp;p-&gt;p_acflag)))
+                <span class="enscript-keyword">return</span>(error);
+
+	kr = stack_microstackshot(uap-&gt;tracebuf, uap-&gt;tracebuf_size, uap-&gt;flags, retval);
+	<span class="enscript-keyword">return</span> stackshot_kern_return_to_bsd_error(kr);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_TELEMETRY */</span>
+
+<span class="enscript-comment">/*
+ * kern_stack_snapshot_with_reason:	Obtains a coherent set of stack traces for specified threads on the sysem,
+ *					tracing both kernel and user stacks where available. Allocates a buffer from the
+ *					kernel and stores the address of this buffer.
+ *
+ * Inputs:      			reason - the reason for triggering a stackshot (unused at the moment, but in the
+ *						future will be saved in the stackshot)
+ * Outputs:				EINVAL/ENOTSUP if there is a problem with the arguments
+ *					EPERM if the caller doesn't pass at least one KERNEL stackshot flag
+ *					ENOMEM if the kernel is unable to allocate enough memory to serve the request
+ *					ESRCH if the target PID isn't found
+ *					returns KERN_SUCCESS on success
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kern_stack_snapshot_with_reason</span>(__unused <span class="enscript-type">char</span> *reason)
+{
+	stackshot_config_t config;
+	kern_return_t kr;
+
+	config.sc_pid = -1;
+	config.sc_flags = (STACKSHOT_SAVE_LOADINFO | STACKSHOT_GET_GLOBAL_MEM_STATS | STACKSHOT_SAVE_IN_KERNEL_BUFFER |
+				STACKSHOT_KCDATA_FORMAT);
+	config.sc_since_timestamp = 0;
+	config.sc_out_buffer_addr = 0;
+	config.sc_out_size_addr = 0;
+
+	kr = kern_stack_snapshot_internal(STACKSHOT_CONFIG_TYPE, &amp;config, <span class="enscript-keyword">sizeof</span>(stackshot_config_t), FALSE);
+	<span class="enscript-keyword">return</span> stackshot_kern_return_to_bsd_error(kr);
+}
+
+<span class="enscript-comment">/*
+ * stack_snapshot_from_kernel:	Stackshot function for kernel consumers who have their own buffer.
+ *
+ * Inputs:			pid - the PID to be traced or -1 for the whole system
+ *				buf - a pointer to the buffer where the stackshot should be written
+ *				size - the size of the buffer
+ *				flags - flags to be passed to the stackshot
+ *				*bytes_traced - a pointer to be filled with the length of the stackshot
+ * Outputs:			-1 if there is a problem with the arguments
+ *				the error returned by the stackshot code otherwise
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">stack_snapshot_from_kernel</span>(pid_t pid, <span class="enscript-type">void</span> *buf, uint32_t size, uint32_t flags, <span class="enscript-type">unsigned</span> *bytes_traced)
+{
+	kern_return_t kr;
+
+	kr = stack_snapshot_from_kernel_internal(pid, buf, size, flags, bytes_traced);
+	<span class="enscript-keyword">if</span> (kr == KERN_FAILURE) {
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">start_kern_tracing</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> new_nkdbufs, boolean_t need_map)
+{
+
+	<span class="enscript-keyword">if</span> (!new_nkdbufs)
+		<span class="enscript-keyword">return</span>;
+	nkdbufs = kdbg_set_nkdbufs(new_nkdbufs);
+	kdbg_lock_init();
+
+	kernel_debug_string_simple(<span class="enscript-string">&quot;start_kern_tracing&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (0 == kdbg_reinit(TRUE)) {
+
+		<span class="enscript-keyword">if</span> (need_map == TRUE) {
+			uint32_t old1, old2;
+
+			kdbg_thrmap_init();
+
+			disable_wrap(&amp;old1, &amp;old2);
+		}
+
+		<span class="enscript-comment">/* Hold off interrupts until the early traces are cut */</span>
+		boolean_t	s = ml_set_interrupts_enabled(FALSE);
+
+		kdbg_set_tracing_enabled(
+			TRUE,
+		 	kdebug_serial ?
+				(KDEBUG_ENABLE_TRACE | KDEBUG_ENABLE_SERIAL) :
+				 KDEBUG_ENABLE_TRACE);
+
+		<span class="enscript-comment">/*
+		 * Transfer all very early events from the static buffer
+		 * into the real buffers.
+		 */</span>
+		kernel_debug_early_end();
+	
+		ml_set_interrupts_enabled(s);
+
+		printf(<span class="enscript-string">&quot;kernel tracing started\n&quot;</span>);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KDEBUG_MOJO_TRACE</span>
+		<span class="enscript-keyword">if</span> (kdebug_serial) {
+			printf(<span class="enscript-string">&quot;serial output enabled with %lu named events\n&quot;</span>,
+			<span class="enscript-keyword">sizeof</span>(kd_events)/<span class="enscript-keyword">sizeof</span>(kd_event_t));
+		}
+#<span class="enscript-reference">endif</span>
+	} <span class="enscript-keyword">else</span> {
+		printf(<span class="enscript-string">&quot;error from kdbg_reinit, kernel tracing not started\n&quot;</span>);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">start_kern_tracing_with_typefilter</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> new_nkdbufs,
+		                   boolean_t need_map,
+		                   <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> typefilter)
+{
+	<span class="enscript-comment">/* startup tracing */</span>
+	start_kern_tracing(new_nkdbufs, need_map);
+
+	<span class="enscript-comment">/* check that tracing was actually enabled */</span>
+	<span class="enscript-keyword">if</span> (!(kdebug_enable &amp; KDEBUG_ENABLE_TRACE))
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/* setup the typefiltering */</span>
+	<span class="enscript-keyword">if</span> (0 == kdbg_enable_typefilter())
+		setbit(type_filter_bitmap,
+		       typefilter &amp; (KDBG_CSC_MASK &gt;&gt; KDBG_CSC_OFFSET));
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdbg_dump_trace_to_file</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *filename)
+{
+	vfs_context_t	ctx;
+	vnode_t		vp;
+	<span class="enscript-type">int</span>		error;
+	size_t		number;
+
+
+	<span class="enscript-keyword">if</span> ( !(kdebug_enable &amp; KDEBUG_ENABLE_TRACE))
+		<span class="enscript-keyword">return</span>;
+
+        <span class="enscript-keyword">if</span> (global_state_pid != -1) {
+		<span class="enscript-keyword">if</span> ((proc_find(global_state_pid)) != NULL) {
+			<span class="enscript-comment">/*
+			 * The global pid exists, we're running
+			 * due to fs_usage, latency, etc...
+			 * don't cut the panic/shutdown trace file
+			 * Disable tracing from this point to avoid
+			 * perturbing state.
+			 */</span>
+			kdebug_enable = 0;
+			kd_ctrl_page.enabled = 0;
+			commpage_update_kdebug_enable();
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+	KERNEL_DEBUG_CONSTANT(TRACE_PANIC | DBG_FUNC_NONE, 0, 0, 0, 0, 0);
+
+	kdebug_enable = 0;
+	kd_ctrl_page.enabled = 0;
+	commpage_update_kdebug_enable();
+
+	ctx = vfs_context_kernel();
+
+	<span class="enscript-keyword">if</span> ((error = vnode_open(filename, (O_CREAT | FWRITE | O_NOFOLLOW), 0600, 0, &amp;vp, ctx)))
+		<span class="enscript-keyword">return</span>;
+
+	number = kd_mapcount * <span class="enscript-keyword">sizeof</span>(kd_threadmap);
+	kdbg_readthrmap(0, &amp;number, vp, ctx);
+
+	number = nkdbufs*<span class="enscript-keyword">sizeof</span>(kd_buf);
+	kdbg_read(0, &amp;number, vp, ctx, RAW_VERSION1);
+	
+	vnode_close(vp, FWRITE, ctx);
+
+	sync(current_proc(), (<span class="enscript-type">void</span> *)NULL, (<span class="enscript-type">int</span> *)NULL);
+}
+
+<span class="enscript-comment">/* Helper function for filling in the BSD name for an address space
+ * Defined here because the machine bindings know only Mach threads
+ * and nothing about BSD processes.
+ *
+ * FIXME: need to grab a lock during this?
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">kdbg_get_task_name</span>(<span class="enscript-type">char</span>* name_buf, <span class="enscript-type">int</span> len, task_t task)
+{
+	proc_t proc;
+	
+	<span class="enscript-comment">/* Note: we can't use thread-&gt;task (and functions that rely on it) here 
+	 * because it hasn't been initialized yet when this function is called.
+	 * We use the explicitly-passed task parameter instead.
+	 */</span>
+	proc = get_bsdtask_info(task);
+	<span class="enscript-keyword">if</span> (proc != PROC_NULL)
+		snprintf(name_buf, len, <span class="enscript-string">&quot;%s/%d&quot;</span>, proc-&gt;p_comm, proc-&gt;p_pid);
+	<span class="enscript-keyword">else</span>
+		snprintf(name_buf, len, <span class="enscript-string">&quot;%p [!bsd]&quot;</span>, task);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KDEBUG_MOJO_TRACE</span>
+<span class="enscript-type">static</span> kd_event_t *
+<span class="enscript-function-name">binary_search</span>(uint32_t id)
+{
+	<span class="enscript-type">int</span> low, high, mid;
+
+	low = 0;
+	high = <span class="enscript-keyword">sizeof</span>(kd_events)/<span class="enscript-keyword">sizeof</span>(kd_event_t) - 1;
+
+	<span class="enscript-keyword">while</span> (TRUE)
+	{
+		mid = (low + high) / 2;
+
+		<span class="enscript-keyword">if</span> (low &gt; high)
+			<span class="enscript-keyword">return</span> NULL; <span class="enscript-comment">/* failed */</span>
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( low + 1 &gt;= high) {
+			<span class="enscript-comment">/* We have a match */</span>
+			<span class="enscript-keyword">if</span> (kd_events[high].id == id)
+				<span class="enscript-keyword">return</span> &amp;kd_events[high];
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kd_events[low].id == id)
+				<span class="enscript-keyword">return</span> &amp;kd_events[low];
+			<span class="enscript-keyword">else</span>
+				<span class="enscript-keyword">return</span> NULL;  <span class="enscript-comment">/* search failed */</span>
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (id &lt; kd_events[mid].id)
+			high = mid;
+		<span class="enscript-keyword">else</span>
+			low = mid;
+	} 
+}
+
+<span class="enscript-comment">/*
+ * Look up event id to get name string.
+ * Using a per-cpu cache of a single entry
+ * before resorting to a binary search of the full table.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">NCACHE</span>	1
+<span class="enscript-type">static</span> kd_event_t	*last_hit[MAX_CPUS];
+<span class="enscript-type">static</span> kd_event_t *
+<span class="enscript-function-name">event_lookup_cache</span>(uint32_t cpu, uint32_t id)
+{
+	<span class="enscript-keyword">if</span> (last_hit[cpu] == NULL || last_hit[cpu]-&gt;id != id)
+		last_hit[cpu] = binary_search(id);
+	<span class="enscript-keyword">return</span> last_hit[cpu];
+}
+
+<span class="enscript-type">static</span> uint64_t	kd_last_timstamp;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_serial_print</span>(
+	uint32_t	cpunum,
+	uint32_t	debugid,
+	uint64_t	timestamp,
+	uintptr_t	arg1,
+	uintptr_t	arg2,
+	uintptr_t	arg3,
+	uintptr_t	arg4,
+	uintptr_t	threadid
+	)
+{
+	<span class="enscript-type">char</span>		kprintf_line[192];
+	<span class="enscript-type">char</span>		event[40];
+	uint64_t	us = timestamp / NSEC_PER_USEC;
+	uint64_t	us_tenth = (timestamp % NSEC_PER_USEC) / 100;
+	uint64_t	delta = timestamp - kd_last_timstamp;
+	uint64_t	delta_us = delta / NSEC_PER_USEC;
+	uint64_t	delta_us_tenth = (delta % NSEC_PER_USEC) / 100;
+	uint32_t	event_id = debugid &amp; KDBG_EVENTID_MASK;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*command;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*bra;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*ket;
+	kd_event_t	*ep;
+
+	<span class="enscript-comment">/* event time and delta from last */</span>
+	snprintf(kprintf_line, <span class="enscript-keyword">sizeof</span>(kprintf_line),
+		<span class="enscript-string">&quot;%11llu.%1llu %8llu.%1llu &quot;</span>,
+		us, us_tenth, delta_us, delta_us_tenth);
+
+
+	<span class="enscript-comment">/* event (id or name) - start prefixed by &quot;[&quot;, end postfixed by &quot;]&quot; */</span>
+	bra = (debugid &amp; DBG_FUNC_START) ? <span class="enscript-string">&quot;[&quot;</span> : <span class="enscript-string">&quot; &quot;</span>;
+	ket = (debugid &amp; DBG_FUNC_END)   ? <span class="enscript-string">&quot;]&quot;</span> : <span class="enscript-string">&quot; &quot;</span>;
+	ep = event_lookup_cache(cpunum, event_id);
+	<span class="enscript-keyword">if</span> (ep) {
+		<span class="enscript-keyword">if</span> (strlen(ep-&gt;name) &lt; <span class="enscript-keyword">sizeof</span>(event) - 3)
+			snprintf(event, <span class="enscript-keyword">sizeof</span>(event), <span class="enscript-string">&quot;%s%s%s&quot;</span>,
+				 bra, ep-&gt;name, ket);
+		<span class="enscript-keyword">else</span>
+			snprintf(event, <span class="enscript-keyword">sizeof</span>(event), <span class="enscript-string">&quot;%s%x(name too long)%s&quot;</span>,
+				 bra, event_id, ket);
+	} <span class="enscript-keyword">else</span> {
+		snprintf(event, <span class="enscript-keyword">sizeof</span>(event), <span class="enscript-string">&quot;%s%x%s&quot;</span>,
+			 bra, event_id, ket);
+	}
+	snprintf(kprintf_line + strlen(kprintf_line),
+		 <span class="enscript-keyword">sizeof</span>(kprintf_line) - strlen(kprintf_line),
+		 <span class="enscript-string">&quot;%-40s  &quot;</span>, event);
+
+	<span class="enscript-comment">/* arg1 .. arg4 with special cases for strings */</span>
+	<span class="enscript-keyword">switch</span> (event_id) {
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">VFS_LOOKUP</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">VFS_LOOKUP_DONE</span>:
+		<span class="enscript-keyword">if</span> (debugid &amp; DBG_FUNC_START) {
+			<span class="enscript-comment">/* arg1 hex then arg2..arg4 chars */</span>
+			snprintf(kprintf_line + strlen(kprintf_line),
+				<span class="enscript-keyword">sizeof</span>(kprintf_line) - strlen(kprintf_line),
+				<span class="enscript-string">&quot;%-16lx %-8s%-8s%-8s                          &quot;</span>,
+				arg1, (<span class="enscript-type">char</span>*)&amp;arg2, (<span class="enscript-type">char</span>*)&amp;arg3, (<span class="enscript-type">char</span>*)&amp;arg4);
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/* else fall through for arg1..arg4 chars */</span>
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">TRACE_STRING_EXEC</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">TRACE_STRING_NEWTHREAD</span>:
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">TRACE_INFO_STRING</span>:
+		snprintf(kprintf_line + strlen(kprintf_line),
+			<span class="enscript-keyword">sizeof</span>(kprintf_line) - strlen(kprintf_line),
+			<span class="enscript-string">&quot;%-8s%-8s%-8s%-8s                                   &quot;</span>,
+			(<span class="enscript-type">char</span>*)&amp;arg1, (<span class="enscript-type">char</span>*)&amp;arg2, (<span class="enscript-type">char</span>*)&amp;arg3, (<span class="enscript-type">char</span>*)&amp;arg4);
+		<span class="enscript-keyword">break</span>;
+	    <span class="enscript-reference">default</span>:
+		snprintf(kprintf_line + strlen(kprintf_line),
+			<span class="enscript-keyword">sizeof</span>(kprintf_line) - strlen(kprintf_line),
+			<span class="enscript-string">&quot;%-16lx %-16lx %-16lx %-16lx&quot;</span>,
+			arg1, arg2, arg3, arg4);
+	}
+
+	<span class="enscript-comment">/* threadid, cpu and command name */</span>
+	<span class="enscript-keyword">if</span> (threadid == (uintptr_t)thread_tid(current_thread()) &amp;&amp;
+	    current_proc() &amp;&amp;
+	    current_proc()-&gt;p_comm[0])
+		command = current_proc()-&gt;p_comm;
+	<span class="enscript-keyword">else</span>
+		command = <span class="enscript-string">&quot;-&quot;</span>;
+	snprintf(kprintf_line + strlen(kprintf_line),
+		<span class="enscript-keyword">sizeof</span>(kprintf_line) - strlen(kprintf_line),
+		<span class="enscript-string">&quot;  %-16lx  %-2d %s\n&quot;</span>,
+		threadid, cpunum, command);
+	
+	kprintf(<span class="enscript-string">&quot;%s&quot;</span>, kprintf_line);
+	kd_last_timstamp = timestamp;
+}
+#<span class="enscript-reference">endif</span>
+</pre>
+<hr />
+</body></html>

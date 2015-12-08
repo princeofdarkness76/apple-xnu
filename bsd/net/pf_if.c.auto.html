@@ -1,0 +1,763 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pf_if.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pf_if.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*	$apfw: pf_if.c,v 1.4 2008/08/27 00:01:32 jhw Exp $ */</span>
+<span class="enscript-comment">/*	$OpenBSD: pf_if.c,v 1.46 2006/12/13 09:01:59 itojun Exp $ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright 2005 Henning Brauer &lt;<a href="mailto:henning@openbsd.org">henning@openbsd.org</a>&gt;
+ * Copyright 2005 Ryan McBride &lt;<a href="mailto:mcbride@openbsd.org">mcbride@openbsd.org</a>&gt;
+ * Copyright (c) 2001 Daniel Hartmeier
+ * Copyright (c) 2003 Cedric Berger
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ *    - Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    - Redistributions in binary form must reproduce the above
+ *      copyright notice, this list of conditions and the following
+ *      disclaimer in the documentation and/or other materials provided
+ *      with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * &quot;AS IS&quot; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/filio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_var.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/pfvar.h&gt;</span>
+
+<span class="enscript-type">struct</span> pfi_kif			*pfi_all = NULL;
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pool		pfi_addr_pl;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pfi_ifhead	pfi_ifs;
+<span class="enscript-type">static</span> u_int32_t		pfi_update = 1;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pfr_addr		*pfi_buffer;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			pfi_buffer_cnt;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			pfi_buffer_max;
+
+__private_extern__ <span class="enscript-type">void</span> pfi_kifaddr_update(<span class="enscript-type">void</span> *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfi_kif_update</span>(<span class="enscript-type">struct</span> pfi_kif *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfi_dynaddr_update</span>(<span class="enscript-type">struct</span> pfi_dynaddr *dyn);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfi_table_update</span>(<span class="enscript-type">struct</span> pfr_ktable *, <span class="enscript-type">struct</span> pfi_kif *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfi_instance_add</span>(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfi_address_add</span>(<span class="enscript-type">struct</span> sockaddr *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pfi_if_compare</span>(<span class="enscript-type">struct</span> pfi_kif *, <span class="enscript-type">struct</span> pfi_kif *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pfi_skip_if</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *, <span class="enscript-type">struct</span> pfi_kif *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pfi_unmask</span>(<span class="enscript-type">void</span> *);
+
+<span class="enscript-function-name">RB_PROTOTYPE_SC</span>(<span class="enscript-type">static</span>, pfi_ifhead, pfi_kif, pfik_tree, pfi_if_compare);
+<span class="enscript-function-name">RB_GENERATE</span>(pfi_ifhead, pfi_kif, pfik_tree, pfi_if_compare);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PFI_BUFFER_MAX</span>		0x10000
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PFI_MTYPE</span>		M_IFADDR
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">IFG_ALL</span>	<span class="enscript-string">&quot;ALL&quot;</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_initialize</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">if</span> (pfi_all != NULL)	<span class="enscript-comment">/* already initialized */</span>
+		<span class="enscript-keyword">return</span>;
+
+	pool_init(&amp;pfi_addr_pl, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> pfi_dynaddr), 0, 0, 0,
+	    <span class="enscript-string">&quot;pfiaddrpl&quot;</span>, NULL);
+	pfi_buffer_max = 64;
+	pfi_buffer = _MALLOC(pfi_buffer_max * <span class="enscript-keyword">sizeof</span> (*pfi_buffer),
+	    PFI_MTYPE, M_WAITOK);
+
+	<span class="enscript-keyword">if</span> ((pfi_all = pfi_kif_get(IFG_ALL)) == NULL)
+		panic(<span class="enscript-string">&quot;pfi_kif_get for pfi_all failed&quot;</span>);
+}
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_destroy</span>(<span class="enscript-type">void</span>)
+{
+	pool_destroy(&amp;pfi_addr_pl);
+	_FREE(pfi_buffer, PFI_MTYPE);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">struct</span> pfi_kif *
+<span class="enscript-function-name">pfi_kif_get</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *kif_name)
+{
+	<span class="enscript-type">struct</span> pfi_kif		*kif;
+	<span class="enscript-type">struct</span> pfi_kif_cmp	 s;
+
+	bzero(&amp;s, <span class="enscript-keyword">sizeof</span> (s));
+	strlcpy(s.pfik_name, kif_name, <span class="enscript-keyword">sizeof</span> (s.pfik_name));
+	<span class="enscript-keyword">if</span> ((kif = RB_FIND(pfi_ifhead, &amp;pfi_ifs,
+	    (<span class="enscript-type">struct</span> pfi_kif *)(<span class="enscript-type">void</span> *)&amp;s)) != NULL)
+		<span class="enscript-keyword">return</span> (kif);
+
+	<span class="enscript-comment">/* create new one */</span>
+	<span class="enscript-keyword">if</span> ((kif = _MALLOC(<span class="enscript-keyword">sizeof</span> (*kif), PFI_MTYPE, M_WAITOK|M_ZERO)) == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	strlcpy(kif-&gt;pfik_name, kif_name, <span class="enscript-keyword">sizeof</span> (kif-&gt;pfik_name));
+	kif-&gt;pfik_tzero = pf_calendar_time_second();
+	TAILQ_INIT(&amp;kif-&gt;pfik_dynaddrs);
+
+	RB_INSERT(pfi_ifhead, &amp;pfi_ifs, kif);
+	<span class="enscript-keyword">return</span> (kif);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_kif_ref</span>(<span class="enscript-type">struct</span> pfi_kif *kif, <span class="enscript-type">enum</span> pfi_kif_refs what)
+{
+	<span class="enscript-keyword">switch</span> (what) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PFI_KIF_REF_RULE</span>:
+		kif-&gt;pfik_rules++;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PFI_KIF_REF_STATE</span>:
+		kif-&gt;pfik_states++;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;pfi_kif_ref with unknown type&quot;</span>);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_kif_unref</span>(<span class="enscript-type">struct</span> pfi_kif *kif, <span class="enscript-type">enum</span> pfi_kif_refs what)
+{
+	<span class="enscript-keyword">if</span> (kif == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">switch</span> (what) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PFI_KIF_REF_NONE</span>:
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PFI_KIF_REF_RULE</span>:
+		<span class="enscript-keyword">if</span> (kif-&gt;pfik_rules &lt;= 0) {
+			printf(<span class="enscript-string">&quot;pfi_kif_unref: rules refcount &lt;= 0\n&quot;</span>);
+			<span class="enscript-keyword">return</span>;
+		}
+		kif-&gt;pfik_rules--;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PFI_KIF_REF_STATE</span>:
+		<span class="enscript-keyword">if</span> (kif-&gt;pfik_states &lt;= 0) {
+			printf(<span class="enscript-string">&quot;pfi_kif_unref: state refcount &lt;= 0\n&quot;</span>);
+			<span class="enscript-keyword">return</span>;
+		}
+		kif-&gt;pfik_states--;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;pfi_kif_unref with unknown type&quot;</span>);
+	}
+
+	<span class="enscript-keyword">if</span> (kif-&gt;pfik_ifp != NULL || kif == pfi_all)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (kif-&gt;pfik_rules || kif-&gt;pfik_states)
+		<span class="enscript-keyword">return</span>;
+
+	RB_REMOVE(pfi_ifhead, &amp;pfi_ifs, kif);
+	_FREE(kif, PFI_MTYPE);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfi_kif_match</span>(<span class="enscript-type">struct</span> pfi_kif *rule_kif, <span class="enscript-type">struct</span> pfi_kif *packet_kif)
+{
+
+	<span class="enscript-keyword">if</span> (rule_kif == NULL || rule_kif == packet_kif)
+		<span class="enscript-keyword">return</span> (1);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_attach_ifnet</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">struct</span> pfi_kif *kif;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	pfi_update++;
+	<span class="enscript-keyword">if</span> ((kif = pfi_kif_get(if_name(ifp))) == NULL)
+		panic(<span class="enscript-string">&quot;pfi_kif_get failed&quot;</span>);
+
+	ifnet_lock_exclusive(ifp);
+	kif-&gt;pfik_ifp = ifp;
+	ifp-&gt;if_pf_kif = kif;
+	ifnet_lock_done(ifp);
+
+	pfi_kif_update(kif);
+}
+
+<span class="enscript-comment">/*
+ * Caller holds ifnet lock as writer (exclusive);
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_detach_ifnet</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">struct</span> pfi_kif		*kif;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> ((kif = (<span class="enscript-type">struct</span> pfi_kif *)ifp-&gt;if_pf_kif) == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	pfi_update++;
+	pfi_kif_update(kif);
+
+	ifnet_lock_exclusive(ifp);
+	kif-&gt;pfik_ifp = NULL;
+	ifp-&gt;if_pf_kif = NULL;
+	ifnet_lock_done(ifp);
+
+	pfi_kif_unref(kif, PFI_KIF_REF_NONE);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfi_match_addr</span>(<span class="enscript-type">struct</span> pfi_dynaddr *dyn, <span class="enscript-type">struct</span> pf_addr *a, sa_family_t af)
+{
+	<span class="enscript-keyword">switch</span> (af) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET</span>:
+		<span class="enscript-keyword">switch</span> (dyn-&gt;pfid_acnt4) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+			<span class="enscript-keyword">return</span> (0);
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">1</span>:
+			<span class="enscript-keyword">return</span> (PF_MATCHA(0, &amp;dyn-&gt;pfid_addr4,
+			    &amp;dyn-&gt;pfid_mask4, a, AF_INET));
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> (pfr_match_addr(dyn-&gt;pfid_kt, a, AF_INET));
+		}
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET6</span>:
+		<span class="enscript-keyword">switch</span> (dyn-&gt;pfid_acnt6) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+			<span class="enscript-keyword">return</span> (0);
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">1</span>:
+			<span class="enscript-keyword">return</span> (PF_MATCHA(0, &amp;dyn-&gt;pfid_addr6,
+			    &amp;dyn-&gt;pfid_mask6, a, AF_INET6));
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> (pfr_match_addr(dyn-&gt;pfid_kt, a, AF_INET6));
+		}
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (0);
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfi_dynaddr_setup</span>(<span class="enscript-type">struct</span> pf_addr_wrap *aw, sa_family_t af)
+{
+	<span class="enscript-type">struct</span> pfi_dynaddr	*dyn;
+	<span class="enscript-type">char</span>			 tblname[PF_TABLE_NAME_SIZE];
+	<span class="enscript-type">struct</span> pf_ruleset	*ruleset = NULL;
+	<span class="enscript-type">int</span>			 rv = 0;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (aw-&gt;type != PF_ADDR_DYNIFTL)
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">if</span> ((dyn = pool_get(&amp;pfi_addr_pl, PR_WAITOK)) == NULL)
+		<span class="enscript-keyword">return</span> (1);
+	bzero(dyn, <span class="enscript-keyword">sizeof</span> (*dyn));
+
+	<span class="enscript-keyword">if</span> (strcmp(aw-&gt;v.ifname, <span class="enscript-string">&quot;self&quot;</span>) == 0)
+		dyn-&gt;pfid_kif = pfi_kif_get(IFG_ALL);
+	<span class="enscript-keyword">else</span>
+		dyn-&gt;pfid_kif = pfi_kif_get(aw-&gt;v.ifname);
+	<span class="enscript-keyword">if</span> (dyn-&gt;pfid_kif == NULL) {
+		rv = 1;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">_bad</span>;
+	}
+	pfi_kif_ref(dyn-&gt;pfid_kif, PFI_KIF_REF_RULE);
+
+	dyn-&gt;pfid_net = pfi_unmask(&amp;aw-&gt;v.a.mask);
+	<span class="enscript-keyword">if</span> (af == AF_INET &amp;&amp; dyn-&gt;pfid_net == 32)
+		dyn-&gt;pfid_net = 128;
+	strlcpy(tblname, aw-&gt;v.ifname, <span class="enscript-keyword">sizeof</span> (tblname));
+	<span class="enscript-keyword">if</span> (aw-&gt;iflags &amp; PFI_AFLAG_NETWORK)
+		strlcat(tblname, <span class="enscript-string">&quot;:network&quot;</span>, <span class="enscript-keyword">sizeof</span> (tblname));
+	<span class="enscript-keyword">if</span> (aw-&gt;iflags &amp; PFI_AFLAG_BROADCAST)
+		strlcat(tblname, <span class="enscript-string">&quot;:broadcast&quot;</span>, <span class="enscript-keyword">sizeof</span> (tblname));
+	<span class="enscript-keyword">if</span> (aw-&gt;iflags &amp; PFI_AFLAG_PEER)
+		strlcat(tblname, <span class="enscript-string">&quot;:peer&quot;</span>, <span class="enscript-keyword">sizeof</span> (tblname));
+	<span class="enscript-keyword">if</span> (aw-&gt;iflags &amp; PFI_AFLAG_NOALIAS)
+		strlcat(tblname, <span class="enscript-string">&quot;:0&quot;</span>, <span class="enscript-keyword">sizeof</span> (tblname));
+	<span class="enscript-keyword">if</span> (dyn-&gt;pfid_net != 128)
+		snprintf(tblname + strlen(tblname),
+		    <span class="enscript-keyword">sizeof</span> (tblname) - strlen(tblname), <span class="enscript-string">&quot;/%d&quot;</span>, dyn-&gt;pfid_net);
+	<span class="enscript-keyword">if</span> ((ruleset = pf_find_or_create_ruleset(PF_RESERVED_ANCHOR)) == NULL) {
+		rv = 1;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">_bad</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ((dyn-&gt;pfid_kt = pfr_attach_table(ruleset, tblname)) == NULL) {
+		rv = 1;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">_bad</span>;
+	}
+
+	dyn-&gt;pfid_kt-&gt;pfrkt_flags |= PFR_TFLAG_ACTIVE;
+	dyn-&gt;pfid_iflags = aw-&gt;iflags;
+	dyn-&gt;pfid_af = af;
+
+	TAILQ_INSERT_TAIL(&amp;dyn-&gt;pfid_kif-&gt;pfik_dynaddrs, dyn, entry);
+	aw-&gt;p.dyn = dyn;
+	pfi_kif_update(dyn-&gt;pfid_kif);
+	<span class="enscript-keyword">return</span> (0);
+
+<span class="enscript-reference">_bad</span>:
+	<span class="enscript-keyword">if</span> (dyn-&gt;pfid_kt != NULL)
+		pfr_detach_table(dyn-&gt;pfid_kt);
+	<span class="enscript-keyword">if</span> (ruleset != NULL)
+		pf_remove_if_empty_ruleset(ruleset);
+	<span class="enscript-keyword">if</span> (dyn-&gt;pfid_kif != NULL)
+		pfi_kif_unref(dyn-&gt;pfid_kif, PFI_KIF_REF_RULE);
+	pool_put(&amp;pfi_addr_pl, dyn);
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_kif_update</span>(<span class="enscript-type">struct</span> pfi_kif *kif)
+{
+	<span class="enscript-type">struct</span> pfi_dynaddr	*p;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-comment">/* update all dynaddr */</span>
+	TAILQ_FOREACH(p, &amp;kif-&gt;pfik_dynaddrs, entry)
+		pfi_dynaddr_update(p);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_dynaddr_update</span>(<span class="enscript-type">struct</span> pfi_dynaddr *dyn)
+{
+	<span class="enscript-type">struct</span> pfi_kif		*kif;
+	<span class="enscript-type">struct</span> pfr_ktable	*kt;
+
+	<span class="enscript-keyword">if</span> (dyn == NULL || dyn-&gt;pfid_kif == NULL || dyn-&gt;pfid_kt == NULL)
+		panic(<span class="enscript-string">&quot;pfi_dynaddr_update&quot;</span>);
+
+	kif = dyn-&gt;pfid_kif;
+	kt = dyn-&gt;pfid_kt;
+
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_larg != pfi_update) {
+		<span class="enscript-comment">/* this table needs to be brought up-to-date */</span>
+		pfi_table_update(kt, kif, dyn-&gt;pfid_net, dyn-&gt;pfid_iflags);
+		kt-&gt;pfrkt_larg = pfi_update;
+	}
+	pfr_dynaddr_update(kt, dyn);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_table_update</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, <span class="enscript-type">struct</span> pfi_kif *kif, <span class="enscript-type">int</span> net, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">int</span>			 e, size2 = 0;
+
+	pfi_buffer_cnt = 0;
+
+	<span class="enscript-keyword">if</span> (kif-&gt;pfik_ifp != NULL)
+		pfi_instance_add(kif-&gt;pfik_ifp, net, flags);
+
+	<span class="enscript-keyword">if</span> ((e = pfr_set_addrs(&amp;kt-&gt;pfrkt_t, CAST_USER_ADDR_T(pfi_buffer),
+	    pfi_buffer_cnt, &amp;size2, NULL, NULL, NULL, 0, PFR_TFLAG_ALLMASK)))
+		printf(<span class="enscript-string">&quot;pfi_table_update: cannot set %d new addresses &quot;</span>
+		    <span class="enscript-string">&quot;into table %s: %d\n&quot;</span>, pfi_buffer_cnt, kt-&gt;pfrkt_name, e);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_instance_add</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">int</span> net, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> ifaddr	*ia;
+	<span class="enscript-type">int</span>		 got4 = 0, got6 = 0;
+	<span class="enscript-type">int</span>		 net2, af;
+
+	<span class="enscript-keyword">if</span> (ifp == NULL)
+		<span class="enscript-keyword">return</span>;
+	ifnet_lock_shared(ifp);
+	TAILQ_FOREACH(ia, &amp;ifp-&gt;if_addrhead, ifa_link) {
+		IFA_LOCK(ia);
+		<span class="enscript-keyword">if</span> (ia-&gt;ifa_addr == NULL) {
+			IFA_UNLOCK(ia);
+			<span class="enscript-keyword">continue</span>;
+		}
+		af = ia-&gt;ifa_addr-&gt;sa_family;
+		<span class="enscript-keyword">if</span> (af != AF_INET &amp;&amp; af != AF_INET6) {
+			IFA_UNLOCK(ia);
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> ((flags &amp; PFI_AFLAG_BROADCAST) &amp;&amp; af == AF_INET6) {
+			IFA_UNLOCK(ia);
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> ((flags &amp; PFI_AFLAG_BROADCAST) &amp;&amp;
+		    !(ifp-&gt;if_flags &amp; IFF_BROADCAST)) {
+			IFA_UNLOCK(ia);
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> ((flags &amp; PFI_AFLAG_PEER) &amp;&amp;
+		    !(ifp-&gt;if_flags &amp; IFF_POINTOPOINT)) {
+			IFA_UNLOCK(ia);
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> ((flags &amp; PFI_AFLAG_NETWORK) &amp;&amp; af == AF_INET6 &amp;&amp;
+		    IN6_IS_ADDR_LINKLOCAL(&amp;((<span class="enscript-type">struct</span> sockaddr_in6 *)
+		    (<span class="enscript-type">void</span> *)ia-&gt;ifa_addr)-&gt;sin6_addr)) {
+			IFA_UNLOCK(ia);
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> (flags &amp; PFI_AFLAG_NOALIAS) {
+			<span class="enscript-keyword">if</span> (af == AF_INET &amp;&amp; got4) {
+				IFA_UNLOCK(ia);
+				<span class="enscript-keyword">continue</span>;
+			}
+			<span class="enscript-keyword">if</span> (af == AF_INET6 &amp;&amp; got6) {
+				IFA_UNLOCK(ia);
+				<span class="enscript-keyword">continue</span>;
+			}
+		}
+		<span class="enscript-keyword">if</span> (af == AF_INET)
+			got4 = 1;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (af == AF_INET6)
+			got6 = 1;
+		net2 = net;
+		<span class="enscript-keyword">if</span> (net2 == 128 &amp;&amp; (flags &amp; PFI_AFLAG_NETWORK)) {
+			<span class="enscript-keyword">if</span> (af == AF_INET)
+				net2 = pfi_unmask(&amp;((<span class="enscript-type">struct</span> sockaddr_in *)
+				    (<span class="enscript-type">void</span> *)ia-&gt;ifa_netmask)-&gt;sin_addr);
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (af == AF_INET6)
+				net2 = pfi_unmask(&amp;((<span class="enscript-type">struct</span> sockaddr_in6 *)
+				    (<span class="enscript-type">void</span> *)ia-&gt;ifa_netmask)-&gt;sin6_addr);
+		}
+		<span class="enscript-keyword">if</span> (af == AF_INET &amp;&amp; net2 &gt; 32)
+			net2 = 32;
+		<span class="enscript-keyword">if</span> (flags &amp; PFI_AFLAG_BROADCAST)
+			pfi_address_add(ia-&gt;ifa_broadaddr, af, net2);
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; PFI_AFLAG_PEER)
+			pfi_address_add(ia-&gt;ifa_dstaddr, af, net2);
+		<span class="enscript-keyword">else</span>
+			pfi_address_add(ia-&gt;ifa_addr, af, net2);
+		IFA_UNLOCK(ia);
+	}
+	ifnet_lock_done(ifp);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_address_add</span>(<span class="enscript-type">struct</span> sockaddr *sa, <span class="enscript-type">int</span> af, <span class="enscript-type">int</span> net)
+{
+	<span class="enscript-type">struct</span> pfr_addr	*p;
+	<span class="enscript-type">int</span>		 i;
+
+	<span class="enscript-keyword">if</span> (pfi_buffer_cnt &gt;= pfi_buffer_max) {
+		<span class="enscript-type">int</span>		 new_max = pfi_buffer_max * 2;
+
+		<span class="enscript-keyword">if</span> (new_max &gt; PFI_BUFFER_MAX) {
+			printf(<span class="enscript-string">&quot;pfi_address_add: address buffer full (%d/%d)\n&quot;</span>,
+			    pfi_buffer_cnt, PFI_BUFFER_MAX);
+			<span class="enscript-keyword">return</span>;
+		}
+		p = _MALLOC(new_max * <span class="enscript-keyword">sizeof</span> (*pfi_buffer), PFI_MTYPE,
+		    M_WAITOK);
+		<span class="enscript-keyword">if</span> (p == NULL) {
+			printf(<span class="enscript-string">&quot;pfi_address_add: no memory to grow buffer &quot;</span>
+			    <span class="enscript-string">&quot;(%d/%d)\n&quot;</span>, pfi_buffer_cnt, PFI_BUFFER_MAX);
+			<span class="enscript-keyword">return</span>;
+		}
+		memcpy(pfi_buffer, p, pfi_buffer_cnt * <span class="enscript-keyword">sizeof</span> (*pfi_buffer));
+		<span class="enscript-comment">/* no need to zero buffer */</span>
+		_FREE(pfi_buffer, PFI_MTYPE);
+		pfi_buffer = p;
+		pfi_buffer_max = new_max;
+	}
+	<span class="enscript-keyword">if</span> (af == AF_INET &amp;&amp; net &gt; 32)
+		net = 128;
+	p = pfi_buffer + pfi_buffer_cnt++;
+	bzero(p, <span class="enscript-keyword">sizeof</span> (*p));
+	p-&gt;pfra_af = af;
+	p-&gt;pfra_net = net;
+	<span class="enscript-keyword">if</span> (af == AF_INET)
+		p-&gt;pfra_ip4addr = ((<span class="enscript-type">struct</span> sockaddr_in *)(<span class="enscript-type">void</span> *)sa)-&gt;sin_addr;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (af == AF_INET6) {
+		p-&gt;pfra_ip6addr =
+		    ((<span class="enscript-type">struct</span> sockaddr_in6 *)(<span class="enscript-type">void</span> *)sa)-&gt;sin6_addr;
+		<span class="enscript-keyword">if</span> (IN6_IS_SCOPE_EMBED(&amp;p-&gt;pfra_ip6addr))
+			p-&gt;pfra_ip6addr.s6_addr16[1] = 0;
+	}
+	<span class="enscript-comment">/* mask network address bits */</span>
+	<span class="enscript-keyword">if</span> (net &lt; 128)
+		((caddr_t)p)[p-&gt;pfra_net/8] &amp;= ~(0xFF &gt;&gt; (p-&gt;pfra_net%8));
+	<span class="enscript-keyword">for</span> (i = (p-&gt;pfra_net+7)/8; i &lt; (<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (p-&gt;pfra_u); i++)
+		((caddr_t)p)[i] = 0;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_dynaddr_remove</span>(<span class="enscript-type">struct</span> pf_addr_wrap *aw)
+{
+	<span class="enscript-keyword">if</span> (aw-&gt;type != PF_ADDR_DYNIFTL || aw-&gt;p.dyn == NULL ||
+	    aw-&gt;p.dyn-&gt;pfid_kif == NULL || aw-&gt;p.dyn-&gt;pfid_kt == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	TAILQ_REMOVE(&amp;aw-&gt;p.dyn-&gt;pfid_kif-&gt;pfik_dynaddrs, aw-&gt;p.dyn, entry);
+	pfi_kif_unref(aw-&gt;p.dyn-&gt;pfid_kif, PFI_KIF_REF_RULE);
+	aw-&gt;p.dyn-&gt;pfid_kif = NULL;
+	pfr_detach_table(aw-&gt;p.dyn-&gt;pfid_kt);
+	aw-&gt;p.dyn-&gt;pfid_kt = NULL;
+	pool_put(&amp;pfi_addr_pl, aw-&gt;p.dyn);
+	aw-&gt;p.dyn = NULL;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_dynaddr_copyout</span>(<span class="enscript-type">struct</span> pf_addr_wrap *aw)
+{
+	<span class="enscript-keyword">if</span> (aw-&gt;type != PF_ADDR_DYNIFTL || aw-&gt;p.dyn == NULL ||
+	    aw-&gt;p.dyn-&gt;pfid_kif == NULL)
+		<span class="enscript-keyword">return</span>;
+	aw-&gt;p.dyncnt = aw-&gt;p.dyn-&gt;pfid_acnt4 + aw-&gt;p.dyn-&gt;pfid_acnt6;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_kifaddr_update</span>(<span class="enscript-type">void</span> *v)
+{
+	<span class="enscript-type">struct</span> pfi_kif		*kif = (<span class="enscript-type">struct</span> pfi_kif *)v;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	pfi_update++;
+	pfi_kif_update(kif);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfi_if_compare</span>(<span class="enscript-type">struct</span> pfi_kif *p, <span class="enscript-type">struct</span> pfi_kif *q)
+{
+	<span class="enscript-keyword">return</span> (strncmp(p-&gt;pfik_name, q-&gt;pfik_name, IFNAMSIZ));
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfi_update_status</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">struct</span> pf_status *pfs)
+{
+	<span class="enscript-type">struct</span> pfi_kif		*p;
+	<span class="enscript-type">struct</span> pfi_kif_cmp	 key;
+	<span class="enscript-type">int</span>			 i, j, k;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	strlcpy(key.pfik_name, name, <span class="enscript-keyword">sizeof</span> (key.pfik_name));
+	p = RB_FIND(pfi_ifhead, &amp;pfi_ifs, (<span class="enscript-type">struct</span> pfi_kif *)(<span class="enscript-type">void</span> *)&amp;key);
+	<span class="enscript-keyword">if</span> (p == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (pfs) {
+		bzero(pfs-&gt;pcounters, <span class="enscript-keyword">sizeof</span> (pfs-&gt;pcounters));
+		bzero(pfs-&gt;bcounters, <span class="enscript-keyword">sizeof</span> (pfs-&gt;bcounters));
+	}
+	<span class="enscript-comment">/* just clear statistics */</span>
+	<span class="enscript-keyword">if</span> (pfs == NULL) {
+		bzero(p-&gt;pfik_packets, <span class="enscript-keyword">sizeof</span> (p-&gt;pfik_packets));
+		bzero(p-&gt;pfik_bytes, <span class="enscript-keyword">sizeof</span> (p-&gt;pfik_bytes));
+		p-&gt;pfik_tzero = pf_calendar_time_second();
+	}
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; 2; i++)
+		<span class="enscript-keyword">for</span> (j = 0; j &lt; 2; j++)
+			<span class="enscript-keyword">for</span> (k = 0; k &lt; 2; k++) {
+				pfs-&gt;pcounters[i][j][k] +=
+				    p-&gt;pfik_packets[i][j][k];
+				pfs-&gt;bcounters[i][j] +=
+				    p-&gt;pfik_bytes[i][j][k];
+			}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfi_get_ifaces</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, user_addr_t buf, <span class="enscript-type">int</span> *size)
+{
+	<span class="enscript-type">struct</span> pfi_kif	 *p, *nextp;
+	<span class="enscript-type">int</span>		 n = 0;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">for</span> (p = RB_MIN(pfi_ifhead, &amp;pfi_ifs); p; p = nextp) {
+		nextp = RB_NEXT(pfi_ifhead, &amp;pfi_ifs, p);
+		<span class="enscript-keyword">if</span> (pfi_skip_if(name, p))
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (*size &gt; n++) {
+			<span class="enscript-type">struct</span> pfi_uif u;
+
+			<span class="enscript-keyword">if</span> (!p-&gt;pfik_tzero)
+				p-&gt;pfik_tzero = pf_calendar_time_second();
+			pfi_kif_ref(p, PFI_KIF_REF_RULE);
+
+			<span class="enscript-comment">/* return the user space version of pfi_kif */</span>
+			bzero(&amp;u, <span class="enscript-keyword">sizeof</span> (u));
+			bcopy(p-&gt;pfik_name, &amp;u.pfik_name, <span class="enscript-keyword">sizeof</span> (u.pfik_name));
+			bcopy(p-&gt;pfik_packets, &amp;u.pfik_packets,
+			    <span class="enscript-keyword">sizeof</span> (u.pfik_packets));
+			bcopy(p-&gt;pfik_bytes, &amp;u.pfik_bytes,
+			    <span class="enscript-keyword">sizeof</span> (u.pfik_bytes));
+			u.pfik_tzero = p-&gt;pfik_tzero;
+			u.pfik_flags = p-&gt;pfik_flags;
+			u.pfik_states = p-&gt;pfik_states;
+			u.pfik_rules = p-&gt;pfik_rules;
+
+			<span class="enscript-keyword">if</span> (copyout(&amp;u, buf, <span class="enscript-keyword">sizeof</span> (u))) {
+				pfi_kif_unref(p, PFI_KIF_REF_RULE);
+				<span class="enscript-keyword">return</span> (EFAULT);
+			}
+			buf += <span class="enscript-keyword">sizeof</span> (u);
+			nextp = RB_NEXT(pfi_ifhead, &amp;pfi_ifs, p);
+			pfi_kif_unref(p, PFI_KIF_REF_RULE);
+		}
+	}
+	*size = n;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfi_skip_if</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *filter, <span class="enscript-type">struct</span> pfi_kif *p)
+{
+	<span class="enscript-type">int</span>	n;
+
+	<span class="enscript-keyword">if</span> (filter == NULL || !*filter)
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">if</span> (strcmp(p-&gt;pfik_name, filter) == 0)
+		<span class="enscript-keyword">return</span> (0);	<span class="enscript-comment">/* exact match */</span>
+	n = strlen(filter);
+	<span class="enscript-keyword">if</span> (n &lt; 1 || n &gt;= IFNAMSIZ)
+		<span class="enscript-keyword">return</span> (1);	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (filter[n-1] &gt;= <span class="enscript-string">'0'</span> &amp;&amp; filter[n-1] &lt;= <span class="enscript-string">'9'</span>)
+		<span class="enscript-keyword">return</span> (1);	<span class="enscript-comment">/* only do exact match in that case */</span>
+	<span class="enscript-keyword">if</span> (strncmp(p-&gt;pfik_name, filter, n))
+		<span class="enscript-keyword">return</span> (1);	<span class="enscript-comment">/* prefix doesn't match */</span>
+	<span class="enscript-keyword">return</span> (p-&gt;pfik_name[n] &lt; <span class="enscript-string">'0'</span> || p-&gt;pfik_name[n] &gt; <span class="enscript-string">'9'</span>);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfi_set_flags</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfi_kif	*p;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	RB_FOREACH(p, pfi_ifhead, &amp;pfi_ifs) {
+		<span class="enscript-keyword">if</span> (pfi_skip_if(name, p))
+			<span class="enscript-keyword">continue</span>;
+		p-&gt;pfik_flags |= flags;
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfi_clear_flags</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfi_kif	*p;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	RB_FOREACH(p, pfi_ifhead, &amp;pfi_ifs) {
+		<span class="enscript-keyword">if</span> (pfi_skip_if(name, p))
+			<span class="enscript-keyword">continue</span>;
+		p-&gt;pfik_flags &amp;= ~flags;
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* from pf_print_state.c */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfi_unmask</span>(<span class="enscript-type">void</span> *addr)
+{
+	<span class="enscript-type">struct</span> pf_addr *m = addr;
+	<span class="enscript-type">int</span> i = 31, j = 0, b = 0;
+	u_int32_t tmp;
+
+	<span class="enscript-keyword">while</span> (j &lt; 4 &amp;&amp; m-&gt;addr32[j] == 0xffffffff) {
+		b += 32;
+		j++;
+	}
+	<span class="enscript-keyword">if</span> (j &lt; 4) {
+		tmp = ntohl(m-&gt;addr32[j]);
+		<span class="enscript-keyword">for</span> (i = 31; tmp &amp; (1 &lt;&lt; i); --i)
+			b++;
+	}
+	<span class="enscript-keyword">return</span> (b);
+}
+</pre>
+<hr />
+</body></html>

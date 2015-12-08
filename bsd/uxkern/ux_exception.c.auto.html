@@ -1,0 +1,509 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ux_exception.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ux_exception.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1987 Carnegie-Mellon University
+ * All rights reserved.  The CMU software License Agreement specifies
+ * the terms and conditions for use and redistribution.
+ */</span>
+
+<span class="enscript-comment">/*
+ *********************************************************************
+ * HISTORY
+ **********************************************************************
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/exception.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/message.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mig_errors.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/exc_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_exc_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ux_exception.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vmparam.h&gt;</span>	<span class="enscript-comment">/* MAXSSIZ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>	<span class="enscript-comment">/* get_task_ipcspace() */</span>
+<span class="enscript-comment">/*
+ * XXX Things that should be retrieved from Mach headers, but aren't
+ */</span>
+<span class="enscript-type">struct</span> ipc_object;
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">ipc_object_copyin</span>(ipc_space_t space, mach_port_name_t name,
+		mach_msg_type_name_t msgt_name, <span class="enscript-type">struct</span> ipc_object **objectp);
+<span class="enscript-type">extern</span> mach_msg_return_t <span class="enscript-function-name">mach_msg_receive</span>(mach_msg_header_t *msg,
+		mach_msg_option_t option, mach_msg_size_t rcv_size,
+		mach_port_name_t rcv_name, mach_msg_timeout_t rcv_timeout,
+		<span class="enscript-type">void</span> (*continuation)(mach_msg_return_t),
+		mach_msg_size_t slist_size);
+<span class="enscript-type">extern</span> mach_msg_return_t <span class="enscript-function-name">mach_msg_send</span>(mach_msg_header_t *msg,
+		mach_msg_option_t option, mach_msg_size_t send_size,
+		mach_msg_timeout_t send_timeout, mach_port_name_t notify);
+<span class="enscript-type">extern</span> thread_t <span class="enscript-function-name">convert_port_to_thread</span>(ipc_port_t port);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ipc_port_release_send</span>(ipc_port_t port);
+
+
+
+
+<span class="enscript-comment">/*
+ *	Unix exception handler.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	ux_exception(<span class="enscript-type">int</span> exception, mach_exception_code_t code, 
+				mach_exception_subcode_t subcode,
+				<span class="enscript-type">int</span> *ux_signal, mach_exception_code_t *ux_code);
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__arm64__</span>)
+mach_port_t			ux_exception_port;
+#<span class="enscript-reference">else</span>
+mach_port_name_t		ux_exception_port;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __x86_64__ */</span>
+
+<span class="enscript-type">static</span> task_t			ux_handler_self;
+
+<span class="enscript-type">static</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ux_handler</span>(<span class="enscript-type">void</span>)
+{
+    task_t		self = current_task();
+    mach_port_name_t	exc_port_name;
+    mach_port_name_t	exc_set_name;
+
+    <span class="enscript-comment">/* self-&gt;kernel_vm_space = TRUE; */</span>
+    ux_handler_self = self;
+
+
+    <span class="enscript-comment">/*
+     *	Allocate a port set that we will receive on.
+     */</span>
+    <span class="enscript-keyword">if</span> (mach_port_allocate(get_task_ipcspace(ux_handler_self), MACH_PORT_RIGHT_PORT_SET,  &amp;exc_set_name) != MACH_MSG_SUCCESS)
+	    panic(<span class="enscript-string">&quot;ux_handler: port_set_allocate failed&quot;</span>);
+
+    <span class="enscript-comment">/*
+     *	Allocate an exception port and use object_copyin to
+     *	translate it to the global name.  Put it into the set.
+     */</span>
+    <span class="enscript-keyword">if</span> (mach_port_allocate(get_task_ipcspace(ux_handler_self), MACH_PORT_RIGHT_RECEIVE, &amp;exc_port_name) != MACH_MSG_SUCCESS)
+	panic(<span class="enscript-string">&quot;ux_handler: port_allocate failed&quot;</span>);
+    <span class="enscript-keyword">if</span> (mach_port_move_member(get_task_ipcspace(ux_handler_self),
+    			exc_port_name,  exc_set_name) != MACH_MSG_SUCCESS)
+	panic(<span class="enscript-string">&quot;ux_handler: port_set_add failed&quot;</span>);
+
+    <span class="enscript-keyword">if</span> (ipc_object_copyin(get_task_ipcspace(self), exc_port_name,
+			MACH_MSG_TYPE_MAKE_SEND, 
+			(<span class="enscript-type">void</span> *) &amp;ux_exception_port) != MACH_MSG_SUCCESS)
+		panic(<span class="enscript-string">&quot;ux_handler: object_copyin(ux_exception_port) failed&quot;</span>);
+
+    proc_list_lock();
+    thread_wakeup(&amp;ux_exception_port);
+    proc_list_unlock();
+
+    <span class="enscript-comment">/* Message handling loop. */</span>
+
+    <span class="enscript-keyword">for</span> (;;) {
+	<span class="enscript-type">struct</span> rep_msg {
+		mach_msg_header_t Head;
+		NDR_record_t NDR;
+		kern_return_t RetCode;
+	} rep_msg;
+	<span class="enscript-type">struct</span> exc_msg {
+		mach_msg_header_t Head;
+		<span class="enscript-comment">/* start of the kernel processed data */</span>
+		mach_msg_body_t msgh_body;
+		mach_msg_port_descriptor_t thread;
+		mach_msg_port_descriptor_t task;
+		<span class="enscript-comment">/* end of the kernel processed data */</span>
+		NDR_record_t NDR;
+		exception_type_t exception;
+		mach_msg_type_number_t codeCnt;
+		mach_exception_data_t code;
+		<span class="enscript-comment">/* some times RCV_TO_LARGE probs */</span>
+		<span class="enscript-type">char</span> pad[512];
+	} exc_msg;
+	mach_port_name_t	reply_port;
+	kern_return_t	 result;
+
+	exc_msg.Head.msgh_local_port = CAST_MACH_NAME_TO_PORT(exc_set_name);
+	exc_msg.Head.msgh_size = <span class="enscript-keyword">sizeof</span> (exc_msg);
+#<span class="enscript-reference">if</span> 0
+	result = mach_msg_receive(&amp;exc_msg.Head);
+#<span class="enscript-reference">else</span>
+	result = mach_msg_receive(&amp;exc_msg.Head, MACH_RCV_MSG,
+			     <span class="enscript-keyword">sizeof</span> (exc_msg), exc_set_name,
+			     MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL,
+			     0);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (result == MACH_MSG_SUCCESS) {
+	    reply_port = CAST_MACH_PORT_TO_NAME(exc_msg.Head.msgh_remote_port);
+
+	    <span class="enscript-keyword">if</span> (mach_exc_server(&amp;exc_msg.Head, &amp;rep_msg.Head)) {
+		result = mach_msg_send(&amp;rep_msg.Head, MACH_SEND_MSG,
+			<span class="enscript-keyword">sizeof</span> (rep_msg),MACH_MSG_TIMEOUT_NONE,MACH_PORT_NULL);
+		<span class="enscript-keyword">if</span> (reply_port != 0 &amp;&amp; result != MACH_MSG_SUCCESS)
+			mach_port_deallocate(get_task_ipcspace(ux_handler_self), reply_port);
+	    }
+
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (result == MACH_RCV_TOO_LARGE)
+		<span class="enscript-comment">/* ignore oversized messages */</span>;
+	<span class="enscript-keyword">else</span>
+		panic(<span class="enscript-string">&quot;exception_handler&quot;</span>);
+    }
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ux_handler_init</span>(<span class="enscript-type">void</span>)
+{
+	thread_t	thread = THREAD_NULL;
+
+	ux_exception_port = MACH_PORT_NULL;
+	(<span class="enscript-type">void</span>) kernel_thread_start((thread_continue_t)ux_handler, NULL, &amp;thread);
+	thread_deallocate(thread);
+	proc_list_lock();
+	<span class="enscript-keyword">if</span> (ux_exception_port == MACH_PORT_NULL)  {
+		(<span class="enscript-type">void</span>)msleep(&amp;ux_exception_port, proc_list_mlock, 0, <span class="enscript-string">&quot;ux_handler_wait&quot;</span>, 0);
+	}
+	proc_list_unlock();
+}
+
+kern_return_t
+<span class="enscript-function-name">catch_exception_raise</span>(
+        __unused mach_port_t exception_port,
+        mach_port_t thread,
+        mach_port_t task,
+        exception_type_t exception,
+        exception_data_t code,
+        __unused mach_msg_type_number_t codeCnt
+)
+{
+	mach_exception_data_type_t big_code[EXCEPTION_CODE_MAX];
+	big_code[0] = code[0];
+	big_code[1] = code[1];
+
+	<span class="enscript-keyword">return</span> catch_mach_exception_raise(exception_port,
+			thread,
+			task,
+			exception,
+			big_code,
+			codeCnt);
+
+}
+
+kern_return_t
+<span class="enscript-function-name">catch_mach_exception_raise</span>(
+        __unused mach_port_t exception_port,
+        mach_port_t thread,
+        mach_port_t task,
+        exception_type_t exception,
+        mach_exception_data_t code,
+        __unused mach_msg_type_number_t codeCnt
+)
+{
+	task_t			self = current_task();
+	thread_t		th_act;
+	ipc_port_t 		thread_port;
+	<span class="enscript-type">struct</span> proc		*p;
+	kern_return_t		result = MACH_MSG_SUCCESS;
+	<span class="enscript-type">int</span>			ux_signal = 0;
+	mach_exception_code_t 	ucode = 0;
+	<span class="enscript-type">struct</span> uthread 		*ut;
+	mach_port_name_t thread_name = CAST_MACH_PORT_TO_NAME(thread);
+	mach_port_name_t task_name = CAST_MACH_PORT_TO_NAME(task);
+
+	<span class="enscript-comment">/*
+	 *	Convert local thread name to global port.
+	 */</span>
+   <span class="enscript-keyword">if</span> (MACH_PORT_VALID(thread_name) &amp;&amp;
+       (ipc_object_copyin(get_task_ipcspace(self), thread_name,
+		       MACH_MSG_TYPE_PORT_SEND,
+		       (<span class="enscript-type">void</span> *) &amp;thread_port) == MACH_MSG_SUCCESS)) {
+        <span class="enscript-keyword">if</span> (IPC_PORT_VALID(thread_port)) {
+	   th_act = convert_port_to_thread(thread_port);
+	   ipc_port_release_send(thread_port);
+	} <span class="enscript-keyword">else</span> {
+	   th_act = THREAD_NULL;
+	}
+
+	<span class="enscript-comment">/*
+	 *	Catch bogus ports
+	 */</span>
+	<span class="enscript-keyword">if</span> (th_act != THREAD_NULL) {
+
+	    <span class="enscript-comment">/*
+	     *	Convert exception to unix signal and code.
+	     */</span>
+	    ux_exception(exception, code[0], code[1], &amp;ux_signal, &amp;ucode);
+
+	    ut = get_bsdthread_info(th_act);
+	    p = proc_findthread(th_act);
+
+	    <span class="enscript-comment">/* Can't deliver a signal without a bsd process reference */</span>
+	    <span class="enscript-keyword">if</span> (p == NULL) {
+		    ux_signal = 0;
+		    result = KERN_FAILURE;
+	    }
+
+	    <span class="enscript-comment">/*
+	     * Stack overflow should result in a SIGSEGV signal
+	     * on the alternate stack.
+	     * but we have one or more guard pages after the
+	     * stack top, so we would get a KERN_PROTECTION_FAILURE
+	     * exception instead of KERN_INVALID_ADDRESS, resulting in
+	     * a SIGBUS signal.
+	     * Detect that situation and select the correct signal.
+	     */</span>
+	    <span class="enscript-keyword">if</span> (code[0] == KERN_PROTECTION_FAILURE &amp;&amp;
+		ux_signal == SIGBUS) {
+		    user_addr_t		sp, stack_min, stack_max;
+		    <span class="enscript-type">int</span>			mask;
+		    <span class="enscript-type">struct</span> sigacts	*ps;
+
+		    sp = code[1];
+
+		    stack_max = p-&gt;user_stack;
+		    stack_min = p-&gt;user_stack - MAXSSIZ;
+		    <span class="enscript-keyword">if</span> (sp &gt;= stack_min &amp;&amp;
+			sp &lt; stack_max) {
+			    <span class="enscript-comment">/*
+			     * This is indeed a stack overflow.  Deliver a
+			     * SIGSEGV signal.
+			     */</span>
+			    ux_signal = SIGSEGV;
+
+			    <span class="enscript-comment">/*
+			     * If the thread/process is not ready to handle
+			     * SIGSEGV on an alternate stack, force-deliver
+			     * SIGSEGV with a SIG_DFL handler.
+			     */</span>
+			    mask = sigmask(ux_signal);
+			    ps = p-&gt;p_sigacts;
+			    <span class="enscript-keyword">if</span> ((p-&gt;p_sigignore &amp; mask) ||
+				(ut-&gt;uu_sigwait &amp; mask) ||
+				(ut-&gt;uu_sigmask &amp; mask) ||
+				(ps-&gt;ps_sigact[SIGSEGV] == SIG_IGN) ||
+				(! (ps-&gt;ps_sigonstack &amp; mask))) {
+				    p-&gt;p_sigignore &amp;= ~mask;
+				    p-&gt;p_sigcatch &amp;= ~mask;
+				    ps-&gt;ps_sigact[SIGSEGV] = SIG_DFL;
+				    ut-&gt;uu_sigwait &amp;= ~mask;
+				    ut-&gt;uu_sigmask &amp;= ~mask;
+			    }
+		    }
+	    }
+	    <span class="enscript-comment">/*
+	     *	Send signal.
+	     */</span>
+	    <span class="enscript-keyword">if</span> (ux_signal != 0) {
+			ut-&gt;uu_exception = exception;
+			<span class="enscript-comment">//ut-&gt;uu_code = code[0]; // filled in by threadsignal
+</span>			ut-&gt;uu_subcode = code[1];			
+			threadsignal(th_act, ux_signal, code[0]);
+	    }
+	    <span class="enscript-keyword">if</span> (p != NULL) 
+		    proc_rele(p);
+	    thread_deallocate(th_act);
+	}
+	<span class="enscript-keyword">else</span>
+	    result = KERN_INVALID_ARGUMENT;
+    }
+    <span class="enscript-keyword">else</span>
+    	result = KERN_INVALID_ARGUMENT;
+
+    <span class="enscript-comment">/*
+     *	Delete our send rights to the task port.
+     */</span>
+    (<span class="enscript-type">void</span>)mach_port_deallocate(get_task_ipcspace(ux_handler_self), task_name);
+
+    <span class="enscript-keyword">return</span> (result);
+}
+
+kern_return_t
+<span class="enscript-function-name">catch_exception_raise_state</span>(
+        __unused mach_port_t exception_port,
+        __unused exception_type_t exception,
+        __unused <span class="enscript-type">const</span> exception_data_t code,
+        __unused mach_msg_type_number_t codeCnt,
+        __unused <span class="enscript-type">int</span> *flavor,
+        __unused <span class="enscript-type">const</span> thread_state_t old_state,
+        __unused mach_msg_type_number_t old_stateCnt,
+        __unused thread_state_t new_state,
+        __unused mach_msg_type_number_t *new_stateCnt)
+{
+	<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+}
+
+kern_return_t
+<span class="enscript-function-name">catch_mach_exception_raise_state</span>(
+        __unused mach_port_t exception_port,
+        __unused exception_type_t exception,
+        __unused <span class="enscript-type">const</span> mach_exception_data_t code,
+        __unused mach_msg_type_number_t codeCnt,
+        __unused <span class="enscript-type">int</span> *flavor,
+        __unused <span class="enscript-type">const</span> thread_state_t old_state,
+        __unused mach_msg_type_number_t old_stateCnt,
+        __unused thread_state_t new_state,
+        __unused mach_msg_type_number_t *new_stateCnt)
+{
+	<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+}
+
+kern_return_t
+<span class="enscript-function-name">catch_exception_raise_state_identity</span>(
+        __unused mach_port_t exception_port,
+        __unused mach_port_t thread,
+        __unused mach_port_t task,
+        __unused exception_type_t exception,
+        __unused exception_data_t code,
+        __unused mach_msg_type_number_t codeCnt,
+        __unused <span class="enscript-type">int</span> *flavor,
+        __unused thread_state_t old_state,
+        __unused mach_msg_type_number_t old_stateCnt,
+        __unused thread_state_t new_state,
+        __unused mach_msg_type_number_t *new_stateCnt)
+{
+	<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+}
+
+kern_return_t
+<span class="enscript-function-name">catch_mach_exception_raise_state_identity</span>(
+        __unused mach_port_t exception_port,
+        __unused mach_port_t thread,
+        __unused mach_port_t task,
+        __unused exception_type_t exception,
+        __unused mach_exception_data_t code,
+        __unused mach_msg_type_number_t codeCnt,
+        __unused <span class="enscript-type">int</span> *flavor,
+        __unused thread_state_t old_state,
+        __unused mach_msg_type_number_t old_stateCnt,
+        __unused thread_state_t new_state,
+        __unused mach_msg_type_number_t *new_stateCnt)
+{
+	<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+}
+
+
+<span class="enscript-comment">/*
+ *	ux_exception translates a mach exception, code and subcode to
+ *	a signal and u.u_code.  Calls machine_exception (machine dependent)
+ *	to attempt translation first.
+ */</span>
+
+<span class="enscript-type">static</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">ux_exception</span>(
+		<span class="enscript-type">int</span>			exception,
+		mach_exception_code_t 	code,
+		mach_exception_subcode_t subcode,
+		<span class="enscript-type">int</span>			*ux_signal,
+		mach_exception_code_t 	*ux_code)
+{
+    <span class="enscript-comment">/*
+     *	Try machine-dependent translation first.
+     */</span>
+    <span class="enscript-keyword">if</span> (machine_exception(exception, code, subcode, ux_signal, ux_code))
+	<span class="enscript-keyword">return</span>;
+	
+    <span class="enscript-keyword">switch</span>(exception) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_BAD_ACCESS</span>:
+		<span class="enscript-keyword">if</span> (code == KERN_INVALID_ADDRESS)
+			*ux_signal = SIGSEGV;
+		<span class="enscript-keyword">else</span>
+			*ux_signal = SIGBUS;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_BAD_INSTRUCTION</span>:
+	    *ux_signal = SIGILL;
+	    <span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_ARITHMETIC</span>:
+	    *ux_signal = SIGFPE;
+	    <span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_EMULATION</span>:
+	    *ux_signal = SIGEMT;
+	    <span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_SOFTWARE</span>:
+	    <span class="enscript-keyword">switch</span> (code) {
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_UNIX_BAD_SYSCALL</span>:
+		*ux_signal = SIGSYS;
+		<span class="enscript-keyword">break</span>;
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_UNIX_BAD_PIPE</span>:
+		*ux_signal = SIGPIPE;
+		<span class="enscript-keyword">break</span>;
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_UNIX_ABORT</span>:
+		*ux_signal = SIGABRT;
+		<span class="enscript-keyword">break</span>;
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_SOFT_SIGNAL</span>:
+		*ux_signal = SIGKILL;
+		<span class="enscript-keyword">break</span>;
+	    }
+	    <span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_BREAKPOINT</span>:
+	    *ux_signal = SIGTRAP;
+	    <span class="enscript-keyword">break</span>;
+    }
+}
+</pre>
+<hr />
+</body></html>

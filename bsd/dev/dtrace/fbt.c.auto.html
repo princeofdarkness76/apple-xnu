@@ -1,0 +1,508 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>fbt.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">fbt.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the &quot;License&quot;).
+ * You may not use this file except in compliance with the License.
+ *
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or <a href="http://www.opensolaris.org/os/licensing.">http://www.opensolaris.org/os/licensing.</a>
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets &quot;[]&quot; replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
+ * Use is subject to license terms.
+ */</span>
+
+<span class="enscript-comment">/* #pragma ident	&quot;@(#)fbt.c	1.18	07/01/10 SMI&quot; */</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_KERNEL</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_KERNEL</span> <span class="enscript-comment">/* Solaris vs. Darwin */</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/loader.h&gt;</span> 
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/kernel_mach_header.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/devfs/devfs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_impl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fbt.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_glue.h&gt;</span>
+
+<span class="enscript-comment">/* #include &lt;machine/trap.h&gt; */</span>
+<span class="enscript-type">struct</span> savearea_t; <span class="enscript-comment">/* Used anonymously */</span>
+
+#<span class="enscript-reference">if</span>   <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">kern_return_t</span> (*perfCallback)(<span class="enscript-type">int</span>, <span class="enscript-type">struct</span> savearea_t *, uintptr_t *, __unused <span class="enscript-type">int</span>);
+<span class="enscript-type">extern</span> perfCallback tempDTraceTrapHook;
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">fbt_perfCallback</span>(<span class="enscript-type">int</span>, <span class="enscript-type">struct</span> savearea_t *, uintptr_t *, __unused <span class="enscript-type">int</span>);
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">Unknown</span> <span class="enscript-variable-name">architecture</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">FBT_ADDR2NDX</span>(addr)	((((uintptr_t)(addr)) &gt;&gt; 4) &amp; fbt_probetab_mask)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FBT_PROBETAB_SIZE</span>	0x8000		<span class="enscript-comment">/* 32k entries -- 128K total */</span>
+
+<span class="enscript-type">static</span> dev_info_t		*fbt_devi;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>				fbt_probetab_size;
+dtrace_provider_id_t	fbt_id;
+fbt_probe_t				**fbt_probetab;
+<span class="enscript-type">int</span>						fbt_probetab_mask;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>				fbt_verbose = 0;
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">fbt_init</span>( <span class="enscript-type">void</span> );
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fbt_destroy</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>,<span class="enscript-variable-name">id</span>)
+	fbt_probe_t *fbt = parg, *next, *hash, *last;
+	<span class="enscript-type">int</span> ndx;
+
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-comment">/*
+		 * Now we need to remove this probe from the fbt_probetab.
+		 */</span>
+		ndx = FBT_ADDR2NDX(fbt-&gt;fbtp_patchpoint);
+		last = NULL;
+		hash = fbt_probetab[ndx];
+
+		<span class="enscript-keyword">while</span> (hash != fbt) {
+			ASSERT(hash != NULL);
+			last = hash;
+			hash = hash-&gt;fbtp_hashnext;
+		}
+
+		<span class="enscript-keyword">if</span> (last != NULL) {
+			last-&gt;fbtp_hashnext = fbt-&gt;fbtp_hashnext;
+		} <span class="enscript-keyword">else</span> {
+			fbt_probetab[ndx] = fbt-&gt;fbtp_hashnext;
+		}
+
+		next = fbt-&gt;fbtp_next;
+		kmem_free(fbt, <span class="enscript-keyword">sizeof</span> (fbt_probe_t));
+
+		fbt = next;
+	} <span class="enscript-keyword">while</span> (fbt != NULL);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fbt_enable</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>,<span class="enscript-variable-name">id</span>)
+	fbt_probe_t *fbt = parg;
+	<span class="enscript-type">struct</span> modctl *ctl = NULL;
+
+    <span class="enscript-keyword">for</span> (; fbt != NULL; fbt = fbt-&gt;fbtp_next) {
+
+	ctl = fbt-&gt;fbtp_ctl;
+	
+	<span class="enscript-keyword">if</span> (!ctl-&gt;mod_loaded) {
+		<span class="enscript-keyword">if</span> (fbt_verbose) {
+			cmn_err(CE_NOTE, <span class="enscript-string">&quot;fbt is failing for probe %s &quot;</span>
+			    <span class="enscript-string">&quot;(module %s unloaded)&quot;</span>,
+			    fbt-&gt;fbtp_name, ctl-&gt;mod_modname);
+		}
+
+		<span class="enscript-keyword">continue</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Now check that our modctl has the expected load count.  If it
+	 * doesn't, this module must have been unloaded and reloaded -- and
+	 * we're not going to touch it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ctl-&gt;mod_loadcnt != fbt-&gt;fbtp_loadcnt) {
+		<span class="enscript-keyword">if</span> (fbt_verbose) {
+			cmn_err(CE_NOTE, <span class="enscript-string">&quot;fbt is failing for probe %s &quot;</span>
+			    <span class="enscript-string">&quot;(module %s reloaded)&quot;</span>,
+			    fbt-&gt;fbtp_name, ctl-&gt;mod_modname);
+		}
+
+		<span class="enscript-keyword">continue</span>;
+	}	
+
+	dtrace_casptr(&amp;tempDTraceTrapHook, NULL, fbt_perfCallback);
+	<span class="enscript-keyword">if</span> (tempDTraceTrapHook != (perfCallback)fbt_perfCallback) {
+		<span class="enscript-keyword">if</span> (fbt_verbose) {
+			cmn_err(CE_NOTE, <span class="enscript-string">&quot;fbt_enable is failing for probe %s &quot;</span>
+			    <span class="enscript-string">&quot;in module %s: tempDTraceTrapHook already occupied.&quot;</span>,
+			    fbt-&gt;fbtp_name, ctl-&gt;mod_modname);
+		}
+		<span class="enscript-keyword">continue</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (fbt-&gt;fbtp_currentval != fbt-&gt;fbtp_patchval) {
+		(<span class="enscript-type">void</span>)ml_nofault_copy( (vm_offset_t)&amp;fbt-&gt;fbtp_patchval, (vm_offset_t)fbt-&gt;fbtp_patchpoint, 
+								<span class="enscript-keyword">sizeof</span>(fbt-&gt;fbtp_patchval));
+                fbt-&gt;fbtp_currentval = fbt-&gt;fbtp_patchval;
+		ctl-&gt;mod_nenabled++;
+	}
+
+    }
+    
+    dtrace_membar_consumer();
+    
+    <span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fbt_disable</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>,<span class="enscript-variable-name">id</span>)
+	fbt_probe_t *fbt = parg;
+	<span class="enscript-type">struct</span> modctl *ctl = NULL;
+
+	<span class="enscript-keyword">for</span> (; fbt != NULL; fbt = fbt-&gt;fbtp_next) {
+	    ctl = fbt-&gt;fbtp_ctl;
+	    
+	    <span class="enscript-keyword">if</span> (!ctl-&gt;mod_loaded || (ctl-&gt;mod_loadcnt != fbt-&gt;fbtp_loadcnt))
+		<span class="enscript-keyword">continue</span>;
+
+	    <span class="enscript-keyword">if</span> (fbt-&gt;fbtp_currentval != fbt-&gt;fbtp_savedval) {
+		(<span class="enscript-type">void</span>)ml_nofault_copy( (vm_offset_t)&amp;fbt-&gt;fbtp_savedval, (vm_offset_t)fbt-&gt;fbtp_patchpoint, 
+								<span class="enscript-keyword">sizeof</span>(fbt-&gt;fbtp_savedval));
+		fbt-&gt;fbtp_currentval = fbt-&gt;fbtp_savedval;
+		ASSERT(ctl-&gt;mod_nenabled &gt; 0);
+		ctl-&gt;mod_nenabled--;
+	    }
+	}
+	dtrace_membar_consumer();
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fbt_suspend</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>,<span class="enscript-variable-name">id</span>)
+	fbt_probe_t *fbt = parg;
+	<span class="enscript-type">struct</span> modctl *ctl = NULL;
+
+	<span class="enscript-keyword">for</span> (; fbt != NULL; fbt = fbt-&gt;fbtp_next) {
+	    ctl = fbt-&gt;fbtp_ctl;
+
+	    ASSERT(ctl-&gt;mod_nenabled &gt; 0);
+	    <span class="enscript-keyword">if</span> (!ctl-&gt;mod_loaded || (ctl-&gt;mod_loadcnt != fbt-&gt;fbtp_loadcnt))
+		<span class="enscript-keyword">continue</span>;
+
+	    (<span class="enscript-type">void</span>)ml_nofault_copy( (vm_offset_t)&amp;fbt-&gt;fbtp_savedval, (vm_offset_t)fbt-&gt;fbtp_patchpoint, 
+								<span class="enscript-keyword">sizeof</span>(fbt-&gt;fbtp_savedval));
+		
+		
+	    fbt-&gt;fbtp_currentval = fbt-&gt;fbtp_savedval;
+	}
+	
+	dtrace_membar_consumer();
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fbt_resume</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>,<span class="enscript-variable-name">id</span>)
+	fbt_probe_t *fbt = parg;
+	<span class="enscript-type">struct</span> modctl *ctl = NULL;
+
+	<span class="enscript-keyword">for</span> (; fbt != NULL; fbt = fbt-&gt;fbtp_next) {
+	    ctl = fbt-&gt;fbtp_ctl;
+
+	    ASSERT(ctl-&gt;mod_nenabled &gt; 0);
+	    <span class="enscript-keyword">if</span> (!ctl-&gt;mod_loaded || (ctl-&gt;mod_loadcnt != fbt-&gt;fbtp_loadcnt))
+		<span class="enscript-keyword">continue</span>;
+	
+	    dtrace_casptr(&amp;tempDTraceTrapHook, NULL, fbt_perfCallback);
+	    <span class="enscript-keyword">if</span> (tempDTraceTrapHook != (perfCallback)fbt_perfCallback) {
+		<span class="enscript-keyword">if</span> (fbt_verbose) {
+			cmn_err(CE_NOTE, <span class="enscript-string">&quot;fbt_resume is failing for probe %s &quot;</span>
+			    <span class="enscript-string">&quot;in module %s: tempDTraceTrapHook already occupied.&quot;</span>,
+			    fbt-&gt;fbtp_name, ctl-&gt;mod_modname);
+		}
+		<span class="enscript-keyword">return</span>;
+	    }
+	
+	    (<span class="enscript-type">void</span>)ml_nofault_copy( (vm_offset_t)&amp;fbt-&gt;fbtp_patchval, (vm_offset_t)fbt-&gt;fbtp_patchpoint, 
+								<span class="enscript-keyword">sizeof</span>(fbt-&gt;fbtp_patchval));
+
+		
+  	    fbt-&gt;fbtp_currentval = fbt-&gt;fbtp_patchval;
+	}
+	
+	dtrace_membar_consumer();
+}
+
+<span class="enscript-comment">/*
+ * APPLE NOTE: fbt_getargdesc not implemented
+ */</span>
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__APPLE__</span>)
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fbt_getargdesc</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg, dtrace_argdesc_t *desc)
+{
+	fbt_probe_t *fbt = parg;
+	<span class="enscript-type">struct</span> modctl *ctl = fbt-&gt;fbtp_ctl;
+	<span class="enscript-type">struct</span> module *mp = ctl-&gt;mod_mp;
+	ctf_file_t *fp = NULL, *pfp;
+	ctf_funcinfo_t f;
+	<span class="enscript-type">int</span> error;
+	ctf_id_t argv[32], type;
+	<span class="enscript-type">int</span> argc = <span class="enscript-keyword">sizeof</span> (argv) / <span class="enscript-keyword">sizeof</span> (ctf_id_t);
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *parent;
+
+	<span class="enscript-keyword">if</span> (!ctl-&gt;mod_loaded || (ctl-&gt;mod_loadcnt != fbt-&gt;fbtp_loadcnt))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+	<span class="enscript-keyword">if</span> (fbt-&gt;fbtp_roffset != 0 &amp;&amp; desc-&gt;dtargd_ndx == 0) {
+		(<span class="enscript-type">void</span>) strlcpy(desc-&gt;dtargd_native, <span class="enscript-string">&quot;int&quot;</span>,
+			       <span class="enscript-keyword">sizeof</span>(desc-&gt;dtargd_native));
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ((fp = ctf_modopen(mp, &amp;error)) == NULL) {
+		<span class="enscript-comment">/*
+		 * We have no CTF information for this module -- and therefore
+		 * no args[] information.
+		 */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * If we have a parent container, we must manually import it.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((parent = ctf_parent_name(fp)) != NULL) {
+		<span class="enscript-type">struct</span> modctl *mp = &amp;modules;
+		<span class="enscript-type">struct</span> modctl *mod = NULL;
+
+		<span class="enscript-comment">/*
+		 * We must iterate over all modules to find the module that
+		 * is our parent.
+		 */</span>
+		<span class="enscript-keyword">do</span> {
+			<span class="enscript-keyword">if</span> (strcmp(mp-&gt;mod_modname, parent) == 0) {
+				mod = mp;
+				<span class="enscript-keyword">break</span>;
+			}
+		} <span class="enscript-keyword">while</span> ((mp = mp-&gt;mod_next) != &amp;modules);
+
+		<span class="enscript-keyword">if</span> (mod == NULL)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+		<span class="enscript-keyword">if</span> ((pfp = ctf_modopen(mod-&gt;mod_mp, &amp;error)) == NULL) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (ctf_import(fp, pfp) != 0) {
+			ctf_close(pfp);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+		}
+
+		ctf_close(pfp);
+	}
+
+	<span class="enscript-keyword">if</span> (ctf_func_info(fp, fbt-&gt;fbtp_symndx, &amp;f) == CTF_ERR)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+	<span class="enscript-keyword">if</span> (fbt-&gt;fbtp_roffset != 0) {
+		<span class="enscript-keyword">if</span> (desc-&gt;dtargd_ndx &gt; 1)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+		ASSERT(desc-&gt;dtargd_ndx == 1);
+		type = f.ctc_return;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (desc-&gt;dtargd_ndx + 1 &gt; f.ctc_argc)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+		<span class="enscript-keyword">if</span> (ctf_func_args(fp, fbt-&gt;fbtp_symndx, argc, argv) == CTF_ERR)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+		type = argv[desc-&gt;dtargd_ndx];
+	}
+
+	<span class="enscript-keyword">if</span> (ctf_type_name(fp, type, desc-&gt;dtargd_native,
+	    DTRACE_ARGTYPELEN) != NULL) {
+		ctf_close(fp);
+		<span class="enscript-keyword">return</span>;
+	}
+<span class="enscript-reference">err</span>:
+	<span class="enscript-keyword">if</span> (fp != NULL)
+		ctf_close(fp);
+
+	desc-&gt;dtargd_ndx = DTRACE_ARGNONE;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE__ */</span>
+
+<span class="enscript-type">static</span> dtrace_pattr_t fbt_attr = {
+{ DTRACE_STABILITY_EVOLVING, DTRACE_STABILITY_EVOLVING, DTRACE_CLASS_ISA },
+{ DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_UNKNOWN },
+{ DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_UNKNOWN },
+{ DTRACE_STABILITY_EVOLVING, DTRACE_STABILITY_EVOLVING, DTRACE_CLASS_ISA },
+{ DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_ISA },
+};
+
+<span class="enscript-type">static</span> dtrace_pops_t fbt_pops = {
+	NULL,
+	fbt_provide_module,
+	fbt_enable,
+	fbt_disable,
+	fbt_suspend,
+	fbt_resume,
+	NULL, <span class="enscript-comment">/*  APPLE NOTE: fbt_getargdesc not implemented */</span>
+	NULL,
+	NULL,
+	fbt_destroy
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fbt_cleanup</span>(dev_info_t *devi)
+{
+	dtrace_invop_remove(fbt_invop);
+	ddi_remove_minor_node(devi, NULL);
+	kmem_free(fbt_probetab, fbt_probetab_size * <span class="enscript-keyword">sizeof</span> (fbt_probe_t *));
+	fbt_probetab = NULL;
+	fbt_probetab_mask = 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">fbt_attach</span>(dev_info_t *devi, ddi_attach_cmd_t cmd)
+{
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DDI_ATTACH</span>:
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DDI_RESUME</span>:
+		<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (DDI_FAILURE);
+	}
+
+	<span class="enscript-keyword">if</span> (fbt_probetab_size == 0)
+		fbt_probetab_size = FBT_PROBETAB_SIZE;
+
+	fbt_probetab_mask = fbt_probetab_size - 1;
+	fbt_probetab =
+	    kmem_zalloc(fbt_probetab_size * <span class="enscript-keyword">sizeof</span> (fbt_probe_t *), KM_SLEEP);
+
+	dtrace_invop_add(fbt_invop);
+
+	<span class="enscript-keyword">if</span> (ddi_create_minor_node(devi, <span class="enscript-string">&quot;fbt&quot;</span>, S_IFCHR, 0,
+	    DDI_PSEUDO, 0) == DDI_FAILURE ||
+	    dtrace_register(<span class="enscript-string">&quot;fbt&quot;</span>, &amp;fbt_attr, DTRACE_PRIV_KERNEL, NULL,
+	    &amp;fbt_pops, NULL, &amp;fbt_id) != 0) {
+		fbt_cleanup(devi);
+		<span class="enscript-keyword">return</span> (DDI_FAILURE);
+	}
+
+	ddi_report_dev(devi);
+	fbt_devi = devi;
+
+	<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+}
+
+<span class="enscript-type">static</span> d_open_t _fbt_open;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">_fbt_open</span>(dev_t dev, <span class="enscript-type">int</span> flags, <span class="enscript-type">int</span> devtype, <span class="enscript-type">struct</span> proc *p)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">dev</span>,<span class="enscript-variable-name">flags</span>,<span class="enscript-variable-name">devtype</span>,<span class="enscript-variable-name">p</span>)
+	<span class="enscript-keyword">return</span> 0;
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">FBT_MAJOR</span>  -24 <span class="enscript-comment">/* let the kernel pick the device number */</span>
+
+<span class="enscript-comment">/*
+ * A struct describing which functions will get invoked for certain
+ * actions.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> cdevsw fbt_cdevsw =
+{
+	_fbt_open,		<span class="enscript-comment">/* open */</span>
+	eno_opcl,			<span class="enscript-comment">/* close */</span>
+	eno_rdwrt,			<span class="enscript-comment">/* read */</span>
+	eno_rdwrt,			<span class="enscript-comment">/* write */</span>
+	eno_ioctl,			<span class="enscript-comment">/* ioctl */</span>
+	(stop_fcn_t *)nulldev, <span class="enscript-comment">/* stop */</span>
+	(reset_fcn_t *)nulldev, <span class="enscript-comment">/* reset */</span>
+	NULL,				<span class="enscript-comment">/* tty's */</span>
+	eno_select,			<span class="enscript-comment">/* select */</span>
+	eno_mmap,			<span class="enscript-comment">/* mmap */</span>
+	eno_strat,			<span class="enscript-comment">/* strategy */</span>
+	eno_getc,			<span class="enscript-comment">/* getc */</span>
+	eno_putc,			<span class="enscript-comment">/* putc */</span>
+	0					<span class="enscript-comment">/* type */</span>
+};
+
+<span class="enscript-type">int</span> gIgnoreFBTBlacklist = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> gFBTInited = 0;
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">kmem_alloc</span> <span class="enscript-comment">/* from its binding to dt_kmem_alloc glue */</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">kmem_free</span> <span class="enscript-comment">/* from its binding to dt_kmem_free glue */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fbt_init</span>( <span class="enscript-type">void</span> )
+{
+	<span class="enscript-keyword">if</span> (0 == gFBTInited)
+	{
+		<span class="enscript-type">int</span> majdevno = cdevsw_add(FBT_MAJOR, &amp;fbt_cdevsw);
+		
+		<span class="enscript-keyword">if</span> (majdevno &lt; 0) {
+			printf(<span class="enscript-string">&quot;fbt_init: failed to allocate a major number!\n&quot;</span>);
+			<span class="enscript-keyword">return</span>;
+		}
+		
+		PE_parse_boot_argn(<span class="enscript-string">&quot;IgnoreFBTBlacklist&quot;</span>, &amp;gIgnoreFBTBlacklist, <span class="enscript-keyword">sizeof</span> (gIgnoreFBTBlacklist));
+
+		fbt_attach( (dev_info_t	*)(uintptr_t)majdevno, DDI_ATTACH );
+		
+		gFBTInited = 1; <span class="enscript-comment">/* Ensure this initialization occurs just one time. */</span>
+	}
+	<span class="enscript-keyword">else</span>
+		panic(<span class="enscript-string">&quot;fbt_init: called twice!\n&quot;</span>);
+}
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">FBT_MAJOR</span>
+</pre>
+<hr />
+</body></html>

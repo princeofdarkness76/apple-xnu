@@ -1,0 +1,3181 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kern_proc.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kern_proc.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1989, 1991, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)kern_proc.c	8.4 (Berkeley) 1/4/94
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+<span class="enscript-comment">/* HISTORY
+ *  04-Aug-97  Umesh Vaishampayan (<a href="mailto:umeshv@apple.com">umeshv@apple.com</a>)
+ *	Added current_proc_EXTERNAL() function for the use of kernel
+ * 	lodable modules.
+ *
+ *  05-Jun-95 Mac Gillon (mgillon) at NeXT
+ *	New version based on 3.3NS and 4.4
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/acct.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/wait.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/tty.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signalvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/codesign.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ubc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/coalition.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/coalition.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>		<span class="enscript-comment">/* vm_map_switch_protect() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/message.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/priv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/bsdtask_info.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kern_memorystatus.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/crypto/sha1.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Structure associated with user cacheing.
+ */</span>
+<span class="enscript-type">struct</span> uidinfo {
+	LIST_ENTRY(uidinfo) ui_hash;
+	uid_t	ui_uid;
+	<span class="enscript-type">long</span>	ui_proccnt;
+};
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">UIHASH</span>(uid)	(&amp;uihashtbl[(uid) &amp; uihash])
+<span class="enscript-function-name">LIST_HEAD</span>(uihashhead, uidinfo) *uihashtbl;
+u_long uihash;		<span class="enscript-comment">/* size of hash table - 1 */</span>
+
+<span class="enscript-comment">/*
+ * Other process lists
+ */</span>
+<span class="enscript-type">struct</span> pidhashhead *pidhashtbl;
+u_long pidhash;
+<span class="enscript-type">struct</span> pgrphashhead *pgrphashtbl;
+u_long pgrphash;
+<span class="enscript-type">struct</span> sesshashhead *sesshashtbl;
+u_long sesshash;
+
+<span class="enscript-type">struct</span> proclist allproc;
+<span class="enscript-type">struct</span> proclist zombproc;
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> tty cons;
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> cs_debug;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">__PROC_INTERNAL_DEBUG</span> 1
+#<span class="enscript-reference">endif</span>
+<span class="enscript-comment">/* Name to give to core files */</span>
+__XNU_PRIVATE_EXTERN <span class="enscript-type">char</span> corefilename[MAXPATHLEN+1] = {<span class="enscript-string">&quot;/cores/core.%P&quot;</span>};
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PROC_REF_DEBUG</span>
+<span class="enscript-type">extern</span> uint32_t <span class="enscript-function-name">fastbacktrace</span>(uintptr_t* bt, uint32_t max_frames) __attribute__((noinline));
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">orphanpg</span>(<span class="enscript-type">struct</span> pgrp *pg);
+<span class="enscript-type">void</span> 	proc_name_kdp(task_t t, <span class="enscript-type">char</span> * buf, <span class="enscript-type">int</span> size);
+<span class="enscript-type">int</span>	proc_threadname_kdp(<span class="enscript-type">void</span> *uth, <span class="enscript-type">char</span> *buf, size_t size);
+<span class="enscript-type">void</span>	proc_starttime_kdp(<span class="enscript-type">void</span> *p, uint64_t *tv_sec, uint64_t *tv_usec);
+<span class="enscript-type">char</span>	*proc_name_address(<span class="enscript-type">void</span> *p);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>  <span class="enscript-function-name">pgrp_add</span>(<span class="enscript-type">struct</span> pgrp * pgrp, proc_t parent, proc_t child);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pgrp_remove</span>(proc_t p);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pgrp_replace</span>(proc_t p, <span class="enscript-type">struct</span> pgrp *pgrp);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pgdelete_dropref</span>(<span class="enscript-type">struct</span> pgrp *pgrp);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pg_rele_dropref</span>(<span class="enscript-type">struct</span> pgrp * pgrp);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">csops_internal</span>(pid_t pid, <span class="enscript-type">int</span> ops, user_addr_t uaddr, user_size_t usersize, user_addr_t uaddittoken);
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">proc_parent_is_currentproc</span>(proc_t p);
+
+<span class="enscript-type">struct</span> fixjob_iterargs {
+	<span class="enscript-type">struct</span> pgrp * pg;
+	<span class="enscript-type">struct</span> session * mysession;
+	<span class="enscript-type">int</span> entering;
+};
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">fixjob_callback</span>(proc_t, <span class="enscript-type">void</span> *);
+
+<span class="enscript-comment">/*
+ * Initialize global process hashing structures.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">procinit</span>(<span class="enscript-type">void</span>)
+{
+	LIST_INIT(&amp;allproc);
+	LIST_INIT(&amp;zombproc);
+	pidhashtbl = hashinit(maxproc / 4, M_PROC, &amp;pidhash);
+	pgrphashtbl = hashinit(maxproc / 4, M_PROC, &amp;pgrphash);
+	sesshashtbl = hashinit(maxproc / 4, M_PROC, &amp;sesshash);
+	uihashtbl = hashinit(maxproc / 16, M_PROC, &amp;uihash);
+}
+
+<span class="enscript-comment">/*
+ * Change the count associated with number of processes
+ * a given user is using. This routine protects the uihash
+ * with the list lock
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">chgproccnt</span>(uid_t uid, <span class="enscript-type">int</span> diff)
+{
+	<span class="enscript-type">struct</span> uidinfo *uip;
+	<span class="enscript-type">struct</span> uidinfo *newuip = NULL;
+	<span class="enscript-type">struct</span> uihashhead *uipp;
+	<span class="enscript-type">int</span> retval;
+
+<span class="enscript-reference">again</span>:
+	proc_list_lock();
+	uipp = UIHASH(uid);
+	<span class="enscript-keyword">for</span> (uip = uipp-&gt;lh_first; uip != 0; uip = uip-&gt;ui_hash.le_next)
+		<span class="enscript-keyword">if</span> (uip-&gt;ui_uid == uid)
+			<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">if</span> (uip) {
+		uip-&gt;ui_proccnt += diff;
+		<span class="enscript-keyword">if</span> (uip-&gt;ui_proccnt &gt; 0) {
+			retval = uip-&gt;ui_proccnt;
+			proc_list_unlock();
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-keyword">if</span> (uip-&gt;ui_proccnt &lt; 0)
+			panic(<span class="enscript-string">&quot;chgproccnt: procs &lt; 0&quot;</span>);
+		LIST_REMOVE(uip, ui_hash);
+		retval = 0;
+		proc_list_unlock();
+		FREE_ZONE(uip, <span class="enscript-keyword">sizeof</span>(*uip), M_PROC);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (diff &lt;= 0) {
+		<span class="enscript-keyword">if</span> (diff == 0) {
+			retval = 0;
+			proc_list_unlock();
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		panic(<span class="enscript-string">&quot;chgproccnt: lost user&quot;</span>);
+	}
+	<span class="enscript-keyword">if</span> (newuip != NULL) {
+		uip = newuip;
+		newuip = NULL;
+		LIST_INSERT_HEAD(uipp, uip, ui_hash);
+		uip-&gt;ui_uid = uid;
+		uip-&gt;ui_proccnt = diff;
+		retval = diff;
+		proc_list_unlock();
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	proc_list_unlock();
+	MALLOC_ZONE(newuip, <span class="enscript-type">struct</span> uidinfo *, <span class="enscript-keyword">sizeof</span>(*uip), M_PROC, M_WAITOK);
+	<span class="enscript-keyword">if</span> (newuip == NULL)
+		panic(<span class="enscript-string">&quot;chgproccnt: M_PROC zone depleted&quot;</span>);
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (newuip != NULL) 
+		FREE_ZONE(newuip, <span class="enscript-keyword">sizeof</span>(*uip), M_PROC);
+	<span class="enscript-keyword">return</span>(retval);
+}
+
+<span class="enscript-comment">/*
+ * Is p an inferior of the current process?
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">inferior</span>(proc_t p)
+{
+	<span class="enscript-type">int</span> retval = 0;
+
+	proc_list_lock();
+	<span class="enscript-keyword">for</span> (; p != current_proc(); p = p-&gt;p_pptr)
+		<span class="enscript-keyword">if</span> (p-&gt;p_pid == 0) 
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	retval = 1;
+<span class="enscript-reference">out</span>:
+	proc_list_unlock();
+	<span class="enscript-keyword">return</span>(retval);
+}
+
+<span class="enscript-comment">/*
+ * Is p an inferior of t ?
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">isinferior</span>(proc_t p, proc_t t)
+{
+	<span class="enscript-type">int</span> retval = 0;
+	<span class="enscript-type">int</span> nchecked = 0;
+	proc_t start = p;
+
+	<span class="enscript-comment">/* if p==t they are not inferior */</span>
+	<span class="enscript-keyword">if</span> (p == t)
+		<span class="enscript-keyword">return</span>(0);
+
+	proc_list_lock();
+	<span class="enscript-keyword">for</span> (; p != t; p = p-&gt;p_pptr) {
+		nchecked++;
+
+		<span class="enscript-comment">/* Detect here if we're in a cycle */</span>
+		<span class="enscript-keyword">if</span> ((p-&gt;p_pid == 0) || (p-&gt;p_pptr == start) || (nchecked &gt;= nprocs))
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	retval = 1;
+<span class="enscript-reference">out</span>:
+	proc_list_unlock();
+	<span class="enscript-keyword">return</span>(retval);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_isinferior</span>(<span class="enscript-type">int</span> pid1, <span class="enscript-type">int</span> pid2)
+{
+	proc_t p = PROC_NULL;
+	proc_t t = PROC_NULL;
+	<span class="enscript-type">int</span> retval = 0;
+	
+	<span class="enscript-keyword">if</span> (((p = proc_find(pid1)) != (proc_t)0 ) &amp;&amp; ((t = proc_find(pid2)) != (proc_t)0))
+		retval = isinferior(p, t);
+
+	<span class="enscript-keyword">if</span> (p != PROC_NULL)
+		proc_rele(p);
+	<span class="enscript-keyword">if</span> (t != PROC_NULL)
+		proc_rele(t);
+
+	<span class="enscript-keyword">return</span>(retval);
+}
+
+proc_t
+<span class="enscript-function-name">proc_find</span>(<span class="enscript-type">int</span> pid)
+{
+	<span class="enscript-keyword">return</span>(proc_findinternal(pid, 0));
+}
+
+proc_t
+<span class="enscript-function-name">proc_findinternal</span>(<span class="enscript-type">int</span> pid, <span class="enscript-type">int</span> locked)
+{
+	proc_t p = PROC_NULL;
+
+	<span class="enscript-keyword">if</span> (locked == 0) {
+		proc_list_lock();
+	}
+
+	p = pfind_locked(pid);
+	<span class="enscript-keyword">if</span> ((p == PROC_NULL) || (p != proc_ref_locked(p)))
+		p = PROC_NULL;
+
+	<span class="enscript-keyword">if</span> (locked == 0) {
+		proc_list_unlock();
+	}
+
+	<span class="enscript-keyword">return</span>(p);
+}
+
+proc_t
+<span class="enscript-function-name">proc_findthread</span>(thread_t thread)
+{
+	proc_t p = PROC_NULL;
+	<span class="enscript-type">struct</span> uthread *uth;
+
+	proc_list_lock();
+	uth = get_bsdthread_info(thread);
+	<span class="enscript-keyword">if</span> (uth &amp;&amp; (uth-&gt;uu_flag &amp; UT_VFORK))
+		p = uth-&gt;uu_proc;
+	<span class="enscript-keyword">else</span>
+		p = (proc_t)(get_bsdthreadtask_info(thread));
+	p = proc_ref_locked(p);
+	proc_list_unlock();
+	<span class="enscript-keyword">return</span>(p);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PROC_REF_DEBUG</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">uthread_reset_proc_refcount</span>(<span class="enscript-type">void</span> *uthread) {
+	uthread_t uth;
+
+	<span class="enscript-keyword">if</span> (proc_ref_tracking_disabled) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	uth = (uthread_t) uthread;
+
+	uth-&gt;uu_proc_refcount = 0;
+	uth-&gt;uu_pindex = 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">uthread_get_proc_refcount</span>(<span class="enscript-type">void</span> *uthread) {
+	uthread_t uth;
+
+	<span class="enscript-keyword">if</span> (proc_ref_tracking_disabled) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	uth = (uthread_t) uthread;
+
+	<span class="enscript-keyword">return</span> uth-&gt;uu_proc_refcount;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">record_procref</span>(proc_t p, <span class="enscript-type">int</span> count) {
+	uthread_t uth;
+
+	<span class="enscript-keyword">if</span> (proc_ref_tracking_disabled) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	uth = current_uthread();
+	uth-&gt;uu_proc_refcount += count;
+
+	<span class="enscript-keyword">if</span> (count == 1) {
+		<span class="enscript-keyword">if</span> (uth-&gt;uu_pindex &lt; NUM_PROC_REFS_TO_TRACK) {
+			fastbacktrace((uintptr_t *) &amp;uth-&gt;uu_proc_pcs[uth-&gt;uu_pindex], PROC_REF_STACK_DEPTH);
+
+			uth-&gt;uu_proc_ps[uth-&gt;uu_pindex] = p;
+			uth-&gt;uu_pindex++;
+		}
+	}
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_rele</span>(proc_t p)
+{
+	proc_list_lock();
+	proc_rele_locked(p);
+	proc_list_unlock();
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+proc_t
+<span class="enscript-function-name">proc_self</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> proc * p;
+
+	p = current_proc();
+
+	proc_list_lock();
+	<span class="enscript-keyword">if</span> (p != proc_ref_locked(p))
+		p = PROC_NULL;
+	proc_list_unlock();
+	<span class="enscript-keyword">return</span>(p);
+}
+
+
+proc_t
+<span class="enscript-function-name">proc_ref_locked</span>(proc_t p)
+{
+	proc_t p1 = p;
+	
+	<span class="enscript-comment">/* if process still in creation return failure */</span>
+	<span class="enscript-keyword">if</span> ((p == PROC_NULL) || ((p-&gt;p_listflag &amp; P_LIST_INCREATE) != 0))
+			<span class="enscript-keyword">return</span> (PROC_NULL);
+	<span class="enscript-comment">/* do not return process marked for termination */</span>
+	<span class="enscript-keyword">if</span> ((p-&gt;p_stat != SZOMB) &amp;&amp; ((p-&gt;p_listflag &amp; P_LIST_EXITED) == 0) &amp;&amp; ((p-&gt;p_listflag &amp; (P_LIST_DRAINWAIT | P_LIST_DRAIN | P_LIST_DEAD)) == 0)) {
+		p-&gt;p_refcount++;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PROC_REF_DEBUG</span>
+		record_procref(p, 1);
+#<span class="enscript-reference">endif</span>
+	}
+	<span class="enscript-keyword">else</span> 
+		p1 = PROC_NULL;
+
+	<span class="enscript-keyword">return</span>(p1);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_rele_locked</span>(proc_t p)
+{
+
+	<span class="enscript-keyword">if</span> (p-&gt;p_refcount &gt; 0) {
+		p-&gt;p_refcount--;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PROC_REF_DEBUG</span>
+		record_procref(p, -1);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">if</span> ((p-&gt;p_refcount == 0) &amp;&amp; ((p-&gt;p_listflag &amp; P_LIST_DRAINWAIT) == P_LIST_DRAINWAIT)) {
+			p-&gt;p_listflag &amp;= ~P_LIST_DRAINWAIT;
+			wakeup(&amp;p-&gt;p_refcount);
+		}
+	} <span class="enscript-keyword">else</span>
+		panic(<span class="enscript-string">&quot;proc_rele_locked  -ve ref\n&quot;</span>);
+
+}
+
+proc_t
+<span class="enscript-function-name">proc_find_zombref</span>(<span class="enscript-type">int</span> pid)
+{
+	proc_t p;
+
+	proc_list_lock();
+
+ <span class="enscript-reference">again</span>:
+	p = pfind_locked(pid);
+
+	<span class="enscript-comment">/* should we bail? */</span>
+	<span class="enscript-keyword">if</span> ((p == PROC_NULL)					<span class="enscript-comment">/* not found */</span>
+	    || ((p-&gt;p_listflag &amp; P_LIST_INCREATE) != 0)		<span class="enscript-comment">/* not created yet */</span>
+	    || ((p-&gt;p_listflag &amp; P_LIST_EXITED) == 0)) {	<span class="enscript-comment">/* not started exit */</span>
+
+		proc_list_unlock();
+		<span class="enscript-keyword">return</span> (PROC_NULL);
+	}
+
+	<span class="enscript-comment">/* If someone else is controlling the (unreaped) zombie - wait */</span>
+	<span class="enscript-keyword">if</span> ((p-&gt;p_listflag &amp; P_LIST_WAITING) != 0) {
+		(<span class="enscript-type">void</span>)msleep(&amp;p-&gt;p_stat, proc_list_mlock, PWAIT, <span class="enscript-string">&quot;waitcoll&quot;</span>, 0);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+	}
+	p-&gt;p_listflag |=  P_LIST_WAITING;
+
+	proc_list_unlock();
+
+	<span class="enscript-keyword">return</span>(p);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_drop_zombref</span>(proc_t p)
+{
+	proc_list_lock();
+	<span class="enscript-keyword">if</span> ((p-&gt;p_listflag &amp; P_LIST_WAITING) ==  P_LIST_WAITING) {
+		p-&gt;p_listflag &amp;= ~P_LIST_WAITING;
+		wakeup(&amp;p-&gt;p_stat);
+	}
+	proc_list_unlock();
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_refdrain</span>(proc_t p)
+{
+
+	proc_list_lock();
+
+	p-&gt;p_listflag |= P_LIST_DRAIN;
+	<span class="enscript-keyword">while</span> (p-&gt;p_refcount) {
+		p-&gt;p_listflag |= P_LIST_DRAINWAIT;
+		msleep(&amp;p-&gt;p_refcount, proc_list_mlock, 0, <span class="enscript-string">&quot;proc_refdrain&quot;</span>, 0) ;
+	}
+	p-&gt;p_listflag &amp;= ~P_LIST_DRAIN;
+	p-&gt;p_listflag |= P_LIST_DEAD;
+
+	proc_list_unlock();
+
+
+}
+
+proc_t 
+<span class="enscript-function-name">proc_parentholdref</span>(proc_t p)
+{
+	proc_t parent = PROC_NULL;
+	proc_t pp;
+	<span class="enscript-type">int</span> loopcnt = 0;
+
+
+	proc_list_lock();
+<span class="enscript-reference">loop</span>:
+	pp = p-&gt;p_pptr;
+	<span class="enscript-keyword">if</span> ((pp == PROC_NULL) || (pp-&gt;p_stat == SZOMB) || ((pp-&gt;p_listflag &amp; (P_LIST_CHILDDRSTART | P_LIST_CHILDDRAINED)) == (P_LIST_CHILDDRSTART | P_LIST_CHILDDRAINED))) {
+		parent = PROC_NULL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+		
+	<span class="enscript-keyword">if</span> ((pp-&gt;p_listflag &amp; (P_LIST_CHILDDRSTART | P_LIST_CHILDDRAINED)) == P_LIST_CHILDDRSTART) {
+		pp-&gt;p_listflag |= P_LIST_CHILDDRWAIT;
+		msleep(&amp;pp-&gt;p_childrencnt, proc_list_mlock, 0, <span class="enscript-string">&quot;proc_parent&quot;</span>, 0);
+		loopcnt++;
+		<span class="enscript-keyword">if</span> (loopcnt == 5) {
+			parent = PROC_NULL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ((pp-&gt;p_listflag &amp; (P_LIST_CHILDDRSTART | P_LIST_CHILDDRAINED)) == 0) {
+		pp-&gt;p_parentref++;
+		parent = pp;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	
+<span class="enscript-reference">out</span>:
+	proc_list_unlock();
+	<span class="enscript-keyword">return</span>(parent);
+}
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_parentdropref</span>(proc_t p, <span class="enscript-type">int</span> listlocked)
+{
+	<span class="enscript-keyword">if</span> (listlocked == 0)
+		proc_list_lock();
+
+	<span class="enscript-keyword">if</span> (p-&gt;p_parentref &gt; 0) {
+		p-&gt;p_parentref--;
+		<span class="enscript-keyword">if</span> ((p-&gt;p_parentref == 0) &amp;&amp; ((p-&gt;p_listflag &amp; P_LIST_PARENTREFWAIT) == P_LIST_PARENTREFWAIT)) {
+			p-&gt;p_listflag &amp;= ~P_LIST_PARENTREFWAIT;
+			wakeup(&amp;p-&gt;p_parentref);
+		}
+	} <span class="enscript-keyword">else</span>
+		panic(<span class="enscript-string">&quot;proc_parentdropref  -ve ref\n&quot;</span>);
+	<span class="enscript-keyword">if</span> (listlocked == 0)
+		proc_list_unlock();
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_childdrainstart</span>(proc_t p)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__PROC_INTERNAL_DEBUG</span>
+	<span class="enscript-keyword">if</span> ((p-&gt;p_listflag &amp; P_LIST_CHILDDRSTART) == P_LIST_CHILDDRSTART)
+		panic(<span class="enscript-string">&quot;proc_childdrainstart: childdrain already started\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+	p-&gt;p_listflag |= P_LIST_CHILDDRSTART;
+	<span class="enscript-comment">/* wait for all that hold parentrefs to drop */</span>
+	<span class="enscript-keyword">while</span> (p-&gt;p_parentref &gt; 0) {
+		p-&gt;p_listflag |= P_LIST_PARENTREFWAIT;
+		msleep(&amp;p-&gt;p_parentref, proc_list_mlock, 0, <span class="enscript-string">&quot;proc_childdrainstart&quot;</span>, 0) ;
+	}
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_childdrainend</span>(proc_t p)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__PROC_INTERNAL_DEBUG</span>
+	<span class="enscript-keyword">if</span> (p-&gt;p_childrencnt &gt; 0)
+		panic(<span class="enscript-string">&quot;exiting: children stil hanging around\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+	p-&gt;p_listflag |= P_LIST_CHILDDRAINED;
+	<span class="enscript-keyword">if</span> ((p-&gt;p_listflag &amp; (P_LIST_CHILDLKWAIT |P_LIST_CHILDDRWAIT)) != 0) {
+		p-&gt;p_listflag &amp;= ~(P_LIST_CHILDLKWAIT |P_LIST_CHILDDRWAIT);
+		wakeup(&amp;p-&gt;p_childrencnt);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_checkdeadrefs</span>(__unused proc_t p)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__PROC_INTERNAL_DEBUG</span>
+	<span class="enscript-keyword">if</span> ((p-&gt;p_listflag  &amp; P_LIST_INHASH) != 0)
+		panic(<span class="enscript-string">&quot;proc being freed and still in hash %p: %u\n&quot;</span>, p, p-&gt;p_listflag);
+	<span class="enscript-keyword">if</span> (p-&gt;p_childrencnt != 0)
+		panic(<span class="enscript-string">&quot;proc being freed and pending children cnt %p:%d\n&quot;</span>, p, p-&gt;p_childrencnt);
+	<span class="enscript-keyword">if</span> (p-&gt;p_refcount != 0)
+		panic(<span class="enscript-string">&quot;proc being freed and pending refcount %p:%d\n&quot;</span>, p, p-&gt;p_refcount);
+	<span class="enscript-keyword">if</span> (p-&gt;p_parentref != 0)
+		panic(<span class="enscript-string">&quot;proc being freed and pending parentrefs %p:%d\n&quot;</span>, p, p-&gt;p_parentref);
+#<span class="enscript-reference">endif</span>
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_pid</span>(proc_t p)
+{
+	<span class="enscript-keyword">if</span> (p != NULL)
+		<span class="enscript-keyword">return</span> (p-&gt;p_pid);
+	<span class="enscript-keyword">return</span> -1;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_ppid</span>(proc_t p)
+{
+	<span class="enscript-keyword">if</span> (p != NULL)
+		<span class="enscript-keyword">return</span> (p-&gt;p_ppid);
+	<span class="enscript-keyword">return</span> -1;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_selfpid</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (current_proc()-&gt;p_pid);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_selfppid</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (current_proc()-&gt;p_ppid);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+<span class="enscript-type">static</span> proc_t
+<span class="enscript-function-name">dtrace_current_proc_vforking</span>(<span class="enscript-type">void</span>)
+{
+	thread_t th = current_thread();
+	<span class="enscript-type">struct</span> uthread *ut = get_bsdthread_info(th);
+
+	<span class="enscript-keyword">if</span> (ut &amp;&amp;
+	    ((ut-&gt;uu_flag &amp; (UT_VFORK|UT_VFORKING)) == (UT_VFORK|UT_VFORKING))) {
+		<span class="enscript-comment">/*
+		 * Handle the narrow window where we're in the vfork syscall,
+		 * but we're not quite ready to claim (in particular, to DTrace)
+		 * that we're running as the child.
+		 */</span>
+		<span class="enscript-keyword">return</span> (get_bsdtask_info(get_threadtask(th)));
+	}
+	<span class="enscript-keyword">return</span> (current_proc());
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">dtrace_proc_selfpid</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (dtrace_current_proc_vforking()-&gt;p_pid);
+}
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">dtrace_proc_selfppid</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (dtrace_current_proc_vforking()-&gt;p_ppid);
+}
+
+uid_t
+<span class="enscript-function-name">dtrace_proc_selfruid</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (dtrace_current_proc_vforking()-&gt;p_ruid);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_DTRACE */</span>
+
+proc_t 
+<span class="enscript-function-name">proc_parent</span>(proc_t p)
+{
+	proc_t parent;
+	proc_t pp;
+
+	proc_list_lock();
+<span class="enscript-reference">loop</span>:
+	pp = p-&gt;p_pptr;
+	parent =  proc_ref_locked(pp);
+	<span class="enscript-keyword">if</span> ((parent == PROC_NULL) &amp;&amp; (pp != PROC_NULL) &amp;&amp; (pp-&gt;p_stat != SZOMB) &amp;&amp; ((pp-&gt;p_listflag &amp; P_LIST_EXITED) != 0) &amp;&amp; ((pp-&gt;p_listflag &amp; P_LIST_CHILDDRAINED)== 0)){
+		pp-&gt;p_listflag |= P_LIST_CHILDLKWAIT;
+		msleep(&amp;pp-&gt;p_childrencnt, proc_list_mlock, 0, <span class="enscript-string">&quot;proc_parent&quot;</span>, 0);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop</span>;
+	}
+	proc_list_unlock();
+	<span class="enscript-keyword">return</span>(parent);
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">proc_parent_is_currentproc</span>(proc_t p)
+{
+	boolean_t ret = FALSE;
+	
+	proc_list_lock();
+	<span class="enscript-keyword">if</span> (p-&gt;p_pptr == current_proc())
+		ret = TRUE;
+
+	proc_list_unlock();
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_name</span>(<span class="enscript-type">int</span> pid, <span class="enscript-type">char</span> * buf, <span class="enscript-type">int</span> size)
+{
+	proc_t p;
+
+	<span class="enscript-keyword">if</span> ((p = proc_find(pid)) != PROC_NULL) {
+		strlcpy(buf, &amp;p-&gt;p_comm[0], size);
+		proc_rele(p);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_name_kdp</span>(task_t t, <span class="enscript-type">char</span> * buf, <span class="enscript-type">int</span> size)
+{
+	proc_t p = get_bsdtask_info(t);
+	<span class="enscript-keyword">if</span> (p == PROC_NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> ((size_t)size &gt; <span class="enscript-keyword">sizeof</span>(p-&gt;p_comm))
+		strlcpy(buf, &amp;p-&gt;p_name[0], MIN((<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(p-&gt;p_name), size));
+	<span class="enscript-keyword">else</span>
+		strlcpy(buf, &amp;p-&gt;p_comm[0], MIN((<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(p-&gt;p_comm), size));
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_threadname_kdp</span>(<span class="enscript-type">void</span> *uth, <span class="enscript-type">char</span> *buf, size_t size)
+{
+	<span class="enscript-keyword">if</span> (size &lt; MAXTHREADNAMESIZE) {
+		<span class="enscript-comment">/* this is really just a protective measure for the future in
+		 * case the thread name size in stackshot gets out of sync with
+		 * the BSD max thread name size. Note that bsd_getthreadname
+		 * doesn't take input buffer size into account. */</span>
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-keyword">if</span> (uth != NULL) {
+		bsd_getthreadname(uth, buf);
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* note that this function is generally going to be called from stackshot,
+ * and the arguments will be coming from a struct which is declared packed
+ * thus the input arguments will in general be unaligned. We have to handle
+ * that here. */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_starttime_kdp</span>(<span class="enscript-type">void</span> *p, uint64_t *tv_sec, uint64_t *tv_usec)
+{
+	proc_t pp = (proc_t)p;
+	<span class="enscript-type">struct</span> uint64p {
+		uint64_t val;
+	} __attribute__((packed));
+
+	<span class="enscript-keyword">if</span> (pp != PROC_NULL) {
+		<span class="enscript-keyword">if</span> (tv_sec != NULL)
+			((<span class="enscript-type">struct</span> uint64p *)tv_sec)-&gt;val = pp-&gt;p_start.tv_sec;
+		<span class="enscript-keyword">if</span> (tv_usec != NULL)
+			((<span class="enscript-type">struct</span> uint64p *)tv_usec)-&gt;val = pp-&gt;p_start.tv_usec;
+	}
+}
+
+<span class="enscript-type">char</span> *
+<span class="enscript-function-name">proc_name_address</span>(<span class="enscript-type">void</span> *p)
+{
+	<span class="enscript-keyword">return</span> &amp;((proc_t)p)-&gt;p_comm[0];
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_selfname</span>(<span class="enscript-type">char</span> * buf, <span class="enscript-type">int</span>  size)
+{
+	proc_t p;
+
+	<span class="enscript-keyword">if</span> ((p = current_proc())!= (proc_t)0) {
+		strlcpy(buf, &amp;p-&gt;p_comm[0], size);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_signal</span>(<span class="enscript-type">int</span> pid, <span class="enscript-type">int</span> signum)
+{
+	proc_t p;
+
+	<span class="enscript-keyword">if</span> ((p = proc_find(pid)) != PROC_NULL) {
+			psignal(p, signum);
+			proc_rele(p);
+	}	
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_issignal</span>(<span class="enscript-type">int</span> pid, sigset_t mask)
+{
+	proc_t p;
+	<span class="enscript-type">int</span> error=0;
+
+	<span class="enscript-keyword">if</span> ((p = proc_find(pid)) != PROC_NULL) {
+		error = proc_pendingsignals(p, mask);
+		proc_rele(p);
+	}	
+
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_noremotehang</span>(proc_t p)
+{
+	<span class="enscript-type">int</span> retval = 0;
+
+	<span class="enscript-keyword">if</span> (p)
+		retval = p-&gt;p_flag &amp; P_NOREMOTEHANG;
+	<span class="enscript-keyword">return</span>(retval? 1: 0);
+
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_exiting</span>(proc_t p)
+{
+	<span class="enscript-type">int</span> retval = 0;
+
+	<span class="enscript-keyword">if</span> (p)
+		retval = p-&gt;p_lflag &amp; P_LEXIT;
+	<span class="enscript-keyword">return</span>(retval? 1: 0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_forcequota</span>(proc_t p)
+{
+	<span class="enscript-type">int</span> retval = 0;
+
+	<span class="enscript-keyword">if</span> (p)
+		retval = p-&gt;p_flag &amp; P_FORCEQUOTA;
+	<span class="enscript-keyword">return</span>(retval? 1: 0);
+
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_suser</span>(proc_t p)
+{
+	kauth_cred_t my_cred;
+	<span class="enscript-type">int</span> error;
+
+	my_cred = kauth_cred_proc_ref(p);
+	error = suser(my_cred, &amp;p-&gt;p_acflag);
+	kauth_cred_unref(&amp;my_cred);
+	<span class="enscript-keyword">return</span>(error);
+}
+
+task_t
+<span class="enscript-function-name">proc_task</span>(proc_t proc)
+{
+	<span class="enscript-keyword">return</span> (task_t)proc-&gt;task;
+}
+
+<span class="enscript-comment">/*      
+ * Obtain the first thread in a process
+ *
+ * XXX This is a bad thing to do; it exists predominantly to support the
+ * XXX use of proc_t's in places that should really be using
+ * XXX thread_t's instead.  This maintains historical behaviour, but really
+ * XXX needs an audit of the context (proxy vs. not) to clean up.
+ */</span>
+thread_t
+<span class="enscript-function-name">proc_thread</span>(proc_t proc)                                                
+{           
+        uthread_t uth = TAILQ_FIRST(&amp;proc-&gt;p_uthlist);
+
+        <span class="enscript-keyword">if</span> (uth != NULL)
+                <span class="enscript-keyword">return</span>(uth-&gt;uu_context.vc_thread);
+
+	<span class="enscript-keyword">return</span>(NULL);
+}       
+
+kauth_cred_t
+<span class="enscript-function-name">proc_ucred</span>(proc_t p)
+{
+	<span class="enscript-keyword">return</span>(p-&gt;p_ucred);
+}
+
+<span class="enscript-type">struct</span> uthread *
+<span class="enscript-function-name">current_uthread</span>()
+{
+	thread_t th = current_thread();
+
+	<span class="enscript-keyword">return</span>((<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(th));
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_is64bit</span>(proc_t p)
+{
+	<span class="enscript-keyword">return</span>(IS_64BIT_PROCESS(p));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_pidversion</span>(proc_t p)
+{
+	<span class="enscript-keyword">return</span>(p-&gt;p_idversion);
+}
+
+uint64_t
+<span class="enscript-function-name">proc_uniqueid</span>(proc_t p)
+{
+	<span class="enscript-keyword">return</span>(p-&gt;p_uniqueid);
+}
+
+uint64_t
+<span class="enscript-function-name">proc_puniqueid</span>(proc_t p)
+{
+	<span class="enscript-keyword">return</span>(p-&gt;p_puniqueid);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_coalitionids</span>(__unused proc_t p, __unused uint64_t ids[COALITION_NUM_TYPES])
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_COALITIONS</span>
+	task_coalition_ids(p-&gt;task, ids);
+#<span class="enscript-reference">else</span>
+	memset(ids, 0, <span class="enscript-keyword">sizeof</span>(uint64_t [COALITION_NUM_TYPES]));
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span>;
+}
+
+uint64_t
+<span class="enscript-function-name">proc_was_throttled</span>(proc_t p)
+{
+	<span class="enscript-keyword">return</span> (p-&gt;was_throttled);
+}
+
+uint64_t
+<span class="enscript-function-name">proc_did_throttle</span>(proc_t p)
+{
+	<span class="enscript-keyword">return</span> (p-&gt;did_throttle);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_getcdhash</span>(proc_t p, <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *cdhash)
+{
+	<span class="enscript-keyword">return</span> vn_getcdhash(p-&gt;p_textvp, p-&gt;p_textoff, cdhash);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_getexecutableuuid</span>(proc_t p, <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *uuidbuf, <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> size)
+{
+	<span class="enscript-keyword">if</span> (size &gt;= <span class="enscript-keyword">sizeof</span>(p-&gt;p_uuid)) {
+		memcpy(uuidbuf, p-&gt;p_uuid, <span class="enscript-keyword">sizeof</span>(p-&gt;p_uuid));
+	}
+}
+
+<span class="enscript-comment">/* Return vnode for executable with an iocount. Must be released with vnode_put() */</span>
+vnode_t
+<span class="enscript-function-name">proc_getexecutablevnode</span>(proc_t p)
+{
+	vnode_t tvp  = p-&gt;p_textvp;
+
+	<span class="enscript-keyword">if</span> ( tvp != NULLVP) {
+		<span class="enscript-keyword">if</span> (vnode_getwithref(tvp) == 0) {
+			<span class="enscript-keyword">return</span> tvp;
+		}
+	}       
+
+	<span class="enscript-keyword">return</span> NULLVP;
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bsd_set_dependency_capable</span>(task_t task)
+{
+    proc_t p = get_bsdtask_info(task);
+
+    <span class="enscript-keyword">if</span> (p) {
+	OSBitOrAtomic(P_DEPENDENCY_CAPABLE, &amp;p-&gt;p_flag);
+    }
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">IS_64BIT_PROCESS</span>(proc_t p)
+{
+	<span class="enscript-keyword">if</span> (p &amp;&amp; (p-&gt;p_flag &amp; P_LP64))
+		<span class="enscript-keyword">return</span>(1);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/*
+ * Locate a process by number
+ */</span>
+proc_t
+<span class="enscript-function-name">pfind_locked</span>(pid_t pid)
+{
+	proc_t p;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	proc_t q;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (!pid)
+		<span class="enscript-keyword">return</span> (kernproc);
+
+	<span class="enscript-keyword">for</span> (p = PIDHASH(pid)-&gt;lh_first; p != 0; p = p-&gt;p_hash.le_next) {
+		<span class="enscript-keyword">if</span> (p-&gt;p_pid == pid) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+			<span class="enscript-keyword">for</span> (q = p-&gt;p_hash.le_next; q != 0; q = q-&gt;p_hash.le_next) {
+				<span class="enscript-keyword">if</span> ((p !=q) &amp;&amp; (q-&gt;p_pid == pid))	
+					panic(<span class="enscript-string">&quot;two procs with same pid %p:%p:%d:%d\n&quot;</span>, p, q, p-&gt;p_pid, q-&gt;p_pid);
+			}
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-keyword">return</span> (p);
+		}
+	}
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-comment">/*
+ * Locate a zombie by PID
+ */</span>
+__private_extern__ proc_t
+<span class="enscript-function-name">pzfind</span>(pid_t pid)
+{
+	proc_t p;
+
+
+	proc_list_lock();
+
+	<span class="enscript-keyword">for</span> (p = zombproc.lh_first; p != 0; p = p-&gt;p_list.le_next)
+		<span class="enscript-keyword">if</span> (p-&gt;p_pid == pid)
+			<span class="enscript-keyword">break</span>;
+
+	proc_list_unlock();
+
+	<span class="enscript-keyword">return</span> (p);
+}
+
+<span class="enscript-comment">/*
+ * Locate a process group by number
+ */</span>
+
+<span class="enscript-type">struct</span> pgrp *
+<span class="enscript-function-name">pgfind</span>(pid_t pgid)
+{
+	<span class="enscript-type">struct</span> pgrp * pgrp;
+
+	proc_list_lock();
+	pgrp = pgfind_internal(pgid);
+	<span class="enscript-keyword">if</span> ((pgrp == NULL) || ((pgrp-&gt;pg_listflags &amp; PGRP_FLAG_TERMINATE) != 0))
+		pgrp = PGRP_NULL;
+	<span class="enscript-keyword">else</span>
+		pgrp-&gt;pg_refcount++;
+	proc_list_unlock();
+	<span class="enscript-keyword">return</span>(pgrp);
+}
+
+
+
+<span class="enscript-type">struct</span> pgrp *
+<span class="enscript-function-name">pgfind_internal</span>(pid_t pgid)
+{
+	<span class="enscript-type">struct</span> pgrp *pgrp;
+
+	<span class="enscript-keyword">for</span> (pgrp = PGRPHASH(pgid)-&gt;lh_first; pgrp != 0; pgrp = pgrp-&gt;pg_hash.le_next)
+		<span class="enscript-keyword">if</span> (pgrp-&gt;pg_id == pgid)
+			<span class="enscript-keyword">return</span> (pgrp);
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pg_rele</span>(<span class="enscript-type">struct</span> pgrp * pgrp)
+{
+	<span class="enscript-keyword">if</span>(pgrp == PGRP_NULL)
+		<span class="enscript-keyword">return</span>;
+	pg_rele_dropref(pgrp);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pg_rele_dropref</span>(<span class="enscript-type">struct</span> pgrp * pgrp)
+{
+	proc_list_lock();
+	<span class="enscript-keyword">if</span> ((pgrp-&gt;pg_refcount == 1) &amp;&amp; ((pgrp-&gt;pg_listflags &amp; PGRP_FLAG_TERMINATE) == PGRP_FLAG_TERMINATE)) {
+		proc_list_unlock();
+		pgdelete_dropref(pgrp);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	pgrp-&gt;pg_refcount--;
+	proc_list_unlock();
+}
+
+<span class="enscript-type">struct</span> session *
+<span class="enscript-function-name">session_find_internal</span>(pid_t sessid)
+{
+	<span class="enscript-type">struct</span> session *sess;
+
+	<span class="enscript-keyword">for</span> (sess = SESSHASH(sessid)-&gt;lh_first; sess != 0; sess = sess-&gt;s_hash.le_next)
+		<span class="enscript-keyword">if</span> (sess-&gt;s_sid == sessid)
+			<span class="enscript-keyword">return</span> (sess);
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+
+<span class="enscript-comment">/*
+ * Make a new process ready to become a useful member of society by making it
+ * visible in all the right places and initialize its own lists to empty.
+ *
+ * Parameters:	parent			The parent of the process to insert
+ *		child			The child process to insert
+ *
+ * Returns:	(void)
+ *
+ * Notes:	Insert a child process into the parents process group, assign
+ *		the child the parent process pointer and PPID of the parent,
+ *		place it on the parents p_children list as a sibling,
+ *		initialize its own child list, place it in the allproc list,
+ *		insert it in the proper hash bucket, and initialize its
+ *		event list.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pinsertchild</span>(proc_t parent, proc_t child)
+{
+	<span class="enscript-type">struct</span> pgrp * pg;
+
+	LIST_INIT(&amp;child-&gt;p_children);
+	TAILQ_INIT(&amp;child-&gt;p_evlist);
+	child-&gt;p_pptr = parent;
+	child-&gt;p_ppid = parent-&gt;p_pid;
+	child-&gt;p_puniqueid = parent-&gt;p_uniqueid;
+
+	pg = proc_pgrp(parent);
+	pgrp_add(pg, parent, child);
+	pg_rele(pg);
+
+	proc_list_lock();
+	
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span>
+	memorystatus_add(child, TRUE);
+#<span class="enscript-reference">endif</span>
+	
+	parent-&gt;p_childrencnt++;
+	LIST_INSERT_HEAD(&amp;parent-&gt;p_children, child, p_sibling);
+
+	LIST_INSERT_HEAD(&amp;allproc, child, p_list);
+	<span class="enscript-comment">/* mark the completion of proc creation */</span>
+	child-&gt;p_listflag &amp;= ~P_LIST_INCREATE;
+
+	proc_list_unlock();
+}
+
+<span class="enscript-comment">/*
+ * Move p to a new or existing process group (and session)
+ *
+ * Returns:	0			Success
+ *		ESRCH			No such process
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">enterpgrp</span>(proc_t p, pid_t pgid, <span class="enscript-type">int</span> mksess)
+{
+	<span class="enscript-type">struct</span> pgrp *pgrp;
+	<span class="enscript-type">struct</span> pgrp *mypgrp;
+	<span class="enscript-type">struct</span> session * procsp;
+
+	pgrp = pgfind(pgid);
+	mypgrp = proc_pgrp(p);
+	procsp = proc_session(p);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-keyword">if</span> (pgrp != NULL &amp;&amp; mksess)	<span class="enscript-comment">/* firewalls */</span>
+		panic(<span class="enscript-string">&quot;enterpgrp: setsid into non-empty pgrp&quot;</span>);
+	<span class="enscript-keyword">if</span> (SESS_LEADER(p, procsp))
+		panic(<span class="enscript-string">&quot;enterpgrp: session leader attempted setpgrp&quot;</span>);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (pgrp == PGRP_NULL) {
+		pid_t savepid = p-&gt;p_pid;
+		proc_t np = PROC_NULL;
+		<span class="enscript-comment">/*
+		 * new process group
+		 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+		<span class="enscript-keyword">if</span> (p-&gt;p_pid != pgid)
+			panic(<span class="enscript-string">&quot;enterpgrp: new pgrp and pid != pgid&quot;</span>);
+#<span class="enscript-reference">endif</span>
+		MALLOC_ZONE(pgrp, <span class="enscript-type">struct</span> pgrp *, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pgrp), M_PGRP,
+		    M_WAITOK);
+		<span class="enscript-keyword">if</span> (pgrp == NULL)
+			panic(<span class="enscript-string">&quot;enterpgrp: M_PGRP zone depleted&quot;</span>);
+		<span class="enscript-keyword">if</span> ((np = proc_find(savepid)) == NULL || np != p) {
+			<span class="enscript-keyword">if</span> (np != PROC_NULL)
+				proc_rele(np);
+			<span class="enscript-keyword">if</span> (mypgrp != PGRP_NULL)
+				pg_rele(mypgrp);
+			<span class="enscript-keyword">if</span> (procsp != SESSION_NULL)
+				session_rele(procsp);
+			FREE_ZONE(pgrp, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pgrp), M_PGRP);
+			<span class="enscript-keyword">return</span> (ESRCH);
+		}
+		proc_rele(np);
+		<span class="enscript-keyword">if</span> (mksess) {
+			<span class="enscript-type">struct</span> session *sess;
+
+			<span class="enscript-comment">/*
+			 * new session
+			 */</span>
+			MALLOC_ZONE(sess, <span class="enscript-type">struct</span> session *,
+				<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> session), M_SESSION, M_WAITOK);
+			<span class="enscript-keyword">if</span> (sess == NULL)
+				panic(<span class="enscript-string">&quot;enterpgrp: M_SESSION zone depleted&quot;</span>);
+			sess-&gt;s_leader = p;
+			sess-&gt;s_sid = p-&gt;p_pid;
+			sess-&gt;s_count = 1;
+			sess-&gt;s_ttyvp = NULL;
+			sess-&gt;s_ttyp = TTY_NULL;
+			sess-&gt;s_flags = 0;
+			sess-&gt;s_listflags = 0;
+			sess-&gt;s_ttypgrpid = NO_PID;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_FINE_LOCK_GROUPS</span>
+			lck_mtx_init(&amp;sess-&gt;s_mlock, proc_mlock_grp, proc_lck_attr);
+#<span class="enscript-reference">else</span>
+			lck_mtx_init(&amp;sess-&gt;s_mlock, proc_lck_grp, proc_lck_attr);
+#<span class="enscript-reference">endif</span>
+			bcopy(procsp-&gt;s_login, sess-&gt;s_login,
+			    <span class="enscript-keyword">sizeof</span>(sess-&gt;s_login));
+			OSBitAndAtomic(~((uint32_t)P_CONTROLT), &amp;p-&gt;p_flag);
+			proc_list_lock();
+			LIST_INSERT_HEAD(SESSHASH(sess-&gt;s_sid), sess, s_hash);
+			proc_list_unlock();
+			pgrp-&gt;pg_session = sess;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+			<span class="enscript-keyword">if</span> (p != current_proc())
+				panic(<span class="enscript-string">&quot;enterpgrp: mksession and p != curproc&quot;</span>);
+#<span class="enscript-reference">endif</span>
+		} <span class="enscript-keyword">else</span> {
+			proc_list_lock();
+			pgrp-&gt;pg_session = procsp;
+			
+			<span class="enscript-keyword">if</span> ((pgrp-&gt;pg_session-&gt;s_listflags &amp; (S_LIST_TERM | S_LIST_DEAD)) != 0)
+				panic(<span class="enscript-string">&quot;enterpgrp:  providing ref to terminating session &quot;</span>);	
+			pgrp-&gt;pg_session-&gt;s_count++;
+			proc_list_unlock();
+		}
+		pgrp-&gt;pg_id = pgid;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_FINE_LOCK_GROUPS</span>
+		lck_mtx_init(&amp;pgrp-&gt;pg_mlock, proc_mlock_grp, proc_lck_attr);
+#<span class="enscript-reference">else</span>
+		lck_mtx_init(&amp;pgrp-&gt;pg_mlock, proc_lck_grp, proc_lck_attr);
+#<span class="enscript-reference">endif</span>
+		LIST_INIT(&amp;pgrp-&gt;pg_members);
+		pgrp-&gt;pg_membercnt = 0;
+		pgrp-&gt;pg_jobc = 0;
+		proc_list_lock();
+		pgrp-&gt;pg_refcount = 1;
+		pgrp-&gt;pg_listflags = 0;
+		LIST_INSERT_HEAD(PGRPHASH(pgid), pgrp, pg_hash);
+		proc_list_unlock();
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (pgrp == mypgrp) {
+		pg_rele(pgrp);
+		<span class="enscript-keyword">if</span> (mypgrp != NULL)
+			pg_rele(mypgrp);
+		<span class="enscript-keyword">if</span> (procsp != SESSION_NULL)
+			session_rele(procsp);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">if</span> (procsp != SESSION_NULL)
+		session_rele(procsp);
+	<span class="enscript-comment">/*
+	 * Adjust eligibility of affected pgrps to participate in job control.
+	 * Increment eligibility counts before decrementing, otherwise we
+	 * could reach 0 spuriously during the first call.
+	 */</span>
+	fixjobc(p, pgrp, 1);
+	fixjobc(p, mypgrp, 0);
+
+	<span class="enscript-keyword">if</span>(mypgrp != PGRP_NULL)
+		pg_rele(mypgrp);
+	pgrp_replace(p, pgrp);
+	pg_rele(pgrp);
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/*
+ * remove process from process group
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">leavepgrp</span>(proc_t p)
+{
+
+	pgrp_remove(p);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * delete a process group
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pgdelete_dropref</span>(<span class="enscript-type">struct</span> pgrp *pgrp)
+{
+	<span class="enscript-type">struct</span> tty *ttyp;
+	<span class="enscript-type">int</span> emptypgrp  = 1;
+	<span class="enscript-type">struct</span> session *sessp;
+
+
+	pgrp_lock(pgrp);
+	<span class="enscript-keyword">if</span> (pgrp-&gt;pg_membercnt != 0) {
+		emptypgrp = 0;
+	}
+	pgrp_unlock(pgrp);
+
+	proc_list_lock();
+	pgrp-&gt;pg_refcount--;
+	<span class="enscript-keyword">if</span> ((emptypgrp == 0) || (pgrp-&gt;pg_membercnt != 0)) {
+		proc_list_unlock();
+		<span class="enscript-keyword">return</span>;
+	}
+
+	pgrp-&gt;pg_listflags |= PGRP_FLAG_TERMINATE;
+	
+	<span class="enscript-keyword">if</span> (pgrp-&gt;pg_refcount &gt; 0) {
+		proc_list_unlock();
+		<span class="enscript-keyword">return</span>;
+	}
+
+	pgrp-&gt;pg_listflags |= PGRP_FLAG_DEAD;
+	LIST_REMOVE(pgrp, pg_hash);
+
+	proc_list_unlock();
+	
+	ttyp = SESSION_TP(pgrp-&gt;pg_session);
+	<span class="enscript-keyword">if</span> (ttyp != TTY_NULL) {
+		<span class="enscript-keyword">if</span> (ttyp-&gt;t_pgrp == pgrp) {
+			tty_lock(ttyp);
+			<span class="enscript-comment">/* Re-check after acquiring the lock */</span>
+			<span class="enscript-keyword">if</span> (ttyp-&gt;t_pgrp == pgrp) {
+				ttyp-&gt;t_pgrp = NULL;
+				pgrp-&gt;pg_session-&gt;s_ttypgrpid = NO_PID;
+			}
+			tty_unlock(ttyp);
+		}
+	}
+
+	proc_list_lock();
+
+	sessp = pgrp-&gt;pg_session;
+	<span class="enscript-keyword">if</span> ((sessp-&gt;s_listflags &amp; (S_LIST_TERM | S_LIST_DEAD)) != 0)
+			panic(<span class="enscript-string">&quot;pg_deleteref: manipulating refs of already terminating session&quot;</span>);
+	<span class="enscript-keyword">if</span> (--sessp-&gt;s_count == 0) {
+		<span class="enscript-keyword">if</span> ((sessp-&gt;s_listflags &amp; (S_LIST_TERM | S_LIST_DEAD)) != 0)
+			panic(<span class="enscript-string">&quot;pg_deleteref: terminating already terminated session&quot;</span>);
+		sessp-&gt;s_listflags |= S_LIST_TERM;
+		ttyp = SESSION_TP(sessp);
+		LIST_REMOVE(sessp, s_hash);
+		proc_list_unlock();
+		<span class="enscript-keyword">if</span> (ttyp != TTY_NULL) {
+			tty_lock(ttyp);
+			<span class="enscript-keyword">if</span> (ttyp-&gt;t_session == sessp)
+				ttyp-&gt;t_session = NULL;
+			tty_unlock(ttyp);
+		}
+		proc_list_lock();
+		sessp-&gt;s_listflags |= S_LIST_DEAD;
+		<span class="enscript-keyword">if</span> (sessp-&gt;s_count != 0)
+			panic(<span class="enscript-string">&quot;pg_deleteref: freeing session in use&quot;</span>);	
+		proc_list_unlock();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_FINE_LOCK_GROUPS</span>
+		lck_mtx_destroy(&amp;sessp-&gt;s_mlock, proc_mlock_grp);
+#<span class="enscript-reference">else</span>
+		lck_mtx_destroy(&amp;sessp-&gt;s_mlock, proc_lck_grp);
+#<span class="enscript-reference">endif</span>
+		FREE_ZONE(sessp, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> session), M_SESSION);
+	} <span class="enscript-keyword">else</span>
+		proc_list_unlock();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_FINE_LOCK_GROUPS</span>
+	lck_mtx_destroy(&amp;pgrp-&gt;pg_mlock, proc_mlock_grp);
+#<span class="enscript-reference">else</span>
+	lck_mtx_destroy(&amp;pgrp-&gt;pg_mlock, proc_lck_grp);
+#<span class="enscript-reference">endif</span>
+	FREE_ZONE(pgrp, <span class="enscript-keyword">sizeof</span>(*pgrp), M_PGRP);
+}
+
+
+<span class="enscript-comment">/*
+ * Adjust pgrp jobc counters when specified process changes process group.
+ * We count the number of processes in each process group that &quot;qualify&quot;
+ * the group for terminal job control (those with a parent in a different
+ * process group of the same session).  If that count reaches zero, the
+ * process group becomes orphaned.  Check both the specified process'
+ * process group and that of its children.
+ * entering == 0 =&gt; p is leaving specified group.
+ * entering == 1 =&gt; p is entering specified group.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fixjob_callback</span>(proc_t p, <span class="enscript-type">void</span> * arg)
+{
+	<span class="enscript-type">struct</span> fixjob_iterargs *fp;
+	<span class="enscript-type">struct</span> pgrp * pg, *hispg;
+	<span class="enscript-type">struct</span> session * mysession, *hissess;
+	<span class="enscript-type">int</span> entering;
+
+	fp = (<span class="enscript-type">struct</span> fixjob_iterargs *)arg;
+	pg = fp-&gt;pg;
+	mysession = fp-&gt;mysession;
+	entering = fp-&gt;entering;
+
+	hispg = proc_pgrp(p);
+	hissess = proc_session(p);
+
+	<span class="enscript-keyword">if</span> ((hispg  != pg) &amp;&amp;
+	    (hissess == mysession)) {
+		pgrp_lock(hispg);
+		<span class="enscript-keyword">if</span> (entering) {
+			hispg-&gt;pg_jobc++;
+			pgrp_unlock(hispg);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (--hispg-&gt;pg_jobc == 0) {
+			pgrp_unlock(hispg);
+			orphanpg(hispg);
+		} <span class="enscript-keyword">else</span>
+			pgrp_unlock(hispg);
+	}
+	<span class="enscript-keyword">if</span> (hissess != SESSION_NULL)
+		session_rele(hissess);
+	<span class="enscript-keyword">if</span> (hispg != PGRP_NULL)
+		pg_rele(hispg);
+
+	<span class="enscript-keyword">return</span>(PROC_RETURNED);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fixjobc</span>(proc_t p, <span class="enscript-type">struct</span> pgrp *pgrp, <span class="enscript-type">int</span> entering)
+{
+	<span class="enscript-type">struct</span> pgrp *hispgrp = PGRP_NULL;
+	<span class="enscript-type">struct</span> session *hissess = SESSION_NULL;
+	<span class="enscript-type">struct</span> session *mysession = pgrp-&gt;pg_session;
+	proc_t parent;
+	<span class="enscript-type">struct</span> fixjob_iterargs fjarg;
+	boolean_t proc_parent_self;
+
+	<span class="enscript-comment">/*
+	 * Check if p's parent is current proc, if yes then no need to take 
+	 * a ref; calling proc_parent with current proc as parent may 
+	 * deadlock if current proc is exiting.
+	 */</span>
+	proc_parent_self = proc_parent_is_currentproc(p);
+	<span class="enscript-keyword">if</span> (proc_parent_self)
+		parent = current_proc();
+	<span class="enscript-keyword">else</span> 
+		parent = proc_parent(p);
+
+	<span class="enscript-keyword">if</span> (parent != PROC_NULL) {
+		hispgrp = proc_pgrp(parent);	
+		hissess = proc_session(parent);
+		<span class="enscript-keyword">if</span> (!proc_parent_self)
+			proc_rele(parent);
+	}
+
+
+	<span class="enscript-comment">/*
+	 * Check p's parent to see whether p qualifies its own process
+	 * group; if so, adjust count for p's process group.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((hispgrp != pgrp) &amp;&amp;
+	    (hissess == mysession)) {
+		pgrp_lock(pgrp);
+		<span class="enscript-keyword">if</span> (entering) {
+			pgrp-&gt;pg_jobc++;
+			pgrp_unlock(pgrp);
+		 }<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (--pgrp-&gt;pg_jobc == 0) {
+			pgrp_unlock(pgrp);
+			orphanpg(pgrp);
+		} <span class="enscript-keyword">else</span>
+			pgrp_unlock(pgrp);
+	}
+
+	<span class="enscript-keyword">if</span> (hissess != SESSION_NULL)
+		session_rele(hissess);
+	<span class="enscript-keyword">if</span> (hispgrp != PGRP_NULL)
+		pg_rele(hispgrp);
+
+	<span class="enscript-comment">/*
+	 * Check this process' children to see whether they qualify
+	 * their process groups; if so, adjust counts for children's
+	 * process groups.
+	 */</span>
+	fjarg.pg = pgrp;
+	fjarg.mysession = mysession;
+	fjarg.entering = entering;
+	proc_childrenwalk(p, fixjob_callback, &amp;fjarg);
+}
+
+<span class="enscript-comment">/* 
+ * A process group has become orphaned;
+ * if there are any stopped processes in the group,
+ * hang-up all process in that group.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">orphanpg</span>(<span class="enscript-type">struct</span> pgrp * pgrp)
+{
+	proc_t p;
+	pid_t * pid_list;
+	<span class="enscript-type">int</span> count, pidcount, i, alloc_count;
+
+	<span class="enscript-keyword">if</span> (pgrp == PGRP_NULL)
+		<span class="enscript-keyword">return</span>;
+	count = 0;
+	pgrp_lock(pgrp);
+	<span class="enscript-keyword">for</span> (p = pgrp-&gt;pg_members.lh_first; p != 0; p = p-&gt;p_pglist.le_next) {
+		<span class="enscript-keyword">if</span> (p-&gt;p_stat == SSTOP) {
+			<span class="enscript-keyword">for</span> (p = pgrp-&gt;pg_members.lh_first; p != 0;
+				p = p-&gt;p_pglist.le_next) 
+				count++;
+			<span class="enscript-keyword">break</span>;	<span class="enscript-comment">/* ??? stops after finding one.. */</span>
+		}
+	}
+	pgrp_unlock(pgrp);
+
+	count += 20;
+	<span class="enscript-keyword">if</span> (count &gt; hard_maxproc)
+		count = hard_maxproc;
+	alloc_count = count * <span class="enscript-keyword">sizeof</span>(pid_t);
+	pid_list = (pid_t *)kalloc(alloc_count);
+	bzero(pid_list, alloc_count);
+	
+	pidcount = 0;
+	pgrp_lock(pgrp);
+	<span class="enscript-keyword">for</span> (p = pgrp-&gt;pg_members.lh_first; p != 0;
+	     p = p-&gt;p_pglist.le_next) {
+		<span class="enscript-keyword">if</span> (p-&gt;p_stat == SSTOP) {
+			<span class="enscript-keyword">for</span> (p = pgrp-&gt;pg_members.lh_first; p != 0;
+				p = p-&gt;p_pglist.le_next) {
+				pid_list[pidcount] = p-&gt;p_pid;
+				pidcount++;
+				<span class="enscript-keyword">if</span> (pidcount &gt;= count)
+					<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">break</span>; <span class="enscript-comment">/* ??? stops after finding one.. */</span>
+		}
+	}
+	pgrp_unlock(pgrp);
+		
+	<span class="enscript-keyword">if</span> (pidcount == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+
+	<span class="enscript-keyword">for</span> (i = 0; i&lt; pidcount; i++) {
+		<span class="enscript-comment">/* No handling or proc0 */</span>
+		<span class="enscript-keyword">if</span> (pid_list[i] == 0)
+			<span class="enscript-keyword">continue</span>;
+		p = proc_find(pid_list[i]);
+		<span class="enscript-keyword">if</span> (p) {
+			proc_transwait(p, 0);
+			pt_setrunnable(p);
+			psignal(p, SIGHUP);
+			psignal(p, SIGCONT);
+			proc_rele(p);
+		}
+	}
+<span class="enscript-reference">out</span>:
+	kfree(pid_list, alloc_count);
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_is_classic</span>(proc_t p __unused)
+{
+    <span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* XXX Why does this function exist?  Need to kill it off... */</span>
+proc_t
+<span class="enscript-function-name">current_proc_EXTERNAL</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (current_proc());
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_is_forcing_hfs_case_sensitivity</span>(proc_t p)
+{
+	<span class="enscript-keyword">return</span> (p-&gt;p_vfs_iopolicy &amp; P_VFS_IOPOLICY_FORCE_HFS_CASE_SENSITIVITY) ? 1 : 0;
+}
+
+<span class="enscript-comment">/*
+ * proc_core_name(name, uid, pid)
+ * Expand the name described in corefilename, using name, uid, and pid.
+ * corefilename is a printf-like string, with three format specifiers:
+ *	%N	name of process (&quot;name&quot;)
+ *	%P	process id (pid)
+ *	%U	user id (uid)
+ * For example, &quot;%N.core&quot; is the default; they can be disabled completely
+ * by using &quot;/dev/null&quot;, or all core files can be stored in &quot;/cores/%U/%N-%P&quot;.
+ * This is controlled by the sysctl variable kern.corefile (see above).
+ */</span>
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_core_name</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, uid_t uid, pid_t pid, <span class="enscript-type">char</span> *cf_name,
+		size_t cf_name_len)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *format, *appendstr;
+	<span class="enscript-type">char</span> id_buf[11];		<span class="enscript-comment">/* Buffer for pid/uid -- max 4B */</span>
+	size_t i, l, n;
+
+	<span class="enscript-keyword">if</span> (cf_name == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">toolong</span>;
+
+	format = corefilename;
+	<span class="enscript-keyword">for</span> (i = 0, n = 0; n &lt; cf_name_len &amp;&amp; format[i]; i++) {
+		<span class="enscript-keyword">switch</span> (format[i]) {
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'%'</span>:	<span class="enscript-comment">/* Format character */</span>
+			i++;
+			<span class="enscript-keyword">switch</span> (format[i]) {
+			<span class="enscript-keyword">case</span> <span class="enscript-string">'%'</span>:
+				appendstr = <span class="enscript-string">&quot;%&quot;</span>;
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-string">'N'</span>:	<span class="enscript-comment">/* process name */</span>
+				appendstr = name;
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-string">'P'</span>:	<span class="enscript-comment">/* process id */</span>
+				snprintf(id_buf, <span class="enscript-keyword">sizeof</span>(id_buf), <span class="enscript-string">&quot;%u&quot;</span>, pid);
+				appendstr = id_buf;
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-string">'U'</span>:	<span class="enscript-comment">/* user id */</span>
+				snprintf(id_buf, <span class="enscript-keyword">sizeof</span>(id_buf), <span class="enscript-string">&quot;%u&quot;</span>, uid);
+				appendstr = id_buf;
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-reference">default</span>:
+				appendstr = <span class="enscript-string">&quot;&quot;</span>;
+			  	log(LOG_ERR,
+				    <span class="enscript-string">&quot;Unknown format character %c in `%s'\n&quot;</span>,
+				    format[i], format);
+			}
+			l = strlen(appendstr);
+			<span class="enscript-keyword">if</span> ((n + l) &gt;= cf_name_len)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">toolong</span>;
+			bcopy(appendstr, cf_name + n, l);
+			n += l;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			cf_name[n++] = format[i];
+		}
+	}
+	<span class="enscript-keyword">if</span> (format[i] != <span class="enscript-string">'\0'</span>)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">toolong</span>;
+	<span class="enscript-keyword">return</span> (0);
+<span class="enscript-reference">toolong</span>:
+	log(LOG_ERR, <span class="enscript-string">&quot;pid %ld (%s), uid (%u): corename is too long\n&quot;</span>,
+	    (<span class="enscript-type">long</span>)pid, name, (uint32_t)uid);
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/* Code Signing related routines */</span>
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">csops</span>(__unused proc_t p, <span class="enscript-type">struct</span> csops_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-keyword">return</span>(csops_internal(uap-&gt;pid, uap-&gt;ops, uap-&gt;useraddr, 
+		uap-&gt;usersize, USER_ADDR_NULL));
+}
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">csops_audittoken</span>(__unused proc_t p, <span class="enscript-type">struct</span> csops_audittoken_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-keyword">if</span> (uap-&gt;uaudittoken == USER_ADDR_NULL)
+		<span class="enscript-keyword">return</span>(EINVAL);
+	<span class="enscript-keyword">return</span>(csops_internal(uap-&gt;pid, uap-&gt;ops, uap-&gt;useraddr, 
+		uap-&gt;usersize, uap-&gt;uaudittoken));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">csops_copy_token</span>(<span class="enscript-type">void</span> *start, size_t length, user_size_t usize, user_addr_t uaddr)
+{
+	<span class="enscript-type">char</span> fakeheader[8] = { 0 };
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (usize &lt; <span class="enscript-keyword">sizeof</span>(fakeheader))
+		<span class="enscript-keyword">return</span> ERANGE;
+
+	<span class="enscript-comment">/* if no blob, fill in zero header */</span>
+	<span class="enscript-keyword">if</span> (NULL == start) {
+		start = fakeheader;
+		length = <span class="enscript-keyword">sizeof</span>(fakeheader);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (usize &lt; length) {
+		<span class="enscript-comment">/* ... if input too short, copy out length of entitlement */</span>
+		uint32_t length32 = htonl((uint32_t)length);
+		memcpy(&amp;fakeheader[4], &amp;length32, <span class="enscript-keyword">sizeof</span>(length32));
+		
+		error = copyout(fakeheader, uaddr, <span class="enscript-keyword">sizeof</span>(fakeheader));
+		<span class="enscript-keyword">if</span> (error == 0)
+			<span class="enscript-keyword">return</span> ERANGE; <span class="enscript-comment">/* input buffer to short, ERANGE signals that */</span>
+		<span class="enscript-keyword">return</span> error;
+	}
+	<span class="enscript-keyword">return</span> copyout(start, uaddr, length);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">csops_internal</span>(pid_t pid, <span class="enscript-type">int</span> ops, user_addr_t uaddr, user_size_t usersize, user_addr_t uaudittoken)
+{
+	size_t usize = (size_t)CAST_DOWN(size_t, usersize);
+	proc_t pt;
+	<span class="enscript-type">int</span> forself;
+	<span class="enscript-type">int</span> error;
+	vnode_t tvp;
+	off_t toff;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> cdhash[SHA1_RESULTLEN];
+	audit_token_t token;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> upid=0, uidversion = 0;
+	
+	forself = error = 0;
+
+	<span class="enscript-keyword">if</span> (pid == 0) 
+		pid = proc_selfpid();
+	<span class="enscript-keyword">if</span> (pid == proc_selfpid())
+		forself = 1;
+
+
+	<span class="enscript-keyword">switch</span> (ops) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_STATUS</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_CDHASH</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_PIDOFFSET</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_ENTITLEMENTS_BLOB</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_IDENTITY</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_BLOB</span>:
+			<span class="enscript-keyword">break</span>;	<span class="enscript-comment">/* unrestricted */</span>
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">if</span> (forself == 0 &amp;&amp; kauth_cred_issuser(kauth_cred_get()) != TRUE)
+				<span class="enscript-keyword">return</span>(EPERM);
+			<span class="enscript-keyword">break</span>;
+	}
+
+	pt = proc_find(pid);
+	<span class="enscript-keyword">if</span> (pt == PROC_NULL)
+		<span class="enscript-keyword">return</span>(ESRCH);
+
+	upid = pt-&gt;p_pid;
+	uidversion = pt-&gt;p_idversion;
+	<span class="enscript-keyword">if</span> (uaudittoken != USER_ADDR_NULL) {
+		
+		error = copyin(uaudittoken, &amp;token, <span class="enscript-keyword">sizeof</span>(audit_token_t));
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		<span class="enscript-comment">/* verify the audit token pid/idversion matches with proc */</span>
+		<span class="enscript-keyword">if</span> ((token.val[5] != upid) || (token.val[7] != uidversion)) {
+			error = ESRCH;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+
+	<span class="enscript-keyword">switch</span> (ops) {
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_STATUS</span>: {
+			uint32_t retflags;
+
+			proc_lock(pt);
+			retflags = pt-&gt;p_csflags;
+			<span class="enscript-keyword">if</span> (cs_enforcement(pt))
+				retflags |= CS_ENFORCEMENT;
+			<span class="enscript-keyword">if</span> (csproc_get_platform_binary(pt))
+				retflags |= CS_PLATFORM_BINARY;
+			proc_unlock(pt);
+
+			<span class="enscript-keyword">if</span> (uaddr != USER_ADDR_NULL)
+				error = copyout(&amp;retflags, uaddr, <span class="enscript-keyword">sizeof</span>(uint32_t));
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_MARKINVALID</span>:
+			proc_lock(pt);
+			<span class="enscript-keyword">if</span> ((pt-&gt;p_csflags &amp; CS_VALID) == CS_VALID) {	<span class="enscript-comment">/* is currently valid */</span>
+				pt-&gt;p_csflags &amp;= ~CS_VALID;	<span class="enscript-comment">/* set invalid */</span>
+				<span class="enscript-keyword">if</span> ((pt-&gt;p_csflags &amp; CS_KILL) == CS_KILL) {
+					pt-&gt;p_csflags |= CS_KILLED;
+					proc_unlock(pt);
+					<span class="enscript-keyword">if</span> (cs_debug) {
+						printf(<span class="enscript-string">&quot;CODE SIGNING: marked invalid by pid %d: &quot;</span>
+			       			<span class="enscript-string">&quot;p=%d[%s] honoring CS_KILL, final status 0x%x\n&quot;</span>,
+			       			proc_selfpid(), pt-&gt;p_pid, pt-&gt;p_comm, pt-&gt;p_csflags);
+					}
+					psignal(pt, SIGKILL);
+				} <span class="enscript-keyword">else</span>
+					proc_unlock(pt);
+			} <span class="enscript-keyword">else</span>
+				proc_unlock(pt);
+				
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_MARKHARD</span>:
+			proc_lock(pt);
+			pt-&gt;p_csflags |= CS_HARD;
+			<span class="enscript-keyword">if</span> ((pt-&gt;p_csflags &amp; CS_VALID) == 0) {
+				<span class="enscript-comment">/* @@@ allow? reject? kill? @@@ */</span>
+				proc_unlock(pt);
+				error = EINVAL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			} <span class="enscript-keyword">else</span>
+				proc_unlock(pt);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_MARKKILL</span>:
+			proc_lock(pt);
+			pt-&gt;p_csflags |= CS_KILL;
+			<span class="enscript-keyword">if</span> ((pt-&gt;p_csflags &amp; CS_VALID) == 0) {
+				proc_unlock(pt);
+				psignal(pt, SIGKILL);
+			} <span class="enscript-keyword">else</span>
+				proc_unlock(pt);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_PIDOFFSET</span>:
+			toff = pt-&gt;p_textoff;
+			proc_rele(pt);
+			error = copyout(&amp;toff, uaddr, <span class="enscript-keyword">sizeof</span>(toff));
+			<span class="enscript-keyword">return</span>(error);
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_CDHASH</span>:
+
+			<span class="enscript-comment">/* pt already holds a reference on its p_textvp */</span>
+			tvp = pt-&gt;p_textvp;
+			toff = pt-&gt;p_textoff;
+
+			<span class="enscript-keyword">if</span> (tvp == NULLVP || usize != SHA1_RESULTLEN) {
+				proc_rele(pt);
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+
+			error = vn_getcdhash(tvp, toff, cdhash);
+			proc_rele(pt);
+
+			<span class="enscript-keyword">if</span> (error == 0) {
+				error = copyout(cdhash, uaddr, <span class="enscript-keyword">sizeof</span> (cdhash));
+			}
+
+			<span class="enscript-keyword">return</span> error;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_ENTITLEMENTS_BLOB</span>: {
+			<span class="enscript-type">void</span> *start;
+			size_t length;
+
+			proc_lock(pt);
+
+			<span class="enscript-keyword">if</span> ((pt-&gt;p_csflags &amp; CS_VALID) == 0) {
+				proc_unlock(pt);
+				error = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			error = cs_entitlements_blob_get(pt, &amp;start, &amp;length);
+			proc_unlock(pt);
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">break</span>;
+
+			error = csops_copy_token(start, length, usize, uaddr);
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_MARKRESTRICT</span>:
+			proc_lock(pt);
+			pt-&gt;p_csflags |= CS_RESTRICT;
+			proc_unlock(pt);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_SET_STATUS</span>: {
+			uint32_t flags;
+
+			<span class="enscript-keyword">if</span> (usize &lt; <span class="enscript-keyword">sizeof</span>(flags)) {
+				error = ERANGE;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			error = copyin(uaddr, &amp;flags, <span class="enscript-keyword">sizeof</span>(flags));
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-comment">/* only allow setting a subset of all code sign flags */</span>
+			flags &amp;=
+			    CS_HARD | CS_EXEC_SET_HARD |
+			    CS_KILL | CS_EXEC_SET_KILL |
+			    CS_RESTRICT |
+			    CS_REQUIRE_LV |
+			    CS_ENFORCEMENT | CS_EXEC_SET_ENFORCEMENT |
+			    CS_ENTITLEMENTS_VALIDATED;
+
+			proc_lock(pt);
+			<span class="enscript-keyword">if</span> (pt-&gt;p_csflags &amp; CS_VALID)
+				pt-&gt;p_csflags |= flags;
+			<span class="enscript-keyword">else</span>
+				error = EINVAL;
+			proc_unlock(pt);
+
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_BLOB</span>: {
+			<span class="enscript-type">void</span> *start;
+			size_t length;
+
+			proc_lock(pt);
+			<span class="enscript-keyword">if</span> ((pt-&gt;p_csflags &amp; CS_VALID) == 0) {
+				proc_unlock(pt);
+				error = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			error = cs_blob_get(pt, &amp;start, &amp;length);
+			proc_unlock(pt);
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">break</span>;
+
+			error = csops_copy_token(start, length, usize, uaddr);
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CS_OPS_IDENTITY</span>: {
+			<span class="enscript-type">const</span> <span class="enscript-type">char</span> *identity;
+			uint8_t fakeheader[8];
+			uint32_t idlen;
+			size_t length;
+
+			<span class="enscript-comment">/*
+			 * Make identity have a blob header to make it
+			 * easier on userland to guess the identity
+			 * length.
+			 */</span>
+			<span class="enscript-keyword">if</span> (usize &lt; <span class="enscript-keyword">sizeof</span>(fakeheader)) {
+			    error = ERANGE;
+			    <span class="enscript-keyword">break</span>;
+			}
+			memset(fakeheader, 0, <span class="enscript-keyword">sizeof</span>(fakeheader));
+
+			proc_lock(pt);
+			<span class="enscript-keyword">if</span> ((pt-&gt;p_csflags &amp; CS_VALID) == 0) {
+				proc_unlock(pt);
+				error = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			identity = cs_identity_get(pt);
+			proc_unlock(pt);
+			<span class="enscript-keyword">if</span> (identity == NULL) {
+				error = ENOENT;
+				<span class="enscript-keyword">break</span>;
+			}
+			
+			length = strlen(identity) + 1; <span class="enscript-comment">/* include NUL */</span>
+			idlen = htonl(length + <span class="enscript-keyword">sizeof</span>(fakeheader));
+			memcpy(&amp;fakeheader[4], &amp;idlen, <span class="enscript-keyword">sizeof</span>(idlen));
+
+			error = copyout(fakeheader, uaddr, <span class="enscript-keyword">sizeof</span>(fakeheader));
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">if</span> (usize &lt; <span class="enscript-keyword">sizeof</span>(fakeheader) + length)
+				error = ERANGE;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (usize &gt; <span class="enscript-keyword">sizeof</span>(fakeheader))
+				error = copyout(identity, uaddr + <span class="enscript-keyword">sizeof</span>(fakeheader), length);
+
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-reference">default</span>:
+			error = EINVAL;
+			<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">out</span>:
+	proc_rele(pt);
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_iterate</span>(flags, callout, arg, filterfn, filterarg)
+	<span class="enscript-type">int</span> flags;
+	<span class="enscript-type">int</span> (*callout)(proc_t, <span class="enscript-type">void</span> *);
+	<span class="enscript-type">void</span> * arg;
+	<span class="enscript-type">int</span> (*filterfn)(proc_t, <span class="enscript-type">void</span> *);
+	<span class="enscript-type">void</span> * filterarg;
+{
+	proc_t p;
+	pid_t * pid_list;
+	<span class="enscript-type">int</span> count, pidcount, alloc_count, i, retval;
+
+	count = nprocs+ 10;
+	<span class="enscript-keyword">if</span> (count &gt; hard_maxproc)
+		count = hard_maxproc;
+	alloc_count = count * <span class="enscript-keyword">sizeof</span>(pid_t);
+	pid_list = (pid_t *)kalloc(alloc_count);
+	bzero(pid_list, alloc_count);
+
+
+	proc_list_lock();
+
+
+	pidcount = 0;
+	<span class="enscript-keyword">if</span> (flags &amp; PROC_ALLPROCLIST) {
+		<span class="enscript-keyword">for</span> (p = allproc.lh_first; (p != 0); p = p-&gt;p_list.le_next) {
+			<span class="enscript-keyword">if</span> (p-&gt;p_stat == SIDL)
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-keyword">if</span> ( (filterfn == 0 ) || (filterfn(p, filterarg) != 0)) {
+				pid_list[pidcount] = p-&gt;p_pid;
+				pidcount++;
+				<span class="enscript-keyword">if</span> (pidcount &gt;= count)
+					<span class="enscript-keyword">break</span>;
+			}
+		}
+	}
+	<span class="enscript-keyword">if</span> ((pidcount &lt;  count ) &amp;&amp; (flags &amp; PROC_ZOMBPROCLIST)) {
+		<span class="enscript-keyword">for</span> (p = zombproc.lh_first; p != 0; p = p-&gt;p_list.le_next) {
+			<span class="enscript-keyword">if</span> ( (filterfn == 0 ) || (filterfn(p, filterarg) != 0)) {
+				pid_list[pidcount] = p-&gt;p_pid;
+				pidcount++;
+				<span class="enscript-keyword">if</span> (pidcount &gt;= count)
+					<span class="enscript-keyword">break</span>;
+			}
+		}
+	}
+		
+
+	proc_list_unlock();
+
+
+	<span class="enscript-keyword">for</span> (i = 0; i&lt; pidcount; i++) {
+		p = proc_find(pid_list[i]);
+		<span class="enscript-keyword">if</span> (p) {
+			<span class="enscript-keyword">if</span> ((flags &amp; PROC_NOWAITTRANS) == 0)
+				proc_transwait(p, 0);
+			retval = callout(p, arg);
+
+			<span class="enscript-keyword">switch</span> (retval) {
+		  		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_RETURNED</span>:
+		  			proc_rele(p);
+		  			<span class="enscript-keyword">break</span>;
+		  		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_RETURNED_DONE</span>:
+			  		proc_rele(p);
+			  		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		  		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_CLAIMED_DONE</span>:
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		  		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_CLAIMED</span>:
+		  		<span class="enscript-reference">default</span>:
+					<span class="enscript-keyword">break</span>;
+			}
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; PROC_ZOMBPROCLIST) {
+			p = proc_find_zombref(pid_list[i]);
+			<span class="enscript-keyword">if</span> (p != PROC_NULL) {
+				retval = callout(p, arg);
+		
+				<span class="enscript-keyword">switch</span> (retval) {
+		  			<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_RETURNED</span>:
+		  				proc_drop_zombref(p);
+		  				<span class="enscript-keyword">break</span>;
+		  			<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_RETURNED_DONE</span>:
+						proc_drop_zombref(p);
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		  			<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_CLAIMED_DONE</span>:
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		  			<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_CLAIMED</span>:
+		  			<span class="enscript-reference">default</span>:
+						<span class="enscript-keyword">break</span>;
+				}
+			}
+		}
+	}
+
+<span class="enscript-reference">out</span>: 
+	kfree(pid_list, alloc_count);
+	<span class="enscript-keyword">return</span>(0);
+
+}
+
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-comment">/* This is for iteration in case of trivial non blocking callouts */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_scanall</span>(flags, callout, arg)
+	<span class="enscript-type">int</span> flags;
+	<span class="enscript-type">int</span> (*callout)(proc_t, <span class="enscript-type">void</span> *);
+	<span class="enscript-type">void</span> * arg;
+{
+	proc_t p;
+	<span class="enscript-type">int</span> retval;
+
+
+	proc_list_lock();
+
+
+	<span class="enscript-keyword">if</span> (flags &amp; PROC_ALLPROCLIST) {
+		<span class="enscript-keyword">for</span> (p = allproc.lh_first; (p != 0); p = p-&gt;p_list.le_next) {
+			retval = callout(p, arg);
+			<span class="enscript-keyword">if</span> (retval == PROC_RETURNED_DONE)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (flags &amp; PROC_ZOMBPROCLIST) {
+		<span class="enscript-keyword">for</span> (p = zombproc.lh_first; p != 0; p = p-&gt;p_list.le_next) {
+			retval = callout(p, arg);
+			<span class="enscript-keyword">if</span> (retval == PROC_RETURNED_DONE)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+<span class="enscript-reference">out</span>:
+
+	proc_list_unlock();
+
+	<span class="enscript-keyword">return</span>(0);
+}
+#<span class="enscript-reference">endif</span>
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_rebootscan</span>(callout, arg, filterfn, filterarg)
+	<span class="enscript-type">int</span> (*callout)(proc_t, <span class="enscript-type">void</span> *);
+	<span class="enscript-type">void</span> * arg;
+	<span class="enscript-type">int</span> (*filterfn)(proc_t, <span class="enscript-type">void</span> *);
+	<span class="enscript-type">void</span> * filterarg;
+{
+	proc_t p;
+	<span class="enscript-type">int</span> lockheld = 0, retval;
+
+	proc_shutdown_exitcount = 0;
+
+<span class="enscript-reference">ps_allprocscan</span>:
+
+	proc_list_lock();
+
+	lockheld = 1;
+
+	<span class="enscript-keyword">for</span> (p = allproc.lh_first; (p != 0); p = p-&gt;p_list.le_next) {
+		<span class="enscript-keyword">if</span> ( (filterfn == 0 ) || (filterfn(p, filterarg) != 0)) {
+			p = proc_ref_locked(p);
+
+			proc_list_unlock();
+			lockheld = 0;
+
+			<span class="enscript-keyword">if</span> (p) {
+				proc_transwait(p, 0);
+				retval = callout(p, arg);
+				proc_rele(p);
+	
+				<span class="enscript-keyword">switch</span> (retval) {
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_RETURNED_DONE</span>:
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_CLAIMED_DONE</span>:
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+				}
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">ps_allprocscan</span>;	
+		} <span class="enscript-comment">/* filter pass */</span>
+	} <span class="enscript-comment">/* allproc walk thru */</span>
+
+	<span class="enscript-keyword">if</span> (lockheld == 1) {
+		proc_list_unlock();
+		lockheld = 0;
+	}
+
+<span class="enscript-reference">out</span>: 
+	<span class="enscript-keyword">return</span>(0);
+
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_childrenwalk</span>(parent, callout, arg)
+	<span class="enscript-type">struct</span> proc * parent;
+	<span class="enscript-type">int</span> (*callout)(proc_t, <span class="enscript-type">void</span> *);
+	<span class="enscript-type">void</span> * arg;
+{
+	<span class="enscript-type">register</span> <span class="enscript-type">struct</span> proc *p;
+	pid_t * pid_list;
+	<span class="enscript-type">int</span> count, pidcount, alloc_count, i, retval;
+
+	count = nprocs+ 10;
+	<span class="enscript-keyword">if</span> (count &gt; hard_maxproc)
+		count = hard_maxproc;
+	alloc_count = count * <span class="enscript-keyword">sizeof</span>(pid_t);
+	pid_list = (pid_t *)kalloc(alloc_count);
+	bzero(pid_list, alloc_count);
+
+
+	proc_list_lock();
+
+
+	pidcount = 0;
+	<span class="enscript-keyword">for</span> (p = parent-&gt;p_children.lh_first; (p != 0); p = p-&gt;p_sibling.le_next) {
+		<span class="enscript-keyword">if</span> (p-&gt;p_stat == SIDL)
+			<span class="enscript-keyword">continue</span>;
+		pid_list[pidcount] = p-&gt;p_pid;
+		pidcount++;
+		<span class="enscript-keyword">if</span> (pidcount &gt;= count)
+			<span class="enscript-keyword">break</span>;
+	}
+	proc_list_unlock();
+
+
+	<span class="enscript-keyword">for</span> (i = 0; i&lt; pidcount; i++) {
+		p = proc_find(pid_list[i]);
+		<span class="enscript-keyword">if</span> (p) {
+			proc_transwait(p, 0);
+			retval = callout(p, arg);
+
+			<span class="enscript-keyword">switch</span> (retval) {
+		  		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_RETURNED</span>:
+		  		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_RETURNED_DONE</span>:
+			  		proc_rele(p);
+			  		<span class="enscript-keyword">if</span> (retval == PROC_RETURNED_DONE) {
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			  		}
+			  		<span class="enscript-keyword">break</span>;
+
+		  		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_CLAIMED_DONE</span>:
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		  		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_CLAIMED</span>:
+		  		<span class="enscript-reference">default</span>:
+					<span class="enscript-keyword">break</span>;
+			}
+		}
+	}
+
+<span class="enscript-reference">out</span>: 
+	kfree(pid_list, alloc_count);
+	<span class="enscript-keyword">return</span>(0);
+
+}
+
+<span class="enscript-comment">/*
+ */</span>
+<span class="enscript-comment">/* PGRP_BLOCKITERATE is not implemented yet */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pgrp_iterate</span>(pgrp, flags, callout, arg, filterfn, filterarg)
+	<span class="enscript-type">struct</span> pgrp *pgrp;
+	<span class="enscript-type">int</span> flags;
+	<span class="enscript-type">int</span> (*callout)(proc_t, <span class="enscript-type">void</span> *);
+	<span class="enscript-type">void</span> * arg;
+	<span class="enscript-type">int</span> (*filterfn)(proc_t, <span class="enscript-type">void</span> *);
+	<span class="enscript-type">void</span> * filterarg;
+{
+	proc_t p;
+	pid_t * pid_list;
+	<span class="enscript-type">int</span> count, pidcount, i, alloc_count;
+	<span class="enscript-type">int</span> retval;
+	pid_t pgid;
+	<span class="enscript-type">int</span> dropref = flags &amp; PGRP_DROPREF;
+#<span class="enscript-reference">if</span> 0
+	<span class="enscript-type">int</span> serialize = flags &amp; PGRP_BLOCKITERATE;
+#<span class="enscript-reference">else</span>
+	<span class="enscript-type">int</span> serialize = 0;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (pgrp == 0)
+		<span class="enscript-keyword">return</span>(0);
+	count = pgrp-&gt;pg_membercnt + 10;
+	<span class="enscript-keyword">if</span> (count &gt; hard_maxproc)
+		count = hard_maxproc;
+	alloc_count = count * <span class="enscript-keyword">sizeof</span>(pid_t);
+	pid_list = (pid_t *)kalloc(alloc_count);
+	bzero(pid_list, alloc_count);
+	
+	pgrp_lock(pgrp);
+	<span class="enscript-keyword">if</span> (serialize  != 0) {
+		<span class="enscript-keyword">while</span> ((pgrp-&gt;pg_listflags &amp; PGRP_FLAG_ITERABEGIN) == PGRP_FLAG_ITERABEGIN) {
+			pgrp-&gt;pg_listflags |= PGRP_FLAG_ITERWAIT;
+			msleep(&amp;pgrp-&gt;pg_listflags, &amp;pgrp-&gt;pg_mlock, 0, <span class="enscript-string">&quot;pgrp_iterate&quot;</span>, 0);
+		}
+		pgrp-&gt;pg_listflags |= PGRP_FLAG_ITERABEGIN;
+	}
+
+	pgid = pgrp-&gt;pg_id;
+
+	pidcount = 0;
+	<span class="enscript-keyword">for</span> (p = pgrp-&gt;pg_members.lh_first; p != 0;
+	     p = p-&gt;p_pglist.le_next) {
+		<span class="enscript-keyword">if</span> ( (filterfn == 0 ) || (filterfn(p, filterarg) != 0)) {
+			pid_list[pidcount] = p-&gt;p_pid;
+			pidcount++;
+			<span class="enscript-keyword">if</span> (pidcount &gt;= count)
+				<span class="enscript-keyword">break</span>;
+		}
+	}
+		
+
+	pgrp_unlock(pgrp);
+	<span class="enscript-keyword">if</span> ((serialize == 0) &amp;&amp; (dropref != 0))
+		pg_rele(pgrp);
+
+
+	<span class="enscript-keyword">for</span> (i = 0; i&lt; pidcount; i++) {
+		<span class="enscript-comment">/* No handling or proc0 */</span>
+		<span class="enscript-keyword">if</span> (pid_list[i] == 0)
+			<span class="enscript-keyword">continue</span>;
+		p = proc_find(pid_list[i]);
+		<span class="enscript-keyword">if</span> (p) {
+			<span class="enscript-keyword">if</span> (p-&gt;p_pgrpid != pgid) {
+				proc_rele(p);
+				<span class="enscript-keyword">continue</span>;
+			}
+			proc_transwait(p, 0);
+			retval = callout(p, arg);
+
+			<span class="enscript-keyword">switch</span> (retval) {
+		  		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_RETURNED</span>:
+		  		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_RETURNED_DONE</span>:
+			  		proc_rele(p);
+			  		<span class="enscript-keyword">if</span> (retval == PROC_RETURNED_DONE) {
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			  		}
+			  		<span class="enscript-keyword">break</span>;
+
+		  		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_CLAIMED_DONE</span>:
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		  		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_CLAIMED</span>:
+		  		<span class="enscript-reference">default</span>:
+					<span class="enscript-keyword">break</span>;
+			}
+		}
+	}
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (serialize != 0) {
+		pgrp_lock(pgrp);
+		pgrp-&gt;pg_listflags &amp;= ~PGRP_FLAG_ITERABEGIN;
+		<span class="enscript-keyword">if</span> ((pgrp-&gt;pg_listflags &amp; PGRP_FLAG_ITERWAIT) == PGRP_FLAG_ITERWAIT) {
+			pgrp-&gt;pg_listflags &amp;= ~PGRP_FLAG_ITERWAIT;
+			wakeup(&amp;pgrp-&gt;pg_listflags);
+		}
+		pgrp_unlock(pgrp);
+		<span class="enscript-keyword">if</span> (dropref != 0)
+			pg_rele(pgrp);
+	}
+	kfree(pid_list, alloc_count);
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pgrp_add</span>(<span class="enscript-type">struct</span> pgrp * pgrp, <span class="enscript-type">struct</span> proc * parent, <span class="enscript-type">struct</span> proc * child)
+{
+	proc_list_lock();
+	child-&gt;p_pgrp = pgrp;
+	child-&gt;p_pgrpid = pgrp-&gt;pg_id;
+	child-&gt;p_listflag |= P_LIST_INPGRP;
+	<span class="enscript-comment">/*
+	 * When pgrp is being freed , a process can still 
+	 * request addition using setpgid from bash when 
+ 	 * login is terminated (login cycler) return ESRCH
+	 * Safe to hold lock due to refcount on pgrp 
+	 */</span>
+	<span class="enscript-keyword">if</span> ((pgrp-&gt;pg_listflags &amp; (PGRP_FLAG_TERMINATE | PGRP_FLAG_DEAD)) == PGRP_FLAG_TERMINATE) {
+		pgrp-&gt;pg_listflags &amp;= ~PGRP_FLAG_TERMINATE;	
+	}
+
+	<span class="enscript-keyword">if</span> ((pgrp-&gt;pg_listflags &amp; PGRP_FLAG_DEAD) == PGRP_FLAG_DEAD)
+		panic(<span class="enscript-string">&quot;pgrp_add : pgrp is dead adding process&quot;</span>);
+	proc_list_unlock();
+
+	pgrp_lock(pgrp);
+	pgrp-&gt;pg_membercnt++;
+	<span class="enscript-keyword">if</span> ( parent != PROC_NULL) {
+		LIST_INSERT_AFTER(parent, child, p_pglist);
+	 }<span class="enscript-keyword">else</span> {
+		LIST_INSERT_HEAD(&amp;pgrp-&gt;pg_members, child, p_pglist);
+	}
+	pgrp_unlock(pgrp);
+
+	proc_list_lock();
+	<span class="enscript-keyword">if</span> (((pgrp-&gt;pg_listflags &amp; (PGRP_FLAG_TERMINATE | PGRP_FLAG_DEAD)) == PGRP_FLAG_TERMINATE) &amp;&amp; (pgrp-&gt;pg_membercnt != 0)) {
+		pgrp-&gt;pg_listflags &amp;= ~PGRP_FLAG_TERMINATE;	
+	}
+	proc_list_unlock();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pgrp_remove</span>(<span class="enscript-type">struct</span> proc * p)
+{
+	<span class="enscript-type">struct</span> pgrp * pg;
+
+	pg = proc_pgrp(p);
+
+	proc_list_lock();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__PROC_INTERNAL_DEBUG</span>
+	<span class="enscript-keyword">if</span> ((p-&gt;p_listflag &amp; P_LIST_INPGRP) == 0)
+		panic(<span class="enscript-string">&quot;removing from pglist but no named ref\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+	p-&gt;p_pgrpid = PGRPID_DEAD;
+	p-&gt;p_listflag &amp;= ~P_LIST_INPGRP;
+	p-&gt;p_pgrp = NULL;
+	proc_list_unlock();
+
+	<span class="enscript-keyword">if</span> (pg == PGRP_NULL)
+		panic(<span class="enscript-string">&quot;pgrp_remove: pg is NULL&quot;</span>);
+	pgrp_lock(pg);
+	pg-&gt;pg_membercnt--;
+
+	<span class="enscript-keyword">if</span> (pg-&gt;pg_membercnt &lt; 0)
+		panic(<span class="enscript-string">&quot;pgprp: -ve membercnt pgprp:%p p:%p\n&quot;</span>,pg, p);
+
+	LIST_REMOVE(p, p_pglist);
+	<span class="enscript-keyword">if</span> (pg-&gt;pg_members.lh_first == 0) {
+		pgrp_unlock(pg);
+		pgdelete_dropref(pg);
+	} <span class="enscript-keyword">else</span> {
+		pgrp_unlock(pg);
+		pg_rele(pg);
+	}
+}
+
+
+<span class="enscript-comment">/* cannot use proc_pgrp as it maybe stalled */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pgrp_replace</span>(<span class="enscript-type">struct</span> proc * p, <span class="enscript-type">struct</span> pgrp * newpg)
+{
+        <span class="enscript-type">struct</span> pgrp * oldpg;
+
+
+
+       proc_list_lock();
+
+	<span class="enscript-keyword">while</span> ((p-&gt;p_listflag &amp; P_LIST_PGRPTRANS) == P_LIST_PGRPTRANS) {
+		p-&gt;p_listflag |= P_LIST_PGRPTRWAIT;
+		(<span class="enscript-type">void</span>)msleep(&amp;p-&gt;p_pgrpid, proc_list_mlock, 0, <span class="enscript-string">&quot;proc_pgrp&quot;</span>, 0);
+	}
+
+	p-&gt;p_listflag |= P_LIST_PGRPTRANS;
+
+	oldpg = p-&gt;p_pgrp;
+	<span class="enscript-keyword">if</span> (oldpg == PGRP_NULL)
+		panic(<span class="enscript-string">&quot;pgrp_replace: oldpg NULL&quot;</span>);
+	oldpg-&gt;pg_refcount++;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__PROC_INTERNAL_DEBUG</span>
+        <span class="enscript-keyword">if</span> ((p-&gt;p_listflag &amp; P_LIST_INPGRP) == 0)
+                panic(<span class="enscript-string">&quot;removing from pglist but no named ref\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+        p-&gt;p_pgrpid = PGRPID_DEAD;
+        p-&gt;p_listflag &amp;= ~P_LIST_INPGRP;
+        p-&gt;p_pgrp = NULL;
+ 
+       proc_list_unlock();
+
+       pgrp_lock(oldpg);
+       oldpg-&gt;pg_membercnt--;
+       <span class="enscript-keyword">if</span> (oldpg-&gt;pg_membercnt &lt; 0)
+                panic(<span class="enscript-string">&quot;pgprp: -ve membercnt pgprp:%p p:%p\n&quot;</span>,oldpg, p);
+       LIST_REMOVE(p, p_pglist);
+        <span class="enscript-keyword">if</span> (oldpg-&gt;pg_members.lh_first == 0) {
+                pgrp_unlock(oldpg);
+                pgdelete_dropref(oldpg);
+        } <span class="enscript-keyword">else</span> {
+                pgrp_unlock(oldpg);
+                pg_rele(oldpg);
+        }
+
+        proc_list_lock();
+        p-&gt;p_pgrp = newpg;
+        p-&gt;p_pgrpid = newpg-&gt;pg_id;
+        p-&gt;p_listflag |= P_LIST_INPGRP;
+        <span class="enscript-comment">/*
+         * When pgrp is being freed , a process can still
+         * request addition using setpgid from bash when 
+         * login is terminated (login cycler) return ESRCH
+         * Safe to hold lock due to refcount on pgrp 
+         */</span>
+        <span class="enscript-keyword">if</span> ((newpg-&gt;pg_listflags &amp; (PGRP_FLAG_TERMINATE | PGRP_FLAG_DEAD)) == PGRP_FLAG_TERMINATE) {
+                newpg-&gt;pg_listflags &amp;= ~PGRP_FLAG_TERMINATE;
+        }
+
+        <span class="enscript-keyword">if</span> ((newpg-&gt;pg_listflags &amp; PGRP_FLAG_DEAD) == PGRP_FLAG_DEAD)
+                panic(<span class="enscript-string">&quot;pgrp_add : pgrp is dead adding process&quot;</span>);
+        proc_list_unlock();
+
+        pgrp_lock(newpg);
+        newpg-&gt;pg_membercnt++;
+	LIST_INSERT_HEAD(&amp;newpg-&gt;pg_members, p, p_pglist);
+        pgrp_unlock(newpg);
+
+        proc_list_lock();
+        <span class="enscript-keyword">if</span> (((newpg-&gt;pg_listflags &amp; (PGRP_FLAG_TERMINATE | PGRP_FLAG_DEAD)) == PGRP_FLAG_TERMINATE) &amp;&amp; (newpg-&gt;pg_membercnt != 0)) {
+                newpg-&gt;pg_listflags &amp;= ~PGRP_FLAG_TERMINATE;
+        }
+
+	p-&gt;p_listflag &amp;= ~P_LIST_PGRPTRANS;
+	<span class="enscript-keyword">if</span> ((p-&gt;p_listflag &amp; P_LIST_PGRPTRWAIT) == P_LIST_PGRPTRWAIT) {
+		p-&gt;p_listflag &amp;= ~P_LIST_PGRPTRWAIT;
+		wakeup(&amp;p-&gt;p_pgrpid);
+		
+	}
+        proc_list_unlock();
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pgrp_lock</span>(<span class="enscript-type">struct</span> pgrp * pgrp)
+{
+	lck_mtx_lock(&amp;pgrp-&gt;pg_mlock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pgrp_unlock</span>(<span class="enscript-type">struct</span> pgrp * pgrp)
+{
+	lck_mtx_unlock(&amp;pgrp-&gt;pg_mlock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">session_lock</span>(<span class="enscript-type">struct</span> session * sess)
+{
+	lck_mtx_lock(&amp;sess-&gt;s_mlock);
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">session_unlock</span>(<span class="enscript-type">struct</span> session * sess)
+{
+	lck_mtx_unlock(&amp;sess-&gt;s_mlock);
+}
+
+<span class="enscript-type">struct</span> pgrp *
+<span class="enscript-function-name">proc_pgrp</span>(proc_t p)
+{
+	<span class="enscript-type">struct</span> pgrp * pgrp;
+
+	<span class="enscript-keyword">if</span> (p == PROC_NULL)
+		<span class="enscript-keyword">return</span>(PGRP_NULL);
+	proc_list_lock();
+
+	<span class="enscript-keyword">while</span> ((p-&gt;p_listflag &amp; P_LIST_PGRPTRANS) == P_LIST_PGRPTRANS) {
+		p-&gt;p_listflag |= P_LIST_PGRPTRWAIT;
+		(<span class="enscript-type">void</span>)msleep(&amp;p-&gt;p_pgrpid, proc_list_mlock, 0, <span class="enscript-string">&quot;proc_pgrp&quot;</span>, 0);
+	}
+		
+	pgrp = p-&gt;p_pgrp;
+
+	assert(pgrp != NULL);
+
+	<span class="enscript-keyword">if</span> (pgrp != PGRP_NULL) {
+		pgrp-&gt;pg_refcount++;
+		<span class="enscript-keyword">if</span> ((pgrp-&gt;pg_listflags &amp; (PGRP_FLAG_TERMINATE | PGRP_FLAG_DEAD)) != 0)
+			panic(<span class="enscript-string">&quot;proc_pgrp: ref being povided for dead pgrp&quot;</span>);
+	}
+		
+	proc_list_unlock();
+	
+	<span class="enscript-keyword">return</span>(pgrp);
+}
+
+<span class="enscript-type">struct</span> pgrp *
+<span class="enscript-function-name">tty_pgrp</span>(<span class="enscript-type">struct</span> tty * tp)
+{
+	<span class="enscript-type">struct</span> pgrp * pg = PGRP_NULL;
+
+	proc_list_lock();
+	pg = tp-&gt;t_pgrp;
+
+	<span class="enscript-keyword">if</span> (pg != PGRP_NULL) {
+		<span class="enscript-keyword">if</span> ((pg-&gt;pg_listflags &amp; PGRP_FLAG_DEAD) != 0)
+			panic(<span class="enscript-string">&quot;tty_pgrp: ref being povided for dead pgrp&quot;</span>);
+		pg-&gt;pg_refcount++;
+	}
+	proc_list_unlock();
+
+	<span class="enscript-keyword">return</span>(pg);
+}
+
+<span class="enscript-type">struct</span> session *
+<span class="enscript-function-name">proc_session</span>(proc_t p)
+{
+	<span class="enscript-type">struct</span> session * sess = SESSION_NULL;
+	
+	<span class="enscript-keyword">if</span> (p == PROC_NULL)
+		<span class="enscript-keyword">return</span>(SESSION_NULL);
+
+	proc_list_lock();
+
+	<span class="enscript-comment">/* wait during transitions */</span>
+	<span class="enscript-keyword">while</span> ((p-&gt;p_listflag &amp; P_LIST_PGRPTRANS) == P_LIST_PGRPTRANS) {
+		p-&gt;p_listflag |= P_LIST_PGRPTRWAIT;
+		(<span class="enscript-type">void</span>)msleep(&amp;p-&gt;p_pgrpid, proc_list_mlock, 0, <span class="enscript-string">&quot;proc_pgrp&quot;</span>, 0);
+	}
+
+	<span class="enscript-keyword">if</span> ((p-&gt;p_pgrp != PGRP_NULL) &amp;&amp; ((sess = p-&gt;p_pgrp-&gt;pg_session) != SESSION_NULL)) {
+		<span class="enscript-keyword">if</span> ((sess-&gt;s_listflags &amp; (S_LIST_TERM | S_LIST_DEAD)) != 0)
+			panic(<span class="enscript-string">&quot;proc_session:returning sesssion ref on terminating session&quot;</span>);
+		sess-&gt;s_count++;
+	}
+	proc_list_unlock();
+	<span class="enscript-keyword">return</span>(sess);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">session_rele</span>(<span class="enscript-type">struct</span> session *sess)
+{
+	proc_list_lock();
+	<span class="enscript-keyword">if</span> (--sess-&gt;s_count == 0) {
+		<span class="enscript-keyword">if</span> ((sess-&gt;s_listflags &amp; (S_LIST_TERM | S_LIST_DEAD)) != 0)
+			panic(<span class="enscript-string">&quot;session_rele: terminating already terminated session&quot;</span>);
+		sess-&gt;s_listflags |= S_LIST_TERM;
+		LIST_REMOVE(sess, s_hash);
+		sess-&gt;s_listflags |= S_LIST_DEAD;
+		<span class="enscript-keyword">if</span> (sess-&gt;s_count != 0)
+			panic(<span class="enscript-string">&quot;session_rele: freeing session in use&quot;</span>);	
+		proc_list_unlock();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_FINE_LOCK_GROUPS</span>
+		lck_mtx_destroy(&amp;sess-&gt;s_mlock, proc_mlock_grp);
+#<span class="enscript-reference">else</span>
+		lck_mtx_destroy(&amp;sess-&gt;s_mlock, proc_lck_grp);
+#<span class="enscript-reference">endif</span>
+		FREE_ZONE(sess, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> session), M_SESSION);
+	} <span class="enscript-keyword">else</span>
+		proc_list_unlock();
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_transstart</span>(proc_t p, <span class="enscript-type">int</span> locked, <span class="enscript-type">int</span> non_blocking)
+{
+	<span class="enscript-keyword">if</span> (locked == 0)
+		proc_lock(p);
+	<span class="enscript-keyword">while</span> ((p-&gt;p_lflag &amp; P_LINTRANSIT) == P_LINTRANSIT) {
+		<span class="enscript-keyword">if</span> (((p-&gt;p_lflag &amp; P_LTRANSCOMMIT) == P_LTRANSCOMMIT) || non_blocking) {
+			<span class="enscript-keyword">if</span> (locked == 0)
+				proc_unlock(p);
+			<span class="enscript-keyword">return</span> EDEADLK;
+		}
+		p-&gt;p_lflag |= P_LTRANSWAIT;
+		msleep(&amp;p-&gt;p_lflag, &amp;p-&gt;p_mlock, 0, <span class="enscript-string">&quot;proc_signstart&quot;</span>, NULL);
+	}
+	p-&gt;p_lflag |= P_LINTRANSIT;
+	p-&gt;p_transholder = current_thread();
+	<span class="enscript-keyword">if</span> (locked == 0)
+		proc_unlock(p);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_transcommit</span>(proc_t p, <span class="enscript-type">int</span> locked)
+{
+	<span class="enscript-keyword">if</span> (locked == 0)
+		proc_lock(p);
+
+	assert ((p-&gt;p_lflag &amp; P_LINTRANSIT) == P_LINTRANSIT);
+	assert (p-&gt;p_transholder == current_thread());
+	p-&gt;p_lflag |= P_LTRANSCOMMIT;
+
+	<span class="enscript-keyword">if</span> ((p-&gt;p_lflag &amp; P_LTRANSWAIT) == P_LTRANSWAIT) {
+		p-&gt;p_lflag &amp;= ~P_LTRANSWAIT;
+		wakeup(&amp;p-&gt;p_lflag);
+	}
+	<span class="enscript-keyword">if</span> (locked == 0)
+		proc_unlock(p);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_transend</span>(proc_t p, <span class="enscript-type">int</span> locked)
+{
+	<span class="enscript-keyword">if</span> (locked == 0)
+		proc_lock(p);
+
+	p-&gt;p_lflag &amp;= ~( P_LINTRANSIT | P_LTRANSCOMMIT);
+	p-&gt;p_transholder = NULL;
+
+	<span class="enscript-keyword">if</span> ((p-&gt;p_lflag &amp; P_LTRANSWAIT) == P_LTRANSWAIT) {
+		p-&gt;p_lflag &amp;= ~P_LTRANSWAIT;
+		wakeup(&amp;p-&gt;p_lflag);
+	}
+	<span class="enscript-keyword">if</span> (locked == 0)
+		proc_unlock(p);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_transwait</span>(proc_t p, <span class="enscript-type">int</span> locked)
+{
+	<span class="enscript-keyword">if</span> (locked == 0)
+		proc_lock(p);
+	<span class="enscript-keyword">while</span> ((p-&gt;p_lflag &amp; P_LINTRANSIT) == P_LINTRANSIT) {
+		<span class="enscript-keyword">if</span> ((p-&gt;p_lflag &amp; P_LTRANSCOMMIT) == P_LTRANSCOMMIT &amp;&amp; current_proc() == p) {
+			<span class="enscript-keyword">if</span> (locked == 0)
+				proc_unlock(p);
+			<span class="enscript-keyword">return</span> EDEADLK;
+		}
+		p-&gt;p_lflag |= P_LTRANSWAIT;
+		msleep(&amp;p-&gt;p_lflag, &amp;p-&gt;p_mlock, 0, <span class="enscript-string">&quot;proc_signstart&quot;</span>, NULL);
+	}
+	<span class="enscript-keyword">if</span> (locked == 0)
+		proc_unlock(p);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_klist_lock</span>(<span class="enscript-type">void</span>)
+{
+	lck_mtx_lock(proc_klist_mlock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_klist_unlock</span>(<span class="enscript-type">void</span>)
+{
+	lck_mtx_unlock(proc_klist_mlock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_knote</span>(<span class="enscript-type">struct</span> proc * p, <span class="enscript-type">long</span> hint)
+{
+	proc_klist_lock();
+	KNOTE(&amp;p-&gt;p_klist, hint);
+	proc_klist_unlock();
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_knote_drain</span>(<span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">struct</span> knote *kn = NULL;
+
+	<span class="enscript-comment">/*
+	 * Clear the proc's klist to avoid references after the proc is reaped.
+	 */</span>
+	proc_klist_lock();
+	<span class="enscript-keyword">while</span> ((kn = SLIST_FIRST(&amp;p-&gt;p_klist))) {
+		kn-&gt;kn_ptr.p_proc = PROC_NULL;
+		KNOTE_DETACH(&amp;p-&gt;p_klist, kn);
+	}
+	proc_klist_unlock();
+}
+
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">proc_setregister</span>(proc_t p)
+{
+	proc_lock(p);
+	p-&gt;p_lflag |= P_LREGISTER;
+	proc_unlock(p);
+}
+
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">proc_resetregister</span>(proc_t p)
+{
+	proc_lock(p);
+	p-&gt;p_lflag &amp;= ~P_LREGISTER;
+	proc_unlock(p);
+}
+
+pid_t
+<span class="enscript-function-name">proc_pgrpid</span>(proc_t p)
+{
+	<span class="enscript-keyword">return</span> p-&gt;p_pgrpid;
+}
+
+pid_t
+<span class="enscript-function-name">proc_selfpgrpid</span>()
+{
+	<span class="enscript-keyword">return</span> current_proc()-&gt;p_pgrpid;
+}
+
+
+<span class="enscript-comment">/* return control and action states */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_getpcontrol</span>(<span class="enscript-type">int</span> pid, <span class="enscript-type">int</span> * pcontrolp)
+{
+	proc_t p;
+
+	p = proc_find(pid);
+	<span class="enscript-keyword">if</span> (p == PROC_NULL)
+		<span class="enscript-keyword">return</span>(ESRCH);
+	<span class="enscript-keyword">if</span> (pcontrolp != NULL)
+		*pcontrolp = p-&gt;p_pcaction;
+
+	proc_rele(p);
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_dopcontrol</span>(proc_t p)
+{
+	<span class="enscript-type">int</span> pcontrol;
+
+	proc_lock(p);
+
+	pcontrol = PROC_CONTROL_STATE(p);
+
+	<span class="enscript-keyword">if</span> (PROC_ACTION_STATE(p) == 0) {
+		<span class="enscript-keyword">switch</span>(pcontrol) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">P_PCTHROTTLE</span>:
+				PROC_SETACTION_STATE(p);
+				proc_unlock(p);
+				printf(<span class="enscript-string">&quot;low swap: throttling pid %d (%s)\n&quot;</span>, p-&gt;p_pid, p-&gt;p_comm);
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">P_PCSUSP</span>:
+				PROC_SETACTION_STATE(p);
+				proc_unlock(p);
+				printf(<span class="enscript-string">&quot;low swap: suspending pid %d (%s)\n&quot;</span>, p-&gt;p_pid, p-&gt;p_comm);
+				task_suspend(p-&gt;task);
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">P_PCKILL</span>:
+				PROC_SETACTION_STATE(p);
+				proc_unlock(p);
+				printf(<span class="enscript-string">&quot;low swap: killing pid %d (%s)\n&quot;</span>, p-&gt;p_pid, p-&gt;p_comm);
+				psignal(p, SIGKILL);
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-reference">default</span>:
+				proc_unlock(p);
+		}
+
+	} <span class="enscript-keyword">else</span> 
+		proc_unlock(p);
+
+	<span class="enscript-keyword">return</span>(PROC_RETURNED);
+}
+
+
+<span class="enscript-comment">/*
+ * Resume a throttled or suspended process.  This is an internal interface that's only
+ * used by the user level code that presents the GUI when we run out of swap space and 
+ * hence is restricted to processes with superuser privileges.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_resetpcontrol</span>(<span class="enscript-type">int</span> pid)
+{
+	proc_t p;
+	<span class="enscript-type">int</span> pcontrol;
+	<span class="enscript-type">int</span> error;
+	proc_t self = current_proc();
+
+	<span class="enscript-comment">/* if the process has been validated to handle resource control or root is valid one */</span>
+	<span class="enscript-keyword">if</span> (((self-&gt;p_lflag &amp; P_LVMRSRCOWNER) == 0) &amp;&amp; (error = suser(kauth_cred_get(), 0)))
+		<span class="enscript-keyword">return</span> error;
+
+	p = proc_find(pid);
+	<span class="enscript-keyword">if</span> (p == PROC_NULL)
+		<span class="enscript-keyword">return</span>(ESRCH);
+	
+	proc_lock(p);
+
+	pcontrol = PROC_CONTROL_STATE(p);
+
+	<span class="enscript-keyword">if</span>(PROC_ACTION_STATE(p) !=0) {
+		<span class="enscript-keyword">switch</span>(pcontrol) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">P_PCTHROTTLE</span>:
+				PROC_RESETACTION_STATE(p);
+				proc_unlock(p);
+				printf(<span class="enscript-string">&quot;low swap: unthrottling pid %d (%s)\n&quot;</span>, p-&gt;p_pid, p-&gt;p_comm);
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">P_PCSUSP</span>:
+				PROC_RESETACTION_STATE(p);
+				proc_unlock(p);
+				printf(<span class="enscript-string">&quot;low swap: resuming pid %d (%s)\n&quot;</span>, p-&gt;p_pid, p-&gt;p_comm);
+				task_resume(p-&gt;task);
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">P_PCKILL</span>:
+				<span class="enscript-comment">/* Huh? */</span>
+				PROC_SETACTION_STATE(p);
+				proc_unlock(p);
+				printf(<span class="enscript-string">&quot;low swap: attempt to unkill pid %d (%s) ignored\n&quot;</span>, p-&gt;p_pid, p-&gt;p_comm);
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-reference">default</span>:
+				proc_unlock(p);
+		}
+
+	} <span class="enscript-keyword">else</span> 
+		proc_unlock(p);
+
+	proc_rele(p);
+	<span class="enscript-keyword">return</span>(0);
+}
+
+
+
+<span class="enscript-type">struct</span> no_paging_space
+{
+	uint64_t	pcs_max_size;
+	uint64_t	pcs_uniqueid;
+	<span class="enscript-type">int</span>		pcs_pid;
+	<span class="enscript-type">int</span>		pcs_proc_count;
+	uint64_t	pcs_total_size;
+
+	uint64_t	npcs_max_size;
+	uint64_t	npcs_uniqueid;
+	<span class="enscript-type">int</span>		npcs_pid;
+	<span class="enscript-type">int</span>		npcs_proc_count;
+	uint64_t	npcs_total_size;
+
+	<span class="enscript-type">int</span>		apcs_proc_count;
+	uint64_t	apcs_total_size;
+};
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_pcontrol_filter</span>(proc_t p, <span class="enscript-type">void</span> *arg)
+{
+	<span class="enscript-type">struct</span> no_paging_space *nps;
+	uint64_t	compressed;
+
+	nps = (<span class="enscript-type">struct</span> no_paging_space *)arg;
+
+	compressed = get_task_compressed(p-&gt;task);
+
+	<span class="enscript-keyword">if</span> (PROC_CONTROL_STATE(p)) {
+		<span class="enscript-keyword">if</span> (PROC_ACTION_STATE(p) == 0) {
+			<span class="enscript-keyword">if</span> (compressed &gt; nps-&gt;pcs_max_size) {
+				nps-&gt;pcs_pid = p-&gt;p_pid;
+				nps-&gt;pcs_uniqueid = p-&gt;p_uniqueid;
+				nps-&gt;pcs_max_size = compressed;
+			}
+			nps-&gt;pcs_total_size += compressed;
+			nps-&gt;pcs_proc_count++;
+		} <span class="enscript-keyword">else</span> {
+			nps-&gt;apcs_total_size += compressed;
+			nps-&gt;apcs_proc_count++;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (compressed &gt; nps-&gt;npcs_max_size) {
+			nps-&gt;npcs_pid = p-&gt;p_pid;
+			nps-&gt;npcs_uniqueid = p-&gt;p_uniqueid;
+			nps-&gt;npcs_max_size = compressed;
+		}
+		nps-&gt;npcs_total_size += compressed;
+		nps-&gt;npcs_proc_count++;
+
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_pcontrol_null</span>(__unused proc_t p, __unused <span class="enscript-type">void</span> *arg)
+{
+	<span class="enscript-keyword">return</span>(PROC_RETURNED);
+}
+
+
+<span class="enscript-comment">/*
+ * Deal with the low on compressor pool space condition... this function
+ * gets called when we are approaching the limits of the compressor pool or
+ * we are unable to create a new swap file.
+ * Since this eventually creates a memory deadlock situtation, we need to take action to free up
+ * memory resources (both compressed and uncompressed) in order to prevent the system from hanging completely.
+ * There are 2 categories of processes to deal with.  Those that have an action
+ * associated with them by the task itself and those that do not.  Actionable 
+ * tasks can have one of three categories specified:  ones that
+ * can be killed immediately, ones that should be suspended, and ones that should
+ * be throttled.  Processes that do not have an action associated with them are normally
+ * ignored unless they are utilizing such a large percentage of the compressor pool (currently 50%)
+ * that only by killing them can we hope to put the system back into a usable state.
+ */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">NO_PAGING_SPACE_DEBUG</span>	0
+
+<span class="enscript-type">extern</span> uint64_t	vm_compressor_pages_compressed(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">struct</span> timeval	last_no_space_action = {0, 0};
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">no_paging_space_action</span>()
+{
+	proc_t		p;
+	<span class="enscript-type">struct</span> no_paging_space nps;
+	<span class="enscript-type">struct</span> timeval	now;
+
+	<span class="enscript-comment">/*
+	 * Throttle how often we come through here.  Once every 5 seconds should be plenty.
+	 */</span>
+	microtime(&amp;now);
+
+	<span class="enscript-keyword">if</span> (now.tv_sec &lt;= last_no_space_action.tv_sec + 5)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-comment">/*
+	 * Examine all processes and find the biggest (biggest is based on the number of pages this 
+	 * task has in the compressor pool) that has been marked to have some action
+	 * taken when swap space runs out... we also find the biggest that hasn't been marked for
+	 * action.
+	 *
+	 * If the biggest non-actionable task is over the &quot;dangerously big&quot; threashold (currently 50% of
+	 * the total number of pages held by the compressor, we go ahead and kill it since no other task
+	 * can have any real effect on the situation.  Otherwise, we go after the actionable process.
+	 */</span>
+	bzero(&amp;nps, <span class="enscript-keyword">sizeof</span>(nps));
+
+	proc_iterate(PROC_ALLPROCLIST, proc_pcontrol_null, (<span class="enscript-type">void</span> *)NULL, proc_pcontrol_filter, (<span class="enscript-type">void</span> *)&amp;nps);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NO_PAGING_SPACE_DEBUG</span>
+	printf(<span class="enscript-string">&quot;low swap: npcs_proc_count = %d, npcs_total_size = %qd, npcs_max_size = %qd\n&quot;</span>,
+	       nps.npcs_proc_count, nps.npcs_total_size, nps.npcs_max_size);
+	printf(<span class="enscript-string">&quot;low swap: pcs_proc_count = %d, pcs_total_size = %qd, pcs_max_size = %qd\n&quot;</span>,
+	       nps.pcs_proc_count, nps.pcs_total_size, nps.pcs_max_size);
+	printf(<span class="enscript-string">&quot;low swap: apcs_proc_count = %d, apcs_total_size = %qd\n&quot;</span>,
+	       nps.apcs_proc_count, nps.apcs_total_size);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (nps.npcs_max_size &gt; (vm_compressor_pages_compressed() * 50) / 100) {
+		<span class="enscript-comment">/*
+		 * for now we'll knock out any task that has more then 50% of the pages
+		 * held by the compressor
+		 */</span>
+		<span class="enscript-keyword">if</span> ((p = proc_find(nps.npcs_pid)) != PROC_NULL) {
+	
+			<span class="enscript-keyword">if</span> (nps.npcs_uniqueid == p-&gt;p_uniqueid) {
+				<span class="enscript-comment">/*
+				 * verify this is still the same process
+				 * in case the proc exited and the pid got reused while
+				 * we were finishing the proc_iterate and getting to this point
+				 */</span>
+				last_no_space_action = now;
+
+				printf(<span class="enscript-string">&quot;low swap: killing pid %d (%s)\n&quot;</span>, p-&gt;p_pid, p-&gt;p_comm);
+				psignal(p, SIGKILL);
+			
+				proc_rele(p);
+
+				<span class="enscript-keyword">return</span> (0);
+			}
+				
+			proc_rele(p);
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (nps.pcs_max_size &gt; 0) {
+		<span class="enscript-keyword">if</span> ((p = proc_find(nps.pcs_pid)) != PROC_NULL) {
+
+			<span class="enscript-keyword">if</span> (nps.pcs_uniqueid == p-&gt;p_uniqueid) {
+				<span class="enscript-comment">/*
+				 * verify this is still the same process
+				 * in case the proc exited and the pid got reused while
+				 * we were finishing the proc_iterate and getting to this point
+				 */</span>
+				last_no_space_action = now;
+		
+				proc_dopcontrol(p);
+			
+				proc_rele(p);
+				
+				<span class="enscript-keyword">return</span> (1);
+			}
+	
+			proc_rele(p);
+		}
+	}
+	last_no_space_action = now;
+
+	printf(<span class="enscript-string">&quot;low swap: unable to find any eligible processes to take action on\n&quot;</span>);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_trace_log</span>(__unused proc_t p,  <span class="enscript-type">struct</span> proc_trace_log_args *uap, __unused <span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-type">int</span> ret = 0;
+	proc_t target_proc = PROC_NULL;
+	pid_t target_pid = uap-&gt;pid;
+	uint64_t target_uniqueid = uap-&gt;uniqueid;
+	task_t target_task = NULL;
+
+	<span class="enscript-keyword">if</span> (priv_check_cred(kauth_cred_get(), PRIV_PROC_TRACE_INSPECT, 0)) {
+		ret = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	target_proc = proc_find(target_pid);
+	<span class="enscript-keyword">if</span> (target_proc != PROC_NULL) {
+		<span class="enscript-keyword">if</span> (target_uniqueid != proc_uniqueid(target_proc)) {
+			ret = ENOENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+
+		target_task = proc_task(target_proc);
+		<span class="enscript-keyword">if</span> (task_send_trace_memory(target_task, target_pid, target_uniqueid)) {
+			ret = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	} <span class="enscript-keyword">else</span>
+		ret = ENOENT;
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (target_proc != PROC_NULL)
+		proc_rele(target_proc);
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">VM_SCAN_FOR_SHADOW_CHAIN</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">vm_map_shadow_max</span>(vm_map_t map);
+<span class="enscript-type">int</span> <span class="enscript-function-name">proc_shadow_max</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">int</span> <span class="enscript-function-name">proc_shadow_max</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span>		retval, max;
+	proc_t		p;
+	task_t		task;
+	vm_map_t	map;
+
+	max = 0;
+	proc_list_lock();
+	<span class="enscript-keyword">for</span> (p = allproc.lh_first; (p != 0); p = p-&gt;p_list.le_next) {
+		<span class="enscript-keyword">if</span> (p-&gt;p_stat == SIDL)
+			<span class="enscript-keyword">continue</span>;
+		task = p-&gt;task;
+		<span class="enscript-keyword">if</span> (task == NULL) {
+			<span class="enscript-keyword">continue</span>;
+		}
+		map = get_task_map(task);
+		<span class="enscript-keyword">if</span> (map == NULL) {
+			<span class="enscript-keyword">continue</span>;
+		}
+		retval = vm_map_shadow_max(map);
+		<span class="enscript-keyword">if</span> (retval &gt; max) {
+			max = retval;
+		}
+	}
+	proc_list_unlock();
+	<span class="enscript-keyword">return</span> max;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* VM_SCAN_FOR_SHADOW_CHAIN */</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">proc_set_responsible_pid</span>(proc_t target_proc, pid_t responsible_pid);
+<span class="enscript-type">void</span> <span class="enscript-function-name">proc_set_responsible_pid</span>(proc_t target_proc, pid_t responsible_pid)
+{
+	<span class="enscript-keyword">if</span> (target_proc != NULL) {
+		target_proc-&gt;p_responsible_pid = responsible_pid;
+	}
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_chrooted</span>(proc_t p)
+{
+	<span class="enscript-type">int</span> retval = 0;
+
+	<span class="enscript-keyword">if</span> (p) {
+		proc_fdlock(p);
+		retval = (p-&gt;p_fd-&gt;fd_rdir != NULL) ? 1 : 0;
+		proc_fdunlock(p);
+	}
+
+	<span class="enscript-keyword">return</span> retval;
+}
+</pre>
+<hr />
+</body></html>

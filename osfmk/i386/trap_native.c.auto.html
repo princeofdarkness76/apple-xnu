@@ -1,0 +1,209 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>trap_native.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">trap_native.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2009-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+* @OSF_COPYRIGHT@
+*/</span>
+<span class="enscript-comment">/* 
+* Mach Operating System
+* Copyright (c) 1991,1990,1989,1988 Carnegie Mellon University
+* All Rights Reserved.
+* 
+* Permission to use, copy, modify and distribute this software and its
+* documentation is hereby granted, provided that both the copyright
+* notice and this permission notice appear in all copies of the
+* software, derivative works or modified versions, and any portions
+* thereof, and that both notices appear in supporting documentation.
+* 
+* CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+* CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+* ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+* 
+* Carnegie Mellon requests users of this software to return to
+* 
+*  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+*  School of Computer Science
+*  Carnegie Mellon University
+*  Pittsburgh PA 15213-3890
+* 
+* any improvements or extensions that they make and grant Carnegie Mellon
+* the rights to redistribute these changes.
+*/</span>
+<span class="enscript-comment">/*
+*/</span>
+
+<span class="enscript-comment">/*
+* Hardware trap/fault handler.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/eflags.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/trap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/fpu.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/misc_protos.h&gt;</span> <span class="enscript-comment">/* panic_io_port_read() */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/exception.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/i386/thread_status.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/exception.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/postcode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp_desc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/proc_reg.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MCA</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_check.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/i386/syscall_sw.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/pal_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kprintf_break_lock</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kprint_state</span>(x86_saved_state64_t *saved_state);
+<span class="enscript-type">void</span> <span class="enscript-function-name">panic_64</span>(x86_saved_state_t *, <span class="enscript-type">int</span>, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *, boolean_t);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">volatile</span> <span class="enscript-type">int</span> panic_double_fault_cpu;
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>) &amp;&amp; <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-comment">/*
+ * K64 debug - fatal handler for debug code in the trap vectors.
+ */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">panic_idt64</span>(x86_saved_state_t *rsp);
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">panic_idt64</span>(x86_saved_state_t *rsp)
+{
+	kprint_state(saved_state64(rsp));
+	panic(<span class="enscript-string">&quot;panic_idt64&quot;</span>);
+}
+#<span class="enscript-reference">endif</span>
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">panic_64</span>(x86_saved_state_t *sp, __unused <span class="enscript-type">int</span> pc, __unused <span class="enscript-type">const</span> <span class="enscript-type">char</span> *msg, boolean_t do_mca_dump)
+{
+	<span class="enscript-comment">/* Set postcode (DEBUG only) */</span>
+	postcode(pc);
+
+	<span class="enscript-comment">/*
+	 * Issue an I/O port read if one has been requested - this is an
+	 * event logic analyzers can use as a trigger point.
+	 */</span>
+	panic_io_port_read();
+
+	
+	<span class="enscript-comment">/*
+	 * Break kprintf lock in case of recursion,
+	 * and record originally faulted instruction address.
+	 */</span>
+	kprintf_break_lock();
+
+	<span class="enscript-keyword">if</span> (do_mca_dump) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MCA</span>
+		<span class="enscript-comment">/*
+		 * Dump the contents of the machine check MSRs (if any).
+		 */</span>
+		mca_dump();
+#<span class="enscript-reference">endif</span>
+	}
+
+	x86_saved_state64_t *regs = saved_state64(sp);
+	panic(<span class="enscript-string">&quot;%s at 0x%016llx, registers:\n&quot;</span>
+	      <span class="enscript-string">&quot;CR0: 0x%016lx, CR2: 0x%016lx, CR3: 0x%016lx, CR4: 0x%016lx\n&quot;</span>
+	      <span class="enscript-string">&quot;RAX: 0x%016llx, RBX: 0x%016llx, RCX: 0x%016llx, RDX: 0x%016llx\n&quot;</span>
+	      <span class="enscript-string">&quot;RSP: 0x%016llx, RBP: 0x%016llx, RSI: 0x%016llx, RDI: 0x%016llx\n&quot;</span>
+	      <span class="enscript-string">&quot;R8:  0x%016llx, R9:  0x%016llx, R10: 0x%016llx, R11: 0x%016llx\n&quot;</span>
+	      <span class="enscript-string">&quot;R12: 0x%016llx, R13: 0x%016llx, R14: 0x%016llx, R15: 0x%016llx\n&quot;</span>
+	      <span class="enscript-string">&quot;RFL: 0x%016llx, RIP: 0x%016llx, CS:  0x%016llx, SS:  0x%016llx\n&quot;</span>
+	      <span class="enscript-string">&quot;Error code: 0x%016llx%s\n&quot;</span>,
+	      msg,
+		  regs-&gt;isf.rip,
+	      get_cr0(), get_cr2(), get_cr3_raw(), get_cr4(),
+	      regs-&gt;rax, regs-&gt;rbx, regs-&gt;rcx, regs-&gt;rdx,
+	      regs-&gt;isf.rsp, regs-&gt;rbp, regs-&gt;rsi, regs-&gt;rdi,
+	      regs-&gt;r8,  regs-&gt;r9,  regs-&gt;r10, regs-&gt;r11,
+	      regs-&gt;r12, regs-&gt;r13, regs-&gt;r14, regs-&gt;r15,
+	      regs-&gt;isf.rflags, regs-&gt;isf.rip, regs-&gt;isf.cs &amp; 0xFFFF,  regs-&gt;isf.ss &amp; 0xFFFF,
+	      regs-&gt;isf.err, virtualized ? <span class="enscript-string">&quot; VMM&quot;</span> : <span class="enscript-string">&quot;&quot;</span>);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">panic_double_fault64</span>(x86_saved_state_t *sp)
+{
+	(<span class="enscript-type">void</span>)OSCompareAndSwap((UInt32) -1, (UInt32) cpu_number(), (<span class="enscript-type">volatile</span> UInt32 *)&amp;panic_double_fault_cpu);
+	panic_64(sp, PANIC_DOUBLE_FAULT, <span class="enscript-string">&quot;Double fault&quot;</span>, FALSE);
+
+}
+<span class="enscript-type">void</span>
+
+<span class="enscript-function-name">panic_machine_check64</span>(x86_saved_state_t *sp)
+{
+	panic_64(sp, PANIC_MACHINE_CHECK, <span class="enscript-string">&quot;Machine Check&quot;</span>, TRUE);
+
+}
+</pre>
+<hr />
+</body></html>

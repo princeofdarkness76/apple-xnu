@@ -1,0 +1,772 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>action.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">action.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2011 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * Called from a trigger. Actually takes the data from the different
+ * modules and puts them in a buffer
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+<span class="enscript-comment">// #include &lt;libkern/libkern.h&gt;
+</span>#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span> <span class="enscript-comment">/* panic */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;chud/chud_xnu.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/kperf.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/buffer.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/timetrigger.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/threadinfo.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/callstack.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/sample.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/action.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/context.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/ast.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/kperf_kpc.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ACTION_MAX</span> 32
+
+<span class="enscript-comment">/* the list of different actions to take */</span>
+<span class="enscript-type">struct</span> action
+{
+	uint32_t sample;
+	uint32_t userdata;
+	<span class="enscript-type">int</span> pid_filter;
+};
+
+<span class="enscript-comment">/* the list of actions */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> actionc = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> action *actionv = NULL;
+
+<span class="enscript-comment">/* manage callbacks from system */</span>
+
+<span class="enscript-comment">/* callback set for kdebug */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> kperf_kdbg_callback_set = 0;
+<span class="enscript-comment">/* whether to record callstacks on kdebug events */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> kdebug_callstacks = 0;
+<span class="enscript-comment">/* the action ID to trigger on signposts */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> kperf_signpost_action = 0;
+
+<span class="enscript-comment">/* callback set for context-switch */</span>
+<span class="enscript-type">int</span> kperf_cswitch_callback_set = 0;
+<span class="enscript-comment">/* should emit tracepoint on context switch */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> kdebug_cswitch = 0;
+<span class="enscript-comment">/* the action ID to trigger on context switches */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> kperf_cswitch_action = 0;
+
+<span class="enscript-comment">/* indirect hooks to play nice with CHUD for the transition to kperf */</span>
+kern_return_t <span class="enscript-function-name">chudxnu_kdebug_callback_enter</span>(chudxnu_kdebug_callback_func_t fn);
+kern_return_t <span class="enscript-function-name">chudxnu_kdebug_callback_cancel</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/* Do the real work! */</span>
+<span class="enscript-comment">/* this can be called in any context ... right? */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">kperf_sample_internal</span>(<span class="enscript-type">struct</span> kperf_sample *sbuf,
+                      <span class="enscript-type">struct</span> kperf_context *context,
+                      <span class="enscript-type">unsigned</span> sample_what, <span class="enscript-type">unsigned</span> sample_flags,
+                      <span class="enscript-type">unsigned</span> actionid)
+{
+	boolean_t enabled;
+	<span class="enscript-type">int</span> did_ucallstack = 0, did_tinfo_extra = 0;
+	uint32_t userdata;
+
+	<span class="enscript-comment">/* not much point continuing here, but what to do ? return
+	 * Shutdown? cut a tracepoint and continue?
+	 */</span>
+	<span class="enscript-keyword">if</span> (sample_what == 0) {
+		<span class="enscript-keyword">return</span> SAMPLE_CONTINUE;
+	}
+
+	<span class="enscript-type">int</span> is_kernel = (context-&gt;cur_pid == 0);
+
+	sbuf-&gt;kcallstack.nframes = 0;
+	sbuf-&gt;kcallstack.flags = CALLSTACK_VALID;
+	sbuf-&gt;ucallstack.nframes = 0;
+	sbuf-&gt;ucallstack.flags = CALLSTACK_VALID;
+
+	<span class="enscript-comment">/* an event occurred. Sample everything and dump it in a
+	 * buffer.
+	 */</span>
+
+	<span class="enscript-comment">/* collect data from samplers */</span>
+	<span class="enscript-keyword">if</span> (sample_what &amp; SAMPLER_TINFO) {
+		kperf_threadinfo_sample(&amp;sbuf-&gt;threadinfo, context);
+
+		<span class="enscript-comment">/* See if we should drop idle thread samples */</span>
+		<span class="enscript-keyword">if</span> (!(sample_flags &amp; SAMPLE_FLAG_IDLE_THREADS)) {
+			<span class="enscript-keyword">if</span> (sbuf-&gt;threadinfo.runmode &amp; 0x40) {
+				<span class="enscript-keyword">return</span> SAMPLE_CONTINUE;
+			}
+		}
+	}
+
+	<span class="enscript-keyword">if</span> ((sample_what &amp; SAMPLER_KSTACK) &amp;&amp; !(sample_flags &amp; SAMPLE_FLAG_EMPTY_CALLSTACK)) {
+		kperf_kcallstack_sample(&amp;(sbuf-&gt;kcallstack), context);
+	}
+
+	<span class="enscript-comment">/* sensitive ones */</span>
+	<span class="enscript-keyword">if</span> (!is_kernel) {
+		<span class="enscript-keyword">if</span> (sample_what &amp; SAMPLER_MEMINFO) {
+			kperf_meminfo_sample(&amp;(sbuf-&gt;meminfo), context);
+		}
+
+		<span class="enscript-keyword">if</span> (sample_flags &amp; SAMPLE_FLAG_PEND_USER) {
+			<span class="enscript-keyword">if</span> ((sample_what &amp; SAMPLER_USTACK)
+			    &amp;&amp; !(sample_flags &amp; SAMPLE_FLAG_EMPTY_CALLSTACK))
+			{
+				did_ucallstack = kperf_ucallstack_pend(context);
+			}
+
+			<span class="enscript-keyword">if</span> (sample_what &amp; SAMPLER_TINFOEX) {
+				did_tinfo_extra = kperf_threadinfo_extra_pend(context);
+			}
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> ((sample_what &amp; SAMPLER_USTACK)
+			    &amp;&amp; !(sample_flags &amp; SAMPLE_FLAG_EMPTY_CALLSTACK))
+			{
+				kperf_ucallstack_sample(&amp;(sbuf-&gt;ucallstack), context);
+			}
+
+			<span class="enscript-keyword">if</span> (sample_what &amp; SAMPLER_TINFOEX) {
+				kperf_threadinfo_extra_sample(&amp;(sbuf-&gt;tinfo_ex),
+				                              context);
+			}
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (sample_what &amp; SAMPLER_PMC_THREAD) {
+		kperf_kpc_thread_sample(&amp;(sbuf-&gt;kpcdata), sample_what);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sample_what &amp; SAMPLER_PMC_CPU) {
+		kperf_kpc_cpu_sample(&amp;(sbuf-&gt;kpcdata), sample_what);
+	}
+
+	<span class="enscript-comment">/* lookup the user tag, if any */</span>
+	<span class="enscript-keyword">if</span> (actionid &amp;&amp; (actionid &lt;= actionc)) {
+		userdata = actionv[actionid - 1].userdata;
+	} <span class="enscript-keyword">else</span> {
+		userdata = actionid;
+	}
+
+	<span class="enscript-comment">/* stash the data into the buffer
+	 * interrupts off to ensure we don't get split
+	 */</span>
+	enabled = ml_set_interrupts_enabled(FALSE);
+
+	BUF_DATA(PERF_GEN_EVENT | DBG_FUNC_START, sample_what,
+	         actionid, userdata, sample_flags);
+
+	<span class="enscript-comment">/* dump threadinfo */</span>
+	<span class="enscript-keyword">if</span> (sample_what &amp; SAMPLER_TINFO) {
+		kperf_threadinfo_log( &amp;sbuf-&gt;threadinfo );
+	}
+
+	<span class="enscript-comment">/* dump kcallstack */</span>
+	<span class="enscript-keyword">if</span> (sample_what &amp; SAMPLER_KSTACK) {
+		kperf_kcallstack_log( &amp;sbuf-&gt;kcallstack );
+	}
+
+	<span class="enscript-comment">/* dump user stuff */</span>
+	<span class="enscript-keyword">if</span> (!is_kernel) {
+		<span class="enscript-comment">/* dump meminfo */</span>
+		<span class="enscript-keyword">if</span> (sample_what &amp; SAMPLER_MEMINFO) {
+			kperf_meminfo_log(&amp;(sbuf-&gt;meminfo));
+		}
+
+		<span class="enscript-keyword">if</span> (sample_flags &amp; SAMPLE_FLAG_PEND_USER) {
+			<span class="enscript-keyword">if</span> (did_ucallstack) {
+				BUF_INFO1(PERF_CS_UPEND, 0);
+			}
+
+			<span class="enscript-keyword">if</span> (did_tinfo_extra) {
+				BUF_INFO1(PERF_TI_XPEND, 0);
+			}
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (sample_what &amp; SAMPLER_USTACK) {
+				kperf_ucallstack_log(&amp;(sbuf-&gt;ucallstack));
+			}
+
+			<span class="enscript-keyword">if</span> (sample_what &amp; SAMPLER_TINFOEX) {
+				kperf_threadinfo_extra_log(&amp;(sbuf-&gt;tinfo_ex));
+			}
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (sample_what &amp; SAMPLER_PMC_THREAD) {
+		kperf_kpc_thread_log(&amp;(sbuf-&gt;kpcdata));
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sample_what &amp; SAMPLER_PMC_CPU) {
+		kperf_kpc_cpu_log(&amp;(sbuf-&gt;kpcdata));
+	}
+
+	BUF_DATA1(PERF_GEN_EVENT | DBG_FUNC_END, sample_what);
+
+	<span class="enscript-comment">/* intrs back on */</span>
+	ml_set_interrupts_enabled(enabled);
+
+	<span class="enscript-keyword">return</span> SAMPLE_CONTINUE;
+}
+
+<span class="enscript-comment">/* Translate actionid into sample bits and take a sample */</span>
+kern_return_t
+<span class="enscript-function-name">kperf_sample</span>(<span class="enscript-type">struct</span> kperf_sample *sbuf,
+             <span class="enscript-type">struct</span> kperf_context *context,
+             <span class="enscript-type">unsigned</span> actionid, <span class="enscript-type">unsigned</span> sample_flags)
+{
+	<span class="enscript-type">unsigned</span> sample_what = 0;
+	<span class="enscript-type">int</span> pid_filter;
+
+	<span class="enscript-comment">/* work out what to sample, if anything */</span>
+	<span class="enscript-keyword">if</span> ((actionid &gt; actionc) || (actionid == 0)) {
+		<span class="enscript-keyword">return</span> SAMPLE_SHUTDOWN;
+	}
+
+	<span class="enscript-comment">/* check the pid filter against the context's current pid.
+	 * filter pid == -1 means any pid
+	 */</span>
+	pid_filter = actionv[actionid - 1].pid_filter;
+	<span class="enscript-keyword">if</span> ((pid_filter != -1) &amp;&amp; (pid_filter != context-&gt;cur_pid)) {
+		<span class="enscript-keyword">return</span> SAMPLE_CONTINUE;
+	}
+
+	<span class="enscript-comment">/* the samplers to run */</span>
+	sample_what = actionv[actionid - 1].sample;
+
+	<span class="enscript-comment">/* do the actual sample operation */</span>
+	<span class="enscript-keyword">return</span> kperf_sample_internal(sbuf, context, sample_what,
+	                             sample_flags, actionid);
+}
+
+<span class="enscript-comment">/* ast callback on a thread */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kperf_thread_ast_handler</span>(thread_t thread)
+{
+	<span class="enscript-type">int</span> r;
+	uint32_t t_chud;
+	<span class="enscript-type">unsigned</span> sample_what = 0;
+	<span class="enscript-comment">/* we know we're on a thread, so let's do stuff */</span>
+	task_t task = NULL;
+
+	BUF_INFO1(PERF_AST_HNDLR | DBG_FUNC_START, thread);
+
+	<span class="enscript-comment">/* use ~2kb of the stack for the sample, should be ok since we're in the ast */</span>
+	<span class="enscript-type">struct</span> kperf_sample sbuf;
+	memset(&amp;sbuf, 0, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kperf_sample));
+
+	<span class="enscript-comment">/* make a context, take a sample */</span>
+	<span class="enscript-type">struct</span> kperf_context ctx;
+	ctx.cur_thread = thread;
+	ctx.cur_pid = -1;
+
+	task = chudxnu_task_for_thread(thread);
+	<span class="enscript-keyword">if</span> (task) {
+		ctx.cur_pid = chudxnu_pid_for_task(task);
+	}
+
+	<span class="enscript-comment">/* decode the chud bits so we know what to sample */</span>
+	t_chud = kperf_get_thread_bits(thread);
+
+	<span class="enscript-keyword">if</span> (t_chud &amp; T_AST_NAME) {
+		sample_what |= SAMPLER_TINFOEX;
+	}
+
+	<span class="enscript-keyword">if</span> (t_chud &amp; T_AST_CALLSTACK) {
+		sample_what |= SAMPLER_USTACK;
+		sample_what |= SAMPLER_TINFO;
+	}
+
+	<span class="enscript-comment">/* do the sample, just of the user stuff */</span>
+	r = kperf_sample_internal(&amp;sbuf, &amp;ctx, sample_what, 0, 0);
+
+	BUF_INFO1(PERF_AST_HNDLR | DBG_FUNC_END, r);
+}
+
+<span class="enscript-comment">/* register AST bits */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_ast_pend</span>(thread_t cur_thread, uint32_t check_bits,
+               uint32_t set_bits)
+{
+	<span class="enscript-comment">/* pend on the thread */</span>
+	uint32_t t_chud, set_done = 0;
+
+	<span class="enscript-comment">/* can only pend on the current thread */</span>
+	<span class="enscript-keyword">if</span> (cur_thread != chudxnu_current_thread()) {
+		panic(<span class="enscript-string">&quot;pending to non-current thread&quot;</span>);
+	}
+
+	<span class="enscript-comment">/* get our current bits */</span>
+	t_chud = kperf_get_thread_bits(cur_thread);
+
+	<span class="enscript-comment">/* see if it's already been done or pended */</span>
+	<span class="enscript-keyword">if</span> (!(t_chud &amp; check_bits)) {
+		<span class="enscript-comment">/* set the bit on the thread */</span>
+		t_chud |= set_bits;
+		kperf_set_thread_bits(cur_thread, t_chud);
+
+		<span class="enscript-comment">/* set the actual AST */</span>
+		kperf_set_thread_ast(cur_thread);
+
+		set_done = 1;
+	}
+
+	<span class="enscript-keyword">return</span> set_done;
+}
+
+<span class="enscript-comment">/*
+ * kdebug callback &amp; stack management
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IS_END</span>(debugid)           ((debugid &amp; 3) == DBG_FUNC_END)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IS_MIG</span>(debugid)           (IS_END(debugid) &amp;&amp; ((debugid &amp; 0xff000000U) == KDBG_CLASS_ENCODE((unsigned)DBG_MIG, 0U)))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IS_MACH_SYSCALL</span>(debugid)  (IS_END(debugid) &amp;&amp; (KDBG_CLASS_DECODE(debugid) == KDBG_CLASS_ENCODE(DBG_MACH, DBG_MACH_EXCP_SC)))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IS_VM_FAULT</span>(debugid)      (IS_END(debugid) &amp;&amp; (KDBG_CLASS_DECODE(debugid) == KDBG_CLASS_ENCODE(DBG_MACH, DBG_MACH_VM)))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IS_BSD_SYSCTLL</span>(debugid)   (IS_END(debugid) &amp;&amp; (KDBG_CLASS_DECODE(debugid) == KDBG_CLASS_ENCODE(DBG_BSD, DBG_BSD_EXCP_SC)))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IS_APPS_SIGNPOST</span>(debugid) (KDBG_CLASS_DECODE(debugid) == KDBG_CLASS_ENCODE(DBG_APPS, DBG_MACH_CHUD))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IS_MACH_SIGNPOST</span>(debugid) (KDBG_CLASS_DECODE(debugid) == KDBG_CLASS_ENCODE(DBG_MACH, DBG_MACH_CHUD))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IS_ENERGYTRACE</span>(debugid)   ((debugid &amp; 0xff000000U) == KDBG_CLASS_ENCODE((unsigned)DBG_ENERGYTRACE, 0U))
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kperf_kdebug_callback</span>(uint32_t debugid)
+{
+	<span class="enscript-type">int</span> cur_pid = 0;
+	task_t task = NULL;
+
+	<span class="enscript-keyword">if</span> (!kdebug_callstacks &amp;&amp; !kperf_signpost_action) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* if we're looking at a kperf tracepoint, don't recurse */</span>
+	<span class="enscript-keyword">if</span> ((debugid &amp; 0xff000000) == KDBG_CLASS_ENCODE(DBG_PERF, 0)) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* ensure interrupts are already off thanks to kdebug */</span>
+	<span class="enscript-keyword">if</span> (ml_get_interrupts_enabled()) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* make sure we're not being called recursively.  */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NOTYET</span>
+	<span class="enscript-keyword">if</span> (kperf_kdbg_recurse(KPERF_RECURSE_IN)) {
+		<span class="enscript-keyword">return</span>;
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* check the happy list of trace codes */</span>
+	<span class="enscript-keyword">if</span>(!(IS_MIG(debugid)
+	     || IS_MACH_SYSCALL(debugid)
+	     || IS_VM_FAULT(debugid)
+	     || IS_BSD_SYSCTLL(debugid)
+	     || IS_MACH_SIGNPOST(debugid)
+	     || IS_ENERGYTRACE(debugid)
+	     || IS_APPS_SIGNPOST(debugid)))
+	{
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* check for kernel */</span>
+	thread_t thread = chudxnu_current_thread();
+	task = chudxnu_task_for_thread(thread);
+	<span class="enscript-keyword">if</span> (task) {
+		cur_pid = chudxnu_pid_for_task(task);
+	}
+	<span class="enscript-keyword">if</span> (!cur_pid) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (kdebug_callstacks) {
+		<span class="enscript-comment">/* dicing with death */</span>
+		BUF_INFO2(PERF_KDBG_HNDLR, debugid, cur_pid);
+
+		<span class="enscript-comment">/* pend the AST */</span>
+		kperf_ast_pend( thread, T_AST_CALLSTACK, T_AST_CALLSTACK );
+	}
+
+	<span class="enscript-keyword">if</span> (kperf_signpost_action &amp;&amp; (IS_MACH_SIGNPOST(debugid)
+	    || IS_APPS_SIGNPOST(debugid)))
+	{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NOTYET</span>
+		<span class="enscript-comment">/* make sure we're not being called recursively.  */</span>
+		<span class="enscript-keyword">if</span>(kperf_kdbg_recurse(KPERF_RECURSE_IN)) {
+			<span class="enscript-keyword">return</span>;
+		}
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-comment">/* setup a context */</span>
+		<span class="enscript-type">struct</span> kperf_context ctx;
+		<span class="enscript-type">struct</span> kperf_sample *intbuf = NULL;
+		BUF_INFO2(PERF_SIGNPOST_HNDLR | DBG_FUNC_START, debugid, cur_pid);
+
+		ctx.cur_thread = thread;
+		ctx.cur_pid = cur_pid;
+		ctx.trigger_type = TRIGGER_TYPE_TRACE;
+		ctx.trigger_id = 0;
+
+		<span class="enscript-comment">/* CPU sample buffer -- only valid with interrupts off (above)
+		* Technically this isn't true -- tracepoints can, and often
+		* are, cut from interrupt handlers, but none of those tracepoints
+		* should make it this far.
+		*/</span>
+		intbuf = kperf_intr_sample_buffer();
+
+		<span class="enscript-comment">/* do the sample */</span>
+		kperf_sample(intbuf, &amp;ctx, kperf_signpost_action,
+		             SAMPLE_FLAG_PEND_USER);
+
+		BUF_INFO2(PERF_SIGNPOST_HNDLR | DBG_FUNC_END, debugid, cur_pid);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NOTYET</span>
+		<span class="enscript-comment">/* no longer recursive */</span>
+		kperf_kdbg_recurse(KPERF_RECURSE_OUT);
+#<span class="enscript-reference">endif</span>
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kperf_kdbg_callback_update</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">unsigned</span> old_callback_set = kperf_kdbg_callback_set;
+
+	<span class="enscript-comment">/* compute new callback state */</span>
+	kperf_kdbg_callback_set = kdebug_callstacks || kperf_signpost_action;
+
+	<span class="enscript-keyword">if</span> (old_callback_set &amp;&amp; !kperf_kdbg_callback_set) {
+		<span class="enscript-comment">/* callback should no longer be set */</span>
+		chudxnu_kdebug_callback_cancel();
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!old_callback_set &amp;&amp; kperf_kdbg_callback_set) {
+		<span class="enscript-comment">/* callback must now be set */</span>
+		chudxnu_kdebug_callback_enter(NULL);
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_kdbg_get_stacks</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> kdebug_callstacks;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_kdbg_set_stacks</span>(<span class="enscript-type">int</span> newval)
+{
+	kdebug_callstacks = newval;
+	kperf_kdbg_callback_update();
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_signpost_action_get</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> kperf_signpost_action;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_signpost_action_set</span>(<span class="enscript-type">int</span> newval)
+{
+	kperf_signpost_action = newval;
+	kperf_kdbg_callback_update();
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Thread switch
+ */</span>
+
+<span class="enscript-comment">/* called from context switch handler */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kperf_switch_context</span>(__unused thread_t old, thread_t new)
+{
+	task_t task = get_threadtask(new);
+	<span class="enscript-type">int</span> pid = chudxnu_pid_for_task(task);
+
+	<span class="enscript-comment">/* cut a tracepoint to tell us what the new thread's PID is
+	 * for Instruments
+	 */</span>
+	BUF_DATA2(PERF_TI_CSWITCH, thread_tid(new), pid);
+
+	<span class="enscript-comment">/* trigger action after counters have been updated */</span>
+	<span class="enscript-keyword">if</span> (kperf_cswitch_action) {
+		<span class="enscript-type">struct</span> kperf_sample sbuf;
+		<span class="enscript-type">struct</span> kperf_context ctx;
+		<span class="enscript-type">int</span> r;
+
+		BUF_DATA1(PERF_CSWITCH_HNDLR | DBG_FUNC_START, 0);
+
+		ctx.cur_pid = 0;
+		ctx.cur_thread = old;
+
+		<span class="enscript-comment">/* get PID for context */</span>
+		task_t old_task = chudxnu_task_for_thread(ctx.cur_thread);
+		<span class="enscript-keyword">if</span> (old_task) {
+			ctx.cur_pid = chudxnu_pid_for_task(old_task);
+		}
+
+		ctx.trigger_type = TRIGGER_TYPE_CSWITCH;
+		ctx.trigger_id = 0;
+
+		r = kperf_sample(&amp;sbuf, &amp;ctx, kperf_cswitch_action,
+			             SAMPLE_FLAG_PEND_USER);
+
+		BUF_INFO1(PERF_CSWITCH_HNDLR | DBG_FUNC_END, r);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kperf_cswitch_callback_update</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">unsigned</span> old_callback_set = kperf_cswitch_callback_set;
+
+	<span class="enscript-type">unsigned</span> new_callback_set = kdebug_cswitch || kperf_cswitch_action;
+
+	<span class="enscript-keyword">if</span> (old_callback_set &amp;&amp; !new_callback_set) {
+		kperf_cswitch_callback_set = 0;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!old_callback_set &amp;&amp; new_callback_set) {
+		kperf_cswitch_callback_set = 1;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	kperf_kpc_cswitch_callback_update();
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_kdbg_cswitch_get</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> kdebug_cswitch;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_kdbg_cswitch_set</span>(<span class="enscript-type">int</span> newval)
+{
+	kdebug_cswitch = newval;
+	kperf_cswitch_callback_update();
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_cswitch_action_get</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> kperf_cswitch_action;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_cswitch_action_set</span>(<span class="enscript-type">int</span> newval)
+{
+	kperf_cswitch_action = newval;
+	kperf_cswitch_callback_update();
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Action configuration
+ */</span>
+<span class="enscript-type">unsigned</span>
+<span class="enscript-function-name">kperf_action_get_count</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> actionc;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_action_set_samplers</span>(<span class="enscript-type">unsigned</span> actionid, uint32_t samplers)
+{
+	<span class="enscript-keyword">if</span> ((actionid &gt; actionc) || (actionid == 0)) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-comment">/* disallow both CPU and thread counters to be sampled in the same
+	 * action */</span>
+	<span class="enscript-keyword">if</span> ((samplers &amp; SAMPLER_PMC_THREAD) &amp;&amp; (samplers &amp; SAMPLER_PMC_CPU)) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	actionv[actionid - 1].sample = samplers;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_action_get_samplers</span>(<span class="enscript-type">unsigned</span> actionid, uint32_t *samplers_out)
+{
+	<span class="enscript-keyword">if</span> ((actionid &gt; actionc)) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-keyword">if</span> (actionid == 0) {
+		*samplers_out = 0; <span class="enscript-comment">/* &quot;NULL&quot; action */</span>
+	} <span class="enscript-keyword">else</span> {
+		*samplers_out = actionv[actionid - 1].sample;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_action_set_userdata</span>(<span class="enscript-type">unsigned</span> actionid, uint32_t userdata)
+{
+	<span class="enscript-keyword">if</span> ((actionid &gt; actionc) || (actionid == 0)) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	actionv[actionid - 1].userdata = userdata;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_action_get_userdata</span>(<span class="enscript-type">unsigned</span> actionid, uint32_t *userdata_out)
+{
+	<span class="enscript-keyword">if</span> ((actionid &gt; actionc)) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-keyword">if</span> (actionid == 0) {
+		*userdata_out = 0; <span class="enscript-comment">/* &quot;NULL&quot; action */</span>
+	} <span class="enscript-keyword">else</span> {
+		*userdata_out = actionv[actionid - 1].userdata;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_action_set_filter</span>(<span class="enscript-type">unsigned</span> actionid, <span class="enscript-type">int</span> pid)
+{
+	<span class="enscript-keyword">if</span> ((actionid &gt; actionc) || (actionid == 0)) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	actionv[actionid - 1].pid_filter = pid;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_action_get_filter</span>(<span class="enscript-type">unsigned</span> actionid, <span class="enscript-type">int</span> *pid_out)
+{
+	<span class="enscript-keyword">if</span> ((actionid &gt; actionc)) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-keyword">if</span> (actionid == 0) {
+		*pid_out = -1; <span class="enscript-comment">/* &quot;NULL&quot; action */</span>
+	} <span class="enscript-keyword">else</span> {
+		*pid_out = actionv[actionid - 1].pid_filter;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_action_set_count</span>(<span class="enscript-type">unsigned</span> count)
+{
+	<span class="enscript-type">struct</span> action *new_actionv = NULL, *old_actionv = NULL;
+	<span class="enscript-type">unsigned</span> old_count, i;
+
+	<span class="enscript-comment">/* easy no-op */</span>
+	<span class="enscript-keyword">if</span> (count == actionc) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-comment">/* TODO: allow shrinking? */</span>
+	<span class="enscript-keyword">if</span> (count &lt; actionc) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-comment">/* cap it for good measure */</span>
+	<span class="enscript-keyword">if</span> (count &gt; ACTION_MAX) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-comment">/* creating the action arror for the first time. create a few
+	 * more things, too.
+	 */</span>
+	<span class="enscript-keyword">if</span> (actionc == 0) {
+		<span class="enscript-type">int</span> r;
+		r = kperf_init();
+
+		<span class="enscript-keyword">if</span> (r != 0) {
+			<span class="enscript-keyword">return</span> r;
+		}
+	}
+
+	<span class="enscript-comment">/* create a new array */</span>
+	new_actionv = kalloc(count * <span class="enscript-keyword">sizeof</span>(*new_actionv));
+	<span class="enscript-keyword">if</span> (new_actionv == NULL) {
+		<span class="enscript-keyword">return</span> ENOMEM;
+	}
+
+	old_actionv = actionv;
+	old_count = actionc;
+
+	<span class="enscript-keyword">if</span> (old_actionv != NULL) {
+		memcpy(new_actionv, actionv, actionc * <span class="enscript-keyword">sizeof</span>(*actionv));
+	}
+
+	memset(&amp;(new_actionv[actionc]), 0, (count - old_count) * <span class="enscript-keyword">sizeof</span>(*actionv));
+
+	<span class="enscript-keyword">for</span> (i = old_count; i &lt; count; i++) {
+		new_actionv[i].pid_filter = -1;
+	}
+
+	actionv = new_actionv;
+	actionc = count;
+
+	<span class="enscript-keyword">if</span> (old_actionv != NULL) {
+		kfree(old_actionv, old_count * <span class="enscript-keyword">sizeof</span>(*actionv));
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,1422 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>inflate.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">inflate.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* inflate.c -- zlib decompression
+ * Copyright (C) 1995-2005 Mark Adler
+ * For conditions of distribution and use, see copyright notice in zlib.h
+ */</span>
+
+<span class="enscript-comment">/*
+ * Change history:
+ *
+ * 1.2.beta0    24 Nov 2002
+ * - First version -- complete rewrite of inflate to simplify code, avoid
+ *   creation of window when not needed, minimize use of window when it is
+ *   needed, make inffast.c even faster, implement gzip decoding, and to
+ *   improve code readability and style over the previous zlib inflate code
+ *
+ * 1.2.beta1    25 Nov 2002
+ * - Use pointers for available input and output checking in inffast.c
+ * - Remove input and output counters in inffast.c
+ * - Change inffast.c entry and loop from avail_in &gt;= 7 to &gt;= 6
+ * - Remove unnecessary second byte pull from length extra in inffast.c
+ * - Unroll direct copy to three copies per loop in inffast.c
+ *
+ * 1.2.beta2    4 Dec 2002
+ * - Change external routine names to reduce potential conflicts
+ * - Correct filename to inffixed.h for fixed tables in inflate.c
+ * - Make hbuf[] unsigned char to match parameter type in inflate.c
+ * - Change strm-&gt;next_out[-state-&gt;offset] to *(strm-&gt;next_out - state-&gt;offset)
+ *   to avoid negation problem on Alphas (64 bit) in inflate.c
+ *
+ * 1.2.beta3    22 Dec 2002
+ * - Add comments on state-&gt;bits assertion in inffast.c
+ * - Add comments on op field in inftrees.h
+ * - Fix bug in reuse of allocated window after inflateReset()
+ * - Remove bit fields--back to byte structure for speed
+ * - Remove distance extra == 0 check in inflate_fast()--only helps for lengths
+ * - Change post-increments to pre-increments in inflate_fast(), PPC biased?
+ * - Add compile time option, POSTINC, to use post-increments instead (Intel?)
+ * - Make MATCH copy in inflate() much faster for when inflate_fast() not used
+ * - Use local copies of stream next and avail values, as well as local bit
+ *   buffer and bit count in inflate()--for speed when inflate_fast() not used
+ *
+ * 1.2.beta4    1 Jan 2003
+ * - Split ptr - 257 statements in inflate_table() to avoid compiler warnings
+ * - Move a comment on output buffer sizes from inffast.c to inflate.c
+ * - Add comments in inffast.c to introduce the inflate_fast() routine
+ * - Rearrange window copies in inflate_fast() for speed and simplification
+ * - Unroll last copy for window match in inflate_fast()
+ * - Use local copies of window variables in inflate_fast() for speed
+ * - Pull out common write == 0 case for speed in inflate_fast()
+ * - Make op and len in inflate_fast() unsigned for consistency
+ * - Add FAR to lcode and dcode declarations in inflate_fast()
+ * - Simplified bad distance check in inflate_fast()
+ * - Added inflateBackInit(), inflateBack(), and inflateBackEnd() in new
+ *   source file infback.c to provide a call-back interface to inflate for
+ *   programs like gzip and unzip -- uses window as output buffer to avoid
+ *   window copying
+ *
+ * 1.2.beta5    1 Jan 2003
+ * - Improved inflateBack() interface to allow the caller to provide initial
+ *   input in strm.
+ * - Fixed stored blocks bug in inflateBack()
+ *
+ * 1.2.beta6    4 Jan 2003
+ * - Added comments in inffast.c on effectiveness of POSTINC
+ * - Typecasting all around to reduce compiler warnings
+ * - Changed loops from while (1) or do {} while (1) to for (;;), again to
+ *   make compilers happy
+ * - Changed type of window in inflateBackInit() to unsigned char *
+ *
+ * 1.2.beta7    27 Jan 2003
+ * - Changed many types to unsigned or unsigned short to avoid warnings
+ * - Added inflateCopy() function
+ *
+ * 1.2.0        9 Mar 2003
+ * - Changed inflateBack() interface to provide separate opaque descriptors
+ *   for the in() and out() functions
+ * - Changed inflateBack() argument and in_func typedef to swap the length
+ *   and buffer address return values for the input function
+ * - Check next_in and next_out for Z_NULL on entry to inflate()
+ *
+ * The history for versions after 1.2.0 are in ChangeLog in zlib distribution.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;zutil.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;inftrees.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;inflate.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;inffast.h&quot;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MAKEFIXED</span>
+#  <span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">BUILDFIXED</span>
+#    <span class="enscript-reference">define</span> <span class="enscript-variable-name">BUILDFIXED</span>
+#  <span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* function prototypes */</span>
+local <span class="enscript-type">void</span> fixedtables <span class="enscript-function-name">OF</span>((<span class="enscript-type">struct</span> inflate_state FAR *state));
+local <span class="enscript-type">int</span> updatewindow <span class="enscript-function-name">OF</span>((z_streamp strm, <span class="enscript-type">unsigned</span> out));
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">BUILDFIXED</span>
+   <span class="enscript-type">void</span> makefixed OF((<span class="enscript-type">void</span>));
+#<span class="enscript-reference">endif</span>
+local <span class="enscript-type">unsigned</span> syncsearch <span class="enscript-function-name">OF</span>((<span class="enscript-type">unsigned</span> FAR *have, <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *buf,
+                              <span class="enscript-type">unsigned</span> len));
+
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">inflateReset</span>(strm)
+z_streamp strm;
+{
+    <span class="enscript-type">struct</span> inflate_state FAR *state;
+
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    state = (<span class="enscript-type">struct</span> inflate_state FAR *)strm-&gt;state;
+    strm-&gt;total_in = strm-&gt;total_out = state-&gt;total = 0;
+    strm-&gt;msg = Z_NULL;
+    strm-&gt;adler = 1;        <span class="enscript-comment">/* to support ill-conceived Java test suite */</span>
+    state-&gt;mode = HEAD;
+    state-&gt;last = 0;
+    state-&gt;havedict = 0;
+    state-&gt;dmax = 32768U;
+    state-&gt;head = Z_NULL;
+    state-&gt;wsize = 0;
+    state-&gt;whave = 0;
+    state-&gt;write = 0;
+    state-&gt;hold = 0;
+    state-&gt;bits = 0;
+    state-&gt;lencode = state-&gt;distcode = state-&gt;next = state-&gt;codes;
+    Tracev((stderr, <span class="enscript-string">&quot;inflate: reset\n&quot;</span>));
+    <span class="enscript-keyword">return</span> Z_OK;
+}
+
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">inflatePrime</span>(strm, bits, value)
+z_streamp strm;
+<span class="enscript-type">int</span> bits;
+<span class="enscript-type">int</span> value;
+{
+    <span class="enscript-type">struct</span> inflate_state FAR *state;
+
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    state = (<span class="enscript-type">struct</span> inflate_state FAR *)strm-&gt;state;
+    <span class="enscript-keyword">if</span> (bits &gt; 16 || state-&gt;bits + bits &gt; 32) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    value &amp;= (1L &lt;&lt; bits) - 1;
+    state-&gt;hold += value &lt;&lt; state-&gt;bits;
+    state-&gt;bits += bits;
+    <span class="enscript-keyword">return</span> Z_OK;
+}
+
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">inflateInit2_</span>(strm, windowBits, version, stream_size)
+z_streamp strm;
+<span class="enscript-type">int</span> windowBits;
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> *version;
+<span class="enscript-type">int</span> stream_size;
+{
+    <span class="enscript-type">struct</span> inflate_state FAR *state;
+
+    <span class="enscript-keyword">if</span> (version == Z_NULL || version[0] != ZLIB_VERSION[0] ||
+        stream_size != (<span class="enscript-type">int</span>)(<span class="enscript-keyword">sizeof</span>(z_stream)))
+        <span class="enscript-keyword">return</span> Z_VERSION_ERROR;
+    <span class="enscript-keyword">if</span> (strm == Z_NULL) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    strm-&gt;msg = Z_NULL;                 <span class="enscript-comment">/* in case we return an error */</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">NO_ZCFUNCS</span>
+    <span class="enscript-keyword">if</span> (strm-&gt;zalloc == (alloc_func)0) {
+        strm-&gt;zalloc = zcalloc;
+        strm-&gt;opaque = (voidpf)0;
+    }
+    <span class="enscript-keyword">if</span> (strm-&gt;zfree == (free_func)0) strm-&gt;zfree = zcfree;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* NO_ZCFUNCS */</span>
+    state = (<span class="enscript-type">struct</span> inflate_state FAR *)
+            ZALLOC(strm, 1, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> inflate_state));
+    <span class="enscript-keyword">if</span> (state == Z_NULL) <span class="enscript-keyword">return</span> Z_MEM_ERROR;
+    Tracev((stderr, <span class="enscript-string">&quot;inflate: allocated\n&quot;</span>));
+    strm-&gt;state = (<span class="enscript-type">struct</span> internal_state FAR *)state;
+    <span class="enscript-keyword">if</span> (windowBits &lt; 0) {
+        state-&gt;wrap = 0;
+        windowBits = -windowBits;
+    }
+    <span class="enscript-keyword">else</span> {
+        state-&gt;wrap = (windowBits &gt;&gt; 4) + 1;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GUNZIP</span>
+        <span class="enscript-keyword">if</span> (windowBits &lt; 48) windowBits &amp;= 15;
+#<span class="enscript-reference">endif</span>
+    }
+    <span class="enscript-keyword">if</span> (windowBits &lt; 8 || windowBits &gt; 15) {
+        ZFREE(strm, state);
+        strm-&gt;state = Z_NULL;
+        <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    }
+    state-&gt;wbits = (<span class="enscript-type">unsigned</span>)windowBits;
+    state-&gt;window = Z_NULL;
+    <span class="enscript-keyword">return</span> inflateReset(strm);
+}
+
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">inflateInit_</span>(strm, version, stream_size)
+z_streamp strm;
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> *version;
+<span class="enscript-type">int</span> stream_size;
+{
+    <span class="enscript-keyword">return</span> inflateInit2_(strm, DEF_WBITS, version, stream_size);
+}
+
+<span class="enscript-comment">/*
+   Return state with length and distance decoding tables and index sizes set to
+   fixed code decoding.  Normally this returns fixed tables from inffixed.h.
+   If BUILDFIXED is defined, then instead this routine builds the tables the
+   first time it's called, and returns those tables the first time and
+   thereafter.  This reduces the size of the code by about 2K bytes, in
+   exchange for a little execution time.  However, BUILDFIXED should not be
+   used for threaded applications, since the rewriting of the tables and virgin
+   may not be thread-safe.
+ */</span>
+local <span class="enscript-type">void</span> <span class="enscript-function-name">fixedtables</span>(state)
+<span class="enscript-type">struct</span> inflate_state FAR *state;
+{
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">BUILDFIXED</span>
+    <span class="enscript-type">static</span> <span class="enscript-type">int</span> virgin = 1;
+    <span class="enscript-type">static</span> code *lenfix, *distfix;
+    <span class="enscript-type">static</span> code fixed[544];
+
+    <span class="enscript-comment">/* build fixed huffman tables if first call (may not be thread safe) */</span>
+    <span class="enscript-keyword">if</span> (virgin) {
+        <span class="enscript-type">unsigned</span> sym, bits;
+        <span class="enscript-type">static</span> code *next;
+
+        <span class="enscript-comment">/* literal/length table */</span>
+        sym = 0;
+        <span class="enscript-keyword">while</span> (sym &lt; 144) state-&gt;lens[sym++] = 8;
+        <span class="enscript-keyword">while</span> (sym &lt; 256) state-&gt;lens[sym++] = 9;
+        <span class="enscript-keyword">while</span> (sym &lt; 280) state-&gt;lens[sym++] = 7;
+        <span class="enscript-keyword">while</span> (sym &lt; 288) state-&gt;lens[sym++] = 8;
+        next = fixed;
+        lenfix = next;
+        bits = 9;
+        inflate_table(LENS, state-&gt;lens, 288, &amp;(next), &amp;(bits), state-&gt;work);
+
+        <span class="enscript-comment">/* distance table */</span>
+        sym = 0;
+        <span class="enscript-keyword">while</span> (sym &lt; 32) state-&gt;lens[sym++] = 5;
+        distfix = next;
+        bits = 5;
+        inflate_table(DISTS, state-&gt;lens, 32, &amp;(next), &amp;(bits), state-&gt;work);
+
+        <span class="enscript-comment">/* do this just once */</span>
+        virgin = 0;
+    }
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !BUILDFIXED */</span>
+#   <span class="enscript-reference">include</span> <span class="enscript-string">&quot;inffixed.h&quot;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* BUILDFIXED */</span>
+    state-&gt;lencode = lenfix;
+    state-&gt;lenbits = 9;
+    state-&gt;distcode = distfix;
+    state-&gt;distbits = 5;
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MAKEFIXED</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+
+<span class="enscript-comment">/*
+   Write out the inffixed.h that is #include'd above.  Defining MAKEFIXED also
+   defines BUILDFIXED, so the tables are built on the fly.  makefixed() writes
+   those tables to stdout, which would be piped to inffixed.h.  A small program
+   can simply call makefixed to do this:
+
+    void makefixed(void);
+
+    int main(void)
+    {
+        makefixed();
+        return 0;
+    }
+
+   Then that can be linked with zlib built with MAKEFIXED defined and run:
+
+    a.out &gt; inffixed.h
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">makefixed</span>()
+{
+    <span class="enscript-type">unsigned</span> low, size;
+    <span class="enscript-type">struct</span> inflate_state state;
+
+    fixedtables(&amp;state);
+    puts(<span class="enscript-string">&quot;    /* inffixed.h -- table for decoding fixed codes&quot;</span>);
+    puts(<span class="enscript-string">&quot;     * Generated automatically by makefixed().&quot;</span>);
+    puts(<span class="enscript-string">&quot;     */&quot;</span>);
+    puts(<span class="enscript-string">&quot;&quot;</span>);
+    puts(<span class="enscript-string">&quot;    /* WARNING: this file should *not* be used by applications.&quot;</span>);
+    puts(<span class="enscript-string">&quot;       It is part of the implementation of this library and is&quot;</span>);
+    puts(<span class="enscript-string">&quot;       subject to change. Applications should only use zlib.h.&quot;</span>);
+    puts(<span class="enscript-string">&quot;     */&quot;</span>);
+    puts(<span class="enscript-string">&quot;&quot;</span>);
+    size = 1U &lt;&lt; 9;
+    printf(<span class="enscript-string">&quot;    static const code lenfix[%u] = {&quot;</span>, size);
+    low = 0;
+    <span class="enscript-keyword">for</span> (;;) {
+        <span class="enscript-keyword">if</span> ((low % 7) == 0) printf(<span class="enscript-string">&quot;\n        &quot;</span>);
+        printf(<span class="enscript-string">&quot;{%u,%u,%d}&quot;</span>, state.lencode[low].op, state.lencode[low].bits,
+               state.lencode[low].val);
+        <span class="enscript-keyword">if</span> (++low == size) <span class="enscript-keyword">break</span>;
+        putchar(<span class="enscript-string">','</span>);
+    }
+    puts(<span class="enscript-string">&quot;\n    };&quot;</span>);
+    size = 1U &lt;&lt; 5;
+    printf(<span class="enscript-string">&quot;\n    static const code distfix[%u] = {&quot;</span>, size);
+    low = 0;
+    <span class="enscript-keyword">for</span> (;;) {
+        <span class="enscript-keyword">if</span> ((low % 6) == 0) printf(<span class="enscript-string">&quot;\n        &quot;</span>);
+        printf(<span class="enscript-string">&quot;{%u,%u,%d}&quot;</span>, state.distcode[low].op, state.distcode[low].bits,
+               state.distcode[low].val);
+        <span class="enscript-keyword">if</span> (++low == size) <span class="enscript-keyword">break</span>;
+        putchar(<span class="enscript-string">','</span>);
+    }
+    puts(<span class="enscript-string">&quot;\n    };&quot;</span>);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAKEFIXED */</span>
+
+<span class="enscript-comment">/*
+   Update the window with the last wsize (normally 32K) bytes written before
+   returning.  If window does not exist yet, create it.  This is only called
+   when a window is already in use, or when output has been written during this
+   inflate call, but the end of the deflate stream has not been reached yet.
+   It is also called to create a window for dictionary data when a dictionary
+   is loaded.
+
+   Providing output buffers larger than 32K to inflate() should provide a speed
+   advantage, since only the last 32K of output is copied to the sliding window
+   upon return from inflate(), and since all distances after the first 32K of
+   output will fall in the output data, making match copies simpler and faster.
+   The advantage may be dependent on the size of the processor's data caches.
+ */</span>
+local <span class="enscript-type">int</span> <span class="enscript-function-name">updatewindow</span>(strm, out)
+z_streamp strm;
+<span class="enscript-type">unsigned</span> out;
+{
+    <span class="enscript-type">struct</span> inflate_state FAR *state;
+    <span class="enscript-type">unsigned</span> copy, dist;
+
+    state = (<span class="enscript-type">struct</span> inflate_state FAR *)strm-&gt;state;
+
+    <span class="enscript-comment">/* if it hasn't been done already, allocate space for the window */</span>
+    <span class="enscript-keyword">if</span> (state-&gt;window == Z_NULL) {
+        state-&gt;window = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *)
+                        ZALLOC(strm, 1U &lt;&lt; state-&gt;wbits,
+                               <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>));
+        <span class="enscript-keyword">if</span> (state-&gt;window == Z_NULL) <span class="enscript-keyword">return</span> 1;
+    }
+
+    <span class="enscript-comment">/* if window not in use yet, initialize */</span>
+    <span class="enscript-keyword">if</span> (state-&gt;wsize == 0) {
+        state-&gt;wsize = 1U &lt;&lt; state-&gt;wbits;
+        state-&gt;write = 0;
+        state-&gt;whave = 0;
+    }
+
+    <span class="enscript-comment">/* copy state-&gt;wsize or less output bytes into the circular window */</span>
+    copy = out - strm-&gt;avail_out;
+    <span class="enscript-keyword">if</span> (copy &gt;= state-&gt;wsize) {
+        zmemcpy(state-&gt;window, strm-&gt;next_out - state-&gt;wsize, state-&gt;wsize);
+        state-&gt;write = 0;
+        state-&gt;whave = state-&gt;wsize;
+    }
+    <span class="enscript-keyword">else</span> {
+        dist = state-&gt;wsize - state-&gt;write;
+        <span class="enscript-keyword">if</span> (dist &gt; copy) dist = copy;
+        zmemcpy(state-&gt;window + state-&gt;write, strm-&gt;next_out - copy, dist);
+        copy -= dist;
+        <span class="enscript-keyword">if</span> (copy) {
+            zmemcpy(state-&gt;window, strm-&gt;next_out - copy, copy);
+            state-&gt;write = copy;
+            state-&gt;whave = state-&gt;wsize;
+        }
+        <span class="enscript-keyword">else</span> {
+            state-&gt;write += dist;
+            <span class="enscript-keyword">if</span> (state-&gt;write == state-&gt;wsize) state-&gt;write = 0;
+            <span class="enscript-keyword">if</span> (state-&gt;whave &lt; state-&gt;wsize) state-&gt;whave += dist;
+        }
+    }
+    <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* Macros for inflate(): */</span>
+
+<span class="enscript-comment">/* check function to use adler32() for zlib or z_crc32() for gzip */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GUNZIP</span>
+#  <span class="enscript-reference">define</span> <span class="enscript-function-name">UPDATE</span>(check, buf, len) \
+    (state-&gt;flags ? z_crc32(check, buf, len) : adler32(check, buf, len))
+#<span class="enscript-reference">else</span>
+#  <span class="enscript-reference">define</span> <span class="enscript-function-name">UPDATE</span>(check, buf, len) adler32(check, buf, len)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* check macros for header crc */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GUNZIP</span>
+#  <span class="enscript-reference">define</span> <span class="enscript-function-name">CRC2</span>(check, word) \
+    <span class="enscript-keyword">do</span> { \
+        hbuf[0] = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)(word); \
+        hbuf[1] = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)((word) &gt;&gt; 8); \
+        check = z_crc32(check, hbuf, 2); \
+    } <span class="enscript-keyword">while</span> (0)
+
+#  <span class="enscript-reference">define</span> <span class="enscript-function-name">CRC4</span>(check, word) \
+    <span class="enscript-keyword">do</span> { \
+        hbuf[0] = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)(word); \
+        hbuf[1] = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)((word) &gt;&gt; 8); \
+        hbuf[2] = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)((word) &gt;&gt; 16); \
+        hbuf[3] = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)((word) &gt;&gt; 24); \
+        check = z_crc32(check, hbuf, 4); \
+    } <span class="enscript-keyword">while</span> (0)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* Load registers with state in inflate() for speed */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">LOAD</span>() \
+    <span class="enscript-keyword">do</span> { \
+        put = strm-&gt;next_out; \
+        left = strm-&gt;avail_out; \
+        next = strm-&gt;next_in; \
+        have = strm-&gt;avail_in; \
+        hold = state-&gt;hold; \
+        bits = state-&gt;bits; \
+    } <span class="enscript-keyword">while</span> (0)
+
+<span class="enscript-comment">/* Restore state from registers in inflate() */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">RESTORE</span>() \
+    <span class="enscript-keyword">do</span> { \
+        strm-&gt;next_out = put; \
+        strm-&gt;avail_out = left; \
+        strm-&gt;next_in = next; \
+        strm-&gt;avail_in = have; \
+        state-&gt;hold = hold; \
+        state-&gt;bits = bits; \
+    } <span class="enscript-keyword">while</span> (0)
+
+<span class="enscript-comment">/* Clear the input bit accumulator */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">INITBITS</span>() \
+    <span class="enscript-keyword">do</span> { \
+        hold = 0; \
+        bits = 0; \
+    } <span class="enscript-keyword">while</span> (0)
+
+<span class="enscript-comment">/* Get a byte of input into the bit accumulator, or return from inflate()
+   if there is no input available. */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PULLBYTE</span>() \
+    <span class="enscript-keyword">do</span> { \
+        <span class="enscript-keyword">if</span> (have == 0) <span class="enscript-keyword">goto</span> <span class="enscript-reference">inf_leave</span>; \
+        have--; \
+        hold += (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)(*next++) &lt;&lt; bits; \
+        bits += 8; \
+    } <span class="enscript-keyword">while</span> (0)
+
+<span class="enscript-comment">/* Assure that there are at least n bits in the bit accumulator.  If there is
+   not enough available input to do that, then return from inflate(). */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">NEEDBITS</span>(n) \
+    <span class="enscript-keyword">do</span> { \
+        <span class="enscript-keyword">while</span> (bits &lt; (<span class="enscript-type">unsigned</span>)(n)) \
+            PULLBYTE(); \
+    } <span class="enscript-keyword">while</span> (0)
+
+<span class="enscript-comment">/* Return the low n bits of the bit accumulator (n &lt; 16) */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">BITS</span>(n) \
+    ((<span class="enscript-type">unsigned</span>)hold &amp; ((1U &lt;&lt; (n)) - 1))
+
+<span class="enscript-comment">/* Remove n bits from the bit accumulator */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DROPBITS</span>(n) \
+    <span class="enscript-keyword">do</span> { \
+        hold &gt;&gt;= (n); \
+        bits -= (<span class="enscript-type">unsigned</span>)(n); \
+    } <span class="enscript-keyword">while</span> (0)
+
+<span class="enscript-comment">/* Remove zero to seven bits as needed to go to a byte boundary */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">BYTEBITS</span>() \
+    <span class="enscript-keyword">do</span> { \
+        hold &gt;&gt;= bits &amp; 7; \
+        bits -= bits &amp; 7; \
+    } <span class="enscript-keyword">while</span> (0)
+
+<span class="enscript-comment">/* Reverse the bytes in a 32-bit value */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">REVERSE</span>(q) \
+    ((((q) &gt;&gt; 24) &amp; 0xff) + (((q) &gt;&gt; 8) &amp; 0xff00) + \
+     (((q) &amp; 0xff00) &lt;&lt; 8) + (((q) &amp; 0xff) &lt;&lt; 24))
+
+<span class="enscript-comment">/*
+   inflate() uses a state machine to process as much input data and generate as
+   much output data as possible before returning.  The state machine is
+   structured roughly as follows:
+
+    for (;;) switch (state) {
+    ...
+    case STATEn:
+        if (not enough input data or output space to make progress)
+            return;
+        ... make progress ...
+        state = STATEm;
+        break;
+    ...
+    }
+
+   so when inflate() is called again, the same case is attempted again, and
+   if the appropriate resources are provided, the machine proceeds to the
+   next state.  The NEEDBITS() macro is usually the way the state evaluates
+   whether it can proceed or should return.  NEEDBITS() does the return if
+   the requested bits are not available.  The typical use of the BITS macros
+   is:
+
+        NEEDBITS(n);
+        ... do something with BITS(n) ...
+        DROPBITS(n);
+
+   where NEEDBITS(n) either returns from inflate() if there isn't enough
+   input left to load n bits into the accumulator, or it continues.  BITS(n)
+   gives the low n bits in the accumulator.  When done, DROPBITS(n) drops
+   the low n bits off the accumulator.  INITBITS() clears the accumulator
+   and sets the number of available bits to zero.  BYTEBITS() discards just
+   enough bits to put the accumulator on a byte boundary.  After BYTEBITS()
+   and a NEEDBITS(8), then BITS(8) would return the next byte in the stream.
+
+   NEEDBITS(n) uses PULLBYTE() to get an available byte of input, or to return
+   if there is no input available.  The decoding of variable length codes uses
+   PULLBYTE() directly in order to pull just enough bytes to decode the next
+   code, and no more.
+
+   Some states loop until they get enough input, making sure that enough
+   state information is maintained to continue the loop where it left off
+   if NEEDBITS() returns in the loop.  For example, want, need, and keep
+   would all have to actually be part of the saved state in case NEEDBITS()
+   returns:
+
+    case STATEw:
+        while (want &lt; need) {
+            NEEDBITS(n);
+            keep[want++] = BITS(n);
+            DROPBITS(n);
+        }
+        state = STATEx;
+    case STATEx:
+
+   As shown above, if the next state is also the next case, then the break
+   is omitted.
+
+   A state may also return if there is not enough output space available to
+   complete that state.  Those states are copying stored data, writing a
+   literal byte, and copying a matching string.
+
+   When returning, a &quot;goto inf_leave&quot; is used to update the total counters,
+   update the check value, and determine whether any progress has been made
+   during that inflate() call in order to return the proper return code.
+   Progress is defined as a change in either strm-&gt;avail_in or strm-&gt;avail_out.
+   When there is a window, goto inf_leave will update the window with the last
+   output written.  If a goto inf_leave occurs in the middle of decompression
+   and there is no window currently, goto inf_leave will create one and copy
+   output to the window for the next call of inflate().
+
+   In this implementation, the flush parameter of inflate() only affects the
+   return code (per zlib.h).  inflate() always writes as much as possible to
+   strm-&gt;next_out, given the space available and the provided input--the effect
+   documented in zlib.h of Z_SYNC_FLUSH.  Furthermore, inflate() always defers
+   the allocation of and copying into a sliding window until necessary, which
+   provides the effect documented in zlib.h for Z_FINISH when the entire input
+   stream available.  So the only thing the flush parameter actually does is:
+   when flush is set to Z_FINISH, inflate() cannot return Z_OK.  Instead it
+   will return Z_BUF_ERROR if it has not reached the end of the stream.
+ */</span>
+
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">inflate</span>(strm, flush)
+z_streamp strm;
+<span class="enscript-type">int</span> flush;
+{
+    <span class="enscript-type">struct</span> inflate_state FAR *state;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *next;    <span class="enscript-comment">/* next input */</span>
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *put;     <span class="enscript-comment">/* next output */</span>
+    <span class="enscript-type">unsigned</span> have, left;        <span class="enscript-comment">/* available input and output */</span>
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> hold;         <span class="enscript-comment">/* bit buffer */</span>
+    <span class="enscript-type">unsigned</span> bits;              <span class="enscript-comment">/* bits in bit buffer */</span>
+    <span class="enscript-type">unsigned</span> in, out;           <span class="enscript-comment">/* save starting available input and output */</span>
+    <span class="enscript-type">unsigned</span> copy;              <span class="enscript-comment">/* number of stored or match bytes to copy */</span>
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *from;    <span class="enscript-comment">/* where to copy match bytes from */</span>
+    code this;                  <span class="enscript-comment">/* current decoding table entry */</span>
+    code last;                  <span class="enscript-comment">/* parent table entry */</span>
+    <span class="enscript-type">unsigned</span> len;               <span class="enscript-comment">/* length to copy for repeats, bits to drop */</span>
+    <span class="enscript-type">int</span> ret;                    <span class="enscript-comment">/* return code */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GUNZIP</span>
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> hbuf[4];      <span class="enscript-comment">/* buffer for gzip header crc calculation */</span>
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> order[19] = <span class="enscript-comment">/* permutation of code lengths */</span>
+        {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
+
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL || strm-&gt;next_out == Z_NULL ||
+        (strm-&gt;next_in == Z_NULL &amp;&amp; strm-&gt;avail_in != 0))
+        <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+
+    state = (<span class="enscript-type">struct</span> inflate_state FAR *)strm-&gt;state;
+    <span class="enscript-keyword">if</span> (state-&gt;mode == TYPE) state-&gt;mode = TYPEDO;      <span class="enscript-comment">/* skip check */</span>
+    LOAD();
+    in = have;
+    out = left;
+    ret = Z_OK;
+    <span class="enscript-keyword">for</span> (;;)
+        <span class="enscript-keyword">switch</span> (state-&gt;mode) {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">HEAD</span>:
+            <span class="enscript-keyword">if</span> (state-&gt;wrap == 0) {
+                state-&gt;mode = TYPEDO;
+                <span class="enscript-keyword">break</span>;
+            }
+            NEEDBITS(16);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GUNZIP</span>
+            <span class="enscript-keyword">if</span> ((state-&gt;wrap &amp; 2) &amp;&amp; hold == 0x8b1f) {  <span class="enscript-comment">/* gzip header */</span>
+                state-&gt;check = z_crc32(0L, Z_NULL, 0);
+                CRC2(state-&gt;check, hold);
+                INITBITS();
+                state-&gt;mode = FLAGS;
+                <span class="enscript-keyword">break</span>;
+            }
+            state-&gt;flags = 0;           <span class="enscript-comment">/* expect zlib header */</span>
+            <span class="enscript-keyword">if</span> (state-&gt;head != Z_NULL)
+                state-&gt;head-&gt;done = -1;
+            <span class="enscript-keyword">if</span> (!(state-&gt;wrap &amp; 1) ||   <span class="enscript-comment">/* check if zlib header allowed */</span>
+#<span class="enscript-reference">else</span>
+            <span class="enscript-keyword">if</span> (
+#<span class="enscript-reference">endif</span>
+                ((BITS(8) &lt;&lt; 8) + (hold &gt;&gt; 8)) % 31) {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;incorrect header check&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+            <span class="enscript-keyword">if</span> (BITS(4) != Z_DEFLATED) {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;unknown compression method&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+            DROPBITS(4);
+            len = BITS(4) + 8;
+            <span class="enscript-keyword">if</span> (len &gt; state-&gt;wbits) {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid window size&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+            state-&gt;dmax = 1U &lt;&lt; len;
+            Tracev((stderr, <span class="enscript-string">&quot;inflate:   zlib header ok\n&quot;</span>));
+            strm-&gt;adler = state-&gt;check = adler32(0L, Z_NULL, 0);
+            state-&gt;mode = hold &amp; 0x200 ? DICTID : TYPE;
+            INITBITS();
+            <span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GUNZIP</span>
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">FLAGS</span>:
+            NEEDBITS(16);
+            state-&gt;flags = (<span class="enscript-type">int</span>)(hold);
+            <span class="enscript-keyword">if</span> ((state-&gt;flags &amp; 0xff) != Z_DEFLATED) {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;unknown compression method&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+            <span class="enscript-keyword">if</span> (state-&gt;flags &amp; 0xe000) {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;unknown header flags set&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+            <span class="enscript-keyword">if</span> (state-&gt;head != Z_NULL)
+                state-&gt;head-&gt;text = (<span class="enscript-type">int</span>)((hold &gt;&gt; 8) &amp; 1);
+            <span class="enscript-keyword">if</span> (state-&gt;flags &amp; 0x0200) CRC2(state-&gt;check, hold);
+            INITBITS();
+            state-&gt;mode = TIME;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">TIME</span>:
+            NEEDBITS(32);
+            <span class="enscript-keyword">if</span> (state-&gt;head != Z_NULL)
+                state-&gt;head-&gt;time = hold;
+            <span class="enscript-keyword">if</span> (state-&gt;flags &amp; 0x0200) CRC4(state-&gt;check, hold);
+            INITBITS();
+            state-&gt;mode = OS;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">OS</span>:
+            NEEDBITS(16);
+            <span class="enscript-keyword">if</span> (state-&gt;head != Z_NULL) {
+                state-&gt;head-&gt;xflags = (<span class="enscript-type">int</span>)(hold &amp; 0xff);
+                state-&gt;head-&gt;os = (<span class="enscript-type">int</span>)(hold &gt;&gt; 8);
+            }
+            <span class="enscript-keyword">if</span> (state-&gt;flags &amp; 0x0200) CRC2(state-&gt;check, hold);
+            INITBITS();
+            state-&gt;mode = EXLEN;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">EXLEN</span>:
+            <span class="enscript-keyword">if</span> (state-&gt;flags &amp; 0x0400) {
+                NEEDBITS(16);
+                state-&gt;length = (<span class="enscript-type">unsigned</span>)(hold);
+                <span class="enscript-keyword">if</span> (state-&gt;head != Z_NULL)
+                    state-&gt;head-&gt;extra_len = (<span class="enscript-type">unsigned</span>)hold;
+                <span class="enscript-keyword">if</span> (state-&gt;flags &amp; 0x0200) CRC2(state-&gt;check, hold);
+                INITBITS();
+            }
+            <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (state-&gt;head != Z_NULL)
+                state-&gt;head-&gt;extra = Z_NULL;
+            state-&gt;mode = EXTRA;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">EXTRA</span>:
+            <span class="enscript-keyword">if</span> (state-&gt;flags &amp; 0x0400) {
+                copy = state-&gt;length;
+                <span class="enscript-keyword">if</span> (copy &gt; have) copy = have;
+                <span class="enscript-keyword">if</span> (copy) {
+                    <span class="enscript-keyword">if</span> (state-&gt;head != Z_NULL &amp;&amp;
+                        state-&gt;head-&gt;extra != Z_NULL) {
+                        len = state-&gt;head-&gt;extra_len - state-&gt;length;
+                        zmemcpy(state-&gt;head-&gt;extra + len, next,
+                                len + copy &gt; state-&gt;head-&gt;extra_max ?
+                                state-&gt;head-&gt;extra_max - len : copy);
+                    }
+                    <span class="enscript-keyword">if</span> (state-&gt;flags &amp; 0x0200)
+                        state-&gt;check = z_crc32(state-&gt;check, next, copy);
+                    have -= copy;
+                    next += copy;
+                    state-&gt;length -= copy;
+                }
+                <span class="enscript-keyword">if</span> (state-&gt;length) <span class="enscript-keyword">goto</span> <span class="enscript-reference">inf_leave</span>;
+            }
+            state-&gt;length = 0;
+            state-&gt;mode = NAME;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">NAME</span>:
+            <span class="enscript-keyword">if</span> (state-&gt;flags &amp; 0x0800) {
+                <span class="enscript-keyword">if</span> (have == 0) <span class="enscript-keyword">goto</span> <span class="enscript-reference">inf_leave</span>;
+                copy = 0;
+                <span class="enscript-keyword">do</span> {
+                    len = (<span class="enscript-type">unsigned</span>)(next[copy++]);
+                    <span class="enscript-keyword">if</span> (state-&gt;head != Z_NULL &amp;&amp;
+                            state-&gt;head-&gt;name != Z_NULL &amp;&amp;
+                            state-&gt;length &lt; state-&gt;head-&gt;name_max)
+                        state-&gt;head-&gt;name[state-&gt;length++] = len;
+                } <span class="enscript-keyword">while</span> (len &amp;&amp; copy &lt; have);
+                <span class="enscript-keyword">if</span> (state-&gt;flags &amp; 0x0200)
+                    state-&gt;check = z_crc32(state-&gt;check, next, copy);
+                have -= copy;
+                next += copy;
+                <span class="enscript-keyword">if</span> (len) <span class="enscript-keyword">goto</span> <span class="enscript-reference">inf_leave</span>;
+            }
+            <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (state-&gt;head != Z_NULL)
+                state-&gt;head-&gt;name = Z_NULL;
+            state-&gt;length = 0;
+            state-&gt;mode = COMMENT;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">COMMENT</span>:
+            <span class="enscript-keyword">if</span> (state-&gt;flags &amp; 0x1000) {
+                <span class="enscript-keyword">if</span> (have == 0) <span class="enscript-keyword">goto</span> <span class="enscript-reference">inf_leave</span>;
+                copy = 0;
+                <span class="enscript-keyword">do</span> {
+                    len = (<span class="enscript-type">unsigned</span>)(next[copy++]);
+                    <span class="enscript-keyword">if</span> (state-&gt;head != Z_NULL &amp;&amp;
+                            state-&gt;head-&gt;comment != Z_NULL &amp;&amp;
+                            state-&gt;length &lt; state-&gt;head-&gt;comm_max)
+                        state-&gt;head-&gt;comment[state-&gt;length++] = len;
+                } <span class="enscript-keyword">while</span> (len &amp;&amp; copy &lt; have);
+                <span class="enscript-keyword">if</span> (state-&gt;flags &amp; 0x0200)
+                    state-&gt;check = z_crc32(state-&gt;check, next, copy);
+                have -= copy;
+                next += copy;
+                <span class="enscript-keyword">if</span> (len) <span class="enscript-keyword">goto</span> <span class="enscript-reference">inf_leave</span>;
+            }
+            <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (state-&gt;head != Z_NULL)
+                state-&gt;head-&gt;comment = Z_NULL;
+            state-&gt;mode = HCRC;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">HCRC</span>:
+            <span class="enscript-keyword">if</span> (state-&gt;flags &amp; 0x0200) {
+                NEEDBITS(16);
+                <span class="enscript-keyword">if</span> (hold != (state-&gt;check &amp; 0xffff)) {
+                    strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;header crc mismatch&quot;</span>;
+                    state-&gt;mode = BAD;
+                    <span class="enscript-keyword">break</span>;
+                }
+                INITBITS();
+            }
+            <span class="enscript-keyword">if</span> (state-&gt;head != Z_NULL) {
+                state-&gt;head-&gt;hcrc = (<span class="enscript-type">int</span>)((state-&gt;flags &gt;&gt; 9) &amp; 1);
+                state-&gt;head-&gt;done = 1;
+            }
+            strm-&gt;adler = state-&gt;check = z_crc32(0L, Z_NULL, 0);
+            state-&gt;mode = TYPE;
+            <span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">DICTID</span>:
+            NEEDBITS(32);
+            strm-&gt;adler = state-&gt;check = REVERSE(hold);
+            INITBITS();
+            state-&gt;mode = DICT;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">DICT</span>:
+            <span class="enscript-keyword">if</span> (state-&gt;havedict == 0) {
+                RESTORE();
+                <span class="enscript-keyword">return</span> Z_NEED_DICT;
+            }
+            strm-&gt;adler = state-&gt;check = adler32(0L, Z_NULL, 0);
+            state-&gt;mode = TYPE;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">TYPE</span>:
+            <span class="enscript-keyword">if</span> (flush == Z_BLOCK) <span class="enscript-keyword">goto</span> <span class="enscript-reference">inf_leave</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">TYPEDO</span>:
+            <span class="enscript-keyword">if</span> (state-&gt;last) {
+                BYTEBITS();
+                state-&gt;mode = CHECK;
+                <span class="enscript-keyword">break</span>;
+            }
+            NEEDBITS(3);
+            state-&gt;last = BITS(1);
+            DROPBITS(1);
+            <span class="enscript-keyword">switch</span> (BITS(2)) {
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:                             <span class="enscript-comment">/* stored block */</span>
+                Tracev((stderr, <span class="enscript-string">&quot;inflate:     stored block%s\n&quot;</span>,
+                        state-&gt;last ? <span class="enscript-string">&quot; (last)&quot;</span> : <span class="enscript-string">&quot;&quot;</span>));
+                state-&gt;mode = STORED;
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">1</span>:                             <span class="enscript-comment">/* fixed block */</span>
+                fixedtables(state);
+                Tracev((stderr, <span class="enscript-string">&quot;inflate:     fixed codes block%s\n&quot;</span>,
+                        state-&gt;last ? <span class="enscript-string">&quot; (last)&quot;</span> : <span class="enscript-string">&quot;&quot;</span>));
+                state-&gt;mode = LEN;              <span class="enscript-comment">/* decode codes */</span>
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">2</span>:                             <span class="enscript-comment">/* dynamic block */</span>
+                Tracev((stderr, <span class="enscript-string">&quot;inflate:     dynamic codes block%s\n&quot;</span>,
+                        state-&gt;last ? <span class="enscript-string">&quot; (last)&quot;</span> : <span class="enscript-string">&quot;&quot;</span>));
+                state-&gt;mode = TABLE;
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">3</span>:
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid block type&quot;</span>;
+                state-&gt;mode = BAD;
+            }
+            DROPBITS(2);
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">STORED</span>:
+            BYTEBITS();                         <span class="enscript-comment">/* go to byte boundary */</span>
+            NEEDBITS(32);
+            <span class="enscript-keyword">if</span> ((hold &amp; 0xffff) != ((hold &gt;&gt; 16) ^ 0xffff)) {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid stored block lengths&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+            state-&gt;length = (<span class="enscript-type">unsigned</span>)hold &amp; 0xffff;
+            Tracev((stderr, <span class="enscript-string">&quot;inflate:       stored length %u\n&quot;</span>,
+                    state-&gt;length));
+            INITBITS();
+            state-&gt;mode = COPY;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">COPY</span>:
+            copy = state-&gt;length;
+            <span class="enscript-keyword">if</span> (copy) {
+                <span class="enscript-keyword">if</span> (copy &gt; have) copy = have;
+                <span class="enscript-keyword">if</span> (copy &gt; left) copy = left;
+                <span class="enscript-keyword">if</span> (copy == 0) <span class="enscript-keyword">goto</span> <span class="enscript-reference">inf_leave</span>;
+                zmemcpy(put, next, copy);
+                have -= copy;
+                next += copy;
+                left -= copy;
+                put += copy;
+                state-&gt;length -= copy;
+                <span class="enscript-keyword">break</span>;
+            }
+            Tracev((stderr, <span class="enscript-string">&quot;inflate:       stored end\n&quot;</span>));
+            state-&gt;mode = TYPE;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">TABLE</span>:
+            NEEDBITS(14);
+            state-&gt;nlen = BITS(5) + 257;
+            DROPBITS(5);
+            state-&gt;ndist = BITS(5) + 1;
+            DROPBITS(5);
+            state-&gt;ncode = BITS(4) + 4;
+            DROPBITS(4);
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">PKZIP_BUG_WORKAROUND</span>
+            <span class="enscript-keyword">if</span> (state-&gt;nlen &gt; 286 || state-&gt;ndist &gt; 30) {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;too many length or distance symbols&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+#<span class="enscript-reference">endif</span>
+            Tracev((stderr, <span class="enscript-string">&quot;inflate:       table sizes ok\n&quot;</span>));
+            state-&gt;have = 0;
+            state-&gt;mode = LENLENS;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">LENLENS</span>:
+            <span class="enscript-keyword">while</span> (state-&gt;have &lt; state-&gt;ncode) {
+                NEEDBITS(3);
+                state-&gt;lens[order[state-&gt;have++]] = (<span class="enscript-type">unsigned</span> <span class="enscript-type">short</span>)BITS(3);
+                DROPBITS(3);
+            }
+            <span class="enscript-keyword">while</span> (state-&gt;have &lt; 19)
+                state-&gt;lens[order[state-&gt;have++]] = 0;
+            state-&gt;next = state-&gt;codes;
+            state-&gt;lencode = (code <span class="enscript-type">const</span> FAR *)(state-&gt;next);
+            state-&gt;lenbits = 7;
+            ret = inflate_table(CODES, state-&gt;lens, 19, &amp;(state-&gt;next),
+                                &amp;(state-&gt;lenbits), state-&gt;work);
+            <span class="enscript-keyword">if</span> (ret) {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid code lengths set&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+            Tracev((stderr, <span class="enscript-string">&quot;inflate:       code lengths ok\n&quot;</span>));
+            state-&gt;have = 0;
+            state-&gt;mode = CODELENS;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">CODELENS</span>:
+            <span class="enscript-keyword">while</span> (state-&gt;have &lt; state-&gt;nlen + state-&gt;ndist) {
+                <span class="enscript-keyword">for</span> (;;) {
+                    this = state-&gt;lencode[BITS(state-&gt;lenbits)];
+                    <span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span>)(this.bits) &lt;= bits) <span class="enscript-keyword">break</span>;
+                    PULLBYTE();
+                }
+                <span class="enscript-keyword">if</span> (this.val &lt; 16) {
+                    NEEDBITS(this.bits);
+                    DROPBITS(this.bits);
+                    state-&gt;lens[state-&gt;have++] = this.val;
+                }
+                <span class="enscript-keyword">else</span> {
+                    <span class="enscript-keyword">if</span> (this.val == 16) {
+                        NEEDBITS(this.bits + 2);
+                        DROPBITS(this.bits);
+                        <span class="enscript-keyword">if</span> (state-&gt;have == 0) {
+                            strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid bit length repeat&quot;</span>;
+                            state-&gt;mode = BAD;
+                            <span class="enscript-keyword">break</span>;
+                        }
+                        len = state-&gt;lens[state-&gt;have - 1];
+                        copy = 3 + BITS(2);
+                        DROPBITS(2);
+                    }
+                    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (this.val == 17) {
+                        NEEDBITS(this.bits + 3);
+                        DROPBITS(this.bits);
+                        len = 0;
+                        copy = 3 + BITS(3);
+                        DROPBITS(3);
+                    }
+                    <span class="enscript-keyword">else</span> {
+                        NEEDBITS(this.bits + 7);
+                        DROPBITS(this.bits);
+                        len = 0;
+                        copy = 11 + BITS(7);
+                        DROPBITS(7);
+                    }
+                    <span class="enscript-keyword">if</span> (state-&gt;have + copy &gt; state-&gt;nlen + state-&gt;ndist) {
+                        strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid bit length repeat&quot;</span>;
+                        state-&gt;mode = BAD;
+                        <span class="enscript-keyword">break</span>;
+                    }
+                    <span class="enscript-keyword">while</span> (copy--)
+                        state-&gt;lens[state-&gt;have++] = (<span class="enscript-type">unsigned</span> <span class="enscript-type">short</span>)len;
+                }
+            }
+
+            <span class="enscript-comment">/* handle error breaks in while */</span>
+            <span class="enscript-keyword">if</span> (state-&gt;mode == BAD) <span class="enscript-keyword">break</span>;
+
+            <span class="enscript-comment">/* build code tables */</span>
+            state-&gt;next = state-&gt;codes;
+            state-&gt;lencode = (code <span class="enscript-type">const</span> FAR *)(state-&gt;next);
+            state-&gt;lenbits = 9;
+            ret = inflate_table(LENS, state-&gt;lens, state-&gt;nlen, &amp;(state-&gt;next),
+                                &amp;(state-&gt;lenbits), state-&gt;work);
+            <span class="enscript-keyword">if</span> (ret) {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid literal/lengths set&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+            state-&gt;distcode = (code <span class="enscript-type">const</span> FAR *)(state-&gt;next);
+            state-&gt;distbits = 6;
+            ret = inflate_table(DISTS, state-&gt;lens + state-&gt;nlen, state-&gt;ndist,
+                            &amp;(state-&gt;next), &amp;(state-&gt;distbits), state-&gt;work);
+            <span class="enscript-keyword">if</span> (ret) {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid distances set&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+            Tracev((stderr, <span class="enscript-string">&quot;inflate:       codes ok\n&quot;</span>));
+            state-&gt;mode = LEN;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">LEN</span>:
+            <span class="enscript-keyword">if</span> (have &gt;= 6 &amp;&amp; left &gt;= 258) {
+                RESTORE();
+                inflate_fast(strm, out);
+                LOAD();
+                <span class="enscript-keyword">break</span>;
+            }
+            <span class="enscript-keyword">for</span> (;;) {
+                this = state-&gt;lencode[BITS(state-&gt;lenbits)];
+                <span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span>)(this.bits) &lt;= bits) <span class="enscript-keyword">break</span>;
+                PULLBYTE();
+            }
+            <span class="enscript-keyword">if</span> (this.op &amp;&amp; (this.op &amp; 0xf0) == 0) {
+                last = this;
+                <span class="enscript-keyword">for</span> (;;) {
+                    this = state-&gt;lencode[last.val +
+                            (BITS(last.bits + last.op) &gt;&gt; last.bits)];
+                    <span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span>)(last.bits + this.bits) &lt;= bits) <span class="enscript-keyword">break</span>;
+                    PULLBYTE();
+                }
+                DROPBITS(last.bits);
+            }
+            DROPBITS(this.bits);
+            state-&gt;length = (<span class="enscript-type">unsigned</span>)this.val;
+            <span class="enscript-keyword">if</span> ((<span class="enscript-type">int</span>)(this.op) == 0) {
+                Tracevv((stderr, this.val &gt;= 0x20 &amp;&amp; this.val &lt; 0x7f ?
+                        <span class="enscript-string">&quot;inflate:         literal '%c'\n&quot;</span> :
+                        <span class="enscript-string">&quot;inflate:         literal 0x%02x\n&quot;</span>, this.val));
+                state-&gt;mode = LIT;
+                <span class="enscript-keyword">break</span>;
+            }
+            <span class="enscript-keyword">if</span> (this.op &amp; 32) {
+                Tracevv((stderr, <span class="enscript-string">&quot;inflate:         end of block\n&quot;</span>));
+                state-&gt;mode = TYPE;
+                <span class="enscript-keyword">break</span>;
+            }
+            <span class="enscript-keyword">if</span> (this.op &amp; 64) {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid literal/length code&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+            state-&gt;extra = (<span class="enscript-type">unsigned</span>)(this.op) &amp; 15;
+            state-&gt;mode = LENEXT;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">LENEXT</span>:
+            <span class="enscript-keyword">if</span> (state-&gt;extra) {
+                NEEDBITS(state-&gt;extra);
+                state-&gt;length += BITS(state-&gt;extra);
+                DROPBITS(state-&gt;extra);
+            }
+            Tracevv((stderr, <span class="enscript-string">&quot;inflate:         length %u\n&quot;</span>, state-&gt;length));
+            state-&gt;mode = DIST;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">DIST</span>:
+            <span class="enscript-keyword">for</span> (;;) {
+                this = state-&gt;distcode[BITS(state-&gt;distbits)];
+                <span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span>)(this.bits) &lt;= bits) <span class="enscript-keyword">break</span>;
+                PULLBYTE();
+            }
+            <span class="enscript-keyword">if</span> ((this.op &amp; 0xf0) == 0) {
+                last = this;
+                <span class="enscript-keyword">for</span> (;;) {
+                    this = state-&gt;distcode[last.val +
+                            (BITS(last.bits + last.op) &gt;&gt; last.bits)];
+                    <span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span>)(last.bits + this.bits) &lt;= bits) <span class="enscript-keyword">break</span>;
+                    PULLBYTE();
+                }
+                DROPBITS(last.bits);
+            }
+            DROPBITS(this.bits);
+            <span class="enscript-keyword">if</span> (this.op &amp; 64) {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid distance code&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+            state-&gt;offset = (<span class="enscript-type">unsigned</span>)this.val;
+            state-&gt;extra = (<span class="enscript-type">unsigned</span>)(this.op) &amp; 15;
+            state-&gt;mode = DISTEXT;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">DISTEXT</span>:
+            <span class="enscript-keyword">if</span> (state-&gt;extra) {
+                NEEDBITS(state-&gt;extra);
+                state-&gt;offset += BITS(state-&gt;extra);
+                DROPBITS(state-&gt;extra);
+            }
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">INFLATE_STRICT</span>
+            <span class="enscript-keyword">if</span> (state-&gt;offset &gt; state-&gt;dmax) {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid distance too far back&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+#<span class="enscript-reference">endif</span>
+            <span class="enscript-keyword">if</span> (state-&gt;offset &gt; state-&gt;whave + out - left) {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid distance too far back&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+            Tracevv((stderr, <span class="enscript-string">&quot;inflate:         distance %u\n&quot;</span>, state-&gt;offset));
+            state-&gt;mode = MATCH;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">MATCH</span>:
+            <span class="enscript-keyword">if</span> (left == 0) <span class="enscript-keyword">goto</span> <span class="enscript-reference">inf_leave</span>;
+            copy = out - left;
+            <span class="enscript-keyword">if</span> (state-&gt;offset &gt; copy) {         <span class="enscript-comment">/* copy from window */</span>
+                copy = state-&gt;offset - copy;
+                <span class="enscript-keyword">if</span> (copy &gt; state-&gt;write) {
+                    copy -= state-&gt;write;
+                    from = state-&gt;window + (state-&gt;wsize - copy);
+                }
+                <span class="enscript-keyword">else</span>
+                    from = state-&gt;window + (state-&gt;write - copy);
+                <span class="enscript-keyword">if</span> (copy &gt; state-&gt;length) copy = state-&gt;length;
+            }
+            <span class="enscript-keyword">else</span> {                              <span class="enscript-comment">/* copy from output */</span>
+                from = put - state-&gt;offset;
+                copy = state-&gt;length;
+            }
+            <span class="enscript-keyword">if</span> (copy &gt; left) copy = left;
+            left -= copy;
+            state-&gt;length -= copy;
+            <span class="enscript-keyword">do</span> {
+                *put++ = *from++;
+            } <span class="enscript-keyword">while</span> (--copy);
+            <span class="enscript-keyword">if</span> (state-&gt;length == 0) state-&gt;mode = LEN;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">LIT</span>:
+            <span class="enscript-keyword">if</span> (left == 0) <span class="enscript-keyword">goto</span> <span class="enscript-reference">inf_leave</span>;
+            *put++ = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)(state-&gt;length);
+            left--;
+            state-&gt;mode = LEN;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">CHECK</span>:
+            <span class="enscript-keyword">if</span> (state-&gt;wrap) {
+                NEEDBITS(32);
+                out -= left;
+                strm-&gt;total_out += out;
+                state-&gt;total += out;
+                <span class="enscript-keyword">if</span> (out)
+                    strm-&gt;adler = state-&gt;check =
+                        UPDATE(state-&gt;check, put - out, out);
+                out = left;
+                <span class="enscript-keyword">if</span> ((
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GUNZIP</span>
+                     state-&gt;flags ? hold :
+#<span class="enscript-reference">endif</span>
+                     REVERSE(hold)) != state-&gt;check) {
+                    strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;incorrect data check&quot;</span>;
+                    state-&gt;mode = BAD;
+                    <span class="enscript-keyword">break</span>;
+                }
+                INITBITS();
+                Tracev((stderr, <span class="enscript-string">&quot;inflate:   check matches trailer\n&quot;</span>));
+            }
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GUNZIP</span>
+            state-&gt;mode = LENGTH;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">LENGTH</span>:
+            <span class="enscript-keyword">if</span> (state-&gt;wrap &amp;&amp; state-&gt;flags) {
+                NEEDBITS(32);
+                <span class="enscript-keyword">if</span> (hold != (state-&gt;total &amp; 0xffffffffUL)) {
+                    strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;incorrect length check&quot;</span>;
+                    state-&gt;mode = BAD;
+                    <span class="enscript-keyword">break</span>;
+                }
+                INITBITS();
+                Tracev((stderr, <span class="enscript-string">&quot;inflate:   length matches trailer\n&quot;</span>));
+            }
+#<span class="enscript-reference">endif</span>
+            state-&gt;mode = DONE;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">DONE</span>:
+            ret = Z_STREAM_END;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">inf_leave</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">BAD</span>:
+            ret = Z_DATA_ERROR;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">inf_leave</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">MEM</span>:
+            <span class="enscript-keyword">return</span> Z_MEM_ERROR;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">SYNC</span>:
+        <span class="enscript-reference">default</span>:
+            <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+        }
+
+    <span class="enscript-comment">/*
+       Return from inflate(), updating the total counts and the check value.
+       If there was no progress during the inflate() call, return a buffer
+       error.  Call updatewindow() to create and/or update the window state.
+       Note: a memory error from inflate() is non-recoverable.
+     */</span>
+  <span class="enscript-reference">inf_leave</span>:
+    RESTORE();
+    <span class="enscript-keyword">if</span> (state-&gt;wsize || (state-&gt;mode &lt; CHECK &amp;&amp; out != strm-&gt;avail_out))
+        <span class="enscript-keyword">if</span> (updatewindow(strm, out)) {
+            state-&gt;mode = MEM;
+            <span class="enscript-keyword">return</span> Z_MEM_ERROR;
+        }
+    in -= strm-&gt;avail_in;
+    out -= strm-&gt;avail_out;
+    strm-&gt;total_in += in;
+    strm-&gt;total_out += out;
+    state-&gt;total += out;
+    <span class="enscript-keyword">if</span> (state-&gt;wrap &amp;&amp; out)
+        strm-&gt;adler = state-&gt;check =
+            UPDATE(state-&gt;check, strm-&gt;next_out - out, out);
+    strm-&gt;data_type = state-&gt;bits + (state-&gt;last ? 64 : 0) +
+                      (state-&gt;mode == TYPE ? 128 : 0);
+    <span class="enscript-keyword">if</span> (((in == 0 &amp;&amp; out == 0) || flush == Z_FINISH) &amp;&amp; ret == Z_OK)
+        ret = Z_BUF_ERROR;
+    <span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">inflateEnd</span>(strm)
+z_streamp strm;
+{
+    <span class="enscript-type">struct</span> inflate_state FAR *state;
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL || strm-&gt;zfree == (free_func)0)
+        <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    state = (<span class="enscript-type">struct</span> inflate_state FAR *)strm-&gt;state;
+    <span class="enscript-keyword">if</span> (state-&gt;window != Z_NULL) ZFREE(strm, state-&gt;window);
+    ZFREE(strm, strm-&gt;state);
+    strm-&gt;state = Z_NULL;
+    Tracev((stderr, <span class="enscript-string">&quot;inflate: end\n&quot;</span>));
+    <span class="enscript-keyword">return</span> Z_OK;
+}
+
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">inflateSetDictionary</span>(strm, dictionary, dictLength)
+z_streamp strm;
+<span class="enscript-type">const</span> Bytef *dictionary;
+uInt dictLength;
+{
+    <span class="enscript-type">struct</span> inflate_state FAR *state;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> id;
+
+    <span class="enscript-comment">/* check state */</span>
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    state = (<span class="enscript-type">struct</span> inflate_state FAR *)strm-&gt;state;
+    <span class="enscript-keyword">if</span> (state-&gt;wrap != 0 &amp;&amp; state-&gt;mode != DICT)
+        <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+
+    <span class="enscript-comment">/* check for correct dictionary id */</span>
+    <span class="enscript-keyword">if</span> (state-&gt;mode == DICT) {
+        id = adler32(0L, Z_NULL, 0);
+        id = adler32(id, dictionary, dictLength);
+        <span class="enscript-keyword">if</span> (id != state-&gt;check)
+            <span class="enscript-keyword">return</span> Z_DATA_ERROR;
+    }
+
+    <span class="enscript-comment">/* copy dictionary to window */</span>
+    <span class="enscript-keyword">if</span> (updatewindow(strm, strm-&gt;avail_out)) {
+        state-&gt;mode = MEM;
+        <span class="enscript-keyword">return</span> Z_MEM_ERROR;
+    }
+    <span class="enscript-keyword">if</span> (dictLength &gt; state-&gt;wsize) {
+        zmemcpy(state-&gt;window, dictionary + dictLength - state-&gt;wsize,
+                state-&gt;wsize);
+        state-&gt;whave = state-&gt;wsize;
+    }
+    <span class="enscript-keyword">else</span> {
+        zmemcpy(state-&gt;window + state-&gt;wsize - dictLength, dictionary,
+                dictLength);
+        state-&gt;whave = dictLength;
+    }
+    state-&gt;havedict = 1;
+    Tracev((stderr, <span class="enscript-string">&quot;inflate:   dictionary set\n&quot;</span>));
+    <span class="enscript-keyword">return</span> Z_OK;
+}
+
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">inflateGetHeader</span>(strm, head)
+z_streamp strm;
+gz_headerp head;
+{
+    <span class="enscript-type">struct</span> inflate_state FAR *state;
+
+    <span class="enscript-comment">/* check state */</span>
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    state = (<span class="enscript-type">struct</span> inflate_state FAR *)strm-&gt;state;
+    <span class="enscript-keyword">if</span> ((state-&gt;wrap &amp; 2) == 0) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+
+    <span class="enscript-comment">/* save header structure */</span>
+    state-&gt;head = head;
+    head-&gt;done = 0;
+    <span class="enscript-keyword">return</span> Z_OK;
+}
+
+<span class="enscript-comment">/*
+   Search buf[0..len-1] for the pattern: 0, 0, 0xff, 0xff.  Return when found
+   or when out of input.  When called, *have is the number of pattern bytes
+   found in order so far, in 0..3.  On return *have is updated to the new
+   state.  If on return *have equals four, then the pattern was found and the
+   return value is how many bytes were read including the last byte of the
+   pattern.  If *have is less than four, then the pattern has not been found
+   yet and the return value is len.  In the latter case, syncsearch() can be
+   called again with more data and the *have state.  *have is initialized to
+   zero for the first call.
+ */</span>
+local <span class="enscript-type">unsigned</span> <span class="enscript-function-name">syncsearch</span>(have, buf, len)
+<span class="enscript-type">unsigned</span> FAR *have;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *buf;
+<span class="enscript-type">unsigned</span> len;
+{
+    <span class="enscript-type">unsigned</span> got;
+    <span class="enscript-type">unsigned</span> next;
+
+    got = *have;
+    next = 0;
+    <span class="enscript-keyword">while</span> (next &lt; len &amp;&amp; got &lt; 4) {
+        <span class="enscript-keyword">if</span> ((<span class="enscript-type">int</span>)(buf[next]) == (got &lt; 2 ? 0 : 0xff))
+            got++;
+        <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (buf[next])
+            got = 0;
+        <span class="enscript-keyword">else</span>
+            got = 4 - got;
+        next++;
+    }
+    *have = got;
+    <span class="enscript-keyword">return</span> next;
+}
+
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">inflateSync</span>(strm)
+z_streamp strm;
+{
+    <span class="enscript-type">unsigned</span> len;               <span class="enscript-comment">/* number of bytes to look at or looked at */</span>
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> in, out;      <span class="enscript-comment">/* temporary to save total_in and total_out */</span>
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> buf[4];       <span class="enscript-comment">/* to restore bit buffer to byte string */</span>
+    <span class="enscript-type">struct</span> inflate_state FAR *state;
+
+    <span class="enscript-comment">/* check parameters */</span>
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    state = (<span class="enscript-type">struct</span> inflate_state FAR *)strm-&gt;state;
+    <span class="enscript-keyword">if</span> (strm-&gt;avail_in == 0 &amp;&amp; state-&gt;bits &lt; 8) <span class="enscript-keyword">return</span> Z_BUF_ERROR;
+
+    <span class="enscript-comment">/* if first time, start search in bit buffer */</span>
+    <span class="enscript-keyword">if</span> (state-&gt;mode != SYNC) {
+        state-&gt;mode = SYNC;
+        state-&gt;hold &lt;&lt;= state-&gt;bits &amp; 7;
+        state-&gt;bits -= state-&gt;bits &amp; 7;
+        len = 0;
+        <span class="enscript-keyword">while</span> (state-&gt;bits &gt;= 8) {
+            buf[len++] = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)(state-&gt;hold);
+            state-&gt;hold &gt;&gt;= 8;
+            state-&gt;bits -= 8;
+        }
+        state-&gt;have = 0;
+        syncsearch(&amp;(state-&gt;have), buf, len);
+    }
+
+    <span class="enscript-comment">/* search available input */</span>
+    len = syncsearch(&amp;(state-&gt;have), strm-&gt;next_in, strm-&gt;avail_in);
+    strm-&gt;avail_in -= len;
+    strm-&gt;next_in += len;
+    strm-&gt;total_in += len;
+
+    <span class="enscript-comment">/* return no joy or set up to restart inflate() on a new block */</span>
+    <span class="enscript-keyword">if</span> (state-&gt;have != 4) <span class="enscript-keyword">return</span> Z_DATA_ERROR;
+    in = strm-&gt;total_in;  out = strm-&gt;total_out;
+    inflateReset(strm);
+    strm-&gt;total_in = in;  strm-&gt;total_out = out;
+    state-&gt;mode = TYPE;
+    <span class="enscript-keyword">return</span> Z_OK;
+}
+
+<span class="enscript-comment">/*
+   Returns true if inflate is currently at the end of a block generated by
+   Z_SYNC_FLUSH or Z_FULL_FLUSH. This function is used by one PPP
+   implementation to provide an additional safety check. PPP uses
+   Z_SYNC_FLUSH but removes the length bytes of the resulting empty stored
+   block. When decompressing, PPP checks that at the end of input packet,
+   inflate is waiting for these length bytes.
+ */</span>
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">inflateSyncPoint</span>(strm)
+z_streamp strm;
+{
+    <span class="enscript-type">struct</span> inflate_state FAR *state;
+
+    <span class="enscript-keyword">if</span> (strm == Z_NULL || strm-&gt;state == Z_NULL) <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    state = (<span class="enscript-type">struct</span> inflate_state FAR *)strm-&gt;state;
+    <span class="enscript-keyword">return</span> state-&gt;mode == STORED &amp;&amp; state-&gt;bits == 0;
+}
+
+<span class="enscript-type">int</span> ZEXPORT <span class="enscript-function-name">inflateCopy</span>(dest, source)
+z_streamp dest;
+z_streamp source;
+{
+    <span class="enscript-type">struct</span> inflate_state FAR *state;
+    <span class="enscript-type">struct</span> inflate_state FAR *copy;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *window;
+    <span class="enscript-type">unsigned</span> wsize;
+
+    <span class="enscript-comment">/* check input */</span>
+    <span class="enscript-keyword">if</span> (dest == Z_NULL || source == Z_NULL || source-&gt;state == Z_NULL ||
+        source-&gt;zalloc == (alloc_func)0 || source-&gt;zfree == (free_func)0)
+        <span class="enscript-keyword">return</span> Z_STREAM_ERROR;
+    state = (<span class="enscript-type">struct</span> inflate_state FAR *)source-&gt;state;
+
+    <span class="enscript-comment">/* allocate space */</span>
+    copy = (<span class="enscript-type">struct</span> inflate_state FAR *)
+           ZALLOC(source, 1, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> inflate_state));
+    <span class="enscript-keyword">if</span> (copy == Z_NULL) <span class="enscript-keyword">return</span> Z_MEM_ERROR;
+    window = Z_NULL;
+    <span class="enscript-keyword">if</span> (state-&gt;window != Z_NULL) {
+        window = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *)
+                 ZALLOC(source, 1U &lt;&lt; state-&gt;wbits, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>));
+        <span class="enscript-keyword">if</span> (window == Z_NULL) {
+            ZFREE(source, copy);
+            <span class="enscript-keyword">return</span> Z_MEM_ERROR;
+        }
+    }
+
+    <span class="enscript-comment">/* copy state */</span>
+    zmemcpy(dest, source, <span class="enscript-keyword">sizeof</span>(z_stream));
+    zmemcpy(copy, state, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> inflate_state));
+    <span class="enscript-keyword">if</span> (state-&gt;lencode &gt;= state-&gt;codes &amp;&amp;
+        state-&gt;lencode &lt;= state-&gt;codes + ENOUGH - 1) {
+        copy-&gt;lencode = copy-&gt;codes + (state-&gt;lencode - state-&gt;codes);
+        copy-&gt;distcode = copy-&gt;codes + (state-&gt;distcode - state-&gt;codes);
+    }
+    copy-&gt;next = copy-&gt;codes + (state-&gt;next - state-&gt;codes);
+    <span class="enscript-keyword">if</span> (window != Z_NULL) {
+        wsize = 1U &lt;&lt; state-&gt;wbits;
+        zmemcpy(window, state-&gt;window, wsize);
+    }
+    copy-&gt;window = window;
+    dest-&gt;state = (<span class="enscript-type">struct</span> internal_state FAR *)copy;
+    <span class="enscript-keyword">return</span> Z_OK;
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,1885 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>vm_purgeable.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">vm_purgeable.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this
+ * file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ledger.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSDebug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/limits.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_compressor_pager.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>				<span class="enscript-comment">/* kmem_alloc */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_page.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_purgeable_internal.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+<span class="enscript-type">extern</span> vm_pressure_level_t memorystatus_vm_pressure_level;
+
+<span class="enscript-type">struct</span> token {
+	token_cnt_t     count;
+	token_idx_t	prev;
+	token_idx_t     next;
+};
+
+<span class="enscript-type">struct</span> token	*tokens;
+token_idx_t	token_q_max_cnt = 0;
+vm_size_t	token_q_cur_size = 0;
+
+token_idx_t     token_free_idx = 0;		<span class="enscript-comment">/* head of free queue */</span>
+token_idx_t     token_init_idx = 1;		<span class="enscript-comment">/* token 0 is reserved!! */</span>
+int32_t		token_new_pagecount = 0;	<span class="enscript-comment">/* count of pages that will
+						 * be added onto token queue */</span>
+
+<span class="enscript-type">int</span>             available_for_purge = 0;	<span class="enscript-comment">/* increase when ripe token
+						 * added, decrease when ripe
+						 * token removed.
+						 * protected by page_queue_lock 
+						 */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> token_q_allocating = 0;		<span class="enscript-comment">/* flag for singlethreading 
+						 * allocator */</span>
+
+<span class="enscript-type">struct</span> purgeable_q purgeable_queues[PURGEABLE_Q_TYPE_MAX];
+queue_head_t purgeable_nonvolatile_queue;
+<span class="enscript-type">int</span> purgeable_nonvolatile_count;
+
+<span class="enscript-function-name">decl_lck_mtx_data</span>(,vm_purgeable_queue_lock)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TOKEN_ADD</span>		0x40	<span class="enscript-comment">/* 0x100 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TOKEN_DELETE</span>		0x41	<span class="enscript-comment">/* 0x104 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TOKEN_RIPEN</span>		0x42	<span class="enscript-comment">/* 0x108 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">OBJECT_ADD</span>		0x48	<span class="enscript-comment">/* 0x120 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">OBJECT_REMOVE</span>		0x49	<span class="enscript-comment">/* 0x124 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">OBJECT_PURGE</span>		0x4a	<span class="enscript-comment">/* 0x128 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">OBJECT_PURGE_ALL</span>	0x4b	<span class="enscript-comment">/* 0x12c */</span>
+
+<span class="enscript-type">static</span> token_idx_t <span class="enscript-function-name">vm_purgeable_token_remove_first</span>(purgeable_q_t queue);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">vm_purgeable_stats_helper</span>(vm_purgeable_stat_t *stat, purgeable_q_t queue, <span class="enscript-type">int</span> group, task_t target_task);
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_purgeable_nonvolatile_owner_update</span>(task_t	owner,
+					   <span class="enscript-type">int</span>		delta);
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_purgeable_volatile_owner_update</span>(task_t		owner,
+					<span class="enscript-type">int</span>		delta);
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_token_check_queue</span>(purgeable_q_t queue)
+{
+	<span class="enscript-type">int</span>             token_cnt = 0, page_cnt = 0;
+	token_idx_t     token = queue-&gt;token_q_head;
+	token_idx_t     unripe = 0;
+	<span class="enscript-type">int</span>             our_inactive_count;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span>
+	<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span>	lightweight_check = 0;
+
+	<span class="enscript-comment">/*
+	 * Due to performance impact, only perform this check
+	 * every 100 times on DEVELOPMENT kernels.
+	 */</span>
+	<span class="enscript-keyword">if</span> (lightweight_check++ &lt; 100) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	lightweight_check = 0;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">while</span> (token) {
+		<span class="enscript-keyword">if</span> (tokens[token].count != 0) {
+			assert(queue-&gt;token_q_unripe);
+			<span class="enscript-keyword">if</span> (unripe == 0) {
+				assert(token == queue-&gt;token_q_unripe);
+				unripe = token;
+			}
+			page_cnt += tokens[token].count;
+		}
+		<span class="enscript-keyword">if</span> (tokens[token].next == 0)
+			assert(queue-&gt;token_q_tail == token);
+
+		token_cnt++;
+		token = tokens[token].next;
+	}
+
+	<span class="enscript-keyword">if</span> (unripe)
+		assert(queue-&gt;token_q_unripe == unripe);
+	assert(token_cnt == queue-&gt;debug_count_tokens);
+	
+	<span class="enscript-comment">/* obsolete queue doesn't maintain token counts */</span>
+	<span class="enscript-keyword">if</span>(queue-&gt;type != PURGEABLE_Q_TYPE_OBSOLETE)
+	{
+		our_inactive_count = page_cnt + queue-&gt;new_pages + token_new_pagecount;
+		assert(our_inactive_count &gt;= 0);
+		assert((uint32_t) our_inactive_count == vm_page_inactive_count - vm_page_cleaned_count);
+	}
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Add a token. Allocate token queue memory if necessary.
+ * Call with page queue locked.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">vm_purgeable_token_add</span>(purgeable_q_t queue)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	lck_mtx_assert(&amp;vm_page_queue_lock, LCK_MTX_ASSERT_OWNED);
+#<span class="enscript-reference">endif</span>
+	
+	<span class="enscript-comment">/* new token */</span>
+	token_idx_t     token;
+	<span class="enscript-type">enum</span> purgeable_q_type i;
+
+<span class="enscript-reference">find_available_token</span>:
+
+	<span class="enscript-keyword">if</span> (token_free_idx) {				<span class="enscript-comment">/* unused tokens available */</span>
+		token = token_free_idx;
+		token_free_idx = tokens[token_free_idx].next;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (token_init_idx &lt; token_q_max_cnt) {	<span class="enscript-comment">/* lazy token array init */</span>
+		token = token_init_idx;
+		token_init_idx++;
+	} <span class="enscript-keyword">else</span> {					<span class="enscript-comment">/* allocate more memory */</span>
+		<span class="enscript-comment">/* Wait if another thread is inside the memory alloc section */</span>
+		<span class="enscript-keyword">while</span>(token_q_allocating) {
+			wait_result_t res = lck_mtx_sleep(&amp;vm_page_queue_lock,
+							  LCK_SLEEP_DEFAULT,
+							  (event_t)&amp;token_q_allocating,
+							  THREAD_UNINT);
+			<span class="enscript-keyword">if</span>(res != THREAD_AWAKENED) <span class="enscript-keyword">return</span> KERN_ABORTED;
+		};
+		
+		<span class="enscript-comment">/* Check whether memory is still maxed out */</span>
+		<span class="enscript-keyword">if</span>(token_init_idx &lt; token_q_max_cnt)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">find_available_token</span>;
+		
+		<span class="enscript-comment">/* Still no memory. Allocate some. */</span>
+		token_q_allocating = 1;
+		
+		<span class="enscript-comment">/* Drop page queue lock so we can allocate */</span>
+		vm_page_unlock_queues();
+		
+		<span class="enscript-type">struct</span> token *new_loc;
+		vm_size_t alloc_size = token_q_cur_size + PAGE_SIZE;
+		kern_return_t result;
+		
+		<span class="enscript-keyword">if</span> (alloc_size / <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> token) &gt; TOKEN_COUNT_MAX) {
+			result = KERN_RESOURCE_SHORTAGE;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (token_q_cur_size) {
+				result = kmem_realloc(kernel_map,
+						      (vm_offset_t) tokens,
+						      token_q_cur_size,
+						      (vm_offset_t *) &amp;new_loc,
+						      alloc_size, VM_KERN_MEMORY_OSFMK);
+			} <span class="enscript-keyword">else</span> {
+				result = kmem_alloc(kernel_map,
+						    (vm_offset_t *) &amp;new_loc,
+						    alloc_size, VM_KERN_MEMORY_OSFMK);
+			}
+		}
+		
+		vm_page_lock_queues();
+		
+		<span class="enscript-keyword">if</span> (result) {
+			<span class="enscript-comment">/* Unblock waiting threads */</span>
+			token_q_allocating = 0;
+			thread_wakeup((event_t)&amp;token_q_allocating);
+			<span class="enscript-keyword">return</span> result;
+		}
+		
+		<span class="enscript-comment">/* If we get here, we allocated new memory. Update pointers and
+		 * dealloc old range */</span>
+		<span class="enscript-type">struct</span> token *old_tokens=tokens;
+		tokens=new_loc;
+		vm_size_t old_token_q_cur_size=token_q_cur_size;
+		token_q_cur_size=alloc_size;
+		token_q_max_cnt = (token_idx_t) (token_q_cur_size /
+						 <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> token));
+		assert (token_init_idx &lt; token_q_max_cnt);	<span class="enscript-comment">/* We must have a free token now */</span>
+		
+		<span class="enscript-keyword">if</span> (old_token_q_cur_size) {	<span class="enscript-comment">/* clean up old mapping */</span>
+			vm_page_unlock_queues();
+			<span class="enscript-comment">/* kmem_realloc leaves the old region mapped. Get rid of it. */</span>
+			kmem_free(kernel_map, (vm_offset_t)old_tokens, old_token_q_cur_size);
+			vm_page_lock_queues();
+		}
+		
+		<span class="enscript-comment">/* Unblock waiting threads */</span>
+		token_q_allocating = 0;
+		thread_wakeup((event_t)&amp;token_q_allocating);
+		
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">find_available_token</span>;
+	}
+	
+	assert (token);
+	
+	<span class="enscript-comment">/*
+	 * the new pagecount we got need to be applied to all queues except
+	 * obsolete
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = PURGEABLE_Q_TYPE_FIFO; i &lt; PURGEABLE_Q_TYPE_MAX; i++) {
+		int64_t pages = purgeable_queues[i].new_pages += token_new_pagecount;
+		assert(pages &gt;= 0);
+		assert(pages &lt;= TOKEN_COUNT_MAX);
+		purgeable_queues[i].new_pages = (int32_t) pages;
+		assert(purgeable_queues[i].new_pages == pages);
+	}
+	token_new_pagecount = 0;
+
+	<span class="enscript-comment">/* set token counter value */</span>
+	<span class="enscript-keyword">if</span> (queue-&gt;type != PURGEABLE_Q_TYPE_OBSOLETE)
+		tokens[token].count = queue-&gt;new_pages;
+	<span class="enscript-keyword">else</span>
+		tokens[token].count = 0;	<span class="enscript-comment">/* all obsolete items are
+						 * ripe immediately */</span>
+	queue-&gt;new_pages = 0;
+
+	<span class="enscript-comment">/* put token on token counter list */</span>
+	tokens[token].next = 0;
+	<span class="enscript-keyword">if</span> (queue-&gt;token_q_tail == 0) {
+		assert(queue-&gt;token_q_head == 0 &amp;&amp; queue-&gt;token_q_unripe == 0);
+		queue-&gt;token_q_head = token;
+		tokens[token].prev = 0;
+	} <span class="enscript-keyword">else</span> {
+		tokens[queue-&gt;token_q_tail].next = token;
+		tokens[token].prev = queue-&gt;token_q_tail;
+	}
+	<span class="enscript-keyword">if</span> (queue-&gt;token_q_unripe == 0) {	<span class="enscript-comment">/* only ripe tokens (token
+						 * count == 0) in queue */</span>
+		<span class="enscript-keyword">if</span> (tokens[token].count &gt; 0)
+			queue-&gt;token_q_unripe = token;	<span class="enscript-comment">/* first unripe token */</span>
+		<span class="enscript-keyword">else</span>
+			available_for_purge++;	<span class="enscript-comment">/* added a ripe token?
+						 * increase available count */</span>
+	}
+	queue-&gt;token_q_tail = token;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	queue-&gt;debug_count_tokens++;
+	<span class="enscript-comment">/* Check both queues, since we modified the new_pages count on each */</span>
+	vm_purgeable_token_check_queue(&amp;purgeable_queues[PURGEABLE_Q_TYPE_FIFO]);
+	vm_purgeable_token_check_queue(&amp;purgeable_queues[PURGEABLE_Q_TYPE_LIFO]);
+
+	KERNEL_DEBUG_CONSTANT((MACHDBG_CODE(DBG_MACH_VM, TOKEN_ADD)),
+			      queue-&gt;type,
+			      tokens[token].count,	<span class="enscript-comment">/* num pages on token
+							 * (last token) */</span>
+			      queue-&gt;debug_count_tokens,
+			      0,
+			      0);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * Remove first token from queue and return its index. Add its count to the
+ * count of the next token.
+ * Call with page queue locked. 
+ */</span>
+<span class="enscript-type">static</span> token_idx_t 
+<span class="enscript-function-name">vm_purgeable_token_remove_first</span>(purgeable_q_t queue)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	lck_mtx_assert(&amp;vm_page_queue_lock, LCK_MTX_ASSERT_OWNED);
+#<span class="enscript-reference">endif</span>
+	
+	token_idx_t     token;
+	token = queue-&gt;token_q_head;
+
+	assert(token);
+
+	<span class="enscript-keyword">if</span> (token) {
+		assert(queue-&gt;token_q_tail);
+		<span class="enscript-keyword">if</span> (queue-&gt;token_q_head == queue-&gt;token_q_unripe) {
+			<span class="enscript-comment">/* no ripe tokens... must move unripe pointer */</span>
+			queue-&gt;token_q_unripe = tokens[token].next;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* we're removing a ripe token. decrease count */</span>
+			available_for_purge--;
+			assert(available_for_purge &gt;= 0);
+		}
+
+		<span class="enscript-keyword">if</span> (queue-&gt;token_q_tail == queue-&gt;token_q_head)
+			assert(tokens[token].next == 0);
+
+		queue-&gt;token_q_head = tokens[token].next;
+		<span class="enscript-keyword">if</span> (queue-&gt;token_q_head) {
+			tokens[queue-&gt;token_q_head].count += tokens[token].count;
+			tokens[queue-&gt;token_q_head].prev = 0;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* currently no other tokens in the queue */</span>
+			<span class="enscript-comment">/*
+			 * the page count must be added to the next newly
+			 * created token
+			 */</span>
+			queue-&gt;new_pages += tokens[token].count;
+			<span class="enscript-comment">/* if head is zero, tail is too */</span>
+			queue-&gt;token_q_tail = 0;
+		}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+		queue-&gt;debug_count_tokens--;
+		vm_purgeable_token_check_queue(queue);
+
+		KERNEL_DEBUG_CONSTANT((MACHDBG_CODE(DBG_MACH_VM, TOKEN_DELETE)),
+				      queue-&gt;type,
+				      tokens[queue-&gt;token_q_head].count,	<span class="enscript-comment">/* num pages on new
+										 * first token */</span>
+				      token_new_pagecount,	<span class="enscript-comment">/* num pages waiting for
+								 * next token */</span>
+				      available_for_purge,
+				      0);
+#<span class="enscript-reference">endif</span>
+	}
+	<span class="enscript-keyword">return</span> token;
+}
+
+<span class="enscript-type">static</span> token_idx_t 
+<span class="enscript-function-name">vm_purgeable_token_remove_last</span>(purgeable_q_t queue)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	lck_mtx_assert(&amp;vm_page_queue_lock, LCK_MTX_ASSERT_OWNED);
+#<span class="enscript-reference">endif</span>
+	
+	token_idx_t     token;
+	token = queue-&gt;token_q_tail;
+
+	assert(token);
+
+	<span class="enscript-keyword">if</span> (token) {
+		assert(queue-&gt;token_q_head);
+
+		<span class="enscript-keyword">if</span> (queue-&gt;token_q_tail == queue-&gt;token_q_head)
+			assert(tokens[token].next == 0);
+
+		<span class="enscript-keyword">if</span> (queue-&gt;token_q_unripe == 0) {
+			<span class="enscript-comment">/* we're removing a ripe token. decrease count */</span>
+			available_for_purge--;
+			assert(available_for_purge &gt;= 0);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (queue-&gt;token_q_unripe == token) {
+			<span class="enscript-comment">/* we're removing the only unripe token */</span>
+			queue-&gt;token_q_unripe = 0;
+		}
+			
+		<span class="enscript-keyword">if</span> (token == queue-&gt;token_q_head) {
+			<span class="enscript-comment">/* token is the last one in the queue */</span>
+			queue-&gt;token_q_head = 0;
+			queue-&gt;token_q_tail = 0;
+		} <span class="enscript-keyword">else</span> {
+			token_idx_t new_tail;
+
+			new_tail = tokens[token].prev;
+
+			assert(new_tail);
+			assert(tokens[new_tail].next == token);
+
+			queue-&gt;token_q_tail = new_tail;
+			tokens[new_tail].next = 0;
+		}
+
+		queue-&gt;new_pages += tokens[token].count;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+		queue-&gt;debug_count_tokens--;
+		vm_purgeable_token_check_queue(queue);
+
+		KERNEL_DEBUG_CONSTANT((MACHDBG_CODE(DBG_MACH_VM, TOKEN_DELETE)),
+				      queue-&gt;type,
+				      tokens[queue-&gt;token_q_head].count,	<span class="enscript-comment">/* num pages on new
+										 * first token */</span>
+				      token_new_pagecount,	<span class="enscript-comment">/* num pages waiting for
+								 * next token */</span>
+				      available_for_purge,
+				      0);
+#<span class="enscript-reference">endif</span>
+	}
+	<span class="enscript-keyword">return</span> token;
+}
+
+<span class="enscript-comment">/* 
+ * Delete first token from queue. Return token to token queue.
+ * Call with page queue locked. 
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_token_delete_first</span>(purgeable_q_t queue)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	lck_mtx_assert(&amp;vm_page_queue_lock, LCK_MTX_ASSERT_OWNED);
+#<span class="enscript-reference">endif</span>
+	token_idx_t     token = vm_purgeable_token_remove_first(queue);
+
+	<span class="enscript-keyword">if</span> (token) {
+		<span class="enscript-comment">/* stick removed token on free queue */</span>
+		tokens[token].next = token_free_idx;
+		tokens[token].prev = 0;
+		token_free_idx = token;
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_token_delete_last</span>(purgeable_q_t queue)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	lck_mtx_assert(&amp;vm_page_queue_lock, LCK_MTX_ASSERT_OWNED);
+#<span class="enscript-reference">endif</span>
+	token_idx_t     token = vm_purgeable_token_remove_last(queue);
+
+	<span class="enscript-keyword">if</span> (token) {
+		<span class="enscript-comment">/* stick removed token on free queue */</span>
+		tokens[token].next = token_free_idx;
+		tokens[token].prev = 0;
+		token_free_idx = token;
+	}
+}
+
+
+<span class="enscript-comment">/* Call with page queue locked. */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_q_advance_all</span>()
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	lck_mtx_assert(&amp;vm_page_queue_lock, LCK_MTX_ASSERT_OWNED);
+#<span class="enscript-reference">endif</span>
+	
+	<span class="enscript-comment">/* check queue counters - if they get really large, scale them back.
+	 * They tend to get that large when there is no purgeable queue action */</span>
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-keyword">if</span>(token_new_pagecount &gt; (TOKEN_NEW_PAGECOUNT_MAX &gt;&gt; 1))	<span class="enscript-comment">/* a system idling years might get there */</span>
+	{
+		<span class="enscript-keyword">for</span> (i = PURGEABLE_Q_TYPE_FIFO; i &lt; PURGEABLE_Q_TYPE_MAX; i++) {
+			int64_t pages = purgeable_queues[i].new_pages += token_new_pagecount;
+			assert(pages &gt;= 0);
+			assert(pages &lt;= TOKEN_COUNT_MAX);
+			purgeable_queues[i].new_pages = (int32_t) pages;
+			assert(purgeable_queues[i].new_pages == pages);
+		}
+		token_new_pagecount = 0;
+	}
+	
+	<span class="enscript-comment">/*
+	 * Decrement token counters. A token counter can be zero, this means the
+	 * object is ripe to be purged. It is not purged immediately, because that
+	 * could cause several objects to be purged even if purging one would satisfy
+	 * the memory needs. Instead, the pageout thread purges one after the other
+	 * by calling vm_purgeable_object_purge_one and then rechecking the memory
+	 * balance.
+	 *
+	 * No need to advance obsolete queue - all items are ripe there,
+	 * always
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = PURGEABLE_Q_TYPE_FIFO; i &lt; PURGEABLE_Q_TYPE_MAX; i++) {
+		purgeable_q_t queue = &amp;purgeable_queues[i];
+		uint32_t num_pages = 1;
+		
+		<span class="enscript-comment">/* Iterate over tokens as long as there are unripe tokens. */</span>
+		<span class="enscript-keyword">while</span> (queue-&gt;token_q_unripe) {
+			<span class="enscript-keyword">if</span> (tokens[queue-&gt;token_q_unripe].count &amp;&amp; num_pages)
+			{
+				tokens[queue-&gt;token_q_unripe].count -= 1;
+				num_pages -= 1;
+			}
+
+			<span class="enscript-keyword">if</span> (tokens[queue-&gt;token_q_unripe].count == 0) {
+				queue-&gt;token_q_unripe = tokens[queue-&gt;token_q_unripe].next;
+				available_for_purge++;
+				KERNEL_DEBUG_CONSTANT((MACHDBG_CODE(DBG_MACH_VM, TOKEN_RIPEN)),
+						      queue-&gt;type,
+						      tokens[queue-&gt;token_q_head].count,	<span class="enscript-comment">/* num pages on new
+											 * first token */</span>
+						      0,
+						      available_for_purge,
+						      0);
+				<span class="enscript-keyword">continue</span>;	<span class="enscript-comment">/* One token ripened. Make sure to
+						 * check the next. */</span>
+			}
+			<span class="enscript-keyword">if</span> (num_pages == 0)
+				<span class="enscript-keyword">break</span>;	<span class="enscript-comment">/* Current token not ripe and no more pages.
+					 * Work done. */</span>
+		}
+
+		<span class="enscript-comment">/*
+		 * if there are no unripe tokens in the queue, decrement the
+		 * new_pages counter instead new_pages can be negative, but must be
+		 * canceled out by token_new_pagecount -- since inactive queue as a
+		 * whole always contains a nonnegative number of pages
+		 */</span>
+		<span class="enscript-keyword">if</span> (!queue-&gt;token_q_unripe) {
+			queue-&gt;new_pages -= num_pages;
+			assert((int32_t) token_new_pagecount + queue-&gt;new_pages &gt;= 0);
+		}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+		vm_purgeable_token_check_queue(queue);
+#<span class="enscript-reference">endif</span>
+	}
+}
+
+<span class="enscript-comment">/*
+ * grab any ripe object and purge it obsolete queue first. then, go through
+ * each volatile group. Select a queue with a ripe token.
+ * Start with first group (0)
+ * 1. Look at queue. Is there an object?
+ *   Yes - purge it. Remove token.
+ *   No - check other queue. Is there an object?
+ *     No - increment group, then go to (1)
+ *     Yes - purge it. Remove token. If there is no ripe token, remove ripe
+ *      token from other queue and migrate unripe token from this
+ *      queue to other queue.
+ * Call with page queue locked.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_token_remove_ripe</span>(purgeable_q_t queue)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	lck_mtx_assert(&amp;vm_page_queue_lock, LCK_MTX_ASSERT_OWNED);
+#<span class="enscript-reference">endif</span>
+	assert(queue-&gt;token_q_head &amp;&amp; tokens[queue-&gt;token_q_head].count == 0);
+	<span class="enscript-comment">/* return token to free list. advance token list. */</span>
+	token_idx_t     new_head = tokens[queue-&gt;token_q_head].next;
+	tokens[queue-&gt;token_q_head].next = token_free_idx;
+	tokens[queue-&gt;token_q_head].prev = 0;
+	token_free_idx = queue-&gt;token_q_head;
+	queue-&gt;token_q_head = new_head;
+	tokens[new_head].prev = 0;
+	<span class="enscript-keyword">if</span> (new_head == 0)
+		queue-&gt;token_q_tail = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	queue-&gt;debug_count_tokens--;
+	vm_purgeable_token_check_queue(queue);
+#<span class="enscript-reference">endif</span>
+
+	available_for_purge--;
+	assert(available_for_purge &gt;= 0);
+}
+
+<span class="enscript-comment">/*
+ * Delete a ripe token from the given queue. If there are no ripe tokens on
+ * that queue, delete a ripe token from queue2, and migrate an unripe token
+ * from queue to queue2
+ * Call with page queue locked.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_token_choose_and_delete_ripe</span>(purgeable_q_t queue, purgeable_q_t queue2)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	lck_mtx_assert(&amp;vm_page_queue_lock, LCK_MTX_ASSERT_OWNED);
+#<span class="enscript-reference">endif</span>
+	assert(queue-&gt;token_q_head);
+
+	<span class="enscript-keyword">if</span> (tokens[queue-&gt;token_q_head].count == 0) {
+		<span class="enscript-comment">/* This queue has a ripe token. Remove. */</span>
+		vm_purgeable_token_remove_ripe(queue);
+	} <span class="enscript-keyword">else</span> {
+		assert(queue2);
+		<span class="enscript-comment">/*
+		 * queue2 must have a ripe token. Remove, and migrate one
+		 * from queue to queue2.
+		 */</span>
+		vm_purgeable_token_remove_ripe(queue2);
+		<span class="enscript-comment">/* migrate unripe token */</span>
+		token_idx_t     token;
+		token_cnt_t     count;
+
+		<span class="enscript-comment">/* remove token from queue1 */</span>
+		assert(queue-&gt;token_q_unripe == queue-&gt;token_q_head);	<span class="enscript-comment">/* queue1 had no unripe
+									 * tokens, remember? */</span>
+		token = vm_purgeable_token_remove_first(queue);
+		assert(token);
+
+		count = tokens[token].count;
+
+		<span class="enscript-comment">/* migrate to queue2 */</span>
+		<span class="enscript-comment">/* go to migration target loc */</span>
+
+		token_idx_t token_to_insert_before = queue2-&gt;token_q_head, token_to_insert_after;
+
+		<span class="enscript-keyword">while</span> (token_to_insert_before != 0 &amp;&amp; count &gt; tokens[token_to_insert_before].count) {
+			count -= tokens[token_to_insert_before].count;
+			token_to_insert_before = tokens[token_to_insert_before].next;
+		}
+
+		<span class="enscript-comment">/* token_to_insert_before is now set correctly */</span>
+	
+		<span class="enscript-comment">/* should the inserted token become the first unripe token? */</span>
+		<span class="enscript-keyword">if</span> ((token_to_insert_before == queue2-&gt;token_q_unripe) || (queue2-&gt;token_q_unripe == 0))
+			queue2-&gt;token_q_unripe = token;	<span class="enscript-comment">/* if so, must update unripe pointer */</span>
+
+		<span class="enscript-comment">/*
+		 * insert token.
+		 * if inserting at end, reduce new_pages by that value;
+		 * otherwise, reduce counter of next token
+		 */</span>
+
+		tokens[token].count = count;
+
+		<span class="enscript-keyword">if</span> (token_to_insert_before != 0) {
+			token_to_insert_after = tokens[token_to_insert_before].prev;
+
+			tokens[token].next = token_to_insert_before;
+			tokens[token_to_insert_before].prev = token;
+
+			assert(tokens[token_to_insert_before].count &gt;= count);
+			tokens[token_to_insert_before].count -= count;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* if we ran off the end of the list, the token to insert after is the tail */</span>
+			token_to_insert_after = queue2-&gt;token_q_tail;
+
+			tokens[token].next = 0;
+			queue2-&gt;token_q_tail = token;
+
+			assert(queue2-&gt;new_pages &gt;= (int32_t) count);
+			queue2-&gt;new_pages -= count;
+		}
+
+		<span class="enscript-keyword">if</span> (token_to_insert_after != 0) {
+			tokens[token].prev = token_to_insert_after;
+			tokens[token_to_insert_after].next = token;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* is this case possible? */</span>
+			tokens[token].prev = 0;
+			queue2-&gt;token_q_head = token;
+		}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+		queue2-&gt;debug_count_tokens++;
+		vm_purgeable_token_check_queue(queue2);
+#<span class="enscript-reference">endif</span>
+	}
+}
+
+<span class="enscript-comment">/* Find an object that can be locked. Returns locked object. */</span>
+<span class="enscript-comment">/* Call with purgeable queue locked. */</span>
+<span class="enscript-type">static</span> vm_object_t
+<span class="enscript-function-name">vm_purgeable_object_find_and_lock</span>(
+	purgeable_q_t	queue,
+	<span class="enscript-type">int</span> 		group,
+	boolean_t	pick_ripe)
+{
+	vm_object_t     object, best_object;
+	<span class="enscript-type">int</span>		object_task_importance;
+	<span class="enscript-type">int</span>		best_object_task_importance;
+	<span class="enscript-type">int</span>		best_object_skipped;
+	<span class="enscript-type">int</span>		num_objects_skipped;
+	task_t		owner;
+
+	best_object = VM_OBJECT_NULL;
+	best_object_task_importance = INT_MAX;
+
+	lck_mtx_assert(&amp;vm_purgeable_queue_lock, LCK_MTX_ASSERT_OWNED);
+	<span class="enscript-comment">/*
+	 * Usually we would pick the first element from a queue. However, we
+	 * might not be able to get a lock on it, in which case we try the
+	 * remaining elements in order.
+	 */</span>
+
+	num_objects_skipped = -1;
+	<span class="enscript-keyword">for</span> (object = (vm_object_t) queue_first(&amp;queue-&gt;objq[group]);
+	     !queue_end(&amp;queue-&gt;objq[group], (queue_entry_t) object);
+	     object = (vm_object_t) queue_next(&amp;object-&gt;objq),
+		num_objects_skipped++) {
+
+		<span class="enscript-keyword">if</span> (pick_ripe &amp;&amp;
+		    ! object-&gt;purgeable_when_ripe) {
+			<span class="enscript-comment">/* we want an object that has a ripe token */</span>
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		object_task_importance = 0;
+
+		owner = object-&gt;vo_purgeable_owner;
+		<span class="enscript-keyword">if</span> (owner) {
+			object_task_importance = task_importance_estimate(owner);
+		}
+
+		<span class="enscript-keyword">if</span> (object_task_importance &lt; best_object_task_importance) {
+			<span class="enscript-keyword">if</span> (vm_object_lock_try(object)) {
+				<span class="enscript-keyword">if</span> (best_object != VM_OBJECT_NULL) {
+					<span class="enscript-comment">/* forget about previous best object */</span>
+					vm_object_unlock(best_object);
+				}
+				best_object = object;
+				best_object_task_importance = object_task_importance;
+				best_object_skipped = num_objects_skipped;
+				<span class="enscript-keyword">if</span> (best_object_task_importance == 0) {
+					<span class="enscript-comment">/* can't get any better: stop looking */</span>
+					<span class="enscript-keyword">break</span>;
+				}
+			}
+		}
+	}
+	object = best_object;
+
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL) {
+		<span class="enscript-keyword">return</span> VM_OBJECT_NULL;
+	}
+
+	<span class="enscript-comment">/* Locked. Great. We'll take it. Remove and return. */</span>
+<span class="enscript-comment">//	printf(&quot;FOUND PURGEABLE object %p skipped %d\n&quot;, object, num_objects_skipped);
+</span>
+	vm_object_lock_assert_exclusive(object);
+
+	queue_remove(&amp;queue-&gt;objq[group], object,
+		     vm_object_t, objq);
+	object-&gt;objq.next = NULL;
+	object-&gt;objq.prev = NULL;
+	object-&gt;purgeable_queue_type = PURGEABLE_Q_TYPE_MAX;
+	object-&gt;purgeable_queue_group = 0;
+	<span class="enscript-comment">/* one less volatile object for this object's owner */</span>
+	vm_purgeable_volatile_owner_update(object-&gt;vo_purgeable_owner, -1);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	object-&gt;vo_purgeable_volatilizer = NULL;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+
+	<span class="enscript-comment">/* keep queue of non-volatile objects */</span>
+	queue_enter(&amp;purgeable_nonvolatile_queue, object,
+		    vm_object_t, objq);
+	assert(purgeable_nonvolatile_count &gt;= 0);
+	purgeable_nonvolatile_count++;
+	assert(purgeable_nonvolatile_count &gt; 0);
+	<span class="enscript-comment">/* one more nonvolatile object for this object's owner */</span>
+	vm_purgeable_nonvolatile_owner_update(object-&gt;vo_purgeable_owner, +1);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	queue-&gt;debug_count_objects--;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span> object;
+}
+
+<span class="enscript-comment">/* Can be called without holding locks */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_object_purge_all</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">enum</span> purgeable_q_type i;
+	<span class="enscript-type">int</span>             group;
+	vm_object_t     object;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	purged_count;
+	uint32_t	collisions;
+
+	purged_count = 0;
+	collisions = 0;
+
+<span class="enscript-reference">restart</span>:
+	lck_mtx_lock(&amp;vm_purgeable_queue_lock);
+	<span class="enscript-comment">/* Cycle through all queues */</span>
+	<span class="enscript-keyword">for</span> (i = PURGEABLE_Q_TYPE_OBSOLETE; i &lt; PURGEABLE_Q_TYPE_MAX; i++) {
+		purgeable_q_t   queue;
+
+		queue = &amp;purgeable_queues[i];
+
+		<span class="enscript-comment">/*
+		 * Look through all groups, starting from the lowest. If
+		 * we find an object in that group, try to lock it (this can
+		 * fail). If locking is successful, we can drop the queue
+		 * lock, remove a token and then purge the object.
+		 */</span>
+		<span class="enscript-keyword">for</span> (group = 0; group &lt; NUM_VOLATILE_GROUPS; group++) {
+			<span class="enscript-keyword">while</span> (!queue_empty(&amp;queue-&gt;objq[group])) {
+				object = vm_purgeable_object_find_and_lock(queue, group, FALSE);
+				<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL) {
+					lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+					mutex_pause(collisions++);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">restart</span>;
+				}
+
+				lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+				
+				<span class="enscript-comment">/* Lock the page queue here so we don't hold it
+				 * over the whole, legthy operation */</span>
+				<span class="enscript-keyword">if</span> (object-&gt;purgeable_when_ripe) {
+					vm_page_lock_queues();
+					vm_purgeable_token_remove_first(queue);
+					vm_page_unlock_queues();
+				}
+				
+				(<span class="enscript-type">void</span>) vm_object_purge(object, 0);
+				assert(object-&gt;purgable == VM_PURGABLE_EMPTY);
+				<span class="enscript-comment">/* no change in purgeable accounting */</span>
+
+				vm_object_unlock(object);
+				purged_count++;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">restart</span>;
+			}
+			assert(queue-&gt;debug_count_objects &gt;= 0);
+		}
+	}
+	KERNEL_DEBUG_CONSTANT((MACHDBG_CODE(DBG_MACH_VM, OBJECT_PURGE_ALL)),
+			      purged_count, <span class="enscript-comment">/* # of purged objects */</span>
+			      0,
+			      available_for_purge,
+			      0,
+			      0);
+	lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+	<span class="enscript-keyword">return</span>;
+}
+
+boolean_t
+<span class="enscript-function-name">vm_purgeable_object_purge_one_unlocked</span>(
+	<span class="enscript-type">int</span>	force_purge_below_group)
+{
+	boolean_t	retval;
+
+	vm_page_lock_queues();
+	retval = vm_purgeable_object_purge_one(force_purge_below_group, 0);
+	vm_page_unlock_queues();
+
+	<span class="enscript-keyword">return</span> retval;
+}
+
+boolean_t
+<span class="enscript-function-name">vm_purgeable_object_purge_one</span>(
+	<span class="enscript-type">int</span>	force_purge_below_group,
+	<span class="enscript-type">int</span>	flags)
+{
+	<span class="enscript-type">enum</span> purgeable_q_type i;
+	<span class="enscript-type">int</span>             group;
+	vm_object_t     object = 0;
+	purgeable_q_t   queue, queue2;
+	boolean_t	forced_purge;
+
+	<span class="enscript-comment">/* Need the page queue lock since we'll be changing the token queue. */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	lck_mtx_assert(&amp;vm_page_queue_lock, LCK_MTX_ASSERT_OWNED);
+#<span class="enscript-reference">endif</span>
+	lck_mtx_lock(&amp;vm_purgeable_queue_lock);
+	
+	<span class="enscript-comment">/* Cycle through all queues */</span>
+	<span class="enscript-keyword">for</span> (i = PURGEABLE_Q_TYPE_OBSOLETE; i &lt; PURGEABLE_Q_TYPE_MAX; i++) {
+		queue = &amp;purgeable_queues[i];
+
+		<span class="enscript-keyword">if</span> (force_purge_below_group == 0) {
+			<span class="enscript-comment">/*
+			 * Are there any ripe tokens on this queue? If yes,
+			 * we'll find an object to purge there
+			 */</span>
+			<span class="enscript-keyword">if</span> (!queue-&gt;token_q_head) {
+				<span class="enscript-comment">/* no token: look at next purgeable queue */</span>
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			<span class="enscript-keyword">if</span> (tokens[queue-&gt;token_q_head].count != 0) {
+				<span class="enscript-comment">/* no ripe token: next queue */</span>
+				<span class="enscript-keyword">continue</span>;
+			}
+		}
+
+		<span class="enscript-comment">/*
+		 * Now look through all groups, starting from the lowest. If
+		 * we find an object in that group, try to lock it (this can
+		 * fail). If locking is successful, we can drop the queue
+		 * lock, remove a token and then purge the object.
+		 */</span>
+		<span class="enscript-keyword">for</span> (group = 0; group &lt; NUM_VOLATILE_GROUPS; group++) {
+			<span class="enscript-keyword">if</span> (!queue-&gt;token_q_head ||
+			    tokens[queue-&gt;token_q_head].count != 0) {
+				<span class="enscript-comment">/* no tokens or no ripe tokens */</span>
+
+				<span class="enscript-keyword">if</span> (group &gt;= force_purge_below_group) {
+					<span class="enscript-comment">/* no more groups to force-purge */</span>
+					<span class="enscript-keyword">break</span>;
+				}
+
+				<span class="enscript-comment">/*
+				 * Try and purge an object in this group
+				 * even though no tokens are ripe.
+				 */</span>
+				<span class="enscript-keyword">if</span> (!queue_empty(&amp;queue-&gt;objq[group]) &amp;&amp;
+				    (object = vm_purgeable_object_find_and_lock(queue, group, FALSE))) {
+					lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+					<span class="enscript-keyword">if</span> (object-&gt;purgeable_when_ripe) {
+						vm_purgeable_token_delete_first(queue);
+					}
+					forced_purge = TRUE;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">purge_now</span>;
+				}
+
+				<span class="enscript-comment">/* nothing to purge in this group: next group */</span>
+				<span class="enscript-keyword">continue</span>;
+			}
+			<span class="enscript-keyword">if</span> (!queue_empty(&amp;queue-&gt;objq[group]) &amp;&amp; 
+			    (object = vm_purgeable_object_find_and_lock(queue, group, TRUE))) {
+				lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+				<span class="enscript-keyword">if</span> (object-&gt;purgeable_when_ripe) {
+					vm_purgeable_token_choose_and_delete_ripe(queue, 0);
+				}
+				forced_purge = FALSE;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">purge_now</span>;
+			}
+			<span class="enscript-keyword">if</span> (i != PURGEABLE_Q_TYPE_OBSOLETE) { 
+				<span class="enscript-comment">/* This is the token migration case, and it works between
+				 * FIFO and LIFO only */</span>
+				queue2 = &amp;purgeable_queues[i != PURGEABLE_Q_TYPE_FIFO ? 
+							   PURGEABLE_Q_TYPE_FIFO : 
+							   PURGEABLE_Q_TYPE_LIFO];
+
+				<span class="enscript-keyword">if</span> (!queue_empty(&amp;queue2-&gt;objq[group]) &amp;&amp; 
+				    (object = vm_purgeable_object_find_and_lock(queue2, group, TRUE))) {
+					lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+					<span class="enscript-keyword">if</span> (object-&gt;purgeable_when_ripe) {
+						vm_purgeable_token_choose_and_delete_ripe(queue2, queue);
+					}
+					forced_purge = FALSE;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">purge_now</span>;
+				}
+			}
+			assert(queue-&gt;debug_count_objects &gt;= 0);
+		}
+	}
+	<span class="enscript-comment">/*
+         * because we have to do a try_lock on the objects which could fail,
+         * we could end up with no object to purge at this time, even though
+         * we have objects in a purgeable state
+         */</span>
+	lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+	<span class="enscript-keyword">return</span> FALSE;
+
+<span class="enscript-reference">purge_now</span>:
+
+	assert(object);
+	vm_page_unlock_queues();  <span class="enscript-comment">/* Unlock for call to vm_object_purge() */</span>
+<span class="enscript-comment">//	printf(&quot;%sPURGING object %p task %p importance %d queue %d group %d force_purge_below_group %d memorystatus_vm_pressure_level %d\n&quot;, forced_purge ? &quot;FORCED &quot; : &quot;&quot;, object, object-&gt;vo_purgeable_owner, task_importance_estimate(object-&gt;vo_purgeable_owner), i, group, force_purge_below_group, memorystatus_vm_pressure_level);
+</span>	(<span class="enscript-type">void</span>) vm_object_purge(object, flags);
+	assert(object-&gt;purgable == VM_PURGABLE_EMPTY);
+	<span class="enscript-comment">/* no change in purgeable accounting */</span>
+	vm_object_unlock(object);
+	vm_page_lock_queues();
+
+	KERNEL_DEBUG_CONSTANT((MACHDBG_CODE(DBG_MACH_VM, OBJECT_PURGE)),
+			      object,	<span class="enscript-comment">/* purged object */</span>
+			      0,
+			      available_for_purge,
+			      0,
+			      0);
+	
+	<span class="enscript-keyword">return</span> TRUE;
+}
+
+<span class="enscript-comment">/* Called with object lock held */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_object_add</span>(vm_object_t object, purgeable_q_t queue, <span class="enscript-type">int</span> group)
+{
+	vm_object_lock_assert_exclusive(object);
+	lck_mtx_lock(&amp;vm_purgeable_queue_lock);
+
+	assert(object-&gt;objq.next != NULL);
+	assert(object-&gt;objq.prev != NULL);
+	queue_remove(&amp;purgeable_nonvolatile_queue, object,
+		     vm_object_t, objq);
+	object-&gt;objq.next = NULL;
+	object-&gt;objq.prev = NULL;
+	assert(purgeable_nonvolatile_count &gt; 0);
+	purgeable_nonvolatile_count--;
+	assert(purgeable_nonvolatile_count &gt;= 0);
+	<span class="enscript-comment">/* one less nonvolatile object for this object's owner */</span>
+	vm_purgeable_nonvolatile_owner_update(object-&gt;vo_purgeable_owner, -1);
+
+	<span class="enscript-keyword">if</span> (queue-&gt;type == PURGEABLE_Q_TYPE_OBSOLETE)
+		group = 0;
+
+	<span class="enscript-keyword">if</span> (queue-&gt;type != PURGEABLE_Q_TYPE_LIFO)	<span class="enscript-comment">/* fifo and obsolete are
+							 * fifo-queued */</span>
+		queue_enter(&amp;queue-&gt;objq[group], object, vm_object_t, objq);	<span class="enscript-comment">/* last to die */</span>
+	<span class="enscript-keyword">else</span>
+		queue_enter_first(&amp;queue-&gt;objq[group], object, vm_object_t, objq);	<span class="enscript-comment">/* first to die */</span>
+	<span class="enscript-comment">/* one more volatile object for this object's owner */</span>
+	vm_purgeable_volatile_owner_update(object-&gt;vo_purgeable_owner, +1);
+
+	object-&gt;purgeable_queue_type = queue-&gt;type;
+	object-&gt;purgeable_queue_group = group;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	assert(object-&gt;vo_purgeable_volatilizer == NULL);
+	object-&gt;vo_purgeable_volatilizer = current_task();
+	OSBacktrace(&amp;object-&gt;purgeable_volatilizer_bt[0], 16);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	queue-&gt;debug_count_objects++;
+	KERNEL_DEBUG_CONSTANT((MACHDBG_CODE(DBG_MACH_VM, OBJECT_ADD)),
+			      0,
+			      tokens[queue-&gt;token_q_head].count,
+			      queue-&gt;type,
+			      group,
+			      0);
+#<span class="enscript-reference">endif</span>
+
+	lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+}
+
+<span class="enscript-comment">/* Look for object. If found, remove from purgeable queue. */</span>
+<span class="enscript-comment">/* Called with object lock held */</span>
+purgeable_q_t
+<span class="enscript-function-name">vm_purgeable_object_remove</span>(vm_object_t object)
+{
+	<span class="enscript-type">int</span> group;
+	<span class="enscript-type">enum</span> purgeable_q_type type;
+	purgeable_q_t queue;
+
+	vm_object_lock_assert_exclusive(object);
+
+	type = object-&gt;purgeable_queue_type;
+	group = object-&gt;purgeable_queue_group;
+
+	<span class="enscript-keyword">if</span> (type == PURGEABLE_Q_TYPE_MAX) {
+		<span class="enscript-keyword">if</span> (object-&gt;objq.prev || object-&gt;objq.next)
+			panic(<span class="enscript-string">&quot;unmarked object on purgeable q&quot;</span>);
+
+		<span class="enscript-keyword">return</span> NULL;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!(object-&gt;objq.prev &amp;&amp; object-&gt;objq.next))
+		panic(<span class="enscript-string">&quot;marked object not on purgeable q&quot;</span>);
+
+	lck_mtx_lock(&amp;vm_purgeable_queue_lock);
+
+	queue = &amp;purgeable_queues[type];
+
+	queue_remove(&amp;queue-&gt;objq[group], object, vm_object_t, objq);
+	object-&gt;objq.next = NULL;
+	object-&gt;objq.prev = NULL;
+	<span class="enscript-comment">/* one less volatile object for this object's owner */</span>
+	vm_purgeable_volatile_owner_update(object-&gt;vo_purgeable_owner, -1);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	object-&gt;vo_purgeable_volatilizer = NULL;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+	<span class="enscript-comment">/* keep queue of non-volatile objects */</span>
+	<span class="enscript-keyword">if</span> (object-&gt;alive &amp;&amp; !object-&gt;terminating) {
+		task_t	owner;
+		queue_enter(&amp;purgeable_nonvolatile_queue, object,
+			    vm_object_t, objq);
+		assert(purgeable_nonvolatile_count &gt;= 0);
+		purgeable_nonvolatile_count++;
+		assert(purgeable_nonvolatile_count &gt; 0);
+		<span class="enscript-comment">/* one more nonvolatile object for this object's owner */</span>
+		owner = object-&gt;vo_purgeable_owner;
+		vm_purgeable_nonvolatile_owner_update(owner, +1);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	queue-&gt;debug_count_objects--;
+	KERNEL_DEBUG_CONSTANT((MACHDBG_CODE(DBG_MACH_VM, OBJECT_REMOVE)),
+			      0,
+			      tokens[queue-&gt;token_q_head].count,
+			      queue-&gt;type,
+			      group,
+			      0);
+#<span class="enscript-reference">endif</span>
+
+	lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+
+	object-&gt;purgeable_queue_type = PURGEABLE_Q_TYPE_MAX;
+	object-&gt;purgeable_queue_group = 0;
+
+	vm_object_lock_assert_exclusive(object);
+
+	<span class="enscript-keyword">return</span> &amp;purgeable_queues[type];
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_stats_helper</span>(vm_purgeable_stat_t *stat, purgeable_q_t queue, <span class="enscript-type">int</span> group, task_t target_task)
+{
+	lck_mtx_assert(&amp;vm_purgeable_queue_lock, LCK_MTX_ASSERT_OWNED);
+
+	stat-&gt;count = stat-&gt;size = 0;
+	vm_object_t     object;
+	<span class="enscript-keyword">for</span> (object = (vm_object_t) queue_first(&amp;queue-&gt;objq[group]);
+	     !queue_end(&amp;queue-&gt;objq[group], (queue_entry_t) object);
+	     object = (vm_object_t) queue_next(&amp;object-&gt;objq)) {
+			<span class="enscript-keyword">if</span> (!target_task || object-&gt;vo_purgeable_owner == target_task) {
+				stat-&gt;count++;
+				stat-&gt;size += (object-&gt;resident_page_count * PAGE_SIZE);
+			}
+	}
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_stats</span>(vm_purgeable_info_t info, task_t target_task)
+{
+	purgeable_q_t	queue;
+	<span class="enscript-type">int</span>             group;
+
+	lck_mtx_lock(&amp;vm_purgeable_queue_lock);
+	
+	<span class="enscript-comment">/* Populate fifo_data */</span>
+	queue = &amp;purgeable_queues[PURGEABLE_Q_TYPE_FIFO];
+	<span class="enscript-keyword">for</span> (group = 0; group &lt; NUM_VOLATILE_GROUPS; group++)
+		vm_purgeable_stats_helper(&amp;(info-&gt;fifo_data[group]), queue, group, target_task);
+	
+	<span class="enscript-comment">/* Populate lifo_data */</span>
+	queue = &amp;purgeable_queues[PURGEABLE_Q_TYPE_LIFO];
+	<span class="enscript-keyword">for</span> (group = 0; group &lt; NUM_VOLATILE_GROUPS; group++)
+		vm_purgeable_stats_helper(&amp;(info-&gt;lifo_data[group]), queue, group, target_task);
+
+	<span class="enscript-comment">/* Populate obsolete data */</span>
+	queue = &amp;purgeable_queues[PURGEABLE_Q_TYPE_OBSOLETE];
+	vm_purgeable_stats_helper(&amp;(info-&gt;obsolete_data), queue, 0, target_task);
+
+	lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+	<span class="enscript-keyword">return</span>;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_account_volatile_queue</span>(
+	purgeable_q_t queue,
+	<span class="enscript-type">int</span> group,
+	task_t task,
+	pvm_account_info_t acnt_info)
+{
+	vm_object_t object;
+	uint64_t compressed_count;
+
+	<span class="enscript-keyword">for</span> (object = (vm_object_t) queue_first(&amp;queue-&gt;objq[group]);
+	    !queue_end(&amp;queue-&gt;objq[group], (queue_entry_t) object);
+	    object = (vm_object_t) queue_next(&amp;object-&gt;objq)) {
+		<span class="enscript-keyword">if</span> (object-&gt;vo_purgeable_owner == task) {
+			compressed_count = vm_compressor_pager_get_count(object-&gt;pager);
+			acnt_info-&gt;pvm_volatile_compressed_count += compressed_count;
+			acnt_info-&gt;pvm_volatile_count += (object-&gt;resident_page_count - object-&gt;wired_page_count);
+			acnt_info-&gt;pvm_nonvolatile_count += object-&gt;wired_page_count;
+		}
+	}
+
+}
+
+<span class="enscript-comment">/*
+ * Walks the purgeable object queues and calculates the usage
+ * associated with the objects for the given task.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">vm_purgeable_account</span>(
+	task_t			task,
+	pvm_account_info_t	acnt_info)
+{
+	queue_head_t	*nonvolatile_q;
+	vm_object_t	object;
+	<span class="enscript-type">int</span>		group;
+	<span class="enscript-type">int</span>		state;
+	uint64_t	compressed_count;
+	purgeable_q_t	volatile_q;
+
+
+	<span class="enscript-keyword">if</span> ((task == NULL) || (acnt_info == NULL)) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	acnt_info-&gt;pvm_volatile_count = 0;
+	acnt_info-&gt;pvm_volatile_compressed_count = 0;
+	acnt_info-&gt;pvm_nonvolatile_count = 0;
+	acnt_info-&gt;pvm_nonvolatile_compressed_count = 0;
+
+	lck_mtx_lock(&amp;vm_purgeable_queue_lock);
+
+	nonvolatile_q = &amp;purgeable_nonvolatile_queue;
+	<span class="enscript-keyword">for</span> (object = (vm_object_t) queue_first(nonvolatile_q);
+	     !queue_end(nonvolatile_q, (queue_entry_t) object);
+	     object = (vm_object_t) queue_next(&amp;object-&gt;objq)) {
+		<span class="enscript-keyword">if</span> (object-&gt;vo_purgeable_owner == task) {
+			state = object-&gt;purgable;
+			compressed_count =  vm_compressor_pager_get_count(object-&gt;pager);
+			<span class="enscript-keyword">if</span> (state == VM_PURGABLE_EMPTY) {
+				acnt_info-&gt;pvm_volatile_count += (object-&gt;resident_page_count - object-&gt;wired_page_count);
+				acnt_info-&gt;pvm_volatile_compressed_count += compressed_count;
+			} <span class="enscript-keyword">else</span> {
+				acnt_info-&gt;pvm_nonvolatile_count += (object-&gt;resident_page_count - object-&gt;wired_page_count);
+				acnt_info-&gt;pvm_nonvolatile_compressed_count += compressed_count;
+			}
+			acnt_info-&gt;pvm_nonvolatile_count += object-&gt;wired_page_count;
+		}
+	}
+
+	volatile_q = &amp;purgeable_queues[PURGEABLE_Q_TYPE_OBSOLETE];
+	vm_purgeable_account_volatile_queue(volatile_q, 0, task, acnt_info);
+
+	volatile_q = &amp;purgeable_queues[PURGEABLE_Q_TYPE_FIFO];
+	<span class="enscript-keyword">for</span> (group = 0; group &lt; NUM_VOLATILE_GROUPS; group++) {
+		vm_purgeable_account_volatile_queue(volatile_q, group, task, acnt_info);
+	}
+
+	volatile_q = &amp;purgeable_queues[PURGEABLE_Q_TYPE_LIFO];
+	<span class="enscript-keyword">for</span> (group = 0; group &lt; NUM_VOLATILE_GROUPS; group++) {
+		vm_purgeable_account_volatile_queue(volatile_q, group, task, acnt_info);
+	}
+	lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+
+	acnt_info-&gt;pvm_volatile_count = (acnt_info-&gt;pvm_volatile_count * PAGE_SIZE);
+	acnt_info-&gt;pvm_volatile_compressed_count = (acnt_info-&gt;pvm_volatile_compressed_count * PAGE_SIZE);
+	acnt_info-&gt;pvm_nonvolatile_count = (acnt_info-&gt;pvm_nonvolatile_count * PAGE_SIZE);
+	acnt_info-&gt;pvm_nonvolatile_compressed_count = (acnt_info-&gt;pvm_nonvolatile_compressed_count * PAGE_SIZE);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEVELOPMENT || DEBUG */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_volatile_queue_disown</span>(
+	purgeable_q_t	queue,
+	<span class="enscript-type">int</span>		group,
+	task_t		task)
+{
+	vm_object_t	object;
+	<span class="enscript-type">int</span>		collisions;
+
+	collisions = 0;
+
+<span class="enscript-reference">again</span>:
+	lck_mtx_assert(&amp;vm_purgeable_queue_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">for</span> (object = (vm_object_t) queue_first(&amp;queue-&gt;objq[group]);
+	     !queue_end(&amp;queue-&gt;objq[group], (queue_entry_t) object);
+	     object = (vm_object_t) queue_next(&amp;object-&gt;objq)) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+		<span class="enscript-comment">/*
+		 * Sanity check: let's scan the entire queues to
+		 * make sure we don't leave any purgeable objects
+		 * pointing back at a dead task.  If the counters
+		 * are off, we would fail to assert that they go
+		 * back to 0 after disowning is done.
+		 */</span>
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* MACH_ASSERT */</span>
+		<span class="enscript-keyword">if</span> (task-&gt;task_volatile_objects == 0) {
+			<span class="enscript-comment">/* no more volatile objects owned by &quot;task&quot; */</span>
+			<span class="enscript-keyword">break</span>;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MACH_ASSERT */</span>
+		<span class="enscript-keyword">if</span> (object-&gt;vo_purgeable_owner == task) {
+			<span class="enscript-keyword">if</span> (! vm_object_lock_try(object)) {
+				lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+				mutex_pause(collisions++);
+				lck_mtx_lock(&amp;vm_purgeable_queue_lock);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+			}
+			assert(object-&gt;purgable == VM_PURGABLE_VOLATILE);
+			<span class="enscript-keyword">if</span> (object-&gt;vo_purgeable_owner == task) {
+				vm_purgeable_accounting(object,
+							object-&gt;purgable,
+							TRUE); <span class="enscript-comment">/* disown */</span>
+				assert(object-&gt;vo_purgeable_owner == NULL);
+			}
+			vm_object_unlock(object);
+		}
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_disown</span>(
+	task_t	task)
+{
+	purgeable_q_t	volatile_q;
+	<span class="enscript-type">int</span>		group;
+	queue_head_t	*nonvolatile_q;
+	vm_object_t	object;
+	<span class="enscript-type">int</span>		collisions;
+
+	<span class="enscript-keyword">if</span> (task == NULL) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	task-&gt;task_purgeable_disowning = TRUE;
+
+	<span class="enscript-comment">/*
+	 * Scan the purgeable objects queues for objects owned by &quot;task&quot;.
+	 * This has to be done &quot;atomically&quot; under the &quot;vm_purgeable_queue&quot;
+	 * lock, to ensure that no new purgeable object get associated
+	 * with this task or moved between queues while we're scanning.
+	 */</span>
+
+	<span class="enscript-comment">/*
+	 * Scan non-volatile queue for objects owned by &quot;task&quot;.
+	 */</span>
+
+	collisions = 0;
+
+<span class="enscript-reference">again</span>:
+	<span class="enscript-keyword">if</span> (task-&gt;task_purgeable_disowned) {
+		<span class="enscript-comment">/* task has already disowned its purgeable memory */</span>
+		assert(task-&gt;task_volatile_objects == 0);
+		assert(task-&gt;task_nonvolatile_objects == 0);
+		<span class="enscript-keyword">return</span>;
+	}
+	lck_mtx_lock(&amp;vm_purgeable_queue_lock);
+
+	nonvolatile_q = &amp;purgeable_nonvolatile_queue;
+	<span class="enscript-keyword">for</span> (object = (vm_object_t) queue_first(nonvolatile_q);
+	      !queue_end(nonvolatile_q, (queue_entry_t) object);
+	     object = (vm_object_t) queue_next(&amp;object-&gt;objq)) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+		<span class="enscript-comment">/*
+		 * Sanity check: let's scan the entire queues to
+		 * make sure we don't leave any purgeable objects
+		 * pointing back at a dead task.  If the counters
+		 * are off, we would fail to assert that they go
+		 * back to 0 after disowning is done.
+		 */</span>
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* MACH_ASSERT */</span>
+		<span class="enscript-keyword">if</span> (task-&gt;task_nonvolatile_objects == 0) {
+			<span class="enscript-comment">/* no more non-volatile objects owned by &quot;task&quot; */</span>
+			<span class="enscript-keyword">break</span>;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MACH_ASSERT */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+		assert(object-&gt;vo_purgeable_volatilizer == NULL);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+		<span class="enscript-keyword">if</span> (object-&gt;vo_purgeable_owner == task) {
+			<span class="enscript-keyword">if</span> (!vm_object_lock_try(object)) {
+				lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+				mutex_pause(collisions++);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+			}
+			<span class="enscript-keyword">if</span> (object-&gt;vo_purgeable_owner == task) {
+				vm_purgeable_accounting(object,
+							object-&gt;purgable,
+							TRUE); <span class="enscript-comment">/* disown */</span>
+				assert(object-&gt;vo_purgeable_owner == NULL);
+			}
+			vm_object_unlock(object);
+		}
+	}
+
+	lck_mtx_yield(&amp;vm_purgeable_queue_lock);
+
+	<span class="enscript-comment">/*
+	 * Scan volatile queues for objects owned by &quot;task&quot;.
+	 */</span>
+
+	volatile_q = &amp;purgeable_queues[PURGEABLE_Q_TYPE_OBSOLETE];
+	vm_purgeable_volatile_queue_disown(volatile_q, 0, task);
+	lck_mtx_yield(&amp;vm_purgeable_queue_lock);
+
+	volatile_q = &amp;purgeable_queues[PURGEABLE_Q_TYPE_FIFO];
+	<span class="enscript-keyword">for</span> (group = 0; group &lt; NUM_VOLATILE_GROUPS; group++) {
+		vm_purgeable_volatile_queue_disown(volatile_q, group, task);
+		lck_mtx_yield(&amp;vm_purgeable_queue_lock);
+	}
+	
+	volatile_q = &amp;purgeable_queues[PURGEABLE_Q_TYPE_LIFO];
+	<span class="enscript-keyword">for</span> (group = 0; group &lt; NUM_VOLATILE_GROUPS; group++) {
+		vm_purgeable_volatile_queue_disown(volatile_q, group, task);
+		lck_mtx_yield(&amp;vm_purgeable_queue_lock);
+	}
+
+	<span class="enscript-keyword">if</span> (task-&gt;task_volatile_objects != 0 ||
+	    task-&gt;task_nonvolatile_objects != 0) {
+		<span class="enscript-comment">/* some purgeable objects sneaked into a queue: find them */</span>
+		lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+		mutex_pause(collisions++);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+	}
+
+	<span class="enscript-comment">/* there shouldn't be any purgeable objects owned by task now */</span>
+	assert(task-&gt;task_volatile_objects == 0);
+	assert(task-&gt;task_nonvolatile_objects == 0);
+	assert(task-&gt;task_purgeable_disowning);
+
+	<span class="enscript-comment">/* and we don't need to try and disown again */</span>
+	task-&gt;task_purgeable_disowned = TRUE;
+
+	lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+}
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">notyet</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vm_purgeable_queue_purge_task_owned</span>(
+	purgeable_q_t	queue,
+	<span class="enscript-type">int</span>		group,
+	task_t		task)
+{
+	vm_object_t	object;
+	<span class="enscript-type">int</span>		num_objects;
+	<span class="enscript-type">int</span>		collisions;
+	<span class="enscript-type">int</span>		num_objects_purged;
+
+	num_objects_purged = 0;
+	collisions = 0;
+
+<span class="enscript-reference">look_again</span>:
+	lck_mtx_lock(&amp;vm_purgeable_queue_lock);
+
+	num_objects = 0;
+	<span class="enscript-keyword">for</span> (object = (vm_object_t) queue_first(&amp;queue-&gt;objq[group]);
+	     !queue_end(&amp;queue-&gt;objq[group], (queue_entry_t) object);
+	     object = (vm_object_t) queue_next(&amp;object-&gt;objq)) {
+
+		<span class="enscript-keyword">if</span> (object-&gt;vo_purgeable_owner != task &amp;&amp;
+		    object-&gt;vo_purgeable_owner != NULL) {
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/* found an object: try and grab it */</span>
+		<span class="enscript-keyword">if</span> (!vm_object_lock_try(object)) {
+			lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+			mutex_pause(collisions++);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">look_again</span>;
+		}
+		<span class="enscript-comment">/* got it ! */</span>
+
+		collisions = 0;
+
+		<span class="enscript-comment">/* remove object from purgeable queue */</span>
+		queue_remove(&amp;queue-&gt;objq[group], object,
+			     vm_object_t, objq);
+		object-&gt;objq.next = NULL;
+		object-&gt;objq.prev = NULL;
+		<span class="enscript-comment">/* one less volatile object for this object's owner */</span>
+		assert(object-&gt;vo_purgeable_owner == task);
+		vm_purgeable_volatile_owner_update(task, -1);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+		object-&gt;vo_purgeable_volatilizer = NULL;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+		queue_enter(&amp;purgeable_nonvolatile_queue, object,
+			    vm_object_t, objq);
+		assert(purgeable_nonvolatile_count &gt;= 0);
+		purgeable_nonvolatile_count++;
+		assert(purgeable_nonvolatile_count &gt; 0);
+		<span class="enscript-comment">/* one more nonvolatile object for this object's owner */</span>
+		assert(object-&gt;vo_purgeable_owner == task);
+		vm_purgeable_nonvolatile_owner_update(task, +1);
+
+		<span class="enscript-comment">/* unlock purgeable queues */</span>
+		lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+
+		<span class="enscript-keyword">if</span> (object-&gt;purgeable_when_ripe) {
+			<span class="enscript-comment">/* remove a token */</span>
+			vm_page_lock_queues();
+			vm_purgeable_token_remove_first(queue);
+			vm_page_unlock_queues();
+		}
+
+		<span class="enscript-comment">/* purge the object */</span>
+		(<span class="enscript-type">void</span>) vm_object_purge(object, 0);
+		assert(object-&gt;purgable == VM_PURGABLE_EMPTY);
+		<span class="enscript-comment">/* no change for purgeable accounting */</span>
+		vm_object_unlock(object);
+		num_objects_purged++;
+
+		<span class="enscript-comment">/* we unlocked the purgeable queues, so start over */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">look_again</span>;
+	}
+
+	lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+
+	<span class="enscript-keyword">return</span> num_objects_purged;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">vm_purgeable_purge_task_owned</span>(
+	task_t	task)
+{
+	purgeable_q_t	queue;
+	<span class="enscript-type">int</span>		group;
+	<span class="enscript-type">int</span>		num_objects_purged;
+
+	num_objects_purged = 0;
+
+	queue = &amp;purgeable_queues[PURGEABLE_Q_TYPE_OBSOLETE];
+	num_objects_purged += vm_purgeable_queue_purge_task_owned(queue,
+								  0,
+								  task);
+
+	queue = &amp;purgeable_queues[PURGEABLE_Q_TYPE_FIFO];
+	<span class="enscript-keyword">for</span> (group = 0; group &lt; NUM_VOLATILE_GROUPS; group++)
+		num_objects_purged += vm_purgeable_queue_purge_task_owned(queue,
+									  group,
+									  task);
+	
+	queue = &amp;purgeable_queues[PURGEABLE_Q_TYPE_LIFO];
+	<span class="enscript-keyword">for</span> (group = 0; group &lt; NUM_VOLATILE_GROUPS; group++)
+		num_objects_purged += vm_purgeable_queue_purge_task_owned(queue,
+									  group,
+									  task);
+
+	<span class="enscript-keyword">return</span> num_objects_purged;
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_nonvolatile_enqueue</span>(
+	vm_object_t	object,
+	task_t		owner)
+{
+	<span class="enscript-type">int</span> page_count;
+
+	vm_object_lock_assert_exclusive(object);
+
+	assert(object-&gt;purgable == VM_PURGABLE_NONVOLATILE);
+	assert(object-&gt;vo_purgeable_owner == NULL);
+	assert(owner != NULL);
+
+	lck_mtx_lock(&amp;vm_purgeable_queue_lock);
+
+	<span class="enscript-keyword">if</span> (owner-&gt;task_purgeable_disowning) {
+		<span class="enscript-comment">/* task is exiting and no longer tracking purgeable objects */</span>
+		owner = NULL;
+	}
+
+	object-&gt;vo_purgeable_owner = owner;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	object-&gt;vo_purgeable_volatilizer = NULL;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	OSBacktrace(&amp;object-&gt;purgeable_owner_bt[0], 16);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+
+	page_count = object-&gt;resident_page_count;
+	assert(page_count == 0); <span class="enscript-comment">/* should be a freshly-created object */</span>
+	<span class="enscript-keyword">if</span> (owner != NULL &amp;&amp; page_count != 0) {
+		ledger_credit(owner-&gt;ledger,
+			      task_ledgers.purgeable_nonvolatile,
+			      ptoa(page_count));
+		ledger_credit(owner-&gt;ledger,
+			      task_ledgers.phys_footprint,
+			      ptoa(page_count));
+	}
+		      
+	assert(object-&gt;objq.next == NULL);
+	assert(object-&gt;objq.prev == NULL);
+
+	queue_enter(&amp;purgeable_nonvolatile_queue, object,
+		    vm_object_t, objq);
+	assert(purgeable_nonvolatile_count &gt;= 0);
+	purgeable_nonvolatile_count++;
+	assert(purgeable_nonvolatile_count &gt; 0);
+	<span class="enscript-comment">/* one more nonvolatile object for this object's owner */</span>
+	assert(object-&gt;vo_purgeable_owner == owner);
+	vm_purgeable_nonvolatile_owner_update(owner, +1);
+	lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+
+	vm_object_lock_assert_exclusive(object);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_nonvolatile_dequeue</span>(
+	vm_object_t	object)
+{
+	task_t	owner;
+
+	vm_object_lock_assert_exclusive(object);
+
+	owner = object-&gt;vo_purgeable_owner;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	assert(object-&gt;vo_purgeable_volatilizer == NULL);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+	<span class="enscript-keyword">if</span> (owner != NULL) {
+		<span class="enscript-comment">/*
+		 * Update the owner's ledger to stop accounting
+		 * for this object.
+		 */</span>
+		vm_purgeable_accounting(object,
+					object-&gt;purgable,
+					TRUE); <span class="enscript-comment">/* disown */</span>
+	}
+
+	lck_mtx_lock(&amp;vm_purgeable_queue_lock);
+	assert(object-&gt;objq.next != NULL);
+	assert(object-&gt;objq.prev != NULL);
+	queue_remove(&amp;purgeable_nonvolatile_queue, object,
+		     vm_object_t, objq);
+	object-&gt;objq.next = NULL;
+	object-&gt;objq.prev = NULL;
+	assert(purgeable_nonvolatile_count &gt; 0);
+	purgeable_nonvolatile_count--;
+	assert(purgeable_nonvolatile_count &gt;= 0);
+	lck_mtx_unlock(&amp;vm_purgeable_queue_lock);
+
+	vm_object_lock_assert_exclusive(object);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_accounting</span>(
+	vm_object_t	object,
+	vm_purgable_t	old_state,
+	boolean_t	disown)
+{
+	task_t		owner;
+	<span class="enscript-type">int</span>		resident_page_count;
+	<span class="enscript-type">int</span>		wired_page_count;
+	<span class="enscript-type">int</span>		compressed_page_count;
+	boolean_t	disown_on_the_fly;
+
+	vm_object_lock_assert_exclusive(object);
+
+	owner = object-&gt;vo_purgeable_owner;
+	<span class="enscript-keyword">if</span> (owner == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (!disown &amp;&amp; owner-&gt;task_purgeable_disowning) {
+		<span class="enscript-comment">/* task is disowning its purgeable objects: help it */</span>
+		disown_on_the_fly = TRUE;
+	} <span class="enscript-keyword">else</span> {
+		disown_on_the_fly = FALSE;
+	}
+
+	resident_page_count = object-&gt;resident_page_count;
+	wired_page_count = object-&gt;wired_page_count;
+	<span class="enscript-keyword">if</span> ((COMPRESSED_PAGER_IS_ACTIVE ||
+	     DEFAULT_FREEZER_COMPRESSED_PAGER_IS_ACTIVE) &amp;&amp;
+	    object-&gt;pager != NULL) {
+		compressed_page_count =
+			vm_compressor_pager_get_count(object-&gt;pager);
+	} <span class="enscript-keyword">else</span> {
+		compressed_page_count = 0;
+	}
+
+	<span class="enscript-keyword">if</span> (old_state == VM_PURGABLE_VOLATILE ||
+	    old_state == VM_PURGABLE_EMPTY) {
+		<span class="enscript-comment">/* less volatile bytes in ledger */</span>
+		ledger_debit(owner-&gt;ledger,
+			     task_ledgers.purgeable_volatile,
+			     ptoa(resident_page_count - wired_page_count));
+		<span class="enscript-comment">/* less compressed volatile bytes in ledger */</span>
+		ledger_debit(owner-&gt;ledger,
+			     task_ledgers.purgeable_volatile_compressed,
+			     ptoa(compressed_page_count));
+
+		<span class="enscript-keyword">if</span> (disown || !object-&gt;alive || object-&gt;terminating) {
+			<span class="enscript-comment">/* wired pages were accounted as &quot;non-volatile&quot;... */</span>
+			ledger_debit(owner-&gt;ledger,
+				     task_ledgers.purgeable_nonvolatile,
+				     ptoa(wired_page_count));
+			<span class="enscript-comment">/* ... and in phys_footprint */</span>
+			ledger_debit(owner-&gt;ledger,
+				     task_ledgers.phys_footprint,
+				     ptoa(wired_page_count));
+
+			<span class="enscript-keyword">if</span> (!disown_on_the_fly &amp;&amp;
+			    (object-&gt;purgeable_queue_type ==
+			     PURGEABLE_Q_TYPE_MAX)) {
+				<span class="enscript-comment">/*
+				 * Not on a volatile queue:  must be empty
+				 * or emptying.
+				 */</span>
+				vm_purgeable_nonvolatile_owner_update(owner,-1);
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* on a volatile queue */</span>
+				vm_purgeable_volatile_owner_update(owner, -1);
+			}
+			<span class="enscript-comment">/* no more accounting for this dead object */</span>
+			object-&gt;vo_purgeable_owner = NULL;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+			object-&gt;vo_purgeable_volatilizer = NULL;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+			<span class="enscript-keyword">return</span>;
+		}
+
+		<span class="enscript-comment">/* more non-volatile bytes in ledger */</span>
+		ledger_credit(owner-&gt;ledger,
+			      task_ledgers.purgeable_nonvolatile,
+			      ptoa(resident_page_count - wired_page_count));
+		<span class="enscript-comment">/* more compressed non-volatile bytes in ledger */</span>
+		ledger_credit(owner-&gt;ledger,
+			      task_ledgers.purgeable_nonvolatile_compressed,
+			      ptoa(compressed_page_count));
+		<span class="enscript-comment">/* more footprint */</span>
+		ledger_credit(owner-&gt;ledger,
+			      task_ledgers.phys_footprint,
+			      ptoa(resident_page_count
+				   + compressed_page_count
+				   - wired_page_count));
+
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (old_state == VM_PURGABLE_NONVOLATILE) {
+
+		<span class="enscript-comment">/* less non-volatile bytes in ledger */</span>
+		ledger_debit(owner-&gt;ledger,
+			     task_ledgers.purgeable_nonvolatile,
+			     ptoa(resident_page_count - wired_page_count));
+		<span class="enscript-comment">/* less compressed non-volatile bytes in ledger */</span>
+		ledger_debit(owner-&gt;ledger,
+			     task_ledgers.purgeable_nonvolatile_compressed,
+			     ptoa(compressed_page_count));
+		<span class="enscript-comment">/* less footprint */</span>
+		ledger_debit(owner-&gt;ledger,
+			     task_ledgers.phys_footprint,
+			     ptoa(resident_page_count
+				  + compressed_page_count
+				  - wired_page_count));
+
+		<span class="enscript-keyword">if</span> (disown || !object-&gt;alive || object-&gt;terminating) {
+			<span class="enscript-comment">/* wired pages still accounted as &quot;non-volatile&quot; */</span>
+			ledger_debit(owner-&gt;ledger,
+				     task_ledgers.purgeable_nonvolatile,
+				     ptoa(wired_page_count));
+			ledger_debit(owner-&gt;ledger,
+				     task_ledgers.phys_footprint,
+				     ptoa(wired_page_count));
+
+			<span class="enscript-comment">/* one less &quot;non-volatile&quot; object for the owner */</span>
+			<span class="enscript-keyword">if</span> (!disown_on_the_fly) {
+				assert(object-&gt;purgeable_queue_type ==
+				       PURGEABLE_Q_TYPE_MAX);
+			}
+			vm_purgeable_nonvolatile_owner_update(owner, -1);
+			<span class="enscript-comment">/* no more accounting for this dead object */</span>
+			object-&gt;vo_purgeable_owner = NULL;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+			object-&gt;vo_purgeable_volatilizer = NULL;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+			<span class="enscript-keyword">return</span>;
+		}
+		<span class="enscript-comment">/* more volatile bytes in ledger */</span>
+		ledger_credit(owner-&gt;ledger,
+			      task_ledgers.purgeable_volatile,
+			      ptoa(resident_page_count - wired_page_count));
+		<span class="enscript-comment">/* more compressed volatile bytes in ledger */</span>
+		ledger_credit(owner-&gt;ledger,
+			      task_ledgers.purgeable_volatile_compressed,
+			      ptoa(compressed_page_count));
+	} <span class="enscript-keyword">else</span> {
+		panic(<span class="enscript-string">&quot;vm_purgeable_accounting(%p): &quot;</span>
+		      <span class="enscript-string">&quot;unexpected old_state=%d\n&quot;</span>,
+		      object, old_state);
+	}
+
+	vm_object_lock_assert_exclusive(object);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_nonvolatile_owner_update</span>(
+	task_t	owner,
+	<span class="enscript-type">int</span>	delta)
+{
+	<span class="enscript-keyword">if</span> (owner == NULL || delta == 0) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (delta &gt; 0) {
+		assert(owner-&gt;task_nonvolatile_objects &gt;= 0);
+		OSAddAtomic(delta, &amp;owner-&gt;task_nonvolatile_objects);
+		assert(owner-&gt;task_nonvolatile_objects &gt; 0);
+	} <span class="enscript-keyword">else</span> {
+		assert(owner-&gt;task_nonvolatile_objects &gt; delta);
+		OSAddAtomic(delta, &amp;owner-&gt;task_nonvolatile_objects);
+		assert(owner-&gt;task_nonvolatile_objects &gt;= 0);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_volatile_owner_update</span>(
+	task_t	owner,
+	<span class="enscript-type">int</span>	delta)
+{
+	<span class="enscript-keyword">if</span> (owner == NULL || delta == 0) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (delta &gt; 0) {
+		assert(owner-&gt;task_volatile_objects &gt;= 0);
+		OSAddAtomic(delta, &amp;owner-&gt;task_volatile_objects);
+		assert(owner-&gt;task_volatile_objects &gt; 0);
+	} <span class="enscript-keyword">else</span> {
+		assert(owner-&gt;task_volatile_objects &gt; delta);
+		OSAddAtomic(delta, &amp;owner-&gt;task_volatile_objects);
+		assert(owner-&gt;task_volatile_objects &gt;= 0);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_purgeable_compressed_update</span>(
+	vm_object_t	object,
+	<span class="enscript-type">int</span>		delta)
+{
+	task_t	owner;
+
+	vm_object_lock_assert_exclusive(object);
+
+	<span class="enscript-keyword">if</span> (delta == 0 ||
+	    !object-&gt;internal ||
+	    object-&gt;purgable == VM_PURGABLE_DENY ||
+	    object-&gt;vo_purgeable_owner == NULL) {
+		<span class="enscript-comment">/* not an owned purgeable VM object: nothing to update */</span>
+		<span class="enscript-keyword">return</span>;
+	}
+	
+	owner = object-&gt;vo_purgeable_owner;
+	<span class="enscript-keyword">switch</span> (object-&gt;purgable) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_PURGABLE_DENY</span>:
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_PURGABLE_NONVOLATILE</span>:
+		<span class="enscript-keyword">if</span> (delta &gt; 0) {
+			ledger_credit(owner-&gt;ledger,
+				      task_ledgers.purgeable_nonvolatile_compressed,
+				      ptoa(delta));
+			ledger_credit(owner-&gt;ledger,
+				      task_ledgers.phys_footprint,
+				      ptoa(delta));
+		} <span class="enscript-keyword">else</span> {
+			ledger_debit(owner-&gt;ledger,
+				     task_ledgers.purgeable_nonvolatile_compressed,
+				     ptoa(-delta));
+			ledger_debit(owner-&gt;ledger,
+				     task_ledgers.phys_footprint,
+				     ptoa(-delta));
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_PURGABLE_VOLATILE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_PURGABLE_EMPTY</span>:
+		<span class="enscript-keyword">if</span> (delta &gt; 0) {
+			ledger_credit(owner-&gt;ledger,
+				      task_ledgers.purgeable_volatile_compressed,
+				      ptoa(delta));
+		} <span class="enscript-keyword">else</span> {
+			ledger_debit(owner-&gt;ledger,
+				     task_ledgers.purgeable_volatile_compressed,
+				     ptoa(-delta));
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;vm_purgeable_compressed_update(): &quot;</span>
+		      <span class="enscript-string">&quot;unexpected purgable %d for object %p\n&quot;</span>,
+		      object-&gt;purgable, object);
+	}
+}
+</pre>
+<hr />
+</body></html>

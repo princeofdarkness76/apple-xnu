@@ -1,0 +1,1646 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOPlatformExpert.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOPlatformExpert.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+ 
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOCPU.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IODeviceTreeSupport.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKitDebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOMapper.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOMessage.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IONVRAM.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOPlatformExpert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IORangeAllocator.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOWorkLoop.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/pwr_mgt/RootDomain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKitKeys.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOTimeStamp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOUserClient.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKitDiagnosticsUserClient.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/system.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSContainers.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/crypto/sha1.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> {
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;uuid/uuid.h&gt;</span>
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">printDictionaryKeys</span> (OSDictionary * inDictionary, <span class="enscript-type">char</span> * inMsg);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">getCStringForObject</span>(OSObject *inObj, <span class="enscript-type">char</span> *outStr, size_t outStrLen);
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOService
+
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IOPlatformExpert, IOService)
+
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IOPlatformExpert,  0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IOPlatformExpert,  1);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IOPlatformExpert,  2);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IOPlatformExpert,  3);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IOPlatformExpert,  4);
+
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformExpert,  5);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformExpert,  6);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformExpert,  7);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformExpert,  8);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformExpert,  9);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformExpert, 10);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformExpert, 11);
+
+<span class="enscript-type">static</span> IOPlatformExpert * gIOPlatform;
+<span class="enscript-type">static</span> OSDictionary * gIOInterruptControllers;
+<span class="enscript-type">static</span> IOLock * gIOInterruptControllersLock;
+<span class="enscript-type">static</span> IODTNVRAM *gIOOptionsEntry;
+
+OSSymbol * gPlatformInterruptControllerName;
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPlatformExpert::attach</span>( IOService * provider )
+{
+
+    <span class="enscript-keyword">if</span>( !super::attach( provider ))
+	<span class="enscript-keyword">return</span>( false);
+
+    <span class="enscript-keyword">return</span>( true);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPlatformExpert::start</span>( IOService * provider )
+{
+    IORangeAllocator *	physicalRanges;
+    OSData *		busFrequency;
+    uint32_t		debugFlags;
+    
+    <span class="enscript-keyword">if</span> (!super::start(provider))
+      <span class="enscript-keyword">return</span> false;
+    
+    <span class="enscript-comment">// Override the mapper present flag is requested by boot arguments.
+</span>    <span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;dart&quot;</span>, &amp;debugFlags, <span class="enscript-keyword">sizeof</span> (debugFlags)) &amp;&amp; (debugFlags == 0))
+      removeProperty(kIOPlatformMapperPresentKey);
+    <span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;-x&quot;</span>, &amp;debugFlags, <span class="enscript-keyword">sizeof</span> (debugFlags)))
+      removeProperty(kIOPlatformMapperPresentKey);
+
+    <span class="enscript-comment">// Register the presence or lack thereof a system 
+</span>    <span class="enscript-comment">// PCI address mapper with the IOMapper class
+</span>    <span class="enscript-reference">IOMapper</span>::setMapperRequired(0 != getProperty(kIOPlatformMapperPresentKey));
+    
+    gIOInterruptControllers = OSDictionary::withCapacity(1);
+    gIOInterruptControllersLock = IOLockAlloc();
+    
+    <span class="enscript-comment">// Correct the bus frequency in the device tree.
+</span>    busFrequency = OSData::withBytesNoCopy((<span class="enscript-type">void</span> *)&amp;gPEClockFrequencyInfo.bus_clock_rate_hz, 4);
+    provider-&gt;setProperty(<span class="enscript-string">&quot;clock-frequency&quot;</span>, busFrequency);
+    busFrequency-&gt;release();
+    
+    gPlatformInterruptControllerName = (OSSymbol *)OSSymbol::withCStringNoCopy(<span class="enscript-string">&quot;IOPlatformInterruptController&quot;</span>);
+    
+    physicalRanges = IORangeAllocator::withRange(0xffffffff, 1, 16,
+						 <span class="enscript-reference">IORangeAllocator</span>::kLocking);
+    assert(physicalRanges);
+    setProperty(<span class="enscript-string">&quot;Platform Memory Ranges&quot;</span>, physicalRanges);
+    
+    setPlatform( <span class="enscript-keyword">this</span> );
+    gIOPlatform = <span class="enscript-keyword">this</span>;
+    
+    PMInstantiatePowerDomains();
+    
+    <span class="enscript-comment">// Parse the serial-number data and publish a user-readable string
+</span>    OSData* mydata = (OSData*) (provider-&gt;getProperty(<span class="enscript-string">&quot;serial-number&quot;</span>));
+    <span class="enscript-keyword">if</span> (mydata != NULL) {
+        OSString *serNoString = createSystemSerialNumberString(mydata);
+        <span class="enscript-keyword">if</span> (serNoString != NULL) {
+            provider-&gt;setProperty(kIOPlatformSerialNumberKey, serNoString);
+            serNoString-&gt;release();
+        }
+    }
+    
+    <span class="enscript-keyword">return</span>( configure(provider) );
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPlatformExpert::configure</span>( IOService * provider )
+{
+    OSSet *		topLevel;
+    OSDictionary *	dict;
+    IOService * 	nub;
+
+    topLevel = OSDynamicCast( OSSet, getProperty(<span class="enscript-string">&quot;top-level&quot;</span>));
+
+    <span class="enscript-keyword">if</span>( topLevel) {
+        <span class="enscript-keyword">while</span>( (dict = OSDynamicCast( OSDictionary,
+				topLevel-&gt;getAnyObject()))) {
+            dict-&gt;retain();
+            topLevel-&gt;removeObject( dict );
+            nub = createNub( dict );
+            <span class="enscript-keyword">if</span>( 0 == nub)
+                <span class="enscript-keyword">continue</span>;
+            dict-&gt;release();
+            nub-&gt;attach( <span class="enscript-keyword">this</span> );
+            nub-&gt;registerService();
+        }
+    }
+
+    <span class="enscript-keyword">return</span>( true );
+}
+
+IOService * <span class="enscript-function-name">IOPlatformExpert::createNub</span>( OSDictionary * from )
+{
+    IOService *		nub;
+
+    nub = <span class="enscript-keyword">new</span> IOPlatformDevice;
+    <span class="enscript-keyword">if</span>(nub) {
+	<span class="enscript-keyword">if</span>( !nub-&gt;init( from )) {
+	    nub-&gt;release();
+	    nub = 0;
+	}
+    }
+    <span class="enscript-keyword">return</span>( nub);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPlatformExpert::compareNubName</span>( <span class="enscript-type">const</span> IOService * nub,
+				OSString * name, OSString ** matched ) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span>( nub-&gt;IORegistryEntry::compareName( name, matched ));
+}
+
+IOReturn <span class="enscript-function-name">IOPlatformExpert::getNubResources</span>( IOService * nub )
+{
+    <span class="enscript-keyword">return</span>( kIOReturnSuccess );
+}
+
+<span class="enscript-type">long</span> <span class="enscript-function-name">IOPlatformExpert::getBootROMType</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span> _peBootROMType;
+}
+
+<span class="enscript-type">long</span> <span class="enscript-function-name">IOPlatformExpert::getChipSetType</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span> _peChipSetType;
+}
+
+<span class="enscript-type">long</span> <span class="enscript-function-name">IOPlatformExpert::getMachineType</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span> _peMachineType;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOPlatformExpert::setBootROMType</span>(<span class="enscript-type">long</span> peBootROMType)
+{
+  _peBootROMType = peBootROMType;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOPlatformExpert::setChipSetType</span>(<span class="enscript-type">long</span> peChipSetType)
+{
+  _peChipSetType = peChipSetType;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOPlatformExpert::setMachineType</span>(<span class="enscript-type">long</span> peMachineType)
+{
+  _peMachineType = peMachineType;
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPlatformExpert::getMachineName</span>( <span class="enscript-type">char</span> * <span class="enscript-comment">/*name*/</span>, <span class="enscript-type">int</span> <span class="enscript-comment">/*maxLength*/</span>)
+{
+    <span class="enscript-keyword">return</span>( false );
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPlatformExpert::getModelName</span>( <span class="enscript-type">char</span> * <span class="enscript-comment">/*name*/</span>, <span class="enscript-type">int</span> <span class="enscript-comment">/*maxLength*/</span>)
+{
+    <span class="enscript-keyword">return</span>( false );
+}
+
+OSString* <span class="enscript-function-name">IOPlatformExpert::createSystemSerialNumberString</span>(OSData* myProperty)
+{
+    <span class="enscript-keyword">return</span> NULL;
+}
+
+IORangeAllocator * <span class="enscript-function-name">IOPlatformExpert::getPhysicalRangeAllocator</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">return</span>(OSDynamicCast(IORangeAllocator,
+			getProperty(<span class="enscript-string">&quot;Platform Memory Ranges&quot;</span>)));
+}
+
+<span class="enscript-function-name">int</span> (*PE_halt_restart)(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> type) = 0;
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">IOPlatformExpert::haltRestart</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> type)
+{
+  <span class="enscript-keyword">if</span> (type == kPEPanicSync) <span class="enscript-keyword">return</span> 0;
+
+  <span class="enscript-keyword">if</span> (type == kPEHangCPU) <span class="enscript-keyword">while</span> (true) {}
+
+  <span class="enscript-keyword">if</span> (type == kPEUPSDelayHaltCPU) {
+    <span class="enscript-comment">// RestartOnPowerLoss feature was turned on, proceed with shutdown.
+</span>    type = kPEHaltCPU;
+  }
+
+  <span class="enscript-comment">// On ARM kPEPanicRestartCPU is supported in the drivers
+</span>  <span class="enscript-keyword">if</span> (type == kPEPanicRestartCPU)
+	  type = kPERestartCPU;
+
+  <span class="enscript-keyword">if</span> (PE_halt_restart) <span class="enscript-keyword">return</span> (*PE_halt_restart)(type);
+  <span class="enscript-keyword">else</span> <span class="enscript-keyword">return</span> -1;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOPlatformExpert::sleepKernel</span>(<span class="enscript-type">void</span>)
+{
+#<span class="enscript-reference">if</span> 0
+  <span class="enscript-type">long</span> cnt;
+  boolean_t intState;
+  
+  intState = ml_set_interrupts_enabled(false);
+  
+  <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; 10000; cnt++) {
+    IODelay(1000);
+  }
+  
+  ml_set_interrupts_enabled(intState);
+#<span class="enscript-reference">else</span>
+<span class="enscript-comment">//  PE_initialize_console(0, kPEDisableScreen);
+</span>  
+  IOCPUSleepKernel();
+  
+<span class="enscript-comment">//  PE_initialize_console(0, kPEEnableScreen);
+</span>#<span class="enscript-reference">endif</span>
+}
+
+<span class="enscript-type">long</span> <span class="enscript-function-name">IOPlatformExpert::getGMTTimeOfDay</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOPlatformExpert::setGMTTimeOfDay</span>(<span class="enscript-type">long</span> secs)
+{
+}
+
+
+IOReturn <span class="enscript-function-name">IOPlatformExpert::getConsoleInfo</span>( PE_Video * consoleInfo )
+{
+    <span class="enscript-keyword">return</span>( PE_current_console( consoleInfo));
+}
+
+IOReturn <span class="enscript-function-name">IOPlatformExpert::setConsoleInfo</span>( PE_Video * consoleInfo,
+						<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> op)
+{
+    <span class="enscript-keyword">return</span>( PE_initialize_console( consoleInfo, op ));
+}
+
+IOReturn <span class="enscript-function-name">IOPlatformExpert::registerInterruptController</span>(OSSymbol *name, IOInterruptController *interruptController)
+{
+  IOLockLock(gIOInterruptControllersLock);
+  
+  gIOInterruptControllers-&gt;setObject(name, interruptController);
+  
+  IOLockWakeup(gIOInterruptControllersLock,
+		gIOInterruptControllers, <span class="enscript-comment">/* one-thread */</span> false);
+
+  IOLockUnlock(gIOInterruptControllersLock);
+  
+  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOReturn <span class="enscript-function-name">IOPlatformExpert::deregisterInterruptController</span>(OSSymbol *name)
+{
+  IOLockLock(gIOInterruptControllersLock);
+  
+  gIOInterruptControllers-&gt;removeObject(name);
+  
+  IOLockUnlock(gIOInterruptControllersLock);
+  
+  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOInterruptController *<span class="enscript-function-name">IOPlatformExpert::lookUpInterruptController</span>(OSSymbol *name)
+{
+  OSObject              *object;
+  
+  IOLockLock(gIOInterruptControllersLock);
+  <span class="enscript-keyword">while</span> (1) {
+    
+    object = gIOInterruptControllers-&gt;getObject(name);
+    
+    <span class="enscript-keyword">if</span> (object != 0)
+	<span class="enscript-keyword">break</span>;
+    
+    IOLockSleep(gIOInterruptControllersLock,
+		gIOInterruptControllers, THREAD_UNINT);
+  }
+  
+  IOLockUnlock(gIOInterruptControllersLock);
+  <span class="enscript-keyword">return</span> OSDynamicCast(IOInterruptController, object);
+}
+
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOPlatformExpert::setCPUInterruptProperties</span>(IOService *service)
+{
+  IOCPUInterruptController *controller;
+  
+  controller = OSDynamicCast(IOCPUInterruptController, waitForService(serviceMatching(<span class="enscript-string">&quot;IOCPUInterruptController&quot;</span>)));
+  <span class="enscript-keyword">if</span> (controller) controller-&gt;setCPUInterruptProperties(service);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPlatformExpert::atInterruptLevel</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span> ml_at_interrupt_context();
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPlatformExpert::platformAdjustService</span>(IOService *<span class="enscript-comment">/*service*/</span>)
+{
+  <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOPlatformExpert::getUTCTimeOfDay</span>(clock_sec_t * secs, clock_nsec_t * nsecs)
+{
+  *secs = getGMTTimeOfDay();
+  *nsecs = 0;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOPlatformExpert::setUTCTimeOfDay</span>(clock_sec_t secs, __unused clock_nsec_t nsecs)
+{
+  setGMTTimeOfDay(secs);
+}
+
+
+<span class="enscript-comment">//*********************************************************************************
+</span><span class="enscript-comment">// PMLog
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//*********************************************************************************
+</span>
+<span class="enscript-type">void</span> IOPlatformExpert::
+<span class="enscript-function-name">PMLog</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *who, <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> event,
+      <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> param1, <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> param2)
+{
+	clock_sec_t nows;
+	clock_usec_t nowus;
+	clock_get_system_microtime(&amp;nows, &amp;nowus);
+	nowus += (nows % 1000) * 1000000;
+
+    kprintf(<span class="enscript-string">&quot;pm%u %p %.30s %d %lx %lx\n&quot;</span>,
+		nowus, OBFUSCATE(current_thread()), who,	<span class="enscript-comment">// Identity
+</span>		(<span class="enscript-type">int</span>) event, (<span class="enscript-type">long</span>)OBFUSCATE(param1), (<span class="enscript-type">long</span>)OBFUSCATE(param2));			<span class="enscript-comment">// Args
+</span>}
+
+
+<span class="enscript-comment">//*********************************************************************************
+</span><span class="enscript-comment">// PMInstantiatePowerDomains
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// In this vanilla implementation, a Root Power Domain is instantiated.
+</span><span class="enscript-comment">// All other objects which register will be children of this Root.
+</span><span class="enscript-comment">// Where this is inappropriate, PMInstantiatePowerDomains is overridden 
+</span><span class="enscript-comment">// in a platform-specific subclass.
+</span><span class="enscript-comment">//*********************************************************************************
+</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOPlatformExpert::PMInstantiatePowerDomains</span> ( <span class="enscript-type">void</span> )
+{
+    root = <span class="enscript-keyword">new</span> IOPMrootDomain;
+    root-&gt;init();
+    root-&gt;attach(<span class="enscript-keyword">this</span>);
+    root-&gt;start(<span class="enscript-keyword">this</span>);
+}
+
+
+<span class="enscript-comment">//*********************************************************************************
+</span><span class="enscript-comment">// PMRegisterDevice
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// In this vanilla implementation, all callers are made children of the root power domain.
+</span><span class="enscript-comment">// Where this is inappropriate, PMRegisterDevice is overridden in a platform-specific subclass.
+</span><span class="enscript-comment">//*********************************************************************************
+</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOPlatformExpert::PMRegisterDevice</span>(IOService * theNub, IOService * theDevice)
+{
+    root-&gt;addPowerChild ( theDevice );
+}
+
+<span class="enscript-comment">//*********************************************************************************
+</span><span class="enscript-comment">// hasPMFeature
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//*********************************************************************************
+</span>
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPlatformExpert::hasPMFeature</span> (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> featureMask)
+{
+  <span class="enscript-keyword">return</span> ((_pePMFeatures &amp; featureMask) != 0);
+}
+
+<span class="enscript-comment">//*********************************************************************************
+</span><span class="enscript-comment">// hasPrivPMFeature
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//*********************************************************************************
+</span>
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPlatformExpert::hasPrivPMFeature</span> (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> privFeatureMask)
+{
+  <span class="enscript-keyword">return</span> ((_pePrivPMFeatures &amp; privFeatureMask) != 0);
+}
+
+<span class="enscript-comment">//*********************************************************************************
+</span><span class="enscript-comment">// numBatteriesSupported
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//*********************************************************************************
+</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">IOPlatformExpert::numBatteriesSupported</span> (<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span> (_peNumBatteriesSupported);
+}
+
+<span class="enscript-comment">//*********************************************************************************
+</span><span class="enscript-comment">// CheckSubTree
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// This method is called by the instantiated sublass of the platform expert to
+</span><span class="enscript-comment">// determine how a device should be inserted into the Power Domain. The subclass
+</span><span class="enscript-comment">// provides an XML power tree description against which a device is matched based
+</span><span class="enscript-comment">// on class and provider. If a match is found this routine returns true in addition
+</span><span class="enscript-comment">// to flagging the description tree at the appropriate node that a device has been
+</span><span class="enscript-comment">// registered for the given service.
+</span><span class="enscript-comment">//*********************************************************************************
+</span>
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPlatformExpert::CheckSubTree</span> (OSArray * inSubTree, IOService * theNub, IOService * theDevice, OSDictionary * theParent)
+{
+  <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>    i;
+  <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>    numPowerTreeNodes;
+  OSDictionary *  entry;
+  OSDictionary *  matchingDictionary;
+  OSDictionary *  providerDictionary;
+  OSDictionary *  deviceDictionary;
+  OSDictionary *  nubDictionary;
+  OSArray *       children;
+  <span class="enscript-type">bool</span>            nodeFound            = false;
+  <span class="enscript-type">bool</span>            continueSearch       = false;
+  <span class="enscript-type">bool</span>            deviceMatch          = false;
+  <span class="enscript-type">bool</span>            providerMatch        = false;
+  <span class="enscript-type">bool</span>            multiParentMatch     = false;
+
+  <span class="enscript-keyword">if</span> ( (NULL == theDevice) || (NULL == inSubTree) )
+    <span class="enscript-keyword">return</span> false;
+
+  numPowerTreeNodes = inSubTree-&gt;getCount ();
+
+  <span class="enscript-comment">// iterate through the power tree to find a home for this device
+</span>
+  <span class="enscript-keyword">for</span> ( i = 0; i &lt; numPowerTreeNodes; i++ ) {
+
+    entry =  (OSDictionary *) inSubTree-&gt;getObject (i);
+
+    matchingDictionary = (OSDictionary *) entry-&gt;getObject (<span class="enscript-string">&quot;device&quot;</span>);
+    providerDictionary = (OSDictionary *) entry-&gt;getObject (<span class="enscript-string">&quot;provider&quot;</span>);
+
+    deviceMatch = true; <span class="enscript-comment">// if no matching dictionary, this is not a criteria and so must match
+</span>    <span class="enscript-keyword">if</span> ( matchingDictionary ) {
+      deviceMatch = false;
+      <span class="enscript-keyword">if</span> ( NULL != (deviceDictionary = theDevice-&gt;dictionaryWithProperties ())) {
+        deviceMatch = deviceDictionary-&gt;isEqualTo ( matchingDictionary, matchingDictionary );
+        deviceDictionary-&gt;release ();
+      }
+    }
+
+    providerMatch = true; <span class="enscript-comment">// we indicate a match if there is no nub or provider
+</span>    <span class="enscript-keyword">if</span> ( theNub &amp;&amp; providerDictionary ) {
+      providerMatch = false;
+      <span class="enscript-keyword">if</span> ( NULL != (nubDictionary = theNub-&gt;dictionaryWithProperties ()) ) {
+        providerMatch = nubDictionary-&gt;isEqualTo ( providerDictionary,  providerDictionary );
+        nubDictionary-&gt;release ();
+      }
+    }
+
+    multiParentMatch = true; <span class="enscript-comment">// again we indicate a match if there is no multi-parent node
+</span>    <span class="enscript-keyword">if</span> (deviceMatch &amp;&amp; providerMatch) {
+      <span class="enscript-keyword">if</span> (NULL != multipleParentKeyValue) {
+        OSNumber * aNumber = (OSNumber *) entry-&gt;getObject (<span class="enscript-string">&quot;multiple-parent&quot;</span>);
+        multiParentMatch   = (NULL != aNumber) ? multipleParentKeyValue-&gt;isEqualTo (aNumber) : false;
+      }
+    }
+
+    nodeFound = (deviceMatch &amp;&amp; providerMatch &amp;&amp; multiParentMatch);
+
+    <span class="enscript-comment">// if the power tree specifies a provider dictionary but theNub is
+</span>    <span class="enscript-comment">// NULL then we cannot match with this entry.
+</span>
+    <span class="enscript-keyword">if</span> ( theNub == NULL &amp;&amp; providerDictionary != NULL )
+      nodeFound = false;
+  
+    <span class="enscript-comment">// if this node is THE ONE...then register the device
+</span>
+    <span class="enscript-keyword">if</span> ( nodeFound ) {
+      <span class="enscript-keyword">if</span> (RegisterServiceInTree (theDevice, entry, theParent, theNub) ) {
+
+        <span class="enscript-keyword">if</span> ( kIOLogPower &amp; gIOKitDebug)
+          IOLog (<span class="enscript-string">&quot;PMRegisterDevice/CheckSubTree - service registered!\n&quot;</span>);
+
+	numInstancesRegistered++;
+
+	<span class="enscript-comment">// determine if we need to search for additional nodes for this item
+</span>	multipleParentKeyValue = (OSNumber *) entry-&gt;getObject (<span class="enscript-string">&quot;multiple-parent&quot;</span>);
+      }
+      <span class="enscript-keyword">else</span>
+	nodeFound = false;
+    }
+
+    continueSearch = ( (false == nodeFound) || (NULL != multipleParentKeyValue) );
+
+    <span class="enscript-keyword">if</span> ( continueSearch &amp;&amp; (NULL != (children = (OSArray *) entry-&gt;getObject (<span class="enscript-string">&quot;children&quot;</span>))) ) {
+      nodeFound = CheckSubTree ( children, theNub, theDevice, entry );
+      continueSearch = ( (false == nodeFound) || (NULL != multipleParentKeyValue) );
+    }
+
+    <span class="enscript-keyword">if</span> ( false == continueSearch )
+      <span class="enscript-keyword">break</span>;
+  }
+
+  <span class="enscript-keyword">return</span> ( nodeFound );
+}
+
+<span class="enscript-comment">//*********************************************************************************
+</span><span class="enscript-comment">// RegisterServiceInTree
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Register a device at the specified node of our power tree.
+</span><span class="enscript-comment">//*********************************************************************************
+</span>
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPlatformExpert::RegisterServiceInTree</span> (IOService * theService, OSDictionary * theTreeNode, OSDictionary * theTreeParentNode, IOService * theProvider)
+{
+  IOService *    aService;
+  <span class="enscript-type">bool</span>           registered = false;
+  OSArray *      children;
+  <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>   numChildren;
+  OSDictionary * child;
+
+  <span class="enscript-comment">// make sure someone is not already registered here
+</span>
+  <span class="enscript-keyword">if</span> ( NULL == theTreeNode-&gt;getObject (<span class="enscript-string">&quot;service&quot;</span>) ) {
+
+    <span class="enscript-keyword">if</span> ( theTreeNode-&gt;setObject (<span class="enscript-string">&quot;service&quot;</span>, OSDynamicCast ( OSObject, theService)) ) {
+
+      <span class="enscript-comment">// 1. CHILDREN ------------------
+</span>
+      <span class="enscript-comment">// we registered the node in the tree...now if the node has children
+</span>      <span class="enscript-comment">// registered we must tell this service to add them.
+</span>
+      <span class="enscript-keyword">if</span> ( NULL != (children = (OSArray *) theTreeNode-&gt;getObject (<span class="enscript-string">&quot;children&quot;</span>)) ) {
+        numChildren = children-&gt;getCount ();
+        <span class="enscript-keyword">for</span> ( <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i = 0; i &lt; numChildren; i++ ) {
+          <span class="enscript-keyword">if</span> ( NULL != (child = (OSDictionary *) children-&gt;getObject (i)) ) {
+            <span class="enscript-keyword">if</span> ( NULL != (aService = (IOService *) child-&gt;getObject (<span class="enscript-string">&quot;service&quot;</span>)) )
+              theService-&gt;addPowerChild (aService);
+          }
+        }
+      }
+
+      <span class="enscript-comment">// 2. PARENT --------------------
+</span>
+      <span class="enscript-comment">// also we must notify the parent of this node (if a registered service
+</span>      <span class="enscript-comment">// exists there) of a new child.
+</span>
+      <span class="enscript-keyword">if</span> ( theTreeParentNode ) {
+        <span class="enscript-keyword">if</span> ( NULL != (aService = (IOService *) theTreeParentNode-&gt;getObject (<span class="enscript-string">&quot;service&quot;</span>)) )
+          <span class="enscript-keyword">if</span> (aService != theProvider)
+            aService-&gt;addPowerChild (theService);
+      }
+
+      registered = true;
+    }
+  }
+
+  <span class="enscript-keyword">return</span> registered;
+}
+
+<span class="enscript-comment">//*********************************************************************************
+</span><span class="enscript-comment">// printDictionaryKeys
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Print the keys for the given dictionary and selected contents.
+</span><span class="enscript-comment">//*********************************************************************************
+</span><span class="enscript-type">void</span> <span class="enscript-function-name">printDictionaryKeys</span> (OSDictionary * inDictionary, <span class="enscript-type">char</span> * inMsg)
+{
+  OSCollectionIterator * mcoll = OSCollectionIterator::withCollection (inDictionary);
+  OSSymbol * mkey;
+  OSString * ioClass;
+  <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i = 0;
+ 
+  mcoll-&gt;reset ();
+
+  mkey = OSDynamicCast (OSSymbol, mcoll-&gt;getNextObject ());
+
+  <span class="enscript-keyword">while</span> (mkey) {
+
+    <span class="enscript-comment">// kprintf (&quot;dictionary key #%d: %s\n&quot;, i, mkey-&gt;getCStringNoCopy () );
+</span>
+    <span class="enscript-comment">// if this is the IOClass key, print it's contents
+</span>
+    <span class="enscript-keyword">if</span> ( mkey-&gt;isEqualTo (<span class="enscript-string">&quot;IOClass&quot;</span>) ) {
+      ioClass = (OSString *) inDictionary-&gt;getObject (<span class="enscript-string">&quot;IOClass&quot;</span>);
+      <span class="enscript-keyword">if</span> ( ioClass ) IOLog (<span class="enscript-string">&quot;%s IOClass is %s\n&quot;</span>, inMsg, ioClass-&gt;getCStringNoCopy () );
+    }
+
+    <span class="enscript-comment">// if this is an IOProviderClass key print it
+</span>
+    <span class="enscript-keyword">if</span> ( mkey-&gt;isEqualTo (<span class="enscript-string">&quot;IOProviderClass&quot;</span>) ) {
+      ioClass = (OSString *) inDictionary-&gt;getObject (<span class="enscript-string">&quot;IOProviderClass&quot;</span>);
+      <span class="enscript-keyword">if</span> ( ioClass ) IOLog (<span class="enscript-string">&quot;%s IOProviderClass is %s\n&quot;</span>, inMsg, ioClass-&gt;getCStringNoCopy () );
+
+    }
+
+    <span class="enscript-comment">// also print IONameMatch keys
+</span>    <span class="enscript-keyword">if</span> ( mkey-&gt;isEqualTo (<span class="enscript-string">&quot;IONameMatch&quot;</span>) ) {
+      ioClass = (OSString *) inDictionary-&gt;getObject (<span class="enscript-string">&quot;IONameMatch&quot;</span>);
+      <span class="enscript-keyword">if</span> ( ioClass ) IOLog (<span class="enscript-string">&quot;%s IONameMatch is %s\n&quot;</span>, inMsg, ioClass-&gt;getCStringNoCopy () );
+    }
+
+    <span class="enscript-comment">// also print IONameMatched keys
+</span>
+    <span class="enscript-keyword">if</span> ( mkey-&gt;isEqualTo (<span class="enscript-string">&quot;IONameMatched&quot;</span>) ) {
+      ioClass = (OSString *) inDictionary-&gt;getObject (<span class="enscript-string">&quot;IONameMatched&quot;</span>);
+      <span class="enscript-keyword">if</span> ( ioClass ) IOLog (<span class="enscript-string">&quot;%s IONameMatched is %s\n&quot;</span>, inMsg, ioClass-&gt;getCStringNoCopy () );
+    }
+
+#<span class="enscript-reference">if</span> 0
+    <span class="enscript-comment">// print clock-id
+</span>
+    <span class="enscript-keyword">if</span> ( mkey-&gt;isEqualTo (<span class="enscript-string">&quot;AAPL,clock-id&quot;</span>) ) {
+      <span class="enscript-type">char</span> * cstr;
+      cstr = getCStringForObject (inDictionary-&gt;getObject (<span class="enscript-string">&quot;AAPL,clock-id&quot;</span>));
+      <span class="enscript-keyword">if</span> (cstr)
+        kprintf (<span class="enscript-string">&quot; ===&gt; AAPL,clock-id is %s\n&quot;</span>, cstr );
+    }
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-comment">// print name
+</span>
+    <span class="enscript-keyword">if</span> ( mkey-&gt;isEqualTo (<span class="enscript-string">&quot;name&quot;</span>) ) {
+      <span class="enscript-type">char</span> nameStr[64];
+      nameStr[0] = 0;
+      getCStringForObject(inDictionary-&gt;getObject(<span class="enscript-string">&quot;name&quot;</span>), nameStr,
+		      <span class="enscript-keyword">sizeof</span>(nameStr));
+      <span class="enscript-keyword">if</span> (strlen(nameStr) &gt; 0)
+        IOLog (<span class="enscript-string">&quot;%s name is %s\n&quot;</span>, inMsg, nameStr);
+    }
+
+    mkey = (OSSymbol *) mcoll-&gt;getNextObject ();
+
+    i++;
+  }
+
+  mcoll-&gt;release ();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">getCStringForObject</span>(OSObject *inObj, <span class="enscript-type">char</span> *outStr, size_t outStrLen)
+{
+   <span class="enscript-type">char</span> * buffer;
+   <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>    len, i;
+
+   <span class="enscript-keyword">if</span> ( (NULL == inObj) || (NULL == outStr))
+     <span class="enscript-keyword">return</span>;
+
+   <span class="enscript-type">char</span> * objString = (<span class="enscript-type">char</span> *) (inObj-&gt;getMetaClass())-&gt;getClassName();
+
+   <span class="enscript-keyword">if</span> ((0 == strncmp(objString, <span class="enscript-string">&quot;OSString&quot;</span>, <span class="enscript-keyword">sizeof</span>(<span class="enscript-string">&quot;OSString&quot;</span>))) ||
+		   (0 == strncmp(objString, <span class="enscript-string">&quot;OSSymbol&quot;</span>, <span class="enscript-keyword">sizeof</span>(<span class="enscript-string">&quot;OSSymbol&quot;</span>))))
+     strlcpy(outStr, ((OSString *)inObj)-&gt;getCStringNoCopy(), outStrLen);
+
+   <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strncmp(objString, <span class="enscript-string">&quot;OSData&quot;</span>, <span class="enscript-keyword">sizeof</span>(<span class="enscript-string">&quot;OSData&quot;</span>))) {
+     len = ((OSData *)inObj)-&gt;getLength();
+     buffer = (<span class="enscript-type">char</span> *)((OSData *)inObj)-&gt;getBytesNoCopy();
+     <span class="enscript-keyword">if</span> (buffer &amp;&amp; (len &gt; 0)) {
+       <span class="enscript-keyword">for</span> (i=0; i &lt; len; i++) {
+         outStr[i] = buffer[i];
+       }
+       outStr[len] = 0;
+     }
+   }
+}
+
+<span class="enscript-comment">/* IOShutdownNotificationsTimedOut
+ * - Called from a timer installed by PEHaltRestart
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">IOShutdownNotificationsTimedOut</span>(
+    thread_call_param_t p0, 
+    thread_call_param_t p1)
+{
+    <span class="enscript-type">int</span> type = (<span class="enscript-type">int</span>)(<span class="enscript-type">long</span>)p0;
+
+    <span class="enscript-comment">/* 30 seconds has elapsed - resume shutdown */</span>
+    <span class="enscript-keyword">if</span>(gIOPlatform) gIOPlatform-&gt;haltRestart(type);
+}
+
+
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> {
+
+<span class="enscript-comment">/*
+ * Callouts from BSD for machine name &amp; model
+ */</span> 
+
+boolean_t <span class="enscript-function-name">PEGetMachineName</span>( <span class="enscript-type">char</span> * name, <span class="enscript-type">int</span> maxLength )
+{
+    <span class="enscript-keyword">if</span>( gIOPlatform)
+	<span class="enscript-keyword">return</span>( gIOPlatform-&gt;getMachineName( name, maxLength ));
+    <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">return</span>( false );
+}
+
+boolean_t <span class="enscript-function-name">PEGetModelName</span>( <span class="enscript-type">char</span> * name, <span class="enscript-type">int</span> maxLength )
+{
+    <span class="enscript-keyword">if</span>( gIOPlatform)
+	<span class="enscript-keyword">return</span>( gIOPlatform-&gt;getModelName( name, maxLength ));
+    <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">return</span>( false );
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">PEGetPlatformEpoch</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">if</span>( gIOPlatform)
+	<span class="enscript-keyword">return</span>( gIOPlatform-&gt;getBootROMType());
+    <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">return</span>( -1 );
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">PEHaltRestart</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> type)
+{
+  IOPMrootDomain    *pmRootDomain;
+  AbsoluteTime      deadline;
+  thread_call_t     shutdown_hang;
+  IORegistryEntry   *node;
+  OSData            *data;
+  uint32_t          timeout = 30;
+  
+  <span class="enscript-keyword">if</span>(type == kPEHaltCPU || type == kPERestartCPU || type == kPEUPSDelayHaltCPU)
+  {
+    pmRootDomain = IOService::getPMRootDomain();
+    <span class="enscript-comment">/* Notify IOKit PM clients of shutdown/restart
+       Clients subscribe to this message with a call to
+       IOService::registerInterest()
+    */</span>
+    
+    <span class="enscript-comment">/* Spawn a thread that will panic in 30 seconds. 
+       If all goes well the machine will be off by the time
+       the timer expires. If the device wants a different
+       timeout, use that value instead of 30 seconds.
+     */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">RESTART_NODE_PATH</span>    <span class="enscript-string">&quot;/chosen&quot;</span>
+    node = IORegistryEntry::fromPath( RESTART_NODE_PATH, gIODTPlane );
+    <span class="enscript-keyword">if</span> ( node ) {
+      data = OSDynamicCast( OSData, node-&gt;getProperty( <span class="enscript-string">&quot;halt-restart-timeout&quot;</span> ) );
+      <span class="enscript-keyword">if</span> ( data &amp;&amp; data-&gt;getLength() == 4 )
+        timeout = *((uint32_t *) data-&gt;getBytesNoCopy());
+    }
+
+    shutdown_hang = thread_call_allocate( &amp;IOShutdownNotificationsTimedOut, 
+                        (thread_call_param_t)(uintptr_t) type);
+    clock_interval_to_deadline( timeout, kSecondScale, &amp;deadline );
+    thread_call_enter1_delayed( shutdown_hang, 0, deadline );
+
+    pmRootDomain-&gt;handlePlatformHaltRestart(type); 
+    <span class="enscript-comment">/* This notification should have few clients who all do 
+       their work synchronously.
+             
+       In this &quot;shutdown notification&quot; context we don't give
+       drivers the option of working asynchronously and responding 
+       later. PM internals make it very hard to wait for asynchronous
+       replies.
+     */</span>
+   }
+   <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span>(type == kPEPanicRestartCPU || type == kPEPanicSync)
+   {
+    IOCPURunPlatformPanicActions(type);
+   }
+
+  <span class="enscript-keyword">if</span> (gIOPlatform) <span class="enscript-keyword">return</span> gIOPlatform-&gt;haltRestart(type);
+  <span class="enscript-keyword">else</span> <span class="enscript-keyword">return</span> -1;
+}
+
+UInt32 <span class="enscript-function-name">PESavePanicInfo</span>(UInt8 *buffer, UInt32 length)
+{
+  <span class="enscript-keyword">if</span> (gIOPlatform != 0) <span class="enscript-keyword">return</span> gIOPlatform-&gt;savePanicInfo(buffer, length);
+  <span class="enscript-keyword">else</span> <span class="enscript-keyword">return</span> 0;
+}
+
+
+
+<span class="enscript-type">inline</span> <span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">init_gIOOptionsEntry</span>(<span class="enscript-type">void</span>)
+{
+    IORegistryEntry *entry;
+    <span class="enscript-type">void</span> *nvram_entry;
+    <span class="enscript-type">volatile</span> <span class="enscript-type">void</span> **options;
+    <span class="enscript-type">int</span> ret = -1;
+
+    <span class="enscript-keyword">if</span> (gIOOptionsEntry) 
+        <span class="enscript-keyword">return</span> 0;
+
+    entry = IORegistryEntry::fromPath( <span class="enscript-string">&quot;/options&quot;</span>, gIODTPlane );
+    <span class="enscript-keyword">if</span> (!entry)
+        <span class="enscript-keyword">return</span> -1;
+
+    nvram_entry = (<span class="enscript-type">void</span> *) OSDynamicCast(IODTNVRAM, entry);
+    <span class="enscript-keyword">if</span> (!nvram_entry) 
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+
+    options = (<span class="enscript-type">volatile</span> <span class="enscript-type">void</span> **) &amp;gIOOptionsEntry;
+    <span class="enscript-keyword">if</span> (!OSCompareAndSwapPtr(NULL, nvram_entry, options)) {
+        ret = 0;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+    }
+
+    <span class="enscript-keyword">return</span> 0;
+
+<span class="enscript-reference">release</span>:
+    entry-&gt;release();
+    <span class="enscript-keyword">return</span> ret;
+
+}
+
+<span class="enscript-comment">/* pass in a NULL value if you just want to figure out the len */</span>
+boolean_t <span class="enscript-function-name">PEReadNVRAMProperty</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *symbol, <span class="enscript-type">void</span> *value,
+                              <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *len)
+{
+    OSObject  *obj;
+    OSData *data;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> vlen;
+
+    <span class="enscript-keyword">if</span> (!symbol || !len)
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+    <span class="enscript-keyword">if</span> (init_gIOOptionsEntry() &lt; 0)
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+    vlen = *len;
+    *len = 0;
+
+    obj = gIOOptionsEntry-&gt;getProperty(symbol);
+    <span class="enscript-keyword">if</span> (!obj)
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+    <span class="enscript-comment">/* convert to data */</span>
+    data = OSDynamicCast(OSData, obj);
+    <span class="enscript-keyword">if</span> (!data) 
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+    *len  = data-&gt;getLength();
+    vlen  = min(vlen, *len);
+    <span class="enscript-keyword">if</span> (value &amp;&amp; vlen)
+        memcpy((<span class="enscript-type">void</span> *) value, data-&gt;getBytesNoCopy(), vlen);
+
+    <span class="enscript-keyword">return</span> TRUE;
+
+<span class="enscript-reference">err</span>:
+    <span class="enscript-keyword">return</span> FALSE;
+}
+
+boolean_t
+<span class="enscript-function-name">PEWriteNVRAMBooleanProperty</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *symbol, boolean_t value)
+{
+	<span class="enscript-type">const</span> OSSymbol *sym = NULL;
+	OSBoolean *data = NULL;
+	<span class="enscript-type">bool</span> ret = false;
+
+	<span class="enscript-keyword">if</span> (symbol == NULL) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (init_gIOOptionsEntry() &lt; 0) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ((sym = OSSymbol::withCStringNoCopy(symbol)) == NULL) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	data  = value ? kOSBooleanTrue : kOSBooleanFalse;
+	ret = gIOOptionsEntry-&gt;setProperty(sym, data);
+
+	sym-&gt;release();
+
+	<span class="enscript-comment">/* success, force the NVRAM to flush writes */</span>
+	<span class="enscript-keyword">if</span> (ret == true) {
+		gIOOptionsEntry-&gt;sync();
+	}
+
+<span class="enscript-reference">exit</span>:
+	<span class="enscript-keyword">return</span> ret;
+}
+
+boolean_t <span class="enscript-function-name">PEWriteNVRAMProperty</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *symbol, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *value, 
+                               <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> len)
+{
+    <span class="enscript-type">const</span> OSSymbol *sym;
+    OSData *data;
+    <span class="enscript-type">bool</span> ret = false;
+
+    <span class="enscript-keyword">if</span> (!symbol || !value || !len)
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+    <span class="enscript-keyword">if</span> (init_gIOOptionsEntry() &lt; 0)
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+    sym = OSSymbol::withCStringNoCopy(symbol);
+    <span class="enscript-keyword">if</span> (!sym)
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+    data = OSData::withBytes((<span class="enscript-type">void</span> *) value, len);
+    <span class="enscript-keyword">if</span> (!data)
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">sym_done</span>;
+
+    ret = gIOOptionsEntry-&gt;setProperty(sym, data);
+    data-&gt;release();
+
+<span class="enscript-reference">sym_done</span>:
+    sym-&gt;release();
+
+    <span class="enscript-keyword">if</span> (ret == true) {
+        gIOOptionsEntry-&gt;sync();
+        <span class="enscript-keyword">return</span> TRUE;
+    }
+
+<span class="enscript-reference">err</span>:
+    <span class="enscript-keyword">return</span> FALSE;
+}
+
+
+boolean_t <span class="enscript-function-name">PERemoveNVRAMProperty</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *symbol)
+{
+    <span class="enscript-type">const</span> OSSymbol *sym;
+
+    <span class="enscript-keyword">if</span> (!symbol)
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+    <span class="enscript-keyword">if</span> (init_gIOOptionsEntry() &lt; 0)
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+    sym = OSSymbol::withCStringNoCopy(symbol);
+    <span class="enscript-keyword">if</span> (!sym)
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+    gIOOptionsEntry-&gt;removeProperty(sym);
+
+    sym-&gt;release();
+
+    gIOOptionsEntry-&gt;sync();
+    <span class="enscript-keyword">return</span> TRUE;
+
+<span class="enscript-reference">err</span>:
+    <span class="enscript-keyword">return</span> FALSE;
+
+}
+
+<span class="enscript-type">long</span> <span class="enscript-function-name">PEGetGMTTimeOfDay</span>(<span class="enscript-type">void</span>)
+{
+    clock_sec_t     secs;
+    clock_usec_t    usecs;
+
+    PEGetUTCTimeOfDay(&amp;secs, &amp;usecs);
+    <span class="enscript-keyword">return</span> secs;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PESetGMTTimeOfDay</span>(<span class="enscript-type">long</span> secs)
+{
+    PESetUTCTimeOfDay(secs, 0);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PEGetUTCTimeOfDay</span>(clock_sec_t * secs, clock_usec_t * usecs)
+{
+    clock_nsec_t    nsecs = 0;
+
+    *secs = 0;
+	<span class="enscript-keyword">if</span> (gIOPlatform)
+        gIOPlatform-&gt;getUTCTimeOfDay(secs, &amp;nsecs);
+
+    assert(nsecs &lt; NSEC_PER_SEC);
+    *usecs = nsecs / NSEC_PER_USEC;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PESetUTCTimeOfDay</span>(clock_sec_t secs, clock_usec_t usecs)
+{
+    assert(usecs &lt; USEC_PER_SEC);
+	<span class="enscript-keyword">if</span> (gIOPlatform)
+        gIOPlatform-&gt;setUTCTimeOfDay(secs, usecs * NSEC_PER_USEC);
+}
+
+} <span class="enscript-comment">/* extern &quot;C&quot; */</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOPlatformExpert::registerNVRAMController</span>(IONVRAMController * caller)
+{
+    OSData *          data;
+    IORegistryEntry * entry;
+    OSString *        string = 0;
+    uuid_string_t     uuid;
+
+    entry = IORegistryEntry::fromPath( <span class="enscript-string">&quot;/efi/platform&quot;</span>, gIODTPlane );
+    <span class="enscript-keyword">if</span> ( entry )
+    {
+        data = OSDynamicCast( OSData, entry-&gt;getProperty( <span class="enscript-string">&quot;system-id&quot;</span> ) );
+        <span class="enscript-keyword">if</span> ( data &amp;&amp; data-&gt;getLength( ) == 16 )
+        {
+            SHA1_CTX     context;
+            uint8_t      digest[ SHA_DIGEST_LENGTH ];
+            <span class="enscript-type">const</span> uuid_t space = { 0x2A, 0x06, 0x19, 0x90, 0xD3, 0x8D, 0x44, 0x40, 0xA1, 0x39, 0xC4, 0x97, 0x70, 0x37, 0x65, 0xAC };
+
+            SHA1Init( &amp;context );
+            SHA1Update( &amp;context, space, <span class="enscript-keyword">sizeof</span>( space ) );
+            SHA1Update( &amp;context, data-&gt;getBytesNoCopy( ), data-&gt;getLength( ) );
+            SHA1Final( digest, &amp;context );
+
+            digest[ 6 ] = ( digest[ 6 ] &amp; 0x0F ) | 0x50;
+            digest[ 8 ] = ( digest[ 8 ] &amp; 0x3F ) | 0x80;
+
+            uuid_unparse( digest, uuid );
+            string = OSString::withCString( uuid );
+        }
+
+        entry-&gt;release( );
+    }
+
+    <span class="enscript-keyword">if</span> ( string == 0 )
+    {
+        entry = IORegistryEntry::fromPath( <span class="enscript-string">&quot;/options&quot;</span>, gIODTPlane );
+        <span class="enscript-keyword">if</span> ( entry )
+        {
+            data = OSDynamicCast( OSData, entry-&gt;getProperty( <span class="enscript-string">&quot;platform-uuid&quot;</span> ) );
+            <span class="enscript-keyword">if</span> ( data &amp;&amp; data-&gt;getLength( ) == <span class="enscript-keyword">sizeof</span>( uuid_t ) )
+            {
+                uuid_unparse( ( uint8_t * ) data-&gt;getBytesNoCopy( ), uuid );
+                string = OSString::withCString( uuid );
+            }
+
+            entry-&gt;release( );
+        }
+    }
+
+    <span class="enscript-keyword">if</span> ( string )
+    {
+        getProvider( )-&gt;setProperty( kIOPlatformUUIDKey, string );
+        publishResource( kIOPlatformUUIDKey, string );
+
+        string-&gt;release( );
+    }
+
+    publishResource(<span class="enscript-string">&quot;IONVRAM&quot;</span>);
+}
+
+IOReturn <span class="enscript-function-name">IOPlatformExpert::callPlatformFunction</span>(<span class="enscript-type">const</span> OSSymbol *functionName,
+						<span class="enscript-type">bool</span> waitForFunction,
+						<span class="enscript-type">void</span> *param1, <span class="enscript-type">void</span> *param2,
+						<span class="enscript-type">void</span> *param3, <span class="enscript-type">void</span> *param4)
+{
+  IOService *service, *_resources;
+  
+  <span class="enscript-keyword">if</span> (waitForFunction) {
+    _resources = waitForService(resourceMatching(functionName));
+  } <span class="enscript-keyword">else</span> {
+    _resources = getResourceService();
+  }
+  <span class="enscript-keyword">if</span> (_resources == 0) <span class="enscript-keyword">return</span> kIOReturnUnsupported;
+  
+  service = OSDynamicCast(IOService, _resources-&gt;getProperty(functionName));
+  <span class="enscript-keyword">if</span> (service == 0) <span class="enscript-keyword">return</span> kIOReturnUnsupported;
+  
+  <span class="enscript-keyword">return</span> service-&gt;callPlatformFunction(functionName, waitForFunction,
+				       param1, param2, param3, param4);
+}
+
+IOByteCount <span class="enscript-function-name">IOPlatformExpert::savePanicInfo</span>(UInt8 *buffer, IOByteCount length)
+{
+  <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">super</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOPlatformExpert
+
+<span class="enscript-function-name">OSDefineMetaClassAndAbstractStructors</span>( IODTPlatformExpert, IOPlatformExpert )
+
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODTPlatformExpert,  0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODTPlatformExpert,  1);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODTPlatformExpert,  2);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODTPlatformExpert,  3);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODTPlatformExpert,  4);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODTPlatformExpert,  5);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODTPlatformExpert,  6);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODTPlatformExpert,  7);
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+IOService * <span class="enscript-function-name">IODTPlatformExpert::probe</span>( IOService * provider,
+			       		SInt32 * score )
+{
+    <span class="enscript-keyword">if</span>( !super::probe( provider, score))
+	<span class="enscript-keyword">return</span>( 0 );
+
+    <span class="enscript-comment">// check machine types
+</span>    <span class="enscript-keyword">if</span>( !provider-&gt;compareNames( getProperty( gIONameMatchKey ) ))
+        <span class="enscript-keyword">return</span>( 0 );
+
+    <span class="enscript-keyword">return</span>( <span class="enscript-keyword">this</span>);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODTPlatformExpert::configure</span>( IOService * provider )
+{
+    <span class="enscript-keyword">if</span>( !super::configure( provider))
+	<span class="enscript-keyword">return</span>( false);
+
+    processTopLevel( provider );
+
+    <span class="enscript-keyword">return</span>( true );
+}
+
+IOService * <span class="enscript-function-name">IODTPlatformExpert::createNub</span>( IORegistryEntry * from )
+{
+    IOService *		nub;
+
+    nub = <span class="enscript-keyword">new</span> IOPlatformDevice;
+    <span class="enscript-keyword">if</span>( nub) {
+	<span class="enscript-keyword">if</span>( !nub-&gt;init( from, gIODTPlane )) {
+	    nub-&gt;free();
+	    nub = 0;
+	}
+    }
+    <span class="enscript-keyword">return</span>( nub);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODTPlatformExpert::createNubs</span>( IOService * parent, OSIterator * iter )
+{
+    IORegistryEntry *	next;
+    IOService *		nub;
+    <span class="enscript-type">bool</span>		ok = true;
+
+    <span class="enscript-keyword">if</span>( iter) {
+	<span class="enscript-keyword">while</span>( (next = (IORegistryEntry *) iter-&gt;getNextObject())) {
+
+            <span class="enscript-keyword">if</span>( 0 == (nub = createNub( next )))
+                <span class="enscript-keyword">continue</span>;
+
+            nub-&gt;attach( parent );
+            nub-&gt;registerService();
+        }
+	iter-&gt;release();
+    }
+
+    <span class="enscript-keyword">return</span>( ok );
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IODTPlatformExpert::processTopLevel</span>( IORegistryEntry * rootEntry )
+{
+    OSIterator * 	kids;
+    IORegistryEntry *	next;
+    IORegistryEntry *	cpus;
+    IORegistryEntry *	options;
+
+    <span class="enscript-comment">// infanticide
+</span>    kids = IODTFindMatchingEntries( rootEntry, 0, deleteList() );
+    <span class="enscript-keyword">if</span>( kids) {
+	<span class="enscript-keyword">while</span>( (next = (IORegistryEntry *)kids-&gt;getNextObject())) {
+	    next-&gt;detachAll( gIODTPlane);
+	}
+	kids-&gt;release();
+    }
+
+    <span class="enscript-comment">// Publish an IODTNVRAM class on /options.
+</span>    options = rootEntry-&gt;childFromPath(<span class="enscript-string">&quot;options&quot;</span>, gIODTPlane);
+    <span class="enscript-keyword">if</span> (options) {
+      dtNVRAM = <span class="enscript-keyword">new</span> IODTNVRAM;
+      <span class="enscript-keyword">if</span> (dtNVRAM) {
+        <span class="enscript-keyword">if</span> (!dtNVRAM-&gt;init(options, gIODTPlane)) {
+	  dtNVRAM-&gt;release();
+	  dtNVRAM = 0;
+        } <span class="enscript-keyword">else</span> {
+	  dtNVRAM-&gt;attach(<span class="enscript-keyword">this</span>);
+	  dtNVRAM-&gt;registerService();
+	  options-&gt;release();
+	}
+      }
+    }
+
+    <span class="enscript-comment">// Publish the cpus.
+</span>    cpus = rootEntry-&gt;childFromPath( <span class="enscript-string">&quot;cpus&quot;</span>, gIODTPlane);
+    <span class="enscript-keyword">if</span> ( cpus)
+    {
+      createNubs( <span class="enscript-keyword">this</span>, IODTFindMatchingEntries( cpus, kIODTExclusive, 0));
+      cpus-&gt;release();
+    }
+
+    <span class="enscript-comment">// publish top level, minus excludeList
+</span>    createNubs( <span class="enscript-keyword">this</span>, IODTFindMatchingEntries( rootEntry, kIODTExclusive, excludeList()));
+}
+
+IOReturn <span class="enscript-function-name">IODTPlatformExpert::getNubResources</span>( IOService * nub )
+{
+  <span class="enscript-keyword">if</span>( nub-&gt;getDeviceMemory())
+    <span class="enscript-keyword">return</span>( kIOReturnSuccess );
+
+  IODTResolveAddressing( nub, <span class="enscript-string">&quot;reg&quot;</span>, 0);
+
+  <span class="enscript-keyword">return</span>( kIOReturnSuccess);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODTPlatformExpert::compareNubName</span>( <span class="enscript-type">const</span> IOService * nub,
+				OSString * name, OSString ** matched ) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span>( IODTCompareNubName( nub, name, matched )
+	  || super::compareNubName( nub, name, matched) );
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODTPlatformExpert::getModelName</span>( <span class="enscript-type">char</span> * name, <span class="enscript-type">int</span> maxLength )
+{
+    OSData *		prop;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *	str;
+    <span class="enscript-type">int</span>			len;
+    <span class="enscript-type">char</span>		c;
+    <span class="enscript-type">bool</span>		ok = false;
+
+    maxLength--;
+
+    prop = (OSData *) getProvider()-&gt;getProperty( gIODTCompatibleKey );
+    <span class="enscript-keyword">if</span>( prop ) {
+	str = (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) prop-&gt;getBytesNoCopy();
+
+	<span class="enscript-keyword">if</span>( 0 == strncmp( str, <span class="enscript-string">&quot;AAPL,&quot;</span>, strlen( <span class="enscript-string">&quot;AAPL,&quot;</span> ) ))
+	    str += strlen( <span class="enscript-string">&quot;AAPL,&quot;</span> );
+
+	len = 0;
+	<span class="enscript-keyword">while</span>( (c = *str++)) {
+	    <span class="enscript-keyword">if</span>( (c == <span class="enscript-string">'/'</span>) || (c == <span class="enscript-string">' '</span>))
+		c = <span class="enscript-string">'-'</span>;
+
+	    name[ len++ ] = c;
+	    <span class="enscript-keyword">if</span>( len &gt;= maxLength)
+		<span class="enscript-keyword">break</span>;
+	}
+
+	name[ len ] = 0;
+	ok = true;
+    }
+    <span class="enscript-keyword">return</span>( ok );
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODTPlatformExpert::getMachineName</span>( <span class="enscript-type">char</span> * name, <span class="enscript-type">int</span> maxLength )
+{
+    OSData *		prop;
+    <span class="enscript-type">bool</span>		ok = false;
+
+    maxLength--;
+    prop = (OSData *) getProvider()-&gt;getProperty( gIODTModelKey );
+    ok = (0 != prop);
+
+    <span class="enscript-keyword">if</span>( ok )
+	strlcpy( name, (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) prop-&gt;getBytesNoCopy(), maxLength );
+
+    <span class="enscript-keyword">return</span>( ok );
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IODTPlatformExpert::registerNVRAMController</span>( IONVRAMController * nvram )
+{
+  <span class="enscript-keyword">if</span> (dtNVRAM) dtNVRAM-&gt;registerNVRAMController(nvram);
+  
+  <span class="enscript-reference">super</span>::registerNVRAMController(nvram);
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">IODTPlatformExpert::haltRestart</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> type)
+{
+  <span class="enscript-keyword">if</span> (dtNVRAM) dtNVRAM-&gt;sync();
+  
+  <span class="enscript-keyword">return</span> super::haltRestart(type);
+}
+
+IOReturn <span class="enscript-function-name">IODTPlatformExpert::readXPRAM</span>(IOByteCount offset, UInt8 * buffer,
+				       IOByteCount length)
+{
+  <span class="enscript-keyword">if</span> (dtNVRAM) <span class="enscript-keyword">return</span> dtNVRAM-&gt;readXPRAM(offset, buffer, length);
+  <span class="enscript-keyword">else</span> <span class="enscript-keyword">return</span> kIOReturnNotReady;
+}
+
+IOReturn <span class="enscript-function-name">IODTPlatformExpert::writeXPRAM</span>(IOByteCount offset, UInt8 * buffer,
+					IOByteCount length)
+{
+  <span class="enscript-keyword">if</span> (dtNVRAM) <span class="enscript-keyword">return</span> dtNVRAM-&gt;writeXPRAM(offset, buffer, length);
+  <span class="enscript-keyword">else</span> <span class="enscript-keyword">return</span> kIOReturnNotReady;
+}
+
+IOReturn <span class="enscript-function-name">IODTPlatformExpert::readNVRAMProperty</span>(
+	IORegistryEntry * entry,
+	<span class="enscript-type">const</span> OSSymbol ** name, OSData ** value )
+{
+  <span class="enscript-keyword">if</span> (dtNVRAM) <span class="enscript-keyword">return</span> dtNVRAM-&gt;readNVRAMProperty(entry, name, value);
+  <span class="enscript-keyword">else</span> <span class="enscript-keyword">return</span> kIOReturnNotReady;
+}
+
+IOReturn <span class="enscript-function-name">IODTPlatformExpert::writeNVRAMProperty</span>(
+	IORegistryEntry * entry,
+	<span class="enscript-type">const</span> OSSymbol * name, OSData * value )
+{
+  <span class="enscript-keyword">if</span> (dtNVRAM) <span class="enscript-keyword">return</span> dtNVRAM-&gt;writeNVRAMProperty(entry, name, value);
+  <span class="enscript-keyword">else</span> <span class="enscript-keyword">return</span> kIOReturnNotReady;
+}
+
+OSDictionary *<span class="enscript-function-name">IODTPlatformExpert::getNVRAMPartitions</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">if</span> (dtNVRAM) <span class="enscript-keyword">return</span> dtNVRAM-&gt;getNVRAMPartitions();
+  <span class="enscript-keyword">else</span> <span class="enscript-keyword">return</span> 0;
+}
+
+IOReturn <span class="enscript-function-name">IODTPlatformExpert::readNVRAMPartition</span>(<span class="enscript-type">const</span> OSSymbol * partitionID,
+						IOByteCount offset, UInt8 * buffer,
+						IOByteCount length)
+{
+  <span class="enscript-keyword">if</span> (dtNVRAM) <span class="enscript-keyword">return</span> dtNVRAM-&gt;readNVRAMPartition(partitionID, offset,
+						  buffer, length);
+  <span class="enscript-keyword">else</span> <span class="enscript-keyword">return</span> kIOReturnNotReady;
+}
+
+IOReturn <span class="enscript-function-name">IODTPlatformExpert::writeNVRAMPartition</span>(<span class="enscript-type">const</span> OSSymbol * partitionID,
+						 IOByteCount offset, UInt8 * buffer,
+						 IOByteCount length)
+{
+  <span class="enscript-keyword">if</span> (dtNVRAM) <span class="enscript-keyword">return</span> dtNVRAM-&gt;writeNVRAMPartition(partitionID, offset,
+						   buffer, length);
+  <span class="enscript-keyword">else</span> <span class="enscript-keyword">return</span> kIOReturnNotReady;
+}
+
+IOByteCount <span class="enscript-function-name">IODTPlatformExpert::savePanicInfo</span>(UInt8 *buffer, IOByteCount length)
+{
+  IOByteCount lengthSaved = 0;
+  
+  <span class="enscript-keyword">if</span> (dtNVRAM) lengthSaved = dtNVRAM-&gt;savePanicInfo(buffer, length);
+  
+  <span class="enscript-keyword">if</span> (lengthSaved == 0) lengthSaved = super::savePanicInfo(buffer, length);
+  
+  <span class="enscript-keyword">return</span> lengthSaved;
+}
+
+OSString* <span class="enscript-function-name">IODTPlatformExpert::createSystemSerialNumberString</span>(OSData* myProperty) {
+    UInt8* serialNumber;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> serialNumberSize;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> pos = 0;
+    <span class="enscript-type">char</span>* temp;
+    <span class="enscript-type">char</span> SerialNo[30];
+    
+    <span class="enscript-keyword">if</span> (myProperty != NULL) {
+        serialNumberSize = myProperty-&gt;getLength();
+        serialNumber = (UInt8*)(myProperty-&gt;getBytesNoCopy());
+        temp = (<span class="enscript-type">char</span>*)serialNumber;
+        <span class="enscript-keyword">if</span> (serialNumberSize &gt; 0) {
+            <span class="enscript-comment">// check to see if this is a CTO serial number...
+</span>            <span class="enscript-keyword">while</span> (pos &lt; serialNumberSize &amp;&amp; temp[pos] != <span class="enscript-string">'-'</span>) pos++;
+            
+            <span class="enscript-keyword">if</span> (pos &lt; serialNumberSize) { <span class="enscript-comment">// there was a hyphen, so it's a CTO serial number
+</span>                memcpy(SerialNo, serialNumber + 12, 8);
+                memcpy(&amp;SerialNo[8], serialNumber, 3);
+                SerialNo[11] = <span class="enscript-string">'-'</span>;
+                memcpy(&amp;SerialNo[12], serialNumber + 3, 8);
+                SerialNo[20] = 0;
+            } <span class="enscript-keyword">else</span> { <span class="enscript-comment">// just a normal serial number
+</span>                memcpy(SerialNo, serialNumber + 13, 8);
+                memcpy(&amp;SerialNo[8], serialNumber, 3);
+                SerialNo[11] = 0;
+            }
+            <span class="enscript-keyword">return</span> OSString::withCString(SerialNo);
+        }
+    }
+    <span class="enscript-keyword">return</span> NULL;
+}
+
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">super</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOService
+
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IOPlatformExpertDevice, IOService)
+
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformExpertDevice,  0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformExpertDevice,  1);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformExpertDevice,  2);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformExpertDevice,  3);
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPlatformExpertDevice::compareName</span>( OSString * name,
+                                        OSString ** matched ) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span>( IODTCompareNubName( <span class="enscript-keyword">this</span>, name, matched ));
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IOPlatformExpertDevice::initWithArgs</span>(
+                            <span class="enscript-type">void</span> * dtTop, <span class="enscript-type">void</span> * p2, <span class="enscript-type">void</span> * p3, <span class="enscript-type">void</span> * p4 )
+{
+    IORegistryEntry * 	dt = 0;
+    <span class="enscript-type">bool</span>		ok;
+
+    <span class="enscript-comment">// dtTop may be zero on non- device tree systems
+</span>    <span class="enscript-keyword">if</span>( dtTop &amp;&amp; (dt = IODeviceTreeAlloc( dtTop )))
+	ok = super::init( dt, gIODTPlane );
+    <span class="enscript-keyword">else</span>
+	ok = super::init();
+
+    <span class="enscript-keyword">if</span>( !ok)
+	<span class="enscript-keyword">return</span>( false);
+
+    reserved = NULL;
+    workLoop = IOWorkLoop::workLoop();
+    <span class="enscript-keyword">if</span> (!workLoop)
+        <span class="enscript-keyword">return</span> false;
+
+    <span class="enscript-keyword">return</span>( true);
+}
+
+IOWorkLoop *<span class="enscript-function-name">IOPlatformExpertDevice::getWorkLoop</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> workLoop;
+}
+
+IOReturn <span class="enscript-function-name">IOPlatformExpertDevice::setProperties</span>( OSObject * properties )
+{
+    OSDictionary * dictionary;
+    OSObject *     object;
+    IOReturn       status;
+
+    status = super::setProperties( properties );
+    <span class="enscript-keyword">if</span> ( status != kIOReturnUnsupported ) <span class="enscript-keyword">return</span> status;
+
+    status = IOUserClient::clientHasPrivilege( current_task( ), kIOClientPrivilegeAdministrator );
+    <span class="enscript-keyword">if</span> ( status != kIOReturnSuccess ) <span class="enscript-keyword">return</span> status;
+
+    dictionary = OSDynamicCast( OSDictionary, properties );
+    <span class="enscript-keyword">if</span> ( dictionary == 0 ) <span class="enscript-keyword">return</span> kIOReturnBadArgument;
+
+    object = dictionary-&gt;getObject( kIOPlatformUUIDKey );
+    <span class="enscript-keyword">if</span> ( object )
+    {
+        IORegistryEntry * entry;
+        OSString *        string;
+        uuid_t            uuid;
+
+        string = ( OSString * ) getProperty( kIOPlatformUUIDKey );
+        <span class="enscript-keyword">if</span> ( string ) <span class="enscript-keyword">return</span> kIOReturnNotPermitted;
+
+        string = OSDynamicCast( OSString, object );
+        <span class="enscript-keyword">if</span> ( string == 0 ) <span class="enscript-keyword">return</span> kIOReturnBadArgument;
+
+        status = uuid_parse( string-&gt;getCStringNoCopy( ), uuid );
+        <span class="enscript-keyword">if</span> ( status != 0 ) <span class="enscript-keyword">return</span> kIOReturnBadArgument;
+
+        entry = IORegistryEntry::fromPath( <span class="enscript-string">&quot;/options&quot;</span>, gIODTPlane );
+        <span class="enscript-keyword">if</span> ( entry )
+        {
+            entry-&gt;setProperty( <span class="enscript-string">&quot;platform-uuid&quot;</span>, uuid, <span class="enscript-keyword">sizeof</span>( uuid_t ) );
+            entry-&gt;release( );
+        }
+
+        setProperty( kIOPlatformUUIDKey, string );
+        publishResource( kIOPlatformUUIDKey, string );
+
+        <span class="enscript-keyword">return</span> kIOReturnSuccess;
+    }
+
+    <span class="enscript-keyword">return</span> kIOReturnUnsupported;
+}
+
+IOReturn <span class="enscript-function-name">IOPlatformExpertDevice::newUserClient</span>( task_t owningTask, <span class="enscript-type">void</span> * securityID,
+                                    UInt32 type,  OSDictionary * properties,
+                                    IOUserClient ** handler )
+{
+    IOReturn            err = kIOReturnSuccess;
+    IOUserClient *      newConnect = 0;
+    IOUserClient *      theConnect = 0;
+
+    <span class="enscript-keyword">switch</span> (type)
+    {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kIOKitDiagnosticsClientType</span>:
+	    newConnect = IOKitDiagnosticsClient::withTask(owningTask);
+	    <span class="enscript-keyword">if</span> (!newConnect) err = kIOReturnNotPermitted;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-reference">default</span>:
+            err = kIOReturnBadArgument;
+    }
+
+    <span class="enscript-keyword">if</span> (newConnect)
+    {
+        <span class="enscript-keyword">if</span> ((false == newConnect-&gt;attach(<span class="enscript-keyword">this</span>))
+                || (false == newConnect-&gt;start(<span class="enscript-keyword">this</span>)))
+        {
+            newConnect-&gt;detach( <span class="enscript-keyword">this</span> );
+            newConnect-&gt;release();
+        }
+        <span class="enscript-keyword">else</span>
+            theConnect = newConnect;
+    }
+
+    *handler = theConnect;
+    <span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOPlatformExpertDevice::free</span>()
+{
+    <span class="enscript-keyword">if</span> (workLoop)
+        workLoop-&gt;release();
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">super</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOService
+
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IOPlatformDevice, IOService)
+
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformDevice,  0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformDevice,  1);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformDevice,  2);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOPlatformDevice,  3);
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPlatformDevice::compareName</span>( OSString * name,
+					OSString ** matched ) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span>( ((IOPlatformExpert *)getProvider())-&gt;
+		compareNubName( <span class="enscript-keyword">this</span>, name, matched ));
+}
+
+IOService * <span class="enscript-function-name">IOPlatformDevice::matchLocation</span>( IOService * <span class="enscript-comment">/* client */</span> )
+{
+    <span class="enscript-keyword">return</span>( <span class="enscript-keyword">this</span> );
+}
+
+IOReturn <span class="enscript-function-name">IOPlatformDevice::getResources</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-keyword">return</span>( ((IOPlatformExpert *)getProvider())-&gt;getNubResources( <span class="enscript-keyword">this</span> ));
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-comment">/*********************************************************************
+* IOPanicPlatform class
+*
+* If no legitimate IOPlatformDevice matches, this one does and panics
+* the kernel with a suitable message.
+*********************************************************************/</span>
+
+<span class="enscript-type">class</span> IOPanicPlatform : IOPlatformExpert {
+    OSDeclareDefaultStructors(IOPanicPlatform);
+
+<span class="enscript-type">public</span>:
+    <span class="enscript-type">bool</span> start(IOService * provider) APPLE_KEXT_OVERRIDE;
+};
+
+
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IOPanicPlatform, IOPlatformExpert);
+
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOPanicPlatform::start</span>(IOService * provider) {
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> * platform_name = <span class="enscript-string">&quot;(unknown platform name)&quot;</span>;
+
+    <span class="enscript-keyword">if</span> (provider) platform_name = provider-&gt;getName();
+
+    panic(<span class="enscript-string">&quot;Unable to find driver for this platform: \&quot;%s\&quot;.\n&quot;</span>,
+        platform_name);
+
+    <span class="enscript-keyword">return</span> false;
+}
+
+</pre>
+<hr />
+</body></html>

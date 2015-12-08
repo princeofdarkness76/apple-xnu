@@ -1,0 +1,1235 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>thread_policy.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">thread_policy.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act_server.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/affinity.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task_policy.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sfi.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine/sdt.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">QOS_EXTRACT</span>(q)        ((q) &amp; 0xff)
+
+<span class="enscript-comment">/*
+ * THREAD_QOS_UNSPECIFIED is assigned the highest tier available, so it does not provide a limit
+ * to threads that don't have a QoS class set.
+ */</span>
+<span class="enscript-type">const</span> qos_policy_params_t thread_qos_policy_params = {
+	<span class="enscript-comment">/*
+	 * This table defines the starting base priority of the thread,
+	 * which will be modified by the thread importance and the task max priority
+	 * before being applied.
+	 */</span>
+	.qos_pri[THREAD_QOS_UNSPECIFIED]                = 0, <span class="enscript-comment">/* not consulted */</span>
+	.qos_pri[THREAD_QOS_USER_INTERACTIVE]           = BASEPRI_BACKGROUND, <span class="enscript-comment">/* i.e. 46 */</span>
+	.qos_pri[THREAD_QOS_USER_INITIATED]             = BASEPRI_USER_INITIATED,
+	.qos_pri[THREAD_QOS_LEGACY]                     = BASEPRI_DEFAULT,
+	.qos_pri[THREAD_QOS_UTILITY]                    = BASEPRI_UTILITY,
+	.qos_pri[THREAD_QOS_BACKGROUND]                 = MAXPRI_THROTTLE,
+	.qos_pri[THREAD_QOS_MAINTENANCE]                = MAXPRI_THROTTLE,
+
+	<span class="enscript-comment">/*
+	 * This table defines the highest IO priority that a thread marked with this
+	 * QoS class can have.
+	 */</span>
+	.qos_iotier[THREAD_QOS_UNSPECIFIED]             = THROTTLE_LEVEL_TIER0,
+	.qos_iotier[THREAD_QOS_USER_INTERACTIVE]        = THROTTLE_LEVEL_TIER0,
+	.qos_iotier[THREAD_QOS_USER_INITIATED]          = THROTTLE_LEVEL_TIER0,
+	.qos_iotier[THREAD_QOS_LEGACY]                  = THROTTLE_LEVEL_TIER0,
+	.qos_iotier[THREAD_QOS_UTILITY]                 = THROTTLE_LEVEL_TIER1,
+	.qos_iotier[THREAD_QOS_BACKGROUND]              = THROTTLE_LEVEL_TIER2, <span class="enscript-comment">/* possibly overridden by bg_iotier */</span>
+	.qos_iotier[THREAD_QOS_MAINTENANCE]             = THROTTLE_LEVEL_TIER3,
+
+	<span class="enscript-comment">/*
+	 * This table defines the highest QoS level that
+	 * a thread marked with this QoS class can have.
+	 */</span>
+
+	.qos_through_qos[THREAD_QOS_UNSPECIFIED]        = QOS_EXTRACT(THROUGHPUT_QOS_TIER_UNSPECIFIED),
+	.qos_through_qos[THREAD_QOS_USER_INTERACTIVE]   = QOS_EXTRACT(THROUGHPUT_QOS_TIER_0),
+	.qos_through_qos[THREAD_QOS_USER_INITIATED]     = QOS_EXTRACT(THROUGHPUT_QOS_TIER_1),
+	.qos_through_qos[THREAD_QOS_LEGACY]             = QOS_EXTRACT(THROUGHPUT_QOS_TIER_1),
+	.qos_through_qos[THREAD_QOS_UTILITY]            = QOS_EXTRACT(THROUGHPUT_QOS_TIER_2),
+	.qos_through_qos[THREAD_QOS_BACKGROUND]         = QOS_EXTRACT(THROUGHPUT_QOS_TIER_5),
+	.qos_through_qos[THREAD_QOS_MAINTENANCE]        = QOS_EXTRACT(THROUGHPUT_QOS_TIER_5),
+
+	.qos_latency_qos[THREAD_QOS_UNSPECIFIED]        = QOS_EXTRACT(LATENCY_QOS_TIER_UNSPECIFIED),
+	.qos_latency_qos[THREAD_QOS_USER_INTERACTIVE]   = QOS_EXTRACT(LATENCY_QOS_TIER_0),
+	.qos_latency_qos[THREAD_QOS_USER_INITIATED]     = QOS_EXTRACT(LATENCY_QOS_TIER_1),
+	.qos_latency_qos[THREAD_QOS_LEGACY]             = QOS_EXTRACT(LATENCY_QOS_TIER_1),
+	.qos_latency_qos[THREAD_QOS_UTILITY]            = QOS_EXTRACT(LATENCY_QOS_TIER_3),
+	.qos_latency_qos[THREAD_QOS_BACKGROUND]         = QOS_EXTRACT(LATENCY_QOS_TIER_3),
+	.qos_latency_qos[THREAD_QOS_MAINTENANCE]        = QOS_EXTRACT(LATENCY_QOS_TIER_3),
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_set_user_sched_mode_and_recompute_pri</span>(thread_t thread, sched_mode_t mode);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">thread_qos_scaled_relative_priority</span>(<span class="enscript-type">int</span> qos, <span class="enscript-type">int</span> qos_relprio);
+
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">proc_get_thread_policy</span>(thread_t thread, thread_policy_state_t info);
+
+boolean_t
+<span class="enscript-function-name">thread_has_qos_policy</span>(thread_t thread) {
+	<span class="enscript-keyword">return</span> (proc_get_task_policy(thread-&gt;task, thread, TASK_POLICY_ATTRIBUTE, TASK_POLICY_QOS) != THREAD_QOS_UNSPECIFIED) ? TRUE : FALSE;
+}
+
+kern_return_t
+<span class="enscript-function-name">thread_remove_qos_policy</span>(thread_t thread) 
+{
+	thread_qos_policy_data_t unspec_qos;
+	unspec_qos.qos_tier = THREAD_QOS_UNSPECIFIED;
+	unspec_qos.tier_importance = 0;
+
+	__unused <span class="enscript-type">int</span> prev_qos = thread-&gt;requested_policy.thrp_qos;
+
+	DTRACE_PROC2(qos__remove, thread_t, thread, <span class="enscript-type">int</span>, prev_qos);
+
+	<span class="enscript-keyword">return</span> thread_policy_set_internal(thread, THREAD_QOS_POLICY, (thread_policy_t)&amp;unspec_qos, THREAD_QOS_POLICY_COUNT);
+}
+
+boolean_t
+<span class="enscript-function-name">thread_is_static_param</span>(thread_t thread)
+{
+	<span class="enscript-keyword">if</span> (thread-&gt;static_param) {
+		DTRACE_PROC1(qos__legacy__denied, thread_t, thread);
+		<span class="enscript-keyword">return</span> TRUE;
+	}
+	<span class="enscript-keyword">return</span> FALSE;
+}
+
+<span class="enscript-comment">/*
+ * Relative priorities can range between 0REL and -15REL. These
+ * map to QoS-specific ranges, to create non-overlapping priority
+ * ranges.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">thread_qos_scaled_relative_priority</span>(<span class="enscript-type">int</span> qos, <span class="enscript-type">int</span> qos_relprio)
+{
+	<span class="enscript-type">int</span> next_lower_qos;
+
+	<span class="enscript-comment">/* Fast path, since no validation or scaling is needed */</span>
+	<span class="enscript-keyword">if</span> (qos_relprio == 0) <span class="enscript-keyword">return</span> 0;
+
+	<span class="enscript-keyword">switch</span> (qos) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_USER_INTERACTIVE</span>:
+			next_lower_qos = THREAD_QOS_USER_INITIATED;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_USER_INITIATED</span>:
+			next_lower_qos = THREAD_QOS_LEGACY;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_LEGACY</span>:
+			next_lower_qos = THREAD_QOS_UTILITY;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_UTILITY</span>:
+			next_lower_qos = THREAD_QOS_BACKGROUND;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_MAINTENANCE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_BACKGROUND</span>:
+			next_lower_qos = 0;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			panic(<span class="enscript-string">&quot;Unrecognized QoS %d&quot;</span>, qos);
+			<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-type">int</span> prio_range_max = thread_qos_policy_params.qos_pri[qos];
+	<span class="enscript-type">int</span> prio_range_min = next_lower_qos ? thread_qos_policy_params.qos_pri[next_lower_qos] : 0;
+
+	<span class="enscript-comment">/*
+	 * We now have the valid range that the scaled relative priority can map to. Note
+	 * that the lower bound is exclusive, but the upper bound is inclusive. If the
+	 * range is (21,31], 0REL should map to 31 and -15REL should map to 22. We use the
+	 * fact that the max relative priority is -15 and use &quot;&gt;&gt;4&quot; to divide by 16 and discard
+	 * remainder.
+	 */</span>
+	<span class="enscript-type">int</span> scaled_relprio = -(((prio_range_max - prio_range_min) * (-qos_relprio)) &gt;&gt; 4);
+
+	<span class="enscript-keyword">return</span> scaled_relprio;
+}
+
+<span class="enscript-comment">/*
+ * flag set by -qos-policy-allow boot-arg to allow
+ * testing thread qos policy from userspace
+ */</span>
+boolean_t allow_qos_policy_set = FALSE;
+
+kern_return_t
+<span class="enscript-function-name">thread_policy_set</span>(
+	thread_t				thread,
+	thread_policy_flavor_t	flavor,
+	thread_policy_t			policy_info,
+	mach_msg_type_number_t	count)
+{
+	thread_qos_policy_data_t req_qos;
+	kern_return_t kr;
+	
+	req_qos.qos_tier = THREAD_QOS_UNSPECIFIED;
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">if</span> (allow_qos_policy_set == FALSE) {
+		<span class="enscript-keyword">if</span> (thread_is_static_param(thread))
+			<span class="enscript-keyword">return</span> (KERN_POLICY_STATIC);
+
+		<span class="enscript-keyword">if</span> (flavor == THREAD_QOS_POLICY || flavor == THREAD_QOS_POLICY_OVERRIDE)
+			<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	}
+
+	<span class="enscript-comment">/* Threads without static_param set reset their QoS when other policies are applied. */</span>
+	<span class="enscript-keyword">if</span> (thread-&gt;requested_policy.thrp_qos != THREAD_QOS_UNSPECIFIED) {
+		<span class="enscript-comment">/* Store the existing tier, if we fail this call it is used to reset back. */</span>
+		req_qos.qos_tier = thread-&gt;requested_policy.thrp_qos;
+		req_qos.tier_importance = thread-&gt;requested_policy.thrp_qos_relprio;
+
+		kr = thread_remove_qos_policy(thread);
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+			<span class="enscript-keyword">return</span> kr;
+		}
+	}
+
+	kr = thread_policy_set_internal(thread, flavor, policy_info, count);
+
+	<span class="enscript-comment">/* Return KERN_QOS_REMOVED instead of KERN_SUCCESS if we succeeded. */</span>
+	<span class="enscript-keyword">if</span> (req_qos.qos_tier != THREAD_QOS_UNSPECIFIED) {
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+			<span class="enscript-comment">/* Reset back to our original tier as the set failed. */</span>
+			(<span class="enscript-type">void</span>)thread_policy_set_internal(thread, THREAD_QOS_POLICY, (thread_policy_t)&amp;req_qos, THREAD_QOS_POLICY_COUNT);
+		}
+	}
+
+	<span class="enscript-keyword">return</span> kr;
+}
+
+kern_return_t
+<span class="enscript-function-name">thread_policy_set_internal</span>(
+	thread_t				thread,
+	thread_policy_flavor_t	flavor,
+	thread_policy_t			policy_info,
+	mach_msg_type_number_t	count)
+{
+	kern_return_t			result = KERN_SUCCESS;
+	spl_t					s;
+
+	thread_mtx_lock(thread);
+	<span class="enscript-keyword">if</span> (!thread-&gt;active) {
+		thread_mtx_unlock(thread);
+
+		<span class="enscript-keyword">return</span> (KERN_TERMINATED);
+	}
+
+	<span class="enscript-keyword">switch</span> (flavor) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_EXTENDED_POLICY</span>:
+	{
+		boolean_t				timeshare = TRUE;
+
+		<span class="enscript-keyword">if</span> (count &gt;= THREAD_EXTENDED_POLICY_COUNT) {
+			thread_extended_policy_t	info;
+
+			info = (thread_extended_policy_t)policy_info;
+			timeshare = info-&gt;timeshare;
+		}
+
+		sched_mode_t mode = (timeshare == TRUE) ? TH_MODE_TIMESHARE : TH_MODE_FIXED;
+
+		s = splsched();
+		thread_lock(thread);
+
+		thread_set_user_sched_mode_and_recompute_pri(thread, mode);
+
+		thread_unlock(thread);
+		splx(s);
+
+		sfi_reevaluate(thread);
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_TIME_CONSTRAINT_POLICY</span>:
+	{
+		thread_time_constraint_policy_t		info;
+
+		<span class="enscript-keyword">if</span> (count &lt; THREAD_TIME_CONSTRAINT_POLICY_COUNT) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		info = (thread_time_constraint_policy_t)policy_info;
+		<span class="enscript-keyword">if</span> (	info-&gt;constraint &lt; info-&gt;computation	||
+				info-&gt;computation &gt; max_rt_quantum		||
+				info-&gt;computation &lt; min_rt_quantum		) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		s = splsched();
+		thread_lock(thread);
+
+		thread-&gt;realtime.period = info-&gt;period;
+		thread-&gt;realtime.computation = info-&gt;computation;
+		thread-&gt;realtime.constraint = info-&gt;constraint;
+		thread-&gt;realtime.preemptible = info-&gt;preemptible;
+
+		thread_set_user_sched_mode_and_recompute_pri(thread, TH_MODE_REALTIME);
+
+		thread_unlock(thread);
+		splx(s);
+
+		sfi_reevaluate(thread);
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_PRECEDENCE_POLICY</span>:
+	{
+		thread_precedence_policy_t		info;
+
+		<span class="enscript-keyword">if</span> (count &lt; THREAD_PRECEDENCE_POLICY_COUNT) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+		info = (thread_precedence_policy_t)policy_info;
+
+		s = splsched();
+		thread_lock(thread);
+
+		thread-&gt;importance = info-&gt;importance;
+
+		thread_recompute_priority(thread);
+
+		thread_unlock(thread);
+		splx(s);
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_AFFINITY_POLICY</span>:
+	{
+		thread_affinity_policy_t	info;
+
+		<span class="enscript-keyword">if</span> (!thread_affinity_is_supported()) {
+			result = KERN_NOT_SUPPORTED;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (count &lt; THREAD_AFFINITY_POLICY_COUNT) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		info = (thread_affinity_policy_t) policy_info;
+		<span class="enscript-comment">/*
+		 * Unlock the thread mutex here and
+		 * return directly after calling thread_affinity_set().
+		 * This is necessary for correct lock ordering because
+		 * thread_affinity_set() takes the task lock.
+		 */</span>
+		thread_mtx_unlock(thread);
+		<span class="enscript-keyword">return</span> thread_affinity_set(thread, info-&gt;affinity_tag);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_THROUGHPUT_QOS_POLICY</span>:
+	{
+		thread_throughput_qos_policy_t info = (thread_throughput_qos_policy_t) policy_info;
+		<span class="enscript-type">int</span> tqos;
+		
+		<span class="enscript-keyword">if</span> (count &lt; THREAD_LATENCY_QOS_POLICY_COUNT) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> ((result = qos_throughput_policy_validate(info-&gt;thread_throughput_qos_tier)) !=
+		    KERN_SUCCESS) {
+			<span class="enscript-keyword">break</span>;
+		}
+
+		tqos = qos_extract(info-&gt;thread_throughput_qos_tier);
+		thread-&gt;effective_policy.t_through_qos = tqos;
+	}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_LATENCY_QOS_POLICY</span>:
+	{
+		thread_latency_qos_policy_t info = (thread_latency_qos_policy_t) policy_info;
+		<span class="enscript-type">int</span> lqos;
+		
+		<span class="enscript-keyword">if</span> (count &lt; THREAD_THROUGHPUT_QOS_POLICY_COUNT) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> ((result = qos_latency_policy_validate(info-&gt;thread_latency_qos_tier)) !=
+		    KERN_SUCCESS) {
+			<span class="enscript-keyword">break</span>;
+		}
+
+		lqos = qos_extract(info-&gt;thread_latency_qos_tier);
+<span class="enscript-comment">/* The expected use cases (opt-in) of per-thread latency QoS would seem to
+ * preclude any requirement at present to re-evaluate timers on a thread level
+ * latency QoS change.
+ */</span>
+		thread-&gt;effective_policy.t_latency_qos = lqos;
+
+	}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_POLICY</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_POLICY_OVERRIDE</span>:
+	{
+		thread_qos_policy_t info = (thread_qos_policy_t)policy_info;
+
+		<span class="enscript-keyword">if</span> (count &lt; THREAD_QOS_POLICY_COUNT) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (info-&gt;qos_tier &lt; 0 || info-&gt;qos_tier &gt;= THREAD_QOS_LAST) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (info-&gt;tier_importance &gt; 0 || info-&gt;tier_importance &lt; THREAD_QOS_MIN_TIER_IMPORTANCE) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (info-&gt;qos_tier == THREAD_QOS_UNSPECIFIED &amp;&amp; info-&gt;tier_importance != 0) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Going into task policy requires the task mutex,
+		 * because of the way synchronization against the IO policy
+		 * subsystem works.
+		 *
+		 * We need to move thread policy to the thread mutex instead.
+		 * &lt;rdar://problem/15831652&gt; separate thread policy from task policy
+		 */</span>
+
+		<span class="enscript-keyword">if</span> (flavor == THREAD_QOS_POLICY_OVERRIDE) {
+			<span class="enscript-type">int</span> strongest_override = info-&gt;qos_tier;
+
+			<span class="enscript-keyword">if</span> (info-&gt;qos_tier != THREAD_QOS_UNSPECIFIED &amp;&amp;
+			    thread-&gt;requested_policy.thrp_qos_override != THREAD_QOS_UNSPECIFIED)
+				strongest_override = MAX(thread-&gt;requested_policy.thrp_qos_override, info-&gt;qos_tier);
+
+			thread_mtx_unlock(thread);
+
+			<span class="enscript-comment">/* There is a race here. To be closed in &lt;rdar://problem/15831652&gt; separate thread policy from task policy */</span>
+
+			proc_set_task_policy(thread-&gt;task, thread, TASK_POLICY_ATTRIBUTE, TASK_POLICY_QOS_OVERRIDE, strongest_override);
+
+			<span class="enscript-keyword">return</span> (result);
+		}
+
+		thread_mtx_unlock(thread);
+
+		proc_set_task_policy2(thread-&gt;task, thread, TASK_POLICY_ATTRIBUTE, TASK_POLICY_QOS_AND_RELPRIO, info-&gt;qos_tier, -info-&gt;tier_importance);
+
+		thread_mtx_lock(thread);
+		<span class="enscript-keyword">if</span> (!thread-&gt;active) {
+			thread_mtx_unlock(thread);
+			<span class="enscript-keyword">return</span> (KERN_TERMINATED);
+		}
+		
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-reference">default</span>:
+		result = KERN_INVALID_ARGUMENT;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	thread_mtx_unlock(thread);
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ * thread_set_mode_and_absolute_pri:
+ *
+ * Set scheduling policy &amp; absolute priority for thread, for deprecated
+ * thread_set_policy and thread_policy interfaces.
+ *
+ * Note that there is no implemented difference between POLICY_RR and POLICY_FIFO.
+ * Both result in FIXED mode scheduling.
+ *
+ * Called with thread mutex locked.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_set_mode_and_absolute_pri</span>(
+	thread_t		thread,
+	integer_t		policy,
+	integer_t		priority)
+{
+	spl_t s;
+	sched_mode_t mode;
+	kern_return_t kr = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (thread_is_static_param(thread))
+		<span class="enscript-keyword">return</span> (KERN_POLICY_STATIC);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;policy_reset)
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+
+	<span class="enscript-comment">/* Setting legacy policies on threads kills the current QoS */</span>
+	<span class="enscript-keyword">if</span> (thread-&gt;requested_policy.thrp_qos != THREAD_QOS_UNSPECIFIED) {
+		thread_mtx_unlock(thread);
+
+		kr = thread_remove_qos_policy(thread);
+
+		thread_mtx_lock(thread);
+		<span class="enscript-keyword">if</span> (!thread-&gt;active) {
+			<span class="enscript-keyword">return</span> (KERN_TERMINATED);
+		}
+	}
+
+	<span class="enscript-keyword">switch</span> (policy) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">POLICY_TIMESHARE</span>:
+			mode = TH_MODE_TIMESHARE;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">POLICY_RR</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">POLICY_FIFO</span>:
+			mode = TH_MODE_FIXED;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			panic(<span class="enscript-string">&quot;unexpected sched policy: %d&quot;</span>, policy);
+			<span class="enscript-keyword">break</span>;
+	}
+
+	s = splsched();
+	thread_lock(thread);
+
+	<span class="enscript-comment">/* This path isn't allowed to change a thread out of realtime. */</span>
+	<span class="enscript-keyword">if</span> ((thread-&gt;sched_mode != TH_MODE_REALTIME) &amp;&amp;
+	    (thread-&gt;saved_mode != TH_MODE_REALTIME)) {
+
+		<span class="enscript-comment">/*
+		 * Reverse engineer and apply the correct importance value
+		 * from the requested absolute priority value.
+		 */</span>
+
+		<span class="enscript-keyword">if</span> (priority &gt;= thread-&gt;max_priority)
+			priority = thread-&gt;max_priority - thread-&gt;task_priority;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (priority &gt;= MINPRI_KERNEL)
+			priority -=  MINPRI_KERNEL;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (priority &gt;= MINPRI_RESERVED)
+			priority -=  MINPRI_RESERVED;
+		<span class="enscript-keyword">else</span>
+			priority -= BASEPRI_DEFAULT;
+
+		priority += thread-&gt;task_priority;
+
+		<span class="enscript-keyword">if</span> (priority &gt; thread-&gt;max_priority)
+			priority = thread-&gt;max_priority;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (priority &lt; MINPRI)
+			priority = MINPRI;
+
+		thread-&gt;importance = priority - thread-&gt;task_priority;
+
+		thread_set_user_sched_mode_and_recompute_pri(thread, mode);
+	}
+
+	thread_unlock(thread);
+	splx(s);
+
+	sfi_reevaluate(thread);
+
+	<span class="enscript-keyword">return</span> (kr);
+}
+
+<span class="enscript-comment">/*
+ * Set the thread's requested mode and recompute priority
+ * Called with thread mutex and thread locked
+ *
+ * TODO: Mitigate potential problems caused by moving thread to end of runq
+ * whenever its priority is recomputed
+ *      Only remove when it actually changes? Attempt to re-insert at appropriate location?
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_set_user_sched_mode_and_recompute_pri</span>(thread_t thread, sched_mode_t mode)
+{
+	<span class="enscript-keyword">if</span> (thread-&gt;policy_reset)
+		<span class="enscript-keyword">return</span>;
+
+	boolean_t removed = thread_run_queue_remove(thread);
+
+	<span class="enscript-comment">/*
+	 * TODO: Instead of having saved mode, have 'user mode' and 'true mode'.
+	 * That way there's zero confusion over which the user wants
+	 * and which the kernel wants.
+	 */</span>
+	<span class="enscript-keyword">if</span> (thread-&gt;sched_flags &amp; TH_SFLAG_DEMOTED_MASK)
+		thread-&gt;saved_mode = mode;
+	<span class="enscript-keyword">else</span>
+		sched_set_thread_mode(thread, mode);
+
+	thread_recompute_priority(thread);
+
+	<span class="enscript-keyword">if</span> (removed)
+		thread_run_queue_reinsert(thread, SCHED_TAILQ);
+}
+
+<span class="enscript-comment">/* called with task lock locked */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_recompute_qos</span>(thread_t thread) {
+	spl_t s;
+
+	thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">if</span> (!thread-&gt;active) {
+		thread_mtx_unlock(thread);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	s = splsched();
+	thread_lock(thread);
+
+	thread_recompute_priority(thread);
+
+	thread_unlock(thread);
+	splx(s);
+
+	thread_mtx_unlock(thread);
+}
+
+<span class="enscript-comment">/* called with task lock locked and thread_mtx_lock locked */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_update_qos_cpu_time</span>(thread_t thread, boolean_t lock_needed)
+{
+	uint64_t last_qos_change_balance;
+	ledger_amount_t thread_balance_credit;
+	ledger_amount_t thread_balance_debit;
+	ledger_amount_t effective_qos_time;
+	uint64_t ctime;
+	uint64_t remainder = 0, consumed = 0;
+	processor_t		processor;
+	spl_t s;
+	kern_return_t kr;
+
+	<span class="enscript-keyword">if</span> (lock_needed) {
+		s = splsched();
+		thread_lock(thread);
+	}
+	
+	<span class="enscript-comment">/*
+	 * Calculation of time elapsed by the thread in the current qos.
+	 * Following is the timeline which shows all the variables used in the calculation below.
+	 *
+	 *       thread ledger      thread ledger
+	 *      cpu_time_last_qos     cpu_time
+	 *              |                |&lt;-   consumed  -&gt;|&lt;- remainder  -&gt;|
+	 * timeline  -----------------------------------------------------------&gt;
+	 *                               |                 |                |
+	 *                            thread_dispatch    ctime           quantum end
+	 *
+	 *              |&lt;-----  effective qos time  -----&gt;|
+	 */</span>
+	
+	<span class="enscript-comment">/* 
+	 * Calculate time elapsed since last qos change on this thread.
+	 * For cpu time on thread ledger, do not use ledger_get_balance,
+	 * only use credit field of ledger, since
+	 * debit is used by per thread cpu limits and is not zero.
+	 */</span>
+	kr = ledger_get_entries(thread-&gt;t_threadledger, thread_ledgers.cpu_time, &amp;thread_balance_credit, &amp;thread_balance_debit);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	last_qos_change_balance = thread-&gt;cpu_time_last_qos;
+
+	<span class="enscript-comment">/*
+	 * If thread running on CPU, calculate time elapsed since this thread was last dispatched on cpu.
+	 * The thread ledger is only updated at context switch, the time since last context swicth is not 
+	 * updated in the thread ledger cpu time.
+	 */</span>
+	processor = thread-&gt;last_processor;
+	<span class="enscript-keyword">if</span> ((processor != PROCESSOR_NULL) &amp;&amp; (processor-&gt;state == PROCESSOR_RUNNING) &amp;&amp;
+		   (processor-&gt;active_thread == thread)) {
+		ctime = mach_absolute_time();
+	
+		<span class="enscript-keyword">if</span> (processor-&gt;quantum_end &gt; ctime)
+			remainder = processor-&gt;quantum_end - ctime;
+
+		consumed = thread-&gt;quantum_remaining - remainder;
+	}
+	<span class="enscript-comment">/*
+	 * There can be multiple qos change in a quantum and in that case the cpu_time_last_qos will
+	 * lie between cpu_time marker and ctime marker shown below. The output of 
+	 * thread_balance - last_qos_change_balance will be negative in such case, but overall outcome
+	 * when consumed is added to it would be positive.
+	 *
+	 *          thread ledger
+	 *            cpu_time
+	 *               |&lt;------------  consumed    ---------&gt;|&lt;- remainder  -&gt;|
+	 * timeline  -----------------------------------------------------------&gt;
+	 *               |              |                      |                |
+	 *         thread_dispatch  thread ledger            ctime           quantum end
+	 *                          cpu_time_last_qos
+	 *
+	 *                              |&lt;-effective qos time-&gt;|
+	 */</span>
+	effective_qos_time = (ledger_amount_t) consumed;
+	effective_qos_time += thread_balance_credit - last_qos_change_balance;
+
+	<span class="enscript-keyword">if</span> (lock_needed) {
+		thread_unlock(thread);
+		splx(s);
+	}
+
+	<span class="enscript-keyword">if</span> (effective_qos_time &lt; 0)
+		<span class="enscript-keyword">return</span>;
+
+	thread-&gt;cpu_time_last_qos += (uint64_t)effective_qos_time;
+
+	<span class="enscript-comment">/*
+	 * Update the task-level qos stats. Its safe to perform operations on these fields, since we 
+	 * hold the task lock.
+	 */</span>
+	<span class="enscript-keyword">switch</span> (thread-&gt;effective_policy.thep_qos) {
+	
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_DEFAULT</span>:
+		thread-&gt;task-&gt;cpu_time_qos_stats.cpu_time_qos_default += effective_qos_time;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_MAINTENANCE</span>:
+		thread-&gt;task-&gt;cpu_time_qos_stats.cpu_time_qos_maintenance += effective_qos_time;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_BACKGROUND</span>:
+		thread-&gt;task-&gt;cpu_time_qos_stats.cpu_time_qos_background += effective_qos_time;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_UTILITY</span>:
+		thread-&gt;task-&gt;cpu_time_qos_stats.cpu_time_qos_utility += effective_qos_time;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_LEGACY</span>:
+		thread-&gt;task-&gt;cpu_time_qos_stats.cpu_time_qos_legacy += effective_qos_time;
+		<span class="enscript-keyword">break</span>;
+	
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_USER_INITIATED</span>:
+		thread-&gt;task-&gt;cpu_time_qos_stats.cpu_time_qos_user_initiated += effective_qos_time;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_USER_INTERACTIVE</span>:
+		thread-&gt;task-&gt;cpu_time_qos_stats.cpu_time_qos_user_interactive += effective_qos_time;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span>;
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (lock_needed) {
+		thread_unlock(thread);
+		splx(s);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Calculate base priority from thread attributes, and set it on the thread
+ *
+ * Called with thread_lock and thread mutex held.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_recompute_priority</span>(
+	thread_t		thread)
+{
+	integer_t		priority;
+
+	<span class="enscript-keyword">if</span> (thread-&gt;policy_reset)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (thread-&gt;sched_mode == TH_MODE_REALTIME) {
+		sched_set_thread_base_priority(thread, BASEPRI_RTQUEUES);
+		<span class="enscript-keyword">return</span>;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (thread-&gt;effective_policy.thep_qos != THREAD_QOS_UNSPECIFIED) {
+		<span class="enscript-type">int</span> qos = thread-&gt;effective_policy.thep_qos;
+		<span class="enscript-type">int</span> qos_ui_is_urgent = thread-&gt;effective_policy.qos_ui_is_urgent;
+		<span class="enscript-type">int</span> qos_relprio = -(thread-&gt;effective_policy.thep_qos_relprio); <span class="enscript-comment">/* stored in task policy inverted */</span>
+		<span class="enscript-type">int</span> qos_scaled_relprio;
+
+		assert(qos &gt;= 0 &amp;&amp; qos &lt; THREAD_QOS_LAST);
+		assert(qos_relprio &lt;= 0 &amp;&amp; qos_relprio &gt;= THREAD_QOS_MIN_TIER_IMPORTANCE);
+
+		priority = thread_qos_policy_params.qos_pri[qos];
+		qos_scaled_relprio = thread_qos_scaled_relative_priority(qos, qos_relprio);
+
+		<span class="enscript-keyword">if</span> (qos == THREAD_QOS_USER_INTERACTIVE &amp;&amp; qos_ui_is_urgent == 1) {
+			<span class="enscript-comment">/* Bump priority 46 to 47 when in a frontmost app */</span>
+			qos_scaled_relprio += 1;
+		}
+
+		priority += qos_scaled_relprio;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (thread-&gt;importance &gt; MAXPRI)
+			priority = MAXPRI;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (thread-&gt;importance &lt; -MAXPRI)
+			priority = -MAXPRI;
+		<span class="enscript-keyword">else</span>
+			priority = thread-&gt;importance;
+
+		priority += thread-&gt;task_priority;
+	}
+
+	<span class="enscript-keyword">if</span> (thread-&gt;saved_mode == TH_MODE_REALTIME &amp;&amp;
+	    thread-&gt;sched_flags &amp; TH_SFLAG_FAILSAFE)
+		priority = DEPRESSPRI;
+
+	<span class="enscript-keyword">if</span> (thread-&gt;effective_policy.terminated == TRUE &amp;&amp; priority &lt; thread-&gt;task_priority) {
+		priority = thread-&gt;task_priority;
+	}
+
+	<span class="enscript-keyword">if</span> (priority &gt; thread-&gt;max_priority)
+		priority = thread-&gt;max_priority;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (priority &lt; MINPRI)
+		priority = MINPRI;
+
+
+	sched_set_thread_base_priority(thread, priority);
+}
+
+<span class="enscript-comment">/* Called with the thread mutex held */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_task_priority</span>(
+	thread_t		thread,
+	integer_t		priority,
+	integer_t		max_priority)
+{
+	spl_t s;
+
+	assert(thread != THREAD_NULL);
+
+	<span class="enscript-keyword">if</span> (!thread-&gt;active || thread-&gt;policy_reset)
+		<span class="enscript-keyword">return</span>;
+
+	s = splsched();
+	thread_lock(thread);
+
+	integer_t old_max_priority = thread-&gt;max_priority;
+
+	thread-&gt;task_priority = priority;
+	thread-&gt;max_priority = max_priority;
+
+	<span class="enscript-comment">/* A thread is 'throttled' when its max priority is below MAXPRI_THROTTLE */</span>
+	<span class="enscript-keyword">if</span> ((max_priority &gt; MAXPRI_THROTTLE) &amp;&amp; (old_max_priority &lt;= MAXPRI_THROTTLE)) {
+		sched_set_thread_throttled(thread, FALSE);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((max_priority &lt;= MAXPRI_THROTTLE) &amp;&amp; (old_max_priority &gt; MAXPRI_THROTTLE)) {
+		sched_set_thread_throttled(thread, TRUE);
+	}
+
+	thread_recompute_priority(thread);
+
+	thread_unlock(thread);
+	splx(s);
+}
+
+<span class="enscript-comment">/*
+ * Reset thread to default state in preparation for termination
+ * Called with thread mutex locked
+ *
+ * Always called on current thread, so we don't need a run queue remove
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_policy_reset</span>(
+	thread_t		thread)
+{
+	spl_t		s;
+
+	assert(thread == current_thread());
+
+	s = splsched();
+	thread_lock(thread);
+
+	assert_thread_sched_count(thread);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;sched_flags &amp; TH_SFLAG_FAILSAFE)
+		sched_thread_mode_undemote(thread, TH_SFLAG_FAILSAFE);
+
+	assert_thread_sched_count(thread);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;sched_flags &amp; TH_SFLAG_THROTTLED)
+		sched_set_thread_throttled(thread, FALSE);
+
+	assert_thread_sched_count(thread);
+
+	assert(thread-&gt;BG_COUNT == 0);
+
+	<span class="enscript-comment">/* At this point, the various demotions should be inactive */</span>
+	assert(!(thread-&gt;sched_flags &amp; TH_SFLAG_DEMOTED_MASK));
+	assert(!(thread-&gt;sched_flags &amp; TH_SFLAG_THROTTLED));
+	assert(!(thread-&gt;sched_flags &amp; TH_SFLAG_DEPRESSED_MASK));
+
+	<span class="enscript-comment">/* Reset thread back to task-default basepri and mode  */</span>
+	sched_mode_t newmode = SCHED(initial_thread_sched_mode)(thread-&gt;task);
+
+	sched_set_thread_mode(thread, newmode);
+
+	thread-&gt;importance = 0;
+
+	sched_set_thread_base_priority(thread, thread-&gt;task_priority);
+
+	<span class="enscript-comment">/* Prevent further changes to thread base priority or mode */</span>
+	thread-&gt;policy_reset = 1;
+
+	assert(thread-&gt;BG_COUNT == 0);
+	assert_thread_sched_count(thread);
+
+	thread_unlock(thread);
+	splx(s);
+}
+
+kern_return_t
+<span class="enscript-function-name">thread_policy_get</span>(
+	thread_t				thread,
+	thread_policy_flavor_t	flavor,
+	thread_policy_t			policy_info,
+	mach_msg_type_number_t	*count,
+	boolean_t				*get_default)
+{
+	kern_return_t			result = KERN_SUCCESS;
+	spl_t					s;
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	thread_mtx_lock(thread);
+	<span class="enscript-keyword">if</span> (!thread-&gt;active) {
+		thread_mtx_unlock(thread);
+
+		<span class="enscript-keyword">return</span> (KERN_TERMINATED);
+	}
+
+	<span class="enscript-keyword">switch</span> (flavor) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_EXTENDED_POLICY</span>:
+	{
+		boolean_t		timeshare = TRUE;
+
+		<span class="enscript-keyword">if</span> (!(*get_default)) {
+			s = splsched();
+			thread_lock(thread);
+
+			<span class="enscript-keyword">if</span> (	 (thread-&gt;sched_mode != TH_MODE_REALTIME)	&amp;&amp;
+					 (thread-&gt;saved_mode != TH_MODE_REALTIME)			) {
+				<span class="enscript-keyword">if</span> (!(thread-&gt;sched_flags &amp; TH_SFLAG_DEMOTED_MASK))
+					timeshare = (thread-&gt;sched_mode == TH_MODE_TIMESHARE) != 0;
+				<span class="enscript-keyword">else</span>
+					timeshare = (thread-&gt;saved_mode == TH_MODE_TIMESHARE) != 0;
+			}
+			<span class="enscript-keyword">else</span>
+				*get_default = TRUE;
+
+			thread_unlock(thread);
+			splx(s);
+		}
+
+		<span class="enscript-keyword">if</span> (*count &gt;= THREAD_EXTENDED_POLICY_COUNT) {
+			thread_extended_policy_t	info;
+
+			info = (thread_extended_policy_t)policy_info;
+			info-&gt;timeshare = timeshare;
+		}
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_TIME_CONSTRAINT_POLICY</span>:
+	{
+		thread_time_constraint_policy_t		info;
+
+		<span class="enscript-keyword">if</span> (*count &lt; THREAD_TIME_CONSTRAINT_POLICY_COUNT) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		info = (thread_time_constraint_policy_t)policy_info;
+
+		<span class="enscript-keyword">if</span> (!(*get_default)) {
+			s = splsched();
+			thread_lock(thread);
+
+			<span class="enscript-keyword">if</span> (	(thread-&gt;sched_mode == TH_MODE_REALTIME)	||
+					(thread-&gt;saved_mode == TH_MODE_REALTIME)		) {
+				info-&gt;period = thread-&gt;realtime.period;
+				info-&gt;computation = thread-&gt;realtime.computation;
+				info-&gt;constraint = thread-&gt;realtime.constraint;
+				info-&gt;preemptible = thread-&gt;realtime.preemptible;
+			}
+			<span class="enscript-keyword">else</span>
+				*get_default = TRUE;
+
+			thread_unlock(thread);
+			splx(s);
+		}
+
+		<span class="enscript-keyword">if</span> (*get_default) {
+			info-&gt;period = 0;
+			info-&gt;computation = default_timeshare_computation;
+			info-&gt;constraint = default_timeshare_constraint;
+			info-&gt;preemptible = TRUE;
+		}
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_PRECEDENCE_POLICY</span>:
+	{
+		thread_precedence_policy_t		info;
+
+		<span class="enscript-keyword">if</span> (*count &lt; THREAD_PRECEDENCE_POLICY_COUNT) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		info = (thread_precedence_policy_t)policy_info;
+
+		<span class="enscript-keyword">if</span> (!(*get_default)) {
+			s = splsched();
+			thread_lock(thread);
+
+			info-&gt;importance = thread-&gt;importance;
+
+			thread_unlock(thread);
+			splx(s);
+		}
+		<span class="enscript-keyword">else</span>
+			info-&gt;importance = 0;
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_AFFINITY_POLICY</span>:
+	{
+		thread_affinity_policy_t		info;
+
+		<span class="enscript-keyword">if</span> (!thread_affinity_is_supported()) {
+			result = KERN_NOT_SUPPORTED;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (*count &lt; THREAD_AFFINITY_POLICY_COUNT) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		info = (thread_affinity_policy_t)policy_info;
+
+		<span class="enscript-keyword">if</span> (!(*get_default))
+			info-&gt;affinity_tag = thread_affinity_get(thread);
+		<span class="enscript-keyword">else</span>
+			info-&gt;affinity_tag = THREAD_AFFINITY_TAG_NULL;
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_POLICY_STATE</span>:
+	{
+		thread_policy_state_t		info;
+
+		<span class="enscript-keyword">if</span> (*count &lt; THREAD_POLICY_STATE_COUNT) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/* Only root can get this info */</span>
+		<span class="enscript-keyword">if</span> (current_task()-&gt;sec_token.val[0] != 0) {
+			result = KERN_PROTECTION_FAILURE;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		info = (thread_policy_state_t)policy_info;
+
+		<span class="enscript-keyword">if</span> (!(*get_default)) {
+			info-&gt;flags = 0;
+
+			info-&gt;flags |= (thread-&gt;static_param ? THREAD_POLICY_STATE_FLAG_STATIC_PARAM : 0);
+
+			<span class="enscript-comment">/*
+			 * Unlock the thread mutex and directly return.
+			 * This is necessary because proc_get_thread_policy()
+			 * takes the task lock.
+			 */</span>
+			thread_mtx_unlock(thread);
+			proc_get_thread_policy(thread, info);
+			<span class="enscript-keyword">return</span> (result);
+		} <span class="enscript-keyword">else</span> {
+			info-&gt;requested = 0;
+			info-&gt;effective = 0;
+			info-&gt;pending = 0;
+		}
+
+		<span class="enscript-keyword">break</span>;
+	}
+	
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_LATENCY_QOS_POLICY</span>:
+	{
+		thread_latency_qos_policy_t info = (thread_latency_qos_policy_t) policy_info;
+		uint32_t plqos;
+
+		<span class="enscript-keyword">if</span> (*count &lt; THREAD_LATENCY_QOS_POLICY_COUNT) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (*get_default) {
+			plqos = 0;
+		} <span class="enscript-keyword">else</span> {
+			plqos = thread-&gt;effective_policy.t_latency_qos;
+		}
+
+		info-&gt;thread_latency_qos_tier = qos_latency_policy_package(plqos);
+	}
+	<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_THROUGHPUT_QOS_POLICY</span>:
+	{
+		thread_throughput_qos_policy_t info = (thread_throughput_qos_policy_t) policy_info;
+		uint32_t ptqos;
+
+		<span class="enscript-keyword">if</span> (*count &lt; THREAD_THROUGHPUT_QOS_POLICY_COUNT) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (*get_default) {
+			ptqos = 0;
+		} <span class="enscript-keyword">else</span> {
+			ptqos = thread-&gt;effective_policy.t_through_qos;
+		}
+
+		info-&gt;thread_throughput_qos_tier = qos_throughput_policy_package(ptqos);
+	}
+	<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_POLICY</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_QOS_POLICY_OVERRIDE</span>:
+	{
+		thread_qos_policy_t info = (thread_qos_policy_t)policy_info;
+
+		<span class="enscript-keyword">if</span> (*count &lt; THREAD_QOS_POLICY_COUNT) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (!(*get_default)) {
+			<span class="enscript-keyword">if</span> (flavor == THREAD_QOS_POLICY_OVERRIDE) {
+				info-&gt;qos_tier = thread-&gt;requested_policy.thrp_qos_override;
+				<span class="enscript-comment">/* TODO: handle importance overrides */</span>
+				info-&gt;tier_importance = 0;
+			} <span class="enscript-keyword">else</span> {
+				info-&gt;qos_tier = thread-&gt;requested_policy.thrp_qos;
+				info-&gt;tier_importance = thread-&gt;importance;
+			}
+		} <span class="enscript-keyword">else</span> {
+			info-&gt;qos_tier = THREAD_QOS_UNSPECIFIED;
+			info-&gt;tier_importance = 0;
+		}
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-reference">default</span>:
+		result = KERN_INVALID_ARGUMENT;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> uint64_t unique_work_interval_id = 1; <span class="enscript-comment">/* Start at 1, 0 is not a valid work interval ID */</span>
+
+kern_return_t
+<span class="enscript-function-name">thread_policy_create_work_interval</span>(
+	thread_t		thread,
+	uint64_t		*work_interval_id)
+{
+	thread_mtx_lock(thread);
+	<span class="enscript-keyword">if</span> (thread-&gt;work_interval_id) {
+		<span class="enscript-comment">/* already assigned a work interval ID */</span>
+		thread_mtx_unlock(thread);
+		<span class="enscript-keyword">return</span> (KERN_INVALID_VALUE);
+	}
+
+	thread-&gt;work_interval_id = OSIncrementAtomic64((<span class="enscript-type">volatile</span> int64_t *)&amp;unique_work_interval_id);
+	*work_interval_id = thread-&gt;work_interval_id;
+
+	thread_mtx_unlock(thread);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+kern_return_t
+<span class="enscript-function-name">thread_policy_destroy_work_interval</span>(
+	thread_t		thread,
+	uint64_t		work_interval_id)
+{
+	thread_mtx_lock(thread);
+	<span class="enscript-keyword">if</span> (work_interval_id == 0 || thread-&gt;work_interval_id == 0 || thread-&gt;work_interval_id != work_interval_id) {
+		<span class="enscript-comment">/* work ID isn't valid or doesn't match previously assigned work interval ID */</span>
+		thread_mtx_unlock(thread);
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	}
+
+	thread-&gt;work_interval_id = 0;
+
+	thread_mtx_unlock(thread);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+</pre>
+<hr />
+</body></html>

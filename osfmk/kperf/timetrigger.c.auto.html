@@ -1,0 +1,517 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>timetrigger.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">timetrigger.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2011 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*  Manage time triggers */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_data.h&gt;</span> <span class="enscript-comment">/* current_thread() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;chud/chud_xnu.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/kperf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/buffer.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/context.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/action.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/timetrigger.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/kperf_arch.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/pet.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/sample.h&gt;</span>
+
+<span class="enscript-comment">/* make up for arm signal deficiencies */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">kperf_signal_handler</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/* represents a periodic timer */</span>
+<span class="enscript-type">struct</span> time_trigger
+{
+	<span class="enscript-type">struct</span> timer_call tcall;
+	uint64_t period;
+	<span class="enscript-type">unsigned</span> actionid;
+	<span class="enscript-type">volatile</span> <span class="enscript-type">unsigned</span> active;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">USE_SIMPLE_SIGNALS</span>
+	<span class="enscript-comment">/* firing accounting */</span>
+	uint64_t fire_count;
+	uint64_t last_cpu_fire[MAX_CPUS];
+#<span class="enscript-reference">endif</span>
+};
+
+<span class="enscript-comment">/* the list of timers */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> timerc = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> time_trigger *timerv;
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> pet_timer = 999;
+
+<span class="enscript-comment">/* maximum number of timers we can construct */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TIMER_MAX</span> 16
+
+<span class="enscript-comment">/* minimal interval for a timer (10usec in nsec) */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MIN_TIMER_NS</span> (10000)
+<span class="enscript-comment">/* minimal interval for pet timer (2msec in nsec) */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MIN_PET_TIMER_NS</span> (2000000)
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kperf_timer_schedule</span>( <span class="enscript-type">struct</span> time_trigger *trigger, uint64_t now )
+{
+	uint64_t deadline;
+
+	BUF_INFO1(PERF_TM_SCHED, trigger-&gt;period);
+
+	<span class="enscript-comment">/* if we re-programmed the timer to zero, just drop it */</span>
+	<span class="enscript-keyword">if</span>( !trigger-&gt;period )
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/* calculate deadline */</span>
+	deadline = now + trigger-&gt;period;
+	
+	<span class="enscript-comment">/* re-schedule the timer, making sure we don't apply slop */</span>
+	timer_call_enter( &amp;trigger-&gt;tcall, deadline, TIMER_CALL_SYS_CRITICAL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kperf_ipi_handler</span>( <span class="enscript-type">void</span> *param )
+{
+	<span class="enscript-type">int</span> r;
+	<span class="enscript-type">int</span> ncpu;
+	<span class="enscript-type">struct</span> kperf_sample *intbuf = NULL;
+	<span class="enscript-type">struct</span> kperf_context ctx;
+	<span class="enscript-type">struct</span> time_trigger *trigger = param;
+	task_t task = NULL;
+
+	<span class="enscript-comment">/* Always cut a tracepoint to show a sample event occurred */</span>
+	BUF_DATA1(PERF_TM_HNDLR | DBG_FUNC_START, 0);
+
+	<span class="enscript-comment">/* In an interrupt, get the interrupt buffer for this CPU */</span>
+	intbuf = kperf_intr_sample_buffer();
+
+	<span class="enscript-comment">/* On a timer, we can see the &quot;real&quot; current thread */</span>
+	ctx.cur_pid = 0; <span class="enscript-comment">/* remove this? */</span>
+	ctx.cur_thread = current_thread();
+
+	task = chudxnu_task_for_thread(ctx.cur_thread);
+	<span class="enscript-keyword">if</span> (task)
+		ctx.cur_pid = chudxnu_pid_for_task(task);
+
+	<span class="enscript-comment">/* who fired */</span>
+	ctx.trigger_type = TRIGGER_TYPE_TIMER;
+	ctx.trigger_id = (<span class="enscript-type">unsigned</span>)(trigger-timerv); <span class="enscript-comment">/* computer timer number */</span>
+
+	ncpu = chudxnu_cpu_number();
+	<span class="enscript-keyword">if</span> (ctx.trigger_id == pet_timer &amp;&amp; ncpu &lt; machine_info.logical_cpu_max)
+		kperf_thread_on_cpus[ncpu] = ctx.cur_thread;
+
+	<span class="enscript-comment">/* check samppling is on */</span>
+	<span class="enscript-keyword">if</span>( kperf_sampling_status() == KPERF_SAMPLING_OFF ) {
+		BUF_INFO1(PERF_TM_HNDLR | DBG_FUNC_END, SAMPLE_OFF);
+		<span class="enscript-keyword">return</span>;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span>( kperf_sampling_status() == KPERF_SAMPLING_SHUTDOWN ) {
+		BUF_INFO1(PERF_TM_HNDLR | DBG_FUNC_END, SAMPLE_SHUTDOWN);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* call the action -- kernel-only from interrupt, pend user */</span>
+	r = kperf_sample( intbuf, &amp;ctx, trigger-&gt;actionid, SAMPLE_FLAG_PEND_USER );
+
+	<span class="enscript-comment">/* end tracepoint is informational */</span>
+	BUF_INFO1(PERF_TM_HNDLR | DBG_FUNC_END, r);
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">USE_SIMPLE_SIGNALS</span>
+<span class="enscript-comment">/* if we can't pass a (function, arg) pair through a signal properly,
+ * we do it the simple way. When a timer fires, we increment a counter
+ * in the time trigger and broadcast a generic signal to all cores. Cores
+ * search the time trigger list for any triggers for which their last seen
+ * firing counter is lower than the current one.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kperf_signal_handler</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> i, cpu;
+	<span class="enscript-type">struct</span> time_trigger *tr = NULL;
+
+	OSMemoryBarrier();
+
+	cpu = chudxnu_cpu_number();
+	<span class="enscript-keyword">for</span>( i = 0; i &lt; (<span class="enscript-type">int</span>) timerc; i++ )
+	{
+		tr = &amp;timerv[i];
+		<span class="enscript-keyword">if</span>( tr-&gt;fire_count &lt;= tr-&gt;last_cpu_fire[cpu] )
+			<span class="enscript-keyword">continue</span>; <span class="enscript-comment">/* this trigger hasn't fired */</span>
+
+		<span class="enscript-comment">/* fire the trigger! */</span>
+		tr-&gt;last_cpu_fire[cpu] = tr-&gt;fire_count;
+		kperf_ipi_handler( tr );
+	}
+}
+#<span class="enscript-reference">else</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kperf_signal_handler</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">// so we can link...
+</span>}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kperf_timer_handler</span>( <span class="enscript-type">void</span> *param0, __unused <span class="enscript-type">void</span> *param1 )
+{
+	<span class="enscript-type">struct</span> time_trigger *trigger = param0;
+	<span class="enscript-type">unsigned</span> ntimer = (<span class="enscript-type">unsigned</span>)(trigger - timerv);
+	<span class="enscript-type">unsigned</span> ncpus  = machine_info.logical_cpu_max;
+
+	trigger-&gt;active = 1;
+
+	<span class="enscript-comment">/* along the lines of do not ipi if we are all shutting down */</span>
+	<span class="enscript-keyword">if</span>( kperf_sampling_status() == KPERF_SAMPLING_SHUTDOWN )
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">deactivate</span>;
+
+	<span class="enscript-comment">/* clean-up the thread-on-CPUs cache */</span>
+	bzero(kperf_thread_on_cpus, ncpus * <span class="enscript-keyword">sizeof</span>(*kperf_thread_on_cpus));
+
+	<span class="enscript-comment">/* ping all CPUs */</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">USE_SIMPLE_SIGNALS</span>
+	kperf_mp_broadcast( kperf_ipi_handler, trigger );
+#<span class="enscript-reference">else</span>
+	trigger-&gt;fire_count++;
+	OSMemoryBarrier();
+	kperf_mp_signal();
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* release the pet thread? */</span>
+	<span class="enscript-keyword">if</span>( ntimer == pet_timer )
+	{
+		<span class="enscript-comment">/* timer re-enabled when thread done */</span>
+		kperf_pet_thread_go();
+	}
+	<span class="enscript-keyword">else</span>
+	{
+		<span class="enscript-comment">/* re-enable the timer
+		 * FIXME: get the current time from elsewhere
+		 */</span>
+		uint64_t now = mach_absolute_time();
+		kperf_timer_schedule( trigger, now );
+	}
+
+<span class="enscript-reference">deactivate</span>:
+	trigger-&gt;active = 0;
+}
+
+<span class="enscript-comment">/* program the timer from the pet thread */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_timer_pet_set</span>( <span class="enscript-type">unsigned</span> timer, uint64_t elapsed_ticks )
+{
+	<span class="enscript-type">static</span> uint64_t pet_min_ticks = 0;
+
+	uint64_t now;
+	<span class="enscript-type">struct</span> time_trigger *trigger = NULL;
+	uint64_t period = 0;
+	uint64_t deadline;
+
+	<span class="enscript-comment">/* compute ns -&gt; ticks */</span>
+	<span class="enscript-keyword">if</span>( pet_min_ticks == 0 )
+		nanoseconds_to_absolutetime(MIN_PET_TIMER_NS, &amp;pet_min_ticks);
+
+	<span class="enscript-keyword">if</span>( timer != pet_timer )
+		panic( <span class="enscript-string">&quot;PET setting with bogus ID\n&quot;</span> );
+
+	<span class="enscript-keyword">if</span>( timer &gt;= timerc )
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	<span class="enscript-keyword">if</span>( kperf_sampling_status() == KPERF_SAMPLING_OFF ) {
+		BUF_INFO1(PERF_PET_END, SAMPLE_OFF);
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-comment">// don't repgram the timer if it's been shutdown
+</span>	<span class="enscript-keyword">if</span>( kperf_sampling_status() == KPERF_SAMPLING_SHUTDOWN ) {
+		BUF_INFO1(PERF_PET_END, SAMPLE_SHUTDOWN);
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-comment">/* CHECKME: we probably took so damn long in the PET thread,
+	 * it makes sense to take the time again.
+	 */</span>
+	now = mach_absolute_time();
+	trigger = &amp;timerv[timer];
+
+	<span class="enscript-comment">/* if we re-programmed the timer to zero, just drop it */</span>
+	<span class="enscript-keyword">if</span>( !trigger-&gt;period )
+		<span class="enscript-keyword">return</span> 0;
+
+	<span class="enscript-comment">/* subtract the time the pet sample took being careful not to underflow */</span>
+	<span class="enscript-keyword">if</span> ( trigger-&gt;period &gt; elapsed_ticks )
+		period = trigger-&gt;period - elapsed_ticks;
+
+	<span class="enscript-comment">/* make sure we don't set the next PET sample to happen too soon */</span>
+	<span class="enscript-keyword">if</span> ( period &lt; pet_min_ticks )
+		period = pet_min_ticks;
+
+	<span class="enscript-comment">/* calculate deadline */</span>
+	deadline = now + period;
+
+	BUF_INFO(PERF_PET_SCHED, trigger-&gt;period, period, elapsed_ticks, deadline);
+
+	<span class="enscript-comment">/* re-schedule the timer, making sure we don't apply slop */</span>
+	timer_call_enter( &amp;trigger-&gt;tcall, deadline, TIMER_CALL_SYS_CRITICAL);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-comment">/* turn on all the timers */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_timer_go</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">unsigned</span> i;
+	uint64_t now = mach_absolute_time();
+
+	<span class="enscript-keyword">for</span>( i = 0; i &lt; timerc; i++ )
+	{
+		<span class="enscript-keyword">if</span>( timerv[i].period == 0 )
+			<span class="enscript-keyword">continue</span>;
+
+		kperf_timer_schedule( &amp;timerv[i], now );
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_timer_stop</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">unsigned</span> i;
+
+	<span class="enscript-keyword">for</span>( i = 0; i &lt; timerc; i++ )
+	{
+		<span class="enscript-keyword">if</span>( timerv[i].period == 0 )
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">while</span> (timerv[i].active)
+			;
+
+		timer_call_cancel( &amp;timerv[i].tcall );
+	}
+
+	<span class="enscript-comment">/* wait for PET to stop, too */</span>
+	kperf_pet_thread_wait();
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">unsigned</span>
+<span class="enscript-function-name">kperf_timer_get_petid</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> pet_timer;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_timer_set_petid</span>(<span class="enscript-type">unsigned</span> timerid)
+{
+	<span class="enscript-type">struct</span> time_trigger *trigger = NULL;
+
+	<span class="enscript-comment">/* they can program whatever... */</span>
+	pet_timer = timerid;
+	
+	<span class="enscript-comment">/* clear them if it's a bogus ID */</span>
+	<span class="enscript-keyword">if</span>( pet_timer &gt;= timerc )
+	{
+		kperf_pet_timer_config( 0, 0 );
+
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-comment">/* update the values */</span>
+	trigger = &amp;timerv[pet_timer];
+	kperf_pet_timer_config( pet_timer, trigger-&gt;actionid );
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_timer_get_period</span>( <span class="enscript-type">unsigned</span> timer, uint64_t *period )
+{
+	<span class="enscript-keyword">if</span>( timer &gt;= timerc )
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	*period = timerv[timer].period;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_timer_set_period</span>( <span class="enscript-type">unsigned</span> timer, uint64_t period )
+{
+	<span class="enscript-type">static</span> uint64_t min_timer_ticks = 0;
+
+	<span class="enscript-keyword">if</span>( timer &gt;= timerc )
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	<span class="enscript-comment">/* compute us -&gt; ticks */</span>
+	<span class="enscript-keyword">if</span>( min_timer_ticks == 0 )
+		nanoseconds_to_absolutetime(MIN_TIMER_NS, &amp;min_timer_ticks);
+
+	<span class="enscript-comment">/* check actual timer */</span>
+	<span class="enscript-keyword">if</span>( period &amp;&amp; (period &lt; min_timer_ticks) )
+		period = min_timer_ticks;
+
+	timerv[timer].period = period;
+
+	<span class="enscript-comment">/* FIXME: re-program running timers? */</span>
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_timer_get_action</span>( <span class="enscript-type">unsigned</span> timer, uint32_t *action )
+{
+	<span class="enscript-keyword">if</span>( timer &gt;= timerc )
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	*action = timerv[timer].actionid;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_timer_set_action</span>( <span class="enscript-type">unsigned</span> timer, uint32_t action )
+{
+	<span class="enscript-keyword">if</span>( timer &gt;= timerc )
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	timerv[timer].actionid = action;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">unsigned</span>
+<span class="enscript-function-name">kperf_timer_get_count</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> timerc;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">setup_timer_call</span>( <span class="enscript-type">struct</span> time_trigger *trigger )
+{
+	timer_call_setup( &amp;trigger-&gt;tcall, kperf_timer_handler, trigger );
+}
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_timer_set_count</span>(<span class="enscript-type">unsigned</span> count)
+{
+	<span class="enscript-type">struct</span> time_trigger *new_timerv = NULL, *old_timerv = NULL;
+	<span class="enscript-type">unsigned</span> old_count, i;
+
+	<span class="enscript-comment">/* easy no-op */</span>
+	<span class="enscript-keyword">if</span>( count == timerc )
+		<span class="enscript-keyword">return</span> 0;
+
+	<span class="enscript-comment">/* TODO: allow shrinking? */</span>
+	<span class="enscript-keyword">if</span>( count &lt; timerc )
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	<span class="enscript-comment">/* cap it for good measure */</span>
+	<span class="enscript-keyword">if</span>( count &gt; TIMER_MAX )
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	<span class="enscript-comment">/* creating the action arror for the first time. create a few
+	 * more things, too.
+	 */</span>
+	<span class="enscript-keyword">if</span>( timerc == 0 )
+	{
+		<span class="enscript-type">int</span> r;
+
+		<span class="enscript-comment">/* main kperf */</span>
+		r = kperf_init();
+		<span class="enscript-keyword">if</span>( r )
+			<span class="enscript-keyword">return</span> r;
+
+		<span class="enscript-comment">/* get the PET thread going */</span>
+		r = kperf_pet_init();
+		<span class="enscript-keyword">if</span>( r )
+			<span class="enscript-keyword">return</span> r;
+	}
+
+	<span class="enscript-comment">/* first shut down any running timers since we will be messing
+	 * with the timer call structures
+	 */</span>
+	<span class="enscript-keyword">if</span>( kperf_timer_stop() )
+		<span class="enscript-keyword">return</span> EBUSY;
+
+	<span class="enscript-comment">/* create a new array */</span>
+	new_timerv = kalloc( count * <span class="enscript-keyword">sizeof</span>(*new_timerv) );
+	<span class="enscript-keyword">if</span>( new_timerv == NULL )
+		<span class="enscript-keyword">return</span> ENOMEM;
+
+	old_timerv = timerv;
+	old_count = timerc;
+
+	<span class="enscript-keyword">if</span>( old_timerv != NULL )
+		bcopy( timerv, new_timerv, timerc * <span class="enscript-keyword">sizeof</span>(*timerv) );
+
+	<span class="enscript-comment">/* zero the new entries */</span>
+	bzero( &amp;new_timerv[timerc], (count - old_count) * <span class="enscript-keyword">sizeof</span>(*new_timerv) );
+
+	<span class="enscript-comment">/* (re-)setup the timer call info for all entries */</span>
+	<span class="enscript-keyword">for</span>( i = 0; i &lt; count; i++ )
+		setup_timer_call( &amp;new_timerv[i] );
+
+	timerv = new_timerv;
+	timerc = count;
+
+	<span class="enscript-keyword">if</span>( old_timerv != NULL )
+		kfree( old_timerv, old_count * <span class="enscript-keyword">sizeof</span>(*timerv) );
+
+	<span class="enscript-keyword">return</span> 0;
+}
+</pre>
+<hr />
+</body></html>

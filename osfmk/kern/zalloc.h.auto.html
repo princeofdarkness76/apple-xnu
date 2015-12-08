@@ -1,0 +1,387 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>zalloc.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">zalloc.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989,1988,1987 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+<span class="enscript-comment">/*
+ *	File:	zalloc.h
+ *	Author:	Avadis Tevanian, Jr.
+ *	Date:	 1985
+ *
+ */</span>
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">KERNEL_PRIVATE</span>
+
+#<span class="enscript-reference">ifndef</span>	<span class="enscript-variable-name">_KERN_ZALLOC_H_</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_KERN_ZALLOC_H_</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine/vm_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">MACH_KERNEL_PRIVATE</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;zone_debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread_call.h&gt;</span>
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">CONFIG_GZALLOC</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> gzalloc_data {
+	uint32_t	gzfc_index;
+	vm_offset_t 	*gzfc;
+} gzalloc_data_t;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ *	A zone is a collection of fixed size blocks for which there
+ *	is fast allocation/deallocation access.  Kernel routines can
+ *	use zones to manage data structures dynamically, creating a zone
+ *	for each type of data structure to be managed.
+ *
+ */</span>
+
+<span class="enscript-type">struct</span> zone_free_element;
+<span class="enscript-type">struct</span> zone_page_metadata;
+
+<span class="enscript-type">struct</span> zone {
+	<span class="enscript-type">struct</span> zone_free_element *free_elements;	<span class="enscript-comment">/* free elements directly linked */</span>
+	<span class="enscript-type">struct</span> {
+		queue_head_t			any_free_foreign;	<span class="enscript-comment">/* foreign pages crammed into zone */</span>
+		queue_head_t			all_free;
+		queue_head_t			intermediate;
+		queue_head_t			all_used;
+	} pages;		<span class="enscript-comment">/* list of zone_page_metadata structs, which maintain per-page free element lists */</span>
+	<span class="enscript-type">int</span>		count;		<span class="enscript-comment">/* Number of elements used now */</span>
+	<span class="enscript-type">int</span>		countfree;	<span class="enscript-comment">/* Number of free elements */</span>
+	lck_attr_t      lock_attr;	<span class="enscript-comment">/* zone lock attribute */</span>
+	decl_lck_mtx_data(,lock)	<span class="enscript-comment">/* zone lock */</span>
+	lck_mtx_ext_t   lock_ext;	<span class="enscript-comment">/* placeholder for indirect mutex */</span>
+	vm_size_t	cur_size;	<span class="enscript-comment">/* current memory utilization */</span>
+	vm_size_t	max_size;	<span class="enscript-comment">/* how large can this zone grow */</span>
+	vm_size_t	elem_size;	<span class="enscript-comment">/* size of an element */</span>
+	vm_size_t	alloc_size;	<span class="enscript-comment">/* size used for more memory */</span>
+	uint64_t	page_count __attribute__((aligned(8)));   <span class="enscript-comment">/* number of pages used by this zone */</span>
+	uint64_t	sum_count;	<span class="enscript-comment">/* count of allocs (life of zone) */</span>
+	uint32_t
+	<span class="enscript-comment">/* boolean_t */</span> exhaustible        :1,	<span class="enscript-comment">/* (F) merely return if empty? */</span>
+	<span class="enscript-comment">/* boolean_t */</span>	collectable        :1,	<span class="enscript-comment">/* (F) garbage collect empty pages */</span>
+	<span class="enscript-comment">/* boolean_t */</span>	expandable         :1,	<span class="enscript-comment">/* (T) expand zone (with message)? */</span>
+	<span class="enscript-comment">/* boolean_t */</span> allows_foreign     :1,  <span class="enscript-comment">/* (F) allow non-zalloc space */</span>
+	<span class="enscript-comment">/* boolean_t */</span>	doing_alloc_without_vm_priv:1,	<span class="enscript-comment">/* is zone expanding now via a non-vm_privileged thread? */</span>
+	<span class="enscript-comment">/* boolean_t */</span> doing_alloc_with_vm_priv:1, <span class="enscript-comment">/* is zone expanding now via a vm_privileged thread? */</span>
+	<span class="enscript-comment">/* boolean_t */</span>	waiting            :1,	<span class="enscript-comment">/* is thread waiting for expansion? */</span>
+	<span class="enscript-comment">/* boolean_t */</span>	async_pending      :1,	<span class="enscript-comment">/* asynchronous allocation pending? */</span>
+	<span class="enscript-comment">/* boolean_t */</span> zleak_on           :1,	<span class="enscript-comment">/* Are we collecting allocation information? */</span>
+	<span class="enscript-comment">/* boolean_t */</span>	caller_acct        :1,  <span class="enscript-comment">/* do we account allocation/free to the caller? */</span>  
+	<span class="enscript-comment">/* boolean_t */</span>	doing_gc           :1,	<span class="enscript-comment">/* garbage collect in progress? */</span>
+	<span class="enscript-comment">/* boolean_t */</span> noencrypt          :1,
+	<span class="enscript-comment">/* boolean_t */</span>	no_callout         :1,
+	<span class="enscript-comment">/* boolean_t */</span>	async_prio_refill  :1,
+	<span class="enscript-comment">/* boolean_t */</span>	gzalloc_exempt     :1,
+	<span class="enscript-comment">/* boolean_t */</span>	alignment_required :1,
+	<span class="enscript-comment">/* boolean_t */</span>	use_page_list 	   :1,
+	<span class="enscript-comment">/* future    */</span> _reserved          :15;
+
+	<span class="enscript-type">int</span>		index;		<span class="enscript-comment">/* index into zone_info arrays for this zone */</span>
+	<span class="enscript-type">struct</span> zone	*next_zone;	<span class="enscript-comment">/* Link for all-zones list */</span>
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*zone_name;	<span class="enscript-comment">/* a name for the zone */</span>
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">ZONE_DEBUG</span>
+	queue_head_t	active_zones;	<span class="enscript-comment">/* active elements */</span>
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* ZONE_DEBUG */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_ZLEAKS</span>
+	uint32_t zleak_capture;		<span class="enscript-comment">/* per-zone counter for capturing every N allocations */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_ZLEAKS */</span>
+	uint32_t zp_count;              <span class="enscript-comment">/* counter for poisoning every N frees */</span>
+	vm_size_t	prio_refill_watermark;
+	thread_t	zone_replenish_thread;
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">CONFIG_GZALLOC</span>
+	gzalloc_data_t	gz;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_GZALLOC */</span>
+};
+
+<span class="enscript-comment">/*
+ *	structure for tracking zone usage
+ *	Used either one per task/thread for all zones or &lt;per-task,per-zone&gt;.
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> zinfo_usage_store_t {
+	<span class="enscript-comment">/* These fields may be updated atomically, and so must be 8 byte aligned */</span>
+	uint64_t	alloc __attribute__((aligned(8)));		<span class="enscript-comment">/* allocation counter */</span>
+	uint64_t	free __attribute__((aligned(8)));		<span class="enscript-comment">/* free counter */</span>
+} zinfo_usage_store_t;
+<span class="enscript-type">typedef</span> zinfo_usage_store_t *zinfo_usage_t;
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		zone_gc(boolean_t);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		consider_zone_gc(boolean_t);
+
+<span class="enscript-comment">/* Steal memory for zone module */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		zone_steal_memory(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/* Bootstrap zone module (create zone zone) */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		zone_bootstrap(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/* Init zone module */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		zone_init(
+					vm_size_t	map_size);
+
+<span class="enscript-comment">/* Handle per-task zone info */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		zinfo_task_init(task_t task);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		zinfo_task_free(task_t task);
+
+
+<span class="enscript-comment">/* Stack use statistics */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		stack_fake_zone_init(<span class="enscript-type">int</span> zone_index);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		stack_fake_zone_info(
+					<span class="enscript-type">int</span>			*count, 
+					vm_size_t	*cur_size, 
+					vm_size_t	*max_size,
+					vm_size_t	*elem_size,
+					vm_size_t	*alloc_size, 
+					uint64_t	*sum_size,
+					<span class="enscript-type">int</span>			*collectable, 
+					<span class="enscript-type">int</span>			*exhaustable,
+					<span class="enscript-type">int</span>		*caller_acct);
+
+#<span class="enscript-reference">if</span>		<span class="enscript-variable-name">ZONE_DEBUG</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		zone_debug_enable(
+				zone_t		z);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		zone_debug_disable(
+				zone_t		z);
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">zone_debug_enabled</span>(z) z-&gt;active_zones.next
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ROUNDUP</span>(x,y)		((((x)+(y)-1)/(y))*(y))
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ZONE_DEBUG_OFFSET</span>	ROUNDUP(sizeof(queue_chain_t),16)
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* ZONE_DEBUG */</span>
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MACH_KERNEL_PRIVATE */</span>
+
+__BEGIN_DECLS
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">XNU_KERNEL_PRIVATE</span>
+
+<span class="enscript-type">extern</span> vm_offset_t     zone_map_min_address;
+<span class="enscript-type">extern</span> vm_offset_t     zone_map_max_address;
+
+
+<span class="enscript-comment">/* Allocate from zone */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> *	zalloc(
+					zone_t		zone);
+
+<span class="enscript-comment">/* Free zone element */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		zfree(
+					zone_t		zone,
+					<span class="enscript-type">void</span> 		*elem);
+
+<span class="enscript-comment">/* Create zone */</span>
+<span class="enscript-type">extern</span> zone_t	zinit(
+					vm_size_t	size,		<span class="enscript-comment">/* the size of an element */</span>
+					vm_size_t	maxmem,		<span class="enscript-comment">/* maximum memory to use */</span>
+					vm_size_t	alloc,		<span class="enscript-comment">/* allocation size */</span>
+					<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*name);		<span class="enscript-comment">/* a name for the zone */</span>
+
+
+<span class="enscript-comment">/* Non-waiting for memory version of zalloc */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> *	zalloc_nopagewait(
+					zone_t		zone);
+
+<span class="enscript-comment">/* Non-blocking version of zalloc */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> *	zalloc_noblock(
+					zone_t		zone);
+
+<span class="enscript-comment">/* selective version of zalloc */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> *	zalloc_canblock(
+					zone_t		zone,
+					boolean_t	canblock);
+
+<span class="enscript-comment">/* Get from zone free list */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> *	zget(
+					zone_t		zone);
+
+<span class="enscript-comment">/* Fill zone with memory */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		zcram(
+					zone_t		zone,
+					vm_offset_t	newmem,
+					vm_size_t	size);
+
+<span class="enscript-comment">/* Initially fill zone with specified number of elements */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>		zfill(
+					zone_t		zone,
+					<span class="enscript-type">int</span>			nelem);
+
+<span class="enscript-comment">/* Change zone parameters */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		zone_change(
+					zone_t			zone,
+					<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	item,
+					boolean_t		value);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		zone_prio_refill_configure(zone_t, vm_size_t);
+<span class="enscript-comment">/* Item definitions */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">Z_EXHAUST</span>	1	<span class="enscript-comment">/* Make zone exhaustible	*/</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">Z_COLLECT</span>	2	<span class="enscript-comment">/* Make zone collectable	*/</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">Z_EXPAND</span>	3	<span class="enscript-comment">/* Make zone expandable		*/</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">Z_FOREIGN</span>	4	<span class="enscript-comment">/* Allow collectable zone to contain foreign elements */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">Z_CALLERACCT</span>	5	<span class="enscript-comment">/* Account alloc/free against the caller */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">Z_NOENCRYPT</span>	6	<span class="enscript-comment">/* Don't encrypt zone during hibernation */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">Z_NOCALLOUT</span> 	7	<span class="enscript-comment">/* Don't asynchronously replenish the zone via
+				 * callouts
+				 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">Z_ALIGNMENT_REQUIRED</span> 8
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">Z_GZALLOC_EXEMPT</span> 9	<span class="enscript-comment">/* Not tracked in guard allocation mode */</span>
+
+<span class="enscript-comment">/* Preallocate space for zone from zone map */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		zprealloc(
+					zone_t		zone,
+					vm_size_t	size);
+
+<span class="enscript-type">extern</span> integer_t	zone_free_count(
+						zone_t		zone);
+
+<span class="enscript-comment">/*
+ * MAX_ZTRACE_DEPTH configures how deep of a stack trace is taken on each zalloc in the zone of interest.  15
+ * levels is usually enough to get past all the layers of code in kalloc and IOKit and see who the actual
+ * caller is up above these lower levels.
+ *
+ * This is used both for the zone leak detector and the zone corruption log.
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_ZTRACE_DEPTH</span>	15
+
+<span class="enscript-comment">/* 
+ *  Structure for keeping track of a backtrace, used for leak detection.
+ *  This is in the .h file because it is used during panic, see kern/debug.c
+ *  A non-zero size indicates that the trace is in use.
+ */</span>
+<span class="enscript-type">struct</span> ztrace {
+	vm_size_t		zt_size;			<span class="enscript-comment">/* How much memory are all the allocations referring to this trace taking up? */</span>
+	uint32_t		zt_depth;			<span class="enscript-comment">/* depth of stack (0 to MAX_ZTRACE_DEPTH) */</span>
+	<span class="enscript-type">void</span>*			zt_stack[MAX_ZTRACE_DEPTH];	<span class="enscript-comment">/* series of return addresses from OSBacktrace */</span>
+	uint32_t		zt_collisions;			<span class="enscript-comment">/* How many times did a different stack land here while it was occupied? */</span>
+	uint32_t		zt_hit_count;			<span class="enscript-comment">/* for determining effectiveness of hash function */</span>
+};
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_ZLEAKS</span>
+
+<span class="enscript-comment">/* support for the kern.zleak.* sysctls */</span>
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">zleak_activate</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> vm_size_t zleak_max_zonemap_size;
+<span class="enscript-type">extern</span> vm_size_t zleak_global_tracking_threshold;
+<span class="enscript-type">extern</span> vm_size_t zleak_per_zone_tracking_threshold;
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">get_zleak_state</span>(<span class="enscript-type">void</span>);
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* CONFIG_ZLEAKS */</span>
+
+<span class="enscript-comment">/* These functions used for leak detection both in zalloc.c and mbuf.c */</span>
+<span class="enscript-type">extern</span> uint32_t <span class="enscript-function-name">fastbacktrace</span>(uintptr_t* bt, uint32_t max_frames) __attribute__((noinline));
+<span class="enscript-type">extern</span> uintptr_t <span class="enscript-function-name">hash_mix</span>(uintptr_t);
+<span class="enscript-type">extern</span> uint32_t <span class="enscript-function-name">hashbacktrace</span>(uintptr_t *, uint32_t, uint32_t);
+<span class="enscript-type">extern</span> uint32_t <span class="enscript-function-name">hashaddr</span>(uintptr_t, uint32_t);
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">lock_zone</span>(zone)					\
+MACRO_BEGIN						\
+	lck_mtx_lock_spin(&amp;(zone)-&gt;lock);		\
+MACRO_END
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">unlock_zone</span>(zone)				\
+MACRO_BEGIN						\
+	lck_mtx_unlock(&amp;(zone)-&gt;lock);			\
+MACRO_END
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">CONFIG_GZALLOC</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">gzalloc_init</span>(vm_size_t);
+<span class="enscript-type">void</span> <span class="enscript-function-name">gzalloc_zone_init</span>(zone_t);
+<span class="enscript-type">void</span> <span class="enscript-function-name">gzalloc_configure</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">void</span> <span class="enscript-function-name">gzalloc_reconfigure</span>(zone_t);
+boolean_t <span class="enscript-function-name">gzalloc_enabled</span>(<span class="enscript-type">void</span>);
+
+vm_offset_t <span class="enscript-function-name">gzalloc_alloc</span>(zone_t, boolean_t);
+boolean_t <span class="enscript-function-name">gzalloc_free</span>(zone_t, <span class="enscript-type">void</span> *);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_GZALLOC */</span>
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* XNU_KERNEL_PRIVATE */</span>
+
+__END_DECLS
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* _KERN_ZALLOC_H_ */</span>
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* KERNEL_PRIVATE */</span>
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,862 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>commpage.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">commpage.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2003-2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ *	Here's what to do if you want to add a new routine to the comm page:
+ *
+ *		1. Add a definition for it's address in osfmk/i386/cpu_capabilities.h,
+ *		   being careful to reserve room for future expansion.
+ *
+ *		2. Write one or more versions of the routine, each with it's own
+ *		   commpage_descriptor.  The tricky part is getting the &quot;special&quot;,
+ *		   &quot;musthave&quot;, and &quot;canthave&quot; fields right, so that exactly one
+ *		   version of the routine is selected for every machine.
+ *		   The source files should be in osfmk/i386/commpage/.
+ *
+ *		3. Add a ptr to your new commpage_descriptor(s) in the &quot;routines&quot;
+ *		   array in osfmk/i386/commpage/commpage_asm.s.  There are two
+ *		   arrays, one for the 32-bit and one for the 64-bit commpage.
+ *
+ *		4. Write the code in Libc to use the new routine.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpuid.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/tsc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/rtclock_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpuid.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/cpu_capabilities.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/commpage.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/page_decrypt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_ATM</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;atm/atm_internal.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* the lists of commpage routines are in commpage_asm.s  */</span>
+<span class="enscript-type">extern</span>	commpage_descriptor*	commpage_32_routines[];
+<span class="enscript-type">extern</span>	commpage_descriptor*	commpage_64_routines[];
+
+<span class="enscript-type">extern</span> vm_map_t	commpage32_map;	<span class="enscript-comment">// the shared submap, set up in vm init
+</span><span class="enscript-type">extern</span> vm_map_t	commpage64_map;	<span class="enscript-comment">// the shared submap, set up in vm init
+</span><span class="enscript-type">extern</span> vm_map_t	commpage_text32_map;	<span class="enscript-comment">// the shared submap, set up in vm init
+</span><span class="enscript-type">extern</span> vm_map_t	commpage_text64_map;	<span class="enscript-comment">// the shared submap, set up in vm init
+</span>
+
+<span class="enscript-type">char</span>	*commPagePtr32 = NULL;		<span class="enscript-comment">// virtual addr in kernel map of 32-bit commpage
+</span><span class="enscript-type">char</span>	*commPagePtr64 = NULL;		<span class="enscript-comment">// ...and of 64-bit commpage
+</span><span class="enscript-type">char</span>	*commPageTextPtr32 = NULL;	<span class="enscript-comment">// virtual addr in kernel map of 32-bit commpage
+</span><span class="enscript-type">char</span>	*commPageTextPtr64 = NULL;	<span class="enscript-comment">// ...and of 64-bit commpage
+</span>
+uint64_t     _cpu_capabilities = 0;     <span class="enscript-comment">// define the capability vector
+</span>
+<span class="enscript-type">typedef</span> uint32_t commpage_address_t;
+
+<span class="enscript-type">static</span> commpage_address_t	next;	<span class="enscript-comment">// next available address in comm page
+</span>
+<span class="enscript-type">static</span> <span class="enscript-type">char</span>    *commPagePtr;		<span class="enscript-comment">// virtual addr in kernel map of commpage we are working on
+</span><span class="enscript-type">static</span> commpage_address_t	commPageBaseOffset; <span class="enscript-comment">// subtract from 32-bit runtime address to get offset in virtual commpage in kernel map
+</span>
+<span class="enscript-type">static</span>	commpage_time_data	*time_data32 = NULL;
+<span class="enscript-type">static</span>	commpage_time_data	*time_data64 = NULL;
+
+<span class="enscript-function-name">decl_simple_lock_data</span>(<span class="enscript-type">static</span>,commpage_active_cpus_lock);
+
+<span class="enscript-comment">/* Allocate the commpage and add to the shared submap created by vm:
+ * 	1. allocate a page in the kernel map (RW)
+ *	2. wire it down
+ *	3. make a memory entry out of it
+ *	4. map that entry into the shared comm region map (R-only)
+ */</span>
+
+<span class="enscript-type">static</span>  <span class="enscript-type">void</span>*
+<span class="enscript-function-name">commpage_allocate</span>( 
+	vm_map_t	submap,			<span class="enscript-comment">// commpage32_map or commpage_map64
+</span>	size_t		area_used,		<span class="enscript-comment">// _COMM_PAGE32_AREA_USED or _COMM_PAGE64_AREA_USED
+</span>	vm_prot_t	uperm)
+{
+	vm_offset_t	kernel_addr = 0;	<span class="enscript-comment">// address of commpage in kernel map
+</span>	vm_offset_t	zero = 0;
+	vm_size_t	size = area_used;	<span class="enscript-comment">// size actually populated
+</span>	vm_map_entry_t	entry;
+	ipc_port_t	handle;
+	kern_return_t	kr;
+
+	<span class="enscript-keyword">if</span> (submap == NULL)
+		panic(<span class="enscript-string">&quot;commpage submap is null&quot;</span>);
+
+	<span class="enscript-keyword">if</span> ((kr = vm_map(kernel_map,
+			 &amp;kernel_addr,
+			 area_used,
+			 0,
+			 VM_FLAGS_ANYWHERE | VM_MAKE_TAG(VM_KERN_MEMORY_OSFMK),
+			 NULL,
+			 0,
+			 FALSE,
+			 VM_PROT_ALL,
+			 VM_PROT_ALL,
+			 VM_INHERIT_NONE)))
+		panic(<span class="enscript-string">&quot;cannot allocate commpage %d&quot;</span>, kr);
+
+	<span class="enscript-keyword">if</span> ((kr = vm_map_wire(kernel_map,
+			      kernel_addr,
+			      kernel_addr+area_used,
+			      VM_PROT_DEFAULT|VM_PROT_MEMORY_TAG_MAKE(VM_KERN_MEMORY_OSFMK),
+			      FALSE)))
+		panic(<span class="enscript-string">&quot;cannot wire commpage: %d&quot;</span>, kr);
+
+	<span class="enscript-comment">/* 
+	 * Now that the object is created and wired into the kernel map, mark it so that no delay
+	 * copy-on-write will ever be performed on it as a result of mapping it into user-space.
+	 * If such a delayed copy ever occurred, we could remove the kernel's wired mapping - and
+	 * that would be a real disaster.
+	 *
+	 * JMM - What we really need is a way to create it like this in the first place.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!(kr = vm_map_lookup_entry( kernel_map, vm_map_trunc_page(kernel_addr, VM_MAP_PAGE_MASK(kernel_map)), &amp;entry) || entry-&gt;is_sub_map))
+		panic(<span class="enscript-string">&quot;cannot find commpage entry %d&quot;</span>, kr);
+	VME_OBJECT(entry)-&gt;copy_strategy = MEMORY_OBJECT_COPY_NONE;
+
+	<span class="enscript-keyword">if</span> ((kr = mach_make_memory_entry( kernel_map,		<span class="enscript-comment">// target map
+</span>				    &amp;size,		<span class="enscript-comment">// size 
+</span>				    kernel_addr,	<span class="enscript-comment">// offset (address in kernel map)
+</span>				    uperm,	<span class="enscript-comment">// protections as specified
+</span>				    &amp;handle,		<span class="enscript-comment">// this is the object handle we get
+</span>				    NULL )))		<span class="enscript-comment">// parent_entry (what is this?)
+</span>		panic(<span class="enscript-string">&quot;cannot make entry for commpage %d&quot;</span>, kr);
+
+	<span class="enscript-keyword">if</span> ((kr = vm_map_64(	submap,				<span class="enscript-comment">// target map (shared submap)
+</span>			&amp;zero,				<span class="enscript-comment">// address (map into 1st page in submap)
+</span>			area_used,			<span class="enscript-comment">// size
+</span>			0,				<span class="enscript-comment">// mask
+</span>			VM_FLAGS_FIXED,			<span class="enscript-comment">// flags (it must be 1st page in submap)
+</span>			handle,				<span class="enscript-comment">// port is the memory entry we just made
+</span>			0,                              <span class="enscript-comment">// offset (map 1st page in memory entry)
+</span>			FALSE,                          <span class="enscript-comment">// copy
+</span>			uperm,   <span class="enscript-comment">// cur_protection (R-only in user map)
+</span>			uperm,   <span class="enscript-comment">// max_protection
+</span>		        VM_INHERIT_SHARE )))             <span class="enscript-comment">// inheritance
+</span>		panic(<span class="enscript-string">&quot;cannot map commpage %d&quot;</span>, kr);
+
+	ipc_port_release(handle);
+	<span class="enscript-comment">/* Make the kernel mapping non-executable. This cannot be done
+	 * at the time of map entry creation as mach_make_memory_entry
+	 * cannot handle disjoint permissions at this time.
+	 */</span>
+	kr = vm_protect(kernel_map, kernel_addr, area_used, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+	assert (kr == KERN_SUCCESS);
+
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">void</span>*)(intptr_t)kernel_addr;                     <span class="enscript-comment">// return address in kernel map
+</span>}
+
+<span class="enscript-comment">/* Get address (in kernel map) of a commpage field. */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>*
+<span class="enscript-function-name">commpage_addr_of</span>(
+    commpage_address_t     addr_at_runtime )
+{
+	<span class="enscript-keyword">return</span>  (<span class="enscript-type">void</span>*) ((uintptr_t)commPagePtr + (addr_at_runtime - commPageBaseOffset));
+}
+
+<span class="enscript-comment">/* Determine number of CPUs on this system.  We cannot rely on
+ * machine_info.max_cpus this early in the boot.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">commpage_cpus</span>( <span class="enscript-type">void</span> )
+{
+	<span class="enscript-type">int</span> cpus;
+
+	cpus = ml_get_max_cpus();                   <span class="enscript-comment">// NB: this call can block
+</span>
+	<span class="enscript-keyword">if</span> (cpus == 0)
+		panic(<span class="enscript-string">&quot;commpage cpus==0&quot;</span>);
+	<span class="enscript-keyword">if</span> (cpus &gt; 0xFF)
+		cpus = 0xFF;
+
+	<span class="enscript-keyword">return</span> cpus;
+}
+
+<span class="enscript-comment">/* Initialize kernel version of _cpu_capabilities vector (used by KEXTs.) */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">commpage_init_cpu_capabilities</span>( <span class="enscript-type">void</span> )
+{
+	uint64_t bits;
+	<span class="enscript-type">int</span> cpus;
+	ml_cpu_info_t cpu_info;
+
+	bits = 0;
+	ml_cpu_get_info(&amp;cpu_info);
+	
+	<span class="enscript-keyword">switch</span> (cpu_info.vector_unit) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">9</span>:
+			bits |= kHasAVX1_0;
+			<span class="enscript-comment">/* fall thru */</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">8</span>:
+			bits |= kHasSSE4_2;
+			<span class="enscript-comment">/* fall thru */</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">7</span>:
+			bits |= kHasSSE4_1;
+			<span class="enscript-comment">/* fall thru */</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">6</span>:
+			bits |= kHasSupplementalSSE3;
+			<span class="enscript-comment">/* fall thru */</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">5</span>:
+			bits |= kHasSSE3;
+			<span class="enscript-comment">/* fall thru */</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">4</span>:
+			bits |= kHasSSE2;
+			<span class="enscript-comment">/* fall thru */</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">3</span>:
+			bits |= kHasSSE;
+			<span class="enscript-comment">/* fall thru */</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">2</span>:
+			bits |= kHasMMX;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">switch</span> (cpu_info.cache_line_size) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">128</span>:
+			bits |= kCache128;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">64</span>:
+			bits |= kCache64;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">32</span>:
+			bits |= kCache32;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">break</span>;
+	}
+	cpus = commpage_cpus();			<span class="enscript-comment">// how many CPUs do we have
+</span>
+	bits |= (cpus &lt;&lt; kNumCPUsShift);
+
+	bits |= kFastThreadLocalStorage;	<span class="enscript-comment">// we use %gs for TLS
+</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">setif</span>(_bits, _bit, _condition) \
+	<span class="enscript-keyword">if</span> (_condition) _bits |= _bit
+
+	setif(bits, kUP,         cpus == 1);
+	setif(bits, k64Bit,      cpu_mode_is64bit());
+	setif(bits, kSlow,       tscFreq &lt;= SLOW_TSC_THRESHOLD);
+
+	setif(bits, kHasAES,     cpuid_features() &amp;
+					CPUID_FEATURE_AES);
+	setif(bits, kHasF16C,    cpuid_features() &amp;
+					CPUID_FEATURE_F16C);
+	setif(bits, kHasRDRAND,  cpuid_features() &amp;
+					CPUID_FEATURE_RDRAND);
+	setif(bits, kHasFMA,     cpuid_features() &amp;
+					CPUID_FEATURE_FMA);
+
+	setif(bits, kHasBMI1,    cpuid_leaf7_features() &amp;
+					CPUID_LEAF7_FEATURE_BMI1);
+	setif(bits, kHasBMI2,    cpuid_leaf7_features() &amp;
+					CPUID_LEAF7_FEATURE_BMI2);
+	setif(bits, kHasRTM,     cpuid_leaf7_features() &amp;
+					CPUID_LEAF7_FEATURE_RTM);
+	setif(bits, kHasHLE,     cpuid_leaf7_features() &amp;
+					CPUID_LEAF7_FEATURE_HLE);
+	setif(bits, kHasAVX2_0,  cpuid_leaf7_features() &amp;
+					CPUID_LEAF7_FEATURE_AVX2);
+	setif(bits, kHasRDSEED,  cpuid_features() &amp;
+					CPUID_LEAF7_FEATURE_RDSEED);
+	setif(bits, kHasADX,     cpuid_features() &amp;
+					CPUID_LEAF7_FEATURE_ADX);
+	
+	uint64_t misc_enable = rdmsr64(MSR_IA32_MISC_ENABLE);
+	setif(bits, kHasENFSTRG, (misc_enable &amp; 1ULL) &amp;&amp;
+				 (cpuid_leaf7_features() &amp;
+					CPUID_LEAF7_FEATURE_ERMS));
+	
+	_cpu_capabilities = bits;		<span class="enscript-comment">// set kernel version for use by drivers etc
+</span>}
+
+<span class="enscript-comment">/* initialize the approx_time_supported flag and set the approx time to 0.
+ * Called during initial commpage population.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">commpage_mach_approximate_time_init</span>(<span class="enscript-type">void</span>)
+{
+        <span class="enscript-type">char</span> *cp = commPagePtr32;
+	uint8_t supported;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_MACH_APPROXIMATE_TIME</span>
+	supported = 1;
+#<span class="enscript-reference">else</span>
+	supported = 0;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> ( cp ) {
+	        cp += (_COMM_PAGE_APPROX_TIME_SUPPORTED - _COMM_PAGE32_BASE_ADDRESS);
+		*(boolean_t *)cp = supported;
+	}
+        cp = commPagePtr64;
+	<span class="enscript-keyword">if</span> ( cp ) {
+	        cp += (_COMM_PAGE_APPROX_TIME_SUPPORTED - _COMM_PAGE32_START_ADDRESS);
+		*(boolean_t *)cp = supported;
+	}
+	commpage_update_mach_approximate_time(0);
+}
+
+
+uint64_t
+<span class="enscript-function-name">_get_cpu_capabilities</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> _cpu_capabilities;
+}
+
+<span class="enscript-comment">/* Copy data into commpage. */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">commpage_stuff</span>(
+    commpage_address_t 	address,
+    <span class="enscript-type">const</span> <span class="enscript-type">void</span> 	*source,
+    <span class="enscript-type">int</span> 	length	)
+{    
+    <span class="enscript-type">void</span>	*dest = commpage_addr_of(address);
+    
+    <span class="enscript-keyword">if</span> (address &lt; next)
+       panic(<span class="enscript-string">&quot;commpage overlap at address 0x%p, 0x%x &lt; 0x%x&quot;</span>, dest, address, next);
+    
+    bcopy(source,dest,length);
+    
+    next = address + length;
+}
+
+<span class="enscript-comment">/* Copy a routine into comm page if it matches running machine.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">commpage_stuff_routine</span>(
+    commpage_descriptor *rd     )
+{
+	commpage_stuff(rd-&gt;commpage_address,rd-&gt;code_address,rd-&gt;code_length);
+}
+
+<span class="enscript-comment">/* Fill in the 32- or 64-bit commpage.  Called once for each.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">commpage_populate_one</span>( 
+	vm_map_t	submap,		<span class="enscript-comment">// commpage32_map or compage64_map
+</span>	<span class="enscript-type">char</span> **		kernAddressPtr,	<span class="enscript-comment">// &amp;commPagePtr32 or &amp;commPagePtr64
+</span>	size_t		area_used,	<span class="enscript-comment">// _COMM_PAGE32_AREA_USED or _COMM_PAGE64_AREA_USED
+</span>	commpage_address_t base_offset,	<span class="enscript-comment">// will become commPageBaseOffset
+</span>	commpage_time_data** time_data,	<span class="enscript-comment">// &amp;time_data32 or &amp;time_data64
+</span>	<span class="enscript-type">const</span> <span class="enscript-type">char</span>*	signature,	<span class="enscript-comment">// &quot;commpage 32-bit&quot; or &quot;commpage 64-bit&quot;
+</span>	vm_prot_t	uperm)
+{
+	uint8_t		c1;
+	uint16_t	c2;
+	<span class="enscript-type">int</span>		c4;
+	uint64_t	c8;
+	uint32_t	cfamily;
+	<span class="enscript-type">short</span>   version = _COMM_PAGE_THIS_VERSION;
+
+	next = 0;
+	commPagePtr = (<span class="enscript-type">char</span> *)commpage_allocate( submap, (vm_size_t) area_used, uperm );
+	*kernAddressPtr = commPagePtr;				<span class="enscript-comment">// save address either in commPagePtr32 or 64
+</span>	commPageBaseOffset = base_offset;
+
+	*time_data = commpage_addr_of( _COMM_PAGE_TIME_DATA_START );
+
+	<span class="enscript-comment">/* Stuff in the constants.  We move things into the comm page in strictly
+	* ascending order, so we can check for overlap and panic if so.
+	* Note: the 32-bit cpu_capabilities vector is retained in addition to
+	* the expanded 64-bit vector.
+	*/</span>
+	commpage_stuff(_COMM_PAGE_SIGNATURE,signature,(<span class="enscript-type">int</span>)MIN(_COMM_PAGE_SIGNATURELEN, strlen(signature)));
+	commpage_stuff(_COMM_PAGE_CPU_CAPABILITIES64,&amp;_cpu_capabilities,<span class="enscript-keyword">sizeof</span>(_cpu_capabilities));
+	commpage_stuff(_COMM_PAGE_VERSION,&amp;version,<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">short</span>));
+	commpage_stuff(_COMM_PAGE_CPU_CAPABILITIES,&amp;_cpu_capabilities,<span class="enscript-keyword">sizeof</span>(uint32_t));
+
+	c2 = 32;  <span class="enscript-comment">// default
+</span>	<span class="enscript-keyword">if</span> (_cpu_capabilities &amp; kCache64)
+		c2 = 64;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (_cpu_capabilities &amp; kCache128)
+		c2 = 128;
+	commpage_stuff(_COMM_PAGE_CACHE_LINESIZE,&amp;c2,2);
+
+	c4 = MP_SPIN_TRIES;
+	commpage_stuff(_COMM_PAGE_SPIN_COUNT,&amp;c4,4);
+
+	<span class="enscript-comment">/* machine_info valid after ml_get_max_cpus() */</span>
+	c1 = machine_info.physical_cpu_max;
+	commpage_stuff(_COMM_PAGE_PHYSICAL_CPUS,&amp;c1,1);
+	c1 = machine_info.logical_cpu_max;
+	commpage_stuff(_COMM_PAGE_LOGICAL_CPUS,&amp;c1,1);
+
+	c8 = ml_cpu_cache_size(0);
+	commpage_stuff(_COMM_PAGE_MEMORY_SIZE, &amp;c8, 8);
+
+	cfamily = cpuid_info()-&gt;cpuid_cpufamily;
+	commpage_stuff(_COMM_PAGE_CPUFAMILY, &amp;cfamily, 4);
+
+	<span class="enscript-keyword">if</span> (next &gt; _COMM_PAGE_END)
+		panic(<span class="enscript-string">&quot;commpage overflow: next = 0x%08x, commPagePtr = 0x%p&quot;</span>, next, commPagePtr);
+
+}
+
+
+<span class="enscript-comment">/* Fill in commpages: called once, during kernel initialization, from the
+ * startup thread before user-mode code is running.
+ *
+ * See the top of this file for a list of what you have to do to add
+ * a new routine to the commpage.
+ */</span>  
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">commpage_populate</span>( <span class="enscript-type">void</span> )
+{
+	commpage_init_cpu_capabilities();
+	
+	commpage_populate_one(	commpage32_map, 
+				&amp;commPagePtr32,
+				_COMM_PAGE32_AREA_USED,
+				_COMM_PAGE32_BASE_ADDRESS,
+				&amp;time_data32,
+				<span class="enscript-string">&quot;commpage 32-bit&quot;</span>,
+				VM_PROT_READ);
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__LP64__</span>
+	pmap_commpage32_init((vm_offset_t) commPagePtr32, _COMM_PAGE32_BASE_ADDRESS, 
+			   _COMM_PAGE32_AREA_USED/INTEL_PGBYTES);
+#<span class="enscript-reference">endif</span>			   
+	time_data64 = time_data32;			<span class="enscript-comment">/* if no 64-bit commpage, point to 32-bit */</span>
+
+	<span class="enscript-keyword">if</span> (_cpu_capabilities &amp; k64Bit) {
+		commpage_populate_one(	commpage64_map, 
+					&amp;commPagePtr64,
+					_COMM_PAGE64_AREA_USED,
+					_COMM_PAGE32_START_ADDRESS, <span class="enscript-comment">/* commpage address are relative to 32-bit commpage placement */</span>
+					&amp;time_data64,
+					<span class="enscript-string">&quot;commpage 64-bit&quot;</span>,
+					VM_PROT_READ);
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__LP64__</span>
+		pmap_commpage64_init((vm_offset_t) commPagePtr64, _COMM_PAGE64_BASE_ADDRESS, 
+				   _COMM_PAGE64_AREA_USED/INTEL_PGBYTES);
+#<span class="enscript-reference">endif</span>
+	}
+
+	simple_lock_init(&amp;commpage_active_cpus_lock, 0);
+
+	commpage_update_active_cpus();
+	commpage_mach_approximate_time_init();
+	rtc_nanotime_init_commpage();
+	commpage_update_kdebug_enable();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_ATM</span>
+	commpage_update_atm_diagnostic_config(atm_get_diagnostic_config());
+#<span class="enscript-reference">endif</span>
+}
+
+<span class="enscript-comment">/* Fill in the common routines during kernel initialization. 
+ * This is called before user-mode code is running.
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">commpage_text_populate</span>( <span class="enscript-type">void</span> ){
+	commpage_descriptor **rd;
+	
+	next = 0;
+	commPagePtr = (<span class="enscript-type">char</span> *) commpage_allocate(commpage_text32_map, (vm_size_t) _COMM_PAGE_TEXT_AREA_USED, VM_PROT_READ | VM_PROT_EXECUTE);
+	commPageTextPtr32 = commPagePtr;
+	
+	<span class="enscript-type">char</span> *cptr = commPagePtr;
+	<span class="enscript-type">int</span> i=0;
+	<span class="enscript-keyword">for</span>(; i&lt; _COMM_PAGE_TEXT_AREA_USED; i++){
+		cptr[i]=0xCC;
+	}
+	
+	commPageBaseOffset = _COMM_PAGE_TEXT_START;
+	<span class="enscript-keyword">for</span> (rd = commpage_32_routines; *rd != NULL; rd++) {
+		commpage_stuff_routine(*rd);
+	}
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__LP64__</span>
+	pmap_commpage32_init((vm_offset_t) commPageTextPtr32, _COMM_PAGE_TEXT_START, 
+			   _COMM_PAGE_TEXT_AREA_USED/INTEL_PGBYTES);
+#<span class="enscript-reference">endif</span>	
+
+	<span class="enscript-keyword">if</span> (_cpu_capabilities &amp; k64Bit) {
+		next = 0;
+		commPagePtr = (<span class="enscript-type">char</span> *) commpage_allocate(commpage_text64_map, (vm_size_t) _COMM_PAGE_TEXT_AREA_USED, VM_PROT_READ | VM_PROT_EXECUTE);
+		commPageTextPtr64 = commPagePtr;
+
+		cptr=commPagePtr;
+		<span class="enscript-keyword">for</span>(i=0; i&lt;_COMM_PAGE_TEXT_AREA_USED; i++){
+			cptr[i]=0xCC;
+		}
+
+		<span class="enscript-keyword">for</span> (rd = commpage_64_routines; *rd !=NULL; rd++) {
+			commpage_stuff_routine(*rd);
+		}
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__LP64__</span>
+	pmap_commpage64_init((vm_offset_t) commPageTextPtr64, _COMM_PAGE_TEXT_START, 
+			   _COMM_PAGE_TEXT_AREA_USED/INTEL_PGBYTES);
+#<span class="enscript-reference">endif</span>	
+	}
+
+	<span class="enscript-keyword">if</span> (next &gt; _COMM_PAGE_TEXT_END) 
+		panic(<span class="enscript-string">&quot;commpage text overflow: next=0x%08x, commPagePtr=%p&quot;</span>, next, commPagePtr); 
+
+}
+
+<span class="enscript-comment">/* Update commpage nanotime information.
+ *
+ * This routine must be serialized by some external means, ie a lock.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">commpage_set_nanotime</span>(
+	uint64_t	tsc_base,
+	uint64_t	ns_base,
+	uint32_t	scale,
+	uint32_t	shift )
+{
+	commpage_time_data	*p32 = time_data32;
+	commpage_time_data	*p64 = time_data64;
+	<span class="enscript-type">static</span> uint32_t	generation = 0;
+	uint32_t	next_gen;
+	
+	<span class="enscript-keyword">if</span> (p32 == NULL)		<span class="enscript-comment">/* have commpages been allocated yet? */</span>
+		<span class="enscript-keyword">return</span>;
+		
+	<span class="enscript-keyword">if</span> ( generation != p32-&gt;nt_generation )
+		panic(<span class="enscript-string">&quot;nanotime trouble 1&quot;</span>);	<span class="enscript-comment">/* possibly not serialized */</span>
+	<span class="enscript-keyword">if</span> ( ns_base &lt; p32-&gt;nt_ns_base )
+		panic(<span class="enscript-string">&quot;nanotime trouble 2&quot;</span>);
+	<span class="enscript-keyword">if</span> ((shift != 0) &amp;&amp; ((_cpu_capabilities &amp; kSlow)==0) )
+		panic(<span class="enscript-string">&quot;nanotime trouble 3&quot;</span>);
+		
+	next_gen = ++generation;
+	<span class="enscript-keyword">if</span> (next_gen == 0)
+		next_gen = ++generation;
+	
+	p32-&gt;nt_generation = 0;		<span class="enscript-comment">/* mark invalid, so commpage won't try to use it */</span>
+	p64-&gt;nt_generation = 0;
+	
+	p32-&gt;nt_tsc_base = tsc_base;
+	p64-&gt;nt_tsc_base = tsc_base;
+	
+	p32-&gt;nt_ns_base = ns_base;
+	p64-&gt;nt_ns_base = ns_base;
+	
+	p32-&gt;nt_scale = scale;
+	p64-&gt;nt_scale = scale;
+	
+	p32-&gt;nt_shift = shift;
+	p64-&gt;nt_shift = shift;
+	
+	p32-&gt;nt_generation = next_gen;	<span class="enscript-comment">/* mark data as valid */</span>
+	p64-&gt;nt_generation = next_gen;
+}
+
+
+<span class="enscript-comment">/* Disable commpage gettimeofday(), forcing commpage to call through to the kernel.  */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">commpage_disable_timestamp</span>( <span class="enscript-type">void</span> )
+{
+	time_data32-&gt;gtod_generation = 0;
+	time_data64-&gt;gtod_generation = 0;
+}
+
+
+<span class="enscript-comment">/* Update commpage gettimeofday() information.  As with nanotime(), we interleave
+ * updates to the 32- and 64-bit commpage, in order to keep time more nearly in sync 
+ * between the two environments.
+ *
+ * This routine must be serializeed by some external means, ie a lock.
+ */</span>
+ 
+ <span class="enscript-type">void</span>
+ commpage_set_timestamp(
+	uint64_t	abstime,
+	uint64_t	secs )
+{
+	commpage_time_data	*p32 = time_data32;
+	commpage_time_data	*p64 = time_data64;
+	<span class="enscript-type">static</span> uint32_t	generation = 0;
+	uint32_t	next_gen;
+	
+	next_gen = ++generation;
+	<span class="enscript-keyword">if</span> (next_gen == 0)
+		next_gen = ++generation;
+	
+	p32-&gt;gtod_generation = 0;		<span class="enscript-comment">/* mark invalid, so commpage won't try to use it */</span>
+	p64-&gt;gtod_generation = 0;
+	
+	p32-&gt;gtod_ns_base = abstime;
+	p64-&gt;gtod_ns_base = abstime;
+	
+	p32-&gt;gtod_sec_base = secs;
+	p64-&gt;gtod_sec_base = secs;
+	
+	p32-&gt;gtod_generation = next_gen;	<span class="enscript-comment">/* mark data as valid */</span>
+	p64-&gt;gtod_generation = next_gen;
+}
+
+
+<span class="enscript-comment">/* Update _COMM_PAGE_MEMORY_PRESSURE.  Called periodically from vm's compute_memory_pressure()  */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">commpage_set_memory_pressure</span>(
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> 	pressure )
+{
+	<span class="enscript-type">char</span>	    *cp;
+	uint32_t    *ip;
+	
+	cp = commPagePtr32;
+	<span class="enscript-keyword">if</span> ( cp ) {
+		cp += (_COMM_PAGE_MEMORY_PRESSURE - _COMM_PAGE32_BASE_ADDRESS);
+		ip = (uint32_t*) (<span class="enscript-type">void</span> *) cp;
+		*ip = (uint32_t) pressure;
+	}
+	
+	cp = commPagePtr64;
+	<span class="enscript-keyword">if</span> ( cp ) {
+		cp += (_COMM_PAGE_MEMORY_PRESSURE - _COMM_PAGE32_START_ADDRESS);
+		ip = (uint32_t*) (<span class="enscript-type">void</span> *) cp;
+		*ip = (uint32_t) pressure;
+	}
+
+}
+
+
+<span class="enscript-comment">/* Update _COMM_PAGE_SPIN_COUNT.  We might want to reduce when running on a battery, etc. */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">commpage_set_spin_count</span>(
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> 	count )
+{
+	<span class="enscript-type">char</span>	    *cp;
+	uint32_t    *ip;
+	
+	<span class="enscript-keyword">if</span> (count == 0)	    <span class="enscript-comment">/* we test for 0 after decrement, not before */</span>
+	    count = 1;
+	    
+	cp = commPagePtr32;
+	<span class="enscript-keyword">if</span> ( cp ) {
+		cp += (_COMM_PAGE_SPIN_COUNT - _COMM_PAGE32_BASE_ADDRESS);
+		ip = (uint32_t*) (<span class="enscript-type">void</span> *) cp;
+		*ip = (uint32_t) count;
+	}
+	
+	cp = commPagePtr64;
+	<span class="enscript-keyword">if</span> ( cp ) {
+		cp += (_COMM_PAGE_SPIN_COUNT - _COMM_PAGE32_START_ADDRESS);
+		ip = (uint32_t*) (<span class="enscript-type">void</span> *) cp;
+		*ip = (uint32_t) count;
+	}
+
+}
+
+<span class="enscript-comment">/* Updated every time a logical CPU goes offline/online */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">commpage_update_active_cpus</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">char</span>	    *cp;
+	<span class="enscript-type">volatile</span> uint8_t    *ip;
+	
+	<span class="enscript-comment">/* At least 32-bit commpage must be initialized */</span>
+	<span class="enscript-keyword">if</span> (!commPagePtr32)
+		<span class="enscript-keyword">return</span>;
+
+	simple_lock(&amp;commpage_active_cpus_lock);
+
+	cp = commPagePtr32;
+	cp += (_COMM_PAGE_ACTIVE_CPUS - _COMM_PAGE32_BASE_ADDRESS);
+	ip = (<span class="enscript-type">volatile</span> uint8_t*) cp;
+	*ip = (uint8_t) processor_avail_count;
+	
+	cp = commPagePtr64;
+	<span class="enscript-keyword">if</span> ( cp ) {
+		cp += (_COMM_PAGE_ACTIVE_CPUS - _COMM_PAGE32_START_ADDRESS);
+		ip = (<span class="enscript-type">volatile</span> uint8_t*) cp;
+		*ip = (uint8_t) processor_avail_count;
+	}
+
+	simple_unlock(&amp;commpage_active_cpus_lock);
+}
+
+<span class="enscript-comment">/*
+ * Update the commpage data with the value of the &quot;kdebug_enable&quot;
+ * global so that userspace can avoid trapping into the kernel
+ * for kdebug_trace() calls. Serialization is handled
+ * by the caller in bsd/kern/kdebug.c.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">commpage_update_kdebug_enable</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">volatile</span> uint32_t *saved_data_ptr;
+	<span class="enscript-type">char</span> *cp;
+
+	cp = commPagePtr32;
+	<span class="enscript-keyword">if</span> (cp) {
+		cp += (_COMM_PAGE_KDEBUG_ENABLE - _COMM_PAGE32_BASE_ADDRESS);
+		saved_data_ptr = (<span class="enscript-type">volatile</span> uint32_t *)cp;
+		*saved_data_ptr = kdebug_enable;
+	}
+
+	cp = commPagePtr64;
+	<span class="enscript-keyword">if</span> ( cp ) {
+		cp += (_COMM_PAGE_KDEBUG_ENABLE - _COMM_PAGE32_START_ADDRESS);
+		saved_data_ptr = (<span class="enscript-type">volatile</span> uint32_t *)cp;
+		*saved_data_ptr = kdebug_enable;
+	}
+}
+
+<span class="enscript-comment">/* Ditto for atm_diagnostic_config */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">commpage_update_atm_diagnostic_config</span>(uint32_t diagnostic_config)
+{
+	<span class="enscript-type">volatile</span> uint32_t *saved_data_ptr;
+	<span class="enscript-type">char</span> *cp;
+
+	cp = commPagePtr32;
+	<span class="enscript-keyword">if</span> (cp) {
+		cp += (_COMM_PAGE_ATM_DIAGNOSTIC_CONFIG - _COMM_PAGE32_BASE_ADDRESS);
+		saved_data_ptr = (<span class="enscript-type">volatile</span> uint32_t *)cp;
+		*saved_data_ptr = diagnostic_config;
+	}
+
+	cp = commPagePtr64;
+	<span class="enscript-keyword">if</span> ( cp ) {
+		cp += (_COMM_PAGE_ATM_DIAGNOSTIC_CONFIG - _COMM_PAGE32_START_ADDRESS);
+		saved_data_ptr = (<span class="enscript-type">volatile</span> uint32_t *)cp;
+		*saved_data_ptr = diagnostic_config;
+	}
+}
+
+<span class="enscript-comment">/*
+ * update the commpage data for last known value of mach_absolute_time()
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">commpage_update_mach_approximate_time</span>(uint64_t abstime)
+{
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_MACH_APPROXIMATE_TIME</span>
+	uint64_t saved_data;
+	<span class="enscript-type">char</span> *cp;
+	
+	cp = commPagePtr32;
+	<span class="enscript-keyword">if</span> ( cp ) {
+		cp += (_COMM_PAGE_APPROX_TIME - _COMM_PAGE32_BASE_ADDRESS);
+		saved_data = *(uint64_t *)cp;
+		<span class="enscript-keyword">if</span> (saved_data &lt; abstime) {
+			<span class="enscript-comment">/* ignoring the success/fail return value assuming that
+			 * if the value has been updated since we last read it,
+			 * &quot;someone&quot; has a newer timestamp than us and ours is
+			 * now invalid. */</span>
+			OSCompareAndSwap64(saved_data, abstime, (uint64_t *)cp);
+		}
+	}
+	cp = commPagePtr64;
+	<span class="enscript-keyword">if</span> ( cp ) {
+		cp += (_COMM_PAGE_APPROX_TIME - _COMM_PAGE32_START_ADDRESS);
+		saved_data = *(uint64_t *)cp;
+		<span class="enscript-keyword">if</span> (saved_data &lt; abstime) {
+			<span class="enscript-comment">/* ignoring the success/fail return value assuming that
+			 * if the value has been updated since we last read it,
+			 * &quot;someone&quot; has a newer timestamp than us and ours is
+			 * now invalid. */</span>
+			OSCompareAndSwap64(saved_data, abstime, (uint64_t *)cp);
+		}
+	}
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span> (<span class="enscript-variable-name">abstime</span>)
+#<span class="enscript-reference">endif</span>
+}
+
+
+<span class="enscript-type">extern</span> user32_addr_t commpage_text32_location;
+<span class="enscript-type">extern</span> user64_addr_t commpage_text64_location;
+
+<span class="enscript-comment">/* Check to see if a given address is in the Preemption Free Zone (PFZ) */</span>
+
+uint32_t
+<span class="enscript-function-name">commpage_is_in_pfz32</span>(uint32_t addr32)
+{
+	<span class="enscript-keyword">if</span> ( (addr32 &gt;= (commpage_text32_location + _COMM_TEXT_PFZ_START_OFFSET)) 
+		&amp;&amp; (addr32 &lt; (commpage_text32_location+_COMM_TEXT_PFZ_END_OFFSET))) {
+		<span class="enscript-keyword">return</span> 1;
+	}
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> 0;
+}
+
+uint32_t
+<span class="enscript-function-name">commpage_is_in_pfz64</span>(addr64_t addr64)
+{
+	<span class="enscript-keyword">if</span> ( (addr64 &gt;= (commpage_text64_location + _COMM_TEXT_PFZ_START_OFFSET))
+	     &amp;&amp; (addr64 &lt;  (commpage_text64_location + _COMM_TEXT_PFZ_END_OFFSET))) {
+		<span class="enscript-keyword">return</span> 1;
+	}
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> 0;
+}
+
+</pre>
+<hr />
+</body></html>

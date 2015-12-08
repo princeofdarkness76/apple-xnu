@@ -1,0 +1,779 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>tty_compat.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">tty_compat.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* Copyright (c) 1997 Apple Computer, Inc. All Rights Reserved */</span>
+<span class="enscript-comment">/*-
+ * Copyright (c) 1982, 1986, 1991, 1993
+ *      The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the University of
+ *      California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *      @(#)tty_compat.c        8.1 (Berkeley) 6/10/93
+ */</span>
+
+<span class="enscript-comment">/*
+ * Compatibility routines for BSD 4.3 tty ioctl() commands
+ *
+ * The only function externalized from this file is ttcompat() and it is
+ * externalized as private extern to prevent exporting of the symbol when
+ * KEXTs link against the kernel.
+ *
+ * Locks:	All functions in this file assume that the tty_lock()
+ *		is held on the tty structure before these functions are
+ *		called.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/tty.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/termios.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ttcompatgetflags</span>(<span class="enscript-type">struct</span> tty *tp);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ttcompatsetflags</span>(<span class="enscript-type">struct</span> tty	*tp, <span class="enscript-type">struct</span> termios *t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ttcompatsetlflags</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">struct</span> termios *t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ttcompatspeedtab</span>(<span class="enscript-type">int</span> speed, <span class="enscript-type">struct</span> speedtab *table);
+
+<span class="enscript-comment">/*
+ * These two tables encode baud rate to speed code and speed code to
+ * baud rate information.  They are a mapping between the &lt;sys/termios.h&gt;
+ * baud rate constants and the &lt;sys/ttydev.h&gt; baud rate constants.  We
+ * cannot use those constants directly here because they occupy the same
+ * name space.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> speedtab compatspeeds[] = {
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_SPEED</span>	17
+	{ 115200, 17 },
+	{ 57600, 16 },
+	{ 38400, 15 },
+	{ 19200, 14 },
+	{ 9600,	13 },
+	{ 4800,	12 },
+	{ 2400,	11 },
+	{ 1800,	10 },
+	{ 1200,	9 },
+	{ 600,	8 },
+	{ 300,	7 },
+	{ 200,	6 },
+	{ 150,	5 },
+	{ 134,	4 },
+	{ 110,	3 },
+	{ 75,	2 },
+	{ 50,	1 },
+	{ 0,	0 },
+	{ -1,	-1 },
+};
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> compatspcodes[] = {
+	0, 50, 75, 110, 134, 150, 200, 300, 600, 1200,
+	1800, 2400, 4800, 9600, 19200, 38400, 57600, 115200,
+};
+
+<span class="enscript-comment">/*
+ * ttcompatspeedtab
+ *
+ * Description:	Given a baud rate value as an integer, and a speed table,
+ *		convert the baud rate to a speed code, according to the
+ *		contents of the table.  This effectively changes termios.h
+ *		baud rate values into ttydev.h baud rate codes.
+ *
+ * Parameters:	int speed		Baud rate, as an integer
+ *		struct speedtab *table	Baud rate table to speed code table
+ *
+ * Returns:	1			B50 speed code; returned if we can
+ *					not find an answer in the table.
+ *		0			If a 0 was requested in order to
+ *					trigger a hangup (250ms of line
+ *					silence, per Bell 103C standard).
+ *		*			A speed code matching the requested
+ *					baud rate (potentially rounded down,
+ *					if there is no exact match).
+ *
+ * Notes:	This function is used for TIOCGETP, TIOCSETP, and TIOCSETN.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ttcompatspeedtab</span>(<span class="enscript-type">int</span> speed, <span class="enscript-type">struct</span> speedtab *table)
+{
+	<span class="enscript-keyword">if</span> (speed == 0)
+		<span class="enscript-keyword">return</span> (0); <span class="enscript-comment">/* hangup */</span>
+	<span class="enscript-keyword">for</span> ( ; table-&gt;sp_speed &gt; 0; table++)
+		<span class="enscript-keyword">if</span> (table-&gt;sp_speed &lt;= speed) <span class="enscript-comment">/* nearest one, rounded down */</span>
+			<span class="enscript-keyword">return</span> (table-&gt;sp_code);
+	<span class="enscript-keyword">return</span> (1); <span class="enscript-comment">/* 50, min and not hangup */</span>
+}
+
+
+<span class="enscript-comment">/*
+ * ttsetcompat
+ *
+ * Description:	Convert backward compatability set command arguments as
+ *		follows:
+ *
+ *		TIOCSETP	-&gt;	TIOSETAF
+ *		TIOCSETN	-&gt;	TIOCSETA
+ *		TIOCSETC	-&gt;	TIOCSETA
+ *		TIOCSLTC	-&gt;	TIOCSETA
+ *		TIOCLBIS	-&gt;	TIOCSETA
+ *		TIOCLBIC	-&gt;	TIOCSETA
+ *		TIOCLSET	-&gt;	TIOCSETA
+ *
+ *	The converted command argument and potentially modified 'term'
+ *	argument are returned to ttcompat(), which will then call
+ *	ttioctl_locked(), if this function returns successfully.
+ *
+ * Parameters	struct tty *tp		The tty on which the operation is
+ *					being performed.
+ *		u_long *com		A pointer to the terminal input/output
+ *					command being requested; its contents
+ *					will be modified per the table above,
+ *					on a non-error return.
+ *		caddr_t data		Command specific parameter data; this
+ *					data is read but not modified.
+ *		struct termios *term	A local stack termios structure from
+ *					ttcompat(), whose contents are to be
+ *					modified based on *com and *data.
+ *
+ * Returns:	EINVAL			An input speed or output speed is
+ *					outside the allowable range for a
+ *					TIOCSETP or TIOCSETN command.
+ *		0			All other cases return 0.
+ *
+ * Notes:	This function may modify the contents of the tp-&gt;t_flags
+ *		field in a successful call to TIOCSETP, TIOCSETN, TIOCLBIS,
+ *		TIOCLBIC, or TIOCLSET.
+ *
+ *		All other tp fields will remain unmodifed, since the struct
+ *		termios is a local stack copy from ttcompat(), and not the
+ *		real thing.  A subsequent call to ttioctl_locked() in
+ *		ttcompat(), however, may result in subsequent changes.
+ *
+ * WARNING:	This compatibility code is not 6/432 clean; it will only
+ *		work for 32 bit processes on 32 bit kernels or 64 bit
+ *		processes on 64 bit kernels.  We are not addressing this
+ *		due to &lt;rdar://6904053&gt;.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ttsetcompat</span>(<span class="enscript-type">struct</span> tty *tp, u_long *com, caddr_t data, <span class="enscript-type">struct</span> termios *term)
+{
+	<span class="enscript-keyword">switch</span> (*com) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETP</span>:
+		<span class="enscript-comment">/*
+		 * Wait for all characters queued for output to drain, then
+		 * Discard all characters queued for input, and then set
+		 * the input and output speeds and device flags, per the
+		 * contents of the struct sgttyb that 'data' points to.
+		 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETN</span>:
+		<span class="enscript-comment">/*
+		 * Same as TIOCSETP, but the output is not drained, and any
+		 * pending input is not discarded.
+		 */</span>
+	    {
+		<span class="enscript-type">register</span> <span class="enscript-type">struct</span> sgttyb *sg = (<span class="enscript-type">struct</span> sgttyb *)data;
+		<span class="enscript-type">int</span> speed;
+
+		<span class="enscript-keyword">if</span> ((speed = sg-&gt;sg_ispeed) &gt; MAX_SPEED || speed &lt; 0)
+			<span class="enscript-keyword">return</span>(EINVAL);
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (speed != ttcompatspeedtab(tp-&gt;t_ispeed, compatspeeds))
+			term-&gt;c_ispeed = compatspcodes[speed];
+		<span class="enscript-keyword">else</span>
+			term-&gt;c_ispeed = tp-&gt;t_ispeed;
+		<span class="enscript-keyword">if</span> ((speed = sg-&gt;sg_ospeed) &gt; MAX_SPEED || speed &lt; 0)
+			<span class="enscript-keyword">return</span>(EINVAL);
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (speed != ttcompatspeedtab(tp-&gt;t_ospeed, compatspeeds))
+			term-&gt;c_ospeed = compatspcodes[speed];
+		<span class="enscript-keyword">else</span>
+			term-&gt;c_ospeed = tp-&gt;t_ospeed;
+		term-&gt;c_cc[VERASE] = sg-&gt;sg_erase;
+		term-&gt;c_cc[VKILL] = sg-&gt;sg_kill;
+		tp-&gt;t_flags = (tp-&gt;t_flags&amp;0xffff0000) | (sg-&gt;sg_flags&amp;0xffff);
+		ttcompatsetflags(tp, term);
+		*com = (*com == TIOCSETP) ? TIOCSETAF : TIOCSETA;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETC</span>:
+		<span class="enscript-comment">/*
+		 * Set the terminal control characters per the contents of
+		 * the struct tchars that 'data' points to.
+		 */</span>
+	    {
+		<span class="enscript-type">struct</span> tchars *tc = (<span class="enscript-type">struct</span> tchars *)data;
+		<span class="enscript-type">register</span> cc_t *cc;
+
+		cc = term-&gt;c_cc;
+		cc[VINTR] = tc-&gt;t_intrc;
+		cc[VQUIT] = tc-&gt;t_quitc;
+		cc[VSTART] = tc-&gt;t_startc;
+		cc[VSTOP] = tc-&gt;t_stopc;
+		cc[VEOF] = tc-&gt;t_eofc;
+		cc[VEOL] = tc-&gt;t_brkc;
+		<span class="enscript-keyword">if</span> (tc-&gt;t_brkc == -1)
+			cc[VEOL2] = _POSIX_VDISABLE;
+		*com = TIOCSETA;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSLTC</span>:
+		<span class="enscript-comment">/*
+		 * Set the terminal control characters per the contents of
+		 * the struct ltchars that 'data' points to.
+		 */</span>
+	{
+		<span class="enscript-type">struct</span> ltchars *ltc = (<span class="enscript-type">struct</span> ltchars *)data;
+		<span class="enscript-type">register</span> cc_t *cc;
+
+		cc = term-&gt;c_cc;
+		cc[VSUSP] = ltc-&gt;t_suspc;
+		cc[VDSUSP] = ltc-&gt;t_dsuspc;
+		cc[VREPRINT] = ltc-&gt;t_rprntc;
+		cc[VDISCARD] = ltc-&gt;t_flushc;
+		cc[VWERASE] = ltc-&gt;t_werasc;
+		cc[VLNEXT] = ltc-&gt;t_lnextc;
+		*com = TIOCSETA;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCLBIS</span>:
+		<span class="enscript-comment">/*
+		 * Set the bits in the terminal state local flags word
+		 * (16 bits) for the terminal to the current bits OR
+		 * those in the 16 bit value pointed to by 'data'.
+		 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCLBIC</span>:
+		<span class="enscript-comment">/*
+		 * Clear the bits in the terminal state local flags word
+		 * for the terminal to the current bits AND those bits NOT
+		 * in the 16 bit value pointed to by 'data'.
+		 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCLSET</span>:
+		<span class="enscript-comment">/*
+		 * Set the terminal state local flags word to exactly those
+		 * bits that correspond to the 16 bit value pointed to by
+		 * 'data'.
+		 */</span>
+		<span class="enscript-keyword">if</span> (*com == TIOCLSET)
+			tp-&gt;t_flags = (tp-&gt;t_flags&amp;0xffff) | *(<span class="enscript-type">int</span> *)data&lt;&lt;16;
+		<span class="enscript-keyword">else</span> {
+			tp-&gt;t_flags =
+			 (ttcompatgetflags(tp)&amp;0xffff0000)|(tp-&gt;t_flags&amp;0xffff);
+			<span class="enscript-keyword">if</span> (*com == TIOCLBIS)
+				tp-&gt;t_flags |= *(<span class="enscript-type">int</span> *)data&lt;&lt;16;
+			<span class="enscript-keyword">else</span>
+				tp-&gt;t_flags &amp;= ~(*(<span class="enscript-type">int</span> *)data&lt;&lt;16);
+		}
+		ttcompatsetlflags(tp, term);
+		*com = TIOCSETA;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * ttcompat
+ *
+ * Description:	For 'set' commands, convert the command and arguments as
+ *		necessary, and call ttioctl_locked(), returning the result
+ *		as our result; for 'get' commands, obtain the requested data
+ *		from the appropriate source, and return it in the expected
+ *		format.  If the command is not recognized, return EINVAL.
+ *
+ * Parameters	struct tty *tp		The tty on which the operation is
+ *					being performed.
+ *		u_long com		The terminal input/output command
+ *					being requested.
+ *		caddr_t	data		The pointer to the user data argument
+ *					provided with the command.
+ *		int flag		The file open flags (e.g. FREAD).
+ *		struct proc *p		The current process pointer for the
+ *					operation.
+ *
+ * Returns:	0			Most 'get' operations can't fail, and
+ *					therefore return this.
+ *		ENOTTY			TIOCGSID may return this when you
+ *					attempt to get the session ID for a
+ *					terminal with no associated session,
+ *					or for which there is a session, but
+ *					no session leader.
+ *		ENOTTY			If the command cannot be handled at
+ *					this layer, this will be returned.
+ *		*			Any value returned by ttioctl_locked(),
+ *					if a set command is requested.
+ *
+ * Notes:	The process pointer may be a proxy on whose behalf we are
+ *		operating, so it is not safe to simply use current_process()
+ *		instead.
+ */</span>
+<span class="enscript-comment">/*ARGSUSED*/</span>
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ttcompat</span>(<span class="enscript-type">struct</span> tty *tp, u_long com, caddr_t data, <span class="enscript-type">int</span> flag, <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-keyword">switch</span> (com) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETN</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSLTC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCLBIS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCLBIC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCLSET</span>:
+		<span class="enscript-comment">/*
+		 * See ttsetcompat() for a full description of these command
+		 * values and their meanings.
+		 */</span>
+	{
+		<span class="enscript-type">struct</span> termios term;
+		<span class="enscript-type">int</span> error;
+
+		term = tp-&gt;t_termios;
+		<span class="enscript-keyword">if</span> ((error = ttsetcompat(tp, &amp;com, data, &amp;term)) != 0)
+			<span class="enscript-keyword">return</span> error;
+		<span class="enscript-keyword">return</span> ttioctl_locked(tp, com, (caddr_t) &amp;term, flag, p);
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCGETP</span>:
+		<span class="enscript-comment">/*
+		 * Get the current input and output speeds, and device
+		 * flags, into the structure pointed to by 'data'.
+		 */</span>
+	    {
+		<span class="enscript-type">register</span> <span class="enscript-type">struct</span> sgttyb *sg = (<span class="enscript-type">struct</span> sgttyb *)data;
+		<span class="enscript-type">register</span> cc_t *cc = tp-&gt;t_cc;
+
+		sg-&gt;sg_ospeed = ttcompatspeedtab(tp-&gt;t_ospeed, compatspeeds);
+		<span class="enscript-keyword">if</span> (tp-&gt;t_ispeed == 0)
+			sg-&gt;sg_ispeed = sg-&gt;sg_ospeed;
+		<span class="enscript-keyword">else</span>
+			sg-&gt;sg_ispeed = ttcompatspeedtab(tp-&gt;t_ispeed, compatspeeds);
+		sg-&gt;sg_erase = cc[VERASE];
+		sg-&gt;sg_kill = cc[VKILL];
+		sg-&gt;sg_flags = tp-&gt;t_flags = ttcompatgetflags(tp);
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCGETC</span>:
+		<span class="enscript-comment">/*
+		 * Get the terminal control characters into the struct
+		 * tchars that 'data' points to.
+		 */</span>
+	    {
+		<span class="enscript-type">struct</span> tchars *tc = (<span class="enscript-type">struct</span> tchars *)data;
+		<span class="enscript-type">register</span> cc_t *cc = tp-&gt;t_cc;
+
+		tc-&gt;t_intrc = cc[VINTR];
+		tc-&gt;t_quitc = cc[VQUIT];
+		tc-&gt;t_startc = cc[VSTART];
+		tc-&gt;t_stopc = cc[VSTOP];
+		tc-&gt;t_eofc = cc[VEOF];
+		tc-&gt;t_brkc = cc[VEOL];
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCGLTC</span>:
+		<span class="enscript-comment">/*
+		 * Get the terminal control characters into the struct
+		 * ltchars that 'data' points to.
+		 */</span>
+	{
+		<span class="enscript-type">struct</span> ltchars *ltc = (<span class="enscript-type">struct</span> ltchars *)data;
+		<span class="enscript-type">register</span> cc_t *cc = tp-&gt;t_cc;
+
+		ltc-&gt;t_suspc = cc[VSUSP];
+		ltc-&gt;t_dsuspc = cc[VDSUSP];
+		ltc-&gt;t_rprntc = cc[VREPRINT];
+		ltc-&gt;t_flushc = cc[VDISCARD];
+		ltc-&gt;t_werasc = cc[VWERASE];
+		ltc-&gt;t_lnextc = cc[VLNEXT];
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCLGET</span>:
+		<span class="enscript-comment">/*
+		 * Get the terminal state local flags word into the 16 bit
+		 * value pointed to by 'data'.
+		 */</span>
+		tp-&gt;t_flags =
+		 (ttcompatgetflags(tp) &amp; 0xffff0000UL)
+		   | (tp-&gt;t_flags &amp; 0xffff);
+		*(<span class="enscript-type">int</span> *)data = tp-&gt;t_flags&gt;&gt;16;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">OTIOCGETD</span>:
+		<span class="enscript-comment">/*
+		 * Get the current line discipline into the int pointed to
+		 * by 'data'.
+		 */</span>
+		*(<span class="enscript-type">int</span> *)data = tp-&gt;t_line ? tp-&gt;t_line : 2;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">OTIOCSETD</span>:
+		<span class="enscript-comment">/*
+		 * Set the current line discipline based on the value of the
+		 * int pointed to by 'data'.
+		 */</span>
+	    {
+		<span class="enscript-type">int</span> ldisczero = 0;
+
+		<span class="enscript-keyword">return</span> (ttioctl_locked(tp, TIOCSETD, 
+		    *(<span class="enscript-type">int</span> *)data == 2 ? (caddr_t)&amp;ldisczero : data, flag, p));
+	    }
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">OTIOCCONS</span>:
+		<span class="enscript-comment">/*
+		 * Become the console device.
+		 */</span>
+		*(<span class="enscript-type">int</span> *)data = 1;
+		<span class="enscript-keyword">return</span> (ttioctl_locked(tp, TIOCCONS, data, flag, p));
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCGSID</span>:
+		<span class="enscript-comment">/*
+		 * Get the current session ID (controlling process' PID).
+		 */</span>
+		<span class="enscript-keyword">if</span> (tp-&gt;t_session == NULL)
+			<span class="enscript-keyword">return</span> ENOTTY;
+
+		<span class="enscript-keyword">if</span> (tp-&gt;t_session-&gt;s_leader == NULL)
+			<span class="enscript-keyword">return</span> ENOTTY;
+
+		*(<span class="enscript-type">int</span> *) data =  tp-&gt;t_session-&gt;s_leader-&gt;p_pid;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-comment">/*
+		 * This ioctl is not handled at this layer.
+		 */</span>
+		<span class="enscript-keyword">return</span> (ENOTTY);
+	}
+
+	<span class="enscript-comment">/*
+	 * Successful 'get' operation.
+	 */</span>
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * ttcompatgetflags
+ *
+ * Description:	Get the terminal state local flags, device flags, and current
+ *		speed code for the device (all 32 bits are returned).
+ *
+ * Parameters	struct tty *tp		The tty on which the operation is
+ *					being performed.
+ *
+ * Returns:	*			Integer value corresponding to the
+ *					current terminal state local flags
+ *					word.
+ *
+ * Notes:	Caller is responsible for breaking these bits back out into
+ *		separate 16 bit filelds, if that's what was actually desired.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ttcompatgetflags</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	<span class="enscript-type">register</span> tcflag_t iflag	= tp-&gt;t_iflag;
+	<span class="enscript-type">register</span> tcflag_t lflag	= tp-&gt;t_lflag;
+	<span class="enscript-type">register</span> tcflag_t oflag	= tp-&gt;t_oflag;
+	<span class="enscript-type">register</span> tcflag_t cflag	= tp-&gt;t_cflag;
+	<span class="enscript-type">register</span> <span class="enscript-type">int</span> flags = 0;
+
+	<span class="enscript-keyword">if</span> (iflag&amp;IXOFF)
+		flags |= TANDEM;
+	<span class="enscript-keyword">if</span> (iflag&amp;ICRNL || oflag&amp;ONLCR)
+		flags |= CRMOD;
+	<span class="enscript-keyword">if</span> ((cflag&amp;CSIZE) == CS8) {
+		flags |= PASS8;
+		<span class="enscript-keyword">if</span> (iflag&amp;ISTRIP)
+			flags |= ANYP;
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cflag&amp;PARENB) {
+		<span class="enscript-keyword">if</span> (iflag&amp;INPCK) {
+			<span class="enscript-keyword">if</span> (cflag&amp;PARODD)
+				flags |= ODDP;
+			<span class="enscript-keyword">else</span>
+				flags |= EVENP;
+		} <span class="enscript-keyword">else</span>
+			flags |= EVENP | ODDP;
+	}
+
+	<span class="enscript-keyword">if</span> ((lflag&amp;ICANON) == 0) {
+		<span class="enscript-comment">/* fudge */</span>
+		<span class="enscript-keyword">if</span> (iflag&amp;(INPCK|ISTRIP|IXON) || lflag&amp;(IEXTEN|ISIG)
+		    || (cflag&amp;(CSIZE|PARENB)) != CS8)
+			flags |= CBREAK;
+		<span class="enscript-keyword">else</span>
+			flags |= RAW;
+	}
+	<span class="enscript-keyword">if</span> (!(flags&amp;RAW) &amp;&amp; !(oflag&amp;OPOST) &amp;&amp; (cflag&amp;(CSIZE|PARENB)) == CS8)
+		flags |= LITOUT;
+	<span class="enscript-keyword">if</span> (cflag&amp;MDMBUF)
+		flags |= MDMBUF;
+	<span class="enscript-keyword">if</span> ((cflag&amp;HUPCL) == 0)
+		flags |= NOHANG;
+	<span class="enscript-keyword">if</span> (oflag&amp;OXTABS)
+		flags |= XTABS;
+	<span class="enscript-keyword">if</span> (lflag&amp;ECHOE)
+		flags |= CRTERA|CRTBS;
+	<span class="enscript-keyword">if</span> (lflag&amp;ECHOKE)
+		flags |= CRTKIL|CRTBS;
+	<span class="enscript-keyword">if</span> (lflag&amp;ECHOPRT)
+		flags |= PRTERA;
+	<span class="enscript-keyword">if</span> (lflag&amp;ECHOCTL)
+		flags |= CTLECH;
+	<span class="enscript-keyword">if</span> ((iflag&amp;IXANY) == 0)
+		flags |= DECCTQ;
+	flags |= lflag&amp;(ECHO|TOSTOP|FLUSHO|PENDIN|NOFLSH);
+	<span class="enscript-keyword">return</span> (flags);
+}
+
+<span class="enscript-comment">/*
+ * ttcompatsetflags
+ *
+ * Description:	Given a set of compatability flags, convert the compatability
+ *		flags in the terminal flags fields into canonical flags in the
+ *		provided termios struct.
+ *
+ * Parameters:	struct tty *tp		The tty on which the operation is
+ *					being performed.
+ *		struct termios *t	The termios structure into which to
+ *					return the converted flags.
+ *
+ * Returns:	void			(implicit: *t, modified)
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ttcompatsetflags</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">struct</span> termios *t)
+{
+	<span class="enscript-type">register</span> <span class="enscript-type">int</span> flags = tp-&gt;t_flags;
+	<span class="enscript-type">register</span> tcflag_t iflag	= t-&gt;c_iflag;
+	<span class="enscript-type">register</span> tcflag_t oflag	= t-&gt;c_oflag;
+	<span class="enscript-type">register</span> tcflag_t lflag	= t-&gt;c_lflag;
+	<span class="enscript-type">register</span> tcflag_t cflag	= t-&gt;c_cflag;
+
+	<span class="enscript-keyword">if</span> (flags &amp; RAW) {
+		iflag = IGNBRK;
+		lflag &amp;= ~(ECHOCTL|ISIG|ICANON|IEXTEN);
+	} <span class="enscript-keyword">else</span> {
+		iflag &amp;= ~(PARMRK|IGNPAR|IGNCR|INLCR);
+		iflag |= BRKINT|IXON|IMAXBEL;
+		lflag |= ISIG|IEXTEN|ECHOCTL;	<span class="enscript-comment">/* XXX was echoctl on ? */</span>
+		<span class="enscript-keyword">if</span> (flags &amp; XTABS)
+			oflag |= OXTABS;
+		<span class="enscript-keyword">else</span>
+			oflag &amp;= ~OXTABS;
+		<span class="enscript-keyword">if</span> (flags &amp; CBREAK)
+			lflag &amp;= ~ICANON;
+		<span class="enscript-keyword">else</span>
+			lflag |= ICANON;
+		<span class="enscript-keyword">if</span> (flags&amp;CRMOD) {
+			iflag |= ICRNL;
+			oflag |= ONLCR;
+		} <span class="enscript-keyword">else</span> {
+			iflag &amp;= ~ICRNL;
+			oflag &amp;= ~ONLCR;
+		}
+	}
+	<span class="enscript-keyword">if</span> (flags&amp;ECHO)
+		lflag |= ECHO;
+	<span class="enscript-keyword">else</span>
+		lflag &amp;= ~ECHO;
+
+	cflag &amp;= ~(CSIZE|PARENB);
+	<span class="enscript-keyword">if</span> (flags&amp;(RAW|LITOUT|PASS8)) {
+		cflag |= CS8;
+		<span class="enscript-keyword">if</span> (!(flags&amp;(RAW|PASS8))
+		    || (flags&amp;(RAW|PASS8|ANYP)) == (PASS8|ANYP))
+			iflag |= ISTRIP;
+		<span class="enscript-keyword">else</span>
+			iflag &amp;= ~ISTRIP;
+		<span class="enscript-keyword">if</span> (flags&amp;(RAW|LITOUT))
+			oflag &amp;= ~OPOST;
+		<span class="enscript-keyword">else</span>
+			oflag |= OPOST;
+	} <span class="enscript-keyword">else</span> {
+		cflag |= CS7|PARENB;
+		iflag |= ISTRIP;
+		oflag |= OPOST;
+	}
+	<span class="enscript-comment">/* XXX don't set INPCK if RAW or PASS8? */</span>
+	<span class="enscript-keyword">if</span> ((flags&amp;(EVENP|ODDP)) == EVENP) {
+		iflag |= INPCK;
+		cflag &amp;= ~PARODD;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((flags&amp;(EVENP|ODDP)) == ODDP) {
+		iflag |= INPCK;
+		cflag |= PARODD;
+	} <span class="enscript-keyword">else</span>
+		iflag &amp;= ~INPCK;
+	<span class="enscript-keyword">if</span> (flags&amp;TANDEM)
+		iflag |= IXOFF;
+	<span class="enscript-keyword">else</span>
+		iflag &amp;= ~IXOFF;
+	<span class="enscript-keyword">if</span> ((flags&amp;DECCTQ) == 0)
+		iflag |= IXANY;
+	<span class="enscript-keyword">else</span>
+		iflag &amp;= ~IXANY;
+	t-&gt;c_iflag = iflag;
+	t-&gt;c_oflag = oflag;
+	t-&gt;c_lflag = lflag;
+	t-&gt;c_cflag = cflag;
+}
+
+<span class="enscript-comment">/*
+ * ttcompatsetlflags
+ *
+ * Description:	Given a set of compatability terminal state local flags,
+ *		convert the compatability flags in the terminal flags
+ *		fields into canonical flags in the provided termios struct.
+ *
+ * Parameters:	struct tty *tp		The tty on which the operation is
+ *					being performed.
+ *		struct termios *t	The termios structure into which to
+ *					return the converted local flags.
+ *
+ * Returns:	void			(implicit: *t, modified)
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ttcompatsetlflags</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">struct</span> termios *t)
+{
+	<span class="enscript-type">register</span> <span class="enscript-type">int</span> flags = tp-&gt;t_flags;
+	<span class="enscript-type">register</span> tcflag_t iflag	= t-&gt;c_iflag;
+	<span class="enscript-type">register</span> tcflag_t oflag	= t-&gt;c_oflag;
+	<span class="enscript-type">register</span> tcflag_t lflag	= t-&gt;c_lflag;
+	<span class="enscript-type">register</span> tcflag_t cflag	= t-&gt;c_cflag;
+
+	iflag &amp;= ~(PARMRK|IGNPAR|IGNCR|INLCR);
+	<span class="enscript-keyword">if</span> (flags&amp;CRTERA)
+		lflag |= ECHOE;
+	<span class="enscript-keyword">else</span>
+		lflag &amp;= ~ECHOE;
+	<span class="enscript-keyword">if</span> (flags&amp;CRTKIL)
+		lflag |= ECHOKE;
+	<span class="enscript-keyword">else</span>
+		lflag &amp;= ~ECHOKE;
+	<span class="enscript-keyword">if</span> (flags&amp;PRTERA)
+		lflag |= ECHOPRT;
+	<span class="enscript-keyword">else</span>
+		lflag &amp;= ~ECHOPRT;
+	<span class="enscript-keyword">if</span> (flags&amp;CTLECH)
+		lflag |= ECHOCTL;
+	<span class="enscript-keyword">else</span>
+		lflag &amp;= ~ECHOCTL;
+	<span class="enscript-keyword">if</span> (flags&amp;TANDEM)
+		iflag |= IXOFF;
+	<span class="enscript-keyword">else</span>
+		iflag &amp;= ~IXOFF;
+	<span class="enscript-keyword">if</span> ((flags&amp;DECCTQ) == 0)
+		iflag |= IXANY;
+	<span class="enscript-keyword">else</span>
+		iflag &amp;= ~IXANY;
+	<span class="enscript-keyword">if</span> (flags &amp; MDMBUF)
+		cflag |= MDMBUF;
+	<span class="enscript-keyword">else</span>
+		cflag &amp;= ~MDMBUF;
+	<span class="enscript-keyword">if</span> (flags&amp;NOHANG)
+		cflag &amp;= ~HUPCL;
+	<span class="enscript-keyword">else</span>
+		cflag |= HUPCL;
+	lflag &amp;= ~(TOSTOP|FLUSHO|PENDIN|NOFLSH);
+	lflag |= flags&amp;(TOSTOP|FLUSHO|PENDIN|NOFLSH);
+
+	<span class="enscript-comment">/*
+	 * The next if-else statement is copied from above so don't bother
+	 * checking it separately.  We could avoid fiddlling with the
+	 * character size if the mode is already RAW or if neither the
+	 * LITOUT bit or the PASS8 bit is being changed, but the delta of
+	 * the change is not available here and skipping the RAW case would
+	 * make the code different from above.
+	 */</span>
+	cflag &amp;= ~(CSIZE|PARENB);
+	<span class="enscript-keyword">if</span> (flags&amp;(RAW|LITOUT|PASS8)) {
+		cflag |= CS8;
+		<span class="enscript-keyword">if</span> (!(flags&amp;(RAW|PASS8))
+		    || (flags&amp;(RAW|PASS8|ANYP)) == (PASS8|ANYP))
+			iflag |= ISTRIP;
+		<span class="enscript-keyword">else</span>
+			iflag &amp;= ~ISTRIP;
+		<span class="enscript-keyword">if</span> (flags&amp;(RAW|LITOUT))
+			oflag &amp;= ~OPOST;
+		<span class="enscript-keyword">else</span>
+			oflag |= OPOST;
+	} <span class="enscript-keyword">else</span> {
+		cflag |= CS7|PARENB;
+		iflag |= ISTRIP;
+		oflag |= OPOST;
+	}
+	t-&gt;c_iflag = iflag;
+	t-&gt;c_oflag = oflag;
+	t-&gt;c_lflag = lflag;
+	t-&gt;c_cflag = cflag;
+}
+</pre>
+<hr />
+</body></html>

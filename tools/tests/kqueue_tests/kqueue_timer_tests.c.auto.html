@@ -1,0 +1,280 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kqueue_timer_tests.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kqueue_timer_tests.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/event.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+
+<span class="enscript-type">int</span> kq, passed, failed;
+
+<span class="enscript-comment">/*
+ * Wait for given kevent, which should return in 'expected' usecs.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">do_simple_kevent</span>(<span class="enscript-type">struct</span> kevent64_s *kev, uint64_t expected)
+{
+	<span class="enscript-type">int</span> ret;
+	uint64_t elapsed_usecs, delta_usecs;
+	<span class="enscript-type">struct</span> timespec timeout;
+	<span class="enscript-type">struct</span> timeval before, after;
+
+	<span class="enscript-comment">/* time out after 1 sec extra delay */</span>
+	timeout.tv_sec = (expected / (1000 * 1000)) + 1; 
+	timeout.tv_nsec = (expected % (1000 * 1000)) * 1000;
+
+	<span class="enscript-comment">/* measure time for the kevent */</span>
+	gettimeofday(&amp;before, NULL);
+	ret = kevent64(kq, kev, 1, kev, 1, 0, &amp;timeout);
+	gettimeofday(&amp;after, NULL);
+
+	<span class="enscript-keyword">if</span> (ret &lt; 1 || (kev-&gt;flags &amp; EV_ERROR)) {
+		printf(<span class="enscript-string">&quot;\tfailure: kevent returned %d, error %d\n&quot;</span>, ret, 
+				(ret == -1 ? errno : (<span class="enscript-type">int</span>) kev-&gt;data));
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-comment">/* did it work? */</span>
+	elapsed_usecs = (after.tv_sec - before.tv_sec) * (1000 * 1000) + 
+		(after.tv_usec - before.tv_usec);
+	delta_usecs = abs(elapsed_usecs - (expected));
+
+	<span class="enscript-comment">/* failure if we're 30% off, or 50 mics late */</span>
+	<span class="enscript-keyword">if</span> (delta_usecs &gt; (30 * expected / 100.0) &amp;&amp; delta_usecs &gt; 50) {
+		printf(<span class="enscript-string">&quot;\tfailure: expected %lld usec, measured %lld usec.\n&quot;</span>, 
+				expected, elapsed_usecs);
+		<span class="enscript-keyword">return</span> 0;
+	} <span class="enscript-keyword">else</span> {
+		printf(<span class="enscript-string">&quot;\tsuccess.\n&quot;</span>);
+		<span class="enscript-keyword">return</span> 1;
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">test_absolute_kevent</span>(<span class="enscript-type">int</span> time, <span class="enscript-type">int</span> scale)
+{
+	<span class="enscript-type">struct</span> timeval tv;
+	<span class="enscript-type">struct</span> kevent64_s kev;
+	uint64_t nowus, expected, deadline;
+	<span class="enscript-type">int</span> ret;
+	<span class="enscript-type">int</span> timescale = 0;
+
+	gettimeofday(&amp;tv, NULL);
+	nowus = tv.tv_sec * (1000 * 1000LL) + tv.tv_usec;
+
+	<span class="enscript-keyword">switch</span> (scale) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">NOTE_SECONDS</span>:
+		printf(<span class="enscript-string">&quot;Testing %d sec absolute timer...\n&quot;</span>, time);
+		timescale = 1000 * 1000;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">NOTE_USECONDS</span>:
+		printf(<span class="enscript-string">&quot;Testing %d usec absolute timer...\n&quot;</span>, time);
+		timescale = 1;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+		printf(<span class="enscript-string">&quot;Testing %d msec absolute timer...\n&quot;</span>, time);
+		timescale = 1000;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		printf(<span class="enscript-string">&quot;Failure: scale 0x%x not recognized.\n&quot;</span>, scale);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	expected = time * timescale;
+	deadline = nowus / timescale + time;
+
+	<span class="enscript-comment">/* deadlines in the past should fire immediately */</span>
+	<span class="enscript-keyword">if</span> (time &lt; 0)
+		expected = 0;
+	
+	EV_SET64(&amp;kev, 1, EVFILT_TIMER, EV_ADD, 
+			NOTE_ABSOLUTE | scale, deadline, 0,0,0);
+	ret = do_simple_kevent(&amp;kev, expected);
+
+	<span class="enscript-keyword">if</span> (ret)
+		passed++;
+	<span class="enscript-keyword">else</span>
+		failed++;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">test_oneshot_kevent</span>(<span class="enscript-type">int</span> time, <span class="enscript-type">int</span> scale)
+{
+	<span class="enscript-type">int</span> ret;
+	uint64_t expected = 0;
+	<span class="enscript-type">struct</span> kevent64_s kev;
+
+	<span class="enscript-keyword">switch</span> (scale) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">NOTE_SECONDS</span>:
+		printf(<span class="enscript-string">&quot;Testing %d sec interval timer...\n&quot;</span>, time);
+		expected = time * (1000 * 1000);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">NOTE_USECONDS</span>:
+		printf(<span class="enscript-string">&quot;Testing %d usec interval timer...\n&quot;</span>, time);
+		expected = time;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">NOTE_NSECONDS</span>:
+		printf(<span class="enscript-string">&quot;Testing %d nsec interval timer...\n&quot;</span>, time);
+		expected = time / 1000;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+		printf(<span class="enscript-string">&quot;Testing %d msec interval timer...\n&quot;</span>, time);
+		expected = time * 1000;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		printf(<span class="enscript-string">&quot;Failure: scale 0x%x not recognized.\n&quot;</span>, scale);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* deadlines in the past should fire immediately */</span>
+	<span class="enscript-keyword">if</span> (time &lt; 0)
+		expected = 0;
+	
+	EV_SET64(&amp;kev, 2, EVFILT_TIMER, EV_ADD | EV_ONESHOT, scale, time, 
+			0, 0, 0);
+	ret = do_simple_kevent(&amp;kev, expected);
+
+	<span class="enscript-keyword">if</span> (ret)
+		passed++;
+	<span class="enscript-keyword">else</span>
+		failed++;
+
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">test_repeating_kevent</span>(<span class="enscript-type">int</span> usec)
+{
+	<span class="enscript-type">struct</span> kevent64_s kev;
+	<span class="enscript-type">int</span> expected_pops, ret;
+
+	expected_pops = 1000 * 1000 / usec;
+	printf(<span class="enscript-string">&quot;Testing repeating kevent for %d pops in a second...\n&quot;</span>, 
+		expected_pops);
+
+	EV_SET64(&amp;kev, 3, EVFILT_TIMER, EV_ADD, NOTE_USECONDS, usec, 0, 0, 0);
+	ret = kevent64(kq, &amp;kev, 1, NULL, 0, 0, NULL);
+	<span class="enscript-keyword">if</span> (ret != 0) {
+		printf(<span class="enscript-string">&quot;\tfailure: kevent64 returned %d\n&quot;</span>, ret);
+		failed++;
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* sleep 1 second */</span>
+	usleep(1000 * 1000);
+	ret = kevent64(kq, NULL, 0, &amp;kev, 1, 0, NULL);
+	<span class="enscript-keyword">if</span> (ret != 1 || (kev.flags &amp; EV_ERROR)) {
+		printf(<span class="enscript-string">&quot;\tfailure: kevent64 returned %d\n&quot;</span>, ret);
+		failed++;
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* check how many times the timer fired: within 5%? */</span>
+	<span class="enscript-keyword">if</span> (kev.data &gt; expected_pops + (expected_pops / 20) ||
+		kev.data &lt; expected_pops - (expected_pops / 20)) {
+		printf(<span class="enscript-string">&quot;\tfailure: saw %lld pops.\n&quot;</span>, kev.data);
+		failed++;
+	} <span class="enscript-keyword">else</span> {
+		printf(<span class="enscript-string">&quot;\tsuccess: saw %lld pops.\n&quot;</span>, kev.data);
+		passed++;
+	}
+
+	EV_SET64(&amp;kev, 3, EVFILT_TIMER, EV_DELETE, 0, 0, 0, 0, 0);
+	ret = kevent64(kq, &amp;kev, 1, NULL, 0, 0, NULL);
+	<span class="enscript-keyword">if</span> (ret != 0) {
+		printf(<span class="enscript-string">&quot;\tfailed to stop repeating timer: %d\n&quot;</span>, ret);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">test_updated_kevent</span>(<span class="enscript-type">int</span> first, <span class="enscript-type">int</span> second)
+{
+	<span class="enscript-type">struct</span> kevent64_s kev;
+	<span class="enscript-type">int</span> ret;
+
+	printf(<span class="enscript-string">&quot;Testing update from %d to %d msecs...\n&quot;</span>, first, second);
+
+	EV_SET64(&amp;kev, 4, EVFILT_TIMER, EV_ADD|EV_ONESHOT, 0, first, 0, 0, 0);
+	ret = kevent64(kq, &amp;kev, 1, NULL, 0, 0, NULL); 
+	<span class="enscript-keyword">if</span> (ret != 0) {
+		printf(<span class="enscript-string">&quot;\tfailure: initial kevent returned %d\n&quot;</span>, ret);
+		failed++;
+		<span class="enscript-keyword">return</span>;
+	}
+
+	EV_SET64(&amp;kev, 4, EVFILT_TIMER, EV_ONESHOT, 0, second, 0, 0, 0);
+	<span class="enscript-keyword">if</span> (second &lt; 0)
+		second = 0;	
+	ret = do_simple_kevent(&amp;kev, second * 1000);
+	<span class="enscript-keyword">if</span> (ret)
+		passed++;
+	<span class="enscript-keyword">else</span>
+		failed++;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">main</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> timeval tv;
+	<span class="enscript-type">struct</span> kevent64_s kev;
+	uint64_t nowms, deadline;
+
+	kq = kqueue();
+	assert(kq &gt; 0);
+	passed = 0;
+	failed = 0;
+
+	test_absolute_kevent(100, 0);
+	test_absolute_kevent(200, 0);
+	test_absolute_kevent(300, 0);
+	test_absolute_kevent(1000, 0);
+	test_absolute_kevent(500, NOTE_USECONDS);
+	test_absolute_kevent(100, NOTE_USECONDS);
+	test_absolute_kevent(5, NOTE_SECONDS);
+	test_absolute_kevent(-1000, 0);
+
+	test_oneshot_kevent(1, NOTE_SECONDS);
+	test_oneshot_kevent(10, 0);
+	test_oneshot_kevent(200, NOTE_USECONDS);
+	test_oneshot_kevent(300000, NOTE_NSECONDS);
+	test_oneshot_kevent(-1, NOTE_SECONDS);
+
+	test_repeating_kevent(100 * 1000);
+	test_repeating_kevent(5 * 1000);
+	test_repeating_kevent(200);
+	test_repeating_kevent(50);
+	test_repeating_kevent(10);
+
+	test_updated_kevent(1000, 2000);
+	test_updated_kevent(2000, 1000);
+	test_updated_kevent(1000, -1);
+
+	printf(<span class="enscript-string">&quot;\nFinished: %d tests passed, %d failed.\n&quot;</span>, passed, failed);
+
+	exit(EXIT_SUCCESS);
+}
+</pre>
+<hr />
+</body></html>

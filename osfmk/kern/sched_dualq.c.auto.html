@@ -1,0 +1,484 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>sched_dualq.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">sched_dualq.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/sched_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_cpu.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_dualq_init</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> thread_t
+<span class="enscript-function-name">sched_dualq_steal_thread</span>(processor_set_t pset);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_dualq_thread_update_scan</span>(sched_update_scan_context_t scan_context);
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_dualq_processor_enqueue</span>(processor_t processor, thread_t thread, integer_t options);
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_dualq_processor_queue_remove</span>(processor_t processor, thread_t thread);
+
+<span class="enscript-type">static</span> ast_t
+<span class="enscript-function-name">sched_dualq_processor_csw_check</span>(processor_t processor);
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_dualq_processor_queue_has_priority</span>(processor_t processor, <span class="enscript-type">int</span> priority, boolean_t gte);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sched_dualq_runq_count</span>(processor_t processor);
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_dualq_processor_queue_empty</span>(processor_t processor);
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">sched_dualq_runq_stats_count_sum</span>(processor_t processor);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sched_dualq_processor_bound_count</span>(processor_t processor);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_dualq_pset_init</span>(processor_set_t pset);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_dualq_processor_init</span>(processor_t processor);
+
+<span class="enscript-type">static</span> thread_t
+<span class="enscript-function-name">sched_dualq_choose_thread</span>(processor_t processor, <span class="enscript-type">int</span> priority, ast_t reason);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_dualq_processor_queue_shutdown</span>(processor_t processor);
+
+<span class="enscript-type">static</span> sched_mode_t
+<span class="enscript-function-name">sched_dualq_initial_thread_sched_mode</span>(task_t parent_task);
+
+<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sched_dispatch_table sched_dualq_dispatch = {
+	.sched_name                                     = <span class="enscript-string">&quot;dualq&quot;</span>,
+	.init                                           = sched_dualq_init,
+	.timebase_init                                  = sched_timeshare_timebase_init,
+	.processor_init                                 = sched_dualq_processor_init,
+	.pset_init                                      = sched_dualq_pset_init,
+	.maintenance_continuation                       = sched_timeshare_maintenance_continue,
+	.choose_thread                                  = sched_dualq_choose_thread,
+	.steal_thread_enabled                           = TRUE,
+	.steal_thread                                   = sched_dualq_steal_thread,
+	.compute_timeshare_priority                     = sched_compute_timeshare_priority,
+	.choose_processor                               = choose_processor,
+	.processor_enqueue                              = sched_dualq_processor_enqueue,
+	.processor_queue_shutdown                       = sched_dualq_processor_queue_shutdown,
+	.processor_queue_remove                         = sched_dualq_processor_queue_remove,
+	.processor_queue_empty                          = sched_dualq_processor_queue_empty,
+	.priority_is_urgent                             = priority_is_urgent,
+	.processor_csw_check                            = sched_dualq_processor_csw_check,
+	.processor_queue_has_priority                   = sched_dualq_processor_queue_has_priority,
+	.initial_quantum_size                           = sched_timeshare_initial_quantum_size,
+	.initial_thread_sched_mode                      = sched_dualq_initial_thread_sched_mode,
+	.can_update_priority                            = can_update_priority,
+	.update_priority                                = update_priority,
+	.lightweight_update_priority                    = lightweight_update_priority,
+	.quantum_expire                                 = sched_default_quantum_expire,
+	.processor_runq_count                           = sched_dualq_runq_count,
+	.processor_runq_stats_count_sum                 = sched_dualq_runq_stats_count_sum,
+	.processor_bound_count                          = sched_dualq_processor_bound_count,
+	.thread_update_scan                             = sched_dualq_thread_update_scan,
+	.direct_dispatch_to_idle_processors             = FALSE,
+	.multiple_psets_enabled                         = TRUE,
+	.sched_groups_enabled                           = FALSE,
+};
+
+<span class="enscript-function-name">__attribute__</span>((always_inline))
+<span class="enscript-type">static</span> inline run_queue_t <span class="enscript-function-name">dualq_main_runq</span>(processor_t processor)
+{
+	<span class="enscript-keyword">return</span> &amp;processor-&gt;processor_set-&gt;pset_runq;
+}
+
+<span class="enscript-function-name">__attribute__</span>((always_inline))
+<span class="enscript-type">static</span> inline run_queue_t <span class="enscript-function-name">dualq_bound_runq</span>(processor_t processor)
+{
+	<span class="enscript-keyword">return</span> &amp;processor-&gt;runq;
+}
+
+<span class="enscript-function-name">__attribute__</span>((always_inline))
+<span class="enscript-type">static</span> inline run_queue_t <span class="enscript-function-name">dualq_runq_for_thread</span>(processor_t processor, thread_t thread)
+{
+	<span class="enscript-keyword">if</span> (thread-&gt;bound_processor == PROCESSOR_NULL) {
+		<span class="enscript-keyword">return</span> dualq_main_runq(processor);
+	} <span class="enscript-keyword">else</span> {
+		assert(thread-&gt;bound_processor == processor);
+		<span class="enscript-keyword">return</span> dualq_bound_runq(processor);
+	}
+}
+
+<span class="enscript-type">static</span> sched_mode_t
+<span class="enscript-function-name">sched_dualq_initial_thread_sched_mode</span>(task_t parent_task)
+{
+	<span class="enscript-keyword">if</span> (parent_task == kernel_task)
+		<span class="enscript-keyword">return</span> TH_MODE_FIXED;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> TH_MODE_TIMESHARE;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_dualq_processor_init</span>(processor_t processor)
+{
+	run_queue_init(&amp;processor-&gt;runq);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_dualq_pset_init</span>(processor_set_t pset)
+{
+	run_queue_init(&amp;pset-&gt;pset_runq);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_dualq_init</span>(<span class="enscript-type">void</span>)
+{
+	sched_timeshare_init();
+}
+
+<span class="enscript-type">static</span> thread_t
+<span class="enscript-function-name">sched_dualq_choose_thread</span>(
+                          processor_t      processor,
+                          <span class="enscript-type">int</span>              priority,
+                 __unused ast_t            reason)
+{
+	run_queue_t main_runq  = dualq_main_runq(processor);
+	run_queue_t bound_runq = dualq_bound_runq(processor);
+	run_queue_t chosen_runq;
+
+	<span class="enscript-keyword">if</span> (bound_runq-&gt;highq &lt; priority &amp;&amp;
+	     main_runq-&gt;highq &lt; priority)
+		<span class="enscript-keyword">return</span> THREAD_NULL;
+
+	<span class="enscript-keyword">if</span> (bound_runq-&gt;count &amp;&amp; main_runq-&gt;count) {
+		<span class="enscript-keyword">if</span> (bound_runq-&gt;highq &gt;= main_runq-&gt;highq) {
+			chosen_runq = bound_runq;
+		} <span class="enscript-keyword">else</span> {
+			chosen_runq = main_runq;
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (bound_runq-&gt;count) {
+		chosen_runq = bound_runq;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (main_runq-&gt;count) {
+		chosen_runq = main_runq;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span> (THREAD_NULL);
+	}
+
+	<span class="enscript-keyword">return</span> run_queue_dequeue(chosen_runq, SCHED_HEADQ);
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_dualq_processor_enqueue</span>(
+                              processor_t       processor,
+                              thread_t          thread,
+                              integer_t         options)
+{
+	run_queue_t     rq = dualq_runq_for_thread(processor, thread);
+	boolean_t       result;
+
+	result = run_queue_enqueue(rq, thread, options);
+	thread-&gt;runq = processor;
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_dualq_processor_queue_empty</span>(processor_t processor)
+{
+	<span class="enscript-keyword">return</span> dualq_main_runq(processor)-&gt;count  == 0 &amp;&amp;
+	       dualq_bound_runq(processor)-&gt;count == 0;
+}
+
+<span class="enscript-type">static</span> ast_t
+<span class="enscript-function-name">sched_dualq_processor_csw_check</span>(processor_t processor)
+{
+	boolean_t       has_higher;
+	<span class="enscript-type">int</span>             pri;
+
+	run_queue_t main_runq  = dualq_main_runq(processor);
+	run_queue_t bound_runq = dualq_bound_runq(processor);
+
+	assert(processor-&gt;active_thread != NULL);
+
+	pri = MAX(main_runq-&gt;highq, bound_runq-&gt;highq);
+
+	<span class="enscript-keyword">if</span> (processor-&gt;first_timeslice) {
+		has_higher = (pri &gt; processor-&gt;current_pri);
+	} <span class="enscript-keyword">else</span> {
+		has_higher = (pri &gt;= processor-&gt;current_pri);
+	}
+
+	<span class="enscript-keyword">if</span> (has_higher) {
+		<span class="enscript-keyword">if</span> (main_runq-&gt;urgency &gt; 0)
+			<span class="enscript-keyword">return</span> (AST_PREEMPT | AST_URGENT);
+
+		<span class="enscript-keyword">if</span> (bound_runq-&gt;urgency &gt; 0)
+			<span class="enscript-keyword">return</span> (AST_PREEMPT | AST_URGENT);
+		
+		<span class="enscript-keyword">return</span> AST_PREEMPT;
+	}
+
+	<span class="enscript-keyword">return</span> AST_NONE;
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_dualq_processor_queue_has_priority</span>(processor_t    processor,
+                                         <span class="enscript-type">int</span>            priority,
+                                         boolean_t      gte)
+{
+	<span class="enscript-type">int</span> qpri = MAX(dualq_main_runq(processor)-&gt;highq, dualq_bound_runq(processor)-&gt;highq);
+
+	<span class="enscript-keyword">if</span> (gte)
+		<span class="enscript-keyword">return</span> qpri &gt;= priority;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> qpri &gt; priority;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sched_dualq_runq_count</span>(processor_t processor)
+{
+	<span class="enscript-keyword">return</span> dualq_main_runq(processor)-&gt;count + dualq_bound_runq(processor)-&gt;count;
+}
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">sched_dualq_runq_stats_count_sum</span>(processor_t processor)
+{
+	uint64_t bound_sum = dualq_bound_runq(processor)-&gt;runq_stats.count_sum;
+
+	<span class="enscript-keyword">if</span> (processor-&gt;cpu_id == processor-&gt;processor_set-&gt;cpu_set_low)
+		<span class="enscript-keyword">return</span> bound_sum + dualq_main_runq(processor)-&gt;runq_stats.count_sum;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> bound_sum;
+}
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sched_dualq_processor_bound_count</span>(processor_t processor)
+{
+	<span class="enscript-keyword">return</span> dualq_bound_runq(processor)-&gt;count;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_dualq_processor_queue_shutdown</span>(processor_t processor)
+{
+	processor_set_t pset = processor-&gt;processor_set;
+	run_queue_t     rq   = dualq_main_runq(processor);
+	thread_t        thread;
+	queue_head_t    tqueue;
+
+	<span class="enscript-comment">/* We only need to migrate threads if this is the last active processor in the pset */</span>
+	<span class="enscript-keyword">if</span> (pset-&gt;online_processor_count &gt; 0) {
+		pset_unlock(pset);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	queue_init(&amp;tqueue);
+
+	<span class="enscript-keyword">while</span> (rq-&gt;count &gt; 0) {
+		thread = run_queue_dequeue(rq, SCHED_HEADQ);
+		enqueue_tail(&amp;tqueue, (queue_entry_t)thread);
+	}
+
+	pset_unlock(pset);
+
+	<span class="enscript-keyword">while</span> ((thread = (thread_t)(<span class="enscript-type">void</span>*)dequeue_head(&amp;tqueue)) != THREAD_NULL) {
+		thread_lock(thread);
+
+		thread_setrun(thread, SCHED_TAILQ);
+
+		thread_unlock(thread);
+	}
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sched_dualq_processor_queue_remove</span>(
+                                   processor_t processor,
+                                   thread_t    thread)
+{
+	run_queue_t             rq;
+	processor_set_t         pset = processor-&gt;processor_set;
+
+	pset_lock(pset);
+
+	rq = dualq_runq_for_thread(processor, thread);
+
+	<span class="enscript-keyword">if</span> (processor == thread-&gt;runq) {
+		<span class="enscript-comment">/*
+		 * Thread is on a run queue and we have a lock on
+		 * that run queue.
+		 */</span>
+		run_queue_remove(rq, thread);
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * The thread left the run queue before we could
+		 * lock the run queue.
+		 */</span>
+		assert(thread-&gt;runq == PROCESSOR_NULL);
+		processor = PROCESSOR_NULL;
+	}
+
+	pset_unlock(pset);
+
+	<span class="enscript-keyword">return</span> (processor != PROCESSOR_NULL);
+}
+
+<span class="enscript-type">static</span> thread_t
+<span class="enscript-function-name">sched_dualq_steal_thread</span>(processor_set_t pset)
+{
+	processor_set_t nset, cset = pset;
+	thread_t        thread;
+
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-keyword">if</span> (cset-&gt;pset_runq.count &gt; 0) {
+			thread = run_queue_dequeue(&amp;cset-&gt;pset_runq, SCHED_HEADQ);
+			pset_unlock(cset);
+			<span class="enscript-keyword">return</span> (thread);
+		}
+
+		nset = next_pset(cset);
+
+		<span class="enscript-keyword">if</span> (nset != pset) {
+			pset_unlock(cset);
+
+			cset = nset;
+			pset_lock(cset);
+		}
+	} <span class="enscript-keyword">while</span> (nset != pset);
+
+	pset_unlock(cset);
+
+	<span class="enscript-keyword">return</span> (THREAD_NULL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_dualq_thread_update_scan</span>(sched_update_scan_context_t scan_context)
+{
+	boolean_t               restart_needed = FALSE;
+	processor_t             processor = processor_list;
+	processor_set_t         pset;
+	thread_t                thread;
+	spl_t                   s;
+
+	<span class="enscript-comment">/*
+	 *  We update the threads associated with each processor (bound and idle threads)
+	 *  and then update the threads in each pset runqueue.
+	 */</span>
+
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-keyword">do</span> {
+			pset = processor-&gt;processor_set;
+
+			s = splsched();
+			pset_lock(pset);
+
+			restart_needed = runq_scan(dualq_bound_runq(processor), scan_context);
+
+			pset_unlock(pset);
+			splx(s);
+
+			<span class="enscript-keyword">if</span> (restart_needed)
+				<span class="enscript-keyword">break</span>;
+
+			thread = processor-&gt;idle_thread;
+			<span class="enscript-keyword">if</span> (thread != THREAD_NULL &amp;&amp; thread-&gt;sched_stamp != sched_tick) {
+				<span class="enscript-keyword">if</span> (thread_update_add_thread(thread) == FALSE) {
+					restart_needed = TRUE;
+					<span class="enscript-keyword">break</span>;
+				}
+			}
+		} <span class="enscript-keyword">while</span> ((processor = processor-&gt;processor_list) != NULL);
+
+		<span class="enscript-comment">/* Ok, we now have a collection of candidates -- fix them. */</span>
+		thread_update_process_threads();
+
+	} <span class="enscript-keyword">while</span> (restart_needed);
+
+	pset = &amp;pset0;
+
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-keyword">do</span> {
+			s = splsched();
+			pset_lock(pset);
+
+			restart_needed = runq_scan(&amp;pset-&gt;pset_runq, scan_context);
+
+			pset_unlock(pset);
+			splx(s);
+
+			<span class="enscript-keyword">if</span> (restart_needed)
+				<span class="enscript-keyword">break</span>;
+		} <span class="enscript-keyword">while</span> ((pset = pset-&gt;pset_list) != NULL);
+
+		<span class="enscript-comment">/* Ok, we now have a collection of candidates -- fix them. */</span>
+		thread_update_process_threads();
+
+	} <span class="enscript-keyword">while</span> (restart_needed);
+}
+
+
+</pre>
+<hr />
+</body></html>

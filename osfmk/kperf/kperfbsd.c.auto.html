@@ -1,0 +1,821 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kperfbsd.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kperfbsd.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2011 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*  sysctl interface for paramters from user-land */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mman.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/context.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/action.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/timetrigger.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/pet.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/kperfbsd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/kperf.h&gt;</span>
+
+
+<span class="enscript-comment">/* a pid which is allowed to control kperf without requiring root access */</span>
+<span class="enscript-type">static</span> pid_t blessed_pid = -1;
+<span class="enscript-type">static</span> boolean_t blessed_preempt = FALSE;
+
+<span class="enscript-comment">/* IDs for dispatch from SYSCTL macros */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_SAMPLING</span>        (1)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_ACTION_COUNT</span>    (2)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_ACTION_SAMPLERS</span> (3)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_TIMER_COUNT</span>     (4)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_TIMER_PERIOD</span>    (5)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_TIMER_PET</span>       (6)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_TIMER_ACTION</span>    (7)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_BLESS</span>           (8)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_ACTION_USERDATA</span> (9)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_ACTION_FILTER_BY_TASK</span> (10)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_ACTION_FILTER_BY_PID</span>  (11)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_KDBG_CALLSTACKS</span> (12)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_PET_IDLE_RATE</span>   (13)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_BLESS_PREEMPT</span>   (14)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_KDBG_CSWITCH</span>    (15)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_CSWITCH_ACTION</span>  (16)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">REQ_SIGNPOST_ACTION</span> (17)
+
+<span class="enscript-comment">/* simple state variables */</span>
+<span class="enscript-type">int</span> kperf_debug_level = 0;
+
+<span class="enscript-type">static</span> lck_grp_attr_t *kperf_cfg_lckgrp_attr = NULL;
+<span class="enscript-type">static</span> lck_grp_t      *kperf_cfg_lckgrp = NULL;
+<span class="enscript-type">static</span> lck_mtx_t       kperf_cfg_lock;
+<span class="enscript-type">static</span> boolean_t       kperf_cfg_initted = FALSE;
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">kdbg_swap_global_state_pid</span>(pid_t old_pid, pid_t new_pid); <span class="enscript-comment">/* bsd/kern/kdebug.c */</span>
+
+<span class="enscript-comment">/***************************
+ *
+ * lock init
+ *
+ ***************************/</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kperf_bootstrap</span>(<span class="enscript-type">void</span>)
+{
+	kperf_cfg_lckgrp_attr = lck_grp_attr_alloc_init();
+	kperf_cfg_lckgrp = lck_grp_alloc_init(<span class="enscript-string">&quot;kperf cfg&quot;</span>, 
+                                          kperf_cfg_lckgrp_attr);
+	lck_mtx_init(&amp;kperf_cfg_lock, kperf_cfg_lckgrp, LCK_ATTR_NULL);
+
+	kperf_cfg_initted = TRUE;
+}
+
+<span class="enscript-comment">/***************************
+ *
+ * sysctl handlers
+ *
+ ***************************/</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_timer_period</span>( __unused <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> error = 0;
+    uint64_t inputs[2], retval;
+    <span class="enscript-type">unsigned</span> timer, set = 0;
+    
+    <span class="enscript-comment">/* get 2x 64-bit words */</span>
+    error = SYSCTL_IN( req, inputs, 2*<span class="enscript-keyword">sizeof</span>(inputs[0]) );
+    <span class="enscript-keyword">if</span>(error)
+	    <span class="enscript-keyword">return</span> (error);
+
+    <span class="enscript-comment">/* setup inputs */</span>
+    timer = (<span class="enscript-type">unsigned</span>) inputs[0];
+    <span class="enscript-keyword">if</span>( inputs[1] != ~0ULL )
+	    set = 1;
+
+    <span class="enscript-keyword">if</span>( set )
+    {
+	    error = kperf_timer_set_period( timer, inputs[1] );
+	    <span class="enscript-keyword">if</span>( error )
+		    <span class="enscript-keyword">return</span> error;
+    }
+
+    error = kperf_timer_get_period(timer, &amp;retval);
+    <span class="enscript-keyword">if</span>(error)
+	    <span class="enscript-keyword">return</span> (error);
+
+    inputs[1] = retval;
+    
+    <span class="enscript-keyword">if</span>( error == 0 )
+	    error = SYSCTL_OUT( req, inputs, 2*<span class="enscript-keyword">sizeof</span>(inputs[0]) );
+
+    <span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_timer_action</span>( __unused <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> error = 0;
+    uint64_t inputs[2];
+    uint32_t retval;
+    <span class="enscript-type">unsigned</span> timer, set = 0;
+    
+    <span class="enscript-comment">/* get 2x 64-bit words */</span>
+    error = SYSCTL_IN( req, inputs, 2*<span class="enscript-keyword">sizeof</span>(inputs[0]) );
+    <span class="enscript-keyword">if</span>(error)
+	    <span class="enscript-keyword">return</span> (error);
+
+    <span class="enscript-comment">/* setup inputs */</span>
+    timer = (<span class="enscript-type">unsigned</span>) inputs[0];
+    <span class="enscript-keyword">if</span>( inputs[1] != ~0ULL )
+	    set = 1;
+
+    <span class="enscript-keyword">if</span>( set )
+    {
+	    error = kperf_timer_set_action( timer, inputs[1] );
+	    <span class="enscript-keyword">if</span>( error )
+		    <span class="enscript-keyword">return</span> error;
+    }
+
+    error = kperf_timer_get_action(timer, &amp;retval);
+    <span class="enscript-keyword">if</span>(error)
+	    <span class="enscript-keyword">return</span> (error);
+
+    inputs[1] = retval;
+    
+    <span class="enscript-keyword">if</span>( error == 0 )
+	    error = SYSCTL_OUT( req, inputs, 2*<span class="enscript-keyword">sizeof</span>(inputs[0]) );
+
+    <span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_action_samplers</span>( __unused <span class="enscript-type">struct</span> sysctl_oid *oidp, 
+                        <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> error = 0;
+    uint64_t inputs[3];
+    uint32_t retval;
+    <span class="enscript-type">unsigned</span> actionid, set = 0;
+    
+    <span class="enscript-comment">/* get 3x 64-bit words */</span>
+    error = SYSCTL_IN( req, inputs, 3*<span class="enscript-keyword">sizeof</span>(inputs[0]) );
+    <span class="enscript-keyword">if</span>(error)
+	    <span class="enscript-keyword">return</span> (error);
+
+    <span class="enscript-comment">/* setup inputs */</span>
+    set = (<span class="enscript-type">unsigned</span>) inputs[0];
+    actionid = (<span class="enscript-type">unsigned</span>) inputs[1];
+
+    <span class="enscript-keyword">if</span>( set )
+    {
+	    error = kperf_action_set_samplers( actionid, inputs[2] );
+	    <span class="enscript-keyword">if</span>( error )
+		    <span class="enscript-keyword">return</span> error;
+    }
+
+    error = kperf_action_get_samplers(actionid, &amp;retval);
+    <span class="enscript-keyword">if</span>(error)
+	    <span class="enscript-keyword">return</span> (error);
+
+    inputs[2] = retval;
+    
+    <span class="enscript-keyword">if</span>( error == 0 )
+	    error = SYSCTL_OUT( req, inputs, 3*<span class="enscript-keyword">sizeof</span>(inputs[0]) );
+
+    <span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_action_userdata</span>( __unused <span class="enscript-type">struct</span> sysctl_oid *oidp, 
+                        <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> error = 0;
+    uint64_t inputs[3];
+    uint32_t retval;
+    <span class="enscript-type">unsigned</span> actionid, set = 0;
+    
+    <span class="enscript-comment">/* get 3x 64-bit words */</span>
+    error = SYSCTL_IN( req, inputs, 3*<span class="enscript-keyword">sizeof</span>(inputs[0]) );
+    <span class="enscript-keyword">if</span>(error)
+	    <span class="enscript-keyword">return</span> (error);
+
+    <span class="enscript-comment">/* setup inputs */</span>
+    set = (<span class="enscript-type">unsigned</span>) inputs[0];
+    actionid = (<span class="enscript-type">unsigned</span>) inputs[1];
+
+    <span class="enscript-keyword">if</span>( set )
+    {
+	    error = kperf_action_set_userdata( actionid, inputs[2] );
+	    <span class="enscript-keyword">if</span>( error )
+		    <span class="enscript-keyword">return</span> error;
+    }
+
+    error = kperf_action_get_userdata(actionid, &amp;retval);
+    <span class="enscript-keyword">if</span>(error)
+	    <span class="enscript-keyword">return</span> (error);
+
+    inputs[2] = retval;
+    
+    <span class="enscript-keyword">if</span>( error == 0 )
+	    error = SYSCTL_OUT( req, inputs, 3*<span class="enscript-keyword">sizeof</span>(inputs[0]) );
+
+    <span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_action_filter</span>( __unused <span class="enscript-type">struct</span> sysctl_oid *oidp,
+		      <span class="enscript-type">struct</span> sysctl_req *req, <span class="enscript-type">int</span> is_task_t )
+{
+    <span class="enscript-type">int</span> error = 0;
+    uint64_t inputs[3];
+    <span class="enscript-type">int</span> retval;
+    <span class="enscript-type">unsigned</span> actionid, set = 0;
+    mach_port_name_t portname;
+    <span class="enscript-type">int</span> pid;
+
+    <span class="enscript-comment">/* get 3x 64-bit words */</span>
+    error = SYSCTL_IN( req, inputs, 3*<span class="enscript-keyword">sizeof</span>(inputs[0]) );
+    <span class="enscript-keyword">if</span>(error)
+	    <span class="enscript-keyword">return</span> (error);
+
+    <span class="enscript-comment">/* setup inputs */</span>
+    set = (<span class="enscript-type">unsigned</span>) inputs[0];
+    actionid = (<span class="enscript-type">unsigned</span>) inputs[1];
+
+    <span class="enscript-keyword">if</span>( set )
+    {
+	    <span class="enscript-keyword">if</span>( is_task_t )
+	    {
+		    portname = (mach_port_name_t) inputs[2];
+		    pid = kperf_port_to_pid(portname);
+	    }
+	    <span class="enscript-keyword">else</span>
+		    pid = (<span class="enscript-type">int</span>) inputs[2];
+
+	    error = kperf_action_set_filter( actionid, pid );
+	    <span class="enscript-keyword">if</span>( error )
+		    <span class="enscript-keyword">return</span> error;
+    }
+
+    error = kperf_action_get_filter(actionid, &amp;retval);
+    <span class="enscript-keyword">if</span>(error)
+	    <span class="enscript-keyword">return</span> (error);
+
+    inputs[2] = retval;
+    
+    <span class="enscript-keyword">if</span>( error == 0 )
+	    error = SYSCTL_OUT( req, inputs, 3*<span class="enscript-keyword">sizeof</span>(inputs[0]) );
+
+    <span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_sampling</span>( <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> error = 0;
+    uint32_t value = 0;
+    
+    <span class="enscript-comment">/* get the old value and process it */</span>
+    value = kperf_sampling_status();
+
+    <span class="enscript-comment">/* copy out the old value, get the new value */</span>
+    error = sysctl_handle_int(oidp, &amp;value, 0, req);
+    <span class="enscript-keyword">if</span> (error || !req-&gt;newptr)
+	    <span class="enscript-keyword">return</span> (error);
+
+    <span class="enscript-comment">/* if that worked, and we're writing... */</span>
+    <span class="enscript-keyword">if</span>( value )
+	    error = kperf_sampling_enable();
+    <span class="enscript-keyword">else</span>
+	    error = kperf_sampling_disable();
+
+    <span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_action_count</span>( <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> error = 0;
+    uint32_t value = 0;
+    
+    <span class="enscript-comment">/* get the old value and process it */</span>
+    value = kperf_action_get_count();
+
+    <span class="enscript-comment">/* copy out the old value, get the new value */</span>
+    error = sysctl_handle_int(oidp, &amp;value, 0, req);
+    <span class="enscript-keyword">if</span> (error || !req-&gt;newptr)
+	    <span class="enscript-keyword">return</span> (error);
+
+    <span class="enscript-comment">/* if that worked, and we're writing... */</span>
+    <span class="enscript-keyword">return</span> kperf_action_set_count(value);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_timer_count</span>( <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> error = 0;
+    uint32_t value = 0;
+    
+    <span class="enscript-comment">/* get the old value and process it */</span>
+    value = kperf_timer_get_count();
+
+    <span class="enscript-comment">/* copy out the old value, get the new value */</span>
+    error = sysctl_handle_int(oidp, &amp;value, 0, req);
+    <span class="enscript-keyword">if</span> (error || !req-&gt;newptr)
+	    <span class="enscript-keyword">return</span> (error);
+
+    <span class="enscript-comment">/* if that worked, and we're writing... */</span>
+    <span class="enscript-keyword">return</span> kperf_timer_set_count(value);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_timer_pet</span>( <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> error = 0;
+    uint32_t value = 0;
+    
+    <span class="enscript-comment">/* get the old value and process it */</span>
+    value = kperf_timer_get_petid();
+
+    <span class="enscript-comment">/* copy out the old value, get the new value */</span>
+    error = sysctl_handle_int(oidp, &amp;value, 0, req);
+    <span class="enscript-keyword">if</span> (error || !req-&gt;newptr)
+	    <span class="enscript-keyword">return</span> (error);
+
+    <span class="enscript-comment">/* if that worked, and we're writing... */</span>
+    <span class="enscript-keyword">return</span> kperf_timer_set_petid(value);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_bless</span>( <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> error = 0;
+    <span class="enscript-type">int</span> value = 0;
+
+    <span class="enscript-comment">/* get the old value and process it */</span>
+    value = blessed_pid;
+
+    <span class="enscript-comment">/* copy out the old value, get the new value */</span>
+    error = sysctl_handle_int(oidp, &amp;value, 0, req);
+    <span class="enscript-keyword">if</span> (error || !req-&gt;newptr)
+	    <span class="enscript-keyword">return</span> (error);
+
+    <span class="enscript-comment">/* if that worked, and we're writing... */</span>
+    error = kperf_bless_pid(value);
+
+    <span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_bless_preempt</span>( <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> error = 0;
+    <span class="enscript-type">int</span> value = 0;
+
+    <span class="enscript-comment">/* get the old value and process it */</span>
+    value = blessed_preempt;
+
+    <span class="enscript-comment">/* copy out the old value, get the new value */</span>
+    error = sysctl_handle_int(oidp, &amp;value, 0, req);
+    <span class="enscript-keyword">if</span> (error || !req-&gt;newptr)
+	    <span class="enscript-keyword">return</span> (error);
+
+    <span class="enscript-comment">/* if that worked, and we're writing... */</span>
+    blessed_preempt = value ? TRUE : FALSE;
+
+    <span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_kdbg_callstacks</span>( <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> error = 0;
+    <span class="enscript-type">int</span> value = 0;
+    
+    <span class="enscript-comment">/* get the old value and process it */</span>
+    value = kperf_kdbg_get_stacks();
+
+    <span class="enscript-comment">/* copy out the old value, get the new value */</span>
+    error = sysctl_handle_int(oidp, &amp;value, 0, req);
+    <span class="enscript-keyword">if</span> (error || !req-&gt;newptr)
+	    <span class="enscript-keyword">return</span> (error);
+
+    <span class="enscript-comment">/* if that worked, and we're writing... */</span>
+    error = kperf_kdbg_set_stacks(value);
+
+    <span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_pet_idle_rate</span>( <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> error = 0;
+    <span class="enscript-type">int</span> value = 0;
+    
+    <span class="enscript-comment">/* get the old value and process it */</span>
+    value = kperf_get_pet_idle_rate();
+
+    <span class="enscript-comment">/* copy out the old value, get the new value */</span>
+    error = sysctl_handle_int(oidp, &amp;value, 0, req);
+    <span class="enscript-keyword">if</span> (error || !req-&gt;newptr)
+	    <span class="enscript-keyword">return</span> (error);
+
+    <span class="enscript-comment">/* if that worked, and we're writing... */</span>
+    kperf_set_pet_idle_rate(value);
+
+    <span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_kdbg_cswitch</span>( <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> value = kperf_kdbg_cswitch_get();
+    <span class="enscript-type">int</span> error = sysctl_handle_int(oidp, &amp;value, 0, req);
+
+    <span class="enscript-keyword">if</span> (error || !req-&gt;newptr) {
+        <span class="enscript-keyword">return</span> error;
+    }
+
+    <span class="enscript-keyword">return</span> kperf_kdbg_cswitch_set(value);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_cswitch_action</span>( <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> value = kperf_cswitch_action_get();
+    <span class="enscript-type">int</span> error = sysctl_handle_int(oidp, &amp;value, 0, req);
+
+    <span class="enscript-keyword">if</span> (error || !req-&gt;newptr) {
+        <span class="enscript-keyword">return</span> error;
+    }
+
+    <span class="enscript-keyword">return</span> kperf_cswitch_action_set(value);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_signpost_action</span>( <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">struct</span> sysctl_req *req )
+{
+    <span class="enscript-type">int</span> value = kperf_signpost_action_get();
+    <span class="enscript-type">int</span> error = sysctl_handle_int(oidp, &amp;value, 0, req);
+
+    <span class="enscript-keyword">if</span> (error || !req-&gt;newptr) {
+        <span class="enscript-keyword">return</span> error;
+    }
+
+    <span class="enscript-keyword">return</span> kperf_signpost_action_set(value);
+}
+
+<span class="enscript-comment">/*
+ * #define SYSCTL_HANDLER_ARGS (struct sysctl_oid *oidp,         \
+ *                                void *arg1, int arg2,                 \
+ *                              struct sysctl_req *req )
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+kperf_sysctl SYSCTL_HANDLER_ARGS
+{
+	<span class="enscript-type">int</span> ret;
+
+	<span class="enscript-comment">// __unused struct sysctl_oid *unused_oidp = oidp;
+</span>	(<span class="enscript-type">void</span>)arg2;
+
+	<span class="enscript-keyword">if</span> ( !kperf_cfg_initted )
+		panic(<span class="enscript-string">&quot;kperf_bootstrap not called&quot;</span>);
+
+	ret = kperf_access_check();
+	<span class="enscript-keyword">if</span> (ret) {
+		<span class="enscript-keyword">return</span> ret;
+	}
+
+	lck_mtx_lock(&amp;kperf_cfg_lock);
+
+	<span class="enscript-comment">/* which request */</span>
+	<span class="enscript-keyword">switch</span>( (uintptr_t) arg1 )
+	{
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_ACTION_COUNT</span>:
+		ret = sysctl_action_count( oidp, req );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_ACTION_SAMPLERS</span>:
+		ret = sysctl_action_samplers( oidp, req );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_ACTION_USERDATA</span>:
+		ret = sysctl_action_userdata( oidp, req );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_TIMER_COUNT</span>:
+		ret = sysctl_timer_count( oidp, req );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_TIMER_PERIOD</span>:
+		ret = sysctl_timer_period( oidp, req );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_TIMER_PET</span>:
+		ret = sysctl_timer_pet( oidp, req );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_TIMER_ACTION</span>:
+		ret = sysctl_timer_action( oidp, req );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_SAMPLING</span>:
+		ret = sysctl_sampling( oidp, req );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_KDBG_CALLSTACKS</span>:
+		ret = sysctl_kdbg_callstacks( oidp, req );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_KDBG_CSWITCH</span>:
+		ret = sysctl_kdbg_cswitch( oidp, req );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_ACTION_FILTER_BY_TASK</span>:
+		ret = sysctl_action_filter( oidp, req, 1 );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_ACTION_FILTER_BY_PID</span>:
+		ret = sysctl_action_filter( oidp, req, 0 );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_PET_IDLE_RATE</span>:
+		ret = sysctl_pet_idle_rate( oidp, req );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_BLESS_PREEMPT</span>:
+		ret = sysctl_bless_preempt( oidp, req );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_CSWITCH_ACTION</span>:
+		ret = sysctl_cswitch_action( oidp, req );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">REQ_SIGNPOST_ACTION</span>:
+		ret = sysctl_signpost_action( oidp, req );
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		ret = ENOENT;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	lck_mtx_unlock(&amp;kperf_cfg_lock);
+
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+kperf_sysctl_bless_handler SYSCTL_HANDLER_ARGS
+{
+	<span class="enscript-type">int</span> ret;
+	<span class="enscript-comment">// __unused struct sysctl_oid *unused_oidp = oidp;
+</span>	(<span class="enscript-type">void</span>)arg2;
+  
+	<span class="enscript-keyword">if</span> ( !kperf_cfg_initted )
+		panic(<span class="enscript-string">&quot;kperf_bootstrap not called&quot;</span>);
+
+	lck_mtx_lock(&amp;kperf_cfg_lock);
+
+	<span class="enscript-comment">/* which request */</span>
+	<span class="enscript-keyword">if</span> ( (uintptr_t) arg1 == REQ_BLESS )
+		ret = sysctl_bless( oidp, req );
+	<span class="enscript-keyword">else</span>
+		ret = ENOENT;
+
+	lck_mtx_unlock(&amp;kperf_cfg_lock);
+
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-comment">/***************************
+ *
+ * Access control
+ *
+ ***************************/</span>
+
+<span class="enscript-comment">/* Validate whether the current process has priviledges to access
+ * kperf (and by extension, trace). Returns 0 if access is granted.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_access_check</span>(<span class="enscript-type">void</span>)
+{
+	proc_t p = current_proc();
+	proc_t blessed_p;
+	<span class="enscript-type">int</span> ret = 0;
+	boolean_t pid_gone = FALSE;
+
+	<span class="enscript-comment">/* check if the pid that held the lock is gone */</span>
+	blessed_p = proc_find(blessed_pid);
+
+	<span class="enscript-keyword">if</span> ( blessed_p != NULL )
+		proc_rele(blessed_p);
+	<span class="enscript-keyword">else</span>
+		pid_gone = TRUE;
+
+	<span class="enscript-keyword">if</span> ( blessed_pid == -1 || pid_gone ) {
+		<span class="enscript-comment">/* check for root */</span>
+		ret = suser(kauth_cred_get(), &amp;p-&gt;p_acflag);
+		<span class="enscript-keyword">if</span>( !ret )
+			<span class="enscript-keyword">return</span> ret;
+	}
+
+	<span class="enscript-comment">/* check against blessed pid */</span>
+	<span class="enscript-keyword">if</span>( p-&gt;p_pid != blessed_pid )
+		<span class="enscript-keyword">return</span> EACCES;
+
+	<span class="enscript-comment">/* access granted. */</span>
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* specify a pid as being able to access kperf/trace, depiste not
+ * being root
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kperf_bless_pid</span>(pid_t newpid)
+{
+	proc_t p = NULL;
+	pid_t current_pid;
+
+	p = current_proc();
+	current_pid = p-&gt;p_pid;
+
+	<span class="enscript-comment">/* are we allowed to preempt? */</span>
+	<span class="enscript-keyword">if</span> ( (newpid != -1) &amp;&amp; (blessed_pid != -1) &amp;&amp;
+	     (blessed_pid != current_pid) &amp;&amp; !blessed_preempt ) {
+		<span class="enscript-comment">/* check if the pid that held the lock is gone */</span>
+		p = proc_find(blessed_pid);
+
+		<span class="enscript-keyword">if</span> ( p != NULL ) {
+			proc_rele(p);
+			<span class="enscript-keyword">return</span> EACCES;
+		}
+	}
+
+	<span class="enscript-comment">/* validate new pid */</span>
+	<span class="enscript-keyword">if</span> ( newpid != -1 ) {
+		p = proc_find(newpid);
+
+		<span class="enscript-keyword">if</span> ( p == NULL )
+			<span class="enscript-keyword">return</span> EINVAL;
+
+		proc_rele(p);
+	}
+
+	<span class="enscript-comment">/* take trace facility as well */</span>
+	kdbg_swap_global_state_pid(blessed_pid, newpid);
+
+	blessed_pid = newpid;
+	blessed_preempt = FALSE;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/***************************
+ *
+ * sysctl hooks
+ *
+ ***************************/</span>
+
+<span class="enscript-comment">/* root kperf node */</span>
+<span class="enscript-function-name">SYSCTL_NODE</span>(, OID_AUTO, kperf, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+            <span class="enscript-string">&quot;kperf&quot;</span>);
+
+<span class="enscript-comment">/* action sub-section */</span>
+<span class="enscript-function-name">SYSCTL_NODE</span>(_kperf, OID_AUTO, action, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+            <span class="enscript-string">&quot;action&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf_action, OID_AUTO, count,
+            CTLTYPE_INT|CTLFLAG_RW|CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_ACTION_COUNT, 
+            <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>), kperf_sysctl, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;Number of actions&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf_action, OID_AUTO, samplers,
+            CTLFLAG_RW|CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_ACTION_SAMPLERS, 
+            3*<span class="enscript-keyword">sizeof</span>(uint64_t), kperf_sysctl, <span class="enscript-string">&quot;UQ&quot;</span>, 
+            <span class="enscript-string">&quot;What to sample what a trigger fires an action&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf_action, OID_AUTO, userdata,
+            CTLFLAG_RW|CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_ACTION_USERDATA, 
+            3*<span class="enscript-keyword">sizeof</span>(uint64_t), kperf_sysctl, <span class="enscript-string">&quot;UQ&quot;</span>, 
+            <span class="enscript-string">&quot;User data to attribute to action&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf_action, OID_AUTO, filter_by_task,
+            CTLFLAG_RW|CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_ACTION_FILTER_BY_TASK, 
+            3*<span class="enscript-keyword">sizeof</span>(uint64_t), kperf_sysctl, <span class="enscript-string">&quot;UQ&quot;</span>, 
+            <span class="enscript-string">&quot;Apply a task filter to the action&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf_action, OID_AUTO, filter_by_pid,
+            CTLFLAG_RW|CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_ACTION_FILTER_BY_PID, 
+            3*<span class="enscript-keyword">sizeof</span>(uint64_t), kperf_sysctl, <span class="enscript-string">&quot;UQ&quot;</span>, 
+            <span class="enscript-string">&quot;Apply a pid filter to the action&quot;</span>);
+
+<span class="enscript-comment">/* timer sub-section */</span>
+<span class="enscript-function-name">SYSCTL_NODE</span>(_kperf, OID_AUTO, timer, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+            <span class="enscript-string">&quot;timer&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf_timer, OID_AUTO, count,
+            CTLTYPE_INT|CTLFLAG_RW|CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_TIMER_COUNT, 
+            <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>), kperf_sysctl, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;Number of time triggers&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf_timer, OID_AUTO, period,
+            CTLFLAG_RW|CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_TIMER_PERIOD, 
+            2*<span class="enscript-keyword">sizeof</span>(uint64_t), kperf_sysctl, <span class="enscript-string">&quot;UQ&quot;</span>, <span class="enscript-string">&quot;Timer number and period&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf_timer, OID_AUTO, action,
+            CTLFLAG_RW|CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_TIMER_ACTION, 
+            2*<span class="enscript-keyword">sizeof</span>(uint64_t), kperf_sysctl, <span class="enscript-string">&quot;UQ&quot;</span>, <span class="enscript-string">&quot;Timer number and actionid&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf_timer, OID_AUTO, pet_timer,
+            CTLTYPE_INT|CTLFLAG_RW|CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_TIMER_PET, 
+            <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>), kperf_sysctl, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;Which timer ID does PET&quot;</span>);
+
+<span class="enscript-comment">/* misc */</span>
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf, OID_AUTO, sampling,
+            CTLTYPE_INT|CTLFLAG_RW|CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_SAMPLING, 
+            <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>), kperf_sysctl, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;Sampling running&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf, OID_AUTO, blessed_pid,
+            CTLTYPE_INT|CTLFLAG_RW, <span class="enscript-comment">/* must be root */</span>
+            (<span class="enscript-type">void</span>*)REQ_BLESS, 
+            <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>), kperf_sysctl_bless_handler, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;Blessed pid&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf, OID_AUTO, blessed_preempt,
+            CTLTYPE_INT|CTLFLAG_RW|CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_BLESS_PREEMPT, 
+            <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>), kperf_sysctl, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;Blessed preemption&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf, OID_AUTO, kdbg_callstacks,
+            CTLTYPE_INT|CTLFLAG_RW|CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_KDBG_CALLSTACKS, 
+            <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>), kperf_sysctl, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;Generate kdbg callstacks&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf, OID_AUTO, kdbg_cswitch,
+            CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span> *)REQ_KDBG_CSWITCH,
+            <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>), kperf_sysctl, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;Generate context switch info&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf, OID_AUTO, pet_idle_rate,
+            CTLTYPE_INT|CTLFLAG_RW|CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_PET_IDLE_RATE,
+            <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>), kperf_sysctl, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;Rate at which unscheduled threads are forced to be sampled in PET mode&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf, OID_AUTO, cswitch_action,
+            CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_CSWITCH_ACTION,
+            <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>), kperf_sysctl, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;ID of action to trigger on context-switch&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kperf, OID_AUTO, signpost_action,
+            CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_ANYBODY,
+            (<span class="enscript-type">void</span>*)REQ_SIGNPOST_ACTION,
+            <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>), kperf_sysctl, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;ID of action to trigger on signposts&quot;</span>);
+
+<span class="enscript-comment">/* debug */</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_kperf, OID_AUTO, debug_level, CTLFLAG_RW, 
+           &amp;kperf_debug_level, 0, <span class="enscript-string">&quot;debug level&quot;</span>);
+
+</pre>
+<hr />
+</body></html>

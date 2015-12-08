@@ -1,0 +1,448 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>utils.py</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">utils.py&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">#General Utility functions for debugging or introspection
+</span>
+<span class="enscript-string">&quot;&quot;&quot; Please make sure you read the README file COMPLETELY BEFORE reading anything below.
+    It is very critical that you read coding guidelines in Section E in README file. 
+&quot;&quot;&quot;</span>
+<span class="enscript-keyword">import</span> sys, re, time, getopt, shlex, os, time
+<span class="enscript-keyword">import</span> lldb
+<span class="enscript-keyword">import</span> struct
+<span class="enscript-keyword">from</span> core.cvalue <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> core.configuration <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> core.lazytarget <span class="enscript-keyword">import</span> *
+
+<span class="enscript-comment">#DONOTTOUCHME: exclusive use for lldb_run_command only. 
+</span>lldb_run_command_state = {<span class="enscript-string">'active'</span>:False}
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">lldb_run_command</span>(cmdstring):
+    <span class="enscript-string">&quot;&quot;&quot; Run a lldb command and get the string output.
+        params: cmdstring - str : lldb command string which could be executed at (lldb) prompt. (eg. &quot;register read&quot;)
+        returns: str - output of command. it may be &quot;&quot; in case if command did not return any output.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> lldb_run_command_state
+    retval =<span class="enscript-string">&quot;&quot;</span>
+    res = lldb.SBCommandReturnObject()
+    <span class="enscript-comment"># set special attribute to notify xnu framework to not print on stdout
+</span>    lldb_run_command_state[<span class="enscript-string">'active'</span>] = True
+    lldb.debugger.GetCommandInterpreter().HandleCommand(cmdstring, res)
+    lldb_run_command_state[<span class="enscript-string">'active'</span>] = False
+    <span class="enscript-keyword">if</span> res.Succeeded():
+        retval = res.GetOutput()
+    <span class="enscript-keyword">else</span>:
+        retval = <span class="enscript-string">&quot;ERROR:&quot;</span> + res.GetError()
+    <span class="enscript-keyword">return</span> retval
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">EnableLLDBAPILogging</span>():
+    <span class="enscript-string">&quot;&quot;&quot; Enable file based logging for lldb and also provide essential information about what information
+        to include when filing a bug with lldb or xnu.
+    &quot;&quot;&quot;</span>
+    logfile_name = <span class="enscript-string">&quot;/tmp/lldb.%d.log&quot;</span> % int(time.time())
+    enable_log_base_cmd = <span class="enscript-string">&quot;log enable --file %s &quot;</span> % logfile_name
+    cmd_str = enable_log_base_cmd + <span class="enscript-string">' lldb api'</span>
+    <span class="enscript-keyword">print</span> cmd_str
+    <span class="enscript-keyword">print</span> lldb_run_command(cmd_str)
+    cmd_str = enable_log_base_cmd + <span class="enscript-string">' gdb-remote packets'</span>
+    <span class="enscript-keyword">print</span> cmd_str
+    <span class="enscript-keyword">print</span> lldb_run_command(cmd_str)
+    cmd_str = enable_log_base_cmd + <span class="enscript-string">' kdp-remote packets'</span>
+    <span class="enscript-keyword">print</span> cmd_str
+    <span class="enscript-keyword">print</span> lldb_run_command(cmd_str)
+    <span class="enscript-keyword">print</span> lldb_run_command(<span class="enscript-string">&quot;version&quot;</span>)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Please collect the logs from %s for filing a radar. If you had encountered an exception in a lldbmacro command please re-run it.&quot;</span> % logfile_name
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Please make sure to provide the output of 'version', 'image list' and output of command that failed.&quot;</span>
+    <span class="enscript-keyword">return</span>
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetConnectionProtocol</span>():
+    <span class="enscript-string">&quot;&quot;&quot; Returns a string representing what kind of connection is used for debugging the target.
+        params: None
+        returns:
+            str - connection type. One of (&quot;core&quot;,&quot;kdp&quot;,&quot;gdb&quot;, &quot;unknown&quot;)
+    &quot;&quot;&quot;</span>
+    retval = <span class="enscript-string">&quot;unknown&quot;</span>
+    process_plugin_name = LazyTarget.GetProcess().GetPluginName().lower()
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;kdp&quot;</span> <span class="enscript-keyword">in</span> process_plugin_name:
+        retval = <span class="enscript-string">&quot;kdp&quot;</span>
+    <span class="enscript-keyword">elif</span> <span class="enscript-string">&quot;gdb&quot;</span> <span class="enscript-keyword">in</span> process_plugin_name:
+        retval = <span class="enscript-string">&quot;gdb&quot;</span>
+    <span class="enscript-keyword">elif</span> <span class="enscript-string">&quot;mach-o&quot;</span> <span class="enscript-keyword">in</span> process_plugin_name <span class="enscript-keyword">and</span> <span class="enscript-string">&quot;core&quot;</span> <span class="enscript-keyword">in</span> process_plugin_name:
+        retval = <span class="enscript-string">&quot;core&quot;</span>
+    <span class="enscript-keyword">return</span> retval
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">SBValueToPointer</span>(sbval):
+    <span class="enscript-string">&quot;&quot;&quot; Helper function for getting pointer value from an object of pointer type. 
+        ex. void *astring = 0x12345
+        use SBValueToPointer(astring_val) to get 0x12345
+        params: sbval - value object of type '&lt;type&gt; *'
+        returns: int - pointer value as an int. 
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> type(sbval) == core.value:
+        sbval = sbval.GetSBValue()
+    <span class="enscript-keyword">if</span> sbval.IsPointerType():
+        <span class="enscript-keyword">return</span> sbval.GetValueAsUnsigned()
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">return</span> int(sbval.GetAddress())
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ArgumentStringToInt</span>(arg_string):
+    <span class="enscript-string">&quot;&quot;&quot; convert '1234' or '0x123' to int
+        params:
+          arg_string: str - typically string passed from commandline. ex '1234' or '0xA12CD'
+        returns:
+          int - integer representation of the string
+    &quot;&quot;&quot;</span>
+    arg_string = arg_string.strip()
+    <span class="enscript-keyword">if</span> arg_string.find(<span class="enscript-string">'0x'</span>) &gt;=0:
+        <span class="enscript-keyword">return</span> int(arg_string, 16)
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">return</span> int(arg_string)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetLongestMatchOption</span>(searchstr, options=[], ignore_case=True):
+    <span class="enscript-string">&quot;&quot;&quot; Get longest matched string from set of options. 
+        params:
+            searchstr : string of chars to be matched
+            options : array of strings that are to be matched
+        returns:
+            [] - array of matched options. The order of options is same as the arguments.
+                 empty array is returned if searchstr does not match any option.
+        example:
+            subcommand = LongestMatch('Rel', ['decode', 'enable', 'reload'], ignore_case=True)
+            print subcommand # prints ['reload']
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> ignore_case:
+        searchstr = searchstr.lower()
+    found_options = []
+    <span class="enscript-keyword">for</span> o <span class="enscript-keyword">in</span> options:
+        so = o
+        <span class="enscript-keyword">if</span> ignore_case:
+            so = o.lower()
+        <span class="enscript-keyword">if</span> so == searchstr:
+            <span class="enscript-keyword">return</span> [o]
+        <span class="enscript-keyword">if</span> so.find(searchstr) &gt;=0 :
+            found_options.append(o)
+    <span class="enscript-keyword">return</span> found_options
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetType</span>(target_type):
+    <span class="enscript-string">&quot;&quot;&quot; type cast an object to new type.
+        params:
+            target_type - str, ex. 'char', 'uint32_t' etc
+        returns:
+            lldb.SBType - a new Type that can be used as param to  lldb.SBValue.Cast()
+        raises:
+            NameError  - Incase the type is not identified
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">return</span> gettype(target_type)
+
+    
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">Cast</span>(obj, target_type):
+    <span class="enscript-string">&quot;&quot;&quot; Type cast an object to another C type.
+        params:
+            obj - core.value  object representing some C construct in lldb
+            target_type - str : ex 'char *'
+                        - lldb.SBType :
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">return</span> cast(obj, target_type)
+
+    
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">loadLLDB</span>():
+    <span class="enscript-string">&quot;&quot;&quot; Util function to load lldb python framework in case not available in common include paths.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">try</span>:
+        <span class="enscript-keyword">import</span> lldb
+        <span class="enscript-keyword">print</span> <span class="enscript-string">'Found LLDB on path'</span>
+    <span class="enscript-keyword">except</span>:
+        platdir = subprocess.check_output(<span class="enscript-string">'xcodebuild -version -sdk iphoneos PlatformPath'</span>.split())
+        offset = platdir.find(<span class="enscript-string">&quot;Contents/Developer&quot;</span>)
+        <span class="enscript-keyword">if</span> offset == -1:
+            lldb_py = os.path.join(os.path.dirname(os.path.dirname(platdir)), <span class="enscript-string">'Library/PrivateFrameworks/LLDB.framework/Versions/A/Resources/Python'</span>)
+        <span class="enscript-keyword">else</span>:
+            lldb_py = os.path.join(platdir[0:offset+8], <span class="enscript-string">'SharedFrameworks/LLDB.framework/Versions/A/Resources/Python'</span>)
+        <span class="enscript-keyword">if</span> os.path.isdir(lldb_py):
+            sys.path.append(lldb_py)
+            <span class="enscript-keyword">global</span> lldb
+            lldb = __import__(<span class="enscript-string">'lldb'</span>)
+            <span class="enscript-keyword">print</span> <span class="enscript-string">'Found LLDB in SDK'</span>
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">'Failed to locate lldb.py from'</span>, lldb_py
+            sys.exit(-1)
+    <span class="enscript-keyword">return</span> True
+
+<span class="enscript-keyword">class</span> Logger():
+    <span class="enscript-string">&quot;&quot;&quot; A logging utility &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">__init__</span>(self, log_file_path=<span class="enscript-string">&quot;/tmp/xnu.log&quot;</span>):
+        self.log_file_handle = open(log_file_path, <span class="enscript-string">&quot;w+&quot;</span>)
+        self.redirect_to_stdout = False
+        
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">log_debug</span>(self, *args):
+        current_timestamp = time.time()
+        debug_line_str = <span class="enscript-string">&quot;DEBUG:&quot;</span> + str(current_timestamp) + <span class="enscript-string">&quot;:&quot;</span>
+        <span class="enscript-keyword">for</span> arg <span class="enscript-keyword">in</span> args:
+            debug_line_str += <span class="enscript-string">&quot; &quot;</span> + str(arg).replace(<span class="enscript-string">&quot;\n&quot;</span>, <span class="enscript-string">&quot; &quot;</span>) + <span class="enscript-string">&quot;, &quot;</span>
+        
+        self.log_file_handle.write(debug_line_str + <span class="enscript-string">&quot;\n&quot;</span>)
+        <span class="enscript-keyword">if</span> self.redirect_to_stdout :
+            <span class="enscript-keyword">print</span> debug_line_str
+    
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">write</span>(self, line):
+        self.log_debug(line)
+
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">sizeof_fmt</span>(num, unit_str=<span class="enscript-string">'B'</span>):
+    <span class="enscript-string">&quot;&quot;&quot; format large number into human readable values.
+        convert any number into Kilo, Mega, Giga, Tera format for human understanding.
+        params:
+            num - int : number to be converted
+            unit_str - str : a suffix for unit. defaults to 'B' for bytes.
+        returns:
+            str - formatted string for printing.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">for</span> x <span class="enscript-keyword">in</span> [<span class="enscript-string">''</span>,<span class="enscript-string">'K'</span>,<span class="enscript-string">'M'</span>,<span class="enscript-string">'G'</span>,<span class="enscript-string">'T'</span>]:
+        <span class="enscript-keyword">if</span> num &lt; 1024.0:
+            <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;%3.1f%s%s&quot;</span> % (num, x,unit_str)
+        num /= 1024.0
+    <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;%3.1f%s%s&quot;</span> % (num, <span class="enscript-string">'P'</span>, unit_str)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WriteStringToMemoryAddress</span>(stringval, addr):
+    <span class="enscript-string">&quot;&quot;&quot; write a null terminated string to address. 
+        params:
+            stringval: str- string to be written to memory. a '\0' will be added at the end
+            addr : int - address where data is to be written
+        returns:
+            bool - True if successfully written
+    &quot;&quot;&quot;</span>
+    serr = lldb.SBError()
+    length = len(stringval) + 1
+    format_string = <span class="enscript-string">&quot;%ds&quot;</span> % length
+    sdata = struct.pack(format_string,stringval)
+    numbytes = LazyTarget.GetProcess().WriteMemory(addr, sdata, serr)
+    <span class="enscript-keyword">if</span> numbytes == length <span class="enscript-keyword">and</span> serr.Success():
+        <span class="enscript-keyword">return</span> True
+    <span class="enscript-keyword">return</span> False
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WriteInt64ToMemoryAddress</span>(intval, addr):
+    <span class="enscript-string">&quot;&quot;&quot; write a 64 bit integer at an address.
+        params:
+          intval - int - an integer value to be saved
+          addr - int - address where int is to be written
+        returns:
+          bool - True if successfully written.
+    &quot;&quot;&quot;</span>
+    serr = lldb.SBError()
+    sdata = struct.pack(<span class="enscript-string">'Q'</span>, intval)
+    addr = int(hex(addr).rstrip(<span class="enscript-string">'L'</span>), 16)
+    numbytes = LazyTarget.GetProcess().WriteMemory(addr,sdata, serr)
+    <span class="enscript-keyword">if</span> numbytes == 8 <span class="enscript-keyword">and</span> serr.Success():
+        <span class="enscript-keyword">return</span> True
+    <span class="enscript-keyword">return</span> False 
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WritePtrDataToMemoryAddress</span>(intval, addr):
+    <span class="enscript-string">&quot;&quot;&quot; Write data to pointer size memory. 
+        This is equivalent of doing *(&amp;((struct pmap *)addr)) = intval
+        It will identify 32/64 bit kernel and write memory accordingly.
+        params:
+          intval - int - an integer value to be saved
+          addr - int - address where int is to be written
+        returns:
+          bool - True if successfully written.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> kern.ptrsize == 8:
+        <span class="enscript-keyword">return</span> WriteInt64ToMemoryAddress(intval, addr)
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">return</span> WriteInt32ToMemoryAddress(intval, addr)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WriteInt32ToMemoryAddress</span>(intval, addr):
+    <span class="enscript-string">&quot;&quot;&quot; write a 32 bit integer at an address.
+        params:
+          intval - int - an integer value to be saved
+          addr - int - address where int is to be written
+        returns:
+          bool - True if successfully written.
+    &quot;&quot;&quot;</span>
+    serr = lldb.SBError()
+    sdata = struct.pack(<span class="enscript-string">'I'</span>, intval)
+    addr = int(hex(addr).rstrip(<span class="enscript-string">'L'</span>), 16)
+    numbytes = LazyTarget.GetProcess().WriteMemory(addr,sdata, serr)
+    <span class="enscript-keyword">if</span> numbytes == 4 <span class="enscript-keyword">and</span> serr.Success():
+        <span class="enscript-keyword">return</span> True
+    <span class="enscript-keyword">return</span> False 
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WriteInt16ToMemoryAddress</span>(intval, addr):
+    <span class="enscript-string">&quot;&quot;&quot; write a 16 bit integer at an address.
+        params:
+          intval - int - an integer value to be saved
+          addr - int - address where int is to be written
+        returns:
+          bool - True if successfully written.
+    &quot;&quot;&quot;</span>
+    serr = lldb.SBError()
+    sdata = struct.pack(<span class="enscript-string">'H'</span>, intval)
+    addr = int(hex(addr).rstrip(<span class="enscript-string">'L'</span>), 16)
+    numbytes = LazyTarget.GetProcess().WriteMemory(addr,sdata, serr)
+    <span class="enscript-keyword">if</span> numbytes == 2 <span class="enscript-keyword">and</span> serr.Success():
+        <span class="enscript-keyword">return</span> True
+    <span class="enscript-keyword">return</span> False 
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">WriteInt8ToMemoryAddress</span>(intval, addr):
+    <span class="enscript-string">&quot;&quot;&quot; write a 8 bit integer at an address.
+        params:
+          intval - int - an integer value to be saved
+          addr - int - address where int is to be written
+        returns:
+          bool - True if successfully written.
+    &quot;&quot;&quot;</span>
+    serr = lldb.SBError()
+    sdata = struct.pack(<span class="enscript-string">'B'</span>, intval)
+    addr = int(hex(addr).rstrip(<span class="enscript-string">'L'</span>), 16)
+    numbytes = LazyTarget.GetProcess().WriteMemory(addr,sdata, serr)
+    <span class="enscript-keyword">if</span> numbytes == 1 <span class="enscript-keyword">and</span> serr.Success():
+        <span class="enscript-keyword">return</span> True
+    <span class="enscript-keyword">return</span> False 
+
+_enum_cache = {}
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetEnumValue</span>(name):
+    <span class="enscript-string">&quot;&quot;&quot; Finds the value of a particular enum define. Ex kdp_req_t::KDP_VERSION  =&gt; 0x3
+        params:
+            name : str - name of enum in the format type::name
+        returns:
+            int - value of the particular enum.
+        raises:
+            TypeError - if the enum is not found
+    &quot;&quot;&quot;</span>
+    name = name.strip()
+    <span class="enscript-keyword">global</span> _enum_cache
+    <span class="enscript-keyword">if</span> name <span class="enscript-keyword">not</span> <span class="enscript-keyword">in</span> _enum_cache:
+        res = lldb.SBCommandReturnObject()
+        lldb.debugger.GetCommandInterpreter().HandleCommand(<span class="enscript-string">&quot;p/x (`%s`)&quot;</span> % name, res)
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> res.Succeeded():
+            <span class="enscript-keyword">raise</span> TypeError(<span class="enscript-string">&quot;Enum not found with name: &quot;</span> + name)
+        <span class="enscript-comment"># the result is of format '(int) $481 = 0x00000003\n'
+</span>        _enum_cache[name] = int( res.GetOutput().split(<span class="enscript-string">'='</span>)[-1].strip(), 16)
+    <span class="enscript-keyword">return</span> _enum_cache[name]
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ResolveFSPath</span>(path):
+    <span class="enscript-string">&quot;&quot;&quot; expand ~user directories and return absolute path.
+        params: path - str - eg &quot;~rc/Software&quot;
+        returns:
+                str - abs path with user directories and symlinks expanded.
+                str - if path resolution fails then returns the same string back
+    &quot;&quot;&quot;</span>
+    expanded_path = os.path.expanduser(path)
+    norm_path = os.path.normpath(expanded_path)
+    <span class="enscript-keyword">return</span> norm_path
+
+_dsymlist = {}
+uuid_regex = re.compile(<span class="enscript-string">&quot;[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}&quot;</span>,re.IGNORECASE|re.DOTALL)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">addDSYM</span>(uuid, info):
+    <span class="enscript-string">&quot;&quot;&quot; add a module by dsym into the target modules. 
+        params: uuid - str - uuid string eg. 4DD2344C0-4A81-3EAB-BDCF-FEAFED9EB73E
+                info - dict - info dictionary passed from dsymForUUID
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> _dsymlist
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;DBGSymbolRichExecutable&quot;</span> <span class="enscript-keyword">not</span> <span class="enscript-keyword">in</span> info:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Error: Unable to find syms for %s&quot;</span> % uuid
+        <span class="enscript-keyword">return</span> False
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> uuid <span class="enscript-keyword">in</span> _dsymlist:
+        <span class="enscript-comment"># add the dsym itself
+</span>        cmd_str = <span class="enscript-string">&quot;target modules add --uuid %s&quot;</span> % uuid
+        debuglog(cmd_str)
+        lldb.debugger.HandleCommand(cmd_str)
+        <span class="enscript-comment"># set up source path
+</span>        <span class="enscript-comment">#lldb.debugger.HandleCommand(&quot;settings append target.source-map %s %s&quot; % (info[&quot;DBGBuildSourcePath&quot;], info[&quot;DBGSourcePath&quot;]))
+</span>        <span class="enscript-comment"># modify the list to show we loaded this
+</span>        _dsymlist[uuid] = True
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">loadDSYM</span>(uuid, load_address):
+    <span class="enscript-string">&quot;&quot;&quot; Load an already added symbols to a particular load address
+        params: uuid - str - uuid string
+                load_address - int - address where to load the symbols
+        returns bool:
+            True - if successful
+            False - if failed. possible because uuid is not presently loaded.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> uuid <span class="enscript-keyword">not</span> <span class="enscript-keyword">in</span> _dsymlist:
+        <span class="enscript-keyword">return</span> False
+    cmd_str = <span class="enscript-string">&quot;target modules load --uuid %s --slide %d&quot;</span> % ( uuid, load_address)
+    debuglog(cmd_str)
+    lldb.debugger.HandleCommand(cmd_str)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">RunShellCommand</span>(command):
+    <span class="enscript-string">&quot;&quot;&quot; Run a shell command in subprocess.
+        params: command with arguments to run
+        returns: (exit_code, stdout, stderr)
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">import</span> shlex, subprocess
+    cmd_args = shlex.split(command)
+    output_str = <span class="enscript-string">&quot;&quot;</span>
+    exit_code = 0
+    <span class="enscript-keyword">try</span>:
+        output_str = subprocess.check_output(cmd_args, stderr=subprocess.STDOUT)
+    <span class="enscript-keyword">except</span> subprocess.CalledProcessError, e:
+        exit_code = e.returncode
+    <span class="enscript-keyword">finally</span>:
+        <span class="enscript-keyword">return</span> (exit_code, output_str, <span class="enscript-string">''</span>)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">dsymForUUID</span>(uuid):
+    <span class="enscript-string">&quot;&quot;&quot; Get dsym informaiton by calling dsymForUUID 
+        params: uuid - str - uuid string from executable. eg. 4DD2344C0-4A81-3EAB-BDCF-FEAFED9EB73E
+        returns:
+            {} - a dictionary holding dsym information printed by dsymForUUID. 
+            None - if failed to find information
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">import</span> subprocess
+    <span class="enscript-keyword">import</span> plistlib
+    output = subprocess.check_output([<span class="enscript-string">&quot;/usr/local/bin/dsymForUUID&quot;</span>, uuid])
+    <span class="enscript-keyword">if</span> output:
+        <span class="enscript-comment"># because of &lt;rdar://12713712&gt;
+</span>        <span class="enscript-comment">#plist = plistlib.readPlistFromString(output)
+</span>        <span class="enscript-comment">#beginworkaround
+</span>        keyvalue_extract_re = re.compile(<span class="enscript-string">&quot;&lt;key&gt;(.*?)&lt;/key&gt;\s*&lt;string&gt;(.*?)&lt;/string&gt;&quot;</span>,re.IGNORECASE|re.MULTILINE|re.DOTALL)
+        plist={}
+        plist[uuid] = {}
+        <span class="enscript-keyword">for</span> item <span class="enscript-keyword">in</span> keyvalue_extract_re.findall(output):
+            plist[uuid][item[0]] = item[1]
+        <span class="enscript-comment">#endworkaround
+</span>        <span class="enscript-keyword">if</span> plist <span class="enscript-keyword">and</span> plist[uuid]:
+            <span class="enscript-keyword">return</span> plist[uuid]
+    <span class="enscript-keyword">return</span> None
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">debuglog</span>(s):
+    <span class="enscript-string">&quot;&quot;&quot; Print a object in the debug stream
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> config
+    <span class="enscript-keyword">if</span> config[<span class="enscript-string">'debug'</span>]:
+      <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;DEBUG:&quot;</span>,s
+    <span class="enscript-keyword">return</span> None
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">IsAppleInternal</span>():
+    <span class="enscript-string">&quot;&quot;&quot; check if apple_internal modules are available
+        returns: True if apple_internal module is present
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">import</span> imp
+    <span class="enscript-keyword">try</span>:
+        imp.find_module(<span class="enscript-string">&quot;apple_internal&quot;</span>)
+        retval = True
+    <span class="enscript-keyword">except</span> ImportError:
+        retval = False
+    <span class="enscript-keyword">return</span> retval
+</pre>
+<hr />
+</body></html>

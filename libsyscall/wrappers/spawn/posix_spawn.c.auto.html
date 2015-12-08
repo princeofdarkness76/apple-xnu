@@ -1,0 +1,1648 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>posix_spawn.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">posix_spawn.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2006-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this
+ * file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * [SPN] Support for _POSIX_SPAWN
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">CONFIG_MEMORYSTATUS</span> 1 // &lt;rdar://problem/13604997&gt;
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span> <span class="enscript-comment">/* for user_size_t */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;spawn.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;spawn_private.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/spawn_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/process_policy.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;limits.h&gt;</span>	<span class="enscript-comment">/* for OPEN_MAX, PATH_MAX */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;strings.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/exception_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/coalition.h&gt;</span> <span class="enscript-comment">/* for COALITION_TYPE_MAX */</span>
+
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_init
+ *
+ * Description:	Initialize a spawn attributes object attr with default values
+ *
+ * Parameters:	attr			The spawn attributes object to be
+ *					initialized
+ *
+ * Returns:	0			Success
+ *		ENOMEM			Insufficient memory exists to
+ *					initialize the spawn attributes object.
+ *
+ * Note:	As an implementation detail, the externally visibily type
+ *		posix_spawnattr_t is defined to be a void *, and initialization
+ *		involves allocation of a memory object.  Subsequent changes to
+ *		the spawn attributes may result in reallocation under the
+ *		covers.
+ *
+ *		Reinitialization of an already initialized spawn attributes
+ *		object will result in memory being leaked.  Because spawn
+ *		attributes are not required to be used in conjunction with a
+ *		static initializer, there is no way to distinguish a spawn
+ *		attribute with stack garbage from one that's been initialized.
+ *		This is arguably an API design error.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_init</span>(posix_spawnattr_t *attr)
+{
+	_posix_spawnattr_t *psattrp = (_posix_spawnattr_t *)attr;
+	<span class="enscript-type">int</span>	err = 0;
+
+	<span class="enscript-keyword">if</span> ((*psattrp = (_posix_spawnattr_t)malloc(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> _posix_spawnattr))) == NULL) {
+		err = ENOMEM;
+	} <span class="enscript-keyword">else</span> {
+
+		<span class="enscript-comment">/*
+		 * The default value of this attribute shall be as if no
+		 * flags were set
+		 */</span>
+		(*psattrp)-&gt;psa_flags = 0;
+
+		<span class="enscript-comment">/*
+		 * The default value of this attribute shall be an empty
+		 * signal set
+		 */</span>
+		(*psattrp)-&gt;psa_sigdefault = 0;
+
+		<span class="enscript-comment">/* The default value of this attribute is unspecified */</span>
+		(*psattrp)-&gt;psa_sigmask = 0;
+
+		<span class="enscript-comment">/* The default value of this attribute shall be zero */</span>
+		(*psattrp)-&gt;psa_pgroup = 0;	<span class="enscript-comment">/* doesn't matter */</span>
+
+		<span class="enscript-comment">/* Default is no binary preferences, i.e. use normal grading */</span>
+		memset((*psattrp)-&gt;psa_binprefs, 0, 
+				<span class="enscript-keyword">sizeof</span>((*psattrp)-&gt;psa_binprefs));
+
+		<span class="enscript-comment">/* Default is no port actions to take */</span>
+		(*psattrp)-&gt;psa_ports = NULL;
+
+		<span class="enscript-comment">/*
+		 * The default value of this attribute shall be an no
+		 * process control on resource starvation
+		 */</span>
+		(*psattrp)-&gt;psa_pcontrol = 0;
+
+		<span class="enscript-comment">/*
+		 * Initializing the alignment paddings. 
+		 */</span>
+
+		 (*psattrp)-&gt;short_padding = 0; 
+		 (*psattrp)-&gt;flags_padding = 0; 
+
+		<span class="enscript-comment">/* Default is no new apptype requested */</span>
+		(*psattrp)-&gt;psa_apptype = POSIX_SPAWN_PROCESS_TYPE_DEFAULT;
+
+		<span class="enscript-comment">/* Jetsam related */</span>
+		(*psattrp)-&gt;psa_jetsam_flags = 0;
+		(*psattrp)-&gt;psa_priority = -1;
+		(*psattrp)-&gt;psa_memlimit_active = -1;
+		(*psattrp)-&gt;psa_memlimit_inactive = -1;
+
+		<span class="enscript-comment">/* Default is no CPU usage monitor active. */</span>
+		(*psattrp)-&gt;psa_cpumonitor_percent = 0;
+		(*psattrp)-&gt;psa_cpumonitor_interval = 0;
+
+		<span class="enscript-comment">/* Default is no MAC policy extensions. */</span>
+		(*psattrp)-&gt;psa_mac_extensions = NULL;
+
+		<span class="enscript-comment">/* Default is to inherit parent's coalition(s) */</span>
+		(*psattrp)-&gt;psa_coalition_info = NULL;
+
+		(*psattrp)-&gt;reserved = NULL;
+
+		<span class="enscript-comment">/*
+		 * old coalition field
+		 * For backwards compatibility reasons, we set this to 1
+		 * which is the first valid coalition id. This will allow
+		 * newer user space code to properly spawn processes on
+		 * older kernels
+		 * (they will just all end up in the same coalition).
+		 */</span>
+		(*psattrp)-&gt;psa_reserved = 1;
+
+		<span class="enscript-comment">/* Default is no new clamp */</span>
+		(*psattrp)-&gt;psa_qos_clamp = POSIX_SPAWN_PROC_CLAMP_NONE;
+
+		<span class="enscript-comment">/* Default is no change to role */</span>
+		(*psattrp)-&gt;psa_darwin_role = POSIX_SPAWN_DARWIN_ROLE_NONE;
+	}
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_destroy
+ *
+ * Description:	Destroy a spawn attributes object that was previously
+ *		initialized via posix_spawnattr_init() by freeing any
+ *		memory associated with it and setting it to an invalid value.
+ *
+ * Parameters:	attr			The spawn attributes object to be
+ *					destroyed.
+ *
+ * Returns:	0			Success
+ *
+ * Notes:	The destroyed spawn attribute results in the void * pointer
+ *		being set to NULL; subsequent use without reinitialization
+ *		will result in explicit program failure (rather than merely
+ *		&quot;undefined behaviour&quot;).
+ *
+ * NOTIMP:	Allowed failures (checking NOT required):
+ *		EINVAL	The value specified by attr is invalid.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">posix_spawn_destroyportactions_np</span>(posix_spawnattr_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">posix_spawn_destroycoalition_info_np</span>(posix_spawnattr_t *);
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_destroy</span>(posix_spawnattr_t *attr)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	posix_spawn_destroyportactions_np(attr);
+	posix_spawn_destroycoalition_info_np(attr);
+
+	free(psattr);
+	*attr = NULL;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_setflags
+ *
+ * Description:	Set the spawn flags attribute for the spawn attribute object
+ *		referred to by 'attr'.
+ *
+ * Parameters:	attr			The spawn attributes object whose flags
+ *					are to be set
+ *		flags			The flags value to set
+ *
+ * Returns:	0			Success
+ *
+ * NOTIMP:	Allowed failures (checking NOT required):
+ *		EINVAL	The value specified by attr is invalid.
+ *		EINVAL	The value of the attribute being set is not valid.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_setflags</span>(posix_spawnattr_t *attr, <span class="enscript-type">short</span> flags)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	psattr-&gt;psa_flags = flags;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_getflags
+ *
+ * Description:	Retrieve the spawn attributes flag for the spawn attributes
+ *		object referenced by 'attr' and place them in the memory
+ *		location referenced by 'flagsp'
+ *
+ * Parameters:	attr			The spawn attributes object whose flags
+ *					are to be retrieved
+ *		flagsp			A pointer to a short value to receive
+ *					the flags
+ *
+ * Returns:	0			Success
+ *
+ * Implicit Returns:
+ *		*flagps (modified)	The flags value from the spawn
+ *					attributes object
+ *
+ * NOTIMP:	Allowed failures (checking NOT required):
+ *		EINVAL	The value specified by attr is invalid.
+ *		EINVAL	The value of the attribute being set is not valid.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_getflags</span>(<span class="enscript-type">const</span> posix_spawnattr_t * __restrict attr,
+	<span class="enscript-type">short</span> * __restrict flagsp)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	*flagsp = psattr-&gt;psa_flags;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_getsigdefault
+ *
+ * Description:	Retrieve the set of signals to be set to default according to
+ *		the spawn attribute value referenced by 'attr' and place the
+ *		result into the memory containing the sigset_t referenced by
+ *		'sigdefault'
+ *
+ * Parameters:	attr			The spawn attributes object whose
+ *					signal set for default signals is to
+ *					be retrieved
+ *		sigdefault		A pointer to the sigset_t to receive
+ *					the signal set
+ *
+ * Returns:	0			Success
+ *
+ * Implicit Returns:
+ *		*sigdefault (modified)	The signal set of signals to default
+ *					from the spawn attributes object
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_getsigdefault</span>(<span class="enscript-type">const</span> posix_spawnattr_t * __restrict attr,
+		sigset_t * __restrict sigdefault)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	*sigdefault = psattr-&gt;psa_sigdefault;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_getpgroup
+ *
+ * Description:	Obtain the value of the spawn process group attribute from the
+ *		spawn attributes object referenced by 'attr' and place the
+ *		results in the memory location referenced by 'pgroup'
+ *
+ * Parameters:	attr			The spawn attributes object whose
+ *					process group information is to be
+ *					retrieved
+ *		pgroup			A pointer to the pid_t to receive the
+ *					process group
+ *
+ * Returns:	0			Success
+ *
+ * Implicit Returns:
+ *		*pgroup (modified)	The process group information from the
+ *					spawn attributes object
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_getpgroup</span>(<span class="enscript-type">const</span> posix_spawnattr_t * __restrict attr,
+		pid_t * __restrict pgroup)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	*pgroup = psattr-&gt;psa_pgroup;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_getsigmask
+ *
+ * Description:	Obtain the value of the spawn signal mask attribute from the
+ *		spawn attributes object referenced by 'attr' and place the
+ *		result into the memory containing the sigset_t referenced by
+ *		'sigmask'
+ *
+ * Parameters:	attr			The spawn attributes object whose
+ *					signal set for masked signals is to
+ *					be retrieved
+ *		sigmask		A pointer to the sigset_t to receive
+ *					the signal set
+ *
+ * Returns:	0			Success
+ *
+ * Implicit Returns:
+ *		*sigmask (modified)	The signal set of signals to mask
+ *					from the spawn attributes object
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_getsigmask</span>(<span class="enscript-type">const</span> posix_spawnattr_t * __restrict attr,
+		sigset_t * __restrict sigmask)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	*sigmask = psattr-&gt;psa_sigmask;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_getbinpref_np
+ *
+ * Description:	Obtain the value of the spawn binary preferences attribute from 
+ * 		the spawn attributes object referenced by 'attr' and place the
+ *		result into the memory referenced by 'pref'.
+ *
+ * Parameters:	attr			The spawn attributes object whose
+ *					binary preferences are to be retrieved
+ *		count			The size of the cpu_type_t array
+ *		pref			An array of cpu types
+ *		ocount			The actual number copied
+ *
+ * Returns:	0			No binary preferences found
+ * 		&gt; 0			The number of cpu types (less than 
+ * 					count) copied over from 'attr'.
+ *
+ * Implicit Returns:
+ *		*pref (modified)	The binary preferences array 
+ *					from the spawn attributes object
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_getbinpref_np</span>(<span class="enscript-type">const</span> posix_spawnattr_t * __restrict attr,
+		size_t count, cpu_type_t *pref, size_t * __restrict ocount)
+{
+	_posix_spawnattr_t psattr;
+	<span class="enscript-type">int</span> i = 0;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count &amp;&amp; i &lt; 4; i++) {
+		pref[i] = psattr-&gt;psa_binprefs[i];
+	}
+
+	<span class="enscript-keyword">if</span> (ocount)
+		*ocount = i;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_getpcontrol_np
+ *
+ * Description:	Retrieve the  process control property set default according to
+ *		the spawn attribute value referenced by 'attr' and place the
+ *		result into the memory containing the control  referenced by
+ *		'pcontrol'
+ *
+ * Parameters:	attr			The spawn attributes object whose
+ *					signal set for default signals is to
+ *					be retrieved
+ *		pcontrol		A pointer to an int  to receive
+ *					the process control info
+ *
+ * Returns:	0			Success
+ *
+ * Implicit Returns:
+ *		*pcontrol (modified)	The signal set of signals to default
+ *					from the spawn attributes object
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_getpcontrol_np</span>(<span class="enscript-type">const</span> posix_spawnattr_t * __restrict attr,
+		<span class="enscript-type">int</span> * __restrict pcontrol)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	*pcontrol = psattr-&gt;psa_pcontrol;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_getprocesstype_np
+ *
+ * Description:	Retrieve the  process specific behaviors and app launch types
+ *		spawn attribute value referenced by 'attr' and place the
+ *		result into the memory containing the control  referenced by
+ *		'proctype'
+ *
+ * Parameters:	attr			The spawn attributes object whose
+ *					signal set for default signals is to
+ *					be retrieved
+ *		proctype		A pointer to an int  to receive
+ *					the process type info
+ *
+ * Returns:	0			Success
+ *
+ * Implicit Returns:
+ *		*proctype (modified)	The process type set to value
+ *					from the spawn attributes object
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_getprocesstype_np</span>(<span class="enscript-type">const</span> posix_spawnattr_t * __restrict attr,
+		<span class="enscript-type">int</span> * __restrict proctype)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	*proctype = psattr-&gt;psa_apptype;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+<span class="enscript-comment">/*
+ * posix_spawnattr_setsigdefault
+ *
+ * Description:	Set the set of signals to be set to default for the spawn
+ *		attribute value referenced by 'attr' from the memory
+ *		containing the sigset_t referenced by 'sigdefault'
+ *
+ * Parameters:	attr			The spawn attributes object whose
+ *					signal set for default signals is to
+ *					be set
+ *		sigdefault		A pointer to the sigset_t from which to
+ *					obtain the signal set
+ *
+ * Returns:	0			Success
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_setsigdefault</span>(posix_spawnattr_t * __restrict attr,
+		<span class="enscript-type">const</span> sigset_t * __restrict sigdefault)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	psattr-&gt;psa_sigdefault = *sigdefault;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_setpgroup
+ *
+ * Description:	Set the value of the spawn process group attribute for the
+ *		spawn attributes object referenced by 'attr' from the value
+ *		of 'pgroup'
+ *
+ * Parameters:	attr			The spawn attributes object for which
+ *					the process group information is to be
+ *					set
+ *		pgroup			The process group to set
+ *
+ * Returns:	0			Success
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_setpgroup</span>(posix_spawnattr_t * attr, pid_t pgroup)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	psattr-&gt;psa_pgroup = pgroup;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_setsigmask
+ *
+ * Description:	Set the set of signals to be masked for the spawn attribute
+ *		value referenced by 'attr' from the memory containing the
+ *		sigset_t referenced by 'sigmask'
+ *
+ * Parameters:	attr			The spawn attributes object whose
+ *					signal set for masked signals is to
+ *					be set
+ *		sigmask		A pointer to the sigset_t from which to
+ *					obtain the signal set
+ *
+ * Returns:	0			Success
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_setsigmask</span>(posix_spawnattr_t * __restrict attr,
+		<span class="enscript-type">const</span> sigset_t * __restrict sigmask)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	psattr-&gt;psa_sigmask = *sigmask;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_setbinpref_np
+ *
+ * Description:	Set the universal binary preferences for the spawn attribute
+ *		value referenced by 'attr' from the memory containing the
+ *		cpu_type_t array referenced by 'pref', size of 'count'
+ *
+ * Parameters:	attr			The spawn attributes object whose
+ * 					binary preferences are to be set
+ * 		count			Size of the array pointed to by 'pref'
+ * 		pref			cpu_type_t array of binary preferences
+ *		ocount			The actual number copied
+ *
+ * Returns:	0			No preferences copied
+ * 		&gt; 0			Number of preferences copied
+ *
+ * Note:	The posix_spawnattr_t currently only holds four cpu_type_t's. 
+ * 		If the caller provides more preferences than this limit, they
+ * 		will be ignored, as reflected in the return value.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_setbinpref_np</span>(posix_spawnattr_t * __restrict attr,
+		size_t count, cpu_type_t *pref, size_t * __restrict ocount)
+{
+	_posix_spawnattr_t psattr;
+	<span class="enscript-type">int</span> i = 0;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count &amp;&amp; i &lt; 4; i++) {
+		psattr-&gt;psa_binprefs[i] = pref[i];
+	}
+
+	<span class="enscript-comment">/* return number of binprefs copied over */</span>
+	<span class="enscript-keyword">if</span> (ocount)
+		*ocount = i;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_setpcontrol_np
+ *
+ * Description:	Set the process control property according to
+ *		attribute value referenced by 'attr' from the memory
+ *		containing the int value 'pcontrol'
+ *
+ * Parameters:	attr			The spawn attributes object whose
+ *					signal set for default signals is to
+ *					be set
+ *		pcontrol		An int value of the process control info
+ *
+ * Returns:	0			Success
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_setpcontrol_np</span>(posix_spawnattr_t * __restrict attr,
+		<span class="enscript-type">const</span> <span class="enscript-type">int</span> pcontrol)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	psattr-&gt;psa_pcontrol = pcontrol;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_setprocesstype_np
+ *
+ * Description:	Set the process specific behaviors and app launch type
+ *		attribute value referenced by 'attr' from the memory
+ *		containing the int value 'proctype'
+ *
+ * Parameters:	attr			The spawn attributes object whose
+ *					signal set for default signals is to
+ *					be set
+ *		proctype		An int value of the process type info
+ *
+ * Returns:	0			Success
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_setprocesstype_np</span>(posix_spawnattr_t * __restrict attr,
+		<span class="enscript-type">const</span> <span class="enscript-type">int</span> proctype)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	psattr-&gt;psa_apptype = proctype;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * posix_spawn_createportactions_np
+ * Description: create a new posix_spawn_port_actions struct and link
+ * 	it into the posix_spawnattr.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawn_createportactions_np</span>(posix_spawnattr_t *attr)
+{
+	_posix_spawnattr_t psattr;
+	_posix_spawn_port_actions_t acts;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	acts = (_posix_spawn_port_actions_t)malloc(PS_PORT_ACTIONS_SIZE(2));
+	<span class="enscript-keyword">if</span> (acts == NULL)
+		<span class="enscript-keyword">return</span> ENOMEM;
+	
+	acts-&gt;pspa_alloc = 2;
+	acts-&gt;pspa_count = 0;
+
+	psattr-&gt;psa_ports = acts;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * posix_spawn_growportactions_np
+ * Description: Enlarge the size of portactions if necessary 
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawn_growportactions_np</span>(posix_spawnattr_t *attr)
+{
+	_posix_spawnattr_t psattr;
+	_posix_spawn_port_actions_t acts; 
+	<span class="enscript-type">int</span> newnum;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	acts = psattr-&gt;psa_ports; 
+	<span class="enscript-keyword">if</span> (acts == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+	
+	<span class="enscript-comment">/* Double number of port actions allocated for */</span>
+	newnum = 2 * acts-&gt;pspa_alloc;
+	acts = realloc(acts, PS_PORT_ACTIONS_SIZE(newnum));
+	<span class="enscript-keyword">if</span> (acts == NULL)
+		<span class="enscript-keyword">return</span> ENOMEM;
+	
+	acts-&gt;pspa_alloc = newnum;
+	psattr-&gt;psa_ports = acts;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * posix_spawn_destroyportactions_np
+ * Description: clean up portactions struct in posix_spawnattr_t attr
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawn_destroyportactions_np</span>(posix_spawnattr_t *attr)
+{
+	_posix_spawnattr_t psattr;
+	_posix_spawn_port_actions_t acts; 
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	acts = psattr-&gt;psa_ports; 
+	<span class="enscript-keyword">if</span> (acts == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+	
+	free(acts);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * posix_spawn_destroycoalition_info_np
+ * Description: clean up coalition_info struct in posix_spawnattr_t attr
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawn_destroycoalition_info_np</span>(posix_spawnattr_t *attr)
+{
+	_posix_spawnattr_t psattr;
+	<span class="enscript-type">struct</span> _posix_spawn_coalition_info *coal_info;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	coal_info = psattr-&gt;psa_coalition_info;
+	<span class="enscript-keyword">if</span> (coal_info == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr-&gt;psa_coalition_info = NULL;
+	free(coal_info);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * posix_spawn_appendportaction_np
+ * Description: append a port action, grow the array if necessary
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawn_appendportaction_np</span>(posix_spawnattr_t *attr, _ps_port_action_t *act)
+{
+	_posix_spawnattr_t psattr;
+	_posix_spawn_port_actions_t acts;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL || act == NULL) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	acts = psattr-&gt;psa_ports;
+
+	<span class="enscript-comment">// Have any port actions been created yet?
+</span>	<span class="enscript-keyword">if</span> (acts == NULL) {
+		<span class="enscript-type">int</span> err = posix_spawn_createportactions_np(attr);
+		<span class="enscript-keyword">if</span> (err) {
+			<span class="enscript-keyword">return</span> err;
+		}
+		acts = psattr-&gt;psa_ports;
+	}
+
+	<span class="enscript-comment">// Is there enough room?
+</span>	<span class="enscript-keyword">if</span> (acts-&gt;pspa_alloc == acts-&gt;pspa_count) {
+		<span class="enscript-type">int</span> err = posix_spawn_growportactions_np(attr);
+		<span class="enscript-keyword">if</span> (err) {
+			<span class="enscript-keyword">return</span> err;
+		}
+		acts = psattr-&gt;psa_ports;
+	}
+
+	<span class="enscript-comment">// Add this action to next spot in array
+</span>	acts-&gt;pspa_actions[acts-&gt;pspa_count] = *act;
+	acts-&gt;pspa_count++;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_setspecialport_np
+ *
+ * Description:	Set a new value for a mach special port in the spawned task. 
+ *
+ * Parameters:	attr			The spawn attributes object for the
+ * 					new process
+ * 		new_port		The new value for the special port
+ * 		which			The particular port to be set
+ * 					(see task_set_special_port for details)
+ *
+ * Returns:	0			Success
+ * 		ENOMEM			Couldn't allocate memory
+ */</span>
+<span class="enscript-type">int</span>    
+<span class="enscript-function-name">posix_spawnattr_setspecialport_np</span>(
+		posix_spawnattr_t *attr,
+		mach_port_t      new_port,
+		<span class="enscript-type">int</span>             which)
+{
+	_ps_port_action_t action = {
+		.port_type = PSPA_SPECIAL,
+		.new_port = new_port,
+		.which = which,
+	};
+	<span class="enscript-keyword">return</span> posix_spawn_appendportaction_np(attr, &amp;action);
+}
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_setexceptionports_np
+ *
+ * Description:	Set a new port for a set of exception ports in the spawned task.
+ *
+ * Parameters:	attr			The spawn attributes object for the
+ * 					new process
+ * 		mask			A bitfield indicating which exceptions
+ * 					to associate the port with
+ * 		new_port		The new value for the exception port
+ * 		behavior		The default behavior for the port
+ * 		flavor			The default flavor for the port
+ * 					(see task_set_exception_ports)
+ *
+ * Returns:	0			Success
+ */</span>
+<span class="enscript-type">int</span>    
+<span class="enscript-function-name">posix_spawnattr_setexceptionports_np</span>(
+		posix_spawnattr_t       *attr,
+		exception_mask_t        mask,
+		mach_port_t              new_port,
+		exception_behavior_t    behavior,
+		thread_state_flavor_t   flavor)
+{
+	_ps_port_action_t action = {
+		.port_type = PSPA_EXCEPTION,
+		.mask = mask,
+		.new_port = new_port,
+		.behavior = behavior,
+		.flavor = flavor,
+	};
+	<span class="enscript-keyword">return</span> posix_spawn_appendportaction_np(attr, &amp;action);
+}
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_setauditsessionport_np
+ *
+ * Description:	Set the audit session port rights attribute in the spawned task.
+ *		This is used to securely set the audit session information for
+ *		the new task.
+ *
+ * Parameters:	attr			The spawn attributes object for the
+ * 					new process
+ * 		au_sessionport		The audit session send port right
+ *
+ * Returns:	0			Success
+ */</span>
+<span class="enscript-type">int</span>    
+<span class="enscript-function-name">posix_spawnattr_setauditsessionport_np</span>(
+		posix_spawnattr_t       *attr,
+		mach_port_t              au_sessionport)
+{
+	_ps_port_action_t action = {
+		.port_type = PSPA_AU_SESSION,
+		.new_port = au_sessionport,
+	};
+	<span class="enscript-keyword">return</span> posix_spawn_appendportaction_np(attr, &amp;action);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawn_file_actions_init
+ *
+ * Description:	Initialize a spawn file actions object attr with default values
+ *
+ * Parameters:	file_actions		The spawn file actions object to be
+ *					initialized
+ *
+ * Returns:	0			Success
+ *		ENOMEM			Insufficient memory exists to
+ *					initialize the spawn file actions
+ *					object.
+ *
+ * Note:	As an implementation detail, the externally visibily type
+ *		posix_spawn_file_actions_t is defined to be a void *, and
+ *		initialization involves allocation of a memory object.
+ *		Subsequent changes to the spawn file actions may result in
+ *		reallocation under the covers.
+ *
+ *		Reinitialization of an already initialized spawn file actions
+ *		object will result in memory being leaked.  Because spawn
+ *		file actions are not required to be used in conjunction with a
+ *		static initializer, there is no way to distinguish a spawn
+ *		file actions with stack garbage from one that's been
+ *		initialized.  This is arguably an API design error.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawn_file_actions_init</span>(posix_spawn_file_actions_t *file_actions)
+{
+	_posix_spawn_file_actions_t *psactsp = (_posix_spawn_file_actions_t *)file_actions;
+	<span class="enscript-type">int</span>	err = 0;
+
+	<span class="enscript-keyword">if</span> ((*psactsp = (_posix_spawn_file_actions_t)malloc(PSF_ACTIONS_SIZE(PSF_ACTIONS_INIT_COUNT))) == NULL) {
+		err = ENOMEM;
+	} <span class="enscript-keyword">else</span> {
+		(*psactsp)-&gt;psfa_act_alloc = PSF_ACTIONS_INIT_COUNT;
+		(*psactsp)-&gt;psfa_act_count = 0;
+	}
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawn_file_actions_destroy
+ *
+ * Description:	Destroy a spawn file actions object that was previously
+ *		initialized via posix_spawn_file_actions_init() by freeing any
+ *		memory associated with it and setting it to an invalid value.
+ *
+ * Parameters:	attr			The spawn file actions object to be
+ *					destroyed.
+ *
+ * Returns:	0			Success
+ *
+ * Notes:	The destroyed spawn file actions results in the void * pointer
+ *		being set to NULL; subsequent use without reinitialization
+ *		will result in explicit program failure (rather than merely
+ *		&quot;undefined behaviour&quot;).
+ *
+ * NOTIMP:	Allowed failures (checking NOT required):
+ *		EINVAL	The value specified by file_actions is invalid.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawn_file_actions_destroy</span>(posix_spawn_file_actions_t *file_actions)
+{
+	_posix_spawn_file_actions_t psacts;
+
+	<span class="enscript-keyword">if</span> (file_actions == NULL || *file_actions == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psacts = *(_posix_spawn_file_actions_t *)file_actions;
+	free(psacts);
+	*file_actions = NULL;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * _posix_spawn_file_actions_grow
+ *
+ * Description:	Grow the available list of file actions associated with the
+ *		pointer to the structure provided; replace the contents of the
+ *		pointer as a side effect.
+ *
+ * Parameters:	psactsp			Pointer to _posix_spawn_file_actions_t
+ *					to grow
+ *
+ * Returns:	0			Success
+ *		ENOMEM			Insufficient memory for operation
+ *
+ * Notes:	This code is common to all posix_spawn_file_actions_*()
+ *		functions, since we use a naieve data structure implementation
+ *		at present.  Future optimization will likely change this.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">_posix_spawn_file_actions_grow</span>(_posix_spawn_file_actions_t *psactsp)
+{
+	<span class="enscript-type">int</span>	new_alloc = (*psactsp)-&gt;psfa_act_alloc * 2;
+	_posix_spawn_file_actions_t new_psacts;
+
+	<span class="enscript-comment">/*
+	 * XXX may want to impose an administrative limit here; POSIX does
+	 * XXX not provide for an administrative error return in this case,
+	 * XXX so it's probably acceptable to just fail catastrophically
+	 * XXX instead of implementing one.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((new_psacts = (_posix_spawn_file_actions_t)realloc((*psactsp), PSF_ACTIONS_SIZE(new_alloc))) == NULL) {
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+	new_psacts-&gt;psfa_act_alloc = new_alloc;
+	*psactsp = new_psacts;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawn_file_actions_addopen
+ *
+ * Description:	Add an open action to the object referenced by 'file_actions'
+ *		that will cause the file named by 'path' to be attempted to be
+ *		opened with flags 'oflag' and mode 'mode', and, if successful,
+ *		return as descriptor 'filedes' to the spawned process.
+ *
+ * Parameters:	file_actions		File action object to augment
+ *		filedes			fd that open is to use
+ *		path			path to file to open
+ *		oflag			open file flags
+ *		mode			open file mode
+ *
+ * Returns:	0			Success
+ *		EBADF			The value specified by fildes is
+ *					negative or greater than or equal to
+ *					{OPEN_MAX}.
+ *		ENOMEM			Insufficient memory exists to add to
+ *					the spawn file actions object.
+ *
+ * NOTIMP:	Allowed failures (checking NOT required):
+ *		EINVAL	The value specified by file_actions is invalid.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawn_file_actions_addopen</span>(
+		posix_spawn_file_actions_t * __restrict file_actions,
+		<span class="enscript-type">int</span> filedes, <span class="enscript-type">const</span> <span class="enscript-type">char</span> * __restrict path, <span class="enscript-type">int</span> oflag,
+		mode_t mode)
+{
+	_posix_spawn_file_actions_t *psactsp;
+	_psfa_action_t *psfileact;
+
+	<span class="enscript-keyword">if</span> (file_actions == NULL || *file_actions == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psactsp = (_posix_spawn_file_actions_t *)file_actions;
+	<span class="enscript-comment">/* Range check; required by POSIX */</span>
+	<span class="enscript-keyword">if</span> (filedes &lt; 0 || filedes &gt;= OPEN_MAX)
+		<span class="enscript-keyword">return</span> (EBADF);
+
+	<span class="enscript-comment">/* If we do not have enough slots, grow the structure */</span>
+	<span class="enscript-keyword">if</span> ((*psactsp)-&gt;psfa_act_count == (*psactsp)-&gt;psfa_act_alloc) {
+		<span class="enscript-comment">/* need to grow file actions structure */</span>
+		<span class="enscript-keyword">if</span> (_posix_spawn_file_actions_grow(psactsp))
+			<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+
+	<span class="enscript-comment">/*
+	 * Allocate next available slot and fill it out
+	 */</span>
+	psfileact = &amp;(*psactsp)-&gt;psfa_act_acts[(*psactsp)-&gt;psfa_act_count++];
+
+	psfileact-&gt;psfaa_type = PSFA_OPEN;
+	psfileact-&gt;psfaa_filedes = filedes;
+	psfileact-&gt;psfaa_openargs.psfao_oflag = oflag;
+	psfileact-&gt;psfaa_openargs.psfao_mode = mode;
+	strlcpy(psfileact-&gt;psfaa_openargs.psfao_path, path, PATH_MAX);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawn_file_actions_addclose
+ *
+ * Description:	Add a close action to the object referenced by 'file_actions'
+ *		that will cause the file referenced by 'filedes' to be
+ *		attempted to be closed in the spawned process.
+ *
+ * Parameters:	file_actions		File action object to augment
+ *		filedes			fd to close
+ *
+ * Returns:	0			Success
+ *		EBADF			The value specified by fildes is
+ *					negative or greater than or equal to
+ *					{OPEN_MAX}.
+ *		ENOMEM			Insufficient memory exists to add to
+ *					the spawn file actions object.
+ *
+ * NOTIMP:	Allowed failures (checking NOT required):
+ *		EINVAL	The value specified by file_actions is invalid.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawn_file_actions_addclose</span>(posix_spawn_file_actions_t *file_actions,
+		<span class="enscript-type">int</span> filedes)
+{
+	_posix_spawn_file_actions_t *psactsp;
+	_psfa_action_t *psfileact;
+
+	<span class="enscript-keyword">if</span> (file_actions == NULL || *file_actions == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psactsp = (_posix_spawn_file_actions_t *)file_actions;
+	<span class="enscript-comment">/* Range check; required by POSIX */</span>
+	<span class="enscript-keyword">if</span> (filedes &lt; 0 || filedes &gt;= OPEN_MAX)
+		<span class="enscript-keyword">return</span> (EBADF);
+
+	<span class="enscript-comment">/* If we do not have enough slots, grow the structure */</span>
+	<span class="enscript-keyword">if</span> ((*psactsp)-&gt;psfa_act_count == (*psactsp)-&gt;psfa_act_alloc) {
+		<span class="enscript-comment">/* need to grow file actions structure */</span>
+		<span class="enscript-keyword">if</span> (_posix_spawn_file_actions_grow(psactsp))
+			<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+
+	<span class="enscript-comment">/*
+	 * Allocate next available slot and fill it out
+	 */</span>
+	psfileact = &amp;(*psactsp)-&gt;psfa_act_acts[(*psactsp)-&gt;psfa_act_count++];
+
+	psfileact-&gt;psfaa_type = PSFA_CLOSE;
+	psfileact-&gt;psfaa_filedes = filedes;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * posix_spawn_file_actions_adddup2
+ *
+ * Description:	Add a dup2 action to the object referenced by 'file_actions'
+ *		that will cause the file referenced by 'filedes' to be
+ *		attempted to be dup2'ed to the descriptor 'newfiledes' in the
+ *		spawned process.
+ *
+ * Parameters:	file_actions		File action object to augment
+ *		filedes			fd to dup2
+ *		newfiledes		fd to dup2 it to
+ *
+ * Returns:	0			Success
+ *		EBADF			The value specified by either fildes
+ *					or by newfiledes is negative or greater
+ *					than or equal to {OPEN_MAX}.
+ *		ENOMEM			Insufficient memory exists to add to
+ *					the spawn file actions object.
+ *
+ * NOTIMP:	Allowed failures (checking NOT required):
+ *		EINVAL	The value specified by file_actions is invalid.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawn_file_actions_adddup2</span>(posix_spawn_file_actions_t *file_actions,
+		<span class="enscript-type">int</span> filedes, <span class="enscript-type">int</span> newfiledes)
+{
+	_posix_spawn_file_actions_t *psactsp;
+	_psfa_action_t *psfileact;
+
+	<span class="enscript-keyword">if</span> (file_actions == NULL || *file_actions == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psactsp = (_posix_spawn_file_actions_t *)file_actions;
+	<span class="enscript-comment">/* Range check; required by POSIX */</span>
+	<span class="enscript-keyword">if</span> (filedes &lt; 0 || filedes &gt;= OPEN_MAX ||
+	    newfiledes &lt; 0 || newfiledes &gt;= OPEN_MAX)
+		<span class="enscript-keyword">return</span> (EBADF);
+
+	<span class="enscript-comment">/* If we do not have enough slots, grow the structure */</span>
+	<span class="enscript-keyword">if</span> ((*psactsp)-&gt;psfa_act_count == (*psactsp)-&gt;psfa_act_alloc) {
+		<span class="enscript-comment">/* need to grow file actions structure */</span>
+		<span class="enscript-keyword">if</span> (_posix_spawn_file_actions_grow(psactsp))
+			<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+
+	<span class="enscript-comment">/*
+	 * Allocate next available slot and fill it out
+	 */</span>
+	psfileact = &amp;(*psactsp)-&gt;psfa_act_acts[(*psactsp)-&gt;psfa_act_count++];
+
+	psfileact-&gt;psfaa_type = PSFA_DUP2;
+	psfileact-&gt;psfaa_filedes = filedes;
+	psfileact-&gt;psfaa_openargs.psfao_oflag = newfiledes;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * posix_spawn_file_actions_addinherit_np
+ *
+ * Description:	Add the &quot;inherit&quot; action to the object referenced by
+ *		'file_actions' that will cause the file referenced by
+ *		'filedes' to continue to be available in the spawned
+ *		process via the same descriptor.
+ *
+ *		Inheritance is the normal default behaviour for
+ *		file descriptors across exec and spawn; but if the
+ *		POSIX_SPAWN_CLOEXEC_DEFAULT flag is set, the usual
+ *		default is reversed for the purposes of the spawn
+ *		invocation.  Any pre-existing descriptors that
+ *		need to be made available to the spawned process can
+ *		be marked explicitly as 'inherit' via this interface.
+ *		Otherwise they will be automatically closed.
+ *
+ *		Note that any descriptors created via the other file
+ *		actions interfaces are automatically marked as 'inherit'.
+ *
+ * Parameters:	file_actions		File action object to augment
+ *		filedes			fd to inherit.
+ *
+ * Returns:	0			Success
+ *		EBADF			The value specified by fildes is
+ *					negative or greater than or equal to
+ *					{OPEN_MAX}.
+ *		ENOMEM			Insufficient memory exists to add to
+ *					the spawn file actions object.
+ *
+ * NOTIMP:	Allowed failures (checking NOT required):
+ *		EINVAL	The value specified by file_actions is invalid.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawn_file_actions_addinherit_np</span>(posix_spawn_file_actions_t *file_actions,
+		<span class="enscript-type">int</span> filedes)
+{
+	_posix_spawn_file_actions_t *psactsp;
+	_psfa_action_t *psfileact;
+
+	<span class="enscript-keyword">if</span> (file_actions == NULL || *file_actions == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	psactsp = (_posix_spawn_file_actions_t *)file_actions;
+	<span class="enscript-comment">/* Range check; required by POSIX */</span>
+	<span class="enscript-keyword">if</span> (filedes &lt; 0 || filedes &gt;= OPEN_MAX)
+		<span class="enscript-keyword">return</span> (EBADF);
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">POSIX_SPAWN_CLOEXEC_DEFAULT</span>)	// <span class="enscript-variable-name">TODO</span>: <span class="enscript-variable-name">delete</span> <span class="enscript-variable-name">this</span> <span class="enscript-variable-name">check</span>
+	<span class="enscript-comment">/* If we do not have enough slots, grow the structure */</span>
+	<span class="enscript-keyword">if</span> ((*psactsp)-&gt;psfa_act_count == (*psactsp)-&gt;psfa_act_alloc) {
+		<span class="enscript-comment">/* need to grow file actions structure */</span>
+		<span class="enscript-keyword">if</span> (_posix_spawn_file_actions_grow(psactsp))
+			<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+
+	<span class="enscript-comment">/*
+	 * Allocate next available slot and fill it out
+	 */</span>
+	psfileact = &amp;(*psactsp)-&gt;psfa_act_acts[(*psactsp)-&gt;psfa_act_count++];
+
+	psfileact-&gt;psfaa_type = PSFA_INHERIT;
+	psfileact-&gt;psfaa_filedes = filedes;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_setcpumonitor_default</span>(posix_spawnattr_t * __restrict attr)
+{
+	<span class="enscript-keyword">return</span> (posix_spawnattr_setcpumonitor(attr, PROC_POLICY_CPUMON_DEFAULTS, 0));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_setcpumonitor</span>(posix_spawnattr_t * __restrict attr,
+		uint64_t percent, uint64_t interval)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	psattr = *(_posix_spawnattr_t *)attr;
+
+	psattr-&gt;psa_cpumonitor_percent = percent;
+	psattr-&gt;psa_cpumonitor_interval = interval;
+
+	<span class="enscript-keyword">return</span> (0);			
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_getcpumonitor</span>(posix_spawnattr_t * __restrict attr,
+		uint64_t *percent, uint64_t *interval)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	psattr = *(_posix_spawnattr_t *)attr;
+
+	*percent = psattr-&gt;psa_cpumonitor_percent;
+	*interval = psattr-&gt;psa_cpumonitor_interval;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+
+<span class="enscript-comment">/*
+ * posix_spawnattr_set_importancewatch_port_np
+ *
+ * Description:	Mark ports referred to by these rights
+ *              to boost the new task instead of their current task 
+ *              for the spawn attribute object referred to by 'attr'.
+ *              Ports must be valid at posix_spawn time.  They will NOT be
+ *              consumed by the kernel, so they must be deallocated after the spawn returns.
+ *              (If you are SETEXEC-ing, they are cleaned up by the exec operation).
+ * 
+ *              The maximum number of watch ports allowed is defined by POSIX_SPAWN_IMPORTANCE_PORT_COUNT.
+ *
+ * Parameters:	count           Number of ports in portarray
+ *              portarray       Array of rights
+ *
+ * Returns:     0       Success
+ *              EINVAL  Bad port count
+ *              ENOMEM  Insufficient memory exists to add to
+ *                      the spawn port actions object.
+ */</span>
+<span class="enscript-type">int</span>     
+<span class="enscript-function-name">posix_spawnattr_set_importancewatch_port_np</span>(posix_spawnattr_t * __restrict attr,
+                 <span class="enscript-type">int</span> count, mach_port_t portarray[]) 
+{
+	<span class="enscript-type">int</span> err = 0, i;
+
+	<span class="enscript-keyword">if</span> (count &lt; 0 || count &gt; POSIX_SPAWN_IMPORTANCE_PORT_COUNT) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		_ps_port_action_t action = {
+			.port_type = PSPA_IMP_WATCHPORTS,
+			.new_port = portarray[i],
+		};
+		<span class="enscript-type">int</span> err = posix_spawn_appendportaction_np(attr, &amp;action);
+		<span class="enscript-keyword">if</span> (err) {
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-keyword">return</span> err;
+}
+
+
+
+<span class="enscript-type">static</span>
+_ps_mac_policy_extension_t *
+<span class="enscript-function-name">posix_spawnattr_macpolicyinfo_lookup</span>(_posix_spawn_mac_policy_extensions_t psmx, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *policyname)
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">if</span> (psmx == NULL)
+		<span class="enscript-keyword">return</span> NULL;
+	
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; psmx-&gt;psmx_count; i++) {
+		_ps_mac_policy_extension_t *extension = &amp;psmx-&gt;psmx_extensions[i];
+		<span class="enscript-keyword">if</span> (strcmp(extension-&gt;policyname, policyname) == 0)
+			<span class="enscript-keyword">return</span> extension;
+	}
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_getmacpolicyinfo_np</span>(<span class="enscript-type">const</span> posix_spawnattr_t * __restrict attr,
+		<span class="enscript-type">const</span> <span class="enscript-type">char</span> *policyname, <span class="enscript-type">void</span> **datap, size_t *datalenp)
+{
+	_posix_spawnattr_t psattr;
+	_ps_mac_policy_extension_t *extension;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL || policyname == NULL || datap == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	extension = posix_spawnattr_macpolicyinfo_lookup(psattr-&gt;psa_mac_extensions, policyname);
+	<span class="enscript-keyword">if</span> (extension == NULL)
+		<span class="enscript-keyword">return</span> ESRCH;
+	*datap = (<span class="enscript-type">void</span> *)(uintptr_t)extension-&gt;data;
+	<span class="enscript-keyword">if</span> (datalenp != NULL) {
+		*datalenp = (size_t)extension-&gt;datalen;
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_setmacpolicyinfo_np</span>(posix_spawnattr_t * __restrict attr,
+		<span class="enscript-type">const</span> <span class="enscript-type">char</span> *policyname, <span class="enscript-type">void</span> *data, size_t datalen)
+{
+	_posix_spawnattr_t psattr;
+	_posix_spawn_mac_policy_extensions_t psmx;
+	_ps_mac_policy_extension_t *extension;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL || policyname == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	psmx = psattr-&gt;psa_mac_extensions;
+	extension = posix_spawnattr_macpolicyinfo_lookup(psattr-&gt;psa_mac_extensions, policyname);
+	<span class="enscript-keyword">if</span> (extension != NULL) {
+		extension-&gt;data = (uintptr_t)data;
+		extension-&gt;datalen = datalen;
+		<span class="enscript-keyword">return</span> 0;
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (psmx == NULL) {
+		psmx = psattr-&gt;psa_mac_extensions = malloc(PS_MAC_EXTENSIONS_SIZE(PS_MAC_EXTENSIONS_INIT_COUNT));
+		<span class="enscript-keyword">if</span> (psmx == NULL)
+			<span class="enscript-keyword">return</span> ENOMEM;
+		psmx-&gt;psmx_alloc = PS_MAC_EXTENSIONS_INIT_COUNT;
+		psmx-&gt;psmx_count = 0;
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (psmx-&gt;psmx_count == psmx-&gt;psmx_alloc) {
+		psmx = psattr-&gt;psa_mac_extensions = reallocf(psmx, PS_MAC_EXTENSIONS_SIZE(psmx-&gt;psmx_alloc * 2));
+		<span class="enscript-keyword">if</span> (psmx == NULL)
+			<span class="enscript-keyword">return</span> ENOMEM;
+		psmx-&gt;psmx_alloc *= 2;
+	}
+	extension = &amp;psmx-&gt;psmx_extensions[psmx-&gt;psmx_count];
+	strlcpy(extension-&gt;policyname, policyname, <span class="enscript-keyword">sizeof</span>(extension-&gt;policyname));
+	extension-&gt;data = (uintptr_t)data;
+	extension-&gt;datalen = datalen;
+	psmx-&gt;psmx_count += 1;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">posix_spawnattr_setcoalition_np</span>(<span class="enscript-type">const</span> posix_spawnattr_t * __restrict attr,
+				    uint64_t coalitionid, <span class="enscript-type">int</span> type, <span class="enscript-type">int</span> role)
+{
+	_posix_spawnattr_t psattr;
+	<span class="enscript-type">struct</span> _posix_spawn_coalition_info *coal_info;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	<span class="enscript-keyword">if</span> (type &lt; 0 || type &gt; COALITION_TYPE_MAX)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+
+	coal_info = psattr-&gt;psa_coalition_info;
+	<span class="enscript-keyword">if</span> (!coal_info) {
+		coal_info = (<span class="enscript-type">struct</span> _posix_spawn_coalition_info *)malloc(<span class="enscript-keyword">sizeof</span>(*coal_info));
+		<span class="enscript-keyword">if</span> (!coal_info)
+			<span class="enscript-keyword">return</span> ENOMEM;
+		memset(coal_info, 0, <span class="enscript-keyword">sizeof</span>(*coal_info));
+		psattr-&gt;psa_coalition_info = coal_info;
+	}
+
+	coal_info-&gt;psci_info[type].psci_id   = coalitionid;
+	coal_info-&gt;psci_info[type].psci_role = role;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">posix_spawnattr_set_qos_clamp_np</span>(<span class="enscript-type">const</span> posix_spawnattr_t * __restrict attr, uint64_t qos_clamp)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-keyword">if</span> (qos_clamp &gt;= POSIX_SPAWN_PROC_CLAMP_LAST)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	psattr-&gt;psa_qos_clamp = qos_clamp;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_get_qos_clamp_np</span>(<span class="enscript-type">const</span> posix_spawnattr_t * __restrict attr, uint64_t * __restrict qos_clampp)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	*qos_clampp = psattr-&gt;psa_qos_clamp;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">posix_spawnattr_set_darwin_role_np</span>(<span class="enscript-type">const</span> posix_spawnattr_t * __restrict attr, uint64_t darwin_role)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	psattr-&gt;psa_darwin_role = darwin_role;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawnattr_get_darwin_role_np</span>(<span class="enscript-type">const</span> posix_spawnattr_t * __restrict attr, uint64_t * __restrict darwin_rolep)
+{
+	_posix_spawnattr_t psattr;
+
+	<span class="enscript-keyword">if</span> (attr == NULL || *attr == NULL) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	psattr = *(_posix_spawnattr_t *)attr;
+	*darwin_rolep = psattr-&gt;psa_darwin_role;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * posix_spawn
+ *
+ * Description:	Create a new process from the process image corresponding to
+ *		the supplied 'path' argument.
+ *
+ * Parameters:	pid				Pointer to pid_t to receive the
+ *						PID of the spawned process, if
+ *						successful and 'pid' != NULL
+ *		path				Path of image file to spawn
+ *		file_actions			spawn file actions object which
+ *						describes file actions to be
+ *						performed during the spawn
+ *		attrp				spawn attributes object which
+ *						describes attributes to be
+ *						applied during the spawn
+ *		argv				argument vector array; NULL
+ *						terminated
+ *		envp				environment vector array; NULL
+ *						terminated
+ *
+ * Returns:	0				Success
+ *		!0				An errno value indicating the
+ *						cause of the failure to spawn
+ *
+ * Notes:	Unlike other system calls, the return value of this system
+ *		call is expected to either be a 0 or an errno, rather than a
+ *		0 or a -1, with the 'errno' variable being set.
+ */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">__posix_spawn</span>(pid_t * __restrict, <span class="enscript-type">const</span> <span class="enscript-type">char</span> * __restrict,
+		<span class="enscript-type">struct</span> _posix_spawn_args_desc *,
+		<span class="enscript-type">char</span> *<span class="enscript-type">const</span> argv[ __restrict], <span class="enscript-type">char</span> *<span class="enscript-type">const</span> envp[ __restrict]);
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">posix_spawn</span>(pid_t * __restrict pid, <span class="enscript-type">const</span> <span class="enscript-type">char</span> * __restrict path,
+		<span class="enscript-type">const</span> posix_spawn_file_actions_t *file_actions,
+		<span class="enscript-type">const</span> posix_spawnattr_t * __restrict attrp,
+		<span class="enscript-type">char</span> *<span class="enscript-type">const</span> argv[ __restrict], <span class="enscript-type">char</span> *<span class="enscript-type">const</span> envp[ __restrict])
+{
+	<span class="enscript-type">int</span> saveerrno = errno;
+	<span class="enscript-type">int</span> ret;
+	<span class="enscript-comment">/*
+	 * Only do extra work if we have file actions or attributes to push
+	 * down.  We use a descriptor to push this information down, since we
+	 * want to have size information, which will let us (1) preallocate a
+	 * single chunk of memory for the copyin(), and (2) allow us to do a
+	 * single copyin() per attributes or file actions as a monlithic block.
+	 *
+	 * Note:	A future implementation may attempt to do the same
+	 *		thing for the argv/envp data, which could potentially
+	 *		result in a performance improvement due to increased
+	 *		kernel efficiency, even though it would mean copying
+	 *		the data in user space.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((file_actions != NULL &amp;&amp; (*file_actions != NULL) &amp;&amp;	(*(_posix_spawn_file_actions_t *)file_actions)-&gt;psfa_act_count &gt; 0) || attrp != NULL) {
+		<span class="enscript-type">struct</span> _posix_spawn_args_desc	ad;
+
+		memset(&amp;ad, 0, <span class="enscript-keyword">sizeof</span>(ad));
+		<span class="enscript-keyword">if</span> (attrp != NULL &amp;&amp; *attrp != NULL) {
+			_posix_spawnattr_t psattr = *(_posix_spawnattr_t *)attrp;
+			ad.attr_size = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> _posix_spawnattr);
+			ad.attrp = psattr;
+
+			<span class="enscript-keyword">if</span> (psattr-&gt;psa_ports != NULL) {
+				ad.port_actions = psattr-&gt;psa_ports;
+				ad.port_actions_size = PS_PORT_ACTIONS_SIZE(
+						ad.port_actions-&gt;pspa_count);
+			}
+			<span class="enscript-keyword">if</span> (psattr-&gt;psa_mac_extensions != NULL) {
+				ad.mac_extensions = psattr-&gt;psa_mac_extensions;
+				ad.mac_extensions_size = PS_MAC_EXTENSIONS_SIZE(
+						ad.mac_extensions-&gt;psmx_count);
+			}
+			<span class="enscript-keyword">if</span> (psattr-&gt;psa_coalition_info != NULL) {
+				ad.coal_info_size = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> _posix_spawn_coalition_info);
+				ad.coal_info = psattr-&gt;psa_coalition_info;
+			}
+		}
+		<span class="enscript-keyword">if</span> (file_actions != NULL &amp;&amp; *file_actions != NULL) {
+			_posix_spawn_file_actions_t psactsp =
+				*(_posix_spawn_file_actions_t *)file_actions;
+
+			<span class="enscript-keyword">if</span> (psactsp-&gt;psfa_act_count &gt; 0) {
+				ad.file_actions_size = PSF_ACTIONS_SIZE(psactsp-&gt;psfa_act_count);
+				ad.file_actions = psactsp;
+			}
+		}
+
+		ret = __posix_spawn(pid, path, &amp;ad, argv, envp);
+	} <span class="enscript-keyword">else</span>
+		ret = __posix_spawn(pid, path, NULL, argv, envp);
+
+	<span class="enscript-keyword">if</span> (ret &lt; 0)
+		ret = errno;
+	errno = saveerrno;
+	<span class="enscript-keyword">return</span> ret;
+}
+
+</pre>
+<hr />
+</body></html>

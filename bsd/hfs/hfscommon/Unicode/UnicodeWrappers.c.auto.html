@@ -1,0 +1,554 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>UnicodeWrappers.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">UnicodeWrappers.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2013 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+	File:		UnicodeWrappers.c
+
+	Contains:	Wrapper routines for Unicode conversion and comparison.
+
+*/</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/utfconv.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../../hfs_macos_defs.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;UCStringCompareData.h&quot;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../headers/FileMgrInternal.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../headers/HFSUnicodeWrappers.h&quot;</span>
+
+<span class="enscript-type">enum</span> {
+	kMinFileExtensionChars = 1,	<span class="enscript-comment">/* does not include dot */</span>
+	kMaxFileExtensionChars = 5	<span class="enscript-comment">/* does not include dot */</span>
+};
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">EXTENSIONCHAR</span>(c)	(((c) &gt;= 0x61 &amp;&amp; (c) &lt;= 0x7A) || \
+				 ((c) &gt;= 0x41 &amp;&amp; (c) &lt;= 0x5A) || \
+				 ((c) &gt;= 0x30 &amp;&amp; (c) &lt;= 0x39))
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IsHexDigit</span>(c)		(((c) &gt;= (u_int8_t) <span class="enscript-string">'0'</span> &amp;&amp; (c) &lt;= (u_int8_t) <span class="enscript-string">'9'</span>) || \
+				 ((c) &gt;= (u_int8_t) <span class="enscript-string">'A'</span> &amp;&amp; (c) &lt;= (u_int8_t) <span class="enscript-string">'F'</span>))
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	GetFilenameExtension( ItemCount length, ConstUniCharArrayPtr unicodeStr, <span class="enscript-type">char</span>* extStr );
+
+
+<span class="enscript-type">static</span> u_int32_t	HexStringToInteger( u_int32_t length, <span class="enscript-type">const</span> u_int8_t *hexStr );
+
+
+<span class="enscript-comment">/*
+ * Get filename extension (if any) as a C string
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">GetFilenameExtension</span>(ItemCount length, ConstUniCharArrayPtr unicodeStr, <span class="enscript-type">char</span> * extStr)
+{
+	u_int32_t	i;
+	UniChar	c;
+	u_int16_t	extChars;	<span class="enscript-comment">/* number of extension chars (excluding dot) */</span>
+	u_int16_t	maxExtChars;
+	Boolean	foundExtension;
+
+	extStr[0] = <span class="enscript-string">'\0'</span>;	<span class="enscript-comment">/* assume there's no extension */</span>
+
+	<span class="enscript-keyword">if</span> ( length &lt; 3 )
+		<span class="enscript-keyword">return</span>;		<span class="enscript-comment">/* &quot;x.y&quot; is smallest possible extension */</span>
+	
+	<span class="enscript-keyword">if</span> ( length &lt; (kMaxFileExtensionChars + 2) )
+		maxExtChars = length - 2;	<span class="enscript-comment">/* save room for prefix + dot */</span>
+	<span class="enscript-keyword">else</span>
+		maxExtChars = kMaxFileExtensionChars;
+
+	i = length;
+	extChars = 0;
+	foundExtension = false;
+
+	<span class="enscript-keyword">while</span> ( extChars &lt;= maxExtChars ) {
+		c = unicodeStr[--i];
+
+		<span class="enscript-comment">/* look for leading dot */</span>
+		<span class="enscript-keyword">if</span> ( c == (UniChar) <span class="enscript-string">'.'</span> ) {
+			<span class="enscript-keyword">if</span> ( extChars &gt; 0 )	<span class="enscript-comment">/* cannot end with a dot */</span>
+				foundExtension = true;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> ( EXTENSIONCHAR(c) )
+			++extChars;
+		<span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">break</span>;
+	}
+	
+	<span class="enscript-comment">/* if we found one then copy it */</span>
+	<span class="enscript-keyword">if</span> ( foundExtension ) {
+		u_int8_t *extStrPtr = (u_int8_t *)extStr;
+		<span class="enscript-type">const</span> UniChar *unicodeStrPtr = &amp;unicodeStr[i];
+		
+		<span class="enscript-keyword">for</span> ( i = 0; i &lt;= extChars; ++i )
+			*(extStrPtr++) = (u_int8_t) *(unicodeStrPtr++);
+		extStr[extChars + 1] = <span class="enscript-string">'\0'</span>;	<span class="enscript-comment">/* terminate extension + dot */</span>
+	}
+}
+
+
+
+<span class="enscript-comment">/*
+ * Count filename extension characters (if any)
+ */</span>
+__private_extern__ u_int32_t
+<span class="enscript-function-name">CountFilenameExtensionChars</span>( <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> * filename, u_int32_t length )
+{
+	u_int32_t	i;
+	UniChar	c;
+	u_int32_t	extChars;	<span class="enscript-comment">/* number of extension chars (excluding dot) */</span>
+	u_int16_t	maxExtChars;
+	Boolean	foundExtension;
+
+	<span class="enscript-keyword">if</span> ( length &lt; 3 )
+		<span class="enscript-keyword">return</span> 0;	<span class="enscript-comment">/* &quot;x.y&quot; is smallest possible extension	*/</span>
+	
+	<span class="enscript-keyword">if</span> ( length &lt; (kMaxFileExtensionChars + 2) )
+		maxExtChars = length - 2;	<span class="enscript-comment">/* save room for prefix + dot */</span>
+	<span class="enscript-keyword">else</span>
+		maxExtChars = kMaxFileExtensionChars;
+
+	extChars = 0;		<span class="enscript-comment">/* assume there's no extension */</span>
+	i = length - 1;		<span class="enscript-comment">/* index to last ascii character */</span>
+	foundExtension = false;
+
+	<span class="enscript-keyword">while</span> ( extChars &lt;= maxExtChars ) {
+		c = filename[i--];
+
+		<span class="enscript-comment">/* look for leading dot */</span>
+		<span class="enscript-keyword">if</span> ( c == (u_int8_t) <span class="enscript-string">'.'</span> )	{
+			<span class="enscript-keyword">if</span> ( extChars &gt; 0 )	<span class="enscript-comment">/* cannot end with a dot */</span>
+				<span class="enscript-keyword">return</span> (extChars);
+
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> ( EXTENSIONCHAR(c) )
+			++extChars;
+		<span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">break</span>;
+	}
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-comment">/*
+ * extract the file id from a mangled name
+ */</span>
+HFSCatalogNodeID
+<span class="enscript-function-name">GetEmbeddedFileID</span>(<span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> * filename, u_int32_t length, u_int32_t *prefixLength)
+{
+	<span class="enscript-type">short</span>	extChars;
+	<span class="enscript-type">short</span>	i;
+	u_int8_t	c;
+
+	*prefixLength = 0;
+
+	<span class="enscript-keyword">if</span> ( filename == NULL )
+		<span class="enscript-keyword">return</span> 0;
+
+	<span class="enscript-keyword">if</span> ( length &lt; 28 )
+		<span class="enscript-keyword">return</span> 0;	<span class="enscript-comment">/* too small to have been mangled */</span>
+
+	<span class="enscript-comment">/* big enough for a file ID (#10) and an extension (.x) ? */</span>
+	<span class="enscript-keyword">if</span> ( length &gt; 5 )
+		extChars = CountFilenameExtensionChars(filename, length);
+	<span class="enscript-keyword">else</span>
+		extChars = 0;
+
+	<span class="enscript-comment">/* skip over dot plus extension characters */</span>
+	<span class="enscript-keyword">if</span> ( extChars &gt; 0 )
+		length -= (extChars + 1);	
+
+	<span class="enscript-comment">/* scan for file id digits */</span>
+	<span class="enscript-keyword">for</span> ( i = length - 1; i &gt;= 0; --i) {
+		c = filename[i];
+
+		<span class="enscript-comment">/* look for file ID marker */</span>
+		<span class="enscript-keyword">if</span> ( c == <span class="enscript-string">'#'</span> ) {
+			<span class="enscript-keyword">if</span> ( (length - i) &lt; 3 )
+				<span class="enscript-keyword">break</span>;	<span class="enscript-comment">/* too small to be a file ID */</span>
+
+			*prefixLength = i;
+			<span class="enscript-keyword">return</span> HexStringToInteger(length - i - 1, &amp;filename[i+1]);
+		}
+
+		<span class="enscript-keyword">if</span> ( !IsHexDigit(c) )
+			<span class="enscript-keyword">break</span>;	<span class="enscript-comment">/* file ID string must have hex digits */</span>
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+
+<span class="enscript-type">static</span> u_int32_t
+<span class="enscript-function-name">HexStringToInteger</span>(u_int32_t length, <span class="enscript-type">const</span> u_int8_t *hexStr)
+{
+	u_int32_t		value;
+	u_int32_t		i;
+	u_int8_t		c;
+	<span class="enscript-type">const</span> u_int8_t	*p;
+
+	value = 0;
+	p = hexStr;
+
+	<span class="enscript-keyword">for</span> ( i = 0; i &lt; length; ++i ) {
+		c = *p++;
+
+		<span class="enscript-keyword">if</span> (c &gt;= <span class="enscript-string">'0'</span> &amp;&amp; c &lt;= <span class="enscript-string">'9'</span>) {
+			value = value &lt;&lt; 4;
+			value += (u_int32_t) c - (u_int32_t) <span class="enscript-string">'0'</span>;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (c &gt;= <span class="enscript-string">'A'</span> &amp;&amp; c &lt;= <span class="enscript-string">'F'</span>) {
+			value = value &lt;&lt; 4;
+			value += 10 + ((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) c - (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) <span class="enscript-string">'A'</span>);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span> 0;	<span class="enscript-comment">/* bad character */</span>
+		}
+	}
+
+	<span class="enscript-keyword">return</span> value;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine:	FastRelString
+ *
+ * Output:	returns -1 if str1 &lt; str2
+ *		returns  1 if str1 &gt; str2
+ *		return	 0 if equal
+ *
+ */</span>
+int32_t	FastRelString( ConstStr255Param str1, ConstStr255Param str2 )
+{
+	u_int16_t*		compareTable;
+	int32_t	 		bestGuess;
+	u_int8_t 	 	length, length2;
+	u_int8_t 	 	delta;
+
+	delta = 0;
+	length = *(str1++);
+	length2 = *(str2++);
+
+	<span class="enscript-keyword">if</span> (length == length2)
+		bestGuess = 0;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (length &lt; length2)
+	{
+		bestGuess = -1;
+		delta = length2 - length;
+	}
+	<span class="enscript-keyword">else</span>
+	{
+		bestGuess = 1;
+		length = length2;
+	}
+
+	compareTable = (u_int16_t*) gCompareTable;
+
+	<span class="enscript-keyword">while</span> (length--)
+	{
+		u_int8_t	aChar, bChar;
+
+		aChar = *(str1++);
+		bChar = *(str2++);
+		
+		<span class="enscript-keyword">if</span> (aChar != bChar)		<span class="enscript-comment">//	If they don't match exacly, do case conversion
+</span>		{	
+			u_int16_t	aSortWord, bSortWord;
+
+			aSortWord = compareTable[aChar];
+			bSortWord = compareTable[bChar];
+
+			<span class="enscript-keyword">if</span> (aSortWord &gt; bSortWord)
+				<span class="enscript-keyword">return</span> 1;
+
+			<span class="enscript-keyword">if</span> (aSortWord &lt; bSortWord)
+				<span class="enscript-keyword">return</span> -1;
+		}
+		
+		<span class="enscript-comment">//	If characters match exactly, then go on to next character immediately without
+</span>		<span class="enscript-comment">//	doing any extra work.
+</span>	}
+	
+	<span class="enscript-comment">//	if you got to here, then return bestGuess
+</span>	<span class="enscript-keyword">return</span> bestGuess;
+}	
+
+
+
+<span class="enscript-comment">//
+</span><span class="enscript-comment">//	FastUnicodeCompare - Compare two Unicode strings; produce a relative ordering
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	    IF				RESULT
+</span><span class="enscript-comment">//	--------------------------
+</span><span class="enscript-comment">//	str1 &lt; str2		=&gt;	-1
+</span><span class="enscript-comment">//	str1 = str2		=&gt;	 0
+</span><span class="enscript-comment">//	str1 &gt; str2		=&gt;	+1
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	The lower case table starts with 256 entries (one for each of the upper bytes
+</span><span class="enscript-comment">//	of the original Unicode char).  If that entry is zero, then all characters with
+</span><span class="enscript-comment">//	that upper byte are already case folded.  If the entry is non-zero, then it is
+</span><span class="enscript-comment">//	the _index_ (not byte offset) of the start of the sub-table for the characters
+</span><span class="enscript-comment">//	with that upper byte.  All ignorable characters are folded to the value zero.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	In pseudocode:
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//		Let c = source Unicode character
+</span><span class="enscript-comment">//		Let table[] = lower case table
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//		lower = table[highbyte(c)]
+</span><span class="enscript-comment">//		if (lower == 0)
+</span><span class="enscript-comment">//			lower = c
+</span><span class="enscript-comment">//		else
+</span><span class="enscript-comment">//			lower = table[lower+lowbyte(c)]
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//		if (lower == 0)
+</span><span class="enscript-comment">//			ignore this character
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	To handle ignorable characters, we now need a loop to find the next valid character.
+</span><span class="enscript-comment">//	Also, we can't pre-compute the number of characters to compare; the string length might
+</span><span class="enscript-comment">//	be larger than the number of non-ignorable characters.  Further, we must be able to handle
+</span><span class="enscript-comment">//	ignorable characters at any point in the string, including as the first or last characters.
+</span><span class="enscript-comment">//	We use a zero value as a sentinel to detect both end-of-string and ignorable characters.
+</span><span class="enscript-comment">//	Since the File Manager doesn't prevent the NUL character (value zero) as part of a filename,
+</span><span class="enscript-comment">//	the case mapping table is assumed to map u+0000 to some non-zero value (like 0xFFFF, which is
+</span><span class="enscript-comment">//	an invalid Unicode character).
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Pseudocode:
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//		while (1) {
+</span><span class="enscript-comment">//			c1 = GetNextValidChar(str1)			//	returns zero if at end of string
+</span><span class="enscript-comment">//			c2 = GetNextValidChar(str2)
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//			if (c1 != c2) break					//	found a difference
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//			if (c1 == 0)						//	reached end of string on both strings at once?
+</span><span class="enscript-comment">//				return 0;						//	yes, so strings are equal
+</span><span class="enscript-comment">//		}
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//		// When we get here, c1 != c2.  So, we just need to determine which one is less.
+</span><span class="enscript-comment">//		if (c1 &lt; c2)
+</span><span class="enscript-comment">//			return -1;
+</span><span class="enscript-comment">//		else
+</span><span class="enscript-comment">//			return 1;
+</span><span class="enscript-comment">//
+</span>
+int32_t <span class="enscript-function-name">FastUnicodeCompare</span> ( <span class="enscript-type">register</span> ConstUniCharArrayPtr str1, <span class="enscript-type">register</span> ItemCount length1,
+							<span class="enscript-type">register</span> ConstUniCharArrayPtr str2, <span class="enscript-type">register</span> ItemCount length2)
+{
+	<span class="enscript-type">register</span> u_int16_t		c1,c2;
+	<span class="enscript-type">register</span> u_int16_t		temp;
+	<span class="enscript-type">register</span> u_int16_t*	lowerCaseTable;
+
+	lowerCaseTable = (u_int16_t*) gLowerCaseTable;
+
+	<span class="enscript-keyword">while</span> (1) {
+		<span class="enscript-comment">/* Set default values for c1, c2 in case there are no more valid chars */</span>
+		c1 = 0;
+		c2 = 0;
+		
+		<span class="enscript-comment">/* Find next non-ignorable char from str1, or zero if no more */</span>
+		<span class="enscript-keyword">while</span> (length1 &amp;&amp; c1 == 0) {
+			c1 = *(str1++);
+			--length1;
+			<span class="enscript-comment">/* check for basic latin first */</span>
+			<span class="enscript-keyword">if</span> (c1 &lt; 0x0100) {
+				c1 = gLatinCaseFold[c1];
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-comment">/* case fold if neccessary */</span>
+			<span class="enscript-keyword">if</span> ((temp = lowerCaseTable[c1&gt;&gt;8]) != 0)
+				c1 = lowerCaseTable[temp + (c1 &amp; 0x00FF)];
+		}
+		
+		
+		<span class="enscript-comment">/* Find next non-ignorable char from str2, or zero if no more */</span>
+		<span class="enscript-keyword">while</span> (length2 &amp;&amp; c2 == 0) {
+			c2 = *(str2++);
+			--length2;
+			<span class="enscript-comment">/* check for basic latin first */</span>
+			<span class="enscript-keyword">if</span> (c2 &lt; 0x0100) {
+				c2 = gLatinCaseFold[c2];
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-comment">/* case fold if neccessary */</span>
+			<span class="enscript-keyword">if</span> ((temp = lowerCaseTable[c2&gt;&gt;8]) != 0)
+				c2 = lowerCaseTable[temp + (c2 &amp; 0x00FF)];
+		}
+		
+		<span class="enscript-keyword">if</span> (c1 != c2)		<span class="enscript-comment">//	found a difference, so stop looping
+</span>			<span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-keyword">if</span> (c1 == 0)		<span class="enscript-comment">//	did we reach the end of both strings at the same time?
+</span>			<span class="enscript-keyword">return</span> 0;		<span class="enscript-comment">//	yes, so strings are equal
+</span>	}
+	
+	<span class="enscript-keyword">if</span> (c1 &lt; c2)
+		<span class="enscript-keyword">return</span> -1;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> 1;
+}
+
+<span class="enscript-comment">/*
+ * UnicodeBinaryCompare
+ * Compare two UTF-16 strings and perform case-sensitive (binary) matching against them.
+ * 
+ * Results are emitted like FastUnicodeCompare:
+ * 
+ * 
+ *	    IF				RESULT
+ *	--------------------------
+ *	str1 &lt; str2		=&gt;	-1
+ *	str1 = str2		=&gt;	 0
+ *	str1 &gt; str2		=&gt;	+1
+ *
+ * The case matching source code is greatly simplified due to the lack of case-folding
+ * in this comparison routine. We compare, in order: the lengths, then do character-by-
+ * character comparisons.
+ * 
+ */</span>
+int32_t <span class="enscript-function-name">UnicodeBinaryCompare</span> (<span class="enscript-type">register</span> ConstUniCharArrayPtr str1, <span class="enscript-type">register</span> ItemCount len1,
+							<span class="enscript-type">register</span> ConstUniCharArrayPtr str2, <span class="enscript-type">register</span> ItemCount len2) {
+	uint16_t c1;
+	uint16_t c2;
+	<span class="enscript-type">int</span> string_length;
+	int32_t result = 0;
+	
+	<span class="enscript-comment">/* Set default values for the two character pointers */</span>
+	c1 = 0;
+	c2 = 0;
+
+	<span class="enscript-comment">/* First generate the string length (for comparison purposes) */</span>
+	<span class="enscript-keyword">if</span> (len1 &lt; len2) {
+		string_length = len1;
+		--result;
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (len1 &gt; len2) {
+		string_length = len2;
+		++result;
+	}
+	<span class="enscript-keyword">else</span> {
+		string_length = len1;
+	}
+
+	<span class="enscript-comment">/* now compare the two string pointers */</span>
+	<span class="enscript-keyword">while</span> (string_length--) {
+		c1 = *(str1++);
+		c2 = *(str2++);
+
+		<span class="enscript-keyword">if</span> (c1 &gt; c2) {
+			result = 1;
+			<span class="enscript-keyword">break</span>;
+		}
+		
+		<span class="enscript-keyword">if</span> (c1 &lt; c2) {
+			result = -1;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/* If equal, iterate to the next two respective chars */</span>		
+	}
+
+	<span class="enscript-keyword">return</span> result;
+}
+
+
+OSErr
+<span class="enscript-function-name">ConvertUnicodeToUTF8Mangled</span>(ByteCount srcLen, ConstUniCharArrayPtr srcStr, ByteCount maxDstLen,
+					 ByteCount *actualDstLen, <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>* dstStr, HFSCatalogNodeID cnid)
+{
+	ByteCount subMaxLen;
+	size_t utf8len;
+	<span class="enscript-type">char</span> fileIDStr[15];
+	<span class="enscript-type">char</span> extStr[15];
+
+	snprintf(fileIDStr, <span class="enscript-keyword">sizeof</span>(fileIDStr), <span class="enscript-string">&quot;#%X&quot;</span>, cnid);
+	GetFilenameExtension(srcLen/<span class="enscript-keyword">sizeof</span>(UniChar), srcStr, extStr);
+
+	<span class="enscript-comment">/* remove extension chars from source */</span>
+	srcLen -= strlen(extStr) * <span class="enscript-keyword">sizeof</span>(UniChar);
+	subMaxLen = maxDstLen - (strlen(extStr) + strlen(fileIDStr));
+
+	(<span class="enscript-type">void</span>) utf8_encodestr(srcStr, srcLen, dstStr, &amp;utf8len, subMaxLen, <span class="enscript-string">':'</span>, 0);
+
+	strlcat((<span class="enscript-type">char</span> *)dstStr, fileIDStr, maxDstLen);
+	strlcat((<span class="enscript-type">char</span> *)dstStr, extStr, maxDstLen);
+	*actualDstLen = utf8len + (strlen(extStr) + strlen(fileIDStr));
+
+	<span class="enscript-keyword">return</span> noErr;
+}
+
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* not HFS - temp workaround until 4277828 is fixed */</span>
+<span class="enscript-comment">/* stubs for exported routines that aren't present when we build kernel without HFS */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+
+int32_t <span class="enscript-function-name">FastUnicodeCompare</span>( <span class="enscript-type">void</span> * str1, u_int32_t length1, <span class="enscript-type">void</span> * str2, u_int32_t length2 );
+
+
+int32_t <span class="enscript-function-name">FastUnicodeCompare</span>( __unused <span class="enscript-type">void</span> * str1, 
+							__unused u_int32_t length1, 
+							__unused <span class="enscript-type">void</span> * str2, 
+							__unused u_int32_t length2 )
+{
+	<span class="enscript-keyword">return</span>( 0 );
+}
+
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS */</span>
+
+</pre>
+<hr />
+</body></html>

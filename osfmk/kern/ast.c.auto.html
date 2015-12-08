@@ -1,0 +1,337 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ast.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ast.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989,1988,1987 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/* 
+ */</span>
+
+<span class="enscript-comment">/*
+ *
+ *	This file contains routines to check whether an ast is needed.
+ *
+ *	ast_check() - check whether ast is needed for interrupt or context
+ *	switch.  Usually called by clock interrupt handler.
+ *
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ast.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/counters.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sfi.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TELEMETRY</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/telemetry.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/waitq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ledger.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/policy.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/trap.h&gt;</span> // for CHUD AST hook
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/pal_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_mach_internal.h&gt;</span> // for MACF AST hook
+
+<span class="enscript-type">volatile</span> perfASTCallback perfASTHook;
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ast_init</span>(<span class="enscript-type">void</span>)
+{
+}
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">chudxnu_thread_ast</span>(thread_t); <span class="enscript-comment">// XXX this should probably be in a header...
+</span>
+<span class="enscript-comment">/*
+ * Called at splsched.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ast_taken</span>(
+	ast_t		reasons,
+	boolean_t	enable
+)
+{
+	boolean_t		preempt_trap = (reasons == AST_PREEMPTION);
+	ast_t			*myast = ast_pending();
+	thread_t		thread = current_thread();
+	perfASTCallback	perf_hook = perfASTHook;
+
+	<span class="enscript-comment">/*
+	 * CHUD hook - all threads including idle processor threads
+	 */</span>
+	<span class="enscript-keyword">if</span> (perf_hook) {
+		<span class="enscript-keyword">if</span> (*myast &amp; AST_CHUD_ALL) {
+			(*perf_hook)(reasons, myast);
+			
+			<span class="enscript-keyword">if</span> (*myast == AST_NONE)
+				<span class="enscript-keyword">return</span>;
+		}
+	}
+	<span class="enscript-keyword">else</span>
+		*myast &amp;= ~AST_CHUD_ALL;
+
+	reasons &amp;= *myast;
+	*myast &amp;= ~reasons;
+
+	<span class="enscript-comment">/*
+	 * Handle ASTs for all threads
+	 * except idle processor threads.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!(thread-&gt;state &amp; TH_IDLE)) {
+		<span class="enscript-comment">/*
+		 * Check for urgent preemption.
+		 */</span>
+		<span class="enscript-keyword">if</span> (	(reasons &amp; AST_URGENT)				&amp;&amp;
+				waitq_wait_possible(thread)		) {
+			<span class="enscript-keyword">if</span> (reasons &amp; AST_PREEMPT) {
+				counter(c_ast_taken_block++);
+				thread_block_reason(THREAD_CONTINUE_NULL, NULL,
+										reasons &amp; AST_PREEMPTION);
+			}
+
+			reasons &amp;= ~AST_PREEMPTION;
+		}
+
+		<span class="enscript-comment">/*
+		 * The kernel preempt traps
+		 * skip all other ASTs.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!preempt_trap) {
+			ml_set_interrupts_enabled(enable);
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">MACH_BSD</span>
+			<span class="enscript-comment">/*
+			 * Handle BSD hook.
+			 */</span>
+			<span class="enscript-keyword">if</span> (reasons &amp; AST_BSD) {
+				thread_ast_clear(thread, AST_BSD);
+				bsd_ast(thread);
+			}
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+			<span class="enscript-comment">/*
+			 * Handle MACF hook.
+			 */</span>
+			<span class="enscript-keyword">if</span> (reasons &amp; AST_MACF) {
+				thread_ast_clear(thread, AST_MACF);
+				mac_thread_userret(thread);
+			}
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-comment">/* 
+			 * Thread APC hook.
+			 */</span>
+			<span class="enscript-keyword">if</span> (reasons &amp; AST_APC) {
+				thread_ast_clear(thread, AST_APC);
+				special_handler(thread);
+			}
+			
+			<span class="enscript-keyword">if</span> (reasons &amp; AST_GUARD) {
+				thread_ast_clear(thread, AST_GUARD);
+				guard_ast(thread);
+			}
+			
+			<span class="enscript-keyword">if</span> (reasons &amp; AST_LEDGER) {
+				thread_ast_clear(thread, AST_LEDGER);
+				ledger_ast(thread);
+			}
+
+			<span class="enscript-comment">/*
+			 * Kernel Profiling Hook
+			 */</span>
+			<span class="enscript-keyword">if</span> (reasons &amp; AST_KPERF) {
+				thread_ast_clear(thread, AST_KPERF);
+				chudxnu_thread_ast(thread);
+			}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TELEMETRY</span>
+			<span class="enscript-keyword">if</span> (reasons &amp; AST_TELEMETRY_ALL) {
+				boolean_t interrupted_userspace = FALSE;
+				boolean_t is_windowed = FALSE;
+
+				assert((reasons &amp; AST_TELEMETRY_ALL) != AST_TELEMETRY_ALL); <span class="enscript-comment">/* only one is valid at a time */</span>
+				interrupted_userspace = (reasons &amp; AST_TELEMETRY_USER) ? TRUE : FALSE;
+				is_windowed = ((reasons &amp; AST_TELEMETRY_WINDOWED) ? TRUE : FALSE);
+				thread_ast_clear(thread, AST_TELEMETRY_ALL);
+				telemetry_ast(thread, interrupted_userspace, is_windowed);
+			}
+#<span class="enscript-reference">endif</span>
+
+			ml_set_interrupts_enabled(FALSE);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_SCHED_SFI</span>
+			<span class="enscript-keyword">if</span> (reasons &amp; AST_SFI) {
+				sfi_ast(thread);
+			}
+#<span class="enscript-reference">endif</span>
+
+			<span class="enscript-comment">/*
+			 * Check for preemption. Conditions may have changed from when the AST_PREEMPT was originally set.
+			 */</span>
+			thread_lock(thread);
+			<span class="enscript-keyword">if</span> (reasons &amp; AST_PREEMPT)
+				reasons = csw_check(current_processor(), reasons &amp; AST_QUANTUM);
+			thread_unlock(thread);
+
+			assert(waitq_wait_possible(thread));
+
+			<span class="enscript-keyword">if</span> (reasons &amp; AST_PREEMPT) {
+				counter(c_ast_taken_block++);
+				thread_block_reason((thread_continue_t)thread_exception_return, NULL, reasons &amp; AST_PREEMPTION);
+			}
+		}
+	}
+
+	ml_set_interrupts_enabled(enable);
+}
+
+<span class="enscript-comment">/*
+ * Called at splsched.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ast_check</span>(
+	processor_t processor)
+{
+	thread_t thread = processor-&gt;active_thread;
+
+	<span class="enscript-keyword">if</span> (processor-&gt;state == PROCESSOR_RUNNING ||
+	    processor-&gt;state == PROCESSOR_SHUTDOWN) {
+		ast_t preempt;
+
+		<span class="enscript-comment">/*
+		 *	Propagate thread ast to processor.
+		 */</span>
+		pal_ast_check(thread);
+
+		ast_propagate(thread-&gt;ast);
+
+		<span class="enscript-comment">/*
+		 *	Context switch check.
+		 */</span>
+		thread_lock(thread);
+
+		processor-&gt;current_pri = thread-&gt;sched_pri;
+		processor-&gt;current_thmode = thread-&gt;sched_mode;
+		processor-&gt;current_sfi_class = thread-&gt;sfi_class = sfi_thread_classify(thread);
+
+		<span class="enscript-keyword">if</span> ((preempt = csw_check(processor, AST_NONE)) != AST_NONE)
+			ast_on(preempt);
+
+		thread_unlock(thread);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Set AST flags on current processor
+ * Called at splsched
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ast_on</span>(ast_t reasons)
+{
+	ast_t *pending_ast = ast_pending();
+
+	*pending_ast |= reasons;
+}
+
+<span class="enscript-comment">/*
+ * Clear AST flags on current processor
+ * Called at splsched
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ast_off</span>(ast_t reasons)
+{
+	ast_t *pending_ast = ast_pending();
+
+	*pending_ast &amp;= ~reasons;
+}
+
+<span class="enscript-comment">/*
+ * Re-set current processor's per-thread AST flags to those set on thread
+ * Called at splsched
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ast_context</span>(thread_t thread)
+{
+	ast_t *pending_ast = ast_pending();
+
+	*pending_ast = ((*pending_ast &amp; ~AST_PER_THREAD) | thread-&gt;ast);
+}
+
+
+</pre>
+<hr />
+</body></html>

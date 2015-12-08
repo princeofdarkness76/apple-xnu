@@ -1,0 +1,290 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pci.py</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pci.py&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-keyword">from</span> xnu <span class="enscript-keyword">import</span> *
+
+<span class="enscript-comment">######################################
+</span><span class="enscript-comment"># Helper functions
+</span><span class="enscript-comment">######################################
+</span><span class="enscript-keyword">def</span> <span class="enscript-function-name">GetMemMappedPciCfgAddrFromRegistry</span>():
+    <span class="enscript-string">&quot;&quot;&quot; Retrieve the base address of the memory mapped PCI config space. It is
+        found in registry entry AppleACPIPlatformExpert, property acpi-mmcfg-seg0.
+        Returns:
+            int base address of memory mapped PCI config space
+    &quot;&quot;&quot;</span>
+    kgm_pci_cfg_base_default = 0xe0000000
+    acpi_pe_obj = FindRegistryObjectRecurse(kern.globals.gRegistryRoot,
+        <span class="enscript-string">&quot;AppleACPIPlatformExpert&quot;</span>)
+    <span class="enscript-keyword">if</span> acpi_pe_obj <span class="enscript-keyword">is</span> None:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Could not find AppleACPIPlatformExpert in registry, \
+        using default base address for memory mapped PCI config space&quot;</span>
+        <span class="enscript-keyword">return</span> kgm_pci_cfg_base_default
+    entry = kern.GetValueFromAddress(int(acpi_pe_obj), <span class="enscript-string">'IOService *'</span>)
+    acpi_mmcfg_seg_prop = LookupKeyInPropTable(entry.fPropertyTable, <span class="enscript-string">&quot;acpi-mmcfg-seg0&quot;</span>)
+    <span class="enscript-keyword">if</span> acpi_mmcfg_seg_prop <span class="enscript-keyword">is</span> None:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Could not find acpi-mmcfg-seg0 property, \
+        using default base address for memory mapped PCI config space&quot;</span>
+        <span class="enscript-keyword">return</span> kgm_pci_cfg_base_default
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">return</span> int(GetNumber(acpi_mmcfg_seg_prop))
+
+@static_var(<span class="enscript-string">'kgm_pci_cfg_base'</span>, -1)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetMemMappedPciCfgAddrBase</span>():
+    <span class="enscript-string">&quot;&quot;&quot; Returns the base address of the memory mapped PCI config space. The address
+        is retrieved once from the registry, and is remembered for all subsequent 
+        calls to this function
+        Returns:
+            int base address of memory mapped PCI config space
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> GetMemMappedPciCfgAddrBase.kgm_pci_cfg_base == -1:
+        <span class="enscript-comment"># Retrieve the base address from the registry if it hasn't been
+</span>        <span class="enscript-comment"># initialized yet
+</span>        GetMemMappedPciCfgAddrBase.kgm_pci_cfg_base = GetMemMappedPciCfgAddrFromRegistry()
+    <span class="enscript-keyword">return</span> GetMemMappedPciCfgAddrBase.kgm_pci_cfg_base
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">MakeMemMappedPciCfgAddr</span>(bus, dev, func, offs):
+    <span class="enscript-string">&quot;&quot;&quot; Construct the memory address for the PCI config register specified by the
+        bus, device, function, and offset
+        Params:
+            bus, dev, func, offs: int - bus, device, function, and offset that specifies
+            the PCI config space register
+        Returns:
+            int - the physical memory address that maps to the PCI config space register
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">return</span> GetMemMappedPciCfgAddrBase() | (bus &lt;&lt; 20) | (dev &lt;&lt; 15) | (func &lt;&lt; 12) | offs
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">DoPciCfgRead</span>(bits, bus, dev, func, offs):
+    <span class="enscript-string">&quot;&quot;&quot; Helper function that performs PCI config space read
+        Params:
+            bits: int - bit width of access: 8, 16, or 32 bits
+            bus, dev, func, offs: int - PCI config bus, device, function and offset
+        Returns:
+            int - the value read from PCI config space
+    &quot;&quot;&quot;</span>
+    phys_addr = MakeMemMappedPciCfgAddr(bus, dev, func, offs)
+    <span class="enscript-keyword">return</span> ReadPhysInt(phys_addr, bits)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">DoPciCfgWrite</span>(bits, bus, dev, func, offs, val):
+    <span class="enscript-string">&quot;&quot;&quot; Helper function that performs PCI config space write
+        Params:
+            bits: int - bit width of access: 8, 16, or 32 bits
+            bus, dev, func, offs: int - PCI config bus, device, function and offset
+        Returns:
+            boolean - True upon success, False otherwise
+    &quot;&quot;&quot;</span>
+    phys_addr = MakeMemMappedPciCfgAddr(bus, dev, func, offs)
+    <span class="enscript-keyword">return</span> WritePhysInt(phys_addr, val, bits)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowPciCfgBytes</span>(bus, dev, func, offset):
+    <span class="enscript-string">&quot;&quot;&quot; Prints 16 bytes of PCI config space starting at specified offset
+        Params:
+            bus, dev, func, offset: int - bus, dev, function, and offset of the
+            PCI config space register
+    &quot;&quot;&quot;</span>
+    <span class="enscript-comment"># Print mem-mapped address at beginning of each 16-byte line
+</span>    phys_addr = MakeMemMappedPciCfgAddr(bus, dev, func, offset)
+    read_vals = [DoPciCfgRead(32, bus, dev, func, offset + byte) 
+                    <span class="enscript-keyword">for</span> byte <span class="enscript-keyword">in</span> range(0, 16, 4)]
+    <span class="enscript-comment"># It would be nicer to have a shorter format that we could loop
+</span>    <span class="enscript-comment"># over, but each call to print results in a newline which 
+</span>    <span class="enscript-comment"># would prevent us from printing all 16 bytes on one line.
+</span>    bytes_fmt = <span class="enscript-string">&quot;{:08x}:&quot;</span> + <span class="enscript-string">&quot;{:02x} &quot;</span> * 16
+    <span class="enscript-keyword">print</span> bytes_fmt.format(
+        phys_addr,
+        read_vals[0] &amp; 0xff, (read_vals[0] &gt;&gt; 8) &amp; 0xff,
+        (read_vals[0] &gt;&gt; 16) &amp; 0xff, (read_vals[0] &gt;&gt; 24) &amp; 0xff,
+        read_vals[1] &amp; 0xff, (read_vals[1] &gt;&gt; 8) &amp; 0xff,
+        (read_vals[1] &gt;&gt; 16) &amp; 0xff, (read_vals[1] &gt;&gt; 24) &amp; 0xff,
+        read_vals[2] &amp; 0xff, (read_vals[2] &gt;&gt; 8) &amp; 0xff,
+        (read_vals[2] &gt;&gt; 16) &amp; 0xff, (read_vals[2] &gt;&gt; 24) &amp; 0xff,
+        read_vals[3] &amp; 0xff, (read_vals[3] &gt;&gt; 8) &amp; 0xff,
+        (read_vals[3] &gt;&gt; 16) &amp; 0xff, (read_vals[3] &gt;&gt; 24) &amp; 0xff)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">DoPciCfgDump</span>(bus, dev, func):
+    <span class="enscript-string">&quot;&quot;&quot; Dumps PCI config space of the PCI device specified by bus, dev, function
+        Params:
+            bus, dev, func: int - bus, dev, function of PCI config space to dump
+    &quot;&quot;&quot;</span>
+    <span class="enscript-comment"># Check for a valid PCI device
+</span>    vendor_id = DoPciCfgRead(16, bus, dev, func, 0)
+    <span class="enscript-keyword">if</span> (vendor_id == 0xbad10ad) <span class="enscript-keyword">or</span> <span class="enscript-keyword">not</span> (vendor_id &gt; 0 <span class="enscript-keyword">and</span> vendor_id &lt; 0xffff):
+        <span class="enscript-keyword">return</span>
+    <span class="enscript-comment"># Show the standard PCI config space
+</span>    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;address: 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F\n&quot;</span>
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;--------------------------------------------------------&quot;</span>
+    <span class="enscript-keyword">for</span> offset <span class="enscript-keyword">in</span> range(0, 256, 16):
+        ShowPciCfgBytes(bus, dev, func, offset)
+    <span class="enscript-comment"># Check for PCIE extended capability config space
+</span>    <span class="enscript-keyword">if</span> DoPciCfgRead(8, bus, dev, func, 256) &lt; 0xff:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot; \n&quot;</span>
+        <span class="enscript-keyword">for</span> offset <span class="enscript-keyword">in</span> range(256, 4096, 16):
+            ShowPciCfgBytes(bus, dev, func, offset)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">DoPciCfgScan</span>(max_bus, dump):
+    <span class="enscript-string">&quot;&quot;&quot; Do a PCI config scan starting at bus 0 up to specified max bus
+        Params:
+            max_bus: int - maximum bus to scan
+            dump: bool - if True, dump the config space of each scanned device
+                         if False, print basic information of each scanned device
+    &quot;&quot;&quot;</span>
+    max_dev  = 32
+    max_func = 8
+    bdfs = ({<span class="enscript-string">'bus'</span>:bus, <span class="enscript-string">'dev'</span>:dev, <span class="enscript-string">'func'</span>:func}
+            <span class="enscript-keyword">for</span> bus <span class="enscript-keyword">in</span> range(max_bus)
+            <span class="enscript-keyword">for</span> dev <span class="enscript-keyword">in</span> range(max_dev)
+            <span class="enscript-keyword">for</span> func <span class="enscript-keyword">in</span> range(max_func))
+    fmt_string = <span class="enscript-string">&quot;{:03x}:&quot;</span> * 3 + <span class="enscript-string">&quot; &quot;</span> + \
+        <span class="enscript-string">&quot;{:02x}&quot;</span> * 2 + <span class="enscript-string">&quot;   &quot;</span> + \
+        <span class="enscript-string">&quot;{:02x}&quot;</span> * 2 + <span class="enscript-string">&quot;    {:02x} | &quot;</span> + \
+        <span class="enscript-string">&quot;{:02x}&quot;</span> * 3
+    <span class="enscript-keyword">for</span> bdf <span class="enscript-keyword">in</span> bdfs:
+        bus = bdf[<span class="enscript-string">'bus'</span>]
+        dev = bdf[<span class="enscript-string">'dev'</span>]
+        func = bdf[<span class="enscript-string">'func'</span>]
+        vend_dev_id = DoPciCfgRead(32, bus, dev, func, 0)
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> (vend_dev_id &gt; 0 <span class="enscript-keyword">and</span> vend_dev_id &lt; 0xffffffff):
+            <span class="enscript-keyword">continue</span>
+        <span class="enscript-keyword">if</span> dump == False:
+            class_rev_id = DoPciCfgRead(32, bus, dev, func, 8)
+            <span class="enscript-keyword">print</span> fmt_string.format(
+                bus, dev, func,
+                (vend_dev_id &gt;&gt; 8) &amp; 0xff, vend_dev_id &amp; 0xff,
+                (vend_dev_id &gt;&gt; 24) &amp; 0xff, (vend_dev_id &gt;&gt; 16) &amp; 0xff,
+                class_rev_id &amp; 0xff, (class_rev_id &gt;&gt; 24) &amp; 0xff,
+                (class_rev_id &gt;&gt; 16) &amp; 0xff, (class_rev_id &gt;&gt; 8) &amp; 0xff)
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{:03x}:{:03x}:{:03x}&quot;</span>.format(bus, dev, func)
+            DoPciCfgDump(bus, dev, func)
+
+<span class="enscript-comment">######################################
+</span><span class="enscript-comment"># LLDB commands
+</span><span class="enscript-comment">######################################
+</span>@lldb_command(<span class="enscript-string">'pci_cfg_read'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">PciCfgRead</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Read PCI config space at the specified bus, device, function, and offset
+        Syntax: pci_cfg_read &lt;bits&gt; &lt;bus&gt; &lt;device&gt; &lt;function&gt; &lt;offset&gt;
+            bits: 8, 16, 32
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> cmd_args == None <span class="enscript-keyword">or</span> len(cmd_args) &lt; 5:
+        <span class="enscript-keyword">print</span> PciCfgRead.__doc__
+        <span class="enscript-keyword">return</span>
+    
+    bits = ArgumentStringToInt(cmd_args[0])
+    bus  = ArgumentStringToInt(cmd_args[1])
+    dev  = ArgumentStringToInt(cmd_args[2])
+    func = ArgumentStringToInt(cmd_args[3])
+    offs = ArgumentStringToInt(cmd_args[4])
+
+    read_val = DoPciCfgRead(bits, bus, dev, func, offs)
+    <span class="enscript-keyword">if</span> read_val == 0xbad10ad:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;ERROR: Failed to read PCI config space&quot;</span>
+        <span class="enscript-keyword">return</span>
+
+    format_for_bits = {8:<span class="enscript-string">&quot;{:#04x}&quot;</span>, 16:<span class="enscript-string">&quot;{:#06x}&quot;</span>, 32:<span class="enscript-string">&quot;{:#010x}&quot;</span>}
+    phys_addr = MakeMemMappedPciCfgAddr(bus, dev, func, offs)
+    fmt_string = <span class="enscript-string">&quot;{:08x}: &quot;</span> + format_for_bits[bits]
+    <span class="enscript-keyword">print</span> fmt_string.format(phys_addr, read_val)
+
+lldb_alias(<span class="enscript-string">'pci_cfg_read8'</span>, <span class="enscript-string">'pci_cfg_read 8'</span>)
+lldb_alias(<span class="enscript-string">'pci_cfg_read16'</span>, <span class="enscript-string">'pci_cfg_read 16'</span>)
+lldb_alias(<span class="enscript-string">'pci_cfg_read32'</span>, <span class="enscript-string">'pci_cfg_read 32'</span>)
+
+@lldb_command(<span class="enscript-string">'pci_cfg_write'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">PciCfgWrite</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Write PCI config space at the specified bus, device, function, and offset
+        Syntax: pci_cfg_write &lt;bits&gt; &lt;bus&gt; &lt;device&gt; &lt;function&gt; &lt;offset&gt; &lt;write val&gt;
+            bits: 8, 16, 32
+
+        Prints an error message if there was a problem
+        Prints nothing upon success.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> cmd_args == None <span class="enscript-keyword">or</span> len(cmd_args) &lt; 6:
+        <span class="enscript-keyword">print</span> PciCfgWrite.__doc__
+        <span class="enscript-keyword">return</span>
+
+    bits = ArgumentStringToInt(cmd_args[0])
+    bus  = ArgumentStringToInt(cmd_args[1])
+    dev  = ArgumentStringToInt(cmd_args[2])
+    func = ArgumentStringToInt(cmd_args[3])
+    offs = ArgumentStringToInt(cmd_args[4])
+    write_val = ArgumentStringToInt(cmd_args[5])
+
+    <span class="enscript-keyword">if</span> DoPciCfgWrite(bits, bus, dev, func, offs, write_val) == False:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;ERROR: Failed to write PCI config space&quot;</span>
+
+lldb_alias(<span class="enscript-string">'pci_cfg_write8'</span>, <span class="enscript-string">'pci_cfg_write 8'</span>)
+lldb_alias(<span class="enscript-string">'pci_cfg_write16'</span>, <span class="enscript-string">'pci_cfg_write 16'</span>)
+lldb_alias(<span class="enscript-string">'pci_cfg_write32'</span>, <span class="enscript-string">'pci_cfg_write 32'</span>)
+
+@lldb_command(<span class="enscript-string">'pci_cfg_dump'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">PciCfgDump</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Dump PCI config space for specified bus, device, and function
+        If an invalid/inaccessible PCI device is specified, nothing will
+        be printed out.
+        Syntax: pci_cfg_dump &lt;bus&gt; &lt;dev&gt; &lt;fuction&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> cmd_args == None <span class="enscript-keyword">or</span> len(cmd_args) &lt; 3:
+        <span class="enscript-keyword">print</span> PciCfgDump.__doc__
+        <span class="enscript-keyword">return</span>
+
+    bus  = ArgumentStringToInt(cmd_args[0])
+    dev  = ArgumentStringToInt(cmd_args[1])
+    func = ArgumentStringToInt(cmd_args[2])
+
+    DoPciCfgDump(bus, dev, func)
+
+@lldb_command(<span class="enscript-string">'pci_cfg_scan'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">PciCfgScan</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Scan for pci devices. The maximum bus number to be scanned defaults to 8,
+        but can be specified as an argument
+        Syntax: pci_cfg_scan [max bus number]
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> cmd_args == None <span class="enscript-keyword">or</span> len(cmd_args) == 0:
+        max_bus = 8
+    <span class="enscript-keyword">elif</span> len(cmd_args) == 1:
+        max_bus = ArgumentStringToInt(cmd_args[0])
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">print</span> PciCfgScan.__doc__
+        <span class="enscript-keyword">return</span>
+
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;bus:dev:fcn: vendor device rev | class&quot;</span>
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;--------------------------------------&quot;</span>
+    DoPciCfgScan(max_bus, False)
+
+@lldb_command(<span class="enscript-string">'pci_cfg_dump_all'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">PciCfgDumpAll</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Dump config space for all scanned PCI devices. The maximum bus number to
+        be scanned defaults to 8, but can be specified as an argument
+        Syntax: pci_cfg_dump_all [max bus number]
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> cmd_args == None <span class="enscript-keyword">or</span> len(cmd_args) == 0:
+        max_bus = 8
+    <span class="enscript-keyword">elif</span> len(cmd_args) == 1:
+        max_bus = ArgumentStringToInt(cmd_args[0])
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">print</span> PciCfgDumpAll.__doc__
+        <span class="enscript-keyword">return</span>
+    
+    DoPciCfgScan(max_bus, True)
+</pre>
+<hr />
+</body></html>

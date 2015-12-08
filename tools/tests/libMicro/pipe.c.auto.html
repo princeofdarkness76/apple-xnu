@@ -1,0 +1,590 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pipe.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pipe.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms
+ * of the Common Development and Distribution License
+ * (the &quot;License&quot;).  You may not use this file except
+ * in compliance with the License.
+ *
+ * You can obtain a copy of the license at
+ * src/OPENSOLARIS.LICENSE
+ * or <a href="http://www.opensolaris.org/os/licensing.">http://www.opensolaris.org/os/licensing.</a>
+ * See the License for the specific language governing
+ * permissions and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL
+ * HEADER in each file and include the License file at
+ * usr/src/OPENSOLARIS.LICENSE.  If applicable,
+ * add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets &quot;[]&quot; replaced with your
+ * own identifying information: Portions Copyright [yyyy]
+ * [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
+ * Use is subject to license terms.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/wait.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;arpa/inet.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netdb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pthread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;signal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;errno.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;libmicro.h&quot;</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	<span class="enscript-type">int</span>			ts_once;
+	pid_t			ts_child;
+	pthread_t		ts_thread;
+	<span class="enscript-type">int</span>			ts_in;
+	<span class="enscript-type">int</span>			ts_out;
+	<span class="enscript-type">int</span>			ts_in2;
+	<span class="enscript-type">int</span>			ts_out2;
+	<span class="enscript-type">int</span>			ts_lsn;
+	<span class="enscript-type">struct</span> sockaddr_in	ts_add;
+} tsd_t;
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FIRSTPORT</span>		12345
+
+<span class="enscript-type">static</span> <span class="enscript-type">char</span>			*modes[] = {<span class="enscript-string">&quot;st&quot;</span>, <span class="enscript-string">&quot;mt&quot;</span>, <span class="enscript-string">&quot;mp&quot;</span>, NULL};
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MD_SINGLE</span>		0
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MD_MULTITHREAD</span>		1
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MD_MULTIPROCESS</span>		2
+
+<span class="enscript-type">static</span> <span class="enscript-type">char</span>			*xports[] = {<span class="enscript-string">&quot;pipe&quot;</span>, <span class="enscript-string">&quot;fifo&quot;</span>, <span class="enscript-string">&quot;sock&quot;</span>, <span class="enscript-string">&quot;tcp&quot;</span>,
+				    NULL};
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">XP_PIPES</span>		0
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">XP_FIFOS</span>		1
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">XP_SOCKETPAIR</span>		2
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">XP_LOCALTCP</span>		3
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DEFM</span>			MD_SINGLE
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DEFS</span>			1024
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DEFX</span>			XP_PIPES
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			optm = DEFM;
+<span class="enscript-type">static</span> size_t			opts = DEFS;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			optx = DEFX;
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>			*rbuf = NULL;
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>			*wbuf = NULL;
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">readall</span>(<span class="enscript-type">int</span> s, <span class="enscript-type">void</span> *buf, size_t len);
+<span class="enscript-type">void</span> *<span class="enscript-function-name">loopback</span>(<span class="enscript-type">void</span> *arg);
+<span class="enscript-type">int</span> <span class="enscript-function-name">prepare_pipes</span>(tsd_t *tsd);
+<span class="enscript-type">int</span> <span class="enscript-function-name">prepare_fifos</span>(tsd_t *tsd);
+<span class="enscript-type">int</span> <span class="enscript-function-name">cleanup_fifos</span>(tsd_t *tsd);
+<span class="enscript-type">int</span> <span class="enscript-function-name">prepare_socketpair</span>(tsd_t *tsd);
+<span class="enscript-type">int</span> <span class="enscript-function-name">prepare_localtcp</span>(tsd_t *tsd);
+<span class="enscript-type">int</span> <span class="enscript-function-name">prepare_localtcp_once</span>(tsd_t *tsd);
+<span class="enscript-type">char</span> *<span class="enscript-function-name">lookupa</span>(<span class="enscript-type">int</span> x, <span class="enscript-type">char</span> *names[]);
+<span class="enscript-type">int</span> <span class="enscript-function-name">lookup</span>(<span class="enscript-type">char</span> *x, <span class="enscript-type">char</span> *names[]);
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_init</span>()
+{
+	lm_tsdsize = <span class="enscript-keyword">sizeof</span> (tsd_t);
+
+	(<span class="enscript-type">void</span>) sprintf(lm_optstr, <span class="enscript-string">&quot;m:s:x:&quot;</span>);
+
+	(<span class="enscript-type">void</span>) sprintf(lm_usage,
+	    <span class="enscript-string">&quot;       [-m mode (st|mt|mp, default %s)]\n&quot;</span>
+	    <span class="enscript-string">&quot;       [-s buffer-size (default %d)]\n&quot;</span>
+	    <span class="enscript-string">&quot;       [-x transport (pipe|fifo|sock|tcp, default %s)]\n&quot;</span>
+	    <span class="enscript-string">&quot;notes: measures write()/read() across various transports\n&quot;</span>,
+	    lookupa(DEFM, modes), DEFS, lookupa(DEFX, xports));
+
+	(<span class="enscript-type">void</span>) sprintf(lm_header, <span class="enscript-string">&quot;%2s %4s&quot;</span>, <span class="enscript-string">&quot;md&quot;</span>, <span class="enscript-string">&quot;xprt&quot;</span>);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_optswitch</span>(<span class="enscript-type">int</span> opt, <span class="enscript-type">char</span> *optarg)
+{
+	<span class="enscript-type">int</span>			x;
+
+	<span class="enscript-keyword">switch</span> (opt) {
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'m'</span>:
+		x = lookup(optarg, modes);
+		<span class="enscript-keyword">if</span> (x == -1)
+			<span class="enscript-keyword">return</span> (-1);
+		optm = x;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'s'</span>:
+		opts = sizetoll(optarg);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'x'</span>:
+		x = lookup(optarg, xports);
+		<span class="enscript-keyword">if</span> (x == -1)
+			<span class="enscript-keyword">return</span> (-1);
+		optx = x;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initrun</span>()
+{
+	<span class="enscript-keyword">if</span> (optx == XP_FIFOS) {
+		<span class="enscript-keyword">if</span> (geteuid() != 0) {
+			(<span class="enscript-type">void</span>) printf(<span class="enscript-string">&quot;sorry, must be root to create fifos\n&quot;</span>);
+			exit(1);
+		}
+	}
+
+	(<span class="enscript-type">void</span>) setfdlimit(4 * lm_optT + 10);
+
+	rbuf = malloc(opts);
+	wbuf = malloc(opts);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initbatch</span>(<span class="enscript-type">void</span> *tsd)
+{
+	tsd_t			*ts = (tsd_t *)tsd;
+	<span class="enscript-type">int</span>			result;
+	pid_t			pid;
+
+	<span class="enscript-keyword">switch</span> (optx) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">XP_SOCKETPAIR</span>:
+		result = prepare_socketpair(ts);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">XP_LOCALTCP</span>:
+		result = prepare_localtcp(ts);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">XP_FIFOS</span>:
+		result = prepare_fifos(ts);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">XP_PIPES</span>:
+	<span class="enscript-reference">default</span>:
+		result = prepare_pipes(ts);
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">if</span> (result == -1) {
+		<span class="enscript-keyword">return</span> (1);
+	}
+
+	<span class="enscript-keyword">switch</span> (optm) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MD_MULTITHREAD</span>:
+		result = pthread_create(&amp;ts-&gt;ts_thread, NULL, loopback, tsd);
+		<span class="enscript-keyword">if</span> (result == -1) {
+			<span class="enscript-keyword">return</span> (1);
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MD_MULTIPROCESS</span>:
+		pid = fork();
+		<span class="enscript-keyword">switch</span> (pid) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+			(<span class="enscript-type">void</span>) loopback(tsd);
+			exit(0);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">-1</span>:
+			<span class="enscript-keyword">return</span> (-1);
+		<span class="enscript-reference">default</span>:
+			ts-&gt;ts_child = pid;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MD_SINGLE</span>:
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/* Prime the loopback */</span>
+	<span class="enscript-keyword">if</span> (write(ts-&gt;ts_out, wbuf, opts) != opts) {
+		<span class="enscript-keyword">return</span> (1);
+	}
+	<span class="enscript-keyword">if</span> (readall(ts-&gt;ts_in, rbuf, opts) != opts) {
+		<span class="enscript-keyword">return</span> (1);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark</span>(<span class="enscript-type">void</span> *tsd, result_t *res)
+{
+	tsd_t			*ts = (tsd_t *)tsd;
+	<span class="enscript-type">int</span>			i;
+	<span class="enscript-type">int</span>			n;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; lm_optB; i++) {
+		<span class="enscript-keyword">if</span> (write(ts-&gt;ts_out, wbuf, opts) != opts) {
+			res-&gt;re_errors++;
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		n = readall(ts-&gt;ts_in, rbuf, opts);
+		<span class="enscript-keyword">if</span> (n == -1) {
+			res-&gt;re_errors++;
+			<span class="enscript-keyword">continue</span>;
+		}
+	}
+	res-&gt;re_count = i;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_finibatch</span>(<span class="enscript-type">void</span> *tsd)
+{
+	tsd_t			*ts = (tsd_t *)tsd;
+
+	<span class="enscript-comment">/* Terminate the loopback */</span>
+	(<span class="enscript-type">void</span>) write(ts-&gt;ts_out, wbuf, opts);
+	(<span class="enscript-type">void</span>) readall(ts-&gt;ts_in, rbuf, opts);
+
+	<span class="enscript-keyword">switch</span> (optm) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MD_MULTITHREAD</span>:
+		(<span class="enscript-type">void</span>) close(ts-&gt;ts_in2);
+		(<span class="enscript-type">void</span>) close(ts-&gt;ts_out2);
+		(<span class="enscript-type">void</span>) pthread_join(ts-&gt;ts_thread, NULL);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MD_MULTIPROCESS</span>:
+		(<span class="enscript-type">void</span>) close(ts-&gt;ts_in2);
+		(<span class="enscript-type">void</span>) close(ts-&gt;ts_out2);
+		(<span class="enscript-type">void</span>) waitpid(ts-&gt;ts_child, NULL, 0);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MD_SINGLE</span>:
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+
+	(<span class="enscript-type">void</span>) close(ts-&gt;ts_in);
+	(<span class="enscript-type">void</span>) close(ts-&gt;ts_out);
+
+	<span class="enscript-keyword">if</span> (optx == XP_FIFOS) {
+		(<span class="enscript-type">void</span>) cleanup_fifos(ts);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">char</span> *
+<span class="enscript-function-name">benchmark_result</span>()
+{
+	<span class="enscript-type">static</span> <span class="enscript-type">char</span>		result[256];
+
+	(<span class="enscript-type">void</span>) sprintf(result, <span class="enscript-string">&quot;%2s %4s&quot;</span>,
+	    lookupa(optm, modes), lookupa(optx, xports));
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">readall</span>(<span class="enscript-type">int</span> s, <span class="enscript-type">void</span> *buf, size_t len)
+{
+	size_t			n;
+	size_t			total = 0;
+
+	<span class="enscript-keyword">for</span> (;;) {
+		n = read(s, (<span class="enscript-type">void</span> *)((<span class="enscript-type">long</span>)buf + total), len - total);
+		<span class="enscript-keyword">if</span> (n &lt; 1) {
+			<span class="enscript-keyword">return</span> (-1);
+		}
+		total += n;
+		<span class="enscript-keyword">if</span> (total &gt;= len) {
+			<span class="enscript-keyword">return</span> (total);
+		}
+	}
+}
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">loopback</span>(<span class="enscript-type">void</span> *arg)
+{
+	tsd_t			*ts = (tsd_t *)arg;
+	<span class="enscript-type">int</span>			i, n, m;
+
+	<span class="enscript-comment">/* Include priming and termination */</span>
+	m = lm_optB + 2;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; m; i++) {
+		n = readall(ts-&gt;ts_in2, rbuf, opts);
+		<span class="enscript-keyword">if</span> (n == -1) {
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (write(ts-&gt;ts_out2, wbuf, opts) != opts) {
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">prepare_localtcp_once</span>(tsd_t *ts)
+{
+	<span class="enscript-type">int</span>			j;
+	<span class="enscript-type">int</span>			opt = 1;
+	<span class="enscript-type">struct</span> hostent	*host;
+
+	j = FIRSTPORT;
+
+	ts-&gt;ts_lsn = socket(AF_INET, SOCK_STREAM, 0);
+	<span class="enscript-keyword">if</span> (ts-&gt;ts_lsn == -1) {
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	<span class="enscript-keyword">if</span> (setsockopt(ts-&gt;ts_lsn, SOL_SOCKET, SO_REUSEADDR,
+	    &amp;opt, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>)) == -1) {
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	<span class="enscript-keyword">if</span> ((host = gethostbyname(<span class="enscript-string">&quot;localhost&quot;</span>)) == NULL) {
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	<span class="enscript-keyword">for</span> (;;) {
+		(<span class="enscript-type">void</span>) memset(&amp;ts-&gt;ts_add, 0,
+		    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in));
+		ts-&gt;ts_add.sin_family = AF_INET;
+		ts-&gt;ts_add.sin_port = htons(j++);
+		(<span class="enscript-type">void</span>) memcpy(&amp;ts-&gt;ts_add.sin_addr.s_addr,
+		    host-&gt;h_addr_list[0], <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> in_addr));
+
+		<span class="enscript-keyword">if</span> (bind(ts-&gt;ts_lsn,
+		    (<span class="enscript-type">struct</span> sockaddr *)&amp;ts-&gt;ts_add,
+		    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in)) == 0) {
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (errno != EADDRINUSE) {
+			<span class="enscript-keyword">return</span> (-1);
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (listen(ts-&gt;ts_lsn, 5) == -1) {
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">prepare_localtcp</span>(tsd_t *ts)
+{
+	<span class="enscript-type">int</span>			result;
+	<span class="enscript-type">struct</span> sockaddr_in	addr;
+	<span class="enscript-type">int</span>			opt = 1;
+	socklen_t		size;
+
+	<span class="enscript-keyword">if</span> (ts-&gt;ts_once++ == 0) {
+		<span class="enscript-keyword">if</span> (prepare_localtcp_once(ts) == -1) {
+			<span class="enscript-keyword">return</span> (-1);
+		}
+	}
+
+	ts-&gt;ts_out = socket(AF_INET, SOCK_STREAM, 0);
+	<span class="enscript-keyword">if</span> (ts-&gt;ts_out == -1) {
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	<span class="enscript-keyword">if</span> (fcntl(ts-&gt;ts_out, F_SETFL, O_NDELAY) == -1) {
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	result = connect(ts-&gt;ts_out, (<span class="enscript-type">struct</span> sockaddr *)&amp;ts-&gt;ts_add,
+	    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in));
+	<span class="enscript-keyword">if</span> ((result == -1) &amp;&amp; (errno != EINPROGRESS)) {
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	<span class="enscript-keyword">if</span> (fcntl(ts-&gt;ts_out, F_SETFL, 0) == -1) {
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	size = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr);
+	result = accept(ts-&gt;ts_lsn, (<span class="enscript-type">struct</span> sockaddr *)&amp;addr, &amp;size);
+	<span class="enscript-keyword">if</span> (result == -1) {
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	ts-&gt;ts_out2 = result;
+
+	<span class="enscript-keyword">if</span> (setsockopt(ts-&gt;ts_out, IPPROTO_TCP, TCP_NODELAY,
+	    &amp;opt, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>)) == -1) {
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	<span class="enscript-keyword">if</span> (setsockopt(ts-&gt;ts_out2, IPPROTO_TCP, TCP_NODELAY,
+	    &amp;opt, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>)) == -1) {
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	<span class="enscript-keyword">if</span> (optm == MD_SINGLE) {
+		ts-&gt;ts_in = ts-&gt;ts_out2;
+	} <span class="enscript-keyword">else</span> {
+		ts-&gt;ts_in = ts-&gt;ts_out;
+		ts-&gt;ts_in2 = ts-&gt;ts_out2;
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">prepare_socketpair</span>(tsd_t *ts)
+{
+	<span class="enscript-type">int</span>			s[2];
+
+	<span class="enscript-keyword">if</span> (socketpair(PF_UNIX, SOCK_STREAM, 0, s) == -1) {
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	<span class="enscript-keyword">if</span> (optm == MD_SINGLE) {
+		ts-&gt;ts_in = s[0];
+		ts-&gt;ts_out = s[1];
+	} <span class="enscript-keyword">else</span> {
+		ts-&gt;ts_in = s[0];
+		ts-&gt;ts_out = s[0];
+		ts-&gt;ts_in2 = s[1];
+		ts-&gt;ts_out2 = s[1];
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">prepare_fifos</span>(tsd_t *ts)
+{
+	<span class="enscript-type">char</span>			path[64];
+
+	(<span class="enscript-type">void</span>) sprintf(path, <span class="enscript-string">&quot;/private/tmp/pipe_%ld.%dA&quot;</span>,
+	    getpid(), pthread_self());
+	<span class="enscript-keyword">if</span> (mknod(path, 0600, S_IFIFO) == -1) {
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	<span class="enscript-keyword">if</span> (optm == MD_SINGLE) {
+		ts-&gt;ts_in = open(path, O_RDONLY);
+		ts-&gt;ts_out = open(path, O_WRONLY);
+	} <span class="enscript-keyword">else</span> {
+		ts-&gt;ts_in = open(path, O_RDONLY);
+		ts-&gt;ts_out2 = open(path, O_WRONLY);
+
+		(<span class="enscript-type">void</span>) sprintf(path, <span class="enscript-string">&quot;/private/tmp/pipe_%ld.%dB&quot;</span>,
+		    getpid(), pthread_self());
+		<span class="enscript-keyword">if</span> (mknod(path, 0600, S_IFIFO) == -1) {
+			<span class="enscript-keyword">return</span> (-1);
+		}
+
+		ts-&gt;ts_in2 = open(path, O_RDONLY);
+		ts-&gt;ts_out = open(path, O_WRONLY);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cleanup_fifos</span>(tsd_t *ts)
+{
+	<span class="enscript-type">char</span>			path[64];
+
+	(<span class="enscript-type">void</span>) sprintf(path, <span class="enscript-string">&quot;/private/tmp/pipe_%ld.%dA&quot;</span>, getpid(), pthread_self());
+	(<span class="enscript-type">void</span>) unlink(path);
+	(<span class="enscript-type">void</span>) sprintf(path, <span class="enscript-string">&quot;/private/tmp/pipe_%ld.%dB&quot;</span>, getpid(), pthread_self());
+	(<span class="enscript-type">void</span>) unlink(path);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">prepare_pipes</span>(tsd_t *ts)
+{
+	<span class="enscript-type">int</span>			p[2];
+
+	<span class="enscript-keyword">if</span> (optm == MD_SINGLE) {
+		<span class="enscript-keyword">if</span> (pipe(p) == -1) {
+			<span class="enscript-keyword">return</span> (-1);
+		}
+		ts-&gt;ts_in = p[0];
+		ts-&gt;ts_out = p[1];
+
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (pipe(p) == -1) {
+			<span class="enscript-keyword">return</span> (-1);
+		}
+		ts-&gt;ts_in = p[0];
+		ts-&gt;ts_out2 = p[1];
+
+		<span class="enscript-keyword">if</span> (pipe(p) == -1) {
+			<span class="enscript-keyword">return</span> (-1);
+		}
+		ts-&gt;ts_in2 = p[0];
+		ts-&gt;ts_out = p[1];
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">char</span> *
+<span class="enscript-function-name">lookupa</span>(<span class="enscript-type">int</span> x, <span class="enscript-type">char</span> *names[])
+{
+	<span class="enscript-type">int</span>			i = 0;
+
+	<span class="enscript-keyword">while</span> (names[i] != NULL) {
+		<span class="enscript-keyword">if</span> (x == i) {
+			<span class="enscript-keyword">return</span> (names[i]);
+		}
+		i++;
+	}
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">lookup</span>(<span class="enscript-type">char</span> *x, <span class="enscript-type">char</span> *names[])
+{
+	<span class="enscript-type">int</span>			i = 0;
+
+	<span class="enscript-keyword">while</span> (names[i] != NULL) {
+		<span class="enscript-keyword">if</span> (strcmp(names[i], x) == 0) {
+			<span class="enscript-keyword">return</span> (i);
+		}
+		i++;
+	}
+	<span class="enscript-keyword">return</span> (-1);
+}
+</pre>
+<hr />
+</body></html>

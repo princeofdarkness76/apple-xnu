@@ -1,0 +1,1545 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>classq_sfb.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">classq_sfb.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2011-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sockio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/dlil.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/flowadv.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/classq/classq_sfb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/flowhash.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;dev/random/randomdev.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Stochastic Fair Blue
+ *
+ * Wu-chang Feng, Dilip D. Kandlur, Debanjan Saha, Kang G. Shin
+ * <a href="http://www.thefengs.com/wuchang/blue/CSE-TR-387-99.pdf">http://www.thefengs.com/wuchang/blue/CSE-TR-387-99.pdf</a>
+ *
+ * Based on the NS code with the following parameters:
+ *
+ *   bytes:	false
+ *   decrement:	0.001
+ *   increment:	0.005
+ *   hold-time:	10ms-50ms (randomized)
+ *   algorithm:	0
+ *   pbox:	1
+ *   pbox-time:	50-100ms (randomized)
+ *   hinterval:	11-23 (randomized)
+ *
+ * This implementation uses L = 2 and N = 32 for 2 sets of:
+ *
+ *	B[L][N]: L x N array of bins (L levels, N bins per level)
+ *
+ * Each set effectively creates 32^2 virtual buckets (bin combinations)
+ * while using only O(32*2) states.
+ *
+ * Given a 32-bit hash value, we divide it such that octets [0,1,2,3] are
+ * used as index for the bins across the 2 levels, where level 1 uses [0,2]
+ * and level 2 uses [1,3].  The 2 values per level correspond to the indices
+ * for the current and warm-up sets (section 4.4. in the SFB paper regarding
+ * Moving Hash Functions explains the purposes of these 2 sets.)
+ */</span>
+
+<span class="enscript-comment">/*
+ * Use Murmur3A_x86_32 for hash function.  It seems to perform consistently
+ * across platforms for 1-word key (32-bit flowhash value).  See flowhash.h
+ * for other alternatives.  We only need 16-bit hash output.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_HASH</span>	net_flowhash_mh3_x86_32
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_HASHMASK</span>	HASHMASK(16)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SFB_BINMASK</span>(_x) \
+	((_x) &amp; HASHMASK(SFB_BINS_SHIFT))
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SFB_BINST</span>(_sp, _l, _n, _c) \
+	(&amp;(*(_sp)-&gt;sfb_bins)[_c].stats[_l][_n])
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SFB_BINFT</span>(_sp, _l, _n, _c) \
+	(&amp;(*(_sp)-&gt;sfb_bins)[_c].freezetime[_l][_n])
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SFB_FC_LIST</span>(_sp, _n) \
+	(&amp;(*(_sp)-&gt;sfb_fc_lists)[_n])
+
+<span class="enscript-comment">/*
+ * The holdtime parameter determines the minimum time interval between
+ * two successive updates of the marking probability.  In the event the
+ * uplink speed is not known, a default value is chosen and is randomized
+ * to be within the following range.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">HOLDTIME_BASE</span>	(100ULL * 1000 * 1000)	<span class="enscript-comment">/* 100ms */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">HOLDTIME_MIN</span>	(10ULL * 1000 * 1000)	<span class="enscript-comment">/* 10ms */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">HOLDTIME_MAX</span>	(100ULL * 1000 * 1000)	<span class="enscript-comment">/* 100ms */</span>
+
+<span class="enscript-comment">/*
+ * The pboxtime parameter determines the bandwidth allocated for rogue
+ * flows, i.e. the rate limiting bandwidth.  In the event the uplink speed
+ * is not known, a default value is chosen and is randomized to be within
+ * the following range.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PBOXTIME_BASE</span>	(300ULL * 1000 * 1000)	<span class="enscript-comment">/* 300ms */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PBOXTIME_MIN</span>	(30ULL * 1000 * 1000)	<span class="enscript-comment">/* 30ms */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PBOXTIME_MAX</span>	(300ULL * 1000 * 1000)	<span class="enscript-comment">/* 300ms */</span>
+
+<span class="enscript-comment">/*
+ * Target queueing delay is the amount of extra delay that can be added
+ * to accommodate variations in the link bandwidth. The queue should be
+ * large enough to induce this much delay and nothing more than that.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TARGET_QDELAY_BASE</span>	(10ULL * 1000 * 1000)	<span class="enscript-comment">/* 10ms */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TARGET_QDELAY_MIN</span>	(10ULL * 1000)	<span class="enscript-comment">/* 10us */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TARGET_QDELAY_MAX</span>	(20ULL * 1000 * 1000 * 1000)	<span class="enscript-comment">/* 20s */</span>
+
+<span class="enscript-comment">/*
+ * Update interval for checking the extra delay added by the queue. This
+ * should be 90-95 percentile of RTT experienced by any TCP connection 
+ * so that it will take care of the burst traffic.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">UPDATE_INTERVAL_BASE</span>	(100ULL * 1000 * 1000)	<span class="enscript-comment">/* 100ms */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">UPDATE_INTERVAL_MIN</span>	(100ULL * 1000 * 1000)	<span class="enscript-comment">/* 100ms */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">UPDATE_INTERVAL_MAX</span>	(10ULL * 1000 * 1000 * 1000)	<span class="enscript-comment">/* 10s */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SFB_RANDOM</span>(sp, tmin, tmax)	((sfb_random(sp) % (tmax)) + (tmin))
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_PKT_PBOX</span>	0x1		<span class="enscript-comment">/* in penalty box */</span>
+
+<span class="enscript-comment">/* The following mantissa values are in SFB_FP_SHIFT Q format */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_MAX_PMARK</span>	(1 &lt;&lt; SFB_FP_SHIFT) <span class="enscript-comment">/* Q14 representation of 1.00 */</span>
+
+<span class="enscript-comment">/*
+ * These are d1 (increment) and d2 (decrement) parameters, used to determine
+ * the amount by which the marking probability is incremented when the queue
+ * overflows, or is decremented when the link is idle.  d1 is set higher than
+ * d2, because link underutilization can occur when congestion management is
+ * either too conservative or too aggressive, but packet loss occurs only
+ * when congestion management is too conservative.  By weighing heavily
+ * against packet loss, it can quickly reach to a substantial increase in
+ * traffic load.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_INCREMENT</span>	82		<span class="enscript-comment">/* Q14 representation of 0.005 */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_DECREMENT</span>	16		<span class="enscript-comment">/* Q14 representation of 0.001 */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_PMARK_TH</span>	16056		<span class="enscript-comment">/* Q14 representation of 0.98 */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_PMARK_WARM</span>	3276		<span class="enscript-comment">/* Q14 representation of 0.2 */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SFB_PMARK_INC</span>(_bin) do {					\
+	(_bin)-&gt;pmark += sfb_increment;					\
+	<span class="enscript-keyword">if</span> ((_bin)-&gt;pmark &gt; SFB_MAX_PMARK)				\
+		(_bin)-&gt;pmark = SFB_MAX_PMARK;				\
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SFB_PMARK_DEC</span>(_bin) do {					\
+	<span class="enscript-keyword">if</span> ((_bin)-&gt;pmark &gt; 0) {					\
+		(_bin)-&gt;pmark -= sfb_decrement;				\
+		<span class="enscript-keyword">if</span> ((_bin)-&gt;pmark &lt; 0)					\
+			(_bin)-&gt;pmark = 0;				\
+	}								\
+} <span class="enscript-keyword">while</span> (0)
+
+<span class="enscript-comment">/* Minimum nuber of bytes in queue to get flow controlled */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_MIN_FC_THRESHOLD_BYTES</span>	7500
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SFB_SET_DELAY_HIGH</span>(_sp_, _q_) do {				\
+	(_sp_)-&gt;sfb_flags |= SFBF_DELAYHIGH;				\
+	(_sp_)-&gt;sfb_fc_threshold = max(SFB_MIN_FC_THRESHOLD_BYTES,	\
+		(qsize((_q_)) &gt;&gt; 3));		\
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SFB_QUEUE_DELAYBASED</span>(_sp_) ((_sp_)-&gt;sfb_flags &amp; SFBF_DELAYBASED)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SFB_IS_DELAYHIGH</span>(_sp_) ((_sp_)-&gt;sfb_flags &amp; SFBF_DELAYHIGH)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_QUEUE_DELAYBASED_MAXSIZE</span>	2048	<span class="enscript-comment">/* max pkts */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">HINTERVAL_MIN</span>	(10)	<span class="enscript-comment">/* 10 seconds */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">HINTERVAL_MAX</span>	(20)	<span class="enscript-comment">/* 20 seconds */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SFB_HINTERVAL</span>(sp) ((sfb_random(sp) % HINTERVAL_MAX) + HINTERVAL_MIN)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DEQUEUE_DECAY</span>	7		<span class="enscript-comment">/* ilog2 of EWMA decay rate, (128) */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">DEQUEUE_SPIKE</span>(_new, _old)	\
+	((u_int64_t)ABS((int64_t)(_new) - (int64_t)(_old)) &gt; ((_old) &lt;&lt; 11))
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ABS</span>(v)  (((v) &gt; 0) ? (v) : -(v))
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_ZONE_MAX</span>		32		<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_ZONE_NAME</span>		<span class="enscript-string">&quot;classq_sfb&quot;</span>	<span class="enscript-comment">/* zone name */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_BINS_ZONE_MAX</span>	32		<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_BINS_ZONE_NAME</span>	<span class="enscript-string">&quot;classq_sfb_bins&quot;</span> <span class="enscript-comment">/* zone name */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_FCL_ZONE_MAX</span>	32		<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_FCL_ZONE_NAME</span>	<span class="enscript-string">&quot;classq_sfb_fcl&quot;</span> <span class="enscript-comment">/* zone name */</span>
+
+<span class="enscript-comment">/* Place the flow control entries in current bin on level 0 */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFB_FC_LEVEL</span>	0
+
+<span class="enscript-comment">/* Store SFB hash and flags in the module private scratch space */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">pkt_sfb_hash8</span>	pkt_mpriv.__mpriv_u.__mpriv32[0].__mpriv32_u.__val8
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">pkt_sfb_hash16</span>	pkt_mpriv.__mpriv_u.__mpriv32[0].__mpriv32_u.__val16
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">pkt_sfb_hash32</span>	pkt_mpriv.__mpriv_u.__mpriv32[0].__mpriv32_u.__val32
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">pkt_sfb_flags</span>	pkt_mpriv.__mpriv_u.__mpriv32[1].__mpriv32_u.__val32
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> sfb_size;		<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *sfb_zone;		<span class="enscript-comment">/* zone for sfb */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> sfb_bins_size;	<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *sfb_bins_zone;	<span class="enscript-comment">/* zone for sfb_bins */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> sfb_fcl_size;	<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *sfb_fcl_zone;	<span class="enscript-comment">/* zone for sfb_fc_lists */</span>
+
+<span class="enscript-comment">/* internal function prototypes */</span>
+<span class="enscript-type">static</span> u_int32_t <span class="enscript-function-name">sfb_random</span>(<span class="enscript-type">struct</span> sfb *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">sfb_getq_flow</span>(<span class="enscript-type">struct</span> sfb *, class_queue_t *, u_int32_t,
+    boolean_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_resetq</span>(<span class="enscript-type">struct</span> sfb *, cqev_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_calc_holdtime</span>(<span class="enscript-type">struct</span> sfb *, u_int64_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_calc_pboxtime</span>(<span class="enscript-type">struct</span> sfb *, u_int64_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_calc_hinterval</span>(<span class="enscript-type">struct</span> sfb *, u_int64_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_calc_target_qdelay</span>(<span class="enscript-type">struct</span> sfb *, u_int64_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_calc_update_interval</span>(<span class="enscript-type">struct</span> sfb *, u_int64_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_swap_bins</span>(<span class="enscript-type">struct</span> sfb *, u_int32_t);
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span> <span class="enscript-function-name">sfb_pcheck</span>(<span class="enscript-type">struct</span> sfb *, <span class="enscript-type">struct</span> pkthdr *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">sfb_penalize</span>(<span class="enscript-type">struct</span> sfb *, <span class="enscript-type">struct</span> pkthdr *, <span class="enscript-type">struct</span> timespec *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_adjust_bin</span>(<span class="enscript-type">struct</span> sfb *, <span class="enscript-type">struct</span> sfbbinstats *,
+    <span class="enscript-type">struct</span> timespec *, <span class="enscript-type">struct</span> timespec *, boolean_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_decrement_bin</span>(<span class="enscript-type">struct</span> sfb *, <span class="enscript-type">struct</span> sfbbinstats *,
+    <span class="enscript-type">struct</span> timespec *, <span class="enscript-type">struct</span> timespec *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_increment_bin</span>(<span class="enscript-type">struct</span> sfb *, <span class="enscript-type">struct</span> sfbbinstats *,
+    <span class="enscript-type">struct</span> timespec *, <span class="enscript-type">struct</span> timespec *);
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_dq_update_bins</span>(<span class="enscript-type">struct</span> sfb *, <span class="enscript-type">struct</span> pkthdr *,
+    <span class="enscript-type">struct</span> timespec *, u_int32_t qsize);
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_eq_update_bins</span>(<span class="enscript-type">struct</span> sfb *, <span class="enscript-type">struct</span> pkthdr *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">sfb_drop_early</span>(<span class="enscript-type">struct</span> sfb *, <span class="enscript-type">struct</span> pkthdr *, u_int16_t *,
+    <span class="enscript-type">struct</span> timespec *);
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">sfb_bin_addfcentry</span>(<span class="enscript-type">struct</span> sfb *, <span class="enscript-type">struct</span> pkthdr *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_fclist_append</span>(<span class="enscript-type">struct</span> sfb *, <span class="enscript-type">struct</span> sfb_fcl *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_fclists_clean</span>(<span class="enscript-type">struct</span> sfb *sp);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">sfb_bin_mark_or_drop</span>(<span class="enscript-type">struct</span> sfb *sp, <span class="enscript-type">struct</span> sfbbinstats *bin);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sfb_detect_dequeue_stall</span>(<span class="enscript-type">struct</span> sfb *sp, class_queue_t *,
+    <span class="enscript-type">struct</span> timespec *);
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_classq, OID_AUTO, sfb, CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;SFB&quot;</span>);
+
+<span class="enscript-type">static</span> u_int64_t sfb_holdtime = 0;	<span class="enscript-comment">/* 0 indicates &quot;automatic&quot; */</span>
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_net_classq_sfb, OID_AUTO, holdtime, CTLFLAG_RW|CTLFLAG_LOCKED,
+    &amp;sfb_holdtime, <span class="enscript-string">&quot;SFB freeze time in nanoseconds&quot;</span>);
+
+<span class="enscript-type">static</span> u_int64_t sfb_pboxtime = 0;	<span class="enscript-comment">/* 0 indicates &quot;automatic&quot; */</span>
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_net_classq_sfb, OID_AUTO, pboxtime, CTLFLAG_RW|CTLFLAG_LOCKED,
+    &amp;sfb_pboxtime, <span class="enscript-string">&quot;SFB penalty box time in nanoseconds&quot;</span>);
+
+<span class="enscript-type">static</span> u_int64_t sfb_hinterval;
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_net_classq_sfb, OID_AUTO, hinterval, CTLFLAG_RW|CTLFLAG_LOCKED,
+    &amp;sfb_hinterval, <span class="enscript-string">&quot;SFB hash interval in nanoseconds&quot;</span>);
+
+<span class="enscript-type">static</span> u_int64_t sfb_target_qdelay = 0;
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_net_classq_sfb, OID_AUTO, target_qdelay, CTLFLAG_RW|CTLFLAG_LOCKED,
+    &amp;sfb_target_qdelay, <span class="enscript-string">&quot;SFB target queue delay in nanoseconds&quot;</span>);
+
+<span class="enscript-type">static</span> u_int64_t sfb_update_interval;
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_net_classq_sfb, OID_AUTO, update_interval,
+    CTLFLAG_RW|CTLFLAG_LOCKED, &amp;sfb_update_interval, <span class="enscript-string">&quot;SFB update interval&quot;</span>);
+
+<span class="enscript-type">static</span> u_int32_t sfb_increment = SFB_INCREMENT;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_net_classq_sfb, OID_AUTO, increment, CTLFLAG_RW|CTLFLAG_LOCKED,
+    &amp;sfb_increment, SFB_INCREMENT, <span class="enscript-string">&quot;SFB increment [d1]&quot;</span>);
+
+<span class="enscript-type">static</span> u_int32_t sfb_decrement = SFB_DECREMENT;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_net_classq_sfb, OID_AUTO, decrement, CTLFLAG_RW|CTLFLAG_LOCKED,
+    &amp;sfb_decrement, SFB_DECREMENT, <span class="enscript-string">&quot;SFB decrement [d2]&quot;</span>);
+
+<span class="enscript-type">static</span> u_int32_t sfb_allocation = 0;	<span class="enscript-comment">/* 0 means &quot;automatic&quot; */</span>
+<span class="enscript-function-name">SYSCTL_UINT</span>(_net_classq_sfb, OID_AUTO, allocation, CTLFLAG_RW|CTLFLAG_LOCKED,
+    &amp;sfb_allocation, 0, <span class="enscript-string">&quot;SFB bin allocation&quot;</span>);
+
+<span class="enscript-type">static</span> u_int32_t sfb_ratelimit = 0;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_net_classq_sfb, OID_AUTO, ratelimit, CTLFLAG_RW|CTLFLAG_LOCKED,
+	&amp;sfb_ratelimit, 0, <span class="enscript-string">&quot;SFB rate limit&quot;</span>);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">KBPS</span>	(1ULL * 1000)		<span class="enscript-comment">/* 1 Kbits per second */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MBPS</span>	(1ULL * 1000 * 1000)	<span class="enscript-comment">/* 1 Mbits per second */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">GBPS</span>	(MBPS * 1000)		<span class="enscript-comment">/* 1 Gbits per second */</span>
+
+<span class="enscript-type">struct</span> sfb_time_tbl {
+	u_int64_t	speed;		<span class="enscript-comment">/* uplink speed */</span>
+	u_int64_t	holdtime;	<span class="enscript-comment">/* hold time */</span>
+	u_int64_t	pboxtime;	<span class="enscript-comment">/* penalty box time */</span>
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> sfb_time_tbl sfb_ttbl[] = {
+	{   1 * MBPS,	HOLDTIME_BASE * 1000,	PBOXTIME_BASE * 1000	},
+	{  10 * MBPS,	HOLDTIME_BASE * 100,	PBOXTIME_BASE * 100	},
+	{ 100 * MBPS,	HOLDTIME_BASE * 10,	PBOXTIME_BASE * 10	},
+	{   1 * GBPS,	HOLDTIME_BASE,		PBOXTIME_BASE		},
+	{  10 * GBPS,	HOLDTIME_BASE / 10,	PBOXTIME_BASE / 10	},
+	{ 100 * GBPS,	HOLDTIME_BASE / 100,	PBOXTIME_BASE / 100	},
+	{ 0, 0, 0 }
+};
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_init</span>(<span class="enscript-type">void</span>)
+{
+	_CASSERT(SFBF_ECN4 == CLASSQF_ECN4);
+	_CASSERT(SFBF_ECN6 == CLASSQF_ECN6);
+
+	sfb_size = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sfb);
+	sfb_zone = zinit(sfb_size, SFB_ZONE_MAX * sfb_size,
+	    0, SFB_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (sfb_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, SFB_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(sfb_zone, Z_EXPAND, TRUE);
+	zone_change(sfb_zone, Z_CALLERACCT, TRUE);
+
+	sfb_bins_size = <span class="enscript-keyword">sizeof</span> (*((<span class="enscript-type">struct</span> sfb *)0)-&gt;sfb_bins);
+	sfb_bins_zone = zinit(sfb_bins_size, SFB_BINS_ZONE_MAX * sfb_bins_size,
+	    0, SFB_BINS_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (sfb_bins_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, SFB_BINS_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(sfb_bins_zone, Z_EXPAND, TRUE);
+	zone_change(sfb_bins_zone, Z_CALLERACCT, TRUE);
+
+	sfb_fcl_size = <span class="enscript-keyword">sizeof</span> (*((<span class="enscript-type">struct</span> sfb *)0)-&gt;sfb_fc_lists);
+	sfb_fcl_zone = zinit(sfb_fcl_size, SFB_FCL_ZONE_MAX * sfb_fcl_size,
+	    0, SFB_FCL_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (sfb_fcl_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, SFB_FCL_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(sfb_fcl_zone, Z_EXPAND, TRUE);
+	zone_change(sfb_fcl_zone, Z_CALLERACCT, TRUE);
+}
+
+<span class="enscript-type">static</span> u_int32_t
+<span class="enscript-function-name">sfb_random</span>(<span class="enscript-type">struct</span> sfb *sp)
+{
+	IFCQ_CONVERT_LOCK(&amp;sp-&gt;sfb_ifp-&gt;if_snd);
+	<span class="enscript-keyword">return</span> (RandomULong());
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_calc_holdtime</span>(<span class="enscript-type">struct</span> sfb *sp, u_int64_t outbw)
+{
+	u_int64_t holdtime;
+
+	<span class="enscript-keyword">if</span> (sfb_holdtime != 0) {
+		holdtime = sfb_holdtime;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (outbw == 0) {
+		holdtime = SFB_RANDOM(sp, HOLDTIME_MIN, HOLDTIME_MAX);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> n, i;
+
+		n = sfb_ttbl[0].holdtime;
+		<span class="enscript-keyword">for</span> (i = 0; sfb_ttbl[i].speed != 0; i++) {
+			<span class="enscript-keyword">if</span> (outbw &lt; sfb_ttbl[i].speed)
+				<span class="enscript-keyword">break</span>;
+			n = sfb_ttbl[i].holdtime;
+		}
+		holdtime = n;
+	}
+	net_nsectimer(&amp;holdtime, &amp;sp-&gt;sfb_holdtime);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_calc_pboxtime</span>(<span class="enscript-type">struct</span> sfb *sp, u_int64_t outbw)
+{
+	u_int64_t pboxtime;
+
+	<span class="enscript-keyword">if</span> (sfb_pboxtime != 0) {
+		pboxtime = sfb_pboxtime;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (outbw == 0) {
+		pboxtime = SFB_RANDOM(sp, PBOXTIME_MIN, PBOXTIME_MAX);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> n, i;
+
+		n = sfb_ttbl[0].pboxtime;
+		<span class="enscript-keyword">for</span> (i = 0; sfb_ttbl[i].speed != 0; i++) {
+			<span class="enscript-keyword">if</span> (outbw &lt; sfb_ttbl[i].speed)
+				<span class="enscript-keyword">break</span>;
+			n = sfb_ttbl[i].pboxtime;
+		}
+		pboxtime = n;
+	}
+	net_nsectimer(&amp;pboxtime, &amp;sp-&gt;sfb_pboxtime);
+	net_timerclear(&amp;sp-&gt;sfb_pboxfreeze);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_calc_hinterval</span>(<span class="enscript-type">struct</span> sfb *sp, u_int64_t *t)
+{
+	u_int64_t hinterval;
+	<span class="enscript-type">struct</span> timespec now;
+
+	<span class="enscript-keyword">if</span> (t != NULL) {
+		<span class="enscript-comment">/*
+		 * TODO <a href="mailto:adi@apple.com">adi@apple.com</a>: use dq_avg to derive hinterval.
+		 */</span>
+		hinterval = *t;
+	}
+
+	<span class="enscript-keyword">if</span> (sfb_hinterval != 0)
+		hinterval = sfb_hinterval;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (t == NULL || hinterval == 0)
+		hinterval = ((u_int64_t)SFB_HINTERVAL(sp) * NSEC_PER_SEC);
+
+	net_nsectimer(&amp;hinterval, &amp;sp-&gt;sfb_hinterval);
+
+	nanouptime(&amp;now);
+	net_timeradd(&amp;now, &amp;sp-&gt;sfb_hinterval, &amp;sp-&gt;sfb_nextreset);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_calc_target_qdelay</span>(<span class="enscript-type">struct</span> sfb *sp, u_int64_t out_bw)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">out_bw</span>)
+	u_int64_t target_qdelay = 0;
+	<span class="enscript-type">struct</span> ifnet *ifp = sp-&gt;sfb_ifp;
+
+	target_qdelay = IFCQ_TARGET_QDELAY(&amp;ifp-&gt;if_snd);	
+
+	<span class="enscript-keyword">if</span> (sfb_target_qdelay != 0)
+		target_qdelay = sfb_target_qdelay;
+
+	<span class="enscript-comment">/*
+	 * If we do not know the effective bandwidth, use the default
+	 * target queue delay.
+	 */</span>
+	<span class="enscript-keyword">if</span> (target_qdelay == 0)
+		target_qdelay = IFQ_TARGET_DELAY;
+
+	<span class="enscript-comment">/*
+	 * If a delay has been added to ifnet start callback for
+	 * coalescing, we have to add that to the pre-set target delay
+	 * because the packets can be in the queue longer.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((ifp-&gt;if_eflags &amp; IFEF_ENQUEUE_MULTI) &amp;&amp;
+		ifp-&gt;if_start_delay_timeout &gt; 0)
+		target_qdelay += ifp-&gt;if_start_delay_timeout;
+
+	sp-&gt;sfb_target_qdelay = target_qdelay;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_calc_update_interval</span>(<span class="enscript-type">struct</span> sfb *sp, u_int64_t out_bw)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">out_bw</span>)
+	u_int64_t update_interval = 0;
+
+	<span class="enscript-comment">/* If the system-level override is set, use it */</span>
+	<span class="enscript-keyword">if</span> (sfb_update_interval != 0)
+		update_interval = sfb_update_interval;
+	<span class="enscript-comment">/*
+	 * If we do not know the effective bandwidth, use the default
+	 * update interval.
+	 */</span>
+	<span class="enscript-keyword">if</span> (update_interval == 0)
+		update_interval = IFQ_UPDATE_INTERVAL;
+
+	net_nsectimer(&amp;update_interval, &amp;sp-&gt;sfb_update_interval);
+}
+
+<span class="enscript-comment">/*
+ * sfb support routines
+ */</span>
+<span class="enscript-type">struct</span> sfb *
+<span class="enscript-function-name">sfb_alloc</span>(<span class="enscript-type">struct</span> ifnet *ifp, u_int32_t qid, u_int32_t qlim, u_int32_t flags)
+{
+	<span class="enscript-type">struct</span> sfb *sp;
+	<span class="enscript-type">int</span> i;
+
+	VERIFY(ifp != NULL &amp;&amp; qlim &gt; 0);
+
+	sp = zalloc(sfb_zone);
+	<span class="enscript-keyword">if</span> (sp == NULL) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: SFB unable to allocate\n&quot;</span>, if_name(ifp));
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	bzero(sp, sfb_size);
+
+	<span class="enscript-keyword">if</span> ((sp-&gt;sfb_bins = zalloc(sfb_bins_zone)) == NULL) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: SFB unable to allocate bins\n&quot;</span>, if_name(ifp));
+		sfb_destroy(sp);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	bzero(sp-&gt;sfb_bins, sfb_bins_size);
+
+	<span class="enscript-keyword">if</span> ((sp-&gt;sfb_fc_lists = zalloc(sfb_fcl_zone)) == NULL) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: SFB unable to allocate flow control lists\n&quot;</span>,
+		    if_name(ifp));
+		sfb_destroy(sp);
+		<span class="enscript-keyword">return</span>(NULL);
+	}
+	bzero(sp-&gt;sfb_fc_lists, sfb_fcl_size);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; SFB_BINS; ++i)
+		STAILQ_INIT(&amp;SFB_FC_LIST(sp, i)-&gt;fclist);
+
+	sp-&gt;sfb_ifp = ifp;
+	sp-&gt;sfb_qlim = qlim;
+	sp-&gt;sfb_qid = qid;
+	sp-&gt;sfb_flags = (flags &amp; SFBF_USERFLAGS);
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">PF_ECN</span>
+	<span class="enscript-keyword">if</span> (sp-&gt;sfb_flags &amp; SFBF_ECN) {
+		sp-&gt;sfb_flags &amp;= ~SFBF_ECN;
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: SFB qid=%d, ECN not available; ignoring &quot;</span>
+		    <span class="enscript-string">&quot;SFBF_ECN flag!\n&quot;</span>, if_name(ifp), sp-&gt;sfb_qid);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !PF_ECN */</span>
+
+	sfb_resetq(sp, -1);
+
+	<span class="enscript-keyword">return</span> (sp);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_fclist_append</span>(<span class="enscript-type">struct</span> sfb *sp, <span class="enscript-type">struct</span> sfb_fcl *fcl)
+{
+	IFCQ_CONVERT_LOCK(&amp;sp-&gt;sfb_ifp-&gt;if_snd);
+
+	VERIFY(STAILQ_EMPTY(&amp;fcl-&gt;fclist) || fcl-&gt;cnt &gt; 0);
+	sp-&gt;sfb_stats.flow_feedback += fcl-&gt;cnt;
+	fcl-&gt;cnt = 0;
+
+	flowadv_add(&amp;fcl-&gt;fclist);
+	VERIFY(fcl-&gt;cnt == 0 &amp;&amp; STAILQ_EMPTY(&amp;fcl-&gt;fclist));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_fclists_clean</span>(<span class="enscript-type">struct</span> sfb *sp)
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-comment">/* Move all the flow control entries to the flowadv list */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; SFB_BINS; ++i) {
+		<span class="enscript-type">struct</span> sfb_fcl *fcl = SFB_FC_LIST(sp, i);
+		<span class="enscript-keyword">if</span> (!STAILQ_EMPTY(&amp;fcl-&gt;fclist))
+			sfb_fclist_append(sp, fcl);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_destroy</span>(<span class="enscript-type">struct</span> sfb *sp)
+{
+	sfb_fclists_clean(sp);
+	<span class="enscript-keyword">if</span> (sp-&gt;sfb_bins != NULL) {
+		zfree(sfb_bins_zone, sp-&gt;sfb_bins);
+		sp-&gt;sfb_bins = NULL;
+	}
+	<span class="enscript-keyword">if</span> (sp-&gt;sfb_fc_lists != NULL) {
+		zfree(sfb_fcl_zone, sp-&gt;sfb_fc_lists);
+		sp-&gt;sfb_fc_lists = NULL;
+	}
+	zfree(sfb_zone, sp);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_resetq</span>(<span class="enscript-type">struct</span> sfb *sp, cqev_t ev)
+{
+	<span class="enscript-type">struct</span> ifnet *ifp = sp-&gt;sfb_ifp;
+	u_int64_t eff_rate;
+
+	VERIFY(ifp != NULL);
+
+	<span class="enscript-keyword">if</span> (ev != CLASSQ_EV_LINK_DOWN) {
+		(*sp-&gt;sfb_bins)[0].fudge = sfb_random(sp);
+		(*sp-&gt;sfb_bins)[1].fudge = sfb_random(sp);
+		sp-&gt;sfb_allocation = ((sfb_allocation == 0) ?
+		    (sp-&gt;sfb_qlim / 3) : sfb_allocation);
+		sp-&gt;sfb_drop_thresh = sp-&gt;sfb_allocation +
+		    (sp-&gt;sfb_allocation &gt;&gt; 1);
+	}
+
+	sp-&gt;sfb_clearpkts = 0;
+	sp-&gt;sfb_current = 0;
+
+	eff_rate = ifnet_output_linkrate(ifp);
+	sp-&gt;sfb_eff_rate = eff_rate;
+
+	sfb_calc_holdtime(sp, eff_rate);
+	sfb_calc_pboxtime(sp, eff_rate);
+	sfb_calc_hinterval(sp, NULL);
+	sfb_calc_target_qdelay(sp, eff_rate);
+	sfb_calc_update_interval(sp, eff_rate);
+
+	<span class="enscript-keyword">if</span> (ev == CLASSQ_EV_LINK_DOWN ||
+		ev == CLASSQ_EV_LINK_UP)
+		sfb_fclists_clean(sp);
+
+	bzero(sp-&gt;sfb_bins, <span class="enscript-keyword">sizeof</span> (*sp-&gt;sfb_bins));
+	bzero(&amp;sp-&gt;sfb_stats, <span class="enscript-keyword">sizeof</span> (sp-&gt;sfb_stats));
+
+	<span class="enscript-keyword">if</span> (ev == CLASSQ_EV_LINK_DOWN || !classq_verbose)
+		<span class="enscript-keyword">return</span>;
+
+	log(LOG_DEBUG, <span class="enscript-string">&quot;%s: SFB qid=%d, holdtime=%llu nsec, &quot;</span>
+	    <span class="enscript-string">&quot;pboxtime=%llu nsec, allocation=%d, drop_thresh=%d, &quot;</span>
+	    <span class="enscript-string">&quot;hinterval=%d sec, sfb_bins=%d bytes, eff_rate=%llu bps&quot;</span>
+	    <span class="enscript-string">&quot;target_qdelay= %llu nsec &quot;</span>
+	    <span class="enscript-string">&quot;update_interval=%llu sec %llu nsec flags=0x%x\n&quot;</span>,
+	    if_name(ifp), sp-&gt;sfb_qid, (u_int64_t)sp-&gt;sfb_holdtime.tv_nsec,
+	    (u_int64_t)sp-&gt;sfb_pboxtime.tv_nsec,
+	    (u_int32_t)sp-&gt;sfb_allocation, (u_int32_t)sp-&gt;sfb_drop_thresh,
+	    (<span class="enscript-type">int</span>)sp-&gt;sfb_hinterval.tv_sec, (<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (*sp-&gt;sfb_bins),
+	    eff_rate, (u_int64_t)sp-&gt;sfb_target_qdelay,
+	    (u_int64_t)sp-&gt;sfb_update_interval.tv_sec,
+	    (u_int64_t)sp-&gt;sfb_update_interval.tv_nsec, sp-&gt;sfb_flags);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_getstats</span>(<span class="enscript-type">struct</span> sfb *sp, <span class="enscript-type">struct</span> sfb_stats *sps)
+{
+	sps-&gt;allocation = sp-&gt;sfb_allocation;
+	sps-&gt;dropthresh = sp-&gt;sfb_drop_thresh;
+	sps-&gt;clearpkts = sp-&gt;sfb_clearpkts;
+	sps-&gt;current = sp-&gt;sfb_current;
+	sps-&gt;target_qdelay = sp-&gt;sfb_target_qdelay;
+	sps-&gt;min_estdelay = sp-&gt;sfb_min_qdelay;
+	sps-&gt;delay_fcthreshold = sp-&gt;sfb_fc_threshold;
+	sps-&gt;flags = sp-&gt;sfb_flags;
+
+	net_timernsec(&amp;sp-&gt;sfb_holdtime, &amp;sp-&gt;sfb_stats.hold_time);
+	net_timernsec(&amp;sp-&gt;sfb_pboxtime, &amp;sp-&gt;sfb_stats.pbox_time);
+	net_timernsec(&amp;sp-&gt;sfb_hinterval, &amp;sp-&gt;sfb_stats.rehash_intval);
+	net_timernsec(&amp;sp-&gt;sfb_update_interval, &amp;sps-&gt;update_interval);
+	*(&amp;(sps-&gt;sfbstats)) = *(&amp;(sp-&gt;sfb_stats));
+
+	_CASSERT(<span class="enscript-keyword">sizeof</span> ((*sp-&gt;sfb_bins)[0].stats) ==
+	    <span class="enscript-keyword">sizeof</span> (sps-&gt;binstats[0].stats));
+
+	bcopy(&amp;(*sp-&gt;sfb_bins)[0].stats, &amp;sps-&gt;binstats[0].stats,
+	    <span class="enscript-keyword">sizeof</span> (sps-&gt;binstats[0].stats));
+	bcopy(&amp;(*sp-&gt;sfb_bins)[1].stats, &amp;sps-&gt;binstats[1].stats,
+	    <span class="enscript-keyword">sizeof</span> (sps-&gt;binstats[1].stats));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_swap_bins</span>(<span class="enscript-type">struct</span> sfb *sp, u_int32_t len)
+{
+	<span class="enscript-type">int</span> i, j, s;
+
+	<span class="enscript-keyword">if</span> (sp-&gt;sfb_flags &amp; SFBF_SUSPENDED)
+		<span class="enscript-keyword">return</span>;
+
+	s = sp-&gt;sfb_current;
+	VERIFY((s + (s ^ 1)) == 1);
+
+	(*sp-&gt;sfb_bins)[s].fudge = sfb_random(sp); <span class="enscript-comment">/* recompute perturbation */</span>
+	sp-&gt;sfb_clearpkts = len;
+	sp-&gt;sfb_stats.num_rehash++;
+
+	s = (sp-&gt;sfb_current ^= 1);	<span class="enscript-comment">/* flip the bit (swap current) */</span>
+
+	<span class="enscript-keyword">if</span> (classq_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: SFB qid=%d, set %d is now current, &quot;</span>
+		    <span class="enscript-string">&quot;qlen=%d\n&quot;</span>, if_name(sp-&gt;sfb_ifp), sp-&gt;sfb_qid, s, len);
+	}
+
+	<span class="enscript-comment">/* clear freezetime for all current bins */</span>
+	bzero(&amp;(*sp-&gt;sfb_bins)[s].freezetime,
+	    <span class="enscript-keyword">sizeof</span> ((*sp-&gt;sfb_bins)[s].freezetime));
+
+	<span class="enscript-comment">/* clear/adjust bin statistics and flow control lists */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; SFB_BINS; i++) {
+		<span class="enscript-type">struct</span> sfb_fcl *fcl = SFB_FC_LIST(sp, i);
+
+		<span class="enscript-keyword">if</span> (!STAILQ_EMPTY(&amp;fcl-&gt;fclist))
+			sfb_fclist_append(sp, fcl);
+
+		<span class="enscript-keyword">for</span> (j = 0; j &lt; SFB_LEVELS; j++) {
+			<span class="enscript-type">struct</span> sfbbinstats *cbin, *wbin;
+
+			cbin = SFB_BINST(sp, j, i, s);		<span class="enscript-comment">/* current */</span>
+			wbin = SFB_BINST(sp, j, i, s ^ 1);	<span class="enscript-comment">/* warm-up */</span>
+
+			cbin-&gt;pkts = 0;
+			cbin-&gt;bytes = 0;
+			<span class="enscript-keyword">if</span> (cbin-&gt;pmark &gt; SFB_MAX_PMARK)
+				cbin-&gt;pmark = SFB_MAX_PMARK;
+			<span class="enscript-keyword">if</span> (cbin-&gt;pmark &lt; 0)
+				cbin-&gt;pmark = 0;
+
+			<span class="enscript-comment">/*
+			 * Keep pmark from before to identify
+			 * non-responsives immediately.
+			 */</span>
+			<span class="enscript-keyword">if</span> (wbin-&gt;pmark &gt; SFB_PMARK_WARM)
+				wbin-&gt;pmark = SFB_PMARK_WARM;
+		}
+	}
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">sfb_pcheck</span>(<span class="enscript-type">struct</span> sfb *sp, <span class="enscript-type">struct</span> pkthdr *pkt)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SFB_LEVELS</span> != 2
+	<span class="enscript-type">int</span> i, n;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SFB_LEVELS != 2 */</span>
+	<span class="enscript-type">int</span> s;
+
+	s = sp-&gt;sfb_current;
+	VERIFY((s + (s ^ 1)) == 1);
+
+	<span class="enscript-comment">/*
+	 * For current bins, returns 1 if all pmark &gt;= SFB_PMARK_TH,
+	 * 0 otherwise; optimize for SFB_LEVELS=2.
+	 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SFB_LEVELS</span> == 2
+	<span class="enscript-comment">/*
+	 * Level 0: bin index at [0] for set 0; [2] for set 1
+	 * Level 1: bin index at [1] for set 0; [3] for set 1
+	 */</span>
+	<span class="enscript-keyword">if</span> (SFB_BINST(sp, 0, SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[(s &lt;&lt; 1)]),
+	    s)-&gt;pmark &lt; SFB_PMARK_TH ||
+	    SFB_BINST(sp, 1, SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[(s &lt;&lt; 1) + 1]),
+	    s)-&gt;pmark &lt; SFB_PMARK_TH)
+		<span class="enscript-keyword">return</span> (0);
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* SFB_LEVELS != 2 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; SFB_LEVELS; i++) {
+		<span class="enscript-keyword">if</span> (s == 0)		<span class="enscript-comment">/* set 0, bin index [0,1] */</span>
+			n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[i]);
+		<span class="enscript-keyword">else</span>			<span class="enscript-comment">/* set 1, bin index [2,3] */</span>
+			n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[i + 2]);
+
+		<span class="enscript-keyword">if</span> (SFB_BINST(sp, i, n, s)-&gt;pmark &lt; SFB_PMARK_TH)
+			<span class="enscript-keyword">return</span> (0);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SFB_LEVELS != 2 */</span>
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sfb_penalize</span>(<span class="enscript-type">struct</span> sfb *sp, <span class="enscript-type">struct</span> pkthdr *pkt, <span class="enscript-type">struct</span> timespec *now)
+{
+	<span class="enscript-type">struct</span> timespec delta = { 0, 0 };
+
+	<span class="enscript-comment">/* If minimum pmark of current bins is &lt; SFB_PMARK_TH, we're done */</span>
+	<span class="enscript-keyword">if</span> (!sfb_ratelimit || !sfb_pcheck(sp, pkt))
+		<span class="enscript-keyword">return</span> (0);
+
+	net_timersub(now, &amp;sp-&gt;sfb_pboxfreeze, &amp;delta);
+	<span class="enscript-keyword">if</span> (net_timercmp(&amp;delta, &amp;sp-&gt;sfb_pboxtime, &lt;)) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SFB_LEVELS</span> != 2
+		<span class="enscript-type">int</span> i;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SFB_LEVELS != 2 */</span>
+		<span class="enscript-type">struct</span> sfbbinstats *bin;
+		<span class="enscript-type">int</span> n, w;
+
+		w = sp-&gt;sfb_current ^ 1;
+		VERIFY((w + (w ^ 1)) == 1);
+
+		<span class="enscript-comment">/*
+		 * Update warm-up bins; optimize for SFB_LEVELS=2
+		 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SFB_LEVELS</span> == 2
+		<span class="enscript-comment">/* Level 0: bin index at [0] for set 0; [2] for set 1 */</span>
+		n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[(w &lt;&lt; 1)]);
+		bin = SFB_BINST(sp, 0, n, w);
+		<span class="enscript-keyword">if</span> (bin-&gt;pkts &gt;= sp-&gt;sfb_allocation)
+			sfb_increment_bin(sp, bin, SFB_BINFT(sp, 0, n, w), now);
+
+		<span class="enscript-comment">/* Level 0: bin index at [1] for set 0; [3] for set 1 */</span>
+		n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[(w &lt;&lt; 1) + 1]);
+		bin = SFB_BINST(sp, 1, n, w);
+		<span class="enscript-keyword">if</span> (bin-&gt;pkts &gt;= sp-&gt;sfb_allocation)
+			sfb_increment_bin(sp, bin, SFB_BINFT(sp, 1, n, w), now);
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* SFB_LEVELS != 2 */</span>
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; SFB_LEVELS; i++) {
+			<span class="enscript-keyword">if</span> (w == 0)	<span class="enscript-comment">/* set 0, bin index [0,1] */</span>
+				n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[i]);
+			<span class="enscript-keyword">else</span>		<span class="enscript-comment">/* set 1, bin index [2,3] */</span>
+				n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[i + 2]);
+
+			bin = SFB_BINST(sp, i, n, w);
+			<span class="enscript-keyword">if</span> (bin-&gt;pkts &gt;= sp-&gt;sfb_allocation) {
+				sfb_increment_bin(sp, bin,
+				    SFB_BINFT(sp, i, n, w), now);
+			}
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SFB_LEVELS != 2 */</span>
+		<span class="enscript-keyword">return</span> (1);
+	}
+
+	<span class="enscript-comment">/* non-conformant or else misclassified flow; queue it anyway */</span>
+	pkt-&gt;pkt_sfb_flags |= SFB_PKT_PBOX;
+	*(&amp;sp-&gt;sfb_pboxfreeze) = *now;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_adjust_bin</span>(<span class="enscript-type">struct</span> sfb *sp, <span class="enscript-type">struct</span> sfbbinstats *bin, <span class="enscript-type">struct</span> timespec *ft,
+    <span class="enscript-type">struct</span> timespec *now, boolean_t inc)
+{
+	<span class="enscript-type">struct</span> timespec delta;
+
+	net_timersub(now, ft, &amp;delta);
+	<span class="enscript-keyword">if</span> (net_timercmp(&amp;delta, &amp;sp-&gt;sfb_holdtime, &lt;)) {
+		<span class="enscript-keyword">if</span> (classq_verbose &gt; 1) {
+			log(LOG_DEBUG, <span class="enscript-string">&quot;%s: SFB qid=%d, %s update frozen &quot;</span>
+			    <span class="enscript-string">&quot;(delta=%llu nsec)\n&quot;</span>, if_name(sp-&gt;sfb_ifp),
+			    sp-&gt;sfb_qid, inc ?  <span class="enscript-string">&quot;increment&quot;</span> : <span class="enscript-string">&quot;decrement&quot;</span>,
+			    (u_int64_t)delta.tv_nsec);
+		}
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* increment/decrement marking probability */</span>
+	*ft = *now;
+	<span class="enscript-keyword">if</span> (inc)
+		SFB_PMARK_INC(bin);
+	<span class="enscript-keyword">else</span>
+		SFB_PMARK_DEC(bin);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_decrement_bin</span>(<span class="enscript-type">struct</span> sfb *sp, <span class="enscript-type">struct</span> sfbbinstats *bin, <span class="enscript-type">struct</span> timespec *ft,
+    <span class="enscript-type">struct</span> timespec *now)
+{
+	<span class="enscript-keyword">return</span> (sfb_adjust_bin(sp, bin, ft, now, FALSE));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_increment_bin</span>(<span class="enscript-type">struct</span> sfb *sp, <span class="enscript-type">struct</span> sfbbinstats *bin, <span class="enscript-type">struct</span> timespec *ft,
+    <span class="enscript-type">struct</span> timespec *now)
+{
+	<span class="enscript-keyword">return</span> (sfb_adjust_bin(sp, bin, ft, now, TRUE));
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_dq_update_bins</span>(<span class="enscript-type">struct</span> sfb *sp, <span class="enscript-type">struct</span> pkthdr *pkt,
+    <span class="enscript-type">struct</span> timespec *now, u_int32_t qsize)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SFB_LEVELS</span> != 2 || <span class="enscript-variable-name">SFB_FC_LEVEL</span> != 0
+	<span class="enscript-type">int</span> i;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SFB_LEVELS != 2 || SFB_FC_LEVEL != 0 */</span>
+	<span class="enscript-type">struct</span> sfbbinstats *bin;
+	<span class="enscript-type">int</span> s, n;
+	<span class="enscript-type">struct</span> sfb_fcl *fcl = NULL;
+
+	s = sp-&gt;sfb_current;
+	VERIFY((s + (s ^ 1)) == 1);
+
+	<span class="enscript-comment">/*
+	 * Update current bins; optimize for SFB_LEVELS=2 and SFB_FC_LEVEL=0
+	 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SFB_LEVELS</span> == 2 &amp;&amp; <span class="enscript-variable-name">SFB_FC_LEVEL</span> == 0
+	<span class="enscript-comment">/* Level 0: bin index at [0] for set 0; [2] for set 1 */</span>
+	n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[(s &lt;&lt; 1)]);
+	bin = SFB_BINST(sp, 0, n, s);
+
+	VERIFY(bin-&gt;pkts &gt; 0 &amp;&amp; bin-&gt;bytes &gt;= (u_int32_t)pkt-&gt;len);
+	bin-&gt;pkts--;
+	bin-&gt;bytes -= pkt-&gt;len;
+
+	<span class="enscript-keyword">if</span> (bin-&gt;pkts == 0)
+		sfb_decrement_bin(sp, bin, SFB_BINFT(sp, 0, n, s), now);
+
+	<span class="enscript-comment">/* Deliver flow control feedback to the sockets */</span>
+	<span class="enscript-keyword">if</span> (SFB_QUEUE_DELAYBASED(sp)) {
+		<span class="enscript-keyword">if</span> (!(SFB_IS_DELAYHIGH(sp)) ||
+		    bin-&gt;bytes &lt;= sp-&gt;sfb_fc_threshold ||
+		    bin-&gt;pkts == 0 || qsize == 0)
+			fcl = SFB_FC_LIST(sp, n);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (bin-&gt;pkts &lt;= (sp-&gt;sfb_allocation &gt;&gt; 2)) {
+			fcl = SFB_FC_LIST(sp, n);
+	}
+
+	<span class="enscript-keyword">if</span> (fcl != NULL &amp;&amp; !STAILQ_EMPTY(&amp;fcl-&gt;fclist))
+		sfb_fclist_append(sp, fcl);
+	fcl = NULL;
+
+	<span class="enscript-comment">/* Level 1: bin index at [1] for set 0; [3] for set 1 */</span>
+	n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[(s &lt;&lt; 1) + 1]);
+	bin = SFB_BINST(sp, 1, n, s);
+
+	VERIFY(bin-&gt;pkts &gt; 0 &amp;&amp; bin-&gt;bytes &gt;= (u_int64_t)pkt-&gt;len);
+	bin-&gt;pkts--;
+	bin-&gt;bytes -= pkt-&gt;len;
+	<span class="enscript-keyword">if</span> (bin-&gt;pkts == 0)
+		sfb_decrement_bin(sp, bin, SFB_BINFT(sp, 1, n, s), now);
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* SFB_LEVELS != 2 || SFB_FC_LEVEL != 0 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; SFB_LEVELS; i++) {
+		<span class="enscript-keyword">if</span> (s == 0)		<span class="enscript-comment">/* set 0, bin index [0,1] */</span>
+			n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[i]);
+		<span class="enscript-keyword">else</span>			<span class="enscript-comment">/* set 1, bin index [2,3] */</span>
+			n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[i + 2]);
+
+		bin = SFB_BINST(sp, i, n, s);
+
+		VERIFY(bin-&gt;pkts &gt; 0 &amp;&amp; bin-&gt;bytes &gt;= pkt-&gt;len);
+		bin-&gt;pkts--;
+		bin-&gt;bytes -= pkt-&gt;len;
+		<span class="enscript-keyword">if</span> (bin-&gt;pkts == 0)
+			sfb_decrement_bin(sp, bin,
+			    SFB_BINFT(sp, i, n, s), now);
+		<span class="enscript-keyword">if</span> (i != SFB_FC_LEVEL)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (SFB_QUEUE_DELAYBASED(sp)) {
+			<span class="enscript-keyword">if</span> (!(SFB_IS_DELAYHIGH(sp)) ||
+			    bin-&gt;bytes &lt;= sp-&gt;sfb_fc_threshold)
+				fcl = SFB_FC_LIST(sp, n);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (bin-&gt;pkts &lt;= (sp-&gt;sfb_allocation &gt;&gt; 2)) {
+			fcl = SFB_FC_LIST(sp, n);
+		}
+		<span class="enscript-keyword">if</span> (fcl != NULL &amp;&amp; !STAILQ_EMPTY(&amp;fcl-&gt;fclist))
+			sfb_fclist_append(sp, fcl);
+		fcl = NULL;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SFB_LEVELS != 2 || SFB_FC_LEVEL != 0 */</span>
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_eq_update_bins</span>(<span class="enscript-type">struct</span> sfb *sp, <span class="enscript-type">struct</span> pkthdr *pkt)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SFB_LEVELS</span> != 2
+	<span class="enscript-type">int</span> i, n;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SFB_LEVELS != 2 */</span>
+	<span class="enscript-type">int</span> s;
+	<span class="enscript-type">struct</span> sfbbinstats *bin;
+	s = sp-&gt;sfb_current;
+	VERIFY((s + (s ^ 1)) == 1);
+
+	<span class="enscript-comment">/*
+	 * Update current bins; optimize for SFB_LEVELS=2
+	 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SFB_LEVELS</span> == 2
+	<span class="enscript-comment">/* Level 0: bin index at [0] for set 0; [2] for set 1 */</span>
+	bin = SFB_BINST(sp, 0,
+	    SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[(s &lt;&lt; 1)]), s);
+	bin-&gt;pkts++;
+	bin-&gt;bytes += pkt-&gt;len;
+
+	<span class="enscript-comment">/* Level 1: bin index at [1] for set 0; [3] for set 1 */</span>
+	bin = SFB_BINST(sp, 1,
+	    SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[(s &lt;&lt; 1) + 1]), s);
+	bin-&gt;pkts++;
+	bin-&gt;bytes += pkt-&gt;len;
+
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* SFB_LEVELS != 2 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; SFB_LEVELS; i++) {
+		<span class="enscript-keyword">if</span> (s == 0)		<span class="enscript-comment">/* set 0, bin index [0,1] */</span>
+			n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[i]);
+		<span class="enscript-keyword">else</span>			<span class="enscript-comment">/* set 1, bin index [2,3] */</span>
+			n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[i + 2]);
+
+		bin = SFB_BINST(sp, i, n, s);
+		bin-&gt;pkts++;
+		bin-&gt;bytes += pkt-&gt;len;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SFB_LEVELS != 2 */</span>
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sfb_bin_addfcentry</span>(<span class="enscript-type">struct</span> sfb *sp, <span class="enscript-type">struct</span> pkthdr *pkt)
+{
+	<span class="enscript-type">struct</span> flowadv_fcentry *fce;
+	u_int32_t flowsrc, flowid;
+	<span class="enscript-type">struct</span> sfb_fcl *fcl;
+	<span class="enscript-type">int</span> s;
+
+	s = sp-&gt;sfb_current;
+	VERIFY((s + (s ^ 1)) == 1);
+
+	flowsrc = pkt-&gt;pkt_flowsrc;
+	flowid = pkt-&gt;pkt_flowid;
+
+	<span class="enscript-keyword">if</span> (flowid == 0) {
+		sp-&gt;sfb_stats.null_flowid++;
+		<span class="enscript-keyword">return</span> (FALSE);
+	}
+
+	<span class="enscript-comment">/*
+	 * Use value at index 0 for set 0 and
+	 * value at index 2 for set 1
+	 */</span>
+	fcl = SFB_FC_LIST(sp, SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[(s &lt;&lt; 1)]));
+	STAILQ_FOREACH(fce, &amp;fcl-&gt;fclist, fce_link) {
+		<span class="enscript-keyword">if</span> (fce-&gt;fce_flowsrc == flowsrc &amp;&amp;
+		    fce-&gt;fce_flowid == flowid) {
+			<span class="enscript-comment">/* Already on flow control list; just return */</span>
+			<span class="enscript-keyword">return</span> (TRUE);
+		}
+	}
+
+	IFCQ_CONVERT_LOCK(&amp;sp-&gt;sfb_ifp-&gt;if_snd);
+	fce = flowadv_alloc_entry(M_WAITOK);
+	<span class="enscript-keyword">if</span> (fce != NULL) {
+		fce-&gt;fce_flowsrc = flowsrc;
+		fce-&gt;fce_flowid = flowid;
+		STAILQ_INSERT_TAIL(&amp;fcl-&gt;fclist, fce, fce_link);
+		fcl-&gt;cnt++;
+		sp-&gt;sfb_stats.flow_controlled++;
+	}
+
+	<span class="enscript-keyword">return</span> (fce != NULL);
+}
+
+<span class="enscript-comment">/*
+ * check if this flow needs to be flow-controlled or if this
+ * packet needs to be dropped.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sfb_bin_mark_or_drop</span>(<span class="enscript-type">struct</span> sfb *sp, <span class="enscript-type">struct</span> sfbbinstats *bin)
+{
+	<span class="enscript-type">int</span> ret = 0;
+	<span class="enscript-keyword">if</span> (SFB_QUEUE_DELAYBASED(sp)) {
+		<span class="enscript-comment">/*
+		 * Mark or drop if this bin has more
+		 * bytes than the flowcontrol threshold.
+		 */</span>
+		<span class="enscript-keyword">if</span> (SFB_IS_DELAYHIGH(sp) &amp;&amp;
+		    bin-&gt;bytes &gt;= (sp-&gt;sfb_fc_threshold &lt;&lt; 1))
+			ret = 1;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (bin-&gt;pkts &gt;= sp-&gt;sfb_allocation &amp;&amp;
+		    bin-&gt;pkts &gt;= sp-&gt;sfb_drop_thresh)
+			ret = 1;	<span class="enscript-comment">/* drop or mark */</span>
+	}
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-comment">/*
+ * early-drop probability is kept in pmark of each bin of the flow
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sfb_drop_early</span>(<span class="enscript-type">struct</span> sfb *sp, <span class="enscript-type">struct</span> pkthdr *pkt, u_int16_t *pmin,
+    <span class="enscript-type">struct</span> timespec *now)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SFB_LEVELS</span> != 2
+	<span class="enscript-type">int</span> i;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SFB_LEVELS != 2 */</span>
+	<span class="enscript-type">struct</span> sfbbinstats *bin;
+	<span class="enscript-type">int</span> s, n, ret = 0;
+
+	s = sp-&gt;sfb_current;
+	VERIFY((s + (s ^ 1)) == 1);
+
+	*pmin = (u_int16_t)-1;
+
+	<span class="enscript-comment">/*
+	 * Update current bins; optimize for SFB_LEVELS=2
+	 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SFB_LEVELS</span> == 2
+	<span class="enscript-comment">/* Level 0: bin index at [0] for set 0; [2] for set 1 */</span>
+	n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[(s &lt;&lt; 1)]);
+	bin = SFB_BINST(sp, 0, n, s);
+	<span class="enscript-keyword">if</span> (*pmin &gt; (u_int16_t)bin-&gt;pmark)
+		*pmin = (u_int16_t)bin-&gt;pmark;
+
+
+	<span class="enscript-comment">/* Update SFB probability */</span>
+	<span class="enscript-keyword">if</span> (bin-&gt;pkts &gt;= sp-&gt;sfb_allocation)
+		sfb_increment_bin(sp, bin, SFB_BINFT(sp, 0, n, s), now);
+
+	ret = sfb_bin_mark_or_drop(sp, bin);
+
+	<span class="enscript-comment">/* Level 1: bin index at [1] for set 0; [3] for set 1 */</span>
+	n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[(s &lt;&lt; 1) + 1]);
+	bin = SFB_BINST(sp, 1, n, s);
+	<span class="enscript-keyword">if</span> (*pmin &gt; (u_int16_t)bin-&gt;pmark)
+		*pmin = (u_int16_t)bin-&gt;pmark;
+
+	<span class="enscript-keyword">if</span> (bin-&gt;pkts &gt;= sp-&gt;sfb_allocation)
+		sfb_increment_bin(sp, bin, SFB_BINFT(sp, 1, n, s), now);
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* SFB_LEVELS != 2 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; SFB_LEVELS; i++) {
+		<span class="enscript-keyword">if</span> (s == 0)		<span class="enscript-comment">/* set 0, bin index [0,1] */</span>
+			n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[i]);
+		<span class="enscript-keyword">else</span>			<span class="enscript-comment">/* set 1, bin index [2,3] */</span>
+			n = SFB_BINMASK(pkt-&gt;pkt_sfb_hash8[i + 2]);
+
+		bin = SFB_BINST(sp, i, n, s);
+		<span class="enscript-keyword">if</span> (*pmin &gt; (u_int16_t)bin-&gt;pmark)
+			*pmin = (u_int16_t)bin-&gt;pmark;
+
+		<span class="enscript-keyword">if</span> (bin-&gt;pkts &gt;= sp-&gt;sfb_allocation)
+			sfb_increment_bin(sp, bin,
+			    SFB_BINFT(sp, i, n, s), now);
+		<span class="enscript-keyword">if</span> (i == SFB_FC_LEVEL)
+			ret = sfb_bin_mark_or_drop(sp, bin);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SFB_LEVELS != 2 */</span>
+
+	<span class="enscript-keyword">if</span> (sp-&gt;sfb_flags &amp; SFBF_SUSPENDED)
+		ret = 1;	<span class="enscript-comment">/* drop or mark */</span>
+
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_detect_dequeue_stall</span>(<span class="enscript-type">struct</span> sfb *sp, class_queue_t *q,
+    <span class="enscript-type">struct</span> timespec *now)
+{
+	<span class="enscript-type">struct</span> timespec max_getqtime;
+
+	<span class="enscript-keyword">if</span> (!SFB_QUEUE_DELAYBASED(sp) || SFB_IS_DELAYHIGH(sp) ||
+	    qsize(q) &lt;= SFB_MIN_FC_THRESHOLD_BYTES ||
+	    !net_timerisset(&amp;sp-&gt;sfb_getqtime))
+		<span class="enscript-keyword">return</span>;
+
+	net_timeradd(&amp;sp-&gt;sfb_getqtime, &amp;sp-&gt;sfb_update_interval,
+	    &amp;max_getqtime);
+	<span class="enscript-keyword">if</span> (net_timercmp(now, &amp;max_getqtime, &gt;)) {
+		<span class="enscript-comment">/*
+		 * No packets have been dequeued in an update interval
+		 * worth of time. It means that the queue is stalled
+		 */</span>
+		SFB_SET_DELAY_HIGH(sp, q);
+		sp-&gt;sfb_stats.dequeue_stall++;
+	}
+}
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DTYPE_NODROP</span>	0	<span class="enscript-comment">/* no drop */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DTYPE_FORCED</span>	1	<span class="enscript-comment">/* a &quot;forced&quot; drop */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DTYPE_EARLY</span>	2	<span class="enscript-comment">/* an &quot;unforced&quot; (early) drop */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sfb_addq</span>(<span class="enscript-type">struct</span> sfb *sp, class_queue_t *q, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> pf_mtag *t)
+{
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">PF_ECN</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">t</span>)
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !PF_ECN */</span>
+	<span class="enscript-type">struct</span> pkthdr *pkt = &amp;m-&gt;m_pkthdr;
+	<span class="enscript-type">struct</span> timespec now;
+	<span class="enscript-type">int</span> droptype, s;
+	u_int16_t pmin;
+	<span class="enscript-type">int</span> fc_adv = 0;
+	<span class="enscript-type">int</span> ret = CLASSQEQ_SUCCESS;
+	u_int32_t maxqsize = 0;
+
+	s = sp-&gt;sfb_current;
+	VERIFY((s + (s ^ 1)) == 1);
+
+	<span class="enscript-comment">/* See comments in &lt;rdar://problem/14040693&gt; */</span>
+	VERIFY(!(pkt-&gt;pkt_flags &amp; PKTF_PRIV_GUARDED));
+	pkt-&gt;pkt_flags |= PKTF_PRIV_GUARDED;
+
+	<span class="enscript-keyword">if</span> (pkt-&gt;pkt_enqueue_ts &gt; 0) {
+		net_nsectimer(&amp;pkt-&gt;pkt_enqueue_ts, &amp;now); 
+	} <span class="enscript-keyword">else</span> {
+		nanouptime(&amp;now);
+		net_timernsec(&amp;now, &amp;pkt-&gt;pkt_enqueue_ts);
+	}
+
+	<span class="enscript-comment">/* time to swap the bins? */</span>
+	<span class="enscript-keyword">if</span> (net_timercmp(&amp;now, &amp;sp-&gt;sfb_nextreset, &gt;=)) {
+		net_timeradd(&amp;now, &amp;sp-&gt;sfb_hinterval, &amp;sp-&gt;sfb_nextreset);
+		sfb_swap_bins(sp, qlen(q));
+		s = sp-&gt;sfb_current;
+		VERIFY((s + (s ^ 1)) == 1);
+	}
+
+	<span class="enscript-keyword">if</span> (!net_timerisset(&amp;sp-&gt;sfb_update_time)) {
+		net_timeradd(&amp;now, &amp;sp-&gt;sfb_update_interval,
+		    &amp;sp-&gt;sfb_update_time);
+	}
+
+	<span class="enscript-comment">/*
+	 * If getq time is not set because this is the first packet
+	 * or after idle time, set it now so that we can detect a stall.
+	 */</span>
+	<span class="enscript-keyword">if</span> (qsize(q) == 0 &amp;&amp; !net_timerisset(&amp;sp-&gt;sfb_getqtime))
+		*(&amp;sp-&gt;sfb_getqtime) = *(&amp;now);
+
+	pkt-&gt;pkt_sfb_flags = 0;
+	pkt-&gt;pkt_sfb_hash16[s] =
+	    (SFB_HASH(&amp;pkt-&gt;pkt_flowid, <span class="enscript-keyword">sizeof</span> (pkt-&gt;pkt_flowid),
+	    (*sp-&gt;sfb_bins)[s].fudge) &amp; SFB_HASHMASK);
+	pkt-&gt;pkt_sfb_hash16[s ^ 1] =
+	    (SFB_HASH(&amp;pkt-&gt;pkt_flowid, <span class="enscript-keyword">sizeof</span> (pkt-&gt;pkt_flowid),
+	    (*sp-&gt;sfb_bins)[s ^ 1].fudge) &amp; SFB_HASHMASK);
+
+	<span class="enscript-comment">/* check if the queue has been stalled */</span>
+	sfb_detect_dequeue_stall(sp, q, &amp;now);
+
+	<span class="enscript-comment">/* see if we drop early */</span>
+	droptype = DTYPE_NODROP;
+	<span class="enscript-keyword">if</span> (sfb_drop_early(sp, pkt, &amp;pmin, &amp;now)) {
+		<span class="enscript-comment">/* flow control, mark or drop by sfb */</span>
+		<span class="enscript-keyword">if</span> ((sp-&gt;sfb_flags &amp; SFBF_FLOWCTL) &amp;&amp;
+		    (pkt-&gt;pkt_flags &amp; PKTF_FLOW_ADV)) {
+			fc_adv = 1;
+			<span class="enscript-comment">/* drop all during suspension or for non-TCP */</span>
+			<span class="enscript-keyword">if</span> ((sp-&gt;sfb_flags &amp; SFBF_SUSPENDED) ||
+			    pkt-&gt;pkt_proto != IPPROTO_TCP) {
+				droptype = DTYPE_EARLY;
+				sp-&gt;sfb_stats.drop_early++;
+			}
+		}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PF_ECN</span>
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((sp-&gt;sfb_flags &amp; SFBF_ECN) &amp;&amp;
+		    (pkt-&gt;pkt_proto == IPPROTO_TCP) &amp;&amp; <span class="enscript-comment">/* only for TCP */</span>
+		    ((sfb_random(sp) &amp; SFB_MAX_PMARK) &lt;= pmin) &amp;&amp;
+		    mark_ecn(m, t, sp-&gt;sfb_flags) &amp;&amp;
+		    !(sp-&gt;sfb_flags &amp; SFBF_SUSPENDED)) {
+			<span class="enscript-comment">/* successfully marked; do not drop. */</span>
+			sp-&gt;sfb_stats.marked_packets++;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PF_ECN */</span>
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* unforced drop by sfb */</span>
+			droptype = DTYPE_EARLY;
+			sp-&gt;sfb_stats.drop_early++;
+		}
+	}
+
+	<span class="enscript-comment">/* non-responsive flow penalty? */</span>
+	<span class="enscript-keyword">if</span> (droptype == DTYPE_NODROP &amp;&amp; sfb_penalize(sp, pkt, &amp;now)) {
+		droptype = DTYPE_FORCED;
+		sp-&gt;sfb_stats.drop_pbox++;
+	}
+
+	<span class="enscript-keyword">if</span> (SFB_QUEUE_DELAYBASED(sp))
+		maxqsize = SFB_QUEUE_DELAYBASED_MAXSIZE;
+	<span class="enscript-keyword">else</span>
+		maxqsize = qlimit(q);
+
+	<span class="enscript-comment">/*
+	 * When the queue length hits the queue limit, make it a forced
+	 * drop
+	 */</span>
+	<span class="enscript-keyword">if</span> (droptype == DTYPE_NODROP &amp;&amp; qlen(q) &gt;= maxqsize) {
+		<span class="enscript-keyword">if</span> (pkt-&gt;pkt_proto == IPPROTO_TCP &amp;&amp;
+		    ((pkt-&gt;pkt_flags &amp; PKTF_TCP_REXMT) ||
+		    (sp-&gt;sfb_flags &amp; SFBF_LAST_PKT_DROPPED))) {
+			<span class="enscript-comment">/*
+			 * At some level, dropping packets will make the
+			 * flows backoff and will keep memory requirements
+			 * under control. But we should not cause a tail
+			 * drop because it can take a long time for a
+			 * TCP flow to recover. We should try to drop
+			 * alternate packets instead.
+			 */</span>
+			sp-&gt;sfb_flags &amp;= ~SFBF_LAST_PKT_DROPPED;
+		} <span class="enscript-keyword">else</span> {
+			droptype = DTYPE_FORCED;
+			sp-&gt;sfb_stats.drop_queue++;
+			sp-&gt;sfb_flags |= SFBF_LAST_PKT_DROPPED;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (fc_adv == 1 &amp;&amp; droptype != DTYPE_FORCED &amp;&amp;
+	    sfb_bin_addfcentry(sp, pkt)) {
+		<span class="enscript-comment">/* deliver flow control advisory error */</span>
+		<span class="enscript-keyword">if</span> (droptype == DTYPE_NODROP) {
+			ret = CLASSQEQ_SUCCESS_FC;
+			VERIFY(!(sp-&gt;sfb_flags &amp; SFBF_SUSPENDED));
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sp-&gt;sfb_flags &amp; SFBF_SUSPENDED) {
+			<span class="enscript-comment">/* dropped due to suspension */</span>
+			ret = CLASSQEQ_DROPPED_SP;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* dropped due to flow-control */</span>
+			ret = CLASSQEQ_DROPPED_FC;
+		}
+	}
+	<span class="enscript-comment">/* if successful enqueue this packet, else drop it */</span>
+	<span class="enscript-keyword">if</span> (droptype == DTYPE_NODROP) {
+		_addq(q, m);
+	} <span class="enscript-keyword">else</span> {
+		IFCQ_CONVERT_LOCK(&amp;sp-&gt;sfb_ifp-&gt;if_snd);
+		m_freem(m);
+		<span class="enscript-keyword">return</span> ((ret != CLASSQEQ_SUCCESS) ? ret : CLASSQEQ_DROPPED);
+	}
+
+	<span class="enscript-keyword">if</span> (!(pkt-&gt;pkt_sfb_flags &amp; SFB_PKT_PBOX))
+		sfb_eq_update_bins(sp, pkt);
+	<span class="enscript-keyword">else</span>
+		sp-&gt;sfb_stats.pbox_packets++;
+
+	<span class="enscript-comment">/* successfully queued */</span>
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">sfb_getq_flow</span>(<span class="enscript-type">struct</span> sfb *sp, class_queue_t *q, u_int32_t flow, boolean_t purge)
+{
+	<span class="enscript-type">struct</span> timespec now;
+	<span class="enscript-type">struct</span> mbuf *m;
+	<span class="enscript-type">struct</span> pkthdr *pkt;
+
+	<span class="enscript-keyword">if</span> (!purge &amp;&amp; (sp-&gt;sfb_flags &amp; SFBF_SUSPENDED))
+		<span class="enscript-keyword">return</span> (NULL);
+
+	nanouptime(&amp;now);
+
+	<span class="enscript-comment">/* flow of 0 means head of queue */</span>
+	<span class="enscript-keyword">if</span> ((m = ((flow == 0) ? _getq(q) : _getq_flow(q, flow))) == NULL) {
+		<span class="enscript-keyword">if</span> (!purge)
+			net_timerclear(&amp;sp-&gt;sfb_getqtime);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	VERIFY(m-&gt;m_flags &amp; M_PKTHDR);
+
+	pkt = &amp;m-&gt;m_pkthdr;
+	VERIFY(pkt-&gt;pkt_flags &amp; PKTF_PRIV_GUARDED);
+
+	<span class="enscript-keyword">if</span> (!purge) {
+		<span class="enscript-comment">/* calculate EWMA of dequeues */</span>
+		<span class="enscript-keyword">if</span> (net_timerisset(&amp;sp-&gt;sfb_getqtime)) {
+			<span class="enscript-type">struct</span> timespec delta;
+			u_int64_t avg, new;
+			net_timersub(&amp;now, &amp;sp-&gt;sfb_getqtime, &amp;delta);
+			net_timernsec(&amp;delta, &amp;new);
+			avg = sp-&gt;sfb_stats.dequeue_avg;
+			<span class="enscript-keyword">if</span> (avg &gt; 0) {
+				<span class="enscript-type">int</span> decay = DEQUEUE_DECAY;
+				<span class="enscript-comment">/*
+				 * If the time since last dequeue is
+				 * significantly greater than the current
+				 * average, weigh the average more against
+				 * the old value.
+				 */</span>
+				<span class="enscript-keyword">if</span> (DEQUEUE_SPIKE(new, avg))
+					decay += 5;
+				avg = (((avg &lt;&lt; decay) - avg) + new) &gt;&gt; decay;
+			} <span class="enscript-keyword">else</span> {
+				avg = new;
+			}
+			sp-&gt;sfb_stats.dequeue_avg = avg;
+		}
+		*(&amp;sp-&gt;sfb_getqtime) = *(&amp;now);
+	}
+
+	<span class="enscript-keyword">if</span> (!purge &amp;&amp; SFB_QUEUE_DELAYBASED(sp)) {
+		u_int64_t dequeue_ns, queue_delay = 0;
+		net_timernsec(&amp;now, &amp;dequeue_ns);
+		<span class="enscript-keyword">if</span> (dequeue_ns &gt; pkt-&gt;pkt_enqueue_ts)
+			queue_delay = dequeue_ns - pkt-&gt;pkt_enqueue_ts;
+
+		<span class="enscript-keyword">if</span> (sp-&gt;sfb_min_qdelay == 0 ||
+		    (queue_delay &gt; 0 &amp;&amp; queue_delay &lt; sp-&gt;sfb_min_qdelay))
+			sp-&gt;sfb_min_qdelay = queue_delay;
+		<span class="enscript-keyword">if</span> (net_timercmp(&amp;now, &amp;sp-&gt;sfb_update_time, &gt;=)) {
+			<span class="enscript-keyword">if</span> (sp-&gt;sfb_min_qdelay &gt; sp-&gt;sfb_target_qdelay) {
+				<span class="enscript-keyword">if</span> (!SFB_IS_DELAYHIGH(sp))
+					SFB_SET_DELAY_HIGH(sp, q);
+			} <span class="enscript-keyword">else</span> {
+				sp-&gt;sfb_flags &amp;= ~(SFBF_DELAYHIGH);
+				sp-&gt;sfb_fc_threshold = 0;
+				
+			}
+			net_timeradd(&amp;now, &amp;sp-&gt;sfb_update_interval,
+			    &amp;sp-&gt;sfb_update_time);
+			sp-&gt;sfb_min_qdelay = 0;
+		}
+	}
+	pkt-&gt;pkt_enqueue_ts = 0;
+
+	<span class="enscript-comment">/*
+	 * Clearpkts are the ones which were in the queue when the hash
+	 * function was perturbed.  Since the perturbation value (fudge),
+	 * and thus bin information for these packets is not known, we do
+	 * not change accounting information while dequeuing these packets.
+	 * It is important not to set the hash interval too small due to
+	 * this reason.  A rule of thumb is to set it to K*D, where D is
+	 * the time taken to drain queue.
+	 */</span>
+	<span class="enscript-keyword">if</span> (pkt-&gt;pkt_sfb_flags &amp; SFB_PKT_PBOX) {
+		pkt-&gt;pkt_sfb_flags &amp;= ~SFB_PKT_PBOX;
+		<span class="enscript-keyword">if</span> (sp-&gt;sfb_clearpkts &gt; 0)
+			sp-&gt;sfb_clearpkts--;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sp-&gt;sfb_clearpkts &gt; 0) {
+		sp-&gt;sfb_clearpkts--;
+	} <span class="enscript-keyword">else</span> {
+		sfb_dq_update_bins(sp, pkt, &amp;now, qsize(q));
+	}
+
+	<span class="enscript-comment">/* See comments in &lt;rdar://problem/14040693&gt; */</span>
+	pkt-&gt;pkt_flags &amp;= ~PKTF_PRIV_GUARDED;
+
+	<span class="enscript-comment">/*
+	 * If the queue becomes empty before the update interval, reset
+	 * the flow control threshold
+	 */</span>
+	<span class="enscript-keyword">if</span> (qsize(q) == 0) {
+		sp-&gt;sfb_flags &amp;= ~SFBF_DELAYHIGH;
+		sp-&gt;sfb_min_qdelay = 0;
+		sp-&gt;sfb_fc_threshold = 0;
+		net_timerclear(&amp;sp-&gt;sfb_update_time);
+		net_timerclear(&amp;sp-&gt;sfb_getqtime);
+	}
+
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">sfb_getq</span>(<span class="enscript-type">struct</span> sfb *sp, class_queue_t *q)
+{
+	<span class="enscript-keyword">return</span> (sfb_getq_flow(sp, q, 0, FALSE));
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_purgeq</span>(<span class="enscript-type">struct</span> sfb *sp, class_queue_t *q, u_int32_t flow, u_int32_t *packets,
+    u_int32_t *bytes)
+{
+	u_int32_t cnt = 0, len = 0;
+	<span class="enscript-type">struct</span> mbuf *m;
+
+	IFCQ_CONVERT_LOCK(&amp;sp-&gt;sfb_ifp-&gt;if_snd);
+
+	<span class="enscript-keyword">while</span> ((m = sfb_getq_flow(sp, q, flow, TRUE)) != NULL) {
+		cnt++;
+		len += m_pktlen(m);
+		m_freem(m);
+	}
+
+	<span class="enscript-keyword">if</span> (packets != NULL)
+		*packets = cnt;
+	<span class="enscript-keyword">if</span> (bytes != NULL)
+		*bytes = len;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sfb_updateq</span>(<span class="enscript-type">struct</span> sfb *sp, cqev_t ev)
+{
+	<span class="enscript-type">struct</span> ifnet *ifp = sp-&gt;sfb_ifp;
+
+	VERIFY(ifp != NULL);
+
+	<span class="enscript-keyword">switch</span> (ev) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQ_EV_LINK_BANDWIDTH</span>: {
+		u_int64_t eff_rate = ifnet_output_linkrate(ifp);
+
+		<span class="enscript-comment">/* update parameters only if rate has changed */</span>
+		<span class="enscript-keyword">if</span> (eff_rate == sp-&gt;sfb_eff_rate)
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">if</span> (classq_verbose) {
+			log(LOG_DEBUG, <span class="enscript-string">&quot;%s: SFB qid=%d, adapting to new &quot;</span>
+			    <span class="enscript-string">&quot;eff_rate=%llu bps\n&quot;</span>, if_name(ifp), sp-&gt;sfb_qid,
+			    eff_rate);
+		}
+		sfb_calc_holdtime(sp, eff_rate);
+		sfb_calc_pboxtime(sp, eff_rate);
+		sfb_calc_target_qdelay(sp, eff_rate);
+		sfb_calc_update_interval(sp, eff_rate);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQ_EV_LINK_UP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQ_EV_LINK_DOWN</span>:
+		<span class="enscript-keyword">if</span> (classq_verbose) {
+			log(LOG_DEBUG, <span class="enscript-string">&quot;%s: SFB qid=%d, resetting due to &quot;</span>
+			    <span class="enscript-string">&quot;link %s\n&quot;</span>, if_name(ifp), sp-&gt;sfb_qid,
+			    (ev == CLASSQ_EV_LINK_UP) ? <span class="enscript-string">&quot;UP&quot;</span> : <span class="enscript-string">&quot;DOWN&quot;</span>);
+		}
+		sfb_resetq(sp, ev);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQ_EV_LINK_LATENCY</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQ_EV_LINK_MTU</span>:
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sfb_suspendq</span>(<span class="enscript-type">struct</span> sfb *sp, class_queue_t *q, boolean_t on)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">q</span>)
+	<span class="enscript-type">struct</span> ifnet *ifp = sp-&gt;sfb_ifp;
+
+	VERIFY(ifp != NULL);
+
+	<span class="enscript-keyword">if</span> ((on &amp;&amp; (sp-&gt;sfb_flags &amp; SFBF_SUSPENDED)) ||
+	    (!on &amp;&amp; !(sp-&gt;sfb_flags &amp; SFBF_SUSPENDED)))
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">if</span> (!(sp-&gt;sfb_flags &amp; SFBF_FLOWCTL)) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: SFB qid=%d, unable to %s queue since &quot;</span>
+		    <span class="enscript-string">&quot;flow-control is not enabled&quot;</span>, if_name(ifp), sp-&gt;sfb_qid,
+		    (on ? <span class="enscript-string">&quot;suspend&quot;</span> : <span class="enscript-string">&quot;resume&quot;</span>));
+		<span class="enscript-keyword">return</span> (ENOTSUP);
+	}
+
+	<span class="enscript-keyword">if</span> (classq_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: SFB qid=%d, setting state to %s&quot;</span>,
+		    if_name(ifp), sp-&gt;sfb_qid, (on ? <span class="enscript-string">&quot;SUSPENDED&quot;</span> : <span class="enscript-string">&quot;RUNNING&quot;</span>));
+	}
+
+	<span class="enscript-keyword">if</span> (on) {
+		sp-&gt;sfb_flags |= SFBF_SUSPENDED;
+	} <span class="enscript-keyword">else</span> {
+		sp-&gt;sfb_flags &amp;= ~SFBF_SUSPENDED;
+		sfb_swap_bins(sp, qlen(q));
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+</pre>
+<hr />
+</body></html>

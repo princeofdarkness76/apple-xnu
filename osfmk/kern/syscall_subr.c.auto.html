@@ -1,0 +1,579 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>syscall_subr.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">syscall_subr.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989,1988,1987 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_switch.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_space.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/counters.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_kobject.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/policy.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/syscall_subr.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_host_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_syscalls.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MACH_BSD</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">workqueue_thread_yielded</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> sched_call_t <span class="enscript-function-name">workqueue_get_sched_callback</span>(<span class="enscript-type">void</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MACH_BSD */</span>
+
+
+<span class="enscript-comment">/* Called from commpage to take a delayed preemption when exiting
+ * the &quot;Preemption Free Zone&quot; (PFZ).
+ */</span>
+kern_return_t
+<span class="enscript-function-name">pfz_exit</span>(
+__unused	<span class="enscript-type">struct</span> pfz_exit_args *args)
+{
+	<span class="enscript-comment">/* For now, nothing special to do.  We'll pick up the ASTs on kernel exit. */</span>
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+
+<span class="enscript-comment">/*
+ *	swtch and swtch_pri both attempt to context switch (logic in
+ *	thread_block no-ops the context switch if nothing would happen).
+ *	A boolean is returned that indicates whether there is anything
+ *	else runnable.  That's no excuse to spin, though.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">swtch_continue</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">register</span> processor_t	myprocessor;
+    boolean_t				result;
+
+    disable_preemption();
+	myprocessor = current_processor();
+	result = !SCHED(processor_queue_empty)(myprocessor) || rt_runq.count &gt; 0;
+	enable_preemption();
+
+	thread_syscall_return(result);
+	<span class="enscript-comment">/*NOTREACHED*/</span>
+}
+
+boolean_t
+<span class="enscript-function-name">swtch</span>(
+	__unused <span class="enscript-type">struct</span> swtch_args *args)
+{
+	<span class="enscript-type">register</span> processor_t	myprocessor;
+	boolean_t				result;
+
+	disable_preemption();
+	myprocessor = current_processor();
+	<span class="enscript-keyword">if</span> (SCHED(processor_queue_empty)(myprocessor) &amp;&amp;	rt_runq.count == 0) {
+		mp_enable_preemption();
+
+		<span class="enscript-keyword">return</span> (FALSE);
+	}
+	enable_preemption();
+
+	counter(c_swtch_block++);
+
+	thread_block_reason((thread_continue_t)swtch_continue, NULL, AST_YIELD);
+
+	disable_preemption();
+	myprocessor = current_processor();
+	result = !SCHED(processor_queue_empty)(myprocessor) || rt_runq.count &gt; 0;
+	enable_preemption();
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">swtch_pri_continue</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">register</span> processor_t	myprocessor;
+    boolean_t				result;
+
+	thread_depress_abort_internal(current_thread());
+
+    disable_preemption();
+	myprocessor = current_processor();
+	result = !SCHED(processor_queue_empty)(myprocessor) || rt_runq.count &gt; 0;
+	mp_enable_preemption();
+
+	thread_syscall_return(result);
+	<span class="enscript-comment">/*NOTREACHED*/</span>
+}
+
+boolean_t
+<span class="enscript-function-name">swtch_pri</span>(
+__unused	<span class="enscript-type">struct</span> swtch_pri_args *args)
+{
+	<span class="enscript-type">register</span> processor_t	myprocessor;
+	boolean_t				result;
+
+	disable_preemption();
+	myprocessor = current_processor();
+	<span class="enscript-keyword">if</span> (SCHED(processor_queue_empty)(myprocessor) &amp;&amp; rt_runq.count == 0) {
+		mp_enable_preemption();
+
+		<span class="enscript-keyword">return</span> (FALSE);
+	}
+	enable_preemption();
+
+	counter(c_swtch_pri_block++);
+
+	thread_depress_abstime(thread_depress_time);
+
+	thread_block_reason((thread_continue_t)swtch_pri_continue, NULL, AST_YIELD);
+
+	thread_depress_abort_internal(current_thread());
+
+	disable_preemption();
+	myprocessor = current_processor();
+	result = !SCHED(processor_queue_empty)(myprocessor) || rt_runq.count &gt; 0;
+	enable_preemption();
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">thread_switch_disable_workqueue_sched_callback</span>(<span class="enscript-type">void</span>)
+{
+	sched_call_t callback = workqueue_get_sched_callback();
+	thread_t self = current_thread();
+	<span class="enscript-keyword">if</span> (!callback || self-&gt;sched_call != callback) {
+		<span class="enscript-keyword">return</span> FALSE;
+	}
+	spl_t s = splsched();
+	thread_lock(self);
+	thread_sched_call(self, NULL);
+	thread_unlock(self);
+	splx(s);
+	<span class="enscript-keyword">return</span> TRUE;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_switch_enable_workqueue_sched_callback</span>(<span class="enscript-type">void</span>)
+{
+	sched_call_t callback = workqueue_get_sched_callback();
+	thread_t self = current_thread();
+	spl_t s = splsched();
+	thread_lock(self);
+	thread_sched_call(self, callback);
+	thread_unlock(self);
+	splx(s);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_switch_continue</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">register</span> thread_t	self = current_thread();
+	<span class="enscript-type">int</span>					option = self-&gt;saved.swtch.option;
+	boolean_t			reenable_workq_callback = self-&gt;saved.swtch.reenable_workq_callback;
+
+
+	<span class="enscript-keyword">if</span> (option == SWITCH_OPTION_DEPRESS || option == SWITCH_OPTION_OSLOCK_DEPRESS)
+		thread_depress_abort_internal(self);
+
+	<span class="enscript-keyword">if</span> (reenable_workq_callback)
+		thread_switch_enable_workqueue_sched_callback();
+
+	thread_syscall_return(KERN_SUCCESS);
+	<span class="enscript-comment">/*NOTREACHED*/</span>
+}
+
+<span class="enscript-comment">/*
+ *	thread_switch:
+ *
+ *	Context switch.  User may supply thread hint.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_switch</span>(
+	<span class="enscript-type">struct</span> thread_switch_args *args)
+{
+	thread_t			thread = THREAD_NULL;
+	thread_t			self = current_thread();
+	mach_port_name_t		thread_name = args-&gt;thread_name;
+	<span class="enscript-type">int</span>						option = args-&gt;option;
+	mach_msg_timeout_t		option_time = args-&gt;option_time;
+	uint32_t				scale_factor = NSEC_PER_MSEC;
+	boolean_t				reenable_workq_callback = FALSE;
+	boolean_t				depress_option = FALSE;
+	boolean_t				wait_option = FALSE;
+
+    <span class="enscript-comment">/*
+     *	Validate and process option.
+     */</span>
+    <span class="enscript-keyword">switch</span> (option) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SWITCH_OPTION_NONE</span>:
+		workqueue_thread_yielded();
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SWITCH_OPTION_WAIT</span>:
+		wait_option = TRUE;
+		workqueue_thread_yielded();
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SWITCH_OPTION_DEPRESS</span>:
+		depress_option = TRUE;
+		workqueue_thread_yielded();
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SWITCH_OPTION_DISPATCH_CONTENTION</span>:
+		scale_factor = NSEC_PER_USEC;
+		wait_option = TRUE;
+		<span class="enscript-keyword">if</span> (thread_switch_disable_workqueue_sched_callback())
+			reenable_workq_callback = TRUE;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SWITCH_OPTION_OSLOCK_DEPRESS</span>:
+		depress_option = TRUE;
+		<span class="enscript-keyword">if</span> (thread_switch_disable_workqueue_sched_callback())
+			reenable_workq_callback = TRUE;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SWITCH_OPTION_OSLOCK_WAIT</span>:
+		wait_option = TRUE;
+		<span class="enscript-keyword">if</span> (thread_switch_disable_workqueue_sched_callback())
+			reenable_workq_callback = TRUE;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+	    <span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+    }
+
+	<span class="enscript-comment">/*
+	 * Translate the port name if supplied.
+	 */</span>
+	<span class="enscript-keyword">if</span> (thread_name != MACH_PORT_NULL) {
+		ipc_port_t port;
+
+		<span class="enscript-keyword">if</span> (ipc_port_translate_send(self-&gt;task-&gt;itk_space,
+		                            thread_name, &amp;port) == KERN_SUCCESS) {
+			ip_reference(port);
+			ip_unlock(port);
+
+			thread = convert_port_to_thread(port);
+			ip_release(port);
+
+			<span class="enscript-keyword">if</span> (thread == self) {
+				thread_deallocate(thread);
+				thread = THREAD_NULL;
+			}
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (option == SWITCH_OPTION_OSLOCK_DEPRESS || option == SWITCH_OPTION_OSLOCK_WAIT) {
+		<span class="enscript-keyword">if</span> (thread != THREAD_NULL) {
+
+			<span class="enscript-keyword">if</span> (thread-&gt;task != self-&gt;task) {
+				<span class="enscript-comment">/*
+				 * OSLock boosting only applies to other threads
+				 * in your same task (even if you have a port for
+				 * a thread in another task)
+				 */</span>
+
+				thread_deallocate(thread);
+				thread = THREAD_NULL;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/*
+				 * Attempt to kick the lock owner up to our same IO throttling tier.
+				 * If the thread is currently blocked in throttle_lowpri_io(),
+				 * it will immediately break out.
+				 *
+				 * TODO: SFI break out?
+				 */</span>
+				<span class="enscript-type">int</span> new_policy = proc_get_effective_thread_policy(self, TASK_POLICY_IO);
+
+				set_thread_iotier_override(thread, new_policy);
+			}
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Try to handoff if supplied.
+	 */</span>
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL) {
+		spl_t s = splsched();
+
+		<span class="enscript-comment">/* This may return a different thread if the target is pushing on something */</span>
+		thread_t pulled_thread = thread_run_queue_remove_for_handoff(thread);
+
+		KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SCHED,MACH_SCHED_THREAD_SWITCH)|DBG_FUNC_NONE,
+				      thread_tid(thread), thread-&gt;state,
+				      pulled_thread ? TRUE : FALSE, 0, 0);
+
+		<span class="enscript-keyword">if</span> (pulled_thread != THREAD_NULL) {
+			<span class="enscript-comment">/* We can't be dropping the last ref here */</span>
+			thread_deallocate_safe(thread);
+
+			<span class="enscript-keyword">if</span> (wait_option)
+				assert_wait_timeout((event_t)assert_wait_timeout, THREAD_ABORTSAFE,
+				                    option_time, scale_factor);
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (depress_option)
+				thread_depress_ms(option_time);
+
+			self-&gt;saved.swtch.option = option;
+			self-&gt;saved.swtch.reenable_workq_callback = reenable_workq_callback;
+
+			thread_run(self, (thread_continue_t)thread_switch_continue, NULL, pulled_thread);
+			<span class="enscript-comment">/* NOTREACHED */</span>
+			panic(<span class="enscript-string">&quot;returned from thread_run!&quot;</span>);
+		}
+
+		splx(s);
+
+		thread_deallocate(thread);
+	}
+
+	<span class="enscript-keyword">if</span> (wait_option)
+		assert_wait_timeout((event_t)assert_wait_timeout, THREAD_ABORTSAFE, option_time, scale_factor);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (depress_option)
+		thread_depress_ms(option_time);
+
+	self-&gt;saved.swtch.option = option;
+	self-&gt;saved.swtch.reenable_workq_callback = reenable_workq_callback;
+
+	thread_block_reason((thread_continue_t)thread_switch_continue, NULL, AST_YIELD);
+
+	<span class="enscript-keyword">if</span> (depress_option)
+		thread_depress_abort_internal(self);
+
+	<span class="enscript-keyword">if</span> (reenable_workq_callback)
+		thread_switch_enable_workqueue_sched_callback();
+
+    <span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ * Depress thread's priority to lowest possible for the specified interval,
+ * with a value of zero resulting in no timeout being scheduled.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_depress_abstime</span>(
+	uint64_t				interval)
+{
+	<span class="enscript-type">register</span> thread_t		self = current_thread();
+	uint64_t				deadline;
+    spl_t					s;
+
+    s = splsched();
+    thread_lock(self);
+	<span class="enscript-keyword">if</span> (!(self-&gt;sched_flags &amp; TH_SFLAG_DEPRESSED_MASK)) {
+		processor_t		myprocessor = self-&gt;last_processor;
+
+		self-&gt;sched_pri = DEPRESSPRI;
+		myprocessor-&gt;current_pri = self-&gt;sched_pri;
+		self-&gt;sched_flags |= TH_SFLAG_DEPRESS;
+
+		<span class="enscript-keyword">if</span> (interval != 0) {
+			clock_absolutetime_interval_to_deadline(interval, &amp;deadline);
+			<span class="enscript-keyword">if</span> (!timer_call_enter(&amp;self-&gt;depress_timer, deadline, TIMER_CALL_USER_CRITICAL))
+				self-&gt;depress_timer_active++;
+		}
+	}
+	thread_unlock(self);
+    splx(s);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_depress_ms</span>(
+	mach_msg_timeout_t		interval)
+{
+	uint64_t		abstime;
+
+	clock_interval_to_absolutetime_interval(
+							interval, NSEC_PER_MSEC, &amp;abstime);
+	thread_depress_abstime(abstime);
+}
+
+<span class="enscript-comment">/*
+ *	Priority depression expiration.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_depress_expire</span>(
+	<span class="enscript-type">void</span>			*p0,
+	__unused <span class="enscript-type">void</span>	*p1)
+{
+	thread_t		thread = p0;
+    spl_t			s;
+
+    s = splsched();
+    thread_lock(thread);
+	<span class="enscript-keyword">if</span> (--thread-&gt;depress_timer_active == 0) {
+		thread-&gt;sched_flags &amp;= ~TH_SFLAG_DEPRESSED_MASK;
+		thread_recompute_sched_pri(thread, FALSE);
+	}
+    thread_unlock(thread);
+    splx(s);
+}
+
+<span class="enscript-comment">/*
+ *	Prematurely abort priority depression if there is one.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_depress_abort_internal</span>(
+	thread_t				thread)
+{
+    kern_return_t 			result = KERN_NOT_DEPRESSED;
+    spl_t					s;
+
+    s = splsched();
+    thread_lock(thread);
+	<span class="enscript-keyword">if</span> (!(thread-&gt;sched_flags &amp; TH_SFLAG_POLLDEPRESS)) {
+		<span class="enscript-keyword">if</span> (thread-&gt;sched_flags &amp; TH_SFLAG_DEPRESSED_MASK) {
+			thread-&gt;sched_flags &amp;= ~TH_SFLAG_DEPRESSED_MASK;
+			thread_recompute_sched_pri(thread, FALSE);
+			result = KERN_SUCCESS;
+		}
+
+		<span class="enscript-keyword">if</span> (timer_call_cancel(&amp;thread-&gt;depress_timer))
+			thread-&gt;depress_timer_active--;
+	}
+	thread_unlock(thread);
+    splx(s);
+
+    <span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_poll_yield</span>(
+	thread_t		self)
+{
+	spl_t			s;
+
+	assert(self == current_thread());
+
+	s = splsched();
+	<span class="enscript-keyword">if</span> (self-&gt;sched_mode == TH_MODE_FIXED) {
+		uint64_t			total_computation, abstime;
+
+		abstime = mach_absolute_time();
+		total_computation = abstime - self-&gt;computation_epoch;
+		total_computation += self-&gt;computation_metered;
+		<span class="enscript-keyword">if</span> (total_computation &gt;= max_poll_computation) {
+			processor_t		myprocessor = current_processor();
+			ast_t			preempt;
+
+			thread_lock(self);
+			<span class="enscript-keyword">if</span> (!(self-&gt;sched_flags &amp; TH_SFLAG_DEPRESSED_MASK)) {
+				self-&gt;sched_pri = DEPRESSPRI;
+				myprocessor-&gt;current_pri = self-&gt;sched_pri;
+			}
+			self-&gt;computation_epoch = abstime;
+			self-&gt;computation_metered = 0;
+			self-&gt;sched_flags |= TH_SFLAG_POLLDEPRESS;
+
+			abstime += (total_computation &gt;&gt; sched_poll_yield_shift);
+			<span class="enscript-keyword">if</span> (!timer_call_enter(&amp;self-&gt;depress_timer, abstime, TIMER_CALL_USER_CRITICAL))
+				self-&gt;depress_timer_active++;
+
+			<span class="enscript-keyword">if</span> ((preempt = csw_check(myprocessor, AST_NONE)) != AST_NONE)
+				ast_on(preempt);
+
+			thread_unlock(self);
+		}
+	}
+	splx(s);
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_yield_internal</span>(
+	mach_msg_timeout_t	ms)
+{
+	processor_t	myprocessor;
+
+	disable_preemption();
+	myprocessor = current_processor();
+	<span class="enscript-keyword">if</span> (SCHED(processor_queue_empty)(myprocessor) &amp;&amp; rt_runq.count == 0) {
+		mp_enable_preemption();
+
+		<span class="enscript-keyword">return</span>;
+	}
+	enable_preemption();
+
+	thread_depress_ms(ms);
+
+	thread_block_reason(THREAD_CONTINUE_NULL, NULL, AST_YIELD);
+
+	thread_depress_abort_internal(current_thread());
+}
+
+</pre>
+<hr />
+</body></html>

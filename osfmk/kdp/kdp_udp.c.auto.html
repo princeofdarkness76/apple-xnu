@@ -1,0 +1,2293 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kdp_udp.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kdp_udp.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1993
+ *      The Regents of the University of California.  All rights reserved.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Kernel Debugging Protocol UDP implementation.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/exception_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kdp/kdp_core.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kdp/kdp_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kdp/kdp_en_debugger.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kdp/kdp_callout.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kdp/kdp_udp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kdp/kdp_core.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_SERIAL_KDP</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kdp/kdp_serial.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span> <span class="enscript-comment">/* kernel_map */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/pal_routines.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/msgbuf.h&gt;</span>
+
+<span class="enscript-comment">/* we just want the link status flags, so undef KERNEL_PRIVATE for this
+ * header file. */</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">KERNEL_PRIVATE</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_media.h&gt;</span> 
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KERNEL_PRIVATE</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOPlatformExpert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/version.h&gt;</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> not_in_kdp;
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> kdp_snapshot;
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">do_stackshot</span>(<span class="enscript-type">void</span>);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_KDP_INTERACTIVE_DEBUGGING</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>      <span class="enscript-function-name">inet_aton</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *, <span class="enscript-type">struct</span> kdp_in_addr *); <span class="enscript-comment">/* in libkern */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">char</span>    *<span class="enscript-function-name">inet_ntoa_r</span>(<span class="enscript-type">struct</span> kdp_in_addr ina, <span class="enscript-type">char</span> *buf,
+    size_t buflen); <span class="enscript-comment">/* in libkern */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DO_ALIGN</span>	1	      <span class="enscript-comment">/* align all packet data accesses */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KDP_SERIAL_IPADDR</span>  0xABADBABE <span class="enscript-comment">/* IP address used for serial KDP */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LINK_UP_STATUS</span>     (IFM_AVALID | IFM_ACTIVE)
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">kdp_getc</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> reattach_wait;
+
+<span class="enscript-type">static</span> u_short ip_id;                          <span class="enscript-comment">/* ip packet ctr, for ids */</span>
+
+<span class="enscript-comment">/*	@(#)udp_usrreq.c	2.2 88/05/23 4.0NFSSRC SMI;	from UCB 7.1 6/5/86	*/</span>
+
+<span class="enscript-comment">/*
+ * UDP protocol implementation.
+ * Per RFC 768, August, 1980.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">UDP_TTL</span>	60 <span class="enscript-comment">/* deflt time to live for UDP packets */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> udp_ttl = UDP_TTL;
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>	exception_seq;
+
+<span class="enscript-type">struct</span> kdp_ipovly {
+        uint32_t ih_next, ih_prev;	<span class="enscript-comment">/* for protocol sequence q's */</span>
+        u_char  ih_x1;			<span class="enscript-comment">/* (unused) */</span>
+        u_char  ih_pr;			<span class="enscript-comment">/* protocol */</span>
+        <span class="enscript-type">short</span>   ih_len;			<span class="enscript-comment">/* protocol length */</span>
+        <span class="enscript-type">struct</span>  kdp_in_addr ih_src;	<span class="enscript-comment">/* source internet address */</span>
+        <span class="enscript-type">struct</span>  kdp_in_addr ih_dst;	<span class="enscript-comment">/* destination internet address */</span>
+};
+
+<span class="enscript-type">struct</span> kdp_udphdr {
+	u_short uh_sport;		<span class="enscript-comment">/* source port */</span>
+	u_short uh_dport;		<span class="enscript-comment">/* destination port */</span>
+	<span class="enscript-type">short</span>   uh_ulen;		<span class="enscript-comment">/* udp length */</span>
+	u_short uh_sum;			<span class="enscript-comment">/* udp checksum */</span>
+};
+
+<span class="enscript-type">struct</span>  kdp_udpiphdr {
+        <span class="enscript-type">struct</span>  kdp_ipovly ui_i;	<span class="enscript-comment">/* overlaid ip structure */</span>
+        <span class="enscript-type">struct</span>  kdp_udphdr ui_u;	<span class="enscript-comment">/* udp header */</span>
+};
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ui_next</span>		ui_i.ih_next
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ui_prev</span>		ui_i.ih_prev
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ui_x1</span>		ui_i.ih_x1
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ui_pr</span>		ui_i.ih_pr
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ui_len</span>		ui_i.ih_len
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ui_src</span>		ui_i.ih_src
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ui_dst</span>		ui_i.ih_dst
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ui_sport</span>	ui_u.uh_sport
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ui_dport</span>	ui_u.uh_dport
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ui_ulen</span>		ui_u.uh_ulen
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ui_sum</span>		ui_u.uh_sum
+
+<span class="enscript-type">struct</span> kdp_ip {
+	<span class="enscript-type">union</span> {
+		uint32_t ip_w;
+		<span class="enscript-type">struct</span> {
+			<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__LITTLE_ENDIAN__</span>
+			<span class="enscript-reference">ip_xhl</span>:4,	<span class="enscript-comment">/* header length */</span>
+			<span class="enscript-reference">ip_xv</span>:4,	<span class="enscript-comment">/* version */</span>
+			<span class="enscript-reference">ip_xtos</span>:8,	<span class="enscript-comment">/* type of service */</span>
+			<span class="enscript-reference">ip_xlen</span>:16;	<span class="enscript-comment">/* total length */</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__BIG_ENDIAN__</span>
+			<span class="enscript-reference">ip_xv</span>:4,	<span class="enscript-comment">/* version */</span>
+			<span class="enscript-reference">ip_xhl</span>:4,	<span class="enscript-comment">/* header length */</span>
+			<span class="enscript-reference">ip_xtos</span>:8,	<span class="enscript-comment">/* type of service */</span>
+			<span class="enscript-reference">ip_xlen</span>:16;	<span class="enscript-comment">/* total length */</span>
+#<span class="enscript-reference">endif</span>
+		} ip_x;
+	} ip_vhltl;
+        u_short ip_id;			<span class="enscript-comment">/* identification */</span>
+        <span class="enscript-type">short</span>   ip_off;			<span class="enscript-comment">/* fragment offset field */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">IP_DF</span> 0x4000			<span class="enscript-comment">/* dont fragment flag */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">IP_MF</span> 0x2000			<span class="enscript-comment">/* more fragments flag */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">IP_OFFMASK</span> 0x1fff		<span class="enscript-comment">/* mask for fragmenting bits */</span>
+        u_char  ip_ttl;			<span class="enscript-comment">/* time to live */</span>
+        u_char  ip_p;			<span class="enscript-comment">/* protocol */</span>
+        u_short ip_sum;			<span class="enscript-comment">/* checksum */</span>
+        <span class="enscript-type">struct</span>  kdp_in_addr ip_src,ip_dst;  <span class="enscript-comment">/* source and dest address */</span>
+};
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ip_v</span>		ip_vhltl.ip_x.ip_xv
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ip_hl</span>		ip_vhltl.ip_x.ip_xhl
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ip_tos</span>		ip_vhltl.ip_x.ip_xtos
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ip_len</span>		ip_vhltl.ip_x.ip_xlen
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">IPPROTO_UDP</span>	17
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">IPVERSION</span>	4
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ETHERTYPE_IP</span>	0x0800  <span class="enscript-comment">/* IP protocol */</span>
+
+<span class="enscript-comment">/*
+ * Ethernet Address Resolution Protocol.
+ *
+ * See RFC 826 for protocol description.  Structure below is adapted
+ * to resolving internet addresses.  Field names used correspond to
+ * RFC 826.
+ */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ETHERTYPE_ARP</span>	0x0806  <span class="enscript-comment">/* Addr. resolution protocol */</span>
+
+<span class="enscript-type">struct</span>  kdp_arphdr {
+	u_short ar_hrd;         <span class="enscript-comment">/* format of hardware address */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ARPHRD_ETHER</span>    1       <span class="enscript-comment">/* ethernet hardware format */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ARPHRD_FRELAY</span>   15      <span class="enscript-comment">/* frame relay hardware format */</span>
+	u_short ar_pro;         <span class="enscript-comment">/* format of protocol address */</span>
+	u_char  ar_hln;         <span class="enscript-comment">/* length of hardware address */</span>
+	u_char  ar_pln;         <span class="enscript-comment">/* length of protocol address */</span>
+	u_short ar_op;          <span class="enscript-comment">/* one of: */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ARPOP_REQUEST</span>   1       <span class="enscript-comment">/* request to resolve address */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ARPOP_REPLY</span>     2       <span class="enscript-comment">/* response to previous request */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ARPOP_REVREQUEST</span> 3      <span class="enscript-comment">/* request protocol address given hardware */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ARPOP_REVREPLY</span>  4       <span class="enscript-comment">/* response giving protocol address */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ARPOP_INVREQUEST</span> 8      <span class="enscript-comment">/* request to identify peer */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ARPOP_INVREPLY</span>  9       <span class="enscript-comment">/* response identifying peer */</span>
+};
+
+<span class="enscript-type">struct</span>  kdp_ether_arp {
+	<span class="enscript-type">struct</span>  kdp_arphdr ea_hdr;		<span class="enscript-comment">/* fixed-size header */</span>
+	u_char  arp_sha[ETHER_ADDR_LEN];        <span class="enscript-comment">/* sender hardware address */</span>
+	u_char  arp_spa[4];			<span class="enscript-comment">/* sender protocol address */</span>
+	u_char  arp_tha[ETHER_ADDR_LEN];        <span class="enscript-comment">/* target hardware address */</span>
+	u_char  arp_tpa[4];			<span class="enscript-comment">/* target protocol address */</span>
+};
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">arp_hrd</span>	ea_hdr.ar_hrd
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">arp_pro</span>	ea_hdr.ar_pro
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">arp_hln</span>	ea_hdr.ar_hln
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">arp_pln</span>	ea_hdr.ar_pln
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">arp_op</span>	ea_hdr.ar_op
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ETHERMTU</span>	1500
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ETHERHDRSIZE</span>	14
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ETHERCRC</span>	4
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">KDP_MAXPACKET</span>	(ETHERHDRSIZE + ETHERMTU + ETHERCRC)
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> {
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>	data[KDP_MAXPACKET];
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	off, len;
+    boolean_t		input;
+} pkt, saved_reply;
+
+<span class="enscript-type">struct</span> kdp_manual_pkt manual_pkt;
+
+<span class="enscript-type">struct</span> {
+    <span class="enscript-type">struct</span> {
+	<span class="enscript-type">struct</span> kdp_in_addr	in;
+	<span class="enscript-type">struct</span> kdp_ether_addr	ea;
+    } loc;
+    <span class="enscript-type">struct</span> {
+	<span class="enscript-type">struct</span> kdp_in_addr	in;
+	<span class="enscript-type">struct</span> kdp_ether_addr	ea;
+    } rmt;
+} adr;
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span>
+*exception_message[] = {
+    <span class="enscript-string">&quot;Unknown&quot;</span>,
+    <span class="enscript-string">&quot;Memory access&quot;</span>,		<span class="enscript-comment">/* EXC_BAD_ACCESS */</span>
+    <span class="enscript-string">&quot;Failed instruction&quot;</span>,	<span class="enscript-comment">/* EXC_BAD_INSTRUCTION */</span>
+    <span class="enscript-string">&quot;Arithmetic&quot;</span>,		<span class="enscript-comment">/* EXC_ARITHMETIC */</span>
+    <span class="enscript-string">&quot;Emulation&quot;</span>,		<span class="enscript-comment">/* EXC_EMULATION */</span>
+    <span class="enscript-string">&quot;Software&quot;</span>,			<span class="enscript-comment">/* EXC_SOFTWARE */</span>
+    <span class="enscript-string">&quot;Breakpoint&quot;</span>		<span class="enscript-comment">/* EXC_BREAKPOINT */</span>
+};
+
+<span class="enscript-type">volatile</span> <span class="enscript-type">int</span> kdp_flag = 0;
+
+kdp_send_t    kdp_en_send_pkt;
+<span class="enscript-type">static</span> kdp_receive_t kdp_en_recv_pkt;
+<span class="enscript-type">static</span> kdp_link_t    kdp_en_linkstatus;
+<span class="enscript-type">static</span> kdp_mode_t    kdp_en_setmode;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_SERIAL_KDP</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kdp_serial_send</span>(<span class="enscript-type">void</span> *rpkt, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> rpkt_len);
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">KDP_SERIAL_ENABLED</span>()  (kdp_en_send_pkt == kdp_serial_send)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">KDP_SERIAL_ENABLED</span>()  (0)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> uint32_t kdp_current_ip_address = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> kdp_ether_addr kdp_current_mac_address = {{0, 0, 0, 0, 0, 0}};
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> *kdp_current_ifp;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kdp_handler</span>( <span class="enscript-type">void</span> *);
+
+<span class="enscript-type">static</span> uint32_t panic_server_ip = 0; 
+<span class="enscript-type">static</span> uint32_t parsed_router_ip = 0;
+<span class="enscript-type">static</span> uint32_t router_ip = 0;
+<span class="enscript-type">static</span> uint32_t target_ip = 0;
+
+<span class="enscript-type">static</span> boolean_t save_ip_in_nvram = FALSE;
+
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> boolean_t panicd_specified = FALSE;
+<span class="enscript-type">static</span> boolean_t router_specified = FALSE;
+<span class="enscript-type">static</span> boolean_t corename_specified = FALSE;
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> panicd_port = CORE_REMOTE_PORT;
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> kdp_ether_addr etherbroadcastaddr = {{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}};
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> kdp_ether_addr router_mac = {{0, 0, 0 , 0, 0, 0}};
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> kdp_ether_addr destination_mac = {{0, 0, 0 , 0, 0, 0}};
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> kdp_ether_addr temp_mac = {{0, 0, 0 , 0, 0, 0}};
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> kdp_ether_addr current_resolved_MAC = {{0, 0, 0 , 0, 0, 0}};
+
+<span class="enscript-type">static</span> boolean_t flag_panic_dump_in_progress = FALSE;
+<span class="enscript-type">static</span> boolean_t flag_router_mac_initialized = FALSE;
+<span class="enscript-type">static</span> boolean_t flag_dont_abort_panic_dump  = FALSE;
+
+<span class="enscript-type">static</span> boolean_t flag_arp_resolved = FALSE;
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> panic_timeout = 100000;
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> last_panic_port = CORE_REMOTE_PORT;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KDP_THROTTLE_VALUE</span>       (10ULL * NSEC_PER_SEC)
+
+uint32_t kdp_crashdump_pkt_size = 512;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KDP_LARGE_CRASHDUMP_PKT_SIZE</span> (1440 - 6 - sizeof(struct kdp_udpiphdr))
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> panicd_ip_str[20];
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> router_ip_str[20];
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> corename_str[50];
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> panic_block = 0;
+<span class="enscript-type">volatile</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> kdp_trigger_core_dump = 0;
+__private_extern__ <span class="enscript-type">volatile</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> flag_kdp_trigger_reboot = 0;
+
+
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> disableConsoleOutput;
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> 		kdp_call(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> boolean_t 	kdp_call_kdb(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">void</span> *	kdp_get_interface(<span class="enscript-type">void</span>);
+<span class="enscript-type">void</span>    <span class="enscript-function-name">kdp_set_gateway_mac</span>(<span class="enscript-type">void</span> *gatewaymac);
+<span class="enscript-type">void</span> 	kdp_set_ip_and_mac_addresses(<span class="enscript-type">struct</span> kdp_in_addr *ipaddr, <span class="enscript-type">struct</span> kdp_ether_addr *);
+<span class="enscript-type">void</span> 	kdp_set_interface(<span class="enscript-type">void</span> *interface, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> kdp_ether_addr *macaddr);
+
+<span class="enscript-type">void</span> 			kdp_disable_arp(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 		kdp_arp_reply(<span class="enscript-type">struct</span> kdp_ether_arp *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 		kdp_process_arp_reply(<span class="enscript-type">struct</span> kdp_ether_arp *);
+<span class="enscript-type">static</span> boolean_t 	kdp_arp_resolve(uint32_t, <span class="enscript-type">struct</span> kdp_ether_addr *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> <span class="enscript-type">unsigned</span>	kdp_reentry_deadline;
+
+<span class="enscript-type">static</span> uint32_t kdp_crashdump_feature_mask = KDP_FEATURE_LARGE_CRASHDUMPS | KDP_FEATURE_LARGE_PKT_SIZE;
+uint32_t kdp_feature_large_crashdumps, kdp_feature_large_pkt_size;
+
+<span class="enscript-type">char</span> kdp_kernelversion_string[256];
+
+<span class="enscript-type">static</span> boolean_t	gKDPDebug = FALSE;
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">KDP_DEBUG</span>(...) if (gKDPDebug) printf(__VA_ARGS__);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SBLOCKSZ</span> (2048)
+uint64_t kdp_dump_start_time = 0;
+uint64_t kdp_min_superblock_dump_time = ~1ULL;
+uint64_t kdp_max_superblock_dump_time = 0;
+uint64_t kdp_superblock_dump_time = 0;
+uint64_t kdp_superblock_dump_start_time = 0;
+<span class="enscript-type">static</span> thread_call_t
+kdp_timer_call;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_ml_enter_debugger_wrapper</span>(__unused <span class="enscript-type">void</span> *param0, __unused <span class="enscript-type">void</span> *param1) {
+	kdp_ml_enter_debugger();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_timer_callout_init</span>(<span class="enscript-type">void</span>) {
+	kdp_timer_call = thread_call_allocate(kdp_ml_enter_debugger_wrapper, NULL);
+}
+
+
+<span class="enscript-comment">/* only send/receive data if the link is up */</span>
+inline <span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">wait_for_link</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-type">static</span> <span class="enscript-type">int</span> first = 0;
+
+    <span class="enscript-keyword">if</span> (!kdp_en_linkstatus)
+        <span class="enscript-keyword">return</span>;
+
+    <span class="enscript-keyword">while</span> (((*kdp_en_linkstatus)() &amp; LINK_UP_STATUS) != LINK_UP_STATUS) {
+        <span class="enscript-keyword">if</span> (first)
+            <span class="enscript-keyword">continue</span>;
+
+        first = 1;
+        printf(<span class="enscript-string">&quot;Waiting for link to become available.\n&quot;</span>);
+        kprintf(<span class="enscript-string">&quot;Waiting for link to become available.\n&quot;</span>);
+    }
+}
+
+
+inline <span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kdp_send_data</span>(<span class="enscript-type">void</span> *packet, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> len)
+{
+    wait_for_link();
+    (*kdp_en_send_pkt)(packet, len);
+}
+
+
+inline <span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kdp_receive_data</span>(<span class="enscript-type">void</span> *packet, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *len,
+                                    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> timeout)
+{
+    wait_for_link();
+    (*kdp_en_recv_pkt)(packet, len, timeout);
+}
+
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">kdp_register_link</span>(kdp_link_t link, kdp_mode_t mode)
+{
+        kdp_en_linkstatus = link;
+        kdp_en_setmode    = mode;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">kdp_unregister_link</span>(__unused kdp_link_t link, __unused kdp_mode_t mode)
+{
+        kdp_en_linkstatus = NULL;
+        kdp_en_setmode    = NULL;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_register_send_receive</span>(
+	kdp_send_t	send, 
+	kdp_receive_t	receive)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	debug = 0;
+
+	PE_parse_boot_argn(<span class="enscript-string">&quot;debug&quot;</span>, &amp;debug, <span class="enscript-keyword">sizeof</span> (debug));
+
+
+	<span class="enscript-keyword">if</span> (!debug)
+		<span class="enscript-keyword">return</span>;
+
+	kdp_en_send_pkt   = send;
+	kdp_en_recv_pkt   = receive;
+
+	<span class="enscript-keyword">if</span> (debug &amp; DB_KDP_BP_DIS)
+		kdp_flag |= KDP_BP_DIS;   
+	<span class="enscript-keyword">if</span> (debug &amp; DB_KDP_GETC_ENA)
+		kdp_flag |= KDP_GETC_ENA;   
+	<span class="enscript-keyword">if</span> (debug &amp; DB_ARP)
+		kdp_flag |= KDP_ARP;
+
+	<span class="enscript-keyword">if</span> (debug &amp; DB_KERN_DUMP_ON_PANIC)
+		kdp_flag |= KDP_PANIC_DUMP_ENABLED;
+	<span class="enscript-keyword">if</span> (debug &amp; DB_KERN_DUMP_ON_NMI)
+		kdp_flag |= PANIC_CORE_ON_NMI;
+
+	<span class="enscript-keyword">if</span> (debug &amp; DB_DBG_POST_CORE)
+		kdp_flag |= DBG_POST_CORE;
+
+	<span class="enscript-keyword">if</span> (debug &amp; DB_PANICLOG_DUMP)
+		kdp_flag |= PANIC_LOG_DUMP;
+
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;_panicd_ip&quot;</span>, panicd_ip_str, <span class="enscript-keyword">sizeof</span> (panicd_ip_str)))
+		panicd_specified = TRUE;
+
+	<span class="enscript-keyword">if</span> ((debug &amp; DB_REBOOT_POST_CORE) &amp;&amp; (panicd_specified == TRUE))
+		kdp_flag |= REBOOT_POST_CORE;
+
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;_router_ip&quot;</span>, router_ip_str, <span class="enscript-keyword">sizeof</span> (router_ip_str)))
+		router_specified = TRUE;
+
+	<span class="enscript-keyword">if</span> (!PE_parse_boot_argn(<span class="enscript-string">&quot;panicd_port&quot;</span>, &amp;panicd_port, <span class="enscript-keyword">sizeof</span> (panicd_port)))
+		panicd_port = CORE_REMOTE_PORT;
+
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;_panicd_corename&quot;</span>, &amp;corename_str, <span class="enscript-keyword">sizeof</span> (corename_str)))
+		corename_specified = TRUE;
+
+	kdp_flag |= KDP_READY;
+
+	<span class="enscript-keyword">if</span> (current_debugger == NO_CUR_DB)
+		current_debugger = KDP_CUR_DB;
+	<span class="enscript-keyword">if</span> ((kdp_current_ip_address != 0) &amp;&amp; halt_in_debugger) {
+		kdp_call(); 
+		halt_in_debugger=0;
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_unregister_send_receive</span>(
+	__unused kdp_send_t	send, 
+	__unused kdp_receive_t	receive)
+{
+	<span class="enscript-keyword">if</span> (current_debugger == KDP_CUR_DB)
+		current_debugger = NO_CUR_DB;
+	kdp_flag &amp;= ~KDP_READY;
+	kdp_en_send_pkt   = NULL;
+	kdp_en_recv_pkt   = NULL;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_schedule_debugger_reentry</span>(<span class="enscript-type">unsigned</span> interval) {
+	uint64_t deadline;;
+
+	clock_interval_to_deadline(interval, 1000 * 1000, &amp;deadline);
+	thread_call_enter_delayed(kdp_timer_call, deadline);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">enaddr_copy</span>(
+	<span class="enscript-type">void</span>	*src,
+	<span class="enscript-type">void</span>	*dst
+)
+{
+	bcopy((<span class="enscript-type">char</span> *)src, (<span class="enscript-type">char</span> *)dst, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ether_addr));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span>
+<span class="enscript-function-name">ip_sum</span>(
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>	*c,
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	hlen
+	)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	high, low, sum;
+    
+	high = low = 0;
+	<span class="enscript-keyword">while</span> (hlen-- &gt; 0) {
+		low += c[1] + c[3];
+		high += c[0] + c[2];
+	
+		c += <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>);
+	}
+    
+	sum = (high &lt;&lt; 8) + low;
+	sum = (sum &gt;&gt; 16) + (sum &amp; 65535);
+    
+	<span class="enscript-keyword">return</span> (sum &gt; 65535 ? sum - 65535 : sum);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_reply</span>(
+          <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span>		reply_port,
+          <span class="enscript-type">const</span> boolean_t         sideband
+          )
+{
+	<span class="enscript-type">struct</span> kdp_udpiphdr	aligned_ui, *ui = &amp;aligned_ui;
+	<span class="enscript-type">struct</span> kdp_ip		aligned_ip, *ip = &amp;aligned_ip;
+	<span class="enscript-type">struct</span> kdp_in_addr	tmp_ipaddr;
+	<span class="enscript-type">struct</span> kdp_ether_addr	tmp_enaddr;
+	<span class="enscript-type">struct</span> kdp_ether_header	*eh = NULL;
+    
+	<span class="enscript-keyword">if</span> (!pkt.input)
+		kdp_panic(<span class="enscript-string">&quot;kdp_reply&quot;</span>);
+	
+	pkt.off -= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udpiphdr);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DO_ALIGN</span>    
+	bcopy((<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], (<span class="enscript-type">char</span> *)ui, <span class="enscript-keyword">sizeof</span>(*ui));
+#<span class="enscript-reference">else</span>
+	ui = (<span class="enscript-type">struct</span> kdp_udpiphdr *)&amp;pkt.data[pkt.off];
+#<span class="enscript-reference">endif</span>
+	ui-&gt;ui_next = ui-&gt;ui_prev = 0;
+	ui-&gt;ui_x1 = 0;
+	ui-&gt;ui_pr = IPPROTO_UDP;
+	ui-&gt;ui_len = htons((u_short)pkt.len + <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udphdr));
+	tmp_ipaddr = ui-&gt;ui_src;
+	ui-&gt;ui_src = ui-&gt;ui_dst;
+	ui-&gt;ui_dst = tmp_ipaddr;
+	ui-&gt;ui_sport = htons(KDP_REMOTE_PORT);
+	ui-&gt;ui_dport = reply_port;
+	ui-&gt;ui_ulen = ui-&gt;ui_len;
+	ui-&gt;ui_sum = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DO_ALIGN</span>
+	bcopy((<span class="enscript-type">char</span> *)ui, (<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], <span class="enscript-keyword">sizeof</span>(*ui));
+	bcopy((<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], (<span class="enscript-type">char</span> *)ip, <span class="enscript-keyword">sizeof</span>(*ip));
+#<span class="enscript-reference">else</span>
+	ip = (<span class="enscript-type">struct</span> kdp_ip *)&amp;pkt.data[pkt.off];
+#<span class="enscript-reference">endif</span>
+	ip-&gt;ip_len = htons(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udpiphdr) + pkt.len);
+	ip-&gt;ip_v = IPVERSION;
+	ip-&gt;ip_id = htons(ip_id++);
+	ip-&gt;ip_hl = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ip) &gt;&gt; 2;
+	ip-&gt;ip_ttl = udp_ttl;
+	ip-&gt;ip_sum = 0;
+	ip-&gt;ip_sum = htons(~ip_sum((<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *)ip, ip-&gt;ip_hl));
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DO_ALIGN</span>
+	bcopy((<span class="enscript-type">char</span> *)ip, (<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], <span class="enscript-keyword">sizeof</span>(*ip));
+#<span class="enscript-reference">endif</span>
+    
+	pkt.len += (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udpiphdr);
+    
+	pkt.off -= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ether_header);
+    
+	eh = (<span class="enscript-type">struct</span> kdp_ether_header *)&amp;pkt.data[pkt.off];
+	enaddr_copy(eh-&gt;ether_shost, &amp;tmp_enaddr);
+	enaddr_copy(eh-&gt;ether_dhost, eh-&gt;ether_shost);
+	enaddr_copy(&amp;tmp_enaddr, eh-&gt;ether_dhost);
+	eh-&gt;ether_type = htons(ETHERTYPE_IP);
+    
+	pkt.len += (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ether_header);
+    
+	<span class="enscript-comment">// save reply for possible retransmission
+</span>	assert(pkt.len &lt;= KDP_MAXPACKET);
+	<span class="enscript-keyword">if</span> (!sideband)
+		bcopy((<span class="enscript-type">char</span> *)&amp;pkt, (<span class="enscript-type">char</span> *)&amp;saved_reply, <span class="enscript-keyword">sizeof</span>(saved_reply));
+
+	kdp_send_data(&amp;pkt.data[pkt.off], pkt.len);
+
+	<span class="enscript-comment">// increment expected sequence number
+</span>	<span class="enscript-keyword">if</span> (!sideband) 
+		exception_seq++;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_send</span>(
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span>		remote_port
+)
+{
+    <span class="enscript-type">struct</span> kdp_udpiphdr		aligned_ui, *ui = &amp;aligned_ui;
+    <span class="enscript-type">struct</span> kdp_ip		aligned_ip, *ip = &amp;aligned_ip;
+    <span class="enscript-type">struct</span> kdp_ether_header	*eh;
+    
+    <span class="enscript-keyword">if</span> (pkt.input)
+	kdp_panic(<span class="enscript-string">&quot;kdp_send&quot;</span>);
+
+    pkt.off -= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udpiphdr);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DO_ALIGN</span>
+    bcopy((<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], (<span class="enscript-type">char</span> *)ui, <span class="enscript-keyword">sizeof</span>(*ui));
+#<span class="enscript-reference">else</span>
+    ui = (<span class="enscript-type">struct</span> kdp_udpiphdr *)&amp;pkt.data[pkt.off];
+#<span class="enscript-reference">endif</span>
+    ui-&gt;ui_next = ui-&gt;ui_prev = 0;
+    ui-&gt;ui_x1 = 0;
+    ui-&gt;ui_pr = IPPROTO_UDP;
+    ui-&gt;ui_len = htons((u_short)pkt.len + <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udphdr));
+    ui-&gt;ui_src = adr.loc.in;
+    ui-&gt;ui_dst = adr.rmt.in;
+    ui-&gt;ui_sport = htons(KDP_REMOTE_PORT);
+    ui-&gt;ui_dport = remote_port;
+    ui-&gt;ui_ulen = ui-&gt;ui_len;
+    ui-&gt;ui_sum = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DO_ALIGN</span>
+    bcopy((<span class="enscript-type">char</span> *)ui, (<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], <span class="enscript-keyword">sizeof</span>(*ui));
+    bcopy((<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], (<span class="enscript-type">char</span> *)ip, <span class="enscript-keyword">sizeof</span>(*ip));
+#<span class="enscript-reference">else</span>
+    ip = (<span class="enscript-type">struct</span> kdp_ip *)&amp;pkt.data[pkt.off];
+#<span class="enscript-reference">endif</span>
+    ip-&gt;ip_len = htons(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udpiphdr) + pkt.len);
+    ip-&gt;ip_v = IPVERSION;
+    ip-&gt;ip_id = htons(ip_id++);
+    ip-&gt;ip_hl = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ip) &gt;&gt; 2;
+    ip-&gt;ip_ttl = udp_ttl;
+    ip-&gt;ip_sum = 0;
+    ip-&gt;ip_sum = htons(~ip_sum((<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *)ip, ip-&gt;ip_hl));
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DO_ALIGN</span>
+    bcopy((<span class="enscript-type">char</span> *)ip, (<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], <span class="enscript-keyword">sizeof</span>(*ip));
+#<span class="enscript-reference">endif</span>
+    
+    pkt.len += (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udpiphdr);
+    
+    pkt.off -= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ether_header);
+    
+    eh = (<span class="enscript-type">struct</span> kdp_ether_header *)&amp;pkt.data[pkt.off];
+    enaddr_copy(&amp;adr.loc.ea, eh-&gt;ether_shost);
+    enaddr_copy(&amp;adr.rmt.ea, eh-&gt;ether_dhost);
+    eh-&gt;ether_type = htons(ETHERTYPE_IP);
+    
+    pkt.len += (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ether_header);
+    kdp_send_data(&amp;pkt.data[pkt.off], pkt.len);
+}
+
+
+inline <span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">debugger_if_necessary</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">if</span> ((current_debugger == KDP_CUR_DB) &amp;&amp; halt_in_debugger) {
+        kdp_call();
+        halt_in_debugger=0;
+    }
+}
+
+
+<span class="enscript-comment">/* We don't interpret this pointer, we just give it to the bsd stack
+   so it can decide when to set the MAC and IP info. We'll
+   early initialize the MAC/IP info if we can so that we can use
+   KDP early in boot. These values may subsequently get over-written
+   when the interface gets initialized for real.
+*/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_set_interface</span>(<span class="enscript-type">void</span> *ifp, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> kdp_ether_addr *macaddr)
+{
+	<span class="enscript-type">char</span> kdpstr[80];
+        <span class="enscript-type">struct</span> kdp_in_addr addr = { 0 };
+        <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> len;
+        
+	kdp_current_ifp = ifp;
+
+        <span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;kdp_ip_addr&quot;</span>, kdpstr, <span class="enscript-keyword">sizeof</span>(kdpstr))) {
+            <span class="enscript-comment">/* look for a static ip address */</span>
+            <span class="enscript-keyword">if</span> (inet_aton(kdpstr, &amp;addr) == FALSE)
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">config_network</span>;
+        }
+
+        <span class="enscript-comment">/* use saved ip address */</span>
+        save_ip_in_nvram = TRUE;
+
+        len = <span class="enscript-keyword">sizeof</span>(kdpstr);
+        <span class="enscript-keyword">if</span> (PEReadNVRAMProperty(<span class="enscript-string">&quot;_kdp_ipstr&quot;</span>, kdpstr, &amp;len) == FALSE)
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+        kdpstr[len &lt; <span class="enscript-keyword">sizeof</span>(kdpstr) ? len : <span class="enscript-keyword">sizeof</span>(kdpstr) - 1] = <span class="enscript-string">'\0'</span>;
+        <span class="enscript-keyword">if</span> (inet_aton(kdpstr, &amp;addr) == FALSE)
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+<span class="enscript-reference">config_network</span>:
+        kdp_current_ip_address = addr.s_addr;
+        <span class="enscript-keyword">if</span> (macaddr)
+            kdp_current_mac_address = *macaddr;
+
+        <span class="enscript-comment">/* we can't drop into the debugger at this point because the
+           link will likely not be up. when getDebuggerLinkStatus() support gets
+           added to the appropriate network drivers, adding the
+           following will enable this capability:
+           debugger_if_necessary();
+        */</span>
+<span class="enscript-reference">done</span>:
+        <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">kdp_get_interface</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> kdp_current_ifp;
+}
+
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">kdp_set_ip_and_mac_addresses</span>(
+	<span class="enscript-type">struct</span> kdp_in_addr		*ipaddr, 
+	<span class="enscript-type">struct</span> kdp_ether_addr	*macaddr)
+{
+        <span class="enscript-type">static</span> uint64_t last_time    = (uint64_t) -1;
+        <span class="enscript-type">static</span> uint64_t throttle_val = 0;
+        uint64_t cur_time;
+        <span class="enscript-type">char</span> addr[16];
+
+        <span class="enscript-keyword">if</span> (kdp_current_ip_address == ipaddr-&gt;s_addr) 
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+        <span class="enscript-comment">/* don't replace if serial debugging is configured */</span>
+        <span class="enscript-keyword">if</span> (!KDP_SERIAL_ENABLED() ||
+            (kdp_current_ip_address != KDP_SERIAL_IPADDR)) {
+            kdp_current_mac_address = *macaddr;
+            kdp_current_ip_address  = ipaddr-&gt;s_addr;
+        }
+
+        <span class="enscript-keyword">if</span> (save_ip_in_nvram == FALSE)
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+        <span class="enscript-keyword">if</span> (inet_ntoa_r(*ipaddr, addr, <span class="enscript-keyword">sizeof</span>(addr)) == NULL)
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+        <span class="enscript-comment">/* throttle writes if needed */</span>
+        <span class="enscript-keyword">if</span> (!throttle_val)
+            nanoseconds_to_absolutetime(KDP_THROTTLE_VALUE, &amp;throttle_val);
+
+        cur_time = mach_absolute_time();
+        <span class="enscript-keyword">if</span> (last_time == (uint64_t) -1 ||
+            ((cur_time - last_time) &gt; throttle_val)) {
+            PEWriteNVRAMProperty(<span class="enscript-string">&quot;_kdp_ipstr&quot;</span>, addr, 
+                                 (<span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) strlen(addr));
+        }
+        last_time = cur_time;
+
+<span class="enscript-reference">done</span>:
+        debugger_if_necessary();
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_set_gateway_mac</span>(<span class="enscript-type">void</span> *gatewaymac)
+{
+    router_mac = *(<span class="enscript-type">struct</span> kdp_ether_addr *)gatewaymac;
+    flag_router_mac_initialized = TRUE;
+} 
+
+<span class="enscript-type">struct</span> kdp_ether_addr 
+<span class="enscript-function-name">kdp_get_mac_addr</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span> kdp_current_mac_address;
+}
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> 
+<span class="enscript-function-name">kdp_get_ip_address</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span> (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)kdp_current_ip_address;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_disable_arp</span>(<span class="enscript-type">void</span>)
+{
+	kdp_flag &amp;= ~(DB_ARP);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_arp_dispatch</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> kdp_ether_arp	aligned_ea, *ea = &amp;aligned_ea;
+	<span class="enscript-type">unsigned</span>		arp_header_offset;
+
+	arp_header_offset = (<span class="enscript-type">unsigned</span>)<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kdp_ether_header) + pkt.off;
+	memcpy((<span class="enscript-type">void</span> *)ea, (<span class="enscript-type">void</span> *)&amp;pkt.data[arp_header_offset], <span class="enscript-keyword">sizeof</span>(*ea));
+
+	<span class="enscript-keyword">switch</span>(ntohs(ea-&gt;arp_op)) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ARPOP_REQUEST</span>:
+		kdp_arp_reply(ea);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ARPOP_REPLY</span>:
+		kdp_process_arp_reply(ea);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span>;
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_process_arp_reply</span>(<span class="enscript-type">struct</span> kdp_ether_arp *ea)
+{
+	<span class="enscript-comment">/* Are we interested in ARP replies? */</span>
+	<span class="enscript-keyword">if</span> (flag_arp_resolved == TRUE)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/* Did we receive a reply from the right source? */</span>
+	<span class="enscript-keyword">if</span> (((<span class="enscript-type">struct</span> kdp_in_addr *)(ea-&gt;arp_spa))-&gt;s_addr != target_ip)
+	  <span class="enscript-keyword">return</span>;
+
+	flag_arp_resolved = TRUE;
+	current_resolved_MAC = *(<span class="enscript-type">struct</span> kdp_ether_addr *) (ea-&gt;arp_sha);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/* ARP responses are enabled when the DB_ARP bit of the debug boot arg
+ * is set.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 
+<span class="enscript-function-name">kdp_arp_reply</span>(<span class="enscript-type">struct</span> kdp_ether_arp *ea)
+{
+	<span class="enscript-type">struct</span> kdp_ether_header	*eh;
+
+	<span class="enscript-type">struct</span> kdp_in_addr 		isaddr, itaddr, myaddr;
+	<span class="enscript-type">struct</span> kdp_ether_addr	my_enaddr;
+
+	eh = (<span class="enscript-type">struct</span> kdp_ether_header *)&amp;pkt.data[pkt.off];
+	pkt.off += (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kdp_ether_header);
+
+	<span class="enscript-keyword">if</span>(ntohs(ea-&gt;arp_op) != ARPOP_REQUEST)
+	  <span class="enscript-keyword">return</span>;
+
+	myaddr.s_addr = kdp_get_ip_address();
+	my_enaddr = kdp_get_mac_addr();
+
+	<span class="enscript-keyword">if</span> ((ntohl(myaddr.s_addr) == 0) ||
+	    ((my_enaddr.ether_addr_octet[0] &amp; 0xff) == 0
+		 &amp;&amp; (my_enaddr.ether_addr_octet[1] &amp; 0xff) == 0
+		 &amp;&amp; (my_enaddr.ether_addr_octet[2] &amp; 0xff) == 0
+		 &amp;&amp; (my_enaddr.ether_addr_octet[3] &amp; 0xff) == 0
+		 &amp;&amp; (my_enaddr.ether_addr_octet[4] &amp; 0xff) == 0
+		 &amp;&amp; (my_enaddr.ether_addr_octet[5] &amp; 0xff) == 0
+		 ))
+		<span class="enscript-keyword">return</span>;
+
+	(<span class="enscript-type">void</span>)memcpy((<span class="enscript-type">void</span> *)&amp;isaddr, (<span class="enscript-type">void</span> *)ea-&gt;arp_spa, <span class="enscript-keyword">sizeof</span> (isaddr));
+	(<span class="enscript-type">void</span>)memcpy((<span class="enscript-type">void</span> *)&amp;itaddr, (<span class="enscript-type">void</span> *)ea-&gt;arp_tpa, <span class="enscript-keyword">sizeof</span> (itaddr));
+
+	<span class="enscript-keyword">if</span> (itaddr.s_addr == myaddr.s_addr) {
+		(<span class="enscript-type">void</span>)memcpy((<span class="enscript-type">void</span> *)ea-&gt;arp_tha, (<span class="enscript-type">void</span> *)ea-&gt;arp_sha, <span class="enscript-keyword">sizeof</span>(ea-&gt;arp_sha));
+		(<span class="enscript-type">void</span>)memcpy((<span class="enscript-type">void</span> *)ea-&gt;arp_sha, (<span class="enscript-type">void</span> *)&amp;my_enaddr, <span class="enscript-keyword">sizeof</span>(ea-&gt;arp_sha));
+
+		(<span class="enscript-type">void</span>)memcpy((<span class="enscript-type">void</span> *)ea-&gt;arp_tpa, (<span class="enscript-type">void</span> *) ea-&gt;arp_spa, <span class="enscript-keyword">sizeof</span>(ea-&gt;arp_spa));
+		(<span class="enscript-type">void</span>)memcpy((<span class="enscript-type">void</span> *)ea-&gt;arp_spa, (<span class="enscript-type">void</span> *) &amp;itaddr, <span class="enscript-keyword">sizeof</span>(ea-&gt;arp_spa));
+
+		ea-&gt;arp_op = htons(ARPOP_REPLY);
+		ea-&gt;arp_pro = htons(ETHERTYPE_IP); 
+		(<span class="enscript-type">void</span>)memcpy(eh-&gt;ether_dhost, ea-&gt;arp_tha, <span class="enscript-keyword">sizeof</span>(eh-&gt;ether_dhost));
+		(<span class="enscript-type">void</span>)memcpy(eh-&gt;ether_shost, &amp;my_enaddr, <span class="enscript-keyword">sizeof</span>(eh-&gt;ether_shost));
+		eh-&gt;ether_type = htons(ETHERTYPE_ARP);
+		(<span class="enscript-type">void</span>)memcpy(&amp;pkt.data[pkt.off], ea, <span class="enscript-keyword">sizeof</span>(*ea));
+		pkt.off -= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ether_header);
+		<span class="enscript-comment">/* pkt.len is still the length we want, ether_header+ether_arp */</span>
+		kdp_send_data(&amp;pkt.data[pkt.off], pkt.len);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_poll</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> kdp_ether_header	*eh = NULL;
+	<span class="enscript-type">struct</span> kdp_udpiphdr	aligned_ui, *ui = &amp;aligned_ui;
+	<span class="enscript-type">struct</span> kdp_ip		aligned_ip, *ip = &amp;aligned_ip;
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span>		msg_printed;
+
+	<span class="enscript-keyword">if</span> (pkt.input)
+		kdp_panic(<span class="enscript-string">&quot;kdp_poll&quot;</span>);
+ 
+	<span class="enscript-keyword">if</span> (!kdp_en_recv_pkt || !kdp_en_send_pkt) {
+		<span class="enscript-keyword">if</span>( msg_printed == 0) {
+			msg_printed = 1;
+			printf(<span class="enscript-string">&quot;kdp_poll: no debugger device\n&quot;</span>);
+		}
+		<span class="enscript-keyword">return</span>;
+	}
+
+	pkt.off = pkt.len = 0;
+	kdp_receive_data(pkt.data, &amp;pkt.len, 3<span class="enscript-comment">/* ms */</span>);
+
+	<span class="enscript-keyword">if</span> (pkt.len == 0)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (pkt.len &gt;= <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kdp_ether_header))
+	{
+		eh = (<span class="enscript-type">struct</span> kdp_ether_header *)&amp;pkt.data[pkt.off];  
+	
+		<span class="enscript-keyword">if</span> (kdp_flag &amp; KDP_ARP)
+		{
+			<span class="enscript-keyword">if</span> (ntohs(eh-&gt;ether_type) == ETHERTYPE_ARP)
+			{
+				kdp_arp_dispatch();
+				<span class="enscript-keyword">return</span>;
+			}
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (pkt.len &lt; (<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ether_header) + <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udpiphdr)))
+		<span class="enscript-keyword">return</span>;
+
+	pkt.off += (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ether_header);
+	<span class="enscript-keyword">if</span> (ntohs(eh-&gt;ether_type) != ETHERTYPE_IP) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DO_ALIGN</span>
+	bcopy((<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], (<span class="enscript-type">char</span> *)ui, <span class="enscript-keyword">sizeof</span>(*ui));
+	bcopy((<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], (<span class="enscript-type">char</span> *)ip, <span class="enscript-keyword">sizeof</span>(*ip));
+#<span class="enscript-reference">else</span>
+	ui = (<span class="enscript-type">struct</span> kdp_udpiphdr *)&amp;pkt.data[pkt.off];
+	ip = (<span class="enscript-type">struct</span> kdp_ip *)&amp;pkt.data[pkt.off];
+#<span class="enscript-reference">endif</span>
+
+	pkt.off += (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udpiphdr);
+	<span class="enscript-keyword">if</span> (ui-&gt;ui_pr != IPPROTO_UDP) {
+		<span class="enscript-keyword">return</span>;
+	}
+ 
+	<span class="enscript-keyword">if</span> (ip-&gt;ip_hl &gt; (<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ip) &gt;&gt; 2)) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (ntohs(ui-&gt;ui_dport) != KDP_REMOTE_PORT) {
+		<span class="enscript-keyword">if</span> (panicd_port == (ntohs(ui-&gt;ui_dport)) &amp;&amp; 
+		    flag_panic_dump_in_progress) {
+			last_panic_port = ui-&gt;ui_sport;
+		}
+		<span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">return</span>;
+	}
+	<span class="enscript-comment">/* If we receive a kernel debugging packet whilst a 
+	 * core dump is in progress, abort the transfer and 
+	 * enter the debugger if not told otherwise. 
+	 */</span>
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">if</span> (flag_panic_dump_in_progress)
+		{
+			<span class="enscript-keyword">if</span> (!flag_dont_abort_panic_dump) {
+				abort_panic_transfer();
+			}
+			<span class="enscript-keyword">return</span>;
+		}
+
+	<span class="enscript-keyword">if</span> (!kdp.is_conn &amp;&amp; !flag_panic_dump_in_progress) {
+		enaddr_copy(eh-&gt;ether_dhost, &amp;adr.loc.ea);
+		adr.loc.in = ui-&gt;ui_dst;
+
+		enaddr_copy(eh-&gt;ether_shost, &amp;adr.rmt.ea);
+		adr.rmt.in = ui-&gt;ui_src;
+	}
+
+	<span class="enscript-comment">/*
+	 * Calculate kdp packet length.
+	 */</span>
+	pkt.len = ntohs((u_short)ui-&gt;ui_ulen) - (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udphdr);
+	pkt.input = TRUE;
+}
+
+<span class="enscript-comment">/* Create and transmit an ARP resolution request for the target IP address.
+ * This is modeled on ether_inet_arp()/RFC 826.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">transmit_ARP_request</span>(uint32_t ip_addr)
+{
+	<span class="enscript-type">struct</span> kdp_ether_header	*eh = (<span class="enscript-type">struct</span> kdp_ether_header *) &amp;pkt.data[0];
+	<span class="enscript-type">struct</span> kdp_ether_arp	*ea = (<span class="enscript-type">struct</span> kdp_ether_arp *) &amp;pkt.data[<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kdp_ether_header)];
+
+ 	KDP_DEBUG(<span class="enscript-string">&quot;Transmitting ARP request\n&quot;</span>);
+	<span class="enscript-comment">/* Populate the ether_header */</span>
+	eh-&gt;ether_type = htons(ETHERTYPE_ARP);
+	enaddr_copy(&amp;kdp_current_mac_address, eh-&gt;ether_shost);
+	enaddr_copy(&amp;etherbroadcastaddr, eh-&gt;ether_dhost);
+
+	<span class="enscript-comment">/* Populate the ARP header */</span>
+	ea-&gt;arp_pro = htons(ETHERTYPE_IP);
+	ea-&gt;arp_hln = <span class="enscript-keyword">sizeof</span>(ea-&gt;arp_sha);
+	ea-&gt;arp_pln = <span class="enscript-keyword">sizeof</span>(ea-&gt;arp_spa);
+	ea-&gt;arp_hrd = htons(ARPHRD_ETHER);
+	ea-&gt;arp_op = htons(ARPOP_REQUEST);
+
+	<span class="enscript-comment">/* Target fields */</span>
+	enaddr_copy(&amp;etherbroadcastaddr, ea-&gt;arp_tha);
+	memcpy(ea-&gt;arp_tpa, (<span class="enscript-type">void</span> *) &amp;ip_addr, <span class="enscript-keyword">sizeof</span>(ip_addr));
+
+	<span class="enscript-comment">/* Source fields */</span>
+	enaddr_copy(&amp;kdp_current_mac_address, ea-&gt;arp_sha);
+	memcpy(ea-&gt;arp_spa, (<span class="enscript-type">void</span> *) &amp;kdp_current_ip_address, <span class="enscript-keyword">sizeof</span>(kdp_current_ip_address));
+
+	pkt.off = 0;
+	pkt.len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kdp_ether_header) + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kdp_ether_arp);
+	<span class="enscript-comment">/* Transmit */</span>
+	kdp_send_data(&amp;pkt.data[pkt.off], pkt.len);
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">kdp_arp_resolve</span>(uint32_t arp_target_ip, <span class="enscript-type">struct</span> kdp_ether_addr *resolved_MAC)
+{
+	<span class="enscript-type">int</span> poll_count = 256; <span class="enscript-comment">/* ~770 ms modulo broadcast/delayed traffic? */</span>
+	<span class="enscript-type">char</span> tretries = 0;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NUM_ARP_TX_RETRIES</span> 5
+
+	target_ip = arp_target_ip;
+	flag_arp_resolved = FALSE;
+
+<span class="enscript-reference">TRANSMIT_RETRY</span>:
+	pkt.off = pkt.len = 0;
+
+	tretries++;
+
+	<span class="enscript-keyword">if</span> (tretries &gt;= NUM_ARP_TX_RETRIES) {
+		<span class="enscript-keyword">return</span> FALSE;
+	}
+
+	KDP_DEBUG(<span class="enscript-string">&quot;ARP TX attempt #%d \n&quot;</span>, tretries);
+
+	transmit_ARP_request(arp_target_ip);
+
+	<span class="enscript-keyword">while</span> (!pkt.input &amp;&amp; !flag_arp_resolved &amp;&amp; flag_panic_dump_in_progress &amp;&amp; --poll_count) {
+		kdp_poll();
+	}
+
+	<span class="enscript-keyword">if</span> (flag_arp_resolved) {
+		*resolved_MAC = current_resolved_MAC;
+		<span class="enscript-keyword">return</span> TRUE;
+	}
+	
+	<span class="enscript-keyword">if</span> (!flag_panic_dump_in_progress || pkt.input) <span class="enscript-comment">/* we received a debugging packet, bail*/</span>
+	{
+		printf(<span class="enscript-string">&quot;Received a debugger packet,transferring control to debugger\n&quot;</span>);
+		<span class="enscript-comment">/* Indicate that we should wait in the debugger when we return */</span>
+		kdp_flag |= DBG_POST_CORE;
+		pkt.input = FALSE;
+		<span class="enscript-keyword">return</span> FALSE;
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-comment">/* We timed out */</span>
+		<span class="enscript-keyword">if</span> (0 == poll_count) {
+			poll_count = 256;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">TRANSMIT_RETRY</span>;
+		}
+	<span class="enscript-keyword">return</span> FALSE;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_handler</span>(
+    <span class="enscript-type">void</span>	*saved_state
+)
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span>		reply_port;
+    kdp_hdr_t			aligned_hdr, *hdr = &amp;aligned_hdr;
+
+    kdp.saved_state = saved_state;  <span class="enscript-comment">// see comment in kdp_raise_exception
+</span>
+    <span class="enscript-keyword">do</span> {
+	<span class="enscript-keyword">while</span> (!pkt.input)
+	    kdp_poll();
+	    		
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DO_ALIGN</span>
+	bcopy((<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], (<span class="enscript-type">char</span> *)hdr, <span class="enscript-keyword">sizeof</span>(*hdr));
+#<span class="enscript-reference">else</span>
+	hdr = (kdp_hdr_t *)&amp;pkt.data[pkt.off];
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">// ignore replies -- we're not expecting them anyway.
+</span>	<span class="enscript-keyword">if</span> (hdr-&gt;is_reply) {
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+	}
+	
+	<span class="enscript-keyword">if</span> (hdr-&gt;request == KDP_REATTACH)
+	  exception_seq = hdr-&gt;seq;
+
+	<span class="enscript-comment">// check for retransmitted request
+</span>	<span class="enscript-keyword">if</span> (hdr-&gt;seq == (exception_seq - 1)) {
+	    <span class="enscript-comment">/* retransmit last reply */</span>
+	    kdp_send_data(&amp;saved_reply.data[saved_reply.off],
+                          saved_reply.len);
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((hdr-&gt;seq != exception_seq) &amp;&amp;
+                   (hdr-&gt;request != KDP_CONNECT)) {
+	    printf(<span class="enscript-string">&quot;kdp: bad sequence %d (want %d)\n&quot;</span>,
+			hdr-&gt;seq, exception_seq);
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+	}
+	
+	<span class="enscript-comment">/* This is a manual side-channel to the main KDP protocol.
+	 * A client like GDB/kgmacros can manually construct 
+	 * a request, set the input flag, issue a dummy KDP request,
+	 * and then manually collect the result
+	 */</span>
+	<span class="enscript-keyword">if</span> (manual_pkt.input) {
+	  kdp_hdr_t *manual_hdr = (kdp_hdr_t *)&amp;manual_pkt.data;
+	  <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> manual_port_unused = 0;
+	  <span class="enscript-keyword">if</span> (!manual_hdr-&gt;is_reply) {
+	    <span class="enscript-comment">/* process */</span>
+	    kdp_packet((<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *)&amp;manual_pkt.data,
+		       (<span class="enscript-type">int</span> *)&amp;manual_pkt.len,
+		       &amp;manual_port_unused);
+	  }
+	  manual_pkt.input = 0;
+	}
+
+	<span class="enscript-keyword">if</span> (kdp_packet((<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>*)&amp;pkt.data[pkt.off], 
+			(<span class="enscript-type">int</span> *)&amp;pkt.len, 
+			(<span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> *)&amp;reply_port)) {
+            boolean_t sideband = FALSE;
+
+            <span class="enscript-comment">/* if it's an already connected error message, 
+             * send a sideband reply for that. for successful connects,
+             * make sure the sequence number is correct. */</span>
+            <span class="enscript-keyword">if</span> (hdr-&gt;request == KDP_CONNECT) {
+                kdp_connect_reply_t *rp = 
+			(kdp_connect_reply_t *) &amp;pkt.data[pkt.off];
+                kdp_error_t err = rp-&gt;error;
+
+                <span class="enscript-keyword">if</span> (err == KDPERR_NO_ERROR) {
+                    exception_seq = hdr-&gt;seq;
+                } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (err == KDPERR_ALREADY_CONNECTED) {
+                    sideband = TRUE;
+                }
+            } 
+
+	    kdp_reply(reply_port, sideband);
+	}
+
+<span class="enscript-reference">again</span>:
+	pkt.input = FALSE;
+    } <span class="enscript-keyword">while</span> (kdp.is_halted);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_connection_wait</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">short</span>		reply_port;
+	<span class="enscript-type">struct</span> kdp_ether_addr	kdp_mac_addr = kdp_get_mac_addr();
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		ip_addr = ntohl(kdp_get_ip_address());
+
+	<span class="enscript-comment">/*
+	 * Do both a printf() and a kprintf() of the MAC and IP so that
+	 * they will print out on headless machines but not be added to
+	 * the panic.log
+	 */</span>
+
+        <span class="enscript-keyword">if</span> (KDP_SERIAL_ENABLED()) {
+            printf(<span class="enscript-string">&quot;Using serial KDP.\n&quot;</span>);
+            kprintf(<span class="enscript-string">&quot;Using serial KDP.\n&quot;</span>);
+        } <span class="enscript-keyword">else</span> {
+            printf( <span class="enscript-string">&quot;ethernet MAC address: %02x:%02x:%02x:%02x:%02x:%02x\n&quot;</span>,
+                    kdp_mac_addr.ether_addr_octet[0] &amp; 0xff,
+                    kdp_mac_addr.ether_addr_octet[1] &amp; 0xff,
+                    kdp_mac_addr.ether_addr_octet[2] &amp; 0xff,
+                    kdp_mac_addr.ether_addr_octet[3] &amp; 0xff,
+                    kdp_mac_addr.ether_addr_octet[4] &amp; 0xff,
+                    kdp_mac_addr.ether_addr_octet[5] &amp; 0xff);
+		
+            kprintf( <span class="enscript-string">&quot;ethernet MAC address: %02x:%02x:%02x:%02x:%02x:%02x\n&quot;</span>,
+                     kdp_mac_addr.ether_addr_octet[0] &amp; 0xff,
+                     kdp_mac_addr.ether_addr_octet[1] &amp; 0xff,
+                     kdp_mac_addr.ether_addr_octet[2] &amp; 0xff,
+                     kdp_mac_addr.ether_addr_octet[3] &amp; 0xff,
+                     kdp_mac_addr.ether_addr_octet[4] &amp; 0xff,
+                     kdp_mac_addr.ether_addr_octet[5] &amp; 0xff);
+		
+            printf( <span class="enscript-string">&quot;ip address: %d.%d.%d.%d\n&quot;</span>,
+                    (ip_addr &amp; 0xff000000) &gt;&gt; 24,
+                    (ip_addr &amp; 0xff0000) &gt;&gt; 16,
+                    (ip_addr &amp; 0xff00) &gt;&gt; 8,
+                    (ip_addr &amp; 0xff));
+            
+            kprintf( <span class="enscript-string">&quot;ip address: %d.%d.%d.%d\n&quot;</span>,
+                     (ip_addr &amp; 0xff000000) &gt;&gt; 24,
+                     (ip_addr &amp; 0xff0000) &gt;&gt; 16,
+                     (ip_addr &amp; 0xff00) &gt;&gt; 8,
+                     (ip_addr &amp; 0xff));
+        }
+            
+	printf(<span class="enscript-string">&quot;\nWaiting for remote debugger connection.\n&quot;</span>);
+	kprintf(<span class="enscript-string">&quot;\nWaiting for remote debugger connection.\n&quot;</span>);
+
+
+	<span class="enscript-keyword">if</span> (reattach_wait == 0) {
+		<span class="enscript-keyword">if</span>((kdp_flag &amp; KDP_GETC_ENA) &amp;&amp; (0 != kdp_getc()))
+		{
+			printf(<span class="enscript-string">&quot;Options.....    Type\n&quot;</span>);
+			printf(<span class="enscript-string">&quot;------------    ----\n&quot;</span>);
+			printf(<span class="enscript-string">&quot;continue....    'c'\n&quot;</span>);
+			printf(<span class="enscript-string">&quot;reboot......    'r'\n&quot;</span>);
+		}
+	} <span class="enscript-keyword">else</span>
+		reattach_wait = 0;
+    
+	exception_seq = 0;
+
+	<span class="enscript-keyword">do</span> {
+		kdp_hdr_t aligned_hdr, *hdr = &amp;aligned_hdr;
+	
+		<span class="enscript-keyword">while</span> (!pkt.input) {
+			<span class="enscript-keyword">if</span> (kdp_flag &amp; KDP_GETC_ENA) {
+				<span class="enscript-keyword">switch</span>(kdp_getc()) {
+				<span class="enscript-keyword">case</span> <span class="enscript-string">'c'</span>:
+					printf(<span class="enscript-string">&quot;Continuing...\n&quot;</span>);
+					<span class="enscript-keyword">return</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-string">'r'</span>:
+					printf(<span class="enscript-string">&quot;Rebooting...\n&quot;</span>);
+					kdp_machine_reboot();
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-reference">default</span>:
+					<span class="enscript-keyword">break</span>;
+		    		}
+			}
+			kdp_poll();
+		}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DO_ALIGN</span>
+		bcopy((<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], (<span class="enscript-type">char</span> *)hdr, <span class="enscript-keyword">sizeof</span>(*hdr));
+#<span class="enscript-reference">else</span>
+		hdr = (kdp_hdr_t *)&amp;pkt.data[pkt.off];
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">if</span> (hdr-&gt;request == KDP_HOSTREBOOT) {
+			kdp_machine_reboot();
+			<span class="enscript-comment">/* should not return! */</span>
+		}
+		<span class="enscript-keyword">if</span> (((hdr-&gt;request == KDP_CONNECT) || (hdr-&gt;request == KDP_REATTACH)) &amp;&amp;
+			!hdr-&gt;is_reply &amp;&amp; (hdr-&gt;seq == exception_seq)) {
+		    <span class="enscript-keyword">if</span> (kdp_packet((<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], 
+				(<span class="enscript-type">int</span> *)&amp;pkt.len, 
+				(<span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> *)&amp;reply_port))
+			    kdp_reply(reply_port, FALSE);
+		    <span class="enscript-keyword">if</span> (hdr-&gt;request == KDP_REATTACH) {
+				reattach_wait = 0;
+				hdr-&gt;request=KDP_DISCONNECT;
+				exception_seq = 0;
+			}
+		}
+
+		pkt.input = FALSE;
+	} <span class="enscript-keyword">while</span> (!kdp.is_conn);
+    
+	<span class="enscript-keyword">if</span> (current_debugger == KDP_CUR_DB)
+		active_debugger=1;
+	printf(<span class="enscript-string">&quot;Connected to remote debugger.\n&quot;</span>);
+	kprintf(<span class="enscript-string">&quot;Connected to remote debugger.\n&quot;</span>);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_send_exception</span>(
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		exception,
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		code,
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		subcode
+)
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span>		remote_port;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		timeout_count = 100;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>                poll_timeout;
+
+    <span class="enscript-keyword">do</span> {
+	pkt.off = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ether_header) + <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udpiphdr);
+	kdp_exception((<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], 
+			(<span class="enscript-type">int</span> *)&amp;pkt.len, 
+			(<span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> *)&amp;remote_port,
+			(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)exception, 
+			(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)code, 
+			(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)subcode);
+
+	kdp_send(remote_port);
+    
+	poll_timeout = 50;
+	<span class="enscript-keyword">while</span>(!pkt.input &amp;&amp; poll_timeout)
+	  {
+	    kdp_poll();
+	    poll_timeout--;
+	  }
+
+	<span class="enscript-keyword">if</span> (pkt.input) {
+	    <span class="enscript-keyword">if</span> (!kdp_exception_ack(&amp;pkt.data[pkt.off], pkt.len)) {
+		pkt.input = FALSE;
+	    }
+	}
+
+	pkt.input = FALSE;
+
+	<span class="enscript-keyword">if</span> (kdp.exception_ack_needed)
+	    kdp_us_spin(250000);
+
+    } <span class="enscript-keyword">while</span> (kdp.exception_ack_needed &amp;&amp; timeout_count--);
+    
+    <span class="enscript-keyword">if</span> (kdp.exception_ack_needed) {
+	<span class="enscript-comment">// give up &amp; disconnect
+</span>	printf(<span class="enscript-string">&quot;kdp: exception ack timeout\n&quot;</span>);
+	<span class="enscript-keyword">if</span> (current_debugger == KDP_CUR_DB)
+    	active_debugger=0;
+	kdp_reset();
+    }
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 
+<span class="enscript-function-name">kdp_debugger_loop</span>(
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		exception,
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		code,
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		subcode,
+    <span class="enscript-type">void</span>			*saved_state)
+{
+    <span class="enscript-type">int</span>			index;
+
+    <span class="enscript-keyword">if</span> (saved_state == 0) 
+	printf(<span class="enscript-string">&quot;kdp_raise_exception with NULL state\n&quot;</span>);
+
+    index = exception;
+    <span class="enscript-keyword">if</span> (exception != EXC_BREAKPOINT) {
+	<span class="enscript-keyword">if</span> (exception &gt; EXC_BREAKPOINT || exception &lt; EXC_BAD_ACCESS) {
+	    index = 0;
+	}
+	printf(<span class="enscript-string">&quot;%s exception (%x,%x,%x)\n&quot;</span>,
+		exception_message[index],
+		exception, code, subcode);
+    }
+
+    kdp_sync_cache();
+
+    <span class="enscript-comment">/* XXX WMG it seems that sometimes it doesn't work to let kdp_handler
+     * do this. I think the client and the host can get out of sync.
+     */</span>
+    kdp.saved_state = saved_state;
+    kdp.kdp_cpu = cpu_number();
+    kdp.kdp_thread = current_thread();
+
+    <span class="enscript-keyword">if</span> (kdp_en_setmode)  
+        (*kdp_en_setmode)(TRUE); <span class="enscript-comment">/* enabling link mode */</span>
+
+    <span class="enscript-keyword">if</span> (pkt.input)
+	kdp_panic(<span class="enscript-string">&quot;kdp_raise_exception&quot;</span>);
+
+    <span class="enscript-keyword">if</span> (((kdp_flag &amp; KDP_PANIC_DUMP_ENABLED) || (kdp_flag &amp; PANIC_LOG_DUMP) || kdp_has_polled_corefile())
+	&amp;&amp; (panicstr != (<span class="enscript-type">char</span> *) 0)) {
+	    kdp_panic_dump();
+	    <span class="enscript-keyword">if</span> (kdp_flag &amp; REBOOT_POST_CORE)
+		    kdp_machine_reboot();
+      }
+    <span class="enscript-keyword">else</span>
+      <span class="enscript-keyword">if</span> ((kdp_flag &amp; PANIC_CORE_ON_NMI) &amp;&amp; (panicstr == (<span class="enscript-type">char</span> *) 0) &amp;&amp;
+	  !kdp.is_conn) {
+
+	disable_debug_output = disableConsoleOutput = FALSE;
+	kdp_panic_dump();
+
+	<span class="enscript-keyword">if</span> (!(kdp_flag &amp; DBG_POST_CORE))
+	  <span class="enscript-keyword">goto</span> <span class="enscript-reference">exit_debugger_loop</span>;
+      }
+
+ <span class="enscript-reference">again</span>:
+    <span class="enscript-keyword">if</span> (!kdp.is_conn)
+	kdp_connection_wait();
+    <span class="enscript-keyword">else</span> {
+	kdp_send_exception(exception, code, subcode);
+	<span class="enscript-keyword">if</span> (kdp.exception_ack_needed) {
+	    kdp.exception_ack_needed = FALSE;
+	    kdp_remove_all_breakpoints();
+	    printf(<span class="enscript-string">&quot;Remote debugger disconnected.\n&quot;</span>);
+	  }
+      }
+
+    <span class="enscript-keyword">if</span> (kdp.is_conn) {
+	kdp.is_halted = TRUE;		<span class="enscript-comment">/* XXX */</span>
+	kdp_handler(saved_state);
+	<span class="enscript-keyword">if</span> (!kdp.is_conn)
+	  {
+	    kdp_remove_all_breakpoints();
+	    printf(<span class="enscript-string">&quot;Remote debugger disconnected.\n&quot;</span>);
+	  }
+    }
+    <span class="enscript-comment">/* Allow triggering a panic core dump when connected to the machine
+     * Continuing after setting kdp_trigger_core_dump should do the
+     * trick.
+     */</span>
+
+    <span class="enscript-keyword">if</span> (1 == kdp_trigger_core_dump) {
+	kdp_flag |= KDP_PANIC_DUMP_ENABLED;
+	kdp_panic_dump();
+	<span class="enscript-keyword">if</span> (kdp_flag &amp; REBOOT_POST_CORE)
+		kdp_machine_reboot();
+	kdp_trigger_core_dump = 0;
+      }
+
+<span class="enscript-comment">/* Trigger a reboot if the user has set this flag through the
+ * debugger.Ideally, this would be done through the HOSTREBOOT packet
+ * in the protocol,but that will need gdb support,and when it's
+ * available, it should work automatically.
+ */</span>
+    <span class="enscript-keyword">if</span> (1 == flag_kdp_trigger_reboot) {
+	    kdp_machine_reboot();
+	    <span class="enscript-comment">/* If we're still around, reset the flag */</span>
+	    flag_kdp_trigger_reboot = 0;
+    }
+
+    <span class="enscript-keyword">if</span> (kdp_reentry_deadline) {
+	    kdp_schedule_debugger_reentry(kdp_reentry_deadline);
+	    printf(<span class="enscript-string">&quot;Debugger re-entry scheduled in %d milliseconds\n&quot;</span>, kdp_reentry_deadline);
+	    kdp_reentry_deadline = 0;
+    }
+
+    kdp_sync_cache();
+
+    <span class="enscript-keyword">if</span> (reattach_wait == 1)
+      <span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+
+<span class="enscript-reference">exit_debugger_loop</span>:
+    <span class="enscript-keyword">if</span> (kdp_en_setmode)  
+        (*kdp_en_setmode)(FALSE); <span class="enscript-comment">/* link cleanup */</span>
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_reset</span>(<span class="enscript-type">void</span>)
+{
+	kdp.reply_port = kdp.exception_port = 0;
+	kdp.is_halted = kdp.is_conn = FALSE;
+	kdp.exception_seq = kdp.conn_seq = 0;
+	kdp.session_key = 0;
+	pkt.input = manual_pkt.input = FALSE;
+	pkt.len = pkt.off = manual_pkt.len = 0;
+}
+
+<span class="enscript-type">struct</span> corehdr *
+<span class="enscript-function-name">create_panic_header</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> request, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *corename, 
+    <span class="enscript-type">unsigned</span> length, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> block)
+{
+	<span class="enscript-type">struct</span> kdp_udpiphdr	aligned_ui, *ui = &amp;aligned_ui;
+	<span class="enscript-type">struct</span> kdp_ip		aligned_ip, *ip = &amp;aligned_ip;
+	<span class="enscript-type">struct</span> kdp_ether_header	*eh;
+	<span class="enscript-type">struct</span> corehdr		*coreh;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>		*mode = <span class="enscript-string">&quot;octet&quot;</span>;
+	<span class="enscript-type">char</span>			modelen  = strlen(mode) + 1;
+
+	size_t			fmask_size = <span class="enscript-keyword">sizeof</span>(KDP_FEATURE_MASK_STRING) + <span class="enscript-keyword">sizeof</span>(kdp_crashdump_feature_mask);
+
+	pkt.off = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ether_header);
+	pkt.len = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)(length + ((request == KDP_WRQ) ? modelen + fmask_size : 0) + 
+	(corename ? (strlen(corename) + 1 ): 0) + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> corehdr));
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DO_ALIGN</span>
+	bcopy((<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], (<span class="enscript-type">char</span> *)ui, <span class="enscript-keyword">sizeof</span>(*ui));
+#<span class="enscript-reference">else</span>
+	ui = (<span class="enscript-type">struct</span> kdp_udpiphdr *)&amp;pkt.data[pkt.off];
+#<span class="enscript-reference">endif</span>
+	ui-&gt;ui_next = ui-&gt;ui_prev = 0;
+	ui-&gt;ui_x1 = 0;
+	ui-&gt;ui_pr = IPPROTO_UDP;
+	ui-&gt;ui_len = htons((u_short)pkt.len + <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udphdr));
+	ui-&gt;ui_src.s_addr = (uint32_t)kdp_current_ip_address;
+	<span class="enscript-comment">/* Already in network byte order via inet_aton() */</span>
+	ui-&gt;ui_dst.s_addr = panic_server_ip;
+	ui-&gt;ui_sport = htons(panicd_port);
+	ui-&gt;ui_dport = ((request == KDP_WRQ) ? htons(panicd_port) : last_panic_port);
+	ui-&gt;ui_ulen = ui-&gt;ui_len;
+	ui-&gt;ui_sum = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DO_ALIGN</span>
+	bcopy((<span class="enscript-type">char</span> *)ui, (<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], <span class="enscript-keyword">sizeof</span>(*ui));
+	bcopy((<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], (<span class="enscript-type">char</span> *)ip, <span class="enscript-keyword">sizeof</span>(*ip));
+#<span class="enscript-reference">else</span>
+	ip = (<span class="enscript-type">struct</span> kdp_ip *)&amp;pkt.data[pkt.off];
+#<span class="enscript-reference">endif</span>
+	ip-&gt;ip_len = htons(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udpiphdr) + pkt.len);
+	ip-&gt;ip_v = IPVERSION;
+	ip-&gt;ip_id = htons(ip_id++);
+	ip-&gt;ip_hl = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ip) &gt;&gt; 2;
+	ip-&gt;ip_ttl = udp_ttl;
+	ip-&gt;ip_sum = 0;
+	ip-&gt;ip_sum = htons(~ip_sum((<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *)ip, ip-&gt;ip_hl));
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DO_ALIGN</span>
+	bcopy((<span class="enscript-type">char</span> *)ip, (<span class="enscript-type">char</span> *)&amp;pkt.data[pkt.off], <span class="enscript-keyword">sizeof</span>(*ip));
+#<span class="enscript-reference">endif</span>
+    
+	pkt.len += (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udpiphdr);
+
+	pkt.off += (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udpiphdr);
+  
+	coreh = (<span class="enscript-type">struct</span> corehdr *) &amp;pkt.data[pkt.off];
+	coreh-&gt;th_opcode = htons((u_short)request);
+  
+	<span class="enscript-keyword">if</span> (request == KDP_WRQ)
+	{
+		<span class="enscript-type">char</span> *cp;
+
+		cp = coreh-&gt;th_u.tu_rpl;
+		cp += strlcpy (cp, corename, KDP_MAXPACKET);
+		*cp++ = <span class="enscript-string">'\0'</span>;
+		cp += strlcpy (cp, mode, KDP_MAXPACKET - strlen(corename));
+		*cp++ = <span class="enscript-string">'\0'</span>;
+		cp += strlcpy(cp, KDP_FEATURE_MASK_STRING, <span class="enscript-keyword">sizeof</span>(KDP_FEATURE_MASK_STRING));
+		*cp++ = <span class="enscript-string">'\0'</span>; <span class="enscript-comment">/* Redundant */</span>
+		bcopy(&amp;kdp_crashdump_feature_mask, cp, <span class="enscript-keyword">sizeof</span>(kdp_crashdump_feature_mask));
+		kdp_crashdump_pkt_size = KDP_LARGE_CRASHDUMP_PKT_SIZE;
+		PE_parse_boot_argn(<span class="enscript-string">&quot;kdp_crashdump_pkt_size&quot;</span>, &amp;kdp_crashdump_pkt_size, <span class="enscript-keyword">sizeof</span>(kdp_crashdump_pkt_size));
+		cp += <span class="enscript-keyword">sizeof</span>(kdp_crashdump_feature_mask);
+		*(uint32_t *)cp = htonl(kdp_crashdump_pkt_size);
+	}
+	<span class="enscript-keyword">else</span>
+	{
+		coreh-&gt;th_block = htonl((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) block);
+	}
+
+	pkt.off -= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_udpiphdr);
+	pkt.off -= (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ether_header);
+
+	eh = (<span class="enscript-type">struct</span> kdp_ether_header *)&amp;pkt.data[pkt.off];
+	enaddr_copy(&amp;kdp_current_mac_address, eh-&gt;ether_shost);
+	enaddr_copy(&amp;destination_mac, eh-&gt;ether_dhost);
+	eh-&gt;ether_type = htons(ETHERTYPE_IP);
+    
+	pkt.len += (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kdp_ether_header);
+	<span class="enscript-keyword">return</span> coreh;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">kdp_send_crashdump_seek</span>(<span class="enscript-type">char</span> *corename, uint64_t seek_off)
+{
+	<span class="enscript-type">int</span> panic_error;
+
+	<span class="enscript-keyword">if</span> (kdp_feature_large_crashdumps) {
+		panic_error = kdp_send_crashdump_pkt(KDP_SEEK, corename, 
+						     <span class="enscript-keyword">sizeof</span>(seek_off),
+						     &amp;seek_off);
+	} <span class="enscript-keyword">else</span> {
+		uint32_t off = (uint32_t) seek_off;
+		panic_error = kdp_send_crashdump_pkt(KDP_SEEK, corename, 
+						     <span class="enscript-keyword">sizeof</span>(off), &amp;off);
+	}
+
+	<span class="enscript-keyword">if</span> (panic_error &lt; 0) {
+		printf (<span class="enscript-string">&quot;kdp_send_crashdump_pkt failed with error %d\n&quot;</span>,
+			panic_error);
+		<span class="enscript-keyword">return</span> panic_error;
+	}
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">kdp_send_crashdump_data</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> request, <span class="enscript-type">char</span> *corename,
+    			    uint64_t length, <span class="enscript-type">void</span> * txstart)
+{
+	<span class="enscript-type">int</span> panic_error = 0;
+
+	<span class="enscript-keyword">while</span> ((length &gt; 0) || !txstart) {
+		uint64_t chunk = MIN(kdp_crashdump_pkt_size, length);
+
+		panic_error = kdp_send_crashdump_pkt(request, corename, chunk,
+							txstart);
+		<span class="enscript-keyword">if</span> (panic_error &lt; 0) {
+			printf (<span class="enscript-string">&quot;kdp_send_crashdump_pkt failed with error %d\n&quot;</span>, panic_error);
+			<span class="enscript-keyword">return</span> panic_error;
+		}
+		<span class="enscript-keyword">if</span> (!txstart) <span class="enscript-keyword">break</span>;
+		txstart = (<span class="enscript-type">void</span> *)(((uintptr_t) txstart) + chunk);
+		length  -= chunk;
+	}
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+uint32_t kdp_crashdump_short_pkt;
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdp_send_crashdump_pkt</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> request, <span class="enscript-type">char</span> *corename, 
+    uint64_t length, <span class="enscript-type">void</span> *panic_data)
+{
+	<span class="enscript-type">int</span> poll_count;
+	<span class="enscript-type">struct</span> corehdr *th = NULL;
+	<span class="enscript-type">char</span> rretries, tretries;
+
+	<span class="enscript-keyword">if</span> (kdp_dump_start_time == 0) {
+		kdp_dump_start_time = mach_absolute_time();
+		kdp_superblock_dump_start_time = kdp_dump_start_time;
+	}
+
+	tretries = rretries = 0;
+	poll_count = KDP_CRASHDUMP_POLL_COUNT;
+	pkt.off = pkt.len = 0;
+	<span class="enscript-keyword">if</span> (request == KDP_WRQ) <span class="enscript-comment">/* longer timeout for initial request */</span>
+		poll_count += 1000;
+
+<span class="enscript-reference">TRANSMIT_RETRY</span>:
+	tretries++;
+
+	<span class="enscript-keyword">if</span> (tretries &gt;=15) {
+<span class="enscript-comment">/* The crashdump server is unreachable for some reason. This could be a network
+ * issue or, if we've been especially unfortunate, we've hit Radar 2760413,
+ * which is a long standing problem with the IOKit polled mode network driver
+ * shim which can prevent transmits/receives completely.
+ */</span>
+		printf (<span class="enscript-string">&quot;Cannot contact panic server, timing out.\n&quot;</span>);
+		<span class="enscript-keyword">return</span> (-3);
+	}
+
+	<span class="enscript-keyword">if</span> (tretries &gt; 2)
+		printf(<span class="enscript-string">&quot;TX retry #%d &quot;</span>, tretries );
+  
+	th = create_panic_header(request, corename, (<span class="enscript-type">unsigned</span>)length, panic_block);
+
+	<span class="enscript-keyword">if</span> (request == KDP_DATA) {
+		<span class="enscript-comment">/* as all packets are kdp_crashdump_pkt_size in length, the last packet
+		 * may end up with trailing bits. make sure that those
+		 * bits aren't confusing. */</span>
+		<span class="enscript-keyword">if</span> (length &lt; kdp_crashdump_pkt_size) {
+			kdp_crashdump_short_pkt++;
+			memset(th-&gt;th_data + length, <span class="enscript-string">'Y'</span>, 
+                               kdp_crashdump_pkt_size - (uint32_t) length);
+		}
+
+		<span class="enscript-keyword">if</span> (!kdp_machine_vm_read((mach_vm_address_t)(uintptr_t)panic_data, (caddr_t) th-&gt;th_data, length)) {
+			uintptr_t next_page = round_page((uintptr_t)panic_data);
+			memset((caddr_t) th-&gt;th_data, <span class="enscript-string">'X'</span>, (size_t)length);
+			<span class="enscript-keyword">if</span> ((next_page - ((uintptr_t) panic_data)) &lt; length) {
+				uint64_t resid = length - (next_page - (intptr_t) panic_data);
+				<span class="enscript-keyword">if</span> (!kdp_machine_vm_read((mach_vm_address_t)(uintptr_t)next_page, (caddr_t) th-&gt;th_data + (length - resid), resid)) {
+					memset((caddr_t) th-&gt;th_data + (length - resid), <span class="enscript-string">'X'</span>, (size_t)resid);
+				}
+			}
+		}
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (request == KDP_SEEK) {
+		<span class="enscript-keyword">if</span> (kdp_feature_large_crashdumps)
+			*(uint64_t *) th-&gt;th_data = OSSwapHostToBigInt64((*(uint64_t *) panic_data));
+		<span class="enscript-keyword">else</span>
+			*(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *) th-&gt;th_data = htonl(*(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *) panic_data);
+	}
+
+	kdp_send_data(&amp;pkt.data[pkt.off], pkt.len);
+
+	<span class="enscript-comment">/* Listen for the ACK */</span>
+<span class="enscript-reference">RECEIVE_RETRY</span>:
+	<span class="enscript-keyword">while</span> (!pkt.input &amp;&amp; flag_panic_dump_in_progress &amp;&amp; poll_count) {
+		kdp_poll();
+		poll_count--;
+	}
+
+	<span class="enscript-keyword">if</span> (pkt.input) {
+    
+		pkt.input = FALSE;
+    
+		th = (<span class="enscript-type">struct</span> corehdr *) &amp;pkt.data[pkt.off];
+		<span class="enscript-keyword">if</span> (request == KDP_WRQ) {
+			uint16_t opcode64 = ntohs(th-&gt;th_opcode);
+			uint16_t features64 = (opcode64 &amp; 0xFF00)&gt;&gt;8;
+			<span class="enscript-keyword">if</span> ((opcode64 &amp; 0xFF) == KDP_ACK) {
+				kdp_feature_large_crashdumps = features64 &amp; KDP_FEATURE_LARGE_CRASHDUMPS;
+				<span class="enscript-keyword">if</span> (features64 &amp; KDP_FEATURE_LARGE_PKT_SIZE) {
+					kdp_feature_large_pkt_size = 1;
+				}
+				<span class="enscript-keyword">else</span> {
+					kdp_feature_large_pkt_size = 0;
+					kdp_crashdump_pkt_size = 512;
+				}
+				printf(<span class="enscript-string">&quot;Protocol features: 0x%x\n&quot;</span>, (uint32_t) features64);
+				th-&gt;th_opcode = htons(KDP_ACK);
+			}
+		}
+		<span class="enscript-keyword">if</span> (ntohs(th-&gt;th_opcode) == KDP_ACK &amp;&amp; ntohl(th-&gt;th_block) == panic_block) {
+		}
+		<span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">if</span> (ntohs(th-&gt;th_opcode) == KDP_ERROR) {
+				printf(<span class="enscript-string">&quot;Panic server returned error %d, retrying\n&quot;</span>, ntohl(th-&gt;th_code));
+				poll_count = 1000;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">TRANSMIT_RETRY</span>;
+			}
+			<span class="enscript-keyword">else</span> 
+				<span class="enscript-keyword">if</span> (ntohl(th-&gt;th_block) == (panic_block - 1)) {
+					printf(<span class="enscript-string">&quot;RX retry &quot;</span>);
+					<span class="enscript-keyword">if</span> (++rretries &gt; 1)
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">TRANSMIT_RETRY</span>;
+					<span class="enscript-keyword">else</span>
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">RECEIVE_RETRY</span>;
+				}
+	}
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">if</span> (!flag_panic_dump_in_progress) <span class="enscript-comment">/* we received a debugging packet, bail*/</span>
+		{
+			printf(<span class="enscript-string">&quot;Received a debugger packet,transferring control to debugger\n&quot;</span>);
+			<span class="enscript-comment">/* Configure that if not set ..*/</span>
+			kdp_flag |= DBG_POST_CORE;
+			<span class="enscript-keyword">return</span> (-2);
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-comment">/* We timed out */</span>
+			<span class="enscript-keyword">if</span> (0 == poll_count) {
+				poll_count = 1000;
+				kdp_us_spin ((tretries%4) * panic_timeout); <span class="enscript-comment">/* capped linear backoff */</span>
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">TRANSMIT_RETRY</span>;
+			}
+
+	<span class="enscript-keyword">if</span> (!(++panic_block % SBLOCKSZ)) {
+		uint64_t ctime;
+		kdb_printf_unbuffered(<span class="enscript-string">&quot;.&quot;</span>);
+		ctime = mach_absolute_time();
+		kdp_superblock_dump_time = ctime - kdp_superblock_dump_start_time;
+		kdp_superblock_dump_start_time = ctime;
+		<span class="enscript-keyword">if</span> (kdp_superblock_dump_time &gt; kdp_max_superblock_dump_time)
+			kdp_max_superblock_dump_time = kdp_superblock_dump_time;
+		<span class="enscript-keyword">if</span> (kdp_superblock_dump_time &lt; kdp_min_superblock_dump_time)
+			kdp_min_superblock_dump_time = kdp_superblock_dump_time;
+	}
+
+	<span class="enscript-keyword">if</span> (request == KDP_EOF) {
+		printf(<span class="enscript-string">&quot;\nTotal number of packets transmitted: %d\n&quot;</span>, panic_block);
+		printf(<span class="enscript-string">&quot;Avg. superblock transfer abstime 0x%llx\n&quot;</span>, ((mach_absolute_time() - kdp_dump_start_time) / panic_block) * SBLOCKSZ);
+		printf(<span class="enscript-string">&quot;Minimum superblock transfer abstime: 0x%llx\n&quot;</span>, kdp_min_superblock_dump_time);
+		printf(<span class="enscript-string">&quot;Maximum superblock transfer abstime: 0x%llx\n&quot;</span>, kdp_max_superblock_dump_time);
+	}
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 
+<span class="enscript-function-name">isdigit</span> (<span class="enscript-type">char</span> c)
+{
+  <span class="enscript-keyword">return</span> ((c &gt; 47) &amp;&amp; (c &lt; 58));
+}
+
+<span class="enscript-comment">/* Horrid hack to extract xnu version if possible - a much cleaner approach
+ * would be to have the integrator run a script which would copy the
+ * xnu version into a string or an int somewhere at project submission
+ * time - makes assumptions about sizeof(version), but will not fail if
+ * it changes, but may be incorrect.
+ */</span>
+<span class="enscript-comment">/* 2006: Incorporated a change from Darwin user P. Lovell to extract
+ * the minor kernel version numbers from the version string.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 
+<span class="enscript-function-name">kdp_get_xnu_version</span>(<span class="enscript-type">char</span> *versionbuf)
+{
+	<span class="enscript-type">char</span> *versionpos;
+	<span class="enscript-type">char</span> vstr[20];
+	<span class="enscript-type">int</span> retval = -1;
+	<span class="enscript-type">char</span> *vptr;
+
+	strlcpy(vstr, <span class="enscript-string">&quot;custom&quot;</span>, 10);
+	<span class="enscript-keyword">if</span> (kdp_machine_vm_read((mach_vm_address_t)(uintptr_t)version, versionbuf, 128)) {
+		versionbuf[127] = <span class="enscript-string">'\0'</span>;
+		versionpos = strnstr(versionbuf, <span class="enscript-string">&quot;xnu-&quot;</span>, 115);
+		<span class="enscript-keyword">if</span> (versionpos) {
+			strncpy(vstr, versionpos, <span class="enscript-keyword">sizeof</span>(vstr));
+			vstr[<span class="enscript-keyword">sizeof</span>(vstr)-1] = <span class="enscript-string">'\0'</span>;
+			vptr = vstr + 4; <span class="enscript-comment">/* Begin after &quot;xnu-&quot; */</span>
+			<span class="enscript-keyword">while</span> (*vptr &amp;&amp; (isdigit(*vptr) || *vptr == <span class="enscript-string">'.'</span>))
+				vptr++;
+			*vptr = <span class="enscript-string">'\0'</span>;
+			<span class="enscript-comment">/* Remove trailing period, if any */</span>
+			<span class="enscript-keyword">if</span> (*(--vptr) == <span class="enscript-string">'.'</span>)
+				*vptr = <span class="enscript-string">'\0'</span>;
+			retval = 0;
+		}
+	}
+	strlcpy(versionbuf, vstr, KDP_MAXPACKET);
+	<span class="enscript-keyword">return</span> retval;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_set_dump_info</span>(<span class="enscript-type">const</span> uint32_t flags, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *filename, 
+                  <span class="enscript-type">const</span> <span class="enscript-type">char</span> *destipstr, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *routeripstr,
+                  <span class="enscript-type">const</span> uint32_t port)
+{
+	uint32_t cmd;
+
+	<span class="enscript-keyword">if</span> (destipstr &amp;&amp; (destipstr[0] != <span class="enscript-string">'\0'</span>)) {
+		strlcpy(panicd_ip_str, destipstr, <span class="enscript-keyword">sizeof</span>(panicd_ip_str));
+		panicd_specified = 1;
+	}
+
+	<span class="enscript-keyword">if</span> (routeripstr &amp;&amp; (routeripstr[0] != <span class="enscript-string">'\0'</span>)) {
+		strlcpy(router_ip_str, routeripstr, <span class="enscript-keyword">sizeof</span>(router_ip_str));
+		router_specified = 1;
+	}
+
+	<span class="enscript-keyword">if</span> (filename &amp;&amp; (filename[0] != <span class="enscript-string">'\0'</span>)) {
+		strlcpy(corename_str, filename, <span class="enscript-keyword">sizeof</span>(corename_str));
+		corename_specified = TRUE;
+	} <span class="enscript-keyword">else</span> {
+		corename_specified = FALSE;
+	}
+
+	<span class="enscript-keyword">if</span> (port) 
+		panicd_port = port;
+
+        <span class="enscript-comment">/* on a disconnect, should we stay in KDP or not? */</span>
+        noresume_on_disconnect = (flags &amp; KDP_DUMPINFO_NORESUME) ? 1 : 0;
+
+	<span class="enscript-keyword">if</span> ((flags &amp; KDP_DUMPINFO_DUMP) == 0)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/* the rest of the commands can modify kdp_flags */</span>
+	cmd = flags &amp; KDP_DUMPINFO_MASK;
+        <span class="enscript-keyword">if</span> (cmd == KDP_DUMPINFO_DISABLE) {
+		kdp_flag &amp;= ~KDP_PANIC_DUMP_ENABLED;
+		panicd_specified       = 0;
+		kdp_trigger_core_dump  = 0;
+		<span class="enscript-keyword">return</span>;
+        }
+
+	kdp_flag &amp;= ~REBOOT_POST_CORE;
+	<span class="enscript-keyword">if</span> (flags &amp; KDP_DUMPINFO_REBOOT)
+            kdp_flag |= REBOOT_POST_CORE;
+
+	kdp_flag &amp;= ~PANIC_LOG_DUMP;
+	<span class="enscript-keyword">if</span> (cmd == KDP_DUMPINFO_PANICLOG)
+            kdp_flag |= PANIC_LOG_DUMP;
+	
+	kdp_flag &amp;= ~SYSTEM_LOG_DUMP;
+	<span class="enscript-keyword">if</span> (cmd == KDP_DUMPINFO_SYSTEMLOG)
+            kdp_flag |= SYSTEM_LOG_DUMP;
+
+	<span class="enscript-comment">/* trigger a dump */</span>
+	kdp_flag |= DBG_POST_CORE;
+
+	flag_dont_abort_panic_dump = (flags &amp; KDP_DUMPINFO_NOINTR) ? 
+		TRUE : FALSE;
+
+	reattach_wait          = 1;
+	logPanicDataToScreen   = 1;
+	disableConsoleOutput   = 0;
+	disable_debug_output   = 0;
+	kdp_trigger_core_dump  = 1;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_get_dump_info</span>(uint32_t *flags, <span class="enscript-type">char</span> *filename, <span class="enscript-type">char</span> *destipstr, 
+                  <span class="enscript-type">char</span> *routeripstr, uint32_t *port)
+{
+	<span class="enscript-keyword">if</span> (destipstr) {
+		<span class="enscript-keyword">if</span> (panicd_specified)
+			strlcpy(destipstr, panicd_ip_str, 
+                                <span class="enscript-keyword">sizeof</span>(panicd_ip_str));
+		<span class="enscript-keyword">else</span> 
+			destipstr[0] = <span class="enscript-string">'\0'</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (routeripstr) {
+		<span class="enscript-keyword">if</span> (router_specified)
+			strlcpy(routeripstr, router_ip_str,
+                                <span class="enscript-keyword">sizeof</span>(router_ip_str));
+		<span class="enscript-keyword">else</span>
+			routeripstr[0] = <span class="enscript-string">'\0'</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (filename) {
+		<span class="enscript-keyword">if</span> (corename_specified)
+			strlcpy(filename, corename_str, 
+                                <span class="enscript-keyword">sizeof</span>(corename_str));
+		<span class="enscript-keyword">else</span> 
+			filename[0] = <span class="enscript-string">'\0'</span>;
+
+	}
+
+	<span class="enscript-keyword">if</span> (port) 
+		*port = panicd_port;
+
+	<span class="enscript-keyword">if</span> (flags) {
+		*flags = 0;
+                <span class="enscript-keyword">if</span> (!panicd_specified) 
+			*flags |= KDP_DUMPINFO_DISABLE;
+                <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kdp_flag &amp; PANIC_LOG_DUMP)
+			*flags |= KDP_DUMPINFO_PANICLOG;
+		<span class="enscript-keyword">else</span>
+			*flags |= KDP_DUMPINFO_CORE;
+
+		<span class="enscript-keyword">if</span> (noresume_on_disconnect)
+			*flags |= KDP_DUMPINFO_NORESUME;
+	}
+}
+
+
+<span class="enscript-comment">/* Primary dispatch routine for the system dump */</span>
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">kdp_panic_dump</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">char</span> coreprefix[10];
+	<span class="enscript-type">char</span> coresuffix[4];
+	<span class="enscript-type">int</span> panic_error;
+
+	uint64_t        abstime;
+	uint32_t	current_ip = ntohl((uint32_t)kdp_current_ip_address);
+
+	<span class="enscript-keyword">if</span> (flag_panic_dump_in_progress) {
+		kdb_printf(<span class="enscript-string">&quot;System dump aborted.\n&quot;</span>);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">panic_dump_exit</span>;
+	}
+		
+	printf(<span class="enscript-string">&quot;Entering system dump routine\n&quot;</span>);
+
+	<span class="enscript-comment">/* try a local disk dump */</span>
+	<span class="enscript-keyword">if</span> (kdp_has_polled_corefile()) {
+	    flag_panic_dump_in_progress = TRUE;
+	    kern_dump(TRUE);
+	    abort_panic_transfer();
+	}
+
+	<span class="enscript-keyword">if</span> (!strcmp(<span class="enscript-string">&quot;local&quot;</span>, panicd_ip_str)) <span class="enscript-keyword">return</span>;	<span class="enscript-comment">/* disk only request */</span>
+
+	<span class="enscript-keyword">if</span> (!kdp_en_recv_pkt || !kdp_en_send_pkt) {
+		<span class="enscript-keyword">if</span> (!kdp_has_polled_corefile()) {
+		    kdb_printf(<span class="enscript-string">&quot;Error: No transport device registered for kernel crashdump\n&quot;</span>);
+		}
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (!panicd_specified) {
+		<span class="enscript-keyword">if</span> (!kdp_has_polled_corefile()) {
+		    kdb_printf(<span class="enscript-string">&quot;A dump server was not specified in the boot-args, terminating kernel core dump.\n&quot;</span>);
+                }
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">panic_dump_exit</span>;
+	}
+
+	flag_panic_dump_in_progress = TRUE;
+
+	<span class="enscript-keyword">if</span> (pkt.input)
+		kdp_panic(<span class="enscript-string">&quot;kdp_panic_dump: unexpected pending input packet&quot;</span>);
+
+	kdp_get_xnu_version((<span class="enscript-type">char</span> *) &amp;pkt.data[0]);
+
+        <span class="enscript-keyword">if</span> (!corename_specified) {
+            coresuffix[0] = 0;
+            <span class="enscript-comment">/* Panic log bit takes precedence over core dump bit */</span>
+            <span class="enscript-keyword">if</span> ((panicstr != (<span class="enscript-type">char</span> *) 0) &amp;&amp; (kdp_flag &amp; PANIC_LOG_DUMP))
+		strlcpy(coreprefix, <span class="enscript-string">&quot;paniclog&quot;</span>, <span class="enscript-keyword">sizeof</span>(coreprefix));
+            <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kdp_flag &amp; SYSTEM_LOG_DUMP) 
+		strlcpy(coreprefix, <span class="enscript-string">&quot;systemlog&quot;</span>, <span class="enscript-keyword">sizeof</span>(coreprefix));
+	    <span class="enscript-keyword">else</span> {
+		strlcpy(coreprefix, <span class="enscript-string">&quot;core&quot;</span>, <span class="enscript-keyword">sizeof</span>(coreprefix));
+		strlcpy(coresuffix, <span class="enscript-string">&quot;.gz&quot;</span>, <span class="enscript-keyword">sizeof</span>(coresuffix));
+	    }
+  
+            abstime = mach_absolute_time();
+	    pkt.data[20] = <span class="enscript-string">'\0'</span>;
+	    snprintf (corename_str, <span class="enscript-keyword">sizeof</span>(corename_str), <span class="enscript-string">&quot;%s-%s-%d.%d.%d.%d-%x%s&quot;</span>, 
+		      coreprefix, &amp;pkt.data[0],
+		      (current_ip &amp; 0xff000000) &gt;&gt; 24,
+		      (current_ip &amp; 0xff0000) &gt;&gt; 16,
+		      (current_ip &amp; 0xff00) &gt;&gt; 8,
+		      (current_ip &amp; 0xff),
+		      (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) (abstime &amp; 0xffffffff),
+		      coresuffix);
+        }
+
+	<span class="enscript-keyword">if</span> (0 == inet_aton(panicd_ip_str, (<span class="enscript-type">struct</span> kdp_in_addr *) &amp;panic_server_ip)) {
+		kdb_printf(<span class="enscript-string">&quot;inet_aton() failed interpreting %s as a panic server IP\n&quot;</span>, panicd_ip_str);
+	}
+	<span class="enscript-keyword">else</span>
+		kdb_printf(<span class="enscript-string">&quot;Attempting connection to panic server configured at IP %s, port %d\n&quot;</span>, panicd_ip_str, panicd_port);
+
+	destination_mac = router_mac;
+
+	<span class="enscript-keyword">if</span> (kdp_arp_resolve(panic_server_ip, &amp;temp_mac)) {
+		kdb_printf(<span class="enscript-string">&quot;Resolved %s's (or proxy's) link level address\n&quot;</span>, panicd_ip_str);
+		destination_mac = temp_mac;
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (!flag_panic_dump_in_progress) <span class="enscript-keyword">goto</span> <span class="enscript-reference">panic_dump_exit</span>;
+		<span class="enscript-keyword">if</span> (router_specified) {
+			<span class="enscript-keyword">if</span> (0 == inet_aton(router_ip_str, (<span class="enscript-type">struct</span> kdp_in_addr *) &amp;parsed_router_ip))
+				kdb_printf(<span class="enscript-string">&quot;inet_aton() failed interpreting %s as an IP\n&quot;</span>, router_ip_str);
+			<span class="enscript-keyword">else</span> {
+				router_ip = parsed_router_ip;
+				<span class="enscript-keyword">if</span> (kdp_arp_resolve(router_ip, &amp;temp_mac)) {
+					destination_mac = temp_mac;
+					kdb_printf(<span class="enscript-string">&quot;Routing through specified router IP %s (%d)\n&quot;</span>, router_ip_str, router_ip);
+				}
+			}
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (!flag_panic_dump_in_progress) <span class="enscript-keyword">goto</span> <span class="enscript-reference">panic_dump_exit</span>;
+
+	kdb_printf(<span class="enscript-string">&quot;Transmitting packets to link level address: %02x:%02x:%02x:%02x:%02x:%02x\n&quot;</span>,
+	    destination_mac.ether_addr_octet[0] &amp; 0xff,
+	    destination_mac.ether_addr_octet[1] &amp; 0xff,
+	    destination_mac.ether_addr_octet[2] &amp; 0xff,
+	    destination_mac.ether_addr_octet[3] &amp; 0xff,
+	    destination_mac.ether_addr_octet[4] &amp; 0xff,
+	    destination_mac.ether_addr_octet[5] &amp; 0xff);
+
+	kdb_printf(<span class="enscript-string">&quot;Kernel map size is %llu\n&quot;</span>, (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> <span class="enscript-type">long</span>) get_vmmap_size(kernel_map));
+	kdb_printf(<span class="enscript-string">&quot;Sending write request for %s\n&quot;</span>, corename_str);  
+
+	<span class="enscript-keyword">if</span> ((panic_error = kdp_send_crashdump_pkt(KDP_WRQ, corename_str, 0 , NULL)) &lt; 0) {
+		kdb_printf (<span class="enscript-string">&quot;kdp_send_crashdump_pkt failed with error %d\n&quot;</span>, panic_error);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">panic_dump_exit</span>;
+	}
+
+	<span class="enscript-comment">/* Just the panic log requested */</span>
+	<span class="enscript-keyword">if</span> ((panicstr != (<span class="enscript-type">char</span> *) 0) &amp;&amp; (kdp_flag &amp; PANIC_LOG_DUMP)) {
+		kdb_printf_unbuffered(<span class="enscript-string">&quot;Transmitting panic log, please wait: &quot;</span>);
+		kdp_send_crashdump_data(KDP_DATA, corename_str, 
+					debug_buf_ptr - debug_buf_addr,
+					debug_buf_addr);
+		kdp_send_crashdump_pkt (KDP_EOF, NULL, 0, ((<span class="enscript-type">void</span> *) 0));
+		printf(<span class="enscript-string">&quot;Please file a bug report on this panic, if possible.\n&quot;</span>);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">panic_dump_exit</span>;
+	}
+  
+	<span class="enscript-comment">/* maybe we wanted the systemlog */</span>
+        <span class="enscript-keyword">if</span> (kdp_flag &amp; SYSTEM_LOG_DUMP) {
+		<span class="enscript-type">long</span> start_off = msgbufp-&gt;msg_bufx;
+                <span class="enscript-type">long</span> len;
+
+		kdb_printf_unbuffered(<span class="enscript-string">&quot;Transmitting system log, please wait: &quot;</span>);
+		<span class="enscript-keyword">if</span> (start_off &gt;= msgbufp-&gt;msg_bufr) {
+			len = msgbufp-&gt;msg_size - start_off;
+			kdp_send_crashdump_data(KDP_DATA, corename_str, len, 
+						msgbufp-&gt;msg_bufc + start_off);
+			<span class="enscript-comment">/* seek to remove trailing bytes */</span>
+			kdp_send_crashdump_seek(corename_str, len);
+			start_off  = 0;
+		}
+
+		<span class="enscript-keyword">if</span> (start_off != msgbufp-&gt;msg_bufr) {
+			len = msgbufp-&gt;msg_bufr - start_off;
+			kdp_send_crashdump_data(KDP_DATA, corename_str, len,
+						msgbufp-&gt;msg_bufc + start_off);
+		}
+
+		kdp_send_crashdump_pkt (KDP_EOF, NULL, 0, ((<span class="enscript-type">void</span> *) 0));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">panic_dump_exit</span>;
+        }
+
+	<span class="enscript-comment">/* We want a core dump if we're here */</span>
+	kern_dump(FALSE);
+
+<span class="enscript-reference">panic_dump_exit</span>:
+	abort_panic_transfer();
+	kdp_reset();
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">abort_panic_transfer</span>(<span class="enscript-type">void</span>)
+{
+	flag_panic_dump_in_progress = FALSE;
+	flag_dont_abort_panic_dump  = FALSE;
+	panic_block = 0;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_SERIAL_KDP</span>
+
+<span class="enscript-type">static</span> boolean_t needs_serial_init = TRUE;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_serial_send</span>(<span class="enscript-type">void</span> *rpkt, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> rpkt_len)
+{
+	<span class="enscript-comment">//	printf(&quot;tx\n&quot;);
+</span>	kdp_serialize_packet((<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *)rpkt, rpkt_len, pal_serial_putc);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 
+<span class="enscript-function-name">kdp_serial_receive</span>(<span class="enscript-type">void</span> *rpkt, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *rpkt_len, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> timeout)
+{
+	<span class="enscript-type">int</span> readkar;
+	uint64_t now, deadline;
+	
+	clock_interval_to_deadline(timeout, 1000 * 1000 <span class="enscript-comment">/* milliseconds */</span>, &amp;deadline);
+
+<span class="enscript-comment">//	printf(&quot;rx\n&quot;);
+</span>	<span class="enscript-keyword">for</span>(clock_get_uptime(&amp;now); now &lt; deadline; clock_get_uptime(&amp;now))
+	{
+		readkar = pal_serial_getc();
+		<span class="enscript-keyword">if</span>(readkar &gt;= 0)
+		{
+			<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *packet;
+			<span class="enscript-comment">//			printf(&quot;got char %02x\n&quot;, readkar);
+</span>			<span class="enscript-keyword">if</span>((packet = kdp_unserialize_packet(readkar,rpkt_len)))
+			{
+				memcpy(rpkt, packet, *rpkt_len);
+				<span class="enscript-keyword">return</span>;
+			}
+		}
+	}
+	*rpkt_len = 0;
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">kdp_serial_setmode</span>(boolean_t active)
+{
+        <span class="enscript-keyword">if</span> (active == FALSE) <span class="enscript-comment">/* leaving KDP */</span>
+            <span class="enscript-keyword">return</span> TRUE;
+
+	<span class="enscript-keyword">if</span> (!needs_serial_init)
+            <span class="enscript-keyword">return</span> TRUE;
+
+        pal_serial_init();
+        needs_serial_init = FALSE;
+        <span class="enscript-keyword">return</span> TRUE;
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 
+<span class="enscript-function-name">kdp_serial_callout</span>(__unused <span class="enscript-type">void</span> *arg, kdp_event_t event)
+{
+    <span class="enscript-comment">/* When we stop KDP, set the bit to re-initialize the console serial port
+     * the next time we send/receive a KDP packet.  We don't do it on
+     * KDP_EVENT_ENTER directly because it also gets called when we trap to KDP
+     * for non-external debugging, i.e., stackshot or core dumps.
+     *
+     * Set needs_serial_init on exit (and initialization, see above) and not
+     * enter because enter is sent multiple times and causes excess reinitialization.
+     */</span>
+	
+    <span class="enscript-keyword">switch</span> (event)
+    {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KDP_EVENT_PANICLOG</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KDP_EVENT_ENTER</span>:
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KDP_EVENT_EXIT</span>:
+			needs_serial_init = TRUE;
+			<span class="enscript-keyword">break</span>;
+    }
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_SERIAL_KDP */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_init</span>(<span class="enscript-type">void</span>)
+{
+	strlcpy(kdp_kernelversion_string, version, <span class="enscript-keyword">sizeof</span>(kdp_kernelversion_string));
+
+	<span class="enscript-comment">/* Relies on platform layer calling panic_init() before kdp_init() */</span>
+	<span class="enscript-keyword">if</span> (kernel_uuid_string[0] != <span class="enscript-string">'\0'</span>) {
+		<span class="enscript-comment">/*
+		 * Update kdp_kernelversion_string with our UUID
+		 * generated at link time.
+		 */</span>
+
+		strlcat(kdp_kernelversion_string, <span class="enscript-string">&quot;; UUID=&quot;</span>, <span class="enscript-keyword">sizeof</span>(kdp_kernelversion_string));
+		strlcat(kdp_kernelversion_string, kernel_uuid_string, <span class="enscript-keyword">sizeof</span>(kdp_kernelversion_string));
+	}
+
+	debug_log_init();
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__arm__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__arm64__</span>)
+	<span class="enscript-keyword">if</span> (vm_kernel_slide) {
+		<span class="enscript-type">char</span>	KASLR_stext[19];
+		strlcat(kdp_kernelversion_string, <span class="enscript-string">&quot;; stext=&quot;</span>, <span class="enscript-keyword">sizeof</span>(kdp_kernelversion_string));
+		snprintf(KASLR_stext, <span class="enscript-keyword">sizeof</span>(KASLR_stext), <span class="enscript-string">&quot;%p&quot;</span>, (<span class="enscript-type">void</span> *) vm_kernel_stext);
+		strlcat(kdp_kernelversion_string, KASLR_stext, <span class="enscript-keyword">sizeof</span>(kdp_kernelversion_string));
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (debug_boot_arg &amp; DB_REBOOT_POST_CORE)
+		kdp_flag |= REBOOT_POST_CORE;
+#<span class="enscript-reference">if</span>	<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)	
+	kdp_machine_init();
+#<span class="enscript-reference">endif</span>
+
+	kdp_timer_callout_init();
+	kdp_crashdump_feature_mask = htonl(kdp_crashdump_feature_mask);
+	kdp_core_init();
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_SERIAL_KDP</span>
+	<span class="enscript-type">char</span> kdpname[80];
+	<span class="enscript-type">struct</span> kdp_in_addr ipaddr;
+	<span class="enscript-type">struct</span> kdp_ether_addr macaddr;
+
+
+	<span class="enscript-comment">// serial must be explicitly requested
+</span>	<span class="enscript-keyword">if</span>(!PE_parse_boot_argn(<span class="enscript-string">&quot;kdp_match_name&quot;</span>, kdpname, <span class="enscript-keyword">sizeof</span>(kdpname)) || strncmp(kdpname, <span class="enscript-string">&quot;serial&quot;</span>, <span class="enscript-keyword">sizeof</span>(kdpname)) != 0)
+		<span class="enscript-keyword">return</span>;
+	
+	kprintf(<span class="enscript-string">&quot;Initializing serial KDP\n&quot;</span>);
+
+	kdp_register_callout(kdp_serial_callout, NULL);
+        kdp_register_link(NULL, kdp_serial_setmode);
+	kdp_register_send_receive(kdp_serial_send, kdp_serial_receive);
+	
+	<span class="enscript-comment">/* fake up an ip and mac for early serial debugging */</span>
+	macaddr.ether_addr_octet[0] = <span class="enscript-string">'s'</span>;
+	macaddr.ether_addr_octet[1] = <span class="enscript-string">'e'</span>;
+	macaddr.ether_addr_octet[2] = <span class="enscript-string">'r'</span>;
+	macaddr.ether_addr_octet[3] = <span class="enscript-string">'i'</span>;
+	macaddr.ether_addr_octet[4] = <span class="enscript-string">'a'</span>;
+	macaddr.ether_addr_octet[5] = <span class="enscript-string">'l'</span>;
+	ipaddr.s_addr = KDP_SERIAL_IPADDR;
+	kdp_set_ip_and_mac_addresses(&amp;ipaddr, &amp;macaddr);
+        
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_SERIAL_KDP */</span>
+}
+
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* CONFIG_KDP_INTERACTIVE_DEBUGGING */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_init</span>(<span class="enscript-type">void</span>) 
+{
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_KDP_INTERACTIVE_DEBUGGING */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__arm64__</span>) || !<span class="enscript-variable-name">CONFIG_KDP_INTERACTIVE_DEBUGGING</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">panic_spin_forever</span>() 
+{
+	kdb_printf(<span class="enscript-string">&quot;\nPlease go to <a href="https://panic.apple.com">https://panic.apple.com</a> to report this panic\n&quot;</span>);
+	<span class="enscript-keyword">for</span> (;;) { }
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_raise_exception</span>(
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		exception,
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		code,
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		subcode,
+    <span class="enscript-type">void</span>			*saved_state
+)
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	initial_not_in_kdp = not_in_kdp;
+
+    not_in_kdp = 0;
+    <span class="enscript-comment">/* Was a system trace requested ? */</span>
+    <span class="enscript-keyword">if</span> (kdp_snapshot &amp;&amp; (!panic_active()) &amp;&amp; (panic_caller == 0)) {
+	    do_stackshot();
+	    not_in_kdp = initial_not_in_kdp;
+	    <span class="enscript-keyword">return</span>;
+    }
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_KDP_INTERACTIVE_DEBUGGING</span>
+
+    disable_preemption();
+    <span class="enscript-comment">/*
+     * On ARM64, KDP debugging is disabled by default.
+     * It is compiled into the kernel for DEVELOPMENT and DEBUG,
+     * but still hidden behind a boot arg (thus PE_i_can_has_kdp()).
+     * For RELEASE, it is not compiled.
+     */</span>
+    <span class="enscript-keyword">if</span> (
+	(current_debugger != KDP_CUR_DB)
+    )
+    {
+	    <span class="enscript-comment">/* try a local disk dump */</span>
+	    <span class="enscript-keyword">if</span> (kdp_has_polled_corefile()) {
+		flag_panic_dump_in_progress = TRUE;
+		kern_dump(TRUE);
+		abort_panic_transfer();
+	    }
+    }
+
+    <span class="enscript-keyword">if</span> (current_debugger != KDP_CUR_DB) {
+        kdb_printf(<span class="enscript-string">&quot;\nDebugger not configured. Hanging.\n&quot;</span>);
+        <span class="enscript-keyword">for</span> (;;) { }
+    }
+
+    kdp_debugger_loop(exception, code, subcode, saved_state);
+    not_in_kdp = initial_not_in_kdp;
+    enable_preemption();
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* CONFIG_KDP_INTERACTIVE_DEBUGGING */</span>
+    assert(current_debugger != KDP_CUR_DB);
+
+    <span class="enscript-comment">/* 
+     * If kernel debugging is enabled via boot-args, but KDP debugging
+     * is not compiled into the kernel, spin here waiting for debugging
+     * via another method.  Why here?  Because we want to have watchdog
+     * disabled (via KDP callout) while sitting waiting to be debugged.
+     */</span>
+    panic_spin_forever();
+
+    (<span class="enscript-type">void</span>)exception;
+    (<span class="enscript-type">void</span>)code;
+    (<span class="enscript-type">void</span>)subcode;
+    (<span class="enscript-type">void</span>)saved_state;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_KDP_INTERACTIVE_DEBUGGING */</span>
+}
+
+
+</pre>
+<hr />
+</body></html>

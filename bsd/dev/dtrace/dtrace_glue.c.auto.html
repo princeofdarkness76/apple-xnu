@@ -1,0 +1,1675 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>dtrace_glue.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">dtrace_glue.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2005-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+
+<span class="enscript-comment">/*
+ * APPLE NOTE: This file is compiled even if dtrace is unconfig'd. A symbol
+ * from this file (_dtrace_register_anon_DOF) always needs to be exported for
+ * an external kext to link against.
+ */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MACH__POSIX_C_SOURCE_PRIVATE</span> 1 <span class="enscript-comment">/* pulls in suitable savearea from mach/ppc/thread_status.h */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_status.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdarg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_impl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/timer_call.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread_call.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/devfs/devfs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span> <span class="enscript-comment">/* All the bits we care about are guarded by MACH_KERNEL_PRIVATE :-( */</span>
+
+<span class="enscript-comment">/*
+ * pid/proc
+ */</span>
+<span class="enscript-comment">/* Solaris proc_t is the struct. Darwin's proc_t is a pointer to it. */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">proc_t</span> struct proc <span class="enscript-comment">/* Steer clear of the Darwin typedef for proc_t */</span>
+
+<span class="enscript-comment">/* Not called from probe context */</span>
+proc_t * 
+<span class="enscript-function-name">sprlock</span>(pid_t pid)
+{
+	proc_t* p;
+
+	<span class="enscript-keyword">if</span> ((p = proc_find(pid)) == PROC_NULL) {
+		<span class="enscript-keyword">return</span> PROC_NULL;
+	}
+
+	task_suspend_internal(p-&gt;task);
+
+	proc_lock(p);
+
+	lck_mtx_lock(&amp;p-&gt;p_dtrace_sprlock);
+
+	<span class="enscript-keyword">return</span> p;
+}
+
+<span class="enscript-comment">/* Not called from probe context */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sprunlock</span>(proc_t *p)
+{
+	<span class="enscript-keyword">if</span> (p != PROC_NULL) {
+		lck_mtx_unlock(&amp;p-&gt;p_dtrace_sprlock);
+
+		proc_unlock(p);
+
+		task_resume_internal(p-&gt;task);
+
+		proc_rele(p);
+	}
+}
+
+<span class="enscript-comment">/*
+ * uread/uwrite
+ */</span>
+
+<span class="enscript-comment">// These are not exported from vm_map.h.
+</span><span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">vm_map_read_user</span>(vm_map_t map, vm_map_address_t src_addr, <span class="enscript-type">void</span> *dst_p, vm_size_t size);
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">vm_map_write_user</span>(vm_map_t map, <span class="enscript-type">void</span> *src_p, vm_map_address_t dst_addr, vm_size_t size);
+
+<span class="enscript-comment">/* Not called from probe context */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">uread</span>(proc_t *p, <span class="enscript-type">void</span> *buf, user_size_t len, user_addr_t a)
+{
+	kern_return_t ret;
+
+	ASSERT(p != PROC_NULL);
+	ASSERT(p-&gt;task != NULL);
+
+	task_t task = p-&gt;task;
+
+	<span class="enscript-comment">/*
+	 * Grab a reference to the task vm_map_t to make sure
+	 * the map isn't pulled out from under us.
+	 *
+	 * Because the proc_lock is not held at all times on all code
+	 * paths leading here, it is possible for the proc to have
+	 * exited. If the map is null, fail.
+	 */</span>
+	vm_map_t map = get_task_map_reference(task);
+	<span class="enscript-keyword">if</span> (map) {
+		ret = vm_map_read_user( map, (vm_map_address_t)a, buf, (vm_size_t)len);
+		vm_map_deallocate(map);
+	} <span class="enscript-keyword">else</span>
+		ret = KERN_TERMINATED;
+	
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">int</span>)ret;
+}
+
+
+<span class="enscript-comment">/* Not called from probe context */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">uwrite</span>(proc_t *p, <span class="enscript-type">void</span> *buf, user_size_t len, user_addr_t a)
+{
+	kern_return_t ret;
+
+	ASSERT(p != NULL);
+	ASSERT(p-&gt;task != NULL);
+
+	task_t task = p-&gt;task;
+
+	<span class="enscript-comment">/*
+	 * Grab a reference to the task vm_map_t to make sure
+	 * the map isn't pulled out from under us.
+	 *
+	 * Because the proc_lock is not held at all times on all code
+	 * paths leading here, it is possible for the proc to have
+	 * exited. If the map is null, fail.
+	 */</span>
+	vm_map_t map = get_task_map_reference(task);
+	<span class="enscript-keyword">if</span> (map) {
+		<span class="enscript-comment">/* Find the memory permissions. */</span>
+		uint32_t nestingDepth=999999;
+		vm_region_submap_short_info_data_64_t info;
+		mach_msg_type_number_t count = VM_REGION_SUBMAP_SHORT_INFO_COUNT_64;
+		mach_vm_address_t address = (mach_vm_address_t)a;
+		mach_vm_size_t sizeOfRegion = (mach_vm_size_t)len;
+	
+		ret = mach_vm_region_recurse(map, &amp;address, &amp;sizeOfRegion, &amp;nestingDepth, (vm_region_recurse_info_t)&amp;info, &amp;count);
+		<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+		vm_prot_t reprotect;
+
+		<span class="enscript-keyword">if</span> (!(info.protection &amp; VM_PROT_WRITE)) {
+			<span class="enscript-comment">/* Save the original protection values for restoration later */</span>
+			reprotect = info.protection;
+
+			<span class="enscript-keyword">if</span> (info.max_protection &amp; VM_PROT_WRITE) {
+				<span class="enscript-comment">/* The memory is not currently writable, but can be made writable. */</span>
+				ret = mach_vm_protect (map, (mach_vm_offset_t)a, (mach_vm_size_t)len, 0, reprotect | VM_PROT_WRITE);
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/*
+				 * The memory is not currently writable, and cannot be made writable. We need to COW this memory.
+				 *
+				 * Strange, we can't just say &quot;reprotect | VM_PROT_COPY&quot;, that fails.
+				 */</span>
+				ret = mach_vm_protect (map, (mach_vm_offset_t)a, (mach_vm_size_t)len, 0, VM_PROT_COPY | VM_PROT_READ | VM_PROT_WRITE);
+			}
+
+			<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* The memory was already writable. */</span>
+			reprotect = VM_PROT_NONE;
+		}
+
+		ret = vm_map_write_user( map,
+					 buf,
+					 (vm_map_address_t)a,
+					 (vm_size_t)len);
+
+		<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+		<span class="enscript-keyword">if</span> (reprotect != VM_PROT_NONE) {
+			ASSERT(reprotect &amp; VM_PROT_EXECUTE);
+			ret = mach_vm_protect (map, (mach_vm_offset_t)a, (mach_vm_size_t)len, 0, reprotect);
+		}
+
+<span class="enscript-reference">done</span>:
+		vm_map_deallocate(map);
+	} <span class="enscript-keyword">else</span> 
+		ret = KERN_TERMINATED;
+
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">int</span>)ret;
+}
+
+<span class="enscript-comment">/*
+ * cpuvar
+ */</span>
+lck_mtx_t cpu_lock;
+lck_mtx_t cyc_lock;
+lck_mtx_t mod_lock;
+
+dtrace_cpu_t *cpu_list;
+cpu_core_t *cpu_core; <span class="enscript-comment">/* XXX TLB lockdown? */</span>
+
+<span class="enscript-comment">/*
+ * cred_t
+ */</span>
+
+<span class="enscript-comment">/*
+ * dtrace_CRED() can be called from probe context. We cannot simply call kauth_cred_get() since
+ * that function may try to resolve a lazy credential binding, which entails taking the proc_lock.
+ */</span> 
+cred_t *
+<span class="enscript-function-name">dtrace_CRED</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> uthread *uthread = get_bsdthread_info(current_thread());
+
+	<span class="enscript-keyword">if</span> (uthread == NULL)
+		<span class="enscript-keyword">return</span> NULL;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> uthread-&gt;uu_ucred; <span class="enscript-comment">/* May return NOCRED which is defined to be 0 */</span>
+}
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">HAS_ALLPRIVS</span>(cr)	priv_isfullset(&amp;CR_OEPRIV(cr))
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">HAS_PRIVILEGE</span>(cr, pr)	((pr) == PRIV_ALL ? \
+					HAS_ALLPRIVS(cr) : \
+					PRIV_ISASSERT(&amp;CR_OEPRIV(cr), pr))
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">PRIV_POLICY_CHOICE</span>(<span class="enscript-type">void</span>* cred, <span class="enscript-type">int</span> priv, <span class="enscript-type">int</span> all)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">priv</span>, <span class="enscript-variable-name">all</span>)
+	<span class="enscript-keyword">return</span> kauth_cred_issuser(cred); <span class="enscript-comment">/* XXX TODO: How is this different from PRIV_POLICY_ONLY? */</span>
+}
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">PRIV_POLICY_ONLY</span>(<span class="enscript-type">void</span> *cr, <span class="enscript-type">int</span> priv, <span class="enscript-type">int</span> boolean)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">priv</span>, <span class="enscript-variable-name">boolean</span>)
+	<span class="enscript-keyword">return</span> kauth_cred_issuser(cr); <span class="enscript-comment">/* XXX TODO: HAS_PRIVILEGE(cr, priv); */</span>
+}
+
+<span class="enscript-comment">/* XXX Get around const poisoning using structure assigns */</span>
+gid_t
+<span class="enscript-function-name">crgetgid</span>(<span class="enscript-type">const</span> cred_t *cr) { cred_t copy_cr = *cr; <span class="enscript-keyword">return</span> kauth_cred_getgid(&amp;copy_cr); }
+
+uid_t
+<span class="enscript-function-name">crgetuid</span>(<span class="enscript-type">const</span> cred_t *cr) { cred_t copy_cr = *cr; <span class="enscript-keyword">return</span> kauth_cred_getuid(&amp;copy_cr); }
+
+<span class="enscript-comment">/*
+ * &quot;cyclic&quot;
+ */</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> wrap_timer_call {
+	<span class="enscript-comment">/* node attributes */</span>
+	cyc_handler_t		hdlr;
+	cyc_time_t		when;
+	uint64_t		deadline;
+	<span class="enscript-type">int</span>			cpuid;
+	boolean_t		suspended;
+	<span class="enscript-type">struct</span> timer_call	call;
+
+	<span class="enscript-comment">/* next item in the linked list */</span>
+	LIST_ENTRY(wrap_timer_call) entries;
+} wrap_timer_call_t;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">WAKEUP_REAPER</span>		0x7FFFFFFFFFFFFFFFLL
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NEARLY_FOREVER</span>		0x7FFFFFFFFFFFFFFELL
+
+<span class="enscript-comment">/* CPU going online/offline notifications */</span>
+<span class="enscript-function-name">void</span> (*dtrace_cpu_state_changed_hook)(<span class="enscript-type">int</span>, boolean_t) = NULL;
+<span class="enscript-type">void</span> <span class="enscript-function-name">dtrace_cpu_state_changed</span>(<span class="enscript-type">int</span>, boolean_t);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_install_cpu_hooks</span>(<span class="enscript-type">void</span>) {
+	dtrace_cpu_state_changed_hook = dtrace_cpu_state_changed;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_cpu_state_changed</span>(<span class="enscript-type">int</span> cpuid, boolean_t is_running) {
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">cpuid</span>)
+	wrap_timer_call_t	*wrapTC = NULL;
+	boolean_t		suspend = (is_running ? FALSE : TRUE);
+	dtrace_icookie_t	s;
+
+	<span class="enscript-comment">/* Ensure that we're not going to leave the CPU */</span>
+	s = dtrace_interrupt_disable();
+	assert(cpuid == cpu_number());
+
+	LIST_FOREACH(wrapTC, &amp;(cpu_list[cpu_number()].cpu_cyc_list), entries) {
+		assert(wrapTC-&gt;cpuid == cpu_number());
+		<span class="enscript-keyword">if</span> (suspend) {
+			assert(!wrapTC-&gt;suspended);
+			<span class="enscript-comment">/* If this fails, we'll panic anyway, so let's do this now. */</span>
+			<span class="enscript-keyword">if</span> (!timer_call_cancel(&amp;wrapTC-&gt;call))
+				panic(<span class="enscript-string">&quot;timer_call_set_suspend() failed to cancel a timer call&quot;</span>);
+			wrapTC-&gt;suspended = TRUE;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* Rearm the timer, but ensure it was suspended first. */</span>
+			assert(wrapTC-&gt;suspended);
+			clock_deadline_for_periodic_event(wrapTC-&gt;when.cyt_interval, mach_absolute_time(),
+			                                  &amp;wrapTC-&gt;deadline);
+			timer_call_enter1(&amp;wrapTC-&gt;call, (<span class="enscript-type">void</span>*) wrapTC, wrapTC-&gt;deadline,
+		                          TIMER_CALL_SYS_CRITICAL | TIMER_CALL_LOCAL);
+			wrapTC-&gt;suspended = FALSE;
+		}
+
+	}
+
+	<span class="enscript-comment">/* Restore the previous interrupt state. */</span>
+	dtrace_interrupt_enable(s);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">_timer_call_apply_cyclic</span>( <span class="enscript-type">void</span> *ignore, <span class="enscript-type">void</span> *vTChdl )
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">ignore</span>)
+	wrap_timer_call_t *wrapTC = (wrap_timer_call_t *)vTChdl;
+
+	(*(wrapTC-&gt;hdlr.cyh_func))( wrapTC-&gt;hdlr.cyh_arg );
+
+	clock_deadline_for_periodic_event( wrapTC-&gt;when.cyt_interval, mach_absolute_time(), &amp;(wrapTC-&gt;deadline) );
+	timer_call_enter1( &amp;(wrapTC-&gt;call), (<span class="enscript-type">void</span> *)wrapTC, wrapTC-&gt;deadline, TIMER_CALL_SYS_CRITICAL | TIMER_CALL_LOCAL );
+}
+
+<span class="enscript-type">static</span> cyclic_id_t
+<span class="enscript-function-name">timer_call_add_cyclic</span>(wrap_timer_call_t *wrapTC, cyc_handler_t *handler, cyc_time_t *when)
+{
+	uint64_t now;
+	dtrace_icookie_t s;
+
+	timer_call_setup( &amp;(wrapTC-&gt;call),  _timer_call_apply_cyclic, NULL );
+	wrapTC-&gt;hdlr = *handler;
+	wrapTC-&gt;when = *when;
+
+	nanoseconds_to_absolutetime( wrapTC-&gt;when.cyt_interval, (uint64_t *)&amp;wrapTC-&gt;when.cyt_interval );
+
+	now = mach_absolute_time();
+	wrapTC-&gt;deadline = now;
+
+	clock_deadline_for_periodic_event( wrapTC-&gt;when.cyt_interval, now, &amp;(wrapTC-&gt;deadline) );
+
+	<span class="enscript-comment">/* Insert the timer to the list of the running timers on this CPU, and start it. */</span>
+	s = dtrace_interrupt_disable();
+		wrapTC-&gt;cpuid = cpu_number();
+		LIST_INSERT_HEAD(&amp;cpu_list[wrapTC-&gt;cpuid].cpu_cyc_list, wrapTC, entries);
+		timer_call_enter1(&amp;wrapTC-&gt;call, (<span class="enscript-type">void</span>*) wrapTC, wrapTC-&gt;deadline,
+		                  TIMER_CALL_SYS_CRITICAL | TIMER_CALL_LOCAL);
+		wrapTC-&gt;suspended = FALSE;
+	dtrace_interrupt_enable(s);
+
+	<span class="enscript-keyword">return</span> (cyclic_id_t)wrapTC;
+}
+
+<span class="enscript-comment">/*
+ * Executed on the CPU the timer is running on.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">timer_call_remove_cyclic</span>(cyclic_id_t cyclic)
+{
+	wrap_timer_call_t *wrapTC = (wrap_timer_call_t *)cyclic;
+
+	assert(wrapTC);
+	assert(cpu_number() == wrapTC-&gt;cpuid);
+
+	<span class="enscript-keyword">if</span> (!timer_call_cancel(&amp;wrapTC-&gt;call))
+		panic(<span class="enscript-string">&quot;timer_call_remove_cyclic() failed to cancel a timer call&quot;</span>);
+
+	LIST_REMOVE(wrapTC, entries);	
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> *
+<span class="enscript-function-name">timer_call_get_cyclic_arg</span>(cyclic_id_t cyclic)
+{       
+	wrap_timer_call_t *wrapTC = (wrap_timer_call_t *)cyclic;
+ 	
+	<span class="enscript-keyword">return</span> (wrapTC ? wrapTC-&gt;hdlr.cyh_arg : NULL);
+}   
+
+cyclic_id_t
+<span class="enscript-function-name">cyclic_timer_add</span>(cyc_handler_t *handler, cyc_time_t *when)
+{
+	wrap_timer_call_t *wrapTC = _MALLOC(<span class="enscript-keyword">sizeof</span>(wrap_timer_call_t), M_TEMP, M_ZERO | M_WAITOK);
+	<span class="enscript-keyword">if</span> (NULL == wrapTC)
+		<span class="enscript-keyword">return</span> CYCLIC_NONE;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> timer_call_add_cyclic( wrapTC, handler, when );
+}
+
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">cyclic_timer_remove</span>(cyclic_id_t cyclic)
+{
+	ASSERT( cyclic != CYCLIC_NONE );
+
+	<span class="enscript-comment">/* Removing a timer call must be done on the CPU the timer is running on. */</span>
+	wrap_timer_call_t *wrapTC = (wrap_timer_call_t *) cyclic;
+	dtrace_xcall(wrapTC-&gt;cpuid, (dtrace_xcall_t) timer_call_remove_cyclic, (<span class="enscript-type">void</span>*) cyclic);
+
+	_FREE((<span class="enscript-type">void</span> *)cyclic, M_TEMP);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">_cyclic_add_omni</span>(cyclic_id_list_t cyc_list)
+{
+	cyc_time_t cT;
+	cyc_handler_t cH;
+	wrap_timer_call_t *wrapTC;
+	cyc_omni_handler_t *omni = (cyc_omni_handler_t *)cyc_list;
+	<span class="enscript-type">char</span> *t;
+
+	(omni-&gt;cyo_online)(omni-&gt;cyo_arg, CPU, &amp;cH, &amp;cT); 
+
+	t = (<span class="enscript-type">char</span> *)cyc_list;
+	t += <span class="enscript-keyword">sizeof</span>(cyc_omni_handler_t);
+	cyc_list = (cyclic_id_list_t)(uintptr_t)t;
+
+	t += <span class="enscript-keyword">sizeof</span>(cyclic_id_t)*NCPU;
+	t += (<span class="enscript-keyword">sizeof</span>(wrap_timer_call_t))*cpu_number();
+	wrapTC = (wrap_timer_call_t *)(uintptr_t)t;
+
+	cyc_list[cpu_number()] = timer_call_add_cyclic(wrapTC, &amp;cH, &amp;cT);
+}
+
+cyclic_id_list_t
+<span class="enscript-function-name">cyclic_add_omni</span>(cyc_omni_handler_t *omni)
+{
+	cyclic_id_list_t cyc_list = 
+		_MALLOC( (<span class="enscript-keyword">sizeof</span>(wrap_timer_call_t))*NCPU + 
+				 <span class="enscript-keyword">sizeof</span>(cyclic_id_t)*NCPU + 
+				 <span class="enscript-keyword">sizeof</span>(cyc_omni_handler_t), M_TEMP, M_ZERO | M_WAITOK);
+	<span class="enscript-keyword">if</span> (NULL == cyc_list)
+		<span class="enscript-keyword">return</span> (cyclic_id_list_t)CYCLIC_NONE;
+
+	*(cyc_omni_handler_t *)cyc_list = *omni;
+	dtrace_xcall(DTRACE_CPUALL, (dtrace_xcall_t)_cyclic_add_omni, (<span class="enscript-type">void</span> *)cyc_list);
+
+	<span class="enscript-keyword">return</span> cyc_list;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">_cyclic_remove_omni</span>(cyclic_id_list_t cyc_list)
+{
+	cyc_omni_handler_t *omni = (cyc_omni_handler_t *)cyc_list;
+	<span class="enscript-type">void</span> *oarg;
+	cyclic_id_t cid;
+	<span class="enscript-type">char</span> *t;
+
+	t = (<span class="enscript-type">char</span> *)cyc_list;
+	t += <span class="enscript-keyword">sizeof</span>(cyc_omni_handler_t);
+	cyc_list = (cyclic_id_list_t)(uintptr_t)t;
+
+	<span class="enscript-comment">/*
+	 * If the processor was offline when dtrace started, we did not allocate
+	 * a cyclic timer for this CPU.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((cid = cyc_list[cpu_number()]) != CYCLIC_NONE) {
+		oarg = timer_call_get_cyclic_arg(cid);
+		timer_call_remove_cyclic(cid);
+		(omni-&gt;cyo_offline)(omni-&gt;cyo_arg, CPU, oarg);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cyclic_remove_omni</span>(cyclic_id_list_t cyc_list)
+{
+	ASSERT( cyc_list != (cyclic_id_list_t)CYCLIC_NONE );
+
+	dtrace_xcall(DTRACE_CPUALL, (dtrace_xcall_t)_cyclic_remove_omni, (<span class="enscript-type">void</span> *)cyc_list);
+	_FREE(cyc_list, M_TEMP);
+}
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> wrap_thread_call {
+	thread_call_t TChdl;
+	cyc_handler_t hdlr;
+	cyc_time_t when;
+	uint64_t deadline;
+} wrap_thread_call_t;
+
+<span class="enscript-comment">/*
+ * _cyclic_apply will run on some thread under kernel_task. That's OK for the 
+ * cleaner and the deadman, but too distant in time and place for the profile provider.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">_cyclic_apply</span>( <span class="enscript-type">void</span> *ignore, <span class="enscript-type">void</span> *vTChdl )
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">ignore</span>)
+	wrap_thread_call_t *wrapTC = (wrap_thread_call_t *)vTChdl;
+
+	(*(wrapTC-&gt;hdlr.cyh_func))( wrapTC-&gt;hdlr.cyh_arg );
+
+	clock_deadline_for_periodic_event( wrapTC-&gt;when.cyt_interval, mach_absolute_time(), &amp;(wrapTC-&gt;deadline) );
+	(<span class="enscript-type">void</span>)thread_call_enter1_delayed( wrapTC-&gt;TChdl, (<span class="enscript-type">void</span> *)wrapTC, wrapTC-&gt;deadline );
+
+	<span class="enscript-comment">/* Did cyclic_remove request a wakeup call when this thread call was re-armed? */</span>
+	<span class="enscript-keyword">if</span> (wrapTC-&gt;when.cyt_interval == WAKEUP_REAPER)
+		thread_wakeup((event_t)wrapTC);
+}
+
+cyclic_id_t
+<span class="enscript-function-name">cyclic_add</span>(cyc_handler_t *handler, cyc_time_t *when)
+{
+	uint64_t now;
+
+	wrap_thread_call_t *wrapTC = _MALLOC(<span class="enscript-keyword">sizeof</span>(wrap_thread_call_t), M_TEMP, M_ZERO | M_WAITOK);
+	<span class="enscript-keyword">if</span> (NULL == wrapTC)
+		<span class="enscript-keyword">return</span> CYCLIC_NONE;
+
+	wrapTC-&gt;TChdl = thread_call_allocate( _cyclic_apply, NULL );
+	wrapTC-&gt;hdlr = *handler;
+	wrapTC-&gt;when = *when;
+
+	ASSERT(when-&gt;cyt_when == 0);
+	ASSERT(when-&gt;cyt_interval &lt; WAKEUP_REAPER);
+
+	nanoseconds_to_absolutetime(wrapTC-&gt;when.cyt_interval, (uint64_t *)&amp;wrapTC-&gt;when.cyt_interval);
+
+	now = mach_absolute_time();
+	wrapTC-&gt;deadline = now;
+
+	clock_deadline_for_periodic_event( wrapTC-&gt;when.cyt_interval, now, &amp;(wrapTC-&gt;deadline) );
+	(<span class="enscript-type">void</span>)thread_call_enter1_delayed( wrapTC-&gt;TChdl, (<span class="enscript-type">void</span> *)wrapTC, wrapTC-&gt;deadline );
+
+	<span class="enscript-keyword">return</span> (cyclic_id_t)wrapTC;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">noop_cyh_func</span>(<span class="enscript-type">void</span> * ignore)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">ignore</span>)
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cyclic_remove</span>(cyclic_id_t cyclic)
+{
+	wrap_thread_call_t *wrapTC = (wrap_thread_call_t *)cyclic;
+
+	ASSERT(cyclic != CYCLIC_NONE);
+
+	<span class="enscript-keyword">while</span> (!thread_call_cancel(wrapTC-&gt;TChdl)) {
+		<span class="enscript-type">int</span> ret = assert_wait(wrapTC, THREAD_UNINT);
+		ASSERT(ret == THREAD_WAITING);
+
+		wrapTC-&gt;when.cyt_interval = WAKEUP_REAPER;
+
+		ret = thread_block(THREAD_CONTINUE_NULL);
+		ASSERT(ret == THREAD_AWAKENED);
+	}
+
+	<span class="enscript-keyword">if</span> (thread_call_free(wrapTC-&gt;TChdl))
+		_FREE(wrapTC, M_TEMP);
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* Gut this cyclic and move on ... */</span>
+		wrapTC-&gt;hdlr.cyh_func = noop_cyh_func;
+		wrapTC-&gt;when.cyt_interval = NEARLY_FOREVER;
+	}
+}
+
+<span class="enscript-comment">/*
+ * timeout / untimeout (converted to dtrace_timeout / dtrace_untimeout due to name collision)
+ */</span> 
+
+thread_call_t
+<span class="enscript-function-name">dtrace_timeout</span>(<span class="enscript-type">void</span> (*func)(<span class="enscript-type">void</span> *, <span class="enscript-type">void</span> *), <span class="enscript-type">void</span>* arg, uint64_t nanos)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>)
+	thread_call_t call = thread_call_allocate(func, NULL);
+
+	nanoseconds_to_absolutetime(nanos, &amp;nanos);
+
+	<span class="enscript-comment">/*
+	 * This method does not use clock_deadline_for_periodic_event() because it is a one-shot,
+	 * and clock drift on later invocations is not a worry.
+	 */</span>
+	uint64_t deadline = mach_absolute_time() + nanos;
+	<span class="enscript-comment">/* DRK: consider using a lower priority callout here */</span>
+	thread_call_enter_delayed(call, deadline);
+
+	<span class="enscript-keyword">return</span> call;
+}
+
+<span class="enscript-comment">/*
+ * ddi
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ddi_report_dev</span>(dev_info_t *devi)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">devi</span>)
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NSOFT_STATES</span> 32 <span class="enscript-comment">/* XXX No more than 32 clients at a time, please. */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> *soft[NSOFT_STATES];
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ddi_soft_state_init</span>(<span class="enscript-type">void</span> **state_p, size_t size, size_t n_items)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">n_items</span>)
+	<span class="enscript-type">int</span> i;
+	
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; NSOFT_STATES; ++i) soft[i] = _MALLOC(size, M_TEMP, M_ZERO | M_WAITOK);
+	*(size_t *)state_p = size;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ddi_soft_state_zalloc</span>(<span class="enscript-type">void</span> *state, <span class="enscript-type">int</span> item)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">state</span>)
+	<span class="enscript-keyword">if</span> (item &lt; NSOFT_STATES)
+		<span class="enscript-keyword">return</span> DDI_SUCCESS;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> DDI_FAILURE;
+}
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">ddi_get_soft_state</span>(<span class="enscript-type">void</span> *state, <span class="enscript-type">int</span> item)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">state</span>)
+	ASSERT(item &lt; NSOFT_STATES);
+	<span class="enscript-keyword">return</span> soft[item];
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ddi_soft_state_free</span>(<span class="enscript-type">void</span> *state, <span class="enscript-type">int</span> item)
+{
+	ASSERT(item &lt; NSOFT_STATES);
+	bzero( soft[item], (size_t)state );
+	<span class="enscript-keyword">return</span> DDI_SUCCESS;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ddi_soft_state_fini</span>(<span class="enscript-type">void</span> **state_p)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">state_p</span>)
+	<span class="enscript-type">int</span> i;
+	
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; NSOFT_STATES; ++i) _FREE( soft[i], M_TEMP );
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> gRegisteredProps = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> {
+	<span class="enscript-type">char</span> name[32];		<span class="enscript-comment">/* enough for &quot;dof-data-&quot; + digits */</span>
+	<span class="enscript-type">int</span> *data;
+	uint_t nelements;
+} gPropTable[16];
+
+kern_return_t <span class="enscript-function-name">_dtrace_register_anon_DOF</span>(<span class="enscript-type">char</span> *, uchar_t *, uint_t);
+
+kern_return_t
+<span class="enscript-function-name">_dtrace_register_anon_DOF</span>(<span class="enscript-type">char</span> *name, uchar_t *data, uint_t nelements)
+{
+	<span class="enscript-keyword">if</span> (gRegisteredProps &lt; <span class="enscript-keyword">sizeof</span>(gPropTable)/<span class="enscript-keyword">sizeof</span>(gPropTable[0])) {
+		<span class="enscript-type">int</span> *p = (<span class="enscript-type">int</span> *)_MALLOC(nelements*<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>), M_TEMP, M_WAITOK);
+		
+		<span class="enscript-keyword">if</span> (NULL == p)
+			<span class="enscript-keyword">return</span> KERN_FAILURE;
+			
+		strlcpy(gPropTable[gRegisteredProps].name, name, <span class="enscript-keyword">sizeof</span>(gPropTable[0].name));
+		gPropTable[gRegisteredProps].nelements = nelements;
+		gPropTable[gRegisteredProps].data = p;
+			
+		<span class="enscript-keyword">while</span> (nelements-- &gt; 0) {
+			*p++ = (<span class="enscript-type">int</span>)(*data++);
+		}
+		
+		gRegisteredProps++;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ddi_prop_lookup_int_array</span>(dev_t match_dev, dev_info_t *dip, uint_t flags,
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">int</span> **data, uint_t *nelements)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">match_dev</span>,<span class="enscript-variable-name">dip</span>,<span class="enscript-variable-name">flags</span>)
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; gRegisteredProps; ++i)
+	{
+		<span class="enscript-keyword">if</span> (0 == strncmp(name, gPropTable[i].name,
+					<span class="enscript-keyword">sizeof</span>(gPropTable[i].name))) {
+			*data = gPropTable[i].data;
+			*nelements = gPropTable[i].nelements;
+			<span class="enscript-keyword">return</span> DDI_SUCCESS;
+		}
+	}
+	<span class="enscript-keyword">return</span> DDI_FAILURE;
+}
+	
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ddi_prop_free</span>(<span class="enscript-type">void</span> *buf)
+{
+	_FREE(buf, M_TEMP);
+	<span class="enscript-keyword">return</span> DDI_SUCCESS;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ddi_driver_major</span>(dev_info_t	*devi) { <span class="enscript-keyword">return</span> (<span class="enscript-type">int</span>)major(CAST_DOWN_EXPLICIT(<span class="enscript-type">int</span>,devi)); }
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ddi_create_minor_node</span>(dev_info_t *dip, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">int</span> spec_type,
+    minor_t minor_num, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *node_type, <span class="enscript-type">int</span> flag)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">spec_type</span>,<span class="enscript-variable-name">node_type</span>,<span class="enscript-variable-name">flag</span>)
+	dev_t dev = makedev( ddi_driver_major(dip), minor_num );
+
+	<span class="enscript-keyword">if</span> (NULL == devfs_make_node( dev, DEVFS_CHAR, UID_ROOT, GID_WHEEL, 0666, name, 0 ))
+		<span class="enscript-keyword">return</span> DDI_FAILURE;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> DDI_SUCCESS;
+} 
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ddi_remove_minor_node</span>(dev_info_t *dip, <span class="enscript-type">char</span> *name)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">dip</span>,<span class="enscript-variable-name">name</span>)
+<span class="enscript-comment">/* XXX called from dtrace_detach, so NOTREACHED for now. */</span>
+}
+
+major_t
+<span class="enscript-function-name">getemajor</span>( dev_t d )
+{
+	<span class="enscript-keyword">return</span> (major_t) major(d);
+}
+
+minor_t
+<span class="enscript-function-name">getminor</span> ( dev_t d )
+{
+	<span class="enscript-keyword">return</span> (minor_t) minor(d);
+}
+
+dev_t 
+<span class="enscript-function-name">makedevice</span>(major_t major, minor_t minor)
+{
+	<span class="enscript-keyword">return</span> makedev( major, minor );
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">ddi_getprop</span>(dev_t dev, dev_info_t *dip, <span class="enscript-type">int</span> flags, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">int</span> defvalue)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">dev</span>, <span class="enscript-variable-name">dip</span>, <span class="enscript-variable-name">flags</span>, <span class="enscript-variable-name">name</span>)
+
+	<span class="enscript-keyword">return</span> defvalue;
+}
+
+<span class="enscript-comment">/*
+ * Kernel Debug Interface
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdi_dtrace_set</span>(kdi_dtrace_set_t ignore)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">ignore</span>)
+	<span class="enscript-keyword">return</span> 0; <span class="enscript-comment">/* Success */</span>
+}
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">Debugger</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span>*);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">debug_enter</span>(<span class="enscript-type">char</span> *c) { Debugger(c); }
+
+<span class="enscript-comment">/*
+ * kmem
+ */</span>
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">dt_kmem_alloc</span>(size_t size, <span class="enscript-type">int</span> kmflag)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">kmflag</span>)
+
+<span class="enscript-comment">/*
+ * We ignore the M_NOWAIT bit in kmflag (all of kmflag, in fact).
+ * Requests larger than 8K with M_NOWAIT fail in kalloc_canblock.
+ */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">DTRACE_MEMORY_ZONES</span>)
+	<span class="enscript-keyword">return</span> dtrace_alloc(size);
+#<span class="enscript-reference">else</span>
+	<span class="enscript-keyword">return</span> kalloc(size);
+#<span class="enscript-reference">endif</span>
+}
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">dt_kmem_zalloc</span>(size_t size, <span class="enscript-type">int</span> kmflag)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">kmflag</span>)
+
+<span class="enscript-comment">/*
+ * We ignore the M_NOWAIT bit in kmflag (all of kmflag, in fact).
+ * Requests larger than 8K with M_NOWAIT fail in kalloc_canblock.
+ */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">DTRACE_MEMORY_ZONES</span>)
+	<span class="enscript-type">void</span>* buf = dtrace_alloc(size);
+#<span class="enscript-reference">else</span>
+	<span class="enscript-type">void</span>* buf = kalloc(size);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span>(!buf)
+		<span class="enscript-keyword">return</span> NULL;
+
+	bzero(buf, size);
+
+	<span class="enscript-keyword">return</span> buf;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dt_kmem_free</span>(<span class="enscript-type">void</span> *buf, size_t size)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">size</span>)
+	<span class="enscript-comment">/*
+	 * DTrace relies on this, its doing a lot of NULL frees.
+	 * A null free causes the debug builds to panic.
+	 */</span>
+	<span class="enscript-keyword">if</span> (buf == NULL) <span class="enscript-keyword">return</span>;
+
+	ASSERT(size &gt; 0);
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">DTRACE_MEMORY_ZONES</span>)
+	dtrace_free(buf, size);
+#<span class="enscript-reference">else</span>
+	kfree(buf, size);
+#<span class="enscript-reference">endif</span>
+}
+
+
+
+<span class="enscript-comment">/*
+ * aligned kmem allocator
+ * align should be a power of two
+ */</span>
+
+<span class="enscript-type">void</span>* <span class="enscript-function-name">dt_kmem_alloc_aligned</span>(size_t size, size_t align, <span class="enscript-type">int</span> kmflag)
+{
+	<span class="enscript-type">void</span> *mem, **addr_to_free;
+	intptr_t mem_aligned;
+	size_t *size_to_free, hdr_size;
+
+	<span class="enscript-comment">/* Must be a power of two. */</span>
+	assert(align != 0);
+	assert((align &amp; (align - 1)) == 0);
+
+	<span class="enscript-comment">/*
+	 * We are going to add a header to the allocation. It contains
+	 * the address to free and the total size of the buffer.
+	 */</span>
+	hdr_size = <span class="enscript-keyword">sizeof</span>(size_t) + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span>*);
+	mem = dt_kmem_alloc(size + align + hdr_size, kmflag);
+	<span class="enscript-keyword">if</span> (mem == NULL)
+		<span class="enscript-keyword">return</span> NULL;
+
+	mem_aligned = (intptr_t) (((intptr_t) mem + align + hdr_size) &amp; ~(align - 1));
+
+	<span class="enscript-comment">/* Write the address to free in the header. */</span>
+	addr_to_free = (<span class="enscript-type">void</span>**) (mem_aligned - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span>*));
+	*addr_to_free = mem;
+
+	<span class="enscript-comment">/* Write the size to free in the header. */</span>
+	size_to_free = (size_t*) (mem_aligned - hdr_size);
+	*size_to_free = size + align + hdr_size;
+
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">void</span>*) mem_aligned;
+}
+
+<span class="enscript-type">void</span>* <span class="enscript-function-name">dt_kmem_zalloc_aligned</span>(size_t size, size_t align, <span class="enscript-type">int</span> kmflag)
+{
+	<span class="enscript-type">void</span>* buf;
+
+	buf = dt_kmem_alloc_aligned(size, align, kmflag);
+
+	<span class="enscript-keyword">if</span>(!buf)
+		<span class="enscript-keyword">return</span> NULL;
+
+	bzero(buf, size);
+
+	<span class="enscript-keyword">return</span> buf;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">dt_kmem_free_aligned</span>(<span class="enscript-type">void</span>* buf, size_t size)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">size</span>)
+	intptr_t ptr = (intptr_t) buf;
+	<span class="enscript-type">void</span> **addr_to_free = (<span class="enscript-type">void</span>**) (ptr - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span>*));
+	size_t *size_to_free = (size_t*) (ptr - (<span class="enscript-keyword">sizeof</span>(size_t) + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span>*)));
+
+	<span class="enscript-keyword">if</span> (buf == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	dt_kmem_free(*addr_to_free, *size_to_free);
+}
+
+<span class="enscript-comment">/*
+ * dtrace wants to manage just a single block: dtrace_state_percpu_t * NCPU, and
+ * doesn't specify constructor, destructor, or reclaim methods.
+ * At present, it always zeroes the block it obtains from kmem_cache_alloc().
+ * We'll manage this constricted use of kmem_cache with ordinary _MALLOC and _FREE.
+ */</span>
+kmem_cache_t *
+<span class="enscript-function-name">kmem_cache_create</span>(
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name,		<span class="enscript-comment">/* descriptive name for this cache */</span>
+    size_t bufsize,		<span class="enscript-comment">/* size of the objects it manages */</span>
+    size_t align,		<span class="enscript-comment">/* required object alignment */</span>
+    <span class="enscript-type">int</span> (*constructor)(<span class="enscript-type">void</span> *, <span class="enscript-type">void</span> *, <span class="enscript-type">int</span>), <span class="enscript-comment">/* object constructor */</span>
+    <span class="enscript-type">void</span> (*destructor)(<span class="enscript-type">void</span> *, <span class="enscript-type">void</span> *),	<span class="enscript-comment">/* object destructor */</span>
+    <span class="enscript-type">void</span> (*reclaim)(<span class="enscript-type">void</span> *), <span class="enscript-comment">/* memory reclaim callback */</span>
+    <span class="enscript-type">void</span> *private,		<span class="enscript-comment">/* pass-thru arg for constr/destr/reclaim */</span>
+    vmem_t *vmp,		<span class="enscript-comment">/* vmem source for slab allocation */</span>
+    <span class="enscript-type">int</span> cflags)		<span class="enscript-comment">/* cache creation flags */</span>
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">name</span>,<span class="enscript-variable-name">align</span>,<span class="enscript-variable-name">constructor</span>,<span class="enscript-variable-name">destructor</span>,<span class="enscript-variable-name">reclaim</span>,<span class="enscript-variable-name">private</span>,<span class="enscript-variable-name">vmp</span>,<span class="enscript-variable-name">cflags</span>)
+	<span class="enscript-keyword">return</span> (kmem_cache_t *)bufsize; <span class="enscript-comment">/* A cookie that tracks the single object size. */</span>
+}
+	
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">kmem_cache_alloc</span>(kmem_cache_t *cp, <span class="enscript-type">int</span> kmflag)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">kmflag</span>)
+	size_t bufsize = (size_t)cp;
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">void</span> *)_MALLOC(bufsize, M_TEMP, M_WAITOK);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kmem_cache_free</span>(kmem_cache_t *cp, <span class="enscript-type">void</span> *buf)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">cp</span>)
+	_FREE(buf, M_TEMP);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kmem_cache_destroy</span>(kmem_cache_t *cp)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">cp</span>)
+}
+
+<span class="enscript-comment">/*
+ * taskq
+ */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">thread_call_setup</span>(thread_call_t, thread_call_func_t, thread_call_param_t); <span class="enscript-comment">/* XXX MACH_KERNEL_PRIVATE */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">_taskq_apply</span>( task_func_t func, thread_call_param_t arg )
+{
+	func( (<span class="enscript-type">void</span> *)arg );
+}
+
+taskq_t *
+<span class="enscript-function-name">taskq_create</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">int</span> nthreads, pri_t pri, <span class="enscript-type">int</span> minalloc,
+    <span class="enscript-type">int</span> maxalloc, uint_t flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">name</span>,<span class="enscript-variable-name">nthreads</span>,<span class="enscript-variable-name">pri</span>,<span class="enscript-variable-name">minalloc</span>,<span class="enscript-variable-name">maxalloc</span>,<span class="enscript-variable-name">flags</span>)
+
+	<span class="enscript-keyword">return</span> (taskq_t *)thread_call_allocate( (thread_call_func_t)_taskq_apply, NULL );
+}
+
+taskqid_t
+<span class="enscript-function-name">taskq_dispatch</span>(taskq_t *tq, task_func_t func, <span class="enscript-type">void</span> *arg, uint_t flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">flags</span>)
+	thread_call_setup( (thread_call_t) tq, (thread_call_func_t)_taskq_apply, (thread_call_param_t)func );
+	thread_call_enter1( (thread_call_t) tq, (thread_call_param_t)arg );
+	<span class="enscript-keyword">return</span> (taskqid_t) tq <span class="enscript-comment">/* for lack of anything better */</span>;
+}
+
+<span class="enscript-type">void</span>	
+<span class="enscript-function-name">taskq_destroy</span>(taskq_t *tq)
+{
+	thread_call_cancel( (thread_call_t) tq );
+	thread_call_free( (thread_call_t) tq );
+}
+
+pri_t maxclsyspri;
+
+<span class="enscript-comment">/*
+ * vmem (Solaris &quot;slab&quot; allocator) used by DTrace solely to hand out resource ids
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> u_daddr_t;
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;blist.h&quot;</span>
+
+<span class="enscript-comment">/* By passing around blist *handles*, the underlying blist can be resized as needed. */</span>
+<span class="enscript-type">struct</span> blist_hdl {
+	blist_t blist; 
+};
+
+vmem_t * 
+<span class="enscript-function-name">vmem_create</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">void</span> *base, size_t size, size_t quantum, <span class="enscript-type">void</span> *ignore5,
+					<span class="enscript-type">void</span> *ignore6, vmem_t *source, size_t qcache_max, <span class="enscript-type">int</span> vmflag)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">name</span>,<span class="enscript-variable-name">quantum</span>,<span class="enscript-variable-name">ignore5</span>,<span class="enscript-variable-name">ignore6</span>,<span class="enscript-variable-name">source</span>,<span class="enscript-variable-name">qcache_max</span>,<span class="enscript-variable-name">vmflag</span>)
+	blist_t bl;
+	<span class="enscript-type">struct</span> blist_hdl *p = _MALLOC(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> blist_hdl), M_TEMP, M_WAITOK);
+	
+	ASSERT(quantum == 1);
+	ASSERT(NULL == ignore5);
+	ASSERT(NULL == ignore6);
+	ASSERT(NULL == source);
+	ASSERT(0 == qcache_max);
+	ASSERT(vmflag &amp; VMC_IDENTIFIER);
+	
+	size = MIN(128, size); <span class="enscript-comment">/* Clamp to 128 initially, since the underlying data structure is pre-allocated */</span>
+	
+	p-&gt;blist = bl = blist_create( size );
+	blist_free(bl, 0, size);
+	<span class="enscript-keyword">if</span> (base) blist_alloc( bl, (daddr_t)(uintptr_t)base ); <span class="enscript-comment">/* Chomp off initial ID(s) */</span>
+	
+	<span class="enscript-keyword">return</span> (vmem_t *)p;
+}
+ 
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">vmem_alloc</span>(vmem_t *vmp, size_t size, <span class="enscript-type">int</span> vmflag)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">vmflag</span>)
+	<span class="enscript-type">struct</span> blist_hdl *q = (<span class="enscript-type">struct</span> blist_hdl *)vmp;
+	blist_t bl = q-&gt;blist;
+	daddr_t p;
+	
+	p = blist_alloc(bl, (daddr_t)size);
+	
+	<span class="enscript-keyword">if</span> ((daddr_t)-1 == p) {
+		blist_resize(&amp;bl, (bl-&gt;bl_blocks) &lt;&lt; 1, 1);
+		q-&gt;blist = bl;
+		p = blist_alloc(bl, (daddr_t)size);
+		<span class="enscript-keyword">if</span> ((daddr_t)-1 == p) 
+			panic(<span class="enscript-string">&quot;vmem_alloc: failure after blist_resize!&quot;</span>);
+	}
+	
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">void</span> *)(uintptr_t)p;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vmem_free</span>(vmem_t *vmp, <span class="enscript-type">void</span> *vaddr, size_t size)
+{
+	<span class="enscript-type">struct</span> blist_hdl *p = (<span class="enscript-type">struct</span> blist_hdl *)vmp;
+	
+	blist_free( p-&gt;blist, (daddr_t)(uintptr_t)vaddr, (daddr_t)size );
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vmem_destroy</span>(vmem_t *vmp)
+{
+	<span class="enscript-type">struct</span> blist_hdl *p = (<span class="enscript-type">struct</span> blist_hdl *)vmp;
+	
+	blist_destroy( p-&gt;blist );
+	_FREE( p, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> blist_hdl) );
+}
+
+<span class="enscript-comment">/*
+ * Timing
+ */</span>
+
+<span class="enscript-comment">/*
+ * dtrace_gethrestime() provides the &quot;walltimestamp&quot;, a value that is anchored at 
+ * January 1, 1970. Because it can be called from probe context, it must take no locks.
+ */</span>
+
+hrtime_t
+<span class="enscript-function-name">dtrace_gethrestime</span>(<span class="enscript-type">void</span>)
+{
+	clock_sec_t		secs;
+	clock_nsec_t	nanosecs;
+	uint64_t		secs64, ns64;
+    
+	clock_get_calendar_nanotime_nowait(&amp;secs, &amp;nanosecs);
+	secs64 = (uint64_t)secs;
+	ns64 = (uint64_t)nanosecs;
+
+	ns64 = ns64 + (secs64 * 1000000000LL);
+	<span class="enscript-keyword">return</span> ns64;
+}
+
+<span class="enscript-comment">/*
+ * dtrace_gethrtime() provides high-resolution timestamps with machine-dependent origin.
+ * Hence its primary use is to specify intervals.
+ */</span>
+
+hrtime_t
+<span class="enscript-function-name">dtrace_abs_to_nano</span>(uint64_t elapsed)
+{
+	<span class="enscript-type">static</span> mach_timebase_info_data_t    sTimebaseInfo = { 0, 0 };
+
+	<span class="enscript-comment">/*
+	 * If this is the first time we've run, get the timebase.
+	 * We can use denom == 0 to indicate that sTimebaseInfo is
+	 * uninitialised because it makes no sense to have a zero
+	 * denominator in a fraction.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> ( sTimebaseInfo.denom == 0 ) {
+		(<span class="enscript-type">void</span>) clock_timebase_info(&amp;sTimebaseInfo);
+	}
+
+	<span class="enscript-comment">/*
+	 * Convert to nanoseconds.
+	 * return (elapsed * (uint64_t)sTimebaseInfo.numer)/(uint64_t)sTimebaseInfo.denom;
+	 *
+	 * Provided the final result is representable in 64 bits the following maneuver will
+	 * deliver that result without intermediate overflow.
+	 */</span>
+	<span class="enscript-keyword">if</span> (sTimebaseInfo.denom == sTimebaseInfo.numer)
+		<span class="enscript-keyword">return</span> elapsed;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sTimebaseInfo.denom == 1)
+		<span class="enscript-keyword">return</span> elapsed * (uint64_t)sTimebaseInfo.numer;
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* Decompose elapsed = eta32 * 2^32 + eps32: */</span>
+		uint64_t eta32 = elapsed &gt;&gt; 32;
+		uint64_t eps32 = elapsed &amp; 0x00000000ffffffffLL;
+
+		uint32_t numer = sTimebaseInfo.numer, denom = sTimebaseInfo.denom;
+
+		<span class="enscript-comment">/* Form product of elapsed64 (decomposed) and numer: */</span>
+		uint64_t mu64 = numer * eta32;
+		uint64_t lambda64 = numer * eps32;
+
+		<span class="enscript-comment">/* Divide the constituents by denom: */</span>
+		uint64_t q32 = mu64/denom;
+		uint64_t r32 = mu64 - (q32 * denom); <span class="enscript-comment">/* mu64 % denom */</span>
+
+		<span class="enscript-keyword">return</span> (q32 &lt;&lt; 32) + ((r32 &lt;&lt; 32) + lambda64)/denom;
+	}
+}
+
+hrtime_t
+<span class="enscript-function-name">dtrace_gethrtime</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-type">static</span> uint64_t        start = 0;
+    
+	<span class="enscript-keyword">if</span> (start == 0)
+		start = mach_absolute_time();
+		
+    <span class="enscript-keyword">return</span> dtrace_abs_to_nano(mach_absolute_time() - start);
+}
+
+<span class="enscript-comment">/*
+ * Atomicity and synchronization
+ */</span>
+uint32_t
+<span class="enscript-function-name">dtrace_cas32</span>(uint32_t *target, uint32_t cmp, uint32_t new)
+{
+    <span class="enscript-keyword">if</span> (OSCompareAndSwap( (UInt32)cmp, (UInt32)new, (<span class="enscript-type">volatile</span> UInt32 *)target ))
+		<span class="enscript-keyword">return</span> cmp;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> ~cmp; <span class="enscript-comment">/* Must return something *other* than cmp */</span>
+}
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">dtrace_casptr</span>(<span class="enscript-type">void</span> *target, <span class="enscript-type">void</span> *cmp, <span class="enscript-type">void</span> *new)
+{
+	<span class="enscript-keyword">if</span> (OSCompareAndSwapPtr( cmp, new, (<span class="enscript-type">void</span>**)target ))
+		<span class="enscript-keyword">return</span> cmp;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> (<span class="enscript-type">void</span> *)(~(uintptr_t)cmp); <span class="enscript-comment">/* Must return something *other* than cmp */</span>
+}
+
+<span class="enscript-comment">/*
+ * Interrupt manipulation
+ */</span>
+dtrace_icookie_t
+<span class="enscript-function-name">dtrace_interrupt_disable</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (dtrace_icookie_t)ml_set_interrupts_enabled(FALSE);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_interrupt_enable</span>(dtrace_icookie_t reenable)
+{
+	(<span class="enscript-type">void</span>)ml_set_interrupts_enabled((boolean_t)reenable);
+}
+
+<span class="enscript-comment">/*
+ * MP coordination
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_sync_func</span>(<span class="enscript-type">void</span>) {}
+
+<span class="enscript-comment">/*
+ * dtrace_sync() is not called from probe context.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_sync</span>(<span class="enscript-type">void</span>)
+{
+	dtrace_xcall(DTRACE_CPUALL, (dtrace_xcall_t)dtrace_sync_func, NULL);
+}
+
+<span class="enscript-comment">/*
+ * The dtrace_copyin/out/instr and dtrace_fuword* routines can be called from probe context.
+ */</span>
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">dtrace_copyio_preflight</span>(addr64_t);
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">dtrace_copyio_postflight</span>(addr64_t);
+ 
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">dtrace_copycheck</span>(user_addr_t uaddr, uintptr_t kaddr, size_t size)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">kaddr</span>)
+
+	vm_offset_t recover = dtrace_set_thread_recover( current_thread(), 0 ); <span class="enscript-comment">/* Snare any extant recovery point. */</span>
+	dtrace_set_thread_recover( current_thread(), recover ); <span class="enscript-comment">/* Put it back. We *must not* re-enter and overwrite. */</span>
+
+	ASSERT(kaddr + size &gt;= kaddr);
+
+	<span class="enscript-keyword">if</span> (	uaddr + size &lt; uaddr ||		<span class="enscript-comment">/* Avoid address wrap. */</span>
+		KERN_FAILURE == dtrace_copyio_preflight(uaddr)) <span class="enscript-comment">/* Machine specific setup/constraints. */</span>
+	{
+		DTRACE_CPUFLAG_SET(CPU_DTRACE_BADADDR);
+		cpu_core[CPU-&gt;cpu_id].cpuc_dtrace_illval = uaddr;
+		<span class="enscript-keyword">return</span> (0);
+	}
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_copyin</span>(user_addr_t src, uintptr_t dst, size_t len, <span class="enscript-type">volatile</span> uint16_t *flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">flags</span>)
+    
+	<span class="enscript-keyword">if</span> (dtrace_copycheck( src, dst, len )) {
+		<span class="enscript-keyword">if</span> (copyin((<span class="enscript-type">const</span> user_addr_t)src, (<span class="enscript-type">char</span> *)dst, (vm_size_t)len)) {
+			DTRACE_CPUFLAG_SET(CPU_DTRACE_BADADDR);
+			cpu_core[CPU-&gt;cpu_id].cpuc_dtrace_illval = src;
+		}
+		dtrace_copyio_postflight(src);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_copyinstr</span>(user_addr_t src, uintptr_t dst, size_t len, <span class="enscript-type">volatile</span> uint16_t *flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">flags</span>)
+    
+	size_t actual;
+	
+	<span class="enscript-keyword">if</span> (dtrace_copycheck( src, dst, len )) {
+		<span class="enscript-comment">/*  copyin as many as 'len' bytes. */</span>
+		<span class="enscript-type">int</span> error = copyinstr((<span class="enscript-type">const</span> user_addr_t)src, (<span class="enscript-type">char</span> *)dst, (vm_size_t)len, &amp;actual);
+
+		<span class="enscript-comment">/*
+		 * ENAMETOOLONG is returned when 'len' bytes have been copied in but the NUL terminator was
+		 * not encountered. That does not require raising CPU_DTRACE_BADADDR, and we press on.
+		 * Note that we do *not* stuff a NUL terminator when returning ENAMETOOLONG, that's left
+		 * to the caller.
+		 */</span>
+		<span class="enscript-keyword">if</span> (error &amp;&amp; error != ENAMETOOLONG) {
+			DTRACE_CPUFLAG_SET(CPU_DTRACE_BADADDR);
+			cpu_core[CPU-&gt;cpu_id].cpuc_dtrace_illval = src;
+		}
+		dtrace_copyio_postflight(src);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_copyout</span>(uintptr_t src, user_addr_t dst, size_t len, <span class="enscript-type">volatile</span> uint16_t *flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">flags</span>)
+    
+	<span class="enscript-keyword">if</span> (dtrace_copycheck( dst, src, len )) {
+		<span class="enscript-keyword">if</span> (copyout((<span class="enscript-type">const</span> <span class="enscript-type">void</span> *)src, dst, (vm_size_t)len)) {
+			DTRACE_CPUFLAG_SET(CPU_DTRACE_BADADDR);
+			cpu_core[CPU-&gt;cpu_id].cpuc_dtrace_illval = dst;
+		}
+		dtrace_copyio_postflight(dst);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_copyoutstr</span>(uintptr_t src, user_addr_t dst, size_t len, <span class="enscript-type">volatile</span> uint16_t *flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">flags</span>)
+    
+	size_t actual;
+
+	<span class="enscript-keyword">if</span> (dtrace_copycheck( dst, src, len )) {
+
+		<span class="enscript-comment">/*
+		 * ENAMETOOLONG is returned when 'len' bytes have been copied out but the NUL terminator was
+		 * not encountered. We raise CPU_DTRACE_BADADDR in that case.
+		 * Note that we do *not* stuff a NUL terminator when returning ENAMETOOLONG, that's left
+		 * to the caller.
+		 */</span>
+		<span class="enscript-keyword">if</span> (copyoutstr((<span class="enscript-type">const</span> <span class="enscript-type">void</span> *)src, dst, (size_t)len, &amp;actual)) {
+			DTRACE_CPUFLAG_SET(CPU_DTRACE_BADADDR);
+			cpu_core[CPU-&gt;cpu_id].cpuc_dtrace_illval = dst;
+		}
+		dtrace_copyio_postflight(dst);
+	}
+}
+
+uint8_t
+<span class="enscript-function-name">dtrace_fuword8</span>(user_addr_t uaddr)
+{
+	uint8_t ret = 0;
+
+	DTRACE_CPUFLAG_SET(CPU_DTRACE_NOFAULT);
+	<span class="enscript-keyword">if</span> (dtrace_copycheck( uaddr, (uintptr_t)&amp;ret, <span class="enscript-keyword">sizeof</span>(ret))) {
+		<span class="enscript-keyword">if</span> (copyin((<span class="enscript-type">const</span> user_addr_t)uaddr, (<span class="enscript-type">char</span> *)&amp;ret, <span class="enscript-keyword">sizeof</span>(ret))) {
+			DTRACE_CPUFLAG_SET(CPU_DTRACE_BADADDR);
+			cpu_core[CPU-&gt;cpu_id].cpuc_dtrace_illval = uaddr;
+		}
+		dtrace_copyio_postflight(uaddr);
+	}
+	DTRACE_CPUFLAG_CLEAR(CPU_DTRACE_NOFAULT);
+
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+uint16_t
+<span class="enscript-function-name">dtrace_fuword16</span>(user_addr_t uaddr)
+{
+	uint16_t ret = 0;
+
+	DTRACE_CPUFLAG_SET(CPU_DTRACE_NOFAULT);
+	<span class="enscript-keyword">if</span> (dtrace_copycheck( uaddr, (uintptr_t)&amp;ret, <span class="enscript-keyword">sizeof</span>(ret))) {
+		<span class="enscript-keyword">if</span> (copyin((<span class="enscript-type">const</span> user_addr_t)uaddr, (<span class="enscript-type">char</span> *)&amp;ret, <span class="enscript-keyword">sizeof</span>(ret))) {
+			DTRACE_CPUFLAG_SET(CPU_DTRACE_BADADDR);
+			cpu_core[CPU-&gt;cpu_id].cpuc_dtrace_illval = uaddr;
+		}
+		dtrace_copyio_postflight(uaddr);
+	}
+	DTRACE_CPUFLAG_CLEAR(CPU_DTRACE_NOFAULT);
+
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+uint32_t
+<span class="enscript-function-name">dtrace_fuword32</span>(user_addr_t uaddr)
+{
+	uint32_t ret = 0;
+
+	DTRACE_CPUFLAG_SET(CPU_DTRACE_NOFAULT);
+	<span class="enscript-keyword">if</span> (dtrace_copycheck( uaddr, (uintptr_t)&amp;ret, <span class="enscript-keyword">sizeof</span>(ret))) {
+		<span class="enscript-keyword">if</span> (copyin((<span class="enscript-type">const</span> user_addr_t)uaddr, (<span class="enscript-type">char</span> *)&amp;ret, <span class="enscript-keyword">sizeof</span>(ret))) {
+			DTRACE_CPUFLAG_SET(CPU_DTRACE_BADADDR);
+			cpu_core[CPU-&gt;cpu_id].cpuc_dtrace_illval = uaddr;
+		}
+		dtrace_copyio_postflight(uaddr);
+	}
+	DTRACE_CPUFLAG_CLEAR(CPU_DTRACE_NOFAULT);
+
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+uint64_t
+<span class="enscript-function-name">dtrace_fuword64</span>(user_addr_t uaddr)
+{
+	uint64_t ret = 0;
+
+	DTRACE_CPUFLAG_SET(CPU_DTRACE_NOFAULT);
+	<span class="enscript-keyword">if</span> (dtrace_copycheck( uaddr, (uintptr_t)&amp;ret, <span class="enscript-keyword">sizeof</span>(ret))) {
+		<span class="enscript-keyword">if</span> (copyin((<span class="enscript-type">const</span> user_addr_t)uaddr, (<span class="enscript-type">char</span> *)&amp;ret, <span class="enscript-keyword">sizeof</span>(ret))) {
+			DTRACE_CPUFLAG_SET(CPU_DTRACE_BADADDR);
+			cpu_core[CPU-&gt;cpu_id].cpuc_dtrace_illval = uaddr;
+		}
+		dtrace_copyio_postflight(uaddr);
+	}
+	DTRACE_CPUFLAG_CLEAR(CPU_DTRACE_NOFAULT);
+
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+<span class="enscript-comment">/*
+ * Emulation of Solaris fuword / suword
+ * Called from the fasttrap provider, so the use of copyin/out requires fewer safegaurds.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fuword8</span>(user_addr_t uaddr, uint8_t *value)
+{
+	<span class="enscript-keyword">if</span> (copyin((<span class="enscript-type">const</span> user_addr_t)uaddr, (<span class="enscript-type">char</span> *)value, <span class="enscript-keyword">sizeof</span>(uint8_t)) != 0) {
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fuword16</span>(user_addr_t uaddr, uint16_t *value)
+{
+	<span class="enscript-keyword">if</span> (copyin((<span class="enscript-type">const</span> user_addr_t)uaddr, (<span class="enscript-type">char</span> *)value, <span class="enscript-keyword">sizeof</span>(uint16_t)) != 0) {
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fuword32</span>(user_addr_t uaddr, uint32_t *value)
+{
+	<span class="enscript-keyword">if</span> (copyin((<span class="enscript-type">const</span> user_addr_t)uaddr, (<span class="enscript-type">char</span> *)value, <span class="enscript-keyword">sizeof</span>(uint32_t)) != 0) {
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fuword64</span>(user_addr_t uaddr, uint64_t *value)
+{
+	<span class="enscript-keyword">if</span> (copyin((<span class="enscript-type">const</span> user_addr_t)uaddr, (<span class="enscript-type">char</span> *)value, <span class="enscript-keyword">sizeof</span>(uint64_t)) != 0) {
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fuword8_noerr</span>(user_addr_t uaddr, uint8_t *value)
+{
+	<span class="enscript-keyword">if</span> (copyin((<span class="enscript-type">const</span> user_addr_t)uaddr, (<span class="enscript-type">char</span> *)value, <span class="enscript-keyword">sizeof</span>(uint8_t))) {
+		*value = 0;
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fuword16_noerr</span>(user_addr_t uaddr, uint16_t *value)
+{
+	<span class="enscript-keyword">if</span> (copyin((<span class="enscript-type">const</span> user_addr_t)uaddr, (<span class="enscript-type">char</span> *)value, <span class="enscript-keyword">sizeof</span>(uint16_t))) {
+		*value = 0;
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fuword32_noerr</span>(user_addr_t uaddr, uint32_t *value)
+{
+	<span class="enscript-keyword">if</span> (copyin((<span class="enscript-type">const</span> user_addr_t)uaddr, (<span class="enscript-type">char</span> *)value, <span class="enscript-keyword">sizeof</span>(uint32_t))) {
+		*value = 0;
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fuword64_noerr</span>(user_addr_t uaddr, uint64_t *value)
+{
+	<span class="enscript-keyword">if</span> (copyin((<span class="enscript-type">const</span> user_addr_t)uaddr, (<span class="enscript-type">char</span> *)value, <span class="enscript-keyword">sizeof</span>(uint64_t))) {
+		*value = 0;
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">suword64</span>(user_addr_t addr, uint64_t value)
+{
+	<span class="enscript-keyword">if</span> (copyout((<span class="enscript-type">const</span> <span class="enscript-type">void</span> *)&amp;value, addr, <span class="enscript-keyword">sizeof</span>(value)) != 0) {
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">suword32</span>(user_addr_t addr, uint32_t value)
+{
+	<span class="enscript-keyword">if</span> (copyout((<span class="enscript-type">const</span> <span class="enscript-type">void</span> *)&amp;value, addr, <span class="enscript-keyword">sizeof</span>(value)) != 0) {
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">suword16</span>(user_addr_t addr, uint16_t value)
+{
+	<span class="enscript-keyword">if</span> (copyout((<span class="enscript-type">const</span> <span class="enscript-type">void</span> *)&amp;value, addr, <span class="enscript-keyword">sizeof</span>(value)) != 0) {
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">suword8</span>(user_addr_t addr, uint8_t value)
+{
+	<span class="enscript-keyword">if</span> (copyout((<span class="enscript-type">const</span> <span class="enscript-type">void</span> *)&amp;value, addr, <span class="enscript-keyword">sizeof</span>(value)) != 0) {
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-comment">/*
+ * Miscellaneous
+ */</span>
+<span class="enscript-type">extern</span> boolean_t <span class="enscript-function-name">dtrace_tally_fault</span>(user_addr_t);
+
+boolean_t
+<span class="enscript-function-name">dtrace_tally_fault</span>(user_addr_t uaddr)
+{
+	DTRACE_CPUFLAG_SET(CPU_DTRACE_BADADDR);
+	cpu_core[CPU-&gt;cpu_id].cpuc_dtrace_illval = uaddr;
+	<span class="enscript-keyword">return</span>( DTRACE_CPUFLAG_ISSET(CPU_DTRACE_NOFAULT) ? TRUE : FALSE );
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TOTTY</span>   0x02
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">prf</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *, va_list, <span class="enscript-type">int</span>, <span class="enscript-type">struct</span> tty *); <span class="enscript-comment">/* bsd/kern/subr_prf.h */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">vuprintf</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *format, va_list ap)
+{
+	<span class="enscript-keyword">return</span> prf(format, ap, TOTTY, NULL);
+}
+
+<span class="enscript-comment">/* Not called from probe context */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">cmn_err</span>( <span class="enscript-type">int</span> level, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *format, ... )
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">level</span>)
+	va_list alist;
+
+	va_start(alist, format);
+	vuprintf(format, alist);
+	va_end(alist);
+	uprintf(<span class="enscript-string">&quot;\n&quot;</span>);
+}
+
+<span class="enscript-comment">/*
+ * History:
+ *  2002-01-24 	gvdl	Initial implementation of strstr
+ */</span>
+
+__private_extern__ <span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">strstr</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *in, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *str)
+{
+    <span class="enscript-type">char</span> c;
+    size_t len;
+
+    c = *str++;
+    <span class="enscript-keyword">if</span> (!c)
+        <span class="enscript-keyword">return</span> (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) in;	<span class="enscript-comment">// Trivial empty string case
+</span>
+    len = strlen(str);
+    <span class="enscript-keyword">do</span> {
+        <span class="enscript-type">char</span> sc;
+
+        <span class="enscript-keyword">do</span> {
+            sc = *in++;
+            <span class="enscript-keyword">if</span> (!sc)
+                <span class="enscript-keyword">return</span> (<span class="enscript-type">char</span> *) 0;
+        } <span class="enscript-keyword">while</span> (sc != c);
+    } <span class="enscript-keyword">while</span> (strncmp(in, str, len) != 0);
+
+    <span class="enscript-keyword">return</span> (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) (in - 1);
+}
+
+<span class="enscript-comment">/*
+ * Runtime and ABI
+ */</span>
+uintptr_t
+<span class="enscript-function-name">dtrace_caller</span>(<span class="enscript-type">int</span> ignore)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">ignore</span>)
+	<span class="enscript-keyword">return</span> -1; <span class="enscript-comment">/* Just as in Solaris dtrace_asm.s */</span>
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">dtrace_getstackdepth</span>(<span class="enscript-type">int</span> aframes)
+{
+	<span class="enscript-type">struct</span> frame *fp = (<span class="enscript-type">struct</span> frame *)__builtin_frame_address(0);
+	<span class="enscript-type">struct</span> frame *nextfp, *minfp, *stacktop;
+	<span class="enscript-type">int</span> depth = 0;
+	<span class="enscript-type">int</span> on_intr;
+
+	<span class="enscript-keyword">if</span> ((on_intr = CPU_ON_INTR(CPU)) != 0)
+		stacktop = (<span class="enscript-type">struct</span> frame *)dtrace_get_cpu_int_stack_top();
+	<span class="enscript-keyword">else</span>
+		stacktop = (<span class="enscript-type">struct</span> frame *)(dtrace_get_kernel_stack(current_thread()) + kernel_stack_size);
+
+	minfp = fp;
+
+	aframes++;
+
+	<span class="enscript-keyword">for</span> (;;) {
+		depth++;
+
+		nextfp = *(<span class="enscript-type">struct</span> frame **)fp;
+
+		<span class="enscript-keyword">if</span> (nextfp &lt;= minfp || nextfp &gt;= stacktop) {
+			<span class="enscript-keyword">if</span> (on_intr) {
+				<span class="enscript-comment">/*
+				 * Hop from interrupt stack to thread stack.
+				 */</span>
+                                vm_offset_t kstack_base = dtrace_get_kernel_stack(current_thread());
+
+                                minfp = (<span class="enscript-type">struct</span> frame *)kstack_base;
+                                stacktop = (<span class="enscript-type">struct</span> frame *)(kstack_base + kernel_stack_size);
+
+				on_intr = 0;
+				<span class="enscript-keyword">continue</span>;
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+
+		fp = nextfp;
+		minfp = fp;
+	}
+
+	<span class="enscript-keyword">if</span> (depth &lt;= aframes)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">return</span> (depth - aframes);
+}
+
+<span class="enscript-comment">/*
+ * Unconsidered
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_vtime_enable</span>(<span class="enscript-type">void</span>) {}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_vtime_disable</span>(<span class="enscript-type">void</span>) {}
+
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* else ! CONFIG_DTRACE */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kmod.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * This exists to prevent build errors when dtrace is unconfigured.
+ */</span>
+
+kern_return_t <span class="enscript-function-name">_dtrace_register_anon_DOF</span>(<span class="enscript-type">char</span> *, <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *, uint32_t);
+
+kern_return_t <span class="enscript-function-name">_dtrace_register_anon_DOF</span>(<span class="enscript-type">char</span> *arg1, <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *arg2, uint32_t arg3) {
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>, <span class="enscript-variable-name">arg3</span>)
+
+        <span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_DTRACE */</span>
+</pre>
+<hr />
+</body></html>

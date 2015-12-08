@@ -1,0 +1,496 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kxld_dict.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kxld_dict.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007-2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEBUG_ASSERT_COMPONENT_NAME_STRING</span> <span class="enscript-string">&quot;kxld&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;AssertMacros.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_dict.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_util.h&quot;</span>
+
+<span class="enscript-comment">/*******************************************************************************
+* Types and macros
+*******************************************************************************/</span>
+
+<span class="enscript-comment">/* Ratio of num_entries:num_buckets that will cause a resize */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">RESIZE_NUMER</span> 7
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">RESIZE_DENOM</span> 10
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">RESIZE_THRESHOLD</span>(x) (((x)*RESIZE_NUMER) / RESIZE_DENOM)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MIN_BUCKETS</span>(x) (((x)*RESIZE_DENOM) / RESIZE_NUMER) 
+
+<span class="enscript-comment">/* Selected for good scaling qualities when resizing dictionary
+ * ... see: <a href="http://www.concentric.net/~ttwang/tech/hashsize.htm">http://www.concentric.net/~ttwang/tech/hashsize.htm</a>
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEFAULT_DICT_SIZE</span> 89
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> dict_entry DictEntry;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">enum</span> {
+    EMPTY = 0,
+    USED = 1,
+    DELETED = 2
+} DictEntryState;
+
+<span class="enscript-type">struct</span> dict_entry {
+    <span class="enscript-type">const</span> <span class="enscript-type">void</span> *key;
+    <span class="enscript-type">void</span> *value;
+    DictEntryState state;
+};
+
+<span class="enscript-comment">/*******************************************************************************
+* Function prototypes
+*******************************************************************************/</span>
+
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">get_locate_index</span>(<span class="enscript-type">const</span> KXLDDict *dict, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *key, 
+    u_int *idx);
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">get_insert_index</span>(<span class="enscript-type">const</span> KXLDDict *dict, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *key, 
+    u_int *idx);
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">resize_dict</span>(KXLDDict *dict);
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_dict_init</span>(KXLDDict * dict, kxld_dict_hash hash, kxld_dict_cmp cmp, 
+    u_int num_entries) 
+{
+    kern_return_t rval = KERN_FAILURE;
+    u_int min_buckets = MIN_BUCKETS(num_entries);
+    u_int num_buckets = DEFAULT_DICT_SIZE;
+    
+    check(dict);
+    check(hash);
+    check(cmp);
+    
+    <span class="enscript-comment">/* We want the number of allocated buckets to be at least twice that of the 
+     * number to be inserted.
+     */</span>
+    <span class="enscript-keyword">while</span> (min_buckets &gt; num_buckets) {
+        num_buckets *= 2;
+        num_buckets++;
+    }
+    
+    <span class="enscript-comment">/* Allocate enough buckets for the anticipated number of entries */</span>
+    rval = kxld_array_init(&amp;dict-&gt;buckets, <span class="enscript-keyword">sizeof</span>(DictEntry), num_buckets);
+    require_noerr(rval, finish);
+    
+    <span class="enscript-comment">/* Initialize */</span>
+    dict-&gt;hash = hash;
+    dict-&gt;cmp = cmp;
+    dict-&gt;num_entries = 0;
+    dict-&gt;resize_threshold = RESIZE_THRESHOLD(num_buckets);
+    
+    rval = KERN_SUCCESS;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_dict_clear</span>(KXLDDict *dict)
+{
+    check(dict);
+
+    dict-&gt;hash = NULL;
+    dict-&gt;cmp = NULL;
+    dict-&gt;num_entries = 0;
+    dict-&gt;resize_threshold = 0;
+    kxld_array_clear(&amp;dict-&gt;buckets);
+    kxld_array_clear(&amp;dict-&gt;resize_buckets);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_dict_iterator_init</span>(KXLDDictIterator *iter, <span class="enscript-type">const</span> KXLDDict *dict)
+{
+    check(iter);
+    check(dict);
+
+    iter-&gt;idx = 0;
+    iter-&gt;dict = dict;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_dict_deinit</span>(KXLDDict *dict)
+{
+    check(dict);
+    
+    kxld_array_deinit(&amp;dict-&gt;buckets);
+    kxld_array_deinit(&amp;dict-&gt;resize_buckets);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_int
+<span class="enscript-function-name">kxld_dict_get_num_entries</span>(<span class="enscript-type">const</span> KXLDDict *dict)
+{
+    check(dict);
+
+    <span class="enscript-keyword">return</span> dict-&gt;num_entries;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">kxld_dict_find</span>(<span class="enscript-type">const</span> KXLDDict *dict, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *key)
+{
+    kern_return_t rval = KERN_FAILURE;
+    DictEntry *entry = NULL;
+    u_int idx = 0;
+   
+    check(dict);
+    check(key);
+   
+    rval = get_locate_index(dict, key, &amp;idx);
+    <span class="enscript-keyword">if</span> (rval) <span class="enscript-keyword">return</span> NULL; 
+
+    entry = kxld_array_get_item(&amp;dict-&gt;buckets, idx);
+    
+    <span class="enscript-keyword">return</span> entry-&gt;value;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+* This dictionary uses linear probing, which means that when there is a
+* collision, we just walk along the buckets until a free bucket shows up.
+* A consequence of this is that when looking up an item, items that lie between
+* its hash value and its actual bucket may have been deleted since it was
+* inserted.  Thus, we should only stop a lookup when we've wrapped around the
+* dictionary or encountered an EMPTY bucket.
+********************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">get_locate_index</span>(<span class="enscript-type">const</span> KXLDDict *dict, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *key, u_int *_idx)
+{
+    kern_return_t rval = KERN_FAILURE;
+    DictEntry *entry = NULL;
+    u_int base, idx;
+
+    base = idx = dict-&gt;hash(dict, key);
+    
+    <span class="enscript-comment">/* Iterate until we match the key, wrap, or hit an empty bucket */</span>
+    entry = kxld_array_get_item(&amp;dict-&gt;buckets, idx);
+    <span class="enscript-keyword">while</span> (!dict-&gt;cmp(entry-&gt;key, key)) {
+        <span class="enscript-keyword">if</span> (entry-&gt;state == EMPTY) <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+
+        idx = (idx + 1) % dict-&gt;buckets.nitems;
+        <span class="enscript-keyword">if</span> (idx == base) <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+
+        entry = kxld_array_get_item(&amp;dict-&gt;buckets, idx);
+    }
+
+    check(idx &lt; dict-&gt;buckets.nitems);
+
+    *_idx = idx;
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_dict_insert</span>(KXLDDict *dict, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *key, <span class="enscript-type">void</span> *value)
+{
+    kern_return_t rval = KERN_FAILURE;
+    DictEntry *entry = NULL;
+    u_int idx = 0;
+    
+    check(dict);
+    check(key);
+    check(value);
+    
+    <span class="enscript-comment">/* Resize if we are greater than the capacity threshold.
+     * Note: this is expensive, but the dictionary can be sized correctly at
+     * construction to avoid ever having to do this.
+     */</span>
+    <span class="enscript-keyword">while</span> (dict-&gt;num_entries &gt; dict-&gt;resize_threshold) { 
+        rval = resize_dict(dict); 
+        require_noerr(rval, finish);
+    }
+    
+    <span class="enscript-comment">/* If this function returns FULL after we've already resized appropriately
+     * something is very wrong and we should return an error.
+     */</span>
+    rval = get_insert_index(dict, key, &amp;idx);
+    require_noerr(rval, finish);
+    
+    <span class="enscript-comment">/* Insert the new key-value pair into the bucket, but only count it as a 
+     * new entry if we are not overwriting an existing entry.
+     */</span>
+    entry = kxld_array_get_item(&amp;dict-&gt;buckets, idx);
+    <span class="enscript-keyword">if</span> (entry-&gt;state != USED) {
+        dict-&gt;num_entries++;
+        entry-&gt;key = key;
+        entry-&gt;state = USED;
+    }
+    entry-&gt;value = value;
+
+    rval = KERN_SUCCESS;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+* Increases the hash table's capacity by 2N+1.  Uses dictionary API.  Not
+* fast; just correct.
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">resize_dict</span>(KXLDDict *dict)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDArray tmparray;
+    DictEntry *entry = NULL;
+    u_int nbuckets = (dict-&gt;buckets.nitems * 2 + 1);
+    u_int i = 0;
+
+    check(dict);
+
+    <span class="enscript-comment">/* Initialize a new set of buckets to hold more entries */</span>
+    rval = kxld_array_init(&amp;dict-&gt;resize_buckets, <span class="enscript-keyword">sizeof</span>(DictEntry), nbuckets);
+    require_noerr(rval, finish);
+
+    <span class="enscript-comment">/* Swap the new buckets with the old buckets */</span>
+    tmparray = dict-&gt;buckets;
+    dict-&gt;buckets = dict-&gt;resize_buckets;
+    dict-&gt;resize_buckets = tmparray; 
+
+    <span class="enscript-comment">/* Reset dictionary parameters */</span>
+    dict-&gt;num_entries = 0;
+    dict-&gt;resize_threshold = RESIZE_THRESHOLD(dict-&gt;buckets.nitems);
+
+    <span class="enscript-comment">/* Rehash all of the entries */</span>
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; dict-&gt;resize_buckets.nitems; ++i) {
+        entry = kxld_array_get_item(&amp;dict-&gt;resize_buckets, i);
+        <span class="enscript-keyword">if</span> (entry-&gt;state == USED) {
+            rval = kxld_dict_insert(dict, entry-&gt;key, entry-&gt;value);
+            require_noerr(rval, finish);
+        }
+    }
+
+    <span class="enscript-comment">/* Clear the old buckets */</span>
+    kxld_array_clear(&amp;dict-&gt;resize_buckets);
+
+    rval = KERN_SUCCESS;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+* Simple function to find the first empty cell
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">get_insert_index</span>(<span class="enscript-type">const</span> KXLDDict *dict, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *key, u_int *r_index)
+{
+    kern_return_t rval = KERN_FAILURE;
+    DictEntry *entry = NULL;
+    u_int base, idx;
+
+    base = idx = dict-&gt;hash(dict, key);
+    
+    <span class="enscript-comment">/* Iterate through the buckets until we find an EMPTY bucket, a DELETED
+     * bucket, or a key match.
+     */</span>
+    entry = kxld_array_get_item(&amp;dict-&gt;buckets, idx);
+    <span class="enscript-keyword">while</span> (entry-&gt;state == USED &amp;&amp; !dict-&gt;cmp(entry-&gt;key, key)) {
+        idx = (idx + 1) % dict-&gt;buckets.nitems;
+        require_action(base != idx, finish, rval=KERN_FAILURE);
+        entry = kxld_array_get_item(&amp;dict-&gt;buckets, idx);
+    }
+    
+    *r_index = idx;
+    rval = KERN_SUCCESS;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_dict_remove</span>(KXLDDict *dict, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *key, <span class="enscript-type">void</span> **value)
+{
+    kern_return_t rval = KERN_FAILURE;
+    DictEntry *entry = NULL;
+    u_int idx = 0;
+   
+    check(dict);
+    check(key);
+    
+    <span class="enscript-comment">/* Find the item */</span>
+    rval = get_locate_index(dict, key, &amp;idx);
+    <span class="enscript-keyword">if</span> (rval) {
+        <span class="enscript-keyword">if</span> (value) *value = NULL;
+        <span class="enscript-keyword">return</span>;
+    }
+
+    entry = kxld_array_get_item(&amp;dict-&gt;buckets, idx);
+
+    <span class="enscript-comment">/* Save the value if requested */</span>    
+    <span class="enscript-keyword">if</span> (value) *value = entry-&gt;value;
+
+    <span class="enscript-comment">/* Delete the item from the dictionary */</span>
+    entry-&gt;key = NULL;
+    entry-&gt;value = NULL;
+    entry-&gt;state = DELETED;
+    dict-&gt;num_entries--;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">kxld_dict_iterator_get_next</span>(KXLDDictIterator *iter, <span class="enscript-type">const</span> <span class="enscript-type">void</span> **key, 
+    <span class="enscript-type">void</span> **value)
+{
+    DictEntry *entry = NULL;
+
+    check(iter);
+    check(key);
+    check(value);
+
+    *key = NULL;
+    *value = NULL;
+
+    <span class="enscript-comment">/* Walk over the dictionary looking for USED buckets */</span>
+    <span class="enscript-keyword">for</span> (; iter-&gt;idx &lt; iter-&gt;dict-&gt;buckets.nitems; ++(iter-&gt;idx)) {
+        entry = kxld_array_get_item(&amp;iter-&gt;dict-&gt;buckets, iter-&gt;idx);
+        <span class="enscript-keyword">if</span> (entry-&gt;state == USED) {
+            *key = entry-&gt;key;
+            *value = entry-&gt;value;
+            ++(iter-&gt;idx);
+            <span class="enscript-keyword">break</span>;
+        }
+    }
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">kxld_dict_iterator_reset</span>(KXLDDictIterator *iter)
+{
+    iter-&gt;idx = 0;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+* This is Daniel Bernstein's hash algorithm from comp.lang.c
+* It's fast and distributes well.  Returns an idx into the symbol hash table.
+* NOTE: Will not check for a valid pointer - performance
+*******************************************************************************/</span>
+u_int
+<span class="enscript-function-name">kxld_dict_string_hash</span>(<span class="enscript-type">const</span> KXLDDict *dict, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *_key) 
+{
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *key = _key;
+    u_int c = 0;
+    u_int hash_val = 5381;
+
+    check(dict);
+    check(_key);
+
+    <span class="enscript-keyword">while</span> ((c = *key++)) {
+        <span class="enscript-comment">/* hash(i) = hash(i-1) *33 ^ name[i] */</span>
+        hash_val = ((hash_val &lt;&lt; 5) + hash_val) ^ c;    
+    }
+    
+    <span class="enscript-keyword">return</span> (hash_val % dict-&gt;buckets.nitems);
+}
+
+u_int
+<span class="enscript-function-name">kxld_dict_uint32_hash</span>(<span class="enscript-type">const</span> KXLDDict *dict, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *_key)
+{
+    uint32_t key = *(<span class="enscript-type">const</span> uint32_t *) _key;
+
+    check(_key);
+
+    <span class="enscript-keyword">return</span> (u_int) (key % dict-&gt;buckets.nitems);
+}
+
+u_int
+<span class="enscript-function-name">kxld_dict_kxldaddr_hash</span>(<span class="enscript-type">const</span> KXLDDict *dict, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *_key)
+{
+    kxld_addr_t key = *(<span class="enscript-type">const</span> kxld_addr_t *) _key;
+
+    check(_key);
+
+    <span class="enscript-keyword">return</span> (u_int) (key % dict-&gt;buckets.nitems);
+}
+
+u_int
+<span class="enscript-function-name">kxld_dict_string_cmp</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *key1, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *key2)
+{
+    <span class="enscript-keyword">return</span> streq(key1, key2);
+}
+
+u_int
+<span class="enscript-function-name">kxld_dict_uint32_cmp</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *key1, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *key2)
+{
+    <span class="enscript-type">const</span> uint32_t *a = key1;
+    <span class="enscript-type">const</span> uint32_t *b = key2;
+
+    <span class="enscript-keyword">return</span> (a &amp;&amp; b &amp;&amp; (*a == *b));
+}
+
+u_int
+<span class="enscript-function-name">kxld_dict_kxldaddr_cmp</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *key1, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *key2)
+{
+    <span class="enscript-type">const</span> kxld_addr_t *a = key1;
+    <span class="enscript-type">const</span> kxld_addr_t *b = key2;
+
+    <span class="enscript-keyword">return</span> (a &amp;&amp; b &amp;&amp; (*a == *b));
+}
+
+</pre>
+<hr />
+</body></html>

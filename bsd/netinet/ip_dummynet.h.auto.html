@@ -1,0 +1,725 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ip_dummynet.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ip_dummynet.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2002 Luigi Rizzo, Universita` di Pisa
+ * Portions Copyright (c) 2000 Akamba Corp.
+ * All rights reserved
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/netinet/ip_dummynet.h,v 1.32 2004/08/17 22:05:54 andre Exp $
+ */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_IP_DUMMYNET_H</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_IP_DUMMYNET_H</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/appleapiopts.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">PRIVATE</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_flowid.h&gt;</span>
+
+<span class="enscript-comment">/* Apply ipv6 mask on ipv6 addr */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">APPLY_MASK</span>(addr,mask)                          \
+    (addr)-&gt;__u6_addr.__u6_addr32[0] &amp;= (mask)-&gt;__u6_addr.__u6_addr32[0]; \
+    (addr)-&gt;__u6_addr.__u6_addr32[1] &amp;= (mask)-&gt;__u6_addr.__u6_addr32[1]; \
+    (addr)-&gt;__u6_addr.__u6_addr32[2] &amp;= (mask)-&gt;__u6_addr.__u6_addr32[2]; \
+    (addr)-&gt;__u6_addr.__u6_addr32[3] &amp;= (mask)-&gt;__u6_addr.__u6_addr32[3];
+
+<span class="enscript-comment">/*
+ * Definition of dummynet data structures. In the structures, I decided
+ * not to use the macros in &lt;sys/queue.h&gt; in the hope of making the code
+ * easier to port to other architectures. The type of lists and queue we
+ * use here is pretty simple anyways.
+ */</span>
+
+<span class="enscript-comment">/*
+ * We start with a heap, which is used in the scheduler to decide when
+ * to transmit packets etc.
+ *
+ * The key for the heap is used for two different values:
+ *
+ * 1. timer ticks- max 10K/second, so 32 bits are enough;
+ *
+ * 2. virtual times. These increase in steps of len/x, where len is the
+ *    packet length, and x is either the weight of the flow, or the
+ *    sum of all weights.
+ *    If we limit to max 1000 flows and a max weight of 100, then
+ *    x needs 17 bits. The packet size is 16 bits, so we can easily
+ *    overflow if we do not allow errors.
+ * So we use a key &quot;dn_key&quot; which is 64 bits. Some macros are used to
+ * compare key values and handle wraparounds.
+ * MAX64 returns the largest of two key values.
+ * MY_M is used as a shift count when doing fixed point arithmetic
+ * (a better name would be useful...).
+ */</span>
+<span class="enscript-type">typedef</span> u_int64_t dn_key ;      <span class="enscript-comment">/* sorting key */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DN_KEY_LT</span>(a,b)     ((int64_t)((a)-(b)) &lt; 0)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DN_KEY_LEQ</span>(a,b)    ((int64_t)((a)-(b)) &lt;= 0)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DN_KEY_GT</span>(a,b)     ((int64_t)((a)-(b)) &gt; 0)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DN_KEY_GEQ</span>(a,b)    ((int64_t)((a)-(b)) &gt;= 0)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MAX64</span>(x,y)  (( (int64_t) ( (y)-(x) )) &gt; 0 ) ? (y) : (x)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MY_M</span>	16 <span class="enscript-comment">/* number of left shift to obtain a larger precision */</span>
+
+<span class="enscript-comment">/*
+ * XXX With this scaling, max 1000 flows, max weight 100, 1Gbit/s, the
+ * virtual time wraps every 15 days.
+ */</span>
+
+<span class="enscript-comment">/*
+ * The OFFSET_OF macro is used to return the offset of a field within
+ * a structure. It is used by the heap management routines.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">OFFSET_OF</span>(type, field) ((int)&amp;( ((type *)0)-&gt;field) )
+
+<span class="enscript-comment">/*
+ * The maximum hash table size for queues.  This value must be a power
+ * of 2.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_MAX_HASH_SIZE</span> 65536
+
+<span class="enscript-comment">/*
+ * A heap entry is made of a key and a pointer to the actual
+ * object stored in the heap.
+ * The heap is an array of dn_heap_entry entries, dynamically allocated.
+ * Current size is &quot;size&quot;, with &quot;elements&quot; actually in use.
+ * The heap normally supports only ordered insert and extract from the top.
+ * If we want to extract an object from the middle of the heap, we
+ * have to know where the object itself is located in the heap (or we
+ * need to scan the whole array). To this purpose, an object has a
+ * field (int) which contains the index of the object itself into the
+ * heap. When the object is moved, the field must also be updated.
+ * The offset of the index in the object is stored in the 'offset'
+ * field in the heap descriptor. The assumption is that this offset
+ * is non-zero if we want to support extract from the middle.
+ */</span>
+<span class="enscript-type">struct</span> dn_heap_entry {
+    dn_key key ;	<span class="enscript-comment">/* sorting key. Topmost element is smallest one */</span>
+    <span class="enscript-type">void</span> *object ;	<span class="enscript-comment">/* object pointer */</span>
+} ;
+
+<span class="enscript-type">struct</span> dn_heap {
+    <span class="enscript-type">int</span> size ;
+    <span class="enscript-type">int</span> elements ;
+    <span class="enscript-type">int</span> offset ; <span class="enscript-comment">/* XXX if &gt; 0 this is the offset of direct ptr to obj */</span>
+    <span class="enscript-type">struct</span> dn_heap_entry *p ;	<span class="enscript-comment">/* really an array of &quot;size&quot; entries */</span>
+} ;
+
+<span class="enscript-comment">/*
+ * Packets processed by dummynet have an mbuf tag associated with
+ * them that carries their dummynet state.  This is used within
+ * the dummynet code as well as outside when checking for special
+ * processing requirements.
+ */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>	<span class="enscript-comment">/* for ip_out_args */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>	<span class="enscript-comment">/* for ip6_out_args */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_var.h&gt;</span>	<span class="enscript-comment">/* for ip6_out_args */</span>
+
+<span class="enscript-type">struct</span> dn_pkt_tag {
+    <span class="enscript-type">struct</span> ip_fw	*dn_ipfw_rule;		<span class="enscript-comment">/* matching IPFW rule */</span>
+    <span class="enscript-type">void</span>		*dn_pf_rule;		<span class="enscript-comment">/* matching PF rule */</span>
+    <span class="enscript-type">int</span>			dn_dir;			<span class="enscript-comment">/* action when packet comes out. */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_TO_IP_OUT</span>	1
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_TO_IP_IN</span>	2
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_TO_BDG_FWD</span>	3
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_TO_IP6_IN</span>    4
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_TO_IP6_OUT</span>   5
+    dn_key 		dn_output_time;		<span class="enscript-comment">/* when the pkt is due for delivery	*/</span>
+    <span class="enscript-type">struct</span> ifnet	*dn_ifp;		<span class="enscript-comment">/* interface, for ip[6]_output		*/</span>
+    <span class="enscript-type">union</span> {
+    	<span class="enscript-type">struct</span> sockaddr_in	_dn_dst;
+    	<span class="enscript-type">struct</span> sockaddr_in6	_dn_dst6 ;
+    } 			dn_dst_;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">dn_dst</span> dn_dst_._dn_dst
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">dn_dst6</span> dn_dst_._dn_dst6
+    <span class="enscript-type">union</span> {
+    	<span class="enscript-type">struct</span> route		_dn_ro;		<span class="enscript-comment">/* route, for ip_output. MUST COPY	*/</span>
+    	<span class="enscript-type">struct</span> route_in6	_dn_ro6;	<span class="enscript-comment">/* route, for ip6_output. MUST COPY	*/</span>
+	} 		dn_ro_;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">dn_ro</span> dn_ro_._dn_ro
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">dn_ro6</span> dn_ro_._dn_ro6
+    <span class="enscript-type">struct</span> route_in6	dn_ro6_pmtu;		<span class="enscript-comment">/* for ip6_output */</span>
+    <span class="enscript-type">struct</span> ifnet	*dn_origifp;		<span class="enscript-comment">/* for ip6_output */</span>
+    u_int32_t		dn_mtu;			<span class="enscript-comment">/* for ip6_output */</span>
+    <span class="enscript-type">int</span>			dn_alwaysfrag;		<span class="enscript-comment">/* for ip6_output */</span>
+    u_int32_t		dn_unfragpartlen;	<span class="enscript-comment">/* for ip6_output */</span>
+    <span class="enscript-type">struct</span> ip6_exthdrs 	dn_exthdrs;		<span class="enscript-comment">/* for ip6_output */</span>
+    <span class="enscript-type">int</span>			dn_flags ;		<span class="enscript-comment">/* flags, for ip[6]_output */</span>
+    <span class="enscript-type">int</span>			dn_client;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_CLIENT_IPFW</span>	1
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_CLIENT_PF</span>	2
+    <span class="enscript-type">union</span> {
+    	<span class="enscript-type">struct</span> ip_out_args	_dn_ipoa;	<span class="enscript-comment">/* output args, for ip_output. MUST COPY */</span>
+    	<span class="enscript-type">struct</span> ip6_out_args	_dn_ip6oa;	<span class="enscript-comment">/* output args, for ip_output. MUST COPY */</span>
+    } 			dn_ipoa_;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">dn_ipoa</span> dn_ipoa_._dn_ipoa
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">dn_ip6oa</span> dn_ipoa_._dn_ip6oa
+};
+#<span class="enscript-reference">else</span>
+<span class="enscript-type">struct</span> dn_pkt;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KERNEL */</span>
+
+<span class="enscript-comment">/*
+ * Overall structure of dummynet (with WF2Q+):
+
+In dummynet, packets are selected with the firewall rules, and passed
+to two different objects: PIPE or QUEUE.
+
+A QUEUE is just a queue with configurable size and queue management
+policy. It is also associated with a mask (to discriminate among
+different flows), a weight (used to give different shares of the
+bandwidth to different flows) and a &quot;pipe&quot;, which essentially
+supplies the transmit clock for all queues associated with that
+pipe.
+
+A PIPE emulates a fixed-bandwidth link, whose bandwidth is
+configurable.  The &quot;clock&quot; for a pipe can come from either an
+internal timer, or from the transmit interrupt of an interface.
+A pipe is also associated with one (or more, if masks are used)
+queue, where all packets for that pipe are stored.
+
+The bandwidth available on the pipe is shared by the queues
+associated with that pipe (only one in case the packet is sent
+to a PIPE) according to the WF2Q+ scheduling algorithm and the
+configured weights.
+
+In general, incoming packets are stored in the appropriate queue,
+which is then placed into one of a few heaps managed by a scheduler
+to decide when the packet should be extracted.
+The scheduler (a function called dummynet()) is run at every timer
+tick, and grabs queues from the head of the heaps when they are
+ready for processing.
+
+There are three data structures definining a pipe and associated queues:
+
+ + dn_pipe, which contains the main configuration parameters related
+   to delay and bandwidth;
+ + dn_flow_set, which contains WF2Q+ configuration, flow
+   masks, plr and RED configuration;
+ + dn_flow_queue, which is the per-flow queue (containing the packets)
+
+Multiple dn_flow_set can be linked to the same pipe, and multiple
+dn_flow_queue can be linked to the same dn_flow_set.
+All data structures are linked in a linear list which is used for
+housekeeping purposes.
+
+During configuration, we create and initialize the dn_flow_set
+and dn_pipe structures (a dn_pipe also contains a dn_flow_set).
+
+At runtime: packets are sent to the appropriate dn_flow_set (either
+WFQ ones, or the one embedded in the dn_pipe for fixed-rate flows),
+which in turn dispatches them to the appropriate dn_flow_queue
+(created dynamically according to the masks).
+
+The transmit clock for fixed rate flows (ready_event()) selects the
+dn_flow_queue to be used to transmit the next packet. For WF2Q,
+wfq_ready_event() extract a pipe which in turn selects the right
+flow using a number of heaps defined into the pipe itself.
+
+ *
+ */</span>
+
+<span class="enscript-comment">/*
+ * per flow queue. This contains the flow identifier, the queue
+ * of packets, counters, and parameters used to support both RED and
+ * WF2Q+.
+ *
+ * A dn_flow_queue is created and initialized whenever a packet for
+ * a new flow arrives.
+ */</span>
+<span class="enscript-type">struct</span> dn_flow_queue {
+    <span class="enscript-type">struct</span> dn_flow_queue *next ;
+    <span class="enscript-type">struct</span> ip_flow_id id ;
+
+    <span class="enscript-type">struct</span> mbuf *head, *tail ;	<span class="enscript-comment">/* queue of packets */</span>
+    u_int len ;
+    u_int len_bytes ;
+    u_int32_t numbytes ;		<span class="enscript-comment">/* credit for transmission (dynamic queues) */</span>
+
+    u_int64_t tot_pkts ;	<span class="enscript-comment">/* statistics counters	*/</span>
+    u_int64_t tot_bytes ;
+    u_int32_t drops ;
+
+    <span class="enscript-type">int</span> hash_slot ;		<span class="enscript-comment">/* debugging/diagnostic */</span>
+
+    <span class="enscript-comment">/* RED parameters */</span>
+    <span class="enscript-type">int</span> avg ;                   <span class="enscript-comment">/* average queue length est. (scaled) */</span>
+    <span class="enscript-type">int</span> count ;                 <span class="enscript-comment">/* arrivals since last RED drop */</span>
+    <span class="enscript-type">int</span> random ;                <span class="enscript-comment">/* random value (scaled) */</span>
+    u_int32_t q_time ;          <span class="enscript-comment">/* start of queue idle time */</span>
+
+    <span class="enscript-comment">/* WF2Q+ support */</span>
+    <span class="enscript-type">struct</span> dn_flow_set *fs ;	<span class="enscript-comment">/* parent flow set */</span>
+    <span class="enscript-type">int</span> heap_pos ;		<span class="enscript-comment">/* position (index) of struct in heap */</span>
+    dn_key sched_time ;		<span class="enscript-comment">/* current time when queue enters ready_heap */</span>
+
+    dn_key S,F ;		<span class="enscript-comment">/* start time, finish time */</span>
+    <span class="enscript-comment">/*
+     * Setting F &lt; S means the timestamp is invalid. We only need
+     * to test this when the queue is empty.
+     */</span>
+} ;
+
+<span class="enscript-comment">/*
+ * flow_set descriptor. Contains the &quot;template&quot; parameters for the
+ * queue configuration, and pointers to the hash table of dn_flow_queue's.
+ *
+ * The hash table is an array of lists -- we identify the slot by
+ * hashing the flow-id, then scan the list looking for a match.
+ * The size of the hash table (buckets) is configurable on a per-queue
+ * basis.
+ *
+ * A dn_flow_set is created whenever a new queue or pipe is created (in the
+ * latter case, the structure is located inside the struct dn_pipe).
+ */</span>
+<span class="enscript-type">struct</span> dn_flow_set {
+    SLIST_ENTRY(dn_flow_set)	next;	<span class="enscript-comment">/* linked list in a hash slot */</span>
+
+    u_short fs_nr ;             <span class="enscript-comment">/* flow_set number       */</span>
+    u_short flags_fs;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_HAVE_FLOW_MASK</span>	0x0001
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_IS_RED</span>		0x0002
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_IS_GENTLE_RED</span>	0x0004
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_QSIZE_IS_BYTES</span>	0x0008	<span class="enscript-comment">/* queue size is measured in bytes */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_NOERROR</span>		0x0010	<span class="enscript-comment">/* do not report ENOBUFS on drops  */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_IS_PIPE</span>		0x4000
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_IS_QUEUE</span>		0x8000
+
+    <span class="enscript-type">struct</span> dn_pipe *pipe ;	<span class="enscript-comment">/* pointer to parent pipe */</span>
+    u_short parent_nr ;		<span class="enscript-comment">/* parent pipe#, 0 if local to a pipe */</span>
+
+    <span class="enscript-type">int</span> weight ;		<span class="enscript-comment">/* WFQ queue weight */</span>
+    <span class="enscript-type">int</span> qsize ;			<span class="enscript-comment">/* queue size in slots or bytes */</span>
+    <span class="enscript-type">int</span> plr ;			<span class="enscript-comment">/* pkt loss rate (2^31-1 means 100%) */</span>
+
+    <span class="enscript-type">struct</span> ip_flow_id flow_mask ;
+
+    <span class="enscript-comment">/* hash table of queues onto this flow_set */</span>
+    <span class="enscript-type">int</span> rq_size ;		<span class="enscript-comment">/* number of slots */</span>
+    <span class="enscript-type">int</span> rq_elements ;		<span class="enscript-comment">/* active elements */</span>
+    <span class="enscript-type">struct</span> dn_flow_queue **rq;	<span class="enscript-comment">/* array of rq_size entries */</span>
+
+    u_int32_t last_expired ;	<span class="enscript-comment">/* do not expire too frequently */</span>
+    <span class="enscript-type">int</span> backlogged ;		<span class="enscript-comment">/* #active queues for this flowset */</span>
+
+        <span class="enscript-comment">/* RED parameters */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SCALE_RED</span>               16
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SCALE</span>(x)                ( (x) &lt;&lt; SCALE_RED )
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SCALE_VAL</span>(x)            ( (x) &gt;&gt; SCALE_RED )
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SCALE_MUL</span>(x,y)          ( ( (x) * (y) ) &gt;&gt; SCALE_RED )
+    <span class="enscript-type">int</span> w_q ;			<span class="enscript-comment">/* queue weight (scaled) */</span>
+    <span class="enscript-type">int</span> max_th ;		<span class="enscript-comment">/* maximum threshold for queue (scaled) */</span>
+    <span class="enscript-type">int</span> min_th ;		<span class="enscript-comment">/* minimum threshold for queue (scaled) */</span>
+    <span class="enscript-type">int</span> max_p ;			<span class="enscript-comment">/* maximum value for p_b (scaled) */</span>
+    u_int c_1 ;			<span class="enscript-comment">/* max_p/(max_th-min_th) (scaled) */</span>
+    u_int c_2 ;			<span class="enscript-comment">/* max_p*min_th/(max_th-min_th) (scaled) */</span>
+    u_int c_3 ;			<span class="enscript-comment">/* for GRED, (1-max_p)/max_th (scaled) */</span>
+    u_int c_4 ;			<span class="enscript-comment">/* for GRED, 1 - 2*max_p (scaled) */</span>
+    u_int * w_q_lookup ;	<span class="enscript-comment">/* lookup table for computing (1-w_q)^t */</span>
+    u_int lookup_depth ;	<span class="enscript-comment">/* depth of lookup table */</span>
+    <span class="enscript-type">int</span> lookup_step ;		<span class="enscript-comment">/* granularity inside the lookup table */</span>
+    <span class="enscript-type">int</span> lookup_weight ;		<span class="enscript-comment">/* equal to (1-w_q)^t / (1-w_q)^(t+1) */</span>
+    <span class="enscript-type">int</span> avg_pkt_size ;		<span class="enscript-comment">/* medium packet size */</span>
+    <span class="enscript-type">int</span> max_pkt_size ;		<span class="enscript-comment">/* max packet size */</span>
+} ;
+
+<span class="enscript-function-name">SLIST_HEAD</span>(dn_flow_set_head, dn_flow_set);
+
+<span class="enscript-comment">/*
+ * Pipe descriptor. Contains global parameters, delay-line queue,
+ * and the flow_set used for fixed-rate queues.
+ *
+ * For WF2Q+ support it also has 3 heaps holding dn_flow_queue:
+ *   not_eligible_heap, for queues whose start time is higher
+ *	than the virtual time. Sorted by start time.
+ *   scheduler_heap, for queues eligible for scheduling. Sorted by
+ *	finish time.
+ *   idle_heap, all flows that are idle and can be removed. We
+ *	do that on each tick so we do not slow down too much
+ *	operations during forwarding.
+ *
+ */</span>
+<span class="enscript-type">struct</span> dn_pipe {		<span class="enscript-comment">/* a pipe */</span>
+    SLIST_ENTRY(dn_pipe)	next;	<span class="enscript-comment">/* linked list in a hash slot */</span>
+
+    <span class="enscript-type">int</span>	pipe_nr ;		<span class="enscript-comment">/* number	*/</span>
+    <span class="enscript-type">int</span> bandwidth;		<span class="enscript-comment">/* really, bytes/tick.	*/</span>
+    <span class="enscript-type">int</span>	delay ;			<span class="enscript-comment">/* really, ticks	*/</span>
+
+    <span class="enscript-type">struct</span>	mbuf *head, *tail ;	<span class="enscript-comment">/* packets in delay line */</span>
+
+    <span class="enscript-comment">/* WF2Q+ */</span>
+    <span class="enscript-type">struct</span> dn_heap scheduler_heap ; <span class="enscript-comment">/* top extract - key Finish time*/</span>
+    <span class="enscript-type">struct</span> dn_heap not_eligible_heap; <span class="enscript-comment">/* top extract- key Start time */</span>
+    <span class="enscript-type">struct</span> dn_heap idle_heap ; <span class="enscript-comment">/* random extract - key Start=Finish time */</span>
+
+    dn_key V ;			<span class="enscript-comment">/* virtual time */</span>
+    <span class="enscript-type">int</span> sum;			<span class="enscript-comment">/* sum of weights of all active sessions */</span>
+    <span class="enscript-type">int</span> numbytes;		<span class="enscript-comment">/* bits I can transmit (more or less). */</span>
+
+    dn_key sched_time ;		<span class="enscript-comment">/* time pipe was scheduled in ready_heap */</span>
+
+    <span class="enscript-comment">/*
+     * When the tx clock come from an interface (if_name[0] != '\0'), its name
+     * is stored below, whereas the ifp is filled when the rule is configured.
+     */</span>
+    <span class="enscript-type">char</span> if_name[IFNAMSIZ];
+    <span class="enscript-type">struct</span> ifnet *ifp ;
+    <span class="enscript-type">int</span> ready ; <span class="enscript-comment">/* set if ifp != NULL and we got a signal from it */</span>
+
+    <span class="enscript-type">struct</span> dn_flow_set fs ; <span class="enscript-comment">/* used with fixed-rate flows */</span>
+};
+
+<span class="enscript-function-name">SLIST_HEAD</span>(dn_pipe_head, dn_pipe);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">BSD_KERNEL_PRIVATE</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">ip_dn_init</span>(<span class="enscript-type">void</span>); <span class="enscript-comment">/* called from raw_ip.c:load_ipfw() */</span>
+
+<span class="enscript-type">typedef</span>	<span class="enscript-type">int</span> ip_dn_ctl_t(<span class="enscript-type">struct</span> sockopt *); <span class="enscript-comment">/* raw_ip.c */</span>
+<span class="enscript-type">typedef</span>	<span class="enscript-type">int</span> ip_dn_io_t(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> pipe_nr, <span class="enscript-type">int</span> dir,
+	<span class="enscript-type">struct</span> ip_fw_args *fwa, <span class="enscript-type">int</span> );
+<span class="enscript-type">extern</span>	ip_dn_ctl_t *ip_dn_ctl_ptr;
+<span class="enscript-type">extern</span>	ip_dn_io_t *ip_dn_io_ptr;
+<span class="enscript-type">void</span> <span class="enscript-function-name">dn_ipfw_rule_delete</span>(<span class="enscript-type">void</span> *);
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DUMMYNET_LOADED</span>	(ip_dn_io_ptr != NULL)
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">pack</span>(4)
+
+<span class="enscript-type">struct</span> dn_heap_32 {
+    <span class="enscript-type">int</span> size ;
+    <span class="enscript-type">int</span> elements ;
+    <span class="enscript-type">int</span> offset ; <span class="enscript-comment">/* XXX if &gt; 0 this is the offset of direct ptr to obj */</span>
+    user32_addr_t p ;	<span class="enscript-comment">/* really an array of &quot;size&quot; entries */</span>
+} ;
+
+<span class="enscript-type">struct</span> dn_flow_queue_32 {
+    user32_addr_t next ;
+    <span class="enscript-type">struct</span> ip_flow_id id ;
+
+    user32_addr_t head, tail ;	<span class="enscript-comment">/* queue of packets */</span>
+    u_int len ;
+    u_int len_bytes ;
+    u_int32_t numbytes ;	<span class="enscript-comment">/* credit for transmission (dynamic queues) */</span>
+
+    u_int64_t tot_pkts ;	<span class="enscript-comment">/* statistics counters	*/</span>
+    u_int64_t tot_bytes ;
+    u_int32_t drops ;
+
+    <span class="enscript-type">int</span> hash_slot ;			<span class="enscript-comment">/* debugging/diagnostic */</span>
+
+    <span class="enscript-comment">/* RED parameters */</span>
+    <span class="enscript-type">int</span> avg ;                   <span class="enscript-comment">/* average queue length est. (scaled) */</span>
+    <span class="enscript-type">int</span> count ;                 <span class="enscript-comment">/* arrivals since last RED drop */</span>
+    <span class="enscript-type">int</span> random ;                <span class="enscript-comment">/* random value (scaled) */</span>
+    u_int32_t q_time ;          <span class="enscript-comment">/* start of queue idle time */</span>
+
+    <span class="enscript-comment">/* WF2Q+ support */</span>
+    user32_addr_t fs ;	<span class="enscript-comment">/* parent flow set */</span>
+    <span class="enscript-type">int</span> heap_pos ;		<span class="enscript-comment">/* position (index) of struct in heap */</span>
+    dn_key sched_time ;		<span class="enscript-comment">/* current time when queue enters ready_heap */</span>
+
+    dn_key S,F ;		<span class="enscript-comment">/* start time, finish time */</span>
+    <span class="enscript-comment">/*
+     * Setting F &lt; S means the timestamp is invalid. We only need
+     * to test this when the queue is empty.
+     */</span>
+} ;
+
+<span class="enscript-type">struct</span> dn_flow_set_32 {
+    user32_addr_t	next; <span class="enscript-comment">/* next flow set in all_flow_sets list */</span>
+	
+    u_short fs_nr ;             	<span class="enscript-comment">/* flow_set number       */</span>
+    u_short flags_fs;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_HAVE_FLOW_MASK</span>	0x0001
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_IS_RED</span>		0x0002
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_IS_GENTLE_RED</span>	0x0004
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_QSIZE_IS_BYTES</span>	0x0008	<span class="enscript-comment">/* queue size is measured in bytes */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_NOERROR</span>		0x0010		<span class="enscript-comment">/* do not report ENOBUFS on drops  */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_IS_PIPE</span>		0x4000
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_IS_QUEUE</span>		0x8000
+	
+    user32_addr_t pipe ;	<span class="enscript-comment">/* pointer to parent pipe */</span>
+    u_short parent_nr ;		<span class="enscript-comment">/* parent pipe#, 0 if local to a pipe */</span>
+	
+    <span class="enscript-type">int</span> weight ;		<span class="enscript-comment">/* WFQ queue weight */</span>
+    <span class="enscript-type">int</span> qsize ;			<span class="enscript-comment">/* queue size in slots or bytes */</span>
+    <span class="enscript-type">int</span> plr ;			<span class="enscript-comment">/* pkt loss rate (2^31-1 means 100%) */</span>
+	
+    <span class="enscript-type">struct</span> ip_flow_id flow_mask ;
+	
+    <span class="enscript-comment">/* hash table of queues onto this flow_set */</span>
+    <span class="enscript-type">int</span> rq_size ;		<span class="enscript-comment">/* number of slots */</span>
+    <span class="enscript-type">int</span> rq_elements ;	<span class="enscript-comment">/* active elements */</span>
+    user32_addr_t rq;	<span class="enscript-comment">/* array of rq_size entries */</span>
+	
+    u_int32_t last_expired ;	<span class="enscript-comment">/* do not expire too frequently */</span>
+    <span class="enscript-type">int</span> backlogged ;			<span class="enscript-comment">/* #active queues for this flowset */</span>
+	
+	<span class="enscript-comment">/* RED parameters */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SCALE_RED</span>               16
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SCALE</span>(x)                ( (x) &lt;&lt; SCALE_RED )
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SCALE_VAL</span>(x)            ( (x) &gt;&gt; SCALE_RED )
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SCALE_MUL</span>(x,y)          ( ( (x) * (y) ) &gt;&gt; SCALE_RED )
+    <span class="enscript-type">int</span> w_q ;			<span class="enscript-comment">/* queue weight (scaled) */</span>
+    <span class="enscript-type">int</span> max_th ;		<span class="enscript-comment">/* maximum threshold for queue (scaled) */</span>
+    <span class="enscript-type">int</span> min_th ;		<span class="enscript-comment">/* minimum threshold for queue (scaled) */</span>
+    <span class="enscript-type">int</span> max_p ;			<span class="enscript-comment">/* maximum value for p_b (scaled) */</span>
+    u_int c_1 ;			<span class="enscript-comment">/* max_p/(max_th-min_th) (scaled) */</span>
+    u_int c_2 ;			<span class="enscript-comment">/* max_p*min_th/(max_th-min_th) (scaled) */</span>
+    u_int c_3 ;			<span class="enscript-comment">/* for GRED, (1-max_p)/max_th (scaled) */</span>
+    u_int c_4 ;			<span class="enscript-comment">/* for GRED, 1 - 2*max_p (scaled) */</span>
+    user32_addr_t w_q_lookup ;	<span class="enscript-comment">/* lookup table for computing (1-w_q)^t */</span>
+    u_int lookup_depth ;	<span class="enscript-comment">/* depth of lookup table */</span>
+    <span class="enscript-type">int</span> lookup_step ;		<span class="enscript-comment">/* granularity inside the lookup table */</span>
+    <span class="enscript-type">int</span> lookup_weight ;		<span class="enscript-comment">/* equal to (1-w_q)^t / (1-w_q)^(t+1) */</span>
+    <span class="enscript-type">int</span> avg_pkt_size ;		<span class="enscript-comment">/* medium packet size */</span>
+    <span class="enscript-type">int</span> max_pkt_size ;		<span class="enscript-comment">/* max packet size */</span>
+} ;
+
+<span class="enscript-type">struct</span> dn_pipe_32 {		<span class="enscript-comment">/* a pipe */</span>
+    user32_addr_t	next ;
+	
+    <span class="enscript-type">int</span>	pipe_nr ;		<span class="enscript-comment">/* number	*/</span>
+    <span class="enscript-type">int</span> bandwidth;		<span class="enscript-comment">/* really, bytes/tick.	*/</span>
+    <span class="enscript-type">int</span>	delay ;			<span class="enscript-comment">/* really, ticks	*/</span>
+	
+    user32_addr_t head, tail ;	<span class="enscript-comment">/* packets in delay line */</span>
+	
+    <span class="enscript-comment">/* WF2Q+ */</span>
+    <span class="enscript-type">struct</span> dn_heap_32 scheduler_heap ; <span class="enscript-comment">/* top extract - key Finish time*/</span>
+    <span class="enscript-type">struct</span> dn_heap_32 not_eligible_heap; <span class="enscript-comment">/* top extract- key Start time */</span>
+    <span class="enscript-type">struct</span> dn_heap_32 idle_heap ; <span class="enscript-comment">/* random extract - key Start=Finish time */</span>
+	
+    dn_key V ;			<span class="enscript-comment">/* virtual time */</span>
+    <span class="enscript-type">int</span> sum;			<span class="enscript-comment">/* sum of weights of all active sessions */</span>
+    <span class="enscript-type">int</span> numbytes;		<span class="enscript-comment">/* bits I can transmit (more or less). */</span>
+	
+    dn_key sched_time ;	<span class="enscript-comment">/* time pipe was scheduled in ready_heap */</span>
+	
+    <span class="enscript-comment">/*
+     * When the tx clock come from an interface (if_name[0] != '\0'), its name
+     * is stored below, whereas the ifp is filled when the rule is configured.
+     */</span>
+    <span class="enscript-type">char</span> if_name[IFNAMSIZ];
+    user32_addr_t ifp ;
+    <span class="enscript-type">int</span> ready ; 		<span class="enscript-comment">/* set if ifp != NULL and we got a signal from it */</span>
+	
+    <span class="enscript-type">struct</span> dn_flow_set_32 fs ; <span class="enscript-comment">/* used with fixed-rate flows */</span>
+};
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">pack</span>()
+
+
+<span class="enscript-type">struct</span> dn_heap_64 {
+    <span class="enscript-type">int</span> size ;
+    <span class="enscript-type">int</span> elements ;
+    <span class="enscript-type">int</span> offset ; <span class="enscript-comment">/* XXX if &gt; 0 this is the offset of direct ptr to obj */</span>
+    user64_addr_t p ;	<span class="enscript-comment">/* really an array of &quot;size&quot; entries */</span>
+} ;
+
+
+<span class="enscript-type">struct</span> dn_flow_queue_64 {
+    user64_addr_t next ;
+    <span class="enscript-type">struct</span> ip_flow_id id ;
+
+    user64_addr_t head, tail ;	<span class="enscript-comment">/* queue of packets */</span>
+    u_int len ;
+    u_int len_bytes ;
+    u_int32_t numbytes ;		<span class="enscript-comment">/* credit for transmission (dynamic queues) */</span>
+
+    u_int64_t tot_pkts ;		<span class="enscript-comment">/* statistics counters	*/</span>
+    u_int64_t tot_bytes ;
+    u_int32_t drops ;
+
+    <span class="enscript-type">int</span> hash_slot ;				<span class="enscript-comment">/* debugging/diagnostic */</span>
+
+    <span class="enscript-comment">/* RED parameters */</span>
+    <span class="enscript-type">int</span> avg ;                   <span class="enscript-comment">/* average queue length est. (scaled) */</span>
+    <span class="enscript-type">int</span> count ;                 <span class="enscript-comment">/* arrivals since last RED drop */</span>
+    <span class="enscript-type">int</span> random ;                <span class="enscript-comment">/* random value (scaled) */</span>
+    u_int32_t q_time ;          <span class="enscript-comment">/* start of queue idle time */</span>
+
+    <span class="enscript-comment">/* WF2Q+ support */</span>
+    user64_addr_t fs ;			<span class="enscript-comment">/* parent flow set */</span>
+    <span class="enscript-type">int</span> heap_pos ;				<span class="enscript-comment">/* position (index) of struct in heap */</span>
+    dn_key sched_time ;			<span class="enscript-comment">/* current time when queue enters ready_heap */</span>
+
+    dn_key S,F ;				<span class="enscript-comment">/* start time, finish time */</span>
+    <span class="enscript-comment">/*
+     * Setting F &lt; S means the timestamp is invalid. We only need
+     * to test this when the queue is empty.
+     */</span>
+} ;
+
+<span class="enscript-type">struct</span> dn_flow_set_64 {
+    user64_addr_t next; 		<span class="enscript-comment">/* next flow set in all_flow_sets list */</span>
+	
+    u_short fs_nr ;             <span class="enscript-comment">/* flow_set number       */</span>
+    u_short flags_fs;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_HAVE_FLOW_MASK</span>	0x0001
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_IS_RED</span>		0x0002
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_IS_GENTLE_RED</span>	0x0004
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_QSIZE_IS_BYTES</span>	0x0008	<span class="enscript-comment">/* queue size is measured in bytes */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_NOERROR</span>		0x0010		<span class="enscript-comment">/* do not report ENOBUFS on drops  */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_IS_PIPE</span>		0x4000
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DN_IS_QUEUE</span>		0x8000
+	
+    user64_addr_t pipe ;	<span class="enscript-comment">/* pointer to parent pipe */</span>
+    u_short parent_nr ;		<span class="enscript-comment">/* parent pipe#, 0 if local to a pipe */</span>
+	
+    <span class="enscript-type">int</span> weight ;		<span class="enscript-comment">/* WFQ queue weight */</span>
+    <span class="enscript-type">int</span> qsize ;			<span class="enscript-comment">/* queue size in slots or bytes */</span>
+    <span class="enscript-type">int</span> plr ;			<span class="enscript-comment">/* pkt loss rate (2^31-1 means 100%) */</span>
+	
+    <span class="enscript-type">struct</span> ip_flow_id flow_mask ;
+	
+    <span class="enscript-comment">/* hash table of queues onto this flow_set */</span>
+    <span class="enscript-type">int</span> rq_size ;		<span class="enscript-comment">/* number of slots */</span>
+    <span class="enscript-type">int</span> rq_elements ;	<span class="enscript-comment">/* active elements */</span>
+    user64_addr_t rq;	<span class="enscript-comment">/* array of rq_size entries */</span>
+	
+    u_int32_t last_expired ;	<span class="enscript-comment">/* do not expire too frequently */</span>
+    <span class="enscript-type">int</span> backlogged ;			<span class="enscript-comment">/* #active queues for this flowset */</span>
+	
+	<span class="enscript-comment">/* RED parameters */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SCALE_RED</span>               16
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SCALE</span>(x)                ( (x) &lt;&lt; SCALE_RED )
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SCALE_VAL</span>(x)            ( (x) &gt;&gt; SCALE_RED )
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SCALE_MUL</span>(x,y)          ( ( (x) * (y) ) &gt;&gt; SCALE_RED )
+    <span class="enscript-type">int</span> w_q ;			<span class="enscript-comment">/* queue weight (scaled) */</span>
+    <span class="enscript-type">int</span> max_th ;		<span class="enscript-comment">/* maximum threshold for queue (scaled) */</span>
+    <span class="enscript-type">int</span> min_th ;		<span class="enscript-comment">/* minimum threshold for queue (scaled) */</span>
+    <span class="enscript-type">int</span> max_p ;			<span class="enscript-comment">/* maximum value for p_b (scaled) */</span>
+    u_int c_1 ;			<span class="enscript-comment">/* max_p/(max_th-min_th) (scaled) */</span>
+    u_int c_2 ;			<span class="enscript-comment">/* max_p*min_th/(max_th-min_th) (scaled) */</span>
+    u_int c_3 ;			<span class="enscript-comment">/* for GRED, (1-max_p)/max_th (scaled) */</span>
+    u_int c_4 ;			<span class="enscript-comment">/* for GRED, 1 - 2*max_p (scaled) */</span>
+    user64_addr_t w_q_lookup ;	<span class="enscript-comment">/* lookup table for computing (1-w_q)^t */</span>
+    u_int lookup_depth ;	<span class="enscript-comment">/* depth of lookup table */</span>
+    <span class="enscript-type">int</span> lookup_step ;		<span class="enscript-comment">/* granularity inside the lookup table */</span>
+    <span class="enscript-type">int</span> lookup_weight ;		<span class="enscript-comment">/* equal to (1-w_q)^t / (1-w_q)^(t+1) */</span>
+    <span class="enscript-type">int</span> avg_pkt_size ;		<span class="enscript-comment">/* medium packet size */</span>
+    <span class="enscript-type">int</span> max_pkt_size ;		<span class="enscript-comment">/* max packet size */</span>
+} ;
+
+<span class="enscript-type">struct</span> dn_pipe_64 {		<span class="enscript-comment">/* a pipe */</span>
+    user64_addr_t	next ;
+	
+    <span class="enscript-type">int</span>	pipe_nr ;		<span class="enscript-comment">/* number	*/</span>
+    <span class="enscript-type">int</span> bandwidth;		<span class="enscript-comment">/* really, bytes/tick.	*/</span>
+    <span class="enscript-type">int</span>	delay ;			<span class="enscript-comment">/* really, ticks	*/</span>
+	
+    user64_addr_t head, tail ;	<span class="enscript-comment">/* packets in delay line */</span>
+	
+    <span class="enscript-comment">/* WF2Q+ */</span>
+    <span class="enscript-type">struct</span> dn_heap_64 scheduler_heap ; 		<span class="enscript-comment">/* top extract - key Finish time*/</span>
+    <span class="enscript-type">struct</span> dn_heap_64 not_eligible_heap;	<span class="enscript-comment">/* top extract- key Start time */</span>
+    <span class="enscript-type">struct</span> dn_heap_64 idle_heap ; 			<span class="enscript-comment">/* random extract - key Start=Finish time */</span>
+	
+    dn_key V ;			<span class="enscript-comment">/* virtual time */</span>
+    <span class="enscript-type">int</span> sum;			<span class="enscript-comment">/* sum of weights of all active sessions */</span>
+    <span class="enscript-type">int</span> numbytes;		<span class="enscript-comment">/* bits I can transmit (more or less). */</span>
+	
+    dn_key sched_time ;	<span class="enscript-comment">/* time pipe was scheduled in ready_heap */</span>
+	
+    <span class="enscript-comment">/*
+     * When the tx clock come from an interface (if_name[0] != '\0'), its name
+     * is stored below, whereas the ifp is filled when the rule is configured.
+     */</span>
+    <span class="enscript-type">char</span> if_name[IFNAMSIZ];
+    user64_addr_t ifp ;
+    <span class="enscript-type">int</span> ready ; <span class="enscript-comment">/* set if ifp != NULL and we got a signal from it */</span>
+	
+    <span class="enscript-type">struct</span> dn_flow_set_64 fs ; <span class="enscript-comment">/* used with fixed-rate flows */</span>
+};
+
+
+
+<span class="enscript-comment">/*
+ * Return the IPFW rule associated with the dummynet tag; if any.
+ * Make sure that the dummynet tag is not reused by lower layers.
+ */</span>
+<span class="enscript-type">static</span> __inline <span class="enscript-type">struct</span> ip_fw *
+<span class="enscript-function-name">ip_dn_claim_rule</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">struct</span> m_tag *mtag = m_tag_locate(m, KERNEL_MODULE_TAG_ID,
+									  KERNEL_TAG_TYPE_DUMMYNET, NULL);
+	<span class="enscript-keyword">if</span> (mtag != NULL) {
+		mtag-&gt;m_tag_type = KERNEL_TAG_TYPE_NONE;
+		<span class="enscript-keyword">return</span> (((<span class="enscript-type">struct</span> dn_pkt_tag *)(mtag+1))-&gt;dn_ipfw_rule);
+	} <span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> (NULL);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* BSD_KERNEL_PRIVATE */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PRIVATE */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* _IP_DUMMYNET_H */</span>
+</pre>
+<hr />
+</body></html>

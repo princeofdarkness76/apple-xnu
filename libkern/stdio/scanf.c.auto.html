@@ -1,0 +1,690 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>scanf.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">scanf.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*-
+ * Copyright (c) 1990, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * Chris Torek.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+
+#<span class="enscript-reference">if</span> 0 <span class="enscript-comment">/* XXX coming soon */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ctype.h&gt;</span>
+#<span class="enscript-reference">else</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">isspace</span>(<span class="enscript-type">char</span> c)
+{
+	<span class="enscript-keyword">return</span> (c == <span class="enscript-string">' '</span> || c == <span class="enscript-string">'\t'</span> || c == <span class="enscript-string">'\n'</span> || c == '\12');
+}
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdarg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">BUF</span>		32 	<span class="enscript-comment">/* Maximum length of numeric string. */</span>
+
+<span class="enscript-comment">/*
+ * Flags used during conversion.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">LONG</span>		0x01	<span class="enscript-comment">/* l: long or double */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SHORT</span>		0x04	<span class="enscript-comment">/* h: short */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SUPPRESS</span>	0x08	<span class="enscript-comment">/* *: suppress assignment */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">POINTER</span>		0x10	<span class="enscript-comment">/* p: void * (as hex) */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">NOSKIP</span>		0x20	<span class="enscript-comment">/* [ or c: do not skip blanks */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">LONGLONG</span>	0x400	<span class="enscript-comment">/* ll: long long (+ deprecated q: quad) */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SHORTSHORT</span>	0x4000	<span class="enscript-comment">/* hh: char */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">UNSIGNED</span>	0x8000	<span class="enscript-comment">/* %[oupxX] conversions */</span>
+
+<span class="enscript-comment">/*
+ * The following are used in numeric conversions only:
+ * SIGNOK, NDIGITS, DPTOK, and EXPOK are for floating point;
+ * SIGNOK, NDIGITS, PFXOK, and NZDIGITS are for integral.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SIGNOK</span>		0x40	<span class="enscript-comment">/* +/- is (still) legal */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">NDIGITS</span>		0x80	<span class="enscript-comment">/* no digits detected */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DPTOK</span>		0x100	<span class="enscript-comment">/* (float) decimal point is still legal */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">EXPOK</span>		0x200	<span class="enscript-comment">/* (float) exponent (e+3, etc) still legal */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PFXOK</span>		0x100	<span class="enscript-comment">/* 0x prefix is (still) legal */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">NZDIGITS</span>	0x200	<span class="enscript-comment">/* no zero digits detected */</span>
+
+<span class="enscript-comment">/*
+ * Conversion types.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CT_CHAR</span>		0	<span class="enscript-comment">/* %c conversion */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CT_CCL</span>		1	<span class="enscript-comment">/* %[...] conversion */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CT_STRING</span>	2	<span class="enscript-comment">/* %s conversion */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CT_INT</span>		3	<span class="enscript-comment">/* %[dioupxX] conversion */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> u_char *<span class="enscript-function-name">__sccl</span>(<span class="enscript-type">char</span> *, <span class="enscript-type">const</span> u_char *);
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sscanf</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *ibuf, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *fmt, ...)
+{
+	va_list ap;
+	<span class="enscript-type">int</span> ret;
+	
+	va_start(ap, fmt);
+	ret = vsscanf(ibuf, fmt, ap);
+	va_end(ap);
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">vsscanf</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *inp, <span class="enscript-type">char</span> <span class="enscript-type">const</span> *fmt0, va_list ap)
+{
+	<span class="enscript-type">int</span> inr;
+	<span class="enscript-type">const</span> u_char *fmt = (<span class="enscript-type">const</span> u_char *)fmt0;
+	<span class="enscript-type">int</span> c;			<span class="enscript-comment">/* character from format, or conversion */</span>
+	size_t width;		<span class="enscript-comment">/* field width, or 0 */</span>
+	<span class="enscript-type">char</span> *p;		<span class="enscript-comment">/* points into all kinds of strings */</span>
+	<span class="enscript-type">int</span> n;			<span class="enscript-comment">/* handy integer */</span>
+	<span class="enscript-type">int</span> flags;		<span class="enscript-comment">/* flags as defined above */</span>
+	<span class="enscript-type">char</span> *p0;		<span class="enscript-comment">/* saves original value of p when necessary */</span>
+	<span class="enscript-type">int</span> nassigned;		<span class="enscript-comment">/* number of fields assigned */</span>
+	<span class="enscript-type">int</span> nconversions;	<span class="enscript-comment">/* number of conversions */</span>
+	<span class="enscript-type">int</span> nread;		<span class="enscript-comment">/* number of characters consumed from fp */</span>
+	<span class="enscript-type">int</span> base;		<span class="enscript-comment">/* base argument to conversion function */</span>
+	<span class="enscript-type">char</span> ccltab[256];	<span class="enscript-comment">/* character class table for %[...] */</span>
+	<span class="enscript-type">char</span> buf[BUF];		<span class="enscript-comment">/* buffer for numeric conversions */</span>
+
+	<span class="enscript-comment">/* `basefix' is used to avoid `if' tests in the integer scanner */</span>
+	<span class="enscript-type">static</span> <span class="enscript-type">short</span> basefix[17] =
+		{ 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
+
+	inr = strlen(inp);
+	
+	nassigned = 0;
+	nconversions = 0;
+	nread = 0;
+	base = 0;		<span class="enscript-comment">/* XXX just to keep gcc happy */</span>
+	<span class="enscript-keyword">for</span> (;;) {
+		c = *fmt++;
+		<span class="enscript-keyword">if</span> (c == 0)
+			<span class="enscript-keyword">return</span> (nassigned);
+		<span class="enscript-keyword">if</span> (isspace(c)) {
+			<span class="enscript-keyword">while</span> (inr &gt; 0 &amp;&amp; isspace(*inp))
+				nread++, inr--, inp++;
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> (c != <span class="enscript-string">'%'</span>)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">literal</span>;
+		width = 0;
+		flags = 0;
+		<span class="enscript-comment">/*
+		 * switch on the format.  continue if done;
+		 * break once format type is derived.
+		 */</span>
+<span class="enscript-reference">again</span>:		c = *fmt++;
+		<span class="enscript-keyword">switch</span> (c) {
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'%'</span>:
+<span class="enscript-reference">literal</span>:
+			<span class="enscript-keyword">if</span> (inr &lt;= 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">input_failure</span>;
+			<span class="enscript-keyword">if</span> (*inp != c)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">match_failure</span>;
+			inr--, inp++;
+			nread++;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'*'</span>:
+			flags |= SUPPRESS;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'l'</span>:
+			<span class="enscript-keyword">if</span> (flags &amp; LONG) {
+				flags &amp;= ~LONG;
+				flags |= LONGLONG;
+			} <span class="enscript-keyword">else</span>
+				flags |= LONG;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'q'</span>:
+			flags |= LONGLONG;	<span class="enscript-comment">/* not quite */</span>
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'h'</span>:
+			<span class="enscript-keyword">if</span> (flags &amp; SHORT) {
+				flags &amp;= ~SHORT;
+				flags |= SHORTSHORT;
+			} <span class="enscript-keyword">else</span>
+				flags |= SHORT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'0'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'1'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'2'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'3'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'4'</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'5'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'6'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'7'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'8'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'9'</span>:
+			width = width * 10 + c - <span class="enscript-string">'0'</span>;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+
+		<span class="enscript-comment">/*
+		 * Conversions.
+		 */</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'d'</span>:
+			c = CT_INT;
+			base = 10;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'i'</span>:
+			c = CT_INT;
+			base = 0;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'o'</span>:
+			c = CT_INT;
+			flags |= UNSIGNED;
+			base = 8;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'u'</span>:
+			c = CT_INT;
+			flags |= UNSIGNED;
+			base = 10;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'X'</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'x'</span>:
+			flags |= PFXOK;	<span class="enscript-comment">/* enable 0x prefixing */</span>
+			c = CT_INT;
+			flags |= UNSIGNED;
+			base = 16;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'s'</span>:
+			c = CT_STRING;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'['</span>:
+			fmt = __sccl(ccltab, fmt);
+			flags |= NOSKIP;
+			c = CT_CCL;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'c'</span>:
+			flags |= NOSKIP;
+			c = CT_CHAR;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'p'</span>:	<span class="enscript-comment">/* pointer format is like hex */</span>
+			flags |= POINTER | PFXOK;
+			c = CT_INT;
+			flags |= UNSIGNED;
+			base = 16;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'n'</span>:
+			nconversions++;
+			<span class="enscript-keyword">if</span> (flags &amp; SUPPRESS)	<span class="enscript-comment">/* ??? */</span>
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-keyword">if</span> (flags &amp; SHORTSHORT)
+				*va_arg(ap, <span class="enscript-type">char</span> *) = nread;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; SHORT)
+				*va_arg(ap, <span class="enscript-type">short</span> *) = nread;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; LONG)
+				*va_arg(ap, <span class="enscript-type">long</span> *) = nread;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; LONGLONG)
+				*va_arg(ap, <span class="enscript-type">long</span> <span class="enscript-type">long</span> *) = nread;
+			<span class="enscript-keyword">else</span>
+				*va_arg(ap, <span class="enscript-type">int</span> *) = nread;
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * We have a conversion that requires input.
+		 */</span>
+		<span class="enscript-keyword">if</span> (inr &lt;= 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">input_failure</span>;
+
+		<span class="enscript-comment">/*
+		 * Consume leading white space, except for formats
+		 * that suppress this.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((flags &amp; NOSKIP) == 0) {
+			<span class="enscript-keyword">while</span> (isspace(*inp)) {
+				nread++;
+				<span class="enscript-keyword">if</span> (--inr &gt; 0)
+					inp++;
+				<span class="enscript-keyword">else</span> 
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">input_failure</span>;
+			}
+			<span class="enscript-comment">/*
+			 * Note that there is at least one character in
+			 * the buffer, so conversions that do not set NOSKIP
+			 * can no longer result in an input failure.
+			 */</span>
+		}
+
+		<span class="enscript-comment">/*
+		 * Do the conversion.
+		 */</span>
+		<span class="enscript-keyword">switch</span> (c) {
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CT_CHAR</span>:
+			<span class="enscript-comment">/* scan arbitrary characters (sets NOSKIP) */</span>
+			<span class="enscript-keyword">if</span> (width == 0)
+				width = 1;
+			<span class="enscript-keyword">if</span> (flags &amp; SUPPRESS) {
+				size_t sum = 0;
+				<span class="enscript-keyword">for</span> (;;) {
+					<span class="enscript-keyword">if</span> ((n = inr) &lt; (<span class="enscript-type">int</span>)width) {
+						sum += n;
+						width -= n;
+						inp += n;
+						<span class="enscript-keyword">if</span> (sum == 0)
+							<span class="enscript-keyword">goto</span> <span class="enscript-reference">input_failure</span>;
+						<span class="enscript-keyword">break</span>;
+					} <span class="enscript-keyword">else</span> {
+						sum += width;
+						inr -= width;
+						inp += width;
+						<span class="enscript-keyword">break</span>;
+					}
+				}
+				nread += sum;
+			} <span class="enscript-keyword">else</span> {
+				bcopy(inp, va_arg(ap, <span class="enscript-type">char</span> *), width);
+				inr -= width;
+				inp += width;
+				nread += width;
+				nassigned++;
+			}
+			nconversions++;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CT_CCL</span>:
+			<span class="enscript-comment">/* scan a (nonempty) character class (sets NOSKIP) */</span>
+			<span class="enscript-keyword">if</span> (width == 0)
+				width = (size_t)~0;	<span class="enscript-comment">/* `infinity' */</span>
+			<span class="enscript-comment">/* take only those things in the class */</span>
+			<span class="enscript-keyword">if</span> (flags &amp; SUPPRESS) {
+				n = 0;
+				<span class="enscript-keyword">while</span> (ccltab[(<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)*inp]) {
+					n++, inr--, inp++;
+					<span class="enscript-keyword">if</span> (--width == 0)
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">if</span> (inr &lt;= 0) {
+						<span class="enscript-keyword">if</span> (n == 0)
+							<span class="enscript-keyword">goto</span> <span class="enscript-reference">input_failure</span>;
+						<span class="enscript-keyword">break</span>;
+					}
+				}
+				<span class="enscript-keyword">if</span> (n == 0)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">match_failure</span>;
+			} <span class="enscript-keyword">else</span> {
+				p0 = p = va_arg(ap, <span class="enscript-type">char</span> *);
+				<span class="enscript-keyword">while</span> (ccltab[(<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)*inp]) {
+					inr--;
+					*p++ = *inp++;
+					<span class="enscript-keyword">if</span> (--width == 0)
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">if</span> (inr &lt;= 0) {
+						<span class="enscript-keyword">if</span> (p == p0)
+							<span class="enscript-keyword">goto</span> <span class="enscript-reference">input_failure</span>;
+						<span class="enscript-keyword">break</span>;
+					}
+				}
+				n = p - p0;
+				<span class="enscript-keyword">if</span> (n == 0)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">match_failure</span>;
+				*p = 0;
+				nassigned++;
+			}
+			nread += n;
+			nconversions++;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CT_STRING</span>:
+			<span class="enscript-comment">/* like CCL, but zero-length string OK, &amp; no NOSKIP */</span>
+			<span class="enscript-keyword">if</span> (width == 0)
+				width = (size_t)~0;
+			<span class="enscript-keyword">if</span> (flags &amp; SUPPRESS) {
+				n = 0;
+				<span class="enscript-keyword">while</span> (!isspace(*inp)) {
+					n++, inr--, inp++;
+					<span class="enscript-keyword">if</span> (--width == 0)
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">if</span> (inr &lt;= 0)
+						<span class="enscript-keyword">break</span>;
+				}
+				nread += n;
+			} <span class="enscript-keyword">else</span> {
+				p0 = p = va_arg(ap, <span class="enscript-type">char</span> *);
+				<span class="enscript-keyword">while</span> (!isspace(*inp)) {
+					inr--;
+					*p++ = *inp++;
+					<span class="enscript-keyword">if</span> (--width == 0)
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">if</span> (inr &lt;= 0)
+						<span class="enscript-keyword">break</span>;
+				}
+				*p = 0;
+				nread += p - p0;
+				nassigned++;
+			}
+			nconversions++;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">CT_INT</span>:
+			<span class="enscript-comment">/* scan an integer as if by the conversion function */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">hardway</span>
+			<span class="enscript-keyword">if</span> (width == 0 || width &gt; <span class="enscript-keyword">sizeof</span>(buf) - 1)
+				width = <span class="enscript-keyword">sizeof</span>(buf) - 1;
+#<span class="enscript-reference">else</span>
+			<span class="enscript-comment">/* size_t is unsigned, hence this optimisation */</span>
+			<span class="enscript-keyword">if</span> (--width &gt; <span class="enscript-keyword">sizeof</span>(buf) - 2)
+				width = <span class="enscript-keyword">sizeof</span>(buf) - 2;
+			width++;
+#<span class="enscript-reference">endif</span>
+			flags |= SIGNOK | NDIGITS | NZDIGITS;
+			<span class="enscript-keyword">for</span> (p = buf; width; width--) {
+				c = *inp;
+				<span class="enscript-comment">/*
+				 * Switch on the character; `goto ok'
+				 * if we accept it as a part of number.
+				 */</span>
+				<span class="enscript-keyword">switch</span> (c) {
+
+				<span class="enscript-comment">/*
+				 * The digit 0 is always legal, but is
+				 * special.  For %i conversions, if no
+				 * digits (zero or nonzero) have been
+				 * scanned (only signs), we will have
+				 * base==0.  In that case, we should set
+				 * it to 8 and enable 0x prefixing.
+				 * Also, if we have not scanned zero digits
+				 * before this, do not turn off prefixing
+				 * (someone else will turn it off if we
+				 * have scanned any nonzero digits).
+				 */</span>
+				<span class="enscript-keyword">case</span> <span class="enscript-string">'0'</span>:
+					<span class="enscript-keyword">if</span> (base == 0) {
+						base = 8;
+						flags |= PFXOK;
+					}
+					<span class="enscript-keyword">if</span> (flags &amp; NZDIGITS)
+					    flags &amp;= ~(SIGNOK|NZDIGITS|NDIGITS);
+					<span class="enscript-keyword">else</span>
+					    flags &amp;= ~(SIGNOK|PFXOK|NDIGITS);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">ok</span>;
+
+				<span class="enscript-comment">/* 1 through 7 always legal */</span>
+				<span class="enscript-keyword">case</span> <span class="enscript-string">'1'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'2'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'3'</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-string">'4'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'5'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'6'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'7'</span>:
+					base = basefix[base];
+					flags &amp;= ~(SIGNOK | PFXOK | NDIGITS);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">ok</span>;
+
+				<span class="enscript-comment">/* digits 8 and 9 ok iff decimal or hex */</span>
+				<span class="enscript-keyword">case</span> <span class="enscript-string">'8'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'9'</span>:
+					base = basefix[base];
+					<span class="enscript-keyword">if</span> (base &lt;= 8)
+						<span class="enscript-keyword">break</span>;	<span class="enscript-comment">/* not legal here */</span>
+					flags &amp;= ~(SIGNOK | PFXOK | NDIGITS);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">ok</span>;
+
+				<span class="enscript-comment">/* letters ok iff hex */</span>
+				<span class="enscript-keyword">case</span> <span class="enscript-string">'A'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'B'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'C'</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-string">'D'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'E'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'F'</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-string">'a'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'b'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'c'</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-string">'d'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'e'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'f'</span>:
+					<span class="enscript-comment">/* no need to fix base here */</span>
+					<span class="enscript-keyword">if</span> (base &lt;= 10)
+						<span class="enscript-keyword">break</span>;	<span class="enscript-comment">/* not legal here */</span>
+					flags &amp;= ~(SIGNOK | PFXOK | NDIGITS);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">ok</span>;
+
+				<span class="enscript-comment">/* sign ok only as first character */</span>
+				<span class="enscript-keyword">case</span> <span class="enscript-string">'+'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'-'</span>:
+					<span class="enscript-keyword">if</span> (flags &amp; SIGNOK) {
+						flags &amp;= ~SIGNOK;
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">ok</span>;
+					}
+					<span class="enscript-keyword">break</span>;
+
+				<span class="enscript-comment">/* x ok iff flag still set &amp; 2nd char */</span>
+				<span class="enscript-keyword">case</span> <span class="enscript-string">'x'</span>: <span class="enscript-keyword">case</span> <span class="enscript-string">'X'</span>:
+					<span class="enscript-keyword">if</span> (flags &amp; PFXOK &amp;&amp; p == buf + 1) {
+						base = 16;	<span class="enscript-comment">/* if %i */</span>
+						flags &amp;= ~PFXOK;
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">ok</span>;
+					}
+					<span class="enscript-keyword">break</span>;
+				}
+
+				<span class="enscript-comment">/*
+				 * If we got here, c is not a legal character
+				 * for a number.  Stop accumulating digits.
+				 */</span>
+				<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">ok</span>:
+				<span class="enscript-comment">/*
+				 * c is legal: store it and look at the next.
+				 */</span>
+				*p++ = c;
+				<span class="enscript-keyword">if</span> (--inr &gt; 0)
+					inp++;
+				<span class="enscript-keyword">else</span> 
+					<span class="enscript-keyword">break</span>;		<span class="enscript-comment">/* end of input */</span>
+			}
+			<span class="enscript-comment">/*
+			 * If we had only a sign, it is no good; push
+			 * back the sign.  If the number ends in `x',
+			 * it was [sign] '0' 'x', so push back the x
+			 * and treat it as [sign] '0'.
+			 */</span>
+			<span class="enscript-keyword">if</span> (flags &amp; NDIGITS) {
+				<span class="enscript-keyword">if</span> (p &gt; buf) {
+					inp--;
+					inr++;
+				}
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">match_failure</span>;
+			}
+			c = ((u_char *)p)[-1];
+			<span class="enscript-keyword">if</span> (c == <span class="enscript-string">'x'</span> || c == <span class="enscript-string">'X'</span>) {
+				--p;
+				inp--;
+				inr++;
+			}
+			<span class="enscript-keyword">if</span> ((flags &amp; SUPPRESS) == 0) {
+				u_quad_t res;
+
+				*p = 0;
+				<span class="enscript-keyword">if</span> ((flags &amp; UNSIGNED) == 0)
+				    res = strtoq(buf, (<span class="enscript-type">char</span> **)NULL, base);
+				<span class="enscript-keyword">else</span>
+				    res = strtouq(buf, (<span class="enscript-type">char</span> **)NULL, base);
+				<span class="enscript-keyword">if</span> (flags &amp; POINTER)
+					*va_arg(ap, <span class="enscript-type">void</span> **) =
+						(<span class="enscript-type">void</span> *)(uintptr_t)res;
+				<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; SHORTSHORT)
+					*va_arg(ap, <span class="enscript-type">char</span> *) = res;
+				<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; SHORT)
+					*va_arg(ap, <span class="enscript-type">short</span> *) = res;
+				<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; LONG)
+					*va_arg(ap, <span class="enscript-type">long</span> *) = res;
+				<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; LONGLONG)
+					*va_arg(ap, <span class="enscript-type">long</span> <span class="enscript-type">long</span> *) = res;
+				<span class="enscript-keyword">else</span>
+					*va_arg(ap, <span class="enscript-type">int</span> *) = res;
+				nassigned++;
+			}
+			nread += p - buf;
+			nconversions++;
+			<span class="enscript-keyword">break</span>;
+
+		}
+	}
+<span class="enscript-reference">input_failure</span>:
+	<span class="enscript-keyword">return</span> (nconversions != 0 ? nassigned : -1);
+<span class="enscript-reference">match_failure</span>:
+	<span class="enscript-keyword">return</span> (nassigned);
+}
+
+<span class="enscript-comment">/*
+ * Fill in the given table from the scanset at the given format
+ * (just after `[').  Return a pointer to the character past the
+ * closing `]'.  The table has a 1 wherever characters should be
+ * considered part of the scanset.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> u_char *
+<span class="enscript-function-name">__sccl</span>(<span class="enscript-type">char</span> *tab, <span class="enscript-type">const</span> u_char *fmt)
+{
+	<span class="enscript-type">int</span> c, n, v;
+
+	<span class="enscript-comment">/* first `clear' the whole table */</span>
+	c = *fmt++;		<span class="enscript-comment">/* first char hat =&gt; negated scanset */</span>
+	<span class="enscript-keyword">if</span> (c == <span class="enscript-string">'^'</span>) {
+		v = 1;		<span class="enscript-comment">/* default =&gt; accept */</span>
+		c = *fmt++;	<span class="enscript-comment">/* get new first char */</span>
+	} <span class="enscript-keyword">else</span>
+		v = 0;		<span class="enscript-comment">/* default =&gt; reject */</span>
+
+	<span class="enscript-comment">/* XXX: Will not work if sizeof(tab*) &gt; sizeof(char) */</span>
+	(<span class="enscript-type">void</span>) memset(tab, v, 256);
+
+	<span class="enscript-keyword">if</span> (c == 0)
+		<span class="enscript-keyword">return</span> (fmt - 1);<span class="enscript-comment">/* format ended before closing ] */</span>
+
+	<span class="enscript-comment">/*
+	 * Now set the entries corresponding to the actual scanset
+	 * to the opposite of the above.
+	 *
+	 * The first character may be ']' (or '-') without being special;
+	 * the last character may be '-'.
+	 */</span>
+	v = 1 - v;
+	<span class="enscript-keyword">for</span> (;;) {
+		tab[c] = v;		<span class="enscript-comment">/* take character c */</span>
+<span class="enscript-reference">doswitch</span>:
+		n = *fmt++;		<span class="enscript-comment">/* and examine the next */</span>
+		<span class="enscript-keyword">switch</span> (n) {
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:			<span class="enscript-comment">/* format ended too soon */</span>
+			<span class="enscript-keyword">return</span> (fmt - 1);
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'-'</span>:
+			<span class="enscript-comment">/*
+			 * A scanset of the form
+			 *	[01+-]
+			 * is defined as `the digit 0, the digit 1,
+			 * the character +, the character -', but
+			 * the effect of a scanset such as
+			 *	[a-zA-Z0-9]
+			 * is implementation defined.  The V7 Unix
+			 * scanf treats `a-z' as `the letters a through
+			 * z', but treats `a-a' as `the letter a, the
+			 * character -, and the letter a'.
+			 *
+			 * For compatibility, the `-' is not considerd
+			 * to define a range if the character following
+			 * it is either a close bracket (required by ANSI)
+			 * or is not numerically greater than the character
+			 * we just stored in the table (c).
+			 */</span>
+			n = *fmt;
+			<span class="enscript-keyword">if</span> (n == <span class="enscript-string">']'</span> || n &lt; c) {
+				c = <span class="enscript-string">'-'</span>;
+				<span class="enscript-keyword">break</span>;	<span class="enscript-comment">/* resume the for(;;) */</span>
+			}
+			fmt++;
+			<span class="enscript-comment">/* fill in the range */</span>
+			<span class="enscript-keyword">do</span> {
+			    tab[++c] = v;
+			} <span class="enscript-keyword">while</span> (c &lt; n);
+			c = n;
+			<span class="enscript-comment">/*
+			 * Alas, the V7 Unix scanf also treats formats
+			 * such as [a-c-e] as `the letters a through e'.
+			 * This too is permitted by the standard....
+			 */</span>
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">doswitch</span>;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">']'</span>:		<span class="enscript-comment">/* end of scanset */</span>
+			<span class="enscript-keyword">return</span> (fmt);
+
+		<span class="enscript-reference">default</span>:		<span class="enscript-comment">/* just another character */</span>
+			c = n;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-comment">/* NOTREACHED */</span>
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,268 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>flowadv.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">flowadv.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * Flow Control and Feedback Advisory
+ *
+ * Each mbuf that is being sent out through an interface is tagged with a
+ * unique 32-bit ID which will help to identify all the packets that belong
+ * to a particular flow at the interface layer.  Packets carrying such ID
+ * would need to be marked with PKTF_FLOW_ID.  Normally, this ID is computed
+ * by the module that generates the flow.  There are 3 kinds of flow sources
+ * that are currently recognized:
+ *
+ *	a. INPCB (INET/INET6 Protocol Control Block).  When a socket is
+ *	   connected, the flow hash for the socket is computed and stored in
+ *	   the PCB.  Further transmissions on the socket will cause the hash
+ *	   value to be carried within the mbuf as the flow ID.
+ *
+ *	b. Interface.  When an interface is attached, the flow hash for the
+ *	   interface is computed and stored in the ifnet.  This value is
+ *	   normally ignored for most network drivers, except for those that
+ *	   reside atop another driver, e.g. a virtual interface performing
+ *	   encapsulation/encryption on the original packet and sending the
+ *	   newly-generated packet to another interface.  Such interface needs
+ *	   to associate all generated packets with the interface flow hash
+ *	   value as the flow ID.
+ *
+ *	c. PF (Packet Filter).  When a packet goes through PF and it is not
+ *	   already associated with a flow ID, PF will compute a flow hash and
+ *	   store it in the packet as flow ID.  When the packet is associated
+ *	   with a PF state, the state record will have the flow ID stored
+ *	   within, in order to avoid recalculating the flow hash.  Although PF
+ *	   is capable of generating flow IDs, it does not participate in flow
+ *	   advisory, and therefore packets whose IDs are computed by PF will
+ *	   not have their PKTF_FLOW_ADV packet flag set.
+ *
+ * Activation of flow advisory mechanism is done by setting the PKTF_FLOW_ADV
+ * packet flag; because a flow ID is required, the mechanism will not take
+ * place unless PKTF_FLOW_ID is set as well.  The packet must also carry one
+ * of the flow source types FLOWSRC_{INPCB,IFNET} in order to identify where
+ * the flow advisory notification should be delivered to.  As noted above,
+ * FLOWSRC_PF does not participate in this mechanism.
+ *
+ * The classq module configured on the interface is responsible for exerting
+ * flow control to the upper layers.  This occurs when the number of packets
+ * queued for a flow reaches a limit.  The module generating the flow will
+ * cease transmission until further flow advisory notice, and the flow will
+ * be inserted into the classq's flow control list.
+ *
+ * When packets are dequeued from the classq and the number of packets for
+ * a flow goes below a limit, the classq will transfer its flow control list
+ * to the global fadv_list.  This will then trigger the flow advisory thread
+ * to run, which will cause the flow source modules to be notified that data
+ * can now be generated for those previously flow-controlled flows.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/flowadv.h&gt;</span>
+
+<span class="enscript-comment">/* Lock group and attribute for fadv_lock */</span>
+<span class="enscript-type">static</span> lck_grp_t	*fadv_lock_grp;
+<span class="enscript-type">static</span> lck_grp_attr_t	*fadv_lock_grp_attr;
+<span class="enscript-function-name">decl_lck_mtx_data</span>(<span class="enscript-type">static</span>, fadv_lock);
+
+<span class="enscript-comment">/* protected by fadv_lock */</span>
+<span class="enscript-type">static</span> <span class="enscript-function-name">STAILQ_HEAD</span>(fadv_head, flowadv_fcentry) fadv_list;
+<span class="enscript-type">static</span> thread_t fadv_thread = THREAD_NULL;
+<span class="enscript-type">static</span> uint32_t fadv_active;
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> fadv_zone_size;		<span class="enscript-comment">/* size of flowadv_fcentry */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *fadv_zone;			<span class="enscript-comment">/* zone for flowadv_fcentry */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FADV_ZONE_MAX</span>	32			<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FADV_ZONE_NAME</span>	<span class="enscript-string">&quot;fadv_zone&quot;</span>		<span class="enscript-comment">/* zone name */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">flowadv_thread_cont</span>(<span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">flowadv_thread_func</span>(<span class="enscript-type">void</span> *, wait_result_t);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">flowadv_init</span>(<span class="enscript-type">void</span>)
+{
+	STAILQ_INIT(&amp;fadv_list);
+
+	<span class="enscript-comment">/* Setup lock group and attribute for fadv_lock */</span>
+	fadv_lock_grp_attr = lck_grp_attr_alloc_init();
+	fadv_lock_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;fadv_lock&quot;</span>, fadv_lock_grp_attr);
+	lck_mtx_init(&amp;fadv_lock, fadv_lock_grp, NULL);
+
+	fadv_zone_size = P2ROUNDUP(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> flowadv_fcentry),
+	    <span class="enscript-keyword">sizeof</span> (u_int64_t));
+	fadv_zone = zinit(fadv_zone_size,
+	    FADV_ZONE_MAX * fadv_zone_size, 0, FADV_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (fadv_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, FADV_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(fadv_zone, Z_EXPAND, TRUE);
+	zone_change(fadv_zone, Z_CALLERACCT, FALSE);
+
+	<span class="enscript-keyword">if</span> (kernel_thread_start(flowadv_thread_func, NULL, &amp;fadv_thread) !=
+	    KERN_SUCCESS) {
+		panic(<span class="enscript-string">&quot;%s: couldn't create flow event advisory thread&quot;</span>,
+		    __func__);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	thread_deallocate(fadv_thread);
+}
+
+<span class="enscript-type">struct</span> flowadv_fcentry *
+<span class="enscript-function-name">flowadv_alloc_entry</span>(<span class="enscript-type">int</span> how)
+{
+	<span class="enscript-type">struct</span> flowadv_fcentry *fce;
+
+	fce = (how == M_WAITOK) ? zalloc(fadv_zone) : zalloc_noblock(fadv_zone);
+	<span class="enscript-keyword">if</span> (fce != NULL)
+		bzero(fce, fadv_zone_size);
+
+	<span class="enscript-keyword">return</span> (fce);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">flowadv_free_entry</span>(<span class="enscript-type">struct</span> flowadv_fcentry *fce)
+{
+	zfree(fadv_zone, fce);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">flowadv_add</span>(<span class="enscript-type">struct</span> flowadv_fclist *fcl)
+{
+	<span class="enscript-keyword">if</span> (STAILQ_EMPTY(fcl))
+		<span class="enscript-keyword">return</span>;
+
+	lck_mtx_lock_spin(&amp;fadv_lock);
+
+	STAILQ_CONCAT(&amp;fadv_list, fcl);
+	VERIFY(!STAILQ_EMPTY(&amp;fadv_list));
+
+	<span class="enscript-keyword">if</span> (!fadv_active &amp;&amp; fadv_thread != THREAD_NULL)
+		wakeup_one((caddr_t)&amp;fadv_list);
+
+	lck_mtx_unlock(&amp;fadv_lock);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">flowadv_thread_cont</span>(<span class="enscript-type">int</span> err)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">err</span>)
+	<span class="enscript-keyword">for</span> (;;) {
+		lck_mtx_assert(&amp;fadv_lock, LCK_MTX_ASSERT_OWNED);
+		<span class="enscript-keyword">while</span> (STAILQ_EMPTY(&amp;fadv_list)) {
+			VERIFY(!fadv_active);
+			(<span class="enscript-type">void</span>) msleep0(&amp;fadv_list, &amp;fadv_lock, (PSOCK | PSPIN),
+			    <span class="enscript-string">&quot;flowadv_cont&quot;</span>, 0, flowadv_thread_cont);
+			<span class="enscript-comment">/* NOTREACHED */</span>
+		}
+
+		fadv_active = 1;
+		<span class="enscript-keyword">for</span> (;;) {
+			<span class="enscript-type">struct</span> flowadv_fcentry *fce;
+
+			VERIFY(!STAILQ_EMPTY(&amp;fadv_list));
+			fce = STAILQ_FIRST(&amp;fadv_list);
+			STAILQ_REMOVE(&amp;fadv_list, fce,
+			    flowadv_fcentry, fce_link);
+			STAILQ_NEXT(fce, fce_link) = NULL;
+
+			lck_mtx_unlock(&amp;fadv_lock);
+			<span class="enscript-keyword">switch</span> (fce-&gt;fce_flowsrc) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">FLOWSRC_INPCB</span>:
+				inp_flowadv(fce-&gt;fce_flowid);
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">FLOWSRC_IFNET</span>:
+				ifnet_flowadv(fce-&gt;fce_flowid);
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">FLOWSRC_PF</span>:
+			<span class="enscript-reference">default</span>:
+				<span class="enscript-keyword">break</span>;
+			}
+			flowadv_free_entry(fce);
+			lck_mtx_lock_spin(&amp;fadv_lock);
+
+			<span class="enscript-comment">/* if there's no pending request, we're done */</span>
+			<span class="enscript-keyword">if</span> (STAILQ_EMPTY(&amp;fadv_list))
+				<span class="enscript-keyword">break</span>;
+		}
+		fadv_active = 0;
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">flowadv_thread_func</span>(<span class="enscript-type">void</span> *v, wait_result_t w)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">v</span>, <span class="enscript-variable-name">w</span>)
+	lck_mtx_lock(&amp;fadv_lock);
+	(<span class="enscript-type">void</span>) msleep0(&amp;fadv_list, &amp;fadv_lock, (PSOCK | PSPIN),
+	    <span class="enscript-string">&quot;flowadv&quot;</span>, 0, flowadv_thread_cont);
+	<span class="enscript-comment">/*
+	 * msleep0() shouldn't have returned as PCATCH was not set;
+	 * therefore assert in this case.
+	 */</span>
+	lck_mtx_unlock(&amp;fadv_lock);
+	VERIFY(0);
+}
+</pre>
+<hr />
+</body></html>

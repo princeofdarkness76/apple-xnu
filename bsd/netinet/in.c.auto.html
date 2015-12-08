@@ -1,0 +1,2351 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>in.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">in.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1991, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)in.c	8.4 (Berkeley) 1/9/95
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sockio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kern_event.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_protocol.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/dlil.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/pfvar.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PF */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/igmp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_timer.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">inctl_associd</span>(<span class="enscript-type">struct</span> socket *, u_long, caddr_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">inctl_connid</span>(<span class="enscript-type">struct</span> socket *, u_long, caddr_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">inctl_conninfo</span>(<span class="enscript-type">struct</span> socket *, u_long, caddr_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">inctl_autoaddr</span>(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">struct</span> ifreq *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">inctl_arpipll</span>(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">struct</span> ifreq *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">inctl_setrouter</span>(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">struct</span> ifreq *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">inctl_ifaddr</span>(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">struct</span> in_ifaddr *, u_long,
+    <span class="enscript-type">struct</span> ifreq *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">inctl_ifdstaddr</span>(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">struct</span> in_ifaddr *, u_long,
+    <span class="enscript-type">struct</span> ifreq *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">inctl_ifbrdaddr</span>(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">struct</span> in_ifaddr *, u_long,
+    <span class="enscript-type">struct</span> ifreq *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">inctl_ifnetmask</span>(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">struct</span> in_ifaddr *, u_long,
+    <span class="enscript-type">struct</span> ifreq *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">in_socktrim</span>(<span class="enscript-type">struct</span> sockaddr_in *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">in_ifinit</span>(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">struct</span> in_ifaddr *,
+    <span class="enscript-type">struct</span> sockaddr_in *, <span class="enscript-type">int</span>);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">IA_HASH_INIT</span>(ia) {					\
+	(ia)-&gt;ia_hash.tqe_next = (<span class="enscript-type">void</span> *)(uintptr_t)-1;		\
+	(ia)-&gt;ia_hash.tqe_prev = (<span class="enscript-type">void</span> *)(uintptr_t)-1;		\
+}
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">IA_IS_HASHED</span>(ia)					\
+	(!((ia)-&gt;ia_hash.tqe_next == (<span class="enscript-type">void</span> *)(uintptr_t)-1 ||	\
+	(ia)-&gt;ia_hash.tqe_prev == (<span class="enscript-type">void</span> *)(uintptr_t)-1))
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">in_iahash_remove</span>(<span class="enscript-type">struct</span> in_ifaddr *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">in_iahash_insert</span>(<span class="enscript-type">struct</span> in_ifaddr *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">in_iahash_insert_ptp</span>(<span class="enscript-type">struct</span> in_ifaddr *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> in_ifaddr *<span class="enscript-function-name">in_ifaddr_alloc</span>(<span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">in_ifaddr_attached</span>(<span class="enscript-type">struct</span> ifaddr *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">in_ifaddr_detached</span>(<span class="enscript-type">struct</span> ifaddr *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">in_ifaddr_free</span>(<span class="enscript-type">struct</span> ifaddr *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">in_ifaddr_trace</span>(<span class="enscript-type">struct</span> ifaddr *, <span class="enscript-type">int</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">in_getassocids</span>(<span class="enscript-type">struct</span> socket *, uint32_t *, user_addr_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">in_getconnids</span>(<span class="enscript-type">struct</span> socket *, sae_associd_t, uint32_t *, user_addr_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">in_getconninfo</span>(<span class="enscript-type">struct</span> socket *, sae_connid_t, uint32_t *,
+    uint32_t *, int32_t *, user_addr_t, socklen_t *, user_addr_t, socklen_t *,
+    uint32_t *, user_addr_t, uint32_t *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> subnetsarelocal = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_ip, OID_AUTO, subnets_are_local,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;subnetsarelocal, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-comment">/* Track whether or not the SIOCARPIPLL ioctl has been called */</span>
+u_int32_t ipv4_ll_arp_aware = 0;
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">INIFA_TRACE_HIST_SIZE</span>	32	<span class="enscript-comment">/* size of trace history */</span>
+
+<span class="enscript-comment">/* For gdb */</span>
+__private_extern__ <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> inifa_trace_hist_size = INIFA_TRACE_HIST_SIZE;
+
+<span class="enscript-type">struct</span> in_ifaddr_dbg {
+	<span class="enscript-type">struct</span> in_ifaddr	inifa;			<span class="enscript-comment">/* in_ifaddr */</span>
+	<span class="enscript-type">struct</span> in_ifaddr	inifa_old;		<span class="enscript-comment">/* saved in_ifaddr */</span>
+	u_int16_t		inifa_refhold_cnt;	<span class="enscript-comment">/* # of IFA_ADDREF */</span>
+	u_int16_t		inifa_refrele_cnt;	<span class="enscript-comment">/* # of IFA_REMREF */</span>
+	<span class="enscript-comment">/*
+	 * Alloc and free callers.
+	 */</span>
+	ctrace_t		inifa_alloc;
+	ctrace_t		inifa_free;
+	<span class="enscript-comment">/*
+	 * Circular lists of IFA_ADDREF and IFA_REMREF callers.
+	 */</span>
+	ctrace_t		inifa_refhold[INIFA_TRACE_HIST_SIZE];
+	ctrace_t		inifa_refrele[INIFA_TRACE_HIST_SIZE];
+	<span class="enscript-comment">/*
+	 * Trash list linkage
+	 */</span>
+	TAILQ_ENTRY(in_ifaddr_dbg) inifa_trash_link;
+};
+
+<span class="enscript-comment">/* List of trash in_ifaddr entries protected by inifa_trash_lock */</span>
+<span class="enscript-type">static</span> <span class="enscript-function-name">TAILQ_HEAD</span>(, in_ifaddr_dbg) inifa_trash_head;
+<span class="enscript-type">static</span> <span class="enscript-function-name">decl_lck_mtx_data</span>(, inifa_trash_lock);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> inifa_debug = 1;		<span class="enscript-comment">/* debugging (enabled) */</span>
+#<span class="enscript-reference">else</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> inifa_debug;		<span class="enscript-comment">/* debugging (disabled) */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !DEBUG */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> inifa_size;			<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *inifa_zone;			<span class="enscript-comment">/* zone for in_ifaddr */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">INIFA_ZONE_MAX</span>		64		<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">INIFA_ZONE_NAME</span>		<span class="enscript-string">&quot;in_ifaddr&quot;</span>	<span class="enscript-comment">/* zone name */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> in_extra_size = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> in_ifextra);
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> in_extra_bufsize = in_extra_size +
+    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">void</span> *) + <span class="enscript-keyword">sizeof</span> (uint64_t);
+
+<span class="enscript-comment">/*
+ * Return 1 if the address is
+ * - loopback
+ * - unicast or multicast link local
+ * - routed via a link level gateway
+ * - belongs to a directly connected (sub)net
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">inaddr_local</span>(<span class="enscript-type">struct</span> in_addr in)
+{
+	<span class="enscript-type">struct</span> rtentry *rt;
+	<span class="enscript-type">struct</span> sockaddr_in sin;
+	<span class="enscript-type">int</span> local = 0;
+
+	<span class="enscript-keyword">if</span> (ntohl(in.s_addr) == INADDR_LOOPBACK ||
+	    IN_LINKLOCAL(ntohl(in.s_addr))) {
+		local = 1;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ntohl(in.s_addr) &gt;= INADDR_UNSPEC_GROUP &amp;&amp;
+	    ntohl(in.s_addr) &lt;= INADDR_MAX_LOCAL_GROUP) {
+			local = 1;
+	} <span class="enscript-keyword">else</span> {
+		sin.sin_family = AF_INET;
+		sin.sin_len = <span class="enscript-keyword">sizeof</span> (sin);
+		sin.sin_addr = in;
+		rt = rtalloc1((<span class="enscript-type">struct</span> sockaddr *)&amp;sin, 0, 0);
+
+		<span class="enscript-keyword">if</span> (rt != NULL) {
+			RT_LOCK_SPIN(rt);
+			<span class="enscript-keyword">if</span> (rt-&gt;rt_gateway-&gt;sa_family == AF_LINK ||
+			    (rt-&gt;rt_ifp-&gt;if_flags &amp; IFF_LOOPBACK))
+				local = 1;
+			RT_UNLOCK(rt);
+			rtfree(rt);
+		} <span class="enscript-keyword">else</span> {
+			local = in_localaddr(in);
+		}
+	}
+	<span class="enscript-keyword">return</span> (local);
+}
+
+<span class="enscript-comment">/*
+ * Return 1 if an internet address is for a ``local'' host
+ * (one to which we have a connection).  If subnetsarelocal
+ * is true, this includes other subnets of the local net.
+ * Otherwise, it includes only the directly-connected (sub)nets.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">in_localaddr</span>(<span class="enscript-type">struct</span> in_addr in)
+{
+	u_int32_t i = ntohl(in.s_addr);
+	<span class="enscript-type">struct</span> in_ifaddr *ia;
+
+	<span class="enscript-keyword">if</span> (subnetsarelocal) {
+		lck_rw_lock_shared(in_ifaddr_rwlock);
+		<span class="enscript-keyword">for</span> (ia = in_ifaddrhead.tqh_first; ia != NULL;
+		    ia = ia-&gt;ia_link.tqe_next) {
+			IFA_LOCK(&amp;ia-&gt;ia_ifa);
+			<span class="enscript-keyword">if</span> ((i &amp; ia-&gt;ia_netmask) == ia-&gt;ia_net) {
+				IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+				lck_rw_done(in_ifaddr_rwlock);
+				<span class="enscript-keyword">return</span> (1);
+			}
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		}
+		lck_rw_done(in_ifaddr_rwlock);
+	} <span class="enscript-keyword">else</span> {
+		lck_rw_lock_shared(in_ifaddr_rwlock);
+		<span class="enscript-keyword">for</span> (ia = in_ifaddrhead.tqh_first; ia != NULL;
+		    ia = ia-&gt;ia_link.tqe_next) {
+			IFA_LOCK(&amp;ia-&gt;ia_ifa);
+			<span class="enscript-keyword">if</span> ((i &amp; ia-&gt;ia_subnetmask) == ia-&gt;ia_subnet) {
+				IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+				lck_rw_done(in_ifaddr_rwlock);
+				<span class="enscript-keyword">return</span> (1);
+			}
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		}
+		lck_rw_done(in_ifaddr_rwlock);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Determine whether an IP address is in a reserved set of addresses
+ * that may not be forwarded, or whether datagrams to that destination
+ * may be forwarded.
+ */</span>
+boolean_t
+<span class="enscript-function-name">in_canforward</span>(<span class="enscript-type">struct</span> in_addr in)
+{
+	u_int32_t i = ntohl(in.s_addr);
+	u_int32_t net;
+
+	<span class="enscript-keyword">if</span> (IN_EXPERIMENTAL(i) || IN_MULTICAST(i))
+		<span class="enscript-keyword">return</span> (FALSE);
+	<span class="enscript-keyword">if</span> (IN_CLASSA(i)) {
+		net = i &amp; IN_CLASSA_NET;
+		<span class="enscript-keyword">if</span> (net == 0 || net == (IN_LOOPBACKNET &lt;&lt; IN_CLASSA_NSHIFT))
+			<span class="enscript-keyword">return</span> (FALSE);
+	}
+	<span class="enscript-keyword">return</span> (TRUE);
+}
+
+<span class="enscript-comment">/*
+ * Trim a mask in a sockaddr
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">in_socktrim</span>(<span class="enscript-type">struct</span> sockaddr_in *ap)
+{
+	<span class="enscript-type">char</span> *cplim = (<span class="enscript-type">char</span> *)&amp;ap-&gt;sin_addr;
+	<span class="enscript-type">char</span> *cp = (<span class="enscript-type">char</span> *)(&amp;ap-&gt;sin_addr + 1);
+
+	ap-&gt;sin_len = 0;
+	<span class="enscript-keyword">while</span> (--cp &gt;= cplim)
+		<span class="enscript-keyword">if</span> (*cp) {
+			(ap)-&gt;sin_len = cp - (<span class="enscript-type">char</span> *)(ap) + 1;
+			<span class="enscript-keyword">break</span>;
+		}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> in_interfaces;	<span class="enscript-comment">/* number of external internet interfaces */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">in_domifattach</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">int</span> error;
+
+	VERIFY(ifp != NULL);
+
+	<span class="enscript-keyword">if</span> ((error = proto_plumb(PF_INET, ifp)) &amp;&amp; error != EEXIST) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: proto_plumb returned %d if=%s\n&quot;</span>,
+		    __func__, error, if_name(ifp));
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (error == 0 &amp;&amp; ifp-&gt;if_inetdata == NULL) {
+		<span class="enscript-type">void</span> **pbuf, *base;
+		<span class="enscript-type">struct</span> in_ifextra *ext;
+		<span class="enscript-type">int</span> errorx;
+
+		<span class="enscript-keyword">if</span> ((ext = (<span class="enscript-type">struct</span> in_ifextra *)_MALLOC(in_extra_bufsize,
+		    M_IFADDR, M_WAITOK|M_ZERO)) == NULL) {
+			error = ENOMEM;
+			errorx = proto_unplumb(PF_INET, ifp);
+			<span class="enscript-keyword">if</span> (errorx != 0) {
+				log(LOG_ERR,
+				    <span class="enscript-string">&quot;%s: proto_unplumb returned %d if=%s%d\n&quot;</span>,
+				    __func__, errorx, ifp-&gt;if_name,
+				    ifp-&gt;if_unit);
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+
+		<span class="enscript-comment">/* Align on 64-bit boundary */</span>
+		base = (<span class="enscript-type">void</span> *)P2ROUNDUP((intptr_t)ext + <span class="enscript-keyword">sizeof</span> (uint64_t),
+		    <span class="enscript-keyword">sizeof</span> (uint64_t));
+		VERIFY(((intptr_t)base + in_extra_size) &lt;=
+		    ((intptr_t)ext + in_extra_bufsize));
+		pbuf = (<span class="enscript-type">void</span> **)((intptr_t)base - <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">void</span> *));
+		*pbuf = ext;
+		ifp-&gt;if_inetdata = base;
+		VERIFY(IS_P2ALIGNED(ifp-&gt;if_inetdata, <span class="enscript-keyword">sizeof</span> (uint64_t)));
+	}
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (error == 0 &amp;&amp; ifp-&gt;if_inetdata != NULL) {
+		<span class="enscript-comment">/*
+		 * Since the structure is never freed, we need to
+		 * zero out its contents to avoid reusing stale data.
+		 * A little redundant with allocation above, but it
+		 * keeps the code simpler for all cases.
+		 */</span>
+		bzero(ifp-&gt;if_inetdata, in_extra_size);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">int</span>
+<span class="enscript-function-name">inctl_associd</span>(<span class="enscript-type">struct</span> socket *so, u_long cmd, caddr_t data)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">union</span> {
+		<span class="enscript-type">struct</span> so_aidreq32 a32;
+		<span class="enscript-type">struct</span> so_aidreq64 a64;
+	} u;
+
+	VERIFY(so != NULL);
+
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGASSOCIDS32</span>:		<span class="enscript-comment">/* struct so_aidreq32 */</span>
+		bcopy(data, &amp;u.a32, <span class="enscript-keyword">sizeof</span> (u.a32));
+		error = in_getassocids(so, &amp;u.a32.sar_cnt, u.a32.sar_aidp);
+		<span class="enscript-keyword">if</span> (error == 0)
+			bcopy(&amp;u.a32, data, <span class="enscript-keyword">sizeof</span> (u.a32));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGASSOCIDS64</span>:		<span class="enscript-comment">/* struct so_aidreq64 */</span>
+		bcopy(data, &amp;u.a64, <span class="enscript-keyword">sizeof</span> (u.a64));
+		error = in_getassocids(so, &amp;u.a64.sar_cnt, u.a64.sar_aidp);
+		<span class="enscript-keyword">if</span> (error == 0)
+			bcopy(&amp;u.a64, data, <span class="enscript-keyword">sizeof</span> (u.a64));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		VERIFY(0);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">int</span>
+<span class="enscript-function-name">inctl_connid</span>(<span class="enscript-type">struct</span> socket *so, u_long cmd, caddr_t data)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">union</span> {
+		<span class="enscript-type">struct</span> so_cidreq32 c32;
+		<span class="enscript-type">struct</span> so_cidreq64 c64;
+	} u;
+
+	VERIFY(so != NULL);
+
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGCONNIDS32</span>:		<span class="enscript-comment">/* struct so_cidreq32 */</span>
+		bcopy(data, &amp;u.c32, <span class="enscript-keyword">sizeof</span> (u.c32));
+		error = in_getconnids(so, u.c32.scr_aid, &amp;u.c32.scr_cnt,
+		    u.c32.scr_cidp);
+		<span class="enscript-keyword">if</span> (error == 0)
+			bcopy(&amp;u.c32, data, <span class="enscript-keyword">sizeof</span> (u.c32));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGCONNIDS64</span>:		<span class="enscript-comment">/* struct so_cidreq64 */</span>
+		bcopy(data, &amp;u.c64, <span class="enscript-keyword">sizeof</span> (u.c64));
+		error = in_getconnids(so, u.c64.scr_aid, &amp;u.c64.scr_cnt,
+		    u.c64.scr_cidp);
+		<span class="enscript-keyword">if</span> (error == 0)
+			bcopy(&amp;u.c64, data, <span class="enscript-keyword">sizeof</span> (u.c64));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		VERIFY(0);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">int</span>
+<span class="enscript-function-name">inctl_conninfo</span>(<span class="enscript-type">struct</span> socket *so, u_long cmd, caddr_t data)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">union</span> {
+		<span class="enscript-type">struct</span> so_cinforeq32 ci32;
+		<span class="enscript-type">struct</span> so_cinforeq64 ci64;
+	} u;
+
+	VERIFY(so != NULL);
+
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGCONNINFO32</span>:		<span class="enscript-comment">/* struct so_cinforeq32 */</span>
+		bcopy(data, &amp;u.ci32, <span class="enscript-keyword">sizeof</span> (u.ci32));
+		error = in_getconninfo(so, u.ci32.scir_cid, &amp;u.ci32.scir_flags,
+		    &amp;u.ci32.scir_ifindex, &amp;u.ci32.scir_error, u.ci32.scir_src,
+		    &amp;u.ci32.scir_src_len, u.ci32.scir_dst, &amp;u.ci32.scir_dst_len,
+		    &amp;u.ci32.scir_aux_type, u.ci32.scir_aux_data,
+		    &amp;u.ci32.scir_aux_len);
+		<span class="enscript-keyword">if</span> (error == 0)
+			bcopy(&amp;u.ci32, data, <span class="enscript-keyword">sizeof</span> (u.ci32));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGCONNINFO64</span>:		<span class="enscript-comment">/* struct so_cinforeq64 */</span>
+		bcopy(data, &amp;u.ci64, <span class="enscript-keyword">sizeof</span> (u.ci64));
+		error = in_getconninfo(so, u.ci64.scir_cid, &amp;u.ci64.scir_flags,
+		    &amp;u.ci64.scir_ifindex, &amp;u.ci64.scir_error, u.ci64.scir_src,
+		    &amp;u.ci64.scir_src_len, u.ci64.scir_dst, &amp;u.ci64.scir_dst_len,
+		    &amp;u.ci64.scir_aux_type, u.ci64.scir_aux_data,
+		    &amp;u.ci64.scir_aux_len);
+		<span class="enscript-keyword">if</span> (error == 0)
+			bcopy(&amp;u.ci64, data, <span class="enscript-keyword">sizeof</span> (u.ci64));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		VERIFY(0);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Caller passes in the ioctl data pointer directly via &quot;ifr&quot;, with the
+ * expectation that this routine always uses bcopy() or other byte-aligned
+ * memory accesses.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">int</span>
+<span class="enscript-function-name">inctl_autoaddr</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> ifreq *ifr)
+{
+	<span class="enscript-type">int</span> error = 0, intval;
+
+	VERIFY(ifp != NULL);
+
+	bcopy(&amp;ifr-&gt;ifr_intval, &amp;intval, <span class="enscript-keyword">sizeof</span> (intval));
+
+	ifnet_lock_exclusive(ifp);
+	<span class="enscript-keyword">if</span> (intval) {
+		<span class="enscript-comment">/*
+		 * An interface in IPv4 router mode implies that it
+		 * is configured with a static IP address and should
+		 * not act as a DHCP client; prevent SIOCAUTOADDR from
+		 * being set in that mode.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ifp-&gt;if_eflags &amp; IFEF_IPV4_ROUTER) {
+			intval = 0;	<span class="enscript-comment">/* be safe; clear flag if set */</span>
+			error = EBUSY;
+		} <span class="enscript-keyword">else</span> {
+			ifp-&gt;if_eflags |= IFEF_AUTOCONFIGURING;
+		}
+	}
+	<span class="enscript-keyword">if</span> (!intval)
+		ifp-&gt;if_eflags &amp;= ~IFEF_AUTOCONFIGURING;
+	ifnet_lock_done(ifp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Caller passes in the ioctl data pointer directly via &quot;ifr&quot;, with the
+ * expectation that this routine always uses bcopy() or other byte-aligned
+ * memory accesses.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">int</span>
+<span class="enscript-function-name">inctl_arpipll</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> ifreq *ifr)
+{
+	<span class="enscript-type">int</span> error = 0, intval;
+
+	VERIFY(ifp != NULL);
+
+	bcopy(&amp;ifr-&gt;ifr_intval, &amp;intval, <span class="enscript-keyword">sizeof</span> (intval));
+	ipv4_ll_arp_aware = 1;
+
+	ifnet_lock_exclusive(ifp);
+	<span class="enscript-keyword">if</span> (intval) {
+		<span class="enscript-comment">/*
+		 * An interface in IPv4 router mode implies that it
+		 * is configured with a static IP address and should
+		 * not have to deal with IPv4 Link-Local Address;
+		 * prevent SIOCARPIPLL from being set in that mode.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ifp-&gt;if_eflags &amp; IFEF_IPV4_ROUTER) {
+			intval = 0;	<span class="enscript-comment">/* be safe; clear flag if set */</span>
+			error = EBUSY;
+		} <span class="enscript-keyword">else</span> {
+			ifp-&gt;if_eflags |= IFEF_ARPLL;
+		}
+	}
+	<span class="enscript-keyword">if</span> (!intval)
+		ifp-&gt;if_eflags &amp;= ~IFEF_ARPLL;
+	ifnet_lock_done(ifp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Handle SIOCSETROUTERMODE to set or clear the IPv4 router mode flag on
+ * the interface.  When in this mode, IPv4 Link-Local Address support is
+ * disabled in ARP, and DHCP client support is disabled in IP input; turning
+ * any of them on would cause an error to be returned.  Entering or exiting
+ * this mode will result in the removal of IPv4 addresses currently configured
+ * on the interface.
+ *
+ * Caller passes in the ioctl data pointer directly via &quot;ifr&quot;, with the
+ * expectation that this routine always uses bcopy() or other byte-aligned
+ * memory accesses.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">int</span>
+<span class="enscript-function-name">inctl_setrouter</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> ifreq *ifr)
+{
+	<span class="enscript-type">int</span> error = 0, intval;
+
+	VERIFY(ifp != NULL);
+
+	<span class="enscript-comment">/* Router mode isn't valid for loopback */</span>
+	<span class="enscript-keyword">if</span> (ifp-&gt;if_flags &amp; IFF_LOOPBACK)
+		<span class="enscript-keyword">return</span> (ENODEV);
+
+	bcopy(&amp;ifr-&gt;ifr_intval, &amp;intval, <span class="enscript-keyword">sizeof</span> (intval));
+
+	ifnet_lock_exclusive(ifp);
+	<span class="enscript-keyword">if</span> (intval) {
+		ifp-&gt;if_eflags |= IFEF_IPV4_ROUTER;
+		ifp-&gt;if_eflags &amp;= ~(IFEF_ARPLL | IFEF_AUTOCONFIGURING);
+	} <span class="enscript-keyword">else</span> {
+		ifp-&gt;if_eflags &amp;= ~IFEF_IPV4_ROUTER;
+	}
+	ifnet_lock_done(ifp);
+
+	<span class="enscript-comment">/* purge all IPv4 addresses configured on this interface */</span>
+	in_purgeaddrs(ifp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Caller passes in the ioctl data pointer directly via &quot;ifr&quot;, with the
+ * expectation that this routine always uses bcopy() or other byte-aligned
+ * memory accesses.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">int</span>
+<span class="enscript-function-name">inctl_ifaddr</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> in_ifaddr *ia, u_long cmd,
+    <span class="enscript-type">struct</span> ifreq *ifr)
+{
+	<span class="enscript-type">struct</span> kev_in_data in_event_data;
+	<span class="enscript-type">struct</span> kev_msg ev_msg;
+	<span class="enscript-type">struct</span> sockaddr_in addr;
+	<span class="enscript-type">struct</span> ifaddr *ifa;
+	<span class="enscript-type">int</span> error = 0;
+
+	VERIFY(ifp != NULL);
+
+	bzero(&amp;in_event_data, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_in_data));
+	bzero(&amp;ev_msg, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_msg));
+
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		<span class="enscript-keyword">if</span> (ia == NULL) {
+			error = EADDRNOTAVAIL;
+			<span class="enscript-keyword">break</span>;
+		}
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		bcopy(&amp;ia-&gt;ia_addr, &amp;ifr-&gt;ifr_addr, <span class="enscript-keyword">sizeof</span> (addr));
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		VERIFY(ia != NULL);
+		bcopy(&amp;ifr-&gt;ifr_addr, &amp;addr, <span class="enscript-keyword">sizeof</span> (addr));
+		<span class="enscript-comment">/*
+		 * If this is a new address, the reference count for the
+		 * hash table has been taken at creation time above.
+		 */</span>
+		error = in_ifinit(ifp, ia, &amp;addr, 1);
+		<span class="enscript-keyword">if</span> (error == 0) {
+			(<span class="enscript-type">void</span>) ifnet_notify_address(ifp, AF_INET);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCAIFADDR</span>: {		<span class="enscript-comment">/* struct {if,in_}aliasreq */</span>
+		<span class="enscript-type">struct</span> in_aliasreq *ifra = (<span class="enscript-type">struct</span> in_aliasreq *)ifr;
+		<span class="enscript-type">struct</span> sockaddr_in broadaddr, mask;
+		<span class="enscript-type">int</span> hostIsNew, maskIsNew;
+
+		VERIFY(ia != NULL);
+		bcopy(&amp;ifra-&gt;ifra_addr, &amp;addr, <span class="enscript-keyword">sizeof</span> (addr));
+		bcopy(&amp;ifra-&gt;ifra_broadaddr, &amp;broadaddr, <span class="enscript-keyword">sizeof</span> (broadaddr));
+		bcopy(&amp;ifra-&gt;ifra_mask, &amp;mask, <span class="enscript-keyword">sizeof</span> (mask));
+
+		maskIsNew = 0;
+		hostIsNew = 1;
+		error = 0;
+
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">if</span> (ia-&gt;ia_addr.sin_family == AF_INET) {
+			<span class="enscript-keyword">if</span> (addr.sin_len == 0) {
+				addr = ia-&gt;ia_addr;
+				hostIsNew = 0;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (addr.sin_addr.s_addr ==
+			    ia-&gt;ia_addr.sin_addr.s_addr) {
+				hostIsNew = 0;
+			}
+		}
+		<span class="enscript-keyword">if</span> (mask.sin_len) {
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			in_ifscrub(ifp, ia, 0);
+			IFA_LOCK(&amp;ia-&gt;ia_ifa);
+			ia-&gt;ia_sockmask = mask;
+			ia-&gt;ia_subnetmask =
+			    ntohl(ia-&gt;ia_sockmask.sin_addr.s_addr);
+			maskIsNew = 1;
+		}
+		<span class="enscript-keyword">if</span> ((ifp-&gt;if_flags &amp; IFF_POINTOPOINT) &amp;&amp;
+		    (broadaddr.sin_family == AF_INET)) {
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			in_ifscrub(ifp, ia, 0);
+			IFA_LOCK(&amp;ia-&gt;ia_ifa);
+			ia-&gt;ia_dstaddr = broadaddr;
+			ia-&gt;ia_dstaddr.sin_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in);
+			maskIsNew  = 1; <span class="enscript-comment">/* We lie; but the effect's the same */</span>
+		}
+		<span class="enscript-keyword">if</span> (addr.sin_family == AF_INET &amp;&amp; (hostIsNew || maskIsNew)) {
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			error = in_ifinit(ifp, ia, &amp;addr, 0);
+		} <span class="enscript-keyword">else</span> {
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		}
+		<span class="enscript-keyword">if</span> (error == 0) {
+			(<span class="enscript-type">void</span>) ifnet_notify_address(ifp, AF_INET);
+		}
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">if</span> ((ifp-&gt;if_flags &amp; IFF_BROADCAST) &amp;&amp;
+		    (broadaddr.sin_family == AF_INET))
+			ia-&gt;ia_broadaddr = broadaddr;
+
+		<span class="enscript-comment">/*
+		 * Report event.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((error == 0) || (error == EEXIST)) {
+			ev_msg.vendor_code	= KEV_VENDOR_APPLE;
+			ev_msg.kev_class	= KEV_NETWORK_CLASS;
+			ev_msg.kev_subclass	= KEV_INET_SUBCLASS;
+
+			<span class="enscript-keyword">if</span> (hostIsNew)
+				ev_msg.event_code = KEV_INET_NEW_ADDR;
+			<span class="enscript-keyword">else</span>
+				ev_msg.event_code = KEV_INET_CHANGED_ADDR;
+
+			<span class="enscript-keyword">if</span> (ia-&gt;ia_ifa.ifa_dstaddr) {
+				in_event_data.ia_dstaddr =
+				    ((<span class="enscript-type">struct</span> sockaddr_in *)(<span class="enscript-type">void</span> *)ia-&gt;
+				    ia_ifa.ifa_dstaddr)-&gt;sin_addr;
+			} <span class="enscript-keyword">else</span> {
+				in_event_data.ia_dstaddr.s_addr = INADDR_ANY;
+			}
+			in_event_data.ia_addr		= ia-&gt;ia_addr.sin_addr;
+			in_event_data.ia_net		= ia-&gt;ia_net;
+			in_event_data.ia_netmask	= ia-&gt;ia_netmask;
+			in_event_data.ia_subnet		= ia-&gt;ia_subnet;
+			in_event_data.ia_subnetmask	= ia-&gt;ia_subnetmask;
+			in_event_data.ia_netbroadcast	= ia-&gt;ia_netbroadcast;
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			(<span class="enscript-type">void</span>) strlcpy(&amp;in_event_data.link_data.if_name[0],
+			    ifp-&gt;if_name, IFNAMSIZ);
+			in_event_data.link_data.if_family = ifp-&gt;if_family;
+			in_event_data.link_data.if_unit = ifp-&gt;if_unit;
+
+			ev_msg.dv[0].data_ptr	 = &amp;in_event_data;
+			ev_msg.dv[0].data_length = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_in_data);
+			ev_msg.dv[1].data_length = 0;
+
+			kev_post_msg(&amp;ev_msg);
+		} <span class="enscript-keyword">else</span> {
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCDIFADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		VERIFY(ia != NULL);
+		error = ifnet_ioctl(ifp, PF_INET, SIOCDIFADDR, ia);
+		<span class="enscript-keyword">if</span> (error == EOPNOTSUPP)
+			error = 0;
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-comment">/* Fill out the kernel event information */</span>
+		ev_msg.vendor_code	= KEV_VENDOR_APPLE;
+		ev_msg.kev_class	= KEV_NETWORK_CLASS;
+		ev_msg.kev_subclass	= KEV_INET_SUBCLASS;
+
+		ev_msg.event_code	= KEV_INET_ADDR_DELETED;
+
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">if</span> (ia-&gt;ia_ifa.ifa_dstaddr) {
+			in_event_data.ia_dstaddr = ((<span class="enscript-type">struct</span> sockaddr_in *)
+			    (<span class="enscript-type">void</span> *)ia-&gt;ia_ifa.ifa_dstaddr)-&gt;sin_addr;
+		} <span class="enscript-keyword">else</span> {
+			in_event_data.ia_dstaddr.s_addr = INADDR_ANY;
+		}
+		in_event_data.ia_addr		= ia-&gt;ia_addr.sin_addr;
+		in_event_data.ia_net		= ia-&gt;ia_net;
+		in_event_data.ia_netmask	= ia-&gt;ia_netmask;
+		in_event_data.ia_subnet		= ia-&gt;ia_subnet;
+		in_event_data.ia_subnetmask	= ia-&gt;ia_subnetmask;
+		in_event_data.ia_netbroadcast	= ia-&gt;ia_netbroadcast;
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		(<span class="enscript-type">void</span>) strlcpy(&amp;in_event_data.link_data.if_name[0],
+		    ifp-&gt;if_name, IFNAMSIZ);
+		in_event_data.link_data.if_family = ifp-&gt;if_family;
+		in_event_data.link_data.if_unit  = (u_int32_t)ifp-&gt;if_unit;
+
+		ev_msg.dv[0].data_ptr    = &amp;in_event_data;
+		ev_msg.dv[0].data_length = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kev_in_data);
+		ev_msg.dv[1].data_length = 0;
+
+		ifa = &amp;ia-&gt;ia_ifa;
+		lck_rw_lock_exclusive(in_ifaddr_rwlock);
+		<span class="enscript-comment">/* Release ia_link reference */</span>
+		IFA_REMREF(ifa);
+		TAILQ_REMOVE(&amp;in_ifaddrhead, ia, ia_link);
+		IFA_LOCK(ifa);
+		<span class="enscript-keyword">if</span> (IA_IS_HASHED(ia))
+			in_iahash_remove(ia);
+		IFA_UNLOCK(ifa);
+		lck_rw_done(in_ifaddr_rwlock);
+
+		<span class="enscript-comment">/*
+		 * in_ifscrub kills the interface route.
+		 */</span>
+		in_ifscrub(ifp, ia, 0);
+		ifnet_lock_exclusive(ifp);
+		IFA_LOCK(ifa);
+		<span class="enscript-comment">/* if_detach_ifa() releases ifa_link reference */</span>
+		if_detach_ifa(ifp, ifa);
+		<span class="enscript-comment">/* Our reference to this address is dropped at the bottom */</span>
+		IFA_UNLOCK(ifa);
+
+		<span class="enscript-comment">/* invalidate route caches */</span>
+		routegenid_inet_update();
+
+		<span class="enscript-comment">/*
+		 * If the interface supports multicast, and no address is left,
+		 * remove the &quot;all hosts&quot; multicast group from that interface.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((ifp-&gt;if_flags &amp; IFF_MULTICAST) ||
+		    ifp-&gt;if_allhostsinm != NULL) {
+
+			TAILQ_FOREACH(ifa, &amp;ifp-&gt;if_addrhead, ifa_link) {
+				IFA_LOCK(ifa);
+				<span class="enscript-keyword">if</span> (ifa-&gt;ifa_addr-&gt;sa_family == AF_INET) {
+					IFA_UNLOCK(ifa);
+					<span class="enscript-keyword">break</span>;
+				}
+				IFA_UNLOCK(ifa);
+			}
+			ifnet_lock_done(ifp);
+
+			lck_mtx_lock(&amp;ifp-&gt;if_addrconfig_lock);
+			<span class="enscript-keyword">if</span> (ifa == NULL &amp;&amp; ifp-&gt;if_allhostsinm != NULL) {
+				<span class="enscript-type">struct</span> in_multi *inm = ifp-&gt;if_allhostsinm;
+				ifp-&gt;if_allhostsinm = NULL;
+
+				in_delmulti(inm);
+				<span class="enscript-comment">/* release the reference for allhostsinm */</span>
+				INM_REMREF(inm);
+			}
+			lck_mtx_unlock(&amp;ifp-&gt;if_addrconfig_lock);
+		} <span class="enscript-keyword">else</span> {
+			ifnet_lock_done(ifp);
+		}
+
+		<span class="enscript-comment">/* Post the kernel event */</span>
+		kev_post_msg(&amp;ev_msg);
+
+		<span class="enscript-comment">/*
+		 * See if there is any IPV4 address left and if so,
+		 * reconfigure KDP to use current primary address.
+		 */</span>
+		ifa = ifa_ifpgetprimary(ifp, AF_INET);
+		<span class="enscript-keyword">if</span> (ifa != NULL) {
+			<span class="enscript-comment">/*
+			 * NOTE: SIOCSIFADDR is defined with struct ifreq
+			 * as parameter, but here we are sending it down
+			 * to the interface with a pointer to struct ifaddr,
+			 * for legacy reasons.
+			 */</span>
+			error = ifnet_ioctl(ifp, PF_INET, SIOCSIFADDR, ifa);
+			<span class="enscript-keyword">if</span> (error == EOPNOTSUPP)
+				error = 0;
+
+			<span class="enscript-comment">/* Release reference from ifa_ifpgetprimary() */</span>
+			IFA_REMREF(ifa);
+		}
+		(<span class="enscript-type">void</span>) ifnet_notify_address(ifp, AF_INET);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		VERIFY(0);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Caller passes in the ioctl data pointer directly via &quot;ifr&quot;, with the
+ * expectation that this routine always uses bcopy() or other byte-aligned
+ * memory accesses.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">int</span>
+<span class="enscript-function-name">inctl_ifdstaddr</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> in_ifaddr *ia, u_long cmd,
+    <span class="enscript-type">struct</span> ifreq *ifr)
+{
+	<span class="enscript-type">struct</span> kev_in_data in_event_data;
+	<span class="enscript-type">struct</span> kev_msg ev_msg;
+	<span class="enscript-type">struct</span> sockaddr_in dstaddr;
+	<span class="enscript-type">int</span> error = 0;
+
+	VERIFY(ifp != NULL);
+
+	<span class="enscript-keyword">if</span> (!(ifp-&gt;if_flags &amp; IFF_POINTOPOINT))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	bzero(&amp;in_event_data, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_in_data));
+	bzero(&amp;ev_msg, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_msg));
+
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFDSTADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		<span class="enscript-keyword">if</span> (ia == NULL) {
+			error = EADDRNOTAVAIL;
+			<span class="enscript-keyword">break</span>;
+		}
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		bcopy(&amp;ia-&gt;ia_dstaddr, &amp;ifr-&gt;ifr_dstaddr, <span class="enscript-keyword">sizeof</span> (dstaddr));
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFDSTADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		VERIFY(ia != NULL);
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		dstaddr = ia-&gt;ia_dstaddr;
+		bcopy(&amp;ifr-&gt;ifr_dstaddr, &amp;ia-&gt;ia_dstaddr, <span class="enscript-keyword">sizeof</span> (dstaddr));
+		<span class="enscript-keyword">if</span> (ia-&gt;ia_dstaddr.sin_family == AF_INET)
+			ia-&gt;ia_dstaddr.sin_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in);
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-comment">/*
+		 * NOTE: SIOCSIFDSTADDR is defined with struct ifreq
+		 * as parameter, but here we are sending it down
+		 * to the interface with a pointer to struct ifaddr,
+		 * for legacy reasons.
+		 */</span>
+		error = ifnet_ioctl(ifp, PF_INET, SIOCSIFDSTADDR, ia);
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">if</span> (error == EOPNOTSUPP)
+			error = 0;
+		<span class="enscript-keyword">if</span> (error != 0) {
+			ia-&gt;ia_dstaddr = dstaddr;
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			<span class="enscript-keyword">break</span>;
+		}
+		IFA_LOCK_ASSERT_HELD(&amp;ia-&gt;ia_ifa);
+
+		ev_msg.vendor_code	= KEV_VENDOR_APPLE;
+		ev_msg.kev_class	= KEV_NETWORK_CLASS;
+		ev_msg.kev_subclass	= KEV_INET_SUBCLASS;
+
+		ev_msg.event_code	= KEV_INET_SIFDSTADDR;
+
+		<span class="enscript-keyword">if</span> (ia-&gt;ia_ifa.ifa_dstaddr) {
+			in_event_data.ia_dstaddr = ((<span class="enscript-type">struct</span> sockaddr_in *)
+			    (<span class="enscript-type">void</span> *)ia-&gt;ia_ifa.ifa_dstaddr)-&gt;sin_addr;
+		} <span class="enscript-keyword">else</span> {
+			in_event_data.ia_dstaddr.s_addr = INADDR_ANY;
+		}
+
+		in_event_data.ia_addr		= ia-&gt;ia_addr.sin_addr;
+		in_event_data.ia_net		= ia-&gt;ia_net;
+		in_event_data.ia_netmask	= ia-&gt;ia_netmask;
+		in_event_data.ia_subnet		= ia-&gt;ia_subnet;
+		in_event_data.ia_subnetmask	= ia-&gt;ia_subnetmask;
+		in_event_data.ia_netbroadcast	= ia-&gt;ia_netbroadcast;
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		(<span class="enscript-type">void</span>) strlcpy(&amp;in_event_data.link_data.if_name[0],
+		    ifp-&gt;if_name, IFNAMSIZ);
+		in_event_data.link_data.if_family = ifp-&gt;if_family;
+		in_event_data.link_data.if_unit  = (u_int32_t)ifp-&gt;if_unit;
+
+		ev_msg.dv[0].data_ptr    = &amp;in_event_data;
+		ev_msg.dv[0].data_length = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_in_data);
+		ev_msg.dv[1].data_length = 0;
+
+		kev_post_msg(&amp;ev_msg);
+
+		lck_mtx_lock(rnh_lock);
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">if</span> (ia-&gt;ia_flags &amp; IFA_ROUTE) {
+			ia-&gt;ia_ifa.ifa_dstaddr = (<span class="enscript-type">struct</span> sockaddr *)&amp;dstaddr;
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			rtinit_locked(&amp;(ia-&gt;ia_ifa), (<span class="enscript-type">int</span>)RTM_DELETE, RTF_HOST);
+			IFA_LOCK(&amp;ia-&gt;ia_ifa);
+			ia-&gt;ia_ifa.ifa_dstaddr =
+			    (<span class="enscript-type">struct</span> sockaddr *)&amp;ia-&gt;ia_dstaddr;
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			rtinit_locked(&amp;(ia-&gt;ia_ifa), (<span class="enscript-type">int</span>)RTM_ADD,
+			    RTF_HOST|RTF_UP);
+		} <span class="enscript-keyword">else</span> {
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		}
+		lck_mtx_unlock(rnh_lock);
+		<span class="enscript-keyword">break</span>;
+
+
+
+	<span class="enscript-reference">default</span>:
+		VERIFY(0);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Caller passes in the ioctl data pointer directly via &quot;ifr&quot;, with the
+ * expectation that this routine always uses bcopy() or other byte-aligned
+ * memory accesses.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">int</span>
+<span class="enscript-function-name">inctl_ifbrdaddr</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> in_ifaddr *ia, u_long cmd,
+    <span class="enscript-type">struct</span> ifreq *ifr)
+{
+	<span class="enscript-type">struct</span> kev_in_data in_event_data;
+	<span class="enscript-type">struct</span> kev_msg ev_msg;
+	<span class="enscript-type">int</span> error = 0;
+
+	VERIFY(ifp != NULL);
+
+	<span class="enscript-keyword">if</span> (ia == NULL)
+		<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+
+	<span class="enscript-keyword">if</span> (!(ifp-&gt;if_flags &amp; IFF_BROADCAST))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	bzero(&amp;in_event_data, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_in_data));
+	bzero(&amp;ev_msg, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_msg));
+
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFBRDADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		bcopy(&amp;ia-&gt;ia_broadaddr, &amp;ifr-&gt;ifr_broadaddr,
+		    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in));
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFBRDADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		bcopy(&amp;ifr-&gt;ifr_broadaddr, &amp;ia-&gt;ia_broadaddr,
+		    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in));
+
+		ev_msg.vendor_code	= KEV_VENDOR_APPLE;
+		ev_msg.kev_class	= KEV_NETWORK_CLASS;
+		ev_msg.kev_subclass	= KEV_INET_SUBCLASS;
+
+		ev_msg.event_code = KEV_INET_SIFBRDADDR;
+
+		<span class="enscript-keyword">if</span> (ia-&gt;ia_ifa.ifa_dstaddr) {
+			in_event_data.ia_dstaddr = ((<span class="enscript-type">struct</span> sockaddr_in *)
+			    (<span class="enscript-type">void</span> *)ia-&gt;ia_ifa.ifa_dstaddr)-&gt;sin_addr;
+		} <span class="enscript-keyword">else</span> {
+			in_event_data.ia_dstaddr.s_addr = INADDR_ANY;
+		}
+		in_event_data.ia_addr		= ia-&gt;ia_addr.sin_addr;
+		in_event_data.ia_net		= ia-&gt;ia_net;
+		in_event_data.ia_netmask	= ia-&gt;ia_netmask;
+		in_event_data.ia_subnet		= ia-&gt;ia_subnet;
+		in_event_data.ia_subnetmask	= ia-&gt;ia_subnetmask;
+		in_event_data.ia_netbroadcast	= ia-&gt;ia_netbroadcast;
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		(<span class="enscript-type">void</span>) strlcpy(&amp;in_event_data.link_data.if_name[0],
+		    ifp-&gt;if_name, IFNAMSIZ);
+		in_event_data.link_data.if_family = ifp-&gt;if_family;
+		in_event_data.link_data.if_unit  = (u_int32_t)ifp-&gt;if_unit;
+
+		ev_msg.dv[0].data_ptr    = &amp;in_event_data;
+		ev_msg.dv[0].data_length = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_in_data);
+		ev_msg.dv[1].data_length = 0;
+
+		kev_post_msg(&amp;ev_msg);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		VERIFY(0);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Caller passes in the ioctl data pointer directly via &quot;ifr&quot;, with the
+ * expectation that this routine always uses bcopy() or other byte-aligned
+ * memory accesses.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">int</span>
+<span class="enscript-function-name">inctl_ifnetmask</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> in_ifaddr *ia, u_long cmd,
+    <span class="enscript-type">struct</span> ifreq *ifr)
+{
+	<span class="enscript-type">struct</span> kev_in_data in_event_data;
+	<span class="enscript-type">struct</span> kev_msg ev_msg;
+	<span class="enscript-type">struct</span> sockaddr_in mask;
+	<span class="enscript-type">int</span> error = 0;
+
+	VERIFY(ifp != NULL);
+
+	bzero(&amp;in_event_data, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_in_data));
+	bzero(&amp;ev_msg, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_msg));
+
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFNETMASK</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		<span class="enscript-keyword">if</span> (ia == NULL) {
+			error = EADDRNOTAVAIL;
+			<span class="enscript-keyword">break</span>;
+		}
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		bcopy(&amp;ia-&gt;ia_sockmask, &amp;ifr-&gt;ifr_addr, <span class="enscript-keyword">sizeof</span> (mask));
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFNETMASK</span>: {		<span class="enscript-comment">/* struct ifreq */</span>
+		in_addr_t i;
+
+		bcopy(&amp;ifr-&gt;ifr_addr, &amp;mask, <span class="enscript-keyword">sizeof</span> (mask));
+		i = mask.sin_addr.s_addr;
+
+		VERIFY(ia != NULL);
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		ia-&gt;ia_subnetmask = ntohl(ia-&gt;ia_sockmask.sin_addr.s_addr = i);
+		ev_msg.vendor_code	= KEV_VENDOR_APPLE;
+		ev_msg.kev_class	= KEV_NETWORK_CLASS;
+		ev_msg.kev_subclass	= KEV_INET_SUBCLASS;
+
+		ev_msg.event_code = KEV_INET_SIFNETMASK;
+
+		<span class="enscript-keyword">if</span> (ia-&gt;ia_ifa.ifa_dstaddr) {
+			in_event_data.ia_dstaddr = ((<span class="enscript-type">struct</span> sockaddr_in *)
+			    (<span class="enscript-type">void</span> *)ia-&gt;ia_ifa.ifa_dstaddr)-&gt;sin_addr;
+		} <span class="enscript-keyword">else</span> {
+			in_event_data.ia_dstaddr.s_addr = INADDR_ANY;
+		}
+		in_event_data.ia_addr		= ia-&gt;ia_addr.sin_addr;
+		in_event_data.ia_net		= ia-&gt;ia_net;
+		in_event_data.ia_netmask	= ia-&gt;ia_netmask;
+		in_event_data.ia_subnet		= ia-&gt;ia_subnet;
+		in_event_data.ia_subnetmask	= ia-&gt;ia_subnetmask;
+		in_event_data.ia_netbroadcast	= ia-&gt;ia_netbroadcast;
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		(<span class="enscript-type">void</span>) strlcpy(&amp;in_event_data.link_data.if_name[0],
+		    ifp-&gt;if_name, IFNAMSIZ);
+		in_event_data.link_data.if_family = ifp-&gt;if_family;
+		in_event_data.link_data.if_unit  = (u_int32_t)ifp-&gt;if_unit;
+
+		ev_msg.dv[0].data_ptr    = &amp;in_event_data;
+		ev_msg.dv[0].data_length = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_in_data);
+		ev_msg.dv[1].data_length = 0;
+
+		kev_post_msg(&amp;ev_msg);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-reference">default</span>:
+		VERIFY(0);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Generic INET control operations (ioctl's).
+ *
+ * ifp is NULL if not an interface-specific ioctl.
+ *
+ * Most of the routines called to handle the ioctls would end up being
+ * tail-call optimized, which unfortunately causes this routine to
+ * consume too much stack space; this is the reason for the &quot;noinline&quot;
+ * attribute used on those routines.
+ *
+ * If called directly from within the networking stack (as opposed to via
+ * pru_control), the socket parameter may be NULL.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">in_control</span>(<span class="enscript-type">struct</span> socket *so, u_long cmd, caddr_t data, <span class="enscript-type">struct</span> ifnet *ifp,
+    <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">struct</span> ifreq *ifr = (<span class="enscript-type">struct</span> ifreq *)(<span class="enscript-type">void</span> *)data;
+	<span class="enscript-type">struct</span> sockaddr_in addr, dstaddr;
+	<span class="enscript-type">struct</span> sockaddr_in sin, *sa = NULL;
+	boolean_t privileged = (proc_suser(p) == 0);
+	boolean_t so_unlocked = FALSE;
+	<span class="enscript-type">struct</span> in_ifaddr *ia = NULL;
+	<span class="enscript-type">struct</span> ifaddr *ifa;
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-comment">/* In case it's NULL, make sure it came from the kernel */</span>
+	VERIFY(so != NULL || p == kernproc);
+
+	<span class="enscript-comment">/*
+	 * ioctls which don't require ifp, but require socket.
+	 */</span>
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGASSOCIDS32</span>:		<span class="enscript-comment">/* struct so_aidreq32 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGASSOCIDS64</span>:		<span class="enscript-comment">/* struct so_aidreq64 */</span>
+		<span class="enscript-keyword">return</span> (inctl_associd(so, cmd, data));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGCONNIDS32</span>:		<span class="enscript-comment">/* struct so_cidreq32 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGCONNIDS64</span>:		<span class="enscript-comment">/* struct so_cidreq64 */</span>
+		<span class="enscript-keyword">return</span> (inctl_connid(so, cmd, data));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGCONNINFO32</span>:		<span class="enscript-comment">/* struct so_cinforeq32 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGCONNINFO64</span>:		<span class="enscript-comment">/* struct so_cinforeq64 */</span>
+		<span class="enscript-keyword">return</span> (inctl_conninfo(so, cmd, data));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-comment">/*
+	 * The rest of ioctls require ifp; reject if we don't have one;
+	 * return ENXIO to be consistent with ifioctl().
+	 */</span>
+	<span class="enscript-keyword">if</span> (ifp == NULL)
+		<span class="enscript-keyword">return</span> (ENXIO);
+
+	<span class="enscript-comment">/*
+	 * ioctls which require ifp but not interface address.
+	 */</span>
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCAUTOADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		<span class="enscript-keyword">if</span> (!privileged)
+			<span class="enscript-keyword">return</span> (EPERM);
+		<span class="enscript-keyword">return</span> (inctl_autoaddr(ifp, ifr));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCARPIPLL</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		<span class="enscript-keyword">if</span> (!privileged)
+			<span class="enscript-keyword">return</span> (EPERM);
+		<span class="enscript-keyword">return</span> (inctl_arpipll(ifp, ifr));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSETROUTERMODE</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		<span class="enscript-keyword">if</span> (!privileged)
+			<span class="enscript-keyword">return</span> (EPERM);
+		<span class="enscript-keyword">return</span> (inctl_setrouter(ifp, ifr));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCPROTOATTACH</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		<span class="enscript-keyword">if</span> (!privileged)
+			<span class="enscript-keyword">return</span> (EPERM);
+		<span class="enscript-keyword">return</span> (in_domifattach(ifp));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCPROTODETACH</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		<span class="enscript-keyword">if</span> (!privileged)
+			<span class="enscript-keyword">return</span> (EPERM);
+
+		<span class="enscript-comment">/*
+		 * If an IPv4 address is still present, refuse to detach.
+		 */</span>
+		ifnet_lock_shared(ifp);
+		TAILQ_FOREACH(ifa, &amp;ifp-&gt;if_addrhead, ifa_link) {
+			IFA_LOCK(ifa);
+			<span class="enscript-keyword">if</span> (ifa-&gt;ifa_addr-&gt;sa_family == AF_INET) {
+				IFA_UNLOCK(ifa);
+				<span class="enscript-keyword">break</span>;
+			}
+			IFA_UNLOCK(ifa);
+		}
+		ifnet_lock_done(ifp);
+		<span class="enscript-keyword">return</span> ((ifa == NULL) ? proto_unplumb(PF_INET, ifp) : EBUSY);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-comment">/*
+	 * ioctls which require interface address; obtain sockaddr_in.
+	 */</span>
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCAIFADDR</span>:		<span class="enscript-comment">/* struct {if,in_}aliasreq */</span>
+		<span class="enscript-keyword">if</span> (!privileged)
+			<span class="enscript-keyword">return</span> (EPERM);
+		bcopy(&amp;((<span class="enscript-type">struct</span> in_aliasreq *)(<span class="enscript-type">void</span> *)data)-&gt;ifra_addr,
+		    &amp;sin, <span class="enscript-keyword">sizeof</span> (sin));
+		sa = &amp;sin;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCDIFADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFDSTADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFNETMASK</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFBRDADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		<span class="enscript-keyword">if</span> (!privileged)
+			<span class="enscript-keyword">return</span> (EPERM);
+		<span class="enscript-comment">/* FALLTHRU */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFDSTADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFNETMASK</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFBRDADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		bcopy(&amp;ifr-&gt;ifr_addr, &amp;sin, <span class="enscript-keyword">sizeof</span> (sin));
+		sa = &amp;sin;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Find address for this interface, if it exists.
+	 *
+	 * If an alias address was specified, find that one instead of
+	 * the first one on the interface, if possible.
+	 */</span>
+	VERIFY(ia == NULL);
+	<span class="enscript-keyword">if</span> (sa != NULL) {
+		<span class="enscript-type">struct</span> in_ifaddr *iap;
+
+		<span class="enscript-comment">/*
+		 * Any failures from this point on must take into account
+		 * a non-NULL &quot;ia&quot; with an outstanding reference count, and
+		 * therefore requires IFA_REMREF.  Jump to &quot;done&quot; label
+		 * instead of calling return if &quot;ia&quot; is valid.
+		 */</span>
+		lck_rw_lock_shared(in_ifaddr_rwlock);
+		TAILQ_FOREACH(iap, INADDR_HASH(sa-&gt;sin_addr.s_addr), ia_hash) {
+			IFA_LOCK(&amp;iap-&gt;ia_ifa);
+			<span class="enscript-keyword">if</span> (iap-&gt;ia_ifp == ifp &amp;&amp;
+			    iap-&gt;ia_addr.sin_addr.s_addr ==
+			    sa-&gt;sin_addr.s_addr) {
+				ia = iap;
+				IFA_UNLOCK(&amp;iap-&gt;ia_ifa);
+				<span class="enscript-keyword">break</span>;
+			}
+			IFA_UNLOCK(&amp;iap-&gt;ia_ifa);
+		}
+		<span class="enscript-comment">/* take a reference on ia before releasing lock */</span>
+		<span class="enscript-keyword">if</span> (ia != NULL)
+			IFA_ADDREF(&amp;ia-&gt;ia_ifa);
+		lck_rw_done(in_ifaddr_rwlock);
+
+		<span class="enscript-keyword">if</span> (ia == NULL) {
+			ifnet_lock_shared(ifp);
+			TAILQ_FOREACH(ifa, &amp;ifp-&gt;if_addrhead, ifa_link) {
+				iap = ifatoia(ifa);
+				IFA_LOCK(&amp;iap-&gt;ia_ifa);
+				<span class="enscript-keyword">if</span> (iap-&gt;ia_addr.sin_family == AF_INET) {
+					ia = iap;
+					IFA_UNLOCK(&amp;iap-&gt;ia_ifa);
+					<span class="enscript-keyword">break</span>;
+				}
+				IFA_UNLOCK(&amp;iap-&gt;ia_ifa);
+			}
+			<span class="enscript-comment">/* take a reference on ia before releasing lock */</span>
+			<span class="enscript-keyword">if</span> (ia != NULL)
+				IFA_ADDREF(&amp;ia-&gt;ia_ifa);
+			ifnet_lock_done(ifp);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Unlock the socket since ifnet_ioctl() may be invoked by
+	 * one of the ioctl handlers below.  Socket will be re-locked
+	 * prior to returning.
+	 */</span>
+	<span class="enscript-keyword">if</span> (so != NULL) {
+		socket_unlock(so, 0);
+		so_unlocked = TRUE;
+	}
+
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCAIFADDR</span>:		<span class="enscript-comment">/* struct {if,in_}aliasreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCDIFADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		<span class="enscript-keyword">if</span> (cmd == SIOCAIFADDR) {
+			bcopy(&amp;((<span class="enscript-type">struct</span> in_aliasreq *)(<span class="enscript-type">void</span> *)data)-&gt;
+			    ifra_addr, &amp;addr, <span class="enscript-keyword">sizeof</span> (addr));
+			bcopy(&amp;((<span class="enscript-type">struct</span> in_aliasreq *)(<span class="enscript-type">void</span> *)data)-&gt;
+			    ifra_dstaddr, &amp;dstaddr, <span class="enscript-keyword">sizeof</span> (dstaddr));
+		} <span class="enscript-keyword">else</span> {
+			VERIFY(cmd == SIOCDIFADDR);
+			bcopy(&amp;((<span class="enscript-type">struct</span> ifreq *)(<span class="enscript-type">void</span> *)data)-&gt;ifr_addr,
+			    &amp;addr, <span class="enscript-keyword">sizeof</span> (addr));
+			bzero(&amp;dstaddr, <span class="enscript-keyword">sizeof</span> (dstaddr));
+		}
+
+		<span class="enscript-keyword">if</span> (addr.sin_family == AF_INET) {
+			<span class="enscript-type">struct</span> in_ifaddr *oia;
+
+			lck_rw_lock_shared(in_ifaddr_rwlock);
+			<span class="enscript-keyword">for</span> (oia = ia; ia; ia = ia-&gt;ia_link.tqe_next) {
+				IFA_LOCK(&amp;ia-&gt;ia_ifa);
+				<span class="enscript-keyword">if</span> (ia-&gt;ia_ifp == ifp &amp;&amp;
+				    ia-&gt;ia_addr.sin_addr.s_addr ==
+				    addr.sin_addr.s_addr) {
+					IFA_ADDREF_LOCKED(&amp;ia-&gt;ia_ifa);
+					IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+					<span class="enscript-keyword">break</span>;
+				}
+				IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			}
+			lck_rw_done(in_ifaddr_rwlock);
+			<span class="enscript-keyword">if</span> (oia != NULL)
+				IFA_REMREF(&amp;oia-&gt;ia_ifa);
+			<span class="enscript-keyword">if</span> ((ifp-&gt;if_flags &amp; IFF_POINTOPOINT) &amp;&amp;
+			    (cmd == SIOCAIFADDR) &amp;&amp;
+			    (dstaddr.sin_addr.s_addr == INADDR_ANY)) {
+				error = EDESTADDRREQ;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+			}
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cmd == SIOCAIFADDR) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		<span class="enscript-keyword">if</span> (cmd == SIOCDIFADDR &amp;&amp; ia == NULL) {
+			error = EADDRNOTAVAIL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFDSTADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFNETMASK</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		<span class="enscript-keyword">if</span> (cmd == SIOCAIFADDR) {
+			<span class="enscript-comment">/* fell thru from above; just repeat it */</span>
+			bcopy(&amp;((<span class="enscript-type">struct</span> in_aliasreq *)(<span class="enscript-type">void</span> *)data)-&gt;
+			    ifra_addr, &amp;addr, <span class="enscript-keyword">sizeof</span> (addr));
+		} <span class="enscript-keyword">else</span> {
+			VERIFY(cmd == SIOCDIFADDR || cmd == SIOCSIFADDR ||
+			    cmd == SIOCSIFNETMASK || cmd == SIOCSIFDSTADDR);
+			bcopy(&amp;((<span class="enscript-type">struct</span> ifreq *)(<span class="enscript-type">void</span> *)data)-&gt;ifr_addr,
+			    &amp;addr, <span class="enscript-keyword">sizeof</span> (addr));
+		}
+
+		<span class="enscript-keyword">if</span> (addr.sin_family != AF_INET &amp;&amp; cmd == SIOCSIFADDR) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		<span class="enscript-keyword">if</span> (ia == NULL) {
+			ia = in_ifaddr_alloc(M_WAITOK);
+			<span class="enscript-keyword">if</span> (ia == NULL) {
+				error = ENOBUFS;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+			}
+			ifnet_lock_exclusive(ifp);
+			ifa = &amp;ia-&gt;ia_ifa;
+			IFA_LOCK(ifa);
+			<span class="enscript-comment">/* Hold a reference for this routine */</span>
+			IFA_ADDREF_LOCKED(ifa);
+			IA_HASH_INIT(ia);
+			ifa-&gt;ifa_addr = (<span class="enscript-type">struct</span> sockaddr *)&amp;ia-&gt;ia_addr;
+			ifa-&gt;ifa_dstaddr = (<span class="enscript-type">struct</span> sockaddr *)&amp;ia-&gt;ia_dstaddr;
+			ifa-&gt;ifa_netmask = (<span class="enscript-type">struct</span> sockaddr *)&amp;ia-&gt;ia_sockmask;
+			ia-&gt;ia_sockmask.sin_len = 8;
+			<span class="enscript-keyword">if</span> (ifp-&gt;if_flags &amp; IFF_BROADCAST) {
+				ia-&gt;ia_broadaddr.sin_len = <span class="enscript-keyword">sizeof</span> (ia-&gt;ia_addr);
+				ia-&gt;ia_broadaddr.sin_family = AF_INET;
+			}
+			ia-&gt;ia_ifp = ifp;
+			<span class="enscript-keyword">if</span> (!(ifp-&gt;if_flags &amp; IFF_LOOPBACK))
+				in_interfaces++;
+			<span class="enscript-comment">/* if_attach_ifa() holds a reference for ifa_link */</span>
+			if_attach_ifa(ifp, ifa);
+			<span class="enscript-comment">/*
+			 * If we have to go through in_ifinit(), make sure
+			 * to avoid installing route(s) based on this address
+			 * via PFC_IFUP event, before the link resolver (ARP)
+			 * initializes it.
+			 */</span>
+			<span class="enscript-keyword">if</span> (cmd == SIOCAIFADDR || cmd == SIOCSIFADDR)
+				ifa-&gt;ifa_debug |= IFD_NOTREADY;
+			IFA_UNLOCK(ifa);
+			ifnet_lock_done(ifp);
+			lck_rw_lock_exclusive(in_ifaddr_rwlock);
+			<span class="enscript-comment">/* Hold a reference for ia_link */</span>
+			IFA_ADDREF(ifa);
+			TAILQ_INSERT_TAIL(&amp;in_ifaddrhead, ia, ia_link);
+			lck_rw_done(in_ifaddr_rwlock);
+			<span class="enscript-comment">/* discard error */</span>
+			(<span class="enscript-type">void</span>) in_domifattach(ifp);
+			error = 0;
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFDSTADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFDSTADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		error = inctl_ifdstaddr(ifp, ia, cmd, ifr);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFBRDADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFBRDADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		error = inctl_ifbrdaddr(ifp, ia, cmd, ifr);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFNETMASK</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFNETMASK</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		error = inctl_ifnetmask(ifp, ia, cmd, ifr);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGIFADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCAIFADDR</span>:		<span class="enscript-comment">/* struct {if,in_}aliasreq */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCDIFADDR</span>:		<span class="enscript-comment">/* struct ifreq */</span>
+		error = inctl_ifaddr(ifp, ia, cmd, ifr);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		error = EOPNOTSUPP;
+		<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (ia != NULL)
+		IFA_REMREF(&amp;ia-&gt;ia_ifa);
+	<span class="enscript-keyword">if</span> (so_unlocked)
+		socket_lock(so, 0);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Delete any existing route for an interface.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">in_ifscrub</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> in_ifaddr *ia, <span class="enscript-type">int</span> locked)
+{
+	IFA_LOCK(&amp;ia-&gt;ia_ifa);
+	<span class="enscript-keyword">if</span> ((ia-&gt;ia_flags &amp; IFA_ROUTE) == 0) {
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">return</span>;
+	}
+	IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+	<span class="enscript-keyword">if</span> (!locked)
+		lck_mtx_lock(rnh_lock);
+	<span class="enscript-keyword">if</span> (ifp-&gt;if_flags &amp; (IFF_LOOPBACK|IFF_POINTOPOINT))
+		rtinit_locked(&amp;(ia-&gt;ia_ifa), (<span class="enscript-type">int</span>)RTM_DELETE, RTF_HOST);
+	<span class="enscript-keyword">else</span>
+		rtinit_locked(&amp;(ia-&gt;ia_ifa), (<span class="enscript-type">int</span>)RTM_DELETE, 0);
+	IFA_LOCK(&amp;ia-&gt;ia_ifa);
+	ia-&gt;ia_flags &amp;= ~IFA_ROUTE;
+	IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+	<span class="enscript-keyword">if</span> (!locked)
+		lck_mtx_unlock(rnh_lock);
+}
+
+<span class="enscript-comment">/*
+ * Caller must hold in_ifaddr_rwlock as writer.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">in_iahash_remove</span>(<span class="enscript-type">struct</span> in_ifaddr *ia)
+{
+	lck_rw_assert(in_ifaddr_rwlock, LCK_RW_ASSERT_EXCLUSIVE);
+	IFA_LOCK_ASSERT_HELD(&amp;ia-&gt;ia_ifa);
+
+	<span class="enscript-keyword">if</span> (!IA_IS_HASHED(ia)) {
+		panic(<span class="enscript-string">&quot;attempt to remove wrong ia %p from hash table\n&quot;</span>, ia);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	TAILQ_REMOVE(INADDR_HASH(ia-&gt;ia_addr.sin_addr.s_addr), ia, ia_hash);
+	IA_HASH_INIT(ia);
+	<span class="enscript-keyword">if</span> (IFA_REMREF_LOCKED(&amp;ia-&gt;ia_ifa) == NULL) {
+		panic(<span class="enscript-string">&quot;%s: unexpected (missing) refcnt ifa=%p&quot;</span>, __func__,
+		    &amp;ia-&gt;ia_ifa);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+}
+
+<span class="enscript-comment">/*
+ * Caller must hold in_ifaddr_rwlock as writer.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">in_iahash_insert</span>(<span class="enscript-type">struct</span> in_ifaddr *ia)
+{
+	lck_rw_assert(in_ifaddr_rwlock, LCK_RW_ASSERT_EXCLUSIVE);
+	IFA_LOCK_ASSERT_HELD(&amp;ia-&gt;ia_ifa);
+
+	<span class="enscript-keyword">if</span> (ia-&gt;ia_addr.sin_family != AF_INET) {
+		panic(<span class="enscript-string">&quot;attempt to insert wrong ia %p into hash table\n&quot;</span>, ia);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (IA_IS_HASHED(ia)) {
+		panic(<span class="enscript-string">&quot;attempt to double-insert ia %p into hash table\n&quot;</span>, ia);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	TAILQ_INSERT_HEAD(INADDR_HASH(ia-&gt;ia_addr.sin_addr.s_addr),
+	    ia, ia_hash);
+	IFA_ADDREF_LOCKED(&amp;ia-&gt;ia_ifa);
+}
+
+<span class="enscript-comment">/*
+ * Some point to point interfaces that are tunnels borrow the address from
+ * an underlying interface (e.g. VPN server). In order for source address
+ * selection logic to find the underlying interface first, we add the address
+ * of borrowing point to point interfaces at the end of the list.
+ * (see rdar://6733789)
+ *
+ * Caller must hold in_ifaddr_rwlock as writer.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">in_iahash_insert_ptp</span>(<span class="enscript-type">struct</span> in_ifaddr *ia)
+{
+	<span class="enscript-type">struct</span> in_ifaddr *tmp_ifa;
+	<span class="enscript-type">struct</span> ifnet *tmp_ifp;
+
+	lck_rw_assert(in_ifaddr_rwlock, LCK_RW_ASSERT_EXCLUSIVE);
+	IFA_LOCK_ASSERT_HELD(&amp;ia-&gt;ia_ifa);
+
+	<span class="enscript-keyword">if</span> (ia-&gt;ia_addr.sin_family != AF_INET) {
+		panic(<span class="enscript-string">&quot;attempt to insert wrong ia %p into hash table\n&quot;</span>, ia);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (IA_IS_HASHED(ia)) {
+		panic(<span class="enscript-string">&quot;attempt to double-insert ia %p into hash table\n&quot;</span>, ia);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+	TAILQ_FOREACH(tmp_ifa, INADDR_HASH(ia-&gt;ia_addr.sin_addr.s_addr),
+	    ia_hash) {
+		IFA_LOCK(&amp;tmp_ifa-&gt;ia_ifa);
+		<span class="enscript-comment">/* ia-&gt;ia_addr won't change, so check without lock */</span>
+		<span class="enscript-keyword">if</span> (IA_SIN(tmp_ifa)-&gt;sin_addr.s_addr ==
+		    ia-&gt;ia_addr.sin_addr.s_addr) {
+			IFA_UNLOCK(&amp;tmp_ifa-&gt;ia_ifa);
+			<span class="enscript-keyword">break</span>;
+		}
+		IFA_UNLOCK(&amp;tmp_ifa-&gt;ia_ifa);
+	}
+	tmp_ifp = (tmp_ifa == NULL) ? NULL : tmp_ifa-&gt;ia_ifp;
+
+	IFA_LOCK(&amp;ia-&gt;ia_ifa);
+	<span class="enscript-keyword">if</span> (tmp_ifp == NULL) {
+		TAILQ_INSERT_HEAD(INADDR_HASH(ia-&gt;ia_addr.sin_addr.s_addr),
+		    ia, ia_hash);
+	} <span class="enscript-keyword">else</span> {
+		TAILQ_INSERT_TAIL(INADDR_HASH(ia-&gt;ia_addr.sin_addr.s_addr),
+		    ia, ia_hash);
+	}
+	IFA_ADDREF_LOCKED(&amp;ia-&gt;ia_ifa);
+}
+
+<span class="enscript-comment">/*
+ * Initialize an interface's internet address
+ * and routing table entry.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">in_ifinit</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> in_ifaddr *ia, <span class="enscript-type">struct</span> sockaddr_in *sin,
+    <span class="enscript-type">int</span> scrub)
+{
+	u_int32_t i = ntohl(sin-&gt;sin_addr.s_addr);
+	<span class="enscript-type">struct</span> sockaddr_in oldaddr;
+	<span class="enscript-type">int</span> flags = RTF_UP, error;
+	<span class="enscript-type">struct</span> ifaddr *ifa0;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> cmd;
+	<span class="enscript-type">int</span> oldremoved = 0;
+
+	<span class="enscript-comment">/* Take an extra reference for this routine */</span>
+	IFA_ADDREF(&amp;ia-&gt;ia_ifa);
+
+	lck_rw_lock_exclusive(in_ifaddr_rwlock);
+	IFA_LOCK(&amp;ia-&gt;ia_ifa);
+	oldaddr = ia-&gt;ia_addr;
+	<span class="enscript-keyword">if</span> (IA_IS_HASHED(ia)) {
+		oldremoved = 1;
+		in_iahash_remove(ia);
+	}
+	ia-&gt;ia_addr = *sin;
+	<span class="enscript-comment">/*
+	 * Interface addresses should not contain port or sin_zero information.
+	 */</span>
+	SIN(&amp;ia-&gt;ia_addr)-&gt;sin_family = AF_INET;
+	SIN(&amp;ia-&gt;ia_addr)-&gt;sin_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in);
+	SIN(&amp;ia-&gt;ia_addr)-&gt;sin_port = 0;
+	bzero(&amp;SIN(&amp;ia-&gt;ia_addr)-&gt;sin_zero, <span class="enscript-keyword">sizeof</span> (sin-&gt;sin_zero));
+	<span class="enscript-keyword">if</span> ((ifp-&gt;if_flags &amp; IFF_POINTOPOINT))
+		in_iahash_insert_ptp(ia);
+	<span class="enscript-keyword">else</span>
+		in_iahash_insert(ia);
+	IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+	lck_rw_done(in_ifaddr_rwlock);
+
+	<span class="enscript-comment">/*
+	 * Give the interface a chance to initialize if this is its first
+	 * address, and to validate the address if necessary.  Send down
+	 * SIOCSIFADDR for first address, and SIOCAIFADDR for alias(es).
+	 * We find the first IPV4 address assigned to it and check if this
+	 * is the same as the one passed into this routine.
+	 */</span>
+	ifa0 = ifa_ifpgetprimary(ifp, AF_INET);
+	cmd = (&amp;ia-&gt;ia_ifa == ifa0) ? SIOCSIFADDR : SIOCAIFADDR;
+	error = ifnet_ioctl(ifp, PF_INET, cmd, ia);
+	<span class="enscript-keyword">if</span> (error == EOPNOTSUPP)
+		error = 0;
+	<span class="enscript-comment">/*
+	 * If we've just sent down SIOCAIFADDR, send another ioctl down
+	 * for SIOCSIFADDR for the first IPV4 address of the interface,
+	 * because an address change on one of the addresses will result
+	 * in the removal of the previous first IPV4 address.  KDP needs
+	 * be reconfigured with the current primary IPV4 address.
+	 */</span>
+	<span class="enscript-keyword">if</span> (error == 0 &amp;&amp; cmd == SIOCAIFADDR) {
+		<span class="enscript-comment">/*
+		 * NOTE: SIOCSIFADDR is defined with struct ifreq
+		 * as parameter, but here we are sending it down
+		 * to the interface with a pointer to struct ifaddr,
+		 * for legacy reasons.
+		 */</span>
+		error = ifnet_ioctl(ifp, PF_INET, SIOCSIFADDR, ifa0);
+		<span class="enscript-keyword">if</span> (error == EOPNOTSUPP)
+			error = 0;
+	}
+
+	<span class="enscript-comment">/* Release reference from ifa_ifpgetprimary() */</span>
+	IFA_REMREF(ifa0);
+
+	<span class="enscript-keyword">if</span> (error) {
+		lck_rw_lock_exclusive(in_ifaddr_rwlock);
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">if</span> (IA_IS_HASHED(ia))
+			in_iahash_remove(ia);
+		ia-&gt;ia_addr = oldaddr;
+		<span class="enscript-keyword">if</span> (oldremoved) {
+			<span class="enscript-keyword">if</span> ((ifp-&gt;if_flags &amp; IFF_POINTOPOINT))
+				in_iahash_insert_ptp(ia);
+			<span class="enscript-keyword">else</span>
+				in_iahash_insert(ia);
+		}
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		lck_rw_done(in_ifaddr_rwlock);
+		<span class="enscript-comment">/* Release extra reference taken above */</span>
+		IFA_REMREF(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">return</span> (error);
+	}
+	lck_mtx_lock(rnh_lock);
+	IFA_LOCK(&amp;ia-&gt;ia_ifa);
+	<span class="enscript-comment">/*
+	 * Address has been initialized by the link resolver (ARP)
+	 * via ifnet_ioctl() above; it may now generate route(s).
+	 */</span>
+	ia-&gt;ia_ifa.ifa_debug &amp;= ~IFD_NOTREADY;
+	<span class="enscript-keyword">if</span> (scrub) {
+		ia-&gt;ia_ifa.ifa_addr = (<span class="enscript-type">struct</span> sockaddr *)&amp;oldaddr;
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		in_ifscrub(ifp, ia, 1);
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		ia-&gt;ia_ifa.ifa_addr = (<span class="enscript-type">struct</span> sockaddr *)&amp;ia-&gt;ia_addr;
+	}
+	IFA_LOCK_ASSERT_HELD(&amp;ia-&gt;ia_ifa);
+	<span class="enscript-keyword">if</span> (IN_CLASSA(i))
+		ia-&gt;ia_netmask = IN_CLASSA_NET;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (IN_CLASSB(i))
+		ia-&gt;ia_netmask = IN_CLASSB_NET;
+	<span class="enscript-keyword">else</span>
+		ia-&gt;ia_netmask = IN_CLASSC_NET;
+	<span class="enscript-comment">/*
+	 * The subnet mask usually includes at least the standard network part,
+	 * but may may be smaller in the case of supernetting.
+	 * If it is set, we believe it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ia-&gt;ia_subnetmask == 0) {
+		ia-&gt;ia_subnetmask = ia-&gt;ia_netmask;
+		ia-&gt;ia_sockmask.sin_addr.s_addr = htonl(ia-&gt;ia_subnetmask);
+	} <span class="enscript-keyword">else</span>
+		ia-&gt;ia_netmask &amp;= ia-&gt;ia_subnetmask;
+	ia-&gt;ia_net = i &amp; ia-&gt;ia_netmask;
+	ia-&gt;ia_subnet = i &amp; ia-&gt;ia_subnetmask;
+	in_socktrim(&amp;ia-&gt;ia_sockmask);
+	<span class="enscript-comment">/*
+	 * Add route for the network.
+	 */</span>
+	ia-&gt;ia_ifa.ifa_metric = ifp-&gt;if_metric;
+	<span class="enscript-keyword">if</span> (ifp-&gt;if_flags &amp; IFF_BROADCAST) {
+		ia-&gt;ia_broadaddr.sin_addr.s_addr =
+		    htonl(ia-&gt;ia_subnet | ~ia-&gt;ia_subnetmask);
+		ia-&gt;ia_netbroadcast.s_addr =
+		    htonl(ia-&gt;ia_net | ~ ia-&gt;ia_netmask);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ifp-&gt;if_flags &amp; IFF_LOOPBACK) {
+		ia-&gt;ia_ifa.ifa_dstaddr = ia-&gt;ia_ifa.ifa_addr;
+		flags |= RTF_HOST;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ifp-&gt;if_flags &amp; IFF_POINTOPOINT) {
+		<span class="enscript-keyword">if</span> (ia-&gt;ia_dstaddr.sin_family != AF_INET) {
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			lck_mtx_unlock(rnh_lock);
+			<span class="enscript-comment">/* Release extra reference taken above */</span>
+			IFA_REMREF(&amp;ia-&gt;ia_ifa);
+			<span class="enscript-keyword">return</span> (0);
+		}
+		ia-&gt;ia_dstaddr.sin_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in);
+		flags |= RTF_HOST;
+	}
+	IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+
+	<span class="enscript-keyword">if</span> ((error = rtinit_locked(&amp;(ia-&gt;ia_ifa), (<span class="enscript-type">int</span>)RTM_ADD, flags)) == 0) {
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		ia-&gt;ia_flags |= IFA_ROUTE;
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+	}
+	lck_mtx_unlock(rnh_lock);
+
+	<span class="enscript-comment">/* XXX check if the subnet route points to the same interface */</span>
+	<span class="enscript-keyword">if</span> (error == EEXIST)
+		error = 0;
+
+	<span class="enscript-comment">/*
+	 * If the interface supports multicast, join the &quot;all hosts&quot;
+	 * multicast group on that interface.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ifp-&gt;if_flags &amp; IFF_MULTICAST) {
+		<span class="enscript-type">struct</span> in_addr addr;
+
+		lck_mtx_lock(&amp;ifp-&gt;if_addrconfig_lock);
+		addr.s_addr = htonl(INADDR_ALLHOSTS_GROUP);
+		<span class="enscript-keyword">if</span> (ifp-&gt;if_allhostsinm == NULL) {
+			<span class="enscript-type">struct</span> in_multi *inm;
+			inm = in_addmulti(&amp;addr, ifp);
+
+			<span class="enscript-keyword">if</span> (inm != NULL) {
+				<span class="enscript-comment">/*
+				 * Keep the reference on inm added by
+				 * in_addmulti above for storing the
+				 * pointer in allhostsinm.
+				 */</span>
+				ifp-&gt;if_allhostsinm = inm;
+			} <span class="enscript-keyword">else</span> {
+				printf(<span class="enscript-string">&quot;%s: failed to add membership to &quot;</span>
+				    <span class="enscript-string">&quot;all-hosts multicast address on %s\n&quot;</span>,
+				    __func__, if_name(ifp));
+			}
+		}
+		lck_mtx_unlock(&amp;ifp-&gt;if_addrconfig_lock);
+	}
+
+	<span class="enscript-comment">/* Release extra reference taken above */</span>
+	IFA_REMREF(&amp;ia-&gt;ia_ifa);
+
+	<span class="enscript-keyword">if</span> (error == 0) {
+		<span class="enscript-comment">/* invalidate route caches */</span>
+		routegenid_inet_update();
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Return TRUE if the address might be a local broadcast address.
+ */</span>
+boolean_t
+<span class="enscript-function-name">in_broadcast</span>(<span class="enscript-type">struct</span> in_addr in, <span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">struct</span> ifaddr *ifa;
+	u_int32_t t;
+
+	<span class="enscript-keyword">if</span> (in.s_addr == INADDR_BROADCAST || in.s_addr == INADDR_ANY)
+		<span class="enscript-keyword">return</span> (TRUE);
+	<span class="enscript-keyword">if</span> (!(ifp-&gt;if_flags &amp; IFF_BROADCAST))
+		<span class="enscript-keyword">return</span> (FALSE);
+	t = ntohl(in.s_addr);
+
+	<span class="enscript-comment">/*
+	 * Look through the list of addresses for a match
+	 * with a broadcast address.
+	 */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ia</span> ((struct in_ifaddr *)ifa)
+	ifnet_lock_shared(ifp);
+	TAILQ_FOREACH(ifa, &amp;ifp-&gt;if_addrhead, ifa_link) {
+		IFA_LOCK(ifa);
+		<span class="enscript-keyword">if</span> (ifa-&gt;ifa_addr-&gt;sa_family == AF_INET &amp;&amp;
+		    (in.s_addr == ia-&gt;ia_broadaddr.sin_addr.s_addr ||
+		     in.s_addr == ia-&gt;ia_netbroadcast.s_addr ||
+		     <span class="enscript-comment">/*
+		      * Check for old-style (host 0) broadcast.
+		      */</span>
+		     t == ia-&gt;ia_subnet || t == ia-&gt;ia_net) &amp;&amp;
+		     <span class="enscript-comment">/*
+		      * Check for an all one subnetmask. These
+		      * only exist when an interface gets a secondary
+		      * address.
+		      */</span>
+		     ia-&gt;ia_subnetmask != (u_int32_t)0xffffffff) {
+			IFA_UNLOCK(ifa);
+			ifnet_lock_done(ifp);
+			<span class="enscript-keyword">return</span> (TRUE);
+		}
+		IFA_UNLOCK(ifa);
+	}
+	ifnet_lock_done(ifp);
+	<span class="enscript-keyword">return</span> (FALSE);
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">ia</span>
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">in_purgeaddrs</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">struct</span> ifaddr **ifap;
+	<span class="enscript-type">int</span> err, i;
+
+	VERIFY(ifp != NULL);
+
+	<span class="enscript-comment">/*
+	 * Be nice, and try the civilized way first.  If we can't get
+	 * rid of them this way, then do it the rough way.  We must
+	 * only get here during detach time, after the ifnet has been
+	 * removed from the global list and arrays.
+	 */</span>
+	err = ifnet_get_address_list_family_internal(ifp, &amp;ifap, AF_INET, 1,
+	    M_WAITOK, 0);
+	<span class="enscript-keyword">if</span> (err == 0 &amp;&amp; ifap != NULL) {
+		<span class="enscript-type">struct</span> ifreq ifr;
+
+		bzero(&amp;ifr, <span class="enscript-keyword">sizeof</span> (ifr));
+		(<span class="enscript-type">void</span>) snprintf(ifr.ifr_name, <span class="enscript-keyword">sizeof</span> (ifr.ifr_name),
+		    <span class="enscript-string">&quot;%s&quot;</span>, if_name(ifp));
+
+		<span class="enscript-keyword">for</span> (i = 0; ifap[i] != NULL; i++) {
+			<span class="enscript-type">struct</span> ifaddr *ifa;
+
+			ifa = ifap[i];
+			IFA_LOCK(ifa);
+			bcopy(ifa-&gt;ifa_addr, &amp;ifr.ifr_addr,
+			    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in));
+			IFA_UNLOCK(ifa);
+			err = in_control(NULL, SIOCDIFADDR, (caddr_t)&amp;ifr, ifp,
+			    kernproc);
+			<span class="enscript-comment">/* if we lost the race, ignore it */</span>
+			<span class="enscript-keyword">if</span> (err == EADDRNOTAVAIL)
+				err = 0;
+			<span class="enscript-keyword">if</span> (err != 0) {
+				<span class="enscript-type">char</span> s_addr[MAX_IPv4_STR_LEN];
+				<span class="enscript-type">char</span> s_dstaddr[MAX_IPv4_STR_LEN];
+				<span class="enscript-type">struct</span> in_addr *s, *d;
+
+				IFA_LOCK(ifa);
+				s = &amp;((<span class="enscript-type">struct</span> sockaddr_in *)
+				    (<span class="enscript-type">void</span> *)ifa-&gt;ifa_addr)-&gt;sin_addr;
+				d = &amp;((<span class="enscript-type">struct</span> sockaddr_in *)
+				    (<span class="enscript-type">void</span> *)ifa-&gt;ifa_dstaddr)-&gt;sin_addr;
+				(<span class="enscript-type">void</span>) inet_ntop(AF_INET, &amp;s-&gt;s_addr, s_addr,
+				    <span class="enscript-keyword">sizeof</span> (s_addr));
+				(<span class="enscript-type">void</span>) inet_ntop(AF_INET, &amp;d-&gt;s_addr, s_dstaddr,
+				    <span class="enscript-keyword">sizeof</span> (s_dstaddr));
+				IFA_UNLOCK(ifa);
+
+				printf(<span class="enscript-string">&quot;%s: SIOCDIFADDR ifp=%s ifa_addr=%s &quot;</span>
+				    <span class="enscript-string">&quot;ifa_dstaddr=%s (err=%d)\n&quot;</span>, __func__,
+				    ifp-&gt;if_xname, s_addr, s_dstaddr, err);
+			}
+		}
+		ifnet_free_address_list(ifap);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (err != 0 &amp;&amp; err != ENXIO) {
+		printf(<span class="enscript-string">&quot;%s: error retrieving list of AF_INET addresses for &quot;</span>
+		    <span class="enscript-string">&quot;ifp=%s (err=%d)\n&quot;</span>, __func__, ifp-&gt;if_xname, err);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Select endpoint address(es).  For now just take the first matching
+ * address and discard the rest, if present.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">in_selectaddrs</span>(<span class="enscript-type">int</span> af, <span class="enscript-type">struct</span> sockaddr_list **src_sl,
+    <span class="enscript-type">struct</span> sockaddr_entry **src_se, <span class="enscript-type">struct</span> sockaddr_list **dst_sl,
+    <span class="enscript-type">struct</span> sockaddr_entry **dst_se)
+{
+	<span class="enscript-type">struct</span> sockaddr_entry *se;
+	<span class="enscript-type">int</span> error = 0;
+
+	VERIFY(src_sl != NULL &amp;&amp; dst_sl != NULL &amp;&amp; *dst_sl != NULL);
+	VERIFY(src_se != NULL &amp;&amp; dst_se != NULL);
+
+	*src_se = *dst_se = NULL;
+
+	<span class="enscript-comment">/* pick a source address, if available */</span>
+	<span class="enscript-keyword">if</span> (*src_sl != NULL) {
+		TAILQ_FOREACH(se, &amp;(*src_sl)-&gt;sl_head, se_link) {
+			VERIFY(se-&gt;se_addr != NULL);
+			<span class="enscript-comment">/*
+			 * Take the first source address, or the first
+			 * one with matching address family.
+			 */</span>
+			<span class="enscript-keyword">if</span> (af == AF_UNSPEC || se-&gt;se_addr-&gt;sa_family == af) {
+				sockaddrlist_remove(*src_sl, se);
+				*src_se = se;
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+		<span class="enscript-comment">/* get rid of the rest */</span>
+		TAILQ_FOREACH(se, &amp;(*src_sl)-&gt;sl_head, se_link) {
+			sockaddrlist_remove(*src_sl, se);
+			sockaddrentry_free(se);
+		}
+		<span class="enscript-keyword">if</span> (*src_se != NULL) {
+			<span class="enscript-comment">/* insert the first src address back in */</span>
+			sockaddrlist_insert(*src_sl, *src_se);
+			VERIFY((*src_sl)-&gt;sl_cnt == 1);
+			<span class="enscript-comment">/* destination address must be of this family */</span>
+			af = (*src_se)-&gt;se_addr-&gt;sa_family;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* no usable source address with matching family */</span>
+			VERIFY(af != AF_UNSPEC);
+			error = EAFNOSUPPORT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+	<span class="enscript-comment">/* pick a (matching) destination address */</span>
+	TAILQ_FOREACH(se, &amp;(*dst_sl)-&gt;sl_head, se_link) {
+		VERIFY(se-&gt;se_addr != NULL);
+		<span class="enscript-comment">/*
+		 * Take the first destination address; if source is specified,
+		 * find one which uses the same address family.
+		 */</span>
+		<span class="enscript-keyword">if</span> (af == AF_UNSPEC || se-&gt;se_addr-&gt;sa_family == af) {
+			sockaddrlist_remove(*dst_sl, se);
+			*dst_se = se;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-comment">/* get rid of the rest */</span>
+	TAILQ_FOREACH(se, &amp;(*dst_sl)-&gt;sl_head, se_link) {
+		sockaddrlist_remove(*dst_sl, se);
+		sockaddrentry_free(se);
+	}
+	<span class="enscript-keyword">if</span> (*dst_se != NULL) {
+		<span class="enscript-comment">/* insert the first dst address back in */</span>
+		sockaddrlist_insert(*dst_sl, *dst_se);
+		VERIFY((*dst_sl)-&gt;sl_cnt == 1);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* source and destination address families don't match */</span>
+		error = EAFNOSUPPORT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	af = (*dst_se)-&gt;se_addr-&gt;sa_family;
+	VERIFY(*src_se == NULL || (*src_se)-&gt;se_addr-&gt;sa_family == af);
+
+	<span class="enscript-comment">/* verify address length */</span>
+	<span class="enscript-keyword">switch</span> (af) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET</span>:
+		<span class="enscript-keyword">if</span> ((*dst_se)-&gt;se_addr-&gt;sa_len !=
+		    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in)) {
+			error = EAFNOSUPPORT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET6</span>:
+		<span class="enscript-keyword">if</span> ((*dst_se)-&gt;se_addr-&gt;sa_len !=
+		    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in6)) {
+			error = EAFNOSUPPORT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+	<span class="enscript-reference">default</span>:
+		error = EAFNOSUPPORT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/* if source address is specified, length must match destination */</span>
+	<span class="enscript-keyword">if</span> (*src_se != NULL &amp;&amp; (*src_se)-&gt;se_addr-&gt;sa_len !=
+	    (*dst_se)-&gt;se_addr-&gt;sa_len) {
+		error = EAFNOSUPPORT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Called as part of ip_init
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">in_ifaddr_init</span>(<span class="enscript-type">void</span>)
+{
+	in_multi_init();
+
+	PE_parse_boot_argn(<span class="enscript-string">&quot;ifa_debug&quot;</span>, &amp;inifa_debug, <span class="enscript-keyword">sizeof</span> (inifa_debug));
+
+	inifa_size = (inifa_debug == 0) ? <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> in_ifaddr) :
+	    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> in_ifaddr_dbg);
+
+	inifa_zone = zinit(inifa_size, INIFA_ZONE_MAX * inifa_size,
+	    0, INIFA_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (inifa_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, INIFA_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(inifa_zone, Z_EXPAND, TRUE);
+	zone_change(inifa_zone, Z_CALLERACCT, FALSE);
+
+	lck_mtx_init(&amp;inifa_trash_lock, ifa_mtx_grp, ifa_mtx_attr);
+	TAILQ_INIT(&amp;inifa_trash_head);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> in_ifaddr *
+<span class="enscript-function-name">in_ifaddr_alloc</span>(<span class="enscript-type">int</span> how)
+{
+	<span class="enscript-type">struct</span> in_ifaddr *inifa;
+
+	inifa = (how == M_WAITOK) ? zalloc(inifa_zone) :
+	    zalloc_noblock(inifa_zone);
+	<span class="enscript-keyword">if</span> (inifa != NULL) {
+		bzero(inifa, inifa_size);
+		inifa-&gt;ia_ifa.ifa_free = in_ifaddr_free;
+		inifa-&gt;ia_ifa.ifa_debug |= IFD_ALLOC;
+		ifa_lock_init(&amp;inifa-&gt;ia_ifa);
+		<span class="enscript-keyword">if</span> (inifa_debug != 0) {
+			<span class="enscript-type">struct</span> in_ifaddr_dbg *inifa_dbg =
+			    (<span class="enscript-type">struct</span> in_ifaddr_dbg *)inifa;
+			inifa-&gt;ia_ifa.ifa_debug |= IFD_DEBUG;
+			inifa-&gt;ia_ifa.ifa_trace = in_ifaddr_trace;
+			inifa-&gt;ia_ifa.ifa_attached = in_ifaddr_attached;
+			inifa-&gt;ia_ifa.ifa_detached = in_ifaddr_detached;
+			ctrace_record(&amp;inifa_dbg-&gt;inifa_alloc);
+		}
+	}
+	<span class="enscript-keyword">return</span> (inifa);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">in_ifaddr_free</span>(<span class="enscript-type">struct</span> ifaddr *ifa)
+{
+	IFA_LOCK_ASSERT_HELD(ifa);
+
+	<span class="enscript-keyword">if</span> (ifa-&gt;ifa_refcnt != 0) {
+		panic(<span class="enscript-string">&quot;%s: ifa %p bad ref cnt&quot;</span>, __func__, ifa);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">if</span> (!(ifa-&gt;ifa_debug &amp; IFD_ALLOC)) {
+		panic(<span class="enscript-string">&quot;%s: ifa %p cannot be freed&quot;</span>, __func__, ifa);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	<span class="enscript-keyword">if</span> (ifa-&gt;ifa_debug &amp; IFD_DEBUG) {
+		<span class="enscript-type">struct</span> in_ifaddr_dbg *inifa_dbg = (<span class="enscript-type">struct</span> in_ifaddr_dbg *)ifa;
+		ctrace_record(&amp;inifa_dbg-&gt;inifa_free);
+		bcopy(&amp;inifa_dbg-&gt;inifa, &amp;inifa_dbg-&gt;inifa_old,
+		    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> in_ifaddr));
+		<span class="enscript-keyword">if</span> (ifa-&gt;ifa_debug &amp; IFD_TRASHED) {
+			<span class="enscript-comment">/* Become a regular mutex, just in case */</span>
+			IFA_CONVERT_LOCK(ifa);
+			lck_mtx_lock(&amp;inifa_trash_lock);
+			TAILQ_REMOVE(&amp;inifa_trash_head, inifa_dbg,
+			    inifa_trash_link);
+			lck_mtx_unlock(&amp;inifa_trash_lock);
+			ifa-&gt;ifa_debug &amp;= ~IFD_TRASHED;
+		}
+	}
+	IFA_UNLOCK(ifa);
+	ifa_lock_destroy(ifa);
+	bzero(ifa, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> in_ifaddr));
+	zfree(inifa_zone, ifa);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">in_ifaddr_attached</span>(<span class="enscript-type">struct</span> ifaddr *ifa)
+{
+	<span class="enscript-type">struct</span> in_ifaddr_dbg *inifa_dbg = (<span class="enscript-type">struct</span> in_ifaddr_dbg *)ifa;
+
+	IFA_LOCK_ASSERT_HELD(ifa);
+
+	<span class="enscript-keyword">if</span> (!(ifa-&gt;ifa_debug &amp; IFD_DEBUG)) {
+		panic(<span class="enscript-string">&quot;%s: ifa %p has no debug structure&quot;</span>, __func__, ifa);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	<span class="enscript-keyword">if</span> (ifa-&gt;ifa_debug &amp; IFD_TRASHED) {
+		<span class="enscript-comment">/* Become a regular mutex, just in case */</span>
+		IFA_CONVERT_LOCK(ifa);
+		lck_mtx_lock(&amp;inifa_trash_lock);
+		TAILQ_REMOVE(&amp;inifa_trash_head, inifa_dbg, inifa_trash_link);
+		lck_mtx_unlock(&amp;inifa_trash_lock);
+		ifa-&gt;ifa_debug &amp;= ~IFD_TRASHED;
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">in_ifaddr_detached</span>(<span class="enscript-type">struct</span> ifaddr *ifa)
+{
+	<span class="enscript-type">struct</span> in_ifaddr_dbg *inifa_dbg = (<span class="enscript-type">struct</span> in_ifaddr_dbg *)ifa;
+
+	IFA_LOCK_ASSERT_HELD(ifa);
+
+	<span class="enscript-keyword">if</span> (!(ifa-&gt;ifa_debug &amp; IFD_DEBUG)) {
+		panic(<span class="enscript-string">&quot;%s: ifa %p has no debug structure&quot;</span>, __func__, ifa);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ifa-&gt;ifa_debug &amp; IFD_TRASHED) {
+		panic(<span class="enscript-string">&quot;%s: ifa %p is already in trash list&quot;</span>, __func__, ifa);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	ifa-&gt;ifa_debug |= IFD_TRASHED;
+	<span class="enscript-comment">/* Become a regular mutex, just in case */</span>
+	IFA_CONVERT_LOCK(ifa);
+	lck_mtx_lock(&amp;inifa_trash_lock);
+	TAILQ_INSERT_TAIL(&amp;inifa_trash_head, inifa_dbg, inifa_trash_link);
+	lck_mtx_unlock(&amp;inifa_trash_lock);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">in_ifaddr_trace</span>(<span class="enscript-type">struct</span> ifaddr *ifa, <span class="enscript-type">int</span> refhold)
+{
+	<span class="enscript-type">struct</span> in_ifaddr_dbg *inifa_dbg = (<span class="enscript-type">struct</span> in_ifaddr_dbg *)ifa;
+	ctrace_t *tr;
+	u_int32_t idx;
+	u_int16_t *cnt;
+
+	<span class="enscript-keyword">if</span> (!(ifa-&gt;ifa_debug &amp; IFD_DEBUG)) {
+		panic(<span class="enscript-string">&quot;%s: ifa %p has no debug structure&quot;</span>, __func__, ifa);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	<span class="enscript-keyword">if</span> (refhold) {
+		cnt = &amp;inifa_dbg-&gt;inifa_refhold_cnt;
+		tr = inifa_dbg-&gt;inifa_refhold;
+	} <span class="enscript-keyword">else</span> {
+		cnt = &amp;inifa_dbg-&gt;inifa_refrele_cnt;
+		tr = inifa_dbg-&gt;inifa_refrele;
+	}
+
+	idx = atomic_add_16_ov(cnt, 1) % INIFA_TRACE_HIST_SIZE;
+	ctrace_record(&amp;tr[idx]);
+}
+
+<span class="enscript-comment">/*
+ * Handle SIOCGASSOCIDS ioctl for PF_INET domain.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">in_getassocids</span>(<span class="enscript-type">struct</span> socket *so, uint32_t *cnt, user_addr_t aidp)
+{
+	<span class="enscript-type">struct</span> inpcb *inp = sotoinpcb(so);
+	sae_associd_t aid;
+
+	<span class="enscript-keyword">if</span> (inp == NULL || inp-&gt;inp_state == INPCB_STATE_DEAD)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/* INPCB has no concept of association */</span>
+	aid = SAE_ASSOCID_ANY;
+	*cnt = 0;
+
+	<span class="enscript-comment">/* just asking how many there are? */</span>
+	<span class="enscript-keyword">if</span> (aidp == USER_ADDR_NULL)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">return</span> (copyout(&amp;aid, aidp, <span class="enscript-keyword">sizeof</span> (aid)));
+}
+
+<span class="enscript-comment">/*
+ * Handle SIOCGCONNIDS ioctl for PF_INET domain.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">in_getconnids</span>(<span class="enscript-type">struct</span> socket *so, sae_associd_t aid, uint32_t *cnt,
+    user_addr_t cidp)
+{
+	<span class="enscript-type">struct</span> inpcb *inp = sotoinpcb(so);
+	sae_connid_t cid;
+
+	<span class="enscript-keyword">if</span> (inp == NULL || inp-&gt;inp_state == INPCB_STATE_DEAD)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">if</span> (aid != SAE_ASSOCID_ANY &amp;&amp; aid != SAE_ASSOCID_ALL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/* if connected, return 1 connection count */</span>
+	*cnt = ((so-&gt;so_state &amp; SS_ISCONNECTED) ? 1 : 0);
+
+	<span class="enscript-comment">/* just asking how many there are? */</span>
+	<span class="enscript-keyword">if</span> (cidp == USER_ADDR_NULL)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-comment">/* if INPCB is connected, assign it connid 1 */</span>
+	cid = ((*cnt != 0) ? 1 : SAE_CONNID_ANY);
+
+	<span class="enscript-keyword">return</span> (copyout(&amp;cid, cidp, <span class="enscript-keyword">sizeof</span> (cid)));
+}
+
+<span class="enscript-comment">/*
+ * Handle SIOCGCONNINFO ioctl for PF_INET domain.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">in_getconninfo</span>(<span class="enscript-type">struct</span> socket *so, sae_connid_t cid, uint32_t *flags,
+    uint32_t *ifindex, int32_t *soerror, user_addr_t src, socklen_t *src_len,
+    user_addr_t dst, socklen_t *dst_len, uint32_t *aux_type,
+    user_addr_t aux_data, uint32_t *aux_len)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">aux_data</span>)
+	<span class="enscript-type">struct</span> inpcb *inp = sotoinpcb(so);
+	<span class="enscript-type">struct</span> sockaddr_in sin;
+	<span class="enscript-type">struct</span> ifnet *ifp = NULL;
+	<span class="enscript-type">int</span> error = 0;
+	u_int32_t copy_len = 0;
+
+	<span class="enscript-comment">/*
+	 * Don't test for INPCB_STATE_DEAD since this may be called
+	 * after SOF_PCBCLEARING is set, e.g. after tcp_close().
+	 */</span>
+	<span class="enscript-keyword">if</span> (inp == NULL) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (cid != SAE_CONNID_ANY &amp;&amp; cid != SAE_CONNID_ALL &amp;&amp; cid != 1) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	ifp = inp-&gt;inp_last_outifp;
+	*ifindex = ((ifp != NULL) ? ifp-&gt;if_index : 0);
+	*soerror = so-&gt;so_error;
+	*flags = 0;
+	<span class="enscript-keyword">if</span> (so-&gt;so_state &amp; SS_ISCONNECTED)
+		*flags |= (CIF_CONNECTED | CIF_PREFERRED);
+	<span class="enscript-keyword">if</span> (inp-&gt;inp_flags &amp; INP_BOUND_IF)
+		*flags |= CIF_BOUND_IF;
+	<span class="enscript-keyword">if</span> (!(inp-&gt;inp_flags &amp; INP_INADDR_ANY))
+		*flags |= CIF_BOUND_IP;
+	<span class="enscript-keyword">if</span> (!(inp-&gt;inp_flags &amp; INP_ANONPORT))
+		*flags |= CIF_BOUND_PORT;
+
+	bzero(&amp;sin, <span class="enscript-keyword">sizeof</span> (sin));
+	sin.sin_len = <span class="enscript-keyword">sizeof</span> (sin);
+	sin.sin_family = AF_INET;
+
+	<span class="enscript-comment">/* source address and port */</span>
+	sin.sin_port = inp-&gt;inp_lport;
+	sin.sin_addr.s_addr = inp-&gt;inp_laddr.s_addr;
+	<span class="enscript-keyword">if</span> (*src_len == 0) {
+		*src_len = sin.sin_len;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (src != USER_ADDR_NULL) {
+			copy_len = min(*src_len, <span class="enscript-keyword">sizeof</span> (sin));
+			error = copyout(&amp;sin, src, copy_len);
+			<span class="enscript-keyword">if</span> (error != 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			*src_len = copy_len;
+		}
+	}
+
+	<span class="enscript-comment">/* destination address and port */</span>
+	sin.sin_port = inp-&gt;inp_fport;
+	sin.sin_addr.s_addr = inp-&gt;inp_faddr.s_addr;
+	<span class="enscript-keyword">if</span> (*dst_len == 0) {
+		*dst_len = sin.sin_len;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (dst != USER_ADDR_NULL) {
+			copy_len = min(*dst_len, <span class="enscript-keyword">sizeof</span> (sin));
+			error = copyout(&amp;sin, dst, copy_len);
+			<span class="enscript-keyword">if</span> (error != 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			*dst_len = copy_len;
+		}
+	}
+
+	*aux_type = 0;
+	*aux_len = 0;
+	<span class="enscript-keyword">if</span> (SOCK_PROTO(so) == IPPROTO_TCP) {
+		<span class="enscript-type">struct</span> conninfo_tcp tcp_ci;
+
+		*aux_type = CIAUX_TCP;
+		<span class="enscript-keyword">if</span> (*aux_len == 0) {
+			*aux_len = <span class="enscript-keyword">sizeof</span> (tcp_ci);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (aux_data != USER_ADDR_NULL) {
+				copy_len = min(*aux_len, <span class="enscript-keyword">sizeof</span> (tcp_ci));
+				bzero(&amp;tcp_ci, <span class="enscript-keyword">sizeof</span> (tcp_ci));
+				tcp_getconninfo(so, &amp;tcp_ci);
+				error = copyout(&amp;tcp_ci, aux_data, copy_len);
+				<span class="enscript-keyword">if</span> (error != 0)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+				*aux_len = copy_len;
+			}
+		}
+	}
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,1488 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IODMACommand.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IODMACommand.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2005-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/assert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSTypes.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSByteOrder.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSDebug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOReturn.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOLib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IODMACommand.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOMapper.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOMemoryDescriptor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOBufferMemoryDescriptor.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;IOKitKernelInternal.h&quot;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MAPTYPE</span>(type)		((UInt) (type) &amp; kTypeMask)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IS_NONCOHERENT</span>(type)	(MAPTYPE(type) == kNonCoherent)
+
+<span class="enscript-type">enum</span> 
+{
+    kWalkSyncIn       = 0x01,	<span class="enscript-comment">// bounce -&gt; md 
+</span>    kWalkSyncOut      = 0x02,	<span class="enscript-comment">// bounce &lt;- md
+</span>    kWalkSyncAlways   = 0x04,
+    kWalkPreflight    = 0x08,
+    kWalkDoubleBuffer = 0x10,
+    kWalkPrepare      = 0x20,
+    kWalkComplete     = 0x40,
+    kWalkClient       = 0x80
+};
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">fInternalState</span> reserved
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">fState</span>         reserved-&gt;fState
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">fMDSummary</span>     reserved-&gt;fMDSummary
+
+
+#<span class="enscript-reference">if</span> 1
+<span class="enscript-comment">// no direction =&gt; OutIn
+</span>#<span class="enscript-reference">define</span> <span class="enscript-function-name">SHOULD_COPY_DIR</span>(op, direction)					    \
+	((kIODirectionNone == (direction))				    \
+	    || (kWalkSyncAlways &amp; (op))					    \
+	    || (((kWalkSyncIn &amp; (op)) ? kIODirectionIn : kIODirectionOut)   \
+						    &amp; (direction)))
+
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SHOULD_COPY_DIR</span>(state, direction) (true)
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> 0
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DEBG</span>(fmt, args...)	{ IOLog(fmt, ## args); kprintf(fmt, ## args); }
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DEBG</span>(fmt, args...)  	{}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/**************************** class IODMACommand ***************************/</span>
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">super</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOCommand
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IODMACommand, IOCommand);
+
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IODMACommand,  0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IODMACommand,  1);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IODMACommand,  2);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IODMACommand,  3);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IODMACommand,  4);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IODMACommand,  5);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IODMACommand,  6);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODMACommand,  7);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODMACommand,  8);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODMACommand,  9);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODMACommand, 10);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODMACommand, 11);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODMACommand, 12);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODMACommand, 13);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODMACommand, 14);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IODMACommand, 15);
+
+IODMACommand *
+<span class="enscript-function-name">IODMACommand::withRefCon</span>(<span class="enscript-type">void</span> * refCon)
+{
+    IODMACommand * me = <span class="enscript-keyword">new</span> IODMACommand;
+
+    <span class="enscript-keyword">if</span> (me &amp;&amp; !me-&gt;initWithRefCon(refCon))
+    {
+        me-&gt;release();
+        <span class="enscript-keyword">return</span> 0;
+    }
+
+    <span class="enscript-keyword">return</span> me;
+}
+
+IODMACommand *
+<span class="enscript-function-name">IODMACommand::withSpecification</span>(SegmentFunction  outSegFunc,
+			  <span class="enscript-type">const</span> SegmentOptions * segmentOptions,
+			  uint32_t       	 mappingOptions,
+			  IOMapper             * mapper,
+			  <span class="enscript-type">void</span>                 * refCon)
+{
+    IODMACommand * me = <span class="enscript-keyword">new</span> IODMACommand;
+
+    <span class="enscript-keyword">if</span> (me &amp;&amp; !me-&gt;initWithSpecification(outSegFunc, segmentOptions, mappingOptions, 
+					 mapper, refCon))
+    {
+        me-&gt;release();
+        <span class="enscript-keyword">return</span> 0;
+    }
+
+    <span class="enscript-keyword">return</span> me;
+}
+
+IODMACommand *
+<span class="enscript-function-name">IODMACommand::withSpecification</span>(SegmentFunction outSegFunc,
+				UInt8           numAddressBits,
+				UInt64          maxSegmentSize,
+				MappingOptions  mappingOptions,
+				UInt64          maxTransferSize,
+				UInt32          alignment,
+				IOMapper       *mapper,
+				<span class="enscript-type">void</span>           *refCon)
+{
+    IODMACommand * me = <span class="enscript-keyword">new</span> IODMACommand;
+
+    <span class="enscript-keyword">if</span> (me &amp;&amp; !me-&gt;initWithSpecification(outSegFunc,
+					 numAddressBits, maxSegmentSize,
+					 mappingOptions, maxTransferSize,
+					 alignment,      mapper, refCon))
+    {
+        me-&gt;release();
+        <span class="enscript-keyword">return</span> 0;
+    }
+
+    <span class="enscript-keyword">return</span> me;
+}
+
+IODMACommand *
+<span class="enscript-function-name">IODMACommand::cloneCommand</span>(<span class="enscript-type">void</span> *refCon)
+{
+    SegmentOptions segmentOptions =
+    {
+	.fStructSize                = <span class="enscript-keyword">sizeof</span>(segmentOptions),
+	.fNumAddressBits            = fNumAddressBits,
+	.fMaxSegmentSize            = fMaxSegmentSize,
+	.fMaxTransferSize           = fMaxTransferSize,
+	.fAlignment                 = fAlignMask + 1,
+	.fAlignmentLength           = fAlignMaskInternalSegments + 1,
+	.fAlignmentInternalSegments = fAlignMaskLength + 1
+    };
+
+    <span class="enscript-keyword">return</span> (IODMACommand::withSpecification(fOutSeg, &amp;segmentOptions,
+	    				    fMappingOptions, fMapper, refCon));
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kLastOutputFunction</span> ((SegmentFunction) kLastOutputFunction)
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IODMACommand::initWithRefCon</span>(<span class="enscript-type">void</span> * refCon)
+{
+    <span class="enscript-keyword">if</span> (!super::init()) <span class="enscript-keyword">return</span> (false);
+
+    <span class="enscript-keyword">if</span> (!reserved)
+    {
+	reserved = IONew(IODMACommandInternal, 1);
+	<span class="enscript-keyword">if</span> (!reserved) <span class="enscript-keyword">return</span> false;
+    }
+    bzero(reserved, <span class="enscript-keyword">sizeof</span>(IODMACommandInternal));
+    fRefCon = refCon;
+
+    <span class="enscript-keyword">return</span> (true);
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IODMACommand::initWithSpecification</span>(SegmentFunction	   outSegFunc,
+				    <span class="enscript-type">const</span> SegmentOptions * segmentOptions,
+				    uint32_t     	   mappingOptions,
+				    IOMapper             * mapper,
+				    <span class="enscript-type">void</span>                 * refCon)
+{
+    <span class="enscript-keyword">if</span> (!initWithRefCon(refCon)) <span class="enscript-keyword">return</span> false;
+
+    <span class="enscript-keyword">if</span> (kIOReturnSuccess != setSpecification(outSegFunc, segmentOptions, 
+    					     mappingOptions, mapper))	   <span class="enscript-keyword">return</span> false;
+
+    <span class="enscript-keyword">return</span> (true);
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IODMACommand::initWithSpecification</span>(SegmentFunction outSegFunc,
+				    UInt8           numAddressBits,
+				    UInt64          maxSegmentSize,
+				    MappingOptions  mappingOptions,
+				    UInt64          maxTransferSize,
+				    UInt32          alignment,
+				    IOMapper       *mapper,
+				    <span class="enscript-type">void</span>           *refCon)
+{
+    SegmentOptions segmentOptions =
+    {
+	.fStructSize                = <span class="enscript-keyword">sizeof</span>(segmentOptions),
+	.fNumAddressBits            = numAddressBits,
+	.fMaxSegmentSize            = maxSegmentSize,
+	.fMaxTransferSize           = maxTransferSize,
+	.fAlignment                 = alignment,
+	.fAlignmentLength           = 1,
+	.fAlignmentInternalSegments = alignment
+    };
+
+    <span class="enscript-keyword">return</span> (initWithSpecification(outSegFunc, &amp;segmentOptions, mappingOptions, mapper, refCon));
+}
+
+IOReturn
+<span class="enscript-function-name">IODMACommand::setSpecification</span>(SegmentFunction        outSegFunc,
+			       <span class="enscript-type">const</span> SegmentOptions * segmentOptions,
+			       uint32_t               mappingOptions,
+			       IOMapper             * mapper)
+{
+    IOService * device = 0;
+    UInt8       numAddressBits;
+    UInt64      maxSegmentSize;
+    UInt64      maxTransferSize;
+    UInt32      alignment;
+
+    <span class="enscript-type">bool</span>        is32Bit;
+
+    <span class="enscript-keyword">if</span> (!outSegFunc || !segmentOptions) <span class="enscript-keyword">return</span> (kIOReturnBadArgument);
+
+    is32Bit = ((OutputHost32 == outSegFunc) 
+    		|| (OutputBig32 == outSegFunc)
+                || (OutputLittle32 == outSegFunc));
+
+    numAddressBits = segmentOptions-&gt;fNumAddressBits;
+    maxSegmentSize = segmentOptions-&gt;fMaxSegmentSize;
+    maxTransferSize = segmentOptions-&gt;fMaxTransferSize;
+    alignment = segmentOptions-&gt;fAlignment;
+    <span class="enscript-keyword">if</span> (is32Bit)
+    {
+	<span class="enscript-keyword">if</span> (!numAddressBits)
+	    numAddressBits = 32;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (numAddressBits &gt; 32)
+	    <span class="enscript-keyword">return</span> (kIOReturnBadArgument);		<span class="enscript-comment">// Wrong output function for bits
+</span>    }
+
+    <span class="enscript-keyword">if</span> (numAddressBits &amp;&amp; (numAddressBits &lt; PAGE_SHIFT)) <span class="enscript-keyword">return</span> (kIOReturnBadArgument);
+
+    <span class="enscript-keyword">if</span> (!maxSegmentSize)  maxSegmentSize--;	<span class="enscript-comment">// Set Max segment to -1
+</span>    <span class="enscript-keyword">if</span> (!maxTransferSize) maxTransferSize--;	<span class="enscript-comment">// Set Max transfer to -1
+</span>
+    <span class="enscript-keyword">if</span> (mapper &amp;&amp; !OSDynamicCast(IOMapper, mapper))
+    {
+    	device = mapper;
+    	mapper = 0;
+    }
+    <span class="enscript-keyword">if</span> (!mapper &amp;&amp; (kUnmapped != MAPTYPE(mappingOptions)))
+    {
+        <span class="enscript-reference">IOMapper</span>::checkForSystemMapper();
+	mapper = IOMapper::gSystem;
+    }
+
+    fNumSegments     = 0;
+    fOutSeg	     = outSegFunc;
+    fNumAddressBits  = numAddressBits;
+    fMaxSegmentSize  = maxSegmentSize;
+    fMappingOptions  = mappingOptions;
+    fMaxTransferSize = maxTransferSize;
+    <span class="enscript-keyword">if</span> (!alignment)    alignment = 1;
+    fAlignMask	     = alignment - 1;
+
+    alignment = segmentOptions-&gt;fAlignmentLength;
+    <span class="enscript-keyword">if</span> (!alignment) alignment = 1;
+    fAlignMaskLength = alignment - 1;
+
+    alignment = segmentOptions-&gt;fAlignmentInternalSegments;
+    <span class="enscript-keyword">if</span> (!alignment) alignment = (fAlignMask + 1);
+    fAlignMaskInternalSegments = alignment - 1;
+
+    <span class="enscript-keyword">switch</span> (MAPTYPE(mappingOptions))
+    {
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">kMapped</span>:      	<span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">kUnmapped</span>:     <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">kNonCoherent</span>: 	<span class="enscript-keyword">break</span>;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">kBypassed</span>:
+	<span class="enscript-keyword">if</span> (!mapper)    <span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">return</span> (kIOReturnBadArgument);
+
+    <span class="enscript-reference">default</span>:
+	<span class="enscript-keyword">return</span> (kIOReturnBadArgument);
+    };
+
+    <span class="enscript-keyword">if</span> (mapper != fMapper)
+    {
+	<span class="enscript-keyword">if</span> (mapper)  mapper-&gt;retain();
+	<span class="enscript-keyword">if</span> (fMapper) fMapper-&gt;release();
+	fMapper = mapper;
+    }
+
+    fInternalState-&gt;fIterateOnly = (0 != (kIterateOnly &amp; mappingOptions));
+    fInternalState-&gt;fDevice = device;
+
+    <span class="enscript-keyword">return</span> (kIOReturnSuccess);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">IODMACommand::free</span>()
+{
+    <span class="enscript-keyword">if</span> (reserved) IODelete(reserved, IODMACommandInternal, 1);
+
+    <span class="enscript-keyword">if</span> (fMapper) fMapper-&gt;release();
+
+    <span class="enscript-reference">super</span>::free();
+}
+
+IOReturn
+<span class="enscript-function-name">IODMACommand::setMemoryDescriptor</span>(<span class="enscript-type">const</span> IOMemoryDescriptor *mem, <span class="enscript-type">bool</span> autoPrepare)
+{
+    IOReturn err = kIOReturnSuccess;
+	
+    <span class="enscript-keyword">if</span> (mem == fMemory)
+    {
+	<span class="enscript-keyword">if</span> (!autoPrepare)
+	{
+	    <span class="enscript-keyword">while</span> (fActive)
+		complete();
+	}
+	<span class="enscript-keyword">return</span> kIOReturnSuccess;
+    }
+
+    <span class="enscript-keyword">if</span> (fMemory) {
+	<span class="enscript-comment">// As we are almost certainly being called from a work loop thread
+</span>	<span class="enscript-comment">// if fActive is true it is probably not a good time to potentially
+</span>	<span class="enscript-comment">// block.  Just test for it and return an error
+</span>	<span class="enscript-keyword">if</span> (fActive)
+	    <span class="enscript-keyword">return</span> kIOReturnBusy;
+	clearMemoryDescriptor();
+    }
+
+    <span class="enscript-keyword">if</span> (mem) {
+	bzero(&amp;fMDSummary, <span class="enscript-keyword">sizeof</span>(fMDSummary));
+	err = mem-&gt;dmaCommandOperation(kIOMDGetCharacteristics | (kMapped == MAPTYPE(fMappingOptions)),
+				       &amp;fMDSummary, <span class="enscript-keyword">sizeof</span>(fMDSummary));
+	<span class="enscript-keyword">if</span> (err)
+	    <span class="enscript-keyword">return</span> err;
+
+	ppnum_t highPage = fMDSummary.fHighestPage ? fMDSummary.fHighestPage : gIOLastPage;
+
+	<span class="enscript-keyword">if</span> ((kMapped == MAPTYPE(fMappingOptions))
+	    &amp;&amp; fMapper)
+	    fInternalState-&gt;fCheckAddressing = false;
+	<span class="enscript-keyword">else</span>
+	    fInternalState-&gt;fCheckAddressing = (fNumAddressBits &amp;&amp; (highPage &gt;= (1UL &lt;&lt; (fNumAddressBits - PAGE_SHIFT))));
+
+	fInternalState-&gt;fNewMD = true;
+	mem-&gt;retain();
+	fMemory = mem;
+
+	mem-&gt;dmaCommandOperation(kIOMDSetDMAActive, <span class="enscript-keyword">this</span>, 0);
+	<span class="enscript-keyword">if</span> (autoPrepare) {
+	    err = prepare();
+	    <span class="enscript-keyword">if</span> (err) {
+		clearMemoryDescriptor();
+	    }
+	}
+    }
+	
+    <span class="enscript-keyword">return</span> err;
+}
+
+IOReturn
+<span class="enscript-function-name">IODMACommand::clearMemoryDescriptor</span>(<span class="enscript-type">bool</span> autoComplete)
+{
+    <span class="enscript-keyword">if</span> (fActive &amp;&amp; !autoComplete)
+	<span class="enscript-keyword">return</span> (kIOReturnNotReady);
+
+    <span class="enscript-keyword">if</span> (fMemory) {
+	<span class="enscript-keyword">while</span> (fActive)
+	    complete();
+	fMemory-&gt;dmaCommandOperation(kIOMDSetDMAInactive, <span class="enscript-keyword">this</span>, 0);
+	fMemory-&gt;release();
+	fMemory = 0;
+    }
+
+    <span class="enscript-keyword">return</span> (kIOReturnSuccess);
+}
+
+<span class="enscript-type">const</span> IOMemoryDescriptor *
+<span class="enscript-function-name">IODMACommand::getMemoryDescriptor</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> fMemory;
+}
+
+IOMemoryDescriptor *
+<span class="enscript-function-name">IODMACommand::getIOMemoryDescriptor</span>() <span class="enscript-type">const</span>
+{
+    IOMemoryDescriptor * mem;
+
+    mem = reserved-&gt;fCopyMD;
+    <span class="enscript-keyword">if</span> (!mem) mem = __IODEQUALIFY(IOMemoryDescriptor *, fMemory);
+
+    <span class="enscript-keyword">return</span> (mem);
+}
+
+IOReturn
+<span class="enscript-function-name">IODMACommand::segmentOp</span>(
+			<span class="enscript-type">void</span>         *reference,
+			IODMACommand *target,
+			Segment64     segment,
+			<span class="enscript-type">void</span>         *segments,
+			UInt32        segmentIndex)
+{
+    IOOptionBits op = (uintptr_t) reference;
+    addr64_t     maxPhys, address;
+    uint64_t     length;
+    uint32_t     numPages;
+    uint32_t     mask;
+
+    IODMACommandInternal * state = target-&gt;reserved;
+
+    <span class="enscript-keyword">if</span> (target-&gt;fNumAddressBits &amp;&amp; (target-&gt;fNumAddressBits &lt; 64) &amp;&amp; (state-&gt;fLocalMapperAlloc || !target-&gt;fMapper))
+	maxPhys = (1ULL &lt;&lt; target-&gt;fNumAddressBits);
+    <span class="enscript-keyword">else</span>
+	maxPhys = 0;
+    maxPhys--;
+
+    address = segment.fIOVMAddr;
+    length = segment.fLength;
+
+    assert(address);
+    assert(length);
+
+    <span class="enscript-keyword">if</span> (!state-&gt;fMisaligned)
+    {
+	mask = (segmentIndex ? target-&gt;fAlignMaskInternalSegments : state-&gt;fSourceAlignMask);
+	state-&gt;fMisaligned |= (0 != (mask &amp; address));
+	<span class="enscript-keyword">if</span> (state-&gt;fMisaligned) DEBG(<span class="enscript-string">&quot;misaligned address %qx:%qx, %x\n&quot;</span>, address, length, mask);
+    }
+    <span class="enscript-keyword">if</span> (!state-&gt;fMisaligned)
+    {
+	mask = target-&gt;fAlignMaskLength;
+	state-&gt;fMisaligned |= (0 != (mask &amp; length));
+	<span class="enscript-keyword">if</span> (state-&gt;fMisaligned) DEBG(<span class="enscript-string">&quot;misaligned length %qx:%qx, %x\n&quot;</span>, address, length, mask);
+    }
+
+    <span class="enscript-keyword">if</span> (state-&gt;fMisaligned &amp;&amp; (kWalkPreflight &amp; op))
+	<span class="enscript-keyword">return</span> (kIOReturnNotAligned);
+
+    <span class="enscript-keyword">if</span> (!state-&gt;fDoubleBuffer)
+    {
+	<span class="enscript-keyword">if</span> ((address + length - 1) &lt;= maxPhys)
+	{
+	    length = 0;
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (address &lt;= maxPhys)
+	{
+	    DEBG(<span class="enscript-string">&quot;tail %qx, %qx&quot;</span>, address, length);
+	    length = (address + length - maxPhys - 1);
+	    address = maxPhys + 1;
+	    DEBG(<span class="enscript-string">&quot;-&gt; %qx, %qx\n&quot;</span>, address, length);
+	}
+    }
+
+    <span class="enscript-keyword">if</span> (!length)
+	<span class="enscript-keyword">return</span> (kIOReturnSuccess);
+
+    numPages = atop_64(round_page_64((address &amp; PAGE_MASK) + length));
+
+    <span class="enscript-keyword">if</span> (kWalkPreflight &amp; op)
+    {
+	state-&gt;fCopyPageCount += numPages;
+    }
+    <span class="enscript-keyword">else</span>
+    {
+	vm_page_t lastPage;
+	lastPage = NULL;
+	<span class="enscript-keyword">if</span> (kWalkPrepare &amp; op)
+	{
+	    lastPage = state-&gt;fCopyNext;
+	    <span class="enscript-keyword">for</span> (IOItemCount idx = 0; idx &lt; numPages; idx++)
+	    {
+		vm_page_set_offset(lastPage, atop_64(address) + idx);
+		lastPage = vm_page_get_next(lastPage);
+	    }
+	}
+
+	<span class="enscript-keyword">if</span> (!lastPage || SHOULD_COPY_DIR(op, target-&gt;fMDSummary.fDirection))
+	{
+	    lastPage = state-&gt;fCopyNext;
+	    <span class="enscript-keyword">for</span> (IOItemCount idx = 0; idx &lt; numPages; idx++)
+	    {
+		<span class="enscript-keyword">if</span> (SHOULD_COPY_DIR(op, target-&gt;fMDSummary.fDirection))
+		{
+		    addr64_t cpuAddr = address;
+		    addr64_t remapAddr;
+		    uint64_t chunk;
+
+		    <span class="enscript-keyword">if</span> ((kMapped == MAPTYPE(target-&gt;fMappingOptions))
+			&amp;&amp; target-&gt;fMapper)
+		    {
+			cpuAddr = target-&gt;fMapper-&gt;mapToPhysicalAddress(address);
+		    }
+	
+		    remapAddr = ptoa_64(vm_page_get_phys_page(lastPage));
+		    <span class="enscript-keyword">if</span> (!state-&gt;fDoubleBuffer)
+		    {
+			remapAddr += (address &amp; PAGE_MASK);
+		    }
+		    chunk = PAGE_SIZE - (address &amp; PAGE_MASK);
+		    <span class="enscript-keyword">if</span> (chunk &gt; length)
+			chunk = length;
+
+		    DEBG(<span class="enscript-string">&quot;cpv: 0x%qx %s 0x%qx, 0x%qx, 0x%02lx\n&quot;</span>, remapAddr, 
+				(kWalkSyncIn &amp; op) ? <span class="enscript-string">&quot;-&gt;&quot;</span> : <span class="enscript-string">&quot;&lt;-&quot;</span>, 
+				address, chunk, op);
+
+		    <span class="enscript-keyword">if</span> (kWalkSyncIn &amp; op)
+		    { <span class="enscript-comment">// cppvNoModSnk
+</span>			copypv(remapAddr, cpuAddr, chunk,
+					cppvPsnk | cppvFsnk | cppvPsrc | cppvNoRefSrc );
+		    }
+		    <span class="enscript-keyword">else</span>
+		    {
+			copypv(cpuAddr, remapAddr, chunk,
+					cppvPsnk | cppvFsnk | cppvPsrc | cppvNoRefSrc );
+		    }
+		    address += chunk;
+		    length -= chunk;
+		}
+		lastPage = vm_page_get_next(lastPage);
+	    }
+	}
+	state-&gt;fCopyNext = lastPage;
+    }
+
+    <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOBufferMemoryDescriptor * 
+<span class="enscript-function-name">IODMACommand::createCopyBuffer</span>(IODirection direction, UInt64 length)
+{
+    mach_vm_address_t mask = 0xFFFFF000; 	<span class="enscript-comment">//state-&gt;fSourceAlignMask
+</span>    <span class="enscript-keyword">return</span> (IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task, 
+    							direction, length, mask));
+}
+
+IOReturn
+<span class="enscript-function-name">IODMACommand::walkAll</span>(UInt8 op)
+{
+    IODMACommandInternal * state = fInternalState;
+
+    IOReturn     ret = kIOReturnSuccess;
+    UInt32       numSegments;
+    UInt64       offset;
+
+    <span class="enscript-keyword">if</span> (kWalkPreflight &amp; op)
+    {
+	state-&gt;fMisaligned     = false;
+	state-&gt;fDoubleBuffer   = false;
+	state-&gt;fPrepared       = false;
+	state-&gt;fCopyNext       = NULL;
+	state-&gt;fCopyPageAlloc  = 0;
+	state-&gt;fCopyPageCount  = 0;
+	state-&gt;fNextRemapPage  = NULL;
+	state-&gt;fCopyMD	       = 0;
+
+	<span class="enscript-keyword">if</span> (!(kWalkDoubleBuffer &amp; op))
+	{
+	    offset = 0;
+	    numSegments = 0-1;
+	    ret = genIOVMSegments(op, segmentOp, (<span class="enscript-type">void</span> *)(uintptr_t) op, &amp;offset, state, &amp;numSegments);
+	}
+
+	op &amp;= ~kWalkPreflight;
+
+	state-&gt;fDoubleBuffer = (state-&gt;fMisaligned || (kWalkDoubleBuffer &amp; op));
+	<span class="enscript-keyword">if</span> (state-&gt;fDoubleBuffer)
+	    state-&gt;fCopyPageCount = atop_64(round_page(state-&gt;fPreparedLength));
+
+	<span class="enscript-keyword">if</span> (state-&gt;fCopyPageCount)
+	{
+	    vm_page_t mapBase = NULL;
+
+	    DEBG(<span class="enscript-string">&quot;preflight fCopyPageCount %d\n&quot;</span>, state-&gt;fCopyPageCount);
+
+	    <span class="enscript-keyword">if</span> (!fMapper &amp;&amp; !state-&gt;fDoubleBuffer)
+	    {
+		kern_return_t kr;
+
+		<span class="enscript-keyword">if</span> (fMapper) panic(<span class="enscript-string">&quot;fMapper copying&quot;</span>);
+
+		kr = vm_page_alloc_list(state-&gt;fCopyPageCount, 
+					KMA_LOMEM | KMA_NOPAGEWAIT, &amp;mapBase);
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+		{
+		    DEBG(<span class="enscript-string">&quot;vm_page_alloc_list(%d) failed (%d)\n&quot;</span>, state-&gt;fCopyPageCount, kr);
+		    mapBase = NULL;
+		}
+	    }
+
+	    <span class="enscript-keyword">if</span> (mapBase)
+	    {
+		state-&gt;fCopyPageAlloc = mapBase;
+		state-&gt;fCopyNext = state-&gt;fCopyPageAlloc;
+		offset = 0;
+		numSegments = 0-1;
+		ret = genIOVMSegments(op, segmentOp, (<span class="enscript-type">void</span> *)(uintptr_t) op, &amp;offset, state, &amp;numSegments);
+		state-&gt;fPrepared = true;
+		op &amp;= ~(kWalkSyncIn | kWalkSyncOut);
+	    }
+	    <span class="enscript-keyword">else</span>
+	    {
+		DEBG(<span class="enscript-string">&quot;alloc IOBMD\n&quot;</span>);
+		state-&gt;fCopyMD = createCopyBuffer(fMDSummary.fDirection, state-&gt;fPreparedLength);
+
+		<span class="enscript-keyword">if</span> (state-&gt;fCopyMD)
+		{
+		    ret = kIOReturnSuccess;
+		    state-&gt;fPrepared = true;
+		}
+		<span class="enscript-keyword">else</span>
+		{
+		    DEBG(<span class="enscript-string">&quot;IODMACommand !alloc IOBMD&quot;</span>);
+		    <span class="enscript-keyword">return</span> (kIOReturnNoResources);
+		}
+	    }
+	}
+    }
+
+    <span class="enscript-keyword">if</span> (state-&gt;fPrepared &amp;&amp; ((kWalkSyncIn | kWalkSyncOut) &amp; op))
+    {
+	<span class="enscript-keyword">if</span> (state-&gt;fCopyPageCount)
+	{
+	    DEBG(<span class="enscript-string">&quot;sync fCopyPageCount %d\n&quot;</span>, state-&gt;fCopyPageCount);
+
+	    <span class="enscript-keyword">if</span> (state-&gt;fCopyPageAlloc)
+	    {
+		state-&gt;fCopyNext = state-&gt;fCopyPageAlloc;
+		offset = 0;
+		numSegments = 0-1;
+		ret = genIOVMSegments(op, segmentOp, (<span class="enscript-type">void</span> *)(uintptr_t) op, &amp;offset, state, &amp;numSegments);
+	    }
+	    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (state-&gt;fCopyMD)
+	    {
+		DEBG(<span class="enscript-string">&quot;sync IOBMD\n&quot;</span>);
+
+		<span class="enscript-keyword">if</span> (SHOULD_COPY_DIR(op, fMDSummary.fDirection))
+		{
+		    IOMemoryDescriptor *poMD = const_cast&lt;IOMemoryDescriptor *&gt;(fMemory);
+
+		    IOByteCount bytes;
+		    
+		    <span class="enscript-keyword">if</span> (kWalkSyncIn &amp; op)
+			bytes = poMD-&gt;writeBytes(state-&gt;fPreparedOffset, 
+						    state-&gt;fCopyMD-&gt;getBytesNoCopy(),
+						    state-&gt;fPreparedLength);
+		    <span class="enscript-keyword">else</span>
+			bytes = poMD-&gt;readBytes(state-&gt;fPreparedOffset, 
+						    state-&gt;fCopyMD-&gt;getBytesNoCopy(),
+						    state-&gt;fPreparedLength);
+		    DEBG(<span class="enscript-string">&quot;fCopyMD %s %lx bytes\n&quot;</span>, (kWalkSyncIn &amp; op) ? <span class="enscript-string">&quot;wrote&quot;</span> : <span class="enscript-string">&quot;read&quot;</span>, bytes);
+		    ret = (bytes == state-&gt;fPreparedLength) ? kIOReturnSuccess : kIOReturnUnderrun;
+		}
+		<span class="enscript-keyword">else</span>
+		    ret = kIOReturnSuccess;
+	    }
+	}
+    }
+
+    <span class="enscript-keyword">if</span> (kWalkComplete &amp; op)
+    {
+	<span class="enscript-keyword">if</span> (state-&gt;fCopyPageAlloc)
+	{
+	    vm_page_free_list(state-&gt;fCopyPageAlloc, FALSE);
+	    state-&gt;fCopyPageAlloc = 0;
+	    state-&gt;fCopyPageCount = 0;
+	}
+	<span class="enscript-keyword">if</span> (state-&gt;fCopyMD)
+	{
+	    state-&gt;fCopyMD-&gt;release();
+	    state-&gt;fCopyMD = 0;
+	}
+
+	state-&gt;fPrepared = false;
+    }
+    <span class="enscript-keyword">return</span> (ret);
+}
+
+UInt8
+<span class="enscript-function-name">IODMACommand::getNumAddressBits</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">return</span> (fNumAddressBits);
+}
+
+UInt32
+<span class="enscript-function-name">IODMACommand::getAlignment</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">return</span> (fAlignMask + 1);
+}
+
+uint32_t
+<span class="enscript-function-name">IODMACommand::getAlignmentLength</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">return</span> (fAlignMaskLength + 1);
+}
+
+uint32_t
+<span class="enscript-function-name">IODMACommand::getAlignmentInternalSegments</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">return</span> (fAlignMaskInternalSegments + 1);
+}
+
+IOReturn
+<span class="enscript-function-name">IODMACommand::prepareWithSpecification</span>(SegmentFunction	      outSegFunc,
+				       <span class="enscript-type">const</span> SegmentOptions * segmentOptions,
+				       uint32_t  	      mappingOptions,
+				       IOMapper		    * mapper,
+				       UInt64		      offset,
+				       UInt64		      length,
+				       <span class="enscript-type">bool</span>		      flushCache,
+				       <span class="enscript-type">bool</span>		      synchronize)
+{
+    IOReturn ret;
+
+    <span class="enscript-keyword">if</span> (fActive) <span class="enscript-keyword">return</span> kIOReturnNotPermitted;
+
+    ret = setSpecification(outSegFunc, segmentOptions, mappingOptions, mapper);
+    <span class="enscript-keyword">if</span> (kIOReturnSuccess != ret) <span class="enscript-keyword">return</span> (ret);
+
+    ret = prepare(offset, length, flushCache, synchronize);
+
+    <span class="enscript-keyword">return</span> (ret);
+}
+
+IOReturn
+<span class="enscript-function-name">IODMACommand::prepareWithSpecification</span>(SegmentFunction	outSegFunc,
+				       UInt8		numAddressBits,
+				       UInt64		maxSegmentSize,
+				       MappingOptions	mappingOptions,
+				       UInt64		maxTransferSize,
+				       UInt32		alignment,
+				       IOMapper		*mapper,
+				       UInt64		offset,
+				       UInt64		length,
+				       <span class="enscript-type">bool</span>		flushCache,
+				       <span class="enscript-type">bool</span>		synchronize)
+{
+    SegmentOptions segmentOptions =
+    {
+	.fStructSize                = <span class="enscript-keyword">sizeof</span>(segmentOptions),
+	.fNumAddressBits            = numAddressBits,
+	.fMaxSegmentSize            = maxSegmentSize,
+	.fMaxTransferSize           = maxTransferSize,
+	.fAlignment                 = alignment,
+	.fAlignmentLength           = 1,
+	.fAlignmentInternalSegments = alignment
+    };
+
+    <span class="enscript-keyword">return</span> (prepareWithSpecification(outSegFunc, &amp;segmentOptions, mappingOptions, mapper,
+    					offset, length, flushCache, synchronize));
+}
+
+
+IOReturn 
+<span class="enscript-function-name">IODMACommand::prepare</span>(UInt64 offset, UInt64 length, <span class="enscript-type">bool</span> flushCache, <span class="enscript-type">bool</span> synchronize)
+{
+    IODMACommandInternal *  state = fInternalState;
+    IOReturn                  ret = kIOReturnSuccess;
+    uint32_t       mappingOptions = fMappingOptions;
+
+    <span class="enscript-comment">// check specification has been set
+</span>    <span class="enscript-keyword">if</span> (!fOutSeg) <span class="enscript-keyword">return</span> (kIOReturnNotReady);
+
+    <span class="enscript-keyword">if</span> (!length) length = fMDSummary.fLength;
+
+    <span class="enscript-keyword">if</span> (length &gt; fMaxTransferSize) <span class="enscript-keyword">return</span> kIOReturnNoSpace;
+
+    <span class="enscript-keyword">if</span> (fActive++)
+    {
+	<span class="enscript-keyword">if</span> ((state-&gt;fPreparedOffset != offset)
+	  || (state-&gt;fPreparedLength != length))
+	ret = kIOReturnNotReady;
+    }
+    <span class="enscript-keyword">else</span>
+    {
+	<span class="enscript-keyword">if</span> (fAlignMaskLength &amp; length) <span class="enscript-keyword">return</span> (kIOReturnNotAligned);
+
+	state-&gt;fPreparedOffset = offset;
+	state-&gt;fPreparedLength = length;
+
+	state-&gt;fMapContig      = false;
+	state-&gt;fMisaligned     = false;
+	state-&gt;fDoubleBuffer   = false;
+	state-&gt;fPrepared       = false;
+	state-&gt;fCopyNext       = NULL;
+	state-&gt;fCopyPageAlloc  = 0;
+	state-&gt;fCopyPageCount  = 0;
+	state-&gt;fNextRemapPage  = NULL;
+	state-&gt;fCopyMD         = 0;
+	state-&gt;fLocalMapperAlloc       = 0;
+	state-&gt;fLocalMapperAllocLength = 0;
+
+	state-&gt;fLocalMapper    = (fMapper &amp;&amp; (fMapper != IOMapper::gSystem));
+
+	state-&gt;fSourceAlignMask = fAlignMask;
+	<span class="enscript-keyword">if</span> (fMapper)
+	    state-&gt;fSourceAlignMask &amp;= page_mask;
+	
+	state-&gt;fCursor = state-&gt;fIterateOnly
+			|| (!state-&gt;fCheckAddressing
+			    &amp;&amp; (!state-&gt;fSourceAlignMask
+				|| ((fMDSummary.fPageAlign &amp; (1 &lt;&lt; 31)) &amp;&amp; (0 == (fMDSummary.fPageAlign &amp; state-&gt;fSourceAlignMask)))));
+
+	<span class="enscript-keyword">if</span> (!state-&gt;fCursor)
+	{
+	    IOOptionBits op = kWalkPrepare | kWalkPreflight;
+	    <span class="enscript-keyword">if</span> (synchronize)
+		op |= kWalkSyncOut;
+	    ret = walkAll(op);
+	}
+
+	<span class="enscript-keyword">if</span> (IS_NONCOHERENT(mappingOptions) &amp;&amp; flushCache) 
+	{
+	    <span class="enscript-keyword">if</span> (state-&gt;fCopyMD)
+	    {
+		state-&gt;fCopyMD-&gt;performOperation(kIOMemoryIncoherentIOStore, 0, length);
+	    }
+	    <span class="enscript-keyword">else</span>
+	    {
+		IOMemoryDescriptor * md = const_cast&lt;IOMemoryDescriptor *&gt;(fMemory);
+		md-&gt;performOperation(kIOMemoryIncoherentIOStore, offset, length);
+	    }
+	}
+
+	<span class="enscript-keyword">if</span> (fMapper)
+	{
+	    IOMDDMAMapArgs mapArgs;
+	    bzero(&amp;mapArgs, <span class="enscript-keyword">sizeof</span>(mapArgs));
+	    mapArgs.fMapper = fMapper;
+	    mapArgs.fCommand = <span class="enscript-keyword">this</span>;
+	    mapArgs.fMapSpec.device         = state-&gt;fDevice;
+	    mapArgs.fMapSpec.alignment      = fAlignMask + 1;
+	    mapArgs.fMapSpec.numAddressBits = fNumAddressBits ? fNumAddressBits : 64;
+	    mapArgs.fLength = state-&gt;fPreparedLength;
+	    <span class="enscript-type">const</span> IOMemoryDescriptor * md = state-&gt;fCopyMD;
+	    <span class="enscript-keyword">if</span> (md) { mapArgs.fOffset = 0; }
+	    <span class="enscript-keyword">else</span>
+	    {
+		md = fMemory;
+		mapArgs.fOffset = state-&gt;fPreparedOffset;
+	    }
+	    ret = md-&gt;dmaCommandOperation(kIOMDDMAMap | state-&gt;fIterateOnly, &amp;mapArgs, <span class="enscript-keyword">sizeof</span>(mapArgs));
+<span class="enscript-comment">//IOLog(&quot;dma %p 0x%x 0x%qx-0x%qx 0x%qx-0x%qx\n&quot;, this, ret, state-&gt;fPreparedOffset, state-&gt;fPreparedLength, mapArgs.fAlloc, mapArgs.fAllocLength);
+</span>
+	    <span class="enscript-keyword">if</span> (kIOReturnSuccess == ret)
+	    {
+		state-&gt;fLocalMapperAlloc       = mapArgs.fAlloc;
+		state-&gt;fLocalMapperAllocLength = mapArgs.fAllocLength;
+		state-&gt;fMapContig = mapArgs.fMapContig;
+	    }
+	    <span class="enscript-keyword">if</span> (NULL != IOMapper::gSystem) ret = kIOReturnSuccess;
+	}
+	<span class="enscript-keyword">if</span> (kIOReturnSuccess == ret) state-&gt;fPrepared = true;
+    }
+    <span class="enscript-keyword">return</span> ret;
+}
+
+IOReturn 
+<span class="enscript-function-name">IODMACommand::complete</span>(<span class="enscript-type">bool</span> invalidateCache, <span class="enscript-type">bool</span> synchronize)
+{
+    IODMACommandInternal * state = fInternalState;
+    IOReturn               ret   = kIOReturnSuccess;
+
+    <span class="enscript-keyword">if</span> (fActive &lt; 1)
+	<span class="enscript-keyword">return</span> kIOReturnNotReady;
+
+    <span class="enscript-keyword">if</span> (!--fActive)
+    {
+	<span class="enscript-keyword">if</span> (IS_NONCOHERENT(fMappingOptions) &amp;&amp; invalidateCache) 
+	{
+	    <span class="enscript-keyword">if</span> (state-&gt;fCopyMD)
+	    {
+		state-&gt;fCopyMD-&gt;performOperation(kIOMemoryIncoherentIOFlush, 0, state-&gt;fPreparedLength);
+	    }
+	    <span class="enscript-keyword">else</span>
+	    {
+		IOMemoryDescriptor * md = const_cast&lt;IOMemoryDescriptor *&gt;(fMemory);
+		md-&gt;performOperation(kIOMemoryIncoherentIOFlush, state-&gt;fPreparedOffset, state-&gt;fPreparedLength);
+	    }
+	}
+
+	<span class="enscript-keyword">if</span> (!state-&gt;fCursor)
+	{
+		IOOptionBits op = kWalkComplete;
+		<span class="enscript-keyword">if</span> (synchronize)
+			op |= kWalkSyncIn;
+		ret = walkAll(op);
+	}
+    	<span class="enscript-keyword">if</span> (state-&gt;fLocalMapperAlloc)
+    	{
+	    <span class="enscript-keyword">if</span> (state-&gt;fLocalMapperAllocLength)
+	    {
+		fMapper-&gt;iovmUnmapMemory(getIOMemoryDescriptor(), <span class="enscript-keyword">this</span>, 
+						state-&gt;fLocalMapperAlloc, state-&gt;fLocalMapperAllocLength);
+	    }
+	    state-&gt;fLocalMapperAlloc       = 0;
+	    state-&gt;fLocalMapperAllocLength = 0;
+	}
+
+	state-&gt;fPrepared = false;
+    }
+
+    <span class="enscript-keyword">return</span> ret;
+}
+
+IOReturn
+<span class="enscript-function-name">IODMACommand::getPreparedOffsetAndLength</span>(UInt64 * offset, UInt64 * length)
+{
+    IODMACommandInternal * state = fInternalState;
+    <span class="enscript-keyword">if</span> (fActive &lt; 1)
+	<span class="enscript-keyword">return</span> (kIOReturnNotReady);
+
+    <span class="enscript-keyword">if</span> (offset)
+	*offset = state-&gt;fPreparedOffset;
+    <span class="enscript-keyword">if</span> (length)
+	*length = state-&gt;fPreparedLength;
+
+    <span class="enscript-keyword">return</span> (kIOReturnSuccess);
+}
+
+IOReturn
+<span class="enscript-function-name">IODMACommand::synchronize</span>(IOOptionBits options)
+{
+    IODMACommandInternal * state = fInternalState;
+    IOReturn		   ret   = kIOReturnSuccess;
+    IOOptionBits           op;
+
+    <span class="enscript-keyword">if</span> (kIODirectionOutIn == (kIODirectionOutIn &amp; options))
+	<span class="enscript-keyword">return</span> kIOReturnBadArgument;
+
+    <span class="enscript-keyword">if</span> (fActive &lt; 1)
+	<span class="enscript-keyword">return</span> kIOReturnNotReady;
+
+    op = 0;
+    <span class="enscript-keyword">if</span> (kForceDoubleBuffer &amp; options)
+    {
+	<span class="enscript-keyword">if</span> (state-&gt;fDoubleBuffer)
+	    <span class="enscript-keyword">return</span> kIOReturnSuccess;
+	<span class="enscript-keyword">if</span> (state-&gt;fCursor)
+	    state-&gt;fCursor = false;
+	<span class="enscript-keyword">else</span>
+	    ret = walkAll(kWalkComplete);
+
+	op |= kWalkPrepare | kWalkPreflight | kWalkDoubleBuffer;
+    }
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (state-&gt;fCursor)
+	<span class="enscript-keyword">return</span> kIOReturnSuccess;
+
+    <span class="enscript-keyword">if</span> (kIODirectionIn &amp; options)
+	op |= kWalkSyncIn | kWalkSyncAlways;
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kIODirectionOut &amp; options)
+	op |= kWalkSyncOut | kWalkSyncAlways;
+
+    ret = walkAll(op);
+
+    <span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-type">struct</span> IODMACommandTransferContext
+{
+    <span class="enscript-type">void</span> *   buffer;
+    UInt64   bufferOffset;
+    UInt64   remaining;
+    UInt32   op;
+};
+<span class="enscript-type">enum</span>
+{
+    kIODMACommandTransferOpReadBytes  = 1,
+    kIODMACommandTransferOpWriteBytes = 2
+};
+
+IOReturn
+<span class="enscript-function-name">IODMACommand::transferSegment</span>(<span class="enscript-type">void</span>   *reference,
+			IODMACommand *target,
+			Segment64     segment,
+			<span class="enscript-type">void</span>         *segments,
+			UInt32        segmentIndex)
+{
+    IODMACommandTransferContext * context = (IODMACommandTransferContext *) reference;
+    UInt64   length  = min(segment.fLength, context-&gt;remaining);
+    addr64_t ioAddr  = segment.fIOVMAddr;
+    addr64_t cpuAddr = ioAddr;
+
+    context-&gt;remaining -= length;
+
+    <span class="enscript-keyword">while</span> (length)
+    {
+	UInt64 copyLen = length;
+	<span class="enscript-keyword">if</span> ((kMapped == MAPTYPE(target-&gt;fMappingOptions))
+	    &amp;&amp; target-&gt;fMapper)
+	{
+	    cpuAddr = target-&gt;fMapper-&gt;mapToPhysicalAddress(ioAddr);
+	    copyLen = min(copyLen, page_size - (ioAddr &amp; (page_size - 1)));
+	    ioAddr += copyLen;
+	}
+
+	<span class="enscript-keyword">switch</span> (context-&gt;op)
+	{
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kIODMACommandTransferOpReadBytes</span>:
+		copypv(cpuAddr, context-&gt;bufferOffset + (addr64_t) context-&gt;buffer, copyLen,
+				    cppvPsrc | cppvNoRefSrc | cppvFsnk | cppvKmap);
+		<span class="enscript-keyword">break</span>;
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kIODMACommandTransferOpWriteBytes</span>:
+		copypv(context-&gt;bufferOffset + (addr64_t) context-&gt;buffer, cpuAddr, copyLen,
+				cppvPsnk | cppvFsnk | cppvNoRefSrc | cppvNoModSnk | cppvKmap);
+		<span class="enscript-keyword">break</span>;
+	}
+	length                -= copyLen;
+	context-&gt;bufferOffset += copyLen;
+    }
+    
+    <span class="enscript-keyword">return</span> (context-&gt;remaining ? kIOReturnSuccess : kIOReturnOverrun);
+}
+
+UInt64
+<span class="enscript-function-name">IODMACommand::transfer</span>(IOOptionBits transferOp, UInt64 offset, <span class="enscript-type">void</span> * buffer, UInt64 length)
+{
+    IODMACommandInternal *      state = fInternalState;
+    IODMACommandTransferContext context;
+    Segment64     		segments[1];
+    UInt32                      numSegments = 0-1;
+
+    <span class="enscript-keyword">if</span> (fActive &lt; 1)
+        <span class="enscript-keyword">return</span> (0);
+
+    <span class="enscript-keyword">if</span> (offset &gt;= state-&gt;fPreparedLength)
+        <span class="enscript-keyword">return</span> (0);
+    length = min(length, state-&gt;fPreparedLength - offset);
+
+    context.buffer       = buffer;
+    context.bufferOffset = 0;
+    context.remaining    = length;
+    context.op           = transferOp;
+    (<span class="enscript-type">void</span>) genIOVMSegments(kWalkClient, transferSegment, &amp;context, &amp;offset, &amp;segments[0], &amp;numSegments);
+
+    <span class="enscript-keyword">return</span> (length - context.remaining);
+}
+
+UInt64
+<span class="enscript-function-name">IODMACommand::readBytes</span>(UInt64 offset, <span class="enscript-type">void</span> *bytes, UInt64 length)
+{
+    <span class="enscript-keyword">return</span> (transfer(kIODMACommandTransferOpReadBytes, offset, bytes, length));
+}
+
+UInt64
+<span class="enscript-function-name">IODMACommand::writeBytes</span>(UInt64 offset, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *bytes, UInt64 length)
+{
+    <span class="enscript-keyword">return</span> (transfer(kIODMACommandTransferOpWriteBytes, offset, const_cast&lt;<span class="enscript-type">void</span> *&gt;(bytes), length));
+}
+
+IOReturn
+<span class="enscript-function-name">IODMACommand::genIOVMSegments</span>(UInt64 *offsetP,
+			      <span class="enscript-type">void</span>   *segmentsP,
+			      UInt32 *numSegmentsP)
+{
+    <span class="enscript-keyword">return</span> (genIOVMSegments(kWalkClient, clientOutputSegment, (<span class="enscript-type">void</span> *) fOutSeg,
+			    offsetP, segmentsP, numSegmentsP));
+}
+
+IOReturn
+<span class="enscript-function-name">IODMACommand::genIOVMSegments</span>(uint32_t op,
+			      InternalSegmentFunction outSegFunc,
+			      <span class="enscript-type">void</span>   *reference,
+			      UInt64 *offsetP,
+			      <span class="enscript-type">void</span>   *segmentsP,
+			      UInt32 *numSegmentsP)
+{
+    IODMACommandInternal * internalState = fInternalState;
+    IOOptionBits           mdOp = kIOMDWalkSegments;
+    IOReturn               ret  = kIOReturnSuccess;
+
+    <span class="enscript-keyword">if</span> (!(kWalkComplete &amp; op) &amp;&amp; !fActive)
+	<span class="enscript-keyword">return</span> kIOReturnNotReady;
+
+    <span class="enscript-keyword">if</span> (!offsetP || !segmentsP || !numSegmentsP || !*numSegmentsP)
+	<span class="enscript-keyword">return</span> kIOReturnBadArgument;
+
+    IOMDDMAWalkSegmentArgs *state =
+	(IOMDDMAWalkSegmentArgs *)(<span class="enscript-type">void</span> *) fState;
+
+    UInt64 offset    = *offsetP + internalState-&gt;fPreparedOffset;
+    UInt64 memLength = internalState-&gt;fPreparedOffset + internalState-&gt;fPreparedLength;
+
+    <span class="enscript-keyword">if</span> (offset &gt;= memLength)
+	<span class="enscript-keyword">return</span> kIOReturnOverrun;
+
+    <span class="enscript-keyword">if</span> ((offset == internalState-&gt;fPreparedOffset) || (offset != state-&gt;fOffset) || internalState-&gt;fNewMD) {
+	state-&gt;fOffset                 = 0;
+	state-&gt;fIOVMAddr               = 0;
+	internalState-&gt;fNextRemapPage  = NULL;
+	internalState-&gt;fNewMD	       = false;
+	state-&gt;fMapped                 = (0 != fMapper);
+	mdOp                           = kIOMDFirstSegment;
+    };
+	
+    UInt32    segIndex = 0;
+    UInt32    numSegments = *numSegmentsP;
+    Segment64 curSeg = { 0, 0 };
+    addr64_t  maxPhys;
+
+    <span class="enscript-keyword">if</span> (fNumAddressBits &amp;&amp; (fNumAddressBits &lt; 64))
+	maxPhys = (1ULL &lt;&lt; fNumAddressBits);
+    <span class="enscript-keyword">else</span>
+	maxPhys = 0;
+    maxPhys--;
+
+    <span class="enscript-keyword">while</span> (state-&gt;fIOVMAddr || (state-&gt;fOffset &lt; memLength))
+    {
+	<span class="enscript-comment">// state = next seg
+</span>	<span class="enscript-keyword">if</span> (!state-&gt;fIOVMAddr) {
+
+	    IOReturn rtn;
+
+	    state-&gt;fOffset = offset;
+	    state-&gt;fLength = memLength - offset;
+
+	    <span class="enscript-keyword">if</span> (internalState-&gt;fMapContig &amp;&amp; internalState-&gt;fLocalMapperAlloc)
+	    {
+		state-&gt;fIOVMAddr = internalState-&gt;fLocalMapperAlloc + offset;
+		rtn = kIOReturnSuccess;
+#<span class="enscript-reference">if</span> 0
+		{
+		    uint64_t checkOffset;
+		    IOPhysicalLength segLen;
+		    <span class="enscript-keyword">for</span> (checkOffset = 0; checkOffset &lt; state-&gt;fLength; )
+		    {
+			addr64_t phys = const_cast&lt;IOMemoryDescriptor *&gt;(fMemory)-&gt;getPhysicalSegment(checkOffset + offset, &amp;segLen, kIOMemoryMapperNone);
+			<span class="enscript-keyword">if</span> (fMapper-&gt;mapAddr(state-&gt;fIOVMAddr + checkOffset) != phys)
+			{
+			    panic(<span class="enscript-string">&quot;%llx != %llx:%llx, %llx phys: %llx %llx\n&quot;</span>, offset, 
+				    state-&gt;fIOVMAddr + checkOffset, fMapper-&gt;mapAddr(state-&gt;fIOVMAddr + checkOffset), state-&gt;fLength, 
+				    phys, checkOffset);
+			}
+		        checkOffset += page_size - (phys &amp; page_mask);
+		    }
+		}
+#<span class="enscript-reference">endif</span>
+	    }
+	    <span class="enscript-keyword">else</span>
+	    {
+		<span class="enscript-type">const</span> IOMemoryDescriptor * memory =
+		    internalState-&gt;fCopyMD ? internalState-&gt;fCopyMD : fMemory;
+		rtn = memory-&gt;dmaCommandOperation(mdOp, fState, <span class="enscript-keyword">sizeof</span>(fState));
+		mdOp = kIOMDWalkSegments;
+	    }
+
+	    <span class="enscript-keyword">if</span> (rtn == kIOReturnSuccess)
+	    {
+		assert(state-&gt;fIOVMAddr);
+		assert(state-&gt;fLength);
+		<span class="enscript-keyword">if</span> ((curSeg.fIOVMAddr + curSeg.fLength) == state-&gt;fIOVMAddr) {
+		    UInt64 length = state-&gt;fLength;
+		    offset	    += length;
+		    curSeg.fLength  += length;
+		    state-&gt;fIOVMAddr = 0;
+		}
+	    }
+	    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (rtn == kIOReturnOverrun)
+		state-&gt;fIOVMAddr = state-&gt;fLength = 0;	<span class="enscript-comment">// At end
+</span>	    <span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> rtn;
+	}
+
+	<span class="enscript-comment">// seg = state, offset = end of seg
+</span>	<span class="enscript-keyword">if</span> (!curSeg.fIOVMAddr)
+	{
+	    UInt64 length = state-&gt;fLength;
+	    offset	    += length;
+	    curSeg.fIOVMAddr = state-&gt;fIOVMAddr;
+	    curSeg.fLength   = length;
+	    state-&gt;fIOVMAddr = 0;
+	}
+
+        <span class="enscript-keyword">if</span> (!state-&gt;fIOVMAddr)
+	{
+	    <span class="enscript-comment">// maxPhys
+</span>	    <span class="enscript-keyword">if</span> ((kWalkClient &amp; op) &amp;&amp; (curSeg.fIOVMAddr + curSeg.fLength - 1) &gt; maxPhys)
+	    {
+		<span class="enscript-keyword">if</span> (internalState-&gt;fCursor)
+		{
+		    curSeg.fIOVMAddr = 0;
+		    ret = kIOReturnMessageTooLarge;
+		    <span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (curSeg.fIOVMAddr &lt;= maxPhys)
+		{
+		    UInt64 remain, newLength;
+
+		    newLength	     = (maxPhys + 1 - curSeg.fIOVMAddr);
+		    DEBG(<span class="enscript-string">&quot;trunc %qx, %qx-&gt; %qx\n&quot;</span>, curSeg.fIOVMAddr, curSeg.fLength, newLength);
+		    remain	     = curSeg.fLength - newLength;
+		    state-&gt;fIOVMAddr = newLength + curSeg.fIOVMAddr;
+		    curSeg.fLength   = newLength;
+		    state-&gt;fLength   = remain;
+		    offset	    -= remain;
+		}
+		<span class="enscript-keyword">else</span> 
+		{
+		    UInt64    addr = curSeg.fIOVMAddr;
+		    ppnum_t   addrPage = atop_64(addr);
+		    vm_page_t remap = NULL;
+		    UInt64    remain, newLength;
+
+		    DEBG(<span class="enscript-string">&quot;sparse switch %qx, %qx &quot;</span>, addr, curSeg.fLength);
+
+		    remap = internalState-&gt;fNextRemapPage;
+		    <span class="enscript-keyword">if</span> (remap &amp;&amp; (addrPage == vm_page_get_offset(remap)))
+		    {
+		    }
+		    <span class="enscript-keyword">else</span> <span class="enscript-keyword">for</span> (remap = internalState-&gt;fCopyPageAlloc; 
+				remap &amp;&amp; (addrPage != vm_page_get_offset(remap));
+				remap = vm_page_get_next(remap))
+		    {
+		    }
+
+		    <span class="enscript-keyword">if</span> (!remap) panic(<span class="enscript-string">&quot;no remap page found&quot;</span>);
+
+		    curSeg.fIOVMAddr = ptoa_64(vm_page_get_phys_page(remap))
+					+ (addr &amp; PAGE_MASK);
+		    internalState-&gt;fNextRemapPage = vm_page_get_next(remap);
+
+		    newLength		 = PAGE_SIZE - (addr &amp; PAGE_MASK);
+		    <span class="enscript-keyword">if</span> (newLength &lt; curSeg.fLength)
+		    {
+			remain		 = curSeg.fLength - newLength;
+			state-&gt;fIOVMAddr = addr + newLength;
+			curSeg.fLength	 = newLength;
+			state-&gt;fLength	 = remain;
+			offset		-= remain;
+		    }
+		    DEBG(<span class="enscript-string">&quot;-&gt; %qx, %qx offset %qx\n&quot;</span>, curSeg.fIOVMAddr, curSeg.fLength, offset);
+		}
+	    }
+
+	    <span class="enscript-comment">// reduce size of output segment
+</span>	    uint64_t reduce, leftover = 0;
+
+	    <span class="enscript-comment">// fMaxSegmentSize
+</span>	    <span class="enscript-keyword">if</span> (curSeg.fLength &gt; fMaxSegmentSize)
+	    {
+		leftover      += curSeg.fLength - fMaxSegmentSize;
+		curSeg.fLength = fMaxSegmentSize;
+		state-&gt;fIOVMAddr = curSeg.fLength + curSeg.fIOVMAddr;
+	    }
+
+	    <span class="enscript-comment">// alignment current length
+</span>
+	    reduce = (curSeg.fLength &amp; fAlignMaskLength);
+	    <span class="enscript-keyword">if</span> (reduce &amp;&amp; (curSeg.fLength &gt; reduce)) 
+	    {
+		leftover       += reduce;
+	    	curSeg.fLength -= reduce;
+		state-&gt;fIOVMAddr = curSeg.fLength + curSeg.fIOVMAddr;
+	    }
+
+	    <span class="enscript-comment">// alignment next address
+</span>
+	    reduce = (state-&gt;fIOVMAddr &amp; fAlignMaskInternalSegments);
+	    <span class="enscript-keyword">if</span> (reduce &amp;&amp; (curSeg.fLength &gt; reduce))
+	    {
+		leftover       += reduce;
+	    	curSeg.fLength -= reduce;
+		state-&gt;fIOVMAddr = curSeg.fLength + curSeg.fIOVMAddr;
+	    }
+
+	    <span class="enscript-keyword">if</span> (leftover)
+	    {
+		DEBG(<span class="enscript-string">&quot;reduce seg by 0x%llx @ 0x%llx [0x%llx, 0x%llx]\n&quot;</span>, 
+		      leftover, offset,
+		      curSeg.fIOVMAddr, curSeg.fLength);
+		state-&gt;fLength   = leftover;
+		offset          -= leftover;
+	    }
+
+	    <span class="enscript-comment">// 
+</span>
+	    <span class="enscript-keyword">if</span> (internalState-&gt;fCursor)
+	    {
+		<span class="enscript-type">bool</span> misaligned;
+		uint32_t mask;
+
+		mask = (segIndex ? fAlignMaskInternalSegments : internalState-&gt;fSourceAlignMask);
+		misaligned = (0 != (mask &amp; curSeg.fIOVMAddr));
+		<span class="enscript-keyword">if</span> (!misaligned)
+		{
+		    mask = fAlignMaskLength;
+		    misaligned |= (0 != (mask &amp;  curSeg.fLength));
+		}
+		<span class="enscript-keyword">if</span> (misaligned)
+		{
+		    <span class="enscript-keyword">if</span> (misaligned) DEBG(<span class="enscript-string">&quot;cursor misaligned %qx:%qx\n&quot;</span>, curSeg.fIOVMAddr, curSeg.fLength);
+		    curSeg.fIOVMAddr = 0;
+		    ret = kIOReturnNotAligned;
+		    <span class="enscript-keyword">break</span>;
+		}
+	    }
+
+	    <span class="enscript-keyword">if</span> (offset &gt;= memLength)
+	    {
+		curSeg.fLength   -= (offset - memLength);
+		offset = memLength;
+		state-&gt;fIOVMAddr = state-&gt;fLength = 0;	<span class="enscript-comment">// At end
+</span>		<span class="enscript-keyword">break</span>;
+	    }
+	}
+
+        <span class="enscript-keyword">if</span> (state-&gt;fIOVMAddr) {
+            <span class="enscript-keyword">if</span> ((segIndex + 1 == numSegments))
+                <span class="enscript-keyword">break</span>;
+
+	    ret = (*outSegFunc)(reference, <span class="enscript-keyword">this</span>, curSeg, segmentsP, segIndex++);
+            curSeg.fIOVMAddr = 0;
+	    <span class="enscript-keyword">if</span> (kIOReturnSuccess != ret)
+		<span class="enscript-keyword">break</span>;
+        }
+    }
+
+    <span class="enscript-keyword">if</span> (curSeg.fIOVMAddr) {
+	ret = (*outSegFunc)(reference, <span class="enscript-keyword">this</span>, curSeg, segmentsP, segIndex++);
+    }
+
+    <span class="enscript-keyword">if</span> (kIOReturnSuccess == ret)
+    {
+	state-&gt;fOffset = offset;
+	*offsetP       = offset - internalState-&gt;fPreparedOffset;
+	*numSegmentsP  = segIndex;
+    }
+    <span class="enscript-keyword">return</span> ret;
+}
+
+IOReturn 
+<span class="enscript-function-name">IODMACommand::clientOutputSegment</span>(
+	<span class="enscript-type">void</span> *reference, IODMACommand *target,
+	Segment64 segment, <span class="enscript-type">void</span> *vSegList, UInt32 outSegIndex)
+{
+    SegmentFunction segmentFunction = (SegmentFunction) reference;
+    IOReturn ret = kIOReturnSuccess;
+
+    <span class="enscript-keyword">if</span> (target-&gt;fNumAddressBits &amp;&amp; (target-&gt;fNumAddressBits &lt; 64) 
+	&amp;&amp; ((segment.fIOVMAddr + segment.fLength - 1) &gt;&gt; target-&gt;fNumAddressBits)
+	&amp;&amp; (target-&gt;reserved-&gt;fLocalMapperAlloc || !target-&gt;fMapper))
+    {
+	DEBG(<span class="enscript-string">&quot;kIOReturnMessageTooLarge(fNumAddressBits) %qx, %qx\n&quot;</span>, segment.fIOVMAddr, segment.fLength);
+	ret = kIOReturnMessageTooLarge;
+    }
+
+    <span class="enscript-keyword">if</span> (!(*segmentFunction)(target, segment, vSegList, outSegIndex))
+    {
+	DEBG(<span class="enscript-string">&quot;kIOReturnMessageTooLarge(fOutSeg) %qx, %qx\n&quot;</span>, segment.fIOVMAddr, segment.fLength);
+	ret = kIOReturnMessageTooLarge;
+    }
+
+    <span class="enscript-keyword">return</span> (ret);
+}
+
+IOReturn
+<span class="enscript-function-name">IODMACommand::genIOVMSegments</span>(SegmentFunction segmentFunction,
+				    UInt64   *offsetP,
+				    <span class="enscript-type">void</span>     *segmentsP,
+				    UInt32   *numSegmentsP)
+{
+    <span class="enscript-keyword">return</span> (genIOVMSegments(kWalkClient, clientOutputSegment, (<span class="enscript-type">void</span> *) segmentFunction,
+			    offsetP, segmentsP, numSegmentsP));
+}
+
+<span class="enscript-type">bool</span> 
+<span class="enscript-function-name">IODMACommand::OutputHost32</span>(IODMACommand *,
+	Segment64 segment, <span class="enscript-type">void</span> *vSegList, UInt32 outSegIndex)
+{
+    Segment32 *base = (Segment32 *) vSegList;
+    base[outSegIndex].fIOVMAddr = (UInt32) segment.fIOVMAddr;
+    base[outSegIndex].fLength   = (UInt32) segment.fLength;
+    <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">bool</span> 
+<span class="enscript-function-name">IODMACommand::OutputBig32</span>(IODMACommand *,
+	Segment64 segment, <span class="enscript-type">void</span> *vSegList, UInt32 outSegIndex)
+{
+    <span class="enscript-type">const</span> UInt offAddr = outSegIndex * <span class="enscript-keyword">sizeof</span>(Segment32);
+    <span class="enscript-type">const</span> UInt offLen  = offAddr + <span class="enscript-keyword">sizeof</span>(UInt32);
+    OSWriteBigInt32(vSegList, offAddr, (UInt32) segment.fIOVMAddr);
+    OSWriteBigInt32(vSegList, offLen,  (UInt32) segment.fLength);
+    <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IODMACommand::OutputLittle32</span>(IODMACommand *,
+	Segment64 segment, <span class="enscript-type">void</span> *vSegList, UInt32 outSegIndex)
+{
+    <span class="enscript-type">const</span> UInt offAddr = outSegIndex * <span class="enscript-keyword">sizeof</span>(Segment32);
+    <span class="enscript-type">const</span> UInt offLen  = offAddr + <span class="enscript-keyword">sizeof</span>(UInt32);
+    OSWriteLittleInt32(vSegList, offAddr, (UInt32) segment.fIOVMAddr);
+    OSWriteLittleInt32(vSegList, offLen,  (UInt32) segment.fLength);
+    <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IODMACommand::OutputHost64</span>(IODMACommand *,
+	Segment64 segment, <span class="enscript-type">void</span> *vSegList, UInt32 outSegIndex)
+{
+    Segment64 *base = (Segment64 *) vSegList;
+    base[outSegIndex] = segment;
+    <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IODMACommand::OutputBig64</span>(IODMACommand *,
+	Segment64 segment, <span class="enscript-type">void</span> *vSegList, UInt32 outSegIndex)
+{
+    <span class="enscript-type">const</span> UInt offAddr = outSegIndex * <span class="enscript-keyword">sizeof</span>(Segment64);
+    <span class="enscript-type">const</span> UInt offLen  = offAddr + <span class="enscript-keyword">sizeof</span>(UInt64);
+    OSWriteBigInt64(vSegList, offAddr, (UInt64) segment.fIOVMAddr);
+    OSWriteBigInt64(vSegList, offLen,  (UInt64) segment.fLength);
+    <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IODMACommand::OutputLittle64</span>(IODMACommand *,
+	Segment64 segment, <span class="enscript-type">void</span> *vSegList, UInt32 outSegIndex)
+{
+    <span class="enscript-type">const</span> UInt offAddr = outSegIndex * <span class="enscript-keyword">sizeof</span>(Segment64);
+    <span class="enscript-type">const</span> UInt offLen  = offAddr + <span class="enscript-keyword">sizeof</span>(UInt64);
+    OSWriteLittleInt64(vSegList, offAddr, (UInt64) segment.fIOVMAddr);
+    OSWriteLittleInt64(vSegList, offLen,  (UInt64) segment.fLength);
+    <span class="enscript-keyword">return</span> true;
+}
+
+
+</pre>
+<hr />
+</body></html>

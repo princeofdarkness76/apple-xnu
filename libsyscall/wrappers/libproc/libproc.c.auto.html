@@ -1,0 +1,880 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>libproc.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">libproc.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2006, 2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this
+ * file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;strings.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/msgbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/resource.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/process_policy.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/event.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/message.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;libproc_internal.h&quot;</span>
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">__proc_info</span>(<span class="enscript-type">int</span> callnum, <span class="enscript-type">int</span> pid, <span class="enscript-type">int</span> flavor, uint64_t arg, <span class="enscript-type">void</span> * buffer, <span class="enscript-type">int</span> buffersize);
+__private_extern__ <span class="enscript-type">int</span> proc_setthreadname(<span class="enscript-type">void</span> * buffer, <span class="enscript-type">int</span> buffersize);
+<span class="enscript-type">int</span> <span class="enscript-function-name">__process_policy</span>(<span class="enscript-type">int</span> scope, <span class="enscript-type">int</span> action, <span class="enscript-type">int</span> policy, <span class="enscript-type">int</span> policy_subtype, proc_policy_attribute_t * attrp, pid_t target_pid, uint64_t target_threadid);
+<span class="enscript-type">int</span> <span class="enscript-function-name">proc_rlimit_control</span>(pid_t pid, <span class="enscript-type">int</span> flavor, <span class="enscript-type">void</span> *arg);
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_listpids</span>(uint32_t type, uint32_t typeinfo, <span class="enscript-type">void</span> *buffer, <span class="enscript-type">int</span> buffersize) 
+{
+	<span class="enscript-type">int</span> retval;
+	
+	<span class="enscript-keyword">if</span> ((type &gt;= PROC_ALL_PIDS) || (type &lt;= PROC_PPID_ONLY)) {
+		<span class="enscript-keyword">if</span> ((retval = __proc_info(PROC_INFO_CALL_LISTPIDS, type, typeinfo,(uint64_t)0, buffer, buffersize)) == -1)
+			<span class="enscript-keyword">return</span>(0);
+	} <span class="enscript-keyword">else</span> {
+		errno = EINVAL;
+		retval = 0;
+	}
+	<span class="enscript-keyword">return</span>(retval);
+}
+
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_listallpids</span>(<span class="enscript-type">void</span> * buffer, <span class="enscript-type">int</span> buffersize)
+{
+	<span class="enscript-type">int</span> numpids;
+	numpids = proc_listpids(PROC_ALL_PIDS, (uint32_t)0, buffer, buffersize);
+
+	<span class="enscript-keyword">if</span> (numpids == -1)
+		<span class="enscript-keyword">return</span>(-1);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>(numpids/<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+}
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_listpgrppids</span>(pid_t pgrpid, <span class="enscript-type">void</span> * buffer, <span class="enscript-type">int</span> buffersize)
+{
+	<span class="enscript-type">int</span> numpids;
+	numpids = proc_listpids(PROC_PGRP_ONLY, (uint32_t)pgrpid, buffer, buffersize);
+	<span class="enscript-keyword">if</span> (numpids == -1)
+		<span class="enscript-keyword">return</span>(-1);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>(numpids/<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+}
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_listchildpids</span>(pid_t ppid, <span class="enscript-type">void</span> * buffer, <span class="enscript-type">int</span> buffersize)
+{
+	<span class="enscript-type">int</span> numpids;
+	numpids = proc_listpids(PROC_PPID_ONLY, (uint32_t)ppid, buffer, buffersize);
+	<span class="enscript-keyword">if</span> (numpids == -1)
+		<span class="enscript-keyword">return</span>(-1);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>(numpids/<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+}
+
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_pidinfo</span>(<span class="enscript-type">int</span> pid, <span class="enscript-type">int</span> flavor, uint64_t arg,  <span class="enscript-type">void</span> *buffer, <span class="enscript-type">int</span> buffersize)
+{
+	<span class="enscript-type">int</span> retval;
+
+	<span class="enscript-keyword">if</span> ((retval = __proc_info(PROC_INFO_CALL_PIDINFO, pid, flavor,  arg,  buffer, buffersize)) == -1)
+		<span class="enscript-keyword">return</span>(0);
+		
+	<span class="enscript-keyword">return</span>(retval);
+}
+
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_pidoriginatorinfo</span>(<span class="enscript-type">int</span> flavor, <span class="enscript-type">void</span> *buffer, <span class="enscript-type">int</span> buffersize)
+{
+	<span class="enscript-type">int</span> retval;
+
+	<span class="enscript-keyword">if</span> ((retval = __proc_info(PROC_INFO_CALL_PIDORIGINATORINFO, getpid(), flavor,  0,  buffer, buffersize)) == -1)
+		<span class="enscript-keyword">return</span>(0);
+		
+	<span class="enscript-keyword">return</span>(retval);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_listcoalitions</span>(<span class="enscript-type">int</span> flavor, <span class="enscript-type">int</span> coaltype, <span class="enscript-type">void</span> *buffer, <span class="enscript-type">int</span> buffersize)
+{
+	<span class="enscript-type">int</span> retval;
+
+	<span class="enscript-keyword">if</span> ((retval = __proc_info(PROC_INFO_CALL_LISTCOALITIONS, flavor, coaltype, 0, buffer, buffersize)) == -1)
+		<span class="enscript-keyword">return</span> 0;
+
+	<span class="enscript-keyword">return</span> retval;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_pid_rusage</span>(<span class="enscript-type">int</span> pid, <span class="enscript-type">int</span> flavor, rusage_info_t *buffer)
+{
+	<span class="enscript-keyword">return</span> (__proc_info(PROC_INFO_CALL_PIDRUSAGE, pid, flavor, 0, buffer, 0));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_setthread_cpupercent</span>(uint8_t percentage, uint32_t ms_refill)
+{
+	uint32_t arg = 0;
+
+	<span class="enscript-comment">/* Pack percentage and refill into a 32-bit number to match existing kernel implementation */</span>
+	<span class="enscript-keyword">if</span> ((percentage &gt;= 100) || (ms_refill &amp; ~0xffffffU)) {
+		errno = EINVAL;
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	arg = ((ms_refill &lt;&lt; 8) | percentage);
+
+	<span class="enscript-keyword">return</span> (proc_rlimit_control(-1, RLIMIT_THREAD_CPULIMITS, (<span class="enscript-type">void</span> *)(uintptr_t)arg));
+}
+
+<span class="enscript-type">int</span>	
+<span class="enscript-function-name">proc_pidfdinfo</span>(<span class="enscript-type">int</span> pid, <span class="enscript-type">int</span> fd, <span class="enscript-type">int</span> flavor, <span class="enscript-type">void</span> * buffer, <span class="enscript-type">int</span> buffersize)
+{
+	<span class="enscript-type">int</span> retval;
+
+	<span class="enscript-keyword">if</span> ((retval = __proc_info(PROC_INFO_CALL_PIDFDINFO, pid,  flavor, (uint64_t)fd, buffer, buffersize)) == -1)
+		<span class="enscript-keyword">return</span>(0);
+		
+	<span class="enscript-keyword">return</span> (retval);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_pidfileportinfo</span>(<span class="enscript-type">int</span> pid, uint32_t fileport, <span class="enscript-type">int</span> flavor, <span class="enscript-type">void</span> *buffer, <span class="enscript-type">int</span> buffersize)
+{
+	<span class="enscript-type">int</span> retval;
+
+	<span class="enscript-keyword">if</span> ((retval = __proc_info(PROC_INFO_CALL_PIDFILEPORTINFO, pid, flavor, (uint64_t)fileport, buffer, buffersize)) == -1)
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">return</span> (retval);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_name</span>(<span class="enscript-type">int</span> pid, <span class="enscript-type">void</span> * buffer, uint32_t buffersize)
+{
+	<span class="enscript-type">int</span> retval = 0, len;
+	<span class="enscript-type">struct</span> proc_bsdinfo pbsd;
+	
+	
+	<span class="enscript-keyword">if</span> (buffersize &lt; <span class="enscript-keyword">sizeof</span>(pbsd.pbi_name)) {
+		errno = ENOMEM;
+		<span class="enscript-keyword">return</span>(0);
+	}
+
+	retval = proc_pidinfo(pid, PROC_PIDTBSDINFO, (uint64_t)0, &amp;pbsd, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> proc_bsdinfo));
+	<span class="enscript-keyword">if</span> (retval != 0) {
+		<span class="enscript-keyword">if</span> (pbsd.pbi_name[0]) {
+			bcopy(&amp;pbsd.pbi_name, buffer, <span class="enscript-keyword">sizeof</span>(pbsd.pbi_name));
+		} <span class="enscript-keyword">else</span> {
+			bcopy(&amp;pbsd.pbi_comm, buffer, <span class="enscript-keyword">sizeof</span>(pbsd.pbi_comm));
+		}
+		len = (<span class="enscript-type">int</span>)strlen(buffer);
+		<span class="enscript-keyword">return</span>(len);
+	}
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_regionfilename</span>(<span class="enscript-type">int</span> pid, uint64_t address, <span class="enscript-type">void</span> * buffer, uint32_t buffersize)
+{
+	<span class="enscript-type">int</span> retval = 0, len;
+	<span class="enscript-type">struct</span> proc_regionwithpathinfo reginfo;
+	
+	<span class="enscript-keyword">if</span> (buffersize &lt; MAXPATHLEN) {
+		errno = ENOMEM;
+		<span class="enscript-keyword">return</span>(0);
+	}
+	
+	retval = proc_pidinfo(pid, PROC_PIDREGIONPATHINFO, (uint64_t)address, &amp;reginfo, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> proc_regionwithpathinfo));
+	<span class="enscript-keyword">if</span> (retval != -1) {
+		len = (<span class="enscript-type">int</span>)strlen(&amp;reginfo.prp_vip.vip_path[0]);
+		<span class="enscript-keyword">if</span> (len != 0) {
+			<span class="enscript-keyword">if</span> (len &gt; MAXPATHLEN)
+				len = MAXPATHLEN;
+			bcopy(&amp;reginfo.prp_vip.vip_path[0], buffer, len);
+			<span class="enscript-keyword">return</span>(len);
+		}
+		<span class="enscript-keyword">return</span>(0);
+	}
+	<span class="enscript-keyword">return</span>(0);
+			
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_kmsgbuf</span>(<span class="enscript-type">void</span> * buffer, uint32_t  buffersize)
+{
+	<span class="enscript-type">int</span> retval;
+
+	<span class="enscript-keyword">if</span> ((retval = __proc_info(PROC_INFO_CALL_KERNMSGBUF, 0,  0, (uint64_t)0, buffer, buffersize)) == -1)
+		<span class="enscript-keyword">return</span>(0);
+	<span class="enscript-keyword">return</span> (retval);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_pidpath</span>(<span class="enscript-type">int</span> pid, <span class="enscript-type">void</span> * buffer, uint32_t  buffersize)
+{
+	<span class="enscript-type">int</span> retval, len;
+
+	<span class="enscript-keyword">if</span> (buffersize &lt; PROC_PIDPATHINFO_SIZE) {
+		errno = ENOMEM;
+		<span class="enscript-keyword">return</span>(0);
+	}
+	<span class="enscript-keyword">if</span> (buffersize &gt;  PROC_PIDPATHINFO_MAXSIZE) {
+		errno = EOVERFLOW;
+		<span class="enscript-keyword">return</span>(0);
+	}
+
+	retval = __proc_info(PROC_INFO_CALL_PIDINFO, pid, PROC_PIDPATHINFO,  (uint64_t)0,  buffer, buffersize);
+	<span class="enscript-keyword">if</span> (retval != -1) {
+		len = (<span class="enscript-type">int</span>)strlen(buffer);
+		<span class="enscript-keyword">return</span>(len);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_libversion</span>(<span class="enscript-type">int</span> *major, <span class="enscript-type">int</span> * minor)
+{
+
+	<span class="enscript-keyword">if</span> (major != NULL)
+		*major = 1;
+	<span class="enscript-keyword">if</span> (minor != NULL)
+		*minor = 1;
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_setpcontrol</span>(<span class="enscript-type">const</span> <span class="enscript-type">int</span> control)
+{
+	<span class="enscript-type">int</span> retval ;
+
+	<span class="enscript-keyword">if</span> (control &lt; PROC_SETPC_NONE || control &gt; PROC_SETPC_TERMINATE)
+		<span class="enscript-keyword">return</span>(EINVAL);
+
+	<span class="enscript-keyword">if</span> ((retval = __proc_info(PROC_INFO_CALL_SETCONTROL, getpid(), PROC_SELFSET_PCONTROL, (uint64_t)control, NULL, 0)) == -1)
+		<span class="enscript-keyword">return</span>(errno);
+		
+	<span class="enscript-keyword">return</span>(0);
+}
+
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_setthreadname</span>(<span class="enscript-type">void</span> * buffer, <span class="enscript-type">int</span> buffersize)
+{
+	<span class="enscript-type">int</span> retval;
+
+        retval = __proc_info(PROC_INFO_CALL_SETCONTROL, getpid(), PROC_SELFSET_THREADNAME, (uint64_t)0, buffer, buffersize);
+
+	<span class="enscript-keyword">if</span> (retval == -1)
+                <span class="enscript-keyword">return</span>(errno);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_track_dirty</span>(pid_t pid, uint32_t flags)
+{
+	<span class="enscript-keyword">if</span> (__proc_info(PROC_INFO_CALL_DIRTYCONTROL, pid, PROC_DIRTYCONTROL_TRACK, flags, NULL, 0) == -1) {
+		<span class="enscript-keyword">return</span> errno;
+	}
+		
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_set_dirty</span>(pid_t pid, bool dirty)
+{
+	<span class="enscript-keyword">if</span> (__proc_info(PROC_INFO_CALL_DIRTYCONTROL, pid, PROC_DIRTYCONTROL_SET, dirty, NULL, 0) == -1) {
+		<span class="enscript-keyword">return</span> errno;		
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_get_dirty</span>(pid_t pid, uint32_t *flags)
+{
+	<span class="enscript-type">int</span> retval;
+	
+	<span class="enscript-keyword">if</span> (!flags) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+	retval = __proc_info(PROC_INFO_CALL_DIRTYCONTROL, pid, PROC_DIRTYCONTROL_GET, 0, NULL, 0);
+	<span class="enscript-keyword">if</span> (retval == -1) {
+		<span class="enscript-keyword">return</span> errno;		
+	}
+	
+	*flags = retval;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_clear_dirty</span>(pid_t pid, uint32_t flags)
+{
+	<span class="enscript-keyword">if</span> (__proc_info(PROC_INFO_CALL_DIRTYCONTROL, pid, PROC_DIRTYCONTROL_CLEAR, flags, NULL, 0) == -1) {
+		<span class="enscript-keyword">return</span> errno;		
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_terminate</span>(pid_t pid, <span class="enscript-type">int</span> *sig)
+{
+	<span class="enscript-type">int</span> retval;
+	
+	<span class="enscript-keyword">if</span> (!sig) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	
+	retval = __proc_info(PROC_INFO_CALL_TERMINATE, pid, 0, 0, NULL, 0);
+	<span class="enscript-keyword">if</span> (retval == -1) {
+		<span class="enscript-keyword">return</span> errno;		
+	}
+	
+	*sig = retval;
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_set_cpumon_params</span>(pid_t pid, <span class="enscript-type">int</span> percentage, <span class="enscript-type">int</span> interval)
+{
+	proc_policy_cpuusage_attr_t attr;
+
+	attr.ppattr_cpu_attr = PROC_POLICY_RSRCACT_NOTIFY_EXC;
+	attr.ppattr_cpu_percentage = percentage;
+	attr.ppattr_cpu_attr_interval = (uint64_t)interval;
+	attr.ppattr_cpu_attr_deadline = 0;
+
+	<span class="enscript-keyword">return</span>(__process_policy(PROC_POLICY_SCOPE_PROCESS, PROC_POLICY_ACTION_SET, PROC_POLICY_RESOURCE_USAGE,
+		PROC_POLICY_RUSAGE_CPU, (proc_policy_attribute_t*)&amp;attr, pid, 0));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_get_cpumon_params</span>(pid_t pid, <span class="enscript-type">int</span> *percentage, <span class="enscript-type">int</span> *interval)
+{
+	proc_policy_cpuusage_attr_t attr;
+	<span class="enscript-type">int</span> ret;
+
+	ret = __process_policy(PROC_POLICY_SCOPE_PROCESS, PROC_POLICY_ACTION_GET, PROC_POLICY_RESOURCE_USAGE,
+		PROC_POLICY_RUSAGE_CPU, (proc_policy_attribute_t*)&amp;attr, pid, 0);
+
+	<span class="enscript-keyword">if</span> ((ret == 0) &amp;&amp; (attr.ppattr_cpu_attr == PROC_POLICY_RSRCACT_NOTIFY_EXC)) {
+		*percentage = attr.ppattr_cpu_percentage;
+		*interval = (<span class="enscript-type">int</span>)attr.ppattr_cpu_attr_interval;
+	} <span class="enscript-keyword">else</span> {
+		*percentage = 0;
+		*interval = 0;
+	}
+
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_set_cpumon_defaults</span>(pid_t pid)
+{
+	proc_policy_cpuusage_attr_t attr;
+
+	attr.ppattr_cpu_attr = PROC_POLICY_RSRCACT_NOTIFY_EXC;
+	attr.ppattr_cpu_percentage = PROC_POLICY_CPUMON_DEFAULTS;
+	attr.ppattr_cpu_attr_interval = 0;
+	attr.ppattr_cpu_attr_deadline = 0;
+
+	<span class="enscript-keyword">return</span>(__process_policy(PROC_POLICY_SCOPE_PROCESS, PROC_POLICY_ACTION_SET, PROC_POLICY_RESOURCE_USAGE,
+		PROC_POLICY_RUSAGE_CPU, (proc_policy_attribute_t*)&amp;attr, pid, 0));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_disable_cpumon</span>(pid_t pid)
+{
+	proc_policy_cpuusage_attr_t attr;
+
+	attr.ppattr_cpu_attr = PROC_POLICY_RSRCACT_NOTIFY_EXC;
+	attr.ppattr_cpu_percentage = PROC_POLICY_CPUMON_DISABLE;
+	attr.ppattr_cpu_attr_interval = 0;
+	attr.ppattr_cpu_attr_deadline = 0;
+
+	<span class="enscript-keyword">return</span>(__process_policy(PROC_POLICY_SCOPE_PROCESS, PROC_POLICY_ACTION_SET, PROC_POLICY_RESOURCE_USAGE,
+		PROC_POLICY_RUSAGE_CPU, (proc_policy_attribute_t*)&amp;attr, pid, 0));
+}
+
+
+<span class="enscript-comment">/*
+ * Turn on the CPU usage monitor using the supplied parameters, and make
+ * violations of the monitor fatal.
+ *
+ * Returns:  0 on success;
+ *	    -1 on failure and sets errno
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_set_cpumon_params_fatal</span>(pid_t pid, <span class="enscript-type">int</span> percentage, <span class="enscript-type">int</span> interval)
+{
+	<span class="enscript-type">int</span> current_percentage = 0;
+	<span class="enscript-type">int</span> current_interval = 0;   <span class="enscript-comment">/* intervals are in seconds */</span>
+	<span class="enscript-type">int</span> ret = 0;
+
+	<span class="enscript-keyword">if</span> ((percentage &lt;= 0)  || (interval &lt;= 0)) {
+		errno = EINVAL;
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	<span class="enscript-comment">/*
+	 * Do a simple query to see if CPU monitoring is
+	 * already active.  If either the percentage or the
+	 * interval is nonzero, then CPU monitoring is
+	 * already in use for this process.
+	 */</span>
+	(<span class="enscript-type">void</span>)proc_get_cpumon_params(pid, &amp;current_percentage, &amp;current_interval);
+	<span class="enscript-keyword">if</span> (current_percentage || current_interval)
+	{
+		<span class="enscript-comment">/*
+		 * The CPU monitor appears to be active.
+		 * We choose not to disturb those settings.
+		 */</span>
+		errno = EBUSY;
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	
+	<span class="enscript-keyword">if</span> ((ret = proc_set_cpumon_params(pid, percentage, interval)) != 0) {
+		<span class="enscript-comment">/* Failed to activate the CPU monitor */</span>
+		<span class="enscript-keyword">return</span> (ret);
+	}
+	
+	<span class="enscript-keyword">if</span> ((ret = proc_rlimit_control(pid, RLIMIT_CPU_USAGE_MONITOR, CPUMON_MAKE_FATAL)) != 0) {
+		<span class="enscript-comment">/* Failed to set termination, back out the CPU monitor settings. */</span>
+		(<span class="enscript-type">void</span>)proc_disable_cpumon(pid);
+	}
+
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_set_wakemon_params</span>(pid_t pid, <span class="enscript-type">int</span> rate_hz, <span class="enscript-type">int</span> flags __unused)
+{
+	<span class="enscript-type">struct</span> proc_rlimit_control_wakeupmon params;
+
+	params.wm_flags = WAKEMON_ENABLE;
+	params.wm_rate = rate_hz;
+
+	<span class="enscript-keyword">return</span> (proc_rlimit_control(pid, RLIMIT_WAKEUPS_MONITOR, &amp;params));
+}
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">WAKEMON_GET_PARAMS</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">WAKEMON_GET_PARAMS</span> 0x4
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">WAKEMON_SET_DEFAULTS</span> 0x8
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_get_wakemon_params</span>(pid_t pid, <span class="enscript-type">int</span> *rate_hz, <span class="enscript-type">int</span> *flags)
+{
+	<span class="enscript-type">struct</span> proc_rlimit_control_wakeupmon params;
+	<span class="enscript-type">int</span> error;
+
+	params.wm_flags = WAKEMON_GET_PARAMS;
+
+	<span class="enscript-keyword">if</span> ((error = proc_rlimit_control(pid, RLIMIT_WAKEUPS_MONITOR, &amp;params)) != 0) {
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	*rate_hz = params.wm_rate;
+	*flags = params.wm_flags;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_set_wakemon_defaults</span>(pid_t pid)
+{
+	<span class="enscript-type">struct</span> proc_rlimit_control_wakeupmon params;
+
+	params.wm_flags = WAKEMON_ENABLE | WAKEMON_SET_DEFAULTS;
+	params.wm_rate = -1;
+
+	<span class="enscript-keyword">return</span> (proc_rlimit_control(pid, RLIMIT_WAKEUPS_MONITOR, &amp;params));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_disable_wakemon</span>(pid_t pid)
+{
+	<span class="enscript-type">struct</span> proc_rlimit_control_wakeupmon params;
+
+	params.wm_flags = WAKEMON_DISABLE;
+	params.wm_rate = -1;
+
+	<span class="enscript-keyword">return</span> (proc_rlimit_control(pid, RLIMIT_WAKEUPS_MONITOR, &amp;params));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_list_uptrs</span>(<span class="enscript-type">int</span> pid, uint64_t *buf, uint32_t bufsz)
+{
+	<span class="enscript-type">int</span> i, j;
+	<span class="enscript-type">int</span> nfds, nkns;
+	<span class="enscript-type">int</span> count = 0;
+	<span class="enscript-type">int</span> knote_max = 4096; <span class="enscript-comment">/* arbitrary starting point */</span>
+
+	<span class="enscript-comment">/* if buffer is empty, this call simply counts the knotes */</span>
+	<span class="enscript-keyword">if</span> (bufsz &gt; 0 &amp;&amp; buf == NULL) {
+		errno = EFAULT;
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-type">struct</span> proc_fdinfo fdlist[OPEN_MAX];
+	nfds = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fdlist, OPEN_MAX*<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> proc_fdinfo));
+	<span class="enscript-keyword">if</span> (nfds &lt;= 0 || nfds &gt; OPEN_MAX) {
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-type">struct</span> kevent_extinfo *kqext = malloc(knote_max * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kevent_extinfo));
+	<span class="enscript-keyword">if</span> (!kqext) {
+		errno = ENOMEM;
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; nfds; i++) {
+		<span class="enscript-keyword">if</span> (fdlist[i].proc_fdtype != PROX_FDTYPE_KQUEUE) {
+			<span class="enscript-keyword">continue</span>;
+		}
+
+ <span class="enscript-reference">again</span>:
+		nkns = __proc_info(PROC_INFO_CALL_PIDFDINFO, pid, PROC_PIDFDKQUEUE_EXTINFO,
+				(uint64_t)fdlist[i].proc_fd, kqext, knote_max * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kevent_extinfo));
+		<span class="enscript-keyword">if</span> (nkns &lt; 0) {
+			<span class="enscript-keyword">if</span> (errno == EBADF) {
+				<span class="enscript-comment">/* the FD table can change after enumerating the FDs */</span>
+				errno = EAGAIN;
+			}
+			free(kqext);
+			<span class="enscript-keyword">return</span> -1;
+		}
+
+		<span class="enscript-keyword">if</span> (nkns &gt; knote_max) {
+			<span class="enscript-comment">/* there are more knotes than we requested - try again with a
+			 * larger buffer */</span>
+			free(kqext);
+			knote_max = nkns + 32; <span class="enscript-comment">/* small margin in case of extra knotes */</span>
+			kqext = malloc(knote_max * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kevent_extinfo));
+			<span class="enscript-keyword">if</span> (!kqext) {
+				errno = ENOMEM;
+				<span class="enscript-keyword">return</span> -1;
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+		}
+
+		<span class="enscript-keyword">for</span> (j = 0; j &lt; nkns; j++) {
+			<span class="enscript-keyword">if</span> (kqext[j].kqext_kev.udata == 0) {
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			<span class="enscript-keyword">if</span> (bufsz &gt;= <span class="enscript-keyword">sizeof</span>(uint64_t)) {
+				*buf++ = kqext[j].kqext_kev.udata;
+				bufsz -= <span class="enscript-keyword">sizeof</span>(uint64_t);
+			}
+			count++;
+		}
+	}
+
+	free(kqext);
+	<span class="enscript-keyword">return</span> count;
+}
+
+
+
+<span class="enscript-comment">/* Donate importance to adaptive processes from this process */</span>
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_donate_importance_boost</span>()
+{
+	<span class="enscript-type">int</span> rval;
+
+	rval = __process_policy(PROC_POLICY_SCOPE_PROCESS,
+							PROC_POLICY_ACTION_SET,
+							PROC_POLICY_BOOST,
+							PROC_POLICY_IMP_DONATION,
+							NULL, getpid(), 0);
+
+	<span class="enscript-keyword">if</span> (rval == 0)
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> (errno);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-function-name">__attribute__</span>((noinline)) <span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_importance_bad_assertion</span>(<span class="enscript-type">char</span> *reason) {
+    (<span class="enscript-type">void</span>)reason;
+}
+
+<span class="enscript-comment">/* 
+ * Use the address of these variables as the token.  This way, they can be
+ * printed in the debugger as useful names.
+ */</span>
+uint64_t important_boost_assertion_token = 0xfafafafafafafafa;
+uint64_t normal_boost_assertion_token    = 0xfbfbfbfbfbfbfbfb;
+uint64_t non_boost_assertion_token       = 0xfcfcfcfcfcfcfcfc;
+uint64_t denap_boost_assertion_token	 = 0xfdfdfdfdfdfdfdfd;
+
+<span class="enscript-comment">/*
+ * Accept the boost on a message, or request another boost assertion
+ * if we have already accepted the implicit boost for this message.
+ *
+ * Returns EOVERFLOW if an attempt is made to take an extra assertion when not boosted.
+ *
+ * Returns EIO if the message was not a boosting message.
+ * TODO: Return a 'non-boost' token instead.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_importance_assertion_begin_with_msg</span>(mach_msg_header_t  *msg,
+                                __unused mach_msg_trailer_t *trailer,
+                                         uint64_t           *assertion_token)
+{
+	<span class="enscript-type">int</span> rval = 0;
+
+	<span class="enscript-keyword">if</span> (assertion_token == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LEGACYBOOSTMASK</span> (MACH_MSGH_BITS_VOUCHER_MASK | MACH_MSGH_BITS_RAISEIMP)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">LEGACYBOOSTED</span>(m) (((m)-&gt;msgh_bits &amp; LEGACYBOOSTMASK) == MACH_MSGH_BITS_RAISEIMP)
+
+	<span class="enscript-comment">/* Is this a legacy boosted message? */</span>
+	<span class="enscript-keyword">if</span> (LEGACYBOOSTED(msg)) {
+
+		<span class="enscript-comment">/* 
+		 * Have we accepted the implicit boost for this message yet?
+		 * If we haven't accepted it yet, no need to call into kernel. 
+		 */</span>
+		<span class="enscript-keyword">if</span> ((msg-&gt;msgh_bits &amp; MACH_MSGH_BITS_IMPHOLDASRT) == 0) {
+			msg-&gt;msgh_bits |= MACH_MSGH_BITS_IMPHOLDASRT;
+			*assertion_token = (uint64_t) &amp;important_boost_assertion_token;
+			<span class="enscript-keyword">return</span> (0);
+		}
+
+		<span class="enscript-comment">/* Request an additional boost count */</span>
+		rval = __process_policy(PROC_POLICY_SCOPE_PROCESS,
+								PROC_POLICY_ACTION_HOLD,
+								PROC_POLICY_BOOST,
+								PROC_POLICY_IMP_IMPORTANT,
+								NULL, getpid(), 0);
+		<span class="enscript-keyword">if</span> (rval == 0) {
+			*assertion_token = (uint64_t) &amp;important_boost_assertion_token;
+			<span class="enscript-keyword">return</span> (0);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (errno == EOVERFLOW) {
+			proc_importance_bad_assertion(<span class="enscript-string">&quot;Attempted to take assertion while not boosted&quot;</span>);
+			<span class="enscript-keyword">return</span> (errno);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span> (errno);
+		}
+	}
+	
+	<span class="enscript-keyword">return</span> (EIO);
+}
+
+
+<span class="enscript-comment">/*
+ * Drop a boost assertion.
+ * Returns EOVERFLOW on boost assertion underflow.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_importance_assertion_complete</span>(uint64_t assertion_token)
+{
+	<span class="enscript-type">int</span> rval = 0;
+
+	<span class="enscript-keyword">if</span> (assertion_token == 0)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">if</span> (assertion_token == (uint64_t) &amp;important_boost_assertion_token) {
+		rval = __process_policy(PROC_POLICY_SCOPE_PROCESS,
+								PROC_POLICY_ACTION_DROP,
+								PROC_POLICY_BOOST,
+								PROC_POLICY_IMP_IMPORTANT,
+								NULL, getpid(), 0);		
+		<span class="enscript-keyword">if</span> (rval == 0) {
+			<span class="enscript-keyword">return</span> (0);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (errno == EOVERFLOW) {
+			proc_importance_bad_assertion(<span class="enscript-string">&quot;Attempted to drop too many assertions&quot;</span>);
+			<span class="enscript-keyword">return</span> (errno);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span> (errno);
+		}
+	} <span class="enscript-keyword">else</span> {
+		proc_importance_bad_assertion(<span class="enscript-string">&quot;Attempted to drop assertion with invalid token&quot;</span>);
+		<span class="enscript-keyword">return</span> (EIO);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Accept the De-Nap boost on a message, or request another boost assertion
+ * if we have already accepted the implicit boost for this message.
+ *
+ * Interface is deprecated before it really got started - just as synonym
+ * for proc_importance_assertion_begin_with_msg() now.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_denap_assertion_begin_with_msg</span>(mach_msg_header_t  *msg,
+				    uint64_t           *assertion_token)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">clang</span> <span class="enscript-variable-name">diagnostic</span> <span class="enscript-variable-name">push</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">clang</span> <span class="enscript-variable-name">diagnostic</span> <span class="enscript-variable-name">ignored</span> <span class="enscript-string">&quot;-Wdeprecated-declarations&quot;</span>
+	<span class="enscript-keyword">return</span> proc_importance_assertion_begin_with_msg(msg, NULL, assertion_token);
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">clang</span> <span class="enscript-variable-name">diagnostic</span> <span class="enscript-variable-name">pop</span>
+}
+
+
+<span class="enscript-comment">/*
+ * Drop a denap boost assertion.
+ *
+ * Interface is deprecated before it really got started - just a synonym
+ * for proc_importance_assertion_complete() now.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_denap_assertion_complete</span>(uint64_t assertion_token)
+{
+	<span class="enscript-keyword">return</span> proc_importance_assertion_complete(assertion_token);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_clear_vmpressure</span>(pid_t pid)
+{
+	<span class="enscript-keyword">if</span> (__process_policy(PROC_POLICY_SCOPE_PROCESS, PROC_POLICY_ACTION_RESTORE, PROC_POLICY_RESOURCE_STARVATION, PROC_POLICY_RS_VIRTUALMEM, NULL, pid, (uint64_t)0) != -1)
+		<span class="enscript-keyword">return</span>(0);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>(errno);
+}
+
+<span class="enscript-comment">/* set the current process as one who can resume suspended processes due to low virtual memory. Need to be root */</span>
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_set_owner_vmpressure</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> retval;
+
+	<span class="enscript-keyword">if</span> ((retval = __proc_info(PROC_INFO_CALL_SETCONTROL, getpid(), PROC_SELFSET_VMRSRCOWNER, (uint64_t)0, NULL, 0)) == -1)
+		<span class="enscript-keyword">return</span>(errno);
+		
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/* mark yourself to delay idle sleep on disk IO */</span>
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_set_delayidlesleep</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> retval;
+
+	<span class="enscript-keyword">if</span> ((retval = __proc_info(PROC_INFO_CALL_SETCONTROL, getpid(), PROC_SELFSET_DELAYIDLESLEEP, (uint64_t)1, NULL, 0)) == -1)
+		<span class="enscript-keyword">return</span>(errno);
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/* Reset yourself to delay idle sleep on disk IO, if already set */</span>
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_clear_delayidlesleep</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> retval;
+
+	<span class="enscript-keyword">if</span> ((retval = __proc_info(PROC_INFO_CALL_SETCONTROL, getpid(), PROC_SELFSET_DELAYIDLESLEEP, (uint64_t)0, NULL, 0)) == -1)
+		<span class="enscript-keyword">return</span>(errno);
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/* disable the launch time backgroudn policy and restore the process to default group */</span>
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_disable_apptype</span>(pid_t pid, <span class="enscript-type">int</span> apptype)
+{
+	<span class="enscript-keyword">switch</span> (apptype) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_OSX_APPTYPE_TAL</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_OSX_APPTYPE_DASHCLIENT</span>:
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span>(EINVAL);
+	}
+
+	<span class="enscript-keyword">if</span> (__process_policy(PROC_POLICY_SCOPE_PROCESS, PROC_POLICY_ACTION_DISABLE, PROC_POLICY_APPTYPE, apptype, NULL, pid, (uint64_t)0) != -1)
+		<span class="enscript-keyword">return</span>(0);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>(errno);
+
+}
+
+<span class="enscript-comment">/* re-enable the launch time background policy if it had been disabled. */</span>
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">proc_enable_apptype</span>(pid_t pid, <span class="enscript-type">int</span> apptype)
+{
+	<span class="enscript-keyword">switch</span> (apptype) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_OSX_APPTYPE_TAL</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_OSX_APPTYPE_DASHCLIENT</span>:
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span>(EINVAL);
+
+	}
+
+	<span class="enscript-keyword">if</span> (__process_policy(PROC_POLICY_SCOPE_PROCESS, PROC_POLICY_ACTION_ENABLE, PROC_POLICY_APPTYPE, apptype, NULL, pid, (uint64_t)0) != -1)
+		<span class="enscript-keyword">return</span>(0);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>(errno);
+ 
+}
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">TARGET_IPHONE_SIMULATOR</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_suppress</span>(__unused pid_t pid, __unused uint64_t *generation)
+{
+	<span class="enscript-keyword">return</span> 0;
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !TARGET_IPHONE_SIMULATOR */</span>
+
+
+
+
+</pre>
+<hr />
+</body></html>

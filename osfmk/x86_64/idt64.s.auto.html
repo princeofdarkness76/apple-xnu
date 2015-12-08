@@ -1,0 +1,1455 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>idt64.s</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">idt64.s&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+/*
+ <span class="enscript-keyword">*</span> Copyright (c) 2010 Apple Inc. All rights reserved.
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span> @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ <span class="enscript-keyword">*</span> 
+ <span class="enscript-keyword">*</span> This file contains Original Code and/or Modifications of Original Code
+ <span class="enscript-keyword">*</span> as defined in and that are subject to the Apple Public Source License
+ <span class="enscript-keyword">*</span> Version 2.0 (the 'License'). You may not use this file except in
+ <span class="enscript-keyword">*</span> compliance with the License. The rights granted to you under the License
+ <span class="enscript-keyword">*</span> may not be used to create, or enable the creation or redistribution of,
+ <span class="enscript-keyword">*</span> unlawful or unlicensed copies of an Apple operating system, or to
+ <span class="enscript-keyword">*</span> circumvent, violate, or enable the circumvention or violation of, any
+ <span class="enscript-keyword">*</span> terms of an Apple operating system software license agreement.
+ <span class="enscript-keyword">*</span> 
+ <span class="enscript-keyword">*</span> Please obtain a copy of the License at
+ <span class="enscript-keyword">*</span> <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ <span class="enscript-keyword">*</span> 
+ <span class="enscript-keyword">*</span> The Original Code and all software distributed under the License are
+ <span class="enscript-keyword">*</span> distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ <span class="enscript-keyword">*</span> EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ <span class="enscript-keyword">*</span> INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ <span class="enscript-keyword">*</span> FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ <span class="enscript-keyword">*</span> Please see the License for the specific language governing rights and
+ <span class="enscript-keyword">*</span> limitations under the License.
+ <span class="enscript-keyword">*</span> 
+ <span class="enscript-keyword">*</span> @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ <span class="enscript-keyword">*/
+</span>#include &lt;i386/asm.h&gt;
+#include &lt;assym.s&gt;
+#include &lt;debug.h&gt;
+#include &lt;i386/eflags.h&gt;
+#include &lt;i386/rtclock_asm.h&gt;
+#include &lt;i386/trap.h&gt;
+#define _ARCH_I386_ASM_HELP_H_	/* Prevent inclusion of user header */
+#include &lt;mach/i386/syscall_sw.h&gt;
+#include &lt;i386/postcode.h&gt;
+#include &lt;i386/proc_reg.h&gt;
+#include &lt;mach/exception_types.h&gt;
+
+#if DEBUG
+#define	DEBUG_IDT64 		1	
+#endif
+
+/*
+ <span class="enscript-keyword">*</span> This is the low-level trap and interrupt handling code associated with
+ <span class="enscript-keyword">*</span> the IDT. It also includes system call handlers for sysenter/syscall.
+ <span class="enscript-keyword">*</span> The IDT itself is defined in mp_desc.c.
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span> Code here is structured as follows:
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span> stubs 	Code called directly from an IDT vector.
+ <span class="enscript-keyword">*</span>		All entry points have the <span class="enscript-string">&quot;idt64_&quot;</span> prefix and they are built
+ <span class="enscript-keyword">*</span>		using macros expanded by the inclusion of idt_table.h.
+ <span class="enscript-keyword">*</span>		This code performs vector-dependent identification and jumps
+ <span class="enscript-keyword">*</span> 		into the dispatch code.
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span> dispatch	The dispatch code is responsible for saving the thread state
+ <span class="enscript-keyword">*</span>		(which is either 64-bit or 32-bit) and then jumping to the
+ <span class="enscript-keyword">*</span>		class handler identified by the stub.
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span> returns	Code to restore state and return to the previous context.
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span> handlers	There are several classes of handlers:
+ <span class="enscript-keyword">*</span>   interrupt	- asynchronous events typically from external devices
+ <span class="enscript-keyword">*</span>   trap	- synchronous events due to thread execution
+ <span class="enscript-keyword">*</span>   syscall	- synchronous system call request
+ <span class="enscript-keyword">*</span>   fatal	- fatal traps
+ <span class="enscript-keyword">*/
+</span>
+/*
+ <span class="enscript-keyword">*</span> Handlers:
+ <span class="enscript-keyword">*/
+</span>#define	HNDL_ALLINTRS		EXT(hndl_allintrs)
+#define	HNDL_ALLTRAPS		EXT(hndl_alltraps)
+#define	HNDL_SYSENTER		EXT(hndl_sysenter)
+#define	HNDL_SYSCALL		EXT(hndl_syscall)
+#define	HNDL_UNIX_SCALL		EXT(hndl_unix_scall)
+#define	HNDL_MACH_SCALL		EXT(hndl_mach_scall)
+#define	HNDL_MDEP_SCALL		EXT(hndl_mdep_scall)
+#define	HNDL_DOUBLE_FAULT	EXT(hndl_double_fault)
+#define	HNDL_MACHINE_CHECK	EXT(hndl_machine_check)
+
+
+#if 1
+#define PUSH_FUNCTION(func) 			 \
+	<span class="enscript-keyword">sub</span>	$8, %rsp			<span class="enscript-comment">;\
+	push	%rax				;\
+</span>	<span class="enscript-keyword">leaq</span>	func(%rip), %rax		<span class="enscript-comment">;\
+	movq	%rax, 8(%rsp)			;\
+</span>	<span class="enscript-keyword">pop</span>	%rax
+#else
+#define PUSH_FUNCTION(func) pushq func
+#endif
+
+/* The wrapper for all non-special traps/interrupts */
+/* Everything up to PUSH_FUNCTION is just to output 
+ <span class="enscript-keyword">*</span> the interrupt number out to the postcode display
+ <span class="enscript-keyword">*/
+</span>#if DEBUG_IDT64
+#define IDT_ENTRY_WRAPPER(n, f)			 \
+	<span class="enscript-keyword">push</span>	%rax				<span class="enscript-comment">;\
+	POSTCODE2(0x6400+n)			;\
+</span>	<span class="enscript-keyword">pop</span>	%rax				<span class="enscript-comment">;\
+	PUSH_FUNCTION(f)  			;\
+</span>	<span class="enscript-keyword">pushq</span>	$(n)				<span class="enscript-comment">;\
+	jmp L_dispatch
+</span>#else
+#define IDT_ENTRY_WRAPPER(n, f)			 \
+	<span class="enscript-keyword">PUSH_FUNCTION(f)</span>  			<span class="enscript-comment">;\
+	pushq	$(n)				;\
+</span>	<span class="enscript-keyword">jmp</span> L_dispatch
+#endif
+
+/* A trap that comes with an error code already on the stack */
+#define TRAP_ERR(n, f)				 \
+	<span class="enscript-keyword">Entry(f)</span>				<span class="enscript-comment">;\
+	IDT_ENTRY_WRAPPER(n, HNDL_ALLTRAPS)
+</span>
+/* A normal trap */
+#define TRAP(n, f)				 \
+	<span class="enscript-keyword">Entry(f)</span>				<span class="enscript-comment">;\
+	pushq	$0          			;\
+</span>	<span class="enscript-keyword">IDT_ENTRY_WRAPPER(n,</span> HNDL_ALLTRAPS)
+
+#define USER_TRAP TRAP
+
+/* An interrupt */
+#define INTERRUPT(n)			 	\
+	<span class="enscript-keyword">Entry(_intr_</span> ## n)			<span class="enscript-comment">;\
+	pushq	$0          			;\
+</span>	<span class="enscript-keyword">IDT_ENTRY_WRAPPER(n,</span> HNDL_ALLINTRS)
+
+/* A trap with a special-case handler, hence we don't need to define anything */
+#define TRAP_SPC(n, f)
+#define TRAP_IST1(n, f)
+#define TRAP_IST2(n, f)
+#define USER_TRAP_SPC(n, f)
+
+/* Generate all the stubs */
+#include <span class="enscript-string">&quot;idt_table.h&quot;</span>
+
+/*
+ <span class="enscript-keyword">*</span> Common dispatch point.
+ <span class="enscript-keyword">*</span> Determine what mode has been interrupted and save state accordingly.
+ <span class="enscript-keyword">*</span> Here with:
+ <span class="enscript-keyword">*</span>	rsp	from user-space:   interrupt state in PCB, or
+ <span class="enscript-keyword">*</span>		from kernel-space: interrupt state in kernel or interrupt stack
+ <span class="enscript-keyword">*</span>	GSBASE	from user-space:   pthread area, or
+ <span class="enscript-keyword">*</span>		from kernel-space: cpu_data
+ <span class="enscript-keyword">*/
+</span><span class="enscript-function-name">L_dispatch:</span>
+	<span class="enscript-keyword">cmpl</span>	$(KERNEL64_CS), ISF64_CS(%rsp)
+	<span class="enscript-keyword">je</span>	L_dispatch_kernel
+
+	<span class="enscript-keyword">swapgs
+</span>
+<span class="enscript-function-name">L_dispatch_user:</span>
+	<span class="enscript-keyword">cmpl</span>	$(TASK_MAP_32BIT), %gs:CPU_TASK_MAP
+	<span class="enscript-keyword">je</span>	L_dispatch_U32		/* 32-bit user task */
+
+<span class="enscript-function-name">L_dispatch_U64:</span>
+	<span class="enscript-keyword">subq</span>	$(ISS64_OFFSET), %rsp
+	<span class="enscript-keyword">mov</span>	%r15, R64_R15(%rsp)
+	<span class="enscript-keyword">mov</span>	%rsp, %r15
+	<span class="enscript-keyword">mov</span>	%gs:CPU_KERNEL_STACK, %rsp
+	<span class="enscript-keyword">jmp</span>	L_dispatch_64bit
+
+<span class="enscript-function-name">L_dispatch_kernel:</span>
+	<span class="enscript-keyword">subq</span>	$(ISS64_OFFSET), %rsp
+	<span class="enscript-keyword">mov</span>	%r15, R64_R15(%rsp)
+	<span class="enscript-keyword">mov</span>	%rsp, %r15
+
+/*
+ <span class="enscript-keyword">*</span> Here for 64-bit user task or kernel
+ <span class="enscript-keyword">*/
+</span><span class="enscript-function-name">L_dispatch_64bit:</span>
+	<span class="enscript-keyword">movl</span>	$(SS_64), SS_FLAVOR(%r15)
+
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Save segment regs - for completeness since theyre not used.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">movl</span>	%fs, R64_FS(%r15)
+	<span class="enscript-keyword">movl</span>	%gs, R64_GS(%r15)
+
+	<span class="enscript-keyword">/*</span> Save general-purpose registers */
+	<span class="enscript-keyword">mov</span>	%rax, R64_RAX(%r15)
+	<span class="enscript-keyword">mov</span>	%rbx, R64_RBX(%r15)
+	<span class="enscript-keyword">mov</span>	%rcx, R64_RCX(%r15)
+	<span class="enscript-keyword">mov</span>	%rdx, R64_RDX(%r15)
+	<span class="enscript-keyword">mov</span>	%rbp, R64_RBP(%r15)
+	<span class="enscript-keyword">mov</span>	%rdi, R64_RDI(%r15)
+	<span class="enscript-keyword">mov</span>	%rsi, R64_RSI(%r15)
+	<span class="enscript-keyword">mov</span>	%r8,  R64_R8(%r15)
+	<span class="enscript-keyword">mov</span>	%r9,  R64_R9(%r15)
+	<span class="enscript-keyword">mov</span>	%r10, R64_R10(%r15)
+	<span class="enscript-keyword">mov</span>	%r11, R64_R11(%r15)
+	<span class="enscript-keyword">mov</span>	%r12, R64_R12(%r15)
+	<span class="enscript-keyword">mov</span>	%r13, R64_R13(%r15)
+	<span class="enscript-keyword">mov</span>	%r14, R64_R14(%r15)
+
+	<span class="enscript-keyword">/*</span> cr2 is significant only for page-faults */
+	<span class="enscript-keyword">mov</span>	%cr2, %rax
+	<span class="enscript-keyword">mov</span>	%rax, R64_CR2(%r15)
+
+	<span class="enscript-keyword">mov</span>	R64_TRAPNO(%r15), %ebx	/* %ebx := trapno for later */
+	<span class="enscript-keyword">mov</span>	R64_TRAPFN(%r15), %rdx	/* %rdx := trapfn for later */
+	<span class="enscript-keyword">mov</span>	R64_CS(%r15), %esi	/* %esi := cs for later */
+
+	<span class="enscript-keyword">jmp</span>	L_common_dispatch
+
+<span class="enscript-function-name">L_64bit_entry_reject:</span>
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Here for a 64-bit user attempting an invalid kernel entry.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">pushq</span>	%rax
+	<span class="enscript-keyword">leaq</span>	HNDL_ALLTRAPS(%rip), %rax
+	<span class="enscript-keyword">movq</span>	%rax, ISF64_TRAPFN+8(%rsp)
+	<span class="enscript-keyword">popq</span>	%rax
+	<span class="enscript-keyword">movq</span>	$(T_INVALID_OPCODE), ISF64_TRAPNO(%rsp)
+	<span class="enscript-keyword">jmp</span> 	L_dispatch_U64
+	<span class="enscript-keyword">
+</span><span class="enscript-function-name">L_32bit_entry_check:</span>
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Check we're not a confused 64-bit user.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">cmpl</span>	$(TASK_MAP_32BIT), %gs:CPU_TASK_MAP
+	<span class="enscript-keyword">jne</span>	L_64bit_entry_reject
+	<span class="enscript-keyword">/*</span> fall through to 32-bit handler: */
+
+<span class="enscript-function-name">L_dispatch_U32:</span> /* 32-bit user task */
+	<span class="enscript-keyword">subq</span>	$(ISS64_OFFSET), %rsp
+	<span class="enscript-keyword">mov</span>	%rsp, %r15
+	<span class="enscript-keyword">mov</span>	%gs:CPU_KERNEL_STACK, %rsp
+	<span class="enscript-keyword">movl</span>	$(SS_32), SS_FLAVOR(%r15)
+
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Save segment regs
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">movl</span>	%ds, R32_DS(%r15)
+	<span class="enscript-keyword">movl</span>	%es, R32_ES(%r15)
+	<span class="enscript-keyword">movl</span>	%fs, R32_FS(%r15)
+	<span class="enscript-keyword">movl</span>	%gs, R32_GS(%r15)
+
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Save general 32-bit registers
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">mov</span>	%eax, R32_EAX(%r15)
+	<span class="enscript-keyword">mov</span>	%ebx, R32_EBX(%r15)
+	<span class="enscript-keyword">mov</span>	%ecx, R32_ECX(%r15)
+	<span class="enscript-keyword">mov</span>	%edx, R32_EDX(%r15)
+	<span class="enscript-keyword">mov</span>	%ebp, R32_EBP(%r15)
+	<span class="enscript-keyword">mov</span>	%esi, R32_ESI(%r15)
+	<span class="enscript-keyword">mov</span>	%edi, R32_EDI(%r15)
+
+	<span class="enscript-keyword">/*</span> Unconditionally save cr2<span class="enscript-comment">; only meaningful on page faults */
+	mov	%cr2, %rax
+</span>	<span class="enscript-keyword">mov</span>	%eax, R32_CR2(%r15)
+
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Copy registers already saved in the machine state 
+	 <span class="enscript-keyword">*</span> (in the interrupt stack frame) into the compat save area.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">mov</span>	R64_RIP(%r15), %eax
+	<span class="enscript-keyword">mov</span>	%eax, R32_EIP(%r15)
+	<span class="enscript-keyword">mov</span>	R64_RFLAGS(%r15), %eax
+	<span class="enscript-keyword">mov</span>	%eax, R32_EFLAGS(%r15)
+	<span class="enscript-keyword">mov</span>	R64_RSP(%r15), %eax
+	<span class="enscript-keyword">mov</span>	%eax, R32_UESP(%r15)
+	<span class="enscript-keyword">mov</span>	R64_SS(%r15), %eax
+	<span class="enscript-keyword">mov</span>	%eax, R32_SS(%r15)
+<span class="enscript-function-name">L_dispatch_U32_after_fault:</span>
+	<span class="enscript-keyword">mov</span>	R64_CS(%r15), %esi		/* %esi := %cs for later */
+	<span class="enscript-keyword">mov</span>	%esi, R32_CS(%r15)
+	<span class="enscript-keyword">mov</span>	R64_TRAPNO(%r15), %ebx		/* %ebx := trapno for later */
+	<span class="enscript-keyword">mov</span>	%ebx, R32_TRAPNO(%r15)
+	<span class="enscript-keyword">mov</span>	R64_ERR(%r15), %eax
+	<span class="enscript-keyword">mov</span>	%eax, R32_ERR(%r15)
+	<span class="enscript-keyword">mov</span>	R64_TRAPFN(%r15), %rdx		/* %rdx := trapfn for later */
+
+<span class="enscript-function-name">L_common_dispatch:</span>
+	<span class="enscript-keyword">cld</span>		/* Ensure the direction flag is clear in the kernel */
+	<span class="enscript-keyword">cmpl</span>    $0, EXT(pmap_smap_enabled)(%rip)
+	<span class="enscript-keyword">je</span>	1f
+	<span class="enscript-keyword">clac</span>		/* Clear EFLAGS.AC if SMAP is present/enabled */
+<span class="enscript-function-name">1:</span>
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> On entering the kernel, we don't need to switch cr3
+	 <span class="enscript-keyword">*</span> because the kernel shares the user's address space.
+	 <span class="enscript-keyword">*</span> But we mark the kernel's cr3 as <span class="enscript-string">&quot;active&quot;</span>.
+	 <span class="enscript-keyword">*</span> If, however, the invalid cr3 flag is set, we have to flush tlbs
+	 <span class="enscript-keyword">*</span> since the kernel's mapping was changed while we were in userspace.
+	 <span class="enscript-keyword">*
+</span>	 <span class="enscript-keyword">*</span> But: if global no_shared_cr3 is TRUE we do switch to the kernel's cr3
+	 <span class="enscript-keyword">*</span> so that illicit accesses to userspace can be trapped.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">mov</span>	%gs:CPU_KERNEL_CR3, %rcx
+	<span class="enscript-keyword">mov</span>	%rcx, %gs:CPU_ACTIVE_CR3
+	<span class="enscript-keyword">test</span>	$3, %esi			/* user/kernel? */
+	<span class="enscript-keyword">jz</span>	2f				/* skip cr3 reload from kernel */
+	<span class="enscript-keyword">xor</span>	%rbp, %rbp
+	<span class="enscript-keyword">cmpl</span>	$0, EXT(no_shared_cr3)(%rip)
+	<span class="enscript-keyword">je</span>	2f
+	<span class="enscript-keyword">mov</span>	%rcx, %cr3			/* load kernel cr3 */
+	<span class="enscript-keyword">jmp</span>	4f				/* and skip tlb flush test */
+<span class="enscript-function-name">2:</span>
+	<span class="enscript-keyword">mov</span>	%gs:CPU_ACTIVE_CR3+4, %rcx
+	<span class="enscript-keyword">shr</span>	$32, %rcx
+	<span class="enscript-keyword">testl</span>	%ecx, %ecx
+	<span class="enscript-keyword">jz</span>	4f
+	<span class="enscript-keyword">movl</span>	$0, %gs:CPU_TLB_INVALID
+	<span class="enscript-keyword">testl</span>	$(1&lt;&lt;16), %ecx			/* Global? */
+	<span class="enscript-keyword">jz</span>	3f
+	<span class="enscript-keyword">mov</span>	%cr4, %rcx	/* RMWW CR4, for lack of an alternative*/
+	<span class="enscript-keyword">and</span>	$(~CR4_PGE), %rcx
+	<span class="enscript-keyword">mov</span>	%rcx, %cr4
+	<span class="enscript-keyword">or</span>	$(CR4_PGE), %rcx
+	<span class="enscript-keyword">mov</span>	%rcx, %cr4
+	<span class="enscript-keyword">jmp</span>	4f
+<span class="enscript-function-name">3:</span>
+	<span class="enscript-keyword">mov</span>	%cr3, %rcx
+	<span class="enscript-keyword">mov</span>	%rcx, %cr3
+<span class="enscript-function-name">4:</span>
+	<span class="enscript-keyword">mov</span>	%gs:CPU_ACTIVE_THREAD, %rcx	/* Get the active thread */
+	<span class="enscript-keyword">movl</span>	$-1, TH_IOTIER_OVERRIDE(%rcx)	/* Reset IO tier override to -1 before handling trap */
+	<span class="enscript-keyword">cmpq</span>	$0, TH_PCB_IDS(%rcx)	/* Is there a debug register state? */
+	<span class="enscript-keyword">je</span>	5f
+	<span class="enscript-keyword">xor</span>	%ecx, %ecx		/* If so, reset DR7 (the control) */
+	<span class="enscript-keyword">mov</span>	%rcx, %dr7
+<span class="enscript-function-name">5:</span>
+	<span class="enscript-keyword">incl</span>	%gs:hwIntCnt(,%ebx,4)		// Bump the trap/intr count
+	<span class="enscript-keyword">/*</span> Dispatch the designated handler */
+	<span class="enscript-keyword">jmp</span>	*%rdx
+
+/*
+ <span class="enscript-keyword">*</span> Control is passed here to return to user.
+ <span class="enscript-keyword">*/</span> 
+Entry(return_to_user)
+	<span class="enscript-keyword">TIME_TRAP_UEXIT
+</span>
+Entry(ret_to_user)
+// XXX 'Be nice to tidy up this debug register restore sequence...
+	<span class="enscript-keyword">mov</span>	%gs:CPU_ACTIVE_THREAD, %rdx
+	<span class="enscript-keyword">movq</span>	TH_PCB_IDS(%rdx),%rax	/* Obtain this thread's debug state */
+	<span class="enscript-keyword">
+</span>	<span class="enscript-keyword">test</span>	%rax, %rax		/* Is there a debug register context? */
+	<span class="enscript-keyword">je</span>	2f 			/* branch if not */
+	<span class="enscript-keyword">cmpl</span>	$(TASK_MAP_32BIT), %gs:CPU_TASK_MAP /* Are we a 32-bit task? */
+	<span class="enscript-keyword">jne</span>	1f
+	<span class="enscript-keyword">movl</span>	DS_DR0(%rax), %ecx	/* If so, load the 32 bit DRs */
+	<span class="enscript-keyword">movq</span>	%rcx, %dr0
+	<span class="enscript-keyword">movl</span>	DS_DR1(%rax), %ecx
+	<span class="enscript-keyword">movq</span>	%rcx, %dr1
+	<span class="enscript-keyword">movl</span>	DS_DR2(%rax), %ecx
+	<span class="enscript-keyword">movq</span>	%rcx, %dr2
+	<span class="enscript-keyword">movl</span>	DS_DR3(%rax), %ecx
+	<span class="enscript-keyword">movq</span>	%rcx, %dr3
+	<span class="enscript-keyword">movl</span>	DS_DR7(%rax), %ecx
+	<span class="enscript-keyword">movq</span> 	%rcx, %gs:CPU_DR7
+	<span class="enscript-keyword">jmp</span> 	2f
+<span class="enscript-function-name">1:</span>
+	<span class="enscript-keyword">mov</span>	DS64_DR0(%rax), %rcx	/* Load the full width DRs*/
+	<span class="enscript-keyword">mov</span>	%rcx, %dr0
+	<span class="enscript-keyword">mov</span>	DS64_DR1(%rax), %rcx
+	<span class="enscript-keyword">mov</span>	%rcx, %dr1
+	<span class="enscript-keyword">mov</span>	DS64_DR2(%rax), %rcx
+	<span class="enscript-keyword">mov</span>	%rcx, %dr2
+	<span class="enscript-keyword">mov</span>	DS64_DR3(%rax), %rcx
+	<span class="enscript-keyword">mov</span>	%rcx, %dr3
+	<span class="enscript-keyword">mov</span>	DS64_DR7(%rax), %rcx
+	<span class="enscript-keyword">mov</span> 	%rcx, %gs:CPU_DR7
+<span class="enscript-function-name">2:</span>
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> On exiting the kernel there's no need to switch cr3 since we're
+	 <span class="enscript-keyword">*</span> already running in the user's address space which includes the
+	 <span class="enscript-keyword">*</span> kernel. Nevertheless, we now mark the task's cr3 as active.
+	 <span class="enscript-keyword">*</span> But, if no_shared_cr3 is set, we do need to switch cr3 at this point.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">mov</span>	%gs:CPU_TASK_CR3, %rcx
+	<span class="enscript-keyword">mov</span>	%rcx, %gs:CPU_ACTIVE_CR3
+	<span class="enscript-keyword">movl</span>	EXT(no_shared_cr3)(%rip), %eax
+	<span class="enscript-keyword">test</span>	%eax, %eax		/* -no_shared_cr3 */
+	<span class="enscript-keyword">jz</span>	3f
+	<span class="enscript-keyword">mov</span>	%rcx, %cr3
+<span class="enscript-function-name">3:</span>
+	<span class="enscript-keyword">mov</span>	%gs:CPU_DR7, %rax	/* Is there a debug control register?*/
+	<span class="enscript-keyword">cmp</span>	$0, %rax
+	<span class="enscript-keyword">je</span>	4f
+	<span class="enscript-keyword">mov</span>	%rax, %dr7		/* Set DR7 */
+	<span class="enscript-keyword">movq</span>	$0, %gs:CPU_DR7
+<span class="enscript-function-name">4:</span>
+	<span class="enscript-keyword">cmpl</span>	$(SS_64), SS_FLAVOR(%r15)	/* 64-bit state? */
+	<span class="enscript-keyword">je</span>	L_64bit_return
+
+<span class="enscript-function-name">L_32bit_return:</span>
+#if DEBUG_IDT64
+	<span class="enscript-keyword">cmpl</span>	$(SS_32), SS_FLAVOR(%r15)	/* 32-bit state? */
+	<span class="enscript-keyword">je</span>	1f
+	<span class="enscript-keyword">cli
+</span>	<span class="enscript-keyword">POSTCODE2(0x6432)
+</span>	<span class="enscript-keyword">CCALL1(panic_idt64,</span> %r15)
+<span class="enscript-function-name">1:</span>
+#endif /* DEBUG_IDT64 */
+
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Restore registers into the machine state for iret.
+	 <span class="enscript-keyword">*</span> Here on fault stack and PCB address in R11.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">movl</span>	R32_EIP(%r15), %eax
+	<span class="enscript-keyword">movl</span>	%eax, R64_RIP(%r15)
+	<span class="enscript-keyword">movl</span>	R32_EFLAGS(%r15), %eax
+	<span class="enscript-keyword">movl</span>	%eax, R64_RFLAGS(%r15)
+	<span class="enscript-keyword">movl</span>	R32_CS(%r15), %eax
+	<span class="enscript-keyword">movl</span>	%eax, R64_CS(%r15)
+	<span class="enscript-keyword">movl</span>	R32_UESP(%r15), %eax
+	<span class="enscript-keyword">movl</span>	%eax, R64_RSP(%r15)
+	<span class="enscript-keyword">movl</span>	R32_SS(%r15), %eax
+	<span class="enscript-keyword">movl</span>	%eax, R64_SS(%r15)
+
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Restore general 32-bit registers
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">movl</span>	R32_EAX(%r15), %eax
+	<span class="enscript-keyword">movl</span>	R32_EBX(%r15), %ebx
+	<span class="enscript-keyword">movl</span>	R32_ECX(%r15), %ecx
+	<span class="enscript-keyword">movl</span>	R32_EDX(%r15), %edx
+	<span class="enscript-keyword">movl</span>	R32_EBP(%r15), %ebp
+	<span class="enscript-keyword">movl</span>	R32_ESI(%r15), %esi
+	<span class="enscript-keyword">movl</span>	R32_EDI(%r15), %edi
+
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Restore segment registers. A segment exception taken here will
+	 <span class="enscript-keyword">*</span> push state on the IST1 stack and will not affect the <span class="enscript-string">&quot;PCB stack&quot;</span>.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">mov</span>	%r15, %rsp		/* Set the PCB as the stack */
+	<span class="enscript-keyword">swapgs
+</span><span class="enscript-function-name">EXT(ret32_set_ds):</span>	
+	<span class="enscript-keyword">movl</span>	R32_DS(%rsp), %ds
+<span class="enscript-function-name">EXT(ret32_set_es):</span>
+	<span class="enscript-keyword">movl</span>	R32_ES(%rsp), %es
+<span class="enscript-function-name">EXT(ret32_set_fs):</span>
+	<span class="enscript-keyword">movl</span>	R32_FS(%rsp), %fs
+<span class="enscript-function-name">EXT(ret32_set_gs):</span>
+	<span class="enscript-keyword">movl</span>	R32_GS(%rsp), %gs
+
+	<span class="enscript-keyword">/*</span> pop compat frame + trapno, trapfn and error */	
+	<span class="enscript-keyword">add</span>	$(ISS64_OFFSET)+8+8+8, %rsp
+	<span class="enscript-keyword">cmpl</span>	$(SYSENTER_CS),ISF64_CS-8-8-8(%rsp)
+					<span class="enscript-keyword">/*</span> test for fast entry/exit */
+	<span class="enscript-keyword">je</span>      L_fast_exit
+<span class="enscript-function-name">EXT(ret32_iret):</span>
+	<span class="enscript-keyword">iretq</span>				/* return from interrupt */
+
+<span class="enscript-function-name">L_fast_exit:</span>
+	<span class="enscript-keyword">pop</span>	%rdx			/* user return eip */
+	<span class="enscript-keyword">pop</span>	%rcx			/* pop and toss cs */
+	<span class="enscript-keyword">andl</span>	$(~EFL_IF), (%rsp)	/* clear interrupts enable, sti below */
+	<span class="enscript-keyword">popf</span>				/* flags - carry denotes failure */
+	<span class="enscript-keyword">pop</span>	%rcx			/* user return esp */
+	<span class="enscript-keyword">sti</span>				/* interrupts enabled after sysexit */
+	<span class="enscript-keyword">sysexitl</span>			/* 32-bit sysexit */
+
+<span class="enscript-function-name">ret_to_kernel:</span>
+#if DEBUG_IDT64
+	<span class="enscript-keyword">cmpl</span>	$(SS_64), SS_FLAVOR(%r15)	/* 64-bit state? */
+	<span class="enscript-keyword">je</span>	1f
+	<span class="enscript-keyword">cli
+</span>	<span class="enscript-keyword">POSTCODE2(0x6464)
+</span>	<span class="enscript-keyword">CCALL1(panic_idt64,</span> %r15)
+	<span class="enscript-keyword">hlt
+</span><span class="enscript-function-name">1:</span>
+	<span class="enscript-keyword">cmpl</span>	$(KERNEL64_CS), R64_CS(%r15)
+	<span class="enscript-keyword">je</span>	2f
+	<span class="enscript-keyword">CCALL1(panic_idt64,</span> %r15)
+	<span class="enscript-keyword">hlt
+</span><span class="enscript-function-name">2:</span>
+#endif
+
+<span class="enscript-function-name">L_64bit_return:</span>
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Restore general 64-bit registers.
+	 <span class="enscript-keyword">*</span> Here on fault stack and PCB address in R15.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">mov</span>	R64_R14(%r15), %r14
+	<span class="enscript-keyword">mov</span>	R64_R13(%r15), %r13
+	<span class="enscript-keyword">mov</span>	R64_R12(%r15), %r12
+	<span class="enscript-keyword">mov</span>	R64_R11(%r15), %r11
+	<span class="enscript-keyword">mov</span>	R64_R10(%r15), %r10
+	<span class="enscript-keyword">mov</span>	R64_R9(%r15),  %r9
+	<span class="enscript-keyword">mov</span>	R64_R8(%r15),  %r8
+	<span class="enscript-keyword">mov</span>	R64_RSI(%r15), %rsi
+	<span class="enscript-keyword">mov</span>	R64_RDI(%r15), %rdi
+	<span class="enscript-keyword">mov</span>	R64_RBP(%r15), %rbp
+	<span class="enscript-keyword">mov</span>	R64_RDX(%r15), %rdx
+	<span class="enscript-keyword">mov</span>	R64_RCX(%r15), %rcx
+	<span class="enscript-keyword">mov</span>	R64_RBX(%r15), %rbx
+	<span class="enscript-keyword">mov</span>	R64_RAX(%r15), %rax
+
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> We must swap GS base if we're returning to user-space,
+	 <span class="enscript-keyword">*</span> or we're returning from an NMI that occurred in a trampoline
+	 <span class="enscript-keyword">*</span> before the user GS had been swapped. In the latter case, the NMI
+	 <span class="enscript-keyword">*</span> handler will have flagged the high-order 32-bits of the CS.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">cmpq</span>	$(KERNEL64_CS), R64_CS(%r15)
+	<span class="enscript-keyword">jz</span>	1f
+	<span class="enscript-keyword">swapgs
+</span><span class="enscript-function-name">1:</span>
+	<span class="enscript-keyword">mov</span>	R64_R15(%r15), %rsp
+	<span class="enscript-keyword">xchg</span>	%r15, %rsp
+	<span class="enscript-keyword">add</span>	$(ISS64_OFFSET)+24, %rsp	/* pop saved state       */
+						<span class="enscript-keyword">/*</span> + trapno/trapfn/error */	
+	<span class="enscript-keyword">cmpl</span>	$(SYSCALL_CS),ISF64_CS-24(%rsp)
+						<span class="enscript-keyword">/*</span> test for fast entry/exit */
+	<span class="enscript-keyword">je</span>      L_sysret
+.globl _dump_iretq
+<span class="enscript-function-name">EXT(ret64_iret):</span>
+        <span class="enscript-keyword">iretq</span>				/* return from interrupt */
+
+<span class="enscript-function-name">L_sysret:</span>
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Here to load rcx/r11/rsp and perform the sysret back to user-space.
+	 <span class="enscript-keyword">*</span> 	rcx	user rip
+	 <span class="enscript-keyword">*</span>	r11	user rflags
+	 <span class="enscript-keyword">*</span>	rsp	user stack pointer
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">mov</span>	ISF64_RIP-24(%rsp), %rcx
+	<span class="enscript-keyword">mov</span>	ISF64_RFLAGS-24(%rsp), %r11
+	<span class="enscript-keyword">mov</span>	ISF64_RSP-24(%rsp), %rsp
+        <span class="enscript-keyword">sysretq</span>				/* return from systen call */
+
+
+
+/*
+ <span class="enscript-keyword">*</span> System call handlers.
+ <span class="enscript-keyword">*</span> These are entered via a syscall interrupt. The system call number in %rax
+ <span class="enscript-keyword">*</span> is saved to the error code slot in the stack frame. We then branch to the
+ <span class="enscript-keyword">*</span> common state saving code.
+ <span class="enscript-keyword">*/
+</span>		<span class="enscript-keyword">
+</span>#ifndef UNIX_INT
+#error NO UNIX INT!!!
+#endif
+Entry(idt64_unix_scall)
+	<span class="enscript-keyword">swapgs</span>				/* switch to kernel gs (cpu_data) */
+	<span class="enscript-keyword">pushq</span>	%rax			/* save system call number */
+	<span class="enscript-keyword">PUSH_FUNCTION(HNDL_UNIX_SCALL)
+</span>	<span class="enscript-keyword">pushq</span>	$(UNIX_INT)
+	<span class="enscript-keyword">jmp</span>	L_32bit_entry_check
+
+	<span class="enscript-keyword">
+</span>Entry(idt64_mach_scall)
+	<span class="enscript-keyword">swapgs</span>				/* switch to kernel gs (cpu_data) */
+	<span class="enscript-keyword">pushq</span>	%rax			/* save system call number */
+	<span class="enscript-keyword">PUSH_FUNCTION(HNDL_MACH_SCALL)
+</span>	<span class="enscript-keyword">pushq</span>	$(MACH_INT)
+	<span class="enscript-keyword">jmp</span>	L_32bit_entry_check
+
+	<span class="enscript-keyword">
+</span>Entry(idt64_mdep_scall)
+	<span class="enscript-keyword">swapgs</span>				/* switch to kernel gs (cpu_data) */
+	<span class="enscript-keyword">pushq</span>	%rax			/* save system call number */
+	<span class="enscript-keyword">PUSH_FUNCTION(HNDL_MDEP_SCALL)
+</span>	<span class="enscript-keyword">pushq</span>	$(MACHDEP_INT)
+	<span class="enscript-keyword">jmp</span>	L_32bit_entry_check
+
+/* Programmed into MSR_IA32_LSTAR by mp_desc.c */
+Entry(hi64_syscall)
+Entry(idt64_syscall)
+<span class="enscript-function-name">L_syscall_continue:</span>
+	<span class="enscript-keyword">swapgs</span>				/* Kapow! get per-cpu data area */
+	<span class="enscript-keyword">mov</span>	%rsp, %gs:CPU_UBER_TMP	/* save user stack */
+	<span class="enscript-keyword">mov</span>	%gs:CPU_UBER_ISF, %rsp	/* switch stack to pcb */
+
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Save values in the ISF frame in the PCB
+	 <span class="enscript-keyword">*</span> to cons up the saved machine state.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">movl</span>	$(USER_DS), ISF64_SS(%rsp)	
+	<span class="enscript-keyword">movl</span>	$(SYSCALL_CS), ISF64_CS(%rsp)	/* cs - a pseudo-segment */
+	<span class="enscript-keyword">mov</span>	%r11, ISF64_RFLAGS(%rsp)	/* rflags */
+	<span class="enscript-keyword">mov</span>	%rcx, ISF64_RIP(%rsp)		/* rip */
+	<span class="enscript-keyword">mov</span>	%gs:CPU_UBER_TMP, %rcx
+	<span class="enscript-keyword">mov</span>	%rcx, ISF64_RSP(%rsp)		/* user stack */
+	<span class="enscript-keyword">mov</span>	%rax, ISF64_ERR(%rsp)		/* err/rax - syscall code */
+	<span class="enscript-keyword">movq</span>	$(T_SYSCALL), ISF64_TRAPNO(%rsp)	/* trapno */
+	<span class="enscript-keyword">leaq</span>	HNDL_SYSCALL(%rip), %r11<span class="enscript-comment">;
+	movq	%r11, ISF64_TRAPFN(%rsp)
+</span>	<span class="enscript-keyword">mov</span>	ISF64_RFLAGS(%rsp), %r11	/* Avoid leak, restore R11 */
+	<span class="enscript-keyword">jmp</span>	L_dispatch_U64			/* this can only be 64-bit */
+	<span class="enscript-keyword">
+</span>/*
+ <span class="enscript-keyword">*</span> sysenter entry point
+ <span class="enscript-keyword">*</span> Requires user code to set up:
+ <span class="enscript-keyword">*</span>	edx: user instruction pointer (return address)
+ <span class="enscript-keyword">*</span>	ecx: user stack pointer
+ <span class="enscript-keyword">*</span>		on which is pushed stub ret addr and saved ebx
+ <span class="enscript-keyword">*</span> Return to user-space is made using sysexit.
+ <span class="enscript-keyword">*</span> Note: sysenter/sysexit cannot be used for calls returning a value in edx,
+ <span class="enscript-keyword">*</span>       or requiring ecx to be preserved.
+ <span class="enscript-keyword">*/
+</span>Entry(hi64_sysenter)
+Entry(idt64_sysenter)
+	<span class="enscript-keyword">movq</span>	(%rsp), %rsp
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Push values on to the PCB stack
+	 <span class="enscript-keyword">*</span> to cons up the saved machine state.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">push</span>	$(USER_DS)		/* ss */
+	<span class="enscript-keyword">push</span>	%rcx			/* uesp */
+	<span class="enscript-keyword">pushf</span>				/* flags */
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Clear, among others, the Nested Task (NT) flags bit<span class="enscript-comment">;
+	 * this is zeroed by INT, but not by SYSENTER.
+</span>	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">push</span>	$0
+	<span class="enscript-keyword">popf
+</span>	<span class="enscript-keyword">push</span>	$(SYSENTER_CS)		/* cs */ 
+<span class="enscript-function-name">L_sysenter_continue:</span>
+	<span class="enscript-keyword">swapgs</span>				/* switch to kernel gs (cpu_data) */
+	<span class="enscript-keyword">push</span>	%rdx			/* eip */
+	<span class="enscript-keyword">push</span>	%rax			/* err/eax - syscall code */
+	<span class="enscript-keyword">PUSH_FUNCTION(HNDL_SYSENTER)
+</span>	<span class="enscript-keyword">pushq</span>	$(T_SYSENTER)
+	<span class="enscript-keyword">orl</span>	$(EFL_IF), ISF64_RFLAGS(%rsp)
+	<span class="enscript-keyword">jmp</span>	L_32bit_entry_check
+
+
+Entry(idt64_page_fault)
+	<span class="enscript-keyword">PUSH_FUNCTION(HNDL_ALLTRAPS)
+</span>	<span class="enscript-keyword">push</span>	$(T_PAGE_FAULT)
+	<span class="enscript-keyword">push</span>	%rax			/* save %rax temporarily */
+	<span class="enscript-keyword">testb</span>	$3, 8+ISF64_CS(%rsp)	/* was trap from kernel? */
+	<span class="enscript-keyword">jz</span>	L_kernel_trap		/* - yes, handle with care */
+	<span class="enscript-keyword">pop</span>	%rax			/* restore %rax, swapgs, and continue */
+	<span class="enscript-keyword">swapgs
+</span>	<span class="enscript-keyword">jmp</span>	L_dispatch_user
+
+
+/*
+ <span class="enscript-keyword">*</span> Debug trap.  Check for single-stepping across system call into
+ <span class="enscript-keyword">*</span> kernel.  If this is the case, taking the debug trap has turned
+ <span class="enscript-keyword">*</span> off single-stepping - save the flags register with the trace
+ <span class="enscript-keyword">*</span> bit set.
+ <span class="enscript-keyword">*/
+</span>Entry(idt64_debug)
+	<span class="enscript-keyword">push</span>	$0			/* error code */
+	<span class="enscript-keyword">PUSH_FUNCTION(HNDL_ALLTRAPS)
+</span>	<span class="enscript-keyword">pushq</span>	$(T_DEBUG)
+
+	<span class="enscript-keyword">testb</span>	$3, ISF64_CS(%rsp)
+	<span class="enscript-keyword">jnz</span>	L_dispatch
+
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> trap came from kernel mode
+	 <span class="enscript-keyword">*/
+</span>
+	<span class="enscript-keyword">push</span>	%rax			/* save %rax temporarily */
+	<span class="enscript-keyword">lea</span>	EXT(idt64_sysenter)(%rip), %rax
+	<span class="enscript-keyword">cmp</span>	%rax, ISF64_RIP+8(%rsp)
+	<span class="enscript-keyword">pop</span>	%rax
+	<span class="enscript-keyword">jne</span>	L_dispatch
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Interrupt stack frame has been pushed on the temporary stack.
+	 <span class="enscript-keyword">*</span> We have to switch to pcb stack and patch up the saved state.
+	 <span class="enscript-keyword">*/</span> 
+	<span class="enscript-keyword">mov</span>	%rcx, ISF64_ERR(%rsp)	/* save %rcx in error slot */
+	<span class="enscript-keyword">mov</span>	ISF64_SS+8(%rsp), %rcx	/* top of temp stack -&gt; pcb stack */
+	<span class="enscript-keyword">xchg</span>	%rcx,%rsp		/* switch to pcb stack */
+	<span class="enscript-keyword">push</span>	$(USER_DS)		/* ss */
+	<span class="enscript-keyword">push</span>	ISF64_ERR(%rcx)		/* saved %rcx into rsp slot */
+	<span class="enscript-keyword">push</span>	ISF64_RFLAGS(%rcx)	/* rflags */
+	<span class="enscript-keyword">push</span>	$(SYSENTER_TF_CS)	/* cs - not SYSENTER_CS for iret path */
+	<span class="enscript-keyword">mov</span>	ISF64_ERR(%rcx),%rcx	/* restore %rcx */
+	<span class="enscript-keyword">jmp</span>	L_sysenter_continue	/* continue sysenter entry */
+	<span class="enscript-keyword">
+</span>
+Entry(idt64_double_fault)
+	<span class="enscript-keyword">PUSH_FUNCTION(HNDL_DOUBLE_FAULT)
+</span>	<span class="enscript-keyword">pushq</span>	$(T_DOUBLE_FAULT)
+
+	<span class="enscript-keyword">push</span>	%rax
+	<span class="enscript-keyword">leaq</span>	EXT(idt64_syscall)(%rip), %rax
+	<span class="enscript-keyword">cmp</span>	%rax, ISF64_RIP+8(%rsp)
+	<span class="enscript-keyword">pop</span>	%rax
+	<span class="enscript-keyword">jne</span>	L_dispatch_kernel
+
+	<span class="enscript-keyword">mov</span>	ISF64_RSP(%rsp), %rsp
+	<span class="enscript-keyword">jmp</span>	L_syscall_continue
+	<span class="enscript-keyword">
+</span>
+/*
+ <span class="enscript-keyword">*</span> For GP/NP/SS faults, we use the IST1 stack.
+ <span class="enscript-keyword">*</span> For faults from user-space, we have to copy the machine state to the
+ <span class="enscript-keyword">*</span> PCB stack and then dispatch as normal.
+ <span class="enscript-keyword">*</span> For faults in kernel-space, we need to scrub for kernel exit faults and
+ <span class="enscript-keyword">*</span> treat these as user-space faults. But for all other kernel-space faults
+ <span class="enscript-keyword">*</span> we continue to run on the IST1 stack and we dispatch to handle the fault
+ <span class="enscript-keyword">*</span> as fatal.
+ <span class="enscript-keyword">*/
+</span>Entry(idt64_gen_prot)
+	<span class="enscript-keyword">PUSH_FUNCTION(HNDL_ALLTRAPS)
+</span>	<span class="enscript-keyword">pushq</span>	$(T_GENERAL_PROTECTION)
+	<span class="enscript-keyword">jmp</span>	trap_check_kernel_exit	/* check for kernel exit sequence */
+
+Entry(idt64_stack_fault)
+	<span class="enscript-keyword">PUSH_FUNCTION(HNDL_ALLTRAPS)
+</span>	<span class="enscript-keyword">pushq</span>	$(T_STACK_FAULT)
+	<span class="enscript-keyword">jmp</span>	trap_check_kernel_exit	/* check for kernel exit sequence */
+
+Entry(idt64_segnp)
+	<span class="enscript-keyword">PUSH_FUNCTION(HNDL_ALLTRAPS)
+</span>	<span class="enscript-keyword">pushq</span>	$(T_SEGMENT_NOT_PRESENT)
+					<span class="enscript-keyword">/*</span> indicate fault type */
+<span class="enscript-function-name">trap_check_kernel_exit:</span>
+	<span class="enscript-keyword">testb</span>   $3,ISF64_CS(%rsp)
+	<span class="enscript-keyword">jz</span>	L_kernel_gpf
+
+	<span class="enscript-keyword">/*</span> Here for fault from user-space. Copy interrupt state to PCB. */
+	<span class="enscript-keyword">swapgs
+</span>	<span class="enscript-keyword">push</span>	%rax
+	<span class="enscript-keyword">mov</span>	%rcx, %gs:CPU_UBER_TMP		/* save user RCX  */
+	<span class="enscript-keyword">mov</span>	%gs:CPU_UBER_ISF, %rcx		/* PCB stack addr */
+	<span class="enscript-keyword">mov</span>	ISF64_SS+8(%rsp), %rax
+	<span class="enscript-keyword">mov</span>	%rax, ISF64_SS(%rcx)
+	<span class="enscript-keyword">mov</span>	ISF64_RSP+8(%rsp), %rax
+	<span class="enscript-keyword">mov</span>	%rax, ISF64_RSP(%rcx)
+	<span class="enscript-keyword">mov</span>	ISF64_RFLAGS+8(%rsp), %rax
+	<span class="enscript-keyword">mov</span>	%rax, ISF64_RFLAGS(%rcx)
+	<span class="enscript-keyword">mov</span>	ISF64_CS+8(%rsp), %rax
+	<span class="enscript-keyword">mov</span>	%rax, ISF64_CS(%rcx)
+	<span class="enscript-keyword">mov</span>	ISF64_RIP+8(%rsp), %rax
+	<span class="enscript-keyword">mov</span>	%rax, ISF64_RIP(%rcx)
+	<span class="enscript-keyword">mov</span>	ISF64_ERR+8(%rsp), %rax
+	<span class="enscript-keyword">mov</span>	%rax, ISF64_ERR(%rcx)
+	<span class="enscript-keyword">mov</span>	ISF64_TRAPFN+8(%rsp), %rax
+	<span class="enscript-keyword">mov</span>	%rax, ISF64_TRAPFN(%rcx)
+	<span class="enscript-keyword">mov</span>	ISF64_TRAPNO+8(%rsp), %rax
+	<span class="enscript-keyword">mov</span>	%rax, ISF64_TRAPNO(%rcx)
+	<span class="enscript-keyword">pop</span>	%rax
+	<span class="enscript-keyword">mov</span>	%gs:CPU_UBER_TMP, %rsp		/* user RCX into RSP */
+	<span class="enscript-keyword">xchg</span>	%rcx, %rsp			/* to PCB stack with user RCX */
+	<span class="enscript-keyword">jmp</span>	L_dispatch_user
+
+<span class="enscript-function-name">L_kernel_gpf:</span>
+	<span class="enscript-keyword">/*</span> Here for GPF from kernel_space. Check for recoverable cases. */
+	<span class="enscript-keyword">push</span>	%rax
+	<span class="enscript-keyword">leaq</span>	EXT(ret32_iret)(%rip), %rax
+	<span class="enscript-keyword">cmp</span>	%rax, 8+ISF64_RIP(%rsp)
+	<span class="enscript-keyword">je</span>	L_fault_iret
+	<span class="enscript-keyword">leaq</span>	EXT(ret64_iret)(%rip), %rax
+	<span class="enscript-keyword">cmp</span>	%rax, 8+ISF64_RIP(%rsp)
+	<span class="enscript-keyword">je</span>	L_fault_iret
+	<span class="enscript-keyword">leaq</span>	EXT(ret32_set_ds)(%rip), %rax
+	<span class="enscript-keyword">cmp</span>	%rax, 8+ISF64_RIP(%rsp)
+	<span class="enscript-keyword">je</span>	L_32bit_fault_set_seg
+	<span class="enscript-keyword">leaq</span>	EXT(ret32_set_es)(%rip), %rax
+	<span class="enscript-keyword">cmp</span>	%rax, 8+ISF64_RIP(%rsp)
+	<span class="enscript-keyword">je</span>	L_32bit_fault_set_seg
+	<span class="enscript-keyword">leaq</span>	EXT(ret32_set_fs)(%rip), %rax
+	<span class="enscript-keyword">cmp</span>	%rax, 8+ISF64_RIP(%rsp)
+	<span class="enscript-keyword">je</span>	L_32bit_fault_set_seg
+	<span class="enscript-keyword">leaq</span>	EXT(ret32_set_gs)(%rip), %rax
+	<span class="enscript-keyword">cmp</span>	%rax, 8+ISF64_RIP(%rsp)
+	<span class="enscript-keyword">je</span>	L_32bit_fault_set_seg
+
+	<span class="enscript-keyword">/*</span> Fall through */
+
+<span class="enscript-function-name">L_kernel_trap:</span>
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Here after taking an unexpected trap from kernel mode - perhaps
+	 <span class="enscript-keyword">*</span> while running in the trampolines hereabouts.
+	 <span class="enscript-keyword">*</span> Note: %rax has been pushed on stack.
+	 <span class="enscript-keyword">*</span> Make sure we're not on the PCB stack, if so move to the kernel stack.
+	 <span class="enscript-keyword">*</span> This is likely a fatal condition.
+	 <span class="enscript-keyword">*</span> But first, ensure we have the kernel gs base active...
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">push</span>	%rcx
+	<span class="enscript-keyword">push</span>	%rdx
+	<span class="enscript-keyword">mov</span>	$(MSR_IA32_GS_BASE), %ecx
+	<span class="enscript-keyword">rdmsr</span>					/* read kernel gsbase */
+	<span class="enscript-keyword">test</span>	$0x80000000, %edx		/* test MSB of address */
+	<span class="enscript-keyword">jne</span>	1f
+	<span class="enscript-keyword">swapgs</span>					/* so swap */
+<span class="enscript-function-name">1:</span>
+	<span class="enscript-keyword">pop</span>	%rdx
+	<span class="enscript-keyword">pop</span>	%rcx
+
+	<span class="enscript-keyword">movq</span>	%gs:CPU_UBER_ISF, %rax		/* PCB stack addr */
+	<span class="enscript-keyword">subq</span>	%rsp, %rax
+	<span class="enscript-keyword">cmpq</span>	$(PAGE_SIZE), %rax		/* current stack in PCB? */
+	<span class="enscript-keyword">jb</span>	2f				/*  - yes, deal with it */
+	<span class="enscript-keyword">pop</span>	%rax				/*  - no, restore %rax */
+	<span class="enscript-keyword">jmp</span>	L_dispatch_kernel
+<span class="enscript-function-name">2:</span>
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span>  Here if %rsp is in the PCB
+	 <span class="enscript-keyword">*</span>  Copy the interrupt stack frame from PCB stack to kernel stack
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">movq</span>	%gs:CPU_KERNEL_STACK, %rax
+	<span class="enscript-keyword">xchgq</span>	%rax, %rsp
+	<span class="enscript-keyword">pushq</span>	8+ISF64_SS(%rax)
+	<span class="enscript-keyword">pushq</span>	8+ISF64_RSP(%rax)
+	<span class="enscript-keyword">pushq</span>	8+ISF64_RFLAGS(%rax)
+	<span class="enscript-keyword">pushq</span>	8+ISF64_CS(%rax)
+	<span class="enscript-keyword">pushq</span>	8+ISF64_RIP(%rax)
+	<span class="enscript-keyword">pushq</span>	8+ISF64_ERR(%rax)
+	<span class="enscript-keyword">pushq</span>	8+ISF64_TRAPFN(%rax)
+	<span class="enscript-keyword">pushq</span>	8+ISF64_TRAPNO(%rax)
+	<span class="enscript-keyword">movq</span>	(%rax), %rax
+	<span class="enscript-keyword">jmp</span>	L_dispatch_kernel
+
+
+/*
+ <span class="enscript-keyword">*</span> GP/NP fault on IRET: CS or SS is in error.
+ <span class="enscript-keyword">*</span> User GSBASE is active.
+ <span class="enscript-keyword">*</span> On IST1 stack containing:
+ <span class="enscript-keyword">*</span>  (rax saved above, which is immediately popped)
+ <span class="enscript-keyword">*</span>  0  ISF64_TRAPNO:	trap code (NP or GP)
+ <span class="enscript-keyword">*</span>  8  ISF64_TRAPFN:	trap function
+ <span class="enscript-keyword">*</span>  16 ISF64_ERR:	segment number in error (error code)
+ <span class="enscript-keyword">*</span>  24 ISF64_RIP:	kernel RIP
+ <span class="enscript-keyword">*</span>  32 ISF64_CS:	kernel CS
+ <span class="enscript-keyword">*</span>  40 ISF64_RFLAGS:	kernel RFLAGS 
+ <span class="enscript-keyword">*</span>  48 ISF64_RSP:	kernel RSP
+ <span class="enscript-keyword">*</span>  56 ISF64_SS:	kernel SS
+ <span class="enscript-keyword">*</span> On the PCB stack, pointed to by the kernel's RSP is:
+ <span class="enscript-keyword">*</span>   0			user RIP
+ <span class="enscript-keyword">*</span>   8			user CS
+ <span class="enscript-keyword">*</span>  16			user RFLAGS
+ <span class="enscript-keyword">*</span>  24			user RSP
+ <span class="enscript-keyword">*</span>  32 			user SS
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span> We need to move the kernel's TRAPNO, TRAPFN and ERR to the PCB and handle
+ <span class="enscript-keyword">*</span> as a user fault with:
+ <span class="enscript-keyword">*</span>  0  ISF64_TRAPNO:	trap code (NP or GP)
+ <span class="enscript-keyword">*</span>  8  ISF64_TRAPFN:	trap function
+ <span class="enscript-keyword">*</span>  16 ISF64_ERR:	segment number in error (error code)
+ <span class="enscript-keyword">*</span>  24			user RIP
+ <span class="enscript-keyword">*</span>  32			user CS
+ <span class="enscript-keyword">*</span>  40			user RFLAGS
+ <span class="enscript-keyword">*</span>  48			user RSP
+ <span class="enscript-keyword">*</span>  56 			user SS
+ <span class="enscript-keyword">*/
+</span><span class="enscript-function-name">L_fault_iret:</span>
+	<span class="enscript-keyword">pop</span>	%rax			/* recover saved %rax */
+	<span class="enscript-keyword">mov</span>	%rax, ISF64_RIP(%rsp)	/* save rax (we don`t need saved rip) */
+	<span class="enscript-keyword">mov</span>	ISF64_RSP(%rsp), %rax
+	<span class="enscript-keyword">xchg</span>	%rax, %rsp		/* switch to PCB stack */
+	<span class="enscript-keyword">push</span>	ISF64_ERR(%rax)
+	<span class="enscript-keyword">push</span>	ISF64_TRAPFN(%rax)
+	<span class="enscript-keyword">push</span>	ISF64_TRAPNO(%rax)
+	<span class="enscript-keyword">mov</span>	ISF64_RIP(%rax), %rax	/* restore rax */
+					<span class="enscript-keyword">/*</span> now treat as fault from user */
+	<span class="enscript-keyword">jmp</span>	L_dispatch
+
+/*
+ <span class="enscript-keyword">*</span> Fault restoring a segment register.  All of the saved state is still
+ <span class="enscript-keyword">*</span> on the stack untouched since we haven't yet moved the stack pointer.
+ <span class="enscript-keyword">*</span> On IST1 stack containing:
+ <span class="enscript-keyword">*</span>  (rax saved above, which is immediately popped)
+ <span class="enscript-keyword">*</span>  0  ISF64_TRAPNO:	trap code (NP or GP)
+ <span class="enscript-keyword">*</span>  8  ISF64_TRAPFN:	trap function
+ <span class="enscript-keyword">*</span>  16 ISF64_ERR:	segment number in error (error code)
+ <span class="enscript-keyword">*</span>  24 ISF64_RIP:	kernel RIP
+ <span class="enscript-keyword">*</span>  32 ISF64_CS:	kernel CS
+ <span class="enscript-keyword">*</span>  40 ISF64_RFLAGS:	kernel RFLAGS 
+ <span class="enscript-keyword">*</span>  48 ISF64_RSP:	kernel RSP
+ <span class="enscript-keyword">*</span>  56 ISF64_SS:	kernel SS
+ <span class="enscript-keyword">*</span> On the PCB stack, pointed to by the kernel's RSP is:
+ <span class="enscript-keyword">*</span>  0  			user trap code
+ <span class="enscript-keyword">*</span>  8  			user trap function
+ <span class="enscript-keyword">*</span>  16			user err 
+ <span class="enscript-keyword">*</span>  24			user RIP
+ <span class="enscript-keyword">*</span>  32			user CS
+ <span class="enscript-keyword">*</span>  40			user RFLAGS
+ <span class="enscript-keyword">*</span>  48			user RSP
+ <span class="enscript-keyword">*</span>  56 			user SS
+ <span class="enscript-keyword">*/
+</span><span class="enscript-function-name">L_32bit_fault_set_seg:</span>
+	<span class="enscript-keyword">swapgs
+</span>	<span class="enscript-keyword">pop</span>	%rax			/* toss saved %rax from stack */
+	<span class="enscript-keyword">mov</span>	ISF64_TRAPNO(%rsp), %rax
+	<span class="enscript-keyword">mov</span>	ISF64_TRAPFN(%rsp), %rcx
+	<span class="enscript-keyword">mov</span>	ISF64_ERR(%rsp), %rdx
+	<span class="enscript-keyword">mov</span>	ISF64_RSP(%rsp), %rsp	/* reset stack to saved state */
+	<span class="enscript-keyword">mov</span>	%rax,R64_TRAPNO(%rsp)
+	<span class="enscript-keyword">mov</span>	%rcx,R64_TRAPFN(%rsp)
+	<span class="enscript-keyword">mov</span>	%rdx,R64_ERR(%rsp)
+					<span class="enscript-keyword">/*</span> now treat as fault from user */
+					<span class="enscript-keyword">/*</span> except that all the state is */
+					<span class="enscript-keyword">/*</span> already saved - we just have to */
+					<span class="enscript-keyword">/*</span> move the trapno and error into */
+					<span class="enscript-keyword">/*</span> the compatibility frame */
+	<span class="enscript-keyword">jmp</span>	L_dispatch_U32_after_fault
+
+/*
+ <span class="enscript-keyword">*</span> Fatal exception handlers:
+ <span class="enscript-keyword">*/
+</span>Entry(idt64_db_task_dbl_fault)
+	<span class="enscript-keyword">PUSH_FUNCTION(HNDL_DOUBLE_FAULT)
+</span>	<span class="enscript-keyword">pushq</span>	$(T_DOUBLE_FAULT)
+	<span class="enscript-keyword">jmp</span>	L_dispatch	
+
+Entry(idt64_db_task_stk_fault)
+	<span class="enscript-keyword">PUSH_FUNCTION(HNDL_DOUBLE_FAULT)
+</span>	<span class="enscript-keyword">pushq</span>	$(T_STACK_FAULT)
+	<span class="enscript-keyword">jmp</span>	L_dispatch	
+
+Entry(idt64_mc)
+	<span class="enscript-keyword">push</span>	$(0)			/* Error */
+	<span class="enscript-keyword">PUSH_FUNCTION(HNDL_MACHINE_CHECK)
+</span>	<span class="enscript-keyword">pushq</span>	$(T_MACHINE_CHECK)
+	<span class="enscript-keyword">jmp</span>	L_dispatch	
+
+/*
+ <span class="enscript-keyword">*</span> NMI
+ <span class="enscript-keyword">*</span> This may or may not be fatal but extreme care is required
+ <span class="enscript-keyword">*</span> because it may fall when control was already in another trampoline.
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span> We get here on IST2 stack which is used for NMIs only.
+ <span class="enscript-keyword">*</span> We must be aware of the interrupted state:
+ <span class="enscript-keyword">*</span>  - from user-space, we
+ <span class="enscript-keyword">*</span>    - copy state to the PCB and continue<span class="enscript-comment">;
+ *  - from kernel-space, we
+</span> <span class="enscript-keyword">*</span>    - copy state to the kernel stack and continue, but
+ <span class="enscript-keyword">*</span>    - check what GSBASE was active, set the kernel base and
+ <span class="enscript-keyword">*</span>    - ensure that the active state is restored when the NMI is dismissed.
+ <span class="enscript-keyword">*/
+</span>Entry(idt64_nmi)
+	<span class="enscript-keyword">push</span>	%rax				/* save RAX to ISF64_ERR */
+	<span class="enscript-keyword">push</span>	%rcx				/* save RCX to ISF64_TRAPFN */
+	<span class="enscript-keyword">push</span>	%rdx				/* save RDX to ISF64_TRAPNO */
+	<span class="enscript-keyword">testb</span>	$3, ISF64_CS(%rsp)		/* NMI from user-space? */
+	<span class="enscript-keyword">je</span>	1f
+
+	<span class="enscript-keyword">/*</span> From user-space: copy interrupt state to user PCB */
+	<span class="enscript-keyword">swapgs
+</span>	<span class="enscript-keyword">mov</span>	%gs:CPU_UBER_ISF, %rcx		/* PCB stack addr */
+	<span class="enscript-keyword">add</span>	$(ISF64_SIZE), %rcx		/* adjust to base of ISF */	
+	<span class="enscript-keyword">swapgs</span>					/* swap back for L_dispatch */
+	<span class="enscript-keyword">jmp</span>	4f				/* Copy state to PCB */
+
+<span class="enscript-function-name">1:</span>
+	<span class="enscript-keyword">/*
+</span>	<span class="enscript-keyword">*</span> From kernel-space:
+	 <span class="enscript-keyword">*</span> Determine whether the kernel or user GS is set.
+	 <span class="enscript-keyword">*</span> Set the kernel and ensure that we'll swap back correctly at IRET.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">mov</span>	$(MSR_IA32_GS_BASE), %ecx
+	<span class="enscript-keyword">rdmsr</span>					/* read kernel gsbase */
+	<span class="enscript-keyword">test</span>	$0x80000000, %edx		/* test MSB of address */
+	<span class="enscript-keyword">jne</span>	2f
+	<span class="enscript-keyword">swapgs</span>					/* so swap */
+	<span class="enscript-keyword">movl</span>	$1, ISF64_CS+4(%rsp)		/* and set flag in CS slot */
+<span class="enscript-function-name">2:</span>
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Determine whether we're on the kernel or interrupt stack
+	 <span class="enscript-keyword">*</span> when the NMI hit.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">mov</span>	ISF64_RSP(%rsp), %rcx
+	<span class="enscript-keyword">mov</span>	%gs:CPU_KERNEL_STACK, %rax
+	<span class="enscript-keyword">xor</span>	%rcx, %rax
+	<span class="enscript-keyword">and</span>	EXT(kernel_stack_mask)(%rip), %rax
+	<span class="enscript-keyword">test</span>	%rax, %rax		/* are we on the kernel stack? */
+	<span class="enscript-keyword">je</span>	3f			/* yes */
+
+	<span class="enscript-keyword">mov</span>	%gs:CPU_INT_STACK_TOP, %rax
+	<span class="enscript-keyword">dec</span>	%rax			/* intr stack top is byte above max */
+	<span class="enscript-keyword">xor</span>	%rcx, %rax
+	<span class="enscript-keyword">and</span>	EXT(kernel_stack_mask)(%rip), %rax
+	<span class="enscript-keyword">test</span>	%rax, %rax		/* are we on the interrupt stack? */
+	<span class="enscript-keyword">je</span>	3f			/* yes */
+
+	<span class="enscript-keyword">mov</span>    %gs:CPU_KERNEL_STACK, %rcx
+<span class="enscript-function-name">3:</span>
+	<span class="enscript-keyword">/*</span> 16-byte-align kernel/interrupt stack for state push */
+	<span class="enscript-keyword">and</span>	$0xFFFFFFFFFFFFFFF0, %rcx
+
+<span class="enscript-function-name">4:</span>
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Copy state from NMI stack (RSP) to the save area (RCX) which is
+	 <span class="enscript-keyword">*</span> the PCB for user or kernel/interrupt stack from kernel.
+	 <span class="enscript-keyword">*</span> ISF64_ERR(RSP)    saved RAX
+	 <span class="enscript-keyword">*</span> ISF64_TRAPFN(RSP) saved RCX
+	 <span class="enscript-keyword">*</span> ISF64_TRAPNO(RSP) saved RDX
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">xchg</span>	%rsp, %rcx			/* set for pushes */
+	<span class="enscript-keyword">push</span>	ISF64_SS(%rcx)
+	<span class="enscript-keyword">push</span>	ISF64_RSP(%rcx)
+	<span class="enscript-keyword">push</span>	ISF64_RFLAGS(%rcx)
+	<span class="enscript-keyword">push</span>	ISF64_CS(%rcx)
+	<span class="enscript-keyword">push</span>	ISF64_RIP(%rcx)
+	<span class="enscript-keyword">push</span>	$(0)				/* error code 0 */
+	<span class="enscript-keyword">lea</span>	HNDL_ALLINTRS(%rip), %rax
+	<span class="enscript-keyword">push</span>	%rax				/* trapfn allintrs */
+	<span class="enscript-keyword">push</span>	$(T_NMI)			/* trapno T_NMI */
+	<span class="enscript-keyword">mov</span>	ISF64_ERR(%rcx), %rax
+	<span class="enscript-keyword">mov</span>	ISF64_TRAPNO(%rcx), %rdx
+	<span class="enscript-keyword">mov</span>	ISF64_TRAPFN(%rcx), %rcx
+	<span class="enscript-keyword">jmp</span>	L_dispatch
+
+
+/* All 'exceptions' enter hndl_alltraps, with:
+ <span class="enscript-keyword">*</span>	r15	x86_saved_state_t address
+ <span class="enscript-keyword">*</span>	rsp	kernel stack if user-space, otherwise interrupt or kernel stack
+ <span class="enscript-keyword">*</span>	esi	cs at trap
+ <span class="enscript-keyword">*</span> 
+ <span class="enscript-keyword">*</span> The rest of the state is set up as:	
+ <span class="enscript-keyword">*</span>	both rsp and r15 are 16-byte aligned
+ <span class="enscript-keyword">*</span>	interrupts disabled
+ <span class="enscript-keyword">*</span>	direction flag cleared
+ <span class="enscript-keyword">*/
+</span>Entry(hndl_alltraps)
+	<span class="enscript-keyword">mov</span>	%esi, %eax
+	<span class="enscript-keyword">testb</span>	$3, %al
+	<span class="enscript-keyword">jz</span>	trap_from_kernel
+
+	<span class="enscript-keyword">TIME_TRAP_UENTRY
+</span>
+	<span class="enscript-keyword">/*</span> Check for active vtimers in the current task */
+	<span class="enscript-keyword">mov</span>	%gs:CPU_ACTIVE_THREAD, %rcx
+	<span class="enscript-keyword">movl</span>	$-1, TH_IOTIER_OVERRIDE(%rcx)	/* Reset IO tier override to -1 before handling trap/exception */
+	<span class="enscript-keyword">mov</span>	TH_TASK(%rcx), %rbx
+	<span class="enscript-keyword">TASK_VTIMER_CHECK(%rbx,</span> %rcx)
+
+	<span class="enscript-keyword">CCALL1(user_trap,</span> %r15)			/* call user trap routine */
+	<span class="enscript-keyword">/*</span> user_trap() unmasks interrupts */
+	<span class="enscript-keyword">cli</span>					/* hold off intrs - critical section */
+	<span class="enscript-keyword">xorl</span>	%ecx, %ecx			/* don't check if we're in the PFZ */
+
+
+Entry(return_from_trap)
+	<span class="enscript-keyword">movq</span>	%gs:CPU_ACTIVE_THREAD,%r15	/* Get current thread */
+	<span class="enscript-keyword">movl</span>	$-1, TH_IOTIER_OVERRIDE(%r15)	/* Reset IO tier override to -1 before returning to userspace */
+	<span class="enscript-keyword">cmpl</span>	$0, TH_RWLOCK_COUNT(%r15)	/* Check if current thread has pending RW locks held */
+	<span class="enscript-keyword">jz</span>	1f
+	<span class="enscript-keyword">xorq</span>	%rbp, %rbp		/* clear framepointer */
+	<span class="enscript-keyword">mov</span>	%r15, %rdi		/* Set RDI to current thread */
+	<span class="enscript-keyword">CCALL(lck_rw_clear_promotions_x86)</span>	/* Clear promotions if needed */
+<span class="enscript-function-name">1:</span>	
+	<span class="enscript-keyword">movq</span>	TH_PCB_ISS(%r15), %r15 		/* PCB stack */
+	<span class="enscript-keyword">movl</span>	%gs:CPU_PENDING_AST,%eax
+	<span class="enscript-keyword">testl</span>	%eax,%eax
+	<span class="enscript-keyword">je</span>	EXT(return_to_user)		/* branch if no AST */
+
+<span class="enscript-function-name">L_return_from_trap_with_ast:</span>
+	<span class="enscript-keyword">testl</span>	%ecx, %ecx		/* see if we need to check for an EIP in the PFZ */
+	<span class="enscript-keyword">je</span>	2f			/* no, go handle the AST */
+	<span class="enscript-keyword">cmpl</span>	$(SS_64), SS_FLAVOR(%r15)	/* are we a 64-bit task? */
+	<span class="enscript-keyword">je</span>	1f
+					<span class="enscript-keyword">/*</span> no... 32-bit user mode */
+	<span class="enscript-keyword">movl</span>	R32_EIP(%r15), %edi
+	<span class="enscript-keyword">xorq</span>	%rbp, %rbp		/* clear framepointer */
+	<span class="enscript-keyword">CCALL(commpage_is_in_pfz32)
+</span>	<span class="enscript-keyword">testl</span>	%eax, %eax
+	<span class="enscript-keyword">je</span>	2f			/* not in the PFZ... go service AST */
+	<span class="enscript-keyword">movl</span>	%eax, R32_EBX(%r15)	/* let the PFZ know we've pended an AST */
+	<span class="enscript-keyword">jmp</span>	EXT(return_to_user)
+<span class="enscript-function-name">1:</span>
+	<span class="enscript-keyword">movq</span>	R64_RIP(%r15), %rdi
+	<span class="enscript-keyword">xorq</span>	%rbp, %rbp		/* clear framepointer */
+	<span class="enscript-keyword">CCALL(commpage_is_in_pfz64)
+</span>	<span class="enscript-keyword">testl</span>	%eax, %eax
+	<span class="enscript-keyword">je</span>	2f			/* not in the PFZ... go service AST */
+	<span class="enscript-keyword">movl</span>	%eax, R64_RBX(%r15)	/* let the PFZ know we've pended an AST */
+	<span class="enscript-keyword">jmp</span>	EXT(return_to_user)
+<span class="enscript-function-name">2:</span>	
+	<span class="enscript-keyword">sti</span>				/* interrupts always enabled on return to user mode */
+
+	<span class="enscript-keyword">xor</span>	%edi, %edi		/* zero %rdi */
+	<span class="enscript-keyword">xorq</span>	%rbp, %rbp		/* clear framepointer */
+	<span class="enscript-keyword">CCALL(i386_astintr)</span>		/* take the AST */
+
+	<span class="enscript-keyword">cli
+</span>	<span class="enscript-keyword">mov</span>	%rsp, %r15		/* AST changes stack, saved state */
+	<span class="enscript-keyword">xorl</span>	%ecx, %ecx		/* don't check if we're in the PFZ */
+	<span class="enscript-keyword">jmp</span>	EXT(return_from_trap)	/* and check again (rare) */
+
+/*
+ <span class="enscript-keyword">*</span> Trap from kernel mode.  No need to switch stacks.
+ <span class="enscript-keyword">*</span> Interrupts must be off here - we will set them to state at time of trap
+ <span class="enscript-keyword">*</span> as soon as it's safe for us to do so and not recurse doing preemption
+ <span class="enscript-keyword">*</span> 
+ <span class="enscript-keyword">*/
+</span><span class="enscript-function-name">trap_from_kernel:</span>
+	<span class="enscript-keyword">movq</span>	%r15, %rdi		/* saved state addr */
+	<span class="enscript-keyword">pushq</span>   R64_RIP(%r15)           /* Simulate a CALL from fault point */
+	<span class="enscript-keyword">pushq</span>   %rbp                    /* Extend framepointer chain */
+	<span class="enscript-keyword">movq</span>    %rsp, %rbp
+	<span class="enscript-keyword">CCALLWITHSP(kernel_trap)</span>	/* to kernel trap routine */
+	<span class="enscript-keyword">popq</span>    %rbp
+	<span class="enscript-keyword">addq</span>    $8, %rsp
+	<span class="enscript-keyword">mov</span>	%rsp, %r15		/* DTrace slides stack/saved-state */
+	<span class="enscript-keyword">cli
+</span>
+	<span class="enscript-keyword">movl</span>	%gs:CPU_PENDING_AST,%eax	/* get pending asts */
+	<span class="enscript-keyword">testl</span>	$(AST_URGENT),%eax		/* any urgent preemption? */
+	<span class="enscript-keyword">je</span>	ret_to_kernel			/* no, nothing to do */
+	<span class="enscript-keyword">cmpl</span>	$(T_PREEMPT),R64_TRAPNO(%r15)
+	<span class="enscript-keyword">je</span>	ret_to_kernel			/* T_PREEMPT handled in kernel_trap() */
+	<span class="enscript-keyword">testl</span>	$(EFL_IF),R64_RFLAGS(%r15)	/* interrupts disabled? */
+	<span class="enscript-keyword">je</span>	ret_to_kernel
+	<span class="enscript-keyword">cmpl</span>	$0,%gs:CPU_PREEMPTION_LEVEL	/* preemption disabled? */
+	<span class="enscript-keyword">jne</span>	ret_to_kernel
+	<span class="enscript-keyword">movq</span>	%gs:CPU_KERNEL_STACK,%rax
+	<span class="enscript-keyword">movq</span>	%rsp,%rcx
+	<span class="enscript-keyword">xorq</span>	%rax,%rcx
+	<span class="enscript-keyword">andq</span>	EXT(kernel_stack_mask)(%rip),%rcx
+	<span class="enscript-keyword">testq</span>	%rcx,%rcx		/* are we on the kernel stack? */
+	<span class="enscript-keyword">jne</span>	ret_to_kernel		/* no, skip it */
+
+	<span class="enscript-keyword">CCALL1(i386_astintr,</span> $1)	/* take the AST */
+
+	<span class="enscript-keyword">mov</span>	%rsp, %r15		/* AST changes stack, saved state */
+	<span class="enscript-keyword">jmp</span>	ret_to_kernel
+
+
+/*
+ <span class="enscript-keyword">*</span> All interrupts on all tasks enter here with:
+ <span class="enscript-keyword">*</span>	r15	 x86_saved_state_t
+ <span class="enscript-keyword">*</span>	rsp	 kernel or interrupt stack
+ <span class="enscript-keyword">*</span>	esi	 cs at trap
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span>	both rsp and r15 are 16-byte aligned
+ <span class="enscript-keyword">*</span>	interrupts disabled
+ <span class="enscript-keyword">*</span>	direction flag cleared
+ <span class="enscript-keyword">*/
+</span>Entry(hndl_allintrs)
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> test whether already on interrupt stack
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">movq</span>	%gs:CPU_INT_STACK_TOP,%rcx
+	<span class="enscript-keyword">cmpq</span>	%rsp,%rcx
+	<span class="enscript-keyword">jb</span>	1f
+	<span class="enscript-keyword">leaq</span>	-INTSTACK_SIZE(%rcx),%rdx
+	<span class="enscript-keyword">cmpq</span>	%rsp,%rdx
+	<span class="enscript-keyword">jb</span>	int_from_intstack
+<span class="enscript-function-name">1:</span>
+	<span class="enscript-keyword">xchgq</span>	%rcx,%rsp		/* switch to interrupt stack */
+
+	<span class="enscript-keyword">mov</span>	%cr0,%rax		/* get cr0 */
+	<span class="enscript-keyword">orl</span>	$(CR0_TS),%eax		/* or in TS bit */
+	<span class="enscript-keyword">mov</span>	%rax,%cr0		/* set cr0 */
+
+	<span class="enscript-keyword">pushq</span>	%rcx			/* save pointer to old stack */
+	<span class="enscript-keyword">pushq</span>	%gs:CPU_INT_STATE	/* save previous intr state */
+	<span class="enscript-keyword">movq</span>	%r15,%gs:CPU_INT_STATE	/* set intr state */
+	<span class="enscript-keyword">
+</span>	<span class="enscript-keyword">TIME_INT_ENTRY</span>			/* do timing */
+
+	<span class="enscript-keyword">/*</span> Check for active vtimers in the current task */
+	<span class="enscript-keyword">mov</span>	%gs:CPU_ACTIVE_THREAD, %rcx
+	<span class="enscript-keyword">mov</span>	TH_TASK(%rcx), %rbx
+	<span class="enscript-keyword">TASK_VTIMER_CHECK(%rbx,</span> %rcx)
+
+	<span class="enscript-keyword">incl</span>	%gs:CPU_PREEMPTION_LEVEL
+	<span class="enscript-keyword">incl</span>	%gs:CPU_INTERRUPT_LEVEL
+
+	<span class="enscript-keyword">CCALL1(interrupt,</span> %r15)		/* call generic interrupt routine */
+
+	<span class="enscript-keyword">.globl</span>	EXT(return_to_iret)
+LEXT(return_to_iret)			/* (label for kdb_kintr and hardclock) */
+
+	<span class="enscript-keyword">decl</span>	%gs:CPU_INTERRUPT_LEVEL
+	<span class="enscript-keyword">decl</span>	%gs:CPU_PREEMPTION_LEVEL
+
+	<span class="enscript-keyword">TIME_INT_EXIT</span>			/* do timing */
+
+	<span class="enscript-keyword">popq</span>	%gs:CPU_INT_STATE 	/* reset/clear intr state pointer */
+	<span class="enscript-keyword">popq</span>	%rsp			/* switch back to old stack */
+
+	<span class="enscript-keyword">movq</span>	%gs:CPU_ACTIVE_THREAD,%rax
+	<span class="enscript-keyword">movq</span>	TH_PCB_FPS(%rax),%rax	/* get pcb's ifps */
+	<span class="enscript-keyword">cmpq</span>	$0,%rax			/* Is there a context */
+	<span class="enscript-keyword">je</span>	1f			/* Branch if not */
+	<span class="enscript-keyword">movl</span>	FP_VALID(%rax),%eax	/* Load fp_valid */
+	<span class="enscript-keyword">cmpl</span>	$0,%eax			/* Check if valid */
+	<span class="enscript-keyword">jne</span>	1f			/* Branch if valid */
+	<span class="enscript-keyword">clts</span>				/* Clear TS */
+	<span class="enscript-keyword">jmp</span>	2f
+<span class="enscript-function-name">1:</span>
+	<span class="enscript-keyword">mov</span>	%cr0,%rax		/* get cr0 */
+	<span class="enscript-keyword">orl</span>	$(CR0_TS),%eax		/* or in TS bit */
+	<span class="enscript-keyword">mov</span>	%rax,%cr0		/* set cr0 */
+<span class="enscript-function-name">2:</span>
+	<span class="enscript-keyword">/*</span> Load interrupted code segment into %eax */
+	<span class="enscript-keyword">movl</span>	R32_CS(%r15),%eax	/* assume 32-bit state */
+	<span class="enscript-keyword">cmpl</span>	$(SS_64),SS_FLAVOR(%r15)/* 64-bit? */	
+#if DEBUG_IDT64
+	<span class="enscript-keyword">jne</span>	4f
+	<span class="enscript-keyword">movl</span>	R64_CS(%r15),%eax	/* 64-bit user mode */
+	<span class="enscript-keyword">jmp</span>	3f
+<span class="enscript-function-name">4:</span>
+	<span class="enscript-keyword">cmpl</span>    $(SS_32),SS_FLAVOR(%r15)
+	<span class="enscript-keyword">je</span>	3f
+	<span class="enscript-keyword">POSTCODE2(0x6431)
+</span>	<span class="enscript-keyword">CCALL1(panic_idt64,</span> %r15)
+	<span class="enscript-keyword">hlt
+</span>#else
+	<span class="enscript-keyword">jne</span>	3f
+	<span class="enscript-keyword">movl</span>	R64_CS(%r15),%eax	/* 64-bit user mode */
+#endif
+<span class="enscript-function-name">3:</span>
+	<span class="enscript-keyword">testb</span>	$3,%al			/* user mode, */
+	<span class="enscript-keyword">jnz</span>	ast_from_interrupt_user	/* go handle potential ASTs */
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> we only want to handle preemption requests if
+	 <span class="enscript-keyword">*</span> the interrupt fell in the kernel context
+	 <span class="enscript-keyword">*</span> and preemption isn't disabled
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">movl</span>	%gs:CPU_PENDING_AST,%eax	
+	<span class="enscript-keyword">testl</span>	$(AST_URGENT),%eax		/* any urgent requests? */
+	<span class="enscript-keyword">je</span>	ret_to_kernel			/* no, nothing to do */
+
+	<span class="enscript-keyword">cmpl</span>	$0,%gs:CPU_PREEMPTION_LEVEL	/* preemption disabled? */
+	<span class="enscript-keyword">jne</span>	ret_to_kernel			/* yes, skip it */
+
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> Take an AST from kernel space.  We don't need (and don't want)
+	 <span class="enscript-keyword">*</span> to do as much as the case where the interrupt came from user
+	 <span class="enscript-keyword">*</span> space.
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">CCALL1(i386_astintr,</span> $1)
+
+	<span class="enscript-keyword">mov</span>	%rsp, %r15		/* AST changes stack, saved state */
+	<span class="enscript-keyword">jmp</span>	ret_to_kernel
+
+
+/*
+ <span class="enscript-keyword">*</span> nested int - simple path, can't preempt etc on way out
+ <span class="enscript-keyword">*/
+</span><span class="enscript-function-name">int_from_intstack:</span>
+	<span class="enscript-keyword">incl</span>	%gs:CPU_PREEMPTION_LEVEL
+	<span class="enscript-keyword">incl</span>	%gs:CPU_INTERRUPT_LEVEL
+	<span class="enscript-keyword">incl</span>	%gs:CPU_NESTED_ISTACK
+
+	<span class="enscript-keyword">push</span>	%gs:CPU_INT_STATE
+	<span class="enscript-keyword">mov</span>	%r15, %gs:CPU_INT_STATE
+
+	<span class="enscript-keyword">CCALL1(interrupt,</span> %r15)
+
+	<span class="enscript-keyword">pop</span>	%gs:CPU_INT_STATE
+
+	<span class="enscript-keyword">decl</span>	%gs:CPU_INTERRUPT_LEVEL
+	<span class="enscript-keyword">decl</span>	%gs:CPU_PREEMPTION_LEVEL
+	<span class="enscript-keyword">decl</span>	%gs:CPU_NESTED_ISTACK
+
+	<span class="enscript-keyword">jmp</span>	ret_to_kernel
+
+/*
+ <span class="enscript-keyword">*</span>	Take an AST from an interrupted user
+ <span class="enscript-keyword">*/
+</span><span class="enscript-function-name">ast_from_interrupt_user:</span>
+	<span class="enscript-keyword">movl</span>	%gs:CPU_PENDING_AST,%eax
+	<span class="enscript-keyword">testl</span>	%eax,%eax		/* pending ASTs? */
+	<span class="enscript-keyword">je</span>	EXT(ret_to_user)	/* no, nothing to do */
+
+	<span class="enscript-keyword">TIME_TRAP_UENTRY
+</span>
+	<span class="enscript-keyword">movl</span>	$1, %ecx		/* check if we're in the PFZ */
+	<span class="enscript-keyword">jmp</span>	L_return_from_trap_with_ast	/* return */
+
+
+/* Syscall dispatch routines! */
+
+/*
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span> 32bit Tasks
+ <span class="enscript-keyword">*</span> System call entries via INTR_GATE or sysenter:
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span>	r15	 x86_saved_state32_t
+ <span class="enscript-keyword">*</span>	rsp	 kernel stack
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span>	both rsp and r15 are 16-byte aligned
+ <span class="enscript-keyword">*</span>	interrupts disabled
+ <span class="enscript-keyword">*</span>	direction flag cleared
+ <span class="enscript-keyword">*/
+</span>
+Entry(hndl_sysenter)
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> We can be here either for a mach syscall or a unix syscall,
+	 <span class="enscript-keyword">*</span> as indicated by the sign of the code:
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">movl</span>	R32_EAX(%r15),%eax
+	<span class="enscript-keyword">testl</span>	%eax,%eax
+	<span class="enscript-keyword">js</span>	EXT(hndl_mach_scall)		/* &lt; 0 =&gt; mach */
+						<span class="enscript-keyword">/*</span> &gt; 0 =&gt; unix */
+	<span class="enscript-keyword">
+</span>Entry(hndl_unix_scall)
+
+        <span class="enscript-keyword">TIME_TRAP_UENTRY
+</span>
+	<span class="enscript-keyword">movq</span>	%gs:CPU_ACTIVE_THREAD,%rcx	/* get current thread     */
+	<span class="enscript-keyword">movq</span>	TH_TASK(%rcx),%rbx		/* point to current task  */
+	<span class="enscript-keyword">incl</span>	TH_SYSCALLS_UNIX(%rcx)		/* increment call count   */
+
+	<span class="enscript-keyword">/*</span> Check for active vtimers in the current task */
+	<span class="enscript-keyword">TASK_VTIMER_CHECK(%rbx,%rcx)
+</span>
+	<span class="enscript-keyword">sti
+</span>
+	<span class="enscript-keyword">CCALL1(unix_syscall,</span> %r15)
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> always returns through thread_exception_return
+	 <span class="enscript-keyword">*/
+</span>
+
+Entry(hndl_mach_scall)
+	<span class="enscript-keyword">TIME_TRAP_UENTRY
+</span>
+	<span class="enscript-keyword">movq</span>	%gs:CPU_ACTIVE_THREAD,%rcx	/* get current thread     */
+	<span class="enscript-keyword">movq</span>	TH_TASK(%rcx),%rbx		/* point to current task  */
+	<span class="enscript-keyword">incl</span>	TH_SYSCALLS_MACH(%rcx)		/* increment call count   */
+
+	<span class="enscript-keyword">/*</span> Check for active vtimers in the current task */
+	<span class="enscript-keyword">TASK_VTIMER_CHECK(%rbx,%rcx)
+</span>
+	<span class="enscript-keyword">sti
+</span>
+	<span class="enscript-keyword">CCALL1(mach_call_munger,</span> %r15)
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> always returns through thread_exception_return
+	 <span class="enscript-keyword">*/
+</span>
+
+Entry(hndl_mdep_scall)
+	<span class="enscript-keyword">TIME_TRAP_UENTRY
+</span>
+	<span class="enscript-keyword">/*</span> Check for active vtimers in the current task */
+	<span class="enscript-keyword">movq</span>	%gs:CPU_ACTIVE_THREAD,%rcx	/* get current thread     */
+	<span class="enscript-keyword">movq</span>	TH_TASK(%rcx),%rbx		/* point to current task  */
+	<span class="enscript-keyword">TASK_VTIMER_CHECK(%rbx,%rcx)
+</span>
+	<span class="enscript-keyword">sti
+</span>
+	<span class="enscript-keyword">CCALL1(machdep_syscall,</span> %r15)
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> always returns through thread_exception_return
+	 <span class="enscript-keyword">*/
+</span>
+/*
+ <span class="enscript-keyword">*</span> 64bit Tasks
+ <span class="enscript-keyword">*</span> System call entries via syscall only:
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span>	r15	 x86_saved_state64_t
+ <span class="enscript-keyword">*</span>	rsp	 kernel stack
+ <span class="enscript-keyword">*
+</span> <span class="enscript-keyword">*</span>	both rsp and r15 are 16-byte aligned
+ <span class="enscript-keyword">*</span>	interrupts disabled
+ <span class="enscript-keyword">*</span>	direction flag cleared
+ <span class="enscript-keyword">*/
+</span>
+Entry(hndl_syscall)
+	<span class="enscript-keyword">TIME_TRAP_UENTRY
+</span>
+	<span class="enscript-keyword">movq</span>	%gs:CPU_ACTIVE_THREAD,%rcx	/* get current thread     */
+	<span class="enscript-keyword">movl</span>	$-1, TH_IOTIER_OVERRIDE(%rcx)	/* Reset IO tier override to -1 before handling syscall */
+	<span class="enscript-keyword">movq</span>	TH_TASK(%rcx),%rbx		/* point to current task  */
+
+	<span class="enscript-keyword">/*</span> Check for active vtimers in the current task */
+	<span class="enscript-keyword">TASK_VTIMER_CHECK(%rbx,%rcx)
+</span>
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> We can be here either for a mach, unix machdep or diag syscall,
+	 <span class="enscript-keyword">*</span> as indicated by the syscall class:
+	 <span class="enscript-keyword">*/
+</span>	<span class="enscript-keyword">movl</span>	R64_RAX(%r15), %eax		/* syscall number/class */
+	<span class="enscript-keyword">movl</span>	%eax, %edx
+	<span class="enscript-keyword">andl</span>	$(SYSCALL_CLASS_MASK), %edx	/* syscall class */
+	<span class="enscript-keyword">cmpl</span>	$(SYSCALL_CLASS_MACH&lt;&lt;SYSCALL_CLASS_SHIFT), %edx
+	<span class="enscript-keyword">je</span>	EXT(hndl_mach_scall64)
+	<span class="enscript-keyword">cmpl</span>	$(SYSCALL_CLASS_UNIX&lt;&lt;SYSCALL_CLASS_SHIFT), %edx
+	<span class="enscript-keyword">je</span>	EXT(hndl_unix_scall64)
+	<span class="enscript-keyword">cmpl</span>	$(SYSCALL_CLASS_MDEP&lt;&lt;SYSCALL_CLASS_SHIFT), %edx
+	<span class="enscript-keyword">je</span>	EXT(hndl_mdep_scall64)
+	<span class="enscript-keyword">cmpl</span>	$(SYSCALL_CLASS_DIAG&lt;&lt;SYSCALL_CLASS_SHIFT), %edx
+	<span class="enscript-keyword">je</span>	EXT(hndl_diag_scall64)
+
+	<span class="enscript-keyword">/*</span> Syscall class unknown */
+	<span class="enscript-keyword">sti
+</span>	<span class="enscript-keyword">CCALL3(i386_exception,</span> $(EXC_SYSCALL), %rax, $1)
+	<span class="enscript-keyword">/*</span> no return */
+
+
+Entry(hndl_unix_scall64)
+	<span class="enscript-keyword">incl</span>	TH_SYSCALLS_UNIX(%rcx)		/* increment call count   */
+	<span class="enscript-keyword">sti
+</span>
+	<span class="enscript-keyword">CCALL1(unix_syscall64,</span> %r15)
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> always returns through thread_exception_return
+	 <span class="enscript-keyword">*/
+</span>
+
+Entry(hndl_mach_scall64)
+	<span class="enscript-keyword">incl</span>	TH_SYSCALLS_MACH(%rcx)		/* increment call count   */
+	<span class="enscript-keyword">sti
+</span>
+	<span class="enscript-keyword">CCALL1(mach_call_munger64,</span> %r15)
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> always returns through thread_exception_return
+	 <span class="enscript-keyword">*/
+</span>
+
+
+Entry(hndl_mdep_scall64)
+	<span class="enscript-keyword">sti
+</span>
+	<span class="enscript-keyword">CCALL1(machdep_syscall64,</span> %r15)
+	<span class="enscript-keyword">/*
+</span>	 <span class="enscript-keyword">*</span> always returns through thread_exception_return
+	 <span class="enscript-keyword">*/
+</span>
+Entry(hndl_diag_scall64)
+	<span class="enscript-keyword">CCALL1(diagCall64,</span> %r15)	// Call diagnostics
+	<span class="enscript-keyword">test</span>	%eax, %eax		// What kind of return is this?
+	<span class="enscript-keyword">je</span>	1f			// - branch if bad (zero)
+	<span class="enscript-keyword">jmp</span>	EXT(return_to_user)	// Normal return, do not check asts...
+<span class="enscript-function-name">1:</span>
+	<span class="enscript-keyword">sti
+</span>	<span class="enscript-keyword">CCALL3(i386_exception,</span> $EXC_SYSCALL, $0x6000, $1)
+	<span class="enscript-keyword">/*</span> no return */
+
+Entry(hndl_machine_check)
+	<span class="enscript-keyword">CCALL1(panic_machine_check64,</span> %r15)
+	<span class="enscript-keyword">hlt
+</span>
+Entry(hndl_double_fault)
+	<span class="enscript-keyword">CCALL1(panic_double_fault64,</span> %r15)
+	<span class="enscript-keyword">hlt
+</span></pre>
+<hr />
+</body></html>

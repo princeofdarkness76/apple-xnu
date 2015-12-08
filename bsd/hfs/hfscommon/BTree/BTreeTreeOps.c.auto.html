@@ -1,0 +1,1370 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>BTreeTreeOps.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">BTreeTreeOps.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+	File:		BTreeTreeOps.c
+
+	Contains:	Multi-node tree operations for the BTree Module.
+
+	Version:	xxx put the technology version here xxx
+
+	Written by:	Gordon Sheridan and Bill Bruffey
+
+	Copyright:	© 1992-1999 by Apple Computer, Inc., all rights reserved.
+
+	File Ownership:
+
+		DRI:				Don Brady
+
+		Other Contact:		Mark Day
+
+		Technology:			File Systems
+
+	Writers:
+
+		(msd)	Mark Day
+		(DSH)	Deric Horn
+		(djb)	Don Brady
+
+	Change History (most recent first):
+
+	   &lt;MOSXS&gt;	  6/1/99	djb		Sync up with Mac OS 8.6.
+	   &lt;CS5&gt;	 12/8/97	djb		Radar #2200632, CollapseTree wasn't marking root node dirty.
+	   &lt;CS4&gt;	11/24/97	djb		Radar #2005325, InsertLevel incorrectly handled root splits!
+	   &lt;CS3&gt;	10/17/97	msd		Conditionalize DebugStrs.
+	   &lt;CS2&gt;	 5/16/97	msd		InsertNode() needs a return statement in ErrorExit.
+	   &lt;CS1&gt;	 4/23/97	djb		first checked in
+
+	  &lt;HFS8&gt;	 3/17/97	DSH		Conditionalize out Panic assertion for SC.
+	  &lt;HFS7&gt;	  3/3/97	djb		Removed DebugStr in InsertLevel.
+	  &lt;HFS6&gt;	 2/19/97	djb		Major re-write of insert code; added InsertLevel and InsertNode.
+	  &lt;HFS5&gt;	 1/27/97	djb		InsertTree and DeleteTree are now recursive and support variable
+									sized index keys.
+	  &lt;HFS4&gt;	 1/16/97	djb		Removed DebugStr in SearchTree. Added initial support for
+									variable sized index keys.
+	  &lt;HFS3&gt;	  1/3/97	djb		Changed len8 to length8.
+	  &lt;HFS2&gt;	  1/3/97	djb		Added support for large keys.
+	  &lt;HFS1&gt;	12/19/96	djb		first checked in
+
+	History applicable to original Scarecrow Design:
+
+		 &lt;3&gt;	10/25/96	ser		Changing for new VFPI
+		 &lt;2&gt;	 1/22/96	dkh		Add #include Memory.h
+		 &lt;1&gt;	10/18/95	rst		Moved from Scarecrow project.
+
+		&lt;12&gt;	 7/18/95	mbb		Change MoveData &amp; ClearBytes to BlockMoveData &amp; BlockZero.
+		&lt;11&gt;	 9/30/94	prp		Get in sync with D2 interface changes.
+		&lt;10&gt;	 7/25/94	wjk		Eliminate usage of BytePtr in favor of UInt8 *.
+		 &lt;9&gt;	 7/22/94	wjk		Convert to the new set of header files.
+		 &lt;8&gt;	 12/2/93	wjk		Move from Makefiles to BuildFiles. Fit into the ModernOS and
+									NRCmds environments.
+		 &lt;7&gt;	11/30/93	wjk		Change some Ptr's to BytePtr's in function definitions so they
+									agree with their prototypes.
+		 &lt;6&gt;	 5/21/93	gs		Debug DeleteTree. Modify InsertTree for BTReplaceRecord.
+		 &lt;5&gt;	 5/10/93	gs		Modify RotateLeft, and add DeleteTree, CollapseTree routines.
+		 &lt;4&gt;	 3/23/93	gs		revise RotateLeft to use InsertKeyRecord instead of
+									InsertRecord.
+		 &lt;3&gt;	 3/23/93	gs		Implement SplitLeft, InsertTree routine.
+		 &lt;2&gt;	  2/8/93	gs		Implement SearchTree, and RotateLeft.
+		 &lt;1&gt;	11/15/92	gs		first checked in
+
+*/</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../headers/BTreesPrivate.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../../hfs_btreeio.h&quot;</span>
+
+<span class="enscript-comment">//
+</span><span class="enscript-comment">/////////////////////// Routines Internal To BTree Module ///////////////////////
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	SearchTree
+</span><span class="enscript-comment">//	InsertTree
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">////////////////////// Routines Internal To BTreeTreeOps.c //////////////////////
+</span>
+<span class="enscript-type">static</span> OSStatus   <span class="enscript-function-name">AddNewRootNode</span>	(BTreeControlBlockPtr		 btreePtr,
+									 NodeDescPtr				 leftNode,
+									 NodeDescPtr				 rightNode );
+
+<span class="enscript-type">static</span> OSStatus   <span class="enscript-function-name">CollapseTree</span>		(BTreeControlBlockPtr		 btreePtr,
+									 BlockDescriptor			*blockPtr );
+
+<span class="enscript-type">static</span> OSStatus   <span class="enscript-function-name">RotateLeft</span>		(BTreeControlBlockPtr		 btreePtr,
+									 NodeDescPtr				 leftNode,
+									 NodeDescPtr				 rightNode,
+									 u_int16_t					 rightInsertIndex,
+									 KeyPtr						 keyPtr,
+									 u_int8_t *					 recPtr,
+									 u_int16_t					 recSize,
+									 u_int16_t					*insertIndex,
+									 u_int32_t					*insertNodeNum,
+									 Boolean					*recordFit,
+									 u_int16_t					*recsRotated );
+
+<span class="enscript-type">static</span> Boolean	   RotateRecordLeft	(BTreeControlBlockPtr		 btreePtr,
+									 NodeDescPtr				 leftNode,
+									 NodeDescPtr				 rightNode );
+
+<span class="enscript-type">static</span> OSStatus	   SplitLeft		(BTreeControlBlockPtr		 btreePtr,
+									 BlockDescriptor			*leftNode,
+									 BlockDescriptor			*rightNode,
+									 u_int32_t					 rightNodeNum,
+									 u_int16_t					 index,
+									 KeyPtr						 keyPtr,
+									 u_int8_t *					 recPtr,
+									 u_int16_t					 recSize,
+									 u_int16_t					*insertIndex,
+									 u_int32_t					*insertNodeNum,
+									 u_int16_t					*recsRotated );
+								 
+
+
+<span class="enscript-type">static</span>	OSStatus	InsertLevel		(BTreeControlBlockPtr		 btreePtr,
+									 TreePathTable				 treePathTable,
+									 InsertKey					*primaryKey,
+									 InsertKey					*secondaryKey,
+									 BlockDescriptor			*targetNode,
+									 u_int16_t					 index,
+									 u_int16_t					 level,
+									 u_int32_t					*insertNode );
+						 
+<span class="enscript-type">static</span> OSErr		InsertNode 		(BTreeControlBlockPtr		 btreePtr,
+									 InsertKey					*key,
+									 BlockDescriptor			*rightNode,
+									 u_int32_t					 node,
+									 u_int16_t	 				 index,
+									 u_int32_t					*newNode,	
+									 u_int16_t					*newIndex,
+									 BlockDescriptor			*leftNode,
+									 Boolean					*updateParent,
+									 Boolean					*insertParent,
+									 Boolean					*rootSplit );
+									 
+<span class="enscript-type">static</span> u_int16_t		GetKeyLength	(<span class="enscript-type">const</span> BTreeControlBlock *btreePtr,
+									 <span class="enscript-type">const</span> BTreeKey *key,
+									 Boolean forLeafNode );
+
+
+
+<span class="enscript-comment">//////////////////////// BTree Multi-node Tree Operations ///////////////////////
+</span>
+
+<span class="enscript-comment">/*-------------------------------------------------------------------------------
+
+Routine:	SearchTree	-	Search BTree for key and set up Tree Path Table.
+
+Function:	Searches BTree for specified key, setting up the Tree Path Table to
+			reflect the search path.
+
+
+Input:		btreePtr		- pointer to control block of BTree to search
+			keyPtr			- pointer to the key to search for
+			treePathTable	- pointer to the tree path table to construct
+			
+Output:		nodeNum			- number of the node containing the key position
+			iterator		- BTreeIterator specifying record or insert position
+			
+Result:		noErr			- key found, index is record index
+			fsBTRecordNotFoundErr	- key not found, index is insert index
+			fsBTEmptyErr		- key not found, return params are nil
+			otherwise			- catastrophic failure (GetNode/ReleaseNode failed)
+-------------------------------------------------------------------------------*/</span>
+
+OSStatus	SearchTree	(BTreeControlBlockPtr	 btreePtr,
+						 BTreeKeyPtr			 searchKey,
+						 TreePathTable			 treePathTable,
+						 u_int32_t				*nodeNum,
+						 BlockDescriptor		*nodePtr,
+						 u_int16_t				*returnIndex )
+{
+	OSStatus	err;
+	int16_t		level;					<span class="enscript-comment">//	Expected depth of current node
+</span>	u_int32_t	curNodeNum;				<span class="enscript-comment">//	Current node we're searching
+</span>	NodeRec		nodeRec;
+	u_int16_t	index;
+	Boolean		keyFound;
+	int8_t		nodeKind;				<span class="enscript-comment">//	Kind of current node (index/leaf)
+</span>	KeyPtr		keyPtr;
+	u_int8_t *	dataPtr;
+	u_int16_t	dataSize;
+	
+	
+	curNodeNum		= btreePtr-&gt;rootNode;
+	level			= btreePtr-&gt;treeDepth;
+	
+	<span class="enscript-keyword">if</span> (level == 0)						<span class="enscript-comment">// is the tree empty?
+</span>	{
+		err = fsBTEmptyErr;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+	}
+	
+	<span class="enscript-comment">//€€ for debugging...
+</span>	treePathTable [0].node		= 0;
+	treePathTable [0].index		= 0;
+
+	<span class="enscript-keyword">while</span> (true)
+	{
+        <span class="enscript-comment">//
+</span>        <span class="enscript-comment">//	[2550929] Node number 0 is the header node.  It is never a valid
+</span>        <span class="enscript-comment">//	index or leaf node.  If we're ever asked to search through node 0,
+</span>        <span class="enscript-comment">//	something has gone wrong (typically a bad child node number, or
+</span>        <span class="enscript-comment">//	we found a node full of zeroes that we thought was an index node).
+</span>        <span class="enscript-comment">//
+</span>        <span class="enscript-keyword">if</span> (curNodeNum == 0)
+        {
+<span class="enscript-comment">//          Panic(&quot;SearchTree: curNodeNum is zero!&quot;);
+</span>            err = btBadNode;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+        }
+        
+        err = GetNode (btreePtr, curNodeNum, 0, &amp;nodeRec);
+        <span class="enscript-keyword">if</span> (err != noErr)
+        {
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+        }
+		
+        <span class="enscript-comment">//
+</span>        <span class="enscript-comment">//	[2550929] Sanity check the node height and node type.  We expect
+</span>        <span class="enscript-comment">//	particular values at each iteration in the search.  This checking
+</span>        <span class="enscript-comment">//	quickly finds bad pointers, loops, and other damage to the
+</span>        <span class="enscript-comment">//	hierarchy of the B-tree.
+</span>        <span class="enscript-comment">//
+</span>        <span class="enscript-keyword">if</span> (((BTNodeDescriptor*)nodeRec.buffer)-&gt;height != level)
+        {
+<span class="enscript-comment">//		Panic(&quot;Incorrect node height&quot;);
+</span>                err = btBadNode;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">ReleaseAndExit</span>;
+        }
+        nodeKind = ((BTNodeDescriptor*)nodeRec.buffer)-&gt;kind;
+        <span class="enscript-keyword">if</span> (level == 1)
+        {
+            <span class="enscript-comment">//	Nodes at level 1 must be leaves, by definition
+</span>            <span class="enscript-keyword">if</span> (nodeKind != kBTLeafNode)
+            {
+ <span class="enscript-comment">//		Panic(&quot;Incorrect node type: expected leaf&quot;);
+</span>                err = btBadNode;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">ReleaseAndExit</span>;           
+            }
+        }
+        <span class="enscript-keyword">else</span>
+        {
+            <span class="enscript-comment">//	A node at any other depth must be an index node
+</span>            <span class="enscript-keyword">if</span> (nodeKind != kBTIndexNode)
+            {
+<span class="enscript-comment">//		Panic(&quot;Incorrect node type: expected index&quot;);
+</span>                err = btBadNode;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">ReleaseAndExit</span>;
+            }
+        }
+        
+        keyFound = SearchNode (btreePtr, nodeRec.buffer, searchKey, &amp;index);
+
+        treePathTable [level].node		= curNodeNum;
+
+        <span class="enscript-keyword">if</span> (nodeKind == kBTLeafNode)
+        {
+                treePathTable [level].index = index;
+                <span class="enscript-keyword">break</span>;			<span class="enscript-comment">// were done...
+</span>        }
+        
+        <span class="enscript-keyword">if</span> ( (keyFound != true) &amp;&amp; (index != 0))
+                --index;
+
+        treePathTable [level].index = index;
+        
+        err = GetRecordByIndex (btreePtr, nodeRec.buffer, index, &amp;keyPtr, &amp;dataPtr, &amp;dataSize);
+        <span class="enscript-keyword">if</span> (err != noErr)
+        {
+            <span class="enscript-comment">//	[2550929] If we got an error, it is probably because the index was bad
+</span>            <span class="enscript-comment">//	(typically a corrupt node that confused SearchNode).  Invalidate the node
+</span>            <span class="enscript-comment">//	so we won't accidentally use the corrupted contents.  NOTE: the Mac OS 9
+</span>            <span class="enscript-comment">//	sources call this InvalidateNode.
+</span>            
+                (<span class="enscript-type">void</span>) TrashNode(btreePtr, &amp;nodeRec);
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+        }
+        
+        <span class="enscript-comment">//	Get the child pointer out of this index node.  We're now done with the current
+</span>        <span class="enscript-comment">//	node and can continue the search with the child node.
+</span>        curNodeNum = *(u_int32_t *)dataPtr;
+        err = ReleaseNode (btreePtr, &amp;nodeRec);
+        <span class="enscript-keyword">if</span> (err != noErr)
+        {
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+        }
+
+        <span class="enscript-comment">//	The child node should be at a level one less than the parent.
+</span>        --level;
+	}
+	
+	*nodeNum			= curNodeNum;
+	*nodePtr			= nodeRec;
+	*returnIndex		= index;
+
+	<span class="enscript-keyword">if</span> (keyFound)
+		<span class="enscript-keyword">return</span>	noErr;			<span class="enscript-comment">// searchKey found, index identifies record in node
+</span>	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>	fsBTRecordNotFoundErr;	<span class="enscript-comment">// searchKey not found, index identifies insert point
+</span>
+<span class="enscript-reference">ReleaseAndExit</span>:
+    (<span class="enscript-type">void</span>) ReleaseNode(btreePtr, &amp;nodeRec);
+    <span class="enscript-comment">//	fall into ErrorExit
+</span>
+<span class="enscript-reference">ErrorExit</span>:
+	
+	*nodeNum					= 0;
+	nodePtr-&gt;buffer				= nil;
+	nodePtr-&gt;blockHeader		= nil;
+	*returnIndex				= 0;
+
+	<span class="enscript-keyword">return</span>	err;
+}
+
+
+
+
+<span class="enscript-comment">////////////////////////////////// InsertTree ///////////////////////////////////
+</span>
+OSStatus	InsertTree ( BTreeControlBlockPtr		 btreePtr,
+						 TreePathTable				 treePathTable,
+						 KeyPtr						 keyPtr,
+						 u_int8_t *					 recPtr,
+						 u_int16_t					 recSize,
+						 BlockDescriptor			*targetNode,
+						 u_int16_t					 index,
+						 u_int16_t					 level,
+						 Boolean					 replacingKey,
+						 u_int32_t					*insertNode )
+{
+	InsertKey			primaryKey;
+	OSStatus			err;
+
+	primaryKey.keyPtr		= keyPtr;
+	primaryKey.keyLength	= GetKeyLength(btreePtr, primaryKey.keyPtr, (level == 1));
+	primaryKey.recPtr		= recPtr;
+	primaryKey.recSize		= recSize;
+	primaryKey.replacingKey	= replacingKey;
+	primaryKey.skipRotate	= false;
+
+	err	= InsertLevel (btreePtr, treePathTable, &amp;primaryKey, nil,
+					   targetNode, index, level, insertNode );
+						
+	<span class="enscript-keyword">return</span> err;
+
+} <span class="enscript-comment">// End of InsertTree
+</span>
+
+<span class="enscript-comment">////////////////////////////////// InsertLevel //////////////////////////////////
+</span>
+OSStatus	InsertLevel (BTreeControlBlockPtr		 btreePtr,
+						 TreePathTable				 treePathTable,
+						 InsertKey					*primaryKey,
+						 InsertKey					*secondaryKey,
+						 BlockDescriptor			*targetNode,
+						 u_int16_t					 index,
+						 u_int16_t					 level,
+						 u_int32_t					*insertNode )
+{
+	OSStatus			 err;
+	BlockDescriptor		 leftNode;
+	u_int32_t			 targetNodeNum;
+	u_int32_t			 newNodeNum;
+	u_int16_t			 newIndex;
+	Boolean				 insertParent;
+	Boolean				 updateParent;
+	Boolean				 newRoot;
+	InsertKey			insertKey;
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">applec</span>) &amp;&amp; !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__SC__</span>)
+	PanicIf ((level == 1) &amp;&amp; (((NodeDescPtr)targetNode-&gt;buffer)-&gt;kind != kBTLeafNode), <span class="enscript-string">&quot; InsertLevel: non-leaf at level 1! &quot;</span>);
+#<span class="enscript-reference">endif</span>
+	leftNode.buffer = nil;
+	leftNode.blockHeader = nil;
+	targetNodeNum = treePathTable [level].node;
+
+	insertParent = false;
+	updateParent = false;
+
+	<span class="enscript-comment">// XXXdbg
+</span>	ModifyBlockStart(btreePtr-&gt;fileRefNum, targetNode);
+
+	<span class="enscript-comment">////// process first insert //////
+</span>
+	err = InsertNode (btreePtr, primaryKey, targetNode, targetNodeNum, index,
+					  &amp;newNodeNum, &amp;newIndex, &amp;leftNode, &amp;updateParent, &amp;insertParent, &amp;newRoot );
+	M_ExitOnError (err);
+
+	<span class="enscript-keyword">if</span> ( newRoot )
+	{
+		<span class="enscript-comment">// Extend the treePathTable by adding an entry for the new
+</span>		<span class="enscript-comment">// root node that references the current targetNode.
+</span>		<span class="enscript-comment">// 
+</span>		<span class="enscript-comment">// If inserting the secondaryKey changes the first key of
+</span>		<span class="enscript-comment">// the target node, then we'll have to update the second
+</span>		<span class="enscript-comment">// key in the new root node.
+</span>
+		treePathTable [level + 1].node  = btreePtr-&gt;rootNode;
+		treePathTable [level + 1].index = 1;	<span class="enscript-comment">// 1 since we always split/rotate left
+</span>	}
+	
+	<span class="enscript-keyword">if</span> ( level == 1 )
+		*insertNode = newNodeNum;		
+	
+	<span class="enscript-comment">////// process second insert (if any) //////
+</span>
+	<span class="enscript-keyword">if</span>  ( secondaryKey != nil )
+	{
+		Boolean				temp;
+
+		err = InsertNode (btreePtr, secondaryKey, targetNode, newNodeNum, newIndex,
+						  &amp;newNodeNum, &amp;newIndex, &amp;leftNode, &amp;updateParent, &amp;insertParent, &amp;temp);
+		M_ExitOnError (err);
+		
+		<span class="enscript-keyword">if</span> ( DEBUG_BUILD &amp;&amp; updateParent &amp;&amp; newRoot )
+			DebugStr(<span class="enscript-string">&quot; InsertLevel: New root from primary key, update from secondary key...&quot;</span>);
+	}
+
+	<span class="enscript-comment">//////////////////////// Update Parent(s) ///////////////////////////////
+</span>
+	<span class="enscript-keyword">if</span> ( insertParent || updateParent )
+	{
+		BlockDescriptor		parentNode;
+		u_int32_t			parentNodeNum;
+		KeyPtr				keyPtr;
+		u_int8_t *			recPtr;
+		u_int16_t			recSize;
+		
+		parentNode.buffer = nil;
+		parentNode.blockHeader = nil;
+
+		secondaryKey = nil;
+		
+		PanicIf ( (level == btreePtr-&gt;treeDepth), <span class="enscript-string">&quot; InsertLevel: unfinished insert!?&quot;</span>);
+
+		++level;
+
+		<span class="enscript-comment">// Get Parent Node data...
+</span>		index = treePathTable [level].index;
+		parentNodeNum = treePathTable [level].node;
+
+		PanicIf ( parentNodeNum == 0, <span class="enscript-string">&quot; InsertLevel: parent node is zero!?&quot;</span>);
+
+		err = GetNode (btreePtr, parentNodeNum, 0, &amp;parentNode);	<span class="enscript-comment">// released as target node in next level up
+</span>		M_ExitOnError (err);
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">applec</span>) &amp;&amp; !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__SC__</span>)
+		<span class="enscript-keyword">if</span> (DEBUG_BUILD &amp;&amp; level &gt; 1)
+			PanicIf ( ((NodeDescPtr)parentNode.buffer)-&gt;kind != kBTIndexNode, <span class="enscript-string">&quot; InsertLevel: parent node not an index node! &quot;</span>);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-comment">////////////////////////// Update Parent Index //////////////////////////////
+</span>	
+		<span class="enscript-keyword">if</span> ( updateParent )
+		{
+			<span class="enscript-comment">// XXXdbg
+</span>			ModifyBlockStart(btreePtr-&gt;fileRefNum, &amp;parentNode);
+
+			<span class="enscript-comment">//€€ debug: check if ptr == targetNodeNum
+</span>			GetRecordByIndex (btreePtr, parentNode.buffer, index, &amp;keyPtr, &amp;recPtr, &amp;recSize);
+			PanicIf( (*(u_int32_t *) recPtr) != targetNodeNum, <span class="enscript-string">&quot; InsertLevel: parent ptr doesn't match target node!&quot;</span>);
+			
+			<span class="enscript-comment">// need to delete and re-insert this parent key/ptr
+</span>			<span class="enscript-comment">// we delete it here and it gets re-inserted in the
+</span>			<span class="enscript-comment">// InsertLevel call below.
+</span>			DeleteRecord (btreePtr, parentNode.buffer, index);
+	
+			primaryKey-&gt;keyPtr		 = (KeyPtr) GetRecordAddress( btreePtr, targetNode-&gt;buffer, 0 );
+			primaryKey-&gt;keyLength	 = GetKeyLength(btreePtr, primaryKey-&gt;keyPtr, false);
+			primaryKey-&gt;recPtr		 = (u_int8_t *) &amp;targetNodeNum;
+			primaryKey-&gt;recSize		 = <span class="enscript-keyword">sizeof</span>(targetNodeNum);
+			primaryKey-&gt;replacingKey = kReplaceRecord;
+			primaryKey-&gt;skipRotate   = insertParent;		<span class="enscript-comment">// don't rotate left if we have two inserts occuring
+</span>		}
+	
+		<span class="enscript-comment">////////////////////////// Add New Parent Index /////////////////////////////
+</span>	
+		<span class="enscript-keyword">if</span> ( insertParent )
+		{
+			InsertKey	*insertKeyPtr;
+			
+			<span class="enscript-keyword">if</span> ( updateParent )
+			{
+				insertKeyPtr = &amp;insertKey;
+				secondaryKey = &amp;insertKey;
+			}
+			<span class="enscript-keyword">else</span>
+			{
+				insertKeyPtr = primaryKey;
+			}
+			
+			insertKeyPtr-&gt;keyPtr		= (KeyPtr) GetRecordAddress (btreePtr, leftNode.buffer, 0);
+			insertKeyPtr-&gt;keyLength		= GetKeyLength(btreePtr, insertKeyPtr-&gt;keyPtr, false);
+			insertKeyPtr-&gt;recPtr		= (u_int8_t *) &amp;((NodeDescPtr)targetNode-&gt;buffer)-&gt;bLink;
+			insertKeyPtr-&gt;recSize		= <span class="enscript-keyword">sizeof</span>(u_int32_t);
+			insertKeyPtr-&gt;replacingKey	= kInsertRecord;
+			insertKeyPtr-&gt;skipRotate	= false;		<span class="enscript-comment">// a rotate is OK during second insert
+</span>		}	
+		
+		err = InsertLevel (btreePtr, treePathTable, primaryKey, secondaryKey,
+						   &amp;parentNode, index, level, insertNode );
+		M_ExitOnError (err);
+	}
+
+	err = UpdateNode (btreePtr, targetNode, 0, kLockTransaction);	<span class="enscript-comment">// all done with target
+</span>	M_ExitOnError (err);
+
+	err = UpdateNode (btreePtr, &amp;leftNode, 0, kLockTransaction);		<span class="enscript-comment">// all done with left sibling
+</span>	M_ExitOnError (err);
+	
+	<span class="enscript-keyword">return</span>	noErr;
+
+<span class="enscript-reference">ErrorExit</span>:
+
+	(<span class="enscript-type">void</span>) ReleaseNode (btreePtr, targetNode);
+	(<span class="enscript-type">void</span>) ReleaseNode (btreePtr, &amp;leftNode);
+
+	Panic (<span class="enscript-string">&quot; InsertLevel: an error occurred!&quot;</span>);
+
+	<span class="enscript-keyword">return</span>	err;
+
+} <span class="enscript-comment">// End of InsertLevel
+</span>
+
+
+<span class="enscript-comment">////////////////////////////////// InsertNode ///////////////////////////////////
+</span>
+<span class="enscript-type">static</span> OSErr	InsertNode	(BTreeControlBlockPtr	 btreePtr,
+							 InsertKey				*key,
+
+							 BlockDescriptor		*rightNode,
+							 u_int32_t				 node,
+							 u_int16_t	 			 index,
+
+							 u_int32_t				*newNode,	
+							 u_int16_t				*newIndex,
+
+							 BlockDescriptor		*leftNode,
+							 Boolean				*updateParent,
+							 Boolean				*insertParent,
+							 Boolean				*rootSplit )
+{
+	BlockDescriptor		*targetNode = NULL;
+	u_int32_t			 leftNodeNum;
+	u_int16_t			 recsRotated;
+	OSErr				 err;
+	Boolean				 recordFit;
+
+	*rootSplit = false;
+	
+	PanicIf ( rightNode-&gt;buffer == leftNode-&gt;buffer, <span class="enscript-string">&quot; InsertNode: rightNode == leftNode, huh?&quot;</span>);
+	
+	leftNodeNum = ((NodeDescPtr) rightNode-&gt;buffer)-&gt;bLink;
+
+
+	<span class="enscript-comment">/////////////////////// Try Simple Insert ///////////////////////////////
+</span>
+	<span class="enscript-comment">/* sanity check our left and right nodes here. */</span>
+	<span class="enscript-keyword">if</span> (node == leftNodeNum) {
+		<span class="enscript-keyword">if</span> (leftNode-&gt;buffer == NULL) {
+			err = fsBTInvalidNodeErr;
+			M_ExitOnError(err);	
+		}
+		<span class="enscript-keyword">else</span>{
+			targetNode = leftNode;
+		}
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">// we can assume right node is initialized.
+</span>		targetNode = rightNode;	
+	}
+	
+	
+	recordFit = InsertKeyRecord (btreePtr, targetNode-&gt;buffer, index, key-&gt;keyPtr, key-&gt;keyLength, key-&gt;recPtr, key-&gt;recSize);
+
+	<span class="enscript-keyword">if</span> ( recordFit )
+	{
+		*newNode  = node;
+		*newIndex = index;
+	
+		<span class="enscript-keyword">if</span> ( (index == 0) &amp;&amp; (((NodeDescPtr) targetNode-&gt;buffer)-&gt;height != btreePtr-&gt;treeDepth) )
+			*updateParent = true;	<span class="enscript-comment">// the first record changed so we need to update the parent
+</span>	}
+
+
+	<span class="enscript-comment">//////////////////////// Try Rotate Left ////////////////////////////////
+</span>	
+	<span class="enscript-keyword">if</span> ( !recordFit &amp;&amp; leftNodeNum &gt; 0 )
+	{
+		PanicIf ( leftNode-&gt;buffer != nil, <span class="enscript-string">&quot; InsertNode: leftNode already acquired!&quot;</span>);
+
+		<span class="enscript-keyword">if</span> ( leftNode-&gt;buffer == nil )
+		{
+			err = GetNode (btreePtr, leftNodeNum, 0, leftNode);	<span class="enscript-comment">// will be released by caller or a split below
+</span>			M_ExitOnError (err);
+			<span class="enscript-comment">// XXXdbg
+</span>			ModifyBlockStart(btreePtr-&gt;fileRefNum, leftNode);
+		}
+
+		PanicIf ( ((NodeDescPtr) leftNode-&gt;buffer)-&gt;fLink != node, <span class="enscript-string">&quot; InsertNode, RotateLeft: invalid sibling link!&quot;</span> );
+
+		<span class="enscript-keyword">if</span> ( !key-&gt;skipRotate )		<span class="enscript-comment">// are rotates allowed?
+</span>		{
+			err = RotateLeft (btreePtr, leftNode-&gt;buffer, rightNode-&gt;buffer, index, key-&gt;keyPtr, key-&gt;recPtr,
+							  key-&gt;recSize, newIndex, newNode, &amp;recordFit, &amp;recsRotated );	
+			M_ExitOnError (err);
+
+			<span class="enscript-keyword">if</span> ( recordFit )
+			{
+				<span class="enscript-keyword">if</span> ( key-&gt;replacingKey || (recsRotated &gt; 1) || (index &gt; 0) )
+					*updateParent = true;			
+			}
+		}
+	}	
+
+
+	<span class="enscript-comment">//////////////////////// Try Split Left /////////////////////////////////
+</span>
+	<span class="enscript-keyword">if</span> ( !recordFit )
+	{
+		<span class="enscript-comment">// might not have left node...
+</span>		err = SplitLeft (btreePtr, leftNode, rightNode, node, index, key-&gt;keyPtr,
+						 key-&gt;recPtr, key-&gt;recSize, newIndex, newNode, &amp;recsRotated);
+		M_ExitOnError (err);
+
+		<span class="enscript-comment">// if we split root node - add new root
+</span>		
+		<span class="enscript-keyword">if</span> ( ((NodeDescPtr) rightNode-&gt;buffer)-&gt;height == btreePtr-&gt;treeDepth )
+		{
+			err = AddNewRootNode (btreePtr, leftNode-&gt;buffer, rightNode-&gt;buffer);	<span class="enscript-comment">// Note: does not update TPT
+</span>			M_ExitOnError (err);
+			*rootSplit = true;
+		}
+		<span class="enscript-keyword">else</span>
+		{
+			*insertParent = true;
+
+			<span class="enscript-keyword">if</span> ( key-&gt;replacingKey || (recsRotated &gt; 1) || (index &gt; 0) )
+				*updateParent = true;
+		}
+	}
+	
+	<span class="enscript-keyword">return</span> noErr;
+
+<span class="enscript-reference">ErrorExit</span>:
+	(<span class="enscript-type">void</span>) ReleaseNode (btreePtr, leftNode);
+	<span class="enscript-keyword">return</span> err;
+	
+} <span class="enscript-comment">// End of InsertNode
+</span>
+
+<span class="enscript-comment">/*-------------------------------------------------------------------------------
+Routine:	DeleteTree	-	One_line_description.
+
+Function:	Brief_description_of_the_function_and_any_side_effects
+
+ToDo:		
+
+Input:		btreePtr		- description
+			treePathTable	- description
+			targetNode		- description
+			index			- description
+						
+Result:		noErr		- success
+			!= noErr	- failure
+-------------------------------------------------------------------------------*/</span>
+
+OSStatus	DeleteTree			(BTreeControlBlockPtr		 btreePtr,
+								 TreePathTable				 treePathTable,
+								 BlockDescriptor			*targetNode,
+								 u_int16_t					 index,
+								 u_int16_t					 level )
+{
+	OSStatus			err;
+	BlockDescriptor		parentNode;
+	BTNodeDescriptor	*targetNodePtr;
+	u_int32_t			targetNodeNum;
+	Boolean				deleteRequired;
+	Boolean				updateRequired;
+
+	<span class="enscript-comment">// XXXdbg - initialize these to null in case we get an
+</span>	<span class="enscript-comment">//          error and try to exit before it's initialized
+</span>	parentNode.buffer      = nil;	
+	parentNode.blockHeader = nil;
+	
+	deleteRequired = false;
+	updateRequired = false;
+
+	targetNodeNum = treePathTable[level].node;
+	targetNodePtr = targetNode-&gt;buffer;
+	PanicIf (targetNodePtr == nil, <span class="enscript-string">&quot;DeleteTree: targetNode has nil buffer!&quot;</span>);
+
+	<span class="enscript-comment">// XXXdbg
+</span>	ModifyBlockStart(btreePtr-&gt;fileRefNum, targetNode);
+
+	DeleteRecord (btreePtr, targetNodePtr, index);
+		
+	<span class="enscript-comment">//€€ coalesce remaining records?
+</span>
+	<span class="enscript-keyword">if</span> ( targetNodePtr-&gt;numRecords == 0 )	<span class="enscript-comment">// did we delete the last record?
+</span>	{
+		BlockDescriptor		siblingNode;
+		u_int32_t			siblingNodeNum;
+
+		deleteRequired = true;
+		
+		siblingNode.buffer = nil;
+		siblingNode.blockHeader = nil;
+
+		<span class="enscript-comment">////////////////// Get Siblings &amp; Update Links //////////////////////////
+</span>		
+		siblingNodeNum = targetNodePtr-&gt;bLink;				<span class="enscript-comment">// Left Sibling Node
+</span>		<span class="enscript-keyword">if</span> ( siblingNodeNum != 0 )
+		{
+			err = GetNode (btreePtr, siblingNodeNum, 0, &amp;siblingNode);
+			M_ExitOnError (err);
+
+			<span class="enscript-comment">// XXXdbg
+</span>			ModifyBlockStart(btreePtr-&gt;fileRefNum, &amp;siblingNode);
+
+			((NodeDescPtr)siblingNode.buffer)-&gt;fLink = targetNodePtr-&gt;fLink;
+			err = UpdateNode (btreePtr, &amp;siblingNode, 0, kLockTransaction);
+			M_ExitOnError (err);
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( targetNodePtr-&gt;kind == kBTLeafNode )		<span class="enscript-comment">// update firstLeafNode
+</span>		{
+			btreePtr-&gt;firstLeafNode = targetNodePtr-&gt;fLink;
+		}
+
+		siblingNodeNum = targetNodePtr-&gt;fLink;				<span class="enscript-comment">// Right Sibling Node
+</span>		<span class="enscript-keyword">if</span> ( siblingNodeNum != 0 )
+		{
+			err = GetNode (btreePtr, siblingNodeNum, 0, &amp;siblingNode);
+			M_ExitOnError (err);
+
+			<span class="enscript-comment">// XXXdbg
+</span>			ModifyBlockStart(btreePtr-&gt;fileRefNum, &amp;siblingNode);
+
+			((NodeDescPtr)siblingNode.buffer)-&gt;bLink = targetNodePtr-&gt;bLink;
+			err = UpdateNode (btreePtr, &amp;siblingNode, 0, kLockTransaction);
+			M_ExitOnError (err);
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( targetNodePtr-&gt;kind == kBTLeafNode )		<span class="enscript-comment">// update lastLeafNode
+</span>		{
+			btreePtr-&gt;lastLeafNode = targetNodePtr-&gt;bLink;
+		}
+		
+		<span class="enscript-comment">//////////////////////// Free Empty Node ////////////////////////////////
+</span>
+		ClearNode (btreePtr, targetNodePtr);
+		
+		err = UpdateNode (btreePtr, targetNode, 0, kLockTransaction);
+		M_ExitOnError (err);
+
+		err = FreeNode (btreePtr, targetNodeNum);
+		M_ExitOnError (err);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( index == 0 )			<span class="enscript-comment">// did we delete the first record?
+</span>	{
+		updateRequired = true;		<span class="enscript-comment">// yes, so we need to update parent
+</span>	}
+
+
+	<span class="enscript-keyword">if</span> ( level == btreePtr-&gt;treeDepth )		<span class="enscript-comment">// then targetNode-&gt;buffer is the root node
+</span>	{
+		deleteRequired = false;
+		updateRequired = false;
+		
+		<span class="enscript-keyword">if</span> ( targetNode-&gt;buffer == nil )	<span class="enscript-comment">// then root was freed and the btree is empty
+</span>		{
+			btreePtr-&gt;rootNode  = 0;
+			btreePtr-&gt;treeDepth = 0;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( ((NodeDescPtr)targetNode-&gt;buffer)-&gt;numRecords == 1 )
+		{
+			err = CollapseTree (btreePtr, targetNode);
+			M_ExitOnError (err);
+		}
+	}
+
+
+	<span class="enscript-keyword">if</span> ( updateRequired || deleteRequired )
+	{
+		++level;	<span class="enscript-comment">// next level
+</span>
+		<span class="enscript-comment">//// Get Parent Node and index
+</span>		index = treePathTable [level].index;
+		err = GetNode (btreePtr, treePathTable[level].node, 0, &amp;parentNode);
+		M_ExitOnError (err);
+
+		<span class="enscript-keyword">if</span> ( updateRequired )
+		{
+			 KeyPtr		keyPtr;
+			 u_int8_t *	recPtr;
+			 u_int16_t	recSize;
+			 u_int32_t	insertNode;
+			 
+			 <span class="enscript-comment">// XXXdbg
+</span>			 ModifyBlockStart(btreePtr-&gt;fileRefNum, &amp;parentNode);
+
+			<span class="enscript-comment">//€€ debug: check if ptr == targetNodeNum
+</span>			GetRecordByIndex (btreePtr, parentNode.buffer, index, &amp;keyPtr, &amp;recPtr, &amp;recSize);
+			PanicIf( (*(u_int32_t *) recPtr) != targetNodeNum, <span class="enscript-string">&quot; DeleteTree: parent ptr doesn't match targetNodeNum!!&quot;</span>);
+			
+			<span class="enscript-comment">// need to delete and re-insert this parent key/ptr
+</span>			DeleteRecord (btreePtr, parentNode.buffer, index);
+	
+			keyPtr = (KeyPtr) GetRecordAddress( btreePtr, targetNode-&gt;buffer, 0 );
+			recPtr = (u_int8_t *) &amp;targetNodeNum;
+			recSize = <span class="enscript-keyword">sizeof</span>(targetNodeNum);
+			
+			err = InsertTree (btreePtr, treePathTable, keyPtr, recPtr, recSize,
+							  &amp;parentNode, index, level, kReplaceRecord, &amp;insertNode);
+			M_ExitOnError (err);
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-comment">// deleteRequired
+</span>		{
+			err = DeleteTree (btreePtr, treePathTable, &amp;parentNode, index, level);
+			M_ExitOnError (err);
+		}
+	}	
+
+
+	err = UpdateNode (btreePtr, targetNode, 0, kLockTransaction);
+	M_ExitOnError (err);
+
+	<span class="enscript-keyword">return</span>	noErr;
+
+<span class="enscript-reference">ErrorExit</span>:
+
+	(<span class="enscript-type">void</span>) ReleaseNode (btreePtr, targetNode);
+	(<span class="enscript-type">void</span>) ReleaseNode (btreePtr, &amp;parentNode);
+
+	<span class="enscript-keyword">return</span>	err;
+
+} <span class="enscript-comment">// end DeleteTree
+</span>
+
+
+<span class="enscript-comment">///////////////////////////////// CollapseTree //////////////////////////////////
+</span>
+<span class="enscript-type">static</span> OSStatus	CollapseTree	(BTreeControlBlockPtr		btreePtr,
+							 	 BlockDescriptor			*blockPtr )
+{
+	OSStatus		err;
+	u_int32_t		originalRoot;
+	u_int32_t		nodeNum;
+	
+	originalRoot	= btreePtr-&gt;rootNode;
+	
+	<span class="enscript-comment">// XXXdbg
+</span>	ModifyBlockStart(btreePtr-&gt;fileRefNum, blockPtr);
+
+	<span class="enscript-keyword">while</span> (true)
+	{
+		<span class="enscript-keyword">if</span> ( ((NodeDescPtr)blockPtr-&gt;buffer)-&gt;numRecords &gt; 1)
+			<span class="enscript-keyword">break</span>;							<span class="enscript-comment">// this will make a fine root node
+</span>		
+		<span class="enscript-keyword">if</span> ( ((NodeDescPtr)blockPtr-&gt;buffer)-&gt;kind == kBTLeafNode)
+			<span class="enscript-keyword">break</span>;							<span class="enscript-comment">// we've hit bottom
+</span>		
+		nodeNum				= btreePtr-&gt;rootNode;
+		btreePtr-&gt;rootNode	= GetChildNodeNum (btreePtr, blockPtr-&gt;buffer, 0);
+		--btreePtr-&gt;treeDepth;
+
+		<span class="enscript-comment">//// Clear and Free Current Old Root Node ////
+</span>		ClearNode (btreePtr, blockPtr-&gt;buffer);
+		err = UpdateNode (btreePtr, blockPtr, 0, kLockTransaction);
+		M_ExitOnError (err);
+		err = FreeNode (btreePtr, nodeNum);
+		M_ExitOnError (err);
+		
+		<span class="enscript-comment">//// Get New Root Node
+</span>		err = GetNode (btreePtr, btreePtr-&gt;rootNode, 0, blockPtr);
+		M_ExitOnError (err);
+
+		<span class="enscript-comment">// XXXdbg
+</span>		ModifyBlockStart(btreePtr-&gt;fileRefNum, blockPtr);
+	}
+	
+	<span class="enscript-keyword">if</span> (btreePtr-&gt;rootNode != originalRoot)
+		M_BTreeHeaderDirty (btreePtr);
+		
+	err = UpdateNode (btreePtr, blockPtr, 0, kLockTransaction);	<span class="enscript-comment">// always update!
+</span>	M_ExitOnError (err);
+	
+	<span class="enscript-keyword">return</span>	noErr;
+	
+
+<span class="enscript-comment">/////////////////////////////////// ErrorExit ///////////////////////////////////
+</span>
+<span class="enscript-reference">ErrorExit</span>:
+	(<span class="enscript-type">void</span>)	ReleaseNode (btreePtr, blockPtr);
+	<span class="enscript-keyword">return</span>	err;
+}
+
+
+
+<span class="enscript-comment">////////////////////////////////// RotateLeft ///////////////////////////////////
+</span>
+<span class="enscript-comment">/*-------------------------------------------------------------------------------
+
+Routine:	RotateLeft	-	One_line_description.
+
+Function:	Brief_description_of_the_function_and_any_side_effects
+
+Algorithm:	if rightIndex &gt; insertIndex, subtract 1 for actual rightIndex
+
+Input:		btreePtr			- description
+			leftNode			- description
+			rightNode			- description
+			rightInsertIndex	- description
+			keyPtr				- description
+			recPtr				- description
+			recSize				- description
+			
+Output:		insertIndex
+			insertNodeNum		- description
+			recordFit			- description
+			recsRotated
+			
+Result:		noErr		- success
+			!= noErr	- failure
+-------------------------------------------------------------------------------*/</span>
+
+<span class="enscript-type">static</span> OSStatus	RotateLeft		(BTreeControlBlockPtr		 btreePtr,
+								 NodeDescPtr				 leftNode,
+								 NodeDescPtr				 rightNode,
+								 u_int16_t					 rightInsertIndex,
+								 KeyPtr						 keyPtr,
+								 u_int8_t *					 recPtr,
+								 u_int16_t					 recSize,
+								 u_int16_t					*insertIndex,
+								 u_int32_t					*insertNodeNum,
+								 Boolean					*recordFit,
+								 u_int16_t					*recsRotated )
+{
+	OSStatus			err;
+	int32_t				insertSize;
+	int32_t				nodeSize;
+	int32_t				leftSize, rightSize;
+	int32_t				moveSize = 0;
+	u_int16_t			keyLength;
+	u_int16_t			lengthFieldSize;
+	u_int16_t			index, moveIndex;
+	Boolean				didItFit;
+
+	<span class="enscript-comment">///////////////////// Determine If Record Will Fit //////////////////////////
+</span>	
+	keyLength = GetKeyLength(btreePtr, keyPtr, (rightNode-&gt;kind == kBTLeafNode));
+
+	<span class="enscript-comment">// the key's length field is 8-bits in HFS and 16-bits in HFS+
+</span>	<span class="enscript-keyword">if</span> ( btreePtr-&gt;attributes &amp; kBTBigKeysMask )
+		lengthFieldSize = <span class="enscript-keyword">sizeof</span>(u_int16_t);
+	<span class="enscript-keyword">else</span>
+		lengthFieldSize = <span class="enscript-keyword">sizeof</span>(u_int8_t);
+
+	insertSize = keyLength + lengthFieldSize + recSize + <span class="enscript-keyword">sizeof</span>(u_int16_t);
+
+	<span class="enscript-keyword">if</span> ( M_IsOdd (insertSize) )
+		++insertSize;	<span class="enscript-comment">// add pad byte;
+</span>
+	nodeSize		= btreePtr-&gt;nodeSize;
+
+	<span class="enscript-comment">// add size of insert record to right node
+</span>	rightSize		= nodeSize - GetNodeFreeSize (btreePtr, rightNode) + insertSize;
+	leftSize		= nodeSize - GetNodeFreeSize (btreePtr, leftNode);
+
+	moveIndex	= 0;
+
+	<span class="enscript-keyword">while</span> ( leftSize &lt; rightSize )
+	{
+		<span class="enscript-keyword">if</span> ( moveIndex &lt; rightInsertIndex )
+		{
+			moveSize = GetRecordSize (btreePtr, rightNode, moveIndex) + 2;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( moveIndex == rightInsertIndex )
+		{
+			moveSize = insertSize;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-comment">// ( moveIndex &gt; rightInsertIndex )
+</span>		{
+			moveSize = GetRecordSize (btreePtr, rightNode, moveIndex - 1) + 2;
+		}
+		
+		leftSize	+= moveSize;
+		rightSize	-= moveSize;
+		++moveIndex;
+	}	
+	
+	<span class="enscript-keyword">if</span> ( leftSize &gt; nodeSize )	<span class="enscript-comment">// undo last move
+</span>	{
+		leftSize	-= moveSize;
+		rightSize	+= moveSize;
+		--moveIndex;
+	}
+	
+	<span class="enscript-keyword">if</span> ( rightSize &gt; nodeSize )	<span class="enscript-comment">// record won't fit - failure, but not error
+</span>	{
+		*insertIndex	= 0;
+		*insertNodeNum	= 0;
+		*recordFit		= false;
+		*recsRotated	= 0;
+		
+		<span class="enscript-keyword">return</span>	noErr;
+	}
+	
+	<span class="enscript-comment">// we've found balance point, moveIndex == number of records moved into leftNode
+</span>	
+
+	<span class="enscript-comment">//////////////////////////// Rotate Records /////////////////////////////////
+</span>
+	*recsRotated	= moveIndex;
+	*recordFit		= true;
+	index			= 0;
+
+	<span class="enscript-keyword">while</span> ( index &lt; moveIndex )
+	{
+		<span class="enscript-keyword">if</span> ( index == rightInsertIndex )	<span class="enscript-comment">// insert new record in left node
+</span>		{
+			u_int16_t	leftInsertIndex;
+			
+			leftInsertIndex = leftNode-&gt;numRecords;
+
+			didItFit = InsertKeyRecord (btreePtr, leftNode, leftInsertIndex,
+										keyPtr, keyLength, recPtr, recSize);
+			<span class="enscript-keyword">if</span> ( !didItFit )
+			{
+				Panic (<span class="enscript-string">&quot;RotateLeft: InsertKeyRecord (left) returned false!&quot;</span>);
+				err = fsBTBadRotateErr;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+			}
+			
+			*insertIndex = leftInsertIndex;
+			*insertNodeNum = rightNode-&gt;bLink;
+		}
+		<span class="enscript-keyword">else</span>
+		{
+			didItFit = RotateRecordLeft (btreePtr, leftNode, rightNode);
+			<span class="enscript-keyword">if</span> ( !didItFit )
+			{
+				Panic (<span class="enscript-string">&quot;RotateLeft: RotateRecordLeft returned false!&quot;</span>);
+				err = fsBTBadRotateErr;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+			}
+		}
+		
+		++index;
+	}
+	
+	<span class="enscript-keyword">if</span> ( moveIndex &lt;= rightInsertIndex )	<span class="enscript-comment">// then insert new record in right node
+</span>	{
+		rightInsertIndex -= index;			<span class="enscript-comment">// adjust for records already rotated
+</span>		
+		didItFit = InsertKeyRecord (btreePtr, rightNode, rightInsertIndex,
+									keyPtr, keyLength, recPtr, recSize);
+		<span class="enscript-keyword">if</span> ( !didItFit )
+		{
+			Panic (<span class="enscript-string">&quot;RotateLeft: InsertKeyRecord (right) returned false!&quot;</span>);
+			err = fsBTBadRotateErr;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+		}
+	
+		*insertIndex = rightInsertIndex;
+		*insertNodeNum = leftNode-&gt;fLink;
+	}
+
+
+	<span class="enscript-keyword">return</span> noErr;
+
+
+	<span class="enscript-comment">////////////////////////////// Error Exit ///////////////////////////////////
+</span>
+<span class="enscript-reference">ErrorExit</span>:
+
+	*insertIndex	= 0;
+	*insertNodeNum	= 0;
+	*recordFit		= false;
+	*recsRotated	= 0;
+	
+	<span class="enscript-keyword">return</span>	err;
+}
+
+
+
+<span class="enscript-comment">/////////////////////////////////// SplitLeft ///////////////////////////////////
+</span>
+<span class="enscript-type">static</span> OSStatus	SplitLeft		(BTreeControlBlockPtr		 btreePtr,
+								 BlockDescriptor			*leftNode,
+								 BlockDescriptor			*rightNode,
+								 u_int32_t					 rightNodeNum,
+								 u_int16_t					 index,
+								 KeyPtr						 keyPtr,
+								 u_int8_t *					 recPtr,
+								 u_int16_t					 recSize,
+								 u_int16_t					*insertIndex,
+								 u_int32_t					*insertNodeNum,
+								 u_int16_t					*recsRotated )
+{
+	OSStatus			err;
+	NodeDescPtr			left, right;
+	u_int32_t			newNodeNum;
+	Boolean				recordFit;
+	
+	
+	<span class="enscript-comment">///////////////////////////// Compare Nodes /////////////////////////////////
+</span>
+	right = rightNode-&gt;buffer;
+	left  = leftNode-&gt;buffer;
+	
+	PanicIf ( right-&gt;bLink != 0 &amp;&amp; left == 0, <span class="enscript-string">&quot; SplitLeft: left sibling missing!?&quot;</span> );
+	
+	<span class="enscript-comment">/* type should be kBTLeafNode or kBTIndexNode */</span>
+	
+	<span class="enscript-keyword">if</span> ( (right-&gt;height == 1) &amp;&amp; (right-&gt;kind != kBTLeafNode) )
+		<span class="enscript-keyword">return</span>	fsBTInvalidNodeErr;
+	
+	<span class="enscript-keyword">if</span> ( left != nil )
+	{
+		<span class="enscript-keyword">if</span> ( left-&gt;fLink != rightNodeNum )
+			<span class="enscript-keyword">return</span> fsBTInvalidNodeErr;										<span class="enscript-comment">//€€ E_BadSibling ?
+</span>	
+		<span class="enscript-keyword">if</span> ( left-&gt;height != right-&gt;height )
+			<span class="enscript-keyword">return</span>	fsBTInvalidNodeErr;										<span class="enscript-comment">//€€ E_BadNodeHeight ?
+</span>		
+		<span class="enscript-keyword">if</span> ( left-&gt;kind != right-&gt;kind )
+			<span class="enscript-keyword">return</span>	fsBTInvalidNodeErr;										<span class="enscript-comment">//€€ E_BadNodeType ?
+</span>	}
+	
+
+	<span class="enscript-comment">///////////////////////////// Allocate Node /////////////////////////////////
+</span>
+	err = AllocateNode (btreePtr, &amp;newNodeNum);
+	M_ExitOnError (err);
+	
+
+	<span class="enscript-comment">/////////////// Update Forward Link In Original Left Node ///////////////////
+</span>
+	<span class="enscript-keyword">if</span> ( left != nil )
+	{
+		<span class="enscript-comment">// XXXdbg
+</span>		ModifyBlockStart(btreePtr-&gt;fileRefNum, leftNode);
+
+		left-&gt;fLink	= newNodeNum;
+		err = UpdateNode (btreePtr, leftNode, 0, kLockTransaction);
+		M_ExitOnError (err);
+	}
+
+
+	<span class="enscript-comment">/////////////////////// Initialize New Left Node ////////////////////////////
+</span>
+	err = GetNewNode (btreePtr, newNodeNum, leftNode);
+	M_ExitOnError (err);
+	
+	<span class="enscript-comment">// XXXdbg
+</span>	ModifyBlockStart(btreePtr-&gt;fileRefNum, leftNode);
+
+	left		= leftNode-&gt;buffer;
+	left-&gt;fLink	= rightNodeNum;
+	
+
+	<span class="enscript-comment">// Steal Info From Right Node
+</span>	
+	left-&gt;bLink  = right-&gt;bLink;
+	left-&gt;kind   = right-&gt;kind;
+	left-&gt;height = right-&gt;height;
+	
+	right-&gt;bLink		= newNodeNum;			<span class="enscript-comment">// update Right bLink
+</span>
+	<span class="enscript-keyword">if</span> ( (left-&gt;kind == kBTLeafNode) &amp;&amp; (left-&gt;bLink == 0) )
+	{
+		<span class="enscript-comment">// if we're adding a new first leaf node - update BTreeInfoRec
+</span>		
+		btreePtr-&gt;firstLeafNode = newNodeNum;
+		M_BTreeHeaderDirty (btreePtr);		<span class="enscript-comment">//€€ AllocateNode should have set the bit already...
+</span>	}
+
+	<span class="enscript-comment">////////////////////////////// Rotate Left //////////////////////////////////
+</span>
+	err = RotateLeft (btreePtr, left, right, index, keyPtr, recPtr, recSize,
+					  insertIndex, insertNodeNum, &amp;recordFit, recsRotated);
+	
+	M_ExitOnError (err);
+
+	<span class="enscript-keyword">return</span> noErr;
+	
+<span class="enscript-reference">ErrorExit</span>:
+	
+	(<span class="enscript-type">void</span>) ReleaseNode (btreePtr, leftNode);
+	(<span class="enscript-type">void</span>) ReleaseNode (btreePtr, rightNode);
+	
+	<span class="enscript-comment">//€€ Free new node if allocated?
+</span>
+	*insertIndex	= 0;
+	*insertNodeNum	= 0;
+	*recsRotated	= 0;
+	
+	<span class="enscript-keyword">return</span>	err;
+}
+
+
+
+<span class="enscript-comment">/////////////////////////////// RotateRecordLeft ////////////////////////////////
+</span>
+<span class="enscript-type">static</span> Boolean <span class="enscript-function-name">RotateRecordLeft</span> (BTreeControlBlockPtr		btreePtr,
+								 NodeDescPtr				leftNode,
+							 	 NodeDescPtr				rightNode )
+{
+	u_int16_t	size;
+	u_int8_t *	recPtr;
+	Boolean		recordFit;
+	
+	size	= GetRecordSize (btreePtr, rightNode, 0);
+	recPtr	= GetRecordAddress (btreePtr, rightNode, 0);
+	
+	recordFit = InsertRecord (btreePtr, leftNode, leftNode-&gt;numRecords, recPtr, size);
+	
+	<span class="enscript-keyword">if</span> ( !recordFit )
+		<span class="enscript-keyword">return</span> false;
+	
+	DeleteRecord (btreePtr, rightNode, 0);
+	
+	<span class="enscript-keyword">return</span> true;
+}
+
+
+<span class="enscript-comment">//////////////////////////////// AddNewRootNode /////////////////////////////////
+</span>
+<span class="enscript-type">static</span> OSStatus	AddNewRootNode	(BTreeControlBlockPtr	 btreePtr,
+								 NodeDescPtr			 leftNode,
+								 NodeDescPtr			 rightNode )
+{
+	OSStatus			err;
+	BlockDescriptor		rootNode;
+	u_int32_t			rootNum;
+	KeyPtr				keyPtr;
+	Boolean				didItFit;
+	u_int16_t			keyLength;	
+	
+	rootNode.buffer = nil;
+	rootNode.blockHeader = nil;
+
+	PanicIf (leftNode == nil, <span class="enscript-string">&quot;AddNewRootNode: leftNode == nil&quot;</span>);
+	PanicIf (rightNode == nil, <span class="enscript-string">&quot;AddNewRootNode: rightNode == nil&quot;</span>);
+	
+	
+	<span class="enscript-comment">/////////////////////// Initialize New Root Node ////////////////////////////
+</span>	
+	err = AllocateNode (btreePtr, &amp;rootNum);
+	M_ExitOnError (err);
+	
+	err = GetNewNode (btreePtr, rootNum, &amp;rootNode);
+	M_ExitOnError (err);
+		
+	<span class="enscript-comment">// XXXdbg
+</span>	ModifyBlockStart(btreePtr-&gt;fileRefNum, &amp;rootNode);
+
+	((NodeDescPtr)rootNode.buffer)-&gt;kind = kBTIndexNode;
+	((NodeDescPtr)rootNode.buffer)-&gt;height	= ++btreePtr-&gt;treeDepth;
+	
+
+	<span class="enscript-comment">///////////////////// Insert Left Node Index Record /////////////////////////	
+</span>
+	keyPtr = (KeyPtr) GetRecordAddress (btreePtr, leftNode, 0);
+	keyLength = GetKeyLength(btreePtr, keyPtr, false);
+
+	didItFit = InsertKeyRecord ( btreePtr, rootNode.buffer, 0, keyPtr, keyLength,
+								 (u_int8_t *) &amp;rightNode-&gt;bLink, 4 );
+
+	PanicIf ( !didItFit, <span class="enscript-string">&quot;AddNewRootNode:InsertKeyRecord failed for left index record&quot;</span>);
+
+
+	<span class="enscript-comment">//////////////////// Insert Right Node Index Record /////////////////////////
+</span>
+	keyPtr = (KeyPtr) GetRecordAddress (btreePtr, rightNode, 0);
+	keyLength = GetKeyLength(btreePtr, keyPtr, false);
+
+	didItFit = InsertKeyRecord ( btreePtr, rootNode.buffer, 1, keyPtr, keyLength,
+								 (u_int8_t *) &amp;leftNode-&gt;fLink, 4 );
+
+	PanicIf ( !didItFit, <span class="enscript-string">&quot;AddNewRootNode:InsertKeyRecord failed for right index record&quot;</span>);
+
+	
+	<span class="enscript-comment">/////////////////////////// Release Root Node ///////////////////////////////
+</span>	
+	err = UpdateNode (btreePtr, &amp;rootNode, 0, kLockTransaction);
+	M_ExitOnError (err);
+	
+	<span class="enscript-comment">// update BTreeInfoRec
+</span>	
+	btreePtr-&gt;rootNode	 = rootNum;
+	M_BTreeHeaderDirty(btreePtr);
+
+	<span class="enscript-keyword">return</span> noErr;
+
+
+	<span class="enscript-comment">////////////////////////////// Error Exit ///////////////////////////////////
+</span>
+<span class="enscript-reference">ErrorExit</span>:
+
+	<span class="enscript-keyword">return</span>	err;
+}
+
+
+<span class="enscript-type">static</span> u_int16_t	GetKeyLength ( <span class="enscript-type">const</span> BTreeControlBlock *btreePtr, <span class="enscript-type">const</span> BTreeKey *key, Boolean forLeafNode )
+{
+	u_int16_t length;
+
+	<span class="enscript-keyword">if</span> ( forLeafNode || btreePtr-&gt;attributes &amp; kBTVariableIndexKeysMask )
+		length = KeyLength (btreePtr, key);		<span class="enscript-comment">// just use actual key length
+</span>	<span class="enscript-keyword">else</span>
+		length = btreePtr-&gt;maxKeyLength;		<span class="enscript-comment">// fixed sized index key (i.e. HFS)		//€€ shouldn't we clear the pad bytes?
+</span>
+	<span class="enscript-keyword">return</span> length;
+}
+
+</pre>
+<hr />
+</body></html>

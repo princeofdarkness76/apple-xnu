@@ -1,0 +1,892 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>uipc_mbuf2.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">uipc_mbuf2.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*	$NetBSD: uipc_mbuf.c,v 1.40 1999/04/01 00:23:25 thorpej Exp $	*/</span>
+
+<span class="enscript-comment">/*
+ * Copyright (C) 1999 WIDE Project.
+ * All rights reserved.
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the project nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1988, 1991, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)uipc_mbuf.c	8.4 (Berkeley) 2/14/95
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+
+<span class="enscript-comment">/*#define PULLDOWN_DEBUG*/</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_var.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * ensure that [off, off + len) is contiguous on the mbuf chain &quot;m&quot;.
+ * packet chain before &quot;off&quot; is kept untouched.
+ * if offp == NULL, the target will start at &lt;retval, 0&gt; on resulting chain.
+ * if offp != NULL, the target will start at &lt;retval, *offp&gt; on resulting chain.
+ *
+ * on error return (NULL return value), original &quot;m&quot; will be freed.
+ *
+ * XXX M_TRAILINGSPACE/M_LEADINGSPACE on shared cluster (sharedcluster)
+ */</span>
+<span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">m_pulldown</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> off, <span class="enscript-type">int</span> len, <span class="enscript-type">int</span> *offp)
+{
+	<span class="enscript-type">struct</span> mbuf *n, *o;
+	<span class="enscript-type">int</span> hlen, tlen, olen;
+	<span class="enscript-type">int</span> sharedcluster;
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">PULLDOWN_STAT</span>) &amp;&amp; <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *prev = NULL;
+	<span class="enscript-type">int</span> prevlen = 0, prevmlen = 0;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* check invalid arguments. */</span>
+	<span class="enscript-keyword">if</span> (m == NULL)
+		panic(<span class="enscript-string">&quot;m == NULL in m_pulldown()&quot;</span>);
+	<span class="enscript-keyword">if</span> (len &gt; MCLBYTES) {
+		m_freem(m);
+		<span class="enscript-keyword">return</span> NULL;	<span class="enscript-comment">/* impossible */</span>
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">PULLDOWN_STAT</span>) &amp;&amp; <span class="enscript-variable-name">INET6</span>
+	ip6stat.ip6s_pulldown++;
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">PULLDOWN_STAT</span>) &amp;&amp; <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-comment">/* statistics for m_pullup */</span>
+	ip6stat.ip6s_pullup++;
+	<span class="enscript-keyword">if</span> (off + len &gt; MHLEN)
+		ip6stat.ip6s_pullup_fail++;
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-type">int</span> dlen, mlen;
+
+		dlen = (prev == m) ? prevlen : m-&gt;m_len;
+		mlen = (prev == m) ? prevmlen : m-&gt;m_len + M_TRAILINGSPACE(m);
+
+		<span class="enscript-keyword">if</span> (dlen &gt;= off + len)
+			ip6stat.ip6s_pullup--; <span class="enscript-comment">/* call will not be made! */</span>
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((m-&gt;m_flags &amp; M_EXT) != 0) {
+			ip6stat.ip6s_pullup_alloc++;
+			ip6stat.ip6s_pullup_copy++;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (mlen &gt;= off + len)
+				ip6stat.ip6s_pullup_copy++;
+			<span class="enscript-keyword">else</span> {
+				ip6stat.ip6s_pullup_alloc++;
+				ip6stat.ip6s_pullup_copy++;
+			}
+		}
+
+		prevlen = off + len;
+		prevmlen = MHLEN;
+	}
+
+	<span class="enscript-comment">/* statistics for m_pullup2 */</span>
+	ip6stat.ip6s_pullup2++;
+	<span class="enscript-keyword">if</span> (off + len &gt; MCLBYTES)
+		ip6stat.ip6s_pullup2_fail++;
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-type">int</span> dlen, mlen;
+
+		dlen = (prev == m) ? prevlen : m-&gt;m_len;
+		mlen = (prev == m) ? prevmlen : m-&gt;m_len + M_TRAILINGSPACE(m);
+		prevlen = off + len;
+		prevmlen = mlen;
+
+		<span class="enscript-keyword">if</span> (dlen &gt;= off + len)
+			ip6stat.ip6s_pullup2--; <span class="enscript-comment">/* call will not be made! */</span>
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((m-&gt;m_flags &amp; M_EXT) != 0) {
+			ip6stat.ip6s_pullup2_alloc++;
+			ip6stat.ip6s_pullup2_copy++;
+			prevmlen = (off + len &gt; MHLEN) ? MCLBYTES : MHLEN;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (mlen &gt;= off + len)
+				ip6stat.ip6s_pullup2_copy++;
+			<span class="enscript-keyword">else</span> {
+				ip6stat.ip6s_pullup2_alloc++;
+				ip6stat.ip6s_pullup2_copy++;
+				prevmlen = (off + len &gt; MHLEN) ? MCLBYTES
+							       : MHLEN;
+			}
+		}
+	}
+
+	prev = m;
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">PULLDOWN_DEBUG</span>
+    {
+	<span class="enscript-type">struct</span> mbuf *t;
+	printf(<span class="enscript-string">&quot;before:&quot;</span>);
+	<span class="enscript-keyword">for</span> (t = m; t; t = t-&gt;m_next)
+		printf(<span class="enscript-string">&quot; %d&quot;</span>, t-&gt;m_len);
+	printf(<span class="enscript-string">&quot;\n&quot;</span>);
+    }
+#<span class="enscript-reference">endif</span>
+	n = m;
+	<span class="enscript-keyword">while</span> (n != NULL &amp;&amp; off &gt; 0) {
+		<span class="enscript-keyword">if</span> (n-&gt;m_len &gt; off)
+			<span class="enscript-keyword">break</span>;
+		off -= n-&gt;m_len;
+		n = n-&gt;m_next;
+	}
+	<span class="enscript-comment">/* be sure to point non-empty mbuf */</span>
+	<span class="enscript-keyword">while</span> (n != NULL &amp;&amp; n-&gt;m_len == 0)
+		n = n-&gt;m_next;
+	<span class="enscript-keyword">if</span> (!n) {
+		m_freem(m);
+		<span class="enscript-keyword">return</span> NULL;	<span class="enscript-comment">/* mbuf chain too short */</span>
+	}
+
+	<span class="enscript-comment">/*
+	 * the target data is on &lt;n, off&gt;.
+	 * if we got enough data on the mbuf &quot;n&quot;, we're done.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((off == 0 || offp) &amp;&amp; len &lt;= n-&gt;m_len - off)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ok</span>;
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">PULLDOWN_STAT</span>) &amp;&amp; <span class="enscript-variable-name">INET6</span>
+	ip6stat.ip6s_pulldown_copy++;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * when len &lt; n-&gt;m_len - off and off != 0, it is a special case.
+	 * len bytes from &lt;n, off&gt; sits in single mbuf, but the caller does
+	 * not like the starting position (off).
+	 * chop the current mbuf into two pieces, set off to 0.
+	 */</span>
+	<span class="enscript-keyword">if</span> (len &lt; n-&gt;m_len - off) {
+		o = m_copym(n, off, n-&gt;m_len - off, M_DONTWAIT);
+		<span class="enscript-keyword">if</span> (o == NULL) {
+			m_freem(m);
+			<span class="enscript-keyword">return</span> NULL;	<span class="enscript-comment">/* ENOBUFS */</span>
+		}
+		n-&gt;m_len = off;
+		o-&gt;m_next = n-&gt;m_next;
+		n-&gt;m_next = o;
+		n = n-&gt;m_next;
+		off = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ok</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * we need to take hlen from &lt;n, off&gt; and tlen from &lt;n-&gt;m_next, 0&gt;,
+	 * and construct contiguous mbuf with m_len == len.
+	 * note that hlen + tlen == len, and tlen &gt; 0.
+	 */</span>
+	hlen = n-&gt;m_len - off;
+	tlen = len - hlen;
+
+	<span class="enscript-comment">/*
+	 * ensure that we have enough trailing data on mbuf chain.
+	 * if not, we can do nothing about the chain.
+	 */</span>
+	olen = 0;
+	<span class="enscript-keyword">for</span> (o = n-&gt;m_next; o != NULL; o = o-&gt;m_next)
+		olen += o-&gt;m_len;
+	<span class="enscript-keyword">if</span> (hlen + olen &lt; len) {
+		m_freem(m);
+		<span class="enscript-keyword">return</span> NULL;	<span class="enscript-comment">/* mbuf chain too short */</span>
+	}
+
+	<span class="enscript-comment">/*
+	 * easy cases first.
+	 * we need to use m_copydata() to get data from &lt;n-&gt;m_next, 0&gt;.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((n-&gt;m_flags &amp; M_EXT) == 0)
+		sharedcluster = 0;
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (n-&gt;m_ext.ext_free)
+			sharedcluster = 1;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (m_mclhasreference(n))
+			sharedcluster = 1;
+		<span class="enscript-keyword">else</span>
+			sharedcluster = 0;
+	}
+	<span class="enscript-keyword">if</span> ((off == 0 || offp) &amp;&amp; M_TRAILINGSPACE(n) &gt;= tlen
+	 &amp;&amp; !sharedcluster) {
+		m_copydata(n-&gt;m_next, 0, tlen, mtod(n, caddr_t) + n-&gt;m_len);
+		n-&gt;m_len += tlen;
+		m_adj(n-&gt;m_next, tlen);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ok</span>;
+	}
+	<span class="enscript-keyword">if</span> ((off == 0 || offp) &amp;&amp; M_LEADINGSPACE(n-&gt;m_next) &gt;= hlen
+	 &amp;&amp; !sharedcluster) {
+		n-&gt;m_next-&gt;m_data -= hlen;
+		n-&gt;m_next-&gt;m_len += hlen;
+		bcopy(mtod(n, caddr_t) + off, mtod(n-&gt;m_next, caddr_t), hlen);
+		n-&gt;m_len -= hlen;
+		n = n-&gt;m_next;
+		off = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ok</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * now, we need to do the hard way.  don't m_copy as there's no room
+	 * on both end.
+	 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">PULLDOWN_STAT</span>) &amp;&amp; <span class="enscript-variable-name">INET6</span>
+	ip6stat.ip6s_pulldown_alloc++;
+#<span class="enscript-reference">endif</span>
+	MGET(o, M_DONTWAIT, m-&gt;m_type);
+	<span class="enscript-keyword">if</span> (o == NULL) {
+		m_freem(m);
+		<span class="enscript-keyword">return</span> NULL;	<span class="enscript-comment">/* ENOBUFS */</span>
+	}
+	<span class="enscript-keyword">if</span> (len &gt; MHLEN) {	<span class="enscript-comment">/* use MHLEN just for safety */</span>
+		MCLGET(o, M_DONTWAIT);
+		<span class="enscript-keyword">if</span> ((o-&gt;m_flags &amp; M_EXT) == 0) {
+			m_freem(m);
+			m_free(o);
+			<span class="enscript-keyword">return</span> NULL;	<span class="enscript-comment">/* ENOBUFS */</span>
+		}
+	}
+	<span class="enscript-comment">/* get hlen from &lt;n, off&gt; into &lt;o, 0&gt; */</span>
+	o-&gt;m_len = hlen;
+	bcopy(mtod(n, caddr_t) + off, mtod(o, caddr_t), hlen);
+	n-&gt;m_len -= hlen;
+	<span class="enscript-comment">/* get tlen from &lt;n-&gt;m_next, 0&gt; into &lt;o, hlen&gt; */</span>
+	m_copydata(n-&gt;m_next, 0, tlen, mtod(o, caddr_t) + o-&gt;m_len);
+	o-&gt;m_len += tlen;
+	m_adj(n-&gt;m_next, tlen);
+	o-&gt;m_next = n-&gt;m_next;
+	n-&gt;m_next = o;
+	n = o;
+	off = 0;
+
+<span class="enscript-reference">ok</span>:
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">PULLDOWN_DEBUG</span>
+    {
+	<span class="enscript-type">struct</span> mbuf *t;
+	printf(<span class="enscript-string">&quot;after:&quot;</span>);
+	<span class="enscript-keyword">for</span> (t = m; t; t = t-&gt;m_next)
+		printf(<span class="enscript-string">&quot;%c%d&quot;</span>, t == n ? <span class="enscript-string">'*'</span> : <span class="enscript-string">' '</span>, t-&gt;m_len);
+	printf(<span class="enscript-string">&quot; (off=%d)\n&quot;</span>, off);
+    }
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (offp)
+		*offp = off;
+	<span class="enscript-keyword">return</span> n;
+}
+
+<span class="enscript-comment">/*
+ * Create and return an m_tag, either by re-using space in a previous tag
+ * or by allocating a new mbuf/cluster
+ */</span>
+<span class="enscript-type">struct</span> m_tag *
+<span class="enscript-function-name">m_tag_create</span>(u_int32_t id, u_int16_t type, <span class="enscript-type">int</span> len, <span class="enscript-type">int</span> wait, <span class="enscript-type">struct</span> mbuf *buf)
+{
+	<span class="enscript-type">struct</span> m_tag *t = NULL;
+	<span class="enscript-type">struct</span> m_tag *p;
+
+	<span class="enscript-keyword">if</span> (len &lt; 0)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	<span class="enscript-keyword">if</span> (len + <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> m_tag) + <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> m_taghdr) &gt; MLEN)
+		<span class="enscript-keyword">return</span> (m_tag_alloc(id, type, len, wait));
+
+	<span class="enscript-comment">/*
+	 * We've exhausted all external cases. Now, go through the m_tag
+	 * chain and see if we can fit it in any of them.
+	 * If not (t == NULL), call m_tag_alloc to store it in a new mbuf.
+	 */</span>
+	p = SLIST_FIRST(&amp;buf-&gt;m_pkthdr.tags);
+	<span class="enscript-keyword">while</span>(p != NULL) {
+		<span class="enscript-comment">/* 2KCL m_tag */</span>
+		<span class="enscript-keyword">if</span> (M_TAG_ALIGN(p-&gt;m_tag_len) +
+		    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> m_taghdr) &gt; MLEN) {
+			p = SLIST_NEXT(p, m_tag_link);
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		VERIFY(p-&gt;m_tag_cookie == M_TAG_VALID_PATTERN);
+
+		<span class="enscript-type">struct</span> mbuf *m = m_dtom(p);
+		<span class="enscript-type">struct</span> m_taghdr *hdr = (<span class="enscript-type">struct</span> m_taghdr *)(<span class="enscript-type">void</span> *)m-&gt;m_data;
+
+		VERIFY(IS_P2ALIGNED(hdr + 1, <span class="enscript-keyword">sizeof</span> (u_int64_t)));
+		VERIFY(m-&gt;m_flags &amp; M_TAGHDR &amp;&amp; !(m-&gt;m_flags &amp; M_EXT));
+
+		<span class="enscript-comment">/* The mbuf can store this m_tag */</span>
+		<span class="enscript-keyword">if</span> (M_TAG_ALIGN(len) &lt;= MLEN - m-&gt;m_len) {
+			t = (<span class="enscript-type">struct</span> m_tag *)(<span class="enscript-type">void</span> *)(m-&gt;m_data + m-&gt;m_len);
+			VERIFY(IS_P2ALIGNED(t, <span class="enscript-keyword">sizeof</span> (u_int64_t)));
+			hdr-&gt;refcnt++;
+			m-&gt;m_len += M_TAG_ALIGN(len);
+			VERIFY(m-&gt;m_len &lt;= MLEN);
+			<span class="enscript-keyword">break</span>;
+		}
+
+		p = SLIST_NEXT(p, m_tag_link);
+	}
+
+	<span class="enscript-keyword">if</span> (t == NULL)
+		<span class="enscript-keyword">return</span> (m_tag_alloc(id, type, len, wait));
+
+	t-&gt;m_tag_cookie = M_TAG_VALID_PATTERN;
+	t-&gt;m_tag_type = type;
+	t-&gt;m_tag_len = len;
+	t-&gt;m_tag_id = id;
+	<span class="enscript-keyword">if</span> (len &gt; 0)
+		bzero(t + 1, len);
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/* Get a packet tag structure along with specified data following. */</span>
+<span class="enscript-type">struct</span> m_tag *
+<span class="enscript-function-name">m_tag_alloc</span>(u_int32_t id, u_int16_t type, <span class="enscript-type">int</span> len, <span class="enscript-type">int</span> wait)
+{
+	<span class="enscript-type">struct</span> m_tag *t;
+
+	<span class="enscript-keyword">if</span> (len &lt; 0)
+		<span class="enscript-keyword">return</span> (NULL);
+
+        <span class="enscript-keyword">if</span> (M_TAG_ALIGN(len) + <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> m_taghdr) &lt;= MLEN) {
+		<span class="enscript-type">struct</span> mbuf *m = m_get(wait, MT_TAG);
+		<span class="enscript-type">struct</span> m_taghdr *hdr;
+
+		<span class="enscript-keyword">if</span> (m == NULL)
+			<span class="enscript-keyword">return</span> (NULL);
+
+		m-&gt;m_flags |= M_TAGHDR;
+
+		hdr = (<span class="enscript-type">struct</span> m_taghdr *)(<span class="enscript-type">void</span> *)m-&gt;m_data;
+		VERIFY(IS_P2ALIGNED(hdr + 1, <span class="enscript-keyword">sizeof</span> (u_int64_t)));
+		hdr-&gt;refcnt = 1;
+		m-&gt;m_len += <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> m_taghdr);
+		t = (<span class="enscript-type">struct</span> m_tag *)(<span class="enscript-type">void</span> *)(m-&gt;m_data + m-&gt;m_len);
+		VERIFY(IS_P2ALIGNED(t, <span class="enscript-keyword">sizeof</span> (u_int64_t)));
+		m-&gt;m_len += M_TAG_ALIGN(len);
+		VERIFY(m-&gt;m_len &lt;= MLEN);
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (len + <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> m_tag) &lt;= MCLBYTES) {
+		t = (<span class="enscript-type">struct</span> m_tag *)(<span class="enscript-type">void</span> *)m_mclalloc(wait);
+        } <span class="enscript-keyword">else</span> {
+                t = NULL;
+	}
+
+	<span class="enscript-keyword">if</span> (t == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	VERIFY(IS_P2ALIGNED(t, <span class="enscript-keyword">sizeof</span> (u_int64_t)));
+	t-&gt;m_tag_cookie = M_TAG_VALID_PATTERN;
+	t-&gt;m_tag_type = type;
+	t-&gt;m_tag_len = len;
+	t-&gt;m_tag_id = id;
+	<span class="enscript-keyword">if</span> (len &gt; 0)
+		bzero(t + 1, len);
+	<span class="enscript-keyword">return</span> (t);
+}
+
+
+<span class="enscript-comment">/* Free a packet tag. */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">m_tag_free</span>(<span class="enscript-type">struct</span> m_tag *t)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+	<span class="enscript-keyword">if</span> (t != NULL &amp;&amp; 
+	    t-&gt;m_tag_id   == KERNEL_MODULE_TAG_ID &amp;&amp;
+	    t-&gt;m_tag_type == KERNEL_TAG_TYPE_MACLABEL)
+		mac_mbuf_tag_destroy(t);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (t == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	VERIFY(t-&gt;m_tag_cookie == M_TAG_VALID_PATTERN);
+
+	<span class="enscript-keyword">if</span> (M_TAG_ALIGN(t-&gt;m_tag_len) + <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> m_taghdr) &lt;= MLEN) {
+		<span class="enscript-type">struct</span> mbuf * m = m_dtom(t);
+		VERIFY(m-&gt;m_flags &amp; M_TAGHDR);
+		<span class="enscript-type">struct</span> m_taghdr *hdr = (<span class="enscript-type">struct</span> m_taghdr *)(<span class="enscript-type">void</span> *)m-&gt;m_data;
+
+		VERIFY(IS_P2ALIGNED(hdr + 1, <span class="enscript-keyword">sizeof</span> (u_int64_t)));
+
+		<span class="enscript-comment">/* No other tags in this mbuf */</span>
+		<span class="enscript-keyword">if</span>(--hdr-&gt;refcnt == 0) {
+			m_free(m);
+			<span class="enscript-keyword">return</span>;
+		}
+
+		<span class="enscript-comment">/* Pattern-fill the header */</span>
+		u_int64_t *fill_ptr = (u_int64_t *)t;
+		u_int64_t *end_ptr = (u_int64_t *)(t + 1);
+		<span class="enscript-keyword">while</span> (fill_ptr &lt; end_ptr) {
+			*fill_ptr = M_TAG_FREE_PATTERN;
+			fill_ptr++;
+		}
+	} <span class="enscript-keyword">else</span> {
+		m_mclfree((caddr_t)t);
+	}
+}
+
+<span class="enscript-comment">/* Prepend a packet tag. */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">m_tag_prepend</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> m_tag *t)
+{
+	VERIFY(m != NULL &amp;&amp; t != NULL);
+
+	SLIST_INSERT_HEAD(&amp;m-&gt;m_pkthdr.tags, t, m_tag_link);
+}
+
+<span class="enscript-comment">/* Unlink a packet tag. */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">m_tag_unlink</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> m_tag *t)
+{
+	VERIFY(m-&gt;m_flags &amp; M_PKTHDR);
+	VERIFY(t != NULL &amp;&amp; t-&gt;m_tag_cookie == M_TAG_VALID_PATTERN);
+
+	SLIST_REMOVE(&amp;m-&gt;m_pkthdr.tags, t, m_tag, m_tag_link);
+}
+
+<span class="enscript-comment">/* Unlink and free a packet tag. */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">m_tag_delete</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> m_tag *t)
+{
+	m_tag_unlink(m, t);
+	m_tag_free(t);
+}
+
+<span class="enscript-comment">/* Unlink and free a packet tag chain, starting from given tag. */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">m_tag_delete_chain</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> m_tag *t)
+{
+	<span class="enscript-type">struct</span> m_tag *p, *q;
+
+	VERIFY(m-&gt;m_flags &amp; M_PKTHDR);
+
+	<span class="enscript-keyword">if</span> (t != NULL) {
+		p = t;
+	} <span class="enscript-keyword">else</span> {
+		p = SLIST_FIRST(&amp;m-&gt;m_pkthdr.tags);
+	}
+	<span class="enscript-keyword">if</span> (p == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	VERIFY(p-&gt;m_tag_cookie == M_TAG_VALID_PATTERN);
+	<span class="enscript-keyword">while</span> ((q = SLIST_NEXT(p, m_tag_link)) != NULL) {
+		VERIFY(q-&gt;m_tag_cookie == M_TAG_VALID_PATTERN);
+		m_tag_delete(m, q);
+	}
+	m_tag_delete(m, p);
+}
+
+<span class="enscript-comment">/* Find a tag, starting from a given position. */</span>
+<span class="enscript-type">struct</span> m_tag *
+<span class="enscript-function-name">m_tag_locate</span>(<span class="enscript-type">struct</span> mbuf *m, u_int32_t id, u_int16_t type, <span class="enscript-type">struct</span> m_tag *t)
+{
+	<span class="enscript-type">struct</span> m_tag *p;
+
+	VERIFY(m-&gt;m_flags &amp; M_PKTHDR);
+
+	<span class="enscript-keyword">if</span> (t == NULL) {
+		p = SLIST_FIRST(&amp;m-&gt;m_pkthdr.tags);
+	} <span class="enscript-keyword">else</span> {
+		VERIFY(t-&gt;m_tag_cookie == M_TAG_VALID_PATTERN);
+		p = SLIST_NEXT(t, m_tag_link);
+	}
+	<span class="enscript-keyword">while</span> (p != NULL) {
+		VERIFY(p-&gt;m_tag_cookie == M_TAG_VALID_PATTERN);
+		<span class="enscript-keyword">if</span> (p-&gt;m_tag_id == id &amp;&amp; p-&gt;m_tag_type == type)
+			<span class="enscript-keyword">return</span> (p);
+		p = SLIST_NEXT(p, m_tag_link);
+	}
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-comment">/* Copy a single tag. */</span>
+<span class="enscript-type">struct</span> m_tag *
+<span class="enscript-function-name">m_tag_copy</span>(<span class="enscript-type">struct</span> m_tag *t, <span class="enscript-type">int</span> how)
+{
+	<span class="enscript-type">struct</span> m_tag *p;
+
+	VERIFY(t != NULL);
+
+	p = m_tag_alloc(t-&gt;m_tag_id, t-&gt;m_tag_type, t-&gt;m_tag_len, how);
+	<span class="enscript-keyword">if</span> (p == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+	<span class="enscript-comment">/*
+	 * XXXMAC: we should probably pass off the initialization, and
+	 * copying here?  can we hid that KERNEL_TAG_TYPE_MACLABEL is
+	 * special from the mbuf code?
+	 */</span>
+	<span class="enscript-keyword">if</span> (t != NULL &amp;&amp;
+	    t-&gt;m_tag_id   == KERNEL_MODULE_TAG_ID &amp;&amp;
+	    t-&gt;m_tag_type == KERNEL_TAG_TYPE_MACLABEL) {
+		<span class="enscript-keyword">if</span> (mac_mbuf_tag_init(p, how) != 0) {
+			m_tag_free(p);
+			<span class="enscript-keyword">return</span> (NULL);
+		}
+		mac_mbuf_tag_copy(t, p);
+	} <span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span>
+	bcopy(t + 1, p + 1, t-&gt;m_tag_len); <span class="enscript-comment">/* Copy the data */</span>
+	<span class="enscript-keyword">return</span> (p);
+}
+
+<span class="enscript-comment">/*
+ * Copy two tag chains. The destination mbuf (to) loses any attached
+ * tags even if the operation fails. This should not be a problem, as
+ * m_tag_copy_chain() is typically called with a newly-allocated
+ * destination mbuf.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">m_tag_copy_chain</span>(<span class="enscript-type">struct</span> mbuf *to, <span class="enscript-type">struct</span> mbuf *from, <span class="enscript-type">int</span> how)
+{
+	<span class="enscript-type">struct</span> m_tag *p, *t, *tprev = NULL;
+
+	VERIFY((to-&gt;m_flags &amp; M_PKTHDR) &amp;&amp; (from-&gt;m_flags &amp; M_PKTHDR));
+
+	m_tag_delete_chain(to, NULL);
+	SLIST_FOREACH(p, &amp;from-&gt;m_pkthdr.tags, m_tag_link) {
+		VERIFY(p-&gt;m_tag_cookie == M_TAG_VALID_PATTERN);
+		t = m_tag_copy(p, how);
+		<span class="enscript-keyword">if</span> (t == NULL) {
+			m_tag_delete_chain(to, NULL);
+			<span class="enscript-keyword">return</span> (0);
+		}
+		<span class="enscript-keyword">if</span> (tprev == NULL) {
+			SLIST_INSERT_HEAD(&amp;to-&gt;m_pkthdr.tags, t, m_tag_link);
+		} <span class="enscript-keyword">else</span> {
+			SLIST_INSERT_AFTER(tprev, t, m_tag_link);
+			tprev = t;
+		}
+	}
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/* Initialize dynamic and static tags on an mbuf. */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">m_tag_init</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> all)
+{
+	VERIFY(m-&gt;m_flags &amp; M_PKTHDR);
+
+	SLIST_INIT(&amp;m-&gt;m_pkthdr.tags);
+	<span class="enscript-comment">/*
+	 * If the caller wants to preserve static mbuf tags
+	 * (e.g. m_dup_pkthdr), don't zero them out.
+	 */</span>
+	<span class="enscript-keyword">if</span> (all) {
+		bzero(&amp;m-&gt;m_pkthdr.pf_mtag, <span class="enscript-keyword">sizeof</span> (m-&gt;m_pkthdr.pf_mtag));
+		bzero(&amp;m-&gt;m_pkthdr.proto_mtag, <span class="enscript-keyword">sizeof</span> (m-&gt;m_pkthdr.proto_mtag));
+		bzero(&amp;m-&gt;m_pkthdr.necp_mtag, <span class="enscript-keyword">sizeof</span> (m-&gt;m_pkthdr.necp_mtag));
+	}
+}
+
+<span class="enscript-comment">/* Get first tag in chain. */</span>
+<span class="enscript-type">struct</span> m_tag *
+<span class="enscript-function-name">m_tag_first</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	VERIFY(m-&gt;m_flags &amp; M_PKTHDR);
+
+	<span class="enscript-keyword">return</span> (SLIST_FIRST(&amp;m-&gt;m_pkthdr.tags));
+}
+
+<span class="enscript-comment">/* Get next tag in chain. */</span>
+<span class="enscript-type">struct</span> m_tag *
+<span class="enscript-function-name">m_tag_next</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> m_tag *t)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">m</span>)
+	VERIFY(t != NULL);
+	VERIFY(t-&gt;m_tag_cookie == M_TAG_VALID_PATTERN);
+
+	<span class="enscript-keyword">return</span> (SLIST_NEXT(t, m_tag_link));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">m_set_traffic_class</span>(<span class="enscript-type">struct</span> mbuf *m, mbuf_traffic_class_t tc)
+{
+	u_int32_t val = MBUF_TC2SCVAL(tc);	<span class="enscript-comment">/* just the val portion */</span>
+
+	<span class="enscript-keyword">return</span> (m_set_service_class(m, m_service_class_from_val(val)));
+}
+
+mbuf_traffic_class_t
+<span class="enscript-function-name">m_get_traffic_class</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-keyword">return</span> (MBUF_SC2TC(m_get_service_class(m)));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">m_set_service_class</span>(<span class="enscript-type">struct</span> mbuf *m, mbuf_svc_class_t sc)
+{
+	<span class="enscript-type">int</span> error = 0;
+
+	VERIFY(m-&gt;m_flags &amp; M_PKTHDR);
+
+	<span class="enscript-keyword">if</span> (MBUF_VALID_SC(sc))
+		m-&gt;m_pkthdr.pkt_svc = sc;
+	<span class="enscript-keyword">else</span>
+		error = EINVAL;
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+mbuf_svc_class_t
+<span class="enscript-function-name">m_get_service_class</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	mbuf_svc_class_t sc;
+
+	VERIFY(m-&gt;m_flags &amp; M_PKTHDR);
+
+	<span class="enscript-keyword">if</span> (MBUF_VALID_SC(m-&gt;m_pkthdr.pkt_svc))
+		sc = m-&gt;m_pkthdr.pkt_svc;
+	<span class="enscript-keyword">else</span>
+		sc = MBUF_SC_BE;
+
+	<span class="enscript-keyword">return</span> (sc);
+}
+
+mbuf_svc_class_t
+<span class="enscript-function-name">m_service_class_from_idx</span>(u_int32_t i)
+{
+	mbuf_svc_class_t sc = MBUF_SC_BE;
+
+	<span class="enscript-keyword">switch</span> (i) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCIDX_BK_SYS</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_BK_SYS);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCIDX_BK</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_BK);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCIDX_BE</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_BE);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCIDX_RD</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_RD);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCIDX_OAM</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_OAM);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCIDX_AV</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_AV);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCIDX_RV</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_RV);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCIDX_VI</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_VI);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCIDX_VO</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_VO);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCIDX_CTL</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_CTL);
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+
+	VERIFY(0);
+	<span class="enscript-comment">/* NOTREACHED */</span>
+	<span class="enscript-keyword">return</span> (sc);
+}
+
+mbuf_svc_class_t
+<span class="enscript-function-name">m_service_class_from_val</span>(u_int32_t v)
+{
+	mbuf_svc_class_t sc = MBUF_SC_BE;
+
+	<span class="enscript-keyword">switch</span> (v) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCVAL_BK_SYS</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_BK_SYS);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCVAL_BK</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_BK);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCVAL_BE</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_BE);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCVAL_RD</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_RD);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCVAL_OAM</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_OAM);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCVAL_AV</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_AV);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCVAL_RV</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_RV);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCVAL_VI</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_VI);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCVAL_VO</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_VO);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SCVAL_CTL</span>:
+		<span class="enscript-keyword">return</span> (MBUF_SC_CTL);
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+
+	VERIFY(0);
+	<span class="enscript-comment">/* NOTREACHED */</span>
+	<span class="enscript-keyword">return</span> (sc);
+}
+
+uint16_t
+<span class="enscript-function-name">m_adj_sum16</span>(<span class="enscript-type">struct</span> mbuf *m, uint32_t start, uint32_t ulpoff, uint32_t sum)
+{
+	<span class="enscript-type">int</span> len = (ulpoff - start);
+
+	<span class="enscript-keyword">if</span> (len &gt; 0) {
+		uint32_t adj = m_sum16(m, start, len);
+		<span class="enscript-keyword">if</span> (adj &gt;= sum)
+			sum = ~(adj - sum) &amp; 0xffff;
+		<span class="enscript-keyword">else</span>
+			sum -= adj;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (len &lt; 0) {
+		sum += m_sum16(m, ulpoff, -len);
+	}
+
+	ADDCARRY(sum);
+
+	<span class="enscript-keyword">return</span> (sum);
+}
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cpu_in_cksum</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> len, <span class="enscript-type">int</span> off, uint32_t initial_sum);
+
+uint16_t
+<span class="enscript-function-name">m_sum16</span>(<span class="enscript-type">struct</span> mbuf *m, uint32_t off, uint32_t len)
+{
+	<span class="enscript-type">int</span> mlen;
+
+	<span class="enscript-comment">/*
+	 * Sanity check
+	 *
+	 * Use m_length2() instead of m_length(), as we cannot rely on
+	 * the caller setting m_pkthdr.len correctly, if the mbuf is
+	 * a M_PKTHDR one.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((mlen = m_length2(m, NULL)) &lt; (off + len)) {
+		panic(<span class="enscript-string">&quot;%s: mbuf len (%d) &lt; off+len (%d+%d)\n&quot;</span>, __func__,
+		    mlen, off, len);
+	}
+
+	<span class="enscript-keyword">return</span> (~cpu_in_cksum(m, len, off, 0) &amp; 0xffff);
+}
+</pre>
+<hr />
+</body></html>

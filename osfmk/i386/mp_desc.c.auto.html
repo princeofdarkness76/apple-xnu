@@ -1,0 +1,935 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mp_desc.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mp_desc.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+
+<span class="enscript-comment">/*
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/bit_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp_desc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmap.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmap_internal.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* i386 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MCA</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_check.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">K_INTR_GATE</span> (ACC_P|ACC_PL_K|ACC_INTR_GATE)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">U_INTR_GATE</span> (ACC_P|ACC_PL_U|ACC_INTR_GATE)
+
+<span class="enscript-comment">// Declare macros that will declare the externs
+</span>#<span class="enscript-reference">define</span> <span class="enscript-function-name">TRAP</span>(n, name)		extern void *name ;
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TRAP_ERR</span>(n, name)	extern void *name ;
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TRAP_SPC</span>(n, name)	extern void *name ;
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TRAP_IST1</span>(n, name)	extern void *name ;
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TRAP_IST2</span>(n, name)	extern void *name ;
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">INTERRUPT</span>(n)		extern void *_intr_ ## n ;
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">USER_TRAP</span>(n, name)	extern void *name ;
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">USER_TRAP_SPC</span>(n, name)	extern void *name ;
+
+<span class="enscript-comment">// Include the table to declare the externs
+</span>#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../x86_64/idt_table.h&quot;</span>
+
+<span class="enscript-comment">// Undef the macros, then redefine them so we can declare the table
+</span>#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">TRAP</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">TRAP_ERR</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">TRAP_SPC</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">TRAP_IST1</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">TRAP_IST2</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">INTERRUPT</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">USER_TRAP</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">USER_TRAP_SPC</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TRAP</span>(n, name)			\
+	[n] = {				\
+		(uintptr_t)&amp;name,	\
+		KERNEL64_CS,		\
+		0,			\
+		K_INTR_GATE,		\
+		0			\
+	},
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TRAP_ERR</span> TRAP
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TRAP_SPC</span> TRAP
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TRAP_IST1</span>(n, name) \
+	[n] = {				\
+		(uintptr_t)&amp;name,	\
+		KERNEL64_CS,		\
+		1,			\
+		K_INTR_GATE,		\
+		0			\
+	},
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TRAP_IST2</span>(n, name) \
+	[n] = {				\
+		(uintptr_t)&amp;name,	\
+		KERNEL64_CS,		\
+		2,			\
+		K_INTR_GATE,		\
+		0			\
+	},
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">INTERRUPT</span>(n) \
+	[n] = {				\
+		(uintptr_t)&amp;_intr_ ## n,\
+		KERNEL64_CS,		\
+		0,			\
+		K_INTR_GATE,		\
+		0			\
+	},
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">USER_TRAP</span>(n, name) \
+	[n] = {				\
+		(uintptr_t)&amp;name,	\
+		KERNEL64_CS,		\
+		0,			\
+		U_INTR_GATE,		\
+		0			\
+	},
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">USER_TRAP_SPC</span> USER_TRAP
+
+<span class="enscript-comment">// Declare the table using the macros we just set up
+</span><span class="enscript-type">struct</span> fake_descriptor64 master_idt64[IDTSZ]
+	__attribute__ ((section(<span class="enscript-string">&quot;__HIB,__desc&quot;</span>)))
+	__attribute__ ((aligned(PAGE_SIZE))) = {
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../x86_64/idt_table.h&quot;</span>
+};
+
+<span class="enscript-comment">/*
+ * First cpu`s interrupt stack.
+ */</span>
+<span class="enscript-type">extern</span> uint32_t		low_intstack[];		<span class="enscript-comment">/* bottom */</span>
+<span class="enscript-type">extern</span> uint32_t		low_eintstack[];	<span class="enscript-comment">/* top */</span>
+
+<span class="enscript-comment">/*
+ * Per-cpu data area pointers.
+ * The master cpu (cpu 0) has its data area statically allocated;
+ * others are allocated dynamically and this array is updated at runtime.
+ */</span>
+<span class="enscript-type">static</span> cpu_data_t	cpu_data_master = {
+	.cpu_this = &amp;cpu_data_master,
+	.cpu_nanotime = &amp;pal_rtc_nanotime_info,
+	.cpu_int_stack_top = (vm_offset_t) low_eintstack,
+};
+cpu_data_t	*cpu_data_ptr[MAX_CPUS] = { [0] = &amp;cpu_data_master };
+
+<span class="enscript-function-name">decl_simple_lock_data</span>(,ncpus_lock);	<span class="enscript-comment">/* protects real_ncpus */</span>
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	real_ncpus = 1;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	max_ncpus = MAX_CPUS;
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">hi64_sysenter</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">hi64_syscall</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/*
+ * Multiprocessor i386/i486 systems use a separate copy of the
+ * GDT, IDT, LDT, and kernel TSS per processor.  The first three
+ * are separate to avoid lock contention: the i386 uses locked
+ * memory cycles to access the descriptor tables.  The TSS is
+ * separate since each processor needs its own kernel stack,
+ * and since using a TSS marks it busy.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Allocate and initialize the per-processor descriptor tables.
+ */</span>
+
+<span class="enscript-type">struct</span> fake_descriptor ldt_desc_pattern = {
+	(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) 0,
+	LDTSZ_MIN * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> fake_descriptor) - 1,
+	0,
+	ACC_P|ACC_PL_K|ACC_LDT
+};
+
+<span class="enscript-type">struct</span> fake_descriptor tss_desc_pattern = {
+	(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) 0,
+	<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> i386_tss) - 1,
+	0,
+	ACC_P|ACC_PL_K|ACC_TSS
+};
+
+<span class="enscript-type">struct</span> fake_descriptor cpudata_desc_pattern = {
+	(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) 0,
+	<span class="enscript-keyword">sizeof</span>(cpu_data_t)-1,
+	SZ_32,
+	ACC_P|ACC_PL_K|ACC_DATA_W
+};
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">NCOPY_WINDOWS</span> &gt; 0
+<span class="enscript-type">struct</span> fake_descriptor userwindow_desc_pattern = {
+	(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) 0,
+	((NBPDE * NCOPY_WINDOWS) / PAGE_SIZE) - 1,
+	SZ_32 | SZ_G,
+	ACC_P|ACC_PL_U|ACC_DATA_W
+};
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">struct</span> fake_descriptor physwindow_desc_pattern = {
+	(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) 0,
+	PAGE_SIZE - 1,
+	SZ_32,
+	ACC_P|ACC_PL_K|ACC_DATA_W
+};
+
+<span class="enscript-comment">/*
+ * This is the expanded, 64-bit variant of the kernel LDT descriptor.
+ * When switching to 64-bit mode this replaces KERNEL_LDT entry
+ * and the following empty slot. This enables the LDT to be referenced
+ * in the uber-space remapping window on the kernel.
+ */</span>
+<span class="enscript-type">struct</span> fake_descriptor64 kernel_ldt_desc64 = {
+	0,
+	LDTSZ_MIN*<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> fake_descriptor)-1,
+	0,
+	ACC_P|ACC_PL_K|ACC_LDT,
+	0
+};
+
+<span class="enscript-comment">/*
+ * This is the expanded, 64-bit variant of the kernel TSS descriptor.
+ * It is follows pattern of the KERNEL_LDT.
+ */</span>
+<span class="enscript-type">struct</span> fake_descriptor64 kernel_tss_desc64 = {
+	0,
+	<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x86_64_tss)-1,
+	0,
+	ACC_P|ACC_PL_K|ACC_TSS,
+	0
+};
+
+<span class="enscript-comment">/*
+ * Convert a descriptor from fake to real format.
+ *
+ * Fake descriptor format:
+ *	bytes 0..3		base 31..0
+ *	bytes 4..5		limit 15..0
+ *	byte  6			access byte 2 | limit 19..16
+ *	byte  7			access byte 1
+ *
+ * Real descriptor format:
+ *	bytes 0..1		limit 15..0
+ *	bytes 2..3		base 15..0
+ *	byte  4			base 23..16
+ *	byte  5			access byte 1
+ *	byte  6			access byte 2 | limit 19..16
+ *	byte  7			base 31..24
+ *
+ * Fake gate format:
+ *	bytes 0..3		offset
+ *	bytes 4..5		selector
+ *	byte  6			word count &lt;&lt; 4 (to match fake descriptor)
+ *	byte  7			access byte 1
+ *
+ * Real gate format:
+ *	bytes 0..1		offset 15..0
+ *	bytes 2..3		selector
+ *	byte  4			word count
+ *	byte  5			access byte 1
+ *	bytes 6..7		offset 31..16
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fix_desc</span>(<span class="enscript-type">void</span> *d, <span class="enscript-type">int</span> num_desc) {
+	<span class="enscript-comment">//early_kprintf(&quot;fix_desc(%x, %x)\n&quot;, d, num_desc);
+</span>	uint8_t *desc = (uint8_t*) d;
+
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-keyword">if</span> ((desc[7] &amp; 0x14) == 0x04) { <span class="enscript-comment">/* gate */</span>
+			uint32_t offset;
+			uint16_t selector;
+			uint8_t wordcount;
+			uint8_t acc;
+			
+			offset = *((uint32_t*)(desc));
+			selector = *((uint32_t*)(desc+4));
+			wordcount = desc[6] &gt;&gt; 4;
+			acc = desc[7];
+
+			*((uint16_t*)desc) = offset &amp; 0xFFFF;
+			*((uint16_t*)(desc+2)) = selector;
+			desc[4] = wordcount;
+			desc[5] = acc;
+			*((uint16_t*)(desc+6)) = offset &gt;&gt; 16;
+
+		} <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* descriptor */</span>
+			uint32_t base;
+			uint16_t limit;
+			uint8_t acc1, acc2;
+
+			base = *((uint32_t*)(desc));
+			limit = *((uint16_t*)(desc+4));
+			acc2 = desc[6];
+			acc1 = desc[7];
+
+			*((uint16_t*)(desc)) = limit;
+			*((uint16_t*)(desc+2)) = base &amp; 0xFFFF;
+			desc[4] = (base &gt;&gt; 16) &amp; 0xFF;
+			desc[5] = acc1;
+			desc[6] = acc2;
+			desc[7] = base &gt;&gt; 24;
+		}
+		desc += 8;
+	} <span class="enscript-keyword">while</span> (--num_desc);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fix_desc64</span>(<span class="enscript-type">void</span> *descp, <span class="enscript-type">int</span> count)
+{
+	<span class="enscript-type">struct</span> fake_descriptor64	*fakep;
+	<span class="enscript-type">union</span> {
+		<span class="enscript-type">struct</span> real_gate64		gate;
+		<span class="enscript-type">struct</span> real_descriptor64	desc;
+	}				real;
+	<span class="enscript-type">int</span>				i;
+
+	fakep = (<span class="enscript-type">struct</span> fake_descriptor64 *) descp;
+	
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++, fakep++) {
+		<span class="enscript-comment">/*
+		 * Construct the real decriptor locally.
+		 */</span>
+
+		bzero((<span class="enscript-type">void</span> *) &amp;real, <span class="enscript-keyword">sizeof</span>(real));
+
+		<span class="enscript-keyword">switch</span> (fakep-&gt;access &amp; ACC_TYPE) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">ACC_CALL_GATE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">ACC_INTR_GATE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">ACC_TRAP_GATE</span>:
+			real.gate.offset_low16 = (uint16_t)(fakep-&gt;offset64 &amp; 0xFFFF);
+			real.gate.selector16 = fakep-&gt;lim_or_seg &amp; 0xFFFF;
+			real.gate.IST = fakep-&gt;size_or_IST &amp; 0x7;
+			real.gate.access8 = fakep-&gt;access;
+			real.gate.offset_high16 = (uint16_t)((fakep-&gt;offset64&gt;&gt;16) &amp; 0xFFFF);
+			real.gate.offset_top32 = (uint32_t)(fakep-&gt;offset64&gt;&gt;32);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:	<span class="enscript-comment">/* Otherwise */</span>
+			real.desc.limit_low16 = fakep-&gt;lim_or_seg &amp; 0xFFFF;
+			real.desc.base_low16 = (uint16_t)(fakep-&gt;offset64 &amp; 0xFFFF);
+			real.desc.base_med8 = (uint8_t)((fakep-&gt;offset64 &gt;&gt; 16) &amp; 0xFF);
+			real.desc.access8 = fakep-&gt;access;
+			real.desc.limit_high4 = (fakep-&gt;lim_or_seg &gt;&gt; 16) &amp; 0xFF;
+			real.desc.granularity4 = fakep-&gt;size_or_IST;
+			real.desc.base_high8 = (uint8_t)((fakep-&gt;offset64 &gt;&gt; 24) &amp; 0xFF);
+			real.desc.base_top32 = (uint32_t)(fakep-&gt;offset64&gt;&gt;32);
+		}
+
+		<span class="enscript-comment">/*
+		 * Now copy back over the fake structure.
+		 */</span>
+		bcopy((<span class="enscript-type">void</span> *) &amp;real, (<span class="enscript-type">void</span> *) fakep, <span class="enscript-keyword">sizeof</span>(real));
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cpu_gdt_alias</span>(vm_map_offset_t gdt, vm_map_offset_t alias)
+{
+	pt_entry_t *pte = NULL;
+
+	<span class="enscript-comment">/* Require page alignment */</span>
+	assert(page_aligned(gdt));
+	assert(page_aligned(alias));
+
+	pte = pmap_pte(kernel_pmap, alias);
+	pmap_store_pte(pte, kvtophys(gdt) | INTEL_PTE_REF
+					  | INTEL_PTE_MOD
+					  | INTEL_PTE_WIRED
+					  | INTEL_PTE_VALID
+					  | INTEL_PTE_WRITE
+					  | INTEL_PTE_NX);
+
+	<span class="enscript-comment">/* TLB flush unneccessry because target processor isn't running yet */</span>
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cpu_desc_init64</span>(cpu_data_t *cdp)
+{
+	cpu_desc_index_t	*cdi = &amp;cdp-&gt;cpu_desc_index;
+
+	<span class="enscript-keyword">if</span> (cdp == &amp;cpu_data_master) {
+		<span class="enscript-comment">/*
+		 * Master CPU uses the tables built at boot time.
+		 * Just set the index pointers to the low memory space.
+		 */</span>
+		cdi-&gt;cdi_ktss = (<span class="enscript-type">void</span> *)&amp;master_ktss64;
+		cdi-&gt;cdi_sstk = (vm_offset_t) &amp;master_sstk.top;
+		cdi-&gt;cdi_gdt.ptr  = (<span class="enscript-type">void</span> *)MASTER_GDT_ALIAS;
+		cdi-&gt;cdi_idt.ptr  = (<span class="enscript-type">void</span> *)MASTER_IDT_ALIAS;
+		cdi-&gt;cdi_ldt  = (<span class="enscript-type">struct</span> fake_descriptor *) master_ldt;
+
+		<span class="enscript-comment">/* Replace the expanded LDTs and TSS slots in the GDT */</span>
+		kernel_ldt_desc64.offset64 = (uintptr_t) &amp;master_ldt;
+		*(<span class="enscript-type">struct</span> fake_descriptor64 *) &amp;master_gdt[sel_idx(KERNEL_LDT)] =
+			kernel_ldt_desc64;
+		*(<span class="enscript-type">struct</span> fake_descriptor64 *) &amp;master_gdt[sel_idx(USER_LDT)] =
+			kernel_ldt_desc64;
+		kernel_tss_desc64.offset64 = (uintptr_t) &amp;master_ktss64;
+		*(<span class="enscript-type">struct</span> fake_descriptor64 *) &amp;master_gdt[sel_idx(KERNEL_TSS)] =
+			kernel_tss_desc64;
+
+		<span class="enscript-comment">/* Fix up the expanded descriptors for 64-bit. */</span>
+		fix_desc64((<span class="enscript-type">void</span> *) &amp;master_idt64, IDTSZ);
+		fix_desc64((<span class="enscript-type">void</span> *) &amp;master_gdt[sel_idx(KERNEL_LDT)], 1);
+		fix_desc64((<span class="enscript-type">void</span> *) &amp;master_gdt[sel_idx(USER_LDT)], 1);
+		fix_desc64((<span class="enscript-type">void</span> *) &amp;master_gdt[sel_idx(KERNEL_TSS)], 1);
+
+		<span class="enscript-comment">/*
+		 * Set the NMI/fault stacks as IST2/IST1 in the 64-bit TSS
+		 * Note: this will be dynamically re-allocated in VM later. 
+		 */</span>
+		master_ktss64.ist2 = (uintptr_t) low_eintstack;
+		master_ktss64.ist1 = (uintptr_t) low_eintstack
+					- <span class="enscript-keyword">sizeof</span>(x86_64_intr_stack_frame_t);
+
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cdi-&gt;cdi_ktss == NULL) {	<span class="enscript-comment">/* Skipping re-init on wake */</span>
+		cpu_desc_table64_t	*cdt = (cpu_desc_table64_t *) cdp-&gt;cpu_desc_tablep;
+
+		<span class="enscript-comment">/*
+		 * Per-cpu GDT, IDT, KTSS descriptors are allocated in kernel 
+		 * heap (cpu_desc_table). 
+		 * LDT descriptors are mapped into a separate area.
+		 * GDT descriptors are addressed by alias to avoid sgdt leaks to user-space.
+		 */</span>
+		cdi-&gt;cdi_idt.ptr  = (<span class="enscript-type">void</span> *)MASTER_IDT_ALIAS;
+		cdi-&gt;cdi_gdt.ptr  = (<span class="enscript-type">void</span> *)CPU_GDT_ALIAS(cdp-&gt;cpu_number);
+		cdi-&gt;cdi_ktss = (<span class="enscript-type">void</span> *)&amp;cdt-&gt;ktss;
+		cdi-&gt;cdi_sstk = (vm_offset_t)&amp;cdt-&gt;sstk.top;
+		cdi-&gt;cdi_ldt  = cdp-&gt;cpu_ldtp;
+
+		<span class="enscript-comment">/* Make the virtual alias address for the GDT */</span>
+		cpu_gdt_alias((vm_map_offset_t) &amp;cdt-&gt;gdt,
+			      (vm_map_offset_t) cdi-&gt;cdi_gdt.ptr);
+
+		<span class="enscript-comment">/*
+		 * Copy the tables
+		 */</span>
+		bcopy((<span class="enscript-type">char</span> *)master_gdt, (<span class="enscript-type">char</span> *)cdt-&gt;gdt, <span class="enscript-keyword">sizeof</span>(master_gdt));
+		bcopy((<span class="enscript-type">char</span> *)master_ldt, (<span class="enscript-type">char</span> *)cdp-&gt;cpu_ldtp, <span class="enscript-keyword">sizeof</span>(master_ldt));
+		bcopy((<span class="enscript-type">char</span> *)&amp;master_ktss64, (<span class="enscript-type">char</span> *)&amp;cdt-&gt;ktss, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x86_64_tss));
+
+		<span class="enscript-comment">/*
+		 * Fix up the entries in the GDT to point to
+		 * this LDT and this TSS.
+		 */</span>
+		kernel_ldt_desc64.offset64 = (uintptr_t) cdi-&gt;cdi_ldt;
+		*(<span class="enscript-type">struct</span> fake_descriptor64 *) &amp;cdt-&gt;gdt[sel_idx(KERNEL_LDT)] =
+			kernel_ldt_desc64;
+		fix_desc64(&amp;cdt-&gt;gdt[sel_idx(KERNEL_LDT)], 1);
+
+		kernel_ldt_desc64.offset64 = (uintptr_t) cdi-&gt;cdi_ldt;
+		*(<span class="enscript-type">struct</span> fake_descriptor64 *) &amp;cdt-&gt;gdt[sel_idx(USER_LDT)] =
+			kernel_ldt_desc64;
+		fix_desc64(&amp;cdt-&gt;gdt[sel_idx(USER_LDT)], 1);
+
+		kernel_tss_desc64.offset64 = (uintptr_t) cdi-&gt;cdi_ktss;
+		*(<span class="enscript-type">struct</span> fake_descriptor64 *) &amp;cdt-&gt;gdt[sel_idx(KERNEL_TSS)] =
+			kernel_tss_desc64;
+		fix_desc64(&amp;cdt-&gt;gdt[sel_idx(KERNEL_TSS)], 1);
+
+		<span class="enscript-comment">/* Set (zeroed) fault stack as IST1, NMI intr stack IST2 */</span>
+		bzero((<span class="enscript-type">void</span> *) cdt-&gt;fstk, <span class="enscript-keyword">sizeof</span>(cdt-&gt;fstk));
+		cdt-&gt;ktss.ist2 = (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)cdt-&gt;fstk + <span class="enscript-keyword">sizeof</span>(cdt-&gt;fstk);
+		cdt-&gt;ktss.ist1 = cdt-&gt;ktss.ist2
+					- <span class="enscript-keyword">sizeof</span>(x86_64_intr_stack_frame_t);
+	}
+
+	<span class="enscript-comment">/* Require that the top of the sysenter stack is 16-byte aligned */</span>
+	<span class="enscript-keyword">if</span> ((cdi-&gt;cdi_sstk % 16) != 0)
+		panic(<span class="enscript-string">&quot;cpu_desc_init64() sysenter stack not 16-byte aligned&quot;</span>);
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cpu_desc_load64</span>(cpu_data_t *cdp)
+{
+	cpu_desc_index_t	*cdi = &amp;cdp-&gt;cpu_desc_index;
+
+	<span class="enscript-comment">/* Stuff the kernel per-cpu data area address into the MSRs */</span>
+	wrmsr64(MSR_IA32_GS_BASE, (uintptr_t) cdp);
+	wrmsr64(MSR_IA32_KERNEL_GS_BASE, (uintptr_t) cdp);
+
+	<span class="enscript-comment">/*
+	 * Ensure the TSS segment's busy bit is clear. This is required
+	 * for the case of reloading descriptors at wake to avoid
+	 * their complete re-initialization.
+	 */</span>
+	gdt_desc_p(KERNEL_TSS)-&gt;access &amp;= ~ACC_TSS_BUSY;
+
+	<span class="enscript-comment">/* Load the GDT, LDT, IDT and TSS */</span>
+	cdi-&gt;cdi_gdt.size = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> real_descriptor)*GDTSZ - 1;
+	cdi-&gt;cdi_idt.size = 0x1000 + cdp-&gt;cpu_number;
+	lgdt((uintptr_t *) &amp;cdi-&gt;cdi_gdt);
+	lidt((uintptr_t *) &amp;cdi-&gt;cdi_idt);
+	lldt(KERNEL_LDT);
+	set_tr(KERNEL_TSS);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">GPROF</span> // <span class="enscript-variable-name">Hack</span> <span class="enscript-variable-name">to</span> <span class="enscript-variable-name">enable</span> <span class="enscript-variable-name">mcount</span> <span class="enscript-variable-name">to</span> <span class="enscript-variable-name">work</span> <span class="enscript-variable-name">on</span> <span class="enscript-variable-name">K64</span>
+	__asm__ <span class="enscript-type">volatile</span>(<span class="enscript-string">&quot;mov %0, %%gs&quot;</span> : : <span class="enscript-string">&quot;rm&quot;</span> ((<span class="enscript-type">unsigned</span> <span class="enscript-type">short</span>)(KERNEL_DS)));
+#<span class="enscript-reference">endif</span>
+}
+
+
+<span class="enscript-comment">/*
+ * Set MSRs for sysenter/sysexit and syscall/sysret for 64-bit.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fast_syscall_init64</span>(__unused cpu_data_t *cdp)
+{
+	wrmsr64(MSR_IA32_SYSENTER_CS, SYSENTER_CS); 
+	wrmsr64(MSR_IA32_SYSENTER_EIP, (uintptr_t) hi64_sysenter);
+	wrmsr64(MSR_IA32_SYSENTER_ESP, current_sstk());
+	<span class="enscript-comment">/* Enable syscall/sysret */</span>
+	wrmsr64(MSR_IA32_EFER, rdmsr64(MSR_IA32_EFER) | MSR_IA32_EFER_SCE);
+
+	<span class="enscript-comment">/*
+	 * MSRs for 64-bit syscall/sysret
+	 * Note USER_CS because sysret uses this + 16 when returning to
+	 * 64-bit code.
+	 */</span>
+	wrmsr64(MSR_IA32_LSTAR, (uintptr_t) hi64_syscall);
+	wrmsr64(MSR_IA32_STAR, (((uint64_t)USER_CS) &lt;&lt; 48) |
+				(((uint64_t)KERNEL64_CS) &lt;&lt; 32));
+	<span class="enscript-comment">/*
+	 * Emulate eflags cleared by sysenter but note that
+	 * we also clear the trace trap to avoid the complications
+	 * of single-stepping into a syscall. The nested task bit
+	 * is also cleared to avoid a spurious &quot;task switch&quot;
+	 * should we choose to return via an IRET.
+	 */</span>
+	wrmsr64(MSR_IA32_FMASK, EFL_DF|EFL_IF|EFL_TF|EFL_NT);
+
+}
+
+
+cpu_data_t *
+<span class="enscript-function-name">cpu_data_alloc</span>(boolean_t is_boot_cpu)
+{
+	<span class="enscript-type">int</span>		ret;
+	cpu_data_t	*cdp;
+
+	<span class="enscript-keyword">if</span> (is_boot_cpu) {
+		assert(real_ncpus == 1);
+		cdp = cpu_datap(0);
+		<span class="enscript-keyword">if</span> (cdp-&gt;cpu_processor == NULL) {
+			simple_lock_init(&amp;ncpus_lock, 0);
+			cdp-&gt;cpu_processor = cpu_processor_alloc(TRUE);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NCOPY_WINDOWS</span> &gt; 0
+			cdp-&gt;cpu_pmap = pmap_cpu_alloc(TRUE);
+#<span class="enscript-reference">endif</span>
+		}
+		<span class="enscript-keyword">return</span> cdp;
+	}
+
+	<span class="enscript-comment">/*
+	 * Allocate per-cpu data:
+	 */</span>
+	ret = kmem_alloc(kernel_map, (vm_offset_t *) &amp;cdp, <span class="enscript-keyword">sizeof</span>(cpu_data_t), VM_KERN_MEMORY_CPU);
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+		printf(<span class="enscript-string">&quot;cpu_data_alloc() failed, ret=%d\n&quot;</span>, ret);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">abort</span>;
+	}
+	bzero((<span class="enscript-type">void</span>*) cdp, <span class="enscript-keyword">sizeof</span>(cpu_data_t));
+	cdp-&gt;cpu_this = cdp;
+
+	<span class="enscript-comment">/*
+	 * Allocate interrupt stack:
+	 */</span>
+	ret = kmem_alloc(kernel_map, 
+			 (vm_offset_t *) &amp;cdp-&gt;cpu_int_stack_top,
+			 INTSTACK_SIZE, VM_KERN_MEMORY_CPU);
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+		printf(<span class="enscript-string">&quot;cpu_data_alloc() int stack failed, ret=%d\n&quot;</span>, ret);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">abort</span>;
+	}
+	bzero((<span class="enscript-type">void</span>*) cdp-&gt;cpu_int_stack_top, INTSTACK_SIZE);
+	cdp-&gt;cpu_int_stack_top += INTSTACK_SIZE;
+
+	<span class="enscript-comment">/*
+	 * Allocate descriptor table:
+	 */</span>
+	ret = kmem_alloc(kernel_map, 
+			 (vm_offset_t *) &amp;cdp-&gt;cpu_desc_tablep,
+			 <span class="enscript-keyword">sizeof</span>(cpu_desc_table64_t),
+			 VM_KERN_MEMORY_CPU);
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+		printf(<span class="enscript-string">&quot;cpu_data_alloc() desc_table failed, ret=%d\n&quot;</span>, ret);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">abort</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Allocate LDT
+	 */</span>
+	ret = kmem_alloc(kernel_map, 
+			 (vm_offset_t *) &amp;cdp-&gt;cpu_ldtp,
+			 <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> real_descriptor) * LDTSZ,
+			 VM_KERN_MEMORY_CPU);
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+		printf(<span class="enscript-string">&quot;cpu_data_alloc() ldt failed, ret=%d\n&quot;</span>, ret);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">abort</span>;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MCA</span>
+	<span class="enscript-comment">/* Machine-check shadow register allocation. */</span>
+	mca_cpu_alloc(cdp);
+#<span class="enscript-reference">endif</span>
+
+	simple_lock(&amp;ncpus_lock);
+
+	cpu_data_ptr[real_ncpus] = cdp;
+	cdp-&gt;cpu_number = real_ncpus;
+	real_ncpus++;
+	simple_unlock(&amp;ncpus_lock);
+
+	<span class="enscript-comment">/*
+	 * Before this cpu has been assigned a real thread context,
+	 * we give it a fake, unique, non-zero thread id which the locking
+	 * primitives use as their lock value.
+	 * Note that this does not apply to the boot processor, cpu 0, which
+	 * transitions to a thread context well before other processors are
+	 * started.
+	 */</span>
+	cdp-&gt;cpu_active_thread = (thread_t) (uintptr_t) cdp-&gt;cpu_number;
+
+	cdp-&gt;cpu_nanotime = &amp;pal_rtc_nanotime_info;
+
+	kprintf(<span class="enscript-string">&quot;cpu_data_alloc(%d) %p desc_table: %p &quot;</span>
+		<span class="enscript-string">&quot;ldt: %p &quot;</span>
+		<span class="enscript-string">&quot;int_stack: 0x%lx-0x%lx\n&quot;</span>,
+		cdp-&gt;cpu_number, cdp, cdp-&gt;cpu_desc_tablep, cdp-&gt;cpu_ldtp,
+		(<span class="enscript-type">long</span>)(cdp-&gt;cpu_int_stack_top - INTSTACK_SIZE), (<span class="enscript-type">long</span>)(cdp-&gt;cpu_int_stack_top));
+
+	<span class="enscript-keyword">return</span> cdp;
+
+<span class="enscript-reference">abort</span>:
+	<span class="enscript-keyword">if</span> (cdp) {
+		<span class="enscript-keyword">if</span> (cdp-&gt;cpu_desc_tablep)
+			kfree((<span class="enscript-type">void</span> *) cdp-&gt;cpu_desc_tablep,
+				<span class="enscript-keyword">sizeof</span>(cpu_desc_table64_t));
+		<span class="enscript-keyword">if</span> (cdp-&gt;cpu_int_stack_top)
+			kfree((<span class="enscript-type">void</span> *) (cdp-&gt;cpu_int_stack_top - INTSTACK_SIZE),
+				INTSTACK_SIZE);
+		kfree((<span class="enscript-type">void</span> *) cdp, <span class="enscript-keyword">sizeof</span>(*cdp));
+	}
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+boolean_t
+<span class="enscript-function-name">valid_user_data_selector</span>(uint16_t selector)
+{
+    sel_t	sel = selector_to_sel(selector);
+    
+    <span class="enscript-keyword">if</span> (selector == 0)
+    	<span class="enscript-keyword">return</span> (TRUE);
+
+    <span class="enscript-keyword">if</span> (sel.ti == SEL_LDT)
+	<span class="enscript-keyword">return</span> (TRUE);
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sel.index &lt; GDTSZ) {
+	<span class="enscript-keyword">if</span> ((gdt_desc_p(selector)-&gt;access &amp; ACC_PL_U) == ACC_PL_U)
+	    <span class="enscript-keyword">return</span> (TRUE);
+    }
+		
+    <span class="enscript-keyword">return</span> (FALSE);
+}
+
+boolean_t
+<span class="enscript-function-name">valid_user_code_selector</span>(uint16_t selector)
+{
+    sel_t	sel = selector_to_sel(selector);
+    
+    <span class="enscript-keyword">if</span> (selector == 0)
+    	<span class="enscript-keyword">return</span> (FALSE);
+
+    <span class="enscript-keyword">if</span> (sel.ti == SEL_LDT) {
+	<span class="enscript-keyword">if</span> (sel.rpl == USER_PRIV)
+	    <span class="enscript-keyword">return</span> (TRUE);
+    }
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sel.index &lt; GDTSZ &amp;&amp; sel.rpl == USER_PRIV) {
+	<span class="enscript-keyword">if</span> ((gdt_desc_p(selector)-&gt;access &amp; ACC_PL_U) == ACC_PL_U)
+	    <span class="enscript-keyword">return</span> (TRUE);
+    }
+
+    <span class="enscript-keyword">return</span> (FALSE);
+}
+
+boolean_t
+<span class="enscript-function-name">valid_user_stack_selector</span>(uint16_t selector)
+{
+    sel_t	sel = selector_to_sel(selector);
+    
+    <span class="enscript-keyword">if</span> (selector == 0)
+    	<span class="enscript-keyword">return</span> (FALSE);
+
+    <span class="enscript-keyword">if</span> (sel.ti == SEL_LDT) {
+	<span class="enscript-keyword">if</span> (sel.rpl == USER_PRIV)
+	    <span class="enscript-keyword">return</span> (TRUE);
+    }
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sel.index &lt; GDTSZ &amp;&amp; sel.rpl == USER_PRIV) {
+	<span class="enscript-keyword">if</span> ((gdt_desc_p(selector)-&gt;access &amp; ACC_PL_U) == ACC_PL_U)
+	    <span class="enscript-keyword">return</span> (TRUE);
+    }
+		
+    <span class="enscript-keyword">return</span> (FALSE);
+}
+
+boolean_t
+<span class="enscript-function-name">valid_user_segment_selectors</span>(uint16_t cs,
+		uint16_t ss,
+		uint16_t ds,
+		uint16_t es,
+		uint16_t fs,
+		uint16_t gs)
+{	
+	<span class="enscript-keyword">return</span> valid_user_code_selector(cs)  &amp;&amp;
+		valid_user_stack_selector(ss) &amp;&amp;
+		valid_user_data_selector(ds)  &amp;&amp;
+		valid_user_data_selector(es)  &amp;&amp;
+		valid_user_data_selector(fs)  &amp;&amp;
+		valid_user_data_selector(gs);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NCOPY_WINDOWS</span> &gt; 0
+
+<span class="enscript-type">static</span> vm_offset_t user_window_base = 0;
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cpu_userwindow_init</span>(<span class="enscript-type">int</span> cpu)
+{
+	cpu_data_t		*cdp = cpu_data_ptr[cpu];
+	vm_offset_t 		user_window;
+	vm_offset_t 		vaddr;
+	<span class="enscript-type">int</span>			num_cpus;
+
+	num_cpus = ml_get_max_cpus();
+
+	<span class="enscript-keyword">if</span> (cpu &gt;= num_cpus)
+		panic(<span class="enscript-string">&quot;cpu_userwindow_init: cpu &gt; num_cpus&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (user_window_base == 0) {
+
+		<span class="enscript-keyword">if</span> (vm_allocate(kernel_map, &amp;vaddr,
+					(NBPDE * NCOPY_WINDOWS * num_cpus) + NBPDE,
+					VM_FLAGS_ANYWHERE | VM_MAKE_TAG(VM_KERN_MEMORY_CPU)) != KERN_SUCCESS)
+			panic(<span class="enscript-string">&quot;cpu_userwindow_init: &quot;</span>
+					<span class="enscript-string">&quot;couldn't allocate user map window&quot;</span>);
+
+		<span class="enscript-comment">/*
+		 * window must start on a page table boundary
+		 * in the virtual address space
+		 */</span>
+		user_window_base = (vaddr + (NBPDE - 1)) &amp; ~(NBPDE - 1);
+
+		<span class="enscript-comment">/*
+		 * get rid of any allocation leading up to our
+		 * starting boundary
+		 */</span>
+		vm_deallocate(kernel_map, vaddr, user_window_base - vaddr);
+
+		<span class="enscript-comment">/*
+		 * get rid of tail that we don't need
+		 */</span>
+		user_window = user_window_base +
+					(NBPDE * NCOPY_WINDOWS * num_cpus);
+
+		vm_deallocate(kernel_map, user_window,
+				(vaddr +
+				 ((NBPDE * NCOPY_WINDOWS * num_cpus) + NBPDE)) -
+				 user_window);
+	}
+
+ 	user_window = user_window_base + (cpu * NCOPY_WINDOWS * NBPDE);
+
+	cdp-&gt;cpu_copywindow_base = user_window;
+	<span class="enscript-comment">/*
+	 * Abuse this pdp entry, the pdp now actually points to 
+	 * an array of copy windows addresses.
+	 */</span>
+	cdp-&gt;cpu_copywindow_pdp  = pmap_pde(kernel_pmap, user_window);
+
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cpu_physwindow_init</span>(<span class="enscript-type">int</span> cpu)
+{
+	cpu_data_t		*cdp = cpu_data_ptr[cpu];
+        vm_offset_t 		phys_window = cdp-&gt;cpu_physwindow_base;
+
+	<span class="enscript-keyword">if</span> (phys_window == 0) {
+		<span class="enscript-keyword">if</span> (vm_allocate(kernel_map, &amp;phys_window,
+				PAGE_SIZE, VM_FLAGS_ANYWHERE | VM_MAKE_TAG(VM_KERN_MEMORY_CPU))
+				!= KERN_SUCCESS)
+		        panic(<span class="enscript-string">&quot;cpu_physwindow_init: &quot;</span>
+				<span class="enscript-string">&quot;couldn't allocate phys map window&quot;</span>);
+
+		<span class="enscript-comment">/*
+		 * make sure the page that encompasses the
+		 * pte pointer we're interested in actually
+		 * exists in the page table
+		 */</span>
+		pmap_expand(kernel_pmap, phys_window, PMAP_EXPAND_OPTIONS_NONE);
+
+		cdp-&gt;cpu_physwindow_base = phys_window;
+		cdp-&gt;cpu_physwindow_ptep = vtopte(phys_window);
+	}
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* NCOPY_WINDOWS &gt; 0 */</span>
+
+<span class="enscript-comment">/*
+ * Load the segment descriptor tables for the current processor.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cpu_mode_init</span>(cpu_data_t *cdp)
+{
+	fast_syscall_init64(cdp);
+}
+
+<span class="enscript-comment">/*
+ * Allocate a new interrupt stack for the boot processor from the
+ * heap rather than continue to use the statically allocated space.
+ * Also switch to a dynamically allocated cpu data area.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cpu_data_realloc</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span>		ret;
+	vm_offset_t	istk;
+	vm_offset_t	fstk;
+	cpu_data_t	*cdp;
+	boolean_t	istate;
+
+	ret = kmem_alloc(kernel_map, &amp;istk, INTSTACK_SIZE, VM_KERN_MEMORY_CPU);
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+		panic(<span class="enscript-string">&quot;cpu_data_realloc() stack alloc, ret=%d\n&quot;</span>, ret);
+	}
+	bzero((<span class="enscript-type">void</span>*) istk, INTSTACK_SIZE);
+	istk += INTSTACK_SIZE;
+
+	ret = kmem_alloc(kernel_map, (vm_offset_t *) &amp;cdp, <span class="enscript-keyword">sizeof</span>(cpu_data_t), VM_KERN_MEMORY_CPU);
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+		panic(<span class="enscript-string">&quot;cpu_data_realloc() cpu data alloc, ret=%d\n&quot;</span>, ret);
+	}
+
+	<span class="enscript-comment">/* Copy old contents into new area and make fix-ups */</span>
+	assert(cpu_number() == 0);
+	bcopy((<span class="enscript-type">void</span> *) cpu_data_ptr[0], (<span class="enscript-type">void</span>*) cdp, <span class="enscript-keyword">sizeof</span>(cpu_data_t));
+	cdp-&gt;cpu_this = cdp;
+	cdp-&gt;cpu_int_stack_top = istk;
+	timer_call_queue_init(&amp;cdp-&gt;rtclock_timer.queue);
+
+	<span class="enscript-comment">/* Allocate the separate fault stack */</span>
+	ret = kmem_alloc(kernel_map, &amp;fstk, PAGE_SIZE, VM_KERN_MEMORY_CPU);
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+		panic(<span class="enscript-string">&quot;cpu_data_realloc() fault stack alloc, ret=%d\n&quot;</span>, ret);
+	}
+	bzero((<span class="enscript-type">void</span>*) fstk, PAGE_SIZE);
+	fstk += PAGE_SIZE;
+
+	<span class="enscript-comment">/*
+	 * With interrupts disabled commmit the new areas.
+	 */</span>
+	istate = ml_set_interrupts_enabled(FALSE);
+	cpu_data_ptr[0] = cdp;
+	master_ktss64.ist2 = (uintptr_t) fstk;
+	master_ktss64.ist1 = (uintptr_t) fstk
+				- <span class="enscript-keyword">sizeof</span>(x86_64_intr_stack_frame_t);
+	wrmsr64(MSR_IA32_GS_BASE, (uintptr_t) cdp);
+	wrmsr64(MSR_IA32_KERNEL_GS_BASE, (uintptr_t) cdp);
+	(<span class="enscript-type">void</span>) ml_set_interrupts_enabled(istate);
+
+	kprintf(<span class="enscript-string">&quot;Reallocated master cpu data: %p,&quot;</span>
+		<span class="enscript-string">&quot; interrupt stack: %p, fault stack: %p\n&quot;</span>,
+		(<span class="enscript-type">void</span> *) cdp, (<span class="enscript-type">void</span> *) istk, (<span class="enscript-type">void</span> *) fstk);
+}
+</pre>
+<hr />
+</body></html>

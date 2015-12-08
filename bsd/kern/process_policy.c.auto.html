@@ -1,0 +1,596 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>process_policy.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">process_policy.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2005, 2010 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * process policy syscall implementation
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/buf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_region.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/process_policy.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/bsdtask_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/msgbuf.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_misc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">handle_lowresource</span>(<span class="enscript-type">int</span> scope, <span class="enscript-type">int</span> action, <span class="enscript-type">int</span> policy, <span class="enscript-type">int</span> policy_subtype, user_addr_t attrp, proc_t proc, uint64_t target_threadid);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">handle_resourceuse</span>(<span class="enscript-type">int</span> scope, <span class="enscript-type">int</span> action, <span class="enscript-type">int</span> policy, <span class="enscript-type">int</span> policy_subtype, user_addr_t attrp, proc_t proc, uint64_t target_threadid);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">handle_apptype</span>(<span class="enscript-type">int</span> scope, <span class="enscript-type">int</span> action, <span class="enscript-type">int</span> policy, <span class="enscript-type">int</span> policy_subtype, user_addr_t attrp, proc_t proc, uint64_t target_threadid);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">handle_boost</span>(<span class="enscript-type">int</span> scope, <span class="enscript-type">int</span> action, <span class="enscript-type">int</span> policy, <span class="enscript-type">int</span> policy_subtype, user_addr_t attrp, proc_t proc, uint64_t target_threadid);
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">task_suspend</span>(task_t);
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">task_resume</span>(task_t);
+
+
+<span class="enscript-comment">/***************************** process_policy ********************/</span>
+
+<span class="enscript-comment">/*
+ *int process_policy(int scope, int action, int policy, int policy_subtype, 
+ *                   proc_policy_attribute_t * attrp, pid_t target_pid, 
+ *                   uint64_t target_threadid)
+ *{ int process_policy(int scope, int action, int policy, int policy_subtype, 
+ * user_addr_t attrp, pid_t target_pid, uint64_t target_threadid); }
+ */</span>
+
+<span class="enscript-comment">/* system call implementation */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">process_policy</span>(__unused <span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> process_policy_args * uap, __unused int32_t *retval)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> scope = uap-&gt;scope;
+	<span class="enscript-type">int</span> policy = uap-&gt;policy;
+	<span class="enscript-type">int</span> action = uap-&gt;action;
+	<span class="enscript-type">int</span> policy_subtype = uap-&gt;policy_subtype;
+	user_addr_t attrp = uap-&gt;attrp;
+	pid_t target_pid = uap-&gt;target_pid;
+	uint64_t target_threadid = uap-&gt;target_threadid;
+	proc_t target_proc = PROC_NULL;
+	proc_t curp = current_proc();
+	kauth_cred_t my_cred;
+
+	<span class="enscript-keyword">if</span> ((scope != PROC_POLICY_SCOPE_PROCESS) &amp;&amp; (scope != PROC_POLICY_SCOPE_THREAD)) {
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+
+	<span class="enscript-keyword">if</span> (target_pid == 0 || target_pid == proc_selfpid())
+		target_proc = proc_self();
+	<span class="enscript-keyword">else</span>
+		target_proc = proc_find(target_pid);
+
+	<span class="enscript-keyword">if</span> (target_proc == PROC_NULL)
+		<span class="enscript-keyword">return</span>(ESRCH);
+
+	my_cred = kauth_cred_get();
+
+	<span class="enscript-comment">/* 
+	 * Resoure starvation control can be used by unpriv resource owner but priv at the time of ownership claim. This is
+	 * checked in low resource handle routine. So bypass the checks here.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((policy != PROC_POLICY_RESOURCE_STARVATION) &amp;&amp; 
+		(policy != PROC_POLICY_APPTYPE) &amp;&amp; 
+		(!kauth_cred_issuser(my_cred) &amp;&amp; curp != p))
+	{
+		error = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-keyword">switch</span> (policy) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_BOOST</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RESOURCE_USAGE</span>:
+			<span class="enscript-comment">/* These policies do their own appropriate mac checks */</span>
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			error = mac_proc_check_sched(curp, target_proc);
+			<span class="enscript-keyword">if</span> (error) <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			<span class="enscript-keyword">break</span>;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_MACF */</span>
+
+	<span class="enscript-keyword">switch</span>(policy) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_BACKGROUND</span>:
+			error = ENOTSUP;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_HARDWARE_ACCESS</span>:
+			error = ENOTSUP;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RESOURCE_STARVATION</span>:
+			error = handle_lowresource(scope, action, policy, policy_subtype, attrp, target_proc, target_threadid);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RESOURCE_USAGE</span>:
+			error = handle_resourceuse(scope, action, policy, policy_subtype, attrp, target_proc, target_threadid);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_APPTYPE</span>:
+			error = handle_apptype(scope, action, policy, policy_subtype, attrp, target_proc, target_threadid);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_BOOST</span>:
+			error = handle_boost(scope, action, policy, policy_subtype, attrp, target_proc, target_threadid);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			error = EINVAL;
+			<span class="enscript-keyword">break</span>;
+	}
+
+<span class="enscript-reference">out</span>:
+	proc_rele(target_proc);
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">handle_lowresource</span>(__unused <span class="enscript-type">int</span> scope, <span class="enscript-type">int</span> action, __unused <span class="enscript-type">int</span> policy, <span class="enscript-type">int</span> policy_subtype, __unused user_addr_t attrp, proc_t proc, __unused uint64_t target_threadid)
+{
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-keyword">switch</span>(policy_subtype) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RS_NONE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RS_VIRTUALMEM</span>:
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span>(EINVAL);	
+	}
+	
+	<span class="enscript-keyword">if</span> (action == PROC_POLICY_ACTION_RESTORE)
+		error = proc_resetpcontrol(proc_pid(proc));
+	<span class="enscript-keyword">else</span>
+		error = EINVAL;
+
+	<span class="enscript-keyword">return</span>(error);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 
+<span class="enscript-function-name">handle_resourceuse</span>(__unused <span class="enscript-type">int</span> scope, __unused <span class="enscript-type">int</span> action, __unused <span class="enscript-type">int</span> policy, <span class="enscript-type">int</span> policy_subtype, user_addr_t attrp, proc_t proc, __unused uint64_t target_threadid)
+{
+	proc_policy_cpuusage_attr_t	cpuattr;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	proc_t 				curp = current_proc();
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-type">int</span>				entitled = TRUE;
+	uint64_t			interval = -1ULL;	
+	<span class="enscript-type">int</span>				error = 0;
+	uint8_t				percentage;
+
+	<span class="enscript-keyword">switch</span>(policy_subtype) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RUSAGE_NONE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RUSAGE_WIREDMEM</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RUSAGE_VIRTMEM</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RUSAGE_DISK</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RUSAGE_NETWORK</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RUSAGE_POWER</span>:
+			<span class="enscript-keyword">return</span>(ENOTSUP);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span>(EINVAL);	
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RUSAGE_CPU</span>:
+			<span class="enscript-keyword">break</span>;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-keyword">if</span> (curp != proc) {
+		<span class="enscript-comment">/* the cpumon entitlement manages messing with CPU limits on self */</span>
+		error = mac_proc_check_sched(curp, proc);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> error;
+	}
+
+	<span class="enscript-comment">/*
+	 * Allow a process to change CPU usage monitor parameters, unless a MAC policy
+	 * overrides it with an entitlement check.
+	 */</span>
+	entitled = (mac_proc_check_cpumon(curp) == 0) ? TRUE : FALSE;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">switch</span> (action) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_ACTION_GET</span>: 
+			error = proc_get_task_ruse_cpu(proc-&gt;task, &amp;cpuattr.ppattr_cpu_attr,
+                                        &amp;percentage,
+                                        &amp;cpuattr.ppattr_cpu_attr_interval,
+                                        &amp;cpuattr.ppattr_cpu_attr_deadline);
+			<span class="enscript-keyword">if</span> (error == 0) {
+				cpuattr.ppattr_cpu_percentage = percentage;
+				cpuattr.ppattr_cpu_attr_interval /= NSEC_PER_SEC;
+				error = copyout((proc_policy_cpuusage_attr_t *)&amp;cpuattr, (user_addr_t)attrp, <span class="enscript-keyword">sizeof</span>(proc_policy_cpuusage_attr_t));
+			}
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_ACTION_APPLY</span>: 
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_ACTION_SET</span>: 
+			error = copyin((user_addr_t)attrp, (proc_policy_cpuusage_attr_t *)&amp;cpuattr, <span class="enscript-keyword">sizeof</span>(proc_policy_cpuusage_attr_t));
+			<span class="enscript-keyword">if</span> (error != 0) {
+				<span class="enscript-keyword">return</span> (error);
+			}
+
+			<span class="enscript-comment">/*
+			 * The process_policy API uses seconds as the units for the interval,
+			 * but the mach task policy SPI uses nanoseconds. Do the conversion,
+			 * but preserve -1 as it has special meaning.
+			 */</span>
+			<span class="enscript-keyword">if</span> (cpuattr.ppattr_cpu_attr_interval != -1ULL) {
+				interval = cpuattr.ppattr_cpu_attr_interval * NSEC_PER_SEC;
+			} <span class="enscript-keyword">else</span> {
+				interval = -1ULL;
+			}
+
+			error = proc_set_task_ruse_cpu(proc-&gt;task, cpuattr.ppattr_cpu_attr, 
+					cpuattr.ppattr_cpu_percentage, 
+					interval, 
+					cpuattr.ppattr_cpu_attr_deadline,
+					entitled); 
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_ACTION_RESTORE</span>:
+			error = proc_clear_task_ruse_cpu(proc-&gt;task, entitled);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:
+			error = EINVAL;
+			<span class="enscript-keyword">break</span>;
+
+	}
+				
+	<span class="enscript-keyword">return</span>(error);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">handle_apptype</span>(         <span class="enscript-type">int</span> scope,
+                        <span class="enscript-type">int</span> action,
+               __unused <span class="enscript-type">int</span> policy,
+                        <span class="enscript-type">int</span> policy_subtype,
+               __unused user_addr_t attrp,
+                        proc_t target_proc,
+               __unused uint64_t target_threadid)
+{
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-keyword">if</span> (scope != PROC_POLICY_SCOPE_PROCESS)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/* Temporary compatibility with old importance donation interface until libproc is moved to new boost calls */</span>
+	<span class="enscript-keyword">switch</span> (policy_subtype) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_IOS_DONATEIMP</span>:
+			<span class="enscript-keyword">if</span> (action != PROC_POLICY_ACTION_ENABLE)
+				<span class="enscript-keyword">return</span> (EINVAL);
+			<span class="enscript-keyword">if</span> (target_proc != current_proc())
+				<span class="enscript-keyword">return</span> (EINVAL);
+			
+			<span class="enscript-comment">/* PROCESS ENABLE APPTYPE DONATEIMP */</span>
+			task_importance_mark_donor(target_proc-&gt;task, TRUE);
+
+			<span class="enscript-keyword">return</span>(0);
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_IOS_HOLDIMP</span>:
+			<span class="enscript-keyword">if</span> (action != PROC_POLICY_ACTION_ENABLE)
+				<span class="enscript-keyword">return</span> (EINVAL);
+			<span class="enscript-keyword">if</span> (target_proc != current_proc())
+				<span class="enscript-keyword">return</span> (EINVAL);
+
+			<span class="enscript-comment">/* PROCESS ENABLE APPTYPE HOLDIMP */</span>
+			error = task_importance_hold_legacy_external_assertion(current_task(), 1);
+
+			<span class="enscript-keyword">return</span>(error);
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_IOS_DROPIMP</span>:
+			<span class="enscript-keyword">if</span> (action != PROC_POLICY_ACTION_ENABLE)
+				<span class="enscript-keyword">return</span> (EINVAL);
+			<span class="enscript-keyword">if</span> (target_proc != current_proc())
+				<span class="enscript-keyword">return</span> (EINVAL);
+
+			<span class="enscript-comment">/* PROCESS ENABLE APPTYPE DROPIMP */</span>
+			error = task_importance_drop_legacy_external_assertion(current_task(), 1);
+
+			<span class="enscript-keyword">return</span>(error);
+
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-comment">/* continue to TAL handling */</span>
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (policy_subtype != PROC_POLICY_OSX_APPTYPE_TAL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/* need to be super user to do this */</span>
+	<span class="enscript-keyword">if</span> (kauth_cred_issuser(kauth_cred_get()) == 0)
+		<span class="enscript-keyword">return</span> (EPERM);
+
+	<span class="enscript-keyword">if</span> (proc_task_is_tal(target_proc-&gt;task) == FALSE)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">switch</span> (action) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_ACTION_ENABLE</span>:
+			<span class="enscript-comment">/* PROCESS ENABLE APPTYPE TAL */</span>
+			proc_set_task_policy(target_proc-&gt;task, THREAD_NULL,
+                                             TASK_POLICY_ATTRIBUTE, TASK_POLICY_TAL,
+                                             TASK_POLICY_ENABLE);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_ACTION_DISABLE</span>:
+			<span class="enscript-comment">/* PROCESS DISABLE APPTYPE TAL */</span>
+			proc_set_task_policy(target_proc-&gt;task, THREAD_NULL,
+                                             TASK_POLICY_ATTRIBUTE, TASK_POLICY_TAL,
+                                             TASK_POLICY_DISABLE);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> (EINVAL);
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">handle_boost</span>(<span class="enscript-type">int</span> scope,
+             <span class="enscript-type">int</span> action,
+    __unused <span class="enscript-type">int</span> policy,
+             <span class="enscript-type">int</span> policy_subtype,
+    __unused user_addr_t attrp,
+             proc_t target_proc,
+    __unused uint64_t target_threadid)
+{
+	<span class="enscript-type">int</span> error = 0;
+
+	assert(policy == PROC_POLICY_BOOST);
+
+	<span class="enscript-keyword">if</span> (scope != PROC_POLICY_SCOPE_PROCESS)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">if</span> (target_proc != current_proc())
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">switch</span>(policy_subtype) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_IMP_IMPORTANT</span>:
+			<span class="enscript-keyword">if</span> (task_is_importance_receiver_type(target_proc-&gt;task) == FALSE)
+				<span class="enscript-keyword">return</span> (EINVAL);
+
+			<span class="enscript-keyword">switch</span> (action) {
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_ACTION_HOLD</span>:
+					<span class="enscript-comment">/* PROCESS HOLD BOOST IMPORTANT */</span>
+					error = task_importance_hold_legacy_external_assertion(current_task(), 1);
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_ACTION_DROP</span>:
+					<span class="enscript-comment">/* PROCESS DROP BOOST IMPORTANT */</span>
+					error = task_importance_drop_legacy_external_assertion(current_task(), 1);
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-reference">default</span>:
+					error = (EINVAL);
+					<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_IMP_DONATION</span>:
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+			error = mac_proc_check_sched(current_proc(), target_proc);
+			<span class="enscript-keyword">if</span> (error) <span class="enscript-keyword">return</span> error;
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-keyword">switch</span> (action) {
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_ACTION_SET</span>:
+					<span class="enscript-comment">/* PROCESS SET BOOST DONATION */</span>
+					task_importance_mark_donor(target_proc-&gt;task, TRUE);
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-reference">default</span>:
+					error = (EINVAL);
+					<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:
+			error = (EINVAL);
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span>(error);
+}
+
+
+<span class="enscript-comment">/* 
+ * KPI to determine if a pid is currently backgrounded. 
+ * Returns ESRCH if pid cannot be found or has started exiting.
+ * Returns EINVAL if state is NULL.
+ * Sets *state to 1 if pid is backgrounded, and 0 otherwise.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_pidbackgrounded</span>(pid_t pid, uint32_t* state)
+{
+	proc_t target_proc = PROC_NULL;
+
+	<span class="enscript-keyword">if</span> (state == NULL)
+		<span class="enscript-keyword">return</span>(EINVAL);	
+
+	target_proc = proc_find(pid);
+
+	<span class="enscript-keyword">if</span> (target_proc == PROC_NULL)
+		<span class="enscript-keyword">return</span>(ESRCH);
+
+	<span class="enscript-keyword">if</span> ( proc_get_effective_task_policy(target_proc-&gt;task, TASK_POLICY_DARWIN_BG) ) {
+		*state = 1;
+	} <span class="enscript-keyword">else</span> {
+		*state = 0;
+	}
+
+	proc_rele(target_proc);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Get the darwin background state of the originator. If the current
+ * process app type is App, then it is the originator, else if it is
+ * a Daemon, then creator of the Resource Accounting attribute of
+ * the current thread voucher is the originator of the work.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_get_originatorbgstate</span>(uint32_t *is_backgrounded)
+{
+	uint32_t bgstate;
+	proc_t p = current_proc();
+	uint32_t flagsp;
+	kern_return_t kr;
+	pid_t pid;
+	<span class="enscript-type">int</span> ret;
+	thread_t thread = current_thread();
+
+	bgstate = proc_get_effective_thread_policy(thread, TASK_POLICY_DARWIN_BG);
+	
+	<span class="enscript-comment">/* If current thread or task backgrounded, return background */</span>
+	<span class="enscript-keyword">if</span> (bgstate) {
+		*is_backgrounded = 1;
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-comment">/* Check if current process app type is App, then return foreground */</span>
+	proc_get_darwinbgstate(p-&gt;task, &amp;flagsp);
+	<span class="enscript-keyword">if</span> ((flagsp &amp; PROC_FLAG_APPLICATION) == PROC_FLAG_APPLICATION) {
+		*is_backgrounded = 0;
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-comment">/*
+	 * Get the current voucher origin pid and it's bgstate.The pid
+	 * returned here might not be valid or may have been recycled.
+	 */</span>
+	kr = thread_get_current_voucher_origin_pid(&amp;pid);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		<span class="enscript-keyword">if</span> (kr == KERN_INVALID_TASK)
+			<span class="enscript-keyword">return</span> ESRCH;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kr == KERN_INVALID_VALUE)
+			<span class="enscript-keyword">return</span> ENOATTR;
+		<span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	ret = proc_pidbackgrounded(pid, is_backgrounded);
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_apply_resource_actions</span>(<span class="enscript-type">void</span> * bsdinfo, __unused <span class="enscript-type">int</span> type, <span class="enscript-type">int</span> action)
+{
+	proc_t p = (proc_t)bsdinfo;
+
+	<span class="enscript-keyword">switch</span>(action) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RSRCACT_THROTTLE</span>:
+			<span class="enscript-comment">/* no need to do anything */</span>
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RSRCACT_SUSPEND</span>:
+			task_suspend(p-&gt;task);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RSRCACT_TERMINATE</span>:
+			psignal(p, SIGKILL);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RSRCACT_NOTIFY_KQ</span>:
+			<span class="enscript-comment">/* not implemented */</span>
+			<span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RSRCACT_NOTIFY_EXC</span>:
+			panic(<span class="enscript-string">&quot;shouldn't be applying exception notification to process!&quot;</span>);
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_restore_resource_actions</span>(<span class="enscript-type">void</span> * bsdinfo, __unused <span class="enscript-type">int</span> type, <span class="enscript-type">int</span> action)
+{
+	proc_t p = (proc_t)bsdinfo;
+
+	<span class="enscript-keyword">switch</span>(action) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RSRCACT_THROTTLE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RSRCACT_TERMINATE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RSRCACT_NOTIFY_KQ</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RSRCACT_NOTIFY_EXC</span>:
+			<span class="enscript-comment">/* no need to do anything */</span>
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PROC_POLICY_RSRCACT_SUSPEND</span>:
+			task_resume(p-&gt;task);
+			<span class="enscript-keyword">break</span>;
+
+	}
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+</pre>
+<hr />
+</body></html>

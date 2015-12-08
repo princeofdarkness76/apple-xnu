@@ -1,0 +1,1788 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kern_newsysctl.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kern_newsysctl.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ *
+ *
+ * Copyright (c) 1982, 1986, 1989, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * Mike Karels at Berkeley Software Design, Inc.
+ *
+ * Quite extensively rewritten by Poul-Henning Kamp of the FreeBSD
+ * project, to make these variables more userfriendly.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)kern_sysctl.c	8.4 (Berkeley) 4/14/94
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/buf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+
+lck_grp_t * sysctl_lock_group = NULL;
+lck_rw_t * sysctl_geometry_lock = NULL;
+lck_mtx_t * sysctl_unlocked_node_lock = NULL;
+
+<span class="enscript-comment">/*
+ * Conditionally allow dtrace to see these functions for debugging purposes.
+ */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">STATIC</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">STATIC</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> 0
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">STATIC</span>
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">STATIC</span> static
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* forward declarations  of static functions */</span>
+STATIC <span class="enscript-type">void</span> <span class="enscript-function-name">sysctl_sysctl_debug_dump_node</span>(<span class="enscript-type">struct</span> sysctl_oid_list *l, <span class="enscript-type">int</span> i);
+STATIC <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_sysctl_debug</span>(<span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1,
+	<span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req);
+STATIC <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_sysctl_name</span>(<span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1,
+	<span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req);
+STATIC <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_sysctl_next_ls</span> (<span class="enscript-type">struct</span> sysctl_oid_list *lsp,
+	<span class="enscript-type">int</span> *name, u_int namelen, <span class="enscript-type">int</span> *next, <span class="enscript-type">int</span> *len, <span class="enscript-type">int</span> level,
+	<span class="enscript-type">struct</span> sysctl_oid **oidpp);
+STATIC <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_old_kernel</span>(<span class="enscript-type">struct</span> sysctl_req *req, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *p, size_t l);
+STATIC <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_new_kernel</span>(<span class="enscript-type">struct</span> sysctl_req *req, <span class="enscript-type">void</span> *p, size_t l);
+STATIC <span class="enscript-type">int</span> <span class="enscript-function-name">name2oid</span> (<span class="enscript-type">char</span> *name, <span class="enscript-type">int</span> *oid, u_int *len);
+STATIC <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_sysctl_name2oid</span>(<span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1, <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req);
+STATIC <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_sysctl_next</span>(<span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1, <span class="enscript-type">int</span> arg2,
+        <span class="enscript-type">struct</span> sysctl_req *req);
+STATIC <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_sysctl_oidfmt</span>(<span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1, <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req);
+STATIC <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_old_user</span>(<span class="enscript-type">struct</span> sysctl_req *req, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *p, size_t l);
+STATIC <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_new_user</span>(<span class="enscript-type">struct</span> sysctl_req *req, <span class="enscript-type">void</span> *p, size_t l);
+
+STATIC <span class="enscript-type">void</span> <span class="enscript-function-name">sysctl_create_user_req</span>(<span class="enscript-type">struct</span> sysctl_req *req, <span class="enscript-type">struct</span> proc *p, user_addr_t oldp,
+								   size_t oldlen, user_addr_t newp, size_t newlen);
+STATIC <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_root</span>(boolean_t from_kernel, boolean_t string_is_canonical, <span class="enscript-type">char</span> *namestring, size_t namestringlen, <span class="enscript-type">int</span> *name, u_int namelen, <span class="enscript-type">struct</span> sysctl_req *req);
+
+<span class="enscript-type">int</span>	kernel_sysctl(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">int</span> *name, u_int namelen, <span class="enscript-type">void</span> *old, size_t *oldlenp, <span class="enscript-type">void</span> *new, size_t newlen);
+<span class="enscript-type">int</span>	kernel_sysctlbyname(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">void</span> *oldp, size_t *oldlenp, <span class="enscript-type">void</span> *newp, size_t newlen);
+<span class="enscript-type">int</span>	userland_sysctl(boolean_t string_is_canonical,
+					<span class="enscript-type">char</span> *namestring, size_t namestringlen,
+					<span class="enscript-type">int</span> *name, u_int namelen, <span class="enscript-type">struct</span> sysctl_req *req,
+					size_t *retval);
+
+<span class="enscript-type">struct</span> sysctl_oid_list sysctl__children; <span class="enscript-comment">/* root list */</span>
+
+<span class="enscript-comment">/*
+ * Initialization of the MIB tree.
+ *
+ * Order by number in each list.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sysctl_register_oid</span>(<span class="enscript-type">struct</span> sysctl_oid *new_oidp)
+{
+	<span class="enscript-type">struct</span> sysctl_oid *oidp = NULL;
+	<span class="enscript-type">struct</span> sysctl_oid_list *parent = new_oidp-&gt;oid_parent;
+	<span class="enscript-type">struct</span> sysctl_oid *p;
+	<span class="enscript-type">struct</span> sysctl_oid *q;
+	<span class="enscript-type">int</span> n;
+
+	<span class="enscript-comment">/*
+	 * The OID can be old-style (needs copy), new style without an earlier
+	 * version (also needs copy), or new style with a matching version (no
+	 * copy needed).  Later versions are rejected (presumably, the OID
+	 * structure was changed for a necessary reason).
+	 */</span>
+	<span class="enscript-keyword">if</span> (!(new_oidp-&gt;oid_kind &amp; CTLFLAG_OID2)) {
+		<span class="enscript-comment">/*
+		 * XXX:	M_TEMP is perhaps not the most apropriate zone, as it
+		 * XXX:	will subject us to use-after-free by other consumers.
+		 */</span>
+		MALLOC(oidp, <span class="enscript-type">struct</span> sysctl_oid *, <span class="enscript-keyword">sizeof</span>(*oidp), M_TEMP, M_WAITOK | M_ZERO);
+		<span class="enscript-keyword">if</span> (oidp == NULL)
+			<span class="enscript-keyword">return</span>;		<span class="enscript-comment">/* reject: no memory */</span>
+
+		<span class="enscript-comment">/*
+		 * Copy the structure only through the oid_fmt field, which
+		 * is the last field in a non-OID2 OID structure.
+		 *
+		 * Note:	We may want to set the oid_descr to the
+		 *		oid_name (or &quot;&quot;) at some future date.
+		 */</span>
+		memcpy(oidp, new_oidp, offsetof(<span class="enscript-type">struct</span> sysctl_oid, oid_descr));
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* It's a later version; handle the versions we know about */</span>
+		<span class="enscript-keyword">switch</span> (new_oidp-&gt;oid_version) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SYSCTL_OID_VERSION</span>:
+			<span class="enscript-comment">/* current version */</span>
+			oidp = new_oidp;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span>;			<span class="enscript-comment">/* rejects unknown version */</span>
+		}
+	}
+
+	<span class="enscript-keyword">if</span>(sysctl_geometry_lock == NULL)
+	{
+		<span class="enscript-comment">/*
+		 * Initialise the geometry lock for reading/modifying the
+		 * sysctl tree. This is done here because IOKit registers
+		 * some sysctl's before bsd_init() calls
+		 * sysctl_register_fixed().
+		 */</span>
+
+		sysctl_lock_group  = lck_grp_alloc_init(<span class="enscript-string">&quot;sysctl&quot;</span>, NULL);
+		sysctl_geometry_lock = lck_rw_alloc_init(sysctl_lock_group, NULL);
+		sysctl_unlocked_node_lock = lck_mtx_alloc_init(sysctl_lock_group, NULL);
+	}
+	<span class="enscript-comment">/* Get the write lock to modify the geometry */</span>
+	lck_rw_lock_exclusive(sysctl_geometry_lock);
+
+	<span class="enscript-comment">/*
+	 * If this oid has a number OID_AUTO, give it a number which
+	 * is greater than any current oid.  Make sure it is at least
+	 * OID_AUTO_START to leave space for pre-assigned oid numbers.
+	 */</span>
+	<span class="enscript-keyword">if</span> (oidp-&gt;oid_number == OID_AUTO) {
+		<span class="enscript-comment">/* First, find the highest oid in the parent list &gt;OID_AUTO_START-1 */</span>
+		n = OID_AUTO_START;
+		SLIST_FOREACH(p, parent, oid_link) {
+			<span class="enscript-keyword">if</span> (p-&gt;oid_number &gt; n)
+				n = p-&gt;oid_number;
+		}
+		oidp-&gt;oid_number = n + 1;
+		<span class="enscript-comment">/*
+		 * Reflect the number in an llocated OID into the template
+		 * of the caller for sysctl_unregister_oid() compares.
+		 */</span>
+		<span class="enscript-keyword">if</span> (oidp != new_oidp)
+			new_oidp-&gt;oid_number = oidp-&gt;oid_number;
+	}
+
+	<span class="enscript-comment">/*
+	 * Insert the oid into the parent's list in order.
+	 */</span>
+	q = NULL;
+	SLIST_FOREACH(p, parent, oid_link) {
+		<span class="enscript-keyword">if</span> (oidp-&gt;oid_number &lt; p-&gt;oid_number)
+			<span class="enscript-keyword">break</span>;
+		q = p;
+	}
+	<span class="enscript-keyword">if</span> (q)
+		SLIST_INSERT_AFTER(q, oidp, oid_link);
+	<span class="enscript-keyword">else</span>
+		SLIST_INSERT_HEAD(parent, oidp, oid_link);
+
+	<span class="enscript-comment">/* Release the write lock */</span>
+	lck_rw_unlock_exclusive(sysctl_geometry_lock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sysctl_unregister_oid</span>(<span class="enscript-type">struct</span> sysctl_oid *oidp)
+{
+	<span class="enscript-type">struct</span> sysctl_oid *removed_oidp = NULL;	<span class="enscript-comment">/* OID removed from tree */</span>
+	<span class="enscript-type">struct</span> sysctl_oid *old_oidp = NULL;	<span class="enscript-comment">/* OID compatibility copy */</span>
+
+	<span class="enscript-comment">/* Get the write lock to modify the geometry */</span>
+	lck_rw_lock_exclusive(sysctl_geometry_lock);
+
+	<span class="enscript-keyword">if</span> (!(oidp-&gt;oid_kind &amp; CTLFLAG_OID2)) {
+		<span class="enscript-comment">/*
+		 * We're using a copy so we can get the new fields in an
+		 * old structure, so we have to iterate to compare the
+		 * partial structure; when we find a match, we remove it
+		 * normally and free the memory.
+		 */</span>
+		SLIST_FOREACH(old_oidp, oidp-&gt;oid_parent, oid_link) {
+			<span class="enscript-keyword">if</span> (!memcmp(&amp;oidp-&gt;oid_number, &amp;old_oidp-&gt;oid_number, (offsetof(<span class="enscript-type">struct</span> sysctl_oid, oid_descr)-offsetof(<span class="enscript-type">struct</span> sysctl_oid, oid_number)))) {
+                <span class="enscript-keyword">break</span>;
+            }
+		}
+		<span class="enscript-keyword">if</span> (old_oidp != NULL) {
+			SLIST_REMOVE(old_oidp-&gt;oid_parent, old_oidp, sysctl_oid, oid_link);
+			removed_oidp = old_oidp;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* It's a later version; handle the versions we know about */</span>
+		<span class="enscript-keyword">switch</span> (oidp-&gt;oid_version) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SYSCTL_OID_VERSION</span>:
+			<span class="enscript-comment">/* We can just remove the OID directly... */</span>
+			SLIST_REMOVE(oidp-&gt;oid_parent, oidp, sysctl_oid, oid_link);
+			removed_oidp = oidp;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			 <span class="enscript-comment">/* XXX: Can't happen; probably tree coruption.*/</span>
+			<span class="enscript-keyword">break</span>;			<span class="enscript-comment">/* rejects unknown version */</span>
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * We've removed it from the list at this point, but we don't want
+	 * to return to the caller until all handler references have drained
+	 * out.  Doing things in this order prevent other people coming in
+	 * and starting new operations against the OID node we want removed.
+	 *
+	 * Note:	oidp could be NULL if it wasn't found.
+	 */</span>
+	<span class="enscript-keyword">while</span>(removed_oidp &amp;&amp; removed_oidp-&gt;oid_refcnt) {
+		lck_rw_sleep(sysctl_geometry_lock, LCK_SLEEP_EXCLUSIVE, &amp;removed_oidp-&gt;oid_refcnt, THREAD_UNINT);
+	}
+
+	<span class="enscript-comment">/* Release the write lock */</span>
+	lck_rw_unlock_exclusive(sysctl_geometry_lock);
+
+	<span class="enscript-comment">/* If it was allocated, free it after dropping the lock */</span>
+	<span class="enscript-keyword">if</span> (old_oidp != NULL) {
+		FREE(old_oidp, M_TEMP);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Bulk-register all the oids in a linker_set.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sysctl_register_set</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *set)
+{
+	<span class="enscript-type">struct</span> sysctl_oid **oidpp, *oidp;
+
+	LINKER_SET_FOREACH(oidpp, <span class="enscript-type">struct</span> sysctl_oid **, set) {
+		oidp = *oidpp;
+		<span class="enscript-keyword">if</span> (!(oidp-&gt;oid_kind &amp; CTLFLAG_NOAUTO)) {
+		    sysctl_register_oid(oidp);
+		}
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sysctl_unregister_set</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *set)
+{
+	<span class="enscript-type">struct</span> sysctl_oid **oidpp, *oidp;
+
+	LINKER_SET_FOREACH(oidpp, <span class="enscript-type">struct</span> sysctl_oid **, set) {
+		oidp = *oidpp;
+		<span class="enscript-keyword">if</span> (!(oidp-&gt;oid_kind &amp; CTLFLAG_NOAUTO)) {
+		    sysctl_unregister_oid(oidp);
+		}
+	}
+}
+
+
+<span class="enscript-comment">/*
+ * Register the kernel's oids on startup.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sysctl_register_all</span>()
+{
+	sysctl_register_set(<span class="enscript-string">&quot;__sysctl_set&quot;</span>);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sysctl_register_fixed</span>(<span class="enscript-type">void</span>)
+{
+	sysctl_register_all();
+}
+
+<span class="enscript-comment">/*
+ * New handler interface
+ *   If the sysctl caller (user mode or kernel mode) is interested in the
+ *   value (req-&gt;oldptr != NULL), we copy the data (bigValue etc.) out,
+ *   if the caller wants to set the value (req-&gt;newptr), we copy
+ *   the data in (*pValue etc.).
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_io_number</span>(<span class="enscript-type">struct</span> sysctl_req *req, <span class="enscript-type">long</span> <span class="enscript-type">long</span> bigValue, size_t valueSize, <span class="enscript-type">void</span> *pValue, <span class="enscript-type">int</span> *changed) {
+	<span class="enscript-type">int</span>		smallValue;
+	<span class="enscript-type">int</span>		error;
+
+	<span class="enscript-keyword">if</span> (changed) *changed = 0;
+
+	<span class="enscript-comment">/*
+	 * Handle the various combinations of caller buffer size and
+	 * data value size.  We are generous in the case where the
+	 * caller has specified a 32-bit buffer but the value is 64-bit
+	 * sized.
+	 */</span>
+
+	<span class="enscript-comment">/* 32 bit value expected or 32 bit buffer offered */</span>
+	<span class="enscript-keyword">if</span> (((valueSize == <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)) ||
+	    ((req-&gt;oldlen == <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)) &amp;&amp; (valueSize == <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span> <span class="enscript-type">long</span>))))
+			&amp;&amp; (req-&gt;oldptr)) {
+		smallValue = (<span class="enscript-type">int</span>)bigValue;
+		<span class="enscript-keyword">if</span> ((<span class="enscript-type">long</span> <span class="enscript-type">long</span>)smallValue != bigValue)
+			<span class="enscript-keyword">return</span>(ERANGE);
+		error = SYSCTL_OUT(req, &amp;smallValue, <span class="enscript-keyword">sizeof</span>(smallValue));
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* any other case is either size-equal or a bug */</span>
+		error = SYSCTL_OUT(req, &amp;bigValue, valueSize);
+	}
+	<span class="enscript-comment">/* error or nothing to set */</span>
+	<span class="enscript-keyword">if</span> (error || !req-&gt;newptr)
+		<span class="enscript-keyword">return</span>(error);
+
+	<span class="enscript-comment">/* set request for constant */</span>
+	<span class="enscript-keyword">if</span> (pValue == NULL)
+		<span class="enscript-keyword">return</span>(EPERM);
+
+	<span class="enscript-comment">/* set request needs to convert? */</span>
+	<span class="enscript-keyword">if</span> ((req-&gt;newlen == <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)) &amp;&amp; (valueSize == <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span> <span class="enscript-type">long</span>))) {
+		<span class="enscript-comment">/* new value is 32 bits, upconvert to 64 bits */</span>
+		error = SYSCTL_IN(req, &amp;smallValue, <span class="enscript-keyword">sizeof</span>(smallValue));
+		<span class="enscript-keyword">if</span> (!error)
+			*(<span class="enscript-type">long</span> <span class="enscript-type">long</span> *)pValue = (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)smallValue;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((req-&gt;newlen == <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span> <span class="enscript-type">long</span>)) &amp;&amp; (valueSize == <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>))) {
+		<span class="enscript-comment">/* new value is 64 bits, downconvert to 32 bits and range check */</span>
+		error = SYSCTL_IN(req, &amp;bigValue, <span class="enscript-keyword">sizeof</span>(bigValue));
+		<span class="enscript-keyword">if</span> (!error) {
+			smallValue = (<span class="enscript-type">int</span>)bigValue;
+			<span class="enscript-keyword">if</span> ((<span class="enscript-type">long</span> <span class="enscript-type">long</span>)smallValue != bigValue)
+				<span class="enscript-keyword">return</span>(ERANGE);
+			*(<span class="enscript-type">int</span> *)pValue = smallValue;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* sizes match, just copy in */</span>
+		error = SYSCTL_IN(req, pValue, valueSize);
+	}
+	<span class="enscript-keyword">if</span> (!error &amp;&amp; changed)
+		*changed = 1;
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_io_string</span>(<span class="enscript-type">struct</span> sysctl_req *req, <span class="enscript-type">char</span> *pValue, size_t valueSize, <span class="enscript-type">int</span> trunc, <span class="enscript-type">int</span> *changed)
+{
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (changed) *changed = 0;
+
+	<span class="enscript-keyword">if</span> (trunc &amp;&amp; req-&gt;oldptr &amp;&amp; req-&gt;oldlen &amp;&amp; (req-&gt;oldlen&lt;strlen(pValue) + 1)) {
+		<span class="enscript-comment">/* If trunc != 0, if you give it a too small (but larger than
+		 * 0 bytes) buffer, instead of returning ENOMEM, it truncates the
+		 * returned string to the buffer size.  This preserves the semantics
+		 * of some library routines implemented via sysctl, which truncate
+		 * their returned data, rather than simply returning an error. The
+		 * returned string is always NUL terminated. */</span>
+		error = SYSCTL_OUT(req, pValue, req-&gt;oldlen-1);
+		<span class="enscript-keyword">if</span> (!error) {
+			<span class="enscript-type">char</span> c = 0;
+			error = SYSCTL_OUT(req, &amp;c, 1);
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* Copy string out */</span>
+		error = SYSCTL_OUT(req, pValue, strlen(pValue) + 1);
+	}
+
+	<span class="enscript-comment">/* error or no new value */</span>
+	<span class="enscript-keyword">if</span> (error || !req-&gt;newptr)
+		<span class="enscript-keyword">return</span>(error);
+
+	<span class="enscript-comment">/* attempt to set read-only value */</span>
+	<span class="enscript-keyword">if</span> (valueSize == 0)
+		<span class="enscript-keyword">return</span>(EPERM);
+
+	<span class="enscript-comment">/* make sure there's room for the new string */</span>
+	<span class="enscript-keyword">if</span> (req-&gt;newlen &gt;= valueSize)
+		<span class="enscript-keyword">return</span>(EINVAL);
+
+	<span class="enscript-comment">/* copy the string in and force NUL termination */</span>
+	error = SYSCTL_IN(req, pValue, req-&gt;newlen);
+	pValue[req-&gt;newlen] = <span class="enscript-string">'\0'</span>;
+
+	<span class="enscript-keyword">if</span> (!error &amp;&amp; changed)
+		*changed = 1;
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_io_opaque</span>(<span class="enscript-type">struct</span> sysctl_req *req,<span class="enscript-type">void</span> *pValue, size_t valueSize, <span class="enscript-type">int</span> *changed)
+{
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (changed) *changed = 0;
+
+	<span class="enscript-comment">/* Copy blob out */</span>
+	error = SYSCTL_OUT(req, pValue, valueSize);
+
+	<span class="enscript-comment">/* error or nothing to set */</span>
+	<span class="enscript-keyword">if</span> (error || !req-&gt;newptr)
+		<span class="enscript-keyword">return</span>(error);
+
+	error = SYSCTL_IN(req, pValue, valueSize);
+
+	<span class="enscript-keyword">if</span> (!error &amp;&amp; changed)
+		*changed = 1;
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-comment">/*
+ * &quot;Staff-functions&quot;
+ *
+ * These functions implement a presently undocumented interface 
+ * used by the sysctl program to walk the tree, and get the type
+ * so it can print the value.
+ * This interface is under work and consideration, and should probably
+ * be killed with a big axe by the first person who can find the time.
+ * (be aware though, that the proper interface isn't as obvious as it
+ * may seem, there are various conflicting requirements.
+ *
+ * {0,0}	printf the entire MIB-tree.
+ * {0,1,...}	return the name of the &quot;...&quot; OID.
+ * {0,2,...}	return the next OID.
+ * {0,3}	return the OID of the name in &quot;new&quot;
+ * {0,4,...}	return the kind &amp; format info for the &quot;...&quot; OID.
+ */</span>
+
+<span class="enscript-comment">/*
+ * sysctl_sysctl_debug_dump_node
+ *
+ * Description:	Dump debug information for a given sysctl_oid_list at the
+ *		given oid depth out to the kernel log, via printf
+ *
+ * Parameters:	l				sysctl_oid_list pointer
+ *		i				current node depth
+ *
+ * Returns:	(void)
+ *
+ * Implicit:	kernel log, modified
+ *
+ * Locks:	Assumes sysctl_geometry_lock is held prior to calling
+ *
+ * Notes:	This function may call itself recursively to resolve Node
+ *		values, which potentially have an inferioer sysctl_oid_list
+ *
+ *		This function is only callable indirectly via the function
+ *		sysctl_sysctl_debug()
+ *
+ * Bugs:	The node depth indentation does not work; this may be an
+ *		artifact of leading space removal by the log daemon itself
+ *		or some intermediate routine.
+ */</span>
+STATIC <span class="enscript-type">void</span>
+<span class="enscript-function-name">sysctl_sysctl_debug_dump_node</span>(<span class="enscript-type">struct</span> sysctl_oid_list *l, <span class="enscript-type">int</span> i)
+{
+	<span class="enscript-type">int</span> k;
+	<span class="enscript-type">struct</span> sysctl_oid *oidp;
+
+	SLIST_FOREACH(oidp, l, oid_link) {
+
+		<span class="enscript-keyword">for</span> (k=0; k&lt;i; k++)
+			printf(<span class="enscript-string">&quot; &quot;</span>);
+
+		printf(<span class="enscript-string">&quot;%d %s &quot;</span>, oidp-&gt;oid_number, oidp-&gt;oid_name);
+
+		printf(<span class="enscript-string">&quot;%c%c%c&quot;</span>,
+			oidp-&gt;oid_kind &amp; CTLFLAG_LOCKED ? <span class="enscript-string">'L'</span>:<span class="enscript-string">' '</span>,
+			oidp-&gt;oid_kind &amp; CTLFLAG_RD ? <span class="enscript-string">'R'</span>:<span class="enscript-string">' '</span>,
+			oidp-&gt;oid_kind &amp; CTLFLAG_WR ? <span class="enscript-string">'W'</span>:<span class="enscript-string">' '</span>);
+
+		<span class="enscript-keyword">if</span> (oidp-&gt;oid_handler)
+			printf(<span class="enscript-string">&quot; *Handler&quot;</span>);
+
+		<span class="enscript-keyword">switch</span> (oidp-&gt;oid_kind &amp; CTLTYPE) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CTLTYPE_NODE</span>:
+				printf(<span class="enscript-string">&quot; Node\n&quot;</span>);
+				<span class="enscript-keyword">if</span> (!oidp-&gt;oid_handler) {
+					sysctl_sysctl_debug_dump_node(
+						oidp-&gt;oid_arg1, i+2);
+				}
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CTLTYPE_INT</span>:    printf(<span class="enscript-string">&quot; Int\n&quot;</span>); <span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CTLTYPE_STRING</span>: printf(<span class="enscript-string">&quot; String\n&quot;</span>); <span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CTLTYPE_QUAD</span>:   printf(<span class="enscript-string">&quot; Quad\n&quot;</span>); <span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CTLTYPE_OPAQUE</span>: printf(<span class="enscript-string">&quot; Opaque/struct\n&quot;</span>); <span class="enscript-keyword">break</span>;
+			<span class="enscript-reference">default</span>:	     printf(<span class="enscript-string">&quot;\n&quot;</span>);
+		}
+
+	}
+}
+
+<span class="enscript-comment">/*
+ * sysctl_sysctl_debug
+ *
+ * Description:	This function implements the &quot;sysctl.debug&quot; portion of the
+ *		OID space for sysctl.
+ *
+ * OID:		0, 0
+ *
+ * Parameters:	__unused
+ *
+ * Returns:	ENOENT
+ *
+ * Implicit:	kernel log, modified
+ *
+ * Locks:	Acquires and then releases a read lock on the
+ *		sysctl_geometry_lock
+ */</span>
+STATIC <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_sysctl_debug</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, __unused <span class="enscript-type">void</span> *arg1,
+	__unused <span class="enscript-type">int</span> arg2, __unused <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	lck_rw_lock_shared(sysctl_geometry_lock);
+	sysctl_sysctl_debug_dump_node(&amp;sysctl__children, 0);
+	lck_rw_done(sysctl_geometry_lock);
+	<span class="enscript-keyword">return</span> ENOENT;
+}
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_sysctl, 0, debug, CTLTYPE_STRING|CTLFLAG_RD | CTLFLAG_LOCKED,
+	0, 0, sysctl_sysctl_debug, <span class="enscript-string">&quot;-&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-comment">/*
+ * sysctl_sysctl_name
+ *
+ * Description:	Convert an OID into a string name; this is used by the user
+ *		space sysctl() command line utility; this is done in a purely
+ *		advisory capacity (e.g. to provide node names for &quot;sysctl -A&quot;
+ *		output).
+ *
+ * OID:		0, 1
+ *
+ * Parameters:	oidp				__unused
+ *		arg1				A pointer to the OID name list
+ *						integer array, beginning at
+ *						adjusted option base 2
+ *		arg2				The number of elements which
+ *						remain in the name array
+ *
+ * Returns:	0				Success
+ *	SYSCTL_OUT:EPERM			Permission denied
+ *	SYSCTL_OUT:EFAULT			Bad user supplied buffer
+ *	SYSCTL_OUT:???				Return value from user function
+ *						for SYSCTL_PROC leaf node
+ *
+ * Implict:	Contents of user request buffer, modified
+ *
+ * Locks:	Acquires and then releases a read lock on the
+ *		sysctl_geometry_lock
+ *
+ * Notes:	SPI (System Programming Interface); this is subject to change
+ *		and may not be relied upon by third party applications; use
+ *		a subprocess to communicate with the &quot;sysctl&quot; command line
+ *		command instead, if you believe you need this functionality.
+ *		Preferrably, use sysctlbyname() instead.
+ *
+ *		Setting of the NULL termination of the output string is
+ *		delayed until after the geometry lock is dropped.  If there
+ *		are no Entries remaining in the OID name list when this
+ *		function is called, it will still write out the termination
+ *		byte.
+ *
+ *		This function differs from other sysctl functions in that
+ *		it can not take an output buffer length of 0 to determine the
+ *		space which will be required.  It is suggested that the buffer
+ *		length be PATH_MAX, and that authors of new sysctl's refrain
+ *		from exceeding this string length.
+ */</span>
+STATIC <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_sysctl_name</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1, <span class="enscript-type">int</span> arg2,
+        <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-type">int</span> *name = (<span class="enscript-type">int</span> *) arg1;
+	u_int namelen = arg2;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> sysctl_oid *oid;
+	<span class="enscript-type">struct</span> sysctl_oid_list *lsp = &amp;sysctl__children, *lsp2;
+	<span class="enscript-type">char</span> tempbuf[10];
+
+	lck_rw_lock_shared(sysctl_geometry_lock);
+	<span class="enscript-keyword">while</span> (namelen) {
+		<span class="enscript-keyword">if</span> (!lsp) {
+			snprintf(tempbuf,<span class="enscript-keyword">sizeof</span>(tempbuf),<span class="enscript-string">&quot;%d&quot;</span>,*name);
+			<span class="enscript-keyword">if</span> (req-&gt;oldidx)
+				error = SYSCTL_OUT(req, <span class="enscript-string">&quot;.&quot;</span>, 1);
+			<span class="enscript-keyword">if</span> (!error)
+				error = SYSCTL_OUT(req, tempbuf, strlen(tempbuf));
+			<span class="enscript-keyword">if</span> (error) {
+				lck_rw_done(sysctl_geometry_lock);
+				<span class="enscript-keyword">return</span> (error);
+			}
+			namelen--;
+			name++;
+			<span class="enscript-keyword">continue</span>;
+		}
+		lsp2 = 0;
+		SLIST_FOREACH(oid, lsp, oid_link) {
+			<span class="enscript-keyword">if</span> (oid-&gt;oid_number != *name)
+				<span class="enscript-keyword">continue</span>;
+
+			<span class="enscript-keyword">if</span> (req-&gt;oldidx)
+				error = SYSCTL_OUT(req, <span class="enscript-string">&quot;.&quot;</span>, 1);
+			<span class="enscript-keyword">if</span> (!error)
+				error = SYSCTL_OUT(req, oid-&gt;oid_name,
+					strlen(oid-&gt;oid_name));
+			<span class="enscript-keyword">if</span> (error) {
+				lck_rw_done(sysctl_geometry_lock);
+				<span class="enscript-keyword">return</span> (error);
+			}
+
+			namelen--;
+			name++;
+
+			<span class="enscript-keyword">if</span> ((oid-&gt;oid_kind &amp; CTLTYPE) != CTLTYPE_NODE) 
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">if</span> (oid-&gt;oid_handler)
+				<span class="enscript-keyword">break</span>;
+
+			lsp2 = (<span class="enscript-type">struct</span> sysctl_oid_list *)oid-&gt;oid_arg1;
+			<span class="enscript-keyword">break</span>;
+		}
+		lsp = lsp2;
+	}
+	lck_rw_done(sysctl_geometry_lock);
+	<span class="enscript-keyword">return</span> (SYSCTL_OUT(req, <span class="enscript-string">&quot;&quot;</span>, 1));
+}
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_sysctl, 1, name, CTLFLAG_RD | CTLFLAG_LOCKED, sysctl_sysctl_name, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-comment">/*
+ * sysctl_sysctl_next_ls
+ *
+ * Description:	For a given OID name value, return the next consecutive OID
+ *		name value within the geometry tree
+ *
+ * Parameters:	lsp				The OID list to look in
+ *		name				The OID name to start from
+ *		namelen				The length of the OID name
+ *		next				Pointer to new oid storage to
+ *						fill in
+ *		len				Pointer to receive new OID
+ *						length value of storage written
+ *		level				OID tree depth (used to compute
+ *						len value)
+ *		oidpp				Pointer to OID list entry
+ *						pointer; used to walk the list
+ *						forward across recursion
+ *
+ * Returns:	0				Returning a new entry
+ *		1				End of geometry list reached
+ *
+ * Implicit:	*next				Modified to contain the new OID
+ *		*len				Modified to contain new length
+ *
+ * Locks:	Assumes sysctl_geometry_lock is held prior to calling
+ *
+ * Notes:	This function will not return OID values that have special
+ *		handlers, since we can not tell wheter these handlers consume
+ *		elements from the OID space as parameters.  For this reason,
+ *		we STRONGLY discourage these types of handlers
+ */</span>
+STATIC <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_sysctl_next_ls</span> (<span class="enscript-type">struct</span> sysctl_oid_list *lsp, <span class="enscript-type">int</span> *name, u_int namelen, 
+	<span class="enscript-type">int</span> *next, <span class="enscript-type">int</span> *len, <span class="enscript-type">int</span> level, <span class="enscript-type">struct</span> sysctl_oid **oidpp)
+{
+	<span class="enscript-type">struct</span> sysctl_oid *oidp;
+
+	*len = level;
+	SLIST_FOREACH(oidp, lsp, oid_link) {
+		*next = oidp-&gt;oid_number;
+		*oidpp = oidp;
+
+		<span class="enscript-keyword">if</span> (!namelen) {
+			<span class="enscript-keyword">if</span> ((oidp-&gt;oid_kind &amp; CTLTYPE) != CTLTYPE_NODE) 
+				<span class="enscript-keyword">return</span> 0;
+			<span class="enscript-keyword">if</span> (oidp-&gt;oid_handler) 
+				<span class="enscript-comment">/* We really should call the handler here...*/</span>
+				<span class="enscript-keyword">return</span> 0;
+			lsp = (<span class="enscript-type">struct</span> sysctl_oid_list *)oidp-&gt;oid_arg1;
+
+			<span class="enscript-keyword">if</span> (!SLIST_FIRST(lsp))
+				<span class="enscript-comment">/* This node had no children - skip it! */</span>
+				<span class="enscript-keyword">continue</span>;
+
+			<span class="enscript-keyword">if</span> (!sysctl_sysctl_next_ls (lsp, 0, 0, next+1, 
+				len, level+1, oidpp))
+				<span class="enscript-keyword">return</span> 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">next</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (oidp-&gt;oid_number &lt; *name)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (oidp-&gt;oid_number &gt; *name) {
+			<span class="enscript-keyword">if</span> ((oidp-&gt;oid_kind &amp; CTLTYPE) != CTLTYPE_NODE)
+				<span class="enscript-keyword">return</span> 0;
+			<span class="enscript-keyword">if</span> (oidp-&gt;oid_handler)
+				<span class="enscript-keyword">return</span> 0;
+			lsp = (<span class="enscript-type">struct</span> sysctl_oid_list *)oidp-&gt;oid_arg1;
+			<span class="enscript-keyword">if</span> (!sysctl_sysctl_next_ls (lsp, name+1, namelen-1, 
+				next+1, len, level+1, oidpp))
+				<span class="enscript-keyword">return</span> (0);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">next</span>;
+		}
+		<span class="enscript-keyword">if</span> ((oidp-&gt;oid_kind &amp; CTLTYPE) != CTLTYPE_NODE)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (oidp-&gt;oid_handler)
+			<span class="enscript-keyword">continue</span>;
+
+		lsp = (<span class="enscript-type">struct</span> sysctl_oid_list *)oidp-&gt;oid_arg1;
+		<span class="enscript-keyword">if</span> (!sysctl_sysctl_next_ls (lsp, name+1, namelen-1, next+1, 
+			len, level+1, oidpp))
+			<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-reference">next</span>:
+		namelen = 1;
+		*len = level;
+	}
+	<span class="enscript-keyword">return</span> 1;
+}
+
+<span class="enscript-comment">/*
+ * sysctl_sysctl_next
+ *
+ * Description:	This is an iterator function designed to iterate the oid tree
+ *		and provide a list of OIDs for use by the user space &quot;sysctl&quot;
+ *		command line tool
+ *
+ * OID:		0, 2
+ *
+ * Parameters:	oidp				__unused
+ *		arg1				Pointer to start OID name
+ *		arg2				Start OID name length
+ *		req				Pointer to user request buffer
+ *
+ * Returns:	0				Success
+ *		ENOENT				Reached end of OID space
+ *	SYSCTL_OUT:EPERM			Permission denied
+ *	SYSCTL_OUT:EFAULT			Bad user supplied buffer
+ *	SYSCTL_OUT:???				Return value from user function
+ *						for SYSCTL_PROC leaf node
+ *
+ * Implict:	Contents of user request buffer, modified
+ *
+ * Locks:	Acquires and then releases a read lock on the
+ *		sysctl_geometry_lock
+ *
+ * Notes:	SPI (System Programming Interface); this is subject to change
+ *		and may not be relied upon by third party applications; use
+ *		a subprocess to communicate with the &quot;sysctl&quot; command line
+ *		command instead, if you believe you need this functionality.
+ *		Preferrably, use sysctlbyname() instead.
+ *
+ *		This function differs from other sysctl functions in that
+ *		it can not take an output buffer length of 0 to determine the
+ *		space which will be required.  It is suggested that the buffer
+ *		length be PATH_MAX, and that authors of new sysctl's refrain
+ *		from exceeding this string length.
+ */</span>
+STATIC <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_sysctl_next</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1, <span class="enscript-type">int</span> arg2,
+        <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-type">int</span> *name = (<span class="enscript-type">int</span> *) arg1;
+	u_int namelen = arg2;
+	<span class="enscript-type">int</span> i, j, error;
+	<span class="enscript-type">struct</span> sysctl_oid *oid;
+	<span class="enscript-type">struct</span> sysctl_oid_list *lsp = &amp;sysctl__children;
+	<span class="enscript-type">int</span> newoid[CTL_MAXNAME];
+
+	lck_rw_lock_shared(sysctl_geometry_lock);
+	i = sysctl_sysctl_next_ls (lsp, name, namelen, newoid, &amp;j, 1, &amp;oid);
+	lck_rw_done(sysctl_geometry_lock);
+	<span class="enscript-keyword">if</span> (i)
+		<span class="enscript-keyword">return</span> ENOENT;
+	error = SYSCTL_OUT(req, newoid, j * <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>));
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_sysctl, 2, next, CTLFLAG_RD | CTLFLAG_LOCKED, sysctl_sysctl_next, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-comment">/*
+ * name2oid
+ *
+ * Description:	Support function for use by sysctl_sysctl_name2oid(); looks
+ *		up an OID name given a string name.
+ *
+ * Parameters:	name				NULL terminated string name
+ *		oid				Pointer to receive OID name
+ *		len				Pointer to receive OID length
+ *						pointer value (see &quot;Notes&quot;)
+ *
+ * Returns:	0				Success
+ *		ENOENT				Entry not found
+ *
+ * Implicit:	*oid				Modified to contain OID value
+ *		*len				Modified to contain OID length
+ *
+ * Locks:	Assumes sysctl_geometry_lock is held prior to calling
+ */</span>
+STATIC <span class="enscript-type">int</span>
+<span class="enscript-function-name">name2oid</span> (<span class="enscript-type">char</span> *name, <span class="enscript-type">int</span> *oid, u_int *len)
+{
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">struct</span> sysctl_oid *oidp;
+	<span class="enscript-type">struct</span> sysctl_oid_list *lsp = &amp;sysctl__children;
+	<span class="enscript-type">char</span> *p;
+
+	<span class="enscript-keyword">if</span> (!*name)
+		<span class="enscript-keyword">return</span> ENOENT;
+
+	p = name + strlen(name) - 1 ;
+	<span class="enscript-keyword">if</span> (*p == <span class="enscript-string">'.'</span>)
+		*p = <span class="enscript-string">'\0'</span>;
+
+	*len = 0;
+
+	<span class="enscript-keyword">for</span> (p = name; *p &amp;&amp; *p != <span class="enscript-string">'.'</span>; p++) 
+		;
+	i = *p;
+	<span class="enscript-keyword">if</span> (i == <span class="enscript-string">'.'</span>)
+		*p = <span class="enscript-string">'\0'</span>;
+
+	oidp = SLIST_FIRST(lsp);
+
+	<span class="enscript-keyword">while</span> (oidp &amp;&amp; *len &lt; CTL_MAXNAME) {
+		<span class="enscript-keyword">if</span> (strcmp(name, oidp-&gt;oid_name)) {
+			oidp = SLIST_NEXT(oidp, oid_link);
+			<span class="enscript-keyword">continue</span>;
+		}
+		*oid++ = oidp-&gt;oid_number;
+		(*len)++;
+
+		<span class="enscript-keyword">if</span> (!i) {
+			<span class="enscript-keyword">return</span> (0);
+		}
+
+		<span class="enscript-keyword">if</span> ((oidp-&gt;oid_kind &amp; CTLTYPE) != CTLTYPE_NODE)
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">if</span> (oidp-&gt;oid_handler)
+			<span class="enscript-keyword">break</span>;
+
+		lsp = (<span class="enscript-type">struct</span> sysctl_oid_list *)oidp-&gt;oid_arg1;
+		oidp = SLIST_FIRST(lsp);
+		*p = i; <span class="enscript-comment">/* restore */</span>
+		name = p+1;
+		<span class="enscript-keyword">for</span> (p = name; *p &amp;&amp; *p != <span class="enscript-string">'.'</span>; p++) 
+				;
+		i = *p;
+		<span class="enscript-keyword">if</span> (i == <span class="enscript-string">'.'</span>)
+			*p = <span class="enscript-string">'\0'</span>;
+	}
+	<span class="enscript-keyword">return</span> ENOENT;
+}
+
+<span class="enscript-comment">/*
+ * sysctl_sysctl_name2oid
+ *
+ * Description:	Translate a string name to an OID name value; this is used by
+ *		the sysctlbyname() function as well as by the &quot;sysctl&quot; command
+ *		line command.
+ *
+ * OID:		0, 3
+ *
+ * Parameters:	oidp				__unused
+ *		arg1				__unused
+ *		arg2				__unused
+ *		req				Request structure
+ *
+ * Returns:	ENOENT				Input length too short
+ *		ENAMETOOLONG			Input length too long
+ *		ENOMEM				Could not allocate work area
+ *	SYSCTL_IN/OUT:EPERM			Permission denied
+ *	SYSCTL_IN/OUT:EFAULT			Bad user supplied buffer
+ *	SYSCTL_IN/OUT:???			Return value from user function
+ *	name2oid:ENOENT				Not found
+ *
+ * Implicit:	*req				Contents of request, modified
+ *
+ * Locks:	Acquires and then releases a read lock on the
+ *		sysctl_geometry_lock
+ *
+ * Notes:	SPI (System Programming Interface); this is subject to change
+ *		and may not be relied upon by third party applications; use
+ *		a subprocess to communicate with the &quot;sysctl&quot; command line
+ *		command instead, if you believe you need this functionality.
+ *		Preferrably, use sysctlbyname() instead.
+ *
+ *		This function differs from other sysctl functions in that
+ *		it can not take an output buffer length of 0 to determine the
+ *		space which will be required.  It is suggested that the buffer
+ *		length be PATH_MAX, and that authors of new sysctl's refrain
+ *		from exceeding this string length.
+ */</span>
+STATIC <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_sysctl_name2oid</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, __unused <span class="enscript-type">void</span> *arg1,
+	__unused <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-type">char</span> *p;
+	<span class="enscript-type">int</span> error, oid[CTL_MAXNAME];
+	u_int len = 0;		<span class="enscript-comment">/* set by name2oid() */</span>
+
+	<span class="enscript-keyword">if</span> (req-&gt;newlen &lt; 1) 
+		<span class="enscript-keyword">return</span> ENOENT;
+	<span class="enscript-keyword">if</span> (req-&gt;newlen &gt;= MAXPATHLEN)	<span class="enscript-comment">/* XXX arbitrary, undocumented */</span>
+		<span class="enscript-keyword">return</span> (ENAMETOOLONG);
+
+	MALLOC(p, <span class="enscript-type">char</span> *,req-&gt;newlen+1, M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (!p)
+	    <span class="enscript-keyword">return</span> ENOMEM;
+
+	error = SYSCTL_IN(req, p, req-&gt;newlen);
+	<span class="enscript-keyword">if</span> (error) {
+		FREE(p, M_TEMP);
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	p [req-&gt;newlen] = <span class="enscript-string">'\0'</span>;
+
+	<span class="enscript-comment">/*
+	 * Note:	We acquire and release the geometry lock here to
+	 *		avoid making name2oid needlessly complex.
+	 */</span>
+	lck_rw_lock_shared(sysctl_geometry_lock);
+	error = name2oid(p, oid, &amp;len);
+	lck_rw_done(sysctl_geometry_lock);
+
+	FREE(p, M_TEMP);
+
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+
+	error = SYSCTL_OUT(req, oid, len * <span class="enscript-keyword">sizeof</span> *oid);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_sysctl, 3, name2oid, CTLFLAG_RW|CTLFLAG_ANYBODY|CTLFLAG_KERN | CTLFLAG_LOCKED, 0, 0, 
+	sysctl_sysctl_name2oid, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-comment">/*
+ * sysctl_sysctl_oidfmt
+ *
+ * Description:	For a given OID name, determine the format of the data which
+ *		is associated with it.  This is used by the &quot;sysctl&quot; command
+ *		line command.
+ *
+ * OID:		0, 4
+ *
+ * Parameters:	oidp				__unused
+ *		arg1				The OID name to look up
+ *		arg2				The length of the OID name
+ *		req				Pointer to user request buffer
+ *
+ * Returns:	0				Success
+ *		EISDIR				Malformed request
+ *		ENOENT				No such OID name
+ *	SYSCTL_OUT:EPERM			Permission denied
+ *	SYSCTL_OUT:EFAULT			Bad user supplied buffer
+ *	SYSCTL_OUT:???				Return value from user function
+ *
+ * Implict:	Contents of user request buffer, modified
+ *
+ * Locks:	Acquires and then releases a read lock on the
+ *		sysctl_geometry_lock
+ *
+ * Notes:	SPI (System Programming Interface); this is subject to change
+ *		and may not be relied upon by third party applications; use
+ *		a subprocess to communicate with the &quot;sysctl&quot; command line
+ *		command instead, if you believe you need this functionality.
+ *
+ *		This function differs from other sysctl functions in that
+ *		it can not take an output buffer length of 0 to determine the
+ *		space which will be required.  It is suggested that the buffer
+ *		length be PATH_MAX, and that authors of new sysctl's refrain
+ *		from exceeding this string length.
+ */</span>
+STATIC <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_sysctl_oidfmt</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1, <span class="enscript-type">int</span> arg2,
+        <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-type">int</span> *name = (<span class="enscript-type">int</span> *) arg1;
+	<span class="enscript-type">int</span> error = ENOENT;		<span class="enscript-comment">/* default error: not found */</span>
+	u_int namelen = arg2;
+	u_int indx;
+	<span class="enscript-type">struct</span> sysctl_oid *oid;
+	<span class="enscript-type">struct</span> sysctl_oid_list *lsp = &amp;sysctl__children;
+
+	lck_rw_lock_shared(sysctl_geometry_lock);
+	oid = SLIST_FIRST(lsp);
+
+	indx = 0;
+	<span class="enscript-keyword">while</span> (oid &amp;&amp; indx &lt; CTL_MAXNAME) {
+		<span class="enscript-keyword">if</span> (oid-&gt;oid_number == name[indx]) {
+			indx++;
+			<span class="enscript-keyword">if</span> ((oid-&gt;oid_kind &amp; CTLTYPE) == CTLTYPE_NODE) {
+				<span class="enscript-keyword">if</span> (oid-&gt;oid_handler)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">found</span>;
+				<span class="enscript-keyword">if</span> (indx == namelen)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">found</span>;
+				lsp = (<span class="enscript-type">struct</span> sysctl_oid_list *)oid-&gt;oid_arg1;
+				oid = SLIST_FIRST(lsp);
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> (indx != namelen) {
+					error =  EISDIR;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+				}
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">found</span>;
+			}
+		} <span class="enscript-keyword">else</span> {
+			oid = SLIST_NEXT(oid, oid_link);
+		}
+	}
+	<span class="enscript-comment">/* Not found */</span>
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+<span class="enscript-reference">found</span>:
+	<span class="enscript-keyword">if</span> (!oid-&gt;oid_fmt)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+	error = SYSCTL_OUT(req, 
+		&amp;oid-&gt;oid_kind, <span class="enscript-keyword">sizeof</span>(oid-&gt;oid_kind));
+	<span class="enscript-keyword">if</span> (!error)
+		error = SYSCTL_OUT(req, oid-&gt;oid_fmt, 
+			strlen(oid-&gt;oid_fmt)+1);
+<span class="enscript-reference">err</span>:
+	lck_rw_done(sysctl_geometry_lock);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_sysctl, 4, oidfmt, CTLFLAG_RD | CTLFLAG_LOCKED, sysctl_sysctl_oidfmt, <span class="enscript-string">&quot;&quot;</span>);
+
+
+<span class="enscript-comment">/*
+ * Default &quot;handler&quot; functions.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Handle an int, signed or unsigned.
+ * Two cases:
+ *     a variable:  point arg1 at it.
+ *     a constant:  pass it in arg2.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_handle_int</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1, <span class="enscript-type">int</span> arg2,
+        <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-keyword">return</span> sysctl_io_number(req, arg1? *(<span class="enscript-type">int</span>*)arg1: arg2, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>), arg1, NULL);
+}
+
+<span class="enscript-comment">/*
+ * Handle a long, signed or unsigned.  arg1 points to it.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_handle_long</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1,
+	__unused <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-keyword">if</span> (!arg1)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">return</span> sysctl_io_number(req, *(<span class="enscript-type">long</span>*)arg1, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span>), arg1, NULL);
+}
+
+<span class="enscript-comment">/*
+ * Handle a quad, signed or unsigned.  arg1 points to it.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_handle_quad</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1,
+	__unused <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-keyword">if</span> (!arg1)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">return</span> sysctl_io_number(req, *(<span class="enscript-type">long</span> <span class="enscript-type">long</span>*)arg1, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span> <span class="enscript-type">long</span>), arg1, NULL);
+}
+
+<span class="enscript-comment">/*
+ * Expose an int value as a quad.
+ *
+ * This interface allows us to support interfaces defined
+ * as using quad values while the implementation is still
+ * using ints.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_handle_int2quad</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1,
+	__unused <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">long</span> <span class="enscript-type">long</span> val;
+	<span class="enscript-type">int</span> newval;
+
+	<span class="enscript-keyword">if</span> (!arg1)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	val = (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)*(<span class="enscript-type">int</span> *)arg1;
+	error = SYSCTL_OUT(req, &amp;val, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span> <span class="enscript-type">long</span>));
+
+	<span class="enscript-keyword">if</span> (error || !req-&gt;newptr)
+		<span class="enscript-keyword">return</span> (error);
+
+	error = SYSCTL_IN(req, &amp;val, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span> <span class="enscript-type">long</span>));
+	<span class="enscript-keyword">if</span> (!error) {
+		<span class="enscript-comment">/*
+		 * Value must be representable; check by
+		 * casting and then casting back.
+		 */</span>
+		newval = (<span class="enscript-type">int</span>)val;
+		<span class="enscript-keyword">if</span> ((<span class="enscript-type">long</span> <span class="enscript-type">long</span>)newval != val) {
+			error = ERANGE;
+		} <span class="enscript-keyword">else</span> {
+			*(<span class="enscript-type">int</span> *)arg1 = newval;
+		}
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Handle our generic '\0' terminated 'C' string.
+ * Two cases:
+ * 	a variable string:  point arg1 at it, arg2 is max length.
+ * 	a constant string:  point arg1 at it, arg2 is zero.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_handle_string</span>( __unused <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1, <span class="enscript-type">int</span> arg2,
+        <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-keyword">return</span> sysctl_io_string(req, arg1, arg2, 0, NULL);
+}
+
+<span class="enscript-comment">/*
+ * Handle any kind of opaque data.
+ * arg1 points to it, arg2 is the size.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_handle_opaque</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1, <span class="enscript-type">int</span> arg2,
+        <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-keyword">return</span> sysctl_io_opaque(req, arg1, arg2, NULL);
+}
+
+<span class="enscript-comment">/*
+ * Transfer functions to/from kernel space.
+ */</span>
+STATIC <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_old_kernel</span>(<span class="enscript-type">struct</span> sysctl_req *req, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *p, size_t l)
+{
+	size_t i = 0;
+
+	<span class="enscript-keyword">if</span> (req-&gt;oldptr) {
+		i = l;
+		<span class="enscript-keyword">if</span> (i &gt; req-&gt;oldlen - req-&gt;oldidx)
+			i = req-&gt;oldlen - req-&gt;oldidx;
+		<span class="enscript-keyword">if</span> (i &gt; 0)
+			bcopy((<span class="enscript-type">const</span> <span class="enscript-type">void</span>*)p, CAST_DOWN(<span class="enscript-type">char</span> *, (req-&gt;oldptr + req-&gt;oldidx)), i);
+	}
+	req-&gt;oldidx += l;
+	<span class="enscript-keyword">if</span> (req-&gt;oldptr &amp;&amp; i != l)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+STATIC <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_new_kernel</span>(<span class="enscript-type">struct</span> sysctl_req *req, <span class="enscript-type">void</span> *p, size_t l)
+{
+	<span class="enscript-keyword">if</span> (!req-&gt;newptr)
+		<span class="enscript-keyword">return</span> 0;
+	<span class="enscript-keyword">if</span> (req-&gt;newlen - req-&gt;newidx &lt; l)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	bcopy(CAST_DOWN(<span class="enscript-type">char</span> *, (req-&gt;newptr + req-&gt;newidx)), p, l);
+	req-&gt;newidx += l;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kernel_sysctl</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">int</span> *name, u_int namelen, <span class="enscript-type">void</span> *old, size_t *oldlenp, <span class="enscript-type">void</span> *new, size_t newlen)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> sysctl_req req;
+
+	<span class="enscript-comment">/*
+	 * Construct request.
+	 */</span>
+	bzero(&amp;req, <span class="enscript-keyword">sizeof</span> req);
+	req.p = p;
+	<span class="enscript-keyword">if</span> (oldlenp)
+		req.oldlen = *oldlenp;
+	<span class="enscript-keyword">if</span> (old)
+		req.oldptr = CAST_USER_ADDR_T(old);
+	<span class="enscript-keyword">if</span> (newlen) {
+		req.newlen = newlen;
+		req.newptr = CAST_USER_ADDR_T(new);
+	}
+	req.oldfunc = sysctl_old_kernel;
+	req.newfunc = sysctl_new_kernel;
+	req.lock = 1;
+
+	<span class="enscript-comment">/* make the request */</span>
+	error = sysctl_root(TRUE, FALSE, NULL, 0, name, namelen, &amp;req);
+
+	<span class="enscript-keyword">if</span> (error &amp;&amp; error != ENOMEM)
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-keyword">if</span> (oldlenp)
+		*oldlenp = req.oldidx;
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Transfer function to/from user space.
+ */</span>
+STATIC <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_old_user</span>(<span class="enscript-type">struct</span> sysctl_req *req, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *p, size_t l)
+{
+	<span class="enscript-type">int</span> error = 0;
+	size_t i = 0;
+
+	<span class="enscript-keyword">if</span> (req-&gt;oldptr) {
+                <span class="enscript-keyword">if</span> (req-&gt;oldlen - req-&gt;oldidx &lt; l)
+                    <span class="enscript-keyword">return</span> (ENOMEM);
+		i = l;
+		<span class="enscript-keyword">if</span> (i &gt; req-&gt;oldlen - req-&gt;oldidx)
+			i = req-&gt;oldlen - req-&gt;oldidx;
+		<span class="enscript-keyword">if</span> (i &gt; 0)
+			error = copyout((<span class="enscript-type">const</span> <span class="enscript-type">void</span>*)p, (req-&gt;oldptr + req-&gt;oldidx), i);
+	}
+	req-&gt;oldidx += l;
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+	<span class="enscript-keyword">if</span> (req-&gt;oldptr &amp;&amp; i &lt; l)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+STATIC <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_new_user</span>(<span class="enscript-type">struct</span> sysctl_req *req, <span class="enscript-type">void</span> *p, size_t l)
+{
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (!req-&gt;newptr)
+		<span class="enscript-keyword">return</span> 0;
+	<span class="enscript-keyword">if</span> (req-&gt;newlen - req-&gt;newidx &lt; l)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	error = copyin((req-&gt;newptr + req-&gt;newidx), p, l);
+	req-&gt;newidx += l;
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Traverse our tree, and find the right node, execute whatever it points
+ * at, and return the resulting error code.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_root</span>(boolean_t from_kernel, boolean_t string_is_canonical, <span class="enscript-type">char</span> *namestring, size_t namestringlen, <span class="enscript-type">int</span> *name, u_int namelen, <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	u_int indx;
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">struct</span> sysctl_oid *oid;
+	<span class="enscript-type">struct</span> sysctl_oid_list *lsp = &amp;sysctl__children;
+	<span class="enscript-type">int</span> error;
+	boolean_t unlocked_node_found = FALSE;
+	boolean_t namestring_started = FALSE;
+
+	<span class="enscript-comment">/* Get the read lock on the geometry */</span>
+	lck_rw_lock_shared(sysctl_geometry_lock);
+
+	<span class="enscript-keyword">if</span> (string_is_canonical) {
+		<span class="enscript-comment">/* namestring is actually canonical, name/namelen needs to be populated */</span>
+		error = name2oid(namestring, name, &amp;namelen);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+		}
+	}
+	
+	oid = SLIST_FIRST(lsp);
+
+	indx = 0;
+	<span class="enscript-keyword">while</span> (oid &amp;&amp; indx &lt; CTL_MAXNAME) {
+		<span class="enscript-keyword">if</span> (oid-&gt;oid_number == name[indx]) {
+			
+			<span class="enscript-keyword">if</span> (!from_kernel &amp;&amp; !string_is_canonical) {
+				<span class="enscript-keyword">if</span> (namestring_started) {
+					<span class="enscript-keyword">if</span> (strlcat(namestring, <span class="enscript-string">&quot;.&quot;</span>, namestringlen) &gt;= namestringlen) {
+						error = ENAMETOOLONG;
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+					}
+				}
+
+				<span class="enscript-keyword">if</span> (strlcat(namestring, oid-&gt;oid_name, namestringlen) &gt;= namestringlen) {
+					error = ENAMETOOLONG;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+				}
+				namestring_started = TRUE;
+			}
+			
+			indx++;
+			<span class="enscript-keyword">if</span> (!(oid-&gt;oid_kind &amp; CTLFLAG_LOCKED))
+			{
+				unlocked_node_found = TRUE;
+			}
+			<span class="enscript-keyword">if</span> (oid-&gt;oid_kind &amp; CTLFLAG_NOLOCK)
+				req-&gt;lock = 0;
+			<span class="enscript-comment">/*
+			 * For SYSCTL_PROC() functions which are for sysctl's
+			 * which have parameters at the end of their OID
+			 * space, you need to OR CTLTYPE_NODE into their
+			 * access value.
+			 *
+			 * NOTE: For binary backward compatibility ONLY! Do
+			 * NOT add new sysctl's that do this!  Existing
+			 * sysctl's which do this will eventually have
+			 * compatibility code in user space, and this method
+			 * will become unsupported.
+			 */</span>
+			<span class="enscript-keyword">if</span> ((oid-&gt;oid_kind &amp; CTLTYPE) == CTLTYPE_NODE) {
+				<span class="enscript-keyword">if</span> (oid-&gt;oid_handler)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">found</span>;
+				<span class="enscript-keyword">if</span> (indx == namelen)
+				{
+					error = ENOENT;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+				}
+
+				lsp = (<span class="enscript-type">struct</span> sysctl_oid_list *)oid-&gt;oid_arg1;
+				oid = SLIST_FIRST(lsp);
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> (indx != namelen)
+				{
+					error = EISDIR;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+				}
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">found</span>;
+			}
+		} <span class="enscript-keyword">else</span> {
+			oid = SLIST_NEXT(oid, oid_link);
+		}
+	}
+	error = ENOENT;
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+<span class="enscript-reference">found</span>:
+	
+	<span class="enscript-comment">/*
+	 * indx is the index of the first remaining OID name,
+	 * for sysctls that take them as arguments
+	 */</span>
+	<span class="enscript-keyword">if</span> (!from_kernel &amp;&amp; !string_is_canonical &amp;&amp; (indx &lt; namelen)) {
+		<span class="enscript-type">char</span> tempbuf[10];
+		u_int indx2;
+		
+		<span class="enscript-keyword">for</span> (indx2 = indx; indx2 &lt; namelen; indx2++) {
+			snprintf(tempbuf, <span class="enscript-keyword">sizeof</span>(tempbuf), <span class="enscript-string">&quot;%d&quot;</span>,name[indx2]);
+			
+			<span class="enscript-keyword">if</span> (namestring_started) {
+				<span class="enscript-keyword">if</span> (strlcat(namestring, <span class="enscript-string">&quot;.&quot;</span>, namestringlen) &gt;= namestringlen) {
+					error = ENAMETOOLONG;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+				}
+			}
+			
+			<span class="enscript-keyword">if</span> (strlcat(namestring, tempbuf, namestringlen) &gt;= namestringlen) {
+				error = ENAMETOOLONG;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+			}
+			namestring_started = TRUE;
+		}
+	}
+	
+	<span class="enscript-comment">/* If writing isn't allowed */</span>
+	<span class="enscript-keyword">if</span> (req-&gt;newptr &amp;&amp; (!(oid-&gt;oid_kind &amp; CTLFLAG_WR) ||
+			    ((oid-&gt;oid_kind &amp; CTLFLAG_SECURE) &amp;&amp; securelevel &gt; 0))) {
+		error = (EPERM);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * If we're inside the kernel, the OID must be marked as kernel-valid.
+	 */</span>
+	<span class="enscript-keyword">if</span> (from_kernel &amp;&amp; !(oid-&gt;oid_kind &amp; CTLFLAG_KERN))
+	{
+		error = (EPERM);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * This is where legacy enforcement of permissions occurs.  If the
+	 * flag does not say CTLFLAG_ANYBODY, then we prohibit anyone but
+	 * root from writing new values down.  If local enforcement happens
+	 * at the leaf node, then it needs to be set as CTLFLAG_ANYBODY.  In
+	 * addition, if the leaf node is set this way, then in order to do
+	 * specific enforcement, it has to be of type SYSCTL_PROC.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!(oid-&gt;oid_kind &amp; CTLFLAG_ANYBODY) &amp;&amp;
+	    req-&gt;newptr &amp;&amp; req-&gt;p &amp;&amp;
+	    (error = proc_suser(req-&gt;p)))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+	<span class="enscript-keyword">if</span> (!oid-&gt;oid_handler) {
+	    error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Reference the OID and drop the geometry lock; this prevents the
+	 * OID from being deleted out from under the handler call, but does
+	 * not prevent other calls into handlers or calls to manage the
+	 * geometry elsewhere from blocking...
+	 */</span>
+	OSAddAtomic(1, &amp;oid-&gt;oid_refcnt);
+
+	lck_rw_done(sysctl_geometry_lock);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-keyword">if</span> (!from_kernel) {
+		error = mac_system_check_sysctlbyname(kauth_cred_get(),
+						      namestring,
+						      name,
+						      namelen,
+						      req-&gt;oldptr,
+						      req-&gt;oldlen,
+						      req-&gt;newptr,
+						      req-&gt;newlen);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">dropref</span>;
+	}
+#<span class="enscript-reference">endif</span>
+	
+	<span class="enscript-comment">/*
+	 * ...however, we still have to grab the mutex for those calls which
+	 * may be into code whose reentrancy is protected by it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (unlocked_node_found)
+	{
+		lck_mtx_lock(sysctl_unlocked_node_lock);
+	}
+
+	<span class="enscript-keyword">if</span> ((oid-&gt;oid_kind &amp; CTLTYPE) == CTLTYPE_NODE) {
+		i = (oid-&gt;oid_handler) (oid,
+					name + indx, namelen - indx,
+					req);
+	} <span class="enscript-keyword">else</span> {
+		i = (oid-&gt;oid_handler) (oid,
+					oid-&gt;oid_arg1, oid-&gt;oid_arg2,
+					req);
+	}
+	error = i;
+
+	<span class="enscript-keyword">if</span> (unlocked_node_found)
+	{
+		lck_mtx_unlock(sysctl_unlocked_node_lock);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-comment">/* only used from another CONFIG_MACF block */</span>
+<span class="enscript-reference">dropref</span>:
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * This is tricky... we re-grab the geometry lock in order to drop
+	 * the reference and wake on the address; since the geometry
+	 * lock is a reader/writer lock rather than a mutex, we have to
+	 * wake on all apparent 1-&gt;0 transitions.  This abuses the drop
+	 * after the reference decrement in order to wake any lck_rw_sleep()
+	 * in progress in sysctl_unregister_oid() that slept because of a
+	 * non-zero reference count.
+	 *
+	 * Note:	OSAddAtomic() is defined to return the previous value;
+	 *		we use this and the fact that the lock itself is a
+	 *		barrier to avoid waking every time through on &quot;hot&quot;
+	 *		OIDs.
+	 */</span>
+	lck_rw_lock_shared(sysctl_geometry_lock);
+	<span class="enscript-keyword">if</span> (OSAddAtomic(-1, &amp;oid-&gt;oid_refcnt) == 1)
+		wakeup(&amp;oid-&gt;oid_refcnt);
+
+<span class="enscript-reference">err</span>:
+	lck_rw_done(sysctl_geometry_lock);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">sysctl_create_user_req</span>(<span class="enscript-type">struct</span> sysctl_req *req, <span class="enscript-type">struct</span> proc *p, user_addr_t oldp,
+							size_t oldlen, user_addr_t newp, size_t newlen)
+{
+	bzero(req, <span class="enscript-keyword">sizeof</span>(*req));
+	
+	req-&gt;p = p;
+	
+	req-&gt;oldlen = oldlen;
+	req-&gt;oldptr = oldp;
+	
+	<span class="enscript-keyword">if</span> (newlen) {
+		req-&gt;newlen = newlen;
+		req-&gt;newptr = newp;
+	}
+	
+	req-&gt;oldfunc = sysctl_old_user;
+	req-&gt;newfunc = sysctl_new_user;
+	req-&gt;lock = 1;
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl</span>(proc_t p, <span class="enscript-type">struct</span> sysctl_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-type">int</span> error;
+	size_t oldlen = 0, newlen;
+	<span class="enscript-type">int</span> name[CTL_MAXNAME];
+	<span class="enscript-type">struct</span> sysctl_req req;
+	<span class="enscript-type">char</span> *namestring;
+	size_t namestringlen = MAXPATHLEN;
+	
+	<span class="enscript-comment">/*
+	 * all top-level sysctl names are non-terminal
+	 */</span>
+	<span class="enscript-keyword">if</span> (uap-&gt;namelen &gt; CTL_MAXNAME || uap-&gt;namelen &lt; 2)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	error = copyin(uap-&gt;name, &amp;name[0], uap-&gt;namelen * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+	
+	AUDIT_ARG(ctlname, name, uap-&gt;namelen);
+	
+	<span class="enscript-keyword">if</span> (uap-&gt;newlen &gt; SIZE_T_MAX)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	newlen = (size_t)uap-&gt;newlen;
+	
+	<span class="enscript-keyword">if</span> (uap-&gt;oldlenp != USER_ADDR_NULL) {
+		uint64_t	oldlen64 = fuulong(uap-&gt;oldlenp);
+
+		<span class="enscript-comment">/*
+		 * If more than 4G, clamp to 4G
+		 */</span>
+		<span class="enscript-keyword">if</span> (oldlen64 &gt; SIZE_T_MAX)
+			oldlen = SIZE_T_MAX;
+		<span class="enscript-keyword">else</span>
+			oldlen = (size_t)oldlen64;
+	}
+	
+	sysctl_create_user_req(&amp;req, p, uap-&gt;old, oldlen, uap-&gt;new, newlen);
+
+	<span class="enscript-comment">/* Guess that longest length for the passed-in MIB, if we can be more aggressive than MAXPATHLEN */</span>
+	<span class="enscript-keyword">if</span> (uap-&gt;namelen == 2) {
+		<span class="enscript-keyword">if</span> (name[0] == CTL_KERN &amp;&amp; name[1] &lt; KERN_MAXID) {
+			namestringlen = 32; <span class="enscript-comment">/* &quot;kern.speculative_reads_disabled&quot; */</span>
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (name[0] == CTL_HW &amp;&amp; name[1] &lt; HW_MAXID) {
+			namestringlen = 32; <span class="enscript-comment">/* &quot;hw.cachelinesize_compat&quot; */</span>
+		}
+	}			
+
+	MALLOC(namestring, <span class="enscript-type">char</span> *, namestringlen, M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (!namestring) {
+	    oldlen = 0;
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+	}
+
+	error = userland_sysctl(FALSE, namestring, namestringlen, name, uap-&gt;namelen, &amp;req, &amp;oldlen);
+	
+	FREE(namestring, M_TEMP);
+	
+	<span class="enscript-keyword">if</span> ((error) &amp;&amp; (error != ENOMEM))
+		<span class="enscript-keyword">return</span> (error);
+	
+<span class="enscript-reference">err</span>:
+	<span class="enscript-keyword">if</span> (uap-&gt;oldlenp != USER_ADDR_NULL)
+		error = suulong(uap-&gt;oldlenp, oldlen);
+	
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctlbyname</span>(proc_t p, <span class="enscript-type">struct</span> sysctlbyname_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-type">int</span> error;
+	size_t oldlen = 0, newlen;
+	<span class="enscript-type">char</span> *name;
+	size_t namelen = 0;
+	<span class="enscript-type">struct</span> sysctl_req req;
+	<span class="enscript-type">int</span> oid[CTL_MAXNAME];
+
+	<span class="enscript-keyword">if</span> (uap-&gt;namelen &gt;= MAXPATHLEN)	<span class="enscript-comment">/* XXX arbitrary, undocumented */</span>
+		<span class="enscript-keyword">return</span> (ENAMETOOLONG);
+	namelen = (size_t)uap-&gt;namelen;
+	
+	MALLOC(name, <span class="enscript-type">char</span> *, namelen+1, M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (!name)
+	    <span class="enscript-keyword">return</span> ENOMEM;
+
+	error = copyin(uap-&gt;name, name, namelen);
+	<span class="enscript-keyword">if</span> (error) {
+		FREE(name, M_TEMP);
+		<span class="enscript-keyword">return</span> (error);
+	}
+	name[namelen] = <span class="enscript-string">'\0'</span>;
+
+	<span class="enscript-comment">/* XXX
+	 * AUDIT_ARG(ctlname, name, uap-&gt;namelen);
+	 */</span>
+	
+	<span class="enscript-keyword">if</span> (uap-&gt;newlen &gt; SIZE_T_MAX) {
+		FREE(name, M_TEMP);
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+	newlen = (size_t)uap-&gt;newlen;
+	
+	<span class="enscript-keyword">if</span> (uap-&gt;oldlenp != USER_ADDR_NULL) {
+		uint64_t	oldlen64 = fuulong(uap-&gt;oldlenp);
+		
+		<span class="enscript-comment">/*
+		 * If more than 4G, clamp to 4G
+		 */</span>
+		<span class="enscript-keyword">if</span> (oldlen64 &gt; SIZE_T_MAX)
+			oldlen = SIZE_T_MAX;
+		<span class="enscript-keyword">else</span>
+			oldlen = (size_t)oldlen64;
+	}
+	
+	sysctl_create_user_req(&amp;req, p, uap-&gt;old, oldlen, uap-&gt;new, newlen);
+
+	error = userland_sysctl(TRUE, name, namelen+1, oid, CTL_MAXNAME, &amp;req, &amp;oldlen);
+	
+	FREE(name, M_TEMP);
+
+	<span class="enscript-keyword">if</span> ((error) &amp;&amp; (error != ENOMEM))
+		<span class="enscript-keyword">return</span> (error);
+	
+	<span class="enscript-keyword">if</span> (uap-&gt;oldlenp != USER_ADDR_NULL)
+		error = suulong(uap-&gt;oldlenp, oldlen);
+	
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * This is used from various compatibility syscalls too.  That's why name
+ * must be in kernel space.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">userland_sysctl</span>(boolean_t string_is_canonical,
+				<span class="enscript-type">char</span> *namestring, size_t namestringlen,
+				<span class="enscript-type">int</span> *name, u_int namelen, <span class="enscript-type">struct</span> sysctl_req *req,
+                size_t *retval)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> sysctl_req req2;
+
+	<span class="enscript-keyword">do</span> {
+	    <span class="enscript-comment">/* if EAGAIN, reset output cursor */</span>
+	    req2 = *req;
+	    <span class="enscript-keyword">if</span> (!string_is_canonical)
+	        namestring[0] = <span class="enscript-string">'\0'</span>;
+
+	    error = sysctl_root(FALSE, string_is_canonical, namestring, namestringlen, name, namelen, &amp;req2);
+	} <span class="enscript-keyword">while</span> (error == EAGAIN);
+
+	<span class="enscript-keyword">if</span> (error &amp;&amp; error != ENOMEM)
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-keyword">if</span> (retval) {
+		<span class="enscript-keyword">if</span> (req2.oldptr &amp;&amp; req2.oldidx &gt; req2.oldlen)
+			*retval = req2.oldlen;
+		<span class="enscript-keyword">else</span>
+			*retval = req2.oldidx;
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Kernel versions of the userland sysctl helper functions.
+ *
+ * These allow sysctl to be used in the same fashion in both
+ * userland and the kernel.
+ *
+ * Note that some sysctl handlers use copyin/copyout, which
+ * may not work correctly.
+ *
+ * The &quot;sysctlbyname&quot; KPI for use by kexts is aliased to this function.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kernel_sysctlbyname</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">void</span> *oldp, size_t *oldlenp, <span class="enscript-type">void</span> *newp, size_t newlen)
+{
+	<span class="enscript-type">int</span> oid[CTL_MAXNAME];
+	<span class="enscript-type">int</span> name2mib_oid[2];
+	<span class="enscript-type">int</span> error;
+	size_t oidlen;
+
+	<span class="enscript-comment">/* look up the OID with magic service node */</span>
+	name2mib_oid[0] = 0;
+	name2mib_oid[1] = 3;
+
+	oidlen = <span class="enscript-keyword">sizeof</span>(oid);
+	error = kernel_sysctl(current_proc(), name2mib_oid, 2, oid, &amp;oidlen, __DECONST(<span class="enscript-type">void</span> *, name), strlen(name));
+	oidlen /= <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>);
+	
+	<span class="enscript-comment">/* now use the OID */</span>
+	<span class="enscript-keyword">if</span> (error == 0)
+		error = kernel_sysctl(current_proc(), oid, oidlen, oldp, oldlenp, newp, newlen);
+	<span class="enscript-keyword">return</span>(error);
+}
+
+</pre>
+<hr />
+</body></html>

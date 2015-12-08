@@ -1,0 +1,185 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>dtrace_alloc.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">dtrace_alloc.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2005-2007 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * DTrace kalloc emulation.
+ *
+ * This is a subset of kalloc functionality, to allow dtrace
+ * specific allocation to be accounted for separately from the
+ * general kalloc pool.
+ *
+ * Note that allocations greater than dalloc_max still go into
+ * the kalloc.large bucket, as it seems impossible to emulate
+ * that functionality in the bsd kern.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdarg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">DTRACE_MEMORY_ZONES</span>)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DTRACE_ALLOC_MINSIZE</span> 16
+
+vm_size_t dtrace_alloc_max;
+vm_size_t dtrace_alloc_max_prerounded;
+<span class="enscript-type">int</span> first_d_zone = -1;
+<span class="enscript-type">struct</span> zone *d_zone[16];
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *d_zone_name[16] = {
+	<span class="enscript-string">&quot;dtrace.1&quot;</span>,		<span class="enscript-string">&quot;dtrace.2&quot;</span>,
+	<span class="enscript-string">&quot;dtrace.4&quot;</span>,		<span class="enscript-string">&quot;dtrace.8&quot;</span>,
+	<span class="enscript-string">&quot;dtrace.16&quot;</span>,		<span class="enscript-string">&quot;dtrace.32&quot;</span>,
+	<span class="enscript-string">&quot;dtrace.64&quot;</span>,		<span class="enscript-string">&quot;dtrace.128&quot;</span>,
+	<span class="enscript-string">&quot;dtrace.256&quot;</span>,		<span class="enscript-string">&quot;dtrace.512&quot;</span>,
+	<span class="enscript-string">&quot;dtrace.1024&quot;</span>,		<span class="enscript-string">&quot;dtrace.2048&quot;</span>,
+	<span class="enscript-string">&quot;dtrace.4096&quot;</span>,		<span class="enscript-string">&quot;dtrace.8192&quot;</span>,
+	<span class="enscript-string">&quot;dtrace.16384&quot;</span>,		<span class="enscript-string">&quot;dtrace.32768&quot;</span>
+};
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> d_zone_max[16] = {
+      1024,		<span class="enscript-comment">/*      1 Byte  */</span>
+      1024,		<span class="enscript-comment">/*      2 Byte  */</span>
+      1024,		<span class="enscript-comment">/*      4 Byte  */</span>
+      1024,		<span class="enscript-comment">/*      8 Byte  */</span>
+      1024,		<span class="enscript-comment">/*     16 Byte  */</span>
+      4096,		<span class="enscript-comment">/*     32 Byte  */</span>
+      4096,		<span class="enscript-comment">/*     64 Byte  */</span>
+      4096,		<span class="enscript-comment">/*    128 Byte  */</span>
+      4096,		<span class="enscript-comment">/*    256 Byte  */</span>
+      1024,		<span class="enscript-comment">/*    512 Byte  */</span>
+      1024,		<span class="enscript-comment">/*   1024 Byte  */</span>
+      1024,		<span class="enscript-comment">/*   2048 Byte  */</span>
+      1024,		<span class="enscript-comment">/*   4096 Byte  */</span>
+      4096,		<span class="enscript-comment">/*   8192 Byte  */</span>
+      64,		<span class="enscript-comment">/*  16384 Byte  */</span>
+      64,		<span class="enscript-comment">/*  32768 Byte  */</span>
+};
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">dtrace_alloc_init</span>(<span class="enscript-type">void</span>)
+{
+	vm_size_t size;
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">if</span> (PAGE_SIZE &lt; 16*1024)
+		dtrace_alloc_max = 16*1024;
+	<span class="enscript-keyword">else</span>
+		dtrace_alloc_max = PAGE_SIZE;
+	dtrace_alloc_max_prerounded = dtrace_alloc_max / 2 + 1;
+
+	<span class="enscript-comment">/*
+	 *	Allocate a zone for each size we are going to handle.
+	 *	We specify non-paged memory.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0, size = 1; size &lt; dtrace_alloc_max; i++, size &lt;&lt;= 1) {
+		<span class="enscript-keyword">if</span> (size &lt; DTRACE_ALLOC_MINSIZE) {
+			d_zone[i] = NULL;
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> (size == DTRACE_ALLOC_MINSIZE) {
+			first_d_zone = i;
+		}
+		d_zone[i] = zinit(size, d_zone_max[i] * size, size, d_zone_name[i]);
+	}
+}
+
+<span class="enscript-type">void</span> *<span class="enscript-function-name">dtrace_alloc</span>(vm_size_t size)
+{
+	<span class="enscript-type">int</span> zindex;
+	vm_size_t allocsize;
+
+	<span class="enscript-comment">/*
+	 * If size is too large for a zone, then use kmem_alloc.
+	 * (We use kmem_alloc instead of kmem_alloc_kobject so that
+	 * krealloc can use kmem_realloc.)
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (size &gt;= dtrace_alloc_max_prerounded) {
+		<span class="enscript-keyword">return</span> _MALLOC(size, M_TEMP, M_WAITOK);
+	}
+
+	<span class="enscript-comment">/* compute the size of the block that we will actually allocate */</span>
+	allocsize = DTRACE_ALLOC_MINSIZE;
+	zindex = first_d_zone;
+	<span class="enscript-keyword">while</span> (allocsize &lt; size) {
+		allocsize &lt;&lt;= 1;
+		zindex++;
+	}
+
+	<span class="enscript-keyword">return</span>(zalloc_canblock(d_zone[zindex], TRUE));
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">dtrace_free</span>(<span class="enscript-type">void</span> *data, vm_size_t size)
+{
+	<span class="enscript-type">int</span> zindex;
+	vm_size_t freesize;
+
+	<span class="enscript-keyword">if</span> (size &gt;= dtrace_alloc_max_prerounded) {
+		_FREE(data, M_TEMP);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* compute the size of the block that we actually allocated from */</span>
+	freesize = DTRACE_ALLOC_MINSIZE;
+	zindex = first_d_zone;
+	<span class="enscript-keyword">while</span> (freesize &lt; size) {
+		freesize &lt;&lt;= 1;
+		zindex++;
+	}
+
+	<span class="enscript-comment">/* free to the appropriate zone */</span>
+	zfree(d_zone[zindex], data);
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DTRACE_MEMORY_ZONES */</span>
+</pre>
+<hr />
+</body></html>

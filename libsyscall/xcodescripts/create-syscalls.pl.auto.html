@@ -1,0 +1,463 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>create-syscalls.pl</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">create-syscalls.pl&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">#!/usr/bin/perl
+</span><span class="enscript-comment">#
+</span><span class="enscript-comment"># Copyright (c) 2006-2014 Apple Inc. All rights reserved.
+</span><span class="enscript-comment">#
+</span><span class="enscript-comment"># @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+</span><span class="enscript-comment"># 
+</span><span class="enscript-comment"># This file contains Original Code and/or Modifications of Original Code
+</span><span class="enscript-comment"># as defined in and that are subject to the Apple Public Source License
+</span><span class="enscript-comment"># Version 2.0 (the 'License'). You may not use this file except in
+</span><span class="enscript-comment"># compliance with the License. Please obtain a copy of the License at
+</span><span class="enscript-comment"># <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this
+</span><span class="enscript-comment"># file.
+</span><span class="enscript-comment"># 
+</span><span class="enscript-comment"># The Original Code and all software distributed under the License are
+</span><span class="enscript-comment"># distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+</span><span class="enscript-comment"># EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+</span><span class="enscript-comment"># INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+</span><span class="enscript-comment"># FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+</span><span class="enscript-comment"># Please see the License for the specific language governing rights and
+</span><span class="enscript-comment"># limitations under the License.
+</span><span class="enscript-comment"># 
+</span><span class="enscript-comment"># @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+</span><span class="enscript-comment">#
+</span><span class="enscript-comment">##########################################################################
+</span><span class="enscript-comment">#
+</span><span class="enscript-comment"># % create-syscalls.pl syscalls.master custom-directory platforms-directory platform-name out-directory
+</span><span class="enscript-comment">#
+</span><span class="enscript-comment"># This script fills the the out-directory with a Makefile.inc and *.s
+</span><span class="enscript-comment"># files to create the double-underbar syscall stubs.  It reads the
+</span><span class="enscript-comment"># syscall.master file to get the symbol names and number of arguments,
+</span><span class="enscript-comment"># and whether Libsystem should automatically create the (non-double-underbar)
+</span><span class="enscript-comment"># stubs if Libc doesn't provide a wrapper.  Which system calls will get
+</span><span class="enscript-comment"># the automatic treatment is writen to the libsyscall.list file, also
+</span><span class="enscript-comment"># written to the out-directory.
+</span><span class="enscript-comment">#
+</span><span class="enscript-comment"># The custom-directory contains:
+</span><span class="enscript-comment"># 1. SYS.h - used by the automatically created *.s and custom files
+</span><span class="enscript-comment"># 2. custom.s - contains architecture specific additional system calls and
+</span><span class="enscript-comment">#    auxilliary routines (like cerror)
+</span><span class="enscript-comment"># 3. special case double-underbar stub files - which are copied into
+</span><span class="enscript-comment">#    the out-directory
+</span><span class="enscript-comment">#
+</span><span class="enscript-comment">##########################################################################
+</span>
+<span class="enscript-keyword">use</span> strict;
+<span class="enscript-keyword">use</span> File::Basename ();
+<span class="enscript-keyword">use</span> File::Copy ();
+<span class="enscript-keyword">use</span> File::Spec;
+<span class="enscript-keyword">use</span> IO::File;
+
+<span class="enscript-keyword">my</span> $MyName = File::Basename::basename($0);
+
+<span class="enscript-keyword">my</span> @CustomSrc = <span class="enscript-keyword">qw</span>(custom.<span class="enscript-keyword">s</span>);
+
+<span class="enscript-keyword">my</span> @Architectures = <span class="enscript-keyword">split</span> /\<span class="enscript-keyword">s</span>/, $ENV{<span class="enscript-string">&quot;ARCHS&quot;</span>};
+<span class="enscript-keyword">my</span> @Copy = (<span class="enscript-keyword">qw</span>(SYS.h), @CustomSrc);
+<span class="enscript-keyword">my</span> $CustomDir;
+<span class="enscript-keyword">my</span> $PlatformsDir;
+<span class="enscript-keyword">my</span> $PlatformName;
+<span class="enscript-keyword">my</span> $OutDir;
+<span class="enscript-comment"># size in bytes of known types (only used for i386)
+</span><span class="enscript-keyword">my</span> %TypeBytes = (
+    <span class="enscript-string">'au_asid_t'</span>		=&gt; 4,
+    <span class="enscript-string">'sae_associd_t'</span>	=&gt; 4,
+    <span class="enscript-string">'caddr_t'</span>		=&gt; 4,
+    <span class="enscript-string">'sae_connid_t'</span>	=&gt; 4,
+    <span class="enscript-string">'gid_t'</span>		=&gt; 4,
+    <span class="enscript-string">'id_t'</span>		=&gt; 4,
+    <span class="enscript-string">'idtype_t'</span>		=&gt; 4,
+    <span class="enscript-string">'int'</span>		=&gt; 4,
+    <span class="enscript-string">'int32_t'</span>		=&gt; 4,
+    <span class="enscript-string">'int64_t'</span>		=&gt; 8,
+    <span class="enscript-string">'key_t'</span>		=&gt; 4,
+    <span class="enscript-string">'long'</span>		=&gt; 4,
+    <span class="enscript-string">'mach_port_name_t'</span>	=&gt; 4,
+    <span class="enscript-string">'mode_t'</span>		=&gt; 4,
+    <span class="enscript-string">'off_t'</span>		=&gt; 8,
+    <span class="enscript-string">'pid_t'</span>		=&gt; 4,
+    <span class="enscript-string">'semun_t'</span>		=&gt; 4,
+    <span class="enscript-string">'sigset_t'</span>		=&gt; 4,
+    <span class="enscript-string">'size_t'</span>		=&gt; 4,
+    <span class="enscript-string">'socklen_t'</span>		=&gt; 4,
+    <span class="enscript-string">'ssize_t'</span>		=&gt; 4,
+    <span class="enscript-string">'u_int'</span>		=&gt; 4,
+    <span class="enscript-string">'u_long'</span>		=&gt; 4,
+    <span class="enscript-string">'uid_t'</span>		=&gt; 4,
+    <span class="enscript-string">'uint32_t'</span>		=&gt; 4,
+    <span class="enscript-string">'uint64_t'</span>		=&gt; 8,
+    <span class="enscript-string">'user_addr_t'</span>	=&gt; 4,
+    <span class="enscript-string">'user_long_t'</span>	=&gt; 4,
+    <span class="enscript-string">'user_size_t'</span>	=&gt; 4,
+    <span class="enscript-string">'user_ssize_t'</span>	=&gt; 4,
+    <span class="enscript-string">'user_ulong_t'</span>	=&gt; 4,
+    <span class="enscript-string">'uuid_t'</span>		=&gt; 4,
+);
+
+<span class="enscript-comment"># Moving towards storing all data in this hash, then we always know
+</span><span class="enscript-comment"># if data is aliased or not, or promoted or not.
+</span><span class="enscript-keyword">my</span> %Symbols = (
+    <span class="enscript-string">&quot;quota&quot;</span> =&gt; {
+        c_sym =&gt; <span class="enscript-string">&quot;quota&quot;</span>,
+        <span class="enscript-keyword">syscall</span> =&gt; <span class="enscript-string">&quot;quota&quot;</span>,
+        asm_sym =&gt; <span class="enscript-string">&quot;_quota&quot;</span>,
+        is_private =&gt; <span class="enscript-keyword">undef</span>,
+        is_custom =&gt; <span class="enscript-keyword">undef</span>,
+        nargs =&gt; 4,
+        bytes =&gt; 0,
+        aliases =&gt; {},
+    },
+    <span class="enscript-string">&quot;setquota&quot;</span> =&gt; {
+        c_sym =&gt; <span class="enscript-string">&quot;setquota&quot;</span>,
+        <span class="enscript-keyword">syscall</span> =&gt; <span class="enscript-string">&quot;setquota&quot;</span>,
+        asm_sym =&gt; <span class="enscript-string">&quot;_setquota&quot;</span>,
+        is_private =&gt; <span class="enscript-keyword">undef</span>,
+        is_custom =&gt; <span class="enscript-keyword">undef</span>,
+        nargs =&gt; 2,
+        bytes =&gt; 0,
+        aliases =&gt; {},
+    },
+    <span class="enscript-string">&quot;syscall&quot;</span> =&gt; {
+        c_sym =&gt; <span class="enscript-string">&quot;syscall&quot;</span>,
+        <span class="enscript-keyword">syscall</span> =&gt; <span class="enscript-string">&quot;syscall&quot;</span>,
+        asm_sym =&gt; <span class="enscript-string">&quot;_syscall&quot;</span>,
+        is_private =&gt; <span class="enscript-keyword">undef</span>,
+        is_custom =&gt; <span class="enscript-keyword">undef</span>,
+        nargs =&gt; 0,
+        bytes =&gt; 0,
+        aliases =&gt; {},
+    },
+);
+
+<span class="enscript-comment"># An explicit list of cancelable syscalls. For creating stubs that call the
+</span><span class="enscript-comment"># cancellable version of cerror.
+</span><span class="enscript-keyword">my</span> @Cancelable = <span class="enscript-keyword">qw</span>/
+	<span class="enscript-keyword">accept</span> access aio_suspend
+	<span class="enscript-keyword">close</span> <span class="enscript-keyword">connect</span> connectx
+	disconnectx
+	faccessat <span class="enscript-keyword">fcntl</span> fdatasync fpathconf fstat fstatat fsync
+	<span class="enscript-keyword">getlogin</span>
+	<span class="enscript-keyword">ioctl</span>
+	<span class="enscript-keyword">link</span> linkat lseek <span class="enscript-keyword">lstat</span>
+	<span class="enscript-keyword">msgrcv</span> <span class="enscript-keyword">msgsnd</span> msync
+	<span class="enscript-keyword">open</span> openat
+	pathconf peeloff poll posix_spawn pread pwrite
+	<span class="enscript-keyword">read</span> readv recvfrom recvmsg <span class="enscript-keyword">rename</span> renameat
+	rename_ext
+	__semwait_signal __sigwait
+	<span class="enscript-keyword">select</span> sem_wait <span class="enscript-keyword">semop</span> sendmsg sendto sigsuspend <span class="enscript-keyword">stat</span> <span class="enscript-keyword">symlink</span> symlinkat sync
+	<span class="enscript-keyword">unlink</span> unlinkat
+	wait4 waitid <span class="enscript-keyword">write</span> writev
+/;
+
+<span class="enscript-keyword">sub</span> usage {
+    <span class="enscript-keyword">die</span> <span class="enscript-string">&quot;Usage: $MyName syscalls.master custom-directory platforms-directory platform-name out-directory\n&quot;</span>;
+}
+
+<span class="enscript-comment">##########################################################################
+</span><span class="enscript-comment"># Read the syscall.master file and collect the system call names and number
+</span><span class="enscript-comment"># of arguments.  It looks for the NO_SYSCALL_STUB quailifier following the
+</span><span class="enscript-comment"># prototype to determine if no automatic stub should be created by Libsystem.
+</span><span class="enscript-comment"># System call name that are already prefixed with double-underbar are set as
+</span><span class="enscript-comment"># if the NO_SYSCALL_STUB qualifier were specified (whether it is or not).
+</span><span class="enscript-comment">#
+</span><span class="enscript-comment"># For the #if lines in syscall.master, all macros are assumed to be defined,
+</span><span class="enscript-comment"># except COMPAT_GETFSSTAT (assumed undefined).
+</span><span class="enscript-comment">##########################################################################
+</span><span class="enscript-keyword">sub</span> readMaster {
+    <span class="enscript-keyword">my</span> $file = <span class="enscript-keyword">shift</span>;
+    <span class="enscript-keyword">local</span> $_;
+    <span class="enscript-keyword">my</span> $f = IO::File-&gt;new($file, <span class="enscript-string">'r'</span>);
+    <span class="enscript-keyword">die</span> <span class="enscript-string">&quot;$MyName: $file: $!\n&quot;</span> <span class="enscript-keyword">unless</span> <span class="enscript-keyword">defined</span>($f);
+    <span class="enscript-keyword">my</span> $line = 0;
+    <span class="enscript-keyword">my</span> $skip = 0;
+    <span class="enscript-keyword">while</span>(&lt;$f&gt;) {
+        $line++;
+        <span class="enscript-keyword">if</span>(/^<span class="enscript-comment">#\s*endif/) {
+</span>            $skip = 0;
+            <span class="enscript-keyword">next</span>;
+        }
+        <span class="enscript-keyword">if</span>(/^<span class="enscript-comment">#\s*else/) {
+</span>            $skip = -$skip;
+            <span class="enscript-keyword">next</span>;
+        }
+        <span class="enscript-keyword">chomp</span>;
+        <span class="enscript-keyword">if</span>(/^<span class="enscript-comment">#\s*if\s+(\S+)$/) {
+</span>            $skip = ($1 <span class="enscript-keyword">eq</span> <span class="enscript-string">'COMPAT_GETFSSTAT'</span>) ? -1 : 1;
+            <span class="enscript-keyword">next</span>;
+        }
+        <span class="enscript-keyword">next</span> <span class="enscript-keyword">if</span> $skip &lt; 0;
+        <span class="enscript-keyword">next</span> <span class="enscript-keyword">unless</span> /^\d/;
+        <span class="enscript-keyword">s</span>/^[^{]*{\<span class="enscript-keyword">s</span>*//;
+        <span class="enscript-keyword">s</span>/\<span class="enscript-keyword">s</span>*}.*$//; # }
+        <span class="enscript-keyword">die</span> <span class="enscript-string">&quot;$MyName: no function prototype on line $line\n&quot;</span> <span class="enscript-keyword">unless</span> <span class="enscript-keyword">length</span>($_) &gt; 0 &amp;&amp; /;$/;
+        <span class="enscript-keyword">my</span> $no_syscall_stub = /\)\<span class="enscript-keyword">s</span>*NO_SYSCALL_STUB\<span class="enscript-keyword">s</span>*;/;
+        <span class="enscript-keyword">my</span>($name, $args) = /\<span class="enscript-keyword">s</span>(\S+)\<span class="enscript-keyword">s</span>*\(([^)]*)\)/;
+        <span class="enscript-keyword">next</span> <span class="enscript-keyword">if</span> $name =~ /e?nosys/;
+        $args =~ <span class="enscript-keyword">s</span>/^\<span class="enscript-keyword">s</span>+//;
+        $args =~ <span class="enscript-keyword">s</span>/\<span class="enscript-keyword">s</span>+$//;
+        <span class="enscript-keyword">my</span> $argbytes = 0;
+        <span class="enscript-keyword">my</span> $nargs = 0;
+        <span class="enscript-keyword">if</span>($args <span class="enscript-keyword">ne</span> <span class="enscript-string">''</span> &amp;&amp; $args <span class="enscript-keyword">ne</span> <span class="enscript-string">'void'</span>) {
+            <span class="enscript-keyword">my</span> @a = <span class="enscript-keyword">split</span>(<span class="enscript-string">','</span>, $args);
+            $nargs = <span class="enscript-keyword">scalar</span>(@a);
+            <span class="enscript-comment"># Calculate the size of all the arguments (only used for i386)
+</span>            <span class="enscript-keyword">for</span> <span class="enscript-keyword">my</span> $type (@a) {
+                $type =~ <span class="enscript-keyword">s</span>/\<span class="enscript-keyword">s</span>*\w+$//; # remove the argument name
+                <span class="enscript-keyword">if</span>($type =~ /\*$/) {
+                    $argbytes += 4; <span class="enscript-comment"># a pointer type
+</span>                } <span class="enscript-keyword">else</span> {
+                    $type =~ <span class="enscript-keyword">s</span>/^.*\<span class="enscript-keyword">s</span>//; # remove any type qualifier, like unsigned
+                    <span class="enscript-keyword">my</span> $b = $TypeBytes{$type};
+                    <span class="enscript-keyword">die</span> <span class="enscript-string">&quot;$MyName: $name: unknown type '$type'\n&quot;</span> <span class="enscript-keyword">unless</span> <span class="enscript-keyword">defined</span>($b);
+                    $argbytes += $b;
+                }
+            }
+        }
+        $Symbols{$name} = {
+            c_sym =&gt; $name,
+            <span class="enscript-keyword">syscall</span> =&gt; $name,
+            asm_sym =&gt; $no_syscall_stub ? <span class="enscript-string">&quot;___$name&quot;</span> : <span class="enscript-string">&quot;_$name&quot;</span>,
+            is_private =&gt; $no_syscall_stub,
+            is_custom =&gt; <span class="enscript-keyword">undef</span>,
+            nargs =&gt; $nargs,
+            bytes =&gt; $argbytes,
+            aliases =&gt; {},
+            except =&gt; [],
+        };
+    }
+}
+
+<span class="enscript-keyword">sub</span> checkForCustomStubs {
+    <span class="enscript-keyword">my</span> ($dir) = @_;
+    
+    <span class="enscript-keyword">my</span> ($c_sym_name, $sym);
+    <span class="enscript-keyword">while</span> (($c_sym_name, $sym) = <span class="enscript-keyword">each</span> %Symbols) {
+        <span class="enscript-keyword">my</span> $source = <span class="enscript-string">&quot;__&quot;</span>.$$sym{c_sym}.<span class="enscript-string">&quot;.s&quot;</span>;
+        <span class="enscript-keyword">my</span> $custom = File::Spec-&gt;join($dir, $source);
+        <span class="enscript-keyword">next</span> <span class="enscript-keyword">unless</span> -f $custom;
+
+        $$sym{is_custom} = $source;
+        <span class="enscript-keyword">if</span> (!$$sym{is_private}) {
+            <span class="enscript-keyword">foreach</span> <span class="enscript-keyword">my</span> $subarch (@Architectures) {
+                (<span class="enscript-keyword">my</span> $arch = $subarch) =~ <span class="enscript-keyword">s</span>/arm(v.*)/arm/;
+                $arch =~ <span class="enscript-keyword">s</span>/x86_64(.*)/x86_64/;
+                $$sym{aliases}{$arch} = [] <span class="enscript-keyword">unless</span> $$sym{aliases}{$arch};
+                <span class="enscript-keyword">push</span>(@{$$sym{aliases}{$arch}}, $$sym{asm_sym});
+            }
+            $$sym{asm_sym} = <span class="enscript-string">&quot;__&quot;</span>.$$sym{asm_sym};
+            $$sym{is_private} = 1;
+        }
+    }    
+}
+
+<span class="enscript-keyword">sub</span> readAliases {
+    <span class="enscript-keyword">my</span> ($platformDir, $platformName) = @_;
+    <span class="enscript-keyword">my</span> $genericMap = File::Spec-&gt;join($platformDir, <span class="enscript-string">&quot;syscall.map&quot;</span>);
+    
+    <span class="enscript-keyword">my</span> %sym_to_c;
+    <span class="enscript-keyword">foreach</span> <span class="enscript-keyword">my</span> $k (<span class="enscript-keyword">keys</span> %Symbols) {
+        $sym_to_c{$Symbols{$k}{asm_sym}} = $k;
+    }
+    
+    <span class="enscript-keyword">my</span> @a = ();
+    <span class="enscript-keyword">for</span> <span class="enscript-keyword">my</span> $arch (@Architectures) {
+        (<span class="enscript-keyword">my</span> $new_arch = $arch) =~ <span class="enscript-keyword">s</span>/arm(v.*)/arm/g;
+        $new_arch =~ <span class="enscript-keyword">s</span>/x86_64(.*)/x86_64/g;
+        <span class="enscript-keyword">push</span>(@a, $new_arch) <span class="enscript-keyword">unless</span> <span class="enscript-keyword">grep</span> { $_ <span class="enscript-keyword">eq</span> $new_arch } @a;
+    }
+    
+    <span class="enscript-keyword">foreach</span> <span class="enscript-keyword">my</span> $arch (@a) {
+        <span class="enscript-keyword">my</span> $syscallFile = File::Spec-&gt;join($platformDir, $platformName, $arch, <span class="enscript-string">&quot;syscall.map&quot;</span>);
+        
+        <span class="enscript-keyword">my</span> @files = ();
+        <span class="enscript-keyword">push</span>(@files, IO::File-&gt;new($syscallFile, <span class="enscript-string">'r'</span>));
+        <span class="enscript-keyword">die</span> <span class="enscript-string">&quot;$MyName: $syscallFile: $!\n&quot;</span> <span class="enscript-keyword">unless</span> <span class="enscript-keyword">defined</span>($files[$#files]);
+        <span class="enscript-keyword">push</span>(@files, IO::File-&gt;new($genericMap, <span class="enscript-string">'r'</span>));
+        <span class="enscript-keyword">die</span> <span class="enscript-string">&quot;$MyName: $genericMap: $!\n&quot;</span> <span class="enscript-keyword">unless</span> <span class="enscript-keyword">defined</span>($files[$#files]);
+        
+        <span class="enscript-keyword">foreach</span> <span class="enscript-keyword">my</span> $f (@files) {
+            <span class="enscript-keyword">while</span> (&lt;$f&gt;) {
+                <span class="enscript-keyword">next</span> <span class="enscript-keyword">if</span> /^<span class="enscript-comment">#/;
+</span>                <span class="enscript-keyword">chomp</span>;
+                
+                <span class="enscript-keyword">my</span> ($alias, $target_symbol) = <span class="enscript-keyword">split</span>;
+                <span class="enscript-keyword">if</span> (<span class="enscript-keyword">defined</span>($target_symbol)) {
+                    <span class="enscript-keyword">foreach</span> <span class="enscript-keyword">my</span> $sym (<span class="enscript-keyword">values</span> %Symbols) {
+                        <span class="enscript-comment"># I've eliminated most of the ugly from this script except
+</span>                        <span class="enscript-comment"># the need to try stripping underbars here.
+</span>                        <span class="enscript-keyword">if</span> ($$sym{is_private}) {
+                            <span class="enscript-keyword">next</span> <span class="enscript-keyword">unless</span> $$sym{asm_sym} <span class="enscript-keyword">eq</span> $target_symbol;
+                        } <span class="enscript-keyword">else</span> {
+                            (<span class="enscript-keyword">my</span> $target = $target_symbol) =~ <span class="enscript-keyword">s</span>/^__//;
+                            <span class="enscript-keyword">next</span> <span class="enscript-keyword">unless</span> ($$sym{asm_sym} <span class="enscript-keyword">eq</span> $target || $$sym{asm_sym} <span class="enscript-keyword">eq</span> $target_symbol);
+                        }
+                        $$sym{aliases}{$arch} = [] <span class="enscript-keyword">unless</span> $$sym{aliases}{$arch};
+                        
+                        <span class="enscript-keyword">die</span> <span class="enscript-string">&quot;$MyName: $arch $$sym{asm_sym} -&gt; $alias: Duplicate alias.\n&quot;</span> <span class="enscript-keyword">if</span> <span class="enscript-keyword">grep</span> { $_ <span class="enscript-keyword">eq</span> $alias } @{$$sym{aliases}{$arch}};
+                        <span class="enscript-keyword">push</span>(@{$$sym{aliases}{$arch}}, $alias);
+                        
+                        <span class="enscript-comment"># last thing to do, if we aliased over a first class symbol, we need
+</span>                        <span class="enscript-comment"># to mark it
+</span>                        <span class="enscript-keyword">my</span> $c = $sym_to_c{$alias};
+                        <span class="enscript-keyword">if</span> ($Symbols{$c}) {
+                            <span class="enscript-keyword">push</span>(@{$Symbols{$c}{except}}, $arch);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+<span class="enscript-comment">##########################################################################
+</span><span class="enscript-comment"># Make a __xxx.s file: if it exists in the $CustomDir, just copy it, otherwise
+</span><span class="enscript-comment"># create one.  We define the macro __SYSCALL_32BIT_ARG_BYTES so that SYS.h could
+</span><span class="enscript-comment"># use that to define __SYSCALL dependent on the arguments' total size.
+</span><span class="enscript-comment">##########################################################################
+</span><span class="enscript-keyword">sub</span> writeStubForSymbol {
+    <span class="enscript-keyword">my</span> ($f, $symbol) = @_;
+    
+    <span class="enscript-keyword">my</span> @conditions;
+    <span class="enscript-keyword">for</span> <span class="enscript-keyword">my</span> $subarch (@Architectures) {
+        (<span class="enscript-keyword">my</span> $arch = $subarch) =~ <span class="enscript-keyword">s</span>/arm(v.*)/arm/;
+        $arch =~ <span class="enscript-keyword">s</span>/x86_64(.*)/x86_64/;
+        <span class="enscript-keyword">push</span>(@conditions, <span class="enscript-string">&quot;defined(__${arch}__)&quot;</span>) <span class="enscript-keyword">unless</span> <span class="enscript-keyword">grep</span> { $_ <span class="enscript-keyword">eq</span> $arch } @{$$symbol{except}};
+    }
+
+	<span class="enscript-keyword">my</span> %is_cancel;
+	<span class="enscript-keyword">for</span> (@Cancelable) { $is_cancel{$_} = 1 };
+    
+    <span class="enscript-keyword">print</span> $f <span class="enscript-string">&quot;#define __SYSCALL_32BIT_ARG_BYTES $$symbol{bytes}\n&quot;</span>;
+    <span class="enscript-keyword">print</span> $f <span class="enscript-string">&quot;#include \&quot;SYS.h\&quot;\n\n&quot;</span>;
+    <span class="enscript-keyword">if</span> (<span class="enscript-keyword">scalar</span>(@conditions)) {
+        <span class="enscript-keyword">printf</span> $f <span class="enscript-string">&quot;#ifndef SYS_%s\n&quot;</span>, $$symbol{<span class="enscript-keyword">syscall</span>};
+        <span class="enscript-keyword">printf</span> $f <span class="enscript-string">&quot;#error \&quot;SYS_%s not defined. The header files libsyscall is building against do not match syscalls.master.\&quot;\n&quot;</span>, $$symbol{<span class="enscript-keyword">syscall</span>};
+        <span class="enscript-keyword">printf</span> $f <span class="enscript-string">&quot;#endif\n\n&quot;</span>;    
+        <span class="enscript-keyword">my</span> $nc = ($is_cancel{$$symbol{<span class="enscript-keyword">syscall</span>}} ? <span class="enscript-string">&quot;cerror&quot;</span> : <span class="enscript-string">&quot;cerror_nocancel&quot;</span>);
+        <span class="enscript-keyword">printf</span> $f <span class="enscript-string">&quot;#if &quot;</span> . <span class="enscript-keyword">join</span>(<span class="enscript-string">&quot; || &quot;</span>, @conditions) . <span class="enscript-string">&quot;\n&quot;</span>;
+        <span class="enscript-keyword">printf</span> $f <span class="enscript-string">&quot;__SYSCALL2(%s, %s, %d, %s)\n&quot;</span>, $$symbol{asm_sym}, $$symbol{<span class="enscript-keyword">syscall</span>}, $$symbol{nargs}, $nc;
+        <span class="enscript-keyword">if</span> (!$$symbol{is_private} &amp;&amp; (<span class="enscript-keyword">scalar</span>(@conditions) &lt; <span class="enscript-keyword">scalar</span>(@Architectures))) {
+            <span class="enscript-keyword">printf</span> $f <span class="enscript-string">&quot;#else\n&quot;</span>;
+            <span class="enscript-keyword">printf</span> $f <span class="enscript-string">&quot;__SYSCALL2(%s, %s, %d, %s)\n&quot;</span>, <span class="enscript-string">&quot;__&quot;</span>.$$symbol{asm_sym}, $$symbol{<span class="enscript-keyword">syscall</span>}, $$symbol{nargs}, $nc;
+        }
+        <span class="enscript-keyword">printf</span> $f <span class="enscript-string">&quot;#endif\n\n&quot;</span>;
+    } <span class="enscript-keyword">else</span> {
+        <span class="enscript-comment"># actually this isnt an inconsistency. kernel can expose what it wants but if all our arches
+</span>        <span class="enscript-comment"># override it we need to honour that.
+</span>    }
+}
+
+<span class="enscript-keyword">sub</span> writeAliasesForSymbol {
+    <span class="enscript-keyword">my</span> ($f, $symbol) = @_;
+    
+    <span class="enscript-keyword">foreach</span> <span class="enscript-keyword">my</span> $subarch (@Architectures) {
+        (<span class="enscript-keyword">my</span> $arch = $subarch) =~ <span class="enscript-keyword">s</span>/arm(v.*)/arm/;
+        $arch =~ <span class="enscript-keyword">s</span>/x86_64(.*)/x86_64/;
+        
+        <span class="enscript-keyword">next</span> <span class="enscript-keyword">unless</span> <span class="enscript-keyword">scalar</span>($$symbol{aliases}{$arch});
+        
+				<span class="enscript-keyword">printf</span> $f <span class="enscript-string">&quot;#if defined(__${arch}__)\n&quot;</span>;
+        <span class="enscript-keyword">foreach</span> <span class="enscript-keyword">my</span> $alias_sym (@{$$symbol{aliases}{$arch}}) {
+            <span class="enscript-keyword">my</span> $sym = (<span class="enscript-keyword">grep</span> { $_ <span class="enscript-keyword">eq</span> $arch } @{$$symbol{except}}) ? <span class="enscript-string">&quot;__&quot;</span>.$$symbol{asm_sym} : $$symbol{asm_sym};
+					
+						<span class="enscript-keyword">printf</span> $f <span class="enscript-string">&quot;\t.globl\t$alias_sym\n&quot;</span>;
+						<span class="enscript-keyword">printf</span> $f <span class="enscript-string">&quot;\t.set\t$alias_sym, $sym\n&quot;</span>;
+        }
+				<span class="enscript-keyword">printf</span> $f <span class="enscript-string">&quot;#endif\n\n&quot;</span>;
+    }
+}
+
+usage() <span class="enscript-keyword">unless</span> <span class="enscript-keyword">scalar</span>(@ARGV) == 5;
+$CustomDir = $ARGV[1];
+<span class="enscript-keyword">die</span> <span class="enscript-string">&quot;$MyName: $CustomDir: No such directory\n&quot;</span> <span class="enscript-keyword">unless</span> -d $CustomDir;
+$PlatformsDir = $ARGV[2];
+<span class="enscript-keyword">die</span> <span class="enscript-string">&quot;$MyName: $PlatformsDir: No such directory\n&quot;</span> <span class="enscript-keyword">unless</span> -d $PlatformsDir;
+$PlatformName = $ARGV[3];
+<span class="enscript-keyword">die</span> <span class="enscript-string">&quot;$MyName: $PlatformsDir/$PlatformName: No such directory\n&quot;</span> <span class="enscript-keyword">unless</span> -d <span class="enscript-string">&quot;$PlatformsDir/$PlatformName&quot;</span>;
+$OutDir = $ARGV[4];
+<span class="enscript-keyword">die</span> <span class="enscript-string">&quot;$MyName: $OutDir: No such directory\n&quot;</span> <span class="enscript-keyword">unless</span> -d $OutDir;
+
+readMaster($ARGV[0]);
+checkForCustomStubs($CustomDir);
+readAliases($PlatformsDir, $PlatformName);
+
+<span class="enscript-comment">##########################################################################
+</span><span class="enscript-comment"># copy the files specified in @Copy from the $CustomDir to $OutDir
+</span><span class="enscript-comment">##########################################################################
+</span><span class="enscript-keyword">for</span>(@Copy) {
+    <span class="enscript-keyword">my</span> $custom = File::Spec-&gt;join($CustomDir, $_);
+    <span class="enscript-keyword">my</span> $path = File::Spec-&gt;join($OutDir, $_);
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Copy $custom -&gt; $path\n&quot;</span>;
+    File::Copy::copy($custom, $path) || <span class="enscript-keyword">die</span> <span class="enscript-string">&quot;$MyName: copy($custom, $path): $!\n&quot;</span>;
+}
+
+<span class="enscript-comment">##########################################################################
+</span><span class="enscript-comment"># make all the *.s files
+</span><span class="enscript-comment">##########################################################################
+</span><span class="enscript-keyword">my</span> @src;
+<span class="enscript-keyword">my</span>($k, $sym);
+<span class="enscript-keyword">while</span> (($k, $sym) = <span class="enscript-keyword">each</span> %Symbols)
+{
+	<span class="enscript-keyword">my</span> $srcname = $$sym{asm_sym} . <span class="enscript-string">&quot;.s&quot;</span>;
+	<span class="enscript-keyword">my</span> $outpath = File::Spec-&gt;join($OutDir, $srcname);
+
+	<span class="enscript-keyword">if</span> ($$sym{is_custom}) {
+		<span class="enscript-keyword">my</span> $custom = File::Spec-&gt;join($CustomDir, $$sym{is_custom});
+		File::Copy::copy($custom, $outpath);
+		<span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Copied $outpath\n&quot;</span>;
+		
+		<span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Writing aliases for $srcname\n&quot;</span>;
+		<span class="enscript-keyword">my</span> $f = IO::File-&gt;new($outpath, <span class="enscript-string">'a'</span>);
+		<span class="enscript-keyword">die</span> <span class="enscript-string">&quot;$MyName: $outpath: $!\n&quot;</span> <span class="enscript-keyword">unless</span> <span class="enscript-keyword">defined</span>($f);
+		writeAliasesForSymbol($f, $sym);
+		<span class="enscript-keyword">undef</span> $f;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">my</span> $f = IO::File-&gt;new($outpath, <span class="enscript-string">'w'</span>);
+		<span class="enscript-keyword">die</span> <span class="enscript-string">&quot;$MyName: $outpath: $!\n&quot;</span> <span class="enscript-keyword">unless</span> <span class="enscript-keyword">defined</span>($f);
+		
+		<span class="enscript-keyword">printf</span> <span class="enscript-string">&quot;Creating $outpath\n&quot;</span>;
+		writeStubForSymbol($f, $sym);
+		writeAliasesForSymbol($f, $sym);
+		<span class="enscript-keyword">undef</span> $f;
+	}
+	<span class="enscript-keyword">push</span>(@src, $srcname);
+}
+
+<span class="enscript-comment">##########################################################################
+</span><span class="enscript-comment"># create the Makefile.inc file from the list for files in @src and @CustomSrc
+</span><span class="enscript-comment">##########################################################################
+</span><span class="enscript-keyword">my</span> $path = File::Spec-&gt;join($OutDir, <span class="enscript-string">'stubs.list'</span>);
+<span class="enscript-keyword">my</span> $f = IO::File-&gt;new($path, <span class="enscript-string">'w'</span>);
+<span class="enscript-keyword">my</span> @sources = <span class="enscript-keyword">sort</span>(@src, @CustomSrc);
+<span class="enscript-keyword">for</span> <span class="enscript-keyword">my</span> $s (@sources) {
+	<span class="enscript-keyword">printf</span> $f File::Spec-&gt;join($OutDir, $s) . <span class="enscript-string">&quot;\n&quot;</span>;
+}
+<span class="enscript-keyword">undef</span> $f;
+<span class="enscript-keyword">undef</span> $path;
+
+</pre>
+<hr />
+</body></html>

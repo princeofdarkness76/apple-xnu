@@ -1,0 +1,678 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>dhcp_options.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">dhcp_options.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2002-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * dhcp_options.c
+ * - routines to parse and access dhcp options
+ *   and create new dhcp option areas
+ * - handles overloaded areas as well as vendor-specific options
+ *   that are encoded using the RFC 2132 encoding
+ */</span>
+
+<span class="enscript-comment">/* 
+ * Modification History
+ *
+ * March 15, 2002	Dieter Siegmund (dieter@apple)
+ * - imported from bootp project
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/dhcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/dhcp_options.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">DHCP_DEBUG</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">dprintf</span>(x) printf x;
+#<span class="enscript-reference">else</span>	<span class="enscript-comment">/* !DHCP_DEBUG */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">dprintf</span>(x)
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* DHCP_DEBUG */</span>
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">my_free</span>(<span class="enscript-type">void</span> * ptr)
+{
+    _FREE(ptr, M_TEMP);
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span> *
+<span class="enscript-function-name">my_malloc</span>(<span class="enscript-type">int</span> size)
+{
+    <span class="enscript-type">void</span> * data;
+    MALLOC(data, <span class="enscript-type">void</span> *, size, M_TEMP, M_WAITOK);
+    <span class="enscript-keyword">return</span> (data);
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span> *
+<span class="enscript-function-name">my_realloc</span>(<span class="enscript-type">void</span> * oldptr, <span class="enscript-type">int</span> oldsize, <span class="enscript-type">int</span> newsize)
+{
+    <span class="enscript-type">void</span> * data;
+
+    MALLOC(data, <span class="enscript-type">void</span> *, newsize, M_TEMP, M_WAITOK);
+    bcopy(oldptr, data, oldsize);
+    my_free(oldptr);
+    <span class="enscript-keyword">return</span> (data);
+}
+
+<span class="enscript-comment">/*
+ * Functions: ptrlist_*
+ * Purpose:
+ *   A dynamically growable array of pointers.
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PTRLIST_NUMBER</span>		16
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ptrlist_init</span>(ptrlist_t * list)
+{
+    bzero(list, <span class="enscript-keyword">sizeof</span>(*list));
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ptrlist_free</span>(ptrlist_t * list)
+{
+    <span class="enscript-keyword">if</span> (list-&gt;array)
+	my_free(list-&gt;array);
+    ptrlist_init(list);
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptrlist_count</span>(ptrlist_t * list)
+{
+    <span class="enscript-keyword">if</span> (list == NULL || list-&gt;array == NULL)
+	<span class="enscript-keyword">return</span> (0);
+
+    <span class="enscript-keyword">return</span> (list-&gt;count);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">void</span> *
+<span class="enscript-function-name">ptrlist_element</span>(ptrlist_t * list, <span class="enscript-type">int</span> i)
+{
+    <span class="enscript-keyword">if</span> (list-&gt;array == NULL)
+	<span class="enscript-keyword">return</span> (NULL);
+    <span class="enscript-keyword">if</span> (i &lt; list-&gt;count)
+	<span class="enscript-keyword">return</span> (list-&gt;array[i]);
+    <span class="enscript-keyword">return</span> (NULL);
+}
+
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">ptrlist_grow</span>(ptrlist_t * list)
+{
+    <span class="enscript-keyword">if</span> (list-&gt;array == NULL) {
+	<span class="enscript-keyword">if</span> (list-&gt;size == 0)
+	    list-&gt;size = PTRLIST_NUMBER;
+	list-&gt;count = 0;
+	list-&gt;array = my_malloc(<span class="enscript-keyword">sizeof</span>(*list-&gt;array) * list-&gt;size);
+    }
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (list-&gt;size == list-&gt;count) {
+	dprintf((<span class="enscript-string">&quot;doubling %d to %d\n&quot;</span>, list-&gt;size, list-&gt;size * 2));
+	list-&gt;array = my_realloc(list-&gt;array, 
+				 <span class="enscript-keyword">sizeof</span>(*list-&gt;array) * list-&gt;size,
+				 <span class="enscript-keyword">sizeof</span>(*list-&gt;array) * list-&gt;size * 2);
+	list-&gt;size *= 2;
+    }
+    <span class="enscript-keyword">if</span> (list-&gt;array == NULL)
+	<span class="enscript-keyword">return</span> (FALSE);
+    <span class="enscript-keyword">return</span> (TRUE);
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">ptrlist_add</span>(ptrlist_t * list, <span class="enscript-type">const</span> <span class="enscript-type">void</span> * element)
+{
+    <span class="enscript-keyword">if</span> (ptrlist_grow(list) == FALSE)
+	<span class="enscript-keyword">return</span> (FALSE);
+
+    list-&gt;array[list-&gt;count++] = element;
+    <span class="enscript-keyword">return</span> (TRUE);
+}
+
+<span class="enscript-comment">/* concatenates extra onto list */</span>
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">ptrlist_concat</span>(ptrlist_t * list, ptrlist_t * extra)
+{
+    <span class="enscript-keyword">if</span> (extra-&gt;count == 0)
+	<span class="enscript-keyword">return</span> (TRUE);
+
+    <span class="enscript-keyword">if</span> ((extra-&gt;count + list-&gt;count) &gt; list-&gt;size) {
+	<span class="enscript-type">int</span> old_size = list-&gt;size;
+
+	list-&gt;size = extra-&gt;count + list-&gt;count;
+	<span class="enscript-keyword">if</span> (list-&gt;array == NULL)
+	    list-&gt;array = my_malloc(<span class="enscript-keyword">sizeof</span>(*list-&gt;array) * list-&gt;size);
+	<span class="enscript-keyword">else</span>
+	    list-&gt;array = my_realloc(list-&gt;array, old_size,
+				     <span class="enscript-keyword">sizeof</span>(*list-&gt;array) * list-&gt;size);
+    }
+    <span class="enscript-keyword">if</span> (list-&gt;array == NULL)
+	<span class="enscript-keyword">return</span> (FALSE);
+    bcopy(extra-&gt;array, list-&gt;array + list-&gt;count, 
+	  extra-&gt;count * <span class="enscript-keyword">sizeof</span>(*list-&gt;array));
+    list-&gt;count += extra-&gt;count;
+    <span class="enscript-keyword">return</span> (TRUE);
+}
+
+
+<span class="enscript-comment">/*
+ * Functions: dhcpol_* 
+ *
+ * Purpose:
+ *   Routines to parse/access existing options buffers.
+ */</span>
+boolean_t
+<span class="enscript-function-name">dhcpol_add</span>(dhcpol_t * list, <span class="enscript-type">const</span> <span class="enscript-type">void</span> * element)
+{
+    <span class="enscript-keyword">return</span> (ptrlist_add((ptrlist_t *)list, element));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">dhcpol_count</span>(dhcpol_t * list)
+{
+    <span class="enscript-keyword">return</span> (ptrlist_count((ptrlist_t *)list));
+}
+
+<span class="enscript-type">const</span> <span class="enscript-type">void</span> *
+<span class="enscript-function-name">dhcpol_element</span>(dhcpol_t * list, <span class="enscript-type">int</span> i)
+{
+    <span class="enscript-keyword">return</span> (ptrlist_element((ptrlist_t *)list, i));
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dhcpol_init</span>(dhcpol_t * list)
+{
+    ptrlist_init((ptrlist_t *)list);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dhcpol_free</span>(dhcpol_t * list)
+{
+    ptrlist_free((ptrlist_t *)list);
+}
+
+boolean_t
+<span class="enscript-function-name">dhcpol_concat</span>(dhcpol_t * list, dhcpol_t * extra)
+{
+    <span class="enscript-keyword">return</span> (ptrlist_concat((ptrlist_t *)list, (ptrlist_t *)extra));
+}
+
+<span class="enscript-comment">/*
+ * Function: dhcpol_parse_buffer
+ *
+ * Purpose:
+ *   Parse the given buffer into DHCP options, returning the
+ *   list of option pointers in the given dhcpol_t.
+ *   Parsing continues until we hit the end of the buffer or
+ *   the end tag.
+ */</span>
+boolean_t
+<span class="enscript-function-name">dhcpol_parse_buffer</span>(dhcpol_t * list, <span class="enscript-type">const</span> <span class="enscript-type">void</span> * buffer, <span class="enscript-type">int</span> length)
+{
+    <span class="enscript-type">int</span>			len;
+    <span class="enscript-type">const</span> uint8_t *	scan;
+    uint8_t		tag;
+
+    dhcpol_init(list);
+
+    len = length;
+    tag = dhcptag_pad_e;
+    <span class="enscript-keyword">for</span> (scan = (<span class="enscript-type">const</span> uint8_t *)buffer; tag != dhcptag_end_e &amp;&amp; len &gt; 0; ) {
+
+	tag = scan[DHCP_TAG_OFFSET];
+
+	<span class="enscript-keyword">switch</span> (tag) {
+	  <span class="enscript-keyword">case</span> <span class="enscript-reference">dhcptag_end_e</span>:
+	      <span class="enscript-comment">/* remember that it was terminated */</span>
+	      dhcpol_add(list, scan);
+	      scan++;
+	      len--;
+	      <span class="enscript-keyword">break</span>;
+	  <span class="enscript-keyword">case</span> <span class="enscript-reference">dhcptag_pad_e</span>: <span class="enscript-comment">/* ignore pad */</span>
+	      scan++;
+	      len--;
+	      <span class="enscript-keyword">break</span>;
+	  <span class="enscript-reference">default</span>: {
+	      uint8_t	option_len = scan[DHCP_LEN_OFFSET];
+	    
+	      dhcpol_add(list, scan);
+	      len -= (option_len + 2);
+	      scan += (option_len + 2);
+	      <span class="enscript-keyword">break</span>;
+	  }
+	}
+    }
+    <span class="enscript-keyword">if</span> (len &lt; 0) {
+	<span class="enscript-comment">/* ran off the end */</span>
+	dprintf((<span class="enscript-string">&quot;dhcp_options: parse failed near tag %d&quot;</span>, tag));
+	dhcpol_free(list);
+	<span class="enscript-keyword">return</span> (FALSE);
+    }
+    <span class="enscript-keyword">return</span> (TRUE);
+}
+
+<span class="enscript-comment">/*
+ * Function: dhcpol_find
+ *
+ * Purpose:
+ *   Finds the first occurence of the given option, and returns its
+ *   length and the option data pointer.
+ *
+ *   The optional start parameter allows this function to 
+ *   return the next start point so that successive
+ *   calls will retrieve the next occurence of the option.
+ *   Before the first call, *start should be set to 0.
+ */</span>
+<span class="enscript-type">const</span> <span class="enscript-type">void</span> *
+<span class="enscript-function-name">dhcpol_find</span>(dhcpol_t * list, <span class="enscript-type">int</span> tag, <span class="enscript-type">int</span> * len_p, <span class="enscript-type">int</span> * start)
+{
+    <span class="enscript-type">int</span> 	i = 0;
+
+    <span class="enscript-keyword">if</span> (tag == dhcptag_end_e || tag == dhcptag_pad_e)
+	<span class="enscript-keyword">return</span> (NULL);
+
+    <span class="enscript-keyword">if</span> (start)
+	i = *start;
+
+    <span class="enscript-keyword">for</span> (; i &lt; dhcpol_count(list); i++) {
+	<span class="enscript-type">const</span> uint8_t * 	option = dhcpol_element(list, i);
+	
+	<span class="enscript-keyword">if</span> (option[DHCP_TAG_OFFSET] == tag) {
+	    <span class="enscript-keyword">if</span> (len_p)
+		*len_p = option[DHCP_LEN_OFFSET];
+	    <span class="enscript-keyword">if</span> (start)
+		*start = i + 1;
+	    <span class="enscript-keyword">return</span> (option + DHCP_OPTION_OFFSET);
+	}
+    }
+    <span class="enscript-keyword">return</span> (NULL);
+}
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-comment">/*
+ * Function: dhcpol_get
+ * 
+ * Purpose:
+ *   Accumulate all occurences of the given option into a
+ *   malloc'd buffer, and return its length.  Used to get
+ *   all occurrences of a particular option in a single
+ *   data area.
+ * Note:
+ *   Use _FREE(val, M_TEMP) to free the returned data area.
+ */</span>
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">dhcpol_get</span>(dhcpol_t * list, <span class="enscript-type">int</span> tag, <span class="enscript-type">int</span> * len_p)
+{
+    <span class="enscript-type">int</span> 	i;
+    <span class="enscript-type">char</span> *	data = NULL;
+    <span class="enscript-type">int</span>		data_len = 0;
+
+    <span class="enscript-keyword">if</span> (tag == dhcptag_end_e || tag == dhcptag_pad_e)
+	<span class="enscript-keyword">return</span> (NULL);
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; dhcpol_count(list); i++) {
+	<span class="enscript-type">const</span> uint8_t * 	option = dhcpol_element(list, i);
+	
+	<span class="enscript-keyword">if</span> (option[DHCP_TAG_OFFSET] == tag) {
+	    <span class="enscript-type">int</span> len = option[DHCP_LEN_OFFSET];
+
+	    <span class="enscript-keyword">if</span> (data_len == 0) {
+		data = my_malloc(len);
+	    }
+	    <span class="enscript-keyword">else</span> {
+		data = my_realloc(data, data_len, data_len + len);
+	    }
+		FIX ME: test data NULL
+	    bcopy(option + DHCP_OPTION_OFFSET, data + data_len, len);
+	    data_len += len;
+	}
+    }
+    *len_p = data_len;
+    <span class="enscript-keyword">return</span> (data);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Function: dhcpol_parse_packet
+ *
+ * Purpose:
+ *    Parse the option areas in the DHCP packet.
+ *    Verifies that the packet has the right magic number,
+ *    then parses and accumulates the option areas.
+ *    First the pkt-&gt;dp_options is parsed.  If that contains
+ *    the overload option, it parses pkt-&gt;dp_file if specified,
+ *    then parses pkt-&gt;dp_sname if specified.
+ */</span>
+boolean_t
+<span class="enscript-function-name">dhcpol_parse_packet</span>(dhcpol_t * options, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> dhcp * pkt, <span class="enscript-type">int</span> len)
+{
+    <span class="enscript-type">char</span>		rfc_magic[4] = RFC_OPTIONS_MAGIC;
+
+    dhcpol_init(options);	<span class="enscript-comment">/* make sure it's empty */</span>
+
+    <span class="enscript-keyword">if</span> (len &lt; (<span class="enscript-keyword">sizeof</span>(*pkt) + RFC_MAGIC_SIZE)) {
+	dprintf((<span class="enscript-string">&quot;dhcp_options: packet is too short: %d &lt; %d\n&quot;</span>,
+		 len, (<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(*pkt) + RFC_MAGIC_SIZE));
+	<span class="enscript-keyword">return</span> (FALSE);
+    }
+    <span class="enscript-keyword">if</span> (bcmp(pkt-&gt;dp_options, rfc_magic, RFC_MAGIC_SIZE)) {
+	dprintf((<span class="enscript-string">&quot;dhcp_options: missing magic number\n&quot;</span>));
+	<span class="enscript-keyword">return</span> (FALSE);
+    }
+    <span class="enscript-keyword">if</span> (dhcpol_parse_buffer(options, pkt-&gt;dp_options + RFC_MAGIC_SIZE,
+			    len - <span class="enscript-keyword">sizeof</span>(*pkt) - RFC_MAGIC_SIZE) == FALSE)
+	<span class="enscript-keyword">return</span> (FALSE);
+    { <span class="enscript-comment">/* get overloaded options */</span>
+	<span class="enscript-type">const</span> uint8_t *	overload;
+	<span class="enscript-type">int</span>		overload_len;
+
+	overload = dhcpol_find(options, dhcptag_option_overload_e, 
+			       &amp;overload_len, NULL);
+	<span class="enscript-keyword">if</span> (overload &amp;&amp; overload_len == 1) { <span class="enscript-comment">/* has overloaded options */</span>
+	    dhcpol_t	extra;
+	    
+	    dhcpol_init(&amp;extra);
+	    <span class="enscript-keyword">if</span> (*overload == DHCP_OVERLOAD_FILE
+		|| *overload == DHCP_OVERLOAD_BOTH) {
+		<span class="enscript-keyword">if</span> (dhcpol_parse_buffer(&amp;extra, pkt-&gt;dp_file, 
+					<span class="enscript-keyword">sizeof</span>(pkt-&gt;dp_file))) {
+		    dhcpol_concat(options, &amp;extra);
+		    dhcpol_free(&amp;extra);
+		}
+	    }
+	    <span class="enscript-keyword">if</span> (*overload == DHCP_OVERLOAD_SNAME
+		|| *overload == DHCP_OVERLOAD_BOTH) {
+		<span class="enscript-keyword">if</span> (dhcpol_parse_buffer(&amp;extra, pkt-&gt;dp_sname, 
+					<span class="enscript-keyword">sizeof</span>(pkt-&gt;dp_sname))) {
+		    dhcpol_concat(options, &amp;extra);
+		    dhcpol_free(&amp;extra);
+		}
+	    }
+	}
+    }
+    <span class="enscript-keyword">return</span> (TRUE);
+}
+
+<span class="enscript-comment">/*
+ * Module: dhcpoa
+ *
+ * Purpose:
+ *   Types and functions to create new dhcp option areas.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Function: dhcpoa_{init_common, init_no_end, init}
+ *
+ * Purpose:
+ *   Initialize an option area structure so that it can be used
+ *   in calling the dhcpoa_* routines.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">dhcpoa_init_common</span>(dhcpoa_t * oa_p, <span class="enscript-type">void</span> * buffer, <span class="enscript-type">int</span> size, <span class="enscript-type">int</span> reserve)
+{
+    bzero(oa_p, <span class="enscript-keyword">sizeof</span>(*oa_p));
+    oa_p-&gt;oa_buffer = buffer;
+    oa_p-&gt;oa_size = size;
+    oa_p-&gt;oa_reserve = reserve;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dhcpoa_init_no_end</span>(dhcpoa_t * oa_p, <span class="enscript-type">void</span> * buffer, <span class="enscript-type">int</span> size)
+{
+    dhcpoa_init_common(oa_p, buffer, size, 0);
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">dhcpoa_size</span>(dhcpoa_t * oa_p)
+{
+    <span class="enscript-keyword">return</span> (oa_p-&gt;oa_size);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dhcpoa_init</span>(dhcpoa_t * oa_p, <span class="enscript-type">void</span> * buffer, <span class="enscript-type">int</span> size)
+{
+    <span class="enscript-comment">/* initialize the area, reserve space for the end tag */</span>
+    dhcpoa_init_common(oa_p, buffer, size, 1);
+    <span class="enscript-keyword">return</span>;
+}
+<span class="enscript-comment">/*
+ * Function: dhcpoa_add
+ *
+ * Purpose:
+ *   Add an option to the option area.
+ */</span>
+dhcpoa_ret_t
+<span class="enscript-function-name">dhcpoa_add</span>(dhcpoa_t * oa_p, dhcptag_t tag, <span class="enscript-type">int</span> len, <span class="enscript-type">const</span> <span class="enscript-type">void</span> * option)
+{
+    <span class="enscript-keyword">if</span> (len &gt; DHCP_OPTION_SIZE_MAX) {
+	dprintf((<span class="enscript-string">&quot;tag %d option %d &gt; %d\n&quot;</span>, tag, len, DHCP_OPTION_SIZE_MAX));
+	<span class="enscript-keyword">return</span> (dhcpoa_failed_e);
+    }
+
+    <span class="enscript-keyword">if</span> (oa_p-&gt;oa_end_tag) {
+	dprintf((<span class="enscript-string">&quot;attempt to add data after end tag\n&quot;</span>));
+	<span class="enscript-keyword">return</span> (dhcpoa_failed_e);
+    }
+
+    <span class="enscript-keyword">switch</span> (tag) {
+      <span class="enscript-keyword">case</span> <span class="enscript-reference">dhcptag_end_e</span>:
+	<span class="enscript-keyword">if</span> ((oa_p-&gt;oa_offset + 1) &gt; oa_p-&gt;oa_size) {
+	    <span class="enscript-comment">/* this can't happen since we're careful to leave space */</span>
+	    dprintf((<span class="enscript-string">&quot;can't add end tag %d &gt; %d\n&quot;</span>,
+		     oa_p-&gt;oa_offset + oa_p-&gt;oa_reserve, oa_p-&gt;oa_size));
+	    <span class="enscript-keyword">return</span> (dhcpoa_failed_e);
+	}
+	((uint8_t *)oa_p-&gt;oa_buffer)[oa_p-&gt;oa_offset + DHCP_TAG_OFFSET] = tag;
+	oa_p-&gt;oa_offset++;
+	oa_p-&gt;oa_end_tag = 1;
+	<span class="enscript-keyword">break</span>;
+
+      <span class="enscript-keyword">case</span> <span class="enscript-reference">dhcptag_pad_e</span>:
+	<span class="enscript-comment">/* 1 for pad tag */</span>
+	<span class="enscript-keyword">if</span> ((oa_p-&gt;oa_offset + oa_p-&gt;oa_reserve + 1) &gt; oa_p-&gt;oa_size) {
+	    dprintf((<span class="enscript-string">&quot;can't add pad tag %d &gt; %d\n&quot;</span>,
+		     oa_p-&gt;oa_offset + oa_p-&gt;oa_reserve + 1, oa_p-&gt;oa_size));
+	    <span class="enscript-keyword">return</span> (dhcpoa_full_e);
+	}
+	((uint8_t *)oa_p-&gt;oa_buffer)[oa_p-&gt;oa_offset + DHCP_TAG_OFFSET] = tag;
+	oa_p-&gt;oa_offset++;
+	<span class="enscript-keyword">break</span>;
+
+      <span class="enscript-reference">default</span>:
+	<span class="enscript-comment">/* 2 for tag/len */</span>
+	<span class="enscript-keyword">if</span> ((oa_p-&gt;oa_offset + len + 2 + oa_p-&gt;oa_reserve) &gt; oa_p-&gt;oa_size) {
+	    dprintf((<span class="enscript-string">&quot;can't add tag %d (%d &gt; %d)\n&quot;</span>, tag,
+		     oa_p-&gt;oa_offset + len + 2 + oa_p-&gt;oa_reserve, 
+		     oa_p-&gt;oa_size));
+	    <span class="enscript-keyword">return</span> (dhcpoa_full_e);
+	}
+	((uint8_t *)oa_p-&gt;oa_buffer)[oa_p-&gt;oa_offset + DHCP_TAG_OFFSET] = tag;
+	((uint8_t *)oa_p-&gt;oa_buffer)[oa_p-&gt;oa_offset + DHCP_LEN_OFFSET] = (uint8_t)len;
+	<span class="enscript-keyword">if</span> (len) {
+	    memcpy(oa_p-&gt;oa_buffer + (DHCP_OPTION_OFFSET + oa_p-&gt;oa_offset),
+		   option, len);
+	}
+	oa_p-&gt;oa_offset += len + DHCP_OPTION_OFFSET;
+	<span class="enscript-keyword">break</span>;
+    }
+    oa_p-&gt;oa_option_count++;
+    <span class="enscript-keyword">return</span> (dhcpoa_success_e);
+}
+
+<span class="enscript-comment">/*
+ * Function: dhcpoa_add_dhcpmsg
+ *
+ * Purpose:
+ *   Add a dhcp message option to the option area.
+ */</span>
+dhcpoa_ret_t
+<span class="enscript-function-name">dhcpoa_add_dhcpmsg</span>(dhcpoa_t * oa_p, dhcp_msgtype_t msgtype)
+{
+    <span class="enscript-keyword">return</span> (dhcpoa_add(oa_p, dhcptag_dhcp_message_type_e,
+		       <span class="enscript-keyword">sizeof</span>(msgtype), &amp;msgtype));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">dhcpoa_used</span>(dhcpoa_t * oa_p)
+{
+    <span class="enscript-keyword">return</span> (oa_p-&gt;oa_offset);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">dhcpoa_freespace</span>(dhcpoa_t * oa_p)
+{
+    <span class="enscript-type">int</span>	freespace;
+
+    freespace = oa_p-&gt;oa_size - oa_p-&gt;oa_offset - oa_p-&gt;oa_reserve;
+    <span class="enscript-keyword">if</span> (freespace &lt; 0) {
+	freespace = 0;
+    }
+    <span class="enscript-keyword">return</span> (freespace);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">dhcpoa_count</span>(dhcpoa_t * oa_p)
+{
+    <span class="enscript-keyword">return</span> (oa_p-&gt;oa_option_count);
+}
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">dhcpoa_buffer</span>(dhcpoa_t * oa_p) 
+{
+    <span class="enscript-keyword">return</span> (oa_p-&gt;oa_buffer);
+}
+
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">TEST_DHCP_OPTIONS</span>
+<span class="enscript-type">char</span> test_empty[] = {
+    99, 130, 83, 99,
+    255,
+};
+
+<span class="enscript-type">char</span> test_simple[] = {
+    99, 130, 83, 99,
+    1, 4, 255, 255, 252, 0,
+    3, 4, 17, 202, 40, 1,
+    255,
+};
+
+<span class="enscript-type">char</span> test_vendor[] = {
+    99, 130, 83, 99,
+    1, 4, 255, 255, 252, 0,
+    3, 4, 17, 202, 40, 1,
+    43, 6, 1, 4, 1, 2, 3, 4,
+    43, 6, 1, 4, 1, 2, 3, 4,
+    255,
+};
+
+<span class="enscript-type">char</span> test_no_end[] = {
+    0x63, 0x82, 0x53, 0x63, 0x35, 0x01, 0x05, 0x36, 
+    0x04, 0xc0, 0xa8, 0x01, 0x01, 0x33, 0x04, 0x80,
+    0x00, 0x80, 0x00, 0x01, 0x04, 0xff, 0xff, 0xff,
+    0x00, 0x03, 0x04, 0xc0, 0xa8, 0x01, 0x01, 0x06,
+    0x0c, 0x18, 0x1a, 0xa3, 0x21, 0x18, 0x1a, 0xa3,
+    0x20, 0x18, 0x5e, 0xa3, 0x21, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+<span class="enscript-type">char</span> test_too_short[] = {
+    0x1 
+};
+<span class="enscript-type">struct</span> test {
+    <span class="enscript-type">char</span> * 		name;
+    <span class="enscript-type">char</span> *		data;
+    <span class="enscript-type">int</span>			len;
+    boolean_t		result;
+};
+
+<span class="enscript-type">struct</span> test tests[] = {
+    { <span class="enscript-string">&quot;empty&quot;</span>, test_empty, <span class="enscript-keyword">sizeof</span>(test_empty), TRUE },
+    { <span class="enscript-string">&quot;simple&quot;</span>, test_simple, <span class="enscript-keyword">sizeof</span>(test_simple), TRUE },
+    { <span class="enscript-string">&quot;vendor&quot;</span>, test_vendor, <span class="enscript-keyword">sizeof</span>(test_vendor), TRUE },
+    { <span class="enscript-string">&quot;no_end&quot;</span>, test_no_end, <span class="enscript-keyword">sizeof</span>(test_no_end), TRUE },
+    { <span class="enscript-string">&quot;too_short&quot;</span>, test_too_short, <span class="enscript-keyword">sizeof</span>(test_too_short), FALSE },
+    { NULL, NULL, 0, FALSE },
+};
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> buf[2048];
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">main</span>()
+{
+    <span class="enscript-type">int</span> 	i;
+    dhcpol_t 	options;
+    <span class="enscript-type">struct</span> dhcp * pkt = (<span class="enscript-type">struct</span> dhcp *)buf;
+
+    dhcpol_init(&amp;options);
+
+    <span class="enscript-keyword">for</span> (i = 0; tests[i].name; i++) {
+	printf(<span class="enscript-string">&quot;\nTest %d: &quot;</span>, i);
+	bcopy(tests[i].data, pkt-&gt;dp_options, tests[i].len);
+	<span class="enscript-keyword">if</span> (dhcpol_parse_packet(&amp;options, pkt, 
+				<span class="enscript-keyword">sizeof</span>(*pkt) + tests[i].len)
+	    != tests[i].result) {
+	    printf(<span class="enscript-string">&quot;test '%s' FAILED\n&quot;</span>, tests[i].name);
+	}
+	<span class="enscript-keyword">else</span> {
+	    printf(<span class="enscript-string">&quot;test '%s' PASSED\n&quot;</span>, tests[i].name);
+	}
+	dhcpol_free(&amp;options);
+    }
+    exit(0);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* TEST_DHCP_OPTIONS */</span>
+</pre>
+<hr />
+</body></html>

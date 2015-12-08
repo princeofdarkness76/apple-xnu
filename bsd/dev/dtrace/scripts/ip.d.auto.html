@@ -1,0 +1,250 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ip.d</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ip.d&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+/*
+ * Copyright (c) 2006-2012 Apple Inc.  All Rights Reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this
+ * file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_HEADER_END@
+ */
+
+#pragma D depends_on library darwin.d
+#pragma D depends_on module mach_kernel
+#pragma D depends_on provider ip
+
+/* Translators for IP dtrace provider */
+
+typedef struct pktinfo {
+	struct mbuf *pkt_addr;	/* Pointer to the packet (struct mbuf) */
+} pktinfo_t;
+
+#pragma D binding &quot;1.0&quot; translator
+translator pktinfo_t &lt; struct mbuf *m &gt; {
+	pkt_addr = m;
+};
+
+typedef struct csinfo {
+	uint8_t   ip_ver;
+	uint16_t  dport;
+	uint16_t  sport;
+	string	  ip_daddr;
+	string	  ip_saddr;
+	uint8_t	  protocol;
+	struct inpcb *cs_addr;	/* Pointer to inpcb (struct inpcb) */
+} csinfo_t;
+
+#pragma D binding &quot;1.0&quot; translator
+translator csinfo_t &lt; struct inpcb *P &gt; {
+	cs_addr = P;
+	ip_ver = (P != NULL) ? (((P-&gt;inp_vflag &amp; 0x2) != 0) ? 6 : 4) : 0;
+	dport = (P != NULL) ? ntohs(P-&gt;inp_fport) : 0;
+	sport = (P != NULL) ? ntohs(P-&gt;inp_lport) : 0;
+	ip_saddr = (P != NULL) ? (((P-&gt;inp_vflag &amp; 0x2) != 0) ? 
+			inet_ntoa6(&amp;P-&gt;inp_dependladdr.inp6_local) :
+			inet_ntoa((uint32_t *)&amp;P-&gt;inp_dependladdr.inp46_local.ia46_addr4.s_addr)) : &quot;&lt;null&gt;&quot;;
+	ip_daddr = (P != NULL) ? (((P-&gt;inp_vflag &amp; 0x2) != 0) ?
+			inet_ntoa6(&amp;P-&gt;inp_dependfaddr.inp6_foreign) :
+			inet_ntoa((uint32_t *)&amp;P-&gt;inp_dependfaddr.inp46_foreign.ia46_addr4.s_addr)) : &quot;&lt;null&gt;&quot;;
+	protocol = P-&gt;inp_ip_p;
+};
+
+typedef struct ipinfo {
+	uint8_t  ip_ver;		/* IP version (4, 6) */
+	uint16_t ip_plength;		/* payload length */
+	string   ip_saddr;		/* source address */
+	string   ip_daddr;		/* destination address */
+} ipinfo_t;
+
+/*
+ * The ip vhl byte is the first byte in struct ip. The type names are
+ * different depending on whether _IP_VHL is defined or not and that will
+ * confuse dtrace. So instead of using type names, just cast and extract
+ * version and header length info from the ip structure.
+ */
+#pragma D binding &quot;1.0&quot; translator
+translator ipinfo_t &lt; struct ip * ip &gt; {
+	ip_ver = (ip != NULL) ? ((*(uint8_t *) ip) &amp; 0xf0) &gt;&gt; 4 : 0;
+	ip_plength = (ip != NULL) ? 
+		(ntohs(ip-&gt;ip_len) - (((*(uint8_t *) ip) &amp; 0x0f) &lt;&lt; 2)) : 0;
+	ip_saddr = (ip != NULL) ? inet_ntoa((uint32_t *)&amp;ip-&gt;ip_src.s_addr) : &quot;&lt;null&gt;&quot;;
+	ip_daddr = (ip != NULL) ? inet_ntoa((uint32_t *)&amp;ip-&gt;ip_dst.s_addr) : &quot;&lt;null&gt;&quot;;
+};
+
+#pragma D binding &quot;1.0&quot; translator
+translator ipinfo_t &lt; struct ip6_hdr *ip6 &gt; {
+	ip_ver = (ip6 != NULL) ? (ip6-&gt;ip6_ctlun.ip6_un2_vfc &amp; 0xf0) &gt;&gt; 4 : 0;
+	ip_plength = (ip6 != NULL) ? (ntohs(ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_plen)) : 0;
+	ip_saddr = (ip6 != NULL) ? inet_ntoa6(&amp;ip6-&gt;ip6_src) : &quot;&lt;null&gt;&quot;;
+	ip_daddr = (ip6 != NULL) ? inet_ntoa6(&amp;ip6-&gt;ip6_dst) : &quot;&lt;null&gt;&quot;;
+};
+
+/*
+ * void_ip_t is a void pointer to either an IPv4 or IPv6 header. It has
+ * its own type name so that a translator can be determined.
+ */
+typedef uintptr_t void_ip_t;
+#pragma D binding &quot;1.0&quot; translator
+translator ipinfo_t &lt; void_ip_t *i&gt; {
+	ip_ver = (i != NULL) ? (*(uint8_t *)i &gt;&gt; 4) : 0;
+	ip_plength = (i != NULL) ? (((*(uint8_t *)i) &gt;&gt; 4 == 4) ? 
+		ntohs(((struct ip *)i)-&gt;ip_len) - 
+		(((*(uint8_t *)i) &amp; 0x0f) &lt;&lt; 2): 
+		(((*(uint8_t *)i) &gt;&gt; 4 == 6) ? 
+		ntohs(((struct ip6_hdr *)i)-&gt;ip6_ctlun.ip6_un1.ip6_un1_plen) : 0)) : 0;
+	ip_saddr = (i != NULL) ? ((((*(uint8_t *)i)) &gt;&gt; 4 == 4) ? 
+		inet_ntoa((uint32_t *)&amp;(((struct ip *)i)-&gt;ip_src.s_addr)) : 
+		((((*(uint8_t *)i) &gt;&gt; 4) == 6) ?
+		inet_ntoa6(&amp;((struct ip6_hdr *)i)-&gt;ip6_src) : &quot;&lt;unknown&gt;&quot;)) : &quot;&lt;null&gt;&quot;; 
+	ip_daddr = (i != NULL) ? (((*(uint8_t *)i) &gt;&gt; 4 == 4) ? 
+		inet_ntoa((uint32_t *)&amp;((struct ip*)i)-&gt;ip_dst.s_addr) : ((((*(uint8_t *)i) &gt;&gt; 4) == 6) ?
+		inet_ntoa6(&amp;((struct ip6_hdr *)i)-&gt;ip6_dst) : &quot;&lt;unknown&gt;&quot;)) : &quot;&lt;null&gt;&quot;;
+};
+
+typedef struct ifinfo {
+	string    if_name;		/* interface name */
+	int8_t    if_local;		/* is delivered locally */
+	int8_t    if_ipstack;		/* ipstack id */
+	struct ifnet *if_addr;		/* pointer to raw ill_t */
+	uint16_t  if_flags;		/* flags: up/down, broadcast etc. */
+	uint32_t  if_eflags;		/* extended flags */
+	uint16_t  if_unit;
+} ifinfo_t;
+
+#pragma D binding &quot;1.0&quot; translator
+translator ifinfo_t &lt; struct ifnet *ifp &gt; {
+	if_name = (ifp != NULL) ? ifp-&gt;if_name : &quot;&lt;null&gt;&quot;;
+	if_unit = (ifp != NULL) ? ifp-&gt;if_unit : 0;
+	if_local = 0;
+	if_ipstack = 0;
+	if_addr = ifp;
+	if_flags = (ifp != NULL) ? ifp-&gt;if_flags : 0;
+	if_eflags = (ifp != NULL) ? ifp-&gt;if_eflags : 0;
+	
+};
+
+typedef struct ipv4info {
+	uint8_t	  ipv4_ver;		/* IP version (4) */
+	uint8_t   ipv4_ihl;		/* header length, bytes */
+	uint8_t   ipv4_tos;		/* type of service field */
+	uint16_t  ipv4_length;		/* length (header + payload) */
+	uint16_t  ipv4_ident;		/* identification */
+	uint8_t   ipv4_flags;		/* IP flags */
+	uint16_t  ipv4_offset;		/* fragment offset */
+	uint8_t   ipv4_ttl;		/* time to live */
+	uint8_t   ipv4_protocol;	/* next level protocol */
+	string    ipv4_protostr;	/* next level protocol, as a string */
+	uint16_t  ipv4_checksum;	/* header checksum */
+	in_addr_t ipv4_src;		/* source address */
+	in_addr_t ipv4_dst;		/* destination address */
+	string    ipv4_saddr;		/* source address, string */
+	string    ipv4_daddr;		/* destination address, string */
+	struct ip *ipv4_hdr;		/* pointer to raw header */
+} ipv4info_t;
+
+#pragma D binding &quot;1.0&quot; translator
+translator ipv4info_t &lt; struct ip *ip &gt; {
+	ipv4_ver = (ip != NULL) ? (*(uint8_t *)ip &amp; 0xf0) &gt;&gt; 4 : 0;
+	ipv4_ihl = (ip != NULL) ? ((*(uint8_t *)ip &amp; 0x0f) &lt;&lt; 2) : 0;
+	ipv4_tos = (ip!= NULL) ? ip-&gt;ip_tos : 0;
+	ipv4_length = (ip != NULL) ? ntohs(ip-&gt;ip_len) : 0; 
+	ipv4_ident = (ip != NULL) ? ip-&gt;ip_id : 0;
+	ipv4_flags = (ip != NULL) ? (ntohs(ip-&gt;ip_off) &amp; 0xe000) : 0;
+	ipv4_offset = (ip != NULL) ? (ntohs(ip-&gt;ip_off) &amp; 0x1fff) : 0;
+	ipv4_ttl = (ip != NULL) ? ip-&gt;ip_ttl : 0;
+	ipv4_protocol = (ip != NULL) ? ip-&gt;ip_p : 0;
+	ipv4_protostr = (ip == NULL) ? &quot;&lt;null&gt;&quot; :
+			(ip-&gt;ip_p == 1) ? &quot;ICMP&quot; :
+			(ip-&gt;ip_p == 2) ? &quot;IGMP&quot; :
+			(ip-&gt;ip_p == 4) ? &quot;IP&quot; :
+			(ip-&gt;ip_p == 6) ? &quot;TCP&quot;: 
+			(ip-&gt;ip_p == 17) ? &quot;UDP&quot; : 
+			(ip-&gt;ip_p == 50) ? &quot;ESP&quot;: 
+			(ip-&gt;ip_p == 51) ? &quot;AH&quot; : 
+			(ip-&gt;ip_p == 58) ? &quot;ICMPV6&quot; : 
+			(ip-&gt;ip_p == 255) ? &quot;RAW&quot; : stringof(ip-&gt;ip_p);
+	ipv4_checksum = (ip != NULL) ? ntohs(ip-&gt;ip_sum) : 0;
+	ipv4_src = (ip != NULL) ? ip-&gt;ip_src.s_addr : 0;
+	ipv4_dst = (ip != NULL) ? ip-&gt;ip_dst.s_addr : 0;
+	ipv4_saddr = (ip != NULL) ? inet_ntoa((uint32_t *)&amp;ip-&gt;ip_src.s_addr) : &quot;&lt;null&gt;&quot;;
+	ipv4_daddr = (ip != NULL) ? inet_ntoa((uint32_t *)&amp;ip-&gt;ip_dst.s_addr) : &quot;&lt;null&gt;&quot;;
+	ipv4_hdr = ip;
+};
+
+typedef struct ipv6info {
+	uint8_t    ipv6_ver;		/* IP version (6) */
+	uint8_t    ipv6_tclass;		/* traffic class */
+	uint32_t   ipv6_flow;		/* flow label */
+	uint16_t   ipv6_plen;		/* payload length */
+	uint8_t    ipv6_nexthdr;	/* next header protocol */
+	string     ipv6_nextstr;	/* next header protocol, as a string */
+	uint8_t    ipv6_hlim;		/* hop limit */
+	struct in6_addr *ipv6_src;	/* source address, pointer to struct in6_addr */
+	struct in6_addr *ipv6_dst;	/* destination address, pointer to struct in6_addr */
+	string     ipv6_saddr;		/* source address, string */
+	string     ipv6_daddr;		/* destination address, string */
+	struct ip6_hdr *ipv6_hdr;	/* pointer to raw header */
+} ipv6info_t;
+
+#pragma D binding &quot;1.0&quot; translator
+translator ipv6info_t &lt; struct ip6_hdr *ip6 &gt; {
+ 	ipv6_ver = (ip6 != NULL) ? ip6-&gt;ip6_ctlun.ip6_un2_vfc : 10;
+	ipv6_tclass = (ip6 != NULL) ? (ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_flow &amp; 0x0ff00000) &gt;&gt; 20 : 0;
+	ipv6_flow = (ip6 != NULL) ? (ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_flow &amp; 0x000fffff) : 0;
+	ipv6_plen = (ip6 != NULL) ? ntohs(ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_plen) : 0;
+	ipv6_nexthdr = (ip6 != NULL) ? ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_nxt : 0;
+	ipv6_nextstr = (ip6 == NULL) ? &quot;&lt;null&gt;&quot; :
+			(ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_nxt == 1) ? &quot;ICMP&quot; :
+			(ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_nxt == 2) ? &quot;IGMP&quot; :
+			(ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_nxt == 4) ? &quot;IP&quot; :
+			(ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_nxt == 6) ? &quot;TCP&quot; :
+			(ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_nxt == 17) ? &quot;UDP&quot; :
+			(ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_nxt == 50) ? &quot;ESP&quot; :
+			(ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_nxt == 51) ? &quot;AH&quot; : 
+			(ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_nxt == 58) ? &quot;ICMPV6&quot; :
+			(ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_nxt == 255) ? &quot;RAW&quot; : 
+			stringof(ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_nxt);
+	ipv6_hlim = (ip6 != NULL) ? ip6-&gt;ip6_ctlun.ip6_un1.ip6_un1_hlim : 0;
+	ipv6_src = (ip6 != NULL) ? (&amp;ip6-&gt;ip6_src) : 0;
+	ipv6_dst = (ip6 != NULL) ? (&amp;ip6-&gt;ip6_dst) : 0;
+	ipv6_saddr = (ip6 != NULL) ? inet_ntoa6(&amp;ip6-&gt;ip6_src) : &quot;&lt;null&gt;&quot;;
+	ipv6_daddr = (ip6 != NULL) ? inet_ntoa6(&amp;ip6-&gt;ip6_dst) : &quot;&lt;null&gt;&quot;; 
+	ipv6_hdr = ip6;
+};
+</pre>
+<hr />
+</body></html>

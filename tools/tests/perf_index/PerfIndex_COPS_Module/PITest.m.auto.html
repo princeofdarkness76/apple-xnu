@@ -1,0 +1,189 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>PITest.m</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">PITest.m&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+//
+//  PITest.m
+//  PerfIndex
+//
+//  Created by Mark Hamilton on 8/21/13.
+//
+//
+
+#import &quot;PITest.h&quot;
+#include &lt;dlfcn.h&gt;
+#include &lt;pthread.h&gt;
+
+@implementation PITest
+
++ (id)testWithOptions:(NSDictionary *)options
+{
+    PITest *instance = nil;
+    <span class="enscript-keyword">if</span>(instance == nil)
+        instance = <span class="enscript-type">[</span><span class="enscript-type">[</span>PITest alloc<span class="enscript-type">]</span> init<span class="enscript-type">]</span>;
+    <span class="enscript-type">[</span>instance setTestName:<span class="enscript-type">[</span>options objectForKey:@&quot;name&quot;<span class="enscript-type">]</span><span class="enscript-type">]</span>;
+    <span class="enscript-keyword">return</span> instance;
+}
+
+- (BOOL)loadPITestAtPath:(NSString*) <span class="enscript-type">path</span>
+{
+    void* handle;
+    void* f;
+
+    handle = dlopen(<span class="enscript-type">[</span><span class="enscript-type">path</span> UTF8String<span class="enscript-type">]</span>, RTLD_NOW | RTLD_LOCAL);
+    <span class="enscript-keyword">if</span>(!handle) {
+        <span class="enscript-keyword">return</span> NO;
+    }
+
+
+    f = dlsym(handle, &quot;setup&quot;);
+    self-&gt;setup_func = (int (*)(int, long long, int, void **))f;
+
+    f = dlsym(handle, &quot;execute&quot;);
+    self-&gt;execute_func = (int (*)(int, int, long long, int, void **))f;
+    <span class="enscript-keyword">if</span>(!self-&gt;execute_func)
+        <span class="enscript-keyword">return</span> NO;
+
+    f = dlsym(handle, &quot;cleanup&quot;);
+    self-&gt;cleanup_func = (void (*)(int, long long))f;
+    <span class="enscript-keyword">return</span> YES;
+}
+
+- (long long)lengthForTest:(NSString*) testName
+{
+    NSNumber* number;
+    long long myLength;
+    NSDictionary* lengths = <span class="enscript-type">[</span>NSDictionary dictionaryWithObjectsAndKeys:
+        @&quot;cpu&quot;, <span class="enscript-type">[</span>NSNumber numberWithLongLong:2000<span class="enscript-type">]</span>,
+        @&quot;syscall&quot;, <span class="enscript-type">[</span>NSNumber numberWithLongLong:2500<span class="enscript-type">]</span>,
+        @&quot;memory&quot;, <span class="enscript-type">[</span>NSNumber numberWithLongLong:1000000<span class="enscript-type">]</span>,
+        @&quot;fault&quot;, <span class="enscript-type">[</span>NSNumber numberWithLongLong:500<span class="enscript-type">]</span>,
+        @&quot;zfod&quot;, <span class="enscript-type">[</span>NSNumber numberWithLongLong:500<span class="enscript-type">]</span>,
+        @&quot;file_create&quot;, <span class="enscript-type">[</span>NSNumber numberWithLongLong:10<span class="enscript-type">]</span>,
+        @&quot;file_read&quot;, <span class="enscript-type">[</span>NSNumber numberWithLongLong:1000000<span class="enscript-type">]</span>,
+        @&quot;file_write&quot;, <span class="enscript-type">[</span>NSNumber numberWithLongLong:1000000<span class="enscript-type">]</span>,
+    nil<span class="enscript-type">]</span>;
+
+    number = (NSNumber*)<span class="enscript-type">[</span>lengths objectForKey:testName<span class="enscript-type">]</span>;
+    <span class="enscript-keyword">if</span>(!number) {
+        myLength = 10;
+    } <span class="enscript-keyword">else</span> {
+        myLength = <span class="enscript-type">[</span>number longLongValue<span class="enscript-type">]</span>;
+    }
+
+    <span class="enscript-keyword">return</span> myLength;
+}
+
+- (BOOL)setup
+{
+    BOOL success = NO;
+    int retval;
+
+    NSString* testPath = <span class="enscript-type">[</span>NSString stringWithFormat:@&quot;/AppleInternal/CoreOS/perf_index/<span class="enscript-comment">%@.dylib&quot;, [self testName]];
+</span>    success = <span class="enscript-type">[</span>self loadPITestAtPath:testPath<span class="enscript-type">]</span>;
+    <span class="enscript-keyword">if</span>(!success) {
+        NSLog(@&quot;Failed to <span class="enscript-type">load</span> test <span class="enscript-comment">%@&quot;, [self testName]);
+</span>        <span class="enscript-keyword">return</span> NO;
+    }
+
+    self-&gt;<span class="enscript-type">length</span> = <span class="enscript-type">[</span>self lengthForTest:<span class="enscript-type">[</span>self testName<span class="enscript-type">]</span><span class="enscript-type">]</span>;
+    self-&gt;numThreads = 1;
+    self-&gt;testArgc = 0;
+    self-&gt;testArgv = NULL;
+
+    pthread_cond_init(&amp;self-&gt;threadsReadyCvar, NULL);
+    pthread_cond_init(&amp;self-&gt;startCvar, NULL);
+    pthread_mutex_init(&amp;self-&gt;readyThreadCountLock, NULL);
+    self-&gt;readyThreadCount = 0;
+
+    <span class="enscript-keyword">if</span>(self-&gt;setup_func) {
+        retval = self-&gt;setup_func(1, self-&gt;<span class="enscript-type">length</span>, 0, NULL);
+        <span class="enscript-keyword">if</span>(retval != 0) {
+            NSLog(@&quot;setup_func failed&quot;);
+            <span class="enscript-keyword">return</span> NO;
+        }
+    }
+
+    self-&gt;threads = (pthread_t*)malloc(sizeof(pthread_t)*self-&gt;numThreads);
+
+    <span class="enscript-keyword">for</span>(int thread_index = 0; thread_index &lt; self-&gt;numThreads; thread_index++) {
+        NSNumber* my_thread_index = <span class="enscript-type">[</span>NSNumber numberWithInt:thread_index<span class="enscript-type">]</span>;
+        NSArray *arg = <span class="enscript-type">[</span>NSArray arrayWithObjects:my_thread_index, self, nil<span class="enscript-type">]</span>;
+        retval = pthread_create(&amp;threads<span class="enscript-type">[</span>thread_index<span class="enscript-type">]</span>, NULL, thread_setup, (__bridge void*)arg);
+        <span class="enscript-keyword">if</span>(retval != 0) {
+            NSLog(@&quot;pthread_create failed&quot;);
+            free(self-&gt;threads);
+            <span class="enscript-keyword">return</span> NO;
+        }
+    }
+
+    pthread_mutex_lock(&amp;self-&gt;readyThreadCountLock);
+    <span class="enscript-keyword">if</span>(self-&gt;readyThreadCount != self-&gt;numThreads) {
+        pthread_cond_wait(&amp;self-&gt;threadsReadyCvar, &amp;self-&gt;readyThreadCountLock);
+    }
+    pthread_mutex_unlock(&amp;self-&gt;readyThreadCountLock);
+    <span class="enscript-keyword">return</span> YES;
+}
+
+- (BOOL)execute
+{
+    pthread_cond_broadcast(&amp;self-&gt;startCvar);
+    <span class="enscript-keyword">for</span>(int thread_index = 0; thread_index &lt; self-&gt;numThreads; thread_index++) {
+        pthread_join(self-&gt;threads<span class="enscript-type">[</span>thread_index<span class="enscript-type">]</span>, NULL);
+    }
+    <span class="enscript-keyword">return</span> YES;
+}
+
+- (void)cleanup
+{
+    free(self-&gt;threads);
+    <span class="enscript-keyword">if</span>(self-&gt;cleanup_func)
+        self-&gt;cleanup_func(0, self-&gt;<span class="enscript-type">length</span>);
+}
+
+void* thread_setup(void* arg)
+{
+    int my_index = (int)<span class="enscript-type">[</span>(NSNumber*)<span class="enscript-type">[</span>(__bridge NSArray*)arg objectAtIndex:0<span class="enscript-type">]</span> integerValue<span class="enscript-type">]</span>;
+    PITest* test = (PITest*)<span class="enscript-type">[</span>(__bridge NSArray*)arg objectAtIndex:1<span class="enscript-type">]</span>;
+
+    long long work_size = test-&gt;<span class="enscript-type">length</span> / test-&gt;numThreads;
+    int work_remainder = test-&gt;<span class="enscript-type">length</span> <span class="enscript-comment">% test-&gt;numThreads;
+</span>
+    <span class="enscript-keyword">if</span>(work_remainder &gt; my_index) {
+        work_size++;
+    }
+
+    pthread_mutex_lock(&amp;test-&gt;readyThreadCountLock);
+    test-&gt;readyThreadCount++;
+
+    <span class="enscript-keyword">if</span>(test-&gt;readyThreadCount == test-&gt;numThreads)
+        pthread_cond_signal(&amp;test-&gt;threadsReadyCvar);
+    pthread_cond_wait(&amp;test-&gt;startCvar, &amp;test-&gt;readyThreadCountLock);
+    pthread_mutex_unlock(&amp;test-&gt;readyThreadCountLock);
+    test-&gt;execute_func(my_index, test-&gt;numThreads, work_size, test-&gt;testArgc, test-&gt;testArgv);
+
+    <span class="enscript-keyword">return</span> NULL;
+}
+
+@<span class="enscript-keyword">end</span>
+</pre>
+<hr />
+</body></html>

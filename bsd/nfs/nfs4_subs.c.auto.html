@@ -1,0 +1,2717 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>nfs4_subs.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">nfs4_subs.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2006-2011 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * miscellaneous support functions for NFSv4
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kpi_mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syscall.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ubc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/quota.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread_call.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vmparam.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/rpcv2.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfsproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfsnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/xdr_subs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfsm_subs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfs_gss.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfsmount.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfs_lock.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/specfs/specdev.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_interface.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * NFS_MAX_WHO is the maximum length of a string representation used
+ * in as an ace who, owner, or group. There is no explicit limit in the
+ * protocol, however the kauth routines have a limit of MAPATHLEN for
+ * strings including the trailing null character, so we impose that
+ * limit. This should be changed if kauth routines change.
+ *
+ * We also want some reasonable maximum, as 32 bits worth of string length
+ * is liable to cause problems. At the very least this limit must guarantee 
+ * that any express that contains the 32 bit length from off the wire used in
+ * allocations does not overflow.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">NFS_MAX_WHO</span>	MAXPATHLEN
+
+<span class="enscript-comment">/*
+ * Create the unique client ID to use for this mount.
+ *
+ * Format: unique ID + en0_address + server_address + mntfromname + mntonname
+ *
+ * We could possibly use one client ID for all mounts of the same server;
+ * however, that would complicate some aspects of state management.
+ *
+ * Each mount socket connection sends a SETCLIENTID.  If the ID is the same but
+ * the verifier (mounttime) changes, then all previous (mounts') state gets dropped.
+ *
+ * State is typically managed per-mount and in order to keep it that way
+ * each mount needs to use a separate client ID.  However, we also need to
+ * make sure that each mount uses the same client ID each time.
+ *
+ * In an attempt to differentiate mounts we include the mntfromname and mntonname
+ * strings to the client ID (as long as they fit).  We also make sure that the
+ * value does not conflict with any existing values in use (changing the unique ID).
+ *
+ * Note that info such as the server's address may change over the lifetime of the
+ * mount.  But the client ID will not be updated because we don't want it changing
+ * simply because we switched to a different server address.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfs4_init_clientid</span>(<span class="enscript-type">struct</span> nfsmount *nmp)
+{
+	<span class="enscript-type">struct</span> nfs_client_id *ncip, *ncip2;
+	<span class="enscript-type">struct</span> sockaddr *saddr;
+	<span class="enscript-type">int</span> error, len, len2, cmp;
+	<span class="enscript-type">struct</span> vfsstatfs *vsfs;
+
+	<span class="enscript-type">static</span> uint8_t en0addr[6];
+	<span class="enscript-type">static</span> uint8_t en0addr_set = 0;
+
+	lck_mtx_lock(nfs_global_mutex);
+	<span class="enscript-keyword">if</span> (!en0addr_set) {
+		ifnet_t interface = NULL;
+		error = ifnet_find_by_name(<span class="enscript-string">&quot;en0&quot;</span>, &amp;interface);
+		<span class="enscript-keyword">if</span> (!error)
+			error = ifnet_lladdr_copy_bytes(interface, en0addr, <span class="enscript-keyword">sizeof</span>(en0addr));
+		<span class="enscript-keyword">if</span> (error)
+			printf(<span class="enscript-string">&quot;nfs4_init_clientid: error getting en0 address, %d\n&quot;</span>, error);
+		<span class="enscript-keyword">if</span> (!error)
+			en0addr_set = 1;
+		<span class="enscript-keyword">if</span> (interface)
+			ifnet_release(interface);
+	}
+	lck_mtx_unlock(nfs_global_mutex);
+
+	MALLOC(ncip, <span class="enscript-type">struct</span> nfs_client_id *, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> nfs_client_id), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (!ncip)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	vsfs = vfs_statfs(nmp-&gt;nm_mountp);
+	saddr = nmp-&gt;nm_saddr;
+	ncip-&gt;nci_idlen = <span class="enscript-keyword">sizeof</span>(uint32_t) + <span class="enscript-keyword">sizeof</span>(en0addr) + saddr-&gt;sa_len +
+		strlen(vsfs-&gt;f_mntfromname) + 1 + strlen(vsfs-&gt;f_mntonname) + 1;
+	<span class="enscript-keyword">if</span> (ncip-&gt;nci_idlen &gt; NFS4_OPAQUE_LIMIT)
+		ncip-&gt;nci_idlen = NFS4_OPAQUE_LIMIT;
+	MALLOC(ncip-&gt;nci_id, <span class="enscript-type">char</span> *, ncip-&gt;nci_idlen, M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (!ncip-&gt;nci_id) {
+		FREE(ncip, M_TEMP);
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+
+	*(uint32_t*)ncip-&gt;nci_id = 0;
+	len = <span class="enscript-keyword">sizeof</span>(uint32_t);
+	len2 = min(<span class="enscript-keyword">sizeof</span>(en0addr), ncip-&gt;nci_idlen-len);
+	bcopy(en0addr, &amp;ncip-&gt;nci_id[len], len2);
+	len += <span class="enscript-keyword">sizeof</span>(en0addr);
+	len2 = min(saddr-&gt;sa_len, ncip-&gt;nci_idlen-len);
+	bcopy(saddr, &amp;ncip-&gt;nci_id[len], len2);
+	len += len2;
+	<span class="enscript-keyword">if</span> (len &lt; ncip-&gt;nci_idlen) {
+		len2 = strlcpy(&amp;ncip-&gt;nci_id[len], vsfs-&gt;f_mntfromname, ncip-&gt;nci_idlen-len);
+		<span class="enscript-keyword">if</span> (len2 &lt; (ncip-&gt;nci_idlen - len))
+			len += len2 + 1;
+		<span class="enscript-keyword">else</span>
+			len = ncip-&gt;nci_idlen;
+	}
+	<span class="enscript-keyword">if</span> (len &lt; ncip-&gt;nci_idlen) {
+		len2 = strlcpy(&amp;ncip-&gt;nci_id[len], vsfs-&gt;f_mntonname, ncip-&gt;nci_idlen-len);
+		<span class="enscript-keyword">if</span> (len2 &lt; (ncip-&gt;nci_idlen - len))
+			len += len2 + 1;
+		<span class="enscript-keyword">else</span>
+			len = ncip-&gt;nci_idlen;
+	}
+
+	<span class="enscript-comment">/* make sure the ID is unique, and add it to the sorted list */</span>
+	lck_mtx_lock(nfs_global_mutex);
+	TAILQ_FOREACH(ncip2, &amp;nfsclientids, nci_link) {
+		<span class="enscript-keyword">if</span> (ncip-&gt;nci_idlen &gt; ncip2-&gt;nci_idlen)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (ncip-&gt;nci_idlen &lt; ncip2-&gt;nci_idlen)
+			<span class="enscript-keyword">break</span>;
+		cmp = bcmp(ncip-&gt;nci_id + <span class="enscript-keyword">sizeof</span>(uint32_t),
+			ncip2-&gt;nci_id + <span class="enscript-keyword">sizeof</span>(uint32_t),
+			ncip-&gt;nci_idlen - <span class="enscript-keyword">sizeof</span>(uint32_t));
+		<span class="enscript-keyword">if</span> (cmp &gt; 0)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (cmp &lt; 0)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (*(uint32_t*)ncip-&gt;nci_id &gt; *(uint32_t*)ncip2-&gt;nci_id)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (*(uint32_t*)ncip-&gt;nci_id &lt; *(uint32_t*)ncip2-&gt;nci_id)
+			<span class="enscript-keyword">break</span>;
+		*(uint32_t*)ncip-&gt;nci_id += 1;
+	}
+	<span class="enscript-keyword">if</span> (*(uint32_t*)ncip-&gt;nci_id)
+		printf(<span class="enscript-string">&quot;nfs client ID collision (%d) for %s on %s\n&quot;</span>, *(uint32_t*)ncip-&gt;nci_id,
+			vsfs-&gt;f_mntfromname, vsfs-&gt;f_mntonname);
+	<span class="enscript-keyword">if</span> (ncip2)
+		TAILQ_INSERT_BEFORE(ncip2, ncip, nci_link);
+	<span class="enscript-keyword">else</span>
+		TAILQ_INSERT_TAIL(&amp;nfsclientids, ncip, nci_link);
+	nmp-&gt;nm_longid = ncip;
+	lck_mtx_unlock(nfs_global_mutex);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * NFSv4 SETCLIENTID
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfs4_setclientid</span>(<span class="enscript-type">struct</span> nfsmount *nmp)
+{
+	uint64_t verifier, xid;
+	<span class="enscript-type">int</span> error = 0, status, numops;
+	uint32_t bitmap[NFS_ATTR_BITMAP_LEN];
+	thread_t thd;
+	kauth_cred_t cred;
+	<span class="enscript-type">struct</span> nfsm_chain nmreq, nmrep;
+	<span class="enscript-type">struct</span> sockaddr_storage ss;
+	<span class="enscript-type">void</span> *sinaddr = NULL;
+	<span class="enscript-type">char</span> raddr[MAX_IPv6_STR_LEN];
+	<span class="enscript-type">char</span> uaddr[MAX_IPv6_STR_LEN+16];
+	<span class="enscript-type">int</span> ualen = 0;
+	in_port_t port;
+
+	thd = current_thread();
+	cred = IS_VALID_CRED(nmp-&gt;nm_mcred) ? nmp-&gt;nm_mcred : vfs_context_ucred(vfs_context_kernel());
+	kauth_cred_ref(cred);
+
+	nfsm_chain_null(&amp;nmreq);
+	nfsm_chain_null(&amp;nmrep);
+
+	<span class="enscript-keyword">if</span> (!nmp-&gt;nm_longid)
+		error = nfs4_init_clientid(nmp);
+
+	<span class="enscript-comment">// SETCLIENTID
+</span>	numops = 1;
+	nfsm_chain_build_alloc_init(error, &amp;nmreq, 14 * NFSX_UNSIGNED + nmp-&gt;nm_longid-&gt;nci_idlen);
+	nfsm_chain_add_compound_header(error, &amp;nmreq, <span class="enscript-string">&quot;setclid&quot;</span>, nmp-&gt;nm_minor_vers, numops);
+	numops--;
+	nfsm_chain_add_32(error, &amp;nmreq, NFS_OP_SETCLIENTID);
+	<span class="enscript-comment">/* nfs_client_id4  client; */</span>
+	nfsm_chain_add_64(error, &amp;nmreq, nmp-&gt;nm_mounttime);
+	nfsm_chain_add_32(error, &amp;nmreq, nmp-&gt;nm_longid-&gt;nci_idlen);
+	nfsm_chain_add_opaque(error, &amp;nmreq, nmp-&gt;nm_longid-&gt;nci_id, nmp-&gt;nm_longid-&gt;nci_idlen);
+	nfsmout_if(error);
+	<span class="enscript-comment">/* cb_client4      callback; */</span>
+	<span class="enscript-keyword">if</span> (!NMFLAG(nmp, NOCALLBACK) &amp;&amp; nmp-&gt;nm_cbid &amp;&amp; nfs4_cb_port &amp;&amp;
+	    !sock_getsockname(nmp-&gt;nm_nso-&gt;nso_so, (<span class="enscript-type">struct</span> sockaddr*)&amp;ss, <span class="enscript-keyword">sizeof</span>(ss))) {
+		<span class="enscript-keyword">if</span> (ss.ss_family == AF_INET) {
+			sinaddr = &amp;((<span class="enscript-type">struct</span> sockaddr_in*)&amp;ss)-&gt;sin_addr;
+			port = nfs4_cb_port;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ss.ss_family == AF_INET6) {
+			sinaddr = &amp;((<span class="enscript-type">struct</span> sockaddr_in6*)&amp;ss)-&gt;sin6_addr;
+			port = nfs4_cb_port6;
+		}
+		<span class="enscript-keyword">if</span> (sinaddr &amp;&amp; port &amp;&amp; (inet_ntop(ss.ss_family, sinaddr, raddr, <span class="enscript-keyword">sizeof</span>(raddr)) == raddr)) {
+			<span class="enscript-comment">/* assemble r_addr = universal address (nmp-&gt;nm_nso-&gt;nso_so source IP addr + port) */</span>
+			ualen = snprintf(uaddr, <span class="enscript-keyword">sizeof</span>(uaddr), <span class="enscript-string">&quot;%s.%d.%d&quot;</span>, raddr,
+					((port &gt;&gt; 8) &amp; 0xff),
+					(port &amp; 0xff));
+			<span class="enscript-comment">/* make sure it fit, give up if it didn't */</span>
+			<span class="enscript-keyword">if</span> (ualen &gt;= (<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(uaddr))
+				ualen = 0;
+		}
+	}
+	<span class="enscript-keyword">if</span> (ualen &gt; 0) {
+		<span class="enscript-comment">/* add callback info */</span>
+		nfsm_chain_add_32(error, &amp;nmreq, NFS4_CALLBACK_PROG); <span class="enscript-comment">/* callback program */</span>
+		<span class="enscript-keyword">if</span> (ss.ss_family == AF_INET)
+			nfsm_chain_add_string(error, &amp;nmreq, <span class="enscript-string">&quot;tcp&quot;</span>, 3); <span class="enscript-comment">/* callback r_netid */</span>
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ss.ss_family == AF_INET6)
+			nfsm_chain_add_string(error, &amp;nmreq, <span class="enscript-string">&quot;tcp6&quot;</span>, 4); <span class="enscript-comment">/* callback r_netid */</span>
+		nfsm_chain_add_string(error, &amp;nmreq, uaddr, ualen); <span class="enscript-comment">/* callback r_addr */</span>
+		nfsm_chain_add_32(error, &amp;nmreq, nmp-&gt;nm_cbid); <span class="enscript-comment">/* callback_ident */</span>
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* don't provide valid callback info */</span>
+		nfsm_chain_add_32(error, &amp;nmreq, 0); <span class="enscript-comment">/* callback program */</span>
+		nfsm_chain_add_string(error, &amp;nmreq, <span class="enscript-string">&quot;&quot;</span>, 0); <span class="enscript-comment">/* callback r_netid */</span>
+		nfsm_chain_add_string(error, &amp;nmreq, <span class="enscript-string">&quot;&quot;</span>, 0); <span class="enscript-comment">/* callback r_addr */</span>
+		nfsm_chain_add_32(error, &amp;nmreq, 0); <span class="enscript-comment">/* callback_ident */</span>
+	}
+	nfsm_chain_build_done(error, &amp;nmreq);
+	nfsm_assert(error, (numops == 0), EPROTO);
+	nfsmout_if(error);
+	error = nfs_request2(NULL, nmp-&gt;nm_mountp, &amp;nmreq, NFSPROC4_COMPOUND, thd, cred, NULL, R_SETUP, &amp;nmrep, &amp;xid, &amp;status);
+	nfsm_chain_skip_tag(error, &amp;nmrep);
+	nfsm_chain_get_32(error, &amp;nmrep, numops);
+	<span class="enscript-keyword">if</span> (!error &amp;&amp; (numops != 1) &amp;&amp; status)
+		error = status;
+	nfsm_chain_op_check(error, &amp;nmrep, NFS_OP_SETCLIENTID);
+	<span class="enscript-keyword">if</span> (error == NFSERR_CLID_INUSE)
+		printf(<span class="enscript-string">&quot;nfs4_setclientid: client ID in use?\n&quot;</span>);
+	nfsmout_if(error);
+	nfsm_chain_get_64(error, &amp;nmrep, nmp-&gt;nm_clientid);
+	nfsm_chain_get_64(error, &amp;nmrep, verifier);
+	nfsm_chain_cleanup(&amp;nmreq);
+	nfsm_chain_cleanup(&amp;nmrep);
+
+	<span class="enscript-comment">// SETCLIENTID_CONFIRM
+</span>	numops = 1;
+	nfsm_chain_build_alloc_init(error, &amp;nmreq, 15 * NFSX_UNSIGNED);
+	nfsm_chain_add_compound_header(error, &amp;nmreq, <span class="enscript-string">&quot;setclid_conf&quot;</span>, nmp-&gt;nm_minor_vers, numops);
+	numops--;
+	nfsm_chain_add_32(error, &amp;nmreq, NFS_OP_SETCLIENTID_CONFIRM);
+	nfsm_chain_add_64(error, &amp;nmreq, nmp-&gt;nm_clientid);
+	nfsm_chain_add_64(error, &amp;nmreq, verifier);
+	nfsm_chain_build_done(error, &amp;nmreq);
+	nfsm_assert(error, (numops == 0), EPROTO);
+	nfsmout_if(error);
+	error = nfs_request2(NULL, nmp-&gt;nm_mountp, &amp;nmreq, NFSPROC4_COMPOUND, thd, cred, NULL, R_SETUP, &amp;nmrep, &amp;xid, &amp;status);
+	nfsm_chain_skip_tag(error, &amp;nmrep);
+	nfsm_chain_get_32(error, &amp;nmrep, numops);
+	nfsm_chain_op_check(error, &amp;nmrep, NFS_OP_SETCLIENTID_CONFIRM);
+	<span class="enscript-keyword">if</span> (error)
+		printf(<span class="enscript-string">&quot;nfs4_setclientid: confirm error %d\n&quot;</span>, error);
+	lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+	<span class="enscript-keyword">if</span> (!error)
+		nmp-&gt;nm_state |= NFSSTA_CLIENTID;
+	lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+
+	nfsmout_if(error || !nmp-&gt;nm_dnp);
+
+	<span class="enscript-comment">/* take the opportunity to refresh fs attributes too */</span>
+	<span class="enscript-comment">// PUTFH, GETATTR(FS)
+</span>	numops = 2;
+	nfsm_chain_build_alloc_init(error, &amp;nmreq, 23 * NFSX_UNSIGNED);
+	nfsm_chain_add_compound_header(error, &amp;nmreq, <span class="enscript-string">&quot;setclid_attr&quot;</span>, nmp-&gt;nm_minor_vers, numops);
+	numops--;
+	nfsm_chain_add_32(error, &amp;nmreq, NFS_OP_PUTFH);
+	nfsm_chain_add_fh(error, &amp;nmreq, nmp-&gt;nm_vers, nmp-&gt;nm_dnp-&gt;n_fhp, nmp-&gt;nm_dnp-&gt;n_fhsize);
+	numops--;
+	nfsm_chain_add_32(error, &amp;nmreq, NFS_OP_GETATTR);
+	NFS_CLEAR_ATTRIBUTES(bitmap);
+	NFS4_PER_FS_ATTRIBUTES(bitmap);
+	nfsm_chain_add_bitmap(error, &amp;nmreq, bitmap, NFS_ATTR_BITMAP_LEN);
+	nfsm_chain_build_done(error, &amp;nmreq);
+	nfsm_assert(error, (numops == 0), EPROTO);
+	nfsmout_if(error);
+	error = nfs_request2(NULL, nmp-&gt;nm_mountp, &amp;nmreq, NFSPROC4_COMPOUND, thd, cred, NULL, R_SETUP, &amp;nmrep, &amp;xid, &amp;status);
+	nfsm_chain_skip_tag(error, &amp;nmrep);
+	nfsm_chain_get_32(error, &amp;nmrep, numops);
+	lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+	nfsm_chain_op_check(error, &amp;nmrep, NFS_OP_PUTFH);
+	nfsm_chain_op_check(error, &amp;nmrep, NFS_OP_GETATTR);
+	<span class="enscript-keyword">if</span> (!error)
+		error = nfs4_parsefattr(&amp;nmrep, &amp;nmp-&gt;nm_fsattr, NULL, NULL, NULL, NULL);
+	lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+	<span class="enscript-keyword">if</span> (error)  <span class="enscript-comment">/* ignore any error from the getattr */</span>
+		error = 0;
+<span class="enscript-reference">nfsmout</span>:
+	nfsm_chain_cleanup(&amp;nmreq);
+	nfsm_chain_cleanup(&amp;nmrep);
+	kauth_cred_unref(&amp;cred);
+	<span class="enscript-keyword">if</span> (error)
+		printf(<span class="enscript-string">&quot;nfs4_setclientid failed, %d\n&quot;</span>, error);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * renew/check lease state on server
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfs4_renew</span>(<span class="enscript-type">struct</span> nfsmount *nmp, <span class="enscript-type">int</span> rpcflag)
+{
+	<span class="enscript-type">int</span> error = 0, status, numops;
+	u_int64_t xid;
+	<span class="enscript-type">struct</span> nfsm_chain nmreq, nmrep;
+	kauth_cred_t cred;
+
+	cred = IS_VALID_CRED(nmp-&gt;nm_mcred) ? nmp-&gt;nm_mcred : vfs_context_ucred(vfs_context_kernel());
+	kauth_cred_ref(cred);
+
+	nfsm_chain_null(&amp;nmreq);
+	nfsm_chain_null(&amp;nmrep);
+
+	<span class="enscript-comment">// RENEW
+</span>	numops = 1;
+	nfsm_chain_build_alloc_init(error, &amp;nmreq, 8 * NFSX_UNSIGNED);
+	nfsm_chain_add_compound_header(error, &amp;nmreq, <span class="enscript-string">&quot;renew&quot;</span>, nmp-&gt;nm_minor_vers, numops);
+	numops--;
+	nfsm_chain_add_32(error, &amp;nmreq, NFS_OP_RENEW);
+	nfsm_chain_add_64(error, &amp;nmreq, nmp-&gt;nm_clientid);
+	nfsm_chain_build_done(error, &amp;nmreq);
+	nfsm_assert(error, (numops == 0), EPROTO);
+	nfsmout_if(error);
+	error = nfs_request2(NULL, nmp-&gt;nm_mountp, &amp;nmreq, NFSPROC4_COMPOUND,
+			current_thread(), cred, NULL, rpcflag, &amp;nmrep, &amp;xid, &amp;status);
+	nfsm_chain_skip_tag(error, &amp;nmrep);
+	nfsm_chain_get_32(error, &amp;nmrep, numops);
+	nfsm_chain_op_check(error, &amp;nmrep, NFS_OP_RENEW);
+<span class="enscript-reference">nfsmout</span>:
+	nfsm_chain_cleanup(&amp;nmreq);
+	nfsm_chain_cleanup(&amp;nmrep);
+	kauth_cred_unref(&amp;cred);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * periodic timer to renew lease state on server
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfs4_renew_timer</span>(<span class="enscript-type">void</span> *param0, __unused <span class="enscript-type">void</span> *param1)
+{
+	<span class="enscript-type">struct</span> nfsmount *nmp = param0;
+	u_int64_t clientid;
+	<span class="enscript-type">int</span> error = 0, interval;
+
+	lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+	clientid = nmp-&gt;nm_clientid;
+	<span class="enscript-keyword">if</span> ((nmp-&gt;nm_state &amp; NFSSTA_RECOVER) || !(nmp-&gt;nm_sockflags &amp; NMSOCK_READY)) {
+		lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+
+	error = nfs4_renew(nmp, R_RECOVER);
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (error == ETIMEDOUT)
+		nfs_need_reconnect(nmp);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (error)
+		printf(<span class="enscript-string">&quot;nfs4_renew_timer: error %d\n&quot;</span>, error);
+	lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+	<span class="enscript-keyword">if</span> (error &amp;&amp; (error != ETIMEDOUT) &amp;&amp;
+	    (nmp-&gt;nm_clientid == clientid) &amp;&amp; !(nmp-&gt;nm_state &amp; NFSSTA_RECOVER)) {
+		printf(<span class="enscript-string">&quot;nfs4_renew_timer: error %d, initiating recovery\n&quot;</span>, error);
+		nfs_need_recover(nmp, error);
+	}
+
+	interval = nmp-&gt;nm_fsattr.nfsa_lease / (error ? 4 : 2);
+	<span class="enscript-keyword">if</span> ((interval &lt; 1) || (nmp-&gt;nm_state &amp; NFSSTA_RECOVER))
+		interval = 1;
+	lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+	nfs_interval_timer_start(nmp-&gt;nm_renew_timer, interval * 1000);
+}
+
+<span class="enscript-comment">/*
+ * get the list of supported security flavors
+ *
+ * How we get them depends on what args we are given:
+ *
+ * FH?   Name?  Action
+ * ----- -----  ------
+ * YES   YES    Use the fh and name provided
+ * YES   NO     4.1-only just use the fh provided
+ * NO    YES    Use the node's (or root) fh and the name provided
+ * NO    NO     Use the node's parent and the node's name (4.1 will just use node's fh)
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfs4_secinfo_rpc</span>(<span class="enscript-type">struct</span> nfsmount *nmp, <span class="enscript-type">struct</span> nfsreq_secinfo_args *siap, kauth_cred_t cred, uint32_t *sec, <span class="enscript-type">int</span> *seccountp)
+{
+	<span class="enscript-type">int</span> error = 0, status, nfsvers, numops, namelen, fhsize;
+	vnode_t dvp = NULLVP;
+	nfsnode_t np, dnp;
+	u_char *fhp;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *vname = NULL, *name;
+	uint64_t xid;
+	<span class="enscript-type">struct</span> nfsm_chain nmreq, nmrep;
+
+	*seccountp = 0;
+	<span class="enscript-keyword">if</span> (nfs_mount_gone(nmp))
+		<span class="enscript-keyword">return</span> (ENXIO);
+	nfsvers = nmp-&gt;nm_vers;
+	np = siap-&gt;rsia_np;
+
+	nfsm_chain_null(&amp;nmreq);
+	nfsm_chain_null(&amp;nmrep);
+
+	fhp = siap-&gt;rsia_fh;
+	fhsize = fhp ? siap-&gt;rsia_fhsize : 0;
+	name = siap-&gt;rsia_name;
+	namelen = name ? siap-&gt;rsia_namelen : 0;
+	<span class="enscript-keyword">if</span> (name &amp;&amp; !namelen)
+		namelen = strlen(name);
+	<span class="enscript-keyword">if</span> (!fhp &amp;&amp; name) {
+		<span class="enscript-keyword">if</span> (!np)  <span class="enscript-comment">/* use PUTROOTFH */</span>
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">gotargs</span>;
+		fhp = np-&gt;n_fhp;
+		fhsize = np-&gt;n_fhsize;
+	}
+	<span class="enscript-keyword">if</span> (fhp &amp;&amp; name)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">gotargs</span>;
+
+	<span class="enscript-keyword">if</span> (!np)
+		<span class="enscript-keyword">return</span> (EIO);
+	nfs_node_lock_force(np);
+	<span class="enscript-keyword">if</span> ((vnode_vtype(NFSTOV(np)) != VDIR) &amp;&amp; np-&gt;n_sillyrename) {
+		<span class="enscript-comment">/*
+		 * The node's been sillyrenamed, so we need to use
+		 * the sillyrename directory/name to do the open.
+		 */</span>
+		<span class="enscript-type">struct</span> nfs_sillyrename *nsp = np-&gt;n_sillyrename;
+		dnp = nsp-&gt;nsr_dnp;
+		dvp = NFSTOV(dnp);
+		<span class="enscript-keyword">if</span> ((error = vnode_get(dvp))) {
+			nfs_node_unlock(np);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">nfsmout</span>;
+		}
+		fhp = dnp-&gt;n_fhp;
+		fhsize = dnp-&gt;n_fhsize;
+		name = nsp-&gt;nsr_name;
+		namelen = nsp-&gt;nsr_namlen;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * [sigh] We can't trust VFS to get the parent right for named
+		 * attribute nodes.  (It likes to reparent the nodes after we've
+		 * created them.)  Luckily we can probably get the right parent
+		 * from the n_parent we have stashed away.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((np-&gt;n_vattr.nva_flags &amp; NFS_FFLAG_IS_ATTR) &amp;&amp;
+		    (((dvp = np-&gt;n_parent)) &amp;&amp; (error = vnode_get(dvp))))
+			dvp = NULL;
+		<span class="enscript-keyword">if</span> (!dvp)
+			dvp = vnode_getparent(NFSTOV(np));
+		vname = vnode_getname(NFSTOV(np));
+		<span class="enscript-keyword">if</span> (!dvp || !vname) {
+			<span class="enscript-keyword">if</span> (!error)
+				error = EIO;
+			nfs_node_unlock(np);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">nfsmout</span>;
+		}
+		dnp = VTONFS(dvp);
+		fhp = dnp-&gt;n_fhp;
+		fhsize = dnp-&gt;n_fhsize;
+		name = vname;
+		namelen = strnlen(vname, MAXPATHLEN);
+	}
+	nfs_node_unlock(np);
+
+<span class="enscript-reference">gotargs</span>:
+	<span class="enscript-comment">// PUT(ROOT)FH + SECINFO
+</span>	numops = 2;
+	nfsm_chain_build_alloc_init(error, &amp;nmreq,
+		4 * NFSX_UNSIGNED + NFSX_FH(nfsvers) + nfsm_rndup(namelen));
+	nfsm_chain_add_compound_header(error, &amp;nmreq, <span class="enscript-string">&quot;secinfo&quot;</span>, nmp-&gt;nm_minor_vers, numops);
+	numops--;
+	<span class="enscript-keyword">if</span> (fhp) {
+		nfsm_chain_add_32(error, &amp;nmreq, NFS_OP_PUTFH);
+		nfsm_chain_add_fh(error, &amp;nmreq, nfsvers, fhp, fhsize);
+	} <span class="enscript-keyword">else</span> {
+		nfsm_chain_add_32(error, &amp;nmreq, NFS_OP_PUTROOTFH);
+	}
+	numops--;
+	nfsm_chain_add_32(error, &amp;nmreq, NFS_OP_SECINFO);
+	nfsm_chain_add_name(error, &amp;nmreq, name, namelen, nmp);
+	nfsm_chain_build_done(error, &amp;nmreq);
+	nfsm_assert(error, (numops == 0), EPROTO);
+	nfsmout_if(error);
+	error = nfs_request2(np, nmp-&gt;nm_mountp, &amp;nmreq, NFSPROC4_COMPOUND,
+			current_thread(), cred, NULL, 0, &amp;nmrep, &amp;xid, &amp;status);
+	nfsm_chain_skip_tag(error, &amp;nmrep);
+	nfsm_chain_get_32(error, &amp;nmrep, numops);
+	nfsm_chain_op_check(error, &amp;nmrep, fhp ? NFS_OP_PUTFH : NFS_OP_PUTROOTFH);
+	nfsm_chain_op_check(error, &amp;nmrep, NFS_OP_SECINFO);
+	nfsmout_if(error);
+	error = nfsm_chain_get_secinfo(&amp;nmrep, sec, seccountp);
+<span class="enscript-reference">nfsmout</span>:
+	nfsm_chain_cleanup(&amp;nmreq);
+	nfsm_chain_cleanup(&amp;nmrep);
+	<span class="enscript-keyword">if</span> (vname)
+		vnode_putname(vname);
+	<span class="enscript-keyword">if</span> (dvp != NULLVP)
+		vnode_put(dvp);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Parse an NFSv4 SECINFO array to an array of pseudo flavors.
+ * (Note: also works for MOUNTv3 security arrays.)
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfsm_chain_get_secinfo</span>(<span class="enscript-type">struct</span> nfsm_chain *nmc, uint32_t *sec, <span class="enscript-type">int</span> *seccountp)
+{
+	<span class="enscript-type">int</span> error = 0, secmax, seccount, srvcount;
+	uint32_t flavor, val;
+	u_char oid[12];
+
+	seccount = srvcount = 0;
+	secmax = *seccountp;
+	*seccountp = 0;
+
+	nfsm_chain_get_32(error, nmc, srvcount);
+	<span class="enscript-keyword">while</span> (!error &amp;&amp; (srvcount &gt; 0) &amp;&amp; (seccount &lt; secmax)) {
+		nfsm_chain_get_32(error, nmc, flavor);
+		nfsmout_if(error);
+		<span class="enscript-keyword">switch</span> (flavor) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">RPCAUTH_NONE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">RPCAUTH_SYS</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">RPCAUTH_KRB5</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">RPCAUTH_KRB5I</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">RPCAUTH_KRB5P</span>:
+			sec[seccount++] = flavor;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">RPCSEC_GSS</span>:
+			<span class="enscript-comment">/* we only recognize KRB5, KRB5I, KRB5P */</span>
+			nfsm_chain_get_32(error, nmc, val); <span class="enscript-comment">/* OID length */</span>
+			nfsmout_if(error);
+			<span class="enscript-keyword">if</span> (val != <span class="enscript-keyword">sizeof</span>(krb5_mech)) {
+				nfsm_chain_adv(error, nmc, val);
+				nfsm_chain_adv(error, nmc, 2*NFSX_UNSIGNED);
+				<span class="enscript-keyword">break</span>;
+			}
+			nfsm_chain_get_opaque(error, nmc, val, oid); <span class="enscript-comment">/* OID bytes */</span>
+			nfsmout_if(error);
+			<span class="enscript-keyword">if</span> (bcmp(oid, krb5_mech, <span class="enscript-keyword">sizeof</span>(krb5_mech))) {
+				nfsm_chain_adv(error, nmc, 2*NFSX_UNSIGNED);
+				<span class="enscript-keyword">break</span>;
+			}
+			nfsm_chain_get_32(error, nmc, val); <span class="enscript-comment">/* QOP */</span>
+			nfsm_chain_get_32(error, nmc, val); <span class="enscript-comment">/* SERVICE */</span>
+			nfsmout_if(error);
+			<span class="enscript-keyword">switch</span> (val) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">RPCSEC_GSS_SVC_NONE</span>:
+				sec[seccount++] = RPCAUTH_KRB5;
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">RPCSEC_GSS_SVC_INTEGRITY</span>:
+				sec[seccount++] = RPCAUTH_KRB5I;
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">RPCSEC_GSS_SVC_PRIVACY</span>:
+				sec[seccount++] = RPCAUTH_KRB5P;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+		srvcount--;
+	}
+<span class="enscript-reference">nfsmout</span>:
+	<span class="enscript-keyword">if</span> (!error)
+		*seccountp = seccount;
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * Fetch the FS_LOCATIONS attribute for the node found at directory/name.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfs4_get_fs_locations</span>(
+	<span class="enscript-type">struct</span> nfsmount *nmp,
+	nfsnode_t dnp,
+	u_char *fhp,
+	<span class="enscript-type">int</span> fhsize,
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name,
+	vfs_context_t ctx,
+	<span class="enscript-type">struct</span> nfs_fs_locations *nfslsp)
+{
+	<span class="enscript-type">int</span> error = 0, numops, status;
+	uint32_t bitmap[NFS_ATTR_BITMAP_LEN];
+	<span class="enscript-type">struct</span> nfsreq rq, *req = &amp;rq;
+	<span class="enscript-type">struct</span> nfsreq_secinfo_args si;
+	<span class="enscript-type">struct</span> nfsm_chain nmreq, nmrep;
+	uint64_t xid;
+
+	<span class="enscript-keyword">if</span> (!fhp &amp;&amp; dnp) {
+		fhp = dnp-&gt;n_fhp;
+		fhsize = dnp-&gt;n_fhsize;
+	}
+	<span class="enscript-keyword">if</span> (!fhp)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	nfsm_chain_null(&amp;nmreq);
+	nfsm_chain_null(&amp;nmrep);
+
+	NFSREQ_SECINFO_SET(&amp;si, NULL, fhp, fhsize, name, 0);
+	numops = 3;
+	nfsm_chain_build_alloc_init(error, &amp;nmreq, 18 * NFSX_UNSIGNED);
+	nfsm_chain_add_compound_header(error, &amp;nmreq, <span class="enscript-string">&quot;fs_locations&quot;</span>, nmp-&gt;nm_minor_vers, numops);
+	numops--;
+	nfsm_chain_add_32(error, &amp;nmreq, NFS_OP_PUTFH);
+	nfsm_chain_add_fh(error, &amp;nmreq, NFS_VER4, fhp, fhsize);
+	numops--;
+	nfsm_chain_add_32(error, &amp;nmreq, NFS_OP_LOOKUP);
+	nfsm_chain_add_name(error, &amp;nmreq, name, strlen(name), nmp);
+	numops--;
+	nfsm_chain_add_32(error, &amp;nmreq, NFS_OP_GETATTR);
+	NFS_CLEAR_ATTRIBUTES(bitmap);
+	NFS_BITMAP_SET(bitmap, NFS_FATTR_FS_LOCATIONS);
+	nfsm_chain_add_bitmap(error, &amp;nmreq, bitmap, NFS_ATTR_BITMAP_LEN);
+	nfsm_chain_build_done(error, &amp;nmreq);
+	nfsm_assert(error, (numops == 0), EPROTO);
+	nfsmout_if(error);
+	error = nfs_request_async(dnp, nmp-&gt;nm_mountp, &amp;nmreq, NFSPROC4_COMPOUND,
+			vfs_context_thread(ctx), vfs_context_ucred(ctx), &amp;si, 0, NULL, &amp;req);
+	<span class="enscript-keyword">if</span> (!error)
+		error = nfs_request_async_finish(req, &amp;nmrep, &amp;xid, &amp;status);
+	nfsm_chain_skip_tag(error, &amp;nmrep);
+	nfsm_chain_get_32(error, &amp;nmrep, numops);
+	nfsm_chain_op_check(error, &amp;nmrep, NFS_OP_PUTFH);
+	nfsm_chain_op_check(error, &amp;nmrep, NFS_OP_LOOKUP);
+	nfsm_chain_op_check(error, &amp;nmrep, NFS_OP_GETATTR);
+	nfsmout_if(error);
+	error = nfs4_parsefattr(&amp;nmrep, NULL, NULL, NULL, NULL, nfslsp);
+<span class="enscript-reference">nfsmout</span>:
+	nfsm_chain_cleanup(&amp;nmrep);
+	nfsm_chain_cleanup(&amp;nmreq);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Referral trigger nodes may not have many attributes provided by the
+ * server, so put some default values in place.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfs4_default_attrs_for_referral_trigger</span>(
+	nfsnode_t dnp,
+	<span class="enscript-type">char</span> *name,
+	<span class="enscript-type">int</span> namelen,
+	<span class="enscript-type">struct</span> nfs_vattr *nvap,
+	fhandle_t *fhp)
+{
+	<span class="enscript-type">struct</span> timeval now;
+	microtime(&amp;now);
+	<span class="enscript-type">int</span> len;
+
+	nvap-&gt;nva_flags = NFS_FFLAG_TRIGGER | NFS_FFLAG_TRIGGER_REFERRAL;
+	<span class="enscript-keyword">if</span> (!NFS_BITMAP_ISSET(nvap-&gt;nva_bitmap, NFS_FATTR_TYPE)) {
+		NFS_BITMAP_SET(nvap-&gt;nva_bitmap, NFS_FATTR_TYPE);
+		nvap-&gt;nva_type = VDIR;
+	}
+	<span class="enscript-keyword">if</span> (!NFS_BITMAP_ISSET(nvap-&gt;nva_bitmap, NFS_FATTR_FSID)) {
+		NFS_BITMAP_SET(nvap-&gt;nva_bitmap, NFS_FATTR_FSID);
+		nvap-&gt;nva_fsid.major = 0;
+		nvap-&gt;nva_fsid.minor = 0;
+	}
+	<span class="enscript-keyword">if</span> (!NFS_BITMAP_ISSET(nvap-&gt;nva_bitmap, NFS_FATTR_OWNER) &amp;&amp; dnp) {
+		NFS_BITMAP_SET(nvap-&gt;nva_bitmap, NFS_FATTR_OWNER);
+		nvap-&gt;nva_uid = dnp-&gt;n_vattr.nva_uid;
+		nvap-&gt;nva_uuuid = dnp-&gt;n_vattr.nva_uuuid;
+	}
+	<span class="enscript-keyword">if</span> (!NFS_BITMAP_ISSET(nvap-&gt;nva_bitmap, NFS_FATTR_OWNER_GROUP) &amp;&amp; dnp) {
+		NFS_BITMAP_SET(nvap-&gt;nva_bitmap, NFS_FATTR_OWNER_GROUP);
+		nvap-&gt;nva_gid = dnp-&gt;n_vattr.nva_gid;
+		nvap-&gt;nva_guuid = dnp-&gt;n_vattr.nva_guuid;
+	}
+	<span class="enscript-keyword">if</span> (!NFS_BITMAP_ISSET(nvap-&gt;nva_bitmap, NFS_FATTR_MODE)) {
+		NFS_BITMAP_SET(nvap-&gt;nva_bitmap, NFS_FATTR_MODE);
+		nvap-&gt;nva_mode = 0777;
+	}
+	<span class="enscript-keyword">if</span> (!NFS_BITMAP_ISSET(nvap-&gt;nva_bitmap, NFS_FATTR_SIZE)) {
+		NFS_BITMAP_SET(nvap-&gt;nva_bitmap, NFS_FATTR_SIZE);
+		nvap-&gt;nva_size = 0;
+	}
+	<span class="enscript-keyword">if</span> (!NFS_BITMAP_ISSET(nvap-&gt;nva_bitmap, NFS_FATTR_SPACE_USED)) {
+		NFS_BITMAP_SET(nvap-&gt;nva_bitmap, NFS_FATTR_SPACE_USED);
+		nvap-&gt;nva_bytes = 0;
+	}
+	<span class="enscript-keyword">if</span> (!NFS_BITMAP_ISSET(nvap-&gt;nva_bitmap, NFS_FATTR_NUMLINKS)) {
+		NFS_BITMAP_SET(nvap-&gt;nva_bitmap, NFS_FATTR_NUMLINKS);
+		nvap-&gt;nva_nlink = 2;
+	}
+	<span class="enscript-keyword">if</span> (!NFS_BITMAP_ISSET(nvap-&gt;nva_bitmap, NFS_FATTR_TIME_ACCESS)) {
+		NFS_BITMAP_SET(nvap-&gt;nva_bitmap, NFS_FATTR_TIME_ACCESS);
+		nvap-&gt;nva_timesec[NFSTIME_ACCESS] = now.tv_sec;
+		nvap-&gt;nva_timensec[NFSTIME_ACCESS] = now.tv_usec * 1000;
+	}
+	<span class="enscript-keyword">if</span> (!NFS_BITMAP_ISSET(nvap-&gt;nva_bitmap, NFS_FATTR_TIME_MODIFY)) {
+		NFS_BITMAP_SET(nvap-&gt;nva_bitmap, NFS_FATTR_TIME_MODIFY);
+		nvap-&gt;nva_timesec[NFSTIME_MODIFY] = now.tv_sec;
+		nvap-&gt;nva_timensec[NFSTIME_MODIFY] = now.tv_usec * 1000;
+	}
+	<span class="enscript-keyword">if</span> (!NFS_BITMAP_ISSET(nvap-&gt;nva_bitmap, NFS_FATTR_TIME_METADATA)) {
+		NFS_BITMAP_SET(nvap-&gt;nva_bitmap, NFS_FATTR_TIME_METADATA);
+		nvap-&gt;nva_timesec[NFSTIME_CHANGE] = now.tv_sec;
+		nvap-&gt;nva_timensec[NFSTIME_CHANGE] = now.tv_usec * 1000;
+	}
+	<span class="enscript-keyword">if</span> (!NFS_BITMAP_ISSET(nvap-&gt;nva_bitmap, NFS_FATTR_FILEID)) {
+		NFS_BITMAP_SET(nvap-&gt;nva_bitmap, NFS_FATTR_FILEID);
+		nvap-&gt;nva_fileid = 42;
+	}
+	<span class="enscript-keyword">if</span> (!NFS_BITMAP_ISSET(nvap-&gt;nva_bitmap, NFS_FATTR_FILEHANDLE) &amp;&amp; dnp &amp;&amp; name &amp;&amp; fhp) {
+		<span class="enscript-comment">/* Build a fake filehandle made up of parent node pointer and name */</span>
+		NFS_BITMAP_SET(nvap-&gt;nva_bitmap, NFS_FATTR_FILEHANDLE);
+		bcopy(&amp;dnp, &amp;fhp-&gt;fh_data[0], <span class="enscript-keyword">sizeof</span>(dnp));
+		len = <span class="enscript-keyword">sizeof</span>(fhp-&gt;fh_data) - <span class="enscript-keyword">sizeof</span>(dnp);
+		bcopy(name, &amp;fhp-&gt;fh_data[0] + <span class="enscript-keyword">sizeof</span>(dnp), MIN(len, namelen));
+		fhp-&gt;fh_len = <span class="enscript-keyword">sizeof</span>(dnp) + namelen;
+		<span class="enscript-keyword">if</span> (fhp-&gt;fh_len &gt; (<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(fhp-&gt;fh_data))
+			fhp-&gt;fh_len = <span class="enscript-keyword">sizeof</span>(fhp-&gt;fh_data);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Set NFS bitmap according to what's set in vnode_attr (and supported by the server).
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfs_vattr_set_bitmap</span>(<span class="enscript-type">struct</span> nfsmount *nmp, uint32_t *bitmap, <span class="enscript-type">struct</span> vnode_attr *vap)
+{
+	<span class="enscript-type">int</span> i;
+
+	NFS_CLEAR_ATTRIBUTES(bitmap);
+	<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_data_size))
+		NFS_BITMAP_SET(bitmap, NFS_FATTR_SIZE);
+	<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_acl) &amp;&amp; (nmp-&gt;nm_fsattr.nfsa_flags &amp; NFS_FSFLAG_ACL))
+		NFS_BITMAP_SET(bitmap, NFS_FATTR_ACL);
+	<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_flags)) {
+		NFS_BITMAP_SET(bitmap, NFS_FATTR_ARCHIVE);
+		NFS_BITMAP_SET(bitmap, NFS_FATTR_HIDDEN);
+	}
+	<span class="enscript-comment">// NFS_BITMAP_SET(bitmap, NFS_FATTR_MIMETYPE)
+</span>	<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_mode) &amp;&amp; !NMFLAG(nmp, ACLONLY))
+		NFS_BITMAP_SET(bitmap, NFS_FATTR_MODE);
+	<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_uid) || VATTR_IS_ACTIVE(vap, va_uuuid))
+		NFS_BITMAP_SET(bitmap, NFS_FATTR_OWNER);
+	<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_gid) || VATTR_IS_ACTIVE(vap, va_guuid))
+		NFS_BITMAP_SET(bitmap, NFS_FATTR_OWNER_GROUP);
+	<span class="enscript-comment">// NFS_BITMAP_SET(bitmap, NFS_FATTR_SYSTEM)
+</span>	<span class="enscript-keyword">if</span> (vap-&gt;va_vaflags &amp; VA_UTIMES_NULL) {
+		NFS_BITMAP_SET(bitmap, NFS_FATTR_TIME_ACCESS_SET);
+		NFS_BITMAP_SET(bitmap, NFS_FATTR_TIME_MODIFY_SET);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_access_time))
+			NFS_BITMAP_SET(bitmap, NFS_FATTR_TIME_ACCESS_SET);
+		<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_modify_time))
+			NFS_BITMAP_SET(bitmap, NFS_FATTR_TIME_MODIFY_SET);
+	}
+	<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_backup_time))
+		NFS_BITMAP_SET(bitmap, NFS_FATTR_TIME_BACKUP);
+	<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_create_time))
+		NFS_BITMAP_SET(bitmap, NFS_FATTR_TIME_CREATE);
+	<span class="enscript-comment">/* and limit to what is supported by server */</span>
+	<span class="enscript-keyword">for</span> (i=0; i &lt; NFS_ATTR_BITMAP_LEN; i++)
+		bitmap[i] &amp;= nmp-&gt;nm_fsattr.nfsa_supp_attr[i];
+}
+
+<span class="enscript-comment">/*
+ * Convert between NFSv4 and VFS ACE types
+ */</span>
+uint32_t
+<span class="enscript-function-name">nfs4_ace_nfstype_to_vfstype</span>(uint32_t nfsacetype, <span class="enscript-type">int</span> *errorp)
+{
+	<span class="enscript-keyword">switch</span> (nfsacetype) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">NFS_ACE_ACCESS_ALLOWED_ACE_TYPE</span>:
+		<span class="enscript-keyword">return</span> KAUTH_ACE_PERMIT;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">NFS_ACE_ACCESS_DENIED_ACE_TYPE</span>:
+		<span class="enscript-keyword">return</span> KAUTH_ACE_DENY;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">NFS_ACE_SYSTEM_AUDIT_ACE_TYPE</span>:
+		<span class="enscript-keyword">return</span> KAUTH_ACE_AUDIT;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">NFS_ACE_SYSTEM_ALARM_ACE_TYPE</span>:
+		<span class="enscript-keyword">return</span> KAUTH_ACE_ALARM;
+	}
+	*errorp = EBADRPC;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+uint32_t
+<span class="enscript-function-name">nfs4_ace_vfstype_to_nfstype</span>(uint32_t vfstype, <span class="enscript-type">int</span> *errorp)
+{
+	<span class="enscript-keyword">switch</span> (vfstype) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_ACE_PERMIT</span>:
+		<span class="enscript-keyword">return</span> NFS_ACE_ACCESS_ALLOWED_ACE_TYPE;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_ACE_DENY</span>:
+		<span class="enscript-keyword">return</span> NFS_ACE_ACCESS_DENIED_ACE_TYPE;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_ACE_AUDIT</span>:
+		<span class="enscript-keyword">return</span> NFS_ACE_SYSTEM_AUDIT_ACE_TYPE;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_ACE_ALARM</span>:
+		<span class="enscript-keyword">return</span> NFS_ACE_SYSTEM_ALARM_ACE_TYPE;
+	}
+	*errorp = EINVAL;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Convert between NFSv4 and VFS ACE flags
+ */</span>
+uint32_t
+<span class="enscript-function-name">nfs4_ace_nfsflags_to_vfsflags</span>(uint32_t nfsflags)
+{
+	uint32_t vfsflags = 0;
+
+	<span class="enscript-keyword">if</span> (nfsflags &amp; NFS_ACE_FILE_INHERIT_ACE)
+		vfsflags |= KAUTH_ACE_FILE_INHERIT;
+	<span class="enscript-keyword">if</span> (nfsflags &amp; NFS_ACE_DIRECTORY_INHERIT_ACE)
+		vfsflags |= KAUTH_ACE_DIRECTORY_INHERIT;
+	<span class="enscript-keyword">if</span> (nfsflags &amp; NFS_ACE_NO_PROPAGATE_INHERIT_ACE)
+		vfsflags |= KAUTH_ACE_LIMIT_INHERIT;
+	<span class="enscript-keyword">if</span> (nfsflags &amp; NFS_ACE_INHERIT_ONLY_ACE)
+		vfsflags |= KAUTH_ACE_ONLY_INHERIT;
+	<span class="enscript-keyword">if</span> (nfsflags &amp; NFS_ACE_SUCCESSFUL_ACCESS_ACE_FLAG)
+		vfsflags |= KAUTH_ACE_SUCCESS;
+	<span class="enscript-keyword">if</span> (nfsflags &amp; NFS_ACE_FAILED_ACCESS_ACE_FLAG)
+		vfsflags |= KAUTH_ACE_FAILURE;
+	<span class="enscript-keyword">if</span> (nfsflags &amp; NFS_ACE_INHERITED_ACE)
+		vfsflags |= KAUTH_ACE_INHERITED;
+
+	<span class="enscript-keyword">return</span> (vfsflags);
+}
+
+uint32_t
+<span class="enscript-function-name">nfs4_ace_vfsflags_to_nfsflags</span>(uint32_t vfsflags)
+{
+	uint32_t nfsflags = 0;
+
+	<span class="enscript-keyword">if</span> (vfsflags &amp; KAUTH_ACE_FILE_INHERIT)
+		nfsflags |= NFS_ACE_FILE_INHERIT_ACE;
+	<span class="enscript-keyword">if</span> (vfsflags &amp; KAUTH_ACE_DIRECTORY_INHERIT)
+		nfsflags |= NFS_ACE_DIRECTORY_INHERIT_ACE;
+	<span class="enscript-keyword">if</span> (vfsflags &amp; KAUTH_ACE_LIMIT_INHERIT)
+		nfsflags |= NFS_ACE_NO_PROPAGATE_INHERIT_ACE;
+	<span class="enscript-keyword">if</span> (vfsflags &amp; KAUTH_ACE_ONLY_INHERIT)
+		nfsflags |= NFS_ACE_INHERIT_ONLY_ACE;
+	<span class="enscript-keyword">if</span> (vfsflags &amp; KAUTH_ACE_SUCCESS)
+		nfsflags |= NFS_ACE_SUCCESSFUL_ACCESS_ACE_FLAG;
+	<span class="enscript-keyword">if</span> (vfsflags &amp; KAUTH_ACE_FAILURE)
+		nfsflags |= NFS_ACE_FAILED_ACCESS_ACE_FLAG;
+	<span class="enscript-keyword">if</span> (vfsflags &amp; KAUTH_ACE_INHERITED)
+		nfsflags |= NFS_ACE_INHERITED_ACE;
+
+	<span class="enscript-keyword">return</span> (nfsflags);
+}
+
+<span class="enscript-comment">/*
+ * Convert between NFSv4 ACE access masks and VFS access rights
+ */</span>
+uint32_t
+<span class="enscript-function-name">nfs4_ace_nfsmask_to_vfsrights</span>(uint32_t nfsmask)
+{
+	uint32_t vfsrights = 0;
+
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_READ_DATA)
+		vfsrights |= KAUTH_VNODE_READ_DATA;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_LIST_DIRECTORY)
+		vfsrights |= KAUTH_VNODE_LIST_DIRECTORY;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_WRITE_DATA)
+		vfsrights |= KAUTH_VNODE_WRITE_DATA;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_ADD_FILE)
+		vfsrights |= KAUTH_VNODE_ADD_FILE;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_APPEND_DATA)
+		vfsrights |= KAUTH_VNODE_APPEND_DATA;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_ADD_SUBDIRECTORY)
+		vfsrights |= KAUTH_VNODE_ADD_SUBDIRECTORY;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_READ_NAMED_ATTRS)
+		vfsrights |= KAUTH_VNODE_READ_EXTATTRIBUTES;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_WRITE_NAMED_ATTRS)
+		vfsrights |= KAUTH_VNODE_WRITE_EXTATTRIBUTES;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_EXECUTE)
+		vfsrights |= KAUTH_VNODE_EXECUTE;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_DELETE_CHILD)
+		vfsrights |= KAUTH_VNODE_DELETE_CHILD;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_READ_ATTRIBUTES)
+		vfsrights |= KAUTH_VNODE_READ_ATTRIBUTES;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_WRITE_ATTRIBUTES)
+		vfsrights |= KAUTH_VNODE_WRITE_ATTRIBUTES;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_DELETE)
+		vfsrights |= KAUTH_VNODE_DELETE;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_READ_ACL)
+		vfsrights |= KAUTH_VNODE_READ_SECURITY;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_WRITE_ACL)
+		vfsrights |= KAUTH_VNODE_WRITE_SECURITY;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_WRITE_OWNER)
+		vfsrights |= KAUTH_VNODE_CHANGE_OWNER;
+	<span class="enscript-keyword">if</span> (nfsmask &amp; NFS_ACE_SYNCHRONIZE)
+		vfsrights |= KAUTH_VNODE_SYNCHRONIZE;
+	<span class="enscript-keyword">if</span> ((nfsmask &amp; NFS_ACE_GENERIC_READ) == NFS_ACE_GENERIC_READ)
+		vfsrights |= KAUTH_ACE_GENERIC_READ;
+	<span class="enscript-keyword">if</span> ((nfsmask &amp; NFS_ACE_GENERIC_WRITE) == NFS_ACE_GENERIC_WRITE)
+		vfsrights |= KAUTH_ACE_GENERIC_WRITE;
+	<span class="enscript-keyword">if</span> ((nfsmask &amp; NFS_ACE_GENERIC_EXECUTE) == NFS_ACE_GENERIC_EXECUTE)
+		vfsrights |= KAUTH_ACE_GENERIC_EXECUTE;
+
+	<span class="enscript-keyword">return</span> (vfsrights);
+}
+
+uint32_t
+<span class="enscript-function-name">nfs4_ace_vfsrights_to_nfsmask</span>(uint32_t vfsrights)
+{
+	uint32_t nfsmask = 0;
+
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_READ_DATA)
+		nfsmask |= NFS_ACE_READ_DATA;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_LIST_DIRECTORY)
+		nfsmask |= NFS_ACE_LIST_DIRECTORY;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_WRITE_DATA)
+		nfsmask |= NFS_ACE_WRITE_DATA;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_ADD_FILE)
+		nfsmask |= NFS_ACE_ADD_FILE;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_APPEND_DATA)
+		nfsmask |= NFS_ACE_APPEND_DATA;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_ADD_SUBDIRECTORY)
+		nfsmask |= NFS_ACE_ADD_SUBDIRECTORY;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_READ_EXTATTRIBUTES)
+		nfsmask |= NFS_ACE_READ_NAMED_ATTRS;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_WRITE_EXTATTRIBUTES)
+		nfsmask |= NFS_ACE_WRITE_NAMED_ATTRS;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_EXECUTE)
+		nfsmask |= NFS_ACE_EXECUTE;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_DELETE_CHILD)
+		nfsmask |= NFS_ACE_DELETE_CHILD;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_READ_ATTRIBUTES)
+		nfsmask |= NFS_ACE_READ_ATTRIBUTES;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_WRITE_ATTRIBUTES)
+		nfsmask |= NFS_ACE_WRITE_ATTRIBUTES;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_DELETE)
+		nfsmask |= NFS_ACE_DELETE;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_READ_SECURITY)
+		nfsmask |= NFS_ACE_READ_ACL;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_WRITE_SECURITY)
+		nfsmask |= NFS_ACE_WRITE_ACL;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_CHANGE_OWNER)
+		nfsmask |= NFS_ACE_WRITE_OWNER;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_VNODE_SYNCHRONIZE)
+		nfsmask |= NFS_ACE_SYNCHRONIZE;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_ACE_GENERIC_READ)
+		nfsmask |= NFS_ACE_GENERIC_READ;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_ACE_GENERIC_WRITE)
+		nfsmask |= NFS_ACE_GENERIC_WRITE;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_ACE_GENERIC_EXECUTE)
+		nfsmask |= NFS_ACE_GENERIC_EXECUTE;
+	<span class="enscript-keyword">if</span> (vfsrights &amp; KAUTH_ACE_GENERIC_ALL)
+		nfsmask |= (KAUTH_ACE_GENERIC_READ|KAUTH_ACE_GENERIC_WRITE|NFS_ACE_GENERIC_EXECUTE);
+
+	<span class="enscript-keyword">return</span> (nfsmask);
+}
+
+<span class="enscript-comment">/*
+ * Map an NFSv4 ID string to a VFS guid.
+ *
+ * Try to use the ID mapping service... but we may fallback to trying to do it ourselves.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfs4_id2guid</span>(<span class="enscript-comment">/*const*/</span> <span class="enscript-type">char</span> *id, guid_t *guidp, <span class="enscript-type">int</span> isgroup)
+{
+	<span class="enscript-type">int</span> error1 = 0, error = 0, compare;
+	guid_t guid1, guid2, *gp;
+	ntsid_t sid;
+	<span class="enscript-type">long</span> num, unknown;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *p, *at;
+
+	*guidp = kauth_null_guid;
+	compare = ((nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_USE_IDMAP_SERVICE) &amp;&amp;
+		   (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_COMPARE_RESULTS));
+	unknown = (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_UNKNOWN_IS_99) ? 99 : -2;
+
+	<span class="enscript-comment">/*
+	 * First check if it is just a simple numeric ID string or a special &quot;XXX@&quot; name.
+	 * If it's a number, there's no need trying to ask the IDMAP service to map it.
+	 * If it's a special &quot;XXX@&quot; name, we want to make sure to treat it as a group.
+	 */</span>
+	num = 1;
+	at = NULL;
+	p = id;
+	<span class="enscript-keyword">while</span> (*p) {
+		<span class="enscript-keyword">if</span> ((*p &lt; <span class="enscript-string">'0'</span>) || (*p &gt; <span class="enscript-string">'9'</span>))
+			num = 0;
+		<span class="enscript-keyword">if</span> (*p == <span class="enscript-string">'@'</span>)
+			at = p;
+		p++;
+	}
+	<span class="enscript-keyword">if</span> (at &amp;&amp; !at[1] &amp;&amp; !isgroup)
+		isgroup = 1;  <span class="enscript-comment">/* special &quot;XXX@&quot; names should always be treated as groups */</span>
+	<span class="enscript-keyword">if</span> (num) {
+		<span class="enscript-comment">/* must be numeric ID (or empty) */</span>
+		num = *id ? strtol(id, NULL, 10) : unknown;
+		gp = guidp;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">gotnumid</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_USE_IDMAP_SERVICE) {
+		<span class="enscript-comment">/*
+		 * Ask the ID mapping service to map the ID string to a GUID.
+		 *
+		 * [sigh] this isn't a &quot;pwnam/grnam&quot; it's an NFS ID string!
+		 */</span>
+		gp = compare ? &amp;guid1 : guidp;
+		<span class="enscript-keyword">if</span> (isgroup)
+			error = kauth_cred_grnam2guid(id, gp);
+		<span class="enscript-keyword">else</span>
+			error = kauth_cred_pwnam2guid(id, gp);
+		<span class="enscript-keyword">if</span> (error &amp;&amp; (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_LOG_FAILED_MAPPINGS))
+			printf(<span class="enscript-string">&quot;nfs4_id2guid: idmap failed for %s %s error %d\n&quot;</span>, id, isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>, error);
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_LOG_SUCCESSFUL_MAPPINGS))
+			printf(<span class="enscript-string">&quot;nfs4_id2guid: idmap for %s %s got guid &quot;</span>
+				<span class="enscript-string">&quot;%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x\n&quot;</span>,
+				id, isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>,
+				gp-&gt;g_guid[0], gp-&gt;g_guid[1], gp-&gt;g_guid[2], gp-&gt;g_guid[3],
+				gp-&gt;g_guid[4], gp-&gt;g_guid[5], gp-&gt;g_guid[6], gp-&gt;g_guid[7],
+				gp-&gt;g_guid[8], gp-&gt;g_guid[9], gp-&gt;g_guid[10], gp-&gt;g_guid[11],
+				gp-&gt;g_guid[12], gp-&gt;g_guid[13], gp-&gt;g_guid[14], gp-&gt;g_guid[15]);
+		error1 = error;
+	}
+	<span class="enscript-keyword">if</span> (error || compare || !(nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_USE_IDMAP_SERVICE)) {
+		<span class="enscript-comment">/*
+		 * fallback path... see if we can come up with an answer ourselves.
+		 */</span>
+		gp = compare ? &amp;guid2 : guidp;
+
+		<span class="enscript-keyword">if</span> (!(nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_FALLBACK_NO_WELLKNOWN_IDS) &amp;&amp; at &amp;&amp; !at[1]) {
+			<span class="enscript-comment">/* must be a special ACE &quot;who&quot; ID */</span>
+			bzero(&amp;sid, <span class="enscript-keyword">sizeof</span>(sid));
+			sid.sid_kind = 1;
+			sid.sid_authcount = 1;
+			<span class="enscript-keyword">if</span> (!strcmp(id, <span class="enscript-string">&quot;OWNER@&quot;</span>)) {
+				<span class="enscript-comment">// S-1-3-0
+</span>				sid.sid_authority[5] = 3;
+				sid.sid_authorities[0] = 0;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!strcmp(id, <span class="enscript-string">&quot;GROUP@&quot;</span>)) {
+				<span class="enscript-comment">// S-1-3-1
+</span>				sid.sid_authority[5] = 3;
+				sid.sid_authorities[0] = 1;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!strcmp(id, <span class="enscript-string">&quot;EVERYONE@&quot;</span>)) {
+				<span class="enscript-comment">// S-1-1-0
+</span>				sid.sid_authority[5] = 1;
+				sid.sid_authorities[0] = 0;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!strcmp(id, <span class="enscript-string">&quot;INTERACTIVE@&quot;</span>)) {
+				<span class="enscript-comment">// S-1-5-4
+</span>				sid.sid_authority[5] = 5;
+				sid.sid_authorities[0] = 4;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!strcmp(id, <span class="enscript-string">&quot;NETWORK@&quot;</span>)) {
+				<span class="enscript-comment">// S-1-5-2
+</span>				sid.sid_authority[5] = 5;
+				sid.sid_authorities[0] = 2;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!strcmp(id, <span class="enscript-string">&quot;DIALUP@&quot;</span>)) {
+				<span class="enscript-comment">// S-1-5-1
+</span>				sid.sid_authority[5] = 5;
+				sid.sid_authorities[0] = 1;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!strcmp(id, <span class="enscript-string">&quot;BATCH@&quot;</span>)) {
+				<span class="enscript-comment">// S-1-5-3
+</span>				sid.sid_authority[5] = 5;
+				sid.sid_authorities[0] = 3;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!strcmp(id, <span class="enscript-string">&quot;ANONYMOUS@&quot;</span>)) {
+				<span class="enscript-comment">// S-1-5-7
+</span>				sid.sid_authority[5] = 5;
+				sid.sid_authorities[0] = 7;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!strcmp(id, <span class="enscript-string">&quot;AUTHENTICATED@&quot;</span>)) {
+				<span class="enscript-comment">// S-1-5-11
+</span>				sid.sid_authority[5] = 5;
+				sid.sid_authorities[0] = 11;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!strcmp(id, <span class="enscript-string">&quot;SERVICE@&quot;</span>)) {
+				<span class="enscript-comment">// S-1-5-6
+</span>				sid.sid_authority[5] = 5;
+				sid.sid_authorities[0] = 6;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">// S-1-0-0 &quot;NOBODY&quot;
+</span>				sid.sid_authority[5] = 0;
+				sid.sid_authorities[0] = 0;
+			}
+			error = kauth_cred_ntsid2guid(&amp;sid, gp);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (!(nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_FALLBACK_NO_COMMON_IDS) &amp;&amp; at) {
+				<span class="enscript-comment">/* must be user@domain */</span>
+				<span class="enscript-comment">/* try to identify some well-known IDs */</span>
+				<span class="enscript-keyword">if</span> (!strncmp(id, <span class="enscript-string">&quot;root@&quot;</span>, 5))
+					num = 0;
+				<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!strncmp(id, <span class="enscript-string">&quot;wheel@&quot;</span>, 6))
+					num = 0;
+				<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!strncmp(id, <span class="enscript-string">&quot;nobody@&quot;</span>, 7))
+					num = -2;
+				<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!strncmp(id, <span class="enscript-string">&quot;nfsnobody@&quot;</span>, 10))
+					num = -2;
+				<span class="enscript-keyword">else</span>
+					num = unknown;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!(nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_FALLBACK_NO_COMMON_IDS) &amp;&amp; !strcmp(id, <span class="enscript-string">&quot;nobody&quot;</span>)) {
+				num = -2;
+			} <span class="enscript-keyword">else</span> {
+				num = unknown;
+			}
+<span class="enscript-reference">gotnumid</span>:
+			<span class="enscript-keyword">if</span> (isgroup)
+				error = kauth_cred_gid2guid((gid_t)num, gp);
+			<span class="enscript-keyword">else</span>
+				error = kauth_cred_uid2guid((uid_t)num, gp);
+		}
+		<span class="enscript-keyword">if</span> (error &amp;&amp; (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_LOG_FAILED_MAPPINGS))
+			printf(<span class="enscript-string">&quot;nfs4_id2guid: fallback map failed for %s %s error %d\n&quot;</span>, id, isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>, error);
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_LOG_SUCCESSFUL_MAPPINGS))
+			printf(<span class="enscript-string">&quot;nfs4_id2guid: fallback map for %s %s got guid &quot;</span>
+				<span class="enscript-string">&quot;%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x\n&quot;</span>,
+				id, isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>,
+				gp-&gt;g_guid[0], gp-&gt;g_guid[1], gp-&gt;g_guid[2], gp-&gt;g_guid[3],
+				gp-&gt;g_guid[4], gp-&gt;g_guid[5], gp-&gt;g_guid[6], gp-&gt;g_guid[7],
+				gp-&gt;g_guid[8], gp-&gt;g_guid[9], gp-&gt;g_guid[10], gp-&gt;g_guid[11],
+				gp-&gt;g_guid[12], gp-&gt;g_guid[13], gp-&gt;g_guid[14], gp-&gt;g_guid[15]);
+	}
+
+	<span class="enscript-keyword">if</span> (compare) {
+		<span class="enscript-comment">/* compare the results, log if different */</span>
+		<span class="enscript-keyword">if</span> (!error1 &amp;&amp; !error) {
+			<span class="enscript-keyword">if</span> (!kauth_guid_equal(&amp;guid1, &amp;guid2))
+				printf(<span class="enscript-string">&quot;nfs4_id2guid: idmap/fallback results differ for %s %s - &quot;</span>
+					<span class="enscript-string">&quot;idmap %02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x &quot;</span>
+					<span class="enscript-string">&quot;fallback %02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x\n&quot;</span>,
+					id, isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>,
+					guid1.g_guid[0], guid1.g_guid[1], guid1.g_guid[2], guid1.g_guid[3],
+					guid1.g_guid[4], guid1.g_guid[5], guid1.g_guid[6], guid1.g_guid[7],
+					guid1.g_guid[8], guid1.g_guid[9], guid1.g_guid[10], guid1.g_guid[11],
+					guid1.g_guid[12], guid1.g_guid[13], guid1.g_guid[14], guid1.g_guid[15],
+					guid2.g_guid[0], guid2.g_guid[1], guid2.g_guid[2], guid2.g_guid[3],
+					guid2.g_guid[4], guid2.g_guid[5], guid2.g_guid[6], guid2.g_guid[7],
+					guid2.g_guid[8], guid2.g_guid[9], guid2.g_guid[10], guid2.g_guid[11],
+					guid2.g_guid[12], guid2.g_guid[13], guid2.g_guid[14], guid2.g_guid[15]);
+			<span class="enscript-comment">/* copy idmap result to output guid */</span>
+			*guidp = guid1;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (error1 &amp;&amp; !error) {
+			printf(<span class="enscript-string">&quot;nfs4_id2guid: idmap/fallback results differ for %s %s - &quot;</span>
+				<span class="enscript-string">&quot;idmap error %d &quot;</span>
+				<span class="enscript-string">&quot;fallback %02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x\n&quot;</span>,
+				id, isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>,
+				error1,
+				guid2.g_guid[0], guid2.g_guid[1], guid2.g_guid[2], guid2.g_guid[3],
+				guid2.g_guid[4], guid2.g_guid[5], guid2.g_guid[6], guid2.g_guid[7],
+				guid2.g_guid[8], guid2.g_guid[9], guid2.g_guid[10], guid2.g_guid[11],
+				guid2.g_guid[12], guid2.g_guid[13], guid2.g_guid[14], guid2.g_guid[15]);
+			<span class="enscript-comment">/* copy fallback result to output guid */</span>
+			*guidp = guid2;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!error1 &amp;&amp; error) {
+			printf(<span class="enscript-string">&quot;nfs4_id2guid: idmap/fallback results differ for %s %s - &quot;</span>
+				<span class="enscript-string">&quot;idmap %02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x &quot;</span>
+				<span class="enscript-string">&quot;fallback error %d\n&quot;</span>,
+				id, isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>,
+				guid1.g_guid[0], guid1.g_guid[1], guid1.g_guid[2], guid1.g_guid[3],
+				guid1.g_guid[4], guid1.g_guid[5], guid1.g_guid[6], guid1.g_guid[7],
+				guid1.g_guid[8], guid1.g_guid[9], guid1.g_guid[10], guid1.g_guid[11],
+				guid1.g_guid[12], guid1.g_guid[13], guid1.g_guid[14], guid1.g_guid[15],
+				error);
+			<span class="enscript-comment">/* copy idmap result to output guid */</span>
+			*guidp = guid1;
+			error = 0;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (error1 != error)
+				printf(<span class="enscript-string">&quot;nfs4_id2guid: idmap/fallback results differ for %s %s - &quot;</span>
+					<span class="enscript-string">&quot;idmap error %d fallback error %d\n&quot;</span>,
+					id, isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>, error1, error);
+		}
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Map a VFS guid to an NFSv4 ID string.
+ *
+ * Try to use the ID mapping service... but we may fallback to trying to do it ourselves.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfs4_guid2id</span>(guid_t *guidp, <span class="enscript-type">char</span> *id, <span class="enscript-type">int</span> *idlen, <span class="enscript-type">int</span> isgroup)
+{
+	<span class="enscript-type">int</span> error1 = 0, error = 0, compare;
+	<span class="enscript-type">int</span> id1len, id2len, len;
+	<span class="enscript-type">char</span> *id1buf, *id1;
+	<span class="enscript-type">char</span> numbuf[32];
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *id2 = NULL;
+
+	id1buf = id1 = NULL;
+	id1len = id2len = 0;
+	compare = ((nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_USE_IDMAP_SERVICE) &amp;&amp;
+		   (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_COMPARE_RESULTS));
+
+	<span class="enscript-keyword">if</span> (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_USE_IDMAP_SERVICE) {
+		<span class="enscript-comment">/*
+		 * Ask the ID mapping service to map the GUID to an ID string.
+		 *
+		 * [sigh] this isn't a &quot;pwnam&quot; it's an NFS id string!
+		 */</span>
+
+		<span class="enscript-comment">/*
+		 * Stupid kauth_cred_guid2pwnam() function requires that the buffer
+		 * be at least MAXPATHLEN bytes long even though most if not all ID
+		 * strings will be much much shorter than that.
+		 */</span>
+		<span class="enscript-keyword">if</span> (compare || (*idlen &lt; MAXPATHLEN)) {
+			MALLOC_ZONE(id1buf, <span class="enscript-type">char</span>*, MAXPATHLEN, M_NAMEI, M_WAITOK);
+			<span class="enscript-keyword">if</span> (!id1buf)
+				<span class="enscript-keyword">return</span> (ENOMEM);
+			id1 = id1buf;
+			id1len = MAXPATHLEN;
+		} <span class="enscript-keyword">else</span> {
+			id1 = id;
+			id1len = *idlen;
+		}
+
+		<span class="enscript-keyword">if</span> (isgroup)
+			error = kauth_cred_guid2grnam(guidp, id1);
+		<span class="enscript-keyword">else</span>
+			error = kauth_cred_guid2pwnam(guidp, id1);
+		<span class="enscript-keyword">if</span> (error &amp;&amp; (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_LOG_FAILED_MAPPINGS))
+			printf(<span class="enscript-string">&quot;nfs4_guid2id: idmap failed for &quot;</span>
+				<span class="enscript-string">&quot;%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x %s &quot;</span>
+				<span class="enscript-string">&quot;error %d\n&quot;</span>,
+				guidp-&gt;g_guid[0], guidp-&gt;g_guid[1], guidp-&gt;g_guid[2], guidp-&gt;g_guid[3],
+				guidp-&gt;g_guid[4], guidp-&gt;g_guid[5], guidp-&gt;g_guid[6], guidp-&gt;g_guid[7],
+				guidp-&gt;g_guid[8], guidp-&gt;g_guid[9], guidp-&gt;g_guid[10], guidp-&gt;g_guid[11],
+				guidp-&gt;g_guid[12], guidp-&gt;g_guid[13], guidp-&gt;g_guid[14], guidp-&gt;g_guid[15],
+				isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>, error);
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_LOG_SUCCESSFUL_MAPPINGS))
+			printf(<span class="enscript-string">&quot;nfs4_guid2id: idmap for &quot;</span>
+				<span class="enscript-string">&quot;%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x %s &quot;</span>
+				<span class="enscript-string">&quot;got ID %s\n&quot;</span>,
+				guidp-&gt;g_guid[0], guidp-&gt;g_guid[1], guidp-&gt;g_guid[2], guidp-&gt;g_guid[3],
+				guidp-&gt;g_guid[4], guidp-&gt;g_guid[5], guidp-&gt;g_guid[6], guidp-&gt;g_guid[7],
+				guidp-&gt;g_guid[8], guidp-&gt;g_guid[9], guidp-&gt;g_guid[10], guidp-&gt;g_guid[11],
+				guidp-&gt;g_guid[12], guidp-&gt;g_guid[13], guidp-&gt;g_guid[14], guidp-&gt;g_guid[15],
+				isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>, id1);
+		error1 = error;
+		<span class="enscript-keyword">if</span> (!error) {
+			<span class="enscript-keyword">if</span> (compare) {
+				id1len = strnlen(id1, id1len);
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (id1 == id1buf) {
+				<span class="enscript-comment">/* copy idmap result to output buffer */</span>
+				len = strlcpy(id, id1, *idlen);
+				<span class="enscript-keyword">if</span> (len &gt;= *idlen)
+					error = ENOSPC;
+				<span class="enscript-keyword">else</span>
+					*idlen = len;
+			}
+		}
+	}
+	<span class="enscript-keyword">if</span> (error || compare || !(nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_USE_IDMAP_SERVICE)) {
+		<span class="enscript-comment">/*
+		 * fallback path... see if we can come up with an answer ourselves.
+		 */</span>
+		ntsid_t sid;
+		uid_t uid;
+
+		<span class="enscript-keyword">if</span> (!(nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_FALLBACK_NO_WELLKNOWN_IDS)) {
+			error = kauth_cred_guid2ntsid(guidp, &amp;sid);
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; (sid.sid_kind == 1) &amp;&amp; (sid.sid_authcount == 1)) {
+				<span class="enscript-comment">/* check if it's one of our well-known ACE WHO names */</span>
+				<span class="enscript-keyword">if</span> (sid.sid_authority[5] == 0) {
+					<span class="enscript-keyword">if</span> (sid.sid_authorities[0] == 0) <span class="enscript-comment">// S-1-0-0
+</span>						id2 = <span class="enscript-string">&quot;nobody@localdomain&quot;</span>;
+				} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sid.sid_authority[5] == 1) {
+					<span class="enscript-keyword">if</span> (sid.sid_authorities[0] == 0) <span class="enscript-comment">// S-1-1-0
+</span>						id2 = <span class="enscript-string">&quot;EVERYONE@&quot;</span>;
+				} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sid.sid_authority[5] == 3) {
+					<span class="enscript-keyword">if</span> (sid.sid_authorities[0] == 0) <span class="enscript-comment">// S-1-3-0
+</span>						id2 = <span class="enscript-string">&quot;OWNER@&quot;</span>;
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sid.sid_authorities[0] == 1) <span class="enscript-comment">// S-1-3-1
+</span>						id2 = <span class="enscript-string">&quot;GROUP@&quot;</span>;
+				} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sid.sid_authority[5] == 5) {
+					<span class="enscript-keyword">if</span> (sid.sid_authorities[0] == ntohl(1)) <span class="enscript-comment">// S-1-5-1
+</span>						id2 = <span class="enscript-string">&quot;DIALUP@&quot;</span>;
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sid.sid_authorities[0] == ntohl(2)) <span class="enscript-comment">// S-1-5-2
+</span>						id2 = <span class="enscript-string">&quot;NETWORK@&quot;</span>;
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sid.sid_authorities[0] == ntohl(3)) <span class="enscript-comment">// S-1-5-3
+</span>						id2 = <span class="enscript-string">&quot;BATCH@&quot;</span>;
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sid.sid_authorities[0] == ntohl(4)) <span class="enscript-comment">// S-1-5-4
+</span>						id2 = <span class="enscript-string">&quot;INTERACTIVE@&quot;</span>;
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sid.sid_authorities[0] == ntohl(6)) <span class="enscript-comment">// S-1-5-6
+</span>						id2 = <span class="enscript-string">&quot;SERVICE@&quot;</span>;
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sid.sid_authorities[0] == ntohl(7)) <span class="enscript-comment">// S-1-5-7
+</span>						id2 = <span class="enscript-string">&quot;ANONYMOUS@&quot;</span>;
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sid.sid_authorities[0] == ntohl(11)) <span class="enscript-comment">// S-1-5-11
+</span>						id2 = <span class="enscript-string">&quot;AUTHENTICATED@&quot;</span>;
+				}
+			}
+		}
+		<span class="enscript-keyword">if</span> (!id2) {
+			<span class="enscript-comment">/* OK, let's just try mapping it to a UID/GID */</span>
+			<span class="enscript-keyword">if</span> (isgroup)
+				error = kauth_cred_guid2gid(guidp, (gid_t*)&amp;uid);
+			<span class="enscript-keyword">else</span>
+				error = kauth_cred_guid2uid(guidp, &amp;uid);
+			<span class="enscript-keyword">if</span> (!error) {
+				<span class="enscript-keyword">if</span> (!(nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_FALLBACK_NO_COMMON_IDS)) {
+					<span class="enscript-comment">/* map well known uid's to strings */</span>
+					<span class="enscript-keyword">if</span> (uid == 0)
+						id2 = isgroup ? <span class="enscript-string">&quot;wheel@localdomain&quot;</span> : <span class="enscript-string">&quot;root@localdomain&quot;</span>;
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (uid == (uid_t)-2)
+						id2 = <span class="enscript-string">&quot;nobody@localdomain&quot;</span>;
+				}
+				<span class="enscript-keyword">if</span> (!id2) {
+					<span class="enscript-comment">/* or just use a decimal number string. */</span>
+					snprintf(numbuf, <span class="enscript-keyword">sizeof</span>(numbuf), <span class="enscript-string">&quot;%d&quot;</span>, uid);
+					id2 = numbuf;
+				}
+			}
+		}
+		<span class="enscript-keyword">if</span> (error &amp;&amp; (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_LOG_FAILED_MAPPINGS))
+			printf(<span class="enscript-string">&quot;nfs4_guid2id: fallback map failed for &quot;</span>
+				<span class="enscript-string">&quot;%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x %s &quot;</span>
+				<span class="enscript-string">&quot;error %d\n&quot;</span>,
+				guidp-&gt;g_guid[0], guidp-&gt;g_guid[1], guidp-&gt;g_guid[2], guidp-&gt;g_guid[3],
+				guidp-&gt;g_guid[4], guidp-&gt;g_guid[5], guidp-&gt;g_guid[6], guidp-&gt;g_guid[7],
+				guidp-&gt;g_guid[8], guidp-&gt;g_guid[9], guidp-&gt;g_guid[10], guidp-&gt;g_guid[11],
+				guidp-&gt;g_guid[12], guidp-&gt;g_guid[13], guidp-&gt;g_guid[14], guidp-&gt;g_guid[15],
+				isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>, error);
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_LOG_SUCCESSFUL_MAPPINGS))
+			printf(<span class="enscript-string">&quot;nfs4_guid2id: fallback map for &quot;</span>
+				<span class="enscript-string">&quot;%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x %s &quot;</span>
+				<span class="enscript-string">&quot;got ID %s\n&quot;</span>,
+				guidp-&gt;g_guid[0], guidp-&gt;g_guid[1], guidp-&gt;g_guid[2], guidp-&gt;g_guid[3],
+				guidp-&gt;g_guid[4], guidp-&gt;g_guid[5], guidp-&gt;g_guid[6], guidp-&gt;g_guid[7],
+				guidp-&gt;g_guid[8], guidp-&gt;g_guid[9], guidp-&gt;g_guid[10], guidp-&gt;g_guid[11],
+				guidp-&gt;g_guid[12], guidp-&gt;g_guid[13], guidp-&gt;g_guid[14], guidp-&gt;g_guid[15],
+				isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>, id2);
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; id2) {
+			<span class="enscript-keyword">if</span> (compare) {
+				id2len = strnlen(id2, MAXPATHLEN);
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* copy fallback result to output buffer */</span>
+				len = strlcpy(id, id2, *idlen);
+				<span class="enscript-keyword">if</span> (len &gt;= *idlen)
+					error = ENOSPC;
+				<span class="enscript-keyword">else</span>
+					*idlen = len;
+			}
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (compare) {
+		<span class="enscript-comment">/* compare the results, log if different */</span>
+		<span class="enscript-keyword">if</span> (!error1 &amp;&amp; !error) {
+			<span class="enscript-keyword">if</span> ((id1len != id2len) || strncmp(id1, id2, id1len))
+				printf(<span class="enscript-string">&quot;nfs4_guid2id: idmap/fallback results differ for &quot;</span>
+					<span class="enscript-string">&quot;%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x %s &quot;</span>
+					<span class="enscript-string">&quot;idmap %s fallback %s\n&quot;</span>,
+					guidp-&gt;g_guid[0], guidp-&gt;g_guid[1], guidp-&gt;g_guid[2], guidp-&gt;g_guid[3],
+					guidp-&gt;g_guid[4], guidp-&gt;g_guid[5], guidp-&gt;g_guid[6], guidp-&gt;g_guid[7],
+					guidp-&gt;g_guid[8], guidp-&gt;g_guid[9], guidp-&gt;g_guid[10], guidp-&gt;g_guid[11],
+					guidp-&gt;g_guid[12], guidp-&gt;g_guid[13], guidp-&gt;g_guid[14], guidp-&gt;g_guid[15],
+					isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>, id1, id2);
+			<span class="enscript-keyword">if</span> (id1 == id1buf) {
+				<span class="enscript-comment">/* copy idmap result to output buffer */</span>
+				len = strlcpy(id, id1, *idlen);
+				<span class="enscript-keyword">if</span> (len &gt;= *idlen)
+					error = ENOSPC;
+				<span class="enscript-keyword">else</span>
+					*idlen = len;
+			}
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (error1 &amp;&amp; !error) {
+			printf(<span class="enscript-string">&quot;nfs4_guid2id: idmap/fallback results differ for &quot;</span>
+				<span class="enscript-string">&quot;%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x %s &quot;</span>
+				<span class="enscript-string">&quot;idmap error %d fallback %s\n&quot;</span>,
+				guidp-&gt;g_guid[0], guidp-&gt;g_guid[1], guidp-&gt;g_guid[2], guidp-&gt;g_guid[3],
+				guidp-&gt;g_guid[4], guidp-&gt;g_guid[5], guidp-&gt;g_guid[6], guidp-&gt;g_guid[7],
+				guidp-&gt;g_guid[8], guidp-&gt;g_guid[9], guidp-&gt;g_guid[10], guidp-&gt;g_guid[11],
+				guidp-&gt;g_guid[12], guidp-&gt;g_guid[13], guidp-&gt;g_guid[14], guidp-&gt;g_guid[15],
+				isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>, error1, id2);
+			<span class="enscript-comment">/* copy fallback result to output buffer */</span>
+			len = strlcpy(id, id2, *idlen);
+			<span class="enscript-keyword">if</span> (len &gt;= *idlen)
+				error = ENOSPC;
+			<span class="enscript-keyword">else</span>
+				*idlen = len;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!error1 &amp;&amp; error) {
+			printf(<span class="enscript-string">&quot;nfs4_guid2id: idmap/fallback results differ for &quot;</span>
+				<span class="enscript-string">&quot;%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x %s &quot;</span>
+				<span class="enscript-string">&quot;idmap %s fallback error %d\n&quot;</span>,
+				guidp-&gt;g_guid[0], guidp-&gt;g_guid[1], guidp-&gt;g_guid[2], guidp-&gt;g_guid[3],
+				guidp-&gt;g_guid[4], guidp-&gt;g_guid[5], guidp-&gt;g_guid[6], guidp-&gt;g_guid[7],
+				guidp-&gt;g_guid[8], guidp-&gt;g_guid[9], guidp-&gt;g_guid[10], guidp-&gt;g_guid[11],
+				guidp-&gt;g_guid[12], guidp-&gt;g_guid[13], guidp-&gt;g_guid[14], guidp-&gt;g_guid[15],
+				isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>, id1, error);
+			<span class="enscript-keyword">if</span> (id1 == id1buf) {
+				<span class="enscript-comment">/* copy idmap result to output buffer */</span>
+				len = strlcpy(id, id1, *idlen);
+				<span class="enscript-keyword">if</span> (len &gt;= *idlen)
+					error = ENOSPC;
+				<span class="enscript-keyword">else</span>
+					*idlen = len;
+			}
+			error = 0;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (error1 != error)
+				printf(<span class="enscript-string">&quot;nfs4_guid2id: idmap/fallback results differ for %s %s - &quot;</span>
+					<span class="enscript-string">&quot;idmap error %d fallback error %d\n&quot;</span>,
+					id, isgroup ? <span class="enscript-string">&quot;G&quot;</span> : <span class="enscript-string">&quot; &quot;</span>, error1, error);
+		}
+	}
+	<span class="enscript-keyword">if</span> (id1buf)
+		FREE_ZONE(id1buf, MAXPATHLEN, M_NAMEI);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * Set a vnode attr's supported bits according to the given bitmap
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfs_vattr_set_supported</span>(uint32_t *bitmap, <span class="enscript-type">struct</span> vnode_attr *vap)
+{
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TYPE))
+		VATTR_SET_SUPPORTED(vap, va_type);
+	<span class="enscript-comment">// if (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_CHANGE))
+</span>	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_SIZE))
+		VATTR_SET_SUPPORTED(vap, va_data_size);
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_FSID))
+		VATTR_SET_SUPPORTED(vap, va_fsid);
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_ACL))
+		VATTR_SET_SUPPORTED(vap, va_acl);
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_ARCHIVE))
+		VATTR_SET_SUPPORTED(vap, va_flags);
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_FILEID))
+		VATTR_SET_SUPPORTED(vap, va_fileid);
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_HIDDEN))
+		VATTR_SET_SUPPORTED(vap, va_flags);
+	<span class="enscript-comment">// if (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_MIMETYPE))
+</span>	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_MODE))
+		VATTR_SET_SUPPORTED(vap, va_mode);
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_NUMLINKS))
+		VATTR_SET_SUPPORTED(vap, va_nlink);
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_OWNER)) {
+		VATTR_SET_SUPPORTED(vap, va_uid);
+		VATTR_SET_SUPPORTED(vap, va_uuuid);
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_OWNER_GROUP)) {
+		VATTR_SET_SUPPORTED(vap, va_gid);
+		VATTR_SET_SUPPORTED(vap, va_guuid);
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_RAWDEV))
+		VATTR_SET_SUPPORTED(vap, va_rdev);
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_SPACE_USED))
+		VATTR_SET_SUPPORTED(vap, va_total_alloc);
+	<span class="enscript-comment">// if (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_SYSTEM))
+</span>	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_ACCESS))
+		VATTR_SET_SUPPORTED(vap, va_access_time);
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_BACKUP))
+		VATTR_SET_SUPPORTED(vap, va_backup_time);
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_CREATE))
+		VATTR_SET_SUPPORTED(vap, va_create_time);
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_METADATA))
+		VATTR_SET_SUPPORTED(vap, va_change_time);
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_MODIFY))
+		VATTR_SET_SUPPORTED(vap, va_modify_time);
+}
+
+<span class="enscript-comment">/*
+ * Parse the attributes that are in the mbuf list and store them in
+ * the given structures.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfs4_parsefattr</span>(
+	<span class="enscript-type">struct</span> nfsm_chain *nmc,
+	<span class="enscript-type">struct</span> nfs_fsattr *nfsap,
+	<span class="enscript-type">struct</span> nfs_vattr *nvap,
+	fhandle_t *fhp,
+	<span class="enscript-type">struct</span> dqblk *dqbp,
+	<span class="enscript-type">struct</span> nfs_fs_locations *nfslsp)
+{
+	<span class="enscript-type">int</span> error = 0, error2, rderror = 0, attrbytes;
+	uint32_t val, val2, val3, i;
+	uint32_t bitmap[NFS_ATTR_BITMAP_LEN], len;
+	size_t slen;
+	<span class="enscript-type">char</span> sbuf[64], *s;
+	<span class="enscript-type">struct</span> nfs_fsattr nfsa_dummy;
+	<span class="enscript-type">struct</span> nfs_vattr nva_dummy;
+	<span class="enscript-type">struct</span> dqblk dqb_dummy;
+	kauth_acl_t acl = NULL;
+	uint32_t ace_type, ace_flags, ace_mask;
+	<span class="enscript-type">struct</span> nfs_fs_locations nfsls_dummy;
+	<span class="enscript-type">struct</span> sockaddr_storage ss;
+
+	<span class="enscript-comment">/* if not interested in some values... throw 'em into a local dummy variable */</span>
+	<span class="enscript-keyword">if</span> (!nfsap)
+		nfsap = &amp;nfsa_dummy;
+	<span class="enscript-keyword">if</span> (!nvap)
+		nvap = &amp;nva_dummy;
+	<span class="enscript-keyword">if</span> (!dqbp)
+		dqbp = &amp;dqb_dummy;
+	<span class="enscript-keyword">if</span> (!nfslsp)
+		nfslsp = &amp;nfsls_dummy;
+	bzero(nfslsp, <span class="enscript-keyword">sizeof</span>(*nfslsp));
+
+	attrbytes = val = val2 = val3 = 0;
+	s = sbuf;
+	slen = <span class="enscript-keyword">sizeof</span>(sbuf);
+	NVATTR_INIT(nvap);
+
+	len = NFS_ATTR_BITMAP_LEN;
+	nfsm_chain_get_bitmap(error, nmc, bitmap, len);
+	<span class="enscript-comment">/* add bits to object/fs attr bitmaps */</span>
+	<span class="enscript-keyword">for</span> (i=0; i &lt; NFS_ATTR_BITMAP_LEN; i++) {
+		nvap-&gt;nva_bitmap[i] |= bitmap[i] &amp; nfs_object_attr_bitmap[i];
+		nfsap-&gt;nfsa_bitmap[i] |= bitmap[i] &amp; nfs_fs_attr_bitmap[i];
+	}
+
+	nfsm_chain_get_32(error, nmc, attrbytes);
+	nfsmout_if(error);
+
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_SUPPORTED_ATTRS)) {
+		len = NFS_ATTR_BITMAP_LEN;
+		nfsm_chain_get_bitmap(error, nmc, nfsap-&gt;nfsa_supp_attr, len);
+		attrbytes -= (len + 1) * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TYPE)) {
+		nfsm_chain_get_32(error, nmc, val);
+		nvap-&gt;nva_type = nfstov_type(val, NFS_VER4);
+		<span class="enscript-keyword">if</span> ((val == NFATTRDIR) || (val == NFNAMEDATTR))
+			nvap-&gt;nva_flags |= NFS_FFLAG_IS_ATTR;
+		<span class="enscript-keyword">else</span>
+			nvap-&gt;nva_flags &amp;= ~NFS_FFLAG_IS_ATTR;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_FH_EXPIRE_TYPE)) {
+		nfsm_chain_get_32(error, nmc, val);
+		nfsmout_if(error);
+		nfsap-&gt;nfsa_flags &amp;= ~NFS_FSFLAG_FHTYPE_MASK;
+		nfsap-&gt;nfsa_flags |= val &lt;&lt; NFS_FSFLAG_FHTYPE_SHIFT;
+		<span class="enscript-keyword">if</span> (val &amp; ~0xff)
+			printf(<span class="enscript-string">&quot;nfs: warning unknown fh type: 0x%x\n&quot;</span>, val);
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_CHANGE)) {
+		nfsm_chain_get_64(error, nmc, nvap-&gt;nva_change);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_SIZE)) {
+		nfsm_chain_get_64(error, nmc, nvap-&gt;nva_size);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_LINK_SUPPORT)) {
+		nfsm_chain_get_32(error, nmc, val);
+		<span class="enscript-keyword">if</span> (val)
+			nfsap-&gt;nfsa_flags |= NFS_FSFLAG_LINK;
+		<span class="enscript-keyword">else</span>
+			nfsap-&gt;nfsa_flags &amp;= ~NFS_FSFLAG_LINK;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_SYMLINK_SUPPORT)) {
+		nfsm_chain_get_32(error, nmc, val);
+		<span class="enscript-keyword">if</span> (val)
+			nfsap-&gt;nfsa_flags |= NFS_FSFLAG_SYMLINK;
+		<span class="enscript-keyword">else</span>
+			nfsap-&gt;nfsa_flags &amp;= ~NFS_FSFLAG_SYMLINK;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_NAMED_ATTR)) {
+		nfsm_chain_get_32(error, nmc, val);
+		<span class="enscript-keyword">if</span> (val)
+			nvap-&gt;nva_flags |= NFS_FFLAG_HAS_NAMED_ATTRS;
+		<span class="enscript-keyword">else</span>
+			nvap-&gt;nva_flags &amp;= ~NFS_FFLAG_HAS_NAMED_ATTRS;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_FSID)) {
+		nfsm_chain_get_64(error, nmc, nvap-&gt;nva_fsid.major);
+		nfsm_chain_get_64(error, nmc, nvap-&gt;nva_fsid.minor);
+		attrbytes -= 4 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_UNIQUE_HANDLES)) {
+		nfsm_chain_get_32(error, nmc, val);
+		<span class="enscript-keyword">if</span> (val)
+			nfsap-&gt;nfsa_flags |= NFS_FSFLAG_UNIQUE_FH;
+		<span class="enscript-keyword">else</span>
+			nfsap-&gt;nfsa_flags &amp;= ~NFS_FSFLAG_UNIQUE_FH;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_LEASE_TIME)) {
+		nfsm_chain_get_32(error, nmc, nfsap-&gt;nfsa_lease);
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_RDATTR_ERROR)) {
+		nfsm_chain_get_32(error, nmc, rderror);
+		attrbytes -= NFSX_UNSIGNED;
+		<span class="enscript-keyword">if</span> (!rderror) { <span class="enscript-comment">/* no error */</span>
+			NFS_BITMAP_CLR(bitmap, NFS_FATTR_RDATTR_ERROR);
+			NFS_BITMAP_CLR(nvap-&gt;nva_bitmap, NFS_FATTR_RDATTR_ERROR);
+		}
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_ACL)) {
+		error2 = 0;
+		ace_type = ace_flags = ace_mask = 0;
+		nfsm_chain_get_32(error, nmc, val); <span class="enscript-comment">/* ACE count */</span>
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; (val &gt; KAUTH_ACL_MAX_ENTRIES))
+			error = EOVERFLOW;
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; !((acl = kauth_acl_alloc(val))))
+			error = ENOMEM;
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; acl) {
+			acl-&gt;acl_entrycount = val;
+			acl-&gt;acl_flags = 0;
+		}
+		attrbytes -= NFSX_UNSIGNED;
+		nfsm_assert(error, (attrbytes &gt;= 0), EBADRPC);
+		<span class="enscript-keyword">for</span> (i=0; !error &amp;&amp; (i &lt; val); i++) {
+			nfsm_chain_get_32(error, nmc, ace_type);
+			nfsm_chain_get_32(error, nmc, ace_flags);
+			nfsm_chain_get_32(error, nmc, ace_mask);
+			nfsm_chain_get_32(error, nmc, len);
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; len &gt;= NFS_MAX_WHO)
+				error = EBADRPC;
+			acl-&gt;acl_ace[i].ace_flags = nfs4_ace_nfstype_to_vfstype(ace_type, &amp;error);
+			acl-&gt;acl_ace[i].ace_flags |= nfs4_ace_nfsflags_to_vfsflags(ace_flags);
+			acl-&gt;acl_ace[i].ace_rights = nfs4_ace_nfsmask_to_vfsrights(ace_mask);
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; !error2 &amp;&amp; (len &gt;= slen)) {
+				<span class="enscript-keyword">if</span> (s != sbuf) {
+					FREE(s, M_TEMP);
+					s = sbuf;
+					slen = <span class="enscript-keyword">sizeof</span>(sbuf);
+				}
+				<span class="enscript-comment">/* Let's add a bit more if we can to the allocation as to try and avoid future allocations */</span>
+				MALLOC(s, <span class="enscript-type">char</span>*, (len + 16 &lt; NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO, M_TEMP, M_WAITOK);
+				<span class="enscript-keyword">if</span> (s)
+					slen = (len + 16 &lt; NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO;
+				<span class="enscript-keyword">else</span>
+					error = ENOMEM;
+			}
+			<span class="enscript-keyword">if</span> (error2)
+				nfsm_chain_adv(error, nmc, nfsm_rndup(len));
+			<span class="enscript-keyword">else</span>
+				nfsm_chain_get_opaque(error, nmc, len, s);
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; !error2) {
+				s[len] = <span class="enscript-string">'\0'</span>;
+				error2 = nfs4_id2guid(s, &amp;acl-&gt;acl_ace[i].ace_applicable,
+						(ace_flags &amp; NFS_ACE_IDENTIFIER_GROUP));
+				<span class="enscript-keyword">if</span> (error2 &amp;&amp; (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_LOG_FAILED_MAPPINGS))
+					printf(<span class="enscript-string">&quot;nfs4_parsefattr: ACE WHO %s is no one, no guid?, error %d\n&quot;</span>, s, error2);
+			}
+			attrbytes -= 4*NFSX_UNSIGNED + nfsm_rndup(len);
+			nfsm_assert(error, (attrbytes &gt;= 0), EBADRPC);
+		}
+		nfsmout_if(error);
+		<span class="enscript-keyword">if</span> ((nvap != &amp;nva_dummy) &amp;&amp; !error2) {
+			nvap-&gt;nva_acl = acl;
+			acl = NULL;
+		}
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_ACLSUPPORT)) {
+		<span class="enscript-comment">/*
+		 * Support ACLs if: the server supports DENY/ALLOC ACEs and
+		 * (just to be safe) FATTR_ACL is in the supported list too.
+		 */</span>
+		nfsm_chain_get_32(error, nmc, val);
+		<span class="enscript-keyword">if</span> ((val &amp; (NFS_ACL_SUPPORT_ALLOW_ACL|NFS_ACL_SUPPORT_DENY_ACL)) &amp;&amp;
+		    NFS_BITMAP_ISSET(nfsap-&gt;nfsa_supp_attr, NFS_FATTR_ACL)) {
+			nfsap-&gt;nfsa_flags |= NFS_FSFLAG_ACL;
+		} <span class="enscript-keyword">else</span> {
+			nfsap-&gt;nfsa_flags &amp;= ~NFS_FSFLAG_ACL;
+		}
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_ARCHIVE)) { <span class="enscript-comment">/* SF_ARCHIVED */</span>
+		nfsm_chain_get_32(error, nmc, val);
+		<span class="enscript-keyword">if</span> (val)
+			nvap-&gt;nva_flags |= NFS_FFLAG_ARCHIVED;
+		<span class="enscript-keyword">else</span>
+			nvap-&gt;nva_flags &amp;= ~NFS_FFLAG_ARCHIVED;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_CANSETTIME)) {
+		nfsm_chain_get_32(error, nmc, val);
+		<span class="enscript-keyword">if</span> (val)
+			nfsap-&gt;nfsa_flags |= NFS_FSFLAG_SET_TIME;
+		<span class="enscript-keyword">else</span>
+			nfsap-&gt;nfsa_flags &amp;= ~NFS_FSFLAG_SET_TIME;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_CASE_INSENSITIVE)) {
+		nfsm_chain_get_32(error, nmc, val);
+		<span class="enscript-keyword">if</span> (val)
+			nfsap-&gt;nfsa_flags |= NFS_FSFLAG_CASE_INSENSITIVE;
+		<span class="enscript-keyword">else</span>
+			nfsap-&gt;nfsa_flags &amp;= ~NFS_FSFLAG_CASE_INSENSITIVE;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_CASE_PRESERVING)) {
+		nfsm_chain_get_32(error, nmc, val);
+		<span class="enscript-keyword">if</span> (val)
+			nfsap-&gt;nfsa_flags |= NFS_FSFLAG_CASE_PRESERVING;
+		<span class="enscript-keyword">else</span>
+			nfsap-&gt;nfsa_flags &amp;= ~NFS_FSFLAG_CASE_PRESERVING;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_CHOWN_RESTRICTED)) {
+		nfsm_chain_get_32(error, nmc, val);
+		<span class="enscript-keyword">if</span> (val)
+			nfsap-&gt;nfsa_flags |= NFS_FSFLAG_CHOWN_RESTRICTED;
+		<span class="enscript-keyword">else</span>
+			nfsap-&gt;nfsa_flags &amp;= ~NFS_FSFLAG_CHOWN_RESTRICTED;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_FILEHANDLE)) {
+		nfsm_chain_get_32(error, nmc, val);
+		<span class="enscript-keyword">if</span> (fhp) {
+			fhp-&gt;fh_len = val;
+			nfsm_chain_get_opaque(error, nmc, nfsm_rndup(val), fhp-&gt;fh_data);
+		} <span class="enscript-keyword">else</span> {
+			nfsm_chain_adv(error, nmc, nfsm_rndup(val));
+		}
+		attrbytes -= NFSX_UNSIGNED + nfsm_rndup(val);
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_FILEID)) {
+		nfsm_chain_get_64(error, nmc, nvap-&gt;nva_fileid);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_FILES_AVAIL)) {
+		nfsm_chain_get_64(error, nmc, nfsap-&gt;nfsa_files_avail);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_FILES_FREE)) {
+		nfsm_chain_get_64(error, nmc, nfsap-&gt;nfsa_files_free);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_FILES_TOTAL)) {
+		nfsm_chain_get_64(error, nmc, nfsap-&gt;nfsa_files_total);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_FS_LOCATIONS)) {
+		uint32_t loc, serv, comp;
+		<span class="enscript-type">struct</span> nfs_fs_location *fsl;
+		<span class="enscript-type">struct</span> nfs_fs_server *fss;
+		<span class="enscript-type">struct</span> nfs_fs_path *fsp;
+
+		<span class="enscript-comment">/* get root pathname */</span>
+		fsp = &amp;nfslsp-&gt;nl_root;
+		nfsm_chain_get_32(error, nmc, fsp-&gt;np_compcount); <span class="enscript-comment">/* component count */</span>
+		attrbytes -= NFSX_UNSIGNED;
+		<span class="enscript-comment">/* sanity check component count */</span>
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; (fsp-&gt;np_compcount &gt; MAXPATHLEN))
+			error = EBADRPC;
+		nfsmout_if(error);
+		<span class="enscript-keyword">if</span> (fsp-&gt;np_compcount) {
+			MALLOC(fsp-&gt;np_components, <span class="enscript-type">char</span> **, fsp-&gt;np_compcount * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">char</span>*), M_TEMP, M_WAITOK|M_ZERO);
+			<span class="enscript-keyword">if</span> (!fsp-&gt;np_components)
+				error = ENOMEM;
+		}
+		<span class="enscript-keyword">for</span> (comp = 0; comp &lt; fsp-&gt;np_compcount; comp++) {
+			nfsm_chain_get_32(error, nmc, val); <span class="enscript-comment">/* component length */</span>
+			<span class="enscript-comment">/* sanity check component length */</span>
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; (val == 0)) {
+				<span class="enscript-comment">/*
+				 * Apparently some people think a path with zero components should
+				 * be encoded with one zero-length component.  So, just ignore any
+				 * zero length components.
+				 */</span>
+				comp--;
+				fsp-&gt;np_compcount--;
+				<span class="enscript-keyword">if</span> (fsp-&gt;np_compcount == 0) {
+					FREE(fsp-&gt;np_components, M_TEMP);
+					fsp-&gt;np_components = NULL;
+				}
+				attrbytes -= NFSX_UNSIGNED;
+				<span class="enscript-keyword">continue</span>;
+			}
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; ((val &lt; 1) || (val &gt; MAXPATHLEN)))
+				error = EBADRPC;
+			nfsmout_if(error);
+			MALLOC(fsp-&gt;np_components[comp], <span class="enscript-type">char</span> *, val+1, M_TEMP, M_WAITOK|M_ZERO);
+			<span class="enscript-keyword">if</span> (!fsp-&gt;np_components[comp])
+				error = ENOMEM;
+			nfsmout_if(error);
+			nfsm_chain_get_opaque(error, nmc, val, fsp-&gt;np_components[comp]); <span class="enscript-comment">/* component */</span>
+			attrbytes -= NFSX_UNSIGNED + nfsm_rndup(val);
+		}
+		nfsm_chain_get_32(error, nmc, nfslsp-&gt;nl_numlocs); <span class="enscript-comment">/* fs location count */</span>
+		attrbytes -= NFSX_UNSIGNED;
+		<span class="enscript-comment">/* sanity check location count */</span>
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; (nfslsp-&gt;nl_numlocs &gt; 256))
+			error = EBADRPC;
+		nfsmout_if(error);
+		<span class="enscript-keyword">if</span> (nfslsp-&gt;nl_numlocs &gt; 0) {
+			MALLOC(nfslsp-&gt;nl_locations, <span class="enscript-type">struct</span> nfs_fs_location **, nfslsp-&gt;nl_numlocs * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> nfs_fs_location*), M_TEMP, M_WAITOK|M_ZERO);
+			<span class="enscript-keyword">if</span> (!nfslsp-&gt;nl_locations)
+				error = ENOMEM;
+		}
+		nfsmout_if(error);
+		<span class="enscript-keyword">for</span> (loc = 0; loc &lt; nfslsp-&gt;nl_numlocs; loc++) {
+			nfsmout_if(error);
+			MALLOC(fsl, <span class="enscript-type">struct</span> nfs_fs_location *, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> nfs_fs_location), M_TEMP, M_WAITOK|M_ZERO);
+			<span class="enscript-keyword">if</span> (!fsl)
+				error = ENOMEM;
+			nfslsp-&gt;nl_locations[loc] = fsl;
+			nfsm_chain_get_32(error, nmc, fsl-&gt;nl_servcount); <span class="enscript-comment">/* server count */</span>
+			attrbytes -= NFSX_UNSIGNED;
+			<span class="enscript-comment">/* sanity check server count */</span>
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; ((fsl-&gt;nl_servcount &lt; 1) || (fsl-&gt;nl_servcount &gt; 256)))
+				error = EBADRPC;
+			nfsmout_if(error);
+			MALLOC(fsl-&gt;nl_servers, <span class="enscript-type">struct</span> nfs_fs_server **, fsl-&gt;nl_servcount * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> nfs_fs_server*), M_TEMP, M_WAITOK|M_ZERO);
+			<span class="enscript-keyword">if</span> (!fsl-&gt;nl_servers)
+				error = ENOMEM;
+			<span class="enscript-keyword">for</span> (serv = 0; serv &lt; fsl-&gt;nl_servcount; serv++) {
+				nfsmout_if(error);
+				MALLOC(fss, <span class="enscript-type">struct</span> nfs_fs_server *, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> nfs_fs_server), M_TEMP, M_WAITOK|M_ZERO);
+				<span class="enscript-keyword">if</span> (!fss)
+					error = ENOMEM;
+				fsl-&gt;nl_servers[serv] = fss;
+				nfsm_chain_get_32(error, nmc, val); <span class="enscript-comment">/* server name length */</span>
+				<span class="enscript-comment">/* sanity check server name length */</span>
+				<span class="enscript-keyword">if</span> (!error &amp;&amp; ((val &lt; 1) || (val &gt; MAXPATHLEN)))
+					error = EINVAL;
+				nfsmout_if(error);
+				MALLOC(fss-&gt;ns_name, <span class="enscript-type">char</span> *, val+1, M_TEMP, M_WAITOK|M_ZERO);
+				<span class="enscript-keyword">if</span> (!fss-&gt;ns_name)
+					error = ENOMEM;
+				nfsm_chain_get_opaque(error, nmc, val, fss-&gt;ns_name); <span class="enscript-comment">/* server name */</span>
+				attrbytes -= NFSX_UNSIGNED + nfsm_rndup(val);
+				nfsmout_if(error);
+				<span class="enscript-comment">/* copy name to address if it converts to a sockaddr */</span>
+				<span class="enscript-keyword">if</span> (nfs_uaddr2sockaddr(fss-&gt;ns_name, (<span class="enscript-type">struct</span> sockaddr*)&amp;ss)) {
+					fss-&gt;ns_addrcount = 1;
+					MALLOC(fss-&gt;ns_addresses, <span class="enscript-type">char</span> **, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">char</span> *), M_TEMP, M_WAITOK|M_ZERO);
+					<span class="enscript-keyword">if</span> (!fss-&gt;ns_addresses)
+						error = ENOMEM;
+					nfsmout_if(error);
+					MALLOC(fss-&gt;ns_addresses[0], <span class="enscript-type">char</span> *, val+1, M_TEMP, M_WAITOK|M_ZERO);
+					<span class="enscript-keyword">if</span> (!fss-&gt;ns_addresses[0])
+						error = ENOMEM;
+					nfsmout_if(error);
+					strlcpy(fss-&gt;ns_addresses[0], fss-&gt;ns_name, val+1);
+				}
+			}
+			<span class="enscript-comment">/* get pathname */</span>
+			fsp = &amp;fsl-&gt;nl_path;
+			nfsm_chain_get_32(error, nmc, fsp-&gt;np_compcount); <span class="enscript-comment">/* component count */</span>
+			attrbytes -= NFSX_UNSIGNED;
+			<span class="enscript-comment">/* sanity check component count */</span>
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; (fsp-&gt;np_compcount &gt; MAXPATHLEN))
+				error = EINVAL;
+			nfsmout_if(error);
+			<span class="enscript-keyword">if</span> (fsp-&gt;np_compcount) {
+				MALLOC(fsp-&gt;np_components, <span class="enscript-type">char</span> **, fsp-&gt;np_compcount * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">char</span>*), M_TEMP, M_WAITOK|M_ZERO);
+				<span class="enscript-keyword">if</span> (!fsp-&gt;np_components)
+					error = ENOMEM;
+			}
+			<span class="enscript-keyword">for</span> (comp = 0; comp &lt; fsp-&gt;np_compcount; comp++) {
+				nfsm_chain_get_32(error, nmc, val); <span class="enscript-comment">/* component length */</span>
+				<span class="enscript-comment">/* sanity check component length */</span>
+				<span class="enscript-keyword">if</span> (!error &amp;&amp; (val == 0)) {
+					<span class="enscript-comment">/*
+					 * Apparently some people think a path with zero components should
+					 * be encoded with one zero-length component.  So, just ignore any
+					 * zero length components.
+					 */</span>
+					comp--;
+					fsp-&gt;np_compcount--;
+					<span class="enscript-keyword">if</span> (fsp-&gt;np_compcount == 0) {
+						FREE(fsp-&gt;np_components, M_TEMP);
+						fsp-&gt;np_components = NULL;
+					}
+					attrbytes -= NFSX_UNSIGNED;
+					<span class="enscript-keyword">continue</span>;
+				}
+				<span class="enscript-keyword">if</span> (!error &amp;&amp; ((val &lt; 1) || (val &gt; MAXPATHLEN)))
+					error = EINVAL;
+				nfsmout_if(error);
+				MALLOC(fsp-&gt;np_components[comp], <span class="enscript-type">char</span> *, val+1, M_TEMP, M_WAITOK|M_ZERO);
+				<span class="enscript-keyword">if</span> (!fsp-&gt;np_components[comp])
+					error = ENOMEM;
+				nfsm_chain_get_opaque(error, nmc, val, fsp-&gt;np_components[comp]); <span class="enscript-comment">/* component */</span>
+				attrbytes -= NFSX_UNSIGNED + nfsm_rndup(val);
+			}
+		}
+		nfsm_assert(error, (attrbytes &gt;= 0), EBADRPC);
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_HIDDEN)) { <span class="enscript-comment">/* UF_HIDDEN */</span>
+		nfsm_chain_get_32(error, nmc, val);
+		<span class="enscript-keyword">if</span> (val)
+			nvap-&gt;nva_flags |= NFS_FFLAG_HIDDEN;
+		<span class="enscript-keyword">else</span>
+			nvap-&gt;nva_flags &amp;= ~NFS_FFLAG_HIDDEN;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_HOMOGENEOUS)) {
+		<span class="enscript-comment">/* XXX If NOT homogeneous, we may need to clear flags on the mount */</span>
+		nfsm_chain_get_32(error, nmc, val);
+		<span class="enscript-keyword">if</span> (val)
+			nfsap-&gt;nfsa_flags |= NFS_FSFLAG_HOMOGENEOUS;
+		<span class="enscript-keyword">else</span>
+			nfsap-&gt;nfsa_flags &amp;= ~NFS_FSFLAG_HOMOGENEOUS;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_MAXFILESIZE)) {
+		nfsm_chain_get_64(error, nmc, nfsap-&gt;nfsa_maxfilesize);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_MAXLINK)) {
+		nfsm_chain_get_32(error, nmc, nvap-&gt;nva_maxlink);
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; (nfsap-&gt;nfsa_maxlink &gt; INT32_MAX))
+			nfsap-&gt;nfsa_maxlink = INT32_MAX;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_MAXNAME)) {
+		nfsm_chain_get_32(error, nmc, nfsap-&gt;nfsa_maxname);
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; (nfsap-&gt;nfsa_maxname &gt; INT32_MAX))
+			nfsap-&gt;nfsa_maxname = INT32_MAX;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_MAXREAD)) {
+		nfsm_chain_get_64(error, nmc, nfsap-&gt;nfsa_maxread);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_MAXWRITE)) {
+		nfsm_chain_get_64(error, nmc, nfsap-&gt;nfsa_maxwrite);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_MIMETYPE)) {
+		nfsm_chain_get_32(error, nmc, val);
+		nfsm_chain_adv(error, nmc, nfsm_rndup(val));
+		attrbytes -= NFSX_UNSIGNED + nfsm_rndup(val);
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_MODE)) {
+		nfsm_chain_get_32(error, nmc, nvap-&gt;nva_mode);
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_NO_TRUNC)) {
+		nfsm_chain_get_32(error, nmc, val);
+		<span class="enscript-keyword">if</span> (val)
+			nfsap-&gt;nfsa_flags |= NFS_FSFLAG_NO_TRUNC;
+		<span class="enscript-keyword">else</span>
+			nfsap-&gt;nfsa_flags &amp;= ~NFS_FSFLAG_NO_TRUNC;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_NUMLINKS)) {
+		nfsm_chain_get_32(error, nmc, val);
+		nvap-&gt;nva_nlink = val;
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_OWNER)) {
+		nfsm_chain_get_32(error, nmc, len);
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; len &gt;= NFS_MAX_WHO)
+			error = EBADRPC;
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; (len &gt;= slen)) {
+			<span class="enscript-keyword">if</span> (s != sbuf) {
+				FREE(s, M_TEMP);
+				s = sbuf;
+				slen = <span class="enscript-keyword">sizeof</span>(sbuf);
+			}
+			<span class="enscript-comment">/* Let's add a bit more if we can to the allocation as to try and avoid future allocations */</span>
+			MALLOC(s, <span class="enscript-type">char</span>*, (len + 16 &lt; NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO, M_TEMP, M_WAITOK);
+			<span class="enscript-keyword">if</span> (s)
+				slen = (len + 16 &lt; NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO;
+			<span class="enscript-keyword">else</span>
+				error = ENOMEM;
+		}
+		nfsm_chain_get_opaque(error, nmc, len, s);
+		<span class="enscript-keyword">if</span> (!error) {
+			s[len] = <span class="enscript-string">'\0'</span>;
+			error = nfs4_id2guid(s, &amp;nvap-&gt;nva_uuuid, 0);
+			<span class="enscript-keyword">if</span> (!error)
+				error = kauth_cred_guid2uid(&amp;nvap-&gt;nva_uuuid, &amp;nvap-&gt;nva_uid);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-comment">/* unable to get either GUID or UID, set to default */</span>
+				nvap-&gt;nva_uid = (uid_t)((nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_UNKNOWN_IS_99) ? 99 : -2);
+				<span class="enscript-keyword">if</span> (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_LOG_FAILED_MAPPINGS)
+					printf(<span class="enscript-string">&quot;nfs4_parsefattr: owner %s is no one, no %s?, error %d\n&quot;</span>, s,
+						kauth_guid_equal(&amp;nvap-&gt;nva_uuuid, &amp;kauth_null_guid) ? <span class="enscript-string">&quot;guid&quot;</span> : <span class="enscript-string">&quot;uid&quot;</span>,
+						error);
+				error = 0;
+			}
+		}
+		attrbytes -= NFSX_UNSIGNED + nfsm_rndup(len);
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_OWNER_GROUP)) {
+		nfsm_chain_get_32(error, nmc, len);
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; len &gt;= NFS_MAX_WHO)
+			error = EBADRPC;
+		<span class="enscript-keyword">if</span> (!error &amp;&amp; (len &gt;= slen)) {
+			<span class="enscript-keyword">if</span> (s != sbuf) {
+				FREE(s, M_TEMP);
+				s = sbuf;
+				slen = <span class="enscript-keyword">sizeof</span>(sbuf);
+			}
+			<span class="enscript-comment">/* Let's add a bit more if we can to the allocation as to try and avoid future allocations */</span>
+			MALLOC(s, <span class="enscript-type">char</span>*, (len + 16 &lt; NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO, M_TEMP, M_WAITOK);
+			<span class="enscript-keyword">if</span> (s)
+				slen = (len + 16 &lt; NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO;
+			<span class="enscript-keyword">else</span>
+				error = ENOMEM;
+		}
+		nfsm_chain_get_opaque(error, nmc, len, s);
+		<span class="enscript-keyword">if</span> (!error) {
+			s[len] = <span class="enscript-string">'\0'</span>;
+			error = nfs4_id2guid(s, &amp;nvap-&gt;nva_guuid, 1);
+			<span class="enscript-keyword">if</span> (!error)
+				error = kauth_cred_guid2gid(&amp;nvap-&gt;nva_guuid, &amp;nvap-&gt;nva_gid);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-comment">/* unable to get either GUID or GID, set to default */</span>
+				nvap-&gt;nva_gid = (gid_t)((nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_UNKNOWN_IS_99) ? 99 : -2);
+				<span class="enscript-keyword">if</span> (nfs_idmap_ctrl &amp; NFS_IDMAP_CTRL_LOG_FAILED_MAPPINGS)
+					printf(<span class="enscript-string">&quot;nfs4_parsefattr: group %s is no one, no %s?, error %d\n&quot;</span>, s,
+						kauth_guid_equal(&amp;nvap-&gt;nva_guuid, &amp;kauth_null_guid) ? <span class="enscript-string">&quot;guid&quot;</span> : <span class="enscript-string">&quot;gid&quot;</span>,
+						error);
+				error = 0;
+			}
+		}
+		attrbytes -= NFSX_UNSIGNED + nfsm_rndup(len);
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_QUOTA_AVAIL_HARD)) {
+		nfsm_chain_get_64(error, nmc, dqbp-&gt;dqb_bhardlimit);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_QUOTA_AVAIL_SOFT)) {
+		nfsm_chain_get_64(error, nmc, dqbp-&gt;dqb_bsoftlimit);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_QUOTA_USED)) {
+		nfsm_chain_get_64(error, nmc, dqbp-&gt;dqb_curbytes);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_RAWDEV)) {
+		nfsm_chain_get_32(error, nmc, nvap-&gt;nva_rawdev.specdata1);
+		nfsm_chain_get_32(error, nmc, nvap-&gt;nva_rawdev.specdata2);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_SPACE_AVAIL)) {
+		nfsm_chain_get_64(error, nmc, nfsap-&gt;nfsa_space_avail);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_SPACE_FREE)) {
+		nfsm_chain_get_64(error, nmc, nfsap-&gt;nfsa_space_free);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_SPACE_TOTAL)) {
+		nfsm_chain_get_64(error, nmc, nfsap-&gt;nfsa_space_total);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_SPACE_USED)) {
+		nfsm_chain_get_64(error, nmc, nvap-&gt;nva_bytes);
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_SYSTEM)) {
+		<span class="enscript-comment">/* we'd support this if we had a flag to map it to... */</span>
+		nfsm_chain_adv(error, nmc, NFSX_UNSIGNED);
+		attrbytes -= NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_ACCESS)) {
+		nfsm_chain_get_64(error, nmc, nvap-&gt;nva_timesec[NFSTIME_ACCESS]);
+		nfsm_chain_get_32(error, nmc, nvap-&gt;nva_timensec[NFSTIME_ACCESS]);
+		attrbytes -= 3 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_ACCESS_SET)) {
+		nfsm_chain_adv(error, nmc, 4*NFSX_UNSIGNED); <span class="enscript-comment">/* just skip it */</span>
+		attrbytes -= 4 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_BACKUP)) {
+		nfsm_chain_get_64(error, nmc, nvap-&gt;nva_timesec[NFSTIME_BACKUP]);
+		nfsm_chain_get_32(error, nmc, nvap-&gt;nva_timensec[NFSTIME_BACKUP]);
+		attrbytes -= 3 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_CREATE)) {
+		nfsm_chain_get_64(error, nmc, nvap-&gt;nva_timesec[NFSTIME_CREATE]);
+		nfsm_chain_get_32(error, nmc, nvap-&gt;nva_timensec[NFSTIME_CREATE]);
+		attrbytes -= 3 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_DELTA)) { <span class="enscript-comment">/* skip for now */</span>
+		nfsm_chain_adv(error, nmc, 3*NFSX_UNSIGNED);
+		attrbytes -= 3 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_METADATA)) {
+		nfsm_chain_get_64(error, nmc, nvap-&gt;nva_timesec[NFSTIME_CHANGE]);
+		nfsm_chain_get_32(error, nmc, nvap-&gt;nva_timensec[NFSTIME_CHANGE]);
+		attrbytes -= 3 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_MODIFY)) {
+		nfsm_chain_get_64(error, nmc, nvap-&gt;nva_timesec[NFSTIME_MODIFY]);
+		nfsm_chain_get_32(error, nmc, nvap-&gt;nva_timensec[NFSTIME_MODIFY]);
+		attrbytes -= 3 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_MODIFY_SET)) {
+		nfsm_chain_adv(error, nmc, 4*NFSX_UNSIGNED); <span class="enscript-comment">/* just skip it */</span>
+		attrbytes -= 4 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_MOUNTED_ON_FILEID)) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TRIGGERS</span>
+		<span class="enscript-comment">/* we prefer the mounted on file ID, so just replace the fileid */</span>
+		nfsm_chain_get_64(error, nmc, nvap-&gt;nva_fileid);
+#<span class="enscript-reference">else</span>
+		nfsm_chain_adv(error, nmc, 2*NFSX_UNSIGNED);
+#<span class="enscript-reference">endif</span>
+		attrbytes -= 2 * NFSX_UNSIGNED;
+	}
+	<span class="enscript-comment">/* advance over any leftover attrbytes */</span>
+	nfsm_assert(error, (attrbytes &gt;= 0), EBADRPC);
+	nfsm_chain_adv(error, nmc, nfsm_rndup(attrbytes));
+<span class="enscript-reference">nfsmout</span>:
+	<span class="enscript-keyword">if</span> (error)
+		nfs_fs_locations_cleanup(nfslsp);
+	<span class="enscript-keyword">if</span> (!error &amp;&amp; rderror)
+		error = rderror;
+	<span class="enscript-comment">/* free up temporary resources */</span>
+	<span class="enscript-keyword">if</span> (s &amp;&amp; (s != sbuf))
+		FREE(s, M_TEMP);
+	<span class="enscript-keyword">if</span> (acl)
+		kauth_acl_free(acl);
+	<span class="enscript-keyword">if</span> (error &amp;&amp; nvap-&gt;nva_acl) {
+		kauth_acl_free(nvap-&gt;nva_acl);
+		nvap-&gt;nva_acl = NULL;
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Add an NFSv4 &quot;sattr&quot; structure to an mbuf chain
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfsm_chain_add_fattr4_f</span>(<span class="enscript-type">struct</span> nfsm_chain *nmc, <span class="enscript-type">struct</span> vnode_attr *vap, <span class="enscript-type">struct</span> nfsmount *nmp)
+{
+	<span class="enscript-type">int</span> error = 0, attrbytes, slen, len, i, isgroup;
+	uint32_t *pattrbytes, val, acecount;;
+	uint32_t bitmap[NFS_ATTR_BITMAP_LEN];
+	<span class="enscript-type">char</span> sbuf[64], *s;
+	kauth_acl_t acl;
+	gid_t gid;
+
+	s = sbuf;
+	slen = <span class="enscript-keyword">sizeof</span>(sbuf);
+
+	<span class="enscript-comment">/* First calculate the bitmap... */</span>
+	nfs_vattr_set_bitmap(nmp, bitmap, vap);
+
+	<span class="enscript-comment">/*
+	 * Now pack it all together:
+	 *     BITMAP, #BYTES, ATTRS
+	 * Keep a pointer to the length so we can set it later.
+	 */</span>
+	nfsm_chain_add_bitmap(error, nmc, bitmap, NFS_ATTR_BITMAP_LEN);
+	attrbytes = 0;
+	nfsm_chain_add_32(error, nmc, attrbytes);
+	pattrbytes = (uint32_t*)(nmc-&gt;nmc_ptr - NFSX_UNSIGNED);
+
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_SIZE)) {
+		nfsm_chain_add_64(error, nmc, vap-&gt;va_data_size);
+		attrbytes += 2*NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_ACL)) {
+		acl = vap-&gt;va_acl;
+		<span class="enscript-keyword">if</span> (!acl || (acl-&gt;acl_entrycount == KAUTH_FILESEC_NOACL))
+			acecount = 0;
+		<span class="enscript-keyword">else</span>
+			acecount = acl-&gt;acl_entrycount;
+		nfsm_chain_add_32(error, nmc, acecount);
+		attrbytes += NFSX_UNSIGNED;
+		<span class="enscript-keyword">for</span> (i=0; !error &amp;&amp; (i &lt; (<span class="enscript-type">int</span>)acecount); i++) {
+			val = (acl-&gt;acl_ace[i].ace_flags &amp; KAUTH_ACE_KINDMASK);
+			val = nfs4_ace_vfstype_to_nfstype(val, &amp;error);
+			nfsm_chain_add_32(error, nmc, val);
+			val = nfs4_ace_vfsflags_to_nfsflags(acl-&gt;acl_ace[i].ace_flags);
+			nfsm_chain_add_32(error, nmc, val);
+			val = nfs4_ace_vfsrights_to_nfsmask(acl-&gt;acl_ace[i].ace_rights);
+			nfsm_chain_add_32(error, nmc, val);
+			len = slen;
+			isgroup = (kauth_cred_guid2gid(&amp;acl-&gt;acl_ace[i].ace_applicable, &amp;gid) == 0);
+			error = nfs4_guid2id(&amp;acl-&gt;acl_ace[i].ace_applicable, s, &amp;len, isgroup);
+			<span class="enscript-keyword">if</span> (error == ENOSPC) {
+				<span class="enscript-keyword">if</span> (s != sbuf) {
+					FREE(s, M_TEMP);
+					s = sbuf;
+				}
+				len += 8;
+				MALLOC(s, <span class="enscript-type">char</span>*, len, M_TEMP, M_WAITOK);
+				<span class="enscript-keyword">if</span> (s) {
+					slen = len;
+					error = nfs4_guid2id(&amp;acl-&gt;acl_ace[i].ace_applicable, s, &amp;len, isgroup);
+				} <span class="enscript-keyword">else</span> {
+					error = ENOMEM;
+				}
+			}
+			nfsm_chain_add_name(error, nmc, s, len, nmp);
+			attrbytes += 4*NFSX_UNSIGNED + nfsm_rndup(len);
+		}
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_ARCHIVE)) {
+		nfsm_chain_add_32(error, nmc, (vap-&gt;va_flags &amp; SF_ARCHIVED) ? 1 : 0);
+		attrbytes += NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_HIDDEN)) {
+		nfsm_chain_add_32(error, nmc, (vap-&gt;va_flags &amp; UF_HIDDEN) ? 1 : 0);
+		attrbytes += NFSX_UNSIGNED;
+	}
+	<span class="enscript-comment">// NFS_BITMAP_ISSET(bitmap, NFS_FATTR_MIMETYPE)
+</span>	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_MODE)) {
+		nfsm_chain_add_32(error, nmc, vap-&gt;va_mode);
+		attrbytes += NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_OWNER)) {
+		nfsmout_if(error);
+		<span class="enscript-comment">/* if we have va_uuuid use it, otherwise use uid */</span>
+		<span class="enscript-keyword">if</span> (!VATTR_IS_ACTIVE(vap, va_uuuid)) {
+			error = kauth_cred_uid2guid(vap-&gt;va_uid, &amp;vap-&gt;va_uuuid);
+			nfsmout_if(error);
+		}
+		len = slen;
+		error = nfs4_guid2id(&amp;vap-&gt;va_uuuid, s, &amp;len, 0);
+		<span class="enscript-keyword">if</span> (error == ENOSPC) {
+			<span class="enscript-keyword">if</span> (s != sbuf) {
+				FREE(s, M_TEMP);
+				s = sbuf;
+			}
+			len += 8;
+			MALLOC(s, <span class="enscript-type">char</span>*, len, M_TEMP, M_WAITOK);
+			<span class="enscript-keyword">if</span> (s) {
+				slen = len;
+				error = nfs4_guid2id(&amp;vap-&gt;va_uuuid, s, &amp;len, 0);
+			} <span class="enscript-keyword">else</span> {
+				error = ENOMEM;
+			}
+		}
+		nfsm_chain_add_name(error, nmc, s, len, nmp);
+		attrbytes += NFSX_UNSIGNED + nfsm_rndup(len);
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_OWNER_GROUP)) {
+		nfsmout_if(error);
+		<span class="enscript-comment">/* if we have va_guuid use it, otherwise use gid */</span>
+		<span class="enscript-keyword">if</span> (!VATTR_IS_ACTIVE(vap, va_guuid)) {
+			error = kauth_cred_gid2guid(vap-&gt;va_gid, &amp;vap-&gt;va_guuid);
+			nfsmout_if(error);
+		}
+		len = slen;
+		error = nfs4_guid2id(&amp;vap-&gt;va_guuid, s, &amp;len, 1);
+		<span class="enscript-keyword">if</span> (error == ENOSPC) {
+			<span class="enscript-keyword">if</span> (s != sbuf) {
+				FREE(s, M_TEMP);
+				s = sbuf;
+			}
+			len += 8;
+			MALLOC(s, <span class="enscript-type">char</span>*, len, M_TEMP, M_WAITOK);
+			<span class="enscript-keyword">if</span> (s) {
+				slen = len;
+				error = nfs4_guid2id(&amp;vap-&gt;va_guuid, s, &amp;len, 1);
+			} <span class="enscript-keyword">else</span> {
+				error = ENOMEM;
+			}
+		}
+		nfsm_chain_add_name(error, nmc, s, len, nmp);
+		attrbytes += NFSX_UNSIGNED + nfsm_rndup(len);
+	}
+	<span class="enscript-comment">// NFS_BITMAP_SET(bitmap, NFS_FATTR_SYSTEM)
+</span>	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_ACCESS_SET)) {
+		<span class="enscript-keyword">if</span> (vap-&gt;va_vaflags &amp; VA_UTIMES_NULL) {
+			nfsm_chain_add_32(error, nmc, NFS4_TIME_SET_TO_SERVER);
+			attrbytes += NFSX_UNSIGNED;
+		} <span class="enscript-keyword">else</span> {
+			nfsm_chain_add_32(error, nmc, NFS4_TIME_SET_TO_CLIENT);
+			nfsm_chain_add_64(error, nmc, vap-&gt;va_access_time.tv_sec);
+			nfsm_chain_add_32(error, nmc, vap-&gt;va_access_time.tv_nsec);
+			attrbytes += 4*NFSX_UNSIGNED;
+		}
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_BACKUP)) {
+		nfsm_chain_add_64(error, nmc, vap-&gt;va_backup_time.tv_sec);
+		nfsm_chain_add_32(error, nmc, vap-&gt;va_backup_time.tv_nsec);
+		attrbytes += 3*NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_CREATE)) {
+		nfsm_chain_add_64(error, nmc, vap-&gt;va_create_time.tv_sec);
+		nfsm_chain_add_32(error, nmc, vap-&gt;va_create_time.tv_nsec);
+		attrbytes += 3*NFSX_UNSIGNED;
+	}
+	<span class="enscript-keyword">if</span> (NFS_BITMAP_ISSET(bitmap, NFS_FATTR_TIME_MODIFY_SET)) {
+		<span class="enscript-keyword">if</span> (vap-&gt;va_vaflags &amp; VA_UTIMES_NULL) {
+			nfsm_chain_add_32(error, nmc, NFS4_TIME_SET_TO_SERVER);
+			attrbytes += NFSX_UNSIGNED;
+		} <span class="enscript-keyword">else</span> {
+			nfsm_chain_add_32(error, nmc, NFS4_TIME_SET_TO_CLIENT);
+			nfsm_chain_add_64(error, nmc, vap-&gt;va_modify_time.tv_sec);
+			nfsm_chain_add_32(error, nmc, vap-&gt;va_modify_time.tv_nsec);
+			attrbytes += 4*NFSX_UNSIGNED;
+		}
+	}
+	nfsmout_if(error);
+	<span class="enscript-comment">/* Now, set the attribute data length */</span>
+	*pattrbytes = txdr_unsigned(attrbytes);
+<span class="enscript-reference">nfsmout</span>:
+	<span class="enscript-keyword">if</span> (s &amp;&amp; (s != sbuf))
+		FREE(s, M_TEMP);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Got the given error and need to start recovery (if not already started).
+ * Note: nmp must be locked!
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfs_need_recover</span>(<span class="enscript-type">struct</span> nfsmount *nmp, <span class="enscript-type">int</span> error)
+{
+	<span class="enscript-type">int</span> wake = !(nmp-&gt;nm_state &amp; NFSSTA_RECOVER);
+
+	nmp-&gt;nm_state |= NFSSTA_RECOVER;
+	<span class="enscript-keyword">if</span> ((error == NFSERR_ADMIN_REVOKED) ||
+	    (error == NFSERR_EXPIRED) ||
+	    (error == NFSERR_STALE_CLIENTID))
+		nmp-&gt;nm_state |= NFSSTA_RECOVER_EXPIRED;
+	<span class="enscript-keyword">if</span> (wake)
+		nfs_mount_sock_thread_wake(nmp);
+}
+
+<span class="enscript-comment">/*
+ * After recovery due to state expiry, check each node and
+ * drop any lingering delegation we thought we had.
+ *
+ * If a node has an open that is not lost and is not marked
+ * for reopen, then we hold onto any delegation because it is
+ * likely newly-granted.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nfs4_expired_check_delegation</span>(nfsnode_t np, vfs_context_t ctx)
+{
+	<span class="enscript-type">struct</span> nfsmount *nmp = NFSTONMP(np);
+	<span class="enscript-type">struct</span> nfs_open_file *nofp;
+	<span class="enscript-type">int</span> drop = 1;
+
+	<span class="enscript-keyword">if</span> ((np-&gt;n_flag &amp; NREVOKE) || !(np-&gt;n_openflags &amp; N_DELEG_MASK))
+		<span class="enscript-keyword">return</span>;
+
+	lck_mtx_lock(&amp;np-&gt;n_openlock);
+
+	TAILQ_FOREACH(nofp, &amp;np-&gt;n_opens, nof_link) {
+		<span class="enscript-keyword">if</span> (!nofp-&gt;nof_opencnt)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (nofp-&gt;nof_flags &amp; NFS_OPEN_FILE_LOST)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (nofp-&gt;nof_flags &amp; NFS_OPEN_FILE_REOPEN)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-comment">/* we have an open that is not lost and not marked for reopen */</span>
+		<span class="enscript-comment">// XXX print out what's keeping this node from dropping the delegation.
+</span>		NP(nofp-&gt;nof_np, <span class="enscript-string">&quot;nfs4_expired_check_delegation: !drop: opencnt %d flags 0x%x access %d %d mmap %d %d&quot;</span>,
+			nofp-&gt;nof_opencnt, nofp-&gt;nof_flags,
+			nofp-&gt;nof_access, nofp-&gt;nof_deny,
+			nofp-&gt;nof_mmap_access, nofp-&gt;nof_mmap_deny);
+		drop = 0;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (drop) {
+		<span class="enscript-comment">/* need to drop a delegation */</span>
+		<span class="enscript-keyword">if</span> (np-&gt;n_dreturn.tqe_next != NFSNOLIST) {
+			<span class="enscript-comment">/* remove this node from the delegation return list */</span>
+			lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+			<span class="enscript-keyword">if</span> (np-&gt;n_dreturn.tqe_next != NFSNOLIST) {
+				TAILQ_REMOVE(&amp;nmp-&gt;nm_dreturnq, np, n_dreturn);
+				np-&gt;n_dreturn.tqe_next = NFSNOLIST;
+			}
+			lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+		}
+		<span class="enscript-keyword">if</span> (np-&gt;n_openflags &amp; N_DELEG_MASK) {
+			np-&gt;n_openflags &amp;= ~N_DELEG_MASK;
+			lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+			<span class="enscript-keyword">if</span> (np-&gt;n_dlink.tqe_next != NFSNOLIST) {
+				TAILQ_REMOVE(&amp;nmp-&gt;nm_delegations, np, n_dlink);
+				np-&gt;n_dlink.tqe_next = NFSNOLIST;
+			}
+			lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+			nfs4_delegreturn_rpc(nmp, np-&gt;n_fhp, np-&gt;n_fhsize, &amp;np-&gt;n_dstateid,
+				0, vfs_context_thread(ctx), vfs_context_ucred(ctx));
+		}
+	}
+
+	lck_mtx_unlock(&amp;np-&gt;n_openlock);
+}
+
+<span class="enscript-comment">/*
+ * Recover state for an NFS mount.
+ *
+ * Iterates over all open files, reclaiming opens and lock state.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfs_recover</span>(<span class="enscript-type">struct</span> nfsmount *nmp)
+{
+	<span class="enscript-type">struct</span> timespec ts = { 1, 0 };
+	<span class="enscript-type">int</span> error, lost, reopen;
+	<span class="enscript-type">struct</span> nfs_open_owner *noop;
+	<span class="enscript-type">struct</span> nfs_open_file *nofp;
+	<span class="enscript-type">struct</span> nfs_file_lock *nflp, *nextnflp;
+	<span class="enscript-type">struct</span> nfs_lock_owner *nlop;
+	thread_t thd = current_thread();
+	nfsnode_t np, nextnp;
+	<span class="enscript-type">struct</span> timeval now;
+
+<span class="enscript-reference">restart</span>:
+	error = 0;
+	lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+	<span class="enscript-comment">/*
+	 * First, wait for the state inuse count to go to zero so
+	 * we know there are no state operations in progress.
+	 */</span>
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-keyword">if</span> ((error = nfs_sigintr(nmp, NULL, NULL, 1)))
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (!(nmp-&gt;nm_sockflags &amp; NMSOCK_READY))
+			error = EPIPE;
+		<span class="enscript-keyword">if</span> (nmp-&gt;nm_state &amp; (NFSSTA_FORCE|NFSSTA_DEAD))
+			error = ENXIO;
+		<span class="enscript-keyword">if</span> (nmp-&gt;nm_sockflags &amp; NMSOCK_UNMOUNT)
+			error = ENXIO;
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (nmp-&gt;nm_stateinuse)
+			msleep(&amp;nmp-&gt;nm_stateinuse, &amp;nmp-&gt;nm_lock, (PZERO-1), <span class="enscript-string">&quot;nfsrecoverstartwait&quot;</span>, &amp;ts);
+	} <span class="enscript-keyword">while</span> (nmp-&gt;nm_stateinuse);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (error == EPIPE)
+			printf(<span class="enscript-string">&quot;nfs recovery reconnecting for %s, 0x%x\n&quot;</span>, vfs_statfs(nmp-&gt;nm_mountp)-&gt;f_mntfromname, nmp-&gt;nm_stategenid);
+		<span class="enscript-keyword">else</span>
+			printf(<span class="enscript-string">&quot;nfs recovery aborted for %s, 0x%x\n&quot;</span>, vfs_statfs(nmp-&gt;nm_mountp)-&gt;f_mntfromname, nmp-&gt;nm_stategenid);
+		lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	microuptime(&amp;now);
+	<span class="enscript-keyword">if</span> (now.tv_sec == nmp-&gt;nm_recover_start) {
+		printf(<span class="enscript-string">&quot;nfs recovery throttled for %s, 0x%x\n&quot;</span>, vfs_statfs(nmp-&gt;nm_mountp)-&gt;f_mntfromname, nmp-&gt;nm_stategenid);
+		lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+		tsleep(nfs_recover, (PZERO-1), <span class="enscript-string">&quot;nfsrecoverrestart&quot;</span>, hz);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">restart</span>;
+	}
+	nmp-&gt;nm_recover_start = now.tv_sec;
+	<span class="enscript-keyword">if</span> (++nmp-&gt;nm_stategenid == 0)
+		++nmp-&gt;nm_stategenid;
+	printf(<span class="enscript-string">&quot;nfs recovery started for %s, 0x%x\n&quot;</span>, vfs_statfs(nmp-&gt;nm_mountp)-&gt;f_mntfromname, nmp-&gt;nm_stategenid);
+	lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+
+	<span class="enscript-comment">/* for each open owner... */</span>
+	TAILQ_FOREACH(noop, &amp;nmp-&gt;nm_open_owners, noo_link) {
+		<span class="enscript-comment">/* for each of its opens... */</span>
+		TAILQ_FOREACH(nofp, &amp;noop-&gt;noo_opens, nof_oolink) {
+			<span class="enscript-keyword">if</span> (!nofp-&gt;nof_access || (nofp-&gt;nof_flags &amp; NFS_OPEN_FILE_LOST) || (nofp-&gt;nof_np-&gt;n_flag &amp; NREVOKE))
+				<span class="enscript-keyword">continue</span>;
+			lost = reopen = 0;
+			<span class="enscript-comment">/* for NFSv2/v3, just skip straight to lock reclaim */</span>
+			<span class="enscript-keyword">if</span> (nmp-&gt;nm_vers &lt; NFS_VER4)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">reclaim_locks</span>;
+			<span class="enscript-keyword">if</span> (nofp-&gt;nof_rw_drw)
+				error = nfs4_open_reclaim_rpc(nofp, NFS_OPEN_SHARE_ACCESS_BOTH, NFS_OPEN_SHARE_DENY_BOTH);
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; nofp-&gt;nof_w_drw)
+				error = nfs4_open_reclaim_rpc(nofp, NFS_OPEN_SHARE_ACCESS_WRITE, NFS_OPEN_SHARE_DENY_BOTH);
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; nofp-&gt;nof_r_drw)
+				error = nfs4_open_reclaim_rpc(nofp, NFS_OPEN_SHARE_ACCESS_READ, NFS_OPEN_SHARE_DENY_BOTH);
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; nofp-&gt;nof_rw_dw)
+				error = nfs4_open_reclaim_rpc(nofp, NFS_OPEN_SHARE_ACCESS_BOTH, NFS_OPEN_SHARE_DENY_WRITE);
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; nofp-&gt;nof_w_dw)
+				error = nfs4_open_reclaim_rpc(nofp, NFS_OPEN_SHARE_ACCESS_WRITE, NFS_OPEN_SHARE_DENY_WRITE);
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; nofp-&gt;nof_r_dw)
+				error = nfs4_open_reclaim_rpc(nofp, NFS_OPEN_SHARE_ACCESS_READ, NFS_OPEN_SHARE_DENY_WRITE);
+			<span class="enscript-comment">/*
+			 * deny-none opens with no locks can just be reopened (later) if reclaim fails.
+			 */</span>
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; nofp-&gt;nof_rw) {
+				error = nfs4_open_reclaim_rpc(nofp, NFS_OPEN_SHARE_ACCESS_BOTH, NFS_OPEN_SHARE_DENY_NONE);
+				<span class="enscript-keyword">if</span> ((error == NFSERR_ADMIN_REVOKED) || (error == NFSERR_EXPIRED) || (error == NFSERR_NO_GRACE)) {
+					reopen = error;
+					error = 0;
+				}
+			}
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; !reopen &amp;&amp; nofp-&gt;nof_w) {
+				error = nfs4_open_reclaim_rpc(nofp, NFS_OPEN_SHARE_ACCESS_WRITE, NFS_OPEN_SHARE_DENY_NONE);
+				<span class="enscript-keyword">if</span> ((error == NFSERR_ADMIN_REVOKED) || (error == NFSERR_EXPIRED) || (error == NFSERR_NO_GRACE)) {
+					reopen = error;
+					error = 0;
+				}
+			}
+			<span class="enscript-keyword">if</span> (!error &amp;&amp; !reopen &amp;&amp; nofp-&gt;nof_r) {
+				error = nfs4_open_reclaim_rpc(nofp, NFS_OPEN_SHARE_ACCESS_READ, NFS_OPEN_SHARE_DENY_NONE);
+				<span class="enscript-keyword">if</span> ((error == NFSERR_ADMIN_REVOKED) || (error == NFSERR_EXPIRED) || (error == NFSERR_NO_GRACE)) {
+					reopen = error;
+					error = 0;
+				}
+			}
+
+			<span class="enscript-comment">/*
+			 * If we hold delegated state but we don't have any non-delegated opens,
+			 * then we should attempt to claim that state now (but don't return the
+			 * delegation unless asked to).
+			 */</span>
+			<span class="enscript-keyword">if</span> ((nofp-&gt;nof_d_rw_drw || nofp-&gt;nof_d_w_drw || nofp-&gt;nof_d_r_drw ||
+				    nofp-&gt;nof_d_rw_dw || nofp-&gt;nof_d_w_dw || nofp-&gt;nof_d_r_dw ||
+				    nofp-&gt;nof_d_rw || nofp-&gt;nof_d_w || nofp-&gt;nof_d_r) &amp;&amp;
+				    (!nofp-&gt;nof_rw_drw &amp;&amp; !nofp-&gt;nof_w_drw &amp;&amp; !nofp-&gt;nof_r_drw &amp;&amp;
+				     !nofp-&gt;nof_rw_dw &amp;&amp; !nofp-&gt;nof_w_dw &amp;&amp; !nofp-&gt;nof_r_dw &amp;&amp;
+				     !nofp-&gt;nof_rw &amp;&amp; !nofp-&gt;nof_w &amp;&amp; !nofp-&gt;nof_r)) {
+				<span class="enscript-keyword">if</span> (!error &amp;&amp; !nfs_open_state_set_busy(nofp-&gt;nof_np, NULL)) {
+					error = nfs4_claim_delegated_state_for_node(nofp-&gt;nof_np, R_RECOVER);
+					<span class="enscript-keyword">if</span> (!error &amp;&amp; (nofp-&gt;nof_flags &amp; NFS_OPEN_FILE_REOPEN))
+						reopen = EAGAIN;
+					nfs_open_state_clear_busy(nofp-&gt;nof_np);
+					<span class="enscript-comment">/* if claim didn't go well, we may need to return delegation now */</span>
+					<span class="enscript-keyword">if</span> (nofp-&gt;nof_np-&gt;n_openflags &amp; N_DELEG_RETURN) {
+						nfs4_delegation_return(nofp-&gt;nof_np, R_RECOVER, thd, noop-&gt;noo_cred);
+						<span class="enscript-keyword">if</span> (!(nmp-&gt;nm_sockflags &amp; NMSOCK_READY))
+							error = ETIMEDOUT;  <span class="enscript-comment">/* looks like we need a reconnect */</span>
+					}
+				}
+			}
+
+			<span class="enscript-comment">/*
+			 * Handle any issue claiming open state.
+			 * Potential reopens need to first confirm that there are no locks.
+			 */</span>
+			<span class="enscript-keyword">if</span> (error || reopen) {
+				<span class="enscript-comment">/* restart recovery? */</span>
+				<span class="enscript-keyword">if</span> ((error == ETIMEDOUT) || nfs_mount_state_error_should_restart(error)) {
+					<span class="enscript-keyword">if</span> (error == ETIMEDOUT)
+						nfs_need_reconnect(nmp);
+					tsleep(nfs_recover, (PZERO-1), <span class="enscript-string">&quot;nfsrecoverrestart&quot;</span>, hz);
+					printf(<span class="enscript-string">&quot;nfs recovery restarting for %s, 0x%x, error %d\n&quot;</span>,
+						vfs_statfs(nmp-&gt;nm_mountp)-&gt;f_mntfromname, nmp-&gt;nm_stategenid, error);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">restart</span>;
+				}
+				<span class="enscript-keyword">if</span> (reopen &amp;&amp; (nfs_check_for_locks(noop, nofp) == 0)) {
+					<span class="enscript-comment">/* just reopen the file on next access */</span>
+					NP(nofp-&gt;nof_np, <span class="enscript-string">&quot;nfs_recover: %d, need reopen for %d %p 0x%x&quot;</span>, reopen,
+						kauth_cred_getuid(noop-&gt;noo_cred), nofp-&gt;nof_np, nofp-&gt;nof_np-&gt;n_flag);
+					lck_mtx_lock(&amp;nofp-&gt;nof_lock);
+					nofp-&gt;nof_flags |= NFS_OPEN_FILE_REOPEN;
+					lck_mtx_unlock(&amp;nofp-&gt;nof_lock);
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-comment">/* open file state lost */</span>
+					<span class="enscript-keyword">if</span> (reopen)
+						NP(nofp-&gt;nof_np, <span class="enscript-string">&quot;nfs_recover: %d, can't reopen because of locks %d %p&quot;</span>, reopen,
+							kauth_cred_getuid(noop-&gt;noo_cred), nofp-&gt;nof_np);
+					lost = 1;
+					error = 0;
+					reopen = 0;
+				}
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* no error, so make sure the reopen flag isn't set */</span>
+				lck_mtx_lock(&amp;nofp-&gt;nof_lock);
+				nofp-&gt;nof_flags &amp;= ~NFS_OPEN_FILE_REOPEN;
+				lck_mtx_unlock(&amp;nofp-&gt;nof_lock);
+			}
+
+			<span class="enscript-comment">/*
+			 * Scan this node's lock owner list for entries with this open owner,
+			 * then walk the lock owner's held lock list recovering each lock.
+			 */</span>
+<span class="enscript-reference">reclaim_locks</span>:
+			TAILQ_FOREACH(nlop, &amp;nofp-&gt;nof_np-&gt;n_lock_owners, nlo_link) {
+				<span class="enscript-keyword">if</span> (lost || reopen)
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">if</span> (nlop-&gt;nlo_open_owner != noop)
+					<span class="enscript-keyword">continue</span>;
+				TAILQ_FOREACH_SAFE(nflp, &amp;nlop-&gt;nlo_locks, nfl_lolink, nextnflp) {
+					<span class="enscript-comment">/* skip dead &amp; blocked lock requests (shouldn't be any in the held lock list) */</span>
+					<span class="enscript-keyword">if</span> (nflp-&gt;nfl_flags &amp; (NFS_FILE_LOCK_DEAD|NFS_FILE_LOCK_BLOCKED))
+						<span class="enscript-keyword">continue</span>;
+					<span class="enscript-comment">/* skip delegated locks */</span>
+					<span class="enscript-keyword">if</span> (nflp-&gt;nfl_flags &amp; NFS_FILE_LOCK_DELEGATED)
+						<span class="enscript-keyword">continue</span>;
+					error = nmp-&gt;nm_funcs-&gt;nf_setlock_rpc(nofp-&gt;nof_np, nofp, nflp, 1, R_RECOVER, thd, noop-&gt;noo_cred);
+					<span class="enscript-keyword">if</span> (error)
+						NP(nofp-&gt;nof_np, <span class="enscript-string">&quot;nfs: lock reclaim (0x%llx, 0x%llx) %s %d&quot;</span>,
+							nflp-&gt;nfl_start, nflp-&gt;nfl_end,
+							error ? <span class="enscript-string">&quot;failed&quot;</span> : <span class="enscript-string">&quot;succeeded&quot;</span>, error);
+					<span class="enscript-keyword">if</span> (!error)
+						<span class="enscript-keyword">continue</span>;
+					<span class="enscript-comment">/* restart recovery? */</span>
+					<span class="enscript-keyword">if</span> ((error == ETIMEDOUT) || nfs_mount_state_error_should_restart(error)) {
+						<span class="enscript-keyword">if</span> (error == ETIMEDOUT)
+							nfs_need_reconnect(nmp);
+						tsleep(nfs_recover, (PZERO-1), <span class="enscript-string">&quot;nfsrecoverrestart&quot;</span>, hz);
+						printf(<span class="enscript-string">&quot;nfs recovery restarting for %s, 0x%x, error %d\n&quot;</span>,
+							vfs_statfs(nmp-&gt;nm_mountp)-&gt;f_mntfromname, nmp-&gt;nm_stategenid, error);
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">restart</span>;
+					}
+					<span class="enscript-comment">/* lock state lost - attempt to close file */</span> 
+					lost = 1;
+					error = 0;
+					<span class="enscript-keyword">break</span>;
+				}
+			}
+
+			<span class="enscript-comment">/*
+			 * If we've determined that we need to reopen the file then we probably
+			 * didn't receive any delegation we think we hold.  We should attempt to
+			 * return that delegation (and claim any delegated state).
+			 *
+			 * If we hold a delegation that is marked for return, then we should
+			 * return it now.
+			 */</span>
+			<span class="enscript-keyword">if</span> ((nofp-&gt;nof_np-&gt;n_openflags &amp; N_DELEG_RETURN) ||
+			    (reopen &amp;&amp; (nofp-&gt;nof_np-&gt;n_openflags &amp; N_DELEG_MASK))) {
+				nfs4_delegation_return(nofp-&gt;nof_np, R_RECOVER, thd, noop-&gt;noo_cred);
+				<span class="enscript-keyword">if</span> (!(nmp-&gt;nm_sockflags &amp; NMSOCK_READY)) {
+					<span class="enscript-comment">/* looks like we need a reconnect */</span>
+					tsleep(nfs_recover, (PZERO-1), <span class="enscript-string">&quot;nfsrecoverrestart&quot;</span>, hz);
+					printf(<span class="enscript-string">&quot;nfs recovery restarting for %s, 0x%x, error %d\n&quot;</span>,
+						vfs_statfs(nmp-&gt;nm_mountp)-&gt;f_mntfromname, nmp-&gt;nm_stategenid, error);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">restart</span>;
+				}
+			}
+
+			<span class="enscript-keyword">if</span> (lost) {
+				<span class="enscript-comment">/* revoke open file state */</span>
+				NP(nofp-&gt;nof_np, <span class="enscript-string">&quot;nfs_recover: state lost for %d %p 0x%x&quot;</span>,
+					kauth_cred_getuid(noop-&gt;noo_cred), nofp-&gt;nof_np, nofp-&gt;nof_np-&gt;n_flag);
+				nfs_revoke_open_state_for_node(nofp-&gt;nof_np);
+			}
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (!error) {
+		<span class="enscript-comment">/* If state expired, make sure we're not holding onto any stale delegations */</span>
+		lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+		<span class="enscript-keyword">if</span> ((nmp-&gt;nm_vers &gt;= NFS_VER4) &amp;&amp; (nmp-&gt;nm_state &amp; NFSSTA_RECOVER_EXPIRED)) {
+<span class="enscript-reference">recheckdeleg</span>:
+			TAILQ_FOREACH_SAFE(np, &amp;nmp-&gt;nm_delegations, n_dlink, nextnp) {
+				lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+				nfs4_expired_check_delegation(np, vfs_context_kernel());
+				lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+				<span class="enscript-keyword">if</span> (nextnp == NFSNOLIST)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">recheckdeleg</span>;
+			}
+		}
+		nmp-&gt;nm_state &amp;= ~(NFSSTA_RECOVER|NFSSTA_RECOVER_EXPIRED);
+		wakeup(&amp;nmp-&gt;nm_state);
+		printf(<span class="enscript-string">&quot;nfs recovery completed for %s, 0x%x\n&quot;</span>,
+			vfs_statfs(nmp-&gt;nm_mountp)-&gt;f_mntfromname, nmp-&gt;nm_stategenid);
+		lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+	} <span class="enscript-keyword">else</span> {
+		printf(<span class="enscript-string">&quot;nfs recovery failed for %s, 0x%x, error %d\n&quot;</span>,
+			vfs_statfs(nmp-&gt;nm_mountp)-&gt;f_mntfromname, nmp-&gt;nm_stategenid, error);
+	}
+}
+</pre>
+<hr />
+</body></html>

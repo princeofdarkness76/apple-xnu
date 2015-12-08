@@ -1,0 +1,262 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOCommandGate.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOCommandGate.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2009 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*[
+    1999-8-10	Godfrey van der Linden(gvdl)
+	Created.
+]*/</span>
+<span class="enscript-comment">/*! @language embedded-c++ */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_IOKIT_IOCOMMANDGATE_H</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_IOKIT_IOCOMMANDGATE_H</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOEventSource.h&gt;</span>
+
+<span class="enscript-comment">/*!
+    @class IOCommandGate : public IOEventSource
+    @abstract Single-threaded work loop client request mechanism.
+    @discussion An IOCommandGate instance is an extremely lightweight mechanism
+that executes an action on the driver's work loop.  Although the code does not
+technically execute on the work loop itself, a single-threaded work loop semantic
+is maintained for this event source using the work loop gate.  The command gate
+tests for a potential self dead lock by checking if the runCommand request is
+made from the work loop's thread, it doesn't check for a mutual dead lock though
+where a pair of work loop's dead lock each other.
+&lt;br&gt;&lt;br&gt;
+	The IOCommandGate is a lighter weight version of the IOCommandQueue and
+should be used in preference.  Generally use a command queue whenever you need a
+client to submit a request to a work loop.  A typical command gate action would
+check if the hardware is active, if so it will add the request to a pending
+queue internal to the device or the device's family.  Otherwise if the hardware
+is inactive then this request can be acted upon immediately.
+&lt;br&gt;&lt;br&gt;
+    CAUTION: The runAction, runCommand, and attemptCommand functions cannot be called from an interrupt context.
+
+*/</span>
+class IOCommandGate : public IOEventSource
+{
+    OSDeclareDefaultStructors(IOCommandGate)
+
+<span class="enscript-reference">public</span>:
+<span class="enscript-comment">/*!
+    @typedef Action
+    @discussion Type and arguments of callout C function that is used when
+a runCommand is executed by a client.  Cast to this type when you want a C++
+member function to be used.  Note the arg1 - arg3 parameters are straight pass
+through from the runCommand to the action callout.
+    @param owner
+	Target of the function, can be used as a refcon.  The owner is set
+during initialisation of the IOCommandGate instance.	 Note if a C++ function
+was specified this parameter is implicitly the first paramter in the target
+member function's parameter list.
+    @param arg0 Argument to action from run operation.
+    @param arg1 Argument to action from run operation.
+    @param arg2 Argument to action from run operation.
+    @param arg3 Argument to action from run operation.
+*/</span>
+    <span class="enscript-type">typedef</span> IOReturn (*Action)(OSObject *owner,
+			       <span class="enscript-type">void</span> *arg0, <span class="enscript-type">void</span> *arg1,
+			       <span class="enscript-type">void</span> *arg2, <span class="enscript-type">void</span> *arg3);
+
+<span class="enscript-reference">protected</span>:
+
+<span class="enscript-comment">/*! @struct ExpansionData
+    @discussion This structure will be used to expand the capablilties of the IOWorkLoop in the future.
+    */</span>    
+    <span class="enscript-type">struct</span> ExpansionData { };
+
+<span class="enscript-comment">/*! @var reserved
+    Reserved for future use.  (Internal use only)  */</span>
+    ExpansionData *reserved;
+
+<span class="enscript-reference">public</span>:
+<span class="enscript-comment">/*! @function commandGate
+    @abstract Factory method to create and initialise an IOCommandGate, See $link init.
+    @result Returns a pointer to the new command gate if sucessful, 0 otherwise. */</span>
+    <span class="enscript-type">static</span> IOCommandGate *commandGate(OSObject *owner, Action action = 0);
+
+<span class="enscript-comment">/*! @function init
+    @abstract Class initialiser.
+    @discussion Initialiser for IOCommandGate operates only on newly 'newed'
+objects.  Shouldn't be used to re-init an existing instance.
+    @param owner 	Owner of this, newly created, instance of the IOCommandGate.  This argument will be used as the first parameter in the action callout.
+    @param action
+	Pointer to a C function that is called whenever a client of the
+IOCommandGate calls runCommand.	 NB Can be a C++ member function but caller
+must cast the member function to $link IOCommandGate::Action and they will get a
+compiler warning.  Defaults to zero, see $link IOEventSource::setAction.
+    @result True if inherited classes initialise successfully. */</span>
+    virtual bool init(OSObject *owner, Action action = 0);
+
+    <span class="enscript-comment">// Superclass overrides
+</span>    virtual <span class="enscript-type">void</span> free() APPLE_KEXT_OVERRIDE;
+    virtual <span class="enscript-type">void</span> setWorkLoop(IOWorkLoop *inWorkLoop) APPLE_KEXT_OVERRIDE;
+
+<span class="enscript-comment">/*! @function runCommand
+    @abstract Single thread a command with the target work loop.
+    @discussion Client function that causes the current action to be called in
+a single threaded manner.  Beware the work loop's gate is recursive and command
+gates can cause direct or indirect re-entrancy.	 When the executing on a
+client's thread runCommand will sleep until the work loop's gate opens for
+execution of client actions, the action is single threaded against all other
+work loop event sources.  If the command is disabled the attempt to run a command will be stalled until enable is called.
+    @param arg0 Parameter for action of command gate, defaults to 0.
+    @param arg1 Parameter for action of command gate, defaults to 0.
+    @param arg2 Parameter for action of command gate, defaults to 0.
+    @param arg3 Parameter for action of command gate, defaults to 0.
+    @result kIOReturnSuccess if successful. kIOReturnAborted if a disabled command gate is free()ed before being reenabled, kIOReturnNoResources if no action available.
+*/</span>
+    virtual IOReturn runCommand(<span class="enscript-type">void</span> *arg0 = 0, <span class="enscript-type">void</span> *arg1 = 0,
+				<span class="enscript-type">void</span> *arg2 = 0, <span class="enscript-type">void</span> *arg3 = 0);
+
+<span class="enscript-comment">/*! @function runAction
+    @abstract Single thread a call to an action with the target work loop.
+    @discussion Client function that causes the given action to be called in
+a single threaded manner.  Beware the work loop's gate is recursive and command
+gates can cause direct or indirect re-entrancy.	 When the executing on a
+client's thread runAction will sleep until the work loop's gate opens for
+execution of client actions, the action is single threaded against all other
+work loop event sources.  If the command is disabled the attempt to run a command will be stalled until enable is called.
+    @param action Pointer to function to be executed in the context of the work loop.
+    @param arg0 Parameter for action parameter, defaults to 0.
+    @param arg1 Parameter for action parameter, defaults to 0.
+    @param arg2 Parameter for action parameter, defaults to 0.
+    @param arg3 Parameter for action parameter, defaults to 0.
+    @result The return value of action if it was called, kIOReturnBadArgument if action is not defined, kIOReturnAborted if a disabled command gate is free()ed before being reenabled.
+*/</span>
+    virtual IOReturn runAction(Action action,
+			       <span class="enscript-type">void</span> *arg0 = 0, <span class="enscript-type">void</span> *arg1 = 0,
+			       <span class="enscript-type">void</span> *arg2 = 0, <span class="enscript-type">void</span> *arg3 = 0);
+
+<span class="enscript-comment">/*! @function attemptCommand
+    @abstract Single thread a command with the target work loop.
+    @discussion Client function that causes the current action to be called in
+a single threaded manner.  When the executing on a client's thread attemptCommand will fail if the work loop's gate is closed.
+    @param arg0 Parameter for action of command gate, defaults to 0.
+    @param arg1 Parameter for action of command gate, defaults to 0.
+    @param arg2 Parameter for action of command gate, defaults to 0.
+    @param arg3 Parameter for action of command gate, defaults to 0.
+    @result kIOReturnSuccess if successful. kIOReturnNotPermitted if this event source is currently disabled, kIOReturnNoResources if no action available, kIOReturnCannotLock if lock attempt fails.
+*/</span>
+    virtual IOReturn attemptCommand(<span class="enscript-type">void</span> *arg0 = 0, <span class="enscript-type">void</span> *arg1 = 0,
+                                    <span class="enscript-type">void</span> *arg2 = 0, <span class="enscript-type">void</span> *arg3 = 0);
+
+<span class="enscript-comment">/*! @function attemptAction
+    @abstract Single thread a call to an action with the target work loop.
+    @discussion Client function that causes the given action to be called in
+a single threaded manner.  Beware the work loop's gate is recursive and command
+gates can cause direct or indirect re-entrancy.	 When the executing on a
+client's thread attemptCommand will fail if the work loop's gate is closed.
+    @param action Pointer to function to be executed in context of the work loop.
+    @param arg0 Parameter for action parameter, defaults to 0.
+    @param arg1 Parameter for action parameter, defaults to 0.
+    @param arg2 Parameter for action parameter, defaults to 0.
+    @param arg3 Parameter for action parameter, defaults to 0.
+    @result kIOReturnSuccess if successful. kIOReturnBadArgument if action is not defined, kIOReturnNotPermitted if this event source is currently disabled, kIOReturnCannotLock if lock attempt fails.
+
+*/</span>
+    virtual IOReturn attemptAction(Action action,
+                                   <span class="enscript-type">void</span> *arg0 = 0, <span class="enscript-type">void</span> *arg1 = 0,
+                                   <span class="enscript-type">void</span> *arg2 = 0, <span class="enscript-type">void</span> *arg3 = 0);
+
+<span class="enscript-comment">/*! @function commandSleep  
+    @abstract Put a thread that is currently holding the command gate to sleep.
+    @discussion Put a thread to sleep waiting for an event but release the gate first.  If the event occurs then the commandGate is closed before the function returns.
+    @param event Pointer to an address.
+    @param interruptible THREAD_UNINT, THREAD_INTERRUPTIBLE or THREAD_ABORTSAFE.  THREAD_UNINT specifies that the sleep cannot be interrupted by a signal.  THREAD_INTERRUPTIBLE specifies that the sleep may be interrupted by a &quot;kill -9&quot; signal.  THREAD_ABORTSAFE (the default value) specifies that the sleep may be interrupted by any user signal.
+    @result THREAD_AWAKENED - normal wakeup, THREAD_TIMED_OUT - timeout expired, THREAD_INTERRUPTED - interrupted, THREAD_RESTART - restart operation entirely, kIOReturnNotPermitted if the calling thread does not hold the command gate. */</span>
+    virtual IOReturn commandSleep(<span class="enscript-type">void</span> *event,
+                                  UInt32 interruptible = THREAD_ABORTSAFE);
+
+<span class="enscript-comment">/*! @function commandWakeup
+    @abstract Wakeup one or more threads that are asleep on an event.
+    @param event Pointer to an address.
+    @param onlyOneThread true to only wake up at most one thread, false otherwise. */</span>
+    virtual <span class="enscript-type">void</span> commandWakeup(<span class="enscript-type">void</span> *event, bool oneThread = false);
+
+<span class="enscript-comment">/*! @function disable
+    @abstract Disable the command gate
+    @discussion When a command gate is disabled all future calls to runAction and runCommand will stall until the gate is enable()d later.  This can be used to block client threads when a system sleep is requested.  The IOWorkLoop thread itself will never stall, even when making runAction/runCommand calls.  This call must be made from a gated context, to clear potential race conditions.  */</span>
+    virtual <span class="enscript-type">void</span> disable() APPLE_KEXT_OVERRIDE;
+
+<span class="enscript-comment">/*! @function enable
+    @abstract Enable command gate, this will unblock any blocked Commands and Actions.
+    @discussion  Enable the command gate.  The attemptAction/attemptCommand calls will now be enabled and can succeeed.  Stalled runCommand/runAction calls will be woken up. */</span>
+    virtual <span class="enscript-type">void</span> enable() APPLE_KEXT_OVERRIDE;
+
+<span class="enscript-comment">/*! @function commandSleep  
+    @abstract Put a thread that is currently holding the command gate to sleep.
+    @discussion Put a thread to sleep waiting for an event but release the gate first.  If the event occurs or timeout occurs then the commandGate is closed before the function returns.
+    @param event Pointer to an address.
+	@param deadline Clock deadline to timeout the sleep.
+    @param interruptible THREAD_UNINT, THREAD_INTERRUPTIBLE or THREAD_ABORTSAFE.  THREAD_UNINT specifies that the sleep cannot be interrupted by a signal.  THREAD_INTERRUPTIBLE specifies that the sleep may be interrupted by a &quot;kill -9&quot; signal.  THREAD_ABORTSAFE specifies that the sleep may be interrupted by any user signal.
+    @result THREAD_AWAKENED - normal wakeup, THREAD_TIMED_OUT - timeout expired, THREAD_INTERRUPTED - interrupted, THREAD_RESTART - restart operation entirely, kIOReturnNotPermitted if the calling thread does not hold the command gate. */</span>
+    virtual IOReturn commandSleep(<span class="enscript-type">void</span> *event,
+								  AbsoluteTime deadline,
+                                  UInt32 interruptible);
+
+<span class="enscript-reference">private</span>:
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__LP64__</span>
+    OSMetaClassDeclareReservedUnused(IOCommandGate, 0);
+#<span class="enscript-reference">else</span>
+    OSMetaClassDeclareReservedUsed(IOCommandGate, 0);
+#<span class="enscript-reference">endif</span>
+    OSMetaClassDeclareReservedUnused(IOCommandGate, 1);
+    OSMetaClassDeclareReservedUnused(IOCommandGate, 2);
+    OSMetaClassDeclareReservedUnused(IOCommandGate, 3);
+    OSMetaClassDeclareReservedUnused(IOCommandGate, 4);
+    OSMetaClassDeclareReservedUnused(IOCommandGate, 5);
+    OSMetaClassDeclareReservedUnused(IOCommandGate, 6);
+    OSMetaClassDeclareReservedUnused(IOCommandGate, 7);
+};
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !_IOKIT_IOCOMMANDGATE_H */</span>
+</pre>
+<hr />
+</body></html>

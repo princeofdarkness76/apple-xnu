@@ -1,0 +1,542 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>genassym.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">genassym.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach_ldebug.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Pass field offsets to assembly code.
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ast.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_space.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_pset.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/Diagnostics.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp_desc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/seg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/tss.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_capabilities.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpuid.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmCPU.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/i386/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/i386/thread_status.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/commpage.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/i386/boot.h&gt;</span>
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">offsetof</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stddef.h&gt;</span>
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">CONFIG_DTRACE</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NEED_DTRACE_DEFS</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;../bsd/sys/lockstat.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * genassym.c is used to produce an
+ * assembly file which, intermingled with unuseful assembly code,
+ * has all the necessary definitions emitted. This assembly file is
+ * then postprocessed with sed to extract only these definitions
+ * and thus the final assyms.s is created.
+ *
+ * This convoluted means is necessary since the structure alignment
+ * and packing may be different between the host machine and the
+ * target so we are forced into using the cross compiler to generate
+ * the values, but we cannot run anything on the target machine.
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DECLARE</span>(SYM,VAL) \
+	__asm(<span class="enscript-string">&quot;DEFINITION__define__&quot;</span> SYM <span class="enscript-string">&quot;:\t .ascii \&quot;%0\&quot;&quot;</span> : : <span class="enscript-string">&quot;n&quot;</span>  ((u_int)(VAL)))
+
+<span class="enscript-type">int</span>	main(
+		<span class="enscript-type">int</span>		argc,
+		<span class="enscript-type">char</span>		** argv);
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">main</span>(
+	<span class="enscript-type">int</span>	argc,
+	<span class="enscript-type">char</span>	**argv)
+{
+
+	DECLARE(<span class="enscript-string">&quot;AST_URGENT&quot;</span>,		AST_URGENT);
+	DECLARE(<span class="enscript-string">&quot;AST_BSD&quot;</span>,			AST_BSD);
+
+	DECLARE(<span class="enscript-string">&quot;MAX_CPUS&quot;</span>,			MAX_CPUS);
+
+	<span class="enscript-comment">/* Simple Lock structure */</span>
+	DECLARE(<span class="enscript-string">&quot;SLOCK_ILK&quot;</span>,	offsetof(usimple_lock_data_t, interlock));
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MACH_LDEBUG</span>
+	DECLARE(<span class="enscript-string">&quot;SLOCK_TYPE&quot;</span>,	offsetof(usimple_lock_data_t, lock_type));
+	DECLARE(<span class="enscript-string">&quot;SLOCK_PC&quot;</span>,	offsetof(usimple_lock_data_t, debug.lock_pc));
+	DECLARE(<span class="enscript-string">&quot;SLOCK_THREAD&quot;</span>,	offsetof(usimple_lock_data_t, debug.lock_thread));
+	DECLARE(<span class="enscript-string">&quot;SLOCK_DURATIONH&quot;</span>,offsetof(usimple_lock_data_t, debug.duration[0]));
+	DECLARE(<span class="enscript-string">&quot;SLOCK_DURATIONL&quot;</span>,offsetof(usimple_lock_data_t, debug.duration[1]));
+	DECLARE(<span class="enscript-string">&quot;USLOCK_TAG&quot;</span>,	USLOCK_TAG);
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MACH_LDEBUG */</span>
+
+	<span class="enscript-comment">/* Mutex structure */</span>
+	DECLARE(<span class="enscript-string">&quot;MUTEX_OWNER&quot;</span>, offsetof(lck_mtx_t, lck_mtx_owner));
+	DECLARE(<span class="enscript-string">&quot;MUTEX_PTR&quot;</span>,   offsetof(lck_mtx_t, lck_mtx_ptr));
+	DECLARE(<span class="enscript-string">&quot;MUTEX_STATE&quot;</span>, offsetof(lck_mtx_t, lck_mtx_state));
+	DECLARE(<span class="enscript-string">&quot;MUTEX_IND&quot;</span>,	LCK_MTX_TAG_INDIRECT);
+	DECLARE(<span class="enscript-string">&quot;MUTEX_ASSERT_OWNED&quot;</span>,	LCK_MTX_ASSERT_OWNED);
+	DECLARE(<span class="enscript-string">&quot;MUTEX_ASSERT_NOTOWNED&quot;</span>,LCK_MTX_ASSERT_NOTOWNED);
+	DECLARE(<span class="enscript-string">&quot;GRP_MTX_STAT_UTIL&quot;</span>,	offsetof(lck_grp_t, lck_grp_stat.lck_grp_mtx_stat.lck_grp_mtx_util_cnt));
+	DECLARE(<span class="enscript-string">&quot;GRP_MTX_STAT_MISS&quot;</span>,	offsetof(lck_grp_t, lck_grp_stat.lck_grp_mtx_stat.lck_grp_mtx_miss_cnt));
+	DECLARE(<span class="enscript-string">&quot;GRP_MTX_STAT_WAIT&quot;</span>,	offsetof(lck_grp_t, lck_grp_stat.lck_grp_mtx_stat.lck_grp_mtx_wait_cnt));
+	
+	<span class="enscript-comment">/* x86 only */</span>
+	DECLARE(<span class="enscript-string">&quot;MUTEX_DESTROYED&quot;</span>, LCK_MTX_TAG_DESTROYED);
+
+	<span class="enscript-comment">/* Per-mutex statistic element */</span>
+	DECLARE(<span class="enscript-string">&quot;MTX_ACQ_TSC&quot;</span>,	offsetof(lck_mtx_ext_t, lck_mtx_stat));
+
+	<span class="enscript-comment">/* Mutex group statistics elements */</span>
+	DECLARE(<span class="enscript-string">&quot;MUTEX_GRP&quot;</span>,	offsetof(lck_mtx_ext_t, lck_mtx_grp));
+	
+	<span class="enscript-comment">/*
+	 * The use of this field is somewhat at variance with the alias.
+	 */</span>
+	DECLARE(<span class="enscript-string">&quot;GRP_MTX_STAT_DIRECT_WAIT&quot;</span>,	offsetof(lck_grp_t, lck_grp_stat.lck_grp_mtx_stat.lck_grp_mtx_held_cnt));
+
+	DECLARE(<span class="enscript-string">&quot;GRP_MTX_STAT_HELD_MAX&quot;</span>,	offsetof(lck_grp_t, lck_grp_stat.lck_grp_mtx_stat.lck_grp_mtx_held_max));
+	<span class="enscript-comment">/* Reader writer lock types */</span>
+	DECLARE(<span class="enscript-string">&quot;RW_SHARED&quot;</span>,    LCK_RW_TYPE_SHARED);
+	DECLARE(<span class="enscript-string">&quot;RW_EXCL&quot;</span>,      LCK_RW_TYPE_EXCLUSIVE);
+
+	DECLARE(<span class="enscript-string">&quot;TH_RECOVER&quot;</span>,		offsetof(<span class="enscript-type">struct</span> thread, recover));
+	DECLARE(<span class="enscript-string">&quot;TH_CONTINUATION&quot;</span>,	offsetof(<span class="enscript-type">struct</span> thread, continuation));
+	DECLARE(<span class="enscript-string">&quot;TH_KERNEL_STACK&quot;</span>,	offsetof(<span class="enscript-type">struct</span> thread, kernel_stack));
+	DECLARE(<span class="enscript-string">&quot;TH_MUTEX_COUNT&quot;</span>,	offsetof(<span class="enscript-type">struct</span> thread, mutex_count));
+	DECLARE(<span class="enscript-string">&quot;TH_WAS_PROMOTED_ON_WAKEUP&quot;</span>, offsetof(<span class="enscript-type">struct</span> thread, was_promoted_on_wakeup));
+	DECLARE(<span class="enscript-string">&quot;TH_IOTIER_OVERRIDE&quot;</span>,	offsetof(<span class="enscript-type">struct</span> thread, iotier_override));
+
+	DECLARE(<span class="enscript-string">&quot;TH_SYSCALLS_MACH&quot;</span>,	offsetof(<span class="enscript-type">struct</span> thread, syscalls_mach));
+	DECLARE(<span class="enscript-string">&quot;TH_SYSCALLS_UNIX&quot;</span>,	offsetof(<span class="enscript-type">struct</span> thread, syscalls_unix));
+
+	DECLARE(<span class="enscript-string">&quot;TASK_VTIMERS&quot;</span>,			offsetof(<span class="enscript-type">struct</span> task, vtimers));
+
+	<span class="enscript-comment">/* These fields are being added on demand */</span>
+	DECLARE(<span class="enscript-string">&quot;TH_TASK&quot;</span>,	offsetof(<span class="enscript-type">struct</span> thread, task));
+	DECLARE(<span class="enscript-string">&quot;TH_AST&quot;</span>,	offsetof(<span class="enscript-type">struct</span> thread, ast));
+	DECLARE(<span class="enscript-string">&quot;TH_MAP&quot;</span>,	offsetof(<span class="enscript-type">struct</span> thread, map));
+	DECLARE(<span class="enscript-string">&quot;TH_SPF&quot;</span>,	offsetof(<span class="enscript-type">struct</span> thread, machine.specFlags));
+	DECLARE(<span class="enscript-string">&quot;TH_PCB_ISS&quot;</span>, 	offsetof(<span class="enscript-type">struct</span> thread, machine.iss));
+	DECLARE(<span class="enscript-string">&quot;TH_PCB_IDS&quot;</span>, 	offsetof(<span class="enscript-type">struct</span> thread, machine.ids));
+	DECLARE(<span class="enscript-string">&quot;TH_PCB_FPS&quot;</span>,	offsetof(<span class="enscript-type">struct</span> thread, machine.ifps));
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NCOPY_WINDOWS</span> &gt; 0
+	DECLARE(<span class="enscript-string">&quot;TH_COPYIO_STATE&quot;</span>, offsetof(<span class="enscript-type">struct</span> thread, machine.copyio_state));
+	DECLARE(<span class="enscript-string">&quot;WINDOWS_CLEAN&quot;</span>, WINDOWS_CLEAN);
+#<span class="enscript-reference">endif</span>
+	DECLARE(<span class="enscript-string">&quot;TH_RWLOCK_COUNT&quot;</span>,	offsetof(<span class="enscript-type">struct</span> thread, rwlock_count));
+
+	DECLARE(<span class="enscript-string">&quot;MAP_PMAP&quot;</span>,	offsetof(<span class="enscript-type">struct</span> _vm_map, pmap));
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IEL_SIZE</span>		(sizeof(struct i386_exception_link *))
+	DECLARE(<span class="enscript-string">&quot;IKS_SIZE&quot;</span>,	<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x86_kernel_state));
+
+	<span class="enscript-comment">/*
+	 * KSS_* are offsets from the top of the kernel stack (cpu_kernel_stack)
+	 */</span>
+	DECLARE(<span class="enscript-string">&quot;KSS_RBX&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_kernel_state, k_rbx));
+	DECLARE(<span class="enscript-string">&quot;KSS_RSP&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_kernel_state, k_rsp));
+	DECLARE(<span class="enscript-string">&quot;KSS_RBP&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_kernel_state, k_rbp));
+	DECLARE(<span class="enscript-string">&quot;KSS_R12&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_kernel_state, k_r12));
+	DECLARE(<span class="enscript-string">&quot;KSS_R13&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_kernel_state, k_r13));
+	DECLARE(<span class="enscript-string">&quot;KSS_R14&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_kernel_state, k_r14));
+	DECLARE(<span class="enscript-string">&quot;KSS_R15&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_kernel_state, k_r15));
+	DECLARE(<span class="enscript-string">&quot;KSS_RIP&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_kernel_state, k_rip));	
+	
+	DECLARE(<span class="enscript-string">&quot;DS_DR0&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state32, dr0));
+	DECLARE(<span class="enscript-string">&quot;DS_DR1&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state32, dr1));
+	DECLARE(<span class="enscript-string">&quot;DS_DR2&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state32, dr2));
+	DECLARE(<span class="enscript-string">&quot;DS_DR3&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state32, dr3));
+	DECLARE(<span class="enscript-string">&quot;DS_DR4&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state32, dr4));
+	DECLARE(<span class="enscript-string">&quot;DS_DR5&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state32, dr5));
+	DECLARE(<span class="enscript-string">&quot;DS_DR6&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state32, dr6));
+	DECLARE(<span class="enscript-string">&quot;DS_DR7&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state32, dr7));
+
+	DECLARE(<span class="enscript-string">&quot;DS64_DR0&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state64, dr0));
+	DECLARE(<span class="enscript-string">&quot;DS64_DR1&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state64, dr1));
+	DECLARE(<span class="enscript-string">&quot;DS64_DR2&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state64, dr2));
+	DECLARE(<span class="enscript-string">&quot;DS64_DR3&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state64, dr3));
+	DECLARE(<span class="enscript-string">&quot;DS64_DR4&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state64, dr4));
+	DECLARE(<span class="enscript-string">&quot;DS64_DR5&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state64, dr5));
+	DECLARE(<span class="enscript-string">&quot;DS64_DR6&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state64, dr6));
+	DECLARE(<span class="enscript-string">&quot;DS64_DR7&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_debug_state64, dr7));
+
+	DECLARE(<span class="enscript-string">&quot;FP_VALID&quot;</span>,	offsetof(<span class="enscript-type">struct</span> x86_fx_thread_state,fp_valid));
+
+	DECLARE(<span class="enscript-string">&quot;SS_FLAVOR&quot;</span>,	offsetof(x86_saved_state_t, flavor));
+	DECLARE(<span class="enscript-string">&quot;SS_32&quot;</span>,	x86_SAVED_STATE32);
+	DECLARE(<span class="enscript-string">&quot;SS_64&quot;</span>,	x86_SAVED_STATE64);
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">R_</span>(x)  offsetof(x86_saved_state_t, ss_32.x)
+	DECLARE(<span class="enscript-string">&quot;R32_CS&quot;</span>,	R_(cs));
+	DECLARE(<span class="enscript-string">&quot;R32_SS&quot;</span>,	R_(ss));
+	DECLARE(<span class="enscript-string">&quot;R32_DS&quot;</span>,	R_(ds));
+	DECLARE(<span class="enscript-string">&quot;R32_ES&quot;</span>,	R_(es));
+	DECLARE(<span class="enscript-string">&quot;R32_FS&quot;</span>,	R_(fs));
+	DECLARE(<span class="enscript-string">&quot;R32_GS&quot;</span>,	R_(gs));
+	DECLARE(<span class="enscript-string">&quot;R32_UESP&quot;</span>,	R_(uesp));
+	DECLARE(<span class="enscript-string">&quot;R32_EBP&quot;</span>,	R_(ebp));
+	DECLARE(<span class="enscript-string">&quot;R32_EAX&quot;</span>,	R_(eax));
+	DECLARE(<span class="enscript-string">&quot;R32_EBX&quot;</span>,	R_(ebx));
+	DECLARE(<span class="enscript-string">&quot;R32_ECX&quot;</span>,	R_(ecx));
+	DECLARE(<span class="enscript-string">&quot;R32_EDX&quot;</span>,	R_(edx));
+	DECLARE(<span class="enscript-string">&quot;R32_ESI&quot;</span>,	R_(esi));
+	DECLARE(<span class="enscript-string">&quot;R32_EDI&quot;</span>,	R_(edi));
+	DECLARE(<span class="enscript-string">&quot;R32_TRAPNO&quot;</span>,	R_(trapno));
+	DECLARE(<span class="enscript-string">&quot;R32_ERR&quot;</span>,	R_(err));
+	DECLARE(<span class="enscript-string">&quot;R32_EFLAGS&quot;</span>,	R_(efl));
+	DECLARE(<span class="enscript-string">&quot;R32_EIP&quot;</span>,	R_(eip));
+	DECLARE(<span class="enscript-string">&quot;R32_CR2&quot;</span>,	R_(cr2));
+	DECLARE(<span class="enscript-string">&quot;ISS32_SIZE&quot;</span>,	<span class="enscript-keyword">sizeof</span> (x86_saved_state32_t));
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">R64_</span>(x)  offsetof(x86_saved_state_t, ss_64.x)
+	DECLARE(<span class="enscript-string">&quot;R64_FS&quot;</span>,	R64_(fs));
+	DECLARE(<span class="enscript-string">&quot;R64_GS&quot;</span>,	R64_(gs));
+	DECLARE(<span class="enscript-string">&quot;R64_R8&quot;</span>,	R64_(r8));
+	DECLARE(<span class="enscript-string">&quot;R64_R9&quot;</span>,	R64_(r9));
+	DECLARE(<span class="enscript-string">&quot;R64_R10&quot;</span>,	R64_(r10));
+	DECLARE(<span class="enscript-string">&quot;R64_R11&quot;</span>,	R64_(r11));
+	DECLARE(<span class="enscript-string">&quot;R64_R12&quot;</span>,	R64_(r12));
+	DECLARE(<span class="enscript-string">&quot;R64_R13&quot;</span>,	R64_(r13));
+	DECLARE(<span class="enscript-string">&quot;R64_R14&quot;</span>,	R64_(r14));
+	DECLARE(<span class="enscript-string">&quot;R64_R15&quot;</span>,	R64_(r15));
+	DECLARE(<span class="enscript-string">&quot;R64_RBP&quot;</span>,	R64_(rbp));
+	DECLARE(<span class="enscript-string">&quot;R64_RAX&quot;</span>,	R64_(rax));
+	DECLARE(<span class="enscript-string">&quot;R64_RBX&quot;</span>,	R64_(rbx));
+	DECLARE(<span class="enscript-string">&quot;R64_RCX&quot;</span>,	R64_(rcx));
+	DECLARE(<span class="enscript-string">&quot;R64_RDX&quot;</span>,	R64_(rdx));
+	DECLARE(<span class="enscript-string">&quot;R64_RSI&quot;</span>,	R64_(rsi));
+	DECLARE(<span class="enscript-string">&quot;R64_RDI&quot;</span>,	R64_(rdi));
+	DECLARE(<span class="enscript-string">&quot;R64_CS&quot;</span>,	R64_(isf.cs));
+	DECLARE(<span class="enscript-string">&quot;R64_SS&quot;</span>,	R64_(isf.ss));
+	DECLARE(<span class="enscript-string">&quot;R64_RSP&quot;</span>,	R64_(isf.rsp));
+	DECLARE(<span class="enscript-string">&quot;R64_TRAPNO&quot;</span>,	R64_(isf.trapno));
+	DECLARE(<span class="enscript-string">&quot;R64_TRAPFN&quot;</span>,	R64_(isf.trapfn));
+	DECLARE(<span class="enscript-string">&quot;R64_ERR&quot;</span>,	R64_(isf.err));
+	DECLARE(<span class="enscript-string">&quot;R64_RFLAGS&quot;</span>,	R64_(isf.rflags));
+	DECLARE(<span class="enscript-string">&quot;R64_RIP&quot;</span>,	R64_(isf.rip));
+	DECLARE(<span class="enscript-string">&quot;R64_CR2&quot;</span>,	R64_(cr2));
+	DECLARE(<span class="enscript-string">&quot;ISS64_OFFSET&quot;</span>,	R64_(isf));
+	DECLARE(<span class="enscript-string">&quot;ISS64_SIZE&quot;</span>,	<span class="enscript-keyword">sizeof</span> (x86_saved_state64_t));
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ISF64_</span>(x)  offsetof(x86_64_intr_stack_frame_t, x)
+	DECLARE(<span class="enscript-string">&quot;ISF64_TRAPNO&quot;</span>,	ISF64_(trapno));
+	DECLARE(<span class="enscript-string">&quot;ISF64_TRAPFN&quot;</span>,	ISF64_(trapfn));
+	DECLARE(<span class="enscript-string">&quot;ISF64_ERR&quot;</span>,	ISF64_(err));
+	DECLARE(<span class="enscript-string">&quot;ISF64_RIP&quot;</span>,	ISF64_(rip));
+	DECLARE(<span class="enscript-string">&quot;ISF64_CS&quot;</span>,	ISF64_(cs));
+	DECLARE(<span class="enscript-string">&quot;ISF64_RFLAGS&quot;</span>,	ISF64_(rflags));
+	DECLARE(<span class="enscript-string">&quot;ISF64_RSP&quot;</span>,	ISF64_(rsp));
+	DECLARE(<span class="enscript-string">&quot;ISF64_SS&quot;</span>,	ISF64_(ss));
+	DECLARE(<span class="enscript-string">&quot;ISF64_SIZE&quot;</span>,	<span class="enscript-keyword">sizeof</span>(x86_64_intr_stack_frame_t));
+
+	DECLARE(<span class="enscript-string">&quot;NBPG&quot;</span>,			I386_PGBYTES);
+	DECLARE(<span class="enscript-string">&quot;PAGE_SIZE&quot;</span>,            I386_PGBYTES);
+	DECLARE(<span class="enscript-string">&quot;PAGE_MASK&quot;</span>,            I386_PGBYTES-1);
+	DECLARE(<span class="enscript-string">&quot;PAGE_SHIFT&quot;</span>,           12);
+	DECLARE(<span class="enscript-string">&quot;NKPT&quot;</span>,                 NKPT);
+	DECLARE(<span class="enscript-string">&quot;VM_MIN_ADDRESS&quot;</span>,	VM_MIN_ADDRESS);
+	DECLARE(<span class="enscript-string">&quot;VM_MAX_ADDRESS&quot;</span>,	VM_MAX_ADDRESS);
+	DECLARE(<span class="enscript-string">&quot;KERNELBASE&quot;</span>,		VM_MIN_KERNEL_ADDRESS);
+	DECLARE(<span class="enscript-string">&quot;LINEAR_KERNELBASE&quot;</span>,	LINEAR_KERNEL_ADDRESS);
+	DECLARE(<span class="enscript-string">&quot;KERNEL_STACK_SIZE&quot;</span>,	KERNEL_STACK_SIZE);
+
+	DECLARE(<span class="enscript-string">&quot;ASM_COMM_PAGE32_BASE_ADDRESS&quot;</span>,  _COMM_PAGE32_BASE_ADDRESS);
+	DECLARE(<span class="enscript-string">&quot;ASM_COMM_PAGE32_START_ADDRESS&quot;</span>,  _COMM_PAGE32_START_ADDRESS);
+	DECLARE(<span class="enscript-string">&quot;ASM_COMM_PAGE_SCHED_GEN&quot;</span>,  _COMM_PAGE_SCHED_GEN);
+
+	DECLARE(<span class="enscript-string">&quot;KERNEL_PML4_INDEX&quot;</span>, KERNEL_PML4_INDEX);
+	DECLARE(<span class="enscript-string">&quot;IDTSZ&quot;</span>,	IDTSZ);
+	DECLARE(<span class="enscript-string">&quot;GDTSZ&quot;</span>,	GDTSZ);
+	DECLARE(<span class="enscript-string">&quot;LDTSZ&quot;</span>,	LDTSZ);
+
+	DECLARE(<span class="enscript-string">&quot;KERNEL_DS&quot;</span>,	KERNEL_DS);
+	DECLARE(<span class="enscript-string">&quot;USER_CS&quot;</span>,	USER_CS);
+	DECLARE(<span class="enscript-string">&quot;USER_DS&quot;</span>,	USER_DS);
+	DECLARE(<span class="enscript-string">&quot;KERNEL32_CS&quot;</span>,	KERNEL32_CS);
+	DECLARE(<span class="enscript-string">&quot;KERNEL64_CS&quot;</span>,  KERNEL64_CS);
+	DECLARE(<span class="enscript-string">&quot;USER64_CS&quot;</span>,	USER64_CS);
+	DECLARE(<span class="enscript-string">&quot;KERNEL_TSS&quot;</span>,	KERNEL_TSS);
+	DECLARE(<span class="enscript-string">&quot;KERNEL_LDT&quot;</span>,	KERNEL_LDT);
+	DECLARE(<span class="enscript-string">&quot;SYSENTER_CS&quot;</span>,	SYSENTER_CS);
+	DECLARE(<span class="enscript-string">&quot;SYSENTER_TF_CS&quot;</span>,SYSENTER_TF_CS);
+	DECLARE(<span class="enscript-string">&quot;SYSENTER_DS&quot;</span>,	SYSENTER_DS);
+	DECLARE(<span class="enscript-string">&quot;SYSCALL_CS&quot;</span>,	SYSCALL_CS);
+
+        DECLARE(<span class="enscript-string">&quot;CPU_THIS&quot;</span>,
+		offsetof(cpu_data_t, cpu_this));
+        DECLARE(<span class="enscript-string">&quot;CPU_ACTIVE_THREAD&quot;</span>,
+		offsetof(cpu_data_t, cpu_active_thread));
+        DECLARE(<span class="enscript-string">&quot;CPU_ACTIVE_STACK&quot;</span>,
+		offsetof(cpu_data_t, cpu_active_stack));
+        DECLARE(<span class="enscript-string">&quot;CPU_KERNEL_STACK&quot;</span>,
+		offsetof(cpu_data_t, cpu_kernel_stack));
+        DECLARE(<span class="enscript-string">&quot;CPU_INT_STACK_TOP&quot;</span>,
+		offsetof(cpu_data_t, cpu_int_stack_top));
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MACH_RT</span>
+        DECLARE(<span class="enscript-string">&quot;CPU_PREEMPTION_LEVEL&quot;</span>,
+		offsetof(cpu_data_t, cpu_preemption_level));
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MACH_RT */</span>
+        DECLARE(<span class="enscript-string">&quot;CPU_HIBERNATE&quot;</span>,
+		offsetof(cpu_data_t, cpu_hibernate));
+        DECLARE(<span class="enscript-string">&quot;CPU_INTERRUPT_LEVEL&quot;</span>,
+		offsetof(cpu_data_t, cpu_interrupt_level));
+	DECLARE(<span class="enscript-string">&quot;CPU_NESTED_ISTACK&quot;</span>,
+	    offsetof(cpu_data_t, cpu_nested_istack));
+        DECLARE(<span class="enscript-string">&quot;CPU_NUMBER_GS&quot;</span>,
+		offsetof(cpu_data_t,cpu_number));
+        DECLARE(<span class="enscript-string">&quot;CPU_RUNNING&quot;</span>,
+		offsetof(cpu_data_t,cpu_running));
+	DECLARE(<span class="enscript-string">&quot;CPU_PENDING_AST&quot;</span>,
+		offsetof(cpu_data_t,cpu_pending_ast));
+	DECLARE(<span class="enscript-string">&quot;CPU_DESC_TABLEP&quot;</span>,
+		offsetof(cpu_data_t,cpu_desc_tablep));
+	DECLARE(<span class="enscript-string">&quot;CPU_DESC_INDEX&quot;</span>,
+		offsetof(cpu_data_t,cpu_desc_index));
+	DECLARE(<span class="enscript-string">&quot;CDI_GDT&quot;</span>,
+		offsetof(cpu_desc_index_t,cdi_gdt));
+	DECLARE(<span class="enscript-string">&quot;CDI_IDT&quot;</span>,
+		offsetof(cpu_desc_index_t,cdi_idt));
+	DECLARE(<span class="enscript-string">&quot;CPU_PROCESSOR&quot;</span>,
+		offsetof(cpu_data_t,cpu_processor));
+        DECLARE(<span class="enscript-string">&quot;CPU_INT_STATE&quot;</span>,
+		offsetof(cpu_data_t, cpu_int_state));
+        DECLARE(<span class="enscript-string">&quot;CPU_INT_EVENT_TIME&quot;</span>,
+		offsetof(cpu_data_t, cpu_int_event_time));
+
+        DECLARE(<span class="enscript-string">&quot;CPU_TASK_CR3&quot;</span>,
+		offsetof(cpu_data_t, cpu_task_cr3));
+        DECLARE(<span class="enscript-string">&quot;CPU_ACTIVE_CR3&quot;</span>,
+		offsetof(cpu_data_t, cpu_active_cr3));
+        DECLARE(<span class="enscript-string">&quot;CPU_KERNEL_CR3&quot;</span>,
+		offsetof(cpu_data_t, cpu_kernel_cr3));
+	DECLARE(<span class="enscript-string">&quot;CPU_TLB_INVALID&quot;</span>,
+		offsetof(cpu_data_t, cpu_tlb_invalid));
+
+	DECLARE(<span class="enscript-string">&quot;CPU_TASK_MAP&quot;</span>,
+		offsetof(cpu_data_t, cpu_task_map));
+	DECLARE(<span class="enscript-string">&quot;TASK_MAP_32BIT&quot;</span>,		TASK_MAP_32BIT); 
+	DECLARE(<span class="enscript-string">&quot;TASK_MAP_64BIT&quot;</span>,		TASK_MAP_64BIT);
+	DECLARE(<span class="enscript-string">&quot;CPU_UBER_USER_GS_BASE&quot;</span>,
+		offsetof(cpu_data_t, cpu_uber.cu_user_gs_base));
+	DECLARE(<span class="enscript-string">&quot;CPU_UBER_ISF&quot;</span>,
+		offsetof(cpu_data_t, cpu_uber.cu_isf));
+	DECLARE(<span class="enscript-string">&quot;CPU_UBER_TMP&quot;</span>,
+		offsetof(cpu_data_t, cpu_uber.cu_tmp));
+
+	DECLARE(<span class="enscript-string">&quot;CPU_NANOTIME&quot;</span>,
+		offsetof(cpu_data_t, cpu_nanotime));
+
+	DECLARE(<span class="enscript-string">&quot;CPU_DR7&quot;</span>,
+		offsetof(cpu_data_t, cpu_dr7));
+
+	DECLARE(<span class="enscript-string">&quot;hwIntCnt&quot;</span>, 	offsetof(cpu_data_t,cpu_hwIntCnt));
+	DECLARE(<span class="enscript-string">&quot;CPU_ACTIVE_PCID&quot;</span>,
+		offsetof(cpu_data_t, cpu_active_pcid));
+	DECLARE(<span class="enscript-string">&quot;CPU_PCID_COHERENTP&quot;</span>,
+		offsetof(cpu_data_t, cpu_pmap_pcid_coherentp));
+	DECLARE(<span class="enscript-string">&quot;CPU_PCID_COHERENTP_KERNEL&quot;</span>,
+		offsetof(cpu_data_t, cpu_pmap_pcid_coherentp_kernel));
+	DECLARE(<span class="enscript-string">&quot;CPU_PMAP_PCID_ENABLED&quot;</span>,
+	    offsetof(cpu_data_t, cpu_pmap_pcid_enabled));
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">PCID_STATS</span>	
+	DECLARE(<span class="enscript-string">&quot;CPU_PMAP_USER_RETS&quot;</span>,
+	    offsetof(cpu_data_t, cpu_pmap_user_rets));
+	DECLARE(<span class="enscript-string">&quot;CPU_PMAP_PCID_PRESERVES&quot;</span>,
+	    offsetof(cpu_data_t, cpu_pmap_pcid_preserves));
+	DECLARE(<span class="enscript-string">&quot;CPU_PMAP_PCID_FLUSHES&quot;</span>,
+	    offsetof(cpu_data_t, cpu_pmap_pcid_flushes));
+#<span class="enscript-reference">endif</span>
+	DECLARE(<span class="enscript-string">&quot;CPU_TLB_INVALID_LOCAL&quot;</span>,
+	    offsetof(cpu_data_t, cpu_tlb_invalid_local));
+	DECLARE(<span class="enscript-string">&quot;CPU_TLB_INVALID_GLOBAL&quot;</span>,
+		offsetof(cpu_data_t, cpu_tlb_invalid_global));
+	DECLARE(<span class="enscript-string">&quot;enaExpTrace&quot;</span>,	enaExpTrace);
+	DECLARE(<span class="enscript-string">&quot;enaUsrFCall&quot;</span>,	enaUsrFCall);
+	DECLARE(<span class="enscript-string">&quot;enaUsrPhyMp&quot;</span>,	enaUsrPhyMp);
+	DECLARE(<span class="enscript-string">&quot;enaDiagSCs&quot;</span>,	enaDiagSCs);
+	DECLARE(<span class="enscript-string">&quot;enaDiagEM&quot;</span>,	enaDiagEM);
+	DECLARE(<span class="enscript-string">&quot;enaNotifyEM&quot;</span>,	enaNotifyEM);
+	DECLARE(<span class="enscript-string">&quot;dgLock&quot;</span>,		offsetof(<span class="enscript-type">struct</span> diagWork, dgLock));
+	DECLARE(<span class="enscript-string">&quot;dgFlags&quot;</span>,		offsetof(<span class="enscript-type">struct</span> diagWork, dgFlags));
+	DECLARE(<span class="enscript-string">&quot;dgMisc1&quot;</span>,		offsetof(<span class="enscript-type">struct</span> diagWork, dgMisc1));
+	DECLARE(<span class="enscript-string">&quot;dgMisc2&quot;</span>,		offsetof(<span class="enscript-type">struct</span> diagWork, dgMisc2));
+	DECLARE(<span class="enscript-string">&quot;dgMisc3&quot;</span>,		offsetof(<span class="enscript-type">struct</span> diagWork, dgMisc3));
+	DECLARE(<span class="enscript-string">&quot;dgMisc4&quot;</span>,		offsetof(<span class="enscript-type">struct</span> diagWork, dgMisc4));
+	DECLARE(<span class="enscript-string">&quot;dgMisc5&quot;</span>,		offsetof(<span class="enscript-type">struct</span> diagWork, dgMisc5));
+
+	DECLARE(<span class="enscript-string">&quot;TSS_ESP0&quot;</span>,	offsetof(<span class="enscript-type">struct</span> i386_tss, esp0));
+	DECLARE(<span class="enscript-string">&quot;TSS_SS0&quot;</span>,	offsetof(<span class="enscript-type">struct</span> i386_tss, ss0));
+	DECLARE(<span class="enscript-string">&quot;TSS_LDT&quot;</span>,	offsetof(<span class="enscript-type">struct</span> i386_tss, ldt));
+	DECLARE(<span class="enscript-string">&quot;TSS_PDBR&quot;</span>,	offsetof(<span class="enscript-type">struct</span> i386_tss, cr3));
+	DECLARE(<span class="enscript-string">&quot;TSS_LINK&quot;</span>,	offsetof(<span class="enscript-type">struct</span> i386_tss, back_link));
+
+	DECLARE(<span class="enscript-string">&quot;K_TASK_GATE&quot;</span>,	ACC_P|ACC_PL_K|ACC_TASK_GATE);
+	DECLARE(<span class="enscript-string">&quot;K_TRAP_GATE&quot;</span>,	ACC_P|ACC_PL_K|ACC_TRAP_GATE);
+	DECLARE(<span class="enscript-string">&quot;U_TRAP_GATE&quot;</span>,	ACC_P|ACC_PL_U|ACC_TRAP_GATE);
+	DECLARE(<span class="enscript-string">&quot;K_INTR_GATE&quot;</span>,	ACC_P|ACC_PL_K|ACC_INTR_GATE);
+	DECLARE(<span class="enscript-string">&quot;U_INTR_GATE&quot;</span>,  ACC_P|ACC_PL_U|ACC_INTR_GATE);
+	DECLARE(<span class="enscript-string">&quot;K_TSS&quot;</span>,	ACC_P|ACC_PL_K|ACC_TSS);
+
+	<span class="enscript-comment">/*
+	 *	usimple_lock fields
+	 */</span>
+	DECLARE(<span class="enscript-string">&quot;USL_INTERLOCK&quot;</span>,	offsetof(usimple_lock_data_t, interlock));
+
+	DECLARE(<span class="enscript-string">&quot;INTSTACK_SIZE&quot;</span>,	INTSTACK_SIZE);
+	DECLARE(<span class="enscript-string">&quot;KADDR&quot;</span>, offsetof(<span class="enscript-type">struct</span> boot_args, kaddr));
+	DECLARE(<span class="enscript-string">&quot;KSIZE&quot;</span>, offsetof(<span class="enscript-type">struct</span> boot_args, ksize));
+	DECLARE(<span class="enscript-string">&quot;MEMORYMAP&quot;</span>, offsetof(<span class="enscript-type">struct</span> boot_args, MemoryMap));
+	DECLARE(<span class="enscript-string">&quot;DEVICETREEP&quot;</span>, offsetof(<span class="enscript-type">struct</span> boot_args, deviceTreeP));
+
+	DECLARE(<span class="enscript-string">&quot;RNT_TSC_BASE&quot;</span>,
+		offsetof(pal_rtc_nanotime_t, tsc_base));
+	DECLARE(<span class="enscript-string">&quot;RNT_NS_BASE&quot;</span>,
+		offsetof(pal_rtc_nanotime_t, ns_base));
+	DECLARE(<span class="enscript-string">&quot;RNT_SCALE&quot;</span>,
+		offsetof(pal_rtc_nanotime_t, scale));
+	DECLARE(<span class="enscript-string">&quot;RNT_SHIFT&quot;</span>,
+		offsetof(pal_rtc_nanotime_t, shift));
+	DECLARE(<span class="enscript-string">&quot;RNT_GENERATION&quot;</span>,
+		offsetof(pal_rtc_nanotime_t, generation));
+
+	<span class="enscript-comment">/* values from kern/timer.h */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__LP64__</span>
+	DECLARE(<span class="enscript-string">&quot;TIMER_ALL&quot;</span>, offsetof(<span class="enscript-type">struct</span> timer, all_bits));
+#<span class="enscript-reference">else</span>
+	DECLARE(<span class="enscript-string">&quot;TIMER_LOW&quot;</span>,	 	offsetof(<span class="enscript-type">struct</span> timer, low_bits));
+	DECLARE(<span class="enscript-string">&quot;TIMER_HIGH&quot;</span>,		offsetof(<span class="enscript-type">struct</span> timer, high_bits));
+	DECLARE(<span class="enscript-string">&quot;TIMER_HIGHCHK&quot;</span>,	offsetof(<span class="enscript-type">struct</span> timer, high_bits_check));	
+#<span class="enscript-reference">endif</span>
+	DECLARE(<span class="enscript-string">&quot;TIMER_TSTAMP&quot;</span>,
+		offsetof(<span class="enscript-type">struct</span> timer, tstamp));
+
+	DECLARE(<span class="enscript-string">&quot;THREAD_TIMER&quot;</span>,
+		offsetof(<span class="enscript-type">struct</span> processor, processor_data.thread_timer));
+	DECLARE(<span class="enscript-string">&quot;KERNEL_TIMER&quot;</span>,
+		offsetof(<span class="enscript-type">struct</span> processor, processor_data.kernel_timer));
+	DECLARE(<span class="enscript-string">&quot;SYSTEM_TIMER&quot;</span>,
+		offsetof(<span class="enscript-type">struct</span> thread, system_timer));
+	DECLARE(<span class="enscript-string">&quot;USER_TIMER&quot;</span>,
+		offsetof(<span class="enscript-type">struct</span> thread, user_timer));
+	DECLARE(<span class="enscript-string">&quot;SYSTEM_STATE&quot;</span>,
+			offsetof(<span class="enscript-type">struct</span> processor, processor_data.system_state));
+	DECLARE(<span class="enscript-string">&quot;USER_STATE&quot;</span>,
+			offsetof(<span class="enscript-type">struct</span> processor, processor_data.user_state));
+	DECLARE(<span class="enscript-string">&quot;IDLE_STATE&quot;</span>,
+			offsetof(<span class="enscript-type">struct</span> processor, processor_data.idle_state));
+	DECLARE(<span class="enscript-string">&quot;CURRENT_STATE&quot;</span>,
+			offsetof(<span class="enscript-type">struct</span> processor, processor_data.current_state));
+
+	DECLARE(<span class="enscript-string">&quot;OnProc&quot;</span>, OnProc);
+
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">CONFIG_DTRACE</span>
+	DECLARE(<span class="enscript-string">&quot;LS_LCK_MTX_LOCK_ACQUIRE&quot;</span>, LS_LCK_MTX_LOCK_ACQUIRE);
+	DECLARE(<span class="enscript-string">&quot;LS_LCK_MTX_TRY_SPIN_LOCK_ACQUIRE&quot;</span>, LS_LCK_MTX_TRY_SPIN_LOCK_ACQUIRE);
+	DECLARE(<span class="enscript-string">&quot;LS_LCK_MTX_UNLOCK_RELEASE&quot;</span>, LS_LCK_MTX_UNLOCK_RELEASE);
+	DECLARE(<span class="enscript-string">&quot;LS_LCK_MTX_TRY_LOCK_ACQUIRE&quot;</span>, LS_LCK_MTX_TRY_LOCK_ACQUIRE);
+	DECLARE(<span class="enscript-string">&quot;LS_LCK_RW_LOCK_SHARED_ACQUIRE&quot;</span>, LS_LCK_RW_LOCK_SHARED_ACQUIRE);
+	DECLARE(<span class="enscript-string">&quot;LS_LCK_RW_DONE_RELEASE&quot;</span>, LS_LCK_RW_DONE_RELEASE);
+	DECLARE(<span class="enscript-string">&quot;LS_LCK_MTX_EXT_LOCK_ACQUIRE&quot;</span>, LS_LCK_MTX_EXT_LOCK_ACQUIRE);
+	DECLARE(<span class="enscript-string">&quot;LS_LCK_MTX_TRY_EXT_LOCK_ACQUIRE&quot;</span>, LS_LCK_MTX_TRY_EXT_LOCK_ACQUIRE);
+	DECLARE(<span class="enscript-string">&quot;LS_LCK_MTX_EXT_UNLOCK_RELEASE&quot;</span>, LS_LCK_MTX_EXT_UNLOCK_RELEASE);
+	DECLARE(<span class="enscript-string">&quot;LS_LCK_RW_LOCK_EXCL_ACQUIRE&quot;</span>, LS_LCK_RW_LOCK_EXCL_ACQUIRE);
+	DECLARE(<span class="enscript-string">&quot;LS_LCK_RW_LOCK_SHARED_TO_EXCL_UPGRADE&quot;</span>, LS_LCK_RW_LOCK_SHARED_TO_EXCL_UPGRADE);
+	DECLARE(<span class="enscript-string">&quot;LS_LCK_RW_TRY_LOCK_EXCL_ACQUIRE&quot;</span>, LS_LCK_RW_TRY_LOCK_EXCL_ACQUIRE);
+	DECLARE(<span class="enscript-string">&quot;LS_LCK_RW_TRY_LOCK_SHARED_ACQUIRE&quot;</span>, LS_LCK_RW_TRY_LOCK_SHARED_ACQUIRE);
+	DECLARE(<span class="enscript-string">&quot;LS_LCK_MTX_LOCK_SPIN_ACQUIRE&quot;</span>, LS_LCK_MTX_LOCK_SPIN_ACQUIRE);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> (0);
+}
+</pre>
+<hr />
+</body></html>

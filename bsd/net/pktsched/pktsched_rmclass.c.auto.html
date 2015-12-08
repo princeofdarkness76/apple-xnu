@@ -1,0 +1,1877 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pktsched_rmclass.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pktsched_rmclass.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*	$OpenBSD: altq_rmclass.c,v 1.13 2007/09/13 20:40:02 chl Exp $	*/</span>
+<span class="enscript-comment">/*	$KAME: altq_rmclass.c,v 1.10 2001/02/09 07:20:40 kjc Exp $	*/</span>
+
+<span class="enscript-comment">/*
+ * Copyright (c) 1991-1997 Regents of the University of California.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the Network Research
+ *      Group at Lawrence Berkeley Laboratory.
+ * 4. Neither the name of the University nor of the Laboratory may be used
+ *    to endorse or promote products derived from this software without
+ *    specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * LBL code modified by <a href="mailto:speer@eng.sun.com">speer@eng.sun.com</a>, May 1977.
+ * For questions and/or comments, please send mail to <a href="mailto:cbq@ee.lbl.gov">cbq@ee.lbl.gov</a>
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+
+#<span class="enscript-reference">ident</span> <span class="enscript-string">&quot;@(#)rm_class.c  1.48     97/12/05 SMI&quot;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PKTSCHED_CBQ</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/pktsched/pktsched.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/pktsched/pktsched_rmclass.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/pktsched/pktsched_rmclass_debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/classq/classq_red.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/classq/classq_rio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/classq/classq_blue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/classq/classq_sfb.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Local Macros
+ */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">reset_cutoff</span>(ifd)	{ ifd-&gt;cutoff_ = RM_MAXDEPTH; }
+
+<span class="enscript-comment">/*
+ * Local routines.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	rmc_satisfied(<span class="enscript-type">struct</span> rm_class *, <span class="enscript-type">struct</span> timeval *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	rmc_wrr_set_weights(<span class="enscript-type">struct</span> rm_ifdat *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	rmc_depth_compute(<span class="enscript-type">struct</span> rm_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	rmc_depth_recompute(rm_class_t *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">_rmc_wrr_dequeue_next</span>(<span class="enscript-type">struct</span> rm_ifdat *, cqdq_op_t);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">_rmc_prr_dequeue_next</span>(<span class="enscript-type">struct</span> rm_ifdat *, cqdq_op_t);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	_rmc_addq(rm_class_t *, <span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">struct</span> pf_mtag *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	_rmc_dropq(rm_class_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">_rmc_getq</span>(rm_class_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">_rmc_pollq</span>(rm_class_t *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	rmc_under_limit(<span class="enscript-type">struct</span> rm_class *, <span class="enscript-type">struct</span> timeval *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	rmc_tl_satisfied(<span class="enscript-type">struct</span> rm_ifdat *, <span class="enscript-type">struct</span> timeval *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	rmc_drop_action(<span class="enscript-type">struct</span> rm_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	rmc_restart(<span class="enscript-type">struct</span> rm_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	rmc_root_overlimit(rm_class_t *, rm_class_t *);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">RMC_ZONE_MAX</span>	32		<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">RMC_ZONE_NAME</span>	<span class="enscript-string">&quot;pktsched_cbq_cl&quot;</span> <span class="enscript-comment">/* zone name (CBQ for now) */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> rmc_size;		<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *rmc_zone;		<span class="enscript-comment">/* zone for rm_class */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">rmclass_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">if</span> (rmc_zone != NULL)
+		<span class="enscript-keyword">return</span>;
+
+	rmc_size = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> rm_class);
+	rmc_zone = zinit(rmc_size, RMC_ZONE_MAX * rmc_size, 0, RMC_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (rmc_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, RMC_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(rmc_zone, Z_EXPAND, TRUE);
+	zone_change(rmc_zone, Z_CALLERACCT, TRUE);
+}
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">BORROW_OFFTIME</span>
+<span class="enscript-comment">/*
+ * BORROW_OFFTIME (experimental):
+ * borrow the offtime of the class borrowing from.
+ * the reason is that when its own offtime is set, the class is unable
+ * to borrow much, especially when cutoff is taking effect.
+ * but when the borrowed class is overloaded (advidle is close to minidle),
+ * use the borrowing class's offtime to avoid overload.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ADJUST_CUTOFF</span>
+<span class="enscript-comment">/*
+ * ADJUST_CUTOFF (experimental):
+ * if no underlimit class is found due to cutoff, increase cutoff and
+ * retry the scheduling loop.
+ * also, don't invoke delay_actions while cutoff is taking effect,
+ * since a sleeping class won't have a chance to be scheduled in the
+ * next loop.
+ *
+ * now heuristics for setting the top-level variable (cutoff_) becomes:
+ *	1. if a packet arrives for a not-overlimit class, set cutoff
+ *	   to the depth of the class.
+ *	2. if cutoff is i, and a packet arrives for an overlimit class
+ *	   with an underlimit ancestor at a lower level than i (say j),
+ *	   then set cutoff to j.
+ *	3. at scheduling a packet, if there is no underlimit class
+ *	   due to the current cutoff level, increase cutoff by 1 and
+ *	   then try to schedule again.
+ */</span>
+
+<span class="enscript-comment">/*
+ * rm_class_t *
+ * rmc_newclass(...) - Create a new resource management class at priority
+ * 'pri' on the interface given by 'ifd'.
+ *
+ * nsecPerByte  is the data rate of the interface in nanoseconds/byte.
+ *              E.g., 800 for a 10Mb/s ethernet.  If the class gets less
+ *              than 100% of the bandwidth, this number should be the
+ *              'effective' rate for the class.  Let f be the
+ *              bandwidth fraction allocated to this class, and let
+ *              nsPerByte be the data rate of the output link in
+ *              nanoseconds/byte.  Then nsecPerByte is set to
+ *              nsPerByte / f.  E.g., 1600 (= 800 / .5)
+ *              for a class that gets 50% of an ethernet's bandwidth.
+ *
+ * action       the routine to call when the class is over limit.
+ *
+ * maxq         max allowable queue size for class (in packets).
+ *
+ * parent       parent class pointer.
+ *
+ * borrow       class to borrow from (should be either 'parent' or null).
+ *
+ * maxidle      max value allowed for class 'idle' time estimate (this
+ *              parameter determines how large an initial burst of packets
+ *              can be before overlimit action is invoked.
+ *
+ * offtime      how long 'delay' action will delay when class goes over
+ *              limit (this parameter determines the steady-state burst
+ *              size when a class is running over its limit).
+ *
+ * Maxidle and offtime have to be computed from the following:  If the
+ * average packet size is s, the bandwidth fraction allocated to this
+ * class is f, we want to allow b packet bursts, and the gain of the
+ * averaging filter is g (= 1 - 2^(-RM_FILTER_GAIN)), then:
+ *
+ *   ptime = s * nsPerByte * (1 - f) / f
+ *   maxidle = ptime * (1 - g^b) / g^b
+ *   minidle = -ptime * (1 / (f - 1))
+ *   offtime = ptime * (1 + 1/(1 - g) * (1 - g^(b - 1)) / g^(b - 1)
+ *
+ * Operationally, it's convenient to specify maxidle &amp; offtime in units
+ * independent of the link bandwidth so the maxidle &amp; offtime passed to
+ * this routine are the above values multiplied by 8*f/(1000*nsPerByte).
+ * (The constant factor is a scale factor needed to make the parameters
+ * integers.  This scaling also means that the 'unscaled' values of
+ * maxidle*nsecPerByte/8 and offtime*nsecPerByte/8 will be in microseconds,
+ * not nanoseconds.)  Also note that the 'idle' filter computation keeps
+ * an estimate scaled upward by 2^RM_FILTER_GAIN so the passed value of
+ * maxidle also must be scaled upward by this value.  Thus, the passed
+ * values for maxidle and offtime can be computed as follows:
+ *
+ * maxidle = maxidle * 2^RM_FILTER_GAIN * 8 / (1000 * nsecPerByte)
+ * offtime = offtime * 8 / (1000 * nsecPerByte)
+ *
+ * When USE_HRTIME is employed, then maxidle and offtime become:
+ * 	maxidle = maxilde * (8.0 / nsecPerByte);
+ * 	offtime = offtime * (8.0 / nsecPerByte);
+ */</span>
+<span class="enscript-type">struct</span> rm_class *
+<span class="enscript-function-name">rmc_newclass</span>(<span class="enscript-type">int</span> pri, <span class="enscript-type">struct</span> rm_ifdat *ifd, u_int32_t nsecPerByte,
+    <span class="enscript-type">void</span> (*action)(rm_class_t *, rm_class_t *), u_int32_t qid, u_int32_t maxq,
+    <span class="enscript-type">struct</span> rm_class *parent, <span class="enscript-type">struct</span> rm_class *borrow, u_int32_t maxidle,
+    <span class="enscript-type">int</span> minidle, u_int32_t offtime, <span class="enscript-type">int</span> pktsize, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> ifnet *ifp;
+	<span class="enscript-type">struct</span> ifclassq *ifq;
+	<span class="enscript-type">struct</span> rm_class	*cl;
+	<span class="enscript-type">struct</span> rm_class	*peer;
+
+	<span class="enscript-keyword">if</span> (nsecPerByte == 0) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: invalid inverse data rate\n&quot;</span>, __func__);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	<span class="enscript-keyword">if</span> (pri &gt;= RM_MAXPRIO) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: priority %d out of range! (max %d)\n&quot;</span>,
+		    __func__, pri, RM_MAXPRIO - 1);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (flags &amp; RMCF_RED) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: RED not configured for CBQ!\n&quot;</span>, __func__);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !CLASSQ_RED */</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (flags &amp; RMCF_RIO) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: RIO not configured for CBQ!\n&quot;</span>, __func__);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (flags &amp; RMCF_BLUE) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: BLUE not configured for CBQ!\n&quot;</span>, __func__);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+
+	<span class="enscript-comment">/* These are mutually exclusive */</span>
+	<span class="enscript-keyword">if</span> ((flags &amp; (RMCF_RED|RMCF_RIO|RMCF_BLUE|RMCF_SFB)) &amp;&amp;
+	    (flags &amp; (RMCF_RED|RMCF_RIO|RMCF_BLUE|RMCF_SFB)) != RMCF_RED &amp;&amp;
+	    (flags &amp; (RMCF_RED|RMCF_RIO|RMCF_BLUE|RMCF_SFB)) != RMCF_RIO &amp;&amp;
+	    (flags &amp; (RMCF_RED|RMCF_RIO|RMCF_BLUE|RMCF_SFB)) != RMCF_BLUE &amp;&amp;
+	    (flags &amp; (RMCF_RED|RMCF_RIO|RMCF_BLUE|RMCF_SFB)) != RMCF_SFB) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: RED|RIO|BLUE|SFB mutually exclusive\n&quot;</span>,
+		    __func__);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	cl = zalloc(rmc_zone);
+	<span class="enscript-keyword">if</span> (cl == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	bzero(cl, rmc_size);
+	CALLOUT_INIT(&amp;cl-&gt;callout_);
+
+	<span class="enscript-comment">/*
+	 * Class initialization.
+	 */</span>
+	cl-&gt;children_ = NULL;
+	cl-&gt;parent_ = parent;
+	cl-&gt;borrow_ = borrow;
+	cl-&gt;leaf_ = 1;
+	cl-&gt;ifdat_ = ifd;
+	cl-&gt;pri_ = pri;
+	cl-&gt;allotment_ = RM_NS_PER_SEC / nsecPerByte; <span class="enscript-comment">/* Bytes per sec */</span>
+	cl-&gt;depth_ = 0;
+	cl-&gt;qthresh_ = 0;
+	cl-&gt;ns_per_byte_ = nsecPerByte;
+
+	ifq = ifd-&gt;ifq_;
+	ifp = ifq-&gt;ifcq_ifp;
+
+	<span class="enscript-keyword">if</span> (maxq == 0 || maxq &gt; IFCQ_MAXLEN(ifq)) {
+		maxq = IFCQ_MAXLEN(ifq);
+		<span class="enscript-keyword">if</span> (maxq == 0)
+			maxq = DEFAULT_QLIMIT;	<span class="enscript-comment">/* use default */</span>
+	}
+	_qinit(&amp;cl-&gt;q_, Q_DROPHEAD, maxq);
+
+	cl-&gt;flags_ = flags;
+
+	cl-&gt;minidle_ = (minidle * (<span class="enscript-type">int</span>)nsecPerByte) / 8;
+	<span class="enscript-keyword">if</span> (cl-&gt;minidle_ &gt; 0)
+		cl-&gt;minidle_ = 0;
+
+	cl-&gt;maxidle_ = (maxidle * nsecPerByte) / 8;
+	<span class="enscript-keyword">if</span> (cl-&gt;maxidle_ == 0)
+		cl-&gt;maxidle_ = 1;
+
+	cl-&gt;avgidle_ = cl-&gt;maxidle_;
+	cl-&gt;offtime_ = ((offtime * nsecPerByte) / 8) &gt;&gt; RM_FILTER_GAIN;
+	<span class="enscript-keyword">if</span> (cl-&gt;offtime_ == 0)
+		cl-&gt;offtime_ = 1;
+
+	cl-&gt;overlimit = action;
+
+	<span class="enscript-keyword">if</span> (flags &amp; (RMCF_RED|RMCF_RIO|RMCF_BLUE|RMCF_SFB)) {
+		<span class="enscript-type">int</span> pkttime;
+
+		cl-&gt;qflags_ = 0;
+		<span class="enscript-keyword">if</span> (flags &amp; RMCF_ECN) {
+			<span class="enscript-keyword">if</span> (flags &amp; RMCF_BLUE)
+				cl-&gt;qflags_ |= BLUEF_ECN;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; RMCF_SFB)
+				cl-&gt;qflags_ |= SFBF_ECN;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; RMCF_RED)
+				cl-&gt;qflags_ |= REDF_ECN;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; RMCF_RIO)
+				cl-&gt;qflags_ |= RIOF_ECN;
+		}
+		<span class="enscript-keyword">if</span> (flags &amp; RMCF_FLOWCTL) {
+			<span class="enscript-keyword">if</span> (flags &amp; RMCF_SFB)
+				cl-&gt;qflags_ |= SFBF_FLOWCTL;
+		}
+		<span class="enscript-keyword">if</span> (flags &amp; RMCF_FLOWVALVE) {
+			<span class="enscript-keyword">if</span> (flags &amp; RMCF_RED)
+				cl-&gt;qflags_ |= REDF_FLOWVALVE;
+		}
+		<span class="enscript-keyword">if</span> (flags &amp; RMCF_CLEARDSCP) {
+			<span class="enscript-keyword">if</span> (flags &amp; RMCF_RIO)
+				cl-&gt;qflags_ |= RIOF_CLEARDSCP;
+		}
+		pkttime = nsecPerByte * pktsize  / 1000;
+
+		<span class="enscript-comment">/* Test for exclusivity {RED,RIO,BLUE,SFB} was done above */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+		<span class="enscript-keyword">if</span> (flags &amp; RMCF_RED) {
+			cl-&gt;red_ = red_alloc(ifp, 0, 0,
+			    qlimit(&amp;cl-&gt;q_) * 10/100,
+			    qlimit(&amp;cl-&gt;q_) * 30/100,
+			    cl-&gt;qflags_, pkttime);
+			<span class="enscript-keyword">if</span> (cl-&gt;red_ != NULL)
+				qtype(&amp;cl-&gt;q_) = Q_RED;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-keyword">if</span> (flags &amp; RMCF_RIO) {
+			cl-&gt;rio_ =
+			    rio_alloc(ifp, 0, NULL, cl-&gt;qflags_, pkttime);
+			<span class="enscript-keyword">if</span> (cl-&gt;rio_ != NULL)
+				qtype(&amp;cl-&gt;q_) = Q_RIO;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+		<span class="enscript-keyword">if</span> (flags &amp; RMCF_BLUE) {
+			cl-&gt;blue_ = blue_alloc(ifp, 0, 0, cl-&gt;qflags_);
+			<span class="enscript-keyword">if</span> (cl-&gt;blue_ != NULL)
+				qtype(&amp;cl-&gt;q_) = Q_BLUE;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+		<span class="enscript-keyword">if</span> (flags &amp; RMCF_SFB) {
+			<span class="enscript-keyword">if</span> (!(cl-&gt;flags_ &amp; RMCF_LAZY))
+				cl-&gt;sfb_ = sfb_alloc(ifp, qid,
+				    qlimit(&amp;cl-&gt;q_), cl-&gt;qflags_);
+			<span class="enscript-keyword">if</span> (cl-&gt;sfb_ != NULL || (cl-&gt;flags_ &amp; RMCF_LAZY))
+				qtype(&amp;cl-&gt;q_) = Q_SFB;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * put the class into the class tree
+	 */</span>
+	<span class="enscript-keyword">if</span> ((peer = ifd-&gt;active_[pri]) != NULL) {
+		<span class="enscript-comment">/* find the last class at this pri */</span>
+		cl-&gt;peer_ = peer;
+		<span class="enscript-keyword">while</span> (peer-&gt;peer_ != ifd-&gt;active_[pri])
+			peer = peer-&gt;peer_;
+		peer-&gt;peer_ = cl;
+	} <span class="enscript-keyword">else</span> {
+		ifd-&gt;active_[pri] = cl;
+		cl-&gt;peer_ = cl;
+	}
+
+	<span class="enscript-keyword">if</span> (cl-&gt;parent_) {
+		cl-&gt;next_ = parent-&gt;children_;
+		parent-&gt;children_ = cl;
+		parent-&gt;leaf_ = 0;
+	}
+
+	<span class="enscript-comment">/*
+	 * Compute the depth of this class and its ancestors in the class
+	 * hierarchy.
+	 */</span>
+	rmc_depth_compute(cl);
+
+	<span class="enscript-comment">/*
+	 * If CBQ's WRR is enabled, then initialize the class WRR state.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ifd-&gt;wrr_) {
+		ifd-&gt;num_[pri]++;
+		ifd-&gt;alloc_[pri] += cl-&gt;allotment_;
+		rmc_wrr_set_weights(ifd);
+	}
+	<span class="enscript-keyword">return</span> (cl);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">rmc_modclass</span>(<span class="enscript-type">struct</span> rm_class *cl, u_int32_t nsecPerByte, <span class="enscript-type">int</span> maxq,
+    u_int32_t maxidle, <span class="enscript-type">int</span> minidle, u_int32_t offtime, <span class="enscript-type">int</span> pktsize)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">pktsize</span>)
+	<span class="enscript-type">struct</span> rm_ifdat	*ifd;
+	u_int32_t	 old_allotment;
+
+	ifd = cl-&gt;ifdat_;
+	old_allotment = cl-&gt;allotment_;
+
+	cl-&gt;allotment_ = RM_NS_PER_SEC / nsecPerByte; <span class="enscript-comment">/* Bytes per sec */</span>
+	cl-&gt;qthresh_ = 0;
+	cl-&gt;ns_per_byte_ = nsecPerByte;
+
+	qlimit(&amp;cl-&gt;q_) = maxq;
+
+	cl-&gt;minidle_ = (minidle * nsecPerByte) / 8;
+	<span class="enscript-keyword">if</span> (cl-&gt;minidle_ &gt; 0)
+		cl-&gt;minidle_ = 0;
+
+	cl-&gt;maxidle_ = (maxidle * nsecPerByte) / 8;
+	<span class="enscript-keyword">if</span> (cl-&gt;maxidle_ == 0)
+		cl-&gt;maxidle_ = 1;
+
+	cl-&gt;avgidle_ = cl-&gt;maxidle_;
+	cl-&gt;offtime_ = ((offtime * nsecPerByte) / 8) &gt;&gt; RM_FILTER_GAIN;
+	<span class="enscript-keyword">if</span> (cl-&gt;offtime_ == 0)
+		cl-&gt;offtime_ = 1;
+
+	<span class="enscript-comment">/*
+	 * If CBQ's WRR is enabled, then initialize the class WRR state.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ifd-&gt;wrr_) {
+		ifd-&gt;alloc_[cl-&gt;pri_] += cl-&gt;allotment_ - old_allotment;
+		rmc_wrr_set_weights(ifd);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * static void
+ * rmc_wrr_set_weights(struct rm_ifdat *ifdat) - This function computes
+ *	the appropriate run robin weights for the CBQ weighted round robin
+ *	algorithm.
+ *
+ *	Returns: NONE
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">rmc_wrr_set_weights</span>(<span class="enscript-type">struct</span> rm_ifdat *ifd)
+{
+	<span class="enscript-type">int</span>		i;
+	<span class="enscript-type">struct</span> rm_class	*cl, *clh;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; RM_MAXPRIO; i++) {
+		<span class="enscript-comment">/*
+		 * This is inverted from that of the simulator to
+		 * maintain precision.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ifd-&gt;num_[i] == 0) {
+			ifd-&gt;M_[i] = 0;
+		} <span class="enscript-keyword">else</span> {
+			ifd-&gt;M_[i] =
+			    ifd-&gt;alloc_[i] / (ifd-&gt;num_[i] * ifd-&gt;maxpkt_);
+		}
+		<span class="enscript-comment">/*
+		 * Compute the weighted allotment for each class.
+		 * This takes the expensive div instruction out
+		 * of the main loop for the wrr scheduling path.
+		 * These only get recomputed when a class comes or
+		 * goes.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ifd-&gt;active_[i] != NULL) {
+			clh = cl = ifd-&gt;active_[i];
+			<span class="enscript-keyword">do</span> {
+				<span class="enscript-comment">/* safe-guard for slow link or alloc_ == 0 */</span>
+				<span class="enscript-keyword">if</span> (ifd-&gt;M_[i] == 0) {
+					cl-&gt;w_allotment_ = 0;
+				} <span class="enscript-keyword">else</span> {
+					cl-&gt;w_allotment_ =
+					    cl-&gt;allotment_ / ifd-&gt;M_[i];
+				}
+				cl = cl-&gt;peer_;
+			} <span class="enscript-keyword">while</span> ((cl != NULL) &amp;&amp; (cl != clh));
+		}
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">rmc_get_weight</span>(<span class="enscript-type">struct</span> rm_ifdat *ifd, <span class="enscript-type">int</span> pri)
+{
+	<span class="enscript-keyword">if</span> ((pri &gt;= 0) &amp;&amp; (pri &lt; RM_MAXPRIO))
+		<span class="enscript-keyword">return</span> (ifd-&gt;M_[pri]);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * static void
+ * rmc_depth_compute(struct rm_class *cl) - This function computes the
+ *	appropriate depth of class 'cl' and its ancestors.
+ *
+ *	Returns:	NONE
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">rmc_depth_compute</span>(<span class="enscript-type">struct</span> rm_class *cl)
+{
+	rm_class_t	*t = cl, *p;
+
+	<span class="enscript-comment">/*
+	 * Recompute the depth for the branch of the tree.
+	 */</span>
+	<span class="enscript-keyword">while</span> (t != NULL) {
+		p = t-&gt;parent_;
+		<span class="enscript-keyword">if</span> (p &amp;&amp; (t-&gt;depth_ &gt;= p-&gt;depth_)) {
+			p-&gt;depth_ = t-&gt;depth_ + 1;
+			t = p;
+		} <span class="enscript-keyword">else</span>
+			t = NULL;
+	}
+}
+
+<span class="enscript-comment">/*
+ * static void
+ * rmc_depth_recompute(struct rm_class *cl) - This function re-computes
+ *	the depth of the tree after a class has been deleted.
+ *
+ *	Returns:	NONE
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">rmc_depth_recompute</span>(rm_class_t *cl)
+{
+	rm_class_t	*p, *t;
+
+	p = cl;
+	<span class="enscript-keyword">while</span> (p != NULL) {
+		<span class="enscript-keyword">if</span> ((t = p-&gt;children_) == NULL) {
+			p-&gt;depth_ = 0;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">int</span> cdepth = 0;
+
+			<span class="enscript-keyword">while</span> (t != NULL) {
+				<span class="enscript-keyword">if</span> (t-&gt;depth_ &gt; cdepth)
+					cdepth = t-&gt;depth_;
+				t = t-&gt;next_;
+			}
+
+			<span class="enscript-keyword">if</span> (p-&gt;depth_ == cdepth + 1)
+				<span class="enscript-comment">/* no change to this parent */</span>
+				<span class="enscript-keyword">return</span>;
+
+			p-&gt;depth_ = cdepth + 1;
+		}
+
+		p = p-&gt;parent_;
+	}
+}
+
+<span class="enscript-comment">/*
+ * void
+ * rmc_delete_class(struct rm_ifdat *ifdat, struct rm_class *cl) - This
+ *	function deletes a class from the link-sharing structure and frees
+ *	all resources associated with the class.
+ *
+ *	Returns: NONE
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">rmc_delete_class</span>(<span class="enscript-type">struct</span> rm_ifdat *ifd, <span class="enscript-type">struct</span> rm_class *cl)
+{
+	<span class="enscript-type">struct</span> rm_class	*p, *head, *previous;
+
+	VERIFY(cl-&gt;children_ == NULL);
+
+	<span class="enscript-keyword">if</span> (cl-&gt;sleeping_)
+		CALLOUT_STOP(&amp;cl-&gt;callout_);
+
+	<span class="enscript-comment">/*
+	 * Free packets in the packet queue.
+	 * XXX - this may not be a desired behavior.  Packets should be
+	 *		re-queued.
+	 */</span>
+	rmc_dropall(cl);
+
+	<span class="enscript-comment">/*
+	 * If the class has a parent, then remove the class from the
+	 * class from the parent's children chain.
+	 */</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;parent_ != NULL) {
+		head = cl-&gt;parent_-&gt;children_;
+		p = previous = head;
+		<span class="enscript-keyword">if</span> (head-&gt;next_ == NULL) {
+			VERIFY(head == cl);
+			cl-&gt;parent_-&gt;children_ = NULL;
+			cl-&gt;parent_-&gt;leaf_ = 1;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">while</span> (p != NULL) {
+			<span class="enscript-keyword">if</span> (p == cl) {
+				<span class="enscript-keyword">if</span> (cl == head)
+					cl-&gt;parent_-&gt;children_ = cl-&gt;next_;
+				<span class="enscript-keyword">else</span>
+					previous-&gt;next_ = cl-&gt;next_;
+				cl-&gt;next_ = NULL;
+				p = NULL;
+			} <span class="enscript-keyword">else</span> {
+				previous = p;
+				p = p-&gt;next_;
+			}
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Delete class from class priority peer list.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((p = ifd-&gt;active_[cl-&gt;pri_]) != NULL) {
+		<span class="enscript-comment">/*
+		 * If there is more than one member of this priority
+		 * level, then look for class(cl) in the priority level.
+		 */</span>
+		<span class="enscript-keyword">if</span> (p != p-&gt;peer_) {
+			<span class="enscript-keyword">while</span> (p-&gt;peer_ != cl)
+				p = p-&gt;peer_;
+			p-&gt;peer_ = cl-&gt;peer_;
+
+			<span class="enscript-keyword">if</span> (ifd-&gt;active_[cl-&gt;pri_] == cl)
+				ifd-&gt;active_[cl-&gt;pri_] = cl-&gt;peer_;
+		} <span class="enscript-keyword">else</span> {
+			VERIFY(p == cl);
+			ifd-&gt;active_[cl-&gt;pri_] = NULL;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Recompute the WRR weights.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ifd-&gt;wrr_) {
+		ifd-&gt;alloc_[cl-&gt;pri_] -= cl-&gt;allotment_;
+		ifd-&gt;num_[cl-&gt;pri_]--;
+		rmc_wrr_set_weights(ifd);
+	}
+
+	<span class="enscript-comment">/*
+	 * Re-compute the depth of the tree.
+	 */</span>
+	rmc_depth_recompute(cl-&gt;parent_);
+
+	<span class="enscript-comment">/*
+	 * Free the class structure.
+	 */</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;qalg_.ptr != NULL) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;q_))
+			rio_destroy(cl-&gt;rio_);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+		<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;q_))
+			red_destroy(cl-&gt;red_);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+		<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;q_))
+			blue_destroy(cl-&gt;blue_);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+		<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;q_) &amp;&amp; cl-&gt;sfb_ != NULL)
+			sfb_destroy(cl-&gt;sfb_);
+		cl-&gt;qalg_.ptr = NULL;
+		qtype(&amp;cl-&gt;q_) = Q_DROPTAIL;
+		qstate(&amp;cl-&gt;q_) = QS_RUNNING;
+	}
+	zfree(rmc_zone, cl);
+}
+
+
+<span class="enscript-comment">/*
+ * int
+ * rmc_init(...) - Initialize the resource management data structures
+ *	associated with the output portion of interface 'ifp'.  'ifd' is
+ *	where the structures will be built (for backwards compatibility, the
+ *	structures aren't kept in the ifnet struct).  'nsecPerByte'
+ *	gives the link speed (inverse of bandwidth) in nanoseconds/byte.
+ *	'restart' is the driver-specific routine that the generic 'delay
+ *	until under limit' action will call to restart output.  `maxq'
+ *	is the queue size of the 'link' &amp; 'default' classes.  'maxqueued'
+ *	is the maximum number of packets that the resource management
+ *	code will allow to be queued 'downstream' (this is typically 1).
+ *
+ *	Returns:	0 on success
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">rmc_init</span>(<span class="enscript-type">struct</span> ifclassq *ifq, <span class="enscript-type">struct</span> rm_ifdat *ifd, u_int32_t nsecPerByte,
+    <span class="enscript-type">void</span> (*restart)(<span class="enscript-type">struct</span> ifclassq *), u_int32_t qid, <span class="enscript-type">int</span> maxq, <span class="enscript-type">int</span> maxqueued,
+    u_int32_t maxidle, <span class="enscript-type">int</span> minidle, u_int32_t offtime, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> ifnet *ifp = ifq-&gt;ifcq_ifp;
+	<span class="enscript-type">int</span> i, mtu;
+
+	<span class="enscript-comment">/*
+	 * Initialize the CBQ tracing/debug facility.
+	 */</span>
+	CBQTRACEINIT();
+
+	<span class="enscript-keyword">if</span> (nsecPerByte == 0) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s: invalid inverse data rate)\n&quot;</span>,
+		    __func__, if_name(ifp));
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	mtu = ifp-&gt;if_mtu;
+	<span class="enscript-keyword">if</span> (mtu &lt; 1) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s: invalid MTU (interface not &quot;</span>
+		    <span class="enscript-string">&quot;initialized?)\n&quot;</span>, __func__, if_name(ifp));
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+	bzero((<span class="enscript-type">char</span> *)ifd, <span class="enscript-keyword">sizeof</span> (*ifd));
+
+	ifd-&gt;ifq_ = ifq;
+	ifd-&gt;restart = restart;
+	ifd-&gt;maxqueued_ = maxqueued;
+	ifd-&gt;ns_per_byte_ = nsecPerByte;
+	ifd-&gt;maxpkt_ = mtu;
+	ifd-&gt;wrr_ = (flags &amp; RMCF_WRR) ? 1 : 0;
+	ifd-&gt;efficient_ = (flags &amp; RMCF_EFFICIENT) ? 1 : 0;
+#<span class="enscript-reference">if</span> 1
+	ifd-&gt;maxiftime_ = mtu * nsecPerByte / 1000 * 16;
+	<span class="enscript-keyword">if</span> (mtu * nsecPerByte &gt; 10 * 1000000)
+		ifd-&gt;maxiftime_ /= 4;
+#<span class="enscript-reference">endif</span>
+
+	reset_cutoff(ifd);
+	CBQTRACE(rmc_init, 'INIT', ifd-&gt;cutoff_);
+
+	<span class="enscript-comment">/*
+	 * Initialize the CBQ's WRR state.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; RM_MAXPRIO; i++) {
+		ifd-&gt;alloc_[i] = 0;
+		ifd-&gt;M_[i] = 0;
+		ifd-&gt;num_[i] = 0;
+		ifd-&gt;na_[i] = 0;
+		ifd-&gt;active_[i] = NULL;
+	}
+
+	<span class="enscript-comment">/*
+	 * Initialize current packet state.
+	 */</span>
+	ifd-&gt;qi_ = 0;
+	ifd-&gt;qo_ = 0;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; RM_MAXQUEUED; i++) {
+		ifd-&gt;class_[i] = NULL;
+		ifd-&gt;curlen_[i] = 0;
+		ifd-&gt;borrowed_[i] = NULL;
+	}
+
+	<span class="enscript-comment">/*
+	 * Create the root class of the link-sharing structure.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((ifd-&gt;root_ = rmc_newclass(0, ifd, nsecPerByte,
+	    rmc_root_overlimit, qid, maxq, 0, 0, maxidle, minidle, offtime,
+	    0, 0)) == NULL) {
+		log(LOG_ERR, <span class="enscript-string">&quot;rmc_init: root class not allocated\n&quot;</span>);
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+	ifd-&gt;root_-&gt;depth_ = 0;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * void
+ * rmc_queue_packet(struct rm_class *cl, struct mbuf *m) - Add packet given by
+ *	mbuf 'm' to queue for resource class 'cl'.  This routine is called
+ *	by a driver's if_output routine.  This routine must be called with
+ *	output packet completion interrupts locked out (to avoid racing with
+ *	rmc_dequeue_next).
+ *
+ *	Returns:	0 on successful queueing
+ *			CLASSQEQ_DROPPED when packet drop occurs
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">rmc_queue_packet</span>(<span class="enscript-type">struct</span> rm_class *cl, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> pf_mtag *t)
+{
+	<span class="enscript-type">struct</span> timeval	 now;
+	<span class="enscript-type">struct</span> rm_ifdat *ifd = cl-&gt;ifdat_;
+	<span class="enscript-type">int</span>		 cpri = cl-&gt;pri_;
+	<span class="enscript-type">int</span>		 is_empty = qempty(&amp;cl-&gt;q_);
+	<span class="enscript-type">int</span> ret	= 0;
+
+	RM_GETTIME(now);
+	<span class="enscript-keyword">if</span> (ifd-&gt;cutoff_ &gt; 0) {
+		<span class="enscript-keyword">if</span> (TV_LT(&amp;cl-&gt;undertime_, &amp;now)) {
+			<span class="enscript-keyword">if</span> (ifd-&gt;cutoff_ &gt; cl-&gt;depth_)
+				ifd-&gt;cutoff_ = cl-&gt;depth_;
+			CBQTRACE(rmc_queue_packet, 'ffoc', cl-&gt;depth_);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * the class is overlimit. if the class has
+			 * underlimit ancestors, set cutoff to the lowest
+			 * depth among them.
+			 */</span>
+			<span class="enscript-type">struct</span> rm_class *borrow = cl-&gt;borrow_;
+
+			<span class="enscript-keyword">while</span> (borrow != NULL &amp;&amp;
+			    borrow-&gt;depth_ &lt; ifd-&gt;cutoff_) {
+				<span class="enscript-keyword">if</span> (TV_LT(&amp;borrow-&gt;undertime_, &amp;now)) {
+					ifd-&gt;cutoff_ = borrow-&gt;depth_;
+					CBQTRACE(rmc_queue_packet, 'ffob',
+					    ifd-&gt;cutoff_);
+					<span class="enscript-keyword">break</span>;
+				}
+				borrow = borrow-&gt;borrow_;
+			}
+		}
+	}
+
+	ret = _rmc_addq(cl, m, t);
+	<span class="enscript-keyword">if</span> (ret != 0 &amp;&amp;
+	    (ret == CLASSQEQ_DROPPED || ret == CLASSQEQ_DROPPED_FC ||
+	    ret == CLASSQEQ_DROPPED_SP)) {
+		<span class="enscript-comment">/* failed */</span>
+		<span class="enscript-keyword">return</span> (ret);
+	}
+	VERIFY(ret == 0 || ret == CLASSQEQ_SUCCESS_FC);
+	<span class="enscript-keyword">if</span> (is_empty) {
+		CBQTRACE(rmc_queue_packet, 'type', cl-&gt;stats_.handle);
+		ifd-&gt;na_[cpri]++;
+	}
+
+	<span class="enscript-keyword">if</span> (qlen(&amp;cl-&gt;q_) &gt; qlimit(&amp;cl-&gt;q_)) {
+		<span class="enscript-comment">/* note: qlimit can be set to 0 or 1 */</span>
+		rmc_drop_action(cl);
+		<span class="enscript-keyword">return</span> (CLASSQEQ_DROPPED);
+	}
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-comment">/*
+ * void
+ * rmc_tl_satisfied(struct rm_ifdat *ifd, struct timeval *now) - Check all
+ *	classes to see if there are satified.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">rmc_tl_satisfied</span>(<span class="enscript-type">struct</span> rm_ifdat *ifd, <span class="enscript-type">struct</span> timeval *now)
+{
+	<span class="enscript-type">int</span>		 i;
+	rm_class_t	*p, *bp;
+
+	<span class="enscript-keyword">for</span> (i = RM_MAXPRIO - 1; i &gt;= 0; i--) {
+		<span class="enscript-keyword">if</span> ((bp = ifd-&gt;active_[i]) != NULL) {
+			p = bp;
+			<span class="enscript-keyword">do</span> {
+				<span class="enscript-keyword">if</span> (!rmc_satisfied(p, now)) {
+					ifd-&gt;cutoff_ = p-&gt;depth_;
+					<span class="enscript-keyword">return</span>;
+				}
+				p = p-&gt;peer_;
+			} <span class="enscript-keyword">while</span> (p != bp);
+		}
+	}
+
+	reset_cutoff(ifd);
+}
+
+<span class="enscript-comment">/*
+ * rmc_satisfied - Return 1 of the class is satisfied.  O, otherwise.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">rmc_satisfied</span>(<span class="enscript-type">struct</span> rm_class *cl, <span class="enscript-type">struct</span> timeval *now)
+{
+	rm_class_t	*p;
+
+	<span class="enscript-keyword">if</span> (cl == NULL)
+		<span class="enscript-keyword">return</span> (1);
+	<span class="enscript-keyword">if</span> (TV_LT(now, &amp;cl-&gt;undertime_))
+		<span class="enscript-keyword">return</span> (1);
+	<span class="enscript-keyword">if</span> (cl-&gt;depth_ == 0) {
+		<span class="enscript-keyword">if</span> (!cl-&gt;sleeping_ &amp;&amp; (qlen(&amp;cl-&gt;q_) &gt; cl-&gt;qthresh_))
+			<span class="enscript-keyword">return</span> (0);
+		<span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">return</span> (1);
+	}
+	<span class="enscript-keyword">if</span> (cl-&gt;children_ != NULL) {
+		p = cl-&gt;children_;
+		<span class="enscript-keyword">while</span> (p != NULL) {
+			<span class="enscript-keyword">if</span> (!rmc_satisfied(p, now))
+				<span class="enscript-keyword">return</span> (0);
+			p = p-&gt;next_;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/*
+ * Return 1 if class 'cl' is under limit or can borrow from a parent,
+ * 0 if overlimit.  As a side-effect, this routine will invoke the
+ * class overlimit action if the class if overlimit.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">rmc_under_limit</span>(<span class="enscript-type">struct</span> rm_class *cl, <span class="enscript-type">struct</span> timeval *now)
+{
+	rm_class_t	*p = cl;
+	rm_class_t	*top;
+	<span class="enscript-type">struct</span> rm_ifdat	*ifd = cl-&gt;ifdat_;
+
+	ifd-&gt;borrowed_[ifd-&gt;qi_] = NULL;
+	<span class="enscript-comment">/*
+	 * If cl is the root class, then always return that it is
+	 * underlimit.  Otherwise, check to see if the class is underlimit.
+	 */</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;parent_ == NULL)
+		<span class="enscript-keyword">return</span> (1);
+
+	<span class="enscript-keyword">if</span> (cl-&gt;sleeping_) {
+		<span class="enscript-keyword">if</span> (TV_LT(now, &amp;cl-&gt;undertime_))
+			<span class="enscript-keyword">return</span> (0);
+
+		CALLOUT_STOP(&amp;cl-&gt;callout_);
+		cl-&gt;sleeping_ = 0;
+		cl-&gt;undertime_.tv_sec = 0;
+		<span class="enscript-keyword">return</span> (1);
+	}
+
+	top = NULL;
+	<span class="enscript-keyword">while</span> (cl-&gt;undertime_.tv_sec &amp;&amp; TV_LT(now, &amp;cl-&gt;undertime_)) {
+		<span class="enscript-keyword">if</span> (((cl = cl-&gt;borrow_) == NULL) ||
+		    (cl-&gt;depth_ &gt; ifd-&gt;cutoff_)) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ADJUST_CUTOFF</span>
+			<span class="enscript-keyword">if</span> (cl != NULL)
+				<span class="enscript-comment">/*
+				 * cutoff is taking effect, just
+				 * return false without calling
+				 * the delay action.
+				 */</span>
+				<span class="enscript-keyword">return</span> (0);
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">BORROW_OFFTIME</span>
+			<span class="enscript-comment">/*
+			 * check if the class can borrow offtime too.
+			 * borrow offtime from the top of the borrow
+			 * chain if the top class is not overloaded.
+			 */</span>
+			<span class="enscript-keyword">if</span> (cl != NULL) {
+				<span class="enscript-comment">/*
+				 * cutoff is taking effect, use this
+				 * class as top.
+				 */</span>
+				top = cl;
+				CBQTRACE(rmc_under_limit, 'ffou', ifd-&gt;cutoff_);
+			}
+			<span class="enscript-keyword">if</span> (top != NULL &amp;&amp; top-&gt;avgidle_ == top-&gt;minidle_)
+				top = NULL;
+			p-&gt;overtime_ = *now;
+			(p-&gt;overlimit)(p, top);
+#<span class="enscript-reference">else</span>
+			p-&gt;overtime_ = *now;
+			(p-&gt;overlimit)(p, NULL);
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-keyword">return</span> (0);
+		}
+		top = cl;
+	}
+
+	<span class="enscript-keyword">if</span> (cl != p)
+		ifd-&gt;borrowed_[ifd-&gt;qi_] = cl;
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/*
+ * _rmc_wrr_dequeue_next() - This is scheduler for WRR as opposed to
+ *	Packet-by-packet round robin.
+ *
+ * The heart of the weighted round-robin scheduler, which decides which
+ * class next gets to send a packet.  Highest priority first, then
+ * weighted round-robin within priorites.
+ *
+ * Each able-to-send class gets to send until its byte allocation is
+ * exhausted.  Thus, the active pointer is only changed after a class has
+ * exhausted its allocation.
+ *
+ * If the scheduler finds no class that is underlimit or able to borrow,
+ * then the first class found that had a nonzero queue and is allowed to
+ * borrow gets to send.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">_rmc_wrr_dequeue_next</span>(<span class="enscript-type">struct</span> rm_ifdat *ifd, cqdq_op_t op)
+{
+	<span class="enscript-type">struct</span> rm_class	*cl = NULL, *first = NULL;
+	u_int32_t	 deficit;
+	<span class="enscript-type">int</span>		 cpri;
+	<span class="enscript-type">struct</span> mbuf	*m;
+	<span class="enscript-type">struct</span> timeval	 now;
+
+	RM_GETTIME(now);
+
+	<span class="enscript-comment">/*
+	 * if the driver polls the top of the queue and then removes
+	 * the polled packet, we must return the same packet.
+	 */</span>
+	<span class="enscript-keyword">if</span> (op == CLASSQDQ_REMOVE &amp;&amp; ifd-&gt;pollcache_) {
+		cl = ifd-&gt;pollcache_;
+		cpri = cl-&gt;pri_;
+		<span class="enscript-keyword">if</span> (ifd-&gt;efficient_) {
+			<span class="enscript-comment">/* check if this class is overlimit */</span>
+			<span class="enscript-keyword">if</span> (cl-&gt;undertime_.tv_sec != 0 &amp;&amp;
+			    rmc_under_limit(cl, &amp;now) == 0)
+				first = cl;
+		}
+		ifd-&gt;pollcache_ = NULL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">_wrr_out</span>;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* mode == CLASSQDQ_POLL || pollcache == NULL */</span>
+		ifd-&gt;pollcache_ = NULL;
+		ifd-&gt;borrowed_[ifd-&gt;qi_] = NULL;
+	}
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ADJUST_CUTOFF</span>
+<span class="enscript-reference">_again</span>:
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">for</span> (cpri = RM_MAXPRIO - 1; cpri &gt;= 0; cpri--) {
+		<span class="enscript-keyword">if</span> (ifd-&gt;na_[cpri] == 0)
+			<span class="enscript-keyword">continue</span>;
+		deficit = 0;
+		<span class="enscript-comment">/*
+		 * Loop through twice for a priority level, if some class
+		 * was unable to send a packet the first round because
+		 * of the weighted round-robin mechanism.
+		 * During the second loop at this level, deficit==2.
+		 * (This second loop is not needed if for every class,
+		 * &quot;M[cl-&gt;pri_])&quot; times &quot;cl-&gt;allotment&quot; is greater than
+		 * the byte size for the largest packet in the class.)
+		 */</span>
+<span class="enscript-reference">_wrr_loop</span>:
+		cl = ifd-&gt;active_[cpri];
+		VERIFY(cl != NULL);
+		<span class="enscript-keyword">do</span> {
+			<span class="enscript-keyword">if</span> ((deficit &lt; 2) &amp;&amp; (cl-&gt;bytes_alloc_ &lt;= 0))
+				cl-&gt;bytes_alloc_ += cl-&gt;w_allotment_;
+			<span class="enscript-keyword">if</span> (!qempty(&amp;cl-&gt;q_)) {
+				<span class="enscript-keyword">if</span> ((cl-&gt;undertime_.tv_sec == 0) ||
+				    rmc_under_limit(cl, &amp;now)) {
+					<span class="enscript-keyword">if</span> (cl-&gt;bytes_alloc_ &gt; 0 || deficit &gt; 1)
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">_wrr_out</span>;
+
+					<span class="enscript-comment">/* underlimit but no alloc */</span>
+					deficit = 1;
+#<span class="enscript-reference">if</span> 1
+					ifd-&gt;borrowed_[ifd-&gt;qi_] = NULL;
+#<span class="enscript-reference">endif</span>
+				} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (first == NULL &amp;&amp; cl-&gt;borrow_ != NULL)
+					first = cl; <span class="enscript-comment">/* borrowing candidate */</span>
+			}
+
+			cl-&gt;bytes_alloc_ = 0;
+			cl = cl-&gt;peer_;
+		} <span class="enscript-keyword">while</span> (cl != ifd-&gt;active_[cpri]);
+
+		<span class="enscript-keyword">if</span> (deficit == 1) {
+			<span class="enscript-comment">/* first loop found an underlimit class with deficit */</span>
+			<span class="enscript-comment">/* Loop on same priority level, with new deficit.  */</span>
+			deficit = 2;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">_wrr_loop</span>;
+		}
+	}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ADJUST_CUTOFF</span>
+	<span class="enscript-comment">/*
+	 * no underlimit class found.  if cutoff is taking effect,
+	 * increase cutoff and try again.
+	 */</span>
+	<span class="enscript-keyword">if</span> (first != NULL &amp;&amp; ifd-&gt;cutoff_ &lt; ifd-&gt;root_-&gt;depth_) {
+		ifd-&gt;cutoff_++;
+		CBQTRACE(_rmc_wrr_dequeue_next, 'ojda', ifd-&gt;cutoff_);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">_again</span>;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* ADJUST_CUTOFF */</span>
+	<span class="enscript-comment">/*
+	 * If LINK_EFFICIENCY is turned on, then the first overlimit
+	 * class we encounter will send a packet if all the classes
+	 * of the link-sharing structure are overlimit.
+	 */</span>
+	reset_cutoff(ifd);
+	CBQTRACE(_rmc_wrr_dequeue_next, 'otsr', ifd-&gt;cutoff_);
+
+	<span class="enscript-keyword">if</span> (!ifd-&gt;efficient_ || first == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	cl = first;
+	cpri = cl-&gt;pri_;
+#<span class="enscript-reference">if</span> 0	<span class="enscript-comment">/* too time-consuming for nothing */</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;sleeping_)
+		CALLOUT_STOP(&amp;cl-&gt;callout_);
+	cl-&gt;sleeping_ = 0;
+	cl-&gt;undertime_.tv_sec = 0;
+#<span class="enscript-reference">endif</span>
+	ifd-&gt;borrowed_[ifd-&gt;qi_] = cl-&gt;borrow_;
+	ifd-&gt;cutoff_ = cl-&gt;borrow_-&gt;depth_;
+
+	<span class="enscript-comment">/*
+	 * Deque the packet and do the book keeping...
+	 */</span>
+<span class="enscript-reference">_wrr_out</span>:
+	<span class="enscript-keyword">if</span> (op == CLASSQDQ_REMOVE) {
+		m = _rmc_getq(cl);
+		<span class="enscript-keyword">if</span> (m == NULL)
+			<span class="enscript-keyword">return</span> (NULL);
+
+		<span class="enscript-keyword">if</span> (qempty(&amp;cl-&gt;q_))
+			ifd-&gt;na_[cpri]--;
+
+		<span class="enscript-comment">/*
+		 * Update class statistics and link data.
+		 */</span>
+		<span class="enscript-keyword">if</span> (cl-&gt;bytes_alloc_ &gt; 0)
+			cl-&gt;bytes_alloc_ -= m_pktlen(m);
+
+		<span class="enscript-keyword">if</span> ((cl-&gt;bytes_alloc_ &lt;= 0) || first == cl)
+			ifd-&gt;active_[cl-&gt;pri_] = cl-&gt;peer_;
+		<span class="enscript-keyword">else</span>
+			ifd-&gt;active_[cl-&gt;pri_] = cl;
+
+		ifd-&gt;class_[ifd-&gt;qi_] = cl;
+		ifd-&gt;curlen_[ifd-&gt;qi_] = m_pktlen(m);
+		ifd-&gt;now_[ifd-&gt;qi_] = now;
+		ifd-&gt;qi_ = (ifd-&gt;qi_ + 1) % ifd-&gt;maxqueued_;
+		ifd-&gt;queued_++;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* mode == ALTDQ_PPOLL */</span>
+		m = _rmc_pollq(cl);
+		ifd-&gt;pollcache_ = cl;
+	}
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-comment">/*
+ * Dequeue &amp; return next packet from the highest priority class that
+ * has a packet to send &amp; has enough allocation to send it.  This
+ * routine is called by a driver whenever it needs a new packet to
+ * output.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">_rmc_prr_dequeue_next</span>(<span class="enscript-type">struct</span> rm_ifdat *ifd, cqdq_op_t op)
+{
+	<span class="enscript-type">struct</span> mbuf	*m;
+	<span class="enscript-type">int</span>		 cpri;
+	<span class="enscript-type">struct</span> rm_class	*cl, *first = NULL;
+	<span class="enscript-type">struct</span> timeval	 now;
+
+	RM_GETTIME(now);
+
+	<span class="enscript-comment">/*
+	 * if the driver polls the top of the queue and then removes
+	 * the polled packet, we must return the same packet.
+	 */</span>
+	<span class="enscript-keyword">if</span> (op == CLASSQDQ_REMOVE &amp;&amp; ifd-&gt;pollcache_) {
+		cl = ifd-&gt;pollcache_;
+		cpri = cl-&gt;pri_;
+		ifd-&gt;pollcache_ = NULL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">_prr_out</span>;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* mode == CLASSQDQ_POLL || pollcache == NULL */</span>
+		ifd-&gt;pollcache_ = NULL;
+		ifd-&gt;borrowed_[ifd-&gt;qi_] = NULL;
+	}
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ADJUST_CUTOFF</span>
+<span class="enscript-reference">_again</span>:
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">for</span> (cpri = RM_MAXPRIO - 1; cpri &gt;= 0; cpri--) {
+		<span class="enscript-keyword">if</span> (ifd-&gt;na_[cpri] == 0)
+			<span class="enscript-keyword">continue</span>;
+		cl = ifd-&gt;active_[cpri];
+		VERIFY(cl != NULL);
+		<span class="enscript-keyword">do</span> {
+			<span class="enscript-keyword">if</span> (!qempty(&amp;cl-&gt;q_)) {
+				<span class="enscript-keyword">if</span> ((cl-&gt;undertime_.tv_sec == 0) ||
+				    rmc_under_limit(cl, &amp;now))
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">_prr_out</span>;
+				<span class="enscript-keyword">if</span> (first == NULL &amp;&amp; cl-&gt;borrow_ != NULL)
+					first = cl;
+			}
+			cl = cl-&gt;peer_;
+		} <span class="enscript-keyword">while</span> (cl != ifd-&gt;active_[cpri]);
+	}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ADJUST_CUTOFF</span>
+	<span class="enscript-comment">/*
+	 * no underlimit class found.  if cutoff is taking effect, increase
+	 * cutoff and try again.
+	 */</span>
+	<span class="enscript-keyword">if</span> (first != NULL &amp;&amp; ifd-&gt;cutoff_ &lt; ifd-&gt;root_-&gt;depth_) {
+		ifd-&gt;cutoff_++;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">_again</span>;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* ADJUST_CUTOFF */</span>
+	<span class="enscript-comment">/*
+	 * If LINK_EFFICIENCY is turned on, then the first overlimit
+	 * class we encounter will send a packet if all the classes
+	 * of the link-sharing structure are overlimit.
+	 */</span>
+	reset_cutoff(ifd);
+	<span class="enscript-keyword">if</span> (!ifd-&gt;efficient_ || first == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	cl = first;
+	cpri = cl-&gt;pri_;
+#<span class="enscript-reference">if</span> 0	<span class="enscript-comment">/* too time-consuming for nothing */</span>
+	<span class="enscript-keyword">if</span> (cl-&gt;sleeping_)
+		CALLOUT_STOP(&amp;cl-&gt;callout_);
+	cl-&gt;sleeping_ = 0;
+	cl-&gt;undertime_.tv_sec = 0;
+#<span class="enscript-reference">endif</span>
+	ifd-&gt;borrowed_[ifd-&gt;qi_] = cl-&gt;borrow_;
+	ifd-&gt;cutoff_ = cl-&gt;borrow_-&gt;depth_;
+
+	<span class="enscript-comment">/*
+	 * Deque the packet and do the book keeping...
+	 */</span>
+<span class="enscript-reference">_prr_out</span>:
+	<span class="enscript-keyword">if</span> (op == CLASSQDQ_REMOVE) {
+		m = _rmc_getq(cl);
+		<span class="enscript-keyword">if</span> (m == NULL)
+			<span class="enscript-keyword">return</span> (NULL);
+
+		<span class="enscript-keyword">if</span> (qempty(&amp;cl-&gt;q_))
+			ifd-&gt;na_[cpri]--;
+
+		ifd-&gt;active_[cpri] = cl-&gt;peer_;
+
+		ifd-&gt;class_[ifd-&gt;qi_] = cl;
+		ifd-&gt;curlen_[ifd-&gt;qi_] = m_pktlen(m);
+		ifd-&gt;now_[ifd-&gt;qi_] = now;
+		ifd-&gt;qi_ = (ifd-&gt;qi_ + 1) % ifd-&gt;maxqueued_;
+		ifd-&gt;queued_++;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* mode == CLASSQDQ_POLL */</span>
+		m = _rmc_pollq(cl);
+		ifd-&gt;pollcache_ = cl;
+	}
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-comment">/*
+ * struct mbuf *
+ * rmc_dequeue_next(struct rm_ifdat *ifd, struct timeval *now) - this function
+ *	is invoked by the packet driver to get the next packet to be
+ *	dequeued and output on the link.  If WRR is enabled, then the
+ *	WRR dequeue next routine will determine the next packet to sent.
+ *	Otherwise, packet-by-packet round robin is invoked.
+ *
+ *	Returns:	NULL, if a packet is not available or if all
+ *			classes are overlimit.
+ *
+ *			Otherwise, Pointer to the next packet.
+ */</span>
+
+<span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">rmc_dequeue_next</span>(<span class="enscript-type">struct</span> rm_ifdat *ifd, cqdq_op_t mode)
+{
+	<span class="enscript-keyword">if</span> (ifd-&gt;queued_ &gt;= ifd-&gt;maxqueued_)
+		<span class="enscript-keyword">return</span> (NULL);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ifd-&gt;wrr_)
+		<span class="enscript-keyword">return</span> (_rmc_wrr_dequeue_next(ifd, mode));
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> (_rmc_prr_dequeue_next(ifd, mode));
+}
+
+<span class="enscript-comment">/*
+ * Update the utilization estimate for the packet that just completed.
+ * The packet's class &amp; the parent(s) of that class all get their
+ * estimators updated.  This routine is called by the driver's output-
+ * packet-completion interrupt service routine.
+ */</span>
+
+<span class="enscript-comment">/*
+ * a macro to approximate &quot;divide by 1000&quot; that gives 0.000999,
+ * if a value has enough effective digits.
+ * (on pentium, mul takes 9 cycles but div takes 46!)
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">NSEC_TO_USEC</span>(t)	(((t) &gt;&gt; 10) + ((t) &gt;&gt; 16) + ((t) &gt;&gt; 17))
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">rmc_update_class_util</span>(<span class="enscript-type">struct</span> rm_ifdat *ifd)
+{
+	<span class="enscript-type">int</span>		 idle, avgidle, pktlen;
+	<span class="enscript-type">int</span>		 pkt_time, tidle;
+	rm_class_t	*cl, *borrowed;
+	rm_class_t	*borrows;
+	<span class="enscript-type">struct</span> timeval	*nowp;
+
+	<span class="enscript-comment">/*
+	 * Get the most recent completed class.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((cl = ifd-&gt;class_[ifd-&gt;qo_]) == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	pktlen = ifd-&gt;curlen_[ifd-&gt;qo_];
+	borrowed = ifd-&gt;borrowed_[ifd-&gt;qo_];
+	borrows = borrowed;
+
+	PKTCNTR_ADD(&amp;cl-&gt;stats_.xmit_cnt, 1, pktlen);
+
+	<span class="enscript-comment">/*
+	 * Run estimator on class and its ancestors.
+	 */</span>
+	<span class="enscript-comment">/*
+	 * rm_update_class_util is designed to be called when the
+	 * transfer is completed from a xmit complete interrupt,
+	 * but most drivers don't implement an upcall for that.
+	 * so, just use estimated completion time.
+	 * as a result, ifd-&gt;qi_ and ifd-&gt;qo_ are always synced.
+	 */</span>
+	nowp = &amp;ifd-&gt;now_[ifd-&gt;qo_];
+	<span class="enscript-comment">/* get pkt_time (for link) in usec */</span>
+#<span class="enscript-reference">if</span> 1  <span class="enscript-comment">/* use approximation */</span>
+	pkt_time = ifd-&gt;curlen_[ifd-&gt;qo_] * ifd-&gt;ns_per_byte_;
+	pkt_time = NSEC_TO_USEC(pkt_time);
+#<span class="enscript-reference">else</span>
+	pkt_time = ifd-&gt;curlen_[ifd-&gt;qo_] * ifd-&gt;ns_per_byte_ / 1000;
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> 1 <span class="enscript-comment">/* ALTQ4PPP */</span>
+	<span class="enscript-keyword">if</span> (TV_LT(nowp, &amp;ifd-&gt;ifnow_)) {
+		<span class="enscript-type">int</span> iftime;
+
+		<span class="enscript-comment">/*
+		 * make sure the estimated completion time does not go
+		 * too far.  it can happen when the link layer supports
+		 * data compression or the interface speed is set to
+		 * a much lower value.
+		 */</span>
+		TV_DELTA(&amp;ifd-&gt;ifnow_, nowp, iftime);
+		<span class="enscript-keyword">if</span> (iftime+pkt_time &lt; ifd-&gt;maxiftime_) {
+			TV_ADD_DELTA(&amp;ifd-&gt;ifnow_, pkt_time, &amp;ifd-&gt;ifnow_);
+		} <span class="enscript-keyword">else</span> {
+			TV_ADD_DELTA(nowp, ifd-&gt;maxiftime_, &amp;ifd-&gt;ifnow_);
+		}
+	} <span class="enscript-keyword">else</span> {
+		TV_ADD_DELTA(nowp, pkt_time, &amp;ifd-&gt;ifnow_);
+	}
+#<span class="enscript-reference">else</span>
+	<span class="enscript-keyword">if</span> (TV_LT(nowp, &amp;ifd-&gt;ifnow_)) {
+		TV_ADD_DELTA(&amp;ifd-&gt;ifnow_, pkt_time, &amp;ifd-&gt;ifnow_);
+	} <span class="enscript-keyword">else</span> {
+		TV_ADD_DELTA(nowp, pkt_time, &amp;ifd-&gt;ifnow_);
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">while</span> (cl != NULL) {
+		TV_DELTA(&amp;ifd-&gt;ifnow_, &amp;cl-&gt;last_, idle);
+		<span class="enscript-keyword">if</span> (idle &gt;= 2000000)
+			<span class="enscript-comment">/*
+			 * this class is idle enough, reset avgidle.
+			 * (TV_DELTA returns 2000000 us when delta is large.)
+			 */</span>
+			cl-&gt;avgidle_ = cl-&gt;maxidle_;
+
+		<span class="enscript-comment">/* get pkt_time (for class) in usec */</span>
+#<span class="enscript-reference">if</span> 1  <span class="enscript-comment">/* use approximation */</span>
+		pkt_time = pktlen * cl-&gt;ns_per_byte_;
+		pkt_time = NSEC_TO_USEC(pkt_time);
+#<span class="enscript-reference">else</span>
+		pkt_time = pktlen * cl-&gt;ns_per_byte_ / 1000;
+#<span class="enscript-reference">endif</span>
+		idle -= pkt_time;
+
+		avgidle = cl-&gt;avgidle_;
+		avgidle += idle - (avgidle &gt;&gt; RM_FILTER_GAIN);
+		cl-&gt;avgidle_ = avgidle;
+
+		<span class="enscript-comment">/* Are we overlimit ? */</span>
+		<span class="enscript-keyword">if</span> (avgidle &lt;= 0) {
+			CBQTRACE(rmc_update_class_util, 'milo',
+			    cl-&gt;stats_.handle);
+			<span class="enscript-comment">/*
+			 * need some lower bound for avgidle, otherwise
+			 * a borrowing class gets unbounded penalty.
+			 */</span>
+			<span class="enscript-keyword">if</span> (avgidle &lt; cl-&gt;minidle_)
+				avgidle = cl-&gt;avgidle_ = cl-&gt;minidle_;
+
+			<span class="enscript-comment">/* set next idle to make avgidle 0 */</span>
+			tidle = pkt_time +
+			    (((1 - RM_POWER) * avgidle) &gt;&gt; RM_FILTER_GAIN);
+			TV_ADD_DELTA(nowp, tidle, &amp;cl-&gt;undertime_);
+			++cl-&gt;stats_.over;
+		} <span class="enscript-keyword">else</span> {
+			cl-&gt;avgidle_ =
+			    (avgidle &gt; cl-&gt;maxidle_) ? cl-&gt;maxidle_ : avgidle;
+			cl-&gt;undertime_.tv_sec = 0;
+			<span class="enscript-keyword">if</span> (cl-&gt;sleeping_) {
+				CALLOUT_STOP(&amp;cl-&gt;callout_);
+				cl-&gt;sleeping_ = 0;
+			}
+		}
+
+		<span class="enscript-keyword">if</span> (borrows != NULL) {
+			<span class="enscript-keyword">if</span> (borrows != cl)
+				++cl-&gt;stats_.borrows;
+			<span class="enscript-keyword">else</span>
+				borrows = NULL;
+		}
+		cl-&gt;last_ = ifd-&gt;ifnow_;
+		cl-&gt;last_pkttime_ = pkt_time;
+
+#<span class="enscript-reference">if</span> 1
+		<span class="enscript-keyword">if</span> (cl-&gt;parent_ == NULL) {
+			<span class="enscript-comment">/* take stats of root class */</span>
+			PKTCNTR_ADD(&amp;cl-&gt;stats_.xmit_cnt, 1, pktlen);
+		}
+#<span class="enscript-reference">endif</span>
+
+		cl = cl-&gt;parent_;
+	}
+
+	<span class="enscript-comment">/*
+	 * Check to see if cutoff needs to set to a new level.
+	 */</span>
+	cl = ifd-&gt;class_[ifd-&gt;qo_];
+	<span class="enscript-keyword">if</span> (borrowed &amp;&amp; (ifd-&gt;cutoff_ &gt;= borrowed-&gt;depth_)) {
+		<span class="enscript-keyword">if</span> ((qlen(&amp;cl-&gt;q_) &lt;= 0) ||
+		    TV_LT(nowp, &amp;borrowed-&gt;undertime_)) {
+			rmc_tl_satisfied(ifd, nowp);
+			CBQTRACE(rmc_update_class_util, 'broe', ifd-&gt;cutoff_);
+		} <span class="enscript-keyword">else</span> {
+			ifd-&gt;cutoff_ = borrowed-&gt;depth_;
+			CBQTRACE(rmc_update_class_util, 'ffob',
+			    borrowed-&gt;depth_);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Release class slot
+	 */</span>
+	ifd-&gt;borrowed_[ifd-&gt;qo_] = NULL;
+	ifd-&gt;class_[ifd-&gt;qo_] = NULL;
+	ifd-&gt;qo_ = (ifd-&gt;qo_ + 1) % ifd-&gt;maxqueued_;
+	ifd-&gt;queued_--;
+}
+
+<span class="enscript-comment">/*
+ * void
+ * rmc_drop_action(struct rm_class *cl) - Generic (not protocol-specific)
+ *	over-limit action routines.  These get invoked by rmc_under_limit()
+ *	if a class with packets to send if over its bandwidth limit &amp; can't
+ *	borrow from a parent class.
+ *
+ *	Returns: NONE
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">rmc_drop_action</span>(<span class="enscript-type">struct</span> rm_class *cl)
+{
+	<span class="enscript-type">struct</span> rm_ifdat	*ifd = cl-&gt;ifdat_;
+
+	VERIFY(qlen(&amp;cl-&gt;q_) &gt; 0);
+	IFCQ_CONVERT_LOCK(ifd-&gt;ifq_);
+	_rmc_dropq(cl);
+	<span class="enscript-keyword">if</span> (qempty(&amp;cl-&gt;q_))
+		ifd-&gt;na_[cl-&gt;pri_]--;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">rmc_drop</span>(<span class="enscript-type">struct</span> rm_class *cl, u_int32_t flow, u_int32_t *packets,
+    u_int32_t *bytes)
+{
+	<span class="enscript-type">struct</span> rm_ifdat	*ifd = cl-&gt;ifdat_;
+	<span class="enscript-type">struct</span> ifclassq *ifq = ifd-&gt;ifq_;
+	u_int32_t pkt = 0, len = 0, qlen;
+
+	<span class="enscript-keyword">if</span> ((qlen = qlen(&amp;cl-&gt;q_)) != 0) {
+		IFCQ_CONVERT_LOCK(ifq);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+		<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;q_))
+			rio_purgeq(cl-&gt;rio_, &amp;cl-&gt;q_, flow, &amp;pkt, &amp;len);
+		<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+		<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;q_))
+			red_purgeq(cl-&gt;red_, &amp;cl-&gt;q_, flow, &amp;pkt, &amp;len);
+		<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+		<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;q_))
+			blue_purgeq(cl-&gt;blue_, &amp;cl-&gt;q_, flow, &amp;pkt, &amp;len);
+		<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+		<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;q_) &amp;&amp; cl-&gt;sfb_ != NULL)
+			sfb_purgeq(cl-&gt;sfb_, &amp;cl-&gt;q_, flow, &amp;pkt, &amp;len);
+		<span class="enscript-keyword">else</span>
+			_flushq_flow(&amp;cl-&gt;q_, flow, &amp;pkt, &amp;len);
+
+		<span class="enscript-keyword">if</span> (pkt &gt; 0) {
+			VERIFY(qlen(&amp;cl-&gt;q_) == (qlen - pkt));
+
+			PKTCNTR_ADD(&amp;cl-&gt;stats_.drop_cnt, pkt, len);
+			IFCQ_DROP_ADD(ifq, pkt, len);
+
+			VERIFY(((<span class="enscript-type">signed</span>)IFCQ_LEN(ifq) - pkt) &gt;= 0);
+			IFCQ_LEN(ifq) -= pkt;
+
+			<span class="enscript-keyword">if</span> (qempty(&amp;cl-&gt;q_))
+				ifd-&gt;na_[cl-&gt;pri_]--;
+		}
+	}
+	<span class="enscript-keyword">if</span> (packets != NULL)
+		*packets = pkt;
+	<span class="enscript-keyword">if</span> (bytes != NULL)
+		*bytes = len;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">rmc_dropall</span>(<span class="enscript-type">struct</span> rm_class *cl)
+{
+	rmc_drop(cl, 0, NULL, NULL);
+}
+
+<span class="enscript-comment">/*
+ * void
+ * rmc_delay_action(struct rm_class *cl) - This function is the generic CBQ
+ *	delay action routine.  It is invoked via rmc_under_limit when the
+ *	packet is discoverd to be overlimit.
+ *
+ *	If the delay action is result of borrow class being overlimit, then
+ *	delay for the offtime of the borrowing class that is overlimit.
+ *
+ *	Returns: NONE
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">rmc_delay_action</span>(<span class="enscript-type">struct</span> rm_class *cl, <span class="enscript-type">struct</span> rm_class *borrow)
+{
+	<span class="enscript-type">int</span>	ndelay, t, extradelay;
+
+	cl-&gt;stats_.overactions++;
+	TV_DELTA(&amp;cl-&gt;undertime_, &amp;cl-&gt;overtime_, ndelay);
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">BORROW_OFFTIME</span>
+	ndelay += cl-&gt;offtime_;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (!cl-&gt;sleeping_) {
+		CBQTRACE(rmc_delay_action, 'yled', cl-&gt;stats_.handle);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">BORROW_OFFTIME</span>
+		<span class="enscript-keyword">if</span> (borrow != NULL)
+			extradelay = borrow-&gt;offtime_;
+		<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span>
+			extradelay = cl-&gt;offtime_;
+
+		<span class="enscript-comment">/*
+		 * XXX recalculate suspend time:
+		 * current undertime is (tidle + pkt_time) calculated
+		 * from the last transmission.
+		 *	tidle: time required to bring avgidle back to 0
+		 *	pkt_time: target waiting time for this class
+		 * we need to replace pkt_time by offtime
+		 */</span>
+		extradelay -= cl-&gt;last_pkttime_;
+		<span class="enscript-keyword">if</span> (extradelay &gt; 0) {
+			TV_ADD_DELTA(&amp;cl-&gt;undertime_, extradelay,
+			    &amp;cl-&gt;undertime_);
+			ndelay += extradelay;
+		}
+
+		cl-&gt;sleeping_ = 1;
+		cl-&gt;stats_.delays++;
+
+		<span class="enscript-comment">/*
+		 * Since packets are phased randomly with respect to the
+		 * clock, 1 tick (the next clock tick) can be an arbitrarily
+		 * short time so we have to wait for at least two ticks.
+		 * NOTE:  If there's no other traffic, we need the timer as
+		 * a 'backstop' to restart this class.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ndelay &gt; tick * 2) {
+			<span class="enscript-comment">/*
+			 * FreeBSD rounds up the tick;
+			 * other BSDs round down the tick.
+			 */</span>
+			t = hzto(&amp;cl-&gt;undertime_) + 1;
+		} <span class="enscript-keyword">else</span> {
+			t = 2;
+		}
+		CALLOUT_RESET(&amp;cl-&gt;callout_, t,
+		    (timeout_t *)rmc_restart, (caddr_t)cl);
+	}
+}
+
+<span class="enscript-comment">/*
+ * void
+ * rmc_restart() - is just a helper routine for rmc_delay_action -- it is
+ *	called by the system timer code &amp; is responsible checking if the
+ *	class is still sleeping (it might have been restarted as a side
+ *	effect of the queue scan on a packet arrival) and, if so, restarting
+ *	output for the class.  Inspecting the class state &amp; restarting output
+ *	require locking the class structure.  In general the driver is
+ *	responsible for locking but this is the only routine that is not
+ *	called directly or indirectly from the interface driver so it has
+ *	know about system locking conventions.
+ *
+ *	Returns:	NONE
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">rmc_restart</span>(<span class="enscript-type">struct</span> rm_class *cl)
+{
+	<span class="enscript-type">struct</span> rm_ifdat	*ifd = cl-&gt;ifdat_;
+
+	<span class="enscript-keyword">if</span> (cl-&gt;sleeping_) {
+		cl-&gt;sleeping_ = 0;
+		cl-&gt;undertime_.tv_sec = 0;
+
+		<span class="enscript-keyword">if</span> (ifd-&gt;queued_ &lt; ifd-&gt;maxqueued_ &amp;&amp; ifd-&gt;restart != NULL) {
+			CBQTRACE(rmc_restart, 'trts', cl-&gt;stats_.handle);
+			(ifd-&gt;restart)(ifd-&gt;ifq_);
+		}
+	}
+}
+
+<span class="enscript-comment">/*
+ * void
+ * rmc_root_overlimit(struct rm_class *cl) - This the generic overlimit
+ *	handling routine for the root class of the link sharing structure.
+ *
+ *	Returns: NONE
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">rmc_root_overlimit</span>(<span class="enscript-type">struct</span> rm_class *cl,
+    <span class="enscript-type">struct</span> rm_class *borrow)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">cl</span>, <span class="enscript-variable-name">borrow</span>)
+	panic(<span class="enscript-string">&quot;rmc_root_overlimit&quot;</span>);
+}
+
+<span class="enscript-comment">/*
+ * Packet Queue handling routines.  Eventually, this is to localize the
+ *	effects on the code whether queues are red queues or droptail
+ *	queues.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">_rmc_addq</span>(rm_class_t *cl, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> pf_mtag *t)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;q_))
+		<span class="enscript-keyword">return</span> (rio_addq(cl-&gt;rio_, &amp;cl-&gt;q_, m, t));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;q_))
+		<span class="enscript-keyword">return</span> (red_addq(cl-&gt;red_, &amp;cl-&gt;q_, m, t));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;q_))
+		<span class="enscript-keyword">return</span> (blue_addq(cl-&gt;blue_, &amp;cl-&gt;q_, m, t));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;q_)) {
+		<span class="enscript-keyword">if</span> (cl-&gt;sfb_ == NULL) {
+			<span class="enscript-type">struct</span> ifclassq *ifq = cl-&gt;ifdat_-&gt;ifq_;
+			<span class="enscript-type">struct</span> ifnet *ifp = ifq-&gt;ifcq_ifp;
+
+			VERIFY(cl-&gt;flags_ &amp; RMCF_LAZY);
+			IFCQ_CONVERT_LOCK(ifq);
+
+			cl-&gt;sfb_ = sfb_alloc(ifp, cl-&gt;stats_.handle,
+			    qlimit(&amp;cl-&gt;q_), cl-&gt;qflags_);
+			<span class="enscript-keyword">if</span> (cl-&gt;sfb_ == NULL) {
+				<span class="enscript-comment">/* fall back to droptail */</span>
+				qtype(&amp;cl-&gt;q_) = Q_DROPTAIL;
+				cl-&gt;flags_ &amp;= ~RMCF_SFB;
+				cl-&gt;qflags_ &amp;= ~(SFBF_ECN | SFBF_FLOWCTL);
+
+				log(LOG_ERR, <span class="enscript-string">&quot;%s: CBQ SFB lazy allocation &quot;</span>
+				    <span class="enscript-string">&quot;failed for qid=%d pri=%d, falling back &quot;</span>
+				    <span class="enscript-string">&quot;to DROPTAIL\n&quot;</span>, if_name(ifp),
+				    cl-&gt;stats_.handle, cl-&gt;pri_);
+			}
+		}
+		<span class="enscript-keyword">if</span> (cl-&gt;sfb_ != NULL)
+			<span class="enscript-keyword">return</span> (sfb_addq(cl-&gt;sfb_, &amp;cl-&gt;q_, m, t));
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PF_ECN</span>
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cl-&gt;flags_ &amp; RMCF_CLEARDSCP)
+		write_dsfield(m, t, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PF_ECN */</span>
+
+	<span class="enscript-comment">/* test for qlen &gt; qlimit is done by caller */</span>
+	_addq(&amp;cl-&gt;q_, m);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* note: _rmc_dropq is not called for red */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">_rmc_dropq</span>(rm_class_t *cl)
+{
+	<span class="enscript-type">struct</span> mbuf *m;
+
+	<span class="enscript-keyword">if</span> ((m = _rmc_getq(cl)) != NULL)
+		m_freem(m);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">_rmc_getq</span>(rm_class_t *cl)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;q_))
+		<span class="enscript-keyword">return</span> (rio_getq(cl-&gt;rio_, &amp;cl-&gt;q_));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;q_))
+		<span class="enscript-keyword">return</span> (red_getq(cl-&gt;red_, &amp;cl-&gt;q_));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;q_))
+		<span class="enscript-keyword">return</span> (blue_getq(cl-&gt;blue_, &amp;cl-&gt;q_));
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;q_) &amp;&amp; cl-&gt;sfb_ != NULL)
+		<span class="enscript-keyword">return</span> (sfb_getq(cl-&gt;sfb_, &amp;cl-&gt;q_));
+
+	<span class="enscript-keyword">return</span> (_getq(&amp;cl-&gt;q_));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">_rmc_pollq</span>(rm_class_t *cl)
+{
+	<span class="enscript-keyword">return</span> (qhead(&amp;cl-&gt;q_));
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">rmc_updateq</span>(rm_class_t *cl, cqev_t ev)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;q_))
+		<span class="enscript-keyword">return</span> (rio_updateq(cl-&gt;rio_, ev));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;q_))
+		<span class="enscript-keyword">return</span> (red_updateq(cl-&gt;red_, ev));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;q_))
+		<span class="enscript-keyword">return</span> (blue_updateq(cl-&gt;blue_, ev));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;q_) &amp;&amp; cl-&gt;sfb_ != NULL)
+		<span class="enscript-keyword">return</span> (sfb_updateq(cl-&gt;sfb_, ev));
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CBQ_TRACE</span>
+
+<span class="enscript-type">struct</span> cbqtrace		 cbqtrace_buffer[NCBQTRACE+1];
+<span class="enscript-type">struct</span> cbqtrace		*cbqtrace_ptr = NULL;
+<span class="enscript-type">int</span>			 cbqtrace_count;
+
+<span class="enscript-comment">/*
+ * DDB hook to trace cbq events:
+ *  the last 1024 events are held in a circular buffer.
+ *  use &quot;call cbqtrace_dump(N)&quot; to display 20 events from Nth event.
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">cbqtrace_dump</span>(<span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> *<span class="enscript-function-name">rmc_funcname</span>(<span class="enscript-type">void</span> *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> rmc_funcs {
+	<span class="enscript-type">void</span>	*func;
+	<span class="enscript-type">char</span>	*name;
+} rmc_funcs[] =
+{
+	rmc_init,		<span class="enscript-string">&quot;rmc_init&quot;</span>,
+	rmc_queue_packet,	<span class="enscript-string">&quot;rmc_queue_packet&quot;</span>,
+	rmc_under_limit,	<span class="enscript-string">&quot;rmc_under_limit&quot;</span>,
+	rmc_update_class_util,	<span class="enscript-string">&quot;rmc_update_class_util&quot;</span>,
+	rmc_delay_action,	<span class="enscript-string">&quot;rmc_delay_action&quot;</span>,
+	rmc_restart,		<span class="enscript-string">&quot;rmc_restart&quot;</span>,
+	_rmc_wrr_dequeue_next,	<span class="enscript-string">&quot;_rmc_wrr_dequeue_next&quot;</span>,
+	NULL,			NULL
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">rmc_funcname</span>(<span class="enscript-type">void</span> *func)
+{
+	<span class="enscript-type">struct</span> rmc_funcs *fp;
+
+	<span class="enscript-keyword">for</span> (fp = rmc_funcs; fp-&gt;func != NULL; fp++)
+		<span class="enscript-keyword">if</span> (fp-&gt;func == func)
+			<span class="enscript-keyword">return</span> (fp-&gt;name);
+	<span class="enscript-keyword">return</span> (<span class="enscript-string">&quot;unknown&quot;</span>);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cbqtrace_dump</span>(<span class="enscript-type">int</span> counter)
+{
+	<span class="enscript-type">int</span>	 i, *p;
+	<span class="enscript-type">char</span>	*cp;
+
+	counter = counter % NCBQTRACE;
+	p = (<span class="enscript-type">int</span> *)&amp;cbqtrace_buffer[counter];
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; 20; i++) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;[0x%x] &quot;</span>, *p++);
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: &quot;</span>, rmc_funcname((<span class="enscript-type">void</span> *)*p++));
+		cp = (<span class="enscript-type">char</span> *)p++;
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%c%c%c%c: &quot;</span>, cp[0], cp[1], cp[2], cp[3]);
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%d\n&quot;</span>, *p++);
+
+		<span class="enscript-keyword">if</span> (p &gt;= (<span class="enscript-type">int</span> *)&amp;cbqtrace_buffer[NCBQTRACE])
+			p = (<span class="enscript-type">int</span> *)cbqtrace_buffer;
+	}
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CBQ_TRACE */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PKTSCHED_CBQ */</span>
+</pre>
+<hr />
+</body></html>

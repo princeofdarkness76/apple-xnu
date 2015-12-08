@@ -1,0 +1,408 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOTimerEventSource.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOTimerEventSource.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2000, 2009-2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+
+__BEGIN_DECLS
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread_call.h&gt;</span>
+__END_DECLS
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/system.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOLib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOTimerEventSource.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOWorkLoop.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOTimeStamp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKitDebug.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/sdt.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOEventSource
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IOTimerEventSource, IOEventSource)
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOTimerEventSource, 0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOTimerEventSource, 1);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOTimerEventSource, 2);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOTimerEventSource, 3);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOTimerEventSource, 4);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOTimerEventSource, 5);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOTimerEventSource, 6);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOTimerEventSource, 7);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IOKITSTATS</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsInitializeCounter</span>() \
+<span class="enscript-keyword">do</span> { \
+	<span class="enscript-reference">IOStatistics</span>::setCounterType(IOEventSource::reserved-&gt;counter, kIOStatisticsTimerEventSourceCounter); \
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsOpenGate</span>() \
+<span class="enscript-keyword">do</span> { \
+	<span class="enscript-reference">IOStatistics</span>::countOpenGate(me-&gt;IOEventSource::reserved-&gt;counter); \
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsCloseGate</span>() \
+<span class="enscript-keyword">do</span> { \
+	<span class="enscript-reference">IOStatistics</span>::countCloseGate(me-&gt;IOEventSource::reserved-&gt;counter); \
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsTimeout</span>() \
+<span class="enscript-keyword">do</span> { \
+	<span class="enscript-reference">IOStatistics</span>::countTimerTimeout(me-&gt;IOEventSource::reserved-&gt;counter); \
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">else</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsInitializeCounter</span>()
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsOpenGate</span>()
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsCloseGate</span>()
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsTimeout</span>()
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IOKITSTATS */</span>
+
+<span class="enscript-comment">// 
+</span><span class="enscript-comment">// reserved != 0 means IOTimerEventSource::timeoutAndRelease is being used,
+</span><span class="enscript-comment">// not a subclassed implementation. 
+</span><span class="enscript-comment">//
+</span>
+<span class="enscript-comment">// Timeout handler function. This function is called by the kernel when
+</span><span class="enscript-comment">// the timeout interval expires.
+</span><span class="enscript-comment">//
+</span><span class="enscript-type">void</span> <span class="enscript-function-name">IOTimerEventSource::timeout</span>(<span class="enscript-type">void</span> *self)
+{
+    IOTimerEventSource *me = (IOTimerEventSource *) self;
+
+    IOStatisticsTimeout();
+
+    <span class="enscript-keyword">if</span> (me-&gt;enabled &amp;&amp; me-&gt;action)
+    {
+        IOWorkLoop *
+        wl = me-&gt;workLoop;
+        <span class="enscript-keyword">if</span> (wl)
+        {
+            Action doit;
+            wl-&gt;closeGate();
+            IOStatisticsCloseGate();
+            doit = (Action) me-&gt;action;
+            <span class="enscript-keyword">if</span> (doit &amp;&amp; me-&gt;enabled &amp;&amp; AbsoluteTime_to_scalar(&amp;me-&gt;abstime))
+            {
+            	<span class="enscript-type">bool</span>    trace = (gIOKitTrace &amp; kIOTraceTimers) ? true : false;
+            	
+            	<span class="enscript-keyword">if</span> (trace)
+                	IOTimeStampStartConstant(IODBG_TIMES(IOTIMES_ACTION),
+											 VM_KERNEL_UNSLIDE(doit), (uintptr_t) me-&gt;owner);
+				
+                (*doit)(me-&gt;owner, me);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+		DTRACE_TMR3(iotescallout__expire, Action, doit, OSObject, me-&gt;owner, <span class="enscript-type">void</span>, me-&gt;workLoop);
+#<span class="enscript-reference">endif</span>
+                
+				<span class="enscript-keyword">if</span> (trace)
+                	IOTimeStampEndConstant(IODBG_TIMES(IOTIMES_ACTION),
+										   VM_KERNEL_UNSLIDE(doit), (uintptr_t) me-&gt;owner);
+            }
+            IOStatisticsOpenGate();
+            wl-&gt;openGate();
+        }
+    }
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOTimerEventSource::timeoutAndRelease</span>(<span class="enscript-type">void</span> * self, <span class="enscript-type">void</span> * c)
+{
+    IOTimerEventSource *me = (IOTimerEventSource *) self;
+	<span class="enscript-comment">/* The second parameter (a pointer) gets abused to carry an SInt32, so on LP64, &quot;count&quot;
+	   must be cast to &quot;long&quot; before, in order to tell GCC we're not truncating a pointer. */</span>
+	SInt32 count = (SInt32) (<span class="enscript-type">long</span>) c;
+
+    IOStatisticsTimeout();
+	
+    <span class="enscript-keyword">if</span> (me-&gt;enabled &amp;&amp; me-&gt;action)
+    {
+        IOWorkLoop *
+        wl = me-&gt;reserved-&gt;workLoop;
+        <span class="enscript-keyword">if</span> (wl)
+        {
+            Action doit;
+            wl-&gt;closeGate();
+            IOStatisticsCloseGate();
+            doit = (Action) me-&gt;action;
+            <span class="enscript-keyword">if</span> (doit &amp;&amp; (me-&gt;reserved-&gt;calloutGeneration == count))
+            {
+            	<span class="enscript-type">bool</span>    trace = (gIOKitTrace &amp; kIOTraceTimers) ? true : false;
+            	
+            	<span class="enscript-keyword">if</span> (trace)
+                	IOTimeStampStartConstant(IODBG_TIMES(IOTIMES_ACTION),
+											 VM_KERNEL_UNSLIDE(doit), (uintptr_t) me-&gt;owner);
+				
+                (*doit)(me-&gt;owner, me);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+		DTRACE_TMR3(iotescallout__expire, Action, doit, OSObject, me-&gt;owner, <span class="enscript-type">void</span>, me-&gt;workLoop);
+#<span class="enscript-reference">endif</span>
+                
+				<span class="enscript-keyword">if</span> (trace)
+                	IOTimeStampEndConstant(IODBG_TIMES(IOTIMES_ACTION),
+										   VM_KERNEL_UNSLIDE(doit), (uintptr_t) me-&gt;owner);
+            }
+            IOStatisticsOpenGate();
+            wl-&gt;openGate();
+        }
+    }
+
+    me-&gt;reserved-&gt;workLoop-&gt;release();
+    me-&gt;release();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOTimerEventSource::setTimeoutFunc</span>()
+{
+    <span class="enscript-comment">// reserved != 0 means IOTimerEventSource::timeoutAndRelease is being used,
+</span>    <span class="enscript-comment">// not a subclassed implementation
+</span>    reserved = IONew(ExpansionData, 1);
+    calloutEntry = (<span class="enscript-type">void</span> *) thread_call_allocate((thread_call_func_t) &amp;IOTimerEventSource::timeoutAndRelease,
+                                                 (thread_call_param_t) <span class="enscript-keyword">this</span>);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOTimerEventSource::init</span>(OSObject *inOwner, Action inAction)
+{
+    <span class="enscript-keyword">if</span> (!super::init(inOwner, (IOEventSource::Action) inAction) )
+        <span class="enscript-keyword">return</span> false;
+
+    setTimeoutFunc();
+    <span class="enscript-keyword">if</span> (!calloutEntry)
+        <span class="enscript-keyword">return</span> false;
+
+    IOStatisticsInitializeCounter();
+
+    <span class="enscript-keyword">return</span> true;
+}
+
+IOTimerEventSource *
+<span class="enscript-function-name">IOTimerEventSource::timerEventSource</span>(OSObject *inOwner, Action inAction)
+{
+    IOTimerEventSource *me = <span class="enscript-keyword">new</span> IOTimerEventSource;
+
+    <span class="enscript-keyword">if</span> (me &amp;&amp; !me-&gt;init(inOwner, inAction)) {
+        me-&gt;release();
+        <span class="enscript-keyword">return</span> 0;
+    }
+
+    <span class="enscript-keyword">return</span> me;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOTimerEventSource::free</span>()
+{
+    <span class="enscript-keyword">if</span> (calloutEntry) {
+        cancelTimeout();
+        thread_call_free((thread_call_t) calloutEntry);    
+    }
+
+    <span class="enscript-keyword">if</span> (reserved)
+        IODelete(reserved, ExpansionData, 1);
+
+    <span class="enscript-reference">super</span>::free();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOTimerEventSource::cancelTimeout</span>()
+{
+    <span class="enscript-keyword">if</span> (reserved)
+        reserved-&gt;calloutGeneration++;
+    <span class="enscript-type">bool</span> active = thread_call_cancel((thread_call_t) calloutEntry);
+    AbsoluteTime_to_scalar(&amp;abstime) = 0;
+    <span class="enscript-keyword">if</span> (active &amp;&amp; reserved)
+    {
+        release();
+        workLoop-&gt;release();
+    }
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOTimerEventSource::enable</span>()
+{
+    <span class="enscript-reference">super</span>::enable();
+    <span class="enscript-keyword">if</span> (kIOReturnSuccess != wakeAtTime(abstime))
+        <span class="enscript-reference">super</span>::disable(); <span class="enscript-comment">// Problem re-scheduling timeout ignore enable
+</span>}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOTimerEventSource::disable</span>()
+{
+    <span class="enscript-keyword">if</span> (reserved)
+        reserved-&gt;calloutGeneration++;
+    <span class="enscript-type">bool</span> active = thread_call_cancel((thread_call_t) calloutEntry);
+    <span class="enscript-reference">super</span>::disable();
+    <span class="enscript-keyword">if</span> (active &amp;&amp; reserved)
+    {
+        release();
+        workLoop-&gt;release();
+    }
+}
+
+IOReturn <span class="enscript-function-name">IOTimerEventSource::setTimeoutTicks</span>(UInt32 ticks)
+{
+    <span class="enscript-keyword">return</span> setTimeout(ticks, kTickScale);
+}
+
+IOReturn <span class="enscript-function-name">IOTimerEventSource::setTimeoutMS</span>(UInt32 ms)
+{
+    <span class="enscript-keyword">return</span> setTimeout(ms, kMillisecondScale);
+}
+
+IOReturn <span class="enscript-function-name">IOTimerEventSource::setTimeoutUS</span>(UInt32 us)
+{
+    <span class="enscript-keyword">return</span> setTimeout(us, kMicrosecondScale);
+}
+
+IOReturn <span class="enscript-function-name">IOTimerEventSource::setTimeout</span>(UInt32 interval, UInt32 scale_factor)
+{
+    AbsoluteTime end;
+
+    clock_interval_to_deadline(interval, scale_factor, &amp;end);
+    <span class="enscript-keyword">return</span> wakeAtTime(end);
+}
+
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+IOReturn <span class="enscript-function-name">IOTimerEventSource::setTimeout</span>(mach_timespec_t interval)
+{
+    AbsoluteTime end, nsecs;
+
+    clock_interval_to_absolutetime_interval
+        (interval.tv_nsec, kNanosecondScale, &amp;nsecs);
+    clock_interval_to_deadline
+        (interval.tv_sec, NSEC_PER_SEC, &amp;end);
+    ADD_ABSOLUTETIME(&amp;end, &amp;nsecs);
+
+    <span class="enscript-keyword">return</span> wakeAtTime(end);
+}
+#<span class="enscript-reference">endif</span>
+
+IOReturn <span class="enscript-function-name">IOTimerEventSource::setTimeout</span>(AbsoluteTime interval)
+{
+    AbsoluteTime end;
+
+    clock_get_uptime(&amp;end);
+    ADD_ABSOLUTETIME(&amp;end, &amp;interval);
+
+    <span class="enscript-keyword">return</span> wakeAtTime(end);
+}
+
+IOReturn <span class="enscript-function-name">IOTimerEventSource::wakeAtTimeTicks</span>(UInt32 ticks)
+{
+    <span class="enscript-keyword">return</span> wakeAtTime(ticks, kTickScale);
+}
+
+IOReturn <span class="enscript-function-name">IOTimerEventSource::wakeAtTimeMS</span>(UInt32 ms)
+{
+    <span class="enscript-keyword">return</span> wakeAtTime(ms, kMillisecondScale);
+}
+
+IOReturn <span class="enscript-function-name">IOTimerEventSource::wakeAtTimeUS</span>(UInt32 us)
+{
+    <span class="enscript-keyword">return</span> wakeAtTime(us, kMicrosecondScale);
+}
+
+IOReturn <span class="enscript-function-name">IOTimerEventSource::wakeAtTime</span>(UInt32 inAbstime, UInt32 scale_factor)
+{
+    AbsoluteTime end;
+    clock_interval_to_absolutetime_interval(inAbstime, scale_factor, &amp;end);
+
+    <span class="enscript-keyword">return</span> wakeAtTime(end);
+}
+
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+IOReturn <span class="enscript-function-name">IOTimerEventSource::wakeAtTime</span>(mach_timespec_t inAbstime)
+{
+    AbsoluteTime end, nsecs;
+
+    clock_interval_to_absolutetime_interval
+        (inAbstime.tv_nsec, kNanosecondScale, &amp;nsecs);
+    clock_interval_to_absolutetime_interval
+        (inAbstime.tv_sec, kSecondScale, &amp;end);
+    ADD_ABSOLUTETIME(&amp;end, &amp;nsecs);
+
+    <span class="enscript-keyword">return</span> wakeAtTime(end);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOTimerEventSource::setWorkLoop</span>(IOWorkLoop *inWorkLoop)
+{
+    <span class="enscript-reference">super</span>::setWorkLoop(inWorkLoop);
+    <span class="enscript-keyword">if</span> ( enabled &amp;&amp; AbsoluteTime_to_scalar(&amp;abstime) &amp;&amp; workLoop )
+        wakeAtTime(abstime);
+}
+
+IOReturn <span class="enscript-function-name">IOTimerEventSource::wakeAtTime</span>(AbsoluteTime inAbstime)
+{
+    <span class="enscript-keyword">if</span> (!action)
+        <span class="enscript-keyword">return</span> kIOReturnNoResources;
+
+    abstime = inAbstime;
+    <span class="enscript-keyword">if</span> ( enabled &amp;&amp; AbsoluteTime_to_scalar(&amp;inAbstime) &amp;&amp; AbsoluteTime_to_scalar(&amp;abstime) &amp;&amp; workLoop )
+    {
+        <span class="enscript-keyword">if</span> (reserved)
+        {
+            retain();
+            workLoop-&gt;retain();
+            reserved-&gt;workLoop = workLoop;
+            reserved-&gt;calloutGeneration++;
+            <span class="enscript-keyword">if</span> (thread_call_enter1_delayed((thread_call_t) calloutEntry, 
+                    (<span class="enscript-type">void</span> *)(uintptr_t) reserved-&gt;calloutGeneration, inAbstime))
+            {
+                release();
+                workLoop-&gt;release();
+            }
+        }
+        <span class="enscript-keyword">else</span>
+            thread_call_enter_delayed((thread_call_t) calloutEntry, inAbstime);
+    }
+
+    <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+</pre>
+<hr />
+</body></html>

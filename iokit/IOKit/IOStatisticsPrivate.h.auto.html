@@ -1,0 +1,384 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOStatisticsPrivate.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOStatisticsPrivate.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2010 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__IOKIT_STATISTICS_PRIVATE_H</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">__IOKIT_STATISTICS_PRIVATE_H</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IOKITSTATS</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/tree.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSKext.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSDebug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOMemoryDescriptor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOStatistics.h&gt;</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">IOStatisticsPrivate</span>.<span class="enscript-variable-name">h</span> <span class="enscript-variable-name">is</span> <span class="enscript-variable-name">for</span> <span class="enscript-variable-name">kernel</span> <span class="enscript-variable-name">use</span> <span class="enscript-variable-name">only</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* Defines */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IOKIT_STATISTICS_RECORDED_USERCLIENT_PROCS</span> 20
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__probable</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">__probable</span>(x) x
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* Forward declarations */</span>
+class IOWorkLoop;
+class IOUserClient;
+class IOEventSource;
+
+<span class="enscript-type">struct</span> IOEventSourceCounter;
+<span class="enscript-type">struct</span> IOUserClientCounter;
+<span class="enscript-type">struct</span> IOWorkLoopCounter;
+<span class="enscript-type">struct</span> IOUserClientProcessEntry;
+
+<span class="enscript-type">struct</span> KextNode;
+
+<span class="enscript-comment">/* Allocation tracking */</span>
+
+<span class="enscript-type">enum</span> {
+	kIOStatisticsMalloc = 0,
+	kIOStatisticsFree,
+	kIOStatisticsMallocAligned,
+	kIOStatisticsFreeAligned,
+	kIOStatisticsMallocContiguous,
+	kIOStatisticsFreeContiguous,
+	kIOStatisticsMallocPageable,
+	kIOStatisticsFreePageable,
+	kIOStatisticsAllocCount
+};
+
+<span class="enscript-function-name">TAILQ_HEAD</span>(ProcessEntryList, IOUserClientProcessEntry);
+
+<span class="enscript-comment">/* Tree and list structs */</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> ClassNode {
+	RB_ENTRY(ClassNode) tLink;
+	SLIST_ENTRY(ClassNode) lLink;
+	<span class="enscript-type">struct</span> KextNode *parentKext;
+	uint32_t classID;
+	uint32_t superClassID;
+	<span class="enscript-type">const</span> OSMetaClass *metaClass;
+	SLIST_HEAD(, IOEventSourceCounter) counterList;
+	SLIST_HEAD(, IOUserClientCounter) userClientList;
+} ClassNode;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> KextNode {
+	RB_ENTRY(KextNode) link;
+	RB_ENTRY(KextNode) addressLink;
+	OSKext *kext;
+	OSKextLoadTag loadTag;
+	vm_offset_t address;
+	vm_offset_t address_end;
+	uint32_t memoryCounters[kIOStatisticsAllocCount];
+	uint32_t classes;
+	SLIST_HEAD(, ClassNode) classList;
+	SLIST_HEAD(, IOWorkLoopCounter) workLoopList;
+	ProcessEntryList userClientCallList;
+} KextNode;
+
+<span class="enscript-comment">/* User client tracing */</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> IOUserClientProcessEntry {
+	TAILQ_ENTRY(IOUserClientProcessEntry) link;
+	<span class="enscript-type">char</span> processName[kIOStatisticsProcessNameLength];
+	int32_t pid;
+	uint32_t calls;
+} IOUserClientProcessEntry;
+
+<span class="enscript-comment">/* Counters */</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> IOInterruptEventSourceCounter {
+	uint32_t produced;
+	uint32_t checksForWork;
+} IOInterruptEventSourceCounter;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> IOTimerEventSourceCounter {
+	uint32_t timeouts;
+	uint32_t checksForWork;
+} IOTimerEventSourceCounter;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> IOCommandGateCounter {
+	uint32_t actionCalls;
+} IOCommandGateCounter;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> IOCommandQueueCounter {
+	uint32_t actionCalls;
+} IOCommandQueueCounter;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> IOEventSourceCounter {
+	SLIST_ENTRY(IOEventSourceCounter) link;
+	ClassNode *parentClass;
+	IOStatisticsCounterType type;
+	uint64_t startTimeStamp;
+	uint64_t timeOnGate;
+	uint32_t closeGateCalls;
+	uint32_t openGateCalls;
+	<span class="enscript-type">union</span> {
+		IOInterruptEventSourceCounter interrupt;
+		IOInterruptEventSourceCounter filter;
+		IOTimerEventSourceCounter timer;
+		IOCommandGateCounter commandGate;
+		IOCommandQueueCounter commandQueue;
+	} u;
+} IOEventSourceCounter;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> IOWorkLoopDependency {
+	RB_ENTRY(IOWorkLoopDependency) link;
+	OSKextLoadTag loadTag;
+} IOWorkLoopDependency;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> IOWorkLoopCounter {    
+	SLIST_ENTRY(IOWorkLoopCounter) link;
+	KextNode *parentKext;
+	<span class="enscript-type">int</span> attachedEventSources;
+	IOWorkLoop *workLoop;
+	uint64_t startTimeStamp;
+    uint64_t timeOnGate;
+	uint32_t closeGateCalls;
+	uint32_t openGateCalls;
+	<span class="enscript-type">typedef</span> RB_HEAD(DependencyTree, IOWorkLoopDependency) DependencyTreeHead;
+	DependencyTreeHead dependencyHead;
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> loadTagCompare(IOWorkLoopDependency *e1, IOWorkLoopDependency *e2);
+	RB_PROTOTYPE_SC(<span class="enscript-type">static</span>, DependencyTree, IOWorkLoopDependency, dependencyLink, KextTagCompare);
+} IOWorkLoopCounter;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> IOUserClientCounter {
+	SLIST_ENTRY(IOUserClientCounter) link;
+	ClassNode *parentClass;
+	uint32_t clientCalls;
+} IOUserClientCounter;
+
+class IOStatistics {
+	<span class="enscript-type">static</span> bool enabled;
+
+	<span class="enscript-type">static</span> IORWLock *lock;
+
+	<span class="enscript-type">static</span> uint32_t sequenceID;
+
+	<span class="enscript-type">static</span> uint32_t lastKextIndex;
+	<span class="enscript-type">static</span> uint32_t lastClassIndex;
+
+	<span class="enscript-type">static</span> uint32_t loadedKexts;
+	<span class="enscript-type">static</span> uint32_t registeredClasses;
+	<span class="enscript-type">static</span> uint32_t registeredCounters;
+	<span class="enscript-type">static</span> uint32_t registeredWorkloops;
+
+	<span class="enscript-type">static</span> uint32_t attachedEventSources;
+
+	<span class="enscript-type">static</span> KextNode *kextHint;
+	
+	<span class="enscript-type">static</span> IOWorkLoopDependency *nextWorkLoopDependency;
+
+	<span class="enscript-type">typedef</span> RB_HEAD(KextTree, KextNode) KextTreeHead;
+	<span class="enscript-type">static</span> KextTreeHead kextHead;
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> kextNodeCompare(KextNode *e1, KextNode *e2);
+	RB_PROTOTYPE_SC(<span class="enscript-type">static</span>, KextTree, KextNode, link, kextNodeCompare);
+
+	<span class="enscript-type">typedef</span> RB_HEAD(KextAddressTree, KextNode) KextAddressTreeHead;
+	<span class="enscript-type">static</span> KextAddressTreeHead kextAddressHead;
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> kextAddressNodeCompare(KextNode *e1, KextNode *e2);
+	RB_PROTOTYPE_SC(<span class="enscript-type">static</span>, KextAddressTree, KextNode, addressLink, kextAddressNodeCompare);
+
+	<span class="enscript-type">typedef</span> RB_HEAD(ClassTree, ClassNode) ClassTreeHead;
+	<span class="enscript-type">static</span> ClassTreeHead classHead;
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> classNodeCompare(ClassNode *e1, ClassNode *e2);
+	RB_PROTOTYPE_SC(<span class="enscript-type">static</span>, ClassTree, ClassNode, tLink, classNodeCompare);
+
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> oid_sysctl(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, __unused <span class="enscript-type">void</span> *arg1, <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req);
+
+	<span class="enscript-type">static</span> uint32_t copyGlobalStatistics(IOStatisticsGlobal *stats);
+	<span class="enscript-type">static</span> uint32_t copyKextStatistics(IOStatisticsKext *stats);
+	<span class="enscript-type">static</span> uint32_t copyMemoryStatistics(IOStatisticsMemory *stats);
+	<span class="enscript-type">static</span> uint32_t copyClassStatistics(IOStatisticsClass *stats);
+	<span class="enscript-type">static</span> uint32_t copyCounterStatistics(IOStatisticsCounter *stats);
+	<span class="enscript-type">static</span> uint32_t copyKextIdentifiers(IOStatisticsKextIdentifier *kextIDs);
+	<span class="enscript-type">static</span> uint32_t copyClassNames(IOStatisticsClassName *classNames);
+
+	<span class="enscript-type">static</span> uint32_t copyWorkLoopStatistics(IOStatisticsWorkLoop *workLoopStats);
+
+	<span class="enscript-type">static</span> uint32_t copyUserClientStatistics(IOStatisticsUserClientHeader *stats, uint32_t loadTag);
+
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> updateAllocationCounter(vm_offset_t address, uint32_t index, vm_size_t size);
+
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> storeUserClientCallInfo(IOUserClient *userClient, IOUserClientCounter *counter);
+
+	<span class="enscript-type">static</span> KextNode *getKextNodeFromBacktrace(boolean_t write);
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> releaseKextNode(KextNode *node);
+
+<span class="enscript-reference">public</span>:
+	
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> initialize();
+
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> onKextLoad(OSKext *kext, kmod_info_t *kmod_info);
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> onKextUnload(OSKext *kext);
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> onClassAdded(OSKext *parentKext, OSMetaClass *metaClass);
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> onClassRemoved(OSKext *parentKext, OSMetaClass *metaClass);
+
+	<span class="enscript-type">static</span> IOEventSourceCounter *registerEventSource(OSObject *inOwner);
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> unregisterEventSource(IOEventSourceCounter *counter);
+	
+	<span class="enscript-type">static</span> IOWorkLoopCounter *registerWorkLoop(IOWorkLoop *workLoop);
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> unregisterWorkLoop(IOWorkLoopCounter *counter);
+
+	<span class="enscript-type">static</span> IOUserClientCounter *registerUserClient(IOUserClient *userClient);
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> unregisterUserClient(IOUserClientCounter *counter);
+
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> getStatistics(sysctl_req *req);
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> getWorkLoopStatistics(sysctl_req *req);
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> getUserClientStatistics(sysctl_req *req);
+
+	<span class="enscript-comment">/* Inlines for counter manipulation.
+	 * 				
+	 * NOTE: counter access is not expressly guarded here so as not to incur performance penalties
+	 * in the instrumented parent objects. Writes are arranged so as to be protected by pre-existing
+	 * locks in the parent where appropriate, but reads have no such guarantee. Counters should
+	 * therefore be regarded as providing an indication of current state, rather than precisely
+	 * accurate statistics. 
+	 */</span>
+	
+	<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> setCounterType(IOEventSourceCounter *counter, IOStatisticsCounterType type) {
+		<span class="enscript-keyword">if</span> (counter) {
+			counter-&gt;type = type;
+		}
+	}
+
+	<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> countOpenGate(IOEventSourceCounter *counter) {
+		<span class="enscript-keyword">if</span> (counter) {
+			counter-&gt;timeOnGate += mach_absolute_time() - counter-&gt;startTimeStamp;
+			counter-&gt;openGateCalls++;
+		}
+	}
+
+	<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> countCloseGate(IOEventSourceCounter *counter) {
+		<span class="enscript-keyword">if</span> (counter) {
+			counter-&gt;startTimeStamp = mach_absolute_time();
+			counter-&gt;closeGateCalls++;
+		}
+	}
+
+	<span class="enscript-comment">/* Interrupt */</span>
+	<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> countInterruptCheckForWork(IOEventSourceCounter *counter) {
+		<span class="enscript-keyword">if</span> (counter) {
+			counter-&gt;u.interrupt.checksForWork++;
+		}
+	}
+
+	<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> countInterrupt(IOEventSourceCounter *counter) {
+		<span class="enscript-keyword">if</span> (counter) {
+			counter-&gt;u.interrupt.produced++;
+		}
+	}
+
+	<span class="enscript-comment">/* CommandQueue */</span>
+	<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> countCommandQueueActionCall(IOEventSourceCounter *counter) {
+		<span class="enscript-keyword">if</span> (counter) {
+			counter-&gt;u.commandQueue.actionCalls++;
+		}
+	}
+
+	<span class="enscript-comment">/* CommandGate */</span>
+	<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> countCommandGateActionCall(IOEventSourceCounter *counter) {
+		<span class="enscript-keyword">if</span> (counter) {
+			counter-&gt;u.commandGate.actionCalls++;
+		}
+	}
+
+	<span class="enscript-comment">/* Timer */</span>
+	<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> countTimerTimeout(IOEventSourceCounter *counter) {
+		<span class="enscript-keyword">if</span> (counter) {
+			counter-&gt;u.timer.timeouts++;
+		}
+	}
+
+	<span class="enscript-comment">/* WorkLoop */</span>
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> attachWorkLoopEventSource(IOWorkLoopCounter *wlc, IOEventSourceCounter *esc);
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> detachWorkLoopEventSource(IOWorkLoopCounter *wlc, IOEventSourceCounter *esc);
+
+	<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> countWorkLoopOpenGate(IOWorkLoopCounter *counter) {
+		<span class="enscript-keyword">if</span> (counter) {
+			counter-&gt;timeOnGate += mach_absolute_time() - counter-&gt;startTimeStamp;
+			counter-&gt;openGateCalls++;
+		}
+	}
+
+	<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> countWorkLoopCloseGate(IOWorkLoopCounter *counter) {
+		<span class="enscript-keyword">if</span> (counter) {
+			counter-&gt;startTimeStamp = mach_absolute_time();
+			counter-&gt;closeGateCalls++;
+		}
+	}
+
+	<span class="enscript-comment">/* IOLib allocations */</span>	
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> countAlloc(uint32_t index, vm_size_t size);
+
+	<span class="enscript-comment">/* UserClient */</span>
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> countUserClientCall(IOUserClient *client);
+};
+
+#<span class="enscript-reference">else</span>
+
+<span class="enscript-comment">/* Statistics disabled */</span>
+
+class IOStatistics {
+<span class="enscript-reference">public</span>:
+	<span class="enscript-type">static</span> <span class="enscript-type">void</span> initialize() {}
+};
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IOKITSTATS */</span>
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __IOKIT_STATISTICS_PRIVATE_H */</span>
+</pre>
+<hr />
+</body></html>

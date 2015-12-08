@@ -1,0 +1,741 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kxld_symtab.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kxld_symtab.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/loader.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/nlist.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEBUG_ASSERT_COMPONENT_NAME_STRING</span> <span class="enscript-string">&quot;kxld&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;AssertMacros.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_array.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_dict.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_sect.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_sym.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_symtab.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_util.h&quot;</span>
+
+<span class="enscript-type">struct</span> kxld_symtab {
+    KXLDArray syms;
+    KXLDDict cxx_index;
+    KXLDDict name_index;
+    <span class="enscript-type">char</span> *strings;
+    u_int strsize;
+    boolean_t cxx_index_initialized;
+    boolean_t name_index_initialized;
+};
+
+<span class="enscript-comment">/*******************************************************************************
+* Prototypes
+*******************************************************************************/</span>
+
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">init_macho</span>(KXLDSymtab *symtab, <span class="enscript-type">struct</span> symtab_command *src,
+    u_char *macho, KXLDSeg * kernel_linkedit_seg,
+    boolean_t is_32_bit)
+    __attribute__((nonnull(1,2)));
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ILP32</span>
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">init_syms_32</span>(KXLDSymtab *symtab, u_char *macho, u_long offset,
+    u_int nsyms);
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_LP64</span>
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">init_syms_64</span>(KXLDSymtab *symtab, u_char *macho, u_long offset,
+    u_int nsyms);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">restrict_private_symbols</span>(KXLDSymtab *symtab)
+    __attribute__((nonnull));
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">sym_is_defined_cxx</span>(<span class="enscript-type">const</span> KXLDSym *sym);
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">sym_is_name_indexed</span>(<span class="enscript-type">const</span> KXLDSym *sym);
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+size_t
+<span class="enscript-function-name">kxld_symtab_sizeof</span>()
+{
+    <span class="enscript-keyword">return</span> <span class="enscript-keyword">sizeof</span>(KXLDSymtab);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ILP32</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_symtab_init_from_macho_32</span>(KXLDSymtab *symtab, <span class="enscript-type">struct</span> symtab_command *src,
+    u_char *macho, KXLDSeg * kernel_linkedit_seg)
+{
+    <span class="enscript-keyword">return</span> init_macho(symtab, src, macho, kernel_linkedit_seg,
+        <span class="enscript-comment">/* is_32_bit */</span> TRUE);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_ILP32 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_LP64</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_symtab_init_from_macho_64</span>(KXLDSymtab *symtab, <span class="enscript-type">struct</span> symtab_command *src,
+    u_char *macho, KXLDSeg * kernel_linkedit_seg)
+{
+    <span class="enscript-keyword">return</span> init_macho(symtab, src, macho, kernel_linkedit_seg,
+        <span class="enscript-comment">/* is_32_bit */</span> FALSE);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_LP64 */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">init_macho</span>(KXLDSymtab *symtab, <span class="enscript-type">struct</span> symtab_command *src,
+    u_char *macho, KXLDSeg * kernel_linkedit_seg,
+    boolean_t is_32_bit __unused)
+{
+    kern_return_t rval = KERN_FAILURE;
+    u_long symoff;
+    u_char * macho_or_linkedit = macho;
+
+    check(symtab);
+    check(src);
+    check(macho);
+
+    <span class="enscript-comment">/* Initialize the symbol array */</span>
+
+    rval = kxld_array_init(&amp;symtab-&gt;syms, <span class="enscript-keyword">sizeof</span>(KXLDSym), src-&gt;nsyms);
+    require_noerr(rval, finish);
+
+    <span class="enscript-comment">/* Initialize the string table */</span>
+
+    <span class="enscript-keyword">if</span> (kernel_linkedit_seg) {
+
+       <span class="enscript-comment">/* If initing the kernel file in memory, we can't trust
+        * the symtab offsets directly, because the kernel file has been mapped
+        * into memory and the mach-o offsets are disk-based.
+        *
+        * The symoff is an offset relative to the linkedit segment
+        * so we just subtract the fileoffset of the linkedit segment
+        * to get its relative start.
+        *
+        * The strings table is an actual pointer, so we calculate that from
+        * the linkedit's vmaddr.
+        *
+        * Further, the init_syms_... functions need an adjusted base
+        * pointer instead of the beginning of the macho, so we substitute
+        * the base of the linkedit segment.
+        */</span>
+
+        symoff = (u_long)(src-&gt;symoff - kernel_linkedit_seg-&gt;fileoff);
+        symtab-&gt;strings = (<span class="enscript-type">char</span> *)(uintptr_t)kernel_linkedit_seg-&gt;base_addr +
+            src-&gt;stroff - kernel_linkedit_seg-&gt;fileoff;
+        macho_or_linkedit = (u_char *)(uintptr_t)kernel_linkedit_seg-&gt;base_addr;
+    } <span class="enscript-keyword">else</span> {
+        symoff = (u_long)src-&gt;symoff;
+        symtab-&gt;strings = (<span class="enscript-type">char</span> *) (macho + src-&gt;stroff);
+    }
+
+    symtab-&gt;strsize = src-&gt;strsize;
+
+    <span class="enscript-comment">/* Initialize the symbols */</span>
+
+    KXLD_3264_FUNC(is_32_bit, rval,
+        init_syms_32, init_syms_64,
+        symtab, macho_or_linkedit, symoff, src-&gt;nsyms);
+    require_noerr(rval, finish);
+
+    <span class="enscript-comment">/* Some symbols must be forced private for compatibility */</span>
+    (<span class="enscript-type">void</span>) restrict_private_symbols(symtab);
+       
+    <span class="enscript-comment">/* Save the output */</span>
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ILP32</span>
+<span class="enscript-comment">/*******************************************************************************
+* In the running kernel, 'macho' is actually the start of the linkedit segment.
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">init_syms_32</span>(KXLDSymtab *symtab, u_char *macho, u_long offset, u_int nsyms)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDSym *sym = NULL;
+    u_int i = 0;
+    <span class="enscript-type">struct</span> nlist *src_syms = (<span class="enscript-type">struct</span> nlist *) ((<span class="enscript-type">void</span> *) (macho + offset));
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; nsyms; ++i) {
+        sym = kxld_array_get_item(&amp;symtab-&gt;syms, i);
+        require_action(sym, finish, rval=KERN_FAILURE);
+
+        rval = kxld_sym_init_from_macho32(sym, symtab-&gt;strings, &amp;src_syms[i]);
+        require_noerr(rval, finish);
+    }
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_ILP32 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_LP64</span>
+<span class="enscript-comment">/*******************************************************************************
+* In the running kernel, 'macho' is actually the start of the linkedit segment.
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">init_syms_64</span>(KXLDSymtab *symtab, u_char *macho, u_long offset, u_int nsyms)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDSym *sym = NULL;
+    u_int i = 0;
+    <span class="enscript-type">struct</span> nlist_64 *src_syms = (<span class="enscript-type">struct</span> nlist_64 *) ((<span class="enscript-type">void</span> *) (macho + offset));
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; nsyms; ++i) {
+        sym = kxld_array_get_item(&amp;symtab-&gt;syms, i);
+        require_action(sym, finish, rval=KERN_FAILURE);
+
+        rval = kxld_sym_init_from_macho64(sym, symtab-&gt;strings, &amp;src_syms[i]);
+        require_noerr(rval, finish);
+    }
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_LP64 */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+* Temporary workaround for PR-6668105 
+* new, new[], delete, and delete[] may be overridden globally in a kext.
+* We should do this with some sort of weak symbols, but we'll use a whitelist 
+* for now to minimize risk.  
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">restrict_private_symbols</span>(KXLDSymtab *symtab)
+{
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *private_symbols[] = {
+        KXLD_KMOD_INFO_SYMBOL,
+        KXLD_OPERATOR_NEW_SYMBOL,
+        KXLD_OPERATOR_NEW_ARRAY_SYMBOL,
+        KXLD_OPERATOR_DELETE_SYMBOL,
+        KXLD_OPERATOR_DELETE_ARRAY_SYMBOL
+    };
+    KXLDSymtabIterator iter;
+    KXLDSym *sym = NULL;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name = NULL;
+    u_int i = 0;
+
+    kxld_symtab_iterator_init(&amp;iter, symtab, kxld_sym_is_exported, FALSE);
+    <span class="enscript-keyword">while</span> ((sym = kxld_symtab_iterator_get_next(&amp;iter))) {
+        <span class="enscript-keyword">for</span> (i = 0; i &lt; const_array_len(private_symbols); ++i) {
+            name = private_symbols[i];
+            <span class="enscript-keyword">if</span> (!streq(sym-&gt;name, name)) {
+                <span class="enscript-keyword">continue</span>;
+            }
+
+            kxld_sym_mark_private(sym);
+        }
+    }
+}
+
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_symtab_iterator_init</span>(KXLDSymtabIterator *iter, <span class="enscript-type">const</span> KXLDSymtab *symtab,
+    KXLDSymPredicateTest test, boolean_t negate)
+{
+    check(iter);
+    check(symtab);
+    check(test);
+
+    iter-&gt;symtab = symtab;
+    iter-&gt;idx = 0;
+    iter-&gt;test = test;
+    iter-&gt;negate = negate;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">kxld_symtab_clear</span>(KXLDSymtab *symtab)
+{
+    check(symtab);
+
+    kxld_array_clear(&amp;symtab-&gt;syms);
+    kxld_dict_clear(&amp;symtab-&gt;cxx_index);
+    kxld_dict_clear(&amp;symtab-&gt;name_index);
+    symtab-&gt;strings = NULL;
+    symtab-&gt;strsize = 0;
+    symtab-&gt;cxx_index_initialized = 0;
+    symtab-&gt;name_index_initialized = 0;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_symtab_deinit</span>(KXLDSymtab *symtab)
+{
+    check(symtab);
+
+    kxld_array_deinit(&amp;symtab-&gt;syms);
+    kxld_dict_deinit(&amp;symtab-&gt;cxx_index);
+    kxld_dict_deinit(&amp;symtab-&gt;name_index);
+    bzero(symtab, <span class="enscript-keyword">sizeof</span>(*symtab));
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_int
+<span class="enscript-function-name">kxld_symtab_get_num_symbols</span>(<span class="enscript-type">const</span> KXLDSymtab *symtab)
+{
+    check(symtab);
+
+    <span class="enscript-keyword">return</span> symtab-&gt;syms.nitems;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+KXLDSym *
+<span class="enscript-function-name">kxld_symtab_get_symbol_by_index</span>(<span class="enscript-type">const</span> KXLDSymtab *symtab, u_int idx)
+{
+    check(symtab);
+
+    <span class="enscript-keyword">return</span> kxld_array_get_item(&amp;symtab-&gt;syms, idx);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+KXLDSym * 
+<span class="enscript-function-name">kxld_symtab_get_symbol_by_name</span>(<span class="enscript-type">const</span> KXLDSymtab *symtab, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name)
+{
+    KXLDSym *sym = NULL;
+    u_int i = 0;
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; symtab-&gt;syms.nitems; ++i) {
+        sym = kxld_array_get_item(&amp;symtab-&gt;syms, i);
+
+        <span class="enscript-keyword">if</span> (streq(sym-&gt;name, name)) {
+            <span class="enscript-keyword">return</span> sym;
+        }
+    }
+    
+    <span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+KXLDSym *
+<span class="enscript-function-name">kxld_symtab_get_locally_defined_symbol_by_name</span>(<span class="enscript-type">const</span> KXLDSymtab *symtab, 
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name)
+{
+    check(symtab);
+    check(name);
+
+    <span class="enscript-keyword">return</span> kxld_dict_find(&amp;symtab-&gt;name_index, name);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+KXLDSym *
+<span class="enscript-function-name">kxld_symtab_get_cxx_symbol_by_value</span>(<span class="enscript-type">const</span> KXLDSymtab *symtab, kxld_addr_t value)
+{
+    check(symtab);
+
+    <span class="enscript-keyword">return</span> kxld_dict_find(&amp;symtab-&gt;cxx_index, &amp;value);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t 
+<span class="enscript-function-name">kxld_symtab_get_sym_index</span>(<span class="enscript-type">const</span> KXLDSymtab *symtab, <span class="enscript-type">const</span> KXLDSym *sym,
+    u_int *symindex)
+{
+    kern_return_t rval = KERN_FAILURE;
+
+    rval = kxld_array_get_index(&amp;symtab-&gt;syms, sym, symindex);
+    require_noerr(rval, finish);
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_long
+<span class="enscript-function-name">kxld_symtab_get_macho_header_size</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">return</span> <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> symtab_command);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_long 
+<span class="enscript-function-name">kxld_symtab_get_macho_data_size</span>(<span class="enscript-type">const</span> KXLDSymtab *symtab, boolean_t is_32_bit)
+{
+    KXLDSymtabIterator iter;
+    KXLDSym *sym = NULL;
+    u_long size = 1; <span class="enscript-comment">/* strtab start padding */</span>
+    u_int nsyms = 0;
+    
+    check(symtab); 
+
+    kxld_symtab_iterator_init(&amp;iter, symtab, 
+        kxld_sym_is_defined_locally, FALSE);
+
+    <span class="enscript-keyword">while</span> ((sym = kxld_symtab_iterator_get_next(&amp;iter))) {
+        size += strlen(sym-&gt;name) + 1;
+        ++nsyms;
+    }
+
+    <span class="enscript-keyword">if</span> (is_32_bit) {
+        size += nsyms * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> nlist);
+    } <span class="enscript-keyword">else</span> {
+        size += nsyms * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> nlist_64);
+    }
+
+    size = (size + 7) &amp; ~7;
+
+    <span class="enscript-keyword">return</span> size;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_symtab_export_macho</span>(<span class="enscript-type">const</span> KXLDSymtab *symtab, u_char *buf, 
+    u_long *header_offset, u_long header_size,
+    u_long *data_offset, u_long data_size,
+    boolean_t is_32_bit)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDSymtabIterator iter;
+    KXLDSym *sym = NULL;
+    <span class="enscript-type">struct</span> symtab_command *symtabhdr = NULL;
+    u_char *nl = NULL;
+    u_long nlistsize = 0;
+    <span class="enscript-type">char</span> *strtab = NULL;
+    u_long stroff = 1; <span class="enscript-comment">/* strtab start padding */</span>
+
+    check(symtab);
+    check(buf);
+    check(header_offset);
+    check(data_offset);
+
+    require_action(<span class="enscript-keyword">sizeof</span>(*symtabhdr) &lt;= header_size - *header_offset, 
+        finish, rval=KERN_FAILURE);
+    symtabhdr = (<span class="enscript-type">struct</span> symtab_command *) ((<span class="enscript-type">void</span> *) (buf + *header_offset));
+    *header_offset += <span class="enscript-keyword">sizeof</span>(*symtabhdr);
+    
+    <span class="enscript-comment">/* Initialize the symbol table header */</span>
+
+    symtabhdr-&gt;cmd = LC_SYMTAB;
+    symtabhdr-&gt;cmdsize = (uint32_t) <span class="enscript-keyword">sizeof</span>(*symtabhdr);
+    symtabhdr-&gt;symoff = (uint32_t) *data_offset;
+    symtabhdr-&gt;strsize = 1; <span class="enscript-comment">/* strtab start padding */</span>
+    
+    <span class="enscript-comment">/* Find the size of the symbol and string tables */</span>
+
+    kxld_symtab_iterator_init(&amp;iter, symtab, 
+        kxld_sym_is_defined_locally, FALSE);
+
+    <span class="enscript-keyword">while</span> ((sym = kxld_symtab_iterator_get_next(&amp;iter))) {
+        symtabhdr-&gt;nsyms++;
+        symtabhdr-&gt;strsize += (uint32_t) (strlen(sym-&gt;name) + 1);
+    }
+
+    <span class="enscript-keyword">if</span> (is_32_bit) {
+        nlistsize = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> nlist);
+    } <span class="enscript-keyword">else</span> {
+        nlistsize = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> nlist_64);
+    }
+
+    symtabhdr-&gt;stroff = (uint32_t) (symtabhdr-&gt;symoff + 
+        (symtabhdr-&gt;nsyms * nlistsize));
+    require_action(symtabhdr-&gt;stroff + symtabhdr-&gt;strsize &lt;= data_size, finish,
+        rval=KERN_FAILURE);
+
+    <span class="enscript-comment">/* Get pointers to the symbol and string tables */</span>
+
+    nl = buf + symtabhdr-&gt;symoff;
+    strtab = (<span class="enscript-type">char</span> *) (buf + symtabhdr-&gt;stroff);
+
+    <span class="enscript-comment">/* Copy over the symbols */</span>
+
+    kxld_symtab_iterator_reset(&amp;iter);
+    <span class="enscript-keyword">while</span> ((sym = kxld_symtab_iterator_get_next(&amp;iter))) {
+
+        KXLD_3264_FUNC(is_32_bit, rval,
+            kxld_sym_export_macho_32, kxld_sym_export_macho_64,
+            sym, nl, strtab, &amp;stroff, symtabhdr-&gt;strsize);
+        require_noerr(rval, finish);
+
+        nl += nlistsize;
+        stroff += rval;
+    }
+
+    <span class="enscript-comment">/* Update the data offset */</span>
+    *data_offset += (symtabhdr-&gt;nsyms * nlistsize) + stroff;
+
+    *data_offset = (*data_offset + 7) &amp; ~7;
+
+    rval = KERN_SUCCESS;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_int
+<span class="enscript-function-name">kxld_symtab_iterator_get_num_remaining</span>(<span class="enscript-type">const</span> KXLDSymtabIterator *iter)
+{
+    u_int idx = 0;
+    u_int count = 0;
+
+    check(iter);
+
+    <span class="enscript-keyword">for</span> (idx = iter-&gt;idx; idx &lt; iter-&gt;symtab-&gt;syms.nitems; ++idx) {
+        count += iter-&gt;test(kxld_array_get_item(&amp;iter-&gt;symtab-&gt;syms, idx));
+    }
+
+    <span class="enscript-keyword">return</span> count;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_symtab_index_cxx_symbols_by_value</span>(KXLDSymtab *symtab)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDSymtabIterator iter;
+    KXLDSym *sym = NULL;
+    u_int nsyms = 0;
+
+    check(symtab);
+
+    <span class="enscript-keyword">if</span> (symtab-&gt;cxx_index_initialized) {
+        rval = KERN_SUCCESS;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    <span class="enscript-comment">/* Count the number of C++ symbols */</span>
+    kxld_symtab_iterator_init(&amp;iter, symtab, sym_is_defined_cxx, FALSE);
+    nsyms = kxld_symtab_iterator_get_num_remaining(&amp;iter);
+
+    <span class="enscript-comment">/* Create the dictionary */</span>
+    rval = kxld_dict_init(&amp;symtab-&gt;cxx_index, kxld_dict_kxldaddr_hash, 
+        kxld_dict_kxldaddr_cmp, nsyms);
+    require_noerr(rval, finish);
+
+    <span class="enscript-comment">/* Insert the non-stab symbols */</span>
+    <span class="enscript-keyword">while</span> ((sym = kxld_symtab_iterator_get_next(&amp;iter))) {
+        rval = kxld_dict_insert(&amp;symtab-&gt;cxx_index, &amp;sym-&gt;base_addr, sym);
+        require_noerr(rval, finish);
+    }
+
+    symtab-&gt;cxx_index_initialized = TRUE;
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sym_is_defined_cxx</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    <span class="enscript-keyword">return</span> (kxld_sym_is_defined_locally(sym) &amp;&amp; kxld_sym_is_cxx(sym));
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_symtab_index_symbols_by_name</span>(KXLDSymtab *symtab)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDSymtabIterator iter;
+    KXLDSym *sym = NULL;
+    u_int nsyms = 0;
+
+    check(symtab);
+
+    <span class="enscript-keyword">if</span> (symtab-&gt;name_index_initialized) {
+        rval = KERN_SUCCESS;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    <span class="enscript-comment">/* Count the number of symbols we need to index by name */</span>
+    kxld_symtab_iterator_init(&amp;iter, symtab, sym_is_name_indexed, FALSE);
+    nsyms = kxld_symtab_iterator_get_num_remaining(&amp;iter);
+
+    <span class="enscript-comment">/* Create the dictionary */</span>
+    rval = kxld_dict_init(&amp;symtab-&gt;name_index, kxld_dict_string_hash, 
+        kxld_dict_string_cmp, nsyms);
+    require_noerr(rval, finish);
+
+    <span class="enscript-comment">/* Insert the non-stab symbols */</span>
+    <span class="enscript-keyword">while</span> ((sym = kxld_symtab_iterator_get_next(&amp;iter))) {
+        rval = kxld_dict_insert(&amp;symtab-&gt;name_index, sym-&gt;name, sym);
+        require_noerr(rval, finish);
+    }
+
+    symtab-&gt;name_index_initialized = TRUE;
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+
+    <span class="enscript-keyword">return</span> rval;
+}
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">sym_is_name_indexed</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    <span class="enscript-keyword">return</span> (kxld_sym_is_defined_locally(sym) &amp;&amp; !kxld_sym_is_stab(sym));
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_symtab_relocate</span>(KXLDSymtab *symtab, <span class="enscript-type">const</span> KXLDArray *sectarray)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDSymtabIterator iter;
+    KXLDSym *sym = NULL;
+    <span class="enscript-type">const</span> KXLDSect *sect = NULL;
+    
+    check(symtab);
+    check(sectarray);
+
+    kxld_symtab_iterator_init(&amp;iter, symtab, kxld_sym_is_section, FALSE);
+
+    <span class="enscript-keyword">while</span> ((sym = kxld_symtab_iterator_get_next(&amp;iter))) {
+        sect = kxld_array_get_item(sectarray, sym-&gt;sectnum);
+        require_action(sect, finish, rval=KERN_FAILURE);
+        kxld_sym_relocate(sym, sect);
+    }
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+* This extends the symbol table and initializes the new symbol.  We insert the
+* symbol into the name index, but we don't bother with the c++ value index
+* because it is based on the base_addr of the symbol, and the base_addr of
+* all synthesized symbols will be 0.
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_symtab_add_symbol</span>(KXLDSymtab *symtab, <span class="enscript-type">char</span> *name, kxld_addr_t link_addr,
+    KXLDSym **symout)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDSym *sym = NULL;
+    u_int symindex = symtab-&gt;syms.nitems;
+
+    rval = kxld_array_resize(&amp;symtab-&gt;syms, symindex + 1);
+    require_noerr(rval, finish);
+
+    sym = kxld_array_get_item(&amp;symtab-&gt;syms, symindex);
+    kxld_sym_init_absolute(sym, name, link_addr);
+
+    rval = kxld_dict_insert(&amp;symtab-&gt;name_index, sym-&gt;name, sym);
+    require_noerr(rval, finish);
+
+    rval = KERN_SUCCESS;
+    *symout = sym;
+    
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+KXLDSym *
+<span class="enscript-function-name">kxld_symtab_iterator_get_next</span>(KXLDSymtabIterator *iter)
+{
+    KXLDSym *sym = NULL;
+    KXLDSym *tmp = NULL;
+    boolean_t cmp = FALSE;
+
+    check(iter);
+
+    <span class="enscript-keyword">for</span> (; iter-&gt;idx &lt; iter-&gt;symtab-&gt;syms.nitems; ++iter-&gt;idx) {
+        tmp = kxld_array_get_item(&amp;iter-&gt;symtab-&gt;syms, iter-&gt;idx);
+        cmp = iter-&gt;test(tmp);
+        <span class="enscript-keyword">if</span> (iter-&gt;negate) cmp = !cmp;
+
+        <span class="enscript-keyword">if</span> (cmp) {
+            sym = tmp;
+            ++iter-&gt;idx;
+            <span class="enscript-keyword">break</span>;
+        }
+    }
+
+    <span class="enscript-keyword">return</span> sym;   
+}
+
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_symtab_iterator_reset</span>(KXLDSymtabIterator *iter)
+{
+    check(iter);
+    iter-&gt;idx = 0;
+}
+
+</pre>
+<hr />
+</body></html>

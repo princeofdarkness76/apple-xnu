@@ -1,0 +1,456 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kern_acct.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kern_acct.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */</span>
+<span class="enscript-comment">/*-
+ * Copyright (c) 1982, 1986, 1989, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ * (c) UNIX System Laboratories, Inc.
+ * All or some portions of this file are derived from material licensed
+ * to the University of California by American Telephone and Telegraph
+ * Co. or Unix System Laboratories, Inc. and are reproduced herein with
+ * the permission of UNIX System Laboratories, Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)kern_acct.c	8.1 (Berkeley) 6/14/93
+ */</span>
+<span class="enscript-comment">/* HISTORY
+ * 08-May-95  Mac Gillon (mgillon) at NeXT
+ *	Purged old history
+ *  	New version based on 4.4
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/acct.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/resourcevar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/tty.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/spl.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * The routines implemented in this file are described in:
+ *      Leffler, et al.: The Design and Implementation of the 4.3BSD
+ *	    UNIX Operating System (Addison Welley, 1989)
+ * on pages 62-63.
+ *
+ * Arguably, to simplify accounting operations, this mechanism should
+ * be replaced by one in which an accounting log file (similar to /dev/klog)
+ * is read by a user process, etc.  However, that has its own problems.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Internal accounting functions.
+ * The former's operation is described in Leffler, et al., and the latter
+ * was provided by UCB with the 4.4BSD-Lite release
+ */</span>
+comp_t	encode_comp_t(uint32_t, uint32_t);
+<span class="enscript-type">void</span>	acctwatch(<span class="enscript-type">void</span> *);
+<span class="enscript-type">void</span>	acct_init(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/*
+ * Accounting vnode pointer, and suspended accounting vnode pointer.  States
+ * are as follows:
+ *
+ *	acctp		suspend_acctp	state
+ *	-------------	------------	------------------------------
+ *	NULL		NULL		Accounting disabled
+ *	!NULL		NULL		Accounting enabled
+ *	NULL		!NULL		Accounting enabled, but suspended
+ *	!NULL		!NULL		&lt;not allowed&gt;
+ */</span>
+<span class="enscript-type">struct</span>	vnode *acctp;
+<span class="enscript-type">struct</span>	vnode *suspend_acctp;
+
+<span class="enscript-comment">/*
+ * Values associated with enabling and disabling accounting
+ */</span>
+<span class="enscript-type">int</span>	acctsuspend = 2;	<span class="enscript-comment">/* stop accounting when &lt; 2% free space left */</span>
+<span class="enscript-type">int</span>	acctresume = 4;		<span class="enscript-comment">/* resume when free space risen to &gt; 4% */</span>
+<span class="enscript-type">int</span>	acctchkfreq = 15;	<span class="enscript-comment">/* frequency (in seconds) to check space */</span>
+
+
+<span class="enscript-type">static</span> lck_grp_t       *acct_subsys_lck_grp;
+<span class="enscript-type">static</span> lck_mtx_t       *acct_subsys_mutex;
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ACCT_SUBSYS_LOCK</span>() lck_mtx_lock(acct_subsys_mutex)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ACCT_SUBSYS_UNLOCK</span>() lck_mtx_unlock(acct_subsys_mutex)
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">acct_init</span>(<span class="enscript-type">void</span>)
+{
+	acct_subsys_lck_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;acct&quot;</span>, NULL);
+	acct_subsys_mutex = lck_mtx_alloc_init(acct_subsys_lck_grp, NULL);
+}
+
+
+<span class="enscript-comment">/*
+ * Accounting system call.  Written based on the specification and
+ * previous implementation done by Mark Tinguely.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">acct</span>(proc_t p, <span class="enscript-type">struct</span> acct_args *uap, __unused <span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-type">struct</span> nameidata nd;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> vfs_context *ctx; 
+
+	ctx = vfs_context_current();
+
+	<span class="enscript-comment">/* Make sure that the caller is root. */</span>
+	<span class="enscript-keyword">if</span> ((error = suser(vfs_context_ucred(ctx), &amp;p-&gt;p_acflag)))
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-comment">/*
+	 * If accounting is to be started to a file, open that file for
+	 * writing and make sure it's a 'normal'.
+	 */</span>
+	<span class="enscript-keyword">if</span> (uap-&gt;path != USER_ADDR_NULL) {
+		NDINIT(&amp;nd, LOOKUP, OP_OPEN, NOFOLLOW, UIO_USERSPACE, uap-&gt;path, ctx);
+		<span class="enscript-keyword">if</span> ((error = vn_open(&amp;nd, FWRITE, 0)))
+			<span class="enscript-keyword">return</span> (error);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+		error = mac_system_check_acct(vfs_context_ucred(ctx), nd.ni_vp);
+		<span class="enscript-keyword">if</span> (error) {
+			vnode_put(nd.ni_vp);
+			vn_close(nd.ni_vp, FWRITE, ctx);
+			<span class="enscript-keyword">return</span> (error);
+		}
+#<span class="enscript-reference">endif</span>
+		vnode_put(nd.ni_vp);
+
+		<span class="enscript-keyword">if</span> (nd.ni_vp-&gt;v_type != VREG) {
+			vn_close(nd.ni_vp, FWRITE, ctx);
+			<span class="enscript-keyword">return</span> (EACCES);
+		}
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-keyword">else</span> {
+		error = mac_system_check_acct(vfs_context_ucred(ctx), NULL);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * If accounting was previously enabled, kill the old space-watcher,
+	 * close the file, and (if no new file was specified, leave).
+	 */</span>
+	ACCT_SUBSYS_LOCK();
+	<span class="enscript-keyword">if</span> (acctp != NULLVP || suspend_acctp != NULLVP) {
+		untimeout(acctwatch, NULL);
+		error = vn_close((acctp != NULLVP ? acctp : suspend_acctp),
+				FWRITE, vfs_context_current());
+
+		acctp = suspend_acctp = NULLVP;
+	}
+	<span class="enscript-keyword">if</span> (uap-&gt;path == USER_ADDR_NULL) {
+		ACCT_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	<span class="enscript-comment">/*
+	 * Save the new accounting file vnode, and schedule the new
+	 * free space watcher.
+	 */</span>
+	acctp = nd.ni_vp;
+	ACCT_SUBSYS_UNLOCK();
+
+	acctwatch(NULL);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Write out process accounting information, on process exit.
+ * Data to be written out is specified in Leffler, et al.
+ * and are enumerated below.  (They're also noted in the system
+ * &quot;acct.h&quot; header file.)
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">acct_process</span>(proc_t p)
+{
+	<span class="enscript-type">struct</span> acct an_acct;
+	<span class="enscript-type">struct</span> rusage rup, *r;
+	<span class="enscript-type">struct</span> timeval ut, st, tmp;
+	<span class="enscript-type">int</span> t;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> vnode *vp;
+	kauth_cred_t safecred;
+	<span class="enscript-type">struct</span> session * sessp;
+	<span class="enscript-type">struct</span>  tty *tp;
+
+	<span class="enscript-comment">/* If accounting isn't enabled, don't bother */</span>
+	ACCT_SUBSYS_LOCK();
+	vp = acctp;
+	<span class="enscript-keyword">if</span> (vp == NULLVP) {
+		ACCT_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-comment">/*
+	 * Get process accounting information.
+	 */</span>
+
+	<span class="enscript-comment">/* (1) The name of the command that ran */</span>
+	bcopy(p-&gt;p_comm, an_acct.ac_comm, <span class="enscript-keyword">sizeof</span> an_acct.ac_comm);
+
+	<span class="enscript-comment">/* (2) The amount of user and system time that was used */</span>
+	calcru(p, &amp;ut, &amp;st, NULL);
+	an_acct.ac_utime = encode_comp_t(ut.tv_sec, ut.tv_usec);
+	an_acct.ac_stime = encode_comp_t(st.tv_sec, st.tv_usec);
+
+	<span class="enscript-comment">/* (3) The elapsed time the commmand ran (and its starting time) */</span>
+	an_acct.ac_btime = p-&gt;p_start.tv_sec;
+	microtime(&amp;tmp);
+	timevalsub(&amp;tmp, &amp;p-&gt;p_start);
+	an_acct.ac_etime = encode_comp_t(tmp.tv_sec, tmp.tv_usec);
+
+	<span class="enscript-comment">/* (4) The average amount of memory used */</span>
+	proc_lock(p);
+	rup = p-&gt;p_stats-&gt;p_ru;
+	proc_unlock(p);
+	r = &amp;rup;
+	tmp = ut;
+	timevaladd(&amp;tmp, &amp;st);
+	t = tmp.tv_sec * hz + tmp.tv_usec / tick;
+	<span class="enscript-keyword">if</span> (t)
+		an_acct.ac_mem = (r-&gt;ru_ixrss + r-&gt;ru_idrss + r-&gt;ru_isrss) / t;
+	<span class="enscript-keyword">else</span>
+		an_acct.ac_mem = 0;
+
+	<span class="enscript-comment">/* (5) The number of disk I/O operations done */</span>
+	an_acct.ac_io = encode_comp_t(r-&gt;ru_inblock + r-&gt;ru_oublock, 0);
+
+	<span class="enscript-comment">/* (6) The UID and GID of the process */</span>
+	safecred = kauth_cred_proc_ref(p);
+
+	an_acct.ac_uid = kauth_cred_getruid(safecred);
+	an_acct.ac_gid = kauth_cred_getrgid(safecred);
+
+	<span class="enscript-comment">/* (7) The terminal from which the process was started */</span>
+	
+	sessp = proc_session(p);
+	<span class="enscript-keyword">if</span> ((p-&gt;p_flag &amp; P_CONTROLT) &amp;&amp; (sessp != SESSION_NULL) &amp;&amp; ((tp = SESSION_TP(sessp)) != TTY_NULL)) {
+		tty_lock(tp);
+		an_acct.ac_tty = tp-&gt;t_dev;
+		tty_unlock(tp);
+	 }<span class="enscript-keyword">else</span>
+		an_acct.ac_tty = NODEV;
+
+	<span class="enscript-keyword">if</span> (sessp != SESSION_NULL)
+		session_rele(sessp);
+
+	<span class="enscript-comment">/* (8) The boolean flags that tell how the process terminated, etc. */</span>
+	an_acct.ac_flag = p-&gt;p_acflag;
+
+	<span class="enscript-comment">/*
+	 * Now, just write the accounting information to the file.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((error = vnode_getwithref(vp)) == 0) {
+	        error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&amp;an_acct, <span class="enscript-keyword">sizeof</span> (an_acct),
+				(off_t)0, UIO_SYSSPACE, IO_APPEND|IO_UNIT, safecred,
+				(<span class="enscript-type">int</span> *)0, p);
+		vnode_put(vp);
+	}
+
+	kauth_cred_unref(&amp;safecred);
+	ACCT_SUBSYS_UNLOCK();
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Encode_comp_t converts from ticks in seconds and microseconds
+ * to ticks in 1/AHZ seconds.  The encoding is described in
+ * Leffler, et al., on page 63.
+ */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MANTSIZE</span>	13			<span class="enscript-comment">/* 13 bit mantissa. */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">EXPSIZE</span>		3			<span class="enscript-comment">/* Base 8 (3 bit) exponent. */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MAXFRACT</span>	((1 &lt;&lt; MANTSIZE) - 1)	<span class="enscript-comment">/* Maximum fractional value. */</span>
+
+comp_t
+<span class="enscript-function-name">encode_comp_t</span>(uint32_t s, uint32_t us)
+{
+	<span class="enscript-type">int</span> exp, rnd;
+
+	exp = 0;
+	rnd = 0;
+	s *= AHZ;
+	s += us / (1000000 / AHZ);	<span class="enscript-comment">/* Maximize precision. */</span>
+
+	<span class="enscript-keyword">while</span> (s &gt; MAXFRACT) {
+	rnd = s &amp; (1 &lt;&lt; (EXPSIZE - 1));	<span class="enscript-comment">/* Round up? */</span>
+		s &gt;&gt;= EXPSIZE;		<span class="enscript-comment">/* Base 8 exponent == 3 bit shift. */</span>
+		exp++;
+	}
+
+	<span class="enscript-comment">/* If we need to round up, do it (and handle overflow correctly). */</span>
+	<span class="enscript-keyword">if</span> (rnd &amp;&amp; (++s &gt; MAXFRACT)) {
+		s &gt;&gt;= EXPSIZE;
+		exp++;
+	}
+
+	<span class="enscript-comment">/* Clean it up and polish it off. */</span>
+	exp &lt;&lt;= MANTSIZE;		<span class="enscript-comment">/* Shift the exponent into place */</span>
+	exp += s;			<span class="enscript-comment">/* and add on the mantissa. */</span>
+	<span class="enscript-keyword">return</span> (exp);
+}
+
+<span class="enscript-comment">/*
+ * Periodically check the file system to see if accounting
+ * should be turned on or off.  Beware the case where the vnode
+ * has been vgone()'d out from underneath us, e.g. when the file
+ * system containing the accounting file has been forcibly unmounted.
+ */</span>
+<span class="enscript-comment">/* ARGSUSED */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">acctwatch</span>(__unused <span class="enscript-type">void</span> *a)
+{
+	vfs_context_t ctx = vfs_context_current();
+	<span class="enscript-type">struct</span> vfs_attr va;
+
+	VFSATTR_INIT(&amp;va);
+	VFSATTR_WANTED(&amp;va, f_blocks);
+	VFSATTR_WANTED(&amp;va, f_bavail);
+
+	ACCT_SUBSYS_LOCK();
+	<span class="enscript-keyword">if</span> (suspend_acctp != NULLVP) {
+		<span class="enscript-comment">/*
+		 * Resuming accounting when accounting is suspended, and the
+		 * filesystem containing the suspended accounting file goes
+		 * below a low watermark
+		 */</span>
+		<span class="enscript-keyword">if</span> (suspend_acctp-&gt;v_type == VBAD) {
+			(<span class="enscript-type">void</span>) vn_close(suspend_acctp, FWRITE, vfs_context_kernel());
+			suspend_acctp = NULLVP;
+			ACCT_SUBSYS_UNLOCK();
+			<span class="enscript-keyword">return</span>;
+		}
+		(<span class="enscript-type">void</span>)vfs_getattr(suspend_acctp-&gt;v_mount, &amp;va, ctx);
+		<span class="enscript-keyword">if</span> (va.f_bavail &gt; acctresume * va.f_blocks / 100) {
+			acctp = suspend_acctp;
+			suspend_acctp = NULLVP;
+			log(LOG_NOTICE, <span class="enscript-string">&quot;Accounting resumed\n&quot;</span>);
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (acctp != NULLVP) {
+		<span class="enscript-comment">/*
+		 * Suspending accounting when accounting is currently active,
+		 * and the filesystem containing the active accounting file
+		 * goes over a high watermark
+		 */</span>
+		<span class="enscript-keyword">if</span> (acctp-&gt;v_type == VBAD) {
+			(<span class="enscript-type">void</span>) vn_close(acctp, FWRITE, vfs_context_kernel());
+			acctp = NULLVP;
+			ACCT_SUBSYS_UNLOCK();
+			<span class="enscript-keyword">return</span>;
+		}
+		(<span class="enscript-type">void</span>)vfs_getattr(acctp-&gt;v_mount, &amp;va, ctx);
+		<span class="enscript-keyword">if</span> (va.f_bavail &lt;= acctsuspend * va.f_blocks / 100) {
+			suspend_acctp = acctp;
+			acctp = NULLVP;
+			log(LOG_NOTICE, <span class="enscript-string">&quot;Accounting suspended\n&quot;</span>);
+		}
+	} <span class="enscript-keyword">else</span> {
+		ACCT_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span>;
+	}
+	ACCT_SUBSYS_UNLOCK();
+    
+	timeout(acctwatch, NULL, acctchkfreq * hz);
+}
+</pre>
+<hr />
+</body></html>

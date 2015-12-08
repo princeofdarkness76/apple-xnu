@@ -1,0 +1,412 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>profile-kgmon.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">profile-kgmon.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/*
+ * HISTORY
+ * 
+ * Revision 1.1.1.1  1998/09/22 21:05:49  wsanchez
+ * Import of Mac OS X kernel (~semeria)
+ *
+ * Revision 1.1.1.1  1998/03/07 02:26:08  wsanchez
+ * Import of OSF Mach kernel (~mburg)
+ *
+ * Revision 1.1.5.1  1995/01/06  19:54:04  devrcs
+ * 	mk6 CR668 - 1.3b26 merge
+ * 	new file for mk6
+ * 	[1994/10/12  22:25:34  dwm]
+ *
+ * Revision 1.1.2.1  1994/04/08  17:52:05  meissner
+ * 	Add callback function to _profile_kgmon.
+ * 	[1994/02/16  22:38:31  meissner]
+ * 
+ * 	_profile_kgmon now returns pointer to area, doesn't do move itself.
+ * 	[1994/02/11  16:52:17  meissner]
+ * 
+ * 	Move all printfs into if (pv-&gt;debug) { ... } blocks.
+ * 	Add debug printfs protected by if (pv-&gt;debug) for all error conditions.
+ * 	Add code to reset profiling information.
+ * 	Add code to get/set debug flag.
+ * 	Expand copyright.
+ * 	[1994/02/07  12:41:14  meissner]
+ * 
+ * 	Add support to copy arbitrary regions.
+ * 	Delete several of the KGMON_GET commands, now that arb. regions are supported.
+ * 	Explicitly call _profile_update_stats before dumping vars or stats.
+ * 	[1994/02/03  00:59:05  meissner]
+ * 
+ * 	Combine _profile_{vars,stats,md}; Allow more than one _profile_vars.
+ * 	[1994/02/01  12:04:09  meissner]
+ * 
+ * 	CR 10198 - Initial version.
+ * 	[1994/01/28  23:33:37  meissner]
+ * 
+ * $EndLog$
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;profiling/profile-internal.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MACH_KERNEL</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;profiling/machine/profile-md.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">PROFILE_VARS</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PROFILE_VARS</span>(cpu) (&amp;_profile_vars)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Kgmon interface.  This returns the count of bytes moved if everything was ok,
+ * or -1 if there were errors.
+ */</span>
+
+<span class="enscript-type">long</span>
+<span class="enscript-function-name">_profile_kgmon</span>(<span class="enscript-type">int</span> write,
+	       size_t count,
+	       <span class="enscript-type">long</span> indx,
+	       <span class="enscript-type">int</span> max_cpus,
+	       <span class="enscript-type">void</span> **p_ptr,
+	       <span class="enscript-type">void</span> (*control_func)(kgmon_control_t))
+{
+	kgmon_control_t kgmon;
+	<span class="enscript-type">int</span> cpu;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">struct</span> profile_vars *pv;
+	<span class="enscript-type">static</span> <span class="enscript-type">struct</span> callback dummy_callback;
+
+	*p_ptr = (<span class="enscript-type">void</span> *)0;
+
+	<span class="enscript-comment">/*
+	 * If the number passed is not within bounds, just copy the data directly.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (!LEGAL_KGMON(indx)) {
+		*p_ptr = (<span class="enscript-type">void</span> *)indx;
+		<span class="enscript-keyword">if</span> (!write) {
+			<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+				printf(<span class="enscript-string">&quot;_profile_kgmon: copy %5ld bytes, from 0x%lx\n&quot;</span>,
+				       (<span class="enscript-type">long</span>)count,
+				       (<span class="enscript-type">long</span>)indx);
+			}
+
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+				printf(<span class="enscript-string">&quot;_profile_kgmon: copy %5ld bytes, to 0x%lx\n&quot;</span>,
+				       (<span class="enscript-type">long</span>)count,
+				       (<span class="enscript-type">long</span>)indx);
+			}
+		}			
+
+		<span class="enscript-keyword">return</span> count;
+	}
+
+	<span class="enscript-comment">/*
+	 * Decode the record number into the component pieces.
+	 */</span>
+
+	DECODE_KGMON(indx, kgmon, cpu);
+
+	<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+		printf(<span class="enscript-string">&quot;_profile_kgmon: start: kgmon control = %2d, cpu = %d, count = %ld\n&quot;</span>,
+		       kgmon, cpu, (<span class="enscript-type">long</span>)count);
+	}
+
+	<span class="enscript-comment">/* Validate the CPU number */</span>
+	<span class="enscript-keyword">if</span> (cpu &lt; 0 || cpu &gt;= max_cpus) {
+		<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+			printf(<span class="enscript-string">&quot;KGMON, bad cpu %d\n&quot;</span>, cpu);
+		}
+
+		<span class="enscript-keyword">return</span> -1;
+
+	} <span class="enscript-keyword">else</span> {
+		pv = PROFILE_VARS(cpu);
+
+		<span class="enscript-keyword">if</span> (!write) {
+			<span class="enscript-keyword">switch</span> (kgmon) {
+			<span class="enscript-reference">default</span>:
+				<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+					printf(<span class="enscript-string">&quot;Unknown KGMON read command\n&quot;</span>);
+				}
+
+				error = -1;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">KGMON_GET_STATUS</span>:		<span class="enscript-comment">/* return whether or not profiling is active */</span>
+				<span class="enscript-keyword">if</span> (cpu != 0) {
+					<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+						printf(<span class="enscript-string">&quot;KGMON_GET_STATUS: cpu = %d\n&quot;</span>, cpu);
+					}
+
+					error = -1;
+					<span class="enscript-keyword">break</span>;
+				}
+
+				<span class="enscript-keyword">if</span> (count != <span class="enscript-keyword">sizeof</span>(pv-&gt;active)) {
+					<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+						printf(<span class="enscript-string">&quot;KGMON_GET_STATUS: count = %ld, should be %ld\n&quot;</span>,
+						       (<span class="enscript-type">long</span>)count,
+						       (<span class="enscript-type">long</span>)<span class="enscript-keyword">sizeof</span>(pv-&gt;active));
+					}
+
+					error = -1;
+					<span class="enscript-keyword">break</span>;
+				}
+
+				*p_ptr = (<span class="enscript-type">void</span> *)&amp;pv-&gt;active;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">KGMON_GET_DEBUG</span>:		<span class="enscript-comment">/* return whether or not debugging is active */</span>
+				<span class="enscript-keyword">if</span> (cpu != 0) {
+					<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+						printf(<span class="enscript-string">&quot;KGMON_GET_DEBUG: cpu = %d\n&quot;</span>, cpu);
+					}
+
+					error = -1;
+					<span class="enscript-keyword">break</span>;
+				}
+
+				<span class="enscript-keyword">if</span> (count != <span class="enscript-keyword">sizeof</span>(pv-&gt;debug)) {
+					<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+						printf(<span class="enscript-string">&quot;KGMON_GET_DEBUG: count = %ld, should be %ld\n&quot;</span>,
+						       (<span class="enscript-type">long</span>)count,
+						       (<span class="enscript-type">long</span>)<span class="enscript-keyword">sizeof</span>(pv-&gt;active));
+					}
+
+					error = -1;
+					<span class="enscript-keyword">break</span>;
+				}
+
+				*p_ptr = (<span class="enscript-type">void</span> *)&amp;pv-&gt;debug;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">KGMON_GET_PROFILE_VARS</span>:	<span class="enscript-comment">/* return the _profile_vars structure */</span>
+				<span class="enscript-keyword">if</span> (count != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> profile_vars)) {
+					<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+						printf(<span class="enscript-string">&quot;KGMON_GET_PROFILE_VARS: count = %ld, should be %ld\n&quot;</span>,
+						       (<span class="enscript-type">long</span>)count,
+						       (<span class="enscript-type">long</span>)<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> profile_vars));
+					}
+
+					error = -1;
+					<span class="enscript-keyword">break</span>;
+				}
+
+				_profile_update_stats(pv);
+				*p_ptr = (<span class="enscript-type">void</span> *)pv;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">KGMON_GET_PROFILE_STATS</span>:	<span class="enscript-comment">/* return the _profile_stats structure */</span>
+				<span class="enscript-keyword">if</span> (count != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> profile_stats)) {
+					<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+						printf(<span class="enscript-string">&quot;KGMON_GET_PROFILE_STATS: count = %ld, should be = %ld\n&quot;</span>,
+						       (<span class="enscript-type">long</span>)count,
+						       (<span class="enscript-type">long</span>)<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> profile_stats));
+					}
+
+					error = -1;
+					<span class="enscript-keyword">break</span>;
+				}
+
+				_profile_update_stats(pv);
+				*p_ptr = (<span class="enscript-type">void</span> *)&amp;pv-&gt;stats;
+				<span class="enscript-keyword">break</span>;
+			}
+
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">switch</span> (kgmon) {
+			<span class="enscript-reference">default</span>:
+				<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+					printf(<span class="enscript-string">&quot;Unknown KGMON write command\n&quot;</span>);
+				}
+
+				error = -1;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">KGMON_SET_PROFILE_ON</span>:	<span class="enscript-comment">/* turn on profiling */</span>
+				<span class="enscript-keyword">if</span> (cpu != 0) {
+					<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+						printf(<span class="enscript-string">&quot;KGMON_SET_PROFILE_ON, cpu = %d\n&quot;</span>, cpu);
+					}
+
+					error = -1;
+					<span class="enscript-keyword">break</span>;
+				}
+
+				<span class="enscript-keyword">if</span> (!PROFILE_VARS(0)-&gt;active) {
+					<span class="enscript-keyword">for</span> (i = 0; i &lt; max_cpus; i++) {
+						PROFILE_VARS(i)-&gt;active = 1;
+					}
+
+					<span class="enscript-keyword">if</span> (control_func) {
+						(*control_func)(kgmon);
+					}
+
+					_profile_md_start();
+				}
+
+				count = 0;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">KGMON_SET_PROFILE_OFF</span>:	<span class="enscript-comment">/* turn off profiling */</span>
+				<span class="enscript-keyword">if</span> (cpu != 0) {
+					<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+						printf(<span class="enscript-string">&quot;KGMON_SET_PROFILE_OFF, cpu = %d\n&quot;</span>, cpu);
+					}
+
+					error = -1;
+					<span class="enscript-keyword">break</span>;
+				}
+
+				<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;active) {
+					<span class="enscript-keyword">for</span> (i = 0; i &lt; max_cpus; i++) {
+						PROFILE_VARS(i)-&gt;active = 0;
+					}
+
+					_profile_md_stop();
+
+					<span class="enscript-keyword">if</span> (control_func) {
+						(*control_func)(kgmon);
+					}
+				}
+
+				count = 0;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">KGMON_SET_PROFILE_RESET</span>:	<span class="enscript-comment">/* reset profiling */</span>
+				<span class="enscript-keyword">if</span> (cpu != 0) {
+					<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+						printf(<span class="enscript-string">&quot;KGMON_SET_PROFILE_RESET, cpu = %d\n&quot;</span>, cpu);
+					}
+
+					error = -1;
+					<span class="enscript-keyword">break</span>;
+				}
+
+				<span class="enscript-keyword">for</span> (i = 0; i &lt; max_cpus; i++) {
+					_profile_reset(PROFILE_VARS(i));
+				}
+
+				<span class="enscript-keyword">if</span> (control_func) {
+					(*control_func)(kgmon);
+				}
+
+				count = 0;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">KGMON_SET_DEBUG_ON</span>:	<span class="enscript-comment">/* turn on profiling */</span>
+				<span class="enscript-keyword">if</span> (cpu != 0) {
+					<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+						printf(<span class="enscript-string">&quot;KGMON_SET_DEBUG_ON, cpu = %d\n&quot;</span>, cpu);
+					}
+
+					error = -1;
+					<span class="enscript-keyword">break</span>;
+				}
+
+				<span class="enscript-keyword">if</span> (!PROFILE_VARS(0)-&gt;debug) {
+					<span class="enscript-keyword">for</span> (i = 0; i &lt; max_cpus; i++) {
+						PROFILE_VARS(i)-&gt;debug = 1;
+					}
+
+					<span class="enscript-keyword">if</span> (control_func) {
+						(*control_func)(kgmon);
+					}
+				}
+
+				count = 0;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">KGMON_SET_DEBUG_OFF</span>:	<span class="enscript-comment">/* turn off profiling */</span>
+				<span class="enscript-keyword">if</span> (cpu != 0) {
+					<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+						printf(<span class="enscript-string">&quot;KGMON_SET_DEBUG_OFF, cpu = %d\n&quot;</span>, cpu);
+					}
+
+					error = -1;
+					<span class="enscript-keyword">break</span>;
+				}
+
+				<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+					<span class="enscript-keyword">for</span> (i = 0; i &lt; max_cpus; i++) {
+						PROFILE_VARS(i)-&gt;debug = 0;
+					}
+
+					<span class="enscript-keyword">if</span> (control_func) {
+						(*control_func)(kgmon);
+					}
+				}
+
+				count = 0;
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+			printf(<span class="enscript-string">&quot;_profile_kgmon: done:  kgmon control = %2d, cpu = %d, error = %d\n&quot;</span>,
+			       kgmon, cpu, error);
+		}
+
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-keyword">if</span> (PROFILE_VARS(0)-&gt;debug) {
+		printf(<span class="enscript-string">&quot;_profile_kgmon: done:  kgmon control = %2d, cpu = %d, count = %ld\n&quot;</span>,
+		       kgmon, cpu, (<span class="enscript-type">long</span>)count);
+	}
+
+	<span class="enscript-keyword">return</span> count;
+}
+</pre>
+<hr />
+</body></html>

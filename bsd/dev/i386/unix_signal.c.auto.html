@@ -1,0 +1,846 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>unix_signal.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">unix_signal.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* 
+ * Copyright (c) 1992 NeXT, Inc.
+ *
+ * HISTORY
+ * 13 May 1992 ? at NeXT
+ *	Created.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/exception.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysent.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ucontext.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/wait.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act.h&gt;</span>	<span class="enscript-comment">/* for thread_abort_safely */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_status.h&gt;</span>	
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/eflags.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/psl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/seg.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/pal_routines.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sdt.h&gt;</span>
+
+
+<span class="enscript-comment">/* Forward: */</span>
+<span class="enscript-type">extern</span> boolean_t <span class="enscript-function-name">machine_exception</span>(<span class="enscript-type">int</span>, mach_exception_code_t, 
+		mach_exception_subcode_t, <span class="enscript-type">int</span> *, mach_exception_subcode_t *);
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">thread_getstatus</span>(<span class="enscript-type">register</span> thread_t act, <span class="enscript-type">int</span> flavor,
+			thread_state_t tstate, mach_msg_type_number_t *count);
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">thread_setstatus</span>(thread_t thread, <span class="enscript-type">int</span> flavor,
+			thread_state_t tstate, mach_msg_type_number_t count);
+
+<span class="enscript-comment">/* Signal handler flavors supported */</span>
+<span class="enscript-comment">/* These defns should match the Libc implmn */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">UC_TRAD</span>			1
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">UC_FLAVOR</span>		30
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">UC_SET_ALT_STACK</span>	0x40000000
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">UC_RESET_ALT_STACK</span>	0x80000000
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">C_32_STK_ALIGN</span>		16
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">C_64_STK_ALIGN</span>		16
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">C_64_REDZONE_LEN</span>	128
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TRUNC_DOWN32</span>(a,c)	((((uint32_t)a)-(c)) &amp; ((uint32_t)(-(c))))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TRUNC_DOWN64</span>(a,c)	((((uint64_t)a)-(c)) &amp; ((uint64_t)(-(c))))
+
+<span class="enscript-comment">/*
+ * Send an interrupt to process.
+ *
+ * Stack is set up to allow sigcode stored
+ * in u. to call routine, followed by chmk
+ * to sigreturn routine below.  After sigreturn
+ * resets the signal mask, the stack, the frame 
+ * pointer, and the argument pointer, it returns
+ * to the user specified pc, psl.
+ */</span>
+<span class="enscript-type">struct</span> sigframe32 {
+	<span class="enscript-type">int</span>		retaddr;
+	user32_addr_t	catcher; <span class="enscript-comment">/* sig_t */</span>
+	<span class="enscript-type">int</span>		sigstyle;
+	<span class="enscript-type">int</span>		sig;
+	user32_addr_t	sinfo;	<span class="enscript-comment">/* siginfo32_t* */</span>
+	user32_addr_t	uctx;	<span class="enscript-comment">/* struct ucontext32 */</span>
+};
+
+<span class="enscript-comment">/*
+ * NOTE: Source and target may *NOT* overlap!
+ * XXX: Unify with bsd/kern/kern_exit.c
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">siginfo_user_to_user32_x86</span>(user_siginfo_t *in, user32_siginfo_t *out)
+{
+	out-&gt;si_signo	= in-&gt;si_signo;
+	out-&gt;si_errno	= in-&gt;si_errno;
+	out-&gt;si_code	= in-&gt;si_code;
+	out-&gt;si_pid	= in-&gt;si_pid;
+	out-&gt;si_uid	= in-&gt;si_uid;
+	out-&gt;si_status	= in-&gt;si_status;
+	out-&gt;si_addr	= CAST_DOWN_EXPLICIT(user32_addr_t,in-&gt;si_addr);
+	<span class="enscript-comment">/* following cast works for sival_int because of padding */</span>
+	out-&gt;si_value.sival_ptr	= CAST_DOWN_EXPLICIT(user32_addr_t,in-&gt;si_value.sival_ptr);
+	out-&gt;si_band	= in-&gt;si_band;			<span class="enscript-comment">/* range reduction */</span>
+	out-&gt;__pad[0]	= in-&gt;pad[0];			<span class="enscript-comment">/* mcontext.ss.r1 */</span>
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">siginfo_user_to_user64_x86</span>(user_siginfo_t *in, user64_siginfo_t *out)
+{
+	out-&gt;si_signo	= in-&gt;si_signo;
+	out-&gt;si_errno	= in-&gt;si_errno;
+	out-&gt;si_code	= in-&gt;si_code;
+	out-&gt;si_pid	= in-&gt;si_pid;
+	out-&gt;si_uid	= in-&gt;si_uid;
+	out-&gt;si_status	= in-&gt;si_status;
+	out-&gt;si_addr	= in-&gt;si_addr;
+	out-&gt;si_value.sival_ptr	= in-&gt;si_value.sival_ptr;
+	out-&gt;si_band	= in-&gt;si_band;			<span class="enscript-comment">/* range reduction */</span>
+	out-&gt;__pad[0]	= in-&gt;pad[0];			<span class="enscript-comment">/* mcontext.ss.r1 */</span>
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sendsig</span>(<span class="enscript-type">struct</span> proc *p, user_addr_t ua_catcher, <span class="enscript-type">int</span> sig, <span class="enscript-type">int</span> mask, __unused uint32_t code)
+{
+	<span class="enscript-type">union</span> {
+		<span class="enscript-type">struct</span> mcontext_avx32	mctx_avx32;
+		<span class="enscript-type">struct</span> mcontext_avx64	mctx_avx64;
+	} mctx_store, *mctxp = &amp;mctx_store;
+
+	user_addr_t	ua_sp;
+	user_addr_t	ua_fp;
+	user_addr_t	ua_cr2;
+	user_addr_t	ua_sip;
+	user_addr_t 	ua_uctxp;
+	user_addr_t	ua_mctxp;
+	user_siginfo_t	sinfo64;
+
+	<span class="enscript-type">struct</span> sigacts *ps = p-&gt;p_sigacts;
+	<span class="enscript-type">int</span> oonstack, flavor; 
+	user_addr_t trampact;
+	<span class="enscript-type">int</span> sigonstack;
+	<span class="enscript-type">void</span> * state;
+	mach_msg_type_number_t state_count;
+
+	thread_t thread;
+	<span class="enscript-type">struct</span> uthread * ut;
+	<span class="enscript-type">int</span> stack_size = 0;
+	<span class="enscript-type">int</span> infostyle = UC_TRAD;
+	boolean_t	sig_avx;
+
+	thread = current_thread();
+	ut = get_bsdthread_info(thread);
+
+	<span class="enscript-keyword">if</span> (p-&gt;p_sigacts-&gt;ps_siginfo &amp; sigmask(sig))
+		infostyle = UC_FLAVOR;
+
+	oonstack = ut-&gt;uu_sigstk.ss_flags &amp; SA_ONSTACK;
+	trampact = ps-&gt;ps_trampact[sig];
+	sigonstack = (ps-&gt;ps_sigonstack &amp; sigmask(sig));
+
+	<span class="enscript-comment">/*
+	 * init siginfo
+	 */</span>
+	proc_unlock(p);
+
+	bzero((caddr_t)&amp;sinfo64, <span class="enscript-keyword">sizeof</span>(sinfo64));
+	sinfo64.si_signo = sig;
+
+	bzero(mctxp, <span class="enscript-keyword">sizeof</span>(*mctxp));
+	sig_avx = ml_fpu_avx_enabled();
+
+	<span class="enscript-keyword">if</span> (proc_is64bit(p)) {
+	        x86_thread_state64_t	*tstate64;
+	        <span class="enscript-type">struct</span> user_ucontext64 	uctx64;
+
+	        flavor = x86_THREAD_STATE64;
+		state_count = x86_THREAD_STATE64_COUNT;
+		state = (<span class="enscript-type">void</span> *)&amp;mctxp-&gt;mctx_avx64.ss;
+		<span class="enscript-keyword">if</span> (thread_getstatus(thread, flavor, (thread_state_t)state, &amp;state_count) != KERN_SUCCESS)
+		        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+		<span class="enscript-keyword">if</span> (sig_avx) {
+			flavor = x86_AVX_STATE64;
+			state_count = x86_AVX_STATE64_COUNT;
+		}
+		<span class="enscript-keyword">else</span> {
+			flavor = x86_FLOAT_STATE64;
+			state_count = x86_FLOAT_STATE64_COUNT;
+		}
+		state = (<span class="enscript-type">void</span> *)&amp;mctxp-&gt;mctx_avx64.fs;
+		<span class="enscript-keyword">if</span> (thread_getstatus(thread, flavor, (thread_state_t)state, &amp;state_count) != KERN_SUCCESS)
+		        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+		flavor = x86_EXCEPTION_STATE64;
+		state_count = x86_EXCEPTION_STATE64_COUNT;
+		state = (<span class="enscript-type">void</span> *)&amp;mctxp-&gt;mctx_avx64.es;
+		<span class="enscript-keyword">if</span> (thread_getstatus(thread, flavor, (thread_state_t)state, &amp;state_count) != KERN_SUCCESS)
+		        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+		tstate64 = &amp;mctxp-&gt;mctx_avx64.ss;
+
+		<span class="enscript-comment">/* figure out where our new stack lives */</span>
+		<span class="enscript-keyword">if</span> ((ut-&gt;uu_flag &amp; UT_ALTSTACK) &amp;&amp; !oonstack &amp;&amp;
+		    (sigonstack)) {
+			ua_sp = ut-&gt;uu_sigstk.ss_sp;
+			stack_size = ut-&gt;uu_sigstk.ss_size;
+			ua_sp += stack_size;
+			ut-&gt;uu_sigstk.ss_flags |= SA_ONSTACK;
+		} <span class="enscript-keyword">else</span> {
+		        ua_sp = tstate64-&gt;rsp;
+		}
+		ua_cr2 = mctxp-&gt;mctx_avx64.es.faultvaddr;
+
+		<span class="enscript-comment">/* The x86_64 ABI defines a 128-byte red zone. */</span>
+		ua_sp -= C_64_REDZONE_LEN;
+
+		ua_sp -= <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> user_ucontext64);
+		ua_uctxp = ua_sp;			 <span class="enscript-comment">// someone tramples the first word!
+</span>
+		ua_sp -= <span class="enscript-keyword">sizeof</span> (user64_siginfo_t);
+		ua_sip = ua_sp;
+
+		ua_sp -= <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> mcontext_avx64);
+		ua_mctxp = ua_sp;
+
+		<span class="enscript-comment">/*
+		 * Align the frame and stack pointers to 16 bytes for SSE.
+		 * (Note that we use 'ua_fp' as the base of the stack going forward)
+		 */</span>
+		ua_fp = TRUNC_DOWN64(ua_sp, C_64_STK_ALIGN);
+
+		<span class="enscript-comment">/*
+		 * But we need to account for the return address so the alignment is
+		 * truly &quot;correct&quot; at _sigtramp
+		 */</span>
+		ua_fp -= <span class="enscript-keyword">sizeof</span>(user_addr_t);
+
+		<span class="enscript-comment">/*
+		 * Build the signal context to be used by sigreturn.
+		 */</span>
+		bzero(&amp;uctx64, <span class="enscript-keyword">sizeof</span>(uctx64));
+
+		uctx64.uc_onstack = oonstack;
+		uctx64.uc_sigmask = mask;
+		uctx64.uc_stack.ss_sp = ua_fp;
+		uctx64.uc_stack.ss_size = stack_size;
+
+		<span class="enscript-keyword">if</span> (oonstack)
+		        uctx64.uc_stack.ss_flags |= SS_ONSTACK;	
+		uctx64.uc_link = 0;
+
+		uctx64.uc_mcsize = sig_avx ? <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> mcontext_avx64) : <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> mcontext64);
+		uctx64.uc_mcontext64 = ua_mctxp;
+		
+		<span class="enscript-keyword">if</span> (copyout((caddr_t)&amp;uctx64, ua_uctxp, <span class="enscript-keyword">sizeof</span> (uctx64))) 
+		        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+		<span class="enscript-keyword">if</span> (copyout((caddr_t)&amp;mctxp-&gt;mctx_avx64, ua_mctxp, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> mcontext_avx64))) 
+		        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+		sinfo64.pad[0]  = tstate64-&gt;rsp;
+		sinfo64.si_addr = tstate64-&gt;rip;
+
+		tstate64-&gt;rip = trampact;
+		tstate64-&gt;rsp = ua_fp;
+		tstate64-&gt;rflags = get_eflags_exportmask();
+		<span class="enscript-comment">/*
+		 * JOE - might not need to set these
+		 */</span>
+		tstate64-&gt;cs = USER64_CS;
+		tstate64-&gt;fs = NULL_SEG;
+		tstate64-&gt;gs = USER_CTHREAD;
+
+		<span class="enscript-comment">/* 
+		 * Build the argument list for the signal handler.
+		 * Handler should call sigreturn to get out of it
+		 */</span>
+		tstate64-&gt;rdi = ua_catcher;
+		tstate64-&gt;rsi = infostyle;
+		tstate64-&gt;rdx = sig;
+		tstate64-&gt;rcx = ua_sip;
+		tstate64-&gt;r8  = ua_uctxp;
+
+	} <span class="enscript-keyword">else</span> {
+	        x86_thread_state32_t	*tstate32;
+	        <span class="enscript-type">struct</span> user_ucontext32 	uctx32;
+		<span class="enscript-type">struct</span> sigframe32	frame32;
+
+	        flavor = x86_THREAD_STATE32;
+		state_count = x86_THREAD_STATE32_COUNT;
+		state = (<span class="enscript-type">void</span> *)&amp;mctxp-&gt;mctx_avx32.ss;
+		<span class="enscript-keyword">if</span> (thread_getstatus(thread, flavor, (thread_state_t)state, &amp;state_count) != KERN_SUCCESS)
+		        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+		<span class="enscript-keyword">if</span> (sig_avx) {
+			flavor = x86_AVX_STATE32;
+			state_count = x86_AVX_STATE32_COUNT;
+		}
+		<span class="enscript-keyword">else</span> {
+			flavor = x86_FLOAT_STATE32;
+			state_count = x86_FLOAT_STATE32_COUNT;
+		}
+
+		state = (<span class="enscript-type">void</span> *)&amp;mctxp-&gt;mctx_avx32.fs;
+		<span class="enscript-keyword">if</span> (thread_getstatus(thread, flavor, (thread_state_t)state, &amp;state_count) != KERN_SUCCESS)
+		        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+		flavor = x86_EXCEPTION_STATE32;
+		state_count = x86_EXCEPTION_STATE32_COUNT;
+		state = (<span class="enscript-type">void</span> *)&amp;mctxp-&gt;mctx_avx32.es;
+		<span class="enscript-keyword">if</span> (thread_getstatus(thread, flavor, (thread_state_t)state, &amp;state_count) != KERN_SUCCESS)
+		        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+		tstate32 = &amp;mctxp-&gt;mctx_avx32.ss;
+
+		<span class="enscript-comment">/* figure out where our new stack lives */</span>
+		<span class="enscript-keyword">if</span> ((ut-&gt;uu_flag &amp; UT_ALTSTACK) &amp;&amp; !oonstack &amp;&amp;
+		    (sigonstack)) {
+			ua_sp = ut-&gt;uu_sigstk.ss_sp;
+			stack_size = ut-&gt;uu_sigstk.ss_size;
+			ua_sp += stack_size;
+			ut-&gt;uu_sigstk.ss_flags |= SA_ONSTACK;
+		} <span class="enscript-keyword">else</span> {
+		        ua_sp = tstate32-&gt;esp;
+		}
+		ua_cr2 = mctxp-&gt;mctx_avx32.es.faultvaddr;
+
+		ua_sp -= <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> user_ucontext32);
+		ua_uctxp = ua_sp;			 <span class="enscript-comment">// someone tramples the first word!
+</span>
+		ua_sp -= <span class="enscript-keyword">sizeof</span> (user32_siginfo_t);
+		ua_sip = ua_sp;
+
+		ua_sp -= <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> mcontext_avx32);
+		ua_mctxp = ua_sp;
+
+		ua_sp -= <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sigframe32);
+		ua_fp = ua_sp;
+
+		<span class="enscript-comment">/*
+		 * Align the frame and stack pointers to 16 bytes for SSE.
+		 * (Note that we use 'fp' as the base of the stack going forward)
+		 */</span>
+		ua_fp = TRUNC_DOWN32(ua_fp, C_32_STK_ALIGN);
+
+		<span class="enscript-comment">/*
+		 * But we need to account for the return address so the alignment is
+		 * truly &quot;correct&quot; at _sigtramp
+		 */</span>
+		ua_fp -= <span class="enscript-keyword">sizeof</span>(frame32.retaddr);
+
+		<span class="enscript-comment">/* 
+		 * Build the argument list for the signal handler.
+		 * Handler should call sigreturn to get out of it
+		 */</span>
+		frame32.retaddr = -1;	
+		frame32.sigstyle = infostyle;
+		frame32.sig = sig;
+		frame32.catcher = CAST_DOWN_EXPLICIT(user32_addr_t, ua_catcher);
+		frame32.sinfo = CAST_DOWN_EXPLICIT(user32_addr_t, ua_sip);
+		frame32.uctx = CAST_DOWN_EXPLICIT(user32_addr_t, ua_uctxp);
+
+		<span class="enscript-keyword">if</span> (copyout((caddr_t)&amp;frame32, ua_fp, <span class="enscript-keyword">sizeof</span> (frame32))) 
+		        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+		<span class="enscript-comment">/*
+		 * Build the signal context to be used by sigreturn.
+		 */</span>
+		bzero(&amp;uctx32, <span class="enscript-keyword">sizeof</span>(uctx32));
+
+		uctx32.uc_onstack = oonstack;
+		uctx32.uc_sigmask = mask;
+		uctx32.uc_stack.ss_sp = CAST_DOWN_EXPLICIT(user32_addr_t, ua_fp);
+		uctx32.uc_stack.ss_size = stack_size;
+
+		<span class="enscript-keyword">if</span> (oonstack)
+		        uctx32.uc_stack.ss_flags |= SS_ONSTACK;	
+		uctx32.uc_link = 0;
+
+		uctx32.uc_mcsize = sig_avx ? <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> mcontext_avx32) : <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> mcontext32);
+
+		uctx32.uc_mcontext = CAST_DOWN_EXPLICIT(user32_addr_t, ua_mctxp);
+		
+		<span class="enscript-keyword">if</span> (copyout((caddr_t)&amp;uctx32, ua_uctxp, <span class="enscript-keyword">sizeof</span> (uctx32))) 
+		        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+		<span class="enscript-keyword">if</span> (copyout((caddr_t)&amp;mctxp-&gt;mctx_avx32, ua_mctxp, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> mcontext_avx32))) 
+		        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+		sinfo64.pad[0]  = tstate32-&gt;esp;
+		sinfo64.si_addr = tstate32-&gt;eip;
+	}
+
+	<span class="enscript-keyword">switch</span> (sig) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIGILL</span>:
+			<span class="enscript-keyword">switch</span> (ut-&gt;uu_code) {
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_I386_INVOP</span>:
+					sinfo64.si_code = ILL_ILLOPC;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-reference">default</span>:
+					sinfo64.si_code = ILL_NOOP;
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIGFPE</span>:
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">FP_IE</span> 0 <span class="enscript-comment">/* Invalid operation */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">FP_DE</span> 1 <span class="enscript-comment">/* Denormalized operand */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">FP_ZE</span> 2 <span class="enscript-comment">/* Zero divide */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">FP_OE</span> 3 <span class="enscript-comment">/* overflow */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">FP_UE</span> 4 <span class="enscript-comment">/* underflow */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">FP_PE</span> 5 <span class="enscript-comment">/* precision */</span>
+			<span class="enscript-keyword">if</span> (ut-&gt;uu_code == EXC_I386_DIV) {
+				sinfo64.si_code = FPE_INTDIV;
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ut-&gt;uu_code == EXC_I386_INTO) {
+				sinfo64.si_code = FPE_INTOVF;
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ut-&gt;uu_subcode &amp; (1 &lt;&lt; FP_ZE)) {
+				sinfo64.si_code = FPE_FLTDIV;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ut-&gt;uu_subcode &amp; (1 &lt;&lt; FP_OE)) {
+				sinfo64.si_code = FPE_FLTOVF;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ut-&gt;uu_subcode &amp; (1 &lt;&lt; FP_UE)) {
+				sinfo64.si_code = FPE_FLTUND;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ut-&gt;uu_subcode &amp; (1 &lt;&lt; FP_PE)) {
+				sinfo64.si_code = FPE_FLTRES;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ut-&gt;uu_subcode &amp; (1 &lt;&lt; FP_IE)) {
+				sinfo64.si_code = FPE_FLTINV;
+			} <span class="enscript-keyword">else</span> {
+				sinfo64.si_code = FPE_NOOP;
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIGBUS</span>:
+			sinfo64.si_code = BUS_ADRERR;
+			sinfo64.si_addr = ua_cr2;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIGTRAP</span>:
+			sinfo64.si_code = TRAP_BRKPT;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIGSEGV</span>:
+		        sinfo64.si_addr = ua_cr2;
+
+			<span class="enscript-keyword">switch</span> (ut-&gt;uu_code) {
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_I386_GPFLT</span>:
+					<span class="enscript-comment">/* CR2 is meaningless after GP fault */</span>
+					<span class="enscript-comment">/* XXX namespace clash! */</span>
+					sinfo64.si_addr = 0ULL;
+					sinfo64.si_code = 0;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_PROTECTION_FAILURE</span>:
+					sinfo64.si_code = SEGV_ACCERR;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ADDRESS</span>:
+					sinfo64.si_code = SEGV_MAPERR;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-reference">default</span>:
+					sinfo64.si_code = FPE_NOOP;
+			}
+				<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+		{
+			<span class="enscript-type">int</span> status_and_exitcode;
+
+			<span class="enscript-comment">/*
+			 * All other signals need to fill out a minimum set of
+			 * information for the siginfo structure passed into
+			 * the signal handler, if SA_SIGINFO was specified.
+			 *
+			 * p-&gt;si_status actually contains both the status and
+			 * the exit code; we save it off in its own variable
+			 * for later breakdown.
+			 */</span>
+			proc_lock(p);
+			sinfo64.si_pid = p-&gt;si_pid;
+			p-&gt;si_pid =0;
+			status_and_exitcode = p-&gt;si_status;
+			p-&gt;si_status = 0;
+			sinfo64.si_uid = p-&gt;si_uid;
+			p-&gt;si_uid =0;
+			sinfo64.si_code = p-&gt;si_code;
+			p-&gt;si_code = 0;
+			proc_unlock(p);
+			<span class="enscript-keyword">if</span> (sinfo64.si_code == CLD_EXITED) {
+				<span class="enscript-keyword">if</span> (WIFEXITED(status_and_exitcode)) 
+					sinfo64.si_code = CLD_EXITED;
+				<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (WIFSIGNALED(status_and_exitcode)) {
+					<span class="enscript-keyword">if</span> (WCOREDUMP(status_and_exitcode)) {
+						sinfo64.si_code = CLD_DUMPED;
+						status_and_exitcode = W_EXITCODE(status_and_exitcode,status_and_exitcode);
+					} <span class="enscript-keyword">else</span> {
+						sinfo64.si_code = CLD_KILLED;
+						status_and_exitcode = W_EXITCODE(status_and_exitcode,status_and_exitcode);
+					}
+				}
+			}
+			<span class="enscript-comment">/*
+			 * The recorded status contains the exit code and the
+			 * signal information, but the information to be passed
+			 * in the siginfo to the handler is supposed to only
+			 * contain the status, so we have to shift it out.
+			 */</span>
+			sinfo64.si_status = WEXITSTATUS(status_and_exitcode);
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (proc_is64bit(p)) {
+		user64_siginfo_t sinfo64_user64;
+		
+		bzero((caddr_t)&amp;sinfo64_user64, <span class="enscript-keyword">sizeof</span>(sinfo64_user64));
+			  
+		siginfo_user_to_user64_x86(&amp;sinfo64,&amp;sinfo64_user64);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+        bzero((caddr_t)&amp;(ut-&gt;t_dtrace_siginfo), <span class="enscript-keyword">sizeof</span>(ut-&gt;t_dtrace_siginfo));
+
+        ut-&gt;t_dtrace_siginfo.si_signo = sinfo64.si_signo;
+        ut-&gt;t_dtrace_siginfo.si_code = sinfo64.si_code;
+        ut-&gt;t_dtrace_siginfo.si_pid = sinfo64.si_pid;
+        ut-&gt;t_dtrace_siginfo.si_uid = sinfo64.si_uid;
+        ut-&gt;t_dtrace_siginfo.si_status = sinfo64.si_status;
+		<span class="enscript-comment">/* XXX truncates faulting address to void * on K32  */</span>
+        ut-&gt;t_dtrace_siginfo.si_addr = CAST_DOWN(<span class="enscript-type">void</span> *, sinfo64.si_addr);
+
+		<span class="enscript-comment">/* Fire DTrace proc:::fault probe when signal is generated by hardware. */</span>
+		<span class="enscript-keyword">switch</span> (sig) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIGILL</span>: <span class="enscript-keyword">case</span> <span class="enscript-reference">SIGBUS</span>: <span class="enscript-keyword">case</span> <span class="enscript-reference">SIGSEGV</span>: <span class="enscript-keyword">case</span> <span class="enscript-reference">SIGFPE</span>: <span class="enscript-keyword">case</span> <span class="enscript-reference">SIGTRAP</span>:
+			DTRACE_PROC2(fault, <span class="enscript-type">int</span>, (<span class="enscript-type">int</span>)(ut-&gt;uu_code), siginfo_t *, &amp;(ut-&gt;t_dtrace_siginfo));
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/* XXX truncates catcher address to uintptr_t */</span>
+		DTRACE_PROC3(signal__handle, <span class="enscript-type">int</span>, sig, siginfo_t *, &amp;(ut-&gt;t_dtrace_siginfo),
+			<span class="enscript-type">void</span> (*)(<span class="enscript-type">void</span>), CAST_DOWN(sig_t, ua_catcher));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_DTRACE */</span>
+
+		<span class="enscript-keyword">if</span> (copyout((caddr_t)&amp;sinfo64_user64, ua_sip, <span class="enscript-keyword">sizeof</span> (sinfo64_user64))) 
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+		flavor = x86_THREAD_STATE64;
+		state_count = x86_THREAD_STATE64_COUNT;
+		state = (<span class="enscript-type">void</span> *)&amp;mctxp-&gt;mctx_avx64.ss;
+	} <span class="enscript-keyword">else</span> {
+		x86_thread_state32_t	*tstate32;
+		user32_siginfo_t sinfo32;
+
+		bzero((caddr_t)&amp;sinfo32, <span class="enscript-keyword">sizeof</span>(sinfo32));
+
+		siginfo_user_to_user32_x86(&amp;sinfo64,&amp;sinfo32);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+        bzero((caddr_t)&amp;(ut-&gt;t_dtrace_siginfo), <span class="enscript-keyword">sizeof</span>(ut-&gt;t_dtrace_siginfo));
+
+        ut-&gt;t_dtrace_siginfo.si_signo = sinfo32.si_signo;
+        ut-&gt;t_dtrace_siginfo.si_code = sinfo32.si_code;
+        ut-&gt;t_dtrace_siginfo.si_pid = sinfo32.si_pid;
+        ut-&gt;t_dtrace_siginfo.si_uid = sinfo32.si_uid;
+        ut-&gt;t_dtrace_siginfo.si_status = sinfo32.si_status;
+        ut-&gt;t_dtrace_siginfo.si_addr = CAST_DOWN(<span class="enscript-type">void</span> *, sinfo32.si_addr);
+
+		<span class="enscript-comment">/* Fire DTrace proc:::fault probe when signal is generated by hardware. */</span>
+		<span class="enscript-keyword">switch</span> (sig) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIGILL</span>: <span class="enscript-keyword">case</span> <span class="enscript-reference">SIGBUS</span>: <span class="enscript-keyword">case</span> <span class="enscript-reference">SIGSEGV</span>: <span class="enscript-keyword">case</span> <span class="enscript-reference">SIGFPE</span>: <span class="enscript-keyword">case</span> <span class="enscript-reference">SIGTRAP</span>:
+			DTRACE_PROC2(fault, <span class="enscript-type">int</span>, (<span class="enscript-type">int</span>)(ut-&gt;uu_code), siginfo_t *, &amp;(ut-&gt;t_dtrace_siginfo));
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">break</span>;
+		}
+
+		DTRACE_PROC3(signal__handle, <span class="enscript-type">int</span>, sig, siginfo_t *, &amp;(ut-&gt;t_dtrace_siginfo),
+			<span class="enscript-type">void</span> (*)(<span class="enscript-type">void</span>), CAST_DOWN(sig_t, ua_catcher));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_DTRACE */</span>
+
+		<span class="enscript-keyword">if</span> (copyout((caddr_t)&amp;sinfo32, ua_sip, <span class="enscript-keyword">sizeof</span> (sinfo32))) 
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	
+		tstate32 = &amp;mctxp-&gt;mctx_avx32.ss;
+
+		tstate32-&gt;eip = CAST_DOWN_EXPLICIT(user32_addr_t, trampact);
+		tstate32-&gt;esp = CAST_DOWN_EXPLICIT(user32_addr_t, ua_fp);
+
+		tstate32-&gt;eflags = get_eflags_exportmask();
+
+		tstate32-&gt;cs = USER_CS;
+		tstate32-&gt;ss = USER_DS;
+		tstate32-&gt;ds = USER_DS;
+		tstate32-&gt;es = USER_DS;
+		tstate32-&gt;fs = NULL_SEG;
+		tstate32-&gt;gs = USER_CTHREAD;
+
+		flavor = x86_THREAD_STATE32;
+		state_count = x86_THREAD_STATE32_COUNT;
+		state = (<span class="enscript-type">void</span> *)tstate32;
+	}
+	<span class="enscript-keyword">if</span> (thread_setstatus(thread, flavor, (thread_state_t)state, state_count) != KERN_SUCCESS)
+	        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	ml_fp_setvalid(FALSE);
+
+	<span class="enscript-comment">/* Tell the PAL layer about the signal */</span>
+	pal_set_signal_delivery( thread );
+
+	proc_lock(p);
+
+	<span class="enscript-keyword">return</span>;
+
+<span class="enscript-reference">bad</span>:
+
+	proc_lock(p);
+	SIGACTION(p, SIGILL) = SIG_DFL;
+	sig = sigmask(SIGILL);
+	p-&gt;p_sigignore &amp;= ~sig;
+	p-&gt;p_sigcatch &amp;= ~sig;
+	ut-&gt;uu_sigmask &amp;= ~sig;
+	<span class="enscript-comment">/* sendsig is called with signal lock held */</span>
+	proc_unlock(p);
+	psignal_locked(p, SIGILL);
+	proc_lock(p);
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * System call to cleanup state after a signal
+ * has been taken.  Reset signal mask and
+ * stack state from context left by sendsig (above).
+ * Return to previous pc and psl as specified by
+ * context left by sendsig. Check carefully to
+ * make sure that the user has not modified the
+ * psl to gain improper priviledges or to cause
+ * a machine fault.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sigreturn</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> sigreturn_args *uap, __unused <span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-type">union</span> {
+		<span class="enscript-type">struct</span> mcontext_avx32	mctx_avx32;
+		<span class="enscript-type">struct</span> mcontext_avx64	mctx_avx64;
+	} mctx_store, *mctxp = &amp;mctx_store;
+
+	thread_t thread = current_thread();
+	<span class="enscript-type">struct</span> uthread * ut;
+	<span class="enscript-type">int</span>	error;
+	<span class="enscript-type">int</span>	onstack = 0;
+
+	mach_msg_type_number_t ts_count;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>           ts_flavor;
+	<span class="enscript-type">void</span>		    *  ts;
+	mach_msg_type_number_t fs_count;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>           fs_flavor;
+	<span class="enscript-type">void</span>		    *  fs;
+	<span class="enscript-type">int</span>	rval = EJUSTRETURN;
+	boolean_t	sig_avx;
+
+	ut = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(thread);
+
+	<span class="enscript-comment">/*
+	 * If we are being asked to change the altstack flag on the thread, we
+	 * just set/reset it and return (the uap-&gt;uctx is not used).
+	 */</span>
+	<span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)uap-&gt;infostyle == UC_SET_ALT_STACK) {
+		ut-&gt;uu_sigstk.ss_flags |= SA_ONSTACK;
+		<span class="enscript-keyword">return</span> (0);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)uap-&gt;infostyle == UC_RESET_ALT_STACK) {
+		ut-&gt;uu_sigstk.ss_flags &amp;= ~SA_ONSTACK;
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	bzero(mctxp, <span class="enscript-keyword">sizeof</span>(*mctxp));
+	sig_avx = ml_fpu_avx_enabled();
+
+	<span class="enscript-keyword">if</span> (proc_is64bit(p)) {
+	        <span class="enscript-type">struct</span> user_ucontext64	uctx64;
+
+	        <span class="enscript-keyword">if</span> ((error = copyin(uap-&gt;uctx, (<span class="enscript-type">void</span> *)&amp;uctx64, <span class="enscript-keyword">sizeof</span> (uctx64))))
+		        <span class="enscript-keyword">return</span>(error);
+
+		<span class="enscript-keyword">if</span> ((error = copyin(uctx64.uc_mcontext64, (<span class="enscript-type">void</span> *)&amp;mctxp-&gt;mctx_avx64, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> mcontext_avx64))))
+		        <span class="enscript-keyword">return</span>(error);
+
+		onstack = uctx64.uc_onstack &amp; 01;
+		ut-&gt;uu_sigmask = uctx64.uc_sigmask &amp; ~sigcantmask;
+
+		ts_flavor = x86_THREAD_STATE64;
+		ts_count  = x86_THREAD_STATE64_COUNT;
+		ts = (<span class="enscript-type">void</span> *)&amp;mctxp-&gt;mctx_avx64.ss;
+
+		<span class="enscript-keyword">if</span> (sig_avx) {
+			fs_flavor = x86_AVX_STATE64;
+			fs_count = x86_AVX_STATE64_COUNT;
+		}
+		<span class="enscript-keyword">else</span> {
+			fs_flavor = x86_FLOAT_STATE64;
+			fs_count = x86_FLOAT_STATE64_COUNT;
+		}
+
+		fs = (<span class="enscript-type">void</span> *)&amp;mctxp-&gt;mctx_avx64.fs;
+
+      } <span class="enscript-keyword">else</span> {
+	        <span class="enscript-type">struct</span> user_ucontext32	uctx32;
+
+	        <span class="enscript-keyword">if</span> ((error = copyin(uap-&gt;uctx, (<span class="enscript-type">void</span> *)&amp;uctx32, <span class="enscript-keyword">sizeof</span> (uctx32)))) 
+		        <span class="enscript-keyword">return</span>(error);
+
+		<span class="enscript-keyword">if</span> ((error = copyin(CAST_USER_ADDR_T(uctx32.uc_mcontext), (<span class="enscript-type">void</span> *)&amp;mctxp-&gt;mctx_avx32, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> mcontext_avx32)))) 
+		        <span class="enscript-keyword">return</span>(error);
+
+		onstack = uctx32.uc_onstack &amp; 01;
+		ut-&gt;uu_sigmask = uctx32.uc_sigmask &amp; ~sigcantmask;
+
+	        ts_flavor = x86_THREAD_STATE32;
+		ts_count  = x86_THREAD_STATE32_COUNT;
+		ts = (<span class="enscript-type">void</span> *)&amp;mctxp-&gt;mctx_avx32.ss;
+
+		<span class="enscript-keyword">if</span> (sig_avx) {
+			fs_flavor = x86_AVX_STATE32;
+			fs_count = x86_AVX_STATE32_COUNT;
+		}
+		<span class="enscript-keyword">else</span> {
+			fs_flavor = x86_FLOAT_STATE32;
+			fs_count = x86_FLOAT_STATE32_COUNT;
+		}
+
+		fs = (<span class="enscript-type">void</span> *)&amp;mctxp-&gt;mctx_avx32.fs;
+	}
+
+	<span class="enscript-keyword">if</span> (onstack)
+		ut-&gt;uu_sigstk.ss_flags |= SA_ONSTACK;
+	<span class="enscript-keyword">else</span>
+		ut-&gt;uu_sigstk.ss_flags &amp;= ~SA_ONSTACK;
+
+	<span class="enscript-keyword">if</span> (ut-&gt;uu_siglist &amp; ~ut-&gt;uu_sigmask)
+		signal_setast(thread);
+	<span class="enscript-comment">/*
+	 * thread_set_state() does all the needed checks for the passed in
+	 * content
+	 */</span>
+	<span class="enscript-keyword">if</span> (thread_setstatus(thread, ts_flavor, ts, ts_count) != KERN_SUCCESS) {
+		rval = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_ret</span>;
+	}
+	
+	ml_fp_setvalid(TRUE);
+
+	<span class="enscript-keyword">if</span> (thread_setstatus(thread, fs_flavor, fs, fs_count)  != KERN_SUCCESS) {
+		rval = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_ret</span>;
+
+	}
+<span class="enscript-reference">error_ret</span>:
+	<span class="enscript-keyword">return</span> rval;
+}
+
+
+<span class="enscript-comment">/*
+ * machine_exception() performs MD translation
+ * of a mach exception to a unix signal and code.
+ */</span>
+
+boolean_t
+<span class="enscript-function-name">machine_exception</span>(
+	<span class="enscript-type">int</span>				exception,
+	mach_exception_code_t		code,
+	__unused mach_exception_subcode_t subcode,
+	<span class="enscript-type">int</span> 				*unix_signal,
+	mach_exception_code_t		*unix_code)
+{
+
+	<span class="enscript-keyword">switch</span>(exception) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_BAD_ACCESS</span>:
+		<span class="enscript-comment">/* Map GP fault to SIGSEGV, otherwise defer to caller */</span>
+		<span class="enscript-keyword">if</span> (code == EXC_I386_GPFLT) {
+			*unix_signal = SIGSEGV;
+			*unix_code = code;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">return</span>(FALSE);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_BAD_INSTRUCTION</span>:
+		*unix_signal = SIGILL;
+		*unix_code = code;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_ARITHMETIC</span>:
+		*unix_signal = SIGFPE;
+		*unix_code = code;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EXC_SOFTWARE</span>:
+		<span class="enscript-keyword">if</span> (code == EXC_I386_BOUND) {
+			<span class="enscript-comment">/*
+			 * Map #BR, the Bound Range Exceeded exception, to
+			 * SIGTRAP.
+			 */</span>
+			*unix_signal = SIGTRAP;
+			*unix_code = code;
+			<span class="enscript-keyword">break</span>;
+		}
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span>(FALSE);
+	}
+   
+	<span class="enscript-keyword">return</span>(TRUE);
+}
+
+</pre>
+<hr />
+</body></html>

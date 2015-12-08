@@ -1,0 +1,1070 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>queue.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">queue.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989,1988,1987 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ *
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ *
+ * any improvements or extensions that they make and grant Carnegie Mellon rights
+ * to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+<span class="enscript-comment">/*
+ *	File:	queue.h
+ *	Author:	Avadis Tevanian, Jr.
+ *	Date:	1985
+ *
+ *	Type definitions for generic queues.
+ *
+ */</span>
+
+#<span class="enscript-reference">ifndef</span>	<span class="enscript-variable-name">_KERN_QUEUE_H_</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">_KERN_QUEUE_H_</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/macro_help.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+
+__BEGIN_DECLS
+
+<span class="enscript-comment">/*
+ * Queue Management APIs
+ *
+ * There are currently two subtly different methods of maintining
+ * a queue of objects. Both APIs are contained in this file, and
+ * unfortunately overlap.
+ * (there is also a third way maintained in bsd/sys/queue.h)
+ *
+ * Both methods use a common queue head and linkage pattern:
+ * 	The head of a queue is declared as:
+ * 		queue_head_t q_head;
+ *
+ * 	Elements in this queue are chained together using
+ * 	struct queue_entry objects embedded within a structure:
+ * 		struct some_data {
+ * 			int field1;
+ * 			int field2;
+ * 			...
+ * 			queue_chain_t link;
+ * 			...
+ * 			int last_field;
+ * 		};
+ * 	struct some_data is referred to as the queue &quot;element.&quot;
+ * 	(note that queue_chain_t is typedef'd to struct queue_entry)
+ *
+ * IMPORTANT: The two queue iteration methods described below are not
+ *            compatible with one another. You must choose one and be careful
+ *            to use only the supported APIs for that method.
+ *
+ * Method 1: chaining of queue_chain_t (linkage chains)
+ * 	This method uses the next and prev pointers of the struct queue_entry
+ * 	linkage object embedded in a queue element to point to the next or
+ * 	previous queue_entry structure in the chain. The head of the queue
+ * 	(the queue_head_t object) will point to the first and last
+ * 	struct queue_entry object, and both the next and prev pointer will
+ * 	point back to the head if the queue is empty.
+ *
+ * 	This method is the most flexible method of chaining objects together
+ * 	as it allows multiple chains through a given object, by embedding
+ * 	multiple queue_chain_t objects in the structure, while simultaneously
+ * 	providing fast removal and insertion into the queue using only
+ * 	struct queue_entry object pointers.
+ *
+ * 	++ Valid APIs for this style queue ++
+ * 	-------------------------------------
+ * 		[C] queue_init
+ * 		[C] queue_first
+ * 		[C] queue_next
+ * 		[C] queue_last
+ * 		[C] queue_prev
+ * 		[C] queue_end
+ * 		[C] queue_empty
+ *
+ * 		[1] enqueue
+ * 		[1] dequeue
+ * 		[1] enqueue_head
+ * 		[1] enqueue_tail
+ * 		[1] dequeue_head
+ * 		[1] dequeue_tail
+ * 		[1] remqueue
+ * 		[1] insque
+ * 		[1] remque
+ * 		[1] re_queue
+ * 		[1] re_queue_tail
+ * 		[1] movqueue
+ * 		[1] qe_element
+ * 		[1] qe_foreach
+ * 		[1] qe_foreach_safe
+ * 		[1] qe_foreach_element
+ * 		[1] qe_foreach_element_safe
+ *
+ * Method 2: chaining of elements (element chains)
+ * 	This method uses the next and prev pointers of the struct queue_entry
+ * 	linkage object embedded in a queue element to point to the next or
+ * 	previous queue element (not another queue_entry). The head of the
+ * 	queue will point to the first and last queue element (struct some_data
+ * 	from the above example) NOT the embedded queue_entry structure. The
+ * 	first queue element will have a prev pointer that points to the
+ * 	queue_head_t, and the last queue element will have a next pointer
+ * 	that points to the queue_head_t.
+ *
+ * 	This method requires knowledge of the queue_head_t of the queue on
+ * 	which an element resides in order to remove the element. Iterating
+ * 	through the elements of the queue is also more cumbersome because
+ * 	a check against the head pointer plus a cast then offset operation
+ * 	must be performed at each step of the iteration.
+ *
+ * 	++ Valid APIs for this style queue ++
+ * 	-------------------------------------
+ * 		[C] queue_init
+ * 		[C] queue_first
+ * 		[C] queue_next
+ * 		[C] queue_last
+ * 		[C] queue_prev
+ * 		[C] queue_end
+ * 		[C] queue_empty
+ *
+ * 		[2] queue_enter
+ * 		[2] queue_enter_first
+ * 		[2] queue_insert_before
+ * 		[2] queue_insert_after
+ * 		[2] queue_field
+ * 		[2] queue_remove
+ * 		[2] queue_remove_first
+ * 		[2] queue_remove_last
+ * 		[2] queue_assign
+ * 		[2] queue_new_head
+ * 		[2] queue_iterate
+ *
+ * Legend:
+ * 	[C] -&gt; API common to both methods
+ * 	[1] -&gt; API used only in method 1 (linkage chains)
+ * 	[2] -&gt; API used only in method 2 (element chains)
+ */</span>
+
+<span class="enscript-comment">/*
+ *	A generic doubly-linked list (queue).
+ */</span>
+
+<span class="enscript-type">struct</span> queue_entry {
+	<span class="enscript-type">struct</span> queue_entry	*next;		<span class="enscript-comment">/* next element */</span>
+	<span class="enscript-type">struct</span> queue_entry	*prev;		<span class="enscript-comment">/* previous element */</span>
+
+};
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> queue_entry	*queue_t;
+<span class="enscript-type">typedef</span>	<span class="enscript-type">struct</span> queue_entry	queue_head_t;
+<span class="enscript-type">typedef</span>	<span class="enscript-type">struct</span> queue_entry	queue_chain_t;
+<span class="enscript-type">typedef</span>	<span class="enscript-type">struct</span> queue_entry	*queue_entry_t;
+
+<span class="enscript-comment">/*
+ *	enqueue puts &quot;elt&quot; on the &quot;queue&quot;.
+ *	dequeue returns the first element in the &quot;queue&quot;.
+ *	remqueue removes the specified &quot;elt&quot; from its queue.
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">enqueue</span>(queue,elt)	enqueue_tail(queue, elt)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">dequeue</span>(queue)		dequeue_head(queue)
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">XNU_KERNEL_PRIVATE</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/branch_predicates.h&gt;</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">__QUEUE_ELT_VALIDATE</span>(queue_entry_t elt) {
+	queue_entry_t	elt_next, elt_prev;
+	
+	<span class="enscript-keyword">if</span> (__improbable(elt == (queue_entry_t)0)) {
+		panic(<span class="enscript-string">&quot;Invalid queue element %p&quot;</span>, elt);
+	}
+	
+	elt_next = elt-&gt;next;
+	elt_prev = elt-&gt;prev;
+	
+	<span class="enscript-keyword">if</span> (__improbable(elt_next == (queue_entry_t)0 || elt_prev == (queue_entry_t)0)) {
+		panic(<span class="enscript-string">&quot;Invalid queue element pointers for %p: next %p prev %p&quot;</span>, elt, elt_next, elt_prev);
+	}
+	<span class="enscript-keyword">if</span> (__improbable(elt_next-&gt;prev != elt || elt_prev-&gt;next != elt)) {
+		panic(<span class="enscript-string">&quot;Invalid queue element linkage for %p: next %p next-&gt;prev %p prev %p prev-&gt;next %p&quot;</span>, 
+			  elt, elt_next, elt_next-&gt;prev, elt_prev, elt_prev-&gt;next);
+	}
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">__DEQUEUE_ELT_CLEANUP</span>(queue_entry_t elt) {
+	(elt)-&gt;next = (queue_entry_t) 0;
+	(elt)-&gt;prev = (queue_entry_t) 0;
+}
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">__QUEUE_ELT_VALIDATE</span>(elt) do { } while (0)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">__DEQUEUE_ELT_CLEANUP</span>(elt) do { } while(0)
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !XNU_KERNEL_PRIVATE */</span>
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">enqueue_head</span>(
+	queue_t		que,
+	queue_entry_t	elt)
+{
+	queue_entry_t	old_head;
+
+	__QUEUE_ELT_VALIDATE((queue_entry_t)que);
+	old_head = que-&gt;next;
+	elt-&gt;next = old_head;
+	elt-&gt;prev = que;
+	old_head-&gt;prev = elt;
+	que-&gt;next = elt;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">enqueue_tail</span>(
+		queue_t		que,
+		queue_entry_t	elt)
+{
+	queue_entry_t	old_tail;
+
+	__QUEUE_ELT_VALIDATE((queue_entry_t)que);
+	old_tail = que-&gt;prev;
+	elt-&gt;next = que;
+	elt-&gt;prev = old_tail;
+	old_tail-&gt;next = elt;
+	que-&gt;prev = elt;
+}
+
+<span class="enscript-type">static</span> __inline__ queue_entry_t
+<span class="enscript-function-name">dequeue_head</span>(
+	queue_t	que)
+{
+	queue_entry_t	elt = (queue_entry_t) 0;
+	queue_entry_t	new_head;
+
+	<span class="enscript-keyword">if</span> (que-&gt;next != que) {
+		elt = que-&gt;next;
+		__QUEUE_ELT_VALIDATE(elt);
+		new_head = elt-&gt;next; <span class="enscript-comment">/* new_head may point to que if elt was the only element */</span>
+		new_head-&gt;prev = que;
+		que-&gt;next = new_head;
+		__DEQUEUE_ELT_CLEANUP(elt);
+	}
+
+	<span class="enscript-keyword">return</span> (elt);
+}
+
+<span class="enscript-type">static</span> __inline__ queue_entry_t
+<span class="enscript-function-name">dequeue_tail</span>(
+	queue_t	que)
+{
+	queue_entry_t	elt = (queue_entry_t) 0;
+	queue_entry_t	new_tail;
+
+	<span class="enscript-keyword">if</span> (que-&gt;prev != que) {
+		elt = que-&gt;prev;
+		__QUEUE_ELT_VALIDATE(elt);
+		new_tail = elt-&gt;prev; <span class="enscript-comment">/* new_tail may point to queue if elt was the only element */</span>
+		new_tail-&gt;next = que;
+		que-&gt;prev = new_tail;
+		__DEQUEUE_ELT_CLEANUP(elt);
+	}
+
+	<span class="enscript-keyword">return</span> (elt);
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">remqueue</span>(
+	queue_entry_t	elt)
+{
+	queue_entry_t	next_elt, prev_elt;
+
+	__QUEUE_ELT_VALIDATE(elt);
+	next_elt = elt-&gt;next;
+	prev_elt = elt-&gt;prev; <span class="enscript-comment">/* next_elt may equal prev_elt (and the queue head) if elt was the only element */</span>
+	next_elt-&gt;prev = prev_elt;
+	prev_elt-&gt;next = next_elt;
+	__DEQUEUE_ELT_CLEANUP(elt);
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">insque</span>(
+	queue_entry_t	entry,
+	queue_entry_t	pred)
+{
+	queue_entry_t	successor;
+
+	__QUEUE_ELT_VALIDATE(pred);
+	successor = pred-&gt;next;
+	entry-&gt;next = successor;
+	entry-&gt;prev = pred;
+	successor-&gt;prev = entry;
+	pred-&gt;next = entry;
+}
+
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">remque</span>(
+	queue_entry_t elt)
+{
+	queue_entry_t	next_elt, prev_elt;
+
+	__QUEUE_ELT_VALIDATE(elt);
+	next_elt = elt-&gt;next;
+	prev_elt = elt-&gt;prev; <span class="enscript-comment">/* next_elt may equal prev_elt (and the queue head) if elt was the only element */</span>
+	next_elt-&gt;prev = prev_elt;
+	prev_elt-&gt;next = next_elt;
+	__DEQUEUE_ELT_CLEANUP(elt);
+}
+
+<span class="enscript-comment">/*
+ *	Function:	re_queue_head
+ *	Parameters:
+ *		queue_t que       : queue onto which elt will be pre-pended
+ *		queue_entry_t elt : element to re-queue
+ *	Description:
+ *		Remove elt from its current queue and put it onto the
+ *		head of a new queue
+ *	Note:
+ *		This should only be used with Method 1 queue iteration (linkage chains)
+ */</span>
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">re_queue_head</span>(queue_t que, queue_entry_t elt)
+{
+	queue_entry_t	n_elt, p_elt;
+
+	__QUEUE_ELT_VALIDATE(elt);
+	__QUEUE_ELT_VALIDATE((queue_entry_t)que);
+
+	<span class="enscript-comment">/* remqueue */</span>
+	n_elt = elt-&gt;next;
+	p_elt = elt-&gt;prev; <span class="enscript-comment">/* next_elt may equal prev_elt (and the queue head) if elt was the only element */</span>
+	n_elt-&gt;prev = p_elt;
+	p_elt-&gt;next = n_elt;
+
+	<span class="enscript-comment">/* enqueue_head */</span>
+	n_elt = que-&gt;next;
+	elt-&gt;next = n_elt;
+	elt-&gt;prev = que;
+	n_elt-&gt;prev = elt;
+	que-&gt;next = elt;
+}
+
+<span class="enscript-comment">/*
+ *	Function:	re_queue_tail
+ *	Parameters:
+ *		queue_t que       : queue onto which elt will be appended
+ *		queue_entry_t elt : element to re-queue
+ *	Description:
+ *		Remove elt from its current queue and put it onto the
+ *		end of a new queue
+ *	Note:
+ *		This should only be used with Method 1 queue iteration (linkage chains)
+ */</span>
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">re_queue_tail</span>(queue_t que, queue_entry_t elt)
+{
+	queue_entry_t	n_elt, p_elt;
+
+	__QUEUE_ELT_VALIDATE(elt);
+	__QUEUE_ELT_VALIDATE((queue_entry_t)que);
+
+	<span class="enscript-comment">/* remqueue */</span>
+	n_elt = elt-&gt;next;
+	p_elt = elt-&gt;prev; <span class="enscript-comment">/* next_elt may equal prev_elt (and the queue head) if elt was the only element */</span>
+	n_elt-&gt;prev = p_elt;
+	p_elt-&gt;next = n_elt;
+
+	<span class="enscript-comment">/* enqueue_tail */</span>
+	p_elt = que-&gt;prev;
+	elt-&gt;next = que;
+	elt-&gt;prev = p_elt;
+	p_elt-&gt;next = elt;
+	que-&gt;prev = elt;
+}
+
+<span class="enscript-comment">/*
+ *	Macro:		qe_element
+ *	Function:
+ *		Convert a queue_entry_t to a queue element pointer.
+ *		Get a pointer to the user-defined element containing
+ *		a given queue_entry_t
+ *	Header:
+ *		&lt;type&gt; * qe_element(queue_entry_t qe, &lt;type&gt;, field)
+ *			qe      - queue entry to convert
+ *			&lt;type&gt;  - what's in the queue (e.g., struct some_data)
+ *			&lt;field&gt; - is the chain field in &lt;type&gt;
+ *	Note:
+ *		Do not use pointer types for &lt;type&gt;
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">qe_element</span>(qe, type, field) \
+	((type *)((<span class="enscript-type">void</span> *)((<span class="enscript-type">char</span> *)(qe) - __offsetof(type, field))))
+
+<span class="enscript-comment">/*
+ *	Macro:		qe_foreach
+ *	Function:
+ *		Iterate over each queue_entry_t structure.
+ *		Generates a 'for' loop, setting 'qe' to
+ *		each queue_entry_t in the queue.
+ *	Header:
+ *		qe_foreach(queue_entry_t qe, queue_t head)
+ *			qe   - iteration variable
+ *			head - pointer to queue_head_t (head of queue)
+ *	Note:
+ *		This should only be used with Method 1 queue iteration (linkage chains)
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">qe_foreach</span>(qe, head) \
+	<span class="enscript-keyword">for</span> (qe = (head)-&gt;next; qe != (head); qe = (qe)-&gt;next)
+
+<span class="enscript-comment">/*
+ *	Macro:		qe_foreach_safe
+ *	Function:
+ *		Safely iterate over each queue_entry_t structure.
+ *
+ *		Use this iterator macro if you plan to remove the
+ *		queue_entry_t, qe, from the queue during the
+ *		iteration.
+ *	Header:
+ *		qe_foreach_safe(queue_entry_t qe, queue_t head)
+ *			qe   - iteration variable
+ *			head - pointer to queue_head_t (head of queue)
+ *	Note:
+ *		This should only be used with Method 1 queue iteration (linkage chains)
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">qe_foreach_safe</span>(qe, head) \
+	<span class="enscript-keyword">for</span> (queue_entry_t _ne = ((head)-&gt;next)-&gt;next, \
+	         __ ## qe ## _unused_shadow __unused = (qe = (head)-&gt;next); \
+	     qe != (head); \
+	     qe = _ne, _ne = (qe)-&gt;next)
+
+<span class="enscript-comment">/*
+ *	Macro:		qe_foreach_element
+ *	Function:
+ *		Iterate over each _element_ in a queue
+ *		where each queue_entry_t points to another
+ *		queue_entry_t, i.e., managed by the [de|en]queue_head/
+ *		[de|en]queue_tail / remqueue / etc. function.
+ *	Header:
+ *		qe_foreach_element(&lt;type&gt; *elt, queue_t head, &lt;field&gt;)
+ *			elt     - iteration variable
+ *			&lt;type&gt;  - what's in the queue (e.g., struct some_data)
+ *			&lt;field&gt; - is the chain field in &lt;type&gt;
+ *	Note:
+ *		This should only be used with Method 1 queue iteration (linkage chains)
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">qe_foreach_element</span>(elt, head, field) \
+	<span class="enscript-keyword">for</span> (elt = qe_element((head)-&gt;next, typeof(*(elt)), field); \
+	     &amp;((elt)-&gt;field) != (head); \
+	     elt = qe_element((elt)-&gt;field.next, typeof(*(elt)), field))
+
+<span class="enscript-comment">/*
+ *	Macro:		qe_foreach_element_safe
+ *	Function:
+ *		Safely iterate over each _element_ in a queue
+ *		where each queue_entry_t points to another
+ *		queue_entry_t, i.e., managed by the [de|en]queue_head/
+ *		[de|en]queue_tail / remqueue / etc. function.
+ *
+ *		Use this iterator macro if you plan to remove the
+ *		element, elt, from the queue during the iteration.
+ *	Header:
+ *		qe_foreach_element_safe(&lt;type&gt; *elt, queue_t head, &lt;field&gt;)
+ *			elt     - iteration variable
+ *			&lt;type&gt;  - what's in the queue (e.g., struct some_data)
+ *			&lt;field&gt; - is the chain field in &lt;type&gt;
+ *	Note:
+ *		This should only be used with Method 1 queue iteration (linkage chains)
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">qe_foreach_element_safe</span>(elt, head, field) \
+	<span class="enscript-keyword">for</span> (typeof(*(elt)) *_nelt = qe_element(((head)-&gt;next)-&gt;next, typeof(*(elt)), field), \
+	     *__ ## elt ## _unused_shadow __unused = \
+	         (elt = qe_element((head)-&gt;next, typeof(*(elt)), field)); \
+	     &amp;((elt)-&gt;field) != (head); \
+	     elt = _nelt, _nelt = qe_element((elt)-&gt;field.next, typeof(*(elt)), field)) \
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_init
+ *	Function:
+ *		Initialize the given queue.
+ *	Header:
+ *		void queue_init(q)
+ *			queue_t		q;	\* MODIFIED *\
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">queue_init</span>(q)	\
+MACRO_BEGIN		\
+	(q)-&gt;next = (q);\
+	(q)-&gt;prev = (q);\
+MACRO_END
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_head_init
+ *	Function:
+ *		Initialize the given queue head
+ *	Header:
+ *		void queue_head_init(q)
+ *			queue_head_t	q;	\* MODIFIED *\
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">queue_head_init</span>(q) \
+	queue_init(&amp;(q))
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_chain_init
+ *	Function:
+ *		Initialize the given queue chain element
+ *	Header:
+ *		void queue_chain_init(q)
+ *			queue_chain_t	q;	\* MODIFIED *\
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">queue_chain_init</span>(q) \
+	queue_init(&amp;(q))
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_first
+ *	Function:
+ *		Returns the first entry in the queue,
+ *	Header:
+ *		queue_entry_t queue_first(q)
+ *			queue_t	q;		\* IN *\
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">queue_first</span>(q)	((q)-&gt;next)
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_next
+ *	Function:
+ *		Returns the entry after an item in the queue.
+ *	Header:
+ *		queue_entry_t queue_next(qc)
+ *			queue_t qc;
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">queue_next</span>(qc)	((qc)-&gt;next)
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_last
+ *	Function:
+ *		Returns the last entry in the queue.
+ *	Header:
+ *		queue_entry_t queue_last(q)
+ *			queue_t	q;		\* IN *\
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">queue_last</span>(q)	((q)-&gt;prev)
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_prev
+ *	Function:
+ *		Returns the entry before an item in the queue.
+ *	Header:
+ *		queue_entry_t queue_prev(qc)
+ *			queue_t qc;
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">queue_prev</span>(qc)	((qc)-&gt;prev)
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_end
+ *	Function:
+ *		Tests whether a new entry is really the end of
+ *		the queue.
+ *	Header:
+ *		boolean_t queue_end(q, qe)
+ *			queue_t q;
+ *			queue_entry_t qe;
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">queue_end</span>(q, qe)	((q) == (qe))
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_empty
+ *	Function:
+ *		Tests whether a queue is empty.
+ *	Header:
+ *		boolean_t queue_empty(q)
+ *			queue_t q;
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">queue_empty</span>(q)		queue_end((q), queue_first(q))
+
+<span class="enscript-comment">/*
+ *	Function:	movqueue
+ *	Parameters:
+ *		queue_t _old : head of a queue whose items will be moved
+ *		queue_t _new : new queue head onto which items will be moved
+ *	Description:
+ *		Rebase queue items in _old onto _new then re-initialize
+ *		the _old object to an empty queue.
+ *		Equivalent to the queue_new_head Method 2 macro
+ *	Note:
+ *		Similar to the queue_new_head macro, this macros is intented
+ *		to function as an initializer method for '_new' and thus may
+ *		leak any list items that happen to be on the '_new' list.
+ *		This should only be used with Method 1 queue iteration (linkage chains)
+ */</span>
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">movqueue</span>(queue_t _old, queue_t _new)
+{
+	queue_entry_t	next_elt, prev_elt;
+
+	__QUEUE_ELT_VALIDATE((queue_entry_t)_old);
+
+	<span class="enscript-keyword">if</span> (queue_empty(_old)) {
+		queue_init(_new);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * move the queue at _old to _new
+	 * and re-initialize _old
+	 */</span>
+	next_elt = _old-&gt;next;
+	prev_elt = _old-&gt;prev;
+
+	_new-&gt;next = next_elt;
+	_new-&gt;prev = prev_elt;
+	next_elt-&gt;prev = _new;
+	prev_elt-&gt;next = _new;
+
+	queue_init(_old);
+}
+
+<span class="enscript-comment">/*----------------------------------------------------------------*/</span>
+<span class="enscript-comment">/*
+ * Macros that operate on generic structures.  The queue
+ * chain may be at any location within the structure, and there
+ * may be more than one chain.
+ */</span>
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_enter
+ *	Function:
+ *		Insert a new element at the tail of the queue.
+ *	Header:
+ *		void queue_enter(q, elt, type, field)
+ *			queue_t q;
+ *			&lt;type&gt; elt;
+ *			&lt;type&gt; is what's in our queue
+ *			&lt;field&gt; is the chain field in (*&lt;type&gt;)
+ *	Note:
+ *		This should only be used with Method 2 queue iteration (element chains)
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">queue_enter</span>(head, elt, type, field)			\
+MACRO_BEGIN							\
+	queue_entry_t __prev;					\
+								\
+	__prev = (head)-&gt;prev;					\
+	<span class="enscript-keyword">if</span> ((head) == __prev) {					\
+		(head)-&gt;next = (queue_entry_t) (elt);		\
+	}							\
+	<span class="enscript-keyword">else</span> {							\
+		((type)(<span class="enscript-type">void</span> *)__prev)-&gt;field.next =		\
+			(queue_entry_t)(elt);			\
+	}							\
+	(elt)-&gt;field.prev = __prev;				\
+	(elt)-&gt;field.next = head;				\
+	(head)-&gt;prev = (queue_entry_t) elt;			\
+MACRO_END
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_enter_first
+ *	Function:
+ *		Insert a new element at the head of the queue.
+ *	Header:
+ *		void queue_enter_first(q, elt, type, field)
+ *			queue_t q;
+ *			&lt;type&gt; elt;
+ *			&lt;type&gt; is what's in our queue
+ *			&lt;field&gt; is the chain field in (*&lt;type&gt;)
+ *	Note:
+ *		This should only be used with Method 2 queue iteration (element chains)
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">queue_enter_first</span>(head, elt, type, field)		\
+MACRO_BEGIN							\
+	queue_entry_t __next;					\
+								\
+	__next = (head)-&gt;next;					\
+	<span class="enscript-keyword">if</span> ((head) == __next) {					\
+		(head)-&gt;prev = (queue_entry_t) (elt);		\
+	}							\
+	<span class="enscript-keyword">else</span> {							\
+		((type)(<span class="enscript-type">void</span> *)__next)-&gt;field.prev =		\
+			(queue_entry_t)(elt);			\
+	}							\
+	(elt)-&gt;field.next = __next;				\
+	(elt)-&gt;field.prev = head;				\
+	(head)-&gt;next = (queue_entry_t) elt;			\
+MACRO_END
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_insert_before
+ *	Function:
+ *		Insert a new element before a given element.
+ *	Header:
+ *		void queue_insert_before(q, elt, cur, type, field)
+ *			queue_t q;
+ *			&lt;type&gt; elt;
+ *			&lt;type&gt; cur;
+ *			&lt;type&gt; is what's in our queue
+ *			&lt;field&gt; is the chain field in (*&lt;type&gt;)
+ *	Note:
+ *		This should only be used with Method 2 queue iteration (element chains)
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">queue_insert_before</span>(head, elt, cur, type, field)		\
+MACRO_BEGIN								\
+	queue_entry_t __prev;						\
+									\
+	<span class="enscript-keyword">if</span> ((head) == (queue_entry_t)(cur)) {				\
+		(elt)-&gt;field.next = (head);				\
+		<span class="enscript-keyword">if</span> ((head)-&gt;next == (head)) {	<span class="enscript-comment">/* only element */</span>	\
+			(elt)-&gt;field.prev = (head);			\
+			(head)-&gt;next = (queue_entry_t)(elt);		\
+		} <span class="enscript-keyword">else</span> {			<span class="enscript-comment">/* last element */</span>	\
+			__prev = (elt)-&gt;field.prev = (head)-&gt;prev;	\
+			((type)(<span class="enscript-type">void</span> *)__prev)-&gt;field.next =		\
+				(queue_entry_t)(elt);			\
+		}							\
+		(head)-&gt;prev = (queue_entry_t)(elt);			\
+	} <span class="enscript-keyword">else</span> {							\
+		(elt)-&gt;field.next = (queue_entry_t)(cur);		\
+		<span class="enscript-keyword">if</span> ((head)-&gt;next == (queue_entry_t)(cur)) {		\
+						<span class="enscript-comment">/* first element */</span>	\
+			(elt)-&gt;field.prev = (head);			\
+			(head)-&gt;next = (queue_entry_t)(elt);		\
+		} <span class="enscript-keyword">else</span> {			<span class="enscript-comment">/* middle element */</span>	\
+			__prev = (elt)-&gt;field.prev = (cur)-&gt;field.prev;	\
+			((type)(<span class="enscript-type">void</span> *)__prev)-&gt;field.next =		\
+				(queue_entry_t)(elt);			\
+		}							\
+		(cur)-&gt;field.prev = (queue_entry_t)(elt);		\
+	}								\
+MACRO_END
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_insert_after
+ *	Function:
+ *		Insert a new element after a given element.
+ *	Header:
+ *		void queue_insert_after(q, elt, cur, type, field)
+ *			queue_t q;
+ *			&lt;type&gt; elt;
+ *			&lt;type&gt; cur;
+ *			&lt;type&gt; is what's in our queue
+ *			&lt;field&gt; is the chain field in (*&lt;type&gt;)
+ *	Note:
+ *		This should only be used with Method 2 queue iteration (element chains)
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">queue_insert_after</span>(head, elt, cur, type, field)			\
+MACRO_BEGIN								\
+	queue_entry_t __next;						\
+									\
+	<span class="enscript-keyword">if</span> ((head) == (queue_entry_t)(cur)) {				\
+		(elt)-&gt;field.prev = (head);				\
+		<span class="enscript-keyword">if</span> ((head)-&gt;next == (head)) {	<span class="enscript-comment">/* only element */</span>	\
+			(elt)-&gt;field.next = (head);			\
+			(head)-&gt;prev = (queue_entry_t)(elt);		\
+		} <span class="enscript-keyword">else</span> {			<span class="enscript-comment">/* first element */</span>	\
+			__next = (elt)-&gt;field.next = (head)-&gt;next;	\
+			((type)(<span class="enscript-type">void</span> *)__next)-&gt;field.prev =		\
+				(queue_entry_t)(elt);			\
+		}							\
+		(head)-&gt;next = (queue_entry_t)(elt);			\
+	} <span class="enscript-keyword">else</span> {							\
+		(elt)-&gt;field.prev = (queue_entry_t)(cur);		\
+		<span class="enscript-keyword">if</span> ((head)-&gt;prev == (queue_entry_t)(cur)) {		\
+						<span class="enscript-comment">/* last element */</span>	\
+			(elt)-&gt;field.next = (head);			\
+			(head)-&gt;prev = (queue_entry_t)(elt);		\
+		} <span class="enscript-keyword">else</span> {			<span class="enscript-comment">/* middle element */</span>	\
+			__next = (elt)-&gt;field.next = (cur)-&gt;field.next;	\
+			((type)(<span class="enscript-type">void</span> *)__next)-&gt;field.prev =		\
+				(queue_entry_t)(elt);			\
+		}							\
+		(cur)-&gt;field.next = (queue_entry_t)(elt);		\
+	}								\
+MACRO_END
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_field [internal use only]
+ *	Function:
+ *		Find the queue_chain_t (or queue_t) for the
+ *		given element (thing) in the given queue (head)
+ *	Note:
+ *		This should only be used with Method 2 queue iteration (element chains)
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">queue_field</span>(head, thing, type, field)			\
+		(((head) == (thing)) ? (head) : &amp;((type)(<span class="enscript-type">void</span> *)(thing))-&gt;field)
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_remove
+ *	Function:
+ *		Remove an arbitrary item from the queue.
+ *	Header:
+ *		void queue_remove(q, qe, type, field)
+ *			arguments as in queue_enter
+ *	Note:
+ *		This should only be used with Method 2 queue iteration (element chains)
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">queue_remove</span>(head, elt, type, field)			\
+MACRO_BEGIN							\
+	queue_entry_t	__next, __prev;				\
+								\
+	__next = (elt)-&gt;field.next;				\
+	__prev = (elt)-&gt;field.prev;				\
+								\
+	<span class="enscript-keyword">if</span> ((head) == __next)					\
+		(head)-&gt;prev = __prev;				\
+	<span class="enscript-keyword">else</span>							\
+		((type)(<span class="enscript-type">void</span> *)__next)-&gt;field.prev = __prev;	\
+								\
+	<span class="enscript-keyword">if</span> ((head) == __prev)					\
+		(head)-&gt;next = __next;				\
+	<span class="enscript-keyword">else</span>							\
+		((type)(<span class="enscript-type">void</span> *)__prev)-&gt;field.next = __next;	\
+								\
+	(elt)-&gt;field.next = NULL;				\
+	(elt)-&gt;field.prev = NULL;				\
+MACRO_END
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_remove_first
+ *	Function:
+ *		Remove and return the entry at the head of
+ *		the queue.
+ *	Header:
+ *		queue_remove_first(head, entry, type, field)
+ *		entry is returned by reference
+ *	Note:
+ *		This should only be used with Method 2 queue iteration (element chains)
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">queue_remove_first</span>(head, entry, type, field)		\
+MACRO_BEGIN							\
+	queue_entry_t	__next;					\
+								\
+	(entry) = (type)(<span class="enscript-type">void</span> *) ((head)-&gt;next);		\
+	__next = (entry)-&gt;field.next;				\
+								\
+	<span class="enscript-keyword">if</span> ((head) == __next)					\
+		(head)-&gt;prev = (head);				\
+	<span class="enscript-keyword">else</span>							\
+		((type)(<span class="enscript-type">void</span> *)(__next))-&gt;field.prev = (head);	\
+	(head)-&gt;next = __next;					\
+								\
+	(entry)-&gt;field.next = NULL;				\
+	(entry)-&gt;field.prev = NULL;				\
+MACRO_END
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_remove_last
+ *	Function:
+ *		Remove and return the entry at the tail of
+ *		the queue.
+ *	Header:
+ *		queue_remove_last(head, entry, type, field)
+ *		entry is returned by reference
+ *	Note:
+ *		This should only be used with Method 2 queue iteration (element chains)
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">queue_remove_last</span>(head, entry, type, field)		\
+MACRO_BEGIN							\
+	queue_entry_t	__prev;					\
+								\
+	(entry) = (type)(<span class="enscript-type">void</span> *) ((head)-&gt;prev);		\
+	__prev = (entry)-&gt;field.prev;				\
+								\
+	<span class="enscript-keyword">if</span> ((head) == __prev)					\
+		(head)-&gt;next = (head);				\
+	<span class="enscript-keyword">else</span>							\
+		((type)(<span class="enscript-type">void</span> *)(__prev))-&gt;field.next = (head);	\
+	(head)-&gt;prev = __prev;					\
+								\
+	(entry)-&gt;field.next = NULL;				\
+	(entry)-&gt;field.prev = NULL;				\
+MACRO_END
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_assign
+ *	Note:
+ *		This should only be used with Method 2 queue iteration (element chains)
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">queue_assign</span>(to, from, type, field)			\
+MACRO_BEGIN							\
+	((type)(<span class="enscript-type">void</span> *)((from)-&gt;prev))-&gt;field.next = (to);	\
+	((type)(<span class="enscript-type">void</span> *)((from)-&gt;next))-&gt;field.prev = (to);	\
+	*to = *from;						\
+MACRO_END
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_new_head
+ *	Function:
+ *		rebase old queue to new queue head
+ *	Header:
+ *		queue_new_head(old, new, type, field)
+ *			queue_t old;
+ *			queue_t new;
+ *			&lt;type&gt; is what's in our queue
+ *                      &lt;field&gt; is the chain field in (*&lt;type&gt;)
+ *	Note:
+ *		This should only be used with Method 2 queue iteration (element chains)
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">queue_new_head</span>(old, new, type, field)			\
+MACRO_BEGIN							\
+	<span class="enscript-keyword">if</span> (!queue_empty(old)) {				\
+		*(new) = *(old);				\
+		((type)(<span class="enscript-type">void</span> *)((new)-&gt;next))-&gt;field.prev =	\
+			(new);					\
+		((type)(<span class="enscript-type">void</span> *)((new)-&gt;prev))-&gt;field.next =	\
+			(new);					\
+	} <span class="enscript-keyword">else</span> {						\
+		queue_init(new);				\
+	}							\
+MACRO_END
+
+<span class="enscript-comment">/*
+ *	Macro:		queue_iterate
+ *	Function:
+ *		iterate over each item in the queue.
+ *		Generates a 'for' loop, setting elt to
+ *		each item in turn (by reference).
+ *	Header:
+ *		queue_iterate(q, elt, type, field)
+ *			queue_t q;
+ *			&lt;type&gt; elt;
+ *			&lt;type&gt; is what's in our queue
+ *			&lt;field&gt; is the chain field in (*&lt;type&gt;)
+ *	Note:
+ *		This should only be used with Method 2 queue iteration (element chains)
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">queue_iterate</span>(head, elt, type, field)			\
+	<span class="enscript-keyword">for</span> ((elt) = (type)(<span class="enscript-type">void</span> *) queue_first(head);		\
+	     !queue_end((head), (queue_entry_t)(elt));		\
+	     (elt) = (type)(<span class="enscript-type">void</span> *) queue_next(&amp;(elt)-&gt;field))
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">MACH_KERNEL_PRIVATE</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+<span class="enscript-comment">/*----------------------------------------------------------------*/</span>
+<span class="enscript-comment">/*
+ *	Define macros for queues with locks.
+ */</span>
+<span class="enscript-type">struct</span> mpqueue_head {
+	<span class="enscript-type">struct</span> queue_entry	head;		<span class="enscript-comment">/* header for queue */</span>
+	uint64_t		earliest_soft_deadline;
+	uint64_t		count;
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+	lck_mtx_t		lock_data;
+	lck_mtx_ext_t		lock_data_ext;
+#<span class="enscript-reference">else</span>
+	lck_spin_t		lock_data;
+#<span class="enscript-reference">endif</span>
+};
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> mpqueue_head	mpqueue_head_t;
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">round_mpq</span>(size)		(size)
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">mpqueue_init</span>(q, lck_grp, lck_attr)		\
+MACRO_BEGIN						\
+	queue_init(&amp;(q)-&gt;head);				\
+        lck_mtx_init_ext(&amp;(q)-&gt;lock_data,		\
+			 &amp;(q)-&gt;lock_data_ext,		\
+			 lck_grp,			\
+			 lck_attr);			\
+	(q)-&gt;earliest_soft_deadline = UINT64_MAX;	\
+	(q)-&gt;count = 0;					\
+MACRO_END
+
+#<span class="enscript-reference">else</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">mpqueue_init</span>(q, lck_grp, lck_attr)		\
+MACRO_BEGIN						\
+	queue_init(&amp;(q)-&gt;head);				\
+        lck_spin_init(&amp;(q)-&gt;lock_data,			\
+		      lck_grp,				\
+		      lck_attr);			\
+MACRO_END
+#<span class="enscript-reference">endif</span>
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">mpenqueue_tail</span>(q, elt)				\
+MACRO_BEGIN						\
+        lck_mtx_lock_spin_always(&amp;(q)-&gt;lock_data);	\
+	enqueue_tail(&amp;(q)-&gt;head, elt);			\
+	lck_mtx_unlock_always(&amp;(q)-&gt;lock_data);		\
+MACRO_END
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">mpdequeue_head</span>(q, elt)				\
+MACRO_BEGIN						\
+        lck_mtx_lock_spin_always(&amp;(q)-&gt;lock_data);	\
+	<span class="enscript-keyword">if</span> (queue_empty(&amp;(q)-&gt;head))			\
+		*(elt) = 0;				\
+	<span class="enscript-keyword">else</span>						\
+		*(elt) = dequeue_head(&amp;(q)-&gt;head);	\
+	lck_mtx_unlock_always(&amp;(q)-&gt;lock_data);		\
+MACRO_END
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MACH_KERNEL_PRIVATE */</span>
+
+__END_DECLS
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* _KERN_QUEUE_H_ */</span>
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,705 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>proc_listpidspath.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">proc_listpidspath.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007, 2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this
+ * file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libproc.h&gt;</span>
+
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	<span class="enscript-comment">// process IDs
+</span>	<span class="enscript-type">int</span>				*pids;
+	<span class="enscript-type">int</span>				pids_count;
+	size_t				pids_size;
+
+	<span class="enscript-comment">// threads
+</span>	uint64_t			*threads;
+	<span class="enscript-type">int</span>				thr_count;
+	size_t				thr_size;
+
+	<span class="enscript-comment">// open file descriptors
+</span>	<span class="enscript-type">struct</span> proc_fdinfo		*fds;
+	<span class="enscript-type">int</span>				fds_count;
+	size_t				fds_size;
+
+	<span class="enscript-comment">// file/volume of interest
+</span>	<span class="enscript-type">struct</span> stat			match_stat;
+
+	<span class="enscript-comment">// flags
+</span>	uint32_t			flags;
+
+} fdOpenInfo, *fdOpenInfoRef;
+
+
+<span class="enscript-comment">/*
+ * check_init
+ */</span>
+<span class="enscript-type">static</span> fdOpenInfoRef
+<span class="enscript-function-name">check_init</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *path, uint32_t flags)
+{
+	fdOpenInfoRef	info;
+	<span class="enscript-type">int</span>		status;
+
+	info = malloc(<span class="enscript-keyword">sizeof</span>(*info));
+	<span class="enscript-keyword">if</span> (!info)
+		<span class="enscript-keyword">return</span> NULL;
+
+	info-&gt;pids		= NULL;
+	info-&gt;pids_count	= 0;
+	info-&gt;pids_size		= 0;
+
+	info-&gt;threads		= NULL;
+	info-&gt;thr_count		= 0;
+	info-&gt;thr_size		= 0;
+
+	info-&gt;fds		= NULL;
+	info-&gt;fds_count		= 0;
+	info-&gt;fds_size		= 0;
+
+	status = stat(path, &amp;info-&gt;match_stat);
+	<span class="enscript-keyword">if</span> (status == -1) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+
+	info-&gt;flags		= flags;
+
+	<span class="enscript-keyword">return</span> info;
+
+    fail :
+
+	free(info);
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+
+<span class="enscript-comment">/*
+ * check_free
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">check_free</span>(fdOpenInfoRef info)
+{
+	<span class="enscript-keyword">if</span> (info-&gt;pids != NULL) {
+		free(info-&gt;pids);
+	}
+
+	<span class="enscript-keyword">if</span> (info-&gt;threads != NULL) {
+		free(info-&gt;threads);
+	}
+
+	<span class="enscript-keyword">if</span> (info-&gt;fds != NULL) {
+		free(info-&gt;fds);
+	}
+
+	free(info);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+
+<span class="enscript-comment">/*
+ * check_file
+ *   check if a process vnode is of interest
+ *
+ *   in  : vnode stat(2)
+ *   out : -1 if error
+ *          0 if no match
+ *          1 if match
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">check_file</span>(fdOpenInfoRef info, <span class="enscript-type">struct</span> vinfo_stat *sb)
+{
+	<span class="enscript-keyword">if</span> (sb-&gt;vst_dev == 0) {
+		<span class="enscript-comment">// if no info
+</span>		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">if</span> (sb-&gt;vst_dev != info-&gt;match_stat.st_dev) {
+		<span class="enscript-comment">// if not the requested filesystem
+</span>		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">if</span> (!(info-&gt;flags &amp; PROC_LISTPIDSPATH_PATH_IS_VOLUME) &amp;&amp;
+	    (sb-&gt;vst_ino != info-&gt;match_stat.st_ino)) {
+		<span class="enscript-comment">// if not the requested file
+</span>		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">return</span> 1;
+}
+
+
+<span class="enscript-comment">/*
+ * check_process_vnodes
+ *   check [process] current working directory
+ *   check [process] root directory
+ *
+ *   in  : pid
+ *   out : -1 if error
+ *          0 if no match
+ *          1 if match
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">check_process_vnodes</span>(fdOpenInfoRef info, <span class="enscript-type">int</span> pid)
+{
+	<span class="enscript-type">int</span>				buf_used;
+	<span class="enscript-type">int</span>				status;
+	<span class="enscript-type">struct</span> proc_vnodepathinfo	vpi;
+
+	buf_used = proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &amp;vpi, <span class="enscript-keyword">sizeof</span>(vpi));
+	<span class="enscript-keyword">if</span> (buf_used &lt;= 0) {
+		<span class="enscript-keyword">if</span> (errno == ESRCH) {
+			<span class="enscript-comment">// if the process is gone
+</span>			<span class="enscript-keyword">return</span> 0;
+		}
+		<span class="enscript-keyword">return</span> -1;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (buf_used &lt; <span class="enscript-keyword">sizeof</span>(vpi)) {
+		<span class="enscript-comment">// if we didn't get enough information
+</span>		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-comment">// processing current working directory
+</span>	status = check_file(info, &amp;vpi.pvi_cdir.vip_vi.vi_stat);
+	<span class="enscript-keyword">if</span> (status != 0) {
+		<span class="enscript-comment">// if error or match
+</span>		<span class="enscript-keyword">return</span> status;
+	}
+
+	<span class="enscript-comment">// processing root directory
+</span>	status = check_file(info, &amp;vpi.pvi_rdir.vip_vi.vi_stat);
+	<span class="enscript-keyword">if</span> (status != 0) {
+		<span class="enscript-comment">// if error or match
+</span>		<span class="enscript-keyword">return</span> status;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-comment">/*
+ * check_process_text
+ *   check [process] text (memory)
+ *
+ *   in  : pid
+ *   out : -1 if error
+ *          0 if no match
+ *          1 if match
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">check_process_text</span>(fdOpenInfoRef info, <span class="enscript-type">int</span> pid)
+{
+	<span class="enscript-type">int</span>		status;
+	<span class="enscript-type">int</span>		buf_used;
+	<span class="enscript-type">struct</span> proc_regionwithpathinfo	rwpi;
+
+	<span class="enscript-keyword">if</span> (info-&gt;flags &amp; PROC_LISTPIDSPATH_PATH_IS_VOLUME) {
+
+		<span class="enscript-comment">// ask for first memory region that matches mountpoint
+</span>		buf_used = proc_pidinfo(pid, PROC_PIDREGIONPATHINFO3, info-&gt;match_stat.st_dev, &amp;rwpi, <span class="enscript-keyword">sizeof</span>(rwpi));
+		<span class="enscript-keyword">if</span> (buf_used &lt;= 0) {
+			<span class="enscript-keyword">if</span> ((errno == ESRCH) || (errno == EINVAL)) {
+				<span class="enscript-comment">// if no more text information is available for this process.
+</span>				<span class="enscript-keyword">return</span> 0;
+			}
+			<span class="enscript-keyword">return</span> -1;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (buf_used &lt; <span class="enscript-keyword">sizeof</span>(rwpi)) {
+			<span class="enscript-comment">// if we didn't get enough information
+</span>			<span class="enscript-keyword">return</span> -1;
+		}
+		
+		status = check_file(info, &amp;rwpi.prp_vip.vip_vi.vi_stat);
+		<span class="enscript-keyword">if</span> (status != 0) {
+			<span class="enscript-comment">// if error or match
+</span>			<span class="enscript-keyword">return</span> status;
+		}
+	} <span class="enscript-keyword">else</span> {
+		uint64_t	a	= 0;
+		
+		<span class="enscript-keyword">while</span> (1) {	<span class="enscript-comment">// for all memory regions
+</span>			<span class="enscript-comment">// processing next address
+</span>			buf_used = proc_pidinfo(pid, PROC_PIDREGIONPATHINFO2, a, &amp;rwpi, <span class="enscript-keyword">sizeof</span>(rwpi));
+			<span class="enscript-keyword">if</span> (buf_used &lt;= 0) {
+				<span class="enscript-keyword">if</span> ((errno == ESRCH) || (errno == EINVAL)) {
+					<span class="enscript-comment">// if no more text information is available for this process.
+</span>					<span class="enscript-keyword">break</span>;
+				}
+				<span class="enscript-keyword">return</span> -1;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (buf_used &lt; <span class="enscript-keyword">sizeof</span>(rwpi)) {
+				<span class="enscript-comment">// if we didn't get enough information
+</span>				<span class="enscript-keyword">return</span> -1;
+			}
+			
+			status = check_file(info, &amp;rwpi.prp_vip.vip_vi.vi_stat);
+			<span class="enscript-keyword">if</span> (status != 0) {
+				<span class="enscript-comment">// if error or match
+</span>				<span class="enscript-keyword">return</span> status;
+			}
+			
+			a = rwpi.prp_prinfo.pri_address + rwpi.prp_prinfo.pri_size;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-comment">/*
+ * check_process_fds
+ *   check [process] open file descriptors
+ *
+ *   in  : pid
+ *   out : -1 if error
+ *          0 if no match
+ *          1 if match
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">check_process_fds</span>(fdOpenInfoRef info, <span class="enscript-type">int</span> pid)
+{
+	<span class="enscript-type">int</span>	buf_used;
+	<span class="enscript-type">int</span>	i;
+	<span class="enscript-type">int</span>	status;
+
+	<span class="enscript-comment">// get list of open file descriptors
+</span>	buf_used = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, NULL, 0);
+	<span class="enscript-keyword">if</span> (buf_used &lt;= 0) {
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-keyword">while</span> (1) {
+		<span class="enscript-keyword">if</span> (buf_used &gt; info-&gt;fds_size) {
+			<span class="enscript-comment">// if we need to allocate [more] space
+</span>			<span class="enscript-keyword">while</span> (buf_used &gt; info-&gt;fds_size) {
+				info-&gt;fds_size += (<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> proc_fdinfo) * 32);
+			}
+
+			<span class="enscript-keyword">if</span> (info-&gt;fds == NULL) {
+				info-&gt;fds = malloc(info-&gt;fds_size);
+			} <span class="enscript-keyword">else</span> {
+				info-&gt;fds = reallocf(info-&gt;fds, info-&gt;fds_size);
+			}
+			<span class="enscript-keyword">if</span> (info-&gt;fds == NULL) {
+				<span class="enscript-keyword">return</span> -1;
+			}
+		}
+
+		buf_used = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, info-&gt;fds, (<span class="enscript-type">int</span>)info-&gt;fds_size);
+		<span class="enscript-keyword">if</span> (buf_used &lt;= 0) {
+			<span class="enscript-keyword">return</span> -1;
+		}
+
+		<span class="enscript-keyword">if</span> ((buf_used + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> proc_fdinfo)) &gt;= info-&gt;fds_size) {
+			<span class="enscript-comment">// if not enough room in the buffer for an extra fd
+</span>			buf_used = (<span class="enscript-type">int</span>)(info-&gt;fds_size + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> proc_fdinfo));
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		info-&gt;fds_count = (<span class="enscript-type">int</span>)(buf_used / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> proc_fdinfo));
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">// iterate through each file descriptor
+</span>	<span class="enscript-keyword">for</span> (i = 0; i &lt; info-&gt;fds_count; i++) {
+		<span class="enscript-type">struct</span> proc_fdinfo	*fdp;
+
+		fdp = &amp;info-&gt;fds[i];
+		<span class="enscript-keyword">switch</span> (fdp-&gt;proc_fdtype) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">PROX_FDTYPE_VNODE</span> : {
+				<span class="enscript-type">int</span>			buf_used;
+				<span class="enscript-type">struct</span> vnode_fdinfo	vi;
+
+				buf_used = proc_pidfdinfo(pid, fdp-&gt;proc_fd, PROC_PIDFDVNODEINFO, &amp;vi, <span class="enscript-keyword">sizeof</span>(vi));
+				<span class="enscript-keyword">if</span> (buf_used &lt;= 0) {
+					<span class="enscript-keyword">if</span> (errno == ENOENT) {
+						<span class="enscript-comment">/*
+						 * The file descriptor's vnode may have been revoked. This is a
+						 * bit of a hack, since an ENOENT error might not always mean the
+						 * descriptor's vnode has been revoked. As the libproc API
+						 * matures, this code may need to be revisited.
+						 */</span>
+						<span class="enscript-keyword">continue</span>;
+					}
+					<span class="enscript-keyword">return</span> -1;
+				} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (buf_used &lt; <span class="enscript-keyword">sizeof</span>(vi)) {
+					<span class="enscript-comment">// if we didn't get enough information
+</span>					<span class="enscript-keyword">return</span> -1;
+				}
+
+				<span class="enscript-keyword">if</span> ((info-&gt;flags &amp; PROC_LISTPIDSPATH_EXCLUDE_EVTONLY) &amp;&amp;
+				    (vi.pfi.fi_openflags &amp; O_EVTONLY)) {
+					<span class="enscript-comment">// if this file should be excluded
+</span>					<span class="enscript-keyword">continue</span>;
+				}
+
+				status = check_file(info, &amp;vi.pvi.vi_stat);
+				<span class="enscript-keyword">if</span> (status != 0) {
+					<span class="enscript-comment">// if error or match
+</span>					<span class="enscript-keyword">return</span> status;
+				}
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">default</span> :
+				<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-comment">/*
+ * check_process_threads
+ *   check [process] thread working directories
+ *
+ *   in  : pid
+ *   out : -1 if error
+ *          0 if no match
+ *          1 if match
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">check_process_threads</span>(fdOpenInfoRef info, <span class="enscript-type">int</span> pid)
+{
+	<span class="enscript-type">int</span>				buf_used;
+	<span class="enscript-type">int</span>				status;
+	<span class="enscript-type">struct</span> proc_taskallinfo		tai;
+
+	buf_used = proc_pidinfo(pid, PROC_PIDTASKALLINFO, 0, &amp;tai, <span class="enscript-keyword">sizeof</span>(tai));
+	<span class="enscript-keyword">if</span> (buf_used &lt;= 0) {
+		<span class="enscript-keyword">if</span> (errno == ESRCH) {
+			<span class="enscript-comment">// if the process is gone
+</span>			<span class="enscript-keyword">return</span> 0;
+		}
+		<span class="enscript-keyword">return</span> -1;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (buf_used &lt; <span class="enscript-keyword">sizeof</span>(tai)) {
+		<span class="enscript-comment">// if we didn't get enough information
+</span>		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-comment">// check thread info
+</span>	<span class="enscript-keyword">if</span> (tai.pbsd.pbi_flags &amp; PROC_FLAG_THCWD) {
+		<span class="enscript-type">int</span>	i;
+
+		<span class="enscript-comment">// get list of threads
+</span>		buf_used = tai.ptinfo.pti_threadnum * <span class="enscript-keyword">sizeof</span>(uint64_t);
+
+		<span class="enscript-keyword">while</span> (1) {
+			<span class="enscript-keyword">if</span> (buf_used &gt; info-&gt;thr_size) {
+				<span class="enscript-comment">// if we need to allocate [more] space
+</span>				<span class="enscript-keyword">while</span> (buf_used &gt; info-&gt;thr_size) {
+					info-&gt;thr_size += (<span class="enscript-keyword">sizeof</span>(uint64_t) * 32);
+				}
+
+				<span class="enscript-keyword">if</span> (info-&gt;threads == NULL) {
+					info-&gt;threads = malloc(info-&gt;thr_size);
+				} <span class="enscript-keyword">else</span> {
+					info-&gt;threads = reallocf(info-&gt;threads, info-&gt;thr_size);
+				}
+				<span class="enscript-keyword">if</span> (info-&gt;threads == NULL) {
+					<span class="enscript-keyword">return</span> -1;
+				}
+			}
+
+			buf_used = proc_pidinfo(pid, PROC_PIDLISTTHREADS, 0, info-&gt;threads, (<span class="enscript-type">int</span>)info-&gt;thr_size);
+			<span class="enscript-keyword">if</span> (buf_used &lt;= 0) {
+				<span class="enscript-keyword">return</span> -1;
+			}
+
+			<span class="enscript-keyword">if</span> ((buf_used + <span class="enscript-keyword">sizeof</span>(uint64_t)) &gt;= info-&gt;thr_size) {
+				<span class="enscript-comment">// if not enough room in the buffer for an extra thread
+</span>				buf_used = (<span class="enscript-type">int</span>)(info-&gt;thr_size + <span class="enscript-keyword">sizeof</span>(uint64_t));
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			info-&gt;thr_count = buf_used / <span class="enscript-keyword">sizeof</span>(uint64_t);
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">// iterate through each thread
+</span>		<span class="enscript-keyword">for</span> (i = 0; i &lt; info-&gt;thr_count; i++) {
+			uint64_t			thr	= info-&gt;threads[i];
+			<span class="enscript-type">struct</span> proc_threadwithpathinfo	tpi;
+
+			buf_used = proc_pidinfo(pid, PROC_PIDTHREADPATHINFO, thr, &amp;tpi, <span class="enscript-keyword">sizeof</span>(tpi));
+			<span class="enscript-keyword">if</span> (buf_used &lt;= 0) {
+				<span class="enscript-keyword">if</span> ((errno == ESRCH) || (errno == EINVAL)) {
+					<span class="enscript-comment">// if the process or thread is gone
+</span>					<span class="enscript-keyword">continue</span>;
+				}
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (buf_used &lt; <span class="enscript-keyword">sizeof</span>(tai)) {
+				<span class="enscript-comment">// if we didn't get enough information
+</span>				<span class="enscript-keyword">return</span> -1;
+			}
+
+			status = check_file(info, &amp;tpi.pvip.vip_vi.vi_stat);
+			<span class="enscript-keyword">if</span> (status != 0) {
+				<span class="enscript-comment">// if error or match
+</span>				<span class="enscript-keyword">return</span> status;
+			}
+		}
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-comment">/*
+ * check_process_phase1
+ *   check [process] process-wide current working and root directories
+ *   check [process] open file descriptors
+ *   check [process] per-thread current working and root directories
+ *
+ *   in  : pid
+ *   out : -1 if error
+ *          0 if no match
+ *          1 if match
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">check_process_phase1</span>(fdOpenInfoRef info, <span class="enscript-type">int</span> pid)
+{
+	<span class="enscript-type">int</span>	status;
+
+	<span class="enscript-comment">// check root and current working directory
+</span>	status = check_process_vnodes(info, pid);
+	<span class="enscript-keyword">if</span> (status != 0) {
+		<span class="enscript-comment">// if error or match
+</span>		<span class="enscript-keyword">return</span> status;
+	}
+
+	<span class="enscript-comment">// check open file descriptors
+</span>	status = check_process_fds(info, pid);
+	<span class="enscript-keyword">if</span> (status != 0) {
+		<span class="enscript-comment">// if error or match
+</span>		<span class="enscript-keyword">return</span> status;
+	}
+
+	<span class="enscript-comment">// check per-thread working directories
+</span>	status = check_process_threads(info, pid);
+	<span class="enscript-keyword">if</span> (status != 0) {
+		<span class="enscript-comment">// if error or match
+</span>		<span class="enscript-keyword">return</span> status;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * check_process_phase2
+ *   check [process] text (memory)
+ *
+ *   in  : pid
+ *   out : -1 if error
+ *          0 if no match
+ *          1 if match
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">check_process_phase2</span>(fdOpenInfoRef info, <span class="enscript-type">int</span> pid)
+{
+	<span class="enscript-type">int</span>	status;
+
+	<span class="enscript-comment">// check process text (memory)
+</span>	status = check_process_text(info, pid);
+	<span class="enscript-keyword">if</span> (status != 0) {
+		<span class="enscript-comment">// if error or match
+</span>		<span class="enscript-keyword">return</span> status;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * proc_listpidspath
+ *
+ *   in  : type
+ *       : typeinfo
+ *       : path
+ *       : pathflags
+ *       : buffer
+ *       : buffersize
+ *   out : buffer filled with process IDs that have open file
+ *         references that match the specified path or volume;
+ *         return value is the bytes of the returned buffer
+ *         that contains valid information.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_listpidspath</span>(uint32_t	type,
+		  uint32_t	typeinfo,
+		  <span class="enscript-type">const</span> <span class="enscript-type">char</span>	*path,
+		  uint32_t	pathflags,
+		  <span class="enscript-type">void</span>		*buffer,
+		  <span class="enscript-type">int</span>		buffersize)
+{
+	<span class="enscript-type">int</span>		buf_used;
+	<span class="enscript-type">int</span>		*buf_next	= (<span class="enscript-type">int</span> *)buffer;
+	<span class="enscript-type">int</span>		i;
+	fdOpenInfoRef	info;
+	<span class="enscript-type">int</span>		status		= -1;
+
+	<span class="enscript-keyword">if</span> (buffer == NULL) {
+		<span class="enscript-comment">// if this is a sizing request
+</span>		<span class="enscript-keyword">return</span> proc_listpids(type, typeinfo, NULL, 0);
+	}
+
+	buffersize -= (buffersize % <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)); <span class="enscript-comment">// make whole number of ints
+</span>	<span class="enscript-keyword">if</span> (buffersize &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)) {
+		<span class="enscript-comment">// if we can't even return a single PID
+</span>		errno = ENOMEM;
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-comment">// init
+</span>	info = check_init(path, pathflags);
+	<span class="enscript-keyword">if</span> (info == NULL) {
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-comment">// get list of processes
+</span>	buf_used = proc_listpids(type, typeinfo, NULL, 0);
+	<span class="enscript-keyword">if</span> (buf_used &lt;= 0) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">while</span> (1) {
+		<span class="enscript-keyword">if</span> (buf_used &gt; info-&gt;pids_size) {
+			<span class="enscript-comment">// if we need to allocate [more] space
+</span>			<span class="enscript-keyword">while</span> (buf_used &gt; info-&gt;pids_size) {
+				info-&gt;pids_size += (<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>) * 32);
+			}
+
+			<span class="enscript-keyword">if</span> (info-&gt;pids == NULL) {
+				info-&gt;pids = malloc(info-&gt;pids_size);
+			} <span class="enscript-keyword">else</span> {
+				info-&gt;pids = reallocf(info-&gt;pids, info-&gt;pids_size);
+			}
+			<span class="enscript-keyword">if</span> (info-&gt;pids == NULL) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+			}
+		}
+
+		buf_used = proc_listpids(type, typeinfo, info-&gt;pids, (<span class="enscript-type">int</span>)info-&gt;pids_size);
+		<span class="enscript-keyword">if</span> (buf_used &lt;= 0) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+
+		<span class="enscript-keyword">if</span> ((buf_used + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)) &gt;= info-&gt;pids_size) {
+			<span class="enscript-comment">// if not enough room in the buffer for an extra pid
+</span>			buf_used = (<span class="enscript-type">int</span>)(info-&gt;pids_size + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		info-&gt;pids_count = buf_used / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">// iterate through each process
+</span>	buf_used = 0;
+	<span class="enscript-keyword">for</span> (i = info-&gt;pids_count - 1; i &gt;= 0; i--) {
+		<span class="enscript-type">int</span>	pid;
+		<span class="enscript-type">int</span>	pstatus;
+
+		pid = info-&gt;pids[i];
+		<span class="enscript-keyword">if</span> (pid == 0) {
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		pstatus = check_process_phase1(info, pid);
+		<span class="enscript-keyword">if</span> (pstatus != 1) {
+			<span class="enscript-comment">// if not a match
+</span>			<span class="enscript-keyword">continue</span>;
+		}
+
+		*buf_next++ = pid;
+		buf_used += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>);
+
+		<span class="enscript-keyword">if</span> (buf_used &gt;= buffersize) {
+			<span class="enscript-comment">// if we have filled the buffer
+</span>			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (buf_used &gt;= buffersize) {
+		<span class="enscript-comment">// if we have filled the buffer
+</span>		status = buf_used;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">// do a more expensive search if we still have buffer space
+</span>	<span class="enscript-keyword">for</span> (i = info-&gt;pids_count - 1; i &gt;= 0; i--) {
+		<span class="enscript-type">int</span>	pid;
+		<span class="enscript-type">int</span>	pstatus;
+
+		pid = info-&gt;pids[i];
+		<span class="enscript-keyword">if</span> (pid == 0) {
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		pstatus = check_process_phase2(info, pid);
+		<span class="enscript-keyword">if</span> (pstatus != 1) {
+			<span class="enscript-comment">// if not a match
+</span>			<span class="enscript-keyword">continue</span>;
+		}
+
+		*buf_next++ = pid;
+		buf_used += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>);
+
+		<span class="enscript-keyword">if</span> (buf_used &gt;= buffersize) {
+			<span class="enscript-comment">// if we have filled the buffer
+</span>			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	status = buf_used;
+
+    done :
+
+	<span class="enscript-comment">// cleanup
+</span>	check_free(info);
+
+	<span class="enscript-keyword">return</span> status;
+}
+</pre>
+<hr />
+</body></html>

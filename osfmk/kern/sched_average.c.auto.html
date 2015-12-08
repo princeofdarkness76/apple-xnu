@@ -1,0 +1,290 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>sched_average.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">sched_average.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2007 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989,1988,1987 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+<span class="enscript-comment">/*
+ *	Author:	Avadis Tevanian, Jr.
+ *	Date:	1986
+ *
+ *	Compute various averages.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TELEMETRY</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/telemetry.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+	
+uint32_t	avenrun[3] = {0, 0, 0};
+uint32_t	mach_factor[3] = {0, 0, 0};
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_TIMESHARE_CORE</span>)
+<span class="enscript-comment">/*
+ * Values are scaled by LOAD_SCALE, defined in processor_info.h
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">base</span>(n)		((n) &lt;&lt; SCHED_TICK_SHIFT)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">frac</span>(n)		(((base(n) - 1) * LOAD_SCALE) /	base(n))
+
+<span class="enscript-type">static</span> uint32_t		fract[3] = {
+	frac(5),		<span class="enscript-comment">/* 5 second average */</span>
+	frac(30),		<span class="enscript-comment">/* 30 second average */</span>
+	frac(60),		<span class="enscript-comment">/* 1 minute average */</span>
+};
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">base</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">frac</span>
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_SCHED_TIMESHARE_CORE */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		sched_nrun;
+
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">void</span>	(*sched_avg_comp_t)(
+					<span class="enscript-type">void</span>			*param);
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> sched_average {
+	sched_avg_comp_t	comp;
+	<span class="enscript-type">void</span>			*param;
+	<span class="enscript-type">int</span>			period; <span class="enscript-comment">/* in seconds */</span>
+	uint64_t		deadline;
+} sched_average[] = {
+	{ compute_averunnable, &amp;sched_nrun, 5, 0 },
+	{ compute_stack_target, NULL, 5, 1 },
+	{ compute_memory_pressure, NULL, 1, 0 },
+	{ compute_zone_gc_throttle, NULL, 60, 0 },
+	{ compute_pageout_gc_throttle, NULL, 1, 0 },
+	{ compute_pmap_gc_throttle, NULL, 60, 0 },
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TELEMETRY</span>
+	{ compute_telemetry, NULL, 1, 0 },
+#<span class="enscript-reference">endif</span>
+	{ NULL, NULL, 0, 0 }
+};
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> sched_average	*sched_average_t;
+
+<span class="enscript-comment">/* The &quot;stdelta&quot; parameter represents the number of scheduler maintenance
+ * &quot;ticks&quot; that have elapsed since the last invocation, subject to
+ * integer division imprecision.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">compute_averages</span>(uint64_t stdelta)
+{
+	<span class="enscript-type">int</span>			ncpus, nthreads, nshared, nbackground, nshared_non_bg;
+	uint32_t		factor_now, average_now, load_now = 0, background_load_now = 0, combined_fgbg_load_now = 0;
+	sched_average_t		avg;
+	uint64_t		abstime, index;
+
+	<span class="enscript-comment">/*
+	 *	Retrieve counts, ignoring
+	 *	the current thread.
+	 */</span>
+	ncpus = processor_avail_count;
+	nthreads = sched_run_count - 1;
+	nshared = sched_share_count;
+	nbackground = sched_background_count;
+
+	<span class="enscript-comment">/*
+	 *	Load average and mach factor calculations for
+	 *	those which ask about these things.
+	 */</span>
+	average_now = nthreads * LOAD_SCALE;
+
+	<span class="enscript-keyword">if</span> (nthreads &gt; ncpus)
+		factor_now = (ncpus * LOAD_SCALE) / (nthreads + 1);
+	<span class="enscript-keyword">else</span>
+		factor_now = (ncpus - nthreads) * LOAD_SCALE;
+
+	<span class="enscript-comment">/* For those statistics that formerly relied on being recomputed
+	 * on timer ticks, advance by the approximate number of corresponding
+	 * elapsed intervals, thus compensating for potential idle intervals.
+	 */</span>
+	<span class="enscript-keyword">for</span> (index = 0; index &lt; stdelta; index++) {
+		sched_mach_factor = ((sched_mach_factor &lt;&lt; 2) + factor_now) / 5;
+		sched_load_average = ((sched_load_average &lt;&lt; 2) + average_now) / 5;
+	}
+	<span class="enscript-comment">/*
+	 * Compute the timeshare priority conversion factor based on loading.
+	 * Because our counters may be incremented and accessed
+	 * concurrently with respect to each other, we may have
+	 * windows where the invariant nthreads &gt;= nshared &gt;= nbackground
+	 * is broken, so truncate values in these cases.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (nshared &gt; nthreads)
+		nshared = nthreads;
+
+	<span class="enscript-keyword">if</span> (nbackground &gt; nshared)
+		nbackground = nshared;
+
+	nshared_non_bg = nshared - nbackground;
+
+	<span class="enscript-keyword">if</span> (nshared_non_bg &gt; ncpus) {
+		<span class="enscript-keyword">if</span> (ncpus &gt; 1)
+			load_now = nshared_non_bg / ncpus;
+		<span class="enscript-keyword">else</span>
+			load_now = nshared_non_bg;
+
+		<span class="enscript-keyword">if</span> (load_now &gt; NRQS - 1)
+			load_now = NRQS - 1;
+	}
+
+	<span class="enscript-keyword">if</span> (nbackground &gt; ncpus) {
+		<span class="enscript-keyword">if</span> (ncpus &gt; 1)
+			background_load_now = nbackground / ncpus;
+		<span class="enscript-keyword">else</span>
+			background_load_now = nbackground;
+
+		<span class="enscript-keyword">if</span> (background_load_now &gt; NRQS - 1)
+			background_load_now = NRQS - 1;
+	}
+
+	<span class="enscript-keyword">if</span> (nshared &gt; ncpus) {
+		<span class="enscript-keyword">if</span> (ncpus &gt; 1)
+			combined_fgbg_load_now = nshared / ncpus;
+		<span class="enscript-keyword">else</span>
+			combined_fgbg_load_now = nshared;
+
+		<span class="enscript-keyword">if</span> (combined_fgbg_load_now &gt; NRQS - 1)
+			combined_fgbg_load_now = NRQS - 1;
+	}
+
+	<span class="enscript-comment">/*
+	 *	Sample total running threads.
+	 */</span>
+	sched_nrun = nthreads;
+	
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_TIMESHARE_CORE</span>)
+
+	<span class="enscript-comment">/*
+	 *	The conversion factor consists of
+	 *	two components: a fixed value based
+	 *	on the absolute time unit, and a
+	 *	dynamic portion based on loading.
+	 *
+	 *	Zero loading results in a out of range
+	 *	shift count.  Accumulated usage is ignored
+	 *	during conversion and new usage deltas
+	 *	are discarded.
+	 */</span>
+	sched_pri_shift = sched_fixed_shift - sched_load_shifts[load_now];
+	sched_background_pri_shift = sched_fixed_shift - sched_load_shifts[background_load_now];
+	sched_combined_fgbg_pri_shift = sched_fixed_shift - sched_load_shifts[combined_fgbg_load_now];
+
+	<span class="enscript-comment">/*
+	 * Compute old-style Mach load averages.
+	 */</span>
+
+	<span class="enscript-keyword">for</span> (index = 0; index &lt; stdelta; index++) {
+		<span class="enscript-type">register</span> <span class="enscript-type">int</span>		i;
+
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; 3; i++) {
+			mach_factor[i] = ((mach_factor[i] * fract[i]) +
+						(factor_now * (LOAD_SCALE - fract[i]))) / LOAD_SCALE;
+
+			avenrun[i] = ((avenrun[i] * fract[i]) +
+						(average_now * (LOAD_SCALE - fract[i]))) / LOAD_SCALE;
+		}
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_SCHED_TIMESHARE_CORE */</span>
+
+	<span class="enscript-comment">/*
+	 *	Compute averages in other components.
+	 */</span>
+	abstime = mach_absolute_time();
+	<span class="enscript-keyword">for</span> (avg = sched_average; avg-&gt;comp != NULL; ++avg) {
+		<span class="enscript-keyword">if</span> (abstime &gt;= avg-&gt;deadline) {
+			uint64_t period_abs = (avg-&gt;period * sched_one_second_interval);
+			uint64_t ninvokes = 1;
+
+			ninvokes += (abstime - avg-&gt;deadline) / period_abs;
+			ninvokes = MIN(ninvokes, SCHED_TICK_MAX_DELTA);
+
+			<span class="enscript-keyword">for</span> (index = 0; index &lt; ninvokes; index++) {
+				(*avg-&gt;comp)(avg-&gt;param);
+			}
+			avg-&gt;deadline = abstime + period_abs;
+		}
+	}
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,230 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mac_posix_sem.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mac_posix_sem.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*-
+ * Copyright (c) 2003-2005 Networks Associates Technology, Inc.
+ * All rights reserved.
+ *
+ * This software was developed for the FreeBSD Project in part by Network
+ * Associates Laboratories, the Security Research Division of Network
+ * Associates, Inc. under DARPA/SPAWAR contract N66001-01-C-8035 (&quot;CBOSS&quot;),
+ * as part of the DARPA CHATS research program.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/posix_sem.h&gt;</span>
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> label *
+<span class="enscript-function-name">mac_posixsem_label_alloc</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_labelzone_alloc(MAC_WAITOK);
+	<span class="enscript-keyword">if</span> (label == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+	MAC_PERFORM(posixsem_label_init, label);
+	<span class="enscript-keyword">return</span> (label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_posixsem_label_init</span>(<span class="enscript-type">struct</span> pseminfo *psem)
+{
+
+	psem-&gt;psem_label = mac_posixsem_label_alloc();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_posixsem_label_free</span>(<span class="enscript-type">struct</span> label *label)
+{
+
+	MAC_PERFORM(posixsem_label_destroy, label);
+	mac_labelzone_free(label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_posixsem_label_destroy</span>(<span class="enscript-type">struct</span> pseminfo *psem)
+{
+
+	mac_posixsem_label_free(psem-&gt;psem_label);
+	psem-&gt;psem_label = NULL;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_posixsem_label_associate</span>(kauth_cred_t cred, <span class="enscript-type">struct</span> pseminfo *psem,
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name)
+{
+
+	MAC_PERFORM(posixsem_label_associate, cred, psem, psem-&gt;psem_label, name);
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_posixsem_vnode_label_associate</span>(kauth_cred_t cred, 
+	<span class="enscript-type">struct</span> pseminfo *psem,  <span class="enscript-type">struct</span> label *plabel,
+	vnode_t vp, <span class="enscript-type">struct</span> label *vlabel)
+{
+	MAC_PERFORM(vnode_label_associate_posixsem, cred,
+		    psem, plabel, vp, vlabel);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_posixsem_check_create</span>(kauth_cred_t cred, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name)
+{
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_posixsem_enforce)
+        <span class="enscript-keyword">return</span> (0);
+#<span class="enscript-reference">endif</span>
+
+	MAC_CHECK(posixsem_check_create, cred, name);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_posixsem_check_open</span>(kauth_cred_t cred, <span class="enscript-type">struct</span> pseminfo *psem)
+{
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_posixsem_enforce)
+        <span class="enscript-keyword">return</span> (0);
+#<span class="enscript-reference">endif</span>
+
+	MAC_CHECK(posixsem_check_open, cred, psem,
+	    psem-&gt;psem_label);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_posixsem_check_post</span>(kauth_cred_t cred, <span class="enscript-type">struct</span> pseminfo *psem)
+{
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_posixsem_enforce)
+        <span class="enscript-keyword">return</span> (0);
+#<span class="enscript-reference">endif</span>
+
+	MAC_CHECK(posixsem_check_post, cred, psem, psem-&gt;psem_label);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_posixsem_check_unlink</span>(kauth_cred_t cred, <span class="enscript-type">struct</span> pseminfo *psem,
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name)
+{
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_posixsem_enforce)
+        <span class="enscript-keyword">return</span> (0);
+#<span class="enscript-reference">endif</span>
+
+	MAC_CHECK(posixsem_check_unlink, cred, psem, psem-&gt;psem_label, name);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_posixsem_check_wait</span>(kauth_cred_t cred, <span class="enscript-type">struct</span> pseminfo *psem)
+{
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_posixsem_enforce)
+        <span class="enscript-keyword">return</span> (0);
+#<span class="enscript-reference">endif</span>
+
+	MAC_CHECK(posixsem_check_wait, cred, psem, psem-&gt;psem_label);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+</pre>
+<hr />
+</body></html>

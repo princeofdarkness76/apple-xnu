@@ -1,0 +1,162 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>replacecontents.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">replacecontents.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this
+ * file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdbool.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;err.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sysexits.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">usage</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">main</span>(<span class="enscript-type">int</span> argc, <span class="enscript-type">char</span> * argv[])
+{
+	<span class="enscript-type">struct</span> stat sb;
+	<span class="enscript-type">char</span> *newcontent = NULL;
+	size_t newcontentlength = 0;
+	<span class="enscript-type">char</span> *oldcontent = NULL;
+	<span class="enscript-type">int</span> ret;
+	<span class="enscript-type">int</span> dstfd;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *dst = NULL;
+	ssize_t readsize, writesize;
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">if</span> (argc &lt; 2) {
+		usage();
+	}
+
+	dst = argv[1];
+
+	<span class="enscript-keyword">for</span> (i=2; i &lt; argc; i++) {
+		newcontentlength += strlen(argv[i]) + 1 <span class="enscript-comment">/* space or newline */</span>;
+	}
+	newcontentlength += 1; <span class="enscript-comment">/* NUL */</span>
+
+	newcontent = malloc(newcontentlength);
+	<span class="enscript-keyword">if</span> (newcontent == NULL)
+		err(EX_UNAVAILABLE, <span class="enscript-string">&quot;malloc() failed&quot;</span>);
+
+	newcontent[0] = <span class="enscript-string">'\0'</span>;
+
+	<span class="enscript-keyword">for</span> (i=2; i &lt; argc; i++) {
+		strlcat(newcontent, argv[i], newcontentlength);
+		<span class="enscript-keyword">if</span> (i &lt; argc - 1) {
+			strlcat(newcontent, <span class="enscript-string">&quot; &quot;</span>, newcontentlength);
+		} <span class="enscript-keyword">else</span> {
+			strlcat(newcontent, <span class="enscript-string">&quot;\n&quot;</span>, newcontentlength);
+		}
+	}
+
+	dstfd = open(dst, O_RDWR | O_CREAT | O_APPEND, DEFFILEMODE);
+	<span class="enscript-keyword">if</span> (dstfd &lt; 0)
+		err(EX_NOINPUT, <span class="enscript-string">&quot;open(%s)&quot;</span>, dst);
+
+	ret = fstat(dstfd, &amp;sb);
+	<span class="enscript-keyword">if</span> (ret &lt; 0)
+		err(EX_NOINPUT, <span class="enscript-string">&quot;fstat(%s)&quot;</span>, dst);
+
+	<span class="enscript-keyword">if</span> (!S_ISREG(sb.st_mode))
+		err(EX_USAGE, <span class="enscript-string">&quot;%s is not a regular file&quot;</span>, dst);
+
+	<span class="enscript-keyword">if</span> (sb.st_size != newcontentlength) {
+		<span class="enscript-comment">/* obvious new content must be different than old */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">replace</span>;
+	}
+
+	oldcontent = malloc(newcontentlength);
+	<span class="enscript-keyword">if</span> (oldcontent == NULL)
+		err(EX_UNAVAILABLE, <span class="enscript-string">&quot;malloc(%lu) failed&quot;</span>, newcontentlength);
+
+	readsize = read(dstfd, oldcontent, newcontentlength);
+	<span class="enscript-keyword">if</span> (readsize == -1)
+		err(EX_UNAVAILABLE, <span class="enscript-string">&quot;read() failed&quot;</span>);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (readsize != newcontentlength)
+		errx(EX_UNAVAILABLE, <span class="enscript-string">&quot;short read of file&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (0 == memcmp(oldcontent, newcontent, newcontentlength)) {
+		<span class="enscript-comment">/* binary comparison succeeded, just exit */</span>
+		free(oldcontent);
+		ret = close(dstfd);
+		<span class="enscript-keyword">if</span> (ret &lt; 0)
+			err(EX_UNAVAILABLE, <span class="enscript-string">&quot;close() failed&quot;</span>);
+
+		exit(0);
+	}
+
+<span class="enscript-reference">replace</span>:
+	ret = ftruncate(dstfd, 0);
+	<span class="enscript-keyword">if</span> (ret &lt; 0)
+		err(EX_UNAVAILABLE, <span class="enscript-string">&quot;ftruncate() failed&quot;</span>);
+
+	writesize = write(dstfd, newcontent, newcontentlength);
+	<span class="enscript-keyword">if</span> (writesize == -1)
+		err(EX_UNAVAILABLE, <span class="enscript-string">&quot;write() failed&quot;</span>);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (writesize != newcontentlength)
+		errx(EX_UNAVAILABLE, <span class="enscript-string">&quot;short write of file&quot;</span>);
+
+	ret = close(dstfd);
+	<span class="enscript-keyword">if</span> (ret &lt; 0)
+		err(EX_NOINPUT, <span class="enscript-string">&quot;close(dst)&quot;</span>);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">usage</span>(<span class="enscript-type">void</span>)
+{
+	fprintf(stderr, <span class="enscript-string">&quot;Usage: %s &lt;dst&gt; &lt;new&gt; &lt;contents&gt; &lt;...&gt;\n&quot;</span>,
+			getprogname());
+	exit(EX_USAGE);
+}
+</pre>
+<hr />
+</body></html>

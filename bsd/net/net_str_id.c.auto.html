@@ -1,0 +1,231 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>net_str_id.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">net_str_id.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008,2011 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_mib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;net/net_str_id.h&quot;</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">NET_ID_STR_ENTRY_SIZE</span>(__str) \
+	((size_t)&amp;(((<span class="enscript-type">struct</span> net_str_id_entry*)0)-&gt;nsi_string[0]) + \
+	strlen(__str) + 1)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FIRST_NET_STR_ID</span>				1000
+<span class="enscript-type">static</span> <span class="enscript-function-name">SLIST_HEAD</span>(,net_str_id_entry)	net_str_id_list = {NULL};
+<span class="enscript-function-name">decl_lck_mtx_data</span>(<span class="enscript-type">static</span>, net_str_id_lock_data);
+<span class="enscript-type">static</span> lck_mtx_t	*net_str_id_lock = &amp;net_str_id_lock_data;
+
+<span class="enscript-type">static</span> u_int32_t nsi_kind_next[NSI_MAX_KIND] = { FIRST_NET_STR_ID, FIRST_NET_STR_ID, FIRST_NET_STR_ID };
+<span class="enscript-type">static</span> u_int32_t nsi_next_id = FIRST_NET_STR_ID;
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> sysctl_if_family_ids SYSCTL_HANDLER_ARGS;
+
+<span class="enscript-function-name">SYSCTL_DECL</span>(_net_link_generic_system);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_net_link_generic_system, OID_AUTO, if_family_ids, CTLTYPE_STRUCT | CTLFLAG_RD | CTLFLAG_LOCKED,
+	0, 0, sysctl_if_family_ids, <span class="enscript-string">&quot;S, if_family_id&quot;</span>, <span class="enscript-string">&quot;Interface Family ID table&quot;</span>);
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">net_str_id_init</span>(<span class="enscript-type">void</span>)
+{
+	lck_grp_attr_t	*grp_attrib = NULL;
+	lck_attr_t		*lck_attrb = NULL;
+	lck_grp_t		*lck_group = NULL;
+	
+	grp_attrib = lck_grp_attr_alloc_init();
+	lck_group = lck_grp_alloc_init(<span class="enscript-string">&quot;mbuf_tag_allocate_id&quot;</span>, grp_attrib);
+	lck_grp_attr_free(grp_attrib);
+	lck_attrb = lck_attr_alloc_init();
+	
+	lck_mtx_init(net_str_id_lock, lck_group, lck_attrb);
+	
+	lck_grp_free(lck_group);
+	lck_attr_free(lck_attrb);
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">net_str_id_first_last</span>(u_int32_t *first, u_int32_t *last, u_int32_t kind)
+{
+	*first = FIRST_NET_STR_ID;
+
+	<span class="enscript-keyword">switch</span> (kind) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSI_MBUF_TAG</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSI_VENDOR_CODE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">NSI_IF_FAM_ID</span>:
+			*last = nsi_kind_next[kind] - 1;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			*last = FIRST_NET_STR_ID - 1;
+			<span class="enscript-keyword">break</span>;
+	}
+}
+
+__private_extern__ errno_t
+<span class="enscript-function-name">net_str_id_find_internal</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*string, u_int32_t *out_id,
+						  u_int32_t	kind, <span class="enscript-type">int</span> create)
+{
+	<span class="enscript-type">struct</span> net_str_id_entry			*entry = NULL;
+	
+	
+	<span class="enscript-keyword">if</span> (string == NULL || out_id == NULL || kind &gt;= NSI_MAX_KIND)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	*out_id = 0;
+	
+	<span class="enscript-comment">/* Look for an existing entry */</span>
+	lck_mtx_lock(net_str_id_lock);
+	SLIST_FOREACH(entry, &amp;net_str_id_list, nsi_next) {
+		<span class="enscript-keyword">if</span> (strcmp(string, entry-&gt;nsi_string) == 0) {
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	
+	<span class="enscript-keyword">if</span> (entry == NULL) {
+		<span class="enscript-keyword">if</span> (create == 0) {
+			lck_mtx_unlock(net_str_id_lock);
+			<span class="enscript-keyword">return</span> ENOENT;
+		}
+		
+		entry = kalloc(NET_ID_STR_ENTRY_SIZE(string));
+		<span class="enscript-keyword">if</span> (entry == NULL) {
+			lck_mtx_unlock(net_str_id_lock);
+			<span class="enscript-keyword">return</span> ENOMEM;
+		}
+		
+		strlcpy(entry-&gt;nsi_string, string, strlen(string) + 1);
+		entry-&gt;nsi_flags = (1 &lt;&lt; kind);
+		entry-&gt;nsi_id = nsi_next_id++;
+		nsi_kind_next[kind] = nsi_next_id;
+		SLIST_INSERT_HEAD(&amp;net_str_id_list, entry, nsi_next);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((entry-&gt;nsi_flags &amp; (1 &lt;&lt; kind)) == 0) {
+		<span class="enscript-keyword">if</span> (create == 0) {
+			lck_mtx_unlock(net_str_id_lock);
+			<span class="enscript-keyword">return</span> ENOENT;
+		}
+		entry-&gt;nsi_flags |= (1 &lt;&lt; kind);
+		<span class="enscript-keyword">if</span> (entry-&gt;nsi_id &gt;= nsi_kind_next[kind])
+			nsi_kind_next[kind] = entry-&gt;nsi_id + 1;
+	}
+	lck_mtx_unlock(net_str_id_lock);
+
+	*out_id = entry-&gt;nsi_id;
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ROUNDUP32</span>(a) \
+        ((a) &gt; 0 ? (1 + (((a) - 1) | (<span class="enscript-keyword">sizeof</span>(uint32_t) - 1))) : <span class="enscript-keyword">sizeof</span>(uint32_t))
+
+<span class="enscript-type">int</span>
+sysctl_if_family_ids SYSCTL_HANDLER_ARGS <span class="enscript-comment">/* XXX bad syntax! */</span>
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>)
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg1</span>)
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg2</span>)
+	errno_t	error = 0;
+	<span class="enscript-type">struct</span> net_str_id_entry *entry = NULL;
+	<span class="enscript-type">struct</span> if_family_id *iffmid = NULL;
+	size_t max_size = 0;
+	
+	lck_mtx_lock(net_str_id_lock);
+	SLIST_FOREACH(entry, &amp;net_str_id_list, nsi_next) {
+		size_t str_size;
+		size_t iffmid_size;
+		
+		<span class="enscript-keyword">if</span> ((entry-&gt;nsi_flags &amp; (1 &lt;&lt; NSI_IF_FAM_ID)) == 0)
+			<span class="enscript-keyword">continue</span>;
+		
+		str_size = strlen(entry-&gt;nsi_string) + 1;
+		iffmid_size = ROUNDUP32(offsetof(<span class="enscript-type">struct</span> net_str_id_entry, nsi_string) + str_size);
+
+		<span class="enscript-keyword">if</span> (iffmid_size &gt; max_size) {
+			<span class="enscript-keyword">if</span> (iffmid) 
+				_FREE(iffmid, M_TEMP);
+			iffmid = _MALLOC(iffmid_size, M_TEMP, M_WAITOK);
+			<span class="enscript-keyword">if</span> (iffmid == NULL) {
+				lck_mtx_unlock(net_str_id_lock);
+				error = ENOMEM;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+			}
+			max_size = iffmid_size;
+		}
+
+		bzero(iffmid, iffmid_size);
+		iffmid-&gt;iffmid_len = iffmid_size;
+		iffmid-&gt;iffmid_id = entry-&gt;nsi_id;
+		strlcpy(iffmid-&gt;iffmid_str, entry-&gt;nsi_string, str_size);
+        error = SYSCTL_OUT(req, iffmid, iffmid_size);
+        <span class="enscript-keyword">if</span> (error) {
+			lck_mtx_unlock(net_str_id_lock);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+        }
+		
+	}
+	lck_mtx_unlock(net_str_id_lock);
+	
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (iffmid) 
+		_FREE(iffmid, M_TEMP);
+	<span class="enscript-keyword">return</span> error;
+}
+</pre>
+<hr />
+</body></html>

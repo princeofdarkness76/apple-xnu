@@ -1,0 +1,1033 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>nfs_lock.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">nfs_lock.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2002-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*-
+ * Copyright (c) 1997 Berkeley Software Design, Inc. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Berkeley Software Design Inc's name may not be used to endorse or
+ *    promote products derived from this software without specific prior
+ *    written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY BERKELEY SOFTWARE DESIGN INC ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL BERKELEY SOFTWARE DESIGN INC BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *      from BSDI nfs_lock.c,v 2.4 1998/12/14 23:49:56 jch Exp
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>		<span class="enscript-comment">/* for hz */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/lockf.h&gt;</span>		<span class="enscript-comment">/* for hz */</span> <span class="enscript-comment">/* Must come after sys/malloc.h */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kpi_mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>	<span class="enscript-comment">/* for p_start */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/resourcevar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/limits.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/rpcv2.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfsproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfs_gss.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfsmount.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfsnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfs_lock.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mig_errors.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_special_ports.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;lockd/lockd_mach.h&gt;</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ipc_port_release_send</span>(ipc_port_t);
+
+<span class="enscript-comment">/*
+ * pending lock request messages are kept in this queue which is
+ * kept sorted by transaction ID (xid).
+ */</span>
+<span class="enscript-type">static</span> uint64_t nfs_lockxid = 0;
+<span class="enscript-type">static</span> LOCKD_MSG_QUEUE nfs_pendlockq;
+
+<span class="enscript-comment">/* list of mounts that are (potentially) making lockd requests */</span>
+<span class="enscript-function-name">TAILQ_HEAD</span>(nfs_lockd_mount_list,nfsmount) nfs_lockd_mount_list;
+
+<span class="enscript-type">static</span> lck_grp_t *nfs_lock_lck_grp;
+<span class="enscript-type">static</span> lck_mtx_t *nfs_lock_mutex;
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">nfs_lockdmsg_enqueue</span>(LOCKD_MSG_REQUEST *);
+<span class="enscript-type">void</span> <span class="enscript-function-name">nfs_lockdmsg_dequeue</span>(LOCKD_MSG_REQUEST *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">nfs_lockdmsg_compare_to_answer</span>(LOCKD_MSG_REQUEST *, <span class="enscript-type">struct</span> lockd_ans *);
+LOCKD_MSG_REQUEST *<span class="enscript-function-name">nfs_lockdmsg_find_by_answer</span>(<span class="enscript-type">struct</span> lockd_ans *);
+LOCKD_MSG_REQUEST *<span class="enscript-function-name">nfs_lockdmsg_find_by_xid</span>(uint64_t);
+uint64_t <span class="enscript-function-name">nfs_lockxid_get</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">int</span> <span class="enscript-function-name">nfs_lockd_send_request</span>(LOCKD_MSG *, <span class="enscript-type">int</span>);
+
+<span class="enscript-comment">/*
+ * initialize global nfs lock state
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfs_lockinit</span>(<span class="enscript-type">void</span>)
+{
+	TAILQ_INIT(&amp;nfs_pendlockq);
+	TAILQ_INIT(&amp;nfs_lockd_mount_list);
+
+	nfs_lock_lck_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;nfs_lock&quot;</span>, LCK_GRP_ATTR_NULL);
+	nfs_lock_mutex = lck_mtx_alloc_init(nfs_lock_lck_grp, LCK_ATTR_NULL);
+}
+
+<span class="enscript-comment">/*
+ * Register a mount as (potentially) making lockd requests.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfs_lockd_mount_register</span>(<span class="enscript-type">struct</span> nfsmount *nmp)
+{
+	lck_mtx_lock(nfs_lock_mutex);
+	TAILQ_INSERT_HEAD(&amp;nfs_lockd_mount_list, nmp, nm_ldlink);
+	nfs_lockd_mounts++;
+	lck_mtx_unlock(nfs_lock_mutex);
+}
+
+<span class="enscript-comment">/*
+ * Unregister a mount as (potentially) making lockd requests.
+ *
+ * When the lockd mount count drops to zero, then send a shutdown request to
+ * lockd if we've sent any requests to it.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfs_lockd_mount_unregister</span>(<span class="enscript-type">struct</span> nfsmount *nmp)
+{
+	<span class="enscript-type">int</span> send_shutdown;
+	mach_port_t lockd_port = IPC_PORT_NULL;
+	kern_return_t kr;
+
+	lck_mtx_lock(nfs_lock_mutex);
+	<span class="enscript-keyword">if</span> (nmp-&gt;nm_ldlink.tqe_next == NFSNOLIST) {
+		lck_mtx_unlock(nfs_lock_mutex);
+		<span class="enscript-keyword">return</span>;
+	}
+	
+	TAILQ_REMOVE(&amp;nfs_lockd_mount_list, nmp, nm_ldlink);
+	nmp-&gt;nm_ldlink.tqe_next = NFSNOLIST;
+
+	nfs_lockd_mounts--;
+
+	<span class="enscript-comment">/* send a shutdown request if there are no more lockd mounts */</span>
+	send_shutdown = ((nfs_lockd_mounts == 0) &amp;&amp; nfs_lockd_request_sent);
+	<span class="enscript-keyword">if</span> (send_shutdown)
+		nfs_lockd_request_sent = 0;
+
+	lck_mtx_unlock(nfs_lock_mutex);
+
+	<span class="enscript-keyword">if</span> (!send_shutdown)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/*
+	 * Let lockd know that it is no longer needed for any NFS mounts
+	 */</span>
+	kr = host_get_lockd_port(host_priv_self(), &amp;lockd_port);
+	<span class="enscript-keyword">if</span> ((kr != KERN_SUCCESS) || !IPC_PORT_VALID(lockd_port)) {
+		printf(<span class="enscript-string">&quot;nfs_lockd_mount_change: shutdown couldn't get port, kr %d, port %s\n&quot;</span>,
+			kr, (lockd_port == IPC_PORT_NULL) ? <span class="enscript-string">&quot;NULL&quot;</span> :
+			(lockd_port == IPC_PORT_DEAD) ? <span class="enscript-string">&quot;DEAD&quot;</span> : <span class="enscript-string">&quot;VALID&quot;</span>);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	kr = lockd_shutdown(lockd_port);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS)
+		printf(<span class="enscript-string">&quot;nfs_lockd_mount_change: shutdown %d\n&quot;</span>, kr);
+
+	ipc_port_release_send(lockd_port);
+}
+
+<span class="enscript-comment">/*
+ * insert a lock request message into the pending queue
+ * (nfs_lock_mutex must be held)
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfs_lockdmsg_enqueue</span>(LOCKD_MSG_REQUEST *msgreq)
+{
+	LOCKD_MSG_REQUEST *mr;
+
+	mr = TAILQ_LAST(&amp;nfs_pendlockq, nfs_lock_msg_queue);
+	<span class="enscript-keyword">if</span> (!mr || (msgreq-&gt;lmr_msg.lm_xid &gt; mr-&gt;lmr_msg.lm_xid)) {
+		<span class="enscript-comment">/* fast path: empty queue or new largest xid */</span>
+		TAILQ_INSERT_TAIL(&amp;nfs_pendlockq, msgreq, lmr_next);
+		<span class="enscript-keyword">return</span>;
+	}
+	<span class="enscript-comment">/* slow path: need to walk list to find insertion point */</span>
+	<span class="enscript-keyword">while</span> (mr &amp;&amp; (msgreq-&gt;lmr_msg.lm_xid &gt; mr-&gt;lmr_msg.lm_xid)) {
+		mr = TAILQ_PREV(mr, nfs_lock_msg_queue, lmr_next);
+	}
+	<span class="enscript-keyword">if</span> (mr) {
+		TAILQ_INSERT_AFTER(&amp;nfs_pendlockq, mr, msgreq, lmr_next);
+	} <span class="enscript-keyword">else</span> {
+		TAILQ_INSERT_HEAD(&amp;nfs_pendlockq, msgreq, lmr_next);
+	}
+}
+
+<span class="enscript-comment">/*
+ * remove a lock request message from the pending queue
+ * (nfs_lock_mutex must be held)
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfs_lockdmsg_dequeue</span>(LOCKD_MSG_REQUEST *msgreq)
+{
+	TAILQ_REMOVE(&amp;nfs_pendlockq, msgreq, lmr_next);
+}
+
+<span class="enscript-comment">/*
+ * find a pending lock request message by xid
+ *
+ * We search from the head of the list assuming that the message we're
+ * looking for is for an older request (because we have an answer to it).
+ * This assumes that lock request will be answered primarily in FIFO order.
+ * However, this may not be the case if there are blocked requests.  We may
+ * want to move blocked requests to a separate queue (but that'll complicate
+ * duplicate xid checking).
+ *
+ * (nfs_lock_mutex must be held)
+ */</span>
+LOCKD_MSG_REQUEST *
+<span class="enscript-function-name">nfs_lockdmsg_find_by_xid</span>(uint64_t lockxid)
+{
+	LOCKD_MSG_REQUEST *mr;
+
+	TAILQ_FOREACH(mr, &amp;nfs_pendlockq, lmr_next) {
+		<span class="enscript-keyword">if</span> (mr-&gt;lmr_msg.lm_xid == lockxid)
+			<span class="enscript-keyword">return</span> mr;
+		<span class="enscript-keyword">if</span> (mr-&gt;lmr_msg.lm_xid &gt; lockxid)
+			<span class="enscript-keyword">return</span> NULL;
+	}
+	<span class="enscript-keyword">return</span> mr;
+}
+
+<span class="enscript-comment">/*
+ * Because we can't depend on nlm_granted messages containing the same
+ * cookie we sent with the original lock request, we need code to test
+ * if an nlm_granted answer matches the lock request.  We also need code
+ * that can find a lockd message based solely on the nlm_granted answer.
+ */</span>
+
+<span class="enscript-comment">/*
+ * compare lockd message to answer
+ *
+ * returns 0 on equality and 1 if different
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfs_lockdmsg_compare_to_answer</span>(LOCKD_MSG_REQUEST *msgreq, <span class="enscript-type">struct</span> lockd_ans *ansp)
+{
+	<span class="enscript-keyword">if</span> (!(ansp-&gt;la_flags &amp; LOCKD_ANS_LOCK_INFO))
+		<span class="enscript-keyword">return</span> 1;
+	<span class="enscript-keyword">if</span> (msgreq-&gt;lmr_msg.lm_fl.l_pid != ansp-&gt;la_pid)
+		<span class="enscript-keyword">return</span> 1;
+	<span class="enscript-keyword">if</span> (msgreq-&gt;lmr_msg.lm_fl.l_start != ansp-&gt;la_start)
+		<span class="enscript-keyword">return</span> 1;
+	<span class="enscript-keyword">if</span> (msgreq-&gt;lmr_msg.lm_fl.l_len != ansp-&gt;la_len)
+		<span class="enscript-keyword">return</span> 1;
+	<span class="enscript-keyword">if</span> (msgreq-&gt;lmr_msg.lm_fh_len != ansp-&gt;la_fh_len)
+		<span class="enscript-keyword">return</span> 1;
+	<span class="enscript-keyword">if</span> (bcmp(msgreq-&gt;lmr_msg.lm_fh, ansp-&gt;la_fh, ansp-&gt;la_fh_len))
+		<span class="enscript-keyword">return</span> 1;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * find a pending lock request message based on the lock info provided
+ * in the lockd_ans/nlm_granted data.  We need this because we can't
+ * depend on nlm_granted messages containing the same cookie we sent
+ * with the original lock request.
+ *
+ * We search from the head of the list assuming that the message we're
+ * looking for is for an older request (because we have an answer to it).
+ * This assumes that lock request will be answered primarily in FIFO order.
+ * However, this may not be the case if there are blocked requests.  We may
+ * want to move blocked requests to a separate queue (but that'll complicate
+ * duplicate xid checking).
+ *
+ * (nfs_lock_mutex must be held)
+ */</span>
+LOCKD_MSG_REQUEST *
+<span class="enscript-function-name">nfs_lockdmsg_find_by_answer</span>(<span class="enscript-type">struct</span> lockd_ans *ansp)
+{
+	LOCKD_MSG_REQUEST *mr;
+
+	<span class="enscript-keyword">if</span> (!(ansp-&gt;la_flags &amp; LOCKD_ANS_LOCK_INFO))
+		<span class="enscript-keyword">return</span> NULL;
+	TAILQ_FOREACH(mr, &amp;nfs_pendlockq, lmr_next) {
+		<span class="enscript-keyword">if</span> (!nfs_lockdmsg_compare_to_answer(mr, ansp))
+			<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span> mr;
+}
+
+<span class="enscript-comment">/*
+ * return the next unique lock request transaction ID
+ * (nfs_lock_mutex must be held)
+ */</span>
+uint64_t
+<span class="enscript-function-name">nfs_lockxid_get</span>(<span class="enscript-type">void</span>)
+{
+	LOCKD_MSG_REQUEST *mr;
+
+	<span class="enscript-comment">/* derive initial lock xid from system time */</span>
+	<span class="enscript-keyword">if</span> (!nfs_lockxid) {
+		<span class="enscript-comment">/*
+		 * Note: it's OK if this code inits nfs_lockxid to 0 (for example,
+		 * due to a broken clock) because we immediately increment it
+		 * and we guarantee to never use xid 0.  So, nfs_lockxid should only
+		 * ever be 0 the first time this function is called.
+		 */</span>
+		<span class="enscript-type">struct</span> timeval tv;
+		microtime(&amp;tv);
+		nfs_lockxid = (uint64_t)tv.tv_sec &lt;&lt; 12;
+	}
+
+	<span class="enscript-comment">/* make sure we get a unique xid */</span>
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-comment">/* Skip zero xid if it should ever happen.  */</span>
+		<span class="enscript-keyword">if</span> (++nfs_lockxid == 0)
+			nfs_lockxid++;
+		<span class="enscript-keyword">if</span> (!(mr = TAILQ_LAST(&amp;nfs_pendlockq, nfs_lock_msg_queue)) ||
+		     (mr-&gt;lmr_msg.lm_xid &lt; nfs_lockxid)) {
+			<span class="enscript-comment">/* fast path: empty queue or new largest xid */</span>
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/* check if xid is already in use */</span>
+	} <span class="enscript-keyword">while</span> (nfs_lockdmsg_find_by_xid(nfs_lockxid));
+
+	<span class="enscript-keyword">return</span> nfs_lockxid;
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MACH_MAX_TRIES</span> 3
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfs_lockd_send_request</span>(LOCKD_MSG *msg, <span class="enscript-type">int</span> interruptable)
+{
+	kern_return_t kr;
+	<span class="enscript-type">int</span> retries = 0;
+	mach_port_t lockd_port = IPC_PORT_NULL;
+
+	kr = host_get_lockd_port(host_priv_self(), &amp;lockd_port);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS || !IPC_PORT_VALID(lockd_port))
+		<span class="enscript-keyword">return</span> (ENOTSUP);
+
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-comment">/* In the kernel all mach messaging is interruptable */</span>
+		<span class="enscript-keyword">do</span> {
+			kr = lockd_request(
+				lockd_port,
+				msg-&gt;lm_version,
+				msg-&gt;lm_flags,
+				msg-&gt;lm_xid,
+				msg-&gt;lm_fl.l_start,
+				msg-&gt;lm_fl.l_len,
+				msg-&gt;lm_fl.l_pid,
+				msg-&gt;lm_fl.l_type,
+				msg-&gt;lm_fl.l_whence,
+				(uint32_t *)&amp;msg-&gt;lm_addr,
+				(uint32_t *)&amp;msg-&gt;lm_cred,
+				msg-&gt;lm_fh_len,
+				msg-&gt;lm_fh);
+			<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS)
+				printf(<span class="enscript-string">&quot;lockd_request received %d!\n&quot;</span>, kr);
+		} <span class="enscript-keyword">while</span> (!interruptable &amp;&amp; kr == MACH_SEND_INTERRUPTED);
+	} <span class="enscript-keyword">while</span> (kr == MIG_SERVER_DIED &amp;&amp; retries++ &lt; MACH_MAX_TRIES);
+
+	ipc_port_release_send(lockd_port);
+	<span class="enscript-keyword">switch</span> (kr) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_SEND_INTERRUPTED</span>: 
+		<span class="enscript-keyword">return</span> (EINTR);
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-comment">/*
+		 * Other MACH or MIG errors we will retry. Eventually
+		 * we will call nfs_down and allow the user to disable 
+		 * locking.
+		 */</span>
+		<span class="enscript-keyword">return</span> (EAGAIN);
+	}
+	<span class="enscript-keyword">return</span> (kr);
+}
+				
+
+<span class="enscript-comment">/*
+ * NFS advisory byte-level locks (client)
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfs3_lockd_request</span>(
+	nfsnode_t np,
+	<span class="enscript-type">int</span> type,
+	LOCKD_MSG_REQUEST *msgreq,
+	<span class="enscript-type">int</span> flags,
+	thread_t thd)
+{
+	LOCKD_MSG *msg = &amp;msgreq-&gt;lmr_msg;
+	<span class="enscript-type">int</span> error, error2;
+	<span class="enscript-type">int</span> interruptable, slpflag;
+	<span class="enscript-type">struct</span> nfsmount *nmp;
+	<span class="enscript-type">struct</span> timeval now;
+	<span class="enscript-type">int</span> timeo, starttime, endtime, lastmsg, wentdown = 0;
+	<span class="enscript-type">struct</span> timespec ts;
+	<span class="enscript-type">struct</span> sockaddr *saddr;
+
+	nmp = NFSTONMP(np);
+	<span class="enscript-keyword">if</span> (!nmp || !nmp-&gt;nm_saddr)
+		<span class="enscript-keyword">return</span> (ENXIO);
+
+	lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+	saddr = nmp-&gt;nm_saddr;
+	bcopy(saddr, &amp;msg-&gt;lm_addr, min(<span class="enscript-keyword">sizeof</span> msg-&gt;lm_addr, saddr-&gt;sa_len));
+	<span class="enscript-keyword">if</span> (nmp-&gt;nm_vers == NFS_VER3)
+		msg-&gt;lm_flags |= LOCKD_MSG_NFSV3;
+
+	<span class="enscript-keyword">if</span> (nmp-&gt;nm_sotype != SOCK_DGRAM)
+		msg-&gt;lm_flags |= LOCKD_MSG_TCP;
+
+	microuptime(&amp;now);
+	starttime = now.tv_sec;
+	lastmsg = now.tv_sec - ((nmp-&gt;nm_tprintf_delay) - (nmp-&gt;nm_tprintf_initial_delay));
+	interruptable = NMFLAG(nmp, INTR);
+	lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+
+	lck_mtx_lock(nfs_lock_mutex);
+
+	<span class="enscript-comment">/* allocate unique xid */</span>
+	msg-&gt;lm_xid = nfs_lockxid_get();
+	nfs_lockdmsg_enqueue(msgreq);
+
+	timeo = 4;
+
+	<span class="enscript-keyword">for</span> (;;) {
+		nfs_lockd_request_sent = 1;
+
+		<span class="enscript-comment">/* need to drop nfs_lock_mutex while calling nfs_lockd_send_request() */</span>
+		lck_mtx_unlock(nfs_lock_mutex);
+		error = nfs_lockd_send_request(msg, interruptable);
+		lck_mtx_lock(nfs_lock_mutex);
+		<span class="enscript-keyword">if</span> (error &amp;&amp; error != EAGAIN)
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-comment">/*
+		 * Always wait for an answer.  Not waiting for unlocks could
+		 * cause a lock to be left if the unlock request gets dropped.
+		 */</span>
+
+		<span class="enscript-comment">/*
+		 * Retry if it takes too long to get a response.
+		 *
+		 * The timeout numbers were picked out of thin air... they start
+		 * at 4 and double each timeout with a max of 30 seconds.
+		 *
+		 * In order to maintain responsiveness, we pass a small timeout
+		 * to msleep and calculate the timeouts ourselves.  This allows
+		 * us to pick up on mount changes quicker.
+		 */</span>
+<span class="enscript-reference">wait_for_granted</span>:
+		error = EWOULDBLOCK;
+		slpflag = (interruptable &amp;&amp; (type != F_UNLCK)) ? PCATCH : 0;
+		ts.tv_sec = 2;
+		ts.tv_nsec = 0;
+		microuptime(&amp;now);
+		endtime = now.tv_sec + timeo;
+		<span class="enscript-keyword">while</span> (now.tv_sec &lt; endtime) {
+			error = error2 = 0;
+			<span class="enscript-keyword">if</span> (!msgreq-&gt;lmr_answered) {
+				error = msleep(msgreq, nfs_lock_mutex, slpflag | PUSER, <span class="enscript-string">&quot;lockd&quot;</span>, &amp;ts);
+				slpflag = 0;
+			}
+			<span class="enscript-keyword">if</span> (msgreq-&gt;lmr_answered) {
+				<span class="enscript-comment">/*
+				 * Note: it's possible to have a lock granted at
+				 * essentially the same time that we get interrupted.
+				 * Since the lock may be granted, we can't return an
+				 * error from this request or we might not unlock the
+				 * lock that's been granted.
+				 */</span>
+				nmp = NFSTONMP(np);
+				<span class="enscript-keyword">if</span> ((msgreq-&gt;lmr_errno == ENOTSUP) &amp;&amp; nmp &amp;&amp;
+				    (nmp-&gt;nm_state &amp; NFSSTA_LOCKSWORK)) {
+					<span class="enscript-comment">/*
+					 * We have evidence that locks work, yet lockd
+					 * returned ENOTSUP.  This is probably because
+					 * it was unable to contact the server's lockd
+					 * to send it the request.
+					 *
+					 * Because we know locks work, we'll consider
+					 * this failure to be a timeout.
+					 */</span>
+					error = EWOULDBLOCK;
+				} <span class="enscript-keyword">else</span> {
+					error = 0;
+				}
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (error != EWOULDBLOCK)
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-comment">/* check that we still have our mount... */</span>
+			<span class="enscript-comment">/* ...and that we still support locks */</span>
+			<span class="enscript-comment">/* ...and that there isn't a recovery pending */</span>
+			nmp = NFSTONMP(np);
+			<span class="enscript-keyword">if</span> ((error2 = nfs_sigintr(nmp, NULL, NULL, 0))) {
+				error = error2;
+				<span class="enscript-keyword">if</span> (type == F_UNLCK)
+					printf(<span class="enscript-string">&quot;nfs3_lockd_request: aborting unlock request, error %d\n&quot;</span>, error);
+				<span class="enscript-keyword">break</span>;
+			}
+			lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+			<span class="enscript-keyword">if</span> (nmp-&gt;nm_lockmode == NFS_LOCK_MODE_DISABLED) {
+				lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> ((nmp-&gt;nm_state &amp; NFSSTA_RECOVER) &amp;&amp; !(flags &amp; R_RECOVER)) {
+				<span class="enscript-comment">/* recovery pending... return an error that'll get this operation restarted */</span>
+				error = NFSERR_GRACE;
+				lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+				<span class="enscript-keyword">break</span>;
+			}
+			interruptable = NMFLAG(nmp, INTR);
+			lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+			microuptime(&amp;now);
+		}
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-comment">/* check that we still have our mount... */</span>
+			nmp = NFSTONMP(np);
+			<span class="enscript-keyword">if</span> ((error2 = nfs_sigintr(nmp, NULL, NULL, 0))) {
+				error = error2;
+				<span class="enscript-keyword">if</span> (error2 != EINTR) {
+					<span class="enscript-keyword">if</span> (type == F_UNLCK)
+						printf(<span class="enscript-string">&quot;nfs3_lockd_request: aborting unlock request, error %d\n&quot;</span>, error);
+					<span class="enscript-keyword">break</span>;
+				}
+			}
+			<span class="enscript-comment">/* ...and that we still support locks */</span>
+			lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+			<span class="enscript-keyword">if</span> (nmp-&gt;nm_lockmode == NFS_LOCK_MODE_DISABLED) {
+				<span class="enscript-keyword">if</span> (error == EWOULDBLOCK)
+					error = ENOTSUP;
+				lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-comment">/* ...and that there isn't a recovery pending */</span>
+			<span class="enscript-keyword">if</span> ((error == EWOULDBLOCK) &amp;&amp; (nmp-&gt;nm_state &amp; NFSSTA_RECOVER) &amp;&amp; !(flags &amp; R_RECOVER)) {
+				<span class="enscript-comment">/* recovery pending... return to allow recovery to occur */</span>
+				error = NFSERR_DENIED;
+				lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+				<span class="enscript-keyword">break</span>;
+			}
+			interruptable = NMFLAG(nmp, INTR);
+			<span class="enscript-keyword">if</span> ((error != EWOULDBLOCK) ||
+			    ((nmp-&gt;nm_state &amp; NFSSTA_RECOVER) &amp;&amp; !(flags &amp; R_RECOVER)) ||
+			    ((flags &amp; R_RECOVER) &amp;&amp; ((now.tv_sec - starttime) &gt; 30))) {
+				<span class="enscript-keyword">if</span> ((error == EWOULDBLOCK) &amp;&amp; (flags &amp; R_RECOVER)) {
+					<span class="enscript-comment">/* give up if this is for recovery and taking too long */</span>
+					error = ETIMEDOUT;
+				} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((nmp-&gt;nm_state &amp; NFSSTA_RECOVER) &amp;&amp; !(flags &amp; R_RECOVER)) {
+					<span class="enscript-comment">/* recovery pending... return an error that'll get this operation restarted */</span>
+					error = NFSERR_GRACE;
+				}
+				lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+				<span class="enscript-comment">/*
+				 * We're going to bail on this request.
+				 * If we were a blocked lock request, send a cancel.
+				 */</span>
+				<span class="enscript-keyword">if</span> ((msgreq-&gt;lmr_errno == EINPROGRESS) &amp;&amp;
+				    !(msg-&gt;lm_flags &amp; LOCKD_MSG_CANCEL)) {
+					<span class="enscript-comment">/* set this request up as a cancel */</span>
+					msg-&gt;lm_flags |= LOCKD_MSG_CANCEL;
+					nfs_lockdmsg_dequeue(msgreq);
+					msg-&gt;lm_xid = nfs_lockxid_get();
+					nfs_lockdmsg_enqueue(msgreq);
+					msgreq-&gt;lmr_saved_errno = error;
+					msgreq-&gt;lmr_errno = 0;
+					msgreq-&gt;lmr_answered = 0;
+					<span class="enscript-comment">/* reset timeout */</span>
+					timeo = 2;
+					<span class="enscript-comment">/* send cancel request */</span>
+					<span class="enscript-keyword">continue</span>;
+				}
+				<span class="enscript-keyword">break</span>;
+			}
+
+			<span class="enscript-comment">/* warn if we're not getting any response */</span>
+			microuptime(&amp;now);
+			<span class="enscript-keyword">if</span> ((msgreq-&gt;lmr_errno != EINPROGRESS) &amp;&amp;
+			    !(msg-&gt;lm_flags &amp; LOCKD_MSG_DENIED_GRACE) &amp;&amp;
+			    (nmp-&gt;nm_tprintf_initial_delay != 0) &amp;&amp;
+			    ((lastmsg + nmp-&gt;nm_tprintf_delay) &lt; now.tv_sec)) {
+				lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+				lastmsg = now.tv_sec;
+				nfs_down(nmp, thd, 0, NFSSTA_LOCKTIMEO, <span class="enscript-string">&quot;lockd not responding&quot;</span>, 0);
+				wentdown = 1;
+			} <span class="enscript-keyword">else</span>
+				lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+
+			<span class="enscript-keyword">if</span> (msgreq-&gt;lmr_errno == EINPROGRESS) {
+				<span class="enscript-comment">/*
+				 * We've got a blocked lock request that we are
+				 * going to retry.  First, we'll want to try to
+				 * send a cancel for the previous request.
+				 *
+				 * Clear errno so if we don't get a response
+				 * to the resend we'll call nfs_down().
+				 * Also reset timeout because we'll expect a
+				 * quick response to the cancel/resend (even if
+				 * it is NLM_BLOCKED).
+				 */</span>
+				msg-&gt;lm_flags |= LOCKD_MSG_CANCEL;
+				nfs_lockdmsg_dequeue(msgreq);
+				msg-&gt;lm_xid = nfs_lockxid_get();
+				nfs_lockdmsg_enqueue(msgreq);
+				msgreq-&gt;lmr_saved_errno = msgreq-&gt;lmr_errno;
+				msgreq-&gt;lmr_errno = 0;
+				msgreq-&gt;lmr_answered = 0;
+				timeo = 2;
+				<span class="enscript-comment">/* send cancel then resend request */</span>
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			<span class="enscript-comment">/*
+			 * We timed out, so we will resend the request.
+			 */</span>
+			<span class="enscript-keyword">if</span> (!(flags &amp; R_RECOVER))
+				timeo *= 2;
+			<span class="enscript-keyword">if</span> (timeo &gt; 30)
+				timeo = 30;
+			<span class="enscript-comment">/* resend request */</span>
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/* we got a reponse, so the server's lockd is OK */</span>
+		nfs_up(NFSTONMP(np), thd, NFSSTA_LOCKTIMEO,
+			wentdown ? <span class="enscript-string">&quot;lockd alive again&quot;</span> : NULL);
+		wentdown = 0;
+
+		<span class="enscript-keyword">if</span> (msgreq-&gt;lmr_answered &amp;&amp; (msg-&gt;lm_flags &amp; LOCKD_MSG_DENIED_GRACE)) {
+			<span class="enscript-comment">/*
+			 * The lock request was denied because the server lockd is
+			 * still in its grace period.  So, we need to try the
+			 * request again in a little bit.  Return the GRACE error so
+			 * the higher levels can perform the retry.
+			 */</span>
+			msgreq-&gt;lmr_saved_errno = msgreq-&gt;lmr_errno = error = NFSERR_GRACE;
+		}
+
+		<span class="enscript-keyword">if</span> (msgreq-&gt;lmr_errno == EINPROGRESS) {
+			<span class="enscript-comment">/* got NLM_BLOCKED response */</span>
+			<span class="enscript-comment">/* need to wait for NLM_GRANTED */</span>
+			timeo = 30;
+			msgreq-&gt;lmr_answered = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">wait_for_granted</span>;
+		}
+
+		<span class="enscript-keyword">if</span> ((msg-&gt;lm_flags &amp; LOCKD_MSG_CANCEL) &amp;&amp;
+		    (msgreq-&gt;lmr_saved_errno == EINPROGRESS)) {
+			<span class="enscript-comment">/*
+			 * We just got a successful reply to the
+			 * cancel of the previous blocked lock request.
+			 * Now, go ahead and return a DENIED error so the
+			 * higher levels can resend the request.
+			 */</span>
+			msg-&gt;lm_flags &amp;= ~LOCKD_MSG_CANCEL;
+			nfs_lockdmsg_dequeue(msgreq);
+			error = NFSERR_DENIED;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * If the blocked lock request was cancelled.
+		 * Restore the error condition from when we
+		 * originally bailed on the request.
+		 */</span>
+		<span class="enscript-keyword">if</span> (msg-&gt;lm_flags &amp; LOCKD_MSG_CANCEL) {
+			msg-&gt;lm_flags &amp;= ~LOCKD_MSG_CANCEL;
+			error = msgreq-&gt;lmr_saved_errno;
+		} <span class="enscript-keyword">else</span> {
+			error = msgreq-&gt;lmr_errno;
+		}
+
+		nmp = NFSTONMP(np);
+		<span class="enscript-keyword">if</span> ((error == ENOTSUP) &amp;&amp; nmp &amp;&amp; !(nmp-&gt;nm_state &amp; NFSSTA_LOCKSWORK)) {
+			<span class="enscript-comment">/*
+			 * We have NO evidence that locks work and lockd
+			 * returned ENOTSUP.  Let's take this as a hint
+			 * that locks aren't supported and disable them
+			 * for this mount.
+			 */</span>
+			nfs_lockdmsg_dequeue(msgreq);
+			lck_mtx_unlock(nfs_lock_mutex);
+			lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+			<span class="enscript-keyword">if</span> (nmp-&gt;nm_lockmode == NFS_LOCK_MODE_ENABLED) {
+				nmp-&gt;nm_lockmode = NFS_LOCK_MODE_DISABLED;
+				nfs_lockd_mount_unregister(nmp);
+			}
+			nmp-&gt;nm_state &amp;= ~NFSSTA_LOCKTIMEO;
+			lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+			printf(<span class="enscript-string">&quot;lockd returned ENOTSUP, disabling locks for nfs server: %s\n&quot;</span>,
+				vfs_statfs(nmp-&gt;nm_mountp)-&gt;f_mntfromname);
+			<span class="enscript-keyword">return</span> (error);
+		}
+		<span class="enscript-keyword">if</span> (!error) {
+			<span class="enscript-comment">/* record that NFS file locking has worked on this mount */</span>
+			<span class="enscript-keyword">if</span> (nmp) {
+				lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+				<span class="enscript-keyword">if</span> (!(nmp-&gt;nm_state &amp; NFSSTA_LOCKSWORK))
+					nmp-&gt;nm_state |= NFSSTA_LOCKSWORK;
+				lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+			}
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+
+	nfs_lockdmsg_dequeue(msgreq);
+
+	lck_mtx_unlock(nfs_lock_mutex);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Send an NLM LOCK message to the server
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfs3_setlock_rpc</span>(
+	nfsnode_t np,
+	<span class="enscript-type">struct</span> nfs_open_file *nofp,
+	<span class="enscript-type">struct</span> nfs_file_lock *nflp,
+	<span class="enscript-type">int</span> reclaim,
+	<span class="enscript-type">int</span> flags,
+	thread_t thd,
+	kauth_cred_t cred)
+{
+	<span class="enscript-type">struct</span> nfs_lock_owner *nlop = nflp-&gt;nfl_owner;
+	<span class="enscript-type">struct</span> nfsmount *nmp;
+	<span class="enscript-type">int</span> error;
+	LOCKD_MSG_REQUEST msgreq;
+	LOCKD_MSG *msg;
+
+	nmp = NFSTONMP(np);
+	<span class="enscript-keyword">if</span> (nfs_mount_gone(nmp))
+		<span class="enscript-keyword">return</span> (ENXIO);
+
+	<span class="enscript-keyword">if</span> (!nlop-&gt;nlo_open_owner) {
+		nfs_open_owner_ref(nofp-&gt;nof_owner);
+		nlop-&gt;nlo_open_owner = nofp-&gt;nof_owner;
+	}
+	<span class="enscript-keyword">if</span> ((error = nfs_lock_owner_set_busy(nlop, thd)))
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-comment">/* set up lock message request structure */</span>
+	bzero(&amp;msgreq, <span class="enscript-keyword">sizeof</span>(msgreq));
+	msg = &amp;msgreq.lmr_msg;
+	msg-&gt;lm_version = LOCKD_MSG_VERSION;
+	<span class="enscript-keyword">if</span> ((nflp-&gt;nfl_flags &amp; NFS_FILE_LOCK_WAIT) &amp;&amp; !reclaim)
+		msg-&gt;lm_flags |= LOCKD_MSG_BLOCK;
+	<span class="enscript-keyword">if</span> (reclaim)
+		msg-&gt;lm_flags |= LOCKD_MSG_RECLAIM;
+	msg-&gt;lm_fh_len = (nmp-&gt;nm_vers == NFS_VER2) ? NFSX_V2FH : np-&gt;n_fhsize;
+	bcopy(np-&gt;n_fhp, msg-&gt;lm_fh, msg-&gt;lm_fh_len);
+	cru2x(cred, &amp;msg-&gt;lm_cred);
+
+	msg-&gt;lm_fl.l_whence = SEEK_SET;
+	msg-&gt;lm_fl.l_start = nflp-&gt;nfl_start;
+	msg-&gt;lm_fl.l_len = NFS_FLOCK_LENGTH(nflp-&gt;nfl_start, nflp-&gt;nfl_end);
+	msg-&gt;lm_fl.l_type = nflp-&gt;nfl_type;
+	msg-&gt;lm_fl.l_pid = nlop-&gt;nlo_pid;
+
+	error = nfs3_lockd_request(np, 0, &amp;msgreq, flags, thd);
+
+	nfs_lock_owner_clear_busy(nlop);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Send an NLM UNLOCK message to the server
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfs3_unlock_rpc</span>(
+	nfsnode_t np,
+	<span class="enscript-type">struct</span> nfs_lock_owner *nlop,
+	__unused <span class="enscript-type">int</span> type,
+	uint64_t start,
+	uint64_t end,
+	<span class="enscript-type">int</span> flags,
+	thread_t thd,
+	kauth_cred_t cred)
+{
+	<span class="enscript-type">struct</span> nfsmount *nmp;
+	LOCKD_MSG_REQUEST msgreq;
+	LOCKD_MSG *msg;
+
+	nmp = NFSTONMP(np);
+	<span class="enscript-keyword">if</span> (!nmp)
+		<span class="enscript-keyword">return</span> (ENXIO);
+
+	<span class="enscript-comment">/* set up lock message request structure */</span>
+	bzero(&amp;msgreq, <span class="enscript-keyword">sizeof</span>(msgreq));
+	msg = &amp;msgreq.lmr_msg;
+	msg-&gt;lm_version = LOCKD_MSG_VERSION;
+	msg-&gt;lm_fh_len = (nmp-&gt;nm_vers == NFS_VER2) ? NFSX_V2FH : np-&gt;n_fhsize;
+	bcopy(np-&gt;n_fhp, msg-&gt;lm_fh, msg-&gt;lm_fh_len);
+	cru2x(cred, &amp;msg-&gt;lm_cred);
+
+	msg-&gt;lm_fl.l_whence = SEEK_SET;
+	msg-&gt;lm_fl.l_start = start;
+	msg-&gt;lm_fl.l_len = NFS_FLOCK_LENGTH(start, end);
+	msg-&gt;lm_fl.l_type = F_UNLCK;
+	msg-&gt;lm_fl.l_pid = nlop-&gt;nlo_pid;
+
+	<span class="enscript-keyword">return</span> (nfs3_lockd_request(np, F_UNLCK, &amp;msgreq, flags, thd));
+}
+
+<span class="enscript-comment">/*
+ * Send an NLM LOCK TEST message to the server
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfs3_getlock_rpc</span>(
+	nfsnode_t np,
+	<span class="enscript-type">struct</span> nfs_lock_owner *nlop,
+	<span class="enscript-type">struct</span> flock *fl,
+	uint64_t start,
+	uint64_t end,
+	vfs_context_t ctx)
+{
+	<span class="enscript-type">struct</span> nfsmount *nmp;
+	<span class="enscript-type">int</span> error;
+	LOCKD_MSG_REQUEST msgreq;
+	LOCKD_MSG *msg;
+
+	nmp = NFSTONMP(np);
+	<span class="enscript-keyword">if</span> (nfs_mount_gone(nmp))
+		<span class="enscript-keyword">return</span> (ENXIO);
+
+	<span class="enscript-comment">/* set up lock message request structure */</span>
+	bzero(&amp;msgreq, <span class="enscript-keyword">sizeof</span>(msgreq));
+	msg = &amp;msgreq.lmr_msg;
+	msg-&gt;lm_version = LOCKD_MSG_VERSION;
+	msg-&gt;lm_flags |= LOCKD_MSG_TEST;
+	msg-&gt;lm_fh_len = (nmp-&gt;nm_vers == NFS_VER2) ? NFSX_V2FH : np-&gt;n_fhsize;
+	bcopy(np-&gt;n_fhp, msg-&gt;lm_fh, msg-&gt;lm_fh_len);
+	cru2x(vfs_context_ucred(ctx), &amp;msg-&gt;lm_cred);
+
+	msg-&gt;lm_fl.l_whence = SEEK_SET;
+	msg-&gt;lm_fl.l_start = start;
+	msg-&gt;lm_fl.l_len = NFS_FLOCK_LENGTH(start, end);
+	msg-&gt;lm_fl.l_type = fl-&gt;l_type;
+	msg-&gt;lm_fl.l_pid = nlop-&gt;nlo_pid;
+
+	error = nfs3_lockd_request(np, 0, &amp;msgreq, 0, vfs_context_thread(ctx));
+
+	<span class="enscript-keyword">if</span> (!error &amp;&amp; (msg-&gt;lm_flags &amp; LOCKD_MSG_TEST) &amp;&amp; !msgreq.lmr_errno) {
+		<span class="enscript-keyword">if</span> (msg-&gt;lm_fl.l_type != F_UNLCK) {
+			fl-&gt;l_type = msg-&gt;lm_fl.l_type;
+			fl-&gt;l_pid = msg-&gt;lm_fl.l_pid;
+			fl-&gt;l_start = msg-&gt;lm_fl.l_start;
+			fl-&gt;l_len = msg-&gt;lm_fl.l_len;
+			fl-&gt;l_whence = SEEK_SET;
+		} <span class="enscript-keyword">else</span>
+			fl-&gt;l_type = F_UNLCK;
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * nfslockdans --
+ *      NFS advisory byte-level locks answer from the lock daemon.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfslockdans</span>(proc_t p, <span class="enscript-type">struct</span> lockd_ans *ansp)
+{
+	LOCKD_MSG_REQUEST *msgreq;
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-comment">/* Let root make this call. */</span>
+	error = proc_suser(p);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-comment">/* the version should match, or we're out of sync */</span>
+	<span class="enscript-keyword">if</span> (ansp-&gt;la_version != LOCKD_ANS_VERSION)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	lck_mtx_lock(nfs_lock_mutex);
+
+	<span class="enscript-comment">/* try to find the lockd message by transaction id (cookie) */</span>
+	msgreq = nfs_lockdmsg_find_by_xid(ansp-&gt;la_xid);
+	<span class="enscript-keyword">if</span> (ansp-&gt;la_flags &amp; LOCKD_ANS_GRANTED) {
+		<span class="enscript-comment">/*
+		 * We can't depend on the granted message having our cookie,
+		 * so we check the answer against the lockd message found.
+		 * If no message was found or it doesn't match the answer,
+		 * we look for the lockd message by the answer's lock info.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!msgreq || nfs_lockdmsg_compare_to_answer(msgreq, ansp))
+			msgreq = nfs_lockdmsg_find_by_answer(ansp);
+		<span class="enscript-comment">/*
+		 * We need to make sure this request isn't being cancelled
+		 * If it is, we don't want to accept the granted message.
+		 */</span>
+		<span class="enscript-keyword">if</span> (msgreq &amp;&amp; (msgreq-&gt;lmr_msg.lm_flags &amp; LOCKD_MSG_CANCEL))
+			msgreq = NULL;
+	}
+	<span class="enscript-keyword">if</span> (!msgreq) {
+		lck_mtx_unlock(nfs_lock_mutex);
+		<span class="enscript-keyword">return</span> (EPIPE);
+	}
+
+	msgreq-&gt;lmr_errno = ansp-&gt;la_errno;
+	<span class="enscript-keyword">if</span> ((msgreq-&gt;lmr_msg.lm_flags &amp; LOCKD_MSG_TEST) &amp;&amp; msgreq-&gt;lmr_errno == 0) {
+		<span class="enscript-keyword">if</span> (ansp-&gt;la_flags &amp; LOCKD_ANS_LOCK_INFO) {
+			<span class="enscript-keyword">if</span> (ansp-&gt;la_flags &amp; LOCKD_ANS_LOCK_EXCL)
+				msgreq-&gt;lmr_msg.lm_fl.l_type = F_WRLCK;
+			<span class="enscript-keyword">else</span>
+				msgreq-&gt;lmr_msg.lm_fl.l_type = F_RDLCK;
+			msgreq-&gt;lmr_msg.lm_fl.l_pid = ansp-&gt;la_pid;
+			msgreq-&gt;lmr_msg.lm_fl.l_start = ansp-&gt;la_start;
+			msgreq-&gt;lmr_msg.lm_fl.l_len = ansp-&gt;la_len;
+		} <span class="enscript-keyword">else</span> {
+			msgreq-&gt;lmr_msg.lm_fl.l_type = F_UNLCK;
+		}
+	}
+	<span class="enscript-keyword">if</span> (ansp-&gt;la_flags &amp; LOCKD_ANS_DENIED_GRACE)
+		msgreq-&gt;lmr_msg.lm_flags |= LOCKD_MSG_DENIED_GRACE;
+
+	msgreq-&gt;lmr_answered = 1;
+	lck_mtx_unlock(nfs_lock_mutex);
+	wakeup(msgreq);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * nfslockdnotify --
+ *      NFS host restart notification from the lock daemon.
+ *
+ * Used to initiate reclaiming of held locks when a server we
+ * have mounted reboots.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">nfslockdnotify</span>(proc_t p, user_addr_t argp)
+{
+	<span class="enscript-type">int</span> error, i, headsize;
+	<span class="enscript-type">struct</span> lockd_notify ln;
+	<span class="enscript-type">struct</span> nfsmount *nmp;
+	<span class="enscript-type">struct</span> sockaddr *saddr;
+
+	<span class="enscript-comment">/* Let root make this call. */</span>
+	error = proc_suser(p);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+
+	headsize = (<span class="enscript-type">char</span>*)&amp;ln.ln_addr[0] - (<span class="enscript-type">char</span>*)&amp;ln.ln_version;
+	error = copyin(argp, &amp;ln, headsize);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+	<span class="enscript-keyword">if</span> (ln.ln_version != LOCKD_NOTIFY_VERSION)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">if</span> ((ln.ln_addrcount &lt; 1) || (ln.ln_addrcount &gt; 128))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	argp += headsize;
+	saddr = (<span class="enscript-type">struct</span> sockaddr *)&amp;ln.ln_addr[0];
+
+	lck_mtx_lock(nfs_lock_mutex);
+
+	<span class="enscript-keyword">for</span> (i=0; i &lt; ln.ln_addrcount; i++) {
+		error = copyin(argp, &amp;ln.ln_addr[0], <span class="enscript-keyword">sizeof</span>(ln.ln_addr[0]));
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">break</span>;
+		argp += <span class="enscript-keyword">sizeof</span>(ln.ln_addr[0]);
+		<span class="enscript-comment">/* scan lockd mount list for match to this address */</span>
+		TAILQ_FOREACH(nmp, &amp;nfs_lockd_mount_list, nm_ldlink) {
+			<span class="enscript-comment">/* check if address matches this mount's server address */</span>
+			<span class="enscript-keyword">if</span> (!nmp-&gt;nm_saddr || nfs_sockaddr_cmp(saddr, nmp-&gt;nm_saddr))
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-comment">/* We have a match!  Mark it as needing recovery. */</span>
+			lck_mtx_lock(&amp;nmp-&gt;nm_lock);
+			nfs_need_recover(nmp, 0);
+			lck_mtx_unlock(&amp;nmp-&gt;nm_lock);
+		}
+	}
+
+	lck_mtx_unlock(nfs_lock_mutex);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+</pre>
+<hr />
+</body></html>

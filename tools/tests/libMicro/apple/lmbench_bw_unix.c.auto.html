@@ -1,0 +1,380 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>lmbench_bw_unix.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">lmbench_bw_unix.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2006 Apple Inc.  All Rights Reserved.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+
+<span class="enscript-comment">/*
+ *	Order of Execution
+ *
+ *	benchmark_init
+ *
+ *	benchmark_optswitch
+ *
+ *		benchmark_initrun
+ *
+ *			benchmark_initworker
+ *				benchmark_initbatch
+ *					benchmark
+ *				benchmark_finibatch
+ *				benchmark_initbatch
+ *					benchmark
+ *				benchmark_finibatch, etc.
+ *			benchmark_finiworker
+ *
+ *		benchmark_result
+ *
+ *		benchmark_finirun
+ *
+ *	benchmark_fini
+ */</span>
+
+
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">__sun</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">ident</span>	<span class="enscript-string">&quot;@(#)trivial.c	1.0	08/17/06 Apple Inc.&quot;</span>
+#<span class="enscript-reference">endif</span>
+
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdbool.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+<span class="enscript-comment">// add additional headers needed here.
+</span>#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;signal.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../libmicro.h&quot;</span>
+
+<span class="enscript-type">void</span>	writer(<span class="enscript-type">int</span> controlfd, <span class="enscript-type">int</span> writefd, <span class="enscript-type">char</span>* buf, <span class="enscript-type">void</span>* cookie);
+<span class="enscript-type">void</span>	touch(<span class="enscript-type">char</span> *buf, <span class="enscript-type">int</span> nbytes);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+# <span class="enscript-reference">define</span> <span class="enscript-function-name">debug</span>(fmt, args...)	(void) fprintf(stderr, fmt <span class="enscript-string">&quot;\n&quot;</span> , ##args)
+#<span class="enscript-reference">else</span>
+# <span class="enscript-reference">define</span> <span class="enscript-function-name">debug</span>(fmt, args...)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ *	Your state variables should live in the tsd_t struct below
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	<span class="enscript-type">int</span>	pid;
+	size_t	xfer;	<span class="enscript-comment">/* bytes to read/write per &quot;packet&quot; */</span>
+	size_t	bytes;	<span class="enscript-comment">/* bytes to read/write in one iteration */</span>
+	<span class="enscript-type">char</span>	*buf;	<span class="enscript-comment">/* buffer memory space */</span>
+	<span class="enscript-type">int</span>	pipes[2];
+	<span class="enscript-type">int</span>	control[2];
+	<span class="enscript-type">int</span>	initerr;
+	<span class="enscript-type">int</span>	parallel;
+	<span class="enscript-type">int</span> warmup;
+	<span class="enscript-type">int</span> repetitions;
+} tsd_t;
+
+size_t	XFER	= 10*1024*1024;
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">XFERSIZE</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">XFERSIZE</span>    (64*1024)   <span class="enscript-comment">/* all bandwidth I/O should use this */</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * You can have any lower-case option you want to define.
+ * options are specified in the lm_optstr as either a 
+ * single lower-case letter, or a single lower case letter 
+ * with a colon after it.  In this example, you can optionally
+ * specify -c {str} -e or -t {number}  
+ *    -c takes a string (quote the string if blanks)
+ *    -e is a boolean 
+ *    -t takes a numeric
+ * argument.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	optm = XFERSIZE;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	opts = 10*1024*1024;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	optw = 0;
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_init</span>()
+{
+	debug(<span class="enscript-string">&quot;benchmark_init\n&quot;</span>);
+	<span class="enscript-comment">/* 
+	 *	the lm_optstr must be defined here or no options for you
+	 *
+	 * 	...and the framework will throw an error
+	 *
+	 */</span>
+	(<span class="enscript-type">void</span>) sprintf(lm_optstr, <span class="enscript-string">&quot;m:s:w:&quot;</span>);
+	<span class="enscript-comment">/*
+	 *	
+	 * 	tsd_t is the state_information struct 
+	 *
+	 *	lm_tsdsize will allocate the space we need for this
+	 *	structure throughout the rest of the framework
+	 */</span>
+	lm_tsdsize = <span class="enscript-keyword">sizeof</span> (tsd_t);
+
+	(<span class="enscript-type">void</span>) sprintf(lm_usage,
+		<span class="enscript-string">&quot;		[-m &lt;message size&gt;]\n&quot;</span>
+		<span class="enscript-string">&quot;		[-s &lt;total bytes&gt;]\n&quot;</span>
+		<span class="enscript-string">&quot;		[-w &lt;warmup&gt;]\n&quot;</span>);
+	
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * This is where you parse your lower-case arguments.
+ * the format was defined in the lm_optstr assignment
+ * in benchmark_init
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_optswitch</span>(<span class="enscript-type">int</span> opt, <span class="enscript-type">char</span> *optarg)
+{
+	debug(<span class="enscript-string">&quot;benchmark_optswitch\n&quot;</span>);
+	
+	<span class="enscript-keyword">switch</span> (opt) {
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'m'</span>:
+			optm = atoi(optarg);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'s'</span>:
+			opts = atoi(optarg);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'w'</span>:
+			optw = atoi(optarg);
+			<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initrun</span>()
+{
+	debug(<span class="enscript-string">&quot;benchmark_initrun\n&quot;</span>);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initworker</span>(<span class="enscript-type">void</span> *tsd)
+{
+	<span class="enscript-comment">/*
+	 *	initialize your state variables here first
+	 */</span>
+	tsd_t	*state = (tsd_t *)tsd;
+	state-&gt;xfer = optm;
+	state-&gt;bytes = opts;
+	state-&gt;parallel = lm_optP;
+	state-&gt;warmup = optw;
+	state-&gt;repetitions = lm_optB;
+	debug(<span class="enscript-string">&quot;benchmark_initworker: repetitions = %i\n&quot;</span>,state-&gt;repetitions);	
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initbatch</span>(<span class="enscript-type">void</span> *tsd)
+{
+	tsd_t	*state = (tsd_t *)tsd;
+
+	state-&gt;buf = valloc(XFERSIZE);
+	touch(state-&gt;buf, XFERSIZE);
+	state-&gt;initerr = 0;
+	<span class="enscript-keyword">if</span> (socketpair(AF_UNIX, SOCK_STREAM, 0, state-&gt;pipes) == -1) {
+		perror(<span class="enscript-string">&quot;socketpair&quot;</span>);
+		state-&gt;initerr = 1;
+		<span class="enscript-keyword">return</span>(0);
+	}
+	<span class="enscript-keyword">if</span> (pipe(state-&gt;control) == -1) {
+		perror(<span class="enscript-string">&quot;pipe&quot;</span>);
+		state-&gt;initerr = 2;
+		<span class="enscript-keyword">return</span>(0);
+	}
+<span class="enscript-comment">//	handle_scheduler(benchmp_childid(), 0, 1);
+</span>	<span class="enscript-keyword">switch</span> (state-&gt;pid = fork()) {
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+<span class="enscript-comment">//	      handle_scheduler(benchmp_childid(), 1, 1);
+</span>		close(state-&gt;control[1]);
+		close(state-&gt;pipes[0]);
+		writer(state-&gt;control[0], state-&gt;pipes[1], state-&gt;buf, state);
+		<span class="enscript-keyword">return</span> (0);
+		<span class="enscript-comment">/*NOTREACHED*/</span>
+	    
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">-1</span>:
+		perror(<span class="enscript-string">&quot;fork&quot;</span>);
+		state-&gt;initerr = 3;
+		<span class="enscript-keyword">return</span> (0);
+		<span class="enscript-comment">/*NOTREACHED*/</span>
+
+	    <span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+	close(state-&gt;control[0]);
+	close(state-&gt;pipes[1]);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark</span>(<span class="enscript-type">void</span> *tsd, result_t *res)
+{
+	<span class="enscript-comment">/* 
+	 *	try not to initialize things here.  This is the main
+	 *  loop of things to get timed.  Start a server in 
+	 *  benchmark_initbatch
+	 */</span>
+	tsd_t	*state = (tsd_t *)tsd;
+	size_t	done, n;
+	size_t	todo = state-&gt;bytes;
+	<span class="enscript-type">int</span>		i;
+	
+	debug(<span class="enscript-string">&quot;in to benchmark - optB = %i : repetitions = %i\n&quot;</span>, lm_optB, state-&gt;repetitions);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; lm_optB; i++) {
+		write(state-&gt;control[1], &amp;todo, <span class="enscript-keyword">sizeof</span>(todo));
+		<span class="enscript-keyword">for</span> (done = 0; done &lt; todo; done += n) {
+			<span class="enscript-keyword">if</span> ((n = read(state-&gt;pipes[0], state-&gt;buf, state-&gt;xfer)) &lt;= 0) {
+				<span class="enscript-comment">/* error! */</span>
+				debug(<span class="enscript-string">&quot;error (n = %d) exiting now\n&quot;</span>, n);
+				exit(1);
+			}
+		}
+	}
+	res-&gt;re_count = i;
+	debug(<span class="enscript-string">&quot;out of benchmark - optB = %i : repetitions = %i\n&quot;</span>, lm_optB, state-&gt;repetitions);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_finibatch</span>(<span class="enscript-type">void</span> *tsd)
+{
+	tsd_t			*state = (tsd_t *)tsd;
+
+	close(state-&gt;control[1]);
+	close(state-&gt;pipes[0]);
+	<span class="enscript-keyword">if</span> (state-&gt;pid &gt; 0) {
+		kill(state-&gt;pid, SIGKILL);
+		waitpid(state-&gt;pid, NULL, 0);
+	}
+	state-&gt;pid = 0;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_finiworker</span>(<span class="enscript-type">void</span> *tsd)
+{
+	tsd_t			*ts = (tsd_t *)tsd;
+	<span class="enscript-comment">// useless code to show what you can do.
+</span>	 ts-&gt;repetitions++;
+	 ts-&gt;repetitions--;
+	debug(<span class="enscript-string">&quot;benchmark_finiworker: repetitions = %i\n&quot;</span>,ts-&gt;repetitions);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">char</span> *
+<span class="enscript-function-name">benchmark_result</span>()
+{
+	<span class="enscript-type">static</span> <span class="enscript-type">char</span>		result = <span class="enscript-string">'\0'</span>;
+	debug(<span class="enscript-string">&quot;benchmark_result\n&quot;</span>);
+	<span class="enscript-keyword">return</span> (&amp;result);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_finirun</span>()
+{
+	debug(<span class="enscript-string">&quot;benchmark_finirun\n&quot;</span>);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_fini</span>()
+{
+	debug(<span class="enscript-string">&quot;benchmark_fini\n&quot;</span>);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * functions from bw_unix.c
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">writer</span>(<span class="enscript-type">int</span> controlfd, <span class="enscript-type">int</span> writefd, <span class="enscript-type">char</span>* buf, <span class="enscript-type">void</span>* cookie)
+{
+	size_t	todo, n, done;
+	tsd_t	*state = (tsd_t *)cookie;
+
+	<span class="enscript-keyword">for</span> ( ;; ) {
+		read(controlfd, &amp;todo, <span class="enscript-keyword">sizeof</span>(todo));
+		<span class="enscript-keyword">for</span> (done = 0; done &lt; todo; done += n) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">TOUCH</span>
+			touch(buf, XFERSIZE);
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-keyword">if</span> ((n = write(writefd, buf, state-&gt;xfer)) &lt; 0) {
+				<span class="enscript-comment">/* error! */</span>
+				exit(1);
+			}
+		}
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">touch</span>(<span class="enscript-type">char</span> *buf, <span class="enscript-type">int</span> nbytes)
+{
+    <span class="enscript-type">static</span> <span class="enscript-type">int</span>	psize;
+
+    <span class="enscript-keyword">if</span> (!psize) {
+        psize = getpagesize();
+    }
+    <span class="enscript-keyword">while</span> (nbytes &gt; 0) {
+        *buf = 1;
+        buf += psize;
+        nbytes -= psize;
+    }
+}
+
+</pre>
+<hr />
+</body></html>

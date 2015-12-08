@@ -1,0 +1,154 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>measure_tlbs.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">measure_tlbs.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;signal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;setjmp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;time.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SUPERPAGE_SIZE</span> (2*1024*1024)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SUPERPAGE_MASK</span> (-SUPERPAGE_SIZE)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SUPERPAGE_ROUND_UP</span>(a) ((a + SUPERPAGE_SIZE-1) &amp; SUPERPAGE_MASK)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">RUNS0</span> 100000
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">STEP</span> 4 <span class="enscript-comment">/* KB */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">START</span> STEP
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX</span> (1024*1024) <span class="enscript-comment">/* KB */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">RUNS1</span> RUNS0
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">RUNS2</span> (RUNS0/20)
+
+clock_t
+<span class="enscript-function-name">testt</span>(boolean_t superpages, <span class="enscript-type">int</span> mode, <span class="enscript-type">int</span> write, <span class="enscript-type">int</span> kb) {
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> sum;
+	<span class="enscript-type">char</span> *data;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> run, p, p2, i, res;
+	mach_vm_address_t addr = 0;
+	<span class="enscript-type">int</span> pages = kb/4;
+	mach_vm_size_t	size = SUPERPAGE_ROUND_UP(pages*PAGE_SIZE); <span class="enscript-comment">/* allocate full superpages */</span>
+	<span class="enscript-type">int</span> kr;
+
+	kr = mach_vm_allocate(mach_task_self(), &amp;addr, size, VM_FLAGS_ANYWHERE | (superpages? VM_FLAGS_SUPERPAGE_SIZE_2MB : VM_FLAGS_SUPERPAGE_NONE));
+
+	<span class="enscript-keyword">if</span> (!addr)
+		<span class="enscript-keyword">return</span> 0;
+
+	data = (<span class="enscript-type">char</span>*)(<span class="enscript-type">long</span>)addr;
+
+	<span class="enscript-comment">/* touch every base page to make sure everything is mapped and zero-filled */</span>
+	<span class="enscript-keyword">for</span> (p = 0; p&lt;pages; p++) {
+		sum += data[p*PAGE_SIZE];
+	}
+
+	clock_t a = clock(); <span class="enscript-comment">/* start timing */</span>
+	<span class="enscript-keyword">switch</span> (mode) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:	<span class="enscript-comment">/* one byte every 4096 */</span>
+			<span class="enscript-keyword">if</span> (write) {
+				<span class="enscript-keyword">for</span> (run = 0; run &lt; RUNS0; run++) {
+					<span class="enscript-keyword">for</span> (p = 0; p&lt;pages; p++) {
+						data[p*PAGE_SIZE] = run &amp; 0xFF;
+					}
+				}
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">for</span> (run = 0; run &lt; RUNS0; run++) {
+					<span class="enscript-keyword">for</span> (p = 0; p&lt;pages; p++) {
+						sum += data[p*PAGE_SIZE];
+					}
+				}
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">1</span>:	<span class="enscript-comment">/* every byte */</span>
+			<span class="enscript-keyword">if</span> (write) {
+				<span class="enscript-keyword">for</span> (run = 0; run &lt; RUNS1/PAGE_SIZE; run++) {
+					<span class="enscript-keyword">for</span> (i = 0; i&lt;pages*PAGE_SIZE; i++) {
+						data[i] = run &amp; 0xFF;
+					}
+				}
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">for</span> (run = 0; run &lt; RUNS1/PAGE_SIZE; run++) {
+					<span class="enscript-keyword">for</span> (i = 0; i&lt;pages*PAGE_SIZE; i++) {
+						sum += data[i];
+					}
+				}
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">2</span>:	<span class="enscript-comment">/* random */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PRIME</span> 15485863
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NODE_SIZE</span> 128		<span class="enscript-comment">/* bytes per node */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NODE_ACCESSES</span> 16	<span class="enscript-comment">/* accesses per node */</span>
+			p = 0;
+			<span class="enscript-keyword">if</span> (write) {
+				<span class="enscript-keyword">for</span> (run = 0; run &lt; RUNS2*pages; run++) {
+					p += PRIME;
+					p2 = p % (pages*PAGE_SIZE/NODE_SIZE);
+<span class="enscript-comment">//printf(&quot;p2 = %d\n&quot;, p2);
+</span>					<span class="enscript-keyword">for</span> (i = 0; i &lt; NODE_ACCESSES; i++) {
+						data[p2*NODE_SIZE+i] = run &amp; 0xFF;
+					}
+				}
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">for</span> (run = 0; run &lt; RUNS2*pages; run++) {
+					p += PRIME;
+					p2 = p % (pages*PAGE_SIZE/NODE_SIZE);
+					<span class="enscript-keyword">for</span> (i = 0; i &lt; NODE_ACCESSES; i++) {
+						sum += data[p2*NODE_SIZE+i];
+					}
+				}
+			}
+			<span class="enscript-keyword">break</span>;
+	}
+	clock_t b = clock(); <span class="enscript-comment">/* stop timing */</span>
+	mach_vm_deallocate(mach_task_self(), addr, size);
+	res = b-a;
+	res /= pages;
+	<span class="enscript-keyword">return</span> res;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">main</span>(<span class="enscript-type">int</span> argc, <span class="enscript-type">char</span> **argv) {
+	<span class="enscript-type">int</span> kb;
+	uint64_t time1, time2, time3, time4;
+
+	<span class="enscript-type">int</span> mode;
+
+	printf(<span class="enscript-string">&quot;; m0 r s; m0 r b; m0 w s; m0 w b; m1 r s; m1 r b; m1 w s; m1 w b; m2 r s; m2 r b; m2 w s; m2 w b\n&quot;</span>);
+	<span class="enscript-keyword">for</span> (kb=START; kb&lt;MAX; kb+=STEP) {
+		printf(<span class="enscript-string">&quot;%d&quot;</span>, kb);
+		<span class="enscript-keyword">for</span> (mode=0; mode&lt;=2; mode++) {
+			time1=time2=time3=time4=-1;
+			time1 = testt(TRUE, mode, 0, kb);	<span class="enscript-comment">// read super
+</span>			time2 = testt(FALSE, mode, 0, kb);	<span class="enscript-comment">// read base
+</span>			time3 = testt(TRUE, mode, 1, kb);	<span class="enscript-comment">// write super
+</span>			time4 = testt(FALSE, mode, 1, kb);	<span class="enscript-comment">// write base
+</span>			printf(<span class="enscript-string">&quot;; %lld; %lld; %lld; %lld&quot;</span>, time1, time2, time3, time4);
+			fflush(stdout);
+		}
+		printf(<span class="enscript-string">&quot;\n&quot;</span>);
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+</pre>
+<hr />
+</body></html>

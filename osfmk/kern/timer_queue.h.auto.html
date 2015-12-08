@@ -1,0 +1,214 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>timer_queue.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">timer_queue.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Timer queue support routines.
+ */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_KERN_TIMER_QUEUE_H_</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_KERN_TIMER_QUEUE_H_</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MACH_KERNEL_PRIVATE</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+
+<span class="enscript-comment">/* Kernel trace events associated with timers and timer queues */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_TRAP_LATENCY</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI, 0)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_SET_DEADLINE</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI, 1)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_TIMER_CALLOUT</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI, 2)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_PM_DEADLINE</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI, 3)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_TIMER_MIGRATE</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI, 4)
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">i386</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">x86_64</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_RDHPET</span>		MACHDBG_CODE(DBG_MACH_EXCP_DECI, 5)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_SET_TSC_DEADLINE</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI, 6)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_SET_APIC_DEADLINE</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI, 16)
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_TIMER_ENTER</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI, 7)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_TIMER_CANCEL</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI, 8)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_TIMER_QUEUE</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI, 9)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_TIMER_EXPIRE</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI,10)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_TIMER_ASYNC_DEQ</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI,11)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_TIMER_UPDATE</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI,12)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_TIMER_ESCALATE</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI,13)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_TIMER_OVERDUE</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI,14)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DECR_TIMER_RESCAN</span>	MACHDBG_CODE(DBG_MACH_EXCP_DECI,15)
+
+<span class="enscript-comment">/*
+ *	Invoked by kernel, implemented by platform.
+ */</span>
+
+<span class="enscript-comment">/* Request an expiration deadline, returns queue association */</span>
+<span class="enscript-type">extern</span> mpqueue_head_t *	timer_queue_assign(
+				uint64_t		deadline);
+
+<span class="enscript-type">extern</span> uint64_t		timer_call_slop(
+				uint64_t		deadline,
+				uint64_t		armtime,
+				uint32_t		urgency,
+				thread_t		arming_thread,
+				boolean_t		*rlimited);
+<span class="enscript-type">extern</span> boolean_t	timer_resort_threshold(uint64_t);
+
+<span class="enscript-comment">/* Cancel an associated expiration deadline and specify new deadline */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		timer_queue_cancel(
+				mpqueue_head_t		*queue,
+				uint64_t		deadline,
+				uint64_t		new_deadline);
+
+<span class="enscript-comment">/* Return a pointer to the local timer queue for a given cpu */</span>
+<span class="enscript-type">extern</span> mpqueue_head_t *	timer_queue_cpu(
+				<span class="enscript-type">int</span>			cpu);
+
+<span class="enscript-comment">/* Call a function with argument on a cpu */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> 		timer_call_cpu(
+				<span class="enscript-type">int</span>			cpu,
+				<span class="enscript-type">void</span>			(*fn)(<span class="enscript-type">void</span> *),
+				<span class="enscript-type">void</span>			*arg);
+
+<span class="enscript-comment">/* Queue a function to be called with argument on a cpu */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		timer_call_nosync_cpu(
+				<span class="enscript-type">int</span>			cpu,
+				<span class="enscript-type">void</span>			(*fn)(<span class="enscript-type">void</span> *),
+				<span class="enscript-type">void</span>			*arg);
+
+<span class="enscript-comment">/*
+ *	Invoked by platform, implemented by kernel.
+ */</span>
+
+<span class="enscript-comment">/*
+ *	Invoked by kernel, implemented by platform.
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NUM_LATENCY_QOS_TIERS</span> (6)
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	uint32_t idle_entry_timer_processing_hdeadline_threshold_ns;
+	uint32_t interrupt_timer_coalescing_ilat_threshold_ns;
+	uint32_t timer_resort_threshold_ns;
+
+	int32_t timer_coalesce_rt_shift;
+	int32_t timer_coalesce_bg_shift;
+	int32_t timer_coalesce_kt_shift;
+	int32_t timer_coalesce_fp_shift;
+	int32_t timer_coalesce_ts_shift;
+
+	uint64_t timer_coalesce_rt_ns_max;
+	uint64_t timer_coalesce_bg_ns_max;
+	uint64_t timer_coalesce_kt_ns_max;
+	uint64_t timer_coalesce_fp_ns_max;
+	uint64_t timer_coalesce_ts_ns_max;
+
+	uint32_t latency_qos_scale[NUM_LATENCY_QOS_TIERS];
+	uint64_t latency_qos_ns_max[NUM_LATENCY_QOS_TIERS];
+	boolean_t latency_tier_rate_limited[NUM_LATENCY_QOS_TIERS];
+} timer_coalescing_priority_params_ns_t;
+
+<span class="enscript-type">extern</span> timer_coalescing_priority_params_ns_t * <span class="enscript-function-name">timer_call_get_priority_params</span>(<span class="enscript-type">void</span>);
+
+
+<span class="enscript-type">extern</span> uint64_t		timer_call_slop(
+	uint64_t		deadline,
+	uint64_t		armtime,
+	uint32_t		urgency,
+	thread_t		arming_thread,
+	boolean_t		*rlimited);
+
+<span class="enscript-comment">/* Process deadline expiration for queue, returns new deadline */</span>
+<span class="enscript-type">extern</span> uint64_t		timer_queue_expire(
+				mpqueue_head_t		*queue,
+				uint64_t		deadline);
+
+<span class="enscript-type">extern</span> uint64_t		timer_queue_expire_with_options(
+				mpqueue_head_t *,
+				uint64_t,
+				boolean_t);
+
+<span class="enscript-comment">/* Shutdown a timer queue and reassign existing activities */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		timer_queue_shutdown(
+				mpqueue_head_t		*queue);
+
+<span class="enscript-comment">/* Move timer requests from one queue to another */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>		timer_queue_migrate(
+				mpqueue_head_t		*from,
+				mpqueue_head_t		*to);
+
+<span class="enscript-comment">/*
+ *	Invoked by platform, implemented by platfrom.
+ */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		timer_intr(<span class="enscript-type">int</span> inuser, uint64_t iaddr);
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">i386</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">x86_64</span>)
+<span class="enscript-type">extern</span> uint64_t		setPop(uint64_t time);
+#<span class="enscript-reference">else</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>		setPop(uint64_t time);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		timer_resync_deadlines(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		timer_set_deadline(uint64_t deadline);
+
+<span class="enscript-comment">/* Migrate the local timer queue of a given cpu to the master cpu */</span>
+<span class="enscript-type">extern</span> uint32_t		timer_queue_migrate_cpu(<span class="enscript-type">int</span> target_cpu);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		timer_queue_trace(
+				mpqueue_head_t		*queue);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		timer_queue_trace_cpu(<span class="enscript-type">int</span> cpu);
+
+<span class="enscript-type">extern</span> uint64_t		timer_sysctl_get(<span class="enscript-type">int</span> oid);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>		timer_sysctl_set(<span class="enscript-type">int</span> oid, uint64_t value);
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MACH_KERNEL_PRIVATE */</span>
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* _KERN_TIMER_QUEUE_H_ */</span>
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,515 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pool.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pool.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;AvailabilityMacros.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_policy.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_error.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pthread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;err.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Pool is another multithreaded test/benchmarking program to evaluate
+ * affinity set placement in Leopard.
+ *
+ * The basic picture is:
+ *
+ *                  -&gt; producer --                 -&gt; consumer --
+ *       free     /                \    work     /                \
+ *    -&gt; queue --      ...          --&gt; queue --                   --
+ *   |            \                /             \                /  |
+ *   |              -&gt; producer --                 -&gt; consumer --    |
+ *    ---------------------------------------------------------------
+ *
+ *       &lt;---------- &quot;stage&quot; ---------&gt; &lt;---------- &quot;stage&quot; ---------&gt;
+ *
+ * There are a series of work stages. Each stage has an input and an output
+ * queue and multiple threads. The first stage is the producer and subsequent
+ * stages are consumers. By defuaut there are 2 stages. There are N producer
+ * and M consumer threads. The are B buffers per producer threads circulating
+ * through the system.
+ *
+ * When affinity is enabled, each producer thread is tagged with an affinity tag
+ * 1 .. N - so each runs on a different L2 cache. When a buffer is queued to
+ * the work queue it is tagged with this affinity. When a consumer dequeues a
+ * work item, it sets its affinity to this tag. Hence consumer threads migrate
+ * to the same affinity set where the data was produced.
+ *
+ * Buffer management uses pthread mutex/condition variables. A thread blocks
+ * when no buffer is available on a queue and it is signaled when a buffer
+ * is placed on an empty queue. Queues are tailq'a a la &lt;sys/queue.h&gt;.
+ * The queue management is centralized in a single routine: what queues to
+ * use as input and output and what function to call for processing is
+ * data-driven.
+ */</span>
+  
+pthread_mutex_t funnel;
+pthread_cond_t	barrier;
+
+uint64_t	timer;
+<span class="enscript-type">int</span>		threads;
+<span class="enscript-type">int</span>		threads_ready = 0;
+
+<span class="enscript-type">int</span>		iterations = 10000;
+boolean_t	affinity = FALSE;
+boolean_t	halting = FALSE;
+<span class="enscript-type">int</span>		verbosity = 1;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> work {
+	TAILQ_ENTRY(work)	link;
+	<span class="enscript-type">int</span>			*data;
+	<span class="enscript-type">int</span>			isize;
+	<span class="enscript-type">int</span>			tag;
+	<span class="enscript-type">int</span>			number;
+} work_t;
+
+<span class="enscript-comment">/*
+ * A work queue, complete with pthread objects for its management
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> work_queue {
+	pthread_mutex_t		mtx;
+	pthread_cond_t		cnd;
+	TAILQ_HEAD(, work)	queue;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		waiters;
+} work_queue_t;
+
+<span class="enscript-comment">/* Worker functions take a integer array and size */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">void</span> (worker_fn_t)(<span class="enscript-type">int</span> *, <span class="enscript-type">int</span>); 
+
+<span class="enscript-comment">/* This struct controls the function of a stage */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">WORKERS_MAX</span> 10
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	<span class="enscript-type">int</span>			stagenum;
+	<span class="enscript-type">char</span>			*name;
+	worker_fn_t		*fn;
+	work_queue_t		*input;		
+	work_queue_t		*output;		
+	work_queue_t		bufq;
+	<span class="enscript-type">int</span>			work_todo;
+} stage_info_t;
+
+<span class="enscript-comment">/* This defines a worker thread */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> worker_info {
+	<span class="enscript-type">int</span>			setnum;
+	stage_info_t		*stage;
+	pthread_t		thread;
+} worker_info_t;
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DBG</span>(x...) do {				\
+	<span class="enscript-keyword">if</span> (verbosity &gt; 1) {			\
+		pthread_mutex_lock(&amp;funnel);	\
+		printf(x);			\
+		pthread_mutex_unlock(&amp;funnel);	\
+	}					\
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">mutter</span>(x...) do {			\
+	<span class="enscript-keyword">if</span> (verbosity &gt; 0) {			\
+		printf(x);			\
+	}					\
+} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">s_if_plural</span>(x)	(((x) &gt; 1) ? <span class="enscript-string">&quot;s&quot;</span> : <span class="enscript-string">&quot;&quot;</span>)
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">usage</span>()
+{
+	fprintf(stderr,
+		<span class="enscript-string">&quot;usage: pool [-a]    Turn affinity on (off)\n&quot;</span>
+		<span class="enscript-string">&quot;            [-b B]  Number of buffers per producer (2)\n&quot;</span>
+		<span class="enscript-string">&quot;            [-i I]  Number of buffers to produce (10000)\n&quot;</span>
+		<span class="enscript-string">&quot;            [-s S]  Number of stages (2)\n&quot;</span>
+		<span class="enscript-string">&quot;            [-p P]  Number of pages per buffer (256=1MB)]\n&quot;</span>
+		<span class="enscript-string">&quot;            [-w]    Consumer writes data\n&quot;</span>
+		<span class="enscript-string">&quot;            [-v V]  Verbosity level 0..2 (1)\n&quot;</span>
+		<span class="enscript-string">&quot;            [N [M]] Number of producer and consumers (2)\n&quot;</span>
+	);
+	exit(1);
+}
+
+<span class="enscript-comment">/* Trivial producer: write to each byte */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">writer_fn</span>(<span class="enscript-type">int</span> *data, <span class="enscript-type">int</span> isize)
+{
+	<span class="enscript-type">int</span> 	i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; isize; i++) {
+		data[i] = i;
+	}
+}
+
+<span class="enscript-comment">/* Trivial consumer: read each byte */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">reader_fn</span>(<span class="enscript-type">int</span> *data, <span class="enscript-type">int</span> isize)
+{
+	<span class="enscript-type">int</span> 	i;
+	<span class="enscript-type">int</span>	datum;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; isize; i++) {
+		datum = data[i];
+	}
+}
+
+<span class="enscript-comment">/* Consumer reading and writing the buffer */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">reader_writer_fn</span>(<span class="enscript-type">int</span> *data, <span class="enscript-type">int</span> isize)
+{
+	<span class="enscript-type">int</span> 	i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; isize; i++) {
+		data[i] += 1;
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">affinity_set</span>(<span class="enscript-type">int</span> tag)
+{
+	kern_return_t			ret;
+	thread_affinity_policy_data_t	policy;
+	<span class="enscript-keyword">if</span> (affinity) {
+		policy.affinity_tag = tag;
+		ret = thread_policy_set(
+				mach_thread_self(), THREAD_AFFINITY_POLICY,
+				(thread_policy_t) &amp;policy,
+				THREAD_AFFINITY_POLICY_COUNT);
+		<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS)
+			printf(<span class="enscript-string">&quot;thread_policy_set(THREAD_AFFINITY_POLICY) returned %d\n&quot;</span>, ret);
+	}
+}
+
+<span class="enscript-comment">/*
+ * This is the central function for every thread.
+ * For each invocation, its role is ets by (a pointer to) a stage_info_t.
+ */</span>
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">manager_fn</span>(<span class="enscript-type">void</span> *arg)
+{
+	worker_info_t	*wp = (worker_info_t *) arg;
+	stage_info_t	*sp = wp-&gt;stage;
+	boolean_t	is_producer = (sp-&gt;stagenum == 0);
+	<span class="enscript-type">long</span>		iteration = 0;
+	<span class="enscript-type">int</span>		current_tag = 0;
+
+	kern_return_t			ret;
+	thread_extended_policy_data_t	epolicy;
+	epolicy.timeshare = FALSE;
+	ret = thread_policy_set(
+			mach_thread_self(), THREAD_EXTENDED_POLICY,
+			(thread_policy_t) &amp;epolicy,
+			THREAD_EXTENDED_POLICY_COUNT);
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS)
+		printf(<span class="enscript-string">&quot;thread_policy_set(THREAD_EXTENDED_POLICY) returned %d\n&quot;</span>, ret);
+	
+	<span class="enscript-comment">/*
+	 * If we're using affinity sets and we're a producer
+	 * set our tag to by our thread set number.
+	 */</span>
+	<span class="enscript-keyword">if</span> (affinity &amp;&amp; is_producer) {
+		affinity_set(wp-&gt;setnum);
+		current_tag = wp-&gt;setnum;
+	}
+
+	DBG(<span class="enscript-string">&quot;Starting %s %d, stage: %d\n&quot;</span>, sp-&gt;name, wp-&gt;setnum, sp-&gt;stagenum);
+
+	<span class="enscript-comment">/*
+	 * Start barrier.
+	 * The tets thread to get here releases everyone and starts the timer.
+	 */</span>
+	pthread_mutex_lock(&amp;funnel);
+	threads_ready++;
+	<span class="enscript-keyword">if</span> (threads_ready == threads) {
+		pthread_mutex_unlock(&amp;funnel);
+		<span class="enscript-keyword">if</span> (halting) {
+			printf(<span class="enscript-string">&quot;  all threads ready for process %d, &quot;</span>
+				<span class="enscript-string">&quot;hit any key to start&quot;</span>, getpid());
+			fflush(stdout);
+			(<span class="enscript-type">void</span>) getchar();
+		}
+		pthread_cond_broadcast(&amp;barrier);
+		timer = mach_absolute_time();
+	} <span class="enscript-keyword">else</span> {
+		pthread_cond_wait(&amp;barrier, &amp;funnel);
+		pthread_mutex_unlock(&amp;funnel);
+	}
+
+	<span class="enscript-keyword">do</span> {
+		work_t		*workp;
+
+		<span class="enscript-comment">/*
+		 * Get a buffer from the input queue.
+		 * Block if none.
+		 * Quit if all work done.
+		 */</span>
+		pthread_mutex_lock(&amp;sp-&gt;input-&gt;mtx);
+		<span class="enscript-keyword">while</span> (1) {
+			<span class="enscript-keyword">if</span> (sp-&gt;work_todo == 0) {
+				pthread_mutex_unlock(&amp;sp-&gt;input-&gt;mtx);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			workp = TAILQ_FIRST(&amp;(sp-&gt;input-&gt;queue));
+			<span class="enscript-keyword">if</span> (workp != NULL)
+				<span class="enscript-keyword">break</span>;
+			DBG(<span class="enscript-string">&quot;    %s[%d,%d] todo %d waiting for buffer\n&quot;</span>,
+				sp-&gt;name, wp-&gt;setnum, sp-&gt;stagenum, sp-&gt;work_todo);
+			sp-&gt;input-&gt;waiters++;
+			pthread_cond_wait(&amp;sp-&gt;input-&gt;cnd, &amp;sp-&gt;input-&gt;mtx);
+			sp-&gt;input-&gt;waiters--;
+		}
+		TAILQ_REMOVE(&amp;(sp-&gt;input-&gt;queue), workp, link);
+		iteration = sp-&gt;work_todo--;
+		pthread_mutex_unlock(&amp;sp-&gt;input-&gt;mtx);
+
+		<span class="enscript-keyword">if</span> (is_producer) {
+			workp-&gt;number = iteration;
+			workp-&gt;tag = wp-&gt;setnum;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (affinity &amp;&amp; current_tag != workp-&gt;tag) {
+				affinity_set(workp-&gt;tag);
+				current_tag = workp-&gt;tag;
+			}
+		}
+
+		DBG(<span class="enscript-string">&quot;  %s[%d,%d] todo %d work %p data %p\n&quot;</span>,
+			sp-&gt;name, wp-&gt;setnum, sp-&gt;stagenum, iteration, workp, workp-&gt;data);
+
+		<span class="enscript-comment">/* Do our stuff with the buffer */</span>
+		(<span class="enscript-type">void</span>) sp-&gt;fn(workp-&gt;data, workp-&gt;isize);
+
+		<span class="enscript-comment">/*
+		 * Place the buffer on the input queue of the next stage.
+		 * Signal waiters if required.
+		 */</span>
+		pthread_mutex_lock(&amp;sp-&gt;output-&gt;mtx);
+		TAILQ_INSERT_TAIL(&amp;(sp-&gt;output-&gt;queue), workp, link);
+		<span class="enscript-keyword">if</span> (sp-&gt;output-&gt;waiters) {
+			DBG(<span class="enscript-string">&quot;    %s[%d,%d] todo %d signaling work\n&quot;</span>,
+				sp-&gt;name, wp-&gt;setnum, sp-&gt;stagenum, iteration);
+			pthread_cond_signal(&amp;sp-&gt;output-&gt;cnd);
+		}
+		pthread_mutex_unlock(&amp;sp-&gt;output-&gt;mtx);
+
+	} <span class="enscript-keyword">while</span> (1);
+
+<span class="enscript-reference">out</span>:
+	pthread_cond_broadcast(&amp;sp-&gt;output-&gt;cnd);
+
+	DBG(<span class="enscript-string">&quot;Ending %s[%d,%d]\n&quot;</span>, sp-&gt;name, wp-&gt;setnum, sp-&gt;stagenum);
+
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">void</span> *) iteration;
+}
+
+<span class="enscript-function-name">void</span> (*producer_fnp)(<span class="enscript-type">int</span> *data, <span class="enscript-type">int</span> isize) = &amp;writer_fn;
+<span class="enscript-function-name">void</span> (*consumer_fnp)(<span class="enscript-type">int</span> *data, <span class="enscript-type">int</span> isize) = &amp;reader_fn;
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">main</span>(<span class="enscript-type">int</span> argc, <span class="enscript-type">char</span> *argv[])
+{
+	<span class="enscript-type">int</span>			i;
+	<span class="enscript-type">int</span>			j;
+	<span class="enscript-type">int</span>			k;
+	<span class="enscript-type">int</span>			pages = 256; <span class="enscript-comment">/* 1MB */</span>
+	<span class="enscript-type">int</span>			buffers = 2;
+	<span class="enscript-type">int</span>			producers = 2;
+	<span class="enscript-type">int</span>			consumers = 2;
+	<span class="enscript-type">int</span>			stages = 2;
+	<span class="enscript-type">int</span>			*status;
+	stage_info_t		*stage_info;
+	stage_info_t		*sp;
+	worker_info_t		*worker_info;
+	worker_info_t		*wp;
+	kern_return_t		ret;
+	<span class="enscript-type">int</span>			c;
+
+	<span class="enscript-comment">/* Do switch parsing: */</span>
+	<span class="enscript-keyword">while</span> ((c = getopt (argc, argv, <span class="enscript-string">&quot;ab:i:p:s:twv:&quot;</span>)) != -1) {
+		<span class="enscript-keyword">switch</span> (c) {
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'a'</span>:
+			affinity = !affinity;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'b'</span>:
+			buffers = atoi(optarg);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'i'</span>:
+			iterations = atoi(optarg);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'p'</span>:
+			pages = atoi(optarg);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'s'</span>:
+			stages = atoi(optarg);
+			<span class="enscript-keyword">if</span> (stages &gt;= WORKERS_MAX)
+				usage();
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'t'</span>:
+			halting = TRUE;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'w'</span>:
+			consumer_fnp = &amp;reader_writer_fn;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'v'</span>:
+			verbosity = atoi(optarg);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'h'</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'?'</span>:
+		<span class="enscript-reference">default</span>:
+			usage();
+		}
+	}
+	argc -= optind; argv += optind;
+	<span class="enscript-keyword">if</span> (argc &gt; 0)
+		producers = atoi(*argv);
+	argc--; argv++;
+	<span class="enscript-keyword">if</span> (argc &gt; 0)
+		consumers = atoi(*argv);
+	
+	pthread_mutex_init(&amp;funnel, NULL);
+	pthread_cond_init(&amp;barrier, NULL);
+
+	<span class="enscript-comment">/*
+ 	 * Fire up the worker threads.
+	 */</span>
+	threads = consumers * (stages - 1) + producers;
+	mutter(<span class="enscript-string">&quot;Launching %d producer%s with %d stage%s of %d consumer%s\n&quot;</span>
+		<span class="enscript-string">&quot;  with %saffinity, consumer reads%s data\n&quot;</span>,
+		producers, s_if_plural(producers),
+		stages - 1, s_if_plural(stages - 1),
+		consumers, s_if_plural(consumers),
+		affinity? <span class="enscript-string">&quot;&quot;</span>: <span class="enscript-string">&quot;no &quot;</span>,
+		(consumer_fnp == &amp;reader_writer_fn)? <span class="enscript-string">&quot; and writes&quot;</span> : <span class="enscript-string">&quot;&quot;</span>);
+	<span class="enscript-keyword">if</span> (pages &lt; 256)
+		mutter(<span class="enscript-string">&quot;  %dkB bytes per buffer, &quot;</span>, pages * 4);
+	<span class="enscript-keyword">else</span>
+		mutter(<span class="enscript-string">&quot;  %dMB bytes per buffer, &quot;</span>, pages / 256);
+	mutter(<span class="enscript-string">&quot;%d buffer%s per producer &quot;</span>,
+		buffers, s_if_plural(buffers));
+	<span class="enscript-keyword">if</span> (buffers * pages &lt; 256)
+		mutter(<span class="enscript-string">&quot;(total %dkB)\n&quot;</span>, buffers * pages * 4);
+	<span class="enscript-keyword">else</span>
+		mutter(<span class="enscript-string">&quot;(total %dMB)\n&quot;</span>, buffers * pages / 256);
+	mutter(<span class="enscript-string">&quot;  processing %d buffer%s...\n&quot;</span>,
+		iterations, s_if_plural(iterations));
+
+	stage_info = (stage_info_t *) malloc(stages * <span class="enscript-keyword">sizeof</span>(stage_info_t));
+	worker_info = (worker_info_t *) malloc(threads * <span class="enscript-keyword">sizeof</span>(worker_info_t));
+
+	<span class="enscript-comment">/* Set up the queue for the workers of this thread set: */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; stages; i++) {
+		sp = &amp;stage_info[i];
+		sp-&gt;stagenum = i;
+		pthread_mutex_init(&amp;sp-&gt;bufq.mtx, NULL);
+		pthread_cond_init(&amp;sp-&gt;bufq.cnd, NULL);
+		TAILQ_INIT(&amp;sp-&gt;bufq.queue);
+		sp-&gt;bufq.waiters = 0;
+		<span class="enscript-keyword">if</span> (i == 0) {
+			sp-&gt;fn = producer_fnp;
+			sp-&gt;name = <span class="enscript-string">&quot;producer&quot;</span>;
+		} <span class="enscript-keyword">else</span> {
+			sp-&gt;fn = consumer_fnp;
+			sp-&gt;name = <span class="enscript-string">&quot;consumer&quot;</span>;
+		}
+		sp-&gt;input = &amp;sp-&gt;bufq;
+		sp-&gt;output = &amp;stage_info[(i + 1) % stages].bufq;
+		stage_info[i].work_todo = iterations;
+	}
+ 
+	<span class="enscript-comment">/* Create the producers */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; producers; i++) {
+		work_t	*work_array;
+		<span class="enscript-type">int</span>	*data;
+		<span class="enscript-type">int</span>	isize;
+
+		isize = pages * 4096 / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>);
+		data = (<span class="enscript-type">int</span> *) malloc(buffers * pages * 4096);
+
+		<span class="enscript-comment">/* Set up the empty work buffers */</span>
+		work_array = (work_t *)  malloc(buffers * <span class="enscript-keyword">sizeof</span>(work_t));
+		<span class="enscript-keyword">for</span> (j = 0; j &lt; buffers; j++) {
+			work_array[j].data = data + (isize * j);	
+			work_array[j].isize = isize;
+			work_array[j].tag = 0;
+			TAILQ_INSERT_TAIL(&amp;stage_info[0].bufq.queue, &amp;work_array[j], link);
+			DBG(<span class="enscript-string">&quot;  empty work item %p for data %p\n&quot;</span>,
+				&amp;work_array[j], work_array[j].data);
+		}
+		wp = &amp;worker_info[i];
+		wp-&gt;setnum = i + 1;
+		wp-&gt;stage = &amp;stage_info[0];
+		<span class="enscript-keyword">if</span> (ret = pthread_create(&amp;wp-&gt;thread,
+					 NULL,
+					 &amp;manager_fn,
+					 (<span class="enscript-type">void</span> *) wp))
+			err(1, <span class="enscript-string">&quot;pthread_create %d,%d&quot;</span>, 0, i);
+	}
+
+	<span class="enscript-comment">/* Create consumers */</span>
+	<span class="enscript-keyword">for</span> (i = 1; i &lt; stages; i++) {
+		<span class="enscript-keyword">for</span> (j = 0; j &lt; consumers; j++) {
+			wp = &amp;worker_info[producers + (consumers*(i-1)) + j];
+			wp-&gt;setnum = j + 1;
+			wp-&gt;stage = &amp;stage_info[i];
+			<span class="enscript-keyword">if</span> (ret = pthread_create(&amp;wp-&gt;thread,
+						NULL,
+						&amp;manager_fn,
+						(<span class="enscript-type">void</span> *) wp))
+				err(1, <span class="enscript-string">&quot;pthread_create %d,%d&quot;</span>, i, j);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * We sit back anf wait for the slaves to finish.
+	 */</span>
+	<span class="enscript-keyword">for</span> (k = 0; k &lt; threads; k++) {
+		<span class="enscript-type">int</span>	i;
+		<span class="enscript-type">int</span>	j;
+
+		wp = &amp;worker_info[k];
+		<span class="enscript-keyword">if</span> (k &lt; producers) {
+			i = 0;
+			j = k;
+		} <span class="enscript-keyword">else</span> {
+			i = (k - producers) / consumers;
+			j = (k - producers) % consumers;
+		}
+		<span class="enscript-keyword">if</span>(ret = pthread_join(wp-&gt;thread, (<span class="enscript-type">void</span> **)&amp;status))
+		    err(1, <span class="enscript-string">&quot;pthread_join %d,%d&quot;</span>, i, j);
+		DBG(<span class="enscript-string">&quot;Thread %d,%d status %d\n&quot;</span>, i, j, status);
+	}
+
+	<span class="enscript-comment">/*
+	 * See how long the work took.
+	 */</span>
+	timer = mach_absolute_time() - timer;
+	timer = timer / 1000000ULL;
+	printf(<span class="enscript-string">&quot;%d.%03d seconds elapsed.\n&quot;</span>,
+		(<span class="enscript-type">int</span>) (timer/1000ULL), (<span class="enscript-type">int</span>) (timer % 1000ULL));
+
+	<span class="enscript-keyword">return</span> 0;
+}
+</pre>
+<hr />
+</body></html>

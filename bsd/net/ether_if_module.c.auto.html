@@ -1,0 +1,667 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ether_if_module.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ether_if_module.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1989, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sockio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">etherbroadcastaddr</span>	fugly
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_llc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_dl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_ether.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_gif.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/if_ether.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>	<span class="enscript-comment">/* For M_LOOP */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_interface.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_protocol.h&gt;</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">etherbroadcastaddr</span>
+
+<span class="enscript-comment">/*
+#if INET
+#include &lt;netinet/in.h&gt;
+#include &lt;netinet/in_var.h&gt;
+
+#include &lt;netinet/in_systm.h&gt;
+#include &lt;netinet/ip.h&gt;
+#endif
+*/</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/ether_if_module.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_vlan_var.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">BOND</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_bond_internal.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* BOND */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IF_BRIDGE</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_bridgevar.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IF_BRIDGE */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/dlil.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">memcpy</span>(x,y,z)	bcopy(y, x, z)
+
+<span class="enscript-function-name">SYSCTL_DECL</span>(_net_link);
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_link, IFT_ETHER, ether, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+    <span class="enscript-string">&quot;Ethernet&quot;</span>);
+
+<span class="enscript-type">struct</span> en_desc {
+	u_int16_t type;			<span class="enscript-comment">/* Type of protocol stored in data */</span>
+	u_int32_t protocol_family;	<span class="enscript-comment">/* Protocol family */</span>
+	u_int32_t data[2];		<span class="enscript-comment">/* Protocol data */</span>
+};
+
+<span class="enscript-comment">/* descriptors are allocated in blocks of ETHER_DESC_BLK_SIZE */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ETHER_DESC_BLK_SIZE</span> (10)
+
+<span class="enscript-comment">/*
+ * Header for the demux list, hangs off of IFP at if_family_cookie
+ */</span>
+<span class="enscript-type">struct</span> ether_desc_blk_str {
+	u_int32_t  n_max_used;
+	u_int32_t	n_count;
+	u_int32_t	n_used;
+	<span class="enscript-type">struct</span> en_desc  block_ptr[1];
+};
+
+<span class="enscript-comment">/* Size of the above struct before the array of struct en_desc */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ETHER_DESC_HEADER_SIZE</span>	\
+	((size_t) offsetof(<span class="enscript-type">struct</span> ether_desc_blk_str, block_ptr))
+
+__private_extern__ u_char etherbroadcastaddr[ETHER_ADDR_LEN] =
+    { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+
+<span class="enscript-comment">/*
+ * Release all descriptor entries owned by this protocol (there may be several).
+ * Setting the type to 0 releases the entry. Eventually we should compact-out
+ * the unused entries.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ether_del_proto</span>(ifnet_t ifp, protocol_family_t protocol_family)
+{
+	<span class="enscript-type">struct</span> ether_desc_blk_str *desc_blk =
+	    (<span class="enscript-type">struct</span> ether_desc_blk_str *)ifp-&gt;if_family_cookie;
+	u_int32_t current = 0;
+	<span class="enscript-type">int</span> found = 0;
+
+	<span class="enscript-keyword">if</span> (desc_blk == NULL)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">for</span> (current = desc_blk-&gt;n_max_used; current &gt; 0; current--) {
+		<span class="enscript-keyword">if</span> (desc_blk-&gt;block_ptr[current - 1].protocol_family ==
+		    protocol_family) {
+			found = 1;
+			desc_blk-&gt;block_ptr[current - 1].type = 0;
+			desc_blk-&gt;n_used--;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (desc_blk-&gt;n_used == 0) {
+		FREE(ifp-&gt;if_family_cookie, M_IFADDR);
+		ifp-&gt;if_family_cookie = 0;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* Decrement n_max_used */</span>
+		<span class="enscript-keyword">for</span> (; desc_blk-&gt;n_max_used &gt; 0 &amp;&amp;
+		    desc_blk-&gt;block_ptr[desc_blk-&gt;n_max_used - 1].type == 0;
+		    desc_blk-&gt;n_max_used--)
+			;
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ether_add_proto_internal</span>(<span class="enscript-type">struct</span> ifnet *ifp, protocol_family_t protocol,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ifnet_demux_desc *demux)
+{
+	<span class="enscript-type">struct</span> en_desc *ed;
+	<span class="enscript-type">struct</span> ether_desc_blk_str *desc_blk =
+	    (<span class="enscript-type">struct</span> ether_desc_blk_str *)ifp-&gt;if_family_cookie;
+	u_int32_t i;
+
+	<span class="enscript-keyword">switch</span> (demux-&gt;type) {
+	<span class="enscript-comment">/* These types are supported */</span>
+	<span class="enscript-comment">/* Top three are preferred */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLIL_DESC_ETYPE2</span>:
+		<span class="enscript-keyword">if</span> (demux-&gt;datalen != 2)
+			<span class="enscript-keyword">return</span> (EINVAL);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLIL_DESC_SAP</span>:
+		<span class="enscript-keyword">if</span> (demux-&gt;datalen != 3)
+			<span class="enscript-keyword">return</span> (EINVAL);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLIL_DESC_SNAP</span>:
+		<span class="enscript-keyword">if</span> (demux-&gt;datalen != 5)
+			<span class="enscript-keyword">return</span> (EINVAL);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (ENOTSUP);
+	}
+
+	<span class="enscript-comment">/* Verify a matching descriptor does not exist */</span>
+	<span class="enscript-keyword">if</span> (desc_blk != NULL) {
+		<span class="enscript-keyword">switch</span> (demux-&gt;type) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DLIL_DESC_ETYPE2</span>:
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; desc_blk-&gt;n_max_used; i++) {
+				<span class="enscript-keyword">if</span> (desc_blk-&gt;block_ptr[i].type ==
+				    DLIL_DESC_ETYPE2 &amp;&amp;
+				    desc_blk-&gt;block_ptr[i].data[0] ==
+				    *(u_int16_t*)demux-&gt;data) {
+					<span class="enscript-keyword">return</span> (EADDRINUSE);
+				}
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DLIL_DESC_SAP</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DLIL_DESC_SNAP</span>:
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; desc_blk-&gt;n_max_used; i++) {
+				<span class="enscript-keyword">if</span> (desc_blk-&gt;block_ptr[i].type ==
+				    demux-&gt;type &amp;&amp;
+				    bcmp(desc_blk-&gt;block_ptr[i].data,
+				    demux-&gt;data, demux-&gt;datalen) == 0) {
+					<span class="enscript-keyword">return</span> (EADDRINUSE);
+				}
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-comment">/* Check for case where all of the descriptor blocks are in use */</span>
+	<span class="enscript-keyword">if</span> (desc_blk == NULL || desc_blk-&gt;n_used == desc_blk-&gt;n_count) {
+		<span class="enscript-type">struct</span> ether_desc_blk_str *tmp;
+		u_int32_t new_count = ETHER_DESC_BLK_SIZE;
+		u_int32_t new_size;
+		u_int32_t old_size = 0;
+
+		i = 0;
+
+		<span class="enscript-keyword">if</span> (desc_blk) {
+			new_count += desc_blk-&gt;n_count;
+			old_size = desc_blk-&gt;n_count * <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> en_desc) +
+			    ETHER_DESC_HEADER_SIZE;
+			i = desc_blk-&gt;n_used;
+		}
+
+		new_size = new_count * <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> en_desc) +
+		    ETHER_DESC_HEADER_SIZE;
+
+		tmp = _MALLOC(new_size, M_IFADDR, M_WAITOK);
+		<span class="enscript-keyword">if</span> (tmp  == NULL) {
+			<span class="enscript-comment">/*
+			 * Remove any previous descriptors set in the call.
+			 */</span>
+			<span class="enscript-keyword">return</span> (ENOMEM);
+		}
+
+		bzero(((<span class="enscript-type">char</span> *)tmp) + old_size, new_size - old_size);
+		<span class="enscript-keyword">if</span> (desc_blk) {
+			bcopy(desc_blk, tmp, old_size);
+			FREE(desc_blk, M_IFADDR);
+		}
+		desc_blk = tmp;
+		ifp-&gt;if_family_cookie = (uintptr_t)desc_blk;
+		desc_blk-&gt;n_count = new_count;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* Find a free entry */</span>
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; desc_blk-&gt;n_count; i++) {
+			<span class="enscript-keyword">if</span> (desc_blk-&gt;block_ptr[i].type == 0) {
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+	}
+
+	<span class="enscript-comment">/* Bump n_max_used if appropriate */</span>
+	<span class="enscript-keyword">if</span> (i + 1 &gt; desc_blk-&gt;n_max_used) {
+		desc_blk-&gt;n_max_used = i + 1;
+	}
+
+	ed = &amp;desc_blk-&gt;block_ptr[i];
+	ed-&gt;protocol_family = protocol;
+	ed-&gt;data[0] = 0;
+	ed-&gt;data[1] = 0;
+
+	<span class="enscript-keyword">switch</span> (demux-&gt;type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLIL_DESC_ETYPE2</span>:
+		<span class="enscript-comment">/* 2 byte ethernet raw protocol type is at native_type */</span>
+		<span class="enscript-comment">/* prtocol must be in network byte order */</span>
+		ed-&gt;type = DLIL_DESC_ETYPE2;
+		ed-&gt;data[0] = *(u_int16_t*)demux-&gt;data;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLIL_DESC_SAP</span>:
+		ed-&gt;type = DLIL_DESC_SAP;
+		bcopy(demux-&gt;data, &amp;ed-&gt;data[0], 3);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLIL_DESC_SNAP</span>: {
+		u_int8_t*	pDest = ((u_int8_t*)&amp;ed-&gt;data[0]) + 3;
+		ed-&gt;type = DLIL_DESC_SNAP;
+		bcopy(demux-&gt;data, pDest, 5);
+		<span class="enscript-keyword">break</span>;
+	}
+	}
+
+	desc_blk-&gt;n_used++;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ether_add_proto</span>(ifnet_t	 ifp, protocol_family_t	protocol,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ifnet_demux_desc *demux_list, u_int32_t demux_count)
+{
+	<span class="enscript-type">int</span> error = 0;
+	u_int32_t i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; demux_count; i++) {
+		error = ether_add_proto_internal(ifp, protocol, &amp;demux_list[i]);
+		<span class="enscript-keyword">if</span> (error) {
+			ether_del_proto(ifp, protocol);
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ether_demux</span>(ifnet_t ifp, mbuf_t m, <span class="enscript-type">char</span> *frame_header,
+    protocol_family_t *protocol_family)
+{
+	<span class="enscript-type">struct</span> ether_header *eh = (<span class="enscript-type">struct</span> ether_header *)(<span class="enscript-type">void</span> *)frame_header;
+	u_short	 ether_type = eh-&gt;ether_type;
+	u_int16_t type;
+	u_int8_t *data;
+	u_int32_t i = 0;
+	<span class="enscript-type">struct</span> ether_desc_blk_str *desc_blk =
+	    (<span class="enscript-type">struct</span> ether_desc_blk_str *)ifp-&gt;if_family_cookie;
+	u_int32_t maxd = desc_blk ? desc_blk-&gt;n_max_used : 0;
+	<span class="enscript-type">struct</span> en_desc	*ed = desc_blk ? desc_blk-&gt;block_ptr : NULL;
+	u_int32_t extProto1 = 0;
+	u_int32_t extProto2 = 0;
+
+	<span class="enscript-keyword">if</span> (eh-&gt;ether_dhost[0] &amp; 1) {
+		<span class="enscript-comment">/* Check for broadcast */</span>
+		<span class="enscript-keyword">if</span> (_ether_cmp(etherbroadcastaddr, eh-&gt;ether_dhost) == 0)
+			m-&gt;m_flags |= M_BCAST;
+		<span class="enscript-keyword">else</span>
+			m-&gt;m_flags |= M_MCAST;
+	}
+
+	<span class="enscript-keyword">if</span> (m-&gt;m_flags &amp; M_HASFCS) {
+                <span class="enscript-comment">/*
+                 * If the M_HASFCS is set by the driver we want to make sure
+                 * that we strip off the trailing FCS data before handing it
+                 * up the stack.
+                 */</span>
+                m_adj(m, -ETHER_CRC_LEN);
+	        m-&gt;m_flags &amp;= ~M_HASFCS;
+        }
+
+	<span class="enscript-keyword">if</span> (ifp-&gt;if_eflags &amp; IFEF_BOND) {
+		<span class="enscript-comment">/* if we're bonded, bond &quot;protocol&quot; gets all the packets */</span>
+		*protocol_family = PF_BOND;
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">if</span> ((eh-&gt;ether_dhost[0] &amp; 1) == 0) {
+		<span class="enscript-comment">/*
+		 * When the driver is put into promiscuous mode we may receive
+		 * unicast frames that are not intended for our interfaces.
+		 * They are marked here as being promiscuous so the caller may
+		 * dispose of them after passing the packets to any interface
+		 * filters.
+		 */</span>
+		<span class="enscript-keyword">if</span> (_ether_cmp(eh-&gt;ether_dhost, IF_LLADDR(ifp))) {
+			m-&gt;m_flags |= M_PROMISC;
+		}
+	}
+
+	<span class="enscript-comment">/* check for VLAN */</span>
+	<span class="enscript-keyword">if</span> ((m-&gt;m_pkthdr.csum_flags &amp; CSUM_VLAN_TAG_VALID) != 0) {
+		<span class="enscript-keyword">if</span> (EVL_VLANOFTAG(m-&gt;m_pkthdr.vlan_tag) != 0) {
+			*protocol_family = PF_VLAN;
+			<span class="enscript-keyword">return</span> (0);
+		}
+		<span class="enscript-comment">/* the packet is just priority-tagged, clear the bit */</span>
+		m-&gt;m_pkthdr.csum_flags &amp;= ~CSUM_VLAN_TAG_VALID;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ether_type == htons(ETHERTYPE_VLAN)) {
+		<span class="enscript-type">struct</span> ether_vlan_header *	evl;
+
+		evl = (<span class="enscript-type">struct</span> ether_vlan_header *)(<span class="enscript-type">void</span> *)frame_header;
+		<span class="enscript-keyword">if</span> (m-&gt;m_len &lt; ETHER_VLAN_ENCAP_LEN ||
+		    ntohs(evl-&gt;evl_proto) == ETHERTYPE_VLAN ||
+		    EVL_VLANOFTAG(ntohs(evl-&gt;evl_tag)) != 0) {
+			*protocol_family = PF_VLAN;
+			<span class="enscript-keyword">return</span> (0);
+		}
+		<span class="enscript-comment">/* the packet is just priority-tagged */</span>
+
+		<span class="enscript-comment">/* make the encapsulated ethertype the actual ethertype */</span>
+		ether_type = evl-&gt;evl_encap_proto = evl-&gt;evl_proto;
+
+		<span class="enscript-comment">/* remove the encapsulation header */</span>
+		m-&gt;m_len -= ETHER_VLAN_ENCAP_LEN;
+		m-&gt;m_data += ETHER_VLAN_ENCAP_LEN;
+		m-&gt;m_pkthdr.len -= ETHER_VLAN_ENCAP_LEN;
+		m-&gt;m_pkthdr.csum_flags = 0; <span class="enscript-comment">/* can't trust hardware checksum */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ether_type == htons(ETHERTYPE_ARP))
+		m-&gt;m_pkthdr.pkt_flags |= PKTF_INET_RESOLVE; <span class="enscript-comment">/* ARP packet */</span>
+
+	data = mtod(m, u_int8_t*);
+
+	<span class="enscript-comment">/*
+	* Determine the packet's protocol type and stuff the protocol into
+	* longs for quick compares.
+	*/</span>
+	<span class="enscript-keyword">if</span> (ntohs(ether_type) &lt;= 1500) {
+		bcopy(data, &amp;extProto1, <span class="enscript-keyword">sizeof</span> (u_int32_t));
+
+		<span class="enscript-comment">/* SAP or SNAP */</span>
+		<span class="enscript-keyword">if</span> ((extProto1 &amp; htonl(0xFFFFFF00)) == htonl(0xAAAA0300)) {
+			<span class="enscript-comment">/* SNAP */</span>
+			type = DLIL_DESC_SNAP;
+			bcopy(data + <span class="enscript-keyword">sizeof</span> (u_int32_t), &amp;extProto2,
+			    <span class="enscript-keyword">sizeof</span> (u_int32_t));
+			extProto1 &amp;= htonl(0x000000FF);
+		} <span class="enscript-keyword">else</span> {
+			type = DLIL_DESC_SAP;
+			extProto1 &amp;= htonl(0xFFFFFF00);
+		}
+	} <span class="enscript-keyword">else</span> {
+		type = DLIL_DESC_ETYPE2;
+	}
+
+	<span class="enscript-comment">/*
+	* Search through the connected protocols for a match.
+	*/</span>
+	<span class="enscript-keyword">switch</span> (type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLIL_DESC_ETYPE2</span>:
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; maxd; i++) {
+			<span class="enscript-keyword">if</span> ((ed[i].type == type) &amp;&amp;
+			    (ed[i].data[0] == ether_type)) {
+				*protocol_family = ed[i].protocol_family;
+				<span class="enscript-keyword">return</span> (0);
+			}
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLIL_DESC_SAP</span>:
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; maxd; i++) {
+			<span class="enscript-keyword">if</span> ((ed[i].type == type) &amp;&amp;
+			    (ed[i].data[0] == extProto1)) {
+				*protocol_family = ed[i].protocol_family;
+				<span class="enscript-keyword">return</span> (0);
+			}
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DLIL_DESC_SNAP</span>:
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; maxd; i++) {
+			<span class="enscript-keyword">if</span> ((ed[i].type == type) &amp;&amp;
+			    (ed[i].data[0] == extProto1) &amp;&amp;
+				(ed[i].data[1] == extProto2)) {
+				*protocol_family = ed[i].protocol_family;
+				<span class="enscript-keyword">return</span> (0);
+			}
+		}
+	<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> (ENOENT);
+}
+
+<span class="enscript-comment">/*
+ * On embedded, ether_frameout is practicaly ether_frameout_extended.
+ * On non-embedded, ether_frameout has long been exposed as a public KPI,
+ * and therefore its signature must remain the same (without the pre- and
+ * postpend length parameters.)
+ */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KPI_INTERFACE_EMBEDDED</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ether_frameout</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> mbuf **m,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *ndest, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *edst,
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *ether_type, u_int32_t *prepend_len, u_int32_t *postpend_len)
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !KPI_INTERFACE_EMBEDDED */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ether_frameout</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> mbuf **m,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *ndest, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *edst,
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *ether_type)
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KPI_INTERFACE_EMBEDDED */</span>
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KPI_INTERFACE_EMBEDDED</span>
+	<span class="enscript-keyword">return</span> (ether_frameout_extended(ifp, m, ndest, edst, ether_type,
+	    prepend_len, postpend_len));
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !KPI_INTERFACE_EMBEDDED */</span>
+	<span class="enscript-keyword">return</span> (ether_frameout_extended(ifp, m, ndest, edst, ether_type,
+	    NULL, NULL));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !KPI_INTERFACE_EMBEDDED */</span>
+}
+
+<span class="enscript-comment">/*
+ * Ethernet output routine.
+ * Encapsulate a packet of type family for the local net.
+ * Use trailer local net encapsulation if enough data in first
+ * packet leaves a multiple of 512 bytes of data in remainder.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ether_frameout_extended</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> mbuf **m,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *ndest, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *edst,
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *ether_type, u_int32_t *prepend_len, u_int32_t *postpend_len)
+{
+	<span class="enscript-type">struct</span> ether_header *eh;
+	<span class="enscript-type">int</span> hlen;	<span class="enscript-comment">/* link layer header length */</span>
+
+	hlen = ETHER_HDR_LEN;
+
+	<span class="enscript-comment">/*
+	 * If a simplex interface, and the packet is being sent to our
+	 * Ethernet address or a broadcast address, loopback a copy.
+	 * XXX To make a simplex device behave exactly like a duplex
+	 * device, we should copy in the case of sending to our own
+	 * ethernet address (thus letting the original actually appear
+	 * on the wire). However, we don't do that here for security
+	 * reasons and compatibility with the original behavior.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((ifp-&gt;if_flags &amp; IFF_SIMPLEX) &amp;&amp;
+	    ((*m)-&gt;m_flags &amp; M_LOOP) &amp;&amp; lo_ifp != NULL) {
+		<span class="enscript-keyword">if</span> ((*m)-&gt;m_flags &amp; M_BCAST) {
+			<span class="enscript-type">struct</span> mbuf *n = m_copy(*m, 0, (<span class="enscript-type">int</span>)M_COPYALL);
+			<span class="enscript-keyword">if</span> (n != NULL) {
+				dlil_output(lo_ifp, ndest-&gt;sa_family,
+				    n, NULL, ndest, 0, NULL);
+			}
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (_ether_cmp(edst, IF_LLADDR(ifp)) == 0) {
+			dlil_output(lo_ifp, ndest-&gt;sa_family, *m,
+			    NULL, ndest, 0, NULL);
+			<span class="enscript-keyword">return</span> (EJUSTRETURN);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Add local net header.  If no space in first mbuf,
+	 * allocate another.
+	 */</span>
+	M_PREPEND(*m, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ether_header), M_DONTWAIT, 0);
+	<span class="enscript-keyword">if</span> (*m == NULL)
+		<span class="enscript-keyword">return</span> (EJUSTRETURN);
+
+	<span class="enscript-keyword">if</span> (prepend_len != NULL)
+		*prepend_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ether_header);
+	<span class="enscript-keyword">if</span> (postpend_len != NULL)
+		*postpend_len = 0;
+
+	eh = mtod(*m, <span class="enscript-type">struct</span> ether_header *);
+	(<span class="enscript-type">void</span>) memcpy(&amp;eh-&gt;ether_type, ether_type, <span class="enscript-keyword">sizeof</span>(eh-&gt;ether_type));
+	(<span class="enscript-type">void</span>) memcpy(eh-&gt;ether_dhost, edst, ETHER_ADDR_LEN);
+	ifnet_lladdr_copy_bytes(ifp, eh-&gt;ether_shost, ETHER_ADDR_LEN);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+errno_t
+<span class="enscript-function-name">ether_check_multi</span>(ifnet_t ifp, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *proto_addr)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">ifp</span>)
+	errno_t	result = EAFNOSUPPORT;
+	<span class="enscript-type">const</span> u_char *e_addr;
+
+	<span class="enscript-comment">/*
+	 * AF_SPEC and AF_LINK don't require translation. We do
+	 * want to verify that they specify a valid multicast.
+	 */</span>
+	<span class="enscript-keyword">switch</span>(proto_addr-&gt;sa_family) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_UNSPEC</span>:
+		e_addr = (<span class="enscript-type">const</span> u_char*)&amp;proto_addr-&gt;sa_data[0];
+		<span class="enscript-keyword">if</span> ((e_addr[0] &amp; 0x01) != 0x01)
+			result = EADDRNOTAVAIL;
+		<span class="enscript-keyword">else</span>
+			result = 0;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_LINK</span>:
+		e_addr = CONST_LLADDR((<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_dl*)
+		    (uintptr_t)(size_t)proto_addr);
+		<span class="enscript-keyword">if</span> ((e_addr[0] &amp; 0x01) != 0x01)
+			result = EADDRNOTAVAIL;
+		<span class="enscript-keyword">else</span>
+			result = 0;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ether_ioctl</span>(ifnet_t ifp, u_int32_t command, <span class="enscript-type">void</span> *data)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">ifp</span>, <span class="enscript-variable-name">command</span>, <span class="enscript-variable-name">data</span>)
+	<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ether_family_init</span>(<span class="enscript-type">void</span>)
+{
+	errno_t	error = 0;
+
+	<span class="enscript-comment">/* Register protocol registration functions */</span>
+	<span class="enscript-keyword">if</span> ((error = proto_register_plumber(PF_INET, APPLE_IF_FAM_ETHERNET,
+	    ether_attach_inet, ether_detach_inet)) != 0) {
+		printf(<span class="enscript-string">&quot;proto_register_plumber failed for PF_INET error=%d\n&quot;</span>,
+		    error);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">if</span> ((error = proto_register_plumber(PF_INET6, APPLE_IF_FAM_ETHERNET,
+	    ether_attach_inet6, ether_detach_inet6)) != 0) {
+		printf(<span class="enscript-string">&quot;proto_register_plumber failed for PF_INET6 error=%d\n&quot;</span>,
+		    error);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">VLAN</span>
+	vlan_family_init();
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* VLAN */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">BOND</span>
+	bond_family_init();
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* BOND */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IF_BRIDGE</span>
+	bridgeattach(0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IF_BRIDGE */</span>
+<span class="enscript-reference">done</span>:
+
+	<span class="enscript-keyword">return</span> (error);
+}
+</pre>
+<hr />
+</body></html>

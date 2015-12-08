@@ -1,0 +1,1125 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>sync_sema.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">sync_sema.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ * 
+ */</span>
+<span class="enscript-comment">/*
+ *	File:	kern/sync_sema.c
+ *	Author:	Joseph CaraDonna
+ *
+ *	Contains RT distributed semaphore synchronization services.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_traps.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/semaphore.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/sync_policy.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sync_sema.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_kobject.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_sync.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_tt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_space.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/waitq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/mach_param.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> semaphore_event;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SEMAPHORE_EVENT</span> CAST_EVENT64_T(&amp;semaphore_event)
+
+zone_t semaphore_zone;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> semaphore_max;
+
+<span class="enscript-comment">/* Forward declarations */</span>
+
+
+kern_return_t 
+<span class="enscript-function-name">semaphore_wait_trap_internal</span>(
+				mach_port_name_t name,
+				<span class="enscript-type">void</span> (*caller_cont)(kern_return_t));
+
+kern_return_t 
+<span class="enscript-function-name">semaphore_wait_signal_trap_internal</span>(
+				mach_port_name_t wait_name,
+				mach_port_name_t signal_name,
+				<span class="enscript-type">void</span> (*caller_cont)(kern_return_t));
+
+kern_return_t 
+<span class="enscript-function-name">semaphore_timedwait_trap_internal</span>(
+				mach_port_name_t name,
+				<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> sec,
+				clock_res_t nsec,
+				<span class="enscript-type">void</span> (*caller_cont)(kern_return_t));
+
+kern_return_t 
+<span class="enscript-function-name">semaphore_timedwait_signal_trap_internal</span>(
+				mach_port_name_t wait_name,
+				mach_port_name_t signal_name,
+				<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> sec,
+				clock_res_t nsec,
+				<span class="enscript-type">void</span> (*caller_cont)(kern_return_t));
+
+kern_return_t
+<span class="enscript-function-name">semaphore_signal_internal_trap</span>(mach_port_name_t sema_name);
+
+kern_return_t
+<span class="enscript-function-name">semaphore_signal_internal</span>(
+			semaphore_t		semaphore,
+			thread_t			thread,
+			<span class="enscript-type">int</span>				options);
+
+kern_return_t
+<span class="enscript-function-name">semaphore_convert_wait_result</span>(
+			<span class="enscript-type">int</span>				wait_result);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">semaphore_wait_continue</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">semaphore_wait_internal</span>(
+			semaphore_t		wait_semaphore,
+			semaphore_t		signal_semaphore,
+			uint64_t		deadline,
+			<span class="enscript-type">int</span>				option,
+			<span class="enscript-type">void</span> (*caller_cont)(kern_return_t));
+
+<span class="enscript-type">static</span> __inline__ uint64_t
+<span class="enscript-function-name">semaphore_deadline</span>(
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		sec,
+	clock_res_t			nsec)
+{
+	uint64_t	abstime;
+
+	nanoseconds_to_absolutetime((uint64_t)sec *	NSEC_PER_SEC + nsec, &amp;abstime);
+	clock_absolutetime_interval_to_deadline(abstime, &amp;abstime);
+
+	<span class="enscript-keyword">return</span> (abstime);
+}
+
+<span class="enscript-comment">/*
+ *	ROUTINE:	semaphore_init		[private]
+ *
+ *	Initialize the semaphore mechanisms.
+ *	Right now, we only need to initialize the semaphore zone.
+ */</span>      
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">semaphore_init</span>(<span class="enscript-type">void</span>)
+{
+  semaphore_zone = zinit(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> semaphore),
+			semaphore_max * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> semaphore),
+			<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> semaphore),
+			<span class="enscript-string">&quot;semaphores&quot;</span>);
+  zone_change(semaphore_zone, Z_NOENCRYPT, TRUE);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_create
+ *
+ *	Creates a semaphore.
+ *	The port representing the semaphore is returned as a parameter.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_create</span>(
+	task_t			task,
+	semaphore_t		*new_semaphore,
+	<span class="enscript-type">int</span>				policy,
+	<span class="enscript-type">int</span>				value)
+{
+	semaphore_t		 s = SEMAPHORE_NULL;
+	kern_return_t		kret;
+
+
+	*new_semaphore = SEMAPHORE_NULL;
+	<span class="enscript-keyword">if</span> (task == TASK_NULL || value &lt; 0 || policy &gt; SYNC_POLICY_MAX)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	s = (semaphore_t) zalloc (semaphore_zone);
+
+	<span class="enscript-keyword">if</span> (s == SEMAPHORE_NULL)
+		<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE; 
+
+	kret = waitq_init(&amp;s-&gt;waitq, policy | SYNC_POLICY_DISABLE_IRQ); <span class="enscript-comment">/* also inits lock */</span>
+	<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) {
+		zfree(semaphore_zone, s);
+		<span class="enscript-keyword">return</span> kret;
+	}
+
+	<span class="enscript-comment">/*
+	 * Initialize the semaphore values.
+	 */</span>
+	s-&gt;port	= IP_NULL;
+	s-&gt;ref_count = 1;
+	s-&gt;count = value;
+	s-&gt;active = TRUE;
+	s-&gt;owner = task;
+
+	<span class="enscript-comment">/*
+	 *  Associate the new semaphore with the task by adding
+	 *  the new semaphore to the task's semaphore list.
+	 */</span>
+	task_lock(task);
+	enqueue_head(&amp;task-&gt;semaphore_list, (queue_entry_t) s);
+	task-&gt;semaphores_owned++;
+	task_unlock(task);
+
+	*new_semaphore = s;
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}		  
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_destroy_internal
+ *
+ *	This call will only succeed if the specified task is the SAME task
+ *	specified at the semaphore's creation.
+ *
+ *	All threads currently blocked on the semaphore are awoken.  These
+ *	threads will return with the KERN_TERMINATED error.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_destroy_internal</span>(
+	task_t			task,
+	semaphore_t		semaphore)
+{
+	<span class="enscript-type">int</span>			old_count;
+	spl_t			spl_level;
+
+	<span class="enscript-comment">/*
+	 *  Disown semaphore
+	 */</span>
+	task_lock(task);
+	<span class="enscript-keyword">if</span> (semaphore-&gt;owner != task) {
+		task_unlock(task);
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+	spl_level = splsched();
+	semaphore_lock(semaphore);
+
+	remqueue((queue_entry_t) semaphore);
+	semaphore-&gt;owner = TASK_NULL;
+	task-&gt;semaphores_owned--;
+
+	task_unlock(task);
+
+	<span class="enscript-comment">/*
+	 *  Deactivate semaphore
+	 */</span>
+	assert(semaphore-&gt;active);
+	semaphore-&gt;active = FALSE;
+
+	<span class="enscript-comment">/*
+	 *  Wakeup blocked threads  
+	 */</span>
+	old_count = semaphore-&gt;count;
+	semaphore-&gt;count = 0;
+
+	<span class="enscript-keyword">if</span> (old_count &lt; 0) {
+		waitq_wakeup64_all_locked(&amp;semaphore-&gt;waitq,
+					  SEMAPHORE_EVENT,
+					  THREAD_RESTART, NULL,
+					  WAITQ_ALL_PRIORITIES,
+					  WAITQ_UNLOCK);
+		<span class="enscript-comment">/* waitq/semaphore is unlocked */</span>
+	} <span class="enscript-keyword">else</span> {
+		semaphore_unlock(semaphore);
+	}
+	splx(spl_level);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_destroy
+ *
+ *	Destroys a semaphore and consume the caller's reference on the
+ *	semaphore.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_destroy</span>(
+	task_t			task,
+	semaphore_t		semaphore)
+{
+	kern_return_t kr;
+
+	<span class="enscript-keyword">if</span> (semaphore == SEMAPHORE_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-keyword">if</span> (task == TASK_NULL) {
+		kr = KERN_INVALID_ARGUMENT;
+	} <span class="enscript-keyword">else</span> {
+		kr = semaphore_destroy_internal(task, semaphore);
+	}
+	semaphore_dereference(semaphore);
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_signal_internal
+ *
+ *		Signals the semaphore as direct.  
+ *	Assumptions:
+ *		Semaphore is locked.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_signal_internal</span>(
+	semaphore_t		semaphore,
+	thread_t		thread,
+	<span class="enscript-type">int</span>				options)
+{
+	kern_return_t kr;
+	spl_t  spl_level;
+
+	spl_level = splsched();
+	semaphore_lock(semaphore);
+
+	<span class="enscript-keyword">if</span> (!semaphore-&gt;active) {
+		semaphore_unlock(semaphore);
+		splx(spl_level);
+		<span class="enscript-keyword">return</span> KERN_TERMINATED;
+	}
+
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL) {
+		<span class="enscript-keyword">if</span> (semaphore-&gt;count &lt; 0) {
+			kr = waitq_wakeup64_thread_locked(
+					&amp;semaphore-&gt;waitq,
+					SEMAPHORE_EVENT,
+					thread,
+					THREAD_AWAKENED,
+					WAITQ_UNLOCK);
+			<span class="enscript-comment">/* waitq/semaphore is unlocked */</span>
+		} <span class="enscript-keyword">else</span> {
+			kr = KERN_NOT_WAITING;
+			semaphore_unlock(semaphore);
+		}
+		splx(spl_level);
+		<span class="enscript-keyword">return</span> kr;
+	} 
+
+	<span class="enscript-keyword">if</span> (options &amp; SEMAPHORE_SIGNAL_ALL) {
+		<span class="enscript-type">int</span> old_count = semaphore-&gt;count;
+
+		kr = KERN_NOT_WAITING;
+		<span class="enscript-keyword">if</span> (old_count &lt; 0) {
+			semaphore-&gt;count = 0;  <span class="enscript-comment">/* always reset */</span>
+			kr = waitq_wakeup64_all_locked(
+					&amp;semaphore-&gt;waitq,
+					SEMAPHORE_EVENT,
+					THREAD_AWAKENED, NULL,
+					WAITQ_ALL_PRIORITIES,
+					WAITQ_UNLOCK);
+			<span class="enscript-comment">/* waitq / semaphore is unlocked */</span>
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (options &amp; SEMAPHORE_SIGNAL_PREPOST)
+				semaphore-&gt;count++;
+			kr = KERN_SUCCESS;
+			semaphore_unlock(semaphore);
+		}
+		splx(spl_level);
+		<span class="enscript-keyword">return</span> kr;
+	}
+	
+	<span class="enscript-keyword">if</span> (semaphore-&gt;count &lt; 0) {
+		kr = waitq_wakeup64_one_locked(
+					&amp;semaphore-&gt;waitq,
+					SEMAPHORE_EVENT,
+					THREAD_AWAKENED, NULL,
+					WAITQ_ALL_PRIORITIES,
+					WAITQ_KEEP_LOCKED);
+		<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS) {
+			semaphore_unlock(semaphore);
+			splx(spl_level);
+			<span class="enscript-keyword">return</span> KERN_SUCCESS;
+		} <span class="enscript-keyword">else</span> {
+			semaphore-&gt;count = 0;  <span class="enscript-comment">/* all waiters gone */</span>
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (options &amp; SEMAPHORE_SIGNAL_PREPOST) {
+		semaphore-&gt;count++;
+	}
+
+	semaphore_unlock(semaphore);
+	splx(spl_level);
+	<span class="enscript-keyword">return</span> KERN_NOT_WAITING;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_signal_thread
+ *
+ *	If the specified thread is blocked on the semaphore, it is
+ *	woken up.  If a NULL thread was supplied, then any one
+ *	thread is woken up.  Otherwise the caller gets KERN_NOT_WAITING
+ *	and the	semaphore is unchanged.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_signal_thread</span>(
+	semaphore_t	semaphore,
+	thread_t	thread)
+{
+	kern_return_t		ret;
+
+	<span class="enscript-keyword">if</span> (semaphore == SEMAPHORE_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	ret = semaphore_signal_internal(semaphore,
+					thread,
+					SEMAPHORE_OPTION_NONE);
+	<span class="enscript-keyword">return</span> ret;
+}	
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_signal_thread_trap
+ *
+ *	Trap interface to the semaphore_signal_thread function.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_signal_thread_trap</span>(
+	<span class="enscript-type">struct</span> semaphore_signal_thread_trap_args *args)
+{
+	mach_port_name_t sema_name = args-&gt;signal_name;
+	mach_port_name_t thread_name = args-&gt;thread_name;
+	semaphore_t	semaphore;
+	thread_t	thread;
+	kern_return_t	kr;
+
+	<span class="enscript-comment">/* 
+	 * MACH_PORT_NULL is not an error. It means that we want to
+	 * select any one thread that is already waiting, but not to
+	 * pre-post the semaphore.
+	 */</span>
+	<span class="enscript-keyword">if</span> (thread_name != MACH_PORT_NULL) {
+		thread = port_name_to_thread(thread_name);
+		<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+			<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	} <span class="enscript-keyword">else</span>
+		thread = THREAD_NULL;
+
+	kr = port_name_to_semaphore(sema_name, &amp;semaphore);
+	<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS) {
+		kr = semaphore_signal_internal(semaphore,
+				thread,
+				SEMAPHORE_OPTION_NONE);
+		semaphore_dereference(semaphore);
+	}
+	<span class="enscript-keyword">if</span> (thread != THREAD_NULL) {
+		thread_deallocate(thread);
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_signal
+ *
+ *		Traditional (in-kernel client and MIG interface) semaphore
+ *		signal routine.  Most users will access the trap version.
+ *
+ *		This interface in not defined to return info about whether
+ *		this call found a thread waiting or not.  The internal
+ *		routines (and future external routines) do.  We have to
+ *		convert those into plain KERN_SUCCESS returns.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_signal</span>(
+	semaphore_t		semaphore)
+{
+	kern_return_t		kr;
+
+	<span class="enscript-keyword">if</span> (semaphore == SEMAPHORE_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	kr = semaphore_signal_internal(semaphore,
+				       THREAD_NULL, 
+				       SEMAPHORE_SIGNAL_PREPOST);
+	<span class="enscript-keyword">if</span> (kr == KERN_NOT_WAITING)
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_signal_trap
+ *
+ *	Trap interface to the semaphore_signal function.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_signal_trap</span>(
+	<span class="enscript-type">struct</span> semaphore_signal_trap_args *args)
+{
+	mach_port_name_t sema_name = args-&gt;signal_name;
+
+	<span class="enscript-keyword">return</span> (semaphore_signal_internal_trap(sema_name));
+}
+
+kern_return_t
+<span class="enscript-function-name">semaphore_signal_internal_trap</span>(mach_port_name_t sema_name)
+{
+	semaphore_t	semaphore;
+	kern_return_t kr;
+
+	kr = port_name_to_semaphore(sema_name, &amp;semaphore);
+	<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS) {
+		kr = semaphore_signal_internal(semaphore, 
+				THREAD_NULL, 
+				SEMAPHORE_SIGNAL_PREPOST);
+		semaphore_dereference(semaphore);
+		<span class="enscript-keyword">if</span> (kr == KERN_NOT_WAITING)
+			kr = KERN_SUCCESS;
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_signal_all
+ *
+ *	Awakens ALL threads currently blocked on the semaphore.
+ *	The semaphore count returns to zero.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_signal_all</span>(
+	semaphore_t		semaphore)
+{
+	kern_return_t kr;
+
+	<span class="enscript-keyword">if</span> (semaphore == SEMAPHORE_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	kr = semaphore_signal_internal(semaphore,
+				       THREAD_NULL, 
+				       SEMAPHORE_SIGNAL_ALL);
+	<span class="enscript-keyword">if</span> (kr == KERN_NOT_WAITING)
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_signal_all_trap
+ *
+ *	Trap interface to the semaphore_signal_all function.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_signal_all_trap</span>(
+	<span class="enscript-type">struct</span> semaphore_signal_all_trap_args *args)
+{
+	mach_port_name_t sema_name = args-&gt;signal_name;
+	semaphore_t	semaphore;
+	kern_return_t kr;
+
+	kr = port_name_to_semaphore(sema_name, &amp;semaphore);
+	<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS) {
+		kr = semaphore_signal_internal(semaphore,
+				THREAD_NULL, 
+				SEMAPHORE_SIGNAL_ALL);
+		semaphore_dereference(semaphore);
+		<span class="enscript-keyword">if</span> (kr == KERN_NOT_WAITING)
+			kr = KERN_SUCCESS;
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_convert_wait_result
+ *
+ *	Generate the return code after a semaphore wait/block.  It
+ *	takes the wait result as an input and coverts that to an
+ *	appropriate result.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_convert_wait_result</span>(<span class="enscript-type">int</span> wait_result)
+{
+	<span class="enscript-keyword">switch</span> (wait_result) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_AWAKENED</span>:
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_TIMED_OUT</span>:
+		<span class="enscript-keyword">return</span> KERN_OPERATION_TIMED_OUT;
+		
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_INTERRUPTED</span>:
+		<span class="enscript-keyword">return</span> KERN_ABORTED;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_RESTART</span>:
+		<span class="enscript-keyword">return</span> KERN_TERMINATED;
+
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;semaphore_block\n&quot;</span>);
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_wait_continue
+ *
+ *	Common continuation routine after waiting on a semphore.
+ *	It returns directly to user space.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">semaphore_wait_continue</span>(<span class="enscript-type">void</span>)
+{
+	thread_t self = current_thread();
+	<span class="enscript-type">int</span> wait_result = self-&gt;wait_result;
+	<span class="enscript-type">void</span> (*caller_cont)(kern_return_t) = self-&gt;sth_continuation;
+
+	assert(self-&gt;sth_waitsemaphore != SEMAPHORE_NULL);
+	semaphore_dereference(self-&gt;sth_waitsemaphore);
+	<span class="enscript-keyword">if</span> (self-&gt;sth_signalsemaphore != SEMAPHORE_NULL)
+		semaphore_dereference(self-&gt;sth_signalsemaphore);
+
+	assert(caller_cont != (<span class="enscript-type">void</span> (*)(kern_return_t))0);
+	(*caller_cont)(semaphore_convert_wait_result(wait_result));
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_wait_internal
+ *
+ *		Decrements the semaphore count by one.  If the count is
+ *		negative after the decrement, the calling thread blocks
+ *		(possibly at a continuation and/or with a timeout).
+ *
+ *	Assumptions:
+ *		The reference
+ *		A reference is held on the signal semaphore.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">semaphore_wait_internal</span>(
+	semaphore_t		wait_semaphore,
+	semaphore_t		signal_semaphore,
+	uint64_t		deadline,
+	<span class="enscript-type">int</span>				option,
+	<span class="enscript-type">void</span> 			(*caller_cont)(kern_return_t))
+{
+	<span class="enscript-type">int</span>					wait_result;
+	spl_t				spl_level;
+	kern_return_t		kr = KERN_ALREADY_WAITING;
+
+	spl_level = splsched();
+	semaphore_lock(wait_semaphore);
+
+	<span class="enscript-keyword">if</span> (!wait_semaphore-&gt;active) {
+		kr = KERN_TERMINATED;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (wait_semaphore-&gt;count &gt; 0) {
+		wait_semaphore-&gt;count--;
+		kr = KERN_SUCCESS;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (option &amp; SEMAPHORE_TIMEOUT_NOBLOCK) {
+		kr = KERN_OPERATION_TIMED_OUT;
+	} <span class="enscript-keyword">else</span> {
+		thread_t	self = current_thread();
+
+		wait_semaphore-&gt;count = -1;  <span class="enscript-comment">/* we don't keep an actual count */</span>
+		thread_lock(self);
+		(<span class="enscript-type">void</span>)waitq_assert_wait64_locked(
+					&amp;wait_semaphore-&gt;waitq,
+					SEMAPHORE_EVENT,
+					THREAD_ABORTSAFE,
+					TIMEOUT_URGENCY_USER_NORMAL,
+					deadline, TIMEOUT_NO_LEEWAY,
+					self);
+		thread_unlock(self);
+	}
+	semaphore_unlock(wait_semaphore);
+	splx(spl_level);
+
+	<span class="enscript-comment">/*
+	 * wait_semaphore is unlocked so we are free to go ahead and
+	 * signal the signal_semaphore (if one was provided).
+	 */</span>
+	<span class="enscript-keyword">if</span> (signal_semaphore != SEMAPHORE_NULL) {
+		kern_return_t signal_kr;
+
+		<span class="enscript-comment">/*
+		 * lock the signal semaphore reference we got and signal it.
+		 * This will NOT block (we cannot block after having asserted
+		 * our intention to wait above).
+		 */</span>
+		signal_kr = semaphore_signal_internal(signal_semaphore,
+						      THREAD_NULL,
+						      SEMAPHORE_SIGNAL_PREPOST);
+
+		<span class="enscript-keyword">if</span> (signal_kr == KERN_NOT_WAITING)
+			signal_kr = KERN_SUCCESS;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (signal_kr == KERN_TERMINATED) {
+			<span class="enscript-comment">/* 
+			 * Uh!Oh!  The semaphore we were to signal died.
+			 * We have to get ourselves out of the wait in
+			 * case we get stuck here forever (it is assumed
+			 * that the semaphore we were posting is gating
+			 * the decision by someone else to post the
+			 * semaphore we are waiting on).  People will
+			 * discover the other dead semaphore soon enough.
+			 * If we got out of the wait cleanly (someone
+			 * already posted a wakeup to us) then return that
+			 * (most important) result.  Otherwise,
+			 * return the KERN_TERMINATED status.
+			 */</span>
+			thread_t self = current_thread();
+
+			clear_wait(self, THREAD_INTERRUPTED);
+			kr = semaphore_convert_wait_result(self-&gt;wait_result);
+			<span class="enscript-keyword">if</span> (kr == KERN_ABORTED)
+				kr = KERN_TERMINATED;
+		}
+	}
+	
+	<span class="enscript-comment">/*
+	 * If we had an error, or we didn't really need to wait we can
+	 * return now that we have signalled the signal semaphore.
+	 */</span>
+	<span class="enscript-keyword">if</span> (kr != KERN_ALREADY_WAITING)
+		<span class="enscript-keyword">return</span> kr;
+
+	<span class="enscript-comment">/*
+	 * Now, we can block.  If the caller supplied a continuation
+	 * pointer of his own for after the block, block with the
+	 * appropriate semaphore continuation.  Thiswill gather the
+	 * semaphore results, release references on the semaphore(s),
+	 * and then call the caller's continuation.
+	 */</span>
+	<span class="enscript-keyword">if</span> (caller_cont) {
+		thread_t self = current_thread();
+
+		self-&gt;sth_continuation = caller_cont;
+		self-&gt;sth_waitsemaphore = wait_semaphore;
+		self-&gt;sth_signalsemaphore = signal_semaphore;
+		wait_result = thread_block((thread_continue_t)semaphore_wait_continue);
+	}
+	<span class="enscript-keyword">else</span> {
+		wait_result = thread_block(THREAD_CONTINUE_NULL);
+	}
+
+	<span class="enscript-keyword">return</span> (semaphore_convert_wait_result(wait_result));
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_wait
+ *
+ *	Traditional (non-continuation) interface presented to
+ * 	in-kernel clients to wait on a semaphore.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_wait</span>(
+	semaphore_t		semaphore)
+{	
+
+	<span class="enscript-keyword">if</span> (semaphore == SEMAPHORE_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-keyword">return</span>(semaphore_wait_internal(semaphore,
+					   SEMAPHORE_NULL,
+					   0ULL, SEMAPHORE_OPTION_NONE,
+				       (<span class="enscript-type">void</span> (*)(kern_return_t))0));
+}
+
+kern_return_t
+<span class="enscript-function-name">semaphore_wait_noblock</span>(
+	semaphore_t		semaphore)
+{	
+
+	<span class="enscript-keyword">if</span> (semaphore == SEMAPHORE_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-keyword">return</span>(semaphore_wait_internal(semaphore,
+					   SEMAPHORE_NULL,
+					   0ULL, SEMAPHORE_TIMEOUT_NOBLOCK,
+				       (<span class="enscript-type">void</span> (*)(kern_return_t))0));
+}
+
+kern_return_t
+<span class="enscript-function-name">semaphore_wait_deadline</span>(
+	semaphore_t		semaphore,
+	uint64_t		deadline)
+{	
+
+	<span class="enscript-keyword">if</span> (semaphore == SEMAPHORE_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-keyword">return</span>(semaphore_wait_internal(semaphore,
+					   SEMAPHORE_NULL,
+					   deadline, SEMAPHORE_OPTION_NONE,
+				       (<span class="enscript-type">void</span> (*)(kern_return_t))0));
+}
+
+<span class="enscript-comment">/*
+ *	Trap:	semaphore_wait_trap
+ *
+ *	Trap version of semaphore wait.  Called on behalf of user-level
+ *	clients.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">semaphore_wait_trap</span>(
+	<span class="enscript-type">struct</span> semaphore_wait_trap_args *args)
+{
+	<span class="enscript-keyword">return</span>(semaphore_wait_trap_internal(args-&gt;wait_name, thread_syscall_return));
+}
+
+
+
+kern_return_t
+<span class="enscript-function-name">semaphore_wait_trap_internal</span>(
+	mach_port_name_t name, 
+	<span class="enscript-type">void</span> (*caller_cont)(kern_return_t))
+{	
+	semaphore_t	semaphore;
+	kern_return_t kr;
+
+	kr = port_name_to_semaphore(name, &amp;semaphore);
+	<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS) {
+		kr = semaphore_wait_internal(semaphore,
+				SEMAPHORE_NULL,
+				0ULL, SEMAPHORE_OPTION_NONE,
+				caller_cont);
+		semaphore_dereference(semaphore);
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_timedwait
+ *
+ *	Traditional (non-continuation) interface presented to
+ * 	in-kernel clients to wait on a semaphore with a timeout.
+ *
+ *	A timeout of {0,0} is considered non-blocking.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_timedwait</span>(
+	semaphore_t		semaphore,
+	mach_timespec_t		wait_time)
+{
+	<span class="enscript-type">int</span>				option = SEMAPHORE_OPTION_NONE;
+	uint64_t		deadline = 0;
+
+	<span class="enscript-keyword">if</span> (semaphore == SEMAPHORE_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	
+	<span class="enscript-keyword">if</span>(BAD_MACH_TIMESPEC(&amp;wait_time))
+		<span class="enscript-keyword">return</span> KERN_INVALID_VALUE;
+
+	<span class="enscript-keyword">if</span> (wait_time.tv_sec == 0 &amp;&amp; wait_time.tv_nsec == 0)
+		option = SEMAPHORE_TIMEOUT_NOBLOCK;
+	<span class="enscript-keyword">else</span>
+		deadline = semaphore_deadline(wait_time.tv_sec, wait_time.tv_nsec);
+	
+	<span class="enscript-keyword">return</span> (semaphore_wait_internal(semaphore,
+					SEMAPHORE_NULL,
+					deadline, option,
+					(<span class="enscript-type">void</span>(*)(kern_return_t))0));
+	
+}
+
+<span class="enscript-comment">/*
+ *	Trap:	semaphore_timedwait_trap
+ *
+ *	Trap version of a semaphore_timedwait.  The timeout parameter
+ *	is passed in two distinct parts and re-assembled on this side
+ *	of the trap interface (to accomodate calling conventions that
+ *	pass structures as pointers instead of inline in registers without
+ *	having to add a copyin).
+ *
+ *	A timeout of {0,0} is considered non-blocking.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_timedwait_trap</span>(
+	<span class="enscript-type">struct</span> semaphore_timedwait_trap_args *args)
+{	
+
+	<span class="enscript-keyword">return</span>(semaphore_timedwait_trap_internal(args-&gt;wait_name, args-&gt;sec, args-&gt;nsec, thread_syscall_return));
+}
+
+
+kern_return_t
+<span class="enscript-function-name">semaphore_timedwait_trap_internal</span>(
+	mach_port_name_t name,
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>            sec,
+	clock_res_t             nsec,
+	<span class="enscript-type">void</span> (*caller_cont)(kern_return_t))
+{
+	semaphore_t semaphore;
+	mach_timespec_t wait_time;
+	kern_return_t kr;
+
+	wait_time.tv_sec = sec;
+	wait_time.tv_nsec = nsec;
+	<span class="enscript-keyword">if</span>(BAD_MACH_TIMESPEC(&amp;wait_time))
+		<span class="enscript-keyword">return</span> KERN_INVALID_VALUE;
+	
+	kr = port_name_to_semaphore(name, &amp;semaphore);
+	<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS) {
+		<span class="enscript-type">int</span>				option = SEMAPHORE_OPTION_NONE;
+		uint64_t		deadline = 0;
+
+		<span class="enscript-keyword">if</span> (sec == 0 &amp;&amp; nsec == 0)
+			option = SEMAPHORE_TIMEOUT_NOBLOCK;
+		<span class="enscript-keyword">else</span>
+			deadline = semaphore_deadline(sec, nsec);
+
+		kr = semaphore_wait_internal(semaphore,
+				SEMAPHORE_NULL,
+				deadline, option,
+				caller_cont);
+		semaphore_dereference(semaphore);
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_wait_signal
+ *
+ *	Atomically register a wait on a semaphore and THEN signal
+ *	another.  This is the in-kernel entry point that does not
+ *	block at a continuation and does not free a signal_semaphore
+ *      reference.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_wait_signal</span>(
+	semaphore_t		wait_semaphore,
+	semaphore_t		signal_semaphore)
+{
+	<span class="enscript-keyword">if</span> (wait_semaphore == SEMAPHORE_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	
+	<span class="enscript-keyword">return</span>(semaphore_wait_internal(wait_semaphore,
+				       signal_semaphore,
+					   0ULL, SEMAPHORE_OPTION_NONE,
+				       (<span class="enscript-type">void</span>(*)(kern_return_t))0));
+}
+
+<span class="enscript-comment">/*
+ *	Trap:	semaphore_wait_signal_trap
+ *
+ *	Atomically register a wait on a semaphore and THEN signal
+ *	another.  This is the trap version from user space.  
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_wait_signal_trap</span>(
+	<span class="enscript-type">struct</span> semaphore_wait_signal_trap_args *args)
+{
+	<span class="enscript-keyword">return</span>(semaphore_wait_signal_trap_internal(args-&gt;wait_name, args-&gt;signal_name, thread_syscall_return));
+}
+
+kern_return_t
+<span class="enscript-function-name">semaphore_wait_signal_trap_internal</span>(
+	mach_port_name_t wait_name,
+	mach_port_name_t signal_name,
+	<span class="enscript-type">void</span> (*caller_cont)(kern_return_t))
+{
+	semaphore_t wait_semaphore;
+	semaphore_t signal_semaphore;
+	kern_return_t kr;
+
+	kr = port_name_to_semaphore(signal_name, &amp;signal_semaphore);
+	<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS) {
+		kr = port_name_to_semaphore(wait_name, &amp;wait_semaphore);
+		<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS) {
+			kr = semaphore_wait_internal(wait_semaphore,
+					signal_semaphore,
+					0ULL, SEMAPHORE_OPTION_NONE,
+					caller_cont);
+			semaphore_dereference(wait_semaphore);
+		}
+		semaphore_dereference(signal_semaphore);
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_timedwait_signal
+ *
+ *	Atomically register a wait on a semaphore and THEN signal
+ *	another.  This is the in-kernel entry point that does not
+ *	block at a continuation.
+ *
+ *	A timeout of {0,0} is considered non-blocking.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_timedwait_signal</span>(
+	semaphore_t		wait_semaphore,
+	semaphore_t		signal_semaphore,
+	mach_timespec_t		wait_time)
+{
+	<span class="enscript-type">int</span>				option = SEMAPHORE_OPTION_NONE;
+	uint64_t		deadline = 0;
+
+	<span class="enscript-keyword">if</span> (wait_semaphore == SEMAPHORE_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	
+	<span class="enscript-keyword">if</span>(BAD_MACH_TIMESPEC(&amp;wait_time))
+		<span class="enscript-keyword">return</span> KERN_INVALID_VALUE;
+
+	<span class="enscript-keyword">if</span> (wait_time.tv_sec == 0 &amp;&amp; wait_time.tv_nsec == 0)
+		option = SEMAPHORE_TIMEOUT_NOBLOCK;
+	<span class="enscript-keyword">else</span>
+		deadline = semaphore_deadline(wait_time.tv_sec, wait_time.tv_nsec);
+	
+	<span class="enscript-keyword">return</span>(semaphore_wait_internal(wait_semaphore,
+				       signal_semaphore,
+					   deadline, option,
+				       (<span class="enscript-type">void</span>(*)(kern_return_t))0));
+}
+
+<span class="enscript-comment">/*
+ *	Trap:	semaphore_timedwait_signal_trap
+ *
+ *	Atomically register a timed wait on a semaphore and THEN signal
+ *	another.  This is the trap version from user space.  
+ */</span>
+kern_return_t
+<span class="enscript-function-name">semaphore_timedwait_signal_trap</span>(
+	<span class="enscript-type">struct</span> semaphore_timedwait_signal_trap_args *args)
+{
+	<span class="enscript-keyword">return</span>(semaphore_timedwait_signal_trap_internal(args-&gt;wait_name, args-&gt;signal_name, args-&gt;sec, args-&gt;nsec, thread_syscall_return));
+}
+
+kern_return_t
+<span class="enscript-function-name">semaphore_timedwait_signal_trap_internal</span>(
+	mach_port_name_t wait_name,
+	mach_port_name_t signal_name,
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> sec,
+	clock_res_t nsec,
+	<span class="enscript-type">void</span> (*caller_cont)(kern_return_t))
+{
+	semaphore_t wait_semaphore;
+	semaphore_t signal_semaphore;
+	mach_timespec_t wait_time;
+	kern_return_t kr;
+
+	wait_time.tv_sec = sec;
+	wait_time.tv_nsec = nsec;
+	<span class="enscript-keyword">if</span>(BAD_MACH_TIMESPEC(&amp;wait_time))
+		<span class="enscript-keyword">return</span> KERN_INVALID_VALUE;
+	
+	kr = port_name_to_semaphore(signal_name, &amp;signal_semaphore);
+	<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS) {
+		kr = port_name_to_semaphore(wait_name, &amp;wait_semaphore);
+		<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS) {
+			<span class="enscript-type">int</span>				option = SEMAPHORE_OPTION_NONE;
+			uint64_t		deadline = 0;
+
+			<span class="enscript-keyword">if</span> (sec == 0 &amp;&amp; nsec == 0)
+				option = SEMAPHORE_TIMEOUT_NOBLOCK;
+			<span class="enscript-keyword">else</span>
+				deadline = semaphore_deadline(sec, nsec);
+
+			kr = semaphore_wait_internal(wait_semaphore,
+					signal_semaphore,
+					deadline, option,
+					caller_cont);
+			semaphore_dereference(wait_semaphore);
+		}
+		semaphore_dereference(signal_semaphore);
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_reference
+ *
+ *	Take out a reference on a semaphore.  This keeps the data structure
+ *	in existence (but the semaphore may be deactivated).
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">semaphore_reference</span>(
+	semaphore_t		semaphore)
+{
+	(<span class="enscript-type">void</span>)hw_atomic_add(&amp;semaphore-&gt;ref_count, 1);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	semaphore_dereference
+ *
+ *	Release a reference on a semaphore.  If this is the last reference,
+ *	the semaphore data structure is deallocated.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">semaphore_dereference</span>(
+	semaphore_t		semaphore)
+{
+	<span class="enscript-keyword">if</span> (semaphore == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (hw_atomic_sub(&amp;semaphore-&gt;ref_count, 1) != 0)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/*
+	 * Last ref, clean up the port [if any]
+	 * associated with the semaphore, destroy
+	 * it (if still active) and then free
+	 * the semaphore.
+	 */</span>
+	ipc_port_t port = semaphore-&gt;port;
+
+	<span class="enscript-keyword">if</span> (IP_VALID(port)) {
+		assert(!port-&gt;ip_srights);
+		ipc_port_dealloc_kernel(port);
+	}
+	<span class="enscript-keyword">if</span> (semaphore-&gt;active) {
+		assert(semaphore-&gt;owner != TASK_NULL);
+		semaphore_destroy_internal(semaphore-&gt;owner, semaphore);
+	}
+	zfree(semaphore_zone, semaphore);
+}
+
+
+</pre>
+<hr />
+</body></html>

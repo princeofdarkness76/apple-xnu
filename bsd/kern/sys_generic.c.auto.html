@@ -1,0 +1,3584 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>sys_generic.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">sys_generic.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1989, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ * (c) UNIX System Laboratories, Inc.
+ * All or some portions of this file are derived from material licensed
+ * to the University of California by American Telephone and Telegraph
+ * Co. or Unix System Laboratories, Inc. and are reproduced herein with
+ * the permission of UNIX System Laboratories, Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)sys_generic.c	8.9 (Berkeley) 2/14/95
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2006 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/filedesc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/guarded.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ev.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/poll.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/event.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/eventvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ledger.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/telemetry.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/waitq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syscall.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/pipe.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_fsm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_seq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_timer.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcpip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_debug.h&gt;</span>
+<span class="enscript-comment">/* for wait queue based select */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/waitq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+
+<span class="enscript-comment">/* XXX should be in a header file somewhere */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">evsofree</span>(<span class="enscript-type">struct</span> socket *);
+<span class="enscript-type">void</span> <span class="enscript-function-name">evpipefree</span>(<span class="enscript-type">struct</span> pipe *);
+<span class="enscript-type">void</span> <span class="enscript-function-name">postpipeevent</span>(<span class="enscript-type">struct</span> pipe *, <span class="enscript-type">int</span>);
+<span class="enscript-type">void</span> <span class="enscript-function-name">postevent</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">struct</span> sockbuf *, <span class="enscript-type">int</span>);
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">IOBSDGetPlatformUUID</span>(__darwin_uuid_t uuid, mach_timespec_t timeoutp);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">delay</span>(<span class="enscript-type">int</span>);
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">rd_uio</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">int</span> fdes, uio_t uio, user_ssize_t *retval);
+<span class="enscript-type">int</span> <span class="enscript-function-name">wr_uio</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> fileproc *fp, uio_t uio, user_ssize_t *retval);
+
+__private_extern__ <span class="enscript-type">int</span>	dofileread(vfs_context_t ctx, <span class="enscript-type">struct</span> fileproc *fp,
+								   user_addr_t bufp, user_size_t nbyte, 
+								   off_t offset, <span class="enscript-type">int</span> flags, user_ssize_t *retval);
+__private_extern__ <span class="enscript-type">int</span>	dofilewrite(vfs_context_t ctx, <span class="enscript-type">struct</span> fileproc *fp,
+									user_addr_t bufp, user_size_t nbyte, 
+									off_t offset, <span class="enscript-type">int</span> flags, user_ssize_t *retval);
+__private_extern__ <span class="enscript-type">int</span>	preparefileread(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> fileproc **fp_ret, <span class="enscript-type">int</span> fd, <span class="enscript-type">int</span> check_for_vnode);
+__private_extern__ <span class="enscript-type">void</span>	donefileread(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> fileproc *fp_ret, <span class="enscript-type">int</span> fd);
+
+
+<span class="enscript-comment">/* Conflict wait queue for when selects collide (opaque type) */</span>
+<span class="enscript-type">struct</span> waitq select_conflict_queue;
+
+<span class="enscript-comment">/*
+ * Init routine called from bsd_init.c
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">select_waitq_init</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">select_waitq_init</span>(<span class="enscript-type">void</span>)
+{
+	waitq_init(&amp;select_conflict_queue, SYNC_POLICY_FIFO | SYNC_POLICY_DISABLE_IRQ);
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">f_flag</span> f_fglob-&gt;fg_flag
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">f_type</span> f_fglob-&gt;fg_ops-&gt;fo_type
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">f_msgcount</span> f_fglob-&gt;fg_msgcount
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">f_cred</span> f_fglob-&gt;fg_cred
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">f_ops</span> f_fglob-&gt;fg_ops
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">f_offset</span> f_fglob-&gt;fg_offset
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">f_data</span> f_fglob-&gt;fg_data
+
+<span class="enscript-comment">/*
+ * Read system call.
+ *
+ * Returns:	0			Success
+ *	preparefileread:EBADF
+ *	preparefileread:ESPIPE
+ *	preparefileread:ENXIO
+ *	preparefileread:EBADF
+ *	dofileread:???
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">read</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> read_args *uap, user_ssize_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span>(read_nocancel(p, (<span class="enscript-type">struct</span> read_nocancel_args *)uap, retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">read_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> read_nocancel_args *uap, user_ssize_t *retval)
+{
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> fd = uap-&gt;fd;
+	<span class="enscript-type">struct</span> vfs_context context;
+
+	<span class="enscript-keyword">if</span> ( (error = preparefileread(p, &amp;fp, fd, 0)) )
+	        <span class="enscript-keyword">return</span> (error);
+
+	context = *(vfs_context_current());
+	context.vc_ucred = fp-&gt;f_fglob-&gt;fg_cred;
+
+	error = dofileread(&amp;context, fp, uap-&gt;cbuf, uap-&gt;nbyte,
+			   (off_t)-1, 0, retval);
+
+	donefileread(p, fp, fd);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/* 
+ * Pread system call
+ *
+ * Returns:	0			Success
+ *	preparefileread:EBADF
+ *	preparefileread:ESPIPE
+ *	preparefileread:ENXIO
+ *	preparefileread:EBADF
+ *	dofileread:???
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pread</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> pread_args *uap, user_ssize_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span>(pread_nocancel(p, (<span class="enscript-type">struct</span> pread_nocancel_args *)uap, retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pread_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> pread_nocancel_args *uap, user_ssize_t *retval)
+{
+	<span class="enscript-type">struct</span> fileproc *fp = NULL;	<span class="enscript-comment">/* fp set by preparefileread() */</span>
+	<span class="enscript-type">int</span> fd = uap-&gt;fd;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> vfs_context context;
+
+	<span class="enscript-keyword">if</span> ( (error = preparefileread(p, &amp;fp, fd, 1)) )
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	context = *(vfs_context_current());
+	context.vc_ucred = fp-&gt;f_fglob-&gt;fg_cred;
+
+	error = dofileread(&amp;context, fp, uap-&gt;buf, uap-&gt;nbyte,
+			uap-&gt;offset, FOF_OFFSET, retval);
+	
+	donefileread(p, fp, fd);
+
+	KERNEL_DEBUG_CONSTANT((BSDDBG_CODE(DBG_BSD_SC_EXTENDED_INFO, SYS_pread) | DBG_FUNC_NONE),
+	      uap-&gt;fd, uap-&gt;nbyte, (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)((uap-&gt;offset &gt;&gt; 32)), (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)(uap-&gt;offset), 0);
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Code common for read and pread
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">donefileread</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> fileproc *fp, <span class="enscript-type">int</span> fd)
+{
+	proc_fdlock_spin(p);
+	fp_drop(p, fd, fp, 1);
+        proc_fdunlock(p);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EBADF
+ *		ESPIPE
+ *		ENXIO
+ *	fp_lookup:EBADF
+ *	fo_read:???
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">preparefileread</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> fileproc **fp_ret, <span class="enscript-type">int</span> fd, <span class="enscript-type">int</span> check_for_pread)
+{
+	vnode_t vp;
+	<span class="enscript-type">int</span> 	error;
+	<span class="enscript-type">struct</span> fileproc *fp;
+
+	AUDIT_ARG(fd, fd);
+
+	proc_fdlock_spin(p);
+
+	error = fp_lookup(p, fd, &amp;fp, 1);
+
+	<span class="enscript-keyword">if</span> (error) {
+	        proc_fdunlock(p);
+		<span class="enscript-keyword">return</span> (error);
+	}
+	<span class="enscript-keyword">if</span> ((fp-&gt;f_flag &amp; FREAD) == 0) {
+	        error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (check_for_pread &amp;&amp; (fp-&gt;f_type != DTYPE_VNODE)) {
+	        error = ESPIPE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_VNODE) {
+		vp = (<span class="enscript-type">struct</span> vnode *)fp-&gt;f_fglob-&gt;fg_data;
+
+		<span class="enscript-keyword">if</span> (check_for_pread &amp;&amp; (vnode_isfifo(vp))) {
+			error = ESPIPE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		} 
+		<span class="enscript-keyword">if</span> (check_for_pread &amp;&amp; (vp-&gt;v_flag &amp; VISTTY)) {
+			error = ENXIO;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+
+	*fp_ret = fp;
+
+        proc_fdunlock(p);
+	<span class="enscript-keyword">return</span> (0);
+
+<span class="enscript-reference">out</span>:
+	fp_drop(p, fd, fp, 1);
+	proc_fdunlock(p);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINVAL
+ *	fo_read:???
+ */</span>
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">dofileread</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> fileproc *fp,
+	   user_addr_t bufp, user_size_t nbyte, off_t offset, <span class="enscript-type">int</span> flags,
+	   user_ssize_t *retval)
+{
+	uio_t auio;
+	user_ssize_t bytecnt;
+	<span class="enscript-type">long</span> error = 0;
+	<span class="enscript-type">char</span> uio_buf[ UIO_SIZEOF(1) ];
+
+	<span class="enscript-keyword">if</span> (nbyte &gt; INT_MAX)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(vfs_context_proc(ctx))) {
+		auio = uio_createwithbuffer(1, offset, UIO_USERSPACE64, UIO_READ, 
+									  &amp;uio_buf[0], <span class="enscript-keyword">sizeof</span>(uio_buf));
+	} <span class="enscript-keyword">else</span> {
+		auio = uio_createwithbuffer(1, offset, UIO_USERSPACE32, UIO_READ, 
+									  &amp;uio_buf[0], <span class="enscript-keyword">sizeof</span>(uio_buf));
+	}
+	uio_addiov(auio, bufp, nbyte);
+
+	bytecnt = nbyte;
+
+	<span class="enscript-keyword">if</span> ((error = fo_read(fp, auio, flags, ctx))) {
+		<span class="enscript-keyword">if</span> (uio_resid(auio) != bytecnt &amp;&amp; (error == ERESTART ||
+			error == EINTR || error == EWOULDBLOCK))
+			error = 0;
+	}
+	bytecnt -= uio_resid(auio);
+
+	*retval = bytecnt;
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*      
+ * Scatter read system call.
+ *
+ * Returns:	0			Success
+ *		EINVAL
+ *		ENOMEM
+ *	copyin:EFAULT
+ *	rd_uio:???
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">readv</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> readv_args *uap, user_ssize_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span>(readv_nocancel(p, (<span class="enscript-type">struct</span> readv_nocancel_args *)uap, retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">readv_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> readv_nocancel_args *uap, user_ssize_t *retval)
+{
+	uio_t auio = NULL;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> user_iovec *iovp;
+
+	<span class="enscript-comment">/* Verify range bedfore calling uio_create() */</span>
+	<span class="enscript-keyword">if</span> (uap-&gt;iovcnt &lt;= 0 || uap-&gt;iovcnt &gt; UIO_MAXIOV)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/* allocate a uio large enough to hold the number of iovecs passed */</span>
+	auio = uio_create(uap-&gt;iovcnt, 0,
+				  (IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32),
+				  UIO_READ);
+				  
+	<span class="enscript-comment">/* get location of iovecs within the uio.  then copyin the iovecs from
+	 * user space.
+	 */</span>
+	iovp = uio_iovsaddr(auio);
+	<span class="enscript-keyword">if</span> (iovp == NULL) {
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+	}
+	error = copyin_user_iovec_array(uap-&gt;iovp,
+		IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32,
+		uap-&gt;iovcnt, iovp);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+	}
+	
+	<span class="enscript-comment">/* finalize uio_t for use and do the IO 
+	 */</span>
+	error = uio_calculateresid(auio);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+	}
+	error = rd_uio(p, uap-&gt;fd, auio, retval);
+
+<span class="enscript-reference">ExitThisRoutine</span>:
+	<span class="enscript-keyword">if</span> (auio != NULL) {
+		uio_free(auio);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Write system call
+ *
+ * Returns:	0			Success
+ *		EBADF
+ *	fp_lookup:EBADF
+ *	dofilewrite:???
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">write</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> write_args *uap, user_ssize_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span>(write_nocancel(p, (<span class="enscript-type">struct</span> write_nocancel_args *)uap, retval));
+
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">write_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> write_nocancel_args *uap, user_ssize_t *retval)
+{
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">int</span> error;      
+	<span class="enscript-type">int</span> fd = uap-&gt;fd;
+	bool wrote_some = false;
+
+	AUDIT_ARG(fd, fd);
+
+	error = fp_lookup(p,fd,&amp;fp,0);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span>(error);
+	<span class="enscript-keyword">if</span> ((fp-&gt;f_flag &amp; FWRITE) == 0) {
+		error = EBADF;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (FP_ISGUARDED(fp, GUARD_WRITE)) {
+		proc_fdlock(p);
+		error = fp_guard_exception(p, fd, fp, kGUARD_EXC_WRITE);
+		proc_fdunlock(p);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> vfs_context context = *(vfs_context_current());
+		context.vc_ucred = fp-&gt;f_fglob-&gt;fg_cred;
+
+		error = dofilewrite(&amp;context, fp, uap-&gt;cbuf, uap-&gt;nbyte,
+			(off_t)-1, 0, retval);
+
+		wrote_some = *retval &gt; 0;
+	}
+	<span class="enscript-keyword">if</span> (wrote_some)
+	        fp_drop_written(p, fd, fp);
+	<span class="enscript-keyword">else</span>
+	        fp_drop(p, fd, fp, 0);
+	<span class="enscript-keyword">return</span>(error);  
+}
+
+<span class="enscript-comment">/*                          
+ * pwrite system call
+ *
+ * Returns:	0			Success
+ *		EBADF
+ *		ESPIPE
+ *		ENXIO
+ *		EINVAL
+ *	fp_lookup:EBADF
+ *	dofilewrite:???
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pwrite</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> pwrite_args *uap, user_ssize_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span>(pwrite_nocancel(p, (<span class="enscript-type">struct</span> pwrite_nocancel_args *)uap, retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pwrite_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> pwrite_nocancel_args *uap, user_ssize_t *retval)
+{
+        <span class="enscript-type">struct</span> fileproc *fp;
+        <span class="enscript-type">int</span> error; 
+	<span class="enscript-type">int</span> fd = uap-&gt;fd;
+	vnode_t vp  = (vnode_t)0;
+	bool wrote_some = false;
+
+	AUDIT_ARG(fd, fd);
+
+	error = fp_lookup(p,fd,&amp;fp,0);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span>(error);
+
+	<span class="enscript-keyword">if</span> ((fp-&gt;f_flag &amp; FWRITE) == 0) {
+		error = EBADF;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (FP_ISGUARDED(fp, GUARD_WRITE)) {
+		proc_fdlock(p);
+		error = fp_guard_exception(p, fd, fp, kGUARD_EXC_WRITE);
+		proc_fdunlock(p);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> vfs_context context = *vfs_context_current();
+		context.vc_ucred = fp-&gt;f_fglob-&gt;fg_cred;
+
+		<span class="enscript-keyword">if</span> (fp-&gt;f_type != DTYPE_VNODE) {
+			error = ESPIPE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">errout</span>;
+		}
+		vp = (vnode_t)fp-&gt;f_fglob-&gt;fg_data;
+		<span class="enscript-keyword">if</span> (vnode_isfifo(vp)) {
+			error = ESPIPE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">errout</span>;
+		} 
+		<span class="enscript-keyword">if</span> ((vp-&gt;v_flag &amp; VISTTY)) {
+			error = ENXIO;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">errout</span>;
+		}
+		<span class="enscript-keyword">if</span> (uap-&gt;offset == (off_t)-1) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">errout</span>;
+		}
+
+		    error = dofilewrite(&amp;context, fp, uap-&gt;buf, uap-&gt;nbyte,
+			uap-&gt;offset, FOF_OFFSET, retval);
+			wrote_some = *retval &gt; 0;
+        }
+<span class="enscript-reference">errout</span>:
+	<span class="enscript-keyword">if</span> (wrote_some)
+	        fp_drop_written(p, fd, fp);
+	<span class="enscript-keyword">else</span>
+	        fp_drop(p, fd, fp, 0);
+
+	KERNEL_DEBUG_CONSTANT((BSDDBG_CODE(DBG_BSD_SC_EXTENDED_INFO, SYS_pwrite) | DBG_FUNC_NONE),
+	      uap-&gt;fd, uap-&gt;nbyte, (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)((uap-&gt;offset &gt;&gt; 32)), (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)(uap-&gt;offset), 0);
+	
+        <span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINVAL
+ *	&lt;fo_write&gt;:EPIPE
+ *	&lt;fo_write&gt;:???			[indirect through struct fileops]
+ */</span>
+__private_extern__ <span class="enscript-type">int</span>                  
+<span class="enscript-function-name">dofilewrite</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> fileproc *fp,
+	    user_addr_t bufp, user_size_t nbyte, off_t offset, <span class="enscript-type">int</span> flags,
+	    user_ssize_t *retval)
+{       
+	uio_t auio;
+	<span class="enscript-type">long</span> error = 0;
+	user_ssize_t bytecnt;
+	<span class="enscript-type">char</span> uio_buf[ UIO_SIZEOF(1) ];
+
+	<span class="enscript-keyword">if</span> (nbyte &gt; INT_MAX) {
+		*retval = 0;
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(vfs_context_proc(ctx))) {
+		auio = uio_createwithbuffer(1, offset, UIO_USERSPACE64, UIO_WRITE, 
+									  &amp;uio_buf[0], <span class="enscript-keyword">sizeof</span>(uio_buf));
+	} <span class="enscript-keyword">else</span> {
+		auio = uio_createwithbuffer(1, offset, UIO_USERSPACE32, UIO_WRITE, 
+									  &amp;uio_buf[0], <span class="enscript-keyword">sizeof</span>(uio_buf));
+	}
+	uio_addiov(auio, bufp, nbyte);
+
+	bytecnt = nbyte; 
+	<span class="enscript-keyword">if</span> ((error = fo_write(fp, auio, flags, ctx))) {
+		<span class="enscript-keyword">if</span> (uio_resid(auio) != bytecnt &amp;&amp; (error == ERESTART ||
+			error == EINTR || error == EWOULDBLOCK))
+			error = 0;
+		<span class="enscript-comment">/* The socket layer handles SIGPIPE */</span>
+		<span class="enscript-keyword">if</span> (error == EPIPE &amp;&amp; fp-&gt;f_type != DTYPE_SOCKET &amp;&amp;
+		    (fp-&gt;f_fglob-&gt;fg_lflags &amp; FG_NOSIGPIPE) == 0) {
+			<span class="enscript-comment">/* XXX Raise the signal on the thread? */</span>
+			psignal(vfs_context_proc(ctx), SIGPIPE);
+		}
+	}
+	bytecnt -= uio_resid(auio);
+	*retval = bytecnt;
+
+	<span class="enscript-keyword">return</span> (error); 
+}
+        
+<span class="enscript-comment">/*      
+ * Gather write system call  
+ */</span>     
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">writev</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> writev_args *uap, user_ssize_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span>(writev_nocancel(p, (<span class="enscript-type">struct</span> writev_nocancel_args *)uap, retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">writev_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> writev_nocancel_args *uap, user_ssize_t *retval)
+{
+	uio_t auio = NULL;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">struct</span> user_iovec *iovp;
+	bool wrote_some = false;
+
+	AUDIT_ARG(fd, uap-&gt;fd);
+
+	<span class="enscript-comment">/* Verify range bedfore calling uio_create() */</span>
+	<span class="enscript-keyword">if</span> (uap-&gt;iovcnt &lt;= 0 || uap-&gt;iovcnt &gt; UIO_MAXIOV)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/* allocate a uio large enough to hold the number of iovecs passed */</span>
+	auio = uio_create(uap-&gt;iovcnt, 0,
+				  (IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32),
+				  UIO_WRITE);
+				  
+	<span class="enscript-comment">/* get location of iovecs within the uio.  then copyin the iovecs from
+	 * user space.
+	 */</span>
+	iovp = uio_iovsaddr(auio);
+	<span class="enscript-keyword">if</span> (iovp == NULL) {
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+	}
+	error = copyin_user_iovec_array(uap-&gt;iovp,
+		IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32,
+		uap-&gt;iovcnt, iovp);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+	}
+	
+	<span class="enscript-comment">/* finalize uio_t for use and do the IO 
+	 */</span>
+	error = uio_calculateresid(auio);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+	}
+
+	error = fp_lookup(p, uap-&gt;fd, &amp;fp, 0);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+	
+	<span class="enscript-keyword">if</span> ((fp-&gt;f_flag &amp; FWRITE) == 0) {
+		error = EBADF;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (FP_ISGUARDED(fp, GUARD_WRITE)) {
+		proc_fdlock(p);
+		error = fp_guard_exception(p, uap-&gt;fd, fp, kGUARD_EXC_WRITE);
+		proc_fdunlock(p);
+	} <span class="enscript-keyword">else</span> {
+		error = wr_uio(p, fp, auio, retval);
+		wrote_some = *retval &gt; 0;
+	}
+	
+	<span class="enscript-keyword">if</span> (wrote_some)
+	        fp_drop_written(p, uap-&gt;fd, fp);
+	<span class="enscript-keyword">else</span>
+	        fp_drop(p, uap-&gt;fd, fp, 0);
+
+<span class="enscript-reference">ExitThisRoutine</span>:
+	<span class="enscript-keyword">if</span> (auio != NULL) {
+		uio_free(auio);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">wr_uio</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> fileproc *fp, uio_t uio, user_ssize_t *retval)
+{
+	<span class="enscript-type">int</span> error;
+	user_ssize_t count;
+	<span class="enscript-type">struct</span> vfs_context context = *vfs_context_current();
+
+	count = uio_resid(uio);
+
+	context.vc_ucred = fp-&gt;f_cred;
+	error = fo_write(fp, uio, 0, &amp;context);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (uio_resid(uio) != count &amp;&amp; (error == ERESTART ||
+						error == EINTR || error == EWOULDBLOCK))
+		        error = 0;
+		<span class="enscript-comment">/* The socket layer handles SIGPIPE */</span>
+		<span class="enscript-keyword">if</span> (error == EPIPE &amp;&amp; fp-&gt;f_type != DTYPE_SOCKET &amp;&amp;
+		    (fp-&gt;f_fglob-&gt;fg_lflags &amp; FG_NOSIGPIPE) == 0)
+		        psignal(p, SIGPIPE);
+	}
+	*retval = count - uio_resid(uio);
+
+	<span class="enscript-keyword">return</span>(error);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">rd_uio</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">int</span> fdes, uio_t uio, user_ssize_t *retval)
+{
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">int</span> error;
+	user_ssize_t count;
+	<span class="enscript-type">struct</span> vfs_context context = *vfs_context_current();
+
+	<span class="enscript-keyword">if</span> ( (error = preparefileread(p, &amp;fp, fdes, 0)) )
+	        <span class="enscript-keyword">return</span> (error);
+
+	count = uio_resid(uio);
+
+	context.vc_ucred = fp-&gt;f_cred;
+
+	error = fo_read(fp, uio, 0, &amp;context);
+
+	<span class="enscript-keyword">if</span> (error) {
+	        <span class="enscript-keyword">if</span> (uio_resid(uio) != count &amp;&amp; (error == ERESTART ||
+						error == EINTR || error == EWOULDBLOCK))
+		        error = 0;
+	}
+	*retval = count - uio_resid(uio);
+
+	donefileread(p, fp, fdes);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Ioctl system call
+ *
+ * Returns:	0			Success
+ *		EBADF
+ *		ENOTTY
+ *		ENOMEM
+ *		ESRCH
+ *	copyin:EFAULT
+ *	copyoutEFAULT
+ *	fp_lookup:EBADF			Bad file descriptor
+ *	fo_ioctl:???
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ioctl</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> ioctl_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-type">struct</span> fileproc *fp = NULL;
+	<span class="enscript-type">int</span> error = 0;
+	u_int size = 0;
+	caddr_t datap = NULL, memp = NULL;
+	boolean_t is64bit = FALSE;
+	<span class="enscript-type">int</span> tmp = 0;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">STK_PARAMS</span>	128
+	<span class="enscript-type">char</span> stkbuf[STK_PARAMS];
+	<span class="enscript-type">int</span> fd = uap-&gt;fd;
+	u_long com = uap-&gt;com;
+	<span class="enscript-type">struct</span> vfs_context context = *vfs_context_current();
+
+	AUDIT_ARG(fd, uap-&gt;fd);
+	AUDIT_ARG(addr, uap-&gt;data);
+
+	is64bit = proc_is64bit(p);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_AUDIT</span>
+	<span class="enscript-keyword">if</span> (is64bit)
+		AUDIT_ARG(value64, com);
+	<span class="enscript-keyword">else</span>
+		AUDIT_ARG(cmd, CAST_DOWN_EXPLICIT(<span class="enscript-type">int</span>, com));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_AUDIT */</span>
+
+	<span class="enscript-comment">/*
+	 * Interpret high order word to find amount of data to be
+	 * copied to/from the user's address space.
+	 */</span>
+	size = IOCPARM_LEN(com);
+	<span class="enscript-keyword">if</span> (size &gt; IOCPARM_MAX)
+			<span class="enscript-keyword">return</span> ENOTTY;
+	<span class="enscript-keyword">if</span> (size &gt; <span class="enscript-keyword">sizeof</span> (stkbuf)) {
+		<span class="enscript-keyword">if</span> ((memp = (caddr_t)kalloc(size)) == 0)
+			<span class="enscript-keyword">return</span> ENOMEM;
+		datap = memp;
+	} <span class="enscript-keyword">else</span>
+		datap = &amp;stkbuf[0];
+	<span class="enscript-keyword">if</span> (com &amp; IOC_IN) {
+		<span class="enscript-keyword">if</span> (size) {
+			error = copyin(uap-&gt;data, datap, size);
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_nofp</span>;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* XXX - IOC_IN and no size?  we should proably return an error here!! */</span>
+			<span class="enscript-keyword">if</span> (is64bit) {
+				*(user_addr_t *)datap = uap-&gt;data;
+			}
+			<span class="enscript-keyword">else</span> {
+				*(uint32_t *)datap = (uint32_t)uap-&gt;data;
+			}
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((com &amp; IOC_OUT) &amp;&amp; size)
+		<span class="enscript-comment">/*
+		 * Zero the buffer so the user always
+		 * gets back something deterministic.
+		 */</span>
+		bzero(datap, size);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (com &amp; IOC_VOID) {
+		<span class="enscript-comment">/* XXX - this is odd since IOC_VOID means no parameters */</span>
+		<span class="enscript-keyword">if</span> (is64bit) {
+			*(user_addr_t *)datap = uap-&gt;data;
+		}
+		<span class="enscript-keyword">else</span> {
+			*(uint32_t *)datap = (uint32_t)uap-&gt;data;
+		}
+	}
+
+	proc_fdlock(p);
+	error = fp_lookup(p,fd,&amp;fp,1);
+	<span class="enscript-keyword">if</span> (error)  {
+		proc_fdunlock(p);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_nofp</span>;
+	}
+
+	AUDIT_ARG(file, p, fp);
+
+	<span class="enscript-keyword">if</span> ((fp-&gt;f_flag &amp; (FREAD | FWRITE)) == 0) {
+			error = EBADF;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	context.vc_ucred = fp-&gt;f_fglob-&gt;fg_cred;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_file_check_ioctl(context.vc_ucred, fp-&gt;f_fglob, com);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">switch</span> (com) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIONCLEX</span>:
+		*fdflags(p, fd) &amp;= ~UF_EXCLOSE;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIOCLEX</span>:
+		*fdflags(p, fd) |= UF_EXCLOSE;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIONBIO</span>:
+		<span class="enscript-keyword">if</span> ( (tmp = *(<span class="enscript-type">int</span> *)datap) )
+			fp-&gt;f_flag |= FNONBLOCK;
+		<span class="enscript-keyword">else</span>
+			fp-&gt;f_flag &amp;= ~FNONBLOCK;
+		error = fo_ioctl(fp, FIONBIO, (caddr_t)&amp;tmp, &amp;context);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIOASYNC</span>:
+		<span class="enscript-keyword">if</span> ( (tmp = *(<span class="enscript-type">int</span> *)datap) )
+			fp-&gt;f_flag |= FASYNC;
+		<span class="enscript-keyword">else</span>
+			fp-&gt;f_flag &amp;= ~FASYNC;
+		error = fo_ioctl(fp, FIOASYNC, (caddr_t)&amp;tmp, &amp;context);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIOSETOWN</span>:
+		tmp = *(<span class="enscript-type">int</span> *)datap;
+		<span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_SOCKET) {
+			((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data)-&gt;so_pgid = tmp;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_PIPE) {
+		        error = fo_ioctl(fp, (<span class="enscript-type">int</span>)TIOCSPGRP, (caddr_t)&amp;tmp, &amp;context);
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (tmp &lt;= 0) {
+			tmp = -tmp;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">struct</span> proc *p1 = proc_find(tmp);
+			<span class="enscript-keyword">if</span> (p1 == 0) {
+				error = ESRCH;
+				<span class="enscript-keyword">break</span>;
+			}
+			tmp = p1-&gt;p_pgrpid;
+			proc_rele(p1);
+		}
+		error = fo_ioctl(fp, (<span class="enscript-type">int</span>)TIOCSPGRP, (caddr_t)&amp;tmp, &amp;context);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIOGETOWN</span>:
+		<span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_SOCKET) {
+			*(<span class="enscript-type">int</span> *)datap = ((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data)-&gt;so_pgid;
+			<span class="enscript-keyword">break</span>;
+		}
+		error = fo_ioctl(fp, TIOCGPGRP, datap, &amp;context);
+		*(<span class="enscript-type">int</span> *)datap = -*(<span class="enscript-type">int</span> *)datap;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		error = fo_ioctl(fp, com, datap, &amp;context);
+		<span class="enscript-comment">/*
+		 * Copy any data to user, size was
+		 * already set and checked above.
+		 */</span>
+		<span class="enscript-keyword">if</span> (error == 0 &amp;&amp; (com &amp; IOC_OUT) &amp;&amp; size)
+			error = copyout(datap, uap-&gt;data, (u_int)size);
+		<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">out</span>:
+	fp_drop(p, fd, fp, 1);
+	proc_fdunlock(p);
+
+<span class="enscript-reference">out_nofp</span>:
+	<span class="enscript-keyword">if</span> (memp)
+		kfree(memp, size);
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-type">int</span>	selwait, nselcoll;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SEL_FIRSTPASS</span> 1
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SEL_SECONDPASS</span> 2
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">selcontinue</span>(<span class="enscript-type">int</span> error);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">selprocess</span>(<span class="enscript-type">int</span> error, <span class="enscript-type">int</span> sel_pass);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">selscan</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> _select * sel, <span class="enscript-type">struct</span> _select_data * seldata,
+			<span class="enscript-type">int</span> nfd, int32_t *retval, <span class="enscript-type">int</span> sel_pass, <span class="enscript-type">struct</span> waitq_set *wqset);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">selcount</span>(<span class="enscript-type">struct</span> proc *p, u_int32_t *ibits, <span class="enscript-type">int</span> nfd, <span class="enscript-type">int</span> *count);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">seldrop_locked</span>(<span class="enscript-type">struct</span> proc *p, u_int32_t *ibits, <span class="enscript-type">int</span> nfd, <span class="enscript-type">int</span> lim, <span class="enscript-type">int</span> *need_wakeup, <span class="enscript-type">int</span> fromselcount);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">seldrop</span>(<span class="enscript-type">struct</span> proc *p, u_int32_t *ibits, <span class="enscript-type">int</span> nfd);
+
+<span class="enscript-comment">/*
+ * Select system call.
+ *
+ * Returns:	0			Success
+ *		EINVAL			Invalid argument
+ *		EAGAIN			Nonconformant error if allocation fails
+ *	selprocess:???
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">select</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> select_args *uap, int32_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span>(select_nocancel(p, (<span class="enscript-type">struct</span> select_nocancel_args *)uap, retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">select_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> select_nocancel_args *uap, int32_t *retval)
+{
+	<span class="enscript-type">int</span> error = 0;
+	u_int ni, nw;
+	thread_t th_act;
+	<span class="enscript-type">struct</span> uthread	*uth;
+	<span class="enscript-type">struct</span> _select *sel;
+	<span class="enscript-type">struct</span> _select_data *seldata;
+	<span class="enscript-type">int</span> needzerofill = 1;
+	<span class="enscript-type">int</span> count = 0;
+	size_t sz = 0;
+
+	th_act = current_thread();
+	uth = get_bsdthread_info(th_act);
+	sel = &amp;uth-&gt;uu_select;
+	seldata = &amp;uth-&gt;uu_kevent.ss_select_data;
+	*retval = 0;
+
+	seldata-&gt;args = uap;
+	seldata-&gt;retval = retval;
+	seldata-&gt;wqp = NULL;
+	seldata-&gt;count = 0;
+
+	<span class="enscript-keyword">if</span> (uap-&gt;nd &lt; 0) {
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-comment">/* select on thread of process that already called proc_exit() */</span>
+	<span class="enscript-keyword">if</span> (p-&gt;p_fd == NULL) {
+		<span class="enscript-keyword">return</span> (EBADF);
+	}
+
+	<span class="enscript-keyword">if</span> (uap-&gt;nd &gt; p-&gt;p_fd-&gt;fd_nfiles)
+		uap-&gt;nd = p-&gt;p_fd-&gt;fd_nfiles; <span class="enscript-comment">/* forgiving; slightly wrong */</span>
+
+	nw = howmany(uap-&gt;nd, NFDBITS);
+	ni = nw * <span class="enscript-keyword">sizeof</span>(fd_mask);
+
+	<span class="enscript-comment">/*
+	 * if the previously allocated space for the bits is smaller than
+	 * what is requested or no space has yet been allocated for this
+	 * thread, allocate enough space now.
+	 *
+	 * Note: If this process fails, select() will return EAGAIN; this
+	 * is the same thing pool() returns in a no-memory situation, but
+	 * it is not a POSIX compliant error code for select().
+	 */</span>
+	<span class="enscript-keyword">if</span> (sel-&gt;nbytes &lt; (3 * ni)) {
+		<span class="enscript-type">int</span> nbytes = 3 * ni;
+
+		<span class="enscript-comment">/* Free previous allocation, if any */</span>
+		<span class="enscript-keyword">if</span> (sel-&gt;ibits != NULL)
+			FREE(sel-&gt;ibits, M_TEMP);
+		<span class="enscript-keyword">if</span> (sel-&gt;obits != NULL) {
+			FREE(sel-&gt;obits, M_TEMP);
+			<span class="enscript-comment">/* NULL out; subsequent ibits allocation may fail */</span>
+			sel-&gt;obits = NULL;
+		}
+
+		MALLOC(sel-&gt;ibits, u_int32_t *, nbytes, M_TEMP, M_WAITOK | M_ZERO);
+		<span class="enscript-keyword">if</span> (sel-&gt;ibits == NULL)
+			<span class="enscript-keyword">return</span> (EAGAIN);
+		MALLOC(sel-&gt;obits, u_int32_t *, nbytes, M_TEMP, M_WAITOK | M_ZERO);
+		<span class="enscript-keyword">if</span> (sel-&gt;obits == NULL) {
+			FREE(sel-&gt;ibits, M_TEMP);
+			sel-&gt;ibits = NULL;
+			<span class="enscript-keyword">return</span> (EAGAIN);
+		}
+		sel-&gt;nbytes = nbytes;
+		needzerofill = 0;
+	}
+
+	<span class="enscript-keyword">if</span> (needzerofill) {
+		bzero((caddr_t)sel-&gt;ibits, sel-&gt;nbytes);
+		bzero((caddr_t)sel-&gt;obits, sel-&gt;nbytes);
+	}
+
+	<span class="enscript-comment">/*
+	 * get the bits from the user address space
+	 */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">getbits</span>(name, x) \
+	<span class="enscript-keyword">do</span> { \
+		<span class="enscript-keyword">if</span> (uap-&gt;name &amp;&amp; (error = copyin(uap-&gt;name, \
+			(caddr_t)&amp;sel-&gt;ibits[(x) * nw], ni))) \
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">continuation</span>; \
+	} <span class="enscript-keyword">while</span> (0)
+
+	getbits(in, 0);
+	getbits(ou, 1);
+	getbits(ex, 2);
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">getbits</span>
+
+	<span class="enscript-keyword">if</span> (uap-&gt;tv) {
+		<span class="enscript-type">struct</span> timeval atv;
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+			<span class="enscript-type">struct</span> user64_timeval atv64;
+			error = copyin(uap-&gt;tv, (caddr_t)&amp;atv64, <span class="enscript-keyword">sizeof</span>(atv64));
+			<span class="enscript-comment">/* Loses resolution - assume timeout &lt; 68 years */</span>
+			atv.tv_sec = atv64.tv_sec;
+			atv.tv_usec = atv64.tv_usec;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">struct</span> user32_timeval atv32;
+			error = copyin(uap-&gt;tv, (caddr_t)&amp;atv32, <span class="enscript-keyword">sizeof</span>(atv32));
+			atv.tv_sec = atv32.tv_sec;
+			atv.tv_usec = atv32.tv_usec;
+		}
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">continuation</span>;
+		<span class="enscript-keyword">if</span> (itimerfix(&amp;atv)) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">continuation</span>;
+		}
+
+		clock_absolutetime_interval_to_deadline(
+										tvtoabstime(&amp;atv), &amp;seldata-&gt;abstime);
+	}
+	<span class="enscript-keyword">else</span>
+		seldata-&gt;abstime = 0;
+
+	<span class="enscript-keyword">if</span> ( (error = selcount(p, sel-&gt;ibits, uap-&gt;nd, &amp;count)) ) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">continuation</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * We need an array of waitq pointers. This is due to the new way
+	 * in which waitqs are linked to sets. When a thread selects on a
+	 * file descriptor, a waitq (embedded in a selinfo structure) is
+	 * added to the thread's local waitq set. There is no longer any
+	 * way to directly iterate over all members of a given waitq set.
+	 * The process of linking a waitq into a set may allocate a link
+	 * table object. Because we can't iterate over all the waitqs to
+	 * which our thread waitq set belongs, we need a way of removing
+	 * this link object!
+	 *
+	 * Thus we need a buffer which will hold one waitq pointer
+	 * per FD being selected. During the tear-down phase we can use
+	 * these pointers to dis-associate the underlying selinfo's waitq
+	 * from our thread's waitq set.
+	 *
+	 * Because we also need to allocate a waitq set for this thread,
+	 * we use a bare buffer pointer to hold all the memory. Note that
+	 * this memory is cached in the thread pointer and not reaped until
+	 * the thread exists. This is generally OK because threads that
+	 * call select tend to keep calling select repeatedly.
+	 */</span>
+	sz = ALIGN(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> waitq_set)) + (count * <span class="enscript-keyword">sizeof</span>(uint64_t));
+	<span class="enscript-keyword">if</span> (sz &gt; uth-&gt;uu_wqstate_sz) {
+		<span class="enscript-comment">/* (re)allocate a buffer to hold waitq pointers */</span>
+		<span class="enscript-keyword">if</span> (uth-&gt;uu_wqset) {
+			<span class="enscript-keyword">if</span> (waitq_set_is_valid(uth-&gt;uu_wqset))
+				waitq_set_deinit(uth-&gt;uu_wqset);
+			FREE(uth-&gt;uu_wqset, M_SELECT);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (uth-&gt;uu_wqstate_sz &amp;&amp; !uth-&gt;uu_wqset)
+			panic(<span class="enscript-string">&quot;select: thread structure corrupt! &quot;</span>
+			      <span class="enscript-string">&quot;uu_wqstate_sz:%ld, wqstate_buf == NULL&quot;</span>,
+			      uth-&gt;uu_wqstate_sz);
+		uth-&gt;uu_wqstate_sz = sz;
+		MALLOC(uth-&gt;uu_wqset, <span class="enscript-type">struct</span> waitq_set *, sz, M_SELECT, M_WAITOK);
+		<span class="enscript-keyword">if</span> (!uth-&gt;uu_wqset)
+			panic(<span class="enscript-string">&quot;can't allocate %ld bytes for wqstate buffer&quot;</span>,
+			      uth-&gt;uu_wqstate_sz);
+		waitq_set_init(uth-&gt;uu_wqset,
+			       SYNC_POLICY_FIFO|SYNC_POLICY_PREPOST|SYNC_POLICY_DISABLE_IRQ, NULL);
+	}
+
+	<span class="enscript-keyword">if</span> (!waitq_set_is_valid(uth-&gt;uu_wqset))
+		waitq_set_init(uth-&gt;uu_wqset,
+			       SYNC_POLICY_FIFO|SYNC_POLICY_PREPOST|SYNC_POLICY_DISABLE_IRQ, NULL);
+
+	<span class="enscript-comment">/* the last chunk of our buffer is an array of waitq pointers */</span>
+	seldata-&gt;wqp = (uint64_t *)((<span class="enscript-type">char</span> *)(uth-&gt;uu_wqset) + ALIGN(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> waitq_set)));
+	bzero(seldata-&gt;wqp, sz - ALIGN(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> waitq_set)));
+
+	seldata-&gt;count = count;
+
+<span class="enscript-reference">continuation</span>:
+
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-comment">/*
+		 * We have already cleaned up any state we established,
+		 * either locally or as a result of selcount().  We don't
+		 * need to wait_subqueue_unlink_all(), since we haven't set
+		 * anything at this point.
+		 */</span>
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	<span class="enscript-keyword">return</span> selprocess(0, SEL_FIRSTPASS);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">selcontinue</span>(<span class="enscript-type">int</span> error)
+{
+	<span class="enscript-keyword">return</span> selprocess(error, SEL_SECONDPASS);
+}
+
+
+<span class="enscript-comment">/*
+ * selprocess
+ *
+ * Parameters:	error			The error code from our caller
+ *		sel_pass		The pass we are on
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">selprocess</span>(<span class="enscript-type">int</span> error, <span class="enscript-type">int</span> sel_pass)
+{
+	<span class="enscript-type">int</span> ncoll;
+	u_int ni, nw;
+	thread_t th_act;
+	<span class="enscript-type">struct</span> uthread	*uth;
+	<span class="enscript-type">struct</span> proc *p;
+	<span class="enscript-type">struct</span> select_nocancel_args *uap;
+	<span class="enscript-type">int</span> *retval;
+	<span class="enscript-type">struct</span> _select *sel;
+	<span class="enscript-type">struct</span> _select_data *seldata;
+	<span class="enscript-type">int</span> unwind = 1;
+	<span class="enscript-type">int</span> prepost = 0;
+	<span class="enscript-type">int</span> somewakeup = 0;
+	<span class="enscript-type">int</span> doretry = 0;
+	wait_result_t wait_result;
+
+	p = current_proc();
+	th_act = current_thread();
+	uth = get_bsdthread_info(th_act);
+	sel = &amp;uth-&gt;uu_select;
+	seldata = &amp;uth-&gt;uu_kevent.ss_select_data;
+	uap = seldata-&gt;args;
+	retval = seldata-&gt;retval;
+
+	<span class="enscript-keyword">if</span> ((error != 0) &amp;&amp; (sel_pass == SEL_FIRSTPASS))
+		unwind = 0;
+	<span class="enscript-keyword">if</span> (seldata-&gt;count == 0)
+		unwind = 0;
+<span class="enscript-reference">retry</span>:
+	<span class="enscript-keyword">if</span> (error != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	ncoll = nselcoll;
+	OSBitOrAtomic(P_SELECT, &amp;p-&gt;p_flag);
+
+	<span class="enscript-comment">/* skip scans if the select is just for timeouts */</span>
+	<span class="enscript-keyword">if</span> (seldata-&gt;count) {
+		error = selscan(p, sel, seldata, uap-&gt;nd, retval, sel_pass, uth-&gt;uu_wqset);
+		<span class="enscript-keyword">if</span> (error || *retval) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		<span class="enscript-keyword">if</span> (prepost || somewakeup) {
+			<span class="enscript-comment">/*
+			 * if the select of log, then we can wakeup and
+			 * discover some one else already read the data;
+			 * go to select again if time permits
+			 */</span>
+			prepost = 0;
+			somewakeup = 0;
+			doretry = 1;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (uap-&gt;tv) {
+		uint64_t	now;
+
+		clock_get_uptime(&amp;now);
+		<span class="enscript-keyword">if</span> (now &gt;= seldata-&gt;abstime)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (doretry) {
+		<span class="enscript-comment">/* cleanup obits and try again */</span>
+		doretry = 0;
+		sel_pass = SEL_FIRSTPASS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * To effect a poll, the timeout argument should be
+	 * non-nil, pointing to a zero-valued timeval structure.
+	 */</span>
+	<span class="enscript-keyword">if</span> (uap-&gt;tv &amp;&amp; seldata-&gt;abstime == 0) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* No spurious wakeups due to colls,no need to check for them */</span>
+	 <span class="enscript-keyword">if</span> ((sel_pass == SEL_SECONDPASS) || ((p-&gt;p_flag &amp; P_SELECT) == 0)) {
+		sel_pass = SEL_FIRSTPASS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry</span>;
+	}
+
+	OSBitAndAtomic(~((uint32_t)P_SELECT), &amp;p-&gt;p_flag);
+
+	<span class="enscript-comment">/* if the select is just for timeout skip check */</span>
+	<span class="enscript-keyword">if</span> (seldata-&gt;count &amp;&amp; (sel_pass == SEL_SECONDPASS))
+		panic(<span class="enscript-string">&quot;selprocess: 2nd pass assertwaiting&quot;</span>);
+
+	<span class="enscript-comment">/* waitq_set has waitqueue as first element */</span>
+	wait_result = waitq_assert_wait64_leeway((<span class="enscript-type">struct</span> waitq *)uth-&gt;uu_wqset,
+						 NO_EVENT64, THREAD_ABORTSAFE,
+						 TIMEOUT_URGENCY_USER_NORMAL,
+						 seldata-&gt;abstime,
+						 TIMEOUT_NO_LEEWAY);
+	<span class="enscript-keyword">if</span> (wait_result != THREAD_AWAKENED) {
+		<span class="enscript-comment">/* there are no preposted events */</span>
+		error = tsleep1(NULL, PSOCK | PCATCH,
+				<span class="enscript-string">&quot;select&quot;</span>, 0, selcontinue);
+	} <span class="enscript-keyword">else</span>  {
+		prepost = 1;
+		error = 0;
+	}
+
+	<span class="enscript-keyword">if</span> (error == 0) {
+		sel_pass = SEL_SECONDPASS;
+		<span class="enscript-keyword">if</span> (!prepost)
+			somewakeup = 1;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry</span>;
+	}
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (unwind) {
+		seldrop(p, sel-&gt;ibits, uap-&gt;nd);
+		waitq_set_deinit(uth-&gt;uu_wqset);
+		<span class="enscript-comment">/*
+		 * zero out the waitq pointer array to avoid use-after free
+		 * errors in the selcount error path (seldrop_locked) if/when
+		 * the thread re-calls select().
+		 */</span>
+		bzero((<span class="enscript-type">void</span> *)uth-&gt;uu_wqset, uth-&gt;uu_wqstate_sz);
+	}
+	OSBitAndAtomic(~((uint32_t)P_SELECT), &amp;p-&gt;p_flag);
+	<span class="enscript-comment">/* select is not restarted after signals... */</span>
+	<span class="enscript-keyword">if</span> (error == ERESTART)
+		error = EINTR;
+	<span class="enscript-keyword">if</span> (error == EWOULDBLOCK)
+		error = 0;
+	nw = howmany(uap-&gt;nd, NFDBITS);
+	ni = nw * <span class="enscript-keyword">sizeof</span>(fd_mask);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">putbits</span>(name, x) \
+	<span class="enscript-keyword">do</span> { \
+		<span class="enscript-keyword">if</span> (uap-&gt;name &amp;&amp; (error2 = \
+			copyout((caddr_t)&amp;sel-&gt;obits[(x) * nw], uap-&gt;name, ni))) \
+			error = error2; \
+	} <span class="enscript-keyword">while</span> (0)
+
+	<span class="enscript-keyword">if</span> (error == 0) {
+		<span class="enscript-type">int</span> error2;
+
+		putbits(in, 0);
+		putbits(ou, 1);
+		putbits(ex, 2);
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">putbits</span>
+	}
+	<span class="enscript-keyword">return</span>(error);
+}
+
+
+<span class="enscript-comment">/**
+ * remove the fileproc's underlying waitq from the supplied waitq set;
+ * clear FP_INSELECT when appropriate
+ *
+ * Parameters:
+ *		fp	File proc that is potentially currently in select
+ *		wqset	Waitq set to which the fileproc may belong
+ *			(usually this is the thread's private waitq set)
+ * Conditions:
+ *		proc_fdlock is held
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">selunlinkfp</span>(<span class="enscript-type">struct</span> fileproc *fp, uint64_t wqp_id, <span class="enscript-type">struct</span> waitq_set *wqset)
+{
+	<span class="enscript-type">int</span> valid_set = waitq_set_is_valid(wqset);
+	<span class="enscript-type">int</span> valid_q = !!wqp_id;
+
+	<span class="enscript-comment">/*
+	 * This could be called (from selcount error path) before we setup
+	 * the thread's wqset. Check the wqset passed in, and only unlink if
+	 * the set is valid.
+	 */</span>
+
+	<span class="enscript-comment">/* unlink the underlying waitq from the input set (thread waitq set) */</span>
+	<span class="enscript-keyword">if</span> (valid_q &amp;&amp; valid_set)
+		waitq_unlink_by_prepost_id(wqp_id, wqset);
+
+	<span class="enscript-comment">/* allow passing a NULL/invalid fp for seldrop unwind */</span>
+	<span class="enscript-keyword">if</span> (!fp || !(fp-&gt;f_flags &amp; (FP_INSELECT|FP_SELCONFLICT)))
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/*
+	 * We can always remove the conflict queue from our thread's set: this
+	 * will not affect other threads that potentially need to be awoken on
+	 * the conflict queue during a fileproc_drain - those sets will still
+	 * be linked with the global conflict queue, and the last waiter
+	 * on the fp clears the CONFLICT marker.
+	 */</span>
+	<span class="enscript-keyword">if</span> (valid_set &amp;&amp; (fp-&gt;f_flags &amp; FP_SELCONFLICT))
+		waitq_unlink(&amp;select_conflict_queue, wqset);
+
+	<span class="enscript-comment">/* jca: TODO:
+	 * This isn't quite right - we don't actually know if this
+	 * fileproc is in another select or not! Here we just assume
+	 * that if we were the first thread to select on the FD, then
+	 * we'll be the one to clear this flag...
+	 */</span>
+	<span class="enscript-keyword">if</span> (valid_set &amp;&amp; fp-&gt;f_wset == (<span class="enscript-type">void</span> *)wqset) {
+		fp-&gt;f_flags &amp;= ~FP_INSELECT;
+		fp-&gt;f_wset = NULL;
+	}
+}
+
+<span class="enscript-comment">/**
+ * connect a fileproc to the given wqset, potentially bridging to a waitq
+ * pointed to indirectly by wq_data
+ *
+ * Parameters:
+ *		fp	File proc potentially currently in select
+ *		wq_data	Pointer to a pointer to a waitq (could be NULL)
+ *		wqset	Waitq set to which the fileproc should now belong
+ *			(usually this is the thread's private waitq set)
+ *
+ * Conditions:
+ *		proc_fdlock is held
+ */</span>
+<span class="enscript-type">static</span> uint64_t <span class="enscript-function-name">sellinkfp</span>(<span class="enscript-type">struct</span> fileproc *fp, <span class="enscript-type">void</span> **wq_data, <span class="enscript-type">struct</span> waitq_set *wqset)
+{
+	<span class="enscript-type">struct</span> waitq *f_wq = NULL;
+
+	<span class="enscript-keyword">if</span> ((fp-&gt;f_flags &amp; FP_INSELECT) != FP_INSELECT) {
+		<span class="enscript-keyword">if</span> (wq_data)
+			panic(<span class="enscript-string">&quot;non-null data:%p on fp:%p not in select?!&quot;</span>
+			      <span class="enscript-string">&quot;(wqset:%p)&quot;</span>, wq_data, fp, wqset);
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">if</span> ((fp-&gt;f_flags &amp; FP_SELCONFLICT) == FP_SELCONFLICT) {
+		<span class="enscript-comment">/*
+		 * The conflict queue requires disabling interrupts, so we
+		 * need to explicitly reserve a link object to avoid a
+		 * panic/assert in the waitq code. Hopefully this extra step
+		 * can be avoided if we can split the waitq structure into
+		 * blocking and linkage sub-structures.
+		 */</span>
+		uint64_t reserved_link = waitq_link_reserve(&amp;select_conflict_queue);
+		waitq_link(&amp;select_conflict_queue, wqset, WAITQ_SHOULD_LOCK, &amp;reserved_link);
+		waitq_link_release(reserved_link);
+	}
+
+	<span class="enscript-comment">/*
+	 * The wq_data parameter has potentially been set by selrecord called
+	 * from a subsystems fo_select() function. If the subsystem does not
+	 * call selrecord, then wq_data will be NULL
+	 *
+	 * Use memcpy to get the value into a proper pointer because
+	 * wq_data most likely points to a stack variable that could be
+	 * unaligned on 32-bit systems.
+	 */</span>
+	<span class="enscript-keyword">if</span> (wq_data) {
+		memcpy(&amp;f_wq, wq_data, <span class="enscript-keyword">sizeof</span>(f_wq));
+		<span class="enscript-keyword">if</span> (!waitq_is_valid(f_wq))
+			f_wq = NULL;
+	}
+
+	<span class="enscript-comment">/* record the first thread's wqset in the fileproc structure */</span>
+	<span class="enscript-keyword">if</span> (!fp-&gt;f_wset)
+		fp-&gt;f_wset = (<span class="enscript-type">void</span> *)wqset;
+
+	<span class="enscript-comment">/* handles NULL f_wq */</span>
+	<span class="enscript-keyword">return</span> waitq_get_prepost_id(f_wq);
+}
+
+
+<span class="enscript-comment">/*
+ * selscan
+ *
+ * Parameters:	p			Process performing the select
+ *		sel			The per-thread select context structure
+ *		nfd			The number of file descriptors to scan
+ *		retval			The per thread system call return area
+ *		sel_pass		Which pass this is; allowed values are
+ *						SEL_FIRSTPASS and SEL_SECONDPASS
+ *		wqset			The per thread wait queue set
+ *
+ * Returns:	0			Success
+ *		EIO			Invalid p-&gt;p_fd field XXX Obsolete?
+ *		EBADF			One of the files in the bit vector is
+ *						invalid.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">selscan</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> _select *sel, <span class="enscript-type">struct</span> _select_data * seldata,
+	<span class="enscript-type">int</span> nfd, int32_t *retval, <span class="enscript-type">int</span> sel_pass, <span class="enscript-type">struct</span> waitq_set *wqset)
+{
+	<span class="enscript-type">struct</span> filedesc *fdp = p-&gt;p_fd;
+	<span class="enscript-type">int</span> msk, i, j, fd;
+	u_int32_t bits;
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">int</span> n = 0;		<span class="enscript-comment">/* count of bits */</span>
+	<span class="enscript-type">int</span> nc = 0;		<span class="enscript-comment">/* bit vector offset (nc'th bit) */</span>
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> flag[3] = { FREAD, FWRITE, 0 };
+	u_int32_t *iptr, *optr;
+	u_int nw;
+	u_int32_t *ibits, *obits;
+	uint64_t reserved_link, *rl_ptr = NULL;
+	<span class="enscript-type">int</span> count;
+	<span class="enscript-type">struct</span> vfs_context context = *vfs_context_current();
+
+	<span class="enscript-comment">/*
+	 * Problems when reboot; due to MacOSX signal probs
+	 * in Beaker1C ; verify that the p-&gt;p_fd is valid
+	 */</span>
+	<span class="enscript-keyword">if</span> (fdp == NULL) {
+		*retval=0;
+		<span class="enscript-keyword">return</span>(EIO);
+	}
+	ibits = sel-&gt;ibits;
+	obits = sel-&gt;obits;
+
+	nw = howmany(nfd, NFDBITS);
+
+	count = seldata-&gt;count;
+
+	nc = 0;
+	<span class="enscript-keyword">if</span> (!count) {
+		*retval = 0;
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	proc_fdlock(p);
+	<span class="enscript-keyword">for</span> (msk = 0; msk &lt; 3; msk++) {
+		iptr = (u_int32_t *)&amp;ibits[msk * nw];
+		optr = (u_int32_t *)&amp;obits[msk * nw];
+
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; nfd; i += NFDBITS) {
+			bits = iptr[i/NFDBITS];
+
+			<span class="enscript-keyword">while</span> ((j = ffs(bits)) &amp;&amp; (fd = i + --j) &lt; nfd) {
+				bits &amp;= ~(1 &lt;&lt; j);
+
+				<span class="enscript-keyword">if</span> (fd &lt; fdp-&gt;fd_nfiles)
+					fp = fdp-&gt;fd_ofiles[fd];
+				<span class="enscript-keyword">else</span>
+					fp = NULL;
+
+				<span class="enscript-keyword">if</span> (fp == NULL || (fdp-&gt;fd_ofileflags[fd] &amp; UF_RESERVED)) {
+					<span class="enscript-comment">/*
+					 * If we abort because of a bad
+					 * fd, let the caller unwind...
+					 */</span>
+					proc_fdunlock(p);
+					<span class="enscript-keyword">return</span>(EBADF);
+				}
+				<span class="enscript-keyword">if</span> (sel_pass == SEL_SECONDPASS) {
+					reserved_link = 0;
+					rl_ptr = NULL;
+					selunlinkfp(fp, seldata-&gt;wqp[nc], wqset);
+				} <span class="enscript-keyword">else</span> {
+					reserved_link = waitq_link_reserve((<span class="enscript-type">struct</span> waitq *)wqset);
+					rl_ptr = &amp;reserved_link;
+					<span class="enscript-keyword">if</span> (fp-&gt;f_flags &amp; FP_INSELECT)
+						<span class="enscript-comment">/* someone is already in select on this fp */</span>
+						fp-&gt;f_flags |= FP_SELCONFLICT;
+					<span class="enscript-keyword">else</span>
+						fp-&gt;f_flags |= FP_INSELECT;
+				}
+
+				context.vc_ucred = fp-&gt;f_cred;
+
+				<span class="enscript-comment">/*
+				 * stash this value b/c fo_select may replace
+				 * reserved_link with a pointer to a waitq object
+				 */</span>
+				uint64_t rsvd = reserved_link;
+
+				<span class="enscript-comment">/* The select; set the bit, if true */</span>
+				<span class="enscript-keyword">if</span> (fp-&gt;f_ops &amp;&amp; fp-&gt;f_type
+					&amp;&amp; fo_select(fp, flag[msk], rl_ptr, &amp;context)) {
+					optr[fd/NFDBITS] |= (1 &lt;&lt; (fd % NFDBITS));
+					n++;
+				}
+				<span class="enscript-keyword">if</span> (sel_pass == SEL_FIRSTPASS) {
+					waitq_link_release(rsvd);
+					<span class="enscript-comment">/*
+					 * If the fp's supporting selinfo structure was linked
+					 * to this thread's waitq set, then 'reserved_link'
+					 * will have been updated by selrecord to be a pointer
+					 * to the selinfo's waitq.
+					 */</span>
+					<span class="enscript-keyword">if</span> (reserved_link == rsvd)
+						rl_ptr = NULL; <span class="enscript-comment">/* fo_select never called selrecord() */</span>
+					<span class="enscript-comment">/*
+					 * Hook up the thread's waitq set either to
+					 * the fileproc structure, or to the global
+					 * conflict queue: but only on the first
+					 * select pass.
+					 */</span>
+					seldata-&gt;wqp[nc] = sellinkfp(fp, (<span class="enscript-type">void</span> **)rl_ptr, wqset);
+				}
+				nc++;
+			}
+		}
+	}
+	proc_fdunlock(p);
+
+	*retval = n;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">poll_callback</span>(<span class="enscript-type">struct</span> kqueue *, <span class="enscript-type">struct</span> kevent_internal_s *, <span class="enscript-type">void</span> *);
+
+<span class="enscript-type">struct</span> poll_continue_args {
+	user_addr_t pca_fds;
+	u_int pca_nfds;
+	u_int pca_rfds;
+};
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">poll</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> poll_args *uap, int32_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span>(poll_nocancel(p, (<span class="enscript-type">struct</span> poll_nocancel_args *)uap, retval));
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">poll_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> poll_nocancel_args *uap, int32_t *retval)
+{
+	<span class="enscript-type">struct</span> poll_continue_args *cont;
+	<span class="enscript-type">struct</span> pollfd *fds;
+	<span class="enscript-type">struct</span> kqueue *kq;
+	<span class="enscript-type">struct</span> timeval atv;
+	<span class="enscript-type">int</span> ncoll, error = 0;
+	u_int nfds = uap-&gt;nfds;
+	u_int rfds = 0;
+	u_int i;
+	size_t ni;
+
+	<span class="enscript-comment">/*
+	 * This is kinda bogus.  We have fd limits, but that is not
+	 * really related to the size of the pollfd array.  Make sure
+	 * we let the process use at least FD_SETSIZE entries and at
+	 * least enough for the current limits.  We want to be reasonably
+	 * safe, but not overly restrictive.
+	 */</span>
+	<span class="enscript-keyword">if</span> (nfds &gt; OPEN_MAX ||
+	    (nfds &gt; p-&gt;p_rlimit[RLIMIT_NOFILE].rlim_cur &amp;&amp; (proc_suser(p) || nfds &gt; FD_SETSIZE)))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	kq = kqueue_alloc(p);
+	<span class="enscript-keyword">if</span> (kq == NULL)
+		<span class="enscript-keyword">return</span> (EAGAIN);
+
+	ni = nfds * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pollfd) + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> poll_continue_args);
+	MALLOC(cont, <span class="enscript-type">struct</span> poll_continue_args *, ni, M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (NULL == cont) {
+		error = EAGAIN;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	
+	fds = (<span class="enscript-type">struct</span> pollfd *)&amp;cont[1];
+	error = copyin(uap-&gt;fds, fds, nfds * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pollfd));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	<span class="enscript-keyword">if</span> (uap-&gt;timeout != -1) {
+		<span class="enscript-type">struct</span> timeval rtv;
+
+		atv.tv_sec = uap-&gt;timeout / 1000;
+		atv.tv_usec = (uap-&gt;timeout % 1000) * 1000;
+		<span class="enscript-keyword">if</span> (itimerfix(&amp;atv)) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		getmicrouptime(&amp;rtv);
+		timevaladd(&amp;atv, &amp;rtv);
+	} <span class="enscript-keyword">else</span> {
+		atv.tv_sec = 0;
+		atv.tv_usec = 0;
+	}
+
+	<span class="enscript-comment">/* JMM - all this P_SELECT stuff is bogus */</span>
+	ncoll = nselcoll;
+	OSBitOrAtomic(P_SELECT, &amp;p-&gt;p_flag);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; nfds; i++) {
+		<span class="enscript-type">short</span> events = fds[i].events;
+		<span class="enscript-type">int</span> kerror = 0;
+
+		<span class="enscript-comment">/* per spec, ignore fd values below zero */</span>
+		<span class="enscript-keyword">if</span> (fds[i].fd &lt; 0) {
+			fds[i].revents = 0;
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/* convert the poll event into a kqueue kevent */</span>
+		<span class="enscript-type">struct</span> kevent_internal_s kev = {
+			.ident = fds[i].fd,
+			.flags = EV_ADD | EV_ONESHOT | EV_POLL,
+			.udata = CAST_USER_ADDR_T(&amp;fds[i]) };
+
+		<span class="enscript-comment">/* Handle input events */</span>
+		<span class="enscript-keyword">if</span> (events &amp; ( POLLIN | POLLRDNORM | POLLPRI | POLLRDBAND | POLLHUP )) {
+			kev.filter = EVFILT_READ;
+			<span class="enscript-keyword">if</span> (events &amp; ( POLLPRI | POLLRDBAND ))
+				kev.flags |= EV_OOBAND;
+			kerror = kevent_register(kq, &amp;kev, p);
+		}
+
+		<span class="enscript-comment">/* Handle output events */</span>
+		<span class="enscript-keyword">if</span> (kerror == 0 &amp;&amp;
+		    events &amp; ( POLLOUT | POLLWRNORM | POLLWRBAND )) {
+			kev.filter = EVFILT_WRITE;
+			kerror = kevent_register(kq, &amp;kev, p);
+		}
+
+		<span class="enscript-comment">/* Handle BSD extension vnode events */</span>
+		<span class="enscript-keyword">if</span> (kerror == 0 &amp;&amp;
+		    events &amp; ( POLLEXTEND | POLLATTRIB | POLLNLINK | POLLWRITE )) {
+			kev.filter = EVFILT_VNODE;
+			kev.fflags = 0;
+			<span class="enscript-keyword">if</span> (events &amp; POLLEXTEND)
+				kev.fflags |= NOTE_EXTEND;
+			<span class="enscript-keyword">if</span> (events &amp; POLLATTRIB)
+				kev.fflags |= NOTE_ATTRIB;
+			<span class="enscript-keyword">if</span> (events &amp; POLLNLINK)
+				kev.fflags |= NOTE_LINK;
+			<span class="enscript-keyword">if</span> (events &amp; POLLWRITE)
+				kev.fflags |= NOTE_WRITE;
+			kerror = kevent_register(kq, &amp;kev, p);
+		}
+
+		<span class="enscript-keyword">if</span> (kerror != 0) {
+			fds[i].revents = POLLNVAL;
+			rfds++;
+		} <span class="enscript-keyword">else</span>
+			fds[i].revents = 0;
+	}
+
+	<span class="enscript-comment">/* Did we have any trouble registering? */</span>
+	<span class="enscript-keyword">if</span> (rfds &gt; 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-comment">/* scan for, and possibly wait for, the kevents to trigger */</span>
+	cont-&gt;pca_fds = uap-&gt;fds;
+	cont-&gt;pca_nfds = nfds;
+	cont-&gt;pca_rfds = rfds;
+	error = kqueue_scan(kq, poll_callback, NULL, cont, &amp;atv, p);
+	rfds = cont-&gt;pca_rfds;
+
+ <span class="enscript-reference">done</span>:
+	OSBitAndAtomic(~((uint32_t)P_SELECT), &amp;p-&gt;p_flag);
+	<span class="enscript-comment">/* poll is not restarted after signals... */</span>
+	<span class="enscript-keyword">if</span> (error == ERESTART)
+		error = EINTR;
+	<span class="enscript-keyword">if</span> (error == EWOULDBLOCK)
+		error = 0;
+	<span class="enscript-keyword">if</span> (error == 0) {
+		error = copyout(fds, uap-&gt;fds, nfds * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pollfd));
+		*retval = rfds;
+	}
+
+ <span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (NULL != cont)
+		FREE(cont, M_TEMP);
+
+	kqueue_dealloc(kq);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">poll_callback</span>(__unused <span class="enscript-type">struct</span> kqueue *kq, <span class="enscript-type">struct</span> kevent_internal_s *kevp, <span class="enscript-type">void</span> *data)
+{
+	<span class="enscript-type">struct</span> poll_continue_args *cont = (<span class="enscript-type">struct</span> poll_continue_args *)data;
+	<span class="enscript-type">struct</span> pollfd *fds = CAST_DOWN(<span class="enscript-type">struct</span> pollfd *, kevp-&gt;udata);
+	<span class="enscript-type">short</span> prev_revents = fds-&gt;revents;
+	<span class="enscript-type">short</span> mask = 0;
+
+	<span class="enscript-comment">/* convert the results back into revents */</span>
+	<span class="enscript-keyword">if</span> (kevp-&gt;flags &amp; EV_EOF)
+		fds-&gt;revents |= POLLHUP;
+	<span class="enscript-keyword">if</span> (kevp-&gt;flags &amp; EV_ERROR)
+		fds-&gt;revents |= POLLERR;
+
+	<span class="enscript-keyword">switch</span> (kevp-&gt;filter) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EVFILT_READ</span>:
+		<span class="enscript-keyword">if</span> (fds-&gt;revents &amp; POLLHUP)
+			mask = (POLLIN | POLLRDNORM | POLLPRI | POLLRDBAND );
+		<span class="enscript-keyword">else</span> {
+			mask = (POLLIN | POLLRDNORM);
+			<span class="enscript-keyword">if</span> (kevp-&gt;flags &amp; EV_OOBAND)
+				mask |= (POLLPRI | POLLRDBAND);
+		}
+		fds-&gt;revents |= (fds-&gt;events &amp; mask);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EVFILT_WRITE</span>:
+		<span class="enscript-keyword">if</span> (!(fds-&gt;revents &amp; POLLHUP))
+			fds-&gt;revents |= (fds-&gt;events &amp; ( POLLOUT | POLLWRNORM | POLLWRBAND ));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EVFILT_VNODE</span>:
+		<span class="enscript-keyword">if</span> (kevp-&gt;fflags &amp; NOTE_EXTEND)
+			fds-&gt;revents |= (fds-&gt;events &amp; POLLEXTEND);
+		<span class="enscript-keyword">if</span> (kevp-&gt;fflags &amp; NOTE_ATTRIB)
+			fds-&gt;revents |= (fds-&gt;events &amp; POLLATTRIB);
+		<span class="enscript-keyword">if</span> (kevp-&gt;fflags &amp; NOTE_LINK)
+			fds-&gt;revents |= (fds-&gt;events &amp; POLLNLINK);
+		<span class="enscript-keyword">if</span> (kevp-&gt;fflags &amp; NOTE_WRITE)
+			fds-&gt;revents |= (fds-&gt;events &amp; POLLWRITE);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (fds-&gt;revents != 0 &amp;&amp; prev_revents == 0)
+		cont-&gt;pca_rfds++;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+	
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">seltrue</span>(__unused dev_t dev, __unused <span class="enscript-type">int</span> flag, __unused <span class="enscript-type">struct</span> proc *p)
+{
+
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/*
+ * selcount
+ *
+ * Count the number of bits set in the input bit vector, and establish an
+ * outstanding fp-&gt;f_iocount for each of the descriptors which will be in
+ * use in the select operation.
+ *
+ * Parameters:	p			The process doing the select
+ *		ibits			The input bit vector
+ *		nfd			The number of fd's in the vector
+ *		countp			Pointer to where to store the bit count
+ *
+ * Returns:	0			Success
+ *		EIO			Bad per process open file table
+ *		EBADF			One of the bits in the input bit vector
+ *						references an invalid fd
+ *
+ * Implicit:	*countp (modified)	Count of fd's
+ *
+ * Notes:	This function is the first pass under the proc_fdlock() that
+ *		permits us to recognize invalid descriptors in the bit vector;
+ *		the may, however, not remain valid through the drop and
+ *		later reacquisition of the proc_fdlock().
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">selcount</span>(<span class="enscript-type">struct</span> proc *p, u_int32_t *ibits, <span class="enscript-type">int</span> nfd, <span class="enscript-type">int</span> *countp)
+{
+	<span class="enscript-type">struct</span> filedesc *fdp = p-&gt;p_fd;
+	<span class="enscript-type">int</span> msk, i, j, fd;
+	u_int32_t bits;
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">int</span> n = 0;
+	u_int32_t *iptr;
+	u_int nw;
+	<span class="enscript-type">int</span> error=0; 
+	<span class="enscript-type">int</span> dropcount;
+	<span class="enscript-type">int</span> need_wakeup = 0;
+
+	<span class="enscript-comment">/*
+	 * Problems when reboot; due to MacOSX signal probs
+	 * in Beaker1C ; verify that the p-&gt;p_fd is valid
+	 */</span>
+	<span class="enscript-keyword">if</span> (fdp == NULL) {
+		*countp = 0;
+		<span class="enscript-keyword">return</span>(EIO);
+	}
+	nw = howmany(nfd, NFDBITS);
+
+	proc_fdlock(p);
+	<span class="enscript-keyword">for</span> (msk = 0; msk &lt; 3; msk++) {
+		iptr = (u_int32_t *)&amp;ibits[msk * nw];
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; nfd; i += NFDBITS) {
+			bits = iptr[i/NFDBITS];
+			<span class="enscript-keyword">while</span> ((j = ffs(bits)) &amp;&amp; (fd = i + --j) &lt; nfd) {
+				bits &amp;= ~(1 &lt;&lt; j);
+
+				<span class="enscript-keyword">if</span> (fd &lt; fdp-&gt;fd_nfiles)
+					fp = fdp-&gt;fd_ofiles[fd];
+				<span class="enscript-keyword">else</span>
+					fp = NULL;
+
+				<span class="enscript-keyword">if</span> (fp == NULL ||
+					(fdp-&gt;fd_ofileflags[fd] &amp; UF_RESERVED)) {
+						*countp = 0;
+						error = EBADF;
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+				}
+				fp-&gt;f_iocount++;
+				n++;
+			}
+		}
+	}
+	proc_fdunlock(p);
+
+	*countp = n;
+	<span class="enscript-keyword">return</span> (0);
+
+<span class="enscript-reference">bad</span>:
+	dropcount = 0;
+	
+	<span class="enscript-keyword">if</span> (n == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	<span class="enscript-comment">/* Ignore error return; it's already EBADF */</span>
+	(<span class="enscript-type">void</span>)seldrop_locked(p, ibits, nfd, n, &amp;need_wakeup, 1);
+
+<span class="enscript-reference">out</span>:
+	proc_fdunlock(p);
+	<span class="enscript-keyword">if</span> (need_wakeup) {
+		wakeup(&amp;p-&gt;p_fpdrainwait);
+	}
+	<span class="enscript-keyword">return</span>(error);
+}
+
+
+<span class="enscript-comment">/*
+ * seldrop_locked
+ *
+ * Drop outstanding wait queue references set up during selscan(); drop the
+ * outstanding per fileproc f_iocount() picked up during the selcount().
+ *
+ * Parameters:	p			Process performing the select
+ *		ibits			Input bit bector of fd's
+ *		nfd			Number of fd's
+ *		lim			Limit to number of vector entries to
+ *						consider, or -1 for &quot;all&quot;
+ *		inselect		True if
+ *		need_wakeup		Pointer to flag to set to do a wakeup
+ *					if f_iocont on any descriptor goes to 0
+ *
+ * Returns:	0			Success
+ *		EBADF			One or more fds in the bit vector
+ *						were invalid, but the rest
+ *						were successfully dropped
+ *
+ * Notes:	An fd make become bad while the proc_fdlock() is not held,
+ *		if a multithreaded application closes the fd out from under
+ *		the in progress select.  In this case, we still have to
+ *		clean up after the set up on the remaining fds.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">seldrop_locked</span>(<span class="enscript-type">struct</span> proc *p, u_int32_t *ibits, <span class="enscript-type">int</span> nfd, <span class="enscript-type">int</span> lim, <span class="enscript-type">int</span> *need_wakeup, <span class="enscript-type">int</span> fromselcount)
+{
+	<span class="enscript-type">struct</span> filedesc *fdp = p-&gt;p_fd;
+	<span class="enscript-type">int</span> msk, i, j, nc, fd;
+	u_int32_t bits;
+	<span class="enscript-type">struct</span> fileproc *fp;
+	u_int32_t *iptr;
+	u_int nw;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> dropcount = 0;
+	uthread_t uth = get_bsdthread_info(current_thread());
+	<span class="enscript-type">struct</span> _select_data *seldata;
+
+	*need_wakeup = 0;
+
+	<span class="enscript-comment">/*
+	 * Problems when reboot; due to MacOSX signal probs
+	 * in Beaker1C ; verify that the p-&gt;p_fd is valid
+	 */</span>
+	<span class="enscript-keyword">if</span> (fdp == NULL) {
+		<span class="enscript-keyword">return</span>(EIO);
+	}
+
+	nw = howmany(nfd, NFDBITS);
+	seldata = &amp;uth-&gt;uu_kevent.ss_select_data;
+
+	nc = 0;
+	<span class="enscript-keyword">for</span> (msk = 0; msk &lt; 3; msk++) {
+		iptr = (u_int32_t *)&amp;ibits[msk * nw];
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; nfd; i += NFDBITS) {
+			bits = iptr[i/NFDBITS];
+			<span class="enscript-keyword">while</span> ((j = ffs(bits)) &amp;&amp; (fd = i + --j) &lt; nfd) {
+				bits &amp;= ~(1 &lt;&lt; j);
+				fp = fdp-&gt;fd_ofiles[fd];
+				<span class="enscript-comment">/*
+				 * If we've already dropped as many as were
+				 * counted/scanned, then we are done.  
+				 */</span>
+				<span class="enscript-keyword">if</span> ((fromselcount != 0) &amp;&amp; (++dropcount &gt; lim))
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+				<span class="enscript-comment">/*
+				 * unlink even potentially NULL fileprocs.
+				 * If the FD was closed from under us, we
+				 * still need to cleanup the waitq links!
+				 */</span>
+				selunlinkfp(fp,
+					    seldata-&gt;wqp ? seldata-&gt;wqp[nc] : 0,
+					    uth-&gt;uu_wqset);
+
+				nc++;
+
+				<span class="enscript-keyword">if</span> (fp == NULL) {
+					<span class="enscript-comment">/* skip (now) bad fds */</span>
+					error = EBADF;
+					<span class="enscript-keyword">continue</span>;
+				}
+
+				fp-&gt;f_iocount--;
+				<span class="enscript-keyword">if</span> (fp-&gt;f_iocount &lt; 0)
+					panic(<span class="enscript-string">&quot;f_iocount overdecrement!&quot;</span>);
+
+				<span class="enscript-keyword">if</span> (fp-&gt;f_iocount == 0) {
+					<span class="enscript-comment">/*
+					 * The last iocount is responsible for clearing
+					 * selconfict flag - even if we didn't set it -
+					 * and is also responsible for waking up anyone
+					 * waiting on iocounts to drain.
+					 */</span>
+					<span class="enscript-keyword">if</span> (fp-&gt;f_flags &amp; FP_SELCONFLICT)
+						fp-&gt;f_flags &amp;= ~FP_SELCONFLICT;
+					<span class="enscript-keyword">if</span> (p-&gt;p_fpdrainwait) {
+						p-&gt;p_fpdrainwait = 0;
+						*need_wakeup = 1;
+					}
+				}
+			}
+		}
+	}
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">seldrop</span>(<span class="enscript-type">struct</span> proc *p, u_int32_t *ibits, <span class="enscript-type">int</span> nfd)
+{
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> need_wakeup = 0;
+
+	proc_fdlock(p);
+	error =  seldrop_locked(p, ibits, nfd, nfd, &amp;need_wakeup, 0);
+	proc_fdunlock(p);
+	<span class="enscript-keyword">if</span> (need_wakeup) {
+		wakeup(&amp;p-&gt;p_fpdrainwait);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Record a select request.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">selrecord</span>(__unused <span class="enscript-type">struct</span> proc *selector, <span class="enscript-type">struct</span> selinfo *sip, <span class="enscript-type">void</span> *s_data)
+{
+	thread_t	cur_act = current_thread();
+	<span class="enscript-type">struct</span> uthread * ut = get_bsdthread_info(cur_act);
+	<span class="enscript-comment">/* on input, s_data points to the 64-bit ID of a reserved link object */</span>
+	uint64_t *reserved_link = (uint64_t *)s_data;
+
+	<span class="enscript-comment">/* need to look at collisions */</span>
+
+	<span class="enscript-comment">/*do not record if this is second pass of select */</span>
+	<span class="enscript-keyword">if</span> (!s_data)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> ((sip-&gt;si_flags &amp; SI_INITED) == 0) {
+		waitq_init(&amp;sip-&gt;si_waitq, SYNC_POLICY_FIFO | SYNC_POLICY_DISABLE_IRQ);
+		sip-&gt;si_flags |= SI_INITED;
+		sip-&gt;si_flags &amp;= ~SI_CLEAR;
+	}
+
+	<span class="enscript-keyword">if</span> (sip-&gt;si_flags &amp; SI_RECORDED)
+		sip-&gt;si_flags |= SI_COLL;
+	<span class="enscript-keyword">else</span>
+		sip-&gt;si_flags &amp;= ~SI_COLL;
+
+	sip-&gt;si_flags |= SI_RECORDED;
+	<span class="enscript-comment">/* note: this checks for pre-existing linkage */</span>
+	waitq_link(&amp;sip-&gt;si_waitq, ut-&gt;uu_wqset,
+		   WAITQ_SHOULD_LOCK, reserved_link);
+
+	<span class="enscript-comment">/*
+	 * Always consume the reserved link.
+	 * We can always call waitq_link_release() safely because if
+	 * waitq_link is successful, it consumes the link and resets the
+	 * value to 0, in which case our call to release becomes a no-op.
+	 * If waitq_link fails, then the following release call will actually
+	 * release the reserved link object.
+	 */</span>
+	waitq_link_release(*reserved_link);
+	*reserved_link = 0;
+
+	<span class="enscript-comment">/*
+	 * Use the s_data pointer as an output parameter as well
+	 * This avoids changing the prototype for this function which is
+	 * used by many kexts. We need to surface the waitq object
+	 * associated with the selinfo we just added to the thread's select
+	 * set. New waitq sets do not have back-pointers to set members, so
+	 * the only way to clear out set linkage objects is to go from the
+	 * waitq to the set. We use a memcpy because s_data could be
+	 * pointing to an unaligned value on the stack
+	 * (especially on 32-bit systems)
+	 */</span>
+	<span class="enscript-type">void</span> *wqptr = (<span class="enscript-type">void</span> *)&amp;sip-&gt;si_waitq;
+	memcpy((<span class="enscript-type">void</span> *)s_data, (<span class="enscript-type">void</span> *)&amp;wqptr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span> *));
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">selwakeup</span>(<span class="enscript-type">struct</span> selinfo *sip)
+{
+	
+	<span class="enscript-keyword">if</span> ((sip-&gt;si_flags &amp; SI_INITED) == 0) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (sip-&gt;si_flags &amp; SI_COLL) {
+		nselcoll++;
+		sip-&gt;si_flags &amp;= ~SI_COLL;
+#<span class="enscript-reference">if</span> 0
+		<span class="enscript-comment">/* will not  support */</span>
+		<span class="enscript-comment">//wakeup((caddr_t)&amp;selwait);
+</span>#<span class="enscript-reference">endif</span>
+	}
+
+	<span class="enscript-keyword">if</span> (sip-&gt;si_flags &amp; SI_RECORDED) {
+		waitq_wakeup64_all(&amp;sip-&gt;si_waitq, NO_EVENT64,
+				   THREAD_AWAKENED, WAITQ_ALL_PRIORITIES);
+		sip-&gt;si_flags &amp;= ~SI_RECORDED;
+	}
+
+}
+
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">selthreadclear</span>(<span class="enscript-type">struct</span> selinfo *sip)
+{
+	<span class="enscript-type">struct</span> waitq *wq;
+
+	<span class="enscript-keyword">if</span> ((sip-&gt;si_flags &amp; SI_INITED) == 0) {
+		<span class="enscript-keyword">return</span>;
+	}
+	<span class="enscript-keyword">if</span> (sip-&gt;si_flags &amp; SI_RECORDED) {
+			selwakeup(sip);
+			sip-&gt;si_flags &amp;= ~(SI_RECORDED | SI_COLL);
+	}
+	sip-&gt;si_flags |= SI_CLEAR;
+	sip-&gt;si_flags &amp;= ~SI_INITED;
+
+	wq = &amp;sip-&gt;si_waitq;
+
+	<span class="enscript-comment">/*
+	 * Higher level logic may have a handle on this waitq's prepost ID,
+	 * but that's OK because the waitq_deinit will remove/invalidate the
+	 * prepost object (as well as mark the waitq invalid). This de-couples
+	 * us from any callers that may have a handle to this waitq via the
+	 * prepost ID.
+	 */</span>
+	waitq_deinit(wq);
+}
+
+
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DBG_POST</span>	0x10
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DBG_WATCH</span>	0x11
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DBG_WAIT</span>	0x12
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DBG_MOD</span>		0x13
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DBG_EWAKEUP</span>	0x14
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DBG_ENQUEUE</span>	0x15
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DBG_DEQUEUE</span>	0x16
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DBG_MISC_POST</span> MISCDBG_CODE(DBG_EVENT,DBG_POST)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DBG_MISC_WATCH</span> MISCDBG_CODE(DBG_EVENT,DBG_WATCH)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DBG_MISC_WAIT</span> MISCDBG_CODE(DBG_EVENT,DBG_WAIT)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DBG_MISC_MOD</span> MISCDBG_CODE(DBG_EVENT,DBG_MOD)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DBG_MISC_EWAKEUP</span> MISCDBG_CODE(DBG_EVENT,DBG_EWAKEUP)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DBG_MISC_ENQUEUE</span> MISCDBG_CODE(DBG_EVENT,DBG_ENQUEUE)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DBG_MISC_DEQUEUE</span> MISCDBG_CODE(DBG_EVENT,DBG_DEQUEUE)
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">EVPROCDEQUE</span>(p, evq)	do {				\
+	proc_lock(p);						\
+	<span class="enscript-keyword">if</span> (evq-&gt;ee_flags &amp; EV_QUEUED) {			\
+	        TAILQ_REMOVE(&amp;p-&gt;p_evlist, evq, ee_plist);	\
+		evq-&gt;ee_flags &amp;= ~EV_QUEUED;			\
+	}							\
+	proc_unlock(p);						\
+} <span class="enscript-keyword">while</span> (0);
+
+
+<span class="enscript-comment">/*
+ * called upon socket close. deque and free all events for
+ * the socket...  socket must be locked by caller.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">evsofree</span>(<span class="enscript-type">struct</span> socket *sp)
+{
+        <span class="enscript-type">struct</span> eventqelt *evq, *next;
+	proc_t 	p;
+
+	<span class="enscript-keyword">if</span> (sp == NULL)
+	        <span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">for</span> (evq = sp-&gt;so_evlist.tqh_first; evq != NULL; evq = next) {
+	        next = evq-&gt;ee_slist.tqe_next;
+		p = evq-&gt;ee_proc;
+
+		<span class="enscript-keyword">if</span> (evq-&gt;ee_flags &amp; EV_QUEUED) {
+		        EVPROCDEQUE(p, evq);
+		}
+		TAILQ_REMOVE(&amp;sp-&gt;so_evlist, evq, ee_slist); <span class="enscript-comment">// remove from socket q
+</span>		FREE(evq, M_TEMP);
+	}
+}
+
+
+<span class="enscript-comment">/*
+ * called upon pipe close. deque and free all events for
+ * the pipe... pipe must be locked by caller
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">evpipefree</span>(<span class="enscript-type">struct</span> pipe *cpipe)
+{
+        <span class="enscript-type">struct</span> eventqelt *evq, *next;
+	proc_t 	p;
+
+	<span class="enscript-keyword">for</span> (evq = cpipe-&gt;pipe_evlist.tqh_first; evq != NULL; evq = next) {
+	        next = evq-&gt;ee_slist.tqe_next;
+		p = evq-&gt;ee_proc;
+
+		EVPROCDEQUE(p, evq);
+
+		TAILQ_REMOVE(&amp;cpipe-&gt;pipe_evlist, evq, ee_slist); <span class="enscript-comment">// remove from pipe q
+</span>		FREE(evq, M_TEMP);
+	}
+}
+
+
+<span class="enscript-comment">/*
+ * enqueue this event if it's not already queued. wakeup
+ * the proc if we do queue this event to it...
+ * entered with proc lock held... we drop it before
+ * doing the wakeup and return in that state
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">evprocenque</span>(<span class="enscript-type">struct</span> eventqelt *evq)
+{
+        proc_t	p;
+
+	assert(evq);
+	p = evq-&gt;ee_proc;
+
+	KERNEL_DEBUG(DBG_MISC_ENQUEUE|DBG_FUNC_START, (uint32_t)evq, evq-&gt;ee_flags, evq-&gt;ee_eventmask,0,0);
+
+	proc_lock(p);
+
+	<span class="enscript-keyword">if</span> (evq-&gt;ee_flags &amp; EV_QUEUED) {
+	        proc_unlock(p);
+
+	        KERNEL_DEBUG(DBG_MISC_ENQUEUE|DBG_FUNC_END, 0,0,0,0,0);
+		<span class="enscript-keyword">return</span>;
+	}
+	evq-&gt;ee_flags |= EV_QUEUED;
+
+	TAILQ_INSERT_TAIL(&amp;p-&gt;p_evlist, evq, ee_plist);
+
+	proc_unlock(p);
+
+	wakeup(&amp;p-&gt;p_evlist);
+
+	KERNEL_DEBUG(DBG_MISC_ENQUEUE|DBG_FUNC_END, 0,0,0,0,0);
+}
+
+
+<span class="enscript-comment">/*
+ * pipe lock must be taken by the caller
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">postpipeevent</span>(<span class="enscript-type">struct</span> pipe *pipep, <span class="enscript-type">int</span> event)
+{
+	<span class="enscript-type">int</span>	mask;
+	<span class="enscript-type">struct</span> eventqelt *evq;
+
+	<span class="enscript-keyword">if</span> (pipep == NULL)
+	        <span class="enscript-keyword">return</span>;
+	KERNEL_DEBUG(DBG_MISC_POST|DBG_FUNC_START, event,0,0,1,0);
+
+	<span class="enscript-keyword">for</span> (evq = pipep-&gt;pipe_evlist.tqh_first;
+	     evq != NULL; evq = evq-&gt;ee_slist.tqe_next) {
+
+	        <span class="enscript-keyword">if</span> (evq-&gt;ee_eventmask == 0)
+		        <span class="enscript-keyword">continue</span>;
+	        mask = 0;
+
+		<span class="enscript-keyword">switch</span> (event &amp; (EV_RWBYTES | EV_RCLOSED | EV_WCLOSED)) {
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_RWBYTES</span>:
+		  <span class="enscript-keyword">if</span> ((evq-&gt;ee_eventmask &amp; EV_RE) &amp;&amp; pipep-&gt;pipe_buffer.cnt) {
+		          mask |= EV_RE;
+			  evq-&gt;ee_req.er_rcnt = pipep-&gt;pipe_buffer.cnt;
+		  }
+		  <span class="enscript-keyword">if</span> ((evq-&gt;ee_eventmask &amp; EV_WR) &amp;&amp; 
+		      (MAX(pipep-&gt;pipe_buffer.size,PIPE_SIZE) - pipep-&gt;pipe_buffer.cnt) &gt;= PIPE_BUF) {
+
+		          <span class="enscript-keyword">if</span> (pipep-&gt;pipe_state &amp; PIPE_EOF) {
+			          mask |= EV_WR|EV_RESET;
+				  <span class="enscript-keyword">break</span>;
+			  }
+			  mask |= EV_WR;
+			  evq-&gt;ee_req.er_wcnt = MAX(pipep-&gt;pipe_buffer.size, PIPE_SIZE) - pipep-&gt;pipe_buffer.cnt;
+		  }
+		  <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_WCLOSED</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_RCLOSED</span>:
+		  <span class="enscript-keyword">if</span> ((evq-&gt;ee_eventmask &amp; EV_RE)) {
+		          mask |= EV_RE|EV_RCLOSED;
+		  }
+		  <span class="enscript-keyword">if</span> ((evq-&gt;ee_eventmask &amp; EV_WR)) {
+		          mask |= EV_WR|EV_WCLOSED;
+		  }
+		  <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:
+		  <span class="enscript-keyword">return</span>;
+		}
+		<span class="enscript-keyword">if</span> (mask) {
+		        <span class="enscript-comment">/*
+			 * disarm... postevents are nops until this event is 'read' via
+			 * waitevent and then re-armed via modwatch
+			 */</span>
+		        evq-&gt;ee_eventmask = 0;
+
+			<span class="enscript-comment">/*
+			 * since events are disarmed until after the waitevent
+			 * the ee_req.er_xxxx fields can't change once we've
+			 * inserted this event into the proc queue...
+			 * therefore, the waitevent will see a 'consistent'
+			 * snapshot of the event, even though it won't hold
+			 * the pipe lock, and we're updating the event outside
+			 * of the proc lock, which it will hold
+			 */</span>
+		        evq-&gt;ee_req.er_eventbits |= mask;
+
+			KERNEL_DEBUG(DBG_MISC_POST, (uint32_t)evq, evq-&gt;ee_req.er_eventbits, mask, 1,0);
+
+			evprocenque(evq);
+		}
+	}
+	KERNEL_DEBUG(DBG_MISC_POST|DBG_FUNC_END, 0,0,0,1,0);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SOCKETS</span>
+<span class="enscript-comment">/*
+ * given either a sockbuf or a socket run down the
+ * event list and queue ready events found...
+ * the socket must be locked by the caller
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">postevent</span>(<span class="enscript-type">struct</span> socket *sp, <span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">int</span> event)
+{
+        <span class="enscript-type">int</span>	mask;
+	<span class="enscript-type">struct</span>	eventqelt *evq;
+	<span class="enscript-type">struct</span>	tcpcb *tp;
+
+	<span class="enscript-keyword">if</span> (sb)
+	        sp = sb-&gt;sb_so;
+	<span class="enscript-keyword">if</span> (sp == NULL)
+	        <span class="enscript-keyword">return</span>;
+
+	KERNEL_DEBUG(DBG_MISC_POST|DBG_FUNC_START, (<span class="enscript-type">int</span>)sp, event, 0, 0, 0);
+
+	<span class="enscript-keyword">for</span> (evq = sp-&gt;so_evlist.tqh_first;
+	     evq != NULL; evq = evq-&gt;ee_slist.tqe_next) {
+
+	        <span class="enscript-keyword">if</span> (evq-&gt;ee_eventmask == 0)
+		        <span class="enscript-keyword">continue</span>;
+	        mask = 0;
+
+		<span class="enscript-comment">/* ready for reading:
+		   - byte cnt &gt;= receive low water mark
+		   - read-half of conn closed
+		   - conn pending for listening sock
+		   - socket error pending
+
+		   ready for writing
+		   - byte cnt avail &gt;= send low water mark
+		   - write half of conn closed
+		   - socket error pending
+		   - non-blocking conn completed successfully
+
+		   exception pending
+		   - out of band data
+		   - sock at out of band mark
+		*/</span>
+
+		<span class="enscript-keyword">switch</span> (event &amp; EV_DMASK) {
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_OOB</span>:
+		  <span class="enscript-keyword">if</span> ((evq-&gt;ee_eventmask &amp; EV_EX)) {
+		          <span class="enscript-keyword">if</span> (sp-&gt;so_oobmark || ((sp-&gt;so_state &amp; SS_RCVATMARK)))
+			          mask |= EV_EX|EV_OOB;
+		  }
+		  <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_RWBYTES</span>|EV_OOB:
+		  <span class="enscript-keyword">if</span> ((evq-&gt;ee_eventmask &amp; EV_EX)) {
+		          <span class="enscript-keyword">if</span> (sp-&gt;so_oobmark || ((sp-&gt;so_state &amp; SS_RCVATMARK)))
+			          mask |= EV_EX|EV_OOB;
+		  }
+		  <span class="enscript-comment">/*
+		   * fall into the next case
+		   */</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_RWBYTES</span>:
+		  <span class="enscript-keyword">if</span> ((evq-&gt;ee_eventmask &amp; EV_RE) &amp;&amp; soreadable(sp)) {
+			  <span class="enscript-comment">/* for AFP/OT purposes; may go away in future */</span>
+		          <span class="enscript-keyword">if</span> ((SOCK_DOM(sp) == PF_INET ||
+			      SOCK_DOM(sp) == PF_INET6) &amp;&amp;
+			      SOCK_PROTO(sp) == IPPROTO_TCP &amp;&amp;
+			      (sp-&gt;so_error == ECONNREFUSED ||
+			      sp-&gt;so_error == ECONNRESET)) {
+			          <span class="enscript-keyword">if</span> (sp-&gt;so_pcb == NULL ||
+				      sotoinpcb(sp)-&gt;inp_state ==
+				      INPCB_STATE_DEAD ||
+				      (tp = sototcpcb(sp)) == NULL ||
+				      tp-&gt;t_state == TCPS_CLOSED) {
+				          mask |= EV_RE|EV_RESET;
+					  <span class="enscript-keyword">break</span>;
+				  }
+			  }
+			  mask |= EV_RE;
+			  evq-&gt;ee_req.er_rcnt = sp-&gt;so_rcv.sb_cc;
+
+			  <span class="enscript-keyword">if</span> (sp-&gt;so_state &amp; SS_CANTRCVMORE) {
+			          mask |= EV_FIN;
+				  <span class="enscript-keyword">break</span>;
+			  }
+		  }
+		  <span class="enscript-keyword">if</span> ((evq-&gt;ee_eventmask &amp; EV_WR) &amp;&amp; sowriteable(sp)) {
+			  <span class="enscript-comment">/* for AFP/OT purposes; may go away in future */</span>
+		          <span class="enscript-keyword">if</span> ((SOCK_DOM(sp) == PF_INET ||
+			      SOCK_DOM(sp) == PF_INET6) &amp;&amp;
+			      SOCK_PROTO(sp) == IPPROTO_TCP &amp;&amp;
+			      (sp-&gt;so_error == ECONNREFUSED ||
+			      sp-&gt;so_error == ECONNRESET)) {
+			          <span class="enscript-keyword">if</span> (sp-&gt;so_pcb == NULL ||
+				      sotoinpcb(sp)-&gt;inp_state ==
+				      INPCB_STATE_DEAD ||
+				      (tp = sototcpcb(sp)) == NULL ||
+				      tp-&gt;t_state == TCPS_CLOSED) {
+					  mask |= EV_WR|EV_RESET;
+					  <span class="enscript-keyword">break</span>;
+				  }
+			  }
+			  mask |= EV_WR;
+			  evq-&gt;ee_req.er_wcnt = sbspace(&amp;sp-&gt;so_snd);
+		  }
+		  <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_RCONN</span>:
+		  <span class="enscript-keyword">if</span> ((evq-&gt;ee_eventmask &amp; EV_RE)) {
+			  mask |= EV_RE|EV_RCONN;
+		          evq-&gt;ee_req.er_rcnt = sp-&gt;so_qlen + 1;  <span class="enscript-comment">// incl this one
+</span>		  }
+		  <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_WCONN</span>:
+		  <span class="enscript-keyword">if</span> ((evq-&gt;ee_eventmask &amp; EV_WR)) {
+		          mask |= EV_WR|EV_WCONN;
+		  }
+		  <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_RCLOSED</span>:
+		  <span class="enscript-keyword">if</span> ((evq-&gt;ee_eventmask &amp; EV_RE)) {
+		          mask |= EV_RE|EV_RCLOSED;
+		  }
+		  <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_WCLOSED</span>:
+		  <span class="enscript-keyword">if</span> ((evq-&gt;ee_eventmask &amp; EV_WR)) {
+		          mask |= EV_WR|EV_WCLOSED;
+		  }
+		  <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_FIN</span>:
+		  <span class="enscript-keyword">if</span> (evq-&gt;ee_eventmask &amp; EV_RE) {
+		          mask |= EV_RE|EV_FIN;
+		  }
+		  <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_RESET</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_TIMEOUT</span>:
+		  <span class="enscript-keyword">if</span> (evq-&gt;ee_eventmask &amp; EV_RE) {
+		          mask |= EV_RE | event;
+		  } 
+		  <span class="enscript-keyword">if</span> (evq-&gt;ee_eventmask &amp; EV_WR) {
+		          mask |= EV_WR | event;
+		  }
+		  <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:
+		  KERNEL_DEBUG(DBG_MISC_POST|DBG_FUNC_END, (<span class="enscript-type">int</span>)sp, -1, 0, 0, 0);
+		  <span class="enscript-keyword">return</span>;
+		} <span class="enscript-comment">/* switch */</span>
+
+		KERNEL_DEBUG(DBG_MISC_POST, (<span class="enscript-type">int</span>)evq, evq-&gt;ee_eventmask, evq-&gt;ee_req.er_eventbits, mask, 0);
+
+		<span class="enscript-keyword">if</span> (mask) {
+		        <span class="enscript-comment">/*
+			 * disarm... postevents are nops until this event is 'read' via
+			 * waitevent and then re-armed via modwatch
+			 */</span>
+		        evq-&gt;ee_eventmask = 0;
+
+			<span class="enscript-comment">/*
+			 * since events are disarmed until after the waitevent
+			 * the ee_req.er_xxxx fields can't change once we've
+			 * inserted this event into the proc queue...
+			 * since waitevent can't see this event until we 
+			 * enqueue it, waitevent will see a 'consistent'
+			 * snapshot of the event, even though it won't hold
+			 * the socket lock, and we're updating the event outside
+			 * of the proc lock, which it will hold
+			 */</span>
+		        evq-&gt;ee_req.er_eventbits |= mask;
+
+			evprocenque(evq);
+		}
+	}
+	KERNEL_DEBUG(DBG_MISC_POST|DBG_FUNC_END, (<span class="enscript-type">int</span>)sp, 0, 0, 0, 0);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SOCKETS */</span>
+
+
+<span class="enscript-comment">/*
+ * watchevent system call. user passes us an event to watch
+ * for. we malloc an event object, initialize it, and queue
+ * it to the open socket. when the event occurs, postevent()
+ * will enque it back to our proc where we can retrieve it
+ * via waitevent().
+ *
+ * should this prevent duplicate events on same socket?
+ *
+ * Returns:
+ *		ENOMEM			No memory for operation
+ *	copyin:EFAULT
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">watchevent</span>(proc_t p, <span class="enscript-type">struct</span> watchevent_args *uap, __unused <span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-type">struct</span> eventqelt *evq = (<span class="enscript-type">struct</span> eventqelt *)0;
+	<span class="enscript-type">struct</span> eventqelt *np = NULL;
+	<span class="enscript-type">struct</span> eventreq64 *erp;
+	<span class="enscript-type">struct</span> fileproc *fp = NULL;
+	<span class="enscript-type">int</span> error;
+
+	KERNEL_DEBUG(DBG_MISC_WATCH|DBG_FUNC_START, 0,0,0,0,0);
+
+	<span class="enscript-comment">// get a qelt and fill with users req
+</span>	MALLOC(evq, <span class="enscript-type">struct</span> eventqelt *, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> eventqelt), M_TEMP, M_WAITOK);
+
+	<span class="enscript-keyword">if</span> (evq == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	erp = &amp;evq-&gt;ee_req;
+
+	<span class="enscript-comment">// get users request pkt
+</span>
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+	        error = copyin(uap-&gt;u_req, (caddr_t)erp, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> eventreq64));
+	} <span class="enscript-keyword">else</span> {
+	        <span class="enscript-type">struct</span> eventreq32 er32;
+
+	        error = copyin(uap-&gt;u_req, (caddr_t)&amp;er32, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> eventreq32));
+		<span class="enscript-keyword">if</span> (error == 0) {
+		       <span class="enscript-comment">/*
+			* the user only passes in the
+			* er_type, er_handle and er_data...
+			* the other fields are initialized
+			* below, so don't bother to copy
+			*/</span>
+		        erp-&gt;er_type = er32.er_type;
+		        erp-&gt;er_handle = er32.er_handle;
+		        erp-&gt;er_data = (user_addr_t)er32.er_data;
+		}
+	}
+	<span class="enscript-keyword">if</span> (error) {
+	        FREE(evq, M_TEMP);
+		KERNEL_DEBUG(DBG_MISC_WATCH|DBG_FUNC_END, error,0,0,0,0);
+
+		<span class="enscript-keyword">return</span>(error);		
+	}
+	KERNEL_DEBUG(DBG_MISC_WATCH, erp-&gt;er_handle,uap-&gt;u_eventmask,(uint32_t)evq,0,0);
+
+	<span class="enscript-comment">// validate, freeing qelt if errors
+</span>	error = 0;
+	proc_fdlock(p);
+
+	<span class="enscript-keyword">if</span> (erp-&gt;er_type != EV_FD) {
+		error = EINVAL;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((error = fp_lookup(p, erp-&gt;er_handle, &amp;fp, 1)) != 0) {
+		error = EBADF;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SOCKETS</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_SOCKET) {
+		socket_lock((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data, 1);
+		np = ((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data)-&gt;so_evlist.tqh_first;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SOCKETS */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_PIPE) {
+		PIPE_LOCK((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data);
+		np = ((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data)-&gt;pipe_evlist.tqh_first;
+	} <span class="enscript-keyword">else</span> {
+		fp_drop(p, erp-&gt;er_handle, fp, 1);
+		error = EINVAL;
+	}
+	proc_fdunlock(p);
+
+	<span class="enscript-keyword">if</span> (error) {
+		FREE(evq, M_TEMP);
+
+		KERNEL_DEBUG(DBG_MISC_WATCH|DBG_FUNC_END, error,0,0,0,0);
+		<span class="enscript-keyword">return</span>(error);
+	}
+		
+	<span class="enscript-comment">/*
+	 * only allow one watch per file per proc
+	 */</span>
+	<span class="enscript-keyword">for</span> ( ; np != NULL; np = np-&gt;ee_slist.tqe_next) {
+		<span class="enscript-keyword">if</span> (np-&gt;ee_proc == p) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SOCKETS</span>
+			<span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_SOCKET)
+				socket_unlock((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data, 1);
+			<span class="enscript-keyword">else</span> 
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SOCKETS */</span>
+				PIPE_UNLOCK((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data);
+			fp_drop(p, erp-&gt;er_handle, fp, 0);
+			FREE(evq, M_TEMP);
+			
+			KERNEL_DEBUG(DBG_MISC_WATCH|DBG_FUNC_END, EINVAL,0,0,0,0);
+			<span class="enscript-keyword">return</span>(EINVAL);
+		}
+	}
+	erp-&gt;er_ecnt = erp-&gt;er_rcnt = erp-&gt;er_wcnt = erp-&gt;er_eventbits = 0;
+	evq-&gt;ee_proc = p;
+	evq-&gt;ee_eventmask = uap-&gt;u_eventmask &amp; EV_MASK;
+	evq-&gt;ee_flags = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SOCKETS</span>
+	<span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_SOCKET) {
+		TAILQ_INSERT_TAIL(&amp;((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data)-&gt;so_evlist, evq, ee_slist);
+		postevent((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data, 0, EV_RWBYTES); <span class="enscript-comment">// catch existing events
+</span>
+		socket_unlock((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data, 1);
+	} <span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SOCKETS */</span>
+	{
+		TAILQ_INSERT_TAIL(&amp;((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data)-&gt;pipe_evlist, evq, ee_slist);
+		postpipeevent((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data, EV_RWBYTES);
+
+		PIPE_UNLOCK((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data);
+	}
+	fp_drop_event(p, erp-&gt;er_handle, fp);
+
+	KERNEL_DEBUG(DBG_MISC_WATCH|DBG_FUNC_END, 0,0,0,0,0);
+	<span class="enscript-keyword">return</span>(0);
+}
+
+
+
+<span class="enscript-comment">/*
+ * waitevent system call.
+ * grabs the next waiting event for this proc and returns
+ * it. if no events, user can request to sleep with timeout
+ * or without or poll mode
+ *    ((tv != NULL &amp;&amp; interval == 0) || tv == -1)
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">waitevent</span>(proc_t p, <span class="enscript-type">struct</span> waitevent_args *uap, <span class="enscript-type">int</span> *retval)
+{
+        <span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> eventqelt *evq;
+	<span class="enscript-type">struct</span> eventreq64 *erp;
+	uint64_t abstime, interval;
+	boolean_t fast_poll = FALSE;
+	<span class="enscript-type">union</span> {
+	        <span class="enscript-type">struct</span> eventreq64 er64;
+	        <span class="enscript-type">struct</span> eventreq32 er32;
+	} uer;
+
+	interval = 0;
+
+	<span class="enscript-keyword">if</span> (uap-&gt;tv) {
+		<span class="enscript-type">struct</span> timeval atv;
+		<span class="enscript-comment">/*
+		 * check for fast poll method
+		 */</span>
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+		        <span class="enscript-keyword">if</span> (uap-&gt;tv == (user_addr_t)-1)
+			        fast_poll = TRUE;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (uap-&gt;tv == (user_addr_t)((uint32_t)-1))
+		        fast_poll = TRUE;
+
+		<span class="enscript-keyword">if</span> (fast_poll == TRUE) {
+		        <span class="enscript-keyword">if</span> (p-&gt;p_evlist.tqh_first == NULL) {
+				KERNEL_DEBUG(DBG_MISC_WAIT|DBG_FUNC_NONE, -1,0,0,0,0);
+				<span class="enscript-comment">/*
+				 * poll failed
+				 */</span>
+			        *retval = 1;
+				<span class="enscript-keyword">return</span> (0);
+			}
+			proc_lock(p);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry</span>;
+		}
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+			<span class="enscript-type">struct</span> user64_timeval atv64;
+			error = copyin(uap-&gt;tv, (caddr_t)&amp;atv64, <span class="enscript-keyword">sizeof</span>(atv64));
+			<span class="enscript-comment">/* Loses resolution - assume timeout &lt; 68 years */</span>
+			atv.tv_sec = atv64.tv_sec;
+			atv.tv_usec = atv64.tv_usec;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">struct</span> user32_timeval atv32;
+			error = copyin(uap-&gt;tv, (caddr_t)&amp;atv32, <span class="enscript-keyword">sizeof</span>(atv32));
+			atv.tv_sec = atv32.tv_sec;
+			atv.tv_usec = atv32.tv_usec;
+		}
+
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span>(error);
+		<span class="enscript-keyword">if</span> (itimerfix(&amp;atv)) {
+			error = EINVAL;
+			<span class="enscript-keyword">return</span>(error);
+		}
+		interval = tvtoabstime(&amp;atv);
+	}
+	KERNEL_DEBUG(DBG_MISC_WAIT|DBG_FUNC_START, 0,0,0,0,0);
+
+	proc_lock(p);
+<span class="enscript-reference">retry</span>:
+	<span class="enscript-keyword">if</span> ((evq = p-&gt;p_evlist.tqh_first) != NULL) {
+	        <span class="enscript-comment">/*
+		 * found one... make a local copy while it's still on the queue
+		 * to prevent it from changing while in the midst of copying
+		 * don't want to hold the proc lock across a copyout because
+		 * it might block on a page fault at the target in user space
+		 */</span>
+	        erp = &amp;evq-&gt;ee_req;
+
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p))
+		        bcopy((caddr_t)erp, (caddr_t)&amp;uer.er64, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> eventreq64));
+		<span class="enscript-keyword">else</span> {
+		        uer.er32.er_type  = erp-&gt;er_type;
+		        uer.er32.er_handle  = erp-&gt;er_handle;
+		        uer.er32.er_data  = (uint32_t)erp-&gt;er_data;
+		        uer.er32.er_ecnt  = erp-&gt;er_ecnt;
+		        uer.er32.er_rcnt  = erp-&gt;er_rcnt;
+		        uer.er32.er_wcnt  = erp-&gt;er_wcnt;
+		        uer.er32.er_eventbits = erp-&gt;er_eventbits;
+		}
+	        TAILQ_REMOVE(&amp;p-&gt;p_evlist, evq, ee_plist);
+
+		evq-&gt;ee_flags &amp;= ~EV_QUEUED;
+
+		proc_unlock(p);
+
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p))
+		        error = copyout((caddr_t)&amp;uer.er64, uap-&gt;u_req, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> eventreq64));
+		<span class="enscript-keyword">else</span>
+		        error = copyout((caddr_t)&amp;uer.er32, uap-&gt;u_req, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> eventreq32));
+
+		KERNEL_DEBUG(DBG_MISC_WAIT|DBG_FUNC_END, error,
+			     evq-&gt;ee_req.er_handle,evq-&gt;ee_req.er_eventbits,(uint32_t)evq,0);
+		<span class="enscript-keyword">return</span> (error);
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (uap-&gt;tv &amp;&amp; interval == 0) {
+			proc_unlock(p);
+			*retval = 1;  <span class="enscript-comment">// poll failed
+</span>
+			KERNEL_DEBUG(DBG_MISC_WAIT|DBG_FUNC_END, error,0,0,0,0);
+			<span class="enscript-keyword">return</span> (error);
+		}
+		<span class="enscript-keyword">if</span> (interval != 0)
+			clock_absolutetime_interval_to_deadline(interval, &amp;abstime);
+		<span class="enscript-keyword">else</span>
+		        abstime = 0;
+
+		KERNEL_DEBUG(DBG_MISC_WAIT, 1,(uint32_t)&amp;p-&gt;p_evlist,0,0,0);
+
+		error = msleep1(&amp;p-&gt;p_evlist, &amp;p-&gt;p_mlock, (PSOCK | PCATCH), <span class="enscript-string">&quot;waitevent&quot;</span>, abstime);
+
+		KERNEL_DEBUG(DBG_MISC_WAIT, 2,(uint32_t)&amp;p-&gt;p_evlist,0,0,0);
+
+		<span class="enscript-keyword">if</span> (error == 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry</span>;
+		<span class="enscript-keyword">if</span> (error == ERESTART)
+			error = EINTR;
+		<span class="enscript-keyword">if</span> (error == EWOULDBLOCK) {
+			*retval = 1;
+			error = 0;
+		}
+	}
+	proc_unlock(p);
+
+	KERNEL_DEBUG(DBG_MISC_WAIT|DBG_FUNC_END, 0,0,0,0,0);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * modwatch system call. user passes in event to modify.
+ * if we find it we reset the event bits and que/deque event
+ * it needed.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">modwatch</span>(proc_t p, <span class="enscript-type">struct</span> modwatch_args *uap, __unused <span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-type">struct</span> eventreq64 er;
+	<span class="enscript-type">struct</span> eventreq64 *erp = &amp;er;
+	<span class="enscript-type">struct</span> eventqelt *evq = NULL;	<span class="enscript-comment">/* protected by error return */</span>
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">int</span> flag;
+
+	KERNEL_DEBUG(DBG_MISC_MOD|DBG_FUNC_START, 0,0,0,0,0);
+
+	<span class="enscript-comment">/*
+	 * get user's request pkt
+	 * just need the er_type and er_handle which sit above the
+	 * problematic er_data (32/64 issue)... so only copy in
+	 * those 2 fields
+	 */</span>
+	<span class="enscript-keyword">if</span> ((error = copyin(uap-&gt;u_req, (caddr_t)erp, <span class="enscript-keyword">sizeof</span>(er.er_type) + <span class="enscript-keyword">sizeof</span>(er.er_handle)))) {
+	        KERNEL_DEBUG(DBG_MISC_MOD|DBG_FUNC_END, error,0,0,0,0);
+	        <span class="enscript-keyword">return</span>(error);
+	}
+	proc_fdlock(p);
+
+	<span class="enscript-keyword">if</span> (erp-&gt;er_type != EV_FD) {
+		error = EINVAL;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((error = fp_lookup(p, erp-&gt;er_handle, &amp;fp, 1)) != 0) {
+		error = EBADF;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SOCKETS</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_SOCKET) {
+		socket_lock((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data, 1);
+		evq = ((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data)-&gt;so_evlist.tqh_first;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SOCKETS */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_PIPE) {
+		PIPE_LOCK((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data);
+		evq = ((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data)-&gt;pipe_evlist.tqh_first;
+	} <span class="enscript-keyword">else</span> {
+		fp_drop(p, erp-&gt;er_handle, fp, 1);
+		error = EINVAL;
+	}
+
+	<span class="enscript-keyword">if</span> (error) {
+		proc_fdunlock(p);
+		KERNEL_DEBUG(DBG_MISC_MOD|DBG_FUNC_END, error,0,0,0,0);
+		<span class="enscript-keyword">return</span>(error);
+	}
+
+	<span class="enscript-keyword">if</span> ((uap-&gt;u_eventmask == EV_RM) &amp;&amp; (fp-&gt;f_flags &amp; FP_WAITEVENT)) {
+		fp-&gt;f_flags &amp;= ~FP_WAITEVENT;
+	}
+	proc_fdunlock(p);
+
+	<span class="enscript-comment">// locate event if possible
+</span>	<span class="enscript-keyword">for</span> ( ; evq != NULL; evq = evq-&gt;ee_slist.tqe_next) {
+	        <span class="enscript-keyword">if</span> (evq-&gt;ee_proc == p)
+		        <span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">if</span> (evq == NULL) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SOCKETS</span>
+		<span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_SOCKET) 
+			socket_unlock((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data, 1);
+		<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SOCKETS */</span>
+			PIPE_UNLOCK((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data);
+		fp_drop(p, erp-&gt;er_handle, fp, 0);
+		KERNEL_DEBUG(DBG_MISC_MOD|DBG_FUNC_END, EINVAL,0,0,0,0);
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+	KERNEL_DEBUG(DBG_MISC_MOD, erp-&gt;er_handle,uap-&gt;u_eventmask,(uint32_t)evq,0,0);
+
+	<span class="enscript-keyword">if</span> (uap-&gt;u_eventmask == EV_RM) {
+		EVPROCDEQUE(p, evq);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SOCKETS</span>
+		<span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_SOCKET) {
+			TAILQ_REMOVE(&amp;((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data)-&gt;so_evlist, evq, ee_slist);
+			socket_unlock((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data, 1);
+		} <span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SOCKETS */</span>
+		{
+			TAILQ_REMOVE(&amp;((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data)-&gt;pipe_evlist, evq, ee_slist);
+			PIPE_UNLOCK((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data);
+		}
+		fp_drop(p, erp-&gt;er_handle, fp, 0);
+		FREE(evq, M_TEMP);
+		KERNEL_DEBUG(DBG_MISC_MOD|DBG_FUNC_END, 0,0,0,0,0);
+		<span class="enscript-keyword">return</span>(0);
+	}
+	<span class="enscript-keyword">switch</span> (uap-&gt;u_eventmask &amp; EV_MASK) {
+ 
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+		flag = 0;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_RE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_WR</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_RE</span>|EV_WR:
+		flag = EV_RWBYTES;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_EX</span>:
+		flag = EV_OOB;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_EX</span>|EV_RE:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_EX</span>|EV_WR:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EV_EX</span>|EV_RE|EV_WR:
+		flag = EV_OOB|EV_RWBYTES;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SOCKETS</span>
+		<span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_SOCKET) 
+			socket_unlock((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data, 1);
+		<span class="enscript-keyword">else</span> 
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SOCKETS */</span>
+			PIPE_UNLOCK((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data);
+		fp_drop(p, erp-&gt;er_handle, fp, 0);
+		KERNEL_DEBUG(DBG_MISC_WATCH|DBG_FUNC_END, EINVAL,0,0,0,0);
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+	<span class="enscript-comment">/*
+	 * since we're holding the socket/pipe lock, the event
+	 * cannot go from the unqueued state to the queued state
+	 * however, it can go from the queued state to the unqueued state
+	 * since that direction is protected by the proc_lock...
+	 * so do a quick check for EV_QUEUED w/o holding the proc lock
+	 * since by far the common case will be NOT EV_QUEUED, this saves
+	 * us taking the proc_lock the majority of the time
+	 */</span>
+	<span class="enscript-keyword">if</span> (evq-&gt;ee_flags &amp; EV_QUEUED) {
+		<span class="enscript-comment">/*
+		 * EVPROCDEQUE will recheck the state after it grabs the proc_lock
+		 */</span>
+		EVPROCDEQUE(p, evq);
+	}
+	<span class="enscript-comment">/*
+	 * while the event is off the proc queue and
+	 * we're holding the socket/pipe lock
+	 * it's safe to update these fields...
+	 */</span>
+	evq-&gt;ee_req.er_eventbits = 0;
+	evq-&gt;ee_eventmask = uap-&gt;u_eventmask &amp; EV_MASK;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SOCKETS</span>
+	<span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_SOCKET) {
+		postevent((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data, 0, flag);
+		socket_unlock((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data, 1);
+	} <span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SOCKETS */</span>
+	{
+		postpipeevent((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data, flag);
+		PIPE_UNLOCK((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data);
+	}
+	fp_drop(p, erp-&gt;er_handle, fp, 0);
+	KERNEL_DEBUG(DBG_MISC_MOD|DBG_FUNC_END, evq-&gt;ee_req.er_handle,evq-&gt;ee_eventmask,(uint32_t)fp-&gt;f_data,flag,0);
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/* this routine is called from the close of fd with proc_fdlock held */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">waitevent_close</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> fileproc *fp)
+{
+	<span class="enscript-type">struct</span> eventqelt *evq;
+
+
+	fp-&gt;f_flags &amp;= ~FP_WAITEVENT;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SOCKETS</span>
+	<span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_SOCKET) {
+	        socket_lock((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data, 1);
+		evq = ((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data)-&gt;so_evlist.tqh_first;
+	} <span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SOCKETS */</span>
+	<span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_PIPE) {
+	        PIPE_LOCK((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data);
+		evq = ((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data)-&gt;pipe_evlist.tqh_first;
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+	proc_fdunlock(p);
+
+
+	<span class="enscript-comment">// locate event if possible
+</span>	<span class="enscript-keyword">for</span> ( ; evq != NULL; evq = evq-&gt;ee_slist.tqe_next) {
+	        <span class="enscript-keyword">if</span> (evq-&gt;ee_proc == p)
+		        <span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">if</span> (evq == NULL) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SOCKETS</span>
+	        <span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_SOCKET) 
+		        socket_unlock((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data, 1);
+		<span class="enscript-keyword">else</span> 
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SOCKETS */</span>
+		        PIPE_UNLOCK((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data);
+
+		proc_fdlock(p);
+
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+	EVPROCDEQUE(p, evq);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SOCKETS</span>
+	<span class="enscript-keyword">if</span> (fp-&gt;f_type == DTYPE_SOCKET) {
+		TAILQ_REMOVE(&amp;((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data)-&gt;so_evlist, evq, ee_slist);
+		socket_unlock((<span class="enscript-type">struct</span> socket *)fp-&gt;f_data, 1);
+	} <span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SOCKETS */</span>
+	{
+		TAILQ_REMOVE(&amp;((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data)-&gt;pipe_evlist, evq, ee_slist);
+		PIPE_UNLOCK((<span class="enscript-type">struct</span> pipe *)fp-&gt;f_data);
+	}
+	FREE(evq, M_TEMP);
+
+	proc_fdlock(p);
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+
+<span class="enscript-comment">/*
+ * gethostuuid
+ *
+ * Description:	Get the host UUID from IOKit and return it to user space.
+ *
+ * Parameters:	uuid_buf		Pointer to buffer to receive UUID
+ *		timeout			Timespec for timout
+ *		spi				SPI, skip sandbox check (temporary)
+ *
+ * Returns:	0			Success
+ *		EWOULDBLOCK		Timeout is too short
+ *		copyout:EFAULT		Bad user buffer
+ *		mac_system_check_info:EPERM		Client not allowed to perform this operation
+ *
+ * Notes:	A timeout seems redundant, since if it's tolerable to not
+ *		have a system UUID in hand, then why ask for one?
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">gethostuuid</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> gethostuuid_args *uap, __unused int32_t *retval)
+{
+	kern_return_t kret;
+	<span class="enscript-type">int</span> error;
+	mach_timespec_t mach_ts;	<span class="enscript-comment">/* for IOKit call */</span>
+	__darwin_uuid_t uuid_kern;	<span class="enscript-comment">/* for IOKit call */</span>
+
+	<span class="enscript-keyword">if</span> (!uap-&gt;spi) {
+	}
+
+	<span class="enscript-comment">/* Convert the 32/64 bit timespec into a mach_timespec_t */</span>
+	<span class="enscript-keyword">if</span> ( proc_is64bit(p) ) {
+		<span class="enscript-type">struct</span> user64_timespec ts;
+		error = copyin(uap-&gt;timeoutp, &amp;ts, <span class="enscript-keyword">sizeof</span>(ts));
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+		mach_ts.tv_sec = ts.tv_sec;
+		mach_ts.tv_nsec = ts.tv_nsec;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> user32_timespec ts;
+		error = copyin(uap-&gt;timeoutp, &amp;ts, <span class="enscript-keyword">sizeof</span>(ts) );
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+		mach_ts.tv_sec = ts.tv_sec;
+		mach_ts.tv_nsec = ts.tv_nsec;
+	}
+
+	<span class="enscript-comment">/* Call IOKit with the stack buffer to get the UUID */</span>
+	kret = IOBSDGetPlatformUUID(uuid_kern, mach_ts);
+
+	<span class="enscript-comment">/*
+	 * If we get it, copy out the data to the user buffer; note that a
+	 * uuid_t is an array of characters, so this is size invariant for
+	 * 32 vs. 64 bit.
+	 */</span>
+	<span class="enscript-keyword">if</span> (kret == KERN_SUCCESS) {
+		error = copyout(uuid_kern, uap-&gt;uuid_buf, <span class="enscript-keyword">sizeof</span>(uuid_kern));
+	} <span class="enscript-keyword">else</span> {
+		error = EWOULDBLOCK;
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * ledger
+ *
+ * Description:	Omnibus system call for ledger operations
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ledger</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> ledger_args *args, __unused int32_t *retval)
+{
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">p</span>)
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-type">int</span> rval, pid, len, error;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">LEDGER_DEBUG</span>
+	<span class="enscript-type">struct</span> ledger_limit_args lla;
+#<span class="enscript-reference">endif</span>
+	task_t task;
+	proc_t proc;
+
+	<span class="enscript-comment">/* Finish copying in the necessary args before taking the proc lock */</span>
+	error = 0;
+	len = 0;
+	<span class="enscript-keyword">if</span> (args-&gt;cmd == LEDGER_ENTRY_INFO)
+		error = copyin(args-&gt;arg3, (<span class="enscript-type">char</span> *)&amp;len, <span class="enscript-keyword">sizeof</span> (len));
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (args-&gt;cmd == LEDGER_TEMPLATE_INFO)
+		error = copyin(args-&gt;arg2, (<span class="enscript-type">char</span> *)&amp;len, <span class="enscript-keyword">sizeof</span> (len));
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">LEDGER_DEBUG</span>
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (args-&gt;cmd == LEDGER_LIMIT)
+		error = copyin(args-&gt;arg2, (<span class="enscript-type">char</span> *)&amp;lla, <span class="enscript-keyword">sizeof</span> (lla));
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+	<span class="enscript-keyword">if</span> (len &lt; 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	rval = 0;
+	<span class="enscript-keyword">if</span> (args-&gt;cmd != LEDGER_TEMPLATE_INFO) {
+		pid = args-&gt;arg1;
+		proc = proc_find(pid);
+		<span class="enscript-keyword">if</span> (proc == NULL)
+			<span class="enscript-keyword">return</span> (ESRCH);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+		error = mac_proc_check_ledger(p, proc, args-&gt;cmd);
+		<span class="enscript-keyword">if</span> (error) {
+			proc_rele(proc);
+			<span class="enscript-keyword">return</span> (error);
+		}
+#<span class="enscript-reference">endif</span>
+
+		task = proc-&gt;task;
+	}
+		
+	<span class="enscript-keyword">switch</span> (args-&gt;cmd) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">LEDGER_DEBUG</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">LEDGER_LIMIT</span>: {
+			<span class="enscript-keyword">if</span> (!kauth_cred_issuser(kauth_cred_get()))
+				rval = EPERM;
+			rval = ledger_limit(task, &amp;lla);
+			proc_rele(proc);
+			<span class="enscript-keyword">break</span>;
+		}
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">LEDGER_INFO</span>: {
+			<span class="enscript-type">struct</span> ledger_info info;
+
+			rval = ledger_info(task, &amp;info);
+			proc_rele(proc);
+			<span class="enscript-keyword">if</span> (rval == 0)
+				rval = copyout(&amp;info, args-&gt;arg2,
+				    <span class="enscript-keyword">sizeof</span> (info));
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">LEDGER_ENTRY_INFO</span>: {
+			<span class="enscript-type">void</span> *buf;
+			<span class="enscript-type">int</span> sz;
+
+			rval = ledger_get_task_entry_info_multiple(task, &amp;buf, &amp;len);
+			proc_rele(proc);
+			<span class="enscript-keyword">if</span> ((rval == 0) &amp;&amp; (len &gt; 0)) {
+				sz = len * <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ledger_entry_info);
+				rval = copyout(buf, args-&gt;arg2, sz);
+				kfree(buf, sz);
+			}
+			<span class="enscript-keyword">if</span> (rval == 0)
+				rval = copyout(&amp;len, args-&gt;arg3, <span class="enscript-keyword">sizeof</span> (len));
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">LEDGER_TEMPLATE_INFO</span>: {
+			<span class="enscript-type">void</span> *buf;
+			<span class="enscript-type">int</span> sz;
+
+			rval = ledger_template_info(&amp;buf, &amp;len);
+			<span class="enscript-keyword">if</span> ((rval == 0) &amp;&amp; (len &gt; 0)) {
+				sz = len * <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ledger_template_info);
+				rval = copyout(buf, args-&gt;arg1, sz);
+				kfree(buf, sz);
+			}
+			<span class="enscript-keyword">if</span> (rval == 0)
+				rval = copyout(&amp;len, args-&gt;arg2, <span class="enscript-keyword">sizeof</span> (len));
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-reference">default</span>:
+			rval = EINVAL;
+	}
+
+	<span class="enscript-keyword">return</span> (rval);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">telemetry</span>(__unused <span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> telemetry_args *args, __unused int32_t *retval)
+{
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-keyword">switch</span> (args-&gt;cmd) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TELEMETRY</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TELEMETRY_CMD_TIMER_EVENT</span>:
+		error = telemetry_timer_event(args-&gt;deadline, args-&gt;interval, args-&gt;leeway);
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_TELEMETRY */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TELEMETRY_CMD_VOUCHER_NAME</span>:
+		<span class="enscript-keyword">if</span> (thread_set_voucher_name((mach_port_name_t)args-&gt;deadline))
+			error = EINVAL;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		error = EINVAL;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">DEVELOPMENT</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">DEBUG</span>)
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_WAITQ_DEBUG</span>
+<span class="enscript-type">static</span> uint64_t g_wqset_num = 0;
+<span class="enscript-type">struct</span> g_wqset {
+	queue_chain_t      link;
+	<span class="enscript-type">struct</span> waitq_set  *wqset;
+};
+
+<span class="enscript-type">static</span> queue_head_t         g_wqset_list;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> waitq_set    *g_waitq_set = NULL;
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> waitq_set *<span class="enscript-function-name">sysctl_get_wqset</span>(<span class="enscript-type">int</span> idx)
+{
+	<span class="enscript-type">struct</span> g_wqset *gwqs;
+
+	<span class="enscript-keyword">if</span> (!g_wqset_num)
+		queue_init(&amp;g_wqset_list);
+
+	<span class="enscript-comment">/* don't bother with locks: this is test-only code! */</span>
+	qe_foreach_element(gwqs, &amp;g_wqset_list, link) {
+		<span class="enscript-keyword">if</span> ((<span class="enscript-type">int</span>)(wqset_id(gwqs-&gt;wqset) &amp; 0xffffffff) == idx)
+			<span class="enscript-keyword">return</span> gwqs-&gt;wqset;
+	}
+
+	<span class="enscript-comment">/* allocate a new one */</span>
+	++g_wqset_num;
+	gwqs = (<span class="enscript-type">struct</span> g_wqset *)kalloc(<span class="enscript-keyword">sizeof</span>(*gwqs));
+	assert(gwqs != NULL);
+
+	gwqs-&gt;wqset = waitq_set_alloc(SYNC_POLICY_FIFO|SYNC_POLICY_PREPOST|SYNC_POLICY_DISABLE_IRQ);
+	enqueue_tail(&amp;g_wqset_list, &amp;gwqs-&gt;link);
+	printf(<span class="enscript-string">&quot;[WQ]: created new waitq set 0x%llx\n&quot;</span>, wqset_id(gwqs-&gt;wqset));
+
+	<span class="enscript-keyword">return</span> gwqs-&gt;wqset;
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_GLOBAL_TEST_QUEUES</span> 64
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> g_wq_init = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> waitq  g_wq[MAX_GLOBAL_TEST_QUEUES];
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">struct</span> waitq *<span class="enscript-function-name">global_test_waitq</span>(<span class="enscript-type">int</span> idx)
+{
+	<span class="enscript-keyword">if</span> (idx &lt; 0)
+		<span class="enscript-keyword">return</span> NULL;
+
+	<span class="enscript-keyword">if</span> (!g_wq_init) {
+		g_wq_init = 1;
+		<span class="enscript-keyword">for</span> (<span class="enscript-type">int</span> i = 0; i &lt; MAX_GLOBAL_TEST_QUEUES; i++)
+			waitq_init(&amp;g_wq[i], SYNC_POLICY_FIFO|SYNC_POLICY_DISABLE_IRQ);
+	}
+
+	<span class="enscript-keyword">return</span> &amp;g_wq[idx % MAX_GLOBAL_TEST_QUEUES];
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> sysctl_waitq_wakeup_one SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> index;
+	<span class="enscript-type">struct</span> waitq *waitq;
+	kern_return_t kr;
+	int64_t event64 = 0;
+
+	error = SYSCTL_IN(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+
+	<span class="enscript-keyword">if</span> (!req-&gt;newptr)
+		<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+
+	<span class="enscript-keyword">if</span> (event64 &lt; 0) {
+		index = (<span class="enscript-type">int</span>)((-event64) &amp; 0xffffffff);
+		waitq = wqset_waitq(sysctl_get_wqset(index));
+		index = -index;
+	} <span class="enscript-keyword">else</span> {
+		index = (<span class="enscript-type">int</span>)event64;
+		waitq = global_test_waitq(index);
+	}
+
+	event64 = 0;
+
+	printf(<span class="enscript-string">&quot;[WQ]: Waking one thread on waitq [%d] event:0x%llx\n&quot;</span>,
+	       index, event64);
+	kr = waitq_wakeup64_one(waitq, (event64_t)event64, THREAD_AWAKENED,
+				WAITQ_ALL_PRIORITIES);
+	printf(<span class="enscript-string">&quot;[WQ]: \tkr=%d\n&quot;</span>, kr);
+
+	<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;kr, <span class="enscript-keyword">sizeof</span>(kr));
+}
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern, OID_AUTO, waitq_wakeup_one, CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+	    0, 0, sysctl_waitq_wakeup_one, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;wakeup one thread waiting on given event&quot;</span>);
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> sysctl_waitq_wakeup_all SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> index;
+	<span class="enscript-type">struct</span> waitq *waitq;
+	kern_return_t kr;
+	int64_t event64 = 0;
+
+	error = SYSCTL_IN(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+
+	<span class="enscript-keyword">if</span> (!req-&gt;newptr)
+		<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+
+	<span class="enscript-keyword">if</span> (event64 &lt; 0) {
+		index = (<span class="enscript-type">int</span>)((-event64) &amp; 0xffffffff);
+		waitq = wqset_waitq(sysctl_get_wqset(index));
+		index = -index;
+	} <span class="enscript-keyword">else</span> {
+		index = (<span class="enscript-type">int</span>)event64;
+		waitq = global_test_waitq(index);
+	}
+
+	event64 = 0;
+
+	printf(<span class="enscript-string">&quot;[WQ]: Waking all threads on waitq [%d] event:0x%llx\n&quot;</span>,
+	       index, event64);
+	kr = waitq_wakeup64_all(waitq, (event64_t)event64,
+				THREAD_AWAKENED, WAITQ_ALL_PRIORITIES);
+	printf(<span class="enscript-string">&quot;[WQ]: \tkr=%d\n&quot;</span>, kr);
+
+	<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;kr, <span class="enscript-keyword">sizeof</span>(kr));
+}
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern, OID_AUTO, waitq_wakeup_all, CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+	    0, 0, sysctl_waitq_wakeup_all, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;wakeup all threads waiting on given event&quot;</span>);
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> sysctl_waitq_wait SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> index;
+	<span class="enscript-type">struct</span> waitq *waitq;
+	kern_return_t kr;
+	int64_t event64 = 0;
+
+	error = SYSCTL_IN(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+
+	<span class="enscript-keyword">if</span> (!req-&gt;newptr)
+		<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+
+	<span class="enscript-keyword">if</span> (event64 &lt; 0) {
+		index = (<span class="enscript-type">int</span>)((-event64) &amp; 0xffffffff);
+		waitq = wqset_waitq(sysctl_get_wqset(index));
+		index = -index;
+	} <span class="enscript-keyword">else</span> {
+		index = (<span class="enscript-type">int</span>)event64;
+		waitq = global_test_waitq(index);
+	}
+
+	event64 = 0;
+
+	printf(<span class="enscript-string">&quot;[WQ]: Current thread waiting on waitq [%d] event:0x%llx\n&quot;</span>,
+	       index, event64);
+	kr = waitq_assert_wait64(waitq, (event64_t)event64, THREAD_INTERRUPTIBLE, 0);
+	<span class="enscript-keyword">if</span> (kr == THREAD_WAITING)
+		thread_block(THREAD_CONTINUE_NULL);
+	printf(<span class="enscript-string">&quot;[WQ]: \tWoke Up: kr=%d\n&quot;</span>, kr);
+
+	<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;kr, <span class="enscript-keyword">sizeof</span>(kr));
+}
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern, OID_AUTO, waitq_wait, CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+	    0, 0, sysctl_waitq_wait, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;start waiting on given event&quot;</span>);
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> sysctl_wqset_select SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> waitq_set *wqset;
+	uint64_t event64 = 0;
+
+	error = SYSCTL_IN(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+
+	<span class="enscript-keyword">if</span> (!req-&gt;newptr)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	wqset = sysctl_get_wqset((<span class="enscript-type">int</span>)(event64 &amp; 0xffffffff));
+	g_waitq_set = wqset;
+
+	event64 = wqset_id(wqset);
+	printf(<span class="enscript-string">&quot;[WQ]: selected wqset 0x%llx\n&quot;</span>, event64);
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (g_waitq_set)
+		event64 = wqset_id(g_waitq_set);
+	<span class="enscript-keyword">else</span>
+		event64 = (uint64_t)(-1);
+
+	<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+}
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern, OID_AUTO, wqset_select, CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+	    0, 0, sysctl_wqset_select, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;select/create a global waitq set&quot;</span>);
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> sysctl_waitq_link SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> index;
+	<span class="enscript-type">struct</span> waitq *waitq;
+	<span class="enscript-type">struct</span> waitq_set *wqset;
+	kern_return_t kr;
+	uint64_t reserved_link = 0;
+	int64_t event64 = 0;
+
+	error = SYSCTL_IN(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+
+	<span class="enscript-keyword">if</span> (!req-&gt;newptr)
+		<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+
+	<span class="enscript-keyword">if</span> (!g_waitq_set)
+		g_waitq_set = sysctl_get_wqset(1);
+	wqset = g_waitq_set;
+
+	<span class="enscript-keyword">if</span> (event64 &lt; 0) {
+		<span class="enscript-type">struct</span> waitq_set *tmp;
+		index = (<span class="enscript-type">int</span>)((-event64) &amp; 0xffffffff);
+		tmp = sysctl_get_wqset(index);
+		<span class="enscript-keyword">if</span> (tmp == wqset)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		waitq = wqset_waitq(tmp);
+		index = -index;
+	} <span class="enscript-keyword">else</span> {
+		index = (<span class="enscript-type">int</span>)event64;
+		waitq = global_test_waitq(index);
+	}
+
+	printf(<span class="enscript-string">&quot;[WQ]: linking waitq [%d] to global wqset (0x%llx)\n&quot;</span>,
+	       index, wqset_id(wqset));
+	reserved_link = waitq_link_reserve(waitq);
+	kr = waitq_link(waitq, wqset, WAITQ_SHOULD_LOCK, &amp;reserved_link);
+	waitq_link_release(reserved_link);
+
+	printf(<span class="enscript-string">&quot;[WQ]: \tkr=%d\n&quot;</span>, kr);
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;kr, <span class="enscript-keyword">sizeof</span>(kr));
+}
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern, OID_AUTO, waitq_link, CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+	    0, 0, sysctl_waitq_link, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;link global waitq to test waitq set&quot;</span>);
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> sysctl_waitq_unlink SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> index;
+	<span class="enscript-type">struct</span> waitq *waitq;
+	<span class="enscript-type">struct</span> waitq_set *wqset;
+	kern_return_t kr;
+	uint64_t event64 = 0;
+
+	error = SYSCTL_IN(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+
+	<span class="enscript-keyword">if</span> (!req-&gt;newptr)
+		<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+
+	<span class="enscript-keyword">if</span> (!g_waitq_set)
+		g_waitq_set = sysctl_get_wqset(1);
+	wqset = g_waitq_set;
+
+	index = (<span class="enscript-type">int</span>)event64;
+	waitq = global_test_waitq(index);
+
+	printf(<span class="enscript-string">&quot;[WQ]: unlinking waitq [%d] from global wqset (0x%llx)\n&quot;</span>,
+	       index, wqset_id(wqset));
+
+	kr = waitq_unlink(waitq, wqset);
+	printf(<span class="enscript-string">&quot;[WQ]: \tkr=%d\n&quot;</span>, kr);
+
+	<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;kr, <span class="enscript-keyword">sizeof</span>(kr));
+}
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern, OID_AUTO, waitq_unlink, CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+	    0, 0, sysctl_waitq_unlink, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;unlink global waitq from test waitq set&quot;</span>);
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> sysctl_waitq_clear_prepost SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">struct</span> waitq *waitq;
+	uint64_t event64 = 0;
+	<span class="enscript-type">int</span> error, index;
+
+	error = SYSCTL_IN(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+
+	<span class="enscript-keyword">if</span> (!req-&gt;newptr)
+		<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+
+	index = (<span class="enscript-type">int</span>)event64;
+	waitq = global_test_waitq(index);
+
+	printf(<span class="enscript-string">&quot;[WQ]: clearing prepost on waitq [%d]\n&quot;</span>, index);
+	waitq_clear_prepost(waitq);
+
+	<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+}
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern, OID_AUTO, waitq_clear_prepost, CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+	    0, 0, sysctl_waitq_clear_prepost, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;clear prepost on given waitq&quot;</span>);
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> sysctl_wqset_unlink_all SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> waitq_set *wqset;
+	kern_return_t kr;
+	uint64_t event64 = 0;
+
+	error = SYSCTL_IN(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+
+	<span class="enscript-keyword">if</span> (!req-&gt;newptr)
+		<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+
+	<span class="enscript-keyword">if</span> (!g_waitq_set)
+		g_waitq_set = sysctl_get_wqset(1);
+	wqset = g_waitq_set;
+
+	printf(<span class="enscript-string">&quot;[WQ]: unlinking all queues from global wqset (0x%llx)\n&quot;</span>,
+	       wqset_id(wqset));
+
+	kr = waitq_set_unlink_all(wqset);
+	printf(<span class="enscript-string">&quot;[WQ]: \tkr=%d\n&quot;</span>, kr);
+
+	<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;kr, <span class="enscript-keyword">sizeof</span>(kr));
+}
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern, OID_AUTO, wqset_unlink_all, CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+	    0, 0, sysctl_wqset_unlink_all, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;unlink all queues from test waitq set&quot;</span>);
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> sysctl_wqset_clear_preposts SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">struct</span> waitq_set *wqset = NULL;
+	uint64_t event64 = 0;
+	<span class="enscript-type">int</span> error, index;
+
+	error = SYSCTL_IN(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+
+	<span class="enscript-keyword">if</span> (!req-&gt;newptr)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	index = (<span class="enscript-type">int</span>)((event64) &amp; 0xffffffff);
+	wqset = sysctl_get_wqset(index);
+	assert(wqset != NULL);
+
+	printf(<span class="enscript-string">&quot;[WQ]: clearing preposts on wqset 0x%llx\n&quot;</span>, wqset_id(wqset));
+	waitq_set_clear_preposts(wqset);
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (wqset)
+		event64 = wqset_id(wqset);
+	<span class="enscript-keyword">else</span>
+		event64 = (uint64_t)(-1);
+
+	<span class="enscript-keyword">return</span> SYSCTL_OUT(req, &amp;event64, <span class="enscript-keyword">sizeof</span>(event64));
+}
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern, OID_AUTO, wqset_clear_preposts, CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+	    0, 0, sysctl_wqset_clear_preposts, <span class="enscript-string">&quot;Q&quot;</span>, <span class="enscript-string">&quot;clear preposts on given waitq set&quot;</span>);
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_WAITQ_DEBUG */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(DEVELOPMENT) || defined(DEBUG) */</span>
+</pre>
+<hr />
+</body></html>

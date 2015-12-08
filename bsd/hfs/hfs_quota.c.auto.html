@@ -1,0 +1,1024 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>hfs_quota.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">hfs_quota.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2002-2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1990, 1993, 1995
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * Robert Elz at The University of Melbourne.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)hfs_quota.c
+ *	derived from @(#)ufs_quota.c	8.5 (Berkeley) 5/20/95
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/quota.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;hfs/hfs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;hfs/hfs_cnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;hfs/hfs_quota.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;hfs/hfs_mount.h&gt;</span>
+
+
+<span class="enscript-comment">/*
+ * Quota name to error message mapping.
+ */</span>
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> *quotatypes[] = INITQFNAMES;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Set up the quotas for a cnode.
+ *
+ * This routine completely defines the semantics of quotas.
+ * If other criterion want to be used to establish quotas, the
+ * MAXQUOTAS value in quotas.h should be increased, and the
+ * additional dquots set up here.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_getinoquota</span>(cp)
+	<span class="enscript-type">register</span> <span class="enscript-type">struct</span> cnode *cp;
+{
+	<span class="enscript-type">struct</span> hfsmount *hfsmp;
+	<span class="enscript-type">struct</span> vnode *vp;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> drop_usrquota = false;
+
+	vp = cp-&gt;c_vp ? cp-&gt;c_vp : cp-&gt;c_rsrc_vp;
+	hfsmp = VTOHFS(vp);
+	<span class="enscript-comment">/*
+	 * Set up the user quota based on file uid.
+	 * EINVAL means that quotas are not enabled.
+	 */</span>
+	<span class="enscript-keyword">if</span> (cp-&gt;c_dquot[USRQUOTA] == NODQUOT) {
+		error = dqget(cp-&gt;c_uid, &amp;hfsmp-&gt;hfs_qfiles[USRQUOTA], USRQUOTA, &amp;cp-&gt;c_dquot[USRQUOTA]);
+		<span class="enscript-keyword">if</span> ((error != 0) &amp;&amp; (error != EINVAL)) {
+			<span class="enscript-keyword">return</span> error;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (error == 0) {
+			drop_usrquota = true;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Set up the group quota based on file gid.
+	 * EINVAL means that quotas are not enabled.
+	 */</span>
+	<span class="enscript-keyword">if</span> (cp-&gt;c_dquot[GRPQUOTA] == NODQUOT) {
+	       error = dqget(cp-&gt;c_gid, &amp;hfsmp-&gt;hfs_qfiles[GRPQUOTA], GRPQUOTA, &amp;cp-&gt;c_dquot[GRPQUOTA]);
+	       <span class="enscript-keyword">if</span> ((error != 0) &amp;&amp; (error != EINVAL)) {
+		       <span class="enscript-keyword">if</span> (drop_usrquota == true) {
+			       dqrele(cp-&gt;c_dquot[USRQUOTA]);
+			       cp-&gt;c_dquot[USRQUOTA] = NODQUOT;
+		       }
+		       <span class="enscript-keyword">return</span> error;
+	       }
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Update disk usage, and take corrective action.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_chkdq</span>(cp, change, cred, flags)
+	<span class="enscript-type">register</span> <span class="enscript-type">struct</span> cnode *cp;
+	int64_t change;
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> flags;
+{
+	<span class="enscript-type">register</span> <span class="enscript-type">struct</span> dquot *dq;
+	<span class="enscript-type">register</span> <span class="enscript-type">int</span> i;
+	int64_t ncurbytes;
+	<span class="enscript-type">int</span> error=0;
+	<span class="enscript-type">struct</span> proc *p;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-keyword">if</span> ((flags &amp; CHOWN) == 0)
+		hfs_chkdquot(cp);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (change == 0)
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">if</span> (change &lt; 0) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; MAXQUOTAS; i++) {
+			<span class="enscript-keyword">if</span> ((dq = cp-&gt;c_dquot[i]) == NODQUOT)
+				<span class="enscript-keyword">continue</span>;
+			dqlock(dq);
+
+			ncurbytes = dq-&gt;dq_curbytes + change;
+			<span class="enscript-keyword">if</span> (ncurbytes &gt;= 0)
+				dq-&gt;dq_curbytes = ncurbytes;
+			<span class="enscript-keyword">else</span>
+				dq-&gt;dq_curbytes = 0;
+			dq-&gt;dq_flags &amp;= ~DQ_BLKS;
+			dq-&gt;dq_flags |= DQ_MOD;
+
+			dqunlock(dq);
+		}
+		<span class="enscript-keyword">return</span> (0);
+	}
+	p = current_proc();
+	<span class="enscript-comment">/*
+	 * This use of proc_ucred() is safe because kernproc credential never
+	 * changes.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!IS_VALID_CRED(cred))
+		cred = proc_ucred(kernproc);
+	<span class="enscript-keyword">if</span> (suser(cred, NULL) || proc_forcequota(p)) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; MAXQUOTAS; i++) {
+			<span class="enscript-keyword">if</span> ((dq = cp-&gt;c_dquot[i]) == NODQUOT)
+				<span class="enscript-keyword">continue</span>;
+			error = hfs_chkdqchg(cp, change, cred, i);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+	}
+	<span class="enscript-keyword">if</span> ((flags &amp; FORCE) || error == 0) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; MAXQUOTAS; i++) {
+			<span class="enscript-keyword">if</span> ((dq = cp-&gt;c_dquot[i]) == NODQUOT)
+				<span class="enscript-keyword">continue</span>;
+			dqlock(dq);
+
+			dq-&gt;dq_curbytes += change;
+			dq-&gt;dq_flags |= DQ_MOD;
+
+			dqunlock(dq);
+		}
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Check for a valid change to a users allocation.
+ * Issue an error message if appropriate.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_chkdqchg</span>(cp, change, cred, type)
+	<span class="enscript-type">struct</span> cnode *cp;
+	int64_t change;
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> type;
+{
+	<span class="enscript-type">register</span> <span class="enscript-type">struct</span> dquot *dq = cp-&gt;c_dquot[type];
+	u_int64_t ncurbytes;
+	<span class="enscript-type">struct</span> vnode *vp = cp-&gt;c_vp ? cp-&gt;c_vp : cp-&gt;c_rsrc_vp;
+	
+	dqlock(dq);
+	
+	ncurbytes = dq-&gt;dq_curbytes + change;
+	<span class="enscript-comment">/*
+	 * If user would exceed their hard limit, disallow space allocation.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ncurbytes &gt;= dq-&gt;dq_bhardlimit &amp;&amp; dq-&gt;dq_bhardlimit) {
+		<span class="enscript-keyword">if</span> ((dq-&gt;dq_flags &amp; DQ_BLKS) == 0 &amp;&amp;
+		    cp-&gt;c_uid == kauth_cred_getuid(cred)) {
+#<span class="enscript-reference">if</span> 0	
+			printf(<span class="enscript-string">&quot;\nhfs: write failed, %s disk limit reached\n&quot;</span>,
+			    quotatypes[type]);
+#<span class="enscript-reference">endif</span>
+			dq-&gt;dq_flags |= DQ_BLKS;
+		}
+		dqunlock(dq);
+
+		<span class="enscript-keyword">return</span> (EDQUOT);
+	}
+	<span class="enscript-comment">/*
+	 * If user is over their soft limit for too long, disallow space
+	 * allocation. Reset time limit as they cross their soft limit.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ncurbytes &gt;= dq-&gt;dq_bsoftlimit &amp;&amp; dq-&gt;dq_bsoftlimit) {
+		<span class="enscript-type">struct</span> timeval tv;
+
+		microuptime(&amp;tv);
+		<span class="enscript-keyword">if</span> (dq-&gt;dq_curbytes &lt; dq-&gt;dq_bsoftlimit) {
+			dq-&gt;dq_btime = tv.tv_sec +
+			    VTOHFS(vp)-&gt;hfs_qfiles[type].qf_btime;
+#<span class="enscript-reference">if</span> 0
+			<span class="enscript-keyword">if</span> (cp-&gt;c_uid == kauth_cred_getuid(cred))
+				printf(<span class="enscript-string">&quot;\nhfs: warning, %s %s\n&quot;</span>,
+				    quotatypes[type], <span class="enscript-string">&quot;disk quota exceeded&quot;</span>);
+#<span class="enscript-reference">endif</span>
+			dqunlock(dq);
+
+			<span class="enscript-keyword">return</span> (0);
+		}
+		<span class="enscript-keyword">if</span> (tv.tv_sec &gt; (time_t)dq-&gt;dq_btime) {
+			<span class="enscript-keyword">if</span> ((dq-&gt;dq_flags &amp; DQ_BLKS) == 0 &amp;&amp;
+			    cp-&gt;c_uid == kauth_cred_getuid(cred)) {
+#<span class="enscript-reference">if</span> 0
+				printf(<span class="enscript-string">&quot;\nhfs: write failed, %s %s\n&quot;</span>,
+				    quotatypes[type],
+				    <span class="enscript-string">&quot;disk quota exceeded for too long&quot;</span>);
+#<span class="enscript-reference">endif</span>
+				dq-&gt;dq_flags |= DQ_BLKS;
+			}
+			dqunlock(dq);
+
+			<span class="enscript-keyword">return</span> (EDQUOT);
+		}
+	}
+	dqunlock(dq);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Check the inode limit, applying corrective action.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_chkiq</span>(cp, change, cred, flags)
+	<span class="enscript-type">register</span> <span class="enscript-type">struct</span> cnode *cp;
+	int32_t change;
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> flags;
+{
+	<span class="enscript-type">register</span> <span class="enscript-type">struct</span> dquot *dq;
+	<span class="enscript-type">register</span> <span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> ncurinodes, error=0;
+	<span class="enscript-type">struct</span> proc *p;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-keyword">if</span> ((flags &amp; CHOWN) == 0)
+		hfs_chkdquot(cp);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (change == 0)
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">if</span> (change &lt; 0) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; MAXQUOTAS; i++) {
+			<span class="enscript-keyword">if</span> ((dq = cp-&gt;c_dquot[i]) == NODQUOT)
+				<span class="enscript-keyword">continue</span>;
+			dqlock(dq);
+
+			ncurinodes = dq-&gt;dq_curinodes + change;
+			<span class="enscript-keyword">if</span> (ncurinodes &gt;= 0)
+				dq-&gt;dq_curinodes = ncurinodes;
+			<span class="enscript-keyword">else</span>
+				dq-&gt;dq_curinodes = 0;
+			dq-&gt;dq_flags &amp;= ~DQ_INODS;
+			dq-&gt;dq_flags |= DQ_MOD;
+
+			dqunlock(dq);
+		}
+		<span class="enscript-keyword">return</span> (0);
+	}
+	p = current_proc();
+	<span class="enscript-comment">/*
+	 * This use of proc_ucred() is safe because kernproc credential never
+	 * changes.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!IS_VALID_CRED(cred))
+		cred = proc_ucred(kernproc);
+	<span class="enscript-keyword">if</span> (suser(cred, NULL) || proc_forcequota(p)) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; MAXQUOTAS; i++) {
+			<span class="enscript-keyword">if</span> ((dq = cp-&gt;c_dquot[i]) == NODQUOT)
+				<span class="enscript-keyword">continue</span>;
+			error = hfs_chkiqchg(cp, change, cred, i);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+	}
+	<span class="enscript-keyword">if</span> ((flags &amp; FORCE) || error == 0) { 
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; MAXQUOTAS; i++) {
+			<span class="enscript-keyword">if</span> ((dq = cp-&gt;c_dquot[i]) == NODQUOT)
+				<span class="enscript-keyword">continue</span>;
+			dqlock(dq);
+
+			dq-&gt;dq_curinodes += change;
+			dq-&gt;dq_flags |= DQ_MOD;
+
+			dqunlock(dq);
+		}
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * Check to see if a change to a user's allocation should be permitted or not.
+ * Issue an error message if it should not be permitted.  Return 0 if 
+ * it should be allowed.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">hfs_isiqchg_allowed</span>(dq, hfsmp, change, cred, type, uid)
+	<span class="enscript-type">struct</span> dquot* dq;
+	<span class="enscript-type">struct</span> hfsmount* hfsmp;
+	int32_t change;
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> type;
+	uid_t uid;
+{
+	u_int32_t ncurinodes;
+
+	dqlock(dq);
+
+	ncurinodes = dq-&gt;dq_curinodes + change;
+	<span class="enscript-comment">/*
+	 * If user would exceed their hard limit, disallow cnode allocation.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ncurinodes &gt;= dq-&gt;dq_ihardlimit &amp;&amp; dq-&gt;dq_ihardlimit) {
+		<span class="enscript-keyword">if</span> ((dq-&gt;dq_flags &amp; DQ_INODS) == 0 &amp;&amp;
+		    uid == kauth_cred_getuid(cred)) {
+			dq-&gt;dq_flags |= DQ_INODS;
+		}
+		dqunlock(dq);
+
+		<span class="enscript-keyword">return</span> (EDQUOT);
+	}
+	<span class="enscript-comment">/*
+	 * If user is over their soft limit for too long, disallow cnode
+	 * allocation. Reset time limit as they cross their soft limit.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ncurinodes &gt;= dq-&gt;dq_isoftlimit &amp;&amp; dq-&gt;dq_isoftlimit) {
+		<span class="enscript-type">struct</span> timeval tv;
+		
+		microuptime(&amp;tv);
+		<span class="enscript-keyword">if</span> (dq-&gt;dq_curinodes &lt; dq-&gt;dq_isoftlimit) {
+			dq-&gt;dq_itime = tv.tv_sec + hfsmp-&gt;hfs_qfiles[type].qf_itime;
+			dqunlock(dq);
+			<span class="enscript-keyword">return</span> (0);
+		}
+		<span class="enscript-keyword">if</span> (tv.tv_sec &gt; (time_t)dq-&gt;dq_itime) {
+			<span class="enscript-keyword">if</span> (((dq-&gt;dq_flags &amp; DQ_INODS) == 0) &amp;&amp;
+			    (uid == kauth_cred_getuid(cred))) {
+				dq-&gt;dq_flags |= DQ_INODS;
+			}
+			dqunlock(dq);
+
+			<span class="enscript-keyword">return</span> (EDQUOT);
+		}
+	}
+	dqunlock(dq);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * Check for a valid change to a users allocation.
+ * Issue an error message if appropriate.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_chkiqchg</span>(cp, change, cred, type)
+	<span class="enscript-type">struct</span> cnode *cp;
+	int32_t change;
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> type;
+{
+	<span class="enscript-type">register</span> <span class="enscript-type">struct</span> dquot *dq = cp-&gt;c_dquot[type];
+	u_int32_t ncurinodes;
+	<span class="enscript-type">struct</span> vnode *vp = cp-&gt;c_vp ? cp-&gt;c_vp : cp-&gt;c_rsrc_vp;
+
+	dqlock(dq);
+
+	ncurinodes = dq-&gt;dq_curinodes + change;
+	<span class="enscript-comment">/*
+	 * If user would exceed their hard limit, disallow cnode allocation.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ncurinodes &gt;= dq-&gt;dq_ihardlimit &amp;&amp; dq-&gt;dq_ihardlimit) {
+		<span class="enscript-keyword">if</span> ((dq-&gt;dq_flags &amp; DQ_INODS) == 0 &amp;&amp;
+		    cp-&gt;c_uid == kauth_cred_getuid(cred)) {
+#<span class="enscript-reference">if</span> 0
+			printf(<span class="enscript-string">&quot;\nhfs: write failed, %s cnode limit reached\n&quot;</span>,
+			    quotatypes[type]);
+#<span class="enscript-reference">endif</span>
+			dq-&gt;dq_flags |= DQ_INODS;
+		}
+		dqunlock(dq);
+
+		<span class="enscript-keyword">return</span> (EDQUOT);
+	}
+	<span class="enscript-comment">/*
+	 * If user is over their soft limit for too long, disallow cnode
+	 * allocation. Reset time limit as they cross their soft limit.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ncurinodes &gt;= dq-&gt;dq_isoftlimit &amp;&amp; dq-&gt;dq_isoftlimit) {
+		<span class="enscript-type">struct</span> timeval tv;
+		
+		microuptime(&amp;tv);
+		<span class="enscript-keyword">if</span> (dq-&gt;dq_curinodes &lt; dq-&gt;dq_isoftlimit) {
+			dq-&gt;dq_itime = tv.tv_sec +
+			    VTOHFS(vp)-&gt;hfs_qfiles[type].qf_itime;
+#<span class="enscript-reference">if</span> 0
+			<span class="enscript-keyword">if</span> (cp-&gt;c_uid == kauth_cred_getuid(cred))
+				printf(<span class="enscript-string">&quot;\nhfs: warning, %s %s\n&quot;</span>,
+				    quotatypes[type], <span class="enscript-string">&quot;cnode quota exceeded&quot;</span>);
+#<span class="enscript-reference">endif</span>
+			dqunlock(dq);
+
+			<span class="enscript-keyword">return</span> (0);
+		}
+		<span class="enscript-keyword">if</span> (tv.tv_sec &gt; (time_t)dq-&gt;dq_itime) {
+			<span class="enscript-keyword">if</span> ((dq-&gt;dq_flags &amp; DQ_INODS) == 0 &amp;&amp;
+			    cp-&gt;c_uid == kauth_cred_getuid(cred)) {
+#<span class="enscript-reference">if</span> 0
+				printf(<span class="enscript-string">&quot;\nhfs: write failed, %s %s\n&quot;</span>,
+				    quotatypes[type],
+				    <span class="enscript-string">&quot;cnode quota exceeded for too long&quot;</span>);
+#<span class="enscript-reference">endif</span>
+				dq-&gt;dq_flags |= DQ_INODS;
+			}
+			dqunlock(dq);
+
+			<span class="enscript-keyword">return</span> (EDQUOT);
+		}
+	}
+	dqunlock(dq);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+<span class="enscript-comment">/*
+ * On filesystems with quotas enabled, it is an error for a file to change
+ * size and not to have a dquot structure associated with it.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_chkdquot</span>(cp)
+	<span class="enscript-type">register</span> <span class="enscript-type">struct</span> cnode *cp;
+{
+	<span class="enscript-type">struct</span> vnode *vp = cp-&gt;c_vp ? cp-&gt;c_vp : cp-&gt;c_rsrc_vp;
+	<span class="enscript-type">struct</span> hfsmount *hfsmp = VTOHFS(vp);
+	<span class="enscript-type">register</span> <span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; MAXQUOTAS; i++) {
+		<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_qfiles[i].qf_vp == NULLVP)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (cp-&gt;c_dquot[i] == NODQUOT) {
+			vprint(<span class="enscript-string">&quot;chkdquot: missing dquot&quot;</span>, vp);
+			panic(<span class="enscript-string">&quot;missing dquot&quot;</span>);
+		}
+	}
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Code to process quotactl commands.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Q_QUOTAON - set up a quota file for a particular file system.
+ */</span>
+<span class="enscript-type">struct</span> hfs_quotaon_cargs {
+        <span class="enscript-type">int</span>	error;
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_quotaon_callback</span>(<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">void</span> *cargs)
+{
+	<span class="enscript-type">struct</span> hfs_quotaon_cargs *args;
+
+	args = (<span class="enscript-type">struct</span> hfs_quotaon_cargs *)cargs;
+
+	args-&gt;error = hfs_getinoquota(VTOC(vp));
+	<span class="enscript-keyword">if</span> (args-&gt;error)
+	        <span class="enscript-keyword">return</span> (VNODE_RETURNED_DONE);
+
+	<span class="enscript-keyword">return</span> (VNODE_RETURNED);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_quotaon</span>(p, mp, type, fnamep)
+	<span class="enscript-type">struct</span> proc *p;
+	<span class="enscript-type">struct</span> mount *mp;
+	<span class="enscript-type">register</span> <span class="enscript-type">int</span> type;
+	caddr_t fnamep;
+{
+	<span class="enscript-type">struct</span> hfsmount *hfsmp = VFSTOHFS(mp);
+	<span class="enscript-type">struct</span> quotafile *qfp;
+	<span class="enscript-type">struct</span> vnode *vp;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> hfs_quotaon_cargs args;
+
+	<span class="enscript-comment">/* Finish setting up quota structures. */</span>
+	dqhashinit();
+
+	qfp = &amp;hfsmp-&gt;hfs_qfiles[type];
+
+	<span class="enscript-keyword">if</span> ( (qf_get(qfp, QTF_OPENING)) )
+	        <span class="enscript-keyword">return</span> (0);
+
+	error = vnode_open(fnamep, FREAD|FWRITE, 0, 0, &amp;vp, NULL);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (!vnode_isreg(vp)) {
+		(<span class="enscript-type">void</span>) vnode_close(vp, FREAD|FWRITE, NULL);
+		error = EACCES;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	vfs_setflags(mp, (u_int64_t)((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)MNT_QUOTA));
+	hfs_lock_mount (hfsmp);
+	hfsmp-&gt;hfs_flags |= HFS_QUOTAS;
+	hfs_unlock_mount (hfsmp);
+	vnode_setnoflush(vp);
+	<span class="enscript-comment">/*
+	 * Save the credential of the process that turned on quotas.
+	 */</span>
+	qfp-&gt;qf_cred = kauth_cred_proc_ref(p);
+	qfp-&gt;qf_vp = vp;
+	<span class="enscript-comment">/*
+	 * Finish initializing the quota file
+	 */</span>
+	error = dqfileopen(qfp, type);
+	<span class="enscript-keyword">if</span> (error) {
+		(<span class="enscript-type">void</span>) vnode_close(vp, FREAD|FWRITE, NULL);
+
+		<span class="enscript-keyword">if</span> (IS_VALID_CRED(qfp-&gt;qf_cred))
+		        kauth_cred_unref(&amp;qfp-&gt;qf_cred);
+	        qfp-&gt;qf_vp = NULLVP;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	qf_put(qfp, QTF_OPENING);
+
+	<span class="enscript-comment">/*
+	 * Search vnodes associated with this mount point,
+	 * adding references to quota file being opened.
+	 * NB: only need to add dquot's for cnodes being modified.
+	 *
+	 * hfs_quota_callback will be called for each vnode open for
+	 * 'write' (VNODE_WRITEABLE) hung off of this mount point
+	 * the vnode will be in an 'unbusy' state (VNODE_WAIT) and 
+	 * properly referenced and unreferenced around the callback
+	 */</span>
+	args.error = 0;
+
+	vnode_iterate(mp, VNODE_WRITEABLE | VNODE_WAIT, hfs_quotaon_callback, (<span class="enscript-type">void</span> *)&amp;args);
+	
+	error = args.error;
+
+	<span class="enscript-keyword">if</span> (error) {
+		hfs_quotaoff(p, mp, type);
+	}
+	<span class="enscript-keyword">return</span> (error);
+
+<span class="enscript-reference">out</span>:
+	qf_put(qfp, QTF_OPENING);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * Q_QUOTAOFF - turn off disk quotas for a filesystem.
+ */</span>
+<span class="enscript-type">struct</span> hfs_quotaoff_cargs {
+        <span class="enscript-type">int</span>	type;
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_quotaoff_callback</span>(<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">void</span> *cargs)
+{
+	<span class="enscript-type">struct</span> hfs_quotaoff_cargs *args;
+	<span class="enscript-type">struct</span> cnode *cp;
+	<span class="enscript-type">struct</span> dquot *dq;
+
+	args = (<span class="enscript-type">struct</span> hfs_quotaoff_cargs *)cargs;
+
+	cp = VTOC(vp);
+
+	dq = cp-&gt;c_dquot[args-&gt;type];
+	cp-&gt;c_dquot[args-&gt;type] = NODQUOT;
+
+	dqrele(dq);
+
+	<span class="enscript-keyword">return</span> (VNODE_RETURNED);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_quotaoff</span>(__unused <span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> mount *mp, <span class="enscript-type">register</span> <span class="enscript-type">int</span> type)
+{
+	<span class="enscript-type">struct</span> vnode *qvp;
+	<span class="enscript-type">struct</span> hfsmount *hfsmp = VFSTOHFS(mp);
+	<span class="enscript-type">struct</span> quotafile *qfp;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> hfs_quotaoff_cargs args;
+
+	<span class="enscript-comment">/*
+	 * If quotas haven't been initialized, there's no work to be done.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!dqisinitialized())
+		<span class="enscript-keyword">return</span> (0);
+
+	qfp = &amp;hfsmp-&gt;hfs_qfiles[type];
+	
+	<span class="enscript-keyword">if</span> ( (qf_get(qfp, QTF_CLOSING)) )
+	        <span class="enscript-keyword">return</span> (0);
+	qvp = qfp-&gt;qf_vp;
+
+	<span class="enscript-comment">/*
+	 * Sync out any orpaned dirty dquot entries.
+	 */</span>
+	dqsync_orphans(qfp);
+
+	<span class="enscript-comment">/*
+	 * Search vnodes associated with this mount point,
+	 * deleting any references to quota file being closed.
+     *
+	 * hfs_quotaoff_callback will be called for each vnode
+	 * hung off of this mount point
+	 * the vnode will be in an 'unbusy' state (VNODE_WAIT) and 
+	 * properly referenced and unreferenced around the callback
+	 */</span>
+	args.type = type;
+
+	vnode_iterate(mp, VNODE_WAIT, hfs_quotaoff_callback, (<span class="enscript-type">void</span> *)&amp;args);
+
+	dqflush(qvp);
+	<span class="enscript-comment">/* Finish tearing down the quota file */</span>
+	dqfileclose(qfp, type);
+
+	vnode_clearnoflush(qvp);
+	error = vnode_close(qvp, FREAD|FWRITE, NULL);
+
+	qfp-&gt;qf_vp = NULLVP;
+
+	<span class="enscript-keyword">if</span> (IS_VALID_CRED(qfp-&gt;qf_cred))
+		kauth_cred_unref(&amp;qfp-&gt;qf_cred);
+	<span class="enscript-keyword">for</span> (type = 0; type &lt; MAXQUOTAS; type++)
+		<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_qfiles[type].qf_vp != NULLVP)
+			<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">if</span> (type == MAXQUOTAS) {
+		vfs_clearflags(mp, (u_int64_t)((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)MNT_QUOTA));
+		hfs_lock_mount (hfsmp);
+		hfsmp-&gt;hfs_flags &amp;= ~HFS_QUOTAS;
+		hfs_unlock_mount (hfsmp);
+	}
+
+	qf_put(qfp, QTF_CLOSING);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * hfs_quotacheck - checks quotas mountwide for a hypothetical situation.  It probes
+ * the quota data structures to see if adding an inode would be allowed or not.  If it
+ * will be allowed, the change is made.  Otherwise, it reports an error back out so the
+ * caller will know not to proceed with inode allocation in the HFS Catalog.
+ * 
+ * Note that this function ONLY tests for addition of inodes, not subtraction.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">hfs_quotacheck</span>(hfsmp, change, uid, gid, cred)
+	<span class="enscript-type">struct</span> hfsmount *hfsmp;
+	<span class="enscript-type">int</span> change;
+	uid_t uid;
+	gid_t gid;
+	kauth_cred_t cred;
+{
+	<span class="enscript-type">struct</span> dquot *dq = NULL;
+	<span class="enscript-type">struct</span> proc *p;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> i;
+	id_t id = uid;
+
+	p = current_proc();
+	<span class="enscript-keyword">if</span> (!IS_VALID_CRED(cred)) {
+		<span class="enscript-comment">/* This use of proc_ucred() is safe because kernproc credential never changes */</span>
+		cred = proc_ucred(kernproc);
+	}
+
+	<span class="enscript-keyword">if</span> (suser(cred, NULL) || proc_forcequota(p)) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; MAXQUOTAS; i++) {
+			<span class="enscript-comment">/* Select if user or group id should be used */</span>
+			<span class="enscript-keyword">if</span> (i == USRQUOTA)
+				id = uid;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (i == GRPQUOTA)
+				id = gid;
+
+			error = dqget(id, &amp;hfsmp-&gt;hfs_qfiles[i], i, &amp;dq);
+			<span class="enscript-keyword">if</span> (error &amp;&amp; (error != EINVAL))
+				<span class="enscript-keyword">break</span>;
+
+			error = 0;
+			<span class="enscript-keyword">if</span> (dq == NODQUOT)
+				<span class="enscript-keyword">continue</span>;
+
+			<span class="enscript-comment">/* Check quota information */</span>
+			error = hfs_isiqchg_allowed(dq, hfsmp, change, cred, i, id);
+			<span class="enscript-keyword">if</span> (error) {
+				dqrele(dq);
+				<span class="enscript-keyword">break</span>;
+			}
+			
+			dqlock(dq);
+			<span class="enscript-comment">/* Update quota information */</span>
+			dq-&gt;dq_curinodes += change;
+			dqunlock(dq);
+			dqrele(dq);
+		}
+	}
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+
+<span class="enscript-comment">/*
+ * Q_GETQUOTA - return current values in a dqblk structure.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_getquota</span>(mp, id, type, datap)
+	<span class="enscript-type">struct</span> mount *mp;
+	u_int32_t id;
+	<span class="enscript-type">int</span> type;
+	caddr_t datap;
+{
+	<span class="enscript-type">struct</span> dquot *dq;
+	<span class="enscript-type">int</span> error;
+
+	error = dqget(id, &amp;VFSTOHFS(mp)-&gt;hfs_qfiles[type], type, &amp;dq);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+	dqlock(dq);
+
+	bcopy(&amp;dq-&gt;dq_dqb, datap, <span class="enscript-keyword">sizeof</span>(dq-&gt;dq_dqb));
+	
+	dqunlock(dq);
+	dqrele(dq);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Q_SETQUOTA - assign an entire dqblk structure.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_setquota</span>(mp, id, type, datap)
+	<span class="enscript-type">struct</span> mount *mp;
+	u_int32_t id;
+	<span class="enscript-type">int</span> type;
+	caddr_t datap;
+{
+	<span class="enscript-type">struct</span> dquot *dq;
+	<span class="enscript-type">struct</span> hfsmount *hfsmp = VFSTOHFS(mp);
+	<span class="enscript-type">struct</span> dqblk * newlimp = (<span class="enscript-type">struct</span> dqblk *) datap;
+	<span class="enscript-type">struct</span> timeval tv;
+	<span class="enscript-type">int</span> error;
+
+	error = dqget(id, &amp;hfsmp-&gt;hfs_qfiles[type], type, &amp;dq);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+	dqlock(dq);
+
+	<span class="enscript-comment">/*
+	 * Copy all but the current values.
+	 * Reset time limit if previously had no soft limit or were
+	 * under it, but now have a soft limit and are over it.
+	 */</span>
+	newlimp-&gt;dqb_curbytes = dq-&gt;dq_curbytes;
+	newlimp-&gt;dqb_curinodes = dq-&gt;dq_curinodes;
+	<span class="enscript-keyword">if</span> (dq-&gt;dq_id != 0) {
+		newlimp-&gt;dqb_btime = dq-&gt;dq_btime;
+		newlimp-&gt;dqb_itime = dq-&gt;dq_itime;
+	}
+	<span class="enscript-keyword">if</span> (newlimp-&gt;dqb_bsoftlimit &amp;&amp;
+	    dq-&gt;dq_curbytes &gt;= newlimp-&gt;dqb_bsoftlimit &amp;&amp;
+	    (dq-&gt;dq_bsoftlimit == 0 || dq-&gt;dq_curbytes &lt; dq-&gt;dq_bsoftlimit)) {
+		microuptime(&amp;tv);
+		newlimp-&gt;dqb_btime = tv.tv_sec + hfsmp-&gt;hfs_qfiles[type].qf_btime;
+	}
+	<span class="enscript-keyword">if</span> (newlimp-&gt;dqb_isoftlimit &amp;&amp;
+	    dq-&gt;dq_curinodes &gt;= newlimp-&gt;dqb_isoftlimit &amp;&amp;
+	    (dq-&gt;dq_isoftlimit == 0 || dq-&gt;dq_curinodes &lt; dq-&gt;dq_isoftlimit)) {
+		microuptime(&amp;tv);
+		newlimp-&gt;dqb_itime = tv.tv_sec + hfsmp-&gt;hfs_qfiles[type].qf_itime;
+	}
+	bcopy(newlimp, &amp;dq-&gt;dq_dqb, <span class="enscript-keyword">sizeof</span>(dq-&gt;dq_dqb));
+	<span class="enscript-keyword">if</span> (dq-&gt;dq_curbytes &lt; dq-&gt;dq_bsoftlimit)
+		dq-&gt;dq_flags &amp;= ~DQ_BLKS;
+	<span class="enscript-keyword">if</span> (dq-&gt;dq_curinodes &lt; dq-&gt;dq_isoftlimit)
+		dq-&gt;dq_flags &amp;= ~DQ_INODS;
+	<span class="enscript-keyword">if</span> (dq-&gt;dq_isoftlimit == 0 &amp;&amp; dq-&gt;dq_bsoftlimit == 0 &amp;&amp;
+	    dq-&gt;dq_ihardlimit == 0 &amp;&amp; dq-&gt;dq_bhardlimit == 0)
+		dq-&gt;dq_flags |= DQ_FAKE;
+	<span class="enscript-keyword">else</span>
+		dq-&gt;dq_flags &amp;= ~DQ_FAKE;
+	dq-&gt;dq_flags |= DQ_MOD;
+
+	dqunlock(dq);
+	dqrele(dq);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Q_SETUSE - set current cnode and byte usage.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_setuse</span>(mp, id, type, datap)
+	<span class="enscript-type">struct</span> mount *mp;
+	u_int32_t id;
+	<span class="enscript-type">int</span> type;
+	caddr_t datap;
+{
+	<span class="enscript-type">struct</span> hfsmount *hfsmp = VFSTOHFS(mp);
+	<span class="enscript-type">struct</span> dquot *dq;
+	<span class="enscript-type">struct</span> timeval tv;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> dqblk *quotablkp = (<span class="enscript-type">struct</span> dqblk *) datap;
+
+	error = dqget(id, &amp;hfsmp-&gt;hfs_qfiles[type], type, &amp;dq);
+	<span class="enscript-keyword">if</span> (error)
+	        <span class="enscript-keyword">return</span> (error);
+	dqlock(dq);
+
+	<span class="enscript-comment">/*
+	 * Reset time limit if have a soft limit and were
+	 * previously under it, but are now over it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (dq-&gt;dq_bsoftlimit &amp;&amp; dq-&gt;dq_curbytes &lt; dq-&gt;dq_bsoftlimit &amp;&amp;
+	    quotablkp-&gt;dqb_curbytes &gt;= dq-&gt;dq_bsoftlimit) {
+		microuptime(&amp;tv);
+		dq-&gt;dq_btime = tv.tv_sec + hfsmp-&gt;hfs_qfiles[type].qf_btime;
+	}
+	<span class="enscript-keyword">if</span> (dq-&gt;dq_isoftlimit &amp;&amp; dq-&gt;dq_curinodes &lt; dq-&gt;dq_isoftlimit &amp;&amp;
+	    quotablkp-&gt;dqb_curinodes &gt;= dq-&gt;dq_isoftlimit) {
+		microuptime(&amp;tv);
+		dq-&gt;dq_itime = tv.tv_sec + hfsmp-&gt;hfs_qfiles[type].qf_itime;
+	}
+	dq-&gt;dq_curbytes = quotablkp-&gt;dqb_curbytes;
+	dq-&gt;dq_curinodes = quotablkp-&gt;dqb_curinodes;
+	<span class="enscript-keyword">if</span> (dq-&gt;dq_curbytes &lt; dq-&gt;dq_bsoftlimit)
+		dq-&gt;dq_flags &amp;= ~DQ_BLKS;
+	<span class="enscript-keyword">if</span> (dq-&gt;dq_curinodes &lt; dq-&gt;dq_isoftlimit)
+		dq-&gt;dq_flags &amp;= ~DQ_INODS;
+	dq-&gt;dq_flags |= DQ_MOD;
+
+	dqunlock(dq);
+	dqrele(dq);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * Q_SYNC - sync quota files to disk.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_qsync_callback</span>(<span class="enscript-type">struct</span> vnode *vp, __unused <span class="enscript-type">void</span> *cargs)
+{
+	<span class="enscript-type">struct</span> cnode *cp;
+	<span class="enscript-type">struct</span> dquot *dq;
+	<span class="enscript-type">int</span> 	i;
+
+	cp = VTOC(vp);
+		    
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; MAXQUOTAS; i++) {
+	        dq = cp-&gt;c_dquot[i];
+		<span class="enscript-keyword">if</span> (dq != NODQUOT &amp;&amp; (dq-&gt;dq_flags &amp; DQ_MOD))
+		        dqsync(dq);
+	}
+	<span class="enscript-keyword">return</span> (VNODE_RETURNED);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_qsync</span>(mp)
+	<span class="enscript-type">struct</span> mount *mp;
+{
+	<span class="enscript-type">struct</span> hfsmount *hfsmp = VFSTOHFS(mp);
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">if</span> (!dqisinitialized())
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-comment">/*
+	 * Check if the mount point has any quotas.
+	 * If not, simply return.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; MAXQUOTAS; i++)
+		<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_qfiles[i].qf_vp != NULLVP)
+			<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">if</span> (i == MAXQUOTAS)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-comment">/*
+	 * Sync out any orpaned dirty dquot entries.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; MAXQUOTAS; i++)
+		<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_qfiles[i].qf_vp != NULLVP)
+			dqsync_orphans(&amp;hfsmp-&gt;hfs_qfiles[i]);
+
+	<span class="enscript-comment">/*
+	 * Search vnodes associated with this mount point,
+	 * synchronizing any modified dquot structures.
+	 *
+	 * hfs_qsync_callback will be called for each vnode
+	 * hung off of this mount point
+	 * the vnode will be
+	 * properly referenced and unreferenced around the callback
+	 */</span>
+	vnode_iterate(mp, 0, hfs_qsync_callback, (<span class="enscript-type">void</span> *)NULL);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Q_QUOTASTAT - get quota on/off status 
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_quotastat</span>(mp, type, datap)
+	<span class="enscript-type">struct</span> mount *mp;
+	<span class="enscript-type">register</span> <span class="enscript-type">int</span> type;
+	caddr_t datap;
+{
+	<span class="enscript-type">struct</span> hfsmount *hfsmp = VFSTOHFS(mp);
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> qstat;
+
+	<span class="enscript-keyword">if</span> ((((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)vfs_flags(mp)) &amp; MNT_QUOTA) &amp;&amp; (hfsmp-&gt;hfs_qfiles[type].qf_vp != NULLVP))
+	  qstat = 1;   <span class="enscript-comment">/* quotas are on for this type */</span>
+	<span class="enscript-keyword">else</span>
+	  qstat = 0;   <span class="enscript-comment">/* quotas are off for this type */</span>
+	
+	*((<span class="enscript-type">int</span> *)datap) = qstat;
+	<span class="enscript-keyword">return</span> (error);
+}
+
+</pre>
+<hr />
+</body></html>

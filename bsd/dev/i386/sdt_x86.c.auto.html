@@ -1,0 +1,187 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>sdt_x86.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">sdt_x86.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the &quot;License&quot;).
+ * You may not use this file except in compliance with the License.
+ *
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or <a href="http://www.opensolaris.org/os/licensing.">http://www.opensolaris.org/os/licensing.</a>
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets &quot;[]&quot; replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
+ * Use is subject to license terms.
+ */</span>
+
+<span class="enscript-comment">/* #pragma ident	&quot;@(#)sdt.c	1.9	08/07/01 SMI&quot; */</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_KERNEL</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_KERNEL</span> <span class="enscript-comment">/* Solaris vs. Darwin */</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MACH__POSIX_C_SOURCE_PRIVATE</span> 1 <span class="enscript-comment">/* pulls in suitable savearea from mach/ppc/thread_status.h */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_status.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_impl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_glue.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sdt_impl.h&gt;</span>
+
+<span class="enscript-type">extern</span> sdt_probe_t      **sdt_probetab;
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sdt_invop</span>(uintptr_t addr, uintptr_t *stack, uintptr_t eax)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">eax</span>)
+	sdt_probe_t *sdt = sdt_probetab[SDT_ADDR2NDX(addr)];
+
+	<span class="enscript-keyword">for</span> (; sdt != NULL; sdt = sdt-&gt;sdp_hashnext) {
+		<span class="enscript-keyword">if</span> ((uintptr_t)sdt-&gt;sdp_patchpoint == addr) {
+			x86_saved_state64_t *regs = (x86_saved_state64_t *)stack;
+
+			dtrace_probe(sdt-&gt;sdp_id, regs-&gt;rdi, regs-&gt;rsi, regs-&gt;rdx, regs-&gt;rcx, regs-&gt;r8);
+
+			<span class="enscript-keyword">return</span> (DTRACE_INVOP_NOP);
+		}
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-type">struct</span> frame {
+    <span class="enscript-type">struct</span> frame *backchain;
+    uintptr_t retaddr;
+};
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+uint64_t
+<span class="enscript-function-name">sdt_getarg</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg, <span class="enscript-type">int</span> argno, <span class="enscript-type">int</span> aframes)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>, <span class="enscript-variable-name">id</span>, <span class="enscript-variable-name">parg</span>)    
+	uint64_t val;
+	<span class="enscript-type">struct</span> frame *fp = (<span class="enscript-type">struct</span> frame *)__builtin_frame_address(0);
+	uintptr_t *stack;
+	uintptr_t pc;
+	<span class="enscript-type">int</span> i;
+
+    <span class="enscript-comment">/*
+     * A total of 6 arguments are passed via registers; any argument with
+     * index of 5 or lower is therefore in a register.
+     */</span>
+    <span class="enscript-type">int</span> inreg = 5;
+
+	<span class="enscript-keyword">for</span> (i = 1; i &lt;= aframes; i++) {
+		fp = fp-&gt;backchain;
+		pc = fp-&gt;retaddr;
+
+		<span class="enscript-keyword">if</span> (dtrace_invop_callsite_pre != NULL
+			&amp;&amp; pc  &gt;  (uintptr_t)dtrace_invop_callsite_pre
+			&amp;&amp; pc  &lt;= (uintptr_t)dtrace_invop_callsite_post) {
+			<span class="enscript-comment">/*
+			 * In the case of x86_64, we will use the pointer to the
+			 * save area structure that was pushed when we took the
+			 * trap.  To get this structure, we must increment
+			 * beyond the frame structure. If the
+			 * argument that we're seeking is passed on the stack,
+			 * we'll pull the true stack pointer out of the saved
+			 * registers and decrement our argument by the number
+			 * of arguments passed in registers; if the argument
+			 * we're seeking is passed in regsiters, we can just
+			 * load it directly.
+			 */</span>
+
+			<span class="enscript-comment">/* fp points to frame of dtrace_invop() activation. */</span>
+			fp = fp-&gt;backchain; <span class="enscript-comment">/* to fbt_perfcallback() activation. */</span>
+			fp = fp-&gt;backchain; <span class="enscript-comment">/* to kernel_trap() activation. */</span>
+			fp = fp-&gt;backchain; <span class="enscript-comment">/* to trap_from_kernel() activation. */</span>
+			
+			x86_saved_state_t   *tagged_regs = (x86_saved_state_t *)&amp;fp[1];
+			x86_saved_state64_t *saved_state = saved_state64(tagged_regs);
+
+			<span class="enscript-keyword">if</span> (argno &lt;= inreg) {
+				stack = (uintptr_t *)&amp;saved_state-&gt;rdi;
+			} <span class="enscript-keyword">else</span> {
+				fp = (<span class="enscript-type">struct</span> frame *)(saved_state-&gt;isf.rsp);
+				stack = (uintptr_t *)&amp;fp[0]; <span class="enscript-comment">/* Find marshalled
+								arguments */</span>
+				argno -= (inreg +1);
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">load</span>;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * We know that we did not come through a trap to get into
+	 * dtrace_probe() --  We arrive here when the provider has
+	 * called dtrace_probe() directly.
+	 * The probe ID is the first argument to dtrace_probe().
+	 * We must advance beyond that to get the argX.
+	 */</span>
+	argno++; <span class="enscript-comment">/* Advance past probeID */</span>
+
+	<span class="enscript-keyword">if</span> (argno &lt;= inreg) {
+		<span class="enscript-comment">/*
+		 * This shouldn't happen.  If the argument is passed in a
+		 * register then it should have been, well, passed in a
+		 * register...
+		 */</span>
+		DTRACE_CPUFLAG_SET(CPU_DTRACE_ILLOP);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	argno -= (inreg + 1);
+	stack = (uintptr_t *)&amp;fp[1]; <span class="enscript-comment">/* Find marshalled arguments */</span>
+
+<span class="enscript-reference">load</span>:
+	DTRACE_CPUFLAG_SET(CPU_DTRACE_NOFAULT);
+	<span class="enscript-comment">/* dtrace_probe arguments arg0 ... arg4 are 64bits wide */</span>
+	val = (uint64_t)(*(((uintptr_t *)stack) + argno));
+	DTRACE_CPUFLAG_CLEAR(CPU_DTRACE_NOFAULT);
+
+	<span class="enscript-keyword">return</span> (val);
+}
+    
+</pre>
+<hr />
+</body></html>

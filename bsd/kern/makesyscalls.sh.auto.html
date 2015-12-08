@@ -1,0 +1,734 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>makesyscalls.sh</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">makesyscalls.sh&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-reference">#! /bin/sh -
+</span><span class="enscript-comment">#	@(#)makesyscalls.sh	8.1 (Berkeley) 6/10/93
+</span><span class="enscript-comment"># $FreeBSD: src/sys/kern/makesyscalls.sh,v 1.60 2003/04/01 01:12:24 jeff Exp $
+</span><span class="enscript-comment">#
+</span><span class="enscript-comment"># Copyright (c) 2004-2008 Apple Inc. All rights reserved.
+</span><span class="enscript-comment">#
+</span><span class="enscript-comment"># @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+</span><span class="enscript-comment"># 
+</span><span class="enscript-comment"># This file contains Original Code and/or Modifications of Original Code
+</span><span class="enscript-comment"># as defined in and that are subject to the Apple Public Source License
+</span><span class="enscript-comment"># Version 2.0 (the 'License'). You may not use this file except in
+</span><span class="enscript-comment"># compliance with the License. Please obtain a copy of the License at
+</span><span class="enscript-comment"># <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this
+</span><span class="enscript-comment"># file.
+</span><span class="enscript-comment"># 
+</span><span class="enscript-comment"># The Original Code and all software distributed under the License are
+</span><span class="enscript-comment"># distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+</span><span class="enscript-comment"># EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+</span><span class="enscript-comment"># INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+</span><span class="enscript-comment"># FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+</span><span class="enscript-comment"># Please see the License for the specific language governing rights and
+</span><span class="enscript-comment"># limitations under the License.
+</span><span class="enscript-comment"># 
+</span><span class="enscript-comment"># @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+</span><span class="enscript-comment">#
+</span>
+<span class="enscript-keyword">set</span> -e
+
+input_file=<span class="enscript-string">&quot;&quot;</span> <span class="enscript-comment"># first argument
+</span>
+<span class="enscript-comment"># output type:
+</span>output_syscallnamesfile=0
+output_sysprotofile=0
+output_syshdrfile=0
+output_syscalltablefile=0
+output_auditevfile=0
+
+<span class="enscript-comment"># output files:
+</span>syscallnamesfile=<span class="enscript-string">&quot;syscalls.c&quot;</span>
+sysprotofile=<span class="enscript-string">&quot;sysproto.h&quot;</span>
+sysproto_h=_SYS_SYSPROTO_H_
+syshdrfile=<span class="enscript-string">&quot;syscall.h&quot;</span>
+syscall_h=_SYS_SYSCALL_H_
+syscalltablefile=<span class="enscript-string">&quot;init_sysent.c&quot;</span>
+auditevfile=<span class="enscript-string">&quot;audit_kevents.c&quot;</span>
+syscallprefix=<span class="enscript-string">&quot;SYS_&quot;</span>
+switchname=<span class="enscript-string">&quot;sysent&quot;</span>
+namesname=<span class="enscript-string">&quot;syscallnames&quot;</span>
+
+<span class="enscript-comment"># tmp files:
+</span>syslegal=<span class="enscript-string">&quot;sysent.syslegal.$$&quot;</span>
+sysent=<span class="enscript-string">&quot;sysent.switch.$$&quot;</span>
+sysinc=<span class="enscript-string">&quot;sysinc.switch.$$&quot;</span>
+sysarg=<span class="enscript-string">&quot;sysarg.switch.$$&quot;</span>
+sysprotoend=<span class="enscript-string">&quot;sysprotoend.$$&quot;</span>
+syscallnamestempfile=<span class="enscript-string">&quot;syscallnamesfile.$$&quot;</span>
+syshdrtempfile=<span class="enscript-string">&quot;syshdrtempfile.$$&quot;</span>
+audittempfile=<span class="enscript-string">&quot;audittempfile.$$&quot;</span>
+
+<span class="enscript-keyword">trap</span> <span class="enscript-string">&quot;rm $syslegal $sysent $sysinc $sysarg $sysprotoend $syscallnamestempfile $syshdrtempfile $audittempfile&quot;</span> 0
+
+touch $syslegal $sysent $sysinc $sysarg $sysprotoend $syscallnamestempfile $syshdrtempfile $audittempfile
+
+<span class="enscript-keyword">case</span> $<span class="enscript-comment"># in
+</span>    0)
+	<span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;usage: $0 input-file [&lt;names|proto|header|table|audit&gt; [&lt;config-file&gt;]]&quot;</span> 1&gt;&amp;2
+	<span class="enscript-keyword">exit</span> 1
+	;;
+<span class="enscript-keyword">esac</span>
+
+input_file=<span class="enscript-string">&quot;$1&quot;</span>
+<span class="enscript-keyword">shift</span>
+
+<span class="enscript-keyword">if</span> [ -n <span class="enscript-string">&quot;$1&quot;</span> ]; <span class="enscript-keyword">then</span>
+    <span class="enscript-keyword">case</span> $1 <span class="enscript-keyword">in</span>
+	names)
+	    output_syscallnamesfile=1
+	    ;;
+	proto)
+	    output_sysprotofile=1
+	    ;;
+	header)
+	    output_syshdrfile=1
+	    ;;
+	table)
+	    output_syscalltablefile=1
+	    ;;
+	audit)
+	    output_auditevfile=1
+	    ;;
+    <span class="enscript-keyword">esac</span>
+    <span class="enscript-keyword">shift</span>;
+<span class="enscript-keyword">else</span>
+    output_syscallnamesfile=1
+    output_sysprotofile=1
+    output_syshdrfile=1
+    output_syscalltablefile=1
+    output_auditevfile=1
+<span class="enscript-keyword">fi</span>
+
+<span class="enscript-keyword">if</span> [ -n <span class="enscript-string">&quot;$1&quot;</span> -a -f <span class="enscript-string">&quot;$1&quot;</span> ]; <span class="enscript-keyword">then</span>
+	. $1
+<span class="enscript-keyword">fi</span>
+
+
+
+sed -e '
+s/\$//g
+:join
+	/\\$/{a\
+
+	N
+	s/\\\n//
+	b join
+	}
+2,${
+	/^<span class="enscript-comment">#/!s/\([{}()*,;]\)/ \1 /g
+</span>}
+' &lt; <span class="enscript-string">&quot;$input_file&quot;</span> | awk <span class="enscript-string">&quot;
+	BEGIN {
+		syslegal = \&quot;$syslegal\&quot;
+		sysprotofile = \&quot;$sysprotofile\&quot;
+		sysprotoend = \&quot;$sysprotoend\&quot;
+		sysproto_h = \&quot;$sysproto_h\&quot;
+		syscall_h = \&quot;$syscall_h\&quot;
+		sysent = \&quot;$sysent\&quot;
+		syscalltablefile = \&quot;$syscalltablefile\&quot;
+		sysinc = \&quot;$sysinc\&quot;
+		sysarg = \&quot;$sysarg\&quot;
+		syscallnamesfile = \&quot;$syscallnamesfile\&quot;
+		syscallnamestempfile = \&quot;$syscallnamestempfile\&quot;
+		syshdrfile = \&quot;$syshdrfile\&quot;
+		syshdrtempfile = \&quot;$syshdrtempfile\&quot;
+		audittempfile = \&quot;$audittempfile\&quot;
+		syscallprefix = \&quot;$syscallprefix\&quot;
+		switchname = \&quot;$switchname\&quot;
+		namesname = \&quot;$namesname\&quot;
+		infile = \&quot;$input_file\&quot;
+		&quot;</span>'
+
+		printf <span class="enscript-string">&quot;/*\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * Copyright (c) 2004-2008 Apple Inc. All rights reserved.\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * \n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * @APPLE_OSREFERENCE_LICENSE_HEADER_START@\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * \n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * This file contains Original Code and/or Modifications of Original Code\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * as defined in and that are subject to the Apple Public Source License\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * Version 2.0 (the \047License\047). You may not use this file except in\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * compliance with the License. The rights granted to you under the License\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * may not be used to create, or enable the creation or redistribution of,\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * unlawful or unlicensed copies of an Apple operating system, or to\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * circumvent, violate, or enable the circumvention or violation of, any\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * terms of an Apple operating system software license agreement.\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * \n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * Please obtain a copy of the License at\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * \n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * The Original Code and all software distributed under the License are\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * distributed on an \047AS IS\047 basis, WITHOUT WARRANTY OF ANY KIND, EITHER\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * Please see the License for the specific language governing rights and\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * limitations under the License.\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * \n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * @APPLE_OSREFERENCE_LICENSE_HEADER_END@\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * \n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * \n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * System call switch table.\n *\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * DO NOT EDIT-- this file is automatically generated.\n&quot;</span> &gt; syslegal
+		printf <span class="enscript-string">&quot; * created from %s\n */\n\n&quot;</span>, infile &gt; syslegal
+	}
+	NR == 1 {
+		printf <span class="enscript-string">&quot;\n/* The casts are bogus but will do for now. */\n&quot;</span> &gt; sysent
+		printf <span class="enscript-string">&quot;__private_extern__ const struct sysent %s[] = {\n&quot;</span>,switchname &gt; sysent
+
+		printf <span class="enscript-string">&quot;#ifndef %s\n&quot;</span>, sysproto_h &gt; sysarg
+		printf <span class="enscript-string">&quot;#define\t%s\n\n&quot;</span>, sysproto_h &gt; sysarg
+		printf <span class="enscript-string">&quot;#ifndef %s\n&quot;</span>, syscall_h &gt; syshdrtempfile
+		printf <span class="enscript-string">&quot;#define\t%s\n\n&quot;</span>, syscall_h &gt; syshdrtempfile
+		printf <span class="enscript-string">&quot;#include &lt;sys/appleapiopts.h&gt;\n&quot;</span> &gt; syshdrtempfile
+		printf <span class="enscript-string">&quot;#ifdef __APPLE_API_PRIVATE\n&quot;</span> &gt; syshdrtempfile
+		printf <span class="enscript-string">&quot;#include &lt;sys/appleapiopts.h&gt;\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#include &lt;sys/cdefs.h&gt;\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#include &lt;sys/mount_internal.h&gt;\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#include &lt;sys/types.h&gt;\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#include &lt;sys/sem_internal.h&gt;\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#include &lt;sys/semaphore.h&gt;\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#include &lt;sys/wait.h&gt;\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#include &lt;mach/shared_region.h&gt;\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;\n#ifdef KERNEL\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#ifdef __APPLE_API_PRIVATE\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;/*\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot; * The kernel may support multiple userspace ABIs, and must use\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot; * argument structures with elements large enough for any of them.\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;*/\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#if CONFIG_REQUIRES_U32_MUNGING\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#define\tPAD_(t)\t(sizeof(uint64_t) &lt;= sizeof(t) \\\n &quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;\t\t? 0 : sizeof(uint64_t) - sizeof(t))\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#else\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#define\tPAD_(t)\t(sizeof(uint32_t) &lt;= sizeof(t) \\\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot; 		? 0 : sizeof(uint32_t) - sizeof(t))\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#endif\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#if BYTE_ORDER == LITTLE_ENDIAN\n&quot;</span>&gt; sysarg
+		printf <span class="enscript-string">&quot;#define\tPADL_(t)\t0\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#define\tPADR_(t)\tPAD_(t)\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#else\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#define\tPADL_(t)\tPAD_(t)\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#define\tPADR_(t)\t0\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#endif\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;\n__BEGIN_DECLS\n&quot;</span> &gt; sysarg
+		printf <span class="enscript-string">&quot;#include &lt;sys/munge.h&gt;\n&quot;</span> &gt; sysarg
+		
+		printf <span class="enscript-string">&quot;\n&quot;</span> &gt; sysarg
+
+		printf <span class="enscript-string">&quot;const char *%s[] = {\n&quot;</span>, namesname &gt; syscallnamestempfile
+
+		printf <span class="enscript-string">&quot;#include &lt;sys/param.h&gt;\n&quot;</span> &gt; audittempfile
+		printf <span class="enscript-string">&quot;#include &lt;sys/types.h&gt;\n\n&quot;</span> &gt; audittempfile
+		printf <span class="enscript-string">&quot;#include &lt;bsm/audit.h&gt;\n&quot;</span> &gt; audittempfile
+		printf <span class="enscript-string">&quot;#include &lt;bsm/audit_kevents.h&gt;\n\n&quot;</span> &gt; audittempfile
+		printf <span class="enscript-string">&quot;#if CONFIG_AUDIT\n\n&quot;</span> &gt; audittempfile
+		printf <span class="enscript-string">&quot;au_event_t sys_au_event[] = {\n&quot;</span> &gt; audittempfile
+		next
+	}
+	NF == 0 || $1 ~ /^;/ {
+		next
+	}
+	$1 ~ /^<span class="enscript-comment">#[ 	]*include/ {
+</span>		print &gt; sysinc
+		next
+	}
+	$1 ~ /^<span class="enscript-comment">#[ 	]*if/ {
+</span>		print &gt; sysent
+		print &gt; sysarg
+		print &gt; syscallnamestempfile
+		print &gt; sysprotoend
+		print &gt; audittempfile
+		savesyscall = syscall_num
+		skip_for_header = 0
+		next
+	}
+	$1 ~ /^<span class="enscript-comment">#[ 	]*else/ {
+</span>		print &gt; sysent
+		print &gt; sysarg
+		print &gt; syscallnamestempfile
+		print &gt; sysprotoend
+		print &gt; audittempfile
+		syscall_num = savesyscall
+		skip_for_header = 1
+		next
+	}
+	$1 ~ /^<span class="enscript-comment">#/ {
+</span>		print &gt; sysent
+		print &gt; sysarg
+		print &gt; syscallnamestempfile
+		print &gt; sysprotoend
+		print &gt; audittempfile
+		skip_for_header = 0
+		next
+	}
+	syscall_num != $1 {
+		printf <span class="enscript-string">&quot;%s: line %d: syscall number out of sync at %d\n&quot;</span>,
+		    infile, NR, syscall_num
+		printf <span class="enscript-string">&quot;line is:\n&quot;</span>
+		print
+		<span class="enscript-keyword">exit</span> 1
+	}
+	function align_comment(linesize, location, thefile) {
+		printf(<span class="enscript-string">&quot; &quot;</span>) &gt; thefile
+		<span class="enscript-keyword">while</span> (linesize &lt; location) {
+			printf(<span class="enscript-string">&quot; &quot;</span>) &gt; thefile
+			linesize++
+		}
+	}
+	function parserr(was, wanted) {
+		printf <span class="enscript-string">&quot;%s: line %d: unexpected %s (expected %s)\n&quot;</span>,
+		    infile, NR, was, wanted
+		<span class="enscript-keyword">exit</span> 1
+	}
+	
+	function parseline() {
+		funcname = <span class="enscript-string">&quot;&quot;</span>
+		current_field = 4	<span class="enscript-comment"># skip number, audit event, type
+</span>		args_start = 0
+		args_end = 0
+		comments_start = 0
+		comments_end = 0
+		argc = 0
+		argssize = <span class="enscript-string">&quot;0&quot;</span>
+		additional_comments = <span class="enscript-string">&quot; &quot;</span>
+
+		<span class="enscript-comment"># find start and end of call name and arguments
+</span>		<span class="enscript-keyword">if</span> ($current_field != <span class="enscript-string">&quot;{&quot;</span>)
+			parserr($current_field, <span class="enscript-string">&quot;{&quot;</span>)
+		args_start = current_field
+		current_field++
+		<span class="enscript-keyword">while</span> (current_field &lt;= NF) {
+			<span class="enscript-keyword">if</span> ($current_field == <span class="enscript-string">&quot;}&quot;</span>) {
+				args_end = current_field
+				<span class="enscript-keyword">break</span>
+			}
+			current_field++
+		}
+		<span class="enscript-keyword">if</span> (args_end == 0) {
+			printf <span class="enscript-string">&quot;%s: line %d: invalid call name and arguments\n&quot;</span>,
+		    	infile, NR
+			<span class="enscript-keyword">exit</span> 1
+		}
+
+		<span class="enscript-comment"># find start and end of optional comments
+</span>		current_field++
+		<span class="enscript-keyword">if</span> (current_field &lt; NF &amp;&amp; $current_field == <span class="enscript-string">&quot;{&quot;</span>) {
+			comments_start = current_field
+			<span class="enscript-keyword">while</span> (current_field &lt;= NF) {
+				<span class="enscript-keyword">if</span> ($current_field == <span class="enscript-string">&quot;}&quot;</span>) {
+					comments_end = current_field
+					<span class="enscript-keyword">break</span>
+				}
+				current_field++
+			}
+			<span class="enscript-keyword">if</span> (comments_end == 0) {
+				printf <span class="enscript-string">&quot;%s: line %d: invalid comments \n&quot;</span>,
+					infile, NR
+				<span class="enscript-keyword">exit</span> 1
+			}
+		}
+
+		<span class="enscript-keyword">if</span> ($args_end != <span class="enscript-string">&quot;}&quot;</span>)
+			parserr($args_end, <span class="enscript-string">&quot;}&quot;</span>)
+		args_end--
+		<span class="enscript-keyword">if</span> ($args_end != <span class="enscript-string">&quot;;&quot;</span>)
+			parserr($args_end, <span class="enscript-string">&quot;;&quot;</span>)
+		args_end--
+
+		<span class="enscript-comment"># skip any NO_SYSCALL_STUB qualifier
+</span>		<span class="enscript-keyword">if</span> ($args_end == <span class="enscript-string">&quot;NO_SYSCALL_STUB&quot;</span>)
+			args_end--
+
+		<span class="enscript-keyword">if</span> ($args_end != <span class="enscript-string">&quot;)&quot;</span>)
+			parserr($args_end, <span class="enscript-string">&quot;)&quot;</span>)
+		args_end--
+
+		<span class="enscript-comment"># extract additional comments
+</span>		<span class="enscript-keyword">if</span> (comments_start != 0) {
+			current_field = comments_start + 1
+			<span class="enscript-keyword">while</span> (current_field &lt; comments_end) {
+				additional_comments = additional_comments $current_field <span class="enscript-string">&quot; &quot;</span>
+				current_field++
+			}
+		}
+
+		<span class="enscript-comment"># get function return type
+</span>		current_field = args_start + 1
+		returntype = $current_field
+
+		<span class="enscript-comment"># get function name and set up to get arguments
+</span>		current_field++
+		funcname = $current_field
+		argalias = funcname <span class="enscript-string">&quot;_args&quot;</span>
+		current_field++ <span class="enscript-comment"># bump past function name
+</span>
+		<span class="enscript-keyword">if</span> ($current_field != <span class="enscript-string">&quot;(&quot;</span>)
+			parserr($current_field, <span class="enscript-string">&quot;(&quot;</span>)
+		current_field++
+
+		<span class="enscript-keyword">if</span> (current_field == args_end) {
+			<span class="enscript-keyword">if</span> ($current_field != <span class="enscript-string">&quot;void&quot;</span>)
+				parserr($current_field, <span class="enscript-string">&quot;argument definition&quot;</span>)
+			<span class="enscript-keyword">return</span>
+		}
+
+		<span class="enscript-comment"># extract argument types and names
+</span>		<span class="enscript-keyword">while</span> (current_field &lt;= args_end) {
+			argc++
+			argtype[argc]=<span class="enscript-string">&quot;&quot;</span>
+			ext_argtype[argc]=<span class="enscript-string">&quot;&quot;</span>
+			oldf=<span class="enscript-string">&quot;&quot;</span>
+			<span class="enscript-keyword">while</span> (current_field &lt; args_end &amp;&amp; $(current_field + 1) != <span class="enscript-string">&quot;,&quot;</span>) {
+				<span class="enscript-keyword">if</span> (argtype[argc] != <span class="enscript-string">&quot;&quot;</span> &amp;&amp; oldf != <span class="enscript-string">&quot;*&quot;</span>) {
+					argtype[argc] = argtype[argc] <span class="enscript-string">&quot; &quot;</span>;
+				}
+				argtype[argc] = argtype[argc] $current_field;
+				ext_argtype[argc] = argtype[argc];
+				oldf = $current_field;
+				current_field++
+			}
+			<span class="enscript-keyword">if</span> (argtype[argc] == <span class="enscript-string">&quot;&quot;</span>)
+				parserr($current_field, <span class="enscript-string">&quot;argument definition&quot;</span>)
+			argname[argc] = $current_field;
+			current_field += 2;			<span class="enscript-comment"># skip name, and any comma
+</span>		}
+		<span class="enscript-keyword">if</span> (argc &gt; 8) {
+			printf <span class="enscript-string">&quot;%s: line %d: too many arguments!\n&quot;</span>, infile, NR
+			<span class="enscript-keyword">exit</span> 1
+		}
+		<span class="enscript-keyword">if</span> (argc != 0)
+			argssize = <span class="enscript-string">&quot;AC(&quot;</span> argalias <span class="enscript-string">&quot;)&quot;</span>
+	}
+
+	{
+		auditev = $2;
+	}
+
+	{
+		add_sysent_entry = 1
+		add_sysnames_entry = 1
+		add_sysheader_entry = 1
+		add_sysproto_entry = 1
+
+
+		<span class="enscript-keyword">if</span> ($3 != <span class="enscript-string">&quot;ALL&quot;</span>) {
+			files_keyword_OK = 0
+			add_sysent_entry = 0
+			add_sysnames_entry = 0
+			add_sysheader_entry = 0
+			add_sysproto_entry = 0
+			
+			<span class="enscript-keyword">if</span> (match($3, <span class="enscript-string">&quot;[T]&quot;</span>) != 0) {
+				add_sysent_entry = 1
+				files_keyword_OK = 1
+			}
+			<span class="enscript-keyword">if</span> (match($3, <span class="enscript-string">&quot;[N]&quot;</span>) != 0) {
+				add_sysnames_entry = 1
+				files_keyword_OK = 1
+			}
+			<span class="enscript-keyword">if</span> (match($3, <span class="enscript-string">&quot;[H]&quot;</span>) != 0) {
+				add_sysheader_entry = 1
+				files_keyword_OK = 1
+			}
+			<span class="enscript-keyword">if</span> (match($3, <span class="enscript-string">&quot;[P]&quot;</span>) != 0) {
+				add_sysproto_entry = 1
+				files_keyword_OK = 1
+			}
+			
+			<span class="enscript-keyword">if</span> (files_keyword_OK == 0) {
+				printf <span class="enscript-string">&quot;%s: line %d: unrecognized keyword %s\n&quot;</span>, infile, NR, $2
+				<span class="enscript-keyword">exit</span> 1
+			}
+		}
+		
+		
+		parseline()
+		
+		<span class="enscript-comment"># output function argument structures to sysproto.h and build the
+</span>		<span class="enscript-comment"># name of the appropriate argument mungers
+</span>		munge32 = <span class="enscript-string">&quot;NULL&quot;</span>
+		size32 = 0
+
+		<span class="enscript-keyword">if</span> ((funcname != <span class="enscript-string">&quot;nosys&quot;</span> &amp;&amp; funcname != <span class="enscript-string">&quot;enosys&quot;</span>) || (syscall_num == 0 &amp;&amp; funcname == <span class="enscript-string">&quot;nosys&quot;</span>)) {
+			<span class="enscript-keyword">if</span> (argc != 0) {
+				<span class="enscript-keyword">if</span> (add_sysproto_entry == 1) {
+					printf(<span class="enscript-string">&quot;struct %s {\n&quot;</span>, argalias) &gt; sysarg
+				}
+				munge32 = <span class="enscript-string">&quot;munge_&quot;</span>
+				<span class="enscript-keyword">for</span> (i = 1; i &lt;= argc; i++) {
+					<span class="enscript-comment"># Build name of argument munger.
+</span>					<span class="enscript-comment"># We account for all sys call argument types here.
+</span>					<span class="enscript-comment"># This is where you add any new types.  With LP64 support
+</span>					<span class="enscript-comment"># each argument consumes 64-bits.  
+</span>					<span class="enscript-comment"># see .../xnu/bsd/dev/munge.c for munge argument types.
+</span>					<span class="enscript-keyword">if</span> (argtype[i] == <span class="enscript-string">&quot;long&quot;</span>) {
+						ext_argtype[i] = <span class="enscript-string">&quot;user_long_t&quot;</span>;
+						munge32 = munge32 <span class="enscript-string">&quot;s&quot;</span>
+						size32 += 4
+					}
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (argtype[i] == <span class="enscript-string">&quot;u_long&quot;</span>) {
+						ext_argtype[i] = <span class="enscript-string">&quot;user_ulong_t&quot;</span>;
+						munge32 = munge32 <span class="enscript-string">&quot;w&quot;</span>
+						size32 += 4
+					}
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (argtype[i] == <span class="enscript-string">&quot;size_t&quot;</span>) {
+						ext_argtype[i] = <span class="enscript-string">&quot;user_size_t&quot;</span>;
+						munge32 = munge32 <span class="enscript-string">&quot;w&quot;</span>
+						size32 += 4
+					}
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (argtype[i] == <span class="enscript-string">&quot;ssize_t&quot;</span>) {
+						ext_argtype[i] = <span class="enscript-string">&quot;user_ssize_t&quot;</span>;
+						munge32 = munge32 <span class="enscript-string">&quot;s&quot;</span>
+						size32 += 4
+					}
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (argtype[i] == <span class="enscript-string">&quot;user_ssize_t&quot;</span> || argtype[i] == <span class="enscript-string">&quot;user_long_t&quot;</span>) {
+						munge32 = munge32 <span class="enscript-string">&quot;s&quot;</span>
+						size32 += 4
+					}
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (argtype[i] == <span class="enscript-string">&quot;user_addr_t&quot;</span> || argtype[i] == <span class="enscript-string">&quot;user_size_t&quot;</span> ||
+						argtype[i] == <span class="enscript-string">&quot;user_ulong_t&quot;</span>) {
+						munge32 = munge32 <span class="enscript-string">&quot;w&quot;</span>
+						size32 += 4
+					}
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (argtype[i] == <span class="enscript-string">&quot;caddr_t&quot;</span> || argtype[i] == <span class="enscript-string">&quot;semun_t&quot;</span> ||
+  						argtype[i] == <span class="enscript-string">&quot;uuid_t&quot;</span> || match(argtype[i], <span class="enscript-string">&quot;[\*]&quot;</span>) != 0) {
+						ext_argtype[i] = <span class="enscript-string">&quot;user_addr_t&quot;</span>;
+						munge32 = munge32 <span class="enscript-string">&quot;w&quot;</span>
+						size32 += 4
+					}
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (argtype[i] == <span class="enscript-string">&quot;int&quot;</span> || argtype[i] == <span class="enscript-string">&quot;u_int&quot;</span> ||
+							 argtype[i] == <span class="enscript-string">&quot;uid_t&quot;</span> || argtype[i] == <span class="enscript-string">&quot;pid_t&quot;</span> ||
+							 argtype[i] == <span class="enscript-string">&quot;id_t&quot;</span> || argtype[i] == <span class="enscript-string">&quot;idtype_t&quot;</span> ||
+							 argtype[i] == <span class="enscript-string">&quot;socklen_t&quot;</span> || argtype[i] == <span class="enscript-string">&quot;uint32_t&quot;</span> || argtype[i] == <span class="enscript-string">&quot;int32_t&quot;</span> ||
+							 argtype[i] == <span class="enscript-string">&quot;sigset_t&quot;</span> || argtype[i] == <span class="enscript-string">&quot;gid_t&quot;</span> || argtype[i] == <span class="enscript-string">&quot;unsigned int&quot;</span> ||
+							 argtype[i] == <span class="enscript-string">&quot;mode_t&quot;</span> || argtype[i] == <span class="enscript-string">&quot;key_t&quot;</span> ||
+							 argtype[i] == <span class="enscript-string">&quot;mach_port_name_t&quot;</span> || argtype[i] == <span class="enscript-string">&quot;au_asid_t&quot;</span> ||
+							 argtype[i] == <span class="enscript-string">&quot;sae_associd_t&quot;</span> || argtype[i] == <span class="enscript-string">&quot;sae_connid_t&quot;</span>) {
+						munge32 = munge32 <span class="enscript-string">&quot;w&quot;</span>
+						size32 += 4
+					}
+					<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (argtype[i] == <span class="enscript-string">&quot;off_t&quot;</span> || argtype[i] == <span class="enscript-string">&quot;int64_t&quot;</span> || argtype[i] == <span class="enscript-string">&quot;uint64_t&quot;</span>) {
+						munge32 = munge32 <span class="enscript-string">&quot;l&quot;</span>
+						size32 += 8
+					}
+					<span class="enscript-keyword">else</span> {
+						printf <span class="enscript-string">&quot;%s: line %d: invalid type \&quot;%s\&quot; \n&quot;</span>, 
+							infile, NR, argtype[i]
+						printf <span class="enscript-string">&quot;You need to add \&quot;%s\&quot; into the type checking code. \n&quot;</span>, 
+							 argtype[i]
+						<span class="enscript-keyword">exit</span> 1
+					}
+					<span class="enscript-keyword">if</span> (add_sysproto_entry == 1) {
+						printf(<span class="enscript-string">&quot;\tchar %s_l_[PADL_(%s)]; &quot;</span> \
+							<span class="enscript-string">&quot;%s %s; char %s_r_[PADR_(%s)];\n&quot;</span>,
+							argname[i], ext_argtype[i],
+							ext_argtype[i], argname[i],
+							argname[i], ext_argtype[i]) &gt; sysarg
+					}
+				}
+				<span class="enscript-keyword">if</span> (add_sysproto_entry == 1) {
+					printf(<span class="enscript-string">&quot;};\n&quot;</span>) &gt; sysarg
+				}
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (add_sysproto_entry == 1) { 
+				printf(<span class="enscript-string">&quot;struct %s {\n\tint32_t dummy;\n};\n&quot;</span>, argalias) &gt; sysarg
+			}
+		}
+		
+		<span class="enscript-comment"># output to init_sysent.c
+</span>		tempname = funcname
+		<span class="enscript-keyword">if</span> (add_sysent_entry == 0) {
+			argssize = <span class="enscript-string">&quot;0&quot;</span>
+			munge32 = <span class="enscript-string">&quot;NULL&quot;</span>
+			munge_ret = <span class="enscript-string">&quot;_SYSCALL_RET_NONE&quot;</span>
+			<span class="enscript-keyword">if</span> (tempname != <span class="enscript-string">&quot;enosys&quot;</span>) {
+				tempname = <span class="enscript-string">&quot;nosys&quot;</span>
+			}
+		}
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-comment"># figure out which return value type to munge
+</span>			<span class="enscript-keyword">if</span> (returntype == <span class="enscript-string">&quot;user_addr_t&quot;</span>) {
+				munge_ret = <span class="enscript-string">&quot;_SYSCALL_RET_ADDR_T&quot;</span>
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (returntype == <span class="enscript-string">&quot;user_ssize_t&quot;</span>) {
+				munge_ret = <span class="enscript-string">&quot;_SYSCALL_RET_SSIZE_T&quot;</span>
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (returntype == <span class="enscript-string">&quot;user_size_t&quot;</span>) {
+				munge_ret = <span class="enscript-string">&quot;_SYSCALL_RET_SIZE_T&quot;</span>
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (returntype == <span class="enscript-string">&quot;int&quot;</span>) {
+				munge_ret = <span class="enscript-string">&quot;_SYSCALL_RET_INT_T&quot;</span>
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (returntype == <span class="enscript-string">&quot;u_int&quot;</span> || returntype == <span class="enscript-string">&quot;mach_port_name_t&quot;</span>) {
+				munge_ret = <span class="enscript-string">&quot;_SYSCALL_RET_UINT_T&quot;</span>
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (returntype == <span class="enscript-string">&quot;uint32_t&quot;</span>) {
+				munge_ret = <span class="enscript-string">&quot;_SYSCALL_RET_UINT_T&quot;</span>
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (returntype == <span class="enscript-string">&quot;uint64_t&quot;</span>) {
+				munge_ret = <span class="enscript-string">&quot;_SYSCALL_RET_UINT64_T&quot;</span>
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (returntype == <span class="enscript-string">&quot;off_t&quot;</span>) {
+				munge_ret = <span class="enscript-string">&quot;_SYSCALL_RET_OFF_T&quot;</span>
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (returntype == <span class="enscript-string">&quot;void&quot;</span>) {
+				munge_ret = <span class="enscript-string">&quot;_SYSCALL_RET_NONE&quot;</span>
+			}
+			<span class="enscript-keyword">else</span> {
+				printf <span class="enscript-string">&quot;%s: line %d: invalid return type \&quot;%s\&quot; \n&quot;</span>, 
+					infile, NR, returntype
+				printf <span class="enscript-string">&quot;You need to add \&quot;%s\&quot; into the return type checking code. \n&quot;</span>, 
+					 returntype
+				<span class="enscript-keyword">exit</span> 1
+			}
+		}
+
+		printf(<span class="enscript-string">&quot;#if CONFIG_REQUIRES_U32_MUNGING || (__arm__ &amp;&amp; (__BIGGEST_ALIGNMENT__ &gt; 4))\n&quot;</span>) &gt; sysent
+		printf(<span class="enscript-string">&quot;\t{ \(sy_call_t *\)%s, %s, %s, %s, %s},&quot;</span>, 
+				tempname, munge32, munge_ret, argssize, size32) &gt; sysent
+		linesize = length(tempname) + length(munge32) + \
+			length(munge_ret) + length(argssize) + length(size32) + 28
+		align_comment(linesize, 88, sysent)
+		printf(<span class="enscript-string">&quot;/* %d = %s%s*/\n&quot;</span>, syscall_num, funcname, additional_comments) &gt; sysent
+		printf(<span class="enscript-string">&quot;#else\n&quot;</span>) &gt; sysent
+		printf(<span class="enscript-string">&quot;\t{ \(sy_call_t *\)%s, %s, %s, %s},\n&quot;</span>, 
+				tempname, munge_ret, argssize, size32) &gt; sysent
+		printf(<span class="enscript-string">&quot;#endif\n&quot;</span>) &gt; sysent
+		
+		<span class="enscript-comment"># output to syscalls.c
+</span>		<span class="enscript-keyword">if</span> (add_sysnames_entry == 1) {
+			tempname = funcname
+			<span class="enscript-keyword">if</span> (funcname == <span class="enscript-string">&quot;nosys&quot;</span> || funcname == <span class="enscript-string">&quot;enosys&quot;</span>) {
+				<span class="enscript-keyword">if</span> (syscall_num == 0)
+					tempname = <span class="enscript-string">&quot;syscall&quot;</span>
+				<span class="enscript-keyword">else</span>
+					tempname = <span class="enscript-string">&quot;#&quot;</span> syscall_num
+			}
+			printf(<span class="enscript-string">&quot;\t\&quot;%s\&quot;, &quot;</span>, tempname) &gt; syscallnamestempfile
+			linesize = length(tempname) + 8
+			align_comment(linesize, 25, syscallnamestempfile)
+			<span class="enscript-keyword">if</span> (substr(tempname,1,1) == <span class="enscript-string">&quot;#&quot;</span>) {
+				printf(<span class="enscript-string">&quot;/* %d =%s*/\n&quot;</span>, syscall_num, additional_comments) &gt; syscallnamestempfile
+			}
+			<span class="enscript-keyword">else</span> {
+				printf(<span class="enscript-string">&quot;/* %d = %s%s*/\n&quot;</span>, syscall_num, tempname, additional_comments) &gt; syscallnamestempfile
+			}
+		}
+
+		<span class="enscript-comment"># output to syscalls.h
+</span>		<span class="enscript-keyword">if</span> (add_sysheader_entry == 1) {
+			tempname = funcname
+			<span class="enscript-keyword">if</span> (syscall_num == 0) {
+				tempname = <span class="enscript-string">&quot;syscall&quot;</span>
+			}
+			<span class="enscript-keyword">if</span> (tempname != <span class="enscript-string">&quot;nosys&quot;</span> &amp;&amp; tempname != <span class="enscript-string">&quot;enosys&quot;</span>) {
+				printf(<span class="enscript-string">&quot;#define\t%s%s&quot;</span>, syscallprefix, tempname) &gt; syshdrtempfile
+				linesize = length(syscallprefix) + length(tempname) + 12
+				align_comment(linesize, 30, syshdrtempfile)
+				printf(<span class="enscript-string">&quot;%d\n&quot;</span>, syscall_num) &gt; syshdrtempfile
+				<span class="enscript-comment"># special case for gettimeofday on ppc - cctools project uses old name
+</span>				<span class="enscript-keyword">if</span> (tempname == <span class="enscript-string">&quot;ppc_gettimeofday&quot;</span>) {
+					printf(<span class="enscript-string">&quot;#define\t%s%s&quot;</span>, syscallprefix, <span class="enscript-string">&quot;gettimeofday&quot;</span>) &gt; syshdrtempfile
+					linesize = length(syscallprefix) + length(tempname) + 12
+					align_comment(linesize, 30, syshdrtempfile)
+					printf(<span class="enscript-string">&quot;%d\n&quot;</span>, syscall_num) &gt; syshdrtempfile
+				}
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (skip_for_header == 0) {
+				printf(<span class="enscript-string">&quot;\t\t\t/* %d %s*/\n&quot;</span>, syscall_num, additional_comments) &gt; syshdrtempfile
+			}
+		}
+		
+		<span class="enscript-comment"># output function prototypes to sysproto.h
+</span>		<span class="enscript-keyword">if</span> (add_sysproto_entry == 1) {
+			<span class="enscript-keyword">if</span> (funcname ==<span class="enscript-string">&quot;exit&quot;</span>) {
+				printf(<span class="enscript-string">&quot;void %s(struct proc *, struct %s *, int32_t *);\n&quot;</span>, 
+						funcname, argalias) &gt; sysprotoend
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((funcname != <span class="enscript-string">&quot;nosys&quot;</span> &amp;&amp; funcname != <span class="enscript-string">&quot;enosys&quot;</span>) || (syscall_num == 0 &amp;&amp; funcname == <span class="enscript-string">&quot;nosys&quot;</span>)) {
+				printf(<span class="enscript-string">&quot;int %s(struct proc *, struct %s *, %s *);\n&quot;</span>, 
+						funcname, argalias, returntype) &gt; sysprotoend
+			}
+		}
+
+		<span class="enscript-comment"># output to audit_kevents.c
+</span>		printf(<span class="enscript-string">&quot;\t%s,\t\t&quot;</span>, auditev) &gt; audittempfile
+		printf(<span class="enscript-string">&quot;/* %d = %s%s*/\n&quot;</span>, syscall_num, tempname, additional_comments) &gt; audittempfile 
+		
+		syscall_num++
+		next
+	}
+
+	END {
+		printf <span class="enscript-string">&quot;#define AC(name) (sizeof(struct name) / sizeof(syscall_arg_t))\n&quot;</span> &gt; sysinc
+		printf <span class="enscript-string">&quot;\n&quot;</span> &gt; sysinc
+
+		printf(<span class="enscript-string">&quot;\n__END_DECLS\n&quot;</span>) &gt; sysprotoend
+		printf(<span class="enscript-string">&quot;#undef PAD_\n&quot;</span>) &gt; sysprotoend
+		printf(<span class="enscript-string">&quot;#undef PADL_\n&quot;</span>) &gt; sysprotoend
+		printf(<span class="enscript-string">&quot;#undef PADR_\n&quot;</span>) &gt; sysprotoend
+		printf <span class="enscript-string">&quot;\n#endif /* __APPLE_API_PRIVATE */\n&quot;</span> &gt; sysprotoend
+		printf <span class="enscript-string">&quot;#endif /* KERNEL */\n&quot;</span> &gt; sysprotoend
+		printf(<span class="enscript-string">&quot;\n#endif /* !%s */\n&quot;</span>, sysproto_h) &gt; sysprotoend
+
+		printf(<span class="enscript-string">&quot;};\n&quot;</span>) &gt; sysent
+		printf(<span class="enscript-string">&quot;int	nsysent = sizeof(sysent) / sizeof(sysent[0]);\n&quot;</span>) &gt; sysent
+		printf(<span class="enscript-string">&quot;/* Verify that NUM_SYSENT reflects the latest syscall count */\n&quot;</span>) &gt; sysent
+		printf(<span class="enscript-string">&quot;_Static_assert(((sizeof(sysent) / sizeof(sysent[0])) == NUM_SYSENT), \&quot;NUM_SYSENT needs to be updated to match syscall count\&quot;);\n&quot;</span>) &gt; sysent
+
+		printf(<span class="enscript-string">&quot;};\n&quot;</span>) &gt; syscallnamestempfile
+		printf(<span class="enscript-string">&quot;#define\t%sMAXSYSCALL\t%d\n&quot;</span>, syscallprefix, syscall_num) \
+		    &gt; syshdrtempfile
+		printf(<span class="enscript-string">&quot;\n#endif /* __APPLE_API_PRIVATE */\n&quot;</span>) &gt; syshdrtempfile
+		printf(<span class="enscript-string">&quot;#endif /* !%s */\n&quot;</span>, syscall_h) &gt; syshdrtempfile
+		printf(<span class="enscript-string">&quot;};\n\n&quot;</span>) &gt; audittempfile
+		printf(<span class="enscript-string">&quot;#endif /* AUDIT */\n&quot;</span>) &gt; audittempfile
+	} '
+
+<span class="enscript-comment"># define value in syscall table file to permit redifintion because of the way
+</span><span class="enscript-comment"># __private_extern__ (doesn't) work.
+</span><span class="enscript-keyword">if</span> [ $output_syscalltablefile -eq 1 ]; <span class="enscript-keyword">then</span>
+    cat $syslegal &gt; $syscalltablefile
+    printf <span class="enscript-string">&quot;#define __INIT_SYSENT_C__ 1\n&quot;</span> &gt;&gt; $syscalltablefile
+    cat $sysinc $sysent &gt;&gt; $syscalltablefile
+<span class="enscript-keyword">fi</span>
+
+<span class="enscript-keyword">if</span> [ $output_syscallnamesfile -eq 1 ]; <span class="enscript-keyword">then</span>
+    cat $syslegal $syscallnamestempfile &gt; $syscallnamesfile
+<span class="enscript-keyword">fi</span>
+
+<span class="enscript-keyword">if</span> [ $output_sysprotofile -eq 1 ]; <span class="enscript-keyword">then</span>
+    cat $syslegal $sysarg $sysprotoend &gt; $sysprotofile
+<span class="enscript-keyword">fi</span>
+
+<span class="enscript-keyword">if</span> [ $output_syshdrfile -eq 1 ]; <span class="enscript-keyword">then</span>
+    cat $syslegal $syshdrtempfile &gt; $syshdrfile
+<span class="enscript-keyword">fi</span>
+
+<span class="enscript-keyword">if</span> [ $output_auditevfile -eq 1 ]; <span class="enscript-keyword">then</span>
+    cat $syslegal $audittempfile &gt; $auditevfile
+<span class="enscript-keyword">fi</span>
+</pre>
+<hr />
+</body></html>

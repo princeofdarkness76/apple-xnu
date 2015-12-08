@@ -1,0 +1,721 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mtrr.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mtrr.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2011 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpuid.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/proc_reg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mtrr.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_check.h&gt;</span>
+
+<span class="enscript-type">struct</span> mtrr_var_range {
+	uint64_t  base;		<span class="enscript-comment">/* in IA32_MTRR_PHYSBASE format */</span>
+	uint64_t  mask;		<span class="enscript-comment">/* in IA32_MTRR_PHYSMASK format */</span>
+	uint32_t  refcnt;	<span class="enscript-comment">/* var ranges reference count */</span>
+};
+
+<span class="enscript-type">struct</span> mtrr_fix_range {
+	uint64_t  types;	<span class="enscript-comment">/* fixed-range type octet */</span>
+};
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> mtrr_var_range mtrr_var_range_t;
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> mtrr_fix_range mtrr_fix_range_t;
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> {
+	uint64_t            MTRRcap;
+	uint64_t            MTRRdefType;
+	mtrr_var_range_t *  var_range;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>        var_count;
+	mtrr_fix_range_t    fix_range[11];
+} mtrr_state;
+
+<span class="enscript-type">static</span> boolean_t mtrr_initialized = FALSE;
+
+<span class="enscript-function-name">decl_simple_lock_data</span>(<span class="enscript-type">static</span>, mtrr_lock);
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MTRR_LOCK</span>()	simple_lock(&amp;mtrr_lock);
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MTRR_UNLOCK</span>()	simple_unlock(&amp;mtrr_lock);
+
+<span class="enscript-comment">//#define MTRR_DEBUG 1
+</span>#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MTRR_DEBUG</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DBG</span>(x...)	kprintf(x)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DBG</span>(x...)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* Private functions */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">mtrr_get_var_ranges</span>(mtrr_var_range_t * range, <span class="enscript-type">int</span> count);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">mtrr_set_var_ranges</span>(<span class="enscript-type">const</span> mtrr_var_range_t * range, <span class="enscript-type">int</span> count);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">mtrr_get_fix_ranges</span>(mtrr_fix_range_t * range);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">mtrr_set_fix_ranges</span>(<span class="enscript-type">const</span> mtrr_fix_range_t * range);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">mtrr_update_setup</span>(<span class="enscript-type">void</span> * param);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">mtrr_update_teardown</span>(<span class="enscript-type">void</span> * param);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">mtrr_update_action</span>(<span class="enscript-type">void</span> * param);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">var_range_encode</span>(mtrr_var_range_t * range, addr64_t address,
+                             uint64_t length, uint32_t type, <span class="enscript-type">int</span> valid);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">var_range_overlap</span>(mtrr_var_range_t * range, addr64_t address,
+                              uint64_t length, uint32_t type);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">CACHE_CONTROL_MTRR</span>		(NULL)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">CACHE_CONTROL_PAT</span>		((void *)1)
+
+<span class="enscript-comment">/*
+ * MTRR MSR bit fields.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IA32_MTRR_DEF_TYPE_MT</span>		0x000000ff
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IA32_MTRR_DEF_TYPE_FE</span>		0x00000400
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IA32_MTRR_DEF_TYPE_E</span>		0x00000800
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IA32_MTRRCAP_VCNT</span>		0x000000ff
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IA32_MTRRCAP_FIX</span>		0x00000100
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IA32_MTRRCAP_WC</span>			0x00000400
+
+<span class="enscript-comment">/* 0 &lt; bits &lt;= 64 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PHYS_BITS_TO_MASK</span>(bits) \
+	((((1ULL &lt;&lt; (bits-1)) - 1) &lt;&lt; 1) | 1)
+
+<span class="enscript-comment">/*
+ * Default mask for 36 physical address bits, this can
+ * change depending on the cpu model.
+ */</span>
+<span class="enscript-type">static</span> uint64_t mtrr_phys_mask = PHYS_BITS_TO_MASK(36);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IA32_MTRR_PHYMASK_VALID</span>		0x0000000000000800ULL
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IA32_MTRR_PHYSBASE_MASK</span>		(mtrr_phys_mask &amp; ~0x0000000000000FFFULL)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IA32_MTRR_PHYSBASE_TYPE</span>		0x00000000000000FFULL
+
+<span class="enscript-comment">/*
+ * Variable-range mask to/from length conversions.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MASK_TO_LEN</span>(mask) \
+	((~((mask) &amp; IA32_MTRR_PHYSBASE_MASK) &amp; mtrr_phys_mask) + 1)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">LEN_TO_MASK</span>(len)  \
+	(~((len) - 1) &amp; IA32_MTRR_PHYSBASE_MASK)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">LSB</span>(x)		((x) &amp; (~((x) - 1)))
+
+<span class="enscript-comment">/*
+ * Fetch variable-range MTRR register pairs.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mtrr_get_var_ranges</span>(mtrr_var_range_t * range, <span class="enscript-type">int</span> count)
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		range[i].base = rdmsr64(MSR_IA32_MTRR_PHYSBASE(i));
+		range[i].mask = rdmsr64(MSR_IA32_MTRR_PHYSMASK(i));
+
+		<span class="enscript-comment">/* bump ref count for firmware configured ranges */</span>
+		<span class="enscript-keyword">if</span> (range[i].mask &amp; IA32_MTRR_PHYMASK_VALID)
+			range[i].refcnt = 1;
+		<span class="enscript-keyword">else</span>
+			range[i].refcnt = 0;
+	}
+}
+
+<span class="enscript-comment">/*
+ * Update variable-range MTRR register pairs.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mtrr_set_var_ranges</span>(<span class="enscript-type">const</span> mtrr_var_range_t * range, <span class="enscript-type">int</span> count)
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		wrmsr64(MSR_IA32_MTRR_PHYSBASE(i), range[i].base);
+		wrmsr64(MSR_IA32_MTRR_PHYSMASK(i), range[i].mask);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Fetch all fixed-range MTRR's. Note MSR offsets are not consecutive.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mtrr_get_fix_ranges</span>(mtrr_fix_range_t * range)
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-comment">/* assume 11 fix range registers */</span>
+	range[0].types = rdmsr64(MSR_IA32_MTRR_FIX64K_00000);
+	range[1].types = rdmsr64(MSR_IA32_MTRR_FIX16K_80000);
+	range[2].types = rdmsr64(MSR_IA32_MTRR_FIX16K_A0000);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; 8; i++)
+		range[3 + i].types = rdmsr64(MSR_IA32_MTRR_FIX4K_C0000 + i);
+}
+
+<span class="enscript-comment">/*
+ * Update all fixed-range MTRR's.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mtrr_set_fix_ranges</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mtrr_fix_range * range)
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-comment">/* assume 11 fix range registers */</span>
+	wrmsr64(MSR_IA32_MTRR_FIX64K_00000, range[0].types);
+	wrmsr64(MSR_IA32_MTRR_FIX16K_80000, range[1].types);
+	wrmsr64(MSR_IA32_MTRR_FIX16K_A0000, range[2].types);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; 8; i++)
+		wrmsr64(MSR_IA32_MTRR_FIX4K_C0000 + i, range[3 + i].types);
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">mtrr_check_fix_ranges</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mtrr_fix_range * range)
+{
+	<span class="enscript-type">int</span>		i;
+	boolean_t	match = TRUE;
+
+	DBG(<span class="enscript-string">&quot;CPU%d: %s\n&quot;</span>, get_cpu_number(), __FUNCTION__);
+
+	<span class="enscript-comment">/* assume 11 fix range registers */</span>
+	match = range[0].types == rdmsr64(MSR_IA32_MTRR_FIX64K_00000) &amp;&amp;
+		range[1].types == rdmsr64(MSR_IA32_MTRR_FIX16K_80000) &amp;&amp;
+		range[2].types == rdmsr64(MSR_IA32_MTRR_FIX16K_A0000);
+	<span class="enscript-keyword">for</span> (i = 0; match &amp;&amp; i &lt; 8; i++) {
+		match = range[3 + i].types ==
+			rdmsr64(MSR_IA32_MTRR_FIX4K_C0000 + i);
+	}
+
+	<span class="enscript-keyword">return</span> match;
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">mtrr_check_var_ranges</span>(mtrr_var_range_t * range, <span class="enscript-type">int</span> count)
+{
+	<span class="enscript-type">int</span>		i;
+	boolean_t	match = TRUE;
+ 
+	DBG(<span class="enscript-string">&quot;CPU%d: %s\n&quot;</span>, get_cpu_number(), __FUNCTION__);
+
+	<span class="enscript-keyword">for</span> (i = 0; match &amp;&amp; i &lt; count; i++) {
+		match = range[i].base == rdmsr64(MSR_IA32_MTRR_PHYSBASE(i)) &amp;&amp;
+			range[i].mask == rdmsr64(MSR_IA32_MTRR_PHYSMASK(i));
+	}
+
+	<span class="enscript-keyword">return</span> match;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MTRR_DEBUG</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mtrr_msr_dump</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> count = rdmsr64(MSR_IA32_MTRRCAP) &amp; IA32_MTRRCAP_VCNT;
+
+	DBG(<span class="enscript-string">&quot;VAR -- BASE -------------- MASK -------------- SIZE\n&quot;</span>);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		DBG(<span class="enscript-string">&quot; %02x    0x%016llx  0x%016llx  0x%llx\n&quot;</span>, i,
+		    rdmsr64(MSR_IA32_MTRR_PHYSBASE(i)),
+		    rdmsr64(MSR_IA32_MTRR_PHYSMASK(i)),
+		    MASK_TO_LEN(rdmsr64(MSR_IA32_MTRR_PHYSMASK(i))));
+	}
+	DBG(<span class="enscript-string">&quot;\n&quot;</span>);
+
+	DBG(<span class="enscript-string">&quot;FIX64K_00000: 0x%016llx\n&quot;</span>, rdmsr64(MSR_IA32_MTRR_FIX64K_00000));
+	DBG(<span class="enscript-string">&quot;FIX16K_80000: 0x%016llx\n&quot;</span>, rdmsr64(MSR_IA32_MTRR_FIX16K_80000));
+	DBG(<span class="enscript-string">&quot;FIX16K_A0000: 0x%016llx\n&quot;</span>, rdmsr64(MSR_IA32_MTRR_FIX16K_A0000));
+	DBG(<span class="enscript-string">&quot; FIX4K_C0000: 0x%016llx\n&quot;</span>, rdmsr64(MSR_IA32_MTRR_FIX4K_C0000));
+	DBG(<span class="enscript-string">&quot; FIX4K_C8000: 0x%016llx\n&quot;</span>, rdmsr64(MSR_IA32_MTRR_FIX4K_C8000));
+	DBG(<span class="enscript-string">&quot; FIX4K_D0000: 0x%016llx\n&quot;</span>, rdmsr64(MSR_IA32_MTRR_FIX4K_D0000));
+	DBG(<span class="enscript-string">&quot; FIX4K_D8000: 0x%016llx\n&quot;</span>, rdmsr64(MSR_IA32_MTRR_FIX4K_D8000));
+	DBG(<span class="enscript-string">&quot; FIX4K_E0000: 0x%016llx\n&quot;</span>, rdmsr64(MSR_IA32_MTRR_FIX4K_E0000));
+	DBG(<span class="enscript-string">&quot; FIX4K_E8000: 0x%016llx\n&quot;</span>, rdmsr64(MSR_IA32_MTRR_FIX4K_E8000));
+	DBG(<span class="enscript-string">&quot; FIX4K_F0000: 0x%016llx\n&quot;</span>, rdmsr64(MSR_IA32_MTRR_FIX4K_F0000));
+	DBG(<span class="enscript-string">&quot; FIX4K_F8000: 0x%016llx\n&quot;</span>, rdmsr64(MSR_IA32_MTRR_FIX4K_F8000));
+
+	DBG(<span class="enscript-string">&quot;\nMTRRcap = 0x%llx MTRRdefType = 0x%llx\n&quot;</span>,
+            rdmsr64(MSR_IA32_MTRRCAP), rdmsr64(MSR_IA32_MTRR_DEF_TYPE));
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MTRR_DEBUG */</span>
+
+<span class="enscript-comment">/*
+ * Called by the boot processor (BP) early during boot to initialize MTRR
+ * support.  The MTRR state on the BP is saved, any additional processors
+ * will have the same settings applied to ensure MTRR consistency.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mtrr_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">/* no reason to init more than once */</span>
+	<span class="enscript-keyword">if</span> (mtrr_initialized == TRUE)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/* check for presence of MTRR feature on the processor */</span>
+	<span class="enscript-keyword">if</span> ((cpuid_features() &amp; CPUID_FEATURE_MTRR) == 0)
+        	<span class="enscript-keyword">return</span>;  <span class="enscript-comment">/* no MTRR feature */</span>
+
+	<span class="enscript-comment">/* use a lock to serialize MTRR changes */</span>
+	bzero((<span class="enscript-type">void</span> *)&amp;mtrr_state, <span class="enscript-keyword">sizeof</span>(mtrr_state));
+	simple_lock_init(&amp;mtrr_lock, 0);
+
+	mtrr_state.MTRRcap     = rdmsr64(MSR_IA32_MTRRCAP);
+	mtrr_state.MTRRdefType = rdmsr64(MSR_IA32_MTRR_DEF_TYPE);
+	mtrr_state.var_count   = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)(mtrr_state.MTRRcap &amp; IA32_MTRRCAP_VCNT);
+
+	<span class="enscript-comment">/* allocate storage for variable ranges (can block?) */</span>
+	<span class="enscript-keyword">if</span> (mtrr_state.var_count) {
+		mtrr_state.var_range = (mtrr_var_range_t *)
+		                       kalloc(<span class="enscript-keyword">sizeof</span>(mtrr_var_range_t) *
+		                              mtrr_state.var_count);
+		<span class="enscript-keyword">if</span> (mtrr_state.var_range == NULL)
+			mtrr_state.var_count = 0;
+	}
+
+	<span class="enscript-comment">/* fetch the initial firmware configured variable ranges */</span>
+	<span class="enscript-keyword">if</span> (mtrr_state.var_count)
+		mtrr_get_var_ranges(mtrr_state.var_range,
+				    mtrr_state.var_count);
+
+	<span class="enscript-comment">/* fetch the initial firmware configured fixed ranges */</span>
+	<span class="enscript-keyword">if</span> (mtrr_state.MTRRcap &amp; IA32_MTRRCAP_FIX)
+		mtrr_get_fix_ranges(mtrr_state.fix_range);
+
+	mtrr_initialized = TRUE;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MTRR_DEBUG</span>
+	mtrr_msr_dump();	<span class="enscript-comment">/* dump firmware settings */</span>
+#<span class="enscript-reference">endif</span>
+
+}
+
+<span class="enscript-comment">/*
+ * Performs the Intel recommended procedure for changing the MTRR
+ * in a MP system. Leverage rendezvous mechanism for the required
+ * barrier synchronization among all processors. This function is
+ * called from the rendezvous IPI handler, and mtrr_update_cpu().
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mtrr_update_action</span>(<span class="enscript-type">void</span> * cache_control_type)
+{
+	uintptr_t cr0, cr4;
+	uintptr_t tmp;
+
+	cr0 = get_cr0();
+	cr4 = get_cr4();
+
+	<span class="enscript-comment">/* enter no-fill cache mode */</span>
+	tmp = cr0 | CR0_CD;
+	tmp &amp;= ~CR0_NW;
+	set_cr0(tmp);
+
+	<span class="enscript-comment">/* flush caches */</span>
+	wbinvd();
+
+	<span class="enscript-comment">/* clear the PGE flag in CR4 */</span>
+	<span class="enscript-keyword">if</span> (cr4 &amp; CR4_PGE)
+		set_cr4(cr4 &amp; ~CR4_PGE);
+
+	<span class="enscript-comment">/* flush TLBs */</span>
+	flush_tlb_raw();
+
+	<span class="enscript-keyword">if</span> (CACHE_CONTROL_PAT == cache_control_type) {
+		<span class="enscript-comment">/* Change PA6 attribute field to WC */</span>
+		uint64_t pat = rdmsr64(MSR_IA32_CR_PAT);
+		DBG(<span class="enscript-string">&quot;CPU%d PAT: was 0x%016llx\n&quot;</span>, get_cpu_number(), pat);
+		pat &amp;= ~(0x0FULL &lt;&lt; 48);
+		pat |=  (0x01ULL &lt;&lt; 48);
+		wrmsr64(MSR_IA32_CR_PAT, pat);
+		DBG(<span class="enscript-string">&quot;CPU%d PAT: is  0x%016llx\n&quot;</span>,
+		    get_cpu_number(), rdmsr64(MSR_IA32_CR_PAT));
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* disable all MTRR ranges */</span>
+		wrmsr64(MSR_IA32_MTRR_DEF_TYPE,
+			mtrr_state.MTRRdefType &amp; ~IA32_MTRR_DEF_TYPE_E);
+
+		<span class="enscript-comment">/* apply MTRR settings */</span>
+		<span class="enscript-keyword">if</span> (mtrr_state.var_count)
+			mtrr_set_var_ranges(mtrr_state.var_range,
+					mtrr_state.var_count);
+
+		<span class="enscript-keyword">if</span> (mtrr_state.MTRRcap &amp; IA32_MTRRCAP_FIX)
+			mtrr_set_fix_ranges(mtrr_state.fix_range);
+
+		<span class="enscript-comment">/* enable all MTRR range registers (what if E was not set?) */</span>
+		wrmsr64(MSR_IA32_MTRR_DEF_TYPE,
+			mtrr_state.MTRRdefType | IA32_MTRR_DEF_TYPE_E);
+	}
+
+	<span class="enscript-comment">/* flush all caches and TLBs a second time */</span>
+	wbinvd();
+	flush_tlb_raw();
+
+	<span class="enscript-comment">/* restore normal cache mode */</span>
+	set_cr0(cr0);
+
+	<span class="enscript-comment">/* restore PGE flag */</span>
+	<span class="enscript-keyword">if</span> (cr4 &amp; CR4_PGE)
+		set_cr4(cr4);
+
+	DBG(<span class="enscript-string">&quot;CPU%d: %s\n&quot;</span>, get_cpu_number(), __FUNCTION__);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mtrr_update_setup</span>(__unused <span class="enscript-type">void</span> * param_not_used)
+{
+	<span class="enscript-comment">/* disable interrupts before the first barrier */</span>
+	current_cpu_datap()-&gt;cpu_iflag = ml_set_interrupts_enabled(FALSE);
+	DBG(<span class="enscript-string">&quot;CPU%d: %s\n&quot;</span>, get_cpu_number(), __FUNCTION__);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mtrr_update_teardown</span>(__unused <span class="enscript-type">void</span> * param_not_used)
+{
+	<span class="enscript-comment">/* restore interrupt flag following MTRR changes */</span>
+	ml_set_interrupts_enabled(current_cpu_datap()-&gt;cpu_iflag);
+	DBG(<span class="enscript-string">&quot;CPU%d: %s\n&quot;</span>, get_cpu_number(), __FUNCTION__);
+}
+
+<span class="enscript-comment">/*
+ * Update MTRR settings on all processors.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">mtrr_update_all_cpus</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">if</span> (mtrr_initialized == FALSE)
+		<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+
+	MTRR_LOCK();
+	mp_rendezvous(mtrr_update_setup,
+		      mtrr_update_action,
+		      mtrr_update_teardown, NULL);
+	MTRR_UNLOCK();
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * Verify that a processor has been set with the BSP's MTRR settings. Called
+ * during slave processor initialization to check and set MTRR settings
+ * discovered on the boot processor by mtrr_init().
+ */</span>
+kern_return_t
+<span class="enscript-function-name">mtrr_update_cpu</span>(<span class="enscript-type">void</span>)
+{
+	boolean_t	match = TRUE;
+
+	<span class="enscript-keyword">if</span> (mtrr_initialized == FALSE)
+		<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+
+	DBG(<span class="enscript-string">&quot;CPU%d: %s\n&quot;</span>, get_cpu_number(), __FUNCTION__);
+
+	MTRR_LOCK();
+
+	<span class="enscript-comment">/* Check MSR_IA32_MTRR_DEF_TYPE MSR */</span>
+	match = mtrr_state.MTRRdefType == rdmsr64(MSR_IA32_MTRR_DEF_TYPE);
+
+	<span class="enscript-comment">/* Check MSR_IA32_MTRRCAP MSR */</span>
+	<span class="enscript-keyword">if</span> (match) {
+		match = mtrr_state.MTRRcap == rdmsr64(MSR_IA32_MTRRCAP);
+	}
+
+	<span class="enscript-comment">/* Check variable ranges */</span>
+	<span class="enscript-keyword">if</span> (match &amp;&amp; mtrr_state.var_count) {
+		match = mtrr_check_var_ranges(mtrr_state.var_range,
+					      mtrr_state.var_count);
+	}
+
+	<span class="enscript-comment">/* Check fixed ranges */</span>
+	<span class="enscript-keyword">if</span> (match &amp;&amp; (mtrr_state.MTRRcap &amp; IA32_MTRRCAP_FIX)) {
+		match = mtrr_check_fix_ranges(mtrr_state.fix_range);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MTRR_DEBUG</span>
+	<span class="enscript-keyword">if</span> (!match)
+		mtrr_msr_dump();
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (!match) {
+		DBG(<span class="enscript-string">&quot;mtrr_update_cpu() setting MTRR for cpu %d\n&quot;</span>,
+			get_cpu_number());
+		mtrr_update_action(NULL);
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MTRR_DEBUG</span>
+	<span class="enscript-keyword">if</span> (!match)
+		mtrr_msr_dump();
+#<span class="enscript-reference">endif</span>
+
+	MTRR_UNLOCK();
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * Add a MTRR range to associate the physical memory range specified
+ * with a given memory caching type.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">mtrr_range_add</span>(addr64_t address, uint64_t length, uint32_t type)
+{
+	mtrr_var_range_t * vr;
+	mtrr_var_range_t * free_range;
+	kern_return_t      ret = KERN_NO_SPACE;
+	<span class="enscript-type">int</span>                overlap;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>       i;
+
+	DBG(<span class="enscript-string">&quot;mtrr_range_add base = 0x%llx, size = 0x%llx, type = %d\n&quot;</span>,
+            address, length, type);
+
+	<span class="enscript-keyword">if</span> (mtrr_initialized == FALSE) {
+		<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+	}
+
+	<span class="enscript-comment">/* check memory type (GPF exception for undefined types) */</span>
+	<span class="enscript-keyword">if</span> ((type != MTRR_TYPE_UNCACHEABLE)  &amp;&amp;
+	    (type != MTRR_TYPE_WRITECOMBINE) &amp;&amp;
+	    (type != MTRR_TYPE_WRITETHROUGH) &amp;&amp;
+	    (type != MTRR_TYPE_WRITEPROTECT) &amp;&amp;
+	    (type != MTRR_TYPE_WRITEBACK)) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	<span class="enscript-comment">/* check WC support if requested */</span>
+	<span class="enscript-keyword">if</span> ((type == MTRR_TYPE_WRITECOMBINE) &amp;&amp;
+	    (mtrr_state.MTRRcap &amp; IA32_MTRRCAP_WC) == 0) {
+		<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+	}
+
+	<span class="enscript-comment">/* leave the fix range area below 1MB alone */</span>
+	<span class="enscript-keyword">if</span> (address &lt; 0x100000 || mtrr_state.var_count == 0) {
+		<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+	}
+
+	<span class="enscript-comment">/*
+	 * Length must be a power of 2 given by 2^n, where n &gt;= 12.
+	 * Base address alignment must be larger than or equal to length.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((length &lt; 0x1000)       ||
+	    (LSB(length) != length) ||
+            (address &amp;&amp; (length &gt; LSB(address)))) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	MTRR_LOCK();
+
+	<span class="enscript-comment">/*
+	 * Check for overlap and locate a free range.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0, free_range = NULL; i &lt; mtrr_state.var_count; i++)
+	{
+		vr = &amp;mtrr_state.var_range[i];
+
+		<span class="enscript-keyword">if</span> (vr-&gt;refcnt == 0) {
+			<span class="enscript-comment">/* free range candidate if no overlaps are found */</span>
+			free_range = vr;
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		overlap = var_range_overlap(vr, address, length, type);
+		<span class="enscript-keyword">if</span> (overlap &gt; 0) {
+			<span class="enscript-comment">/*
+			 * identical overlap permitted, increment ref count.
+			 * no hardware update required.
+			 */</span>
+			free_range = vr;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (overlap &lt; 0) {
+			<span class="enscript-comment">/* unsupported overlapping of memory types */</span>
+			free_range = NULL;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (free_range) {
+		<span class="enscript-keyword">if</span> (free_range-&gt;refcnt++ == 0) {
+			var_range_encode(free_range, address, length, type, 1);
+			mp_rendezvous(mtrr_update_setup,
+				      mtrr_update_action,
+				      mtrr_update_teardown, NULL);
+		}
+		ret = KERN_SUCCESS;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MTRR_DEBUG</span>
+	mtrr_msr_dump();
+#<span class="enscript-reference">endif</span>
+
+	MTRR_UNLOCK();
+
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-comment">/*
+ * Remove a previously added MTRR range. The same arguments used for adding
+ * the memory range must be supplied again.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">mtrr_range_remove</span>(addr64_t address, uint64_t length, uint32_t type)
+{
+	mtrr_var_range_t * vr;
+	<span class="enscript-type">int</span>                result = KERN_FAILURE;
+	<span class="enscript-type">int</span>                cpu_update = 0;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>       i;
+
+	DBG(<span class="enscript-string">&quot;mtrr_range_remove base = 0x%llx, size = 0x%llx, type = %d\n&quot;</span>,
+            address, length, type);
+
+	<span class="enscript-keyword">if</span> (mtrr_initialized == FALSE) {
+		<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+	}
+
+	MTRR_LOCK();
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; mtrr_state.var_count; i++) {
+		vr = &amp;mtrr_state.var_range[i];
+
+		<span class="enscript-keyword">if</span> (vr-&gt;refcnt &amp;&amp;
+		    var_range_overlap(vr, address, length, type) &gt; 0) {
+			<span class="enscript-comment">/* found specified variable range */</span>
+			<span class="enscript-keyword">if</span> (--mtrr_state.var_range[i].refcnt == 0) {
+				var_range_encode(vr, address, length, type, 0);
+				cpu_update = 1;
+			}
+			result = KERN_SUCCESS;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (cpu_update) {
+		mp_rendezvous(mtrr_update_setup,
+			      mtrr_update_action,
+			      mtrr_update_teardown, NULL);
+		result = KERN_SUCCESS;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MTRR_DEBUG</span>
+	mtrr_msr_dump();
+#<span class="enscript-reference">endif</span>
+
+	MTRR_UNLOCK();
+
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-comment">/*
+ * Variable range helper routines
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">var_range_encode</span>(mtrr_var_range_t * range, addr64_t address,
+		 uint64_t length, uint32_t type, <span class="enscript-type">int</span> valid)
+{
+	range-&gt;base = (address &amp; IA32_MTRR_PHYSBASE_MASK) |
+		      (type    &amp; (uint32_t)IA32_MTRR_PHYSBASE_TYPE);
+
+	range-&gt;mask = LEN_TO_MASK(length) |
+		      (valid ? IA32_MTRR_PHYMASK_VALID : 0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">var_range_overlap</span>(mtrr_var_range_t * range, addr64_t address,
+		  uint64_t length, uint32_t type)
+{
+	uint64_t  v_address, v_length;
+	uint32_t  v_type;
+	<span class="enscript-type">int</span>       result = 0;  <span class="enscript-comment">/* no overlap, or overlap ok */</span>
+
+	v_address = range-&gt;base &amp; IA32_MTRR_PHYSBASE_MASK;
+	v_type    = (uint32_t)(range-&gt;base &amp; IA32_MTRR_PHYSBASE_TYPE);
+	v_length  = MASK_TO_LEN(range-&gt;mask);
+
+	<span class="enscript-comment">/* detect range overlap */</span>
+	<span class="enscript-keyword">if</span> ((v_address &gt;= address &amp;&amp; v_address &lt; (address + length)) ||
+	    (address &gt;= v_address &amp;&amp; address &lt; (v_address + v_length))) {
+
+		<span class="enscript-keyword">if</span> (v_address == address &amp;&amp; v_length == length &amp;&amp; v_type == type)
+			result = 1; <span class="enscript-comment">/* identical overlap ok */</span>
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( v_type == MTRR_TYPE_UNCACHEABLE &amp;&amp;
+			    type == MTRR_TYPE_UNCACHEABLE ) {
+			<span class="enscript-comment">/* UC ranges can overlap */</span>
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((v_type == MTRR_TYPE_UNCACHEABLE &amp;&amp;
+		            type == MTRR_TYPE_WRITEBACK)  ||
+			 (v_type == MTRR_TYPE_WRITEBACK &amp;&amp;
+			    type == MTRR_TYPE_UNCACHEABLE)) {
+			<span class="enscript-comment">/* UC/WB can overlap - effective type becomes UC */</span>
+		}
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* anything else may cause undefined behavior */</span>
+			result = -1;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-comment">/*
+ * Initialize PAT (Page Attribute Table)
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pat_init</span>(<span class="enscript-type">void</span>)
+{
+	boolean_t	istate;
+	uint64_t	pat;
+
+	<span class="enscript-keyword">if</span> (!(cpuid_features() &amp; CPUID_FEATURE_PAT))
+		<span class="enscript-keyword">return</span>;
+
+	istate = ml_set_interrupts_enabled(FALSE);
+
+	pat = rdmsr64(MSR_IA32_CR_PAT);
+	DBG(<span class="enscript-string">&quot;CPU%d PAT: was 0x%016llx\n&quot;</span>, get_cpu_number(), pat);
+
+	<span class="enscript-comment">/* Change PA6 attribute field to WC if required */</span>
+	<span class="enscript-keyword">if</span> ((pat &amp; ~(0x0FULL &lt;&lt; 48)) != (0x01ULL &lt;&lt; 48)) {
+		mtrr_update_action(CACHE_CONTROL_PAT);
+	}
+	ml_set_interrupts_enabled(istate);
+}
+</pre>
+<hr />
+</body></html>

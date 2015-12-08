@@ -1,0 +1,1675 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>devfs_vnops.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">devfs_vnops.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright 1997,1998 Julian Elischer.  All rights reserved.
+ * <a href="mailto:julian@freebsd.org">julian@freebsd.org</a>
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met:
+ *  1. Redistributions of source code must retain the above copyright
+ *     notice, this list of conditions and the following disclaimer.
+ *  2. Redistributions in binary form must reproduce the above copyright notice,
+ *     this list of conditions and the following disclaimer in the documentation
+ *     and/or other materials provided with the distribution.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER ``AS IS'' AND ANY EXPRESS
+ * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL THE HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ * 
+ * devfs_vnops.c
+ */</span>
+
+<span class="enscript-comment">/*
+ * HISTORY
+ *  Clark Warner (<a href="mailto:warner_c@apple.com">warner_c@apple.com</a>) Tue Feb 10 2000
+ *  - Added err_copyfile to the vnode operations table
+ *  Dieter Siegmund (<a href="mailto:dieter@apple.com">dieter@apple.com</a>) Thu Apr  8 14:08:19 PDT 1999
+ *  - instead of duplicating specfs here, created a vnode-ops table
+ *    that redirects most operations to specfs (as is done with ufs);
+ *  - removed routines that made no sense
+ *  - cleaned up reclaim: replaced devfs_vntodn() with a macro VTODN()
+ *  - cleaned up symlink, link locking
+ *  - added the devfs_lock to protect devfs data structures against
+ *    driver's calling devfs_add_devswf()/etc.
+ *  Dieter Siegmund (<a href="mailto:dieter@apple.com">dieter@apple.com</a>) Wed Jul 14 13:37:59 PDT 1999
+ *  - free the devfs devnode in devfs_inactive(), not just in devfs_reclaim()
+ *    to free up kernel memory as soon as it's available
+ *  - got rid of devfsspec_{read, write}
+ *  Dieter Siegmund (<a href="mailto:dieter@apple.com">dieter@apple.com</a>) Fri Sep 17 09:58:38 PDT 1999
+ *  - update the mod/access times
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/disklabel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/specfs/specdev.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dirent.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vmmeter.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio_internal.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;devfsdefs.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;devfs.h&quot;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">FDESC</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;fdesc.h&quot;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* FDESC */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 		devfs_update(<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> timeval *access,
+                        	<span class="enscript-type">struct</span> timeval *modify);
+<span class="enscript-type">void</span>			devfs_rele_node(devnode_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>		devfs_consider_time_update(devnode_t *dnp, uint32_t just_changed_flags);
+<span class="enscript-type">static</span> boolean_t 	devfs_update_needed(<span class="enscript-type">long</span> now_s, <span class="enscript-type">long</span> last_s);
+<span class="enscript-type">void</span> 			dn_times_locked(devnode_t * dnp, <span class="enscript-type">struct</span> timeval *t1, <span class="enscript-type">struct</span> timeval *t2, <span class="enscript-type">struct</span> timeval *t3, uint32_t just_changed_flags);
+<span class="enscript-type">void</span>			dn_times_now(devnode_t *dnp, uint32_t just_changed_flags);
+<span class="enscript-type">void</span>			dn_mark_for_delayed_times_update(devnode_t *dnp, uint32_t just_changed_flags);
+
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">dn_times_locked</span>(devnode_t * dnp, <span class="enscript-type">struct</span> timeval *t1, <span class="enscript-type">struct</span> timeval *t2, <span class="enscript-type">struct</span> timeval *t3, uint32_t just_changed_flags)
+{
+
+	lck_mtx_assert(&amp;devfs_attr_mutex, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (just_changed_flags &amp; DEVFS_UPDATE_ACCESS) {
+		dnp-&gt;dn_atime.tv_sec = t1-&gt;tv_sec;
+		dnp-&gt;dn_atime.tv_nsec = t1-&gt;tv_usec * 1000;
+		dnp-&gt;dn_access = 0;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (dnp-&gt;dn_access) {
+		dnp-&gt;dn_atime.tv_sec = MIN(t1-&gt;tv_sec, dnp-&gt;dn_atime.tv_sec + DEVFS_LAZY_UPDATE_SECONDS);
+		dnp-&gt;dn_atime.tv_nsec = t1-&gt;tv_usec * 1000;
+		dnp-&gt;dn_access = 0;
+	}
+
+	<span class="enscript-keyword">if</span> (just_changed_flags &amp; DEVFS_UPDATE_MOD) {
+		dnp-&gt;dn_mtime.tv_sec = t2-&gt;tv_sec;
+		dnp-&gt;dn_mtime.tv_nsec = t2-&gt;tv_usec * 1000;
+		dnp-&gt;dn_update = 0;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (dnp-&gt;dn_update) {
+		dnp-&gt;dn_mtime.tv_sec = MIN(t2-&gt;tv_sec, dnp-&gt;dn_mtime.tv_sec + DEVFS_LAZY_UPDATE_SECONDS);
+		dnp-&gt;dn_mtime.tv_nsec = t2-&gt;tv_usec * 1000;
+		dnp-&gt;dn_update = 0;
+	}
+
+	<span class="enscript-keyword">if</span> (just_changed_flags &amp; DEVFS_UPDATE_CHANGE) {
+		dnp-&gt;dn_ctime.tv_sec = t3-&gt;tv_sec;
+		dnp-&gt;dn_ctime.tv_nsec = t3-&gt;tv_usec * 1000;
+		dnp-&gt;dn_change = 0;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (dnp-&gt;dn_change) {
+		dnp-&gt;dn_ctime.tv_sec = MIN(t3-&gt;tv_sec, dnp-&gt;dn_ctime.tv_sec + DEVFS_LAZY_UPDATE_SECONDS);
+		dnp-&gt;dn_ctime.tv_nsec = t3-&gt;tv_usec * 1000;
+		dnp-&gt;dn_change = 0;
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dn_mark_for_delayed_times_update</span>(devnode_t *dnp, uint32_t just_changed_flags)
+{
+	<span class="enscript-keyword">if</span> (just_changed_flags &amp; DEVFS_UPDATE_CHANGE) {
+		dnp-&gt;dn_change = 1;
+	}
+	<span class="enscript-keyword">if</span> (just_changed_flags &amp; DEVFS_UPDATE_ACCESS) {
+		dnp-&gt;dn_access = 1;
+	}
+	<span class="enscript-keyword">if</span> (just_changed_flags &amp; DEVFS_UPDATE_MOD) {
+		dnp-&gt;dn_update = 1;
+	}
+}
+
+<span class="enscript-comment">/*
+ * Update times based on pending updates and optionally a set of new changes.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dn_times_now</span>(devnode_t * dnp, uint32_t just_changed_flags)
+{
+	<span class="enscript-type">struct</span> timeval now;
+
+	DEVFS_ATTR_LOCK_SPIN();
+	microtime(&amp;now);
+	dn_times_locked(dnp, &amp;now, &amp;now, &amp;now, just_changed_flags);
+	DEVFS_ATTR_UNLOCK();
+}
+
+
+<span class="enscript-comment">/*
+ * Convert a component of a pathname into a pointer to a locked node.
+ * This is a very central and rather complicated routine.
+ * If the file system is not maintained in a strict tree hierarchy,
+ * this can result in a deadlock situation (see comments in code below).
+ *
+ * The flag argument is LOOKUP, CREATE, RENAME, or DELETE depending on
+ * whether the name is to be looked up, created, renamed, or deleted.
+ * When CREATE, RENAME, or DELETE is specified, information usable in
+ * creating, renaming, or deleting a directory entry may be calculated.
+ * If flag has LOCKPARENT or'ed into it and the target of the pathname
+ * exists, lookup returns both the target and its parent directory locked.
+ * When creating or renaming and LOCKPARENT is specified, the target may
+ * not be &quot;.&quot;.  When deleting and LOCKPARENT is specified, the target may
+ * be &quot;.&quot;., but the caller must check to ensure it does an vrele and DNUNLOCK
+ * instead of two DNUNLOCKs.
+ *
+ * Overall outline of devfs_lookup:
+ *
+ *	check accessibility of directory
+ *	null terminate the component (lookup leaves the whole string alone)
+ *	look for name in cache, if found, then if at end of path
+ *	  and deleting or creating, drop it, else return name
+ *	search for name in directory, to found or notfound
+ * notfound:
+ *	if creating, return locked directory,
+ *	else return error
+ * found:
+ *	if at end of path and deleting, return information to allow delete
+ *	if at end of path and rewriting (RENAME and LOCKPARENT), lock target
+ *	  node and return info to allow rewrite
+ *	if not at end, add name to cache; if at end and neither creating
+ *	  nor deleting, add name to cache
+ * On return to lookup, remove the null termination we put in at the start.
+ *
+ * NOTE: (LOOKUP | LOCKPARENT) currently returns the parent node unlocked.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_lookup</span>(<span class="enscript-type">struct</span> vnop_lookup_args *ap)
+        <span class="enscript-comment">/*struct vnop_lookup_args {
+                struct vnode * a_dvp; directory vnode ptr
+                struct vnode ** a_vpp; where to put the result
+                struct componentname * a_cnp; the name we want
+		vfs_context_t a_context;
+        };*/</span>
+{
+	<span class="enscript-type">struct</span> componentname *cnp = ap-&gt;a_cnp;
+	vfs_context_t ctx = cnp-&gt;cn_context;
+	<span class="enscript-type">struct</span> proc *p = vfs_context_proc(ctx);
+	<span class="enscript-type">struct</span> vnode *dir_vnode = ap-&gt;a_dvp;
+	<span class="enscript-type">struct</span> vnode **result_vnode = ap-&gt;a_vpp;
+	devnode_t *   dir_node;       <span class="enscript-comment">/* the directory we are searching */</span>
+	devnode_t *   node = NULL;       <span class="enscript-comment">/* the node we are searching for */</span>
+	devdirent_t * nodename;
+	<span class="enscript-type">int</span> flags = cnp-&gt;cn_flags;
+	<span class="enscript-type">int</span> op = cnp-&gt;cn_nameiop;       <span class="enscript-comment">/* LOOKUP, CREATE, RENAME, or DELETE */</span>
+	<span class="enscript-type">int</span> wantparent = flags &amp; (LOCKPARENT|WANTPARENT);
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">char</span>	heldchar;	<span class="enscript-comment">/* the char at the end of the name componet */</span>
+
+<span class="enscript-reference">retry</span>:
+
+	*result_vnode = NULL; <span class="enscript-comment">/* safe not sorry */</span> <span class="enscript-comment">/*XXX*/</span>
+
+	<span class="enscript-comment">/*  okay to look at directory vnodes ourside devfs lock as they are not aliased */</span>
+	dir_node = VTODN(dir_vnode);
+
+	<span class="enscript-comment">/*
+	 * Make sure that our node is a directory as well.
+	 */</span>
+	<span class="enscript-keyword">if</span> (dir_node-&gt;dn_type != DEV_DIR) {
+		<span class="enscript-keyword">return</span> (ENOTDIR);
+	}
+
+	DEVFS_LOCK();
+	<span class="enscript-comment">/*
+	 * temporarily terminate string component
+	 */</span>
+	heldchar = cnp-&gt;cn_nameptr[cnp-&gt;cn_namelen];
+	cnp-&gt;cn_nameptr[cnp-&gt;cn_namelen] = <span class="enscript-string">'\0'</span>;
+
+	nodename = dev_findname(dir_node, cnp-&gt;cn_nameptr);
+	<span class="enscript-comment">/*
+	 * restore saved character
+	 */</span>
+	cnp-&gt;cn_nameptr[cnp-&gt;cn_namelen] = heldchar;
+
+	<span class="enscript-keyword">if</span> (nodename) {
+	        <span class="enscript-comment">/* entry exists */</span>
+	        node = nodename-&gt;de_dnp;
+
+		<span class="enscript-comment">/* Do potential vnode allocation here inside the lock 
+		 * to make sure that our device node has a non-NULL dn_vn
+		 * associated with it.  The device node might otherwise
+		 * get deleted out from under us (see devfs_dn_free()).
+		 */</span>
+		error = devfs_dntovn(node, result_vnode, p);
+	}
+	DEVFS_UNLOCK();
+
+	<span class="enscript-keyword">if</span> (error) {
+	        <span class="enscript-keyword">if</span> (error == EAGAIN)
+		        <span class="enscript-keyword">goto</span> <span class="enscript-reference">retry</span>;
+		<span class="enscript-keyword">return</span> error;
+	}
+	<span class="enscript-keyword">if</span> (!nodename) {
+		<span class="enscript-comment">/*
+		 * we haven't called devfs_dntovn if we get here
+		 * we have not taken a reference on the node.. no
+		 * vnode_put is necessary on these error returns
+		 *
+		 * If it doesn't exist and we're not the last component,
+		 * or we're at the last component, but we're not creating
+		 * or renaming, return ENOENT.
+		 */</span>
+        	<span class="enscript-keyword">if</span> (!(flags &amp; ISLASTCN) || !(op == CREATE || op == RENAME)) {
+			<span class="enscript-keyword">return</span> ENOENT;
+		}
+		<span class="enscript-comment">/*
+		 * We return with the directory locked, so that
+		 * the parameters we set up above will still be
+		 * valid if we actually decide to add a new entry.
+		 * We return ni_vp == NULL to indicate that the entry
+		 * does not currently exist; we leave a pointer to
+		 * the (locked) directory vnode in namei_data-&gt;ni_dvp.
+		 *
+		 * NB - if the directory is unlocked, then this
+		 * information cannot be used.
+		 */</span>
+		<span class="enscript-keyword">return</span> (EJUSTRETURN);
+	}
+	<span class="enscript-comment">/*
+	 * from this point forward, we need to vnode_put the reference
+	 * picked up in devfs_dntovn if we decide to return an error
+	 */</span>
+
+	<span class="enscript-comment">/*
+	 * If deleting, and at end of pathname, return
+	 * parameters which can be used to remove file.
+	 * If the wantparent flag isn't set, we return only
+	 * the directory (in namei_data-&gt;ni_dvp), otherwise we go
+	 * on and lock the node, being careful with &quot;.&quot;.
+	 */</span>
+	<span class="enscript-keyword">if</span> (op == DELETE &amp;&amp; (flags &amp; ISLASTCN)) {
+
+		<span class="enscript-comment">/*
+		 * we are trying to delete '.'.  What does this mean? XXX
+		 */</span>
+		<span class="enscript-keyword">if</span> (dir_node == node) {
+		        <span class="enscript-keyword">if</span> (*result_vnode) {
+			        vnode_put(*result_vnode);
+			        *result_vnode = NULL;
+			}				
+			<span class="enscript-keyword">if</span> ( ((error = vnode_get(dir_vnode)) == 0) ) {
+			        *result_vnode = dir_vnode;
+			}
+			<span class="enscript-keyword">return</span> (error);
+		}
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-comment">/*
+	 * If rewriting (RENAME), return the vnode and the
+	 * information required to rewrite the present directory
+	 * Must get node of directory entry to verify it's a
+	 * regular file, or empty directory.
+	 */</span>
+	<span class="enscript-keyword">if</span> (op == RENAME &amp;&amp; wantparent &amp;&amp; (flags &amp; ISLASTCN)) {
+
+		<span class="enscript-comment">/*
+		 * Careful about locking second node.
+		 * This can only occur if the target is &quot;.&quot;.
+		 */</span>
+		<span class="enscript-keyword">if</span> (dir_node == node) {
+		        error = EISDIR;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">drop_ref</span>;
+		}
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-comment">/*
+	 * Step through the translation in the name.  We do not unlock the
+	 * directory because we may need it again if a symbolic link
+	 * is relative to the current directory.  Instead we save it
+	 * unlocked as &quot;saved_dir_node&quot; XXX.  We must get the target
+	 * node before unlocking
+	 * the directory to insure that the node will not be removed
+	 * before we get it.  We prevent deadlock by always fetching
+	 * nodes from the root, moving down the directory tree. Thus
+	 * when following backward pointers &quot;..&quot; we must unlock the
+	 * parent directory before getting the requested directory.
+	 * There is a potential race condition here if both the current
+	 * and parent directories are removed before the lock for the
+	 * node associated with &quot;..&quot; returns.  We hope that this occurs
+	 * infrequently since we cannot avoid this race condition without
+	 * implementing a sophisticated deadlock detection algorithm.
+	 * Note also that this simple deadlock detection scheme will not
+	 * work if the file system has any hard links other than &quot;..&quot;
+	 * that point backwards in the directory structure.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((flags &amp; ISDOTDOT) == 0 &amp;&amp; dir_node == node) {
+	        <span class="enscript-keyword">if</span> (*result_vnode) {
+		        vnode_put(*result_vnode);
+		        *result_vnode = NULL;
+		}
+		<span class="enscript-keyword">if</span> ( (error = vnode_get(dir_vnode)) ) {
+			<span class="enscript-keyword">return</span> (error);
+		}
+		*result_vnode = dir_vnode;
+	}
+	<span class="enscript-keyword">return</span> (0);
+
+<span class="enscript-reference">drop_ref</span>:
+	<span class="enscript-keyword">if</span> (*result_vnode) {
+	        vnode_put(*result_vnode);
+		*result_vnode = NULL;
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_getattr</span>(<span class="enscript-type">struct</span> vnop_getattr_args *ap)
+        <span class="enscript-comment">/*struct vnop_getattr_args {
+                struct vnode *a_vp;
+                struct vnode_attr *a_vap;
+                kauth_cred_t a_cred;
+                struct proc *a_p;
+        } */</span> 
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	<span class="enscript-type">struct</span> vnode_attr *vap = ap-&gt;a_vap;
+	devnode_t *	file_node;
+	<span class="enscript-type">struct</span> timeval now;
+
+
+	DEVFS_LOCK();
+	file_node = VTODN(vp);
+
+	VATTR_RETURN(vap, va_mode, file_node-&gt;dn_mode);
+
+	<span class="enscript-comment">/*
+	 * Note: for DEV_CDEV and DEV_BDEV, we return the device from
+	 * the vp, not the file_node; if we getting information on a
+	 * cloning device, we want the cloned information, not the template.
+	 */</span>
+	<span class="enscript-keyword">switch</span> (file_node-&gt;dn_type)
+	{
+	<span class="enscript-keyword">case</span> 	<span class="enscript-reference">DEV_DIR</span>:
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">FDESC</span>
+	<span class="enscript-keyword">case</span>	<span class="enscript-reference">DEV_DEVFD</span>:	<span class="enscript-comment">/* Like a directory */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* FDESC */</span>
+		VATTR_RETURN(vap, va_rdev,  0);
+		vap-&gt;va_mode |= (S_IFDIR);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span>	<span class="enscript-reference">DEV_CDEV</span>:
+		VATTR_RETURN(vap, va_rdev, vp-&gt;v_rdev);
+		vap-&gt;va_mode |= (S_IFCHR);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span>	<span class="enscript-reference">DEV_BDEV</span>:
+		VATTR_RETURN(vap, va_rdev, vp-&gt;v_rdev);
+		vap-&gt;va_mode |= (S_IFBLK);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span>	<span class="enscript-reference">DEV_SLNK</span>:
+		VATTR_RETURN(vap, va_rdev, 0);
+		vap-&gt;va_mode |= (S_IFLNK);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		VATTR_RETURN(vap, va_rdev, 0);	<span class="enscript-comment">/* default value only */</span>
+	}
+	VATTR_RETURN(vap, va_type, vp-&gt;v_type);
+	VATTR_RETURN(vap, va_nlink, file_node-&gt;dn_links);
+	VATTR_RETURN(vap, va_uid, file_node-&gt;dn_uid);
+	VATTR_RETURN(vap, va_gid, file_node-&gt;dn_gid);
+	VATTR_RETURN(vap, va_fsid, (uintptr_t)file_node-&gt;dn_dvm);
+	VATTR_RETURN(vap, va_fileid, (uintptr_t)file_node-&gt;dn_ino);
+	VATTR_RETURN(vap, va_data_size, file_node-&gt;dn_len);
+
+	<span class="enscript-comment">/* return an override block size (advisory) */</span>
+	<span class="enscript-keyword">if</span> (vp-&gt;v_type == VBLK)
+		VATTR_RETURN(vap, va_iosize, BLKDEV_IOSIZE);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (vp-&gt;v_type == VCHR)
+		VATTR_RETURN(vap, va_iosize, MAXPHYSIO);
+	<span class="enscript-keyword">else</span>
+		VATTR_RETURN(vap, va_iosize, vp-&gt;v_mount-&gt;mnt_vfsstat.f_iosize);
+
+
+	DEVFS_ATTR_LOCK_SPIN();
+
+	microtime(&amp;now);
+	dn_times_locked(file_node, &amp;now, &amp;now, &amp;now, 0);
+
+	<span class="enscript-comment">/* if the time is bogus, set it to the boot time */</span>
+	<span class="enscript-keyword">if</span> (file_node-&gt;dn_ctime.tv_sec == 0) {
+		file_node-&gt;dn_ctime.tv_sec = boottime_sec();
+		file_node-&gt;dn_ctime.tv_nsec = 0;
+	}
+	<span class="enscript-keyword">if</span> (file_node-&gt;dn_mtime.tv_sec == 0)
+	    file_node-&gt;dn_mtime = file_node-&gt;dn_ctime;
+	<span class="enscript-keyword">if</span> (file_node-&gt;dn_atime.tv_sec == 0)
+	    file_node-&gt;dn_atime = file_node-&gt;dn_ctime;
+	VATTR_RETURN(vap, va_change_time, file_node-&gt;dn_ctime);
+	VATTR_RETURN(vap, va_modify_time, file_node-&gt;dn_mtime);
+	VATTR_RETURN(vap, va_access_time, file_node-&gt;dn_atime);
+
+	DEVFS_ATTR_UNLOCK();
+
+	VATTR_RETURN(vap, va_gen, 0);
+	VATTR_RETURN(vap, va_filerev, 0);
+	VATTR_RETURN(vap, va_acl, NULL);
+
+	<span class="enscript-comment">/* Hide the root so Finder doesn't display it */</span>
+	<span class="enscript-keyword">if</span> (vnode_isvroot(vp)) {
+		VATTR_RETURN(vap, va_flags, UF_HIDDEN);
+	} <span class="enscript-keyword">else</span> {
+		VATTR_RETURN(vap, va_flags, 0);
+	}
+
+	DEVFS_UNLOCK();
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_setattr</span>(<span class="enscript-type">struct</span> vnop_setattr_args *ap)
+	<span class="enscript-comment">/*struct vnop_setattr_args  {
+	  struct vnode *a_vp;
+	  struct vnode_attr *a_vap;
+	  vfs_context_t a_context;
+          } */</span> 
+{
+  	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+ 	<span class="enscript-type">struct</span> vnode_attr *vap = ap-&gt;a_vap;
+  	<span class="enscript-type">int</span> error = 0;
+  	devnode_t *	file_node;
+  	<span class="enscript-type">struct</span> timeval atimeval, mtimeval;
+  
+ 	DEVFS_LOCK();
+
+  	file_node = VTODN(vp);
+  	<span class="enscript-comment">/*
+  	 * Go through the fields and update if set.
+  	 */</span>
+ 	<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_access_time) || VATTR_IS_ACTIVE(vap, va_modify_time)) {
+  
+  
+		<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_access_time))
+			file_node-&gt;dn_access = 1;
+		<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_modify_time)) {
+			file_node-&gt;dn_change = 1;
+			file_node-&gt;dn_update = 1;
+		}
+		atimeval.tv_sec = vap-&gt;va_access_time.tv_sec;
+		atimeval.tv_usec = vap-&gt;va_access_time.tv_nsec / 1000;
+		mtimeval.tv_sec = vap-&gt;va_modify_time.tv_sec;
+		mtimeval.tv_usec = vap-&gt;va_modify_time.tv_nsec / 1000;
+  
+		<span class="enscript-keyword">if</span> ( (error = devfs_update(vp, &amp;atimeval, &amp;mtimeval)) )
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+ 	}
+ 	VATTR_SET_SUPPORTED(vap, va_access_time);
+ 	VATTR_SET_SUPPORTED(vap, va_change_time);
+  
+  	<span class="enscript-comment">/*
+  	 * Change the permissions.
+  	 */</span>
+ 	<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_mode)) {
+  		file_node-&gt;dn_mode &amp;= ~07777;
+  		file_node-&gt;dn_mode |= vap-&gt;va_mode &amp; 07777;
+  	}
+ 	VATTR_SET_SUPPORTED(vap, va_mode);
+  
+  	<span class="enscript-comment">/*
+  	 * Change the owner.
+  	 */</span>
+ 	<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_uid))
+  		file_node-&gt;dn_uid = vap-&gt;va_uid;
+ 	VATTR_SET_SUPPORTED(vap, va_uid);
+  
+  	<span class="enscript-comment">/*
+  	 * Change the group.
+  	 */</span>
+ 	<span class="enscript-keyword">if</span> (VATTR_IS_ACTIVE(vap, va_gid))
+  		file_node-&gt;dn_gid = vap-&gt;va_gid;
+ 	VATTR_SET_SUPPORTED(vap, va_gid);
+	<span class="enscript-reference">exit</span>:
+	DEVFS_UNLOCK();
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_setlabel</span>(<span class="enscript-type">struct</span> vnop_setlabel_args *ap)
+			<span class="enscript-comment">/* struct vnop_setlabel_args {
+					struct vnodeop_desc *a_desc;
+					struct vnode *a_vp;
+					struct label *a_vl;
+				vfs_context_t a_context;
+				} */</span>
+{
+	<span class="enscript-type">struct</span> vnode *vp;
+	<span class="enscript-type">struct</span> devnode *de;
+
+	vp = ap-&gt;a_vp;
+	de = VTODN(vp);
+
+	mac_vnode_label_update(ap-&gt;a_context, vp, ap-&gt;a_vl);
+	mac_devfs_label_update(vp-&gt;v_mount, de, vp);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_read</span>(<span class="enscript-type">struct</span> vnop_read_args *ap)
+        <span class="enscript-comment">/* struct vnop_read_args {
+                struct vnode *a_vp;
+                struct uio *a_uio;
+                int  a_ioflag;
+		vfs_context_t a_context;
+        } */</span>
+{
+    	devnode_t * dn_p = VTODN(ap-&gt;a_vp);
+
+	<span class="enscript-keyword">switch</span> (ap-&gt;a_vp-&gt;v_type) {
+	  <span class="enscript-keyword">case</span> <span class="enscript-reference">VDIR</span>: {
+	      dn_p-&gt;dn_access = 1;
+
+	      <span class="enscript-keyword">return</span> VNOP_READDIR(ap-&gt;a_vp, ap-&gt;a_uio, 0, NULL, NULL, ap-&gt;a_context);
+	  }
+	  <span class="enscript-reference">default</span>: {
+	      printf(<span class="enscript-string">&quot;devfs_read(): bad file type %d&quot;</span>, ap-&gt;a_vp-&gt;v_type);
+	      <span class="enscript-keyword">return</span>(EINVAL);
+	      <span class="enscript-keyword">break</span>;
+	  }
+	}
+	<span class="enscript-keyword">return</span> (0); <span class="enscript-comment">/* not reached */</span>
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_close</span>(<span class="enscript-type">struct</span> vnop_close_args *ap)
+        <span class="enscript-comment">/* struct vnop_close_args {
+		struct vnode *a_vp;
+		int  a_fflag;
+		vfs_context_t a_context;
+	} */</span>
+{
+    	<span class="enscript-type">struct</span> vnode *	    	vp = ap-&gt;a_vp;
+	<span class="enscript-type">register</span> devnode_t * 	dnp;
+
+	<span class="enscript-keyword">if</span> (vnode_isinuse(vp, 1)) {
+	    DEVFS_LOCK();
+	    dnp = VTODN(vp);
+	    dn_times_now(dnp, 0);
+	    DEVFS_UNLOCK();
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfsspec_close</span>(<span class="enscript-type">struct</span> vnop_close_args *ap)
+        <span class="enscript-comment">/* struct vnop_close_args {
+		struct vnode *a_vp;
+		int  a_fflag;
+		vfs_context_t a_context;
+	} */</span>
+{
+    	<span class="enscript-type">struct</span> vnode *	    	vp = ap-&gt;a_vp;
+	<span class="enscript-type">register</span> devnode_t * 	dnp;
+
+	<span class="enscript-keyword">if</span> (vnode_isinuse(vp, 0)) {
+	    DEVFS_LOCK();
+	    dnp = VTODN(vp);
+	    dn_times_now(dnp, 0);
+	    DEVFS_UNLOCK();
+	}
+
+	<span class="enscript-keyword">return</span> (VOCALL (spec_vnodeop_p, VOFFSET(vnop_close), ap));
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">devfs_update_needed</span>(<span class="enscript-type">long</span> now_s, <span class="enscript-type">long</span> last_s)
+{
+	<span class="enscript-keyword">if</span> (now_s &gt; last_s) {
+		<span class="enscript-keyword">if</span> (now_s - last_s &gt;= DEVFS_LAZY_UPDATE_SECONDS) {
+			<span class="enscript-keyword">return</span> TRUE;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> FALSE;
+}
+
+<span class="enscript-comment">/*
+ * Given a set of time updates required [to happen at some point], check
+ * either make those changes (and resolve other pending updates) or mark
+ * the devnode for a subsequent update.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">devfs_consider_time_update</span>(devnode_t *dnp, uint32_t just_changed_flags)
+{
+	<span class="enscript-type">struct</span> timeval 		now;
+	<span class="enscript-type">long</span> now_s;
+
+	microtime(&amp;now);
+	now_s = now.tv_sec;
+
+	<span class="enscript-keyword">if</span> (dnp-&gt;dn_change || (just_changed_flags &amp; DEVFS_UPDATE_CHANGE)) {
+		<span class="enscript-keyword">if</span> (devfs_update_needed(now_s, dnp-&gt;dn_ctime.tv_sec)) {
+			dn_times_now(dnp, just_changed_flags);
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (dnp-&gt;dn_access || (just_changed_flags &amp; DEVFS_UPDATE_ACCESS)) {
+		<span class="enscript-keyword">if</span> (devfs_update_needed(now_s, dnp-&gt;dn_atime.tv_sec)) {
+			dn_times_now(dnp, just_changed_flags);
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (dnp-&gt;dn_update || (just_changed_flags &amp; DEVFS_UPDATE_MOD)) {
+		<span class="enscript-keyword">if</span> (devfs_update_needed(now_s, dnp-&gt;dn_mtime.tv_sec)) {
+			dn_times_now(dnp, just_changed_flags);
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+
+	<span class="enscript-comment">/* Not going to do anything now--mark for later update */</span>
+	dn_mark_for_delayed_times_update(dnp, just_changed_flags);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfsspec_read</span>(<span class="enscript-type">struct</span> vnop_read_args *ap)
+        <span class="enscript-comment">/* struct vnop_read_args {
+                struct vnode *a_vp;
+                struct uio *a_uio;
+                int  a_ioflag;
+                kauth_cred_t a_cred;
+        } */</span>
+{
+	<span class="enscript-type">register</span> devnode_t * 	dnp = VTODN(ap-&gt;a_vp);
+
+	devfs_consider_time_update(dnp, DEVFS_UPDATE_ACCESS);
+
+	<span class="enscript-keyword">return</span> (VOCALL (spec_vnodeop_p, VOFFSET(vnop_read), ap));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfsspec_write</span>(<span class="enscript-type">struct</span> vnop_write_args *ap)
+        <span class="enscript-comment">/* struct vnop_write_args  {
+                struct vnode *a_vp;
+                struct uio *a_uio;
+                int  a_ioflag;
+		vfs_context_t a_context;
+        } */</span>
+{
+	<span class="enscript-type">register</span> devnode_t * 	dnp = VTODN(ap-&gt;a_vp);
+
+	devfs_consider_time_update(dnp, DEVFS_UPDATE_CHANGE | DEVFS_UPDATE_MOD);
+
+	<span class="enscript-keyword">return</span> (VOCALL (spec_vnodeop_p, VOFFSET(vnop_write), ap));
+}
+
+<span class="enscript-comment">/*
+ *  Write data to a file or directory.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_write</span>(<span class="enscript-type">struct</span> vnop_write_args *ap)
+        <span class="enscript-comment">/* struct vnop_write_args  {
+                struct vnode *a_vp;
+                struct uio *a_uio;
+                int  a_ioflag;
+                kauth_cred_t a_cred;
+        } */</span>
+{
+	<span class="enscript-keyword">switch</span> (ap-&gt;a_vp-&gt;v_type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VDIR</span>:
+		<span class="enscript-keyword">return</span>(EISDIR);
+	<span class="enscript-reference">default</span>:
+		printf(<span class="enscript-string">&quot;devfs_write(): bad file type %d&quot;</span>, ap-&gt;a_vp-&gt;v_type);
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+	<span class="enscript-keyword">return</span> 0; <span class="enscript-comment">/* not reached */</span>
+}
+
+<span class="enscript-comment">/* 
+ * Deviates from UFS naming convention because there is a KPI function
+ * called devfs_remove().
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_vnop_remove</span>(<span class="enscript-type">struct</span> vnop_remove_args *ap)
+        <span class="enscript-comment">/* struct vnop_remove_args  {
+                struct vnode *a_dvp;
+                struct vnode *a_vp;
+                struct componentname *a_cnp;
+        } */</span> 
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	<span class="enscript-type">struct</span> vnode *dvp = ap-&gt;a_dvp;
+	<span class="enscript-type">struct</span> componentname *cnp = ap-&gt;a_cnp;
+	devnode_t *  tp;
+	devnode_t *  tdp;
+	devdirent_t * tnp;
+	<span class="enscript-type">int</span> doingdirectory = 0;
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-comment">/*
+	 * assume that the name is null terminated as they
+	 * are the end of the path. Get pointers to all our
+	 * devfs structures.
+	 */</span>
+	DEVFS_LOCK();
+
+	tp = VTODN(vp);
+	tdp = VTODN(dvp);
+
+
+	tnp = dev_findname(tdp, cnp-&gt;cn_nameptr);
+
+	<span class="enscript-keyword">if</span> (tnp == NULL) {
+	        error = ENOENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">abort</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Make sure that we don't try do something stupid
+	 */</span>
+	<span class="enscript-keyword">if</span> ((tp-&gt;dn_type) == DEV_DIR) {
+		<span class="enscript-comment">/*
+		 * Avoid &quot;.&quot;, &quot;..&quot;, and aliases of &quot;.&quot; for obvious reasons.
+		 */</span>
+		<span class="enscript-keyword">if</span> ( (cnp-&gt;cn_namelen == 1 &amp;&amp; cnp-&gt;cn_nameptr[0] == <span class="enscript-string">'.'</span>) 
+		    || (cnp-&gt;cn_flags&amp;ISDOTDOT) ) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">abort</span>;
+		}
+		doingdirectory++;
+	}
+
+	<span class="enscript-comment">/***********************************
+	 * Start actually doing things.... *
+	 ***********************************/</span>
+	devfs_consider_time_update(tdp, DEVFS_UPDATE_CHANGE | DEVFS_UPDATE_MOD);
+
+	<span class="enscript-comment">/*
+	 * Target must be empty if a directory and have no links
+	 * to it. Also, ensure source and target are compatible
+	 * (both directories, or both not directories).
+	 */</span>
+	<span class="enscript-keyword">if</span> (( doingdirectory) &amp;&amp; (tp-&gt;dn_links &gt; 2)) {
+	    error = ENOTEMPTY;
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">abort</span>;
+	}
+	dev_free_name(tnp);
+<span class="enscript-reference">abort</span>:
+	DEVFS_UNLOCK();
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_link</span>(<span class="enscript-type">struct</span> vnop_link_args *ap)
+        <span class="enscript-comment">/*struct vnop_link_args  {
+                struct vnode *a_tdvp;
+                struct vnode *a_vp;
+                struct componentname *a_cnp;
+		vfs_context_t a_context;
+        } */</span> 
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	<span class="enscript-type">struct</span> vnode *tdvp = ap-&gt;a_tdvp;
+	<span class="enscript-type">struct</span> componentname *cnp = ap-&gt;a_cnp;
+	devnode_t * fp;
+	devnode_t * tdp;
+	devdirent_t * tnp;
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-comment">/*
+	 * First catch an arbitrary restriction for this FS
+	 */</span>
+	<span class="enscript-keyword">if</span> (cnp-&gt;cn_namelen &gt; DEVMAXNAMESIZE) {
+		error = ENAMETOOLONG;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out1</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Lock our directories and get our name pointers
+	 * assume that the names are null terminated as they
+	 * are the end of the path. Get pointers to all our
+	 * devfs structures.
+	 */</span>
+	<span class="enscript-comment">/* can lookup dnode safely for tdvp outside of devfs lock as it is not aliased */</span>
+	tdp = VTODN(tdvp);
+	
+	<span class="enscript-keyword">if</span> (tdvp-&gt;v_mount != vp-&gt;v_mount) {
+		<span class="enscript-keyword">return</span> (EXDEV);
+	}
+	DEVFS_LOCK();
+
+	fp = VTODN(vp);
+
+	<span class="enscript-comment">/***********************************
+	 * Start actually doing things.... *
+	 ***********************************/</span>
+	dn_times_now(fp, DEVFS_UPDATE_CHANGE);
+
+	<span class="enscript-keyword">if</span> (!error) {
+	    error = dev_add_name(cnp-&gt;cn_nameptr, tdp, NULL, fp, &amp;tnp);
+	}
+<span class="enscript-reference">out1</span>:
+	DEVFS_UNLOCK();
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Rename system call. Seems overly complicated to me...
+ * 	rename(&quot;foo&quot;, &quot;bar&quot;);
+ * is essentially
+ *	unlink(&quot;bar&quot;);
+ *	link(&quot;foo&quot;, &quot;bar&quot;);
+ *	unlink(&quot;foo&quot;);
+ * but ``atomically''.
+ *
+ * When the target exists, both the directory
+ * and target vnodes are locked.
+ * the source and source-parent vnodes are referenced
+ *
+ *
+ * Basic algorithm is:
+ *
+ * 1) Bump link count on source while we're linking it to the
+ *    target.  This also ensure the inode won't be deleted out
+ *    from underneath us while we work (it may be truncated by
+ *    a concurrent `trunc' or `open' for creation).
+ * 2) Link source to destination.  If destination already exists,
+ *    delete it first.
+ * 3) Unlink source reference to node if still around. If a
+ *    directory was moved and the parent of the destination
+ *    is different from the source, patch the &quot;..&quot; entry in the
+ *    directory.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_rename</span>(<span class="enscript-type">struct</span> vnop_rename_args *ap)
+        <span class="enscript-comment">/*struct vnop_rename_args  {
+                struct vnode *a_fdvp; 
+                struct vnode *a_fvp;  
+                struct componentname *a_fcnp;
+                struct vnode *a_tdvp;
+                struct vnode *a_tvp;
+                struct componentname *a_tcnp;
+		vfs_context_t a_context;
+        } */</span>
+{
+	<span class="enscript-type">struct</span> vnode *tvp = ap-&gt;a_tvp;
+	<span class="enscript-type">struct</span> vnode *tdvp = ap-&gt;a_tdvp;
+	<span class="enscript-type">struct</span> vnode *fvp = ap-&gt;a_fvp;
+	<span class="enscript-type">struct</span> vnode *fdvp = ap-&gt;a_fdvp;
+	<span class="enscript-type">struct</span> componentname *tcnp = ap-&gt;a_tcnp;
+	<span class="enscript-type">struct</span> componentname *fcnp = ap-&gt;a_fcnp;
+	devnode_t *fp, *fdp, *tp, *tdp;
+	devdirent_t *fnp,*tnp;
+	<span class="enscript-type">int</span> doingdirectory = 0;
+	<span class="enscript-type">int</span> error = 0;
+
+	DEVFS_LOCK();
+	<span class="enscript-comment">/*
+	 * First catch an arbitrary restriction for this FS
+	 */</span>
+	<span class="enscript-keyword">if</span> (tcnp-&gt;cn_namelen &gt; DEVMAXNAMESIZE) {
+		error = ENAMETOOLONG;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * assume that the names are null terminated as they
+	 * are the end of the path. Get pointers to all our
+	 * devfs structures.
+	 */</span>
+	tdp = VTODN(tdvp);
+	fdp = VTODN(fdvp);
+	fp = VTODN(fvp);
+
+	fnp = dev_findname(fdp, fcnp-&gt;cn_nameptr);
+
+	<span class="enscript-keyword">if</span> (fnp == NULL) {
+	        error = ENOENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	tp = NULL;
+	tnp = NULL;
+
+	<span class="enscript-keyword">if</span> (tvp) {
+		tnp = dev_findname(tdp, tcnp-&gt;cn_nameptr);
+
+		<span class="enscript-keyword">if</span> (tnp == NULL) {
+		        error = ENOENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		tp = VTODN(tvp);
+	}
+	
+	<span class="enscript-comment">/*
+	 * Make sure that we don't try do something stupid
+	 */</span>
+	<span class="enscript-keyword">if</span> ((fp-&gt;dn_type) == DEV_DIR) {
+		<span class="enscript-comment">/*
+		 * Avoid &quot;.&quot;, &quot;..&quot;, and aliases of &quot;.&quot; for obvious reasons.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((fcnp-&gt;cn_namelen == 1 &amp;&amp; fcnp-&gt;cn_nameptr[0] == <span class="enscript-string">'.'</span>) 
+		    || (fcnp-&gt;cn_flags&amp;ISDOTDOT) 
+		    || (tcnp-&gt;cn_namelen == 1 &amp;&amp; tcnp-&gt;cn_nameptr[0] == <span class="enscript-string">'.'</span>) 
+		    || (tcnp-&gt;cn_flags&amp;ISDOTDOT) 
+		    || (tdp == fp )) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		doingdirectory++;
+	}
+
+	<span class="enscript-comment">/*
+	 * If &quot;..&quot; must be changed (ie the directory gets a new
+	 * parent) then the source directory must not be in the
+	 * directory hierarchy above the target, as this would
+	 * orphan everything below the source directory. Also
+	 * the user must have write permission in the source so
+	 * as to be able to change &quot;..&quot;. 
+	 */</span>
+	<span class="enscript-keyword">if</span> (doingdirectory &amp;&amp; (tdp != fdp)) {
+		devnode_t * tmp, *ntmp;
+		tmp = tdp;
+		<span class="enscript-keyword">do</span> {
+			<span class="enscript-keyword">if</span>(tmp == fp) {
+				<span class="enscript-comment">/* XXX unlock stuff here probably */</span>
+				error = EINVAL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			ntmp = tmp;
+		} <span class="enscript-keyword">while</span> ((tmp = tmp-&gt;dn_typeinfo.Dir.parent) != ntmp);
+	}
+
+	<span class="enscript-comment">/***********************************
+	 * Start actually doing things.... *
+	 ***********************************/</span>
+	dn_times_now(fp, DEVFS_UPDATE_CHANGE);
+
+	<span class="enscript-comment">/*
+	 * Check if just deleting a link name.
+	 */</span>
+	<span class="enscript-keyword">if</span> (fvp == tvp) {
+		<span class="enscript-keyword">if</span> (fvp-&gt;v_type == VDIR) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-comment">/* Release destination completely. */</span>
+		dev_free_name(fnp);
+
+		DEVFS_UNLOCK();
+		<span class="enscript-keyword">return</span> 0;
+	}
+	<span class="enscript-comment">/*
+	 * 1) Bump link count while we're moving stuff
+	 *    around.  If we crash somewhere before
+	 *    completing our work,  too bad :)
+	 */</span>
+	fp-&gt;dn_links++;
+	<span class="enscript-comment">/*
+	 * If the target exists zap it (unless it's a non-empty directory)
+	 * We could do that as well but won't
+ 	 */</span>
+	<span class="enscript-keyword">if</span> (tp) {
+		<span class="enscript-comment">/*
+		 * Target must be empty if a directory and have no links
+		 * to it. Also, ensure source and target are compatible
+		 * (both directories, or both not directories).
+		 */</span>
+		<span class="enscript-keyword">if</span> (( doingdirectory) &amp;&amp; (tp-&gt;dn_links &gt; 2)) {
+		        error = ENOTEMPTY;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		dev_free_name(tnp);
+		tp = NULL;
+	}
+	dev_add_name(tcnp-&gt;cn_nameptr,tdp,NULL,fp,&amp;tnp);
+	fnp-&gt;de_dnp = NULL;
+	fp-&gt;dn_links--; <span class="enscript-comment">/* one less link to it.. */</span>
+
+	dev_free_name(fnp);
+<span class="enscript-reference">bad</span>:
+	fp-&gt;dn_links--; <span class="enscript-comment">/* we added one earlier*/</span>
+<span class="enscript-reference">out</span>:
+	DEVFS_UNLOCK();
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_mkdir</span>(<span class="enscript-type">struct</span> vnop_mkdir_args *ap)
+        <span class="enscript-comment">/*struct vnop_mkdir_args {
+                struct vnode *a_dvp;
+                struct vnode **a_vpp;
+                struct componentname *a_cnp;
+                struct vnode_attr *a_vap;
+		vfs_context_t a_context;
+        } */</span>
+{
+	<span class="enscript-type">struct</span> componentname * cnp = ap-&gt;a_cnp;
+	vfs_context_t ctx = cnp-&gt;cn_context;
+	<span class="enscript-type">struct</span> proc *p = vfs_context_proc(ctx);
+	<span class="enscript-type">int</span> error = 0;
+	devnode_t * dir_p;
+	devdirent_t * nm_p;
+	devnode_t * dev_p;
+	<span class="enscript-type">struct</span> vnode_attr *	vap = ap-&gt;a_vap;
+	<span class="enscript-type">struct</span> vnode * * vpp = ap-&gt;a_vpp;
+
+	DEVFS_LOCK();
+
+	dir_p = VTODN(ap-&gt;a_dvp);
+	error = dev_add_entry(cnp-&gt;cn_nameptr, dir_p, DEV_DIR, 
+			      NULL, NULL, NULL, &amp;nm_p);
+	<span class="enscript-keyword">if</span> (error) {
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">failure</span>;
+	}
+	dev_p = nm_p-&gt;de_dnp;
+	dev_p-&gt;dn_uid = dir_p-&gt;dn_uid;
+	dev_p-&gt;dn_gid = dir_p-&gt;dn_gid;
+	dev_p-&gt;dn_mode = vap-&gt;va_mode;
+	dn_copy_times(dev_p, dir_p);
+
+	error = devfs_dntovn(dev_p, vpp, p);
+<span class="enscript-reference">failure</span>:
+	DEVFS_UNLOCK();
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-comment">/*
+ * An rmdir is a special type of remove, which we already support; we wrap
+ * and reexpress the arguments to call devfs_remove directly.  The only
+ * different argument is flags, which we do not set, since it's ignored.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_rmdir</span>(<span class="enscript-type">struct</span> vnop_rmdir_args *ap)
+	<span class="enscript-comment">/* struct vnop_rmdir_args {
+		struct vnode *a_dvp;
+		struct vnode *a_vp;
+		struct componentname *a_cnp;
+		vfs_context_t a_context;
+	} */</span>
+{
+	<span class="enscript-type">struct</span> vnop_remove_args ra;
+
+	ra.a_dvp = ap-&gt;a_dvp;
+	ra.a_vp = ap-&gt;a_vp;
+	ra.a_cnp = ap-&gt;a_cnp;
+	ra.a_flags = 0;		<span class="enscript-comment">/* XXX */</span>
+	ra.a_context = ap-&gt;a_context;
+
+	<span class="enscript-keyword">return</span> devfs_vnop_remove(&amp;ra);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_symlink</span>(<span class="enscript-type">struct</span> vnop_symlink_args *ap)
+        <span class="enscript-comment">/*struct vnop_symlink_args {
+                struct vnode *a_dvp;
+                struct vnode **a_vpp;
+                struct componentname *a_cnp;
+                struct vnode_attr *a_vap;
+                char *a_target;
+		vfs_context_t a_context;
+        } */</span>
+{
+	<span class="enscript-type">int</span> error;
+	devdirent_t *newent;
+
+	DEVFS_LOCK();
+	error = devfs_make_symlink(VTODN(ap-&gt;a_dvp), ap-&gt;a_cnp-&gt;cn_nameptr, ap-&gt;a_vap-&gt;va_mode, ap-&gt;a_target, &amp;newent);
+	
+	<span class="enscript-keyword">if</span> (error == 0) {
+		error = devfs_dntovn(newent-&gt;de_dnp, ap-&gt;a_vpp, vfs_context_proc(ap-&gt;a_context));
+	}
+
+	DEVFS_UNLOCK();
+
+	<span class="enscript-keyword">return</span> error;
+
+}
+
+<span class="enscript-comment">/* Called with devfs locked */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_make_symlink</span>(devnode_t *dir_p, <span class="enscript-type">char</span> *name, <span class="enscript-type">int</span> mode, <span class="enscript-type">char</span> *target, devdirent_t **newent)
+{
+	<span class="enscript-type">int</span> error = 0;
+	devnode_type_t typeinfo;
+	devdirent_t * nm_p;
+	devnode_t * dev_p;
+
+	typeinfo.Slnk.name = target;
+	typeinfo.Slnk.namelen = strlen(target);
+
+	error = dev_add_entry(name, dir_p, DEV_SLNK, 
+			      &amp;typeinfo, NULL, NULL, &amp;nm_p);
+	<span class="enscript-keyword">if</span> (error) {
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">failure</span>;
+	}
+	dev_p = nm_p-&gt;de_dnp;
+	dev_p-&gt;dn_uid = dir_p-&gt;dn_uid;
+	dev_p-&gt;dn_gid = dir_p-&gt;dn_gid;
+	dev_p-&gt;dn_mode = mode;
+	dn_copy_times(dev_p, dir_p);
+
+	<span class="enscript-keyword">if</span> (newent) {
+		*newent = nm_p;
+	}
+
+<span class="enscript-reference">failure</span>:
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-comment">/*
+ * Mknod vnode call
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_mknod</span>(<span class="enscript-type">struct</span> vnop_mknod_args *ap)
+        <span class="enscript-comment">/* struct vnop_mknod_args {
+		struct vnode *a_dvp;
+		struct vnode **a_vpp;
+		struct componentname *a_cnp;
+		struct vnode_attr *a_vap;
+		vfs_context_t a_context;
+	} */</span>
+{
+    	<span class="enscript-type">struct</span> componentname * cnp = ap-&gt;a_cnp;
+	vfs_context_t ctx = cnp-&gt;cn_context;
+	<span class="enscript-type">struct</span> proc *p = vfs_context_proc(ctx);
+	devnode_t *	dev_p;
+	devdirent_t *	devent;
+	devnode_t *	dir_p;	<span class="enscript-comment">/* devnode for parent directory */</span>
+    	<span class="enscript-type">struct</span> vnode * 	dvp = ap-&gt;a_dvp;
+	<span class="enscript-type">int</span> 		error = 0;
+	devnode_type_t	typeinfo;
+	<span class="enscript-type">struct</span> vnode_attr *	vap = ap-&gt;a_vap;
+	<span class="enscript-type">struct</span> vnode ** vpp = ap-&gt;a_vpp;
+
+	*vpp = NULL;
+	<span class="enscript-keyword">if</span> (!(vap-&gt;va_type == VBLK) &amp;&amp; !(vap-&gt;va_type == VCHR)) {
+	        <span class="enscript-keyword">return</span> (EINVAL); <span class="enscript-comment">/* only support mknod of special files */</span>
+	}
+	typeinfo.dev = vap-&gt;va_rdev;
+
+	DEVFS_LOCK();
+
+	dir_p = VTODN(dvp);
+
+	error = dev_add_entry(cnp-&gt;cn_nameptr, dir_p, 
+			      (vap-&gt;va_type == VBLK) ? DEV_BDEV : DEV_CDEV,
+			      &amp;typeinfo, NULL, NULL, &amp;devent);
+	<span class="enscript-keyword">if</span> (error) {
+	        <span class="enscript-keyword">goto</span> <span class="enscript-reference">failure</span>;
+	}
+	dev_p = devent-&gt;de_dnp;
+	error = devfs_dntovn(dev_p, vpp, p);
+	<span class="enscript-keyword">if</span> (error)
+	        <span class="enscript-keyword">goto</span> <span class="enscript-reference">failure</span>;
+	dev_p-&gt;dn_uid = vap-&gt;va_uid;
+	dev_p-&gt;dn_gid = vap-&gt;va_gid;
+	dev_p-&gt;dn_mode = vap-&gt;va_mode;
+	VATTR_SET_SUPPORTED(vap, va_uid);
+	VATTR_SET_SUPPORTED(vap, va_gid);
+	VATTR_SET_SUPPORTED(vap, va_mode);
+<span class="enscript-reference">failure</span>:
+	DEVFS_UNLOCK();
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Vnode op for readdir
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_readdir</span>(<span class="enscript-type">struct</span> vnop_readdir_args *ap)
+        <span class="enscript-comment">/*struct vnop_readdir_args {
+                struct vnode *a_vp;
+                struct uio *a_uio;
+		int a_flags;
+		int *a_eofflag;
+		int *a_numdirent;
+		vfs_context_t a_context;
+        } */</span>
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	<span class="enscript-type">struct</span> uio *uio = ap-&gt;a_uio;
+	<span class="enscript-type">struct</span> dirent dirent;
+	devnode_t * dir_node;
+	devdirent_t *	name_node;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> reclen;
+	<span class="enscript-type">int</span> nodenumber;
+	<span class="enscript-type">int</span>	startpos,pos;
+
+	<span class="enscript-keyword">if</span> (ap-&gt;a_flags &amp; (VNODE_READDIR_EXTENDED | VNODE_READDIR_REQSEEKOFF))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/*  set up refs to dir */</span>
+	dir_node = VTODN(vp);
+	<span class="enscript-keyword">if</span> (dir_node-&gt;dn_type != DEV_DIR)
+		<span class="enscript-keyword">return</span>(ENOTDIR);
+	pos = 0;
+	startpos = uio-&gt;uio_offset;
+
+	DEVFS_LOCK();
+
+	name_node = dir_node-&gt;dn_typeinfo.Dir.dirlist;
+	nodenumber = 0;
+
+	<span class="enscript-keyword">while</span> ((name_node || (nodenumber &lt; 2)) &amp;&amp; (uio_resid(uio) &gt; 0))
+	{
+		<span class="enscript-keyword">switch</span>(nodenumber)
+		{
+		<span class="enscript-keyword">case</span>	<span class="enscript-reference">0</span>:
+			dirent.d_fileno = dir_node-&gt;dn_ino;
+			name = <span class="enscript-string">&quot;.&quot;</span>;
+			dirent.d_namlen = 1;
+			dirent.d_type = DT_DIR;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span>	<span class="enscript-reference">1</span>:
+			<span class="enscript-keyword">if</span>(dir_node-&gt;dn_typeinfo.Dir.parent)
+				dirent.d_fileno = dir_node-&gt;dn_typeinfo.Dir.parent-&gt;dn_ino;
+			<span class="enscript-keyword">else</span>
+				dirent.d_fileno = dir_node-&gt;dn_ino;
+			name = <span class="enscript-string">&quot;..&quot;</span>;
+			dirent.d_namlen = 2;
+			dirent.d_type = DT_DIR;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			dirent.d_fileno = name_node-&gt;de_dnp-&gt;dn_ino;
+			dirent.d_namlen = strlen(name_node-&gt;de_name);
+			name = name_node-&gt;de_name;
+			<span class="enscript-keyword">switch</span>(name_node-&gt;de_dnp-&gt;dn_type) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">DEV_BDEV</span>:
+				dirent.d_type = DT_BLK;
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">DEV_CDEV</span>:
+				dirent.d_type = DT_CHR;
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">DEV_DIR</span>:
+				dirent.d_type = DT_DIR;
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">DEV_SLNK</span>:
+				dirent.d_type = DT_LNK;
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-reference">default</span>:
+				dirent.d_type = DT_UNKNOWN;
+			}
+		}
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">GENERIC_DIRSIZ</span>(dp) \
+    ((<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> dirent) - (MAXNAMLEN+1)) + (((dp)-&gt;d_namlen+1 + 3) &amp;~ 3))
+
+		reclen = dirent.d_reclen = GENERIC_DIRSIZ(&amp;dirent);
+
+		<span class="enscript-keyword">if</span>(pos &gt;= startpos)	<span class="enscript-comment">/* made it to the offset yet? */</span>
+		{
+			<span class="enscript-keyword">if</span> (uio_resid(uio) &lt; reclen) <span class="enscript-comment">/* will it fit? */</span>
+				<span class="enscript-keyword">break</span>;
+			strlcpy(dirent.d_name, name, DEVMAXNAMESIZE);
+			<span class="enscript-keyword">if</span> ((error = uiomove ((caddr_t)&amp;dirent,
+					dirent.d_reclen, uio)) != 0)
+				<span class="enscript-keyword">break</span>;
+		}
+		pos += reclen;
+		<span class="enscript-keyword">if</span>((nodenumber &gt;1) &amp;&amp; name_node)
+			name_node = name_node-&gt;de_next;
+		nodenumber++;
+	}
+	DEVFS_UNLOCK();
+	uio-&gt;uio_offset = pos;
+
+	devfs_consider_time_update(dir_node, DEVFS_UPDATE_ACCESS);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_readlink</span>(<span class="enscript-type">struct</span> vnop_readlink_args *ap)
+        <span class="enscript-comment">/*struct vnop_readlink_args {
+                struct vnode *a_vp;
+                struct uio *a_uio;
+		vfs_context_t a_context;
+        } */</span>
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	<span class="enscript-type">struct</span> uio *uio = ap-&gt;a_uio;
+	devnode_t * lnk_node;
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-comment">/*  set up refs to dir */</span>
+	lnk_node = VTODN(vp);
+
+	<span class="enscript-keyword">if</span> (lnk_node-&gt;dn_type != DEV_SLNK) {
+	        error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	error = uiomove(lnk_node-&gt;dn_typeinfo.Slnk.name, 
+			lnk_node-&gt;dn_typeinfo.Slnk.namelen, uio);
+<span class="enscript-reference">out</span>:	
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_reclaim</span>(<span class="enscript-type">struct</span> vnop_reclaim_args *ap)
+        <span class="enscript-comment">/*struct vnop_reclaim_args {
+		struct vnode *a_vp;
+        } */</span>
+{
+    <span class="enscript-type">struct</span> vnode *	vp = ap-&gt;a_vp;
+    devnode_t * 	dnp;
+    
+    DEVFS_LOCK();
+
+    dnp = VTODN(vp);
+
+    <span class="enscript-keyword">if</span> (dnp) {
+	<span class="enscript-comment">/* If this is a cloning device, it didn't have a dn_vn anyway */</span>
+	dnp-&gt;dn_vn = NULL;
+	vnode_clearfsnode(vp);
+
+	<span class="enscript-comment">/* This could delete the node, if we are the last vnode */</span>
+	devfs_rele_node(dnp);
+    }
+    DEVFS_UNLOCK();
+
+    <span class="enscript-keyword">return</span>(0);
+}
+
+
+<span class="enscript-comment">/*
+ * Get configurable pathname variables.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devs_vnop_pathconf</span>(
+	<span class="enscript-type">struct</span> vnop_pathconf_args <span class="enscript-comment">/* {
+		struct vnode *a_vp;
+		int a_name;
+		int *a_retval;
+		vfs_context_t a_context;
+	} */</span> *ap)
+{
+	<span class="enscript-keyword">switch</span> (ap-&gt;a_name) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_LINK_MAX</span>:
+		<span class="enscript-comment">/* arbitrary limit matching HFS; devfs has no hard limit */</span>
+		*ap-&gt;a_retval = 32767;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_NAME_MAX</span>:
+		*ap-&gt;a_retval = DEVMAXNAMESIZE - 1;	<span class="enscript-comment">/* includes NUL */</span>
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_PATH_MAX</span>:
+		*ap-&gt;a_retval = DEVMAXPATHSIZE - 1;	<span class="enscript-comment">/* XXX nonconformant */</span>
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_CHOWN_RESTRICTED</span>:
+		*ap-&gt;a_retval = 200112;		<span class="enscript-comment">/* _POSIX_CHOWN_RESTRICTED */</span>
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_NO_TRUNC</span>:
+		*ap-&gt;a_retval = 0;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_CASE_SENSITIVE</span>:
+		*ap-&gt;a_retval = 1;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_CASE_PRESERVING</span>:
+		*ap-&gt;a_retval = 1;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+
+<span class="enscript-comment">/**************************************************************************\
+* pseudo ops *
+\**************************************************************************/</span>
+
+<span class="enscript-comment">/*
+ *
+ *	struct vnop_inactive_args {
+ *		struct vnode *a_vp;
+ *		vfs_context_t a_context;
+ *	} 
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_inactive</span>(__unused <span class="enscript-type">struct</span> vnop_inactive_args *ap)
+{
+    	vnode_t vp = ap-&gt;a_vp;
+	devnode_t *dnp = VTODN(vp);
+
+	<span class="enscript-comment">/* 
+	 * Cloned vnodes are not linked in anywhere, so they
+	 * can just be recycled.  
+	 */</span>
+	<span class="enscript-keyword">if</span> (dnp-&gt;dn_clone != NULL) {
+		vnode_recycle(vp);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * called with DEVFS_LOCK held
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_update</span>(<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> timeval *access, <span class="enscript-type">struct</span> timeval *modify)
+{
+	devnode_t * ip;
+	<span class="enscript-type">struct</span> timeval now;
+
+	ip = VTODN(vp);
+	<span class="enscript-keyword">if</span> (vp-&gt;v_mount-&gt;mnt_flag &amp; MNT_RDONLY) {
+	        ip-&gt;dn_access = 0;
+	        ip-&gt;dn_change = 0;
+	        ip-&gt;dn_update = 0;
+
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	DEVFS_ATTR_LOCK_SPIN();
+	microtime(&amp;now);
+	dn_times_locked(ip, access, modify, &amp;now, DEVFS_UPDATE_ACCESS | DEVFS_UPDATE_MOD);
+	DEVFS_ATTR_UNLOCK();
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VOPFUNC</span> int (*)(void *)
+
+<span class="enscript-comment">/* The following ops are used by directories and symlinks */</span>
+<span class="enscript-function-name">int</span> (**devfs_vnodeop_p)(<span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> vnodeopv_entry_desc devfs_vnodeop_entries[] = {
+	{ &amp;vnop_default_desc, (VOPFUNC)vn_default_error },
+	{ &amp;vnop_lookup_desc, (VOPFUNC)devfs_lookup },		<span class="enscript-comment">/* lookup */</span>
+	{ &amp;vnop_create_desc, (VOPFUNC)err_create },		<span class="enscript-comment">/* create */</span>
+	{ &amp;vnop_whiteout_desc, (VOPFUNC)err_whiteout },		<span class="enscript-comment">/* whiteout */</span>
+	{ &amp;vnop_mknod_desc, (VOPFUNC)devfs_mknod },		<span class="enscript-comment">/* mknod */</span>
+	{ &amp;vnop_open_desc, (VOPFUNC)nop_open },			<span class="enscript-comment">/* open */</span>
+	{ &amp;vnop_close_desc, (VOPFUNC)devfs_close },		<span class="enscript-comment">/* close */</span>
+	{ &amp;vnop_getattr_desc, (VOPFUNC)devfs_getattr },		<span class="enscript-comment">/* getattr */</span>
+	{ &amp;vnop_setattr_desc, (VOPFUNC)devfs_setattr },		<span class="enscript-comment">/* setattr */</span>
+	{ &amp;vnop_read_desc, (VOPFUNC)devfs_read },		<span class="enscript-comment">/* read */</span>
+	{ &amp;vnop_write_desc, (VOPFUNC)devfs_write },		<span class="enscript-comment">/* write */</span>
+	{ &amp;vnop_ioctl_desc, (VOPFUNC)err_ioctl },		<span class="enscript-comment">/* ioctl */</span>
+	{ &amp;vnop_select_desc, (VOPFUNC)err_select },		<span class="enscript-comment">/* select */</span>
+	{ &amp;vnop_revoke_desc, (VOPFUNC)err_revoke },		<span class="enscript-comment">/* revoke */</span>
+	{ &amp;vnop_mmap_desc, (VOPFUNC)err_mmap },			<span class="enscript-comment">/* mmap */</span>
+	{ &amp;vnop_fsync_desc, (VOPFUNC)nop_fsync },		<span class="enscript-comment">/* fsync */</span>
+	{ &amp;vnop_remove_desc, (VOPFUNC)devfs_vnop_remove },	<span class="enscript-comment">/* remove */</span>
+	{ &amp;vnop_link_desc, (VOPFUNC)devfs_link },		<span class="enscript-comment">/* link */</span>
+	{ &amp;vnop_rename_desc, (VOPFUNC)devfs_rename },		<span class="enscript-comment">/* rename */</span>
+	{ &amp;vnop_mkdir_desc, (VOPFUNC)devfs_mkdir },		<span class="enscript-comment">/* mkdir */</span>
+	{ &amp;vnop_rmdir_desc, (VOPFUNC)devfs_rmdir },		<span class="enscript-comment">/* rmdir */</span>
+	{ &amp;vnop_symlink_desc, (VOPFUNC)devfs_symlink },		<span class="enscript-comment">/* symlink */</span>
+	{ &amp;vnop_readdir_desc, (VOPFUNC)devfs_readdir },		<span class="enscript-comment">/* readdir */</span>
+	{ &amp;vnop_readlink_desc, (VOPFUNC)devfs_readlink },	<span class="enscript-comment">/* readlink */</span>
+	{ &amp;vnop_inactive_desc, (VOPFUNC)devfs_inactive },	<span class="enscript-comment">/* inactive */</span>
+	{ &amp;vnop_reclaim_desc, (VOPFUNC)devfs_reclaim },		<span class="enscript-comment">/* reclaim */</span>
+	{ &amp;vnop_strategy_desc, (VOPFUNC)err_strategy },		<span class="enscript-comment">/* strategy */</span>
+	{ &amp;vnop_pathconf_desc, (VOPFUNC)devs_vnop_pathconf },	<span class="enscript-comment">/* pathconf */</span>
+	{ &amp;vnop_advlock_desc, (VOPFUNC)err_advlock },		<span class="enscript-comment">/* advlock */</span>
+	{ &amp;vnop_bwrite_desc, (VOPFUNC)err_bwrite },
+	{ &amp;vnop_pagein_desc, (VOPFUNC)err_pagein },		<span class="enscript-comment">/* Pagein */</span>
+	{ &amp;vnop_pageout_desc, (VOPFUNC)err_pageout },		<span class="enscript-comment">/* Pageout */</span>
+	{ &amp;vnop_copyfile_desc, (VOPFUNC)err_copyfile },		<span class="enscript-comment">/* Copyfile */</span>
+	{ &amp;vnop_blktooff_desc, (VOPFUNC)err_blktooff },		<span class="enscript-comment">/* blktooff */</span>
+	{ &amp;vnop_offtoblk_desc, (VOPFUNC)err_offtoblk },		<span class="enscript-comment">/* offtoblk */</span>
+	{ &amp;vnop_blockmap_desc, (VOPFUNC)err_blockmap },		<span class="enscript-comment">/* blockmap */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	{ &amp;vnop_setlabel_desc, (VOPFUNC)devfs_setlabel },       <span class="enscript-comment">/* setlabel */</span>
+#<span class="enscript-reference">endif</span>
+	{ (<span class="enscript-type">struct</span> vnodeop_desc*)NULL, (<span class="enscript-type">int</span>(*)())NULL }
+};
+<span class="enscript-type">struct</span> vnodeopv_desc devfs_vnodeop_opv_desc =
+	{ &amp;devfs_vnodeop_p, devfs_vnodeop_entries };
+
+<span class="enscript-comment">/* The following ops are used by the device nodes */</span>
+<span class="enscript-function-name">int</span> (**devfs_spec_vnodeop_p)(<span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> vnodeopv_entry_desc devfs_spec_vnodeop_entries[] = {
+	{ &amp;vnop_default_desc, (VOPFUNC)vn_default_error },
+	{ &amp;vnop_lookup_desc, (VOPFUNC)spec_lookup },		<span class="enscript-comment">/* lookup */</span>
+	{ &amp;vnop_create_desc, (VOPFUNC)spec_create },		<span class="enscript-comment">/* create */</span>
+	{ &amp;vnop_mknod_desc, (VOPFUNC)spec_mknod },		<span class="enscript-comment">/* mknod */</span>
+	{ &amp;vnop_open_desc, (VOPFUNC)spec_open },			<span class="enscript-comment">/* open */</span>
+	{ &amp;vnop_close_desc, (VOPFUNC)devfsspec_close },		<span class="enscript-comment">/* close */</span>
+	{ &amp;vnop_getattr_desc, (VOPFUNC)devfs_getattr },		<span class="enscript-comment">/* getattr */</span>
+	{ &amp;vnop_setattr_desc, (VOPFUNC)devfs_setattr },		<span class="enscript-comment">/* setattr */</span>
+	{ &amp;vnop_read_desc, (VOPFUNC)devfsspec_read },		<span class="enscript-comment">/* read */</span>
+	{ &amp;vnop_write_desc, (VOPFUNC)devfsspec_write },		<span class="enscript-comment">/* write */</span>
+	{ &amp;vnop_ioctl_desc, (VOPFUNC)spec_ioctl },		<span class="enscript-comment">/* ioctl */</span>
+	{ &amp;vnop_select_desc, (VOPFUNC)spec_select },		<span class="enscript-comment">/* select */</span>
+	{ &amp;vnop_revoke_desc, (VOPFUNC)spec_revoke },		<span class="enscript-comment">/* revoke */</span>
+	{ &amp;vnop_mmap_desc, (VOPFUNC)spec_mmap },			<span class="enscript-comment">/* mmap */</span>
+	{ &amp;vnop_fsync_desc, (VOPFUNC)spec_fsync },		<span class="enscript-comment">/* fsync */</span>
+	{ &amp;vnop_remove_desc, (VOPFUNC)devfs_vnop_remove },	<span class="enscript-comment">/* remove */</span>
+	{ &amp;vnop_link_desc, (VOPFUNC)devfs_link },		<span class="enscript-comment">/* link */</span>
+	{ &amp;vnop_rename_desc, (VOPFUNC)spec_rename },		<span class="enscript-comment">/* rename */</span>
+	{ &amp;vnop_mkdir_desc, (VOPFUNC)spec_mkdir },		<span class="enscript-comment">/* mkdir */</span>
+	{ &amp;vnop_rmdir_desc, (VOPFUNC)spec_rmdir },		<span class="enscript-comment">/* rmdir */</span>
+	{ &amp;vnop_symlink_desc, (VOPFUNC)spec_symlink },		<span class="enscript-comment">/* symlink */</span>
+	{ &amp;vnop_readdir_desc, (VOPFUNC)spec_readdir },		<span class="enscript-comment">/* readdir */</span>
+	{ &amp;vnop_readlink_desc, (VOPFUNC)spec_readlink },		<span class="enscript-comment">/* readlink */</span>
+	{ &amp;vnop_inactive_desc, (VOPFUNC)devfs_inactive },	<span class="enscript-comment">/* inactive */</span>
+	{ &amp;vnop_reclaim_desc, (VOPFUNC)devfs_reclaim },		<span class="enscript-comment">/* reclaim */</span>
+	{ &amp;vnop_strategy_desc, (VOPFUNC)spec_strategy },		<span class="enscript-comment">/* strategy */</span>
+	{ &amp;vnop_pathconf_desc, (VOPFUNC)spec_pathconf },		<span class="enscript-comment">/* pathconf */</span>
+	{ &amp;vnop_advlock_desc, (VOPFUNC)spec_advlock },		<span class="enscript-comment">/* advlock */</span>
+	{ &amp;vnop_bwrite_desc, (VOPFUNC)vn_bwrite },
+	{ &amp;vnop_pagein_desc, (VOPFUNC)err_pagein },		<span class="enscript-comment">/* Pagein */</span>
+	{ &amp;vnop_pageout_desc, (VOPFUNC)err_pageout },		<span class="enscript-comment">/* Pageout */</span>
+	{ &amp;vnop_copyfile_desc, (VOPFUNC)err_copyfile },		<span class="enscript-comment">/* Copyfile */</span>
+	{ &amp;vnop_blktooff_desc, (VOPFUNC)spec_blktooff },	<span class="enscript-comment">/* blktooff */</span>
+	{ &amp;vnop_blktooff_desc, (VOPFUNC)spec_offtoblk  },	<span class="enscript-comment">/* blkofftoblk */</span>
+	{ &amp;vnop_blockmap_desc, (VOPFUNC)spec_blockmap },	<span class="enscript-comment">/* blockmap */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	{ &amp;vnop_setlabel_desc, (VOPFUNC)devfs_setlabel },	<span class="enscript-comment">/* setlabel */</span>
+#<span class="enscript-reference">endif</span>
+	{ (<span class="enscript-type">struct</span> vnodeop_desc*)NULL, (<span class="enscript-type">int</span>(*)())NULL }
+};
+<span class="enscript-type">struct</span> vnodeopv_desc devfs_spec_vnodeop_opv_desc =
+	{ &amp;devfs_spec_vnodeop_p, devfs_spec_vnodeop_entries };
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">FDESC</span>
+<span class="enscript-function-name">int</span> (**devfs_devfd_vnodeop_p)(<span class="enscript-type">void</span>*);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> vnodeopv_entry_desc devfs_devfd_vnodeop_entries[] = {
+	{ &amp;vnop_default_desc, (VOPFUNC)vn_default_error },
+	{ &amp;vnop_lookup_desc, (VOPFUNC)devfs_devfd_lookup},	<span class="enscript-comment">/* lookup */</span>
+	{ &amp;vnop_open_desc, (VOPFUNC)nop_open },			<span class="enscript-comment">/* open */</span>
+	{ &amp;vnop_close_desc, (VOPFUNC)devfs_close },		<span class="enscript-comment">/* close */</span>
+	{ &amp;vnop_getattr_desc, (VOPFUNC)devfs_getattr },		<span class="enscript-comment">/* getattr */</span>
+	{ &amp;vnop_setattr_desc, (VOPFUNC)devfs_setattr },		<span class="enscript-comment">/* setattr */</span>
+	{ &amp;vnop_revoke_desc, (VOPFUNC)err_revoke },		<span class="enscript-comment">/* revoke */</span>
+	{ &amp;vnop_fsync_desc, (VOPFUNC)nop_fsync },		<span class="enscript-comment">/* fsync */</span>
+	{ &amp;vnop_readdir_desc, (VOPFUNC)devfs_devfd_readdir},		<span class="enscript-comment">/* readdir */</span>
+	{ &amp;vnop_inactive_desc, (VOPFUNC)devfs_inactive },	<span class="enscript-comment">/* inactive */</span>
+	{ &amp;vnop_reclaim_desc, (VOPFUNC)devfs_reclaim },		<span class="enscript-comment">/* reclaim */</span>
+	{ &amp;vnop_pathconf_desc, (VOPFUNC)devs_vnop_pathconf },	<span class="enscript-comment">/* pathconf */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	{ &amp;vnop_setlabel_desc, (VOPFUNC)devfs_setlabel },       <span class="enscript-comment">/* setlabel */</span>
+#<span class="enscript-reference">endif</span>
+	{ (<span class="enscript-type">struct</span> vnodeop_desc*)NULL, (<span class="enscript-type">int</span>(*)())NULL }
+};
+<span class="enscript-type">struct</span> vnodeopv_desc devfs_devfd_vnodeop_opv_desc =
+	{ &amp;devfs_devfd_vnodeop_p, devfs_devfd_vnodeop_entries};
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* FDESC */</span>
+
+
+</pre>
+<hr />
+</body></html>

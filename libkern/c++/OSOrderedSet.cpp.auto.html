@@ -1,0 +1,450 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>OSOrderedSet.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">OSOrderedSet.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSDictionary.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSOrderedSet.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSLib.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> OSCollection
+
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(OSOrderedSet, OSCollection)
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSOrderedSet, 0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSOrderedSet, 1);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSOrderedSet, 2);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSOrderedSet, 3);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSOrderedSet, 4);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSOrderedSet, 5);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSOrderedSet, 6);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSOrderedSet, 7);
+
+
+<span class="enscript-type">struct</span> _Element {
+    <span class="enscript-type">const</span> OSMetaClassBase *		obj;
+<span class="enscript-comment">//    unsigned int	pri;
+</span>};
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">EXT_CAST</span>(obj) \
+    reinterpret_cast&lt;OSObject *&gt;(const_cast&lt;OSMetaClassBase *&gt;(obj))
+
+<span class="enscript-type">bool</span> OSOrderedSet::
+<span class="enscript-function-name">initWithCapacity</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> inCapacity,
+                 OSOrderFunction inOrdering, <span class="enscript-type">void</span> *inOrderingRef)
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> size;
+
+    <span class="enscript-keyword">if</span> (!super::init())
+        <span class="enscript-keyword">return</span> false;
+
+    <span class="enscript-keyword">if</span> (inCapacity &gt; (UINT_MAX / <span class="enscript-keyword">sizeof</span>(_Element)))
+        <span class="enscript-keyword">return</span> false;
+
+    size = <span class="enscript-keyword">sizeof</span>(_Element) * inCapacity;
+    array = (_Element *) kalloc_container(size);
+    <span class="enscript-keyword">if</span> (!array)
+        <span class="enscript-keyword">return</span> false;
+
+    count = 0;
+    capacity = inCapacity;
+    capacityIncrement = (inCapacity)? inCapacity : 16;
+    ordering = inOrdering;
+    orderingRef = inOrderingRef;
+
+    bzero(array, size);
+    OSCONTAINER_ACCUMSIZE(size);
+
+    <span class="enscript-keyword">return</span> true;	
+}
+
+OSOrderedSet * OSOrderedSet::
+<span class="enscript-function-name">withCapacity</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> capacity,
+             OSOrderFunction ordering, <span class="enscript-type">void</span> * orderingRef)
+{
+    OSOrderedSet *me = <span class="enscript-keyword">new</span> OSOrderedSet;
+
+    <span class="enscript-keyword">if</span> (me &amp;&amp; !me-&gt;initWithCapacity(capacity, ordering, orderingRef)) {
+        me-&gt;release();
+	me = 0;
+    }
+
+    <span class="enscript-keyword">return</span> me;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSOrderedSet::free</span>()
+{
+    (<span class="enscript-type">void</span>) super::setOptions(0, kImmutable);
+    flushCollection();
+
+    <span class="enscript-keyword">if</span> (array) {
+        kfree(array, <span class="enscript-keyword">sizeof</span>(_Element) * capacity);
+        OSCONTAINER_ACCUMSIZE( -(<span class="enscript-keyword">sizeof</span>(_Element) * capacity) );
+    }
+
+    <span class="enscript-reference">super</span>::free();
+}
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> <span class="enscript-function-name">OSOrderedSet::getCount</span>() <span class="enscript-type">const</span> { <span class="enscript-keyword">return</span> count; }
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> <span class="enscript-function-name">OSOrderedSet::getCapacity</span>() <span class="enscript-type">const</span> { <span class="enscript-keyword">return</span> capacity; }
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> <span class="enscript-function-name">OSOrderedSet::getCapacityIncrement</span>() <span class="enscript-type">const</span>
+	{ <span class="enscript-keyword">return</span> capacityIncrement; }
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> <span class="enscript-function-name">OSOrderedSet::setCapacityIncrement</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> increment)
+{
+    capacityIncrement = (increment)? increment : 16;
+    <span class="enscript-keyword">return</span> capacityIncrement;
+}
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> <span class="enscript-function-name">OSOrderedSet::ensureCapacity</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> newCapacity)
+{
+    _Element *newArray;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> finalCapacity, oldSize, newSize;
+
+    <span class="enscript-keyword">if</span> (newCapacity &lt;= capacity)
+        <span class="enscript-keyword">return</span> capacity;
+
+    <span class="enscript-comment">// round up
+</span>    finalCapacity = (((newCapacity - 1) / capacityIncrement) + 1)
+                * capacityIncrement;
+    <span class="enscript-keyword">if</span> ((finalCapacity &lt; newCapacity) ||
+        (finalCapacity &gt; (UINT_MAX / <span class="enscript-keyword">sizeof</span>(_Element)))) {
+        <span class="enscript-keyword">return</span> capacity;
+    }
+    newSize = <span class="enscript-keyword">sizeof</span>(_Element) * finalCapacity;
+
+    newArray = (_Element *) kalloc_container(newSize);
+    <span class="enscript-keyword">if</span> (newArray) {
+        oldSize = <span class="enscript-keyword">sizeof</span>(_Element) * capacity;
+
+        OSCONTAINER_ACCUMSIZE(((size_t)newSize) - ((size_t)oldSize));
+
+        bcopy(array, newArray, oldSize);
+        bzero(&amp;newArray[capacity], newSize - oldSize);
+        kfree(array, oldSize);
+        array = newArray;
+        capacity = finalCapacity;
+    }
+
+    <span class="enscript-keyword">return</span> capacity;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSOrderedSet::flushCollection</span>()
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+
+    haveUpdated();
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++)
+        array[i].obj-&gt;taggedRelease(OSTypeID(OSCollection));
+
+    count = 0;
+}
+
+<span class="enscript-comment">/* internal */</span>
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSOrderedSet::setObject</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> index, <span class="enscript-type">const</span> OSMetaClassBase *anObject)
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> newCount = count + 1;
+
+    <span class="enscript-keyword">if</span> ((index &gt; count) || !anObject)
+        <span class="enscript-keyword">return</span> false;
+
+    <span class="enscript-keyword">if</span> (containsObject(anObject))
+        <span class="enscript-keyword">return</span> false;
+
+    <span class="enscript-comment">// do we need more space?
+</span>    <span class="enscript-keyword">if</span> (newCount &gt; capacity &amp;&amp; newCount &gt; ensureCapacity(newCount))
+        <span class="enscript-keyword">return</span> false;
+
+    haveUpdated();
+    <span class="enscript-keyword">if</span> (index != count) {
+        <span class="enscript-keyword">for</span> (i = count; i &gt; index; i--)
+            array[i] = array[i-1];
+    }
+    array[index].obj = anObject;
+<span class="enscript-comment">//    array[index].pri = pri;
+</span>    anObject-&gt;taggedRetain(OSTypeID(OSCollection));
+    count++;
+
+    <span class="enscript-keyword">return</span> true;
+}
+
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSOrderedSet::setFirstObject</span>(<span class="enscript-type">const</span> OSMetaClassBase *anObject)
+{
+    <span class="enscript-keyword">return</span>( setObject(0, anObject));
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSOrderedSet::setLastObject</span>(<span class="enscript-type">const</span> OSMetaClassBase *anObject)
+{
+    <span class="enscript-keyword">return</span>( setObject( count, anObject));
+}
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ORDER</span>(obj1,obj2) \
+    (ordering ? ((*ordering)( (<span class="enscript-type">const</span> OSObject *) obj1, (<span class="enscript-type">const</span> OSObject *) obj2, orderingRef)) : 0)
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSOrderedSet::setObject</span>(<span class="enscript-type">const</span> OSMetaClassBase *anObject )
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+
+    <span class="enscript-comment">// queue it behind those with same priority
+</span>    <span class="enscript-keyword">for</span>( i = 0;
+	(i &lt; count) &amp;&amp; (ORDER(array[i].obj, anObject) &gt;= 0);
+	i++ ) {}
+
+    <span class="enscript-keyword">return</span>( setObject(i, anObject));
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSOrderedSet::removeObject</span>(<span class="enscript-type">const</span> OSMetaClassBase *anObject)
+{
+    <span class="enscript-type">bool</span>		deleted = false;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> 	i;
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+
+        <span class="enscript-keyword">if</span> (deleted)
+            array[i-1] = array[i];
+        <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (array[i].obj == anObject) {
+            deleted = true;
+	    haveUpdated();	<span class="enscript-comment">// Pity we can't flush the log
+</span>            array[i].obj-&gt;taggedRelease(OSTypeID(OSCollection));
+        }
+    }
+
+    <span class="enscript-keyword">if</span> (deleted)
+	count--;
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSOrderedSet::containsObject</span>(<span class="enscript-type">const</span> OSMetaClassBase *anObject) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> anObject &amp;&amp; member(anObject);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSOrderedSet::member</span>(<span class="enscript-type">const</span> OSMetaClassBase *anObject) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+
+    <span class="enscript-keyword">for</span>( i = 0;
+	(i &lt; count) &amp;&amp; (array[i].obj != anObject);
+	i++ ) {}
+
+    <span class="enscript-keyword">return</span>( i &lt; count);
+}
+
+<span class="enscript-comment">/* internal */</span>
+OSObject *<span class="enscript-function-name">OSOrderedSet::getObject</span>( <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> index ) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">if</span> (index &gt;= count)
+        <span class="enscript-keyword">return</span> 0;
+
+<span class="enscript-comment">//    if( pri)
+</span><span class="enscript-comment">//	*pri = array[index].pri;
+</span>
+    <span class="enscript-keyword">return</span>( const_cast&lt;OSObject *&gt;((<span class="enscript-type">const</span> OSObject *) array[index].obj) );
+}
+
+OSObject *<span class="enscript-function-name">OSOrderedSet::getFirstObject</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">if</span>( count)
+        <span class="enscript-keyword">return</span>( const_cast&lt;OSObject *&gt;((<span class="enscript-type">const</span> OSObject *) array[0].obj) );
+    <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">return</span>( 0 );
+}
+
+OSObject *<span class="enscript-function-name">OSOrderedSet::getLastObject</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">if</span>( count)
+        <span class="enscript-keyword">return</span>( const_cast&lt;OSObject *&gt;((<span class="enscript-type">const</span> OSObject *) array[count-1].obj) );
+    <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">return</span>( 0 );
+}
+
+SInt32 <span class="enscript-function-name">OSOrderedSet::orderObject</span>( <span class="enscript-type">const</span> OSMetaClassBase * anObject )
+{
+    <span class="enscript-keyword">return</span>( ORDER( anObject, 0 ));
+}
+
+<span class="enscript-type">void</span> *<span class="enscript-function-name">OSOrderedSet::getOrderingRef</span>()
+{
+    <span class="enscript-keyword">return</span> orderingRef;
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSOrderedSet::isEqualTo</span>(<span class="enscript-type">const</span> OSOrderedSet *anOrderedSet) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+    
+    <span class="enscript-keyword">if</span> ( <span class="enscript-keyword">this</span> == anOrderedSet )
+        <span class="enscript-keyword">return</span> true;
+
+    <span class="enscript-keyword">if</span> ( count != anOrderedSet-&gt;getCount() )
+        <span class="enscript-keyword">return</span> false;
+
+    <span class="enscript-keyword">for</span> ( i = 0; i &lt; count; i++ ) {
+        <span class="enscript-keyword">if</span> ( !array[i].obj-&gt;isEqualTo(anOrderedSet-&gt;getObject(i)) )
+            <span class="enscript-keyword">return</span> false;
+    }
+
+    <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSOrderedSet::isEqualTo</span>(<span class="enscript-type">const</span> OSMetaClassBase *anObject) <span class="enscript-type">const</span>
+{
+    OSOrderedSet *oSet;
+
+    oSet = OSDynamicCast(OSOrderedSet, anObject);
+    <span class="enscript-keyword">if</span> ( oSet )
+        <span class="enscript-keyword">return</span> isEqualTo(oSet);
+    <span class="enscript-keyword">else</span>
+        <span class="enscript-keyword">return</span> false;
+}
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> <span class="enscript-function-name">OSOrderedSet::iteratorSize</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span>( <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>));
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSOrderedSet::initIterator</span>(<span class="enscript-type">void</span> *inIterator) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *iteratorP = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *) inIterator;
+
+    *iteratorP = 0;
+    <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">bool</span> OSOrderedSet::
+<span class="enscript-function-name">getNextObjectForIterator</span>(<span class="enscript-type">void</span> *inIterator, OSObject **ret) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *iteratorP = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *) inIterator;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> index = (*iteratorP)++;
+
+    <span class="enscript-keyword">if</span> (index &lt; count)
+        *ret = const_cast&lt;OSObject *&gt;((<span class="enscript-type">const</span> OSObject *) array[index].obj);
+    <span class="enscript-keyword">else</span>
+        *ret = 0;
+
+    <span class="enscript-keyword">return</span> (*ret != 0);
+}
+
+
+<span class="enscript-type">unsigned</span> <span class="enscript-function-name">OSOrderedSet::setOptions</span>(<span class="enscript-type">unsigned</span> options, <span class="enscript-type">unsigned</span> mask, <span class="enscript-type">void</span> *)
+{
+    <span class="enscript-type">unsigned</span> old = super::setOptions(options, mask);
+    <span class="enscript-keyword">if</span> ((old ^ options) &amp; mask) {
+
+	<span class="enscript-comment">// Value changed need to recurse over all of the child collections
+</span>	<span class="enscript-keyword">for</span> ( <span class="enscript-type">unsigned</span> i = 0; i &lt; count; i++ ) {
+	    OSCollection *coll = OSDynamicCast(OSCollection, array[i].obj);
+	    <span class="enscript-keyword">if</span> (coll)
+		coll-&gt;setOptions(options, mask);
+	}
+    }
+
+    <span class="enscript-keyword">return</span> old;
+}
+
+OSCollection * <span class="enscript-function-name">OSOrderedSet::copyCollection</span>(OSDictionary *cycleDict)
+{
+    <span class="enscript-type">bool</span> allocDict = !cycleDict;
+    OSCollection *ret = 0;
+    OSOrderedSet *newSet = 0;
+
+    <span class="enscript-keyword">if</span> (allocDict) {
+	cycleDict = OSDictionary::withCapacity(16);
+	<span class="enscript-keyword">if</span> (!cycleDict)
+	    <span class="enscript-keyword">return</span> 0;
+    }
+
+    <span class="enscript-keyword">do</span> {
+	<span class="enscript-comment">// Check for a cycle
+</span>	ret = super::copyCollection(cycleDict);
+	<span class="enscript-keyword">if</span> (ret)
+	    <span class="enscript-keyword">continue</span>;
+	
+	<span class="enscript-comment">// Duplicate the set with no contents
+</span>	newSet = OSOrderedSet::withCapacity(capacity, ordering, orderingRef);
+	<span class="enscript-keyword">if</span> (!newSet)
+	    <span class="enscript-keyword">continue</span>;
+
+	<span class="enscript-comment">// Insert object into cycle Dictionary
+</span>	cycleDict-&gt;setObject((<span class="enscript-type">const</span> OSSymbol *) <span class="enscript-keyword">this</span>, newSet);
+
+	newSet-&gt;capacityIncrement = capacityIncrement;
+
+	<span class="enscript-comment">// Now copy over the contents to the new duplicate
+</span>	<span class="enscript-keyword">for</span> (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i = 0; i &lt; count; i++) {
+	    OSObject *obj = EXT_CAST(array[i].obj);
+	    OSCollection *coll = OSDynamicCast(OSCollection, obj);
+	    <span class="enscript-keyword">if</span> (coll) {
+		OSCollection *newColl = coll-&gt;copyCollection(cycleDict);
+		<span class="enscript-keyword">if</span> (newColl) {
+		    obj = newColl;	<span class="enscript-comment">// Rely on cycleDict ref for a bit
+</span>		    newColl-&gt;release();
+		}
+		<span class="enscript-keyword">else</span>
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">abortCopy</span>;
+	    };
+	    newSet-&gt;setLastObject(obj);
+	};
+
+	ret = newSet;
+	newSet = 0;
+
+    } <span class="enscript-keyword">while</span> (false);
+
+<span class="enscript-reference">abortCopy</span>:
+    <span class="enscript-keyword">if</span> (newSet)
+	newSet-&gt;release();
+
+    <span class="enscript-keyword">if</span> (allocDict)
+	cycleDict-&gt;release();
+
+    <span class="enscript-keyword">return</span> ret;
+}
+</pre>
+<hr />
+</body></html>

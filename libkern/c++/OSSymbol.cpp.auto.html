@@ -1,0 +1,649 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>OSSymbol.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">OSSymbol.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* IOSymbol.cpp created by gvdl on Fri 1998-11-17 */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSSymbol.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSLib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> OSString
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> { <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i, j; } OSSymbolPoolState;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">INITIAL_POOL_SIZE</span>  (exp2ml(1 + log2(kInitBucketCount)))
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">GROW_FACTOR</span>   (1)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SHRINK_FACTOR</span> (3)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">GROW_POOL</span>()     do \
+    <span class="enscript-keyword">if</span> (count * GROW_FACTOR &gt; nBuckets) { \
+        reconstructSymbols(true); \
+    } \
+<span class="enscript-function-name">while</span> (0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SHRINK_POOL</span>()     do \
+    <span class="enscript-keyword">if</span> (count * SHRINK_FACTOR &lt; nBuckets &amp;&amp; \
+        nBuckets &gt; INITIAL_POOL_SIZE) { \
+        reconstructSymbols(false); \
+    } \
+<span class="enscript-function-name">while</span> (0)
+
+<span class="enscript-type">class</span> OSSymbolPool
+{
+<span class="enscript-type">private</span>:
+    <span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> kInitBucketCount = 16;
+
+    <span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> { <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> count; OSSymbol **symbolP; } Bucket;
+
+    Bucket *buckets;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> nBuckets;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> count;
+    lck_mtx_t *poolGate;
+
+    <span class="enscript-type">static</span> <span class="enscript-type">inline</span> <span class="enscript-type">void</span> hashSymbol(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *s,
+                                  <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *hashP,
+                                  <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *lenP)
+    {
+        <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> hash = 0;
+        <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> len = 0;
+
+        <span class="enscript-comment">/* Unroll the loop. */</span>
+        <span class="enscript-keyword">for</span> (;;) {
+            <span class="enscript-keyword">if</span> (!*s) <span class="enscript-keyword">break</span>; len++; hash ^= *s++;
+            <span class="enscript-keyword">if</span> (!*s) <span class="enscript-keyword">break</span>; len++; hash ^= *s++ &lt;&lt;  8;
+            <span class="enscript-keyword">if</span> (!*s) <span class="enscript-keyword">break</span>; len++; hash ^= *s++ &lt;&lt; 16;
+            <span class="enscript-keyword">if</span> (!*s) <span class="enscript-keyword">break</span>; len++; hash ^= *s++ &lt;&lt; 24;
+        }
+        *lenP = len;
+        *hashP = hash;
+    }
+
+    <span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> log2(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> x);
+    <span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> exp2ml(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> x);
+
+    <span class="enscript-type">void</span> reconstructSymbols(<span class="enscript-type">void</span>);
+    <span class="enscript-type">void</span> reconstructSymbols(<span class="enscript-type">bool</span> grow);
+
+<span class="enscript-type">public</span>:
+    <span class="enscript-type">static</span> <span class="enscript-type">void</span> *<span class="enscript-keyword">operator</span> <span class="enscript-keyword">new</span>(size_t size);
+    <span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-keyword">operator</span> <span class="enscript-keyword">delete</span>(<span class="enscript-type">void</span> *mem, size_t size);
+
+    OSSymbolPool() { };
+    OSSymbolPool(<span class="enscript-type">const</span> OSSymbolPool *old);
+    <span class="enscript-type">virtual</span> ~OSSymbolPool();
+
+    <span class="enscript-type">bool</span> init();
+
+    <span class="enscript-type">inline</span> <span class="enscript-type">void</span> closeGate() { lck_mtx_lock(poolGate); };
+    <span class="enscript-type">inline</span> <span class="enscript-type">void</span> openGate()  { lck_mtx_unlock(poolGate); };
+
+    OSSymbol *findSymbol(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *cString) <span class="enscript-type">const</span>;
+    OSSymbol *insertSymbol(OSSymbol *sym);
+    <span class="enscript-type">void</span> removeSymbol(OSSymbol *sym);
+
+    OSSymbolPoolState initHashState();
+    OSSymbol *nextHashState(OSSymbolPoolState *stateP);
+};
+
+<span class="enscript-type">void</span> * OSSymbolPool::<span class="enscript-keyword">operator</span> <span class="enscript-keyword">new</span>(size_t size)
+{
+    <span class="enscript-type">void</span> *mem = (<span class="enscript-type">void</span> *)kalloc_tag(size, VM_KERN_MEMORY_LIBKERN);
+    OSMETA_ACCUMSIZE(size);
+    assert(mem);
+    bzero(mem, size);
+
+    <span class="enscript-keyword">return</span> mem;
+}
+
+<span class="enscript-type">void</span> OSSymbolPool::<span class="enscript-keyword">operator</span> <span class="enscript-keyword">delete</span>(<span class="enscript-type">void</span> *mem, size_t size)
+{
+    kfree(mem, size);
+    OSMETA_ACCUMSIZE(-size);
+}
+
+<span class="enscript-type">extern</span> lck_grp_t *IOLockGroup;
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSSymbolPool::init</span>()
+{
+    count = 0;
+    nBuckets = INITIAL_POOL_SIZE;
+    buckets = (Bucket *) kalloc_tag(nBuckets * <span class="enscript-keyword">sizeof</span>(Bucket), VM_KERN_MEMORY_LIBKERN);
+    OSMETA_ACCUMSIZE(nBuckets * <span class="enscript-keyword">sizeof</span>(Bucket));
+    <span class="enscript-keyword">if</span> (!buckets)
+        <span class="enscript-keyword">return</span> false;
+
+    bzero(buckets, nBuckets * <span class="enscript-keyword">sizeof</span>(Bucket));
+
+    poolGate = lck_mtx_alloc_init(IOLockGroup, LCK_ATTR_NULL);
+
+    <span class="enscript-keyword">return</span> poolGate != 0;
+}
+
+<span class="enscript-function-name">OSSymbolPool::OSSymbolPool</span>(<span class="enscript-type">const</span> OSSymbolPool *old)
+{
+    count = old-&gt;count;
+    nBuckets = old-&gt;nBuckets;
+    buckets = old-&gt;buckets;
+
+    poolGate = 0;	<span class="enscript-comment">// Do not duplicate the poolGate
+</span>}
+
+<span class="enscript-function-name">OSSymbolPool::~OSSymbolPool</span>()
+{
+    <span class="enscript-keyword">if</span> (buckets) {
+        Bucket *thisBucket;
+        <span class="enscript-keyword">for</span> (thisBucket = &amp;buckets[0]; thisBucket &lt; &amp;buckets[nBuckets]; thisBucket++) {
+            <span class="enscript-keyword">if</span> (thisBucket-&gt;count &gt; 1) {
+                kfree(thisBucket-&gt;symbolP, thisBucket-&gt;count * <span class="enscript-keyword">sizeof</span>(OSSymbol *));
+                OSMETA_ACCUMSIZE(-(thisBucket-&gt;count * <span class="enscript-keyword">sizeof</span>(OSSymbol *)));
+            }
+        }
+        kfree(buckets, nBuckets * <span class="enscript-keyword">sizeof</span>(Bucket));
+        OSMETA_ACCUMSIZE(-(nBuckets * <span class="enscript-keyword">sizeof</span>(Bucket)));
+    }
+
+    <span class="enscript-keyword">if</span> (poolGate)
+        lck_mtx_free(poolGate, IOLockGroup);
+}
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> <span class="enscript-function-name">OSSymbolPool::log2</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> x)
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> i;
+
+    <span class="enscript-keyword">for</span> (i = 0; x &gt; 1 ; i++)
+        x &gt;&gt;= 1;
+    <span class="enscript-keyword">return</span> i;
+}
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> <span class="enscript-function-name">OSSymbolPool::exp2ml</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> x)
+{
+    <span class="enscript-keyword">return</span> (1 &lt;&lt; x) - 1;
+}
+
+OSSymbolPoolState <span class="enscript-function-name">OSSymbolPool::initHashState</span>()
+{
+    OSSymbolPoolState newState = { nBuckets, 0 };
+    <span class="enscript-keyword">return</span> newState;
+}
+
+OSSymbol *<span class="enscript-function-name">OSSymbolPool::nextHashState</span>(OSSymbolPoolState *stateP)
+{
+    Bucket *thisBucket = &amp;buckets[stateP-&gt;i];
+
+    <span class="enscript-keyword">while</span> (!stateP-&gt;j) {
+        <span class="enscript-keyword">if</span> (!stateP-&gt;i)
+            <span class="enscript-keyword">return</span> 0;
+        stateP-&gt;i--;
+        thisBucket--;
+        stateP-&gt;j = thisBucket-&gt;count;
+    }
+
+    stateP-&gt;j--;
+    <span class="enscript-keyword">if</span> (thisBucket-&gt;count == 1)
+        <span class="enscript-keyword">return</span> (OSSymbol *) thisBucket-&gt;symbolP;
+    <span class="enscript-keyword">else</span>
+        <span class="enscript-keyword">return</span> thisBucket-&gt;symbolP[stateP-&gt;j];
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSSymbolPool::reconstructSymbols</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">this</span>-&gt;reconstructSymbols(true);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSSymbolPool::reconstructSymbols</span>(<span class="enscript-type">bool</span> grow)
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> new_nBuckets = nBuckets;
+    OSSymbol *insert;
+    OSSymbolPoolState state;
+
+    <span class="enscript-keyword">if</span> (grow) {
+        new_nBuckets += new_nBuckets + 1;
+    } <span class="enscript-keyword">else</span> {
+       <span class="enscript-comment">/* Don't shrink the pool below the default initial size.
+        */</span>
+        <span class="enscript-keyword">if</span> (nBuckets &lt;= INITIAL_POOL_SIZE) {
+            <span class="enscript-keyword">return</span>;
+        }
+        new_nBuckets = (new_nBuckets - 1) / 2;
+    }
+
+   <span class="enscript-comment">/* Create old pool to iterate after doing above check, cause it
+    * gets finalized at return.
+    */</span>
+    OSSymbolPool old(<span class="enscript-keyword">this</span>);
+
+    count = 0;
+    nBuckets = new_nBuckets;
+    buckets = (Bucket *) kalloc_tag(nBuckets * <span class="enscript-keyword">sizeof</span>(Bucket), VM_KERN_MEMORY_LIBKERN);
+    OSMETA_ACCUMSIZE(nBuckets * <span class="enscript-keyword">sizeof</span>(Bucket));
+    <span class="enscript-comment">/* @@@ gvdl: Zero test and panic if can't set up pool */</span>
+    bzero(buckets, nBuckets * <span class="enscript-keyword">sizeof</span>(Bucket));
+
+    state = old.initHashState();
+    <span class="enscript-keyword">while</span> ( (insert = old.nextHashState(&amp;state)) )
+        insertSymbol(insert);
+}
+
+OSSymbol *<span class="enscript-function-name">OSSymbolPool::findSymbol</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *cString) <span class="enscript-type">const</span>
+{
+    Bucket *thisBucket;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> j, inLen, hash;
+    OSSymbol *probeSymbol, **list;
+
+    hashSymbol(cString, &amp;hash, &amp;inLen); inLen++;
+    thisBucket = &amp;buckets[hash % nBuckets];
+    j = thisBucket-&gt;count;
+
+    <span class="enscript-keyword">if</span> (!j)
+        <span class="enscript-keyword">return</span> 0;
+
+    <span class="enscript-keyword">if</span> (j == 1) {
+        probeSymbol = (OSSymbol *) thisBucket-&gt;symbolP;
+
+        <span class="enscript-keyword">if</span> (inLen == probeSymbol-&gt;length
+        &amp;&amp;  (strncmp(probeSymbol-&gt;string, cString, probeSymbol-&gt;length) == 0))
+            <span class="enscript-keyword">return</span> probeSymbol;
+	<span class="enscript-keyword">return</span> 0;
+    }
+
+    <span class="enscript-keyword">for</span> (list = thisBucket-&gt;symbolP; j--; list++) {
+        probeSymbol = *list;
+        <span class="enscript-keyword">if</span> (inLen == probeSymbol-&gt;length
+        &amp;&amp;  (strncmp(probeSymbol-&gt;string, cString, probeSymbol-&gt;length) == 0))
+            <span class="enscript-keyword">return</span> probeSymbol;
+    }
+
+    <span class="enscript-keyword">return</span> 0;
+}
+
+OSSymbol *<span class="enscript-function-name">OSSymbolPool::insertSymbol</span>(OSSymbol *sym)
+{
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *cString = sym-&gt;string;
+    Bucket *thisBucket;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> j, inLen, hash;
+    OSSymbol *probeSymbol, **list;
+
+    hashSymbol(cString, &amp;hash, &amp;inLen); inLen++;
+    thisBucket = &amp;buckets[hash % nBuckets];
+    j = thisBucket-&gt;count;
+
+    <span class="enscript-keyword">if</span> (!j) {
+        thisBucket-&gt;symbolP = (OSSymbol **) sym;
+        thisBucket-&gt;count++;
+        count++;
+        <span class="enscript-keyword">return</span> sym;
+    }
+
+    <span class="enscript-keyword">if</span> (j == 1) {
+        probeSymbol = (OSSymbol *) thisBucket-&gt;symbolP;
+
+        <span class="enscript-keyword">if</span> (inLen == probeSymbol-&gt;length
+        &amp;&amp;  strncmp(probeSymbol-&gt;string, cString, probeSymbol-&gt;length) == 0)
+            <span class="enscript-keyword">return</span> probeSymbol;
+
+        list = (OSSymbol **) kalloc_tag(2 * <span class="enscript-keyword">sizeof</span>(OSSymbol *), VM_KERN_MEMORY_LIBKERN);
+        OSMETA_ACCUMSIZE(2 * <span class="enscript-keyword">sizeof</span>(OSSymbol *));
+        <span class="enscript-comment">/* @@@ gvdl: Zero test and panic if can't set up pool */</span>
+        list[0] = sym;
+        list[1] = probeSymbol;
+        thisBucket-&gt;symbolP = list;
+        thisBucket-&gt;count++;
+        count++;
+        GROW_POOL();
+
+        <span class="enscript-keyword">return</span> sym;
+    }
+
+    <span class="enscript-keyword">for</span> (list = thisBucket-&gt;symbolP; j--; list++) {
+        probeSymbol = *list;
+        <span class="enscript-keyword">if</span> (inLen == probeSymbol-&gt;length
+        &amp;&amp;  strncmp(probeSymbol-&gt;string, cString, probeSymbol-&gt;length) == 0)
+            <span class="enscript-keyword">return</span> probeSymbol;
+    }
+
+    j = thisBucket-&gt;count++;
+    count++;
+    list = (OSSymbol **) kalloc_tag(thisBucket-&gt;count * <span class="enscript-keyword">sizeof</span>(OSSymbol *), VM_KERN_MEMORY_LIBKERN);
+    OSMETA_ACCUMSIZE(thisBucket-&gt;count * <span class="enscript-keyword">sizeof</span>(OSSymbol *));
+    <span class="enscript-comment">/* @@@ gvdl: Zero test and panic if can't set up pool */</span>
+    list[0] = sym;
+    bcopy(thisBucket-&gt;symbolP, list + 1, j * <span class="enscript-keyword">sizeof</span>(OSSymbol *));
+    kfree(thisBucket-&gt;symbolP, j * <span class="enscript-keyword">sizeof</span>(OSSymbol *));
+    OSMETA_ACCUMSIZE(-(j * <span class="enscript-keyword">sizeof</span>(OSSymbol *)));
+    thisBucket-&gt;symbolP = list;
+    GROW_POOL();
+
+    <span class="enscript-keyword">return</span> sym;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSSymbolPool::removeSymbol</span>(OSSymbol *sym)
+{
+    Bucket *thisBucket;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> j, inLen, hash;
+    OSSymbol *probeSymbol, **list;
+
+    hashSymbol(sym-&gt;string, &amp;hash, &amp;inLen); inLen++;
+    thisBucket = &amp;buckets[hash % nBuckets];
+    j = thisBucket-&gt;count;
+    list = thisBucket-&gt;symbolP;
+
+    <span class="enscript-keyword">if</span> (!j) {
+	<span class="enscript-comment">// couldn't find the symbol; probably means string hash changed
+</span>        panic(<span class="enscript-string">&quot;removeSymbol %s count %d &quot;</span>, sym-&gt;string ? sym-&gt;string : <span class="enscript-string">&quot;no string&quot;</span>, count);
+        <span class="enscript-keyword">return</span>;
+    }
+
+    <span class="enscript-keyword">if</span> (j == 1) {
+        probeSymbol = (OSSymbol *) list;
+
+        <span class="enscript-keyword">if</span> (probeSymbol == sym) {
+            thisBucket-&gt;symbolP = 0;
+            count--;
+            thisBucket-&gt;count--;
+            SHRINK_POOL();
+            <span class="enscript-keyword">return</span>;
+        }
+	<span class="enscript-comment">// couldn't find the symbol; probably means string hash changed
+</span>    	panic(<span class="enscript-string">&quot;removeSymbol %s count %d &quot;</span>, sym-&gt;string ? sym-&gt;string : <span class="enscript-string">&quot;no string&quot;</span>, count);
+        <span class="enscript-keyword">return</span>;
+    }
+
+    <span class="enscript-keyword">if</span> (j == 2) {
+        probeSymbol = list[0];
+        <span class="enscript-keyword">if</span> (probeSymbol == sym) {
+            thisBucket-&gt;symbolP = (OSSymbol **) list[1];
+            kfree(list, 2 * <span class="enscript-keyword">sizeof</span>(OSSymbol *));
+	    OSMETA_ACCUMSIZE(-(2 * <span class="enscript-keyword">sizeof</span>(OSSymbol *)));
+            count--;
+            thisBucket-&gt;count--;
+            SHRINK_POOL();
+            <span class="enscript-keyword">return</span>;
+        }
+
+        probeSymbol = list[1];
+        <span class="enscript-keyword">if</span> (probeSymbol == sym) {
+            thisBucket-&gt;symbolP = (OSSymbol **) list[0];
+            kfree(list, 2 * <span class="enscript-keyword">sizeof</span>(OSSymbol *));
+	    OSMETA_ACCUMSIZE(-(2 * <span class="enscript-keyword">sizeof</span>(OSSymbol *)));
+            count--;
+            thisBucket-&gt;count--;
+            SHRINK_POOL();
+            <span class="enscript-keyword">return</span>;
+        }
+	<span class="enscript-comment">// couldn't find the symbol; probably means string hash changed
+</span>    	panic(<span class="enscript-string">&quot;removeSymbol %s count %d &quot;</span>, sym-&gt;string ? sym-&gt;string : <span class="enscript-string">&quot;no string&quot;</span>, count);
+        <span class="enscript-keyword">return</span>;
+    }
+
+    <span class="enscript-keyword">for</span> (; j--; list++) {
+        probeSymbol = *list;
+        <span class="enscript-keyword">if</span> (probeSymbol == sym) {
+
+            list = (OSSymbol **)
+                kalloc_tag((thisBucket-&gt;count-1) * <span class="enscript-keyword">sizeof</span>(OSSymbol *), VM_KERN_MEMORY_LIBKERN);
+	    OSMETA_ACCUMSIZE((thisBucket-&gt;count-1) * <span class="enscript-keyword">sizeof</span>(OSSymbol *));
+            <span class="enscript-keyword">if</span> (thisBucket-&gt;count-1 != j)
+                bcopy(thisBucket-&gt;symbolP, list,
+                      (thisBucket-&gt;count-1-j) * <span class="enscript-keyword">sizeof</span>(OSSymbol *));
+            <span class="enscript-keyword">if</span> (j)
+                bcopy(thisBucket-&gt;symbolP + thisBucket-&gt;count-j,
+                      list + thisBucket-&gt;count-1-j,
+                      j * <span class="enscript-keyword">sizeof</span>(OSSymbol *));
+            kfree(thisBucket-&gt;symbolP, thisBucket-&gt;count * <span class="enscript-keyword">sizeof</span>(OSSymbol *));
+	    OSMETA_ACCUMSIZE(-(thisBucket-&gt;count * <span class="enscript-keyword">sizeof</span>(OSSymbol *)));
+            thisBucket-&gt;symbolP = list;
+            count--;
+            thisBucket-&gt;count--;
+            <span class="enscript-keyword">return</span>;
+        }
+    }
+    <span class="enscript-comment">// couldn't find the symbol; probably means string hash changed
+</span>    panic(<span class="enscript-string">&quot;removeSymbol %s count %d &quot;</span>, sym-&gt;string ? sym-&gt;string : <span class="enscript-string">&quot;no string&quot;</span>, count);
+}
+
+<span class="enscript-comment">/*
+ *********************************************************************
+ * From here on we are actually implementing the OSSymbol class
+ *********************************************************************
+ */</span>
+<span class="enscript-function-name">OSDefineMetaClassAndStructorsWithInit</span>(OSSymbol, OSString,
+                                      <span class="enscript-reference">OSSymbol</span>::initialize())
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSSymbol, 0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSSymbol, 1);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSSymbol, 2);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSSymbol, 3);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSSymbol, 4);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSSymbol, 5);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSSymbol, 6);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(OSSymbol, 7);
+
+<span class="enscript-type">static</span> OSSymbolPool *pool;
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSSymbol::initialize</span>()
+{
+    pool = <span class="enscript-keyword">new</span> OSSymbolPool;
+    assert(pool);
+
+    <span class="enscript-keyword">if</span> (pool &amp;&amp; !pool-&gt;init()) {
+        <span class="enscript-keyword">delete</span> pool;
+        assert(false);
+    };
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSSymbol::initWithCStringNoCopy</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) { <span class="enscript-keyword">return</span> false; }
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSSymbol::initWithCString</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) { <span class="enscript-keyword">return</span> false; }
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSSymbol::initWithString</span>(<span class="enscript-type">const</span> OSString *) { <span class="enscript-keyword">return</span> false; }
+
+<span class="enscript-type">const</span> OSSymbol *<span class="enscript-function-name">OSSymbol::withString</span>(<span class="enscript-type">const</span> OSString *aString)
+{
+    <span class="enscript-comment">// This string may be a OSSymbol already, cheap check.
+</span>    <span class="enscript-keyword">if</span> (OSDynamicCast(OSSymbol, aString)) {
+	aString-&gt;retain();
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">const</span> OSSymbol *) aString;
+    }
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (((<span class="enscript-type">const</span> OSSymbol *) aString)-&gt;flags &amp; kOSStringNoCopy)
+        <span class="enscript-keyword">return</span> OSSymbol::withCStringNoCopy(aString-&gt;getCStringNoCopy());
+    <span class="enscript-keyword">else</span>
+        <span class="enscript-keyword">return</span> OSSymbol::withCString(aString-&gt;getCStringNoCopy());
+}
+
+<span class="enscript-type">const</span> OSSymbol *<span class="enscript-function-name">OSSymbol::withCString</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *cString)
+{
+    pool-&gt;closeGate();
+
+    OSSymbol *oldSymb = pool-&gt;findSymbol(cString);
+    <span class="enscript-keyword">if</span> (!oldSymb) {
+        OSSymbol *newSymb = <span class="enscript-keyword">new</span> OSSymbol;
+        <span class="enscript-keyword">if</span> (!newSymb) {
+            pool-&gt;openGate();
+            <span class="enscript-keyword">return</span> newSymb;
+        }
+
+	<span class="enscript-keyword">if</span> (newSymb-&gt;OSString::initWithCString(cString))
+	    oldSymb = pool-&gt;insertSymbol(newSymb);
+        
+        <span class="enscript-keyword">if</span> (newSymb == oldSymb) {
+            pool-&gt;openGate();
+            <span class="enscript-keyword">return</span> newSymb;	<span class="enscript-comment">// return the newly created &amp; inserted symbol.
+</span>        }
+        <span class="enscript-keyword">else</span>
+            <span class="enscript-comment">// Somebody else inserted the new symbol so free our copy
+</span>	    newSymb-&gt;OSString::free();
+    }
+    
+    oldSymb-&gt;retain();	<span class="enscript-comment">// Retain the old symbol before releasing the lock.
+</span>
+    pool-&gt;openGate();
+    <span class="enscript-keyword">return</span> oldSymb;
+}
+
+<span class="enscript-type">const</span> OSSymbol *<span class="enscript-function-name">OSSymbol::withCStringNoCopy</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *cString)
+{
+    pool-&gt;closeGate();
+
+    OSSymbol *oldSymb = pool-&gt;findSymbol(cString);
+    <span class="enscript-keyword">if</span> (!oldSymb) {
+        OSSymbol *newSymb = <span class="enscript-keyword">new</span> OSSymbol;
+        <span class="enscript-keyword">if</span> (!newSymb) {
+            pool-&gt;openGate();
+            <span class="enscript-keyword">return</span> newSymb;
+        }
+
+	<span class="enscript-keyword">if</span> (newSymb-&gt;OSString::initWithCStringNoCopy(cString))
+	    oldSymb = pool-&gt;insertSymbol(newSymb);
+        
+        <span class="enscript-keyword">if</span> (newSymb == oldSymb) {
+            pool-&gt;openGate();
+            <span class="enscript-keyword">return</span> newSymb;	<span class="enscript-comment">// return the newly created &amp; inserted symbol.
+</span>        }
+        <span class="enscript-keyword">else</span>
+            <span class="enscript-comment">// Somebody else inserted the new symbol so free our copy
+</span>	    newSymb-&gt;OSString::free();
+    }
+    
+    oldSymb-&gt;retain();	<span class="enscript-comment">// Retain the old symbol before releasing the lock.
+</span>
+    pool-&gt;openGate();
+    <span class="enscript-keyword">return</span> oldSymb;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSSymbol::checkForPageUnload</span>(<span class="enscript-type">void</span> *startAddr, <span class="enscript-type">void</span> *endAddr)
+{
+    OSSymbol *probeSymbol;
+    OSSymbolPoolState state;
+
+    pool-&gt;closeGate();
+    state = pool-&gt;initHashState();
+    <span class="enscript-keyword">while</span> ( (probeSymbol = pool-&gt;nextHashState(&amp;state)) ) {
+        <span class="enscript-keyword">if</span> (probeSymbol-&gt;string &gt;= startAddr &amp;&amp; probeSymbol-&gt;string &lt; endAddr) {
+	    probeSymbol-&gt;OSString::initWithCString(probeSymbol-&gt;string);
+        }
+    }
+    pool-&gt;openGate();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSSymbol::taggedRelease</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *tag) <span class="enscript-type">const</span>
+{
+    <span class="enscript-reference">super</span>::taggedRelease(tag);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSSymbol::taggedRelease</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *tag, <span class="enscript-type">const</span> <span class="enscript-type">int</span> when) <span class="enscript-type">const</span>
+{
+    pool-&gt;closeGate();
+    <span class="enscript-reference">super</span>::taggedRelease(tag, when);
+    pool-&gt;openGate();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSSymbol::free</span>()
+{
+    pool-&gt;removeSymbol(<span class="enscript-keyword">this</span>);
+    <span class="enscript-reference">super</span>::free();
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSSymbol::isEqualTo</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *aCString) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> super::isEqualTo(aCString);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSSymbol::isEqualTo</span>(<span class="enscript-type">const</span> OSSymbol *aSymbol) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> aSymbol == <span class="enscript-keyword">this</span>;
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSSymbol::isEqualTo</span>(<span class="enscript-type">const</span> OSMetaClassBase *obj) <span class="enscript-type">const</span>
+{
+    OSSymbol *	sym;
+    OSString *	str;
+
+    <span class="enscript-keyword">if</span> ((sym = OSDynamicCast(OSSymbol, obj)))
+	<span class="enscript-keyword">return</span> isEqualTo(sym);
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((str = OSDynamicCast(OSString, obj)))
+	<span class="enscript-keyword">return</span> super::isEqualTo(str);
+    <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">return</span> false;
+}
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">OSSymbol::bsearch</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">void</span> *  key,
+	<span class="enscript-type">const</span> <span class="enscript-type">void</span> *  array,
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>  arrayCount,
+	size_t        memberSize)
+{
+    <span class="enscript-type">const</span> <span class="enscript-type">void</span> **p;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> baseIdx = 0;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> lim;
+
+    <span class="enscript-keyword">for</span> (lim = arrayCount; lim; lim &gt;&gt;= 1)
+    {
+	p = (typeof(p)) (((uintptr_t) array) + (baseIdx + (lim &gt;&gt; 1)) * memberSize);
+	<span class="enscript-keyword">if</span> (key == *p)
+	{
+	    <span class="enscript-keyword">return</span> (baseIdx + (lim &gt;&gt; 1));
+	}
+	<span class="enscript-keyword">if</span> (key &gt; *p) 
+	{	
+	    <span class="enscript-comment">// move right
+</span>	    baseIdx += (lim &gt;&gt; 1) + 1;
+	    lim--;
+	}
+	<span class="enscript-comment">// else move left
+</span>    }
+    <span class="enscript-comment">// not found, insertion point here
+</span>    <span class="enscript-keyword">return</span> (baseIdx + (lim &gt;&gt; 1));
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,248 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>randomdev.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">randomdev.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1999-2009 Apple, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/devfs/devfs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio_internal.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;dev/random/randomdev.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSByteOrder.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_time.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">RANDOM_MAJOR</span>  -1 <span class="enscript-comment">/* let the kernel pick the device number */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">RANDOM_MINOR</span>   0
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">URANDOM_MINOR</span>  1
+
+d_ioctl_t       random_ioctl;
+
+<span class="enscript-comment">/*
+ * A struct describing which functions will get invoked for certain
+ * actions.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> cdevsw random_cdevsw =
+{
+	random_open,		<span class="enscript-comment">/* open */</span>
+	random_close,		<span class="enscript-comment">/* close */</span>
+	random_read,		<span class="enscript-comment">/* read */</span>
+	random_write,		<span class="enscript-comment">/* write */</span>
+	random_ioctl,		<span class="enscript-comment">/* ioctl */</span>
+	(stop_fcn_t *)nulldev, <span class="enscript-comment">/* stop */</span>
+	(reset_fcn_t *)nulldev, <span class="enscript-comment">/* reset */</span>
+	NULL,				<span class="enscript-comment">/* tty's */</span>
+	eno_select,			<span class="enscript-comment">/* select */</span>
+	eno_mmap,			<span class="enscript-comment">/* mmap */</span>
+	eno_strat,			<span class="enscript-comment">/* strategy */</span>
+	eno_getc,			<span class="enscript-comment">/* getc */</span>
+	eno_putc,			<span class="enscript-comment">/* putc */</span>
+	0					<span class="enscript-comment">/* type */</span>
+};
+
+
+<span class="enscript-comment">/*
+ * Called to initialize our device,
+ * and to register ourselves with devfs
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">random_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> ret;
+
+	ret = cdevsw_add(RANDOM_MAJOR, &amp;random_cdevsw);
+	<span class="enscript-keyword">if</span> (ret &lt; 0) {
+		panic(<span class="enscript-string">&quot;random_init: failed to allocate a major number!&quot;</span>);
+	}
+
+	devfs_make_node(makedev (ret, RANDOM_MINOR), DEVFS_CHAR,
+		UID_ROOT, GID_WHEEL, 0666, <span class="enscript-string">&quot;random&quot;</span>, 0);
+
+	<span class="enscript-comment">/*
+	 * also make urandom 
+	 * (which is exactly the same thing in our context)
+	 */</span>
+	devfs_make_node(makedev (ret, URANDOM_MINOR), DEVFS_CHAR,
+		UID_ROOT, GID_WHEEL, 0666, <span class="enscript-string">&quot;urandom&quot;</span>, 0);
+
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">random_ioctl</span>(	__unused dev_t dev, u_long cmd, __unused caddr_t data, 
+				__unused <span class="enscript-type">int</span> flag, __unused <span class="enscript-type">struct</span> proc *p  )
+{
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIONBIO</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIOASYNC</span>:
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> ENODEV;
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Open the device.  Make sure init happened, and make sure the caller is
+ * authorized.
+ */</span>
+ 
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">random_open</span>(__unused dev_t dev, <span class="enscript-type">int</span> flags, __unused <span class="enscript-type">int</span> devtype, __unused <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-comment">/*
+	 * if we are being opened for write,
+	 * make sure that we have privledges do so
+	 */</span>
+	<span class="enscript-keyword">if</span> (flags &amp; FWRITE) {
+		<span class="enscript-keyword">if</span> (securelevel &gt;= 2)
+			<span class="enscript-keyword">return</span> (EPERM);
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__APPLE__</span>
+		<span class="enscript-keyword">if</span> ((securelevel &gt;= 1) &amp;&amp; proc_suser(p))
+			<span class="enscript-keyword">return</span> (EPERM);
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* !__APPLE__ */</span>
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * close the device.
+ */</span>
+ 
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">random_close</span>(__unused dev_t dev, __unused <span class="enscript-type">int</span> flags, __unused <span class="enscript-type">int</span> mode, __unused <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * Get entropic data from the Security Server, and use it to reseed the
+ * prng.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">random_write</span> (dev_t dev, <span class="enscript-type">struct</span> uio *uio, __unused <span class="enscript-type">int</span> ioflag)
+{
+    <span class="enscript-type">int</span> retCode = 0;
+    <span class="enscript-type">char</span> rdBuffer[256];
+
+    <span class="enscript-keyword">if</span> (minor(dev) != RANDOM_MINOR)
+	<span class="enscript-keyword">return</span> EPERM;
+
+    <span class="enscript-comment">/* Security server is sending us entropy */</span>
+
+    <span class="enscript-keyword">while</span> (uio_resid(uio) &gt; 0 &amp;&amp; retCode == 0) {
+        <span class="enscript-comment">/* get the user's data */</span>
+        <span class="enscript-type">int</span> bytesToInput = MIN(uio_resid(uio),
+			       (user_ssize_t) <span class="enscript-keyword">sizeof</span>(rdBuffer));
+        retCode = uiomove(rdBuffer, bytesToInput, uio);
+        <span class="enscript-keyword">if</span> (retCode != 0)
+	    <span class="enscript-keyword">break</span>;
+	retCode = write_random(rdBuffer, bytesToInput);
+        <span class="enscript-keyword">if</span> (retCode != 0)
+	    <span class="enscript-keyword">break</span>;
+    }
+
+    <span class="enscript-keyword">return</span> retCode;
+}
+
+<span class="enscript-comment">/*
+ * return data to the caller.  Results unpredictable.
+ */</span> 
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">random_read</span>(__unused dev_t dev, <span class="enscript-type">struct</span> uio *uio, __unused <span class="enscript-type">int</span> ioflag)
+{
+	<span class="enscript-type">int</span> retCode = 0;
+	<span class="enscript-type">char</span> buffer[512];
+
+	user_ssize_t bytes_remaining = uio_resid(uio);
+	<span class="enscript-keyword">while</span> (bytes_remaining &gt; 0 &amp;&amp; retCode == 0) {
+		<span class="enscript-type">int</span> bytesToRead = MIN(bytes_remaining,
+				      (user_ssize_t) <span class="enscript-keyword">sizeof</span>(buffer));
+		read_random(buffer, bytesToRead);
+			
+		retCode = uiomove(buffer, bytesToRead, uio);
+		<span class="enscript-keyword">if</span> (retCode != 0)
+			<span class="enscript-keyword">break</span>;
+		
+		bytes_remaining = uio_resid(uio);
+	}
+    
+	<span class="enscript-keyword">return</span> retCode;
+}
+
+<span class="enscript-comment">/*
+ * Return an u_int32_t pseudo-random number.
+ */</span>
+u_int32_t
+<span class="enscript-function-name">RandomULong</span>(<span class="enscript-type">void</span>)
+{
+	u_int32_t buf;
+	read_random(&amp;buf, <span class="enscript-keyword">sizeof</span> (buf));
+	<span class="enscript-keyword">return</span> (buf);
+}
+
+</pre>
+<hr />
+</body></html>

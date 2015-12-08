@@ -1,0 +1,1307 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kern_mman.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kern_mman.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007 Apple Inc. All Rights Reserved.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1988 University of Utah.
+ * Copyright (c) 1991, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * the Systems Programming Group of the University of Utah Computer
+ * Science Department.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * from: Utah $Hdr: vm_mmap.c 1.6 91/10/21$
+ *
+ *	@(#)vm_mmap.c	8.10 (Berkeley) 2/19/95
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Mapped file (mmap) interface to VM
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/filedesc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/resourcevar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/acct.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/wait.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vadvise.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/trace.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mman.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ubc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ubc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_PROTECT</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cprotect.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syscall.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/bsdtask_info.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit_kevents.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_traps.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_sync.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_behavior.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_inherit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_statistics.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/sdt.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/page_decrypt.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOReturn.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pager.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * XXX Internally, we use VM_PROT_* somewhat interchangeably, but the correct
+ * XXX usage is PROT_* from an interface perspective.  Thus the values of
+ * XXX VM_PROT_* and PROT_* need to correspond.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mmap</span>(proc_t p, <span class="enscript-type">struct</span> mmap_args *uap, user_addr_t *retval)
+{
+	<span class="enscript-comment">/*
+	 *	Map in special device (must be SHARED) or file
+	 */</span>
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">register</span> <span class="enscript-type">struct</span>		vnode *vp;
+	<span class="enscript-type">int</span>			flags;
+	<span class="enscript-type">int</span>			prot;
+	<span class="enscript-type">int</span>			err=0;
+	vm_map_t		user_map;
+	kern_return_t		result;
+	vm_map_offset_t		user_addr;
+	vm_map_size_t		user_size;
+	vm_object_offset_t	pageoff;
+	vm_object_offset_t	file_pos;
+	<span class="enscript-type">int</span>			alloc_flags=0;
+	boolean_t		docow;
+	vm_prot_t		maxprot;
+	<span class="enscript-type">void</span> 			*handle;
+	memory_object_t		pager = MEMORY_OBJECT_NULL;
+	memory_object_control_t	 control;
+	<span class="enscript-type">int</span> 			mapanon=0;
+	<span class="enscript-type">int</span> 			fpref=0;
+	<span class="enscript-type">int</span> error =0;
+	<span class="enscript-type">int</span> fd = uap-&gt;fd;
+	<span class="enscript-type">int</span> num_retries = 0;
+
+	<span class="enscript-comment">/*
+	 * Note that for UNIX03 conformance, there is additional parameter checking for
+	 * mmap() system call in libsyscall prior to entering the kernel.  The sanity 
+	 * checks and argument validation done in this function are not the only places
+	 * one can get returned errnos.
+	 */</span>
+
+	user_map = current_map();
+	user_addr = (vm_map_offset_t)uap-&gt;addr;
+	user_size = (vm_map_size_t) uap-&gt;len;
+
+	AUDIT_ARG(addr, user_addr);
+	AUDIT_ARG(len, user_size);
+	AUDIT_ARG(fd, uap-&gt;fd);
+
+	prot = (uap-&gt;prot &amp; VM_PROT_ALL);
+#<span class="enscript-reference">if</span> 3777787
+	<span class="enscript-comment">/*
+	 * Since the hardware currently does not support writing without
+	 * read-before-write, or execution-without-read, if the request is
+	 * for write or execute access, we must imply read access as well;
+	 * otherwise programs expecting this to work will fail to operate.
+	 */</span>
+	<span class="enscript-keyword">if</span> (prot &amp; (VM_PROT_EXECUTE | VM_PROT_WRITE))
+		prot |= VM_PROT_READ;
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* radar 3777787 */</span>
+
+	flags = uap-&gt;flags;
+	vp = NULLVP;
+
+	<span class="enscript-comment">/*
+	 * The vm code does not have prototypes &amp; compiler doesn't do the'
+	 * the right thing when you cast 64bit value and pass it in function 
+	 * call. So here it is.
+	 */</span>
+	file_pos = (vm_object_offset_t)uap-&gt;pos;
+
+
+	<span class="enscript-comment">/* make sure mapping fits into numeric range etc */</span>
+	<span class="enscript-keyword">if</span> (file_pos + user_size &gt; (vm_object_offset_t)-PAGE_SIZE_64)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/*
+	 * Align the file position to a page boundary,
+	 * and save its page offset component.
+	 */</span>
+	pageoff = (file_pos &amp; vm_map_page_mask(user_map));
+	file_pos -= (vm_object_offset_t)pageoff;
+
+
+	<span class="enscript-comment">/* Adjust size for rounding (on both ends). */</span>
+	user_size += pageoff;	<span class="enscript-comment">/* low end... */</span>
+	user_size = vm_map_round_page(user_size,	
+				      vm_map_page_mask(user_map)); <span class="enscript-comment">/* hi end */</span>
+
+	<span class="enscript-keyword">if</span> (flags &amp; MAP_JIT) {
+		<span class="enscript-keyword">if</span> ((flags &amp; MAP_FIXED) ||
+		    (flags &amp; MAP_SHARED) ||
+		    !(flags &amp; MAP_ANON) ||
+		    (flags &amp; MAP_RESILIENT_CODESIGN)) {
+			<span class="enscript-keyword">return</span> EINVAL;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> ((flags &amp; MAP_RESILIENT_CODESIGN) ||
+	    (flags &amp; MAP_RESILIENT_MEDIA)) {
+		assert(!(flags &amp; MAP_JIT));
+		<span class="enscript-keyword">if</span> (flags &amp; MAP_ANON) {
+			<span class="enscript-keyword">return</span> EINVAL;
+		}
+		<span class="enscript-keyword">if</span> (prot &amp; (VM_PROT_WRITE | VM_PROT_EXECUTE)) {
+			<span class="enscript-keyword">return</span> EPERM;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Check for illegal addresses.  Watch out for address wrap... Note
+	 * that VM_*_ADDRESS are not constants due to casts (argh).
+	 */</span>
+	<span class="enscript-keyword">if</span> (flags &amp; MAP_FIXED) {
+		<span class="enscript-comment">/*
+		 * The specified address must have the same remainder
+		 * as the file offset taken modulo PAGE_SIZE, so it
+		 * should be aligned after adjustment by pageoff.
+		 */</span>
+		user_addr -= pageoff;
+		<span class="enscript-keyword">if</span> (user_addr &amp; vm_map_page_mask(user_map))
+			<span class="enscript-keyword">return</span> (EINVAL);
+	}
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">notyet</span>
+	<span class="enscript-comment">/* DO not have apis to get this info, need to wait till then*/</span>
+	<span class="enscript-comment">/*
+	 * XXX for non-fixed mappings where no hint is provided or
+	 * the hint would fall in the potential heap space,
+	 * place it after the end of the largest possible heap.
+	 *
+	 * There should really be a pmap call to determine a reasonable
+	 * location.
+	 */</span>
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (addr &lt; vm_map_round_page(p-&gt;p_vmspace-&gt;vm_daddr + MAXDSIZ,
+					  vm_map_page_mask(user_map)))
+		addr = vm_map_round_page(p-&gt;p_vmspace-&gt;vm_daddr + MAXDSIZ,
+					 vm_map_page_mask(user_map));
+
+#<span class="enscript-reference">endif</span>
+
+	alloc_flags = 0;
+
+	<span class="enscript-keyword">if</span> (flags &amp; MAP_ANON) {
+
+		maxprot = VM_PROT_ALL;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+		<span class="enscript-comment">/*
+		 * Entitlement check.
+		 */</span>
+		error = mac_proc_check_map_anon(p, user_addr, user_size, prot, flags, &amp;maxprot);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">return</span> EINVAL;
+		}		
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC */</span>
+
+		<span class="enscript-comment">/*
+		 * Mapping blank space is trivial.  Use positive fds as the alias
+		 * value for memory tracking. 
+		 */</span>
+		<span class="enscript-keyword">if</span> (fd != -1) {
+			<span class="enscript-comment">/*
+			 * Use &quot;fd&quot; to pass (some) Mach VM allocation flags,
+			 * (see the VM_FLAGS_* definitions).
+			 */</span>
+			alloc_flags = fd &amp; (VM_FLAGS_ALIAS_MASK | VM_FLAGS_SUPERPAGE_MASK |
+					    VM_FLAGS_PURGABLE);
+			<span class="enscript-keyword">if</span> (alloc_flags != fd) {
+				<span class="enscript-comment">/* reject if there are any extra flags */</span>
+				<span class="enscript-keyword">return</span> EINVAL;
+			}
+		}
+			
+		handle = NULL;
+		file_pos = 0;
+		mapanon = 1;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> vnode_attr va;
+		vfs_context_t ctx = vfs_context_current();
+
+		<span class="enscript-keyword">if</span> (flags &amp; MAP_JIT)
+			<span class="enscript-keyword">return</span> EINVAL;
+
+		<span class="enscript-comment">/*
+		 * Mapping file, get fp for validation. Obtain vnode and make
+		 * sure it is of appropriate type.
+		 */</span>
+		err = fp_lookup(p, fd, &amp;fp, 0);
+		<span class="enscript-keyword">if</span> (err)
+			<span class="enscript-keyword">return</span>(err);
+		fpref = 1;
+		<span class="enscript-keyword">switch</span> (FILEGLOB_DTYPE(fp-&gt;f_fglob)) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTYPE_PSXSHM</span>:
+			uap-&gt;addr = (user_addr_t)user_addr;
+			uap-&gt;len = (user_size_t)user_size;
+			uap-&gt;prot = prot;
+			uap-&gt;flags = flags;
+			uap-&gt;pos = file_pos;
+			error = pshm_mmap(p, uap, retval, fp, (off_t)pageoff);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DTYPE_VNODE</span>:
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		vp = (<span class="enscript-type">struct</span> vnode *)fp-&gt;f_fglob-&gt;fg_data;
+		error = vnode_getwithref(vp);
+		<span class="enscript-keyword">if</span>(error != 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+		<span class="enscript-keyword">if</span> (vp-&gt;v_type != VREG &amp;&amp; vp-&gt;v_type != VCHR) {
+			(<span class="enscript-type">void</span>)vnode_put(vp);
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+
+		AUDIT_ARG(vnpath, vp, ARG_VNODE1);
+		
+		<span class="enscript-comment">/*
+		 * POSIX: mmap needs to update access time for mapped files
+		 */</span>
+		<span class="enscript-keyword">if</span> ((vnode_vfsvisflags(vp) &amp; MNT_NOATIME) == 0) {
+			VATTR_INIT(&amp;va);
+			nanotime(&amp;va.va_access_time);
+			VATTR_SET_ACTIVE(&amp;va, va_access_time);
+			vnode_setattr(vp, &amp;va, ctx);
+		}
+
+		<span class="enscript-comment">/*
+		 * XXX hack to handle use of /dev/zero to map anon memory (ala
+		 * SunOS).
+		 */</span>
+		<span class="enscript-keyword">if</span> (vp-&gt;v_type == VCHR || vp-&gt;v_type == VSTR) {
+			(<span class="enscript-type">void</span>)vnode_put(vp);
+			error = ENODEV;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * Ensure that file and memory protections are
+			 * compatible.  Note that we only worry about
+			 * writability if mapping is shared; in this case,
+			 * current and max prot are dictated by the open file.
+			 * XXX use the vnode instead?  Problem is: what
+			 * credentials do we use for determination? What if
+			 * proc does a setuid?
+			 */</span>
+			maxprot = VM_PROT_EXECUTE;	<span class="enscript-comment">/* ??? */</span>
+			<span class="enscript-keyword">if</span> (fp-&gt;f_fglob-&gt;fg_flag &amp; FREAD)
+				maxprot |= VM_PROT_READ;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (prot &amp; PROT_READ) {
+				(<span class="enscript-type">void</span>)vnode_put(vp);
+				error = EACCES;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+			<span class="enscript-comment">/*
+			 * If we are sharing potential changes (either via
+			 * MAP_SHARED or via the implicit sharing of character
+			 * device mappings), and we are trying to get write
+			 * permission although we opened it without asking
+			 * for it, bail out. 
+			 */</span>
+
+			<span class="enscript-keyword">if</span> ((flags &amp; MAP_SHARED) != 0) {
+				<span class="enscript-keyword">if</span> ((fp-&gt;f_fglob-&gt;fg_flag &amp; FWRITE) != 0 &amp;&amp;
+				    <span class="enscript-comment">/*
+				     * Do not allow writable mappings of 
+				     * swap files (see vm_swapfile_pager.c).
+				     */</span>
+				    !vnode_isswap(vp)) {
+ 					<span class="enscript-comment">/*
+ 					 * check for write access
+ 					 *
+ 					 * Note that we already made this check when granting FWRITE
+ 					 * against the file, so it seems redundant here.
+ 					 */</span>
+ 					error = vnode_authorize(vp, NULL, KAUTH_VNODE_CHECKIMMUTABLE, ctx);
+ 
+ 					<span class="enscript-comment">/* if not granted for any reason, but we wanted it, bad */</span>
+ 					<span class="enscript-keyword">if</span> ((prot &amp; PROT_WRITE) &amp;&amp; (error != 0)) {
+ 						vnode_put(vp);
+  						<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+  					}
+ 
+ 					<span class="enscript-comment">/* if writable, remember */</span>
+ 					<span class="enscript-keyword">if</span> (error == 0)
+  						maxprot |= VM_PROT_WRITE;
+
+				} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((prot &amp; PROT_WRITE) != 0) {
+					(<span class="enscript-type">void</span>)vnode_put(vp);
+					error = EACCES;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+				}
+			} <span class="enscript-keyword">else</span>
+				maxprot |= VM_PROT_WRITE;
+
+			handle = (<span class="enscript-type">void</span> *)vp;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+			error = mac_file_check_mmap(vfs_context_ucred(ctx),
+			    fp-&gt;f_fglob, prot, flags, file_pos, &amp;maxprot);
+			<span class="enscript-keyword">if</span> (error) {
+				(<span class="enscript-type">void</span>)vnode_put(vp);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_PROTECT</span>
+			{
+				error = cp_handle_vnop(vp, CP_READ_ACCESS | CP_WRITE_ACCESS, 0);
+				<span class="enscript-keyword">if</span> (error) {
+					(<span class="enscript-type">void</span>) vnode_put(vp);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+				}
+			}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_PROTECT */</span>
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (user_size == 0)  {
+		<span class="enscript-keyword">if</span> (!mapanon)
+			(<span class="enscript-type">void</span>)vnode_put(vp);
+		error = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 *	We bend a little - round the start and end addresses
+	 *	to the nearest page boundary.
+	 */</span>
+	user_size = vm_map_round_page(user_size,
+				      vm_map_page_mask(user_map));
+
+	<span class="enscript-keyword">if</span> (file_pos &amp; vm_map_page_mask(user_map)) {
+		<span class="enscript-keyword">if</span> (!mapanon)
+			(<span class="enscript-type">void</span>)vnode_put(vp);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ((flags &amp; MAP_FIXED) == 0) {
+		alloc_flags |= VM_FLAGS_ANYWHERE;
+		user_addr = vm_map_round_page(user_addr,
+					      vm_map_page_mask(user_map));
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (user_addr != vm_map_trunc_page(user_addr,
+						   vm_map_page_mask(user_map))) {
+		        <span class="enscript-keyword">if</span> (!mapanon)
+			        (<span class="enscript-type">void</span>)vnode_put(vp);
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		<span class="enscript-comment">/*
+		 * mmap(MAP_FIXED) will replace any existing mappings in the
+		 * specified range, if the new mapping is successful.
+		 * If we just deallocate the specified address range here,
+		 * another thread might jump in and allocate memory in that
+		 * range before we get a chance to establish the new mapping,
+		 * and we won't have a chance to restore the old mappings.
+		 * So we use VM_FLAGS_OVERWRITE to let Mach VM know that it
+		 * has to deallocate the existing mappings and establish the
+		 * new ones atomically.
+		 */</span>
+		alloc_flags |= VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE;
+	}
+
+	<span class="enscript-keyword">if</span> (flags &amp; MAP_NOCACHE)
+		alloc_flags |= VM_FLAGS_NO_CACHE;
+
+	<span class="enscript-keyword">if</span> (flags &amp; MAP_JIT) {
+		alloc_flags |= VM_FLAGS_MAP_JIT;
+	}
+
+	<span class="enscript-keyword">if</span> (flags &amp; MAP_RESILIENT_CODESIGN) {
+		alloc_flags |= VM_FLAGS_RESILIENT_CODESIGN;
+	}
+
+	<span class="enscript-comment">/*
+	 * Lookup/allocate object.
+	 */</span>
+	<span class="enscript-keyword">if</span> (handle == NULL) {
+		control = NULL;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">notyet</span>
+<span class="enscript-comment">/* Hmm .. */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">VM_PROT_READ_IS_EXEC</span>)
+		<span class="enscript-keyword">if</span> (prot &amp; VM_PROT_READ)
+			prot |= VM_PROT_EXECUTE;
+		<span class="enscript-keyword">if</span> (maxprot &amp; VM_PROT_READ)
+			maxprot |= VM_PROT_EXECUTE;
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> 3777787
+		<span class="enscript-keyword">if</span> (prot &amp; (VM_PROT_EXECUTE | VM_PROT_WRITE))
+			prot |= VM_PROT_READ;
+		<span class="enscript-keyword">if</span> (maxprot &amp; (VM_PROT_EXECUTE | VM_PROT_WRITE))
+			maxprot |= VM_PROT_READ;
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* radar 3777787 */</span>
+<span class="enscript-reference">map_anon_retry</span>:
+		result = vm_map_enter_mem_object(user_map,
+						 &amp;user_addr, user_size,
+						 0, alloc_flags,
+						 IPC_PORT_NULL, 0, FALSE,
+						 prot, maxprot,
+						 (flags &amp; MAP_SHARED) ?
+						 VM_INHERIT_SHARE : 
+						 VM_INHERIT_DEFAULT);
+
+		<span class="enscript-comment">/* If a non-binding address was specified for this anonymous
+		 * mapping, retry the mapping with a zero base
+		 * in the event the mapping operation failed due to
+		 * lack of space between the address and the map's maximum.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((result == KERN_NO_SPACE) &amp;&amp; ((flags &amp; MAP_FIXED) == 0) &amp;&amp; user_addr &amp;&amp; (num_retries++ == 0)) {
+			user_addr = vm_map_page_size(user_map);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">map_anon_retry</span>;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (vnode_isswap(vp)) {
+			<span class="enscript-comment">/*
+			 * Map swap files with a special pager
+			 * that returns obfuscated contents.
+			 */</span>
+			control = NULL;
+			pager = swapfile_pager_setup(vp);
+			<span class="enscript-keyword">if</span> (pager != MEMORY_OBJECT_NULL) {
+				control = swapfile_pager_control(pager);
+			}
+		} <span class="enscript-keyword">else</span> {
+			control = ubc_getobject(vp, UBC_FLAGS_NONE);
+		}
+		
+		<span class="enscript-keyword">if</span> (control == NULL) {
+			(<span class="enscript-type">void</span>)vnode_put(vp);
+			error = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 *  Set credentials:
+		 *	FIXME: if we're writing the file we need a way to
+		 *      ensure that someone doesn't replace our R/W creds
+		 * 	with ones that only work for read.
+		 */</span>
+
+		ubc_setthreadcred(vp, p, current_thread());
+		docow = FALSE;
+		<span class="enscript-keyword">if</span> ((flags &amp; (MAP_ANON|MAP_SHARED)) == 0) {
+			docow = TRUE;
+		}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">notyet</span>
+<span class="enscript-comment">/* Hmm .. */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">VM_PROT_READ_IS_EXEC</span>)
+		<span class="enscript-keyword">if</span> (prot &amp; VM_PROT_READ)
+			prot |= VM_PROT_EXECUTE;
+		<span class="enscript-keyword">if</span> (maxprot &amp; VM_PROT_READ)
+			maxprot |= VM_PROT_EXECUTE;
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* notyet */</span>
+
+#<span class="enscript-reference">if</span> 3777787
+		<span class="enscript-keyword">if</span> (prot &amp; (VM_PROT_EXECUTE | VM_PROT_WRITE))
+			prot |= VM_PROT_READ;
+		<span class="enscript-keyword">if</span> (maxprot &amp; (VM_PROT_EXECUTE | VM_PROT_WRITE))
+			maxprot |= VM_PROT_READ;
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* radar 3777787 */</span>
+
+<span class="enscript-reference">map_file_retry</span>:
+		<span class="enscript-keyword">if</span> ((flags &amp; MAP_RESILIENT_CODESIGN) ||
+		    (flags &amp; MAP_RESILIENT_MEDIA)) {
+			<span class="enscript-keyword">if</span> (prot &amp; (VM_PROT_WRITE | VM_PROT_EXECUTE)) {
+				assert(!mapanon);
+				vnode_put(vp);
+				error = EPERM;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+			<span class="enscript-comment">/* strictly limit access to &quot;prot&quot; */</span>
+			maxprot &amp;= prot;
+		}
+		result = vm_map_enter_mem_object_control(user_map,
+						 &amp;user_addr, user_size,
+						 0, alloc_flags,
+						 control, file_pos,
+						 docow, prot, maxprot, 
+						 (flags &amp; MAP_SHARED) ?
+						 VM_INHERIT_SHARE : 
+						 VM_INHERIT_DEFAULT);
+
+		<span class="enscript-comment">/* If a non-binding address was specified for this file backed
+		 * mapping, retry the mapping with a zero base
+		 * in the event the mapping operation failed due to
+		 * lack of space between the address and the map's maximum.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((result == KERN_NO_SPACE) &amp;&amp; ((flags &amp; MAP_FIXED) == 0) &amp;&amp; user_addr &amp;&amp; (num_retries++ == 0)) {
+			user_addr = vm_map_page_size(user_map);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">map_file_retry</span>;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (!mapanon) {
+		(<span class="enscript-type">void</span>)vnode_put(vp);
+	}
+
+	<span class="enscript-keyword">switch</span> (result) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_SUCCESS</span>:
+		*retval = user_addr + pageoff;
+		error = 0;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ADDRESS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NO_SPACE</span>:
+		error =  ENOMEM;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_PROTECTION_FAILURE</span>:
+		error =  EACCES;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		error =  EINVAL;
+		<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">bad</span>:
+	<span class="enscript-keyword">if</span> (pager != MEMORY_OBJECT_NULL) {
+		<span class="enscript-comment">/*
+		 * Release the reference on the pager.
+		 * If the mapping was successful, it now holds
+		 * an extra reference.
+		 */</span>
+		memory_object_deallocate(pager);
+	}
+	<span class="enscript-keyword">if</span> (fpref)
+		fp_drop(p, fd, fp, 0);
+
+	KERNEL_DEBUG_CONSTANT((BSDDBG_CODE(DBG_BSD_SC_EXTENDED_INFO, SYS_mmap) | DBG_FUNC_NONE), fd, (uint32_t)(*retval), (uint32_t)user_size, error, 0);
+	KERNEL_DEBUG_CONSTANT((BSDDBG_CODE(DBG_BSD_SC_EXTENDED_INFO2, SYS_mmap) | DBG_FUNC_NONE), (uint32_t)(*retval &gt;&gt; 32), (uint32_t)(user_size &gt;&gt; 32),
+			      (uint32_t)(file_pos &gt;&gt; 32), (uint32_t)file_pos, 0);
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">msync</span>(__unused proc_t p, <span class="enscript-type">struct</span> msync_args *uap, int32_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span>(msync_nocancel(p, (<span class="enscript-type">struct</span> msync_nocancel_args *)uap, retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">msync_nocancel</span>(__unused proc_t p, <span class="enscript-type">struct</span> msync_nocancel_args *uap, __unused int32_t *retval)
+{
+	mach_vm_offset_t addr;
+	mach_vm_size_t size;
+	<span class="enscript-type">int</span> flags;
+	vm_map_t user_map;
+	<span class="enscript-type">int</span> rv;
+	vm_sync_t sync_flags=0;
+
+	user_map = current_map();
+	addr = (mach_vm_offset_t) uap-&gt;addr;
+	size = (mach_vm_size_t)uap-&gt;len;
+	KERNEL_DEBUG_CONSTANT((BSDDBG_CODE(DBG_BSD_SC_EXTENDED_INFO, SYS_msync) | DBG_FUNC_NONE), (uint32_t)(addr &gt;&gt; 32), (uint32_t)(size &gt;&gt; 32), 0, 0, 0);
+	<span class="enscript-keyword">if</span> (addr &amp; vm_map_page_mask(user_map)) {
+		<span class="enscript-comment">/* UNIX SPEC: user address is not page-aligned, return EINVAL */</span>
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	<span class="enscript-keyword">if</span> (size == 0) {
+		<span class="enscript-comment">/*
+		 * We cannot support this properly without maintaining
+		 * list all mmaps done. Cannot use vm_map_entry as they could be
+		 * split or coalesced by indepenedant actions. So instead of 
+		 * inaccurate results, lets just return error as invalid size
+		 * specified
+		 */</span>
+		<span class="enscript-keyword">return</span> (EINVAL); <span class="enscript-comment">/* XXX breaks posix apps */</span>
+	}
+
+	flags = uap-&gt;flags;
+	<span class="enscript-comment">/* disallow contradictory flags */</span>
+	<span class="enscript-keyword">if</span> ((flags &amp; (MS_SYNC|MS_ASYNC)) == (MS_SYNC|MS_ASYNC))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">if</span> (flags &amp; MS_KILLPAGES)
+	        sync_flags |= VM_SYNC_KILLPAGES;
+	<span class="enscript-keyword">if</span> (flags &amp; MS_DEACTIVATE)
+	        sync_flags |= VM_SYNC_DEACTIVATE;
+	<span class="enscript-keyword">if</span> (flags &amp; MS_INVALIDATE)
+	        sync_flags |= VM_SYNC_INVALIDATE;
+
+	<span class="enscript-keyword">if</span> ( !(flags &amp; (MS_KILLPAGES | MS_DEACTIVATE))) {
+	        <span class="enscript-keyword">if</span> (flags &amp; MS_ASYNC) 
+		        sync_flags |= VM_SYNC_ASYNCHRONOUS;
+		<span class="enscript-keyword">else</span> 
+		        sync_flags |= VM_SYNC_SYNCHRONOUS;
+	}
+
+	sync_flags |= VM_SYNC_CONTIGUOUS;	<span class="enscript-comment">/* complain if holes */</span>
+
+	rv = mach_vm_msync(user_map, addr, size, sync_flags);
+
+	<span class="enscript-keyword">switch</span> (rv) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_SUCCESS</span>:
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ADDRESS</span>:	<span class="enscript-comment">/* hole in region being sync'ed */</span>
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_FAILURE</span>:
+		<span class="enscript-keyword">return</span> (EIO);
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">munmap</span>(__unused proc_t p, <span class="enscript-type">struct</span> munmap_args *uap, __unused int32_t *retval)
+{
+	mach_vm_offset_t	user_addr;
+	mach_vm_size_t		user_size;
+	kern_return_t		result;
+	vm_map_t		user_map;
+
+	user_map = current_map();
+	user_addr = (mach_vm_offset_t) uap-&gt;addr;
+	user_size = (mach_vm_size_t) uap-&gt;len;
+
+	AUDIT_ARG(addr, user_addr);
+	AUDIT_ARG(len, user_size);
+
+	<span class="enscript-keyword">if</span> (user_addr &amp; vm_map_page_mask(user_map)) {
+		<span class="enscript-comment">/* UNIX SPEC: user address is not page-aligned, return EINVAL */</span>
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-keyword">if</span> (user_addr + user_size &lt; user_addr)
+		<span class="enscript-keyword">return</span>(EINVAL);
+
+	<span class="enscript-keyword">if</span> (user_size == 0) {
+		<span class="enscript-comment">/* UNIX SPEC: size is 0, return EINVAL */</span>
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	result = mach_vm_deallocate(user_map, user_addr, user_size);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS) {
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mprotect</span>(__unused proc_t p, <span class="enscript-type">struct</span> mprotect_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-type">register</span> vm_prot_t prot;
+	mach_vm_offset_t	user_addr;
+	mach_vm_size_t	user_size;
+	kern_return_t	result;
+	vm_map_t	user_map;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-type">int</span> error;
+#<span class="enscript-reference">endif</span>
+
+	AUDIT_ARG(addr, uap-&gt;addr);
+	AUDIT_ARG(len, uap-&gt;len);
+	AUDIT_ARG(value32, uap-&gt;prot);
+
+	user_map = current_map();
+	user_addr = (mach_vm_offset_t) uap-&gt;addr;
+	user_size = (mach_vm_size_t) uap-&gt;len;
+	prot = (vm_prot_t)(uap-&gt;prot &amp; (VM_PROT_ALL | VM_PROT_TRUSTED));
+
+	<span class="enscript-keyword">if</span> (user_addr &amp; vm_map_page_mask(user_map)) {
+		<span class="enscript-comment">/* UNIX SPEC: user address is not page-aligned, return EINVAL */</span>
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+		
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">notyet</span>
+<span class="enscript-comment">/* Hmm .. */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">VM_PROT_READ_IS_EXEC</span>)
+	<span class="enscript-keyword">if</span> (prot &amp; VM_PROT_READ)
+		prot |= VM_PROT_EXECUTE;
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* notyet */</span>
+
+#<span class="enscript-reference">if</span> 3936456
+	<span class="enscript-keyword">if</span> (prot &amp; (VM_PROT_EXECUTE | VM_PROT_WRITE))
+		prot |= VM_PROT_READ;
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* 3936456 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-comment">/*
+	 * The MAC check for mprotect is of limited use for 2 reasons:
+	 * Without mmap revocation, the caller could have asked for the max
+	 * protections initially instead of a reduced set, so a mprotect
+	 * check would offer no new security.
+	 * It is not possible to extract the vnode from the pager object(s)
+	 * of the target memory range.
+	 * However, the MAC check may be used to prevent a process from,
+	 * e.g., making the stack executable.
+	 */</span>
+	error = mac_proc_check_mprotect(p, user_addr,
+	    		user_size, prot);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span>(prot &amp; VM_PROT_TRUSTED) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DYNAMIC_CODE_SIGNING</span>
+		<span class="enscript-comment">/* CODE SIGNING ENFORCEMENT - JIT support */</span>
+		<span class="enscript-comment">/* The special protection value VM_PROT_TRUSTED requests that we treat
+		 * this page as if it had a valid code signature.
+		 * If this is enabled, there MUST be a MAC policy implementing the 
+		 * mac_proc_check_mprotect() hook above. Otherwise, Codesigning will be
+		 * compromised because the check would always succeed and thusly any
+		 * process could sign dynamically. */</span>
+		result = vm_map_sign(
+			user_map, 
+			vm_map_trunc_page(user_addr,
+					  vm_map_page_mask(user_map)),
+			vm_map_round_page(user_addr+user_size,
+					  vm_map_page_mask(user_map)));
+		<span class="enscript-keyword">switch</span> (result) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_SUCCESS</span>:
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ADDRESS</span>:
+				<span class="enscript-comment">/* UNIX SPEC: for an invalid address range, return ENOMEM */</span>
+				<span class="enscript-keyword">return</span> ENOMEM;
+			<span class="enscript-reference">default</span>:
+				<span class="enscript-keyword">return</span> EINVAL;
+		}
+#<span class="enscript-reference">else</span>
+		<span class="enscript-keyword">return</span> ENOTSUP;
+#<span class="enscript-reference">endif</span>
+	}
+	prot &amp;= ~VM_PROT_TRUSTED;
+	
+	result = mach_vm_protect(user_map, user_addr, user_size,
+				 FALSE, prot);
+	<span class="enscript-keyword">switch</span> (result) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_SUCCESS</span>:
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_PROTECTION_FAILURE</span>:
+		<span class="enscript-keyword">return</span> (EACCES);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ADDRESS</span>:
+		<span class="enscript-comment">/* UNIX SPEC: for an invalid address range, return ENOMEM */</span>
+		<span class="enscript-keyword">return</span> ENOMEM;
+	}
+	<span class="enscript-keyword">return</span> (EINVAL);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">minherit</span>(__unused proc_t p, <span class="enscript-type">struct</span> minherit_args *uap, __unused int32_t *retval)
+{
+	mach_vm_offset_t addr;
+	mach_vm_size_t size;
+	<span class="enscript-type">register</span> vm_inherit_t inherit;
+	vm_map_t	user_map;
+	kern_return_t	result;
+
+	AUDIT_ARG(addr, uap-&gt;addr);
+	AUDIT_ARG(len, uap-&gt;len);
+	AUDIT_ARG(value32, uap-&gt;inherit);
+
+	addr = (mach_vm_offset_t)uap-&gt;addr;
+	size = (mach_vm_size_t)uap-&gt;len;
+	inherit = uap-&gt;inherit;
+
+	user_map = current_map();
+	result = mach_vm_inherit(user_map, addr, size,
+				inherit);
+	<span class="enscript-keyword">switch</span> (result) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_SUCCESS</span>:
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_PROTECTION_FAILURE</span>:
+		<span class="enscript-keyword">return</span> (EACCES);
+	}
+	<span class="enscript-keyword">return</span> (EINVAL);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">madvise</span>(__unused proc_t p, <span class="enscript-type">struct</span> madvise_args *uap, __unused int32_t *retval)
+{
+	vm_map_t user_map;
+	mach_vm_offset_t start;
+	mach_vm_size_t size;
+	vm_behavior_t new_behavior;
+	kern_return_t	result;
+
+	<span class="enscript-comment">/*
+	 * Since this routine is only advisory, we default to conservative
+	 * behavior.
+	 */</span>
+	<span class="enscript-keyword">switch</span> (uap-&gt;behav) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MADV_RANDOM</span>:
+			new_behavior = VM_BEHAVIOR_RANDOM;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MADV_SEQUENTIAL</span>: 
+			new_behavior = VM_BEHAVIOR_SEQUENTIAL;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MADV_NORMAL</span>:
+			new_behavior = VM_BEHAVIOR_DEFAULT;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MADV_WILLNEED</span>:
+			new_behavior = VM_BEHAVIOR_WILLNEED;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MADV_DONTNEED</span>:
+			new_behavior = VM_BEHAVIOR_DONTNEED;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MADV_FREE</span>:
+			new_behavior = VM_BEHAVIOR_FREE;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MADV_ZERO_WIRED_PAGES</span>:
+			new_behavior = VM_BEHAVIOR_ZERO_WIRED_PAGES;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MADV_FREE_REUSABLE</span>:
+			new_behavior = VM_BEHAVIOR_REUSABLE;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MADV_FREE_REUSE</span>:
+			new_behavior = VM_BEHAVIOR_REUSE;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MADV_CAN_REUSE</span>:
+			new_behavior = VM_BEHAVIOR_CAN_REUSE;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MADV_PAGEOUT</span>:
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+			new_behavior = VM_BEHAVIOR_PAGEOUT;
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* MACH_ASSERT */</span>
+			<span class="enscript-keyword">return</span> ENOTSUP;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MACH_ASSERT */</span>
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span>(EINVAL);
+	}
+
+	start = (mach_vm_offset_t) uap-&gt;addr;
+	size = (mach_vm_size_t) uap-&gt;len;
+	
+
+	user_map = current_map();
+
+	result = mach_vm_behavior_set(user_map, start, size, new_behavior);
+	<span class="enscript-keyword">switch</span> (result) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_SUCCESS</span>:
+		<span class="enscript-keyword">return</span> 0;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ADDRESS</span>:
+		<span class="enscript-keyword">return</span> EINVAL;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NO_SPACE</span>:	
+		<span class="enscript-keyword">return</span> ENOMEM;
+	}
+
+	<span class="enscript-keyword">return</span> EINVAL;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mincore</span>(__unused proc_t p, <span class="enscript-type">struct</span> mincore_args *uap, __unused int32_t *retval)
+{
+	mach_vm_offset_t addr, first_addr, end;
+	vm_map_t map;
+	user_addr_t vec;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> vecindex, lastvecindex;
+	<span class="enscript-type">int</span> mincoreinfo=0;
+	<span class="enscript-type">int</span> pqueryinfo;
+	kern_return_t	ret;
+	<span class="enscript-type">int</span> numref;
+
+	<span class="enscript-type">char</span> c;
+
+	map = current_map();
+
+	<span class="enscript-comment">/*
+	 * Make sure that the addresses presented are valid for user
+	 * mode.
+	 */</span>
+	first_addr = addr = vm_map_trunc_page(uap-&gt;addr,
+					      vm_map_page_mask(map));
+	end = addr + vm_map_round_page(uap-&gt;len,
+				       vm_map_page_mask(map));
+
+	<span class="enscript-keyword">if</span> (end &lt; addr)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/*
+	 * Address of byte vector
+	 */</span>
+	vec = uap-&gt;vec;
+
+	map = current_map();
+
+	<span class="enscript-comment">/*
+	 * Do this on a map entry basis so that if the pages are not
+	 * in the current processes address space, we can easily look
+	 * up the pages elsewhere.
+	 */</span>
+	lastvecindex = -1;
+	<span class="enscript-keyword">for</span>( ; addr &lt; end; addr += PAGE_SIZE ) {
+		pqueryinfo = 0;
+		ret = mach_vm_page_query(map, addr, &amp;pqueryinfo, &amp;numref);
+		<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) 
+			pqueryinfo = 0;
+		mincoreinfo = 0;
+		<span class="enscript-keyword">if</span> (pqueryinfo &amp; VM_PAGE_QUERY_PAGE_PRESENT)
+			mincoreinfo |= MINCORE_INCORE;
+		<span class="enscript-keyword">if</span> (pqueryinfo &amp; VM_PAGE_QUERY_PAGE_REF)
+			mincoreinfo |= MINCORE_REFERENCED;
+		<span class="enscript-keyword">if</span> (pqueryinfo &amp; VM_PAGE_QUERY_PAGE_DIRTY)
+			mincoreinfo |= MINCORE_MODIFIED;
+		
+		
+		<span class="enscript-comment">/*
+		 * calculate index into user supplied byte vector
+		 */</span>
+		vecindex = (addr - first_addr)&gt;&gt; PAGE_SHIFT;
+
+		<span class="enscript-comment">/*
+		 * If we have skipped map entries, we need to make sure that
+		 * the byte vector is zeroed for those skipped entries.
+		 */</span>
+		<span class="enscript-keyword">while</span>((lastvecindex + 1) &lt; vecindex) {
+			c = 0;
+			error = copyout(&amp;c, vec + lastvecindex, 1);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">return</span> (EFAULT);
+			}
+			++lastvecindex;
+		}
+
+		<span class="enscript-comment">/*
+		 * Pass the page information to the user
+		 */</span>
+		c = (<span class="enscript-type">char</span>)mincoreinfo;
+		error = copyout(&amp;c, vec + vecindex, 1);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">return</span> (EFAULT);
+		}
+		lastvecindex = vecindex;
+	}
+
+
+	<span class="enscript-comment">/*
+	 * Zero the last entries in the byte vector.
+	 */</span>
+	vecindex = (end - first_addr) &gt;&gt; PAGE_SHIFT;
+	<span class="enscript-keyword">while</span>((lastvecindex + 1) &lt; vecindex) {
+		c = 0;
+		error = copyout(&amp;c, vec + lastvecindex, 1);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">return</span> (EFAULT);
+		}
+		++lastvecindex;
+	}
+	
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mlock</span>(__unused proc_t p, <span class="enscript-type">struct</span> mlock_args *uap, __unused int32_t *retvalval)
+{
+	vm_map_t user_map;
+	vm_map_offset_t addr;
+	vm_map_size_t size, pageoff;
+	kern_return_t	result;
+
+	AUDIT_ARG(addr, uap-&gt;addr);
+	AUDIT_ARG(len, uap-&gt;len);
+
+	addr = (vm_map_offset_t) uap-&gt;addr;
+	size = (vm_map_size_t)uap-&gt;len;
+
+	<span class="enscript-comment">/* disable wrap around */</span>
+	<span class="enscript-keyword">if</span> (addr + size &lt; addr)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">if</span> (size == 0)
+		<span class="enscript-keyword">return</span> (0);
+
+	user_map = current_map();
+	pageoff = (addr &amp; vm_map_page_mask(user_map));
+	addr -= pageoff;
+	size = vm_map_round_page(size+pageoff, vm_map_page_mask(user_map));
+
+	<span class="enscript-comment">/* have to call vm_map_wire directly to pass &quot;I don't know&quot; protections */</span>
+	result = vm_map_wire(user_map, addr, addr+size, VM_PROT_NONE | VM_PROT_MEMORY_TAG_MAKE(VM_KERN_MEMORY_MLOCK), TRUE);
+
+	<span class="enscript-keyword">if</span> (result == KERN_RESOURCE_SHORTAGE)
+		<span class="enscript-keyword">return</span> EAGAIN;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> ENOMEM;
+
+	<span class="enscript-keyword">return</span> 0;	<span class="enscript-comment">/* KERN_SUCCESS */</span>
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">munlock</span>(__unused proc_t p, <span class="enscript-type">struct</span> munlock_args *uap, __unused int32_t *retval)
+{
+	mach_vm_offset_t addr;
+	mach_vm_size_t size;
+	vm_map_t user_map;
+	kern_return_t	result;
+
+	AUDIT_ARG(addr, uap-&gt;addr);
+	AUDIT_ARG(addr, uap-&gt;len);
+
+	addr = (mach_vm_offset_t) uap-&gt;addr;
+	size = (mach_vm_size_t)uap-&gt;len;
+	user_map = current_map();
+
+	<span class="enscript-comment">/* JMM - need to remove all wirings by spec - this just removes one */</span>
+	result = mach_vm_wire(host_priv_self(), user_map, addr, size, VM_PROT_NONE);
+	<span class="enscript-keyword">return</span> (result == KERN_SUCCESS ? 0 : ENOMEM);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mlockall</span>(__unused proc_t p, __unused <span class="enscript-type">struct</span> mlockall_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-keyword">return</span> (ENOSYS);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">munlockall</span>(__unused proc_t p, __unused <span class="enscript-type">struct</span> munlockall_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-keyword">return</span>(ENOSYS);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_CODE_DECRYPTION</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mremap_encrypted</span>(__unused <span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> mremap_encrypted_args *uap, __unused int32_t *retval)
+{
+    mach_vm_offset_t	user_addr;
+    mach_vm_size_t	user_size;
+    kern_return_t	result;
+    vm_map_t	user_map;
+    uint32_t	cryptid;
+    cpu_type_t	cputype;
+    cpu_subtype_t	cpusubtype;
+    pager_crypt_info_t	crypt_info;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> * cryptname = 0;
+    <span class="enscript-type">char</span> *vpath;
+    <span class="enscript-type">int</span> len, ret;
+    <span class="enscript-type">struct</span> proc_regioninfo_internal pinfo;
+    vnode_t vp;
+    uintptr_t vnodeaddr;
+    uint32_t vid;
+    
+    AUDIT_ARG(addr, uap-&gt;addr);
+    AUDIT_ARG(len, uap-&gt;len);
+    
+    user_map = current_map();
+    user_addr = (mach_vm_offset_t) uap-&gt;addr;
+    user_size = (mach_vm_size_t) uap-&gt;len;
+    
+    cryptid = uap-&gt;cryptid;
+    cputype = uap-&gt;cputype;
+    cpusubtype = uap-&gt;cpusubtype;
+    
+    <span class="enscript-keyword">if</span> (user_addr &amp; vm_map_page_mask(user_map)) {
+        <span class="enscript-comment">/* UNIX SPEC: user address is not page-aligned, return EINVAL */</span>
+        <span class="enscript-keyword">return</span> EINVAL;
+    }
+    
+    <span class="enscript-keyword">switch</span>(cryptid) {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+            <span class="enscript-comment">/* not encrypted, just an empty load command */</span>
+            <span class="enscript-keyword">return</span> 0;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">1</span>:
+            cryptname=<span class="enscript-string">&quot;com.apple.unfree&quot;</span>;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">0x10</span>:
+            <span class="enscript-comment">/* some random cryptid that you could manually put into
+             * your binary if you want NULL */</span>
+            cryptname=<span class="enscript-string">&quot;com.apple.null&quot;</span>;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-reference">default</span>:
+            <span class="enscript-keyword">return</span> EINVAL;
+    }
+    
+    <span class="enscript-keyword">if</span> (NULL == text_crypter_create) <span class="enscript-keyword">return</span> ENOTSUP;
+    
+    ret = fill_procregioninfo_onlymappedvnodes( proc_task(p), user_addr, &amp;pinfo, &amp;vnodeaddr, &amp;vid);
+    <span class="enscript-keyword">if</span> (ret == 0 || !vnodeaddr) {
+        <span class="enscript-comment">/* No really, this returns 0 if the memory address is not backed by a file */</span>
+        <span class="enscript-keyword">return</span> (EINVAL);
+    }
+    
+    vp = (vnode_t)vnodeaddr;
+    <span class="enscript-keyword">if</span> ((vnode_getwithvid(vp, vid)) == 0) {
+        MALLOC_ZONE(vpath, <span class="enscript-type">char</span> *, MAXPATHLEN, M_NAMEI, M_WAITOK);
+        <span class="enscript-keyword">if</span>(vpath == NULL) {
+            vnode_put(vp);
+            <span class="enscript-keyword">return</span> (ENOMEM);
+        }
+        
+        len = MAXPATHLEN;
+        ret = vn_getpath(vp, vpath, &amp;len);
+        <span class="enscript-keyword">if</span>(ret) {
+            FREE_ZONE(vpath, MAXPATHLEN, M_NAMEI);
+            vnode_put(vp);
+            <span class="enscript-keyword">return</span> (ret);
+        }
+        
+        vnode_put(vp);
+    } <span class="enscript-keyword">else</span> {
+        <span class="enscript-keyword">return</span> (EINVAL);
+    }
+
+#<span class="enscript-reference">if</span> 0
+    kprintf(<span class="enscript-string">&quot;%s vpath %s cryptid 0x%08x cputype 0x%08x cpusubtype 0x%08x range 0x%016llx size 0x%016llx\n&quot;</span>,
+            __FUNCTION__, vpath, cryptid, cputype, cpusubtype, (uint64_t)user_addr, (uint64_t)user_size);
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-comment">/* set up decrypter first */</span>
+    crypt_file_data_t crypt_data = {
+        .filename = vpath,
+        .cputype = cputype,
+        .cpusubtype = cpusubtype };
+    result = text_crypter_create(&amp;crypt_info, cryptname, (<span class="enscript-type">void</span>*)&amp;crypt_data);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+    printf(<span class="enscript-string">&quot;APPLE_PROTECT: %d[%s] map %p [0x%llx:0x%llx] %s(%s) -&gt; 0x%x\n&quot;</span>,
+	   p-&gt;p_pid, p-&gt;p_comm,
+	   user_map, (uint64_t) user_addr, (uint64_t) (user_addr + user_size),
+	   __FUNCTION__, vpath, result);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEVELOPMENT || DEBUG */</span>
+    FREE_ZONE(vpath, MAXPATHLEN, M_NAMEI);
+    
+    <span class="enscript-keyword">if</span>(result) {
+        printf(<span class="enscript-string">&quot;%s: unable to create decrypter %s, kr=%d\n&quot;</span>,
+               __FUNCTION__, cryptname, result);
+        <span class="enscript-keyword">if</span> (result == kIOReturnNotPrivileged) {
+            <span class="enscript-comment">/* text encryption returned decryption failure */</span>
+            <span class="enscript-keyword">return</span> (EPERM);
+        } <span class="enscript-keyword">else</span> {
+            <span class="enscript-keyword">return</span> (ENOMEM);
+        }
+    }
+    
+    <span class="enscript-comment">/* now remap using the decrypter */</span>
+    vm_object_offset_t crypto_backing_offset;
+    crypto_backing_offset = -1;	<span class="enscript-comment">/* i.e. use map entry's offset */</span>
+    result = vm_map_apple_protected(user_map,
+				    user_addr,
+				    user_addr+user_size,
+				    crypto_backing_offset,
+				    &amp;crypt_info);
+    <span class="enscript-keyword">if</span> (result) {
+        printf(<span class="enscript-string">&quot;%s: mapping failed with %d\n&quot;</span>, __FUNCTION__, result);
+    }
+   
+    <span class="enscript-keyword">if</span> (result) {
+        <span class="enscript-keyword">return</span> (EPERM);
+    }
+    <span class="enscript-keyword">return</span> 0;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_CODE_DECRYPTION */</span>
+</pre>
+<hr />
+</body></html>

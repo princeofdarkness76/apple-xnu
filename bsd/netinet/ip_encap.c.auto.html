@@ -1,0 +1,589 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ip_encap.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ip_encap.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*	$FreeBSD: src/sys/netinet/ip_encap.c,v 1.1.2.2 2001/07/03 11:01:46 ume Exp $	*/</span>
+<span class="enscript-comment">/*	$KAME: ip_encap.c,v 1.41 2001/03/15 08:35:08 itojun Exp $	*/</span>
+
+<span class="enscript-comment">/*
+ * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the project nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+<span class="enscript-comment">/*
+ * My grandfather said that there's a devil inside tunnelling technology...
+ *
+ * We have surprisingly many protocols that want packets with IP protocol
+ * #4 or #41.  Here's a list of protocols that want protocol #41:
+ *	RFC1933 configured tunnel
+ *	RFC1933 automatic tunnel
+ *	RFC2401 IPsec tunnel
+ *	RFC2473 IPv6 generic packet tunnelling
+ *	RFC2529 6over4 tunnel
+ *	mobile-ip6 (uses RFC2473)
+ *	6to4 tunnel
+ * Here's a list of protocol that want protocol #4:
+ *	RFC1853 IPv4-in-IPv4 tunnelling
+ *	RFC2003 IPv4 encapsulation within IPv4
+ *	RFC2344 reverse tunnelling for mobile-ip4
+ *	RFC2401 IPsec tunnel
+ * Well, what can I say.  They impose different en/decapsulation mechanism
+ * from each other, so they need separate protocol handler.  The only one
+ * we can easily determine by protocol # is IPsec, which always has
+ * AH/ESP/IPComp header right after outer IP header.
+ *
+ * So, clearly good old protosw does not work for protocol #4 and #41.
+ * The code will let you match protocol via src/dst address pair.
+ */</span>
+<span class="enscript-comment">/* XXX is M_NETADDR correct? */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sockio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_encap.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6protosw.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__APPLE__</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+<span class="enscript-function-name">MALLOC_DEFINE</span>(M_NETADDR, <span class="enscript-string">&quot;Export Host&quot;</span>, <span class="enscript-string">&quot;Export host address structure&quot;</span>);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">encap_init</span>(<span class="enscript-type">struct</span> protosw *, <span class="enscript-type">struct</span> domain *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">encap_add</span>(<span class="enscript-type">struct</span> encaptab *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">mask_match</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> encaptab *, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *,
+		<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">encap_fillarg</span>(<span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> encaptab *);
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">LIST_HEAD_INITIALIZER</span>
+<span class="enscript-comment">/* rely upon BSS initialization */</span>
+<span class="enscript-function-name">LIST_HEAD</span>(, encaptab) encaptab;
+#<span class="enscript-reference">else</span>
+<span class="enscript-function-name">LIST_HEAD</span>(, encaptab) encaptab = LIST_HEAD_INITIALIZER(&amp;encaptab);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">encap_init</span>(<span class="enscript-type">struct</span> protosw *pp, <span class="enscript-type">struct</span> domain *dp)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">dp</span>)
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> encap_initialized = 0;
+
+	VERIFY((pp-&gt;pr_flags &amp; (PR_INITIALIZED|PR_ATTACHED)) == PR_ATTACHED);
+
+	<span class="enscript-comment">/* This gets called by more than one protocols, so initialize once */</span>
+	<span class="enscript-keyword">if</span> (encap_initialized)
+		<span class="enscript-keyword">return</span>;
+	encap_initialized = 1;
+#<span class="enscript-reference">if</span> 0
+	<span class="enscript-comment">/*
+	 * we cannot use LIST_INIT() here, since drivers may want to call
+	 * encap_attach(), on driver attach.  encap_init() will be called
+	 * on AF_INET{,6} initialization, which happens after driver
+	 * initialization - using LIST_INIT() here can nuke encap_attach()
+	 * from drivers.
+	 */</span>
+	LIST_INIT(&amp;encaptab);
+#<span class="enscript-reference">endif</span>
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">encap4_init</span>(<span class="enscript-type">struct</span> protosw *pp, <span class="enscript-type">struct</span> domain *dp)
+{
+	encap_init(pp, dp);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">encap6_init</span>(<span class="enscript-type">struct</span> ip6protosw *pp, <span class="enscript-type">struct</span> domain *dp)
+{
+	encap_init((<span class="enscript-type">struct</span> protosw *)pp, dp);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">encap4_input</span>(m, off)
+	<span class="enscript-type">struct</span> mbuf *m;
+	<span class="enscript-type">int</span> off;
+{
+	<span class="enscript-type">int</span> proto;
+	<span class="enscript-type">struct</span> ip *ip;
+	<span class="enscript-type">struct</span> sockaddr_in s, d;
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> protosw *psw;
+	<span class="enscript-type">struct</span> encaptab *ep, *match;
+	<span class="enscript-type">int</span> prio, matchprio;
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__APPLE__</span>
+	va_start(ap, m);
+	off = va_arg(ap, <span class="enscript-type">int</span>);
+	proto = va_arg(ap, <span class="enscript-type">int</span>);
+	va_end(ap);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* Expect 32-bit aligned data pointer on strict-align platforms */</span>
+	MBUF_STRICT_DATA_ALIGNMENT_CHECK_32(m);
+
+	ip = mtod(m, <span class="enscript-type">struct</span> ip *);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__APPLE__</span>
+	proto = ip-&gt;ip_p;
+#<span class="enscript-reference">endif</span>
+
+	bzero(&amp;s, <span class="enscript-keyword">sizeof</span>(s));
+	s.sin_family = AF_INET;
+	s.sin_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in);
+	s.sin_addr = ip-&gt;ip_src;
+	bzero(&amp;d, <span class="enscript-keyword">sizeof</span>(d));
+	d.sin_family = AF_INET;
+	d.sin_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in);
+	d.sin_addr = ip-&gt;ip_dst;
+
+	match = NULL;
+	matchprio = 0;
+	<span class="enscript-keyword">for</span> (ep = LIST_FIRST(&amp;encaptab); ep; ep = LIST_NEXT(ep, chain)) {
+		<span class="enscript-keyword">if</span> (ep-&gt;af != AF_INET)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (ep-&gt;proto &gt;= 0 &amp;&amp; ep-&gt;proto != proto)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (ep-&gt;func)
+			prio = (*ep-&gt;func)(m, off, proto, ep-&gt;arg);
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * it's inbound traffic, we need to match in reverse
+			 * order
+			 */</span>
+			prio = mask_match(ep, (<span class="enscript-type">struct</span> sockaddr *)&amp;d,
+			    (<span class="enscript-type">struct</span> sockaddr *)&amp;s);
+		}
+
+		<span class="enscript-comment">/*
+		 * We prioritize the matches by using bit length of the
+		 * matches.  mask_match() and user-supplied matching function
+		 * should return the bit length of the matches (for example,
+		 * if both src/dst are matched for IPv4, 64 should be returned).
+		 * 0 or negative return value means &quot;it did not match&quot;.
+		 *
+		 * The question is, since we have two &quot;mask&quot; portion, we
+		 * cannot really define total order between entries.
+		 * For example, which of these should be preferred?
+		 * mask_match() returns 48 (32 + 16) for both of them.
+		 *	src=3ffe::/16, dst=3ffe:501::/32
+		 *	src=3ffe:501::/32, dst=3ffe::/16
+		 *
+		 * We need to loop through all the possible candidates
+		 * to get the best match - the search takes O(n) for
+		 * n attachments (i.e. interfaces).
+		 */</span>
+		<span class="enscript-keyword">if</span> (prio &lt;= 0)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (prio &gt; matchprio) {
+			matchprio = prio;
+			match = ep;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (match) {
+		<span class="enscript-comment">/* found a match, &quot;match&quot; has the best one */</span>
+		psw = (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> protosw *)match-&gt;psw;
+		<span class="enscript-keyword">if</span> (psw &amp;&amp; psw-&gt;pr_input) {
+			encap_fillarg(m, match);
+			(*psw-&gt;pr_input)(m, off);
+		} <span class="enscript-keyword">else</span>
+			m_freem(m);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* last resort: inject to raw socket */</span>
+	rip_input(m, off);
+}
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">encap6_input</span>(<span class="enscript-type">struct</span> mbuf **mp, <span class="enscript-type">int</span> *offp, <span class="enscript-type">int</span> proto)
+{
+	<span class="enscript-type">struct</span> mbuf *m = *mp;
+	<span class="enscript-type">struct</span> ip6_hdr *ip6;
+	<span class="enscript-type">struct</span> sockaddr_in6 s, d;
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ip6protosw *psw;
+	<span class="enscript-type">struct</span> encaptab *ep, *match;
+	<span class="enscript-type">int</span> prio, matchprio;
+
+	<span class="enscript-comment">/* Expect 32-bit aligned data pointer on strict-align platforms */</span>
+	MBUF_STRICT_DATA_ALIGNMENT_CHECK_32(m);
+
+	ip6 = mtod(m, <span class="enscript-type">struct</span> ip6_hdr *);
+	bzero(&amp;s, <span class="enscript-keyword">sizeof</span>(s));
+	s.sin6_family = AF_INET6;
+	s.sin6_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in6);
+	s.sin6_addr = ip6-&gt;ip6_src;
+	bzero(&amp;d, <span class="enscript-keyword">sizeof</span>(d));
+	d.sin6_family = AF_INET6;
+	d.sin6_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in6);
+	d.sin6_addr = ip6-&gt;ip6_dst;
+
+	match = NULL;
+	matchprio = 0;
+	<span class="enscript-keyword">for</span> (ep = LIST_FIRST(&amp;encaptab); ep; ep = LIST_NEXT(ep, chain)) {
+		<span class="enscript-keyword">if</span> (ep-&gt;af != AF_INET6)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (ep-&gt;proto &gt;= 0 &amp;&amp; ep-&gt;proto != proto)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (ep-&gt;func)
+			prio = (*ep-&gt;func)(m, *offp, proto, ep-&gt;arg);
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * it's inbound traffic, we need to match in reverse
+			 * order
+			 */</span>
+			prio = mask_match(ep, (<span class="enscript-type">struct</span> sockaddr *)&amp;d,
+			    (<span class="enscript-type">struct</span> sockaddr *)&amp;s);
+		}
+
+		<span class="enscript-comment">/* see encap4_input() for issues here */</span>
+		<span class="enscript-keyword">if</span> (prio &lt;= 0)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (prio &gt; matchprio) {
+			matchprio = prio;
+			match = ep;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (match) {
+		<span class="enscript-comment">/* found a match */</span>
+		psw = (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ip6protosw *)match-&gt;psw;
+		<span class="enscript-keyword">if</span> (psw &amp;&amp; psw-&gt;pr_input) {
+			encap_fillarg(m, match);
+			<span class="enscript-keyword">return</span> (*psw-&gt;pr_input)(mp, offp, proto);
+		} <span class="enscript-keyword">else</span> {
+			m_freem(m);
+			<span class="enscript-keyword">return</span> IPPROTO_DONE;
+		}
+	}
+
+	<span class="enscript-comment">/* last resort: inject to raw socket */</span>
+	<span class="enscript-keyword">return</span> rip6_input(mp, offp, proto);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">encap_add</span>(ep)
+	<span class="enscript-type">struct</span> encaptab *ep;
+{
+
+	LIST_INSERT_HEAD(&amp;encaptab, ep, chain);
+}
+
+<span class="enscript-comment">/*
+ * sp (src ptr) is always my side, and dp (dst ptr) is always remote side.
+ * length of mask (sm and dm) is assumed to be same as sp/dp.
+ * Return value will be necessary as input (cookie) for encap_detach().
+ */</span>
+<span class="enscript-type">const</span> <span class="enscript-type">struct</span> encaptab *
+<span class="enscript-function-name">encap_attach</span>(af, proto, sp, sm, dp, dm, psw, arg)
+	<span class="enscript-type">int</span> af;
+	<span class="enscript-type">int</span> proto;
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *sp, *sm;
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *dp, *dm;
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> protosw *psw;
+	<span class="enscript-type">void</span> *arg;
+{
+	<span class="enscript-type">struct</span> encaptab *ep;
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-comment">/* sanity check on args */</span>
+	<span class="enscript-keyword">if</span> (sp-&gt;sa_len &gt; <span class="enscript-keyword">sizeof</span>(ep-&gt;src) || dp-&gt;sa_len &gt; <span class="enscript-keyword">sizeof</span>(ep-&gt;dst)) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+	<span class="enscript-keyword">if</span> (sp-&gt;sa_len != dp-&gt;sa_len) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+	<span class="enscript-keyword">if</span> (af != sp-&gt;sa_family || af != dp-&gt;sa_family) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+
+	<span class="enscript-comment">/* check if anyone have already attached with exactly same config */</span>
+	<span class="enscript-keyword">for</span> (ep = LIST_FIRST(&amp;encaptab); ep; ep = LIST_NEXT(ep, chain)) {
+		<span class="enscript-keyword">if</span> (ep-&gt;af != af)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (ep-&gt;proto != proto)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (ep-&gt;src.ss_len != sp-&gt;sa_len ||
+		    bcmp(&amp;ep-&gt;src, sp, sp-&gt;sa_len) != 0 ||
+		    bcmp(&amp;ep-&gt;srcmask, sm, sp-&gt;sa_len) != 0)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (ep-&gt;dst.ss_len != dp-&gt;sa_len ||
+		    bcmp(&amp;ep-&gt;dst, dp, dp-&gt;sa_len) != 0 ||
+		    bcmp(&amp;ep-&gt;dstmask, dm, dp-&gt;sa_len) != 0)
+			<span class="enscript-keyword">continue</span>;
+
+		error = EEXIST;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+
+	ep = _MALLOC(<span class="enscript-keyword">sizeof</span>(*ep), M_NETADDR, M_WAITOK | M_ZERO); <span class="enscript-comment">/* XXX */</span>
+	<span class="enscript-keyword">if</span> (ep == NULL) {
+		error = ENOBUFS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+
+	ep-&gt;af = af;
+	ep-&gt;proto = proto;
+	bcopy(sp, &amp;ep-&gt;src, sp-&gt;sa_len);
+	bcopy(sm, &amp;ep-&gt;srcmask, sp-&gt;sa_len);
+	bcopy(dp, &amp;ep-&gt;dst, dp-&gt;sa_len);
+	bcopy(dm, &amp;ep-&gt;dstmask, dp-&gt;sa_len);
+	ep-&gt;psw = psw;
+	ep-&gt;arg = arg;
+
+	encap_add(ep);
+
+	error = 0;
+	<span class="enscript-keyword">return</span> ep;
+
+<span class="enscript-reference">fail</span>:
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-type">const</span> <span class="enscript-type">struct</span> encaptab *
+<span class="enscript-function-name">encap_attach_func</span>(af, proto, func, psw, arg)
+	<span class="enscript-type">int</span> af;
+	<span class="enscript-type">int</span> proto;
+	<span class="enscript-type">int</span> (*func)(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>, <span class="enscript-type">void</span> *);
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> protosw *psw;
+	<span class="enscript-type">void</span> *arg;
+{
+	<span class="enscript-type">struct</span> encaptab *ep;
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-comment">/* sanity check on args */</span>
+	<span class="enscript-keyword">if</span> (!func) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+
+	ep = _MALLOC(<span class="enscript-keyword">sizeof</span>(*ep), M_NETADDR, M_WAITOK | M_ZERO); <span class="enscript-comment">/* XXX */</span>
+	<span class="enscript-keyword">if</span> (ep == NULL) {
+		error = ENOBUFS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+
+	ep-&gt;af = af;
+	ep-&gt;proto = proto;
+	ep-&gt;func = func;
+	ep-&gt;psw = psw;
+	ep-&gt;arg = arg;
+
+	encap_add(ep);
+
+	error = 0;
+	<span class="enscript-keyword">return</span> ep;
+
+<span class="enscript-reference">fail</span>:
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">encap_detach</span>(cookie)
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> encaptab *cookie;
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> encaptab *ep = cookie;
+	<span class="enscript-type">struct</span> encaptab *p;
+
+	<span class="enscript-keyword">for</span> (p = LIST_FIRST(&amp;encaptab); p; p = LIST_NEXT(p, chain)) {
+		<span class="enscript-keyword">if</span> (p == ep) {
+			LIST_REMOVE(p, chain);
+			_FREE(p, M_NETADDR);	<span class="enscript-comment">/*XXX*/</span>
+			<span class="enscript-keyword">return</span> 0;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> EINVAL;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">mask_match</span>(ep, sp, dp)
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> encaptab *ep;
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *sp;
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *dp;
+{
+	<span class="enscript-type">struct</span> sockaddr_storage s;
+	<span class="enscript-type">struct</span> sockaddr_storage d;
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">const</span> u_int8_t *p, *q;
+	u_int8_t *r;
+	<span class="enscript-type">int</span> matchlen;
+
+	<span class="enscript-keyword">if</span> (sp-&gt;sa_len &gt; <span class="enscript-keyword">sizeof</span>(s) || dp-&gt;sa_len &gt; <span class="enscript-keyword">sizeof</span>(d))
+		<span class="enscript-keyword">return</span> 0;
+	<span class="enscript-keyword">if</span> (sp-&gt;sa_family != ep-&gt;af || dp-&gt;sa_family != ep-&gt;af)
+		<span class="enscript-keyword">return</span> 0;
+	<span class="enscript-keyword">if</span> (sp-&gt;sa_len != ep-&gt;src.ss_len || dp-&gt;sa_len != ep-&gt;dst.ss_len)
+		<span class="enscript-keyword">return</span> 0;
+
+	matchlen = 0;
+
+	p = (<span class="enscript-type">const</span> u_int8_t *)sp;
+	q = (<span class="enscript-type">const</span> u_int8_t *)&amp;ep-&gt;srcmask;
+	r = (u_int8_t *)&amp;s;
+	<span class="enscript-keyword">for</span> (i = 0 ; i &lt; sp-&gt;sa_len; i++) {
+		r[i] = p[i] &amp; q[i];
+		<span class="enscript-comment">/* XXX estimate */</span>
+		matchlen += (q[i] ? 8 : 0);
+	}
+
+	p = (<span class="enscript-type">const</span> u_int8_t *)dp;
+	q = (<span class="enscript-type">const</span> u_int8_t *)&amp;ep-&gt;dstmask;
+	r = (u_int8_t *)&amp;d;
+	<span class="enscript-keyword">for</span> (i = 0 ; i &lt; dp-&gt;sa_len; i++) {
+		r[i] = p[i] &amp; q[i];
+		<span class="enscript-comment">/* XXX rough estimate */</span>
+		matchlen += (q[i] ? 8 : 0);
+	}
+
+	<span class="enscript-comment">/* need to overwrite len/family portion as we don't compare them */</span>
+	s.ss_len = sp-&gt;sa_len;
+	s.ss_family = sp-&gt;sa_family;
+	d.ss_len = dp-&gt;sa_len;
+	d.ss_family = dp-&gt;sa_family;
+
+	<span class="enscript-keyword">if</span> (bcmp(&amp;s, &amp;ep-&gt;src, ep-&gt;src.ss_len) == 0 &amp;&amp;
+	    bcmp(&amp;d, &amp;ep-&gt;dst, ep-&gt;dst.ss_len) == 0) {
+		<span class="enscript-keyword">return</span> matchlen;
+	} <span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">struct</span> encaptabtag {
+	<span class="enscript-type">void</span>*			*arg;
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">encap_fillarg</span>(
+	<span class="enscript-type">struct</span> mbuf *m,
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> encaptab *ep)
+{
+	<span class="enscript-type">struct</span> m_tag	*tag;
+	<span class="enscript-type">struct</span> encaptabtag *et;
+	
+	tag = m_tag_create(KERNEL_MODULE_TAG_ID, KERNEL_TAG_TYPE_ENCAP,
+					  <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> encaptabtag), M_WAITOK, m);
+	
+	<span class="enscript-keyword">if</span> (tag != NULL) {
+		et = (<span class="enscript-type">struct</span> encaptabtag*)(tag + 1);
+		et-&gt;arg = ep-&gt;arg;
+		m_tag_prepend(m, tag);
+	}
+}
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">encap_getarg</span>(m)
+	<span class="enscript-type">struct</span> mbuf *m;
+{
+	<span class="enscript-type">struct</span> m_tag	*tag;
+	<span class="enscript-type">struct</span> encaptabtag *et;
+	<span class="enscript-type">void</span> *p = NULL;
+	
+	tag = m_tag_locate(m, KERNEL_MODULE_TAG_ID, KERNEL_TAG_TYPE_ENCAP, NULL);
+	<span class="enscript-keyword">if</span> (tag) {
+		et = (<span class="enscript-type">struct</span> encaptabtag*)(tag + 1);
+		p = et-&gt;arg;
+		m_tag_delete(m, tag);
+	}
+	
+	<span class="enscript-keyword">return</span> p;
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,156 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>vm_purgeable_internal.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">vm_purgeable_internal.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this
+ * file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * Purgeable spelling rules
+ * It is believed that the correct spelling is 
+ * { 'p', 'u', 'r', 'g', 'e', 'a', 'b', 'l', 'e' }.
+ * However, there is one published API that likes to spell it without the
+ * first 'e', vm_purgable_control(). Since we can't change that API,
+ * here are the rules.
+ * All qualifiers defined in vm_purgable.h are spelled without the e.
+ * All other qualifiers are spelled with the e.
+ * Right now, there are remains of the wrong spelling throughout the code,
+ * vm_object_t.purgable for example. We expect to change these on occasion.
+ */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__VM_PURGEABLE_INTERNAL__</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">__VM_PURGEABLE_INTERNAL__</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+
+<span class="enscript-type">enum</span> purgeable_q_type {
+	PURGEABLE_Q_TYPE_OBSOLETE,
+	PURGEABLE_Q_TYPE_FIFO,
+	PURGEABLE_Q_TYPE_LIFO,
+	PURGEABLE_Q_TYPE_MAX
+};
+
+<span class="enscript-type">typedef</span> uint32_t token_idx_t;
+<span class="enscript-type">typedef</span> uint32_t token_cnt_t;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TOKEN_COUNT_MAX</span> UINT32_MAX
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NUM_VOLATILE_GROUPS</span> 8
+<span class="enscript-type">struct</span> purgeable_q {
+	token_idx_t token_q_head;    <span class="enscript-comment">/* first token */</span>
+	token_idx_t token_q_tail;    <span class="enscript-comment">/* last token  */</span>
+	token_idx_t token_q_unripe;  <span class="enscript-comment">/* first token which is not ripe */</span>
+	int32_t new_pages;
+	queue_head_t objq[NUM_VOLATILE_GROUPS];
+	<span class="enscript-type">enum</span> purgeable_q_type type;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+	<span class="enscript-type">int</span> debug_count_tokens;
+	<span class="enscript-type">int</span> debug_count_objects;
+#<span class="enscript-reference">endif</span>
+};
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> purgeable_q * purgeable_q_t;
+
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> purgeable_q purgeable_queues[PURGEABLE_Q_TYPE_MAX];
+<span class="enscript-type">extern</span> queue_head_t purgeable_nonvolatile_queue;
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> purgeable_nonvolatile_count;
+<span class="enscript-type">extern</span> int32_t token_new_pagecount;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TOKEN_NEW_PAGECOUNT_MAX</span> INT32_MAX
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> available_for_purge;
+
+
+<span class="enscript-comment">/*
+ * Locking:
+ * the token counters are protected by the vm_page_queue_lock, since they're
+ * mostly used in that context and we don't want to do a lot of extra locking
+ * the purgeable page queues are protected by a separate lock since they're
+ * mostly used on a user context and we don't want any contention with the
+ * pageout daemon.
+ */</span>
+<span class="enscript-function-name">decl_lck_mtx_data</span>(<span class="enscript-type">extern</span>,vm_purgeable_queue_lock)
+
+<span class="enscript-comment">/* add a new token to queue. called by vm_object_purgeable_control */</span>
+<span class="enscript-comment">/* enter with page queue locked */</span>
+kern_return_t <span class="enscript-function-name">vm_purgeable_token_add</span>(purgeable_q_t queue);
+
+<span class="enscript-comment">/* enter with page queue locked */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_purgeable_token_delete_first</span>(purgeable_q_t queue);
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_purgeable_token_delete_last</span>(purgeable_q_t queue);
+
+<span class="enscript-comment">/*
+ * decrement token counters.
+ * enter with page queue locked
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_purgeable_q_advance_all</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/* the object purger. purges the next eligible object from memory. */</span>
+<span class="enscript-comment">/* returns TRUE if an object was purged, otherwise FALSE. */</span>
+boolean_t <span class="enscript-function-name">vm_purgeable_object_purge_one</span>(<span class="enscript-type">int</span> force_purge_below_group, <span class="enscript-type">int</span> flags);
+
+<span class="enscript-comment">/* purge all volatile objects now */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_purgeable_object_purge_all</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/* insert purgeable object into queue */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_purgeable_object_add</span>(vm_object_t object, purgeable_q_t queue, <span class="enscript-type">int</span> group);
+
+<span class="enscript-comment">/* look for object. If found, remove from purgeable queue. */</span>
+purgeable_q_t <span class="enscript-function-name">vm_purgeable_object_remove</span>(vm_object_t object);
+
+<span class="enscript-comment">/* statistics for purgable objects in all queues */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_purgeable_stats</span>(vm_purgeable_info_t info, task_t target_task);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-comment">/* statistics for purgeable object usage in all queues for a task */</span>
+kern_return_t <span class="enscript-function-name">vm_purgeable_account</span>(task_t task, pvm_account_info_t acnt_info);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEVELOPMENT || DEBUG */</span>
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">vm_purgeable_purge_task_owned</span>(task_t task);
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_purgeable_nonvolatile_enqueue</span>(vm_object_t object, task_t task);
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_purgeable_nonvolatile_dequeue</span>(vm_object_t object);
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_purgeable_accounting</span>(vm_object_t	object,
+			     vm_purgable_t	old_state,
+			     boolean_t		disown);
+<span class="enscript-type">void</span> <span class="enscript-function-name">vm_purgeable_compressed_update</span>(vm_object_t	object,
+				    <span class="enscript-type">int</span>		delta);
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __VM_PURGEABLE_INTERNAL__ */</span>
+</pre>
+<hr />
+</body></html>

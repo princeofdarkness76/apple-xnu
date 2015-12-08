@@ -1,0 +1,399 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>machine_check.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">machine_check.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007-2011 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpuid.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_topology.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_threads.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/lapic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_cpu.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_check.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/proc_reg.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * At the time of the machine-check exception, all hardware-threads panic.
+ * Each thread saves the state of its MCA registers to its per-cpu data area.
+ *
+ * State reporting is serialized so one thread dumps all valid state for all
+ * threads to the panic log. This may entail spinning waiting for other
+ * threads to complete saving state to memory. A timeout applies to this wait
+ * -- in particular, a 3-strikes timeout may prevent a thread from taking
+ * part is the affair.
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IF</span>(bool,str)	((bool) ? (str) : <span class="enscript-string">&quot;&quot;</span>)
+
+<span class="enscript-type">static</span> boolean_t	mca_initialized = FALSE;
+<span class="enscript-type">static</span> boolean_t	mca_MCE_present = FALSE;
+<span class="enscript-type">static</span> boolean_t	mca_MCA_present = FALSE;
+<span class="enscript-type">static</span> uint32_t		mca_family = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	mca_error_bank_count = 0;
+<span class="enscript-type">static</span> boolean_t	mca_control_MSR_present = FALSE;
+<span class="enscript-type">static</span> boolean_t	mca_cmci_present = FALSE;
+<span class="enscript-type">static</span> ia32_mcg_cap_t	ia32_mcg_cap;
+<span class="enscript-function-name">decl_simple_lock_data</span>(<span class="enscript-type">static</span>, mca_lock);
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	ia32_mci_ctl_t		mca_mci_ctl;
+	ia32_mci_status_t	mca_mci_status;
+	ia32_mci_misc_t		mca_mci_misc;
+	ia32_mci_addr_t		mca_mci_addr;
+} mca_mci_bank_t;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> mca_state {
+	boolean_t		mca_is_saved;
+	boolean_t		mca_is_valid;	<span class="enscript-comment">/* some state is valid */</span>
+	ia32_mcg_ctl_t		mca_mcg_ctl;
+	ia32_mcg_status_t	mca_mcg_status;
+	mca_mci_bank_t		mca_error_bank[0];
+} mca_state_t;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">enum</span> {
+	CLEAR,
+	DUMPING,
+	DUMPED
+} mca_dump_state_t;
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> mca_dump_state_t mca_dump_state = CLEAR;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mca_get_availability</span>(<span class="enscript-type">void</span>)
+{
+	uint64_t	features = cpuid_info()-&gt;cpuid_features;
+	uint32_t	family =   cpuid_info()-&gt;cpuid_family;
+	uint32_t	model =    cpuid_info()-&gt;cpuid_model;
+	uint32_t	stepping = cpuid_info()-&gt;cpuid_stepping;
+
+	<span class="enscript-keyword">if</span> ((model == CPUID_MODEL_HASWELL     &amp;&amp; stepping &lt; 3) ||
+	    (model == CPUID_MODEL_HASWELL_ULT &amp;&amp; stepping &lt; 1) ||
+	    (model == CPUID_MODEL_CRYSTALWELL &amp;&amp; stepping &lt; 1))
+		panic(<span class="enscript-string">&quot;Haswell pre-C0 steppings are not supported&quot;</span>);
+
+	mca_MCE_present = (features &amp; CPUID_FEATURE_MCE) != 0;
+	mca_MCA_present = (features &amp; CPUID_FEATURE_MCA) != 0;
+	mca_family = family;
+
+	<span class="enscript-comment">/*
+	 * If MCA, the number of banks etc is reported by the IA32_MCG_CAP MSR.
+	 */</span>
+	<span class="enscript-keyword">if</span> (mca_MCA_present) {
+		ia32_mcg_cap.u64 = rdmsr64(IA32_MCG_CAP);
+		mca_error_bank_count = ia32_mcg_cap.bits.count;
+		mca_control_MSR_present = ia32_mcg_cap.bits.mcg_ctl_p;
+		mca_cmci_present = ia32_mcg_cap.bits.mcg_ext_corr_err_p;
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mca_cpu_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	i;
+
+	<span class="enscript-comment">/*
+	 * The first (boot) processor is responsible for discovering the
+	 * machine check architecture present on this machine.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!mca_initialized) {
+		mca_get_availability();
+		mca_initialized = TRUE;
+		simple_lock_init(&amp;mca_lock, 0);
+	}
+
+	<span class="enscript-keyword">if</span> (mca_MCA_present) {
+
+		<span class="enscript-comment">/* Enable all MCA features */</span>
+		<span class="enscript-keyword">if</span> (mca_control_MSR_present)
+			wrmsr64(IA32_MCG_CTL, IA32_MCG_CTL_ENABLE);
+	
+		<span class="enscript-keyword">switch</span> (mca_family) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">0x06</span>:
+			<span class="enscript-comment">/* Enable all but mc0 */</span>
+			<span class="enscript-keyword">for</span> (i = 1; i &lt; mca_error_bank_count; i++)
+				wrmsr64(IA32_MCi_CTL(i),0xFFFFFFFFFFFFFFFFULL); 
+			
+			<span class="enscript-comment">/* Clear all errors */</span>
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; mca_error_bank_count; i++)
+				wrmsr64(IA32_MCi_STATUS(i), 0ULL);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">0x0F</span>:
+			<span class="enscript-comment">/* Enable all banks */</span>
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; mca_error_bank_count; i++)
+				wrmsr64(IA32_MCi_CTL(i),0xFFFFFFFFFFFFFFFFULL); 
+			
+			<span class="enscript-comment">/* Clear all errors */</span>
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; mca_error_bank_count; i++)
+				wrmsr64(IA32_MCi_STATUS(i), 0ULL);
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-comment">/* Enable machine check exception handling if available */</span>
+	<span class="enscript-keyword">if</span> (mca_MCE_present) {
+		set_cr4(get_cr4()|CR4_MCE);
+	}
+}
+
+boolean_t
+<span class="enscript-function-name">mca_is_cmci_present</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">if</span> (!mca_initialized)
+		mca_cpu_init();
+	<span class="enscript-keyword">return</span> mca_cmci_present;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mca_cpu_alloc</span>(cpu_data_t	*cdp)
+{
+	vm_size_t	mca_state_size;
+
+	<span class="enscript-comment">/*
+	 * Allocate space for an array of error banks.
+	 */</span>
+	mca_state_size = <span class="enscript-keyword">sizeof</span>(mca_state_t) +
+				<span class="enscript-keyword">sizeof</span>(mca_mci_bank_t) * mca_error_bank_count;
+	cdp-&gt;cpu_mca_state = kalloc(mca_state_size);
+	<span class="enscript-keyword">if</span> (cdp-&gt;cpu_mca_state == NULL) {
+		printf(<span class="enscript-string">&quot;mca_cpu_alloc() failed for cpu %d\n&quot;</span>, cdp-&gt;cpu_number);
+		<span class="enscript-keyword">return</span>;
+	}
+	bzero((<span class="enscript-type">void</span> *) cdp-&gt;cpu_mca_state, mca_state_size);
+
+	<span class="enscript-comment">/*
+	 * If the boot processor is yet have its allocation made,
+	 * do this now.
+	 */</span>
+	<span class="enscript-keyword">if</span> (cpu_datap(master_cpu)-&gt;cpu_mca_state == NULL)
+		mca_cpu_alloc(cpu_datap(master_cpu));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mca_save_state</span>(mca_state_t *mca_state)
+{
+	mca_mci_bank_t  *bank;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	i;
+
+	assert(!ml_get_interrupts_enabled() || get_preemption_level() &gt; 0);
+
+	<span class="enscript-keyword">if</span>  (mca_state == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	mca_state-&gt;mca_mcg_ctl = mca_control_MSR_present ?
+					rdmsr64(IA32_MCG_CTL) : 0ULL;	
+	mca_state-&gt;mca_mcg_status.u64 = rdmsr64(IA32_MCG_STATUS);
+
+ 	bank = (mca_mci_bank_t *) &amp;mca_state-&gt;mca_error_bank[0];
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; mca_error_bank_count; i++, bank++) {
+		bank-&gt;mca_mci_ctl        = rdmsr64(IA32_MCi_CTL(i));	
+		bank-&gt;mca_mci_status.u64 = rdmsr64(IA32_MCi_STATUS(i));	
+		<span class="enscript-keyword">if</span> (!bank-&gt;mca_mci_status.bits.val)
+			<span class="enscript-keyword">continue</span>;
+		bank-&gt;mca_mci_misc = (bank-&gt;mca_mci_status.bits.miscv)?
+					rdmsr64(IA32_MCi_MISC(i)) : 0ULL;	
+		bank-&gt;mca_mci_addr = (bank-&gt;mca_mci_status.bits.addrv)?
+					rdmsr64(IA32_MCi_ADDR(i)) : 0ULL;	
+		mca_state-&gt;mca_is_valid = TRUE;
+	} 
+
+	<span class="enscript-comment">/*
+	 * If we're the first thread with MCA state, point our package to it
+	 * and don't care about races
+	 */</span>
+	<span class="enscript-keyword">if</span> (x86_package()-&gt;mca_state == NULL)
+		x86_package()-&gt;mca_state = mca_state;
+
+	mca_state-&gt;mca_is_saved = TRUE;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mca_check_save</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">if</span> (mca_dump_state &gt; CLEAR)
+		mca_save_state(current_cpu_datap()-&gt;cpu_mca_state);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mca_report_cpu_info</span>(<span class="enscript-type">void</span>)
+{
+	i386_cpu_info_t *infop = cpuid_info();
+
+	kdb_printf(<span class="enscript-string">&quot; family: %d model: %d stepping: %d microcode: %d\n&quot;</span>,
+		infop-&gt;cpuid_family,
+		infop-&gt;cpuid_model,
+		infop-&gt;cpuid_stepping,
+		infop-&gt;cpuid_microcode_version);
+	kdb_printf(<span class="enscript-string">&quot; signature: 0x%x\n&quot;</span>,
+		infop-&gt;cpuid_signature);
+	kdb_printf(<span class="enscript-string">&quot; %s\n&quot;</span>,
+		infop-&gt;cpuid_brand_string);
+
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mca_dump_bank</span>(mca_state_t *state, <span class="enscript-type">int</span> i)
+{
+	mca_mci_bank_t		*bank;
+	ia32_mci_status_t	status;
+
+	bank = &amp;state-&gt;mca_error_bank[i];
+	status = bank-&gt;mca_mci_status;
+	<span class="enscript-keyword">if</span> (!status.bits.val)
+		<span class="enscript-keyword">return</span>;
+
+	kdb_printf(<span class="enscript-string">&quot; IA32_MC%d_STATUS(0x%x): 0x%016qx\n&quot;</span>,
+		i, IA32_MCi_STATUS(i), status.u64);
+
+	<span class="enscript-keyword">if</span> (status.bits.addrv)
+		kdb_printf(<span class="enscript-string">&quot; IA32_MC%d_ADDR(0x%x):   0x%016qx\n&quot;</span>,
+			i, IA32_MCi_ADDR(i), bank-&gt;mca_mci_addr);
+
+	<span class="enscript-keyword">if</span> (status.bits.miscv)
+		kdb_printf(<span class="enscript-string">&quot; IA32_MC%d_MISC(0x%x):   0x%016qx\n&quot;</span>,
+			i, IA32_MCi_MISC(i), bank-&gt;mca_mci_misc);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mca_cpu_dump_error_banks</span>(mca_state_t *state)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> 		i;
+
+	<span class="enscript-keyword">if</span> (!state-&gt;mca_is_valid)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; mca_error_bank_count; i++ ) {
+		mca_dump_bank(state, i);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mca_dump</span>(<span class="enscript-type">void</span>)
+{
+	mca_state_t	*mca_state = current_cpu_datap()-&gt;cpu_mca_state;
+	uint64_t	deadline;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	i = 0;
+
+	<span class="enscript-comment">/*
+	 * Capture local MCA registers to per-cpu data.
+	 */</span>
+	mca_save_state(mca_state);
+
+	<span class="enscript-comment">/*
+	 * Serialize: the first caller controls dumping MCA registers,
+	 * other threads spin meantime.
+	 */</span>
+	simple_lock(&amp;mca_lock);
+	<span class="enscript-keyword">if</span> (mca_dump_state &gt; CLEAR) {
+		simple_unlock(&amp;mca_lock);
+		<span class="enscript-keyword">while</span> (mca_dump_state == DUMPING)
+			cpu_pause();
+		<span class="enscript-keyword">return</span>;
+	}
+	mca_dump_state = DUMPING;
+	simple_unlock(&amp;mca_lock);
+
+	<span class="enscript-comment">/*
+	 * Wait for all other hardware threads to save their state.
+	 * Or timeout.
+	 */</span>
+	deadline = mach_absolute_time() + LockTimeOut;
+	<span class="enscript-keyword">while</span> (mach_absolute_time() &lt; deadline &amp;&amp; i &lt; real_ncpus) {
+		<span class="enscript-keyword">if</span> (!cpu_datap(i)-&gt;cpu_mca_state-&gt;mca_is_saved) {
+			cpu_pause();
+			<span class="enscript-keyword">continue</span>;
+		}
+		i += 1;
+	}
+
+	<span class="enscript-comment">/*
+	 * Report machine-check capabilities:
+	 */</span>
+	kdb_printf(<span class="enscript-string">&quot;Machine-check capabilities: 0x%016qx\n&quot;</span>, ia32_mcg_cap.u64);
+
+	mca_report_cpu_info();
+
+	kdb_printf(<span class="enscript-string">&quot; %d error-reporting banks\n&quot;</span>, mca_error_bank_count);
+ 
+	<span class="enscript-comment">/*
+	 * Dump all processor state:
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; real_ncpus; i++) {
+		mca_state_t		*mcsp = cpu_datap(i)-&gt;cpu_mca_state;
+		ia32_mcg_status_t	status;
+
+		<span class="enscript-keyword">if</span> (mcsp == NULL ||
+		    mcsp-&gt;mca_is_saved == FALSE ||
+		    mcsp-&gt;mca_mcg_status.u64 == 0 ||
+		    !mcsp-&gt;mca_is_valid) {
+			<span class="enscript-keyword">continue</span>;
+		}
+		status = mcsp-&gt;mca_mcg_status;
+		kdb_printf(<span class="enscript-string">&quot;Processor %d: IA32_MCG_STATUS: 0x%016qx\n&quot;</span>,
+			i, status.u64);
+		mca_cpu_dump_error_banks(mcsp);
+	}
+
+	<span class="enscript-comment">/* Update state to release any other threads. */</span>
+	mca_dump_state = DUMPED;
+}
+
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">mca_exception_panic</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">lapic_trigger_MC</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">void</span> <span class="enscript-function-name">mca_exception_panic</span>(<span class="enscript-type">void</span>)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	lapic_trigger_MC();
+#<span class="enscript-reference">else</span>
+	kprintf(<span class="enscript-string">&quot;mca_exception_panic() requires DEBUG build\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+}
+</pre>
+<hr />
+</body></html>

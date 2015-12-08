@@ -1,0 +1,369 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pe_init.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pe_init.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * file: pe_init.c
+ *    i386 platform expert initialization.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/boot.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/device_tree.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pe_images.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_CSR</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/csr.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;boot_images.h&quot;</span>
+
+<span class="enscript-comment">/* extern references */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pe_identify_machine</span>(<span class="enscript-type">void</span> * args);
+
+<span class="enscript-comment">/* private globals */</span>
+PE_state_t  PE_state;
+
+<span class="enscript-comment">/* Clock Frequency Info */</span>
+clock_frequency_info_t gPEClockFrequencyInfo;
+
+<span class="enscript-type">void</span> *gPEEFISystemTable;
+<span class="enscript-type">void</span> *gPEEFIRuntimeServices;
+
+<span class="enscript-type">static</span> boot_icon_element* norootIcon_lzss;
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> uint8_t*     norootClut_lzss;
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">PE_initialize_console</span>( PE_Video * info, <span class="enscript-type">int</span> op )
+{
+    <span class="enscript-type">static</span> <span class="enscript-type">int</span>   last_console = -1;
+
+    <span class="enscript-keyword">if</span> (info) {
+	info-&gt;v_offset  = 0;
+	info-&gt;v_length  = 0;
+	info-&gt;v_display = GRAPHICS_MODE;
+    }
+
+    <span class="enscript-keyword">switch</span> ( op ) {
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPEDisableScreen</span>:
+            initialize_screen(info, op);
+            kprintf(<span class="enscript-string">&quot;kPEDisableScreen %d\n&quot;</span>, last_console);
+	    <span class="enscript-keyword">if</span> (!console_is_serial())
+		last_console = switch_to_serial_console();
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPEEnableScreen</span>:
+            initialize_screen(info, op);
+            <span class="enscript-keyword">if</span> (info) PE_state.video = *info;
+            kprintf(<span class="enscript-string">&quot;kPEEnableScreen %d\n&quot;</span>, last_console);
+            <span class="enscript-keyword">if</span>( last_console != -1)
+                switch_to_old_console( last_console);
+            <span class="enscript-keyword">break</span>;
+	
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPEBaseAddressChange</span>:
+            <span class="enscript-keyword">if</span> (info) PE_state.video = *info;
+            <span class="enscript-comment">/* fall thru */</span>
+
+        <span class="enscript-reference">default</span>:
+            initialize_screen(info, op);
+            <span class="enscript-keyword">break</span>;
+    }
+
+    <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PE_init_iokit</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-type">enum</span> { kMaxBootVar = 128 };
+        
+    boolean_t bootClutInitialized = FALSE;
+    boolean_t noroot_rle_Initialized = FALSE;
+
+    DTEntry             entry;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	size;
+    uint32_t		*map;
+	boot_progress_element *bootPict;
+
+    norootIcon_lzss = NULL;
+    norootClut_lzss = NULL;
+
+    PE_init_kprintf(TRUE);
+    PE_init_printf(TRUE);
+
+    kprintf(<span class="enscript-string">&quot;Kernel boot args: '%s'\n&quot;</span>, PE_boot_args());
+
+    <span class="enscript-comment">/*
+     * Fetch the CLUT and the noroot image.
+     */</span>
+
+    <span class="enscript-keyword">if</span>( kSuccess == DTLookupEntry(NULL, <span class="enscript-string">&quot;/chosen/memory-map&quot;</span>, &amp;entry)) {
+        <span class="enscript-keyword">if</span>( kSuccess == DTGetProperty(entry, <span class="enscript-string">&quot;BootCLUT&quot;</span>, (<span class="enscript-type">void</span> **) &amp;map, &amp;size)) {
+            <span class="enscript-keyword">if</span> (<span class="enscript-keyword">sizeof</span>(appleClut8) &lt;= map[1]) {
+                bcopy( (<span class="enscript-type">void</span> *)ml_static_ptovirt(map[0]), appleClut8, <span class="enscript-keyword">sizeof</span>(appleClut8) );
+                bootClutInitialized = TRUE;
+            }
+        }
+
+        <span class="enscript-keyword">if</span>( kSuccess == DTGetProperty(entry, <span class="enscript-string">&quot;Pict-FailedBoot&quot;</span>, (<span class="enscript-type">void</span> **) &amp;map, &amp;size)) {
+            bootPict = (boot_progress_element *) ml_static_ptovirt(map[0]);
+            default_noroot.width  = bootPict-&gt;width;
+            default_noroot.height = bootPict-&gt;height;
+            default_noroot.dx     = 0;
+            default_noroot.dy     = bootPict-&gt;yOffset;
+            default_noroot_data   = &amp;bootPict-&gt;data[0];
+            noroot_rle_Initialized = TRUE;
+        }
+
+        <span class="enscript-keyword">if</span>( kSuccess == DTGetProperty(entry, <span class="enscript-string">&quot;FailedCLUT&quot;</span>, (<span class="enscript-type">void</span> **) &amp;map, &amp;size)) {
+	        norootClut_lzss = (uint8_t*) ml_static_ptovirt(map[0]);
+        }
+
+        <span class="enscript-keyword">if</span>( kSuccess == DTGetProperty(entry, <span class="enscript-string">&quot;FailedImage&quot;</span>, (<span class="enscript-type">void</span> **) &amp;map, &amp;size)) {
+            norootIcon_lzss = (boot_icon_element *) ml_static_ptovirt(map[0]);
+            <span class="enscript-keyword">if</span> (norootClut_lzss == NULL) {
+                    printf(<span class="enscript-string">&quot;ERROR: No FailedCLUT provided for noroot icon!\n&quot;</span>);
+            }
+        }
+    }
+
+    <span class="enscript-keyword">if</span> (!bootClutInitialized) {
+        bcopy( (<span class="enscript-type">void</span> *) (uintptr_t) bootClut, (<span class="enscript-type">void</span> *) appleClut8, <span class="enscript-keyword">sizeof</span>(appleClut8) );
+    }
+
+    <span class="enscript-keyword">if</span> (!noroot_rle_Initialized) {
+        default_noroot.width  = kFailedBootWidth;
+        default_noroot.height = kFailedBootHeight;
+        default_noroot.dx     = 0;
+        default_noroot.dy     = kFailedBootOffset;
+        default_noroot_data   = failedBootPict;
+    }
+    
+    <span class="enscript-comment">/*
+     * Initialize the spinning wheel (progress indicator).
+     */</span>
+    vc_progress_initialize(&amp;default_progress, 
+			    default_progress_data1x,
+			    default_progress_data2x, 
+			    default_progress_data3x, 
+			    (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *) appleClut8);
+
+    StartIOKit( PE_state.deviceTreeHead, PE_state.bootArgs, gPEEFIRuntimeServices, NULL);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PE_init_platform</span>(boolean_t vm_initialized, <span class="enscript-type">void</span> * _args)
+{
+    boot_args *args = (boot_args *)_args;
+
+    <span class="enscript-keyword">if</span> (PE_state.initialized == FALSE) {
+	    PE_state.initialized        = TRUE;
+
+        <span class="enscript-comment">// New EFI-style
+</span>        PE_state.bootArgs           = _args;
+        PE_state.deviceTreeHead	    = (<span class="enscript-type">void</span> *) ml_static_ptovirt(args-&gt;deviceTreeP);
+        PE_state.video.v_baseAddr   = args-&gt;Video.v_baseAddr; <span class="enscript-comment">// remains physical address
+</span>        PE_state.video.v_rowBytes   = args-&gt;Video.v_rowBytes;
+        PE_state.video.v_width	    = args-&gt;Video.v_width;
+        PE_state.video.v_height	    = args-&gt;Video.v_height;
+        PE_state.video.v_depth	    = args-&gt;Video.v_depth;
+        PE_state.video.v_display    = args-&gt;Video.v_display;
+        strlcpy(PE_state.video.v_pixelFormat, <span class="enscript-string">&quot;PPPPPPPP&quot;</span>,
+		<span class="enscript-keyword">sizeof</span>(PE_state.video.v_pixelFormat));
+
+#<span class="enscript-reference">ifdef</span>  <span class="enscript-variable-name">kBootArgsFlagHiDPI</span>
+	<span class="enscript-keyword">if</span> (args-&gt;flags &amp; kBootArgsFlagHiDPI)
+                PE_state.video.v_scale = kPEScaleFactor2x;
+	<span class="enscript-keyword">else</span>
+                PE_state.video.v_scale = kPEScaleFactor1x;
+#<span class="enscript-reference">else</span>
+	PE_state.video.v_scale = kPEScaleFactor1x;
+#<span class="enscript-reference">endif</span>
+    }
+
+    <span class="enscript-keyword">if</span> (!vm_initialized) {
+
+        <span class="enscript-keyword">if</span> (PE_state.deviceTreeHead) {
+            DTInit(PE_state.deviceTreeHead);
+        }
+
+        pe_identify_machine(args);
+    } <span class="enscript-keyword">else</span> {
+        pe_init_debug();
+    }
+
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PE_create_console</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-keyword">if</span> ( PE_state.video.v_display == GRAPHICS_MODE )
+        PE_initialize_console( &amp;PE_state.video, kPEGraphicsMode );
+    <span class="enscript-keyword">else</span>
+        PE_initialize_console( &amp;PE_state.video, kPETextMode );
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">PE_current_console</span>( PE_Video * info )
+{
+    *info = PE_state.video;
+
+    <span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PE_display_icon</span>( __unused <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> flags, __unused <span class="enscript-type">const</span> <span class="enscript-type">char</span> * name )
+{
+    <span class="enscript-keyword">if</span> ( norootIcon_lzss &amp;&amp; norootClut_lzss ) {
+        uint32_t width  = norootIcon_lzss-&gt;width;
+        uint32_t height = norootIcon_lzss-&gt;height;
+        uint32_t x = ((PE_state.video.v_width  - width) / 2);
+        uint32_t y = ((PE_state.video.v_height - height) / 2) + norootIcon_lzss-&gt;y_offset_from_center;
+
+        vc_display_lzss_icon(x, y, width, height,
+                             &amp;norootIcon_lzss-&gt;data[0],
+                             norootIcon_lzss-&gt;data_size,
+                             norootClut_lzss);
+    }
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( default_noroot_data ) {
+        vc_display_icon( &amp;default_noroot, default_noroot_data );
+    } <span class="enscript-keyword">else</span> {
+        printf(<span class="enscript-string">&quot;ERROR: No data found for noroot icon!\n&quot;</span>);
+    }
+}
+
+boolean_t
+<span class="enscript-function-name">PE_get_hotkey</span>(__unused <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> key)
+{
+    <span class="enscript-keyword">return</span> (FALSE);
+}
+
+<span class="enscript-type">static</span> timebase_callback_func gTimebaseCallback;
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PE_register_timebase_callback</span>(timebase_callback_func callback)
+{
+    gTimebaseCallback = callback;
+  
+    PE_call_timebase_callback();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PE_call_timebase_callback</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-type">struct</span> timebase_freq_t timebase_freq;
+  <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>          num, den, cnt;
+  
+  num = gPEClockFrequencyInfo.bus_clock_rate_num * gPEClockFrequencyInfo.bus_to_dec_rate_num;
+  den = gPEClockFrequencyInfo.bus_clock_rate_den * gPEClockFrequencyInfo.bus_to_dec_rate_den;
+  
+  cnt = 2;
+  <span class="enscript-keyword">while</span> (cnt &lt;= den) {
+    <span class="enscript-keyword">if</span> ((num % cnt) || (den % cnt)) {
+      cnt++;
+      <span class="enscript-keyword">continue</span>;
+    }
+    
+    num /= cnt;
+    den /= cnt;
+  }
+  
+  timebase_freq.timebase_num = num;
+  timebase_freq.timebase_den = den;
+  
+  <span class="enscript-keyword">if</span> (gTimebaseCallback) gTimebaseCallback(&amp;timebase_freq);
+}
+
+<span class="enscript-comment">/*
+ * The default (non-functional) PE_poll_input handler.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">PE_stub_poll_input</span>(__unused <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> options, <span class="enscript-type">char</span> * c)
+{
+    *c = 0xff;
+    <span class="enscript-keyword">return</span> 1;  <span class="enscript-comment">/* 0 for success, 1 for unsupported */</span>
+}
+
+<span class="enscript-comment">/*
+ * Called by the kernel debugger to poll for keyboard input.
+ * Keyboard drivers may replace the default stub function
+ * with their polled-mode input function.
+ */</span>
+<span class="enscript-function-name">int</span> (*PE_poll_input)(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> options, <span class="enscript-type">char</span> * c)
+	= PE_stub_poll_input;
+
+boolean_t
+<span class="enscript-function-name">PE_reboot_on_panic</span>(<span class="enscript-type">void</span>)
+{
+	boot_args *args = (boot_args *)PE_state.bootArgs;
+
+	<span class="enscript-keyword">if</span> (args-&gt;flags &amp; kBootArgsFlagRebootOnPanic)
+		<span class="enscript-keyword">return</span> TRUE;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> FALSE;
+}
+
+<span class="enscript-comment">/* rdar://problem/21244753 */</span>
+uint32_t
+<span class="enscript-function-name">PE_i_can_has_debugger</span>(uint32_t *debug_flags)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_CSR</span>
+	<span class="enscript-keyword">if</span> (csr_check(CSR_ALLOW_KERNEL_DEBUGGER) != 0 &amp;&amp;
+	    csr_check(CSR_ALLOW_APPLE_INTERNAL) != 0) {
+		<span class="enscript-keyword">if</span> (debug_flags)
+			*debug_flags = 0;
+		<span class="enscript-keyword">return</span> FALSE;
+	}
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (debug_flags) {
+		*debug_flags = debug_boot_arg;
+	}
+	<span class="enscript-keyword">return</span> TRUE;
+}
+</pre>
+<hr />
+</body></html>

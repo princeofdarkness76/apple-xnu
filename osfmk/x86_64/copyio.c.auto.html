@@ -1,0 +1,446 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>copyio.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">copyio.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach_assert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpuid.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/vmx.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_fault.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">copyio</span>(<span class="enscript-type">int</span>, user_addr_t, <span class="enscript-type">char</span> *, vm_size_t, vm_size_t *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">copyio_phys</span>(addr64_t, addr64_t, vm_size_t, <span class="enscript-type">int</span>);
+
+<span class="enscript-comment">/*
+ * Copy sizes bigger than this value will cause a kernel panic.
+ *
+ * Yes, this is an arbitrary fixed limit, but it's almost certainly
+ * a programming error to be copying more than this amount between
+ * user and wired kernel memory in a single invocation on this
+ * platform.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">COPYSIZELIMIT_PANIC</span>     (64*MB)
+
+<span class="enscript-comment">/*
+ * The copy engine has the following characteristics
+ *   - copyio() handles copies to/from user or kernel space
+ *   - copypv() deals with physical or virtual addresses
+ *
+ * Readers familiar with the 32-bit kernel will expect Joe's thesis at this
+ * point describing the full glory of the copy window implementation. In K64,
+ * however, there is no need for windowing. Thanks to the vast shared address
+ * space, the kernel has direct access to userspace and to physical memory.
+ *
+ * User virtual addresses are accessible provided the user's cr3 is loaded.
+ * Physical addresses are accessible via the direct map and the PHYSMAP_PTOV()
+ * translation.
+ *
+ * Copyin/out variants all boil done to just these 2 routines in locore.s which
+ * provide fault-recoverable copying:
+ */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">_bcopy</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *, <span class="enscript-type">void</span> *, vm_size_t);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">_bcopystr</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *, <span class="enscript-type">void</span> *, vm_size_t, vm_size_t *);
+
+
+<span class="enscript-comment">/*
+ * Types of copies:
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">COPYIN</span>		0	<span class="enscript-comment">/* from user virtual to kernel virtual */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">COPYOUT</span>		1	<span class="enscript-comment">/* from kernel virtual to user virtual */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">COPYINSTR</span>	2	<span class="enscript-comment">/* string variant of copyout */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">COPYINPHYS</span>	3	<span class="enscript-comment">/* from user virtual to kernel physical */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">COPYOUTPHYS</span>	4	<span class="enscript-comment">/* from kernel physical to user virtual */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	uint64_t 	timestamp;
+	thread_t	thread;
+	uintptr_t	cr4;
+	uint8_t		cpuid;
+	uint8_t		smap_state;
+	uint8_t		copyio_active;
+} smaplog_entry_t;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SMAPLOG_BUFFER_SIZE</span> (50)
+<span class="enscript-type">static</span> smaplog_entry_t	smaplog_cbuf[SMAPLOG_BUFFER_SIZE];
+<span class="enscript-type">static</span> uint32_t		smaplog_head = 0;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">smaplog_add_entry</span>(boolean_t enabling)
+{
+	uint32_t index = 0;
+	thread_t thread = current_thread();
+
+	<span class="enscript-keyword">do</span> {
+		index = smaplog_head;
+	} <span class="enscript-keyword">while</span> (!OSCompareAndSwap(index, (index + 1) % SMAPLOG_BUFFER_SIZE, &amp;smaplog_head));
+
+	assert(index &lt; SMAPLOG_BUFFER_SIZE);
+	assert(smaplog_head &lt; SMAPLOG_BUFFER_SIZE);
+	assert(thread);
+
+	smaplog_cbuf[index].timestamp = mach_absolute_time();
+	smaplog_cbuf[index].thread = thread;
+	smaplog_cbuf[index].cpuid = cpu_number();
+	smaplog_cbuf[index].cr4 = get_cr4();
+	smaplog_cbuf[index].smap_state = enabling;
+	smaplog_cbuf[index].copyio_active = (thread-&gt;machine.specFlags &amp; CopyIOActive) ? 1 : 0;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEVELOPMENT */</span>
+
+<span class="enscript-type">extern</span> boolean_t pmap_smap_enabled;
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">user_access_enable</span>(<span class="enscript-type">void</span>) {
+	<span class="enscript-keyword">if</span> (pmap_smap_enabled) {
+		stac();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span>
+		smaplog_add_entry(TRUE);
+#<span class="enscript-reference">endif</span>
+	}
+}
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> <span class="enscript-function-name">user_access_disable</span>(<span class="enscript-type">void</span>) {
+	<span class="enscript-keyword">if</span> (pmap_smap_enabled) {
+		clac();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span>
+		smaplog_add_entry(FALSE);
+#<span class="enscript-reference">endif</span>
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">copyio</span>(<span class="enscript-type">int</span> copy_type, user_addr_t user_addr, <span class="enscript-type">char</span> *kernel_addr,
+       vm_size_t nbytes, vm_size_t *lencopied, <span class="enscript-type">int</span> use_kernel_map)
+{
+        thread_t	thread;
+	pmap_t		pmap;
+	vm_size_t	bytes_copied;
+	<span class="enscript-type">int</span>		error = 0;
+	boolean_t	istate = FALSE;
+	boolean_t	recursive_CopyIOActive;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KDEBUG</span>
+	<span class="enscript-type">int</span>		debug_type = 0xeff70010;
+	debug_type += (copy_type &lt;&lt; 2);
+#<span class="enscript-reference">endif</span>
+
+	assert(nbytes &lt; COPYSIZELIMIT_PANIC);
+
+	thread = current_thread();
+
+	KERNEL_DEBUG(debug_type | DBG_FUNC_START,
+		     (<span class="enscript-type">unsigned</span>)(user_addr &gt;&gt; 32), (<span class="enscript-type">unsigned</span>)user_addr,
+		     nbytes, thread-&gt;machine.copyio_state, 0);
+
+	<span class="enscript-keyword">if</span> (nbytes == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+        pmap = thread-&gt;map-&gt;pmap;
+
+	<span class="enscript-keyword">if</span> ((copy_type != COPYINPHYS) &amp;&amp; (copy_type != COPYOUTPHYS) &amp;&amp; ((vm_offset_t)kernel_addr &lt; VM_MIN_KERNEL_AND_KEXT_ADDRESS)) {
+		panic(<span class="enscript-string">&quot;Invalid copy parameter, copy type: %d, kernel address: %p&quot;</span>, copy_type, kernel_addr);
+	}
+
+	<span class="enscript-comment">/* Sanity and security check for addresses to/from a user */</span>
+
+	<span class="enscript-keyword">if</span> (((pmap != kernel_pmap) &amp;&amp; (use_kernel_map == 0)) &amp;&amp;
+	    ((nbytes &amp;&amp; (user_addr+nbytes &lt;= user_addr)) || ((user_addr + nbytes) &gt; vm_map_max(thread-&gt;map)))) {
+		error = EFAULT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * If the no_shared_cr3 boot-arg is set (true), the kernel runs on 
+	 * its own pmap and cr3 rather than the user's -- so that wild accesses
+	 * from kernel or kexts can be trapped. So, during copyin and copyout,
+	 * we need to switch back to the user's map/cr3. The thread is flagged
+	 * &quot;CopyIOActive&quot; at this time so that if the thread is pre-empted,
+	 * we will later restore the correct cr3.
+	 */</span>
+	recursive_CopyIOActive = thread-&gt;machine.specFlags &amp; CopyIOActive;
+	thread-&gt;machine.specFlags |= CopyIOActive;
+	user_access_enable();
+	<span class="enscript-keyword">if</span> (no_shared_cr3) {
+		istate = ml_set_interrupts_enabled(FALSE);
+ 		<span class="enscript-keyword">if</span> (get_cr3_base() != pmap-&gt;pm_cr3)
+			set_cr3_raw(pmap-&gt;pm_cr3);
+	}
+
+	<span class="enscript-comment">/*
+	 * Ensure that we're running on the target thread's cr3.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((pmap != kernel_pmap) &amp;&amp; !use_kernel_map &amp;&amp;
+	    (get_cr3_base() != pmap-&gt;pm_cr3)) {
+		panic(<span class="enscript-string">&quot;copyio(%d,%p,%p,%ld,%p,%d) cr3 is %p expects %p&quot;</span>,
+			copy_type, (<span class="enscript-type">void</span> *)user_addr, kernel_addr, nbytes, lencopied, use_kernel_map,
+			(<span class="enscript-type">void</span> *) get_cr3_raw(), (<span class="enscript-type">void</span> *) pmap-&gt;pm_cr3);
+	}
+	<span class="enscript-keyword">if</span> (no_shared_cr3)
+		(<span class="enscript-type">void</span>) ml_set_interrupts_enabled(istate);
+
+	KERNEL_DEBUG(0xeff70044 | DBG_FUNC_NONE, (<span class="enscript-type">unsigned</span>)user_addr,
+		     (<span class="enscript-type">unsigned</span>)kernel_addr, nbytes, 0, 0);
+
+        <span class="enscript-keyword">switch</span> (copy_type) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">COPYIN</span>:
+	        error = _bcopy((<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) user_addr,
+				kernel_addr,
+				nbytes);
+		<span class="enscript-keyword">break</span>;
+			
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">COPYOUT</span>:
+	        error = _bcopy(kernel_addr,
+				(<span class="enscript-type">void</span> *) user_addr,
+				nbytes);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">COPYINPHYS</span>:
+	        error = _bcopy((<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) user_addr,
+				PHYSMAP_PTOV(kernel_addr),
+				nbytes);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">COPYOUTPHYS</span>:
+	        error = _bcopy((<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) PHYSMAP_PTOV(kernel_addr),
+				(<span class="enscript-type">void</span> *) user_addr,
+				nbytes);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">COPYINSTR</span>:
+	        error = _bcopystr((<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) user_addr,
+				kernel_addr,
+				(<span class="enscript-type">int</span>) nbytes,
+				&amp;bytes_copied);
+
+		<span class="enscript-comment">/*
+		 * lencopied should be updated on success
+		 * or ENAMETOOLONG...  but not EFAULT
+		 */</span>
+		<span class="enscript-keyword">if</span> (error != EFAULT)
+		        *lencopied = bytes_copied;
+
+		<span class="enscript-keyword">if</span> (error) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KDEBUG</span>
+		        nbytes = *lencopied;
+#<span class="enscript-reference">endif</span>
+		        <span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (*(kernel_addr + bytes_copied - 1) == 0) {
+		        <span class="enscript-comment">/*
+			 * we found a NULL terminator... we're done
+			 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KDEBUG</span>
+		        nbytes = *lencopied;
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-keyword">break</span>;
+		} <span class="enscript-keyword">else</span> {
+		        <span class="enscript-comment">/*
+			 * no more room in the buffer and we haven't
+			 * yet come across a NULL terminator
+			 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KDEBUG</span>
+		        nbytes = *lencopied;
+#<span class="enscript-reference">endif</span>
+		        error = ENAMETOOLONG;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+
+	user_access_disable();
+	<span class="enscript-keyword">if</span> (!recursive_CopyIOActive) {
+		thread-&gt;machine.specFlags &amp;= ~CopyIOActive;
+	}
+	<span class="enscript-keyword">if</span> (no_shared_cr3) {
+		istate = ml_set_interrupts_enabled(FALSE);
+		<span class="enscript-keyword">if</span>  (get_cr3_raw() != kernel_pmap-&gt;pm_cr3)
+			set_cr3_raw(kernel_pmap-&gt;pm_cr3);
+		(<span class="enscript-type">void</span>) ml_set_interrupts_enabled(istate);
+	}
+
+<span class="enscript-reference">out</span>:
+	KERNEL_DEBUG(debug_type | DBG_FUNC_END, (<span class="enscript-type">unsigned</span>)user_addr,
+		     (<span class="enscript-type">unsigned</span>)kernel_addr, (<span class="enscript-type">unsigned</span>)nbytes, error, 0);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">copyio_phys</span>(addr64_t source, addr64_t sink, vm_size_t csize, <span class="enscript-type">int</span> which)
+{
+        <span class="enscript-type">char</span>	    *paddr;
+	user_addr_t vaddr;
+	<span class="enscript-type">int</span>         ctype;
+
+	<span class="enscript-keyword">if</span> (which &amp; cppvPsnk) {
+		paddr  = (<span class="enscript-type">char</span> *)sink;
+	        vaddr  = (user_addr_t)source;
+		ctype  = COPYINPHYS;
+	} <span class="enscript-keyword">else</span> {
+	        paddr  = (<span class="enscript-type">char</span> *)source;
+		vaddr  = (user_addr_t)sink;
+		ctype  = COPYOUTPHYS;
+	}
+	<span class="enscript-keyword">return</span> copyio(ctype, vaddr, paddr, csize, NULL, which &amp; cppvKmap);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">copyinmsg</span>(<span class="enscript-type">const</span> user_addr_t user_addr, <span class="enscript-type">char</span> *kernel_addr, mach_msg_size_t nbytes)
+{
+    <span class="enscript-keyword">return</span> copyio(COPYIN, user_addr, kernel_addr, nbytes, NULL, 0);
+}    
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">copyin</span>(<span class="enscript-type">const</span> user_addr_t user_addr, <span class="enscript-type">char</span> *kernel_addr, vm_size_t nbytes)
+{
+    <span class="enscript-keyword">return</span> copyio(COPYIN, user_addr, kernel_addr, nbytes, NULL, 0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">copyinstr</span>(<span class="enscript-type">const</span> user_addr_t user_addr,  <span class="enscript-type">char</span> *kernel_addr, vm_size_t nbytes, vm_size_t *lencopied)
+{
+    *lencopied = 0;
+
+    <span class="enscript-keyword">return</span> copyio(COPYINSTR, user_addr, kernel_addr, nbytes, lencopied, 0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">copyoutmsg</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *kernel_addr, user_addr_t user_addr, mach_msg_size_t nbytes)
+{
+    <span class="enscript-keyword">return</span> copyio(COPYOUT, user_addr, (<span class="enscript-type">char</span> *)(uintptr_t)kernel_addr, nbytes, NULL, 0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">copyout</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *kernel_addr, user_addr_t user_addr, vm_size_t nbytes)
+{
+    <span class="enscript-keyword">return</span> copyio(COPYOUT, user_addr, (<span class="enscript-type">char</span> *)(uintptr_t)kernel_addr, nbytes, NULL, 0);
+}
+
+
+kern_return_t
+<span class="enscript-function-name">copypv</span>(addr64_t src64, addr64_t snk64, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> size, <span class="enscript-type">int</span> which)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> lop, csize;
+	<span class="enscript-type">int</span> bothphys = 0;
+	
+	KERNEL_DEBUG(0xeff7004c | DBG_FUNC_START, (<span class="enscript-type">unsigned</span>)src64,
+		     (<span class="enscript-type">unsigned</span>)snk64, size, which, 0);
+
+	<span class="enscript-keyword">if</span> ((which &amp; (cppvPsrc | cppvPsnk)) == 0 )				<span class="enscript-comment">/* Make sure that only one is virtual */</span>
+		panic(<span class="enscript-string">&quot;copypv: no more than 1 parameter may be virtual\n&quot;</span>);	<span class="enscript-comment">/* Not allowed */</span>
+
+	<span class="enscript-keyword">if</span> ((which &amp; (cppvPsrc | cppvPsnk)) == (cppvPsrc | cppvPsnk))
+	        bothphys = 1;							<span class="enscript-comment">/* both are physical */</span>
+
+	<span class="enscript-keyword">while</span> (size) {
+	  
+	        <span class="enscript-keyword">if</span> (bothphys) {
+		        lop = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)(PAGE_SIZE - (snk64 &amp; (PAGE_SIZE - 1)));		<span class="enscript-comment">/* Assume sink smallest */</span>
+
+			<span class="enscript-keyword">if</span> (lop &gt; (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)(PAGE_SIZE - (src64 &amp; (PAGE_SIZE - 1))))
+			        lop = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)(PAGE_SIZE - (src64 &amp; (PAGE_SIZE - 1)));	<span class="enscript-comment">/* No, source is smaller */</span>
+		} <span class="enscript-keyword">else</span> {
+		        <span class="enscript-comment">/*
+			 * only need to compute the resid for the physical page
+			 * address... we don't care about where we start/finish in
+			 * the virtual since we just call the normal copyin/copyout
+			 */</span>
+		        <span class="enscript-keyword">if</span> (which &amp; cppvPsrc)
+			        lop = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)(PAGE_SIZE - (src64 &amp; (PAGE_SIZE - 1)));
+			<span class="enscript-keyword">else</span>
+			        lop = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)(PAGE_SIZE - (snk64 &amp; (PAGE_SIZE - 1)));
+		}
+		csize = size;						<span class="enscript-comment">/* Assume we can copy it all */</span>
+		<span class="enscript-keyword">if</span> (lop &lt; size)
+		        csize = lop;					<span class="enscript-comment">/* Nope, we can't do it all */</span>
+#<span class="enscript-reference">if</span> 0		
+		<span class="enscript-comment">/*
+		 * flush_dcache64 is currently a nop on the i386... 
+		 * it's used when copying to non-system memory such
+		 * as video capture cards... on PPC there was a need
+		 * to flush due to how we mapped this memory... not
+		 * sure if it's needed on i386.
+		 */</span>
+		<span class="enscript-keyword">if</span> (which &amp; cppvFsrc)
+		        flush_dcache64(src64, csize, 1);		<span class="enscript-comment">/* If requested, flush source before move */</span>
+		<span class="enscript-keyword">if</span> (which &amp; cppvFsnk)
+		        flush_dcache64(snk64, csize, 1);		<span class="enscript-comment">/* If requested, flush sink before move */</span>
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">if</span> (bothphys)
+		        bcopy_phys(src64, snk64, csize);		<span class="enscript-comment">/* Do a physical copy, virtually */</span>
+		<span class="enscript-keyword">else</span> {
+		        <span class="enscript-keyword">if</span> (copyio_phys(src64, snk64, csize, which))
+			        <span class="enscript-keyword">return</span> (KERN_FAILURE);
+		}
+#<span class="enscript-reference">if</span> 0
+		<span class="enscript-keyword">if</span> (which &amp; cppvFsrc)
+		        flush_dcache64(src64, csize, 1);	<span class="enscript-comment">/* If requested, flush source after move */</span>
+		<span class="enscript-keyword">if</span> (which &amp; cppvFsnk)
+		        flush_dcache64(snk64, csize, 1);	<span class="enscript-comment">/* If requested, flush sink after move */</span>
+#<span class="enscript-reference">endif</span>
+		size   -= csize;					<span class="enscript-comment">/* Calculate what is left */</span>
+		snk64 += csize;					<span class="enscript-comment">/* Bump sink to next physical address */</span>
+		src64 += csize;					<span class="enscript-comment">/* Bump source to next physical address */</span>
+	}
+	KERNEL_DEBUG(0xeff7004c | DBG_FUNC_END, (<span class="enscript-type">unsigned</span>)src64,
+		     (<span class="enscript-type">unsigned</span>)snk64, size, which, 0);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+</pre>
+<hr />
+</body></html>

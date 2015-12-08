@@ -1,0 +1,2661 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>hfs_xattr.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">hfs_xattr.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2004-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ubc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/utfconv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/xattr.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fsctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio_internal.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_cnode.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_mount.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_format.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_endian.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_btreeio.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_fsctl.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_cprotect.h&quot;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfscommon/headers/BTreesInternal.h&quot;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">HFS_XATTR_VERBOSE</span>  0
+
+#<span class="enscript-reference">define</span>  <span class="enscript-variable-name">ATTRIBUTE_FILE_NODE_SIZE</span>   8192
+
+
+<span class="enscript-comment">/* State information for the listattr_callback callback function. */</span>
+<span class="enscript-type">struct</span> listattr_callback_state {
+	u_int32_t   fileID;
+	<span class="enscript-type">int</span>         result;
+	uio_t       uio;
+	size_t      size;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	<span class="enscript-type">int</span>         showcompressed;
+	vfs_context_t ctx;
+	vnode_t     vp;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+};
+
+
+<span class="enscript-comment">/* HFS Internal Names */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">XATTR_EXTENDEDSECURITY_NAME</span>   <span class="enscript-string">&quot;system.extendedsecurity&quot;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">XATTR_XATTREXTENTS_NAME</span>	      <span class="enscript-string">&quot;system.xattrextents&quot;</span>
+
+<span class="enscript-type">static</span> u_int32_t emptyfinfo[8] = {0};
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">hfs_zero_hidden_fields</span> (<span class="enscript-type">struct</span> cnode *cp, u_int8_t *finderinfo); 
+
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> hfs_attrdatafilename[] = <span class="enscript-string">&quot;Attribute Data&quot;</span>;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">listattr_callback</span>(<span class="enscript-type">const</span> HFSPlusAttrKey *key, <span class="enscript-type">const</span> HFSPlusAttrData *data,
+                       <span class="enscript-type">struct</span> listattr_callback_state *state);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">remove_attribute_records</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, BTreeIterator * iterator);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">getnodecount</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, size_t nodesize);
+
+<span class="enscript-type">static</span> size_t  <span class="enscript-function-name">getmaxinlineattrsize</span>(<span class="enscript-type">struct</span> vnode * attrvp);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">read_attr_data</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, uio_t uio, size_t datasize, HFSPlusExtentDescriptor *extents);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">write_attr_data</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, uio_t uio, size_t datasize, HFSPlusExtentDescriptor *extents);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">alloc_attr_blks</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, size_t attrsize, size_t extentbufsize, HFSPlusExtentDescriptor *extents, <span class="enscript-type">int</span> *blocks);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>  <span class="enscript-function-name">free_attr_blks</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">int</span> blkcnt, HFSPlusExtentDescriptor *extents);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">has_overflow_extents</span>(HFSPlusForkData *forkdata);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">count_extent_blocks</span>(<span class="enscript-type">int</span> maxblks, HFSPlusExtentRecord extents);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NAMEDSTREAMS</span>
+<span class="enscript-comment">/*
+ * Obtain the vnode for a stream.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_vnop_getnamedstream</span>(<span class="enscript-type">struct</span> vnop_getnamedstream_args* ap)
+{
+	vnode_t vp = ap-&gt;a_vp;
+	vnode_t *svpp = ap-&gt;a_svpp;
+	<span class="enscript-type">struct</span> cnode *cp;
+	<span class="enscript-type">int</span> error = 0;
+
+	*svpp = NULL;
+
+	<span class="enscript-comment">/*
+	 * We only support the &quot;com.apple.ResourceFork&quot; stream.
+	 */</span>
+	<span class="enscript-keyword">if</span> (bcmp(ap-&gt;a_name, XATTR_RESOURCEFORK_NAME, <span class="enscript-keyword">sizeof</span>(XATTR_RESOURCEFORK_NAME)) != 0) {
+		<span class="enscript-keyword">return</span> (ENOATTR);
+	}
+	cp = VTOC(vp);
+	<span class="enscript-keyword">if</span> ( !S_ISREG(cp-&gt;c_mode) ) {
+		<span class="enscript-keyword">return</span> (EPERM);
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	<span class="enscript-type">int</span> hide_rsrc = hfs_hides_rsrc(ap-&gt;a_context, VTOC(vp), 1);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+	<span class="enscript-keyword">if</span> ((error = hfs_lock(VTOC(vp), HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
+		<span class="enscript-keyword">return</span> (error);
+	}
+	<span class="enscript-keyword">if</span> ((!hfs_has_rsrc(cp)
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	     || hide_rsrc
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+	     ) &amp;&amp; (ap-&gt;a_operation != NS_OPEN)) {
+		hfs_unlock(cp);
+		<span class="enscript-keyword">return</span> (ENOATTR);
+	}
+	error = hfs_vgetrsrc(VTOHFS(vp), vp, svpp);
+	hfs_unlock(cp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Create a stream.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_vnop_makenamedstream</span>(<span class="enscript-type">struct</span> vnop_makenamedstream_args* ap)
+{
+	vnode_t vp = ap-&gt;a_vp;
+	vnode_t *svpp = ap-&gt;a_svpp;
+	<span class="enscript-type">struct</span> cnode *cp;
+	<span class="enscript-type">int</span> error = 0;
+
+	*svpp = NULL;
+
+	<span class="enscript-comment">/*
+	 * We only support the &quot;com.apple.ResourceFork&quot; stream.
+	 */</span>
+	<span class="enscript-keyword">if</span> (bcmp(ap-&gt;a_name, XATTR_RESOURCEFORK_NAME, <span class="enscript-keyword">sizeof</span>(XATTR_RESOURCEFORK_NAME)) != 0) {
+		<span class="enscript-keyword">return</span> (ENOATTR);
+	}
+	cp = VTOC(vp);
+	<span class="enscript-keyword">if</span> ( !S_ISREG(cp-&gt;c_mode) ) {
+		<span class="enscript-keyword">return</span> (EPERM);
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	<span class="enscript-keyword">if</span> (hfs_hides_rsrc(ap-&gt;a_context, VTOC(vp), 1)) {
+		<span class="enscript-keyword">if</span> (VNODE_IS_RSRC(vp)) {
+			<span class="enscript-keyword">return</span> EINVAL;
+		} <span class="enscript-keyword">else</span> {
+			error = decmpfs_decompress_file(vp, VTOCMP(vp), -1, 1, 0);
+			<span class="enscript-keyword">if</span> (error != 0)
+				<span class="enscript-keyword">return</span> error;
+		}
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+	<span class="enscript-keyword">if</span> ((error = hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
+		<span class="enscript-keyword">return</span> (error);
+	}
+	error = hfs_vgetrsrc(VTOHFS(vp), vp, svpp);
+	hfs_unlock(cp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Remove a stream.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_vnop_removenamedstream</span>(<span class="enscript-type">struct</span> vnop_removenamedstream_args* ap)
+{
+	vnode_t svp = ap-&gt;a_svp;
+	cnode_t *scp = VTOC(svp);
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-comment">/*
+	 * We only support the &quot;com.apple.ResourceFork&quot; stream.
+	 */</span>
+	<span class="enscript-keyword">if</span> (bcmp(ap-&gt;a_name, XATTR_RESOURCEFORK_NAME, <span class="enscript-keyword">sizeof</span>(XATTR_RESOURCEFORK_NAME)) != 0) {
+		<span class="enscript-keyword">return</span> (ENOATTR);
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	<span class="enscript-keyword">if</span> (hfs_hides_rsrc(ap-&gt;a_context, scp, 1)) {
+		<span class="enscript-comment">/* do nothing */</span>
+		<span class="enscript-keyword">return</span> 0;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+
+	hfs_lock_truncate(scp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
+	<span class="enscript-keyword">if</span> (VTOF(svp)-&gt;ff_size) {
+		<span class="enscript-comment">// hfs_truncate will deal with the cnode lock
+</span>		error = hfs_truncate(svp, 0, IO_NDELAY, 0, ap-&gt;a_context);
+	}
+	hfs_unlock_truncate(scp, HFS_LOCK_DEFAULT);
+
+	<span class="enscript-keyword">return</span> error;
+}
+#<span class="enscript-reference">endif</span>
+
+
+<span class="enscript-comment">/* Zero out the date added field for the specified cnode */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">hfs_zero_hidden_fields</span> (<span class="enscript-type">struct</span> cnode *cp, u_int8_t *finderinfo) 
+{
+	u_int8_t *finfo = finderinfo;
+    
+	<span class="enscript-comment">/* Advance finfo by 16 bytes to the 2nd half of the finderinfo */</span>
+	finfo = finfo + 16;
+	
+	<span class="enscript-keyword">if</span> (S_ISREG(cp-&gt;c_attr.ca_mode) || S_ISLNK(cp-&gt;c_attr.ca_mode)) {
+		<span class="enscript-type">struct</span> FndrExtendedFileInfo *extinfo = (<span class="enscript-type">struct</span> FndrExtendedFileInfo *)finfo;
+		extinfo-&gt;document_id = 0;
+		extinfo-&gt;date_added = 0;
+		extinfo-&gt;write_gen_counter = 0;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (S_ISDIR(cp-&gt;c_attr.ca_mode)) {
+		<span class="enscript-type">struct</span> FndrExtendedDirInfo *extinfo = (<span class="enscript-type">struct</span> FndrExtendedDirInfo *)finfo;
+		extinfo-&gt;document_id = 0;
+		extinfo-&gt;date_added = 0;
+		extinfo-&gt;write_gen_counter = 0;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* Return an error */</span>
+		<span class="enscript-keyword">return</span> -1;
+	}
+	<span class="enscript-keyword">return</span> 0;
+    
+}
+
+<span class="enscript-comment">/*
+ * Retrieve the data of an extended attribute.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_vnop_getxattr</span>(<span class="enscript-type">struct</span> vnop_getxattr_args *ap)
+<span class="enscript-comment">/*
+	struct vnop_getxattr_args {
+		struct vnodeop_desc *a_desc;
+		vnode_t a_vp;
+		char * a_name;
+		uio_t a_uio;
+		size_t *a_size;
+		int a_options;
+		vfs_context_t a_context;
+	};
+*/</span>
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	<span class="enscript-type">struct</span> cnode *cp;
+	<span class="enscript-type">struct</span> hfsmount *hfsmp;
+	uio_t uio = ap-&gt;a_uio;
+	size_t bufsize;
+	<span class="enscript-type">int</span> result;
+
+	cp = VTOC(vp);
+	<span class="enscript-keyword">if</span> (vp == cp-&gt;c_vp) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+		<span class="enscript-type">int</span> decmpfs_hide = hfs_hides_xattr(ap-&gt;a_context, VTOC(vp), ap-&gt;a_name, 1); <span class="enscript-comment">/* 1 == don't take the cnode lock */</span>
+		<span class="enscript-keyword">if</span> (decmpfs_hide &amp;&amp; !(ap-&gt;a_options &amp; XATTR_SHOWCOMPRESSION))
+				<span class="enscript-keyword">return</span> ENOATTR;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+		
+		<span class="enscript-comment">/* Get the Finder Info. */</span>
+		<span class="enscript-keyword">if</span> (bcmp(ap-&gt;a_name, XATTR_FINDERINFO_NAME, <span class="enscript-keyword">sizeof</span>(XATTR_FINDERINFO_NAME)) == 0) {
+			u_int8_t finderinfo[32];
+			bufsize = 32;
+
+			<span class="enscript-keyword">if</span> ((result = hfs_lock(cp, HFS_SHARED_LOCK, HFS_LOCK_DEFAULT))) {
+				<span class="enscript-keyword">return</span> (result);
+			}
+			<span class="enscript-comment">/* Make a copy since we may not export all of it. */</span>
+			bcopy(cp-&gt;c_finderinfo, finderinfo, <span class="enscript-keyword">sizeof</span>(finderinfo));
+			hfs_unlock(cp);
+			
+			<span class="enscript-comment">/* Zero out the date added field in the local copy */</span>
+			hfs_zero_hidden_fields (cp, finderinfo);
+
+			<span class="enscript-comment">/* Don't expose a symlink's private type/creator. */</span>
+			<span class="enscript-keyword">if</span> (vnode_islnk(vp)) {
+				<span class="enscript-type">struct</span> FndrFileInfo *fip;
+
+				fip = (<span class="enscript-type">struct</span> FndrFileInfo *)&amp;finderinfo;
+				fip-&gt;fdType = 0;
+				fip-&gt;fdCreator = 0;
+			}
+			<span class="enscript-comment">/* If Finder Info is empty then it doesn't exist. */</span>
+			<span class="enscript-keyword">if</span> (bcmp(finderinfo, emptyfinfo, <span class="enscript-keyword">sizeof</span>(emptyfinfo)) == 0) {
+				<span class="enscript-keyword">return</span> (ENOATTR);
+			}
+			<span class="enscript-keyword">if</span> (uio == NULL) {
+				*ap-&gt;a_size = bufsize;
+				<span class="enscript-keyword">return</span> (0);
+			}
+			<span class="enscript-keyword">if</span> ((user_size_t)uio_resid(uio) &lt; bufsize)
+				<span class="enscript-keyword">return</span> (ERANGE);
+
+			result = uiomove((caddr_t)&amp;finderinfo , bufsize, uio);
+
+			<span class="enscript-keyword">return</span> (result);
+		}
+		<span class="enscript-comment">/* Read the Resource Fork. */</span>
+		<span class="enscript-keyword">if</span> (bcmp(ap-&gt;a_name, XATTR_RESOURCEFORK_NAME, <span class="enscript-keyword">sizeof</span>(XATTR_RESOURCEFORK_NAME)) == 0) {
+			<span class="enscript-type">struct</span> vnode *rvp = NULL;
+			<span class="enscript-type">int</span> openunlinked = 0;
+			<span class="enscript-type">int</span> namelen = 0;
+
+			<span class="enscript-keyword">if</span> ( !S_ISREG(cp-&gt;c_mode) ) {
+				<span class="enscript-keyword">return</span> (EPERM);
+			}
+			<span class="enscript-keyword">if</span> ((result = hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
+				<span class="enscript-keyword">return</span> (result);
+			}
+			namelen = cp-&gt;c_desc.cd_namelen;
+
+			<span class="enscript-keyword">if</span> (!hfs_has_rsrc(cp)) {
+				hfs_unlock(cp);
+				<span class="enscript-keyword">return</span> (ENOATTR);
+			}
+			hfsmp = VTOHFS(vp);
+			<span class="enscript-keyword">if</span> ((cp-&gt;c_flag &amp; C_DELETED) &amp;&amp; (namelen == 0)) {
+				openunlinked = 1;
+			}
+			
+			result = hfs_vgetrsrc(hfsmp, vp, &amp;rvp);
+			hfs_unlock(cp);
+			<span class="enscript-keyword">if</span> (result) {
+				<span class="enscript-keyword">return</span> (result);
+			}
+			<span class="enscript-keyword">if</span> (uio == NULL) {
+				*ap-&gt;a_size = (size_t)VTOF(rvp)-&gt;ff_size;
+			} <span class="enscript-keyword">else</span> {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+				user_ssize_t uio_size = 0;
+				<span class="enscript-keyword">if</span> (decmpfs_hide)
+					uio_size = uio_resid(uio);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+				result = VNOP_READ(rvp, uio, 0, ap-&gt;a_context);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+				<span class="enscript-keyword">if</span> (decmpfs_hide &amp;&amp;
+				    (result == 0) &amp;&amp;
+				    (uio_resid(uio) == uio_size)) {
+					<span class="enscript-comment">/*
+					 * We intentionally make the above call to VNOP_READ so that
+					 * it can return an authorization/permission/etc. Error
+					 * based on ap-&gt;a_context and thus deny this operation;
+					 * in that case, result != 0 and we won't proceed.
+					 * 
+					 * However, if result == 0, it will have returned no data
+					 * because hfs_vnop_read hid the resource fork
+					 * (hence uio_resid(uio) == uio_size, i.e. the uio is untouched)
+					 * 
+					 * In that case, we try again with the decmpfs_ctx context
+					 * to get the actual data
+					 */</span>
+					result = VNOP_READ(rvp, uio, 0, decmpfs_ctx);
+				}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+			}
+			<span class="enscript-comment">/* force the rsrc fork vnode to recycle right away */</span>
+			<span class="enscript-keyword">if</span> (openunlinked) {
+				<span class="enscript-type">int</span> vref;
+				vref = vnode_ref (rvp);
+				<span class="enscript-keyword">if</span> (vref == 0) {
+					vnode_rele (rvp);
+				}
+				vnode_recycle(rvp);
+			}
+			vnode_put(rvp);
+			<span class="enscript-keyword">return</span> (result);
+		}
+	}
+	hfsmp = VTOHFS(vp);
+	<span class="enscript-comment">/*
+	 * Standard HFS only supports native FinderInfo and Resource Forks.
+	 */</span>
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_flags &amp; HFS_STANDARD) {
+		<span class="enscript-keyword">return</span> (EPERM);
+	}
+
+	<span class="enscript-keyword">if</span> ((result = hfs_lock(cp, HFS_SHARED_LOCK, HFS_LOCK_DEFAULT))) {
+		<span class="enscript-keyword">return</span> (result);
+	}
+	
+	<span class="enscript-comment">/* Check for non-rsrc, non-finderinfo EAs */</span>
+	result = hfs_getxattr_internal (cp, ap, VTOHFS(cp-&gt;c_vp), 0);
+
+	hfs_unlock(cp);
+	
+	<span class="enscript-keyword">return</span> MacToVFSError(result);
+}
+
+<span class="enscript-comment">// Has same limitations as hfs_getxattr_internal below
+</span><span class="enscript-type">int</span> <span class="enscript-function-name">hfs_xattr_read</span>(vnode_t vp, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">void</span> *data, size_t *size)
+{
+	<span class="enscript-type">char</span>  uio_buf[UIO_SIZEOF(1)];
+	uio_t uio = uio_createwithbuffer(1, 0, UIO_SYSSPACE, UIO_READ, uio_buf, 
+									 <span class="enscript-keyword">sizeof</span>(uio_buf));
+
+	uio_addiov(uio, CAST_USER_ADDR_T(data), *size);
+
+	<span class="enscript-type">struct</span> vnop_getxattr_args args = {
+		.a_uio = uio,
+		.a_name = name,
+		.a_size = size
+	};
+
+	<span class="enscript-keyword">return</span> hfs_getxattr_internal(VTOC(vp), &amp;args, VTOHFS(vp), 0);
+}
+
+<span class="enscript-comment">/*
+ * getxattr_internal
+ *
+ * We break out this internal function which searches the attributes B-Tree and the 
+ * overflow extents file to find non-resource, non-finderinfo EAs.  There may be cases 
+ * where we need to get EAs in contexts where we are already holding the cnode lock, 
+ * and to re-enter hfs_vnop_getxattr would cause us to double-lock the cnode.  Instead, 
+ * we can just directly call this function.
+ *
+ * We pass the hfsmp argument directly here because we may not necessarily have a cnode to
+ * operate on.  Under normal conditions, we have a file or directory to query, but if we
+ * are operating on the root directory (id 1), then we may not have a cnode.  In this case, if hte
+ * 'cp' argument is NULL, then we need to use the 'fileid' argument as the entry to manipulate
+ *
+ * NOTE: This function assumes the cnode lock for 'cp' is held exclusive or shared. 
+ */</span> 
+<span class="enscript-type">int</span> <span class="enscript-function-name">hfs_getxattr_internal</span> (<span class="enscript-type">struct</span> cnode *cp, <span class="enscript-type">struct</span> vnop_getxattr_args *ap, 
+		<span class="enscript-type">struct</span> hfsmount *hfsmp, u_int32_t fileid) 
+{
+	
+	<span class="enscript-type">struct</span> filefork *btfile;
+	<span class="enscript-type">struct</span> BTreeIterator * iterator = NULL;
+	size_t bufsize = 0;
+	HFSPlusAttrRecord *recp = NULL;
+	FSBufferDescriptor btdata;
+	<span class="enscript-type">int</span> lockflags = 0;
+	<span class="enscript-type">int</span> result = 0;
+	u_int16_t datasize = 0;
+	uio_t uio = ap-&gt;a_uio;
+	u_int32_t target_id = 0;
+
+	<span class="enscript-keyword">if</span> (cp) {
+		target_id = cp-&gt;c_fileid;
+	} <span class="enscript-keyword">else</span> {
+		target_id = fileid;
+	}
+
+
+	<span class="enscript-comment">/* Bail if we don't have an EA B-Tree. */</span>
+	<span class="enscript-keyword">if</span> ((hfsmp-&gt;hfs_attribute_vp == NULL) ||
+	   ((cp) &amp;&amp;  (cp-&gt;c_attr.ca_recflags &amp; kHFSHasAttributesMask) == 0)) {
+		result = ENOATTR;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	
+	<span class="enscript-comment">/* Initialize the B-Tree iterator for searching for the proper EA */</span>
+	btfile = VTOF(hfsmp-&gt;hfs_attribute_vp);
+	
+	MALLOC(iterator, BTreeIterator *, <span class="enscript-keyword">sizeof</span>(*iterator), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (iterator == NULL) {
+		result = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	bzero(iterator, <span class="enscript-keyword">sizeof</span>(*iterator));
+	
+	<span class="enscript-comment">/* Allocate memory for reading in the attribute record.  This buffer is 
+	 * big enough to read in all types of attribute records.  It is not big 
+	 * enough to read inline attribute data which is read in later.
+	 */</span>
+	MALLOC(recp, HFSPlusAttrRecord *, <span class="enscript-keyword">sizeof</span>(HFSPlusAttrRecord), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (recp == NULL) {
+		result = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	btdata.bufferAddress = recp;
+	btdata.itemSize = <span class="enscript-keyword">sizeof</span>(HFSPlusAttrRecord);
+	btdata.itemCount = 1;
+
+	result = hfs_buildattrkey(target_id, ap-&gt;a_name, (HFSPlusAttrKey *)&amp;iterator-&gt;key);
+	<span class="enscript-keyword">if</span> (result) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	<span class="enscript-comment">/* Lookup the attribute in the Attribute B-Tree */</span>
+	lockflags = hfs_systemfile_lock(hfsmp, SFL_ATTRIBUTE, HFS_SHARED_LOCK);
+	result = BTSearchRecord(btfile, iterator, &amp;btdata, &amp;datasize, NULL);
+	hfs_systemfile_unlock(hfsmp, lockflags);
+	
+	<span class="enscript-keyword">if</span> (result) {
+		<span class="enscript-keyword">if</span> (result == btNotFound) {
+			result = ENOATTR;
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	
+	<span class="enscript-comment">/* 
+	 * Operate differently if we have inline EAs that can fit in the attribute B-Tree or if
+	 * we have extent based EAs.
+	 */</span>
+	<span class="enscript-keyword">switch</span> (recp-&gt;recordType) {
+
+		<span class="enscript-comment">/* Attribute fits in the Attribute B-Tree */</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSPlusAttrInlineData</span>: {
+			<span class="enscript-comment">/*
+			 * Sanity check record size. It's not required to have any
+			 * user data, so the minimum size is 2 bytes less that the
+			 * size of HFSPlusAttrData (since HFSPlusAttrData struct
+			 * has 2 bytes set aside for attribute data).
+			 */</span>
+			<span class="enscript-keyword">if</span> (datasize &lt; (<span class="enscript-keyword">sizeof</span>(HFSPlusAttrData) - 2)) {
+				printf(<span class="enscript-string">&quot;hfs_getxattr: vol=%s %d,%s invalid record size %d (expecting %lu)\n&quot;</span>, 
+					   hfsmp-&gt;vcbVN, target_id, ap-&gt;a_name, datasize, <span class="enscript-keyword">sizeof</span>(HFSPlusAttrData));
+				result = ENOATTR;
+				<span class="enscript-keyword">break</span>;
+			}
+			*ap-&gt;a_size = recp-&gt;attrData.attrSize;
+			<span class="enscript-keyword">if</span> (uio &amp;&amp; recp-&gt;attrData.attrSize != 0) {
+				<span class="enscript-keyword">if</span> (*ap-&gt;a_size &gt; (user_size_t)uio_resid(uio)) {
+					<span class="enscript-comment">/* User provided buffer is not large enough for the xattr data */</span>
+					result = ERANGE;
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-comment">/* Previous BTreeSearchRecord() read in only the attribute record, 
+					 * and not the attribute data.  Now allocate enough memory for 
+					 * both attribute record and data, and read the attribute record again. 
+					 */</span>
+					bufsize = <span class="enscript-keyword">sizeof</span>(HFSPlusAttrData) - 2 + recp-&gt;attrData.attrSize;
+					FREE(recp, M_TEMP);
+					MALLOC(recp, HFSPlusAttrRecord *, bufsize, M_TEMP, M_WAITOK);
+					<span class="enscript-keyword">if</span> (recp == NULL) {
+						result = ENOMEM;
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+					}
+
+					btdata.bufferAddress = recp;
+					btdata.itemSize = bufsize;
+					btdata.itemCount = 1;
+
+					bzero(iterator, <span class="enscript-keyword">sizeof</span>(*iterator));
+					result = hfs_buildattrkey(target_id, ap-&gt;a_name, (HFSPlusAttrKey *)&amp;iterator-&gt;key);
+					<span class="enscript-keyword">if</span> (result) {
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+					}
+
+					<span class="enscript-comment">/* Lookup the attribute record and inline data */</span>
+					lockflags = hfs_systemfile_lock(hfsmp, SFL_ATTRIBUTE, HFS_SHARED_LOCK);
+					result = BTSearchRecord(btfile, iterator, &amp;btdata, &amp;datasize, NULL);
+					hfs_systemfile_unlock(hfsmp, lockflags);
+					<span class="enscript-keyword">if</span> (result) {
+						<span class="enscript-keyword">if</span> (result == btNotFound) {
+							result = ENOATTR;
+						}
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+					}
+
+					<span class="enscript-comment">/* Copy-out the attribute data to the user buffer */</span>
+					*ap-&gt;a_size = recp-&gt;attrData.attrSize;
+					result = uiomove((caddr_t) &amp;recp-&gt;attrData.attrData , recp-&gt;attrData.attrSize, uio);
+				}
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/* Extent-Based EAs */</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSPlusAttrForkData</span>: {
+			<span class="enscript-keyword">if</span> (datasize &lt; <span class="enscript-keyword">sizeof</span>(HFSPlusAttrForkData)) {
+				printf(<span class="enscript-string">&quot;hfs_getxattr: vol=%s %d,%s invalid record size %d (expecting %lu)\n&quot;</span>, 
+					   hfsmp-&gt;vcbVN, target_id, ap-&gt;a_name, datasize, <span class="enscript-keyword">sizeof</span>(HFSPlusAttrForkData));
+				result = ENOATTR;
+				<span class="enscript-keyword">break</span>;
+			}
+			*ap-&gt;a_size = recp-&gt;forkData.theFork.logicalSize;
+			<span class="enscript-keyword">if</span> (uio == NULL) {
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (*ap-&gt;a_size &gt; (user_size_t)uio_resid(uio)) {
+				result = ERANGE;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-comment">/* Process overflow extents if necessary. */</span>
+			<span class="enscript-keyword">if</span> (has_overflow_extents(&amp;recp-&gt;forkData.theFork)) {
+				HFSPlusExtentDescriptor *extentbuf;
+				HFSPlusExtentDescriptor *extentptr;
+				size_t extentbufsize;
+				u_int32_t totalblocks;
+				u_int32_t blkcnt;
+				u_int32_t attrlen;
+				
+				totalblocks = recp-&gt;forkData.theFork.totalBlocks;
+				<span class="enscript-comment">/* Ignore bogus block counts. */</span>
+				<span class="enscript-keyword">if</span> (totalblocks &gt; howmany(HFS_XATTR_MAXSIZE, hfsmp-&gt;blockSize)) {
+					result = ERANGE;
+					<span class="enscript-keyword">break</span>;
+				}
+				attrlen = recp-&gt;forkData.theFork.logicalSize;
+				
+				<span class="enscript-comment">/* Get a buffer to hold the worst case amount of extents. */</span>
+				extentbufsize = totalblocks * <span class="enscript-keyword">sizeof</span>(HFSPlusExtentDescriptor);
+				extentbufsize = roundup(extentbufsize, <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord));
+				MALLOC(extentbuf, HFSPlusExtentDescriptor *, extentbufsize, M_TEMP, M_WAITOK);
+				<span class="enscript-keyword">if</span> (extentbuf == NULL) {
+					result = ENOMEM;
+					<span class="enscript-keyword">break</span>;
+				}
+				bzero(extentbuf, extentbufsize);
+				extentptr = extentbuf;
+				
+				<span class="enscript-comment">/* Grab the first 8 extents. */</span>
+				bcopy(&amp;recp-&gt;forkData.theFork.extents[0], extentptr, <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord));
+				extentptr += kHFSPlusExtentDensity;
+				blkcnt = count_extent_blocks(totalblocks, recp-&gt;forkData.theFork.extents);
+				
+				<span class="enscript-comment">/* Now lookup the overflow extents. */</span>
+				lockflags = hfs_systemfile_lock(hfsmp, SFL_ATTRIBUTE, HFS_SHARED_LOCK);
+				<span class="enscript-keyword">while</span> (blkcnt &lt; totalblocks) {
+					((HFSPlusAttrKey *)&amp;iterator-&gt;key)-&gt;startBlock = blkcnt;
+					result = BTSearchRecord(btfile, iterator, &amp;btdata, &amp;datasize, NULL);
+					<span class="enscript-keyword">if</span> (result ||
+						(recp-&gt;recordType != kHFSPlusAttrExtents) ||
+						(datasize &lt; <span class="enscript-keyword">sizeof</span>(HFSPlusAttrExtents))) {
+						printf(<span class="enscript-string">&quot;hfs_getxattr: %s missing extents, only %d blks of %d found\n&quot;</span>,
+							   ap-&gt;a_name, blkcnt, totalblocks);
+						result = ENOATTR;
+						<span class="enscript-keyword">break</span>;   <span class="enscript-comment">/* break from while */</span>
+					}
+					<span class="enscript-comment">/* Grab the next 8 extents. */</span>
+					bcopy(&amp;recp-&gt;overflowExtents.extents[0], extentptr, <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord));
+					extentptr += kHFSPlusExtentDensity;
+					blkcnt += count_extent_blocks(totalblocks, recp-&gt;overflowExtents.extents);
+				}
+				
+				<span class="enscript-comment">/* Release Attr B-Tree lock */</span>
+				hfs_systemfile_unlock(hfsmp, lockflags);
+				
+				<span class="enscript-keyword">if</span> (blkcnt &lt; totalblocks) {
+					result = ENOATTR;
+				} <span class="enscript-keyword">else</span> {
+					result = read_attr_data(hfsmp, uio, attrlen, extentbuf);
+				}
+				FREE(extentbuf, M_TEMP);
+				
+			} <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* No overflow extents. */</span>
+				result = read_attr_data(hfsmp, uio, recp-&gt;forkData.theFork.logicalSize, recp-&gt;forkData.theFork.extents);
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+			
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-comment">/* We only support Extent or inline EAs.  Default to ENOATTR for anything else */</span>
+			result = ENOATTR;
+			<span class="enscript-keyword">break</span>;		
+	}
+	
+<span class="enscript-reference">exit</span>:	
+	<span class="enscript-keyword">if</span> (iterator) {
+		FREE(iterator, M_TEMP);
+	}
+	<span class="enscript-keyword">if</span> (recp) {
+		FREE(recp, M_TEMP);
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+	
+}
+
+
+<span class="enscript-comment">/*
+ * Set the data of an extended attribute.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_vnop_setxattr</span>(<span class="enscript-type">struct</span> vnop_setxattr_args *ap)
+<span class="enscript-comment">/*
+	struct vnop_setxattr_args {
+		struct vnodeop_desc *a_desc;
+		vnode_t a_vp;
+		char * a_name;
+		uio_t a_uio;
+		int a_options;
+		vfs_context_t a_context;
+	};
+*/</span>
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	<span class="enscript-type">struct</span> cnode *cp = NULL;
+	<span class="enscript-type">struct</span> hfsmount *hfsmp;
+	uio_t uio = ap-&gt;a_uio;
+	size_t attrsize;
+	<span class="enscript-type">void</span> * user_data_ptr = NULL;
+	<span class="enscript-type">int</span> result;
+	time_t orig_ctime=VTOC(vp)-&gt;c_ctime;
+
+	<span class="enscript-keyword">if</span> (ap-&gt;a_name == NULL || ap-&gt;a_name[0] == <span class="enscript-string">'\0'</span>) {
+		<span class="enscript-keyword">return</span> (EINVAL);  <span class="enscript-comment">/* invalid name */</span>
+	}
+	hfsmp = VTOHFS(vp);
+	<span class="enscript-keyword">if</span> (VNODE_IS_RSRC(vp)) {
+		<span class="enscript-keyword">return</span> (EPERM);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	<span class="enscript-keyword">if</span> (hfs_hides_xattr(ap-&gt;a_context, VTOC(vp), ap-&gt;a_name, 1) ) { <span class="enscript-comment">/* 1 == don't take the cnode lock */</span>
+		result = decmpfs_decompress_file(vp, VTOCMP(vp), -1, 1, 0);
+		<span class="enscript-keyword">if</span> (result != 0)
+			<span class="enscript-keyword">return</span> result;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+
+	check_for_tracked_file(vp, orig_ctime, NAMESPACE_HANDLER_METADATA_WRITE_OP, NSPACE_REARM_NO_ARG);
+	
+	<span class="enscript-comment">/* Set the Finder Info. */</span>
+	<span class="enscript-keyword">if</span> (bcmp(ap-&gt;a_name, XATTR_FINDERINFO_NAME, <span class="enscript-keyword">sizeof</span>(XATTR_FINDERINFO_NAME)) == 0) {
+		u_int8_t finderinfo[32];
+		<span class="enscript-type">struct</span> FndrFileInfo *fip;
+		<span class="enscript-type">void</span> * finderinfo_start;
+		u_int8_t *finfo = NULL;
+		u_int16_t fdFlags;
+		u_int32_t dateadded = 0;
+		u_int32_t write_gen_counter = 0;
+		u_int32_t document_id = 0;
+
+		attrsize = <span class="enscript-keyword">sizeof</span>(VTOC(vp)-&gt;c_finderinfo);
+
+		<span class="enscript-keyword">if</span> ((user_size_t)uio_resid(uio) != attrsize) {
+			<span class="enscript-keyword">return</span> (ERANGE);
+		}
+		<span class="enscript-comment">/* Grab the new Finder Info data. */</span>
+		<span class="enscript-keyword">if</span> ((result = uiomove((caddr_t)&amp;finderinfo , attrsize, uio))) {
+			<span class="enscript-keyword">return</span> (result);
+		}
+		fip = (<span class="enscript-type">struct</span> FndrFileInfo *)&amp;finderinfo;
+
+		<span class="enscript-keyword">if</span> ((result = hfs_lock(VTOC(vp), HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
+			<span class="enscript-keyword">return</span> (result);
+		}
+		cp = VTOC(vp);
+
+		<span class="enscript-comment">/* Symlink's don't have an external type/creator. */</span>
+		<span class="enscript-keyword">if</span> (vnode_islnk(vp)) {
+			<span class="enscript-comment">/* Skip over type/creator fields. */</span>
+			finderinfo_start = &amp;cp-&gt;c_finderinfo[8];
+			attrsize -= 8;
+		} <span class="enscript-keyword">else</span> {
+			finderinfo_start = &amp;cp-&gt;c_finderinfo[0];
+			<span class="enscript-comment">/*
+			 * Don't allow the external setting of
+			 * file type to kHardLinkFileType.
+			 */</span>
+			<span class="enscript-keyword">if</span> (fip-&gt;fdType == SWAP_BE32(kHardLinkFileType)) {
+				hfs_unlock(cp);
+				<span class="enscript-keyword">return</span> (EPERM);
+			} 
+		}
+
+		<span class="enscript-comment">/* Grab the current date added from the cnode */</span>
+		dateadded = hfs_get_dateadded (cp);
+		<span class="enscript-keyword">if</span> (S_ISREG(cp-&gt;c_attr.ca_mode) || S_ISLNK(cp-&gt;c_attr.ca_mode)) {
+			<span class="enscript-type">struct</span> FndrExtendedFileInfo *extinfo = (<span class="enscript-type">struct</span> FndrExtendedFileInfo *)((u_int8_t*)cp-&gt;c_finderinfo + 16);
+			<span class="enscript-comment">/* 
+			 * Grab generation counter directly from the cnode 
+			 * instead of calling hfs_get_gencount(), because 
+			 * for zero generation count values hfs_get_gencount() 
+			 * lies and bumps it up to one.
+			 */</span>
+			write_gen_counter = extinfo-&gt;write_gen_counter;
+			document_id = extinfo-&gt;document_id;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (S_ISDIR(cp-&gt;c_attr.ca_mode)) {
+			<span class="enscript-type">struct</span> FndrExtendedDirInfo *extinfo = (<span class="enscript-type">struct</span> FndrExtendedDirInfo *)((u_int8_t*)cp-&gt;c_finderinfo + 16);
+			write_gen_counter = extinfo-&gt;write_gen_counter;
+			document_id = extinfo-&gt;document_id;
+		}
+
+		<span class="enscript-comment">/* 
+		 * Zero out the finder info's reserved fields like date added, 
+		 * generation counter, and document id to ignore user's attempts 
+		 * to set it 
+		 */</span> 
+		hfs_zero_hidden_fields(cp, finderinfo);
+
+		<span class="enscript-keyword">if</span> (bcmp(finderinfo_start, emptyfinfo, attrsize)) {
+			<span class="enscript-comment">/* attr exists and &quot;create&quot; was specified. */</span>
+			<span class="enscript-keyword">if</span> (ap-&gt;a_options &amp; XATTR_CREATE) {
+				hfs_unlock(cp);
+				<span class="enscript-keyword">return</span> (EEXIST);
+			}
+		} <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* empty */</span>
+			<span class="enscript-comment">/* attr doesn't exists and &quot;replace&quot; was specified. */</span>
+			<span class="enscript-keyword">if</span> (ap-&gt;a_options &amp; XATTR_REPLACE) {
+				hfs_unlock(cp);
+				<span class="enscript-keyword">return</span> (ENOATTR);
+			}
+		}
+
+		<span class="enscript-comment">/* 
+		 * Now restore the date added and other reserved fields to the finderinfo to 
+		 * be written out.  Advance to the 2nd half of the finderinfo to write them 
+		 * out into the buffer.
+		 *
+		 * Make sure to endian swap the date added back into big endian.  When we used
+		 * hfs_get_dateadded above to retrieve it, it swapped into local endianness
+		 * for us.  But now that we're writing it out, put it back into big endian.
+		 */</span>
+		finfo = &amp;finderinfo[16];
+		<span class="enscript-keyword">if</span> (S_ISREG(cp-&gt;c_attr.ca_mode) || S_ISLNK(cp-&gt;c_attr.ca_mode)) {
+			<span class="enscript-type">struct</span> FndrExtendedFileInfo *extinfo = (<span class="enscript-type">struct</span> FndrExtendedFileInfo *)finfo;
+			extinfo-&gt;date_added = OSSwapHostToBigInt32(dateadded);
+			extinfo-&gt;write_gen_counter = write_gen_counter;
+			extinfo-&gt;document_id = document_id;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (S_ISDIR(cp-&gt;c_attr.ca_mode)) {
+			<span class="enscript-type">struct</span> FndrExtendedDirInfo *extinfo = (<span class="enscript-type">struct</span> FndrExtendedDirInfo *)finfo;
+			extinfo-&gt;date_added = OSSwapHostToBigInt32(dateadded);
+			extinfo-&gt;write_gen_counter = write_gen_counter;
+			extinfo-&gt;document_id = document_id;
+		}
+
+		<span class="enscript-comment">/* Set the cnode's Finder Info. */</span>
+		<span class="enscript-keyword">if</span> (attrsize == <span class="enscript-keyword">sizeof</span>(cp-&gt;c_finderinfo)) {
+			bcopy(&amp;finderinfo[0], finderinfo_start, attrsize);
+		} <span class="enscript-keyword">else</span> {
+			bcopy(&amp;finderinfo[8], finderinfo_start, attrsize);
+		}
+	
+		<span class="enscript-comment">/* Updating finderInfo updates change time and modified time */</span>
+		cp-&gt;c_touch_chgtime = TRUE;
+		cp-&gt;c_flag |= C_MODIFIED;
+
+		<span class="enscript-comment">/*
+		 * Mirror the invisible bit to the UF_HIDDEN flag.
+		 *
+		 * The fdFlags for files and frFlags for folders are both 8 bytes
+		 * into the userInfo (the first 16 bytes of the Finder Info).  They
+		 * are both 16-bit fields.
+		 */</span>
+		fdFlags = *((u_int16_t *) &amp;cp-&gt;c_finderinfo[8]);
+		<span class="enscript-keyword">if</span> (fdFlags &amp; OSSwapHostToBigConstInt16(kFinderInvisibleMask)) {
+			cp-&gt;c_bsdflags |= UF_HIDDEN;
+		} <span class="enscript-keyword">else</span> {
+			cp-&gt;c_bsdflags &amp;= ~UF_HIDDEN;
+		}
+
+		result = hfs_update(vp, 0);
+
+		hfs_unlock(cp);
+		<span class="enscript-keyword">return</span> (result);
+	}
+	<span class="enscript-comment">/* Write the Resource Fork. */</span>
+	<span class="enscript-keyword">if</span> (bcmp(ap-&gt;a_name, XATTR_RESOURCEFORK_NAME, <span class="enscript-keyword">sizeof</span>(XATTR_RESOURCEFORK_NAME)) == 0) {
+		<span class="enscript-type">struct</span> vnode *rvp = NULL;
+		<span class="enscript-type">int</span> namelen = 0;
+		<span class="enscript-type">int</span> openunlinked = 0;
+
+		<span class="enscript-keyword">if</span> (!vnode_isreg(vp)) {
+			<span class="enscript-keyword">return</span> (EPERM);
+		}
+		<span class="enscript-keyword">if</span> ((result = hfs_lock(VTOC(vp), HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
+			<span class="enscript-keyword">return</span> (result);
+		}
+		cp = VTOC(vp);
+		namelen = cp-&gt;c_desc.cd_namelen;
+
+		<span class="enscript-keyword">if</span> (hfs_has_rsrc(cp)) {
+			<span class="enscript-comment">/* attr exists and &quot;create&quot; was specified. */</span>
+			<span class="enscript-keyword">if</span> (ap-&gt;a_options &amp; XATTR_CREATE) {
+				hfs_unlock(cp);
+				<span class="enscript-keyword">return</span> (EEXIST);
+			}
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* attr doesn't exists and &quot;replace&quot; was specified. */</span>
+			<span class="enscript-keyword">if</span> (ap-&gt;a_options &amp; XATTR_REPLACE) {
+				hfs_unlock(cp);
+				<span class="enscript-keyword">return</span> (ENOATTR);
+			}
+		}
+		
+		<span class="enscript-comment">/*
+		 * Note that we could be called on to grab the rsrc fork vnode
+		 * for a file that has become open-unlinked.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((cp-&gt;c_flag &amp; C_DELETED) &amp;&amp; (namelen == 0)) {
+			openunlinked = 1;
+		}
+
+		result = hfs_vgetrsrc(hfsmp, vp, &amp;rvp);
+		hfs_unlock(cp);
+		<span class="enscript-keyword">if</span> (result) {
+			<span class="enscript-keyword">return</span> (result);
+		}
+		<span class="enscript-comment">/* VNOP_WRITE marks cnode as needing a modtime update */</span>
+		result = VNOP_WRITE(rvp, uio, 0, ap-&gt;a_context);
+		
+		<span class="enscript-comment">/* if open unlinked, force it inactive */</span>
+		<span class="enscript-keyword">if</span> (openunlinked) {
+			<span class="enscript-type">int</span> vref;
+			vref = vnode_ref (rvp);
+			<span class="enscript-keyword">if</span> (vref == 0) {
+				vnode_rele(rvp);
+			}
+			vnode_recycle (rvp);	
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* cnode is not open-unlinked, so re-lock cnode to sync */</span>
+			<span class="enscript-keyword">if</span> ((result = hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
+				vnode_recycle (rvp);
+				vnode_put(rvp);
+				<span class="enscript-keyword">return</span> result;
+			}
+			
+			<span class="enscript-comment">/* hfs fsync rsrc fork to force to disk and update modtime */</span>
+			result = hfs_fsync (rvp, MNT_NOWAIT, 0, vfs_context_proc (ap-&gt;a_context));
+			hfs_unlock (cp);
+		}
+
+		vnode_put(rvp);
+		<span class="enscript-keyword">return</span> (result);
+	}
+	<span class="enscript-comment">/*
+	 * Standard HFS only supports native FinderInfo and Resource Forks.
+	 */</span>
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_flags &amp; HFS_STANDARD) {
+		<span class="enscript-keyword">return</span> (EPERM);
+	}
+	attrsize = uio_resid(uio);
+
+	<span class="enscript-comment">/* Enforce an upper limit. */</span>
+	<span class="enscript-keyword">if</span> (attrsize &gt; HFS_XATTR_MAXSIZE) {
+		result = E2BIG;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Attempt to copy the users attr data before taking any locks,
+	 * only if it will be an inline attribute.  For larger attributes, 
+	 * the data will be directly read from the uio.
+	 */</span>
+	<span class="enscript-keyword">if</span> (attrsize &gt; 0 &amp;&amp;
+	    hfsmp-&gt;hfs_max_inline_attrsize != 0 &amp;&amp;
+	    attrsize &lt; hfsmp-&gt;hfs_max_inline_attrsize) {
+		MALLOC(user_data_ptr, <span class="enscript-type">void</span> *, attrsize, M_TEMP, M_WAITOK);
+		<span class="enscript-keyword">if</span> (user_data_ptr == NULL) {
+			result = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+		}
+
+		result = uiomove((caddr_t)user_data_ptr, attrsize, uio);
+		<span class="enscript-keyword">if</span> (result) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+		}
+	}
+
+	result = hfs_lock(VTOC(vp), HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
+	<span class="enscript-keyword">if</span> (result) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	cp = VTOC(vp);
+	
+	<span class="enscript-comment">/* 
+	 * If we're trying to set a non-finderinfo, non-resourcefork EA, then
+	 * call the breakout function.
+	 */</span>
+	result = hfs_setxattr_internal (cp, user_data_ptr, attrsize, ap, VTOHFS(vp), 0);
+
+ <span class="enscript-reference">exit</span>:
+	<span class="enscript-keyword">if</span> (cp) {
+		hfs_unlock(cp);
+	}
+	<span class="enscript-keyword">if</span> (user_data_ptr) {
+		FREE(user_data_ptr, M_TEMP);
+	}
+
+	<span class="enscript-keyword">return</span> (result == btNotFound ? ENOATTR : MacToVFSError(result));
+}
+
+<span class="enscript-comment">// Has same limitations as hfs_setxattr_internal below
+</span><span class="enscript-type">int</span> <span class="enscript-function-name">hfs_xattr_write</span>(vnode_t vp, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *data, size_t size)
+{
+	<span class="enscript-type">struct</span> vnop_setxattr_args args = {
+		.a_vp 	= vp,
+		.a_name = name,
+	};
+
+	<span class="enscript-keyword">return</span> hfs_setxattr_internal(VTOC(vp), data, size, &amp;args, VTOHFS(vp), 0);
+}
+
+<span class="enscript-comment">/*
+ * hfs_setxattr_internal
+ * 
+ * Internal function to set non-rsrc, non-finderinfo EAs to either the attribute B-Tree or
+ * extent-based EAs.
+ *
+ * See comments from hfs_getxattr_internal on why we need to pass 'hfsmp' and fileid here.
+ * The gist is that we could end up writing to the root folder which may not have a cnode.
+ *
+ * Assumptions: 
+ *		1. cnode 'cp' is locked EXCLUSIVE before calling this function.
+ *		2. data_ptr contains data to be written.  If gathering data from userland, this must be
+ *			done before calling this function.  
+ *		3. If data originates entirely in-kernel, use a null UIO, and ensure the size is less than 
+ *			hfsmp-&gt;hfs_max_inline_attrsize bytes long. 
+ */</span> 
+<span class="enscript-type">int</span> <span class="enscript-function-name">hfs_setxattr_internal</span> (<span class="enscript-type">struct</span> cnode *cp, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *data_ptr, size_t attrsize,
+						   <span class="enscript-type">struct</span> vnop_setxattr_args *ap, <span class="enscript-type">struct</span> hfsmount *hfsmp, 
+						   u_int32_t fileid) 
+{
+	uio_t uio = ap-&gt;a_uio;
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	<span class="enscript-type">int</span> started_transaction = 0;
+	<span class="enscript-type">struct</span> BTreeIterator * iterator = NULL;
+	<span class="enscript-type">struct</span> filefork *btfile = NULL;
+	FSBufferDescriptor btdata;
+	HFSPlusAttrRecord attrdata;  <span class="enscript-comment">/* 90 bytes */</span>
+	HFSPlusAttrRecord *recp = NULL;
+	HFSPlusExtentDescriptor *extentptr = NULL;
+	<span class="enscript-type">int</span> result = 0;
+	<span class="enscript-type">int</span> lockflags = 0;
+	<span class="enscript-type">int</span> exists = 0;
+	<span class="enscript-type">int</span> allocatedblks = 0;
+	u_int32_t target_id;
+
+	<span class="enscript-keyword">if</span> (cp) {
+		target_id = cp-&gt;c_fileid;
+	} <span class="enscript-keyword">else</span> {
+		target_id = fileid;
+	}
+	
+	<span class="enscript-comment">/* Start a transaction for our changes. */</span>
+	<span class="enscript-keyword">if</span> (hfs_start_transaction(hfsmp) != 0) {
+	    result = EINVAL;
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	started_transaction = 1;
+	
+	<span class="enscript-comment">/*
+	 * Once we started the transaction, nobody can compete
+	 * with us, so make sure this file is still there.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((cp) &amp;&amp; (cp-&gt;c_flag &amp; C_NOEXISTS)) {
+		result = ENOENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	
+	<span class="enscript-comment">/*
+	 * If there isn't an attributes b-tree then create one.
+	 */</span>
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_attribute_vp == NULL) {
+		result = hfs_create_attr_btree(hfsmp, ATTRIBUTE_FILE_NODE_SIZE,
+		                               getnodecount(hfsmp, ATTRIBUTE_FILE_NODE_SIZE));
+		<span class="enscript-keyword">if</span> (result) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_max_inline_attrsize == 0) {
+		hfsmp-&gt;hfs_max_inline_attrsize = getmaxinlineattrsize(hfsmp-&gt;hfs_attribute_vp);
+	}
+
+	lockflags = hfs_systemfile_lock(hfsmp, SFL_ATTRIBUTE, HFS_EXCLUSIVE_LOCK);
+
+	<span class="enscript-comment">/* Build the b-tree key. */</span>
+	MALLOC(iterator, BTreeIterator *, <span class="enscript-keyword">sizeof</span>(*iterator), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (iterator == NULL) {
+		result = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	bzero(iterator, <span class="enscript-keyword">sizeof</span>(*iterator));
+	result = hfs_buildattrkey(target_id, ap-&gt;a_name, (HFSPlusAttrKey *)&amp;iterator-&gt;key);
+	<span class="enscript-keyword">if</span> (result) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	
+	<span class="enscript-comment">/* Preflight for replace/create semantics. */</span>
+	btfile = VTOF(hfsmp-&gt;hfs_attribute_vp);
+	btdata.bufferAddress = &amp;attrdata;
+	btdata.itemSize = <span class="enscript-keyword">sizeof</span>(attrdata);
+	btdata.itemCount = 1;
+	exists = BTSearchRecord(btfile, iterator, &amp;btdata, NULL, NULL) == 0;
+	
+	<span class="enscript-comment">/* Replace requires that the attribute already exists. */</span>
+	<span class="enscript-keyword">if</span> ((ap-&gt;a_options &amp; XATTR_REPLACE) &amp;&amp; !exists) {
+		result = ENOATTR;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;	
+	}
+	<span class="enscript-comment">/* Create requires that the attribute doesn't exist. */</span>
+	<span class="enscript-keyword">if</span> ((ap-&gt;a_options &amp; XATTR_CREATE) &amp;&amp; exists) {
+		result = EEXIST;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;	
+	}
+	
+	<span class="enscript-comment">/* If it won't fit inline then use extent-based attributes. */</span>
+	<span class="enscript-keyword">if</span> (attrsize &gt; hfsmp-&gt;hfs_max_inline_attrsize) {
+		size_t extentbufsize;
+		<span class="enscript-type">int</span> blkcnt;
+		<span class="enscript-type">int</span> extentblks;
+		u_int32_t *keystartblk;
+		<span class="enscript-type">int</span> i;
+		
+		<span class="enscript-keyword">if</span> (uio == NULL) {
+			<span class="enscript-comment">/*
+			 * setxattrs originating from in-kernel are not supported if they are bigger
+			 * than the inline max size. Just return ENOATTR and force them to do it with a
+			 * smaller EA.
+			 */</span>
+			result = EPERM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+		}
+		
+		<span class="enscript-comment">/* Get some blocks. */</span>
+		blkcnt = howmany(attrsize, hfsmp-&gt;blockSize);
+		extentbufsize = blkcnt * <span class="enscript-keyword">sizeof</span>(HFSPlusExtentDescriptor);
+		extentbufsize = roundup(extentbufsize, <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord));
+		MALLOC(extentptr, HFSPlusExtentDescriptor *, extentbufsize, M_TEMP, M_WAITOK);
+		<span class="enscript-keyword">if</span> (extentptr == NULL) {
+			result = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+		}
+		bzero(extentptr, extentbufsize);
+		result = alloc_attr_blks(hfsmp, attrsize, extentbufsize, extentptr, &amp;allocatedblks);
+		<span class="enscript-keyword">if</span> (result) {
+			allocatedblks = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;  <span class="enscript-comment">/* no more space */</span>
+		}
+		<span class="enscript-comment">/* Copy data into the blocks. */</span>
+		result = write_attr_data(hfsmp, uio, attrsize, extentptr);
+		<span class="enscript-keyword">if</span> (result) {
+			<span class="enscript-keyword">if</span> (vp) {
+				<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name = vnode_getname(vp);
+				printf(<span class="enscript-string">&quot;hfs_setxattr: write_attr_data vol=%s err (%d) %s:%s\n&quot;</span>,
+						hfsmp-&gt;vcbVN, result,  name ? name : <span class="enscript-string">&quot;&quot;</span>, ap-&gt;a_name);
+				<span class="enscript-keyword">if</span> (name)
+					vnode_putname(name);
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+		}
+
+		<span class="enscript-comment">/* Now remove any previous attribute. */</span>
+		<span class="enscript-keyword">if</span> (exists) {
+			result = remove_attribute_records(hfsmp, iterator);
+			<span class="enscript-keyword">if</span> (result) {
+				<span class="enscript-keyword">if</span> (vp) {
+					<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name = vnode_getname(vp);
+					printf(<span class="enscript-string">&quot;hfs_setxattr: remove_attribute_records vol=%s err (%d) %s:%s\n&quot;</span>,
+							hfsmp-&gt;vcbVN, result, name ? name : <span class="enscript-string">&quot;&quot;</span>, ap-&gt;a_name);
+					<span class="enscript-keyword">if</span> (name)
+						vnode_putname(name);
+				}
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+			}
+		}
+		<span class="enscript-comment">/* Create attribute fork data record. */</span>
+		MALLOC(recp, HFSPlusAttrRecord *, <span class="enscript-keyword">sizeof</span>(HFSPlusAttrRecord), M_TEMP, M_WAITOK);
+		<span class="enscript-keyword">if</span> (recp == NULL) {
+			result = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+		}
+		btdata.bufferAddress = recp;
+		btdata.itemCount = 1;
+		btdata.itemSize = <span class="enscript-keyword">sizeof</span>(HFSPlusAttrForkData);
+		
+		recp-&gt;recordType = kHFSPlusAttrForkData;
+		recp-&gt;forkData.reserved = 0;
+		recp-&gt;forkData.theFork.logicalSize = attrsize;
+		recp-&gt;forkData.theFork.clumpSize = 0;
+		recp-&gt;forkData.theFork.totalBlocks = blkcnt;
+		bcopy(extentptr, recp-&gt;forkData.theFork.extents, <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord));
+		
+		(<span class="enscript-type">void</span>) hfs_buildattrkey(target_id, ap-&gt;a_name, (HFSPlusAttrKey *)&amp;iterator-&gt;key);
+		
+		result = BTInsertRecord(btfile, iterator, &amp;btdata, btdata.itemSize);
+		<span class="enscript-keyword">if</span> (result) {
+			printf (<span class="enscript-string">&quot;hfs_setxattr: BTInsertRecord(): vol=%s %d,%s err=%d\n&quot;</span>, 
+					hfsmp-&gt;vcbVN, target_id, ap-&gt;a_name, result);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>; 
+		}
+		extentblks = count_extent_blocks(blkcnt, recp-&gt;forkData.theFork.extents);
+		blkcnt -= extentblks;
+		keystartblk = &amp;((HFSPlusAttrKey *)&amp;iterator-&gt;key)-&gt;startBlock;
+		i = 0;
+		
+		<span class="enscript-comment">/* Create overflow extents as needed. */</span>
+		<span class="enscript-keyword">while</span> (blkcnt &gt; 0) {
+			<span class="enscript-comment">/* Initialize the key and record. */</span>
+			*keystartblk += (u_int32_t)extentblks;
+			btdata.itemSize = <span class="enscript-keyword">sizeof</span>(HFSPlusAttrExtents);
+			recp-&gt;recordType = kHFSPlusAttrExtents;
+			recp-&gt;overflowExtents.reserved = 0;
+			
+			<span class="enscript-comment">/* Copy the next set of extents. */</span>
+			i += kHFSPlusExtentDensity;
+			bcopy(&amp;extentptr[i], recp-&gt;overflowExtents.extents, <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord));
+			
+			result = BTInsertRecord(btfile, iterator, &amp;btdata, btdata.itemSize);
+			<span class="enscript-keyword">if</span> (result) {
+				printf (<span class="enscript-string">&quot;hfs_setxattr: BTInsertRecord() overflow: vol=%s %d,%s err=%d\n&quot;</span>, 
+						hfsmp-&gt;vcbVN, target_id, ap-&gt;a_name, result);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+			}
+			extentblks = count_extent_blocks(blkcnt, recp-&gt;overflowExtents.extents);
+			blkcnt -= extentblks;
+		}
+	} <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* Inline data */</span> 
+		<span class="enscript-keyword">if</span> (exists) {
+			result = remove_attribute_records(hfsmp, iterator);
+			<span class="enscript-keyword">if</span> (result) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+			}
+		}
+		
+		<span class="enscript-comment">/* Calculate size of record rounded up to multiple of 2 bytes. */</span>
+		btdata.itemSize = <span class="enscript-keyword">sizeof</span>(HFSPlusAttrData) - 2 + attrsize + ((attrsize &amp; 1) ? 1 : 0);
+		MALLOC(recp, HFSPlusAttrRecord *, btdata.itemSize, M_TEMP, M_WAITOK);
+		<span class="enscript-keyword">if</span> (recp == NULL) {
+			result = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+		}
+		recp-&gt;recordType = kHFSPlusAttrInlineData;
+		recp-&gt;attrData.reserved[0] = 0;
+		recp-&gt;attrData.reserved[1] = 0;
+		recp-&gt;attrData.attrSize = attrsize;
+		
+		<span class="enscript-comment">/* Copy in the attribute data (if any). */</span>
+		<span class="enscript-keyword">if</span> (attrsize &gt; 0) {
+			<span class="enscript-keyword">if</span> (data_ptr) {
+				bcopy(data_ptr, &amp;recp-&gt;attrData.attrData, attrsize);
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* 
+				 * A null UIO meant it originated in-kernel.  If they didn't supply data_ptr 
+				 * then deny the copy operation.
+				 */</span>
+				<span class="enscript-keyword">if</span> (uio == NULL) {
+					result = EPERM;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+				}
+				result = uiomove((caddr_t)&amp;recp-&gt;attrData.attrData, attrsize, uio);
+			}
+			
+			<span class="enscript-keyword">if</span> (result) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+			}
+		}
+		
+		(<span class="enscript-type">void</span>) hfs_buildattrkey(target_id, ap-&gt;a_name, (HFSPlusAttrKey *)&amp;iterator-&gt;key);
+		
+		btdata.bufferAddress = recp;
+		btdata.itemCount = 1;
+		result = BTInsertRecord(btfile, iterator, &amp;btdata, btdata.itemSize);
+	}
+	
+<span class="enscript-reference">exit</span>:
+	<span class="enscript-keyword">if</span> (btfile &amp;&amp; started_transaction) {
+		(<span class="enscript-type">void</span>) BTFlushPath(btfile);
+	}
+	hfs_systemfile_unlock(hfsmp, lockflags);
+	<span class="enscript-keyword">if</span> (result == 0) {
+		<span class="enscript-keyword">if</span> (vp) {
+			cp = VTOC(vp);
+			<span class="enscript-comment">/* Setting an attribute only updates change time and not 
+			 * modified time of the file.
+			 */</span>
+			cp-&gt;c_touch_chgtime = TRUE;
+			cp-&gt;c_flag |= C_MODIFIED;
+			cp-&gt;c_attr.ca_recflags |= kHFSHasAttributesMask;
+			<span class="enscript-keyword">if</span> ((bcmp(ap-&gt;a_name, KAUTH_FILESEC_XATTR, <span class="enscript-keyword">sizeof</span>(KAUTH_FILESEC_XATTR)) == 0)) {
+				cp-&gt;c_attr.ca_recflags |= kHFSHasSecurityMask;
+			}
+			(<span class="enscript-type">void</span>) hfs_update(vp, 0);
+		}
+	}
+	<span class="enscript-keyword">if</span> (started_transaction) {
+		<span class="enscript-keyword">if</span> (result &amp;&amp; allocatedblks) {
+			free_attr_blks(hfsmp, allocatedblks, extentptr);
+		}
+		hfs_end_transaction(hfsmp);
+	}
+	
+	<span class="enscript-keyword">if</span> (recp) {
+		FREE(recp, M_TEMP);
+	}
+	<span class="enscript-keyword">if</span> (extentptr) {
+		FREE(extentptr, M_TEMP);
+	}
+	<span class="enscript-keyword">if</span> (iterator) {
+		FREE(iterator, M_TEMP);
+	}
+	
+	<span class="enscript-keyword">return</span> result;	
+}
+
+
+
+
+<span class="enscript-comment">/*
+ * Remove an extended attribute.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_vnop_removexattr</span>(<span class="enscript-type">struct</span> vnop_removexattr_args *ap)
+<span class="enscript-comment">/*
+	struct vnop_removexattr_args {
+		struct vnodeop_desc *a_desc;
+		vnode_t a_vp;
+		char * a_name;
+		int a_options;
+		vfs_context_t a_context;
+	};
+*/</span>
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	<span class="enscript-type">struct</span> cnode *cp = VTOC(vp);
+	<span class="enscript-type">struct</span> hfsmount *hfsmp;
+	<span class="enscript-type">struct</span> BTreeIterator * iterator = NULL;
+	<span class="enscript-type">int</span> lockflags;
+	<span class="enscript-type">int</span> result;
+	time_t orig_ctime=VTOC(vp)-&gt;c_ctime;
+
+	<span class="enscript-keyword">if</span> (ap-&gt;a_name == NULL || ap-&gt;a_name[0] == <span class="enscript-string">'\0'</span>) {
+		<span class="enscript-keyword">return</span> (EINVAL);  <span class="enscript-comment">/* invalid name */</span>
+	}
+	hfsmp = VTOHFS(vp);
+	<span class="enscript-keyword">if</span> (VNODE_IS_RSRC(vp)) {
+		<span class="enscript-keyword">return</span> (EPERM);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	<span class="enscript-keyword">if</span> (hfs_hides_xattr(ap-&gt;a_context, VTOC(vp), ap-&gt;a_name, 1) &amp;&amp; !(ap-&gt;a_options &amp; XATTR_SHOWCOMPRESSION)) {
+		<span class="enscript-keyword">return</span> ENOATTR;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+
+	check_for_tracked_file(vp, orig_ctime, NAMESPACE_HANDLER_METADATA_DELETE_OP, NSPACE_REARM_NO_ARG);
+	
+	<span class="enscript-comment">/* If Resource Fork is non-empty then truncate it. */</span>
+	<span class="enscript-keyword">if</span> (bcmp(ap-&gt;a_name, XATTR_RESOURCEFORK_NAME, <span class="enscript-keyword">sizeof</span>(XATTR_RESOURCEFORK_NAME)) == 0) {
+		<span class="enscript-type">struct</span> vnode *rvp = NULL;
+
+		<span class="enscript-keyword">if</span> ( !vnode_isreg(vp) ) {
+			<span class="enscript-keyword">return</span> (EPERM);
+		}
+		<span class="enscript-keyword">if</span> ((result = hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
+			<span class="enscript-keyword">return</span> (result);
+		}
+		<span class="enscript-keyword">if</span> (!hfs_has_rsrc(cp)) {
+			hfs_unlock(cp);
+			<span class="enscript-keyword">return</span> (ENOATTR);
+		}
+		result = hfs_vgetrsrc(hfsmp, vp, &amp;rvp);
+		hfs_unlock(cp);
+		<span class="enscript-keyword">if</span> (result) {
+			<span class="enscript-keyword">return</span> (result);
+		}
+
+		hfs_lock_truncate(VTOC(rvp), HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
+
+		<span class="enscript-comment">// Tell UBC now before we take the cnode lock and start the transaction
+</span>		hfs_ubc_setsize(rvp, 0, false);
+
+		<span class="enscript-keyword">if</span> ((result = hfs_lock(VTOC(rvp), HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
+			hfs_unlock_truncate(cp, HFS_LOCK_DEFAULT);
+			vnode_put(rvp);
+			<span class="enscript-keyword">return</span> (result);
+		}
+
+		<span class="enscript-comment">/* Start a transaction for encapsulating changes in 
+		 * hfs_truncate() and hfs_update()
+		 */</span>
+		<span class="enscript-keyword">if</span> ((result = hfs_start_transaction(hfsmp))) {
+			hfs_unlock_truncate(cp, HFS_LOCK_DEFAULT);
+			hfs_unlock(cp);
+			vnode_put(rvp);
+			<span class="enscript-keyword">return</span> (result);
+		}
+
+		result = hfs_truncate(rvp, (off_t)0, IO_NDELAY, 0, ap-&gt;a_context);
+		<span class="enscript-keyword">if</span> (result == 0) {
+			cp-&gt;c_touch_chgtime = TRUE;
+			cp-&gt;c_flag |= C_MODIFIED;
+			result = hfs_update(vp, 0);
+		}
+
+		hfs_end_transaction(hfsmp);
+		hfs_unlock_truncate(VTOC(rvp), HFS_LOCK_DEFAULT);
+		hfs_unlock(VTOC(rvp));
+
+		vnode_put(rvp);
+		<span class="enscript-keyword">return</span> (result);
+	}
+	<span class="enscript-comment">/* Clear out the Finder Info. */</span>
+	<span class="enscript-keyword">if</span> (bcmp(ap-&gt;a_name, XATTR_FINDERINFO_NAME, <span class="enscript-keyword">sizeof</span>(XATTR_FINDERINFO_NAME)) == 0) {
+		<span class="enscript-type">void</span> * finderinfo_start;
+		<span class="enscript-type">int</span> finderinfo_size;
+		u_int8_t finderinfo[32];
+		u_int32_t date_added, write_gen_counter, document_id;
+		u_int8_t *finfo = NULL;
+        
+		<span class="enscript-keyword">if</span> ((result = hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
+			<span class="enscript-keyword">return</span> (result);
+		}
+		
+		<span class="enscript-comment">/* Use the local copy to store our temporary changes. */</span>
+		bcopy(cp-&gt;c_finderinfo, finderinfo, <span class="enscript-keyword">sizeof</span>(finderinfo));
+		
+		
+		<span class="enscript-comment">/* Zero out the date added field in the local copy */</span>
+		hfs_zero_hidden_fields (cp, finderinfo);
+		
+		<span class="enscript-comment">/* Don't expose a symlink's private type/creator. */</span>
+		<span class="enscript-keyword">if</span> (vnode_islnk(vp)) {
+			<span class="enscript-type">struct</span> FndrFileInfo *fip;
+			
+			fip = (<span class="enscript-type">struct</span> FndrFileInfo *)&amp;finderinfo;
+			fip-&gt;fdType = 0;
+			fip-&gt;fdCreator = 0;
+		}
+		
+		<span class="enscript-comment">/* Do the byte compare against the local copy */</span>
+		<span class="enscript-keyword">if</span> (bcmp(finderinfo, emptyfinfo, <span class="enscript-keyword">sizeof</span>(emptyfinfo)) == 0) {
+            hfs_unlock(cp);
+			<span class="enscript-keyword">return</span> (ENOATTR);
+		}
+		
+		<span class="enscript-comment">/* 
+		 * If there was other content, zero out everything except 
+		 * type/creator and date added.  First, save the date added.
+		 */</span>
+		finfo = cp-&gt;c_finderinfo;
+		finfo = finfo + 16;
+		<span class="enscript-keyword">if</span> (S_ISREG(cp-&gt;c_attr.ca_mode) || S_ISLNK(cp-&gt;c_attr.ca_mode)) {
+			<span class="enscript-type">struct</span> FndrExtendedFileInfo *extinfo = (<span class="enscript-type">struct</span> FndrExtendedFileInfo *)finfo;
+			date_added = extinfo-&gt;date_added;
+			write_gen_counter = extinfo-&gt;write_gen_counter;
+			document_id = extinfo-&gt;document_id;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (S_ISDIR(cp-&gt;c_attr.ca_mode)) {
+			<span class="enscript-type">struct</span> FndrExtendedDirInfo *extinfo = (<span class="enscript-type">struct</span> FndrExtendedDirInfo *)finfo;
+			date_added = extinfo-&gt;date_added;
+			write_gen_counter = extinfo-&gt;write_gen_counter;
+			document_id = extinfo-&gt;document_id;
+		}
+		
+		<span class="enscript-keyword">if</span> (vnode_islnk(vp)) {
+			<span class="enscript-comment">/* Ignore type/creator */</span>
+			finderinfo_start = &amp;cp-&gt;c_finderinfo[8];
+			finderinfo_size = <span class="enscript-keyword">sizeof</span>(cp-&gt;c_finderinfo) - 8;
+		} <span class="enscript-keyword">else</span> {
+			finderinfo_start = &amp;cp-&gt;c_finderinfo[0];
+			finderinfo_size = <span class="enscript-keyword">sizeof</span>(cp-&gt;c_finderinfo);
+		}
+		bzero(finderinfo_start, finderinfo_size);
+		
+		
+		<span class="enscript-comment">/* Now restore the date added */</span>
+		<span class="enscript-keyword">if</span> (S_ISREG(cp-&gt;c_attr.ca_mode) || S_ISLNK(cp-&gt;c_attr.ca_mode)) {
+			<span class="enscript-type">struct</span> FndrExtendedFileInfo *extinfo = (<span class="enscript-type">struct</span> FndrExtendedFileInfo *)finfo;
+			extinfo-&gt;date_added = date_added;
+			extinfo-&gt;write_gen_counter = write_gen_counter;
+			extinfo-&gt;document_id = document_id;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (S_ISDIR(cp-&gt;c_attr.ca_mode)) {
+			<span class="enscript-type">struct</span> FndrExtendedDirInfo *extinfo = (<span class="enscript-type">struct</span> FndrExtendedDirInfo *)finfo;
+			extinfo-&gt;date_added = date_added;
+			extinfo-&gt;write_gen_counter = write_gen_counter;
+			extinfo-&gt;document_id = document_id;
+		}
+        
+		<span class="enscript-comment">/* Updating finderInfo updates change time and modified time */</span>
+		cp-&gt;c_touch_chgtime = TRUE;
+		cp-&gt;c_flag |= C_MODIFIED;
+		hfs_update(vp, 0);
+        
+		hfs_unlock(cp);
+        
+		<span class="enscript-keyword">return</span> (0);
+	}
+	<span class="enscript-comment">/*
+	 * Standard HFS only supports native FinderInfo and Resource Forks.
+	 */</span>
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_flags &amp; HFS_STANDARD) {
+		<span class="enscript-keyword">return</span> (EPERM);
+	}
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_attribute_vp == NULL) {
+		<span class="enscript-keyword">return</span> (ENOATTR);
+	}
+
+	MALLOC(iterator, BTreeIterator *, <span class="enscript-keyword">sizeof</span>(*iterator), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (iterator == NULL) {
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+	bzero(iterator, <span class="enscript-keyword">sizeof</span>(*iterator));
+
+	<span class="enscript-keyword">if</span> ((result = hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit_nolock</span>;
+	}
+
+	result = hfs_buildattrkey(cp-&gt;c_fileid, ap-&gt;a_name, (HFSPlusAttrKey *)&amp;iterator-&gt;key);
+	<span class="enscript-keyword">if</span> (result) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;	
+	}
+
+	<span class="enscript-keyword">if</span> (hfs_start_transaction(hfsmp) != 0) {
+	    result = EINVAL;
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	lockflags = hfs_systemfile_lock(hfsmp, SFL_ATTRIBUTE | SFL_BITMAP, HFS_EXCLUSIVE_LOCK);
+	
+	result = remove_attribute_records(hfsmp, iterator);
+
+	hfs_systemfile_unlock(hfsmp, lockflags);
+
+	<span class="enscript-keyword">if</span> (result == 0) {
+		cp-&gt;c_touch_chgtime = TRUE;
+
+		lockflags = hfs_systemfile_lock(hfsmp, SFL_ATTRIBUTE, HFS_SHARED_LOCK);
+
+		<span class="enscript-comment">/* If no more attributes exist, clear attribute bit */</span>
+		result = file_attribute_exist(hfsmp, cp-&gt;c_fileid);
+		<span class="enscript-keyword">if</span> (result == 0) {
+			cp-&gt;c_attr.ca_recflags &amp;= ~kHFSHasAttributesMask;
+			cp-&gt;c_flag |= C_MODIFIED;
+		}
+		<span class="enscript-keyword">if</span> (result == EEXIST) {
+			result = 0;
+		}
+
+		hfs_systemfile_unlock(hfsmp, lockflags);
+
+		<span class="enscript-comment">/* If ACL was removed, clear security bit */</span>
+		<span class="enscript-keyword">if</span> ((bcmp(ap-&gt;a_name, KAUTH_FILESEC_XATTR, <span class="enscript-keyword">sizeof</span>(KAUTH_FILESEC_XATTR)) == 0)) {
+			cp-&gt;c_attr.ca_recflags &amp;= ~kHFSHasSecurityMask;
+			cp-&gt;c_flag |= C_MODIFIED;
+		}
+		(<span class="enscript-type">void</span>) hfs_update(vp, 0);
+	}
+
+	hfs_end_transaction(hfsmp);
+<span class="enscript-reference">exit</span>:
+	hfs_unlock(cp);
+<span class="enscript-reference">exit_nolock</span>:
+	FREE(iterator, M_TEMP);
+	<span class="enscript-keyword">return</span> MacToVFSError(result);
+}
+
+<span class="enscript-comment">/* Check if any attribute record exist for given fileID.  This function 
+ * is called by hfs_vnop_removexattr to determine if it should clear the 
+ * attribute bit in the catalog record or not.
+ * 
+ * Note - you must acquire a shared lock on the attribute btree before
+ *        calling this function.
+ * 
+ * Output: 
+ * 	EEXIST	- If attribute record was found
+ *	0	- Attribute was not found
+ *	(other)	- Other error (such as EIO) 
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">file_attribute_exist</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, uint32_t fileID)
+{
+	HFSPlusAttrKey *key;
+	<span class="enscript-type">struct</span> BTreeIterator * iterator = NULL;
+	<span class="enscript-type">struct</span> filefork *btfile;
+	<span class="enscript-type">int</span> result = 0;
+
+	<span class="enscript-comment">// if there's no attribute b-tree we sure as heck
+</span>	<span class="enscript-comment">// can't have any attributes!
+</span>	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_attribute_vp == NULL) {
+	    <span class="enscript-keyword">return</span> false;
+	}
+
+	MALLOC(iterator, BTreeIterator *, <span class="enscript-keyword">sizeof</span>(*iterator), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (iterator == NULL) {
+		result = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	} 
+	bzero(iterator, <span class="enscript-keyword">sizeof</span>(*iterator));
+	key = (HFSPlusAttrKey *)&amp;iterator-&gt;key;
+
+	result = hfs_buildattrkey(fileID, NULL, key);
+	<span class="enscript-keyword">if</span> (result) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	btfile = VTOF(hfsmp-&gt;hfs_attribute_vp);
+	result = BTSearchRecord(btfile, iterator, NULL, NULL, NULL);
+	<span class="enscript-keyword">if</span> (result &amp;&amp; (result != btNotFound)) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	result = BTIterateRecord(btfile, kBTreeNextRecord, iterator, NULL, NULL);
+	<span class="enscript-comment">/* If no next record was found or fileID for next record did not match,
+	 * no more attributes exist for this fileID
+	 */</span>
+	<span class="enscript-keyword">if</span> ((result &amp;&amp; (result == btNotFound)) || (key-&gt;fileID != fileID)) {
+		result = 0;	
+	} <span class="enscript-keyword">else</span> {
+		result = EEXIST;
+	}
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (iterator) {
+		FREE(iterator, M_TEMP);
+	}
+	<span class="enscript-keyword">return</span> result;
+}
+
+
+<span class="enscript-comment">/*
+ * Remove all the records for a given attribute.
+ *
+ * - Used by hfs_vnop_removexattr, hfs_vnop_setxattr and hfs_removeallattr.
+ * - A transaction must have been started.
+ * - The Attribute b-tree file must be locked exclusive.
+ * - The Allocation Bitmap file must be locked exclusive.
+ * - The iterator key must be initialized.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">remove_attribute_records</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, BTreeIterator * iterator)
+{
+	<span class="enscript-type">struct</span> filefork *btfile;
+	FSBufferDescriptor btdata;
+	HFSPlusAttrRecord attrdata;  <span class="enscript-comment">/* 90 bytes */</span>
+	u_int16_t datasize;
+	<span class="enscript-type">int</span> result;
+
+	btfile = VTOF(hfsmp-&gt;hfs_attribute_vp);
+
+	btdata.bufferAddress = &amp;attrdata;
+	btdata.itemSize = <span class="enscript-keyword">sizeof</span>(attrdata);
+	btdata.itemCount = 1;
+	result = BTSearchRecord(btfile, iterator, &amp;btdata, &amp;datasize, NULL);
+	<span class="enscript-keyword">if</span> (result) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>; <span class="enscript-comment">/* no records. */</span>
+	}
+	<span class="enscript-comment">/*
+	 * Free the blocks from extent based attributes.
+	 *
+	 * Note that the block references (btree records) are removed
+	 * before releasing the blocks in the allocation bitmap.
+	 */</span>
+	<span class="enscript-keyword">if</span> (attrdata.recordType == kHFSPlusAttrForkData) {
+		<span class="enscript-type">int</span> totalblks;
+		<span class="enscript-type">int</span> extentblks;
+		u_int32_t *keystartblk;
+
+		<span class="enscript-keyword">if</span> (datasize &lt; <span class="enscript-keyword">sizeof</span>(HFSPlusAttrForkData)) {
+			printf(<span class="enscript-string">&quot;hfs: remove_attribute_records: bad record size %d (expecting %lu)\n&quot;</span>, datasize, <span class="enscript-keyword">sizeof</span>(HFSPlusAttrForkData));
+		}
+		totalblks = attrdata.forkData.theFork.totalBlocks;
+
+		<span class="enscript-comment">/* Process the first 8 extents. */</span>
+		extentblks = count_extent_blocks(totalblks, attrdata.forkData.theFork.extents);
+		<span class="enscript-keyword">if</span> (extentblks &gt; totalblks)
+			panic(<span class="enscript-string">&quot;hfs: remove_attribute_records: corruption...&quot;</span>);
+		<span class="enscript-keyword">if</span> (BTDeleteRecord(btfile, iterator) == 0) {
+			free_attr_blks(hfsmp, extentblks, attrdata.forkData.theFork.extents);
+		}
+		totalblks -= extentblks;
+		keystartblk = &amp;((HFSPlusAttrKey *)&amp;iterator-&gt;key)-&gt;startBlock;
+
+		<span class="enscript-comment">/* Process any overflow extents. */</span>
+		<span class="enscript-keyword">while</span> (totalblks) {
+			*keystartblk += (u_int32_t)extentblks;
+
+			result = BTSearchRecord(btfile, iterator, &amp;btdata, &amp;datasize, NULL);
+			<span class="enscript-keyword">if</span> (result ||
+			    (attrdata.recordType != kHFSPlusAttrExtents) ||
+			    (datasize &lt; <span class="enscript-keyword">sizeof</span>(HFSPlusAttrExtents))) {
+				printf(<span class="enscript-string">&quot;hfs: remove_attribute_records: BTSearchRecord: vol=%s, err=%d (%d), totalblks %d\n&quot;</span>,
+					hfsmp-&gt;vcbVN, MacToVFSError(result), attrdata.recordType != kHFSPlusAttrExtents, totalblks);
+				result = ENOATTR;
+				<span class="enscript-keyword">break</span>;   <span class="enscript-comment">/* break from while */</span>
+			}
+			<span class="enscript-comment">/* Process the next 8 extents. */</span>
+			extentblks = count_extent_blocks(totalblks, attrdata.overflowExtents.extents);
+			<span class="enscript-keyword">if</span> (extentblks &gt; totalblks)
+				panic(<span class="enscript-string">&quot;hfs: remove_attribute_records: corruption...&quot;</span>);
+			<span class="enscript-keyword">if</span> (BTDeleteRecord(btfile, iterator) == 0) {
+				free_attr_blks(hfsmp, extentblks, attrdata.overflowExtents.extents);
+			}
+			totalblks -= extentblks;
+		}
+	} <span class="enscript-keyword">else</span> {
+		result = BTDeleteRecord(btfile, iterator);
+	}
+	(<span class="enscript-type">void</span>) BTFlushPath(btfile);
+<span class="enscript-reference">exit</span>:
+	<span class="enscript-keyword">return</span> (result == btNotFound ? ENOATTR :  MacToVFSError(result));
+}
+
+
+<span class="enscript-comment">/*
+ * Retrieve the list of extended attribute names.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_vnop_listxattr</span>(<span class="enscript-type">struct</span> vnop_listxattr_args *ap)
+<span class="enscript-comment">/*
+	struct vnop_listxattr_args {
+		struct vnodeop_desc *a_desc;
+		vnode_t a_vp;
+		uio_t a_uio;
+		size_t *a_size;
+		int a_options;
+		vfs_context_t a_context;
+*/</span>
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	<span class="enscript-type">struct</span> cnode *cp = VTOC(vp);
+	<span class="enscript-type">struct</span> hfsmount *hfsmp;
+	uio_t uio = ap-&gt;a_uio;
+	<span class="enscript-type">struct</span> BTreeIterator * iterator = NULL;
+	<span class="enscript-type">struct</span> filefork *btfile;
+	<span class="enscript-type">struct</span> listattr_callback_state state;
+	user_addr_t user_start = 0;
+	user_size_t user_len = 0;
+	<span class="enscript-type">int</span> lockflags;
+	<span class="enscript-type">int</span> result;
+    u_int8_t finderinfo[32];
+
+
+	<span class="enscript-keyword">if</span> (VNODE_IS_RSRC(vp)) {
+		<span class="enscript-keyword">return</span> (EPERM);
+	}
+	
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	<span class="enscript-type">int</span> compressed = hfs_file_is_compressed(cp, 1); <span class="enscript-comment">/* 1 == don't take the cnode lock */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+	
+	hfsmp = VTOHFS(vp);
+	*ap-&gt;a_size = 0;
+	
+	<span class="enscript-comment">/* 
+	 * Take the truncate lock; this serializes us against the ioctl
+	 * to truncate data &amp; reset the decmpfs state
+	 * in the compressed file handler. 
+	 */</span>
+	hfs_lock_truncate(cp, HFS_SHARED_LOCK, HFS_LOCK_DEFAULT);
+
+	<span class="enscript-comment">/* Now the regular cnode lock (shared) */</span>
+	<span class="enscript-keyword">if</span> ((result = hfs_lock(cp, HFS_SHARED_LOCK, HFS_LOCK_DEFAULT))) {
+		hfs_unlock_truncate(cp, HFS_LOCK_DEFAULT);
+		<span class="enscript-keyword">return</span> (result);
+	}
+
+	<span class="enscript-comment">/* 
+	 * Make a copy of the cnode's finderinfo to a local so we can
+	 * zero out the date added field.  Also zero out the private type/creator
+	 * for symlinks.
+	 */</span>
+	bcopy(cp-&gt;c_finderinfo, finderinfo, <span class="enscript-keyword">sizeof</span>(finderinfo));
+	hfs_zero_hidden_fields (cp, finderinfo);
+	
+	<span class="enscript-comment">/* Don't expose a symlink's private type/creator. */</span>
+	<span class="enscript-keyword">if</span> (vnode_islnk(vp)) {
+		<span class="enscript-type">struct</span> FndrFileInfo *fip;
+		
+		fip = (<span class="enscript-type">struct</span> FndrFileInfo *)&amp;finderinfo;
+		fip-&gt;fdType = 0;
+		fip-&gt;fdCreator = 0;
+	}	
+
+	
+	<span class="enscript-comment">/* If Finder Info is non-empty then export it's name. */</span>
+	<span class="enscript-keyword">if</span> (bcmp(finderinfo, emptyfinfo, <span class="enscript-keyword">sizeof</span>(emptyfinfo)) != 0) {
+		<span class="enscript-keyword">if</span> (uio == NULL) {
+			*ap-&gt;a_size += <span class="enscript-keyword">sizeof</span>(XATTR_FINDERINFO_NAME);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((user_size_t)uio_resid(uio) &lt; <span class="enscript-keyword">sizeof</span>(XATTR_FINDERINFO_NAME)) {
+			result = ERANGE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+		} <span class="enscript-keyword">else</span> {
+			result = uiomove(XATTR_FINDERINFO_NAME,
+			                  <span class="enscript-keyword">sizeof</span>(XATTR_FINDERINFO_NAME), uio);
+			<span class="enscript-keyword">if</span> (result)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+		}
+	}
+	<span class="enscript-comment">/* If Resource Fork is non-empty then export it's name. */</span>
+	<span class="enscript-keyword">if</span> (S_ISREG(cp-&gt;c_mode) &amp;&amp; hfs_has_rsrc(cp)) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+		<span class="enscript-keyword">if</span> ((ap-&gt;a_options &amp; XATTR_SHOWCOMPRESSION) ||
+		    !compressed ||
+		    !decmpfs_hides_rsrc(ap-&gt;a_context, VTOCMP(vp))
+		    )
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+		{
+			<span class="enscript-keyword">if</span> (uio == NULL) {
+				*ap-&gt;a_size += <span class="enscript-keyword">sizeof</span>(XATTR_RESOURCEFORK_NAME);
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((user_size_t)uio_resid(uio) &lt; <span class="enscript-keyword">sizeof</span>(XATTR_RESOURCEFORK_NAME)) {
+				result = ERANGE;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+			} <span class="enscript-keyword">else</span> {
+				result = uiomove(XATTR_RESOURCEFORK_NAME,
+								 <span class="enscript-keyword">sizeof</span>(XATTR_RESOURCEFORK_NAME), uio);
+				<span class="enscript-keyword">if</span> (result)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+			}
+		}
+	}
+	<span class="enscript-comment">/*
+	 * Standard HFS only supports native FinderInfo and Resource Forks.
+	 * Return at this point.
+	 */</span>
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_flags &amp; HFS_STANDARD) {
+		result = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	<span class="enscript-comment">/* Bail if we don't have any extended attributes. */</span>
+	<span class="enscript-keyword">if</span> ((hfsmp-&gt;hfs_attribute_vp == NULL) ||
+	    (cp-&gt;c_attr.ca_recflags &amp; kHFSHasAttributesMask) == 0) {
+		result = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	btfile = VTOF(hfsmp-&gt;hfs_attribute_vp);
+
+	MALLOC(iterator, BTreeIterator *, <span class="enscript-keyword">sizeof</span>(*iterator), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (iterator == NULL) {
+		result = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	bzero(iterator, <span class="enscript-keyword">sizeof</span>(*iterator));
+	result = hfs_buildattrkey(cp-&gt;c_fileid, NULL, (HFSPlusAttrKey *)&amp;iterator-&gt;key);
+	<span class="enscript-keyword">if</span> (result)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;	
+
+	<span class="enscript-comment">/*
+	 * Lock the user's buffer here so that we won't fault on
+	 * it in uiomove while holding the attributes b-tree lock.
+	 */</span>
+	<span class="enscript-keyword">if</span> (uio &amp;&amp; uio_isuserspace(uio)) {
+		user_start = uio_curriovbase(uio);
+		user_len = uio_curriovlen(uio);
+
+		<span class="enscript-keyword">if</span> ((result = vslock(user_start, user_len)) != 0) {
+			user_start = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+		}
+	}
+	lockflags = hfs_systemfile_lock(hfsmp, SFL_ATTRIBUTE, HFS_SHARED_LOCK);
+
+	result = BTSearchRecord(btfile, iterator, NULL, NULL, NULL);
+	<span class="enscript-keyword">if</span> (result &amp;&amp; result != btNotFound) {
+		hfs_systemfile_unlock(hfsmp, lockflags);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	state.fileID = cp-&gt;c_fileid;
+	state.result = 0;
+	state.uio = uio;
+	state.size = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	state.showcompressed = !compressed || ap-&gt;a_options &amp; XATTR_SHOWCOMPRESSION;
+	state.ctx = ap-&gt;a_context;
+	state.vp = vp;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+
+	<span class="enscript-comment">/*
+	 * Process entries starting just after iterator-&gt;key.
+	 */</span>
+	result = BTIterateRecords(btfile, kBTreeNextRecord, iterator,
+	                          (IterateCallBackProcPtr)listattr_callback, &amp;state);
+	hfs_systemfile_unlock(hfsmp, lockflags);
+	<span class="enscript-keyword">if</span> (uio == NULL) {
+		*ap-&gt;a_size += state.size;
+	}
+
+	<span class="enscript-keyword">if</span> (state.result || result == btNotFound)
+		result = state.result;
+
+<span class="enscript-reference">exit</span>:
+	<span class="enscript-keyword">if</span> (user_start) {
+		vsunlock(user_start, user_len, TRUE);
+	}
+	<span class="enscript-keyword">if</span> (iterator) {
+		FREE(iterator, M_TEMP);
+	}
+	hfs_unlock(cp);
+	hfs_unlock_truncate(cp, HFS_LOCK_DEFAULT);
+	
+	<span class="enscript-keyword">return</span> MacToVFSError(result);
+}
+
+
+<span class="enscript-comment">/*
+ * Callback - called for each attribute record
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">listattr_callback</span>(<span class="enscript-type">const</span> HFSPlusAttrKey *key, __unused <span class="enscript-type">const</span> HFSPlusAttrData *data, <span class="enscript-type">struct</span> listattr_callback_state *state)
+{
+	<span class="enscript-type">char</span> attrname[XATTR_MAXNAMELEN + 1];
+	ssize_t bytecount;
+	<span class="enscript-type">int</span> result;
+
+	<span class="enscript-keyword">if</span> (state-&gt;fileID != key-&gt;fileID) {
+		state-&gt;result = 0;
+		<span class="enscript-keyword">return</span> (0);	<span class="enscript-comment">/* stop */</span>
+	}
+	<span class="enscript-comment">/*
+	 * Skip over non-primary keys
+	 */</span>
+	<span class="enscript-keyword">if</span> (key-&gt;startBlock != 0) {
+		<span class="enscript-keyword">return</span> (1);	<span class="enscript-comment">/* continue */</span>
+	}
+
+	<span class="enscript-comment">/* Convert the attribute name into UTF-8. */</span>
+	result = utf8_encodestr(key-&gt;attrName, key-&gt;attrNameLen * <span class="enscript-keyword">sizeof</span>(UniChar),
+				(u_int8_t *)attrname, (size_t *)&amp;bytecount, <span class="enscript-keyword">sizeof</span>(attrname), <span class="enscript-string">'/'</span>, 0);
+	<span class="enscript-keyword">if</span> (result) {
+		state-&gt;result = result;
+		<span class="enscript-keyword">return</span> (0);	<span class="enscript-comment">/* stop */</span>
+	}
+	bytecount++; <span class="enscript-comment">/* account for null termination char */</span>
+
+	<span class="enscript-keyword">if</span> (xattr_protected(attrname))
+		<span class="enscript-keyword">return</span> (1);     <span class="enscript-comment">/* continue */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	<span class="enscript-keyword">if</span> (!state-&gt;showcompressed &amp;&amp; decmpfs_hides_xattr(state-&gt;ctx, VTOCMP(state-&gt;vp), attrname) )
+		<span class="enscript-keyword">return</span> 1; <span class="enscript-comment">/* continue */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+	
+	<span class="enscript-keyword">if</span> (state-&gt;uio == NULL) {
+		state-&gt;size += bytecount;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (bytecount &gt; uio_resid(state-&gt;uio)) {
+			state-&gt;result = ERANGE;
+			<span class="enscript-keyword">return</span> (0);	<span class="enscript-comment">/* stop */</span>
+		}
+		result = uiomove((caddr_t) attrname, bytecount, state-&gt;uio);
+		<span class="enscript-keyword">if</span> (result) {
+			state-&gt;result = result;
+			<span class="enscript-keyword">return</span> (0);	<span class="enscript-comment">/* stop */</span>
+		}
+	}
+	<span class="enscript-keyword">return</span> (1); <span class="enscript-comment">/* continue */</span>
+}
+
+<span class="enscript-comment">/*
+ * Remove all the attributes from a cnode.
+ *
+ * This function creates/ends its own transaction so that each
+ * attribute is deleted in its own transaction (to avoid having
+ * a transaction grow too large).
+ *
+ * This function takes the necessary locks on the attribute
+ * b-tree file and the allocation (bitmap) file.
+ *
+ * NOTE: Upon sucecss, this function will return with an open
+ * transaction.  The reason we do it this way is because when we
+ * delete the last attribute, we must make sure the flag in the
+ * catalog record that indicates there are no more records is cleared.
+ * The caller is responsible for doing this and *must* do it before
+ * ending the transaction.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_removeallattr</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, u_int32_t fileid, 
+				  bool *open_transaction)
+{
+	BTreeIterator *iterator = NULL;
+	HFSPlusAttrKey *key;
+	<span class="enscript-type">struct</span> filefork *btfile;
+	<span class="enscript-type">int</span> result, lockflags = 0;
+
+	*open_transaction = false;
+
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_attribute_vp == NULL)
+		<span class="enscript-keyword">return</span> 0;
+
+	btfile = VTOF(hfsmp-&gt;hfs_attribute_vp);
+
+	MALLOC(iterator, BTreeIterator *, <span class="enscript-keyword">sizeof</span>(BTreeIterator), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (iterator == NULL) {
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+	bzero(iterator, <span class="enscript-keyword">sizeof</span>(BTreeIterator));
+	key = (HFSPlusAttrKey *)&amp;iterator-&gt;key;
+
+	<span class="enscript-comment">/* Loop until there are no more attributes for this file id */</span>
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-keyword">if</span> (!*open_transaction)
+			lockflags = hfs_systemfile_lock(hfsmp, SFL_ATTRIBUTE, HFS_SHARED_LOCK);
+
+		(<span class="enscript-type">void</span>) hfs_buildattrkey(fileid, NULL, key);
+		result = BTIterateRecord(btfile, kBTreeNextRecord, iterator, NULL, NULL);
+		<span class="enscript-keyword">if</span> (result || key-&gt;fileID != fileid)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+
+		hfs_systemfile_unlock(hfsmp, lockflags);
+		lockflags = 0;
+
+		<span class="enscript-keyword">if</span> (*open_transaction) {
+			hfs_end_transaction(hfsmp);
+			*open_transaction = false;
+		}
+
+		<span class="enscript-keyword">if</span> (hfs_start_transaction(hfsmp) != 0) {
+			result = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+		}
+
+		*open_transaction = true;
+
+		lockflags = hfs_systemfile_lock(hfsmp, SFL_ATTRIBUTE | SFL_BITMAP, HFS_EXCLUSIVE_LOCK);
+
+		result = remove_attribute_records(hfsmp, iterator);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_XATTR_VERBOSE</span>
+		<span class="enscript-keyword">if</span> (result) {
+			printf(<span class="enscript-string">&quot;hfs_removeallattr: unexpected err %d\n&quot;</span>, result);
+		}
+#<span class="enscript-reference">endif</span>
+	} <span class="enscript-keyword">while</span> (!result);
+
+<span class="enscript-reference">exit</span>:
+	FREE(iterator, M_TEMP);
+
+	<span class="enscript-keyword">if</span> (lockflags)
+		hfs_systemfile_unlock(hfsmp, lockflags);
+
+	result = result == btNotFound ? 0 : MacToVFSError(result);
+
+	<span class="enscript-keyword">if</span> (result &amp;&amp; *open_transaction) {
+		hfs_end_transaction(hfsmp);
+		*open_transaction = false;
+	}
+
+	<span class="enscript-keyword">return</span> result;
+}
+
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_xattr_init</span>(<span class="enscript-type">struct</span> hfsmount * hfsmp)
+{
+	<span class="enscript-comment">/*
+	 * If there isn't an attributes b-tree then create one.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!(hfsmp-&gt;hfs_flags &amp; HFS_STANDARD) &amp;&amp;
+	    (hfsmp-&gt;hfs_attribute_vp == NULL) &amp;&amp;
+	    !(hfsmp-&gt;hfs_flags &amp; HFS_READ_ONLY)) {
+		(<span class="enscript-type">void</span>) hfs_create_attr_btree(hfsmp, ATTRIBUTE_FILE_NODE_SIZE,
+		                             getnodecount(hfsmp, ATTRIBUTE_FILE_NODE_SIZE));
+	}
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_attribute_vp)
+		hfsmp-&gt;hfs_max_inline_attrsize = getmaxinlineattrsize(hfsmp-&gt;hfs_attribute_vp);
+}
+
+<span class="enscript-comment">/*
+ * Enable/Disable volume attributes stored as EA for root file system.
+ * Supported attributes are - 
+ *	1. Extent-based Extended Attributes 
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_set_volxattr</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> xattrtype, <span class="enscript-type">int</span> state)
+{
+	<span class="enscript-type">struct</span> BTreeIterator * iterator = NULL;
+	<span class="enscript-type">struct</span> filefork *btfile;
+	<span class="enscript-type">int</span> lockflags;
+	<span class="enscript-type">int</span> result;
+
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_flags &amp; HFS_STANDARD) {
+		<span class="enscript-keyword">return</span> (ENOTSUP);
+	}
+	<span class="enscript-keyword">if</span> (xattrtype != HFS_SET_XATTREXTENTS_STATE) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-comment">/*
+	 * If there isn't an attributes b-tree then create one.
+	 */</span>
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_attribute_vp == NULL) {
+		result = hfs_create_attr_btree(hfsmp, ATTRIBUTE_FILE_NODE_SIZE,
+		                               getnodecount(hfsmp, ATTRIBUTE_FILE_NODE_SIZE));
+		<span class="enscript-keyword">if</span> (result) {
+			<span class="enscript-keyword">return</span> (result);
+		}
+	}
+
+	MALLOC(iterator, BTreeIterator *, <span class="enscript-keyword">sizeof</span>(*iterator), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (iterator == NULL) {
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	} 
+	bzero(iterator, <span class="enscript-keyword">sizeof</span>(*iterator));
+
+	<span class="enscript-comment">/*
+	 * Build a b-tree key.
+	 * We use the root's parent id (1) to hold this volume attribute.
+	 */</span>
+	(<span class="enscript-type">void</span>) hfs_buildattrkey(kHFSRootParentID, XATTR_XATTREXTENTS_NAME,
+			      (HFSPlusAttrKey *)&amp;iterator-&gt;key);
+
+	<span class="enscript-comment">/* Start a transaction for our changes. */</span>
+	<span class="enscript-keyword">if</span> (hfs_start_transaction(hfsmp) != 0) {
+		result = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	btfile = VTOF(hfsmp-&gt;hfs_attribute_vp);
+
+	lockflags = hfs_systemfile_lock(hfsmp, SFL_ATTRIBUTE, HFS_EXCLUSIVE_LOCK);
+
+	<span class="enscript-keyword">if</span> (state == 0) {
+		<span class="enscript-comment">/* Remove the attribute. */</span>
+		result = BTDeleteRecord(btfile, iterator);
+		<span class="enscript-keyword">if</span> (result == btNotFound)
+			result = 0;
+	} <span class="enscript-keyword">else</span> {
+		FSBufferDescriptor btdata;
+		HFSPlusAttrData attrdata;
+		u_int16_t datasize;
+
+		datasize = <span class="enscript-keyword">sizeof</span>(attrdata);
+		btdata.bufferAddress = &amp;attrdata;
+		btdata.itemSize = datasize;
+		btdata.itemCount = 1;
+		attrdata.recordType = kHFSPlusAttrInlineData;
+		attrdata.reserved[0] = 0;
+		attrdata.reserved[1] = 0;
+		attrdata.attrSize    = 2;
+		attrdata.attrData[0] = 0;
+		attrdata.attrData[1] = 0;
+
+		<span class="enscript-comment">/* Insert the attribute. */</span>
+		result = BTInsertRecord(btfile, iterator, &amp;btdata, datasize);
+		<span class="enscript-keyword">if</span> (result == btExists)
+			result = 0;
+	}
+	(<span class="enscript-type">void</span>) BTFlushPath(btfile);
+
+	hfs_systemfile_unlock(hfsmp, lockflags);
+
+	<span class="enscript-comment">/* Finish the transaction of our changes. */</span>
+	hfs_end_transaction(hfsmp);
+
+	<span class="enscript-comment">/* Update the state in the mount point */</span>
+	hfs_lock_mount (hfsmp);
+	<span class="enscript-keyword">if</span> (state == 0) {
+		hfsmp-&gt;hfs_flags &amp;= ~HFS_XATTR_EXTENTS; 
+	} <span class="enscript-keyword">else</span> {
+		hfsmp-&gt;hfs_flags |= HFS_XATTR_EXTENTS; 
+	}
+	hfs_unlock_mount (hfsmp);
+
+<span class="enscript-reference">exit</span>:
+	<span class="enscript-keyword">if</span> (iterator) {
+		FREE(iterator, M_TEMP);
+	}
+	<span class="enscript-keyword">return</span> MacToVFSError(result);
+}
+
+
+<span class="enscript-comment">/*
+ * hfs_attrkeycompare - compare two attribute b-tree keys.
+ *
+ * The name portion of the key is compared using a 16-bit binary comparison. 
+ * This is called from the b-tree code.
+ */</span>
+__private_extern__
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_attrkeycompare</span>(HFSPlusAttrKey *searchKey, HFSPlusAttrKey *trialKey)
+{
+	u_int32_t searchFileID, trialFileID;
+	<span class="enscript-type">int</span> result;
+
+	searchFileID = searchKey-&gt;fileID;
+	trialFileID = trialKey-&gt;fileID;
+	result = 0;
+	
+	<span class="enscript-keyword">if</span> (searchFileID &gt; trialFileID) {
+		++result;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (searchFileID &lt; trialFileID) {
+		--result;
+	} <span class="enscript-keyword">else</span> {
+		u_int16_t * str1 = &amp;searchKey-&gt;attrName[0];
+		u_int16_t * str2 = &amp;trialKey-&gt;attrName[0];
+		<span class="enscript-type">int</span> length1 = searchKey-&gt;attrNameLen;
+		<span class="enscript-type">int</span> length2 = trialKey-&gt;attrNameLen;
+		u_int16_t c1, c2;
+		<span class="enscript-type">int</span> length;
+	
+		<span class="enscript-keyword">if</span> (length1 &lt; length2) {
+			length = length1;
+			--result;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (length1 &gt; length2) {
+			length = length2;
+			++result;
+		} <span class="enscript-keyword">else</span> {
+			length = length1;
+		}
+	
+		<span class="enscript-keyword">while</span> (length--) {
+			c1 = *(str1++);
+			c2 = *(str2++);
+	
+			<span class="enscript-keyword">if</span> (c1 &gt; c2) {
+				result = 1;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (c1 &lt; c2) {
+				result = -1;
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+		<span class="enscript-keyword">if</span> (result)
+			<span class="enscript-keyword">return</span> (result);
+		<span class="enscript-comment">/*
+		 * Names are equal; compare startBlock
+		 */</span>
+		<span class="enscript-keyword">if</span> (searchKey-&gt;startBlock == trialKey-&gt;startBlock) {
+			<span class="enscript-keyword">return</span> (0);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span> (searchKey-&gt;startBlock &lt; trialKey-&gt;startBlock ? -1 : 1);
+		}
+	}
+
+	<span class="enscript-keyword">return</span> result;
+}
+
+
+<span class="enscript-comment">/*
+ * hfs_buildattrkey - build an Attribute b-tree key
+ */</span>
+__private_extern__
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_buildattrkey</span>(u_int32_t fileID, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *attrname, HFSPlusAttrKey *key)
+{
+	<span class="enscript-type">int</span> result = 0;
+	size_t unicodeBytes = 0;
+
+	<span class="enscript-keyword">if</span> (attrname != NULL) {
+		<span class="enscript-comment">/*
+		 * Convert filename from UTF-8 into Unicode
+		 */</span>	
+		result = utf8_decodestr((<span class="enscript-type">const</span> u_int8_t *)attrname, strlen(attrname), key-&gt;attrName,
+					&amp;unicodeBytes, <span class="enscript-keyword">sizeof</span>(key-&gt;attrName), 0, 0);
+		<span class="enscript-keyword">if</span> (result) {
+			<span class="enscript-keyword">if</span> (result != ENAMETOOLONG)
+				result = EINVAL;  <span class="enscript-comment">/* name has invalid characters */</span>
+			<span class="enscript-keyword">return</span> (result);
+		}
+		key-&gt;attrNameLen = unicodeBytes / <span class="enscript-keyword">sizeof</span>(UniChar);
+		key-&gt;keyLength = kHFSPlusAttrKeyMinimumLength + unicodeBytes;
+	} <span class="enscript-keyword">else</span> {
+		key-&gt;attrNameLen = 0;
+		key-&gt;keyLength = kHFSPlusAttrKeyMinimumLength;
+	}
+	key-&gt;pad = 0;
+	key-&gt;fileID = fileID;
+	key-&gt;startBlock = 0;
+
+	<span class="enscript-keyword">return</span> (0);
+ }
+
+<span class="enscript-comment">/*
+ * getnodecount - calculate starting node count for attributes b-tree.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">getnodecount</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, size_t nodesize)
+{
+	u_int64_t freebytes;
+	u_int64_t calcbytes;
+
+	<span class="enscript-comment">/*
+	 * 10.4: Scale base on current catalog file size (20 %) up to 20 MB.
+	 * 10.5: Attempt to be as big as the catalog clump size.
+	 *
+	 * Use no more than 10 % of the remaining free space.
+	 */</span>
+	freebytes = (u_int64_t)hfs_freeblks(hfsmp, 0) * (u_int64_t)hfsmp-&gt;blockSize;
+
+	calcbytes = MIN(hfsmp-&gt;hfs_catalog_cp-&gt;c_datafork-&gt;ff_size / 5, 20 * 1024 * 1024);
+
+	calcbytes = MAX(calcbytes, hfsmp-&gt;hfs_catalog_cp-&gt;c_datafork-&gt;ff_clumpsize);
+	
+	calcbytes = MIN(calcbytes, freebytes / 10);
+
+	<span class="enscript-keyword">return</span> (MAX(2, (<span class="enscript-type">int</span>)(calcbytes / nodesize)));
+}
+
+
+<span class="enscript-comment">/*
+ * getmaxinlineattrsize - calculate maximum inline attribute size.
+ *
+ * This yields 3,802 bytes for an 8K node size.
+ */</span>
+<span class="enscript-type">static</span> size_t
+<span class="enscript-function-name">getmaxinlineattrsize</span>(<span class="enscript-type">struct</span> vnode * attrvp)
+{
+	<span class="enscript-type">struct</span> BTreeInfoRec btinfo;
+	size_t nodesize = ATTRIBUTE_FILE_NODE_SIZE;
+	size_t maxsize;
+
+	<span class="enscript-keyword">if</span> (attrvp != NULL) {
+		(<span class="enscript-type">void</span>) hfs_lock(VTOC(attrvp), HFS_SHARED_LOCK, HFS_LOCK_DEFAULT);
+		<span class="enscript-keyword">if</span> (BTGetInformation(VTOF(attrvp), 0, &amp;btinfo) == 0)
+			nodesize = btinfo.nodeSize;
+		hfs_unlock(VTOC(attrvp));
+	}
+	maxsize = nodesize;
+	maxsize -= <span class="enscript-keyword">sizeof</span>(BTNodeDescriptor);     <span class="enscript-comment">/* minus node descriptor */</span>
+	maxsize -= 3 * <span class="enscript-keyword">sizeof</span>(u_int16_t);        <span class="enscript-comment">/* minus 3 index slots */</span>
+	maxsize /= 2;                            <span class="enscript-comment">/* 2 key/rec pairs minumum */</span>
+	maxsize -= <span class="enscript-keyword">sizeof</span>(HFSPlusAttrKey);       <span class="enscript-comment">/* minus maximum key size */</span>
+	maxsize -= <span class="enscript-keyword">sizeof</span>(HFSPlusAttrData) - 2;  <span class="enscript-comment">/* minus data header */</span>
+	maxsize &amp;= 0xFFFFFFFE;                   <span class="enscript-comment">/* multiple of 2 bytes */</span>
+	
+	<span class="enscript-keyword">return</span> (maxsize);
+}
+
+<span class="enscript-comment">/*
+ * Initialize vnode for attribute data I/O.  
+ * 
+ * On success, 
+ * 	- returns zero
+ * 	- the attrdata vnode is initialized as hfsmp-&gt;hfs_attrdata_vp
+ * 	- an iocount is taken on the attrdata vnode which exists 
+ * 	  for the entire duration of the mount.  It is only dropped 
+ * 	  during unmount
+ * 	- the attrdata cnode is not locked
+ *
+ * On failure, 
+ * 	- returns non-zero value
+ * 	- the caller does not have to worry about any locks or references
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">init_attrdata_vnode</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp)
+{
+	vnode_t vp;
+	<span class="enscript-type">int</span> result = 0;
+	<span class="enscript-type">struct</span> cat_desc cat_desc;
+	<span class="enscript-type">struct</span> cat_attr cat_attr;
+	<span class="enscript-type">struct</span> cat_fork cat_fork;
+	<span class="enscript-type">int</span> newvnode_flags = 0;
+
+	bzero(&amp;cat_desc, <span class="enscript-keyword">sizeof</span>(cat_desc));
+	cat_desc.cd_parentcnid = kHFSRootParentID;
+	cat_desc.cd_nameptr = (<span class="enscript-type">const</span> u_int8_t *)hfs_attrdatafilename;
+	cat_desc.cd_namelen = strlen(hfs_attrdatafilename);
+	cat_desc.cd_cnid = kHFSAttributeDataFileID;
+	<span class="enscript-comment">/* Tag vnode as system file, note that we can still use cluster I/O */</span>
+	cat_desc.cd_flags |= CD_ISMETA; 
+
+	bzero(&amp;cat_attr, <span class="enscript-keyword">sizeof</span>(cat_attr));
+	cat_attr.ca_linkcount = 1;
+	cat_attr.ca_mode = S_IFREG;
+	cat_attr.ca_fileid = cat_desc.cd_cnid;
+	cat_attr.ca_blocks = hfsmp-&gt;totalBlocks;
+
+	<span class="enscript-comment">/*
+	 * The attribute data file is a virtual file that spans the
+	 * entire file system space.
+	 *
+	 * Each extent-based attribute occupies a unique portion of
+	 * in this virtual file.  The cluster I/O is done using actual
+	 * allocation block offsets so no additional mapping is needed
+	 * for the VNOP_BLOCKMAP call.
+	 *
+	 * This approach allows the attribute data to be cached without
+	 * incurring the high cost of using a separate vnode per attribute.
+	 *
+	 * Since we need to acquire the attribute b-tree file lock anyways,
+	 * the virtual file doesn't introduce any additional serialization.
+	 */</span>
+	bzero(&amp;cat_fork, <span class="enscript-keyword">sizeof</span>(cat_fork));
+	cat_fork.cf_size = (u_int64_t)hfsmp-&gt;totalBlocks * (u_int64_t)hfsmp-&gt;blockSize;
+	cat_fork.cf_blocks = hfsmp-&gt;totalBlocks;
+	cat_fork.cf_extents[0].startBlock = 0;
+	cat_fork.cf_extents[0].blockCount = cat_fork.cf_blocks;
+
+	result = hfs_getnewvnode(hfsmp, NULL, NULL, &amp;cat_desc, 0, &amp;cat_attr, 
+				 &amp;cat_fork, &amp;vp, &amp;newvnode_flags);
+	<span class="enscript-keyword">if</span> (result == 0) {
+		hfsmp-&gt;hfs_attrdata_vp = vp;
+		hfs_unlock(VTOC(vp));
+	}
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ * Read an extent based attribute.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">read_attr_data</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, uio_t uio, size_t datasize, HFSPlusExtentDescriptor *extents)
+{
+	vnode_t evp = hfsmp-&gt;hfs_attrdata_vp;
+	<span class="enscript-type">int</span> bufsize;
+	int64_t iosize;
+	<span class="enscript-type">int</span> attrsize;
+	<span class="enscript-type">int</span> blksize;
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> result = 0;
+
+	hfs_lock_truncate(VTOC(evp), HFS_SHARED_LOCK, HFS_LOCK_DEFAULT);
+
+	bufsize = (<span class="enscript-type">int</span>)uio_resid(uio);
+	attrsize = (<span class="enscript-type">int</span>)datasize;
+	blksize = (<span class="enscript-type">int</span>)hfsmp-&gt;blockSize;
+
+	<span class="enscript-comment">/*
+	 * Read the attribute data one extent at a time.
+	 * For the typical case there is only one extent.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; (attrsize &gt; 0) &amp;&amp; (bufsize &gt; 0) &amp;&amp; (extents[i].startBlock != 0); ++i) {
+		iosize = extents[i].blockCount * blksize;
+		iosize = MIN(iosize, attrsize);
+		iosize = MIN(iosize, bufsize);
+		uio_setresid(uio, iosize);
+		uio_setoffset(uio, (u_int64_t)extents[i].startBlock * (u_int64_t)blksize);
+
+		result = cluster_read(evp, uio, VTOF(evp)-&gt;ff_size, IO_SYNC | IO_UNIT);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_XATTR_VERBOSE</span>
+		printf(<span class="enscript-string">&quot;hfs: read_attr_data: cr iosize %lld [%d, %d] (%d)\n&quot;</span>,
+			iosize, extents[i].startBlock, extents[i].blockCount, result);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">if</span> (result)
+			<span class="enscript-keyword">break</span>;
+		attrsize -= iosize;
+		bufsize -= iosize;
+	}
+	uio_setresid(uio, bufsize);
+	uio_setoffset(uio, datasize);
+
+	hfs_unlock_truncate(VTOC(evp), HFS_LOCK_DEFAULT);
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ * Write an extent based attribute.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">write_attr_data</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, uio_t uio, size_t datasize, HFSPlusExtentDescriptor *extents)
+{
+	vnode_t evp = hfsmp-&gt;hfs_attrdata_vp;
+	off_t filesize;
+	<span class="enscript-type">int</span> bufsize;
+	<span class="enscript-type">int</span> attrsize;
+	int64_t iosize;
+	<span class="enscript-type">int</span> blksize;
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> result = 0;
+
+	hfs_lock_truncate(VTOC(evp), HFS_SHARED_LOCK, HFS_LOCK_DEFAULT);
+
+	bufsize = uio_resid(uio);
+	attrsize = (<span class="enscript-type">int</span>) datasize;
+	blksize = (<span class="enscript-type">int</span>) hfsmp-&gt;blockSize;
+	filesize = VTOF(evp)-&gt;ff_size;
+
+	<span class="enscript-comment">/*
+	 * Write the attribute data one extent at a time.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; (attrsize &gt; 0) &amp;&amp; (bufsize &gt; 0) &amp;&amp; (extents[i].startBlock != 0); ++i) {
+		iosize = extents[i].blockCount * blksize;
+		iosize = MIN(iosize, attrsize);
+		iosize = MIN(iosize, bufsize);
+		uio_setresid(uio, iosize);
+		uio_setoffset(uio, (u_int64_t)extents[i].startBlock * (u_int64_t)blksize);
+
+		result = cluster_write(evp, uio, filesize, filesize, filesize,
+		                       (off_t) 0, IO_SYNC | IO_UNIT);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_XATTR_VERBOSE</span>
+		printf(<span class="enscript-string">&quot;hfs: write_attr_data: cw iosize %lld [%d, %d] (%d)\n&quot;</span>,
+			iosize, extents[i].startBlock, extents[i].blockCount, result);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">if</span> (result)
+			<span class="enscript-keyword">break</span>;
+		attrsize -= iosize;
+		bufsize -= iosize;
+	}
+	uio_setresid(uio, bufsize);
+	uio_setoffset(uio, datasize);
+
+	hfs_unlock_truncate(VTOC(evp), HFS_LOCK_DEFAULT);
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ * Allocate blocks for an extent based attribute.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">alloc_attr_blks</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, size_t attrsize, size_t extentbufsize, HFSPlusExtentDescriptor *extents, <span class="enscript-type">int</span> *blocks)
+{
+	<span class="enscript-type">int</span> blkcnt;
+	<span class="enscript-type">int</span> startblk;
+	<span class="enscript-type">int</span> lockflags;
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> maxextents;
+	<span class="enscript-type">int</span> result = 0;
+
+	startblk = hfsmp-&gt;hfs_metazone_end;
+	blkcnt = howmany(attrsize, hfsmp-&gt;blockSize);
+	<span class="enscript-keyword">if</span> (blkcnt &gt; (<span class="enscript-type">int</span>)hfs_freeblks(hfsmp, 0)) {
+		<span class="enscript-keyword">return</span> (ENOSPC);
+	}
+	*blocks = blkcnt;
+	maxextents = extentbufsize / <span class="enscript-keyword">sizeof</span>(HFSPlusExtentDescriptor);
+
+	lockflags = hfs_systemfile_lock(hfsmp, SFL_BITMAP, HFS_EXCLUSIVE_LOCK);
+
+	<span class="enscript-keyword">for</span> (i = 0; (blkcnt &gt; 0) &amp;&amp; (i &lt; maxextents); i++) {
+		<span class="enscript-comment">/* Try allocating and see if we find something decent */</span>
+		result = BlockAllocate(hfsmp, startblk, blkcnt, blkcnt, 0,
+				       &amp;extents[i].startBlock, &amp;extents[i].blockCount);
+		<span class="enscript-comment">/* 
+		 * If we couldn't find anything, then re-try the allocation but allow
+		 * journal flushes.
+		 */</span>
+		<span class="enscript-keyword">if</span> (result == dskFulErr) {
+			result = BlockAllocate(hfsmp, startblk, blkcnt, blkcnt, HFS_ALLOC_FLUSHTXN,
+					&amp;extents[i].startBlock, &amp;extents[i].blockCount);
+		}
+
+		
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_XATTR_VERBOSE</span>
+		printf(<span class="enscript-string">&quot;hfs: alloc_attr_blks: BA blkcnt %d [%d, %d] (%d)\n&quot;</span>,
+			blkcnt, extents[i].startBlock, extents[i].blockCount, result);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">if</span> (result) {
+			extents[i].startBlock = 0;
+			extents[i].blockCount = 0;
+			<span class="enscript-keyword">break</span>;
+		}
+		blkcnt -= extents[i].blockCount;
+		startblk = extents[i].startBlock + extents[i].blockCount;
+	}
+	<span class="enscript-comment">/*
+	 * If it didn't fit in the extents buffer then bail.
+	 */</span>
+	<span class="enscript-keyword">if</span> (blkcnt) {
+		result = ENOSPC;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_XATTR_VERBOSE</span>
+		printf(<span class="enscript-string">&quot;hfs: alloc_attr_blks: unexpected failure, %d blocks unallocated\n&quot;</span>, blkcnt);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">for</span> (; i &gt;= 0; i--) {
+			<span class="enscript-keyword">if</span> ((blkcnt = extents[i].blockCount) != 0) {
+				(<span class="enscript-type">void</span>) BlockDeallocate(hfsmp, extents[i].startBlock, blkcnt, 0);
+				extents[i].startBlock = 0;
+				extents[i].blockCount = 0;
+		    }
+		}
+	}
+
+	hfs_systemfile_unlock(hfsmp, lockflags);
+	<span class="enscript-keyword">return</span> MacToVFSError(result);
+}
+
+<span class="enscript-comment">/*
+ * Release blocks from an extent based attribute.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">free_attr_blks</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">int</span> blkcnt, HFSPlusExtentDescriptor *extents)
+{
+	vnode_t evp = hfsmp-&gt;hfs_attrdata_vp;
+	<span class="enscript-type">int</span> remblks = blkcnt;
+	<span class="enscript-type">int</span> lockflags;
+	<span class="enscript-type">int</span> i;
+
+	lockflags = hfs_systemfile_lock(hfsmp, SFL_BITMAP, HFS_EXCLUSIVE_LOCK);
+
+	<span class="enscript-keyword">for</span> (i = 0; (remblks &gt; 0) &amp;&amp; (extents[i].blockCount != 0); i++) {
+		<span class="enscript-keyword">if</span> (extents[i].blockCount &gt; (u_int32_t)blkcnt) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_XATTR_VERBOSE</span>
+			printf(<span class="enscript-string">&quot;hfs: free_attr_blks: skipping bad extent [%d, %d]\n&quot;</span>,
+				extents[i].startBlock, extents[i].blockCount);
+#<span class="enscript-reference">endif</span>
+			extents[i].blockCount = 0;
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> (extents[i].startBlock == 0) {
+			<span class="enscript-keyword">break</span>;
+		}
+		(<span class="enscript-type">void</span>)BlockDeallocate(hfsmp, extents[i].startBlock, extents[i].blockCount, 0);
+		remblks -= extents[i].blockCount;
+		extents[i].startBlock = 0;
+		extents[i].blockCount = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_XATTR_VERBOSE</span>
+		printf(<span class="enscript-string">&quot;hfs: free_attr_blks: BlockDeallocate [%d, %d]\n&quot;</span>,
+		       extents[i].startBlock, extents[i].blockCount);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-comment">/* Discard any resident pages for this block range. */</span>
+		<span class="enscript-keyword">if</span> (evp) {
+			off_t  start, end;
+
+			start = (u_int64_t)extents[i].startBlock * (u_int64_t)hfsmp-&gt;blockSize;
+			end = start + (u_int64_t)extents[i].blockCount * (u_int64_t)hfsmp-&gt;blockSize;
+			(<span class="enscript-type">void</span>) ubc_msync(hfsmp-&gt;hfs_attrdata_vp, start, end, &amp;start, UBC_INVALIDATE);
+		}
+	}
+
+	hfs_systemfile_unlock(hfsmp, lockflags);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">has_overflow_extents</span>(HFSPlusForkData *forkdata)
+{
+	u_int32_t blocks;
+
+	<span class="enscript-keyword">if</span> (forkdata-&gt;extents[7].blockCount == 0)
+		<span class="enscript-keyword">return</span> (0);
+
+	blocks = forkdata-&gt;extents[0].blockCount +
+		 forkdata-&gt;extents[1].blockCount +
+		 forkdata-&gt;extents[2].blockCount +
+		 forkdata-&gt;extents[3].blockCount +
+		 forkdata-&gt;extents[4].blockCount +
+		 forkdata-&gt;extents[5].blockCount +
+		 forkdata-&gt;extents[6].blockCount +
+		 forkdata-&gt;extents[7].blockCount;	
+
+	<span class="enscript-keyword">return</span> (forkdata-&gt;totalBlocks &gt; blocks);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">count_extent_blocks</span>(<span class="enscript-type">int</span> maxblks, HFSPlusExtentRecord extents)
+{
+	<span class="enscript-type">int</span> blocks;
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">for</span> (i = 0, blocks = 0; i &lt; kHFSPlusExtentDensity; ++i) {
+		<span class="enscript-comment">/* Ignore obvious bogus extents. */</span>
+		<span class="enscript-keyword">if</span> (extents[i].blockCount &gt; (u_int32_t)maxblks)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (extents[i].startBlock == 0 || extents[i].blockCount == 0)
+			<span class="enscript-keyword">break</span>;
+		blocks += extents[i].blockCount;
+	}
+	<span class="enscript-keyword">return</span> (blocks);
+}
+
+</pre>
+<hr />
+</body></html>

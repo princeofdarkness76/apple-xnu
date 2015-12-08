@@ -1,0 +1,2629 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>spec_vnops.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">spec_vnops.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2012 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1989, 1993, 1995
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)spec_vnops.c	8.14 (Berkeley) 5/21/95
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/buf_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/disk.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/resource.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/specfs/specdev.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vfs/vfs_support.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+<span class="enscript-comment">/* XXX following three prototypes should be in a header file somewhere */</span>
+<span class="enscript-type">extern</span> dev_t	chrtoblk(dev_t dev);
+<span class="enscript-type">extern</span> boolean_t	iskmemdev(dev_t dev);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>	bpfkqfilter(dev_t dev, <span class="enscript-type">struct</span> knote *kn);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>	ptsd_kqfilter(dev_t dev, <span class="enscript-type">struct</span> knote *kn);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> ignore_is_ssd;
+
+<span class="enscript-type">struct</span> vnode *speclisth[SPECHSZ];
+
+<span class="enscript-comment">/* symbolic sleep message strings for devices */</span>
+<span class="enscript-type">char</span>	devopn[] = <span class="enscript-string">&quot;devopn&quot;</span>;
+<span class="enscript-type">char</span>	devio[] = <span class="enscript-string">&quot;devio&quot;</span>;
+<span class="enscript-type">char</span>	devwait[] = <span class="enscript-string">&quot;devwait&quot;</span>;
+<span class="enscript-type">char</span>	devin[] = <span class="enscript-string">&quot;devin&quot;</span>;
+<span class="enscript-type">char</span>	devout[] = <span class="enscript-string">&quot;devout&quot;</span>;
+<span class="enscript-type">char</span>	devioc[] = <span class="enscript-string">&quot;devioc&quot;</span>;
+<span class="enscript-type">char</span>	devcls[] = <span class="enscript-string">&quot;devcls&quot;</span>;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VOPFUNC</span> int (*)(void *)
+
+<span class="enscript-function-name">int</span> (**spec_vnodeop_p)(<span class="enscript-type">void</span> *);
+<span class="enscript-type">struct</span> vnodeopv_entry_desc spec_vnodeop_entries[] = {
+	{ &amp;vnop_default_desc, (VOPFUNC)vn_default_error },
+	{ &amp;vnop_lookup_desc, (VOPFUNC)spec_lookup },		<span class="enscript-comment">/* lookup */</span>
+	{ &amp;vnop_create_desc, (VOPFUNC)err_create },		<span class="enscript-comment">/* create */</span>
+	{ &amp;vnop_mknod_desc, (VOPFUNC)err_mknod },		<span class="enscript-comment">/* mknod */</span>
+	{ &amp;vnop_open_desc, (VOPFUNC)spec_open },			<span class="enscript-comment">/* open */</span>
+	{ &amp;vnop_close_desc, (VOPFUNC)spec_close },		<span class="enscript-comment">/* close */</span>
+	{ &amp;vnop_access_desc, (VOPFUNC)spec_access },		<span class="enscript-comment">/* access */</span>
+	{ &amp;vnop_getattr_desc, (VOPFUNC)spec_getattr },		<span class="enscript-comment">/* getattr */</span>
+	{ &amp;vnop_setattr_desc, (VOPFUNC)spec_setattr },		<span class="enscript-comment">/* setattr */</span>
+	{ &amp;vnop_read_desc, (VOPFUNC)spec_read },			<span class="enscript-comment">/* read */</span>
+	{ &amp;vnop_write_desc, (VOPFUNC)spec_write },		<span class="enscript-comment">/* write */</span>
+	{ &amp;vnop_ioctl_desc, (VOPFUNC)spec_ioctl },		<span class="enscript-comment">/* ioctl */</span>
+	{ &amp;vnop_select_desc, (VOPFUNC)spec_select },		<span class="enscript-comment">/* select */</span>
+	{ &amp;vnop_revoke_desc, (VOPFUNC)nop_revoke },		<span class="enscript-comment">/* revoke */</span>
+	{ &amp;vnop_mmap_desc, (VOPFUNC)err_mmap },			<span class="enscript-comment">/* mmap */</span>
+	{ &amp;vnop_fsync_desc, (VOPFUNC)spec_fsync },		<span class="enscript-comment">/* fsync */</span>
+	{ &amp;vnop_remove_desc, (VOPFUNC)err_remove },		<span class="enscript-comment">/* remove */</span>
+	{ &amp;vnop_link_desc, (VOPFUNC)err_link },			<span class="enscript-comment">/* link */</span>
+	{ &amp;vnop_rename_desc, (VOPFUNC)err_rename },		<span class="enscript-comment">/* rename */</span>
+	{ &amp;vnop_mkdir_desc, (VOPFUNC)err_mkdir },		<span class="enscript-comment">/* mkdir */</span>
+	{ &amp;vnop_rmdir_desc, (VOPFUNC)err_rmdir },		<span class="enscript-comment">/* rmdir */</span>
+	{ &amp;vnop_symlink_desc, (VOPFUNC)err_symlink },		<span class="enscript-comment">/* symlink */</span>
+	{ &amp;vnop_readdir_desc, (VOPFUNC)err_readdir },		<span class="enscript-comment">/* readdir */</span>
+	{ &amp;vnop_readlink_desc, (VOPFUNC)err_readlink },		<span class="enscript-comment">/* readlink */</span>
+	{ &amp;vnop_inactive_desc, (VOPFUNC)nop_inactive },		<span class="enscript-comment">/* inactive */</span>
+	{ &amp;vnop_reclaim_desc, (VOPFUNC)nop_reclaim },		<span class="enscript-comment">/* reclaim */</span>
+	{ &amp;vnop_strategy_desc, (VOPFUNC)spec_strategy },		<span class="enscript-comment">/* strategy */</span>
+	{ &amp;vnop_pathconf_desc, (VOPFUNC)spec_pathconf },		<span class="enscript-comment">/* pathconf */</span>
+	{ &amp;vnop_advlock_desc, (VOPFUNC)err_advlock },		<span class="enscript-comment">/* advlock */</span>
+	{ &amp;vnop_bwrite_desc, (VOPFUNC)spec_bwrite },		<span class="enscript-comment">/* bwrite */</span>
+	{ &amp;vnop_pagein_desc, (VOPFUNC)err_pagein },		<span class="enscript-comment">/* Pagein */</span>
+	{ &amp;vnop_pageout_desc, (VOPFUNC)err_pageout },		<span class="enscript-comment">/* Pageout */</span>
+        { &amp;vnop_copyfile_desc, (VOPFUNC)err_copyfile },		<span class="enscript-comment">/* Copyfile */</span>
+	{ &amp;vnop_blktooff_desc, (VOPFUNC)spec_blktooff },		<span class="enscript-comment">/* blktooff */</span>
+	{ &amp;vnop_offtoblk_desc, (VOPFUNC)spec_offtoblk },		<span class="enscript-comment">/* offtoblk */</span>
+	{ &amp;vnop_blockmap_desc, (VOPFUNC)spec_blockmap },		<span class="enscript-comment">/* blockmap */</span>
+	{ (<span class="enscript-type">struct</span> vnodeop_desc*)NULL, (<span class="enscript-type">int</span>(*)())NULL }
+};
+<span class="enscript-type">struct</span> vnodeopv_desc spec_vnodeop_opv_desc =
+	{ &amp;spec_vnodeop_p, spec_vnodeop_entries };
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">set_blocksize</span>(vnode_t, dev_t);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LOWPRI_TIER1_WINDOW_MSECS</span>	  25
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LOWPRI_TIER2_WINDOW_MSECS</span>	  100
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LOWPRI_TIER3_WINDOW_MSECS</span>	  500
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LOWPRI_TIER1_IO_PERIOD_MSECS</span>	  15
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LOWPRI_TIER2_IO_PERIOD_MSECS</span>	  50
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LOWPRI_TIER3_IO_PERIOD_MSECS</span>	  200
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LOWPRI_TIER1_IO_PERIOD_SSD_MSECS</span>  5
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LOWPRI_TIER2_IO_PERIOD_SSD_MSECS</span>  15
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LOWPRI_TIER3_IO_PERIOD_SSD_MSECS</span>  25
+
+
+<span class="enscript-type">int</span>	throttle_windows_msecs[THROTTLE_LEVEL_END + 1] = {
+	0,
+	LOWPRI_TIER1_WINDOW_MSECS,
+	LOWPRI_TIER2_WINDOW_MSECS,
+	LOWPRI_TIER3_WINDOW_MSECS,
+};
+
+<span class="enscript-type">int</span>	throttle_io_period_msecs[THROTTLE_LEVEL_END + 1] = {
+	0,
+	LOWPRI_TIER1_IO_PERIOD_MSECS,
+	LOWPRI_TIER2_IO_PERIOD_MSECS,
+	LOWPRI_TIER3_IO_PERIOD_MSECS,
+};
+
+<span class="enscript-type">int</span>	throttle_io_period_ssd_msecs[THROTTLE_LEVEL_END + 1] = {
+	0,
+	LOWPRI_TIER1_IO_PERIOD_SSD_MSECS,
+	LOWPRI_TIER2_IO_PERIOD_SSD_MSECS,
+	LOWPRI_TIER3_IO_PERIOD_SSD_MSECS,
+};
+
+
+<span class="enscript-type">int</span>	throttled_count[THROTTLE_LEVEL_END + 1];
+
+<span class="enscript-type">struct</span> _throttle_io_info_t {
+        lck_mtx_t       throttle_lock;
+
+	<span class="enscript-type">struct</span> timeval	throttle_last_write_timestamp;
+	<span class="enscript-type">struct</span> timeval	throttle_min_timer_deadline;
+	<span class="enscript-type">struct</span> timeval	throttle_window_start_timestamp[THROTTLE_LEVEL_END + 1];
+	<span class="enscript-type">struct</span> timeval	throttle_last_IO_timestamp[THROTTLE_LEVEL_END + 1];
+	pid_t 		throttle_last_IO_pid[THROTTLE_LEVEL_END + 1];
+	<span class="enscript-type">struct</span> timeval	throttle_start_IO_period_timestamp[THROTTLE_LEVEL_END + 1];
+
+	TAILQ_HEAD( , uthread) throttle_uthlist[THROTTLE_LEVEL_END + 1]; 	<span class="enscript-comment">/* Lists of throttled uthreads */</span>
+	<span class="enscript-type">int</span>		throttle_next_wake_level;
+
+        thread_call_t   throttle_timer_call;
+        int32_t throttle_timer_ref;
+        int32_t throttle_timer_active;
+
+        int32_t throttle_io_count;
+        int32_t throttle_io_count_begin;
+        <span class="enscript-type">int</span>    *throttle_io_periods;
+	uint32_t throttle_io_period_num;
+
+	int32_t throttle_refcnt;
+	int32_t throttle_alloc;
+	int32_t throttle_disabled;
+	int32_t throttle_is_fusion_with_priority;
+};
+
+<span class="enscript-type">struct</span> _throttle_io_info_t _throttle_io_info[LOWPRI_MAX_NUM_DEV];
+
+
+<span class="enscript-type">int</span>	lowpri_throttle_enabled = 1;
+
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">throttle_info_update_internal</span>(<span class="enscript-type">struct</span> _throttle_io_info_t *info, uthread_t ut, <span class="enscript-type">int</span> flags, boolean_t isssd);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">throttle_get_thread_throttle_level</span>(uthread_t ut);
+
+<span class="enscript-comment">/*
+ * Trivial lookup routine that always fails.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_lookup</span>(<span class="enscript-type">struct</span> vnop_lookup_args *ap)
+{
+
+	*ap-&gt;a_vpp = NULL;
+	<span class="enscript-keyword">return</span> (ENOTDIR);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">set_blocksize</span>(<span class="enscript-type">struct</span> vnode *vp, dev_t dev)
+{
+    <span class="enscript-type">int</span> (*size)(dev_t);
+    <span class="enscript-type">int</span> rsize;
+
+    <span class="enscript-keyword">if</span> ((major(dev) &lt; nblkdev) &amp;&amp; (size = bdevsw[major(dev)].d_psize)) {
+        rsize = (*size)(dev);
+	<span class="enscript-keyword">if</span> (rsize &lt;= 0)        <span class="enscript-comment">/* did size fail? */</span>
+	    vp-&gt;v_specsize = DEV_BSIZE;
+	<span class="enscript-keyword">else</span>
+	    vp-&gt;v_specsize = rsize;
+    }
+    <span class="enscript-keyword">else</span>
+	    vp-&gt;v_specsize = DEV_BSIZE;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">set_fsblocksize</span>(<span class="enscript-type">struct</span> vnode *vp)
+{
+	
+	<span class="enscript-keyword">if</span> (vp-&gt;v_type == VBLK) {
+		dev_t dev = (dev_t)vp-&gt;v_rdev;
+		<span class="enscript-type">int</span> maj = major(dev);
+
+		<span class="enscript-keyword">if</span> ((u_int)maj &gt;= (u_int)nblkdev)
+			<span class="enscript-keyword">return</span>;
+
+		vnode_lock(vp);
+		set_blocksize(vp, dev);
+		vnode_unlock(vp);
+	}
+
+}
+
+
+<span class="enscript-comment">/*
+ * Open a special file.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_open</span>(<span class="enscript-type">struct</span> vnop_open_args *ap)
+{
+	<span class="enscript-type">struct</span> proc *p = vfs_context_proc(ap-&gt;a_context);
+	kauth_cred_t cred = vfs_context_ucred(ap-&gt;a_context);
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	dev_t bdev, dev = (dev_t)vp-&gt;v_rdev;
+	<span class="enscript-type">int</span> maj = major(dev);
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-comment">/*
+	 * Don't allow open if fs is mounted -nodev.
+	 */</span>
+	<span class="enscript-keyword">if</span> (vp-&gt;v_mount &amp;&amp; (vp-&gt;v_mount-&gt;mnt_flag &amp; MNT_NODEV))
+		<span class="enscript-keyword">return</span> (ENXIO);
+
+	<span class="enscript-keyword">switch</span> (vp-&gt;v_type) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VCHR</span>:
+		<span class="enscript-keyword">if</span> ((u_int)maj &gt;= (u_int)nchrdev)
+			<span class="enscript-keyword">return</span> (ENXIO);
+		<span class="enscript-keyword">if</span> (cred != FSCRED &amp;&amp; (ap-&gt;a_mode &amp; FWRITE)) {
+			<span class="enscript-comment">/*
+			 * When running in very secure mode, do not allow
+			 * opens for writing of any disk character devices.
+			 */</span>
+			<span class="enscript-keyword">if</span> (securelevel &gt;= 2 &amp;&amp; isdisk(dev, VCHR))
+				<span class="enscript-keyword">return</span> (EPERM);
+
+			<span class="enscript-comment">/* Never allow writing to /dev/mem or /dev/kmem */</span>
+			<span class="enscript-keyword">if</span> (iskmemdev(dev))
+				<span class="enscript-keyword">return</span> (EPERM);
+			<span class="enscript-comment">/*
+			 * When running in secure mode, do not allow opens for
+			 * writing of character devices whose corresponding block
+			 * devices are currently mounted.
+			 */</span>
+			<span class="enscript-keyword">if</span> (securelevel &gt;= 1) {
+				<span class="enscript-keyword">if</span> ((bdev = chrtoblk(dev)) != NODEV &amp;&amp; check_mountedon(bdev, VBLK, &amp;error))
+					<span class="enscript-keyword">return</span> (error);
+			}
+		}
+
+		devsw_lock(dev, S_IFCHR);
+		error = (*cdevsw[maj].d_open)(dev, ap-&gt;a_mode, S_IFCHR, p);
+
+		<span class="enscript-keyword">if</span> (error == 0) {
+			vp-&gt;v_specinfo-&gt;si_opencount++;
+		}
+
+		devsw_unlock(dev, S_IFCHR);
+
+		<span class="enscript-keyword">if</span> (error == 0 &amp;&amp; cdevsw[maj].d_type == D_DISK &amp;&amp; !vp-&gt;v_un.vu_specinfo-&gt;si_initted) {
+			<span class="enscript-type">int</span>	isssd = 0;
+			uint64_t throttle_mask = 0;
+			uint32_t devbsdunit = 0;
+
+			<span class="enscript-keyword">if</span> (VNOP_IOCTL(vp, DKIOCGETTHROTTLEMASK, (caddr_t)&amp;throttle_mask, 0, NULL) == 0) {
+				
+				<span class="enscript-keyword">if</span> (throttle_mask != 0 &amp;&amp;
+				    VNOP_IOCTL(vp, DKIOCISSOLIDSTATE, (caddr_t)&amp;isssd, 0, ap-&gt;a_context) == 0) {
+					<span class="enscript-comment">/*
+					 * as a reasonable approximation, only use the lowest bit of the mask
+					 * to generate a disk unit number
+					 */</span>
+					devbsdunit = num_trailing_0(throttle_mask);
+
+					vnode_lock(vp);
+					
+					vp-&gt;v_un.vu_specinfo-&gt;si_isssd = isssd;
+					vp-&gt;v_un.vu_specinfo-&gt;si_devbsdunit = devbsdunit;
+					vp-&gt;v_un.vu_specinfo-&gt;si_throttle_mask = throttle_mask;
+					vp-&gt;v_un.vu_specinfo-&gt;si_throttleable = 1;
+					vp-&gt;v_un.vu_specinfo-&gt;si_initted = 1;
+
+					vnode_unlock(vp);
+				}
+			}
+			<span class="enscript-keyword">if</span> (vp-&gt;v_un.vu_specinfo-&gt;si_initted == 0) {
+				vnode_lock(vp);
+				vp-&gt;v_un.vu_specinfo-&gt;si_initted = 1;
+				vnode_unlock(vp);
+			}
+		}
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VBLK</span>:
+		<span class="enscript-keyword">if</span> ((u_int)maj &gt;= (u_int)nblkdev)
+			<span class="enscript-keyword">return</span> (ENXIO);
+		<span class="enscript-comment">/*
+		 * When running in very secure mode, do not allow
+		 * opens for writing of any disk block devices.
+		 */</span>
+		<span class="enscript-keyword">if</span> (securelevel &gt;= 2 &amp;&amp; cred != FSCRED &amp;&amp;
+		    (ap-&gt;a_mode &amp; FWRITE) &amp;&amp; bdevsw[maj].d_type == D_DISK)
+			<span class="enscript-keyword">return</span> (EPERM);
+		<span class="enscript-comment">/*
+		 * Do not allow opens of block devices that are
+		 * currently mounted.
+		 */</span>
+		<span class="enscript-keyword">if</span> ( (error = vfs_mountedon(vp)) )
+			<span class="enscript-keyword">return</span> (error);
+
+		devsw_lock(dev, S_IFBLK);
+		error = (*bdevsw[maj].d_open)(dev, ap-&gt;a_mode, S_IFBLK, p);
+		<span class="enscript-keyword">if</span> (!error) {
+			vp-&gt;v_specinfo-&gt;si_opencount++;
+		}
+		devsw_unlock(dev, S_IFBLK);
+
+		<span class="enscript-keyword">if</span> (!error) {
+		    u_int64_t blkcnt;
+		    u_int32_t blksize;
+			<span class="enscript-type">int</span> setsize = 0;
+			u_int32_t size512 = 512;
+
+
+		    <span class="enscript-keyword">if</span> (!VNOP_IOCTL(vp, DKIOCGETBLOCKSIZE, (caddr_t)&amp;blksize, 0, ap-&gt;a_context)) {
+				<span class="enscript-comment">/* Switch to 512 byte sectors (temporarily) */</span>
+
+				<span class="enscript-keyword">if</span> (!VNOP_IOCTL(vp, DKIOCSETBLOCKSIZE, (caddr_t)&amp;size512, FWRITE, ap-&gt;a_context)) {
+			    	<span class="enscript-comment">/* Get the number of 512 byte physical blocks. */</span>
+			    	<span class="enscript-keyword">if</span> (!VNOP_IOCTL(vp, DKIOCGETBLOCKCOUNT, (caddr_t)&amp;blkcnt, 0, ap-&gt;a_context)) {
+						setsize = 1;
+			    	}
+				}
+				<span class="enscript-comment">/* If it doesn't set back, we can't recover */</span>
+				<span class="enscript-keyword">if</span> (VNOP_IOCTL(vp, DKIOCSETBLOCKSIZE, (caddr_t)&amp;blksize, FWRITE, ap-&gt;a_context))
+			    	error = ENXIO;
+		    }
+
+
+			vnode_lock(vp);
+		    set_blocksize(vp, dev);
+
+		    <span class="enscript-comment">/*
+		     * Cache the size in bytes of the block device for later
+		     * use by spec_write().
+		     */</span>
+			<span class="enscript-keyword">if</span> (setsize)
+				vp-&gt;v_specdevsize = blkcnt * (u_int64_t)size512;
+			<span class="enscript-keyword">else</span>
+		    	vp-&gt;v_specdevsize = (u_int64_t)0;	<span class="enscript-comment">/* Default: Can't get */</span>
+			
+			vnode_unlock(vp);
+
+		}
+		<span class="enscript-keyword">return</span>(error);
+	<span class="enscript-reference">default</span>:
+	        panic(<span class="enscript-string">&quot;spec_open type&quot;</span>);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Vnode op for read
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_read</span>(<span class="enscript-type">struct</span> vnop_read_args *ap)
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	<span class="enscript-type">struct</span> uio *uio = ap-&gt;a_uio;
+	<span class="enscript-type">struct</span> buf *bp;
+	daddr64_t bn, nextbn;
+	<span class="enscript-type">long</span> bsize, bscale;
+	<span class="enscript-type">int</span> devBlockSize=0;
+	<span class="enscript-type">int</span> n, on;
+	<span class="enscript-type">int</span> error = 0;
+	dev_t dev;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-keyword">if</span> (uio-&gt;uio_rw != UIO_READ)
+		panic(<span class="enscript-string">&quot;spec_read mode&quot;</span>);
+	<span class="enscript-keyword">if</span> (UIO_SEG_IS_USER_SPACE(uio-&gt;uio_segflg))
+		panic(<span class="enscript-string">&quot;spec_read proc&quot;</span>);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (uio_resid(uio) == 0)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">switch</span> (vp-&gt;v_type) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VCHR</span>:
+                <span class="enscript-keyword">if</span> (cdevsw[major(vp-&gt;v_rdev)].d_type == D_DISK &amp;&amp; vp-&gt;v_un.vu_specinfo-&gt;si_throttleable) {
+			<span class="enscript-type">struct</span> _throttle_io_info_t *throttle_info;
+
+			throttle_info = &amp;_throttle_io_info[vp-&gt;v_un.vu_specinfo-&gt;si_devbsdunit];
+			throttle_info_update_internal(throttle_info, NULL, 0, vp-&gt;v_un.vu_specinfo-&gt;si_isssd);
+                }
+		error = (*cdevsw[major(vp-&gt;v_rdev)].d_read)
+			(vp-&gt;v_rdev, uio, ap-&gt;a_ioflag);
+
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VBLK</span>:
+		<span class="enscript-keyword">if</span> (uio-&gt;uio_offset &lt; 0)
+			<span class="enscript-keyword">return</span> (EINVAL);
+
+		dev = vp-&gt;v_rdev;
+
+		devBlockSize = vp-&gt;v_specsize;
+
+		<span class="enscript-keyword">if</span> (devBlockSize &gt; PAGE_SIZE) 
+			<span class="enscript-keyword">return</span> (EINVAL);
+
+	        bscale = PAGE_SIZE / devBlockSize;
+		bsize = bscale * devBlockSize;
+
+		<span class="enscript-keyword">do</span> {
+			on = uio-&gt;uio_offset % bsize;
+
+			bn = (daddr64_t)((uio-&gt;uio_offset / devBlockSize) &amp;~ (bscale - 1));
+			
+			<span class="enscript-keyword">if</span> (vp-&gt;v_speclastr + bscale == bn) {
+			        nextbn = bn + bscale;
+				error = buf_breadn(vp, bn, (<span class="enscript-type">int</span>)bsize, &amp;nextbn,
+					       (<span class="enscript-type">int</span> *)&amp;bsize, 1, NOCRED, &amp;bp);
+			} <span class="enscript-keyword">else</span>
+			        error = buf_bread(vp, bn, (<span class="enscript-type">int</span>)bsize, NOCRED, &amp;bp);
+
+			vnode_lock(vp);
+			vp-&gt;v_speclastr = bn;
+			vnode_unlock(vp);
+
+			n = bsize - buf_resid(bp);
+			<span class="enscript-keyword">if</span> ((on &gt; n) || error) {
+			        <span class="enscript-keyword">if</span> (!error)
+				        error = EINVAL;
+				buf_brelse(bp);
+				<span class="enscript-keyword">return</span> (error);
+			}
+			n = min((<span class="enscript-type">unsigned</span>)(n  - on), uio_resid(uio));
+
+			error = uiomove((<span class="enscript-type">char</span> *)buf_dataptr(bp) + on, n, uio);
+			<span class="enscript-keyword">if</span> (n + on == bsize)
+				buf_markaged(bp);
+			buf_brelse(bp);
+		} <span class="enscript-keyword">while</span> (error == 0 &amp;&amp; uio_resid(uio) &gt; 0 &amp;&amp; n != 0);
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;spec_read type&quot;</span>);
+	}
+	<span class="enscript-comment">/* NOTREACHED */</span>
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Vnode op for write
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_write</span>(<span class="enscript-type">struct</span> vnop_write_args *ap)
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	<span class="enscript-type">struct</span> uio *uio = ap-&gt;a_uio;
+	<span class="enscript-type">struct</span> buf *bp;
+	daddr64_t bn;
+	<span class="enscript-type">int</span> bsize, blkmask, bscale;
+	<span class="enscript-type">int</span> io_sync;
+	<span class="enscript-type">int</span> devBlockSize=0;
+	<span class="enscript-type">int</span> n, on;
+	<span class="enscript-type">int</span> error = 0;
+	dev_t dev;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-keyword">if</span> (uio-&gt;uio_rw != UIO_WRITE)
+		panic(<span class="enscript-string">&quot;spec_write mode&quot;</span>);
+	<span class="enscript-keyword">if</span> (UIO_SEG_IS_USER_SPACE(uio-&gt;uio_segflg))
+		panic(<span class="enscript-string">&quot;spec_write proc&quot;</span>);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">switch</span> (vp-&gt;v_type) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VCHR</span>:
+                <span class="enscript-keyword">if</span> (cdevsw[major(vp-&gt;v_rdev)].d_type == D_DISK &amp;&amp; vp-&gt;v_un.vu_specinfo-&gt;si_throttleable) {
+			<span class="enscript-type">struct</span> _throttle_io_info_t *throttle_info;
+
+			throttle_info = &amp;_throttle_io_info[vp-&gt;v_un.vu_specinfo-&gt;si_devbsdunit];
+
+			throttle_info_update_internal(throttle_info, NULL, 0, vp-&gt;v_un.vu_specinfo-&gt;si_isssd);
+
+			microuptime(&amp;throttle_info-&gt;throttle_last_write_timestamp);
+                }
+		error = (*cdevsw[major(vp-&gt;v_rdev)].d_write)
+			(vp-&gt;v_rdev, uio, ap-&gt;a_ioflag);
+
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VBLK</span>:
+		<span class="enscript-keyword">if</span> (uio_resid(uio) == 0)
+			<span class="enscript-keyword">return</span> (0);
+		<span class="enscript-keyword">if</span> (uio-&gt;uio_offset &lt; 0)
+			<span class="enscript-keyword">return</span> (EINVAL);
+
+		io_sync = (ap-&gt;a_ioflag &amp; IO_SYNC);
+
+		dev = (vp-&gt;v_rdev);
+
+		devBlockSize = vp-&gt;v_specsize;
+		<span class="enscript-keyword">if</span> (devBlockSize &gt; PAGE_SIZE)
+			<span class="enscript-keyword">return</span>(EINVAL);
+
+	        bscale = PAGE_SIZE / devBlockSize;
+		blkmask = bscale - 1;
+		bsize = bscale * devBlockSize;
+		
+
+		<span class="enscript-keyword">do</span> {
+			bn = (daddr64_t)((uio-&gt;uio_offset / devBlockSize) &amp;~ blkmask);
+			on = uio-&gt;uio_offset % bsize;
+
+			n = min((<span class="enscript-type">unsigned</span>)(bsize - on), uio_resid(uio));
+
+			<span class="enscript-comment">/*
+			 * Use buf_getblk() as an optimization IFF:
+			 *
+			 * 1)	We are reading exactly a block on a block
+			 *	aligned boundary
+			 * 2)	We know the size of the device from spec_open
+			 * 3)	The read doesn't span the end of the device
+			 *
+			 * Otherwise, we fall back on buf_bread().
+			 */</span>
+			<span class="enscript-keyword">if</span> (n == bsize &amp;&amp;
+			    vp-&gt;v_specdevsize != (u_int64_t)0 &amp;&amp;
+			    (uio-&gt;uio_offset + (u_int64_t)n) &gt; vp-&gt;v_specdevsize) {
+			    <span class="enscript-comment">/* reduce the size of the read to what is there */</span>
+			    n = (uio-&gt;uio_offset + (u_int64_t)n) - vp-&gt;v_specdevsize;
+			}
+
+			<span class="enscript-keyword">if</span> (n == bsize)
+			        bp = buf_getblk(vp, bn, bsize, 0, 0, BLK_WRITE);
+			<span class="enscript-keyword">else</span>
+			        error = (<span class="enscript-type">int</span>)buf_bread(vp, bn, bsize, NOCRED, &amp;bp);
+
+			<span class="enscript-comment">/* Translate downstream error for upstream, if needed */</span>
+			<span class="enscript-keyword">if</span> (!error)
+				error = (<span class="enscript-type">int</span>)buf_error(bp);
+			<span class="enscript-keyword">if</span> (error) {
+				buf_brelse(bp);
+				<span class="enscript-keyword">return</span> (error);
+			}
+			n = min(n, bsize - buf_resid(bp));
+
+			error = uiomove((<span class="enscript-type">char</span> *)buf_dataptr(bp) + on, n, uio);
+			<span class="enscript-keyword">if</span> (error) {
+				buf_brelse(bp);
+				<span class="enscript-keyword">return</span> (error);
+			}
+			buf_markaged(bp);
+
+			<span class="enscript-keyword">if</span> (io_sync) 
+			        error = buf_bwrite(bp);
+			<span class="enscript-keyword">else</span> {
+			        <span class="enscript-keyword">if</span> ((n + on) == bsize)
+				        error = buf_bawrite(bp);
+				<span class="enscript-keyword">else</span>
+				        error = buf_bdwrite(bp);
+			}
+		} <span class="enscript-keyword">while</span> (error == 0 &amp;&amp; uio_resid(uio) &gt; 0 &amp;&amp; n != 0);
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;spec_write type&quot;</span>);
+	}
+	<span class="enscript-comment">/* NOTREACHED */</span>
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Device ioctl operation.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_ioctl</span>(<span class="enscript-type">struct</span> vnop_ioctl_args *ap)
+{
+	proc_t p = vfs_context_proc(ap-&gt;a_context);
+	dev_t dev = ap-&gt;a_vp-&gt;v_rdev;
+	<span class="enscript-type">int</span>	retval = 0;
+
+	KERNEL_DEBUG_CONSTANT(FSDBG_CODE(DBG_IOCTL, 0) | DBG_FUNC_START,
+		dev, ap-&gt;a_command, ap-&gt;a_fflag, ap-&gt;a_vp-&gt;v_type, 0);
+
+	<span class="enscript-keyword">switch</span> (ap-&gt;a_vp-&gt;v_type) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VCHR</span>:
+		retval = (*cdevsw[major(dev)].d_ioctl)(dev, ap-&gt;a_command, ap-&gt;a_data,
+						       ap-&gt;a_fflag, p);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VBLK</span>:
+		<span class="enscript-keyword">if</span> (kdebug_enable) {
+			<span class="enscript-keyword">if</span> (ap-&gt;a_command == DKIOCUNMAP) {
+				dk_unmap_t	*unmap;
+				dk_extent_t	*extent;
+				uint32_t	i;
+
+				unmap = (dk_unmap_t *)ap-&gt;a_data;
+				extent = unmap-&gt;extents;
+
+				<span class="enscript-keyword">for</span> (i = 0; i &lt; unmap-&gt;extentsCount; i++, extent++) {
+					KERNEL_DEBUG_CONSTANT(FSDBG_CODE(DBG_IOCTL, 1) | DBG_FUNC_NONE, dev, 	
+						extent-&gt;offset/ap-&gt;a_vp-&gt;v_specsize, extent-&gt;length, 0, 0);
+				}
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ap-&gt;a_command == DKIOCSYNCHRONIZE) {
+				dk_synchronize_t *synch;
+				synch = (dk_synchronize_t *)ap-&gt;a_data;
+				KERNEL_DEBUG_CONSTANT(FSDBG_CODE(DBG_IOCTL, 1) | DBG_FUNC_NONE, dev, ap-&gt;a_command, 				
+					synch-&gt;options, 0, 0);
+			}
+		}
+		retval = (*bdevsw[major(dev)].d_ioctl)(dev, ap-&gt;a_command, ap-&gt;a_data, ap-&gt;a_fflag, p);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;spec_ioctl&quot;</span>);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	KERNEL_DEBUG_CONSTANT(FSDBG_CODE(DBG_IOCTL, 0) | DBG_FUNC_END,
+		dev, ap-&gt;a_command, ap-&gt;a_fflag, retval, 0);
+
+	<span class="enscript-keyword">return</span> (retval);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_select</span>(<span class="enscript-type">struct</span> vnop_select_args *ap)
+{
+	proc_t p = vfs_context_proc(ap-&gt;a_context);
+	dev_t dev;
+
+	<span class="enscript-keyword">switch</span> (ap-&gt;a_vp-&gt;v_type) {
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (1);		<span class="enscript-comment">/* XXX */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VCHR</span>:
+		dev = ap-&gt;a_vp-&gt;v_rdev;
+		<span class="enscript-keyword">return</span> (*cdevsw[major(dev)].d_select)(dev, ap-&gt;a_which, ap-&gt;a_wql, p);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">filt_specattach</span>(<span class="enscript-type">struct</span> knote *kn);
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_kqfilter</span>(vnode_t vp, <span class="enscript-type">struct</span> knote *kn)
+{
+	dev_t dev;
+	<span class="enscript-type">int</span> err;
+
+	assert(vnode_ischr(vp));
+
+	dev = vnode_specrdev(vp);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NETWORKING</span>
+	<span class="enscript-comment">/* Try a bpf device, as defined in bsd/net/bpf.c */</span>
+	<span class="enscript-keyword">if</span> ((err = bpfkqfilter(dev, kn)) == 0) {
+		<span class="enscript-keyword">return</span> err;
+	}
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-comment">/* Try to attach to other char special devices */</span>
+	err = filt_specattach(kn);
+
+	<span class="enscript-keyword">return</span> err;
+}
+
+<span class="enscript-comment">/*
+ * Synch buffers associated with a block device
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_fsync_internal</span>(vnode_t vp, <span class="enscript-type">int</span> waitfor, __unused vfs_context_t context)
+{
+	<span class="enscript-keyword">if</span> (vp-&gt;v_type == VCHR)
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-comment">/*
+	 * Flush all dirty buffers associated with a block device.
+	 */</span>
+	buf_flushdirtyblks(vp, (waitfor == MNT_WAIT || waitfor == MNT_DWAIT), 0, <span class="enscript-string">&quot;spec_fsync&quot;</span>);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_fsync</span>(<span class="enscript-type">struct</span> vnop_fsync_args *ap)
+{
+	<span class="enscript-keyword">return</span> spec_fsync_internal(ap-&gt;a_vp, ap-&gt;a_waitfor, ap-&gt;a_context);
+}
+
+
+<span class="enscript-comment">/*
+ * Just call the device strategy routine
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">throttle_init</span>(<span class="enscript-type">void</span>);
+
+
+#<span class="enscript-reference">if</span> 0 
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DEBUG_ALLOC_THROTTLE_INFO</span>(format, debug_info, args...)	\
+        <span class="enscript-keyword">do</span> {                                                    \
+               <span class="enscript-keyword">if</span> ((debug_info)-&gt;alloc)                           \
+               printf(<span class="enscript-string">&quot;%s: &quot;</span>format, __FUNCTION__, ## args);     \
+       } <span class="enscript-keyword">while</span>(0)
+
+#<span class="enscript-reference">else</span> 
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DEBUG_ALLOC_THROTTLE_INFO</span>(format, debug_info, args...)
+#<span class="enscript-reference">endif</span>
+
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_debug, OID_AUTO, lowpri_throttle_tier1_window_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;throttle_windows_msecs[THROTTLE_LEVEL_TIER1], 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_debug, OID_AUTO, lowpri_throttle_tier2_window_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;throttle_windows_msecs[THROTTLE_LEVEL_TIER2], 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_debug, OID_AUTO, lowpri_throttle_tier3_window_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;throttle_windows_msecs[THROTTLE_LEVEL_TIER3], 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_debug, OID_AUTO, lowpri_throttle_tier1_io_period_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;throttle_io_period_msecs[THROTTLE_LEVEL_TIER1], 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_debug, OID_AUTO, lowpri_throttle_tier2_io_period_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;throttle_io_period_msecs[THROTTLE_LEVEL_TIER2], 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_debug, OID_AUTO, lowpri_throttle_tier3_io_period_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;throttle_io_period_msecs[THROTTLE_LEVEL_TIER3], 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_debug, OID_AUTO, lowpri_throttle_tier1_io_period_ssd_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;throttle_io_period_ssd_msecs[THROTTLE_LEVEL_TIER1], 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_debug, OID_AUTO, lowpri_throttle_tier2_io_period_ssd_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;throttle_io_period_ssd_msecs[THROTTLE_LEVEL_TIER2], 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_debug, OID_AUTO, lowpri_throttle_tier3_io_period_ssd_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;throttle_io_period_ssd_msecs[THROTTLE_LEVEL_TIER3], 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_debug, OID_AUTO, lowpri_throttle_enabled, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;lowpri_throttle_enabled, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+
+<span class="enscript-type">static</span> lck_grp_t        *throttle_mtx_grp;
+<span class="enscript-type">static</span> lck_attr_t       *throttle_mtx_attr;
+<span class="enscript-type">static</span> lck_grp_attr_t   *throttle_mtx_grp_attr;
+
+
+<span class="enscript-comment">/*
+ * throttled I/O helper function
+ * convert the index of the lowest set bit to a device index
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">num_trailing_0</span>(uint64_t n)
+{
+	<span class="enscript-comment">/*
+	 * since in most cases the number of trailing 0s is very small,
+	 * we simply counting sequentially from the lowest bit
+	 */</span>
+	<span class="enscript-keyword">if</span> (n == 0)
+		<span class="enscript-keyword">return</span> <span class="enscript-keyword">sizeof</span>(n) * 8;
+	<span class="enscript-type">int</span> count = 0;
+	<span class="enscript-keyword">while</span> (!ISSET(n, 1)) {
+		n &gt;&gt;= 1;
+		++count;
+	}
+	<span class="enscript-keyword">return</span> count;
+}
+
+
+<span class="enscript-comment">/*
+ * Release the reference and if the item was allocated and this is the last
+ * reference then free it.
+ *
+ * This routine always returns the old value.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">throttle_info_rel</span>(<span class="enscript-type">struct</span> _throttle_io_info_t *info)
+{
+	SInt32 oldValue = OSDecrementAtomic(&amp;info-&gt;throttle_refcnt);
+
+	DEBUG_ALLOC_THROTTLE_INFO(<span class="enscript-string">&quot;refcnt = %d info = %p\n&quot;</span>, 
+		info, (<span class="enscript-type">int</span>)(oldValue -1), info );
+
+	<span class="enscript-comment">/* The reference count just went negative, very bad */</span>
+	<span class="enscript-keyword">if</span> (oldValue == 0)
+		panic(<span class="enscript-string">&quot;throttle info ref cnt went negative!&quot;</span>);
+
+	<span class="enscript-comment">/* 
+	 * Once reference count is zero, no one else should be able to take a 
+	 * reference 
+	 */</span>
+	<span class="enscript-keyword">if</span> ((info-&gt;throttle_refcnt == 0) &amp;&amp; (info-&gt;throttle_alloc)) {
+		DEBUG_ALLOC_THROTTLE_INFO(<span class="enscript-string">&quot;Freeing info = %p\n&quot;</span>, info);
+		
+		lck_mtx_destroy(&amp;info-&gt;throttle_lock, throttle_mtx_grp);
+		FREE(info, M_TEMP); 
+	}
+	<span class="enscript-keyword">return</span> oldValue;
+}
+
+
+<span class="enscript-comment">/*
+ * Just take a reference on the throttle info structure.
+ *
+ * This routine always returns the old value.
+ */</span>
+<span class="enscript-type">static</span> SInt32
+<span class="enscript-function-name">throttle_info_ref</span>(<span class="enscript-type">struct</span> _throttle_io_info_t *info)
+{
+	SInt32 oldValue = OSIncrementAtomic(&amp;info-&gt;throttle_refcnt);
+
+	DEBUG_ALLOC_THROTTLE_INFO(<span class="enscript-string">&quot;refcnt = %d info = %p\n&quot;</span>, 
+		info, (<span class="enscript-type">int</span>)(oldValue -1), info );
+	<span class="enscript-comment">/* Allocated items should never have a reference of zero */</span>
+	<span class="enscript-keyword">if</span> (info-&gt;throttle_alloc &amp;&amp; (oldValue == 0))
+		panic(<span class="enscript-string">&quot;Taking a reference without calling create throttle info!\n&quot;</span>);
+
+	<span class="enscript-keyword">return</span> oldValue;
+}
+
+<span class="enscript-comment">/*
+ * on entry the throttle_lock is held...
+ * this function is responsible for taking
+ * and dropping the reference on the info
+ * structure which will keep it from going
+ * away while the timer is running if it
+ * happens to have been dynamically allocated by
+ * a network fileystem kext which is now trying
+ * to free it
+ */</span>
+<span class="enscript-type">static</span> uint32_t
+<span class="enscript-function-name">throttle_timer_start</span>(<span class="enscript-type">struct</span> _throttle_io_info_t *info, boolean_t update_io_count, <span class="enscript-type">int</span> wakelevel)
+{	
+	<span class="enscript-type">struct</span> timeval  elapsed;
+	<span class="enscript-type">struct</span> timeval  now;
+	<span class="enscript-type">struct</span> timeval  period;
+	uint64_t	elapsed_msecs;
+	<span class="enscript-type">int</span>		throttle_level;
+	<span class="enscript-type">int</span>		level;
+	<span class="enscript-type">int</span>		msecs;
+	boolean_t	throttled = FALSE;
+	boolean_t	need_timer = FALSE;
+
+	microuptime(&amp;now);
+
+	<span class="enscript-keyword">if</span> (update_io_count == TRUE) {
+		info-&gt;throttle_io_count_begin = info-&gt;throttle_io_count;
+		info-&gt;throttle_io_period_num++;
+
+		<span class="enscript-keyword">while</span> (wakelevel &gt;= THROTTLE_LEVEL_THROTTLED)
+			info-&gt;throttle_start_IO_period_timestamp[wakelevel--] = now;
+
+		info-&gt;throttle_min_timer_deadline = now;
+
+		msecs = info-&gt;throttle_io_periods[THROTTLE_LEVEL_THROTTLED];
+		period.tv_sec = msecs / 1000;
+		period.tv_usec = (msecs % 1000) * 1000;
+
+		timevaladd(&amp;info-&gt;throttle_min_timer_deadline, &amp;period);
+	}
+	<span class="enscript-keyword">for</span> (throttle_level = THROTTLE_LEVEL_START; throttle_level &lt; THROTTLE_LEVEL_END; throttle_level++) {
+
+		elapsed = now;
+		timevalsub(&amp;elapsed, &amp;info-&gt;throttle_window_start_timestamp[throttle_level]);
+		elapsed_msecs = (uint64_t)elapsed.tv_sec * (uint64_t)1000 + (elapsed.tv_usec / 1000);
+
+		<span class="enscript-keyword">for</span> (level = throttle_level + 1; level &lt;= THROTTLE_LEVEL_END; level++) {
+
+			<span class="enscript-keyword">if</span> (!TAILQ_EMPTY(&amp;info-&gt;throttle_uthlist[level])) {
+
+				<span class="enscript-keyword">if</span> (elapsed_msecs &lt; (uint64_t)throttle_windows_msecs[level]) {
+					<span class="enscript-comment">/*
+					 * we had an I/O occur at a higher priority tier within
+					 * this tier's throttle window
+					 */</span>
+					throttled = TRUE;
+				}
+				<span class="enscript-comment">/*
+				 * we assume that the windows are the same or longer
+				 * as we drop through the throttling tiers...  thus
+				 * we can stop looking once we run into a tier with
+				 * threads to schedule regardless of whether it's
+				 * still in its throttling window or not
+				 */</span>
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+		<span class="enscript-keyword">if</span> (throttled == TRUE)
+			<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">if</span> (throttled == TRUE) {
+		uint64_t	deadline = 0;
+		<span class="enscript-type">struct</span> timeval  target;
+		<span class="enscript-type">struct</span> timeval  min_target;
+
+	        <span class="enscript-comment">/*
+		 * we've got at least one tier still in a throttled window
+		 * so we need a timer running... compute the next deadline
+		 * and schedule it
+		 */</span>
+		<span class="enscript-keyword">for</span> (level = throttle_level+1; level &lt;= THROTTLE_LEVEL_END; level++) {
+
+			<span class="enscript-keyword">if</span> (TAILQ_EMPTY(&amp;info-&gt;throttle_uthlist[level]))
+				<span class="enscript-keyword">continue</span>;
+
+			target = info-&gt;throttle_start_IO_period_timestamp[level];
+
+			msecs = info-&gt;throttle_io_periods[level];
+			period.tv_sec = msecs / 1000;
+			period.tv_usec = (msecs % 1000) * 1000;
+
+			timevaladd(&amp;target, &amp;period);
+			
+			<span class="enscript-keyword">if</span> (need_timer == FALSE || timevalcmp(&amp;target, &amp;min_target, &lt;)) {
+				min_target = target;
+				need_timer = TRUE;
+			}
+		}
+		<span class="enscript-keyword">if</span> (timevalcmp(&amp;info-&gt;throttle_min_timer_deadline, &amp;now, &gt;)) {
+		        <span class="enscript-keyword">if</span> (timevalcmp(&amp;info-&gt;throttle_min_timer_deadline, &amp;min_target, &gt;))
+			        min_target = info-&gt;throttle_min_timer_deadline;
+		}
+
+		<span class="enscript-keyword">if</span> (info-&gt;throttle_timer_active) {
+			<span class="enscript-keyword">if</span> (thread_call_cancel(info-&gt;throttle_timer_call) == FALSE) {
+				<span class="enscript-comment">/*
+				 * couldn't kill the timer because it's already
+				 * been dispatched, so don't try to start a new
+				 * one... once we drop the lock, the timer will
+				 * proceed and eventually re-run this function
+				 */</span>
+				need_timer = FALSE;
+			} <span class="enscript-keyword">else</span>
+				info-&gt;throttle_timer_active = 0;
+		}
+		<span class="enscript-keyword">if</span> (need_timer == TRUE) {
+			<span class="enscript-comment">/*
+			 * This is defined as an int (32-bit) rather than a 64-bit
+			 * value because it would need a really big period in the
+			 * order of ~500 days to overflow this. So, we let this be
+			 * 32-bit which allows us to use the clock_interval_to_deadline()
+			 * routine.
+			 */</span>
+			<span class="enscript-type">int</span>	target_msecs;
+
+			<span class="enscript-keyword">if</span> (info-&gt;throttle_timer_ref == 0) {
+				<span class="enscript-comment">/*
+				 * take a reference for the timer
+				 */</span>
+				throttle_info_ref(info);
+
+				info-&gt;throttle_timer_ref = 1;
+			}
+			elapsed = min_target;
+			timevalsub(&amp;elapsed, &amp;now);
+			target_msecs = elapsed.tv_sec * 1000 + elapsed.tv_usec / 1000;
+
+			<span class="enscript-keyword">if</span> (target_msecs &lt;= 0) {
+				<span class="enscript-comment">/*
+				 * we may have computed a deadline slightly in the past
+				 * due to various factors... if so, just set the timer
+				 * to go off in the near future (we don't need to be precise)
+				 */</span>
+				target_msecs = 1;
+			}
+			clock_interval_to_deadline(target_msecs, 1000000, &amp;deadline);
+
+			thread_call_enter_delayed(info-&gt;throttle_timer_call, deadline);
+			info-&gt;throttle_timer_active = 1;
+		}
+	}
+	<span class="enscript-keyword">return</span> (throttle_level);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">throttle_timer</span>(<span class="enscript-type">struct</span> _throttle_io_info_t *info)
+{
+	uthread_t       ut, utlist;
+	<span class="enscript-type">struct</span> timeval	elapsed;
+	<span class="enscript-type">struct</span> timeval	now;
+	uint64_t	elapsed_msecs;
+	<span class="enscript-type">int</span>		throttle_level;
+	<span class="enscript-type">int</span>		level;
+	<span class="enscript-type">int</span>		wake_level;
+	caddr_t		wake_address = NULL;
+        boolean_t	update_io_count = FALSE;
+	boolean_t	need_wakeup = FALSE;
+	boolean_t	need_release = FALSE;
+
+	ut = NULL;
+        lck_mtx_lock(&amp;info-&gt;throttle_lock);
+
+	info-&gt;throttle_timer_active = 0;
+	microuptime(&amp;now);
+
+	elapsed = now;
+	timevalsub(&amp;elapsed, &amp;info-&gt;throttle_start_IO_period_timestamp[THROTTLE_LEVEL_THROTTLED]);
+	elapsed_msecs = (uint64_t)elapsed.tv_sec * (uint64_t)1000 + (elapsed.tv_usec / 1000);
+
+	<span class="enscript-keyword">if</span> (elapsed_msecs &gt;= (uint64_t)info-&gt;throttle_io_periods[THROTTLE_LEVEL_THROTTLED]) {
+
+		wake_level = info-&gt;throttle_next_wake_level;
+
+		<span class="enscript-keyword">for</span> (level = THROTTLE_LEVEL_START; level &lt; THROTTLE_LEVEL_END; level++) {
+
+			elapsed = now;
+			timevalsub(&amp;elapsed, &amp;info-&gt;throttle_start_IO_period_timestamp[wake_level]);
+			elapsed_msecs = (uint64_t)elapsed.tv_sec * (uint64_t)1000 + (elapsed.tv_usec / 1000);
+
+			<span class="enscript-keyword">if</span> (elapsed_msecs &gt;= (uint64_t)info-&gt;throttle_io_periods[wake_level] &amp;&amp; !TAILQ_EMPTY(&amp;info-&gt;throttle_uthlist[wake_level])) {
+				<span class="enscript-comment">/*
+				 * we're closing out the current IO period...
+				 * if we have a waiting thread, wake it up
+				 * after we have reset the I/O window info
+				 */</span>
+				need_wakeup = TRUE;
+				update_io_count = TRUE;
+
+				info-&gt;throttle_next_wake_level = wake_level - 1;
+
+				<span class="enscript-keyword">if</span> (info-&gt;throttle_next_wake_level == THROTTLE_LEVEL_START)
+					info-&gt;throttle_next_wake_level = THROTTLE_LEVEL_END;
+
+				<span class="enscript-keyword">break</span>;
+			}
+			wake_level--;
+
+			<span class="enscript-keyword">if</span> (wake_level == THROTTLE_LEVEL_START)
+				wake_level = THROTTLE_LEVEL_END;
+		}
+	}
+	<span class="enscript-keyword">if</span> (need_wakeup == TRUE) {
+		<span class="enscript-keyword">if</span> (!TAILQ_EMPTY(&amp;info-&gt;throttle_uthlist[wake_level])) {
+
+			ut = (uthread_t)TAILQ_FIRST(&amp;info-&gt;throttle_uthlist[wake_level]);
+			TAILQ_REMOVE(&amp;info-&gt;throttle_uthlist[wake_level], ut, uu_throttlelist);
+			ut-&gt;uu_on_throttlelist = THROTTLE_LEVEL_NONE;
+
+			wake_address = (caddr_t)&amp;ut-&gt;uu_on_throttlelist;
+		}
+	} <span class="enscript-keyword">else</span>
+		wake_level = THROTTLE_LEVEL_START;
+
+        throttle_level = throttle_timer_start(info, update_io_count, wake_level);
+
+	<span class="enscript-keyword">if</span> (wake_address != NULL)
+		wakeup(wake_address);
+
+	<span class="enscript-keyword">for</span> (level = THROTTLE_LEVEL_THROTTLED; level &lt;= throttle_level; level++) {
+
+		TAILQ_FOREACH_SAFE(ut, &amp;info-&gt;throttle_uthlist[level], uu_throttlelist, utlist) {
+
+			TAILQ_REMOVE(&amp;info-&gt;throttle_uthlist[level], ut, uu_throttlelist);
+			ut-&gt;uu_on_throttlelist = THROTTLE_LEVEL_NONE;
+
+			wakeup(&amp;ut-&gt;uu_on_throttlelist);
+		}
+	}
+	<span class="enscript-keyword">if</span> (info-&gt;throttle_timer_active == 0 &amp;&amp; info-&gt;throttle_timer_ref) {
+		info-&gt;throttle_timer_ref = 0;
+		need_release = TRUE;
+	}
+        lck_mtx_unlock(&amp;info-&gt;throttle_lock);
+
+	<span class="enscript-keyword">if</span> (need_release == TRUE)
+		throttle_info_rel(info);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">throttle_add_to_list</span>(<span class="enscript-type">struct</span> _throttle_io_info_t *info, uthread_t ut, <span class="enscript-type">int</span> mylevel, boolean_t insert_tail)
+{
+	boolean_t start_timer = FALSE;
+	<span class="enscript-type">int</span> level = THROTTLE_LEVEL_START;
+
+	<span class="enscript-keyword">if</span> (TAILQ_EMPTY(&amp;info-&gt;throttle_uthlist[mylevel])) {
+		info-&gt;throttle_start_IO_period_timestamp[mylevel] = info-&gt;throttle_last_IO_timestamp[mylevel];
+		start_timer = TRUE;
+	}
+
+	<span class="enscript-keyword">if</span> (insert_tail == TRUE)
+		TAILQ_INSERT_TAIL(&amp;info-&gt;throttle_uthlist[mylevel], ut, uu_throttlelist);
+	<span class="enscript-keyword">else</span>
+		TAILQ_INSERT_HEAD(&amp;info-&gt;throttle_uthlist[mylevel], ut, uu_throttlelist);
+
+	ut-&gt;uu_on_throttlelist = mylevel;
+
+	<span class="enscript-keyword">if</span> (start_timer == TRUE) {
+		<span class="enscript-comment">/* we may need to start or rearm the timer */</span>
+		level = throttle_timer_start(info, FALSE, THROTTLE_LEVEL_START);
+
+		<span class="enscript-keyword">if</span> (level == THROTTLE_LEVEL_END) {
+			<span class="enscript-keyword">if</span> (ut-&gt;uu_on_throttlelist &gt;= THROTTLE_LEVEL_THROTTLED) {
+				TAILQ_REMOVE(&amp;info-&gt;throttle_uthlist[ut-&gt;uu_on_throttlelist], ut, uu_throttlelist);
+
+				ut-&gt;uu_on_throttlelist = THROTTLE_LEVEL_NONE;
+			}
+		}
+	}
+	<span class="enscript-keyword">return</span> (level);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">throttle_init_throttle_window</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> throttle_window_size;
+
+	<span class="enscript-comment">/*
+	 * The hierarchy of throttle window values is as follows:
+	 * - Global defaults
+	 * - Device tree properties
+	 * - Boot-args
+	 * All values are specified in msecs.
+	 */</span>
+
+	<span class="enscript-comment">/* Override global values with device-tree properties */</span>
+	<span class="enscript-keyword">if</span> (PE_get_default(<span class="enscript-string">&quot;kern.io_throttle_window_tier1&quot;</span>, &amp;throttle_window_size, <span class="enscript-keyword">sizeof</span>(throttle_window_size)))
+		throttle_windows_msecs[THROTTLE_LEVEL_TIER1] = throttle_window_size;
+
+	<span class="enscript-keyword">if</span> (PE_get_default(<span class="enscript-string">&quot;kern.io_throttle_window_tier2&quot;</span>, &amp;throttle_window_size, <span class="enscript-keyword">sizeof</span>(throttle_window_size)))
+		throttle_windows_msecs[THROTTLE_LEVEL_TIER2] = throttle_window_size;
+
+	<span class="enscript-keyword">if</span> (PE_get_default(<span class="enscript-string">&quot;kern.io_throttle_window_tier3&quot;</span>, &amp;throttle_window_size, <span class="enscript-keyword">sizeof</span>(throttle_window_size)))
+		throttle_windows_msecs[THROTTLE_LEVEL_TIER3] = throttle_window_size;
+	
+	<span class="enscript-comment">/* Override with boot-args */</span>
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;io_throttle_window_tier1&quot;</span>, &amp;throttle_window_size, <span class="enscript-keyword">sizeof</span>(throttle_window_size)))
+		throttle_windows_msecs[THROTTLE_LEVEL_TIER1] = throttle_window_size;
+
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;io_throttle_window_tier2&quot;</span>, &amp;throttle_window_size, <span class="enscript-keyword">sizeof</span>(throttle_window_size)))
+		throttle_windows_msecs[THROTTLE_LEVEL_TIER2] = throttle_window_size;
+	
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;io_throttle_window_tier3&quot;</span>, &amp;throttle_window_size, <span class="enscript-keyword">sizeof</span>(throttle_window_size)))
+		throttle_windows_msecs[THROTTLE_LEVEL_TIER3] = throttle_window_size;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">throttle_init_throttle_period</span>(<span class="enscript-type">struct</span> _throttle_io_info_t *info, boolean_t isssd)
+{
+	<span class="enscript-type">int</span> throttle_period_size;
+
+	<span class="enscript-comment">/*
+	 * The hierarchy of throttle period values is as follows:
+	 * - Global defaults
+	 * - Device tree properties
+	 * - Boot-args
+	 * All values are specified in msecs.
+	 */</span>
+
+	<span class="enscript-comment">/* Assign global defaults */</span>
+	<span class="enscript-keyword">if</span> ((isssd == TRUE) &amp;&amp; (info-&gt;throttle_is_fusion_with_priority == 0))
+		info-&gt;throttle_io_periods = &amp;throttle_io_period_ssd_msecs[0];
+	<span class="enscript-keyword">else</span>
+		info-&gt;throttle_io_periods = &amp;throttle_io_period_msecs[0];
+
+	<span class="enscript-comment">/* Override global values with device-tree properties */</span>
+	<span class="enscript-keyword">if</span> (PE_get_default(<span class="enscript-string">&quot;kern.io_throttle_period_tier1&quot;</span>, &amp;throttle_period_size, <span class="enscript-keyword">sizeof</span>(throttle_period_size)))
+		info-&gt;throttle_io_periods[THROTTLE_LEVEL_TIER1] = throttle_period_size;
+	
+	<span class="enscript-keyword">if</span> (PE_get_default(<span class="enscript-string">&quot;kern.io_throttle_period_tier2&quot;</span>, &amp;throttle_period_size, <span class="enscript-keyword">sizeof</span>(throttle_period_size)))
+		info-&gt;throttle_io_periods[THROTTLE_LEVEL_TIER2] = throttle_period_size;
+
+	<span class="enscript-keyword">if</span> (PE_get_default(<span class="enscript-string">&quot;kern.io_throttle_period_tier3&quot;</span>, &amp;throttle_period_size, <span class="enscript-keyword">sizeof</span>(throttle_period_size)))
+		info-&gt;throttle_io_periods[THROTTLE_LEVEL_TIER3] = throttle_period_size;
+	
+	<span class="enscript-comment">/* Override with boot-args */</span>
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;io_throttle_period_tier1&quot;</span>, &amp;throttle_period_size, <span class="enscript-keyword">sizeof</span>(throttle_period_size)))
+		info-&gt;throttle_io_periods[THROTTLE_LEVEL_TIER1] = throttle_period_size;
+	
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;io_throttle_period_tier2&quot;</span>, &amp;throttle_period_size, <span class="enscript-keyword">sizeof</span>(throttle_period_size)))
+		info-&gt;throttle_io_periods[THROTTLE_LEVEL_TIER2] = throttle_period_size;
+
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;io_throttle_period_tier3&quot;</span>, &amp;throttle_period_size, <span class="enscript-keyword">sizeof</span>(throttle_period_size)))
+		info-&gt;throttle_io_periods[THROTTLE_LEVEL_TIER3] = throttle_period_size;
+
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_IOSCHED</span>
+<span class="enscript-type">extern</span>	<span class="enscript-type">void</span> vm_io_reprioritize_init(<span class="enscript-type">void</span>);
+<span class="enscript-type">int</span>	iosched_enabled = 1;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">throttle_init</span>(<span class="enscript-type">void</span>)
+{
+        <span class="enscript-type">struct</span> _throttle_io_info_t *info;
+        <span class="enscript-type">int</span>	i;
+	<span class="enscript-type">int</span>	level;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_IOSCHED</span>
+	<span class="enscript-type">int</span> 	iosched;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-comment">/*                                                                                                                                    
+         * allocate lock group attribute and group                                                                                            
+         */</span>
+        throttle_mtx_grp_attr = lck_grp_attr_alloc_init();
+        throttle_mtx_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;throttle I/O&quot;</span>, throttle_mtx_grp_attr);
+
+	<span class="enscript-comment">/* Update throttle parameters based on device tree configuration */</span>
+	throttle_init_throttle_window();
+
+        <span class="enscript-comment">/*                                                                                                                                    
+         * allocate the lock attribute                                                                                                        
+         */</span>
+        throttle_mtx_attr = lck_attr_alloc_init();
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; LOWPRI_MAX_NUM_DEV; i++) {
+	        info = &amp;_throttle_io_info[i];
+	  
+	        lck_mtx_init(&amp;info-&gt;throttle_lock, throttle_mtx_grp, throttle_mtx_attr);
+		info-&gt;throttle_timer_call = thread_call_allocate((thread_call_func_t)throttle_timer, (thread_call_param_t)info);
+
+		<span class="enscript-keyword">for</span> (level = 0; level &lt;= THROTTLE_LEVEL_END; level++) {
+			TAILQ_INIT(&amp;info-&gt;throttle_uthlist[level]);
+			info-&gt;throttle_last_IO_pid[level] = 0;
+		}
+		info-&gt;throttle_next_wake_level = THROTTLE_LEVEL_END;
+		info-&gt;throttle_disabled = 0;
+		info-&gt;throttle_is_fusion_with_priority = 0;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_IOSCHED</span>
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;iosched&quot;</span>, &amp;iosched, <span class="enscript-keyword">sizeof</span>(iosched))) {
+		iosched_enabled = iosched;
+	}
+	<span class="enscript-keyword">if</span> (iosched_enabled) {
+		<span class="enscript-comment">/* Initialize I/O Reprioritization mechanism */</span>
+		vm_io_reprioritize_init();
+	}
+#<span class="enscript-reference">endif</span>
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sys_override_io_throttle</span>(<span class="enscript-type">int</span> flag)
+{
+	<span class="enscript-keyword">if</span> (flag == THROTTLE_IO_ENABLE)
+		lowpri_throttle_enabled = 1;
+
+	<span class="enscript-keyword">if</span> (flag == THROTTLE_IO_DISABLE)
+		lowpri_throttle_enabled = 0;
+}
+
+<span class="enscript-type">int</span> rethrottle_removed_from_list = 0;
+<span class="enscript-type">int</span> rethrottle_moved_to_new_list = 0;
+
+<span class="enscript-comment">/*
+ * move a throttled thread to the appropriate state based
+ * on it's new throttle level... throttle_add_to_list will
+ * reset the timer deadline if necessary... it may also
+ * leave the thread off of the queue if we're already outside
+ * the throttle window for the new level
+ * takes a valid uthread (which may or may not be on the
+ * throttle queue) as input
+ *
+ * NOTE: This is called with the task lock held.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">rethrottle_thread</span>(uthread_t ut)
+{
+	<span class="enscript-type">struct</span> _throttle_io_info_t *info;
+	<span class="enscript-type">int</span> my_new_level;
+
+	<span class="enscript-keyword">if</span> ((info = ut-&gt;uu_throttle_info) == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	lck_mtx_lock(&amp;info-&gt;throttle_lock);
+
+	<span class="enscript-keyword">if</span> (ut-&gt;uu_on_throttlelist &gt;= THROTTLE_LEVEL_THROTTLED) {
+
+		my_new_level = throttle_get_thread_throttle_level(ut);
+
+		<span class="enscript-keyword">if</span> (my_new_level != ut-&gt;uu_on_throttlelist) {
+
+			TAILQ_REMOVE(&amp;info-&gt;throttle_uthlist[ut-&gt;uu_on_throttlelist], ut, uu_throttlelist);
+			ut-&gt;uu_on_throttlelist = THROTTLE_LEVEL_NONE;
+
+			<span class="enscript-keyword">if</span> (my_new_level &gt;= THROTTLE_LEVEL_THROTTLED) {
+				throttle_add_to_list(info, ut, my_new_level, TRUE);
+				rethrottle_moved_to_new_list++;
+			}
+
+			<span class="enscript-comment">/* Thread no longer in window, need to wake it up */</span>
+			<span class="enscript-keyword">if</span> (ut-&gt;uu_on_throttlelist == THROTTLE_LEVEL_NONE) {
+				wakeup(&amp;ut-&gt;uu_on_throttlelist);
+				rethrottle_removed_from_list++;
+			}
+		}
+	}
+
+	lck_mtx_unlock(&amp;info-&gt;throttle_lock);
+}
+
+
+<span class="enscript-comment">/*
+ * KPI routine
+ *
+ * Create and take a reference on a throttle info structure and return a
+ * pointer for the file system to use when calling throttle_info_update.
+ * Calling file system must have a matching release for every create.
+ */</span>
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">throttle_info_create</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> _throttle_io_info_t *info; 
+	<span class="enscript-type">int</span>	level;
+
+	MALLOC(info, <span class="enscript-type">struct</span> _throttle_io_info_t *, <span class="enscript-keyword">sizeof</span>(*info), M_TEMP, M_ZERO | M_WAITOK);
+	<span class="enscript-comment">/* Should never happen but just in case */</span>
+	<span class="enscript-keyword">if</span> (info == NULL)
+		<span class="enscript-keyword">return</span> NULL;
+	<span class="enscript-comment">/* Mark that this one was allocated and needs to be freed */</span>
+	DEBUG_ALLOC_THROTTLE_INFO(<span class="enscript-string">&quot;Creating info = %p\n&quot;</span>, info, info );
+	info-&gt;throttle_alloc = TRUE;
+
+	lck_mtx_init(&amp;info-&gt;throttle_lock, throttle_mtx_grp, throttle_mtx_attr);
+	info-&gt;throttle_timer_call = thread_call_allocate((thread_call_func_t)throttle_timer, (thread_call_param_t)info);
+
+	<span class="enscript-keyword">for</span> (level = 0; level &lt;= THROTTLE_LEVEL_END; level++) {
+		TAILQ_INIT(&amp;info-&gt;throttle_uthlist[level]);
+	}
+	info-&gt;throttle_next_wake_level = THROTTLE_LEVEL_END;
+
+	<span class="enscript-comment">/* Take a reference */</span>
+	OSIncrementAtomic(&amp;info-&gt;throttle_refcnt);
+	<span class="enscript-keyword">return</span> info;
+}
+
+<span class="enscript-comment">/*
+ * KPI routine
+ *
+ * Release the throttle info pointer if all the reference are gone. Should be 
+ * called to release reference taken by throttle_info_create 
+ */</span> 
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">throttle_info_release</span>(<span class="enscript-type">void</span> *throttle_info)
+{
+	DEBUG_ALLOC_THROTTLE_INFO(<span class="enscript-string">&quot;Releaseing info = %p\n&quot;</span>,
+		(<span class="enscript-type">struct</span> _throttle_io_info_t *)throttle_info,
+		(<span class="enscript-type">struct</span> _throttle_io_info_t *)throttle_info);
+	<span class="enscript-keyword">if</span> (throttle_info) <span class="enscript-comment">/* Just to be careful */</span>
+		throttle_info_rel(throttle_info);
+}
+
+<span class="enscript-comment">/*
+ * KPI routine
+ *
+ * File Systems that create an info structure, need to call this routine in
+ * their mount routine (used by cluster code). File Systems that call this in
+ * their mount routines must call throttle_info_mount_rel in their unmount
+ * routines. 
+ */</span>
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">throttle_info_mount_ref</span>(mount_t mp, <span class="enscript-type">void</span> *throttle_info)
+{
+	<span class="enscript-keyword">if</span> ((throttle_info == NULL) || (mp == NULL))
+		<span class="enscript-keyword">return</span>;
+	throttle_info_ref(throttle_info);
+
+	<span class="enscript-comment">/*
+	 * We already have a reference release it before adding the new one
+	 */</span>
+	<span class="enscript-keyword">if</span> (mp-&gt;mnt_throttle_info)
+		throttle_info_rel(mp-&gt;mnt_throttle_info);
+	mp-&gt;mnt_throttle_info = throttle_info;
+}
+
+<span class="enscript-comment">/*
+ * Private KPI routine
+ *
+ * return a handle for accessing throttle_info given a throttle_mask.  The
+ * handle must be released by throttle_info_rel_by_mask
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">throttle_info_ref_by_mask</span>(uint64_t throttle_mask, throttle_info_handle_t *throttle_info_handle)
+{
+	<span class="enscript-type">int</span>	dev_index;
+	<span class="enscript-type">struct</span> _throttle_io_info_t *info;
+
+	<span class="enscript-keyword">if</span> (throttle_info_handle == NULL)
+		<span class="enscript-keyword">return</span> EINVAL;
+	
+	dev_index = num_trailing_0(throttle_mask);
+	info = &amp;_throttle_io_info[dev_index];
+	throttle_info_ref(info);
+	*(<span class="enscript-type">struct</span> _throttle_io_info_t**)throttle_info_handle = info;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Private KPI routine
+ *
+ * release the handle obtained by throttle_info_ref_by_mask
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">throttle_info_rel_by_mask</span>(throttle_info_handle_t throttle_info_handle)
+{
+	<span class="enscript-comment">/*
+	 * for now the handle is just a pointer to _throttle_io_info_t
+	 */</span>
+	throttle_info_rel((<span class="enscript-type">struct</span> _throttle_io_info_t*)throttle_info_handle);
+}
+
+<span class="enscript-comment">/*
+ * KPI routine
+ *
+ * File Systems that throttle_info_mount_ref, must call this routine in their
+ * umount routine.
+ */</span> 
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">throttle_info_mount_rel</span>(mount_t mp)
+{
+	<span class="enscript-keyword">if</span> (mp-&gt;mnt_throttle_info)
+		throttle_info_rel(mp-&gt;mnt_throttle_info);
+	mp-&gt;mnt_throttle_info = NULL;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">throttle_info_get_last_io_time</span>(mount_t mp, <span class="enscript-type">struct</span> timeval *tv)
+{
+    	<span class="enscript-type">struct</span> _throttle_io_info_t *info;
+
+	<span class="enscript-keyword">if</span> (mp == NULL)
+		info = &amp;_throttle_io_info[LOWPRI_MAX_NUM_DEV - 1];
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (mp-&gt;mnt_throttle_info == NULL)
+		info = &amp;_throttle_io_info[mp-&gt;mnt_devbsdunit];
+	<span class="enscript-keyword">else</span>
+		info = mp-&gt;mnt_throttle_info;
+
+	*tv = info-&gt;throttle_last_write_timestamp;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">update_last_io_time</span>(mount_t mp)
+{
+    	<span class="enscript-type">struct</span> _throttle_io_info_t *info;
+		
+	<span class="enscript-keyword">if</span> (mp == NULL)
+		info = &amp;_throttle_io_info[LOWPRI_MAX_NUM_DEV - 1];
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (mp-&gt;mnt_throttle_info == NULL)
+		info = &amp;_throttle_io_info[mp-&gt;mnt_devbsdunit];
+	<span class="enscript-keyword">else</span>
+		info = mp-&gt;mnt_throttle_info;
+
+	microuptime(&amp;info-&gt;throttle_last_write_timestamp);
+	<span class="enscript-keyword">if</span> (mp != NULL)
+		mp-&gt;mnt_last_write_completed_timestamp = info-&gt;throttle_last_write_timestamp;
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">throttle_get_io_policy</span>(uthread_t *ut)
+{
+	<span class="enscript-keyword">if</span> (ut != NULL)
+		*ut = get_bsdthread_info(current_thread());
+
+	<span class="enscript-keyword">return</span> (proc_get_effective_thread_policy(current_thread(), TASK_POLICY_IO));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">throttle_get_passive_io_policy</span>(uthread_t *ut)
+{
+	<span class="enscript-keyword">if</span> (ut != NULL)
+		*ut = get_bsdthread_info(current_thread());
+
+	<span class="enscript-keyword">return</span> (proc_get_effective_thread_policy(current_thread(), TASK_POLICY_PASSIVE_IO));
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">throttle_get_thread_throttle_level</span>(uthread_t ut)
+{
+	<span class="enscript-type">int</span> thread_throttle_level;
+
+	<span class="enscript-keyword">if</span> (ut == NULL)
+		ut = get_bsdthread_info(current_thread());
+
+	thread_throttle_level = proc_get_effective_thread_policy(ut-&gt;uu_thread, TASK_POLICY_IO);
+
+	<span class="enscript-comment">/* Bootcache misses should always be throttled */</span>
+	<span class="enscript-keyword">if</span> (ut-&gt;uu_throttle_bc == TRUE)
+		thread_throttle_level = THROTTLE_LEVEL_TIER3;
+
+	<span class="enscript-keyword">return</span> (thread_throttle_level);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">throttle_io_will_be_throttled_internal</span>(<span class="enscript-type">void</span> * throttle_info, <span class="enscript-type">int</span> * mylevel, <span class="enscript-type">int</span> * throttling_level)
+{
+    	<span class="enscript-type">struct</span> _throttle_io_info_t *info = throttle_info;
+	<span class="enscript-type">struct</span> timeval elapsed;
+	uint64_t elapsed_msecs;
+	<span class="enscript-type">int</span>	thread_throttle_level;
+	<span class="enscript-type">int</span>	throttle_level;
+
+	<span class="enscript-keyword">if</span> ((thread_throttle_level = throttle_get_thread_throttle_level(NULL)) &lt; THROTTLE_LEVEL_THROTTLED)
+		<span class="enscript-keyword">return</span> (THROTTLE_DISENGAGED);
+
+	<span class="enscript-keyword">for</span> (throttle_level = THROTTLE_LEVEL_START; throttle_level &lt; thread_throttle_level; throttle_level++) {
+
+		microuptime(&amp;elapsed);
+		timevalsub(&amp;elapsed, &amp;info-&gt;throttle_window_start_timestamp[throttle_level]);
+		elapsed_msecs = (uint64_t)elapsed.tv_sec * (uint64_t)1000 + (elapsed.tv_usec / 1000);
+
+		<span class="enscript-keyword">if</span> (elapsed_msecs &lt; (uint64_t)throttle_windows_msecs[thread_throttle_level])
+			<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">if</span> (throttle_level &gt;= thread_throttle_level) {
+		<span class="enscript-comment">/*
+		 * we're beyond all of the throttle windows
+		 * that affect the throttle level of this thread,
+		 * so go ahead and treat as normal I/O
+		 */</span>
+		<span class="enscript-keyword">return</span> (THROTTLE_DISENGAGED);
+	}
+	<span class="enscript-keyword">if</span> (mylevel)
+		*mylevel = thread_throttle_level;
+	<span class="enscript-keyword">if</span> (throttling_level)
+		*throttling_level = throttle_level;
+
+	<span class="enscript-keyword">if</span> (info-&gt;throttle_io_count != info-&gt;throttle_io_count_begin) {
+		<span class="enscript-comment">/*
+		 * we've already issued at least one throttleable I/O
+		 * in the current I/O window, so avoid issuing another one
+		 */</span>
+		<span class="enscript-keyword">return</span> (THROTTLE_NOW);
+	}
+	<span class="enscript-comment">/*
+	 * we're in the throttle window, so
+	 * cut the I/O size back
+	 */</span>
+	<span class="enscript-keyword">return</span> (THROTTLE_ENGAGED);
+}
+
+<span class="enscript-comment">/* 
+ * If we have a mount point and it has a throttle info pointer then
+ * use it to do the check, otherwise use the device unit number to find
+ * the correct throttle info array element.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">throttle_io_will_be_throttled</span>(__unused <span class="enscript-type">int</span> lowpri_window_msecs, mount_t mp)
+{
+    	<span class="enscript-type">struct</span> _throttle_io_info_t	*info;
+
+	<span class="enscript-comment">/*
+	 * Should we just return zero if no mount point
+	 */</span>
+	<span class="enscript-keyword">if</span> (mp == NULL)
+	        info = &amp;_throttle_io_info[LOWPRI_MAX_NUM_DEV - 1];
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (mp-&gt;mnt_throttle_info == NULL)
+	        info = &amp;_throttle_io_info[mp-&gt;mnt_devbsdunit];
+	<span class="enscript-keyword">else</span>
+	        info = mp-&gt;mnt_throttle_info;
+
+	<span class="enscript-keyword">if</span> (info-&gt;throttle_is_fusion_with_priority) {
+		uthread_t ut = get_bsdthread_info(current_thread());
+		<span class="enscript-keyword">if</span> (ut-&gt;uu_lowpri_window == 0)
+			<span class="enscript-keyword">return</span> (THROTTLE_DISENGAGED);
+	}
+
+	<span class="enscript-keyword">if</span> (info-&gt;throttle_disabled)
+		<span class="enscript-keyword">return</span> (THROTTLE_DISENGAGED);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> throttle_io_will_be_throttled_internal(info, NULL, NULL);
+}
+
+<span class="enscript-comment">/* 
+ * Routine to increment I/O throttling counters maintained in the proc
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 
+<span class="enscript-function-name">throttle_update_proc_stats</span>(pid_t throttling_pid, <span class="enscript-type">int</span> count)
+{
+	proc_t throttling_proc;
+	proc_t throttled_proc = current_proc();
+
+	<span class="enscript-comment">/* The throttled_proc is always the current proc; so we are not concerned with refs */</span>
+	OSAddAtomic64(count, &amp;(throttled_proc-&gt;was_throttled));
+	
+	<span class="enscript-comment">/* The throttling pid might have exited by now */</span>
+	throttling_proc = proc_find(throttling_pid);
+	<span class="enscript-keyword">if</span> (throttling_proc != PROC_NULL) {
+		OSAddAtomic64(count, &amp;(throttling_proc-&gt;did_throttle));
+		proc_rele(throttling_proc);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Block until woken up by the throttle timer or by a rethrottle call.
+ * As long as we hold the throttle_lock while querying the throttle tier, we're
+ * safe against seeing an old throttle tier after a rethrottle.
+ */</span>
+uint32_t
+<span class="enscript-function-name">throttle_lowpri_io</span>(<span class="enscript-type">int</span> sleep_amount)
+{
+	uthread_t ut;
+	<span class="enscript-type">struct</span> _throttle_io_info_t *info;
+	<span class="enscript-type">int</span>	throttle_type = 0;
+	<span class="enscript-type">int</span>	mylevel = 0;
+	<span class="enscript-type">int</span>	throttling_level = THROTTLE_LEVEL_NONE;
+	<span class="enscript-type">int</span>	sleep_cnt = 0;
+	uint32_t  throttle_io_period_num = 0;
+	boolean_t insert_tail = TRUE;
+
+	ut = get_bsdthread_info(current_thread());
+
+	<span class="enscript-keyword">if</span> (ut-&gt;uu_lowpri_window == 0)
+		<span class="enscript-keyword">return</span> (0);
+
+	info = ut-&gt;uu_throttle_info;
+
+	<span class="enscript-keyword">if</span> (info == NULL) {
+		ut-&gt;uu_throttle_bc = FALSE;
+		ut-&gt;uu_lowpri_window = 0;
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	lck_mtx_lock(&amp;info-&gt;throttle_lock);
+
+	<span class="enscript-keyword">if</span> (sleep_amount == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-keyword">if</span> (sleep_amount == 1 &amp;&amp; ut-&gt;uu_throttle_bc == FALSE)
+		sleep_amount = 0;
+
+	throttle_io_period_num = info-&gt;throttle_io_period_num;
+
+	<span class="enscript-keyword">while</span> ( (throttle_type = throttle_io_will_be_throttled_internal(info, &amp;mylevel, &amp;throttling_level)) ) {
+
+		<span class="enscript-keyword">if</span> (throttle_type == THROTTLE_ENGAGED) {
+			<span class="enscript-keyword">if</span> (sleep_amount == 0)
+				<span class="enscript-keyword">break</span>;			
+			<span class="enscript-keyword">if</span> (info-&gt;throttle_io_period_num &lt; throttle_io_period_num)
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">if</span> ((info-&gt;throttle_io_period_num - throttle_io_period_num) &gt;= (uint32_t)sleep_amount)
+				<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (ut-&gt;uu_on_throttlelist &lt; THROTTLE_LEVEL_THROTTLED) {
+			<span class="enscript-keyword">if</span> (throttle_add_to_list(info, ut, mylevel, insert_tail) == THROTTLE_LEVEL_END)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		assert(throttling_level &gt;= THROTTLE_LEVEL_START &amp;&amp; throttling_level &lt;= THROTTLE_LEVEL_END);
+		KERNEL_DEBUG_CONSTANT((FSDBG_CODE(DBG_THROTTLE, PROCESS_THROTTLED)) | DBG_FUNC_NONE,
+				info-&gt;throttle_last_IO_pid[throttling_level], throttling_level, proc_selfpid(), mylevel, 0);
+
+		
+		<span class="enscript-keyword">if</span> (sleep_cnt == 0) {
+			KERNEL_DEBUG_CONSTANT((FSDBG_CODE(DBG_FSRW, 97)) | DBG_FUNC_START,
+					      throttle_windows_msecs[mylevel], info-&gt;throttle_io_periods[mylevel], info-&gt;throttle_io_count, 0, 0);
+			throttled_count[mylevel]++;
+		}
+		msleep((caddr_t)&amp;ut-&gt;uu_on_throttlelist, &amp;info-&gt;throttle_lock, PRIBIO + 1, <span class="enscript-string">&quot;throttle_lowpri_io&quot;</span>, NULL);
+
+		sleep_cnt++;
+		
+		<span class="enscript-keyword">if</span> (sleep_amount == 0)
+			insert_tail = FALSE;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (info-&gt;throttle_io_period_num &lt; throttle_io_period_num ||
+			 (info-&gt;throttle_io_period_num - throttle_io_period_num) &gt;= (uint32_t)sleep_amount) {
+			insert_tail = FALSE;
+			sleep_amount = 0;
+		}
+	}
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (ut-&gt;uu_on_throttlelist &gt;= THROTTLE_LEVEL_THROTTLED) {
+		TAILQ_REMOVE(&amp;info-&gt;throttle_uthlist[ut-&gt;uu_on_throttlelist], ut, uu_throttlelist);
+		ut-&gt;uu_on_throttlelist = THROTTLE_LEVEL_NONE;
+	}
+
+	lck_mtx_unlock(&amp;info-&gt;throttle_lock);
+
+	<span class="enscript-keyword">if</span> (sleep_cnt) {
+		KERNEL_DEBUG_CONSTANT((FSDBG_CODE(DBG_FSRW, 97)) | DBG_FUNC_END,
+				      throttle_windows_msecs[mylevel], info-&gt;throttle_io_periods[mylevel], info-&gt;throttle_io_count, 0, 0);
+		<span class="enscript-comment">/*
+		 * We update the stats for the last pid which opened a throttle window for the throttled thread.
+		 * This might not be completely accurate since the multiple throttles seen by the lower tier pid
+		 * might have been caused by various higher prio pids. However, updating these stats accurately 
+		 * means doing a proc_find while holding the throttle lock which leads to deadlock.
+		 */</span>
+		throttle_update_proc_stats(info-&gt;throttle_last_IO_pid[throttling_level], sleep_cnt);
+	}
+
+	throttle_info_rel(info);
+
+	ut-&gt;uu_throttle_info = NULL;
+	ut-&gt;uu_throttle_bc = FALSE;
+	ut-&gt;uu_lowpri_window = 0;
+
+	<span class="enscript-keyword">return</span> (sleep_cnt);
+}
+
+<span class="enscript-comment">/*
+ * KPI routine
+ *
+ * set a kernel thread's IO policy.  policy can be:
+ * IOPOL_NORMAL, IOPOL_THROTTLE, IOPOL_PASSIVE, IOPOL_UTILITY, IOPOL_STANDARD
+ *
+ * explanations about these policies are in the man page of setiopolicy_np
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">throttle_set_thread_io_policy</span>(<span class="enscript-type">int</span> policy)
+{
+	proc_set_task_policy(current_task(), current_thread(),
+	                     TASK_POLICY_INTERNAL, TASK_POLICY_IOPOL,
+	                     policy);
+}
+
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">throttle_info_reset_window</span>(uthread_t ut)
+{
+	<span class="enscript-type">struct</span> _throttle_io_info_t *info;
+
+	<span class="enscript-keyword">if</span> (ut == NULL) 
+		ut = get_bsdthread_info(current_thread());
+
+	<span class="enscript-keyword">if</span> ( (info = ut-&gt;uu_throttle_info) ) {
+		throttle_info_rel(info);
+
+		ut-&gt;uu_throttle_info = NULL;
+		ut-&gt;uu_lowpri_window = 0;
+		ut-&gt;uu_throttle_bc = FALSE;
+	}
+}
+
+<span class="enscript-type">static</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">throttle_info_set_initial_window</span>(uthread_t ut, <span class="enscript-type">struct</span> _throttle_io_info_t *info, boolean_t BC_throttle, boolean_t isssd)
+{
+	<span class="enscript-keyword">if</span> (lowpri_throttle_enabled == 0 || info-&gt;throttle_disabled)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (info-&gt;throttle_io_periods == 0) {
+		throttle_init_throttle_period(info, isssd);
+	}
+	<span class="enscript-keyword">if</span> (ut-&gt;uu_throttle_info == NULL) {
+
+		ut-&gt;uu_throttle_info = info;
+		throttle_info_ref(info);
+		DEBUG_ALLOC_THROTTLE_INFO(<span class="enscript-string">&quot;updating info = %p\n&quot;</span>, info, info );
+
+		ut-&gt;uu_lowpri_window = 1;
+		ut-&gt;uu_throttle_bc = BC_throttle;
+	}
+}
+
+
+<span class="enscript-type">static</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">throttle_info_update_internal</span>(<span class="enscript-type">struct</span> _throttle_io_info_t *info, uthread_t ut, <span class="enscript-type">int</span> flags, boolean_t isssd)
+{
+	<span class="enscript-type">int</span>	thread_throttle_level;
+
+	<span class="enscript-keyword">if</span> (lowpri_throttle_enabled == 0 || info-&gt;throttle_disabled)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (ut == NULL)
+		ut = get_bsdthread_info(current_thread());
+
+	thread_throttle_level = throttle_get_thread_throttle_level(ut);
+
+	<span class="enscript-keyword">if</span> (thread_throttle_level != THROTTLE_LEVEL_NONE) {
+		<span class="enscript-keyword">if</span>(!ISSET(flags, B_PASSIVE)) {
+			microuptime(&amp;info-&gt;throttle_window_start_timestamp[thread_throttle_level]);
+			info-&gt;throttle_last_IO_pid[thread_throttle_level] = proc_selfpid();
+			KERNEL_DEBUG_CONSTANT((FSDBG_CODE(DBG_THROTTLE, OPEN_THROTTLE_WINDOW)) | DBG_FUNC_NONE,
+					current_proc()-&gt;p_pid, thread_throttle_level, 0, 0, 0);
+		}
+		microuptime(&amp;info-&gt;throttle_last_IO_timestamp[thread_throttle_level]);
+	}
+
+
+	<span class="enscript-keyword">if</span> (thread_throttle_level &gt;= THROTTLE_LEVEL_THROTTLED) {
+		<span class="enscript-comment">/*
+		 * I'd really like to do the IOSleep here, but
+		 * we may be holding all kinds of filesystem related locks
+		 * and the pages for this I/O marked 'busy'...
+		 * we don't want to cause a normal task to block on
+		 * one of these locks while we're throttling a task marked
+		 * for low priority I/O... we'll mark the uthread and
+		 * do the delay just before we return from the system
+		 * call that triggered this I/O or from vnode_pagein
+		 */</span>
+	        OSAddAtomic(1, &amp;info-&gt;throttle_io_count);
+
+		throttle_info_set_initial_window(ut, info, FALSE, isssd);
+	}
+}
+
+<span class="enscript-type">void</span> *<span class="enscript-function-name">throttle_info_update_by_mount</span>(mount_t mp)
+{
+	<span class="enscript-type">struct</span> _throttle_io_info_t *info;
+	uthread_t ut;
+	boolean_t isssd = FALSE;
+
+	ut = get_bsdthread_info(current_thread());
+
+	<span class="enscript-keyword">if</span> (mp != NULL) {
+		<span class="enscript-keyword">if</span> ((mp-&gt;mnt_kern_flag &amp; MNTK_SSD) &amp;&amp; !ignore_is_ssd)
+			isssd = TRUE;
+		info = &amp;_throttle_io_info[mp-&gt;mnt_devbsdunit];
+	} <span class="enscript-keyword">else</span>
+		info = &amp;_throttle_io_info[LOWPRI_MAX_NUM_DEV - 1];
+
+	<span class="enscript-keyword">if</span> (!ut-&gt;uu_lowpri_window)
+		throttle_info_set_initial_window(ut, info, FALSE, isssd);
+
+	<span class="enscript-keyword">return</span> info;
+}
+
+
+<span class="enscript-comment">/*
+ * KPI routine
+ *
+ * this is usually called before every I/O, used for throttled I/O
+ * book keeping.  This routine has low overhead and does not sleep
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">throttle_info_update</span>(<span class="enscript-type">void</span> *throttle_info, <span class="enscript-type">int</span> flags)
+{
+        <span class="enscript-keyword">if</span> (throttle_info)
+		throttle_info_update_internal(throttle_info, NULL, flags, FALSE);
+}
+
+<span class="enscript-comment">/*
+ * KPI routine
+ *
+ * this is usually called before every I/O, used for throttled I/O
+ * book keeping.  This routine has low overhead and does not sleep
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">throttle_info_update_by_mask</span>(<span class="enscript-type">void</span> *throttle_info_handle, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">void</span> *throttle_info = throttle_info_handle;
+
+	<span class="enscript-comment">/*
+	 * for now we only use the lowest bit of the throttle mask, so the
+	 * handle is the same as the throttle_info.  Later if we store a
+	 * set of throttle infos in the handle, we will want to loop through
+	 * them and call throttle_info_update in a loop
+	 */</span>
+	throttle_info_update(throttle_info, flags);
+}
+<span class="enscript-comment">/*
+ * KPI routine
+ * 
+ * This routine marks the throttle info as disabled. Used for mount points which 
+ * support I/O scheduling.
+ */</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">throttle_info_disable_throttle</span>(<span class="enscript-type">int</span> devno, boolean_t isfusion)
+{
+	<span class="enscript-type">struct</span> _throttle_io_info_t *info;
+
+	<span class="enscript-keyword">if</span> (devno &lt; 0 || devno &gt;= LOWPRI_MAX_NUM_DEV) 
+		panic(<span class="enscript-string">&quot;Illegal devno (%d) passed into throttle_info_disable_throttle()&quot;</span>, devno);
+
+	info = &amp;_throttle_io_info[devno];
+	<span class="enscript-comment">// don't disable software throttling on devices that are part of a fusion device
+</span>	<span class="enscript-comment">// and override the software throttle periods to use HDD periods
+</span>	<span class="enscript-keyword">if</span> (isfusion) {
+		info-&gt;throttle_is_fusion_with_priority = isfusion;
+		throttle_init_throttle_period(info, FALSE);
+	}
+	info-&gt;throttle_disabled = !info-&gt;throttle_is_fusion_with_priority;
+	<span class="enscript-keyword">return</span>;
+} 
+
+
+<span class="enscript-comment">/*
+ * KPI routine (private)
+ * Called to determine if this IO is being throttled to this level so that it can be treated specially
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">throttle_info_io_will_be_throttled</span>(<span class="enscript-type">void</span> * throttle_info, <span class="enscript-type">int</span> policy)
+{
+    	<span class="enscript-type">struct</span> _throttle_io_info_t *info = throttle_info;
+	<span class="enscript-type">struct</span> timeval elapsed;
+	uint64_t elapsed_msecs;
+	<span class="enscript-type">int</span>	throttle_level;
+	<span class="enscript-type">int</span>	thread_throttle_level;
+
+        <span class="enscript-keyword">switch</span> (policy) {
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">IOPOL_THROTTLE</span>:
+                thread_throttle_level = THROTTLE_LEVEL_TIER3;
+                <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">IOPOL_UTILITY</span>:
+                thread_throttle_level = THROTTLE_LEVEL_TIER2;
+                <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">IOPOL_STANDARD</span>:
+                thread_throttle_level = THROTTLE_LEVEL_TIER1;
+                <span class="enscript-keyword">break</span>;
+        <span class="enscript-reference">default</span>:
+                thread_throttle_level = THROTTLE_LEVEL_TIER0;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">for</span> (throttle_level = THROTTLE_LEVEL_START; throttle_level &lt; thread_throttle_level; throttle_level++) {
+
+		microuptime(&amp;elapsed);
+		timevalsub(&amp;elapsed, &amp;info-&gt;throttle_window_start_timestamp[throttle_level]);
+		elapsed_msecs = (uint64_t)elapsed.tv_sec * (uint64_t)1000 + (elapsed.tv_usec / 1000);
+
+		<span class="enscript-keyword">if</span> (elapsed_msecs &lt; (uint64_t)throttle_windows_msecs[thread_throttle_level])
+			<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">if</span> (throttle_level &gt;= thread_throttle_level) {
+		<span class="enscript-comment">/*
+		 * we're beyond all of the throttle windows
+		 * so go ahead and treat as normal I/O
+		 */</span>
+		<span class="enscript-keyword">return</span> (THROTTLE_DISENGAGED);
+	}
+	<span class="enscript-comment">/*
+	 * we're in the throttle window
+	 */</span>
+	<span class="enscript-keyword">return</span> (THROTTLE_ENGAGED);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_strategy</span>(<span class="enscript-type">struct</span> vnop_strategy_args *ap)
+{
+	buf_t	bp;
+	<span class="enscript-type">int</span>	bflags;
+	<span class="enscript-type">int</span>	io_tier;
+	<span class="enscript-type">int</span>	passive;
+	dev_t	bdev;
+	uthread_t ut;
+	mount_t mp;
+	<span class="enscript-type">struct</span>	bufattr *bap;
+	<span class="enscript-type">int</span>	strategy_ret;
+	<span class="enscript-type">struct</span> _throttle_io_info_t *throttle_info;
+	boolean_t isssd = FALSE;
+	<span class="enscript-type">int</span> code = 0;
+
+	proc_t curproc = current_proc();
+
+        bp = ap-&gt;a_bp;
+	bdev = buf_device(bp);
+	mp = buf_vnode(bp)-&gt;v_mount;
+	bap = &amp;bp-&gt;b_attr;
+
+	io_tier = throttle_get_io_policy(&amp;ut);
+	passive = throttle_get_passive_io_policy(&amp;ut);
+
+	<span class="enscript-keyword">if</span> (bp-&gt;b_flags &amp; B_META)
+		bap-&gt;ba_flags |= BA_META;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_IOSCHED</span>
+	<span class="enscript-comment">/* 
+	 * For I/O Scheduling, we currently do not have a way to track and expedite metadata I/Os.
+	 * To ensure we dont get into priority inversions due to metadata I/Os, we use the following rules:
+	 * For metadata reads, ceil all I/Os to IOSCHED_METADATA_TIER &amp; mark them passive if the I/O tier was upgraded
+	 * For metadata writes, unconditionally mark them as IOSCHED_METADATA_TIER and passive
+	 */</span>
+	<span class="enscript-keyword">if</span> (bap-&gt;ba_flags &amp; BA_META) {
+		<span class="enscript-keyword">if</span> (mp &amp;&amp; (mp-&gt;mnt_ioflags &amp; MNT_IOFLAGS_IOSCHED_SUPPORTED)) {
+			<span class="enscript-keyword">if</span> (bp-&gt;b_flags &amp; B_READ) {
+				<span class="enscript-keyword">if</span> (io_tier &gt; IOSCHED_METADATA_TIER) {
+					io_tier = IOSCHED_METADATA_TIER;
+					passive = 1;
+				}
+			} <span class="enscript-keyword">else</span> {
+				io_tier = IOSCHED_METADATA_TIER;
+				passive = 1;
+			}
+		}
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_IOSCHED */</span>
+			
+	SET_BUFATTR_IO_TIER(bap, io_tier);
+
+	<span class="enscript-keyword">if</span> (passive) {
+		bp-&gt;b_flags |= B_PASSIVE;
+		bap-&gt;ba_flags |= BA_PASSIVE;
+	}
+
+	<span class="enscript-keyword">if</span> ((curproc != NULL) &amp;&amp; ((curproc-&gt;p_flag &amp; P_DELAYIDLESLEEP) == P_DELAYIDLESLEEP))
+		bap-&gt;ba_flags |= BA_DELAYIDLESLEEP;
+		
+	bflags = bp-&gt;b_flags;
+
+	<span class="enscript-keyword">if</span> (((bflags &amp; B_READ) == 0) &amp;&amp; ((bflags &amp; B_ASYNC) == 0))
+		bufattr_markquickcomplete(bap);
+
+	<span class="enscript-keyword">if</span> (bflags &amp; B_READ)
+	        code |= DKIO_READ;
+	<span class="enscript-keyword">if</span> (bflags &amp; B_ASYNC)
+	        code |= DKIO_ASYNC;
+	<span class="enscript-keyword">if</span> (bflags &amp; B_META)
+	        code |= DKIO_META;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (bflags &amp; B_PAGEIO)
+	        code |= DKIO_PAGING;
+
+	<span class="enscript-keyword">if</span> (io_tier != 0)
+		code |= DKIO_THROTTLE;
+
+	code |= ((io_tier &lt;&lt; DKIO_TIER_SHIFT) &amp; DKIO_TIER_MASK);
+
+	<span class="enscript-keyword">if</span> (bflags &amp; B_PASSIVE)
+		code |= DKIO_PASSIVE;
+
+	<span class="enscript-keyword">if</span> (bap-&gt;ba_flags &amp; BA_NOCACHE)
+		code |= DKIO_NOCACHE;
+
+	<span class="enscript-keyword">if</span> (kdebug_enable) {
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_COMMON, FSDBG_CODE(DBG_DKRW, code) | DBG_FUNC_NONE,
+					  buf_kernel_addrperm_addr(bp), bdev, (<span class="enscript-type">int</span>)buf_blkno(bp), buf_count(bp), 0);
+        }
+
+	thread_update_io_stats(current_thread(), buf_count(bp), code);
+
+	<span class="enscript-keyword">if</span> (mp != NULL) {
+		<span class="enscript-keyword">if</span> ((mp-&gt;mnt_kern_flag &amp; MNTK_SSD) &amp;&amp; !ignore_is_ssd)
+			isssd = TRUE;
+		throttle_info = &amp;_throttle_io_info[mp-&gt;mnt_devbsdunit];
+	} <span class="enscript-keyword">else</span> 
+		throttle_info = &amp;_throttle_io_info[LOWPRI_MAX_NUM_DEV - 1];
+
+	throttle_info_update_internal(throttle_info, ut, bflags, isssd);
+
+	<span class="enscript-keyword">if</span> ((bflags &amp; B_READ) == 0) {
+		microuptime(&amp;throttle_info-&gt;throttle_last_write_timestamp);
+
+		<span class="enscript-keyword">if</span> (mp) {
+			mp-&gt;mnt_last_write_issued_timestamp = throttle_info-&gt;throttle_last_write_timestamp;
+			INCR_PENDING_IO(buf_count(bp), mp-&gt;mnt_pending_write_size);
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (mp) {
+		INCR_PENDING_IO(buf_count(bp), mp-&gt;mnt_pending_read_size);
+	}
+	<span class="enscript-comment">/*
+	 * The BootCache may give us special information about
+	 * the IO, so it returns special values that we check
+	 * for here.
+	 *
+	 * IO_SATISFIED_BY_CACHE
+	 * The read has been satisfied by the boot cache. Don't
+	 * throttle the thread unnecessarily.
+	 *
+	 * IO_SHOULD_BE_THROTTLED
+	 * The boot cache is playing back a playlist and this IO
+	 * cut through. Throttle it so we're not cutting through
+	 * the boot cache too often.
+	 *
+	 * Note that typical strategy routines are defined with
+	 * a void return so we'll get garbage here. In the 
+	 * unlikely case the garbage matches our special return
+	 * value, it's not a big deal since we're only adjusting
+	 * the throttling delay.
+ 	 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IO_SATISFIED_BY_CACHE</span>  ((int)0xcafefeed)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IO_SHOULD_BE_THROTTLED</span> ((int)0xcafebeef)
+	<span class="enscript-type">typedef</span>	<span class="enscript-type">int</span> strategy_fcn_ret_t(<span class="enscript-type">struct</span> buf *bp);
+	
+	strategy_ret = (*(strategy_fcn_ret_t*)bdevsw[major(bdev)].d_strategy)(bp);
+	
+	<span class="enscript-keyword">if</span> (IO_SATISFIED_BY_CACHE == strategy_ret) {
+		<span class="enscript-comment">/*
+		 * If this was a throttled IO satisfied by the boot cache,
+		 * don't delay the thread.
+		 */</span>
+		throttle_info_reset_window(ut);
+
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (IO_SHOULD_BE_THROTTLED == strategy_ret) {
+		<span class="enscript-comment">/*
+		 * If the boot cache indicates this IO should be throttled,
+		 * delay the thread.
+		 */</span>
+		throttle_info_set_initial_window(ut, throttle_info, TRUE, isssd);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * This is a noop, simply returning what one has been given.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_blockmap</span>(__unused <span class="enscript-type">struct</span> vnop_blockmap_args *ap)
+{
+	<span class="enscript-keyword">return</span> (ENOTSUP);
+}
+
+
+<span class="enscript-comment">/*
+ * Device close routine
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_close</span>(<span class="enscript-type">struct</span> vnop_close_args *ap)
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	dev_t dev = vp-&gt;v_rdev;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> flags = ap-&gt;a_fflag;
+	<span class="enscript-type">struct</span> proc *p = vfs_context_proc(ap-&gt;a_context);
+	<span class="enscript-type">struct</span> session *sessp;
+
+	<span class="enscript-keyword">switch</span> (vp-&gt;v_type) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VCHR</span>:
+		<span class="enscript-comment">/*
+		 * Hack: a tty device that is a controlling terminal
+		 * has a reference from the session structure.
+		 * We cannot easily tell that a character device is
+		 * a controlling terminal, unless it is the closing
+		 * process' controlling terminal.  In that case,
+		 * if the reference count is 1 (this is the very
+		 * last close)
+		 */</span>
+		sessp = proc_session(p);
+		devsw_lock(dev, S_IFCHR);
+		<span class="enscript-keyword">if</span> (sessp != SESSION_NULL) {
+			<span class="enscript-keyword">if</span> (vp == sessp-&gt;s_ttyvp &amp;&amp; vcount(vp) == 1) {
+				<span class="enscript-type">struct</span> tty *tp = TTY_NULL;
+
+				devsw_unlock(dev, S_IFCHR);
+				session_lock(sessp);
+				<span class="enscript-keyword">if</span> (vp == sessp-&gt;s_ttyvp) {
+					tp = SESSION_TP(sessp);
+					sessp-&gt;s_ttyvp = NULL;
+					sessp-&gt;s_ttyvid = 0;
+					sessp-&gt;s_ttyp = TTY_NULL;
+					sessp-&gt;s_ttypgrpid = NO_PID;
+				} 
+				session_unlock(sessp);
+
+				<span class="enscript-keyword">if</span> (tp != TTY_NULL) {
+					<span class="enscript-comment">/*
+					 * We may have won a race with a proc_exit
+					 * of the session leader, the winner
+					 * clears the flag (even if not set)
+					 */</span>
+					tty_lock(tp);
+					ttyclrpgrphup(tp);
+					tty_unlock(tp);
+
+					ttyfree(tp);
+				}
+				devsw_lock(dev, S_IFCHR);
+			}
+			session_rele(sessp);
+		}
+
+		<span class="enscript-keyword">if</span> (--vp-&gt;v_specinfo-&gt;si_opencount &lt; 0)
+			panic(<span class="enscript-string">&quot;negative open count (c, %u, %u)&quot;</span>, major(dev), minor(dev));
+
+		<span class="enscript-comment">/*
+		 * close on last reference or on vnode revoke call
+		 */</span>
+		<span class="enscript-keyword">if</span> (vcount(vp) == 0 || (flags &amp; IO_REVOKE) != 0)
+			error = cdevsw[major(dev)].d_close(dev, flags, S_IFCHR, p);
+
+		devsw_unlock(dev, S_IFCHR);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VBLK</span>:
+		<span class="enscript-comment">/*
+		 * If there is more than one outstanding open, don't
+		 * send the close to the device.
+		 */</span>
+		devsw_lock(dev, S_IFBLK);
+		<span class="enscript-keyword">if</span> (vcount(vp) &gt; 1) {
+			vp-&gt;v_specinfo-&gt;si_opencount--;
+			devsw_unlock(dev, S_IFBLK);
+			<span class="enscript-keyword">return</span> (0);
+		}
+		devsw_unlock(dev, S_IFBLK);
+
+		<span class="enscript-comment">/*
+		 * On last close of a block device (that isn't mounted)
+		 * we must invalidate any in core blocks, so that
+		 * we can, for instance, change floppy disks.
+		 */</span>
+	        <span class="enscript-keyword">if</span> ((error = spec_fsync_internal(vp, MNT_WAIT, ap-&gt;a_context)))
+		        <span class="enscript-keyword">return</span> (error);
+
+		error = buf_invalidateblks(vp, BUF_WRITE_DATA, 0, 0);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+
+		devsw_lock(dev, S_IFBLK);
+
+		<span class="enscript-keyword">if</span> (--vp-&gt;v_specinfo-&gt;si_opencount &lt; 0)
+			panic(<span class="enscript-string">&quot;negative open count (b, %u, %u)&quot;</span>, major(dev), minor(dev));
+
+		<span class="enscript-keyword">if</span> (vcount(vp) == 0)
+			error = bdevsw[major(dev)].d_close(dev, flags, S_IFBLK, p);
+
+		devsw_unlock(dev, S_IFBLK);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;spec_close: not special&quot;</span>);
+		<span class="enscript-keyword">return</span>(EBADF);
+	}
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-comment">/*
+ * Return POSIX pathconf information applicable to special devices.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_pathconf</span>(<span class="enscript-type">struct</span> vnop_pathconf_args *ap)
+{
+
+	<span class="enscript-keyword">switch</span> (ap-&gt;a_name) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_LINK_MAX</span>:
+		*ap-&gt;a_retval = LINK_MAX;
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_MAX_CANON</span>:
+		*ap-&gt;a_retval = MAX_CANON;
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_MAX_INPUT</span>:
+		*ap-&gt;a_retval = MAX_INPUT;
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_PIPE_BUF</span>:
+		*ap-&gt;a_retval = PIPE_BUF;
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_CHOWN_RESTRICTED</span>:
+		*ap-&gt;a_retval = 200112;		<span class="enscript-comment">/* _POSIX_CHOWN_RESTRICTED */</span>
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_VDISABLE</span>:
+		*ap-&gt;a_retval = _POSIX_VDISABLE;
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+	<span class="enscript-comment">/* NOTREACHED */</span>
+}
+
+<span class="enscript-comment">/*
+ * Special device failed operation
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_ebadf</span>(__unused <span class="enscript-type">void</span> *dummy)
+{
+
+	<span class="enscript-keyword">return</span> (EBADF);
+}
+
+<span class="enscript-comment">/* Blktooff derives file offset from logical block number */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_blktooff</span>(<span class="enscript-type">struct</span> vnop_blktooff_args *ap)
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+
+	<span class="enscript-keyword">switch</span> (vp-&gt;v_type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VCHR</span>:
+		*ap-&gt;a_offset = (off_t)-1; <span class="enscript-comment">/* failure */</span>
+		<span class="enscript-keyword">return</span> (ENOTSUP);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VBLK</span>:
+		printf(<span class="enscript-string">&quot;spec_blktooff: not implemented for VBLK\n&quot;</span>);
+		*ap-&gt;a_offset = (off_t)-1; <span class="enscript-comment">/* failure */</span>
+		<span class="enscript-keyword">return</span> (ENOTSUP);
+
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;spec_blktooff type&quot;</span>);
+	}
+	<span class="enscript-comment">/* NOTREACHED */</span>
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* Offtoblk derives logical block number from file offset */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">spec_offtoblk</span>(<span class="enscript-type">struct</span> vnop_offtoblk_args *ap)
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+
+	<span class="enscript-keyword">switch</span> (vp-&gt;v_type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VCHR</span>:
+		*ap-&gt;a_lblkno = (daddr64_t)-1; <span class="enscript-comment">/* failure */</span>
+		<span class="enscript-keyword">return</span> (ENOTSUP);
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VBLK</span>:
+		printf(<span class="enscript-string">&quot;spec_offtoblk: not implemented for VBLK\n&quot;</span>);
+		*ap-&gt;a_lblkno = (daddr64_t)-1; <span class="enscript-comment">/* failure */</span>
+		<span class="enscript-keyword">return</span> (ENOTSUP);
+
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;spec_offtoblk type&quot;</span>);
+	}
+	<span class="enscript-comment">/* NOTREACHED */</span>
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">filt_specdetach</span>(<span class="enscript-type">struct</span> knote *kn);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">filt_spec</span>(<span class="enscript-type">struct</span> knote *kn, <span class="enscript-type">long</span> hint);
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-function-name">filt_specpeek</span>(<span class="enscript-type">struct</span> knote *kn);
+
+<span class="enscript-type">struct</span> filterops spec_filtops = {
+	.f_isfd 	= 1,
+        .f_attach 	= filt_specattach,
+        .f_detach 	= filt_specdetach,
+        .f_event 	= filt_spec,
+	.f_peek 	= filt_specpeek
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">filter_to_seltype</span>(int16_t filter)
+{
+	<span class="enscript-keyword">switch</span> (filter) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EVFILT_READ</span>: 
+		<span class="enscript-keyword">return</span> FREAD;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">EVFILT_WRITE</span>:
+		<span class="enscript-keyword">return</span> FWRITE;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;filt_to_seltype(): invalid filter %d\n&quot;</span>, filter);
+		<span class="enscript-keyword">return</span> 0;
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 
+<span class="enscript-function-name">filt_specattach</span>(<span class="enscript-type">struct</span> knote *kn)
+{
+	vnode_t vp;
+	dev_t dev;
+
+	vp = (vnode_t)kn-&gt;kn_fp-&gt;f_fglob-&gt;fg_data; <span class="enscript-comment">/* Already have iocount, and vnode is alive */</span>
+
+	assert(vnode_ischr(vp));
+
+	dev = vnode_specrdev(vp);
+
+	<span class="enscript-keyword">if</span> (major(dev) &gt; nchrdev) {
+		<span class="enscript-keyword">return</span> ENXIO;
+	}
+
+	<span class="enscript-comment">/*
+	 * For a few special kinds of devices, we can attach knotes with
+	 * no restrictions because their &quot;select&quot; vectors return the amount
+	 * of data available.  Others require an explicit NOTE_LOWAT with
+	 * data of 1, indicating that the caller doesn't care about actual
+	 * data counts, just an indication that the device has data.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> ((cdevsw_flags[major(dev)] &amp; CDEVSW_SELECT_KQUEUE) == 0 &amp;&amp;
+	    ((kn-&gt;kn_sfflags &amp; NOTE_LOWAT) == 0 || kn-&gt;kn_sdata != 1)) {
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	kn-&gt;kn_hook_data = 0;
+
+	kn-&gt;kn_fop = &amp;spec_filtops;
+	kn-&gt;kn_hookid = vnode_vid(vp);
+
+	knote_markstayqueued(kn);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 
+<span class="enscript-function-name">filt_specdetach</span>(<span class="enscript-type">struct</span> knote *kn)
+{
+	knote_clearstayqueued(kn);
+
+	<span class="enscript-comment">/*
+	 * This is potentially tricky: the device's selinfo waitq that was
+	 * tricked into being part of this knote's waitq set may not be a part
+	 * of any other set, and the device itself may have revoked the memory
+	 * in which the waitq was held. We use the knote's kn_hook_data field
+	 * to keep the ID of the waitq's prepost table object. This
+	 * object keeps a pointer back to the waitq, and gives us a safe way
+	 * to decouple the dereferencing of driver allocated memory: if the
+	 * driver goes away (taking the waitq with it) then the prepost table
+	 * object will be invalidated. The waitq details are handled in the
+	 * waitq API invoked here.
+	 */</span>
+	<span class="enscript-keyword">if</span> (kn-&gt;kn_hook_data) {
+		waitq_unlink_by_prepost_id(kn-&gt;kn_hook_data, kn-&gt;kn_kq-&gt;kq_wqs);
+		kn-&gt;kn_hook_data = 0;
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 
+<span class="enscript-function-name">filt_spec</span>(<span class="enscript-type">struct</span> knote *kn, <span class="enscript-type">long</span> hint)
+{
+	vnode_t vp;
+	uthread_t uth;
+	<span class="enscript-type">struct</span> waitq_set *old_wqs;
+	vfs_context_t ctx;
+	<span class="enscript-type">int</span> selres;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> use_offset;
+	dev_t dev;
+	uint64_t flags;
+	uint64_t rsvd, rsvd_arg;
+	uint64_t *rlptr = NULL;
+
+	<span class="enscript-keyword">if</span> (hint != 0) {
+		panic(<span class="enscript-string">&quot;filt_spec(): nonzero hint?&quot;</span>);
+	}
+
+	uth = get_bsdthread_info(current_thread());
+	ctx = vfs_context_current();
+	vp = (vnode_t)kn-&gt;kn_fp-&gt;f_fglob-&gt;fg_data;
+
+	error = vnode_getwithvid(vp, kn-&gt;kn_hookid);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		kn-&gt;kn_flags |= (EV_EOF | EV_ONESHOT);
+		<span class="enscript-keyword">return</span> 1;
+	}
+	
+	dev = vnode_specrdev(vp);
+	flags = cdevsw_flags[major(dev)];
+	use_offset = ((flags &amp; CDEVSW_USE_OFFSET) != 0);
+
+	<span class="enscript-comment">/*
+	 * This function may be called many times to link or re-link the
+	 * underlying vnode to the kqueue.  If we've already linked the two,
+	 * we will have a valid kn_hook_data which ties us to the underlying
+	 * device's waitq via a the waitq's prepost table object. However,
+	 * devices can abort any select action by calling selthreadclear().
+	 * This is OK because the table object will be invalidated by the
+	 * driver (through a call to selthreadclear), so any attempt to access
+	 * the associated waitq will fail because the table object is invalid.
+	 *
+	 * Even if we've already registered, we need to pass a pointer
+	 * to a reserved link structure. Otherwise, selrecord() will
+	 * infer that we're in the second pass of select() and won't
+	 * actually do anything!
+	 */</span>
+	rsvd = rsvd_arg = waitq_link_reserve(NULL);
+	rlptr = (<span class="enscript-type">void</span> *)&amp;rsvd_arg;
+
+	<span class="enscript-comment">/*
+	 * Trick selrecord() into hooking kqueue's wait queue set
+	 * set into device's selinfo wait queue
+	 */</span>
+	old_wqs = uth-&gt;uu_wqset;
+	uth-&gt;uu_wqset = kn-&gt;kn_kq-&gt;kq_wqs;
+	selres = VNOP_SELECT(vp, filter_to_seltype(kn-&gt;kn_filter),
+			     0, rlptr, ctx);
+	uth-&gt;uu_wqset = old_wqs;
+
+	<span class="enscript-comment">/*
+	 * make sure to cleanup the reserved link - this guards against
+	 * drivers that may not actually call selrecord().
+	 */</span>
+	waitq_link_release(rsvd);
+	<span class="enscript-keyword">if</span> (rsvd != rsvd_arg) {
+		<span class="enscript-comment">/* the driver / handler called selrecord() */</span>
+		<span class="enscript-type">struct</span> waitq *wq;
+		memcpy(&amp;wq, rlptr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span> *));
+
+		<span class="enscript-comment">/*
+		 * The waitq_get_prepost_id() function will (potentially)
+		 * allocate a prepost table object for the waitq and return
+		 * the table object's ID to us.  It will also set the
+		 * waitq_prepost_id field within the waitq structure.
+		 *
+		 * We can just overwrite kn_hook_data because it's simply a
+		 * table ID used to grab a reference when needed.
+		 *
+		 * We have a reference on the vnode, so we know that the
+		 * device won't go away while we get this ID.
+		 */</span>
+		kn-&gt;kn_hook_data = waitq_get_prepost_id(wq);
+	}
+
+	<span class="enscript-keyword">if</span> (use_offset) {
+		<span class="enscript-keyword">if</span> (kn-&gt;kn_fp-&gt;f_fglob-&gt;fg_offset &gt;= (uint32_t)selres) {
+			kn-&gt;kn_data = 0;
+		} <span class="enscript-keyword">else</span> {
+			kn-&gt;kn_data = ((uint32_t)selres) - kn-&gt;kn_fp-&gt;f_fglob-&gt;fg_offset;
+		}
+	} <span class="enscript-keyword">else</span> {
+		kn-&gt;kn_data = selres;
+	}
+
+	vnode_put(vp);
+
+	<span class="enscript-keyword">if</span> ((kn-&gt;kn_sfflags &amp; NOTE_LOWAT) != 0)
+		<span class="enscript-keyword">return</span> (kn-&gt;kn_data &gt;= kn-&gt;kn_sdata);
+
+	<span class="enscript-keyword">return</span> (kn-&gt;kn_data != 0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span>
+<span class="enscript-function-name">filt_specpeek</span>(<span class="enscript-type">struct</span> knote *kn)
+{
+	vnode_t vp;
+	uthread_t uth;
+	<span class="enscript-type">struct</span> waitq_set *old_wqs;
+	vfs_context_t ctx;
+	<span class="enscript-type">int</span> error, selres;
+	uint64_t rsvd, rsvd_arg;
+	uint64_t *rlptr = NULL;
+	
+	uth = get_bsdthread_info(current_thread());
+	ctx = vfs_context_current();
+	vp = (vnode_t)kn-&gt;kn_fp-&gt;f_fglob-&gt;fg_data;
+
+	error = vnode_getwithvid(vp, kn-&gt;kn_hookid);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		<span class="enscript-keyword">return</span> 1; <span class="enscript-comment">/* Just like VNOP_SELECT() on recycled vnode */</span>
+	}
+
+	<span class="enscript-comment">/*
+	 * Even if we've already registered, we need to pass a pointer
+	 * to a reserved link structure. Otherwise, selrecord() will
+	 * infer that we're in the second pass of select() and won't
+	 * actually do anything!
+	 */</span>
+	rsvd = rsvd_arg = waitq_link_reserve(NULL);
+	rlptr = (<span class="enscript-type">void</span> *)&amp;rsvd_arg;
+
+	old_wqs = uth-&gt;uu_wqset;
+	uth-&gt;uu_wqset = kn-&gt;kn_kq-&gt;kq_wqs;
+	selres = VNOP_SELECT(vp, filter_to_seltype(kn-&gt;kn_filter),
+			     0, (<span class="enscript-type">void</span> *)rlptr, ctx);
+	uth-&gt;uu_wqset = old_wqs;
+
+	<span class="enscript-comment">/*
+	 * make sure to cleanup the reserved link - this guards against
+	 * drivers that may not actually call selrecord()
+	 */</span>
+	waitq_link_release(rsvd);
+	<span class="enscript-keyword">if</span> (rsvd != rsvd_arg) {
+		<span class="enscript-comment">/* the driver / handler called selrecord() */</span>
+		<span class="enscript-type">struct</span> waitq *wq;
+		memcpy(&amp;wq, rlptr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span> *));
+
+		<span class="enscript-comment">/*
+		 * The waitq_get_prepost_id() function will (potentially)
+		 * allocate a prepost table object for the waitq and return
+		 * the table object's ID to us.  It will also set the
+		 * waitq_prepost_id field within the waitq structure.
+		 *
+		 * We can just overwrite kn_hook_data because it's simply a
+		 * table ID used to grab a reference when needed.
+		 *
+		 * We have a reference on the vnode, so we know that the
+		 * device won't go away while we get this ID.
+		 */</span>
+		kn-&gt;kn_hook_data = waitq_get_prepost_id(wq);
+	}
+
+	vnode_put(vp);
+	<span class="enscript-keyword">return</span> selres;
+}
+
+</pre>
+<hr />
+</body></html>

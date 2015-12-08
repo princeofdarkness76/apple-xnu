@@ -1,0 +1,3760 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>uipc_syscalls.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">uipc_syscalls.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1989, 1990, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * sendfile(2) and related extensions:
+ * Copyright (c) 1998, David Greenman. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)uipc_syscalls.c	8.4 (Berkeley) 2/21/94
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/filedesc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signalvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/priv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">f_flag</span> f_fglob-&gt;fg_flag
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">f_type</span> f_fglob-&gt;fg_ops-&gt;fo_type
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">f_msgcount</span> f_fglob-&gt;fg_msgcount
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">f_cred</span> f_fglob-&gt;fg_cred
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">f_ops</span> f_fglob-&gt;fg_ops
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">f_offset</span> f_fglob-&gt;fg_offset
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">f_data</span> f_fglob-&gt;fg_data
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_LAYER_IN_BEG</span>	NETDBG_CODE(DBG_NETSOCK, 0)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_LAYER_IN_END</span>	NETDBG_CODE(DBG_NETSOCK, 2)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_LAYER_OUT_BEG</span>	NETDBG_CODE(DBG_NETSOCK, 1)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_LAYER_OUT_END</span>	NETDBG_CODE(DBG_NETSOCK, 3)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_FNC_SENDMSG</span>		NETDBG_CODE(DBG_NETSOCK, (1 &lt;&lt; 8) | 1)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_FNC_SENDTO</span>		NETDBG_CODE(DBG_NETSOCK, (2 &lt;&lt; 8) | 1)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_FNC_SENDIT</span>		NETDBG_CODE(DBG_NETSOCK, (3 &lt;&lt; 8) | 1)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_FNC_RECVFROM</span>	NETDBG_CODE(DBG_NETSOCK, (5 &lt;&lt; 8))
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_FNC_RECVMSG</span>		NETDBG_CODE(DBG_NETSOCK, (6 &lt;&lt; 8))
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_FNC_RECVIT</span>		NETDBG_CODE(DBG_NETSOCK, (7 &lt;&lt; 8))
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_FNC_SENDFILE</span>	NETDBG_CODE(DBG_NETSOCK, (10 &lt;&lt; 8))
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_FNC_SENDFILE_WAIT</span>	NETDBG_CODE(DBG_NETSOCK, ((10 &lt;&lt; 8) | 1))
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_FNC_SENDFILE_READ</span>	NETDBG_CODE(DBG_NETSOCK, ((10 &lt;&lt; 8) | 2))
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_FNC_SENDFILE_SEND</span>	NETDBG_CODE(DBG_NETSOCK, ((10 &lt;&lt; 8) | 3))
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_FNC_SENDMSG_X</span>	NETDBG_CODE(DBG_NETSOCK, (11 &lt;&lt; 8))
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DBG_FNC_RECVMSG_X</span>	NETDBG_CODE(DBG_NETSOCK, (12 &lt;&lt; 8))
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span> || <span class="enscript-variable-name">DEVELOPMENT</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">DEBUG_KERNEL_ADDRPERM</span>(_v) (_v)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">DBG_PRINTF</span>(...) printf(__VA_ARGS__)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">DEBUG_KERNEL_ADDRPERM</span>(_v) VM_KERNEL_ADDRPERM(_v)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">DBG_PRINTF</span>(...) do { } while (0)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* TODO: should be in header file */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">falloc_locked</span>(proc_t, <span class="enscript-type">struct</span> fileproc **, <span class="enscript-type">int</span> *, vfs_context_t, <span class="enscript-type">int</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">sendit</span>(<span class="enscript-type">struct</span> proc *, <span class="enscript-type">struct</span> socket *, <span class="enscript-type">struct</span> user_msghdr *, uio_t,
+    <span class="enscript-type">int</span>, int32_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">recvit</span>(<span class="enscript-type">struct</span> proc *, <span class="enscript-type">int</span>, <span class="enscript-type">struct</span> user_msghdr *, uio_t, user_addr_t,
+    int32_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">connectit</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">struct</span> sockaddr *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">getsockaddr</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">struct</span> sockaddr **, user_addr_t,
+    size_t, boolean_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">getsockaddr_s</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">struct</span> sockaddr_storage *,
+    user_addr_t, size_t, boolean_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">getsockaddrlist</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">struct</span> sockaddr_list **,
+    user_addr_t, socklen_t, boolean_t);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SENDFILE</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">alloc_sendpkt</span>(<span class="enscript-type">int</span>, size_t, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *, <span class="enscript-type">struct</span> mbuf **,
+    boolean_t);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SENDFILE */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">connectx_nocancel</span>(<span class="enscript-type">struct</span> proc *, <span class="enscript-type">struct</span> connectx_args *, <span class="enscript-type">int</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">connectitx</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">struct</span> sockaddr_list **,
+    <span class="enscript-type">struct</span> sockaddr_list **, <span class="enscript-type">struct</span> proc *, uint32_t, sae_associd_t,
+    sae_connid_t *, uio_t, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>, user_ssize_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">peeloff_nocancel</span>(<span class="enscript-type">struct</span> proc *, <span class="enscript-type">struct</span> peeloff_args *, <span class="enscript-type">int</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">disconnectx_nocancel</span>(<span class="enscript-type">struct</span> proc *, <span class="enscript-type">struct</span> disconnectx_args *,
+    <span class="enscript-type">int</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">socket_common</span>(<span class="enscript-type">struct</span> proc *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>, pid_t, int32_t *, <span class="enscript-type">int</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">internalize_user_msghdr_array</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>, u_int,
+    <span class="enscript-type">struct</span> user_msghdr_x *, <span class="enscript-type">struct</span> uio **);
+<span class="enscript-type">static</span> u_int <span class="enscript-function-name">externalize_user_msghdr_array</span>(<span class="enscript-type">void</span> *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>, u_int,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> user_msghdr_x *, <span class="enscript-type">struct</span> uio **);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">free_uio_array</span>(<span class="enscript-type">struct</span> uio **, u_int);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">uio_array_is_valid</span>(<span class="enscript-type">struct</span> uio **, u_int);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">recv_msg_array_is_valid</span>(<span class="enscript-type">struct</span> recv_msg_elem *, u_int);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">internalize_recv_msghdr_array</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>,
+    u_int, <span class="enscript-type">struct</span> user_msghdr_x *, <span class="enscript-type">struct</span> recv_msg_elem *);
+<span class="enscript-type">static</span> u_int <span class="enscript-function-name">externalize_recv_msghdr_array</span>(<span class="enscript-type">void</span> *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>, u_int,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> user_msghdr_x *, <span class="enscript-type">struct</span> recv_msg_elem *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> recv_msg_elem *<span class="enscript-function-name">alloc_recv_msg_array</span>(u_int count);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">free_recv_msg_array</span>(<span class="enscript-type">struct</span> recv_msg_elem *, u_int);
+
+<span class="enscript-function-name">SYSCTL_DECL</span>(_kern_ipc);
+
+<span class="enscript-type">static</span> u_int somaxsendmsgx = 100;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_kern_ipc, OID_AUTO, maxsendmsgx,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;somaxsendmsgx, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-type">static</span> u_int somaxrecvmsgx = 100;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_kern_ipc, OID_AUTO, maxrecvmsgx,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;somaxrecvmsgx, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-comment">/*
+ * System call interface to the socket abstraction.
+ */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">const</span> <span class="enscript-type">struct</span> fileops socketops;
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EACCES			Mandatory Access Control failure
+ *	falloc:ENFILE
+ *	falloc:EMFILE
+ *	falloc:ENOMEM
+ *	socreate:EAFNOSUPPORT
+ *	socreate:EPROTOTYPE
+ *	socreate:EPROTONOSUPPORT
+ *	socreate:ENOBUFS
+ *	socreate:ENOMEM
+ *	socreate:???			[other protocol families, IPSEC]
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">socket</span>(<span class="enscript-type">struct</span> proc *p,
+	<span class="enscript-type">struct</span> socket_args *uap,
+	int32_t *retval)
+{
+	<span class="enscript-keyword">return</span> (socket_common(p, uap-&gt;domain, uap-&gt;type, uap-&gt;protocol,
+	    proc_selfpid(), retval, 0));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">socket_delegate</span>(<span class="enscript-type">struct</span> proc *p,
+		<span class="enscript-type">struct</span> socket_delegate_args *uap,
+		int32_t *retval)
+{
+	<span class="enscript-keyword">return</span> socket_common(p, uap-&gt;domain, uap-&gt;type, uap-&gt;protocol,
+	    uap-&gt;epid, retval, 1);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">socket_common</span>(<span class="enscript-type">struct</span> proc *p,
+		<span class="enscript-type">int</span> domain,
+		<span class="enscript-type">int</span> type,
+		<span class="enscript-type">int</span> protocol,
+		pid_t epid,
+		int32_t *retval,
+		<span class="enscript-type">int</span> delegate)
+{
+	<span class="enscript-type">struct</span> socket *so;
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">int</span> fd, error;
+
+	AUDIT_ARG(socket, domain, type, protocol);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	<span class="enscript-keyword">if</span> ((error = mac_socket_check_create(kauth_cred_get(), domain,
+	    type, protocol)) != 0)
+		<span class="enscript-keyword">return</span> (error);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+
+	<span class="enscript-keyword">if</span> (delegate) {
+		error = priv_check_cred(kauth_cred_get(),
+		    PRIV_NET_PRIVILEGED_SOCKET_DELEGATE, 0);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (EACCES);
+	}
+
+	error = falloc(p, &amp;fp, &amp;fd, vfs_context_current());
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">return</span> (error);
+	}
+	fp-&gt;f_flag = FREAD|FWRITE;
+	fp-&gt;f_ops = &amp;socketops;
+
+	<span class="enscript-keyword">if</span> (delegate)
+		error = socreate_delegate(domain, &amp;so, type, protocol, epid);
+	<span class="enscript-keyword">else</span>
+		error = socreate(domain, &amp;so, type, protocol);
+
+	<span class="enscript-keyword">if</span> (error) {
+		fp_free(p, fd, fp);
+	} <span class="enscript-keyword">else</span> {
+		fp-&gt;f_data = (caddr_t)so;
+
+		proc_fdlock(p);
+		procfdtbl_releasefd(p, fd, NULL);
+
+		fp_drop(p, fd, fp, 1);
+		proc_fdunlock(p);
+
+		*retval = fd;
+		<span class="enscript-keyword">if</span> (ENTR_SHOULDTRACE) {
+			KERNEL_ENERGYTRACE(kEnTrActKernSocket, DBG_FUNC_START,
+			    fd, 0, (int64_t)VM_KERNEL_ADDRPERM(so));
+		}
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EDESTADDRREQ		Destination address required
+ *		EBADF			Bad file descriptor
+ *		EACCES			Mandatory Access Control failure
+ *	file_socket:ENOTSOCK
+ *	file_socket:EBADF
+ *	getsockaddr:ENAMETOOLONG	Filename too long
+ *	getsockaddr:EINVAL		Invalid argument
+ *	getsockaddr:ENOMEM		Not enough space
+ *	getsockaddr:EFAULT		Bad address
+ *	sobindlock:???
+ */</span>
+<span class="enscript-comment">/* ARGSUSED */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">bind</span>(__unused proc_t p, <span class="enscript-type">struct</span> bind_args *uap, __unused int32_t *retval)
+{
+	<span class="enscript-type">struct</span> sockaddr_storage ss;
+	<span class="enscript-type">struct</span> sockaddr *sa = NULL;
+	<span class="enscript-type">struct</span> socket *so;
+	boolean_t want_free = TRUE;
+	<span class="enscript-type">int</span> error;
+
+	AUDIT_ARG(fd, uap-&gt;s);
+	error = file_socket(uap-&gt;s, &amp;so);
+	<span class="enscript-keyword">if</span> (error != 0)
+		<span class="enscript-keyword">return</span> (error);
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (uap-&gt;name == USER_ADDR_NULL) {
+		error = EDESTADDRREQ;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (uap-&gt;namelen &gt; <span class="enscript-keyword">sizeof</span> (ss)) {
+		error = getsockaddr(so, &amp;sa, uap-&gt;name, uap-&gt;namelen, TRUE);
+	} <span class="enscript-keyword">else</span> {
+		error = getsockaddr_s(so, &amp;ss, uap-&gt;name, uap-&gt;namelen, TRUE);
+		<span class="enscript-keyword">if</span> (error == 0) {
+			sa = (<span class="enscript-type">struct</span> sockaddr *)&amp;ss;
+			want_free = FALSE;
+		}
+	}
+	<span class="enscript-keyword">if</span> (error != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	AUDIT_ARG(sockaddr, vfs_context_cwd(vfs_context_current()), sa);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	<span class="enscript-keyword">if</span> ((error = mac_socket_check_bind(kauth_cred_get(), so, sa)) == 0)
+		error = sobindlock(so, sa, 1);	<span class="enscript-comment">/* will lock socket */</span>
+#<span class="enscript-reference">else</span>
+		error = sobindlock(so, sa, 1);	<span class="enscript-comment">/* will lock socket */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+	<span class="enscript-keyword">if</span> (want_free)
+		FREE(sa, M_SONAME);
+<span class="enscript-reference">out</span>:
+	file_drop(uap-&gt;s);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EBADF
+ *		EACCES			Mandatory Access Control failure
+ *	file_socket:ENOTSOCK
+ *	file_socket:EBADF
+ *	solisten:EINVAL
+ *	solisten:EOPNOTSUPP
+ *	solisten:???
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">listen</span>(__unused <span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> listen_args *uap,
+    __unused int32_t *retval)
+{
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> socket *so;
+
+	AUDIT_ARG(fd, uap-&gt;s);
+	error = file_socket(uap-&gt;s, &amp;so);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+	<span class="enscript-keyword">if</span> (so != NULL)
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	{
+		error = mac_socket_check_listen(kauth_cred_get(), so);
+		<span class="enscript-keyword">if</span> (error == 0)
+			error = solisten(so, uap-&gt;backlog);
+	}
+#<span class="enscript-reference">else</span>
+		error =  solisten(so, uap-&gt;backlog);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+	<span class="enscript-keyword">else</span>
+		error = EBADF;
+
+	file_drop(uap-&gt;s);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	fp_getfsock:EBADF	Bad file descriptor
+ *		fp_getfsock:EOPNOTSUPP	...
+ *		xlate =&gt; :ENOTSOCK	Socket operation on non-socket
+ *		:EFAULT			Bad address on copyin/copyout
+ *		:EBADF			Bad file descriptor
+ *		:EOPNOTSUPP		Operation not supported on socket
+ *		:EINVAL			Invalid argument
+ *		:EWOULDBLOCK		Operation would block
+ *		:ECONNABORTED		Connection aborted
+ *		:EINTR			Interrupted function
+ *		:EACCES			Mandatory Access Control failure
+ *		falloc_locked:ENFILE	Too many files open in system
+ *		falloc_locked::EMFILE	Too many open files
+ *		falloc_locked::ENOMEM	Not enough space
+ *		0			Success
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">accept_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> accept_nocancel_args *uap,
+    int32_t *retval)
+{
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">struct</span> sockaddr *sa = NULL;
+	socklen_t namelen;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> socket *head, *so = NULL;
+	lck_mtx_t *mutex_held;
+	<span class="enscript-type">int</span> fd = uap-&gt;s;
+	<span class="enscript-type">int</span> newfd;
+	<span class="enscript-type">short</span> fflag;		<span class="enscript-comment">/* type must match fp-&gt;f_flag */</span>
+	<span class="enscript-type">int</span> dosocklock = 0;
+
+	*retval = -1;
+
+	AUDIT_ARG(fd, uap-&gt;s);
+
+	<span class="enscript-keyword">if</span> (uap-&gt;name) {
+		error = copyin(uap-&gt;anamelen, (caddr_t)&amp;namelen,
+		    <span class="enscript-keyword">sizeof</span> (socklen_t));
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+	}
+	error = fp_getfsock(p, fd, &amp;fp, &amp;head);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (error == EOPNOTSUPP)
+			error = ENOTSOCK;
+		<span class="enscript-keyword">return</span> (error);
+	}
+	<span class="enscript-keyword">if</span> (head == NULL) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	<span class="enscript-keyword">if</span> ((error = mac_socket_check_accept(kauth_cred_get(), head)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+
+	socket_lock(head, 1);
+
+	<span class="enscript-keyword">if</span> (head-&gt;so_proto-&gt;pr_getlock != NULL)  {
+		mutex_held = (*head-&gt;so_proto-&gt;pr_getlock)(head, 0);
+		dosocklock = 1;
+	} <span class="enscript-keyword">else</span> {
+		mutex_held = head-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+		dosocklock = 0;
+	}
+
+	<span class="enscript-keyword">if</span> ((head-&gt;so_options &amp; SO_ACCEPTCONN) == 0) {
+		<span class="enscript-keyword">if</span> ((head-&gt;so_proto-&gt;pr_flags &amp; PR_CONNREQUIRED) == 0) {
+			error = EOPNOTSUPP;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* POSIX: The socket is not accepting connections */</span>
+			error = EINVAL;
+		}
+		socket_unlock(head, 1);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> ((head-&gt;so_state &amp; SS_NBIO) &amp;&amp; head-&gt;so_comp.tqh_first == NULL) {
+		socket_unlock(head, 1);
+		error = EWOULDBLOCK;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">while</span> (TAILQ_EMPTY(&amp;head-&gt;so_comp) &amp;&amp; head-&gt;so_error == 0) {
+		<span class="enscript-keyword">if</span> (head-&gt;so_state &amp; SS_CANTRCVMORE) {
+			head-&gt;so_error = ECONNABORTED;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (head-&gt;so_usecount &lt; 1)
+			panic(<span class="enscript-string">&quot;accept: head=%p refcount=%d\n&quot;</span>, head,
+			    head-&gt;so_usecount);
+		error = msleep((caddr_t)&amp;head-&gt;so_timeo, mutex_held,
+		    PSOCK | PCATCH, <span class="enscript-string">&quot;accept&quot;</span>, 0);
+		<span class="enscript-keyword">if</span> (head-&gt;so_usecount &lt; 1)
+			panic(<span class="enscript-string">&quot;accept: 2 head=%p refcount=%d\n&quot;</span>, head,
+			    head-&gt;so_usecount);
+		<span class="enscript-keyword">if</span> ((head-&gt;so_state &amp; SS_DRAINING)) {
+			error = ECONNABORTED;
+		}
+		<span class="enscript-keyword">if</span> (error) {
+			socket_unlock(head, 1);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (head-&gt;so_error) {
+		error = head-&gt;so_error;
+		head-&gt;so_error = 0;
+		socket_unlock(head, 1);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+
+	<span class="enscript-comment">/*
+	 * At this point we know that there is at least one connection
+	 * ready to be accepted. Remove it from the queue prior to
+	 * allocating the file descriptor for it since falloc() may
+	 * block allowing another process to accept the connection
+	 * instead.
+	 */</span>
+	lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+	so = TAILQ_FIRST(&amp;head-&gt;so_comp);
+	TAILQ_REMOVE(&amp;head-&gt;so_comp, so, so_list);
+	head-&gt;so_qlen--;
+	<span class="enscript-comment">/* unlock head to avoid deadlock with select, keep a ref on head */</span>
+	socket_unlock(head, 0);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	<span class="enscript-comment">/*
+	 * Pass the pre-accepted socket to the MAC framework. This is
+	 * cheaper than allocating a file descriptor for the socket,
+	 * calling the protocol accept callback, and possibly freeing
+	 * the file descriptor should the MAC check fails.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((error = mac_socket_check_accepted(kauth_cred_get(), so)) != 0) {
+		socket_lock(so, 1);
+		so-&gt;so_state &amp;= ~(SS_NOFDREF | SS_COMP);
+		so-&gt;so_head = NULL;
+		socket_unlock(so, 1);
+		soclose(so);
+		<span class="enscript-comment">/* Drop reference on listening socket */</span>
+		sodereference(head);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+
+	<span class="enscript-comment">/*
+	 * Pass the pre-accepted socket to any interested socket filter(s).
+	 * Upon failure, the socket would have been closed by the callee.
+	 */</span>
+	<span class="enscript-keyword">if</span> (so-&gt;so_filt != NULL &amp;&amp; (error = soacceptfilter(so)) != 0) {
+		<span class="enscript-comment">/* Drop reference on listening socket */</span>
+		sodereference(head);
+		<span class="enscript-comment">/* Propagate socket filter's error code to the caller */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	fflag = fp-&gt;f_flag;
+	error = falloc(p, &amp;fp, &amp;newfd, vfs_context_current());
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-comment">/*
+		 * Probably ran out of file descriptors.
+		 *
+		 * &lt;rdar://problem/8554930&gt;
+		 * Don't put this back on the socket like we used to, that
+		 * just causes the client to spin. Drop the socket.
+		 */</span>
+		socket_lock(so, 1);
+		so-&gt;so_state &amp;= ~(SS_NOFDREF | SS_COMP);
+		so-&gt;so_head = NULL;
+		socket_unlock(so, 1);
+		soclose(so);
+		sodereference(head);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	*retval = newfd;
+	fp-&gt;f_flag = fflag;
+	fp-&gt;f_ops = &amp;socketops;
+	fp-&gt;f_data = (caddr_t)so;
+
+	socket_lock(head, 0);
+	<span class="enscript-keyword">if</span> (dosocklock)
+		socket_lock(so, 1);
+
+	so-&gt;so_state &amp;= ~SS_COMP;
+	so-&gt;so_head = NULL;
+
+	<span class="enscript-comment">/* Sync socket non-blocking/async state with file flags */</span>
+	<span class="enscript-keyword">if</span> (fp-&gt;f_flag &amp; FNONBLOCK) {
+		so-&gt;so_state |= SS_NBIO;
+	} <span class="enscript-keyword">else</span> {
+		so-&gt;so_state &amp;= ~SS_NBIO;
+	}
+
+	<span class="enscript-keyword">if</span> (fp-&gt;f_flag &amp; FASYNC) {
+		so-&gt;so_state |= SS_ASYNC;
+		so-&gt;so_rcv.sb_flags |= SB_ASYNC;
+		so-&gt;so_snd.sb_flags |= SB_ASYNC;
+	} <span class="enscript-keyword">else</span> {
+		so-&gt;so_state &amp;= ~SS_ASYNC;
+		so-&gt;so_rcv.sb_flags &amp;= ~SB_ASYNC;
+		so-&gt;so_snd.sb_flags &amp;= ~SB_ASYNC;
+	}
+
+	(<span class="enscript-type">void</span>) soacceptlock(so, &amp;sa, 0);
+	socket_unlock(head, 1);
+	<span class="enscript-keyword">if</span> (sa == NULL) {
+		namelen = 0;
+		<span class="enscript-keyword">if</span> (uap-&gt;name)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">gotnoname</span>;
+		error = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">releasefd</span>;
+	}
+	AUDIT_ARG(sockaddr, vfs_context_cwd(vfs_context_current()), sa);
+
+	<span class="enscript-keyword">if</span> (uap-&gt;name) {
+		socklen_t	sa_len;
+
+		<span class="enscript-comment">/* save sa_len before it is destroyed */</span>
+		sa_len = sa-&gt;sa_len;
+		namelen = MIN(namelen, sa_len);
+		error = copyout(sa, uap-&gt;name, namelen);
+		<span class="enscript-keyword">if</span> (!error)
+			<span class="enscript-comment">/* return the actual, untruncated address length */</span>
+			namelen = sa_len;
+<span class="enscript-reference">gotnoname</span>:
+		error = copyout((caddr_t)&amp;namelen, uap-&gt;anamelen,
+		    <span class="enscript-keyword">sizeof</span> (socklen_t));
+	}
+	FREE(sa, M_SONAME);
+
+<span class="enscript-reference">releasefd</span>:
+	<span class="enscript-comment">/*
+	 * If the socket has been marked as inactive by sosetdefunct(),
+	 * disallow further operations on it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (so-&gt;so_flags &amp; SOF_DEFUNCT) {
+		sodefunct(current_proc(), so,
+		    SHUTDOWN_SOCKET_LEVEL_DISCONNECT_INTERNAL);
+	}
+
+	<span class="enscript-keyword">if</span> (dosocklock)
+		socket_unlock(so, 1);
+
+	proc_fdlock(p);
+	procfdtbl_releasefd(p, newfd, NULL);
+	fp_drop(p, newfd, fp, 1);
+	proc_fdunlock(p);
+
+<span class="enscript-reference">out</span>:
+	file_drop(fd);
+
+	<span class="enscript-keyword">if</span> (error == 0 &amp;&amp; ENTR_SHOULDTRACE) {
+		KERNEL_ENERGYTRACE(kEnTrActKernSocket, DBG_FUNC_START,
+		    newfd, 0, (int64_t)VM_KERNEL_ADDRPERM(so));
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">accept</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> accept_args *uap, int32_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span> (accept_nocancel(p, (<span class="enscript-type">struct</span> accept_nocancel_args *)uap,
+	    retval));
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EBADF			Bad file descriptor
+ *		EALREADY		Connection already in progress
+ *		EINPROGRESS		Operation in progress
+ *		ECONNABORTED		Connection aborted
+ *		EINTR			Interrupted function
+ *		EACCES			Mandatory Access Control failure
+ *	file_socket:ENOTSOCK
+ *	file_socket:EBADF
+ *	getsockaddr:ENAMETOOLONG	Filename too long
+ *	getsockaddr:EINVAL		Invalid argument
+ *	getsockaddr:ENOMEM		Not enough space
+ *	getsockaddr:EFAULT		Bad address
+ *	soconnectlock:EOPNOTSUPP
+ *	soconnectlock:EISCONN
+ *	soconnectlock:???		[depends on protocol, filters]
+ *	msleep:EINTR
+ *
+ * Imputed:	so_error		error may be set from so_error, which
+ *					may have been set by soconnectlock.
+ */</span>
+<span class="enscript-comment">/* ARGSUSED */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">connect</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> connect_args *uap, int32_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span> (connect_nocancel(p, (<span class="enscript-type">struct</span> connect_nocancel_args *)uap,
+	    retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">connect_nocancel</span>(proc_t p, <span class="enscript-type">struct</span> connect_nocancel_args *uap, int32_t *retval)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">p</span>, <span class="enscript-variable-name">retval</span>)
+	<span class="enscript-type">struct</span> socket *so;
+	<span class="enscript-type">struct</span> sockaddr_storage ss;
+	<span class="enscript-type">struct</span> sockaddr *sa = NULL;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> fd = uap-&gt;s;
+	boolean_t dgram;
+
+	AUDIT_ARG(fd, uap-&gt;s);
+	error = file_socket(fd, &amp;so);
+	<span class="enscript-keyword">if</span> (error != 0)
+		<span class="enscript-keyword">return</span> (error);
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Ask getsockaddr{_s} to not translate AF_UNSPEC to AF_INET
+	 * if this is a datagram socket; translate for other types.
+	 */</span>
+	dgram = (so-&gt;so_type == SOCK_DGRAM);
+
+	<span class="enscript-comment">/* Get socket address now before we obtain socket lock */</span>
+	<span class="enscript-keyword">if</span> (uap-&gt;namelen &gt; <span class="enscript-keyword">sizeof</span> (ss)) {
+		error = getsockaddr(so, &amp;sa, uap-&gt;name, uap-&gt;namelen, !dgram);
+	} <span class="enscript-keyword">else</span> {
+		error = getsockaddr_s(so, &amp;ss, uap-&gt;name, uap-&gt;namelen, !dgram);
+		<span class="enscript-keyword">if</span> (error == 0)
+			sa = (<span class="enscript-type">struct</span> sockaddr *)&amp;ss;
+	}
+	<span class="enscript-keyword">if</span> (error != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	error = connectit(so, sa);
+
+	<span class="enscript-keyword">if</span> (sa != NULL &amp;&amp; sa != SA(&amp;ss))
+		FREE(sa, M_SONAME);
+	<span class="enscript-keyword">if</span> (error == ERESTART)
+		error = EINTR;
+<span class="enscript-reference">out</span>:
+	file_drop(fd);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">connectx_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> connectx_args *uap, <span class="enscript-type">int</span> *retval)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">p</span>, <span class="enscript-variable-name">retval</span>)
+	<span class="enscript-type">struct</span> sockaddr_list *src_sl = NULL, *dst_sl = NULL;
+	<span class="enscript-type">struct</span> socket *so;
+	<span class="enscript-type">int</span> error, error1, fd = uap-&gt;socket;
+	boolean_t dgram;
+	sae_connid_t cid = SAE_CONNID_ANY;
+	<span class="enscript-type">struct</span> user32_sa_endpoints ep32;
+	<span class="enscript-type">struct</span> user64_sa_endpoints ep64;
+	<span class="enscript-type">struct</span> user_sa_endpoints ep;
+	user_ssize_t bytes_written = 0;
+	<span class="enscript-type">struct</span> user_iovec *iovp;
+	uio_t auio = NULL;
+
+	AUDIT_ARG(fd, uap-&gt;socket);
+	error = file_socket(fd, &amp;so);
+	<span class="enscript-keyword">if</span> (error != 0)
+		<span class="enscript-keyword">return</span> (error);
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (uap-&gt;endpoints == USER_ADDR_NULL) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+		error = copyin(uap-&gt;endpoints, (caddr_t)&amp;ep64, <span class="enscript-keyword">sizeof</span>(ep64));
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		ep.sae_srcif = ep64.sae_srcif;
+		ep.sae_srcaddr = ep64.sae_srcaddr;
+		ep.sae_srcaddrlen = ep64.sae_srcaddrlen;
+		ep.sae_dstaddr = ep64.sae_dstaddr;
+		ep.sae_dstaddrlen = ep64.sae_dstaddrlen;
+	} <span class="enscript-keyword">else</span> {
+		error = copyin(uap-&gt;endpoints, (caddr_t)&amp;ep32, <span class="enscript-keyword">sizeof</span>(ep32));
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		ep.sae_srcif = ep32.sae_srcif;
+		ep.sae_srcaddr = ep32.sae_srcaddr;
+		ep.sae_srcaddrlen = ep32.sae_srcaddrlen;
+		ep.sae_dstaddr = ep32.sae_dstaddr;
+		ep.sae_dstaddrlen = ep32.sae_dstaddrlen;
+	}
+
+	<span class="enscript-comment">/*
+	 * Ask getsockaddr{_s} to not translate AF_UNSPEC to AF_INET
+	 * if this is a datagram socket; translate for other types.
+	 */</span>
+	dgram = (so-&gt;so_type == SOCK_DGRAM);
+
+	<span class="enscript-comment">/*
+	 * Get socket address(es) now before we obtain socket lock; use
+	 * sockaddr_list for src address for convenience, if present,
+	 * even though it won't hold more than one.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ep.sae_srcaddr != USER_ADDR_NULL &amp;&amp; (error = getsockaddrlist(so,
+	    &amp;src_sl, (user_addr_t)(caddr_t)ep.sae_srcaddr, ep.sae_srcaddrlen,
+	    dgram)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	<span class="enscript-keyword">if</span> (ep.sae_dstaddr == USER_ADDR_NULL) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	error = getsockaddrlist(so, &amp;dst_sl, (user_addr_t)(caddr_t)ep.sae_dstaddr,
+	    ep.sae_dstaddrlen, dgram);
+	<span class="enscript-keyword">if</span> (error != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	VERIFY(dst_sl != NULL &amp;&amp;
+	    !TAILQ_EMPTY(&amp;dst_sl-&gt;sl_head) &amp;&amp; dst_sl-&gt;sl_cnt &gt; 0);
+
+	<span class="enscript-keyword">if</span> (uap-&gt;iov != USER_ADDR_NULL) {
+		<span class="enscript-comment">/* Verify range before calling uio_create() */</span>
+		<span class="enscript-keyword">if</span> (uap-&gt;iovcnt &lt;= 0 || uap-&gt;iovcnt &gt; UIO_MAXIOV)
+			<span class="enscript-keyword">return</span> (EINVAL);
+
+		<span class="enscript-keyword">if</span> (uap-&gt;len == USER_ADDR_NULL)
+			<span class="enscript-keyword">return</span> (EINVAL);
+
+		<span class="enscript-comment">/* allocate a uio to hold the number of iovecs passed */</span>
+		auio = uio_create(uap-&gt;iovcnt, 0,
+		    (IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32),
+		    UIO_WRITE);
+
+		<span class="enscript-keyword">if</span> (auio == NULL) {
+			error = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * get location of iovecs within the uio.
+		 * then copyin the iovecs from user space.
+		 */</span>
+		iovp = uio_iovsaddr(auio);
+		<span class="enscript-keyword">if</span> (iovp == NULL) {
+			error = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		error = copyin_user_iovec_array(uap-&gt;iov,
+			IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32,
+			uap-&gt;iovcnt, iovp);
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		<span class="enscript-comment">/* finish setup of uio_t */</span>
+		error = uio_calculateresid(auio);
+		<span class="enscript-keyword">if</span> (error != 0) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+
+	error = connectitx(so, &amp;src_sl, &amp;dst_sl, p, ep.sae_srcif, uap-&gt;associd,
+	    &amp;cid, auio, uap-&gt;flags, &amp;bytes_written);
+	<span class="enscript-keyword">if</span> (error == ERESTART)
+		error = EINTR;
+
+	<span class="enscript-keyword">if</span> (uap-&gt;len != USER_ADDR_NULL) {
+		error1 = copyout(&amp;bytes_written, uap-&gt;len, <span class="enscript-keyword">sizeof</span> (uap-&gt;len));
+		<span class="enscript-comment">/* give precedence to connectitx errors */</span>
+		<span class="enscript-keyword">if</span> ((error1 != 0) &amp;&amp; (error == 0))
+			error = error1;
+	}
+
+	<span class="enscript-keyword">if</span> (uap-&gt;connid != USER_ADDR_NULL) {
+		error1 = copyout(&amp;cid, uap-&gt;connid, <span class="enscript-keyword">sizeof</span> (cid));
+		<span class="enscript-comment">/* give precedence to connectitx errors */</span>
+		<span class="enscript-keyword">if</span> ((error1 != 0) &amp;&amp; (error == 0))
+			error = error1;
+	}
+<span class="enscript-reference">out</span>:
+	file_drop(fd);
+	<span class="enscript-keyword">if</span> (auio != NULL) {
+		uio_free(auio);
+	}
+	<span class="enscript-keyword">if</span> (src_sl != NULL)
+		sockaddrlist_free(src_sl);
+	<span class="enscript-keyword">if</span> (dst_sl != NULL)
+		sockaddrlist_free(dst_sl);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">connectx</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> connectx_args *uap, <span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-comment">/*
+	 * Due to similiarity with a POSIX interface, define as
+	 * an unofficial cancellation point.
+	 */</span>
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span> (connectx_nocancel(p, uap, retval));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">connectit</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr *sa)
+{
+	<span class="enscript-type">int</span> error;
+
+	AUDIT_ARG(sockaddr, vfs_context_cwd(vfs_context_current()), sa);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	<span class="enscript-keyword">if</span> ((error = mac_socket_check_connect(kauth_cred_get(), so, sa)) != 0)
+		<span class="enscript-keyword">return</span> (error);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+
+	socket_lock(so, 1);
+	<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_NBIO) &amp;&amp; (so-&gt;so_state &amp; SS_ISCONNECTING)) {
+		error = EALREADY;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	error = soconnectlock(so, sa, 0);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		so-&gt;so_state &amp;= ~SS_ISCONNECTING;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_NBIO) &amp;&amp; (so-&gt;so_state &amp; SS_ISCONNECTING)) {
+		error = EINPROGRESS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">while</span> ((so-&gt;so_state &amp; SS_ISCONNECTING) &amp;&amp; so-&gt;so_error == 0) {
+		lck_mtx_t *mutex_held;
+
+		<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_getlock != NULL)
+			mutex_held = (*so-&gt;so_proto-&gt;pr_getlock)(so, 0);
+		<span class="enscript-keyword">else</span>
+			mutex_held = so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+		error = msleep((caddr_t)&amp;so-&gt;so_timeo, mutex_held,
+		    PSOCK | PCATCH, __func__, 0);
+		<span class="enscript-keyword">if</span> (so-&gt;so_state &amp; SS_DRAINING) {
+			error = ECONNABORTED;
+		}
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">if</span> (error == 0) {
+		error = so-&gt;so_error;
+		so-&gt;so_error = 0;
+	}
+<span class="enscript-reference">out</span>:
+	socket_unlock(so, 1);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">connectitx</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr_list **src_sl,
+    <span class="enscript-type">struct</span> sockaddr_list **dst_sl, <span class="enscript-type">struct</span> proc *p, uint32_t ifscope,
+    sae_associd_t aid, sae_connid_t *pcid, uio_t auio, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> flags,
+    user_ssize_t *bytes_written)
+{
+	<span class="enscript-type">struct</span> sockaddr_entry *se;
+	<span class="enscript-type">int</span> error;
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span> (<span class="enscript-variable-name">flags</span>)
+
+	VERIFY(dst_sl != NULL &amp;&amp; *dst_sl != NULL);
+
+	TAILQ_FOREACH(se, &amp;(*dst_sl)-&gt;sl_head, se_link) {
+		VERIFY(se-&gt;se_addr != NULL);
+		AUDIT_ARG(sockaddr, vfs_context_cwd(vfs_context_current()),
+		    se-&gt;se_addr);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+		<span class="enscript-keyword">if</span> ((error = mac_socket_check_connect(kauth_cred_get(),
+		    so, se-&gt;se_addr)) != 0)
+			<span class="enscript-keyword">return</span> (error);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+	}
+
+	socket_lock(so, 1);
+	<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_NBIO) &amp;&amp; (so-&gt;so_state &amp; SS_ISCONNECTING)) {
+		error = EALREADY;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_proto-&gt;pr_flags &amp; PR_DATA_IDEMPOTENT) &amp;&amp;
+	    (flags &amp; CONNECT_DATA_IDEMPOTENT))
+		so-&gt;so_flags1 |= SOF1_DATA_IDEMPOTENT;
+
+	<span class="enscript-comment">/*
+	 * Case 1: CONNECT_RESUME_ON_READ_WRITE set, no data.
+	 * Case 2: CONNECT_RESUME_ON_READ_WRITE set, with data (user error)
+	 * Case 3: CONNECT_RESUME_ON_READ_WRITE not set, with data
+	 * Case 3 allows user to combine write with connect even if they have
+	 * no use for TFO (such as regular TCP, and UDP).
+	 * Case 4: CONNECT_RESUME_ON_READ_WRITE not set, no data (regular case)
+	 */</span>
+	<span class="enscript-keyword">if</span> ((so-&gt;so_proto-&gt;pr_flags &amp; PR_PRECONN_WRITE) &amp;&amp;
+	    ((flags &amp; CONNECT_RESUME_ON_READ_WRITE) || auio))
+		so-&gt;so_flags1 |= SOF1_PRECONNECT_DATA;
+
+	<span class="enscript-comment">/*
+	 * If a user sets data idempotent and does not pass an uio, or
+	 * sets CONNECT_RESUME_ON_READ_WRITE, this is an error, reset
+	 * SOF1_DATA_IDEMPOTENT.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!(so-&gt;so_flags1 &amp; SOF1_PRECONNECT_DATA) &amp;&amp;
+	    (so-&gt;so_flags1 &amp; SOF1_DATA_IDEMPOTENT)) {
+		<span class="enscript-comment">/* We should return EINVAL instead perhaps. */</span>
+		so-&gt;so_flags1 &amp;= ~SOF1_DATA_IDEMPOTENT;
+	}
+
+	error = soconnectxlocked(so, src_sl, dst_sl, p, ifscope,
+	    aid, pcid, 0, NULL, 0, auio, bytes_written);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		so-&gt;so_state &amp;= ~SS_ISCONNECTING;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-comment">/*
+	 * If, after the call to soconnectxlocked the flag is still set (in case
+	 * data has been queued and the connect() has actually been triggered,
+	 * it will have been unset by the transport), we exit immediately. There
+	 * is no reason to wait on any event.
+	 */</span>
+	<span class="enscript-keyword">if</span> (so-&gt;so_flags1 &amp; SOF1_PRECONNECT_DATA) {
+		error = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_NBIO) &amp;&amp; (so-&gt;so_state &amp; SS_ISCONNECTING)) {
+		error = EINPROGRESS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">while</span> ((so-&gt;so_state &amp; SS_ISCONNECTING) &amp;&amp; so-&gt;so_error == 0) {
+		lck_mtx_t *mutex_held;
+
+		<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_getlock != NULL)
+			mutex_held = (*so-&gt;so_proto-&gt;pr_getlock)(so, 0);
+		<span class="enscript-keyword">else</span>
+			mutex_held = so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+		error = msleep((caddr_t)&amp;so-&gt;so_timeo, mutex_held,
+		    PSOCK | PCATCH, __func__, 0);
+		<span class="enscript-keyword">if</span> (so-&gt;so_state &amp; SS_DRAINING) {
+			error = ECONNABORTED;
+		}
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">if</span> (error == 0) {
+		error = so-&gt;so_error;
+		so-&gt;so_error = 0;
+	}
+<span class="enscript-reference">out</span>:
+	socket_unlock(so, 1);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">peeloff</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> peeloff_args *uap, <span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-comment">/*
+	 * Due to similiarity with a POSIX interface, define as
+	 * an unofficial cancellation point.
+	 */</span>
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span> (peeloff_nocancel(p, uap, retval));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">peeloff_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> peeloff_args *uap, <span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">struct</span> socket *mp_so, *so = NULL;
+	<span class="enscript-type">int</span> newfd, fd = uap-&gt;s;
+	<span class="enscript-type">short</span> fflag;		<span class="enscript-comment">/* type must match fp-&gt;f_flag */</span>
+	<span class="enscript-type">int</span> error;
+
+	*retval = -1;
+
+	error = fp_getfsock(p, fd, &amp;fp, &amp;mp_so);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		<span class="enscript-keyword">if</span> (error == EOPNOTSUPP)
+			error = ENOTSOCK;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_nofile</span>;
+	}
+	<span class="enscript-keyword">if</span> (mp_so == NULL) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	socket_lock(mp_so, 1);
+	error = sopeelofflocked(mp_so, uap-&gt;aid, &amp;so);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		socket_unlock(mp_so, 1);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	VERIFY(so != NULL);
+	socket_unlock(mp_so, 0);		<span class="enscript-comment">/* keep ref on mp_so for us */</span>
+
+	fflag = fp-&gt;f_flag;
+	error = falloc(p, &amp;fp, &amp;newfd, vfs_context_current());
+	<span class="enscript-keyword">if</span> (error != 0) {
+		<span class="enscript-comment">/* drop this socket (probably ran out of file descriptors) */</span>
+		soclose(so);
+		sodereference(mp_so);		<span class="enscript-comment">/* our mp_so ref */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	fp-&gt;f_flag = fflag;
+	fp-&gt;f_ops = &amp;socketops;
+	fp-&gt;f_data = (caddr_t)so;
+
+	<span class="enscript-comment">/*
+	 * If the socket has been marked as inactive by sosetdefunct(),
+	 * disallow further operations on it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (so-&gt;so_flags &amp; SOF_DEFUNCT) {
+		sodefunct(current_proc(), so,
+		    SHUTDOWN_SOCKET_LEVEL_DISCONNECT_INTERNAL);
+	}
+
+	proc_fdlock(p);
+	procfdtbl_releasefd(p, newfd, NULL);
+	fp_drop(p, newfd, fp, 1);
+	proc_fdunlock(p);
+
+	sodereference(mp_so);			<span class="enscript-comment">/* our mp_so ref */</span>
+	*retval = newfd;
+
+<span class="enscript-reference">out</span>:
+	file_drop(fd);
+
+<span class="enscript-reference">out_nofile</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">disconnectx</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> disconnectx_args *uap, <span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-comment">/*
+	 * Due to similiarity with a POSIX interface, define as
+	 * an unofficial cancellation point.
+	 */</span>
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span> (disconnectx_nocancel(p, uap, retval));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">disconnectx_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> disconnectx_args *uap, <span class="enscript-type">int</span> *retval)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">p</span>, <span class="enscript-variable-name">retval</span>)
+	<span class="enscript-type">struct</span> socket *so;
+	<span class="enscript-type">int</span> fd = uap-&gt;s;
+	<span class="enscript-type">int</span> error;
+
+	error = file_socket(fd, &amp;so);
+	<span class="enscript-keyword">if</span> (error != 0)
+		<span class="enscript-keyword">return</span> (error);
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	error = sodisconnectx(so, uap-&gt;aid, uap-&gt;cid);
+<span class="enscript-reference">out</span>:
+	file_drop(fd);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *	socreate:EAFNOSUPPORT
+ *	socreate:EPROTOTYPE
+ *	socreate:EPROTONOSUPPORT
+ *	socreate:ENOBUFS
+ *	socreate:ENOMEM
+ *	socreate:EISCONN
+ *	socreate:???			[other protocol families, IPSEC]
+ *	falloc:ENFILE
+ *	falloc:EMFILE
+ *	falloc:ENOMEM
+ *	copyout:EFAULT
+ *	soconnect2:EINVAL
+ *	soconnect2:EPROTOTYPE
+ *	soconnect2:???			[other protocol families[
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">socketpair</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> socketpair_args *uap,
+    __unused int32_t *retval)
+{
+	<span class="enscript-type">struct</span> fileproc *fp1, *fp2;
+	<span class="enscript-type">struct</span> socket *so1, *so2;
+	<span class="enscript-type">int</span> fd, error, sv[2];
+
+	AUDIT_ARG(socket, uap-&gt;domain, uap-&gt;type, uap-&gt;protocol);
+	error = socreate(uap-&gt;domain, &amp;so1, uap-&gt;type, uap-&gt;protocol);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+	error = socreate(uap-&gt;domain, &amp;so2, uap-&gt;type, uap-&gt;protocol);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">free1</span>;
+
+	error = falloc(p, &amp;fp1, &amp;fd, vfs_context_current());
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">free2</span>;
+	}
+	fp1-&gt;f_flag = FREAD|FWRITE;
+	fp1-&gt;f_ops = &amp;socketops;
+	fp1-&gt;f_data = (caddr_t)so1;
+	sv[0] = fd;
+
+	error = falloc(p, &amp;fp2, &amp;fd, vfs_context_current());
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">free3</span>;
+	}
+	fp2-&gt;f_flag = FREAD|FWRITE;
+	fp2-&gt;f_ops = &amp;socketops;
+	fp2-&gt;f_data = (caddr_t)so2;
+	sv[1] = fd;
+
+	error = soconnect2(so1, so2);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">free4</span>;
+	}
+	<span class="enscript-keyword">if</span> (uap-&gt;type == SOCK_DGRAM) {
+		<span class="enscript-comment">/*
+		 * Datagram socket connection is asymmetric.
+		 */</span>
+		error = soconnect2(so2, so1);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">free4</span>;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> ((error = copyout(sv, uap-&gt;rsv, 2 * <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>))) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">free4</span>;
+
+	proc_fdlock(p);
+	procfdtbl_releasefd(p, sv[0], NULL);
+	procfdtbl_releasefd(p, sv[1], NULL);
+	fp_drop(p, sv[0], fp1, 1);
+	fp_drop(p, sv[1], fp2, 1);
+	proc_fdunlock(p);
+
+	<span class="enscript-keyword">return</span> (0);
+<span class="enscript-reference">free4</span>:
+	fp_free(p, sv[1], fp2);
+<span class="enscript-reference">free3</span>:
+	fp_free(p, sv[0], fp1);
+<span class="enscript-reference">free2</span>:
+	(<span class="enscript-type">void</span>) soclose(so2);
+<span class="enscript-reference">free1</span>:
+	(<span class="enscript-type">void</span>) soclose(so1);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINVAL
+ *		ENOBUFS
+ *		EBADF
+ *		EPIPE
+ *		EACCES			Mandatory Access Control failure
+ *	file_socket:ENOTSOCK
+ *	file_socket:EBADF
+ *	getsockaddr:ENAMETOOLONG	Filename too long
+ *	getsockaddr:EINVAL		Invalid argument
+ *	getsockaddr:ENOMEM		Not enough space
+ *	getsockaddr:EFAULT		Bad address
+ *	&lt;pru_sosend&gt;:EACCES[TCP]
+ *	&lt;pru_sosend&gt;:EADDRINUSE[TCP]
+ *	&lt;pru_sosend&gt;:EADDRNOTAVAIL[TCP]
+ *	&lt;pru_sosend&gt;:EAFNOSUPPORT[TCP]
+ *	&lt;pru_sosend&gt;:EAGAIN[TCP]
+ *	&lt;pru_sosend&gt;:EBADF
+ *	&lt;pru_sosend&gt;:ECONNRESET[TCP]
+ *	&lt;pru_sosend&gt;:EFAULT
+ *	&lt;pru_sosend&gt;:EHOSTUNREACH[TCP]
+ *	&lt;pru_sosend&gt;:EINTR
+ *	&lt;pru_sosend&gt;:EINVAL
+ *	&lt;pru_sosend&gt;:EISCONN[AF_INET]
+ *	&lt;pru_sosend&gt;:EMSGSIZE[TCP]
+ *	&lt;pru_sosend&gt;:ENETDOWN[TCP]
+ *	&lt;pru_sosend&gt;:ENETUNREACH[TCP]
+ *	&lt;pru_sosend&gt;:ENOBUFS
+ *	&lt;pru_sosend&gt;:ENOMEM[TCP]
+ *	&lt;pru_sosend&gt;:ENOTCONN[AF_INET]
+ *	&lt;pru_sosend&gt;:EOPNOTSUPP
+ *	&lt;pru_sosend&gt;:EPERM[TCP]
+ *	&lt;pru_sosend&gt;:EPIPE
+ *	&lt;pru_sosend&gt;:EWOULDBLOCK
+ *	&lt;pru_sosend&gt;:???[TCP]		[ignorable: mostly IPSEC/firewall/DLIL]
+ *	&lt;pru_sosend&gt;:???[AF_INET]	[whatever a filter author chooses]
+ *	&lt;pru_sosend&gt;:???		[value from so_error]
+ *	sockargs:???
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sendit</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> user_msghdr *mp, uio_t uiop,
+    <span class="enscript-type">int</span> flags, int32_t *retval)
+{
+	<span class="enscript-type">struct</span> mbuf *control = NULL;
+	<span class="enscript-type">struct</span> sockaddr_storage ss;
+	<span class="enscript-type">struct</span> sockaddr *to = NULL;
+	boolean_t want_free = TRUE;
+	<span class="enscript-type">int</span> error;
+	user_ssize_t len;
+
+	KERNEL_DEBUG(DBG_FNC_SENDIT | DBG_FUNC_START, 0, 0, 0, 0, 0);
+
+	<span class="enscript-keyword">if</span> (mp-&gt;msg_name != USER_ADDR_NULL) {
+		<span class="enscript-keyword">if</span> (mp-&gt;msg_namelen &gt; <span class="enscript-keyword">sizeof</span> (ss)) {
+			error = getsockaddr(so, &amp;to, mp-&gt;msg_name,
+			    mp-&gt;msg_namelen, TRUE);
+		} <span class="enscript-keyword">else</span> {
+			error = getsockaddr_s(so, &amp;ss, mp-&gt;msg_name,
+			    mp-&gt;msg_namelen, TRUE);
+			<span class="enscript-keyword">if</span> (error == 0) {
+				to = (<span class="enscript-type">struct</span> sockaddr *)&amp;ss;
+				want_free = FALSE;
+			}
+		}
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		AUDIT_ARG(sockaddr, vfs_context_cwd(vfs_context_current()), to);
+	}
+	<span class="enscript-keyword">if</span> (mp-&gt;msg_control != USER_ADDR_NULL) {
+		<span class="enscript-keyword">if</span> (mp-&gt;msg_controllen &lt; <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> cmsghdr)) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		error = sockargs(&amp;control, mp-&gt;msg_control,
+		    mp-&gt;msg_controllen, MT_CONTROL);
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	<span class="enscript-comment">/*
+	 * We check the state without holding the socket lock;
+	 * if a race condition occurs, it would simply result
+	 * in an extra call to the MAC check function.
+	 */</span>
+	<span class="enscript-keyword">if</span> (to != NULL &amp;&amp;
+	    !(so-&gt;so_state &amp; SS_DEFUNCT) &amp;&amp;
+	    (error = mac_socket_check_send(kauth_cred_get(), so, to)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+
+	len = uio_resid(uiop);
+	error = so-&gt;so_proto-&gt;pr_usrreqs-&gt;pru_sosend(so, to, uiop, 0,
+		control, flags);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		<span class="enscript-keyword">if</span> (uio_resid(uiop) != len &amp;&amp; (error == ERESTART ||
+		    error == EINTR || error == EWOULDBLOCK))
+			error = 0;
+		<span class="enscript-comment">/* Generation of SIGPIPE can be controlled per socket */</span>
+		<span class="enscript-keyword">if</span> (error == EPIPE &amp;&amp; !(so-&gt;so_flags &amp; SOF_NOSIGPIPE))
+			psignal(p, SIGPIPE);
+	}
+	<span class="enscript-keyword">if</span> (error == 0)
+		*retval = (<span class="enscript-type">int</span>)(len - uio_resid(uiop));
+<span class="enscript-reference">bad</span>:
+	<span class="enscript-keyword">if</span> (to != NULL &amp;&amp; want_free)
+		FREE(to, M_SONAME);
+<span class="enscript-reference">out</span>:
+	KERNEL_DEBUG(DBG_FNC_SENDIT | DBG_FUNC_END, error, 0, 0, 0, 0);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		ENOMEM
+ *	sendit:???			[see sendit definition in this file]
+ *	write:???			[4056224: applicable for pipes]
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sendto</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> sendto_args *uap, int32_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span> (sendto_nocancel(p, (<span class="enscript-type">struct</span> sendto_nocancel_args *)uap, retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sendto_nocancel</span>(<span class="enscript-type">struct</span> proc *p,
+		<span class="enscript-type">struct</span> sendto_nocancel_args *uap,
+		int32_t *retval)
+{
+	<span class="enscript-type">struct</span> user_msghdr msg;
+	<span class="enscript-type">int</span> error;
+	uio_t auio = NULL;
+	<span class="enscript-type">struct</span> socket *so;
+
+	KERNEL_DEBUG(DBG_FNC_SENDTO | DBG_FUNC_START, 0, 0, 0, 0, 0);
+	AUDIT_ARG(fd, uap-&gt;s);
+
+	auio = uio_create(1, 0,
+	    (IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32),
+	    UIO_WRITE);
+	<span class="enscript-keyword">if</span> (auio == NULL) {
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	uio_addiov(auio, uap-&gt;buf, uap-&gt;len);
+
+	msg.msg_name = uap-&gt;to;
+	msg.msg_namelen = uap-&gt;tolen;
+	<span class="enscript-comment">/* no need to set up msg_iov.  sendit uses uio_t we send it */</span>
+	msg.msg_iov = 0;
+	msg.msg_iovlen = 0;
+	msg.msg_control = 0;
+	msg.msg_flags = 0;
+
+	error = file_socket(uap-&gt;s, &amp;so);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		error = EBADF;
+	} <span class="enscript-keyword">else</span> {
+		error = sendit(p, so, &amp;msg, auio, uap-&gt;flags, retval);
+	}
+
+	file_drop(uap-&gt;s);
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (auio != NULL)
+		uio_free(auio);
+
+	KERNEL_DEBUG(DBG_FNC_SENDTO | DBG_FUNC_END, error, *retval, 0, 0, 0);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		ENOBUFS
+ *	copyin:EFAULT
+ *	sendit:???			[see sendit definition in this file]
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sendmsg</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> sendmsg_args *uap, int32_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span> (sendmsg_nocancel(p, (<span class="enscript-type">struct</span> sendmsg_nocancel_args *)uap,
+	    retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sendmsg_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> sendmsg_nocancel_args *uap,
+    int32_t *retval)
+{
+	<span class="enscript-type">struct</span> user32_msghdr msg32;
+	<span class="enscript-type">struct</span> user64_msghdr msg64;
+	<span class="enscript-type">struct</span> user_msghdr user_msg;
+	caddr_t msghdrp;
+	<span class="enscript-type">int</span>	size_of_msghdr;
+	<span class="enscript-type">int</span> error;
+	uio_t auio = NULL;
+	<span class="enscript-type">struct</span> user_iovec *iovp;
+	<span class="enscript-type">struct</span> socket *so;
+
+	KERNEL_DEBUG(DBG_FNC_SENDMSG | DBG_FUNC_START, 0, 0, 0, 0, 0);
+	AUDIT_ARG(fd, uap-&gt;s);
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+		msghdrp = (caddr_t)&amp;msg64;
+		size_of_msghdr = <span class="enscript-keyword">sizeof</span> (msg64);
+	} <span class="enscript-keyword">else</span> {
+		msghdrp = (caddr_t)&amp;msg32;
+		size_of_msghdr = <span class="enscript-keyword">sizeof</span> (msg32);
+	}
+	error = copyin(uap-&gt;msg, msghdrp, size_of_msghdr);
+	<span class="enscript-keyword">if</span> (error) {
+		KERNEL_DEBUG(DBG_FNC_SENDMSG | DBG_FUNC_END, error, 0, 0, 0, 0);
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+		user_msg.msg_flags = msg64.msg_flags;
+		user_msg.msg_controllen = msg64.msg_controllen;
+		user_msg.msg_control = msg64.msg_control;
+		user_msg.msg_iovlen = msg64.msg_iovlen;
+		user_msg.msg_iov = msg64.msg_iov;
+		user_msg.msg_namelen = msg64.msg_namelen;
+		user_msg.msg_name = msg64.msg_name;
+	} <span class="enscript-keyword">else</span> {
+		user_msg.msg_flags = msg32.msg_flags;
+		user_msg.msg_controllen = msg32.msg_controllen;
+		user_msg.msg_control = msg32.msg_control;
+		user_msg.msg_iovlen = msg32.msg_iovlen;
+		user_msg.msg_iov = msg32.msg_iov;
+		user_msg.msg_namelen = msg32.msg_namelen;
+		user_msg.msg_name = msg32.msg_name;
+	}
+
+	<span class="enscript-keyword">if</span> (user_msg.msg_iovlen &lt;= 0 || user_msg.msg_iovlen &gt; UIO_MAXIOV) {
+		KERNEL_DEBUG(DBG_FNC_SENDMSG | DBG_FUNC_END, EMSGSIZE,
+		    0, 0, 0, 0);
+		<span class="enscript-keyword">return</span> (EMSGSIZE);
+	}
+
+	<span class="enscript-comment">/* allocate a uio large enough to hold the number of iovecs passed */</span>
+	auio = uio_create(user_msg.msg_iovlen, 0,
+	    (IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32),
+	    UIO_WRITE);
+	<span class="enscript-keyword">if</span> (auio == NULL) {
+		error = ENOBUFS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (user_msg.msg_iovlen) {
+		<span class="enscript-comment">/*
+		 * get location of iovecs within the uio.
+		 * then copyin the iovecs from user space.
+		 */</span>
+		iovp = uio_iovsaddr(auio);
+		<span class="enscript-keyword">if</span> (iovp == NULL) {
+			error = ENOBUFS;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		error = copyin_user_iovec_array(user_msg.msg_iov,
+			IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32,
+			user_msg.msg_iovlen, iovp);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		user_msg.msg_iov = CAST_USER_ADDR_T(iovp);
+
+		<span class="enscript-comment">/* finish setup of uio_t */</span>
+		error = uio_calculateresid(auio);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+	} <span class="enscript-keyword">else</span> {
+		user_msg.msg_iov = 0;
+	}
+
+	<span class="enscript-comment">/* msg_flags is ignored for send */</span>
+	user_msg.msg_flags = 0;
+
+	error = file_socket(uap-&gt;s, &amp;so);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		error = EBADF;
+	} <span class="enscript-keyword">else</span> {
+		error = sendit(p, so, &amp;user_msg, auio, uap-&gt;flags, retval);
+	}
+	file_drop(uap-&gt;s);
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (auio != NULL) {
+		uio_free(auio);
+	}
+	KERNEL_DEBUG(DBG_FNC_SENDMSG | DBG_FUNC_END, error, 0, 0, 0, 0);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sendmsg_x</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> sendmsg_x_args *uap, user_ssize_t *retval)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> user_msghdr_x *user_msg_x = NULL;
+	<span class="enscript-type">struct</span> uio **uiop = NULL;
+	<span class="enscript-type">struct</span> socket *so;
+	u_int i;
+	<span class="enscript-type">struct</span> sockaddr *to = NULL;
+	user_ssize_t len_before = 0, len_after;
+	<span class="enscript-type">int</span> need_drop = 0;
+	size_t size_of_msghdr;
+	<span class="enscript-type">void</span> *umsgp = NULL;
+	u_int uiocnt;
+	<span class="enscript-type">int</span> has_addr_or_ctl = 0;
+
+	KERNEL_DEBUG(DBG_FNC_SENDMSG_X | DBG_FUNC_START, 0, 0, 0, 0, 0);
+
+	error = file_socket(uap-&gt;s, &amp;so);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	need_drop = 1;
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Input parameter range check
+	 */</span>
+	<span class="enscript-keyword">if</span> (uap-&gt;cnt == 0 || uap-&gt;cnt &gt; UIO_MAXIOV) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-comment">/*
+	 * Clip to max currently allowed
+	 */</span>
+	<span class="enscript-keyword">if</span> (uap-&gt;cnt &gt; somaxsendmsgx)
+		uap-&gt;cnt = somaxsendmsgx;
+
+	user_msg_x = _MALLOC(uap-&gt;cnt * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user_msghdr_x),
+			M_TEMP, M_WAITOK | M_ZERO);
+	<span class="enscript-keyword">if</span> (user_msg_x == NULL) {
+		DBG_PRINTF(<span class="enscript-string">&quot;%s _MALLOC() user_msg_x failed\n&quot;</span>, __func__);
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	uiop = _MALLOC(uap-&gt;cnt * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> uio *),
+		M_TEMP, M_WAITOK | M_ZERO);
+	<span class="enscript-keyword">if</span> (uiop == NULL) {
+		DBG_PRINTF(<span class="enscript-string">&quot;%s _MALLOC() uiop failed\n&quot;</span>, __func__);
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	size_of_msghdr = IS_64BIT_PROCESS(p) ?
+		<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user64_msghdr_x) : <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user32_msghdr_x);
+
+	umsgp = _MALLOC(uap-&gt;cnt * size_of_msghdr,
+			M_TEMP, M_WAITOK | M_ZERO);
+	<span class="enscript-keyword">if</span> (umsgp == NULL) {
+		printf(<span class="enscript-string">&quot;%s _MALLOC() user_msg_x failed\n&quot;</span>, __func__);
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	error = copyin(uap-&gt;msgp, umsgp, uap-&gt;cnt * size_of_msghdr);
+	<span class="enscript-keyword">if</span> (error) {
+		DBG_PRINTF(<span class="enscript-string">&quot;%s copyin() failed\n&quot;</span>, __func__);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	error = internalize_user_msghdr_array(umsgp,
+		IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32,
+		UIO_WRITE, uap-&gt;cnt, user_msg_x, uiop);
+	<span class="enscript-keyword">if</span> (error) {
+		DBG_PRINTF(<span class="enscript-string">&quot;%s copyin_user_msghdr_array() failed\n&quot;</span>, __func__);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-comment">/*
+	 * Make sure the size of each message iovec and
+	 * the aggregate size of all the iovec is valid
+	 */</span>
+	<span class="enscript-keyword">if</span> (uio_array_is_valid(uiop, uap-&gt;cnt) == 0) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Sanity check on passed arguments
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; uap-&gt;cnt; i++) {
+		<span class="enscript-type">struct</span> user_msghdr_x *mp = user_msg_x + i;
+
+		<span class="enscript-comment">/*
+		 * No flags on send message
+		 */</span>
+		<span class="enscript-keyword">if</span> (mp-&gt;msg_flags != 0) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-comment">/*
+		 * No support for address or ancillary data (yet)
+		 */</span>
+		<span class="enscript-keyword">if</span> (mp-&gt;msg_name != USER_ADDR_NULL || mp-&gt;msg_namelen != 0)
+			has_addr_or_ctl = 1;
+
+		<span class="enscript-keyword">if</span> (mp-&gt;msg_control != USER_ADDR_NULL ||
+		    mp-&gt;msg_controllen != 0)
+			has_addr_or_ctl = 1;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+		<span class="enscript-comment">/*
+		 * We check the state without holding the socket lock;
+		 * if a race condition occurs, it would simply result
+		 * in an extra call to the MAC check function.
+		 *
+		 * Note: The following check is never true taken with the
+		 * current limitation that we do not accept to pass an address,
+		 * this is effectively placeholder code. If we add support for
+		 * addresses, we will have to check every address.
+		 */</span>
+		<span class="enscript-keyword">if</span> (to != NULL &amp;&amp;
+		    !(so-&gt;so_state &amp; SS_DEFUNCT) &amp;&amp;
+		    (error = mac_socket_check_send(kauth_cred_get(), so, to))
+			!= 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+	}
+
+	len_before = uio_array_resid(uiop, uap-&gt;cnt);
+
+	<span class="enscript-comment">/*
+	 * Feed list of packets at once only for connected socket without
+	 * control message
+	 */</span>
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_usrreqs-&gt;pru_sosend_list !=
+	    pru_sosend_list_notsupp &amp;&amp;
+	    has_addr_or_ctl == 0 &amp;&amp; somaxsendmsgx == 0) {
+		error = so-&gt;so_proto-&gt;pr_usrreqs-&gt;pru_sosend_list(so, uiop,
+		    uap-&gt;cnt, uap-&gt;flags);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; uap-&gt;cnt; i++) {
+			<span class="enscript-type">struct</span> user_msghdr_x *mp = user_msg_x + i;
+			<span class="enscript-type">struct</span> user_msghdr user_msg;
+			uio_t auio = uiop[i];
+			int32_t tmpval;
+
+			user_msg.msg_flags = mp-&gt;msg_flags;
+			user_msg.msg_controllen = mp-&gt;msg_controllen;
+			user_msg.msg_control = mp-&gt;msg_control;
+			user_msg.msg_iovlen = mp-&gt;msg_iovlen;
+			user_msg.msg_iov = mp-&gt;msg_iov;
+			user_msg.msg_namelen = mp-&gt;msg_namelen;
+			user_msg.msg_name = mp-&gt;msg_name;
+
+			error = sendit(p, so, &amp;user_msg, auio, uap-&gt;flags,
+			    &amp;tmpval);
+			<span class="enscript-keyword">if</span> (error != 0)
+				<span class="enscript-keyword">break</span>;
+		}
+	}
+	len_after = uio_array_resid(uiop, uap-&gt;cnt);
+
+	VERIFY(len_after &lt;= len_before);
+
+	<span class="enscript-keyword">if</span> (error != 0) {
+		<span class="enscript-keyword">if</span> (len_after != len_before &amp;&amp; (error == ERESTART ||
+		    error == EINTR || error == EWOULDBLOCK ||
+		    error == ENOBUFS))
+			error = 0;
+		<span class="enscript-comment">/* Generation of SIGPIPE can be controlled per socket */</span>
+		<span class="enscript-keyword">if</span> (error == EPIPE &amp;&amp; !(so-&gt;so_flags &amp; SOF_NOSIGPIPE))
+			psignal(p, SIGPIPE);
+	}
+	<span class="enscript-keyword">if</span> (error == 0) {
+		uiocnt = externalize_user_msghdr_array(umsgp,
+		    IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32,
+		    UIO_WRITE, uap-&gt;cnt, user_msg_x, uiop);
+
+		*retval = (<span class="enscript-type">int</span>)(uiocnt);
+	}
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (need_drop)
+		file_drop(uap-&gt;s);
+	<span class="enscript-keyword">if</span> (umsgp != NULL)
+		_FREE(umsgp, M_TEMP);
+	<span class="enscript-keyword">if</span> (uiop != NULL) {
+		free_uio_array(uiop, uap-&gt;cnt);
+		_FREE(uiop, M_TEMP);
+	}
+	<span class="enscript-keyword">if</span> (user_msg_x != NULL)
+		_FREE(user_msg_x, M_TEMP);
+
+	KERNEL_DEBUG(DBG_FNC_SENDMSG_X | DBG_FUNC_END, error, 0, 0, 0, 0);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">copyout_sa</span>(<span class="enscript-type">struct</span> sockaddr *fromsa, user_addr_t name, socklen_t *namelen)
+{
+	<span class="enscript-type">int</span> error = 0;
+	socklen_t sa_len = 0;
+	ssize_t len;
+
+	len = *namelen;
+	<span class="enscript-keyword">if</span> (len &lt;= 0 || fromsa == 0) {
+		len = 0;
+	} <span class="enscript-keyword">else</span> {
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">MIN</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">MIN</span>(a, b) ((a) &gt; (b) ? (b) : (a))
+#<span class="enscript-reference">endif</span>
+		sa_len = fromsa-&gt;sa_len;
+		len = MIN((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)len, sa_len);
+		error = copyout(fromsa, name, (<span class="enscript-type">unsigned</span>)len);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	*namelen = sa_len;
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">copyout_control</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> mbuf *m, user_addr_t control,
+    socklen_t *controllen, <span class="enscript-type">int</span> *flags)
+{
+	<span class="enscript-type">int</span> error = 0;
+	ssize_t len;
+	user_addr_t ctlbuf;
+
+	len = *controllen;
+	*controllen = 0;
+	ctlbuf = control;
+
+	<span class="enscript-keyword">while</span> (m &amp;&amp; len &gt; 0) {
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> tocopy;
+		<span class="enscript-type">struct</span> cmsghdr *cp = mtod(m, <span class="enscript-type">struct</span> cmsghdr *);
+		<span class="enscript-type">int</span> cp_size = CMSG_ALIGN(cp-&gt;cmsg_len);
+		<span class="enscript-type">int</span> buflen = m-&gt;m_len;
+
+		<span class="enscript-keyword">while</span> (buflen &gt; 0 &amp;&amp; len &gt; 0) {
+			<span class="enscript-comment">/*
+			 * SCM_TIMESTAMP hack because  struct timeval has a
+			 * different size for 32 bits and 64 bits processes
+			 */</span>
+			<span class="enscript-keyword">if</span> (cp-&gt;cmsg_level == SOL_SOCKET &amp;&amp; cp-&gt;cmsg_type == SCM_TIMESTAMP) {
+				<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> tmp_buffer[CMSG_SPACE(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user64_timeval))];
+				<span class="enscript-type">struct</span> cmsghdr *tmp_cp = (<span class="enscript-type">struct</span> cmsghdr *)(<span class="enscript-type">void</span> *)tmp_buffer;
+				<span class="enscript-type">int</span> tmp_space;
+				<span class="enscript-type">struct</span> timeval *tv = (<span class="enscript-type">struct</span> timeval *)(<span class="enscript-type">void</span> *)CMSG_DATA(cp);
+
+				tmp_cp-&gt;cmsg_level = SOL_SOCKET;
+				tmp_cp-&gt;cmsg_type = SCM_TIMESTAMP;
+
+				<span class="enscript-keyword">if</span> (proc_is64bit(p)) {
+					<span class="enscript-type">struct</span> user64_timeval *tv64 = (<span class="enscript-type">struct</span> user64_timeval *)(<span class="enscript-type">void</span> *)CMSG_DATA(tmp_cp);
+
+					tv64-&gt;tv_sec = tv-&gt;tv_sec;
+					tv64-&gt;tv_usec = tv-&gt;tv_usec;
+
+					tmp_cp-&gt;cmsg_len = CMSG_LEN(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user64_timeval));
+					tmp_space = CMSG_SPACE(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user64_timeval));
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-type">struct</span> user32_timeval *tv32 = (<span class="enscript-type">struct</span> user32_timeval *)(<span class="enscript-type">void</span> *)CMSG_DATA(tmp_cp);
+
+					tv32-&gt;tv_sec = tv-&gt;tv_sec;
+					tv32-&gt;tv_usec = tv-&gt;tv_usec;
+
+					tmp_cp-&gt;cmsg_len = CMSG_LEN(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user32_timeval));
+					tmp_space = CMSG_SPACE(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user32_timeval));
+				}
+				<span class="enscript-keyword">if</span> (len &gt;= tmp_space) {
+					tocopy = tmp_space;
+				} <span class="enscript-keyword">else</span> {
+					*flags |= MSG_CTRUNC;
+					tocopy = len;
+				}
+				error = copyout(tmp_buffer, ctlbuf, tocopy);
+				<span class="enscript-keyword">if</span> (error)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> (cp_size &gt; buflen) {
+					panic(<span class="enscript-string">&quot;cp_size &gt; buflen, something&quot;</span>
+					    <span class="enscript-string">&quot;wrong with alignment!&quot;</span>);
+				}
+				<span class="enscript-keyword">if</span> (len &gt;= cp_size) {
+					tocopy = cp_size;
+				} <span class="enscript-keyword">else</span> {
+					*flags |= MSG_CTRUNC;
+					tocopy = len;
+				}
+				error = copyout((caddr_t) cp, ctlbuf, tocopy);
+				<span class="enscript-keyword">if</span> (error)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+
+			ctlbuf += tocopy;
+			len -= tocopy;
+
+			buflen -= cp_size;
+			cp = (<span class="enscript-type">struct</span> cmsghdr *)(<span class="enscript-type">void</span> *)
+			    ((<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *) cp + cp_size);
+			cp_size = CMSG_ALIGN(cp-&gt;cmsg_len);
+		}
+
+		m = m-&gt;m_next;
+	}
+	*controllen = ctlbuf - control;
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		ENOTSOCK
+ *		EINVAL
+ *		EBADF
+ *		EACCES			Mandatory Access Control failure
+ *	copyout:EFAULT
+ *	fp_lookup:EBADF
+ *	&lt;pru_soreceive&gt;:ENOBUFS
+ *	&lt;pru_soreceive&gt;:ENOTCONN
+ *	&lt;pru_soreceive&gt;:EWOULDBLOCK
+ *	&lt;pru_soreceive&gt;:EFAULT
+ *	&lt;pru_soreceive&gt;:EINTR
+ *	&lt;pru_soreceive&gt;:EBADF
+ *	&lt;pru_soreceive&gt;:EINVAL
+ *	&lt;pru_soreceive&gt;:EMSGSIZE
+ *	&lt;pru_soreceive&gt;:???
+ *
+ * Notes:	Additional return values from calls through &lt;pru_soreceive&gt;
+ *		depend on protocols other than TCP or AF_UNIX, which are
+ *		documented above.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">recvit</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">int</span> s, <span class="enscript-type">struct</span> user_msghdr *mp, uio_t uiop,
+    user_addr_t namelenp, int32_t *retval)
+{
+	ssize_t len;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> mbuf *control = 0;
+	<span class="enscript-type">struct</span> socket *so;
+	<span class="enscript-type">struct</span> sockaddr *fromsa = 0;
+	<span class="enscript-type">struct</span> fileproc *fp;
+
+	KERNEL_DEBUG(DBG_FNC_RECVIT | DBG_FUNC_START, 0, 0, 0, 0, 0);
+	proc_fdlock(p);
+	<span class="enscript-keyword">if</span> ((error = fp_lookup(p, s, &amp;fp, 1))) {
+		KERNEL_DEBUG(DBG_FNC_RECVIT | DBG_FUNC_END, error, 0, 0, 0, 0);
+		proc_fdunlock(p);
+		<span class="enscript-keyword">return</span> (error);
+	}
+	<span class="enscript-keyword">if</span> (fp-&gt;f_type != DTYPE_SOCKET) {
+		fp_drop(p, s, fp, 1);
+		proc_fdunlock(p);
+		<span class="enscript-keyword">return</span> (ENOTSOCK);
+	}
+
+	so = (<span class="enscript-type">struct</span> socket *)fp-&gt;f_data;
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		fp_drop(p, s, fp, 1);
+		proc_fdunlock(p);
+		<span class="enscript-keyword">return</span> (EBADF);
+	}
+
+	proc_fdunlock(p);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	<span class="enscript-comment">/*
+	 * We check the state without holding the socket lock;
+	 * if a race condition occurs, it would simply result
+	 * in an extra call to the MAC check function.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!(so-&gt;so_state &amp; SS_DEFUNCT) &amp;&amp;
+	    !(so-&gt;so_state &amp; SS_ISCONNECTED) &amp;&amp;
+	    !(so-&gt;so_proto-&gt;pr_flags &amp; PR_CONNREQUIRED) &amp;&amp;
+	    (error = mac_socket_check_receive(kauth_cred_get(), so)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out1</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+	<span class="enscript-keyword">if</span> (uio_resid(uiop) &lt; 0) {
+		KERNEL_DEBUG(DBG_FNC_RECVIT | DBG_FUNC_END, EINVAL, 0, 0, 0, 0);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out1</span>;
+	}
+
+	len = uio_resid(uiop);
+	error = so-&gt;so_proto-&gt;pr_usrreqs-&gt;pru_soreceive(so, &amp;fromsa, uiop,
+	    (<span class="enscript-type">struct</span> mbuf **)0, mp-&gt;msg_control ? &amp;control : (<span class="enscript-type">struct</span> mbuf **)0,
+	    &amp;mp-&gt;msg_flags);
+	<span class="enscript-keyword">if</span> (fromsa)
+		AUDIT_ARG(sockaddr, vfs_context_cwd(vfs_context_current()),
+		    fromsa);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (uio_resid(uiop) != len &amp;&amp; (error == ERESTART ||
+		    error == EINTR || error == EWOULDBLOCK))
+			error = 0;
+	}
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	*retval = len - uio_resid(uiop);
+
+	<span class="enscript-keyword">if</span> (mp-&gt;msg_name) {
+		error = copyout_sa(fromsa, mp-&gt;msg_name, &amp;mp-&gt;msg_namelen);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		<span class="enscript-comment">/* return the actual, untruncated address length */</span>
+		<span class="enscript-keyword">if</span> (namelenp &amp;&amp;
+		    (error = copyout((caddr_t)&amp;mp-&gt;msg_namelen, namelenp,
+		    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>)))) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (mp-&gt;msg_control) {
+		error = copyout_control(p, control, mp-&gt;msg_control,
+		    &amp;mp-&gt;msg_controllen, &amp;mp-&gt;msg_flags);
+	}
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (fromsa)
+		FREE(fromsa, M_SONAME);
+	<span class="enscript-keyword">if</span> (control)
+		m_freem(control);
+	KERNEL_DEBUG(DBG_FNC_RECVIT | DBG_FUNC_END, error, 0, 0, 0, 0);
+<span class="enscript-reference">out1</span>:
+	fp_drop(p, s, fp, 0);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		ENOMEM
+ *	copyin:EFAULT
+ *	recvit:???
+ *	read:???			[4056224: applicable for pipes]
+ *
+ * Notes:	The read entry point is only called as part of support for
+ *		binary backward compatability; new code should use read
+ *		instead of recv or recvfrom when attempting to read data
+ *		from pipes.
+ *
+ *		For full documentation of the return codes from recvit, see
+ *		the block header for the recvit function.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">recvfrom</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> recvfrom_args *uap, int32_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span> (recvfrom_nocancel(p, (<span class="enscript-type">struct</span> recvfrom_nocancel_args *)uap,
+	    retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">recvfrom_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> recvfrom_nocancel_args *uap,
+    int32_t *retval)
+{
+	<span class="enscript-type">struct</span> user_msghdr msg;
+	<span class="enscript-type">int</span> error;
+	uio_t auio = NULL;
+
+	KERNEL_DEBUG(DBG_FNC_RECVFROM | DBG_FUNC_START, 0, 0, 0, 0, 0);
+	AUDIT_ARG(fd, uap-&gt;s);
+
+	<span class="enscript-keyword">if</span> (uap-&gt;fromlenaddr) {
+		error = copyin(uap-&gt;fromlenaddr,
+		    (caddr_t)&amp;msg.msg_namelen, <span class="enscript-keyword">sizeof</span> (msg.msg_namelen));
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+	} <span class="enscript-keyword">else</span> {
+		msg.msg_namelen = 0;
+	}
+	msg.msg_name = uap-&gt;from;
+	auio = uio_create(1, 0,
+	    (IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32),
+	    UIO_READ);
+	<span class="enscript-keyword">if</span> (auio == NULL) {
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+
+	uio_addiov(auio, uap-&gt;buf, uap-&gt;len);
+	<span class="enscript-comment">/* no need to set up msg_iov.  recvit uses uio_t we send it */</span>
+	msg.msg_iov = 0;
+	msg.msg_iovlen = 0;
+	msg.msg_control = 0;
+	msg.msg_controllen = 0;
+	msg.msg_flags = uap-&gt;flags;
+	error = recvit(p, uap-&gt;s, &amp;msg, auio, uap-&gt;fromlenaddr, retval);
+	<span class="enscript-keyword">if</span> (auio != NULL) {
+		uio_free(auio);
+	}
+
+	KERNEL_DEBUG(DBG_FNC_RECVFROM | DBG_FUNC_END, error, 0, 0, 0, 0);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EMSGSIZE
+ *		ENOMEM
+ *	copyin:EFAULT
+ *	copyout:EFAULT
+ *	recvit:???
+ *
+ * Notes:	For full documentation of the return codes from recvit, see
+ *		the block header for the recvit function.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">recvmsg</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> recvmsg_args *uap, int32_t *retval)
+{
+	__pthread_testcancel(1);
+	<span class="enscript-keyword">return</span> (recvmsg_nocancel(p, (<span class="enscript-type">struct</span> recvmsg_nocancel_args *)uap,
+	    retval));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">recvmsg_nocancel</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> recvmsg_nocancel_args *uap,
+    int32_t *retval)
+{
+	<span class="enscript-type">struct</span> user32_msghdr msg32;
+	<span class="enscript-type">struct</span> user64_msghdr msg64;
+	<span class="enscript-type">struct</span> user_msghdr user_msg;
+	caddr_t msghdrp;
+	<span class="enscript-type">int</span>	size_of_msghdr;
+	user_addr_t uiov;
+	<span class="enscript-type">int</span> error;
+	uio_t auio = NULL;
+	<span class="enscript-type">struct</span> user_iovec *iovp;
+
+	KERNEL_DEBUG(DBG_FNC_RECVMSG | DBG_FUNC_START, 0, 0, 0, 0, 0);
+	AUDIT_ARG(fd, uap-&gt;s);
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+		msghdrp = (caddr_t)&amp;msg64;
+		size_of_msghdr = <span class="enscript-keyword">sizeof</span> (msg64);
+	} <span class="enscript-keyword">else</span> {
+		msghdrp = (caddr_t)&amp;msg32;
+		size_of_msghdr = <span class="enscript-keyword">sizeof</span> (msg32);
+	}
+	error = copyin(uap-&gt;msg, msghdrp, size_of_msghdr);
+	<span class="enscript-keyword">if</span> (error) {
+		KERNEL_DEBUG(DBG_FNC_RECVMSG | DBG_FUNC_END, error, 0, 0, 0, 0);
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	<span class="enscript-comment">/* only need to copy if user process is not 64-bit */</span>
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+		user_msg.msg_flags = msg64.msg_flags;
+		user_msg.msg_controllen = msg64.msg_controllen;
+		user_msg.msg_control = msg64.msg_control;
+		user_msg.msg_iovlen = msg64.msg_iovlen;
+		user_msg.msg_iov = msg64.msg_iov;
+		user_msg.msg_namelen = msg64.msg_namelen;
+		user_msg.msg_name = msg64.msg_name;
+	} <span class="enscript-keyword">else</span> {
+		user_msg.msg_flags = msg32.msg_flags;
+		user_msg.msg_controllen = msg32.msg_controllen;
+		user_msg.msg_control = msg32.msg_control;
+		user_msg.msg_iovlen = msg32.msg_iovlen;
+		user_msg.msg_iov = msg32.msg_iov;
+		user_msg.msg_namelen = msg32.msg_namelen;
+		user_msg.msg_name = msg32.msg_name;
+	}
+
+	<span class="enscript-keyword">if</span> (user_msg.msg_iovlen &lt;= 0 || user_msg.msg_iovlen &gt; UIO_MAXIOV) {
+		KERNEL_DEBUG(DBG_FNC_RECVMSG | DBG_FUNC_END, EMSGSIZE,
+		    0, 0, 0, 0);
+		<span class="enscript-keyword">return</span> (EMSGSIZE);
+	}
+
+	user_msg.msg_flags = uap-&gt;flags;
+
+	<span class="enscript-comment">/* allocate a uio large enough to hold the number of iovecs passed */</span>
+	auio = uio_create(user_msg.msg_iovlen, 0,
+	    (IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32),
+	    UIO_READ);
+	<span class="enscript-keyword">if</span> (auio == NULL) {
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * get location of iovecs within the uio.  then copyin the iovecs from
+	 * user space.
+	 */</span>
+	iovp = uio_iovsaddr(auio);
+	<span class="enscript-keyword">if</span> (iovp == NULL) {
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	uiov = user_msg.msg_iov;
+	user_msg.msg_iov = CAST_USER_ADDR_T(iovp);
+	error = copyin_user_iovec_array(uiov,
+		IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32,
+		user_msg.msg_iovlen, iovp);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-comment">/* finish setup of uio_t */</span>
+	error = uio_calculateresid(auio);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	error = recvit(p, uap-&gt;s, &amp;user_msg, auio, 0, retval);
+	<span class="enscript-keyword">if</span> (!error) {
+		user_msg.msg_iov = uiov;
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+			msg64.msg_flags = user_msg.msg_flags;
+			msg64.msg_controllen = user_msg.msg_controllen;
+			msg64.msg_control = user_msg.msg_control;
+			msg64.msg_iovlen = user_msg.msg_iovlen;
+			msg64.msg_iov = user_msg.msg_iov;
+			msg64.msg_namelen = user_msg.msg_namelen;
+			msg64.msg_name = user_msg.msg_name;
+		} <span class="enscript-keyword">else</span> {
+			msg32.msg_flags = user_msg.msg_flags;
+			msg32.msg_controllen = user_msg.msg_controllen;
+			msg32.msg_control = user_msg.msg_control;
+			msg32.msg_iovlen = user_msg.msg_iovlen;
+			msg32.msg_iov = user_msg.msg_iov;
+			msg32.msg_namelen = user_msg.msg_namelen;
+			msg32.msg_name = user_msg.msg_name;
+		}
+		error = copyout(msghdrp, uap-&gt;msg, size_of_msghdr);
+	}
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (auio != NULL) {
+		uio_free(auio);
+	}
+	KERNEL_DEBUG(DBG_FNC_RECVMSG | DBG_FUNC_END, error, 0, 0, 0, 0);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">recvmsg_x</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> recvmsg_x_args *uap, user_ssize_t *retval)
+{
+	<span class="enscript-type">int</span> error = EOPNOTSUPP;
+	<span class="enscript-type">struct</span> user_msghdr_x *user_msg_x = NULL;
+	<span class="enscript-type">struct</span> recv_msg_elem *recv_msg_array = NULL;
+	<span class="enscript-type">struct</span> socket *so;
+	user_ssize_t len_before = 0, len_after;
+	<span class="enscript-type">int</span> need_drop = 0;
+	size_t size_of_msghdr;
+	<span class="enscript-type">void</span> *umsgp = NULL;
+	u_int i;
+	u_int uiocnt;
+
+	KERNEL_DEBUG(DBG_FNC_RECVMSG_X | DBG_FUNC_START, 0, 0, 0, 0, 0);
+
+	error = file_socket(uap-&gt;s, &amp;so);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	need_drop = 1;
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-comment">/*
+	 * Input parameter range check
+	 */</span>
+	<span class="enscript-keyword">if</span> (uap-&gt;cnt == 0 || uap-&gt;cnt &gt; UIO_MAXIOV) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (uap-&gt;cnt &gt; somaxrecvmsgx)
+		uap-&gt;cnt = somaxrecvmsgx;
+
+	user_msg_x = _MALLOC(uap-&gt;cnt * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user_msghdr_x),
+	    M_TEMP, M_WAITOK | M_ZERO);
+	<span class="enscript-keyword">if</span> (user_msg_x == NULL) {
+		DBG_PRINTF(<span class="enscript-string">&quot;%s _MALLOC() user_msg_x failed\n&quot;</span>, __func__);
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	recv_msg_array = alloc_recv_msg_array(uap-&gt;cnt);
+	<span class="enscript-keyword">if</span> (recv_msg_array == NULL) {
+		DBG_PRINTF(<span class="enscript-string">&quot;%s alloc_recv_msg_array() failed\n&quot;</span>, __func__);
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	size_of_msghdr = IS_64BIT_PROCESS(p) ?
+	    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user64_msghdr_x) : <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user32_msghdr_x);
+
+	umsgp = _MALLOC(uap-&gt;cnt * size_of_msghdr, M_TEMP, M_WAITOK | M_ZERO);
+	<span class="enscript-keyword">if</span> (umsgp == NULL) {
+		DBG_PRINTF(<span class="enscript-string">&quot;%s _MALLOC() umsgp failed\n&quot;</span>, __func__);
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	error = copyin(uap-&gt;msgp, umsgp, uap-&gt;cnt * size_of_msghdr);
+	<span class="enscript-keyword">if</span> (error) {
+		DBG_PRINTF(<span class="enscript-string">&quot;%s copyin() failed\n&quot;</span>, __func__);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	error = internalize_recv_msghdr_array(umsgp,
+	    IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32,
+	    UIO_READ, uap-&gt;cnt, user_msg_x, recv_msg_array);
+	<span class="enscript-keyword">if</span> (error) {
+		DBG_PRINTF(<span class="enscript-string">&quot;%s copyin_user_msghdr_array() failed\n&quot;</span>, __func__);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-comment">/*
+	 * Make sure the size of each message iovec and
+	 * the aggregate size of all the iovec is valid
+	 */</span>
+	<span class="enscript-keyword">if</span> (recv_msg_array_is_valid(recv_msg_array, uap-&gt;cnt) == 0) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-comment">/*
+	 * Sanity check on passed arguments
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; uap-&gt;cnt; i++) {
+		<span class="enscript-type">struct</span> user_msghdr_x *mp = user_msg_x + i;
+
+		<span class="enscript-keyword">if</span> (mp-&gt;msg_flags != 0) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	<span class="enscript-comment">/*
+	 * We check the state without holding the socket lock;
+	 * if a race condition occurs, it would simply result
+	 * in an extra call to the MAC check function.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!(so-&gt;so_state &amp; SS_DEFUNCT) &amp;&amp;
+	    !(so-&gt;so_state &amp; SS_ISCONNECTED) &amp;&amp;
+	    !(so-&gt;so_proto-&gt;pr_flags &amp; PR_CONNREQUIRED) &amp;&amp;
+	    (error = mac_socket_check_receive(kauth_cred_get(), so)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+
+	len_before = recv_msg_array_resid(recv_msg_array, uap-&gt;cnt);
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_usrreqs-&gt;pru_soreceive_list !=
+	    pru_soreceive_list_notsupp &amp;&amp;
+	    somaxrecvmsgx == 0) {
+		error = so-&gt;so_proto-&gt;pr_usrreqs-&gt;pru_soreceive_list(so,
+		    recv_msg_array, uap-&gt;cnt, &amp;uap-&gt;flags);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">int</span> flags = uap-&gt;flags;
+
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; uap-&gt;cnt; i++) {
+			<span class="enscript-type">struct</span> recv_msg_elem *recv_msg_elem;
+			uio_t auio;
+			<span class="enscript-type">struct</span> sockaddr **psa;
+			<span class="enscript-type">struct</span> mbuf **controlp;
+
+			recv_msg_elem = recv_msg_array + i;
+			auio = recv_msg_elem-&gt;uio;
+
+			<span class="enscript-comment">/*
+			 * Do not block if we got at least one packet
+			 */</span>
+			<span class="enscript-keyword">if</span> (i &gt; 0)
+				flags |= MSG_DONTWAIT;
+
+			psa = (recv_msg_elem-&gt;which &amp; SOCK_MSG_SA) ?
+			    &amp;recv_msg_elem-&gt;psa : NULL;
+			controlp = (recv_msg_elem-&gt;which &amp; SOCK_MSG_CONTROL) ?
+			    &amp;recv_msg_elem-&gt;controlp : NULL;
+
+			error = so-&gt;so_proto-&gt;pr_usrreqs-&gt;pru_soreceive(so, psa,
+			    auio, (<span class="enscript-type">struct</span> mbuf **)0, controlp, &amp;flags);
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-comment">/*
+			 * We have some data
+			 */</span>
+			recv_msg_elem-&gt;which |= SOCK_MSG_DATA;
+			<span class="enscript-comment">/*
+			 * Stop on partial copy
+			 */</span>
+			<span class="enscript-keyword">if</span> (flags &amp; (MSG_RCVMORE | MSG_TRUNC))
+				<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> ((uap-&gt;flags &amp; MSG_DONTWAIT) == 0)
+			flags &amp;= ~MSG_DONTWAIT;
+		uap-&gt;flags = flags;
+	}
+
+	len_after = recv_msg_array_resid(recv_msg_array, uap-&gt;cnt);
+
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (len_after != len_before &amp;&amp; (error == ERESTART ||
+		    error == EINTR || error == EWOULDBLOCK))
+			error = 0;
+		<span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	uiocnt = externalize_recv_msghdr_array(umsgp,
+	    IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32,
+	    UIO_READ, uap-&gt;cnt, user_msg_x, recv_msg_array);
+
+	error = copyout(umsgp, uap-&gt;msgp, uap-&gt;cnt * size_of_msghdr);
+	<span class="enscript-keyword">if</span> (error) {
+		DBG_PRINTF(<span class="enscript-string">&quot;%s copyout() failed\n&quot;</span>, __func__);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	*retval = (<span class="enscript-type">int</span>)(uiocnt);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; uap-&gt;cnt; i++) {
+		<span class="enscript-type">struct</span> user_msghdr_x *mp = user_msg_x + i;
+		<span class="enscript-type">struct</span> recv_msg_elem *recv_msg_elem = recv_msg_array + i;
+		<span class="enscript-type">struct</span> sockaddr *fromsa = recv_msg_elem-&gt;psa;
+
+		<span class="enscript-keyword">if</span> (mp-&gt;msg_name) {
+			error = copyout_sa(fromsa, mp-&gt;msg_name,
+			    &amp;mp-&gt;msg_namelen);
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-keyword">if</span> (mp-&gt;msg_control) {
+			error = copyout_control(p, recv_msg_elem-&gt;controlp,
+			    mp-&gt;msg_control, &amp;mp-&gt;msg_controllen,
+			    &amp;mp-&gt;msg_flags);
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (need_drop)
+		file_drop(uap-&gt;s);
+	<span class="enscript-keyword">if</span> (umsgp != NULL)
+		_FREE(umsgp, M_TEMP);
+	<span class="enscript-keyword">if</span> (recv_msg_array != NULL)
+		free_recv_msg_array(recv_msg_array, uap-&gt;cnt);
+	<span class="enscript-keyword">if</span> (user_msg_x != NULL)
+		_FREE(user_msg_x, M_TEMP);
+
+	KERNEL_DEBUG(DBG_FNC_RECVMSG_X | DBG_FUNC_END, error, 0, 0, 0, 0);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EBADF
+ *	file_socket:ENOTSOCK
+ *	file_socket:EBADF
+ *	soshutdown:EINVAL
+ *	soshutdown:ENOTCONN
+ *	soshutdown:EADDRNOTAVAIL[TCP]
+ *	soshutdown:ENOBUFS[TCP]
+ *	soshutdown:EMSGSIZE[TCP]
+ *	soshutdown:EHOSTUNREACH[TCP]
+ *	soshutdown:ENETUNREACH[TCP]
+ *	soshutdown:ENETDOWN[TCP]
+ *	soshutdown:ENOMEM[TCP]
+ *	soshutdown:EACCES[TCP]
+ *	soshutdown:EMSGSIZE[TCP]
+ *	soshutdown:ENOBUFS[TCP]
+ *	soshutdown:???[TCP]		[ignorable: mostly IPSEC/firewall/DLIL]
+ *	soshutdown:???			[other protocol families]
+ */</span>
+<span class="enscript-comment">/* ARGSUSED */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">shutdown</span>(__unused <span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> shutdown_args *uap,
+    __unused int32_t *retval)
+{
+	<span class="enscript-type">struct</span> socket *so;
+	<span class="enscript-type">int</span> error;
+
+	AUDIT_ARG(fd, uap-&gt;s);
+	error = file_socket(uap-&gt;s, &amp;so);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	error =  soshutdown((<span class="enscript-type">struct</span> socket *)so, uap-&gt;how);
+<span class="enscript-reference">out</span>:
+	file_drop(uap-&gt;s);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EFAULT
+ *		EINVAL
+ *		EACCES			Mandatory Access Control failure
+ *	file_socket:ENOTSOCK
+ *	file_socket:EBADF
+ *	sosetopt:EINVAL
+ *	sosetopt:ENOPROTOOPT
+ *	sosetopt:ENOBUFS
+ *	sosetopt:EDOM
+ *	sosetopt:EFAULT
+ *	sosetopt:EOPNOTSUPP[AF_UNIX]
+ *	sosetopt:???
+ */</span>
+<span class="enscript-comment">/* ARGSUSED */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">setsockopt</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> setsockopt_args *uap,
+    __unused int32_t *retval)
+{
+	<span class="enscript-type">struct</span> socket *so;
+	<span class="enscript-type">struct</span> sockopt sopt;
+	<span class="enscript-type">int</span> error;
+
+	AUDIT_ARG(fd, uap-&gt;s);
+	<span class="enscript-keyword">if</span> (uap-&gt;val == 0 &amp;&amp; uap-&gt;valsize != 0)
+		<span class="enscript-keyword">return</span> (EFAULT);
+	<span class="enscript-comment">/* No bounds checking on size (it's unsigned) */</span>
+
+	error = file_socket(uap-&gt;s, &amp;so);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+
+	sopt.sopt_dir = SOPT_SET;
+	sopt.sopt_level = uap-&gt;level;
+	sopt.sopt_name = uap-&gt;name;
+	sopt.sopt_val = uap-&gt;val;
+	sopt.sopt_valsize = uap-&gt;valsize;
+	sopt.sopt_p = p;
+
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	<span class="enscript-keyword">if</span> ((error = mac_socket_check_setsockopt(kauth_cred_get(), so,
+	    &amp;sopt)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+	error = sosetoptlock(so, &amp;sopt, 1);	<span class="enscript-comment">/* will lock socket */</span>
+<span class="enscript-reference">out</span>:
+	file_drop(uap-&gt;s);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINVAL
+ *		EBADF
+ *		EACCES			Mandatory Access Control failure
+ *	copyin:EFAULT
+ *	copyout:EFAULT
+ *	file_socket:ENOTSOCK
+ *	file_socket:EBADF
+ *	sogetopt:???
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">getsockopt</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> getsockopt_args  *uap,
+    __unused int32_t *retval)
+{
+	<span class="enscript-type">int</span>		error;
+	socklen_t	valsize;
+	<span class="enscript-type">struct</span> sockopt	sopt;
+	<span class="enscript-type">struct</span> socket *so;
+
+	error = file_socket(uap-&gt;s, &amp;so);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+	<span class="enscript-keyword">if</span> (uap-&gt;val) {
+		error = copyin(uap-&gt;avalsize, (caddr_t)&amp;valsize,
+		    <span class="enscript-keyword">sizeof</span> (valsize));
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		<span class="enscript-comment">/* No bounds checking on size (it's unsigned) */</span>
+	} <span class="enscript-keyword">else</span> {
+		valsize = 0;
+	}
+	sopt.sopt_dir = SOPT_GET;
+	sopt.sopt_level = uap-&gt;level;
+	sopt.sopt_name = uap-&gt;name;
+	sopt.sopt_val = uap-&gt;val;
+	sopt.sopt_valsize = (size_t)valsize; <span class="enscript-comment">/* checked non-negative above */</span>
+	sopt.sopt_p = p;
+
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	<span class="enscript-keyword">if</span> ((error = mac_socket_check_getsockopt(kauth_cred_get(), so,
+	    &amp;sopt)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+	error = sogetoptlock((<span class="enscript-type">struct</span> socket *)so, &amp;sopt, 1);	<span class="enscript-comment">/* will lock */</span>
+	<span class="enscript-keyword">if</span> (error == 0) {
+		valsize = sopt.sopt_valsize;
+		error = copyout((caddr_t)&amp;valsize, uap-&gt;avalsize,
+		    <span class="enscript-keyword">sizeof</span> (valsize));
+	}
+<span class="enscript-reference">out</span>:
+	file_drop(uap-&gt;s);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * Get socket name.
+ *
+ * Returns:	0			Success
+ *		EBADF
+ *	file_socket:ENOTSOCK
+ *	file_socket:EBADF
+ *	copyin:EFAULT
+ *	copyout:EFAULT
+ *	&lt;pru_sockaddr&gt;:ENOBUFS[TCP]
+ *	&lt;pru_sockaddr&gt;:ECONNRESET[TCP]
+ *	&lt;pru_sockaddr&gt;:EINVAL[AF_UNIX]
+ *	&lt;sf_getsockname&gt;:???
+ */</span>
+<span class="enscript-comment">/* ARGSUSED */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">getsockname</span>(__unused <span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> getsockname_args *uap,
+    __unused int32_t *retval)
+{
+	<span class="enscript-type">struct</span> socket *so;
+	<span class="enscript-type">struct</span> sockaddr *sa;
+	socklen_t len;
+	socklen_t sa_len;
+	<span class="enscript-type">int</span> error;
+
+	error = file_socket(uap-&gt;fdes, &amp;so);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+	error = copyin(uap-&gt;alen, (caddr_t)&amp;len, <span class="enscript-keyword">sizeof</span> (socklen_t));
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	sa = 0;
+	socket_lock(so, 1);
+	error = (*so-&gt;so_proto-&gt;pr_usrreqs-&gt;pru_sockaddr)(so, &amp;sa);
+	<span class="enscript-keyword">if</span> (error == 0) {
+		error = sflt_getsockname(so, &amp;sa);
+		<span class="enscript-keyword">if</span> (error == EJUSTRETURN)
+			error = 0;
+	}
+	socket_unlock(so, 1);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	<span class="enscript-keyword">if</span> (sa == 0) {
+		len = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">gotnothing</span>;
+	}
+
+	sa_len = sa-&gt;sa_len;
+	len = MIN(len, sa_len);
+	error = copyout((caddr_t)sa, uap-&gt;asa, len);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	<span class="enscript-comment">/* return the actual, untruncated address length */</span>
+	len = sa_len;
+<span class="enscript-reference">gotnothing</span>:
+		error = copyout((caddr_t)&amp;len, uap-&gt;alen, <span class="enscript-keyword">sizeof</span> (socklen_t));
+<span class="enscript-reference">bad</span>:
+	<span class="enscript-keyword">if</span> (sa)
+		FREE(sa, M_SONAME);
+<span class="enscript-reference">out</span>:
+	file_drop(uap-&gt;fdes);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Get name of peer for connected socket.
+ *
+ * Returns:	0			Success
+ *		EBADF
+ *		EINVAL
+ *		ENOTCONN
+ *	file_socket:ENOTSOCK
+ *	file_socket:EBADF
+ *	copyin:EFAULT
+ *	copyout:EFAULT
+ *	&lt;pru_peeraddr&gt;:???
+ *	&lt;sf_getpeername&gt;:???
+ */</span>
+<span class="enscript-comment">/* ARGSUSED */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">getpeername</span>(__unused <span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> getpeername_args *uap,
+    __unused int32_t *retval)
+{
+	<span class="enscript-type">struct</span> socket *so;
+	<span class="enscript-type">struct</span> sockaddr *sa;
+	socklen_t len;
+	socklen_t sa_len;
+	<span class="enscript-type">int</span> error;
+
+	error = file_socket(uap-&gt;fdes, &amp;so);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	socket_lock(so, 1);
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; (SS_CANTRCVMORE | SS_CANTSENDMORE)) ==
+	    (SS_CANTRCVMORE | SS_CANTSENDMORE)) {
+		<span class="enscript-comment">/* the socket has been shutdown, no more getpeername's */</span>
+		socket_unlock(so, 1);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; (SS_ISCONNECTED|SS_ISCONFIRMING)) == 0) {
+		socket_unlock(so, 1);
+		error = ENOTCONN;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	error = copyin(uap-&gt;alen, (caddr_t)&amp;len, <span class="enscript-keyword">sizeof</span> (socklen_t));
+	<span class="enscript-keyword">if</span> (error) {
+		socket_unlock(so, 1);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	sa = 0;
+	error = (*so-&gt;so_proto-&gt;pr_usrreqs-&gt;pru_peeraddr)(so, &amp;sa);
+	<span class="enscript-keyword">if</span> (error == 0) {
+		error = sflt_getpeername(so, &amp;sa);
+		<span class="enscript-keyword">if</span> (error == EJUSTRETURN)
+			error = 0;
+	}
+	socket_unlock(so, 1);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	<span class="enscript-keyword">if</span> (sa == 0) {
+		len = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">gotnothing</span>;
+	}
+	sa_len = sa-&gt;sa_len;
+	len = MIN(len, sa_len);
+	error = copyout(sa, uap-&gt;asa, len);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	<span class="enscript-comment">/* return the actual, untruncated address length */</span>
+	len = sa_len;
+<span class="enscript-reference">gotnothing</span>:
+	error = copyout((caddr_t)&amp;len, uap-&gt;alen, <span class="enscript-keyword">sizeof</span> (socklen_t));
+<span class="enscript-reference">bad</span>:
+	<span class="enscript-keyword">if</span> (sa) FREE(sa, M_SONAME);
+<span class="enscript-reference">out</span>:
+	file_drop(uap-&gt;fdes);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sockargs</span>(<span class="enscript-type">struct</span> mbuf **mp, user_addr_t data, <span class="enscript-type">int</span> buflen, <span class="enscript-type">int</span> type)
+{
+	<span class="enscript-type">struct</span> sockaddr *sa;
+	<span class="enscript-type">struct</span> mbuf *m;
+	<span class="enscript-type">int</span> error;
+
+	size_t alloc_buflen = (size_t)buflen;
+
+	<span class="enscript-keyword">if</span> (alloc_buflen &gt; INT_MAX/2)
+		<span class="enscript-keyword">return</span> (EINVAL);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__LP64__</span>
+	<span class="enscript-comment">/*
+	 * The fd's in the buffer must expand to be pointers, thus we need twice
+	 * as much space
+	 */</span>
+	<span class="enscript-keyword">if</span> (type == MT_CONTROL)
+		alloc_buflen = ((buflen - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cmsghdr))*2) +
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cmsghdr);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (alloc_buflen &gt; MLEN) {
+		<span class="enscript-keyword">if</span> (type == MT_SONAME &amp;&amp; alloc_buflen &lt;= 112)
+			alloc_buflen = MLEN;	<span class="enscript-comment">/* unix domain compat. hack */</span>
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (alloc_buflen &gt; MCLBYTES)
+			<span class="enscript-keyword">return</span> (EINVAL);
+	}
+	m = m_get(M_WAIT, type);
+	<span class="enscript-keyword">if</span> (m == NULL)
+		<span class="enscript-keyword">return</span> (ENOBUFS);
+	<span class="enscript-keyword">if</span> (alloc_buflen &gt; MLEN) {
+		MCLGET(m, M_WAIT);
+		<span class="enscript-keyword">if</span> ((m-&gt;m_flags &amp; M_EXT) == 0) {
+			m_free(m);
+			<span class="enscript-keyword">return</span> (ENOBUFS);
+		}
+	}
+	<span class="enscript-comment">/*
+	 * K64: We still copyin the original buflen because it gets expanded
+	 * later and we lie about the size of the mbuf because it only affects
+	 * unp_* functions
+	 */</span>
+	m-&gt;m_len = buflen;
+	error = copyin(data, mtod(m, caddr_t), (u_int)buflen);
+	<span class="enscript-keyword">if</span> (error) {
+		(<span class="enscript-type">void</span>) m_free(m);
+	} <span class="enscript-keyword">else</span> {
+		*mp = m;
+		<span class="enscript-keyword">if</span> (type == MT_SONAME) {
+			sa = mtod(m, <span class="enscript-type">struct</span> sockaddr *);
+			sa-&gt;sa_len = buflen;
+		}
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Given a user_addr_t of length len, allocate and fill out a *sa.
+ *
+ * Returns:	0			Success
+ *		ENAMETOOLONG		Filename too long
+ *		EINVAL			Invalid argument
+ *		ENOMEM			Not enough space
+ *		copyin:EFAULT		Bad address
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">getsockaddr</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr **namp, user_addr_t uaddr,
+    size_t len, boolean_t translate_unspec)
+{
+	<span class="enscript-type">struct</span> sockaddr *sa;
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (len &gt; SOCK_MAXADDRLEN)
+		<span class="enscript-keyword">return</span> (ENAMETOOLONG);
+
+	<span class="enscript-keyword">if</span> (len &lt; offsetof(<span class="enscript-type">struct</span> sockaddr, sa_data[0]))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	MALLOC(sa, <span class="enscript-type">struct</span> sockaddr *, len, M_SONAME, M_WAITOK | M_ZERO);
+	<span class="enscript-keyword">if</span> (sa == NULL) {
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+	error = copyin(uaddr, (caddr_t)sa, len);
+	<span class="enscript-keyword">if</span> (error) {
+		FREE(sa, M_SONAME);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * Force sa_family to AF_INET on AF_INET sockets to handle
+		 * legacy applications that use AF_UNSPEC (0).  On all other
+		 * sockets we leave it unchanged and let the lower layer
+		 * handle it.
+		 */</span>
+		<span class="enscript-keyword">if</span> (translate_unspec &amp;&amp; sa-&gt;sa_family == AF_UNSPEC &amp;&amp;
+		    SOCK_CHECK_DOM(so, PF_INET) &amp;&amp;
+		    len == <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in))
+			sa-&gt;sa_family = AF_INET;
+
+		sa-&gt;sa_len = len;
+		*namp = sa;
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">getsockaddr_s</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr_storage *ss,
+    user_addr_t uaddr, size_t len, boolean_t translate_unspec)
+{
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (ss == NULL || uaddr == USER_ADDR_NULL ||
+	    len &lt; offsetof(<span class="enscript-type">struct</span> sockaddr, sa_data[0]))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/*
+	 * sockaddr_storage size is less than SOCK_MAXADDRLEN,
+	 * so the check here is inclusive.
+	 */</span>
+	<span class="enscript-keyword">if</span> (len &gt; <span class="enscript-keyword">sizeof</span> (*ss))
+		<span class="enscript-keyword">return</span> (ENAMETOOLONG);
+
+	bzero(ss, <span class="enscript-keyword">sizeof</span> (*ss));
+	error = copyin(uaddr, (caddr_t)ss, len);
+	<span class="enscript-keyword">if</span> (error == 0) {
+		<span class="enscript-comment">/*
+		 * Force sa_family to AF_INET on AF_INET sockets to handle
+		 * legacy applications that use AF_UNSPEC (0).  On all other
+		 * sockets we leave it unchanged and let the lower layer
+		 * handle it.
+		 */</span>
+		<span class="enscript-keyword">if</span> (translate_unspec &amp;&amp; ss-&gt;ss_family == AF_UNSPEC &amp;&amp;
+		    SOCK_CHECK_DOM(so, PF_INET) &amp;&amp;
+		    len == <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in))
+			ss-&gt;ss_family = AF_INET;
+
+		ss-&gt;ss_len = len;
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Hard limit on the number of source and/or destination addresses
+ * that can be specified by an application.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SOCKADDRLIST_MAX_ENTRIES</span>	64
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">getsockaddrlist</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr_list **slp,
+    user_addr_t uaddr, socklen_t uaddrlen, boolean_t xlate_unspec)
+{
+	<span class="enscript-type">struct</span> sockaddr_list *sl;
+	<span class="enscript-type">int</span> error = 0;
+
+	*slp = NULL;
+
+	<span class="enscript-keyword">if</span> (uaddr == USER_ADDR_NULL || uaddrlen == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	sl = sockaddrlist_alloc(M_WAITOK);
+	<span class="enscript-keyword">if</span> (sl == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	VERIFY(sl-&gt;sl_cnt == 0);
+	<span class="enscript-keyword">while</span> (uaddrlen &gt; 0 &amp;&amp; sl-&gt;sl_cnt &lt; SOCKADDRLIST_MAX_ENTRIES) {
+		<span class="enscript-type">struct</span> sockaddr_storage ss;
+		<span class="enscript-type">struct</span> sockaddr_entry *se;
+		<span class="enscript-type">struct</span> sockaddr *sa;
+
+		<span class="enscript-keyword">if</span> (uaddrlen &lt; <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr)) {
+			error = EINVAL;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		bzero(&amp;ss, <span class="enscript-keyword">sizeof</span> (ss));
+		error = copyin(uaddr, (caddr_t)&amp;ss, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr));
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-comment">/* getsockaddr does the same but we need them now */</span>
+		<span class="enscript-keyword">if</span> (uaddrlen &lt; ss.ss_len ||
+		    ss.ss_len &lt; offsetof(<span class="enscript-type">struct</span> sockaddr, sa_data[0])) {
+			error = EINVAL;
+			<span class="enscript-keyword">break</span>;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ss.ss_len &gt; <span class="enscript-keyword">sizeof</span> (ss)) {
+			<span class="enscript-comment">/*
+			 * sockaddr_storage size is less than SOCK_MAXADDRLEN,
+			 * so the check here is inclusive.  We could user the
+			 * latter instead, but seems like an overkill for now.
+			 */</span>
+			error = ENAMETOOLONG;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		se = sockaddrentry_alloc(M_WAITOK);
+		<span class="enscript-keyword">if</span> (se == NULL)
+			<span class="enscript-keyword">break</span>;
+
+		sockaddrlist_insert(sl, se);
+
+		error = getsockaddr(so, &amp;sa, uaddr, ss.ss_len, xlate_unspec);
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">break</span>;
+
+		VERIFY(sa != NULL &amp;&amp; sa-&gt;sa_len == ss.ss_len);
+		se-&gt;se_addr = sa;
+
+		uaddr += ss.ss_len;
+		VERIFY(((<span class="enscript-type">signed</span>)uaddrlen - ss.ss_len) &gt;= 0);
+		uaddrlen -= ss.ss_len;
+	}
+
+	<span class="enscript-keyword">if</span> (error != 0)
+		sockaddrlist_free(sl);
+	<span class="enscript-keyword">else</span>
+		*slp = sl;
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">internalize_user_msghdr_array</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *src, <span class="enscript-type">int</span> spacetype, <span class="enscript-type">int</span> direction,
+    u_int count, <span class="enscript-type">struct</span> user_msghdr_x *dst, <span class="enscript-type">struct</span> uio **uiop)
+{
+	<span class="enscript-type">int</span> error = 0;
+	u_int i;
+	u_int namecnt = 0;
+	u_int ctlcnt = 0;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		uio_t auio;
+		<span class="enscript-type">struct</span> user_iovec *iovp;
+		<span class="enscript-type">struct</span> user_msghdr_x *user_msg = dst + i;
+
+		<span class="enscript-keyword">if</span> (spacetype == UIO_USERSPACE64) {
+			<span class="enscript-type">const</span> <span class="enscript-type">struct</span> user64_msghdr_x *msghdr64;
+
+			msghdr64 = ((<span class="enscript-type">const</span> <span class="enscript-type">struct</span> user64_msghdr_x *)src) + i;
+
+			user_msg-&gt;msg_name = msghdr64-&gt;msg_name;
+			user_msg-&gt;msg_namelen = msghdr64-&gt;msg_namelen;
+			user_msg-&gt;msg_iov = msghdr64-&gt;msg_iov;
+			user_msg-&gt;msg_iovlen = msghdr64-&gt;msg_iovlen;
+			user_msg-&gt;msg_control = msghdr64-&gt;msg_control;
+			user_msg-&gt;msg_controllen = msghdr64-&gt;msg_controllen;
+			user_msg-&gt;msg_flags = msghdr64-&gt;msg_flags;
+			user_msg-&gt;msg_datalen = msghdr64-&gt;msg_datalen;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">const</span> <span class="enscript-type">struct</span> user32_msghdr_x *msghdr32;
+
+			msghdr32 = ((<span class="enscript-type">const</span> <span class="enscript-type">struct</span> user32_msghdr_x *)src) + i;
+
+			user_msg-&gt;msg_name = msghdr32-&gt;msg_name;
+			user_msg-&gt;msg_namelen = msghdr32-&gt;msg_namelen;
+			user_msg-&gt;msg_iov = msghdr32-&gt;msg_iov;
+			user_msg-&gt;msg_iovlen = msghdr32-&gt;msg_iovlen;
+			user_msg-&gt;msg_control = msghdr32-&gt;msg_control;
+			user_msg-&gt;msg_controllen = msghdr32-&gt;msg_controllen;
+			user_msg-&gt;msg_flags = msghdr32-&gt;msg_flags;
+			user_msg-&gt;msg_datalen = msghdr32-&gt;msg_datalen;
+		}
+
+		<span class="enscript-keyword">if</span> (user_msg-&gt;msg_iovlen &lt;= 0 ||
+		    user_msg-&gt;msg_iovlen &gt; UIO_MAXIOV) {
+			error = EMSGSIZE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		auio = uio_create(user_msg-&gt;msg_iovlen, 0, spacetype,
+		    direction);
+		<span class="enscript-keyword">if</span> (auio == NULL) {
+			error = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		uiop[i] = auio;
+
+		iovp = uio_iovsaddr(auio);
+		<span class="enscript-keyword">if</span> (iovp == NULL) {
+			error = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		error = copyin_user_iovec_array(user_msg-&gt;msg_iov,
+			spacetype, user_msg-&gt;msg_iovlen, iovp);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		user_msg-&gt;msg_iov = CAST_USER_ADDR_T(iovp);
+
+		error = uio_calculateresid(auio);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		user_msg-&gt;msg_datalen = uio_resid(auio);
+
+		<span class="enscript-keyword">if</span> (user_msg-&gt;msg_name &amp;&amp; user_msg-&gt;msg_namelen)
+			namecnt++;
+		<span class="enscript-keyword">if</span> (user_msg-&gt;msg_control &amp;&amp; user_msg-&gt;msg_controllen)
+			ctlcnt++;
+	}
+<span class="enscript-reference">done</span>:
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">internalize_recv_msghdr_array</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *src, <span class="enscript-type">int</span> spacetype, <span class="enscript-type">int</span> direction,
+    u_int count, <span class="enscript-type">struct</span> user_msghdr_x *dst,
+    <span class="enscript-type">struct</span> recv_msg_elem *recv_msg_array)
+{
+	<span class="enscript-type">int</span> error = 0;
+	u_int i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		<span class="enscript-type">struct</span> user_iovec *iovp;
+		<span class="enscript-type">struct</span> user_msghdr_x *user_msg = dst + i;
+		<span class="enscript-type">struct</span> recv_msg_elem *recv_msg_elem = recv_msg_array + i;
+
+		<span class="enscript-keyword">if</span> (spacetype == UIO_USERSPACE64) {
+			<span class="enscript-type">const</span> <span class="enscript-type">struct</span> user64_msghdr_x *msghdr64;
+
+			msghdr64 = ((<span class="enscript-type">const</span> <span class="enscript-type">struct</span> user64_msghdr_x *)src) + i;
+
+			user_msg-&gt;msg_name = msghdr64-&gt;msg_name;
+			user_msg-&gt;msg_namelen = msghdr64-&gt;msg_namelen;
+			user_msg-&gt;msg_iov = msghdr64-&gt;msg_iov;
+			user_msg-&gt;msg_iovlen = msghdr64-&gt;msg_iovlen;
+			user_msg-&gt;msg_control = msghdr64-&gt;msg_control;
+			user_msg-&gt;msg_controllen = msghdr64-&gt;msg_controllen;
+			user_msg-&gt;msg_flags = msghdr64-&gt;msg_flags;
+			user_msg-&gt;msg_datalen = msghdr64-&gt;msg_datalen;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">const</span> <span class="enscript-type">struct</span> user32_msghdr_x *msghdr32;
+
+			msghdr32 = ((<span class="enscript-type">const</span> <span class="enscript-type">struct</span> user32_msghdr_x *)src) + i;
+
+			user_msg-&gt;msg_name = msghdr32-&gt;msg_name;
+			user_msg-&gt;msg_namelen = msghdr32-&gt;msg_namelen;
+			user_msg-&gt;msg_iov = msghdr32-&gt;msg_iov;
+			user_msg-&gt;msg_iovlen = msghdr32-&gt;msg_iovlen;
+			user_msg-&gt;msg_control = msghdr32-&gt;msg_control;
+			user_msg-&gt;msg_controllen = msghdr32-&gt;msg_controllen;
+			user_msg-&gt;msg_flags = msghdr32-&gt;msg_flags;
+			user_msg-&gt;msg_datalen = msghdr32-&gt;msg_datalen;
+		}
+
+		<span class="enscript-keyword">if</span> (user_msg-&gt;msg_iovlen &lt;= 0 ||
+		    user_msg-&gt;msg_iovlen &gt; UIO_MAXIOV) {
+			error = EMSGSIZE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		recv_msg_elem-&gt;uio = uio_create(user_msg-&gt;msg_iovlen, 0,
+		    spacetype, direction);
+		<span class="enscript-keyword">if</span> (recv_msg_elem-&gt;uio == NULL) {
+			error = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+
+		iovp = uio_iovsaddr(recv_msg_elem-&gt;uio);
+		<span class="enscript-keyword">if</span> (iovp == NULL) {
+			error = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		error = copyin_user_iovec_array(user_msg-&gt;msg_iov,
+			spacetype, user_msg-&gt;msg_iovlen, iovp);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		user_msg-&gt;msg_iov = CAST_USER_ADDR_T(iovp);
+
+		error = uio_calculateresid(recv_msg_elem-&gt;uio);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		user_msg-&gt;msg_datalen = uio_resid(recv_msg_elem-&gt;uio);
+
+		<span class="enscript-keyword">if</span> (user_msg-&gt;msg_name &amp;&amp; user_msg-&gt;msg_namelen)
+			recv_msg_elem-&gt;which |= SOCK_MSG_SA;
+		<span class="enscript-keyword">if</span> (user_msg-&gt;msg_control &amp;&amp; user_msg-&gt;msg_controllen)
+			recv_msg_elem-&gt;which |= SOCK_MSG_CONTROL;
+	}
+<span class="enscript-reference">done</span>:
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+u_int
+<span class="enscript-function-name">externalize_user_msghdr_array</span>(<span class="enscript-type">void</span> *dst, <span class="enscript-type">int</span> spacetype, <span class="enscript-type">int</span> direction,
+    u_int count, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> user_msghdr_x *src, <span class="enscript-type">struct</span> uio **uiop)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">direction</span>)
+	u_int i;
+	<span class="enscript-type">int</span> seenlast = 0;
+	u_int retcnt = 0;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		<span class="enscript-type">const</span> <span class="enscript-type">struct</span> user_msghdr_x *user_msg = src + i;
+		uio_t auio = uiop[i];
+		user_ssize_t len = user_msg-&gt;msg_datalen - uio_resid(auio);
+
+		<span class="enscript-keyword">if</span> (user_msg-&gt;msg_datalen != 0 &amp;&amp; len == 0)
+			seenlast = 1;
+
+		<span class="enscript-keyword">if</span> (seenlast == 0)
+			retcnt ++;
+
+		<span class="enscript-keyword">if</span> (spacetype == UIO_USERSPACE64) {
+			<span class="enscript-type">struct</span> user64_msghdr_x *msghdr64;
+
+			msghdr64 = ((<span class="enscript-type">struct</span> user64_msghdr_x *)dst) + i;
+
+			msghdr64-&gt;msg_flags = user_msg-&gt;msg_flags;
+			msghdr64-&gt;msg_datalen = len;
+
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">struct</span> user32_msghdr_x *msghdr32;
+
+			msghdr32 = ((<span class="enscript-type">struct</span> user32_msghdr_x *)dst) + i;
+
+			msghdr32-&gt;msg_flags = user_msg-&gt;msg_flags;
+			msghdr32-&gt;msg_datalen = len;
+		}
+	}
+	<span class="enscript-keyword">return</span> (retcnt);
+}
+
+u_int
+<span class="enscript-function-name">externalize_recv_msghdr_array</span>(<span class="enscript-type">void</span> *dst, <span class="enscript-type">int</span> spacetype, <span class="enscript-type">int</span> direction,
+    u_int count, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> user_msghdr_x *src,
+    <span class="enscript-type">struct</span> recv_msg_elem *recv_msg_array)
+{
+	u_int i;
+	<span class="enscript-type">int</span> seenlast = 0;
+	u_int retcnt = 0;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		<span class="enscript-type">const</span> <span class="enscript-type">struct</span> user_msghdr_x *user_msg = src + i;
+		<span class="enscript-type">struct</span> recv_msg_elem *recv_msg_elem = recv_msg_array + i;
+		user_ssize_t len;
+
+		len = user_msg-&gt;msg_datalen - uio_resid(recv_msg_elem-&gt;uio);
+
+		<span class="enscript-keyword">if</span> (direction == UIO_READ) {
+			<span class="enscript-keyword">if</span> ((recv_msg_elem-&gt;which &amp; SOCK_MSG_DATA) == 0)
+				seenlast = 1;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (user_msg-&gt;msg_datalen != 0 &amp;&amp; len == 0)
+				seenlast = 1;
+		}
+
+		<span class="enscript-keyword">if</span> (seenlast == 0)
+			retcnt ++;
+
+		<span class="enscript-keyword">if</span> (spacetype == UIO_USERSPACE64) {
+			<span class="enscript-type">struct</span> user64_msghdr_x *msghdr64;
+
+			msghdr64 = ((<span class="enscript-type">struct</span> user64_msghdr_x *)dst) + i;
+
+			msghdr64-&gt;msg_flags = user_msg-&gt;msg_flags;
+			msghdr64-&gt;msg_datalen = len;
+
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">struct</span> user32_msghdr_x *msghdr32;
+
+			msghdr32 = ((<span class="enscript-type">struct</span> user32_msghdr_x *)dst) + i;
+
+			msghdr32-&gt;msg_flags = user_msg-&gt;msg_flags;
+			msghdr32-&gt;msg_datalen = len;
+		}
+	}
+	<span class="enscript-keyword">return</span> (retcnt);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">free_uio_array</span>(<span class="enscript-type">struct</span> uio **uiop, u_int count)
+{
+	u_int i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		<span class="enscript-keyword">if</span> (uiop[i] != NULL)
+			uio_free(uiop[i]);
+	}
+}
+
+__private_extern__ user_ssize_t
+<span class="enscript-function-name">uio_array_resid</span>(<span class="enscript-type">struct</span> uio **uiop, u_int count)
+{
+	user_ssize_t len = 0;
+	u_int i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		<span class="enscript-type">struct</span> uio *auio = uiop[i];
+
+		<span class="enscript-keyword">if</span> (auio != NULL)
+			len += uio_resid(auio);
+	}
+	<span class="enscript-keyword">return</span> (len);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">uio_array_is_valid</span>(<span class="enscript-type">struct</span> uio **uiop, u_int count)
+{
+	user_ssize_t len = 0;
+	u_int i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		<span class="enscript-type">struct</span> uio *auio = uiop[i];
+
+		<span class="enscript-keyword">if</span> (auio != NULL) {
+			user_ssize_t resid = uio_resid(auio);
+
+			<span class="enscript-comment">/*
+			 * Sanity check on the validity of the iovec:
+			 * no point of going over sb_max
+			 */</span>
+			<span class="enscript-keyword">if</span> (resid &lt; 0 || (u_int32_t)resid &gt; sb_max)
+				<span class="enscript-keyword">return</span> (0);
+
+			len += resid;
+			<span class="enscript-keyword">if</span> (len &lt; 0 || (u_int32_t)len &gt; sb_max)
+				<span class="enscript-keyword">return</span> (0);
+		}
+	}
+	<span class="enscript-keyword">return</span> (1);
+}
+
+
+<span class="enscript-type">struct</span> recv_msg_elem *
+<span class="enscript-function-name">alloc_recv_msg_array</span>(u_int count)
+{
+	<span class="enscript-type">struct</span> recv_msg_elem *recv_msg_array;
+
+	recv_msg_array = _MALLOC(count * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> recv_msg_elem),
+	    M_TEMP, M_WAITOK | M_ZERO);
+
+	<span class="enscript-keyword">return</span> (recv_msg_array);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">free_recv_msg_array</span>(<span class="enscript-type">struct</span> recv_msg_elem *recv_msg_array, u_int count)
+{
+	u_int i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		<span class="enscript-type">struct</span> recv_msg_elem *recv_msg_elem = recv_msg_array + i;
+
+		<span class="enscript-keyword">if</span> (recv_msg_elem-&gt;uio != NULL)
+			uio_free(recv_msg_elem-&gt;uio);
+		<span class="enscript-keyword">if</span> (recv_msg_elem-&gt;psa != NULL)
+			_FREE(recv_msg_elem-&gt;psa, M_TEMP);
+		<span class="enscript-keyword">if</span> (recv_msg_elem-&gt;controlp != NULL)
+			m_freem(recv_msg_elem-&gt;controlp);
+	}
+	_FREE(recv_msg_array, M_TEMP);
+}
+
+
+__private_extern__ user_ssize_t
+<span class="enscript-function-name">recv_msg_array_resid</span>(<span class="enscript-type">struct</span> recv_msg_elem *recv_msg_array, u_int count)
+{
+	user_ssize_t len = 0;
+	u_int i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		<span class="enscript-type">struct</span> recv_msg_elem *recv_msg_elem = recv_msg_array + i;
+
+		<span class="enscript-keyword">if</span> (recv_msg_elem-&gt;uio != NULL)
+			len += uio_resid(recv_msg_elem-&gt;uio);
+	}
+	<span class="enscript-keyword">return</span> (len);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">recv_msg_array_is_valid</span>(<span class="enscript-type">struct</span> recv_msg_elem *recv_msg_array, u_int count)
+{
+	user_ssize_t len = 0;
+	u_int i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		<span class="enscript-type">struct</span> recv_msg_elem *recv_msg_elem = recv_msg_array + i;
+
+		<span class="enscript-keyword">if</span> (recv_msg_elem-&gt;uio != NULL) {
+			user_ssize_t resid = uio_resid(recv_msg_elem-&gt;uio);
+
+			<span class="enscript-comment">/*
+			 * Sanity check on the validity of the iovec:
+			 * no point of going over sb_max
+			 */</span>
+			<span class="enscript-keyword">if</span> (resid &lt; 0 || (u_int32_t)resid &gt; sb_max)
+				<span class="enscript-keyword">return</span> (0);
+
+			len += resid;
+			<span class="enscript-keyword">if</span> (len &lt; 0 || (u_int32_t)len &gt; sb_max)
+				<span class="enscript-keyword">return</span> (0);
+		}
+	}
+	<span class="enscript-keyword">return</span> (1);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SENDFILE</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SFUIOBUFS</span> 64
+
+<span class="enscript-comment">/* Macros to compute the number of mbufs needed depending on cluster size */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">HOWMANY_16K</span>(n)	((((unsigned int)(n) - 1) &gt;&gt; M16KCLSHIFT) + 1)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">HOWMANY_4K</span>(n)	((((unsigned int)(n) - 1) &gt;&gt; MBIGCLSHIFT) + 1)
+
+<span class="enscript-comment">/* Upper send limit in bytes (SFUIOBUFS * PAGESIZE) */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SENDFILE_MAX_BYTES</span>	(SFUIOBUFS &lt;&lt; PGSHIFT)
+
+<span class="enscript-comment">/* Upper send limit in the number of mbuf clusters */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SENDFILE_MAX_16K</span>	HOWMANY_16K(SENDFILE_MAX_BYTES)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SENDFILE_MAX_4K</span>		HOWMANY_4K(SENDFILE_MAX_BYTES)
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">alloc_sendpkt</span>(<span class="enscript-type">int</span> how, size_t pktlen, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *maxchunks,
+    <span class="enscript-type">struct</span> mbuf **m, boolean_t jumbocl)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> needed;
+
+	<span class="enscript-keyword">if</span> (pktlen == 0)
+		panic(<span class="enscript-string">&quot;%s: pktlen (%ld) must be non-zero\n&quot;</span>, __func__, pktlen);
+
+	<span class="enscript-comment">/*
+	 * Try to allocate for the whole thing.  Since we want full control
+	 * over the buffer size and be able to accept partial result, we can't
+	 * use mbuf_allocpacket().  The logic below is similar to sosend().
+	 */</span>
+	*m = NULL;
+	<span class="enscript-keyword">if</span> (pktlen &gt; MBIGCLBYTES &amp;&amp; jumbocl) {
+		needed = MIN(SENDFILE_MAX_16K, HOWMANY_16K(pktlen));
+		*m = m_getpackets_internal(&amp;needed, 1, how, 0, M16KCLBYTES);
+	}
+	<span class="enscript-keyword">if</span> (*m == NULL) {
+		needed = MIN(SENDFILE_MAX_4K, HOWMANY_4K(pktlen));
+		*m = m_getpackets_internal(&amp;needed, 1, how, 0, MBIGCLBYTES);
+	}
+
+	<span class="enscript-comment">/*
+	 * Our previous attempt(s) at allocation had failed; the system
+	 * may be short on mbufs, and we want to block until they are
+	 * available.  This time, ask just for 1 mbuf and don't return
+	 * until we get it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (*m == NULL) {
+		needed = 1;
+		*m = m_getpackets_internal(&amp;needed, 1, M_WAIT, 1, MBIGCLBYTES);
+	}
+	<span class="enscript-keyword">if</span> (*m == NULL)
+		panic(<span class="enscript-string">&quot;%s: blocking allocation returned NULL\n&quot;</span>, __func__);
+
+	*maxchunks = needed;
+}
+
+<span class="enscript-comment">/*
+ * sendfile(2).
+ * int sendfile(int fd, int s, off_t offset, off_t *nbytes,
+ *	 struct sf_hdtr *hdtr, int flags)
+ *
+ * Send a file specified by 'fd' and starting at 'offset' to a socket
+ * specified by 's'. Send only '*nbytes' of the file or until EOF if
+ * *nbytes == 0. Optionally add a header and/or trailer to the socket
+ * output. If specified, write the total number of bytes sent into *nbytes.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sendfile</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> sendfile_args *uap, __unused <span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">struct</span> vnode *vp;
+	<span class="enscript-type">struct</span> socket *so;
+	<span class="enscript-type">struct</span> writev_nocancel_args nuap;
+	user_ssize_t writev_retval;
+	<span class="enscript-type">struct</span> user_sf_hdtr user_hdtr;
+	<span class="enscript-type">struct</span> user32_sf_hdtr user32_hdtr;
+	<span class="enscript-type">struct</span> user64_sf_hdtr user64_hdtr;
+	off_t off, xfsize;
+	off_t nbytes = 0, sbytes = 0;
+	<span class="enscript-type">int</span> error = 0;
+	size_t sizeof_hdtr;
+	off_t file_size;
+	<span class="enscript-type">struct</span> vfs_context context = *vfs_context_current();
+
+	KERNEL_DEBUG_CONSTANT((DBG_FNC_SENDFILE | DBG_FUNC_START), uap-&gt;s,
+	    0, 0, 0, 0);
+
+	AUDIT_ARG(fd, uap-&gt;fd);
+	AUDIT_ARG(value32, uap-&gt;s);
+
+	<span class="enscript-comment">/*
+	 * Do argument checking. Must be a regular file in, stream
+	 * type and connected socket out, positive offset.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((error = fp_getfvp(p, uap-&gt;fd, &amp;fp, &amp;vp))) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">if</span> ((fp-&gt;f_flag &amp; FREAD) == 0) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done1</span>;
+	}
+	<span class="enscript-keyword">if</span> (vnode_isreg(vp) == 0) {
+		error = ENOTSUP;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done1</span>;
+	}
+	error = file_socket(uap-&gt;s, &amp;so);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done1</span>;
+	}
+	<span class="enscript-keyword">if</span> (so == NULL) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done2</span>;
+	}
+	<span class="enscript-keyword">if</span> (so-&gt;so_type != SOCK_STREAM) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done2</span>;
+	}
+	<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_ISCONNECTED) == 0) {
+		error = ENOTCONN;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done2</span>;
+	}
+	<span class="enscript-keyword">if</span> (uap-&gt;offset &lt; 0) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done2</span>;
+	}
+	<span class="enscript-keyword">if</span> (uap-&gt;nbytes == USER_ADDR_NULL) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done2</span>;
+	}
+	<span class="enscript-keyword">if</span> (uap-&gt;flags != 0) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done2</span>;
+	}
+
+	context.vc_ucred = fp-&gt;f_fglob-&gt;fg_cred;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	<span class="enscript-comment">/* JMM - fetch connected sockaddr? */</span>
+	error = mac_socket_check_send(context.vc_ucred, so, NULL);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done2</span>;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * Get number of bytes to send
+	 * Should it applies to size of header and trailer?
+	 * JMM - error handling?
+	 */</span>
+	copyin(uap-&gt;nbytes, &amp;nbytes, <span class="enscript-keyword">sizeof</span> (off_t));
+
+	<span class="enscript-comment">/*
+	 * If specified, get the pointer to the sf_hdtr struct for
+	 * any headers/trailers.
+	 */</span>
+	<span class="enscript-keyword">if</span> (uap-&gt;hdtr != USER_ADDR_NULL) {
+		caddr_t hdtrp;
+
+		bzero(&amp;user_hdtr, <span class="enscript-keyword">sizeof</span> (user_hdtr));
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+			hdtrp = (caddr_t)&amp;user64_hdtr;
+			sizeof_hdtr = <span class="enscript-keyword">sizeof</span> (user64_hdtr);
+		} <span class="enscript-keyword">else</span> {
+			hdtrp = (caddr_t)&amp;user32_hdtr;
+			sizeof_hdtr = <span class="enscript-keyword">sizeof</span> (user32_hdtr);
+		}
+		error = copyin(uap-&gt;hdtr, hdtrp, sizeof_hdtr);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done2</span>;
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+			user_hdtr.headers = user64_hdtr.headers;
+			user_hdtr.hdr_cnt = user64_hdtr.hdr_cnt;
+			user_hdtr.trailers = user64_hdtr.trailers;
+			user_hdtr.trl_cnt = user64_hdtr.trl_cnt;
+		} <span class="enscript-keyword">else</span> {
+			user_hdtr.headers = user32_hdtr.headers;
+			user_hdtr.hdr_cnt = user32_hdtr.hdr_cnt;
+			user_hdtr.trailers = user32_hdtr.trailers;
+			user_hdtr.trl_cnt = user32_hdtr.trl_cnt;
+		}
+
+		<span class="enscript-comment">/*
+		 * Send any headers. Wimp out and use writev(2).
+		 */</span>
+		<span class="enscript-keyword">if</span> (user_hdtr.headers != USER_ADDR_NULL) {
+			bzero(&amp;nuap, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> writev_args));
+			nuap.fd = uap-&gt;s;
+			nuap.iovp = user_hdtr.headers;
+			nuap.iovcnt = user_hdtr.hdr_cnt;
+			error = writev_nocancel(p, &amp;nuap, &amp;writev_retval);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done2</span>;
+			}
+			sbytes += writev_retval;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Get the file size for 2 reasons:
+	 *  1. We don't want to allocate more mbufs than necessary
+	 *  2. We don't want to read past the end of file
+	 */</span>
+	<span class="enscript-keyword">if</span> ((error = vnode_size(vp, &amp;file_size, vfs_context_current())) != 0) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done2</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Simply read file data into a chain of mbufs that used with scatter
+	 * gather reads. We're not (yet?) setup to use zero copy external
+	 * mbufs that point to the file pages.
+	 */</span>
+	socket_lock(so, 1);
+	error = sblock(&amp;so-&gt;so_snd, SBL_WAIT);
+	<span class="enscript-keyword">if</span> (error) {
+		socket_unlock(so, 1);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done2</span>;
+	}
+	<span class="enscript-keyword">for</span> (off = uap-&gt;offset; ; off += xfsize, sbytes += xfsize) {
+		mbuf_t	m0 = NULL, m;
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	nbufs = SFUIOBUFS, i;
+		uio_t	auio;
+		<span class="enscript-type">char</span>	uio_buf[UIO_SIZEOF(SFUIOBUFS)]; <span class="enscript-comment">/* 1 KB !!! */</span>
+		size_t	uiolen;
+		user_ssize_t	rlen;
+		off_t	pgoff;
+		size_t	pktlen;
+		boolean_t jumbocl;
+
+		<span class="enscript-comment">/*
+		 * Calculate the amount to transfer.
+		 * Align to round number of pages.
+		 * Not to exceed send socket buffer,
+		 * the EOF, or the passed in nbytes.
+		 */</span>
+		xfsize = sbspace(&amp;so-&gt;so_snd);
+
+		<span class="enscript-keyword">if</span> (xfsize &lt;= 0) {
+			<span class="enscript-keyword">if</span> (so-&gt;so_state &amp; SS_CANTSENDMORE) {
+				error = EPIPE;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done3</span>;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_NBIO)) {
+				error = EAGAIN;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done3</span>;
+			} <span class="enscript-keyword">else</span> {
+				xfsize = PAGE_SIZE;
+			}
+		}
+
+		<span class="enscript-keyword">if</span> (xfsize &gt; SENDFILE_MAX_BYTES)
+			xfsize = SENDFILE_MAX_BYTES;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (xfsize &gt; PAGE_SIZE)
+			xfsize = trunc_page(xfsize);
+		pgoff = off &amp; PAGE_MASK_64;
+		<span class="enscript-keyword">if</span> (pgoff &gt; 0 &amp;&amp; PAGE_SIZE - pgoff &lt; xfsize)
+			xfsize = PAGE_SIZE_64 - pgoff;
+		<span class="enscript-keyword">if</span> (nbytes &amp;&amp; xfsize &gt; (nbytes - sbytes))
+			xfsize = nbytes - sbytes;
+		<span class="enscript-keyword">if</span> (xfsize &lt;= 0)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (off + xfsize &gt; file_size)
+			xfsize = file_size - off;
+		<span class="enscript-keyword">if</span> (xfsize &lt;= 0)
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-comment">/*
+		 * Attempt to use larger than system page-size clusters for
+		 * large writes only if there is a jumbo cluster pool and
+		 * if the socket is marked accordingly.
+		 */</span>
+		jumbocl = sosendjcl &amp;&amp; njcl &gt; 0 &amp;&amp;
+		    ((so-&gt;so_flags &amp; SOF_MULTIPAGES) || sosendjcl_ignore_capab);
+
+		socket_unlock(so, 0);
+		alloc_sendpkt(M_WAIT, xfsize, &amp;nbufs, &amp;m0, jumbocl);
+		pktlen = mbuf_pkthdr_maxlen(m0);
+		<span class="enscript-keyword">if</span> (pktlen &lt; (size_t)xfsize)
+			xfsize = pktlen;
+
+		auio = uio_createwithbuffer(nbufs, off, UIO_SYSSPACE,
+		    UIO_READ, &amp;uio_buf[0], <span class="enscript-keyword">sizeof</span> (uio_buf));
+		<span class="enscript-keyword">if</span> (auio == NULL) {
+			printf(<span class="enscript-string">&quot;sendfile failed. nbufs = %d. %s&quot;</span>, nbufs,
+				<span class="enscript-string">&quot;File a radar related to rdar://10146739.\n&quot;</span>);
+			mbuf_freem(m0);
+			error = ENXIO;
+			socket_lock(so, 0);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done3</span>;
+		}
+
+		<span class="enscript-keyword">for</span> (i = 0, m = m0, uiolen = 0;
+		    i &lt; nbufs &amp;&amp; m != NULL &amp;&amp; uiolen &lt; (size_t)xfsize;
+		    i++, m = mbuf_next(m)) {
+			size_t mlen = mbuf_maxlen(m);
+
+			<span class="enscript-keyword">if</span> (mlen + uiolen &gt; (size_t)xfsize)
+				mlen = xfsize - uiolen;
+			mbuf_setlen(m, mlen);
+			uio_addiov(auio, CAST_USER_ADDR_T(mbuf_datastart(m)),
+			    mlen);
+			uiolen += mlen;
+		}
+
+		<span class="enscript-keyword">if</span> (xfsize != uio_resid(auio))
+			printf(<span class="enscript-string">&quot;sendfile: xfsize: %lld != uio_resid(auio): &quot;</span>
+				<span class="enscript-string">&quot;%lld\n&quot;</span>, xfsize, (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)uio_resid(auio));
+
+		KERNEL_DEBUG_CONSTANT((DBG_FNC_SENDFILE_READ | DBG_FUNC_START),
+		    uap-&gt;s, (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)((xfsize &gt;&gt; 32) &amp; 0x0ffffffff),
+		    (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)(xfsize &amp; 0x0ffffffff), 0, 0);
+		error = fo_read(fp, auio, FOF_OFFSET, &amp;context);
+		socket_lock(so, 0);
+		<span class="enscript-keyword">if</span> (error != 0) {
+			<span class="enscript-keyword">if</span> (uio_resid(auio) != xfsize &amp;&amp; (error == ERESTART ||
+			    error == EINTR || error == EWOULDBLOCK)) {
+				error = 0;
+			} <span class="enscript-keyword">else</span> {
+				mbuf_freem(m0);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done3</span>;
+			}
+		}
+		xfsize -= uio_resid(auio);
+		KERNEL_DEBUG_CONSTANT((DBG_FNC_SENDFILE_READ | DBG_FUNC_END),
+		    uap-&gt;s, (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)((xfsize &gt;&gt; 32) &amp; 0x0ffffffff),
+		    (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)(xfsize &amp; 0x0ffffffff), 0, 0);
+
+		<span class="enscript-keyword">if</span> (xfsize == 0) {
+			<span class="enscript-comment">// printf(&quot;sendfile: fo_read 0 bytes, EOF\n&quot;);
+</span>			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (xfsize + off &gt; file_size)
+			printf(<span class="enscript-string">&quot;sendfile: xfsize: %lld + off: %lld &gt; file_size:&quot;</span>
+			    <span class="enscript-string">&quot;%lld\n&quot;</span>, xfsize, off, file_size);
+		<span class="enscript-keyword">for</span> (i = 0, m = m0, rlen = 0;
+		    i &lt; nbufs &amp;&amp; m != NULL &amp;&amp; rlen &lt; xfsize;
+		    i++, m = mbuf_next(m)) {
+			size_t mlen = mbuf_maxlen(m);
+
+			<span class="enscript-keyword">if</span> (rlen + mlen &gt; (size_t)xfsize)
+				mlen = xfsize - rlen;
+			mbuf_setlen(m, mlen);
+
+			rlen += mlen;
+		}
+		mbuf_pkthdr_setlen(m0, xfsize);
+
+<span class="enscript-reference">retry_space</span>:
+		<span class="enscript-comment">/*
+		 * Make sure that the socket is still able to take more data.
+		 * CANTSENDMORE being true usually means that the connection
+		 * was closed. so_error is true when an error was sensed after
+		 * a previous send.
+		 * The state is checked after the page mapping and buffer
+		 * allocation above since those operations may block and make
+		 * any socket checks stale. From this point forward, nothing
+		 * blocks before the pru_send (or more accurately, any blocking
+		 * results in a loop back to here to re-check).
+		 */</span>
+		<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_CANTSENDMORE) || so-&gt;so_error) {
+			<span class="enscript-keyword">if</span> (so-&gt;so_state &amp; SS_CANTSENDMORE) {
+				error = EPIPE;
+			} <span class="enscript-keyword">else</span> {
+				error = so-&gt;so_error;
+				so-&gt;so_error = 0;
+			}
+			m_freem(m0);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done3</span>;
+		}
+		<span class="enscript-comment">/*
+		 * Wait for socket space to become available. We do this just
+		 * after checking the connection state above in order to avoid
+		 * a race condition with sbwait().
+		 */</span>
+		<span class="enscript-keyword">if</span> (sbspace(&amp;so-&gt;so_snd) &lt; (<span class="enscript-type">long</span>)so-&gt;so_snd.sb_lowat) {
+			<span class="enscript-keyword">if</span> (so-&gt;so_state &amp; SS_NBIO) {
+				m_freem(m0);
+				error = EAGAIN;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done3</span>;
+			}
+			KERNEL_DEBUG_CONSTANT((DBG_FNC_SENDFILE_WAIT |
+			    DBG_FUNC_START), uap-&gt;s, 0, 0, 0, 0);
+			error = sbwait(&amp;so-&gt;so_snd);
+			KERNEL_DEBUG_CONSTANT((DBG_FNC_SENDFILE_WAIT|
+			    DBG_FUNC_END), uap-&gt;s, 0, 0, 0, 0);
+			<span class="enscript-comment">/*
+			 * An error from sbwait usually indicates that we've
+			 * been interrupted by a signal. If we've sent anything
+			 * then return bytes sent, otherwise return the error.
+			 */</span>
+			<span class="enscript-keyword">if</span> (error) {
+				m_freem(m0);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done3</span>;
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry_space</span>;
+		}
+
+		<span class="enscript-type">struct</span> mbuf *control = NULL;
+		{
+			<span class="enscript-comment">/*
+			 * Socket filter processing
+			 */</span>
+
+			error = sflt_data_out(so, NULL, &amp;m0, &amp;control, 0);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">if</span> (error == EJUSTRETURN) {
+					error = 0;
+					<span class="enscript-keyword">continue</span>;
+				}
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done3</span>;
+			}
+			<span class="enscript-comment">/*
+			 * End Socket filter processing
+			 */</span>
+		}
+		KERNEL_DEBUG_CONSTANT((DBG_FNC_SENDFILE_SEND | DBG_FUNC_START),
+		    uap-&gt;s, 0, 0, 0, 0);
+		error = (*so-&gt;so_proto-&gt;pr_usrreqs-&gt;pru_send)(so, 0, m0,
+		    0, control, p);
+		KERNEL_DEBUG_CONSTANT((DBG_FNC_SENDFILE_SEND | DBG_FUNC_START),
+		    uap-&gt;s, 0, 0, 0, 0);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done3</span>;
+		}
+	}
+	sbunlock(&amp;so-&gt;so_snd, FALSE);	<span class="enscript-comment">/* will unlock socket */</span>
+	<span class="enscript-comment">/*
+	 * Send trailers. Wimp out and use writev(2).
+	 */</span>
+	<span class="enscript-keyword">if</span> (uap-&gt;hdtr != USER_ADDR_NULL &amp;&amp;
+	    user_hdtr.trailers != USER_ADDR_NULL) {
+		bzero(&amp;nuap, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> writev_args));
+		nuap.fd = uap-&gt;s;
+		nuap.iovp = user_hdtr.trailers;
+		nuap.iovcnt = user_hdtr.trl_cnt;
+		error = writev_nocancel(p, &amp;nuap, &amp;writev_retval);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done2</span>;
+		}
+		sbytes += writev_retval;
+	}
+<span class="enscript-reference">done2</span>:
+	file_drop(uap-&gt;s);
+<span class="enscript-reference">done1</span>:
+	file_drop(uap-&gt;fd);
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (uap-&gt;nbytes != USER_ADDR_NULL) {
+		<span class="enscript-comment">/* XXX this appears bogus for some early failure conditions */</span>
+		copyout(&amp;sbytes, uap-&gt;nbytes, <span class="enscript-keyword">sizeof</span> (off_t));
+	}
+	KERNEL_DEBUG_CONSTANT((DBG_FNC_SENDFILE | DBG_FUNC_END), uap-&gt;s,
+	    (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)((sbytes &gt;&gt; 32) &amp; 0x0ffffffff),
+	    (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)(sbytes &amp; 0x0ffffffff), error, 0);
+	<span class="enscript-keyword">return</span> (error);
+<span class="enscript-reference">done3</span>:
+	sbunlock(&amp;so-&gt;so_snd, FALSE);	<span class="enscript-comment">/* will unlock socket */</span>
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">done2</span>;
+}
+
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SENDFILE */</span>
+</pre>
+<hr />
+</body></html>

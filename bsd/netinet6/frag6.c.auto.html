@@ -1,0 +1,1192 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>frag6.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">frag6.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*	$FreeBSD: src/sys/netinet6/frag6.c,v 1.2.2.5 2001/07/03 11:01:50 ume Exp $	*/</span>
+<span class="enscript-comment">/*	$KAME: frag6.c,v 1.31 2001/05/17 13:45:34 jinmei Exp $	*/</span>
+
+<span class="enscript-comment">/*
+ * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the project nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/icmp6.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;dev/random/randomdev.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Define it to get a correct behavior on per-interface statistics.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IN6_IFSTAT_STRICT</span>
+
+<span class="enscript-function-name">MBUFQ_HEAD</span>(fq6_head);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">frag6_save_context</span>(<span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">frag6_scrub_context</span>(<span class="enscript-type">struct</span> mbuf *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">frag6_restore_context</span>(<span class="enscript-type">struct</span> mbuf *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">frag6_icmp6_paramprob_error</span>(<span class="enscript-type">struct</span> fq6_head *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">frag6_icmp6_timeex_error</span>(<span class="enscript-type">struct</span> fq6_head *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">frag6_enq</span>(<span class="enscript-type">struct</span> ip6asfrag *, <span class="enscript-type">struct</span> ip6asfrag *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">frag6_deq</span>(<span class="enscript-type">struct</span> ip6asfrag *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">frag6_insque</span>(<span class="enscript-type">struct</span> ip6q *, <span class="enscript-type">struct</span> ip6q *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">frag6_remque</span>(<span class="enscript-type">struct</span> ip6q *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">frag6_freef</span>(<span class="enscript-type">struct</span> ip6q *, <span class="enscript-type">struct</span> fq6_head *, <span class="enscript-type">struct</span> fq6_head *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> frag6_timeout_run;		<span class="enscript-comment">/* frag6 timer is scheduled to run */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">frag6_timeout</span>(<span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">frag6_sched_timeout</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ip6q *<span class="enscript-function-name">ip6q_alloc</span>(<span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ip6q_free</span>(<span class="enscript-type">struct</span> ip6q *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ip6q_updateparams</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ip6asfrag *<span class="enscript-function-name">ip6af_alloc</span>(<span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ip6af_free</span>(<span class="enscript-type">struct</span> ip6asfrag *);
+
+<span class="enscript-function-name">decl_lck_mtx_data</span>(<span class="enscript-type">static</span>, ip6qlock);
+<span class="enscript-type">static</span> lck_attr_t	*ip6qlock_attr;
+<span class="enscript-type">static</span> lck_grp_t	*ip6qlock_grp;
+<span class="enscript-type">static</span> lck_grp_attr_t	*ip6qlock_grp_attr;
+
+<span class="enscript-comment">/* IPv6 fragment reassembly queues (protected by ip6qlock) */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ip6q ip6q;		<span class="enscript-comment">/* ip6 reassembly queues */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> ip6_maxfragpackets;		<span class="enscript-comment">/* max packets in reass queues */</span>
+<span class="enscript-type">static</span> u_int32_t frag6_nfragpackets;	<span class="enscript-comment">/* # of packets in reass queues */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> ip6_maxfrags;		<span class="enscript-comment">/* max fragments in reass queues */</span>
+<span class="enscript-type">static</span> u_int32_t frag6_nfrags;		<span class="enscript-comment">/* # of fragments in reass queues */</span>
+<span class="enscript-type">static</span> u_int32_t ip6q_limit;		<span class="enscript-comment">/* ip6q allocation limit */</span>
+<span class="enscript-type">static</span> u_int32_t ip6q_count;		<span class="enscript-comment">/* current # of allocated ip6q's */</span>
+<span class="enscript-type">static</span> u_int32_t ip6af_limit;		<span class="enscript-comment">/* ip6asfrag allocation limit */</span>
+<span class="enscript-type">static</span> u_int32_t ip6af_count;		<span class="enscript-comment">/* current # of allocated ip6asfrag's */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> sysctl_maxfragpackets SYSCTL_HANDLER_ARGS;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> sysctl_maxfrags SYSCTL_HANDLER_ARGS;
+
+<span class="enscript-function-name">SYSCTL_DECL</span>(_net_inet6_ip6);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_net_inet6_ip6, IPV6CTL_MAXFRAGPACKETS, maxfragpackets,
+    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, &amp;ip6_maxfragpackets, 0,
+    sysctl_maxfragpackets, <span class="enscript-string">&quot;I&quot;</span>,
+    <span class="enscript-string">&quot;Maximum number of IPv6 fragment reassembly queue entries&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_UINT</span>(_net_inet6_ip6, OID_AUTO, fragpackets,
+    CTLFLAG_RD | CTLFLAG_LOCKED, &amp;frag6_nfragpackets, 0,
+    <span class="enscript-string">&quot;Current number of IPv6 fragment reassembly queue entries&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_net_inet6_ip6, IPV6CTL_MAXFRAGS, maxfrags,
+    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, &amp;ip6_maxfrags, 0,
+    sysctl_maxfrags, <span class="enscript-string">&quot;I&quot;</span>, <span class="enscript-string">&quot;Maximum number of IPv6 fragments allowed&quot;</span>);
+
+<span class="enscript-comment">/*
+ * Initialise reassembly queue and fragment identifier.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">frag6_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">/* ip6q_alloc() uses mbufs for IPv6 fragment queue structures */</span>
+	_CASSERT(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ip6q) &lt;= _MLEN);
+	<span class="enscript-comment">/* ip6af_alloc() uses mbufs for IPv6 fragment queue structures */</span>
+	_CASSERT(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ip6asfrag) &lt;= _MLEN);
+
+	<span class="enscript-comment">/* IPv6 fragment reassembly queue lock */</span>
+	ip6qlock_grp_attr  = lck_grp_attr_alloc_init();
+	ip6qlock_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;ip6qlock&quot;</span>, ip6qlock_grp_attr);
+	ip6qlock_attr = lck_attr_alloc_init();
+	lck_mtx_init(&amp;ip6qlock, ip6qlock_grp, ip6qlock_attr);
+
+	lck_mtx_lock(&amp;ip6qlock);
+	<span class="enscript-comment">/* Initialize IPv6 reassembly queue. */</span>
+	ip6q.ip6q_next = ip6q.ip6q_prev = &amp;ip6q;
+
+	<span class="enscript-comment">/* same limits as IPv4 */</span>
+	ip6_maxfragpackets = nmbclusters / 32;
+	ip6_maxfrags = ip6_maxfragpackets * 2;
+	ip6q_updateparams();
+	lck_mtx_unlock(&amp;ip6qlock);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">frag6_save_context</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> val)
+{
+	m-&gt;m_pkthdr.pkt_hdr = (<span class="enscript-type">void</span> *)(uintptr_t)val;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">frag6_scrub_context</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	m-&gt;m_pkthdr.pkt_hdr = NULL;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">frag6_restore_context</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-keyword">return</span> ((<span class="enscript-type">int</span>)m-&gt;m_pkthdr.pkt_hdr);
+}
+
+<span class="enscript-comment">/*
+ * Send any deferred ICMP param problem error messages; caller must not be
+ * holding ip6qlock and is expected to have saved the per-packet parameter
+ * value via frag6_save_context().
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">frag6_icmp6_paramprob_error</span>(<span class="enscript-type">struct</span> fq6_head *diq6)
+{
+	lck_mtx_assert(&amp;ip6qlock, LCK_MTX_ASSERT_NOTOWNED);
+
+	<span class="enscript-keyword">if</span> (!MBUFQ_EMPTY(diq6)) {
+		<span class="enscript-type">struct</span> mbuf *merr, *merr_tmp;
+		<span class="enscript-type">int</span> param;
+		MBUFQ_FOREACH_SAFE(merr, diq6, merr_tmp) {
+			MBUFQ_REMOVE(diq6, merr);
+			MBUFQ_NEXT(merr) = NULL;
+			param = frag6_restore_context(merr);
+			frag6_scrub_context(merr);
+			icmp6_error(merr, ICMP6_PARAM_PROB,
+			    ICMP6_PARAMPROB_HEADER, param);
+		}
+	}
+}
+
+<span class="enscript-comment">/*
+ * Send any deferred ICMP time exceeded error messages;
+ * caller must not be holding ip6qlock.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">frag6_icmp6_timeex_error</span>(<span class="enscript-type">struct</span> fq6_head *diq6)
+{
+	lck_mtx_assert(&amp;ip6qlock, LCK_MTX_ASSERT_NOTOWNED);
+
+	<span class="enscript-keyword">if</span> (!MBUFQ_EMPTY(diq6)) {
+		<span class="enscript-type">struct</span> mbuf *m, *m_tmp;
+		MBUFQ_FOREACH_SAFE(m, diq6, m_tmp) {
+			MBUFQ_REMOVE(diq6, m);
+			MBUFQ_NEXT(m) = NULL;
+			icmp6_error_flag(m, ICMP6_TIME_EXCEEDED,
+			    ICMP6_TIME_EXCEED_REASSEMBLY, 0, 0);
+		}
+	}
+}
+
+<span class="enscript-comment">/*
+ * In RFC2460, fragment and reassembly rule do not agree with each other,
+ * in terms of next header field handling in fragment header.
+ * While the sender will use the same value for all of the fragmented packets,
+ * receiver is suggested not to check the consistency.
+ *
+ * fragment rule (p20):
+ *	(2) A Fragment header containing:
+ *	The Next Header value that identifies the first header of
+ *	the Fragmentable Part of the original packet.
+ *		-&gt; next header field is same for all fragments
+ *
+ * reassembly rule (p21):
+ *	The Next Header field of the last header of the Unfragmentable
+ *	Part is obtained from the Next Header field of the first
+ *	fragment's Fragment header.
+ *		-&gt; should grab it from the first fragment only
+ *
+ * The following note also contradicts with fragment rule - noone is going to
+ * send different fragment with different next header field.
+ *
+ * additional note (p22):
+ *	The Next Header values in the Fragment headers of different
+ *	fragments of the same original packet may differ.  Only the value
+ *	from the Offset zero fragment packet is used for reassembly.
+ *		-&gt; should grab it from the first fragment only
+ *
+ * There is no explicit reason given in the RFC.  Historical reason maybe?
+ */</span>
+<span class="enscript-comment">/*
+ * Fragment input
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">frag6_input</span>(<span class="enscript-type">struct</span> mbuf **mp, <span class="enscript-type">int</span> *offp, <span class="enscript-type">int</span> proto)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">proto</span>)
+	<span class="enscript-type">struct</span> mbuf *m = *mp, *t;
+	<span class="enscript-type">struct</span> ip6_hdr *ip6;
+	<span class="enscript-type">struct</span> ip6_frag *ip6f;
+	<span class="enscript-type">struct</span> ip6q *q6;
+	<span class="enscript-type">struct</span> ip6asfrag *af6, *ip6af, *af6dwn;
+	<span class="enscript-type">int</span> offset = *offp, nxt, i, next;
+	<span class="enscript-type">int</span> first_frag = 0;
+	<span class="enscript-type">int</span> fragoff, frgpartlen;	<span class="enscript-comment">/* must be larger than u_int16_t */</span>
+	<span class="enscript-type">struct</span> ifnet *dstifp = NULL;
+	u_int8_t ecn, ecn0;
+	uint32_t csum, csum_flags;
+	<span class="enscript-type">struct</span> fq6_head diq6;
+	<span class="enscript-type">int</span> locked = 0;
+
+	VERIFY(m-&gt;m_flags &amp; M_PKTHDR);
+
+	MBUFQ_INIT(&amp;diq6);	<span class="enscript-comment">/* for deferred ICMP param problem errors */</span>
+
+	<span class="enscript-comment">/* Expect 32-bit aligned data pointer on strict-align platforms */</span>
+	MBUF_STRICT_DATA_ALIGNMENT_CHECK_32(m);
+
+	ip6 = mtod(m, <span class="enscript-type">struct</span> ip6_hdr *);
+	IP6_EXTHDR_CHECK(m, offset, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_frag), <span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>);
+	ip6f = (<span class="enscript-type">struct</span> ip6_frag *)((caddr_t)ip6 + offset);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IN6_IFSTAT_STRICT</span>
+	<span class="enscript-comment">/* find the destination interface of the packet. */</span>
+	<span class="enscript-keyword">if</span> (m-&gt;m_pkthdr.pkt_flags &amp; PKTF_IFAINFO) {
+		uint32_t idx;
+
+		<span class="enscript-keyword">if</span> (ip6_getdstifaddr_info(m, &amp;idx, NULL) == 0) {
+			<span class="enscript-keyword">if</span> (idx &gt; 0 &amp;&amp; idx &lt;= if_index) {
+				ifnet_head_lock_shared();
+				dstifp = ifindex2ifnet[idx];
+				ifnet_head_done();
+			}
+		}
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IN6_IFSTAT_STRICT */</span>
+
+	<span class="enscript-comment">/* we are violating the spec, this may not be the dst interface */</span>
+	<span class="enscript-keyword">if</span> (dstifp == NULL)
+		dstifp = m-&gt;m_pkthdr.rcvif;
+
+	<span class="enscript-comment">/* jumbo payload can't contain a fragment header */</span>
+	<span class="enscript-keyword">if</span> (ip6-&gt;ip6_plen == 0) {
+		icmp6_error(m, ICMP6_PARAM_PROB, ICMP6_PARAMPROB_HEADER, offset);
+		in6_ifstat_inc(dstifp, ifs6_reass_fail);
+		m = NULL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * check whether fragment packet's fragment length is
+	 * multiple of 8 octets.
+	 * sizeof(struct ip6_frag) == 8
+	 * sizeof(struct ip6_hdr) = 40
+	 */</span>
+	<span class="enscript-keyword">if</span> ((ip6f-&gt;ip6f_offlg &amp; IP6F_MORE_FRAG) &amp;&amp;
+	    (((ntohs(ip6-&gt;ip6_plen) - offset) &amp; 0x7) != 0)) {
+		icmp6_error(m, ICMP6_PARAM_PROB, ICMP6_PARAMPROB_HEADER,
+		    offsetof(<span class="enscript-type">struct</span> ip6_hdr, ip6_plen));
+		in6_ifstat_inc(dstifp, ifs6_reass_fail);
+		m = NULL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* If ip6_maxfragpackets or ip6_maxfrags is 0, never accept fragments */</span>
+	<span class="enscript-keyword">if</span> (ip6_maxfragpackets == 0 || ip6_maxfrags == 0) {
+		ip6stat.ip6s_fragments++;
+		ip6stat.ip6s_fragdropped++;
+		in6_ifstat_inc(dstifp, ifs6_reass_fail);
+		m_freem(m);
+		m = NULL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* offset now points to data portion */</span>
+	offset += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_frag);
+
+	<span class="enscript-comment">/*
+	 * Leverage partial checksum offload for simple UDP/IP fragments,
+	 * as that is the most common case.
+	 *
+	 * Perform 1's complement adjustment of octets that got included/
+	 * excluded in the hardware-calculated checksum value.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ip6f-&gt;ip6f_nxt == IPPROTO_UDP &amp;&amp;
+	    offset == (<span class="enscript-keyword">sizeof</span> (*ip6) + <span class="enscript-keyword">sizeof</span> (*ip6f)) &amp;&amp;
+	    (m-&gt;m_pkthdr.csum_flags &amp;
+	    (CSUM_DATA_VALID | CSUM_PARTIAL | CSUM_PSEUDO_HDR)) ==
+	    (CSUM_DATA_VALID | CSUM_PARTIAL)) {
+		uint32_t start;
+
+		start = m-&gt;m_pkthdr.csum_rx_start;
+		csum = m-&gt;m_pkthdr.csum_rx_val;
+
+		<span class="enscript-keyword">if</span> (start != offset) {
+			uint16_t s, d;
+
+			<span class="enscript-keyword">if</span> (IN6_IS_SCOPE_EMBED(&amp;ip6-&gt;ip6_src)) {
+				s = ip6-&gt;ip6_src.s6_addr16[1];
+				ip6-&gt;ip6_src.s6_addr16[1] = 0 ;
+			}
+			<span class="enscript-keyword">if</span> (IN6_IS_SCOPE_EMBED(&amp;ip6-&gt;ip6_dst)) {
+				d = ip6-&gt;ip6_dst.s6_addr16[1];
+				ip6-&gt;ip6_dst.s6_addr16[1] = 0;
+			}
+
+			<span class="enscript-comment">/* callee folds in sum */</span>
+			csum = m_adj_sum16(m, start, offset, csum);
+
+			<span class="enscript-keyword">if</span> (IN6_IS_SCOPE_EMBED(&amp;ip6-&gt;ip6_src))
+				ip6-&gt;ip6_src.s6_addr16[1] = s;
+			<span class="enscript-keyword">if</span> (IN6_IS_SCOPE_EMBED(&amp;ip6-&gt;ip6_dst))
+				ip6-&gt;ip6_dst.s6_addr16[1] = d;
+
+		}
+		csum_flags = m-&gt;m_pkthdr.csum_flags;
+	} <span class="enscript-keyword">else</span> {
+		csum = 0;
+		csum_flags = 0;
+	}
+
+	<span class="enscript-comment">/* Invalidate checksum */</span>
+	m-&gt;m_pkthdr.csum_flags &amp;= ~CSUM_DATA_VALID;
+
+	ip6stat.ip6s_fragments++;
+	in6_ifstat_inc(dstifp, ifs6_reass_reqd);
+
+	lck_mtx_lock(&amp;ip6qlock);
+	locked = 1;
+
+	<span class="enscript-keyword">for</span> (q6 = ip6q.ip6q_next; q6 != &amp;ip6q; q6 = q6-&gt;ip6q_next)
+		<span class="enscript-keyword">if</span> (ip6f-&gt;ip6f_ident == q6-&gt;ip6q_ident &amp;&amp;
+		    IN6_ARE_ADDR_EQUAL(&amp;ip6-&gt;ip6_src, &amp;q6-&gt;ip6q_src) &amp;&amp;
+		    IN6_ARE_ADDR_EQUAL(&amp;ip6-&gt;ip6_dst, &amp;q6-&gt;ip6q_dst))
+			<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">if</span> (q6 == &amp;ip6q) {
+		<span class="enscript-comment">/*
+		 * the first fragment to arrive, create a reassembly queue.
+		 */</span>
+		first_frag = 1;
+
+		q6 = ip6q_alloc(M_DONTWAIT);
+		<span class="enscript-keyword">if</span> (q6 == NULL)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">dropfrag</span>;
+
+		frag6_insque(q6, &amp;ip6q);
+		frag6_nfragpackets++;
+
+		<span class="enscript-comment">/* ip6q_nxt will be filled afterwards, from 1st fragment */</span>
+		q6-&gt;ip6q_down	= q6-&gt;ip6q_up = (<span class="enscript-type">struct</span> ip6asfrag *)q6;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">notyet</span>
+		q6-&gt;ip6q_nxtp	= (u_char *)nxtp;
+#<span class="enscript-reference">endif</span>
+		q6-&gt;ip6q_ident	= ip6f-&gt;ip6f_ident;
+		q6-&gt;ip6q_ttl	= IPV6_FRAGTTL;
+		q6-&gt;ip6q_src	= ip6-&gt;ip6_src;
+		q6-&gt;ip6q_dst	= ip6-&gt;ip6_dst;
+		q6-&gt;ip6q_ecn	=
+		    (ntohl(ip6-&gt;ip6_flow) &gt;&gt; 20) &amp; IPTOS_ECN_MASK;
+		q6-&gt;ip6q_unfrglen = -1;	<span class="enscript-comment">/* The 1st fragment has not arrived. */</span>
+
+		q6-&gt;ip6q_nfrag = 0;
+
+		<span class="enscript-comment">/*
+		 * If the first fragment has valid checksum offload
+		 * info, the rest of fragments are eligible as well.
+		 */</span>
+		<span class="enscript-keyword">if</span> (csum_flags != 0) {
+			q6-&gt;ip6q_csum = csum;
+			q6-&gt;ip6q_csum_flags = csum_flags;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * If it's the 1st fragment, record the length of the
+	 * unfragmentable part and the next header of the fragment header.
+	 */</span>
+	fragoff = ntohs(ip6f-&gt;ip6f_offlg &amp; IP6F_OFF_MASK);
+	<span class="enscript-keyword">if</span> (fragoff == 0) {
+		q6-&gt;ip6q_unfrglen = offset - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_hdr) -
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_frag);
+		q6-&gt;ip6q_nxt = ip6f-&gt;ip6f_nxt;
+	}
+
+	<span class="enscript-comment">/*
+	 * Check that the reassembled packet would not exceed 65535 bytes
+	 * in size.
+	 * If it would exceed, discard the fragment and return an ICMP error.
+	 */</span>
+	frgpartlen = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_hdr) + ntohs(ip6-&gt;ip6_plen) - offset;
+	<span class="enscript-keyword">if</span> (q6-&gt;ip6q_unfrglen &gt;= 0) {
+		<span class="enscript-comment">/* The 1st fragment has already arrived. */</span>
+		<span class="enscript-keyword">if</span> (q6-&gt;ip6q_unfrglen + fragoff + frgpartlen &gt; IPV6_MAXPACKET) {
+			lck_mtx_unlock(&amp;ip6qlock);
+			locked = 0;
+			icmp6_error(m, ICMP6_PARAM_PROB, ICMP6_PARAMPROB_HEADER,
+			    offset - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_frag) +
+			    offsetof(<span class="enscript-type">struct</span> ip6_frag, ip6f_offlg));
+			m = NULL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (fragoff + frgpartlen &gt; IPV6_MAXPACKET) {
+		lck_mtx_unlock(&amp;ip6qlock);
+		locked = 0;
+		icmp6_error(m, ICMP6_PARAM_PROB, ICMP6_PARAMPROB_HEADER,
+		    offset - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_frag) +
+		    offsetof(<span class="enscript-type">struct</span> ip6_frag, ip6f_offlg));
+		m = NULL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-comment">/*
+	 * If it's the first fragment, do the above check for each
+	 * fragment already stored in the reassembly queue.
+	 */</span>
+	<span class="enscript-keyword">if</span> (fragoff == 0) {
+		<span class="enscript-keyword">for</span> (af6 = q6-&gt;ip6q_down; af6 != (<span class="enscript-type">struct</span> ip6asfrag *)q6;
+		     af6 = af6dwn) {
+			af6dwn = af6-&gt;ip6af_down;
+
+			<span class="enscript-keyword">if</span> (q6-&gt;ip6q_unfrglen + af6-&gt;ip6af_off + af6-&gt;ip6af_frglen &gt;
+			    IPV6_MAXPACKET) {
+				<span class="enscript-type">struct</span> mbuf *merr = IP6_REASS_MBUF(af6);
+				<span class="enscript-type">struct</span> ip6_hdr *ip6err;
+				<span class="enscript-type">int</span> erroff = af6-&gt;ip6af_offset;
+
+				<span class="enscript-comment">/* dequeue the fragment. */</span>
+				frag6_deq(af6);
+				ip6af_free(af6);
+
+				<span class="enscript-comment">/* adjust pointer. */</span>
+				ip6err = mtod(merr, <span class="enscript-type">struct</span> ip6_hdr *);
+
+				<span class="enscript-comment">/*
+				 * Restore source and destination addresses
+				 * in the erroneous IPv6 header.
+				 */</span>
+				ip6err-&gt;ip6_src = q6-&gt;ip6q_src;
+				ip6err-&gt;ip6_dst = q6-&gt;ip6q_dst;
+
+				frag6_save_context(merr,
+				    erroff - <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ip6_frag) +
+				    offsetof(<span class="enscript-type">struct</span> ip6_frag, ip6f_offlg));
+
+				MBUFQ_ENQUEUE(&amp;diq6, merr);
+			}
+		}
+	}
+
+	ip6af = ip6af_alloc(M_DONTWAIT);
+	<span class="enscript-keyword">if</span> (ip6af == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">dropfrag</span>;
+
+	ip6af-&gt;ip6af_mff = ip6f-&gt;ip6f_offlg &amp; IP6F_MORE_FRAG;
+	ip6af-&gt;ip6af_off = fragoff;
+	ip6af-&gt;ip6af_frglen = frgpartlen;
+	ip6af-&gt;ip6af_offset = offset;
+	IP6_REASS_MBUF(ip6af) = m;
+
+	<span class="enscript-keyword">if</span> (first_frag) {
+		af6 = (<span class="enscript-type">struct</span> ip6asfrag *)q6;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">insert</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Handle ECN by comparing this segment with the first one;
+	 * if CE is set, do not lose CE.
+	 * drop if CE and not-ECT are mixed for the same packet.
+	 */</span>
+	ecn = (ntohl(ip6-&gt;ip6_flow) &gt;&gt; 20) &amp; IPTOS_ECN_MASK;
+	ecn0 = q6-&gt;ip6q_ecn;
+	<span class="enscript-keyword">if</span> (ecn == IPTOS_ECN_CE) {
+		<span class="enscript-keyword">if</span> (ecn0 == IPTOS_ECN_NOTECT) {
+			ip6af_free(ip6af);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">dropfrag</span>;
+		}
+		<span class="enscript-keyword">if</span> (ecn0 != IPTOS_ECN_CE)
+			q6-&gt;ip6q_ecn = IPTOS_ECN_CE;
+	}
+	<span class="enscript-keyword">if</span> (ecn == IPTOS_ECN_NOTECT &amp;&amp; ecn0 != IPTOS_ECN_NOTECT) {
+		ip6af_free(ip6af);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">dropfrag</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Find a segment which begins after this one does.
+	 */</span>
+	<span class="enscript-keyword">for</span> (af6 = q6-&gt;ip6q_down; af6 != (<span class="enscript-type">struct</span> ip6asfrag *)q6;
+	     af6 = af6-&gt;ip6af_down)
+		<span class="enscript-keyword">if</span> (af6-&gt;ip6af_off &gt; ip6af-&gt;ip6af_off)
+			<span class="enscript-keyword">break</span>;
+
+#<span class="enscript-reference">if</span> 0
+	<span class="enscript-comment">/*
+	 * If there is a preceding segment, it may provide some of
+	 * our data already.  If so, drop the data from the incoming
+	 * segment.  If it provides all of our data, drop us.
+	 *
+	 * If some of the data is dropped from the preceding
+	 * segment, then it's checksum is invalidated.
+	 */</span>
+	<span class="enscript-keyword">if</span> (af6-&gt;ip6af_up != (<span class="enscript-type">struct</span> ip6asfrag *)q6) {
+		i = af6-&gt;ip6af_up-&gt;ip6af_off + af6-&gt;ip6af_up-&gt;ip6af_frglen
+			- ip6af-&gt;ip6af_off;
+		<span class="enscript-keyword">if</span> (i &gt; 0) {
+			<span class="enscript-keyword">if</span> (i &gt;= ip6af-&gt;ip6af_frglen)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">dropfrag</span>;
+			m_adj(IP6_REASS_MBUF(ip6af), i);
+			q6-&gt;ip6q_csum_flags = 0;
+			ip6af-&gt;ip6af_off += i;
+			ip6af-&gt;ip6af_frglen -= i;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * While we overlap succeeding segments trim them or,
+	 * if they are completely covered, dequeue them.
+	 */</span>
+	<span class="enscript-keyword">while</span> (af6 != (<span class="enscript-type">struct</span> ip6asfrag *)q6 &amp;&amp;
+	       ip6af-&gt;ip6af_off + ip6af-&gt;ip6af_frglen &gt; af6-&gt;ip6af_off) {
+		i = (ip6af-&gt;ip6af_off + ip6af-&gt;ip6af_frglen) - af6-&gt;ip6af_off;
+		<span class="enscript-keyword">if</span> (i &lt; af6-&gt;ip6af_frglen) {
+			af6-&gt;ip6af_frglen -= i;
+			af6-&gt;ip6af_off += i;
+			m_adj(IP6_REASS_MBUF(af6), i);
+			q6-&gt;ip6q_csum_flags = 0;
+			<span class="enscript-keyword">break</span>;
+		}
+		af6 = af6-&gt;ip6af_down;
+		m_freem(IP6_REASS_MBUF(af6-&gt;ip6af_up));
+		frag6_deq(af6-&gt;ip6af_up);
+	}
+#<span class="enscript-reference">else</span>
+	<span class="enscript-comment">/*
+	 * If the incoming framgent overlaps some existing fragments in
+	 * the reassembly queue, drop it, since it is dangerous to override
+	 * existing fragments from a security point of view.
+	 * We don't know which fragment is the bad guy - here we trust
+	 * fragment that came in earlier, with no real reason.
+	 *
+	 * Note: due to changes after disabling this part, mbuf passed to
+	 * m_adj() below now does not meet the requirement.
+	 */</span>
+	<span class="enscript-keyword">if</span> (af6-&gt;ip6af_up != (<span class="enscript-type">struct</span> ip6asfrag *)q6) {
+		i = af6-&gt;ip6af_up-&gt;ip6af_off + af6-&gt;ip6af_up-&gt;ip6af_frglen
+			- ip6af-&gt;ip6af_off;
+		<span class="enscript-keyword">if</span> (i &gt; 0) {
+#<span class="enscript-reference">if</span> 0				<span class="enscript-comment">/* suppress the noisy log */</span>
+			log(LOG_ERR, <span class="enscript-string">&quot;%d bytes of a fragment from %s &quot;</span>
+			    <span class="enscript-string">&quot;overlaps the previous fragment\n&quot;</span>,
+			    i, ip6_sprintf(&amp;q6-&gt;ip6q_src));
+#<span class="enscript-reference">endif</span>
+			ip6af_free(ip6af);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">dropfrag</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (af6 != (<span class="enscript-type">struct</span> ip6asfrag *)q6) {
+		i = (ip6af-&gt;ip6af_off + ip6af-&gt;ip6af_frglen) - af6-&gt;ip6af_off;
+		<span class="enscript-keyword">if</span> (i &gt; 0) {
+#<span class="enscript-reference">if</span> 0				<span class="enscript-comment">/* suppress the noisy log */</span>
+			log(LOG_ERR, <span class="enscript-string">&quot;%d bytes of a fragment from %s &quot;</span>
+			    <span class="enscript-string">&quot;overlaps the succeeding fragment&quot;</span>,
+			    i, ip6_sprintf(&amp;q6-&gt;ip6q_src));
+#<span class="enscript-reference">endif</span>
+			ip6af_free(ip6af);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">dropfrag</span>;
+		}
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * If this fragment contains similar checksum offload info
+	 * as that of the existing ones, accumulate checksum.  Otherwise,
+	 * invalidate checksum offload info for the entire datagram.
+	 */</span>
+	<span class="enscript-keyword">if</span> (csum_flags != 0 &amp;&amp; csum_flags == q6-&gt;ip6q_csum_flags)
+		q6-&gt;ip6q_csum += csum;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (q6-&gt;ip6q_csum_flags != 0)
+		q6-&gt;ip6q_csum_flags = 0;
+
+<span class="enscript-reference">insert</span>:
+
+	<span class="enscript-comment">/*
+	 * Stick new segment in its place;
+	 * check for complete reassembly.
+	 * Move to front of packet queue, as we are
+	 * the most recently active fragmented packet.
+	 */</span>
+	frag6_enq(ip6af, af6-&gt;ip6af_up);
+	frag6_nfrags++;
+	q6-&gt;ip6q_nfrag++;
+#<span class="enscript-reference">if</span> 0 <span class="enscript-comment">/* xxx */</span>
+	<span class="enscript-keyword">if</span> (q6 != ip6q.ip6q_next) {
+		frag6_remque(q6);
+		frag6_insque(q6, &amp;ip6q);
+	}
+#<span class="enscript-reference">endif</span>
+	next = 0;
+	<span class="enscript-keyword">for</span> (af6 = q6-&gt;ip6q_down; af6 != (<span class="enscript-type">struct</span> ip6asfrag *)q6;
+	     af6 = af6-&gt;ip6af_down) {
+		<span class="enscript-keyword">if</span> (af6-&gt;ip6af_off != next) {
+			lck_mtx_unlock(&amp;ip6qlock);
+			locked = 0;
+			m = NULL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		next += af6-&gt;ip6af_frglen;
+	}
+	<span class="enscript-keyword">if</span> (af6-&gt;ip6af_up-&gt;ip6af_mff) {
+		lck_mtx_unlock(&amp;ip6qlock);
+		locked = 0;
+		m = NULL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Reassembly is complete; concatenate fragments.
+	 */</span>
+	ip6af = q6-&gt;ip6q_down;
+	t = m = IP6_REASS_MBUF(ip6af);
+	af6 = ip6af-&gt;ip6af_down;
+	frag6_deq(ip6af);
+	<span class="enscript-keyword">while</span> (af6 != (<span class="enscript-type">struct</span> ip6asfrag *)q6) {
+		af6dwn = af6-&gt;ip6af_down;
+		frag6_deq(af6);
+		<span class="enscript-keyword">while</span> (t-&gt;m_next)
+			t = t-&gt;m_next;
+		t-&gt;m_next = IP6_REASS_MBUF(af6);
+		m_adj(t-&gt;m_next, af6-&gt;ip6af_offset);
+		ip6af_free(af6);
+		af6 = af6dwn;
+	}
+
+	<span class="enscript-comment">/*
+	 * Store partial hardware checksum info from the fragment queue;
+	 * the receive start offset is set to 40 bytes (see code at the
+	 * top of this routine.)
+	 */</span>
+	<span class="enscript-keyword">if</span> (q6-&gt;ip6q_csum_flags != 0) {
+		csum = q6-&gt;ip6q_csum;
+
+		ADDCARRY(csum);
+
+		m-&gt;m_pkthdr.csum_rx_val = csum;
+		m-&gt;m_pkthdr.csum_rx_start = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ip6_hdr);
+		m-&gt;m_pkthdr.csum_flags = q6-&gt;ip6q_csum_flags;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((m-&gt;m_pkthdr.rcvif-&gt;if_flags &amp; IFF_LOOPBACK) ||
+	    (m-&gt;m_pkthdr.pkt_flags &amp; PKTF_LOOP)) {
+		<span class="enscript-comment">/* loopback checksums are always OK */</span>
+		m-&gt;m_pkthdr.csum_data = 0xffff;
+		m-&gt;m_pkthdr.csum_flags &amp;= ~CSUM_PARTIAL;
+		m-&gt;m_pkthdr.csum_flags = CSUM_DATA_VALID | CSUM_PSEUDO_HDR;
+	}
+
+	<span class="enscript-comment">/* adjust offset to point where the original next header starts */</span>
+	offset = ip6af-&gt;ip6af_offset - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_frag);
+	ip6af_free(ip6af);
+	ip6 = mtod(m, <span class="enscript-type">struct</span> ip6_hdr *);
+	ip6-&gt;ip6_plen = htons((u_short)next + offset - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_hdr));
+	ip6-&gt;ip6_src = q6-&gt;ip6q_src;
+	ip6-&gt;ip6_dst = q6-&gt;ip6q_dst;
+	<span class="enscript-keyword">if</span> (q6-&gt;ip6q_ecn == IPTOS_ECN_CE)
+		ip6-&gt;ip6_flow |= htonl(IPTOS_ECN_CE &lt;&lt; 20);
+
+	nxt = q6-&gt;ip6q_nxt;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">notyet</span>
+	*q6-&gt;ip6q_nxtp = (u_char)(nxt &amp; 0xff);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* Delete frag6 header */</span>
+	<span class="enscript-keyword">if</span> (m-&gt;m_len &gt;= offset + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_frag)) {
+		<span class="enscript-comment">/* This is the only possible case with !PULLDOWN_TEST */</span>
+		ovbcopy((caddr_t)ip6, (caddr_t)ip6 + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_frag),
+		    offset);
+		m-&gt;m_data += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_frag);
+		m-&gt;m_len -= <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_frag);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* this comes with no copy if the boundary is on cluster */</span>
+		<span class="enscript-keyword">if</span> ((t = m_split(m, offset, M_DONTWAIT)) == NULL) {
+			frag6_remque(q6);
+			frag6_nfragpackets--;
+			frag6_nfrags -= q6-&gt;ip6q_nfrag;
+			ip6q_free(q6);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">dropfrag</span>;
+		}
+		m_adj(t, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_frag));
+		m_cat(m, t);
+	}
+
+	<span class="enscript-comment">/*
+	 * Store NXT to the original.
+	 */</span>
+	{
+		<span class="enscript-type">char</span> *prvnxtp = ip6_get_prevhdr(m, offset); <span class="enscript-comment">/* XXX */</span>
+		*prvnxtp = nxt;
+	}
+
+	frag6_remque(q6);
+	frag6_nfragpackets--;
+	frag6_nfrags -= q6-&gt;ip6q_nfrag;
+	ip6q_free(q6);
+
+	<span class="enscript-keyword">if</span> (m-&gt;m_flags &amp; M_PKTHDR)	<span class="enscript-comment">/* Isn't it always true? */</span>
+		m_fixhdr(m);
+
+	ip6stat.ip6s_reassembled++;
+
+	<span class="enscript-comment">/*
+	 * Tell launch routine the next header
+	 */</span>
+	*mp = m;
+	*offp = offset;
+
+	<span class="enscript-comment">/* arm the purge timer if not already and if there's work to do */</span>
+	frag6_sched_timeout();
+	lck_mtx_unlock(&amp;ip6qlock);
+	in6_ifstat_inc(dstifp, ifs6_reass_ok);
+	frag6_icmp6_paramprob_error(&amp;diq6);
+	VERIFY(MBUFQ_EMPTY(&amp;diq6));
+	<span class="enscript-keyword">return</span> (nxt);
+
+<span class="enscript-reference">done</span>:
+	VERIFY(m == NULL);
+	<span class="enscript-keyword">if</span> (!locked) {
+		<span class="enscript-keyword">if</span> (frag6_nfragpackets == 0) {
+			frag6_icmp6_paramprob_error(&amp;diq6);
+			VERIFY(MBUFQ_EMPTY(&amp;diq6));
+			<span class="enscript-keyword">return</span> (IPPROTO_DONE);
+		}
+		lck_mtx_lock(&amp;ip6qlock);
+	}
+	<span class="enscript-comment">/* arm the purge timer if not already and if there's work to do */</span>
+	frag6_sched_timeout();
+	lck_mtx_unlock(&amp;ip6qlock);
+	frag6_icmp6_paramprob_error(&amp;diq6);
+	VERIFY(MBUFQ_EMPTY(&amp;diq6));
+	<span class="enscript-keyword">return</span> (IPPROTO_DONE);
+
+<span class="enscript-reference">dropfrag</span>:
+	ip6stat.ip6s_fragdropped++;
+	<span class="enscript-comment">/* arm the purge timer if not already and if there's work to do */</span>
+	frag6_sched_timeout();
+	lck_mtx_unlock(&amp;ip6qlock);
+	in6_ifstat_inc(dstifp, ifs6_reass_fail);
+	m_freem(m);
+	frag6_icmp6_paramprob_error(&amp;diq6);
+	VERIFY(MBUFQ_EMPTY(&amp;diq6));
+	<span class="enscript-keyword">return</span> (IPPROTO_DONE);
+}
+
+<span class="enscript-comment">/*
+ * Free a fragment reassembly header and all
+ * associated datagrams.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">frag6_freef</span>(<span class="enscript-type">struct</span> ip6q *q6, <span class="enscript-type">struct</span> fq6_head *dfq6, <span class="enscript-type">struct</span> fq6_head *diq6)
+{
+	<span class="enscript-type">struct</span> ip6asfrag *af6, *down6;
+
+	lck_mtx_assert(&amp;ip6qlock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">for</span> (af6 = q6-&gt;ip6q_down; af6 != (<span class="enscript-type">struct</span> ip6asfrag *)q6;
+	     af6 = down6) {
+		<span class="enscript-type">struct</span> mbuf *m = IP6_REASS_MBUF(af6);
+
+		down6 = af6-&gt;ip6af_down;
+		frag6_deq(af6);
+
+		<span class="enscript-comment">/*
+		 * Return ICMP time exceeded error for the 1st fragment.
+		 * Just free other fragments.
+		 */</span>
+		<span class="enscript-keyword">if</span> (af6-&gt;ip6af_off == 0) {
+			<span class="enscript-type">struct</span> ip6_hdr *ip6;
+
+			<span class="enscript-comment">/* adjust pointer */</span>
+			ip6 = mtod(m, <span class="enscript-type">struct</span> ip6_hdr *);
+
+			<span class="enscript-comment">/* restore source and destination addresses */</span>
+			ip6-&gt;ip6_src = q6-&gt;ip6q_src;
+			ip6-&gt;ip6_dst = q6-&gt;ip6q_dst;
+
+			MBUFQ_ENQUEUE(diq6, m);
+		} <span class="enscript-keyword">else</span> {
+			MBUFQ_ENQUEUE(dfq6, m);
+		}
+		ip6af_free(af6);
+
+	}
+	frag6_remque(q6);
+	frag6_nfragpackets--;
+	frag6_nfrags -= q6-&gt;ip6q_nfrag;
+	ip6q_free(q6);
+}
+
+<span class="enscript-comment">/*
+ * Put an ip fragment on a reassembly chain.
+ * Like insque, but pointers in middle of structure.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">frag6_enq</span>(<span class="enscript-type">struct</span> ip6asfrag *af6, <span class="enscript-type">struct</span> ip6asfrag *up6)
+{
+	lck_mtx_assert(&amp;ip6qlock, LCK_MTX_ASSERT_OWNED);
+
+	af6-&gt;ip6af_up = up6;
+	af6-&gt;ip6af_down = up6-&gt;ip6af_down;
+	up6-&gt;ip6af_down-&gt;ip6af_up = af6;
+	up6-&gt;ip6af_down = af6;
+}
+
+<span class="enscript-comment">/*
+ * To frag6_enq as remque is to insque.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">frag6_deq</span>(<span class="enscript-type">struct</span> ip6asfrag *af6)
+{
+	lck_mtx_assert(&amp;ip6qlock, LCK_MTX_ASSERT_OWNED);
+
+	af6-&gt;ip6af_up-&gt;ip6af_down = af6-&gt;ip6af_down;
+	af6-&gt;ip6af_down-&gt;ip6af_up = af6-&gt;ip6af_up;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">frag6_insque</span>(<span class="enscript-type">struct</span> ip6q *new, <span class="enscript-type">struct</span> ip6q *old)
+{
+	lck_mtx_assert(&amp;ip6qlock, LCK_MTX_ASSERT_OWNED);
+
+	new-&gt;ip6q_prev = old;
+	new-&gt;ip6q_next = old-&gt;ip6q_next;
+	old-&gt;ip6q_next-&gt;ip6q_prev= new;
+	old-&gt;ip6q_next = new;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">frag6_remque</span>(<span class="enscript-type">struct</span> ip6q *p6)
+{
+	lck_mtx_assert(&amp;ip6qlock, LCK_MTX_ASSERT_OWNED);
+
+	p6-&gt;ip6q_prev-&gt;ip6q_next = p6-&gt;ip6q_next;
+	p6-&gt;ip6q_next-&gt;ip6q_prev = p6-&gt;ip6q_prev;
+}
+
+<span class="enscript-comment">/*
+ * IPv6 reassembling timer processing;
+ * if a timer expires on a reassembly
+ * queue, discard it.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">frag6_timeout</span>(<span class="enscript-type">void</span> *arg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>)
+	<span class="enscript-type">struct</span> fq6_head dfq6, diq6;
+	<span class="enscript-type">struct</span> ip6q *q6;
+
+	MBUFQ_INIT(&amp;dfq6);	<span class="enscript-comment">/* for deferred frees */</span>
+	MBUFQ_INIT(&amp;diq6);	<span class="enscript-comment">/* for deferred ICMP time exceeded errors */</span>
+
+	<span class="enscript-comment">/*
+	 * Update coarse-grained networking timestamp (in sec.); the idea
+	 * is to piggy-back on the timeout callout to update the counter
+	 * returnable via net_uptime().
+	 */</span>
+	net_update_uptime();
+
+	lck_mtx_lock(&amp;ip6qlock);
+	q6 = ip6q.ip6q_next;
+	<span class="enscript-keyword">if</span> (q6)
+		<span class="enscript-keyword">while</span> (q6 != &amp;ip6q) {
+			--q6-&gt;ip6q_ttl;
+			q6 = q6-&gt;ip6q_next;
+			<span class="enscript-keyword">if</span> (q6-&gt;ip6q_prev-&gt;ip6q_ttl == 0) {
+				ip6stat.ip6s_fragtimeout++;
+				<span class="enscript-comment">/* XXX in6_ifstat_inc(ifp, ifs6_reass_fail) */</span>
+				frag6_freef(q6-&gt;ip6q_prev, &amp;dfq6, &amp;diq6);
+			}
+		}
+	<span class="enscript-comment">/*
+	 * If we are over the maximum number of fragments
+	 * (due to the limit being lowered), drain off
+	 * enough to get down to the new limit.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ip6_maxfragpackets &gt;= 0) {
+		<span class="enscript-keyword">while</span> (frag6_nfragpackets &gt; (<span class="enscript-type">unsigned</span>)ip6_maxfragpackets &amp;&amp;
+		    ip6q.ip6q_prev) {
+			ip6stat.ip6s_fragoverflow++;
+			<span class="enscript-comment">/* XXX in6_ifstat_inc(ifp, ifs6_reass_fail) */</span>
+			frag6_freef(ip6q.ip6q_prev, &amp;dfq6, &amp;diq6);
+		}
+	}
+	<span class="enscript-comment">/* re-arm the purge timer if there's work to do */</span>
+	frag6_timeout_run = 0;
+	frag6_sched_timeout();
+	lck_mtx_unlock(&amp;ip6qlock);
+
+	<span class="enscript-comment">/* free fragments that need to be freed */</span>
+	<span class="enscript-keyword">if</span> (!MBUFQ_EMPTY(&amp;dfq6))
+		MBUFQ_DRAIN(&amp;dfq6);
+
+	frag6_icmp6_timeex_error(&amp;diq6);
+
+	VERIFY(MBUFQ_EMPTY(&amp;dfq6));
+	VERIFY(MBUFQ_EMPTY(&amp;diq6));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">frag6_sched_timeout</span>(<span class="enscript-type">void</span>)
+{
+	lck_mtx_assert(&amp;ip6qlock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (!frag6_timeout_run &amp;&amp; frag6_nfragpackets &gt; 0) {
+		frag6_timeout_run = 1;
+		timeout(frag6_timeout, NULL, hz);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Drain off all datagram fragments.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">frag6_drain</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> fq6_head dfq6, diq6;
+
+	MBUFQ_INIT(&amp;dfq6);	<span class="enscript-comment">/* for deferred frees */</span>
+	MBUFQ_INIT(&amp;diq6);	<span class="enscript-comment">/* for deferred ICMP time exceeded errors */</span>
+
+	lck_mtx_lock(&amp;ip6qlock);
+	<span class="enscript-keyword">while</span> (ip6q.ip6q_next != &amp;ip6q) {
+		ip6stat.ip6s_fragdropped++;
+		<span class="enscript-comment">/* XXX in6_ifstat_inc(ifp, ifs6_reass_fail) */</span>
+		frag6_freef(ip6q.ip6q_next, &amp;dfq6, &amp;diq6);
+	}
+	lck_mtx_unlock(&amp;ip6qlock);
+
+	<span class="enscript-comment">/* free fragments that need to be freed */</span>
+	<span class="enscript-keyword">if</span> (!MBUFQ_EMPTY(&amp;dfq6))
+		MBUFQ_DRAIN(&amp;dfq6);
+
+	frag6_icmp6_timeex_error(&amp;diq6);
+
+	VERIFY(MBUFQ_EMPTY(&amp;dfq6));
+	VERIFY(MBUFQ_EMPTY(&amp;diq6));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ip6q *
+<span class="enscript-function-name">ip6q_alloc</span>(<span class="enscript-type">int</span> how)
+{
+	<span class="enscript-type">struct</span> mbuf *t;
+	<span class="enscript-type">struct</span> ip6q *q6;
+
+	<span class="enscript-comment">/*
+	 * See comments in ip6q_updateparams().  Keep the count separate
+	 * from frag6_nfragpackets since the latter represents the elements
+	 * already in the reassembly queues.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ip6q_limit &gt; 0 &amp;&amp; ip6q_count &gt; ip6q_limit)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	t = m_get(how, MT_FTABLE);
+	<span class="enscript-keyword">if</span> (t != NULL) {
+		atomic_add_32(&amp;ip6q_count, 1);
+		q6 = mtod(t, <span class="enscript-type">struct</span> ip6q *);
+		bzero(q6, <span class="enscript-keyword">sizeof</span> (*q6));
+	} <span class="enscript-keyword">else</span> {
+		q6 = NULL;
+	}
+	<span class="enscript-keyword">return</span> (q6);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ip6q_free</span>(<span class="enscript-type">struct</span> ip6q *q6)
+{
+	(<span class="enscript-type">void</span>) m_free(dtom(q6));
+	atomic_add_32(&amp;ip6q_count, -1);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ip6asfrag *
+<span class="enscript-function-name">ip6af_alloc</span>(<span class="enscript-type">int</span> how)
+{
+	<span class="enscript-type">struct</span> mbuf *t;
+	<span class="enscript-type">struct</span> ip6asfrag *af6;
+
+	<span class="enscript-comment">/*
+	 * See comments in ip6q_updateparams().  Keep the count separate
+	 * from frag6_nfrags since the latter represents the elements
+	 * already in the reassembly queues.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ip6af_limit &gt; 0 &amp;&amp; ip6af_count &gt; ip6af_limit)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	t = m_get(how, MT_FTABLE);
+	<span class="enscript-keyword">if</span> (t != NULL) {
+		atomic_add_32(&amp;ip6af_count, 1);
+		af6 = mtod(t, <span class="enscript-type">struct</span> ip6asfrag *);
+		bzero(af6, <span class="enscript-keyword">sizeof</span> (*af6));
+	} <span class="enscript-keyword">else</span> {
+		af6 = NULL;
+	}
+	<span class="enscript-keyword">return</span> (af6);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ip6af_free</span>(<span class="enscript-type">struct</span> ip6asfrag *af6)
+{
+	(<span class="enscript-type">void</span>) m_free(dtom(af6));
+	atomic_add_32(&amp;ip6af_count, -1);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ip6q_updateparams</span>(<span class="enscript-type">void</span>)
+{
+	lck_mtx_assert(&amp;ip6qlock, LCK_MTX_ASSERT_OWNED);
+	<span class="enscript-comment">/*
+	 * -1 for unlimited allocation.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ip6_maxfragpackets &lt; 0)
+		ip6q_limit = 0;
+	<span class="enscript-keyword">if</span> (ip6_maxfrags &lt; 0)
+		ip6af_limit = 0;
+	<span class="enscript-comment">/*
+	 * Positive number for specific bound.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ip6_maxfragpackets &gt; 0)
+		ip6q_limit = ip6_maxfragpackets;
+	<span class="enscript-keyword">if</span> (ip6_maxfrags &gt; 0)
+		ip6af_limit = ip6_maxfrags;
+	<span class="enscript-comment">/*
+	 * Zero specifies no further fragment queue allocation -- set the
+	 * bound very low, but rely on implementation elsewhere to actually
+	 * prevent allocation and reclaim current queues.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ip6_maxfragpackets == 0)
+		ip6q_limit = 1;
+	<span class="enscript-keyword">if</span> (ip6_maxfrags == 0)
+		ip6af_limit = 1;
+	<span class="enscript-comment">/*
+	 * Arm the purge timer if not already and if there's work to do
+	 */</span>
+	frag6_sched_timeout();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+sysctl_maxfragpackets SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error, i;
+
+	lck_mtx_lock(&amp;ip6qlock);
+	i = ip6_maxfragpackets;
+	error = sysctl_handle_int(oidp, &amp;i, 0, req);
+	<span class="enscript-keyword">if</span> (error || req-&gt;newptr == USER_ADDR_NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	<span class="enscript-comment">/* impose bounds */</span>
+	<span class="enscript-keyword">if</span> (i &lt; -1 || i &gt; (nmbclusters / 4)) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	ip6_maxfragpackets = i;
+	ip6q_updateparams();
+<span class="enscript-reference">done</span>:
+	lck_mtx_unlock(&amp;ip6qlock);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+sysctl_maxfrags SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error, i;
+
+	lck_mtx_lock(&amp;ip6qlock);
+	i = ip6_maxfrags;
+	error = sysctl_handle_int(oidp, &amp;i, 0, req);
+	<span class="enscript-keyword">if</span> (error || req-&gt;newptr == USER_ADDR_NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	<span class="enscript-comment">/* impose bounds */</span>
+	<span class="enscript-keyword">if</span> (i &lt; -1 || i &gt; (nmbclusters / 4)) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	ip6_maxfrags= i;
+	ip6q_updateparams();	<span class="enscript-comment">/* see if we need to arm timer */</span>
+<span class="enscript-reference">done</span>:
+	lck_mtx_unlock(&amp;ip6qlock);
+	<span class="enscript-keyword">return</span> (error);
+}
+</pre>
+<hr />
+</body></html>

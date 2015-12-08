@@ -1,0 +1,156 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>serial_general.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">serial_general.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2005-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/*
+ * @APPLE_FREE_COPYRIGHT@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/std_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;console/serial_protos.h&gt;</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">cons_cinput</span>(<span class="enscript-type">char</span> ch);		<span class="enscript-comment">/* The BSD routine that gets characters */</span>
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> serialmode;				<span class="enscript-comment">/* Serial mode keyboard and console control */</span>
+
+<span class="enscript-comment">/*
+ *  This routine will start a thread that polls the serial port, listening for
+ *  characters that have been typed.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">serial_keyboard_init</span>(<span class="enscript-type">void</span>)
+{
+	kern_return_t	result;
+	thread_t		thread;
+
+	<span class="enscript-keyword">if</span>(!(serialmode &amp; 2)) <span class="enscript-comment">/* Leave if we do not want a serial console */</span>
+		<span class="enscript-keyword">return</span>;
+
+	kprintf(<span class="enscript-string">&quot;Serial keyboard started\n&quot;</span>);
+	result = kernel_thread_start_priority((thread_continue_t)serial_keyboard_start, NULL, MAXPRI_KERNEL, &amp;thread);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		panic(<span class="enscript-string">&quot;serial_keyboard_init&quot;</span>);
+
+	thread_deallocate(thread);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">serial_keyboard_start</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">/* Go see if there are any characters pending now */</span>
+	serial_keyboard_poll();
+	panic(<span class="enscript-string">&quot;serial_keyboard_start: we can't get back here\n&quot;</span>);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">serial_keyboard_poll</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> chr;
+	uint64_t next;
+
+	<span class="enscript-keyword">while</span>(1) {
+		chr = _serial_getc(0, 1, 0, 1);	<span class="enscript-comment">/* Get a character if there is one */</span>
+		<span class="enscript-keyword">if</span>(chr &lt; 0) <span class="enscript-comment">/* The serial buffer is empty */</span>
+			<span class="enscript-keyword">break</span>;
+		cons_cinput((<span class="enscript-type">char</span>)chr);			<span class="enscript-comment">/* Buffer up the character */</span>
+	}
+
+	clock_interval_to_deadline(16, 1000000, &amp;next);	<span class="enscript-comment">/* Get time of pop */</span>
+
+	assert_wait_deadline((event_t)serial_keyboard_poll, THREAD_UNINT, next);	<span class="enscript-comment">/* Show we are &quot;waiting&quot; */</span>
+	thread_block((thread_continue_t)serial_keyboard_poll);	<span class="enscript-comment">/* Wait for it */</span>
+	panic(<span class="enscript-string">&quot;serial_keyboard_poll: Shouldn't never ever get here...\n&quot;</span>);
+}
+
+boolean_t
+<span class="enscript-function-name">console_is_serial</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> (cons_ops_index == SERIAL_CONS_OPS);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">switch_to_video_console</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> old_cons_ops = cons_ops_index;
+	cons_ops_index = VC_CONS_OPS;
+	<span class="enscript-keyword">return</span> old_cons_ops;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">switch_to_serial_console</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> old_cons_ops = cons_ops_index;
+	cons_ops_index = SERIAL_CONS_OPS;
+	<span class="enscript-keyword">return</span> old_cons_ops;
+}
+
+<span class="enscript-comment">/* The switch_to_{video,serial,kgdb}_console functions return a cookie that
+   can be used to restore the console to whatever it was before, in the
+   same way that splwhatever() and splx() work.  */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">switch_to_old_console</span>(<span class="enscript-type">int</span> old_console)
+{
+	<span class="enscript-type">static</span> boolean_t squawked;
+	uint32_t ops = old_console;
+
+	<span class="enscript-keyword">if</span> ((ops &gt;= nconsops) &amp;&amp; !squawked) {
+		squawked = TRUE;
+		printf(<span class="enscript-string">&quot;switch_to_old_console: unknown ops %d\n&quot;</span>, ops);
+	} <span class="enscript-keyword">else</span>
+		cons_ops_index = ops;
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,231 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>GenericInterruptController.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">GenericInterruptController.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2000 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1999 Apple Computer, Inc.  All rights reserved.
+ *
+ *  DRI: Josh de Cesare
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOPlatformExpert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;GenericInterruptController.h&quot;</span>
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">undef</span>  <span class="enscript-variable-name">super</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOInterruptController
+
+<span class="enscript-function-name">IODefineMetaClassAndStructors</span>(GenericInterruptController,
+			      IOInterruptController);
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">GenericInterruptController::start</span>(IOService *provider)
+{
+  IOInterruptAction    handler;
+  IOSymbol             *interruptControllerName;
+    
+  <span class="enscript-comment">// If needed call the parents start.
+</span>  <span class="enscript-keyword">if</span> (!super::start(provider))
+    <span class="enscript-keyword">return</span> false;
+  
+  <span class="enscript-comment">// Map the device's memory and initalize its state.
+</span>  
+  <span class="enscript-comment">// For now you must allocate storage for the vectors.
+</span>  <span class="enscript-comment">// This will probably changed to something like: initVectors(numVectors).
+</span>  <span class="enscript-comment">// In the mean time something like this works well.
+</span>#<span class="enscript-reference">if</span> 0
+  <span class="enscript-comment">// Allocate the memory for the vectors.
+</span>  vectors = (IOInterruptVector *)IOMalloc(numVectors *
+					  <span class="enscript-keyword">sizeof</span>(IOInterruptVector));
+  <span class="enscript-keyword">if</span> (vectors == NULL) <span class="enscript-keyword">return</span> false;
+  bzero(vectors, numVectors * <span class="enscript-keyword">sizeof</span>(IOInterruptVector));
+  
+  <span class="enscript-comment">// Allocate locks for the vectors.
+</span>  <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; numVectors; cnt++) {
+    vectors[cnt].interruptLock = IOLockAlloc();
+    <span class="enscript-keyword">if</span> (vectors[cnt].interruptLock == NULL) {
+      <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; numVectors; cnt++) {
+	<span class="enscript-keyword">if</span> (vectors[cnt].interruptLock != NULL)
+	  IOLockFree(vectors[cnt].interruptLock);
+      }
+    }
+  } 
+#<span class="enscript-reference">endif</span>
+  
+  <span class="enscript-comment">// If you know that this interrupt controller is the primary
+</span>  <span class="enscript-comment">// interrupt controller, use this to set it nub properties properly.
+</span>  <span class="enscript-comment">// This may be done by the nub's creator.
+</span>  getPlatform()-&gt;setCPUInterruptProperties(provider);
+  
+  <span class="enscript-comment">// register the interrupt handler so it can receive interrupts.
+</span>  handler = getInterruptHandlerAddress();
+  provider-&gt;registerInterrupt(0, <span class="enscript-keyword">this</span>, handler, 0);
+  
+  <span class="enscript-comment">// Just like any interrupt source, you must enable it to receive interrupts.
+</span>  provider-&gt;enableInterrupt(0);
+  
+  <span class="enscript-comment">// Set interruptControllerName to the proper symbol.
+</span>  <span class="enscript-comment">//interruptControllerName = xxx;
+</span>  
+  <span class="enscript-comment">// Register this interrupt controller so clients can find it.
+</span>  getPlatform()-&gt;registerInterruptController(interruptControllerName, <span class="enscript-keyword">this</span>);
+  
+  <span class="enscript-comment">// All done, so return true.
+</span>  <span class="enscript-keyword">return</span> true;
+}
+
+IOReturn <span class="enscript-function-name">GenericInterruptController::getInterruptType</span>(IOService *nub,
+						      <span class="enscript-type">int</span> source,
+						      <span class="enscript-type">int</span> *interruptType)
+{
+  <span class="enscript-keyword">if</span> (interruptType == 0) <span class="enscript-keyword">return</span> kIOReturnBadArgument;
+  
+  <span class="enscript-comment">// Given the nub and source, set interruptType to level or edge.
+</span>  
+  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+<span class="enscript-comment">// Sadly this just has to be replicated in every interrupt controller.
+</span>IOInterruptAction <span class="enscript-function-name">GenericInterruptController::getInterruptHandlerAddress</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span> (IOInterruptAction)handleInterrupt;
+}
+
+<span class="enscript-comment">// Handle all current interrupts.
+</span>IOReturn <span class="enscript-function-name">GenericInterruptController::handleInterrupt</span>(<span class="enscript-type">void</span> * refCon,
+						     IOService * nub,
+						     <span class="enscript-type">int</span> source)
+{
+  IOInterruptVector *vector;
+  <span class="enscript-type">int</span>               vectorNumber;
+  
+  <span class="enscript-keyword">while</span> (1) {
+    <span class="enscript-comment">// Get vectorNumber from hardware some how and clear the event.
+</span>    
+    <span class="enscript-comment">// Break if there are no more vectors to handle.
+</span>    <span class="enscript-keyword">if</span> (vectorNumber == 0<span class="enscript-comment">/*kNoVector*/</span>) <span class="enscript-keyword">break</span>;
+    
+    <span class="enscript-comment">// Get the vector's date from the controller's array.
+</span>    vector = &amp;vectors[vectorNumber];
+    
+    <span class="enscript-comment">// Set the vector as active. This store must compleat before
+</span>    <span class="enscript-comment">// moving on to prevent the disableInterrupt fuction from
+</span>    <span class="enscript-comment">// geting out of sync.
+</span>    vector-&gt;interruptActive = 1;
+    <span class="enscript-comment">//sync();
+</span>    <span class="enscript-comment">//isync();
+</span>    
+    <span class="enscript-comment">// If the vector is not disabled soft, handle it.
+</span>    <span class="enscript-keyword">if</span> (!vector-&gt;interruptDisabledSoft) {
+      <span class="enscript-comment">// Prevent speculative exacution as needed on your processor.
+</span>      <span class="enscript-comment">//isync();
+</span>      
+      <span class="enscript-comment">// Call the handler if it exists.
+</span>      <span class="enscript-keyword">if</span> (vector-&gt;interruptRegistered) {
+	vector-&gt;handler(vector-&gt;target, vector-&gt;refCon,
+			vector-&gt;nub, vector-&gt;source);
+      }
+    } <span class="enscript-keyword">else</span> {
+      <span class="enscript-comment">// Hard disable the vector if is was only soft disabled.
+</span>      vector-&gt;interruptDisabledHard = 1;
+      disableVectorHard(vectorNumber, vector);
+    }
+    
+    <span class="enscript-comment">// Done with this vector so, set it back to inactive.
+</span>    vector-&gt;interruptActive = 0;
+  }
+  
+  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">GenericInterruptController::vectorCanBeShared</span>(<span class="enscript-type">long</span> vectorNumber,
+						   IOInterruptVector *vector)
+{
+  <span class="enscript-comment">// Given the vector number and the vector data, return if it can be shared.
+</span>  <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">GenericInterruptController::initVector</span>(<span class="enscript-type">long</span> vectorNumber,
+					    IOInterruptVector *vector)
+{
+  <span class="enscript-comment">// Given the vector number and the vector data,
+</span>  <span class="enscript-comment">// get the hardware ready for the vector to generate interrupts.
+</span>  <span class="enscript-comment">// Make sure the vector is left disabled.
+</span>}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">GenericInterruptController::disableVectorHard</span>(<span class="enscript-type">long</span> vectorNumber,
+						   IOInterruptVector *vector)
+{
+  <span class="enscript-comment">// Given the vector number and the vector data,
+</span>  <span class="enscript-comment">// disable the vector at the hardware.
+</span>}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">GenericInterruptController::enableVector</span>(<span class="enscript-type">long</span> vectorNumber,
+					      IOInterruptVector *vector)
+{
+  <span class="enscript-comment">// Given the vector number and the vector data,
+</span>  <span class="enscript-comment">// enable the vector at the hardware.
+</span>}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">GenericInterruptController::causeVector</span>(<span class="enscript-type">long</span> vectorNumber,
+					     IOInterruptVector *vector)
+{
+  <span class="enscript-comment">// Given the vector number and the vector data,
+</span>  <span class="enscript-comment">// Set the vector pending and cause an interrupt at the parent controller.
+</span>  
+  <span class="enscript-comment">// cause the interrupt at the parent controller.  Source is usually zero,
+</span>  <span class="enscript-comment">// but it could be different for your controller.
+</span>  getPlatform()-&gt;causeInterrupt(0);
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,432 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>sched.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">sched.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989,1988,1987 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+<span class="enscript-comment">/*
+ *	File:	sched.h
+ *	Author:	Avadis Tevanian, Jr.
+ *	Date:	1985
+ *
+ *	Header file for scheduler.
+ *
+ */</span>
+
+#<span class="enscript-reference">ifndef</span>	<span class="enscript-variable-name">_KERN_SCHED_H_</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_KERN_SCHED_H_</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/policy.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/macro_help.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/timer_call.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ast.h&gt;</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">NRQS</span>		128				<span class="enscript-comment">/* 128 levels per run queue */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NRQBM</span>		(NRQS / 32)		<span class="enscript-comment">/* number of words per bit map */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAXPRI</span>		(NRQS-1)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MINPRI</span>		IDLEPRI			<span class="enscript-comment">/* lowest legal priority schedulable */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">IDLEPRI</span>		0				<span class="enscript-comment">/* idle thread priority */</span>
+
+<span class="enscript-comment">/*
+ *	High-level priority assignments
+ *
+ *************************************************************************
+ * 127		Reserved (real-time)
+ *				A
+ *				+
+ *			(32 levels)
+ *				+
+ *				V
+ * 96		Reserved (real-time)
+ * 95		Kernel mode only
+ *				A
+ *				+
+ *			(16 levels)
+ *				+
+ *				V
+ * 80		Kernel mode only
+ * 79		System high priority
+ *				A
+ *				+
+ *			(16 levels)
+ *				+
+ *				V
+ * 64		System high priority
+ * 63		Elevated priorities
+ *				A
+ *				+
+ *			(12 levels)
+ *				+
+ *				V
+ * 52		Elevated priorities
+ * 51		Elevated priorities (incl. BSD +nice)
+ *				A
+ *				+
+ *			(20 levels)
+ *				+
+ *				V
+ * 32		Elevated priorities (incl. BSD +nice)
+ * 31		Default (default base for threads)
+ * 30		Lowered priorities (incl. BSD -nice)
+ *				A
+ *				+
+ *			(20 levels)
+ *				+
+ *				V
+ * 11		Lowered priorities (incl. BSD -nice)
+ * 10		Lowered priorities (aged pri's)
+ *				A
+ *				+
+ *			(11 levels)
+ *				+
+ *				V
+ * 0		Lowered priorities (aged pri's / idle)
+ *************************************************************************
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BASEPRI_RTQUEUES</span>	(BASEPRI_REALTIME + 1)				<span class="enscript-comment">/* 97 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BASEPRI_REALTIME</span>	(MAXPRI - (NRQS / 4) + 1)			<span class="enscript-comment">/* 96 */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAXPRI_KERNEL</span>		(BASEPRI_REALTIME - 1)				<span class="enscript-comment">/* 95 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BASEPRI_PREEMPT</span>		(MAXPRI_KERNEL - 2)					<span class="enscript-comment">/* 93 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BASEPRI_KERNEL</span>		(MINPRI_KERNEL + 1)					<span class="enscript-comment">/* 81 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MINPRI_KERNEL</span>		(MAXPRI_KERNEL - (NRQS / 8) + 1)	<span class="enscript-comment">/* 80 */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAXPRI_RESERVED</span>		(MINPRI_KERNEL - 1)					<span class="enscript-comment">/* 79 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BASEPRI_GRAPHICS</span>	(MAXPRI_RESERVED - 3)				<span class="enscript-comment">/* 76 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MINPRI_RESERVED</span>		(MAXPRI_RESERVED - (NRQS / 8) + 1)	<span class="enscript-comment">/* 64 */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAXPRI_USER</span>			(MINPRI_RESERVED - 1)				<span class="enscript-comment">/* 63 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BASEPRI_CONTROL</span>		(BASEPRI_DEFAULT + 17)				<span class="enscript-comment">/* 48 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BASEPRI_FOREGROUND</span>	(BASEPRI_DEFAULT + 16)				<span class="enscript-comment">/* 47 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BASEPRI_BACKGROUND</span>	(BASEPRI_DEFAULT + 15)				<span class="enscript-comment">/* 46 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BASEPRI_USER_INITIATED</span>	(BASEPRI_DEFAULT +  6)				<span class="enscript-comment">/* 37 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BASEPRI_DEFAULT</span>		(MAXPRI_USER - (NRQS / 4))			<span class="enscript-comment">/* 31 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAXPRI_SUPPRESSED</span>	(BASEPRI_DEFAULT - 3)				<span class="enscript-comment">/* 28 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BASEPRI_UTILITY</span>		(BASEPRI_DEFAULT - 11)				<span class="enscript-comment">/* 20 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAXPRI_THROTTLE</span>		(MINPRI + 4)						<span class="enscript-comment">/*  4 */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MINPRI_USER</span>			MINPRI								<span class="enscript-comment">/*  0 */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEPRESSPRI</span>	MINPRI			<span class="enscript-comment">/* depress priority */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAXPRI_PROMOTE</span>		(MAXPRI_KERNEL)		<span class="enscript-comment">/* ceiling for mutex promotion */</span>
+
+<span class="enscript-comment">/* Type used for thread-&gt;sched_mode and saved_mode */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">enum</span> {
+	TH_MODE_NONE = 0,					<span class="enscript-comment">/* unassigned, usually for saved_mode only */</span>
+	TH_MODE_REALTIME,					<span class="enscript-comment">/* time constraints supplied */</span>
+	TH_MODE_FIXED,						<span class="enscript-comment">/* use fixed priorities, no decay */</span>
+	TH_MODE_TIMESHARE,					<span class="enscript-comment">/* use timesharing algorithm */</span>
+} sched_mode_t;
+
+<span class="enscript-comment">/*
+ *	Macro to check for invalid priorities.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">invalid_pri</span>(pri) ((pri) &lt; MINPRI || (pri) &gt; MAXPRI)
+
+<span class="enscript-type">struct</span> runq_stats {
+	uint64_t				count_sum;
+	uint64_t				last_change_timestamp;
+};
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_TIMESHARE_CORE</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_PROTO</span>)
+
+<span class="enscript-type">struct</span> run_queue {
+	<span class="enscript-type">int</span>					highq;				<span class="enscript-comment">/* highest runnable queue */</span>
+	<span class="enscript-type">int</span>					bitmap[NRQBM];		<span class="enscript-comment">/* run queue bitmap array */</span>
+	<span class="enscript-type">int</span>					count;				<span class="enscript-comment">/* # of threads total */</span>
+	<span class="enscript-type">int</span>					urgency;			<span class="enscript-comment">/* level of preemption urgency */</span>
+	queue_head_t		queues[NRQS];		<span class="enscript-comment">/* one for each priority */</span>
+
+	<span class="enscript-type">struct</span> runq_stats	runq_stats;
+};
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(CONFIG_SCHED_TIMESHARE_CORE) || defined(CONFIG_SCHED_PROTO) */</span>
+
+<span class="enscript-type">struct</span> rt_queue {
+	<span class="enscript-type">int</span>					count;				<span class="enscript-comment">/* # of threads total */</span>
+	queue_head_t		queue;				<span class="enscript-comment">/* all runnable RT threads */</span>
+
+	<span class="enscript-type">struct</span> runq_stats	runq_stats;
+};
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_GRRR_CORE</span>)
+
+<span class="enscript-comment">/*
+ * We map standard Mach priorities to an abstract scale that more properly
+ * indicates how we want processor time allocated under contention.
+ */</span>
+<span class="enscript-type">typedef</span> uint8_t	grrr_proportional_priority_t;
+<span class="enscript-type">typedef</span> uint8_t grrr_group_index_t;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NUM_GRRR_PROPORTIONAL_PRIORITIES</span>	256
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_GRRR_PROPORTIONAL_PRIORITY</span> ((grrr_proportional_priority_t)255)
+
+#<span class="enscript-reference">if</span> 0
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NUM_GRRR_GROUPS</span> 8					<span class="enscript-comment">/* log(256) */</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NUM_GRRR_GROUPS</span> 64					<span class="enscript-comment">/* 256/4 */</span>
+
+<span class="enscript-type">struct</span> grrr_group {
+	queue_chain_t			priority_order;				<span class="enscript-comment">/* next greatest weight group */</span>
+	grrr_proportional_priority_t		minpriority;
+	grrr_group_index_t		index;
+
+	queue_head_t			clients;
+	<span class="enscript-type">int</span>						count;
+	uint32_t				weight;
+#<span class="enscript-reference">if</span> 0
+	uint32_t				deferred_removal_weight;
+#<span class="enscript-reference">endif</span>
+	uint32_t				work;
+	thread_t				current_client;
+};
+
+<span class="enscript-type">struct</span> grrr_run_queue {
+	<span class="enscript-type">int</span>					count;
+	uint32_t			last_rescale_tick;
+	<span class="enscript-type">struct</span> grrr_group	groups[NUM_GRRR_GROUPS];
+	queue_head_t		sorted_group_list;
+	uint32_t			weight;
+	grrr_group_t		current_group;
+	
+	<span class="enscript-type">struct</span> runq_stats   runq_stats;
+};
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(CONFIG_SCHED_GRRR_CORE) */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> rt_queue		rt_runq;
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_MULTIQ</span>)
+sched_group_t   <span class="enscript-function-name">sched_group_create</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">void</span>            <span class="enscript-function-name">sched_group_destroy</span>(sched_group_t sched_group);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(CONFIG_SCHED_MULTIQ) */</span>
+
+
+
+<span class="enscript-comment">/*
+ *	Scheduler routines.
+ */</span>
+
+<span class="enscript-comment">/* Handle quantum expiration for an executing thread */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		thread_quantum_expire(
+					timer_call_param_t	processor,
+					timer_call_param_t	thread);
+
+<span class="enscript-comment">/* Context switch check for current processor */</span>
+<span class="enscript-type">extern</span> ast_t	csw_check(processor_t		processor,
+						ast_t			check_reason);
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_TIMESHARE_CORE</span>)
+<span class="enscript-type">extern</span> uint32_t	std_quantum, min_std_quantum;
+<span class="enscript-type">extern</span> uint32_t	std_quantum_us;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_SCHED_TIMESHARE_CORE */</span>
+
+<span class="enscript-type">extern</span> uint32_t thread_depress_time;
+<span class="enscript-type">extern</span> uint32_t default_timeshare_computation;
+<span class="enscript-type">extern</span> uint32_t default_timeshare_constraint;
+
+<span class="enscript-type">extern</span> uint32_t	max_rt_quantum, min_rt_quantum;
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> default_preemption_rate;
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> default_bg_preemption_rate;
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_TIMESHARE_CORE</span>)
+
+<span class="enscript-comment">/*
+ *	Age usage  at approximately (1 &lt;&lt; SCHED_TICK_SHIFT) times per second
+ *	Aging may be deferred during periods where all processors are idle
+ *	and cumulatively applied during periods of activity.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SCHED_TICK_SHIFT</span>	3
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SCHED_TICK_MAX_DELTA</span>	(8)
+
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span>		sched_tick;
+<span class="enscript-type">extern</span> uint32_t		sched_tick_interval;
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_SCHED_TIMESHARE_CORE */</span>
+
+<span class="enscript-type">extern</span> uint64_t		sched_one_second_interval;
+
+<span class="enscript-comment">/* Periodic computation of various averages */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		compute_averages(uint64_t);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		compute_averunnable(
+					<span class="enscript-type">void</span>			*nrun);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		compute_stack_target(
+					<span class="enscript-type">void</span>			*arg);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		compute_memory_pressure(
+					<span class="enscript-type">void</span>			*arg);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		compute_zone_gc_throttle(
+					<span class="enscript-type">void</span>			*arg);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		compute_pageout_gc_throttle(
+					<span class="enscript-type">void</span>			*arg);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		compute_pmap_gc_throttle(
+					<span class="enscript-type">void</span>			*arg);
+
+<span class="enscript-comment">/*
+ *	Conversion factor from usage
+ *	to priority.
+ */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">CONFIG_SCHED_TIMESHARE_CORE</span>)
+<span class="enscript-type">extern</span> uint32_t		sched_pri_shift;
+<span class="enscript-type">extern</span> uint32_t		sched_background_pri_shift;
+<span class="enscript-type">extern</span> uint32_t		sched_combined_fgbg_pri_shift;
+<span class="enscript-type">extern</span> uint32_t		sched_fixed_shift;
+<span class="enscript-type">extern</span> int8_t		sched_load_shifts[NRQS];
+<span class="enscript-type">extern</span> uint32_t		sched_decay_usage_age_factor;
+<span class="enscript-type">extern</span> uint32_t		sched_use_combined_fgbg_decay;
+<span class="enscript-type">void</span> <span class="enscript-function-name">sched_timeshare_consider_maintenance</span>(uint64_t);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_SCHED_TIMESHARE_CORE */</span>
+
+<span class="enscript-type">extern</span> int32_t		sched_poll_yield_shift;
+<span class="enscript-type">extern</span> uint64_t		sched_safe_duration;
+
+<span class="enscript-type">extern</span> uint32_t		sched_run_count, sched_share_count, sched_background_count;
+<span class="enscript-type">extern</span> uint32_t		sched_load_average, sched_mach_factor;
+
+<span class="enscript-type">extern</span> uint32_t		avenrun[3], mach_factor[3];
+
+<span class="enscript-type">extern</span> uint64_t		max_unsafe_computation;
+<span class="enscript-type">extern</span> uint64_t		max_poll_computation;
+
+<span class="enscript-comment">/* TH_RUN &amp; !TH_IDLE controls whether a thread has a run count */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">sched_run_incr</span>(th)                                      \
+	hw_atomic_add(&amp;sched_run_count, 1)                      \
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">sched_run_decr</span>(th)                                      \
+	hw_atomic_sub(&amp;sched_run_count, 1)                      \
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sched_share_incr</span>(thread_t thread);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sched_share_decr</span>(thread_t thread);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sched_background_incr</span>(thread_t thread);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sched_background_decr</span>(thread_t thread);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">assert_thread_sched_count</span>(thread_t thread);
+
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* MACH_ASSERT */</span>
+<span class="enscript-comment">/* sched_mode == TH_MODE_TIMESHARE controls whether a thread has a timeshare count when it has a run count */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">sched_share_incr</span>(th)                            \
+MACRO_BEGIN                                             \
+	(<span class="enscript-type">void</span>)hw_atomic_add(&amp;sched_share_count, 1);     \
+MACRO_END
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">sched_share_decr</span>(th)                            \
+MACRO_BEGIN                                             \
+	(<span class="enscript-type">void</span>)hw_atomic_sub(&amp;sched_share_count, 1);     \
+MACRO_END
+
+<span class="enscript-comment">/* TH_SFLAG_THROTTLED controls whether a thread has a background count when it has a run count and a share count */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">sched_background_incr</span>(th)                       \
+MACRO_BEGIN                                             \
+	hw_atomic_add(&amp;sched_background_count, 1);      \
+MACRO_END
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">sched_background_decr</span>(th)                       \
+MACRO_BEGIN                                             \
+	hw_atomic_sub(&amp;sched_background_count, 1);      \
+MACRO_END
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">assert_thread_sched_count</span>(th)                   \
+MACRO_BEGIN                                             \
+MACRO_END
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !MACH_ASSERT */</span>
+
+<span class="enscript-comment">/*
+ *	thread_timer_delta macro takes care of both thread timers.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">thread_timer_delta</span>(thread, delta)					\
+MACRO_BEGIN													\
+	(delta) = (typeof(delta))timer_delta(&amp;(thread)-&gt;system_timer,			\
+							&amp;(thread)-&gt;system_timer_save);	\
+	(delta) += (typeof(delta))timer_delta(&amp;(thread)-&gt;user_timer,			\
+							&amp;(thread)-&gt;user_timer_save);	\
+MACRO_END
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* _KERN_SCHED_H_ */</span>
+</pre>
+<hr />
+</body></html>

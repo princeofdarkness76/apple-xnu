@@ -1,0 +1,2014 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pcb.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pcb.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach_rt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach_debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach_ldebug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_status.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/counters.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/mach_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/eflags.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/proc_reg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/fpu.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp_desc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/lapic.h&gt;</span> <span class="enscript-comment">/* LAPIC_PMC_SWI_VECTOR */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KPERF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/kperf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kperf/kperf_kpc.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HYPERVISOR</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/hv_support.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Maps state flavor to number of words in the state:
+ */</span>
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> _MachineStateCount[] = {
+	[x86_THREAD_STATE32]	= x86_THREAD_STATE32_COUNT,
+	[x86_THREAD_STATE64]	= x86_THREAD_STATE64_COUNT,
+	[x86_THREAD_STATE]	= x86_THREAD_STATE_COUNT,
+	[x86_FLOAT_STATE32]	= x86_FLOAT_STATE32_COUNT,
+	[x86_FLOAT_STATE64]	= x86_FLOAT_STATE64_COUNT,
+	[x86_FLOAT_STATE]	= x86_FLOAT_STATE_COUNT,
+	[x86_EXCEPTION_STATE32]	= x86_EXCEPTION_STATE32_COUNT,
+	[x86_EXCEPTION_STATE64]	= x86_EXCEPTION_STATE64_COUNT,
+	[x86_EXCEPTION_STATE]	= x86_EXCEPTION_STATE_COUNT,
+	[x86_DEBUG_STATE32]	= x86_DEBUG_STATE32_COUNT,
+	[x86_DEBUG_STATE64]	= x86_DEBUG_STATE64_COUNT,
+	[x86_DEBUG_STATE]	= x86_DEBUG_STATE_COUNT,
+	[x86_AVX_STATE32]	= x86_AVX_STATE32_COUNT,
+	[x86_AVX_STATE64]	= x86_AVX_STATE64_COUNT,
+	[x86_AVX_STATE]		= x86_AVX_STATE_COUNT,
+};
+
+zone_t		iss_zone;		<span class="enscript-comment">/* zone for saved_state area */</span>
+zone_t		ids_zone;		<span class="enscript-comment">/* zone for debug_state area */</span>
+
+<span class="enscript-comment">/* Forward */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		Thread_continue(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		Load_context(
+				thread_t			thread);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">get_exception_state32</span>(thread_t thread, x86_exception_state32_t *es);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">get_exception_state64</span>(thread_t thread, x86_exception_state64_t *es);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">get_thread_state32</span>(thread_t thread, x86_thread_state32_t *ts);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">get_thread_state64</span>(thread_t thread, x86_thread_state64_t *ts);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">set_thread_state32</span>(thread_t thread, x86_thread_state32_t *ts);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">set_thread_state64</span>(thread_t thread, x86_thread_state64_t *ts);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HYPERVISOR</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">ml_hv_cswitch</span>(thread_t old, thread_t new)
+{
+	<span class="enscript-keyword">if</span> (old-&gt;hv_thread_target)
+		hv_callbacks.preempt(old-&gt;hv_thread_target);
+
+	<span class="enscript-keyword">if</span> (new-&gt;hv_thread_target)
+		hv_callbacks.dispatch(new-&gt;hv_thread_target);	
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Don't let an illegal value for the lower 32-bits of dr7 get set.
+ * Specifically, check for undefined settings.  Setting these bit patterns
+ * result in undefined behaviour and can lead to an unexpected
+ * TRCTRAP.
+ */</span>
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">dr7d_is_valid</span>(uint32_t *dr7d)
+{
+	<span class="enscript-type">int</span> i;
+	uint32_t mask1, mask2;
+
+	<span class="enscript-comment">/*
+	 * If the DE bit is set in CR4, R/W0-3 can be pattern
+	 * &quot;10B&quot; to indicate i/o reads and write
+	 */</span>
+	<span class="enscript-keyword">if</span> (!(get_cr4() &amp; CR4_DE))
+		<span class="enscript-keyword">for</span> (i = 0, mask1 = 0x3&lt;&lt;16, mask2 = 0x2&lt;&lt;16; i &lt; 4; 
+				i++, mask1 &lt;&lt;= 4, mask2 &lt;&lt;= 4)
+			<span class="enscript-keyword">if</span> ((*dr7d &amp; mask1) == mask2)
+				<span class="enscript-keyword">return</span> (FALSE);
+
+	<span class="enscript-comment">/*
+	 * if we are doing an instruction execution break (indicated
+	 * by r/w[x] being &quot;00B&quot;), then the len[x] must also be set
+	 * to &quot;00B&quot;
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; 4; i++)
+		<span class="enscript-keyword">if</span> (((((*dr7d &gt;&gt; (16 + i*4))) &amp; 0x3) == 0) &amp;&amp;
+				((((*dr7d &gt;&gt; (18 + i*4))) &amp; 0x3) != 0))
+			<span class="enscript-keyword">return</span> (FALSE);
+
+	<span class="enscript-comment">/*
+	 * Intel docs have these bits fixed.
+	 */</span>
+	*dr7d |= 0x1 &lt;&lt; 10; <span class="enscript-comment">/* set bit 10 to 1 */</span>
+	*dr7d &amp;= ~(0x1 &lt;&lt; 11); <span class="enscript-comment">/* set bit 11 to 0 */</span>
+	*dr7d &amp;= ~(0x1 &lt;&lt; 12); <span class="enscript-comment">/* set bit 12 to 0 */</span>
+	*dr7d &amp;= ~(0x1 &lt;&lt; 14); <span class="enscript-comment">/* set bit 14 to 0 */</span>
+	*dr7d &amp;= ~(0x1 &lt;&lt; 15); <span class="enscript-comment">/* set bit 15 to 0 */</span>
+
+	<span class="enscript-comment">/*
+	 * We don't allow anything to set the global breakpoints.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (*dr7d &amp; 0x2)
+		<span class="enscript-keyword">return</span> (FALSE);
+
+	<span class="enscript-keyword">if</span> (*dr7d &amp; (0x2&lt;&lt;2))
+		<span class="enscript-keyword">return</span> (FALSE);
+
+	<span class="enscript-keyword">if</span> (*dr7d &amp; (0x2&lt;&lt;4))
+		<span class="enscript-keyword">return</span> (FALSE);
+
+	<span class="enscript-keyword">if</span> (*dr7d &amp; (0x2&lt;&lt;6))
+		<span class="enscript-keyword">return</span> (FALSE);
+
+	<span class="enscript-keyword">return</span> (TRUE);
+}
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">set_64bit_debug_regs</span>(x86_debug_state64_t *ds);
+
+boolean_t
+<span class="enscript-function-name">debug_state_is_valid32</span>(x86_debug_state32_t *ds) 
+{
+	<span class="enscript-keyword">if</span> (!dr7d_is_valid(&amp;ds-&gt;dr7))
+		<span class="enscript-keyword">return</span> FALSE;
+
+	<span class="enscript-keyword">return</span> TRUE;
+}
+
+boolean_t
+<span class="enscript-function-name">debug_state_is_valid64</span>(x86_debug_state64_t *ds)
+{
+	<span class="enscript-keyword">if</span> (!dr7d_is_valid((uint32_t *)&amp;ds-&gt;dr7))
+		<span class="enscript-keyword">return</span> FALSE;
+
+	<span class="enscript-comment">/*
+	 * Don't allow the user to set debug addresses above their max
+	 * value
+	 */</span>
+	<span class="enscript-keyword">if</span> (ds-&gt;dr7 &amp; 0x1)
+		<span class="enscript-keyword">if</span> (ds-&gt;dr0 &gt;= VM_MAX_PAGE_ADDRESS)
+			<span class="enscript-keyword">return</span> FALSE;
+
+	<span class="enscript-keyword">if</span> (ds-&gt;dr7 &amp; (0x1&lt;&lt;2))
+		<span class="enscript-keyword">if</span> (ds-&gt;dr1 &gt;= VM_MAX_PAGE_ADDRESS)
+			<span class="enscript-keyword">return</span> FALSE;
+
+	<span class="enscript-keyword">if</span> (ds-&gt;dr7 &amp; (0x1&lt;&lt;4))
+		<span class="enscript-keyword">if</span> (ds-&gt;dr2 &gt;= VM_MAX_PAGE_ADDRESS)
+			<span class="enscript-keyword">return</span> FALSE;
+
+	<span class="enscript-keyword">if</span> (ds-&gt;dr7 &amp; (0x1&lt;&lt;6))
+		<span class="enscript-keyword">if</span> (ds-&gt;dr3 &gt;= VM_MAX_PAGE_ADDRESS)
+			<span class="enscript-keyword">return</span> FALSE;
+
+	<span class="enscript-comment">/* For x86-64, we must ensure the upper 32-bits of DR7 are clear */</span>
+	ds-&gt;dr7 &amp;= 0xffffffffULL;
+
+	<span class="enscript-keyword">return</span> TRUE;
+}
+
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">set_debug_state32</span>(thread_t thread, x86_debug_state32_t *ds)
+{
+	x86_debug_state32_t *ids;
+	pcb_t pcb;
+
+	pcb = THREAD_TO_PCB(thread);
+	ids = pcb-&gt;ids;
+
+	<span class="enscript-keyword">if</span> (debug_state_is_valid32(ds) != TRUE) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	<span class="enscript-keyword">if</span> (ids == NULL) {
+		ids = zalloc(ids_zone);
+		bzero(ids, <span class="enscript-keyword">sizeof</span> *ids);
+
+		simple_lock(&amp;pcb-&gt;lock);
+		<span class="enscript-comment">/* make sure it wasn't already alloc()'d elsewhere */</span>
+		<span class="enscript-keyword">if</span> (pcb-&gt;ids == NULL) {
+			pcb-&gt;ids = ids;
+			simple_unlock(&amp;pcb-&gt;lock);
+		} <span class="enscript-keyword">else</span> {
+			simple_unlock(&amp;pcb-&gt;lock);
+			zfree(ids_zone, ids);
+		}
+	}
+
+
+	copy_debug_state32(ds, ids, FALSE);
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">set_debug_state64</span>(thread_t thread, x86_debug_state64_t *ds)
+{
+	x86_debug_state64_t *ids;
+	pcb_t pcb;
+
+	pcb = THREAD_TO_PCB(thread);
+	ids = pcb-&gt;ids;
+
+	<span class="enscript-keyword">if</span> (debug_state_is_valid64(ds) != TRUE) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	<span class="enscript-keyword">if</span> (ids == NULL) {
+		ids = zalloc(ids_zone);
+		bzero(ids, <span class="enscript-keyword">sizeof</span> *ids);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HYPERVISOR</span>
+		<span class="enscript-keyword">if</span> (thread-&gt;hv_thread_target) {
+			hv_callbacks.volatile_state(thread-&gt;hv_thread_target,
+				HV_DEBUG_STATE);
+		}
+#<span class="enscript-reference">endif</span>
+
+		simple_lock(&amp;pcb-&gt;lock);
+		<span class="enscript-comment">/* make sure it wasn't already alloc()'d elsewhere */</span>
+		<span class="enscript-keyword">if</span> (pcb-&gt;ids == NULL) {
+			pcb-&gt;ids = ids;
+			simple_unlock(&amp;pcb-&gt;lock);
+		} <span class="enscript-keyword">else</span> {
+			simple_unlock(&amp;pcb-&gt;lock);
+			zfree(ids_zone, ids);
+		}
+	}
+
+	copy_debug_state64(ds, ids, FALSE);
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">get_debug_state32</span>(thread_t thread, x86_debug_state32_t *ds)
+{
+	x86_debug_state32_t *saved_state;
+
+	saved_state = thread-&gt;machine.ids;
+
+	<span class="enscript-keyword">if</span> (saved_state) {
+		copy_debug_state32(saved_state, ds, TRUE);
+	} <span class="enscript-keyword">else</span>
+		bzero(ds, <span class="enscript-keyword">sizeof</span> *ds);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">get_debug_state64</span>(thread_t thread, x86_debug_state64_t *ds)
+{
+	x86_debug_state64_t *saved_state;
+
+	saved_state = (x86_debug_state64_t *)thread-&gt;machine.ids;
+
+	<span class="enscript-keyword">if</span> (saved_state) {
+		copy_debug_state64(saved_state, ds, TRUE);
+	} <span class="enscript-keyword">else</span>
+		bzero(ds, <span class="enscript-keyword">sizeof</span> *ds);
+}
+
+<span class="enscript-comment">/*
+ * consider_machine_collect:
+ *
+ *	Try to collect machine-dependent pages
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">consider_machine_collect</span>(<span class="enscript-type">void</span>)
+{
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">consider_machine_adjust</span>(<span class="enscript-type">void</span>)
+{
+}
+
+<span class="enscript-comment">/*
+ * Switch to the first thread on a CPU.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">machine_load_context</span>(
+	thread_t		new)
+{
+	new-&gt;machine.specFlags |= OnProc;
+	act_machine_switch_pcb(NULL, new);
+	Load_context(new);
+}
+
+<span class="enscript-comment">/*
+ * Switch to a new thread.
+ * Save the old thread`s kernel state or continuation,
+ * and return it.
+ */</span>
+thread_t
+<span class="enscript-function-name">machine_switch_context</span>(
+	thread_t			old,
+	thread_continue_t	continuation,
+	thread_t			new)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_RT</span>
+        assert(current_cpu_datap()-&gt;cpu_active_stack == old-&gt;kernel_stack);
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KPERF</span>
+	kperf_kpc_cswitch(old, new);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-comment">/*
+	 *	Save FP registers if in use.
+	 */</span>
+	fpu_save_context(old);
+
+	old-&gt;machine.specFlags &amp;= ~OnProc;
+	new-&gt;machine.specFlags |= OnProc;
+
+	<span class="enscript-comment">/*
+ 	 * Monitor the stack depth and report new max,
+	 * not worrying about races.
+	 */</span>
+	vm_offset_t	depth = current_stack_depth();
+	<span class="enscript-keyword">if</span> (depth &gt; kernel_stack_depth_max) {
+		kernel_stack_depth_max = depth;
+		KERNEL_DEBUG_CONSTANT(
+			MACHDBG_CODE(DBG_MACH_SCHED, MACH_STACK_DEPTH),
+			(<span class="enscript-type">long</span>) depth, 0, 0, 0, 0);
+	}
+
+	<span class="enscript-comment">/*
+	 *	Switch address maps if need be, even if not switching tasks.
+	 *	(A server activation may be &quot;borrowing&quot; a client map.)
+	 */</span>
+	PMAP_SWITCH_CONTEXT(old, new, cpu_number());
+
+	<span class="enscript-comment">/*
+	 *	Load the rest of the user state for the new thread
+	 */</span>
+	act_machine_switch_pcb(old, new);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HYPERVISOR</span>
+	ml_hv_cswitch(old, new);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span>(Switch_context(old, continuation, new));
+}
+
+thread_t        
+<span class="enscript-function-name">machine_processor_shutdown</span>(
+	thread_t	thread,
+	<span class="enscript-type">void</span>		(*doshutdown)(processor_t),
+	processor_t	processor)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_VMX</span>
+	vmx_suspend();
+#<span class="enscript-reference">endif</span>
+	fpu_save_context(thread);
+	PMAP_SWITCH_CONTEXT(thread, processor-&gt;idle_thread, cpu_number());
+	<span class="enscript-keyword">return</span>(Shutdown_context(thread, doshutdown, processor));
+}
+
+
+<span class="enscript-comment">/*
+ * This is where registers that are not normally specified by the mach-o
+ * file on an execve would be nullified, perhaps to avoid a covert channel.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">machine_thread_state_initialize</span>(
+	thread_t thread)
+{
+    <span class="enscript-comment">/*
+     * If there's an fpu save area, free it.
+     * The initialized state will then be lazily faulted-in, if required.
+     * And if we're target, re-arm the no-fpu trap.
+     */</span>
+	<span class="enscript-keyword">if</span> (thread-&gt;machine.ifps) {
+		(<span class="enscript-type">void</span>) fpu_set_fxstate(thread, NULL, x86_FLOAT_STATE64);
+
+		<span class="enscript-keyword">if</span> (thread == current_thread())
+			clear_fpu();
+	}
+
+	<span class="enscript-keyword">if</span> (thread-&gt;machine.ids) {
+		zfree(ids_zone, thread-&gt;machine.ids);
+		thread-&gt;machine.ids = NULL;
+	}
+
+	<span class="enscript-keyword">return</span>  KERN_SUCCESS;
+}
+
+uint32_t
+<span class="enscript-function-name">get_eflags_exportmask</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> EFL_USER_SET;
+}
+
+<span class="enscript-comment">/*
+ * x86_SAVED_STATE32	 - internal save/restore general register state on 32/64 bit processors
+ *			   for 32bit tasks only
+ * x86_SAVED_STATE64	 - internal save/restore general register state on 64 bit processors
+ *			   for 64bit tasks only
+ * x86_THREAD_STATE32	 - external set/get general register state on 32/64 bit processors
+ *			   for 32bit tasks only
+ * x86_THREAD_STATE64	 - external set/get general register state on 64 bit processors
+ *			   for 64bit tasks only
+ * x86_SAVED_STATE	 - external set/get general register state on 32/64 bit processors
+ *			   for either 32bit or 64bit tasks
+ * x86_FLOAT_STATE32	 - internal/external save/restore float and xmm state on 32/64 bit processors
+ *			   for 32bit tasks only
+ * x86_FLOAT_STATE64	 - internal/external save/restore float and xmm state on 64 bit processors
+ *			   for 64bit tasks only
+ * x86_FLOAT_STATE	 - external save/restore float and xmm state on 32/64 bit processors
+ *			   for either 32bit or 64bit tasks
+ * x86_EXCEPTION_STATE32 - external get exception state on 32/64 bit processors
+ *			   for 32bit tasks only
+ * x86_EXCEPTION_STATE64 - external get exception state on 64 bit processors
+ *			   for 64bit tasks only
+ * x86_EXCEPTION_STATE   - external get exception state on 323/64 bit processors
+ *			   for either 32bit or 64bit tasks
+ */</span>
+
+ 
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">get_exception_state64</span>(thread_t thread, x86_exception_state64_t *es)
+{
+        x86_saved_state64_t *saved_state;
+
+        saved_state = USER_REGS64(thread);
+
+	es-&gt;trapno = saved_state-&gt;isf.trapno;
+	es-&gt;cpu = saved_state-&gt;isf.cpu;
+	es-&gt;err = (typeof(es-&gt;err))saved_state-&gt;isf.err;
+	es-&gt;faultvaddr = saved_state-&gt;cr2;
+}		
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">get_exception_state32</span>(thread_t thread, x86_exception_state32_t *es)
+{
+        x86_saved_state32_t *saved_state;
+
+        saved_state = USER_REGS32(thread);
+
+	es-&gt;trapno = saved_state-&gt;trapno;
+	es-&gt;cpu = saved_state-&gt;cpu;
+	es-&gt;err = saved_state-&gt;err;
+	es-&gt;faultvaddr = saved_state-&gt;cr2;
+}		
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">set_thread_state32</span>(thread_t thread, x86_thread_state32_t *ts)
+{
+        x86_saved_state32_t	*saved_state;
+
+	pal_register_cache_state(thread, DIRTY);
+
+	saved_state = USER_REGS32(thread);
+
+	<span class="enscript-comment">/*
+	 * Scrub segment selector values:
+	 */</span>
+	ts-&gt;cs = USER_CS;
+	<span class="enscript-comment">/*
+	 * On a 64 bit kernel, we always override the data segments,
+	 * as the actual selector numbers have changed. This also
+	 * means that we don't support setting the data segments
+	 * manually any more.
+	 */</span>
+	ts-&gt;ss = USER_DS;
+	ts-&gt;ds = USER_DS;
+	ts-&gt;es = USER_DS;
+
+	<span class="enscript-comment">/* Set GS to CTHREAD only if's been established */</span>
+	ts-&gt;gs = thread-&gt;machine.cthread_self ? USER_CTHREAD : NULL_SEG;
+ 
+	<span class="enscript-comment">/* Check segment selectors are safe */</span>
+	<span class="enscript-keyword">if</span> (!valid_user_segment_selectors(ts-&gt;cs,
+					  ts-&gt;ss,
+					  ts-&gt;ds,
+					  ts-&gt;es,
+					  ts-&gt;fs,
+					  ts-&gt;gs))
+		<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+	saved_state-&gt;eax = ts-&gt;eax;
+	saved_state-&gt;ebx = ts-&gt;ebx;
+	saved_state-&gt;ecx = ts-&gt;ecx;
+	saved_state-&gt;edx = ts-&gt;edx;
+	saved_state-&gt;edi = ts-&gt;edi;
+	saved_state-&gt;esi = ts-&gt;esi;
+	saved_state-&gt;ebp = ts-&gt;ebp;
+	saved_state-&gt;uesp = ts-&gt;esp;
+	saved_state-&gt;efl = (ts-&gt;eflags &amp; ~EFL_USER_CLEAR) | EFL_USER_SET;
+	saved_state-&gt;eip = ts-&gt;eip;
+	saved_state-&gt;cs = ts-&gt;cs;
+	saved_state-&gt;ss = ts-&gt;ss;
+	saved_state-&gt;ds = ts-&gt;ds;
+	saved_state-&gt;es = ts-&gt;es;
+	saved_state-&gt;fs = ts-&gt;fs;
+	saved_state-&gt;gs = ts-&gt;gs;
+
+	<span class="enscript-comment">/*
+	 * If the trace trap bit is being set,
+	 * ensure that the user returns via iret
+	 * - which is signaled thusly:
+	 */</span>
+	<span class="enscript-keyword">if</span> ((saved_state-&gt;efl &amp; EFL_TF) &amp;&amp; saved_state-&gt;cs == SYSENTER_CS)
+		saved_state-&gt;cs = SYSENTER_TF_CS;
+
+	<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">set_thread_state64</span>(thread_t thread, x86_thread_state64_t *ts)
+{
+        x86_saved_state64_t	*saved_state;
+
+	pal_register_cache_state(thread, DIRTY);
+
+	saved_state = USER_REGS64(thread);
+
+	<span class="enscript-keyword">if</span> (!IS_USERADDR64_CANONICAL(ts-&gt;rsp) ||
+	    !IS_USERADDR64_CANONICAL(ts-&gt;rip))
+		<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+	saved_state-&gt;r8 = ts-&gt;r8;
+	saved_state-&gt;r9 = ts-&gt;r9;
+	saved_state-&gt;r10 = ts-&gt;r10;
+	saved_state-&gt;r11 = ts-&gt;r11;
+	saved_state-&gt;r12 = ts-&gt;r12;
+	saved_state-&gt;r13 = ts-&gt;r13;
+	saved_state-&gt;r14 = ts-&gt;r14;
+	saved_state-&gt;r15 = ts-&gt;r15;
+	saved_state-&gt;rax = ts-&gt;rax;
+	saved_state-&gt;rbx = ts-&gt;rbx;
+	saved_state-&gt;rcx = ts-&gt;rcx;
+	saved_state-&gt;rdx = ts-&gt;rdx;
+	saved_state-&gt;rdi = ts-&gt;rdi;
+	saved_state-&gt;rsi = ts-&gt;rsi;
+	saved_state-&gt;rbp = ts-&gt;rbp;
+	saved_state-&gt;isf.rsp = ts-&gt;rsp;
+	saved_state-&gt;isf.rflags = (ts-&gt;rflags &amp; ~EFL_USER_CLEAR) | EFL_USER_SET;
+	saved_state-&gt;isf.rip = ts-&gt;rip;
+	saved_state-&gt;isf.cs = USER64_CS;
+	saved_state-&gt;fs = (uint32_t)ts-&gt;fs;
+	saved_state-&gt;gs = (uint32_t)ts-&gt;gs;
+
+	<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+}
+
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">get_thread_state32</span>(thread_t thread, x86_thread_state32_t *ts)
+{
+        x86_saved_state32_t	*saved_state;
+
+	pal_register_cache_state(thread, VALID);
+
+	saved_state = USER_REGS32(thread);
+
+	ts-&gt;eax = saved_state-&gt;eax;
+	ts-&gt;ebx = saved_state-&gt;ebx;
+	ts-&gt;ecx = saved_state-&gt;ecx;
+	ts-&gt;edx = saved_state-&gt;edx;
+	ts-&gt;edi = saved_state-&gt;edi;
+	ts-&gt;esi = saved_state-&gt;esi;
+	ts-&gt;ebp = saved_state-&gt;ebp;
+	ts-&gt;esp = saved_state-&gt;uesp;
+	ts-&gt;eflags = saved_state-&gt;efl;
+	ts-&gt;eip = saved_state-&gt;eip;
+	ts-&gt;cs = saved_state-&gt;cs;
+	ts-&gt;ss = saved_state-&gt;ss;
+	ts-&gt;ds = saved_state-&gt;ds;
+	ts-&gt;es = saved_state-&gt;es;
+	ts-&gt;fs = saved_state-&gt;fs;
+	ts-&gt;gs = saved_state-&gt;gs;
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">get_thread_state64</span>(thread_t thread, x86_thread_state64_t *ts)
+{
+        x86_saved_state64_t	*saved_state;
+
+	pal_register_cache_state(thread, VALID);
+
+	saved_state = USER_REGS64(thread);
+
+	ts-&gt;r8 = saved_state-&gt;r8;
+	ts-&gt;r9 = saved_state-&gt;r9;
+	ts-&gt;r10 = saved_state-&gt;r10;
+	ts-&gt;r11 = saved_state-&gt;r11;
+	ts-&gt;r12 = saved_state-&gt;r12;
+	ts-&gt;r13 = saved_state-&gt;r13;
+	ts-&gt;r14 = saved_state-&gt;r14;
+	ts-&gt;r15 = saved_state-&gt;r15;
+	ts-&gt;rax = saved_state-&gt;rax;
+	ts-&gt;rbx = saved_state-&gt;rbx;
+	ts-&gt;rcx = saved_state-&gt;rcx;
+	ts-&gt;rdx = saved_state-&gt;rdx;
+	ts-&gt;rdi = saved_state-&gt;rdi;
+	ts-&gt;rsi = saved_state-&gt;rsi;
+	ts-&gt;rbp = saved_state-&gt;rbp;
+	ts-&gt;rsp = saved_state-&gt;isf.rsp;
+	ts-&gt;rflags = saved_state-&gt;isf.rflags;
+	ts-&gt;rip = saved_state-&gt;isf.rip;
+	ts-&gt;cs = saved_state-&gt;isf.cs;
+	ts-&gt;fs = saved_state-&gt;fs;
+	ts-&gt;gs = saved_state-&gt;gs;
+}
+
+
+<span class="enscript-comment">/*
+ *	act_machine_set_state:
+ *
+ *	Set the status of the specified thread.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">machine_thread_set_state</span>(
+	thread_t thr_act,
+	thread_flavor_t flavor,
+	thread_state_t tstate,
+	mach_msg_type_number_t count)
+{
+	<span class="enscript-keyword">switch</span> (flavor) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_SAVED_STATE32</span>:
+	{
+		x86_saved_state32_t	*state;
+		x86_saved_state32_t	*saved_state;
+
+		<span class="enscript-keyword">if</span> (count &lt; x86_SAVED_STATE32_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+        
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		state = (x86_saved_state32_t *) tstate;
+
+		<span class="enscript-comment">/* Check segment selectors are safe */</span>
+		<span class="enscript-keyword">if</span> (!valid_user_segment_selectors(state-&gt;cs,
+					state-&gt;ss,
+					state-&gt;ds,
+					state-&gt;es,
+					state-&gt;fs,
+					state-&gt;gs))
+			<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+		pal_register_cache_state(thr_act, DIRTY);
+
+		saved_state = USER_REGS32(thr_act);
+
+		<span class="enscript-comment">/*
+		 * General registers
+		 */</span>
+		saved_state-&gt;edi = state-&gt;edi;
+		saved_state-&gt;esi = state-&gt;esi;
+		saved_state-&gt;ebp = state-&gt;ebp;
+		saved_state-&gt;uesp = state-&gt;uesp;
+		saved_state-&gt;ebx = state-&gt;ebx;
+		saved_state-&gt;edx = state-&gt;edx;
+		saved_state-&gt;ecx = state-&gt;ecx;
+		saved_state-&gt;eax = state-&gt;eax;
+		saved_state-&gt;eip = state-&gt;eip;
+
+		saved_state-&gt;efl = (state-&gt;efl &amp; ~EFL_USER_CLEAR) | EFL_USER_SET;
+
+		<span class="enscript-comment">/*
+		 * If the trace trap bit is being set,
+		 * ensure that the user returns via iret
+		 * - which is signaled thusly:
+		 */</span>
+		<span class="enscript-keyword">if</span> ((saved_state-&gt;efl &amp; EFL_TF) &amp;&amp; state-&gt;cs == SYSENTER_CS)
+			state-&gt;cs = SYSENTER_TF_CS;
+
+		<span class="enscript-comment">/*
+		 * User setting segment registers.
+		 * Code and stack selectors have already been
+		 * checked.  Others will be reset by 'iret'
+		 * if they are not valid.
+		 */</span>
+		saved_state-&gt;cs = state-&gt;cs;
+		saved_state-&gt;ss = state-&gt;ss;
+		saved_state-&gt;ds = state-&gt;ds;
+		saved_state-&gt;es = state-&gt;es;
+		saved_state-&gt;fs = state-&gt;fs;
+		saved_state-&gt;gs = state-&gt;gs;
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_SAVED_STATE64</span>:
+	{
+		x86_saved_state64_t	*state;
+		x86_saved_state64_t	*saved_state;
+
+		<span class="enscript-keyword">if</span> (count &lt; x86_SAVED_STATE64_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> (!thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		state = (x86_saved_state64_t *) tstate;
+
+		<span class="enscript-comment">/* Verify that the supplied code segment selector is
+		 * valid. In 64-bit mode, the FS and GS segment overrides
+		 * use the FS.base and GS.base MSRs to calculate
+		 * base addresses, and the trampolines don't directly
+		 * restore the segment registers--hence they are no
+		 * longer relevant for validation.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!valid_user_code_selector(state-&gt;isf.cs))
+		        <span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+		
+		<span class="enscript-comment">/* Check pc and stack are canonical addresses */</span>
+		<span class="enscript-keyword">if</span> (!IS_USERADDR64_CANONICAL(state-&gt;isf.rsp) ||
+		    !IS_USERADDR64_CANONICAL(state-&gt;isf.rip))
+			<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+		pal_register_cache_state(thr_act, DIRTY);
+
+		saved_state = USER_REGS64(thr_act);
+
+		<span class="enscript-comment">/*
+		 * General registers
+		 */</span>
+		saved_state-&gt;r8 = state-&gt;r8;
+		saved_state-&gt;r9 = state-&gt;r9;
+		saved_state-&gt;r10 = state-&gt;r10;
+		saved_state-&gt;r11 = state-&gt;r11;
+		saved_state-&gt;r12 = state-&gt;r12;
+		saved_state-&gt;r13 = state-&gt;r13;
+		saved_state-&gt;r14 = state-&gt;r14;
+		saved_state-&gt;r15 = state-&gt;r15;
+		saved_state-&gt;rdi = state-&gt;rdi;
+		saved_state-&gt;rsi = state-&gt;rsi;
+		saved_state-&gt;rbp = state-&gt;rbp;
+		saved_state-&gt;rbx = state-&gt;rbx;
+		saved_state-&gt;rdx = state-&gt;rdx;
+		saved_state-&gt;rcx = state-&gt;rcx;
+		saved_state-&gt;rax = state-&gt;rax;
+		saved_state-&gt;isf.rsp = state-&gt;isf.rsp;
+		saved_state-&gt;isf.rip = state-&gt;isf.rip;
+
+		saved_state-&gt;isf.rflags = (state-&gt;isf.rflags &amp; ~EFL_USER_CLEAR) | EFL_USER_SET;
+
+		<span class="enscript-comment">/*
+		 * User setting segment registers.
+		 * Code and stack selectors have already been
+		 * checked.  Others will be reset by 'sys'
+		 * if they are not valid.
+		 */</span>
+		saved_state-&gt;isf.cs = state-&gt;isf.cs;
+		saved_state-&gt;isf.ss = state-&gt;isf.ss;
+		saved_state-&gt;fs = state-&gt;fs;
+		saved_state-&gt;gs = state-&gt;gs;
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_FLOAT_STATE32</span>:
+	{
+		<span class="enscript-keyword">if</span> (count != x86_FLOAT_STATE32_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">return</span> fpu_set_fxstate(thr_act, tstate, flavor);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_FLOAT_STATE64</span>:
+	{
+		<span class="enscript-keyword">if</span> (count != x86_FLOAT_STATE64_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> ( !thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">return</span> fpu_set_fxstate(thr_act, tstate, flavor);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_FLOAT_STATE</span>:
+	{   
+		x86_float_state_t       *state;
+
+		<span class="enscript-keyword">if</span> (count != x86_FLOAT_STATE_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		state = (x86_float_state_t *)tstate;
+		<span class="enscript-keyword">if</span> (state-&gt;fsh.flavor == x86_FLOAT_STATE64 &amp;&amp; state-&gt;fsh.count == x86_FLOAT_STATE64_COUNT &amp;&amp;
+		    thread_is_64bit(thr_act)) {
+			<span class="enscript-keyword">return</span> fpu_set_fxstate(thr_act, (thread_state_t)&amp;state-&gt;ufs.fs64, x86_FLOAT_STATE64);
+		}
+		<span class="enscript-keyword">if</span> (state-&gt;fsh.flavor == x86_FLOAT_STATE32 &amp;&amp; state-&gt;fsh.count == x86_FLOAT_STATE32_COUNT &amp;&amp;
+		    !thread_is_64bit(thr_act)) {
+			<span class="enscript-keyword">return</span> fpu_set_fxstate(thr_act, (thread_state_t)&amp;state-&gt;ufs.fs32, x86_FLOAT_STATE32); 
+		}
+		<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_AVX_STATE32</span>:
+	{
+		<span class="enscript-keyword">if</span> (count != x86_AVX_STATE32_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">return</span> fpu_set_fxstate(thr_act, tstate, flavor);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_AVX_STATE64</span>:
+	{
+		<span class="enscript-keyword">if</span> (count != x86_AVX_STATE64_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> (!thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">return</span> fpu_set_fxstate(thr_act, tstate, flavor);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_AVX_STATE</span>:
+	{   
+		x86_avx_state_t       *state;
+
+		<span class="enscript-keyword">if</span> (count != x86_AVX_STATE_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		state = (x86_avx_state_t *)tstate;
+		<span class="enscript-keyword">if</span> (state-&gt;ash.flavor == x86_AVX_STATE64 &amp;&amp;
+		    state-&gt;ash.count  == x86_FLOAT_STATE64_COUNT &amp;&amp;
+		    thread_is_64bit(thr_act)) {
+			<span class="enscript-keyword">return</span> fpu_set_fxstate(thr_act,
+					       (thread_state_t)&amp;state-&gt;ufs.as64,
+					       x86_FLOAT_STATE64);
+		}
+		<span class="enscript-keyword">if</span> (state-&gt;ash.flavor == x86_FLOAT_STATE32 &amp;&amp;
+		    state-&gt;ash.count  == x86_FLOAT_STATE32_COUNT &amp;&amp;
+		    !thread_is_64bit(thr_act)) {
+			<span class="enscript-keyword">return</span> fpu_set_fxstate(thr_act,
+					       (thread_state_t)&amp;state-&gt;ufs.as32,
+					       x86_FLOAT_STATE32); 
+		}
+		<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_THREAD_STATE32</span>: 
+	{
+		<span class="enscript-keyword">if</span> (count != x86_THREAD_STATE32_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">return</span> set_thread_state32(thr_act, (x86_thread_state32_t *)tstate);
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_THREAD_STATE64</span>: 
+	{
+		<span class="enscript-keyword">if</span> (count != x86_THREAD_STATE64_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> (!thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">return</span> set_thread_state64(thr_act, (x86_thread_state64_t *)tstate);
+
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_THREAD_STATE</span>:
+	{
+		x86_thread_state_t      *state;
+
+		<span class="enscript-keyword">if</span> (count != x86_THREAD_STATE_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		state = (x86_thread_state_t *)tstate;
+
+		<span class="enscript-keyword">if</span> (state-&gt;tsh.flavor == x86_THREAD_STATE64 &amp;&amp;
+		    state-&gt;tsh.count == x86_THREAD_STATE64_COUNT &amp;&amp;
+		    thread_is_64bit(thr_act)) {
+			<span class="enscript-keyword">return</span> set_thread_state64(thr_act, &amp;state-&gt;uts.ts64);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (state-&gt;tsh.flavor == x86_THREAD_STATE32 &amp;&amp;
+			   state-&gt;tsh.count == x86_THREAD_STATE32_COUNT &amp;&amp;
+			   !thread_is_64bit(thr_act)) {
+			<span class="enscript-keyword">return</span> set_thread_state32(thr_act, &amp;state-&gt;uts.ts32);
+		} <span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_DEBUG_STATE32</span>:
+	{
+		x86_debug_state32_t *state;
+		kern_return_t ret;
+
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		state = (x86_debug_state32_t *)tstate;
+
+		ret = set_debug_state32(thr_act, state);
+
+		<span class="enscript-keyword">return</span> ret;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_DEBUG_STATE64</span>:
+	{
+		x86_debug_state64_t *state;
+		kern_return_t ret;
+
+		<span class="enscript-keyword">if</span> (!thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		state = (x86_debug_state64_t *)tstate;
+
+		ret = set_debug_state64(thr_act, state);
+
+		<span class="enscript-keyword">return</span> ret;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_DEBUG_STATE</span>:
+	{
+		x86_debug_state_t *state;
+		kern_return_t ret = KERN_INVALID_ARGUMENT;
+
+		<span class="enscript-keyword">if</span> (count != x86_DEBUG_STATE_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+		state = (x86_debug_state_t *)tstate;
+		<span class="enscript-keyword">if</span> (state-&gt;dsh.flavor == x86_DEBUG_STATE64 &amp;&amp;
+				state-&gt;dsh.count == x86_DEBUG_STATE64_COUNT &amp;&amp;
+				thread_is_64bit(thr_act)) {
+			ret = set_debug_state64(thr_act, &amp;state-&gt;uds.ds64);
+		}
+		<span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">if</span> (state-&gt;dsh.flavor == x86_DEBUG_STATE32 &amp;&amp;
+			    state-&gt;dsh.count == x86_DEBUG_STATE32_COUNT &amp;&amp;
+			    !thread_is_64bit(thr_act)) {
+				ret = set_debug_state32(thr_act, &amp;state-&gt;uds.ds32);
+		}
+		<span class="enscript-keyword">return</span> ret;
+	}
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+	}
+
+	<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+}
+
+
+
+<span class="enscript-comment">/*
+ *	thread_getstatus:
+ *
+ *	Get the status of the specified thread.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">machine_thread_get_state</span>(
+	thread_t thr_act,
+	thread_flavor_t flavor,
+	thread_state_t tstate,
+	mach_msg_type_number_t *count)
+{
+
+	<span class="enscript-keyword">switch</span> (flavor)  {
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_STATE_FLAVOR_LIST</span>:
+	    {
+		<span class="enscript-keyword">if</span> (*count &lt; 3)
+		        <span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	        tstate[0] = i386_THREAD_STATE;
+		tstate[1] = i386_FLOAT_STATE;
+		tstate[2] = i386_EXCEPTION_STATE;
+
+		*count = 3;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_STATE_FLAVOR_LIST_NEW</span>:
+	    {
+		<span class="enscript-keyword">if</span> (*count &lt; 4)
+		        <span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	        tstate[0] = x86_THREAD_STATE;
+		tstate[1] = x86_FLOAT_STATE;
+		tstate[2] = x86_EXCEPTION_STATE;
+		tstate[3] = x86_DEBUG_STATE;
+
+		*count = 4;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_STATE_FLAVOR_LIST_10_9</span>:
+	    {
+		<span class="enscript-keyword">if</span> (*count &lt; 5)
+		        <span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	        tstate[0] = x86_THREAD_STATE;
+		tstate[1] = x86_FLOAT_STATE;
+		tstate[2] = x86_EXCEPTION_STATE;
+		tstate[3] = x86_DEBUG_STATE;
+		tstate[4] = x86_AVX_STATE;
+
+		*count = 5;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_SAVED_STATE32</span>:
+	    {
+		x86_saved_state32_t	*state;
+		x86_saved_state32_t	*saved_state;
+
+		<span class="enscript-keyword">if</span> (*count &lt; x86_SAVED_STATE32_COUNT)
+		        <span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		state = (x86_saved_state32_t *) tstate;
+		saved_state = USER_REGS32(thr_act);
+
+		<span class="enscript-comment">/*
+		 * First, copy everything:
+		 */</span>
+		*state = *saved_state;
+		state-&gt;ds = saved_state-&gt;ds &amp; 0xffff;
+		state-&gt;es = saved_state-&gt;es &amp; 0xffff;
+		state-&gt;fs = saved_state-&gt;fs &amp; 0xffff;
+		state-&gt;gs = saved_state-&gt;gs &amp; 0xffff;
+
+		*count = x86_SAVED_STATE32_COUNT;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_SAVED_STATE64</span>:
+	    {
+		x86_saved_state64_t	*state;
+		x86_saved_state64_t	*saved_state;
+
+		<span class="enscript-keyword">if</span> (*count &lt; x86_SAVED_STATE64_COUNT)
+		        <span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> (!thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		state = (x86_saved_state64_t *)tstate;
+		saved_state = USER_REGS64(thr_act);
+
+		<span class="enscript-comment">/*
+		 * First, copy everything:
+		 */</span>
+		*state = *saved_state;
+		state-&gt;fs = saved_state-&gt;fs &amp; 0xffff;
+		state-&gt;gs = saved_state-&gt;gs &amp; 0xffff;
+
+		*count = x86_SAVED_STATE64_COUNT;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_FLOAT_STATE32</span>:
+	    {
+		<span class="enscript-keyword">if</span> (*count &lt; x86_FLOAT_STATE32_COUNT) 
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		*count = x86_FLOAT_STATE32_COUNT;
+
+		<span class="enscript-keyword">return</span> fpu_get_fxstate(thr_act, tstate, flavor);
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_FLOAT_STATE64</span>:
+	    {
+		<span class="enscript-keyword">if</span> (*count &lt; x86_FLOAT_STATE64_COUNT) 
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> ( !thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		*count = x86_FLOAT_STATE64_COUNT;
+
+		<span class="enscript-keyword">return</span> fpu_get_fxstate(thr_act, tstate, flavor);
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_FLOAT_STATE</span>:
+	    {
+	        x86_float_state_t	*state;
+		kern_return_t		kret;
+
+		<span class="enscript-keyword">if</span> (*count &lt; x86_FLOAT_STATE_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		state = (x86_float_state_t *)tstate;
+
+		<span class="enscript-comment">/*
+		 * no need to bzero... currently 
+		 * x86_FLOAT_STATE64_COUNT == x86_FLOAT_STATE32_COUNT
+		 */</span>
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act)) {
+		        state-&gt;fsh.flavor = x86_FLOAT_STATE64;
+		        state-&gt;fsh.count  = x86_FLOAT_STATE64_COUNT;
+
+			kret = fpu_get_fxstate(thr_act, (thread_state_t)&amp;state-&gt;ufs.fs64, x86_FLOAT_STATE64);
+		} <span class="enscript-keyword">else</span> {
+		        state-&gt;fsh.flavor = x86_FLOAT_STATE32;
+			state-&gt;fsh.count  = x86_FLOAT_STATE32_COUNT;
+
+			kret = fpu_get_fxstate(thr_act, (thread_state_t)&amp;state-&gt;ufs.fs32, x86_FLOAT_STATE32);
+		}
+		*count = x86_FLOAT_STATE_COUNT;
+
+		<span class="enscript-keyword">return</span>(kret);
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_AVX_STATE32</span>:
+	    {
+		<span class="enscript-keyword">if</span> (*count != x86_AVX_STATE32_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		*count = x86_AVX_STATE32_COUNT;
+
+		<span class="enscript-keyword">return</span> fpu_get_fxstate(thr_act, tstate, flavor);
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_AVX_STATE64</span>:
+	    {
+		<span class="enscript-keyword">if</span> (*count != x86_AVX_STATE64_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> ( !thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		*count = x86_AVX_STATE64_COUNT;
+
+		<span class="enscript-keyword">return</span> fpu_get_fxstate(thr_act, tstate, flavor);
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_AVX_STATE</span>:
+	    {
+	        x86_avx_state_t		*state;
+		kern_return_t		kret;
+
+		<span class="enscript-keyword">if</span> (*count &lt; x86_AVX_STATE_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		state = (x86_avx_state_t *)tstate;
+
+		bzero((<span class="enscript-type">char</span> *)state, <span class="enscript-keyword">sizeof</span>(x86_avx_state_t));
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act)) {
+		        state-&gt;ash.flavor = x86_AVX_STATE64;
+		        state-&gt;ash.count  = x86_AVX_STATE64_COUNT;
+			kret = fpu_get_fxstate(thr_act,
+					       (thread_state_t)&amp;state-&gt;ufs.as64,
+					       x86_AVX_STATE64);
+		} <span class="enscript-keyword">else</span> {
+		        state-&gt;ash.flavor = x86_AVX_STATE32;
+			state-&gt;ash.count  = x86_AVX_STATE32_COUNT;
+			kret = fpu_get_fxstate(thr_act,
+					       (thread_state_t)&amp;state-&gt;ufs.as32,
+					       x86_AVX_STATE32);
+		}
+		*count = x86_AVX_STATE_COUNT;
+
+		<span class="enscript-keyword">return</span>(kret);
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_THREAD_STATE32</span>: 
+	    {
+		<span class="enscript-keyword">if</span> (*count &lt; x86_THREAD_STATE32_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act))
+		        <span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		*count = x86_THREAD_STATE32_COUNT;
+
+		get_thread_state32(thr_act, (x86_thread_state32_t *)tstate);
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_THREAD_STATE64</span>:
+	    {
+		<span class="enscript-keyword">if</span> (*count &lt; x86_THREAD_STATE64_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+                <span class="enscript-keyword">if</span> ( !thread_is_64bit(thr_act))
+		        <span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		*count = x86_THREAD_STATE64_COUNT;
+
+		get_thread_state64(thr_act, (x86_thread_state64_t *)tstate);
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_THREAD_STATE</span>:
+	    {
+		x86_thread_state_t 	*state;
+
+		<span class="enscript-keyword">if</span> (*count &lt; x86_THREAD_STATE_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		state = (x86_thread_state_t *)tstate;
+
+		bzero((<span class="enscript-type">char</span> *)state, <span class="enscript-keyword">sizeof</span>(x86_thread_state_t));
+
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act)) {
+			state-&gt;tsh.flavor = x86_THREAD_STATE64;
+			state-&gt;tsh.count  = x86_THREAD_STATE64_COUNT;
+
+		        get_thread_state64(thr_act, &amp;state-&gt;uts.ts64);
+		} <span class="enscript-keyword">else</span> {
+			state-&gt;tsh.flavor = x86_THREAD_STATE32;
+			state-&gt;tsh.count  = x86_THREAD_STATE32_COUNT;
+
+		        get_thread_state32(thr_act, &amp;state-&gt;uts.ts32);
+		}
+		*count = x86_THREAD_STATE_COUNT;
+
+		<span class="enscript-keyword">break</span>;
+	    }
+
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_EXCEPTION_STATE32</span>:
+	    {
+		<span class="enscript-keyword">if</span> (*count &lt; x86_EXCEPTION_STATE32_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		*count = x86_EXCEPTION_STATE32_COUNT;
+
+		get_exception_state32(thr_act, (x86_exception_state32_t *)tstate);
+		<span class="enscript-comment">/*
+		 * Suppress the cpu number for binary compatibility
+		 * of this deprecated state.
+		 */</span>
+		((x86_exception_state32_t *)tstate)-&gt;cpu = 0;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_EXCEPTION_STATE64</span>:
+	    {
+		<span class="enscript-keyword">if</span> (*count &lt; x86_EXCEPTION_STATE64_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> ( !thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		*count = x86_EXCEPTION_STATE64_COUNT;
+
+		get_exception_state64(thr_act, (x86_exception_state64_t *)tstate);
+		<span class="enscript-comment">/*
+		 * Suppress the cpu number for binary compatibility
+		 * of this deprecated state.
+		 */</span>
+		((x86_exception_state64_t *)tstate)-&gt;cpu = 0;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_EXCEPTION_STATE</span>:
+	    {
+		x86_exception_state_t 	*state;
+
+		<span class="enscript-keyword">if</span> (*count &lt; x86_EXCEPTION_STATE_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		state = (x86_exception_state_t *)tstate;
+
+		bzero((<span class="enscript-type">char</span> *)state, <span class="enscript-keyword">sizeof</span>(x86_exception_state_t));
+
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act)) {
+			state-&gt;esh.flavor = x86_EXCEPTION_STATE64;
+			state-&gt;esh.count  = x86_EXCEPTION_STATE64_COUNT;
+
+		        get_exception_state64(thr_act, &amp;state-&gt;ues.es64);
+		} <span class="enscript-keyword">else</span> {
+			state-&gt;esh.flavor = x86_EXCEPTION_STATE32;
+			state-&gt;esh.count  = x86_EXCEPTION_STATE32_COUNT;
+
+		        get_exception_state32(thr_act, &amp;state-&gt;ues.es32);
+		}
+		*count = x86_EXCEPTION_STATE_COUNT;
+
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_DEBUG_STATE32</span>:
+	{
+		<span class="enscript-keyword">if</span> (*count &lt; x86_DEBUG_STATE32_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		get_debug_state32(thr_act, (x86_debug_state32_t *)tstate);
+
+		*count = x86_DEBUG_STATE32_COUNT;
+
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_DEBUG_STATE64</span>:
+	{
+		<span class="enscript-keyword">if</span> (*count &lt; x86_DEBUG_STATE64_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+		
+		<span class="enscript-keyword">if</span> (!thread_is_64bit(thr_act))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		get_debug_state64(thr_act, (x86_debug_state64_t *)tstate);
+
+		*count = x86_DEBUG_STATE64_COUNT;
+
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">x86_DEBUG_STATE</span>:
+	{
+		x86_debug_state_t   *state;
+
+		<span class="enscript-keyword">if</span> (*count &lt; x86_DEBUG_STATE_COUNT)
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		state = (x86_debug_state_t *)tstate;
+
+		bzero(state, <span class="enscript-keyword">sizeof</span> *state);
+
+		<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act)) {
+			state-&gt;dsh.flavor = x86_DEBUG_STATE64;
+			state-&gt;dsh.count  = x86_DEBUG_STATE64_COUNT;
+
+			get_debug_state64(thr_act, &amp;state-&gt;uds.ds64);
+		} <span class="enscript-keyword">else</span> {
+			state-&gt;dsh.flavor = x86_DEBUG_STATE32;
+			state-&gt;dsh.count  = x86_DEBUG_STATE32_COUNT;
+
+			get_debug_state32(thr_act, &amp;state-&gt;uds.ds32);
+		}
+		*count = x86_DEBUG_STATE_COUNT;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+	}
+
+	<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+}
+
+kern_return_t
+<span class="enscript-function-name">machine_thread_get_kern_state</span>(
+		thread_t		thread,
+		thread_flavor_t		flavor,
+		thread_state_t		tstate,
+		mach_msg_type_number_t	*count)
+{
+	x86_saved_state_t	*int_state = current_cpu_datap()-&gt;cpu_int_state;
+
+	<span class="enscript-comment">/*
+	 * This works only for an interrupted kernel thread
+	 */</span>
+	<span class="enscript-keyword">if</span> (thread != current_thread() || int_state == NULL)
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+
+	<span class="enscript-keyword">switch</span> (flavor) {
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_THREAD_STATE32</span>: {
+		x86_thread_state32_t *state;
+		x86_saved_state32_t *saved_state;
+
+		<span class="enscript-keyword">if</span> (!is_saved_state32(int_state) ||
+		    *count &lt; x86_THREAD_STATE32_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+		state = (x86_thread_state32_t *) tstate;
+
+		saved_state = saved_state32(int_state);
+		<span class="enscript-comment">/*
+		 * General registers.
+		 */</span>
+		state-&gt;eax = saved_state-&gt;eax;
+		state-&gt;ebx = saved_state-&gt;ebx;
+		state-&gt;ecx = saved_state-&gt;ecx;
+		state-&gt;edx = saved_state-&gt;edx;
+		state-&gt;edi = saved_state-&gt;edi;
+		state-&gt;esi = saved_state-&gt;esi;
+		state-&gt;ebp = saved_state-&gt;ebp;
+		state-&gt;esp = saved_state-&gt;uesp;
+		state-&gt;eflags = saved_state-&gt;efl;
+		state-&gt;eip = saved_state-&gt;eip;
+		state-&gt;cs = saved_state-&gt;cs;
+		state-&gt;ss = saved_state-&gt;ss;
+		state-&gt;ds = saved_state-&gt;ds &amp; 0xffff;
+		state-&gt;es = saved_state-&gt;es &amp; 0xffff;
+		state-&gt;fs = saved_state-&gt;fs &amp; 0xffff;
+		state-&gt;gs = saved_state-&gt;gs &amp; 0xffff;
+
+		*count = x86_THREAD_STATE32_COUNT;
+
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	    }
+  
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_THREAD_STATE64</span>: {
+		x86_thread_state64_t	*state;
+		x86_saved_state64_t	*saved_state;
+
+		<span class="enscript-keyword">if</span> (!is_saved_state64(int_state) ||
+		    *count &lt; x86_THREAD_STATE64_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+		state = (x86_thread_state64_t *) tstate;
+
+		saved_state = saved_state64(int_state);
+		<span class="enscript-comment">/*
+		 * General registers.
+		 */</span>
+		state-&gt;rax = saved_state-&gt;rax;
+		state-&gt;rbx = saved_state-&gt;rbx;
+		state-&gt;rcx = saved_state-&gt;rcx;
+		state-&gt;rdx = saved_state-&gt;rdx;
+		state-&gt;rdi = saved_state-&gt;rdi;
+		state-&gt;rsi = saved_state-&gt;rsi;
+		state-&gt;rbp = saved_state-&gt;rbp;
+		state-&gt;rsp = saved_state-&gt;isf.rsp;
+		state-&gt;r8 = saved_state-&gt;r8;
+		state-&gt;r9 = saved_state-&gt;r9;
+		state-&gt;r10 = saved_state-&gt;r10;
+		state-&gt;r11 = saved_state-&gt;r11;
+		state-&gt;r12 = saved_state-&gt;r12;
+		state-&gt;r13 = saved_state-&gt;r13;
+		state-&gt;r14 = saved_state-&gt;r14;
+		state-&gt;r15 = saved_state-&gt;r15;
+
+		state-&gt;rip = saved_state-&gt;isf.rip;
+		state-&gt;rflags = saved_state-&gt;isf.rflags;
+		state-&gt;cs = saved_state-&gt;isf.cs;
+		state-&gt;fs = saved_state-&gt;fs &amp; 0xffff;
+		state-&gt;gs = saved_state-&gt;gs &amp; 0xffff;
+		*count = x86_THREAD_STATE64_COUNT;
+
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	    }
+  
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">x86_THREAD_STATE</span>: {
+		x86_thread_state_t *state = NULL;
+
+		<span class="enscript-keyword">if</span> (*count &lt; x86_THREAD_STATE_COUNT)
+			<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+		state = (x86_thread_state_t *) tstate;
+
+		<span class="enscript-keyword">if</span> (is_saved_state32(int_state)) {
+			x86_saved_state32_t *saved_state = saved_state32(int_state);
+
+			state-&gt;tsh.flavor = x86_THREAD_STATE32;
+			state-&gt;tsh.count = x86_THREAD_STATE32_COUNT;
+
+			<span class="enscript-comment">/*
+			 * General registers.
+			 */</span>
+			state-&gt;uts.ts32.eax = saved_state-&gt;eax;
+			state-&gt;uts.ts32.ebx = saved_state-&gt;ebx;
+			state-&gt;uts.ts32.ecx = saved_state-&gt;ecx;
+			state-&gt;uts.ts32.edx = saved_state-&gt;edx;
+			state-&gt;uts.ts32.edi = saved_state-&gt;edi;
+			state-&gt;uts.ts32.esi = saved_state-&gt;esi;
+			state-&gt;uts.ts32.ebp = saved_state-&gt;ebp;
+			state-&gt;uts.ts32.esp = saved_state-&gt;uesp;
+			state-&gt;uts.ts32.eflags = saved_state-&gt;efl;
+			state-&gt;uts.ts32.eip = saved_state-&gt;eip;
+			state-&gt;uts.ts32.cs = saved_state-&gt;cs;
+			state-&gt;uts.ts32.ss = saved_state-&gt;ss;
+			state-&gt;uts.ts32.ds = saved_state-&gt;ds &amp; 0xffff;
+			state-&gt;uts.ts32.es = saved_state-&gt;es &amp; 0xffff;
+			state-&gt;uts.ts32.fs = saved_state-&gt;fs &amp; 0xffff;
+			state-&gt;uts.ts32.gs = saved_state-&gt;gs &amp; 0xffff;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (is_saved_state64(int_state)) {
+			x86_saved_state64_t *saved_state = saved_state64(int_state);
+
+			state-&gt;tsh.flavor = x86_THREAD_STATE64;
+			state-&gt;tsh.count = x86_THREAD_STATE64_COUNT;
+
+			<span class="enscript-comment">/*
+			 * General registers.
+			 */</span>
+			state-&gt;uts.ts64.rax = saved_state-&gt;rax;
+			state-&gt;uts.ts64.rbx = saved_state-&gt;rbx;
+			state-&gt;uts.ts64.rcx = saved_state-&gt;rcx;
+			state-&gt;uts.ts64.rdx = saved_state-&gt;rdx;
+			state-&gt;uts.ts64.rdi = saved_state-&gt;rdi;
+			state-&gt;uts.ts64.rsi = saved_state-&gt;rsi;
+			state-&gt;uts.ts64.rbp = saved_state-&gt;rbp;
+			state-&gt;uts.ts64.rsp = saved_state-&gt;isf.rsp;
+			state-&gt;uts.ts64.r8 = saved_state-&gt;r8;
+			state-&gt;uts.ts64.r9 = saved_state-&gt;r9;
+			state-&gt;uts.ts64.r10 = saved_state-&gt;r10;
+			state-&gt;uts.ts64.r11 = saved_state-&gt;r11;
+			state-&gt;uts.ts64.r12 = saved_state-&gt;r12;
+			state-&gt;uts.ts64.r13 = saved_state-&gt;r13;
+			state-&gt;uts.ts64.r14 = saved_state-&gt;r14;
+			state-&gt;uts.ts64.r15 = saved_state-&gt;r15;
+
+			state-&gt;uts.ts64.rip = saved_state-&gt;isf.rip;
+			state-&gt;uts.ts64.rflags = saved_state-&gt;isf.rflags;
+			state-&gt;uts.ts64.cs = saved_state-&gt;isf.cs;
+			state-&gt;uts.ts64.fs = saved_state-&gt;fs &amp; 0xffff;
+			state-&gt;uts.ts64.gs = saved_state-&gt;gs &amp; 0xffff;
+		} <span class="enscript-keyword">else</span> {
+			panic(<span class="enscript-string">&quot;unknown thread state&quot;</span>);
+		}
+
+		*count = x86_THREAD_STATE_COUNT;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	    }
+	}
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">machine_thread_switch_addrmode</span>(thread_t thread)
+{
+	<span class="enscript-comment">/*
+	 * We don't want to be preempted until we're done
+	 * - particularly if we're switching the current thread
+	 */</span>
+	disable_preemption();
+
+	<span class="enscript-comment">/*
+	 * Reset the state saveareas. As we're resetting, we anticipate no
+	 * memory allocations in this path.
+	 */</span>
+	machine_thread_create(thread, thread-&gt;task);
+
+	<span class="enscript-comment">/* If we're switching ourselves, reset the pcb addresses etc. */</span>
+	<span class="enscript-keyword">if</span> (thread == current_thread()) {
+		boolean_t istate = ml_set_interrupts_enabled(FALSE);
+		act_machine_switch_pcb(NULL, thread);
+		ml_set_interrupts_enabled(istate);
+	}
+	enable_preemption();
+}
+
+
+
+<span class="enscript-comment">/*
+ * This is used to set the current thr_act/thread
+ * when starting up a new processor
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">machine_set_current_thread</span>(thread_t thread)
+{
+	current_cpu_datap()-&gt;cpu_active_thread = thread;
+}
+
+
+<span class="enscript-comment">/*
+ * Perform machine-dependent per-thread initializations
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">machine_thread_init</span>(<span class="enscript-type">void</span>)
+{
+	iss_zone = zinit(<span class="enscript-keyword">sizeof</span>(x86_saved_state_t),
+			thread_max * <span class="enscript-keyword">sizeof</span>(x86_saved_state_t),
+			THREAD_CHUNK * <span class="enscript-keyword">sizeof</span>(x86_saved_state_t),
+			<span class="enscript-string">&quot;x86_64 saved state&quot;</span>);
+
+        ids_zone = zinit(<span class="enscript-keyword">sizeof</span>(x86_debug_state64_t),
+			 thread_max * <span class="enscript-keyword">sizeof</span>(x86_debug_state64_t),
+			 THREAD_CHUNK * <span class="enscript-keyword">sizeof</span>(x86_debug_state64_t),
+			 <span class="enscript-string">&quot;x86_64 debug state&quot;</span>);
+
+	fpu_module_init();
+}
+
+
+
+user_addr_t
+<span class="enscript-function-name">get_useraddr</span>(<span class="enscript-type">void</span>)
+{
+        thread_t thr_act = current_thread();
+ 
+        <span class="enscript-keyword">if</span> (thread_is_64bit(thr_act)) {
+	        x86_saved_state64_t	*iss64;
+		
+		iss64 = USER_REGS64(thr_act);
+
+         	<span class="enscript-keyword">return</span>(iss64-&gt;isf.rip);
+	} <span class="enscript-keyword">else</span> {
+	        x86_saved_state32_t	*iss32;
+
+		iss32 = USER_REGS32(thr_act);
+
+         	<span class="enscript-keyword">return</span>(iss32-&gt;eip);
+	}
+}
+
+<span class="enscript-comment">/*
+ * detach and return a kernel stack from a thread
+ */</span>
+
+vm_offset_t
+<span class="enscript-function-name">machine_stack_detach</span>(thread_t thread)
+{
+	vm_offset_t     stack;
+
+	KERNEL_DEBUG(MACHDBG_CODE(DBG_MACH_SCHED, MACH_STACK_DETACH),
+		     (uintptr_t)thread_tid(thread), thread-&gt;priority,
+		     thread-&gt;sched_pri, 0,
+		     0);
+
+	stack = thread-&gt;kernel_stack;
+	thread-&gt;kernel_stack = 0;
+
+	<span class="enscript-keyword">return</span> (stack);
+}
+
+<span class="enscript-comment">/*
+ * attach a kernel stack to a thread and initialize it
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">machine_stack_attach</span>(
+	thread_t		thread,
+	vm_offset_t		stack)
+{
+	<span class="enscript-type">struct</span> x86_kernel_state *statep;
+
+	KERNEL_DEBUG(MACHDBG_CODE(DBG_MACH_SCHED, MACH_STACK_ATTACH),
+		     (uintptr_t)thread_tid(thread), thread-&gt;priority,
+		     thread-&gt;sched_pri, 0, 0);
+
+	assert(stack);
+	thread-&gt;kernel_stack = stack;
+
+	statep = STACK_IKS(stack);
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+	statep-&gt;k_rip = (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>) Thread_continue;
+	statep-&gt;k_rbx = (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>) thread_continue;
+	statep-&gt;k_rsp = (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>) (STACK_IKS(stack) - 1);
+#<span class="enscript-reference">else</span>
+	statep-&gt;k_eip = (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>) Thread_continue;
+	statep-&gt;k_ebx = (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>) thread_continue;
+	statep-&gt;k_esp = (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>) (STACK_IKS(stack) - 1);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * move a stack from old to new thread
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">machine_stack_handoff</span>(thread_t old,
+	      thread_t new)
+{
+	vm_offset_t     stack;
+
+	assert(new);
+	assert(old);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KPERF</span>
+	kperf_kpc_cswitch(old, new);
+#<span class="enscript-reference">endif</span>
+
+	stack = old-&gt;kernel_stack;
+	<span class="enscript-keyword">if</span> (stack == old-&gt;reserved_stack) {
+		assert(new-&gt;reserved_stack);
+		old-&gt;reserved_stack = new-&gt;reserved_stack;
+		new-&gt;reserved_stack = stack;
+	}
+	old-&gt;kernel_stack = 0;
+	<span class="enscript-comment">/*
+	 * A full call to machine_stack_attach() is unnecessry
+	 * because old stack is already initialized.
+	 */</span>
+	new-&gt;kernel_stack = stack;
+
+	fpu_save_context(old);
+	
+	old-&gt;machine.specFlags &amp;= ~OnProc;
+	new-&gt;machine.specFlags |= OnProc;
+
+	PMAP_SWITCH_CONTEXT(old, new, cpu_number());
+	act_machine_switch_pcb(old, new);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HYPERVISOR</span>
+	ml_hv_cswitch(old, new);
+#<span class="enscript-reference">endif</span>
+
+	machine_set_current_thread(new);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+
+
+
+<span class="enscript-type">struct</span> x86_act_context32 {
+	x86_saved_state32_t ss;
+	x86_float_state32_t fs;
+	x86_debug_state32_t ds;
+};
+
+<span class="enscript-type">struct</span> x86_act_context64 {
+	x86_saved_state64_t ss;
+	x86_float_state64_t fs;
+	x86_debug_state64_t ds;
+};
+
+
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">act_thread_csave</span>(<span class="enscript-type">void</span>)
+{
+	kern_return_t kret;
+	mach_msg_type_number_t val;
+	thread_t thr_act = current_thread();
+
+	<span class="enscript-keyword">if</span> (thread_is_64bit(thr_act)) {
+		<span class="enscript-type">struct</span> x86_act_context64 *ic64;
+
+		ic64 = (<span class="enscript-type">struct</span> x86_act_context64 *)kalloc(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x86_act_context64));
+
+		<span class="enscript-keyword">if</span> (ic64 == (<span class="enscript-type">struct</span> x86_act_context64 *)NULL)
+			<span class="enscript-keyword">return</span>((<span class="enscript-type">void</span> *)0);
+
+		val = x86_SAVED_STATE64_COUNT; 
+		kret = machine_thread_get_state(thr_act, x86_SAVED_STATE64,
+				(thread_state_t) &amp;ic64-&gt;ss, &amp;val);
+		<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) {
+			kfree(ic64, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x86_act_context64));
+			<span class="enscript-keyword">return</span>((<span class="enscript-type">void</span> *)0);
+		}
+		val = x86_FLOAT_STATE64_COUNT; 
+		kret = machine_thread_get_state(thr_act, x86_FLOAT_STATE64,
+				(thread_state_t) &amp;ic64-&gt;fs, &amp;val);
+		<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) {
+			kfree(ic64, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x86_act_context64));
+			<span class="enscript-keyword">return</span>((<span class="enscript-type">void</span> *)0);
+		}
+
+		val = x86_DEBUG_STATE64_COUNT;
+		kret = machine_thread_get_state(thr_act,
+						x86_DEBUG_STATE64,
+						(thread_state_t)&amp;ic64-&gt;ds,
+						&amp;val);
+		<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) {
+		        kfree(ic64, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x86_act_context64));
+			<span class="enscript-keyword">return</span>((<span class="enscript-type">void</span> *)0);
+		}
+		<span class="enscript-keyword">return</span>(ic64);
+
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> x86_act_context32 *ic32;
+
+		ic32 = (<span class="enscript-type">struct</span> x86_act_context32 *)kalloc(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x86_act_context32));
+
+		<span class="enscript-keyword">if</span> (ic32 == (<span class="enscript-type">struct</span> x86_act_context32 *)NULL)
+			<span class="enscript-keyword">return</span>((<span class="enscript-type">void</span> *)0);
+
+		val = x86_SAVED_STATE32_COUNT; 
+		kret = machine_thread_get_state(thr_act, x86_SAVED_STATE32,
+				(thread_state_t) &amp;ic32-&gt;ss, &amp;val);
+		<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) {
+			kfree(ic32, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x86_act_context32));
+			<span class="enscript-keyword">return</span>((<span class="enscript-type">void</span> *)0);
+		}
+		val = x86_FLOAT_STATE32_COUNT; 
+		kret = machine_thread_get_state(thr_act, x86_FLOAT_STATE32,
+				(thread_state_t) &amp;ic32-&gt;fs, &amp;val);
+		<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) {
+			kfree(ic32, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x86_act_context32));
+			<span class="enscript-keyword">return</span>((<span class="enscript-type">void</span> *)0);
+		}
+
+		val = x86_DEBUG_STATE32_COUNT;
+		kret = machine_thread_get_state(thr_act,
+						x86_DEBUG_STATE32,
+						(thread_state_t)&amp;ic32-&gt;ds,
+						&amp;val);
+		<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) {
+		        kfree(ic32, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x86_act_context32));
+			<span class="enscript-keyword">return</span>((<span class="enscript-type">void</span> *)0);
+		}
+		<span class="enscript-keyword">return</span>(ic32);
+	}
+}
+
+
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">act_thread_catt</span>(<span class="enscript-type">void</span> *ctx)
+{
+        thread_t thr_act = current_thread();
+	kern_return_t kret;
+
+	<span class="enscript-keyword">if</span> (ctx == (<span class="enscript-type">void</span> *)NULL)
+				<span class="enscript-keyword">return</span>;
+
+        <span class="enscript-keyword">if</span> (thread_is_64bit(thr_act)) {
+	        <span class="enscript-type">struct</span> x86_act_context64 *ic64;
+
+	        ic64 = (<span class="enscript-type">struct</span> x86_act_context64 *)ctx;
+
+		kret = machine_thread_set_state(thr_act, x86_SAVED_STATE64,
+						(thread_state_t) &amp;ic64-&gt;ss, x86_SAVED_STATE64_COUNT);
+		<span class="enscript-keyword">if</span> (kret == KERN_SUCCESS) {
+			        machine_thread_set_state(thr_act, x86_FLOAT_STATE64,
+							 (thread_state_t) &amp;ic64-&gt;fs, x86_FLOAT_STATE64_COUNT);
+		}
+		kfree(ic64, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x86_act_context64));
+	} <span class="enscript-keyword">else</span> {
+	        <span class="enscript-type">struct</span> x86_act_context32 *ic32;
+
+	        ic32 = (<span class="enscript-type">struct</span> x86_act_context32 *)ctx;
+
+		kret = machine_thread_set_state(thr_act, x86_SAVED_STATE32,
+						(thread_state_t) &amp;ic32-&gt;ss, x86_SAVED_STATE32_COUNT);
+		<span class="enscript-keyword">if</span> (kret == KERN_SUCCESS) {
+			(<span class="enscript-type">void</span>) machine_thread_set_state(thr_act, x86_FLOAT_STATE32,
+						 (thread_state_t) &amp;ic32-&gt;fs, x86_FLOAT_STATE32_COUNT);
+		}
+		kfree(ic32, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x86_act_context32));
+	}
+}
+
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">act_thread_cfree</span>(__unused <span class="enscript-type">void</span> *ctx)
+{
+	<span class="enscript-comment">/* XXX - Unused */</span>
+}
+
+<span class="enscript-comment">/*
+ * Duplicate one x86_debug_state32_t to another.  &quot;all&quot; parameter
+ * chooses whether dr4 and dr5 are copied (they are never meant
+ * to be installed when we do machine_task_set_state() or 
+ * machine_thread_set_state()).
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">copy_debug_state32</span>(
+		x86_debug_state32_t *src,
+		x86_debug_state32_t *target,
+		boolean_t all)
+{
+	<span class="enscript-keyword">if</span> (all) {
+		target-&gt;dr4 = src-&gt;dr4;
+		target-&gt;dr5 = src-&gt;dr5;
+	}
+
+	target-&gt;dr0 = src-&gt;dr0;
+	target-&gt;dr1 = src-&gt;dr1;
+	target-&gt;dr2 = src-&gt;dr2;
+	target-&gt;dr3 = src-&gt;dr3;
+	target-&gt;dr6 = src-&gt;dr6;
+	target-&gt;dr7 = src-&gt;dr7;
+}
+
+<span class="enscript-comment">/*
+ * Duplicate one x86_debug_state64_t to another.  &quot;all&quot; parameter
+ * chooses whether dr4 and dr5 are copied (they are never meant
+ * to be installed when we do machine_task_set_state() or 
+ * machine_thread_set_state()).
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">copy_debug_state64</span>(
+		x86_debug_state64_t *src,
+		x86_debug_state64_t *target,
+		boolean_t all)
+{
+	<span class="enscript-keyword">if</span> (all) {
+		target-&gt;dr4 = src-&gt;dr4;
+		target-&gt;dr5 = src-&gt;dr5;
+	}
+
+	target-&gt;dr0 = src-&gt;dr0;
+	target-&gt;dr1 = src-&gt;dr1;
+	target-&gt;dr2 = src-&gt;dr2;
+	target-&gt;dr3 = src-&gt;dr3;
+	target-&gt;dr6 = src-&gt;dr6;
+	target-&gt;dr7 = src-&gt;dr7;
+}
+</pre>
+<hr />
+</body></html>

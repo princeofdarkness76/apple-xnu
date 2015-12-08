@@ -1,0 +1,705 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kxld_vtable.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kxld_vtable.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/loader.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KERNEL</span>
+    #ifdef MACH_ASSERT
+        #undef MACH_ASSERT
+    #endif
+    #define MACH_ASSERT 1
+    #include &lt;kern/assert.h&gt;
+#<span class="enscript-reference">else</span>
+    #include &lt;assert.h&gt;
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEBUG_ASSERT_COMPONENT_NAME_STRING</span> <span class="enscript-string">&quot;kxld&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;AssertMacros.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_demangle.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_dict.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_object.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_reloc.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_sect.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_sym.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_symtab.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_util.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_vtable.h&quot;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VTABLE_ENTRY_SIZE_32</span> 4
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VTABLE_HEADER_LEN_32</span> 2
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VTABLE_HEADER_SIZE_32</span> (VTABLE_HEADER_LEN_32 * VTABLE_ENTRY_SIZE_32)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VTABLE_ENTRY_SIZE_64</span> 8
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VTABLE_HEADER_LEN_64</span> 2
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VTABLE_HEADER_SIZE_64</span> (VTABLE_HEADER_LEN_64 * VTABLE_ENTRY_SIZE_64)
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>  <span class="enscript-function-name">get_vtable_base_sizes</span>(boolean_t is_32_bit, u_int *vtable_entry_size,
+    u_int *vtable_header_size);
+
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">init_by_relocs</span>(KXLDVTable *vtable, <span class="enscript-type">const</span> KXLDSym *vtable_sym,
+    <span class="enscript-type">const</span> KXLDSect *sect, <span class="enscript-type">const</span> KXLDRelocator *relocator);
+
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">init_by_entries_and_relocs</span>(KXLDVTable *vtable, 
+    <span class="enscript-type">const</span> KXLDSym *vtable_sym, <span class="enscript-type">const</span> KXLDRelocator *relocator, 
+    <span class="enscript-type">const</span> KXLDArray *relocs, <span class="enscript-type">const</span> KXLDDict *defined_cxx_symbols);
+
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">init_by_entries</span>(KXLDVTable *vtable,
+    <span class="enscript-type">const</span> KXLDRelocator *relocator, <span class="enscript-type">const</span> KXLDDict *defined_cxx_symbols);
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t 
+<span class="enscript-function-name">kxld_vtable_init</span>(KXLDVTable *vtable, <span class="enscript-type">const</span> KXLDSym *vtable_sym, 
+    <span class="enscript-type">const</span> KXLDObject *object, <span class="enscript-type">const</span> KXLDDict *defined_cxx_symbols)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">const</span> KXLDArray *extrelocs = NULL;
+    <span class="enscript-type">const</span> KXLDRelocator *relocator = NULL;
+    <span class="enscript-type">const</span> KXLDSect *vtable_sect = NULL;
+    <span class="enscript-type">char</span> *demangled_name = NULL;
+    size_t demangled_length = 0;
+
+    check(vtable);
+    check(vtable_sym);
+    check(object);
+
+    relocator = kxld_object_get_relocator(object);
+
+    vtable_sect = kxld_object_get_section_by_index(object, 
+        vtable_sym-&gt;sectnum);
+    require_action(vtable_sect, finish, rval=KERN_FAILURE);
+
+    vtable-&gt;name = vtable_sym-&gt;name;
+    vtable-&gt;vtable = vtable_sect-&gt;data + 
+        kxld_sym_get_section_offset(vtable_sym, vtable_sect);
+
+    <span class="enscript-keyword">if</span> (kxld_object_is_linked(object)) {
+        rval = init_by_entries(vtable, relocator, defined_cxx_symbols);
+        require_noerr(rval, finish);
+
+        vtable-&gt;is_patched = TRUE;
+    } <span class="enscript-keyword">else</span> {
+        <span class="enscript-keyword">if</span> (kxld_object_is_final_image(object)) {
+            extrelocs = kxld_object_get_extrelocs(object);
+            require_action(extrelocs, finish,
+                rval=KERN_FAILURE;
+                kxld_log(kKxldLogPatching, kKxldLogErr, 
+                    kKxldLogMalformedVTable, 
+                    kxld_demangle(vtable-&gt;name, 
+                        &amp;demangled_name, &amp;demangled_length)));
+
+            rval = init_by_entries_and_relocs(vtable, vtable_sym, 
+                relocator, extrelocs, defined_cxx_symbols);
+            require_noerr(rval, finish);
+        } <span class="enscript-keyword">else</span> {
+            require_action(kxld_sect_get_num_relocs(vtable_sect) &gt; 0, finish,
+                rval=KERN_FAILURE;
+                kxld_log(kKxldLogPatching, kKxldLogErr, 
+                    kKxldLogMalformedVTable, 
+                    kxld_demangle(vtable-&gt;name, 
+                        &amp;demangled_name, &amp;demangled_length)));
+
+            rval = init_by_relocs(vtable, vtable_sym, vtable_sect, relocator);
+            require_noerr(rval, finish);
+        }
+        
+        vtable-&gt;is_patched = FALSE;
+    }
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">if</span> (demangled_name) kxld_free(demangled_name, demangled_length);
+
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 
+<span class="enscript-function-name">get_vtable_base_sizes</span>(boolean_t is_32_bit, u_int *vtable_entry_size,
+    u_int *vtable_header_size)
+{
+    check(vtable_entry_size);
+    check(vtable_header_size);
+
+    <span class="enscript-keyword">if</span> (is_32_bit) {
+        *vtable_entry_size = VTABLE_ENTRY_SIZE_32;
+        *vtable_header_size = VTABLE_HEADER_SIZE_32;
+    } <span class="enscript-keyword">else</span> {
+        *vtable_entry_size = VTABLE_ENTRY_SIZE_64;
+        *vtable_header_size = VTABLE_HEADER_SIZE_64;
+    }
+}
+
+<span class="enscript-comment">/*******************************************************************************
+* Initializes a vtable object by matching up relocation entries to the vtable's
+* entries and finding the corresponding symbols.
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">init_by_relocs</span>(KXLDVTable *vtable, <span class="enscript-type">const</span> KXLDSym *vtable_sym, 
+    <span class="enscript-type">const</span> KXLDSect *sect, <span class="enscript-type">const</span> KXLDRelocator *relocator)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDReloc *reloc = NULL;
+    KXLDVTableEntry *entry = NULL;
+    KXLDSym *sym = NULL;
+    kxld_addr_t vtable_base_offset = 0;
+    kxld_addr_t entry_offset = 0;
+    u_int i = 0;
+    u_int nentries = 0;
+    u_int vtable_entry_size = 0;
+    u_int vtable_header_size = 0;
+    u_int base_reloc_index = 0;
+    u_int reloc_index = 0;
+
+    check(vtable);
+    check(vtable_sym);
+    check(sect);
+    check(relocator);
+
+    <span class="enscript-comment">/* Find the first entry past the vtable padding */</span>
+
+    (<span class="enscript-type">void</span>) get_vtable_base_sizes(relocator-&gt;is_32_bit, 
+        &amp;vtable_entry_size, &amp;vtable_header_size);
+
+    vtable_base_offset = kxld_sym_get_section_offset(vtable_sym, sect) + 
+        vtable_header_size;
+   
+    <span class="enscript-comment">/* Find the relocation entry at the start of the vtable */</span>
+
+    rval = kxld_reloc_get_reloc_index_by_offset(&amp;sect-&gt;relocs, 
+        vtable_base_offset, &amp;base_reloc_index);
+    require_noerr(rval, finish);
+
+    <span class="enscript-comment">/* Count the number of consecutive relocation entries to find the number of
+     * vtable entries.  For some reason, the __TEXT,__const relocations are
+     * sorted in descending order, so we have to walk backwards.  Also, make
+     * sure we don't run off the end of the section's relocs.
+     */</span>
+
+    reloc_index = base_reloc_index;
+    entry_offset = vtable_base_offset;
+    reloc = kxld_array_get_item(&amp;sect-&gt;relocs, reloc_index);
+    <span class="enscript-keyword">while</span> (reloc-&gt;address == entry_offset) {
+        ++nentries;
+        <span class="enscript-keyword">if</span> (!reloc_index) <span class="enscript-keyword">break</span>;
+
+        --reloc_index;
+
+        reloc = kxld_array_get_item(&amp;sect-&gt;relocs, reloc_index);
+        entry_offset += vtable_entry_size;
+    }
+
+    <span class="enscript-comment">/* Allocate the symbol index */</span>
+
+    rval = kxld_array_init(&amp;vtable-&gt;entries, <span class="enscript-keyword">sizeof</span>(KXLDVTableEntry), nentries);
+    require_noerr(rval, finish);
+
+    <span class="enscript-comment">/* Find the symbols for each vtable entry */</span>
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; vtable-&gt;entries.nitems; ++i) {
+        reloc = kxld_array_get_item(&amp;sect-&gt;relocs, base_reloc_index - i);
+        entry = kxld_array_get_item(&amp;vtable-&gt;entries, i);
+
+        <span class="enscript-comment">/* If we can't find a symbol, it means it is a locally-defined,
+         * non-external symbol that has been stripped.  We don't patch over
+         * locally-defined symbols, so we leave the symbol as NULL and just
+         * skip it.  We won't be able to patch subclasses with this symbol,
+         * but there isn't much we can do about that.
+         */</span>
+        sym = kxld_reloc_get_symbol(relocator, reloc, sect-&gt;data);
+
+        entry-&gt;unpatched.sym = sym;
+        entry-&gt;unpatched.reloc = reloc;
+    }
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+* Initializes a vtable object by reading the symbol values out of the vtable
+* entries and performing reverse symbol lookups on those values.
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">init_by_entries</span>(KXLDVTable *vtable, <span class="enscript-type">const</span> KXLDRelocator *relocator,
+    <span class="enscript-type">const</span> KXLDDict *defined_cxx_symbols)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDVTableEntry *tmpentry = NULL;
+    KXLDSym *sym = NULL;
+    kxld_addr_t entry_value = 0;
+    u_long entry_offset;
+    u_int vtable_entry_size = 0;
+    u_int vtable_header_size = 0;
+    u_int nentries = 0;
+    u_int i = 0;
+
+    check(vtable);
+    check(relocator);
+
+    (<span class="enscript-type">void</span>) get_vtable_base_sizes(relocator-&gt;is_32_bit, 
+        &amp;vtable_entry_size, &amp;vtable_header_size);
+
+    <span class="enscript-comment">/* Count the number of entries (the vtable is null-terminated) */</span>
+
+    entry_offset = vtable_header_size;
+    <span class="enscript-keyword">while</span> (1) {
+        entry_value = kxld_relocator_get_pointer_at_addr(relocator,
+            vtable-&gt;vtable, entry_offset);
+        <span class="enscript-keyword">if</span> (!entry_value) <span class="enscript-keyword">break</span>;
+
+        entry_offset += vtable_entry_size;
+        ++nentries;
+    }
+
+    <span class="enscript-comment">/* Allocate the symbol index */</span>
+
+    rval = kxld_array_init(&amp;vtable-&gt;entries, <span class="enscript-keyword">sizeof</span>(KXLDVTableEntry), nentries);
+    require_noerr(rval, finish);
+
+    <span class="enscript-comment">/* Look up the symbols for each entry */</span>
+
+    <span class="enscript-keyword">for</span> (i = 0, entry_offset = vtable_header_size; 
+         i &lt; vtable-&gt;entries.nitems; 
+         ++i, entry_offset += vtable_entry_size) 
+    {
+        entry_value = kxld_relocator_get_pointer_at_addr(relocator,
+            vtable-&gt;vtable, entry_offset);
+
+        <span class="enscript-comment">/* If we can't find the symbol, it means that the virtual function was
+         * defined inline.  There's not much I can do about this; it just means
+         * I can't patch this function.
+         */</span>
+        tmpentry = kxld_array_get_item(&amp;vtable-&gt;entries, i);
+        sym = kxld_dict_find(defined_cxx_symbols, &amp;entry_value);
+
+        <span class="enscript-keyword">if</span> (sym) {
+            tmpentry-&gt;patched.name = sym-&gt;name;
+            tmpentry-&gt;patched.addr = sym-&gt;link_addr;
+        } <span class="enscript-keyword">else</span> {
+            tmpentry-&gt;patched.name = NULL;
+            tmpentry-&gt;patched.addr = 0;
+        }
+    }
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+* Initializes vtables by performing a reverse lookup on symbol values when
+* they exist in the vtable entry, and by looking through a matching relocation
+* entry when the vtable entry is NULL.
+*
+* Final linked images require this hybrid vtable initialization approach
+* because they are already internally resolved.  This means that the vtables
+* contain valid entries to local symbols, but still have relocation entries for
+* external symbols.
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">init_by_entries_and_relocs</span>(KXLDVTable *vtable, <span class="enscript-type">const</span> KXLDSym *vtable_sym, 
+    <span class="enscript-type">const</span> KXLDRelocator *relocator, <span class="enscript-type">const</span> KXLDArray *relocs,
+    <span class="enscript-type">const</span> KXLDDict *defined_cxx_symbols)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDReloc *reloc = NULL;
+    KXLDVTableEntry *tmpentry = NULL;
+    KXLDSym *sym = NULL;
+    u_int vtable_entry_size = 0;
+    u_int vtable_header_size = 0;
+    kxld_addr_t entry_value = 0;
+    u_long entry_offset = 0;
+    u_int nentries = 0;
+    u_int i = 0;
+    <span class="enscript-type">char</span> *demangled_name1 = NULL;
+    size_t demangled_length1 = 0;
+
+    check(vtable);
+    check(vtable_sym);
+    check(relocator);
+    check(relocs);
+
+    <span class="enscript-comment">/* Find the first entry and its offset past the vtable padding */</span>
+
+    (<span class="enscript-type">void</span>) get_vtable_base_sizes(relocator-&gt;is_32_bit, 
+        &amp;vtable_entry_size, &amp;vtable_header_size);
+
+    <span class="enscript-comment">/* In a final linked image, a vtable slot is valid if it is nonzero
+     * (meaning the userspace linker has already resolved it) or if it has
+     * a relocation entry.  We'll know the end of the vtable when we find a
+     * slot that meets neither of these conditions.
+     */</span>
+    entry_offset = vtable_header_size;
+    <span class="enscript-keyword">while</span> (1) {
+        entry_value = kxld_relocator_get_pointer_at_addr(relocator,
+            vtable-&gt;vtable, entry_offset);
+        <span class="enscript-keyword">if</span> (!entry_value) {
+            reloc = kxld_reloc_get_reloc_by_offset(relocs, 
+                vtable_sym-&gt;base_addr + entry_offset);
+            <span class="enscript-keyword">if</span> (!reloc) <span class="enscript-keyword">break</span>;
+        }
+
+        ++nentries;
+        entry_offset += vtable_entry_size;
+    }
+
+    <span class="enscript-comment">/* Allocate the symbol index */</span>
+
+    rval = kxld_array_init(&amp;vtable-&gt;entries, <span class="enscript-keyword">sizeof</span>(KXLDVTableEntry), nentries);
+    require_noerr(rval, finish);
+
+    <span class="enscript-comment">/* Find the symbols for each vtable entry */</span>
+
+    <span class="enscript-keyword">for</span> (i = 0, entry_offset = vtable_header_size; 
+         i &lt; vtable-&gt;entries.nitems; 
+         ++i, entry_offset += vtable_entry_size) 
+    {
+        entry_value = kxld_relocator_get_pointer_at_addr(relocator,
+            vtable-&gt;vtable, entry_offset);
+
+        <span class="enscript-comment">/* If we can't find a symbol, it means it is a locally-defined,
+         * non-external symbol that has been stripped.  We don't patch over
+         * locally-defined symbols, so we leave the symbol as NULL and just
+         * skip it.  We won't be able to patch subclasses with this symbol,
+         * but there isn't much we can do about that.
+         */</span>
+        <span class="enscript-keyword">if</span> (entry_value) {
+            reloc = NULL;
+            sym = kxld_dict_find(defined_cxx_symbols, &amp;entry_value);
+        } <span class="enscript-keyword">else</span> {
+            reloc = kxld_reloc_get_reloc_by_offset(relocs,
+                vtable_sym-&gt;base_addr + entry_offset);
+            require_action(reloc, finish,
+                rval=KERN_FAILURE;
+                kxld_log(kKxldLogPatching, kKxldLogErr, 
+                    kKxldLogMalformedVTable, 
+                    kxld_demangle(vtable-&gt;name, &amp;demangled_name1, 
+                        &amp;demangled_length1)));
+        
+            sym = kxld_reloc_get_symbol(relocator, reloc, <span class="enscript-comment">/* data */</span> NULL);
+        }
+
+        tmpentry = kxld_array_get_item(&amp;vtable-&gt;entries, i);
+        tmpentry-&gt;unpatched.reloc = reloc;
+        tmpentry-&gt;unpatched.sym = sym;
+    }
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_vtable_clear</span>(KXLDVTable *vtable)
+{
+    check(vtable);
+
+    vtable-&gt;vtable = NULL;
+    vtable-&gt;name = NULL;
+    vtable-&gt;is_patched = FALSE;
+    kxld_array_clear(&amp;vtable-&gt;entries);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_vtable_deinit</span>(KXLDVTable *vtable)
+{
+    check(vtable);
+
+    kxld_array_deinit(&amp;vtable-&gt;entries);
+    bzero(vtable, <span class="enscript-keyword">sizeof</span>(*vtable));
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+KXLDVTableEntry * 
+<span class="enscript-function-name">kxld_vtable_get_entry_for_offset</span>(<span class="enscript-type">const</span> KXLDVTable *vtable, u_long offset, 
+    boolean_t is_32_bit)
+{
+    KXLDVTableEntry *rval = NULL;
+    u_int vtable_entry_size = 0;
+    u_int vtable_header_size = 0;
+    u_int vtable_entry_idx = 0;
+
+    (<span class="enscript-type">void</span>) get_vtable_base_sizes(is_32_bit, 
+        &amp;vtable_entry_size, &amp;vtable_header_size);
+
+    <span class="enscript-keyword">if</span> (offset % vtable_entry_size) {
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    vtable_entry_idx = (u_int) ((offset - vtable_header_size) / vtable_entry_size);
+    rval = kxld_array_get_item(&amp;vtable-&gt;entries, vtable_entry_idx);
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+* Patching vtables allows us to preserve binary compatibility across releases.
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_vtable_patch</span>(KXLDVTable *vtable, <span class="enscript-type">const</span> KXLDVTable *super_vtable,
+    KXLDObject *object)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">const</span> KXLDSymtab *symtab = NULL;
+    <span class="enscript-type">const</span> KXLDSym *sym = NULL;
+    KXLDVTableEntry *child_entry = NULL;
+    KXLDVTableEntry *parent_entry = NULL;
+    u_int symindex = 0;
+    u_int i = 0;
+    <span class="enscript-type">char</span> *demangled_name1 = NULL;
+    <span class="enscript-type">char</span> *demangled_name2 = NULL;
+    <span class="enscript-type">char</span> *demangled_name3 = NULL;
+    size_t demangled_length1 = 0;
+    size_t demangled_length2 = 0;
+    size_t demangled_length3 = 0;
+    boolean_t failure = FALSE;
+
+    check(vtable);
+    check(super_vtable);
+
+    symtab = kxld_object_get_symtab(object);
+
+    require_action(!vtable-&gt;is_patched, finish, rval=KERN_SUCCESS);
+    require_action(super_vtable-&gt;is_patched, finish, rval=KERN_FAILURE);
+    require_action(vtable-&gt;entries.nitems &gt;= super_vtable-&gt;entries.nitems, finish,
+        rval=KERN_FAILURE;
+        kxld_log(kKxldLogPatching, kKxldLogErr, kKxldLogMalformedVTable, 
+            kxld_demangle(vtable-&gt;name, &amp;demangled_name1, &amp;demangled_length1)));
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; super_vtable-&gt;entries.nitems; ++i) {
+        child_entry = kxld_array_get_item(&amp;vtable-&gt;entries, i);
+        parent_entry = kxld_array_get_item(&amp;super_vtable-&gt;entries, i);
+
+        <span class="enscript-comment">/* The child entry can be NULL when a locally-defined, non-external
+         * symbol is stripped.  We wouldn't patch this entry anyway, so we
+         * just skip it.
+         */</span>
+
+        <span class="enscript-keyword">if</span> (!child_entry-&gt;unpatched.sym) <span class="enscript-keyword">continue</span>;
+
+        <span class="enscript-comment">/* It's possible for the patched parent entry not to have a symbol
+         * (e.g. when the definition is inlined).  We can't patch this entry no
+         * matter what, so we'll just skip it and die later if it's a problem
+         * (which is not likely).
+         */</span>
+
+        <span class="enscript-keyword">if</span> (!parent_entry-&gt;patched.name) <span class="enscript-keyword">continue</span>;
+        
+        <span class="enscript-comment">/* 1) If the symbol is defined locally, do not patch */</span>
+
+        <span class="enscript-keyword">if</span> (kxld_sym_is_defined_locally(child_entry-&gt;unpatched.sym)) <span class="enscript-keyword">continue</span>;
+
+        <span class="enscript-comment">/* 2) If the child is a pure virtual function, do not patch.
+         * In general, we want to proceed with patching when the symbol is 
+         * externally defined because pad slots fall into this category.
+         * The pure virtual function symbol is special case, as the pure
+         * virtual property itself overrides the parent's implementation.
+         */</span>
+
+        <span class="enscript-keyword">if</span> (kxld_sym_is_pure_virtual(child_entry-&gt;unpatched.sym)) <span class="enscript-keyword">continue</span>;
+
+        <span class="enscript-comment">/* 3) If the symbols are the same, do not patch */</span>
+
+        <span class="enscript-keyword">if</span> (streq(child_entry-&gt;unpatched.sym-&gt;name, 
+                  parent_entry-&gt;patched.name)) 
+        {
+            <span class="enscript-keyword">continue</span>;
+        }
+
+        <span class="enscript-comment">/* 4) If the parent vtable entry is a pad slot, and the child does not
+         * match it, then the child was built against a newer version of the
+         * libraries, so it is binary-incompatible.
+         */</span>
+
+        require_action(!kxld_sym_name_is_padslot(parent_entry-&gt;patched.name),
+            finish, rval=KERN_FAILURE;
+            kxld_log(kKxldLogPatching, kKxldLogErr, 
+                kKxldLogParentOutOfDate, 
+                kxld_demangle(super_vtable-&gt;name, &amp;demangled_name1, 
+                    &amp;demangled_length1), 
+                kxld_demangle(vtable-&gt;name, &amp;demangled_name2, 
+                    &amp;demangled_length2)));
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_STRICT_PATCHING</span>
+        <span class="enscript-comment">/* 5) If we are doing strict patching, we prevent kexts from declaring
+         * virtual functions and not implementing them.  We can tell if a
+         * virtual function is declared but not implemented because we resolve
+         * symbols before patching; an unimplemented function will still be
+         * undefined at this point.  We then look at whether the symbol has
+         * the same class prefix as the vtable.  If it does, the symbol was
+         * declared as part of the class and not inherited, which means we
+         * should not patch it.
+         */</span>
+
+        <span class="enscript-keyword">if</span> (kxld_object_target_supports_strict_patching(object) &amp;&amp; 
+            !kxld_sym_is_defined(child_entry-&gt;unpatched.sym))
+        {
+            <span class="enscript-type">char</span> class_name[KXLD_MAX_NAME_LEN];
+            <span class="enscript-type">char</span> function_prefix[KXLD_MAX_NAME_LEN];
+            u_long function_prefix_len = 0;
+
+            rval = kxld_sym_get_class_name_from_vtable_name(vtable-&gt;name,
+                class_name, <span class="enscript-keyword">sizeof</span>(class_name));
+            require_noerr(rval, finish);
+
+            function_prefix_len = 
+                kxld_sym_get_function_prefix_from_class_name(class_name,
+                    function_prefix, <span class="enscript-keyword">sizeof</span>(function_prefix));
+            require(function_prefix_len, finish);
+
+            <span class="enscript-keyword">if</span> (!strncmp(child_entry-&gt;unpatched.sym-&gt;name, 
+                    function_prefix, function_prefix_len)) 
+            {
+                failure = TRUE;
+                kxld_log(kKxldLogPatching, kKxldLogErr,
+                    <span class="enscript-string">&quot;The %s is unpatchable because its class declares the &quot;</span>
+                    <span class="enscript-string">&quot;method '%s' without providing an implementation.&quot;</span>,
+                    kxld_demangle(vtable-&gt;name,
+                        &amp;demangled_name1, &amp;demangled_length1),
+                    kxld_demangle(child_entry-&gt;unpatched.sym-&gt;name,
+                        &amp;demangled_name2, &amp;demangled_length2));
+                <span class="enscript-keyword">continue</span>;
+            }
+        }
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_STRICT_PATCHING */</span>
+    
+        <span class="enscript-comment">/* 6) The child symbol is unresolved and different from its parent, so
+         * we need to patch it up.  We do this by modifying the relocation
+         * entry of the vtable entry to point to the symbol of the parent
+         * vtable entry.  If that symbol does not exist (i.e. we got the data
+         * from a link state object's vtable representation), then we create a
+         * new symbol in the symbol table and point the relocation entry to
+         * that.
+         */</span>
+
+        sym = kxld_symtab_get_locally_defined_symbol_by_name(symtab, 
+            parent_entry-&gt;patched.name);
+        <span class="enscript-keyword">if</span> (!sym) {
+            rval = kxld_object_add_symbol(object, parent_entry-&gt;patched.name,
+                parent_entry-&gt;patched.addr, &amp;sym);
+            require_noerr(rval, finish);
+        }
+        require_action(sym, finish, rval=KERN_FAILURE);
+
+        rval = kxld_symtab_get_sym_index(symtab, sym, &amp;symindex);
+        require_noerr(rval, finish);
+
+        rval = kxld_reloc_update_symindex(child_entry-&gt;unpatched.reloc, symindex);
+        require_noerr(rval, finish);
+        kxld_log(kKxldLogPatching, kKxldLogDetail,
+            <span class="enscript-string">&quot;In vtable '%s', patching '%s' with '%s'.&quot;</span>, 
+            kxld_demangle(vtable-&gt;name, &amp;demangled_name1, &amp;demangled_length1),
+            kxld_demangle(child_entry-&gt;unpatched.sym-&gt;name, 
+                &amp;demangled_name2, &amp;demangled_length2), 
+            kxld_demangle(sym-&gt;name, &amp;demangled_name3, &amp;demangled_length3));
+
+        rval = kxld_object_patch_symbol(object, child_entry-&gt;unpatched.sym);
+        require_noerr(rval, finish);
+
+        child_entry-&gt;unpatched.sym = sym;
+
+        <span class="enscript-comment">/*
+         * The C++ ABI requires that functions be aligned on a 2-byte boundary:
+         * <a href="http://www.codesourcery.com/public/cxx-abi/abi.html#member-pointers">http://www.codesourcery.com/public/cxx-abi/abi.html#member-pointers</a>
+         * If the LSB of any virtual function's link address is 1, then the
+         * compiler has violated that part of the ABI, and we're going to panic
+         * in _ptmf2ptf() (in OSMetaClass.h). Better to panic here with some
+         * context.
+         */</span>
+        assert(kxld_sym_is_pure_virtual(sym) || !(sym-&gt;link_addr &amp; 1)); 
+    }
+
+    require_action(!failure, finish, rval=KERN_FAILURE);
+
+    <span class="enscript-comment">/* Change the vtable representation from the unpatched layout to the
+     * patched layout.
+     */</span>
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; vtable-&gt;entries.nitems; ++i) {
+        <span class="enscript-type">char</span> *name;
+        kxld_addr_t addr;
+
+        child_entry = kxld_array_get_item(&amp;vtable-&gt;entries, i);
+        <span class="enscript-keyword">if</span> (child_entry-&gt;unpatched.sym) {
+            name = child_entry-&gt;unpatched.sym-&gt;name;
+            addr = child_entry-&gt;unpatched.sym-&gt;link_addr;
+        } <span class="enscript-keyword">else</span> {
+            name = NULL;
+            addr = 0;
+        }
+
+        child_entry-&gt;patched.name = name;
+        child_entry-&gt;patched.addr = addr;
+    }
+
+    vtable-&gt;is_patched = TRUE;
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">if</span> (demangled_name1) kxld_free(demangled_name1, demangled_length1);
+    <span class="enscript-keyword">if</span> (demangled_name2) kxld_free(demangled_name2, demangled_length2);
+    <span class="enscript-keyword">if</span> (demangled_name3) kxld_free(demangled_name3, demangled_length3);
+    
+    <span class="enscript-keyword">return</span> rval;
+}
+
+</pre>
+<hr />
+</body></html>

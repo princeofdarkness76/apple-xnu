@@ -1,0 +1,389 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mk_sp.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mk_sp.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ * 
+ */</span>
+
+<span class="enscript-comment">/* The routines in this module are all obsolete */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_switch.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_space.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_kobject.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/policy.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/syscall_subr.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_host_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_syscalls.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_host_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv_server.h&gt;</span>
+
+
+<span class="enscript-comment">/*
+ *	thread_set_policy
+ *
+ *	Set scheduling policy and parameters, both base and limit, for 
+ *	the given thread. Policy can be any policy implemented by the
+ *	processor set, whether enabled or not. 
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_set_policy</span>(
+	thread_t				thread,
+	processor_set_t			pset,
+	policy_t				policy,
+	policy_base_t			base,
+	mach_msg_type_number_t	base_count,
+	policy_limit_t			limit,
+	mach_msg_type_number_t	limit_count)
+{
+	<span class="enscript-type">int</span> 					max, bas;
+	kern_return_t			result = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (	thread == THREAD_NULL			||
+			pset == PROCESSOR_SET_NULL || pset != &amp;pset0)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">if</span> (invalid_policy(policy))
+		<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);	
+
+	thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">switch</span> (policy) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">POLICY_RR</span>:
+	{
+		policy_rr_base_t		rr_base = (policy_rr_base_t) base;
+		policy_rr_limit_t		rr_limit = (policy_rr_limit_t) limit;
+
+		<span class="enscript-keyword">if</span> (	base_count != POLICY_RR_BASE_COUNT		||
+				limit_count != POLICY_RR_LIMIT_COUNT		) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		bas = rr_base-&gt;base_priority;
+		max = rr_limit-&gt;max_priority;
+		<span class="enscript-keyword">if</span> (invalid_pri(bas) || invalid_pri(max)) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">POLICY_FIFO</span>:
+	{
+		policy_fifo_base_t		fifo_base = (policy_fifo_base_t) base;
+		policy_fifo_limit_t		fifo_limit = (policy_fifo_limit_t) limit;
+
+		<span class="enscript-keyword">if</span> (	base_count != POLICY_FIFO_BASE_COUNT	||
+				limit_count != POLICY_FIFO_LIMIT_COUNT)		{
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		bas = fifo_base-&gt;base_priority;
+		max = fifo_limit-&gt;max_priority;
+		<span class="enscript-keyword">if</span> (invalid_pri(bas) || invalid_pri(max)) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">POLICY_TIMESHARE</span>:
+	{
+		policy_timeshare_base_t		ts_base = (policy_timeshare_base_t) base;
+		policy_timeshare_limit_t	ts_limit =
+						(policy_timeshare_limit_t) limit;
+
+		<span class="enscript-keyword">if</span> (	base_count != POLICY_TIMESHARE_BASE_COUNT		||
+				limit_count != POLICY_TIMESHARE_LIMIT_COUNT			) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		bas = ts_base-&gt;base_priority;
+		max = ts_limit-&gt;max_priority;
+		<span class="enscript-keyword">if</span> (invalid_pri(bas) || invalid_pri(max)) {
+			result = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-reference">default</span>:
+		result = KERN_INVALID_POLICY;
+	}
+
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS) {
+		thread_mtx_unlock(thread);
+
+		<span class="enscript-keyword">return</span> (result);
+	}
+
+	<span class="enscript-comment">/* Note that we do not pass on max priority. */</span>
+	<span class="enscript-keyword">if</span> (result == KERN_SUCCESS) {
+	    result = thread_set_mode_and_absolute_pri(thread, policy, bas);
+	}
+
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+
+<span class="enscript-comment">/*
+ * 	thread_policy
+ *
+ *	Set scheduling policy and parameters, both base and limit, for
+ *	the given thread. Policy must be a policy which is enabled for the
+ *	processor set. Change contained threads if requested. 
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_policy</span>(
+	thread_t				thread,
+	policy_t				policy,
+	policy_base_t			base,
+	mach_msg_type_number_t	count,
+	boolean_t				set_limit)
+{
+	kern_return_t			result = KERN_SUCCESS;
+	processor_set_t			pset = &amp;pset0;
+	policy_limit_t			limit = NULL;
+	<span class="enscript-type">int</span>						limcount = 0;
+	policy_rr_limit_data_t			rr_limit;
+	policy_fifo_limit_data_t		fifo_limit;
+	policy_timeshare_limit_data_t	ts_limit;
+	
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">if</span> (	invalid_policy(policy)											||
+			((POLICY_TIMESHARE | POLICY_RR | POLICY_FIFO) &amp; policy) == 0	) {
+		thread_mtx_unlock(thread);
+
+		<span class="enscript-keyword">return</span> (KERN_INVALID_POLICY);
+	}
+
+	<span class="enscript-keyword">if</span> (set_limit) {
+		<span class="enscript-comment">/*
+	 	 * 	Set scheduling limits to base priority.
+		 */</span>
+		<span class="enscript-keyword">switch</span> (policy) {
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">POLICY_RR</span>:
+		{
+			policy_rr_base_t rr_base;
+
+			<span class="enscript-keyword">if</span> (count != POLICY_RR_BASE_COUNT) {
+				result = KERN_INVALID_ARGUMENT;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			limcount = POLICY_RR_LIMIT_COUNT;
+			rr_base = (policy_rr_base_t) base;
+			rr_limit.max_priority = rr_base-&gt;base_priority;
+			limit = (policy_limit_t) &amp;rr_limit;
+
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">POLICY_FIFO</span>:
+		{
+			policy_fifo_base_t fifo_base;
+
+			<span class="enscript-keyword">if</span> (count != POLICY_FIFO_BASE_COUNT) {
+				result = KERN_INVALID_ARGUMENT;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			limcount = POLICY_FIFO_LIMIT_COUNT;
+			fifo_base = (policy_fifo_base_t) base;
+			fifo_limit.max_priority = fifo_base-&gt;base_priority;
+			limit = (policy_limit_t) &amp;fifo_limit;
+
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">POLICY_TIMESHARE</span>:
+		{
+			policy_timeshare_base_t ts_base;
+
+			<span class="enscript-keyword">if</span> (count != POLICY_TIMESHARE_BASE_COUNT) {
+				result = KERN_INVALID_ARGUMENT;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			limcount = POLICY_TIMESHARE_LIMIT_COUNT;
+			ts_base = (policy_timeshare_base_t) base;
+			ts_limit.max_priority = ts_base-&gt;base_priority;
+			limit = (policy_limit_t) &amp;ts_limit;
+
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-reference">default</span>:
+			result = KERN_INVALID_POLICY;
+			<span class="enscript-keyword">break</span>;
+		}
+
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 *	Use current scheduling limits. Ensure that the
+		 *	new base priority will not exceed current limits.
+		 */</span>
+		<span class="enscript-keyword">switch</span> (policy) {
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">POLICY_RR</span>:
+		{
+			policy_rr_base_t rr_base;
+
+			<span class="enscript-keyword">if</span> (count != POLICY_RR_BASE_COUNT) {
+				result = KERN_INVALID_ARGUMENT;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			limcount = POLICY_RR_LIMIT_COUNT;
+			rr_base = (policy_rr_base_t) base;
+			<span class="enscript-keyword">if</span> (rr_base-&gt;base_priority &gt; thread-&gt;max_priority) {
+				result = KERN_POLICY_LIMIT;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			rr_limit.max_priority = thread-&gt;max_priority;
+			limit = (policy_limit_t) &amp;rr_limit;
+
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">POLICY_FIFO</span>:
+		{
+			policy_fifo_base_t fifo_base;
+
+			<span class="enscript-keyword">if</span> (count != POLICY_FIFO_BASE_COUNT) {
+				result = KERN_INVALID_ARGUMENT;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			limcount = POLICY_FIFO_LIMIT_COUNT;
+			fifo_base = (policy_fifo_base_t) base;
+			<span class="enscript-keyword">if</span> (fifo_base-&gt;base_priority &gt; thread-&gt;max_priority) {
+				result = KERN_POLICY_LIMIT;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			fifo_limit.max_priority = thread-&gt;max_priority;
+			limit = (policy_limit_t) &amp;fifo_limit;
+
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">POLICY_TIMESHARE</span>:
+		{
+			policy_timeshare_base_t ts_base;
+
+			<span class="enscript-keyword">if</span> (count != POLICY_TIMESHARE_BASE_COUNT) {
+				result = KERN_INVALID_ARGUMENT;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			limcount = POLICY_TIMESHARE_LIMIT_COUNT;
+			ts_base = (policy_timeshare_base_t) base;
+			<span class="enscript-keyword">if</span> (ts_base-&gt;base_priority &gt; thread-&gt;max_priority) {
+				result = KERN_POLICY_LIMIT;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			ts_limit.max_priority = thread-&gt;max_priority;
+			limit = (policy_limit_t) &amp;ts_limit;
+
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-reference">default</span>:
+			result = KERN_INVALID_POLICY;
+			<span class="enscript-keyword">break</span>;
+		}
+
+	}
+
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">if</span> (result == KERN_SUCCESS)
+	    result = thread_set_policy(thread, pset,
+					 policy, base, count, limit, limcount);
+
+	<span class="enscript-keyword">return</span>(result);
+}
+</pre>
+<hr />
+</body></html>

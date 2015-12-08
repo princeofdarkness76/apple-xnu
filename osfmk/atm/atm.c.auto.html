@@ -1,0 +1,1458 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>atm.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">atm.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2012-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;atm/atm_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;atm/atm_notification.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_special_ports.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/commpage.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_ATM_VALUES</span>         (2 * 4096)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_TRACE_BUFFER_SIZE</span>  (0x40000000)  <span class="enscript-comment">/* Restrict to 1GB per task */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ATM_VALUE_TO_HANDLE</span>(x) (CAST_DOWN(atm_voucher_id_t, (x)))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">HANDLE_TO_ATM_VALUE</span>(x) (CAST_DOWN(atm_value_t, (x)))
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ATM_MAX_HASH_TABLE_SIZE</span> (256)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">AID_HASH_MASK</span> (0xFF)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">AID_TO_HASH</span>(x) ((x) &amp; (AID_HASH_MASK))
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ATM_LIST_DEAD_MAX</span> 15
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">AID_ARRAY_COUNT_MAX</span> (256)
+
+<span class="enscript-type">struct</span> atm_value_hash atm_value_hash_table[ATM_MAX_HASH_TABLE_SIZE];
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> maxproc;
+
+<span class="enscript-comment">/* Global flag to disable ATM. ATM get value and memory registration will return error. */</span>
+boolean_t disable_atm = FALSE;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+queue_head_t atm_descriptors_list;
+queue_head_t atm_values_list;
+#<span class="enscript-reference">endif</span>
+
+ipc_voucher_attr_control_t  voucher_attr_control;    <span class="enscript-comment">/* communication channel from ATM to voucher system */</span>
+<span class="enscript-type">static</span> zone_t atm_value_zone, atm_descriptors_zone, atm_link_objects_zone;
+
+<span class="enscript-type">static</span> aid_t <span class="enscript-function-name">get_aid</span>();
+<span class="enscript-type">static</span> mach_atm_subaid_t <span class="enscript-function-name">get_subaid</span>();
+<span class="enscript-type">static</span> atm_value_t <span class="enscript-function-name">atm_value_alloc_init</span>(aid_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">atm_value_dealloc</span>(atm_value_t atm_value);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">atm_hash_table_init</span>();
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">atm_value_hash_table_insert</span>(atm_value_t new_atm_value);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">atm_value_hash_table_delete</span>(atm_value_t atm_value);
+<span class="enscript-type">static</span> atm_value_t <span class="enscript-function-name">get_atm_value_from_aid</span>(aid_t aid) __unused;
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">atm_value_get_ref</span>(atm_value_t atm_value);
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">atm_listener_insert</span>(atm_value_t atm_value, atm_task_descriptor_t task_descriptor, atm_guard_t guard);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">atm_listener_delete_all</span>(atm_value_t atm_value);
+<span class="enscript-type">static</span> atm_task_descriptor_t <span class="enscript-function-name">atm_task_descriptor_alloc_init</span>(mach_port_t trace_buffer,uint64_t buffer_size, __assert_only task_t task);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">atm_descriptor_get_reference</span>(atm_task_descriptor_t task_descriptor);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">atm_task_descriptor_dealloc</span>(atm_task_descriptor_t task_descriptor);
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">atm_value_unregister</span>(atm_value_t atm_value, atm_task_descriptor_t task_descriptor, atm_guard_t guard);
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">atm_value_register</span>(atm_value_t atm_value, atm_task_descriptor_t task_descriptor, atm_guard_t guard);
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">atm_listener_delete</span>(atm_value_t atm_value, atm_task_descriptor_t task_descriptor, atm_guard_t guard);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">atm_link_get_reference</span>(atm_link_object_t link_object) __unused;
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">atm_link_dealloc</span>(atm_link_object_t link_object);
+kern_return_t <span class="enscript-function-name">atm_invoke_collection</span>(atm_value_t atm_value, mach_atm_subaid_t subaid, uint32_t flags);
+kern_return_t <span class="enscript-function-name">atm_send_user_notification</span>(aid_t aid, mach_atm_subaid_t sub_aid, mach_port_t *buffers_array, uint64_t *sizes_array, mach_msg_type_number_t count, uint32_t flags);
+
+kern_return_t
+<span class="enscript-function-name">atm_release_value</span>(
+	ipc_voucher_attr_manager_t __assert_only manager,
+	mach_voucher_attr_key_t __assert_only key,
+	mach_voucher_attr_value_handle_t value,
+	mach_voucher_attr_value_reference_t sync);
+
+kern_return_t
+<span class="enscript-function-name">atm_get_value</span>(
+	ipc_voucher_attr_manager_t __assert_only manager,
+	mach_voucher_attr_key_t __assert_only key,
+	mach_voucher_attr_recipe_command_t command,
+	mach_voucher_attr_value_handle_array_t prev_values,
+	mach_msg_type_number_t __assert_only prev_value_count,
+	mach_voucher_attr_content_t recipe,
+	mach_voucher_attr_content_size_t recipe_size,
+	mach_voucher_attr_value_handle_t *out_value,
+	ipc_voucher_t *out_value_voucher);
+
+kern_return_t
+<span class="enscript-function-name">atm_extract_content</span>(
+	ipc_voucher_attr_manager_t __assert_only manager,
+	mach_voucher_attr_key_t __assert_only key,
+	mach_voucher_attr_value_handle_array_t values,
+	mach_msg_type_number_t value_count,
+	mach_voucher_attr_recipe_command_t *out_command,
+	mach_voucher_attr_content_t out_recipe,
+	mach_voucher_attr_content_size_t *in_out_recipe_size);
+
+kern_return_t
+<span class="enscript-function-name">atm_command</span>(
+	ipc_voucher_attr_manager_t __assert_only manager,
+	mach_voucher_attr_key_t __assert_only key,
+	mach_voucher_attr_value_handle_array_t values,
+	mach_msg_type_number_t value_count,
+	mach_voucher_attr_command_t command,
+	mach_voucher_attr_content_t in_content,
+	mach_voucher_attr_content_size_t in_content_size,
+	mach_voucher_attr_content_t out_content,
+	mach_voucher_attr_content_size_t *in_out_content_size);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">atm_release</span>(ipc_voucher_attr_manager_t __assert_only manager);
+
+<span class="enscript-comment">/*
+ * communication channel from voucher system to ATM
+ */</span>
+<span class="enscript-type">struct</span> ipc_voucher_attr_manager atm_manager = {
+	.ivam_release_value    = atm_release_value,
+	.ivam_get_value        = atm_get_value,
+	.ivam_extract_content  = atm_extract_content,
+	.ivam_command	       = atm_command,
+	.ivam_release          = atm_release,
+};
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-function-name">decl_lck_mtx_data</span>(, atm_descriptors_list_lock);
+<span class="enscript-function-name">decl_lck_mtx_data</span>(, atm_values_list_lock);
+
+lck_grp_t		atm_dev_lock_grp;
+lck_attr_t		atm_dev_lock_attr;
+lck_grp_attr_t		atm_dev_lock_grp_attr;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">extern</span> vm_map_t kernel_map;
+<span class="enscript-comment">/*
+ * Global aid. Incremented on each get_aid.
+ */</span>
+aid_t global_aid;
+
+<span class="enscript-comment">/*
+ * Global subaid. Incremented on each get_subaid.
+ */</span>
+mach_atm_subaid_t global_subaid;
+
+<span class="enscript-comment">/*
+ * Lock group attributes for atm sub system.
+ */</span>
+lck_grp_t		atm_lock_grp;
+lck_attr_t		atm_lock_attr;
+lck_grp_attr_t		atm_lock_grp_attr;
+
+<span class="enscript-comment">/*
+ * Global that is set by diagnosticd and readable by userspace
+ * via the commpage.
+ */</span>
+<span class="enscript-type">static</span> uint32_t atm_diagnostic_config;
+
+<span class="enscript-comment">/*
+ * Routine: atm_init
+ * Purpose: Initialize the atm subsystem.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">atm_init</span>()
+{
+	kern_return_t kr = KERN_SUCCESS;
+	<span class="enscript-type">char</span> temp_buf[20];
+
+	<span class="enscript-comment">/* Disable atm if disable_atm present in device-tree properties or in boot-args */</span>
+	<span class="enscript-keyword">if</span> ((PE_get_default(<span class="enscript-string">&quot;kern.disable_atm&quot;</span>, temp_buf, <span class="enscript-keyword">sizeof</span>(temp_buf))) || 
+	    (PE_parse_boot_argn(<span class="enscript-string">&quot;-disable_atm&quot;</span>, temp_buf, <span class="enscript-keyword">sizeof</span>(temp_buf)))) {
+		disable_atm = TRUE;
+	}
+
+	<span class="enscript-keyword">if</span> (!PE_parse_boot_argn(<span class="enscript-string">&quot;atm_diagnostic_config&quot;</span>, &amp;atm_diagnostic_config, <span class="enscript-keyword">sizeof</span>(atm_diagnostic_config))) {
+		<span class="enscript-keyword">if</span> (!PE_get_default(<span class="enscript-string">&quot;kern.atm_diagnostic_config&quot;</span>,  &amp;atm_diagnostic_config, <span class="enscript-keyword">sizeof</span>(atm_diagnostic_config))) {
+			atm_diagnostic_config = 0;
+		}
+	}
+
+	<span class="enscript-comment">/* setup zones for descriptors, values and link objects */</span>
+	atm_value_zone       = zinit(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> atm_value),
+	                       MAX_ATM_VALUES * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> atm_value),
+	                       <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> atm_value),
+	                       <span class="enscript-string">&quot;atm_values&quot;</span>);
+
+	atm_descriptors_zone = zinit(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> atm_task_descriptor),
+	                       MAX_ATM_VALUES * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> atm_task_descriptor),
+	                       <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> atm_task_descriptor),
+	                       <span class="enscript-string">&quot;atm_task_descriptors&quot;</span>);
+
+	atm_link_objects_zone = zinit(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> atm_link_object),
+	                        MAX_ATM_VALUES * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> atm_link_object),
+	                        <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> atm_link_object),
+	                        <span class="enscript-string">&quot;atm_link_objects&quot;</span>);
+
+	<span class="enscript-comment">/* Initialize atm lock group and lock attributes. */</span>
+	lck_grp_attr_setdefault(&amp;atm_lock_grp_attr);
+	lck_grp_init(&amp;atm_lock_grp, <span class="enscript-string">&quot;atm_lock&quot;</span>, &amp;atm_lock_grp_attr);
+	lck_attr_setdefault(&amp;atm_lock_attr);
+
+	global_aid = 1;
+	global_subaid = 1;
+	atm_hash_table_init();
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	<span class="enscript-comment">/* Initialize global atm development lock group and lock attributes. */</span>
+	lck_grp_attr_setdefault(&amp;atm_dev_lock_grp_attr);
+	lck_grp_init(&amp;atm_dev_lock_grp, <span class="enscript-string">&quot;atm_dev_lock&quot;</span>, &amp;atm_dev_lock_grp_attr);
+	lck_attr_setdefault(&amp;atm_dev_lock_attr);
+
+	lck_mtx_init(&amp;atm_descriptors_list_lock, &amp;atm_dev_lock_grp, &amp;atm_dev_lock_attr);
+	lck_mtx_init(&amp;atm_values_list_lock, &amp;atm_dev_lock_grp, &amp;atm_dev_lock_attr);
+
+	queue_init(&amp;atm_descriptors_list);
+	queue_init(&amp;atm_values_list);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* Register the atm manager with the Vouchers sub system. */</span>
+	kr = ipc_register_well_known_mach_voucher_attr_manager(
+	                &amp;atm_manager,
+	                0,
+	                MACH_VOUCHER_ATTR_KEY_ATM,
+	                &amp;voucher_attr_control);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS )
+		panic(<span class="enscript-string">&quot;ATM subsystem initialization failed&quot;</span>);
+
+	kprintf(<span class="enscript-string">&quot;ATM subsystem is initialized\n&quot;</span>);
+	<span class="enscript-keyword">return</span> ;
+}
+
+
+<span class="enscript-comment">/*
+ * ATM Resource Manager Routines.
+ */</span>
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_release_value
+ * Purpose: Release a value, if sync matches the sync count in value.
+ * Returns: KERN_SUCCESS: on Successful deletion.
+ *          KERN_FAILURE: if sync value does not matches.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">atm_release_value</span>(
+	ipc_voucher_attr_manager_t		__assert_only manager,
+	mach_voucher_attr_key_t			__assert_only key,
+	mach_voucher_attr_value_handle_t		      value,
+	mach_voucher_attr_value_reference_t	          sync)
+{
+	atm_value_t atm_value = ATM_VALUE_NULL;
+
+	assert(MACH_VOUCHER_ATTR_KEY_ATM == key);
+	assert(manager == &amp;atm_manager);
+
+	atm_value = HANDLE_TO_ATM_VALUE(value);
+	<span class="enscript-keyword">if</span> (atm_value == VAM_DEFAULT_VALUE) {
+		<span class="enscript-comment">/* Return success for default value */</span>
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	<span class="enscript-keyword">if</span> (atm_value-&gt;sync != sync) {
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+
+	<span class="enscript-comment">/* Deallocate the atm value. */</span>
+	atm_value_hash_table_delete(atm_value);
+	atm_value_dealloc(atm_value);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_get_value
+ */</span>
+kern_return_t
+<span class="enscript-function-name">atm_get_value</span>(
+	ipc_voucher_attr_manager_t 		__assert_only manager,
+	mach_voucher_attr_key_t 		__assert_only key,
+	mach_voucher_attr_recipe_command_t 	          command,
+	mach_voucher_attr_value_handle_array_t 	      prev_values,
+	mach_msg_type_number_t 			__assert_only prev_value_count,
+	mach_voucher_attr_content_t          __unused recipe,
+	mach_voucher_attr_content_size_t     __unused recipe_size,
+	mach_voucher_attr_value_handle_t             *out_value,
+	ipc_voucher_t 				                 *out_value_voucher)
+{
+	atm_value_t atm_value = ATM_VALUE_NULL;
+	mach_voucher_attr_value_handle_t atm_handle;
+	atm_task_descriptor_t task_descriptor = ATM_TASK_DESCRIPTOR_NULL;
+	task_t task;
+	aid_t aid;
+	atm_guard_t guard;
+	natural_t i;
+	kern_return_t kr = KERN_SUCCESS;
+
+	assert(MACH_VOUCHER_ATTR_KEY_ATM == key);
+	assert(manager == &amp;atm_manager);
+
+	<span class="enscript-comment">/* never an out voucher */</span>
+	*out_value_voucher = IPC_VOUCHER_NULL;
+
+	<span class="enscript-keyword">if</span> (disable_atm || (atm_get_diagnostic_config() &amp; ATM_TRACE_DISABLE))
+		<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+
+	<span class="enscript-keyword">switch</span> (command) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_VOUCHER_ATTR_ATM_REGISTER</span>:
+
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; prev_value_count; i++) {
+			atm_handle = prev_values[i];
+			atm_value = HANDLE_TO_ATM_VALUE(atm_handle);
+
+			<span class="enscript-keyword">if</span> (atm_value == VAM_DEFAULT_VALUE)
+				<span class="enscript-keyword">continue</span>;
+
+			<span class="enscript-keyword">if</span> (recipe_size != <span class="enscript-keyword">sizeof</span>(atm_guard_t)) {
+				kr = KERN_INVALID_ARGUMENT;
+				<span class="enscript-keyword">break</span>;
+			}
+			memcpy(&amp;guard, recipe, <span class="enscript-keyword">sizeof</span>(atm_guard_t));
+
+			task = current_task();
+			task_descriptor = task-&gt;atm_context;
+				
+			kr = atm_value_register(atm_value, task_descriptor, guard);
+			<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+				<span class="enscript-keyword">break</span>;
+			}
+
+			<span class="enscript-comment">/* Increment sync value. */</span>
+			atm_sync_reference_internal(atm_value);
+
+			*out_value = atm_handle;
+			<span class="enscript-keyword">return</span> kr;
+		}
+
+		*out_value = ATM_VALUE_TO_HANDLE(VAM_DEFAULT_VALUE);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_VOUCHER_ATTR_ATM_CREATE</span>:
+
+		<span class="enscript-comment">/* Handle the old case where aid value is created in kernel */</span>
+		<span class="enscript-keyword">if</span> (recipe_size == 0) {
+			aid = get_aid();
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (recipe_size == <span class="enscript-keyword">sizeof</span>(aid_t)) {
+			memcpy(&amp;aid, recipe, <span class="enscript-keyword">sizeof</span>(aid_t));
+		} <span class="enscript-keyword">else</span> {
+			kr = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+		
+		<span class="enscript-comment">/* Allocate a new atm value. */</span>
+		atm_value = atm_value_alloc_init(aid);
+		<span class="enscript-keyword">if</span> (atm_value == ATM_VALUE_NULL) {
+			kr = KERN_RESOURCE_SHORTAGE;
+			<span class="enscript-keyword">break</span>;
+		}
+<span class="enscript-reference">redrive</span>:	
+		kr = atm_value_hash_table_insert(atm_value);
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+			<span class="enscript-keyword">if</span> (recipe_size == 0) {
+				atm_value-&gt;aid = get_aid();
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">redrive</span>;
+			}
+			atm_value_dealloc(atm_value);
+			<span class="enscript-keyword">break</span>;
+		}
+
+		*out_value = ATM_VALUE_TO_HANDLE(atm_value);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_VOUCHER_ATTR_ATM_NULL</span>:
+	<span class="enscript-reference">default</span>:
+		kr = KERN_INVALID_ARGUMENT;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_extract_content
+ * Purpose: Extract a set of aid from an array of voucher values.
+ * Returns: KERN_SUCCESS: on Success.
+ *          KERN_FAILURE: one of the value is not present in the hash.
+ *          KERN_NO_SPACE: insufficeint buffer provided to fill an array of aid.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">atm_extract_content</span>(
+	ipc_voucher_attr_manager_t      __assert_only manager,
+	mach_voucher_attr_key_t         __assert_only key,
+	mach_voucher_attr_value_handle_array_t        values,
+	mach_msg_type_number_t 			              value_count,
+	mach_voucher_attr_recipe_command_t           *out_command,
+	mach_voucher_attr_content_t                   out_recipe,
+	mach_voucher_attr_content_size_t             *in_out_recipe_size)
+{
+	atm_value_t atm_value;
+	mach_voucher_attr_value_handle_t atm_handle;
+	natural_t i;
+
+	assert(MACH_VOUCHER_ATTR_KEY_ATM == key);
+	assert(manager == &amp;atm_manager);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; value_count; i++) {
+		atm_handle = values[i];
+		atm_value = HANDLE_TO_ATM_VALUE(atm_handle);
+		<span class="enscript-keyword">if</span> (atm_value == VAM_DEFAULT_VALUE)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (( <span class="enscript-keyword">sizeof</span>(aid_t)) &gt; *in_out_recipe_size) {
+			*in_out_recipe_size = 0;
+			<span class="enscript-keyword">return</span> KERN_NO_SPACE;
+		}
+
+		memcpy(&amp;out_recipe[0], &amp;atm_value-&gt;aid, <span class="enscript-keyword">sizeof</span>(aid_t));
+		*out_command = MACH_VOUCHER_ATTR_ATM_NULL;
+		*in_out_recipe_size = <span class="enscript-keyword">sizeof</span>(aid_t);
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	*in_out_recipe_size = 0;
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * Routine: atm_command
+ * Purpose: Execute a command against a set of ATM values.
+ * Returns: KERN_SUCCESS: On successful execution of command.
+ 	    KERN_FAILURE: On failure.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">atm_command</span>(
+	ipc_voucher_attr_manager_t 		   __assert_only manager,
+	mach_voucher_attr_key_t 		   __assert_only key,
+	mach_voucher_attr_value_handle_array_t 	values,
+	mach_msg_type_number_t 			   value_count,
+	mach_voucher_attr_command_t		   command,
+	mach_voucher_attr_content_t 	   in_content,
+	mach_voucher_attr_content_size_t   in_content_size,
+	mach_voucher_attr_content_t 	   out_content,
+	mach_voucher_attr_content_size_t   *out_content_size)
+{
+	assert(MACH_VOUCHER_ATTR_KEY_ATM == key);
+	assert(manager == &amp;atm_manager);
+	atm_value_t atm_value = ATM_VALUE_NULL;
+	natural_t i = 0;
+	mach_atm_subaid_t *subaid_array = NULL;
+	mach_atm_subaid_t next_subaid = 0;
+	uint32_t aid_array_count = 0;
+	atm_task_descriptor_t task_descriptor = ATM_TASK_DESCRIPTOR_NULL;
+	task_t task;
+	uint32_t collection_flags = ATM_ACTION_LOGFAIL;
+	kern_return_t kr = KERN_SUCCESS;
+	atm_guard_t guard;
+	
+	<span class="enscript-keyword">switch</span> (command) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ATM_ACTION_COLLECT</span>:
+		collection_flags = ATM_ACTION_COLLECT;
+		<span class="enscript-comment">/* Fall through */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ATM_ACTION_LOGFAIL</span>: {
+		mach_atm_subaid_t sub_aid = 0;
+
+		<span class="enscript-keyword">if</span> (disable_atm || (atm_get_diagnostic_config() &amp; ATM_TRACE_DISABLE))
+			<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+
+		<span class="enscript-comment">/* find the first non-default atm_value */</span>
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; value_count; i++) {
+			atm_value = HANDLE_TO_ATM_VALUE(values[i]);
+			<span class="enscript-keyword">if</span> (atm_value != VAM_DEFAULT_VALUE)
+				<span class="enscript-keyword">break</span>;
+		}
+		
+		<span class="enscript-comment">/* if we are not able to find any atm values
+		 * in stack then this call was made in error
+		 */</span>
+		<span class="enscript-keyword">if</span> (atm_value == NULL) {
+			<span class="enscript-keyword">return</span> KERN_FAILURE;
+		}
+
+		<span class="enscript-keyword">if</span> (in_content_size &gt;= <span class="enscript-keyword">sizeof</span>(mach_atm_subaid_t)) {
+			sub_aid = *(mach_atm_subaid_t *)(<span class="enscript-type">void</span> *)in_content;
+		}
+
+		*out_content_size = 0;
+		kr = atm_invoke_collection(atm_value, sub_aid, collection_flags);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ATM_FIND_MIN_SUB_AID</span>:
+		<span class="enscript-keyword">if</span> ((in_content_size/<span class="enscript-keyword">sizeof</span>(aid_t)) &gt; (*out_content_size/<span class="enscript-keyword">sizeof</span>(mach_atm_subaid_t)))
+			<span class="enscript-keyword">return</span> KERN_FAILURE;
+
+		aid_array_count = in_content_size / <span class="enscript-keyword">sizeof</span>(aid_t);
+		<span class="enscript-keyword">if</span> (aid_array_count &gt; AID_ARRAY_COUNT_MAX)
+			<span class="enscript-keyword">return</span> KERN_FAILURE;
+
+		subaid_array = (mach_atm_subaid_t *) (<span class="enscript-type">void</span> *) out_content;
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; aid_array_count; i++) {
+			subaid_array[i] = ATM_SUBAID32_MAX;
+		}
+
+		*out_content_size = aid_array_count * <span class="enscript-keyword">sizeof</span>(mach_atm_subaid_t);
+
+		kr = KERN_SUCCESS;
+
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ATM_ACTION_UNREGISTER</span>:
+		<span class="enscript-comment">/* find the first non-default atm_value */</span>
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; value_count; i++) {
+			atm_value = HANDLE_TO_ATM_VALUE(values[i]);
+			<span class="enscript-keyword">if</span> (atm_value != VAM_DEFAULT_VALUE)
+				<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/* if we are not able to find any atm values
+		 * in stack then this call was made in error
+		 */</span>
+		<span class="enscript-keyword">if</span> (atm_value == NULL) {
+			<span class="enscript-keyword">return</span> KERN_FAILURE;
+		}
+		<span class="enscript-keyword">if</span> (in_content == NULL || in_content_size != <span class="enscript-keyword">sizeof</span>(atm_guard_t)){
+			<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+		}
+
+		memcpy(&amp;guard, in_content, <span class="enscript-keyword">sizeof</span>(atm_guard_t));
+		task = current_task();
+		task_descriptor = task-&gt;atm_context;
+
+		kr = atm_value_unregister(atm_value, task_descriptor, guard);
+
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ATM_ACTION_REGISTER</span>:
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; value_count; i++) {
+			atm_value = HANDLE_TO_ATM_VALUE(values[i]);
+			<span class="enscript-keyword">if</span> (atm_value != VAM_DEFAULT_VALUE)
+				<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/* if we are not able to find any atm values
+		 * in stack then this call was made in error
+		 */</span>
+		<span class="enscript-keyword">if</span> (atm_value == NULL) {
+			<span class="enscript-keyword">return</span> KERN_FAILURE;
+		}
+		<span class="enscript-keyword">if</span> (in_content == NULL || in_content_size != <span class="enscript-keyword">sizeof</span>(atm_guard_t)){
+			<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+		}
+
+		memcpy(&amp;guard, in_content, <span class="enscript-keyword">sizeof</span>(atm_guard_t));
+		task = current_task();
+		task_descriptor = task-&gt;atm_context;
+
+		kr = atm_value_register(atm_value, task_descriptor, guard);
+
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ATM_ACTION_GETSUBAID</span>:
+		<span class="enscript-keyword">if</span> (out_content == NULL || *out_content_size != <span class="enscript-keyword">sizeof</span>(mach_atm_subaid_t))
+			<span class="enscript-keyword">return</span> KERN_FAILURE;
+
+		next_subaid = get_subaid();
+		memcpy(out_content, &amp;next_subaid, <span class="enscript-keyword">sizeof</span>(mach_atm_subaid_t));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		kr = KERN_INVALID_ARGUMENT;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">atm_release</span>(
+	ipc_voucher_attr_manager_t 		__assert_only manager)
+{
+	assert(manager == &amp;atm_manager);
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_invoke_collection
+ * Purpose: Sends a notification with array of memory buffer.
+ * Note: may block till user daemon responds.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">atm_invoke_collection</span>(
+	atm_value_t atm_value,
+	mach_atm_subaid_t sub_aid,
+	uint32_t flags)
+{
+	aid_t aid = atm_value-&gt;aid;
+	kern_return_t kr = KERN_SUCCESS;
+	uint32_t array_count = 0, i = 0, j = 0, requestor_index = 0;
+	uint64_t *sizes_array = NULL;
+	atm_link_object_t link_object = NULL;
+	mach_port_t *mem_array = NULL;
+	boolean_t need_swap_first = FALSE;
+	atm_task_descriptor_t requesting_descriptor = current_task()-&gt;atm_context;
+
+	lck_mtx_lock(&amp;atm_value-&gt;listener_lock);
+	array_count = atm_value-&gt;listener_count;
+	lck_mtx_unlock(&amp;atm_value-&gt;listener_lock);
+
+	<span class="enscript-keyword">if</span> (array_count == 0){
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	mem_array = kalloc(<span class="enscript-keyword">sizeof</span>(mach_port_t) * array_count);
+	<span class="enscript-keyword">if</span> (mem_array == NULL){
+		<span class="enscript-keyword">return</span> KERN_NO_SPACE;
+	}
+
+	sizes_array = kalloc(<span class="enscript-keyword">sizeof</span>(uint64_t) * array_count);
+	<span class="enscript-keyword">if</span> (sizes_array == NULL){
+		kfree(mem_array, <span class="enscript-keyword">sizeof</span>(mach_port_t) * array_count);
+		<span class="enscript-keyword">return</span> KERN_NO_SPACE;
+	}
+
+	lck_mtx_lock(&amp;atm_value-&gt;listener_lock);
+	queue_iterate(&amp;atm_value-&gt;listeners, link_object, atm_link_object_t, listeners_element) {
+		<span class="enscript-keyword">if</span> (i &gt;= array_count){
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (!need_swap_first &amp;&amp; requesting_descriptor == link_object-&gt;descriptor){
+			assert(requesting_descriptor != NULL);
+			requestor_index = i;
+			need_swap_first = TRUE;
+		}
+
+		sizes_array[i] = link_object-&gt;descriptor-&gt;trace_buffer_size;
+		mem_array[i] = ipc_port_copy_send(link_object-&gt;descriptor-&gt;trace_buffer);
+		<span class="enscript-keyword">if</span> (!IPC_PORT_VALID(mem_array[i])){
+			mem_array[i] = NULL;
+		}
+		i++;
+	}
+	lck_mtx_unlock(&amp;atm_value-&gt;listener_lock);
+
+	<span class="enscript-comment">/*
+	 * Swap the position of requesting task ahead, diagnostics can 
+	 * process its buffers the first.
+	 */</span>
+	<span class="enscript-keyword">if</span> (need_swap_first &amp;&amp; requestor_index != 0){
+		assert(requestor_index &lt; array_count);
+		mach_port_t tmp_port = mem_array[0];
+		uint64_t tmp_size = sizes_array[0];
+		mem_array[0] = mem_array[requestor_index];
+		sizes_array[0] = sizes_array[requestor_index];
+		mem_array[requestor_index] = tmp_port;
+		sizes_array[requestor_index] = tmp_size;
+	}
+
+	<span class="enscript-keyword">if</span> (i &gt; 0) {
+		kr = atm_send_user_notification(aid, sub_aid, mem_array, sizes_array, i, flags);
+	}
+
+	<span class="enscript-keyword">for</span> (j = 0; j &lt; i; j++) {
+		<span class="enscript-keyword">if</span> (mem_array[j] != NULL)
+			ipc_port_release_send(mem_array[j]);
+	}
+
+	kfree(mem_array, <span class="enscript-keyword">sizeof</span>(mach_port_t) * array_count);
+	kfree(sizes_array, <span class="enscript-keyword">sizeof</span>(uint64_t) * array_count);
+
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ * Routine: atm_send_user_notification
+ * Purpose: Make an upcall to user space daemon if its listening for atm notifications.
+ * Returns: KERN_SUCCESS for successful delivery.
+ *			KERN_FAILURE if port is dead or NULL.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">atm_send_user_notification</span>(
+	aid_t aid,
+	mach_atm_subaid_t sub_aid,
+	mach_port_t *buffers_array,
+	uint64_t *sizes_array,
+	mach_msg_type_number_t count,
+	uint32_t flags)
+{
+	mach_port_t user_port;
+	<span class="enscript-type">int</span>			error;
+	thread_t th = current_thread();
+	kern_return_t kr;
+
+	error = host_get_atm_notification_port(host_priv_self(), &amp;user_port);
+	<span class="enscript-keyword">if</span> ((error != KERN_SUCCESS) || !IPC_PORT_VALID(user_port)) {
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+
+	<span class="enscript-comment">/* Set the honor queue limit option on the thread. */</span>
+	th-&gt;options |= TH_OPT_HONOR_QLIMIT;
+	kr = atm_collect_trace_info(user_port, aid, sub_aid, flags, buffers_array, count, sizes_array, count);
+	<span class="enscript-comment">/* Make sure that honor queue limit option is unset on the thread. */</span>
+	th-&gt;options &amp;= (~TH_OPT_HONOR_QLIMIT);
+
+	<span class="enscript-keyword">if</span> (kr == MACH_SEND_TIMED_OUT) {
+		kr = KERN_SUCCESS;
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ * Routine: atm_send_proc_inspect_notification
+ * Purpose: Make an upcall to user space daemon if its listening for trace 
+ *          notifications for per process inspection.
+ * Returns: KERN_SUCCESS for successful delivery.
+ *			KERN_FAILURE if port is dead or NULL.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">atm_send_proc_inspect_notification</span>(
+	task_t task,
+	int32_t traced_pid,
+	uint64_t traced_uniqueid)
+{
+	mach_port_t user_port = MACH_PORT_NULL;
+	mach_port_t memory_port = MACH_PORT_NULL;
+	kern_return_t kr;
+	atm_task_descriptor_t task_descriptor = ATM_TASK_DESCRIPTOR_NULL;
+	uint64_t buffer_size = 0;
+	<span class="enscript-type">int</span>			error;
+	thread_t th = current_thread();
+
+	<span class="enscript-keyword">if</span> (disable_atm || (atm_get_diagnostic_config() &amp; ATM_TRACE_DISABLE))
+		<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+
+	<span class="enscript-comment">/* look for the requested memory in target task */</span>
+	<span class="enscript-keyword">if</span> (!task)
+		<span class="enscript-keyword">return</span> KERN_INVALID_TASK;
+
+	task_lock(task);
+	<span class="enscript-keyword">if</span> (task-&gt;atm_context){
+		task_descriptor = task-&gt;atm_context;
+		atm_descriptor_get_reference(task_descriptor);
+	}
+	task_unlock(task);
+
+	<span class="enscript-keyword">if</span> (task_descriptor == ATM_TASK_DESCRIPTOR_NULL){
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+
+	memory_port = ipc_port_copy_send(task_descriptor-&gt;trace_buffer);
+	buffer_size =  task_descriptor-&gt;trace_buffer_size;
+	atm_task_descriptor_dealloc(task_descriptor);
+
+	<span class="enscript-comment">/* get the communication port */</span>
+	error = host_get_atm_notification_port(host_priv_self(), &amp;user_port);
+	<span class="enscript-keyword">if</span> ((error != KERN_SUCCESS) || !IPC_PORT_VALID(user_port)) {
+		ipc_port_release_send(memory_port);
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+
+	<span class="enscript-comment">/* Set the honor queue limit option on the thread. */</span>
+	th-&gt;options |= TH_OPT_HONOR_QLIMIT;
+	kr =  atm_inspect_process_buffer(user_port, traced_pid, traced_uniqueid, buffer_size, memory_port);
+	<span class="enscript-comment">/* Make sure that honor queue limit option is unset on the thread. */</span>
+	th-&gt;options &amp;= (~TH_OPT_HONOR_QLIMIT);
+
+	<span class="enscript-keyword">if</span> (kr == MACH_SEND_TIMED_OUT) {
+		kr = KERN_SUCCESS;
+	}
+
+	ipc_port_release_send(memory_port);
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ * Routine: atm_value_alloc_init
+ * Purpose: Allocates an atm value struct and initialize it.
+ * Returns: atm_value_t: On Success with a sync count on atm_value.
+ *          ATM_VALUE_NULL: On failure.
+ */</span>
+<span class="enscript-type">static</span> atm_value_t
+<span class="enscript-function-name">atm_value_alloc_init</span>(aid_t aid)
+{
+	atm_value_t new_atm_value = ATM_VALUE_NULL;
+
+	new_atm_value = (atm_value_t) zalloc(atm_value_zone);
+	<span class="enscript-keyword">if</span> (new_atm_value == ATM_VALUE_NULL)
+		panic(<span class="enscript-string">&quot;Ran out of ATM values structure.\n\n&quot;</span>);
+
+	new_atm_value-&gt;aid = aid;
+	queue_init(&amp;new_atm_value-&gt;listeners);
+	new_atm_value-&gt;sync = 1;
+	new_atm_value-&gt;listener_count = 0;
+	new_atm_value-&gt;reference_count = 1;
+	lck_mtx_init(&amp;new_atm_value-&gt;listener_lock, &amp;atm_lock_grp, &amp;atm_lock_attr);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	lck_mtx_lock(&amp;atm_values_list_lock);
+	queue_enter(&amp;atm_values_list, new_atm_value, atm_value_t, value_elt);
+	lck_mtx_unlock(&amp;atm_values_list_lock);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span> new_atm_value;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: get_aid
+ * Purpose: Increment the global aid counter and return it.
+ * Returns: aid
+ */</span>
+<span class="enscript-type">static</span> aid_t
+<span class="enscript-function-name">get_aid</span>()
+{
+	aid_t aid;
+	aid = (aid_t)OSIncrementAtomic64((SInt64 *)&amp;global_aid);
+	<span class="enscript-keyword">return</span> aid;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: get_subaid
+ * Purpose: Increment the global subaid counter and return it.
+ * Returns: subaid
+ */</span>
+<span class="enscript-type">static</span> mach_atm_subaid_t
+<span class="enscript-function-name">get_subaid</span>()
+{
+	mach_atm_subaid_t next_subaid;
+	next_subaid = (mach_atm_subaid_t)OSIncrementAtomic64((SInt64 *)&amp;global_subaid);
+	<span class="enscript-keyword">return</span> next_subaid;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_value_dealloc
+ * Purpose: Drops the reference on atm value and deallocates.
+ *          Deletes all the listeners on deallocation.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">atm_value_dealloc</span>(atm_value_t atm_value)
+{
+	<span class="enscript-keyword">if</span> (0 &lt; atm_value_release_internal(atm_value)) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	assert(atm_value-&gt;reference_count == 0);
+
+	<span class="enscript-comment">/* Free up the atm value and also remove all the listeners. */</span>
+	atm_listener_delete_all(atm_value);
+
+	lck_mtx_destroy(&amp;atm_value-&gt;listener_lock, &amp;atm_lock_grp);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	lck_mtx_lock(&amp;atm_values_list_lock);
+	queue_remove(&amp;atm_values_list, atm_value, atm_value_t, value_elt);
+	lck_mtx_unlock(&amp;atm_values_list_lock);
+#<span class="enscript-reference">endif</span>
+	zfree(atm_value_zone, atm_value);
+	<span class="enscript-keyword">return</span>;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_hash_table_init
+ * Purpose: Initialize the atm aid hash table.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">atm_hash_table_init</span>()
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; ATM_MAX_HASH_TABLE_SIZE; i++) {
+		queue_init(&amp;atm_value_hash_table[i].hash_list);
+		lck_mtx_init(&amp;atm_value_hash_table[i].hash_list_lock, &amp;atm_lock_grp, &amp;atm_lock_attr);
+	}
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_value_hash_table_insert
+ * Purpose: Insert an atm value in the hash table.
+ * Returns: KERN_SUCCESS on success.
+ *          KERN_NAME_EXISTS if atm value already in the hash table.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">atm_value_hash_table_insert</span>(atm_value_t new_atm_value)
+{
+	<span class="enscript-type">int</span> hash_index;
+	atm_value_hash_t hash_list_head;
+	aid_t aid = new_atm_value-&gt;aid;
+	atm_value_t next;
+
+	hash_index = AID_TO_HASH(aid);
+	hash_list_head = &amp;atm_value_hash_table[hash_index];
+
+	<span class="enscript-comment">/* Lock the atm list and search for the aid. */</span>
+	lck_mtx_lock(&amp;hash_list_head-&gt;hash_list_lock);
+
+	queue_iterate(&amp;hash_list_head-&gt;hash_list, next, atm_value_t, vid_hash_elt) {
+		<span class="enscript-keyword">if</span> (next-&gt;aid == aid) {
+			<span class="enscript-comment">/*
+			 * aid found. return error.
+			 */</span>
+			lck_mtx_unlock(&amp;hash_list_head-&gt;hash_list_lock);
+			<span class="enscript-keyword">return</span> (KERN_NAME_EXISTS);
+		}
+	}
+
+	<span class="enscript-comment">/* Enter the aid in hash and return success. */</span>
+	queue_enter(&amp;hash_list_head-&gt;hash_list, new_atm_value, atm_value_t, vid_hash_elt);
+	lck_mtx_unlock(&amp;hash_list_head-&gt;hash_list_lock);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_value_hash_table_delete
+ * Purpose: Delete the atm value from the hash table.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">atm_value_hash_table_delete</span>(atm_value_t atm_value)
+{
+	<span class="enscript-type">int</span> hash_index;
+	atm_value_hash_t hash_list_head;
+	aid_t aid = atm_value-&gt;aid;
+
+	hash_index = AID_TO_HASH(aid);
+	hash_list_head = &amp;atm_value_hash_table[hash_index];
+
+	lck_mtx_lock(&amp;hash_list_head-&gt;hash_list_lock);
+	queue_remove(&amp;hash_list_head-&gt;hash_list, atm_value, atm_value_t, vid_hash_elt);
+	lck_mtx_unlock(&amp;hash_list_head-&gt;hash_list_lock);
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: get_atm_value_from_aid
+ * Purpose: Search a given aid in atm value hash table and
+ *          return the atm value stucture.
+ * Returns: atm value structure if aid found.
+ *          ATM_VALUE_NULL: If aid not found in atm value hash table.
+ */</span>
+<span class="enscript-type">static</span> atm_value_t
+<span class="enscript-function-name">get_atm_value_from_aid</span>(aid_t aid)
+{
+	<span class="enscript-type">int</span> hash_index;
+	atm_value_hash_t hash_list_head;
+	atm_value_t next;
+
+	hash_index = AID_TO_HASH(aid);
+	hash_list_head = &amp;atm_value_hash_table[hash_index];
+
+	<span class="enscript-comment">/* Lock the atm list and search for the aid. */</span>
+	lck_mtx_lock(&amp;hash_list_head-&gt;hash_list_lock);
+
+	queue_iterate(&amp;hash_list_head-&gt;hash_list, next, atm_value_t, vid_hash_elt) {
+		<span class="enscript-keyword">if</span> (next-&gt;aid == aid) {
+			<span class="enscript-comment">/*
+			 * Aid found. Incerease ref count and return
+			 * the atm value structure.
+			 */</span>
+			atm_value_get_ref(next);
+			lck_mtx_unlock(&amp;hash_list_head-&gt;hash_list_lock);
+			<span class="enscript-keyword">return</span> (next);
+		}
+	}
+	lck_mtx_unlock(&amp;hash_list_head-&gt;hash_list_lock);
+	<span class="enscript-keyword">return</span> ATM_VALUE_NULL;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_value_get_ref
+ * Purpose: Get a reference on atm value.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">atm_value_get_ref</span>(atm_value_t atm_value)
+{
+	atm_value_reference_internal(atm_value);
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_listener_insert
+ * Purpose: Insert a listener to an atm value.
+ * Returns: KERN_SUCCESS on success.
+ *          KERN_FAILURE if the task is already present as a listener.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">atm_listener_insert</span>(
+	atm_value_t 		atm_value,
+	atm_task_descriptor_t 	task_descriptor,
+	atm_guard_t     	guard)
+{
+	atm_link_object_t new_link_object;
+	atm_link_object_t next, elem;
+	int32_t freed_count = 0, dead_but_not_freed = 0, listener_count;
+	boolean_t element_found = FALSE;
+	queue_head_t free_listeners;
+
+	new_link_object = (atm_link_object_t) zalloc(atm_link_objects_zone);
+	new_link_object-&gt;descriptor = task_descriptor;
+	new_link_object-&gt;reference_count = 1;
+	new_link_object-&gt;guard = guard;
+
+	<span class="enscript-comment">/* Get a reference on the task descriptor */</span>
+	atm_descriptor_get_reference(task_descriptor);
+	queue_init(&amp;free_listeners);
+	listener_count = atm_value-&gt;listener_count;
+
+	<span class="enscript-comment">/* Check if the task is already on the listener list */</span>
+	lck_mtx_lock(&amp;atm_value-&gt;listener_lock);
+
+	next = (atm_link_object_t)(<span class="enscript-type">void</span> *) queue_first(&amp;atm_value-&gt;listeners);
+	<span class="enscript-keyword">while</span> (!queue_end(&amp;atm_value-&gt;listeners, (queue_entry_t)next)) {
+		elem = next;
+		next = (atm_link_object_t)(<span class="enscript-type">void</span> *) queue_next(&amp;next-&gt;listeners_element);
+
+		<span class="enscript-comment">/* Check for dead tasks */</span>
+		<span class="enscript-keyword">if</span> (elem-&gt;descriptor-&gt;flags == ATM_TASK_DEAD) {
+			<span class="enscript-keyword">if</span> ((dead_but_not_freed &gt; ATM_LIST_DEAD_MAX) || elem-&gt;guard == 0) {
+				queue_remove(&amp;atm_value-&gt;listeners, elem, atm_link_object_t, listeners_element);
+				queue_enter(&amp;free_listeners, elem, atm_link_object_t, listeners_element);
+				atm_listener_count_decr_internal(atm_value);
+				freed_count++;
+			} <span class="enscript-keyword">else</span> {
+				dead_but_not_freed++;
+			}
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (element_found)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (elem-&gt;descriptor == task_descriptor) {
+			<span class="enscript-comment">/* Increment reference count on Link object. */</span>
+			atm_link_get_reference(elem);
+
+			<span class="enscript-comment">/* Replace the guard with the new one, the old guard is anyways on unregister path. */</span>
+			elem-&gt;guard = guard;
+			element_found = TRUE;
+			KERNEL_DEBUG_CONSTANT((ATM_CODE(ATM_GETVALUE_INFO, (ATM_VALUE_REPLACED))) | DBG_FUNC_NONE,
+				VM_KERNEL_ADDRPERM(atm_value), atm_value-&gt;aid, guard, 0, 0);
+
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (element_found) {
+		lck_mtx_unlock(&amp;atm_value-&gt;listener_lock);
+		<span class="enscript-comment">/* Drop the extra reference on task descriptor taken by this function. */</span>
+		atm_task_descriptor_dealloc(task_descriptor);
+		zfree(atm_link_objects_zone, new_link_object);
+	} <span class="enscript-keyword">else</span> {
+		KERNEL_DEBUG_CONSTANT((ATM_CODE(ATM_GETVALUE_INFO, (ATM_VALUE_ADDED))) | DBG_FUNC_NONE,
+				VM_KERNEL_ADDRPERM(atm_value), atm_value-&gt;aid, guard, 0, 0);
+
+		queue_enter(&amp;atm_value-&gt;listeners, new_link_object, atm_link_object_t, listeners_element);
+		atm_listener_count_incr_internal(atm_value);
+		lck_mtx_unlock(&amp;atm_value-&gt;listener_lock);
+	}
+
+	<span class="enscript-comment">/* Free the link objects */</span>
+	<span class="enscript-keyword">while</span>(!queue_empty(&amp;free_listeners)) {
+		queue_remove_first(&amp;free_listeners, next, atm_link_object_t, listeners_element);
+
+		<span class="enscript-comment">/* Deallocate the link object */</span>
+		atm_link_dealloc(next);
+	}
+
+	KERNEL_DEBUG_CONSTANT((ATM_CODE(ATM_SUBAID_INFO, (ATM_LINK_LIST_TRIM))) | DBG_FUNC_NONE,
+		listener_count, freed_count, dead_but_not_freed, VM_KERNEL_ADDRPERM(atm_value), 1);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_listener_delete_all
+ * Purpose: Deletes all the listeners for an atm value.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">atm_listener_delete_all</span>(atm_value_t atm_value)
+{
+	atm_link_object_t next;
+
+	<span class="enscript-keyword">while</span>(!queue_empty(&amp;atm_value-&gt;listeners)) {
+		queue_remove_first(&amp;atm_value-&gt;listeners, next, atm_link_object_t, listeners_element);
+
+		<span class="enscript-comment">/* Deallocate the link object */</span>
+		atm_link_dealloc(next);
+	}
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_listener_delete
+ * Purpose: Deletes a listerner for an atm value.
+ * Returns: KERN_SUCCESS on successful unregister.
+ *          KERN_INVALID_VALUE on finding a different guard.
+ *          KERN_FAILURE on failure.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">atm_listener_delete</span>(
+	atm_value_t atm_value,
+	atm_task_descriptor_t task_descriptor,
+	atm_guard_t guard)
+{
+	queue_head_t free_listeners;
+	atm_link_object_t next, elem;
+	kern_return_t kr = KERN_FAILURE;
+
+	queue_init(&amp;free_listeners);
+
+	lck_mtx_lock(&amp;atm_value-&gt;listener_lock);
+
+	next = (atm_link_object_t)(<span class="enscript-type">void</span> *) queue_first(&amp;atm_value-&gt;listeners);
+	<span class="enscript-keyword">while</span> (!queue_end(&amp;atm_value-&gt;listeners, (queue_entry_t)next)) {
+		elem = next;
+		next = (atm_link_object_t)(<span class="enscript-type">void</span> *) queue_next(&amp;next-&gt;listeners_element);
+
+		<span class="enscript-keyword">if</span> (elem-&gt;descriptor == task_descriptor) {
+			<span class="enscript-keyword">if</span> (elem-&gt;guard == guard) {
+				KERNEL_DEBUG_CONSTANT((ATM_CODE(ATM_UNREGISTER_INFO,
+					(ATM_VALUE_UNREGISTERED))) | DBG_FUNC_NONE,
+					VM_KERNEL_ADDRPERM(atm_value), atm_value-&gt;aid, guard, elem-&gt;reference_count, 0);
+				elem-&gt;guard = 0;
+				kr = KERN_SUCCESS;
+			} <span class="enscript-keyword">else</span> {
+				KERNEL_DEBUG_CONSTANT((ATM_CODE(ATM_UNREGISTER_INFO,
+					(ATM_VALUE_DIFF_MAILBOX))) | DBG_FUNC_NONE,
+					VM_KERNEL_ADDRPERM(atm_value), atm_value-&gt;aid, elem-&gt;guard, elem-&gt;reference_count, 0);
+				kr = KERN_INVALID_VALUE;
+			}
+			<span class="enscript-keyword">if</span> (0 == atm_link_object_release_internal(elem)) {
+				queue_remove(&amp;atm_value-&gt;listeners, elem, atm_link_object_t, listeners_element);
+				queue_enter(&amp;free_listeners, elem, atm_link_object_t, listeners_element);
+				atm_listener_count_decr_internal(atm_value);
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	lck_mtx_unlock(&amp;atm_value-&gt;listener_lock);
+
+	<span class="enscript-keyword">while</span>(!queue_empty(&amp;free_listeners)) {
+		queue_remove_first(&amp;free_listeners, next, atm_link_object_t, listeners_element);
+	
+		<span class="enscript-comment">/* Deallocate the link object */</span>
+		atm_link_dealloc(next);
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_descriptor_alloc_init
+ * Purpose: Allocate an atm task descriptor and initialize it and takes a reference.
+ * Returns: atm task descriptor: On success.
+ *          NULL: on error.
+ */</span>
+<span class="enscript-type">static</span> atm_task_descriptor_t
+<span class="enscript-function-name">atm_task_descriptor_alloc_init</span>(
+	mach_port_t		trace_buffer,
+	uint64_t		buffer_size,
+	task_t 			__assert_only task)
+{
+	atm_task_descriptor_t new_task_descriptor;
+
+	new_task_descriptor = (atm_task_descriptor_t) zalloc(atm_descriptors_zone);
+
+	new_task_descriptor-&gt;trace_buffer = trace_buffer;
+	new_task_descriptor-&gt;trace_buffer_size = buffer_size;
+	new_task_descriptor-&gt;reference_count = 1;
+	new_task_descriptor-&gt;flags = 0;
+	lck_mtx_init(&amp;new_task_descriptor-&gt;lock, &amp;atm_lock_grp, &amp;atm_lock_attr);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	new_task_descriptor-&gt;task = task;
+	lck_mtx_lock(&amp;atm_descriptors_list_lock);
+	queue_enter(&amp;atm_descriptors_list, new_task_descriptor, atm_task_descriptor_t, descriptor_elt);
+	lck_mtx_unlock(&amp;atm_descriptors_list_lock);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> new_task_descriptor;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_descriptor_get_reference
+ * Purpose: Get a reference count on task descriptor.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">atm_descriptor_get_reference</span>(atm_task_descriptor_t task_descriptor)
+{
+	atm_task_desc_reference_internal(task_descriptor);
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_task_descriptor_dealloc
+ * Prupose: Drops the reference on atm descriptor.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">atm_task_descriptor_dealloc</span>(atm_task_descriptor_t task_descriptor)
+{
+	<span class="enscript-keyword">if</span> (0 &lt; atm_task_desc_release_internal(task_descriptor)) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	assert(task_descriptor-&gt;reference_count == 0);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	lck_mtx_lock(&amp;atm_descriptors_list_lock);
+	queue_remove(&amp;atm_descriptors_list, task_descriptor, atm_task_descriptor_t, descriptor_elt);
+	lck_mtx_unlock(&amp;atm_descriptors_list_lock);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-comment">/* release the send right for the named memory entry */</span>
+	ipc_port_release_send(task_descriptor-&gt;trace_buffer);
+	lck_mtx_destroy(&amp;task_descriptor-&gt;lock, &amp;atm_lock_grp);
+	zfree(atm_descriptors_zone, task_descriptor);
+	<span class="enscript-keyword">return</span>;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_link_get_reference
+ * Purpose: Get a reference count on atm link object.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">atm_link_get_reference</span>(atm_link_object_t link_object)
+{
+	atm_link_object_reference_internal(link_object);
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_link_dealloc
+ * Prupose: Drops the reference on link object.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">atm_link_dealloc</span>(atm_link_object_t link_object)
+{
+	<span class="enscript-comment">/* Drop the reference on atm task descriptor. */</span>
+	atm_task_descriptor_dealloc(link_object-&gt;descriptor);
+	zfree(atm_link_objects_zone, link_object);
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_register_trace_memory
+ * Purpose: Registers trace memory for a task.
+ * Returns: KERN_SUCCESS: on Success.
+ *          KERN_FAILURE: on Error.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">atm_register_trace_memory</span>(
+	task_t 			task,
+	uint64_t 		trace_buffer_address,
+	uint64_t 		buffer_size)
+{
+	atm_task_descriptor_t task_descriptor;
+	mach_port_t trace_buffer = MACH_PORT_NULL;
+	kern_return_t kr = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (disable_atm || (atm_get_diagnostic_config() &amp; ATM_TRACE_DISABLE))
+		<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+
+	<span class="enscript-keyword">if</span> (task != current_task())
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-keyword">if</span> (task-&gt;atm_context != NULL
+	    || (<span class="enscript-type">void</span> *)trace_buffer_address == NULL
+	    || buffer_size == 0
+	    || (buffer_size &amp; PAGE_MASK) != 0
+	    || buffer_size &gt; MAX_TRACE_BUFFER_SIZE) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	vm_map_t map = current_map();
+	memory_object_size_t mo_size = (memory_object_size_t) buffer_size;
+	kr = mach_make_memory_entry_64(map,
+		                          &amp;mo_size,
+		                          (mach_vm_offset_t)trace_buffer_address,
+		                          VM_PROT_READ,
+		                          &amp;trace_buffer,
+		                          NULL);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> kr;
+
+	task_descriptor = atm_task_descriptor_alloc_init(trace_buffer, buffer_size, task);
+	<span class="enscript-keyword">if</span> (task_descriptor == ATM_TASK_DESCRIPTOR_NULL) {
+		ipc_port_release_send(trace_buffer);
+		<span class="enscript-keyword">return</span> KERN_NO_SPACE;
+	}
+
+	task_lock(task);
+	<span class="enscript-keyword">if</span> (task-&gt;atm_context == NULL) {
+		task-&gt;atm_context = task_descriptor;
+		kr = KERN_SUCCESS;
+	} <span class="enscript-keyword">else</span> {
+		kr = KERN_FAILURE;
+	}
+	task_unlock(task);
+
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		<span class="enscript-comment">/* undo the mapping and allocations since we failed to hook descriptor to task */</span>
+		atm_task_descriptor_dealloc(task_descriptor);
+	}
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * Routine: atm_set_diagnostic_config
+ * Purpose: Set global atm_diagnostic_config and update the commpage to reflect
+ *          the new value.
+ * Returns: Error if ATM is disabled.
+ */</span>
+<span class="enscript-type">extern</span> uint32_t atm_diagnostic_config; <span class="enscript-comment">/* Proxied to commpage for fast user access */</span>
+kern_return_t
+<span class="enscript-function-name">atm_set_diagnostic_config</span>(uint32_t diagnostic_config)
+{
+	<span class="enscript-keyword">if</span> (disable_atm)
+		<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+
+	atm_diagnostic_config = diagnostic_config;
+	commpage_update_atm_diagnostic_config(atm_diagnostic_config);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_get_diagnostic_config
+ * Purpose: Get global atm_diagnostic_config.
+ * Returns: Diagnostic value
+ */</span>
+uint32_t
+<span class="enscript-function-name">atm_get_diagnostic_config</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> atm_diagnostic_config;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_value_unregister
+ * Purpose: Unregisters a process from an activity id.
+ * Returns: KERN_SUCCESS on successful unregister.
+ *          KERN_INVALID_VALUE on finding a diff guard.
+ *          KERN_FAILURE on failure.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">atm_value_unregister</span>(
+	atm_value_t atm_value,
+	atm_task_descriptor_t task_descriptor,
+	atm_guard_t guard)
+{
+	kern_return_t kr;
+
+	<span class="enscript-keyword">if</span> (task_descriptor == ATM_TASK_DESCRIPTOR_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_TASK;
+	
+	kr = atm_listener_delete(atm_value, task_descriptor, guard);
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: atm_value_register
+ * Purpose: Registers a process for an activity id.
+ * Returns: KERN_SUCCESS on successful register.
+ *          KERN_INVALID_TASK on finding a null task atm context.
+ *          KERN_FAILURE on failure.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">atm_value_register</span>(
+	atm_value_t atm_value,
+	atm_task_descriptor_t task_descriptor,
+	atm_guard_t guard)
+{
+	kern_return_t kr;
+
+	<span class="enscript-keyword">if</span> (task_descriptor == ATM_TASK_DESCRIPTOR_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_TASK;
+
+	kr = atm_listener_insert(atm_value, task_descriptor, guard);
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">atm_task_descriptor_destroy</span>(atm_task_descriptor_t task_descriptor)
+{
+	<span class="enscript-comment">/* Mark the task dead in the task descriptor to make task descriptor eligible for cleanup. */</span>
+	lck_mtx_lock(&amp;task_descriptor-&gt;lock);
+	task_descriptor-&gt;flags = ATM_TASK_DEAD;
+	lck_mtx_unlock(&amp;task_descriptor-&gt;lock);
+
+	atm_task_descriptor_dealloc(task_descriptor);
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,207 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>inet_ntop.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">inet_ntop.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2004 by Internet Systems Consortium, Inc. (&quot;ISC&quot;)
+ * Copyright (c) 1996-1999 by Internet Software Consortium.
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED &quot;AS IS&quot; AND ISC DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+ * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">LIBC_SCCS</span>) &amp;&amp; !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">lint</span>)
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> rcsid[] = <span class="enscript-string">&quot;$Id: inet_ntop.c,v 1.3.18.2 2005/11/03 23:02:22 marka Exp $&quot;</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* LIBC_SCCS and not lint */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+
+<span class="enscript-comment">/*%
+ * WARNING: Don't even consider trying to compile this on a system where
+ * sizeof(int) &lt; 4.  sizeof(int) &gt; 4 is fine; all the world's not a VAX.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">char</span>	*inet_ntop4(<span class="enscript-type">const</span> u_char *src, <span class="enscript-type">char</span> *dst, socklen_t size);
+<span class="enscript-type">static</span> <span class="enscript-type">char</span>	*inet_ntop6(<span class="enscript-type">const</span> u_char *src, <span class="enscript-type">char</span> *dst, socklen_t size);
+
+<span class="enscript-comment">/* char *
+ * inet_ntop(af, src, dst, size)
+ *	convert a network format address to presentation format.
+ * return:
+ *	pointer to presentation format address (`dst'), or NULL (see errno).
+ * author:
+ *	Paul Vixie, 1996.
+ */</span>
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">inet_ntop</span>(<span class="enscript-type">int</span> af, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *src, <span class="enscript-type">char</span> *dst, socklen_t size)
+{
+	<span class="enscript-keyword">switch</span> (af) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET</span>:
+		<span class="enscript-keyword">return</span> (inet_ntop4(src, dst, size));
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET6</span>:
+		<span class="enscript-keyword">return</span> (inet_ntop6(src, dst, size));
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	<span class="enscript-comment">/* NOTREACHED */</span>
+}
+
+<span class="enscript-comment">/* const char *
+ * inet_ntop4(src, dst, size)
+ *	format an IPv4 address
+ * return:
+ *	`dst' (as a const)
+ * notes:
+ *	(1) uses no statics
+ *	(2) takes a u_char* not an in_addr as input
+ * author:
+ *	Paul Vixie, 1996.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">inet_ntop4</span>(<span class="enscript-type">const</span> u_char *src, <span class="enscript-type">char</span> *dst, socklen_t size)
+{
+	<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> fmt[] = <span class="enscript-string">&quot;%u.%u.%u.%u&quot;</span>;
+	<span class="enscript-type">char</span> tmp[<span class="enscript-keyword">sizeof</span> <span class="enscript-string">&quot;255.255.255.255&quot;</span>];
+	<span class="enscript-type">int</span> l;
+
+	l = snprintf(tmp, <span class="enscript-keyword">sizeof</span>(tmp), fmt, src[0], src[1], src[2], src[3]);
+	<span class="enscript-keyword">if</span> (l &lt;= 0 || (socklen_t) l &gt;= size) {
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	strlcpy(dst, tmp, size);
+	<span class="enscript-keyword">return</span> (dst);
+}
+
+<span class="enscript-comment">/* const char *
+ * inet_ntop6(src, dst, size)
+ *	convert IPv6 binary address into presentation (printable) format
+ * author:
+ *	Paul Vixie, 1996.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">inet_ntop6</span>(<span class="enscript-type">const</span> u_char *src, <span class="enscript-type">char</span> *dst, socklen_t size)
+{
+	<span class="enscript-comment">/*
+	 * Note that int32_t and int16_t need only be &quot;at least&quot; large enough
+	 * to contain a value of the specified size.  On some systems, like
+	 * Crays, there is no such thing as an integer variable with 16 bits.
+	 * Keep this in mind if you think this function should have been coded
+	 * to use pointer overlays.  All the world's not a VAX.
+	 */</span>
+	<span class="enscript-type">char</span> tmp[<span class="enscript-keyword">sizeof</span> <span class="enscript-string">&quot;ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255&quot;</span>], *tp;
+	<span class="enscript-type">struct</span> { <span class="enscript-type">int</span> base, len; } best, cur;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NS_IN6ADDRSZ</span>	16
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NS_INT16SZ</span>	2
+	u_int words[NS_IN6ADDRSZ / NS_INT16SZ];
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-comment">/*
+	 * Preprocess:
+	 *	Copy the input (bytewise) array into a wordwise array.
+	 *	Find the longest run of 0x00's in src[] for :: shorthanding.
+	 */</span>
+	memset(words, <span class="enscript-string">'\0'</span>, <span class="enscript-keyword">sizeof</span> words);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; NS_IN6ADDRSZ; i++)
+		words[i / 2] |= (src[i] &lt;&lt; ((1 - (i % 2)) &lt;&lt; 3));
+	best.base = -1;
+	best.len = 0;
+	cur.base = -1;
+	cur.len = 0;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; (NS_IN6ADDRSZ / NS_INT16SZ); i++) {
+		<span class="enscript-keyword">if</span> (words[i] == 0) {
+			<span class="enscript-keyword">if</span> (cur.base == -1)
+				cur.base = i, cur.len = 1;
+			<span class="enscript-keyword">else</span>
+				cur.len++;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (cur.base != -1) {
+				<span class="enscript-keyword">if</span> (best.base == -1 || cur.len &gt; best.len)
+					best = cur;
+				cur.base = -1;
+			}
+		}
+	}
+	<span class="enscript-keyword">if</span> (cur.base != -1) {
+		<span class="enscript-keyword">if</span> (best.base == -1 || cur.len &gt; best.len)
+			best = cur;
+	}
+	<span class="enscript-keyword">if</span> (best.base != -1 &amp;&amp; best.len &lt; 2)
+		best.base = -1;
+
+	<span class="enscript-comment">/*
+	 * Format the result.
+	 */</span>
+	tp = tmp;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; (NS_IN6ADDRSZ / NS_INT16SZ); i++) {
+		<span class="enscript-comment">/* Are we inside the best run of 0x00's? */</span>
+		<span class="enscript-keyword">if</span> (best.base != -1 &amp;&amp; i &gt;= best.base &amp;&amp;
+		    i &lt; (best.base + best.len)) {
+			<span class="enscript-keyword">if</span> (i == best.base)
+				*tp++ = <span class="enscript-string">':'</span>;
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-comment">/* Are we following an initial run of 0x00s or any real hex? */</span>
+		<span class="enscript-keyword">if</span> (i != 0)
+			*tp++ = <span class="enscript-string">':'</span>;
+		<span class="enscript-comment">/* Is this address an encapsulated IPv4? */</span>
+		<span class="enscript-keyword">if</span> (i == 6 &amp;&amp; best.base == 0 &amp;&amp; (best.len == 6 ||
+		    (best.len == 7 &amp;&amp; words[7] != 0x0001) ||
+		    (best.len == 5 &amp;&amp; words[5] == 0xffff))) {
+			<span class="enscript-keyword">if</span> (!inet_ntop4(src+12, tp, <span class="enscript-keyword">sizeof</span> tmp - (tp - tmp)))
+				<span class="enscript-keyword">return</span> (NULL);
+			tp += strlen(tp);
+			<span class="enscript-keyword">break</span>;
+		}
+		tp += snprintf(tp, <span class="enscript-keyword">sizeof</span>(tmp), <span class="enscript-string">&quot;%x&quot;</span>, words[i]);
+	}
+	<span class="enscript-comment">/* Was it a trailing run of 0x00's? */</span>
+	<span class="enscript-keyword">if</span> (best.base != -1 &amp;&amp; (best.base + best.len) == 
+	    (NS_IN6ADDRSZ / NS_INT16SZ))
+		*tp++ = <span class="enscript-string">':'</span>;
+	*tp++ = <span class="enscript-string">'\0'</span>;
+
+	<span class="enscript-comment">/*
+	 * Check for overflow, copy, and we're done.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((socklen_t)(tp - tmp) &gt; size) {
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	strlcpy(dst, tmp, size);
+	<span class="enscript-keyword">return</span> (dst);
+}
+
+<span class="enscript-comment">/*! \file */</span>
+</pre>
+<hr />
+</body></html>

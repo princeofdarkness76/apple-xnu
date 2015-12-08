@@ -1,0 +1,1281 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>sysv_shm.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">sysv_shm.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*	$NetBSD: sysv_shm.c,v 1.23 1994/07/04 23:25:12 glass Exp $	*/</span>
+
+<span class="enscript-comment">/*
+ * Copyright (c) 1994 Adam Glass and Charles Hannum.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Adam Glass and Charles
+ *	Hannum.
+ * 4. The names of the authors may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by McAfee Research in 2004 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ * Copyright (c) 2005-2006 SPARTA, Inc.
+*/</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/appleapiopts.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/shm_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mman.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ipcs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysent.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_inherit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+<span class="enscript-comment">/* Uncomment this line to see MAC debugging output. */</span>
+<span class="enscript-comment">/* #define MAC_DEBUG */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_DEBUG</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">MPRINTF</span>(a)	printf a
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">MPRINTF</span>(a)     
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SYSV_SHM</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">shminit</span>(<span class="enscript-type">void</span> *);
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-function-name">SYSINIT</span>(sysv_shm, SI_SUB_SYSV_SHM, SI_ORDER_FIRST, shminit, NULL)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> lck_grp_t       *sysv_shm_subsys_lck_grp;
+<span class="enscript-type">static</span> lck_grp_attr_t  *sysv_shm_subsys_lck_grp_attr;
+<span class="enscript-type">static</span> lck_attr_t      *sysv_shm_subsys_lck_attr;
+<span class="enscript-type">static</span> lck_mtx_t        sysv_shm_subsys_mutex;
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SYSV_SHM_SUBSYS_LOCK</span>() lck_mtx_lock(&amp;sysv_shm_subsys_mutex)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SYSV_SHM_SUBSYS_UNLOCK</span>() lck_mtx_unlock(&amp;sysv_shm_subsys_mutex)
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">oshmctl</span>(<span class="enscript-type">void</span> *p, <span class="enscript-type">void</span> *uap, <span class="enscript-type">void</span> *retval);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">shmget_allocate_segment</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> shmget_args *uap, <span class="enscript-type">int</span> mode, <span class="enscript-type">int</span> * retval);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">shmget_existing</span>(<span class="enscript-type">struct</span> shmget_args *uap, <span class="enscript-type">int</span> mode, <span class="enscript-type">int</span> segnum, <span class="enscript-type">int</span>  * retval);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">shmid_ds_64to32</span>(<span class="enscript-type">struct</span> user_shmid_ds *in, <span class="enscript-type">struct</span> user32_shmid_ds *out);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">shmid_ds_32to64</span>(<span class="enscript-type">struct</span> user32_shmid_ds *in, <span class="enscript-type">struct</span> user_shmid_ds *out);
+
+<span class="enscript-comment">/* XXX casting to (sy_call_t *) is bogus, as usual. */</span>
+<span class="enscript-type">static</span> sy_call_t *shmcalls[] = {
+	(sy_call_t *)shmat, (sy_call_t *)oshmctl,
+	(sy_call_t *)shmdt, (sy_call_t *)shmget,
+	(sy_call_t *)shmctl
+};
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SHMSEG_FREE</span>     	0x0200
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SHMSEG_REMOVED</span>  	0x0400
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SHMSEG_ALLOCATED</span>	0x0800
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SHMSEG_WANTED</span>		0x1000
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> shm_last_free, shm_nused, shm_committed;
+<span class="enscript-type">struct</span> shmid_kernel	*shmsegs;	<span class="enscript-comment">/* 64 bit version */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> shm_inited = 0;
+
+<span class="enscript-comment">/*
+ * Since anonymous memory chunks are limited to ANON_MAX_SIZE bytes,
+ * we have to keep a list of chunks when we want to handle a shared memory
+ * segment bigger than ANON_MAX_SIZE.
+ * Each chunk points to a VM named entry of up to ANON_MAX_SIZE bytes
+ * of anonymous memory.
+ */</span>
+<span class="enscript-type">struct</span> shm_handle {
+	<span class="enscript-type">void</span> * shm_object;			<span class="enscript-comment">/* named entry for this chunk*/</span>
+	memory_object_size_t shm_handle_size;	<span class="enscript-comment">/* size of this chunk */</span>
+	<span class="enscript-type">struct</span> shm_handle *shm_handle_next;	<span class="enscript-comment">/* next chunk */</span>
+};
+
+<span class="enscript-type">struct</span> shmmap_state {
+	mach_vm_address_t va;		<span class="enscript-comment">/* user address */</span>
+	<span class="enscript-type">int</span> shmid;			<span class="enscript-comment">/* segment id */</span>
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">shm_deallocate_segment</span>(<span class="enscript-type">struct</span> shmid_kernel *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">shm_find_segment_by_key</span>(key_t);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> shmid_kernel *<span class="enscript-function-name">shm_find_segment_by_shmid</span>(<span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">shm_delete_mapping</span>(<span class="enscript-type">struct</span> proc *, <span class="enscript-type">struct</span> shmmap_state *, <span class="enscript-type">int</span>);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__APPLE_API_PRIVATE</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEFAULT_SHMMAX</span>	(4 * 1024 * 1024)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEFAULT_SHMMIN</span>	1
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEFAULT_SHMMNI</span>	32
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEFAULT_SHMSEG</span>	8
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEFAULT_SHMALL</span>	1024
+
+<span class="enscript-type">struct</span>  shminfo shminfo = {
+        DEFAULT_SHMMAX,
+        DEFAULT_SHMMIN,
+        DEFAULT_SHMMNI,
+	DEFAULT_SHMSEG,
+	DEFAULT_SHMALL
+};
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE_API_PRIVATE */</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">sysv_shm_lock_init</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> __inline__ time_t
+<span class="enscript-function-name">sysv_shmtime</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> timeval	tv;
+	microtime(&amp;tv);
+	<span class="enscript-keyword">return</span> (tv.tv_sec);
+}
+
+<span class="enscript-comment">/*
+ * This conversion is safe, since if we are converting for a 32 bit process,
+ * then it's value of (struct shmid_ds)-&gt;shm_segsz will never exceed 4G.
+ *
+ * NOTE: Source and target may *NOT* overlap! (target is smaller)
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">shmid_ds_64to32</span>(<span class="enscript-type">struct</span> user_shmid_ds *in, <span class="enscript-type">struct</span> user32_shmid_ds *out)
+{
+	out-&gt;shm_perm = in-&gt;shm_perm;
+	out-&gt;shm_segsz = in-&gt;shm_segsz;
+	out-&gt;shm_lpid = in-&gt;shm_lpid;
+	out-&gt;shm_cpid = in-&gt;shm_cpid;
+	out-&gt;shm_nattch = in-&gt;shm_nattch;
+	out-&gt;shm_atime = in-&gt;shm_atime;
+	out-&gt;shm_dtime = in-&gt;shm_dtime;
+	out-&gt;shm_ctime = in-&gt;shm_ctime;
+	out-&gt;shm_internal = CAST_DOWN_EXPLICIT(<span class="enscript-type">int</span>,in-&gt;shm_internal);
+}
+
+<span class="enscript-comment">/*
+ * NOTE: Source and target may are permitted to overlap! (source is smaller);
+ * this works because we copy fields in order from the end of the struct to
+ * the beginning.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">shmid_ds_32to64</span>(<span class="enscript-type">struct</span> user32_shmid_ds *in, <span class="enscript-type">struct</span> user_shmid_ds *out)
+{
+	out-&gt;shm_internal = in-&gt;shm_internal;
+	out-&gt;shm_ctime = in-&gt;shm_ctime;
+	out-&gt;shm_dtime = in-&gt;shm_dtime;
+	out-&gt;shm_atime = in-&gt;shm_atime;
+	out-&gt;shm_nattch = in-&gt;shm_nattch;
+	out-&gt;shm_cpid = in-&gt;shm_cpid;
+	out-&gt;shm_lpid = in-&gt;shm_lpid;
+	out-&gt;shm_segsz = in-&gt;shm_segsz;
+	out-&gt;shm_perm = in-&gt;shm_perm;
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">shm_find_segment_by_key</span>(key_t key)
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; shminfo.shmmni; i++)
+		<span class="enscript-keyword">if</span> ((shmsegs[i].u.shm_perm.mode &amp; SHMSEG_ALLOCATED) &amp;&amp;
+		    shmsegs[i].u.shm_perm._key == key)
+			<span class="enscript-keyword">return</span> i;
+	<span class="enscript-keyword">return</span> -1;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> shmid_kernel *
+<span class="enscript-function-name">shm_find_segment_by_shmid</span>(<span class="enscript-type">int</span> shmid)
+{
+	<span class="enscript-type">int</span> segnum;
+	<span class="enscript-type">struct</span> shmid_kernel *shmseg;
+
+	segnum = IPCID_TO_IX(shmid);
+	<span class="enscript-keyword">if</span> (segnum &lt; 0 || segnum &gt;= shminfo.shmmni)
+		<span class="enscript-keyword">return</span> NULL;
+	shmseg = &amp;shmsegs[segnum];
+	<span class="enscript-keyword">if</span> ((shmseg-&gt;u.shm_perm.mode &amp; (SHMSEG_ALLOCATED | SHMSEG_REMOVED))
+	    != SHMSEG_ALLOCATED ||
+	    shmseg-&gt;u.shm_perm._seq != IPCID_TO_SEQ(shmid))
+		<span class="enscript-keyword">return</span> NULL;
+	<span class="enscript-keyword">return</span> shmseg;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">shm_deallocate_segment</span>(<span class="enscript-type">struct</span> shmid_kernel *shmseg)
+{
+	<span class="enscript-type">struct</span> shm_handle *shm_handle, *shm_handle_next;
+	mach_vm_size_t size;
+
+	<span class="enscript-keyword">for</span> (shm_handle = CAST_DOWN(<span class="enscript-type">void</span> *,shmseg-&gt;u.shm_internal); <span class="enscript-comment">/* tunnel */</span>
+	     shm_handle != NULL;
+	     shm_handle = shm_handle_next) {
+		shm_handle_next = shm_handle-&gt;shm_handle_next;
+		mach_memory_entry_port_release(shm_handle-&gt;shm_object);
+		FREE((caddr_t) shm_handle, M_SHM);
+	}
+	shmseg-&gt;u.shm_internal = USER_ADDR_NULL;		<span class="enscript-comment">/* tunnel */</span>
+	size = mach_vm_round_page(shmseg-&gt;u.shm_segsz);
+	shm_committed -= btoc(size);
+	shm_nused--;
+	shmseg-&gt;u.shm_perm.mode = SHMSEG_FREE;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-comment">/* Reset the MAC label */</span>
+	mac_sysvshm_label_recycle(shmseg);
+#<span class="enscript-reference">endif</span>
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">shm_delete_mapping</span>(__unused <span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> shmmap_state *shmmap_s,
+	<span class="enscript-type">int</span> deallocate)
+{
+	<span class="enscript-type">struct</span> shmid_kernel *shmseg;
+	<span class="enscript-type">int</span> segnum, result;
+	mach_vm_size_t size;
+
+	segnum = IPCID_TO_IX(shmmap_s-&gt;shmid);
+	shmseg = &amp;shmsegs[segnum];
+	size = mach_vm_round_page(shmseg-&gt;u.shm_segsz);	<span class="enscript-comment">/* XXX done for us? */</span>
+	<span class="enscript-keyword">if</span> (deallocate) {
+	result = mach_vm_deallocate(current_map(), shmmap_s-&gt;va, size);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+	shmmap_s-&gt;shmid = -1;
+	shmseg-&gt;u.shm_dtime = sysv_shmtime();
+	<span class="enscript-keyword">if</span> ((--shmseg-&gt;u.shm_nattch &lt;= 0) &amp;&amp;
+	    (shmseg-&gt;u.shm_perm.mode &amp; SHMSEG_REMOVED)) {
+		shm_deallocate_segment(shmseg);
+		shm_last_free = segnum;
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">shmdt</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> shmdt_args *uap, int32_t *retval)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-type">struct</span> shmid_kernel *shmsegptr;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-type">struct</span> shmmap_state *shmmap_s;
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> shmdtret = 0;
+
+	AUDIT_ARG(svipc_addr, uap-&gt;shmaddr);
+
+	SYSV_SHM_SUBSYS_LOCK();
+
+	<span class="enscript-keyword">if</span> (!shm_inited) {
+		shminit(NULL);
+	}
+	shmmap_s = (<span class="enscript-type">struct</span> shmmap_state *)p-&gt;vm_shm;
+ 	<span class="enscript-keyword">if</span> (shmmap_s == NULL) {
+		shmdtret = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmdt_out</span>;
+	}
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; shminfo.shmseg; i++, shmmap_s++)
+		<span class="enscript-keyword">if</span> (shmmap_s-&gt;shmid != -1 &amp;&amp;
+		    shmmap_s-&gt;va == (mach_vm_offset_t)uap-&gt;shmaddr)
+			<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">if</span> (i == shminfo.shmseg) {
+		shmdtret = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmdt_out</span>;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-comment">/*
+	 * XXX: It might be useful to move this into the shm_delete_mapping
+	 * function
+	 */</span>
+	shmsegptr = &amp;shmsegs[IPCID_TO_IX(shmmap_s-&gt;shmid)];
+	shmdtret = mac_sysvshm_check_shmdt(kauth_cred_get(), shmsegptr);
+	<span class="enscript-keyword">if</span> (shmdtret)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmdt_out</span>;
+#<span class="enscript-reference">endif</span>
+	i = shm_delete_mapping(p, shmmap_s, 1);
+
+	<span class="enscript-keyword">if</span> (i == 0)
+		*retval = 0;
+	shmdtret = i;
+<span class="enscript-reference">shmdt_out</span>:
+	SYSV_SHM_SUBSYS_UNLOCK();
+	<span class="enscript-keyword">return</span> shmdtret;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">shmat</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> shmat_args *uap, user_addr_t *retval)
+{
+	<span class="enscript-type">int</span> error, i, flags;
+	<span class="enscript-type">struct</span> shmid_kernel	*shmseg;
+	<span class="enscript-type">struct</span> shmmap_state	*shmmap_s = NULL;
+	<span class="enscript-type">struct</span> shm_handle	*shm_handle;
+	mach_vm_address_t	attach_va;	<span class="enscript-comment">/* attach address in/out */</span>
+	mach_vm_size_t		map_size;	<span class="enscript-comment">/* size of map entry */</span>
+	mach_vm_size_t		mapped_size;
+	vm_prot_t           prot;
+    size_t              size;
+	kern_return_t		rv;
+	<span class="enscript-type">int</span>			shmat_ret;
+	<span class="enscript-type">int</span>			vm_flags;
+
+	shmat_ret = 0;
+
+	AUDIT_ARG(svipc_id, uap-&gt;shmid);
+	AUDIT_ARG(svipc_addr, uap-&gt;shmaddr);
+
+	SYSV_SHM_SUBSYS_LOCK();
+
+	<span class="enscript-keyword">if</span> (!shm_inited) {
+		shminit(NULL);
+	}
+
+	shmmap_s = (<span class="enscript-type">struct</span> shmmap_state *)p-&gt;vm_shm;
+
+	<span class="enscript-keyword">if</span> (shmmap_s == NULL) {
+		size = shminfo.shmseg * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> shmmap_state);
+        <span class="enscript-keyword">if</span> (size == 0 || size / shminfo.shmseg != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> shmmap_state)) {
+            <span class="enscript-comment">/* overflow */</span>
+            shmat_ret = ENOMEM;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">shmat_out</span>;
+        }
+		MALLOC(shmmap_s, <span class="enscript-type">struct</span> shmmap_state *, size, M_SHM, M_WAITOK);
+		<span class="enscript-keyword">if</span> (shmmap_s == NULL) {
+			shmat_ret = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmat_out</span>;
+		}
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; shminfo.shmseg; i++)
+			shmmap_s[i].shmid = -1;
+		p-&gt;vm_shm = (caddr_t)shmmap_s;
+	}
+	shmseg = shm_find_segment_by_shmid(uap-&gt;shmid);
+	<span class="enscript-keyword">if</span> (shmseg == NULL) {
+		shmat_ret = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmat_out</span>;
+	}
+
+	AUDIT_ARG(svipc_perm, &amp;shmseg-&gt;u.shm_perm);
+	error = ipcperm(kauth_cred_get(), &amp;shmseg-&gt;u.shm_perm,
+	    (uap-&gt;shmflg &amp; SHM_RDONLY) ? IPC_R : IPC_R|IPC_W);
+	<span class="enscript-keyword">if</span> (error) {
+		shmat_ret = error;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmat_out</span>;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_sysvshm_check_shmat(kauth_cred_get(), shmseg, uap-&gt;shmflg);
+	<span class="enscript-keyword">if</span> (error) {
+		shmat_ret = error;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmat_out</span>;
+	}
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; shminfo.shmseg; i++) {
+		<span class="enscript-keyword">if</span> (shmmap_s-&gt;shmid == -1)
+			<span class="enscript-keyword">break</span>;
+		shmmap_s++;
+	}
+	<span class="enscript-keyword">if</span> (i &gt;= shminfo.shmseg) {
+		shmat_ret = EMFILE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmat_out</span>;
+	}
+
+	map_size = mach_vm_round_page(shmseg-&gt;u.shm_segsz);
+	prot = VM_PROT_READ;
+	<span class="enscript-keyword">if</span> ((uap-&gt;shmflg &amp; SHM_RDONLY) == 0)
+		prot |= VM_PROT_WRITE;
+	flags = MAP_ANON | MAP_SHARED;
+	<span class="enscript-keyword">if</span> (uap-&gt;shmaddr)
+		flags |= MAP_FIXED;
+
+	attach_va = (mach_vm_address_t)uap-&gt;shmaddr;
+	<span class="enscript-keyword">if</span> (uap-&gt;shmflg &amp; SHM_RND)
+		attach_va &amp;= ~(SHMLBA-1);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((attach_va &amp; (SHMLBA-1)) != 0) {
+		shmat_ret = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmat_out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (flags &amp; MAP_FIXED) {
+		vm_flags = VM_FLAGS_FIXED;
+	} <span class="enscript-keyword">else</span> {
+		vm_flags = VM_FLAGS_ANYWHERE;
+	}
+
+	mapped_size = 0;
+
+	<span class="enscript-comment">/* first reserve enough space... */</span>
+	rv = mach_vm_map(current_map(),
+			 &amp;attach_va,
+			 map_size,
+			 0,
+			 vm_flags,
+			 IPC_PORT_NULL,
+			 0,
+			 FALSE,
+			 VM_PROT_NONE,
+			 VM_PROT_NONE,
+			 VM_INHERIT_NONE);
+	<span class="enscript-keyword">if</span> (rv != KERN_SUCCESS) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	shmmap_s-&gt;va = attach_va;
+
+	<span class="enscript-comment">/* ... then map the shared memory over the reserved space */</span>
+	<span class="enscript-keyword">for</span> (shm_handle = CAST_DOWN(<span class="enscript-type">void</span> *, shmseg-&gt;u.shm_internal);<span class="enscript-comment">/* tunnel */</span>
+	     shm_handle != NULL;
+	     shm_handle = shm_handle-&gt;shm_handle_next) {
+
+		rv = vm_map_enter_mem_object(
+			current_map(),		<span class="enscript-comment">/* process map */</span>
+			&amp;attach_va,		<span class="enscript-comment">/* attach address */</span>
+			shm_handle-&gt;shm_handle_size, <span class="enscript-comment">/* segment size */</span>
+			(mach_vm_offset_t)0,	<span class="enscript-comment">/* alignment mask */</span>
+			VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
+			shm_handle-&gt;shm_object,
+			(mach_vm_offset_t)0,
+			FALSE,
+			prot,
+			prot,
+			VM_INHERIT_SHARE);
+		<span class="enscript-keyword">if</span> (rv != KERN_SUCCESS) 
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		mapped_size += shm_handle-&gt;shm_handle_size;
+		attach_va = attach_va + shm_handle-&gt;shm_handle_size;
+	}
+
+	shmmap_s-&gt;shmid = uap-&gt;shmid;
+	shmseg-&gt;u.shm_lpid = p-&gt;p_pid;
+	shmseg-&gt;u.shm_atime = sysv_shmtime();
+	shmseg-&gt;u.shm_nattch++;
+	*retval = shmmap_s-&gt;va;	<span class="enscript-comment">/* XXX return -1 on error */</span>
+	shmat_ret = 0;
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmat_out</span>;
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (mapped_size &gt; 0) {
+		(<span class="enscript-type">void</span>) mach_vm_deallocate(current_map(),
+					  shmmap_s-&gt;va,
+					  mapped_size);
+	}
+	<span class="enscript-keyword">switch</span> (rv) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ADDRESS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NO_SPACE</span>:
+		shmat_ret = ENOMEM;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_PROTECTION_FAILURE</span>:
+		shmat_ret = EACCES;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		shmat_ret = EINVAL;
+		<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">shmat_out</span>:
+	SYSV_SHM_SUBSYS_UNLOCK();
+	<span class="enscript-keyword">return</span> shmat_ret;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">oshmctl</span>(__unused <span class="enscript-type">void</span> *p, __unused <span class="enscript-type">void</span> *uap, __unused <span class="enscript-type">void</span> *retval)
+{
+	<span class="enscript-keyword">return</span> EINVAL;
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINVAL
+ *	copyout:EFAULT
+ *	copyin:EFAULT
+ *	ipcperm:EPERM
+ *	ipcperm:EACCES
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">shmctl</span>(__unused <span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> shmctl_args *uap, int32_t *retval)
+{
+	<span class="enscript-type">int</span> error;
+	kauth_cred_t cred = kauth_cred_get();
+	<span class="enscript-type">struct</span> user_shmid_ds inbuf;
+	<span class="enscript-type">struct</span> shmid_kernel *shmseg;
+
+	<span class="enscript-type">int</span> shmctl_ret = 0;
+
+	AUDIT_ARG(svipc_cmd, uap-&gt;cmd);
+	AUDIT_ARG(svipc_id, uap-&gt;shmid);
+
+	SYSV_SHM_SUBSYS_LOCK();
+
+	<span class="enscript-keyword">if</span> (!shm_inited) {
+		shminit(NULL);
+	}
+
+	shmseg = shm_find_segment_by_shmid(uap-&gt;shmid);
+	<span class="enscript-keyword">if</span> (shmseg == NULL) {
+		shmctl_ret = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmctl_out</span>;
+	}
+
+	<span class="enscript-comment">/* XXAUDIT: This is the perms BEFORE any change by this call. This 
+	 * may not be what is desired.
+	 */</span>
+	AUDIT_ARG(svipc_perm, &amp;shmseg-&gt;u.shm_perm);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_sysvshm_check_shmctl(cred, shmseg, uap-&gt;cmd);
+	<span class="enscript-keyword">if</span> (error) {
+		shmctl_ret = error;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmctl_out</span>;
+	}
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">switch</span> (uap-&gt;cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPC_STAT</span>:
+		error = ipcperm(cred, &amp;shmseg-&gt;u.shm_perm, IPC_R);
+		<span class="enscript-keyword">if</span> (error) {
+			shmctl_ret = error;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmctl_out</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+			<span class="enscript-type">struct</span> user_shmid_ds shmid_ds;
+			memcpy(&amp;shmid_ds, &amp;shmseg-&gt;u, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user_shmid_ds));
+			
+			<span class="enscript-comment">/* Clear kernel reserved pointer before copying to user space */</span>
+			shmid_ds.shm_internal = USER_ADDR_NULL;
+			
+			error = copyout(&amp;shmid_ds, uap-&gt;buf, <span class="enscript-keyword">sizeof</span>(shmid_ds));
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">struct</span> user32_shmid_ds shmid_ds32;
+			shmid_ds_64to32(&amp;shmseg-&gt;u, &amp;shmid_ds32);
+			
+			<span class="enscript-comment">/* Clear kernel reserved pointer before copying to user space */</span>
+			shmid_ds32.shm_internal = (user32_addr_t)0;
+			
+			error = copyout(&amp;shmid_ds32, uap-&gt;buf, <span class="enscript-keyword">sizeof</span>(shmid_ds32));
+		}
+		<span class="enscript-keyword">if</span> (error) {
+			shmctl_ret = error;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmctl_out</span>;
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPC_SET</span>:
+		error = ipcperm(cred, &amp;shmseg-&gt;u.shm_perm, IPC_M);
+		<span class="enscript-keyword">if</span> (error) {
+			shmctl_ret = error;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmctl_out</span>;
+		}
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(p)) {
+			error = copyin(uap-&gt;buf, &amp;inbuf, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user_shmid_ds));
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">struct</span> user32_shmid_ds shmid_ds32;
+			error = copyin(uap-&gt;buf, &amp;shmid_ds32, <span class="enscript-keyword">sizeof</span>(shmid_ds32));
+			<span class="enscript-comment">/* convert in place; ugly, but safe */</span>
+			shmid_ds_32to64(&amp;shmid_ds32, &amp;inbuf);
+		}
+		<span class="enscript-keyword">if</span> (error) {
+			shmctl_ret = error;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmctl_out</span>;
+		}
+		shmseg-&gt;u.shm_perm.uid = inbuf.shm_perm.uid;
+		shmseg-&gt;u.shm_perm.gid = inbuf.shm_perm.gid;
+		shmseg-&gt;u.shm_perm.mode =
+		    (shmseg-&gt;u.shm_perm.mode &amp; ~ACCESSPERMS) |
+		    (inbuf.shm_perm.mode &amp; ACCESSPERMS);
+		shmseg-&gt;u.shm_ctime = sysv_shmtime();
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPC_RMID</span>:
+		error = ipcperm(cred, &amp;shmseg-&gt;u.shm_perm, IPC_M);
+		<span class="enscript-keyword">if</span> (error) {
+			shmctl_ret = error;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmctl_out</span>;
+		}
+		shmseg-&gt;u.shm_perm._key = IPC_PRIVATE;
+		shmseg-&gt;u.shm_perm.mode |= SHMSEG_REMOVED;
+		<span class="enscript-keyword">if</span> (shmseg-&gt;u.shm_nattch &lt;= 0) {
+			shm_deallocate_segment(shmseg);
+			shm_last_free = IPCID_TO_IX(uap-&gt;shmid);
+		}
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">if</span> 0
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SHM_LOCK</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SHM_UNLOCK</span>:
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-reference">default</span>:
+		shmctl_ret = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmctl_out</span>;
+	}
+	*retval = 0;
+	shmctl_ret = 0;
+<span class="enscript-reference">shmctl_out</span>:
+	SYSV_SHM_SUBSYS_UNLOCK();
+	<span class="enscript-keyword">return</span> shmctl_ret;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">shmget_existing</span>(<span class="enscript-type">struct</span> shmget_args *uap, <span class="enscript-type">int</span> mode, <span class="enscript-type">int</span> segnum, <span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-type">struct</span> shmid_kernel *shmseg;
+	<span class="enscript-type">int</span> error = 0;
+
+	shmseg = &amp;shmsegs[segnum];
+	<span class="enscript-keyword">if</span> (shmseg-&gt;u.shm_perm.mode &amp; SHMSEG_REMOVED) {
+		<span class="enscript-comment">/*
+		 * This segment is in the process of being allocated.  Wait
+		 * until it's done, and look the key up again (in case the
+		 * allocation failed or it was freed).
+		 */</span>
+		shmseg-&gt;u.shm_perm.mode |= SHMSEG_WANTED;
+		error = tsleep((caddr_t)shmseg, PLOCK | PCATCH, <span class="enscript-string">&quot;shmget&quot;</span>, 0);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> error;
+		<span class="enscript-keyword">return</span> EAGAIN;
+	}
+
+	<span class="enscript-comment">/*
+	 * The low 9 bits of shmflag are the mode bits being requested, which
+	 * are the actual mode bits desired on the segment, and not in IPC_R
+	 * form; therefore it would be incorrect to call ipcperm() to validate
+	 * them; instead, we AND the existing mode with the requested mode, and
+	 * verify that it matches the requested mode; otherwise, we fail with
+	 * EACCES (access denied).
+	 */</span>
+	<span class="enscript-keyword">if</span> ((shmseg-&gt;u.shm_perm.mode &amp; mode) != mode)
+		<span class="enscript-keyword">return</span> EACCES;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_sysvshm_check_shmget(kauth_cred_get(), shmseg, uap-&gt;shmflg);
+	<span class="enscript-keyword">if</span> (error) 
+		<span class="enscript-keyword">return</span> (error);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (uap-&gt;size &amp;&amp; uap-&gt;size &gt; shmseg-&gt;u.shm_segsz)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+       <span class="enscript-keyword">if</span> ((uap-&gt;shmflg &amp; (IPC_CREAT | IPC_EXCL)) == (IPC_CREAT | IPC_EXCL))
+		<span class="enscript-keyword">return</span> EEXIST;
+
+	*retval = IXSEQ_TO_IPCID(segnum, shmseg-&gt;u.shm_perm);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">shmget_allocate_segment</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> shmget_args *uap, <span class="enscript-type">int</span> mode,
+	<span class="enscript-type">int</span> *retval)
+{
+	<span class="enscript-type">int</span> i, segnum, shmid;
+	kauth_cred_t cred = kauth_cred_get();
+	<span class="enscript-type">struct</span> shmid_kernel *shmseg;
+	<span class="enscript-type">struct</span> shm_handle *shm_handle;
+	kern_return_t kret;
+	mach_vm_size_t total_size, size, alloc_size;
+	<span class="enscript-type">void</span> * mem_object;
+	<span class="enscript-type">struct</span> shm_handle *shm_handle_next, **shm_handle_next_p;
+
+	<span class="enscript-keyword">if</span> (uap-&gt;size &lt; (user_size_t)shminfo.shmmin ||
+	    uap-&gt;size &gt; (user_size_t)shminfo.shmmax)
+		<span class="enscript-keyword">return</span> EINVAL;
+	<span class="enscript-keyword">if</span> (shm_nused &gt;= shminfo.shmmni) <span class="enscript-comment">/* any shmids left? */</span>
+		<span class="enscript-keyword">return</span> ENOSPC;
+	total_size = mach_vm_round_page(uap-&gt;size);
+	<span class="enscript-keyword">if</span> ((user_ssize_t)(shm_committed + btoc(total_size)) &gt; shminfo.shmall)
+		<span class="enscript-keyword">return</span> ENOMEM;
+	<span class="enscript-keyword">if</span> (shm_last_free &lt; 0) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; shminfo.shmmni; i++)
+			<span class="enscript-keyword">if</span> (shmsegs[i].u.shm_perm.mode &amp; SHMSEG_FREE)
+				<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (i == shminfo.shmmni)
+			panic(<span class="enscript-string">&quot;shmseg free count inconsistent&quot;</span>);
+		segnum = i;
+	} <span class="enscript-keyword">else</span>  {
+		segnum = shm_last_free;
+		shm_last_free = -1;
+	}
+	shmseg = &amp;shmsegs[segnum];
+
+	<span class="enscript-comment">/*
+	 * In case we sleep in malloc(), mark the segment present but deleted
+	 * so that noone else tries to create the same key.
+	 * XXX but we don't release the global lock !?
+	 */</span>
+	shmseg-&gt;u.shm_perm.mode = SHMSEG_ALLOCATED | SHMSEG_REMOVED;
+	shmseg-&gt;u.shm_perm._key = uap-&gt;key;
+	shmseg-&gt;u.shm_perm._seq = (shmseg-&gt;u.shm_perm._seq + 1) &amp; 0x7fff;
+
+	shm_handle_next_p = NULL;
+	<span class="enscript-keyword">for</span> (alloc_size = 0;
+	     alloc_size &lt; total_size;
+	     alloc_size += size) {
+		size = MIN(total_size - alloc_size, ANON_MAX_SIZE);
+		kret = mach_make_memory_entry_64(
+			VM_MAP_NULL,
+			(memory_object_size_t *) &amp;size,
+			(memory_object_offset_t) 0,
+			MAP_MEM_NAMED_CREATE | VM_PROT_DEFAULT,
+			(ipc_port_t *) &amp;mem_object, 0);
+		<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) 
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		
+		MALLOC(shm_handle, <span class="enscript-type">struct</span> shm_handle *, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> shm_handle), M_SHM, M_WAITOK);
+		<span class="enscript-keyword">if</span> (shm_handle == NULL) {
+			kret = KERN_NO_SPACE;
+			mach_memory_entry_port_release(mem_object);
+			mem_object = NULL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		shm_handle-&gt;shm_object = mem_object;
+		shm_handle-&gt;shm_handle_size = size;
+		shm_handle-&gt;shm_handle_next = NULL;
+		<span class="enscript-keyword">if</span> (shm_handle_next_p == NULL) {
+			shmseg-&gt;u.shm_internal = CAST_USER_ADDR_T(shm_handle);<span class="enscript-comment">/* tunnel */</span>
+		} <span class="enscript-keyword">else</span> {
+			*shm_handle_next_p = shm_handle;
+		}
+		shm_handle_next_p = &amp;shm_handle-&gt;shm_handle_next;
+	}
+
+	shmid = IXSEQ_TO_IPCID(segnum, shmseg-&gt;u.shm_perm);
+
+	shmseg-&gt;u.shm_perm.cuid = shmseg-&gt;u.shm_perm.uid = kauth_cred_getuid(cred);
+	shmseg-&gt;u.shm_perm.cgid = shmseg-&gt;u.shm_perm.gid = kauth_cred_getgid(cred);
+	shmseg-&gt;u.shm_perm.mode = (shmseg-&gt;u.shm_perm.mode &amp; SHMSEG_WANTED) |
+	    (mode &amp; ACCESSPERMS) | SHMSEG_ALLOCATED;
+	shmseg-&gt;u.shm_segsz = uap-&gt;size;
+	shmseg-&gt;u.shm_cpid = p-&gt;p_pid;
+	shmseg-&gt;u.shm_lpid = shmseg-&gt;u.shm_nattch = 0;
+	shmseg-&gt;u.shm_atime = shmseg-&gt;u.shm_dtime = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	mac_sysvshm_label_associate(cred, shmseg);
+#<span class="enscript-reference">endif</span>
+	shmseg-&gt;u.shm_ctime = sysv_shmtime();
+	shm_committed += btoc(size);
+	shm_nused++;
+	AUDIT_ARG(svipc_perm, &amp;shmseg-&gt;u.shm_perm);
+	<span class="enscript-keyword">if</span> (shmseg-&gt;u.shm_perm.mode &amp; SHMSEG_WANTED) {
+		<span class="enscript-comment">/*
+		 * Somebody else wanted this key while we were asleep.  Wake
+		 * them up now.
+		 */</span>
+		shmseg-&gt;u.shm_perm.mode &amp;= ~SHMSEG_WANTED;
+		wakeup((caddr_t)shmseg);
+	}
+	*retval = shmid;
+	AUDIT_ARG(svipc_id, shmid);
+	<span class="enscript-keyword">return</span> 0;
+<span class="enscript-reference">out</span>: 
+	<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) {
+		<span class="enscript-keyword">for</span> (shm_handle = CAST_DOWN(<span class="enscript-type">void</span> *,shmseg-&gt;u.shm_internal); <span class="enscript-comment">/* tunnel */</span>
+		     shm_handle != NULL;
+		     shm_handle = shm_handle_next) {
+			shm_handle_next = shm_handle-&gt;shm_handle_next;
+			mach_memory_entry_port_release(shm_handle-&gt;shm_object);
+			FREE((caddr_t) shm_handle, M_SHM);
+		}
+		shmseg-&gt;u.shm_internal = USER_ADDR_NULL; <span class="enscript-comment">/* tunnel */</span>
+	}
+
+	<span class="enscript-keyword">switch</span> (kret) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ADDRESS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NO_SPACE</span>:
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_PROTECTION_FAILURE</span>:
+		<span class="enscript-keyword">return</span> (EACCES);
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">shmget</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> shmget_args *uap, int32_t *retval)
+{
+	<span class="enscript-type">int</span> segnum, mode, error;
+	<span class="enscript-type">int</span> shmget_ret = 0;
+	
+	<span class="enscript-comment">/* Auditing is actually done in shmget_allocate_segment() */</span>
+
+	SYSV_SHM_SUBSYS_LOCK();
+
+	<span class="enscript-keyword">if</span> (!shm_inited) {
+		shminit(NULL);
+	}
+
+	mode = uap-&gt;shmflg &amp; ACCESSPERMS;
+	<span class="enscript-keyword">if</span> (uap-&gt;key != IPC_PRIVATE) {
+	<span class="enscript-reference">again</span>:
+		segnum = shm_find_segment_by_key(uap-&gt;key);
+		<span class="enscript-keyword">if</span> (segnum &gt;= 0) {
+			error = shmget_existing(uap, mode, segnum, retval);
+			<span class="enscript-keyword">if</span> (error == EAGAIN)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+			shmget_ret = error;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmget_out</span>;
+		}
+		<span class="enscript-keyword">if</span> ((uap-&gt;shmflg &amp; IPC_CREAT) == 0) {
+			shmget_ret = ENOENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmget_out</span>;
+		}
+	}
+	shmget_ret = shmget_allocate_segment(p, uap, mode, retval);
+<span class="enscript-reference">shmget_out</span>:
+	SYSV_SHM_SUBSYS_UNLOCK();
+	<span class="enscript-keyword">return</span> shmget_ret;
+	<span class="enscript-comment">/*NOTREACHED*/</span>
+
+}
+
+<span class="enscript-comment">/*
+ * shmsys
+ *
+ * Entry point for all SHM calls: shmat, oshmctl, shmdt, shmget, shmctl
+ *
+ * Parameters:	p	Process requesting the call
+ * 		uap	User argument descriptor (see below)
+ * 		retval	Return value of the selected shm call
+ *
+ * Indirect parameters:	uap-&gt;which	msg call to invoke (index in array of shm calls)
+ * 			uap-&gt;a2		User argument descriptor
+ * 
+ * Returns:	0	Success
+ * 		!0	Not success
+ *
+ * Implicit returns: retval     Return value of the selected shm call
+ *
+ * DEPRECATED:  This interface should not be used to call the other SHM 
+ * 		functions (shmat, oshmctl, shmdt, shmget, shmctl). The correct 
+ * 		usage is to call the other SHM functions directly.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">shmsys</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> shmsys_args *uap, int32_t *retval)
+{
+
+	<span class="enscript-comment">/* The routine that we are dispatching already does this */</span>
+
+	<span class="enscript-keyword">if</span> (uap-&gt;which &gt;= <span class="enscript-keyword">sizeof</span>(shmcalls)/<span class="enscript-keyword">sizeof</span>(shmcalls[0]))
+		<span class="enscript-keyword">return</span> EINVAL;
+	<span class="enscript-keyword">return</span> ((*shmcalls[uap-&gt;which])(p, &amp;uap-&gt;a2, retval));
+}
+
+<span class="enscript-comment">/*
+ * Return 0 on success, 1 on failure.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">shmfork</span>(<span class="enscript-type">struct</span> proc *p1, <span class="enscript-type">struct</span> proc *p2)
+{
+	<span class="enscript-type">struct</span> shmmap_state *shmmap_s;
+    size_t size;
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> shmfork_ret = 0;
+
+	SYSV_SHM_SUBSYS_LOCK();
+
+	<span class="enscript-keyword">if</span> (!shm_inited) {
+		shminit(NULL);
+	}
+    size = shminfo.shmseg * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> shmmap_state);
+    <span class="enscript-keyword">if</span> (size == 0 || size / shminfo.shmseg != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> shmmap_state)) {
+        <span class="enscript-comment">/* overflow */</span>
+        shmfork_ret = 1;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">shmfork_out</span>;
+    }
+	MALLOC(shmmap_s, <span class="enscript-type">struct</span> shmmap_state *, size, M_SHM, M_WAITOK);
+	<span class="enscript-keyword">if</span> (shmmap_s != NULL) {
+		bcopy((caddr_t)p1-&gt;vm_shm, (caddr_t)shmmap_s, size);
+		p2-&gt;vm_shm = (caddr_t)shmmap_s;
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; shminfo.shmseg; i++, shmmap_s++)
+			<span class="enscript-keyword">if</span> (shmmap_s-&gt;shmid != -1)
+				shmsegs[IPCID_TO_IX(shmmap_s-&gt;shmid)].u.shm_nattch++;
+		shmfork_ret = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">shmfork_out</span>;
+	}
+
+	shmfork_ret = 1;	<span class="enscript-comment">/* failed to copy to child - ENOMEM */</span>
+<span class="enscript-reference">shmfork_out</span>:
+	SYSV_SHM_SUBSYS_UNLOCK();
+	<span class="enscript-keyword">return</span> shmfork_ret;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">shmexit</span>(<span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">struct</span> shmmap_state *shmmap_s;
+	<span class="enscript-type">int</span> i;
+
+	shmmap_s = (<span class="enscript-type">struct</span> shmmap_state *)p-&gt;vm_shm;
+
+	SYSV_SHM_SUBSYS_LOCK();
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; shminfo.shmseg; i++, shmmap_s++)
+		<span class="enscript-keyword">if</span> (shmmap_s-&gt;shmid != -1)
+			<span class="enscript-comment">/*
+			 * XXX: Should the MAC framework enforce
+			 * check here as well.
+			 */</span>
+			shm_delete_mapping(p, shmmap_s, 1);
+	FREE((caddr_t)p-&gt;vm_shm, M_SHM);
+	p-&gt;vm_shm = NULL;
+	SYSV_SHM_SUBSYS_UNLOCK();
+}
+
+<span class="enscript-comment">/*
+ * shmexec() is like shmexit(), only it doesn't delete the mappings,
+ * since the old address space has already been destroyed and the new
+ * one instantiated.  Instead, it just does the housekeeping work we
+ * need to do to keep the System V shared memory subsystem sane.
+ */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">shmexec</span>(<span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">struct</span> shmmap_state *shmmap_s;
+	<span class="enscript-type">int</span> i;
+
+	shmmap_s = (<span class="enscript-type">struct</span> shmmap_state *)p-&gt;vm_shm;
+	SYSV_SHM_SUBSYS_LOCK();
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; shminfo.shmseg; i++, shmmap_s++)
+		<span class="enscript-keyword">if</span> (shmmap_s-&gt;shmid != -1)
+			shm_delete_mapping(p, shmmap_s, 0);
+	FREE((caddr_t)p-&gt;vm_shm, M_SHM);
+	p-&gt;vm_shm = NULL;
+	SYSV_SHM_SUBSYS_UNLOCK();
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">shminit</span>(__unused <span class="enscript-type">void</span> *dummy)
+{
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> s;
+
+	<span class="enscript-keyword">if</span> (!shm_inited) {
+		<span class="enscript-comment">/*
+		 * we store internally 64 bit, since if we didn't, we would
+		 * be unable to represent a segment size in excess of 32 bits
+		 * with the (struct shmid_ds)-&gt;shm_segsz field; also, POSIX
+		 * dictates this filed be a size_t, which is 64 bits when
+		 * running 64 bit binaries.
+		 */</span>
+		s = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> shmid_kernel) * shminfo.shmmni;
+
+		MALLOC(shmsegs, <span class="enscript-type">struct</span> shmid_kernel *, s, M_SHM, M_WAITOK);
+		<span class="enscript-keyword">if</span> (shmsegs == NULL) {
+			<span class="enscript-comment">/* XXX fail safely: leave shared memory uninited */</span>
+			<span class="enscript-keyword">return</span>;
+		}
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; shminfo.shmmni; i++) {
+			shmsegs[i].u.shm_perm.mode = SHMSEG_FREE;
+			shmsegs[i].u.shm_perm._seq = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+			mac_sysvshm_label_init(&amp;shmsegs[i]);
+#<span class="enscript-reference">endif</span>
+		}
+		shm_last_free = 0;
+		shm_nused = 0;
+		shm_committed = 0;
+		shm_inited = 1;
+	}
+}
+<span class="enscript-comment">/* Initialize the mutex governing access to the SysV shm subsystem */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">sysv_shm_lock_init</span>( <span class="enscript-type">void</span> )
+{
+
+	sysv_shm_subsys_lck_grp_attr = lck_grp_attr_alloc_init();
+	
+	sysv_shm_subsys_lck_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;sysv_shm_subsys_lock&quot;</span>, sysv_shm_subsys_lck_grp_attr);
+	
+	sysv_shm_subsys_lck_attr = lck_attr_alloc_init();
+	lck_mtx_init(&amp;sysv_shm_subsys_mutex, sysv_shm_subsys_lck_grp, sysv_shm_subsys_lck_attr);
+}
+
+<span class="enscript-comment">/* (struct sysctl_oid *oidp, void *arg1, int arg2, \
+        struct sysctl_req *req) */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sysctl_shminfo</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, <span class="enscript-type">void</span> *arg1,
+	__unused <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> sysctl_shminfo_ret = 0;
+	uint64_t	saved_shmmax;
+    uint64_t    saved_shmseg;
+    uint64_t    saved_shmmni;
+    uint64_t    saved_shmall;
+
+	error = SYSCTL_OUT(req, arg1, <span class="enscript-keyword">sizeof</span>(int64_t));
+	<span class="enscript-keyword">if</span> (error || req-&gt;newptr == USER_ADDR_NULL)
+		<span class="enscript-keyword">return</span>(error);
+
+	SYSV_SHM_SUBSYS_LOCK();
+
+	<span class="enscript-comment">/* shmmni can not be changed after SysV SHM has been initialized */</span>
+	<span class="enscript-keyword">if</span> (shm_inited &amp;&amp; arg1 == &amp;shminfo.shmmni) {
+		sysctl_shminfo_ret = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">sysctl_shminfo_out</span>;
+	}
+    saved_shmmax = shminfo.shmmax;
+    saved_shmseg = shminfo.shmseg;
+    saved_shmmni = shminfo.shmmni;
+    saved_shmall = shminfo.shmall;
+
+	<span class="enscript-keyword">if</span> ((error = SYSCTL_IN(req, arg1, <span class="enscript-keyword">sizeof</span>(int64_t))) != 0) {
+		sysctl_shminfo_ret = error;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">sysctl_shminfo_out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (arg1 == &amp;shminfo.shmmax) {
+		<span class="enscript-comment">/* shmmax needs to be page-aligned */</span>
+		<span class="enscript-keyword">if</span> (shminfo.shmmax &amp; PAGE_MASK_64) {
+			shminfo.shmmax = saved_shmmax;
+			sysctl_shminfo_ret = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">sysctl_shminfo_out</span>;
+		}
+	}
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (arg1 == &amp;shminfo.shmseg) {
+        <span class="enscript-comment">/* add a sanity check - 20847256 */</span>
+        <span class="enscript-keyword">if</span> (shminfo.shmseg &gt; INT32_MAX || shminfo.shmseg &lt; 0) {
+            shminfo.shmseg = saved_shmseg;
+            sysctl_shminfo_ret = EINVAL;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">sysctl_shminfo_out</span>;
+        }
+    }
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (arg1 == &amp;shminfo.shmmni) {
+        <span class="enscript-comment">/* add a sanity check - 20847256 */</span>
+        <span class="enscript-keyword">if</span> (shminfo.shmmni &gt; INT32_MAX || shminfo.shmmni &lt; 0) {
+            shminfo.shmmni = saved_shmmni;
+            sysctl_shminfo_ret = EINVAL;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">sysctl_shminfo_out</span>;
+        }
+    }
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (arg1 == &amp;shminfo.shmall) {
+        <span class="enscript-comment">/* add a sanity check - 20847256 */</span>
+        <span class="enscript-keyword">if</span> (shminfo.shmall &gt; INT32_MAX || shminfo.shmall &lt; 0) {
+            shminfo.shmall = saved_shmall;
+            sysctl_shminfo_ret = EINVAL;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">sysctl_shminfo_out</span>;
+        }
+    }
+	sysctl_shminfo_ret = 0;
+<span class="enscript-reference">sysctl_shminfo_out</span>:
+	SYSV_SHM_SUBSYS_UNLOCK();
+	<span class="enscript-keyword">return</span> sysctl_shminfo_ret;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">IPCS_shm_sysctl</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, __unused <span class="enscript-type">void</span> *arg1,
+	__unused <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> cursor;
+	<span class="enscript-type">union</span> {
+		<span class="enscript-type">struct</span> user32_IPCS_command u32;
+		<span class="enscript-type">struct</span> user_IPCS_command u64;
+	} ipcs;
+	<span class="enscript-type">struct</span> user32_shmid_ds shmid_ds32;	<span class="enscript-comment">/* post conversion, 32 bit version */</span>
+	<span class="enscript-type">struct</span> user_shmid_ds   shmid_ds;	<span class="enscript-comment">/* 64 bit version */</span>
+	<span class="enscript-type">void</span> *shmid_dsp;
+	size_t ipcs_sz = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user_IPCS_command);
+	size_t shmid_ds_sz = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user_shmid_ds);
+	<span class="enscript-type">struct</span> proc *p = current_proc();
+
+	SYSV_SHM_SUBSYS_LOCK();
+
+	<span class="enscript-keyword">if</span> (!shm_inited) {
+		shminit(NULL);
+	}
+
+	<span class="enscript-keyword">if</span> (!IS_64BIT_PROCESS(p)) {
+		ipcs_sz = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user32_IPCS_command);
+		shmid_ds_sz = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user32_shmid_ds);
+	}
+
+	<span class="enscript-comment">/* Copy in the command structure */</span>
+	<span class="enscript-keyword">if</span> ((error = SYSCTL_IN(req, &amp;ipcs, ipcs_sz)) != 0) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ipcs_shm_sysctl_out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (!IS_64BIT_PROCESS(p))	<span class="enscript-comment">/* convert in place */</span>
+		ipcs.u64.ipcs_data = CAST_USER_ADDR_T(ipcs.u32.ipcs_data);
+
+	<span class="enscript-comment">/* Let us version this interface... */</span>
+	<span class="enscript-keyword">if</span> (ipcs.u64.ipcs_magic != IPCS_MAGIC) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ipcs_shm_sysctl_out</span>;
+	}
+
+	<span class="enscript-keyword">switch</span>(ipcs.u64.ipcs_op) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPCS_SHM_CONF</span>:	<span class="enscript-comment">/* Obtain global configuration data */</span>
+		<span class="enscript-keyword">if</span> (ipcs.u64.ipcs_datalen != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> shminfo)) {
+			<span class="enscript-keyword">if</span> (ipcs.u64.ipcs_cursor != 0) { <span class="enscript-comment">/* fwd. compat. */</span>
+				error = ENOMEM;
+				<span class="enscript-keyword">break</span>;
+			}
+			error = ERANGE;
+			<span class="enscript-keyword">break</span>;
+		}
+		error = copyout(&amp;shminfo, ipcs.u64.ipcs_data, ipcs.u64.ipcs_datalen);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPCS_SHM_ITER</span>:	<span class="enscript-comment">/* Iterate over existing segments */</span>
+		cursor = ipcs.u64.ipcs_cursor;
+		<span class="enscript-keyword">if</span> (cursor &lt; 0 || cursor &gt;= shminfo.shmmni) {
+			error = ERANGE;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (ipcs.u64.ipcs_datalen != (<span class="enscript-type">int</span>)shmid_ds_sz) {
+			error = EINVAL;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">for</span>( ; cursor &lt; shminfo.shmmni; cursor++) {
+			<span class="enscript-keyword">if</span> (shmsegs[cursor].u.shm_perm.mode &amp; SHMSEG_ALLOCATED)
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> (cursor == shminfo.shmmni) {
+			error = ENOENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		shmid_dsp = &amp;shmsegs[cursor];	<span class="enscript-comment">/* default: 64 bit */</span>
+
+		<span class="enscript-comment">/*
+		 * If necessary, convert the 64 bit kernel segment
+		 * descriptor to a 32 bit user one.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!IS_64BIT_PROCESS(p)) {
+			shmid_ds_64to32(shmid_dsp, &amp;shmid_ds32);
+			
+			<span class="enscript-comment">/* Clear kernel reserved pointer before copying to user space */</span>
+			shmid_ds32.shm_internal = (user32_addr_t)0;
+			
+			shmid_dsp = &amp;shmid_ds32;
+		} <span class="enscript-keyword">else</span> {
+			memcpy(&amp;shmid_ds, shmid_dsp, <span class="enscript-keyword">sizeof</span>(shmid_ds));
+
+			<span class="enscript-comment">/* Clear kernel reserved pointer before copying to user space */</span>
+			shmid_ds.shm_internal = USER_ADDR_NULL;
+			
+			shmid_dsp = &amp;shmid_ds;
+		}
+		error = copyout(shmid_dsp, ipcs.u64.ipcs_data, ipcs.u64.ipcs_datalen);
+		<span class="enscript-keyword">if</span> (!error) {
+			<span class="enscript-comment">/* update cursor */</span>
+			ipcs.u64.ipcs_cursor = cursor + 1;
+
+		<span class="enscript-keyword">if</span> (!IS_64BIT_PROCESS(p))	<span class="enscript-comment">/* convert in place */</span>
+			ipcs.u32.ipcs_data = CAST_DOWN_EXPLICIT(user32_addr_t,ipcs.u64.ipcs_data);
+
+		error = SYSCTL_OUT(req, &amp;ipcs, ipcs_sz);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		error = EINVAL;
+		<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">ipcs_shm_sysctl_out</span>:
+	SYSV_SHM_SUBSYS_UNLOCK();
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_kern, KERN_SYSV, sysv, CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_ANYBODY, 0, <span class="enscript-string">&quot;SYSV&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern_sysv, OID_AUTO, shmmax, CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;shminfo.shmmax, 0, &amp;sysctl_shminfo ,<span class="enscript-string">&quot;Q&quot;</span>,<span class="enscript-string">&quot;shmmax&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern_sysv, OID_AUTO, shmmin, CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;shminfo.shmmin, 0, &amp;sysctl_shminfo ,<span class="enscript-string">&quot;Q&quot;</span>,<span class="enscript-string">&quot;shmmin&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern_sysv, OID_AUTO, shmmni, CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;shminfo.shmmni, 0, &amp;sysctl_shminfo ,<span class="enscript-string">&quot;Q&quot;</span>,<span class="enscript-string">&quot;shmmni&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern_sysv, OID_AUTO, shmseg, CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;shminfo.shmseg, 0, &amp;sysctl_shminfo ,<span class="enscript-string">&quot;Q&quot;</span>,<span class="enscript-string">&quot;shmseg&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern_sysv, OID_AUTO, shmall, CTLTYPE_QUAD | CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;shminfo.shmall, 0, &amp;sysctl_shminfo ,<span class="enscript-string">&quot;Q&quot;</span>,<span class="enscript-string">&quot;shmall&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_kern_sysv, OID_AUTO, ipcs, CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_ANYBODY, 0, <span class="enscript-string">&quot;SYSVIPCS&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern_sysv_ipcs, OID_AUTO, shm, CTLFLAG_RW | CTLFLAG_ANYBODY | CTLFLAG_LOCKED,
+	0, 0, IPCS_shm_sysctl,
+	<span class="enscript-string">&quot;S,IPCS_shm_command&quot;</span>,
+	<span class="enscript-string">&quot;ipcs shm command interface&quot;</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SYSV_SHM */</span>
+
+<span class="enscript-comment">/* DSEP Review Done pl-20051108-v02 @2743,@2908,@2913,@3009 */</span>
+</pre>
+<hr />
+</body></html>

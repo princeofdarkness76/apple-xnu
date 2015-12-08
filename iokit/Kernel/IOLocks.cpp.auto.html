@@ -1,0 +1,343 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOLocks.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOLocks.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/system.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOReturn.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOLib.h&gt;</span> 
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/assert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOLocksPrivate.h&gt;</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> {
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+<span class="enscript-comment">/* Synthetic event if none is specified, for backwards compatibility only. */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">bool</span> IOLockSleep_NO_EVENT <span class="enscript-function-name">__attribute__</span>((used)) = 0;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">void</span>	IOLockInitWithState( IOLock * lock, IOLockState state)
+{
+    <span class="enscript-keyword">if</span>( state == kIOLockStateLocked)
+        lck_mtx_lock( lock);
+}
+
+IOLock * <span class="enscript-function-name">IOLockAlloc</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-keyword">return</span>( lck_mtx_alloc_init(IOLockGroup, LCK_ATTR_NULL) );
+}
+
+<span class="enscript-type">void</span>	IOLockFree( IOLock * lock)
+{
+    lck_mtx_free( lock, IOLockGroup);
+}
+
+lck_mtx_t * <span class="enscript-function-name">IOLockGetMachLock</span>( IOLock * lock)
+{
+    <span class="enscript-keyword">return</span>( (lck_mtx_t *)lock);
+}
+
+<span class="enscript-type">int</span>	IOLockSleep( IOLock * lock, <span class="enscript-type">void</span> *event, UInt32 interType)
+{
+    <span class="enscript-keyword">return</span> (<span class="enscript-type">int</span>) lck_mtx_sleep(lock, LCK_SLEEP_PROMOTED_PRI, (event_t) event, (wait_interrupt_t) interType);
+}
+
+<span class="enscript-type">int</span>	IOLockSleepDeadline( IOLock * lock, <span class="enscript-type">void</span> *event,
+                                AbsoluteTime deadline, UInt32 interType)
+{
+    <span class="enscript-keyword">return</span> (<span class="enscript-type">int</span>) lck_mtx_sleep_deadline(lock, LCK_SLEEP_PROMOTED_PRI, (event_t) event,
+    					(wait_interrupt_t) interType, __OSAbsoluteTime(deadline));
+}
+
+<span class="enscript-type">void</span>	IOLockWakeup(IOLock * lock, <span class="enscript-type">void</span> *event, <span class="enscript-type">bool</span> oneThread)
+{   
+	thread_wakeup_prim((event_t) event, oneThread, THREAD_AWAKENED);
+}   
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+<span class="enscript-comment">/*
+ * For backwards compatibility, kexts built against pre-Darwin 14 headers will bind at runtime to this function,
+ * which supports a NULL event,
+ */</span>
+<span class="enscript-type">int</span>	IOLockSleep_legacy_x86_64( IOLock * lock, <span class="enscript-type">void</span> *event, UInt32 interType) __asm(<span class="enscript-string">&quot;_IOLockSleep&quot;</span>);
+<span class="enscript-type">int</span>	IOLockSleepDeadline_legacy_x86_64( IOLock * lock, <span class="enscript-type">void</span> *event,
+					   AbsoluteTime deadline, UInt32 interType) __asm(<span class="enscript-string">&quot;_IOLockSleepDeadline&quot;</span>);
+<span class="enscript-type">void</span>	IOLockWakeup_legacy_x86_64(IOLock * lock, <span class="enscript-type">void</span> *event, <span class="enscript-type">bool</span> oneThread) __asm(<span class="enscript-string">&quot;_IOLockWakeup&quot;</span>);
+
+<span class="enscript-type">int</span>	IOLockSleep_legacy_x86_64( IOLock * lock, <span class="enscript-type">void</span> *event, UInt32 interType)
+{
+    <span class="enscript-keyword">if</span> (event == NULL)
+        event = (<span class="enscript-type">void</span> *)&amp;IOLockSleep_NO_EVENT;
+
+    <span class="enscript-keyword">return</span> IOLockSleep(lock, event, interType);
+}
+
+<span class="enscript-type">int</span>	IOLockSleepDeadline_legacy_x86_64( IOLock * lock, <span class="enscript-type">void</span> *event,
+			     AbsoluteTime deadline, UInt32 interType)
+{
+    <span class="enscript-keyword">if</span> (event == NULL)
+        event = (<span class="enscript-type">void</span> *)&amp;IOLockSleep_NO_EVENT;
+
+    <span class="enscript-keyword">return</span> IOLockSleepDeadline(lock, event, deadline, interType);
+}
+
+<span class="enscript-type">void</span>	IOLockWakeup_legacy_x86_64(IOLock * lock, <span class="enscript-type">void</span> *event, <span class="enscript-type">bool</span> oneThread)
+{   
+    <span class="enscript-keyword">if</span> (event == NULL)
+        event = (<span class="enscript-type">void</span> *)&amp;IOLockSleep_NO_EVENT;
+
+    IOLockWakeup(lock, event, oneThread);
+}   
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(__x86_64__) */</span>
+
+
+<span class="enscript-type">struct</span> _IORecursiveLock {
+	lck_mtx_t	*mutex;
+	lck_grp_t	*group;
+	thread_t	thread;
+	UInt32		count;
+};
+
+IORecursiveLock * <span class="enscript-function-name">IORecursiveLockAllocWithLockGroup</span>( lck_grp_t * lockGroup )
+{
+    _IORecursiveLock * lock;
+
+    <span class="enscript-keyword">if</span>( lockGroup == 0 )
+        <span class="enscript-keyword">return</span>( 0 );
+
+    lock = IONew( _IORecursiveLock, 1 );
+    <span class="enscript-keyword">if</span>( !lock )
+        <span class="enscript-keyword">return</span>( 0 );
+
+    lock-&gt;mutex = lck_mtx_alloc_init( lockGroup, LCK_ATTR_NULL );
+    <span class="enscript-keyword">if</span>( lock-&gt;mutex ) {
+		lock-&gt;group = lockGroup;
+        lock-&gt;thread = 0;
+        lock-&gt;count  = 0;
+    } <span class="enscript-keyword">else</span> {
+        IODelete( lock, _IORecursiveLock, 1 );
+        lock = 0;
+    }
+
+    <span class="enscript-keyword">return</span>( (IORecursiveLock *) lock );
+}
+
+
+IORecursiveLock * <span class="enscript-function-name">IORecursiveLockAlloc</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-keyword">return</span> IORecursiveLockAllocWithLockGroup( IOLockGroup );
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORecursiveLockFree</span>( IORecursiveLock * _lock )
+{
+    _IORecursiveLock * lock = (_IORecursiveLock *)_lock;
+	
+    lck_mtx_free( lock-&gt;mutex, lock-&gt;group );
+    IODelete( lock, _IORecursiveLock, 1 );
+}
+
+lck_mtx_t * <span class="enscript-function-name">IORecursiveLockGetMachLock</span>( IORecursiveLock * lock )
+{
+    <span class="enscript-keyword">return</span>( lock-&gt;mutex );
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORecursiveLockLock</span>( IORecursiveLock * _lock)
+{
+    _IORecursiveLock * lock = (_IORecursiveLock *)_lock;
+
+    <span class="enscript-keyword">if</span>( lock-&gt;thread == IOThreadSelf())
+        lock-&gt;count++;
+    <span class="enscript-keyword">else</span> {
+        lck_mtx_lock( lock-&gt;mutex );
+        assert( lock-&gt;thread == 0 );
+        assert( lock-&gt;count == 0 );
+        lock-&gt;thread = IOThreadSelf();
+        lock-&gt;count = 1;
+    }
+}
+
+boolean_t <span class="enscript-function-name">IORecursiveLockTryLock</span>( IORecursiveLock * _lock)
+{
+    _IORecursiveLock * lock = (_IORecursiveLock *)_lock;
+
+    <span class="enscript-keyword">if</span>( lock-&gt;thread == IOThreadSelf()) {
+        lock-&gt;count++;
+	<span class="enscript-keyword">return</span>( true );
+    } <span class="enscript-keyword">else</span> {
+        <span class="enscript-keyword">if</span>( lck_mtx_try_lock( lock-&gt;mutex )) {
+            assert( lock-&gt;thread == 0 );
+            assert( lock-&gt;count == 0 );
+            lock-&gt;thread = IOThreadSelf();
+            lock-&gt;count = 1;
+            <span class="enscript-keyword">return</span>( true );
+	}
+    }
+    <span class="enscript-keyword">return</span>( false );
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORecursiveLockUnlock</span>( IORecursiveLock * _lock)
+{
+    _IORecursiveLock * lock = (_IORecursiveLock *)_lock;
+
+    assert( lock-&gt;thread == IOThreadSelf() );
+
+    <span class="enscript-keyword">if</span>( 0 == (--lock-&gt;count)) {
+        lock-&gt;thread = 0;
+        lck_mtx_unlock( lock-&gt;mutex );
+    }
+}
+
+boolean_t <span class="enscript-function-name">IORecursiveLockHaveLock</span>( <span class="enscript-type">const</span> IORecursiveLock * _lock)
+{
+    _IORecursiveLock * lock = (_IORecursiveLock *)_lock;
+
+    <span class="enscript-keyword">return</span>( lock-&gt;thread == IOThreadSelf());
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">IORecursiveLockSleep</span>(IORecursiveLock *_lock, <span class="enscript-type">void</span> *event, UInt32 interType)
+{
+    _IORecursiveLock * lock = (_IORecursiveLock *)_lock;
+    UInt32 count = lock-&gt;count;
+    <span class="enscript-type">int</span> res;
+
+    assert(lock-&gt;thread == IOThreadSelf());
+    
+    lock-&gt;count = 0;
+    lock-&gt;thread = 0;
+    res = lck_mtx_sleep(lock-&gt;mutex, LCK_SLEEP_PROMOTED_PRI, (event_t) event, (wait_interrupt_t) interType);
+
+    <span class="enscript-comment">// Must re-establish the recursive lock no matter why we woke up
+</span>    <span class="enscript-comment">// otherwise we would potentially leave the return path corrupted.
+</span>    assert(lock-&gt;thread == 0);
+    assert(lock-&gt;count == 0);
+    lock-&gt;thread = IOThreadSelf();
+    lock-&gt;count = count;
+    <span class="enscript-keyword">return</span> res;
+}
+
+<span class="enscript-type">int</span>	IORecursiveLockSleepDeadline( IORecursiveLock * _lock, <span class="enscript-type">void</span> *event,
+                                  AbsoluteTime deadline, UInt32 interType)
+{
+    _IORecursiveLock * lock = (_IORecursiveLock *)_lock;
+    UInt32 count = lock-&gt;count;
+    <span class="enscript-type">int</span> res;
+
+    assert(lock-&gt;thread == IOThreadSelf());
+    
+    lock-&gt;count = 0;
+    lock-&gt;thread = 0;
+    res = lck_mtx_sleep_deadline(lock-&gt;mutex, LCK_SLEEP_PROMOTED_PRI, (event_t) event, 
+								      (wait_interrupt_t) interType, __OSAbsoluteTime(deadline));
+
+    <span class="enscript-comment">// Must re-establish the recursive lock no matter why we woke up
+</span>    <span class="enscript-comment">// otherwise we would potentially leave the return path corrupted.
+</span>    assert(lock-&gt;thread == 0);
+    assert(lock-&gt;count == 0);
+    lock-&gt;thread = IOThreadSelf();
+    lock-&gt;count = count;
+    <span class="enscript-keyword">return</span> res;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORecursiveLockWakeup</span>(IORecursiveLock *, <span class="enscript-type">void</span> *event, <span class="enscript-type">bool</span> oneThread)
+{
+    thread_wakeup_prim((event_t) event, oneThread, THREAD_AWAKENED);
+}
+
+<span class="enscript-comment">/*
+ * Complex (read/write) lock operations
+ */</span>
+
+IORWLock * <span class="enscript-function-name">IORWLockAlloc</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-keyword">return</span>(  lck_rw_alloc_init(IOLockGroup, LCK_ATTR_NULL)  );
+}
+
+<span class="enscript-type">void</span>	IORWLockFree( IORWLock * lock)
+{
+    lck_rw_free( lock, IOLockGroup);
+}
+
+lck_rw_t * <span class="enscript-function-name">IORWLockGetMachLock</span>( IORWLock * lock)
+{
+    <span class="enscript-keyword">return</span>( (lck_rw_t *)lock);
+}
+
+
+<span class="enscript-comment">/*
+ * Spin locks
+ */</span>
+
+IOSimpleLock * <span class="enscript-function-name">IOSimpleLockAlloc</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-keyword">return</span>( lck_spin_alloc_init( IOLockGroup, LCK_ATTR_NULL) );
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOSimpleLockInit</span>( IOSimpleLock * lock)
+{
+    lck_spin_init( lock, IOLockGroup, LCK_ATTR_NULL);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOSimpleLockFree</span>( IOSimpleLock * lock )
+{
+    lck_spin_free( lock, IOLockGroup);
+}
+
+lck_spin_t * <span class="enscript-function-name">IOSimpleLockGetMachLock</span>( IOSimpleLock * lock)
+{
+    <span class="enscript-keyword">return</span>( (lck_spin_t *)lock);
+}
+
+} <span class="enscript-comment">/* extern &quot;C&quot; */</span>
+
+
+</pre>
+<hr />
+</body></html>

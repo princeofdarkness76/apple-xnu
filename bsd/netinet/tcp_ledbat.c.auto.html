@@ -1,0 +1,465 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>tcp_ledbat.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">tcp_ledbat.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2010-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_fsm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_timer.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcpip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_cc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+<span class="enscript-comment">/* This file implements an alternate TCP congestion control algorithm
+ * for background transport developed by LEDBAT working group at IETF and
+ * described in draft: draft-ietf-ledbat-congestion-02
+ */</span>
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">tcp_ledbat_init</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+<span class="enscript-type">int</span> <span class="enscript-function-name">tcp_ledbat_cleanup</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+<span class="enscript-type">void</span> <span class="enscript-function-name">tcp_ledbat_cwnd_init</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+<span class="enscript-type">void</span> <span class="enscript-function-name">tcp_ledbat_congestion_avd</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th);
+<span class="enscript-type">void</span> <span class="enscript-function-name">tcp_ledbat_ack_rcvd</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th);
+<span class="enscript-type">void</span> <span class="enscript-function-name">tcp_ledbat_pre_fr</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+<span class="enscript-type">void</span> <span class="enscript-function-name">tcp_ledbat_post_fr</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th);
+<span class="enscript-type">void</span> <span class="enscript-function-name">tcp_ledbat_after_idle</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+<span class="enscript-type">void</span> <span class="enscript-function-name">tcp_ledbat_after_timeout</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+<span class="enscript-type">int</span> <span class="enscript-function-name">tcp_ledbat_delay_ack</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th);
+<span class="enscript-type">void</span> <span class="enscript-function-name">tcp_ledbat_switch_cc</span>(<span class="enscript-type">struct</span> tcpcb *tp, uint16_t old_cc_index);
+
+<span class="enscript-type">struct</span> tcp_cc_algo tcp_cc_ledbat = {
+	.name = <span class="enscript-string">&quot;ledbat&quot;</span>,
+	.init = tcp_ledbat_init,
+	.cleanup = tcp_ledbat_cleanup,
+	.cwnd_init = tcp_ledbat_cwnd_init,
+	.congestion_avd = tcp_ledbat_congestion_avd,
+	.ack_rcvd = tcp_ledbat_ack_rcvd,
+	.pre_fr = tcp_ledbat_pre_fr,
+	.post_fr = tcp_ledbat_post_fr,
+	.after_idle = tcp_ledbat_after_idle,
+	.after_timeout = tcp_ledbat_after_timeout,
+	.delay_ack = tcp_ledbat_delay_ack,
+	.switch_to = tcp_ledbat_switch_cc
+};
+
+<span class="enscript-comment">/* Target queuing delay in milliseconds. This includes the processing 
+ * and scheduling delay on both of the end-hosts. A LEDBAT sender tries 
+ * to keep queuing delay below this limit. When the queuing delay
+ * goes above this limit, a LEDBAT sender will start reducing the 
+ * congestion window.
+ *
+ * The LEDBAT draft says that target queue delay MUST be 100 ms for 
+ * inter-operability.
+ */</span>
+<span class="enscript-type">int</span> target_qdelay = 100;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, bg_target_qdelay, CTLFLAG_RW | CTLFLAG_LOCKED, 
+	&amp;target_qdelay , 100, <span class="enscript-string">&quot;Target queuing delay&quot;</span>);
+
+<span class="enscript-comment">/* Allowed increase and tether are used to place an upper bound on
+ * congestion window based on the amount of data that is outstanding.
+ * This will limit the congestion window when the amount of data in 
+ * flight is little because the application is writing to the socket
+ * intermittently and is preventing the connection from becoming idle . 
+ *
+ * max_allowed_cwnd = allowed_increase + (tether * flight_size)
+ * cwnd = min(cwnd, max_allowed_cwnd)
+ *
+ * 'Allowed_increase' parameter is set to 8. If the flight size is zero, then
+ * we want the congestion window to be at least 8 packets to reduce the
+ * delay induced by delayed ack. This helps when the receiver is acking 
+ * more than 2 packets at a time (stretching acks for better performance).
+ * 
+ * 'Tether' is also set to 2. We do not want this to limit the growth of cwnd
+ * during slow-start.
+ */</span> 
+<span class="enscript-type">int</span> allowed_increase = 8;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, bg_allowed_increase, CTLFLAG_RW | CTLFLAG_LOCKED, 
+	&amp;allowed_increase, 1, <span class="enscript-string">&quot;Additive constant used to calculate max allowed congestion window&quot;</span>);
+
+<span class="enscript-comment">/* Left shift for cwnd to get tether value of 2 */</span>
+<span class="enscript-type">int</span> tether_shift = 1;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, bg_tether_shift, CTLFLAG_RW | CTLFLAG_LOCKED, 
+	&amp;tether_shift, 1, <span class="enscript-string">&quot;Tether shift for max allowed congestion window&quot;</span>);
+
+<span class="enscript-comment">/* Start with an initial window of 2. This will help to get more accurate 
+ * minimum RTT measurement in the beginning. It will help to probe
+ * the path slowly and will not add to the existing delay if the path is
+ * already congested. Using 2 packets will reduce the delay induced by delayed-ack.
+ */</span>
+uint32_t bg_ss_fltsz = 2;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, bg_ss_fltsz, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;bg_ss_fltsz, 2, <span class="enscript-string">&quot;Initial congestion window for background transport&quot;</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> rtt_samples_per_slot;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">update_cwnd</span>(<span class="enscript-type">struct</span> tcpcb *tp, uint32_t incr) {
+	uint32_t max_allowed_cwnd = 0, flight_size = 0;
+	uint32_t qdelay, base_rtt;
+	int32_t off_target;
+
+	base_rtt = get_base_rtt(tp);
+
+	<span class="enscript-comment">/* If we do not have a good RTT measurement yet, increment
+	 * congestion window by the default value.  
+	 */</span>
+	<span class="enscript-keyword">if</span> (base_rtt == 0 || tp-&gt;t_rttcur == 0) {
+		tp-&gt;snd_cwnd += incr;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">check_max</span>;
+	}
+		
+	qdelay = tp-&gt;t_rttcur - base_rtt;
+	off_target = (int32_t)(target_qdelay - qdelay);
+
+	<span class="enscript-keyword">if</span> (off_target &gt;= 0) {
+		<span class="enscript-comment">/* Delay decreased or remained the same, we can increase 
+		 * the congestion window according to RFC 3465.
+		 *
+		 * Move background slow-start threshold to current
+		 * congestion window so that the next time (after some idle
+		 * period), we can attempt to do slow-start till here if there 
+		 * is no increase in rtt
+		 */</span>
+		<span class="enscript-keyword">if</span> (tp-&gt;bg_ssthresh &lt; tp-&gt;snd_cwnd)
+			tp-&gt;bg_ssthresh = tp-&gt;snd_cwnd;
+		tp-&gt;snd_cwnd += incr;	
+
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* In response to an increase in rtt, reduce the congestion 
+		 * window by one-eighth. This will help to yield immediately 
+		 * to a competing stream.
+		 */</span>
+		uint32_t redwin;
+
+		redwin = tp-&gt;snd_cwnd &gt;&gt; 3;  
+		tp-&gt;snd_cwnd -= redwin;
+		<span class="enscript-keyword">if</span> (tp-&gt;snd_cwnd &lt; bg_ss_fltsz * tp-&gt;t_maxseg)
+			tp-&gt;snd_cwnd = bg_ss_fltsz * tp-&gt;t_maxseg;
+
+		<span class="enscript-comment">/* Lower background slow-start threshold so that the connection 
+		 * will go into congestion avoidance phase
+		 */</span>
+		<span class="enscript-keyword">if</span> (tp-&gt;bg_ssthresh &gt; tp-&gt;snd_cwnd)
+			tp-&gt;bg_ssthresh = tp-&gt;snd_cwnd;
+	}
+<span class="enscript-reference">check_max</span>:
+	<span class="enscript-comment">/* Calculate the outstanding flight size and restrict the
+	 * congestion window to a factor of flight size.
+	 */</span>
+	flight_size = tp-&gt;snd_max - tp-&gt;snd_una;
+
+	max_allowed_cwnd = (allowed_increase * tp-&gt;t_maxseg) 
+		+ (flight_size &lt;&lt; tether_shift);
+	tp-&gt;snd_cwnd = min(tp-&gt;snd_cwnd, max_allowed_cwnd);
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">tcp_ledbat_init</span>(<span class="enscript-type">struct</span> tcpcb *tp) {
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">tp</span>)
+	OSIncrementAtomic((<span class="enscript-type">volatile</span> SInt32 *)&amp;tcp_cc_ledbat.num_sockets);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">tcp_ledbat_cleanup</span>(<span class="enscript-type">struct</span> tcpcb *tp) {
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">tp</span>)
+	OSDecrementAtomic((<span class="enscript-type">volatile</span> SInt32 *)&amp;tcp_cc_ledbat.num_sockets);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* Initialize the congestion window for a connection 
+ * 
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_ledbat_cwnd_init</span>(<span class="enscript-type">struct</span> tcpcb *tp) {
+	tp-&gt;snd_cwnd = tp-&gt;t_maxseg * bg_ss_fltsz;
+	tp-&gt;bg_ssthresh = tp-&gt;snd_ssthresh;
+}
+
+<span class="enscript-comment">/* Function to handle an in-sequence ack which is fast-path processing 
+ * of an in sequence ack in tcp_input function (called as header prediction). 
+ * This gets called only during congestion avoidance phase.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_ledbat_congestion_avd</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th) {
+	<span class="enscript-type">int</span> acked = 0;
+	u_int32_t incr = 0;
+
+	acked = BYTES_ACKED(th, tp);
+	tp-&gt;t_bytes_acked += acked;
+	<span class="enscript-keyword">if</span> (tp-&gt;t_bytes_acked &gt; tp-&gt;snd_cwnd) {
+		tp-&gt;t_bytes_acked -= tp-&gt;snd_cwnd;
+		incr = tp-&gt;t_maxseg;
+	}
+
+	<span class="enscript-keyword">if</span> (tp-&gt;snd_cwnd &lt; tp-&gt;snd_wnd &amp;&amp; incr &gt; 0) {
+		update_cwnd(tp, incr);
+	}
+}
+<span class="enscript-comment">/* Function to process an ack.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_ledbat_ack_rcvd</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th) {
+	<span class="enscript-comment">/*
+	 * RFC 3465 - Appropriate Byte Counting.
+	 *
+	 * If the window is currently less than ssthresh,
+	 * open the window by the number of bytes ACKed by
+	 * the last ACK, however clamp the window increase
+	 * to an upper limit &quot;L&quot;.
+	 *
+	 * In congestion avoidance phase, open the window by
+	 * one segment each time &quot;bytes_acked&quot; grows to be
+	 * greater than or equal to the congestion window.
+	 */</span>
+
+	<span class="enscript-type">register</span> u_int cw = tp-&gt;snd_cwnd;
+	<span class="enscript-type">register</span> u_int incr = tp-&gt;t_maxseg;
+	<span class="enscript-type">int</span> acked = 0;
+
+	acked = BYTES_ACKED(th, tp);
+	tp-&gt;t_bytes_acked += acked;
+	<span class="enscript-keyword">if</span> (cw &gt;= tp-&gt;bg_ssthresh) {
+		<span class="enscript-comment">/* congestion-avoidance */</span>
+		<span class="enscript-keyword">if</span> (tp-&gt;t_bytes_acked &lt; cw) {
+			<span class="enscript-comment">/* No need to increase yet. */</span>
+			incr = 0;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * If the user explicitly enables RFC3465
+		 * use 2*SMSS for the &quot;L&quot; param.  Otherwise
+		 * use the more conservative 1*SMSS.
+		 *
+		 * (See RFC 3465 2.3 Choosing the Limit)
+		 */</span>
+		u_int abc_lim;
+
+		abc_lim = (tcp_do_rfc3465_lim2 &amp;&amp;
+			tp-&gt;snd_nxt == tp-&gt;snd_max) ? incr * 2 : incr;
+
+		incr = lmin(acked, abc_lim);
+	}
+	<span class="enscript-keyword">if</span> (tp-&gt;t_bytes_acked &gt;= cw)
+		tp-&gt;t_bytes_acked -= cw;
+	<span class="enscript-keyword">if</span> (incr &gt; 0) 
+		update_cwnd(tp, incr);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_ledbat_pre_fr</span>(<span class="enscript-type">struct</span> tcpcb *tp) {
+	uint32_t win;
+
+	win = min(tp-&gt;snd_wnd, tp-&gt;snd_cwnd) / 
+		2 / tp-&gt;t_maxseg;
+	<span class="enscript-keyword">if</span> ( win &lt; 2 )
+		win = 2;
+	tp-&gt;snd_ssthresh = win * tp-&gt;t_maxseg; 
+	<span class="enscript-keyword">if</span> (tp-&gt;bg_ssthresh &gt; tp-&gt;snd_ssthresh)
+		tp-&gt;bg_ssthresh = tp-&gt;snd_ssthresh;
+
+	tcp_cc_resize_sndbuf(tp);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_ledbat_post_fr</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th) {
+	int32_t ss;
+
+	ss = tp-&gt;snd_max - th-&gt;th_ack;
+
+	<span class="enscript-comment">/*
+	 * Complete ack.  Inflate the congestion window to
+	 * ssthresh and exit fast recovery.
+	 *
+	 * Window inflation should have left us with approx.
+	 * snd_ssthresh outstanding data.  But in case we
+	 * would be inclined to send a burst, better to do
+	 * it via the slow start mechanism.
+	 *
+	 * If the flight size is zero, then make congestion 
+	 * window to be worth at least 2 segments to avoid 
+	 * delayed acknowledgement (draft-ietf-tcpm-rfc3782-bis-05).
+	 */</span>
+	<span class="enscript-keyword">if</span> (ss &lt; (int32_t)tp-&gt;snd_ssthresh)
+		tp-&gt;snd_cwnd = max(ss, tp-&gt;t_maxseg) + tp-&gt;t_maxseg;
+	<span class="enscript-keyword">else</span>
+		tp-&gt;snd_cwnd = tp-&gt;snd_ssthresh;
+	tp-&gt;t_bytes_acked = 0;
+}
+
+<span class="enscript-comment">/*
+ * Function to handle connections that have been idle for
+ * some time. Slow start to get ack &quot;clock&quot; running again.
+ * Clear base history after idle time.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_ledbat_after_idle</span>(<span class="enscript-type">struct</span> tcpcb *tp) {
+	int32_t n = N_RTT_BASE, i = (N_RTT_BASE - 1);
+
+	<span class="enscript-comment">/* Decide how many base history entries have to be cleared 
+	 * based on how long the connection has been idle.
+	 */</span>
+	
+	<span class="enscript-keyword">if</span> (tp-&gt;t_rttcur &gt; 0) {
+		int32_t nrtt, idle_time;
+
+		idle_time = tcp_now - tp-&gt;t_rcvtime;
+		nrtt = idle_time / tp-&gt;t_rttcur; 
+		n = nrtt / rtt_samples_per_slot;
+		<span class="enscript-keyword">if</span> (n &gt; N_RTT_BASE)
+			n = N_RTT_BASE;
+	}
+	<span class="enscript-keyword">for</span> (i = (N_RTT_BASE - 1); n &gt; 0; --i, --n) {
+		tp-&gt;rtt_hist[i] = 0;
+	}
+	<span class="enscript-keyword">for</span> (n = (N_RTT_BASE - 1); i &gt;= 0; --i, --n) {
+		tp-&gt;rtt_hist[n] = tp-&gt;rtt_hist[i];
+		tp-&gt;rtt_hist[i] = 0;
+	}
+	
+	<span class="enscript-comment">/* Reset the congestion window */</span>
+	tp-&gt;snd_cwnd = tp-&gt;t_maxseg * bg_ss_fltsz;
+}
+
+<span class="enscript-comment">/* Function to change the congestion window when the retransmit 
+ * timer fires. The behavior is the same as that for best-effort
+ * TCP, reduce congestion window to one segment and start probing
+ * the link using &quot;slow start&quot;. The slow start threshold is set
+ * to half of the current window. Lower the background slow start
+ * threshold also.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_ledbat_after_timeout</span>(<span class="enscript-type">struct</span> tcpcb *tp) {
+	<span class="enscript-keyword">if</span> (tp-&gt;t_state &gt;=  TCPS_ESTABLISHED) {
+		u_int win = min(tp-&gt;snd_wnd, tp-&gt;snd_cwnd) / 2 / tp-&gt;t_maxseg;
+		<span class="enscript-keyword">if</span> (win &lt; 2)
+			win = 2;
+		tp-&gt;snd_ssthresh = win * tp-&gt;t_maxseg;
+
+		<span class="enscript-keyword">if</span> (tp-&gt;bg_ssthresh &gt; tp-&gt;snd_ssthresh)
+			tp-&gt;bg_ssthresh = tp-&gt;snd_ssthresh;
+
+		tp-&gt;snd_cwnd = tp-&gt;t_maxseg;
+		tcp_cc_resize_sndbuf(tp);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Indicate whether this ack should be delayed.
+ * We can delay the ack if:
+ *      - our last ack wasn't a 0-sized window.
+ *      - the peer hasn't sent us a TH_PUSH data packet: if he did, take this 
+ * 	as a clue that we need to ACK without any delay. This helps higher 
+ *	level protocols who won't send us more data even if the window is 
+ * 	open because their last &quot;segment&quot; hasn't been ACKed
+ * Otherwise the receiver will ack every other full-sized segment or when the
+ * delayed ack timer fires. This will help to generate better rtt estimates for 
+ * the other end if it is a ledbat sender.
+ * 
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">tcp_ledbat_delay_ack</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th) {
+	<span class="enscript-comment">/* If any flag other than TH_ACK is set, set &quot;end-of-write&quot; bit */</span>
+	<span class="enscript-keyword">if</span> (th-&gt;th_flags &amp; ~TH_ACK)
+		tp-&gt;t_flagsext |= TF_STREAMEOW;
+	<span class="enscript-keyword">else</span>
+		tp-&gt;t_flagsext &amp;= ~(TF_STREAMEOW);
+
+	<span class="enscript-keyword">if</span> ((tp-&gt;t_flags &amp; TF_RXWIN0SENT) == 0 &amp;&amp;
+		(th-&gt;th_flags &amp; TH_PUSH) == 0 &amp;&amp;
+		(tp-&gt;t_unacksegs == 1))
+		<span class="enscript-keyword">return</span>(1);
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/* Change a connection to use ledbat. First, lower bg_ssthresh value
+ * if it needs to be. 
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_ledbat_switch_cc</span>(<span class="enscript-type">struct</span> tcpcb *tp, uint16_t old_cc_index) {
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">old_cc_index</span>)
+	uint32_t cwnd;
+
+	<span class="enscript-keyword">if</span> (tp-&gt;bg_ssthresh == 0 || tp-&gt;bg_ssthresh &gt; tp-&gt;snd_ssthresh)
+		tp-&gt;bg_ssthresh = tp-&gt;snd_ssthresh;
+
+	cwnd = min(tp-&gt;snd_wnd, tp-&gt;snd_cwnd);
+
+	<span class="enscript-keyword">if</span> (tp-&gt;snd_cwnd &gt; tp-&gt;bg_ssthresh)
+		cwnd = cwnd / tp-&gt;t_maxseg;
+	<span class="enscript-keyword">else</span>
+		cwnd = cwnd / 2 / tp-&gt;t_maxseg;
+
+	<span class="enscript-keyword">if</span> (cwnd &lt; bg_ss_fltsz)
+		cwnd = bg_ss_fltsz;
+
+	tp-&gt;snd_cwnd = cwnd * tp-&gt;t_maxseg;
+	tp-&gt;t_bytes_acked = 0;
+
+	OSIncrementAtomic((<span class="enscript-type">volatile</span> SInt32 *)&amp;tcp_cc_ledbat.num_sockets);
+}
+</pre>
+<hr />
+</body></html>

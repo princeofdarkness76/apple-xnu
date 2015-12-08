@@ -1,0 +1,181 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>tcp_cc.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">tcp_cc.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2010-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*-
+ * Copyright (c) 2008 Swinburne University of Technology, Melbourne, Australia
+ * All rights reserved.
+ *
+ * This software was developed at the Centre for Advanced Internet
+ * Architectures, Swinburne University, by Lawrence Stewart and James Healy,
+ * made possible in part by a grant from the Cisco University Research Program
+ * Fund at Community Foundation Silicon Valley.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * $FreeBSD$
+ */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_NETINET_CC_H_</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_NETINET_CC_H_</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCP_CC_ALGO_NONE</span>		0
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCP_CC_ALGO_NEWRENO_INDEX</span>	1
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCP_CC_ALGO_BACKGROUND_INDEX</span>	2 <span class="enscript-comment">/* CC for background transport */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCP_CC_ALGO_CUBIC_INDEX</span>		3 <span class="enscript-comment">/* default CC algorithm */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCP_CC_ALGO_COUNT</span>		4 <span class="enscript-comment">/* Count of CC algorithms */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCP_CA_NAME_MAX</span> 16		<span class="enscript-comment">/* Maximum characters in the name of a CC algorithm */</span>
+
+<span class="enscript-comment">/*
+ * Structure to hold definition various actions defined by a congestion 
+ * control algorithm for TCP. This can be used to change the congestion
+ * control on a connection based on the user settings of priority of a
+ * connection.
+ */</span>
+<span class="enscript-type">struct</span> tcp_cc_algo {
+	<span class="enscript-type">char</span> name[TCP_CA_NAME_MAX];
+	uint32_t num_sockets;
+	uint32_t flags;
+
+	<span class="enscript-comment">/* init the congestion algorithm for the specified control block */</span>
+	<span class="enscript-type">int</span> (*init) (<span class="enscript-type">struct</span> tcpcb *tp);
+
+	<span class="enscript-comment">/*
+	 * cleanup any state that is stored in the connection 
+	 * related to the algorithm
+	 */</span>
+	<span class="enscript-type">int</span> (*cleanup) (<span class="enscript-type">struct</span> tcpcb *tp); 
+
+	<span class="enscript-comment">/* initialize cwnd at the start of a connection */</span>
+	<span class="enscript-type">void</span> (*cwnd_init) (<span class="enscript-type">struct</span> tcpcb *tp);
+
+	<span class="enscript-comment">/*
+	 * called on the receipt of in-sequence ack during congestion
+	 * avoidance phase
+	 */</span>
+	<span class="enscript-type">void</span> (*congestion_avd) (<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th);
+
+	<span class="enscript-comment">/* called on the receipt of a valid ack */</span>
+	<span class="enscript-type">void</span> (*ack_rcvd) (<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th);
+
+	<span class="enscript-comment">/* called before entering FR */</span>
+	<span class="enscript-type">void</span> (*pre_fr) (<span class="enscript-type">struct</span> tcpcb *tp);
+
+	<span class="enscript-comment">/*  after exiting FR */</span>
+	<span class="enscript-type">void</span> (*post_fr) (<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th);
+
+	<span class="enscript-comment">/* perform tasks when data transfer resumes after an idle period */</span>
+	<span class="enscript-type">void</span> (*after_idle) (<span class="enscript-type">struct</span> tcpcb *tp);
+
+	<span class="enscript-comment">/* perform tasks when the connection's retransmit timer expires */</span>
+	<span class="enscript-type">void</span> (*after_timeout) (<span class="enscript-type">struct</span> tcpcb *tp);
+
+	<span class="enscript-comment">/* Whether or not to delay the ack */</span>
+	<span class="enscript-type">int</span> (*delay_ack)(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th);
+
+	<span class="enscript-comment">/* Switch a connection to this CC algorithm after sending some packets */</span>
+	<span class="enscript-type">void</span> (*switch_to)(<span class="enscript-type">struct</span> tcpcb *tp, uint16_t old_cc_index); 
+
+} __attribute__((aligned(4)));
+
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> zone *tcp_cc_zone; 
+
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> tcp_cc_algo* tcp_cc_algo_list[TCP_CC_ALGO_COUNT];
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">CC_ALGO</span>(tp) (tcp_cc_algo_list[tp-&gt;tcp_cc_index])
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCP_CC_CWND_INIT_BYTES</span>	4380
+<span class="enscript-comment">/*
+ * The congestion window will have to be reset after a
+ * non-validated period -- currently set to 3 minutes
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCP_CC_CWND_NONVALIDATED_PERIOD</span>	(3 * 60 * TCP_RETRANSHZ)
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>	tcp_cc_init(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">tcp_cc_resize_sndbuf</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">tcp_bad_rexmt_fix_sndbuf</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">tcp_cc_cwnd_init_or_reset</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">tcp_cc_delay_ack</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">tcp_ccdbg_trace</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcphdr *th,
+	int32_t event);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">tcp_cc_allocate_state</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">tcp_cc_after_idle_stretchack</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+<span class="enscript-type">extern</span> uint32_t <span class="enscript-function-name">tcp_cc_is_cwnd_nonvalidated</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">tcp_cc_adjust_nonvalidated_cwnd</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+<span class="enscript-type">extern</span> u_int32_t <span class="enscript-function-name">tcp_get_max_pipeack</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">tcp_clear_pipeack_state</span>(<span class="enscript-type">struct</span> tcpcb *tp);
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KERNEL */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* _NETINET_CC_H_ */</span>
+</pre>
+<hr />
+</body></html>

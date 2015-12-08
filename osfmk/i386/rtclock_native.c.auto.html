@@ -1,0 +1,222 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>rtclock_native.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">rtclock_native.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2011 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;architecture/i386/pio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_cpu.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpuid.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_threads.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pal_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/proc_reg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/lapic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/limits.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/tsc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/rtclock_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pal_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/timer_queue.h&gt;</span>
+
+<span class="enscript-type">static</span> uint64_t	rtc_decrementer_min;
+<span class="enscript-type">static</span> uint64_t	rtc_decrementer_max;
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">deadline_to_decrementer</span>(
+	uint64_t	deadline,
+	uint64_t	now)
+{
+	uint64_t	delta;
+
+	<span class="enscript-keyword">if</span> (deadline &lt;= now)
+		<span class="enscript-keyword">return</span> rtc_decrementer_min;
+	<span class="enscript-keyword">else</span> {
+		delta = deadline - now;
+		<span class="enscript-keyword">return</span> MIN(MAX(rtc_decrementer_min,delta),rtc_decrementer_max); 
+	}
+}
+
+
+<span class="enscript-comment">/*
+ * Regular local APIC timer case:
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">rtc_lapic_config_timer</span>(<span class="enscript-type">void</span>)
+{
+	lapic_config_timer(TRUE, one_shot, divide_by_1);
+}
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">rtc_lapic_set_timer</span>(uint64_t deadline, uint64_t now)
+{
+	uint64_t count;
+	uint64_t set = 0;
+
+	<span class="enscript-keyword">if</span> (deadline &gt; 0) {
+		<span class="enscript-comment">/*
+		 * Convert delta to bus ticks
+		 * - time now is not relevant
+		 */</span>
+		count = deadline_to_decrementer(deadline, now);
+		set = now + count;
+		lapic_set_timer_fast((uint32_t) tmrCvt(count, busFCvtn2t));
+	} <span class="enscript-keyword">else</span> {
+		lapic_set_timer(FALSE, one_shot, divide_by_1, 0);
+	}
+
+	KERNEL_DEBUG_CONSTANT(
+		DECR_SET_APIC_DEADLINE | DBG_FUNC_NONE,
+		now, deadline,
+		set, LAPIC_READ(TIMER_CURRENT_COUNT),
+		0);
+
+	<span class="enscript-keyword">return</span> set;
+}
+
+<span class="enscript-comment">/*
+ * TSC-deadline timer case:
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">rtc_lapic_config_tsc_deadline_timer</span>(<span class="enscript-type">void</span>)
+{
+	lapic_config_tsc_deadline_timer();
+}
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">rtc_lapic_set_tsc_deadline_timer</span>(uint64_t deadline, uint64_t now)
+{
+	uint64_t delta;
+	uint64_t delta_tsc;
+	uint64_t tsc = rdtsc64();
+	uint64_t set = 0;
+
+	<span class="enscript-keyword">if</span> (deadline &gt; 0) {
+		<span class="enscript-comment">/*
+		 * Convert to TSC
+		 */</span>
+		delta = deadline_to_decrementer(deadline, now);
+		set = now + delta;
+		delta_tsc = tmrCvt(delta, tscFCvtn2t);
+		lapic_set_tsc_deadline_timer(tsc + delta_tsc);
+	} <span class="enscript-keyword">else</span> {
+		lapic_set_tsc_deadline_timer(0);
+	}
+	
+	KERNEL_DEBUG_CONSTANT(
+		DECR_SET_TSC_DEADLINE | DBG_FUNC_NONE,
+		now, deadline,
+		tsc, lapic_get_tsc_deadline_timer(),
+		0);
+
+	<span class="enscript-keyword">return</span> set;
+} 
+
+<span class="enscript-comment">/*
+ * Definitions for timer operations table
+ */</span>
+
+rtc_timer_t	rtc_timer_lapic  = {
+	rtc_lapic_config_timer,
+	rtc_lapic_set_timer
+};
+
+rtc_timer_t	rtc_timer_tsc_deadline  = {
+	rtc_lapic_config_tsc_deadline_timer,
+	rtc_lapic_set_tsc_deadline_timer
+};
+
+rtc_timer_t	*rtc_timer = &amp;rtc_timer_lapic; <span class="enscript-comment">/* defaults to LAPIC timer */</span>
+
+<span class="enscript-comment">/*
+ * rtc_timer_init() is called at startup on the boot processor only.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">rtc_timer_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span>	TSC_deadline_timer = 0;
+
+	<span class="enscript-comment">/* See whether we can use the local apic in TSC-deadline mode */</span>
+	<span class="enscript-keyword">if</span> ((cpuid_features() &amp; CPUID_FEATURE_TSCTMR)) {
+		TSC_deadline_timer = 1;
+		PE_parse_boot_argn(<span class="enscript-string">&quot;TSC_deadline_timer&quot;</span>, &amp;TSC_deadline_timer,
+				   <span class="enscript-keyword">sizeof</span>(TSC_deadline_timer));
+		printf(<span class="enscript-string">&quot;TSC Deadline Timer supported %s enabled\n&quot;</span>,
+			TSC_deadline_timer ? <span class="enscript-string">&quot;and&quot;</span> : <span class="enscript-string">&quot;but not&quot;</span>);
+	}
+
+	<span class="enscript-keyword">if</span> (TSC_deadline_timer) {
+		rtc_timer = &amp;rtc_timer_tsc_deadline;
+		rtc_decrementer_max = UINT64_MAX;	<span class="enscript-comment">/* effectively none */</span>
+		<span class="enscript-comment">/*
+		 * The min could be as low as 1nsec,
+		 * but we're being conservative for now and making it the same
+		 * as for the local apic timer.
+		 */</span>
+		rtc_decrementer_min = 1*NSEC_PER_USEC;	<span class="enscript-comment">/* 1 usec */</span>
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * Compute the longest interval using LAPIC timer.
+		 */</span>
+		rtc_decrementer_max = tmrCvt(0x7fffffffULL, busFCvtt2n);
+		kprintf(<span class="enscript-string">&quot;maxDec: %lld\n&quot;</span>, rtc_decrementer_max);
+		rtc_decrementer_min = 1*NSEC_PER_USEC;	<span class="enscript-comment">/* 1 usec */</span>
+	}
+
+	<span class="enscript-comment">/* Point LAPIC interrupts to hardclock() */</span>
+	lapic_set_timer_func((i386_intr_func_t) rtclock_intr);
+}
+</pre>
+<hr />
+</body></html>

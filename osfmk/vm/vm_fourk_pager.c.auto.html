@@ -1,0 +1,1373 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>vm_fourk_pager.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">vm_fourk_pager.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2014 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_traps.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_control.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/policy.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/upl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/page_decrypt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_space.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;default_pager/default_pager_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;default_pager/default_pager_object_server.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_fault.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/memory_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+
+<span class="enscript-comment">/* 
+ * 4K MEMORY PAGER 
+ *
+ * This external memory manager (EMM) handles memory mappings that are
+ * 4K-aligned but not page-aligned and can therefore not be mapped directly.
+ * 
+ * It mostly handles page-in requests (from memory_object_data_request()) by
+ * getting the data needed to fill in each 4K-chunk.  That can require
+ * getting data from one or two pages from its backing VM object
+ * (a file or a &quot;apple-protected&quot; pager backed by an encrypted file), and
+ * copies the data to another page so that it is aligned as expected by
+ * the mapping.
+ *
+ * Returned pages can never be dirtied and must always be mapped copy-on-write,
+ * so the memory manager does not need to handle page-out requests (from
+ * memory_object_data_return()).
+ *
+ */</span>
+
+<span class="enscript-comment">/* forward declarations */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">fourk_pager_reference</span>(memory_object_t mem_obj);
+<span class="enscript-type">void</span> <span class="enscript-function-name">fourk_pager_deallocate</span>(memory_object_t mem_obj);
+kern_return_t <span class="enscript-function-name">fourk_pager_init</span>(memory_object_t mem_obj,
+				 memory_object_control_t control,
+				 memory_object_cluster_size_t pg_size);
+kern_return_t <span class="enscript-function-name">fourk_pager_terminate</span>(memory_object_t mem_obj);
+kern_return_t <span class="enscript-function-name">fourk_pager_data_request</span>(memory_object_t mem_obj,
+					 memory_object_offset_t offset,
+					 memory_object_cluster_size_t length,
+					 vm_prot_t protection_required,
+					 memory_object_fault_info_t fault_info);
+kern_return_t <span class="enscript-function-name">fourk_pager_data_return</span>(memory_object_t mem_obj,
+					memory_object_offset_t offset,
+					memory_object_cluster_size_t	data_cnt,
+					memory_object_offset_t *resid_offset,
+					<span class="enscript-type">int</span> *io_error,
+					boolean_t dirty,
+					boolean_t kernel_copy,
+					<span class="enscript-type">int</span> upl_flags);
+kern_return_t <span class="enscript-function-name">fourk_pager_data_initialize</span>(memory_object_t mem_obj,
+					    memory_object_offset_t offset,
+					    memory_object_cluster_size_t data_cnt);
+kern_return_t <span class="enscript-function-name">fourk_pager_data_unlock</span>(memory_object_t mem_obj,
+					memory_object_offset_t offset,
+					memory_object_size_t size,
+					vm_prot_t desired_access);
+kern_return_t <span class="enscript-function-name">fourk_pager_synchronize</span>(memory_object_t mem_obj,
+					memory_object_offset_t offset,
+					memory_object_size_t length,
+					vm_sync_t sync_flags);
+kern_return_t <span class="enscript-function-name">fourk_pager_map</span>(memory_object_t mem_obj,
+				vm_prot_t prot);
+kern_return_t <span class="enscript-function-name">fourk_pager_last_unmap</span>(memory_object_t mem_obj);
+
+<span class="enscript-comment">/*
+ * Vector of VM operations for this EMM.
+ * These routines are invoked by VM via the memory_object_*() interfaces.
+ */</span>
+<span class="enscript-type">const</span> <span class="enscript-type">struct</span> memory_object_pager_ops fourk_pager_ops = {
+	fourk_pager_reference,
+	fourk_pager_deallocate,
+	fourk_pager_init,
+	fourk_pager_terminate,
+	fourk_pager_data_request,
+	fourk_pager_data_return,
+	fourk_pager_data_initialize,
+	fourk_pager_data_unlock,
+	fourk_pager_synchronize,
+	fourk_pager_map,
+	fourk_pager_last_unmap,
+	NULL, <span class="enscript-comment">/* data_reclaim */</span>
+	<span class="enscript-string">&quot;fourk_pager&quot;</span>
+};
+
+<span class="enscript-comment">/*
+ * The &quot;fourk_pager&quot; describes a memory object backed by
+ * the &quot;4K&quot; EMM.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">FOURK_PAGER_SLOTS</span> 4	<span class="enscript-comment">/* 16K / 4K */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> fourk_pager_backing {
+	vm_object_t		backing_object;
+	vm_object_offset_t	backing_offset;
+} *fourk_pager_backing_t;
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> fourk_pager {
+	<span class="enscript-type">struct</span> ipc_object_header	pager_header;	<span class="enscript-comment">/* fake ip_kotype() */</span>
+	memory_object_pager_ops_t pager_ops; <span class="enscript-comment">/* == &amp;fourk_pager_ops */</span>
+	memory_object_control_t pager_control;	<span class="enscript-comment">/* mem object control handle */</span>
+	queue_chain_t		pager_queue;	<span class="enscript-comment">/* next &amp; prev pagers */</span>
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		ref_count;	<span class="enscript-comment">/* reference count */</span>
+	<span class="enscript-type">int</span>	is_ready;	<span class="enscript-comment">/* is this pager ready ? */</span>
+	<span class="enscript-type">int</span>	is_mapped;	<span class="enscript-comment">/* is this mem_obj mapped ? */</span>
+	<span class="enscript-type">struct</span> fourk_pager_backing slots[FOURK_PAGER_SLOTS]; <span class="enscript-comment">/* backing for each
+								4K-chunk */</span>
+} *fourk_pager_t;
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FOURK_PAGER_NULL</span>	((fourk_pager_t) NULL)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">pager_ikot</span> pager_header.io_bits
+
+<span class="enscript-comment">/*
+ * List of memory objects managed by this EMM.
+ * The list is protected by the &quot;fourk_pager_lock&quot; lock.
+ */</span>
+<span class="enscript-type">int</span> fourk_pager_count = 0;		<span class="enscript-comment">/* number of pagers */</span>
+<span class="enscript-type">int</span> fourk_pager_count_mapped = 0;	<span class="enscript-comment">/* number of unmapped pagers */</span>
+queue_head_t fourk_pager_queue;
+<span class="enscript-function-name">decl_lck_mtx_data</span>(,fourk_pager_lock)
+
+<span class="enscript-comment">/*
+ * Maximum number of unmapped pagers we're willing to keep around.
+ */</span>
+<span class="enscript-type">int</span> fourk_pager_cache_limit = 0;
+
+<span class="enscript-comment">/*
+ * Statistics &amp; counters.
+ */</span>
+<span class="enscript-type">int</span> fourk_pager_count_max = 0;
+<span class="enscript-type">int</span> fourk_pager_count_unmapped_max = 0;
+<span class="enscript-type">int</span> fourk_pager_num_trim_max = 0;
+<span class="enscript-type">int</span> fourk_pager_num_trim_total = 0;
+
+
+lck_grp_t	fourk_pager_lck_grp;
+lck_grp_attr_t	fourk_pager_lck_grp_attr;
+lck_attr_t	fourk_pager_lck_attr;
+
+
+<span class="enscript-comment">/* internal prototypes */</span>
+fourk_pager_t <span class="enscript-function-name">fourk_pager_lookup</span>(memory_object_t mem_obj);
+<span class="enscript-type">void</span> <span class="enscript-function-name">fourk_pager_dequeue</span>(fourk_pager_t pager);
+<span class="enscript-type">void</span> <span class="enscript-function-name">fourk_pager_deallocate_internal</span>(fourk_pager_t pager,
+				       boolean_t locked);
+<span class="enscript-type">void</span> <span class="enscript-function-name">fourk_pager_terminate_internal</span>(fourk_pager_t pager);
+<span class="enscript-type">void</span> <span class="enscript-function-name">fourk_pager_trim</span>(<span class="enscript-type">void</span>);
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-type">int</span> fourk_pagerdebug = 0;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PAGER_ALL</span>		0xffffffff
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PAGER_INIT</span>		0x00000001
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PAGER_PAGEIN</span>		0x00000002
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PAGER_DEBUG</span>(LEVEL, A)						\
+	MACRO_BEGIN							\
+	<span class="enscript-keyword">if</span> ((fourk_pagerdebug &amp; LEVEL)==LEVEL) {		\
+		printf A;						\
+	}								\
+	MACRO_END
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PAGER_DEBUG</span>(LEVEL, A)
+#<span class="enscript-reference">endif</span>
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fourk_pager_bootstrap</span>(<span class="enscript-type">void</span>)
+{
+	lck_grp_attr_setdefault(&amp;fourk_pager_lck_grp_attr);
+	lck_grp_init(&amp;fourk_pager_lck_grp, <span class="enscript-string">&quot;4K-pager&quot;</span>, &amp;fourk_pager_lck_grp_attr);
+	lck_attr_setdefault(&amp;fourk_pager_lck_attr);
+	lck_mtx_init(&amp;fourk_pager_lock, &amp;fourk_pager_lck_grp, &amp;fourk_pager_lck_attr);
+	queue_init(&amp;fourk_pager_queue);
+}
+
+<span class="enscript-comment">/*
+ * fourk_pager_init()
+ *
+ * Initialize the memory object and makes it ready to be used and mapped.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">fourk_pager_init</span>(
+	memory_object_t		mem_obj, 
+	memory_object_control_t	control, 
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">DEBUG</span>
+	__unused
+#<span class="enscript-reference">endif</span>
+	memory_object_cluster_size_t pg_size)
+{
+	fourk_pager_t	pager;
+	kern_return_t   	kr;
+	memory_object_attr_info_data_t  attributes;
+
+	PAGER_DEBUG(PAGER_ALL,
+		    (<span class="enscript-string">&quot;fourk_pager_init: %p, %p, %x\n&quot;</span>,
+		     mem_obj, control, pg_size));
+
+	<span class="enscript-keyword">if</span> (control == MEMORY_OBJECT_CONTROL_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	pager = fourk_pager_lookup(mem_obj);
+
+	memory_object_control_reference(control);
+
+	pager-&gt;pager_control = control;
+
+	attributes.copy_strategy = MEMORY_OBJECT_COPY_DELAY;
+	<span class="enscript-comment">/* attributes.cluster_size = (1 &lt;&lt; (CLUSTER_SHIFT + PAGE_SHIFT));*/</span>
+	attributes.cluster_size = (1 &lt;&lt; (PAGE_SHIFT));
+	attributes.may_cache_object = FALSE;
+	attributes.temporary = TRUE;
+
+	kr = memory_object_change_attributes(
+					control,
+					MEMORY_OBJECT_ATTRIBUTE_INFO,
+					(memory_object_info_t) &amp;attributes,
+					MEMORY_OBJECT_ATTR_INFO_COUNT);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS)
+		panic(<span class="enscript-string">&quot;fourk_pager_init: &quot;</span>
+		      <span class="enscript-string">&quot;memory_object_change_attributes() failed&quot;</span>);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * fourk_pager_data_return()
+ *
+ * Handles page-out requests from VM.  This should never happen since
+ * the pages provided by this EMM are not supposed to be dirty or dirtied
+ * and VM should simply discard the contents and reclaim the pages if it
+ * needs to.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">fourk_pager_data_return</span>(
+        __unused memory_object_t	mem_obj,
+        __unused memory_object_offset_t	offset,
+        __unused memory_object_cluster_size_t		data_cnt,
+        __unused memory_object_offset_t	*resid_offset,
+	__unused <span class="enscript-type">int</span>			*io_error,
+	__unused boolean_t		dirty,
+	__unused boolean_t		kernel_copy,
+	__unused <span class="enscript-type">int</span>			upl_flags)  
+{
+	panic(<span class="enscript-string">&quot;fourk_pager_data_return: should never get called&quot;</span>);
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+kern_return_t
+<span class="enscript-function-name">fourk_pager_data_initialize</span>(
+	__unused memory_object_t	mem_obj,
+	__unused memory_object_offset_t	offset,
+	__unused memory_object_cluster_size_t		data_cnt)
+{
+	panic(<span class="enscript-string">&quot;fourk_pager_data_initialize: should never get called&quot;</span>);
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+kern_return_t
+<span class="enscript-function-name">fourk_pager_data_unlock</span>(
+	__unused memory_object_t	mem_obj,
+	__unused memory_object_offset_t	offset,
+	__unused memory_object_size_t		size,
+	__unused vm_prot_t		desired_access)
+{
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+<span class="enscript-comment">/*
+ * fourk_pager_reference()
+ *
+ * Get a reference on this memory object.
+ * For external usage only.  Assumes that the initial reference count is not 0,
+ * i.e one should not &quot;revive&quot; a dead pager this way.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fourk_pager_reference</span>(
+	memory_object_t		mem_obj)
+{	
+	fourk_pager_t	pager;
+
+	pager = fourk_pager_lookup(mem_obj);
+
+	lck_mtx_lock(&amp;fourk_pager_lock);
+	assert(pager-&gt;ref_count &gt; 0);
+	pager-&gt;ref_count++;
+	lck_mtx_unlock(&amp;fourk_pager_lock);
+}
+
+
+<span class="enscript-comment">/*
+ * fourk_pager_dequeue:
+ *
+ * Removes a pager from the list of pagers.
+ *
+ * The caller must hold &quot;fourk_pager_lock&quot;.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fourk_pager_dequeue</span>(
+	fourk_pager_t pager)
+{
+	assert(!pager-&gt;is_mapped);
+
+	queue_remove(&amp;fourk_pager_queue,
+		     pager,
+		     fourk_pager_t,
+		     pager_queue);
+	pager-&gt;pager_queue.next = NULL;
+	pager-&gt;pager_queue.prev = NULL;
+	
+	fourk_pager_count--;
+}
+
+<span class="enscript-comment">/*
+ * fourk_pager_terminate_internal:
+ *
+ * Trigger the asynchronous termination of the memory object associated
+ * with this pager.
+ * When the memory object is terminated, there will be one more call
+ * to memory_object_deallocate() (i.e. fourk_pager_deallocate())
+ * to finish the clean up.
+ *
+ * &quot;fourk_pager_lock&quot; should not be held by the caller.
+ * We don't need the lock because the pager has already been removed from
+ * the pagers' list and is now ours exclusively.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fourk_pager_terminate_internal</span>(
+	fourk_pager_t pager)
+{
+	<span class="enscript-type">int</span> i;
+
+	assert(pager-&gt;is_ready);
+	assert(!pager-&gt;is_mapped);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; FOURK_PAGER_SLOTS; i++) {
+		<span class="enscript-keyword">if</span> (pager-&gt;slots[i].backing_object != VM_OBJECT_NULL &amp;&amp;
+		    pager-&gt;slots[i].backing_object != (vm_object_t) -1) {
+			vm_object_deallocate(pager-&gt;slots[i].backing_object);
+			pager-&gt;slots[i].backing_object = (vm_object_t) -1;
+			pager-&gt;slots[i].backing_offset = (vm_object_offset_t) -1;
+		}
+	}
+	
+	<span class="enscript-comment">/* trigger the destruction of the memory object */</span>
+	memory_object_destroy(pager-&gt;pager_control, 0);
+}
+
+<span class="enscript-comment">/*
+ * fourk_pager_deallocate_internal()
+ *
+ * Release a reference on this pager and free it when the last
+ * reference goes away.
+ * Can be called with fourk_pager_lock held or not but always returns
+ * with it unlocked.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fourk_pager_deallocate_internal</span>(
+	fourk_pager_t	pager,
+	boolean_t		locked)
+{
+	boolean_t	needs_trimming;
+	<span class="enscript-type">int</span>		count_unmapped;
+
+	<span class="enscript-keyword">if</span> (! locked) {
+		lck_mtx_lock(&amp;fourk_pager_lock);
+	}
+
+	count_unmapped = (fourk_pager_count - 
+			  fourk_pager_count_mapped);
+	<span class="enscript-keyword">if</span> (count_unmapped &gt; fourk_pager_cache_limit) {
+		<span class="enscript-comment">/* we have too many unmapped pagers:  trim some */</span>
+		needs_trimming = TRUE;
+	} <span class="enscript-keyword">else</span> {
+		needs_trimming = FALSE;
+	}
+
+	<span class="enscript-comment">/* drop a reference on this pager */</span>
+	pager-&gt;ref_count--;
+
+	<span class="enscript-keyword">if</span> (pager-&gt;ref_count == 1) {
+		<span class="enscript-comment">/*
+		 * Only the &quot;named&quot; reference is left, which means that
+		 * no one is really holding on to this pager anymore.
+		 * Terminate it.
+		 */</span>
+		fourk_pager_dequeue(pager);
+		<span class="enscript-comment">/* the pager is all ours: no need for the lock now */</span>
+		lck_mtx_unlock(&amp;fourk_pager_lock);
+		fourk_pager_terminate_internal(pager);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (pager-&gt;ref_count == 0) {
+		<span class="enscript-comment">/*
+		 * Dropped the existence reference;  the memory object has
+		 * been terminated.  Do some final cleanup and release the
+		 * pager structure.
+		 */</span>
+		lck_mtx_unlock(&amp;fourk_pager_lock);
+		<span class="enscript-keyword">if</span> (pager-&gt;pager_control != MEMORY_OBJECT_CONTROL_NULL) {
+			memory_object_control_deallocate(pager-&gt;pager_control);
+			pager-&gt;pager_control = MEMORY_OBJECT_CONTROL_NULL;
+		}
+		kfree(pager, <span class="enscript-keyword">sizeof</span> (*pager));
+		pager = FOURK_PAGER_NULL;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* there are still plenty of references:  keep going... */</span>
+		lck_mtx_unlock(&amp;fourk_pager_lock);
+	}
+
+	<span class="enscript-keyword">if</span> (needs_trimming) {
+		fourk_pager_trim();
+	}
+	<span class="enscript-comment">/* caution: lock is not held on return... */</span>
+}
+
+<span class="enscript-comment">/*
+ * fourk_pager_deallocate()
+ *
+ * Release a reference on this pager and free it when the last
+ * reference goes away.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fourk_pager_deallocate</span>(
+	memory_object_t		mem_obj)
+{
+	fourk_pager_t	pager;
+
+	PAGER_DEBUG(PAGER_ALL, (<span class="enscript-string">&quot;fourk_pager_deallocate: %p\n&quot;</span>, mem_obj));
+	pager = fourk_pager_lookup(mem_obj);
+	fourk_pager_deallocate_internal(pager, FALSE);
+}
+
+<span class="enscript-comment">/*
+ *
+ */</span>
+kern_return_t
+<span class="enscript-function-name">fourk_pager_terminate</span>(
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">DEBUG</span>
+	__unused
+#<span class="enscript-reference">endif</span>
+	memory_object_t	mem_obj)
+{
+	PAGER_DEBUG(PAGER_ALL, (<span class="enscript-string">&quot;fourk_pager_terminate: %p\n&quot;</span>, mem_obj));
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *
+ */</span>
+kern_return_t
+<span class="enscript-function-name">fourk_pager_synchronize</span>(
+	memory_object_t		mem_obj,
+	memory_object_offset_t	offset,
+	memory_object_size_t		length,
+	__unused vm_sync_t		sync_flags)
+{
+	fourk_pager_t	pager;
+
+	PAGER_DEBUG(PAGER_ALL, (<span class="enscript-string">&quot;fourk_pager_synchronize: %p\n&quot;</span>, mem_obj));
+
+	pager = fourk_pager_lookup(mem_obj);
+
+	memory_object_synchronize_completed(pager-&gt;pager_control,
+					    offset, length);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * fourk_pager_map()
+ *
+ * This allows VM to let us, the EMM, know that this memory object
+ * is currently mapped one or more times.  This is called by VM each time
+ * the memory object gets mapped and we take one extra reference on the
+ * memory object to account for all its mappings.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">fourk_pager_map</span>(
+	memory_object_t		mem_obj,
+	__unused vm_prot_t	prot)
+{
+	fourk_pager_t	pager;
+
+	PAGER_DEBUG(PAGER_ALL, (<span class="enscript-string">&quot;fourk_pager_map: %p\n&quot;</span>, mem_obj));
+
+	pager = fourk_pager_lookup(mem_obj);
+
+	lck_mtx_lock(&amp;fourk_pager_lock);
+	assert(pager-&gt;is_ready);
+	assert(pager-&gt;ref_count &gt; 0); <span class="enscript-comment">/* pager is alive */</span>
+	<span class="enscript-keyword">if</span> (pager-&gt;is_mapped == FALSE) {
+		<span class="enscript-comment">/*
+		 * First mapping of this pager:  take an extra reference
+		 * that will remain until all the mappings of this pager
+		 * are removed.
+		 */</span>
+		pager-&gt;is_mapped = TRUE;
+		pager-&gt;ref_count++;
+		fourk_pager_count_mapped++;
+	}
+	lck_mtx_unlock(&amp;fourk_pager_lock);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * fourk_pager_last_unmap()
+ *
+ * This is called by VM when this memory object is no longer mapped anywhere.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">fourk_pager_last_unmap</span>(
+	memory_object_t		mem_obj)
+{
+	fourk_pager_t	pager;
+	<span class="enscript-type">int</span>			count_unmapped;
+
+	PAGER_DEBUG(PAGER_ALL,
+		    (<span class="enscript-string">&quot;fourk_pager_last_unmap: %p\n&quot;</span>, mem_obj));
+
+	pager = fourk_pager_lookup(mem_obj);
+
+	lck_mtx_lock(&amp;fourk_pager_lock);
+	<span class="enscript-keyword">if</span> (pager-&gt;is_mapped) {
+		<span class="enscript-comment">/*
+		 * All the mappings are gone, so let go of the one extra
+		 * reference that represents all the mappings of this pager.
+		 */</span>
+		fourk_pager_count_mapped--;
+		count_unmapped = (fourk_pager_count -
+				  fourk_pager_count_mapped);
+		<span class="enscript-keyword">if</span> (count_unmapped &gt; fourk_pager_count_unmapped_max) {
+			fourk_pager_count_unmapped_max = count_unmapped;
+		}
+		pager-&gt;is_mapped = FALSE;
+		fourk_pager_deallocate_internal(pager, TRUE);
+		<span class="enscript-comment">/* caution: deallocate_internal() released the lock ! */</span>
+	} <span class="enscript-keyword">else</span> {
+		lck_mtx_unlock(&amp;fourk_pager_lock);
+	}
+	
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+
+<span class="enscript-comment">/*
+ *
+ */</span>
+fourk_pager_t
+<span class="enscript-function-name">fourk_pager_lookup</span>(
+	memory_object_t	 mem_obj)
+{
+	fourk_pager_t	pager;
+
+	pager = (fourk_pager_t) mem_obj;
+	assert(pager-&gt;pager_ops == &amp;fourk_pager_ops);
+	assert(pager-&gt;ref_count &gt; 0);
+	<span class="enscript-keyword">return</span> pager;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fourk_pager_trim</span>(<span class="enscript-type">void</span>)
+{
+	fourk_pager_t	pager, prev_pager;
+	queue_head_t		trim_queue;
+	<span class="enscript-type">int</span>			num_trim;
+	<span class="enscript-type">int</span>			count_unmapped;
+
+	lck_mtx_lock(&amp;fourk_pager_lock);
+
+	<span class="enscript-comment">/*
+	 * We have too many pagers, try and trim some unused ones,
+	 * starting with the oldest pager at the end of the queue.
+	 */</span>
+	queue_init(&amp;trim_queue);
+	num_trim = 0;
+
+	<span class="enscript-keyword">for</span> (pager = (fourk_pager_t)
+		     queue_last(&amp;fourk_pager_queue);
+	     !queue_end(&amp;fourk_pager_queue,
+			(queue_entry_t) pager);
+	     pager = prev_pager) {
+		<span class="enscript-comment">/* get prev elt before we dequeue */</span>
+		prev_pager = (fourk_pager_t)
+			queue_prev(&amp;pager-&gt;pager_queue);
+
+		<span class="enscript-keyword">if</span> (pager-&gt;ref_count == 2 &amp;&amp;
+		    pager-&gt;is_ready &amp;&amp;
+		    !pager-&gt;is_mapped) {
+			<span class="enscript-comment">/* this pager can be trimmed */</span>
+			num_trim++;
+			<span class="enscript-comment">/* remove this pager from the main list ... */</span>
+			fourk_pager_dequeue(pager);
+			<span class="enscript-comment">/* ... and add it to our trim queue */</span>
+			queue_enter_first(&amp;trim_queue,
+					  pager,
+					  fourk_pager_t,
+					  pager_queue);
+
+			count_unmapped = (fourk_pager_count -
+					  fourk_pager_count_mapped);
+			<span class="enscript-keyword">if</span> (count_unmapped &lt;= fourk_pager_cache_limit) {
+				<span class="enscript-comment">/* we have enough pagers to trim */</span>
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+	}
+	<span class="enscript-keyword">if</span> (num_trim &gt; fourk_pager_num_trim_max) {
+		fourk_pager_num_trim_max = num_trim;
+	}
+	fourk_pager_num_trim_total += num_trim;
+
+	lck_mtx_unlock(&amp;fourk_pager_lock);
+
+	<span class="enscript-comment">/* terminate the trimmed pagers */</span>
+	<span class="enscript-keyword">while</span> (!queue_empty(&amp;trim_queue)) {
+		queue_remove_first(&amp;trim_queue,
+				   pager,
+				   fourk_pager_t,
+				   pager_queue);
+		pager-&gt;pager_queue.next = NULL;
+		pager-&gt;pager_queue.prev = NULL;
+		assert(pager-&gt;ref_count == 2);
+		<span class="enscript-comment">/*
+		 * We can't call deallocate_internal() because the pager
+		 * has already been dequeued, but we still need to remove
+		 * a reference.
+		 */</span>
+		pager-&gt;ref_count--;
+		fourk_pager_terminate_internal(pager);
+	}
+}
+
+
+
+
+
+
+vm_object_t
+<span class="enscript-function-name">fourk_pager_to_vm_object</span>(
+	memory_object_t	mem_obj)
+{
+	fourk_pager_t	pager;
+	vm_object_t	object;
+
+	pager = fourk_pager_lookup(mem_obj);
+	<span class="enscript-keyword">if</span> (pager == NULL) {
+		<span class="enscript-keyword">return</span> VM_OBJECT_NULL;
+	}
+
+	assert(pager-&gt;ref_count &gt; 0);
+	assert(pager-&gt;pager_control != MEMORY_OBJECT_CONTROL_NULL);
+	object = memory_object_control_to_vm_object(pager-&gt;pager_control);
+	assert(object != VM_OBJECT_NULL);
+	<span class="enscript-keyword">return</span> object;
+}
+
+memory_object_t
+<span class="enscript-function-name">fourk_pager_create</span>(<span class="enscript-type">void</span>)
+{
+	fourk_pager_t		pager;
+	memory_object_control_t	control;
+	kern_return_t		kr;
+	<span class="enscript-type">int</span>			i;
+
+#<span class="enscript-reference">if</span> 00
+	<span class="enscript-keyword">if</span> (PAGE_SIZE_64 == FOURK_PAGE_SIZE) {
+		panic(<span class="enscript-string">&quot;fourk_pager_create: page size is 4K !?&quot;</span>);
+	}
+#<span class="enscript-reference">endif</span>
+
+	pager = (fourk_pager_t) kalloc(<span class="enscript-keyword">sizeof</span> (*pager));
+	<span class="enscript-keyword">if</span> (pager == FOURK_PAGER_NULL) {
+		<span class="enscript-keyword">return</span> MEMORY_OBJECT_NULL;
+	}
+	bzero(pager, <span class="enscript-keyword">sizeof</span> (*pager));
+
+	<span class="enscript-comment">/*
+	 * The vm_map call takes both named entry ports and raw memory
+	 * objects in the same parameter.  We need to make sure that
+	 * vm_map does not see this object as a named entry port.  So,
+	 * we reserve the first word in the object for a fake ip_kotype
+	 * setting - that will tell vm_map to use it as a memory object.
+	 */</span>
+	pager-&gt;pager_ops = &amp;fourk_pager_ops;
+	pager-&gt;pager_ikot = IKOT_MEMORY_OBJECT;
+	pager-&gt;pager_control = MEMORY_OBJECT_CONTROL_NULL;
+	pager-&gt;ref_count = 2;	<span class="enscript-comment">/* existence + setup reference */</span>
+	pager-&gt;is_ready = FALSE;<span class="enscript-comment">/* not ready until it has a &quot;name&quot; */</span>
+	pager-&gt;is_mapped = FALSE;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; FOURK_PAGER_SLOTS; i++) {
+		pager-&gt;slots[i].backing_object = (vm_object_t) -1;
+		pager-&gt;slots[i].backing_offset = (vm_object_offset_t) -1;
+	}
+	
+	lck_mtx_lock(&amp;fourk_pager_lock);
+
+	<span class="enscript-comment">/* enter new pager at the head of our list of pagers */</span>
+	queue_enter_first(&amp;fourk_pager_queue,
+			  pager,
+			  fourk_pager_t,
+			  pager_queue);
+	fourk_pager_count++;
+	<span class="enscript-keyword">if</span> (fourk_pager_count &gt; fourk_pager_count_max) {
+		fourk_pager_count_max = fourk_pager_count;
+	}
+	lck_mtx_unlock(&amp;fourk_pager_lock);
+
+	kr = memory_object_create_named((memory_object_t) pager,
+					0,
+					&amp;control);
+	assert(kr == KERN_SUCCESS);
+
+	lck_mtx_lock(&amp;fourk_pager_lock);
+	<span class="enscript-comment">/* the new pager is now ready to be used */</span>
+	pager-&gt;is_ready = TRUE;
+	lck_mtx_unlock(&amp;fourk_pager_lock);
+
+	<span class="enscript-comment">/* wakeup anyone waiting for this pager to be ready */</span>
+	thread_wakeup(&amp;pager-&gt;is_ready);
+
+	<span class="enscript-keyword">return</span> (memory_object_t) pager;
+}
+
+<span class="enscript-comment">/*
+ * fourk_pager_data_request()
+ *
+ * Handles page-in requests from VM.
+ */</span>
+<span class="enscript-type">int</span> fourk_pager_data_request_debug = 0;
+kern_return_t	
+<span class="enscript-function-name">fourk_pager_data_request</span>(
+	memory_object_t		mem_obj,
+	memory_object_offset_t	offset,
+	memory_object_cluster_size_t		length,
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">DEBUG</span>
+	__unused
+#<span class="enscript-reference">endif</span>
+	vm_prot_t		protection_required,
+	memory_object_fault_info_t mo_fault_info)
+{
+	fourk_pager_t		pager;
+	memory_object_control_t	mo_control;
+	upl_t			upl;
+	<span class="enscript-type">int</span>			upl_flags;
+	upl_size_t		upl_size;
+	upl_page_info_t		*upl_pl;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		pl_count;
+	vm_object_t		dst_object;
+	kern_return_t		kr, retval;
+	vm_map_offset_t		kernel_mapping;
+	vm_offset_t		src_vaddr, dst_vaddr;
+	vm_offset_t		cur_offset;
+	<span class="enscript-type">int</span>			sub_page;
+	<span class="enscript-type">int</span>			sub_page_idx, sub_page_cnt;
+
+	pager = fourk_pager_lookup(mem_obj);
+	assert(pager-&gt;is_ready);
+	assert(pager-&gt;ref_count &gt; 1); <span class="enscript-comment">/* pager is alive and mapped */</span>
+
+	PAGER_DEBUG(PAGER_PAGEIN, (<span class="enscript-string">&quot;fourk_pager_data_request: %p, %llx, %x, %x, pager %p\n&quot;</span>, mem_obj, offset, length, protection_required, pager));
+
+	retval = KERN_SUCCESS;
+	kernel_mapping = 0;
+
+	offset = memory_object_trunc_page(offset);
+
+	<span class="enscript-comment">/*
+	 * Gather in a UPL all the VM pages requested by VM.
+	 */</span>
+	mo_control = pager-&gt;pager_control;
+
+	upl_size = length;
+	upl_flags =
+		UPL_RET_ONLY_ABSENT |
+		UPL_SET_LITE |
+		UPL_NO_SYNC |
+		UPL_CLEAN_IN_PLACE |	<span class="enscript-comment">/* triggers UPL_CLEAR_DIRTY */</span>
+		UPL_SET_INTERNAL;
+	pl_count = 0;
+	kr = memory_object_upl_request(mo_control,
+				       offset, upl_size,
+				       &amp;upl, NULL, NULL, upl_flags);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		retval = kr;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	dst_object = mo_control-&gt;moc_object;
+	assert(dst_object != VM_OBJECT_NULL);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__x86_64__</span> || <span class="enscript-variable-name">__arm__</span> || <span class="enscript-variable-name">__arm64__</span>
+	<span class="enscript-comment">/* use the 1-to-1 mapping of physical memory */</span>
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* __x86_64__ || __arm__ || __arm64__ */</span>
+	<span class="enscript-comment">/*
+	 * Reserve 2 virtual pages in the kernel address space to map the
+	 * source and destination physical pages when it's their turn to
+	 * be processed.
+	 */</span>
+	vm_map_entry_t		map_entry;
+
+	vm_object_reference(kernel_object);	<span class="enscript-comment">/* ref. for mapping */</span>
+	kr = vm_map_find_space(kernel_map,
+			       &amp;kernel_mapping,
+			       2 * PAGE_SIZE_64,
+			       0,
+			       0,
+			       &amp;map_entry);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		vm_object_deallocate(kernel_object);
+		retval = kr;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	map_entry-&gt;object.vm_object = kernel_object;
+	map_entry-&gt;offset = kernel_mapping;
+	vm_map_unlock(kernel_map);
+	src_vaddr = CAST_DOWN(vm_offset_t, kernel_mapping);
+	dst_vaddr = CAST_DOWN(vm_offset_t, kernel_mapping + PAGE_SIZE_64);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __x86_64__ || __arm__ || __arm64__ */</span>
+
+	<span class="enscript-comment">/*
+	 * Fill in the contents of the pages requested by VM.
+	 */</span>
+	upl_pl = UPL_GET_INTERNAL_PAGE_LIST(upl);
+	pl_count = length / PAGE_SIZE;
+	<span class="enscript-keyword">for</span> (cur_offset = 0;
+	     retval == KERN_SUCCESS &amp;&amp; cur_offset &lt; length;
+	     cur_offset += PAGE_SIZE) {
+		ppnum_t dst_pnum;
+		<span class="enscript-type">int</span> num_subpg_signed, num_subpg_validated;
+		<span class="enscript-type">int</span> num_subpg_tainted, num_subpg_nx;
+
+		<span class="enscript-keyword">if</span> (!upl_page_present(upl_pl, (<span class="enscript-type">int</span>)(cur_offset / PAGE_SIZE))) {
+			<span class="enscript-comment">/* this page is not in the UPL: skip it */</span>
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Establish an explicit pmap mapping of the destination
+		 * physical page.
+		 * We can't do a regular VM mapping because the VM page
+		 * is &quot;busy&quot;.
+		 */</span>
+		dst_pnum = (ppnum_t)
+			upl_phys_page(upl_pl, (<span class="enscript-type">int</span>)(cur_offset / PAGE_SIZE));
+		assert(dst_pnum != 0);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__x86_64__</span>
+		dst_vaddr = (vm_map_offset_t)
+			PHYSMAP_PTOV((pmap_paddr_t)dst_pnum &lt;&lt; PAGE_SHIFT);
+#<span class="enscript-reference">else</span>
+		pmap_enter(kernel_pmap,
+			   dst_vaddr,
+			   dst_pnum,
+			   VM_PROT_READ | VM_PROT_WRITE,
+			   VM_PROT_NONE,
+			   0,
+			   TRUE);
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-comment">/* retrieve appropriate data for each 4K-page in this page */</span>
+		<span class="enscript-keyword">if</span> (PAGE_SHIFT == FOURK_PAGE_SHIFT &amp;&amp;
+		    page_shift_user32 == SIXTEENK_PAGE_SHIFT) {
+			<span class="enscript-comment">/*
+			 * Find the slot for the requested 4KB page in
+			 * the 16K page...
+			 */</span>
+			assert(PAGE_SHIFT == FOURK_PAGE_SHIFT);
+			assert(page_shift_user32 == SIXTEENK_PAGE_SHIFT);
+			sub_page_idx = ((offset &amp; SIXTEENK_PAGE_MASK) /
+					PAGE_SIZE);
+			<span class="enscript-comment">/*
+			 * ... and provide only that one 4KB page.
+			 */</span>
+			sub_page_cnt = 1;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * Iterate over all slots, i.e. retrieve all four 4KB
+			 * pages in the requested 16KB page.
+			 */</span>
+			assert(PAGE_SHIFT == SIXTEENK_PAGE_SHIFT);
+			sub_page_idx = 0;
+			sub_page_cnt = FOURK_PAGER_SLOTS;
+		}
+
+		num_subpg_signed = 0;
+		num_subpg_validated = 0;
+		num_subpg_tainted = 0;
+		num_subpg_nx = 0;
+
+		<span class="enscript-comment">/* retrieve appropriate data for each 4K-page in this page */</span>
+		<span class="enscript-keyword">for</span> (sub_page = sub_page_idx;
+		     sub_page &lt; sub_page_idx + sub_page_cnt;
+		     sub_page++) {
+			vm_object_t		src_object;
+			memory_object_offset_t	src_offset;
+			vm_offset_t		offset_in_src_page;
+			kern_return_t		error_code;
+			vm_page_t		src_page;
+			vm_page_t		top_page;
+			vm_prot_t		prot;
+			<span class="enscript-type">int</span>			interruptible;
+			<span class="enscript-type">struct</span> vm_object_fault_info	fault_info;
+			boolean_t	subpg_validated;
+			<span class="enscript-type">unsigned</span>	subpg_tainted;
+
+
+			<span class="enscript-keyword">if</span> (offset &lt; SIXTEENK_PAGE_SIZE) {
+				<span class="enscript-comment">/*
+				 * The 1st 16K-page can cover multiple
+				 * sub-mappings, as described in the 
+				 * pager-&gt;slots[] array.
+				 */</span>
+				src_object =
+					pager-&gt;slots[sub_page].backing_object;
+				src_offset =
+					pager-&gt;slots[sub_page].backing_offset;
+			} <span class="enscript-keyword">else</span> {
+				fourk_pager_backing_t slot;
+
+				<span class="enscript-comment">/*
+				 * Beyond the 1st 16K-page in the pager is
+				 * an extension of the last &quot;sub page&quot; in
+				 * the pager-&gt;slots[] array.
+				 */</span>
+				slot = &amp;pager-&gt;slots[FOURK_PAGER_SLOTS-1];
+				src_object = slot-&gt;backing_object;
+				src_offset = slot-&gt;backing_offset;
+				src_offset += FOURK_PAGE_SIZE;
+				src_offset +=
+					(vm_map_trunc_page(offset,
+							   SIXTEENK_PAGE_MASK)
+					 - SIXTEENK_PAGE_SIZE);
+				src_offset += sub_page * FOURK_PAGE_SIZE;
+			}
+			offset_in_src_page = src_offset &amp; PAGE_MASK_64;
+			src_offset = vm_object_trunc_page(src_offset);
+				
+			<span class="enscript-keyword">if</span> (src_object == VM_OBJECT_NULL ||
+			    src_object == (vm_object_t) -1) {
+				<span class="enscript-comment">/* zero-fill */</span>
+				bzero((<span class="enscript-type">char</span> *)(dst_vaddr +
+					       ((sub_page-sub_page_idx)
+						* FOURK_PAGE_SIZE)),
+				      FOURK_PAGE_SIZE);
+				<span class="enscript-keyword">if</span> (fourk_pager_data_request_debug) {
+					printf(<span class="enscript-string">&quot;fourk_pager_data_request&quot;</span>
+					       <span class="enscript-string">&quot;(%p,0x%llx+0x%lx+0x%04x): &quot;</span>
+					       <span class="enscript-string">&quot;ZERO\n&quot;</span>,
+					       pager,
+					       offset,
+					       cur_offset,
+					       ((sub_page - sub_page_idx)
+						* FOURK_PAGE_SIZE));
+				}
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			<span class="enscript-comment">/* fault in the source page from src_object */</span>
+		<span class="enscript-reference">retry_src_fault</span>:
+			src_page = VM_PAGE_NULL;
+			top_page = VM_PAGE_NULL;
+			fault_info = *((<span class="enscript-type">struct</span> vm_object_fault_info *)
+				       (uintptr_t)mo_fault_info);
+			fault_info.stealth = TRUE;
+			fault_info.io_sync = FALSE;
+			fault_info.mark_zf_absent = FALSE;
+			fault_info.batch_pmap_op = FALSE;
+			interruptible = fault_info.interruptible;
+			prot = VM_PROT_READ;
+			error_code = 0;
+
+			vm_object_lock(src_object);
+			vm_object_paging_begin(src_object);
+			kr = vm_fault_page(src_object,
+					   src_offset,
+					   VM_PROT_READ,
+					   FALSE,
+					   FALSE, <span class="enscript-comment">/* src_page not looked up */</span>
+					   &amp;prot,
+					   &amp;src_page,
+					   &amp;top_page,
+					   NULL,
+					   &amp;error_code,
+					   FALSE,
+					   FALSE,
+					   &amp;fault_info);
+			<span class="enscript-keyword">switch</span> (kr) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_SUCCESS</span>:
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_RETRY</span>:
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry_src_fault</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_MEMORY_SHORTAGE</span>:
+				<span class="enscript-keyword">if</span> (vm_page_wait(interruptible)) {
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry_src_fault</span>;
+				}
+				<span class="enscript-comment">/* fall thru */</span>
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_INTERRUPTED</span>:
+				retval = MACH_SEND_INTERRUPTED;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">src_fault_done</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_SUCCESS_NO_VM_PAGE</span>:
+				<span class="enscript-comment">/* success but no VM page: fail */</span>
+				vm_object_paging_end(src_object);
+				vm_object_unlock(src_object);
+				<span class="enscript-comment">/*FALLTHROUGH*/</span>
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_MEMORY_ERROR</span>:
+				<span class="enscript-comment">/* the page is not there! */</span>
+				<span class="enscript-keyword">if</span> (error_code) {
+					retval = error_code;
+				} <span class="enscript-keyword">else</span> {
+					retval = KERN_MEMORY_ERROR;
+				}
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">src_fault_done</span>;
+			<span class="enscript-reference">default</span>:
+				panic(<span class="enscript-string">&quot;fourk_pager_data_request: &quot;</span>
+				      <span class="enscript-string">&quot;vm_fault_page() unexpected error 0x%x\n&quot;</span>,
+				      kr);
+			}
+			assert(src_page != VM_PAGE_NULL);
+			assert(src_page-&gt;busy);
+
+			<span class="enscript-keyword">if</span> (!src_page-&gt;active &amp;&amp;
+			    !src_page-&gt;inactive &amp;&amp;
+			    !src_page-&gt;speculative &amp;&amp;
+			    !src_page-&gt;throttled &amp;&amp;
+			    !VM_PAGE_WIRED(src_page)) {
+				vm_page_lockspin_queues();
+				<span class="enscript-keyword">if</span> (!src_page-&gt;active &amp;&amp;
+				    !src_page-&gt;inactive &amp;&amp;
+				    !src_page-&gt;speculative &amp;&amp;
+				    !src_page-&gt;throttled &amp;&amp;
+				    !VM_PAGE_WIRED(src_page)) {
+					vm_page_deactivate(src_page);
+				}
+				vm_page_unlock_queues();
+			}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__x86_64__</span>
+			src_vaddr = (vm_map_offset_t)
+				PHYSMAP_PTOV((pmap_paddr_t)src_page-&gt;phys_page
+					     &lt;&lt; PAGE_SHIFT);
+#<span class="enscript-reference">else</span>
+			<span class="enscript-comment">/*
+			 * Establish an explicit mapping of the source
+			 * physical page.
+			 */</span>
+			pmap_enter(kernel_pmap,
+				   src_vaddr,
+				   src_page-&gt;phys_page,
+				   VM_PROT_READ,
+				   VM_PROT_NONE,
+				   0,
+				   TRUE);
+#<span class="enscript-reference">endif</span>
+
+			<span class="enscript-comment">/*
+			 * Validate the 4K page we want from
+			 * this source page...
+			 */</span>
+			subpg_validated = FALSE;
+			subpg_tainted = 0;
+			<span class="enscript-keyword">if</span> (src_page-&gt;object-&gt;code_signed) {
+				vm_page_validate_cs_mapped_chunk(
+					src_page,
+					(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) src_vaddr,
+					offset_in_src_page,
+					&amp;subpg_validated,
+					&amp;subpg_tainted);
+				num_subpg_signed++;
+				<span class="enscript-keyword">if</span> (subpg_validated) {
+					num_subpg_validated++;
+				}
+				<span class="enscript-keyword">if</span> (subpg_tainted &amp; CS_VALIDATE_TAINTED) {
+					num_subpg_tainted++;
+				}
+				<span class="enscript-keyword">if</span> (subpg_tainted &amp; CS_VALIDATE_NX) {
+					<span class="enscript-comment">/* subpg should not be executable */</span>
+					<span class="enscript-keyword">if</span> (sub_page_cnt &gt; 1) {
+						<span class="enscript-comment">/*
+						 * The destination page has
+						 * more than 1 subpage and its
+						 * other subpages might need
+						 * EXEC, so we do not propagate
+						 * CS_VALIDATE_NX to the
+						 * destination page...
+						 */</span>
+					} <span class="enscript-keyword">else</span> {
+						num_subpg_nx++;
+					}
+				}
+			}
+
+			<span class="enscript-comment">/*
+			 * Copy the relevant portion of the source page
+			 * into the appropriate part of the destination page.
+			 */</span>
+			bcopy((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)(src_vaddr + offset_in_src_page),
+			      (<span class="enscript-type">char</span> *)(dst_vaddr +
+				       ((sub_page - sub_page_idx) *
+					FOURK_PAGE_SIZE)),
+			      FOURK_PAGE_SIZE);
+			<span class="enscript-keyword">if</span> (fourk_pager_data_request_debug) {
+				printf(<span class="enscript-string">&quot;fourk_data_request&quot;</span>
+				       <span class="enscript-string">&quot;(%p,0x%llx+0x%lx+0x%04x): &quot;</span>
+				       <span class="enscript-string">&quot;backed by [%p:0x%llx]: &quot;</span>
+				       <span class="enscript-string">&quot;[0x%016llx 0x%016llx] &quot;</span>
+				       <span class="enscript-string">&quot;code_signed=%d &quot;</span>
+				       <span class="enscript-string">&quot;cs_valid=%d cs_tainted=%d cs_nx=%d\n&quot;</span>,
+				       pager,
+				       offset, cur_offset,
+				       (sub_page-sub_page_idx)*FOURK_PAGE_SIZE,
+				       src_page-&gt;object,
+				       src_page-&gt;offset + offset_in_src_page,
+				       *(uint64_t *)(dst_vaddr +
+						     ((sub_page-sub_page_idx) *
+						      FOURK_PAGE_SIZE)),
+				       *(uint64_t *)(dst_vaddr +
+						     ((sub_page-sub_page_idx) *
+						      FOURK_PAGE_SIZE) +
+						     8),
+				       src_page-&gt;object-&gt;code_signed,
+				       subpg_validated,
+				       !!(subpg_tainted &amp; CS_VALIDATE_TAINTED),
+				       !!(subpg_tainted &amp; CS_VALIDATE_NX));
+			}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__x86_64__</span> || <span class="enscript-variable-name">__arm__</span> || <span class="enscript-variable-name">__arm64__</span>
+			<span class="enscript-comment">/* we used the 1-to-1 mapping of physical memory */</span>
+			src_vaddr = 0;
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* __x86_64__ || __arm__ || __arm64__ */</span>
+			<span class="enscript-comment">/*
+			 * Remove the pmap mapping of the source page 
+			 * in the kernel.
+			 */</span>
+			pmap_remove(kernel_pmap,
+				    (addr64_t) src_vaddr,
+				    (addr64_t) src_vaddr + PAGE_SIZE_64);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __x86_64__ || __arm__ || __arm64__ */</span>
+
+		<span class="enscript-reference">src_fault_done</span>:
+			<span class="enscript-comment">/*
+			 * Cleanup the result of vm_fault_page().
+			 */</span>
+			<span class="enscript-keyword">if</span> (src_page) {
+				vm_object_t	src_page_object;
+
+				src_page_object = src_page-&gt;object;
+				PAGE_WAKEUP_DONE(src_page);
+				src_page = VM_PAGE_NULL;
+				vm_object_paging_end(src_page_object);
+				vm_object_unlock(src_page_object);
+				<span class="enscript-keyword">if</span> (top_page) {
+					vm_object_t	top_object;
+
+					top_object = top_page-&gt;object;
+					vm_object_lock(top_object);
+					VM_PAGE_FREE(top_page);
+					top_page = VM_PAGE_NULL;
+					vm_object_paging_end(top_object);
+					vm_object_unlock(top_object);
+				}
+			}
+		}
+		<span class="enscript-keyword">if</span> (num_subpg_signed &gt; 0) {
+			<span class="enscript-comment">/* some code-signing involved with this 16K page */</span>
+			<span class="enscript-keyword">if</span> (num_subpg_tainted &gt; 0) {
+				<span class="enscript-comment">/* a tainted subpage taints entire 16K page */</span>
+				UPL_SET_CS_TAINTED(upl_pl,
+						   cur_offset / PAGE_SIZE,
+						   TRUE);
+				<span class="enscript-comment">/* also mark as &quot;validated&quot; for consisteny */</span>
+				UPL_SET_CS_VALIDATED(upl_pl,
+						     cur_offset / PAGE_SIZE,
+						     TRUE);
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (num_subpg_validated == num_subpg_signed) {
+				<span class="enscript-comment">/*
+				 * All the code-signed 4K subpages of this
+				 * 16K page are validated:  our 16K page is
+				 * considered validated.
+				 */</span>
+				UPL_SET_CS_VALIDATED(upl_pl,
+						     cur_offset / PAGE_SIZE,
+						     TRUE);
+			}
+			<span class="enscript-keyword">if</span> (num_subpg_nx &gt; 0) {
+				UPL_SET_CS_NX(upl_pl,
+					      cur_offset / PAGE_SIZE,
+					      TRUE);
+			}
+		}
+	}
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (upl != NULL) {
+		<span class="enscript-comment">/* clean up the UPL */</span>
+
+		<span class="enscript-comment">/*
+		 * The pages are currently dirty because we've just been
+		 * writing on them, but as far as we're concerned, they're
+		 * clean since they contain their &quot;original&quot; contents as
+		 * provided by us, the pager.
+		 * Tell the UPL to mark them &quot;clean&quot;.
+		 */</span>
+		upl_clear_dirty(upl, TRUE);
+
+		<span class="enscript-comment">/* abort or commit the UPL */</span>
+		<span class="enscript-keyword">if</span> (retval != KERN_SUCCESS) {
+			upl_abort(upl, 0);
+			<span class="enscript-keyword">if</span> (retval == KERN_ABORTED) {
+				wait_result_t	wait_result;
+
+				<span class="enscript-comment">/*
+				 * We aborted the fault and did not provide
+				 * any contents for the requested pages but
+				 * the pages themselves are not invalid, so
+				 * let's return success and let the caller
+				 * retry the fault, in case it might succeed
+				 * later (when the decryption code is up and
+				 * running in the kernel, for example).
+				 */</span>
+				retval = KERN_SUCCESS;
+				<span class="enscript-comment">/*
+				 * Wait a little bit first to avoid using
+				 * too much CPU time retrying and failing
+				 * the same fault over and over again.
+				 */</span>
+				wait_result = assert_wait_timeout(
+					(event_t) fourk_pager_data_request,
+					THREAD_UNINT,
+					10000,	<span class="enscript-comment">/* 10ms */</span>
+					NSEC_PER_USEC);
+				assert(wait_result == THREAD_WAITING);
+				wait_result = thread_block(THREAD_CONTINUE_NULL);
+				assert(wait_result == THREAD_TIMED_OUT);
+			}
+		} <span class="enscript-keyword">else</span> {
+			boolean_t empty;
+			upl_commit_range(upl, 0, upl-&gt;size, 
+					 UPL_COMMIT_CS_VALIDATED | UPL_COMMIT_WRITTEN_BY_KERNEL,
+					 upl_pl, pl_count, &amp;empty);
+		}
+
+		<span class="enscript-comment">/* and deallocate the UPL */</span>
+		upl_deallocate(upl);
+		upl = NULL;
+	}
+	<span class="enscript-keyword">if</span> (kernel_mapping != 0) {
+		<span class="enscript-comment">/* clean up the mapping of the source and destination pages */</span>
+		kr = vm_map_remove(kernel_map,
+				   kernel_mapping,
+				   kernel_mapping + (2 * PAGE_SIZE_64),
+				   VM_MAP_NO_FLAGS);
+		assert(kr == KERN_SUCCESS);
+		kernel_mapping = 0;
+		src_vaddr = 0;
+		dst_vaddr = 0;
+	}
+
+	<span class="enscript-keyword">return</span> retval;
+}
+
+
+
+kern_return_t
+<span class="enscript-function-name">fourk_pager_populate</span>(
+	memory_object_t		mem_obj,
+	boolean_t		overwrite,
+	<span class="enscript-type">int</span>			index,
+	vm_object_t		new_backing_object,
+	vm_object_offset_t	new_backing_offset,
+	vm_object_t		*old_backing_object,
+	vm_object_offset_t	*old_backing_offset)
+{
+	fourk_pager_t	pager;
+
+	pager = fourk_pager_lookup(mem_obj);
+	<span class="enscript-keyword">if</span> (pager == NULL) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	assert(pager-&gt;ref_count &gt; 0);
+	assert(pager-&gt;pager_control != MEMORY_OBJECT_CONTROL_NULL);
+
+	<span class="enscript-keyword">if</span> (index &lt; 0 || index &gt; FOURK_PAGER_SLOTS) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	<span class="enscript-keyword">if</span> (!overwrite &amp;&amp;
+	    (pager-&gt;slots[index].backing_object != (vm_object_t) -1 ||
+	     pager-&gt;slots[index].backing_offset != (vm_object_offset_t) -1)) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ADDRESS;
+	}
+
+	*old_backing_object = pager-&gt;slots[index].backing_object;
+	*old_backing_offset = pager-&gt;slots[index].backing_offset;
+
+	pager-&gt;slots[index].backing_object = new_backing_object;
+	pager-&gt;slots[index].backing_offset = new_backing_offset;
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+</pre>
+<hr />
+</body></html>

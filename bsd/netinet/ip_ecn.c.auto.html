@@ -1,0 +1,285 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ip_ecn.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ip_ecn.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000, 2007, 2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (C) 1999 WIDE Project.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the project nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ */</span>
+<span class="enscript-comment">/*
+ * ECN consideration on tunnel ingress/egress operation.
+ * <a href="http://www.aciri.org/floyd/papers/draft-ipsec-ecn-00.txt">http://www.aciri.org/floyd/papers/draft-ipsec-ecn-00.txt</a>
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_ecn.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_ecn.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * modify outer ECN (TOS) field on ingress operation (tunnel encapsulation).
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ip_ecn_ingress</span>(mode, outer, inner)
+	<span class="enscript-type">int</span> mode;
+	u_int8_t *outer;
+	<span class="enscript-type">const</span> u_int8_t *inner;
+{
+	<span class="enscript-keyword">if</span> (!outer || !inner)
+		panic(<span class="enscript-string">&quot;NULL pointer passed to ip_ecn_ingress&quot;</span>);
+
+	*outer = *inner;
+	<span class="enscript-keyword">switch</span> (mode) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ECN_NORMAL</span>:		<span class="enscript-comment">/* ECN normal mode, copy flags */</span>
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ECN_COMPATIBILITY</span>:		<span class="enscript-comment">/* ECN compatibility mode */</span>
+		*outer &amp;= ~IPTOS_ECN_MASK;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ECN_NOCARE</span>:	<span class="enscript-comment">/* no consideration to ECN */</span>
+		<span class="enscript-keyword">break</span>;
+	}
+}
+
+<span class="enscript-comment">/*
+ * modify inner ECN (TOS) field on egress operation (tunnel decapsulation).
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ip_ecn_egress</span>(mode, outer, inner)
+	<span class="enscript-type">int</span> mode;
+	<span class="enscript-type">const</span> u_int8_t *outer;
+	u_int8_t *inner;
+{
+	<span class="enscript-keyword">if</span> (!outer || !inner)
+		panic(<span class="enscript-string">&quot;NULL pointer passed to ip_ecn_egress&quot;</span>);
+
+	<span class="enscript-keyword">switch</span> (mode) {
+	<span class="enscript-comment">/* Process ECN for both normal and compatibility modes */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ECN_NORMAL</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ECN_COMPATIBILITY</span>:
+		<span class="enscript-keyword">if</span> ((*outer &amp; IPTOS_ECN_MASK) == IPTOS_ECN_CE) {
+			<span class="enscript-keyword">if</span> ((*inner &amp; IPTOS_ECN_MASK) == IPTOS_ECN_NOTECT) {
+				<span class="enscript-comment">/* Drop */</span>
+				<span class="enscript-keyword">return</span> (0);
+			} <span class="enscript-keyword">else</span> {
+				*inner |= IPTOS_ECN_CE;
+			}
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((*outer &amp; IPTOS_ECN_MASK) == IPTOS_ECN_ECT1 &amp;&amp;
+				   (*inner &amp; IPTOS_ECN_MASK) == IPTOS_ECN_ECT0) {
+			*inner = *outer;
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ECN_NOCARE</span>:	<span class="enscript-comment">/* no consideration to ECN */</span>
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span> (1);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ip6_ecn_ingress</span>(mode, outer, inner)
+	<span class="enscript-type">int</span> mode;
+	u_int32_t *outer;
+	<span class="enscript-type">const</span> u_int32_t *inner;
+{
+	u_int8_t outer8, inner8;
+
+	<span class="enscript-keyword">if</span> (!outer || !inner)
+		panic(<span class="enscript-string">&quot;NULL pointer passed to ip6_ecn_ingress&quot;</span>);
+
+	inner8 = (ntohl(*inner) &gt;&gt; 20) &amp; 0xff;
+	ip_ecn_ingress(mode, &amp;outer8, &amp;inner8);
+	*outer &amp;= ~htonl(0xff &lt;&lt; 20);
+	*outer |= htonl((u_int32_t)outer8 &lt;&lt; 20);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ip6_ecn_egress</span>(mode, outer, inner)
+	<span class="enscript-type">int</span> mode;
+	<span class="enscript-type">const</span> u_int32_t *outer;
+	u_int32_t *inner;
+{
+	u_int8_t outer8, inner8;
+
+	<span class="enscript-keyword">if</span> (!outer || !inner)
+		panic(<span class="enscript-string">&quot;NULL pointer passed to ip6_ecn_egress&quot;</span>);
+
+	outer8 = (ntohl(*outer) &gt;&gt; 20) &amp; 0xff;
+	inner8 = (ntohl(*inner) &gt;&gt; 20) &amp; 0xff;
+	<span class="enscript-keyword">if</span> (ip_ecn_egress(mode, &amp;outer8, &amp;inner8) == 0) {
+		<span class="enscript-keyword">return</span> (0);
+	}
+	*inner &amp;= ~htonl(0xff &lt;&lt; 20);
+	*inner |= htonl((u_int32_t)inner8 &lt;&lt; 20);
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/*
+ * Modify outer IPv6 ECN (Traffic Class) field according to inner IPv4 TOS field
+ * on ingress operation (tunnel encapsulation).
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ip46_ecn_ingress</span>(mode, outer, tos)
+	<span class="enscript-type">int</span> mode;
+	u_int32_t *outer;
+	<span class="enscript-type">const</span> u_int8_t *tos;
+{
+	u_int8_t outer8;
+
+	<span class="enscript-keyword">if</span> (!outer || !tos)
+		panic(<span class="enscript-string">&quot;NULL pointer passed to ip46_ecn_ingress&quot;</span>);
+
+	ip_ecn_ingress(mode, &amp;outer8, tos);
+	*outer &amp;= ~htonl(0xff &lt;&lt; 20);
+	*outer |= htonl((u_int32_t)outer8 &lt;&lt; 20);
+}
+
+<span class="enscript-comment">/*
+ * Modify inner IPv4 ECN (TOS) field according to output IPv6 ECN (Traffic Class)
+ * on egress operation (tunnel decapsulation).
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ip46_ecn_egress</span>(mode, outer, tos)
+	<span class="enscript-type">int</span> mode;
+	<span class="enscript-type">const</span> u_int32_t *outer;
+	u_int8_t *tos;
+{
+	u_int8_t outer8;
+
+	<span class="enscript-keyword">if</span> (!outer || !tos)
+		panic(<span class="enscript-string">&quot;NULL pointer passed to ip46_ecn_egress&quot;</span>);
+
+	outer8 = (ntohl(*outer) &gt;&gt; 20) &amp; 0xff;
+	<span class="enscript-keyword">return</span> ip_ecn_egress(mode, &amp;outer8, tos);
+}
+
+<span class="enscript-comment">/*
+ * Modify outer IPv4 TOS field according to inner IPv6 ECN (Traffic Class)
+ * on ingress operation (tunnel encapsulation).
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ip64_ecn_ingress</span>(mode, outer, inner)
+	<span class="enscript-type">int</span> mode;
+	u_int8_t *outer;
+	<span class="enscript-type">const</span> u_int32_t *inner;
+{
+	u_int8_t inner8;
+
+	<span class="enscript-keyword">if</span> (!outer || ! inner)
+		panic(<span class="enscript-string">&quot;NULL pointer passed to ip64_ecn_ingress&quot;</span>);
+
+	inner8 = (ntohl(*inner) &gt;&gt; 20) &amp; 0xff;
+	ip_ecn_ingress(mode, outer, &amp;inner8);
+}
+
+<span class="enscript-comment">/*
+ * Modify inner IPv6 ECN (Traffic Class) according to outer IPv4 TOS field
+ * on egress operation (tunnel decapsulation).
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ip64_ecn_egress</span>(mode, outer, inner)
+	<span class="enscript-type">int</span> mode;
+	<span class="enscript-type">const</span> u_int8_t *outer;
+	u_int32_t *inner;
+{
+	u_int8_t inner8;
+
+	<span class="enscript-keyword">if</span> (!outer || !inner)
+		panic(<span class="enscript-string">&quot;NULL pointer passed to ip64_ecn_egress&quot;</span>);
+
+	inner8 = (ntohl(*inner) &gt;&gt; 20) &amp; 0xff;
+	<span class="enscript-keyword">if</span> (ip_ecn_egress(mode, outer, &amp;inner8) == 0) {
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	*inner &amp;= ~htonl(0xff &lt;&lt; 20);
+	*inner |= htonl((u_int32_t)inner8 &lt;&lt; 20);
+	<span class="enscript-keyword">return</span> (1);
+}
+
+#<span class="enscript-reference">endif</span>
+</pre>
+<hr />
+</body></html>

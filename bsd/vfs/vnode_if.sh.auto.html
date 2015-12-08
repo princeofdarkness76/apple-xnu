@@ -1,0 +1,409 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>vnode_if.sh</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">vnode_if.sh&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-reference">#!/bin/sh -
+</span>copyright='
+/*
+ * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined <span class="enscript-keyword">in</span> and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * <span class="enscript-string">&quot;License&quot;</span>).  You may not use this file except <span class="enscript-keyword">in</span> compliance with the
+ * License.  Please obtain a copy of the License at
+ * <a href="http://www.apple.com/publicsource">http://www.apple.com/publicsource</a> and <span class="enscript-keyword">read</span> it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an <span class="enscript-string">&quot;AS IS&quot;</span> basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License <span class="enscript-keyword">for</span> the specific language governing rights and limitations
+ * under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */
+/*
+ * Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved
+ * Copyright (c) 1992, 1993, 1994, 1995
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use <span class="enscript-keyword">in</span> source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions <span class="enscript-keyword">in</span> binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer <span class="enscript-keyword">in</span> the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the University of
+ *      California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+'
+SCRIPT_ID='@(<span class="enscript-comment">#)vnode_if.sh	8.7 (Berkeley) 5/11/95'
+</span>
+<span class="enscript-comment"># Script to produce VFS front-end sugar.
+</span><span class="enscript-comment">#
+</span><span class="enscript-comment"># usage: vnode_if.sh srcfile
+</span><span class="enscript-comment">#	(where srcfile is currently bsd/vfs/vnode_if.src)
+</span><span class="enscript-comment">#
+</span>
+<span class="enscript-keyword">if</span> [ $<span class="enscript-comment"># -ne 1 ] ; then
+</span>	<span class="enscript-keyword">echo</span> 'usage: vnode_if.sh srcfile'
+	<span class="enscript-keyword">exit</span> 1
+<span class="enscript-keyword">fi</span>
+
+<span class="enscript-comment"># Name of the source file.
+</span>src=$1
+
+<span class="enscript-comment"># Names of the created files.
+</span>out_c=vnode_if.c
+out_h=vnode_if.h
+
+<span class="enscript-comment"># Awk program (must support nawk extensions)
+</span><span class="enscript-comment"># Use &quot;awk&quot; at Berkeley, &quot;nawk&quot; or &quot;gawk&quot; elsewhere.
+</span>awk=${AWK:-awk}
+<span class="enscript-comment">#awk=${AWK:-gawk}
+</span>
+<span class="enscript-comment"># Does this awk have a &quot;toupper&quot; function? (i.e. is it GNU awk)
+</span>isgawk=`$awk 'BEGIN { print toupper(<span class="enscript-string">&quot;true&quot;</span>); <span class="enscript-keyword">exit</span>; }' 2&gt;/dev/null`
+
+<span class="enscript-comment"># If this awk does not define &quot;toupper&quot; then define our own.
+</span><span class="enscript-keyword">if</span> [ <span class="enscript-string">&quot;$isgawk&quot;</span> = TRUE ] ; <span class="enscript-keyword">then</span>
+	<span class="enscript-comment"># GNU awk provides it.
+</span>	toupper=
+<span class="enscript-keyword">else</span>
+	<span class="enscript-comment"># Provide our own toupper()
+</span>	toupper='
+function toupper(str) {
+	_toupper_cmd = <span class="enscript-string">&quot;echo &quot;</span>str<span class="enscript-string">&quot; |tr a-z A-Z&quot;</span>
+	_toupper_cmd | getline _toupper_str;
+	close(_toupper_cmd);
+	<span class="enscript-keyword">return</span> _toupper_str;
+}'
+<span class="enscript-keyword">fi</span>
+
+<span class="enscript-comment">#
+</span><span class="enscript-comment"># This is the common part of all awk programs that read $src
+</span><span class="enscript-comment"># This parses the input for one function into the arrays:
+</span><span class="enscript-comment">#	argdir, argtype, argname, willrele
+</span><span class="enscript-comment"># and calls &quot;doit()&quot; to generate output for the function.
+</span><span class="enscript-comment">#
+</span><span class="enscript-comment"># Input to this parser is pre-processed slightly by sed
+</span><span class="enscript-comment"># so this awk parser doesn't have to work so hard.  The
+</span><span class="enscript-comment"># changes done by the sed pre-processing step are:
+</span><span class="enscript-comment">#	insert a space beween * and pointer name
+</span><span class="enscript-comment">#	replace semicolons with spaces
+</span><span class="enscript-comment">#
+</span>sed_prep='s:\*\([^\*/]\):\* \1:g
+s/;/ /'
+awk_parser='
+<span class="enscript-comment"># Comment line
+</span>/^<span class="enscript-comment">#/	{ next; }
+</span><span class="enscript-comment"># First line of description
+</span>/^vop_/	{
+	name=$1;
+	argc=0;
+	ubc=$3;
+	next;
+}
+<span class="enscript-comment"># Last line of description
+</span>/^}/	{
+	doit();
+	next;
+}
+<span class="enscript-comment"># Middle lines of description
+</span>{
+	argdir[argc] = $1; i=2;
+	<span class="enscript-keyword">if</span> ($2 == <span class="enscript-string">&quot;WILLRELE&quot;</span>) {
+		willrele[argc] = 1;
+		i++;
+	} <span class="enscript-keyword">else</span>
+		willrele[argc] = 0;
+	argtype[argc] = $i; i++;
+	<span class="enscript-keyword">while</span> (i &lt; NF) {
+		argtype[argc] = argtype[argc]<span class="enscript-string">&quot; &quot;</span>$i;
+		i++;
+	}
+	argname[argc] = $i;
+	argc++;
+	next;
+}
+'
+
+<span class="enscript-comment"># This is put after the copyright on each generated file.
+</span>warning=<span class="enscript-string">&quot;
+/*
+ * Warning: This file is generated automatically.
+ * (Modifications made here may easily be lost!)
+ *
+ * Created by the script:
+ *	${SCRIPT_ID}
+ */
+&quot;</span>
+
+<span class="enscript-comment"># Get rid of ugly spaces
+</span>space_elim='s:\([^/]\*\) :\1:g'
+
+<span class="enscript-comment">#
+</span><span class="enscript-comment"># Redirect stdout to the H file.
+</span><span class="enscript-comment">#
+</span><span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;$0: Creating $out_h&quot;</span> 1&gt;&amp;2
+<span class="enscript-keyword">exec</span> &gt; $out_h
+
+<span class="enscript-comment"># Begin stuff
+</span><span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;$copyright&quot;</span>
+<span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;$warning&quot;</span>
+<span class="enscript-keyword">echo</span> '
+<span class="enscript-comment">#ifndef _SYS_VNODE_IF_H_
+</span><span class="enscript-comment">#define _SYS_VNODE_IF_H_
+</span>
+<span class="enscript-comment">#include &lt;sys/appleapiopts.h&gt;
+</span><span class="enscript-comment">#include &lt;sys/ubc.h&gt;
+</span>
+<span class="enscript-comment">#ifdef __APPLE_API_UNSTABLE
+</span>extern struct vnodeop_desc vop_default_desc;
+'
+
+<span class="enscript-comment"># Body stuff
+</span><span class="enscript-comment"># This awk program needs toupper() so define it if necessary.
+</span>sed -e <span class="enscript-string">&quot;$sed_prep&quot;</span> $src | $awk <span class="enscript-string">&quot;$toupper&quot;</span>'
+function doit() {
+	<span class="enscript-comment"># Declare arg struct, descriptor.
+</span>	printf(<span class="enscript-string">&quot;\nstruct %s_args {\n&quot;</span>, name);
+	printf(<span class="enscript-string">&quot;\tstruct vnodeop_desc * a_desc;\n&quot;</span>);
+	<span class="enscript-keyword">for</span> (i=0; i&lt;argc; i++) {
+		printf(<span class="enscript-string">&quot;\t%s a_%s;\n&quot;</span>, argtype[i], argname[i]);
+	}
+	printf(<span class="enscript-string">&quot;};\n&quot;</span>);
+	printf(<span class="enscript-string">&quot;extern struct vnodeop_desc %s_desc;\n&quot;</span>, name);
+	<span class="enscript-comment"># Define inline function.
+</span>	printf(<span class="enscript-string">&quot;#define %s(&quot;</span>, toupper(name));
+	<span class="enscript-keyword">for</span> (i=0; i&lt;argc; i++) {
+		printf(<span class="enscript-string">&quot;%s&quot;</span>, argname[i]);
+		<span class="enscript-keyword">if</span> (i &lt; (argc-1)) printf(<span class="enscript-string">&quot;, &quot;</span>);
+	}
+	printf(<span class="enscript-string">&quot;) _%s(&quot;</span>, toupper(name));
+	<span class="enscript-keyword">for</span> (i=0; i&lt;argc; i++) {
+		printf(<span class="enscript-string">&quot;%s&quot;</span>, argname[i]);
+		<span class="enscript-keyword">if</span> (i &lt; (argc-1)) printf(<span class="enscript-string">&quot;, &quot;</span>);
+	}
+	printf(<span class="enscript-string">&quot;)\n&quot;</span>);
+	printf(<span class="enscript-string">&quot;static __inline int _%s(&quot;</span>, toupper(name));
+	<span class="enscript-keyword">for</span> (i=0; i&lt;argc; i++) {
+		<span class="enscript-comment"># generate ANSI protoypes now, hurrah!
+</span>		printf(<span class="enscript-string">&quot;%s _%s&quot;</span>, argtype[i], argname[i]);
+		<span class="enscript-keyword">if</span> (i &lt; (argc-1)) printf(<span class="enscript-string">&quot;, &quot;</span>);
+	}
+	printf(<span class="enscript-string">&quot;)\n&quot;</span>);
+	printf(<span class="enscript-string">&quot;{\n\tstruct %s_args a;\n&quot;</span>, name);
+	printf(<span class="enscript-string">&quot;\ta.a_desc = VDESC(%s);\n&quot;</span>, name);
+	<span class="enscript-keyword">for</span> (i=0; i&lt;argc; i++) {
+		printf(<span class="enscript-string">&quot;\ta.a_%s = _%s;\n&quot;</span>, argname[i], argname[i]);
+	}
+	<span class="enscript-keyword">if</span> (toupper(ubc) == <span class="enscript-string">&quot;UBC&quot;</span>) {
+		printf(<span class="enscript-string">&quot;\t{\n\t\t&quot;</span> \
+			<span class="enscript-string">&quot;int _err;\n\t\t&quot;</span>   \
+			<span class="enscript-string">&quot;_err = VCALL(_%s%s, VOFFSET(%s), &amp;a);\n\t\t&quot;</span>    \
+			<span class="enscript-string">&quot;return (_err);\n\t}\n}\n&quot;</span>,
+			argname[0], argname[0], arg0special, name, argname[0]);
+	} <span class="enscript-keyword">else</span> {
+		printf(<span class="enscript-string">&quot;\treturn (VCALL(_%s%s, VOFFSET(%s), &amp;a));\n}\n&quot;</span>,
+			argname[0], arg0special, name);
+	}
+}
+BEGIN	{
+	arg0special=<span class="enscript-string">&quot;&quot;</span>;
+}
+END	{
+	printf(<span class="enscript-string">&quot;\n/* Special cases: */\n#include &lt;sys/buf.h&gt;\n#include &lt;sys/vm.h&gt;\n&quot;</span>);
+	argc=1;
+	argtype[0]=<span class="enscript-string">&quot;struct buf *&quot;</span>;
+	argname[0]=<span class="enscript-string">&quot;bp&quot;</span>;
+	arg0special=<span class="enscript-string">&quot;-&gt;b_vp&quot;</span>;
+	name=<span class="enscript-string">&quot;vop_strategy&quot;</span>;
+	doit();
+	name=<span class="enscript-string">&quot;VNOP_BWRITE&quot;</span>;
+	doit();
+}
+'<span class="enscript-string">&quot;$awk_parser&quot;</span> | sed -e <span class="enscript-string">&quot;$space_elim&quot;</span>
+
+<span class="enscript-comment"># End stuff
+</span><span class="enscript-keyword">echo</span> '
+/* End of special cases. */
+
+<span class="enscript-comment">#endif /* __APPLE_API_UNSTABLE */
+</span><span class="enscript-comment">#endif /* !_SYS_VNODE_IF_H_ */'
+</span>
+<span class="enscript-comment">#
+</span><span class="enscript-comment"># Redirect stdout to the C file.
+</span><span class="enscript-comment">#
+</span><span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;$0: Creating $out_c&quot;</span> 1&gt;&amp;2
+<span class="enscript-keyword">exec</span> &gt; $out_c
+
+<span class="enscript-comment"># Begin stuff
+</span><span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;$copyright&quot;</span>
+<span class="enscript-keyword">echo</span> <span class="enscript-string">&quot;$warning&quot;</span>
+<span class="enscript-keyword">echo</span> '
+<span class="enscript-comment">#include &lt;sys/param.h&gt;
+</span><span class="enscript-comment">#include &lt;sys/mount.h&gt;
+</span><span class="enscript-comment">#include &lt;sys/vm.h&gt;
+</span><span class="enscript-comment">#include &lt;sys/vnode.h&gt;
+</span>
+struct vnodeop_desc vop_default_desc = {
+	0,
+	<span class="enscript-string">&quot;default&quot;</span>,
+	0,
+	NULL,
+	VDESC_NO_OFFSET,
+	VDESC_NO_OFFSET,
+	VDESC_NO_OFFSET,
+	VDESC_NO_OFFSET,
+	NULL,
+};
+'
+
+<span class="enscript-comment"># Body stuff
+</span>sed -e <span class="enscript-string">&quot;$sed_prep&quot;</span> $src | $awk '
+function do_offset(typematch) {
+	<span class="enscript-keyword">for</span> (i=0; i&lt;argc; i++) {
+		<span class="enscript-keyword">if</span> (argtype[i] == typematch) {
+			printf(<span class="enscript-string">&quot;\tVOPARG_OFFSETOF(struct %s_args, a_%s),\n&quot;</span>,
+				name, argname[i]);
+			<span class="enscript-keyword">return</span> i;
+		};
+	};
+	print <span class="enscript-string">&quot;\tVDESC_NO_OFFSET,&quot;</span>;
+	<span class="enscript-keyword">return</span> -1;
+}
+
+function doit() {
+	<span class="enscript-comment"># Define offsets array
+</span>	printf(<span class="enscript-string">&quot;\nint %s_vp_offsets[] = {\n&quot;</span>, name);
+	<span class="enscript-keyword">for</span> (i=0; i&lt;argc; i++) {
+		<span class="enscript-keyword">if</span> (argtype[i] == <span class="enscript-string">&quot;struct vnode *&quot;</span>) {
+			printf (<span class="enscript-string">&quot;\tVOPARG_OFFSETOF(struct %s_args,a_%s),\n&quot;</span>,
+				name, argname[i]);
+		}
+	}
+	print <span class="enscript-string">&quot;\tVDESC_NO_OFFSET&quot;</span>;
+	print <span class="enscript-string">&quot;};&quot;</span>;
+	<span class="enscript-comment"># Define F_desc
+</span>	printf(<span class="enscript-string">&quot;struct vnodeop_desc %s_desc = {\n&quot;</span>, name);
+	<span class="enscript-comment"># offset
+</span>	printf (<span class="enscript-string">&quot;\t0,\n&quot;</span>);
+	<span class="enscript-comment"># printable name
+</span>	printf (<span class="enscript-string">&quot;\t\&quot;%s\&quot;,\n&quot;</span>, name);
+	<span class="enscript-comment"># flags
+</span>	printf(<span class="enscript-string">&quot;\t0&quot;</span>);
+	vpnum = 0;
+	<span class="enscript-keyword">for</span> (i=0; i&lt;argc; i++) {
+		<span class="enscript-keyword">if</span> (match(argtype[i], <span class="enscript-string">&quot;struct vnode *&quot;</span>) == 1) {
+			<span class="enscript-keyword">if</span> (willrele[i]) {
+				<span class="enscript-keyword">if</span> (argdir[i] ~ /OUT/) {
+					printf(<span class="enscript-string">&quot; | VDESC_VPP_WILLRELE&quot;</span>);
+				} <span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot; | VDESC_VP%s_WILLRELE&quot;</span>, vpnum);
+				};
+			}
+		vpnum++;
+		}
+	}
+	print <span class="enscript-string">&quot;,&quot;</span>;
+	<span class="enscript-comment"># vp offsets
+</span>	printf (<span class="enscript-string">&quot;\t%s_vp_offsets,\n&quot;</span>, name);
+	<span class="enscript-comment"># vpp (if any)
+</span>	do_offset(<span class="enscript-string">&quot;struct vnode **&quot;</span>);
+	<span class="enscript-comment"># cred (if any)
+</span>	do_offset(<span class="enscript-string">&quot;kauth_credential_t&quot;</span>);
+	<span class="enscript-comment"># proc (if any)
+</span>	do_offset(<span class="enscript-string">&quot;struct proc *&quot;</span>);
+	<span class="enscript-comment"># componentname
+</span>	do_offset(<span class="enscript-string">&quot;struct componentname *&quot;</span>);
+	<span class="enscript-comment"># transport layer information
+</span>	printf (<span class="enscript-string">&quot;\tNULL,\n};\n&quot;</span>);
+}
+END	{
+	printf(<span class="enscript-string">&quot;\n/* Special cases: */\n&quot;</span>);
+	argc=1;
+	argdir[0]=<span class="enscript-string">&quot;IN&quot;</span>;
+	argtype[0]=<span class="enscript-string">&quot;struct buf *&quot;</span>;
+	argname[0]=<span class="enscript-string">&quot;bp&quot;</span>;
+	willrele[0]=0;
+	name=<span class="enscript-string">&quot;vop_strategy&quot;</span>;
+	doit();
+	name=<span class="enscript-string">&quot;VNOP_BWRITE&quot;</span>;
+	doit();
+}
+'<span class="enscript-string">&quot;$awk_parser&quot;</span> | sed -e <span class="enscript-string">&quot;$space_elim&quot;</span>
+
+<span class="enscript-comment"># End stuff
+</span><span class="enscript-keyword">echo</span> '
+/* End of special cases. */'
+
+<span class="enscript-comment"># Add the vfs_op_descs array to the C file.
+</span><span class="enscript-comment"># Begin stuff
+</span><span class="enscript-keyword">echo</span> '
+struct vnodeop_desc *vfs_op_descs[] = {
+	&amp;vop_default_desc,	/* MUST BE FIRST */
+	&amp;vop_strategy_desc,	/* XXX: SPECIAL CASE */
+	&amp;VNOP_BWRITE_desc,	/* XXX: SPECIAL CASE */
+'
+
+<span class="enscript-comment"># Body stuff
+</span>sed -e <span class="enscript-string">&quot;$sed_prep&quot;</span> $src | $awk '
+function doit() {
+	printf(<span class="enscript-string">&quot;\t&amp;%s_desc,\n&quot;</span>, name);
+}
+'<span class="enscript-string">&quot;$awk_parser&quot;</span>
+
+<span class="enscript-comment"># End stuff
+</span><span class="enscript-keyword">echo</span> '	NULL
+};
+'
+
+<span class="enscript-keyword">exit</span> 0
+
+<span class="enscript-comment"># Local Variables:
+</span><span class="enscript-comment"># tab-width: 4
+</span><span class="enscript-comment"># End:
+</span></pre>
+<hr />
+</body></html>

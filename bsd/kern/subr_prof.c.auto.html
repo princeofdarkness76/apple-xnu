@@ -1,0 +1,445 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>subr_prof.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">subr_prof.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2008 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */</span>
+<span class="enscript-comment">/*-
+ * Copyright (c) 1982, 1986, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)subr_prof.c	8.3 (Berkeley) 9/23/93
+ */</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GPROF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/kernel_mach_header.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">GPROF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/gmon.h&gt;</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_doprof</span>(<span class="enscript-type">int</span> *, u_int, user_addr_t, size_t *, 
+		user_addr_t, size_t newlen);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">sysctl_struct</span>(user_addr_t, size_t *,
+		user_addr_t, size_t, <span class="enscript-type">void</span> *, <span class="enscript-type">int</span>);
+
+lck_spin_t * mcount_lock;
+lck_grp_t * mcount_lock_grp;
+lck_attr_t * mcount_lock_attr;
+
+<span class="enscript-comment">/*
+ * Froms is actually a bunch of unsigned shorts indexing tos
+ */</span>
+<span class="enscript-type">struct</span> gmonparam _gmonparam = { .state = GMON_PROF_OFF };
+
+<span class="enscript-comment">/*
+ * This code uses 32 bit mach object segment information from the currently
+ * running kernel.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kmstartup</span>(<span class="enscript-type">void</span>)
+{
+	tostruct_t *cp;
+	kernel_segment_command_t	*sgp;	<span class="enscript-comment">/* 32 bit mach object file segment */</span>
+	<span class="enscript-type">struct</span> gmonparam *p = &amp;_gmonparam;
+	
+	sgp = getsegbyname(<span class="enscript-string">&quot;__TEXT&quot;</span>);
+	p-&gt;lowpc = (u_int32_t)sgp-&gt;vmaddr;
+	p-&gt;highpc = (u_int32_t)(sgp-&gt;vmaddr + sgp-&gt;vmsize);
+	
+	<span class="enscript-comment">/*
+	 * Round lowpc and highpc to multiples of the density we're using
+	 * so the rest of the scaling (here and in gprof) stays in ints.
+	 */</span>
+	p-&gt;lowpc = ROUNDDOWN(p-&gt;lowpc, HISTFRACTION * <span class="enscript-keyword">sizeof</span>(HISTCOUNTER));
+	p-&gt;highpc = ROUNDUP(p-&gt;highpc, HISTFRACTION * <span class="enscript-keyword">sizeof</span>(HISTCOUNTER));
+	p-&gt;textsize = p-&gt;highpc - p-&gt;lowpc;
+	printf(<span class="enscript-string">&quot;Profiling kernel, textsize=%lu [0x%016lx..0x%016lx]\n&quot;</span>,
+	       p-&gt;textsize, p-&gt;lowpc, p-&gt;highpc);
+	p-&gt;kcountsize = p-&gt;textsize / HISTFRACTION;
+	p-&gt;hashfraction = HASHFRACTION;
+	p-&gt;fromssize = p-&gt;textsize / HASHFRACTION;
+	p-&gt;tolimit = p-&gt;textsize * ARCDENSITY / 100;
+	<span class="enscript-keyword">if</span> (p-&gt;tolimit &lt; MINARCS)
+		p-&gt;tolimit = MINARCS;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (p-&gt;tolimit &gt; MAXARCS)
+		p-&gt;tolimit = MAXARCS;
+	p-&gt;tossize = p-&gt;tolimit * <span class="enscript-keyword">sizeof</span>(tostruct_t);
+	<span class="enscript-comment">/* Why not use MALLOC with M_GPROF ? */</span>
+	cp = (tostruct_t *)kalloc(p-&gt;kcountsize + p-&gt;fromssize + p-&gt;tossize);
+	<span class="enscript-keyword">if</span> (cp == 0) {
+		printf(<span class="enscript-string">&quot;No memory for profiling.\n&quot;</span>);
+		<span class="enscript-keyword">return</span>;
+	}
+	bzero(cp, p-&gt;kcountsize + p-&gt;tossize + p-&gt;fromssize);
+	p-&gt;tos = cp;
+	cp = (tostruct_t *)((vm_offset_t)cp + p-&gt;tossize);
+	p-&gt;kcount = (u_short *)cp;
+	cp = (tostruct_t *)((vm_offset_t)cp + p-&gt;kcountsize);
+	p-&gt;froms = (u_short *)cp;
+	
+	mcount_lock_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;MCOUNT&quot;</span>, LCK_GRP_ATTR_NULL);
+	mcount_lock_attr = lck_attr_alloc_init();
+	mcount_lock = lck_spin_alloc_init(mcount_lock_grp, mcount_lock_attr);
+
+}
+
+<span class="enscript-comment">/*
+ * XXX		These should be broken out into per-argument OID values,
+ * XXX		since there are no sub-OID parameter values, but unfortunately
+ * XXX		there is barely enough time for an initial conversion.
+ *
+ * Note:	These items appear to be read/write.
+ */</span>
+STATIC <span class="enscript-type">int</span>
+sysctl_doprofhandle SYSCTL_HANDLER_ARGS
+{
+<span class="enscript-function-name">sysctl_doprof</span>(<span class="enscript-type">int</span> *name, u_int namelen, user_addr_t oldp, size_t *oldlenp, 
+              user_addr_t newp, size_t newlen)
+{
+	__unused <span class="enscript-type">int</span> cmd = oidp-&gt;oid_arg2;	<span class="enscript-comment">/* subcommand*/</span>
+	<span class="enscript-type">int</span> *name = arg1;		<span class="enscript-comment">/* oid element argument vector */</span>
+	<span class="enscript-type">int</span> namelen = arg2;		<span class="enscript-comment">/* number of oid element arguments */</span>
+	user_addr_t oldp = req-&gt;oldptr;	<span class="enscript-comment">/* user buffer copy out address */</span>
+	size_t *oldlenp = req-&gt;oldlen;	<span class="enscript-comment">/* user buffer copy out size */</span>
+	user_addr_t newp = req-&gt;newptr;	<span class="enscript-comment">/* user buffer copy in address */</span>
+	size_t newlen = req-&gt;newlen;	<span class="enscript-comment">/* user buffer copy in size */</span>
+
+	<span class="enscript-type">struct</span> gmonparam *gp = &amp;_gmonparam;
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-comment">/* all sysctl names at this level are terminal */</span>
+	<span class="enscript-keyword">if</span> (namelen != 1)
+		<span class="enscript-keyword">return</span> (ENOTDIR);		<span class="enscript-comment">/* overloaded */</span>
+
+	<span class="enscript-keyword">switch</span> (name[0]) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">GPROF_STATE</span>:
+		error = sysctl_int(oldp, oldlenp, newp, newlen, &amp;gp-&gt;state);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (gp-&gt;state == GMON_PROF_OFF)
+			stopprofclock(kernproc);
+		<span class="enscript-keyword">else</span>
+			startprofclock(kernproc);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">GPROF_COUNT</span>:
+		error = sysctl_struct(oldp, oldlenp, newp, newlen, 
+		                      gp-&gt;kcount, gp-&gt;kcountsize);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">GPROF_FROMS</span>:
+		error = sysctl_struct(oldp, oldlenp, newp, newlen,
+		                      gp-&gt;froms, gp-&gt;fromssize);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">GPROF_TOS</span>:
+		error = sysctl_struct(oldp, oldlenp, newp, newlen,
+		                      gp-&gt;tos, gp-&gt;tossize);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">GPROF_GMONPARAM</span>:
+		error = sysctl_rdstruct(oldp, oldlenp, newp, gp, <span class="enscript-keyword">sizeof</span> *gp);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		error = ENOTSUP;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/* adjust index so we return the right required/consumed amount */</span>
+	<span class="enscript-keyword">if</span> (!error)
+		req-&gt;oldidx += req-&gt;oldlen;
+
+	<span class="enscript-keyword">return</span>(error);
+}
+<span class="enscript-function-name">SYSCTL_PROC</span>(_kern, KERN_PROF, prof, STLFLAG_NODE|CTLFLAG_RW | CTLFLAG_LOCKED,
+	0,			<span class="enscript-comment">/* Pointer argument (arg1) */</span>
+	0,			<span class="enscript-comment">/* Integer argument (arg2) */</span>
+	sysctl_doprofhandle,	<span class="enscript-comment">/* Handler function */</span>
+	NULL,			<span class="enscript-comment">/* No explicit data */</span>
+	<span class="enscript-string">&quot;&quot;</span>);
+
+
+<span class="enscript-comment">/*
+ * mcount() called with interrupts disabled.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mcount</span>(
+    uintptr_t frompc,
+    uintptr_t selfpc
+)
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> *frompcindex;
+	tostruct_t *top, *prevtop;
+	<span class="enscript-type">struct</span> gmonparam *p = &amp;_gmonparam;
+	<span class="enscript-type">long</span> toindex;
+
+    <span class="enscript-comment">/*
+     * check that we are profiling
+     * and that we aren't recursively invoked.
+     */</span>
+    <span class="enscript-keyword">if</span> (p-&gt;state != GMON_PROF_ON)
+        <span class="enscript-keyword">return</span>;
+
+	lck_spin_lock(mcount_lock);
+
+	<span class="enscript-comment">/*
+	 *	check that frompcindex is a reasonable pc value.
+	 *	for example:	signal catchers get called from the stack,
+	 *			not from text space.  too bad.
+	 */</span>
+	frompc -= p-&gt;lowpc;
+	<span class="enscript-keyword">if</span> (frompc &gt; p-&gt;textsize)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	frompcindex = &amp;p-&gt;froms[frompc / (p-&gt;hashfraction * <span class="enscript-keyword">sizeof</span>(*p-&gt;froms))];
+	toindex = *frompcindex;
+	<span class="enscript-keyword">if</span> (toindex == 0) {
+		<span class="enscript-comment">/*
+		 *	first time traversing this arc
+		 */</span>
+		toindex = ++p-&gt;tos[0].link;
+		<span class="enscript-keyword">if</span> (toindex &gt;= p-&gt;tolimit) {
+            <span class="enscript-comment">/* halt further profiling */</span>
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">overflow</span>;
+		}
+		*frompcindex = toindex;
+		top = &amp;p-&gt;tos[toindex];
+		top-&gt;selfpc = selfpc;
+		top-&gt;count = 1;
+		top-&gt;link = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	top = &amp;p-&gt;tos[toindex];
+	<span class="enscript-keyword">if</span> (top-&gt;selfpc == selfpc) {
+		<span class="enscript-comment">/*
+		 *	arc at front of chain; usual case.
+		 */</span>
+		top-&gt;count++;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-comment">/*
+	 *	have to go looking down chain for it.
+	 *	top points to what we are looking at,
+	 *	prevtop points to previous top.
+	 *	we know it is not at the head of the chain.
+	 */</span>
+	<span class="enscript-keyword">for</span> (; <span class="enscript-comment">/* goto done */</span>; ) {
+		<span class="enscript-keyword">if</span> (top-&gt;link == 0) {
+			<span class="enscript-comment">/*
+			 *	top is end of the chain and none of the chain
+			 *	had top-&gt;selfpc == selfpc.
+			 *	so we allocate a new tostruct
+			 *	and link it to the head of the chain.
+			 */</span>
+			toindex = ++p-&gt;tos[0].link;
+			<span class="enscript-keyword">if</span> (toindex &gt;= p-&gt;tolimit) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">overflow</span>;
+			}
+			top = &amp;p-&gt;tos[toindex];
+			top-&gt;selfpc = selfpc;
+			top-&gt;count = 1;
+			top-&gt;link = *frompcindex;
+			*frompcindex = toindex;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		<span class="enscript-comment">/*
+		 *	otherwise, check the next arc on the chain.
+		 */</span>
+		prevtop = top;
+		top = &amp;p-&gt;tos[top-&gt;link];
+		<span class="enscript-keyword">if</span> (top-&gt;selfpc == selfpc) {
+			<span class="enscript-comment">/*
+			 *	there it is.
+			 *	increment its count
+			 *	move it to the head of the chain.
+			 */</span>
+			top-&gt;count++;
+			toindex = prevtop-&gt;link;
+			prevtop-&gt;link = top-&gt;link;
+			top-&gt;link = *frompcindex;
+			*frompcindex = toindex;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+
+	}
+<span class="enscript-reference">done</span>:
+	lck_spin_unlock(mcount_lock);
+	<span class="enscript-keyword">return</span>;
+
+<span class="enscript-reference">overflow</span>:
+    p-&gt;state = GMON_PROF_ERROR;
+        lck_spin_unlock(mcount_lock);
+	printf(<span class="enscript-string">&quot;mcount: tos overflow\n&quot;</span>);
+	<span class="enscript-keyword">return</span>;
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* GPROF */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PROFILE_LOCK</span>(x)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PROFILE_UNLOCK</span>(x)
+
+
+<span class="enscript-comment">/*
+ * Scale is a fixed-point number with the binary point 16 bits
+ * into the value, and is &lt;= 1.0.  pc is at most 32 bits, so the
+ * intermediate result is at most 48 bits.
+ */</span>
+<span class="enscript-comment">//K64todo - this doesn't fit into 64 bit any more, it needs 64+16
+</span>#<span class="enscript-reference">define</span> <span class="enscript-function-name">PC_TO_INDEX</span>(pc, prof) \
+	((user_addr_t)(((u_quad_t)((pc) - (prof)-&gt;pr_off) * \
+			(u_quad_t)((prof)-&gt;pr_scale)) &gt;&gt; 16) &amp; ~1)
+
+<span class="enscript-comment">/*
+ * Collect user-level profiling statistics; called on a profiling tick,
+ * when a process is running in user-mode. We use
+ * an AST that will vector us to trap() with a context in which copyin
+ * and copyout will work.  Trap will then call addupc_task().
+ *
+ * Note that we may (rarely) not get around to the AST soon enough, and
+ * lose profile ticks when the next tick overwrites this one, but in this
+ * case the system is overloaded and the profile is probably already
+ * inaccurate.
+ *
+ * We can afford to take faults here.  If the
+ * update fails, we simply turn off profiling.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">addupc_task</span>(<span class="enscript-type">struct</span> proc *p, user_addr_t pc, u_int ticks)
+{
+	user_addr_t off;
+	u_short count;
+
+	<span class="enscript-comment">/* Testing P_PROFIL may be unnecessary, but is certainly safe. */</span>
+	<span class="enscript-keyword">if</span> ((p-&gt;p_flag &amp; P_PROFIL) == 0 || ticks == 0)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (proc_is64bit(p)) {
+        <span class="enscript-type">struct</span> user_uprof *prof;
+        user_addr_t cell;
+
+        <span class="enscript-keyword">for</span> (prof = &amp;p-&gt;p_stats-&gt;user_p_prof; prof; prof = prof-&gt;pr_next) {
+            off = PC_TO_INDEX(pc, prof);
+            cell = (prof-&gt;pr_base + off);
+            <span class="enscript-keyword">if</span> (cell &gt;= prof-&gt;pr_base &amp;&amp;
+                cell &lt; (prof-&gt;pr_size + prof-&gt;pr_base)) {
+                <span class="enscript-keyword">if</span> (copyin(cell, (caddr_t) &amp;count, <span class="enscript-keyword">sizeof</span>(count)) == 0) {
+                    count += ticks;
+                    <span class="enscript-keyword">if</span>(copyout((caddr_t) &amp;count, cell, <span class="enscript-keyword">sizeof</span>(count)) == 0)
+                        <span class="enscript-keyword">return</span>;
+                }
+                p-&gt;p_stats-&gt;user_p_prof.pr_scale = 0;
+                stopprofclock(p);
+                <span class="enscript-keyword">break</span>;
+            }
+        }
+	}
+	<span class="enscript-keyword">else</span> {
+        <span class="enscript-type">struct</span> uprof *prof;
+        <span class="enscript-type">short</span> *cell;
+
+        <span class="enscript-keyword">for</span> (prof = &amp;p-&gt;p_stats-&gt;p_prof; prof; prof = prof-&gt;pr_next) {
+            off = PC_TO_INDEX(pc,prof);
+            cell = (<span class="enscript-type">short</span> *)(prof-&gt;pr_base + off);
+            <span class="enscript-keyword">if</span> (cell &gt;= (<span class="enscript-type">short</span> *)prof-&gt;pr_base &amp;&amp;
+                cell &lt; (<span class="enscript-type">short</span>*)(prof-&gt;pr_size + prof-&gt;pr_base)) {
+                <span class="enscript-keyword">if</span> (copyin(CAST_USER_ADDR_T(cell), (caddr_t) &amp;count, <span class="enscript-keyword">sizeof</span>(count)) == 0) {
+                    count += ticks;
+                    <span class="enscript-keyword">if</span>(copyout((caddr_t) &amp;count, CAST_USER_ADDR_T(cell), <span class="enscript-keyword">sizeof</span>(count)) == 0)
+                        <span class="enscript-keyword">return</span>;
+                }
+                p-&gt;p_stats-&gt;p_prof.pr_scale = 0;
+                stopprofclock(p);
+                <span class="enscript-keyword">break</span>;
+            }
+        }
+	}
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,391 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>serial_console.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">serial_console.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/bit_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_cpu.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/serial_io.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;console/video_console.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;console/serial_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> {
+	<span class="enscript-type">char</span>	*buffer;
+	<span class="enscript-type">int</span>	len;
+	<span class="enscript-type">int</span>	used;
+	<span class="enscript-type">char</span>	*write_ptr;
+	<span class="enscript-type">char</span>	*read_ptr;
+	decl_simple_lock_data(,read_lock);
+	decl_simple_lock_data(,write_lock);
+} console_ring;
+
+hw_lock_data_t cnputc_lock;
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> <span class="enscript-type">long</span> console_output = 0;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> console_buf {
+	<span class="enscript-type">char</span>	*buf_base;
+	<span class="enscript-type">char</span>	*buf_end;
+	<span class="enscript-type">char</span>	*buf_ptr;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">CPU_BUFFER_LEN</span>	(256 - 3*(sizeof(char*)))
+	<span class="enscript-type">char</span>	buf[CPU_BUFFER_LEN];
+} console_buf_t;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">_serial_putc</span>(<span class="enscript-type">int</span>, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);
+
+<span class="enscript-type">struct</span> console_ops cons_ops[] = {
+	{
+		.putc = _serial_putc,
+		.getc = _serial_getc,
+	},
+	{
+		.putc = vcputc,
+		.getc = vcgetc,
+	},
+};
+
+uint32_t nconsops = (<span class="enscript-keyword">sizeof</span> cons_ops / <span class="enscript-keyword">sizeof</span> cons_ops[0]);
+
+uint32_t cons_ops_index = VC_CONS_OPS;
+
+<span class="enscript-comment">/* This macro polls for pending TLB flushes while spinning on a lock
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SIMPLE_LOCK_NO_INTRS</span>(l)				\
+MACRO_BEGIN						\
+	boolean_t istate = ml_get_interrupts_enabled();	\
+	<span class="enscript-keyword">while</span> (!simple_lock_try((l)))			\
+	{						\
+		<span class="enscript-keyword">if</span> (!istate)				\
+			handle_pending_TLB_flushes();	\
+		cpu_pause();				\
+	}						\
+MACRO_END
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">console_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span>	ret;
+
+	console_ring.len = PAGE_SIZE;
+	ret = kmem_alloc(kernel_map, (vm_offset_t *) &amp;console_ring.buffer,
+			 console_ring.len, VM_KERN_MEMORY_OSFMK);
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS)
+		panic(<span class="enscript-string">&quot;console_ring_init() &quot;</span>
+		      <span class="enscript-string">&quot;failed to allocate ring buffer, error %d\n&quot;</span>, ret);
+	console_ring.used = 0;
+	console_ring.read_ptr = console_ring.buffer;
+	console_ring.write_ptr = console_ring.buffer;
+	simple_lock_init(&amp;console_ring.read_lock, 0);
+	simple_lock_init(&amp;console_ring.write_lock, 0);
+	hw_lock_init(&amp;cnputc_lock);
+}
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">console_cpu_alloc</span>(__unused boolean_t boot_processor)
+{
+	<span class="enscript-type">int</span>		ret;
+	console_buf_t	*cbp;
+
+	ret = kmem_alloc(kernel_map, (vm_offset_t *) &amp;cbp,
+				<span class="enscript-keyword">sizeof</span>(console_buf_t), VM_KERN_MEMORY_OSFMK);
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+		printf(<span class="enscript-string">&quot;console_cpu_alloc() &quot;</span>
+		      <span class="enscript-string">&quot;failed to allocate cpu buffer, error=%d\n&quot;</span>, ret);
+		<span class="enscript-keyword">return</span> NULL;
+	}
+
+	cbp-&gt;buf_base = (<span class="enscript-type">char</span> *) &amp;cbp-&gt;buf;
+	cbp-&gt;buf_ptr = cbp-&gt;buf_base;
+	cbp-&gt;buf_end = cbp-&gt;buf_base + CPU_BUFFER_LEN;
+
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">void</span> *) cbp;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">console_cpu_free</span>(<span class="enscript-type">void</span> *buf)
+{
+	<span class="enscript-keyword">if</span> (buf != NULL)
+		kfree((<span class="enscript-type">void</span> *) buf, <span class="enscript-keyword">sizeof</span>(console_buf_t));
+}
+
+<span class="enscript-comment">/* So we can re-write the serial device functions at boot-time */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">console_set_serial_ops</span>( <span class="enscript-type">struct</span> console_ops *newops )
+{
+	cons_ops[SERIAL_CONS_OPS] = *newops;
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">console_ring_space</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> console_ring.len - console_ring.used;
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">console_ring_put</span>(<span class="enscript-type">char</span> ch)
+{
+	<span class="enscript-keyword">if</span> (console_ring.used &lt; console_ring.len) {
+		console_ring.used++;;
+		*console_ring.write_ptr++ = ch;
+		<span class="enscript-keyword">if</span> (console_ring.write_ptr - console_ring.buffer
+		    == console_ring.len)
+			console_ring.write_ptr = console_ring.buffer;
+		<span class="enscript-keyword">return</span> TRUE;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span> FALSE;
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">console_ring_get</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">char</span>	ch = 0;
+
+	<span class="enscript-keyword">if</span> (console_ring.used &gt; 0) {
+		console_ring.used--;
+		ch = *console_ring.read_ptr++;
+		<span class="enscript-keyword">if</span> (console_ring.read_ptr - console_ring.buffer
+		    == console_ring.len)
+			console_ring.read_ptr = console_ring.buffer;
+	}
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">int</span>) ch;	
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">cpu_buffer_put</span>(console_buf_t *cbp, <span class="enscript-type">char</span> ch)
+{
+	<span class="enscript-keyword">if</span> (ch != <span class="enscript-string">'\0'</span> &amp;&amp; cbp-&gt;buf_ptr &lt; cbp-&gt;buf_end)
+		*(cbp-&gt;buf_ptr++) = ch;
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">_cnputc</span>(<span class="enscript-type">char</span> c)
+{
+	<span class="enscript-comment">/* The console device output routines are assumed to be
+	 * non-reentrant.
+	 */</span>
+	mp_disable_preemption();
+	<span class="enscript-keyword">if</span> (!hw_lock_to(&amp;cnputc_lock, LockTimeOutTSC)) {
+	<span class="enscript-comment">/* If we timed out on the lock, and we're in the debugger,
+	 * break the lock.
+	 */</span>
+		<span class="enscript-keyword">if</span> (debug_mode) {
+			<span class="enscript-comment">/* Since hw_lock_to takes a pre-emption count...*/</span>
+			mp_enable_preemption(); 
+			hw_lock_init(&amp;cnputc_lock);
+			hw_lock_lock(&amp;cnputc_lock);
+		}
+		<span class="enscript-keyword">else</span>
+			panic(<span class="enscript-string">&quot;Lock acquire timeout in _cnputc()&quot;</span>);
+	}
+	cons_ops[cons_ops_index].putc(0, 0, c);
+	<span class="enscript-keyword">if</span> (c == <span class="enscript-string">'\n'</span>)
+            cons_ops[cons_ops_index].putc(0, 0, <span class="enscript-string">'\r'</span>);
+	hw_lock_unlock(&amp;cnputc_lock);
+	mp_enable_preemption();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">cnputc_unbuffered</span>(<span class="enscript-type">char</span> c) {
+	_cnputc(c);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cnputcusr</span>(<span class="enscript-type">char</span> c)
+{
+	<span class="enscript-comment">/* Spin (with pre-emption enabled) waiting for console_ring_try_empty()
+	 * to complete output. There is a small window here where we could
+	 * end up with a stale value of console_output, but it's unlikely,
+	 * and _cnputc(), which outputs to the console device, is internally
+	 * synchronized. There's something of a conflict between the
+	 * character-at-a-time (with pre-emption enabled) unbuffered
+	 * output model here, and the buffered output from cnputc(),
+	 * whose consumers include printf() ( which outputs a sequence
+	 * with pre-emption disabled, and should be safe to call with
+	 * interrupts off); we don't want to disable pre-emption indefinitely
+	 * here, and spinlocks and mutexes are inappropriate.
+	 */</span>
+	<span class="enscript-keyword">while</span> (console_output != 0);
+
+	_cnputc(c);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">console_ring_try_empty</span>(<span class="enscript-type">void</span>)
+{
+	boolean_t state = ml_get_interrupts_enabled();
+	<span class="enscript-comment">/*
+	 * Try to get the read lock on the ring buffer to empty it.
+	 * If this fails someone else is already emptying...
+	 */</span>
+	<span class="enscript-keyword">if</span> (!simple_lock_try(&amp;console_ring.read_lock))
+		<span class="enscript-keyword">return</span>;
+	<span class="enscript-comment">/* Indicate that we're in the process of writing a block of data
+	 * to the console.
+	 */</span>
+	atomic_incl(&amp;console_output, 1);
+	<span class="enscript-keyword">for</span> (;;) {
+		<span class="enscript-type">char</span>	ch;
+		<span class="enscript-keyword">if</span> (!state)
+			handle_pending_TLB_flushes();
+   	 	SIMPLE_LOCK_NO_INTRS(&amp;console_ring.write_lock);
+		ch = console_ring_get();
+    		simple_unlock(&amp;console_ring.write_lock);
+		<span class="enscript-keyword">if</span> (ch == 0)
+			<span class="enscript-keyword">break</span>;
+		_cnputc(ch);
+	}
+	atomic_decl(&amp;console_output, 1);
+	simple_unlock(&amp;console_ring.read_lock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cnputc</span>(<span class="enscript-type">char</span> c)
+{
+	console_buf_t	*cbp;
+	mp_disable_preemption();
+	cbp = (console_buf_t *) current_cpu_datap()-&gt;cpu_console_buf;
+	<span class="enscript-keyword">if</span> (cbp == NULL) {
+		mp_enable_preemption();
+		<span class="enscript-comment">/* Put directly if console ring is not initialized */</span>
+		_cnputc(c);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* add to stack buf */</span>
+	<span class="enscript-keyword">if</span> (c != <span class="enscript-string">'\n'</span>) {
+		<span class="enscript-comment">/* XXX - cpu_buffer_put() can fail silently if the buffer
+		 * is exhausted, as can happen if there's a long sequence
+		 * of data with no newlines. We should, instead, attempt
+		 * a flush.
+		 */</span>
+		cpu_buffer_put(cbp, c);
+	} <span class="enscript-keyword">else</span> {
+		boolean_t	state;
+		<span class="enscript-type">char</span>		*cp;
+
+		<span class="enscript-comment">/* Here at end of printf -- time to try to output */</span>
+	
+		<span class="enscript-comment">/* copy this buffer into the shared ring buffer */</span>
+		state = ml_set_interrupts_enabled(FALSE);
+		SIMPLE_LOCK_NO_INTRS(&amp;console_ring.write_lock);
+
+		<span class="enscript-comment">/*
+		 * Is there enough space in the shared ring buffer?
+		 * Try to empty if not.
+		 * Note, we want the entire local buffer to fit to
+		 * avoid another cpu interjecting.
+		 */</span>
+		<span class="enscript-keyword">while</span> (cbp-&gt;buf_ptr-cbp-&gt;buf_base + 1 &gt; console_ring_space()) {
+			simple_unlock(&amp;console_ring.write_lock);
+			ml_set_interrupts_enabled(state);
+			console_ring_try_empty();
+			state = ml_set_interrupts_enabled(FALSE);
+			SIMPLE_LOCK_NO_INTRS(&amp;console_ring.write_lock);
+		}
+		<span class="enscript-keyword">for</span> (cp = cbp-&gt;buf_base; cp &lt; cbp-&gt;buf_ptr; cp++)
+			console_ring_put(*cp);
+		console_ring_put(<span class="enscript-string">'\n'</span>);
+		cbp-&gt;buf_ptr = cbp-&gt;buf_base;
+		simple_unlock(&amp;console_ring.write_lock);
+		ml_set_interrupts_enabled(state);
+	}
+	console_ring_try_empty();
+	mp_enable_preemption();
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">_serial_getc</span>(__unused <span class="enscript-type">int</span> a, __unused <span class="enscript-type">int</span> b, boolean_t wait, __unused boolean_t raw)
+{
+    <span class="enscript-type">int</span> c;
+    <span class="enscript-keyword">do</span> {
+        c = serial_getc();
+    } <span class="enscript-keyword">while</span> (wait &amp;&amp; c &lt; 0);
+
+    <span class="enscript-keyword">return</span> c;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">_serial_putc</span>(__unused <span class="enscript-type">int</span> a, __unused <span class="enscript-type">int</span> b, <span class="enscript-type">int</span> c)
+{
+    serial_putc(c);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cngetc</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> cons_ops[cons_ops_index].getc(0, 0,
+					     TRUE, FALSE);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cnmaygetc</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> cons_ops[cons_ops_index].getc(0, 0,
+					     FALSE, FALSE);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">vcgetc</span>(__unused <span class="enscript-type">int</span> l, 
+       __unused <span class="enscript-type">int</span> u, 
+       __unused boolean_t wait, 
+       __unused boolean_t raw)
+{
+	<span class="enscript-type">char</span> c;
+
+	<span class="enscript-keyword">if</span>( 0 == (*PE_poll_input)( 0, &amp;c))
+		<span class="enscript-keyword">return</span>( c);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>( 0);
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,1329 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ipc.py</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ipc.py&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-string">&quot;&quot;&quot; Please make sure you read the README file COMPLETELY BEFORE reading anything below.
+    It is very critical that you read coding guidelines in Section E in README file. 
+&quot;&quot;&quot;</span>
+<span class="enscript-keyword">from</span> xnu <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">import</span> sys, shlex
+<span class="enscript-keyword">from</span> utils <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> process <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> atm <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> bank <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> waitq <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">import</span> xnudefines
+
+@header(<span class="enscript-string">&quot;{0: &lt;20s} {1: &lt;6s} {2: &lt;6s} {3: &lt;10s} {4: &lt;15s}&quot;</span>.format(<span class="enscript-string">&quot;task&quot;</span>, <span class="enscript-string">&quot;pid&quot;</span>, <span class="enscript-string">'#acts'</span>, <span class="enscript-string">&quot;tablesize&quot;</span>, <span class="enscript-string">&quot;command&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetTaskIPCSummary</span>(task):
+    <span class="enscript-string">&quot;&quot;&quot; Display a task's ipc summary. 
+        params:
+            task : core.value represeting a Task in kernel
+        returns
+            str - string of ipc info for the task
+    &quot;&quot;&quot;</span>
+    out_string = <span class="enscript-string">''</span>
+    format_string = <span class="enscript-string">&quot;{0: &lt;#020x} {1: &lt;6d} {2: &lt;6d} {3: &lt;10d} {4: &lt;15s}&quot;</span>
+    pval = Cast(task.bsd_info, <span class="enscript-string">'proc *'</span>)
+    table_size = int(task.itk_space.is_table_size)
+    proc_name = str(pval.p_comm)
+    out_string += format_string.format(task, pval.p_pid, task.thread_count, table_size, proc_name)
+    <span class="enscript-keyword">return</span> out_string
+
+@header(<span class="enscript-string">&quot;{0: &lt;20s} {1: &lt;28s} {2: &lt;12s} {3: &lt;6s} {4: &lt;4s}  {5: &lt;20s} {6: &lt;4s}\n&quot;</span>.format(
+            <span class="enscript-string">&quot;port&quot;</span>, <span class="enscript-string">&quot;mqueue&quot;</span>, <span class="enscript-string">&quot;recvname&quot;</span>, <span class="enscript-string">&quot;flags&quot;</span>, <span class="enscript-string">&quot;refs&quot;</span>, <span class="enscript-string">&quot;recvname&quot;</span>, <span class="enscript-string">&quot;dest&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">PrintPortSummary</span>(port, show_kmsg_summary=True, prefix=<span class="enscript-string">&quot;&quot;</span>):
+    <span class="enscript-string">&quot;&quot;&quot; Display a port's summary
+        params:
+            port : core.value representing a port in the kernel
+        returns
+            str  : string of ipc info for the given port
+    &quot;&quot;&quot;</span>
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    portp = Cast(port, <span class="enscript-string">'struct ipc_port *'</span>)
+    destspacep = kern.GetValueFromAddress(0, <span class="enscript-string">'struct ipc_space *'</span>)
+    spacep = portp.data.receiver
+    format_string = <span class="enscript-string">&quot;{0: #019x} {1: #019x} {2: &lt;8s} {3: #011x}   {4: &lt;5s} {5: #05x}  {6: #019x}  {7: &lt;16s}\n&quot;</span>
+    <span class="enscript-keyword">if</span> portp.ip_object.io_bits &amp; 0x80000000:
+        out_string += prefix + format_string.format(
+                                unsigned(portp), addressof(portp.ip_messages), <span class="enscript-string">' '</span>*8,
+                                unsigned(portp.ip_messages.data.port.receiver_name),
+                                <span class="enscript-string">&quot;APort&quot;</span>, portp.ip_object.io_references,
+                                unsigned(portp.ip_messages.data.port.receiver_name),
+                                GetPortDestProc(portp))
+    <span class="enscript-keyword">else</span>:
+        out_string += prefix + format_string.format(
+                                unsigned(portp), addressof(portp.ip_messages), <span class="enscript-string">' '</span>*8,
+                                unsigned(portp.ip_messages.data.port.receiver_name),
+                                <span class="enscript-string">&quot;DPort&quot;</span>, portp.ip_object.io_references, unsigned(portp),
+                                <span class="enscript-string">&quot;inactive-port&quot;</span>)
+    <span class="enscript-keyword">print</span> out_string
+    <span class="enscript-keyword">if</span> show_kmsg_summary:
+        kmsgp = Cast(portp.ip_messages.data.port.messages.ikmq_base, <span class="enscript-string">'ipc_kmsg_t'</span>)
+        <span class="enscript-keyword">if</span> unsigned(kmsgp):
+            <span class="enscript-keyword">print</span> prefix + GetKMsgSummary.header + prefix + GetKMsgSummary(kmsgp, prefix)
+            kmsgheadp = kmsgp
+            kmsgp = kmsgp.ikm_next
+            <span class="enscript-keyword">while</span> (kmsgp) != (kmsgheadp):
+                <span class="enscript-keyword">print</span> prefix + GetKMsgSummary(kmsgp, prefix)
+                kmsgp = kmsgp.ikm_next
+    <span class="enscript-keyword">return</span>
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetPortDestProc</span>(portp):
+    <span class="enscript-string">&quot;&quot;&quot; Display the name and pid of a given port's receiver
+        params:
+            portp : core.value representing a pointer to a port in the kernel
+            destspacep : core.value representing a pointer to an ipc_space
+        returns:
+            str   : string containing receiver's name and pid
+    &quot;&quot;&quot;</span>
+    spacep = portp.data.receiver
+    out_str = <span class="enscript-string">&quot;Not found&quot;</span>
+    <span class="enscript-keyword">for</span> tsk <span class="enscript-keyword">in</span> kern.tasks:
+        <span class="enscript-keyword">if</span> tsk.itk_space == spacep:
+            <span class="enscript-keyword">if</span> tsk.bsd_info:
+                destprocp = Cast(tsk.bsd_info, <span class="enscript-string">'struct proc *'</span>)
+                out_str = <span class="enscript-string">&quot;{0:s}({1: &lt;d})&quot;</span>.format(destprocp.p_comm, destprocp.p_pid)
+            <span class="enscript-keyword">else</span>:
+                out_str = <span class="enscript-string">&quot;unknown&quot;</span>
+            <span class="enscript-keyword">break</span>
+    
+    <span class="enscript-keyword">return</span> out_str
+
+@header(<span class="enscript-string">&quot;{:&lt;20s} {:&lt;28s} {:&lt;12s} {:&lt;8s} {:&lt;6s} {:&lt;19s} {:&lt;26s} {:&lt;26s}\n&quot;</span>.format(
+            <span class="enscript-string">&quot;&quot;</span>, <span class="enscript-string">&quot;kmsg&quot;</span>, <span class="enscript-string">&quot;msgid&quot;</span>, <span class="enscript-string">&quot;disp&quot;</span>, <span class="enscript-string">&quot;size&quot;</span>, <span class="enscript-string">&quot;reply-port&quot;</span>, <span class="enscript-string">&quot;source&quot;</span>, <span class="enscript-string">&quot;destination&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetKMsgSummary</span>(kmsgp, prefix_str=<span class="enscript-string">&quot;&quot;</span>):
+    <span class="enscript-string">&quot;&quot;&quot; Display a summary for type ipc_kmsg_t
+        params:
+            kmsgp : core.value representing the given ipc_kmsg_t struct
+        returns:
+            str   : string of summary info for the given ipc_kmsg_t instance
+    &quot;&quot;&quot;</span>
+    kmsghp = kmsgp.ikm_header
+    kmsgh = dereference(kmsghp)
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    out_string += <span class="enscript-string">&quot;{0: &lt;20s} {1: &lt;#019x} {2: &lt;8s} {3: &lt;#011x} &quot;</span>.format(
+                    <span class="enscript-string">' '</span>, unsigned(kmsgp), <span class="enscript-string">' '</span>*8, kmsgh.msgh_id)
+    prefix_str = <span class="enscript-string">&quot;{0: &lt;20s} &quot;</span>.format(<span class="enscript-string">' '</span>) + prefix_str
+    disposition = <span class="enscript-string">&quot;&quot;</span>
+    bits = kmsgh.msgh_bits &amp; 0xff
+    
+    <span class="enscript-comment"># remote port
+</span>    <span class="enscript-keyword">if</span> bits == 17:
+        disposition = <span class="enscript-string">&quot;rS&quot;</span>
+    <span class="enscript-keyword">elif</span> bits == 18:
+        disposition = <span class="enscript-string">&quot;rO&quot;</span>
+    <span class="enscript-keyword">else</span> :
+        disposition = <span class="enscript-string">&quot;rX&quot;</span> <span class="enscript-comment"># invalid
+</span>    
+    out_string += <span class="enscript-string">&quot;{0: &lt;2s}&quot;</span>.format(disposition)
+    
+    <span class="enscript-comment"># local port
+</span>    disposition = <span class="enscript-string">&quot;&quot;</span>
+    bits = (kmsgh.msgh_bits &amp; 0xff00) &gt;&gt; 8
+    
+    <span class="enscript-keyword">if</span> bits == 17:
+        disposition = <span class="enscript-string">&quot;lS&quot;</span>
+    <span class="enscript-keyword">elif</span> bits == 18:
+        disposition = <span class="enscript-string">&quot;lO&quot;</span>
+    <span class="enscript-keyword">elif</span> bits == 0:
+        disposition = <span class="enscript-string">&quot;l-&quot;</span>
+    <span class="enscript-keyword">else</span>:
+        disposition = <span class="enscript-string">&quot;lX&quot;</span>  <span class="enscript-comment"># invalid
+</span>        
+    out_string += <span class="enscript-string">&quot;{0: &lt;2s}&quot;</span>.format(disposition)
+    
+    <span class="enscript-comment"># voucher
+</span>    disposition = <span class="enscript-string">&quot;&quot;</span>
+    bits = (kmsgh.msgh_bits &amp; 0xff0000) &gt;&gt; 16
+    
+    <span class="enscript-keyword">if</span> bits == 17:
+        disposition = <span class="enscript-string">&quot;vS&quot;</span>
+    <span class="enscript-keyword">elif</span> bits == 0:
+        disposition = <span class="enscript-string">&quot;v-&quot;</span>
+    <span class="enscript-keyword">else</span>:
+        disposition = <span class="enscript-string">&quot;vX&quot;</span>
+
+    out_string += <span class="enscript-string">&quot;{0: &lt;2s}&quot;</span>.format(disposition) 
+        
+    <span class="enscript-comment"># complex message
+</span>    <span class="enscript-keyword">if</span> kmsgh.msgh_bits &amp; 0x80000000:
+        out_string += <span class="enscript-string">&quot;{0: &lt;1s}&quot;</span>.format(<span class="enscript-string">&quot;c&quot;</span>)
+    <span class="enscript-keyword">else</span>:
+        out_string += <span class="enscript-string">&quot;{0: &lt;1s}&quot;</span>.format(<span class="enscript-string">&quot;s&quot;</span>)
+    
+    <span class="enscript-comment"># importance boost
+</span>    <span class="enscript-keyword">if</span> kmsgh.msgh_bits &amp; 0x20000000:
+        out_string += <span class="enscript-string">&quot;{0: &lt;1s}&quot;</span>.format(<span class="enscript-string">&quot;I&quot;</span>)
+    <span class="enscript-keyword">else</span>:
+        out_string += <span class="enscript-string">&quot;{0: &lt;1s}&quot;</span>.format(<span class="enscript-string">&quot;-&quot;</span>)
+    
+    dest_proc_name = <span class="enscript-string">&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> kmsgp.ikm_header.msgh_remote_port:
+        dest_proc_name = GetDestinationProcessFromPort(kmsgp.ikm_header.msgh_remote_port)
+
+    out_string += <span class="enscript-string">&quot;{0: ^6d}   {1: &lt;#019x} {2: &lt;26s} {3: &lt;26s}\n&quot;</span>.format(
+                    unsigned(kmsgh.msgh_size), unsigned(kmsgh.msgh_local_port),
+                    GetKMsgSrc(kmsgp), dest_proc_name)
+    
+    <span class="enscript-keyword">if</span> kmsgh.msgh_bits &amp; 0x80000000:
+        out_string += prefix_str + <span class="enscript-string">&quot;\t&quot;</span> + GetKMsgBody.header + <span class="enscript-string">&quot;\n&quot;</span>
+        out_string += prefix_str + <span class="enscript-string">&quot;\t&quot;</span> + GetKMsgBody(kmsgp, prefix_str + <span class="enscript-string">&quot;\t&quot;</span>) + <span class="enscript-string">&quot;\n&quot;</span>
+    
+    <span class="enscript-keyword">return</span> out_string
+
+@header(<span class="enscript-string">&quot;{: &lt;20s} {: &lt;20s} {: &lt;10s}&quot;</span>.format(<span class="enscript-string">&quot;descriptor&quot;</span>, <span class="enscript-string">&quot;address&quot;</span>, <span class="enscript-string">&quot;size&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetMachMsgOOLDescriptorSummary</span>(desc):
+    <span class="enscript-string">&quot;&quot;&quot; Returns description for mach_msg_ool_descriptor_t * object
+    &quot;&quot;&quot;</span>
+    format_string = <span class="enscript-string">&quot;{: &lt;#020x} {: &lt;#020x} {: &lt;#010x}&quot;</span>
+    out_string = format_string.format(desc, desc.address, desc.size)
+    <span class="enscript-keyword">return</span> out_string
+
+@header(<span class="enscript-string">&quot;{: &lt;20s} {: &lt;8s} {: &lt;20s} {: &lt;10s} {: &lt;20s}&quot;</span>.format(<span class="enscript-string">&quot;kmsgheader&quot;</span>, <span class="enscript-string">&quot;size&quot;</span>, <span class="enscript-string">&quot;body&quot;</span>, <span class="enscript-string">&quot;ds_count&quot;</span>, <span class="enscript-string">&quot;dsc_head&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetKMsgBody</span>(kmsgp, prefix_str=<span class="enscript-string">&quot;&quot;</span>):
+    <span class="enscript-string">&quot;&quot;&quot; Routine that prints a complex kmsg's body
+    &quot;&quot;&quot;</span>
+    kmsghp = kmsgp.ikm_header
+    kmsgh = dereference(kmsghp)
+    format_string = <span class="enscript-string">&quot;{: &lt;#020x} {: &lt;#08x} {: &lt;#020x} {: &lt;#010x} {: &lt;#020x}&quot;</span>
+    out_string = <span class="enscript-string">&quot;&quot;</span>
+    body = Cast(addressof(kmsghp[1]), <span class="enscript-string">'mach_msg_body_t *'</span>)
+    dsc_count = body.msgh_descriptor_count
+
+    dschead = Cast(addressof(body[1]), <span class="enscript-string">'mach_msg_descriptor_t *'</span>)
+    out_string += format_string.format(kmsghp, sizeof(dereference(kmsghp)), body, unsigned(dsc_count), dschead)
+    
+    <span class="enscript-keyword">for</span> i <span class="enscript-keyword">in</span> range(dsc_count):
+        dsc = dschead[i]        
+        out_string += <span class="enscript-string">&quot;\n&quot;</span> + prefix_str + <span class="enscript-string">&quot;Descriptor: &quot;</span> + xnudefines.mach_msg_type_descriptor_strings[unsigned(dsc.type.type)]
+        <span class="enscript-keyword">if</span> unsigned(dsc.type.type) == 0:
+            <span class="enscript-comment"># its a port.
+</span>            p = dsc.port.name
+            out_string += <span class="enscript-string">&quot; name: {: &lt;#20x}&quot;</span>.format(p)
+        <span class="enscript-keyword">elif</span> unsigned(dsc.type.type) <span class="enscript-keyword">in</span> (1,3):
+            <span class="enscript-comment"># its OOL DESCRIPTOR or OOL VOLATILE DESCRIPTOR
+</span>            ool = dsc.out_of_line
+            out_string += <span class="enscript-string">&quot; &quot;</span> + GetMachMsgOOLDescriptorSummary(addressof(ool))
+    <span class="enscript-keyword">return</span> out_string 
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetKMsgSrc</span>(kmsgp):
+    <span class="enscript-string">&quot;&quot;&quot; Routine that prints a kmsg's source process and pid details
+        params:
+            kmsgp : core.value representing the given ipc_kmsg_t struct
+        returns:
+            str  : string containing the name and pid of the kmsg's source proc
+    &quot;&quot;&quot;</span>
+    kmsgsrchp = Cast(kmsgp, <span class="enscript-string">'ipc_kmsg_t'</span>).ikm_header
+    kmsgpid = int(Cast(kern.GetValueFromAddress(unsigned(kmsgsrchp) + kmsgsrchp.msgh_size, <span class="enscript-string">'uint *'</span>)[10], <span class="enscript-string">'pid_t'</span>))
+    
+    <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;{0:s} ({1:d})&quot;</span>.format(GetProcNameForPid(kmsgpid), kmsgpid)
+
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">PrintPortSetMembers</span>(space, setid, show_kmsg_summary):
+    <span class="enscript-string">&quot;&quot;&quot; Print out the members of a given IPC PSet
+    &quot;&quot;&quot;</span>
+    num_entries = int(space.is_table_size)
+    is_tableval = space.is_table
+    setid_str = GetWaitqSetidString(setid)
+
+    prefix_str = <span class="enscript-string">&quot;{0:&lt;21s}&quot;</span>.format(<span class="enscript-string">' '</span>*21)
+    once = True
+    verbose = False
+    <span class="enscript-keyword">if</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vHUMAN:
+        verbose = True
+
+    idx = 0
+    <span class="enscript-keyword">while</span> idx &lt; num_entries:
+        entryval = GetObjectAtIndexFromArray(is_tableval, idx)
+        ie_bits = unsigned(entryval.ie_bits)
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> (ie_bits &amp; 0x00180000):
+            <span class="enscript-comment"># It's a port entry that's _not_ dead
+</span>            portval = Cast(entryval.ie_object, <span class="enscript-string">'ipc_port_t'</span>)
+            waitq = addressof(portval.ip_messages.data.port.waitq)
+            psets = GetWaitqSets(addressof(portval.ip_messages.data.port.waitq))
+            <span class="enscript-keyword">for</span> ps <span class="enscript-keyword">in</span> psets:
+                <span class="enscript-keyword">if</span> ps == setid_str:
+                    <span class="enscript-keyword">if</span> once:
+                        once = False
+                        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{:s}\n{:s}{:s}&quot;</span>.format(GetPortDestProc(portval), prefix_str, PrintPortSummary.header)
+                    PrintPortSummary(portval, show_kmsg_summary, prefix_str)
+            <span class="enscript-keyword">if</span> verbose:
+                sys.stderr.write(<span class="enscript-string">'{:d}/{:d}...          \r'</span>.format(idx, num_entries))
+        idx += 1
+    <span class="enscript-keyword">return</span>
+
+
+@header(<span class="enscript-string">&quot;{0: &lt;20s} {1: &lt;28s} {2: &lt;12s} {3: &lt;6s} {4: &lt;6s} {5: &lt;20s} {6: &lt;7s}\n&quot;</span>.format(
+            <span class="enscript-string">&quot;portset&quot;</span>, <span class="enscript-string">&quot;waitqueue&quot;</span>, <span class="enscript-string">&quot;recvname&quot;</span>, <span class="enscript-string">&quot;flags&quot;</span>, <span class="enscript-string">&quot;refs&quot;</span>, <span class="enscript-string">&quot;recvname&quot;</span>, <span class="enscript-string">&quot;process&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">PrintPortSetSummary</span>(pset, space = 0):
+    <span class="enscript-string">&quot;&quot;&quot; Display summary for a given struct ipc_pset *
+        params:
+            pset : core.value representing a pset in the kernel
+        returns:
+            str  : string of summary information for the given pset
+    &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">&quot;&quot;</span>
+    show_kmsg_summary = False
+    <span class="enscript-keyword">if</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vHUMAN :
+        show_kmsg_summary = True
+
+    setid = 0
+    <span class="enscript-keyword">if</span> pset.ips_object.io_bits &amp; 0x80000000:
+        setid = pset.ips_messages.data.pset.setq.wqset_id
+        out_str += <span class="enscript-string">&quot;{0: #019x}  {1: #019x} {2: &lt;7s} {3: #011x}   {4: &lt;4s} {5: &gt;6d}  {6: #019x}   &quot;</span>.format(
+                    unsigned(pset), addressof(pset.ips_messages), <span class="enscript-string">' '</span>*7,
+                    pset.ips_messages.data.pset.local_name, <span class="enscript-string">&quot;ASet&quot;</span>,
+                    pset.ips_object.io_references,
+                    pset.ips_messages.data.pset.local_name)
+
+    <span class="enscript-keyword">else</span>:
+        out_str += <span class="enscript-string">&quot;{0: #019x}  {1: #019x} {2: &lt;7s} {3: #011x}   {4: &lt;4s} {5: &gt;6d}  {6: #019x}   &quot;</span>.format(
+                    unsigned(pset), addressof(pset.ips_messages), <span class="enscript-string">' '</span>*7,
+                    pset.ips_messages.data.pset.local_name, <span class="enscript-string">&quot;DSet&quot;</span>,
+                    pset.ips_object.io_references,
+                    pset.ips_messages.data.pset.local_name)
+    <span class="enscript-keyword">print</span> out_str
+
+    <span class="enscript-keyword">if</span> setid != 0 <span class="enscript-keyword">and</span> space != 0:
+        PrintPortSetMembers(space, setid, show_kmsg_summary)
+
+    <span class="enscript-keyword">return</span>
+
+<span class="enscript-comment"># Macro: showipc
+</span>
+@lldb_command(<span class="enscript-string">'showipc'</span>) 
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowIPC</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print data for the given IPC space 
+         Usage: showipc &lt;address of ipc space&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No arguments passed&quot;</span>
+        <span class="enscript-keyword">print</span> ShowIPC.__doc__
+        <span class="enscript-keyword">return</span> False
+    ipc = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'ipc_space *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> ipc:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;unknown arguments:&quot;</span>, str(cmd_args)
+        <span class="enscript-keyword">return</span> False
+    <span class="enscript-keyword">print</span> PrintIPCInformation.header
+    PrintIPCInformation(ipc, False, False)
+
+<span class="enscript-comment"># EndMacro: showipc
+</span>
+<span class="enscript-comment"># Macro: showtaskipc
+</span>
+@lldb_command(<span class="enscript-string">'showtaskipc'</span>) 
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowTaskIPC</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print IPC summary of given task
+         Usage: showtaskipc &lt;address of task&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No arguments passed&quot;</span>
+        <span class="enscript-keyword">print</span> ShowTaskIPC.__doc__
+        <span class="enscript-keyword">return</span> False
+    tval = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'task *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> tval:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;unknown arguments:&quot;</span>, str(cmd_args)
+        <span class="enscript-keyword">return</span> False
+    <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+    pval = Cast(tval.bsd_info, <span class="enscript-string">'proc *'</span>)
+    <span class="enscript-keyword">print</span> GetTaskSummary(tval) + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary(pval)
+    <span class="enscript-keyword">print</span> GetTaskIPCSummary.header
+    <span class="enscript-keyword">print</span> GetTaskIPCSummary(tval)
+
+<span class="enscript-comment"># EndMacro: showtaskipc
+</span>
+<span class="enscript-comment"># Macro: showallipc
+</span>
+@lldb_command(<span class="enscript-string">'showallipc'</span>) 
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllIPC</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print IPC summary of all tasks
+         Usage: showallipc
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.tasks:
+        <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+        pval = Cast(t.bsd_info, <span class="enscript-string">'proc *'</span>)
+        <span class="enscript-keyword">print</span> GetTaskSummary(t) + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary(pval)
+        <span class="enscript-keyword">print</span> PrintIPCInformation.header
+        PrintIPCInformation(t.itk_space, False, False) + <span class="enscript-string">&quot;\n\n&quot;</span>
+
+<span class="enscript-comment"># EndMacro: showallipc
+</span>
+@lldb_command(<span class="enscript-string">'showipcsummary'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowIPCSummary</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Summarizes the IPC state of all tasks. 
+        This is a convenient way to dump some basic clues about IPC messaging. You can use the output to determine
+        tasks that are candidates for further investigation.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">print</span> GetTaskIPCSummary.header
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.tasks:
+        <span class="enscript-keyword">print</span> GetTaskIPCSummary(t)
+    <span class="enscript-keyword">return</span>
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetKObjectFromPort</span>(portval):
+    <span class="enscript-string">&quot;&quot;&quot; Get Kobject description from the port.
+        params: portval - core.value representation of 'ipc_port *' object
+        returns: str - string of kobject information
+    &quot;&quot;&quot;</span>
+    kobject_str = <span class="enscript-string">&quot;{0: &lt;#020x}&quot;</span>.format(portval.kdata.kobject)
+    io_bits = unsigned(portval.ip_object.io_bits)
+    objtype_index = io_bits &amp; 0xfff
+    <span class="enscript-keyword">if</span> objtype_index &lt; len(xnudefines.kobject_types) :
+        desc_str = <span class="enscript-string">&quot;kobject({0:s})&quot;</span>.format(xnudefines.kobject_types[objtype_index])
+        <span class="enscript-keyword">if</span> xnudefines.kobject_types[objtype_index] <span class="enscript-keyword">in</span> (<span class="enscript-string">'TASK_RESUME'</span>, <span class="enscript-string">'TASK'</span>):
+            desc_str += <span class="enscript-string">&quot; &quot;</span> + GetProcNameForTask(Cast(portval.kdata.kobject, <span class="enscript-string">'task *'</span>))
+    <span class="enscript-keyword">else</span>:
+        desc_str = <span class="enscript-string">&quot;kobject(UNKNOWN) {:d}&quot;</span>.format(objtype_index)
+    <span class="enscript-keyword">return</span> kobject_str + <span class="enscript-string">&quot; &quot;</span> + desc_str
+
+@static_var(<span class="enscript-string">'destcache'</span>, {})    
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetDestinationProcessFromPort</span>(port):
+    <span class="enscript-string">&quot;&quot;&quot;
+        params: port - core.value representation of 'ipc_port *' object
+        returns: str - name of process 
+    &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">''</span>
+    dest_space = port.data.receiver
+    found_dest = False
+    <span class="enscript-comment">#update destcache if data is not found
+</span>    <span class="enscript-keyword">if</span> hex(dest_space) <span class="enscript-keyword">not</span> <span class="enscript-keyword">in</span> GetDestinationProcessFromPort.destcache:
+        <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.tasks:
+            <span class="enscript-keyword">if</span> hex(t.itk_space) == hex(dest_space):
+                pval = Cast(t.bsd_info, <span class="enscript-string">'proc *'</span>)
+                GetDestinationProcessFromPort.destcache[hex(dest_space)] = (t, pval)
+                found_dest = True
+                <span class="enscript-keyword">break</span>
+        <span class="enscript-comment">#end of for loop
+</span>    <span class="enscript-keyword">else</span>: found_dest = True
+    
+    <span class="enscript-keyword">if</span> found_dest:
+        (ftask , fproc) = GetDestinationProcessFromPort.destcache[hex(dest_space)]
+        <span class="enscript-keyword">if</span> fproc:
+            out_str = <span class="enscript-string">&quot;{0:s}({1:d})&quot;</span>.format(fproc.p_comm, fproc.p_pid )
+        <span class="enscript-keyword">else</span>:
+            out_str = <span class="enscript-string">&quot;task {0: &lt;#020x}&quot;</span>.format(ftask)
+    <span class="enscript-keyword">return</span> out_str
+    
+        
+    
+@header(<span class="enscript-string">&quot;{0: &lt;20s} {1: &lt;20s}&quot;</span>.format(<span class="enscript-string">&quot;destname&quot;</span>, <span class="enscript-string">&quot;destination&quot;</span>) )
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetPortDestinationSummary</span>(port):
+    <span class="enscript-string">&quot;&quot;&quot; Get destination information for a port. 
+        params: port - core.value representation of 'ipc_port *' object
+        returns: str - string of info about ports destination
+    &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">''</span>
+    format_string = <span class="enscript-string">&quot;{0: &lt;20s} {1: &lt;20s}&quot;</span>
+    destname_str = <span class="enscript-string">''</span>
+    destination_str = <span class="enscript-string">''</span>
+    ipc_space_kernel = unsigned(kern.globals.ipc_space_kernel)
+    target_spaceval = port.data.receiver
+    <span class="enscript-keyword">if</span> unsigned(target_spaceval) == ipc_space_kernel :
+        destname_str = GetKObjectFromPort(port)
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">if</span> int(port.ip_object.io_bits) &amp; 0x80000000 :
+            destname_str = <span class="enscript-string">&quot;{0: &lt;#020x}&quot;</span>.format(port.ip_messages.data.port.receiver_name)
+            destination_str = GetDestinationProcessFromPort(port)
+        <span class="enscript-keyword">else</span>:
+            destname_str = <span class="enscript-string">&quot;{0: &lt;#020x}&quot;</span>.format(port)
+            destination_str = <span class="enscript-string">&quot;inactive-port&quot;</span>
+    
+    out_str += format_string.format(destname_str, destination_str)
+    <span class="enscript-keyword">return</span> out_str
+    
+@lldb_type_summary([<span class="enscript-string">'ipc_entry_t'</span>])
+@header(<span class="enscript-string">&quot;{: &lt;20s} {: &lt;20s} {: &lt;8s} {: &lt;8s} {: &lt;8s} {: &lt;8s} {: &lt;20s} {: &lt;20s}&quot;</span>.format(<span class="enscript-string">&quot;object&quot;</span>, <span class="enscript-string">&quot;name&quot;</span>,<span class="enscript-string">&quot;rite&quot;</span>, <span class="enscript-string">&quot;urefs&quot;</span>, <span class="enscript-string">&quot;nsets&quot;</span>, <span class="enscript-string">&quot;nmsgs&quot;</span>, <span class="enscript-string">&quot;destname&quot;</span>, <span class="enscript-string">&quot;destination&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetIPCEntrySummary</span>(entry, ipc_name=<span class="enscript-string">''</span>, rights_filter=0):
+    <span class="enscript-string">&quot;&quot;&quot; Get summary of a ipc entry.
+        params:
+            entry - core.value representing ipc_entry_t in the kernel
+            ipc_name - str of format '0x0123' for display in summary.  
+        returns:
+            str - string of ipc entry related information
+
+        types of rights:
+            'Dead'  : Dead name
+            'Set'   : Port set
+            'S'     : Send right
+            'R'     : Receive right
+            'O'     : Send-once right
+        types of notifications:
+            's'     : Send-Possible notification armed
+            'd'     : Send-Possible notification requested
+            'n'     : Dead-Name notification requested
+            'c'     : ???
+            'x'     : No-Senders notification requested
+    &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">''</span>    
+    entry_ptr = int(hex(entry), 16)
+    format_string = <span class="enscript-string">&quot;{: &lt;#020x} {: &lt;12s} {: &lt;8s} {: &lt;8d} {: &lt;8d} {: &lt;8d} {: &lt;20s} {: &lt;20s}&quot;</span>
+    right_str = <span class="enscript-string">''</span>
+    destname_str = <span class="enscript-string">''</span>
+    destination_str = <span class="enscript-string">''</span>
+    
+    ie_object = entry.ie_object
+    ie_bits = int(entry.ie_bits)
+    urefs = int(ie_bits &amp; 0xffff)
+    nsets = 0
+    nmsgs = 0
+    <span class="enscript-keyword">if</span> ie_bits &amp; 0x00100000 :
+        right_str = <span class="enscript-string">'Dead'</span>
+    <span class="enscript-keyword">elif</span> ie_bits &amp; 0x00080000:
+        right_str = <span class="enscript-string">'Set'</span>
+        psetval = Cast(ie_object, <span class="enscript-string">'ipc_pset *'</span>)
+        set_str = GetWaitqSets(addressof(psetval.ips_messages.data.pset.setq.wqset_q))
+        nsets = len(set_str)
+        nmsgs = 0
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">if</span> ie_bits &amp; 0x00010000 :
+            <span class="enscript-keyword">if</span> ie_bits &amp; 0x00020000 :
+                <span class="enscript-comment"># SEND + RECV
+</span>                right_str = <span class="enscript-string">'SR'</span>
+            <span class="enscript-keyword">else</span>:
+                <span class="enscript-comment"># SEND only
+</span>                right_str = <span class="enscript-string">'S'</span>
+        <span class="enscript-keyword">elif</span> ie_bits &amp; 0x00020000:
+            <span class="enscript-comment"># RECV only
+</span>            right_str = <span class="enscript-string">'R'</span>
+        <span class="enscript-keyword">elif</span> ie_bits &amp; 0x00040000 :
+            <span class="enscript-comment"># SEND_ONCE
+</span>            right_str = <span class="enscript-string">'O'</span>
+        portval = Cast(ie_object, <span class="enscript-string">'ipc_port_t'</span>)
+        <span class="enscript-keyword">if</span> int(entry.index.request) != 0:
+            requestsval = portval.ip_requests
+            sorightval = requestsval[int(entry.index.request)].notify.port
+            soright_ptr = unsigned(sorightval)
+            <span class="enscript-keyword">if</span> soright_ptr != 0:
+                 <span class="enscript-comment"># send-possible armed
+</span>                 <span class="enscript-keyword">if</span> soright_ptr &amp; 0x1 : right_str +=<span class="enscript-string">'s'</span>
+                 <span class="enscript-comment"># send-possible requested
+</span>                 <span class="enscript-keyword">elif</span> soright_ptr &amp; 0x2 : right_str +=<span class="enscript-string">'d'</span>
+                 <span class="enscript-comment"># dead-name notification requested
+</span>                 <span class="enscript-keyword">else</span> : right_str +=<span class="enscript-string">'n'</span>
+        <span class="enscript-comment"># XXX: What does this bit mean?
+</span>        <span class="enscript-keyword">if</span> ie_bits &amp; 0x00800000 : right_str +=<span class="enscript-string">'c'</span>
+        <span class="enscript-comment"># No-senders notification requested
+</span>        <span class="enscript-keyword">if</span> portval.ip_nsrequest != 0: right_str +=<span class="enscript-string">'x'</span>
+        <span class="enscript-comment"># now show the port destination part
+</span>        destname_str = GetPortDestinationSummary(Cast(ie_object, <span class="enscript-string">'ipc_port_t'</span>))
+        <span class="enscript-comment"># Get the number of sets to which this port belongs
+</span>        set_str = GetWaitqSets(addressof(portval.ip_messages.data.port.waitq))
+        nsets = len(set_str)
+        nmsgs = portval.ip_messages.data.port.msgcount
+    <span class="enscript-keyword">if</span> rights_filter == 0 <span class="enscript-keyword">or</span> rights_filter == right_str:
+        out_str = format_string.format(ie_object, ipc_name, right_str, urefs, nsets, nmsgs, destname_str, destination_str)
+    <span class="enscript-keyword">return</span> out_str
+
+@header(<span class="enscript-string">&quot;{0: &gt;20s}&quot;</span>.format(<span class="enscript-string">&quot;user bt&quot;</span>) )
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetPortUserStack</span>(port, task):
+    <span class="enscript-string">&quot;&quot;&quot; Get UserStack information for the given port &amp; task. 
+        params: port - core.value representation of 'ipc_port *' object
+                task - value representing 'task *' object
+        returns: str - string information on port's userstack
+    &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">''</span>
+    ie_port_callstack = port.ip_callstack
+    ie_port_spares = port.ip_spares[0]
+    proc_val = Cast(task.bsd_info, <span class="enscript-string">'proc *'</span>)  
+    <span class="enscript-keyword">if</span> ie_port_callstack[0]:
+        out_str += <span class="enscript-string">&quot;{: &lt;10x}&quot;</span>.format(ie_port_callstack[0])
+        count = 1
+        <span class="enscript-keyword">while</span> count &lt; 16 <span class="enscript-keyword">and</span> ie_port_callstack[count]:
+            out_str += <span class="enscript-string">&quot;: &lt;10x&quot;</span>.format(ie_port_callstack[count])
+            count = count + 1
+        <span class="enscript-keyword">if</span> ie_port_spares != proc_val.p_pid:
+            out_str += <span class="enscript-string">&quot; ({:&lt;10d})&quot;</span>.format(ie_port_spares)
+        out_str += <span class="enscript-string">'\n'</span>
+    <span class="enscript-keyword">return</span> out_str
+
+@lldb_type_summary([<span class="enscript-string">'ipc_space *'</span>])
+@header(<span class="enscript-string">&quot;{0: &lt;20s} {1: &lt;20s} {2: &lt;20s} {3: &lt;8s} {4: &lt;10s} {5: &lt;18s} {6: &gt;8s} {7: &lt;8s}&quot;</span>.format(<span class="enscript-string">'ipc_space'</span>, <span class="enscript-string">'is_task'</span>, <span class="enscript-string">'is_table'</span>, <span class="enscript-string">'flags'</span>, <span class="enscript-string">'ports'</span>, <span class="enscript-string">'table_next'</span>, <span class="enscript-string">'low_mod'</span>, <span class="enscript-string">'high_mod'</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">PrintIPCInformation</span>(space, show_entries=False, show_userstack=False, rights_filter=0):
+    <span class="enscript-string">&quot;&quot;&quot; Provide a summary of the ipc space
+    &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">''</span>
+    format_string = <span class="enscript-string">&quot;{0: &lt;#020x} {1: &lt;#020x} {2: &lt;#020x} {3: &lt;8s} {4: &lt;10d} {5: &lt;#18x} {6: &gt;8d} {7: &lt;8d}&quot;</span>
+    is_tableval = space.is_table
+    ports = int(space.is_table_size)
+    flags =<span class="enscript-string">''</span>
+    is_bits = int(space.is_bits)
+    <span class="enscript-keyword">if</span> (is_bits &amp; 0x40000000) == 0: flags +=<span class="enscript-string">'A'</span>
+    <span class="enscript-keyword">else</span>: flags += <span class="enscript-string">' '</span>
+    <span class="enscript-keyword">if</span> (is_bits &amp; 0x20000000) != 0: flags +=<span class="enscript-string">'G'</span>
+    <span class="enscript-keyword">print</span> format_string.format(space, space.is_task, space.is_table, flags, space.is_table_size, space.is_table_next, space.is_low_mod, space.is_high_mod)
+    
+    <span class="enscript-comment">#should show the each individual entries if asked.
+</span>    <span class="enscript-keyword">if</span> show_entries == True:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;\t&quot;</span> + GetIPCEntrySummary.header
+        num_entries = ports
+        index = 0
+        <span class="enscript-keyword">while</span> index &lt; num_entries:
+            entryval = GetObjectAtIndexFromArray(is_tableval, index)
+            entry_ie_bits = unsigned(entryval.ie_bits)
+            <span class="enscript-keyword">if</span> (int(entry_ie_bits) &amp; 0x001f0000 ) != 0:
+                entry_name = <span class="enscript-string">&quot;{0: &lt;#020x}&quot;</span>.format( (index &lt;&lt;8 | entry_ie_bits &gt;&gt; 24) )
+                entry_str = GetIPCEntrySummary(entryval, entry_name, rights_filter)
+                <span class="enscript-keyword">if</span> len(entry_str) &gt; 0:
+                    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;                  \r\t&quot;</span> + entry_str
+                    <span class="enscript-keyword">if</span> show_userstack == True:
+                        entryport = Cast(entryval.ie_object, <span class="enscript-string">'ipc_port *'</span>)
+                        <span class="enscript-keyword">if</span> entryval.ie_object <span class="enscript-keyword">and</span> (int(entry_ie_bits) &amp; 0x00070000) <span class="enscript-keyword">and</span> entryport.ip_callstack[0]:
+                            <span class="enscript-keyword">print</span> GetPortUserStack.header + GetPortUserStack(entryport, space.is_task)
+                <span class="enscript-keyword">else</span>:
+                    <span class="enscript-comment"># give some progress indication (this is especially
+</span>                    <span class="enscript-comment"># helpful for tasks with large sets of rights)
+</span>                    sys.stderr.write(<span class="enscript-string">' {:d}/{:d}...\r'</span>.format(index, num_entries))
+            index += 1
+    <span class="enscript-comment">#done with showing entries
+</span>    <span class="enscript-keyword">return</span> out_str
+
+<span class="enscript-comment"># Macro: showrights
+</span>
+@lldb_command(<span class="enscript-string">'showrights'</span>, <span class="enscript-string">'R:'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowRights</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print rights information for the given IPC space 
+         Usage: showrights [-R rights_type] &lt;address of ipc space&gt;
+                -R rights_type  : only display rights matching the string 'rights_type'
+
+                types of rights:
+                    'Dead'  : Dead name
+                    'Set'   : Port set
+                    'S'     : Send right
+                    'R'     : Receive right
+                    'O'     : Send-once right
+                types of notifications (append to rights type string):
+                    's'     : Send-Possible notification armed
+                    'd'     : Send-Possible notification requested
+                    'n'     : Dead-Name notification requested
+                    'c'     : ???
+                    'x'     : No-Senders notification requested
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No arguments passed&quot;</span>
+        <span class="enscript-keyword">print</span> ShowRights.__doc__
+        <span class="enscript-keyword">return</span> False
+    ipc = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'ipc_space *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> ipc:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;unknown arguments:&quot;</span>, str(cmd_args)
+        <span class="enscript-keyword">return</span> False
+    rights_type = 0
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-R&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        rights_type = cmd_options[<span class="enscript-string">&quot;-R&quot;</span>]
+    <span class="enscript-keyword">print</span> PrintIPCInformation.header
+    PrintIPCInformation(ipc, True, False, rights_type)
+
+<span class="enscript-comment"># EndMacro: showrights
+</span>
+@lldb_command(<span class="enscript-string">'showtaskrights'</span>,<span class="enscript-string">'R:'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowTaskRights</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to ipc rights information for a task
+        Usage: showtaskrights [-R rights_type] &lt;task address&gt;
+               -R rights_type  : only display rights matching the string 'rights_type'
+
+               types of rights:
+                   'Dead'  : Dead name
+                   'Set'   : Port set
+                   'S'     : Send right
+                   'R'     : Receive right
+                   'O'     : Send-once right
+               types of notifications (append to rights type string):
+                   's'     : Send-Possible notification armed
+                   'd'     : Send-Possible notification requested
+                   'n'     : Dead-Name notification requested
+                   'c'     : ???
+                   'x'     : No-Senders notification requested
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> cmd_args == None:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No arguments passed&quot;</span>
+        <span class="enscript-keyword">print</span> ShowTaskStacksCmdHelper.__doc__
+        <span class="enscript-keyword">return</span> False
+    tval = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'task *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> tval:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;unknown arguments:&quot;</span>, str(cmd_args)
+        <span class="enscript-keyword">return</span> False
+    rights_type = 0
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-R&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        rights_type = cmd_options[<span class="enscript-string">&quot;-R&quot;</span>]
+    <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+    pval = Cast(tval.bsd_info, <span class="enscript-string">'proc *'</span>)
+    <span class="enscript-keyword">print</span> GetTaskSummary(tval) + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary(pval)
+    <span class="enscript-keyword">print</span> PrintIPCInformation.header
+    PrintIPCInformation(tval.itk_space, True, False, rights_type)
+
+<span class="enscript-comment"># Macro: showataskrightsbt
+</span>
+@lldb_command(<span class="enscript-string">'showtaskrightsbt'</span>, <span class="enscript-string">'R:'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowTaskRightsBt</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to ipc rights information with userstacks for a task
+        Usage: showtaskrightsbt [-R rights_type] &lt;task address&gt;
+               -R rights_type  : only display rights matching the string 'rights_type'
+
+               types of rights:
+                   'Dead'  : Dead name
+                   'Set'   : Port set
+                   'S'     : Send right
+                   'R'     : Receive right
+                   'O'     : Send-once right
+               types of notifications (append to rights type string):
+                   's'     : Send-Possible notification armed
+                   'd'     : Send-Possible notification requested
+                   'n'     : Dead-Name notification requested
+                   'c'     : ???
+                   'x'     : No-Senders notification requested
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> cmd_args == None:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No arguments passed&quot;</span>
+        <span class="enscript-keyword">print</span> ShowTaskRightsBt.__doc__
+        <span class="enscript-keyword">return</span> False
+    tval = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'task *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> tval:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;unknown arguments:&quot;</span>, str(cmd_args)
+        <span class="enscript-keyword">return</span> False
+    rights_type = 0
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-R&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        rights_type = cmd_options[<span class="enscript-string">&quot;-R&quot;</span>]
+    <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+    pval = Cast(tval.bsd_info, <span class="enscript-string">'proc *'</span>)
+    <span class="enscript-keyword">print</span> GetTaskSummary(tval) + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary(pval)
+    <span class="enscript-keyword">print</span> PrintIPCInformation.header
+    PrintIPCInformation(tval.itk_space, True, True, rights_type)
+
+<span class="enscript-comment"># EndMacro: showtaskrightsbt
+</span>
+<span class="enscript-comment"># Macro: showallrights
+</span>
+@lldb_command(<span class="enscript-string">'showallrights'</span>, <span class="enscript-string">'R:'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllRights</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print rights information for IPC space of all tasks
+         Usage: showallrights [-R rights_type]
+                -R rights_type  : only display rights matching the string 'rights_type'
+
+                types of rights:
+                    'Dead'  : Dead name
+                    'Set'   : Port set
+                    'S'     : Send right
+                    'R'     : Receive right
+                    'O'     : Send-once right
+                types of notifications (append to rights type string):
+                    's'     : Send-Possible notification armed
+                    'd'     : Send-Possible notification requested
+                    'n'     : Dead-Name notification requested
+                    'c'     : ???
+                    'x'     : No-Senders notification requested
+    &quot;&quot;&quot;</span>
+    rights_type = 0
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-R&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        rights_type = cmd_options[<span class="enscript-string">&quot;-R&quot;</span>]
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.tasks:
+        <span class="enscript-keyword">print</span> GetTaskSummary.header + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary.header
+        pval = Cast(t.bsd_info, <span class="enscript-string">'proc *'</span>)
+        <span class="enscript-keyword">print</span> GetTaskSummary(t) + <span class="enscript-string">&quot; &quot;</span> + GetProcSummary(pval)
+        <span class="enscript-keyword">try</span>:
+            <span class="enscript-keyword">print</span> PrintIPCInformation.header
+            PrintIPCInformation(t.itk_space, True, False, rights_type) + <span class="enscript-string">&quot;\n\n&quot;</span>
+        <span class="enscript-keyword">except</span> (KeyboardInterrupt, SystemExit):
+            <span class="enscript-keyword">raise</span>
+        <span class="enscript-keyword">except</span>:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Failed to get IPC information. Do individual showtaskrights &lt;task&gt; to find the error. \n\n&quot;</span>
+
+<span class="enscript-comment"># EndMacro: showallrights
+</span>
+<span class="enscript-comment"># Macro: showpipestats
+</span>@lldb_command(<span class="enscript-string">'showpipestats'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowPipeStats</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Display pipes usage information in the kernel
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Number of pipes: {: d}&quot;</span>.format(kern.globals.amountpipes)
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Memory used by pipes: {:s}&quot;</span>.format(sizeof_fmt(int(kern.globals.amountpipekva)))
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Max memory allowed for pipes: {:s}&quot;</span>.format(sizeof_fmt(int(kern.globals.maxpipekva)))
+<span class="enscript-comment"># EndMacro: showpipestats
+</span>
+<span class="enscript-comment"># Macro: showtaskbusyports
+</span>@lldb_command(<span class="enscript-string">'showtaskbusyports'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowTaskBusyPorts</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to print information about receive rights belonging to this task that
+        have enqueued messages. This is oten a sign of a blocked or hung process
+        Usage: showtaskbusyports &lt;task address&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No arguments passed. Please pass in the address of a task&quot;</span>
+        <span class="enscript-keyword">print</span> ShowTaskBusyPorts.__doc__
+        <span class="enscript-keyword">return</span>
+    task = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'task_t'</span>)
+    PrintTaskBusyPorts(task)
+    <span class="enscript-keyword">return</span>
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">PrintTaskBusyPorts</span>(task):
+    <span class="enscript-string">&quot;&quot;&quot; Prints all busy ports for a given task. ie. all receive rights belonging
+        to this task that have enqueued messages.
+        params:
+            task : core.value representing a task in kernel
+        returns:
+            str  : String containing information about the given task's busy ports
+    &quot;&quot;&quot;</span>
+    isp = task.itk_space
+    i = 0
+    <span class="enscript-keyword">while</span> i &lt; isp.is_table_size:
+        iep = addressof(isp.is_table[i])
+        <span class="enscript-keyword">if</span> iep.ie_bits &amp; 0x00020000:
+            port = Cast(iep.ie_object, <span class="enscript-string">'ipc_port_t'</span>)
+            <span class="enscript-keyword">if</span> port.ip_messages.data.port.msgcount &gt; 0:
+                <span class="enscript-keyword">print</span> PrintPortSummary.header
+                PrintPortSummary(port)
+        i = i + 1
+    <span class="enscript-keyword">return</span>
+<span class="enscript-comment"># EndMacro: showtaskbusyports
+</span>
+<span class="enscript-comment"># Macro: showallbusyports
+</span>@lldb_command(<span class="enscript-string">'showallbusyports'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllBusyPorts</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to print information about all receive rights on the system that
+        have enqueued messages.
+    &quot;&quot;&quot;</span>
+    task_queue_head = kern.globals.tasks
+
+    <span class="enscript-keyword">for</span> tsk <span class="enscript-keyword">in</span> kern.tasks:
+        PrintTaskBusyPorts(tsk)
+    <span class="enscript-keyword">return</span>
+<span class="enscript-comment"># EndMacro: showallbusyports
+</span>
+<span class="enscript-comment"># Macro: showport:
+</span>@lldb_command(<span class="enscript-string">'showport'</span>,<span class="enscript-string">'K'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowPort</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Routine that lists details about a given IPC port 
+        Syntax: (lldb) showport 0xaddr
+    &quot;&quot;&quot;</span>
+    show_kmsgs = True
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-K&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        show_kmsgs = False
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Please specify the address of the port whose details you want to print&quot;</span>
+        <span class="enscript-keyword">print</span> ShowPort.__doc__
+        <span class="enscript-keyword">return</span>
+    port = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'struct ipc_port *'</span>)
+    <span class="enscript-keyword">print</span> PrintPortSummary.header
+    PrintPortSummary(port, show_kmsgs)
+<span class="enscript-comment"># EndMacro: showport
+</span>
+<span class="enscript-comment"># Macro: showmqueue:
+</span>@lldb_command(<span class="enscript-string">'showmqueue'</span>, <span class="enscript-string">&quot;S:&quot;</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowMQueue</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Routine that lists details about a given mqueue
+        Syntax: (lldb) showmqueue 0xaddr [-S ipc_space]
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Please specify the address of the ipc_mqueue whose details you want to print&quot;</span>
+        <span class="enscript-keyword">print</span> ShowMQueue.__doc__
+        <span class="enscript-keyword">return</span>
+    space = 0
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-S&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        space = kern.GetValueFromAddress(cmd_options[<span class="enscript-string">&quot;-S&quot;</span>], <span class="enscript-string">'struct ipc_space *'</span>)
+    mqueue = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'struct ipc_mqueue *'</span>)
+    wq_type = mqueue.data.pset.setq.wqset_q.waitq_type
+    <span class="enscript-keyword">if</span> int(wq_type) == 3:
+        psetoff = getfieldoffset(<span class="enscript-string">'struct ipc_pset'</span>, <span class="enscript-string">'ips_messages'</span>)
+        pset = unsigned(ArgumentStringToInt(cmd_args[0])) - unsigned(psetoff)
+        <span class="enscript-keyword">print</span> PrintPortSetSummary.header
+        PrintPortSetSummary(kern.GetValueFromAddress(pset, <span class="enscript-string">'struct ipc_pset *'</span>), space)
+    <span class="enscript-keyword">elif</span> int(wq_type) == 2:
+        portoff = getfieldoffset(<span class="enscript-string">'struct ipc_port'</span>, <span class="enscript-string">'ip_messages'</span>)
+        port = unsigned(ArgumentStringToInt(cmd_args[0])) - unsigned(portoff)
+        <span class="enscript-keyword">print</span> PrintPortSummary.header
+        PrintPortSummary(kern.GetValueFromAddress(port, <span class="enscript-string">'struct ipc_port *'</span>))
+    <span class="enscript-keyword">else</span>:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Invalid mqueue? (waitq type {:d} is invalid)&quot;</span>.format(int(wq_type))
+<span class="enscript-comment"># EndMacro: showmqueue
+</span>
+<span class="enscript-comment"># Macro: showkmsg:
+</span>@lldb_command(<span class="enscript-string">'showkmsg'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowKMSG</span>(cmd_args=[]):
+    <span class="enscript-string">&quot;&quot;&quot; Show detail information about a &lt;ipc_kmsg_t&gt; structure
+        Usage: (lldb) showkmsg &lt;ipc_kmsg_t&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">'Invalid arguments'</span>)
+    kmsg = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'ipc_kmsg_t'</span>)
+    <span class="enscript-keyword">print</span> GetKMsgSummary.header
+    <span class="enscript-keyword">print</span> GetKMsgSummary(kmsg)
+
+<span class="enscript-comment"># EndMacro: showkmsg
+</span>
+<span class="enscript-comment"># Macro: showpset
+</span>@lldb_command(<span class="enscript-string">'showpset'</span>, <span class="enscript-string">&quot;S:&quot;</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowPSet</span>(cmd_args=None, cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Routine that prints details for a given ipc_pset *
+        Syntax: (lldb) showpset 0xaddr [-S ipc_space]
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Please specify the address of the pset whose details you want to print&quot;</span>
+        <span class="enscript-keyword">print</span> ShowPSet.__doc__
+        <span class="enscript-keyword">return</span>
+    space = 0
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;-S&quot;</span> <span class="enscript-keyword">in</span> cmd_options:
+        space = kern.GetValueFromAddress(cmd_options[<span class="enscript-string">&quot;-S&quot;</span>], <span class="enscript-string">'struct ipc_space *'</span>)
+
+    <span class="enscript-keyword">print</span> PrintPortSetSummary.header
+    PrintPortSetSummary(kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'ipc_pset *'</span>), space)
+<span class="enscript-comment"># EndMacro: showpset
+</span>
+<span class="enscript-comment"># IPC importance inheritance related macros.
+</span>
+@lldb_command(<span class="enscript-string">'showalliits'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllIITs</span>(cmd_args=[], cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Development only macro. Show list of all iits allocated in the system. &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">try</span>:
+        iit_queue = kern.globals.global_iit_alloc_queue 
+    <span class="enscript-keyword">except</span> ValueError:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;This debug macro is only available in development or debug kernels&quot;</span>
+        <span class="enscript-keyword">return</span>
+    
+    <span class="enscript-keyword">print</span> GetIPCImportantTaskSummary.header
+    <span class="enscript-keyword">for</span> iit <span class="enscript-keyword">in</span> IterateQueue(iit_queue, <span class="enscript-string">'struct ipc_importance_task *'</span>, <span class="enscript-string">'iit_allocation'</span>):
+        <span class="enscript-keyword">print</span> GetIPCImportantTaskSummary(iit)
+    <span class="enscript-keyword">return</span>
+
+@header(<span class="enscript-string">&quot;{: &lt;18s} {: &lt;3s} {: &lt;18s} {: &lt;20s} {: &lt;18s} {: &lt;8s}&quot;</span>.format(<span class="enscript-string">&quot;ipc_imp_inherit&quot;</span>, <span class="enscript-string">&quot;don&quot;</span>, <span class="enscript-string">&quot;to_task&quot;</span>, <span class="enscript-string">&quot;proc_name&quot;</span>, <span class="enscript-string">&quot;from_elem&quot;</span>, <span class="enscript-string">&quot;depth&quot;</span>))
+@lldb_type_summary([<span class="enscript-string">'ipc_importance_inherit *'</span>, <span class="enscript-string">'ipc_importance_inherit_t'</span>])
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetIPCImportanceInheritSummary</span>(iii):
+    <span class="enscript-string">&quot;&quot;&quot; describes iii object of type ipc_importance_inherit_t * &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">&quot;&quot;</span>
+    fmt = <span class="enscript-string">&quot;{o: &lt;#018x} {don: &lt;3s} {o.iii_to_task.iit_task: &lt;#018x} {task_name: &lt;20s} {o.iii_from_elem: &lt;#018x} {o.iii_depth: &lt;#08x}&quot;</span>
+    donating_str = <span class="enscript-string">&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> unsigned(iii.iii_donating):
+        donating_str = <span class="enscript-string">&quot;DON&quot;</span>
+    taskname = GetProcNameForTask(iii.iii_to_task.iit_task)
+    <span class="enscript-keyword">if</span> hasattr(iii.iii_to_task, <span class="enscript-string">'iit_bsd_pid'</span>):
+        taskname =  <span class="enscript-string">&quot;({:d}) {:s}&quot;</span>.format(iii.iii_to_task.iit_bsd_pid, iii.iii_to_task.iit_procname)
+    out_str += fmt.format(o=iii, task_name = taskname, don=donating_str)
+    <span class="enscript-keyword">return</span> out_str
+
+@static_var(<span class="enscript-string">'recursion_count'</span>, 0)
+@header(<span class="enscript-string">&quot;{: &lt;18s} {: &lt;4s} {: &lt;8s} {: &lt;8s} {: &lt;18s} {: &lt;18s}&quot;</span>.format(<span class="enscript-string">&quot;iie&quot;</span>, <span class="enscript-string">&quot;type&quot;</span>, <span class="enscript-string">&quot;refs&quot;</span>, <span class="enscript-string">&quot;made&quot;</span>, <span class="enscript-string">&quot;#kmsgs&quot;</span>, <span class="enscript-string">&quot;#inherits&quot;</span>))
+@lldb_type_summary([<span class="enscript-string">'ipc_importance_elem *'</span>])
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetIPCImportanceElemSummary</span>(iie):
+    <span class="enscript-string">&quot;&quot;&quot; describes an ipc_importance_elem * object &quot;&quot;&quot;</span>
+
+    <span class="enscript-keyword">if</span> GetIPCImportanceElemSummary.recursion_count &gt; 500:
+        GetIPCImportanceElemSummary.recursion_count = 0
+        <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;Recursion of 500 reached&quot;</span>
+
+    out_str = <span class="enscript-string">''</span>
+    fmt = <span class="enscript-string">&quot;{: &lt;#018x} {: &lt;4s} {: &lt;8d} {: &lt;8d} {: &lt;#018x} {: &lt;#018x}&quot;</span>
+    type_str = <span class="enscript-string">'TASK'</span>
+    <span class="enscript-keyword">if</span> unsigned(iie.iie_bits) &amp; 0x80000000:
+        type_str = <span class="enscript-string">&quot;INH&quot;</span>
+    refs = unsigned(iie.iie_bits) &amp; 0x7fffffff
+    made_refs = unsigned(iie.iie_made)
+    kmsg_count = sum(1 <span class="enscript-keyword">for</span> i <span class="enscript-keyword">in</span> IterateQueue(iie.iie_kmsgs, <span class="enscript-string">'struct ipc_kmsg *'</span>,  <span class="enscript-string">'ikm_inheritance'</span>))
+    inherit_count = sum(1 <span class="enscript-keyword">for</span> i <span class="enscript-keyword">in</span> IterateQueue(iie.iie_inherits, <span class="enscript-string">'struct ipc_importance_inherit *'</span>,  <span class="enscript-string">'iii_inheritance'</span>))
+    out_str += fmt.format(iie, type_str, refs, made_refs, kmsg_count, inherit_count)
+    <span class="enscript-keyword">if</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vHUMAN:
+        <span class="enscript-keyword">if</span> kmsg_count &gt; 0:
+            out_str += <span class="enscript-string">&quot;\n\t&quot;</span>+ GetKMsgSummary.header 
+            <span class="enscript-keyword">for</span> k <span class="enscript-keyword">in</span> IterateQueue(iie.iie_kmsgs, <span class="enscript-string">'struct ipc_kmsg *'</span>,  <span class="enscript-string">'ikm_inheritance'</span>):
+                out_str += <span class="enscript-string">&quot;\t&quot;</span> + <span class="enscript-string">&quot;{: &lt;#018x}&quot;</span>.format(k.ikm_header.msgh_remote_port) + <span class="enscript-string">'   '</span> + GetKMsgSummary(k, <span class="enscript-string">&quot;\t&quot;</span>).lstrip() 
+            out_str += <span class="enscript-string">&quot;\n&quot;</span>
+        <span class="enscript-keyword">if</span> inherit_count &gt; 0:
+            out_str += <span class="enscript-string">&quot;\n\t&quot;</span> + GetIPCImportanceInheritSummary.header + <span class="enscript-string">&quot;\n&quot;</span>
+            <span class="enscript-keyword">for</span> i <span class="enscript-keyword">in</span> IterateQueue(iie.iie_inherits, <span class="enscript-string">'struct ipc_importance_inherit *'</span>,  <span class="enscript-string">'iii_inheritance'</span>):
+                out_str += <span class="enscript-string">&quot;\t&quot;</span> + GetIPCImportanceInheritSummary(i) + <span class="enscript-string">&quot;\n&quot;</span>
+            out_str += <span class="enscript-string">&quot;\n&quot;</span>
+        <span class="enscript-keyword">if</span> type_str == <span class="enscript-string">&quot;INH&quot;</span>:
+            iii = Cast(iie, <span class="enscript-string">'struct ipc_importance_inherit *'</span>)
+            out_str += <span class="enscript-string">&quot;Inherit from: &quot;</span> + GetIPCImportanceElemSummary(iii.iii_from_elem)
+
+    <span class="enscript-keyword">return</span> out_str
+
+@header(<span class="enscript-string">&quot;{: &lt;18s} {: &lt;18s} {: &lt;20s}&quot;</span>.format(<span class="enscript-string">&quot;iit&quot;</span>, <span class="enscript-string">&quot;task&quot;</span>, <span class="enscript-string">&quot;name&quot;</span>))
+@lldb_type_summary([<span class="enscript-string">'ipc_importance_task *'</span>])
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetIPCImportantTaskSummary</span>(iit):
+    <span class="enscript-string">&quot;&quot;&quot; iit is a ipc_importance_task value object.
+    &quot;&quot;&quot;</span>
+    fmt = <span class="enscript-string">&quot;{: &lt;#018x} {: &lt;#018x} {: &lt;20s}&quot;</span>
+    out_str=<span class="enscript-string">''</span>
+    pname = GetProcNameForTask(iit.iit_task)
+    <span class="enscript-keyword">if</span> hasattr(iit, <span class="enscript-string">'iit_bsd_pid'</span>):
+        pname = <span class="enscript-string">&quot;({:d}) {:s}&quot;</span>.format(iit.iit_bsd_pid, iit.iit_procname)
+    out_str += fmt.format(iit, iit.iit_task, pname)
+    <span class="enscript-keyword">return</span> out_str
+
+@lldb_command(<span class="enscript-string">'showallimportancetasks'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowIPCImportanceTasks</span>(cmd_args=[], cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; display a list of all tasks with ipc importance information. 
+        Usage: (lldb) showallimportancetasks
+        Tip: add &quot;-v&quot; to see detailed information on each kmsg or inherit elems 
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">print</span> <span class="enscript-string">' '</span> + GetIPCImportantTaskSummary.header + <span class="enscript-string">' '</span> + GetIPCImportanceElemSummary.header
+    <span class="enscript-keyword">for</span> t <span class="enscript-keyword">in</span> kern.tasks:
+        s = <span class="enscript-string">&quot;&quot;</span>
+        <span class="enscript-keyword">if</span> unsigned(t.task_imp_base):
+            s += <span class="enscript-string">' '</span> + GetIPCImportantTaskSummary(t.task_imp_base)
+            s += <span class="enscript-string">' '</span> + GetIPCImportanceElemSummary(addressof(t.task_imp_base.iit_elem))
+            <span class="enscript-keyword">print</span> s
+
+@lldb_command(<span class="enscript-string">'showipcimportance'</span>, <span class="enscript-string">''</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowIPCImportance</span>(cmd_args=[], cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Describe an importance from &lt;ipc_importance_elem_t&gt; argument.
+        Usage: (lldb) showimportance &lt;ipc_importance_elem_t&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Please provide valid argument&quot;</span>)
+
+    elem = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'ipc_importance_elem_t'</span>)
+    <span class="enscript-keyword">print</span> GetIPCImportanceElemSummary.header
+    <span class="enscript-keyword">print</span> GetIPCImportanceElemSummary(elem)
+
+@header(<span class="enscript-string">&quot;{: &lt;18s} {: &lt;10s} {: &lt;18s} {: &lt;18s} {: &lt;8s} {: &lt;5s} {: &lt;5s} {: &lt;5s}&quot;</span>.format(<span class="enscript-string">&quot;ivac&quot;</span>, <span class="enscript-string">&quot;refs&quot;</span>, <span class="enscript-string">&quot;port&quot;</span>, <span class="enscript-string">&quot;tbl&quot;</span>, <span class="enscript-string">&quot;tblsize&quot;</span>, <span class="enscript-string">&quot;index&quot;</span>, <span class="enscript-string">&quot;Grow&quot;</span>, <span class="enscript-string">&quot;freelist&quot;</span>))
+@lldb_type_summary([<span class="enscript-string">'ipc_voucher_attr_control *'</span>, <span class="enscript-string">'ipc_voucher_attr_control_t'</span>])
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetIPCVoucherAttrControlSummary</span>(ivac):
+    <span class="enscript-string">&quot;&quot;&quot; describes a voucher attribute control settings &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">&quot;&quot;</span>
+    fmt = <span class="enscript-string">&quot;{c: &lt;#018x} {c.ivac_refs: &lt;10d} {c.ivac_port: &lt;#018x} {c.ivac_table: &lt;#018x} {c.ivac_table_size: &lt;8d} {c.ivac_key_index: &lt;5d} {growing: &lt;5s} {c.ivac_freelist: &lt;5d}&quot;</span>
+    growing_str = <span class="enscript-string">&quot;&quot;</span>
+    
+    <span class="enscript-keyword">if</span> unsigned(ivac) == 0:
+        <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;{: &lt;#018x}&quot;</span>.format(ivac)
+
+    <span class="enscript-keyword">if</span> unsigned(ivac.ivac_is_growing):
+        growing_str = <span class="enscript-string">&quot;Y&quot;</span>
+    out_str += fmt.format(c=ivac, growing = growing_str)
+    <span class="enscript-keyword">return</span> out_str
+
+@lldb_command(<span class="enscript-string">'showivac'</span>,<span class="enscript-string">''</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowIPCVoucherAttributeControl</span>(cmd_args=[], cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Show summary of voucher attribute contols.
+        Usage: (lldb) showivac &lt;ipc_voucher_attr_control_t&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Please provide correct arguments.&quot;</span>)
+    ivac = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'ipc_voucher_attr_control_t'</span>)
+    <span class="enscript-keyword">print</span> GetIPCVoucherAttrControlSummary.header
+    <span class="enscript-keyword">print</span> GetIPCVoucherAttrControlSummary(ivac)
+    <span class="enscript-keyword">if</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vHUMAN:
+        cur_entry_index = 0
+        last_entry_index = unsigned(ivac.ivac_table_size)
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;index &quot;</span> + GetIPCVoucherAttributeEntrySummary.header
+        <span class="enscript-keyword">while</span> cur_entry_index &lt; last_entry_index:
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{: &lt;5d} &quot;</span>.format(cur_entry_index) + GetIPCVoucherAttributeEntrySummary(addressof(ivac.ivac_table[cur_entry_index]))
+            cur_entry_index += 1
+
+    
+
+
+@header(<span class="enscript-string">&quot;{: &lt;18s} {: &lt;30s} {: &lt;30s} {: &lt;30s} {: &lt;30s} {: &lt;30s}&quot;</span>.format(<span class="enscript-string">&quot;ivam&quot;</span>, <span class="enscript-string">&quot;get_value_fn&quot;</span>, <span class="enscript-string">&quot;extract_fn&quot;</span>, <span class="enscript-string">&quot;release_value_fn&quot;</span>, <span class="enscript-string">&quot;command_fn&quot;</span>, <span class="enscript-string">&quot;release_fn&quot;</span>))
+@lldb_type_summary([<span class="enscript-string">'ipc_voucher_attr_manager *'</span>, <span class="enscript-string">'ipc_voucher_attr_manager_t'</span>])
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetIPCVoucherAttrManagerSummary</span>(ivam):
+    <span class="enscript-string">&quot;&quot;&quot; describes a voucher attribute manager settings &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">&quot;&quot;</span>
+    fmt = <span class="enscript-string">&quot;{: &lt;#018x} {: &lt;30s} {: &lt;30s} {: &lt;30s} {: &lt;30s} {: &lt;30s}&quot;</span>
+    
+    <span class="enscript-keyword">if</span> unsigned(ivam) == 0 :
+        <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;{: &lt;#018x}&quot;</span>.format(ivam)
+
+    get_value_fn = kern.Symbolicate(unsigned(ivam.ivam_get_value))
+    extract_fn = kern.Symbolicate(unsigned(ivam.ivam_extract_content))
+    release_value_fn = kern.Symbolicate(unsigned(ivam.ivam_release_value))
+    command_fn = kern.Symbolicate(unsigned(ivam.ivam_command))
+    release_fn = kern.Symbolicate(unsigned(ivam.ivam_release))
+    out_str += fmt.format(ivam, get_value_fn, extract_fn, release_value_fn, command_fn, release_fn)
+    <span class="enscript-keyword">return</span> out_str
+
+
+
+@header(<span class="enscript-string">&quot;{: &lt;18s} {: &lt;10s} {:s} {:s}&quot;</span>.format(<span class="enscript-string">&quot;ivgte&quot;</span>, <span class="enscript-string">&quot;key&quot;</span>, GetIPCVoucherAttrControlSummary.header.strip(), GetIPCVoucherAttrManagerSummary.header.strip()))
+@lldb_type_summary([<span class="enscript-string">'ipc_voucher_global_table_element *'</span>, <span class="enscript-string">'ipc_voucher_global_table_element_t'</span>])
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetIPCVoucherGlobalTableElementSummary</span>(ivgte):
+    <span class="enscript-string">&quot;&quot;&quot; describes a ipc_voucher_global_table_element object &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">&quot;&quot;</span>
+    fmt = <span class="enscript-string">&quot;{g: &lt;#018x} {g.ivgte_key: &lt;10d} {ctrl_s:s} {mgr_s:s}&quot;</span>
+    out_str += fmt.format(g=ivgte, ctrl_s=GetIPCVoucherAttrControlSummary(ivgte.ivgte_control), mgr_s=GetIPCVoucherAttrManagerSummary(ivgte.ivgte_manager))
+    <span class="enscript-keyword">return</span> out_str
+
+@lldb_command(<span class="enscript-string">'showglobalvouchertable'</span>, <span class="enscript-string">''</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowGlobalVoucherTable</span>(cmd_args=[], cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; show detailed information of all voucher attribute managers registered with vouchers system
+        Usage: (lldb) showglobalvouchertable
+    &quot;&quot;&quot;</span>
+    entry_size = sizeof(kern.globals.iv_global_table[0])
+    elems = sizeof(kern.globals.iv_global_table) / entry_size
+    <span class="enscript-keyword">print</span> GetIPCVoucherGlobalTableElementSummary.header
+    <span class="enscript-keyword">for</span> i <span class="enscript-keyword">in</span> range(elems):
+        elt = addressof(kern.globals.iv_global_table[i])
+        <span class="enscript-keyword">print</span> GetIPCVoucherGlobalTableElementSummary(elt)
+
+<span class="enscript-comment"># Type summaries for Bag of Bits.
+</span>
+@lldb_type_summary([<span class="enscript-string">'user_data_value_element'</span>, <span class="enscript-string">'user_data_element_t'</span>])
+@header(<span class="enscript-string">&quot;{0: &lt;20s} {1: &lt;16s} {2: &lt;20s} {3: &lt;20s} {4: &lt;16s} {5: &lt;20s}&quot;</span>.format(<span class="enscript-string">&quot;user_data_ve&quot;</span>, <span class="enscript-string">&quot;maderefs&quot;</span>, <span class="enscript-string">&quot;checksum&quot;</span>, <span class="enscript-string">&quot;hash value&quot;</span>, <span class="enscript-string">&quot;size&quot;</span>, <span class="enscript-string">&quot;data&quot;</span>))
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetBagofBitsElementSummary</span>(data_element):
+    <span class="enscript-string">&quot;&quot;&quot; Summarizes the Bag of Bits element
+        params: data_element = value of the object of type user_data_value_element_t
+        returns: String with summary of the type.
+    &quot;&quot;&quot;</span>
+    format_str = <span class="enscript-string">&quot;{0: &lt;#020x} {1: &lt;16d} {2: &lt;#020x} {3: &lt;#020x} {4: &lt;16d}&quot;</span>
+    out_string = format_str.format(data_element, unsigned(data_element.e_made), data_element.e_sum, data_element.e_hash, unsigned(data_element.e_size))
+    out_string += <span class="enscript-string">&quot; 0x&quot;</span>
+
+    <span class="enscript-keyword">for</span> i <span class="enscript-keyword">in</span> range(0, (unsigned(data_element.e_size) - 1)):
+      out_string += <span class="enscript-string">&quot;{:02x}&quot;</span>.format(int(data_element.e_data[i]))
+    <span class="enscript-keyword">return</span> out_string
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetIPCHandleSummary</span>(handle_ptr):
+    <span class="enscript-string">&quot;&quot;&quot; converts a handle value inside a voucher attribute table to ipc element and returns appropriate summary.
+        params: handle_ptr - uint64 number stored in handle of voucher.
+        returns: str - string summary of the element held in internal structure
+    &quot;&quot;&quot;</span>
+    elem = kern.GetValueFromAddress(handle_ptr, <span class="enscript-string">'ipc_importance_elem_t'</span>)
+    <span class="enscript-keyword">if</span> elem.iie_bits &amp; 0x80000000 :
+        iie = Cast(elem, <span class="enscript-string">'struct ipc_importance_inherit *'</span>)
+        <span class="enscript-keyword">return</span> GetIPCImportanceInheritSummary(iie)
+    <span class="enscript-keyword">else</span>:
+        iit = Cast(elem, <span class="enscript-string">'struct ipc_importance_task *'</span>)
+        <span class="enscript-keyword">return</span> GetIPCImportantTaskSummary(iit)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetATMHandleSummary</span>(handle_ptr):
+    <span class="enscript-string">&quot;&quot;&quot; Convert a handle value to atm value and returns corresponding summary of its fields.
+        params: handle_ptr - uint64 number stored in handle of voucher
+        returns: str - summary of atm value
+    &quot;&quot;&quot;</span>
+    elem = kern.GetValueFromAddress(handle_ptr, <span class="enscript-string">'atm_value *'</span>)
+    <span class="enscript-keyword">return</span> GetATMValueSummary(elem)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetBankHandleSummary</span>(handle_ptr):
+    <span class="enscript-string">&quot;&quot;&quot; converts a handle value inside a voucher attribute table to bank element and returns appropriate summary.
+        params: handle_ptr - uint64 number stored in handle of voucher.
+        returns: str - summary of bank element
+    &quot;&quot;&quot;</span>
+    elem = kern.GetValueFromAddress(handle_ptr, <span class="enscript-string">'bank_element_t'</span>)
+    <span class="enscript-keyword">if</span> elem.be_type &amp; 1 :
+        ba = Cast(elem, <span class="enscript-string">'struct bank_account *'</span>)
+        <span class="enscript-keyword">return</span> GetBankAccountSummary(ba)
+    <span class="enscript-keyword">else</span>:
+        bt = Cast(elem, <span class="enscript-string">'struct bank_task *'</span>)
+        <span class="enscript-keyword">return</span> GetBankTaskSummary(bt)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetBagofBitsHandleSummary</span>(handle_ptr):
+    <span class="enscript-string">&quot;&quot;&quot; Convert a handle value to bag of bits value and returns corresponding summary of its fields.
+        params: handle_ptr - uint64 number stored in handle of voucher
+        returns: str - summary of bag of bits element
+    &quot;&quot;&quot;</span>
+    elem = kern.GetValueFromAddress(handle_ptr, <span class="enscript-string">'user_data_element_t'</span>)
+    <span class="enscript-keyword">return</span> GetBagofBitsElementSummary(elem)
+
+@static_var(<span class="enscript-string">'attr_managers'</span>,{1: GetATMHandleSummary, 2: GetIPCHandleSummary, 3: GetBankHandleSummary, 7: GetBagofBitsHandleSummary})
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetHandleSummaryForKey</span>(handle_ptr, key_num):
+    <span class="enscript-string">&quot;&quot;&quot; Get a summary of handle pointer from the voucher attribute manager. 
+        For example key 1 -&gt; ATM and it puts atm_value_t in the handle. So summary of it would be atm value and refs etc.
+                    key 2 -&gt; ipc and it puts either ipc_importance_inherit_t or ipc_important_task_t.
+                    key 3 -&gt; Bank and it puts either bank_task_t or bank_account_t.
+                    key 7 -&gt; Bag of Bits and it puts user_data_element_t in handle. So summary of it would be Bag of Bits content and refs etc.
+    &quot;&quot;&quot;</span>
+    key_num = int(key_num)
+    <span class="enscript-keyword">if</span> key_num <span class="enscript-keyword">not</span> <span class="enscript-keyword">in</span> GetHandleSummaryForKey.attr_managers:
+        <span class="enscript-keyword">return</span> <span class="enscript-string">&quot;Unknown key %d&quot;</span> % key_num
+    <span class="enscript-keyword">return</span> GetHandleSummaryForKey.attr_managers[key_num](handle_ptr)
+
+
+@header(<span class="enscript-string">&quot;{: &lt;18s} {: &lt;18s} {: &lt;10s} {: &lt;4s} {: &lt;18s} {: &lt;18s}&quot;</span>.format(<span class="enscript-string">&quot;ivace&quot;</span>, <span class="enscript-string">&quot;value_handle&quot;</span>, <span class="enscript-string">&quot;#refs&quot;</span>, <span class="enscript-string">&quot;rel?&quot;</span>, <span class="enscript-string">&quot;maderefs&quot;</span>, <span class="enscript-string">&quot;next_layer&quot;</span>))
+@lldb_type_summary([<span class="enscript-string">'ivac_entry *'</span>, <span class="enscript-string">'ivac_entry_t'</span>])
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetIPCVoucherAttributeEntrySummary</span>(ivace, manager_key_num = 0):
+    <span class="enscript-string">&quot;&quot;&quot; Get summary for voucher attribute entry.
+    &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">&quot;&quot;</span>
+    fmt = <span class="enscript-string">&quot;{e: &lt;#018x} {e.ivace_value: &lt;#018x} {e.ivace_refs: &lt;10d} {release: &lt;4s} {made_refs: &lt;18s} {next_layer: &lt;18s}&quot;</span>
+    release_str = <span class="enscript-string">&quot;&quot;</span>
+    free_str = <span class="enscript-string">&quot;&quot;</span>
+    made_refs = <span class="enscript-string">&quot;&quot;</span>
+    next_layer = <span class="enscript-string">&quot;&quot;</span>
+
+    <span class="enscript-keyword">if</span> unsigned(ivace.ivace_releasing):
+        release_str = <span class="enscript-string">&quot;Y&quot;</span>
+    <span class="enscript-keyword">if</span> unsigned(ivace.ivace_free):
+        free_str = <span class="enscript-string">'F'</span>
+    <span class="enscript-keyword">if</span> unsigned(ivace.ivace_layered):
+        next_layer = <span class="enscript-string">&quot;{: &lt;#018x}&quot;</span>.format(ivace.ivace_u.ivaceu_layer)
+    <span class="enscript-keyword">else</span>:
+        made_refs = <span class="enscript-string">&quot;{: &lt;18d}&quot;</span>.format(ivace.ivace_u.ivaceu_made)
+
+    out_str += fmt.format(e=ivace, release=release_str, made_refs=made_refs, next_layer=next_layer)
+    <span class="enscript-keyword">if</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vHUMAN <span class="enscript-keyword">and</span> manager_key_num &gt; 0:
+        out_str += <span class="enscript-string">&quot; &quot;</span> + GetHandleSummaryForKey(unsigned(ivace.ivace_value), manager_key_num)
+    <span class="enscript-keyword">if</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vHUMAN :
+        out_str += <span class="enscript-string">' {: &lt;2s} {: &lt;4d} {: &lt;4d}'</span>.format(free_str, ivace.ivace_next, ivace.ivace_index)
+    <span class="enscript-keyword">return</span> out_str
+
+@lldb_command(<span class="enscript-string">'showivacfreelist'</span>,<span class="enscript-string">''</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowIVACFreeList</span>(cmd_args=[], cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Walk the free list and print every entry in the list.
+        usage: (lldb) showivacfreelist &lt;ipc_voucher_attr_control_t&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">'Please provide &lt;ipc_voucher_attr_control_t&gt;'</span>)
+    ivac = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'ipc_voucher_attr_control_t'</span>)
+    <span class="enscript-keyword">print</span> GetIPCVoucherAttrControlSummary.header
+    <span class="enscript-keyword">print</span> GetIPCVoucherAttrControlSummary(ivac)
+    <span class="enscript-keyword">if</span> unsigned(ivac.ivac_freelist) == 0:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;ivac table is full&quot;</span>
+        <span class="enscript-keyword">return</span>
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;index &quot;</span> + GetIPCVoucherAttributeEntrySummary.header
+    next_free = unsigned(ivac.ivac_freelist)
+    <span class="enscript-keyword">while</span> next_free != 0:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{: &lt;5d} &quot;</span>.format(next_free) + GetIPCVoucherAttributeEntrySummary(addressof(ivac.ivac_table[next_free]))
+        next_free = unsigned(ivac.ivac_table[next_free].ivace_next)
+
+
+
+@header(<span class="enscript-string">'{: &lt;18s} {: &lt;8s} {: &lt;18s} {: &lt;18s} {: &lt;18s} {: &lt;18s} {: &lt;18s}'</span>.format(<span class="enscript-string">&quot;ipc_voucher&quot;</span>, <span class="enscript-string">&quot;refs&quot;</span>, <span class="enscript-string">&quot;checksum&quot;</span>, <span class="enscript-string">&quot;hash&quot;</span>, <span class="enscript-string">&quot;tbl_size&quot;</span>, <span class="enscript-string">&quot;table&quot;</span>, <span class="enscript-string">&quot;voucher_port&quot;</span>))
+@lldb_type_summary([<span class="enscript-string">'ipc_voucher *'</span>, <span class="enscript-string">'ipc_voucher_t'</span>])
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetIPCVoucherSummary</span>(voucher, show_entries=False):
+    <span class="enscript-string">&quot;&quot;&quot; describe a voucher from its ipc_voucher * object &quot;&quot;&quot;</span>
+    out_str = <span class="enscript-string">&quot;&quot;</span>
+    fmt = <span class="enscript-string">&quot;{v: &lt;#018x} {v.iv_refs: &lt;8d} {v.iv_sum: &lt;#018x} {v.iv_hash: &lt;#018x} {v.iv_table_size: &lt;#018x} {v.iv_table: &lt;#018x} {v.iv_port: &lt;#018x}&quot;</span>
+    out_str += fmt.format(v = voucher)
+    entries_str = <span class="enscript-string">''</span>
+    <span class="enscript-keyword">if</span> show_entries <span class="enscript-keyword">or</span> config[<span class="enscript-string">'verbosity'</span>] &gt; vHUMAN:
+        elems = unsigned(voucher.iv_table_size)
+        entries_header_str = <span class="enscript-string">&quot;\n\t&quot;</span> + <span class="enscript-string">&quot;{: &lt;5s} {: &lt;3s} {: &lt;16s} {: &lt;30s}&quot;</span>.format(<span class="enscript-string">&quot;index&quot;</span>, <span class="enscript-string">&quot;key&quot;</span>, <span class="enscript-string">&quot;value_index&quot;</span>, <span class="enscript-string">&quot;manager&quot;</span>) + <span class="enscript-string">&quot; &quot;</span> + GetIPCVoucherAttributeEntrySummary.header
+        fmt =  <span class="enscript-string">&quot;{: &lt;5d} {: &lt;3d} {: &lt;16d} {: &lt;30s}&quot;</span>
+        <span class="enscript-keyword">for</span> i <span class="enscript-keyword">in</span> range(elems):
+            voucher_entry_index = unsigned(voucher.iv_inline_table[i])
+            <span class="enscript-keyword">if</span> voucher_entry_index:
+                s = fmt.format(i, GetVoucherManagerKeyForIndex(i), voucher_entry_index, GetVoucherAttributeManagerNameForIndex(i))
+                e = GetVoucherValueHandleFromVoucherForIndex(voucher, i)
+                <span class="enscript-keyword">if</span> e <span class="enscript-keyword">is</span> <span class="enscript-keyword">not</span> None:
+                    s += <span class="enscript-string">&quot; &quot;</span> + GetIPCVoucherAttributeEntrySummary(addressof(e), GetVoucherManagerKeyForIndex(i) )
+                <span class="enscript-keyword">if</span> entries_header_str :
+                    entries_str = entries_header_str
+                    entries_header_str = <span class="enscript-string">''</span>
+                entries_str += <span class="enscript-string">&quot;\n\t&quot;</span> + s 
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> entries_header_str:
+            entries_str += <span class="enscript-string">&quot;\n\t&quot;</span>
+    out_str += entries_str
+    <span class="enscript-keyword">return</span> out_str
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetVoucherManagerKeyForIndex</span>(idx):
+    <span class="enscript-string">&quot;&quot;&quot; Returns key number for index based on global table. Will raise index error if value is incorrect
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">return</span> unsigned(kern.globals.iv_global_table[idx].ivgte_key)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetVoucherAttributeManagerForKey</span>(k):
+    <span class="enscript-string">&quot;&quot;&quot; Walks through the iv_global_table and finds the attribute manager name
+        params: k - int key number of the manager
+        return: cvalue - the attribute manager object. 
+                None - if not found
+    &quot;&quot;&quot;</span>
+    retval = None
+    entry_size = sizeof(kern.globals.iv_global_table[0])
+    elems = sizeof(kern.globals.iv_global_table) / entry_size
+    <span class="enscript-keyword">for</span> i <span class="enscript-keyword">in</span> range(elems):
+        elt = addressof(kern.globals.iv_global_table[i])
+        <span class="enscript-keyword">if</span> k == unsigned(elt.ivgte_key):
+            retval = elt.ivgte_manager
+            <span class="enscript-keyword">break</span>
+    <span class="enscript-keyword">return</span> retval
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetVoucherAttributeControllerForKey</span>(k):
+    <span class="enscript-string">&quot;&quot;&quot; Walks through the iv_global_table and finds the attribute controller
+        params: k - int key number of the manager
+        return: cvalue - the attribute controller object. 
+                None - if not found
+    &quot;&quot;&quot;</span>
+    retval = None
+    entry_size = sizeof(kern.globals.iv_global_table[0])
+    elems = sizeof(kern.globals.iv_global_table) / entry_size
+    <span class="enscript-keyword">for</span> i <span class="enscript-keyword">in</span> range(elems):
+        elt = addressof(kern.globals.iv_global_table[i])
+        <span class="enscript-keyword">if</span> k == unsigned(elt.ivgte_key):
+            retval = elt.ivgte_control
+            <span class="enscript-keyword">break</span>
+    <span class="enscript-keyword">return</span> retval
+
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetVoucherAttributeManagerName</span>(ivam):
+    <span class="enscript-string">&quot;&quot;&quot; find the name of the ivam object
+        param: ivam - cvalue object of type ipc_voucher_attr_manager_t
+        returns: str - name of the manager
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">return</span> kern.Symbolicate(unsigned(ivam))
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetVoucherAttributeManagerNameForIndex</span>(idx):
+    <span class="enscript-string">&quot;&quot;&quot; get voucher attribute manager name for index 
+        return: str - name of the attribute manager object
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">return</span> GetVoucherAttributeManagerName(GetVoucherAttributeManagerForKey(GetVoucherManagerKeyForIndex(idx)))
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">GetVoucherValueHandleFromVoucherForIndex</span>(voucher, idx):
+    <span class="enscript-string">&quot;&quot;&quot; traverse the voucher attrs and get value_handle in the voucher attr controls table
+        params:
+            voucher - cvalue object of type ipc_voucher_t
+            idx - int index in the entries for which you wish to get actual handle for
+        returns: cvalue object of type ivac_entry_t
+                 None if no handle found.
+    &quot;&quot;&quot;</span>
+    manager_key = GetVoucherManagerKeyForIndex(idx)
+    voucher_num_elems = unsigned(voucher.iv_table_size)
+    <span class="enscript-keyword">if</span> idx &gt;= voucher_num_elems:
+        debuglog(<span class="enscript-string">&quot;idx %d is out of range max: %d&quot;</span> % (idx, voucher_num_elems))
+        <span class="enscript-keyword">return</span> None
+    voucher_entry_value = unsigned(voucher.iv_inline_table[idx])
+    debuglog(<span class="enscript-string">&quot;manager_key %d&quot;</span> % manager_key)
+    ivac = GetVoucherAttributeControllerForKey(manager_key)
+    <span class="enscript-keyword">if</span> ivac <span class="enscript-keyword">is</span> None <span class="enscript-keyword">or</span> unsigned(ivac) == 0:
+        debuglog(<span class="enscript-string">&quot;No voucher attribute controller for idx %d&quot;</span> % idx)
+        <span class="enscript-keyword">return</span> None
+
+    ivac = kern.GetValueFromAddress(unsigned(ivac), <span class="enscript-string">'ipc_voucher_attr_control_t'</span>)  <span class="enscript-comment"># ??? No idea why lldb does not addressof directly
+</span>    ivace_table = ivac.ivac_table
+    <span class="enscript-keyword">if</span> voucher_entry_value &gt;= unsigned(ivac.ivac_table_size):
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Failed to get ivace for value %d in table of size %d&quot;</span> % (voucher_entry_value, unsigned(ivac.ivac_table_size))
+        <span class="enscript-keyword">return</span> None
+    <span class="enscript-keyword">return</span> ivace_table[voucher_entry_value]
+
+
+
+@lldb_command(<span class="enscript-string">'showallvouchers'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAllVouchers</span>(cmd_args=[], cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Display a list of all vouchers in the global voucher hash table
+        Usage: (lldb) showallvouchers 
+    &quot;&quot;&quot;</span>
+    iv_hash_table = kern.globals.ivht_bucket
+    num_buckets =  sizeof(kern.globals.ivht_bucket) / sizeof(kern.globals.ivht_bucket[0])
+    <span class="enscript-keyword">print</span> GetIPCVoucherSummary.header
+    <span class="enscript-keyword">for</span> i <span class="enscript-keyword">in</span> range(num_buckets):
+        <span class="enscript-keyword">for</span> v <span class="enscript-keyword">in</span> IterateQueue(iv_hash_table[i], <span class="enscript-string">'ipc_voucher_t'</span>, <span class="enscript-string">'iv_hash_link'</span>):
+            <span class="enscript-keyword">print</span> GetIPCVoucherSummary(v)
+
+@lldb_command(<span class="enscript-string">'showvoucher'</span>, <span class="enscript-string">''</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowVoucher</span>(cmd_args=[], cmd_options={}):
+    <span class="enscript-string">&quot;&quot;&quot; Describe a voucher from &lt;ipc_voucher_t&gt; argument.
+        Usage: (lldb) showvoucher &lt;ipc_voucher_t&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Please provide valid argument&quot;</span>)
+
+    voucher = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'ipc_voucher_t'</span>)
+    <span class="enscript-keyword">print</span> GetIPCVoucherSummary.header
+    <span class="enscript-keyword">print</span> GetIPCVoucherSummary(voucher, show_entries=True)
+    
+
+</pre>
+<hr />
+</body></html>

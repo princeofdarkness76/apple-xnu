@@ -1,0 +1,934 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>printf.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">printf.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989,1988 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+
+<span class="enscript-comment">/*
+ *  Common code for printf et al.
+ *
+ *  The calling routine typically takes a variable number of arguments,
+ *  and passes the address of the first one.  This implementation
+ *  assumes a straightforward, stack implementation, aligned to the
+ *  machine's wordsize.  Increasing addresses are assumed to point to
+ *  successive arguments (left-to-right), as is the case for a machine
+ *  with a downward-growing stack with arguments pushed right-to-left.
+ *
+ *  To write, for example, fprintf() using this routine, the code
+ *
+ *	fprintf(fd, format, args)
+ *	FILE *fd;
+ *	char *format;
+ *	{
+ *	_doprnt(format, &amp;args, fd);
+ *	}
+ *
+ *  would suffice.  (This example does not handle the fprintf's &quot;return
+ *  value&quot; correctly, but who looks at the return value of fprintf
+ *  anyway?)
+ *
+ *  This version implements the following printf features:
+ *
+ *	%d	decimal conversion
+ *	%u	unsigned conversion
+ *	%x	hexadecimal conversion
+ *	%X	hexadecimal conversion with capital letters
+ *      %D      hexdump, ptr &amp; separator string (&quot;%6D&quot;, ptr, &quot;:&quot;) -&gt; XX:XX:XX:XX:XX:XX
+ *              if you use, &quot;%*D&quot; then there's a length, the data ptr and then the separator
+ *	%o	octal conversion
+ *	%c	character
+ *	%s	string
+ *	%m.n	field width, precision
+ *	%-m.n	left adjustment
+ *	%0m.n	zero-padding
+ *	%*.*	width and precision taken from arguments
+ *
+ *  This version does not implement %f, %e, or %g.
+ *
+ *  As mentioned, this version does not return any reasonable value.
+ *
+ *  Permission is granted to use, modify, or propagate this code as
+ *  long as this notice is incorporated.
+ *
+ *  Steve Summit 3/25/87
+ *
+ *  Tweaked for long long support and extended to support the hexdump %D
+ *  specifier by dbg 05/02/02.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Added formats for decoding device registers:
+ *
+ * printf(&quot;reg = %b&quot;, regval, &quot;&lt;base&gt;&lt;arg&gt;*&quot;)
+ *
+ * where &lt;base&gt; is the output base expressed as a control character:
+ * i.e. '\10' gives octal, '\20' gives hex.  Each &lt;arg&gt; is a sequence of
+ * characters, the first of which gives the bit number to be inspected
+ * (origin 1), and the rest (up to a control character (&lt;= 32)) give the
+ * name of the register.  Thus
+ *	printf(&quot;reg = %b\n&quot;, 3, &quot;\10\2BITTWO\1BITONE&quot;)
+ * would produce
+ *	reg = 3&lt;BITTWO,BITONE&gt;
+ *
+ * If the second character in &lt;arg&gt; is also a control character, it
+ * indicates the last bit of a bit field.  In this case, printf will extract
+ * bits &lt;1&gt; to &lt;2&gt; and print it.  Characters following the second control
+ * character are printed before the bit field.
+ *	printf(&quot;reg = %b\n&quot;, 0xb, &quot;\10\4\3FIELD1=\2BITTWO\1BITONE&quot;)
+ * would produce
+ *	reg = b&lt;FIELD1=2,BITONE&gt;
+ *
+ * The %B format is like %b but the bits are numbered from the most
+ * significant (the bit weighted 31), which is called 1, to the least
+ * significant, called 32.
+ */</span>
+<span class="enscript-comment">/*
+ * Added for general use:
+ *	#	prefix for alternate format:
+ *		0x (0X) for hex
+ *		leading 0 for octal
+ *	+	print '+' if positive
+ *	blank	print ' ' if positive
+ *
+ *	z	signed hexadecimal
+ *	r	signed, 'radix'
+ *	n	unsigned, 'radix'
+ *
+ *	D,U,O,Z	same as corresponding lower-case versions
+ *		(compatibility)
+ */</span>
+<span class="enscript-comment">/*
+ * Added support for print long long (64-bit) integers.
+ * Use %lld, %Ld or %qd to print a 64-bit int.  Other
+ * output bases such as x, X, u, U, o, and O also work.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach_kdp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdarg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach_assert.h&gt;</span>
+#<span class="enscript-reference">ifdef</span>  <span class="enscript-variable-name">MACH_BSD</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/msgbuf.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;console/serial_protos.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">isdigit</span>(d) ((d) &gt;= <span class="enscript-string">'0'</span> &amp;&amp; (d) &lt;= <span class="enscript-string">'9'</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">Ctod</span>(c) ((c) - <span class="enscript-string">'0'</span>)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAXBUF</span> (sizeof(long long int) * 8)	<span class="enscript-comment">/* enough for binary */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> digs[] = <span class="enscript-string">&quot;0123456789abcdef&quot;</span>;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_NO_PRINTF_STRINGS</span>
+<span class="enscript-comment">/* Prevent CPP from breaking the definition below */</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">printf</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">_consume_printf_args</span>(<span class="enscript-type">int</span> a __unused, ...)
+{
+    <span class="enscript-keyword">return</span> 0;
+}
+<span class="enscript-type">void</span> <span class="enscript-function-name">_consume_kprintf_args</span>(<span class="enscript-type">int</span> a __unused, ...)
+{
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">printnum</span>(
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> <span class="enscript-type">long</span> <span class="enscript-type">int</span>	u,	<span class="enscript-comment">/* number to print */</span>
+	<span class="enscript-type">int</span>		base,
+	<span class="enscript-type">void</span>			(*putc)(<span class="enscript-type">int</span>, <span class="enscript-type">void</span> *),
+	<span class="enscript-type">void</span>                    *arg)
+{
+	<span class="enscript-type">char</span>	buf[MAXBUF];	<span class="enscript-comment">/* build number here */</span>
+	<span class="enscript-type">char</span> *	p = &amp;buf[MAXBUF-1];
+	<span class="enscript-type">int</span> nprinted = 0;
+
+	<span class="enscript-keyword">do</span> {
+	    *p-- = digs[u % base];
+	    u /= base;
+	} <span class="enscript-keyword">while</span> (u != 0);
+
+	<span class="enscript-keyword">while</span> (++p != &amp;buf[MAXBUF]) {
+	    (*putc)(*p, arg);
+	    nprinted++;
+	}
+
+	<span class="enscript-keyword">return</span> nprinted;
+}
+
+boolean_t	_doprnt_truncates = FALSE;
+
+#<span class="enscript-reference">if</span> (<span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>) 
+boolean_t	doprnt_hide_pointers = FALSE;
+#<span class="enscript-reference">else</span>
+boolean_t	doprnt_hide_pointers = TRUE;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">__doprnt</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*fmt,
+	va_list			argp,
+						<span class="enscript-comment">/* character output routine */</span>
+	<span class="enscript-type">void</span>			(*putc)(<span class="enscript-type">int</span>, <span class="enscript-type">void</span> *arg),
+	<span class="enscript-type">void</span>                    *arg,
+	<span class="enscript-type">int</span>			radix,		<span class="enscript-comment">/* default radix - for '%r' */</span>
+	<span class="enscript-type">int</span>			is_log)
+{
+	<span class="enscript-type">int</span>		length;
+	<span class="enscript-type">int</span>		prec;
+	boolean_t	ladjust;
+	<span class="enscript-type">char</span>		padc;
+	<span class="enscript-type">long</span> <span class="enscript-type">long</span>		n;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> <span class="enscript-type">long</span>	u;
+	<span class="enscript-type">int</span>		plus_sign;
+	<span class="enscript-type">int</span>		sign_char;
+	boolean_t	altfmt, truncate;
+	<span class="enscript-type">int</span>		base;
+	<span class="enscript-type">char</span>	c;
+	<span class="enscript-type">int</span>		capitals;
+	<span class="enscript-type">int</span>		long_long;
+	<span class="enscript-type">int</span>             nprinted = 0;
+
+	<span class="enscript-keyword">while</span> ((c = *fmt) != <span class="enscript-string">'\0'</span>) {
+	    <span class="enscript-keyword">if</span> (c != <span class="enscript-string">'%'</span>) {
+		(*putc)(c, arg);
+		nprinted++;
+		fmt++;
+		<span class="enscript-keyword">continue</span>;
+	    }
+
+	    fmt++;
+
+	    long_long = 0;
+	    length = 0;
+	    prec = -1;
+	    ladjust = FALSE;
+	    padc = <span class="enscript-string">' '</span>;
+	    plus_sign = 0;
+	    sign_char = 0;
+	    altfmt = FALSE;
+
+	    <span class="enscript-keyword">while</span> (TRUE) {
+		c = *fmt;
+		<span class="enscript-keyword">if</span> (c == <span class="enscript-string">'#'</span>) {
+		    altfmt = TRUE;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (c == <span class="enscript-string">'-'</span>) {
+		    ladjust = TRUE;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (c == <span class="enscript-string">'+'</span>) {
+		    plus_sign = <span class="enscript-string">'+'</span>;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (c == <span class="enscript-string">' '</span>) {
+		    <span class="enscript-keyword">if</span> (plus_sign == 0)
+			plus_sign = <span class="enscript-string">' '</span>;
+		}
+		<span class="enscript-keyword">else</span>
+		    <span class="enscript-keyword">break</span>;
+		fmt++;
+	    }
+
+	    <span class="enscript-keyword">if</span> (c == <span class="enscript-string">'0'</span>) {
+		padc = <span class="enscript-string">'0'</span>;
+		c = *++fmt;
+	    }
+
+	    <span class="enscript-keyword">if</span> (isdigit(c)) {
+		<span class="enscript-keyword">while</span>(isdigit(c)) {
+		    length = 10 * length + Ctod(c);
+		    c = *++fmt;
+		}
+	    }
+	    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (c == <span class="enscript-string">'*'</span>) {
+		length = va_arg(argp, <span class="enscript-type">int</span>);
+		c = *++fmt;
+		<span class="enscript-keyword">if</span> (length &lt; 0) {
+		    ladjust = !ladjust;
+		    length = -length;
+		}
+	    }
+
+	    <span class="enscript-keyword">if</span> (c == <span class="enscript-string">'.'</span>) {
+		c = *++fmt;
+		<span class="enscript-keyword">if</span> (isdigit(c)) {
+		    prec = 0;
+		    <span class="enscript-keyword">while</span>(isdigit(c)) {
+			prec = 10 * prec + Ctod(c);
+			c = *++fmt;
+		    }
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (c == <span class="enscript-string">'*'</span>) {
+		    prec = va_arg(argp, <span class="enscript-type">int</span>);
+		    c = *++fmt;
+		}
+	    }
+
+	    <span class="enscript-keyword">if</span> (c == <span class="enscript-string">'l'</span>) {
+		c = *++fmt;	<span class="enscript-comment">/* need it if sizeof(int) &lt; sizeof(long) */</span>
+		<span class="enscript-keyword">if</span> (<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)&lt;<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span>))
+		    long_long = 1;
+		<span class="enscript-keyword">if</span> (c == <span class="enscript-string">'l'</span>) {
+		    long_long = 1;
+		    c = *++fmt;
+		}	
+	    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (c == <span class="enscript-string">'q'</span> || c == <span class="enscript-string">'L'</span>) {
+	    	long_long = 1;
+		c = *++fmt;
+	    } 
+
+	    truncate = FALSE;
+	    capitals=0;		<span class="enscript-comment">/* Assume lower case printing */</span>
+
+	    <span class="enscript-keyword">switch</span>(c) {
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'b'</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'B'</span>:
+		{
+		    <span class="enscript-type">register</span> <span class="enscript-type">char</span> *p;
+		    boolean_t	  any;
+		    <span class="enscript-type">register</span> <span class="enscript-type">int</span>  i;
+
+		    <span class="enscript-keyword">if</span> (long_long) {
+			u = va_arg(argp, <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> <span class="enscript-type">long</span>);
+		    } <span class="enscript-keyword">else</span> {
+			u = va_arg(argp, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>);
+		    }
+		    p = va_arg(argp, <span class="enscript-type">char</span> *);
+		    base = *p++;
+		    nprinted += printnum(u, base, putc, arg);
+
+		    <span class="enscript-keyword">if</span> (u == 0)
+			<span class="enscript-keyword">break</span>;
+
+		    any = FALSE;
+		    <span class="enscript-keyword">while</span> ((i = *p++) != <span class="enscript-string">'\0'</span>) {
+			<span class="enscript-keyword">if</span> (*fmt == <span class="enscript-string">'B'</span>)
+			    i = 33 - i;
+			<span class="enscript-keyword">if</span> (*p &lt;= 32) {
+			    <span class="enscript-comment">/*
+			     * Bit field
+			     */</span>
+			    <span class="enscript-type">register</span> <span class="enscript-type">int</span> j;
+			    <span class="enscript-keyword">if</span> (any)
+				(*putc)(<span class="enscript-string">','</span>, arg);
+			    <span class="enscript-keyword">else</span> {
+				(*putc)(<span class="enscript-string">'&lt;'</span>, arg);
+				any = TRUE;
+			    }
+			    nprinted++;
+			    j = *p++;
+			    <span class="enscript-keyword">if</span> (*fmt == <span class="enscript-string">'B'</span>)
+				j = 32 - j;
+			    <span class="enscript-keyword">for</span> (; (c = *p) &gt; 32; p++) {
+				(*putc)(c, arg);
+				nprinted++;
+			    }
+			    nprinted += printnum((<span class="enscript-type">unsigned</span>)( (u&gt;&gt;(j-1)) &amp; ((2&lt;&lt;(i-j))-1)),
+						 base, putc, arg);
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (u &amp; (1&lt;&lt;(i-1))) {
+			    <span class="enscript-keyword">if</span> (any)
+				(*putc)(<span class="enscript-string">','</span>, arg);
+			    <span class="enscript-keyword">else</span> {
+				(*putc)(<span class="enscript-string">'&lt;'</span>, arg);
+				any = TRUE;
+			    }
+			    nprinted++;
+			    <span class="enscript-keyword">for</span> (; (c = *p) &gt; 32; p++) {
+				(*putc)(c, arg);
+				nprinted++;
+			    }
+			}
+			<span class="enscript-keyword">else</span> {
+			    <span class="enscript-keyword">for</span> (; *p &gt; 32; p++)
+				<span class="enscript-keyword">continue</span>;
+			}
+		    }
+		    <span class="enscript-keyword">if</span> (any) {
+			(*putc)(<span class="enscript-string">'&gt;'</span>, arg);
+			nprinted++;
+		    }
+		    <span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'c'</span>:
+		    c = va_arg(argp, <span class="enscript-type">int</span>);
+		    (*putc)(c, arg);
+		    nprinted++;
+		    <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'s'</span>:
+		{
+		    <span class="enscript-type">register</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *p;
+		    <span class="enscript-type">register</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *p2;
+
+		    <span class="enscript-keyword">if</span> (prec == -1)
+			prec = 0x7fffffff;	<span class="enscript-comment">/* MAXINT */</span>
+
+		    p = va_arg(argp, <span class="enscript-type">char</span> *);
+
+		    <span class="enscript-keyword">if</span> (p == NULL)
+			p = <span class="enscript-string">&quot;&quot;</span>;
+
+		    <span class="enscript-keyword">if</span> (length &gt; 0 &amp;&amp; !ladjust) {
+			n = 0;
+			p2 = p;
+
+			<span class="enscript-keyword">for</span> (; *p != <span class="enscript-string">'\0'</span> &amp;&amp; n &lt; prec; p++)
+			    n++;
+
+			p = p2;
+
+			<span class="enscript-keyword">while</span> (n &lt; length) {
+			    (*putc)(<span class="enscript-string">' '</span>, arg);
+			    n++;
+			    nprinted++;
+			}
+		    }
+
+		    n = 0;
+
+		    <span class="enscript-keyword">while</span> ((n &lt; prec) &amp;&amp; (!(length &gt; 0 &amp;&amp; n &gt;= length))) {
+			    <span class="enscript-keyword">if</span> (*p == <span class="enscript-string">'\0'</span>) {
+				    <span class="enscript-keyword">break</span>;
+			    }
+			    (*putc)(*p++, arg);
+			    nprinted++;
+			    n++;
+		    }
+
+		    <span class="enscript-keyword">if</span> (n &lt; length &amp;&amp; ladjust) {
+			<span class="enscript-keyword">while</span> (n &lt; length) {
+			    (*putc)(<span class="enscript-string">' '</span>, arg);
+			    n++;
+			    nprinted++;
+			}
+		    }
+
+		    <span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'o'</span>:
+		    truncate = _doprnt_truncates;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'O'</span>:
+		    base = 8;
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">print_unsigned</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'D'</span>: {
+		    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *up;
+		    <span class="enscript-type">char</span> *q, *p;
+		    
+			up = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *)va_arg(argp, <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *);
+			p = (<span class="enscript-type">char</span> *)va_arg(argp, <span class="enscript-type">char</span> *);
+			<span class="enscript-keyword">if</span> (length == -1)
+				length = 16;
+			<span class="enscript-keyword">while</span>(length--) {
+				(*putc)(digs[(*up &gt;&gt; 4)], arg);
+				(*putc)(digs[(*up &amp; 0x0f)], arg);
+				nprinted += 2;
+				up++;
+				<span class="enscript-keyword">if</span> (length) {
+				    <span class="enscript-keyword">for</span> (q=p;*q;q++) {
+						(*putc)(*q, arg);
+						nprinted++;
+				    }
+				}
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'d'</span>:
+		    truncate = _doprnt_truncates;
+		    base = 10;
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">print_signed</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'u'</span>:
+		    truncate = _doprnt_truncates;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'U'</span>:
+		    base = 10;
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">print_unsigned</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'p'</span>:
+		    altfmt = TRUE;
+		    <span class="enscript-keyword">if</span> (<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)&lt;<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span> *)) {
+			long_long = 1;
+		    }
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'x'</span>:
+		    truncate = _doprnt_truncates;
+		    base = 16;
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">print_unsigned</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'X'</span>:
+		    base = 16;
+		    capitals=16;	<span class="enscript-comment">/* Print in upper case */</span>
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">print_unsigned</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'z'</span>:
+		    truncate = _doprnt_truncates;
+		    base = 16;
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">print_signed</span>;
+			
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'Z'</span>:
+		    base = 16;
+		    capitals=16;	<span class="enscript-comment">/* Print in upper case */</span>
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">print_signed</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'r'</span>:
+		    truncate = _doprnt_truncates;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'R'</span>:
+		    base = radix;
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">print_signed</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'n'</span>:
+		    truncate = _doprnt_truncates;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'N'</span>:
+		    base = radix;
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">print_unsigned</span>;
+
+		<span class="enscript-reference">print_signed</span>:
+		    <span class="enscript-keyword">if</span> (long_long) {
+			n = va_arg(argp, <span class="enscript-type">long</span> <span class="enscript-type">long</span>);
+		    } <span class="enscript-keyword">else</span> {
+			n = va_arg(argp, <span class="enscript-type">int</span>);
+		    }
+		    <span class="enscript-keyword">if</span> (n &gt;= 0) {
+			u = n;
+			sign_char = plus_sign;
+		    }
+		    <span class="enscript-keyword">else</span> {
+			u = -n;
+			sign_char = <span class="enscript-string">'-'</span>;
+		    }
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">print_num</span>;
+
+		<span class="enscript-reference">print_unsigned</span>:
+		    <span class="enscript-keyword">if</span> (long_long) {
+			u = va_arg(argp, <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> <span class="enscript-type">long</span>);
+		    } <span class="enscript-keyword">else</span> { 
+			u = va_arg(argp, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>);
+		    }
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">print_num</span>;
+
+		<span class="enscript-reference">print_num</span>:
+		{
+		    <span class="enscript-type">char</span>	buf[MAXBUF];	<span class="enscript-comment">/* build number here */</span>
+		    <span class="enscript-type">register</span> <span class="enscript-type">char</span> *	p = &amp;buf[MAXBUF-1];
+		    <span class="enscript-type">static</span> <span class="enscript-type">char</span> digits[] = <span class="enscript-string">&quot;0123456789abcdef0123456789ABCDEF&quot;</span>;
+		    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *prefix = NULL;
+
+		    <span class="enscript-keyword">if</span> (truncate) u = (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)((<span class="enscript-type">int</span>)(u));
+
+		    <span class="enscript-keyword">if</span> (doprnt_hide_pointers &amp;&amp; is_log) {
+			<span class="enscript-type">const</span> <span class="enscript-type">char</span> str[] = <span class="enscript-string">&quot;&lt;ptr&gt;&quot;</span>;
+			<span class="enscript-type">const</span> <span class="enscript-type">char</span>* strp = str;
+			<span class="enscript-type">int</span> strl = <span class="enscript-keyword">sizeof</span>(str) - 1;
+
+			<span class="enscript-keyword">if</span> (u &gt;= VM_MIN_KERNEL_AND_KEXT_ADDRESS &amp;&amp; u &lt;= VM_MAX_KERNEL_ADDRESS) {
+			    <span class="enscript-keyword">while</span>(*strp != <span class="enscript-string">'\0'</span>) {
+				(*putc)(*strp, arg);
+				strp++;
+			    }
+			    nprinted += strl;
+			    <span class="enscript-keyword">break</span>;
+			}
+		    }
+
+		    <span class="enscript-keyword">if</span> (u != 0 &amp;&amp; altfmt) {
+			<span class="enscript-keyword">if</span> (base == 8)
+			    prefix = <span class="enscript-string">&quot;0&quot;</span>;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (base == 16)
+			    prefix = <span class="enscript-string">&quot;0x&quot;</span>;
+		    }
+
+		    <span class="enscript-keyword">do</span> {
+			<span class="enscript-comment">/* Print in the correct case */</span>
+			*p-- = digits[(u % base)+capitals];
+			u /= base;
+		    } <span class="enscript-keyword">while</span> (u != 0);
+
+		    length -= (<span class="enscript-type">int</span>)(&amp;buf[MAXBUF-1] - p);
+		    <span class="enscript-keyword">if</span> (sign_char)
+			length--;
+		    <span class="enscript-keyword">if</span> (prefix)
+			length -= (<span class="enscript-type">int</span>)strlen(prefix);
+
+		    <span class="enscript-keyword">if</span> (padc == <span class="enscript-string">' '</span> &amp;&amp; !ladjust) {
+			<span class="enscript-comment">/* blank padding goes before prefix */</span>
+			<span class="enscript-keyword">while</span> (--length &gt;= 0) {
+			    (*putc)(<span class="enscript-string">' '</span>, arg);
+			    nprinted++;
+			}			    
+		    }
+		    <span class="enscript-keyword">if</span> (sign_char) {
+			(*putc)(sign_char, arg);
+			nprinted++;
+		    }
+		    <span class="enscript-keyword">if</span> (prefix) {
+			<span class="enscript-keyword">while</span> (*prefix) {
+			    (*putc)(*prefix++, arg);
+			    nprinted++;
+			}
+		    }
+		    <span class="enscript-keyword">if</span> (padc == <span class="enscript-string">'0'</span>) {
+			<span class="enscript-comment">/* zero padding goes after sign and prefix */</span>
+			<span class="enscript-keyword">while</span> (--length &gt;= 0) {
+			    (*putc)(<span class="enscript-string">'0'</span>, arg);
+			    nprinted++;
+			}			    
+		    }
+		    <span class="enscript-keyword">while</span> (++p != &amp;buf[MAXBUF]) {
+			(*putc)(*p, arg);
+			nprinted++;
+		    }
+		    
+		    <span class="enscript-keyword">if</span> (ladjust) {
+			<span class="enscript-keyword">while</span> (--length &gt;= 0) {
+			    (*putc)(<span class="enscript-string">' '</span>, arg);
+			    nprinted++;
+			}
+		    }
+		    <span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'\0'</span>:
+		    fmt--;
+		    <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:
+		    (*putc)(c, arg);
+		    nprinted++;
+	    }
+	fmt++;
+	}
+
+	<span class="enscript-keyword">return</span> nprinted;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">dummy_putc</span>(<span class="enscript-type">int</span> ch, <span class="enscript-type">void</span> *arg)
+{
+    <span class="enscript-type">void</span> (*real_putc)(<span class="enscript-type">char</span>) = arg;
+    
+    real_putc(ch);
+}
+
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">_doprnt</span>(
+	<span class="enscript-type">register</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span>	*fmt,
+	va_list			*argp,
+						<span class="enscript-comment">/* character output routine */</span>
+	<span class="enscript-type">void</span>			(*putc)(<span class="enscript-type">char</span>),
+	<span class="enscript-type">int</span>			radix)		<span class="enscript-comment">/* default radix - for '%r' */</span>
+{
+    __doprnt(fmt, *argp, dummy_putc, putc, radix, FALSE);
+}
+
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">_doprnt_log</span>(
+	<span class="enscript-type">register</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span>	*fmt,
+	va_list			*argp,
+						<span class="enscript-comment">/* character output routine */</span>
+	<span class="enscript-type">void</span>			(*putc)(<span class="enscript-type">char</span>),
+	<span class="enscript-type">int</span>			radix)		<span class="enscript-comment">/* default radix - for '%r' */</span>
+{
+    __doprnt(fmt, *argp, dummy_putc, putc, radix, TRUE);
+}
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MP_PRINTF</span> 
+boolean_t	new_printf_cpu_number = FALSE;
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MP_PRINTF */</span>
+
+
+<span class="enscript-function-name">decl_simple_lock_data</span>(,printf_lock)
+<span class="enscript-function-name">decl_simple_lock_data</span>(,bsd_log_spinlock)
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">bsd_log_init</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">void</span> <span class="enscript-function-name">bsd_log_lock</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">void</span> <span class="enscript-function-name">bsd_log_unlock</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">printf_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">/*
+	 * Lock is only really needed after the first thread is created.
+	 */</span>
+	simple_lock_init(&amp;printf_lock, 0);
+	simple_lock_init(&amp;bsd_log_spinlock, 0);
+	bsd_log_init();
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bsd_log_lock</span>(<span class="enscript-type">void</span>)
+{
+	simple_lock(&amp;bsd_log_spinlock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bsd_log_unlock</span>(<span class="enscript-type">void</span>)
+{
+	simple_unlock(&amp;bsd_log_spinlock);
+}
+
+<span class="enscript-comment">/* derived from boot_gets */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">safe_gets</span>(
+	<span class="enscript-type">char</span>	*str,
+	<span class="enscript-type">int</span>	maxlen)
+{
+	<span class="enscript-type">register</span> <span class="enscript-type">char</span> *lp;
+	<span class="enscript-type">register</span> <span class="enscript-type">int</span> c;
+	<span class="enscript-type">char</span> *strmax = str + maxlen - 1; <span class="enscript-comment">/* allow space for trailing 0 */</span>
+
+	lp = str;
+	<span class="enscript-keyword">for</span> (;;) {
+		c = cngetc();
+		<span class="enscript-keyword">switch</span> (c) {
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'\n'</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'\r'</span>:
+			printf(<span class="enscript-string">&quot;\n&quot;</span>);
+			*lp++ = 0;
+			<span class="enscript-keyword">return</span>;
+			
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'\b'</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'#'</span>:
+		<span class="enscript-keyword">case</span> '\177':
+			<span class="enscript-keyword">if</span> (lp &gt; str) {
+				printf(<span class="enscript-string">&quot;\b \b&quot;</span>);
+				lp--;
+			}
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'@'</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'u'</span>&amp;037:
+			lp = str;
+			printf(<span class="enscript-string">&quot;\n\r&quot;</span>);
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">if</span> (c &gt;= <span class="enscript-string">' '</span> &amp;&amp; c &lt; '\177') {
+				<span class="enscript-keyword">if</span> (lp &lt; strmax) {
+					*lp++ = c;
+					printf(<span class="enscript-string">&quot;%c&quot;</span>, c);
+				}
+				<span class="enscript-keyword">else</span> {
+					printf(<span class="enscript-string">&quot;%c&quot;</span>, '\007'); <span class="enscript-comment">/* beep */</span>
+				}
+			}
+		}
+	}
+}
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> disableConsoleOutput;
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">conslog_putc</span>(
+	<span class="enscript-type">char</span> c)
+{
+	<span class="enscript-keyword">if</span> ((debug_mode &amp;&amp; !disable_debug_output) || !disableConsoleOutput)
+		cnputc(c);
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">MACH_BSD</span>
+	<span class="enscript-keyword">if</span> (debug_mode == 0)
+		log_putc(c);
+#<span class="enscript-reference">endif</span>
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cons_putc_locked</span>(
+	<span class="enscript-type">char</span> c)
+{
+	<span class="enscript-keyword">if</span> ((debug_mode &amp;&amp; !disable_debug_output) || !disableConsoleOutput)
+		cnputc(c);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">printf</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *fmt, ...)
+{
+	va_list	listp;
+
+	<span class="enscript-keyword">if</span> (fmt) {
+		disable_preemption();
+		va_start(listp, fmt);
+		_doprnt_log(fmt, &amp;listp, conslog_putc, 16);
+		va_end(listp);
+		enable_preemption();
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">consdebug_putc</span>(<span class="enscript-type">char</span> c)
+{
+	<span class="enscript-keyword">if</span> ((debug_mode &amp;&amp; !disable_debug_output) || !disableConsoleOutput)
+		cnputc(c);
+
+	debug_putc(c);
+
+	<span class="enscript-keyword">if</span> (!console_is_serial())
+		<span class="enscript-keyword">if</span> (!disable_serial_output)
+			PE_kputc(c);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">consdebug_putc_unbuffered</span>(<span class="enscript-type">char</span> c)
+{
+	<span class="enscript-keyword">if</span> ((debug_mode &amp;&amp; !disable_debug_output) || !disableConsoleOutput)
+		cnputc_unbuffered(c);
+
+	debug_putc(c);
+
+	<span class="enscript-keyword">if</span> (!console_is_serial())
+		<span class="enscript-keyword">if</span> (!disable_serial_output)
+			PE_kputc(c);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">consdebug_log</span>(<span class="enscript-type">char</span> c)
+{
+	debug_putc(c);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdb_printf</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *fmt, ...)
+{
+	va_list	listp;
+
+	va_start(listp, fmt);
+	_doprnt_log(fmt, &amp;listp, consdebug_putc, 16);
+	va_end(listp);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdb_log</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *fmt, ...)
+{
+	va_list	listp;
+
+	va_start(listp, fmt);
+	_doprnt(fmt, &amp;listp, consdebug_log, 16);
+	va_end(listp);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdb_printf_unbuffered</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *fmt, ...)
+{
+	va_list	listp;
+
+	va_start(listp, fmt);
+	_doprnt(fmt, &amp;listp, consdebug_putc_unbuffered, 16);
+	va_end(listp);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">copybyte</span>(<span class="enscript-type">int</span> c, <span class="enscript-type">void</span> *arg)
+{
+	<span class="enscript-comment">/*
+	 * arg is a pointer (outside pointer) to the pointer
+	 * (inside pointer) which points to the character.
+	 * We pass a double pointer, so that we can increment
+	 * the inside pointer.
+	 */</span>
+	<span class="enscript-type">char</span>** p = arg;	<span class="enscript-comment">/* cast outside pointer */</span>
+	**p = c;	<span class="enscript-comment">/* store character */</span>
+	(*p)++;		<span class="enscript-comment">/* increment inside pointer */</span>
+}
+
+<span class="enscript-comment">/*
+ * Deprecation Warning:
+ *	sprintf() is being deprecated. Please use snprintf() instead.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sprintf</span>(<span class="enscript-type">char</span> *buf, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *fmt, ...)
+{
+        va_list listp;
+	<span class="enscript-type">char</span> *copybyte_str;
+
+        va_start(listp, fmt);
+        copybyte_str = buf;
+        __doprnt(fmt, listp, copybyte, &amp;copybyte_str, 16, FALSE);
+        va_end(listp);
+	*copybyte_str = <span class="enscript-string">'\0'</span>;
+        <span class="enscript-keyword">return</span> (<span class="enscript-type">int</span>)strlen(buf);
+}
+</pre>
+<hr />
+</body></html>

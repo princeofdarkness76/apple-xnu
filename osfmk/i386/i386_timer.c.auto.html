@@ -1,0 +1,428 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>i386_timer.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">i386_timer.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/*
+ * @APPLE_FREE_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/*
+ *	File:		timer.c
+ *	Purpose:	Routines for handling the machine independent timer.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/timer_queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/timer_call.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/macro_help.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/timer_queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/pms.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/commpage.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_topology.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_threads.h&gt;</span>
+
+uint32_t spurious_timers;
+
+<span class="enscript-comment">/*
+ * 	Event timer interrupt.
+ *
+ * XXX a drawback of this implementation is that events serviced earlier must not set deadlines
+ *     that occur before the entire chain completes.
+ *
+ * XXX a better implementation would use a set of generic callouts and iterate over them
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">timer_intr</span>(<span class="enscript-type">int</span>		user_mode,
+	    uint64_t	rip)
+{
+	uint64_t		abstime;
+	rtclock_timer_t		*mytimer;
+	cpu_data_t		*pp;
+	int64_t			latency;
+	uint64_t		pmdeadline;
+	boolean_t		timer_processed = FALSE;
+
+	pp = current_cpu_datap();
+
+	SCHED_STATS_TIMER_POP(current_processor());
+
+	abstime = mach_absolute_time();		<span class="enscript-comment">/* Get the time now */</span>
+
+	<span class="enscript-comment">/* has a pending clock timer expired? */</span>
+	mytimer = &amp;pp-&gt;rtclock_timer;		<span class="enscript-comment">/* Point to the event timer */</span>
+
+	<span class="enscript-keyword">if</span> ((timer_processed = ((mytimer-&gt;deadline &lt;= abstime) ||
+		    (abstime &gt;= (mytimer-&gt;queue.earliest_soft_deadline))))) {
+		<span class="enscript-comment">/*
+		 * Log interrupt service latency (-ve value expected by tool)
+		 * a non-PM event is expected next.
+		 * The requested deadline may be earlier than when it was set 
+		 * - use MAX to avoid reporting bogus latencies.
+		 */</span>
+		latency = (int64_t) (abstime - MAX(mytimer-&gt;deadline,
+						   mytimer-&gt;when_set));
+		<span class="enscript-comment">/* Log zero timer latencies when opportunistically processing
+		 * coalesced timers.
+		 */</span>
+		<span class="enscript-keyword">if</span> (latency &lt; 0) {
+			TCOAL_DEBUG(0xEEEE0000, abstime, mytimer-&gt;queue.earliest_soft_deadline, abstime - mytimer-&gt;queue.earliest_soft_deadline, 0, 0);
+			latency = 0;
+		}
+
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+			DECR_TRAP_LATENCY | DBG_FUNC_NONE,
+			-latency,
+			((user_mode != 0) ? rip : VM_KERNEL_UNSLIDE(rip)),
+			user_mode, 0, 0);
+
+		mytimer-&gt;has_expired = TRUE;	<span class="enscript-comment">/* Remember that we popped */</span>
+		mytimer-&gt;deadline = timer_queue_expire(&amp;mytimer-&gt;queue, abstime);
+		mytimer-&gt;has_expired = FALSE;
+
+		<span class="enscript-comment">/* Get the time again since we ran a bit */</span>
+		abstime = mach_absolute_time();
+		mytimer-&gt;when_set = abstime;
+	}
+
+	<span class="enscript-comment">/* is it time for power management state change? */</span>
+	<span class="enscript-keyword">if</span> ((pmdeadline = pmCPUGetDeadline(pp)) &amp;&amp; (pmdeadline &lt;= abstime)) {
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+			DECR_PM_DEADLINE | DBG_FUNC_START,
+			0, 0, 0, 0, 0);
+		pmCPUDeadline(pp);
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+			DECR_PM_DEADLINE | DBG_FUNC_END,
+			0, 0, 0, 0, 0);
+		timer_processed = TRUE;
+	}
+
+	<span class="enscript-comment">/* schedule our next deadline */</span>
+	x86_lcpu()-&gt;rtcDeadline = EndOfAllTime;
+	timer_resync_deadlines();
+
+	<span class="enscript-keyword">if</span> (__improbable(timer_processed == FALSE))
+		spurious_timers++;
+}
+
+<span class="enscript-comment">/*
+ * Set the clock deadline.
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">timer_set_deadline</span>(uint64_t deadline)
+{
+	rtclock_timer_t		*mytimer;
+	spl_t			s;
+	cpu_data_t		*pp;
+
+	s = splclock();				<span class="enscript-comment">/* no interruptions */</span>
+	pp = current_cpu_datap();
+
+	mytimer = &amp;pp-&gt;rtclock_timer;		<span class="enscript-comment">/* Point to the timer itself */</span>
+	mytimer-&gt;deadline = deadline;		<span class="enscript-comment">/* Set new expiration time */</span>
+	mytimer-&gt;when_set = mach_absolute_time();
+
+	timer_resync_deadlines();
+
+	splx(s);
+}
+
+<span class="enscript-comment">/*
+ * Re-evaluate the outstanding deadlines and select the most proximate.
+ *
+ * Should be called at splclock.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">timer_resync_deadlines</span>(<span class="enscript-type">void</span>)
+{
+	uint64_t		deadline = EndOfAllTime;
+	uint64_t		pmdeadline;
+	rtclock_timer_t		*mytimer;
+	spl_t			s = splclock();
+	cpu_data_t		*pp;
+	uint32_t		decr;
+
+	pp = current_cpu_datap();
+	<span class="enscript-keyword">if</span> (!pp-&gt;cpu_running)
+		<span class="enscript-comment">/* There's really nothing to do if this processor is down */</span>
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/*
+	 * If we have a clock timer set, pick that.
+	 */</span>
+	mytimer = &amp;pp-&gt;rtclock_timer;
+	<span class="enscript-keyword">if</span> (!mytimer-&gt;has_expired &amp;&amp;
+	    0 &lt; mytimer-&gt;deadline &amp;&amp; mytimer-&gt;deadline &lt; EndOfAllTime)
+		deadline = mytimer-&gt;deadline;
+
+	<span class="enscript-comment">/*
+	 * If we have a power management deadline, see if that's earlier.
+	 */</span>
+	pmdeadline = pmCPUGetDeadline(pp);
+	<span class="enscript-keyword">if</span> (0 &lt; pmdeadline &amp;&amp; pmdeadline &lt; deadline)
+		deadline = pmdeadline;
+
+	<span class="enscript-comment">/*
+	 * Go and set the &quot;pop&quot; event.
+	 */</span>
+	decr = (uint32_t) setPop(deadline);
+
+	<span class="enscript-comment">/* Record non-PM deadline for latency tool */</span>
+	<span class="enscript-keyword">if</span> (decr != 0 &amp;&amp; deadline != pmdeadline) {
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+			DECR_SET_DEADLINE | DBG_FUNC_NONE,
+			decr, 2,
+			deadline,
+			mytimer-&gt;queue.count, 0);
+	}
+	splx(s);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">timer_queue_expire_local</span>(
+__unused <span class="enscript-type">void</span>			*arg)
+{
+	rtclock_timer_t		*mytimer;
+	uint64_t			abstime;
+	cpu_data_t			*pp;
+
+	pp = current_cpu_datap();
+
+	mytimer = &amp;pp-&gt;rtclock_timer;
+	abstime = mach_absolute_time();
+
+	mytimer-&gt;has_expired = TRUE;
+	mytimer-&gt;deadline = timer_queue_expire(&amp;mytimer-&gt;queue, abstime);
+	mytimer-&gt;has_expired = FALSE;
+	mytimer-&gt;when_set = mach_absolute_time();
+
+	timer_resync_deadlines();
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">timer_queue_expire_rescan</span>(
+__unused <span class="enscript-type">void</span>			*arg)
+{
+	rtclock_timer_t		*mytimer;
+	uint64_t		abstime;
+	cpu_data_t		*pp;
+
+	assert(ml_get_interrupts_enabled() == FALSE);
+	pp = current_cpu_datap();
+
+	mytimer = &amp;pp-&gt;rtclock_timer;
+	abstime = mach_absolute_time();
+
+	mytimer-&gt;has_expired = TRUE;
+	mytimer-&gt;deadline = timer_queue_expire_with_options(&amp;mytimer-&gt;queue, abstime, TRUE);
+	mytimer-&gt;has_expired = FALSE;
+	mytimer-&gt;when_set = mach_absolute_time();
+
+	timer_resync_deadlines();
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TIMER_RESORT_THRESHOLD_ABSTIME</span> (50 * NSEC_PER_MSEC)
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">TCOAL_PRIO_STATS</span>
+int32_t nc_tcl, rt_tcl, bg_tcl, kt_tcl, fp_tcl, ts_tcl, qos_tcl;
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TCOAL_PRIO_STAT</span>(x) (x++)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TCOAL_PRIO_STAT</span>(x)
+#<span class="enscript-reference">endif</span>
+
+boolean_t
+<span class="enscript-function-name">timer_resort_threshold</span>(uint64_t skew) {
+	<span class="enscript-keyword">if</span> (skew &gt;= TIMER_RESORT_THRESHOLD_ABSTIME)
+		<span class="enscript-keyword">return</span> TRUE;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> FALSE;
+}
+
+<span class="enscript-comment">/*
+ * Return the local timer queue for a running processor
+ * else return the boot processor's timer queue.
+ */</span>
+mpqueue_head_t *
+<span class="enscript-function-name">timer_queue_assign</span>(
+    uint64_t        deadline)
+{
+	cpu_data_t		*cdp = current_cpu_datap();
+	mpqueue_head_t		*queue;
+
+	<span class="enscript-keyword">if</span> (cdp-&gt;cpu_running) {
+		queue = &amp;cdp-&gt;rtclock_timer.queue;
+
+		<span class="enscript-keyword">if</span> (deadline &lt; cdp-&gt;rtclock_timer.deadline)
+			timer_set_deadline(deadline);
+	}
+	<span class="enscript-keyword">else</span>
+		queue = &amp;cpu_datap(master_cpu)-&gt;rtclock_timer.queue;
+
+    <span class="enscript-keyword">return</span> (queue);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">timer_queue_cancel</span>(
+    mpqueue_head_t  *queue,
+    uint64_t        deadline,
+    uint64_t        new_deadline)
+{
+    <span class="enscript-keyword">if</span> (queue == &amp;current_cpu_datap()-&gt;rtclock_timer.queue) {
+        <span class="enscript-keyword">if</span> (deadline &lt; new_deadline)
+            timer_set_deadline(new_deadline);
+    }
+}
+
+<span class="enscript-comment">/*
+ * timer_queue_migrate_cpu() is called from the Power-Management kext
+ * when a logical processor goes idle (in a deep C-state) with a distant
+ * deadline so that it's timer queue can be moved to another processor.
+ * This target processor should be the least idle (most busy) --
+ * currently this is the primary processor for the calling thread's package.
+ * Locking restrictions demand that the target cpu must be the boot cpu.
+ */</span>
+uint32_t
+<span class="enscript-function-name">timer_queue_migrate_cpu</span>(<span class="enscript-type">int</span> target_cpu)
+{
+	cpu_data_t	*target_cdp = cpu_datap(target_cpu);
+	cpu_data_t	*cdp = current_cpu_datap();
+	<span class="enscript-type">int</span>		ntimers_moved;
+
+	assert(!ml_get_interrupts_enabled());
+	assert(target_cpu != cdp-&gt;cpu_number);
+	assert(target_cpu == master_cpu);
+
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+		DECR_TIMER_MIGRATE | DBG_FUNC_START,
+		target_cpu,
+		cdp-&gt;rtclock_timer.deadline, (cdp-&gt;rtclock_timer.deadline &gt;&gt;32),
+		0, 0);
+
+	<span class="enscript-comment">/*
+	 * Move timer requests from the local queue to the target processor's.
+	 * The return value is the number of requests moved. If this is 0,
+	 * it indicates that the first (i.e. earliest) timer is earlier than
+	 * the earliest for the target processor. Since this would force a
+	 * resync, the move of this and all later requests is aborted.
+	 */</span>
+	ntimers_moved = timer_queue_migrate(&amp;cdp-&gt;rtclock_timer.queue,
+					    &amp;target_cdp-&gt;rtclock_timer.queue);
+
+	<span class="enscript-comment">/*
+	 * Assuming we moved stuff, clear local deadline.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ntimers_moved &gt; 0) {
+		cdp-&gt;rtclock_timer.deadline = EndOfAllTime;
+		setPop(EndOfAllTime);
+	}
+ 
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+		DECR_TIMER_MIGRATE | DBG_FUNC_END,
+		target_cpu, ntimers_moved, 0, 0, 0);
+
+	<span class="enscript-keyword">return</span> ntimers_moved;
+}
+
+mpqueue_head_t *
+<span class="enscript-function-name">timer_queue_cpu</span>(<span class="enscript-type">int</span> cpu)
+{
+	<span class="enscript-keyword">return</span> &amp;cpu_datap(cpu)-&gt;rtclock_timer.queue;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">timer_call_cpu</span>(<span class="enscript-type">int</span> cpu, <span class="enscript-type">void</span> (*fn)(<span class="enscript-type">void</span> *), <span class="enscript-type">void</span> *arg)
+{
+	mp_cpus_call(cpu_to_cpumask(cpu), SYNC, fn, arg);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">timer_call_nosync_cpu</span>(<span class="enscript-type">int</span> cpu, <span class="enscript-type">void</span> (*fn)(<span class="enscript-type">void</span> *), <span class="enscript-type">void</span> *arg)
+{
+	<span class="enscript-comment">/* XXX Needs error checking and retry */</span>
+	mp_cpus_call(cpu_to_cpumask(cpu), NOSYNC, fn, arg);
+}
+
+
+<span class="enscript-type">static</span> timer_coalescing_priority_params_ns_t tcoal_prio_params_init =
+{
+	.idle_entry_timer_processing_hdeadline_threshold_ns = 5000ULL * NSEC_PER_USEC,
+	.interrupt_timer_coalescing_ilat_threshold_ns = 30ULL * NSEC_PER_USEC,
+	.timer_resort_threshold_ns = 50 * NSEC_PER_MSEC,
+	.timer_coalesce_rt_shift = 0,
+	.timer_coalesce_bg_shift = -5,
+	.timer_coalesce_kt_shift = 3,
+	.timer_coalesce_fp_shift = 3,
+	.timer_coalesce_ts_shift = 3,
+	.timer_coalesce_rt_ns_max = 0ULL,
+	.timer_coalesce_bg_ns_max = 100 * NSEC_PER_MSEC,
+	.timer_coalesce_kt_ns_max = 1 * NSEC_PER_MSEC,
+	.timer_coalesce_fp_ns_max = 1 * NSEC_PER_MSEC,
+	.timer_coalesce_ts_ns_max = 1 * NSEC_PER_MSEC,
+	.latency_qos_scale = {3, 2, 1, -2, -15, -15},
+	.latency_qos_ns_max ={1 * NSEC_PER_MSEC, 5 * NSEC_PER_MSEC, 20 * NSEC_PER_MSEC,
+			      75 * NSEC_PER_MSEC, 10000 * NSEC_PER_MSEC, 10000 * NSEC_PER_MSEC},
+	.latency_tier_rate_limited = {FALSE, FALSE, FALSE, FALSE, TRUE, TRUE},
+};
+
+timer_coalescing_priority_params_ns_t * <span class="enscript-function-name">timer_call_get_priority_params</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> &amp;tcoal_prio_params_init;
+}
+</pre>
+<hr />
+</body></html>

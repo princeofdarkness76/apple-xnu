@@ -1,0 +1,1589 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>vm_apple_protect.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">vm_apple_protect.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_traps.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_control.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/policy.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/upl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/page_decrypt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_space.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;default_pager/default_pager_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;default_pager/default_pager_object_server.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_fault.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/memory_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+
+<span class="enscript-comment">/* 
+ * APPLE PROTECT MEMORY PAGER 
+ *
+ * This external memory manager (EMM) handles memory from the encrypted
+ * sections of some executables protected by the DSMOS kernel extension.
+ * 
+ * It mostly handles page-in requests (from memory_object_data_request()) by
+ * getting the encrypted data from its backing VM object, itself backed by
+ * the encrypted file, decrypting it and providing it to VM.
+ *
+ * The decrypted pages will never be dirtied, so the memory manager doesn't
+ * need to handle page-out requests (from memory_object_data_return()).  The
+ * pages need to be mapped copy-on-write, so that the originals stay clean.
+ *
+ * We don't expect to have to handle a large number of apple-protected
+ * binaries, so the data structures are very simple (simple linked list)
+ * for now.
+ */</span>
+
+<span class="enscript-comment">/* forward declarations */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">apple_protect_pager_reference</span>(memory_object_t mem_obj);
+<span class="enscript-type">void</span> <span class="enscript-function-name">apple_protect_pager_deallocate</span>(memory_object_t mem_obj);
+kern_return_t <span class="enscript-function-name">apple_protect_pager_init</span>(memory_object_t mem_obj,
+				       memory_object_control_t control,
+				       memory_object_cluster_size_t pg_size);
+kern_return_t <span class="enscript-function-name">apple_protect_pager_terminate</span>(memory_object_t mem_obj);
+kern_return_t <span class="enscript-function-name">apple_protect_pager_data_request</span>(memory_object_t mem_obj,
+					       memory_object_offset_t offset,
+					       memory_object_cluster_size_t length,
+					       vm_prot_t protection_required,
+					       memory_object_fault_info_t fault_info);
+kern_return_t <span class="enscript-function-name">apple_protect_pager_data_return</span>(memory_object_t mem_obj,
+					      memory_object_offset_t offset,
+					      memory_object_cluster_size_t	data_cnt,
+					      memory_object_offset_t *resid_offset,
+					      <span class="enscript-type">int</span> *io_error,
+					      boolean_t dirty,
+					      boolean_t kernel_copy,
+					      <span class="enscript-type">int</span> upl_flags);
+kern_return_t <span class="enscript-function-name">apple_protect_pager_data_initialize</span>(memory_object_t mem_obj,
+						  memory_object_offset_t offset,
+						  memory_object_cluster_size_t data_cnt);
+kern_return_t <span class="enscript-function-name">apple_protect_pager_data_unlock</span>(memory_object_t mem_obj,
+					      memory_object_offset_t offset,
+					      memory_object_size_t size,
+					      vm_prot_t desired_access);
+kern_return_t <span class="enscript-function-name">apple_protect_pager_synchronize</span>(memory_object_t mem_obj,
+					      memory_object_offset_t offset,
+					      memory_object_size_t length,
+					      vm_sync_t sync_flags);
+kern_return_t <span class="enscript-function-name">apple_protect_pager_map</span>(memory_object_t mem_obj,
+				      vm_prot_t prot);
+kern_return_t <span class="enscript-function-name">apple_protect_pager_last_unmap</span>(memory_object_t mem_obj);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span> 0
+<span class="enscript-type">void</span> <span class="enscript-function-name">crypt_info_reference</span>(<span class="enscript-type">struct</span> pager_crypt_info *crypt_info);
+<span class="enscript-type">void</span> <span class="enscript-function-name">crypt_info_deallocate</span>(<span class="enscript-type">struct</span> pager_crypt_info *crypt_info);
+
+<span class="enscript-comment">/*
+ * Vector of VM operations for this EMM.
+ * These routines are invoked by VM via the memory_object_*() interfaces.
+ */</span>
+<span class="enscript-type">const</span> <span class="enscript-type">struct</span> memory_object_pager_ops apple_protect_pager_ops = {
+	apple_protect_pager_reference,
+	apple_protect_pager_deallocate,
+	apple_protect_pager_init,
+	apple_protect_pager_terminate,
+	apple_protect_pager_data_request,
+	apple_protect_pager_data_return,
+	apple_protect_pager_data_initialize,
+	apple_protect_pager_data_unlock,
+	apple_protect_pager_synchronize,
+	apple_protect_pager_map,
+	apple_protect_pager_last_unmap,
+	NULL, <span class="enscript-comment">/* data_reclaim */</span>
+	<span class="enscript-string">&quot;apple_protect&quot;</span>
+};
+
+<span class="enscript-comment">/*
+ * The &quot;apple_protect_pager&quot; describes a memory object backed by
+ * the &quot;apple protect&quot; EMM.
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> apple_protect_pager {
+	<span class="enscript-type">struct</span> ipc_object_header pager_header;	<span class="enscript-comment">/* fake ip_kotype() */</span>
+	memory_object_pager_ops_t pager_ops; <span class="enscript-comment">/* == &amp;apple_protect_pager_ops */</span>
+	queue_chain_t		pager_queue;	<span class="enscript-comment">/* next &amp; prev pagers */</span>
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		ref_count;	<span class="enscript-comment">/* reference count */</span>
+	boolean_t		is_ready;	<span class="enscript-comment">/* is this pager ready ? */</span>
+	boolean_t		is_mapped;	<span class="enscript-comment">/* is this mem_obj mapped ? */</span>
+	memory_object_control_t pager_control;	<span class="enscript-comment">/* mem object control handle */</span>
+	vm_object_t		backing_object; <span class="enscript-comment">/* VM obj w/ encrypted data */</span>
+	vm_object_offset_t	backing_offset;
+	vm_object_offset_t	crypto_backing_offset; <span class="enscript-comment">/* for key... */</span>
+	vm_object_offset_t	crypto_start;
+	vm_object_offset_t	crypto_end;
+	<span class="enscript-type">struct</span> pager_crypt_info *crypt_info;
+} *apple_protect_pager_t;
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">APPLE_PROTECT_PAGER_NULL</span>	((apple_protect_pager_t) NULL)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">pager_ikot</span> pager_header.io_bits
+
+<span class="enscript-comment">/*
+ * List of memory objects managed by this EMM.
+ * The list is protected by the &quot;apple_protect_pager_lock&quot; lock.
+ */</span>
+<span class="enscript-type">int</span> apple_protect_pager_count = 0;		<span class="enscript-comment">/* number of pagers */</span>
+<span class="enscript-type">int</span> apple_protect_pager_count_mapped = 0;	<span class="enscript-comment">/* number of unmapped pagers */</span>
+queue_head_t apple_protect_pager_queue;
+<span class="enscript-function-name">decl_lck_mtx_data</span>(,apple_protect_pager_lock)
+
+<span class="enscript-comment">/*
+ * Maximum number of unmapped pagers we're willing to keep around.
+ */</span>
+<span class="enscript-type">int</span> apple_protect_pager_cache_limit = 10;
+
+<span class="enscript-comment">/*
+ * Statistics &amp; counters.
+ */</span>
+<span class="enscript-type">int</span> apple_protect_pager_count_max = 0;
+<span class="enscript-type">int</span> apple_protect_pager_count_unmapped_max = 0;
+<span class="enscript-type">int</span> apple_protect_pager_num_trim_max = 0;
+<span class="enscript-type">int</span> apple_protect_pager_num_trim_total = 0;
+
+
+lck_grp_t		apple_protect_pager_lck_grp;
+lck_grp_attr_t	apple_protect_pager_lck_grp_attr;
+lck_attr_t		apple_protect_pager_lck_attr;
+
+
+<span class="enscript-comment">/* internal prototypes */</span>
+apple_protect_pager_t <span class="enscript-function-name">apple_protect_pager_create</span>(
+	vm_object_t backing_object,
+	vm_object_offset_t backing_offset,
+	vm_object_offset_t crypto_backing_offset,
+	<span class="enscript-type">struct</span> pager_crypt_info *crypt_info,
+	vm_object_offset_t crypto_start,
+	vm_object_offset_t crypto_end);
+apple_protect_pager_t <span class="enscript-function-name">apple_protect_pager_lookup</span>(memory_object_t mem_obj);
+<span class="enscript-type">void</span> <span class="enscript-function-name">apple_protect_pager_dequeue</span>(apple_protect_pager_t pager);
+<span class="enscript-type">void</span> <span class="enscript-function-name">apple_protect_pager_deallocate_internal</span>(apple_protect_pager_t pager,
+					     boolean_t locked);
+<span class="enscript-type">void</span> <span class="enscript-function-name">apple_protect_pager_terminate_internal</span>(apple_protect_pager_t pager);
+<span class="enscript-type">void</span> <span class="enscript-function-name">apple_protect_pager_trim</span>(<span class="enscript-type">void</span>);
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-type">int</span> apple_protect_pagerdebug = 0;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PAGER_ALL</span>		0xffffffff
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PAGER_INIT</span>		0x00000001
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PAGER_PAGEIN</span>		0x00000002
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PAGER_DEBUG</span>(LEVEL, A)						\
+	MACRO_BEGIN							\
+	<span class="enscript-keyword">if</span> ((apple_protect_pagerdebug &amp; LEVEL)==LEVEL) {		\
+		printf A;						\
+	}								\
+	MACRO_END
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PAGER_DEBUG</span>(LEVEL, A)
+#<span class="enscript-reference">endif</span>
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">apple_protect_pager_bootstrap</span>(<span class="enscript-type">void</span>)
+{
+	lck_grp_attr_setdefault(&amp;apple_protect_pager_lck_grp_attr);
+	lck_grp_init(&amp;apple_protect_pager_lck_grp, <span class="enscript-string">&quot;apple_protect&quot;</span>, &amp;apple_protect_pager_lck_grp_attr);
+	lck_attr_setdefault(&amp;apple_protect_pager_lck_attr);
+	lck_mtx_init(&amp;apple_protect_pager_lock, &amp;apple_protect_pager_lck_grp, &amp;apple_protect_pager_lck_attr);
+	queue_init(&amp;apple_protect_pager_queue);
+}
+
+<span class="enscript-comment">/*
+ * apple_protect_pager_init()
+ *
+ * Initialize the memory object and makes it ready to be used and mapped.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">apple_protect_pager_init</span>(
+	memory_object_t		mem_obj, 
+	memory_object_control_t	control, 
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">DEBUG</span>
+	__unused
+#<span class="enscript-reference">endif</span>
+	memory_object_cluster_size_t pg_size)
+{
+	apple_protect_pager_t	pager;
+	kern_return_t   	kr;
+	memory_object_attr_info_data_t  attributes;
+
+	PAGER_DEBUG(PAGER_ALL,
+		    (<span class="enscript-string">&quot;apple_protect_pager_init: %p, %p, %x\n&quot;</span>,
+		     mem_obj, control, pg_size));
+
+	<span class="enscript-keyword">if</span> (control == MEMORY_OBJECT_CONTROL_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	pager = apple_protect_pager_lookup(mem_obj);
+
+	memory_object_control_reference(control);
+
+	pager-&gt;pager_control = control;
+
+	attributes.copy_strategy = MEMORY_OBJECT_COPY_DELAY;
+	<span class="enscript-comment">/* attributes.cluster_size = (1 &lt;&lt; (CLUSTER_SHIFT + PAGE_SHIFT));*/</span>
+	attributes.cluster_size = (1 &lt;&lt; (PAGE_SHIFT));
+	attributes.may_cache_object = FALSE;
+	attributes.temporary = TRUE;
+
+	kr = memory_object_change_attributes(
+					control,
+					MEMORY_OBJECT_ATTRIBUTE_INFO,
+					(memory_object_info_t) &amp;attributes,
+					MEMORY_OBJECT_ATTR_INFO_COUNT);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS)
+		panic(<span class="enscript-string">&quot;apple_protect_pager_init: &quot;</span>
+		      <span class="enscript-string">&quot;memory_object_change_attributes() failed&quot;</span>);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * apple_protect_data_return()
+ *
+ * Handles page-out requests from VM.  This should never happen since
+ * the pages provided by this EMM are not supposed to be dirty or dirtied
+ * and VM should simply discard the contents and reclaim the pages if it
+ * needs to.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">apple_protect_pager_data_return</span>(
+        __unused memory_object_t	mem_obj,
+        __unused memory_object_offset_t	offset,
+        __unused memory_object_cluster_size_t		data_cnt,
+        __unused memory_object_offset_t	*resid_offset,
+	__unused <span class="enscript-type">int</span>			*io_error,
+	__unused boolean_t		dirty,
+	__unused boolean_t		kernel_copy,
+	__unused <span class="enscript-type">int</span>			upl_flags)  
+{
+	panic(<span class="enscript-string">&quot;apple_protect_pager_data_return: should never get called&quot;</span>);
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+kern_return_t
+<span class="enscript-function-name">apple_protect_pager_data_initialize</span>(
+	__unused memory_object_t	mem_obj,
+	__unused memory_object_offset_t	offset,
+	__unused memory_object_cluster_size_t		data_cnt)
+{
+	panic(<span class="enscript-string">&quot;apple_protect_pager_data_initialize: should never get called&quot;</span>);
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+kern_return_t
+<span class="enscript-function-name">apple_protect_pager_data_unlock</span>(
+	__unused memory_object_t	mem_obj,
+	__unused memory_object_offset_t	offset,
+	__unused memory_object_size_t		size,
+	__unused vm_prot_t		desired_access)
+{
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+<span class="enscript-comment">/*
+ * apple_protect_pager_data_request()
+ *
+ * Handles page-in requests from VM.
+ */</span>
+<span class="enscript-type">int</span> apple_protect_pager_data_request_debug = 0;
+kern_return_t	
+<span class="enscript-function-name">apple_protect_pager_data_request</span>(
+	memory_object_t		mem_obj,
+	memory_object_offset_t	offset,
+	memory_object_cluster_size_t		length,
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">DEBUG</span>
+	__unused
+#<span class="enscript-reference">endif</span>
+	vm_prot_t		protection_required,
+	memory_object_fault_info_t mo_fault_info)
+{
+	apple_protect_pager_t	pager;
+	memory_object_control_t	mo_control;
+	upl_t			upl;
+	<span class="enscript-type">int</span>			upl_flags;
+	upl_size_t		upl_size;
+	upl_page_info_t		*upl_pl;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		pl_count;
+	vm_object_t		src_object, dst_object;
+	kern_return_t		kr, retval;
+	vm_map_offset_t		kernel_mapping;
+	vm_offset_t		src_vaddr, dst_vaddr;
+	vm_offset_t		cur_offset;
+	vm_offset_t		offset_in_page;
+	kern_return_t		error_code;
+	vm_prot_t		prot;
+	vm_page_t		src_page, top_page;
+	<span class="enscript-type">int</span>			interruptible;
+	<span class="enscript-type">struct</span> vm_object_fault_info	fault_info;
+	<span class="enscript-type">int</span>			ret;
+
+	PAGER_DEBUG(PAGER_ALL, (<span class="enscript-string">&quot;apple_protect_pager_data_request: %p, %llx, %x, %x\n&quot;</span>, mem_obj, offset, length, protection_required));
+
+	retval = KERN_SUCCESS;
+	src_object = VM_OBJECT_NULL;
+	kernel_mapping = 0;
+	upl = NULL;
+	upl_pl = NULL;
+	fault_info = *((<span class="enscript-type">struct</span> vm_object_fault_info *) mo_fault_info);
+	fault_info.stealth = TRUE;
+	fault_info.io_sync = FALSE;
+	fault_info.mark_zf_absent = FALSE;
+	fault_info.batch_pmap_op = FALSE;
+	interruptible = fault_info.interruptible;
+
+	pager = apple_protect_pager_lookup(mem_obj);
+	assert(pager-&gt;is_ready);
+	assert(pager-&gt;ref_count &gt; 1); <span class="enscript-comment">/* pager is alive and mapped */</span>
+
+	PAGER_DEBUG(PAGER_PAGEIN, (<span class="enscript-string">&quot;apple_protect_pager_data_request: %p, %llx, %x, %x, pager %p\n&quot;</span>, mem_obj, offset, length, protection_required, pager));
+
+	<span class="enscript-comment">/*
+	 * Gather in a UPL all the VM pages requested by VM.
+	 */</span>
+	mo_control = pager-&gt;pager_control;
+
+	upl_size = length;
+	upl_flags =
+		UPL_RET_ONLY_ABSENT |
+		UPL_SET_LITE |
+		UPL_NO_SYNC |
+		UPL_CLEAN_IN_PLACE |	<span class="enscript-comment">/* triggers UPL_CLEAR_DIRTY */</span>
+		UPL_SET_INTERNAL;
+	pl_count = 0;
+	kr = memory_object_upl_request(mo_control,
+				       offset, upl_size,
+				       &amp;upl, NULL, NULL, upl_flags);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		retval = kr;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	dst_object = mo_control-&gt;moc_object;
+	assert(dst_object != VM_OBJECT_NULL);
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__x86_64__</span> || <span class="enscript-variable-name">__arm__</span> || <span class="enscript-variable-name">__arm64__</span>
+	<span class="enscript-comment">/* we'll use the 1-to-1 mapping of physical memory */</span>
+	src_vaddr = 0;
+	dst_vaddr = 0;
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* __x86_64__ || __arm__ || __arm64__ */</span>
+	<span class="enscript-comment">/*
+	 * Reserve 2 virtual pages in the kernel address space to map each
+	 * source and destination physical pages when it's their turn to
+	 * be processed.
+	 */</span>
+	vm_map_entry_t		map_entry;
+
+	vm_object_reference(kernel_object);	<span class="enscript-comment">/* ref. for mapping */</span>
+	kr = vm_map_find_space(kernel_map,
+			       &amp;kernel_mapping,
+			       2 * PAGE_SIZE_64,
+			       0,
+			       0,
+			       &amp;map_entry);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		vm_object_deallocate(kernel_object);
+		retval = kr;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	map_entry-&gt;object.vm_object = kernel_object;
+	map_entry-&gt;offset = kernel_mapping;
+	vm_map_unlock(kernel_map);
+	src_vaddr = CAST_DOWN(vm_offset_t, kernel_mapping);
+	dst_vaddr = CAST_DOWN(vm_offset_t, kernel_mapping + PAGE_SIZE_64);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __x86_64__ || __arm__ || __arm64__ */</span>
+
+	<span class="enscript-comment">/*
+	 * We'll map the encrypted data in the kernel address space from the 
+	 * backing VM object (itself backed by the encrypted file via
+	 * the vnode pager).
+	 */</span>
+	src_object = pager-&gt;backing_object;
+	assert(src_object != VM_OBJECT_NULL);
+	vm_object_reference(src_object); <span class="enscript-comment">/* to keep the source object alive */</span>
+
+	<span class="enscript-comment">/*
+	 * Fill in the contents of the pages requested by VM.
+	 */</span>
+	upl_pl = UPL_GET_INTERNAL_PAGE_LIST(upl);
+	pl_count = length / PAGE_SIZE;
+	<span class="enscript-keyword">for</span> (cur_offset = 0;
+	     retval == KERN_SUCCESS &amp;&amp; cur_offset &lt; length;
+	     cur_offset += PAGE_SIZE) {
+		ppnum_t dst_pnum;
+
+		<span class="enscript-keyword">if</span> (!upl_page_present(upl_pl, (<span class="enscript-type">int</span>)(cur_offset / PAGE_SIZE))) {
+			<span class="enscript-comment">/* this page is not in the UPL: skip it */</span>
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Map the source (encrypted) page in the kernel's
+		 * virtual address space.
+		 * We already hold a reference on the src_object.
+		 */</span>
+	<span class="enscript-reference">retry_src_fault</span>:
+		vm_object_lock(src_object);
+		vm_object_paging_begin(src_object);
+		error_code = 0;
+		prot = VM_PROT_READ;
+		src_page = VM_PAGE_NULL;
+		kr = vm_fault_page(src_object,
+				   pager-&gt;backing_offset + offset + cur_offset,
+				   VM_PROT_READ,
+				   FALSE,
+				   FALSE, <span class="enscript-comment">/* src_page not looked up */</span>
+				   &amp;prot,
+				   &amp;src_page,
+				   &amp;top_page,
+				   NULL,
+				   &amp;error_code,
+				   FALSE,
+				   FALSE,
+				   &amp;fault_info);
+		<span class="enscript-keyword">switch</span> (kr) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_SUCCESS</span>:
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_RETRY</span>:
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry_src_fault</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_MEMORY_SHORTAGE</span>:
+			<span class="enscript-keyword">if</span> (vm_page_wait(interruptible)) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry_src_fault</span>;
+			}
+			<span class="enscript-comment">/* fall thru */</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_INTERRUPTED</span>:
+			retval = MACH_SEND_INTERRUPTED;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_SUCCESS_NO_VM_PAGE</span>:
+			<span class="enscript-comment">/* success but no VM page: fail */</span>
+			vm_object_paging_end(src_object);
+			vm_object_unlock(src_object);
+			<span class="enscript-comment">/*FALLTHROUGH*/</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_MEMORY_ERROR</span>:
+			<span class="enscript-comment">/* the page is not there ! */</span>
+			<span class="enscript-keyword">if</span> (error_code) {
+				retval = error_code;
+			} <span class="enscript-keyword">else</span> {
+				retval = KERN_MEMORY_ERROR;
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		<span class="enscript-reference">default</span>:
+			panic(<span class="enscript-string">&quot;apple_protect_pager_data_request: &quot;</span>
+			      <span class="enscript-string">&quot;vm_fault_page() unexpected error 0x%x\n&quot;</span>,
+			      kr);
+		}
+		assert(src_page != VM_PAGE_NULL);
+		assert(src_page-&gt;busy);
+
+		<span class="enscript-keyword">if</span> (!src_page-&gt;active &amp;&amp;
+		    !src_page-&gt;inactive &amp;&amp;
+		    !src_page-&gt;throttled) {
+			vm_page_lockspin_queues();
+			<span class="enscript-keyword">if</span> (!src_page-&gt;active &amp;&amp;
+			    !src_page-&gt;inactive &amp;&amp;
+			    !src_page-&gt;throttled) {
+				vm_page_deactivate(src_page);
+			}
+			vm_page_unlock_queues();
+		}
+
+		<span class="enscript-comment">/*
+		 * Establish an explicit mapping of the source
+		 * physical page.
+		 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__x86_64__</span>
+		src_vaddr = (vm_map_offset_t)
+			PHYSMAP_PTOV((pmap_paddr_t)src_page-&gt;phys_page
+				     &lt;&lt; PAGE_SHIFT);
+#<span class="enscript-reference">else</span>
+		pmap_enter(kernel_pmap,
+			   src_vaddr,
+			   src_page-&gt;phys_page,
+			   VM_PROT_READ,
+			   VM_PROT_NONE,
+			   0,
+			   TRUE);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-comment">/*
+		 * Establish an explicit pmap mapping of the destination
+		 * physical page.
+		 * We can't do a regular VM mapping because the VM page
+		 * is &quot;busy&quot;.
+		 */</span>
+		dst_pnum = (ppnum_t)
+			upl_phys_page(upl_pl, (<span class="enscript-type">int</span>)(cur_offset / PAGE_SIZE));
+		assert(dst_pnum != 0);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__x86_64__</span>
+		dst_vaddr = (vm_map_offset_t)
+			PHYSMAP_PTOV((pmap_paddr_t)dst_pnum &lt;&lt; PAGE_SHIFT);
+#<span class="enscript-reference">else</span>
+		pmap_enter(kernel_pmap,
+			   dst_vaddr,
+			   dst_pnum,
+			   VM_PROT_READ | VM_PROT_WRITE,
+			   VM_PROT_NONE,
+			   0,
+			   TRUE);
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-comment">/*
+		 * Validate the original page...
+		 */</span>
+		<span class="enscript-keyword">if</span> (src_page-&gt;object-&gt;code_signed) {
+			vm_page_validate_cs_mapped(
+				src_page,
+				(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) src_vaddr);
+		}
+		<span class="enscript-comment">/*
+		 * ... and transfer the results to the destination page.
+		 */</span>
+		UPL_SET_CS_VALIDATED(upl_pl, cur_offset / PAGE_SIZE,
+				     src_page-&gt;cs_validated);
+		UPL_SET_CS_TAINTED(upl_pl, cur_offset / PAGE_SIZE,
+				   src_page-&gt;cs_tainted);
+		UPL_SET_CS_NX(upl_pl, cur_offset / PAGE_SIZE,
+				   src_page-&gt;cs_nx);
+
+		<span class="enscript-comment">/*
+		 * page_decrypt() might access a mapped file, so let's release
+		 * the object lock for the source page to avoid a potential
+		 * deadlock.  The source page is kept busy and we have a
+		 * &quot;paging_in_progress&quot; reference on its object, so it's safe
+		 * to unlock the object here.
+		 */</span>
+		assert(src_page-&gt;busy);
+		assert(src_page-&gt;object-&gt;paging_in_progress &gt; 0);
+		vm_object_unlock(src_page-&gt;object);
+
+		<span class="enscript-comment">/*
+		 * Decrypt the encrypted contents of the source page
+		 * into the destination page.
+		 */</span>
+		<span class="enscript-keyword">for</span> (offset_in_page = 0;
+		     offset_in_page &lt; PAGE_SIZE;
+		     offset_in_page += 4096) {
+			<span class="enscript-keyword">if</span> (offset + cur_offset + offset_in_page &lt;
+			    pager-&gt;crypto_start ||
+			    offset + cur_offset + offset_in_page &gt;=
+			    pager-&gt;crypto_end) {
+				<span class="enscript-comment">/* not encrypted: just copy */</span>
+				bcopy((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)(src_vaddr +
+						     offset_in_page),
+				      (<span class="enscript-type">char</span> *)(dst_vaddr + offset_in_page),
+				      4096);
+				<span class="enscript-keyword">if</span> (apple_protect_pager_data_request_debug) {
+					printf(<span class="enscript-string">&quot;apple_protect_data_request&quot;</span>
+					       <span class="enscript-string">&quot;(%p,0x%llx+0x%llx+0x%04llx): &quot;</span>
+					       <span class="enscript-string">&quot;out of crypto range &quot;</span>
+					       <span class="enscript-string">&quot;[0x%llx:0x%llx]: &quot;</span>
+					       <span class="enscript-string">&quot;COPY [0x%016llx 0x%016llx] &quot;</span>
+					       <span class="enscript-string">&quot;code_signed=%d &quot;</span>
+					       <span class="enscript-string">&quot;cs_validated=%d &quot;</span>
+					       <span class="enscript-string">&quot;cs_tainted=%d &quot;</span>
+					       <span class="enscript-string">&quot;cs_nx=%d\n&quot;</span>,
+					       pager,
+					       offset,
+					       (uint64_t) cur_offset,
+					       (uint64_t) offset_in_page,
+					       pager-&gt;crypto_start,
+					       pager-&gt;crypto_end,
+					       *(uint64_t *)(dst_vaddr+
+							     offset_in_page),
+					       *(uint64_t *)(dst_vaddr+
+							     offset_in_page+8),
+					       src_page-&gt;object-&gt;code_signed,
+					       src_page-&gt;cs_validated,
+					       src_page-&gt;cs_tainted,
+					       src_page-&gt;cs_nx);
+				}
+				ret = 0;
+				<span class="enscript-keyword">continue</span>;
+			}
+			ret = pager-&gt;crypt_info-&gt;page_decrypt(
+				(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *)(src_vaddr + offset_in_page),
+				(<span class="enscript-type">void</span> *)(dst_vaddr + offset_in_page),
+				((pager-&gt;crypto_backing_offset -
+				  pager-&gt;crypto_start) + <span class="enscript-comment">/* XXX ? */</span>
+				 offset +
+				 cur_offset +
+				 offset_in_page),
+				pager-&gt;crypt_info-&gt;crypt_ops);
+			<span class="enscript-keyword">if</span> (apple_protect_pager_data_request_debug) {
+				printf(<span class="enscript-string">&quot;apple_protect_data_request&quot;</span>
+				       <span class="enscript-string">&quot;(%p,0x%llx+0x%llx+0x%04llx): &quot;</span>
+				       <span class="enscript-string">&quot;in crypto range [0x%llx:0x%llx]: &quot;</span>
+				       <span class="enscript-string">&quot;DECRYPT offset 0x%llx=&quot;</span>
+				       <span class="enscript-string">&quot;(0x%llx-0x%llx+0x%llx+0x%llx+0x%04llx)&quot;</span>
+				       <span class="enscript-string">&quot;[0x%016llx 0x%016llx] &quot;</span>
+				       <span class="enscript-string">&quot;code_signed=%d &quot;</span>
+				       <span class="enscript-string">&quot;cs_validated=%d &quot;</span>
+				       <span class="enscript-string">&quot;cs_tainted=%d &quot;</span>
+				       <span class="enscript-string">&quot;cs_nx=%d &quot;</span>
+				       <span class="enscript-string">&quot;ret=0x%x\n&quot;</span>,
+				       pager,
+				       offset,
+				       (uint64_t) cur_offset,
+				       (uint64_t) offset_in_page,
+				       pager-&gt;crypto_start, pager-&gt;crypto_end,
+				       ((pager-&gt;crypto_backing_offset -
+					 pager-&gt;crypto_start) +
+					offset +
+					cur_offset +
+					offset_in_page),
+				       pager-&gt;crypto_backing_offset,
+				       pager-&gt;crypto_start,
+				       offset,
+				       (uint64_t) cur_offset,
+				       (uint64_t) offset_in_page,
+				       *(uint64_t *)(dst_vaddr+offset_in_page),
+				       *(uint64_t *)(dst_vaddr+offset_in_page+8),
+				       src_page-&gt;object-&gt;code_signed,
+				       src_page-&gt;cs_validated,
+				       src_page-&gt;cs_tainted,
+				       src_page-&gt;cs_nx,
+				       ret);
+			}
+			<span class="enscript-keyword">if</span> (ret) {
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+		<span class="enscript-keyword">if</span> (ret) {
+			<span class="enscript-comment">/*
+			 * Decryption failed.  Abort the fault.
+			 */</span>
+			retval = KERN_ABORTED;
+		}
+
+		assert(src_page-&gt;busy);
+		assert(src_page-&gt;object-&gt;paging_in_progress &gt; 0);
+		vm_object_lock(src_page-&gt;object);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__x86_64__</span> || <span class="enscript-variable-name">__arm__</span> || <span class="enscript-variable-name">__arm64__</span>
+		<span class="enscript-comment">/* we used the 1-to-1 mapping of physical memory */</span>
+		src_vaddr = 0;
+		dst_vaddr = 0;
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* __x86_64__ || __arm__ || __arm64__ */</span>
+		<span class="enscript-comment">/*
+		 * Remove the pmap mapping of the source and destination pages
+		 * in the kernel.
+		 */</span>
+		pmap_remove(kernel_pmap,
+			    (addr64_t) kernel_mapping,
+			    (addr64_t) (kernel_mapping + (2 * PAGE_SIZE_64)));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __x86_64__ || __arm__ || __arm64__ */</span>
+
+		<span class="enscript-comment">/*
+		 * Cleanup the result of vm_fault_page() of the source page.
+		 */</span>
+		PAGE_WAKEUP_DONE(src_page);
+		vm_object_paging_end(src_page-&gt;object);
+		vm_object_unlock(src_page-&gt;object);
+		<span class="enscript-keyword">if</span> (top_page != VM_PAGE_NULL) {
+			vm_object_t top_object;
+
+			top_object = top_page-&gt;object;
+			vm_object_lock(top_object);
+			VM_PAGE_FREE(top_page);
+			vm_object_paging_end(top_object);
+			vm_object_unlock(top_object);
+		}
+	}
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (upl != NULL) {
+		<span class="enscript-comment">/* clean up the UPL */</span>
+
+		<span class="enscript-comment">/*
+		 * The pages are currently dirty because we've just been
+		 * writing on them, but as far as we're concerned, they're
+		 * clean since they contain their &quot;original&quot; contents as
+		 * provided by us, the pager.
+		 * Tell the UPL to mark them &quot;clean&quot;.
+		 */</span>
+		upl_clear_dirty(upl, TRUE);
+
+		<span class="enscript-comment">/* abort or commit the UPL */</span>
+		<span class="enscript-keyword">if</span> (retval != KERN_SUCCESS) {
+			upl_abort(upl, 0);
+			<span class="enscript-keyword">if</span> (retval == KERN_ABORTED) {
+				wait_result_t	wait_result;
+
+				<span class="enscript-comment">/*
+				 * We aborted the fault and did not provide
+				 * any contents for the requested pages but
+				 * the pages themselves are not invalid, so
+				 * let's return success and let the caller
+				 * retry the fault, in case it might succeed
+				 * later (when the decryption code is up and
+				 * running in the kernel, for example).
+				 */</span>
+				retval = KERN_SUCCESS;
+				<span class="enscript-comment">/*
+				 * Wait a little bit first to avoid using
+				 * too much CPU time retrying and failing
+				 * the same fault over and over again.
+				 */</span>
+				wait_result = assert_wait_timeout(
+					(event_t) apple_protect_pager_data_request,
+					THREAD_UNINT,
+					10000,	<span class="enscript-comment">/* 10ms */</span>
+					NSEC_PER_USEC);
+				assert(wait_result == THREAD_WAITING);
+				wait_result = thread_block(THREAD_CONTINUE_NULL);
+				assert(wait_result == THREAD_TIMED_OUT);
+			}
+		} <span class="enscript-keyword">else</span> {
+			boolean_t empty;
+			upl_commit_range(upl, 0, upl-&gt;size, 
+					 UPL_COMMIT_CS_VALIDATED | UPL_COMMIT_WRITTEN_BY_KERNEL,
+					 upl_pl, pl_count, &amp;empty);
+		}
+
+		<span class="enscript-comment">/* and deallocate the UPL */</span>
+		upl_deallocate(upl);
+		upl = NULL;
+	}
+	<span class="enscript-keyword">if</span> (kernel_mapping != 0) {
+		<span class="enscript-comment">/* clean up the mapping of the source and destination pages */</span>
+		kr = vm_map_remove(kernel_map,
+				   kernel_mapping,
+				   kernel_mapping + (2 * PAGE_SIZE_64),
+				   VM_MAP_NO_FLAGS);
+		assert(kr == KERN_SUCCESS);
+		kernel_mapping = 0;
+		src_vaddr = 0;
+		dst_vaddr = 0;
+	}
+	<span class="enscript-keyword">if</span> (src_object != VM_OBJECT_NULL) {
+		vm_object_deallocate(src_object);
+	}
+
+	<span class="enscript-keyword">return</span> retval;
+}
+
+<span class="enscript-comment">/*
+ * apple_protect_pager_reference()
+ *
+ * Get a reference on this memory object.
+ * For external usage only.  Assumes that the initial reference count is not 0,
+ * i.e one should not &quot;revive&quot; a dead pager this way.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">apple_protect_pager_reference</span>(
+	memory_object_t		mem_obj)
+{	
+	apple_protect_pager_t	pager;
+
+	pager = apple_protect_pager_lookup(mem_obj);
+
+	lck_mtx_lock(&amp;apple_protect_pager_lock);
+	assert(pager-&gt;ref_count &gt; 0);
+	pager-&gt;ref_count++;
+	lck_mtx_unlock(&amp;apple_protect_pager_lock);
+}
+
+
+<span class="enscript-comment">/*
+ * apple_protect_pager_dequeue:
+ *
+ * Removes a pager from the list of pagers.
+ *
+ * The caller must hold &quot;apple_protect_pager_lock&quot;.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">apple_protect_pager_dequeue</span>(
+	apple_protect_pager_t pager)
+{
+	assert(!pager-&gt;is_mapped);
+
+	queue_remove(&amp;apple_protect_pager_queue,
+		     pager,
+		     apple_protect_pager_t,
+		     pager_queue);
+	pager-&gt;pager_queue.next = NULL;
+	pager-&gt;pager_queue.prev = NULL;
+	
+	apple_protect_pager_count--;
+}
+
+<span class="enscript-comment">/*
+ * apple_protect_pager_terminate_internal:
+ *
+ * Trigger the asynchronous termination of the memory object associated
+ * with this pager.
+ * When the memory object is terminated, there will be one more call
+ * to memory_object_deallocate() (i.e. apple_protect_pager_deallocate())
+ * to finish the clean up.
+ *
+ * &quot;apple_protect_pager_lock&quot; should not be held by the caller.
+ * We don't need the lock because the pager has already been removed from
+ * the pagers' list and is now ours exclusively.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">apple_protect_pager_terminate_internal</span>(
+	apple_protect_pager_t pager)
+{
+	assert(pager-&gt;is_ready);
+	assert(!pager-&gt;is_mapped);
+
+	<span class="enscript-keyword">if</span> (pager-&gt;backing_object != VM_OBJECT_NULL) {
+		vm_object_deallocate(pager-&gt;backing_object);
+		pager-&gt;backing_object = VM_OBJECT_NULL;
+	}
+
+	<span class="enscript-comment">/* one less pager using this &quot;pager_crypt_info&quot; */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+	printf(<span class="enscript-string">&quot;CRYPT_INFO %s: deallocate %p ref %d\n&quot;</span>,
+	       __FUNCTION__,
+	       pager-&gt;crypt_info,
+	       pager-&gt;crypt_info-&gt;crypt_refcnt);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+	crypt_info_deallocate(pager-&gt;crypt_info);
+	pager-&gt;crypt_info = NULL;
+
+	<span class="enscript-comment">/* trigger the destruction of the memory object */</span>
+	memory_object_destroy(pager-&gt;pager_control, 0);
+}
+
+<span class="enscript-comment">/*
+ * apple_protect_pager_deallocate_internal()
+ *
+ * Release a reference on this pager and free it when the last
+ * reference goes away.
+ * Can be called with apple_protect_pager_lock held or not but always returns
+ * with it unlocked.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">apple_protect_pager_deallocate_internal</span>(
+	apple_protect_pager_t	pager,
+	boolean_t		locked)
+{
+	boolean_t	needs_trimming;
+	<span class="enscript-type">int</span>		count_unmapped;
+
+	<span class="enscript-keyword">if</span> (! locked) {
+		lck_mtx_lock(&amp;apple_protect_pager_lock);
+	}
+
+	count_unmapped = (apple_protect_pager_count - 
+			  apple_protect_pager_count_mapped);
+	<span class="enscript-keyword">if</span> (count_unmapped &gt; apple_protect_pager_cache_limit) {
+		<span class="enscript-comment">/* we have too many unmapped pagers:  trim some */</span>
+		needs_trimming = TRUE;
+	} <span class="enscript-keyword">else</span> {
+		needs_trimming = FALSE;
+	}
+
+	<span class="enscript-comment">/* drop a reference on this pager */</span>
+	pager-&gt;ref_count--;
+
+	<span class="enscript-keyword">if</span> (pager-&gt;ref_count == 1) {
+		<span class="enscript-comment">/*
+		 * Only the &quot;named&quot; reference is left, which means that
+		 * no one is really holding on to this pager anymore.
+		 * Terminate it.
+		 */</span>
+		apple_protect_pager_dequeue(pager);
+		<span class="enscript-comment">/* the pager is all ours: no need for the lock now */</span>
+		lck_mtx_unlock(&amp;apple_protect_pager_lock);
+		apple_protect_pager_terminate_internal(pager);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (pager-&gt;ref_count == 0) {
+		<span class="enscript-comment">/*
+		 * Dropped the existence reference;  the memory object has
+		 * been terminated.  Do some final cleanup and release the
+		 * pager structure.
+		 */</span>
+		lck_mtx_unlock(&amp;apple_protect_pager_lock);
+		<span class="enscript-keyword">if</span> (pager-&gt;pager_control != MEMORY_OBJECT_CONTROL_NULL) {
+			memory_object_control_deallocate(pager-&gt;pager_control);
+			pager-&gt;pager_control = MEMORY_OBJECT_CONTROL_NULL;
+		}
+		kfree(pager, <span class="enscript-keyword">sizeof</span> (*pager));
+		pager = APPLE_PROTECT_PAGER_NULL;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* there are still plenty of references:  keep going... */</span>
+		lck_mtx_unlock(&amp;apple_protect_pager_lock);
+	}
+
+	<span class="enscript-keyword">if</span> (needs_trimming) {
+		apple_protect_pager_trim();
+	}
+	<span class="enscript-comment">/* caution: lock is not held on return... */</span>
+}
+
+<span class="enscript-comment">/*
+ * apple_protect_pager_deallocate()
+ *
+ * Release a reference on this pager and free it when the last
+ * reference goes away.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">apple_protect_pager_deallocate</span>(
+	memory_object_t		mem_obj)
+{
+	apple_protect_pager_t	pager;
+
+	PAGER_DEBUG(PAGER_ALL, (<span class="enscript-string">&quot;apple_protect_pager_deallocate: %p\n&quot;</span>, mem_obj));
+	pager = apple_protect_pager_lookup(mem_obj);
+	apple_protect_pager_deallocate_internal(pager, FALSE);
+}
+
+<span class="enscript-comment">/*
+ *
+ */</span>
+kern_return_t
+<span class="enscript-function-name">apple_protect_pager_terminate</span>(
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">DEBUG</span>
+	__unused
+#<span class="enscript-reference">endif</span>
+	memory_object_t	mem_obj)
+{
+	PAGER_DEBUG(PAGER_ALL, (<span class="enscript-string">&quot;apple_protect_pager_terminate: %p\n&quot;</span>, mem_obj));
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *
+ */</span>
+kern_return_t
+<span class="enscript-function-name">apple_protect_pager_synchronize</span>(
+	memory_object_t		mem_obj,
+	memory_object_offset_t	offset,
+	memory_object_size_t		length,
+	__unused vm_sync_t		sync_flags)
+{
+	apple_protect_pager_t	pager;
+
+	PAGER_DEBUG(PAGER_ALL, (<span class="enscript-string">&quot;apple_protect_pager_synchronize: %p\n&quot;</span>, mem_obj));
+
+	pager = apple_protect_pager_lookup(mem_obj);
+
+	memory_object_synchronize_completed(pager-&gt;pager_control,
+					    offset, length);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * apple_protect_pager_map()
+ *
+ * This allows VM to let us, the EMM, know that this memory object
+ * is currently mapped one or more times.  This is called by VM each time
+ * the memory object gets mapped and we take one extra reference on the
+ * memory object to account for all its mappings.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">apple_protect_pager_map</span>(
+	memory_object_t		mem_obj,
+	__unused vm_prot_t	prot)
+{
+	apple_protect_pager_t	pager;
+
+	PAGER_DEBUG(PAGER_ALL, (<span class="enscript-string">&quot;apple_protect_pager_map: %p\n&quot;</span>, mem_obj));
+
+	pager = apple_protect_pager_lookup(mem_obj);
+
+	lck_mtx_lock(&amp;apple_protect_pager_lock);
+	assert(pager-&gt;is_ready);
+	assert(pager-&gt;ref_count &gt; 0); <span class="enscript-comment">/* pager is alive */</span>
+	<span class="enscript-keyword">if</span> (pager-&gt;is_mapped == FALSE) {
+		<span class="enscript-comment">/*
+		 * First mapping of this pager:  take an extra reference
+		 * that will remain until all the mappings of this pager
+		 * are removed.
+		 */</span>
+		pager-&gt;is_mapped = TRUE;
+		pager-&gt;ref_count++;
+		apple_protect_pager_count_mapped++;
+	}
+	lck_mtx_unlock(&amp;apple_protect_pager_lock);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * apple_protect_pager_last_unmap()
+ *
+ * This is called by VM when this memory object is no longer mapped anywhere.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">apple_protect_pager_last_unmap</span>(
+	memory_object_t		mem_obj)
+{
+	apple_protect_pager_t	pager;
+	<span class="enscript-type">int</span>			count_unmapped;
+
+	PAGER_DEBUG(PAGER_ALL,
+		    (<span class="enscript-string">&quot;apple_protect_pager_last_unmap: %p\n&quot;</span>, mem_obj));
+
+	pager = apple_protect_pager_lookup(mem_obj);
+
+	lck_mtx_lock(&amp;apple_protect_pager_lock);
+	<span class="enscript-keyword">if</span> (pager-&gt;is_mapped) {
+		<span class="enscript-comment">/*
+		 * All the mappings are gone, so let go of the one extra
+		 * reference that represents all the mappings of this pager.
+		 */</span>
+		apple_protect_pager_count_mapped--;
+		count_unmapped = (apple_protect_pager_count -
+				  apple_protect_pager_count_mapped);
+		<span class="enscript-keyword">if</span> (count_unmapped &gt; apple_protect_pager_count_unmapped_max) {
+			apple_protect_pager_count_unmapped_max = count_unmapped;
+		}
+		pager-&gt;is_mapped = FALSE;
+		apple_protect_pager_deallocate_internal(pager, TRUE);
+		<span class="enscript-comment">/* caution: deallocate_internal() released the lock ! */</span>
+	} <span class="enscript-keyword">else</span> {
+		lck_mtx_unlock(&amp;apple_protect_pager_lock);
+	}
+	
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+
+<span class="enscript-comment">/*
+ *
+ */</span>
+apple_protect_pager_t
+<span class="enscript-function-name">apple_protect_pager_lookup</span>(
+	memory_object_t	 mem_obj)
+{
+	apple_protect_pager_t	pager;
+
+	pager = (apple_protect_pager_t) mem_obj;
+	assert(pager-&gt;pager_ops == &amp;apple_protect_pager_ops);
+	assert(pager-&gt;ref_count &gt; 0);
+	<span class="enscript-keyword">return</span> pager;
+}
+
+apple_protect_pager_t
+<span class="enscript-function-name">apple_protect_pager_create</span>(
+	vm_object_t		backing_object,
+	vm_object_offset_t	backing_offset,
+	vm_object_offset_t	crypto_backing_offset,
+	<span class="enscript-type">struct</span> pager_crypt_info *crypt_info,
+	vm_object_offset_t	crypto_start,
+	vm_object_offset_t	crypto_end)
+{
+	apple_protect_pager_t	pager, pager2;
+	memory_object_control_t	control;
+	kern_return_t		kr;
+	<span class="enscript-type">struct</span> pager_crypt_info	*old_crypt_info;
+
+	pager = (apple_protect_pager_t) kalloc(<span class="enscript-keyword">sizeof</span> (*pager));
+	<span class="enscript-keyword">if</span> (pager == APPLE_PROTECT_PAGER_NULL) {
+		<span class="enscript-keyword">return</span> APPLE_PROTECT_PAGER_NULL;
+	}
+
+	<span class="enscript-comment">/*
+	 * The vm_map call takes both named entry ports and raw memory
+	 * objects in the same parameter.  We need to make sure that
+	 * vm_map does not see this object as a named entry port.  So,
+	 * we reserve the first word in the object for a fake ip_kotype
+	 * setting - that will tell vm_map to use it as a memory object.
+	 */</span>
+	pager-&gt;pager_ops = &amp;apple_protect_pager_ops;
+	pager-&gt;pager_ikot = IKOT_MEMORY_OBJECT;
+	pager-&gt;is_ready = FALSE;<span class="enscript-comment">/* not ready until it has a &quot;name&quot; */</span>
+	pager-&gt;ref_count = 1;	<span class="enscript-comment">/* existence reference (for the cache) */</span>
+	pager-&gt;ref_count++;	<span class="enscript-comment">/* for the caller */</span>
+	pager-&gt;is_mapped = FALSE;
+	pager-&gt;pager_control = MEMORY_OBJECT_CONTROL_NULL;
+	pager-&gt;backing_object = backing_object;
+	pager-&gt;backing_offset = backing_offset;
+	pager-&gt;crypto_backing_offset = crypto_backing_offset;
+	pager-&gt;crypto_start = crypto_start;
+	pager-&gt;crypto_end = crypto_end;
+	pager-&gt;crypt_info = crypt_info; <span class="enscript-comment">/* allocated by caller */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+	printf(<span class="enscript-string">&quot;CRYPT_INFO %s: crypt_info %p [%p,%p,%p,%d]\n&quot;</span>,
+	       __FUNCTION__,
+	       crypt_info,
+	       crypt_info-&gt;page_decrypt,
+	       crypt_info-&gt;crypt_end,
+	       crypt_info-&gt;crypt_ops,
+	       crypt_info-&gt;crypt_refcnt);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+	
+	vm_object_reference(backing_object);
+
+	old_crypt_info = NULL;
+
+	lck_mtx_lock(&amp;apple_protect_pager_lock);
+	<span class="enscript-comment">/* see if anyone raced us to create a pager for the same object */</span>
+	queue_iterate(&amp;apple_protect_pager_queue,
+		      pager2,
+		      apple_protect_pager_t,
+		      pager_queue) {
+		<span class="enscript-keyword">if</span> ((pager2-&gt;crypt_info-&gt;page_decrypt !=
+		     crypt_info-&gt;page_decrypt) ||
+		    (pager2-&gt;crypt_info-&gt;crypt_end !=
+		     crypt_info-&gt;crypt_end) ||
+		    (pager2-&gt;crypt_info-&gt;crypt_ops !=
+		     crypt_info-&gt;crypt_ops)) {
+			<span class="enscript-comment">/* crypt_info contents do not match: next pager */</span>
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/* found a match for crypt_info ... */</span>
+		<span class="enscript-keyword">if</span> (old_crypt_info) {
+			<span class="enscript-comment">/* ... already switched to that crypt_info */</span>
+			assert(old_crypt_info == pager2-&gt;crypt_info);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (pager2-&gt;crypt_info != crypt_info) {
+			<span class="enscript-comment">/* ... switch to that pager's crypt_info */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+			printf(<span class="enscript-string">&quot;CRYPT_INFO %s: reference %p ref %d &quot;</span>
+			       <span class="enscript-string">&quot;(create match)\n&quot;</span>,
+			       __FUNCTION__,
+			       pager2-&gt;crypt_info,
+			       pager2-&gt;crypt_info-&gt;crypt_refcnt);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+			old_crypt_info = pager2-&gt;crypt_info;
+			crypt_info_reference(old_crypt_info);
+			pager-&gt;crypt_info = old_crypt_info;
+		}
+		
+		<span class="enscript-keyword">if</span> (pager2-&gt;backing_object == backing_object &amp;&amp;
+		    pager2-&gt;backing_offset == backing_offset &amp;&amp;
+		    pager2-&gt;crypto_backing_offset == crypto_backing_offset &amp;&amp;
+		    pager2-&gt;crypto_start == crypto_start &amp;&amp;
+		    pager2-&gt;crypto_end == crypto_end) {
+			<span class="enscript-comment">/* full match: use that pager */</span>
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (! queue_end(&amp;apple_protect_pager_queue,
+			(queue_entry_t) pager2)) {
+		<span class="enscript-comment">/* we lost the race, down with the loser... */</span>
+		lck_mtx_unlock(&amp;apple_protect_pager_lock);
+		vm_object_deallocate(pager-&gt;backing_object);
+		pager-&gt;backing_object = VM_OBJECT_NULL;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+		printf(<span class="enscript-string">&quot;CRYPT_INFO %s: %p ref %d (create pager match)\n&quot;</span>,
+		       __FUNCTION__,
+		       pager-&gt;crypt_info,
+		       pager-&gt;crypt_info-&gt;crypt_refcnt);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+		crypt_info_deallocate(pager-&gt;crypt_info);
+		pager-&gt;crypt_info = NULL;
+		kfree(pager, <span class="enscript-keyword">sizeof</span> (*pager));
+		<span class="enscript-comment">/* ... and go with the winner */</span>
+		pager = pager2;
+		<span class="enscript-comment">/* let the winner make sure the pager gets ready */</span>
+		<span class="enscript-keyword">return</span> pager;
+	}
+
+	<span class="enscript-comment">/* enter new pager at the head of our list of pagers */</span>
+	queue_enter_first(&amp;apple_protect_pager_queue,
+			  pager,
+			  apple_protect_pager_t,
+			  pager_queue);
+	apple_protect_pager_count++;
+	<span class="enscript-keyword">if</span> (apple_protect_pager_count &gt; apple_protect_pager_count_max) {
+		apple_protect_pager_count_max = apple_protect_pager_count;
+	}
+	lck_mtx_unlock(&amp;apple_protect_pager_lock);
+
+	kr = memory_object_create_named((memory_object_t) pager,
+					0,
+					&amp;control);
+	assert(kr == KERN_SUCCESS);
+
+	lck_mtx_lock(&amp;apple_protect_pager_lock);
+	<span class="enscript-comment">/* the new pager is now ready to be used */</span>
+	pager-&gt;is_ready = TRUE;
+	lck_mtx_unlock(&amp;apple_protect_pager_lock);
+
+	<span class="enscript-comment">/* wakeup anyone waiting for this pager to be ready */</span>
+	thread_wakeup(&amp;pager-&gt;is_ready);
+
+	<span class="enscript-keyword">if</span> (old_crypt_info != NULL &amp;&amp;
+	    old_crypt_info != crypt_info) {
+		<span class="enscript-comment">/* we re-used an old crypt_info instead of using our new one */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+		printf(<span class="enscript-string">&quot;CRYPT_INFO %s: deallocate %p ref %d &quot;</span>
+		       <span class="enscript-string">&quot;(create used old)\n&quot;</span>,
+		       __FUNCTION__,
+		       crypt_info,
+		       crypt_info-&gt;crypt_refcnt);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+		crypt_info_deallocate(crypt_info);
+		crypt_info = NULL;
+	}
+
+	<span class="enscript-keyword">return</span> pager;
+}
+
+<span class="enscript-comment">/*
+ * apple_protect_pager_setup()
+ *
+ * Provide the caller with a memory object backed by the provided
+ * &quot;backing_object&quot; VM object.  If such a memory object already exists,
+ * re-use it, otherwise create a new memory object.
+ */</span>
+memory_object_t
+<span class="enscript-function-name">apple_protect_pager_setup</span>(
+	vm_object_t		backing_object,
+	vm_object_offset_t	backing_offset,
+	vm_object_offset_t	crypto_backing_offset,
+	<span class="enscript-type">struct</span> pager_crypt_info *crypt_info,
+	vm_object_offset_t	crypto_start,
+	vm_object_offset_t	crypto_end)
+{
+	apple_protect_pager_t	pager;
+	<span class="enscript-type">struct</span> pager_crypt_info	*old_crypt_info, *new_crypt_info;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+	printf(<span class="enscript-string">&quot;CRYPT_INFO %s: crypt_info=%p [%p,%p,%p,%d]\n&quot;</span>,
+	       __FUNCTION__,
+	       crypt_info,
+	       crypt_info-&gt;page_decrypt,
+	       crypt_info-&gt;crypt_end,
+	       crypt_info-&gt;crypt_ops,
+	       crypt_info-&gt;crypt_refcnt);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+
+	old_crypt_info = NULL;
+
+	lck_mtx_lock(&amp;apple_protect_pager_lock);
+
+	queue_iterate(&amp;apple_protect_pager_queue,
+		      pager,
+		      apple_protect_pager_t,
+		      pager_queue) {
+		<span class="enscript-keyword">if</span> ((pager-&gt;crypt_info-&gt;page_decrypt !=
+		     crypt_info-&gt;page_decrypt) ||
+		    (pager-&gt;crypt_info-&gt;crypt_end !=
+		     crypt_info-&gt;crypt_end) ||
+		    (pager-&gt;crypt_info-&gt;crypt_ops !=
+		     crypt_info-&gt;crypt_ops)) {
+			<span class="enscript-comment">/* no match for &quot;crypt_info&quot;: next pager */</span>
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-comment">/* found a match for crypt_info ... */</span>
+		<span class="enscript-keyword">if</span> (old_crypt_info) {
+			<span class="enscript-comment">/* ... already switched to that crypt_info */</span>
+			assert(old_crypt_info == pager-&gt;crypt_info);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* ... switch to that pager's crypt_info */</span>
+			old_crypt_info = pager-&gt;crypt_info;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+			printf(<span class="enscript-string">&quot;CRYPT_INFO %s: &quot;</span>
+			       <span class="enscript-string">&quot;switching crypt_info from %p [%p,%p,%p,%d] &quot;</span>
+			       <span class="enscript-string">&quot;to %p [%p,%p,%p,%d] from pager %p\n&quot;</span>,
+			       __FUNCTION__,
+			       crypt_info,
+			       crypt_info-&gt;page_decrypt,
+			       crypt_info-&gt;crypt_end,
+			       crypt_info-&gt;crypt_ops,
+			       crypt_info-&gt;crypt_refcnt,
+			       old_crypt_info,
+			       old_crypt_info-&gt;page_decrypt,
+			       old_crypt_info-&gt;crypt_end,
+			       old_crypt_info-&gt;crypt_ops,
+			       old_crypt_info-&gt;crypt_refcnt,
+			       pager);
+			printf(<span class="enscript-string">&quot;CRYPT_INFO %s: %p ref %d (setup match)\n&quot;</span>,
+			       __FUNCTION__,
+			       pager-&gt;crypt_info,
+			       pager-&gt;crypt_info-&gt;crypt_refcnt);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+			crypt_info_reference(pager-&gt;crypt_info);
+		}
+		
+		<span class="enscript-keyword">if</span> (pager-&gt;backing_object == backing_object &amp;&amp;
+		    pager-&gt;backing_offset == backing_offset &amp;&amp;
+		    pager-&gt;crypto_backing_offset == crypto_backing_offset &amp;&amp;
+		    pager-&gt;crypto_start == crypto_start &amp;&amp;
+		    pager-&gt;crypto_end == crypto_end) {
+			<span class="enscript-comment">/* full match: use that pager! */</span>
+			assert(old_crypt_info == pager-&gt;crypt_info);
+			assert(old_crypt_info-&gt;crypt_refcnt &gt; 1);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+			printf(<span class="enscript-string">&quot;CRYPT_INFO %s: &quot;</span>
+			       <span class="enscript-string">&quot;pager match with %p crypt_info %p\n&quot;</span>,
+			       __FUNCTION__,
+			       pager,
+			       pager-&gt;crypt_info);
+			printf(<span class="enscript-string">&quot;CRYPT_INFO %s: deallocate %p ref %d &quot;</span>
+			       <span class="enscript-string">&quot;(pager match)\n&quot;</span>,
+			       __FUNCTION__,
+			       old_crypt_info,
+			       old_crypt_info-&gt;crypt_refcnt);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+			<span class="enscript-comment">/* release the extra ref on crypt_info we got above */</span>
+			crypt_info_deallocate(old_crypt_info);
+			assert(old_crypt_info-&gt;crypt_refcnt &gt; 0);
+			<span class="enscript-comment">/* give extra reference on pager to the caller */</span>
+			assert(pager-&gt;ref_count &gt; 0);
+			pager-&gt;ref_count++;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (queue_end(&amp;apple_protect_pager_queue,
+		      (queue_entry_t) pager)) {
+		lck_mtx_unlock(&amp;apple_protect_pager_lock);
+		<span class="enscript-comment">/* no existing pager for this backing object */</span>
+		pager = APPLE_PROTECT_PAGER_NULL;
+		<span class="enscript-keyword">if</span> (old_crypt_info) {
+			<span class="enscript-comment">/* use this old crypt_info for new pager */</span>
+			new_crypt_info = old_crypt_info;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+			printf(<span class="enscript-string">&quot;CRYPT_INFO %s: &quot;</span>
+			       <span class="enscript-string">&quot;will use old_crypt_info %p for new pager\n&quot;</span>,
+			       __FUNCTION__,
+			       old_crypt_info);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* allocate a new crypt_info for new pager */</span>
+			new_crypt_info = kalloc(<span class="enscript-keyword">sizeof</span> (*new_crypt_info));
+			*new_crypt_info = *crypt_info;
+			new_crypt_info-&gt;crypt_refcnt = 1;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+			printf(<span class="enscript-string">&quot;CRYPT_INFO %s: &quot;</span>
+			       <span class="enscript-string">&quot;will use new_crypt_info %p for new pager\n&quot;</span>,
+			       __FUNCTION__,
+			       new_crypt_info);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+		}
+		<span class="enscript-keyword">if</span> (new_crypt_info == NULL) {
+			<span class="enscript-comment">/* can't create new pager without a crypt_info */</span>
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* create new pager */</span>
+			pager = apple_protect_pager_create(
+				backing_object,
+				backing_offset,
+				crypto_backing_offset,
+				new_crypt_info,
+				crypto_start,
+				crypto_end);
+		}
+		<span class="enscript-keyword">if</span> (pager == APPLE_PROTECT_PAGER_NULL) {
+			<span class="enscript-comment">/* could not create a new pager */</span>
+			<span class="enscript-keyword">if</span> (new_crypt_info == old_crypt_info) {
+				<span class="enscript-comment">/* release extra reference on old_crypt_info */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+				printf(<span class="enscript-string">&quot;CRYPT_INFO %s: deallocate %p ref %d &quot;</span>
+				       <span class="enscript-string">&quot;(create fail old_crypt_info)\n&quot;</span>,
+				       __FUNCTION__,
+				       old_crypt_info, 
+				       old_crypt_info-&gt;crypt_refcnt);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+				crypt_info_deallocate(old_crypt_info);
+				old_crypt_info = NULL;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* release unused new_crypt_info */</span>
+				assert(new_crypt_info-&gt;crypt_refcnt == 1);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+				printf(<span class="enscript-string">&quot;CRYPT_INFO %s: deallocate %p ref %d &quot;</span>
+				       <span class="enscript-string">&quot;(create fail new_crypt_info)\n&quot;</span>,
+				       __FUNCTION__,
+				       new_crypt_info,
+				       new_crypt_info-&gt;crypt_refcnt);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+				crypt_info_deallocate(new_crypt_info);
+				new_crypt_info = NULL;
+			}
+			<span class="enscript-keyword">return</span> MEMORY_OBJECT_NULL;
+		}
+		lck_mtx_lock(&amp;apple_protect_pager_lock);
+	} <span class="enscript-keyword">else</span> {
+		assert(old_crypt_info == pager-&gt;crypt_info);
+	}
+
+	<span class="enscript-keyword">while</span> (!pager-&gt;is_ready) {
+		lck_mtx_sleep(&amp;apple_protect_pager_lock,
+			LCK_SLEEP_DEFAULT,
+			&amp;pager-&gt;is_ready,
+			THREAD_UNINT);
+	}
+	lck_mtx_unlock(&amp;apple_protect_pager_lock);
+
+	<span class="enscript-keyword">return</span> (memory_object_t) pager;
+}	
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">apple_protect_pager_trim</span>(<span class="enscript-type">void</span>)
+{
+	apple_protect_pager_t	pager, prev_pager;
+	queue_head_t		trim_queue;
+	<span class="enscript-type">int</span>			num_trim;
+	<span class="enscript-type">int</span>			count_unmapped;
+
+	lck_mtx_lock(&amp;apple_protect_pager_lock);
+
+	<span class="enscript-comment">/*
+	 * We have too many pagers, try and trim some unused ones,
+	 * starting with the oldest pager at the end of the queue.
+	 */</span>
+	queue_init(&amp;trim_queue);
+	num_trim = 0;
+
+	<span class="enscript-keyword">for</span> (pager = (apple_protect_pager_t)
+		     queue_last(&amp;apple_protect_pager_queue);
+	     !queue_end(&amp;apple_protect_pager_queue,
+			(queue_entry_t) pager);
+	     pager = prev_pager) {
+		<span class="enscript-comment">/* get prev elt before we dequeue */</span>
+		prev_pager = (apple_protect_pager_t)
+			queue_prev(&amp;pager-&gt;pager_queue);
+
+		<span class="enscript-keyword">if</span> (pager-&gt;ref_count == 2 &amp;&amp;
+		    pager-&gt;is_ready &amp;&amp;
+		    !pager-&gt;is_mapped) {
+			<span class="enscript-comment">/* this pager can be trimmed */</span>
+			num_trim++;
+			<span class="enscript-comment">/* remove this pager from the main list ... */</span>
+			apple_protect_pager_dequeue(pager);
+			<span class="enscript-comment">/* ... and add it to our trim queue */</span>
+			queue_enter_first(&amp;trim_queue,
+					  pager,
+					  apple_protect_pager_t,
+					  pager_queue);
+
+			count_unmapped = (apple_protect_pager_count -
+					  apple_protect_pager_count_mapped);
+			<span class="enscript-keyword">if</span> (count_unmapped &lt;= apple_protect_pager_cache_limit) {
+				<span class="enscript-comment">/* we have enough pagers to trim */</span>
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+	}
+	<span class="enscript-keyword">if</span> (num_trim &gt; apple_protect_pager_num_trim_max) {
+		apple_protect_pager_num_trim_max = num_trim;
+	}
+	apple_protect_pager_num_trim_total += num_trim;
+
+	lck_mtx_unlock(&amp;apple_protect_pager_lock);
+
+	<span class="enscript-comment">/* terminate the trimmed pagers */</span>
+	<span class="enscript-keyword">while</span> (!queue_empty(&amp;trim_queue)) {
+		queue_remove_first(&amp;trim_queue,
+				   pager,
+				   apple_protect_pager_t,
+				   pager_queue);
+		pager-&gt;pager_queue.next = NULL;
+		pager-&gt;pager_queue.prev = NULL;
+		assert(pager-&gt;ref_count == 2);
+		<span class="enscript-comment">/*
+		 * We can't call deallocate_internal() because the pager
+		 * has already been dequeued, but we still need to remove
+		 * a reference.
+		 */</span>
+		pager-&gt;ref_count--;
+		apple_protect_pager_terminate_internal(pager);
+	}
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">crypt_info_reference</span>(
+	<span class="enscript-type">struct</span> pager_crypt_info *crypt_info)
+{
+	assert(crypt_info-&gt;crypt_refcnt != 0);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+	printf(<span class="enscript-string">&quot;CRYPT_INFO %s: %p ref %d -&gt; %d\n&quot;</span>,
+	       __FUNCTION__,
+	       crypt_info,
+	       crypt_info-&gt;crypt_refcnt,
+	       crypt_info-&gt;crypt_refcnt + 1);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+	OSAddAtomic(+1, &amp;crypt_info-&gt;crypt_refcnt);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">crypt_info_deallocate</span>(
+	<span class="enscript-type">struct</span> pager_crypt_info	*crypt_info)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+	printf(<span class="enscript-string">&quot;CRYPT_INFO %s: %p ref %d -&gt; %d\n&quot;</span>,
+	       __FUNCTION__,
+	       crypt_info,
+	       crypt_info-&gt;crypt_refcnt,
+	       crypt_info-&gt;crypt_refcnt - 1);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+	OSAddAtomic(-1, &amp;crypt_info-&gt;crypt_refcnt);
+	<span class="enscript-keyword">if</span> (crypt_info-&gt;crypt_refcnt == 0) {
+		<span class="enscript-comment">/* deallocate any crypt module data */</span>
+		<span class="enscript-keyword">if</span> (crypt_info-&gt;crypt_end) {
+			crypt_info-&gt;crypt_end(crypt_info-&gt;crypt_ops);
+			crypt_info-&gt;crypt_end = NULL;
+		}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPT_INFO_DEBUG</span>
+		printf(<span class="enscript-string">&quot;CRYPT_INFO %s: freeing %p\n&quot;</span>,
+		       __FUNCTION__,
+		       crypt_info);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CRYPT_INFO_DEBUG */</span>
+		kfree(crypt_info, <span class="enscript-keyword">sizeof</span> (*crypt_info));
+		crypt_info = NULL;
+	}
+}
+</pre>
+<hr />
+</body></html>

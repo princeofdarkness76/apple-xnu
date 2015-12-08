@@ -1,0 +1,1529 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IONVRAM.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IONVRAM.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2006 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2007-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOLib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IONVRAM.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOPlatformExpert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOUserClient.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKitKeys.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKitKeysPrivate.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> {
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+};
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOService
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kIONVRAMPrivilege</span>	kIOClientPrivilegeAdministrator
+<span class="enscript-comment">//#define kIONVRAMPrivilege	kIOClientPrivilegeLocalUser
+</span>
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IODTNVRAM, IOService);
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODTNVRAM::init</span>(IORegistryEntry *old, <span class="enscript-type">const</span> IORegistryPlane *plane)
+{
+  OSDictionary *dict;
+  
+  <span class="enscript-keyword">if</span> (!super::init(old, plane)) <span class="enscript-keyword">return</span> false;
+  
+  dict =  OSDictionary::withCapacity(1);
+  <span class="enscript-keyword">if</span> (dict == 0) <span class="enscript-keyword">return</span> false;
+  setPropertyTable(dict);
+  
+  _nvramImage = IONew(UInt8, kIODTNVRAMImageSize);
+  <span class="enscript-keyword">if</span> (_nvramImage == 0) <span class="enscript-keyword">return</span> false;
+  
+  _nvramPartitionOffsets = OSDictionary::withCapacity(1);
+  <span class="enscript-keyword">if</span> (_nvramPartitionOffsets == 0) <span class="enscript-keyword">return</span> false;
+  
+  _nvramPartitionLengths = OSDictionary::withCapacity(1);
+  <span class="enscript-keyword">if</span> (_nvramPartitionLengths == 0) <span class="enscript-keyword">return</span> false;
+  
+  _registryPropertiesKey = OSSymbol::withCStringNoCopy(<span class="enscript-string">&quot;aapl,pci&quot;</span>);
+  <span class="enscript-keyword">if</span> (_registryPropertiesKey == 0) <span class="enscript-keyword">return</span> false;
+  
+  <span class="enscript-comment">// &lt;rdar://problem/9529235&gt; race condition possible between
+</span>  <span class="enscript-comment">// IODTNVRAM and IONVRAMController (restore loses boot-args)
+</span>  initProxyData();
+
+  <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IODTNVRAM::initProxyData</span>(<span class="enscript-type">void</span>)
+{
+  IORegistryEntry *entry;
+  <span class="enscript-type">const</span> <span class="enscript-type">char</span> *key = <span class="enscript-string">&quot;nvram-proxy-data&quot;</span>;
+  OSObject *prop;
+  OSData *data;
+  <span class="enscript-type">const</span> <span class="enscript-type">void</span> *bytes;
+  
+  entry = IORegistryEntry::fromPath(<span class="enscript-string">&quot;/chosen&quot;</span>, gIODTPlane);
+  <span class="enscript-keyword">if</span> (entry != 0) {
+    prop = entry-&gt;getProperty(key);
+    <span class="enscript-keyword">if</span> (prop != 0) {
+      data = OSDynamicCast(OSData, prop);
+      <span class="enscript-keyword">if</span> (data != 0) {
+        bytes = data-&gt;getBytesNoCopy();
+        <span class="enscript-keyword">if</span> (bytes != 0) {
+          bcopy(bytes, _nvramImage, data-&gt;getLength());
+          initNVRAMImage();
+          _isProxied = true;
+        }
+      }
+    }
+    entry-&gt;removeProperty(key);
+    entry-&gt;release();
+  }
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IODTNVRAM::registerNVRAMController</span>(IONVRAMController *nvram)
+{
+  <span class="enscript-keyword">if</span> (_nvramController != 0) <span class="enscript-keyword">return</span>;
+  
+  _nvramController = nvram;
+  
+  <span class="enscript-comment">// &lt;rdar://problem/9529235&gt; race condition possible between
+</span>  <span class="enscript-comment">// IODTNVRAM and IONVRAMController (restore loses boot-args)
+</span>  <span class="enscript-keyword">if</span> (!_isProxied) {
+    _nvramController-&gt;read(0, _nvramImage, kIODTNVRAMImageSize);
+    initNVRAMImage();
+  } <span class="enscript-keyword">else</span> {
+    syncOFVariables();
+  }
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IODTNVRAM::initNVRAMImage</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-type">char</span>   partitionID[18];
+  UInt32 partitionOffset, partitionLength;
+  UInt32 freePartitionOffset, freePartitionSize;
+  UInt32 currentLength, currentOffset = 0;
+  OSNumber *partitionOffsetNumber, *partitionLengthNumber;
+  
+  <span class="enscript-comment">// Find the offsets for the OF, XPRAM, NameRegistry and PanicInfo partitions.
+</span>  _ofPartitionOffset = 0xFFFFFFFF;
+  _piPartitionOffset = 0xFFFFFFFF;
+  freePartitionOffset = 0xFFFFFFFF;
+  freePartitionSize = 0;
+
+  <span class="enscript-comment">// Look through the partitions to find the OF, MacOS partitions.
+</span>  <span class="enscript-keyword">while</span> (currentOffset &lt; kIODTNVRAMImageSize) {
+    currentLength = ((UInt16 *)(_nvramImage + currentOffset))[1] * 16;
+    
+    partitionOffset = currentOffset + 16;
+    partitionLength = currentLength - 16;
+    
+    <span class="enscript-keyword">if</span> (strncmp((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)_nvramImage + currentOffset + 4,
+		kIODTNVRAMOFPartitionName, 12) == 0) {
+      _ofPartitionOffset = partitionOffset;
+      _ofPartitionSize = partitionLength;
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (strncmp((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)_nvramImage + currentOffset + 4,
+		       kIODTNVRAMXPRAMPartitionName, 12) == 0) {
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (strncmp((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)_nvramImage + currentOffset + 4,
+		       kIODTNVRAMPanicInfoPartitonName, 12) == 0) {
+      _piPartitionOffset = partitionOffset;
+      _piPartitionSize = partitionLength;
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (strncmp((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)_nvramImage + currentOffset + 4,
+		       kIODTNVRAMFreePartitionName, 12) == 0) {
+      freePartitionOffset = currentOffset;
+      freePartitionSize = currentLength;
+    } <span class="enscript-keyword">else</span> {
+      <span class="enscript-comment">// Construct the partition ID from the signature and name.
+</span>      snprintf(partitionID, <span class="enscript-keyword">sizeof</span>(partitionID), <span class="enscript-string">&quot;0x%02x,&quot;</span>,
+	      *(UInt8 *)(_nvramImage + currentOffset));
+      strncpy(partitionID + 5,
+	      (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)(_nvramImage + currentOffset + 4), 12);
+      partitionID[17] = <span class="enscript-string">'\0'</span>;
+      
+      partitionOffsetNumber = OSNumber::withNumber(partitionOffset, 32);
+      partitionLengthNumber = OSNumber::withNumber(partitionLength, 32);
+      
+      <span class="enscript-comment">// Save the partition offset and length
+</span>      _nvramPartitionOffsets-&gt;setObject(partitionID, partitionOffsetNumber);
+      _nvramPartitionLengths-&gt;setObject(partitionID, partitionLengthNumber);
+      
+      partitionOffsetNumber-&gt;release();
+      partitionLengthNumber-&gt;release();
+    }
+    currentOffset += currentLength;
+  }
+  
+  <span class="enscript-keyword">if</span> (_ofPartitionOffset != 0xFFFFFFFF)
+    _ofImage    = _nvramImage + _ofPartitionOffset;
+  
+  <span class="enscript-keyword">if</span> (_piPartitionOffset == 0xFFFFFFFF) {
+    <span class="enscript-keyword">if</span> (freePartitionSize &gt; 0x20) {
+      <span class="enscript-comment">// Set the signature to 0xa1.
+</span>      _nvramImage[freePartitionOffset] = 0xa1;
+      <span class="enscript-comment">// Set the checksum to 0.
+</span>      _nvramImage[freePartitionOffset + 1] = 0;
+      <span class="enscript-comment">// Set the name for the Panic Info partition.
+</span>      strncpy((<span class="enscript-type">char</span> *)(_nvramImage + freePartitionOffset + 4),
+	      kIODTNVRAMPanicInfoPartitonName, 12);
+      
+      <span class="enscript-comment">// Calculate the partition offset and size.
+</span>      _piPartitionOffset = freePartitionOffset + 0x10;
+      _piPartitionSize = 0x800;
+      <span class="enscript-keyword">if</span> (_piPartitionSize + 0x20 &gt; freePartitionSize)
+	_piPartitionSize = freePartitionSize - 0x20;
+      
+      _piImage = _nvramImage + _piPartitionOffset;
+      
+      <span class="enscript-comment">// Zero the new partition.
+</span>      bzero(_piImage, _piPartitionSize);
+      
+      <span class="enscript-comment">// Set the partition size.
+</span>      *(UInt16 *)(_nvramImage + freePartitionOffset + 2) =
+	(_piPartitionSize / 0x10) + 1;
+      
+      <span class="enscript-comment">// Set the partition checksum.
+</span>      _nvramImage[freePartitionOffset + 1] =
+	calculatePartitionChecksum(_nvramImage + freePartitionOffset);
+      
+      <span class="enscript-comment">// Calculate the free partition offset and size.
+</span>      freePartitionOffset += _piPartitionSize + 0x10;
+      freePartitionSize -= _piPartitionSize + 0x10;
+      
+      <span class="enscript-comment">// Set the signature to 0x7f.
+</span>      _nvramImage[freePartitionOffset] = 0x7f;
+      <span class="enscript-comment">// Set the checksum to 0.
+</span>      _nvramImage[freePartitionOffset + 1] = 0;
+      <span class="enscript-comment">// Set the name for the free partition.
+</span>      strncpy((<span class="enscript-type">char</span> *)(_nvramImage + freePartitionOffset + 4),
+	      kIODTNVRAMFreePartitionName, 12);
+      <span class="enscript-comment">// Set the partition size.
+</span>      *(UInt16 *)(_nvramImage + freePartitionOffset + 2) =
+	freePartitionSize / 0x10;
+      <span class="enscript-comment">// Set the partition checksum.
+</span>      _nvramImage[freePartitionOffset + 1] =
+	calculatePartitionChecksum(_nvramImage + freePartitionOffset);
+
+      <span class="enscript-keyword">if</span> (_nvramController != 0) {
+        _nvramController-&gt;write(0, _nvramImage, kIODTNVRAMImageSize);
+      }
+    }
+  } <span class="enscript-keyword">else</span> {
+    _piImage = _nvramImage + _piPartitionOffset;
+  }
+  
+  _lastDeviceSync = 0;
+  _freshInterval = TRUE;		<span class="enscript-comment">// we will allow sync() even before the first 15 minutes have passed.
+</span>
+  initOFVariables();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IODTNVRAM::syncInternal</span>(<span class="enscript-type">bool</span> rateLimit)
+{
+  <span class="enscript-comment">// Don't try to perform controller operations if none has been registered.  
+</span>  <span class="enscript-keyword">if</span> (_nvramController == 0) <span class="enscript-keyword">return</span>;
+
+  <span class="enscript-comment">// Rate limit requests to sync. Drivers that need this rate limiting will
+</span>  <span class="enscript-comment">// shadow the data and only write to flash when they get a sync call
+</span>  <span class="enscript-keyword">if</span> (rateLimit &amp;&amp; !safeToSync()) <span class="enscript-keyword">return</span>;
+  
+  _nvramController-&gt;sync();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IODTNVRAM::sync</span>(<span class="enscript-type">void</span>)
+{
+  syncInternal(false);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODTNVRAM::serializeProperties</span>(OSSerialize *s) <span class="enscript-type">const</span>
+{
+  <span class="enscript-type">bool</span>                 result, hasPrivilege;
+  UInt32               variablePerm;
+  <span class="enscript-type">const</span> OSSymbol       *key;
+  OSDictionary         *dict;
+  OSCollectionIterator *iter = 0;
+  
+  <span class="enscript-comment">// Verify permissions.
+</span>  hasPrivilege = (kIOReturnSuccess == IOUserClient::clientHasPrivilege(current_task(), kIONVRAMPrivilege));
+
+  <span class="enscript-keyword">if</span> (_ofDict == 0) {
+    <span class="enscript-comment">/* No nvram. Return an empty dictionary. */</span>
+    dict = OSDictionary::withCapacity(1);
+    <span class="enscript-keyword">if</span> (dict == 0) <span class="enscript-keyword">return</span> false;
+  } <span class="enscript-keyword">else</span> {
+    IOLockLock(_ofLock);
+    dict = OSDictionary::withDictionary(_ofDict);
+    IOLockUnlock(_ofLock);
+    <span class="enscript-keyword">if</span> (dict == 0) <span class="enscript-keyword">return</span> false;
+
+    <span class="enscript-comment">/* Copy properties with client privilege. */</span>
+    iter = OSCollectionIterator::withCollection(dict);
+    <span class="enscript-keyword">if</span> (iter == 0) {
+      dict-&gt;release();
+      <span class="enscript-keyword">return</span> false;
+    }
+    <span class="enscript-keyword">while</span> (1) {
+      key = OSDynamicCast(OSSymbol, iter-&gt;getNextObject());
+      <span class="enscript-keyword">if</span> (key == 0) <span class="enscript-keyword">break</span>;
+      
+      variablePerm = getOFVariablePerm(key);
+      <span class="enscript-keyword">if</span> ((hasPrivilege || (variablePerm != kOFVariablePermRootOnly)) &amp;&amp;
+	  ( ! (variablePerm == kOFVariablePermKernelOnly &amp;&amp; current_task() != kernel_task) )
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+          &amp;&amp; (current_task() == kernel_task || mac_iokit_check_nvram_get(kauth_cred_get(), key-&gt;getCStringNoCopy()) == 0)
+#<span class="enscript-reference">endif</span>
+         ) { }
+      <span class="enscript-keyword">else</span> dict-&gt;removeObject(key);
+    }
+  }
+
+  result = dict-&gt;serialize(s);
+ 
+  dict-&gt;release();
+  <span class="enscript-keyword">if</span> (iter != 0) iter-&gt;release();
+  
+  <span class="enscript-keyword">return</span> result;
+}
+
+OSObject *<span class="enscript-function-name">IODTNVRAM::copyProperty</span>(<span class="enscript-type">const</span> OSSymbol *aKey) <span class="enscript-type">const</span>
+{
+  IOReturn result;
+  UInt32   variablePerm;
+  OSObject *theObject;
+  
+  <span class="enscript-keyword">if</span> (_ofDict == 0) <span class="enscript-keyword">return</span> 0;
+  
+  <span class="enscript-comment">// Verify permissions.
+</span>  variablePerm = getOFVariablePerm(aKey);
+  result = IOUserClient::clientHasPrivilege(current_task(), kIONVRAMPrivilege);
+  <span class="enscript-keyword">if</span> (result != kIOReturnSuccess) {
+    <span class="enscript-keyword">if</span> (variablePerm == kOFVariablePermRootOnly) <span class="enscript-keyword">return</span> 0;
+  }
+  <span class="enscript-keyword">if</span> (variablePerm == kOFVariablePermKernelOnly &amp;&amp; current_task() != kernel_task) <span class="enscript-keyword">return</span> 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+  <span class="enscript-keyword">if</span> (current_task() != kernel_task &amp;&amp;
+      mac_iokit_check_nvram_get(kauth_cred_get(), aKey-&gt;getCStringNoCopy()) != 0)
+    <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+
+  IOLockLock(_ofLock);
+  theObject = _ofDict-&gt;getObject(aKey);
+  <span class="enscript-keyword">if</span> (theObject) theObject-&gt;retain();
+  IOLockUnlock(_ofLock);
+
+  <span class="enscript-keyword">return</span> theObject;
+}
+
+OSObject *<span class="enscript-function-name">IODTNVRAM::copyProperty</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *aKey) <span class="enscript-type">const</span>
+{
+  <span class="enscript-type">const</span> OSSymbol *keySymbol;
+  OSObject *theObject = 0;
+  
+  keySymbol = OSSymbol::withCString(aKey);
+  <span class="enscript-keyword">if</span> (keySymbol != 0) {
+    theObject = copyProperty(keySymbol);
+    keySymbol-&gt;release();
+  }
+  
+  <span class="enscript-keyword">return</span> theObject;
+}
+
+OSObject *<span class="enscript-function-name">IODTNVRAM::getProperty</span>(<span class="enscript-type">const</span> OSSymbol *aKey) <span class="enscript-type">const</span>
+{
+  OSObject *theObject;
+
+  theObject = copyProperty(aKey);
+  <span class="enscript-keyword">if</span> (theObject) theObject-&gt;release();
+
+  <span class="enscript-keyword">return</span> theObject;
+}
+
+OSObject *<span class="enscript-function-name">IODTNVRAM::getProperty</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *aKey) <span class="enscript-type">const</span>
+{
+  OSObject *theObject;
+
+  theObject = copyProperty(aKey);
+  <span class="enscript-keyword">if</span> (theObject) theObject-&gt;release();
+
+  <span class="enscript-keyword">return</span> theObject;
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODTNVRAM::setProperty</span>(<span class="enscript-type">const</span> OSSymbol *aKey, OSObject *anObject)
+{
+  <span class="enscript-type">bool</span>     result;
+  UInt32   propType, propPerm;
+  OSString *tmpString;
+  OSObject *propObject = 0;
+  
+  <span class="enscript-keyword">if</span> (_ofDict == 0) <span class="enscript-keyword">return</span> false;
+  
+  <span class="enscript-comment">// Verify permissions.
+</span>  propPerm = getOFVariablePerm(aKey);
+  result = IOUserClient::clientHasPrivilege(current_task(), kIONVRAMPrivilege);
+  <span class="enscript-keyword">if</span> (result != kIOReturnSuccess) {
+    <span class="enscript-keyword">if</span> (propPerm != kOFVariablePermUserWrite) <span class="enscript-keyword">return</span> false;
+  }
+  <span class="enscript-keyword">if</span> (propPerm == kOFVariablePermKernelOnly &amp;&amp; current_task() != kernel_task) <span class="enscript-keyword">return</span> 0;
+
+  <span class="enscript-comment">// Don't allow change of 'aapl,panic-info'.
+</span>  <span class="enscript-keyword">if</span> (aKey-&gt;isEqualTo(kIODTNVRAMPanicInfoKey)) <span class="enscript-keyword">return</span> false;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+  <span class="enscript-keyword">if</span> (current_task() != kernel_task &amp;&amp;
+      mac_iokit_check_nvram_set(kauth_cred_get(), aKey-&gt;getCStringNoCopy(), anObject) != 0)
+    <span class="enscript-keyword">return</span> false;
+#<span class="enscript-reference">endif</span>
+  
+  <span class="enscript-comment">// Make sure the object is of the correct type.
+</span>  propType = getOFVariableType(aKey);
+  <span class="enscript-keyword">switch</span> (propType) {
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeBoolean</span> :
+    propObject = OSDynamicCast(OSBoolean, anObject);
+    <span class="enscript-keyword">break</span>;
+    
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeNumber</span> :
+    propObject = OSDynamicCast(OSNumber, anObject);
+    <span class="enscript-keyword">break</span>;
+    
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeString</span> :
+    propObject = OSDynamicCast(OSString, anObject);
+    <span class="enscript-keyword">break</span>;
+    
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeData</span> :
+    propObject = OSDynamicCast(OSData, anObject);
+    <span class="enscript-keyword">if</span> (propObject == 0) {
+      tmpString = OSDynamicCast(OSString, anObject);
+      <span class="enscript-keyword">if</span> (tmpString != 0) {
+	propObject = OSData::withBytes(tmpString-&gt;getCStringNoCopy(),
+				       tmpString-&gt;getLength());
+      }
+    }
+    <span class="enscript-keyword">break</span>;
+  }
+  
+  <span class="enscript-keyword">if</span> (propObject == 0) <span class="enscript-keyword">return</span> false;
+
+  IOLockLock(_ofLock);
+  result = _ofDict-&gt;setObject(aKey, propObject);
+  IOLockUnlock(_ofLock);
+
+  <span class="enscript-keyword">if</span> (result) {
+    syncOFVariables();
+  }
+  
+  <span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IODTNVRAM::removeProperty</span>(<span class="enscript-type">const</span> OSSymbol *aKey)
+{
+  <span class="enscript-type">bool</span>     result;
+  UInt32   propPerm;
+  
+  <span class="enscript-keyword">if</span> (_ofDict == 0) <span class="enscript-keyword">return</span>;
+  
+  <span class="enscript-comment">// Verify permissions.
+</span>  propPerm = getOFVariablePerm(aKey);
+  result = IOUserClient::clientHasPrivilege(current_task(), kIOClientPrivilegeAdministrator);
+  <span class="enscript-keyword">if</span> (result != kIOReturnSuccess) {
+    <span class="enscript-keyword">if</span> (propPerm != kOFVariablePermUserWrite) <span class="enscript-keyword">return</span>;
+  }
+  <span class="enscript-keyword">if</span> (propPerm == kOFVariablePermKernelOnly &amp;&amp; current_task() != kernel_task) <span class="enscript-keyword">return</span>;
+  
+  <span class="enscript-comment">// Don't allow change of 'aapl,panic-info'.
+</span>  <span class="enscript-keyword">if</span> (aKey-&gt;isEqualTo(kIODTNVRAMPanicInfoKey)) <span class="enscript-keyword">return</span>;
+  
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+  <span class="enscript-keyword">if</span> (current_task() != kernel_task &amp;&amp;
+      mac_iokit_check_nvram_delete(kauth_cred_get(), aKey-&gt;getCStringNoCopy()) != 0)
+    <span class="enscript-keyword">return</span>;
+#<span class="enscript-reference">endif</span>
+
+  <span class="enscript-comment">// If the object exists, remove it from the dictionary.
+</span>
+  IOLockLock(_ofLock);
+  result = _ofDict-&gt;getObject(aKey) != 0;
+  <span class="enscript-keyword">if</span> (result) {
+    _ofDict-&gt;removeObject(aKey);
+  }
+  IOLockUnlock(_ofLock);
+
+  <span class="enscript-keyword">if</span> (result) {
+    syncOFVariables();
+  }
+}
+
+IOReturn <span class="enscript-function-name">IODTNVRAM::setProperties</span>(OSObject *properties)
+{
+  <span class="enscript-type">bool</span>                 result = true;
+  OSObject             *object;
+  <span class="enscript-type">const</span> OSSymbol       *key;
+  <span class="enscript-type">const</span> OSString       *tmpStr;
+  OSDictionary         *dict;
+  OSCollectionIterator *iter;
+  
+  dict = OSDynamicCast(OSDictionary, properties);
+  <span class="enscript-keyword">if</span> (dict == 0) <span class="enscript-keyword">return</span> kIOReturnBadArgument;
+  
+  iter = OSCollectionIterator::withCollection(dict);
+  <span class="enscript-keyword">if</span> (iter == 0) <span class="enscript-keyword">return</span> kIOReturnBadArgument;
+  
+  <span class="enscript-keyword">while</span> (result) {
+    key = OSDynamicCast(OSSymbol, iter-&gt;getNextObject());
+    <span class="enscript-keyword">if</span> (key == 0) <span class="enscript-keyword">break</span>;
+    
+    object = dict-&gt;getObject(key);
+    <span class="enscript-keyword">if</span> (object == 0) <span class="enscript-keyword">continue</span>;
+    
+    <span class="enscript-keyword">if</span> (key-&gt;isEqualTo(kIONVRAMDeletePropertyKey)) {
+		tmpStr = OSDynamicCast(OSString, object);
+		<span class="enscript-keyword">if</span> (tmpStr != 0) {
+			key = OSSymbol::withString(tmpStr);
+			removeProperty(key);
+			key-&gt;release();
+			result = true;
+		} <span class="enscript-keyword">else</span> {
+			result = false;
+		}
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span>(key-&gt;isEqualTo(kIONVRAMSyncNowPropertyKey) || key-&gt;isEqualTo(kIONVRAMForceSyncNowPropertyKey)) {
+		tmpStr = OSDynamicCast(OSString, object);
+		<span class="enscript-keyword">if</span> (tmpStr != 0) {
+
+			result = true;
+
+      <span class="enscript-comment">// We still want to throttle NVRAM commit rate for SyncNow. ForceSyncNow is provided as a really big hammer.
+</span>
+			syncInternal(key-&gt;isEqualTo(kIONVRAMSyncNowPropertyKey));
+
+		} <span class="enscript-keyword">else</span> {
+			result = false;
+		}
+	}
+	<span class="enscript-keyword">else</span> {
+		result = setProperty(key, object);
+    }
+
+  }
+  
+  iter-&gt;release();
+  
+  <span class="enscript-keyword">if</span> (result) <span class="enscript-keyword">return</span> kIOReturnSuccess;
+  <span class="enscript-keyword">else</span> <span class="enscript-keyword">return</span> kIOReturnError;
+}
+
+IOReturn <span class="enscript-function-name">IODTNVRAM::readXPRAM</span>(IOByteCount offset, UInt8 *buffer,
+			      IOByteCount length)
+{
+  <span class="enscript-keyword">return</span> kIOReturnUnsupported;
+}
+
+IOReturn <span class="enscript-function-name">IODTNVRAM::writeXPRAM</span>(IOByteCount offset, UInt8 *buffer,
+			       IOByteCount length)
+{
+  <span class="enscript-keyword">return</span> kIOReturnUnsupported;
+}
+
+IOReturn <span class="enscript-function-name">IODTNVRAM::readNVRAMProperty</span>(IORegistryEntry *entry,
+				      <span class="enscript-type">const</span> OSSymbol **name,
+				      OSData **value)
+{
+  IOReturn err;
+
+  err = readNVRAMPropertyType1(entry, name, value);
+  
+  <span class="enscript-keyword">return</span> err;
+}
+
+IOReturn <span class="enscript-function-name">IODTNVRAM::writeNVRAMProperty</span>(IORegistryEntry *entry,
+				       <span class="enscript-type">const</span> OSSymbol *name,
+				       OSData *value)
+{
+  IOReturn err;
+  
+  err = writeNVRAMPropertyType1(entry, name, value);
+  
+  <span class="enscript-keyword">return</span> err;
+}
+
+OSDictionary *<span class="enscript-function-name">IODTNVRAM::getNVRAMPartitions</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span> _nvramPartitionLengths;
+}
+
+IOReturn <span class="enscript-function-name">IODTNVRAM::readNVRAMPartition</span>(<span class="enscript-type">const</span> OSSymbol *partitionID,
+				       IOByteCount offset, UInt8 *buffer,
+				       IOByteCount length)
+{
+  OSNumber *partitionOffsetNumber, *partitionLengthNumber;
+  UInt32   partitionOffset, partitionLength;
+  
+  partitionOffsetNumber =
+    (OSNumber *)_nvramPartitionOffsets-&gt;getObject(partitionID);
+  partitionLengthNumber =
+    (OSNumber *)_nvramPartitionLengths-&gt;getObject(partitionID);
+  
+  <span class="enscript-keyword">if</span> ((partitionOffsetNumber == 0) || (partitionLengthNumber == 0))
+    <span class="enscript-keyword">return</span> kIOReturnNotFound;
+  
+  partitionOffset = partitionOffsetNumber-&gt;unsigned32BitValue();
+  partitionLength = partitionLengthNumber-&gt;unsigned32BitValue();
+  
+  <span class="enscript-keyword">if</span> ((buffer == 0) || (length == 0) ||
+      (offset + length &gt; partitionLength))
+    <span class="enscript-keyword">return</span> kIOReturnBadArgument;
+  
+  bcopy(_nvramImage + partitionOffset + offset, buffer, length);
+  
+  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOReturn <span class="enscript-function-name">IODTNVRAM::writeNVRAMPartition</span>(<span class="enscript-type">const</span> OSSymbol *partitionID,
+					IOByteCount offset, UInt8 *buffer,
+					IOByteCount length)
+{
+  OSNumber *partitionOffsetNumber, *partitionLengthNumber;
+  UInt32   partitionOffset, partitionLength;
+  
+  partitionOffsetNumber =
+    (OSNumber *)_nvramPartitionOffsets-&gt;getObject(partitionID);
+  partitionLengthNumber =
+    (OSNumber *)_nvramPartitionLengths-&gt;getObject(partitionID);
+  
+  <span class="enscript-keyword">if</span> ((partitionOffsetNumber == 0) || (partitionLengthNumber == 0))
+    <span class="enscript-keyword">return</span> kIOReturnNotFound;
+  
+  partitionOffset = partitionOffsetNumber-&gt;unsigned32BitValue();
+  partitionLength = partitionLengthNumber-&gt;unsigned32BitValue();
+  
+  <span class="enscript-keyword">if</span> ((buffer == 0) || (length == 0) ||
+      (offset + length &gt; partitionLength))
+    <span class="enscript-keyword">return</span> kIOReturnBadArgument;
+  
+  bcopy(buffer, _nvramImage + partitionOffset + offset, length);
+  
+  <span class="enscript-keyword">if</span> (_nvramController != 0) {
+    _nvramController-&gt;write(0, _nvramImage, kIODTNVRAMImageSize);
+  }
+  
+  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOByteCount <span class="enscript-function-name">IODTNVRAM::savePanicInfo</span>(UInt8 *buffer, IOByteCount length)
+{
+  <span class="enscript-keyword">if</span> ((_piImage == 0) || (length &lt;= 0)) <span class="enscript-keyword">return</span> 0;
+  
+  <span class="enscript-keyword">if</span> (length &gt; (_piPartitionSize - 4))
+    length = _piPartitionSize - 4;
+  
+  <span class="enscript-comment">// Save the Panic Info.
+</span>  bcopy(buffer, _piImage + 4, length);
+  
+  <span class="enscript-comment">// Save the Panic Info length.
+</span>  *(UInt32 *)_piImage = length;
+  
+  <span class="enscript-keyword">if</span> (_nvramController != 0) {
+    _nvramController-&gt;write(0, _nvramImage, kIODTNVRAMImageSize);
+  }
+  <span class="enscript-comment">/* 
+   * This prevents OF variables from being committed if the system has panicked
+   */</span>
+  _systemPaniced = true;
+  <span class="enscript-comment">/* The call to sync() forces the NVRAM controller to write the panic info
+   * partition to NVRAM.
+   */</span>
+  sync();
+
+  <span class="enscript-keyword">return</span> length;
+}
+
+<span class="enscript-comment">// Private methods
+</span>
+UInt8 <span class="enscript-function-name">IODTNVRAM::calculatePartitionChecksum</span>(UInt8 *partitionHeader)
+{
+  UInt8 cnt, isum, csum = 0;
+  
+  <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; 0x10; cnt++) {
+    isum = csum + partitionHeader[cnt];
+    <span class="enscript-keyword">if</span> (isum &lt; csum) isum++;
+    csum = isum;
+  }
+  
+  <span class="enscript-keyword">return</span> csum;
+}
+
+IOReturn <span class="enscript-function-name">IODTNVRAM::initOFVariables</span>(<span class="enscript-type">void</span>)
+{
+  UInt32            cnt;
+  UInt8             *propName, *propData;
+  UInt32            propNameLength, propDataLength;
+  <span class="enscript-type">const</span> OSSymbol    *propSymbol;
+  OSObject          *propObject;
+
+  <span class="enscript-keyword">if</span> (_ofImage == 0) <span class="enscript-keyword">return</span> kIOReturnNotReady;
+  
+  _ofDict = OSDictionary::withCapacity(1);
+  _ofLock = IOLockAlloc();
+  <span class="enscript-keyword">if</span> (!_ofDict || !_ofLock) <span class="enscript-keyword">return</span> kIOReturnNoMemory;
+  
+  cnt = 0;
+  <span class="enscript-keyword">while</span> (cnt &lt; _ofPartitionSize) {
+    <span class="enscript-comment">// Break if there is no name.
+</span>    <span class="enscript-keyword">if</span> (_ofImage[cnt] == <span class="enscript-string">'\0'</span>) <span class="enscript-keyword">break</span>;
+    
+    <span class="enscript-comment">// Find the length of the name.
+</span>    propName = _ofImage + cnt;
+    <span class="enscript-keyword">for</span> (propNameLength = 0; (cnt + propNameLength) &lt; _ofPartitionSize;
+	 propNameLength++) {
+      <span class="enscript-keyword">if</span> (_ofImage[cnt + propNameLength] == <span class="enscript-string">'='</span>) <span class="enscript-keyword">break</span>;
+    }
+    
+    <span class="enscript-comment">// Break if the name goes past the end of the partition.
+</span>    <span class="enscript-keyword">if</span> ((cnt + propNameLength) &gt;= _ofPartitionSize) <span class="enscript-keyword">break</span>;
+    cnt += propNameLength + 1;
+    
+    propData = _ofImage + cnt;
+    <span class="enscript-keyword">for</span> (propDataLength = 0; (cnt + propDataLength) &lt; _ofPartitionSize;
+	 propDataLength++) {
+      <span class="enscript-keyword">if</span> (_ofImage[cnt + propDataLength] == <span class="enscript-string">'\0'</span>) <span class="enscript-keyword">break</span>;
+    }
+    
+    <span class="enscript-comment">// Break if the data goes past the end of the partition.
+</span>    <span class="enscript-keyword">if</span> ((cnt + propDataLength) &gt;= _ofPartitionSize) <span class="enscript-keyword">break</span>;
+    cnt += propDataLength + 1;
+    
+    <span class="enscript-keyword">if</span> (convertPropToObject(propName, propNameLength,
+			    propData, propDataLength,
+			    &amp;propSymbol, &amp;propObject)) {
+      _ofDict-&gt;setObject(propSymbol, propObject);
+      propSymbol-&gt;release();
+      propObject-&gt;release();
+    }
+  }
+  
+  <span class="enscript-comment">// Create the boot-args property if it is not in the dictionary.
+</span>  <span class="enscript-keyword">if</span> (_ofDict-&gt;getObject(<span class="enscript-string">&quot;boot-args&quot;</span>) == 0) {
+    propObject = OSString::withCStringNoCopy(<span class="enscript-string">&quot;&quot;</span>);
+    <span class="enscript-keyword">if</span> (propObject != 0) {
+      _ofDict-&gt;setObject(<span class="enscript-string">&quot;boot-args&quot;</span>, propObject);
+      propObject-&gt;release();
+    }
+  }
+  
+  <span class="enscript-comment">// Create the 'aapl,panic-info' property if needed.
+</span>  <span class="enscript-keyword">if</span> (_piImage != 0) {
+    propDataLength = *(UInt32 *)_piImage;
+    <span class="enscript-keyword">if</span> ((propDataLength != 0) &amp;&amp; (propDataLength &lt;= (_piPartitionSize - 4))) {
+      propObject = OSData::withBytes(_piImage + 4, propDataLength);
+      _ofDict-&gt;setObject(kIODTNVRAMPanicInfoKey, propObject);
+      propObject-&gt;release();
+      
+      <span class="enscript-comment">// Clear the length from _piImage and mark dirty.
+</span>      *(UInt32 *)_piImage = 0;
+      <span class="enscript-keyword">if</span> (_nvramController != 0) {
+        _nvramController-&gt;write(0, _nvramImage, kIODTNVRAMImageSize);
+      }
+    }
+  }
+
+  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOReturn <span class="enscript-function-name">IODTNVRAM::syncOFVariables</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-type">bool</span>                 ok;
+  UInt32               length, maxLength;
+  UInt8                *buffer, *tmpBuffer;
+  <span class="enscript-type">const</span> OSSymbol       *tmpSymbol;
+  OSObject             *tmpObject;
+  OSCollectionIterator *iter;
+  
+  <span class="enscript-keyword">if</span> ((_ofImage == 0) || (_ofDict == 0) || _systemPaniced) <span class="enscript-keyword">return</span> kIOReturnNotReady;
+  
+  buffer = tmpBuffer = IONew(UInt8, _ofPartitionSize);
+  <span class="enscript-keyword">if</span> (buffer == 0) <span class="enscript-keyword">return</span> kIOReturnNoMemory;
+  bzero(buffer, _ofPartitionSize);
+  
+  ok = true;
+  maxLength = _ofPartitionSize;
+
+  IOLockLock(_ofLock);
+  iter = OSCollectionIterator::withCollection(_ofDict);
+  <span class="enscript-keyword">if</span> (iter == 0) ok = false;
+  
+  <span class="enscript-keyword">while</span> (ok) {
+    tmpSymbol = OSDynamicCast(OSSymbol, iter-&gt;getNextObject());
+    <span class="enscript-keyword">if</span> (tmpSymbol == 0) <span class="enscript-keyword">break</span>;
+    
+    <span class="enscript-comment">// Don't save 'aapl,panic-info'.
+</span>    <span class="enscript-keyword">if</span> (tmpSymbol-&gt;isEqualTo(kIODTNVRAMPanicInfoKey)) <span class="enscript-keyword">continue</span>;
+    
+    tmpObject = _ofDict-&gt;getObject(tmpSymbol);
+    
+    length = maxLength;
+    ok = convertObjectToProp(tmpBuffer, &amp;length, tmpSymbol, tmpObject);
+    <span class="enscript-keyword">if</span> (ok) {
+      tmpBuffer += length;
+      maxLength -= length;
+    }
+  }
+  iter-&gt;release();
+  IOLockUnlock(_ofLock);
+  
+  <span class="enscript-keyword">if</span> (ok) {
+    bcopy(buffer, _ofImage, _ofPartitionSize);
+  }
+  
+  IODelete(buffer, UInt8, _ofPartitionSize);
+  
+  <span class="enscript-keyword">if</span> (!ok) <span class="enscript-keyword">return</span> kIOReturnBadArgument;
+  
+  <span class="enscript-keyword">if</span> (_nvramController != 0) {
+    _nvramController-&gt;write(0, _nvramImage, kIODTNVRAMImageSize);
+  }
+  
+  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+<span class="enscript-type">struct</span> OFVariable {
+  <span class="enscript-type">const</span> <span class="enscript-type">char</span> *variableName;
+  UInt32     variableType;
+  UInt32     variablePerm;
+  SInt32     variableOffset;
+};
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> OFVariable OFVariable;
+
+<span class="enscript-type">enum</span> {
+  kOWVariableOffsetNumber = 8,
+  kOWVariableOffsetString = 17
+};
+
+OFVariable gOFVariables[] = {
+  {<span class="enscript-string">&quot;little-endian?&quot;</span>, kOFVariableTypeBoolean, kOFVariablePermUserRead, 0},
+  {<span class="enscript-string">&quot;real-mode?&quot;</span>, kOFVariableTypeBoolean, kOFVariablePermUserRead, 1},
+  {<span class="enscript-string">&quot;auto-boot?&quot;</span>, kOFVariableTypeBoolean, kOFVariablePermUserRead, 2},
+  {<span class="enscript-string">&quot;diag-switch?&quot;</span>, kOFVariableTypeBoolean, kOFVariablePermUserRead, 3},
+  {<span class="enscript-string">&quot;fcode-debug?&quot;</span>, kOFVariableTypeBoolean, kOFVariablePermUserRead, 4},
+  {<span class="enscript-string">&quot;oem-banner?&quot;</span>, kOFVariableTypeBoolean, kOFVariablePermUserRead, 5},
+  {<span class="enscript-string">&quot;oem-logo?&quot;</span>, kOFVariableTypeBoolean, kOFVariablePermUserRead, 6},
+  {<span class="enscript-string">&quot;use-nvramrc?&quot;</span>, kOFVariableTypeBoolean, kOFVariablePermUserRead, 7},
+  {<span class="enscript-string">&quot;use-generic?&quot;</span>, kOFVariableTypeBoolean, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;default-mac-address?&quot;</span>, kOFVariableTypeBoolean, kOFVariablePermUserRead,-1},
+  {<span class="enscript-string">&quot;real-base&quot;</span>, kOFVariableTypeNumber, kOFVariablePermUserRead, 8},
+  {<span class="enscript-string">&quot;real-size&quot;</span>, kOFVariableTypeNumber, kOFVariablePermUserRead, 9},
+  {<span class="enscript-string">&quot;virt-base&quot;</span>, kOFVariableTypeNumber, kOFVariablePermUserRead, 10},
+  {<span class="enscript-string">&quot;virt-size&quot;</span>, kOFVariableTypeNumber, kOFVariablePermUserRead, 11},
+  {<span class="enscript-string">&quot;load-base&quot;</span>, kOFVariableTypeNumber, kOFVariablePermUserRead, 12},
+  {<span class="enscript-string">&quot;pci-probe-list&quot;</span>, kOFVariableTypeNumber, kOFVariablePermUserRead, 13},
+  {<span class="enscript-string">&quot;pci-probe-mask&quot;</span>, kOFVariableTypeNumber, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;screen-#columns&quot;</span>, kOFVariableTypeNumber, kOFVariablePermUserRead, 14},
+  {<span class="enscript-string">&quot;screen-#rows&quot;</span>, kOFVariableTypeNumber, kOFVariablePermUserRead, 15},
+  {<span class="enscript-string">&quot;selftest-#megs&quot;</span>, kOFVariableTypeNumber, kOFVariablePermUserRead, 16},
+  {<span class="enscript-string">&quot;boot-device&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, 17},
+  {<span class="enscript-string">&quot;boot-file&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, 18},
+  {<span class="enscript-string">&quot;boot-screen&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;console-screen&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;diag-device&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, 19},
+  {<span class="enscript-string">&quot;diag-file&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, 20},
+  {<span class="enscript-string">&quot;input-device&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, 21},
+  {<span class="enscript-string">&quot;output-device&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, 22},
+  {<span class="enscript-string">&quot;input-device-1&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;output-device-1&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;mouse-device&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;oem-banner&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, 23},
+  {<span class="enscript-string">&quot;oem-logo&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, 24},
+  {<span class="enscript-string">&quot;nvramrc&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, 25},
+  {<span class="enscript-string">&quot;boot-command&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, 26},
+  {<span class="enscript-string">&quot;default-client-ip&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;default-server-ip&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;default-gateway-ip&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;default-subnet-mask&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;default-router-ip&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;boot-script&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;boot-args&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;aapl,pci&quot;</span>, kOFVariableTypeData, kOFVariablePermRootOnly, -1},
+  {<span class="enscript-string">&quot;security-mode&quot;</span>, kOFVariableTypeString, kOFVariablePermUserRead, -1},
+  {<span class="enscript-string">&quot;security-password&quot;</span>, kOFVariableTypeData, kOFVariablePermRootOnly, -1},
+  {<span class="enscript-string">&quot;boot-image&quot;</span>, kOFVariableTypeData, kOFVariablePermUserWrite, -1},
+  {<span class="enscript-string">&quot;com.apple.System.fp-state&quot;</span>, kOFVariableTypeData, kOFVariablePermKernelOnly, -1},
+  {0, kOFVariableTypeData, kOFVariablePermUserRead, -1}
+};
+
+UInt32 <span class="enscript-function-name">IODTNVRAM::getOFVariableType</span>(<span class="enscript-type">const</span> OSSymbol *propSymbol) <span class="enscript-type">const</span>
+{
+  OFVariable *ofVar;
+  
+  ofVar = gOFVariables;
+  <span class="enscript-keyword">while</span> (1) {
+    <span class="enscript-keyword">if</span> ((ofVar-&gt;variableName == 0) ||
+	propSymbol-&gt;isEqualTo(ofVar-&gt;variableName)) <span class="enscript-keyword">break</span>;
+    ofVar++;
+  }
+  
+  <span class="enscript-keyword">return</span> ofVar-&gt;variableType;
+}
+
+UInt32 <span class="enscript-function-name">IODTNVRAM::getOFVariablePerm</span>(<span class="enscript-type">const</span> OSSymbol *propSymbol) <span class="enscript-type">const</span>
+{
+  OFVariable *ofVar;
+  
+  ofVar = gOFVariables;
+  <span class="enscript-keyword">while</span> (1) {
+    <span class="enscript-keyword">if</span> ((ofVar-&gt;variableName == 0) ||
+	propSymbol-&gt;isEqualTo(ofVar-&gt;variableName)) <span class="enscript-keyword">break</span>;
+    ofVar++;
+  }
+  
+  <span class="enscript-keyword">return</span> ofVar-&gt;variablePerm;
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODTNVRAM::getOWVariableInfo</span>(UInt32 variableNumber, <span class="enscript-type">const</span> OSSymbol **propSymbol,
+				  UInt32 *propType, UInt32 *propOffset)
+{
+  OFVariable *ofVar;
+  
+  ofVar = gOFVariables;
+  <span class="enscript-keyword">while</span> (1) {
+    <span class="enscript-keyword">if</span> (ofVar-&gt;variableName == 0) <span class="enscript-keyword">return</span> false;
+    
+    <span class="enscript-keyword">if</span> (ofVar-&gt;variableOffset == (SInt32) variableNumber) <span class="enscript-keyword">break</span>;
+    
+    ofVar++;
+  }
+  
+  *propSymbol = OSSymbol::withCStringNoCopy(ofVar-&gt;variableName);
+  *propType = ofVar-&gt;variableType;
+  
+  <span class="enscript-keyword">switch</span> (*propType) {
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeBoolean</span> :
+    *propOffset = 1 &lt;&lt; (31 - variableNumber);
+    <span class="enscript-keyword">break</span>;
+    
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeNumber</span> :
+    *propOffset = variableNumber - kOWVariableOffsetNumber;
+    <span class="enscript-keyword">break</span>;
+    
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeString</span> :
+    *propOffset = variableNumber - kOWVariableOffsetString;
+    <span class="enscript-keyword">break</span>;
+  }
+  
+  <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODTNVRAM::convertPropToObject</span>(UInt8 *propName, UInt32 propNameLength,
+				    UInt8 *propData, UInt32 propDataLength,
+				    <span class="enscript-type">const</span> OSSymbol **propSymbol,
+				    OSObject **propObject)
+{
+  UInt32         propType;
+  <span class="enscript-type">const</span> OSSymbol *tmpSymbol;
+  OSObject       *tmpObject;
+  OSNumber       *tmpNumber;
+  OSString       *tmpString;
+  
+  <span class="enscript-comment">// Create the symbol.
+</span>  propName[propNameLength] = <span class="enscript-string">'\0'</span>;
+  tmpSymbol = OSSymbol::withCString((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)propName);
+  propName[propNameLength] = <span class="enscript-string">'='</span>;
+  <span class="enscript-keyword">if</span> (tmpSymbol == 0) {
+    <span class="enscript-keyword">return</span> false;
+  }
+  
+  propType = getOFVariableType(tmpSymbol);
+  
+  <span class="enscript-comment">// Create the object.
+</span>  tmpObject = 0;
+  <span class="enscript-keyword">switch</span> (propType) {
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeBoolean</span> :
+    <span class="enscript-keyword">if</span> (!strncmp(<span class="enscript-string">&quot;true&quot;</span>, (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)propData, propDataLength)) {
+      tmpObject = kOSBooleanTrue;
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!strncmp(<span class="enscript-string">&quot;false&quot;</span>, (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)propData, propDataLength)) {
+      tmpObject = kOSBooleanFalse;
+    }
+    <span class="enscript-keyword">break</span>;
+    
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeNumber</span> :
+    tmpNumber = OSNumber::withNumber(strtol((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)propData, 0, 0), 32);
+    <span class="enscript-keyword">if</span> (tmpNumber != 0) tmpObject = tmpNumber;
+    <span class="enscript-keyword">break</span>;
+    
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeString</span> :
+    tmpString = OSString::withCString((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)propData);
+    <span class="enscript-keyword">if</span> (tmpString != 0) tmpObject = tmpString;
+    <span class="enscript-keyword">break</span>;
+    
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeData</span> :
+    tmpObject = unescapeBytesToData(propData, propDataLength);
+    <span class="enscript-keyword">break</span>;
+  }
+  
+  <span class="enscript-keyword">if</span> (tmpObject == 0) {
+    tmpSymbol-&gt;release();
+    <span class="enscript-keyword">return</span> false;
+  }
+  
+  *propSymbol = tmpSymbol;
+  *propObject = tmpObject;
+  
+  <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODTNVRAM::convertObjectToProp</span>(UInt8 *buffer, UInt32 *length,
+				    <span class="enscript-type">const</span> OSSymbol *propSymbol, OSObject *propObject)
+{
+  <span class="enscript-type">const</span> UInt8    *propName;
+  UInt32         propNameLength, propDataLength;
+  UInt32         propType, tmpValue;
+  OSBoolean      *tmpBoolean = 0;
+  OSNumber       *tmpNumber = 0;
+  OSString       *tmpString = 0;
+  OSData         *tmpData = 0;
+  
+  propName = (<span class="enscript-type">const</span> UInt8 *)propSymbol-&gt;getCStringNoCopy();
+  propNameLength = propSymbol-&gt;getLength();
+  propType = getOFVariableType(propSymbol);
+  
+  <span class="enscript-comment">// Get the size of the data.
+</span>  propDataLength = 0xFFFFFFFF;
+  <span class="enscript-keyword">switch</span> (propType) {
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeBoolean</span> :
+    tmpBoolean = OSDynamicCast(OSBoolean, propObject);
+    <span class="enscript-keyword">if</span> (tmpBoolean != 0) propDataLength = 5;
+    <span class="enscript-keyword">break</span>;
+    
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeNumber</span> :
+    tmpNumber = OSDynamicCast(OSNumber, propObject);
+    <span class="enscript-keyword">if</span> (tmpNumber != 0) propDataLength = 10;
+    <span class="enscript-keyword">break</span>;
+    
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeString</span> :
+    tmpString = OSDynamicCast(OSString, propObject);
+    <span class="enscript-keyword">if</span> (tmpString != 0) propDataLength = tmpString-&gt;getLength();
+    <span class="enscript-keyword">break</span>;
+    
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeData</span> :
+    tmpData = OSDynamicCast(OSData, propObject); 
+    <span class="enscript-keyword">if</span> (tmpData != 0) {
+      tmpData = escapeDataToData(tmpData);
+      propDataLength = tmpData-&gt;getLength();
+    }
+    <span class="enscript-keyword">break</span>;
+  }
+  
+  <span class="enscript-comment">// Make sure the propertySize is known and will fit.
+</span>  <span class="enscript-keyword">if</span> (propDataLength == 0xFFFFFFFF) <span class="enscript-keyword">return</span> false;
+  <span class="enscript-keyword">if</span> ((propNameLength + propDataLength + 2) &gt; *length) <span class="enscript-keyword">return</span> false;
+  
+  <span class="enscript-comment">// Copy the property name equal sign.
+</span>  buffer += snprintf((<span class="enscript-type">char</span> *)buffer, *length, <span class="enscript-string">&quot;%s=&quot;</span>, propName);
+  
+  <span class="enscript-keyword">switch</span> (propType) {
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeBoolean</span> :
+    <span class="enscript-keyword">if</span> (tmpBoolean-&gt;getValue()) {
+      strlcpy((<span class="enscript-type">char</span> *)buffer, <span class="enscript-string">&quot;true&quot;</span>, *length - propNameLength);
+    } <span class="enscript-keyword">else</span> {
+      strlcpy((<span class="enscript-type">char</span> *)buffer, <span class="enscript-string">&quot;false&quot;</span>, *length - propNameLength);
+    }
+    <span class="enscript-keyword">break</span>;
+    
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeNumber</span> :
+    tmpValue = tmpNumber-&gt;unsigned32BitValue();
+    <span class="enscript-keyword">if</span> (tmpValue == 0xFFFFFFFF) {
+      strlcpy((<span class="enscript-type">char</span> *)buffer, <span class="enscript-string">&quot;-1&quot;</span>, *length - propNameLength);
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (tmpValue &lt; 1000) {
+      snprintf((<span class="enscript-type">char</span> *)buffer, *length - propNameLength, <span class="enscript-string">&quot;%d&quot;</span>, (uint32_t)tmpValue);
+    } <span class="enscript-keyword">else</span> {
+      snprintf((<span class="enscript-type">char</span> *)buffer, *length - propNameLength, <span class="enscript-string">&quot;0x%x&quot;</span>, (uint32_t)tmpValue);
+    }
+    <span class="enscript-keyword">break</span>;
+    
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeString</span> :
+    strlcpy((<span class="enscript-type">char</span> *)buffer, tmpString-&gt;getCStringNoCopy(), *length - propNameLength);
+    <span class="enscript-keyword">break</span>;
+    
+  <span class="enscript-keyword">case</span> <span class="enscript-reference">kOFVariableTypeData</span> :
+    bcopy(tmpData-&gt;getBytesNoCopy(), buffer, propDataLength);
+    tmpData-&gt;release();
+    <span class="enscript-keyword">break</span>;
+  }
+  
+  propDataLength = strlen((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)buffer);  
+  
+  *length = propNameLength + propDataLength + 2;
+  
+  <span class="enscript-keyword">return</span> true;
+}
+
+
+UInt16 <span class="enscript-function-name">IODTNVRAM::generateOWChecksum</span>(UInt8 *buffer)
+{
+  UInt32 cnt, checksum = 0;
+  UInt16 *tmpBuffer = (UInt16 *)buffer;
+  
+  <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; _ofPartitionSize / 2; cnt++)
+    checksum += tmpBuffer[cnt];
+  
+  <span class="enscript-keyword">return</span> checksum % 0x0000FFFF;
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODTNVRAM::validateOWChecksum</span>(UInt8 *buffer)
+{
+  UInt32 cnt, checksum, sum = 0;
+  UInt16 *tmpBuffer = (UInt16 *)buffer;
+  
+  <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; _ofPartitionSize / 2; cnt++)
+    sum += tmpBuffer[cnt];
+  
+  checksum = (sum &gt;&gt; 16) + (sum &amp; 0x0000FFFF);
+  <span class="enscript-keyword">if</span> (checksum == 0x10000) checksum--;
+  checksum = (checksum ^ 0x0000FFFF) &amp; 0x0000FFFF;
+  
+  <span class="enscript-keyword">return</span> checksum == 0;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IODTNVRAM::updateOWBootArgs</span>(<span class="enscript-type">const</span> OSSymbol *key, OSObject *value)
+{
+  <span class="enscript-type">bool</span>        wasBootArgs, bootr = false;
+  UInt32      cnt;
+  OSString    *tmpString, *bootCommand, *bootArgs = 0;
+  <span class="enscript-type">const</span> UInt8 *bootCommandData, *bootArgsData;
+  UInt8       *tmpData;
+  UInt32      bootCommandDataLength, bootArgsDataLength, tmpDataLength;
+  
+  tmpString = OSDynamicCast(OSString, value);
+  <span class="enscript-keyword">if</span> (tmpString == 0) <span class="enscript-keyword">return</span>;
+  
+  <span class="enscript-keyword">if</span> (key-&gt;isEqualTo(<span class="enscript-string">&quot;boot-command&quot;</span>)) {
+    wasBootArgs = false;
+    bootCommand = tmpString;
+  } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (key-&gt;isEqualTo(<span class="enscript-string">&quot;boot-args&quot;</span>)) {
+    wasBootArgs = true;
+    bootArgs = tmpString;
+    bootCommand = OSDynamicCast(OSString, _ofDict-&gt;getObject(<span class="enscript-string">&quot;boot-command&quot;</span>));
+    <span class="enscript-keyword">if</span> (bootCommand == 0) <span class="enscript-keyword">return</span>;
+  } <span class="enscript-keyword">else</span> <span class="enscript-keyword">return</span>;
+  
+  bootCommandData = (<span class="enscript-type">const</span> UInt8 *)bootCommand-&gt;getCStringNoCopy();
+  bootCommandDataLength = bootCommand-&gt;getLength();
+  
+  <span class="enscript-keyword">if</span> (bootCommandData == 0) <span class="enscript-keyword">return</span>;
+  
+  <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; bootCommandDataLength; cnt++) {
+    <span class="enscript-keyword">if</span> ((bootCommandData[cnt] == <span class="enscript-string">'b'</span>) &amp;&amp;
+	!strncmp(<span class="enscript-string">&quot;bootr&quot;</span>, (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)bootCommandData + cnt, 5)) {
+      cnt += 5;
+      <span class="enscript-keyword">while</span> (bootCommandData[cnt] == <span class="enscript-string">' '</span>) cnt++;
+      bootr = true;
+      <span class="enscript-keyword">break</span>;
+    }
+  }
+  <span class="enscript-keyword">if</span> (!bootr) {
+    _ofDict-&gt;removeObject(<span class="enscript-string">&quot;boot-args&quot;</span>);
+    <span class="enscript-keyword">return</span>;
+  }
+  
+  <span class="enscript-keyword">if</span> (wasBootArgs) {
+    bootArgsData = (<span class="enscript-type">const</span> UInt8 *)bootArgs-&gt;getCStringNoCopy();
+    bootArgsDataLength = bootArgs-&gt;getLength();
+    <span class="enscript-keyword">if</span> (bootArgsData == 0) <span class="enscript-keyword">return</span>;
+    
+    tmpDataLength = cnt + bootArgsDataLength;
+    tmpData = IONew(UInt8, tmpDataLength + 1);
+    <span class="enscript-keyword">if</span> (tmpData == 0) <span class="enscript-keyword">return</span>;
+    
+    cnt -= strlcpy((<span class="enscript-type">char</span> *)tmpData, (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)bootCommandData, cnt);
+    strlcat((<span class="enscript-type">char</span> *)tmpData, (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)bootArgsData, cnt);
+    
+    bootCommand = OSString::withCString((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)tmpData);
+    <span class="enscript-keyword">if</span> (bootCommand != 0) {
+      _ofDict-&gt;setObject(<span class="enscript-string">&quot;boot-command&quot;</span>, bootCommand);
+      bootCommand-&gt;release();
+    }
+    
+    IODelete(tmpData, UInt8, tmpDataLength + 1);
+  } <span class="enscript-keyword">else</span> {
+    bootArgs = OSString::withCString((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)(bootCommandData + cnt));
+    <span class="enscript-keyword">if</span> (bootArgs != 0) {
+      _ofDict-&gt;setObject(<span class="enscript-string">&quot;boot-args&quot;</span>, bootArgs);
+      bootArgs-&gt;release();
+    }
+  }
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODTNVRAM::searchNVRAMProperty</span>(IONVRAMDescriptor *hdr, UInt32 *where)
+{
+  <span class="enscript-keyword">return</span> false;
+}
+
+IOReturn <span class="enscript-function-name">IODTNVRAM::readNVRAMPropertyType0</span>(IORegistryEntry *entry,
+					   <span class="enscript-type">const</span> OSSymbol **name,
+					   OSData **value)
+{
+  <span class="enscript-keyword">return</span> kIOReturnUnsupported;
+}
+
+
+IOReturn <span class="enscript-function-name">IODTNVRAM::writeNVRAMPropertyType0</span>(IORegistryEntry *entry,
+					    <span class="enscript-type">const</span> OSSymbol *name,
+					    OSData *value)
+{
+  <span class="enscript-keyword">return</span> kIOReturnUnsupported;
+}
+
+
+OSData *<span class="enscript-function-name">IODTNVRAM::unescapeBytesToData</span>(<span class="enscript-type">const</span> UInt8 *bytes, UInt32 length)
+{
+  OSData *data = 0;
+  UInt32 totalLength = 0;
+  UInt32 cnt, cnt2;
+  UInt8  byte;
+  <span class="enscript-type">bool</span>   ok;
+
+  <span class="enscript-comment">// Calculate the actual length of the data.
+</span>  ok = true;
+  totalLength = 0;
+  <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; length;) {
+    byte = bytes[cnt++];
+    <span class="enscript-keyword">if</span> (byte == 0xFF) {
+      byte = bytes[cnt++];
+      <span class="enscript-keyword">if</span> (byte == 0x00) {
+        ok = false;
+        <span class="enscript-keyword">break</span>;
+      }
+      cnt2 = byte &amp; 0x7F;
+    } <span class="enscript-keyword">else</span>
+      cnt2 = 1;
+    totalLength += cnt2;
+  }
+
+  <span class="enscript-keyword">if</span> (ok) {
+    <span class="enscript-comment">// Create an empty OSData of the correct size.
+</span>    data = OSData::withCapacity(totalLength);
+    <span class="enscript-keyword">if</span> (data != 0) {
+      <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; length;) {
+        byte = bytes[cnt++];
+        <span class="enscript-keyword">if</span> (byte == 0xFF) {
+          byte = bytes[cnt++];
+          cnt2 = byte &amp; 0x7F;
+          byte = (byte &amp; 0x80) ? 0xFF : 0x00;
+        } <span class="enscript-keyword">else</span>
+          cnt2 = 1;
+        data-&gt;appendByte(byte, cnt2);
+      }
+    }
+  }
+
+  <span class="enscript-keyword">return</span> data;
+}
+
+OSData * <span class="enscript-function-name">IODTNVRAM::escapeDataToData</span>(OSData * value)
+{
+  OSData *       result;
+  <span class="enscript-type">const</span> UInt8 *  startPtr;
+  <span class="enscript-type">const</span> UInt8 *  endPtr;
+  <span class="enscript-type">const</span> UInt8 *  wherePtr;
+  UInt8          byte;
+  <span class="enscript-type">bool</span>	         ok = true;
+
+  wherePtr = (<span class="enscript-type">const</span> UInt8 *) value-&gt;getBytesNoCopy();
+  endPtr = wherePtr + value-&gt;getLength();
+
+  result = OSData::withCapacity(endPtr - wherePtr);
+  <span class="enscript-keyword">if</span> (!result)
+    <span class="enscript-keyword">return</span> result;
+
+  <span class="enscript-keyword">while</span> (wherePtr &lt; endPtr) {
+    startPtr = wherePtr;
+    byte = *wherePtr++;
+    <span class="enscript-keyword">if</span> ((byte == 0x00) || (byte == 0xFF)) {
+      <span class="enscript-keyword">for</span> (;
+            ((wherePtr - startPtr) &lt; 0x80) &amp;&amp; (wherePtr &lt; endPtr) &amp;&amp; (byte == *wherePtr);
+            wherePtr++)	{}
+      ok &amp;= result-&gt;appendByte(0xff, 1);
+      byte = (byte &amp; 0x80) | (wherePtr - startPtr);
+    }
+    ok &amp;= result-&gt;appendByte(byte, 1);
+  }
+  ok &amp;= result-&gt;appendByte(0, 1);
+
+  <span class="enscript-keyword">if</span> (!ok) {
+    result-&gt;release();
+    result = 0;
+  }
+
+  <span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">bool</span> <span class="enscript-function-name">IsApplePropertyName</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> * propName)
+{
+  <span class="enscript-type">char</span> c;
+  <span class="enscript-keyword">while</span> ((c = *propName++)) {
+    <span class="enscript-keyword">if</span> ((c &gt;= <span class="enscript-string">'A'</span>) &amp;&amp; (c &lt;= <span class="enscript-string">'Z'</span>))
+      <span class="enscript-keyword">break</span>;
+  }
+
+  <span class="enscript-keyword">return</span> (c == 0);
+}
+
+IOReturn <span class="enscript-function-name">IODTNVRAM::readNVRAMPropertyType1</span>(IORegistryEntry *entry,
+					   <span class="enscript-type">const</span> OSSymbol **name,
+					   OSData **value)
+{
+  IOReturn    err = kIOReturnNoResources;
+  OSData      *data;
+  <span class="enscript-type">const</span> UInt8 *startPtr;
+  <span class="enscript-type">const</span> UInt8 *endPtr;
+  <span class="enscript-type">const</span> UInt8 *wherePtr;
+  <span class="enscript-type">const</span> UInt8 *nvPath = 0;
+  <span class="enscript-type">const</span> <span class="enscript-type">char</span>  *nvName = 0;
+  <span class="enscript-type">const</span> <span class="enscript-type">char</span>  *resultName = 0;
+  <span class="enscript-type">const</span> UInt8 *resultValue = 0;
+  UInt32       resultValueLen = 0;
+  UInt8       byte;
+
+  <span class="enscript-keyword">if</span> (_ofDict == 0) <span class="enscript-keyword">return</span> err;
+
+  IOLockLock(_ofLock);
+  data = OSDynamicCast(OSData, _ofDict-&gt;getObject(_registryPropertiesKey));
+  IOLockUnlock(_ofLock);
+
+  <span class="enscript-keyword">if</span> (data == 0) <span class="enscript-keyword">return</span> err;
+  
+  startPtr = (<span class="enscript-type">const</span> UInt8 *) data-&gt;getBytesNoCopy();
+  endPtr = startPtr + data-&gt;getLength();
+
+  wherePtr = startPtr;
+  <span class="enscript-keyword">while</span> (wherePtr &lt; endPtr) {
+    byte = *(wherePtr++);
+    <span class="enscript-keyword">if</span> (byte)
+      <span class="enscript-keyword">continue</span>;
+    
+    <span class="enscript-keyword">if</span> (nvPath == 0)
+      nvPath = startPtr;
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (nvName == 0)
+      nvName = (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) startPtr;
+    <span class="enscript-keyword">else</span> {
+      IORegistryEntry * compareEntry = IORegistryEntry::fromPath((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) nvPath, gIODTPlane);
+      <span class="enscript-keyword">if</span> (compareEntry)
+        compareEntry-&gt;release();
+      <span class="enscript-keyword">if</span> (entry == compareEntry) {
+        <span class="enscript-type">bool</span> appleProp = IsApplePropertyName(nvName);
+        <span class="enscript-keyword">if</span> (!appleProp || !resultName) {
+          resultName     = nvName;
+          resultValue    = startPtr;
+          resultValueLen = wherePtr - startPtr - 1;
+        }
+        <span class="enscript-keyword">if</span> (!appleProp)
+          <span class="enscript-keyword">break</span>;
+      }
+      nvPath = 0;
+      nvName = 0;
+    }
+    startPtr = wherePtr;
+  }
+  <span class="enscript-keyword">if</span> (resultName) {
+    *name = OSSymbol::withCString(resultName);
+    *value = unescapeBytesToData(resultValue, resultValueLen);
+    <span class="enscript-keyword">if</span> ((*name != 0) &amp;&amp; (*value != 0))
+      err = kIOReturnSuccess;
+    <span class="enscript-keyword">else</span>
+      err = kIOReturnNoMemory;
+  }
+  <span class="enscript-keyword">return</span> err;
+}
+
+IOReturn <span class="enscript-function-name">IODTNVRAM::writeNVRAMPropertyType1</span>(IORegistryEntry *entry,
+					    <span class="enscript-type">const</span> OSSymbol *propName,
+					    OSData *value)
+{
+  OSData       *oldData;
+  OSData       *data = 0;
+  <span class="enscript-type">const</span> UInt8  *startPtr;
+  <span class="enscript-type">const</span> UInt8  *propStart;
+  <span class="enscript-type">const</span> UInt8  *endPtr;
+  <span class="enscript-type">const</span> UInt8  *wherePtr;
+  <span class="enscript-type">const</span> UInt8  *nvPath = 0;
+  <span class="enscript-type">const</span> <span class="enscript-type">char</span>   *nvName = 0;
+  <span class="enscript-type">const</span> <span class="enscript-type">char</span> * comp;
+  <span class="enscript-type">const</span> <span class="enscript-type">char</span> * name;
+  UInt8        byte;
+  <span class="enscript-type">bool</span>         ok = true;
+  <span class="enscript-type">bool</span>         settingAppleProp;
+
+  <span class="enscript-keyword">if</span> (_ofDict == 0) <span class="enscript-keyword">return</span> kIOReturnNoResources;
+
+  settingAppleProp = IsApplePropertyName(propName-&gt;getCStringNoCopy());
+
+  <span class="enscript-comment">// copy over existing properties for other entries
+</span>
+  IOLockLock(_ofLock);
+
+  oldData = OSDynamicCast(OSData, _ofDict-&gt;getObject(_registryPropertiesKey));
+  <span class="enscript-keyword">if</span> (oldData) {
+    startPtr = (<span class="enscript-type">const</span> UInt8 *) oldData-&gt;getBytesNoCopy();
+    endPtr = startPtr + oldData-&gt;getLength();
+    
+    propStart = startPtr;
+    wherePtr = startPtr;
+    <span class="enscript-keyword">while</span> (wherePtr &lt; endPtr) {
+      byte = *(wherePtr++);
+      <span class="enscript-keyword">if</span> (byte)
+        <span class="enscript-keyword">continue</span>;
+      <span class="enscript-keyword">if</span> (nvPath == 0)
+        nvPath = startPtr;
+      <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (nvName == 0)
+        nvName = (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) startPtr;
+      <span class="enscript-keyword">else</span> {
+        IORegistryEntry * compareEntry = IORegistryEntry::fromPath((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) nvPath, gIODTPlane);
+        <span class="enscript-keyword">if</span> (compareEntry)
+          compareEntry-&gt;release();
+        <span class="enscript-keyword">if</span> (entry == compareEntry) {
+          <span class="enscript-keyword">if</span> ((settingAppleProp &amp;&amp; propName-&gt;isEqualTo(nvName))
+           || (!settingAppleProp &amp;&amp; !IsApplePropertyName(nvName))) {
+             <span class="enscript-comment">// delete old property (nvPath -&gt; wherePtr)
+</span>             data = OSData::withBytes(propStart, nvPath - propStart);
+             <span class="enscript-keyword">if</span> (data)
+               ok &amp;= data-&gt;appendBytes(wherePtr, endPtr - wherePtr);
+             <span class="enscript-keyword">break</span>;
+          }
+        }
+        nvPath = 0;
+        nvName = 0;
+      }
+        
+      startPtr = wherePtr;
+    }
+  }
+
+  <span class="enscript-comment">// make the new property
+</span>
+  <span class="enscript-keyword">if</span> (!data) {
+    <span class="enscript-keyword">if</span> (oldData)
+      data = OSData::withData(oldData);
+    <span class="enscript-keyword">else</span>
+      data = OSData::withCapacity(16);
+    <span class="enscript-keyword">if</span> (!data) ok = false;
+  }
+
+  <span class="enscript-keyword">if</span> (ok &amp;&amp; value &amp;&amp; value-&gt;getLength()) <span class="enscript-keyword">do</span> {
+    <span class="enscript-comment">// get entries in path
+</span>    OSArray *array = OSArray::withCapacity(5);
+    <span class="enscript-keyword">if</span> (!array) {
+      ok = false;
+      <span class="enscript-keyword">break</span>;
+    }
+    <span class="enscript-keyword">do</span>
+      array-&gt;setObject(entry);
+    <span class="enscript-keyword">while</span> ((entry = entry-&gt;getParentEntry(gIODTPlane)));
+
+    <span class="enscript-comment">// append path
+</span>    <span class="enscript-keyword">for</span> (<span class="enscript-type">int</span> i = array-&gt;getCount() - 3;
+	 (entry = (IORegistryEntry *) array-&gt;getObject(i));
+	 i--) {
+
+      name = entry-&gt;getName(gIODTPlane);
+      comp = entry-&gt;getLocation(gIODTPlane);
+      <span class="enscript-keyword">if</span> (comp) ok &amp;= data-&gt;appendBytes(<span class="enscript-string">&quot;/@&quot;</span>, 2);
+      <span class="enscript-keyword">else</span> {
+	<span class="enscript-keyword">if</span> (!name) <span class="enscript-keyword">continue</span>;
+	ok &amp;= data-&gt;appendByte(<span class="enscript-string">'/'</span>, 1);
+	comp = name;
+      }
+      ok &amp;= data-&gt;appendBytes(comp, strlen(comp));
+    }
+    ok &amp;= data-&gt;appendByte(0, 1);
+    array-&gt;release();
+
+    <span class="enscript-comment">// append prop name
+</span>    ok &amp;= data-&gt;appendBytes(propName-&gt;getCStringNoCopy(), propName-&gt;getLength() + 1);
+  
+    <span class="enscript-comment">// append escaped data
+</span>    oldData = escapeDataToData(value);
+    ok &amp;= (oldData != 0);
+    <span class="enscript-keyword">if</span> (ok) ok &amp;= data-&gt;appendBytes(oldData);
+
+  } <span class="enscript-keyword">while</span> (false);
+
+  <span class="enscript-keyword">if</span> (ok) {
+    ok = _ofDict-&gt;setObject(_registryPropertiesKey, data);
+  }
+
+  IOLockUnlock(_ofLock);
+  <span class="enscript-keyword">if</span> (data) data-&gt;release();
+
+  <span class="enscript-keyword">if</span> (ok) syncOFVariables();
+
+  <span class="enscript-keyword">return</span> ok ? kIOReturnSuccess : kIOReturnNoMemory;
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODTNVRAM::safeToSync</span>(<span class="enscript-type">void</span>)
+{
+    AbsoluteTime delta;
+    UInt64       delta_ns;
+    SInt32       delta_secs;
+	
+	<span class="enscript-comment">// delta interval went by
+</span>	clock_get_uptime(&amp;delta);
+	
+    <span class="enscript-comment">// Figure it in seconds.
+</span>    absolutetime_to_nanoseconds(delta, &amp;delta_ns);
+    delta_secs = (SInt32)(delta_ns / NSEC_PER_SEC);
+
+	<span class="enscript-keyword">if</span> ((delta_secs &gt; (_lastDeviceSync + MIN_SYNC_NOW_INTERVAL)) || _freshInterval)
+	{
+		_lastDeviceSync = delta_secs;
+		_freshInterval = FALSE;
+		<span class="enscript-keyword">return</span> TRUE;
+	}
+
+	<span class="enscript-keyword">return</span> FALSE;
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,222 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ipc_clock.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ipc_clock.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/*
+ *	File:		kern/ipc_clock.c
+ *	Purpose:	Routines to support ipc semantics of new kernel
+ *			alarm clock facility.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/message.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_kobject.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_space.h&gt;</span>
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_clock_init
+ *	Purpose:
+ *		Initialize ipc control of a clock.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_clock_init</span>(
+	clock_t		clock)
+{
+	ipc_port_t	port;
+
+	port = ipc_port_alloc_kernel();
+	<span class="enscript-keyword">if</span> (port == IP_NULL)
+		panic(<span class="enscript-string">&quot;ipc_clock_init&quot;</span>);
+	clock-&gt;cl_service = port;
+
+	port = ipc_port_alloc_kernel();
+	<span class="enscript-keyword">if</span> (port == IP_NULL)
+		panic(<span class="enscript-string">&quot;ipc_clock_init&quot;</span>);
+	clock-&gt;cl_control = port;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_clock_enable
+ *	Purpose:
+ *		Enable ipc access to a clock.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_clock_enable</span>(
+	clock_t		clock)
+{
+	ipc_kobject_set(clock-&gt;cl_service,
+			(ipc_kobject_t) clock, IKOT_CLOCK);
+	ipc_kobject_set(clock-&gt;cl_control,
+			(ipc_kobject_t) clock, IKOT_CLOCK_CTRL);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	convert_port_to_clock
+ *	Purpose:
+ *		Convert from a port to a clock.
+ *		Doesn't consume the port ref; produces a clock ref,
+ *		which may be null.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+clock_t
+<span class="enscript-function-name">convert_port_to_clock</span>(
+	ipc_port_t	port)
+{
+	clock_t		clock = CLOCK_NULL;
+
+	<span class="enscript-keyword">if</span> (IP_VALID(port)) {
+		ip_lock(port);
+		<span class="enscript-keyword">if</span> (ip_active(port) &amp;&amp;
+		    ((ip_kotype(port) == IKOT_CLOCK) ||
+		     (ip_kotype(port) == IKOT_CLOCK_CTRL))) {
+			clock = (clock_t) port-&gt;ip_kobject;
+		}
+		ip_unlock(port);
+	}
+	<span class="enscript-keyword">return</span> (clock);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	convert_port_to_clock_ctrl
+ *	Purpose:
+ *		Convert from a port to a clock.
+ *		Doesn't consume the port ref; produces a clock ref,
+ *		which may be null.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+clock_t
+<span class="enscript-function-name">convert_port_to_clock_ctrl</span>(
+	ipc_port_t	port)
+{
+	clock_t		clock = CLOCK_NULL;
+
+	<span class="enscript-keyword">if</span> (IP_VALID(port)) {
+		ip_lock(port);
+		<span class="enscript-keyword">if</span> (ip_active(port) &amp;&amp;
+		    (ip_kotype(port) == IKOT_CLOCK_CTRL)) {
+			clock = (clock_t) port-&gt;ip_kobject;
+		}
+		ip_unlock(port);
+	}
+	<span class="enscript-keyword">return</span> (clock);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	convert_clock_to_port
+ *	Purpose:
+ *		Convert from a clock to a port.
+ *		Produces a naked send right which may be invalid.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+ipc_port_t
+<span class="enscript-function-name">convert_clock_to_port</span>(
+	clock_t		clock)
+{
+	ipc_port_t	port;
+
+	port = ipc_port_make_send(clock-&gt;cl_service);
+	<span class="enscript-keyword">return</span> (port);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	convert_clock_ctrl_to_port
+ *	Purpose:
+ *		Convert from a clock to a port.
+ *		Produces a naked send right which may be invalid.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+ipc_port_t
+<span class="enscript-function-name">convert_clock_ctrl_to_port</span>(
+	clock_t		clock)
+{
+	ipc_port_t	port;
+
+	port = ipc_port_make_send(clock-&gt;cl_control);
+	<span class="enscript-keyword">return</span> (port);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	port_name_to_clock
+ *	Purpose:
+ *		Convert from a clock name to a clock pointer.
+ */</span>
+clock_t
+<span class="enscript-function-name">port_name_to_clock</span>(
+	mach_port_name_t clock_name)
+{
+	clock_t		clock = CLOCK_NULL;
+	ipc_space_t	space;
+	ipc_port_t	port;
+
+	<span class="enscript-keyword">if</span> (clock_name == 0)
+		<span class="enscript-keyword">return</span> (clock);
+	space = current_space();
+	<span class="enscript-keyword">if</span> (ipc_port_translate_send(space, clock_name, &amp;port) != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> (clock);
+	<span class="enscript-keyword">if</span> (ip_active(port) &amp;&amp; (ip_kotype(port) == IKOT_CLOCK))
+		clock = (clock_t) port-&gt;ip_kobject;
+	ip_unlock(port);
+	<span class="enscript-keyword">return</span> (clock);
+}
+</pre>
+<hr />
+</body></html>

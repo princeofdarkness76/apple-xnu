@@ -1,0 +1,2496 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>uipc_usrreq.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">uipc_usrreq.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1989, 1991, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	From: @(#)uipc_usrreq.c	8.3 (Berkeley) 1/4/94
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>		<span class="enscript-comment">/* XXX must be before &lt;sys/file.h&gt; */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/guarded.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/filedesc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/un.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/unpcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_MACF */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Maximum number of FDs that can be passed in an mbuf
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">UIPC_MAX_CMSG_FD</span>	512
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">f_msgcount</span> f_fglob-&gt;fg_msgcount
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">f_cred</span> f_fglob-&gt;fg_cred
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">f_ops</span> f_fglob-&gt;fg_ops
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">f_offset</span> f_fglob-&gt;fg_offset
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">f_data</span> f_fglob-&gt;fg_data
+<span class="enscript-type">struct</span>	zone *unp_zone;
+<span class="enscript-type">static</span>	unp_gen_t unp_gencnt;
+<span class="enscript-type">static</span>	u_int unp_count;
+
+<span class="enscript-type">static</span>	lck_attr_t		*unp_mtx_attr;
+<span class="enscript-type">static</span>	lck_grp_t		*unp_mtx_grp;
+<span class="enscript-type">static</span>	lck_grp_attr_t		*unp_mtx_grp_attr;
+<span class="enscript-type">static</span>	lck_rw_t		*unp_list_mtx;
+
+<span class="enscript-type">static</span>  lck_mtx_t		*unp_disconnect_lock;
+<span class="enscript-type">static</span>	lck_mtx_t		*unp_connect_lock;
+<span class="enscript-type">static</span>  u_int                   disconnect_in_progress;
+
+<span class="enscript-type">extern</span> lck_mtx_t *uipc_lock;
+<span class="enscript-type">static</span>	<span class="enscript-type">struct</span> unp_head unp_shead, unp_dhead;
+
+<span class="enscript-comment">/*
+ * mDNSResponder tracing.  When enabled, endpoints connected to
+ * /var/run/mDNSResponder will be traced; during each send on
+ * the traced socket, we log the PID and process name of the
+ * sending process.  We also print out a bit of info related
+ * to the data itself; this assumes ipc_msg_hdr in dnssd_ipc.h
+ * of mDNSResponder stays the same.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MDNSRESPONDER_PATH</span>	<span class="enscript-string">&quot;/var/run/mDNSResponder&quot;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> unpst_tracemdns;	<span class="enscript-comment">/* enable tracing */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MDNS_IPC_MSG_HDR_VERSION_1</span>	1
+
+<span class="enscript-type">struct</span> mdns_ipc_msg_hdr {
+	uint32_t version;
+	uint32_t datalen;
+	uint32_t ipc_flags;
+	uint32_t op;
+	<span class="enscript-type">union</span> {
+		<span class="enscript-type">void</span> *context;
+		uint32_t u32[2];
+	} __attribute__((packed));
+	uint32_t reg_index;
+} __attribute__((packed));
+
+<span class="enscript-comment">/*
+ * Unix communications domain.
+ *
+ * TODO:
+ *	SEQPACKET, RDM
+ *	rethink name space problems
+ *	need a proper out-of-band
+ *	lock pushdown
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span>	sockaddr sun_noname = { <span class="enscript-keyword">sizeof</span> (sun_noname), AF_LOCAL, { 0 } };
+<span class="enscript-type">static</span> ino_t	unp_ino;		<span class="enscript-comment">/* prototype for fake inode numbers */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	unp_attach(<span class="enscript-type">struct</span> socket *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	unp_detach(<span class="enscript-type">struct</span> unpcb *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	unp_bind(<span class="enscript-type">struct</span> unpcb *, <span class="enscript-type">struct</span> sockaddr *, proc_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	unp_connect(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">struct</span> sockaddr *, proc_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	unp_disconnect(<span class="enscript-type">struct</span> unpcb *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	unp_shutdown(<span class="enscript-type">struct</span> unpcb *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	unp_drop(<span class="enscript-type">struct</span> unpcb *, <span class="enscript-type">int</span>);
+__private_extern__ <span class="enscript-type">void</span>	unp_gc(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	unp_scan(<span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">void</span> (*)(<span class="enscript-type">struct</span> fileglob *, <span class="enscript-type">void</span> *arg), <span class="enscript-type">void</span> *arg);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	unp_mark(<span class="enscript-type">struct</span> fileglob *, __unused <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	unp_discard(<span class="enscript-type">struct</span> fileglob *, <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	unp_internalize(<span class="enscript-type">struct</span> mbuf *, proc_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	unp_listen(<span class="enscript-type">struct</span> unpcb *, proc_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	unpcb_to_compat(<span class="enscript-type">struct</span> unpcb *, <span class="enscript-type">struct</span> unpcb_compat *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>     <span class="enscript-function-name">unp_get_locks_in_order</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> socket *conn_so);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 
+<span class="enscript-function-name">unp_get_locks_in_order</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> socket *conn_so) 
+{
+	<span class="enscript-keyword">if</span> (so &lt; conn_so) {
+		socket_lock(conn_so, 1);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+		unp-&gt;unp_flags |= UNP_DONTDISCONNECT;
+		unp-&gt;rw_thrcount++;
+		socket_unlock(so, 0);
+
+		<span class="enscript-comment">/* Get the locks in the correct order */</span>
+		socket_lock(conn_so, 1);
+		socket_lock(so, 0);
+		unp-&gt;rw_thrcount--;
+		<span class="enscript-keyword">if</span> (unp-&gt;rw_thrcount == 0) {
+			unp-&gt;unp_flags &amp;= ~UNP_DONTDISCONNECT;
+			wakeup(unp);
+		}
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_abort</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+
+	<span class="enscript-keyword">if</span> (unp == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	unp_drop(unp, ECONNABORTED);
+	unp_detach(unp);
+	sofree(so);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_accept</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr **nam)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+
+	<span class="enscript-keyword">if</span> (unp == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/*
+	 * Pass back name of connected socket,
+	 * if it was bound and we are still connected
+	 * (our peer may have closed already!).
+	 */</span>
+	<span class="enscript-keyword">if</span> (unp-&gt;unp_conn &amp;&amp; unp-&gt;unp_conn-&gt;unp_addr) {
+		*nam = dup_sockaddr((<span class="enscript-type">struct</span> sockaddr *)
+		    unp-&gt;unp_conn-&gt;unp_addr, 1);
+	} <span class="enscript-keyword">else</span> {
+		*nam = dup_sockaddr((<span class="enscript-type">struct</span> sockaddr *)&amp;sun_noname, 1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EISCONN
+ *	unp_attach:
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_attach</span>(<span class="enscript-type">struct</span> socket *so, __unused <span class="enscript-type">int</span> proto, __unused proc_t p)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+
+	<span class="enscript-keyword">if</span> (unp != 0)
+		<span class="enscript-keyword">return</span> (EISCONN);
+	<span class="enscript-keyword">return</span> (unp_attach(so));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_bind</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr *nam, proc_t p)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+
+	<span class="enscript-keyword">if</span> (unp == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">return</span> (unp_bind(unp, nam, p));
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINVAL
+ *	unp_connect:???			[See elsewhere in this file]
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_connect</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr *nam, proc_t p)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+
+	<span class="enscript-keyword">if</span> (unp == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">return</span> (unp_connect(so, nam, p));
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINVAL
+ *	unp_connect2:EPROTOTYPE		Protocol wrong type for socket
+ *	unp_connect2:EINVAL		Invalid argument
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_connect2</span>(<span class="enscript-type">struct</span> socket *so1, <span class="enscript-type">struct</span> socket *so2)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so1);
+
+	<span class="enscript-keyword">if</span> (unp == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">return</span> (unp_connect2(so1, so2));
+}
+
+<span class="enscript-comment">/* control is EOPNOTSUPP */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_detach</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+
+	<span class="enscript-keyword">if</span> (unp == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	lck_mtx_assert(&amp;unp-&gt;unp_mtx, LCK_MTX_ASSERT_OWNED);
+	unp_detach(unp);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_disconnect</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+
+	<span class="enscript-keyword">if</span> (unp == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	unp_disconnect(unp);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINVAL
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_listen</span>(<span class="enscript-type">struct</span> socket *so, __unused proc_t p)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+
+	<span class="enscript-keyword">if</span> (unp == 0 || unp-&gt;unp_vnode == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">return</span> (unp_listen(unp, p));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_peeraddr</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr **nam)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+
+	<span class="enscript-keyword">if</span> (unp == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">if</span> (unp-&gt;unp_conn != NULL &amp;&amp; unp-&gt;unp_conn-&gt;unp_addr != NULL) {
+		*nam = dup_sockaddr((<span class="enscript-type">struct</span> sockaddr *)
+		    unp-&gt;unp_conn-&gt;unp_addr, 1);
+	} <span class="enscript-keyword">else</span> {
+		*nam = dup_sockaddr((<span class="enscript-type">struct</span> sockaddr *)&amp;sun_noname, 1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_rcvd</span>(<span class="enscript-type">struct</span> socket *so, __unused <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+	<span class="enscript-type">struct</span> socket *so2;
+
+	<span class="enscript-keyword">if</span> (unp == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">switch</span> (so-&gt;so_type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SOCK_DGRAM</span>:
+		panic(<span class="enscript-string">&quot;uipc_rcvd DGRAM?&quot;</span>);
+		<span class="enscript-comment">/*NOTREACHED*/</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SOCK_STREAM</span>:
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">rcv</span> (&amp;so-&gt;so_rcv)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">snd</span> (&amp;so2-&gt;so_snd)
+		<span class="enscript-keyword">if</span> (unp-&gt;unp_conn == 0)
+			<span class="enscript-keyword">break</span>;
+		
+		so2 = unp-&gt;unp_conn-&gt;unp_socket;
+		unp_get_locks_in_order(so, so2);
+		<span class="enscript-comment">/*
+		 * Adjust backpressure on sender
+		 * and wakeup any waiting to write.
+		 */</span>
+		snd-&gt;sb_mbmax += unp-&gt;unp_mbcnt - rcv-&gt;sb_mbcnt;
+		unp-&gt;unp_mbcnt = rcv-&gt;sb_mbcnt;
+		snd-&gt;sb_hiwat += unp-&gt;unp_cc - rcv-&gt;sb_cc;
+		unp-&gt;unp_cc = rcv-&gt;sb_cc;
+		sowwakeup(so2);
+
+		socket_unlock(so2, 1);
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">snd</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">rcv</span>
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;uipc_rcvd unknown socktype&quot;</span>);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* pru_rcvoob is EOPNOTSUPP */</span>
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINVAL
+ *		EOPNOTSUPP
+ *		EPIPE
+ *		ENOTCONN
+ *		EISCONN
+ *	unp_internalize:EINVAL
+ *	unp_internalize:EBADF
+ *	unp_connect:EAFNOSUPPORT	Address family not supported
+ *	unp_connect:EINVAL		Invalid argument
+ *	unp_connect:ENOTSOCK		Not a socket
+ *	unp_connect:ECONNREFUSED	Connection refused
+ *	unp_connect:EISCONN		Socket is connected
+ *	unp_connect:EPROTOTYPE		Protocol wrong type for socket
+ *	unp_connect:???
+ *	sbappendaddr:ENOBUFS		[5th argument, contents modified]
+ *	sbappendaddr:???		[whatever a filter author chooses]
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_send</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> flags, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> sockaddr *nam,
+    <span class="enscript-type">struct</span> mbuf *control, proc_t p)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+	<span class="enscript-type">struct</span> socket *so2;
+
+	<span class="enscript-keyword">if</span> (unp == 0) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+	}
+	<span class="enscript-keyword">if</span> (flags &amp; PRUS_OOB) {
+		error = EOPNOTSUPP;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (control) {
+		<span class="enscript-comment">/* release lock to avoid deadlock (4436174) */</span>
+		socket_unlock(so, 0);
+		error = unp_internalize(control, p);
+		socket_lock(so, 0);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+	}
+
+	<span class="enscript-keyword">switch</span> (so-&gt;so_type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SOCK_DGRAM</span>:
+	{
+		<span class="enscript-type">struct</span> sockaddr *from;
+
+		<span class="enscript-keyword">if</span> (nam) {
+			<span class="enscript-keyword">if</span> (unp-&gt;unp_conn) {
+				error = EISCONN;
+				<span class="enscript-keyword">break</span>;
+			}
+			error = unp_connect(so, nam, p);
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">break</span>;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (unp-&gt;unp_conn == 0) {
+				error = ENOTCONN;
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+
+		so2 = unp-&gt;unp_conn-&gt;unp_socket;
+		<span class="enscript-keyword">if</span> (so != so2)
+			unp_get_locks_in_order(so, so2);
+
+		<span class="enscript-keyword">if</span> (unp-&gt;unp_addr)
+			from = (<span class="enscript-type">struct</span> sockaddr *)unp-&gt;unp_addr;
+		<span class="enscript-keyword">else</span>
+			from = &amp;sun_noname;
+		<span class="enscript-comment">/*
+		 * sbappendaddr() will fail when the receiver runs out of
+		 * space; in contrast to SOCK_STREAM, we will lose messages
+		 * for the SOCK_DGRAM case when the receiver's queue overflows.
+		 * SB_UNIX on the socket buffer implies that the callee will
+		 * not free the control message, if any, because we would need
+		 * to call unp_dispose() on it.
+		 */</span>
+		<span class="enscript-keyword">if</span> (sbappendaddr(&amp;so2-&gt;so_rcv, from, m, control, &amp;error)) {
+			control = NULL;
+			sorwakeup(so2);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (control != NULL &amp;&amp; error == 0) {
+			<span class="enscript-comment">/* A socket filter took control; don't touch it */</span>
+			control = NULL;
+		}
+
+		<span class="enscript-keyword">if</span> (so != so2) 
+			socket_unlock(so2, 1);
+
+		m = NULL;
+		<span class="enscript-keyword">if</span> (nam)
+			unp_disconnect(unp);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SOCK_STREAM</span>: {
+		<span class="enscript-type">int</span> didreceive = 0;
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">rcv</span> (&amp;so2-&gt;so_rcv)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">snd</span> (&amp;so-&gt;so_snd)
+		<span class="enscript-comment">/* Connect if not connected yet. */</span>
+		<span class="enscript-comment">/*
+		 * Note: A better implementation would complain
+		 * if not equal to the peer's address.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_ISCONNECTED) == 0) {
+			<span class="enscript-keyword">if</span> (nam) {
+				error = unp_connect(so, nam, p);
+				<span class="enscript-keyword">if</span> (error)
+					<span class="enscript-keyword">break</span>;	<span class="enscript-comment">/* XXX */</span>
+			} <span class="enscript-keyword">else</span> {
+				error = ENOTCONN;
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+
+		<span class="enscript-keyword">if</span> (so-&gt;so_state &amp; SS_CANTSENDMORE) {
+			error = EPIPE;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (unp-&gt;unp_conn == 0)
+			panic(<span class="enscript-string">&quot;uipc_send connected but no connection?&quot;</span>);
+
+		so2 = unp-&gt;unp_conn-&gt;unp_socket;
+		unp_get_locks_in_order(so, so2);
+
+		<span class="enscript-comment">/* Check socket state again as we might have unlocked the socket 
+		 * while trying to get the locks in order
+		 */</span>
+
+		<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_CANTSENDMORE)) {
+			error = EPIPE;
+			socket_unlock(so2, 1);
+			<span class="enscript-keyword">break</span>;
+		}	
+
+		<span class="enscript-keyword">if</span> (unp-&gt;unp_flags &amp; UNP_TRACE_MDNS) {
+			<span class="enscript-type">struct</span> mdns_ipc_msg_hdr hdr;
+
+			<span class="enscript-keyword">if</span> (mbuf_copydata(m, 0, <span class="enscript-keyword">sizeof</span> (hdr), &amp;hdr) == 0 &amp;&amp;
+			    hdr.version  == ntohl(MDNS_IPC_MSG_HDR_VERSION_1)) {
+				printf(<span class="enscript-string">&quot;%s[mDNSResponder] pid=%d (%s): op=0x%x\n&quot;</span>,
+				    __func__, p-&gt;p_pid, p-&gt;p_comm, ntohl(hdr.op));
+			}
+		}
+
+		<span class="enscript-comment">/*
+		 * Send to paired receive port, and then reduce send buffer
+		 * hiwater marks to maintain backpressure.  Wake up readers.
+		 * SB_UNIX flag will allow new record to be appended to the
+		 * receiver's queue even when it is already full.  It is
+		 * possible, however, that append might fail.  In that case,
+		 * we will need to call unp_dispose() on the control message;
+		 * the callee will not free it since SB_UNIX is set.
+		 */</span>
+		didreceive = control ?
+		    sbappendcontrol(rcv, m, control, &amp;error) : sbappend(rcv, m);
+
+		snd-&gt;sb_mbmax -= rcv-&gt;sb_mbcnt - unp-&gt;unp_conn-&gt;unp_mbcnt;
+		unp-&gt;unp_conn-&gt;unp_mbcnt = rcv-&gt;sb_mbcnt;
+		<span class="enscript-keyword">if</span> ((int32_t)snd-&gt;sb_hiwat &gt;= 
+		    (int32_t)(rcv-&gt;sb_cc - unp-&gt;unp_conn-&gt;unp_cc)) {
+			snd-&gt;sb_hiwat -= rcv-&gt;sb_cc - unp-&gt;unp_conn-&gt;unp_cc;
+		} <span class="enscript-keyword">else</span> {
+			snd-&gt;sb_hiwat = 0;
+		}
+		unp-&gt;unp_conn-&gt;unp_cc = rcv-&gt;sb_cc;
+		<span class="enscript-keyword">if</span> (didreceive) {
+			control = NULL;
+			sorwakeup(so2);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (control != NULL &amp;&amp; error == 0) {
+			<span class="enscript-comment">/* A socket filter took control; don't touch it */</span>
+			control = NULL;
+		}
+
+		socket_unlock(so2, 1);
+		m = NULL;
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">snd</span>
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">rcv</span>
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;uipc_send unknown socktype&quot;</span>);
+	}
+
+	<span class="enscript-comment">/*
+	 * SEND_EOF is equivalent to a SEND followed by
+	 * a SHUTDOWN.
+	 */</span>
+	<span class="enscript-keyword">if</span> (flags &amp; PRUS_EOF) {
+		socantsendmore(so);
+		unp_shutdown(unp);
+	}
+
+	<span class="enscript-keyword">if</span> (control &amp;&amp; error != 0) {
+		socket_unlock(so, 0);
+		unp_dispose(control);
+		socket_lock(so, 0);
+	}
+
+<span class="enscript-reference">release</span>:
+	<span class="enscript-keyword">if</span> (control)
+		m_freem(control);
+	<span class="enscript-keyword">if</span> (m)
+		m_freem(m);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_sense</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">void</span> *ub, <span class="enscript-type">int</span> isstat64)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+	<span class="enscript-type">struct</span> socket *so2;
+	blksize_t blksize;
+
+	<span class="enscript-keyword">if</span> (unp == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	blksize = so-&gt;so_snd.sb_hiwat;
+	<span class="enscript-keyword">if</span> (so-&gt;so_type == SOCK_STREAM &amp;&amp; unp-&gt;unp_conn != 0) {
+		so2 = unp-&gt;unp_conn-&gt;unp_socket;
+		blksize += so2-&gt;so_rcv.sb_cc;
+	}
+	<span class="enscript-keyword">if</span> (unp-&gt;unp_ino == 0)
+		unp-&gt;unp_ino = unp_ino++;
+
+	<span class="enscript-keyword">if</span> (isstat64 != 0) {
+		<span class="enscript-type">struct</span> stat64  *sb64;
+
+		sb64 = (<span class="enscript-type">struct</span> stat64 *)ub;
+		sb64-&gt;st_blksize = blksize;
+		sb64-&gt;st_dev = NODEV;
+		sb64-&gt;st_ino = (ino64_t)unp-&gt;unp_ino;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> stat *sb;
+
+		sb = (<span class="enscript-type">struct</span> stat *)ub;
+		sb-&gt;st_blksize = blksize;
+		sb-&gt;st_dev = NODEV;
+		sb-&gt;st_ino = (ino_t)(uintptr_t)unp-&gt;unp_ino;
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0		Success
+ *		EINVAL
+ *
+ * Notes:	This is not strictly correct, as unp_shutdown() also calls
+ *		socantrcvmore().  These should maybe both be conditionalized
+ *		on the 'how' argument in soshutdown() as called from the
+ *		shutdown() system call.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_shutdown</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+
+	<span class="enscript-keyword">if</span> (unp == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	socantsendmore(so);
+	unp_shutdown(unp);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINVAL			Invalid argument
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_sockaddr</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr **nam)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+
+	<span class="enscript-keyword">if</span> (unp == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">if</span> (unp-&gt;unp_addr != NULL) {
+		*nam = dup_sockaddr((<span class="enscript-type">struct</span> sockaddr *)unp-&gt;unp_addr, 1);
+	} <span class="enscript-keyword">else</span> {
+		*nam = dup_sockaddr((<span class="enscript-type">struct</span> sockaddr *)&amp;sun_noname, 1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">struct</span> pr_usrreqs uipc_usrreqs = {
+	.pru_abort =		uipc_abort,
+	.pru_accept =		uipc_accept,
+	.pru_attach =		uipc_attach,
+	.pru_bind =		uipc_bind,
+	.pru_connect =		uipc_connect,
+	.pru_connect2 =		uipc_connect2,
+	.pru_detach =		uipc_detach,
+	.pru_disconnect =	uipc_disconnect,
+	.pru_listen =		uipc_listen,
+	.pru_peeraddr =		uipc_peeraddr,
+	.pru_rcvd =		uipc_rcvd,
+	.pru_send =		uipc_send,
+	.pru_sense =		uipc_sense,
+	.pru_shutdown =		uipc_shutdown,
+	.pru_sockaddr =		uipc_sockaddr,
+	.pru_sosend =		sosend,
+	.pru_soreceive =	soreceive,
+};
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">uipc_ctloutput</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+	<span class="enscript-type">int</span> error = 0;
+	pid_t peerpid;
+	<span class="enscript-type">struct</span> socket *peerso;
+
+	<span class="enscript-keyword">switch</span> (sopt-&gt;sopt_dir) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SOPT_GET</span>:
+		<span class="enscript-keyword">switch</span> (sopt-&gt;sopt_name) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">LOCAL_PEERCRED</span>:
+			<span class="enscript-keyword">if</span> (unp-&gt;unp_flags &amp; UNP_HAVEPC) {
+				error = sooptcopyout(sopt, &amp;unp-&gt;unp_peercred,
+				    <span class="enscript-keyword">sizeof</span> (unp-&gt;unp_peercred));
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> (so-&gt;so_type == SOCK_STREAM)
+					error = ENOTCONN;
+				<span class="enscript-keyword">else</span>
+					error = EINVAL;
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">LOCAL_PEERPID</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">LOCAL_PEEREPID</span>:
+			<span class="enscript-keyword">if</span> (unp-&gt;unp_conn == NULL) {
+				error = ENOTCONN;
+				<span class="enscript-keyword">break</span>;
+			}
+			peerso = unp-&gt;unp_conn-&gt;unp_socket;
+			<span class="enscript-keyword">if</span> (peerso == NULL)
+				panic(<span class="enscript-string">&quot;peer is connected but has no socket?&quot;</span>);
+			unp_get_locks_in_order(so, peerso);
+			<span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == LOCAL_PEEREPID &amp;&amp;
+			    peerso-&gt;so_flags &amp; SOF_DELEGATED)
+				peerpid = peerso-&gt;e_pid;
+			<span class="enscript-keyword">else</span>
+				peerpid = peerso-&gt;last_pid;
+			socket_unlock(peerso, 1);
+			error = sooptcopyout(sopt, &amp;peerpid, <span class="enscript-keyword">sizeof</span> (peerpid));
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">LOCAL_PEERUUID</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">LOCAL_PEEREUUID</span>:
+			<span class="enscript-keyword">if</span> (unp-&gt;unp_conn == NULL) {
+				error = ENOTCONN;
+				<span class="enscript-keyword">break</span>;
+			}
+			peerso = unp-&gt;unp_conn-&gt;unp_socket;
+			<span class="enscript-keyword">if</span> (peerso == NULL)
+				panic(<span class="enscript-string">&quot;peer is connected but has no socket?&quot;</span>);
+			unp_get_locks_in_order(so, peerso);
+			<span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == LOCAL_PEEREUUID &amp;&amp;
+			    peerso-&gt;so_flags &amp; SOF_DELEGATED)
+				error = sooptcopyout(sopt, &amp;peerso-&gt;e_uuid,
+				    <span class="enscript-keyword">sizeof</span> (peerso-&gt;e_uuid));
+			<span class="enscript-keyword">else</span>
+				error = sooptcopyout(sopt, &amp;peerso-&gt;last_uuid,
+				    <span class="enscript-keyword">sizeof</span> (peerso-&gt;last_uuid));
+			socket_unlock(peerso, 1);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			error = EOPNOTSUPP;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SOPT_SET</span>:
+	<span class="enscript-reference">default</span>:
+		error = EOPNOTSUPP;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Both send and receive buffers are allocated PIPSIZ bytes of buffering
+ * for stream sockets, although the total for sender and receiver is
+ * actually only PIPSIZ.
+ * Datagram sockets really use the sendspace as the maximum datagram size,
+ * and don't really want to reserve the sendspace.  Their recvspace should
+ * be large enough for at least one max-size datagram plus address.
+ */</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">PIPSIZ</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PIPSIZ</span>	8192
+#<span class="enscript-reference">endif</span>
+<span class="enscript-type">static</span> u_int32_t	unpst_sendspace = PIPSIZ;
+<span class="enscript-type">static</span> u_int32_t	unpst_recvspace = PIPSIZ;
+<span class="enscript-type">static</span> u_int32_t	unpdg_sendspace = 2*1024;	<span class="enscript-comment">/* really max datagram size */</span>
+<span class="enscript-type">static</span> u_int32_t	unpdg_recvspace = 4*1024;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	unp_rights;			<span class="enscript-comment">/* file descriptors in flight */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	unp_disposed;			<span class="enscript-comment">/* discarded file descriptors */</span>
+
+<span class="enscript-function-name">SYSCTL_DECL</span>(_net_local_stream);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_local_stream, OID_AUTO, sendspace, CTLFLAG_RW | CTLFLAG_LOCKED,
+   &amp;unpst_sendspace, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_local_stream, OID_AUTO, recvspace, CTLFLAG_RW | CTLFLAG_LOCKED,
+   &amp;unpst_recvspace, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_local_stream, OID_AUTO, tracemdns, CTLFLAG_RW | CTLFLAG_LOCKED,
+   &amp;unpst_tracemdns, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_DECL</span>(_net_local_dgram);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_local_dgram, OID_AUTO, maxdgram, CTLFLAG_RW | CTLFLAG_LOCKED,
+   &amp;unpdg_sendspace, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_local_dgram, OID_AUTO, recvspace, CTLFLAG_RW | CTLFLAG_LOCKED,
+   &amp;unpdg_recvspace, 0, <span class="enscript-string">&quot;&quot;</span>);
+<span class="enscript-function-name">SYSCTL_DECL</span>(_net_local);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_local, OID_AUTO, inflight, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;unp_rights, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		ENOBUFS
+ *	soreserve:ENOBUFS
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">unp_attach</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> unpcb *unp;
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_snd.sb_hiwat == 0 || so-&gt;so_rcv.sb_hiwat == 0) {
+		<span class="enscript-keyword">switch</span> (so-&gt;so_type) {
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SOCK_STREAM</span>:
+			error = soreserve(so, unpst_sendspace, unpst_recvspace);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SOCK_DGRAM</span>:
+			error = soreserve(so, unpdg_sendspace, unpdg_recvspace);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:
+			panic(<span class="enscript-string">&quot;unp_attach&quot;</span>);
+		}
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+	}
+	unp = (<span class="enscript-type">struct</span> unpcb *)zalloc(unp_zone);
+	<span class="enscript-keyword">if</span> (unp == NULL)
+		<span class="enscript-keyword">return</span> (ENOBUFS);
+	bzero(unp, <span class="enscript-keyword">sizeof</span> (*unp));
+
+	lck_mtx_init(&amp;unp-&gt;unp_mtx, 
+		unp_mtx_grp, unp_mtx_attr);
+
+	lck_rw_lock_exclusive(unp_list_mtx);
+	LIST_INIT(&amp;unp-&gt;unp_refs);
+	unp-&gt;unp_socket = so;
+	unp-&gt;unp_gencnt = ++unp_gencnt;
+	unp_count++;
+	LIST_INSERT_HEAD(so-&gt;so_type == SOCK_DGRAM ?
+	    &amp;unp_dhead : &amp;unp_shead, unp, unp_link);
+	lck_rw_done(unp_list_mtx);
+	so-&gt;so_pcb = (caddr_t)unp;
+	<span class="enscript-comment">/*
+	 * Mark AF_UNIX socket buffers accordingly so that:
+	 *
+	 * a. In the SOCK_STREAM case, socket buffer append won't fail due to
+	 *    the lack of space; this essentially loosens the sbspace() check,
+	 *    since there is disconnect between sosend() and uipc_send() with
+	 *    respect to flow control that might result in our dropping the
+	 *    data in uipc_send().  By setting this, we allow for slightly
+	 *    more records to be appended to the receiving socket to avoid
+	 *    losing data (which we can't afford in the SOCK_STREAM case).
+	 *    Flow control still takes place since we adjust the sender's
+	 *    hiwat during each send.  This doesn't affect the SOCK_DGRAM
+	 *    case and append would still fail when the queue overflows.
+	 *
+	 * b. In the presence of control messages containing internalized
+	 *    file descriptors, the append routines will not free them since
+	 *    we'd need to undo the work first via unp_dispose().
+	 */</span>
+	so-&gt;so_rcv.sb_flags |= SB_UNIX;
+	so-&gt;so_snd.sb_flags |= SB_UNIX;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">unp_detach</span>(<span class="enscript-type">struct</span> unpcb *unp)
+{
+	<span class="enscript-type">int</span> so_locked = 1;
+
+	lck_rw_lock_exclusive(unp_list_mtx);
+	LIST_REMOVE(unp, unp_link);
+	--unp_count; 
+	++unp_gencnt;
+	lck_rw_done(unp_list_mtx);
+	<span class="enscript-keyword">if</span> (unp-&gt;unp_vnode) {
+		<span class="enscript-type">struct</span> vnode *tvp = NULL;
+		socket_unlock(unp-&gt;unp_socket, 0);
+
+		<span class="enscript-comment">/* Holding unp_connect_lock will avoid a race between
+		 * a thread closing the listening socket and a thread
+		 * connecting to it.
+		 */</span>
+		lck_mtx_lock(unp_connect_lock);
+		socket_lock(unp-&gt;unp_socket, 0);
+		<span class="enscript-keyword">if</span> (unp-&gt;unp_vnode) {
+			tvp = unp-&gt;unp_vnode;
+			unp-&gt;unp_vnode-&gt;v_socket = NULL;
+			unp-&gt;unp_vnode = NULL;
+		}
+		lck_mtx_unlock(unp_connect_lock);
+		<span class="enscript-keyword">if</span> (tvp != NULL)
+			vnode_rele(tvp);		<span class="enscript-comment">/* drop the usecount */</span>
+	}
+	<span class="enscript-keyword">if</span> (unp-&gt;unp_conn)
+		unp_disconnect(unp);
+	<span class="enscript-keyword">while</span> (unp-&gt;unp_refs.lh_first) {
+		<span class="enscript-type">struct</span> unpcb *unp2 = NULL;
+
+		<span class="enscript-comment">/* This datagram socket is connected to one or more
+		 * sockets. In order to avoid a race condition between removing
+		 * this reference and closing the connected socket, we need 
+		 * to check disconnect_in_progress
+		 */</span>
+		<span class="enscript-keyword">if</span> (so_locked == 1) {
+			socket_unlock(unp-&gt;unp_socket, 0);
+			so_locked = 0;
+		}
+		lck_mtx_lock(unp_disconnect_lock);
+		<span class="enscript-keyword">while</span> (disconnect_in_progress != 0) {
+			(<span class="enscript-type">void</span>)msleep((caddr_t)&amp;disconnect_in_progress, unp_disconnect_lock,
+				PSOCK, <span class="enscript-string">&quot;disconnect&quot;</span>, NULL);
+		}
+		disconnect_in_progress = 1;
+		lck_mtx_unlock(unp_disconnect_lock);
+
+		<span class="enscript-comment">/* Now we are sure that any unpcb socket disconnect is not happening */</span>
+		<span class="enscript-keyword">if</span> (unp-&gt;unp_refs.lh_first != NULL) {
+ 			unp2 = unp-&gt;unp_refs.lh_first;
+ 			socket_lock(unp2-&gt;unp_socket, 1);
+		}
+		
+		lck_mtx_lock(unp_disconnect_lock);
+		disconnect_in_progress = 0;
+		wakeup(&amp;disconnect_in_progress);
+		lck_mtx_unlock(unp_disconnect_lock);
+			
+		<span class="enscript-keyword">if</span> (unp2 != NULL) {
+			<span class="enscript-comment">/* We already locked this socket and have a reference on it */</span>
+ 			unp_drop(unp2, ECONNRESET);
+ 			socket_unlock(unp2-&gt;unp_socket, 1);
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (so_locked == 0) {
+		socket_lock(unp-&gt;unp_socket, 0);
+		so_locked = 1;
+	}
+	soisdisconnected(unp-&gt;unp_socket);
+	<span class="enscript-comment">/* makes sure we're getting dealloced */</span>
+	unp-&gt;unp_socket-&gt;so_flags |= SOF_PCBCLEARING;
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EAFNOSUPPORT
+ *		EINVAL
+ *		EADDRINUSE
+ *		namei:???		[anything namei can return]
+ *		vnode_authorize:???	[anything vnode_authorize can return]
+ *
+ * Notes:	p at this point is the current process, as this function is
+ *		only called by sobind().
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">unp_bind</span>(
+	<span class="enscript-type">struct</span> unpcb *unp,
+	<span class="enscript-type">struct</span> sockaddr *nam,
+	proc_t p)
+{
+	<span class="enscript-type">struct</span> sockaddr_un *soun = (<span class="enscript-type">struct</span> sockaddr_un *)nam;
+	<span class="enscript-type">struct</span> vnode *vp, *dvp;
+	<span class="enscript-type">struct</span> vnode_attr va;
+	vfs_context_t ctx = vfs_context_current();
+	<span class="enscript-type">int</span> error, namelen;
+	<span class="enscript-type">struct</span> nameidata nd;
+	<span class="enscript-type">struct</span> socket *so = unp-&gt;unp_socket;
+	<span class="enscript-type">char</span> buf[SOCK_MAXADDRLEN];
+
+	<span class="enscript-keyword">if</span> (nam-&gt;sa_family != 0 &amp;&amp; nam-&gt;sa_family != AF_UNIX) {
+		<span class="enscript-keyword">return</span> (EAFNOSUPPORT);
+	}
+
+	<span class="enscript-keyword">if</span> (unp-&gt;unp_vnode != NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+	namelen = soun-&gt;sun_len - offsetof(<span class="enscript-type">struct</span> sockaddr_un, sun_path);
+	<span class="enscript-keyword">if</span> (namelen &lt;= 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	socket_unlock(so, 0);
+
+	strlcpy(buf, soun-&gt;sun_path, namelen+1);
+	NDINIT(&amp;nd, CREATE, OP_MKFIFO, FOLLOW | LOCKPARENT, UIO_SYSSPACE,
+	    CAST_USER_ADDR_T(buf), ctx);
+	<span class="enscript-comment">/* SHOULD BE ABLE TO ADOPT EXISTING AND wakeup() ALA FIFO's */</span>
+	error = namei(&amp;nd);
+	<span class="enscript-keyword">if</span> (error) {
+		socket_lock(so, 0);
+		<span class="enscript-keyword">return</span> (error);
+	}
+	dvp = nd.ni_dvp;
+	vp = nd.ni_vp;
+
+	<span class="enscript-keyword">if</span> (vp != NULL) {
+		<span class="enscript-comment">/*
+		 * need to do this before the vnode_put of dvp
+		 * since we may have to release an fs_nodelock
+		 */</span>
+		nameidone(&amp;nd);
+
+		vnode_put(dvp);
+		vnode_put(vp);
+
+		socket_lock(so, 0);
+		<span class="enscript-keyword">return</span> (EADDRINUSE);
+	}
+
+	VATTR_INIT(&amp;va);
+	VATTR_SET(&amp;va, va_type, VSOCK);
+	VATTR_SET(&amp;va, va_mode, (ACCESSPERMS &amp; ~p-&gt;p_fd-&gt;fd_cmask));
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_vnode_check_create(ctx,
+	    nd.ni_dvp, &amp;nd.ni_cnd, &amp;va);
+
+	<span class="enscript-keyword">if</span> (error == 0)
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_MACF */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	error = mac_vnode_check_uipc_bind(ctx,
+	    nd.ni_dvp, &amp;nd.ni_cnd, &amp;va);
+
+	<span class="enscript-keyword">if</span> (error == 0)
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+	<span class="enscript-comment">/* authorize before creating */</span>
+	error = vnode_authorize(dvp, NULL, KAUTH_VNODE_ADD_FILE, ctx);
+
+	<span class="enscript-keyword">if</span> (!error) {
+		<span class="enscript-comment">/* create the socket */</span>
+		error = vn_create(dvp, &amp;vp, &amp;nd, &amp;va, 0, 0, NULL, ctx);
+	}
+
+	nameidone(&amp;nd);
+	vnode_put(dvp);
+
+	<span class="enscript-keyword">if</span> (error) {
+		socket_lock(so, 0);
+		<span class="enscript-keyword">return</span> (error);
+	}
+	vnode_ref(vp);	<span class="enscript-comment">/* gain a longterm reference */</span>
+	socket_lock(so, 0);
+	vp-&gt;v_socket = unp-&gt;unp_socket;
+	unp-&gt;unp_vnode = vp;
+	unp-&gt;unp_addr = (<span class="enscript-type">struct</span> sockaddr_un *)dup_sockaddr(nam, 1);
+	vnode_put(vp);		<span class="enscript-comment">/* drop the iocount */</span>
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EAFNOSUPPORT		Address family not supported
+ *		EINVAL			Invalid argument
+ *		ENOTSOCK		Not a socket
+ *		ECONNREFUSED		Connection refused
+ *		EPROTOTYPE		Protocol wrong type for socket
+ *		EISCONN			Socket is connected
+ *	unp_connect2:EPROTOTYPE		Protocol wrong type for socket
+ *	unp_connect2:EINVAL		Invalid argument
+ *	namei:???			[anything namei can return]
+ *	vnode_authorize:????		[anything vnode_authorize can return]
+ *
+ * Notes:	p at this point is the current process, as this function is
+ *		only called by sosend(), sendfile(), and soconnectlock().
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">unp_connect</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr *nam, __unused proc_t p)
+{
+	<span class="enscript-type">struct</span> sockaddr_un *soun = (<span class="enscript-type">struct</span> sockaddr_un *)nam;
+	<span class="enscript-type">struct</span> vnode *vp;
+	<span class="enscript-type">struct</span> socket *so2, *so3, *list_so=NULL;
+	<span class="enscript-type">struct</span> unpcb *unp, *unp2, *unp3;
+	vfs_context_t ctx = vfs_context_current();
+	<span class="enscript-type">int</span> error, len;
+	<span class="enscript-type">struct</span> nameidata nd;
+	<span class="enscript-type">char</span> buf[SOCK_MAXADDRLEN];
+
+	<span class="enscript-keyword">if</span> (nam-&gt;sa_family != 0 &amp;&amp; nam-&gt;sa_family != AF_UNIX) {
+		<span class="enscript-keyword">return</span> (EAFNOSUPPORT);
+	}
+
+	unp = sotounpcb(so);
+	so2 = so3 = NULL;
+
+	len = nam-&gt;sa_len - offsetof(<span class="enscript-type">struct</span> sockaddr_un, sun_path);
+	<span class="enscript-keyword">if</span> (len &lt;= 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	strlcpy(buf, soun-&gt;sun_path, len+1);
+	socket_unlock(so, 0);
+
+	NDINIT(&amp;nd, LOOKUP, OP_LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE,
+	    CAST_USER_ADDR_T(buf), ctx);
+	error = namei(&amp;nd);
+	<span class="enscript-keyword">if</span> (error) {
+		socket_lock(so, 0);
+		<span class="enscript-keyword">return</span> (error);
+	}
+	nameidone(&amp;nd);
+	vp = nd.ni_vp;
+	<span class="enscript-keyword">if</span> (vp-&gt;v_type != VSOCK) {
+		error = ENOTSOCK;
+		socket_lock(so, 0);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	error = mac_vnode_check_uipc_connect(ctx, vp);
+	<span class="enscript-keyword">if</span> (error) {
+		socket_lock(so, 0);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET_SUBSET */</span>
+
+	error = vnode_authorize(vp, NULL, KAUTH_VNODE_WRITE_DATA, ctx);
+	<span class="enscript-keyword">if</span> (error) {
+		socket_lock(so, 0);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	lck_mtx_lock(unp_connect_lock);
+
+	<span class="enscript-keyword">if</span> (vp-&gt;v_socket == 0) {
+		lck_mtx_unlock(unp_connect_lock);
+		error = ECONNREFUSED;
+		socket_lock(so, 0);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	socket_lock(vp-&gt;v_socket, 1); <span class="enscript-comment">/* Get a reference on the listening socket */</span>
+	so2 = vp-&gt;v_socket;
+	lck_mtx_unlock(unp_connect_lock);
+
+
+	<span class="enscript-keyword">if</span> (so2-&gt;so_pcb == NULL) {
+		error = ECONNREFUSED;
+		<span class="enscript-keyword">if</span> (so != so2) {
+			socket_unlock(so2, 1);
+			socket_lock(so, 0);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* Release the reference held for the listen socket */</span>
+			so2-&gt;so_usecount--;
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (so &lt; so2) {
+		socket_unlock(so2, 0);
+		socket_lock(so, 0);
+		socket_lock(so2, 0);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (so &gt; so2) {
+		socket_lock(so, 0);
+	}
+	<span class="enscript-comment">/*
+	 * Check if socket was connected while we were trying to
+	 * get the socket locks in order.
+	 * XXX - probably shouldn't return an error for SOCK_DGRAM
+	 */</span>
+	<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_ISCONNECTED) != 0) {
+		error = EISCONN;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">decref_out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_type != so2-&gt;so_type) {
+		error = EPROTOTYPE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">decref_out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_flags &amp; PR_CONNREQUIRED) {
+		<span class="enscript-comment">/* Release the incoming socket but keep a reference */</span>
+		socket_unlock(so, 0);
+
+		<span class="enscript-keyword">if</span> ((so2-&gt;so_options &amp; SO_ACCEPTCONN) == 0 ||
+		    (so3 = sonewconn(so2, 0, nam)) == 0) {
+			error = ECONNREFUSED;
+			<span class="enscript-keyword">if</span> (so != so2) {
+				socket_unlock(so2, 1);
+				socket_lock(so, 0);
+			} <span class="enscript-keyword">else</span> {
+				socket_lock(so, 0);
+				<span class="enscript-comment">/* Release the reference held for
+				 * listen socket.
+				 */</span>
+				so2-&gt;so_usecount--;
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		unp2 = sotounpcb(so2);
+		unp3 = sotounpcb(so3);
+		<span class="enscript-keyword">if</span> (unp2-&gt;unp_addr)
+			unp3-&gt;unp_addr = (<span class="enscript-type">struct</span> sockaddr_un *)
+			    dup_sockaddr((<span class="enscript-type">struct</span> sockaddr *)unp2-&gt;unp_addr, 1);
+
+		<span class="enscript-comment">/*
+		 * unp_peercred management:
+		 *
+		 * The connecter's (client's) credentials are copied
+		 * from its process structure at the time of connect()
+		 * (which is now).
+		 */</span>
+		cru2x(vfs_context_ucred(ctx), &amp;unp3-&gt;unp_peercred);
+		unp3-&gt;unp_flags |= UNP_HAVEPC;
+		<span class="enscript-comment">/*
+		 * The receiver's (server's) credentials are copied
+		 * from the unp_peercred member of socket on which the
+		 * former called listen(); unp_listen() cached that
+		 * process's credentials at that time so we can use
+		 * them now.
+		 */</span>
+		KASSERT(unp2-&gt;unp_flags &amp; UNP_HAVEPCCACHED,
+		    (<span class="enscript-string">&quot;unp_connect: listener without cached peercred&quot;</span>));
+
+		<span class="enscript-comment">/* Here we need to have both so and so2 locks and so2
+		 * is already locked. Lock ordering is required.
+		 */</span>
+		<span class="enscript-keyword">if</span> (so &lt; so2) {
+			socket_unlock(so2, 0);
+			socket_lock(so, 0);
+			socket_lock(so2, 0);
+		} <span class="enscript-keyword">else</span> {
+			socket_lock(so, 0);
+		}
+
+		<span class="enscript-comment">/* Check again if the socket state changed when its lock was released */</span>
+		<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_ISCONNECTED) != 0) {
+			error = EISCONN;
+			socket_unlock(so2, 1);
+			socket_lock(so3, 0);
+			sofreelastref(so3, 1);
+                	<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		memcpy(&amp;unp-&gt;unp_peercred, &amp;unp2-&gt;unp_peercred,
+		    <span class="enscript-keyword">sizeof</span> (unp-&gt;unp_peercred));
+		unp-&gt;unp_flags |= UNP_HAVEPC;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET</span>
+		<span class="enscript-comment">/* XXXMAC: recursive lock: SOCK_LOCK(so); */</span>
+		mac_socketpeer_label_associate_socket(so, so3);
+		mac_socketpeer_label_associate_socket(so3, so);
+		<span class="enscript-comment">/* XXXMAC: SOCK_UNLOCK(so); */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_SOCKET */</span>
+
+		<span class="enscript-comment">/* Hold the reference on listening socket until the end */</span>
+		socket_unlock(so2, 0);
+		list_so = so2;
+
+		<span class="enscript-comment">/* Lock ordering doesn't matter because so3 was just created */</span>
+		socket_lock(so3, 1);
+		so2 = so3;
+
+		<span class="enscript-comment">/*
+		 * Enable tracing for mDNSResponder endpoints.  (The use
+		 * of sizeof instead of strlen below takes the null
+		 * terminating character into account.)
+		 */</span>
+		<span class="enscript-keyword">if</span> (unpst_tracemdns &amp;&amp;
+		    !strncmp(soun-&gt;sun_path, MDNSRESPONDER_PATH,
+		    <span class="enscript-keyword">sizeof</span> (MDNSRESPONDER_PATH))) {
+			unp-&gt;unp_flags |= UNP_TRACE_MDNS;
+			unp2-&gt;unp_flags |= UNP_TRACE_MDNS;
+		}
+	}
+	
+	error = unp_connect2(so, so2);
+
+<span class="enscript-reference">decref_out</span>:
+	<span class="enscript-keyword">if</span> (so2 != NULL) {
+		<span class="enscript-keyword">if</span> (so != so2) {
+			socket_unlock(so2, 1);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* Release the extra reference held for the listen socket.
+			 * This is possible only for SOCK_DGRAM sockets. We refuse
+			 * connecting to the same socket for SOCK_STREAM sockets.
+			 */</span>
+			so2-&gt;so_usecount--;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (list_so != NULL) {
+		socket_lock(list_so, 0);
+		socket_unlock(list_so, 1);
+	}
+
+<span class="enscript-reference">out</span>:
+	lck_mtx_assert(&amp;unp-&gt;unp_mtx, LCK_MTX_ASSERT_OWNED);
+	vnode_put(vp);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EPROTOTYPE		Protocol wrong type for socket
+ *		EINVAL			Invalid argument
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">unp_connect2</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> socket *so2)
+{
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+	<span class="enscript-type">struct</span> unpcb *unp2;
+
+	<span class="enscript-keyword">if</span> (so2-&gt;so_type != so-&gt;so_type)
+		<span class="enscript-keyword">return</span> (EPROTOTYPE);
+
+	unp2 = sotounpcb(so2);
+
+	lck_mtx_assert(&amp;unp-&gt;unp_mtx, LCK_MTX_ASSERT_OWNED);
+	lck_mtx_assert(&amp;unp2-&gt;unp_mtx, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-comment">/* Verify both sockets are still opened */</span>
+	<span class="enscript-keyword">if</span> (unp == 0 || unp2 == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	unp-&gt;unp_conn = unp2;
+	so2-&gt;so_usecount++; 
+	
+	<span class="enscript-keyword">switch</span> (so-&gt;so_type) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SOCK_DGRAM</span>:
+		LIST_INSERT_HEAD(&amp;unp2-&gt;unp_refs, unp, unp_reflink);
+
+		<span class="enscript-keyword">if</span> (so != so2) {	
+			<span class="enscript-comment">/* Avoid lock order reversals due to drop/acquire in soisconnected. */</span>
+ 			<span class="enscript-comment">/* Keep an extra reference on so2 that will be dropped
+			 * soon after getting the locks in order 
+			 */</span> 
+			socket_unlock(so2, 0);
+			soisconnected(so);
+			unp_get_locks_in_order(so, so2);
+			so2-&gt;so_usecount--;
+		} <span class="enscript-keyword">else</span> {
+			soisconnected(so);
+		}
+
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SOCK_STREAM</span>:
+		<span class="enscript-comment">/* This takes care of socketpair */</span>
+		<span class="enscript-keyword">if</span> (!(unp-&gt;unp_flags &amp; UNP_HAVEPC) &amp;&amp;
+		    !(unp2-&gt;unp_flags &amp; UNP_HAVEPC)) {
+			cru2x(kauth_cred_get(), &amp;unp-&gt;unp_peercred);
+			unp-&gt;unp_flags |= UNP_HAVEPC;
+
+			cru2x(kauth_cred_get(), &amp;unp2-&gt;unp_peercred);
+			unp2-&gt;unp_flags |= UNP_HAVEPC;
+		}
+		unp2-&gt;unp_conn = unp;
+		so-&gt;so_usecount++;
+
+		<span class="enscript-comment">/* Avoid lock order reversals due to drop/acquire in soisconnected. */</span>
+		socket_unlock(so, 0);
+		soisconnected(so2);
+
+		<span class="enscript-comment">/* Keep an extra reference on so2, that will be dropped soon after
+		 * getting the locks in order again.
+		 */</span>
+		socket_unlock(so2, 0);
+
+		socket_lock(so, 0);
+		soisconnected(so);
+
+		unp_get_locks_in_order(so, so2);
+		<span class="enscript-comment">/* Decrement the extra reference left before */</span>
+		so2-&gt;so_usecount--;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;unknown socket type %d in unp_connect2&quot;</span>, so-&gt;so_type);
+	}
+	lck_mtx_assert(&amp;unp-&gt;unp_mtx, LCK_MTX_ASSERT_OWNED);
+	lck_mtx_assert(&amp;unp2-&gt;unp_mtx, LCK_MTX_ASSERT_OWNED);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">unp_disconnect</span>(<span class="enscript-type">struct</span> unpcb *unp)
+{
+	<span class="enscript-type">struct</span> unpcb *unp2 = NULL;
+	<span class="enscript-type">struct</span> socket *so2 = NULL, *so;
+	<span class="enscript-type">struct</span> socket *waitso;
+	<span class="enscript-type">int</span> so_locked = 1, strdisconn = 0;
+
+	so = unp-&gt;unp_socket;
+	<span class="enscript-keyword">if</span> (unp-&gt;unp_conn == NULL) {
+		<span class="enscript-keyword">return</span>;
+	}
+	lck_mtx_lock(unp_disconnect_lock);
+	<span class="enscript-keyword">while</span> (disconnect_in_progress != 0) {
+		<span class="enscript-keyword">if</span> (so_locked == 1) {
+			socket_unlock(so, 0);
+			so_locked = 0;
+		}
+		(<span class="enscript-type">void</span>)msleep((caddr_t)&amp;disconnect_in_progress, unp_disconnect_lock,
+			PSOCK, <span class="enscript-string">&quot;disconnect&quot;</span>, NULL);
+	}
+	disconnect_in_progress = 1;
+	lck_mtx_unlock(unp_disconnect_lock);
+
+	<span class="enscript-keyword">if</span> (so_locked == 0) {
+		socket_lock(so, 0);
+		so_locked = 1;
+	}
+
+	unp2 = unp-&gt;unp_conn;
+
+	<span class="enscript-keyword">if</span> (unp2 == 0 || unp2-&gt;unp_socket == NULL) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	so2 = unp2-&gt;unp_socket;
+
+<span class="enscript-reference">try_again</span>:
+	<span class="enscript-keyword">if</span> (so == so2) {
+		<span class="enscript-keyword">if</span> (so_locked == 0) {
+			socket_lock(so, 0);
+		}
+		waitso = so;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (so &lt; so2) {
+		<span class="enscript-keyword">if</span> (so_locked == 0) {
+			socket_lock(so, 0);
+		}
+		socket_lock(so2, 1);
+		waitso = so2;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (so_locked == 1) { 
+			socket_unlock(so, 0);
+		}
+		socket_lock(so2, 1);
+		socket_lock(so, 0);
+		waitso = so;
+	}
+	so_locked = 1;
+
+	lck_mtx_assert(&amp;unp-&gt;unp_mtx, LCK_MTX_ASSERT_OWNED);
+	lck_mtx_assert(&amp;unp2-&gt;unp_mtx, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-comment">/* Check for the UNP_DONTDISCONNECT flag, if it
+	 * is set, release both sockets and go to sleep
+	 */</span>
+	
+	<span class="enscript-keyword">if</span> ((((<span class="enscript-type">struct</span> unpcb *)waitso-&gt;so_pcb)-&gt;unp_flags &amp; UNP_DONTDISCONNECT) != 0) {
+		<span class="enscript-keyword">if</span> (so != so2) {
+			socket_unlock(so2, 1);
+		}
+		so_locked = 0;
+
+		(<span class="enscript-type">void</span>)msleep(waitso-&gt;so_pcb, &amp;unp-&gt;unp_mtx, 
+			PSOCK | PDROP, <span class="enscript-string">&quot;unpdisconnect&quot;</span>, NULL);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">try_again</span>;
+	}
+	
+	<span class="enscript-keyword">if</span> (unp-&gt;unp_conn == NULL) {
+		panic(<span class="enscript-string">&quot;unp_conn became NULL after sleep&quot;</span>);
+	}
+
+	unp-&gt;unp_conn = NULL;
+	so2-&gt;so_usecount--;
+
+	<span class="enscript-keyword">if</span> (unp-&gt;unp_flags &amp; UNP_TRACE_MDNS)
+		unp-&gt;unp_flags &amp;= ~UNP_TRACE_MDNS;
+
+	<span class="enscript-keyword">switch</span> (unp-&gt;unp_socket-&gt;so_type) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SOCK_DGRAM</span>:
+		LIST_REMOVE(unp, unp_reflink);
+		unp-&gt;unp_socket-&gt;so_state &amp;= ~SS_ISCONNECTED;
+		<span class="enscript-keyword">if</span> (so != so2)
+			socket_unlock(so2, 1);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SOCK_STREAM</span>:
+		unp2-&gt;unp_conn = NULL;
+		so-&gt;so_usecount--;
+
+		<span class="enscript-comment">/* Set the socket state correctly but do a wakeup later when
+		 * we release all locks except the socket lock, this will avoid
+		 * a deadlock.
+		 */</span>
+		unp-&gt;unp_socket-&gt;so_state &amp;= ~(SS_ISCONNECTING|SS_ISCONNECTED|SS_ISDISCONNECTING);
+		unp-&gt;unp_socket-&gt;so_state |= (SS_CANTRCVMORE|SS_CANTSENDMORE|SS_ISDISCONNECTED);
+
+		unp2-&gt;unp_socket-&gt;so_state &amp;= ~(SS_ISCONNECTING|SS_ISCONNECTED|SS_ISDISCONNECTING);
+		unp-&gt;unp_socket-&gt;so_state |= (SS_CANTRCVMORE|SS_CANTSENDMORE|SS_ISDISCONNECTED);
+
+		<span class="enscript-keyword">if</span> (unp2-&gt;unp_flags &amp; UNP_TRACE_MDNS)
+			unp2-&gt;unp_flags &amp;= ~UNP_TRACE_MDNS;
+
+		strdisconn = 1;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;unknown socket type %d&quot;</span>, so-&gt;so_type);
+	}
+<span class="enscript-reference">out</span>:
+	lck_mtx_lock(unp_disconnect_lock);
+	disconnect_in_progress = 0;
+	wakeup(&amp;disconnect_in_progress);
+	lck_mtx_unlock(unp_disconnect_lock);
+
+	<span class="enscript-keyword">if</span> (strdisconn) {
+		socket_unlock(so, 0);
+		soisdisconnected(so2);
+		socket_unlock(so2, 1);
+
+		socket_lock(so,0);
+		soisdisconnected(so);
+	}
+	lck_mtx_assert(&amp;unp-&gt;unp_mtx, LCK_MTX_ASSERT_OWNED);
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * unpcb_to_compat copies specific bits of a unpcb to a unpcb_compat format.
+ * The unpcb_compat data structure is passed to user space and must not change.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">unpcb_to_compat</span>(<span class="enscript-type">struct</span> unpcb *up, <span class="enscript-type">struct</span> unpcb_compat *cp)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+	cp-&gt;unp_link.le_next = (u_int32_t)
+	    VM_KERNEL_ADDRPERM(up-&gt;unp_link.le_next);
+	cp-&gt;unp_link.le_prev = (u_int32_t)
+	    VM_KERNEL_ADDRPERM(up-&gt;unp_link.le_prev);
+#<span class="enscript-reference">else</span>
+	cp-&gt;unp_link.le_next = (<span class="enscript-type">struct</span> unpcb_compat *)
+	    VM_KERNEL_ADDRPERM(up-&gt;unp_link.le_next);
+	cp-&gt;unp_link.le_prev = (<span class="enscript-type">struct</span> unpcb_compat **)
+	    VM_KERNEL_ADDRPERM(up-&gt;unp_link.le_prev);
+#<span class="enscript-reference">endif</span>
+	cp-&gt;unp_socket = (_UNPCB_PTR(<span class="enscript-type">struct</span> socket *))
+	    VM_KERNEL_ADDRPERM(up-&gt;unp_socket);
+	cp-&gt;unp_vnode = (_UNPCB_PTR(<span class="enscript-type">struct</span> vnode *))
+	    VM_KERNEL_ADDRPERM(up-&gt;unp_vnode);
+	cp-&gt;unp_ino = up-&gt;unp_ino;
+	cp-&gt;unp_conn = (_UNPCB_PTR(<span class="enscript-type">struct</span> unpcb_compat *))
+	    VM_KERNEL_ADDRPERM(up-&gt;unp_conn);
+	cp-&gt;unp_refs = (u_int32_t)VM_KERNEL_ADDRPERM(up-&gt;unp_refs.lh_first);
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+	cp-&gt;unp_reflink.le_next =
+	    (u_int32_t)VM_KERNEL_ADDRPERM(up-&gt;unp_reflink.le_next);
+	cp-&gt;unp_reflink.le_prev =
+	    (u_int32_t)VM_KERNEL_ADDRPERM(up-&gt;unp_reflink.le_prev);
+#<span class="enscript-reference">else</span>
+	cp-&gt;unp_reflink.le_next =
+	    (<span class="enscript-type">struct</span> unpcb_compat *)VM_KERNEL_ADDRPERM(up-&gt;unp_reflink.le_next);
+	cp-&gt;unp_reflink.le_prev =
+	    (<span class="enscript-type">struct</span> unpcb_compat **)VM_KERNEL_ADDRPERM(up-&gt;unp_reflink.le_prev);
+#<span class="enscript-reference">endif</span>
+	cp-&gt;unp_addr = (_UNPCB_PTR(<span class="enscript-type">struct</span> sockaddr_un *))
+	    VM_KERNEL_ADDRPERM(up-&gt;unp_addr);
+	cp-&gt;unp_cc = up-&gt;unp_cc;
+	cp-&gt;unp_mbcnt = up-&gt;unp_mbcnt;
+	cp-&gt;unp_gencnt = up-&gt;unp_gencnt;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+unp_pcblist SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>,<span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error, i, n;
+	<span class="enscript-type">struct</span> unpcb *unp, **unp_list;
+	unp_gen_t gencnt;
+	<span class="enscript-type">struct</span> xunpgen xug;
+	<span class="enscript-type">struct</span> unp_head *head;
+
+	lck_rw_lock_shared(unp_list_mtx);
+	head = ((intptr_t)arg1 == SOCK_DGRAM ? &amp;unp_dhead : &amp;unp_shead);
+
+	<span class="enscript-comment">/*
+	 * The process of preparing the PCB list is too time-consuming and
+	 * resource-intensive to repeat twice on every request.
+	 */</span>
+	<span class="enscript-keyword">if</span> (req-&gt;oldptr == USER_ADDR_NULL) {
+		n = unp_count;
+		req-&gt;oldidx = 2 * <span class="enscript-keyword">sizeof</span> (xug) + (n + n / 8) *
+		    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> xunpcb);
+		lck_rw_done(unp_list_mtx);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">if</span> (req-&gt;newptr != USER_ADDR_NULL) {
+		lck_rw_done(unp_list_mtx);
+		<span class="enscript-keyword">return</span> (EPERM);
+	}
+
+	<span class="enscript-comment">/*
+	 * OK, now we're committed to doing something.
+	 */</span>
+	gencnt = unp_gencnt;
+	n = unp_count;
+
+	bzero(&amp;xug, <span class="enscript-keyword">sizeof</span> (xug));
+	xug.xug_len = <span class="enscript-keyword">sizeof</span> (xug);
+	xug.xug_count = n;
+	xug.xug_gen = gencnt;
+	xug.xug_sogen = so_gencnt;
+	error = SYSCTL_OUT(req, &amp;xug, <span class="enscript-keyword">sizeof</span> (xug));
+	<span class="enscript-keyword">if</span> (error) {
+		lck_rw_done(unp_list_mtx);
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	<span class="enscript-comment">/*
+	 * We are done if there is no pcb
+	 */</span>
+	<span class="enscript-keyword">if</span> (n == 0)  {
+		lck_rw_done(unp_list_mtx);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	MALLOC(unp_list, <span class="enscript-type">struct</span> unpcb **, n * <span class="enscript-keyword">sizeof</span> (*unp_list),
+	    M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (unp_list == 0) {
+		lck_rw_done(unp_list_mtx);
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+
+	<span class="enscript-keyword">for</span> (unp = head-&gt;lh_first, i = 0; unp &amp;&amp; i &lt; n;
+	    unp = unp-&gt;unp_link.le_next) {
+		<span class="enscript-keyword">if</span> (unp-&gt;unp_gencnt &lt;= gencnt)
+			unp_list[i++] = unp;
+	}
+	n = i;			<span class="enscript-comment">/* in case we lost some during malloc */</span>
+
+	error = 0;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; n; i++) {
+		unp = unp_list[i];
+		<span class="enscript-keyword">if</span> (unp-&gt;unp_gencnt &lt;= gencnt) {
+			<span class="enscript-type">struct</span> xunpcb xu;
+
+			bzero(&amp;xu, <span class="enscript-keyword">sizeof</span> (xu));
+			xu.xu_len = <span class="enscript-keyword">sizeof</span> (xu);
+			xu.xu_unpp = (_UNPCB_PTR(<span class="enscript-type">struct</span> unpcb_compat *))
+			    VM_KERNEL_ADDRPERM(unp);
+			<span class="enscript-comment">/*
+			 * XXX - need more locking here to protect against
+			 * connect/disconnect races for SMP.
+			 */</span>
+			<span class="enscript-keyword">if</span> (unp-&gt;unp_addr)
+				bcopy(unp-&gt;unp_addr, &amp;xu.xu_addr,
+				    unp-&gt;unp_addr-&gt;sun_len);
+			<span class="enscript-keyword">if</span> (unp-&gt;unp_conn &amp;&amp; unp-&gt;unp_conn-&gt;unp_addr)
+				bcopy(unp-&gt;unp_conn-&gt;unp_addr,
+				    &amp;xu.xu_caddr,
+				    unp-&gt;unp_conn-&gt;unp_addr-&gt;sun_len);
+			unpcb_to_compat(unp, &amp;xu.xu_unp);
+			sotoxsocket(unp-&gt;unp_socket, &amp;xu.xu_socket);
+			error = SYSCTL_OUT(req, &amp;xu, <span class="enscript-keyword">sizeof</span> (xu));
+		}
+	}
+	<span class="enscript-keyword">if</span> (!error) {
+		<span class="enscript-comment">/*
+		 * Give the user an updated idea of our state.
+		 * If the generation differs from what we told
+		 * her before, she knows that something happened
+		 * while we were processing this request, and it
+		 * might be necessary to retry.
+		 */</span>
+		bzero(&amp;xug, <span class="enscript-keyword">sizeof</span> (xug));
+		xug.xug_len = <span class="enscript-keyword">sizeof</span> (xug);
+		xug.xug_gen = unp_gencnt;
+		xug.xug_sogen = so_gencnt;
+		xug.xug_count = unp_count;
+		error = SYSCTL_OUT(req, &amp;xug, <span class="enscript-keyword">sizeof</span> (xug));
+	}
+	FREE(unp_list, M_TEMP);
+	lck_rw_done(unp_list_mtx);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_net_local_dgram, OID_AUTO, pcblist,
+            CTLTYPE_STRUCT | CTLFLAG_RD | CTLFLAG_LOCKED,
+            (caddr_t)(<span class="enscript-type">long</span>)SOCK_DGRAM, 0, unp_pcblist, <span class="enscript-string">&quot;S,xunpcb&quot;</span>,
+            <span class="enscript-string">&quot;List of active local datagram sockets&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_net_local_stream, OID_AUTO, pcblist,
+            CTLTYPE_STRUCT | CTLFLAG_RD | CTLFLAG_LOCKED,
+            (caddr_t)(<span class="enscript-type">long</span>)SOCK_STREAM, 0, unp_pcblist, <span class="enscript-string">&quot;S,xunpcb&quot;</span>,
+            <span class="enscript-string">&quot;List of active local stream sockets&quot;</span>);
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+unp_pcblist64 SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>,<span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error, i, n;
+	<span class="enscript-type">struct</span> unpcb *unp, **unp_list;
+	unp_gen_t gencnt;
+	<span class="enscript-type">struct</span> xunpgen xug;
+	<span class="enscript-type">struct</span> unp_head *head;
+
+	lck_rw_lock_shared(unp_list_mtx);
+	head = ((intptr_t)arg1 == SOCK_DGRAM ? &amp;unp_dhead : &amp;unp_shead);
+
+	<span class="enscript-comment">/*
+	 * The process of preparing the PCB list is too time-consuming and
+	 * resource-intensive to repeat twice on every request.
+	 */</span>
+	<span class="enscript-keyword">if</span> (req-&gt;oldptr == USER_ADDR_NULL) {
+		n = unp_count;
+		req-&gt;oldidx = 2 * <span class="enscript-keyword">sizeof</span> (xug) + (n + n / 8) *
+		    (<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> xunpcb64)); 
+		lck_rw_done(unp_list_mtx);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">if</span> (req-&gt;newptr != USER_ADDR_NULL) {
+		lck_rw_done(unp_list_mtx);
+		<span class="enscript-keyword">return</span> (EPERM);
+	}
+
+	<span class="enscript-comment">/*
+	 * OK, now we're committed to doing something.
+	 */</span>
+	gencnt = unp_gencnt;
+	n = unp_count;
+
+	bzero(&amp;xug, <span class="enscript-keyword">sizeof</span> (xug));
+	xug.xug_len = <span class="enscript-keyword">sizeof</span> (xug);
+	xug.xug_count = n;
+	xug.xug_gen = gencnt;
+	xug.xug_sogen = so_gencnt;
+	error = SYSCTL_OUT(req, &amp;xug, <span class="enscript-keyword">sizeof</span> (xug));
+	<span class="enscript-keyword">if</span> (error) {
+		lck_rw_done(unp_list_mtx);
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	<span class="enscript-comment">/*
+	 * We are done if there is no pcb
+	 */</span>
+	<span class="enscript-keyword">if</span> (n == 0)  {
+		lck_rw_done(unp_list_mtx);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	MALLOC(unp_list, <span class="enscript-type">struct</span> unpcb **, n * <span class="enscript-keyword">sizeof</span> (*unp_list),
+	    M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (unp_list == 0) {
+		lck_rw_done(unp_list_mtx);
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+
+	<span class="enscript-keyword">for</span> (unp = head-&gt;lh_first, i = 0; unp &amp;&amp; i &lt; n;
+	    unp = unp-&gt;unp_link.le_next) {
+		<span class="enscript-keyword">if</span> (unp-&gt;unp_gencnt &lt;= gencnt)
+			unp_list[i++] = unp;
+	}
+	n = i;			<span class="enscript-comment">/* in case we lost some during malloc */</span>
+
+	error = 0;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; n; i++) {
+		unp = unp_list[i];
+		<span class="enscript-keyword">if</span> (unp-&gt;unp_gencnt &lt;= gencnt) {
+			<span class="enscript-type">struct</span> xunpcb64 xu;
+			size_t		xu_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> xunpcb64);
+
+			bzero(&amp;xu, xu_len);
+			xu.xu_len = xu_len;
+			xu.xu_unpp = (u_int64_t)VM_KERNEL_ADDRPERM(unp);
+			xu.xunp_link.le_next = (u_int64_t)
+			    VM_KERNEL_ADDRPERM(unp-&gt;unp_link.le_next);
+			xu.xunp_link.le_prev = (u_int64_t)
+			    VM_KERNEL_ADDRPERM(unp-&gt;unp_link.le_prev);
+			xu.xunp_socket = (u_int64_t)
+			    VM_KERNEL_ADDRPERM(unp-&gt;unp_socket);
+			xu.xunp_vnode = (u_int64_t)
+			    VM_KERNEL_ADDRPERM(unp-&gt;unp_vnode);
+			xu.xunp_ino = unp-&gt;unp_ino;
+			xu.xunp_conn = (u_int64_t)
+			    VM_KERNEL_ADDRPERM(unp-&gt;unp_conn);
+			xu.xunp_refs = (u_int64_t)
+			    VM_KERNEL_ADDRPERM(unp-&gt;unp_refs.lh_first);
+			xu.xunp_reflink.le_next = (u_int64_t)
+			    VM_KERNEL_ADDRPERM(unp-&gt;unp_reflink.le_next);
+			xu.xunp_reflink.le_prev = (u_int64_t)
+			    VM_KERNEL_ADDRPERM(unp-&gt;unp_reflink.le_prev);
+			xu.xunp_cc = unp-&gt;unp_cc;
+			xu.xunp_mbcnt = unp-&gt;unp_mbcnt;
+			xu.xunp_gencnt = unp-&gt;unp_gencnt;
+
+			<span class="enscript-keyword">if</span> (unp-&gt;unp_socket)
+				sotoxsocket64(unp-&gt;unp_socket, &amp;xu.xu_socket);
+
+			<span class="enscript-comment">/*
+			 * XXX - need more locking here to protect against
+			 * connect/disconnect races for SMP.
+			 */</span>
+                        <span class="enscript-keyword">if</span> (unp-&gt;unp_addr)
+                                bcopy(unp-&gt;unp_addr, &amp;xu.xunp_addr,
+                                    unp-&gt;unp_addr-&gt;sun_len);
+                        <span class="enscript-keyword">if</span> (unp-&gt;unp_conn &amp;&amp; unp-&gt;unp_conn-&gt;unp_addr)
+                                bcopy(unp-&gt;unp_conn-&gt;unp_addr,
+                                    &amp;xu.xunp_caddr,
+                                    unp-&gt;unp_conn-&gt;unp_addr-&gt;sun_len);
+
+			error = SYSCTL_OUT(req, &amp;xu, xu_len);
+		}
+	}
+	<span class="enscript-keyword">if</span> (!error) {
+		<span class="enscript-comment">/*
+		 * Give the user an updated idea of our state.
+		 * If the generation differs from what we told
+		 * her before, she knows that something happened
+		 * while we were processing this request, and it
+		 * might be necessary to retry.
+		 */</span>
+		bzero(&amp;xug, <span class="enscript-keyword">sizeof</span> (xug));
+		xug.xug_len = <span class="enscript-keyword">sizeof</span> (xug);
+		xug.xug_gen = unp_gencnt;
+		xug.xug_sogen = so_gencnt;
+		xug.xug_count = unp_count;
+		error = SYSCTL_OUT(req, &amp;xug, <span class="enscript-keyword">sizeof</span> (xug));
+	}
+	FREE(unp_list, M_TEMP);
+	lck_rw_done(unp_list_mtx);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-function-name">SYSCTL_PROC</span>(_net_local_dgram, OID_AUTO, pcblist64,
+	    CTLTYPE_STRUCT | CTLFLAG_RD | CTLFLAG_LOCKED,
+	    (caddr_t)(<span class="enscript-type">long</span>)SOCK_DGRAM, 0, unp_pcblist64, <span class="enscript-string">&quot;S,xunpcb64&quot;</span>,
+	    <span class="enscript-string">&quot;List of active local datagram sockets 64 bit&quot;</span>);
+<span class="enscript-function-name">SYSCTL_PROC</span>(_net_local_stream, OID_AUTO, pcblist64,
+	    CTLTYPE_STRUCT | CTLFLAG_RD | CTLFLAG_LOCKED,
+	    (caddr_t)(<span class="enscript-type">long</span>)SOCK_STREAM, 0, unp_pcblist64, <span class="enscript-string">&quot;S,xunpcb64&quot;</span>,
+	    <span class="enscript-string">&quot;List of active local stream sockets 64 bit&quot;</span>);
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">unp_shutdown</span>(<span class="enscript-type">struct</span> unpcb *unp)
+{
+	<span class="enscript-type">struct</span> socket *so = unp-&gt;unp_socket;
+	<span class="enscript-type">struct</span> socket *so2;
+	<span class="enscript-keyword">if</span> (unp-&gt;unp_socket-&gt;so_type == SOCK_STREAM &amp;&amp; unp-&gt;unp_conn) {
+		so2 = unp-&gt;unp_conn-&gt;unp_socket;
+		unp_get_locks_in_order(so, so2);
+		socantrcvmore(so2);
+		socket_unlock(so2, 1);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">unp_drop</span>(<span class="enscript-type">struct</span> unpcb *unp, <span class="enscript-type">int</span> errno)
+{
+	<span class="enscript-type">struct</span> socket *so = unp-&gt;unp_socket;
+
+	so-&gt;so_error = errno;
+	unp_disconnect(unp);
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EMSGSIZE		The new fd's will not fit
+ *		ENOBUFS			Cannot alloc struct fileproc
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">unp_externalize</span>(<span class="enscript-type">struct</span> mbuf *rights)
+{
+	proc_t p = current_proc();		<span class="enscript-comment">/* XXX */</span>
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">struct</span> cmsghdr *cm = mtod(rights, <span class="enscript-type">struct</span> cmsghdr *);
+	<span class="enscript-type">struct</span> fileglob **rp = (<span class="enscript-type">struct</span> fileglob **)(cm + 1);
+	<span class="enscript-type">int</span> *fds = (<span class="enscript-type">int</span> *)(cm + 1);
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">struct</span> fileglob **fgl;
+	<span class="enscript-type">int</span> newfds = (cm-&gt;cmsg_len - <span class="enscript-keyword">sizeof</span> (*cm)) / <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>);
+	<span class="enscript-type">int</span> f, error = 0;
+
+	MALLOC(fgl, <span class="enscript-type">struct</span> fileglob **, newfds * <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> fileglob *),
+		M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (fgl == NULL) {
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">discard</span>;
+	}
+
+	proc_fdlock(p);
+
+	<span class="enscript-comment">/*
+	 * if the new FD's will not fit, then we free them all
+	 */</span>
+	<span class="enscript-keyword">if</span> (!fdavail(p, newfds)) {
+		proc_fdunlock(p);
+		error = EMSGSIZE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">discard</span>;
+	}
+	<span class="enscript-comment">/*
+	 * now change each pointer to an fd in the global table to
+	 * an integer that is the index to the local fd table entry
+	 * that we set up to point to the global one we are transferring.
+	 * XXX (1) this assumes a pointer and int are the same size, 
+	 * XXX     or the mbuf can hold the expansion
+	 * XXX (2) allocation failures should be non-fatal
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; newfds; i++) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET</span>
+		<span class="enscript-comment">/*
+		 * If receive access is denied, don't pass along
+		 * and error message, just discard the descriptor.
+		 */</span>
+		<span class="enscript-keyword">if</span> (mac_file_check_receive(kauth_cred_get(), rp[i])) {
+			proc_fdunlock(p);
+			unp_discard(rp[i], p);
+			fds[i] = 0;
+			proc_fdlock(p);
+			<span class="enscript-keyword">continue</span>;
+		}
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">if</span> (fdalloc(p, 0, &amp;f))
+			panic(<span class="enscript-string">&quot;unp_externalize:fdalloc&quot;</span>);
+		fp = fileproc_alloc_init(NULL);
+		<span class="enscript-keyword">if</span> (fp == NULL)
+			panic(<span class="enscript-string">&quot;unp_externalize: MALLOC_ZONE&quot;</span>);
+		fp-&gt;f_iocount = 0;
+		fp-&gt;f_fglob = rp[i];
+		<span class="enscript-keyword">if</span> (fg_removeuipc_mark(rp[i]))
+			fgl[i] = rp[i];
+		<span class="enscript-keyword">else</span>
+			fgl[i] = NULL;
+		procfdtbl_releasefd(p, f, fp);
+		fds[i] = f;
+	}
+	proc_fdunlock(p);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; newfds; i++) {
+		<span class="enscript-keyword">if</span> (fgl[i] != NULL) {
+			VERIFY(fgl[i]-&gt;fg_lflags &amp; FG_RMMSGQ);
+			fg_removeuipc(fgl[i]);
+		}
+		<span class="enscript-keyword">if</span> (fds[i])
+			(<span class="enscript-type">void</span>) OSAddAtomic(-1, &amp;unp_rights);
+	}
+
+<span class="enscript-reference">discard</span>:
+	<span class="enscript-keyword">if</span> (fgl)
+		FREE(fgl, M_TEMP);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; newfds; i++) {
+			unp_discard(*rp, p);
+			*rp++ = NULL;
+		}
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">unp_init</span>(<span class="enscript-type">void</span>)
+{
+	_CASSERT(UIPC_MAX_CMSG_FD &gt;= (MCLBYTES / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)));
+	unp_zone = zinit(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> unpcb),
+	    (nmbclusters * <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> unpcb)), 4096, <span class="enscript-string">&quot;unpzone&quot;</span>);
+
+	<span class="enscript-keyword">if</span> (unp_zone == 0)
+		panic(<span class="enscript-string">&quot;unp_init&quot;</span>);
+	LIST_INIT(&amp;unp_dhead);
+	LIST_INIT(&amp;unp_shead);
+
+	<span class="enscript-comment">/*
+	 * allocate lock group attribute and group for udp pcb mutexes
+	 */</span>
+	unp_mtx_grp_attr = lck_grp_attr_alloc_init();
+
+	unp_mtx_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;unp_list&quot;</span>, unp_mtx_grp_attr);
+
+	unp_mtx_attr = lck_attr_alloc_init();
+
+	<span class="enscript-keyword">if</span> ((unp_list_mtx = lck_rw_alloc_init(unp_mtx_grp,
+	    unp_mtx_attr)) == NULL)
+		<span class="enscript-keyword">return</span>;	<span class="enscript-comment">/* pretty much dead if this fails... */</span>
+
+	<span class="enscript-keyword">if</span> ((unp_disconnect_lock = lck_mtx_alloc_init(unp_mtx_grp,
+		unp_mtx_attr)) == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> ((unp_connect_lock = lck_mtx_alloc_init(unp_mtx_grp,
+		unp_mtx_attr)) == NULL)
+		<span class="enscript-keyword">return</span>;
+}
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">MIN</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">MIN</span>(a, b) (((a) &lt; (b)) ? (a) : (b))
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ *		EINVAL
+ *	fdgetf_noref:EBADF
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">unp_internalize</span>(<span class="enscript-type">struct</span> mbuf *control, proc_t p)
+{
+	<span class="enscript-type">struct</span> cmsghdr *cm = mtod(control, <span class="enscript-type">struct</span> cmsghdr *);
+	<span class="enscript-type">int</span> *fds;
+	<span class="enscript-type">struct</span> fileglob **rp;
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">int</span> i, error;
+	<span class="enscript-type">int</span> oldfds;
+	uint8_t fg_ins[UIPC_MAX_CMSG_FD / 8];
+
+	<span class="enscript-comment">/* 64bit: cmsg_len is 'uint32_t', m_len is 'long' */</span>
+	<span class="enscript-keyword">if</span> (cm-&gt;cmsg_type != SCM_RIGHTS || cm-&gt;cmsg_level != SOL_SOCKET ||
+	    (socklen_t)cm-&gt;cmsg_len != (socklen_t)control-&gt;m_len) {
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+	oldfds = (cm-&gt;cmsg_len - <span class="enscript-keyword">sizeof</span> (*cm)) / <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>);
+	bzero(fg_ins, <span class="enscript-keyword">sizeof</span>(fg_ins));
+
+	proc_fdlock(p);
+	fds = (<span class="enscript-type">int</span> *)(cm + 1);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; oldfds; i++) {
+		<span class="enscript-type">struct</span> fileproc *tmpfp;
+		<span class="enscript-keyword">if</span> (((error = fdgetf_noref(p, fds[i], &amp;tmpfp)) != 0)) {
+			proc_fdunlock(p);
+			<span class="enscript-keyword">return</span> (error);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!file_issendable(p, tmpfp)) {
+			proc_fdunlock(p);
+			<span class="enscript-keyword">return</span> (EINVAL);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (FP_ISGUARDED(tmpfp, GUARD_SOCKET_IPC)) {
+			error = fp_guard_exception(p,
+				fds[i], tmpfp, kGUARD_EXC_SOCKET_IPC);
+			proc_fdunlock(p);
+			<span class="enscript-keyword">return</span> (error);
+		}
+	}
+	rp = (<span class="enscript-type">struct</span> fileglob **)(cm + 1);
+
+	<span class="enscript-comment">/* On K64 we need to walk backwards because a fileglob * is twice the size of an fd 
+	 * and doing them in-order would result in stomping over unprocessed fd's
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = (oldfds - 1); i &gt;= 0; i--) {
+		(<span class="enscript-type">void</span>) fdgetf_noref(p, fds[i], &amp;fp);
+		<span class="enscript-keyword">if</span> (fg_insertuipc_mark(fp-&gt;f_fglob))
+			fg_ins[i / 8] |= 0x80 &gt;&gt; (i % 8);
+		rp[i] = fp-&gt;f_fglob;
+	}
+	proc_fdunlock(p);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; oldfds; i++) {
+		<span class="enscript-keyword">if</span> (fg_ins[i / 8] &amp; (0x80 &gt;&gt; (i % 8))) {
+			VERIFY(rp[i]-&gt;fg_lflags &amp; FG_INSMSGQ);
+			fg_insertuipc(rp[i]);
+		}
+		(<span class="enscript-type">void</span>) OSAddAtomic(1, &amp;unp_rights);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	unp_defer, unp_gcing, unp_gcwait;
+<span class="enscript-type">static</span> thread_t unp_gcthread = NULL;
+
+<span class="enscript-comment">/* always called under uipc_lock */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">unp_gc_wait</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">if</span> (unp_gcthread == current_thread())
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">while</span> (unp_gcing != 0) {
+		unp_gcwait = 1;
+		msleep(&amp;unp_gcing, uipc_lock, 0 , <span class="enscript-string">&quot;unp_gc_wait&quot;</span>, NULL);
+	}
+}
+
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">unp_gc</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> fileglob *fg, *nextfg;
+	<span class="enscript-type">struct</span> socket *so;
+	<span class="enscript-type">static</span> <span class="enscript-type">struct</span> fileglob **extra_ref;
+	<span class="enscript-type">struct</span> fileglob **fpp;
+	<span class="enscript-type">int</span> nunref, i;
+	<span class="enscript-type">int</span> need_gcwakeup = 0;
+
+	lck_mtx_lock(uipc_lock);
+	<span class="enscript-keyword">if</span> (unp_gcing) {
+		lck_mtx_unlock(uipc_lock);
+		<span class="enscript-keyword">return</span>;
+	}
+	unp_gcing = 1;
+	unp_defer = 0;
+	unp_gcthread = current_thread();
+	lck_mtx_unlock(uipc_lock);
+	<span class="enscript-comment">/*
+	 * before going through all this, set all FDs to
+	 * be NOT defered and NOT externally accessible
+	 */</span>
+	<span class="enscript-keyword">for</span> (fg = fmsghead.lh_first; fg != 0; fg = fg-&gt;f_msglist.le_next) {
+		lck_mtx_lock(&amp;fg-&gt;fg_lock);
+		fg-&gt;fg_flag &amp;= ~(FMARK|FDEFER);
+		lck_mtx_unlock(&amp;fg-&gt;fg_lock);
+	}
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-keyword">for</span> (fg = fmsghead.lh_first; fg != 0;
+		    fg = fg-&gt;f_msglist.le_next) {
+			lck_mtx_lock(&amp;fg-&gt;fg_lock);
+			<span class="enscript-comment">/*
+			 * If the file is not open, skip it
+			 */</span>
+			<span class="enscript-keyword">if</span> (fg-&gt;fg_count == 0) {
+				lck_mtx_unlock(&amp;fg-&gt;fg_lock);
+				<span class="enscript-keyword">continue</span>;
+			}
+			<span class="enscript-comment">/*
+			 * If we already marked it as 'defer'  in a
+			 * previous pass, then try process it this time
+			 * and un-mark it
+			 */</span>
+			<span class="enscript-keyword">if</span> (fg-&gt;fg_flag &amp; FDEFER) {
+				fg-&gt;fg_flag &amp;= ~FDEFER;
+				unp_defer--;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/*
+				 * if it's not defered, then check if it's
+				 * already marked.. if so skip it
+				 */</span>
+				<span class="enscript-keyword">if</span> (fg-&gt;fg_flag &amp; FMARK) {
+					lck_mtx_unlock(&amp;fg-&gt;fg_lock);
+					<span class="enscript-keyword">continue</span>;
+				}
+				<span class="enscript-comment">/*
+				 * If all references are from messages
+				 * in transit, then skip it. it's not
+				 * externally accessible.
+				 */</span>
+				<span class="enscript-keyword">if</span> (fg-&gt;fg_count == fg-&gt;fg_msgcount) {
+					lck_mtx_unlock(&amp;fg-&gt;fg_lock);
+					<span class="enscript-keyword">continue</span>;
+				}
+				<span class="enscript-comment">/*
+				 * If it got this far then it must be
+				 * externally accessible.
+				 */</span>
+				fg-&gt;fg_flag |= FMARK;
+			}
+			<span class="enscript-comment">/*
+			 * either it was defered, or it is externally
+			 * accessible and not already marked so.
+			 * Now check if it is possibly one of OUR sockets.
+			 */</span>
+			<span class="enscript-keyword">if</span> (FILEGLOB_DTYPE(fg) != DTYPE_SOCKET ||
+			    (so = (<span class="enscript-type">struct</span> socket *)fg-&gt;fg_data) == 0) {
+				lck_mtx_unlock(&amp;fg-&gt;fg_lock);
+				<span class="enscript-keyword">continue</span>;
+			}
+			<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_domain != localdomain ||
+			    (so-&gt;so_proto-&gt;pr_flags&amp;PR_RIGHTS) == 0) {
+				lck_mtx_unlock(&amp;fg-&gt;fg_lock);
+				<span class="enscript-keyword">continue</span>;
+			}
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">notdef</span>
+			<span class="enscript-keyword">if</span> (so-&gt;so_rcv.sb_flags &amp; SB_LOCK) {
+				<span class="enscript-comment">/*
+				 * This is problematical; it's not clear
+				 * we need to wait for the sockbuf to be
+				 * unlocked (on a uniprocessor, at least),
+				 * and it's also not clear what to do
+				 * if sbwait returns an error due to receipt
+				 * of a signal.  If sbwait does return
+				 * an error, we'll go into an infinite
+				 * loop.  Delete all of this for now.
+				 */</span>
+				(<span class="enscript-type">void</span>) sbwait(&amp;so-&gt;so_rcv);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">restart</span>;
+			}
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-comment">/*
+			 * So, Ok, it's one of our sockets and it IS externally
+			 * accessible (or was defered). Now we look
+			 * to see if we hold any file descriptors in its
+			 * message buffers. Follow those links and mark them
+			 * as accessible too.
+			 *
+			 * In case a file is passed onto itself we need to 
+			 * release the file lock.
+			 */</span>
+			lck_mtx_unlock(&amp;fg-&gt;fg_lock);
+
+			unp_scan(so-&gt;so_rcv.sb_mb, unp_mark, 0);
+		}
+	} <span class="enscript-keyword">while</span> (unp_defer);
+	<span class="enscript-comment">/*
+	 * We grab an extra reference to each of the file table entries
+	 * that are not otherwise accessible and then free the rights
+	 * that are stored in messages on them.
+	 *
+	 * The bug in the orginal code is a little tricky, so I'll describe
+	 * what's wrong with it here.
+	 *
+	 * It is incorrect to simply unp_discard each entry for f_msgcount
+	 * times -- consider the case of sockets A and B that contain
+	 * references to each other.  On a last close of some other socket,
+	 * we trigger a gc since the number of outstanding rights (unp_rights)
+	 * is non-zero.  If during the sweep phase the gc code un_discards,
+	 * we end up doing a (full) closef on the descriptor.  A closef on A
+	 * results in the following chain.  Closef calls soo_close, which
+	 * calls soclose.   Soclose calls first (through the switch
+	 * uipc_usrreq) unp_detach, which re-invokes unp_gc.  Unp_gc simply
+	 * returns because the previous instance had set unp_gcing, and
+	 * we return all the way back to soclose, which marks the socket
+	 * with SS_NOFDREF, and then calls sofree.  Sofree calls sorflush
+	 * to free up the rights that are queued in messages on the socket A,
+	 * i.e., the reference on B.  The sorflush calls via the dom_dispose
+	 * switch unp_dispose, which unp_scans with unp_discard.  This second
+	 * instance of unp_discard just calls closef on B.
+	 *
+	 * Well, a similar chain occurs on B, resulting in a sorflush on B,
+	 * which results in another closef on A.  Unfortunately, A is already
+	 * being closed, and the descriptor has already been marked with
+	 * SS_NOFDREF, and soclose panics at this point.
+	 *
+	 * Here, we first take an extra reference to each inaccessible
+	 * descriptor.  Then, we call sorflush ourself, since we know
+	 * it is a Unix domain socket anyhow.  After we destroy all the
+	 * rights carried in messages, we do a last closef to get rid
+	 * of our extra reference.  This is the last close, and the
+	 * unp_detach etc will shut down the socket.
+	 *
+	 * 91/09/19, <a href="mailto:bsy@cs.cmu.edu">bsy@cs.cmu.edu</a>
+	 */</span>
+	extra_ref = _MALLOC(nfiles * <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> fileglob *),
+	    M_FILEGLOB, M_WAITOK);
+	<span class="enscript-keyword">if</span> (extra_ref == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bail</span>;
+	<span class="enscript-keyword">for</span> (nunref = 0, fg = fmsghead.lh_first, fpp = extra_ref; fg != 0;
+	    fg = nextfg) {
+		lck_mtx_lock(&amp;fg-&gt;fg_lock);
+
+		nextfg = fg-&gt;f_msglist.le_next;
+		<span class="enscript-comment">/*
+		 * If it's not open, skip it
+		 */</span>
+		<span class="enscript-keyword">if</span> (fg-&gt;fg_count == 0) {
+			lck_mtx_unlock(&amp;fg-&gt;fg_lock);
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-comment">/*
+		 * If all refs are from msgs, and it's not marked accessible
+		 * then it must be referenced from some unreachable cycle
+		 * of (shut-down) FDs, so include it in our
+		 * list of FDs to remove
+		 */</span>
+		<span class="enscript-keyword">if</span> (fg-&gt;fg_count == fg-&gt;fg_msgcount &amp;&amp; !(fg-&gt;fg_flag &amp; FMARK)) {
+			fg-&gt;fg_count++;
+			*fpp++ = fg;
+			nunref++;
+		}
+		lck_mtx_unlock(&amp;fg-&gt;fg_lock);
+	}
+	<span class="enscript-comment">/*
+	 * for each FD on our hit list, do the following two things
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = nunref, fpp = extra_ref; --i &gt;= 0; ++fpp) {
+		<span class="enscript-type">struct</span> fileglob *tfg;
+
+		tfg = *fpp;
+
+		<span class="enscript-keyword">if</span> (FILEGLOB_DTYPE(tfg) == DTYPE_SOCKET &amp;&amp;
+		    tfg-&gt;fg_data != NULL) {
+			so = (<span class="enscript-type">struct</span> socket *)(tfg-&gt;fg_data);
+
+			socket_lock(so, 0);
+			
+			sorflush(so);
+
+			socket_unlock(so, 0);
+		}
+	}
+	<span class="enscript-keyword">for</span> (i = nunref, fpp = extra_ref; --i &gt;= 0; ++fpp)
+		closef_locked((<span class="enscript-type">struct</span> fileproc *)0, *fpp, (proc_t)NULL);
+
+	FREE((caddr_t)extra_ref, M_FILEGLOB);
+<span class="enscript-reference">bail</span>:
+        lck_mtx_lock(uipc_lock);
+	unp_gcing = 0;
+	unp_gcthread = NULL;
+
+	<span class="enscript-keyword">if</span> (unp_gcwait != 0) {
+		unp_gcwait = 0;
+		need_gcwakeup = 1;
+	}
+	lck_mtx_unlock(uipc_lock);
+
+	<span class="enscript-keyword">if</span> (need_gcwakeup != 0)
+		wakeup(&amp;unp_gcing);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">unp_dispose</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-keyword">if</span> (m) {
+		unp_scan(m, unp_discard, NULL);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Returns:	0			Success
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">unp_listen</span>(<span class="enscript-type">struct</span> unpcb *unp, proc_t p)
+{
+	kauth_cred_t safecred = kauth_cred_proc_ref(p);
+	cru2x(safecred, &amp;unp-&gt;unp_peercred);
+	kauth_cred_unref(&amp;safecred);
+	unp-&gt;unp_flags |= UNP_HAVEPCCACHED;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">unp_scan</span>(<span class="enscript-type">struct</span> mbuf *m0, <span class="enscript-type">void</span> (*op)(<span class="enscript-type">struct</span> fileglob *, <span class="enscript-type">void</span> *arg), <span class="enscript-type">void</span> *arg)
+{
+	<span class="enscript-type">struct</span> mbuf *m;
+	<span class="enscript-type">struct</span> fileglob **rp;
+	<span class="enscript-type">struct</span> cmsghdr *cm;
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> qfds;
+
+	<span class="enscript-keyword">while</span> (m0) {
+		<span class="enscript-keyword">for</span> (m = m0; m; m = m-&gt;m_next)
+			<span class="enscript-keyword">if</span> (m-&gt;m_type == MT_CONTROL &amp;&amp;
+			    (size_t)m-&gt;m_len &gt;= <span class="enscript-keyword">sizeof</span> (*cm)) {
+				cm = mtod(m, <span class="enscript-type">struct</span> cmsghdr *);
+				<span class="enscript-keyword">if</span> (cm-&gt;cmsg_level != SOL_SOCKET ||
+				    cm-&gt;cmsg_type != SCM_RIGHTS)
+					<span class="enscript-keyword">continue</span>;
+				qfds = (cm-&gt;cmsg_len - <span class="enscript-keyword">sizeof</span> (*cm)) /
+				    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">int</span>);
+				rp = (<span class="enscript-type">struct</span> fileglob **)(cm + 1);
+				<span class="enscript-keyword">for</span> (i = 0; i &lt; qfds; i++)
+					(*op)(*rp++, arg);
+				<span class="enscript-keyword">break</span>;		<span class="enscript-comment">/* XXX, but saves time */</span>
+			}
+		m0 = m0-&gt;m_act;
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">unp_mark</span>(<span class="enscript-type">struct</span> fileglob *fg, __unused <span class="enscript-type">void</span> *arg)
+{
+	lck_mtx_lock(&amp;fg-&gt;fg_lock);
+
+	<span class="enscript-keyword">if</span> (fg-&gt;fg_flag &amp; FMARK) {
+		lck_mtx_unlock(&amp;fg-&gt;fg_lock);
+		<span class="enscript-keyword">return</span>;
+	}
+	fg-&gt;fg_flag |= (FMARK|FDEFER);
+
+	lck_mtx_unlock(&amp;fg-&gt;fg_lock);
+
+	unp_defer++;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">unp_discard</span>(<span class="enscript-type">struct</span> fileglob *fg, <span class="enscript-type">void</span> *p)
+{
+	<span class="enscript-keyword">if</span> (p == NULL)
+		p = current_proc();		<span class="enscript-comment">/* XXX */</span>
+
+	(<span class="enscript-type">void</span>) OSAddAtomic(1, &amp;unp_disposed);
+	<span class="enscript-keyword">if</span> (fg_removeuipc_mark(fg)) {
+		VERIFY(fg-&gt;fg_lflags &amp; FG_RMMSGQ);
+		fg_removeuipc(fg);
+	}
+	(<span class="enscript-type">void</span>) OSAddAtomic(-1, &amp;unp_rights);
+
+	proc_fdlock(p);
+	(<span class="enscript-type">void</span>) closef_locked((<span class="enscript-type">struct</span> fileproc *)0, fg, p);
+	proc_fdunlock(p);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">unp_lock</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> refcount, <span class="enscript-type">void</span> * lr)
+ {
+        <span class="enscript-type">void</span> * lr_saved;
+        <span class="enscript-keyword">if</span> (lr == 0)
+                lr_saved = (<span class="enscript-type">void</span> *)  __builtin_return_address(0);
+        <span class="enscript-keyword">else</span> lr_saved = lr;
+
+        <span class="enscript-keyword">if</span> (so-&gt;so_pcb) {
+                lck_mtx_lock(&amp;((<span class="enscript-type">struct</span> unpcb *)so-&gt;so_pcb)-&gt;unp_mtx);
+        } <span class="enscript-keyword">else</span>  {
+                panic(<span class="enscript-string">&quot;unp_lock: so=%p NO PCB! lr=%p ref=0x%x\n&quot;</span>, 
+			so, lr_saved, so-&gt;so_usecount);
+        }
+
+        <span class="enscript-keyword">if</span> (so-&gt;so_usecount &lt; 0)
+                panic(<span class="enscript-string">&quot;unp_lock: so=%p so_pcb=%p lr=%p ref=0x%x\n&quot;</span>,
+                so, so-&gt;so_pcb, lr_saved, so-&gt;so_usecount);
+
+        <span class="enscript-keyword">if</span> (refcount)
+                so-&gt;so_usecount++;
+
+        so-&gt;lock_lr[so-&gt;next_lock_lr] = lr_saved;
+        so-&gt;next_lock_lr = (so-&gt;next_lock_lr+1) % SO_LCKDBG_MAX;
+        <span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">unp_unlock</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> refcount, <span class="enscript-type">void</span> * lr)
+{
+        <span class="enscript-type">void</span> * lr_saved;
+        lck_mtx_t * mutex_held = NULL;
+	<span class="enscript-type">struct</span> unpcb *unp = sotounpcb(so);
+
+        <span class="enscript-keyword">if</span> (lr == 0)
+                lr_saved = (<span class="enscript-type">void</span> *) __builtin_return_address(0);
+        <span class="enscript-keyword">else</span> lr_saved = lr;
+
+        <span class="enscript-keyword">if</span> (refcount)
+                so-&gt;so_usecount--;
+
+        <span class="enscript-keyword">if</span> (so-&gt;so_usecount &lt; 0)
+                panic(<span class="enscript-string">&quot;unp_unlock: so=%p usecount=%x\n&quot;</span>, so, so-&gt;so_usecount);
+        <span class="enscript-keyword">if</span> (so-&gt;so_pcb == NULL) {
+                panic(<span class="enscript-string">&quot;unp_unlock: so=%p NO PCB usecount=%x\n&quot;</span>, so, so-&gt;so_usecount);
+        } <span class="enscript-keyword">else</span> {
+                mutex_held = &amp;((<span class="enscript-type">struct</span> unpcb *)so-&gt;so_pcb)-&gt;unp_mtx;
+        }
+        lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+        so-&gt;unlock_lr[so-&gt;next_unlock_lr] = lr_saved;
+        so-&gt;next_unlock_lr = (so-&gt;next_unlock_lr+1) % SO_LCKDBG_MAX;
+
+        <span class="enscript-keyword">if</span> (so-&gt;so_usecount == 0 &amp;&amp; (so-&gt;so_flags &amp; SOF_PCBCLEARING)) {
+		sofreelastref(so, 1);
+
+		<span class="enscript-keyword">if</span> (unp-&gt;unp_addr)
+			FREE(unp-&gt;unp_addr, M_SONAME);
+		
+		lck_mtx_unlock(mutex_held);
+
+		lck_mtx_destroy(&amp;unp-&gt;unp_mtx, unp_mtx_grp);
+		zfree(unp_zone, unp);
+
+		unp_gc();
+	} <span class="enscript-keyword">else</span> {
+		lck_mtx_unlock(mutex_held);
+	}
+
+        <span class="enscript-keyword">return</span> (0);
+}
+
+lck_mtx_t *
+<span class="enscript-function-name">unp_getlock</span>(<span class="enscript-type">struct</span> socket *so, __unused <span class="enscript-type">int</span> locktype)
+{
+        <span class="enscript-type">struct</span> unpcb *unp = (<span class="enscript-type">struct</span> unpcb *)so-&gt;so_pcb;
+
+
+        <span class="enscript-keyword">if</span> (so-&gt;so_pcb)  {
+                <span class="enscript-keyword">if</span> (so-&gt;so_usecount &lt; 0)
+                        panic(<span class="enscript-string">&quot;unp_getlock: so=%p usecount=%x\n&quot;</span>, so, so-&gt;so_usecount);
+                <span class="enscript-keyword">return</span>(&amp;unp-&gt;unp_mtx);
+        } <span class="enscript-keyword">else</span> {
+                panic(<span class="enscript-string">&quot;unp_getlock: so=%p NULL so_pcb\n&quot;</span>, so);
+                <span class="enscript-keyword">return</span> (so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx);
+        }
+}
+
+</pre>
+<hr />
+</body></html>

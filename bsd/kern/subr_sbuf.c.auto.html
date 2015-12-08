@@ -1,0 +1,609 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>subr_sbuf.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">subr_sbuf.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*-
+ * Copyright (c) 2000 Poul-Henning Kamp and Dag-Erling Co•dan Sm¿rgrav
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer
+ *    in this position and unchanged.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+<span class="enscript-comment">/* #include &lt;ctype.h&gt; */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdarg.h&gt;</span>
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* KERNEL */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ctype.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdarg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KERNEL */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sbuf.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+<span class="enscript-comment">/* MALLOC_DEFINE(M_SBUF, &quot;sbuf&quot;, &quot;string buffers&quot;); */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SBMALLOC</span>(size)		_MALLOC(size, M_SBUF, M_WAITOK)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SBFREE</span>(buf)		FREE(buf, M_SBUF)
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* KERNEL */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">KASSERT</span>(e, m)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SBMALLOC</span>(size)		malloc(size)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SBFREE</span>(buf)		free(buf)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">min</span>(x,y)		MIN(x,y)
+	
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KERNEL */</span>
+
+<span class="enscript-comment">/*
+ * Predicates
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SBUF_ISDYNAMIC</span>(s)	((s)-&gt;s_flags &amp; SBUF_DYNAMIC)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SBUF_ISDYNSTRUCT</span>(s)	((s)-&gt;s_flags &amp; SBUF_DYNSTRUCT)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SBUF_ISFINISHED</span>(s)	((s)-&gt;s_flags &amp; SBUF_FINISHED)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SBUF_HASOVERFLOWED</span>(s)	((s)-&gt;s_flags &amp; SBUF_OVERFLOWED)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SBUF_HASROOM</span>(s)		((s)-&gt;s_len &lt; (s)-&gt;s_size - 1)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SBUF_FREESPACE</span>(s)	((s)-&gt;s_size - (s)-&gt;s_len - 1)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SBUF_CANEXTEND</span>(s)	((s)-&gt;s_flags &amp; SBUF_AUTOEXTEND)
+
+<span class="enscript-comment">/*
+ * Set / clear flags
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SBUF_SETFLAG</span>(s, f)	do { (s)-&gt;s_flags |= (f); } while (0)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SBUF_CLEARFLAG</span>(s, f)	do { (s)-&gt;s_flags &amp;= ~(f); } while (0)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SBUF_MINEXTENDSIZE</span>	16		<span class="enscript-comment">/* Should be power of 2. */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SBUF_MAXEXTENDSIZE</span>	PAGE_SIZE
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SBUF_MAXEXTENDINCR</span>	PAGE_SIZE
+
+<span class="enscript-comment">/*
+ * Debugging support
+ */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">KERNEL</span>) &amp;&amp; <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">INVARIANTS</span>)
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">_assert_sbuf_integrity</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *fun, <span class="enscript-type">struct</span> sbuf *s)
+{
+	KASSERT(s != NULL,
+	    (<span class="enscript-string">&quot;%s called with a NULL sbuf pointer&quot;</span>, fun));
+	KASSERT(s-&gt;s_buf != NULL,
+	    (<span class="enscript-string">&quot;%s called with uninitialized or corrupt sbuf&quot;</span>, fun));
+	KASSERT(s-&gt;s_len &lt; s-&gt;s_size,
+	    (<span class="enscript-string">&quot;wrote past end of sbuf (%d &gt;= %d)&quot;</span>, s-&gt;s_len, s-&gt;s_size));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">_assert_sbuf_state</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *fun, <span class="enscript-type">struct</span> sbuf *s, <span class="enscript-type">int</span> state)
+{
+	KASSERT((s-&gt;s_flags &amp; SBUF_FINISHED) == state,
+	    (<span class="enscript-string">&quot;%s called with %sfinished or corrupt sbuf&quot;</span>, fun,
+	    (state ? <span class="enscript-string">&quot;un&quot;</span> : <span class="enscript-string">&quot;&quot;</span>)));
+}
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">assert_sbuf_integrity</span>(s) _assert_sbuf_integrity(__func__, (s))
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">assert_sbuf_state</span>(s, i)	 _assert_sbuf_state(__func__, (s), (i))
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* KERNEL &amp;&amp; INVARIANTS */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">assert_sbuf_integrity</span>(s) do { } while (0)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">assert_sbuf_state</span>(s, i)	 do { } while (0)
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KERNEL &amp;&amp; INVARIANTS */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_extendsize</span>(<span class="enscript-type">int</span> size)
+{
+	<span class="enscript-type">int</span> newsize;
+
+	newsize = SBUF_MINEXTENDSIZE;
+	<span class="enscript-keyword">while</span> (newsize &lt; size) {
+		<span class="enscript-keyword">if</span> (newsize &lt; (<span class="enscript-type">int</span>)SBUF_MAXEXTENDSIZE)
+			newsize *= 2;
+		<span class="enscript-keyword">else</span>
+			newsize += SBUF_MAXEXTENDINCR;
+	}
+
+	<span class="enscript-keyword">return</span> (newsize);
+}
+
+
+<span class="enscript-comment">/*
+ * Extend an sbuf.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_extend</span>(<span class="enscript-type">struct</span> sbuf *s, <span class="enscript-type">int</span> addlen)
+{
+	<span class="enscript-type">char</span> *newbuf;
+	<span class="enscript-type">int</span> newsize;
+
+	<span class="enscript-keyword">if</span> (!SBUF_CANEXTEND(s))
+		<span class="enscript-keyword">return</span> (-1);
+
+	newsize = sbuf_extendsize(s-&gt;s_size + addlen);
+	newbuf = (<span class="enscript-type">char</span> *)SBMALLOC(newsize);
+	<span class="enscript-keyword">if</span> (newbuf == NULL)
+		<span class="enscript-keyword">return</span> (-1);
+	bcopy(s-&gt;s_buf, newbuf, s-&gt;s_size);
+	<span class="enscript-keyword">if</span> (SBUF_ISDYNAMIC(s))
+		SBFREE(s-&gt;s_buf);
+	<span class="enscript-keyword">else</span>
+		SBUF_SETFLAG(s, SBUF_DYNAMIC);
+	s-&gt;s_buf = newbuf;
+	s-&gt;s_size = newsize;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Initialize an sbuf.
+ * If buf is non-NULL, it points to a static or already-allocated string
+ * big enough to hold at least length characters.
+ */</span>
+<span class="enscript-type">struct</span> sbuf *
+<span class="enscript-function-name">sbuf_new</span>(<span class="enscript-type">struct</span> sbuf *s, <span class="enscript-type">char</span> *buf, <span class="enscript-type">int</span> length, <span class="enscript-type">int</span> flags)
+{
+	KASSERT(length &gt;= 0,
+	    (<span class="enscript-string">&quot;attempt to create an sbuf of negative length (%d)&quot;</span>, length));
+	KASSERT((flags &amp; ~SBUF_USRFLAGMSK) == 0,
+	    (<span class="enscript-string">&quot;%s called with invalid flags&quot;</span>, __func__));
+
+	flags &amp;= SBUF_USRFLAGMSK;
+	<span class="enscript-keyword">if</span> (s == NULL) {
+		s = (<span class="enscript-type">struct</span> sbuf *)SBMALLOC(<span class="enscript-keyword">sizeof</span> *s);
+		<span class="enscript-keyword">if</span> (s == NULL)
+			<span class="enscript-keyword">return</span> (NULL);
+		bzero(s, <span class="enscript-keyword">sizeof</span> *s);
+		s-&gt;s_flags = flags;
+		SBUF_SETFLAG(s, SBUF_DYNSTRUCT);
+	} <span class="enscript-keyword">else</span> {
+		bzero(s, <span class="enscript-keyword">sizeof</span> *s);
+		s-&gt;s_flags = flags;
+	}
+	s-&gt;s_size = length;
+	<span class="enscript-keyword">if</span> (buf) {
+		s-&gt;s_buf = buf;
+		<span class="enscript-keyword">return</span> (s);
+	}
+	<span class="enscript-keyword">if</span> (flags &amp; SBUF_AUTOEXTEND)
+		s-&gt;s_size = sbuf_extendsize(s-&gt;s_size);
+	s-&gt;s_buf = (<span class="enscript-type">char</span> *)SBMALLOC(s-&gt;s_size);
+	<span class="enscript-keyword">if</span> (s-&gt;s_buf == NULL) {
+		<span class="enscript-keyword">if</span> (SBUF_ISDYNSTRUCT(s))
+			SBFREE(s);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	SBUF_SETFLAG(s, SBUF_DYNAMIC);
+	<span class="enscript-keyword">return</span> (s);
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+<span class="enscript-comment">/*
+ * Create an sbuf with uio data
+ */</span>
+<span class="enscript-type">struct</span> sbuf *
+<span class="enscript-function-name">sbuf_uionew</span>(<span class="enscript-type">struct</span> sbuf *s, <span class="enscript-type">struct</span> uio *uio, <span class="enscript-type">int</span> *error)
+{
+	KASSERT(uio != NULL,
+	    (<span class="enscript-string">&quot;%s called with NULL uio pointer&quot;</span>, __func__));
+	KASSERT(error != NULL,
+	    (<span class="enscript-string">&quot;%s called with NULL error pointer&quot;</span>, __func__));
+
+	s = sbuf_new(s, NULL, uio_resid(uio) + 1, 0);
+	<span class="enscript-keyword">if</span> (s == NULL) {
+		*error = ENOMEM;
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	*error = uiomove(s-&gt;s_buf, uio_resid(uio), uio);
+	<span class="enscript-keyword">if</span> (*error != 0) {
+		sbuf_delete(s);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	s-&gt;s_len = s-&gt;s_size - 1;
+	*error = 0;
+	<span class="enscript-keyword">return</span> (s);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Clear an sbuf and reset its position.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sbuf_clear</span>(<span class="enscript-type">struct</span> sbuf *s)
+{
+	assert_sbuf_integrity(s);
+	<span class="enscript-comment">/* don't care if it's finished or not */</span>
+
+	SBUF_CLEARFLAG(s, SBUF_FINISHED);
+	SBUF_CLEARFLAG(s, SBUF_OVERFLOWED);
+	s-&gt;s_len = 0;
+}
+
+<span class="enscript-comment">/*
+ * Set the sbuf's end position to an arbitrary value.
+ * Effectively truncates the sbuf at the new position.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_setpos</span>(<span class="enscript-type">struct</span> sbuf *s, <span class="enscript-type">int</span> pos)
+{
+	assert_sbuf_integrity(s);
+	assert_sbuf_state(s, 0);
+
+	KASSERT(pos &gt;= 0,
+	    (<span class="enscript-string">&quot;attempt to seek to a negative position (%d)&quot;</span>, pos));
+	KASSERT(pos &lt; s-&gt;s_size,
+	    (<span class="enscript-string">&quot;attempt to seek past end of sbuf (%d &gt;= %d)&quot;</span>, pos, s-&gt;s_size));
+
+	<span class="enscript-keyword">if</span> (pos &lt; 0 || pos &gt; s-&gt;s_len)
+		<span class="enscript-keyword">return</span> (-1);
+	s-&gt;s_len = pos;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Append a byte string to an sbuf.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_bcat</span>(<span class="enscript-type">struct</span> sbuf *s, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *buf, size_t len)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *str = buf;
+
+	assert_sbuf_integrity(s);
+	assert_sbuf_state(s, 0);
+
+	<span class="enscript-keyword">if</span> (SBUF_HASOVERFLOWED(s))
+		<span class="enscript-keyword">return</span> (-1);
+
+	<span class="enscript-keyword">for</span> (; len; len--) {
+		<span class="enscript-keyword">if</span> (!SBUF_HASROOM(s) &amp;&amp; sbuf_extend(s, len) &lt; 0)
+			<span class="enscript-keyword">break</span>;
+		s-&gt;s_buf[s-&gt;s_len++] = *str++;
+	}
+	<span class="enscript-keyword">if</span> (len) {
+		SBUF_SETFLAG(s, SBUF_OVERFLOWED);
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+<span class="enscript-comment">/*
+ * Copy a byte string from userland into an sbuf.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_bcopyin</span>(<span class="enscript-type">struct</span> sbuf *s, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *uaddr, size_t len)
+{
+	assert_sbuf_integrity(s);
+	assert_sbuf_state(s, 0);
+
+	<span class="enscript-keyword">if</span> (SBUF_HASOVERFLOWED(s))
+		<span class="enscript-keyword">return</span> (-1);
+
+	<span class="enscript-keyword">if</span> (len == 0)
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">if</span> (len &gt; (<span class="enscript-type">unsigned</span>) SBUF_FREESPACE(s)) {
+		sbuf_extend(s, len - SBUF_FREESPACE(s));
+		len = min(len, SBUF_FREESPACE(s));
+	}
+	<span class="enscript-keyword">if</span> (copyin(CAST_USER_ADDR_T(uaddr), s-&gt;s_buf + s-&gt;s_len, len) != 0)
+		<span class="enscript-keyword">return</span> (-1);
+	s-&gt;s_len += len;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Copy a byte string into an sbuf.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_bcpy</span>(<span class="enscript-type">struct</span> sbuf *s, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *buf, size_t len)
+{
+	assert_sbuf_integrity(s);
+	assert_sbuf_state(s, 0);
+
+	sbuf_clear(s);
+	<span class="enscript-keyword">return</span> (sbuf_bcat(s, buf, len));
+}
+
+<span class="enscript-comment">/*
+ * Append a string to an sbuf.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_cat</span>(<span class="enscript-type">struct</span> sbuf *s, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *str)
+{
+	assert_sbuf_integrity(s);
+	assert_sbuf_state(s, 0);
+
+	<span class="enscript-keyword">if</span> (SBUF_HASOVERFLOWED(s))
+		<span class="enscript-keyword">return</span> (-1);
+
+	<span class="enscript-keyword">while</span> (*str) {
+		<span class="enscript-keyword">if</span> (!SBUF_HASROOM(s) &amp;&amp; sbuf_extend(s, strlen(str)) &lt; 0)
+			<span class="enscript-keyword">break</span>;
+		s-&gt;s_buf[s-&gt;s_len++] = *str++;
+	}
+	<span class="enscript-keyword">if</span> (*str) {
+		SBUF_SETFLAG(s, SBUF_OVERFLOWED);
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+<span class="enscript-comment">/*
+ * Append a string from userland to an sbuf.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_copyin</span>(<span class="enscript-type">struct</span> sbuf *s, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *uaddr, size_t len)
+{
+	size_t done;
+
+	assert_sbuf_integrity(s);
+	assert_sbuf_state(s, 0);
+
+	<span class="enscript-keyword">if</span> (SBUF_HASOVERFLOWED(s))
+		<span class="enscript-keyword">return</span> (-1);
+
+	<span class="enscript-keyword">if</span> (len == 0)
+		len = SBUF_FREESPACE(s);	<span class="enscript-comment">/* XXX return 0? */</span>
+	<span class="enscript-keyword">if</span> (len &gt; (<span class="enscript-type">unsigned</span>) SBUF_FREESPACE(s)) {
+		sbuf_extend(s, len);
+		len = min(len, SBUF_FREESPACE(s));
+	}
+	<span class="enscript-keyword">switch</span> (copyinstr(CAST_USER_ADDR_T(uaddr), s-&gt;s_buf + s-&gt;s_len, len + 1, &amp;done)) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ENAMETOOLONG</span>:
+		SBUF_SETFLAG(s, SBUF_OVERFLOWED);
+		<span class="enscript-comment">/* fall through */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+		s-&gt;s_len += done - 1;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (-1);	<span class="enscript-comment">/* XXX */</span>
+	}
+
+	<span class="enscript-keyword">return</span> (done);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Copy a string into an sbuf.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_cpy</span>(<span class="enscript-type">struct</span> sbuf *s, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *str)
+{
+	assert_sbuf_integrity(s);
+	assert_sbuf_state(s, 0);
+
+	sbuf_clear(s);
+	<span class="enscript-keyword">return</span> (sbuf_cat(s, str));
+}
+
+<span class="enscript-comment">/*
+ * Format the given argument list and append the resulting string to an sbuf.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_vprintf</span>(<span class="enscript-type">struct</span> sbuf *s, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *fmt, va_list ap)
+{
+	__builtin_va_list ap_copy; <span class="enscript-comment">/* XXX tduffy - blame on him */</span>
+	<span class="enscript-type">int</span> len;
+
+	assert_sbuf_integrity(s);
+	assert_sbuf_state(s, 0);
+
+	KASSERT(fmt != NULL,
+	    (<span class="enscript-string">&quot;%s called with a NULL format string&quot;</span>, __func__));
+
+	<span class="enscript-keyword">if</span> (SBUF_HASOVERFLOWED(s))
+		<span class="enscript-keyword">return</span> (-1);
+
+	<span class="enscript-keyword">do</span> {
+		va_copy(ap_copy, ap);
+		len = vsnprintf(&amp;s-&gt;s_buf[s-&gt;s_len], SBUF_FREESPACE(s) + 1,
+		    fmt, ap_copy);
+		va_end(ap_copy);
+	} <span class="enscript-keyword">while</span> (len &gt; SBUF_FREESPACE(s) &amp;&amp;
+	    sbuf_extend(s, len - SBUF_FREESPACE(s)) == 0);
+
+	<span class="enscript-comment">/*
+	 * s-&gt;s_len is the length of the string, without the terminating nul.
+	 * When updating s-&gt;s_len, we must subtract 1 from the length that
+	 * we passed into vsnprintf() because that length includes the
+	 * terminating nul.
+	 *
+	 * vsnprintf() returns the amount that would have been copied,
+	 * given sufficient space, hence the min() calculation below.
+	 */</span>
+	s-&gt;s_len += min(len, SBUF_FREESPACE(s));
+	<span class="enscript-keyword">if</span> (!SBUF_HASROOM(s) &amp;&amp; !SBUF_CANEXTEND(s))
+		SBUF_SETFLAG(s, SBUF_OVERFLOWED);
+
+	KASSERT(s-&gt;s_len &lt; s-&gt;s_size,
+	    (<span class="enscript-string">&quot;wrote past end of sbuf (%d &gt;= %d)&quot;</span>, s-&gt;s_len, s-&gt;s_size));
+
+	<span class="enscript-keyword">if</span> (SBUF_HASOVERFLOWED(s))
+		<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Format the given arguments and append the resulting string to an sbuf.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_printf</span>(<span class="enscript-type">struct</span> sbuf *s, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *fmt, ...)
+{
+	va_list ap;
+	<span class="enscript-type">int</span> result;
+
+	va_start(ap, fmt);
+	result = sbuf_vprintf(s, fmt, ap);
+	va_end(ap);
+	<span class="enscript-keyword">return</span>(result);
+}
+
+<span class="enscript-comment">/*
+ * Append a character to an sbuf.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_putc</span>(<span class="enscript-type">struct</span> sbuf *s, <span class="enscript-type">int</span> c)
+{
+	assert_sbuf_integrity(s);
+	assert_sbuf_state(s, 0);
+
+	<span class="enscript-keyword">if</span> (SBUF_HASOVERFLOWED(s))
+		<span class="enscript-keyword">return</span> (-1);
+
+	<span class="enscript-keyword">if</span> (!SBUF_HASROOM(s) &amp;&amp; sbuf_extend(s, 1) &lt; 0) {
+		SBUF_SETFLAG(s, SBUF_OVERFLOWED);
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	<span class="enscript-keyword">if</span> (c != <span class="enscript-string">'\0'</span>)
+	    s-&gt;s_buf[s-&gt;s_len++] = c;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">isspace</span>(<span class="enscript-type">char</span> ch)
+{
+  <span class="enscript-keyword">return</span> (ch == <span class="enscript-string">' '</span> || ch == <span class="enscript-string">'\n'</span> || ch == <span class="enscript-string">'\t'</span>);
+}
+
+<span class="enscript-comment">/*
+ * Trim whitespace characters from end of an sbuf.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_trim</span>(<span class="enscript-type">struct</span> sbuf *s)
+{
+	assert_sbuf_integrity(s);
+	assert_sbuf_state(s, 0);
+
+	<span class="enscript-keyword">if</span> (SBUF_HASOVERFLOWED(s))
+		<span class="enscript-keyword">return</span> (-1);
+
+	<span class="enscript-keyword">while</span> (s-&gt;s_len &amp;&amp; isspace(s-&gt;s_buf[s-&gt;s_len-1]))
+		--s-&gt;s_len;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Check if an sbuf overflowed
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_overflowed</span>(<span class="enscript-type">struct</span> sbuf *s)
+{
+    <span class="enscript-keyword">return</span> SBUF_HASOVERFLOWED(s);
+}
+
+<span class="enscript-comment">/*
+ * Finish off an sbuf.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sbuf_finish</span>(<span class="enscript-type">struct</span> sbuf *s)
+{
+	assert_sbuf_integrity(s);
+	assert_sbuf_state(s, 0);
+
+	s-&gt;s_buf[s-&gt;s_len] = <span class="enscript-string">'\0'</span>;
+	SBUF_CLEARFLAG(s, SBUF_OVERFLOWED);
+	SBUF_SETFLAG(s, SBUF_FINISHED);
+}
+
+<span class="enscript-comment">/*
+ * Return a pointer to the sbuf data.
+ */</span>
+<span class="enscript-type">char</span> *
+<span class="enscript-function-name">sbuf_data</span>(<span class="enscript-type">struct</span> sbuf *s)
+{
+	assert_sbuf_integrity(s);
+	assert_sbuf_state(s, SBUF_FINISHED);
+
+	<span class="enscript-keyword">return</span> s-&gt;s_buf;
+}
+
+<span class="enscript-comment">/*
+ * Return the length of the sbuf data.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_len</span>(<span class="enscript-type">struct</span> sbuf *s)
+{
+	assert_sbuf_integrity(s);
+	<span class="enscript-comment">/* don't care if it's finished or not */</span>
+
+	<span class="enscript-keyword">if</span> (SBUF_HASOVERFLOWED(s))
+		<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">return</span> s-&gt;s_len;
+}
+
+<span class="enscript-comment">/*
+ * Clear an sbuf, free its buffer if necessary.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">sbuf_delete</span>(<span class="enscript-type">struct</span> sbuf *s)
+{
+	<span class="enscript-type">int</span> isdyn;
+
+	assert_sbuf_integrity(s);
+	<span class="enscript-comment">/* don't care if it's finished or not */</span>
+
+	<span class="enscript-keyword">if</span> (SBUF_ISDYNAMIC(s))
+		SBFREE(s-&gt;s_buf);
+	isdyn = SBUF_ISDYNSTRUCT(s);
+	bzero(s, <span class="enscript-keyword">sizeof</span> *s);
+	<span class="enscript-keyword">if</span> (isdyn)
+		SBFREE(s);
+}
+
+<span class="enscript-comment">/*
+ * Check if an sbuf has been finished.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sbuf_done</span>(<span class="enscript-type">struct</span> sbuf *s)
+{
+
+	<span class="enscript-keyword">return</span>(SBUF_ISFINISHED(s));
+}
+</pre>
+<hr />
+</body></html>

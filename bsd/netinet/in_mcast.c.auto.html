@@ -1,0 +1,3705 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>in_mcast.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">in_mcast.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2010-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*-
+ * Copyright (c) 2007-2009 Bruce Simpson.
+ * Copyright (c) 2005 Robert N. M. Watson.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+<span class="enscript-comment">/*
+ * IPv4 multicast socket, group, and socket option processing module.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/tree.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_dl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/igmp_var.h&gt;</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__SOCKUNION_DECLARED</span>
+<span class="enscript-type">union</span> sockunion {
+	<span class="enscript-type">struct</span> sockaddr_storage	ss;
+	<span class="enscript-type">struct</span> sockaddr		sa;
+	<span class="enscript-type">struct</span> sockaddr_dl	sdl;
+	<span class="enscript-type">struct</span> sockaddr_in	sin;
+};
+<span class="enscript-type">typedef</span> <span class="enscript-type">union</span> sockunion sockunion_t;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">__SOCKUNION_DECLARED</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __SOCKUNION_DECLARED */</span>
+
+<span class="enscript-comment">/*
+ * Functions with non-static linkage defined in this file should be
+ * declared in in_var.h:
+ *  imo_multi_filter()
+ *  in_addmulti()
+ *  in_delmulti()
+ *  in_joingroup()
+ *  in_leavegroup()
+ * and ip_var.h:
+ *  inp_freemoptions()
+ *  inp_getmoptions()
+ *  inp_setmoptions()
+ *
+ * XXX: Both carp and pf need to use the legacy (*,G) KPIs in_addmulti()
+ * and in_delmulti().
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	imf_commit(<span class="enscript-type">struct</span> in_mfilter *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	imf_get_source(<span class="enscript-type">struct</span> in_mfilter *imf,
+		    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_in *psin,
+		    <span class="enscript-type">struct</span> in_msource **);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> in_msource *
+		imf_graft(<span class="enscript-type">struct</span> in_mfilter *, <span class="enscript-type">const</span> uint8_t,
+		    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_in *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	imf_prune(<span class="enscript-type">struct</span> in_mfilter *, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_in *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	imf_rollback(<span class="enscript-type">struct</span> in_mfilter *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	imf_reap(<span class="enscript-type">struct</span> in_mfilter *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	imo_grow(<span class="enscript-type">struct</span> ip_moptions *, size_t);
+<span class="enscript-type">static</span> size_t	imo_match_group(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ip_moptions *,
+		    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> in_msource *
+		imo_match_source(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ip_moptions *, <span class="enscript-type">const</span> size_t,
+		    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	ims_merge(<span class="enscript-type">struct</span> ip_msource *ims,
+		    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_msource *lims, <span class="enscript-type">const</span> <span class="enscript-type">int</span> rollback);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	in_getmulti(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_addr *,
+		    <span class="enscript-type">struct</span> in_multi **);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	in_joingroup(<span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_addr *,
+		    <span class="enscript-type">struct</span> in_mfilter *, <span class="enscript-type">struct</span> in_multi **);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	inm_get_source(<span class="enscript-type">struct</span> in_multi *inm, <span class="enscript-type">const</span> in_addr_t haddr,
+		    <span class="enscript-type">const</span> <span class="enscript-type">int</span> noalloc, <span class="enscript-type">struct</span> ip_msource **pims);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	inm_is_ifp_detached(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_multi *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	inm_merge(<span class="enscript-type">struct</span> in_multi *, <span class="enscript-comment">/*const*/</span> <span class="enscript-type">struct</span> in_mfilter *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	inm_reap(<span class="enscript-type">struct</span> in_multi *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ip_moptions *
+		inp_findmoptions(<span class="enscript-type">struct</span> inpcb *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	inp_get_source_filters(<span class="enscript-type">struct</span> inpcb *, <span class="enscript-type">struct</span> sockopt *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ifnet *
+		inp_lookup_mcast_ifp(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> inpcb *,
+		    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_in *, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_addr);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	inp_block_unblock_source(<span class="enscript-type">struct</span> inpcb *, <span class="enscript-type">struct</span> sockopt *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	inp_set_multicast_if(<span class="enscript-type">struct</span> inpcb *, <span class="enscript-type">struct</span> sockopt *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	inp_set_source_filters(<span class="enscript-type">struct</span> inpcb *, <span class="enscript-type">struct</span> sockopt *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	sysctl_ip_mcast_filters SYSCTL_HANDLER_ARGS;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ifnet * <span class="enscript-function-name">ip_multicast_if</span>(<span class="enscript-type">struct</span> in_addr *, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *);
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">int</span> <span class="enscript-function-name">ip_msource_cmp</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ip_msource *,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ip_msource *);
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_inet_ip, OID_AUTO, mcast, CTLFLAG_RW | CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;IPv4 multicast&quot;</span>);
+
+<span class="enscript-type">static</span> u_long in_mcast_maxgrpsrc = IP_MAX_GROUP_SRC_FILTER;
+<span class="enscript-function-name">SYSCTL_LONG</span>(_net_inet_ip_mcast, OID_AUTO, maxgrpsrc,
+    CTLFLAG_RW | CTLFLAG_LOCKED, &amp;in_mcast_maxgrpsrc, <span class="enscript-string">&quot;Max source filters per group&quot;</span>);
+
+<span class="enscript-type">static</span> u_long in_mcast_maxsocksrc = IP_MAX_SOCK_SRC_FILTER;
+<span class="enscript-function-name">SYSCTL_LONG</span>(_net_inet_ip_mcast, OID_AUTO, maxsocksrc,
+    CTLFLAG_RW | CTLFLAG_LOCKED, &amp;in_mcast_maxsocksrc, 
+    <span class="enscript-string">&quot;Max source filters per socket&quot;</span>);
+
+<span class="enscript-type">int</span> in_mcast_loop = IP_DEFAULT_MULTICAST_LOOP;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_ip_mcast, OID_AUTO, loop, CTLFLAG_RW | CTLFLAG_LOCKED, 
+    &amp;in_mcast_loop, 0, <span class="enscript-string">&quot;Loopback multicast datagrams by default&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_inet_ip_mcast, OID_AUTO, filters,
+    CTLFLAG_RD | CTLFLAG_LOCKED, sysctl_ip_mcast_filters,
+    <span class="enscript-string">&quot;Per-interface stack-wide source filters&quot;</span>);
+
+<span class="enscript-function-name">RB_GENERATE_PREV</span>(ip_msource_tree, ip_msource, ims_link, ip_msource_cmp);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">INM_TRACE_HIST_SIZE</span>	32	<span class="enscript-comment">/* size of trace history */</span>
+
+<span class="enscript-comment">/* For gdb */</span>
+__private_extern__ <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> inm_trace_hist_size = INM_TRACE_HIST_SIZE;
+
+<span class="enscript-type">struct</span> in_multi_dbg {
+	<span class="enscript-type">struct</span> in_multi		inm;			<span class="enscript-comment">/* in_multi */</span>
+	u_int16_t		inm_refhold_cnt;	<span class="enscript-comment">/* # of ref */</span>
+	u_int16_t		inm_refrele_cnt;	<span class="enscript-comment">/* # of rele */</span>
+	<span class="enscript-comment">/*
+	 * Circular lists of inm_addref and inm_remref callers.
+	 */</span>
+	ctrace_t		inm_refhold[INM_TRACE_HIST_SIZE];
+	ctrace_t		inm_refrele[INM_TRACE_HIST_SIZE];
+	<span class="enscript-comment">/*
+	 * Trash list linkage
+	 */</span>
+	TAILQ_ENTRY(in_multi_dbg) inm_trash_link;
+};
+
+<span class="enscript-comment">/* List of trash in_multi entries protected by inm_trash_lock */</span>
+<span class="enscript-type">static</span> <span class="enscript-function-name">TAILQ_HEAD</span>(, in_multi_dbg) inm_trash_head;
+<span class="enscript-type">static</span> <span class="enscript-function-name">decl_lck_mtx_data</span>(, inm_trash_lock);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">INM_ZONE_MAX</span>		64		<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">INM_ZONE_NAME</span>		<span class="enscript-string">&quot;in_multi&quot;</span>	<span class="enscript-comment">/* zone name */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> inm_debug = 1;		<span class="enscript-comment">/* debugging (enabled) */</span>
+#<span class="enscript-reference">else</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> inm_debug;			<span class="enscript-comment">/* debugging (disabled) */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !DEBUG */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> inm_size;			<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *inm_zone;			<span class="enscript-comment">/* zone for in_multi */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">IPMS_ZONE_MAX</span>		64		<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">IPMS_ZONE_NAME</span>		<span class="enscript-string">&quot;ip_msource&quot;</span>	<span class="enscript-comment">/* zone name */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> ipms_size;			<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *ipms_zone;			<span class="enscript-comment">/* zone for ip_msource */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">INMS_ZONE_MAX</span>		64		<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">INMS_ZONE_NAME</span>		<span class="enscript-string">&quot;in_msource&quot;</span>	<span class="enscript-comment">/* zone name */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> inms_size;			<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *inms_zone;			<span class="enscript-comment">/* zone for in_msource */</span>
+
+<span class="enscript-comment">/* Lock group and attribute for in_multihead_lock lock */</span>
+<span class="enscript-type">static</span> lck_attr_t	*in_multihead_lock_attr;
+<span class="enscript-type">static</span> lck_grp_t	*in_multihead_lock_grp;
+<span class="enscript-type">static</span> lck_grp_attr_t	*in_multihead_lock_grp_attr;
+
+<span class="enscript-type">static</span> <span class="enscript-function-name">decl_lck_rw_data</span>(, in_multihead_lock);
+<span class="enscript-type">struct</span> in_multihead in_multihead;
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> in_multi *<span class="enscript-function-name">in_multi_alloc</span>(<span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">in_multi_free</span>(<span class="enscript-type">struct</span> in_multi *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">in_multi_attach</span>(<span class="enscript-type">struct</span> in_multi *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">inm_trace</span>(<span class="enscript-type">struct</span> in_multi *, <span class="enscript-type">int</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ip_msource *<span class="enscript-function-name">ipms_alloc</span>(<span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ipms_free</span>(<span class="enscript-type">struct</span> ip_msource *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> in_msource *<span class="enscript-function-name">inms_alloc</span>(<span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">inms_free</span>(<span class="enscript-type">struct</span> in_msource *);
+
+<span class="enscript-type">static</span> __inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">ip_msource_cmp</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ip_msource *a, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ip_msource *b)
+{
+
+	<span class="enscript-keyword">if</span> (a-&gt;ims_haddr &lt; b-&gt;ims_haddr)
+		<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">if</span> (a-&gt;ims_haddr == b-&gt;ims_haddr)
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/*
+ * Inline function which wraps assertions for a valid ifp.
+ */</span>
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">inm_is_ifp_detached</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_multi *inm)
+{
+	VERIFY(inm-&gt;inm_ifma != NULL);
+	VERIFY(inm-&gt;inm_ifp == inm-&gt;inm_ifma-&gt;ifma_ifp);
+
+	<span class="enscript-keyword">return</span> (!ifnet_is_attached(inm-&gt;inm_ifp, 0));
+}
+
+<span class="enscript-comment">/*
+ * Initialize an in_mfilter structure to a known state at t0, t1
+ * with an empty source filter list.
+ */</span>
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">imf_init</span>(<span class="enscript-type">struct</span> in_mfilter *imf, <span class="enscript-type">const</span> <span class="enscript-type">int</span> st0, <span class="enscript-type">const</span> <span class="enscript-type">int</span> st1)
+{
+	memset(imf, 0, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> in_mfilter));
+	RB_INIT(&amp;imf-&gt;imf_sources);
+	imf-&gt;imf_st[0] = st0;
+	imf-&gt;imf_st[1] = st1;
+}
+
+<span class="enscript-comment">/*
+ * Resize the ip_moptions vector to the next power-of-two minus 1.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">imo_grow</span>(<span class="enscript-type">struct</span> ip_moptions *imo, size_t newmax)
+{
+	<span class="enscript-type">struct</span> in_multi		**nmships;
+	<span class="enscript-type">struct</span> in_multi		**omships;
+	<span class="enscript-type">struct</span> in_mfilter	 *nmfilters;
+	<span class="enscript-type">struct</span> in_mfilter	 *omfilters;
+	size_t			  idx;
+	size_t			  oldmax;
+
+	IMO_LOCK_ASSERT_HELD(imo);
+
+	nmships = NULL;
+	nmfilters = NULL;
+	omships = imo-&gt;imo_membership;
+	omfilters = imo-&gt;imo_mfilters;
+	oldmax = imo-&gt;imo_max_memberships;
+	<span class="enscript-keyword">if</span> (newmax == 0)
+		newmax = ((oldmax + 1) * 2) - 1;
+
+	<span class="enscript-keyword">if</span> (newmax &gt; IP_MAX_MEMBERSHIPS)
+		<span class="enscript-keyword">return</span> (ETOOMANYREFS);
+
+	<span class="enscript-keyword">if</span> ((nmships = (<span class="enscript-type">struct</span> in_multi **)_REALLOC(omships,
+	    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> in_multi *) * newmax, M_IPMOPTS,
+	    M_WAITOK | M_ZERO)) == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	imo-&gt;imo_membership = nmships;
+
+	<span class="enscript-keyword">if</span> ((nmfilters = (<span class="enscript-type">struct</span> in_mfilter *)_REALLOC(omfilters,
+	    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> in_mfilter) * newmax, M_INMFILTER,
+	    M_WAITOK | M_ZERO)) == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	imo-&gt;imo_mfilters = nmfilters;
+
+	<span class="enscript-comment">/* Initialize newly allocated source filter heads. */</span>
+	<span class="enscript-keyword">for</span> (idx = oldmax; idx &lt; newmax; idx++)
+		imf_init(&amp;nmfilters[idx], MCAST_UNDEFINED, MCAST_EXCLUDE);
+
+	imo-&gt;imo_max_memberships = newmax;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Find an IPv4 multicast group entry for this ip_moptions instance
+ * which matches the specified group, and optionally an interface.
+ * Return its index into the array, or -1 if not found.
+ */</span>
+<span class="enscript-type">static</span> size_t
+<span class="enscript-function-name">imo_match_group</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ip_moptions *imo, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ifnet *ifp,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *group)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_in *gsin;
+	<span class="enscript-type">struct</span> in_multi	*pinm;
+	<span class="enscript-type">int</span>		  idx;
+	<span class="enscript-type">int</span>		  nmships;
+
+	IMO_LOCK_ASSERT_HELD(__DECONST(<span class="enscript-type">struct</span> ip_moptions *, imo));
+
+	gsin = (<span class="enscript-type">struct</span> sockaddr_in *)(uintptr_t)(size_t)group;
+
+	<span class="enscript-comment">/* The imo_membership array may be lazy allocated. */</span>
+	<span class="enscript-keyword">if</span> (imo-&gt;imo_membership == NULL || imo-&gt;imo_num_memberships == 0)
+		<span class="enscript-keyword">return</span> (-1);
+
+	nmships = imo-&gt;imo_num_memberships;
+	<span class="enscript-keyword">for</span> (idx = 0; idx &lt; nmships; idx++) {
+		pinm = imo-&gt;imo_membership[idx];
+		<span class="enscript-keyword">if</span> (pinm == NULL)
+			<span class="enscript-keyword">continue</span>;
+		INM_LOCK(pinm);
+		<span class="enscript-keyword">if</span> ((ifp == NULL || (pinm-&gt;inm_ifp == ifp)) &amp;&amp;
+		    in_hosteq(pinm-&gt;inm_addr, gsin-&gt;sin_addr)) {
+			INM_UNLOCK(pinm);
+			<span class="enscript-keyword">break</span>;
+		}
+		INM_UNLOCK(pinm);
+	}
+	<span class="enscript-keyword">if</span> (idx &gt;= nmships)
+		idx = -1;
+
+	<span class="enscript-keyword">return</span> (idx);
+}
+
+<span class="enscript-comment">/*
+ * Find an IPv4 multicast source entry for this imo which matches
+ * the given group index for this socket, and source address.
+ *
+ * NOTE: This does not check if the entry is in-mode, merely if
+ * it exists, which may not be the desired behaviour.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> in_msource *
+<span class="enscript-function-name">imo_match_source</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ip_moptions *imo, <span class="enscript-type">const</span> size_t gidx,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *src)
+{
+	<span class="enscript-type">struct</span> ip_msource	 find;
+	<span class="enscript-type">struct</span> in_mfilter	*imf;
+	<span class="enscript-type">struct</span> ip_msource	*ims;
+	<span class="enscript-type">const</span> sockunion_t	*psa;
+
+	IMO_LOCK_ASSERT_HELD(__DECONST(<span class="enscript-type">struct</span> ip_moptions *, imo));
+
+	VERIFY(src-&gt;sa_family == AF_INET);
+	VERIFY(gidx != (size_t)-1 &amp;&amp; gidx &lt; imo-&gt;imo_num_memberships);
+
+	<span class="enscript-comment">/* The imo_mfilters array may be lazy allocated. */</span>
+	<span class="enscript-keyword">if</span> (imo-&gt;imo_mfilters == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+	imf = &amp;imo-&gt;imo_mfilters[gidx];
+
+	<span class="enscript-comment">/* Source trees are keyed in host byte order. */</span>
+	psa = (sockunion_t *)(uintptr_t)(size_t)src;
+	find.ims_haddr = ntohl(psa-&gt;sin.sin_addr.s_addr);
+	ims = RB_FIND(ip_msource_tree, &amp;imf-&gt;imf_sources, &amp;find);
+
+	<span class="enscript-keyword">return</span> ((<span class="enscript-type">struct</span> in_msource *)ims);
+}
+
+<span class="enscript-comment">/*
+ * Perform filtering for multicast datagrams on a socket by group and source.
+ *
+ * Returns 0 if a datagram should be allowed through, or various error codes
+ * if the socket was not a member of the group, or the source was muted, etc.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">imo_multi_filter</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ip_moptions *imo, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ifnet *ifp,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *group, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *src)
+{
+	size_t gidx;
+	<span class="enscript-type">struct</span> in_msource *ims;
+	<span class="enscript-type">int</span> mode;
+
+	IMO_LOCK_ASSERT_HELD(__DECONST(<span class="enscript-type">struct</span> ip_moptions *, imo));
+	VERIFY(ifp != NULL);
+
+	gidx = imo_match_group(imo, ifp, group);
+	<span class="enscript-keyword">if</span> (gidx == (size_t)-1)
+		<span class="enscript-keyword">return</span> (MCAST_NOTGMEMBER);
+
+	<span class="enscript-comment">/*
+	 * Check if the source was included in an (S,G) join.
+	 * Allow reception on exclusive memberships by default,
+	 * reject reception on inclusive memberships by default.
+	 * Exclude source only if an in-mode exclude filter exists.
+	 * Include source only if an in-mode include filter exists.
+	 * NOTE: We are comparing group state here at IGMP t1 (now)
+	 * with socket-layer t0 (since last downcall).
+	 */</span>
+	mode = imo-&gt;imo_mfilters[gidx].imf_st[1];
+	ims = imo_match_source(imo, gidx, src);
+
+	<span class="enscript-keyword">if</span> ((ims == NULL &amp;&amp; mode == MCAST_INCLUDE) ||
+	    (ims != NULL &amp;&amp; ims-&gt;imsl_st[0] != mode)) {
+		<span class="enscript-keyword">return</span> (MCAST_NOTSMEMBER);
+	}
+
+	<span class="enscript-keyword">return</span> (MCAST_PASS);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">imo_clone</span>(<span class="enscript-type">struct</span> inpcb *from_inp, <span class="enscript-type">struct</span> inpcb *to_inp)
+{
+	<span class="enscript-type">int</span> i, err = 0;
+	<span class="enscript-type">struct</span> ip_moptions *from;
+	<span class="enscript-type">struct</span> ip_moptions *to;
+
+	from = inp_findmoptions(from_inp);
+	<span class="enscript-keyword">if</span> (from == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM); 
+
+	to = inp_findmoptions(to_inp);
+	<span class="enscript-keyword">if</span> (to == NULL) {
+		IMO_REMREF(from);
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+
+	IMO_LOCK(from);
+	IMO_LOCK(to);
+
+        to-&gt;imo_multicast_ifp = from-&gt;imo_multicast_ifp;
+        to-&gt;imo_multicast_vif = from-&gt;imo_multicast_vif;
+        to-&gt;imo_multicast_ttl = from-&gt;imo_multicast_ttl;
+        to-&gt;imo_multicast_loop = from-&gt;imo_multicast_loop;
+
+	<span class="enscript-comment">/*
+	 * We're cloning, so drop any existing memberships and source
+	 * filters on the destination ip_moptions.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; to-&gt;imo_num_memberships; ++i) {
+		<span class="enscript-type">struct</span> in_mfilter *imf;
+
+		imf = to-&gt;imo_mfilters ? &amp;to-&gt;imo_mfilters[i] : NULL;
+		<span class="enscript-keyword">if</span> (imf != NULL)
+			imf_leave(imf);
+
+		(<span class="enscript-type">void</span>) in_leavegroup(to-&gt;imo_membership[i], imf);
+
+		<span class="enscript-keyword">if</span> (imf != NULL)
+			imf_purge(imf);
+
+		INM_REMREF(to-&gt;imo_membership[i]);
+		to-&gt;imo_membership[i] = NULL;
+	}
+	to-&gt;imo_num_memberships = 0;
+
+	VERIFY(to-&gt;imo_max_memberships != 0 &amp;&amp; from-&gt;imo_max_memberships != 0);
+	<span class="enscript-keyword">if</span> (to-&gt;imo_max_memberships &lt; from-&gt;imo_max_memberships) {
+		<span class="enscript-comment">/*
+		 * Ensure source and destination ip_moptions memberships
+		 * and source filters arrays are at least equal in size.
+		 */</span>
+		err = imo_grow(to, from-&gt;imo_max_memberships);
+		<span class="enscript-keyword">if</span> (err != 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	VERIFY(to-&gt;imo_max_memberships &gt;= from-&gt;imo_max_memberships);
+
+	<span class="enscript-comment">/*
+	 * Source filtering doesn't apply to OpenTransport socket,
+	 * so simply hold additional reference count per membership.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; from-&gt;imo_num_memberships; i++) {
+		to-&gt;imo_membership[i] = 
+			in_addmulti(&amp;from-&gt;imo_membership[i]-&gt;inm_addr,
+						from-&gt;imo_membership[i]-&gt;inm_ifp);
+		<span class="enscript-keyword">if</span> (to-&gt;imo_membership[i] == NULL)
+			<span class="enscript-keyword">break</span>;
+		to-&gt;imo_num_memberships++;
+        }
+	VERIFY(to-&gt;imo_num_memberships == from-&gt;imo_num_memberships);
+
+<span class="enscript-reference">done</span>:
+	IMO_UNLOCK(to);
+	IMO_REMREF(to);
+	IMO_UNLOCK(from);
+	IMO_REMREF(from);
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-comment">/*
+ * Find and return a reference to an in_multi record for (ifp, group),
+ * and bump its reference count.
+ * If one does not exist, try to allocate it, and update link-layer multicast
+ * filters on ifp to listen for group.
+ * Return 0 if successful, otherwise return an appropriate error code.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">in_getmulti</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_addr *group,
+    <span class="enscript-type">struct</span> in_multi **pinm)
+{
+	<span class="enscript-type">struct</span> sockaddr_in	 gsin;
+	<span class="enscript-type">struct</span> ifmultiaddr	*ifma;
+	<span class="enscript-type">struct</span> in_multi		*inm;
+	<span class="enscript-type">int</span>			error;
+
+	in_multihead_lock_shared();
+	IN_LOOKUP_MULTI(group, ifp, inm);
+	<span class="enscript-keyword">if</span> (inm != NULL) {
+		INM_LOCK(inm);
+		VERIFY(inm-&gt;inm_reqcnt &gt;= 1);
+		inm-&gt;inm_reqcnt++;
+		VERIFY(inm-&gt;inm_reqcnt != 0);
+		*pinm = inm;
+		INM_UNLOCK(inm);
+		in_multihead_lock_done();
+		<span class="enscript-comment">/*
+		 * We already joined this group; return the inm
+		 * with a refcount held (via lookup) for caller.
+		 */</span>
+		<span class="enscript-keyword">return</span> (0);
+	}
+	in_multihead_lock_done();
+
+	bzero(&amp;gsin, <span class="enscript-keyword">sizeof</span>(gsin));
+	gsin.sin_family = AF_INET;
+	gsin.sin_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in);
+	gsin.sin_addr = *group;
+
+	<span class="enscript-comment">/*
+	 * Check if a link-layer group is already associated
+	 * with this network-layer group on the given ifnet.
+	 */</span>
+	error = if_addmulti(ifp, (<span class="enscript-type">struct</span> sockaddr *)&amp;gsin, &amp;ifma);
+	<span class="enscript-keyword">if</span> (error != 0)
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-comment">/*
+	 * See comments in inm_remref() for access to ifma_protospec.
+	 */</span>
+	in_multihead_lock_exclusive();
+	IFMA_LOCK(ifma);
+	<span class="enscript-keyword">if</span> ((inm = ifma-&gt;ifma_protospec) != NULL) {
+		VERIFY(ifma-&gt;ifma_addr != NULL);
+		VERIFY(ifma-&gt;ifma_addr-&gt;sa_family == AF_INET);
+		INM_ADDREF(inm);	<span class="enscript-comment">/* for caller */</span>
+		IFMA_UNLOCK(ifma);
+		INM_LOCK(inm);
+		VERIFY(inm-&gt;inm_ifma == ifma);
+		VERIFY(inm-&gt;inm_ifp == ifp);
+		VERIFY(in_hosteq(inm-&gt;inm_addr, *group));
+		<span class="enscript-keyword">if</span> (inm-&gt;inm_debug &amp; IFD_ATTACHED) {
+			VERIFY(inm-&gt;inm_reqcnt &gt;= 1);
+			inm-&gt;inm_reqcnt++;
+			VERIFY(inm-&gt;inm_reqcnt != 0);
+			*pinm = inm;
+			INM_UNLOCK(inm);
+			in_multihead_lock_done();
+			IFMA_REMREF(ifma);
+			<span class="enscript-comment">/*
+			 * We lost the race with another thread doing
+			 * in_getmulti(); since this group has already
+			 * been joined; return the inm with a refcount
+			 * held for caller.
+			 */</span>
+			<span class="enscript-keyword">return</span> (0);
+		}
+		<span class="enscript-comment">/*
+		 * We lost the race with another thread doing in_delmulti();
+		 * the inm referring to the ifma has been detached, thus we
+		 * reattach it back to the in_multihead list and return the
+		 * inm with a refcount held for the caller.
+		 */</span>
+		in_multi_attach(inm);
+		VERIFY((inm-&gt;inm_debug &amp;
+		    (IFD_ATTACHED | IFD_TRASHED)) == IFD_ATTACHED);
+		*pinm = inm;
+		INM_UNLOCK(inm);
+		in_multihead_lock_done();
+		IFMA_REMREF(ifma);
+		<span class="enscript-keyword">return</span> (0);
+	}
+	IFMA_UNLOCK(ifma);
+
+	<span class="enscript-comment">/*
+	 * A new in_multi record is needed; allocate and initialize it.
+	 * We DO NOT perform an IGMP join as the in_ layer may need to
+	 * push an initial source list down to IGMP to support SSM.
+	 *
+	 * The initial source filter state is INCLUDE, {} as per the RFC.
+	 */</span>
+	inm = in_multi_alloc(M_WAITOK);
+	<span class="enscript-keyword">if</span> (inm == NULL) {
+		in_multihead_lock_done();
+		IFMA_REMREF(ifma);
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+	INM_LOCK(inm);
+	inm-&gt;inm_addr = *group;
+	inm-&gt;inm_ifp = ifp;
+	inm-&gt;inm_igi = IGMP_IFINFO(ifp);
+	VERIFY(inm-&gt;inm_igi != NULL);
+	IGI_ADDREF(inm-&gt;inm_igi);
+	inm-&gt;inm_ifma = ifma;		<span class="enscript-comment">/* keep refcount from if_addmulti() */</span>
+	inm-&gt;inm_state = IGMP_NOT_MEMBER;
+	<span class="enscript-comment">/*
+	 * Pending state-changes per group are subject to a bounds check.
+	 */</span>
+	inm-&gt;inm_scq.ifq_maxlen = IGMP_MAX_STATE_CHANGES;
+	inm-&gt;inm_st[0].iss_fmode = MCAST_UNDEFINED;
+	inm-&gt;inm_st[1].iss_fmode = MCAST_UNDEFINED;
+	RB_INIT(&amp;inm-&gt;inm_srcs);
+	*pinm = inm;
+	in_multi_attach(inm);
+	VERIFY((inm-&gt;inm_debug &amp; (IFD_ATTACHED | IFD_TRASHED)) == IFD_ATTACHED);
+	INM_ADDREF_LOCKED(inm);		<span class="enscript-comment">/* for caller */</span>
+	INM_UNLOCK(inm);
+
+	IFMA_LOCK(ifma);
+	VERIFY(ifma-&gt;ifma_protospec == NULL);
+	ifma-&gt;ifma_protospec = inm;
+	IFMA_UNLOCK(ifma);
+	in_multihead_lock_done();
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Clear recorded source entries for a group.
+ * Used by the IGMP code.
+ * FIXME: Should reap.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">inm_clear_recorded</span>(<span class="enscript-type">struct</span> in_multi *inm)
+{
+	<span class="enscript-type">struct</span> ip_msource	*ims;
+
+	INM_LOCK_ASSERT_HELD(inm);
+
+	RB_FOREACH(ims, ip_msource_tree, &amp;inm-&gt;inm_srcs) {
+		<span class="enscript-keyword">if</span> (ims-&gt;ims_stp) {
+			ims-&gt;ims_stp = 0;
+			--inm-&gt;inm_st[1].iss_rec;
+		}
+	}
+	VERIFY(inm-&gt;inm_st[1].iss_rec == 0);
+}
+
+<span class="enscript-comment">/*
+ * Record a source as pending for a Source-Group IGMPv3 query.
+ * This lives here as it modifies the shared tree.
+ *
+ * inm is the group descriptor.
+ * naddr is the address of the source to record in network-byte order.
+ *
+ * If the net.inet.igmp.sgalloc sysctl is non-zero, we will
+ * lazy-allocate a source node in response to an SG query.
+ * Otherwise, no allocation is performed. This saves some memory
+ * with the trade-off that the source will not be reported to the
+ * router if joined in the window between the query response and
+ * the group actually being joined on the local host.
+ *
+ * Return 0 if the source didn't exist or was already marked as recorded.
+ * Return 1 if the source was marked as recorded by this function.
+ * Return &lt;0 if any error occured (negated errno code).
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">inm_record_source</span>(<span class="enscript-type">struct</span> in_multi *inm, <span class="enscript-type">const</span> in_addr_t naddr)
+{
+	<span class="enscript-type">struct</span> ip_msource	 find;
+	<span class="enscript-type">struct</span> ip_msource	*ims, *nims;
+
+	INM_LOCK_ASSERT_HELD(inm);
+
+	find.ims_haddr = ntohl(naddr);
+	ims = RB_FIND(ip_msource_tree, &amp;inm-&gt;inm_srcs, &amp;find);
+	<span class="enscript-keyword">if</span> (ims &amp;&amp; ims-&gt;ims_stp)
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">if</span> (ims == NULL) {
+		<span class="enscript-keyword">if</span> (inm-&gt;inm_nsrc == in_mcast_maxgrpsrc)
+			<span class="enscript-keyword">return</span> (-ENOSPC);
+		nims = ipms_alloc(M_WAITOK);
+		<span class="enscript-keyword">if</span> (nims == NULL)
+			<span class="enscript-keyword">return</span> (-ENOMEM);
+		nims-&gt;ims_haddr = find.ims_haddr;
+		RB_INSERT(ip_msource_tree, &amp;inm-&gt;inm_srcs, nims);
+		++inm-&gt;inm_nsrc;
+		ims = nims;
+	}
+
+	<span class="enscript-comment">/*
+	 * Mark the source as recorded and update the recorded
+	 * source count.
+	 */</span>
+	++ims-&gt;ims_stp;
+	++inm-&gt;inm_st[1].iss_rec;
+
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/*
+ * Return a pointer to an in_msource owned by an in_mfilter,
+ * given its source address.
+ * Lazy-allocate if needed. If this is a new entry its filter state is
+ * undefined at t0.
+ *
+ * imf is the filter set being modified.
+ * haddr is the source address in *host* byte-order.
+ *
+ * Caller is expected to be holding imo_lock.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">imf_get_source</span>(<span class="enscript-type">struct</span> in_mfilter *imf, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_in *psin,
+    <span class="enscript-type">struct</span> in_msource **plims)
+{
+	<span class="enscript-type">struct</span> ip_msource	 find;
+	<span class="enscript-type">struct</span> ip_msource	*ims;
+	<span class="enscript-type">struct</span> in_msource	*lims;
+	<span class="enscript-type">int</span>			 error;
+
+	error = 0;
+	ims = NULL;
+	lims = NULL;
+
+	<span class="enscript-comment">/* key is host byte order */</span>
+	find.ims_haddr = ntohl(psin-&gt;sin_addr.s_addr);
+	ims = RB_FIND(ip_msource_tree, &amp;imf-&gt;imf_sources, &amp;find);
+	lims = (<span class="enscript-type">struct</span> in_msource *)ims;
+	<span class="enscript-keyword">if</span> (lims == NULL) {
+		<span class="enscript-keyword">if</span> (imf-&gt;imf_nsrc == in_mcast_maxsocksrc)
+			<span class="enscript-keyword">return</span> (ENOSPC);
+		lims = inms_alloc(M_WAITOK);
+		<span class="enscript-keyword">if</span> (lims == NULL)
+			<span class="enscript-keyword">return</span> (ENOMEM);
+		lims-&gt;ims_haddr = find.ims_haddr;
+		lims-&gt;imsl_st[0] = MCAST_UNDEFINED;
+		RB_INSERT(ip_msource_tree, &amp;imf-&gt;imf_sources,
+		    (<span class="enscript-type">struct</span> ip_msource *)lims);
+		++imf-&gt;imf_nsrc;
+	}
+
+	*plims = lims;
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Graft a source entry into an existing socket-layer filter set,
+ * maintaining any required invariants and checking allocations.
+ *
+ * The source is marked as being in the new filter mode at t1.
+ *
+ * Return the pointer to the new node, otherwise return NULL.
+ *
+ * Caller is expected to be holding imo_lock.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> in_msource *
+<span class="enscript-function-name">imf_graft</span>(<span class="enscript-type">struct</span> in_mfilter *imf, <span class="enscript-type">const</span> uint8_t st1,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_in *psin)
+{
+	<span class="enscript-type">struct</span> in_msource	*lims;
+
+	lims = inms_alloc(M_WAITOK);
+	<span class="enscript-keyword">if</span> (lims == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+	lims-&gt;ims_haddr = ntohl(psin-&gt;sin_addr.s_addr);
+	lims-&gt;imsl_st[0] = MCAST_UNDEFINED;
+	lims-&gt;imsl_st[1] = st1;
+	RB_INSERT(ip_msource_tree, &amp;imf-&gt;imf_sources,
+	    (<span class="enscript-type">struct</span> ip_msource *)lims);
+	++imf-&gt;imf_nsrc;
+
+	<span class="enscript-keyword">return</span> (lims);
+}
+
+<span class="enscript-comment">/*
+ * Prune a source entry from an existing socket-layer filter set,
+ * maintaining any required invariants and checking allocations.
+ *
+ * The source is marked as being left at t1, it is not freed.
+ *
+ * Return 0 if no error occurred, otherwise return an errno value.
+ *
+ * Caller is expected to be holding imo_lock.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">imf_prune</span>(<span class="enscript-type">struct</span> in_mfilter *imf, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_in *psin)
+{
+	<span class="enscript-type">struct</span> ip_msource	 find;
+	<span class="enscript-type">struct</span> ip_msource	*ims;
+	<span class="enscript-type">struct</span> in_msource	*lims;
+
+	<span class="enscript-comment">/* key is host byte order */</span>
+	find.ims_haddr = ntohl(psin-&gt;sin_addr.s_addr);
+	ims = RB_FIND(ip_msource_tree, &amp;imf-&gt;imf_sources, &amp;find);
+	<span class="enscript-keyword">if</span> (ims == NULL)
+		<span class="enscript-keyword">return</span> (ENOENT);
+	lims = (<span class="enscript-type">struct</span> in_msource *)ims;
+	lims-&gt;imsl_st[1] = MCAST_UNDEFINED;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Revert socket-layer filter set deltas at t1 to t0 state.
+ *
+ * Caller is expected to be holding imo_lock.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">imf_rollback</span>(<span class="enscript-type">struct</span> in_mfilter *imf)
+{
+	<span class="enscript-type">struct</span> ip_msource	*ims, *tims;
+	<span class="enscript-type">struct</span> in_msource	*lims;
+
+	RB_FOREACH_SAFE(ims, ip_msource_tree, &amp;imf-&gt;imf_sources, tims) {
+		lims = (<span class="enscript-type">struct</span> in_msource *)ims;
+		<span class="enscript-keyword">if</span> (lims-&gt;imsl_st[0] == lims-&gt;imsl_st[1]) {
+			<span class="enscript-comment">/* no change at t1 */</span>
+			<span class="enscript-keyword">continue</span>;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (lims-&gt;imsl_st[0] != MCAST_UNDEFINED) {
+			<span class="enscript-comment">/* revert change to existing source at t1 */</span>
+			lims-&gt;imsl_st[1] = lims-&gt;imsl_st[0];
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* revert source added t1 */</span>
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: free inms 0x%llx\n&quot;</span>, __func__,
+			    (uint64_t)VM_KERNEL_ADDRPERM(lims)));
+			RB_REMOVE(ip_msource_tree, &amp;imf-&gt;imf_sources, ims);
+			inms_free(lims);
+			imf-&gt;imf_nsrc--;
+		}
+	}
+	imf-&gt;imf_st[1] = imf-&gt;imf_st[0];
+}
+
+<span class="enscript-comment">/*
+ * Mark socket-layer filter set as INCLUDE {} at t1.
+ *
+ * Caller is expected to be holding imo_lock.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">imf_leave</span>(<span class="enscript-type">struct</span> in_mfilter *imf)
+{
+	<span class="enscript-type">struct</span> ip_msource	*ims;
+	<span class="enscript-type">struct</span> in_msource	*lims;
+
+	RB_FOREACH(ims, ip_msource_tree, &amp;imf-&gt;imf_sources) {
+		lims = (<span class="enscript-type">struct</span> in_msource *)ims;
+		lims-&gt;imsl_st[1] = MCAST_UNDEFINED;
+	}
+	imf-&gt;imf_st[1] = MCAST_INCLUDE;
+}
+
+<span class="enscript-comment">/*
+ * Mark socket-layer filter set deltas as committed.
+ *
+ * Caller is expected to be holding imo_lock.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">imf_commit</span>(<span class="enscript-type">struct</span> in_mfilter *imf)
+{
+	<span class="enscript-type">struct</span> ip_msource	*ims;
+	<span class="enscript-type">struct</span> in_msource	*lims;
+
+	RB_FOREACH(ims, ip_msource_tree, &amp;imf-&gt;imf_sources) {
+		lims = (<span class="enscript-type">struct</span> in_msource *)ims;
+		lims-&gt;imsl_st[0] = lims-&gt;imsl_st[1];
+	}
+	imf-&gt;imf_st[0] = imf-&gt;imf_st[1];
+}
+
+<span class="enscript-comment">/*
+ * Reap unreferenced sources from socket-layer filter set.
+ *
+ * Caller is expected to be holding imo_lock.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">imf_reap</span>(<span class="enscript-type">struct</span> in_mfilter *imf)
+{
+	<span class="enscript-type">struct</span> ip_msource	*ims, *tims;
+	<span class="enscript-type">struct</span> in_msource	*lims;
+
+	RB_FOREACH_SAFE(ims, ip_msource_tree, &amp;imf-&gt;imf_sources, tims) {
+		lims = (<span class="enscript-type">struct</span> in_msource *)ims;
+		<span class="enscript-keyword">if</span> ((lims-&gt;imsl_st[0] == MCAST_UNDEFINED) &amp;&amp;
+		    (lims-&gt;imsl_st[1] == MCAST_UNDEFINED)) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: free inms 0x%llx\n&quot;</span>, __func__,
+			    (uint64_t)VM_KERNEL_ADDRPERM(lims)));
+			RB_REMOVE(ip_msource_tree, &amp;imf-&gt;imf_sources, ims);
+			inms_free(lims);
+			imf-&gt;imf_nsrc--;
+		}
+	}
+}
+
+<span class="enscript-comment">/*
+ * Purge socket-layer filter set.
+ *
+ * Caller is expected to be holding imo_lock.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">imf_purge</span>(<span class="enscript-type">struct</span> in_mfilter *imf)
+{
+	<span class="enscript-type">struct</span> ip_msource	*ims, *tims;
+	<span class="enscript-type">struct</span> in_msource	*lims;
+
+	RB_FOREACH_SAFE(ims, ip_msource_tree, &amp;imf-&gt;imf_sources, tims) {
+		lims = (<span class="enscript-type">struct</span> in_msource *)ims;
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: free inms 0x%llx\n&quot;</span>, __func__,
+		    (uint64_t)VM_KERNEL_ADDRPERM(lims)));
+		RB_REMOVE(ip_msource_tree, &amp;imf-&gt;imf_sources, ims);
+		inms_free(lims);
+		imf-&gt;imf_nsrc--;
+	}
+	imf-&gt;imf_st[0] = imf-&gt;imf_st[1] = MCAST_UNDEFINED;
+	VERIFY(RB_EMPTY(&amp;imf-&gt;imf_sources));
+}
+
+<span class="enscript-comment">/*
+ * Look up a source filter entry for a multicast group.
+ *
+ * inm is the group descriptor to work with.
+ * haddr is the host-byte-order IPv4 address to look up.
+ * noalloc may be non-zero to suppress allocation of sources.
+ * *pims will be set to the address of the retrieved or allocated source.
+ *
+ * Return 0 if successful, otherwise return a non-zero error code.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">inm_get_source</span>(<span class="enscript-type">struct</span> in_multi *inm, <span class="enscript-type">const</span> in_addr_t haddr,
+    <span class="enscript-type">const</span> <span class="enscript-type">int</span> noalloc, <span class="enscript-type">struct</span> ip_msource **pims)
+{
+	<span class="enscript-type">struct</span> ip_msource	 find;
+	<span class="enscript-type">struct</span> ip_msource	*ims, *nims;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IGMP_DEBUG</span>
+	<span class="enscript-type">struct</span> in_addr ia;
+	<span class="enscript-type">char</span> buf[MAX_IPv4_STR_LEN];
+#<span class="enscript-reference">endif</span>
+	INM_LOCK_ASSERT_HELD(inm);
+
+	find.ims_haddr = haddr;
+	ims = RB_FIND(ip_msource_tree, &amp;inm-&gt;inm_srcs, &amp;find);
+	<span class="enscript-keyword">if</span> (ims == NULL &amp;&amp; !noalloc) {
+		<span class="enscript-keyword">if</span> (inm-&gt;inm_nsrc == in_mcast_maxgrpsrc)
+			<span class="enscript-keyword">return</span> (ENOSPC);
+		nims = ipms_alloc(M_WAITOK);
+		<span class="enscript-keyword">if</span> (nims == NULL)
+			<span class="enscript-keyword">return</span> (ENOMEM);
+		nims-&gt;ims_haddr = haddr;
+		RB_INSERT(ip_msource_tree, &amp;inm-&gt;inm_srcs, nims);
+		++inm-&gt;inm_nsrc;
+		ims = nims;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IGMP_DEBUG</span>
+		ia.s_addr = htonl(haddr);
+		inet_ntop(AF_INET, &amp;ia, buf, <span class="enscript-keyword">sizeof</span>(buf));
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: allocated %s as 0x%llx\n&quot;</span>, __func__,
+		    buf, (uint64_t)VM_KERNEL_ADDRPERM(ims)));
+#<span class="enscript-reference">endif</span>
+	}
+
+	*pims = ims;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Helper function to derive the filter mode on a source entry
+ * from its internal counters. Predicates are:
+ *  A source is only excluded if all listeners exclude it.
+ *  A source is only included if no listeners exclude it,
+ *  and at least one listener includes it.
+ * May be used by ifmcstat(8).
+ */</span>
+uint8_t
+<span class="enscript-function-name">ims_get_mode</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_multi *inm, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ip_msource *ims,
+    uint8_t t)
+{
+	INM_LOCK_ASSERT_HELD(__DECONST(<span class="enscript-type">struct</span> in_multi *, inm));
+
+	t = !!t;
+	<span class="enscript-keyword">if</span> (inm-&gt;inm_st[t].iss_ex &gt; 0 &amp;&amp;
+	    inm-&gt;inm_st[t].iss_ex == ims-&gt;ims_st[t].ex)
+		<span class="enscript-keyword">return</span> (MCAST_EXCLUDE);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ims-&gt;ims_st[t].in &gt; 0 &amp;&amp; ims-&gt;ims_st[t].ex == 0)
+		<span class="enscript-keyword">return</span> (MCAST_INCLUDE);
+	<span class="enscript-keyword">return</span> (MCAST_UNDEFINED);
+}
+
+<span class="enscript-comment">/*
+ * Merge socket-layer source into IGMP-layer source.
+ * If rollback is non-zero, perform the inverse of the merge.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ims_merge</span>(<span class="enscript-type">struct</span> ip_msource *ims, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_msource *lims,
+    <span class="enscript-type">const</span> <span class="enscript-type">int</span> rollback)
+{
+	<span class="enscript-type">int</span> n = rollback ? -1 : 1;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IGMP_DEBUG</span>
+	<span class="enscript-type">struct</span> in_addr ia;
+
+	ia.s_addr = htonl(ims-&gt;ims_haddr);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (lims-&gt;imsl_st[0] == MCAST_EXCLUDE) {
+		IGMP_INET_PRINTF(ia,
+		    (<span class="enscript-string">&quot;%s: t1 ex -= %d on %s\n&quot;</span>,
+		    __func__, n, _igmp_inet_buf));
+		ims-&gt;ims_st[1].ex -= n;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (lims-&gt;imsl_st[0] == MCAST_INCLUDE) {
+		IGMP_INET_PRINTF(ia,
+		    (<span class="enscript-string">&quot;%s: t1 in -= %d on %s\n&quot;</span>,
+		    __func__, n, _igmp_inet_buf));
+		ims-&gt;ims_st[1].in -= n;
+	}
+
+	<span class="enscript-keyword">if</span> (lims-&gt;imsl_st[1] == MCAST_EXCLUDE) {
+		IGMP_INET_PRINTF(ia,
+		    (<span class="enscript-string">&quot;%s: t1 ex += %d on %s\n&quot;</span>,
+		    __func__, n, _igmp_inet_buf));
+		ims-&gt;ims_st[1].ex += n;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (lims-&gt;imsl_st[1] == MCAST_INCLUDE) {
+		IGMP_INET_PRINTF(ia,
+		    (<span class="enscript-string">&quot;%s: t1 in += %d on %s\n&quot;</span>,
+		    __func__, n, _igmp_inet_buf));
+		ims-&gt;ims_st[1].in += n;
+	}
+}
+
+<span class="enscript-comment">/*
+ * Atomically update the global in_multi state, when a membership's
+ * filter list is being updated in any way.
+ *
+ * imf is the per-inpcb-membership group filter pointer.
+ * A fake imf may be passed for in-kernel consumers.
+ *
+ * XXX This is a candidate for a set-symmetric-difference style loop
+ * which would eliminate the repeated lookup from root of ims nodes,
+ * as they share the same key space.
+ *
+ * If any error occurred this function will back out of refcounts
+ * and return a non-zero value.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">inm_merge</span>(<span class="enscript-type">struct</span> in_multi *inm, <span class="enscript-comment">/*const*/</span> <span class="enscript-type">struct</span> in_mfilter *imf)
+{
+	<span class="enscript-type">struct</span> ip_msource	*ims, *nims;
+	<span class="enscript-type">struct</span> in_msource	*lims;
+	<span class="enscript-type">int</span>			 schanged, error;
+	<span class="enscript-type">int</span>			 nsrc0, nsrc1;
+
+	INM_LOCK_ASSERT_HELD(inm);
+
+	schanged = 0;
+	error = 0;
+	nsrc1 = nsrc0 = 0;
+
+	<span class="enscript-comment">/*
+	 * Update the source filters first, as this may fail.
+	 * Maintain count of in-mode filters at t0, t1. These are
+	 * used to work out if we transition into ASM mode or not.
+	 * Maintain a count of source filters whose state was
+	 * actually modified by this operation.
+	 */</span>
+	RB_FOREACH(ims, ip_msource_tree, &amp;imf-&gt;imf_sources) {
+		lims = (<span class="enscript-type">struct</span> in_msource *)ims;
+		<span class="enscript-keyword">if</span> (lims-&gt;imsl_st[0] == imf-&gt;imf_st[0]) nsrc0++;
+		<span class="enscript-keyword">if</span> (lims-&gt;imsl_st[1] == imf-&gt;imf_st[1]) nsrc1++;
+		<span class="enscript-keyword">if</span> (lims-&gt;imsl_st[0] == lims-&gt;imsl_st[1]) <span class="enscript-keyword">continue</span>;
+		error = inm_get_source(inm, lims-&gt;ims_haddr, 0, &amp;nims);
+		++schanged;
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">break</span>;
+		ims_merge(nims, lims, 0);
+	}
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-type">struct</span> ip_msource *bims;
+
+		RB_FOREACH_REVERSE_FROM(ims, ip_msource_tree, nims) {
+			lims = (<span class="enscript-type">struct</span> in_msource *)ims;
+			<span class="enscript-keyword">if</span> (lims-&gt;imsl_st[0] == lims-&gt;imsl_st[1])
+				<span class="enscript-keyword">continue</span>;
+			(<span class="enscript-type">void</span>) inm_get_source(inm, lims-&gt;ims_haddr, 1, &amp;bims);
+			<span class="enscript-keyword">if</span> (bims == NULL)
+				<span class="enscript-keyword">continue</span>;
+			ims_merge(bims, lims, 1);
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_reap</span>;
+	}
+
+	IGMP_PRINTF((<span class="enscript-string">&quot;%s: imf filters in-mode: %d at t0, %d at t1\n&quot;</span>,
+	    __func__, nsrc0, nsrc1));
+
+	<span class="enscript-comment">/* Handle transition between INCLUDE {n} and INCLUDE {} on socket. */</span>
+	<span class="enscript-keyword">if</span> (imf-&gt;imf_st[0] == imf-&gt;imf_st[1] &amp;&amp;
+	    imf-&gt;imf_st[1] == MCAST_INCLUDE) {
+		<span class="enscript-keyword">if</span> (nsrc1 == 0) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: --in on inm at t1\n&quot;</span>, __func__));
+			--inm-&gt;inm_st[1].iss_in;
+		}
+	}
+
+	<span class="enscript-comment">/* Handle filter mode transition on socket. */</span>
+	<span class="enscript-keyword">if</span> (imf-&gt;imf_st[0] != imf-&gt;imf_st[1]) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: imf transition %d to %d\n&quot;</span>,
+		    __func__, imf-&gt;imf_st[0], imf-&gt;imf_st[1]));
+
+		<span class="enscript-keyword">if</span> (imf-&gt;imf_st[0] == MCAST_EXCLUDE) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: --ex on inm at t1\n&quot;</span>, __func__));
+			--inm-&gt;inm_st[1].iss_ex;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (imf-&gt;imf_st[0] == MCAST_INCLUDE) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: --in on inm at t1\n&quot;</span>, __func__));
+			--inm-&gt;inm_st[1].iss_in;
+		}
+
+		<span class="enscript-keyword">if</span> (imf-&gt;imf_st[1] == MCAST_EXCLUDE) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: ex++ on inm at t1\n&quot;</span>, __func__));
+			inm-&gt;inm_st[1].iss_ex++;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (imf-&gt;imf_st[1] == MCAST_INCLUDE &amp;&amp; nsrc1 &gt; 0) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: in++ on inm at t1\n&quot;</span>, __func__));
+			inm-&gt;inm_st[1].iss_in++;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Track inm filter state in terms of listener counts.
+	 * If there are any exclusive listeners, stack-wide
+	 * membership is exclusive.
+	 * Otherwise, if only inclusive listeners, stack-wide is inclusive.
+	 * If no listeners remain, state is undefined at t1,
+	 * and the IGMP lifecycle for this group should finish.
+	 */</span>
+	<span class="enscript-keyword">if</span> (inm-&gt;inm_st[1].iss_ex &gt; 0) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: transition to EX\n&quot;</span>, __func__));
+		inm-&gt;inm_st[1].iss_fmode = MCAST_EXCLUDE;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (inm-&gt;inm_st[1].iss_in &gt; 0) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: transition to IN\n&quot;</span>, __func__));
+		inm-&gt;inm_st[1].iss_fmode = MCAST_INCLUDE;
+	} <span class="enscript-keyword">else</span> {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: transition to UNDEF\n&quot;</span>, __func__));
+		inm-&gt;inm_st[1].iss_fmode = MCAST_UNDEFINED;
+	}
+
+	<span class="enscript-comment">/* Decrement ASM listener count on transition out of ASM mode. */</span>
+	<span class="enscript-keyword">if</span> (imf-&gt;imf_st[0] == MCAST_EXCLUDE &amp;&amp; nsrc0 == 0) {
+		<span class="enscript-keyword">if</span> ((imf-&gt;imf_st[1] != MCAST_EXCLUDE) ||
+		    (imf-&gt;imf_st[1] == MCAST_EXCLUDE &amp;&amp; nsrc1 &gt; 0)) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: --asm on inm at t1\n&quot;</span>, __func__));
+			--inm-&gt;inm_st[1].iss_asm;
+		}
+	}
+
+	<span class="enscript-comment">/* Increment ASM listener count on transition to ASM mode. */</span>
+	<span class="enscript-keyword">if</span> (imf-&gt;imf_st[1] == MCAST_EXCLUDE &amp;&amp; nsrc1 == 0) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: asm++ on inm at t1\n&quot;</span>, __func__));
+		inm-&gt;inm_st[1].iss_asm++;
+	}
+
+	IGMP_PRINTF((<span class="enscript-string">&quot;%s: merged imf 0x%llx to inm 0x%llx\n&quot;</span>, __func__,
+	    (uint64_t)VM_KERNEL_ADDRPERM(imf),
+	    (uint64_t)VM_KERNEL_ADDRPERM(inm)));
+	inm_print(inm);
+
+<span class="enscript-reference">out_reap</span>:
+	<span class="enscript-keyword">if</span> (schanged &gt; 0) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: sources changed; reaping\n&quot;</span>, __func__));
+		inm_reap(inm);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Mark an in_multi's filter set deltas as committed.
+ * Called by IGMP after a state change has been enqueued.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">inm_commit</span>(<span class="enscript-type">struct</span> in_multi *inm)
+{
+	<span class="enscript-type">struct</span> ip_msource	*ims;
+
+	INM_LOCK_ASSERT_HELD(inm);
+
+	IGMP_PRINTF((<span class="enscript-string">&quot;%s: commit inm 0x%llx\n&quot;</span>, __func__,
+	    (uint64_t)VM_KERNEL_ADDRPERM(inm)));
+	IGMP_PRINTF((<span class="enscript-string">&quot;%s: pre commit:\n&quot;</span>, __func__));
+	inm_print(inm);
+
+	RB_FOREACH(ims, ip_msource_tree, &amp;inm-&gt;inm_srcs) {
+		ims-&gt;ims_st[0] = ims-&gt;ims_st[1];
+	}
+	inm-&gt;inm_st[0] = inm-&gt;inm_st[1];
+}
+
+<span class="enscript-comment">/*
+ * Reap unreferenced nodes from an in_multi's filter set.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">inm_reap</span>(<span class="enscript-type">struct</span> in_multi *inm)
+{
+	<span class="enscript-type">struct</span> ip_msource	*ims, *tims;
+
+	INM_LOCK_ASSERT_HELD(inm);
+
+	RB_FOREACH_SAFE(ims, ip_msource_tree, &amp;inm-&gt;inm_srcs, tims) {
+		<span class="enscript-keyword">if</span> (ims-&gt;ims_st[0].ex &gt; 0 || ims-&gt;ims_st[0].in &gt; 0 ||
+		    ims-&gt;ims_st[1].ex &gt; 0 || ims-&gt;ims_st[1].in &gt; 0 ||
+		    ims-&gt;ims_stp != 0)
+			<span class="enscript-keyword">continue</span>;
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: free ims 0x%llx\n&quot;</span>, __func__,
+		    (uint64_t)VM_KERNEL_ADDRPERM(ims)));
+		RB_REMOVE(ip_msource_tree, &amp;inm-&gt;inm_srcs, ims);
+		ipms_free(ims);
+		inm-&gt;inm_nsrc--;
+	}
+}
+
+<span class="enscript-comment">/*
+ * Purge all source nodes from an in_multi's filter set.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">inm_purge</span>(<span class="enscript-type">struct</span> in_multi *inm)
+{
+	<span class="enscript-type">struct</span> ip_msource	*ims, *tims;
+
+	INM_LOCK_ASSERT_HELD(inm);
+
+	RB_FOREACH_SAFE(ims, ip_msource_tree, &amp;inm-&gt;inm_srcs, tims) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: free ims 0x%llx\n&quot;</span>, __func__,
+		    (uint64_t)VM_KERNEL_ADDRPERM(ims)));
+		RB_REMOVE(ip_msource_tree, &amp;inm-&gt;inm_srcs, ims);
+		ipms_free(ims);
+		inm-&gt;inm_nsrc--;
+	}
+}
+
+<span class="enscript-comment">/*
+ * Join a multicast group; real entry point.
+ *
+ * Only preserves atomicity at inm level.
+ * NOTE: imf argument cannot be const due to sys/tree.h limitations.
+ *
+ * If the IGMP downcall fails, the group is not joined, and an error
+ * code is returned.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">in_joingroup</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_addr *gina,
+    <span class="enscript-comment">/*const*/</span> <span class="enscript-type">struct</span> in_mfilter *imf, <span class="enscript-type">struct</span> in_multi **pinm)
+{
+	<span class="enscript-type">struct</span> in_mfilter	 timf;
+	<span class="enscript-type">struct</span> in_multi		*inm = NULL;
+	<span class="enscript-type">int</span>			 error = 0;
+	<span class="enscript-type">struct</span> igmp_tparams	 itp;
+
+	IGMP_INET_PRINTF(*gina, (<span class="enscript-string">&quot;%s: join %s on 0x%llx(%s))\n&quot;</span>, __func__,
+	    _igmp_inet_buf, (uint64_t)VM_KERNEL_ADDRPERM(ifp), if_name(ifp)));
+
+	bzero(&amp;itp, <span class="enscript-keyword">sizeof</span> (itp));
+	*pinm = NULL;
+
+	<span class="enscript-comment">/*
+	 * If no imf was specified (i.e. kernel consumer),
+	 * fake one up and assume it is an ASM join.
+	 */</span>
+	<span class="enscript-keyword">if</span> (imf == NULL) {
+		imf_init(&amp;timf, MCAST_UNDEFINED, MCAST_EXCLUDE);
+		imf = &amp;timf;
+	}
+
+	error = in_getmulti(ifp, gina, &amp;inm);
+	<span class="enscript-keyword">if</span> (error) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: in_getmulti() failure\n&quot;</span>, __func__));
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	IGMP_PRINTF((<span class="enscript-string">&quot;%s: merge inm state\n&quot;</span>, __func__));
+
+	INM_LOCK(inm);
+	error = inm_merge(inm, imf);
+	<span class="enscript-keyword">if</span> (error) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: failed to merge inm state\n&quot;</span>, __func__));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_inm_release</span>;
+	}
+
+	IGMP_PRINTF((<span class="enscript-string">&quot;%s: doing igmp downcall\n&quot;</span>, __func__));
+	error = igmp_change_state(inm, &amp;itp);
+	<span class="enscript-keyword">if</span> (error) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: failed to update source\n&quot;</span>, __func__));
+		imf_rollback(imf);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_inm_release</span>;
+	}
+
+<span class="enscript-reference">out_inm_release</span>:
+	<span class="enscript-keyword">if</span> (error) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: dropping ref on 0x%llx\n&quot;</span>, __func__,
+		    (uint64_t)VM_KERNEL_ADDRPERM(inm)));
+		INM_UNLOCK(inm);
+		INM_REMREF(inm);
+	} <span class="enscript-keyword">else</span> {
+		INM_UNLOCK(inm);
+		*pinm = inm;	<span class="enscript-comment">/* keep refcount from in_getmulti() */</span>
+	}
+
+	<span class="enscript-comment">/* schedule timer now that we've dropped the lock(s) */</span>
+	igmp_set_timeout(&amp;itp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Leave a multicast group; real entry point.
+ * All source filters will be expunged.
+ *
+ * Only preserves atomicity at inm level.
+ *
+ * Note: This is not the same as inm_release(*) as this function also
+ * makes a state change downcall into IGMP.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">in_leavegroup</span>(<span class="enscript-type">struct</span> in_multi *inm, <span class="enscript-comment">/*const*/</span> <span class="enscript-type">struct</span> in_mfilter *imf)
+{
+	<span class="enscript-type">struct</span> in_mfilter	 timf;
+	<span class="enscript-type">int</span>			 error, lastref;
+	<span class="enscript-type">struct</span> igmp_tparams	 itp;
+
+	bzero(&amp;itp, <span class="enscript-keyword">sizeof</span> (itp));
+	error = 0;
+
+	INM_LOCK_ASSERT_NOTHELD(inm);
+
+        in_multihead_lock_exclusive();
+        INM_LOCK(inm);
+
+	IGMP_INET_PRINTF(inm-&gt;inm_addr,
+	    (<span class="enscript-string">&quot;%s: leave inm 0x%llx, %s/%s%d, imf 0x%llx\n&quot;</span>, __func__,
+	    (uint64_t)VM_KERNEL_ADDRPERM(inm), _igmp_inet_buf,
+	    (inm_is_ifp_detached(inm) ? <span class="enscript-string">&quot;null&quot;</span> : inm-&gt;inm_ifp-&gt;if_name),
+	    inm-&gt;inm_ifp-&gt;if_unit, (uint64_t)VM_KERNEL_ADDRPERM(imf)));
+
+	<span class="enscript-comment">/*
+	 * If no imf was specified (i.e. kernel consumer),
+	 * fake one up and assume it is an ASM join.
+	 */</span>
+	<span class="enscript-keyword">if</span> (imf == NULL) {
+		imf_init(&amp;timf, MCAST_EXCLUDE, MCAST_UNDEFINED);
+		imf = &amp;timf;
+	}
+
+	<span class="enscript-comment">/*
+	 * Begin state merge transaction at IGMP layer.
+	 *
+	 * As this particular invocation should not cause any memory
+	 * to be allocated, and there is no opportunity to roll back
+	 * the transaction, it MUST NOT fail.
+	 */</span>
+	IGMP_PRINTF((<span class="enscript-string">&quot;%s: merge inm state\n&quot;</span>, __func__));
+
+	error = inm_merge(inm, imf);
+	KASSERT(error == 0, (<span class="enscript-string">&quot;%s: failed to merge inm state\n&quot;</span>, __func__));
+
+	IGMP_PRINTF((<span class="enscript-string">&quot;%s: doing igmp downcall\n&quot;</span>, __func__));
+	error = igmp_change_state(inm, &amp;itp);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IGMP_DEBUG</span>
+	<span class="enscript-keyword">if</span> (error)
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: failed igmp downcall\n&quot;</span>, __func__));
+#<span class="enscript-reference">endif</span>
+        lastref = in_multi_detach(inm);
+        VERIFY(!lastref || (!(inm-&gt;inm_debug &amp; IFD_ATTACHED) &amp;&amp;
+            inm-&gt;inm_reqcnt == 0));
+	INM_UNLOCK(inm);
+        in_multihead_lock_done();
+
+        <span class="enscript-keyword">if</span> (lastref)
+		INM_REMREF(inm);	<span class="enscript-comment">/* for in_multihead list */</span>
+
+	<span class="enscript-comment">/* schedule timer now that we've dropped the lock(s) */</span>
+	igmp_set_timeout(&amp;itp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Join an IPv4 multicast group in (*,G) exclusive mode.
+ * The group must be a 224.0.0.0/24 link-scope group.
+ * This KPI is for legacy kernel consumers only.
+ */</span>
+<span class="enscript-type">struct</span> in_multi *
+<span class="enscript-function-name">in_addmulti</span>(<span class="enscript-type">struct</span> in_addr *ap, <span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">struct</span> in_multi *pinm = NULL;
+	<span class="enscript-type">int</span> error;
+
+	KASSERT(IN_LOCAL_GROUP(ntohl(ap-&gt;s_addr)),
+	    (<span class="enscript-string">&quot;%s: %s not in 224.0.0.0/24\n&quot;</span>, __func__, inet_ntoa(*ap)));
+
+	error = in_joingroup(ifp, ap, NULL, &amp;pinm);
+	VERIFY(pinm != NULL || error != 0);
+
+	<span class="enscript-keyword">return</span> (pinm);
+}
+
+<span class="enscript-comment">/*
+ * Leave an IPv4 multicast group, assumed to be in exclusive (*,G) mode.
+ * This KPI is for legacy kernel consumers only.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">in_delmulti</span>(<span class="enscript-type">struct</span> in_multi *inm)
+{
+
+	(<span class="enscript-type">void</span>) in_leavegroup(inm, NULL);
+}
+
+<span class="enscript-comment">/*
+ * Block or unblock an ASM multicast source on an inpcb.
+ * This implements the delta-based API described in RFC 3678.
+ *
+ * The delta-based API applies only to exclusive-mode memberships.
+ * An IGMP downcall will be performed.
+ *
+ * Return 0 if successful, otherwise return an appropriate error code.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">inp_block_unblock_source</span>(<span class="enscript-type">struct</span> inpcb *inp, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+	<span class="enscript-type">struct</span> group_source_req		 gsr;
+	sockunion_t			*gsa, *ssa;
+	<span class="enscript-type">struct</span> ifnet			*ifp;
+	<span class="enscript-type">struct</span> in_mfilter		*imf;
+	<span class="enscript-type">struct</span> ip_moptions		*imo;
+	<span class="enscript-type">struct</span> in_msource		*ims;
+	<span class="enscript-type">struct</span> in_multi			*inm;
+	size_t				 idx;
+	uint16_t			 fmode;
+	<span class="enscript-type">int</span>				 error, doblock;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>			 ifindex = 0;
+	<span class="enscript-type">struct</span> igmp_tparams		 itp;
+
+	bzero(&amp;itp, <span class="enscript-keyword">sizeof</span> (itp));
+	ifp = NULL;
+	error = 0;
+	doblock = 0;
+
+	memset(&amp;gsr, 0, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> group_source_req));
+	gsa = (sockunion_t *)&amp;gsr.gsr_group;
+	ssa = (sockunion_t *)&amp;gsr.gsr_source;
+
+	<span class="enscript-keyword">switch</span> (sopt-&gt;sopt_name) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_BLOCK_SOURCE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_UNBLOCK_SOURCE</span>: {
+		<span class="enscript-type">struct</span> ip_mreq_source	 mreqs;
+
+		error = sooptcopyin(sopt, &amp;mreqs,
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreq_source),
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreq_source));
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+
+		gsa-&gt;sin.sin_family = AF_INET;
+		gsa-&gt;sin.sin_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in);
+		gsa-&gt;sin.sin_addr = mreqs.imr_multiaddr;
+
+		ssa-&gt;sin.sin_family = AF_INET;
+		ssa-&gt;sin.sin_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in);
+		ssa-&gt;sin.sin_addr = mreqs.imr_sourceaddr;
+
+		<span class="enscript-keyword">if</span> (!in_nullhost(mreqs.imr_interface))
+			ifp = ip_multicast_if(&amp;mreqs.imr_interface, &amp;ifindex);
+
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == IP_BLOCK_SOURCE)
+			doblock = 1;
+
+		IGMP_INET_PRINTF(mreqs.imr_interface,
+		    (<span class="enscript-string">&quot;%s: imr_interface = %s, ifp = 0x%llx\n&quot;</span>, __func__,
+		    _igmp_inet_buf, (uint64_t)VM_KERNEL_ADDRPERM(ifp)));
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MCAST_BLOCK_SOURCE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MCAST_UNBLOCK_SOURCE</span>:
+		error = sooptcopyin(sopt, &amp;gsr,
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> group_source_req),
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> group_source_req));
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+
+		<span class="enscript-keyword">if</span> (gsa-&gt;sin.sin_family != AF_INET ||
+		    gsa-&gt;sin.sin_len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in))
+			<span class="enscript-keyword">return</span> (EINVAL);
+
+		<span class="enscript-keyword">if</span> (ssa-&gt;sin.sin_family != AF_INET ||
+		    ssa-&gt;sin.sin_len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in))
+			<span class="enscript-keyword">return</span> (EINVAL);
+
+		ifnet_head_lock_shared();
+		<span class="enscript-keyword">if</span> (gsr.gsr_interface == 0 ||
+		    (u_int)if_index &lt; gsr.gsr_interface) {
+			ifnet_head_done();
+			<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+		}
+
+		ifp = ifindex2ifnet[gsr.gsr_interface];
+		ifnet_head_done();
+
+		<span class="enscript-keyword">if</span> (ifp == NULL)
+			<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == MCAST_BLOCK_SOURCE)
+			doblock = 1;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: unknown sopt_name %d\n&quot;</span>,
+		    __func__, sopt-&gt;sopt_name));
+		<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (!IN_MULTICAST(ntohl(gsa-&gt;sin.sin_addr.s_addr)))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/*
+	 * Check if we are actually a member of this group.
+	 */</span>
+	imo = inp_findmoptions(inp);
+	<span class="enscript-keyword">if</span> (imo == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	IMO_LOCK(imo);
+	idx = imo_match_group(imo, ifp, &amp;gsa-&gt;sa);
+	<span class="enscript-keyword">if</span> (idx == (size_t)-1 || imo-&gt;imo_mfilters == NULL) {
+		error = EADDRNOTAVAIL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imo_locked</span>;
+	}
+
+	VERIFY(imo-&gt;imo_mfilters != NULL);
+	imf = &amp;imo-&gt;imo_mfilters[idx];
+	inm = imo-&gt;imo_membership[idx];
+
+	<span class="enscript-comment">/*
+	 * Attempting to use the delta-based API on an
+	 * non exclusive-mode membership is an error.
+	 */</span>
+	fmode = imf-&gt;imf_st[0];
+	<span class="enscript-keyword">if</span> (fmode != MCAST_EXCLUDE) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imo_locked</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Deal with error cases up-front:
+	 *  Asked to block, but already blocked; or
+	 *  Asked to unblock, but nothing to unblock.
+	 * If adding a new block entry, allocate it.
+	 */</span>
+	ims = imo_match_source(imo, idx, &amp;ssa-&gt;sa);
+	<span class="enscript-keyword">if</span> ((ims != NULL &amp;&amp; doblock) || (ims == NULL &amp;&amp; !doblock)) {
+		IGMP_INET_PRINTF(ssa-&gt;sin.sin_addr,
+		    (<span class="enscript-string">&quot;%s: source %s %spresent\n&quot;</span>, __func__,
+		    _igmp_inet_buf, doblock ? <span class="enscript-string">&quot;&quot;</span> : <span class="enscript-string">&quot;not &quot;</span>));
+		error = EADDRNOTAVAIL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imo_locked</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Begin state merge transaction at socket layer.
+	 */</span>
+	<span class="enscript-keyword">if</span> (doblock) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: %s source\n&quot;</span>, __func__, <span class="enscript-string">&quot;block&quot;</span>));
+		ims = imf_graft(imf, fmode, &amp;ssa-&gt;sin);
+		<span class="enscript-keyword">if</span> (ims == NULL)
+			error = ENOMEM;
+	} <span class="enscript-keyword">else</span> {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: %s source\n&quot;</span>, __func__, <span class="enscript-string">&quot;allow&quot;</span>));
+		error = imf_prune(imf, &amp;ssa-&gt;sin);
+	}
+
+	<span class="enscript-keyword">if</span> (error) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: merge imf state failed\n&quot;</span>, __func__));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imf_rollback</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Begin state merge transaction at IGMP layer.
+	 */</span>
+	INM_LOCK(inm);
+	IGMP_PRINTF((<span class="enscript-string">&quot;%s: merge inm state\n&quot;</span>, __func__));
+	error = inm_merge(inm, imf);
+	<span class="enscript-keyword">if</span> (error) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: failed to merge inm state\n&quot;</span>, __func__));
+		INM_UNLOCK(inm);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imf_rollback</span>;
+	}
+
+	IGMP_PRINTF((<span class="enscript-string">&quot;%s: doing igmp downcall\n&quot;</span>, __func__));
+	error = igmp_change_state(inm, &amp;itp);
+	INM_UNLOCK(inm);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IGMP_DEBUG</span>
+	<span class="enscript-keyword">if</span> (error)
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: failed igmp downcall\n&quot;</span>, __func__));
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-reference">out_imf_rollback</span>:
+	<span class="enscript-keyword">if</span> (error)
+		imf_rollback(imf);
+	<span class="enscript-keyword">else</span>
+		imf_commit(imf);
+
+	imf_reap(imf);
+
+<span class="enscript-reference">out_imo_locked</span>:
+	IMO_UNLOCK(imo);
+	IMO_REMREF(imo);	<span class="enscript-comment">/* from inp_findmoptions() */</span>
+
+	<span class="enscript-comment">/* schedule timer now that we've dropped the lock(s) */</span>
+	igmp_set_timeout(&amp;itp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Given an inpcb, return its multicast options structure pointer.
+ *
+ * Caller is responsible for locking the inpcb, and releasing the
+ * extra reference held on the imo, upon a successful return.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ip_moptions *
+<span class="enscript-function-name">inp_findmoptions</span>(<span class="enscript-type">struct</span> inpcb *inp)
+{
+	<span class="enscript-type">struct</span> ip_moptions	 *imo;
+	<span class="enscript-type">struct</span> in_multi		**immp;
+	<span class="enscript-type">struct</span> in_mfilter	 *imfp;
+	size_t			  idx;
+
+	<span class="enscript-keyword">if</span> ((imo = inp-&gt;inp_moptions) != NULL) {
+		IMO_ADDREF(imo);	<span class="enscript-comment">/* for caller */</span>
+		<span class="enscript-keyword">return</span> (imo);
+	}
+
+	imo = ip_allocmoptions(M_WAITOK);
+	<span class="enscript-keyword">if</span> (imo == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	immp = _MALLOC(<span class="enscript-keyword">sizeof</span> (*immp) * IP_MIN_MEMBERSHIPS, M_IPMOPTS,
+	    M_WAITOK | M_ZERO);
+	<span class="enscript-keyword">if</span> (immp == NULL) {
+		IMO_REMREF(imo);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	imfp = _MALLOC(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> in_mfilter) * IP_MIN_MEMBERSHIPS,
+	    M_INMFILTER, M_WAITOK | M_ZERO);
+	<span class="enscript-keyword">if</span> (imfp == NULL) {
+		_FREE(immp, M_IPMOPTS);
+		IMO_REMREF(imo);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	imo-&gt;imo_multicast_ifp = NULL;
+	imo-&gt;imo_multicast_addr.s_addr = INADDR_ANY;
+	imo-&gt;imo_multicast_vif = -1;
+	imo-&gt;imo_multicast_ttl = IP_DEFAULT_MULTICAST_TTL;
+	imo-&gt;imo_multicast_loop = in_mcast_loop;
+	imo-&gt;imo_num_memberships = 0;
+	imo-&gt;imo_max_memberships = IP_MIN_MEMBERSHIPS;
+	imo-&gt;imo_membership = immp;
+
+	<span class="enscript-comment">/* Initialize per-group source filters. */</span>
+	<span class="enscript-keyword">for</span> (idx = 0; idx &lt; IP_MIN_MEMBERSHIPS; idx++)
+		imf_init(&amp;imfp[idx], MCAST_UNDEFINED, MCAST_EXCLUDE);
+
+	imo-&gt;imo_mfilters = imfp;
+	inp-&gt;inp_moptions = imo; <span class="enscript-comment">/* keep reference from ip_allocmoptions() */</span>
+	IMO_ADDREF(imo);	<span class="enscript-comment">/* for caller */</span>
+
+	<span class="enscript-keyword">return</span> (imo);
+}
+<span class="enscript-comment">/*
+ * Atomically get source filters on a socket for an IPv4 multicast group.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">inp_get_source_filters</span>(<span class="enscript-type">struct</span> inpcb *inp, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+	<span class="enscript-type">struct</span> __msfilterreq64	msfr, msfr64;
+	<span class="enscript-type">struct</span> __msfilterreq32	msfr32;
+	sockunion_t		*gsa;
+	<span class="enscript-type">struct</span> ifnet		*ifp;
+	<span class="enscript-type">struct</span> ip_moptions	*imo;
+	<span class="enscript-type">struct</span> in_mfilter	*imf;
+	<span class="enscript-type">struct</span> ip_msource	*ims;
+	<span class="enscript-type">struct</span> in_msource	*lims;
+	<span class="enscript-type">struct</span> sockaddr_in	*psin;
+	<span class="enscript-type">struct</span> sockaddr_storage	*ptss;
+	<span class="enscript-type">struct</span> sockaddr_storage	*tss;
+	<span class="enscript-type">int</span>			 error;
+	size_t			 idx, nsrcs, ncsrcs;
+	user_addr_t 		 tmp_ptr;
+
+	imo = inp-&gt;inp_moptions;
+	VERIFY(imo != NULL);
+
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(current_proc())) {
+		error = sooptcopyin(sopt, &amp;msfr64,
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> __msfilterreq64),
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> __msfilterreq64));
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+		<span class="enscript-comment">/* we never use msfr.msfr_srcs; */</span>
+		memcpy(&amp;msfr, &amp;msfr64, <span class="enscript-keyword">sizeof</span>(msfr64));
+	} <span class="enscript-keyword">else</span> {
+		error = sooptcopyin(sopt, &amp;msfr32,
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> __msfilterreq32),
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> __msfilterreq32));
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+		<span class="enscript-comment">/* we never use msfr.msfr_srcs; */</span>
+		memcpy(&amp;msfr, &amp;msfr32, <span class="enscript-keyword">sizeof</span>(msfr32));
+	}
+
+	ifnet_head_lock_shared();
+	<span class="enscript-keyword">if</span> (msfr.msfr_ifindex == 0 || (u_int)if_index &lt; msfr.msfr_ifindex) {
+		ifnet_head_done();
+		<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+	}
+
+	ifp = ifindex2ifnet[msfr.msfr_ifindex];
+	ifnet_head_done();
+
+	<span class="enscript-keyword">if</span> (ifp == NULL)
+		<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+
+	<span class="enscript-keyword">if</span> ((size_t) msfr.msfr_nsrcs &gt;
+	    UINT32_MAX / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_storage))
+		msfr.msfr_nsrcs = UINT32_MAX / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_storage);
+
+	<span class="enscript-keyword">if</span> (msfr.msfr_nsrcs &gt; in_mcast_maxsocksrc)
+		msfr.msfr_nsrcs = in_mcast_maxsocksrc;
+
+	IMO_LOCK(imo);
+	<span class="enscript-comment">/*
+	 * Lookup group on the socket.
+	 */</span>
+	gsa = (sockunion_t *)&amp;msfr.msfr_group;
+	idx = imo_match_group(imo, ifp, &amp;gsa-&gt;sa);
+	<span class="enscript-keyword">if</span> (idx == (size_t)-1 || imo-&gt;imo_mfilters == NULL) {
+		IMO_UNLOCK(imo);
+		<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+	}
+	imf = &amp;imo-&gt;imo_mfilters[idx];
+
+	<span class="enscript-comment">/*
+	 * Ignore memberships which are in limbo.
+	 */</span>
+	<span class="enscript-keyword">if</span> (imf-&gt;imf_st[1] == MCAST_UNDEFINED) {
+		IMO_UNLOCK(imo);
+		<span class="enscript-keyword">return</span> (EAGAIN);
+	}
+	msfr.msfr_fmode = imf-&gt;imf_st[1];
+
+	<span class="enscript-comment">/*
+	 * If the user specified a buffer, copy out the source filter
+	 * entries to userland gracefully.
+	 * We only copy out the number of entries which userland
+	 * has asked for, but we always tell userland how big the
+	 * buffer really needs to be.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(current_proc())) 
+		tmp_ptr = msfr64.msfr_srcs;
+	<span class="enscript-keyword">else</span>
+		tmp_ptr = CAST_USER_ADDR_T(msfr32.msfr_srcs);
+
+	tss = NULL;
+	<span class="enscript-keyword">if</span> (tmp_ptr != USER_ADDR_NULL &amp;&amp; msfr.msfr_nsrcs &gt; 0) {
+		tss = _MALLOC((size_t) msfr.msfr_nsrcs * <span class="enscript-keyword">sizeof</span>(*tss),
+		    M_TEMP, M_WAITOK | M_ZERO);
+		<span class="enscript-keyword">if</span> (tss == NULL) {
+			IMO_UNLOCK(imo);
+			<span class="enscript-keyword">return</span> (ENOBUFS);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Count number of sources in-mode at t0.
+	 * If buffer space exists and remains, copy out source entries.
+	 */</span>
+	nsrcs = msfr.msfr_nsrcs;
+	ncsrcs = 0;
+	ptss = tss;
+	RB_FOREACH(ims, ip_msource_tree, &amp;imf-&gt;imf_sources) {
+		lims = (<span class="enscript-type">struct</span> in_msource *)ims;
+		<span class="enscript-keyword">if</span> (lims-&gt;imsl_st[0] == MCAST_UNDEFINED ||
+		    lims-&gt;imsl_st[0] != imf-&gt;imf_st[0])
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (tss != NULL &amp;&amp; nsrcs &gt; 0) {
+			psin = (<span class="enscript-type">struct</span> sockaddr_in *)ptss;
+			psin-&gt;sin_family = AF_INET;
+			psin-&gt;sin_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in);
+			psin-&gt;sin_addr.s_addr = htonl(lims-&gt;ims_haddr);
+			psin-&gt;sin_port = 0;
+			++ptss;
+			--nsrcs;
+			++ncsrcs;
+		}
+	}
+
+	IMO_UNLOCK(imo);
+
+	<span class="enscript-keyword">if</span> (tss != NULL) {
+		error = copyout(tss, tmp_ptr, ncsrcs * <span class="enscript-keyword">sizeof</span>(*tss));
+		FREE(tss, M_TEMP);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+	}
+
+	msfr.msfr_nsrcs = ncsrcs;
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(current_proc())) {
+		msfr64.msfr_ifindex = msfr.msfr_ifindex;
+		msfr64.msfr_fmode   = msfr.msfr_fmode;
+		msfr64.msfr_nsrcs   = msfr.msfr_nsrcs;
+		memcpy(&amp;msfr64.msfr_group, &amp;msfr.msfr_group,
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_storage));
+		error = sooptcopyout(sopt, &amp;msfr64,
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> __msfilterreq64));
+	} <span class="enscript-keyword">else</span> {
+		msfr32.msfr_ifindex = msfr.msfr_ifindex;
+		msfr32.msfr_fmode   = msfr.msfr_fmode;
+		msfr32.msfr_nsrcs   = msfr.msfr_nsrcs;
+		memcpy(&amp;msfr32.msfr_group, &amp;msfr.msfr_group,
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_storage));
+		error = sooptcopyout(sopt, &amp;msfr32,
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> __msfilterreq32));
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Return the IP multicast options in response to user getsockopt().
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">inp_getmoptions</span>(<span class="enscript-type">struct</span> inpcb *inp, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+	<span class="enscript-type">struct</span> ip_mreqn		 mreqn;
+	<span class="enscript-type">struct</span> ip_moptions	*imo;
+	<span class="enscript-type">struct</span> ifnet		*ifp;
+	<span class="enscript-type">struct</span> in_ifaddr	*ia;
+	<span class="enscript-type">int</span>			 error, optval;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		 ifindex;
+	u_char			 coptval;
+
+	imo = inp-&gt;inp_moptions;
+	<span class="enscript-comment">/*
+	 * If socket is neither of type SOCK_RAW or SOCK_DGRAM,
+	 * or is a divert socket, reject it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (SOCK_PROTO(inp-&gt;inp_socket) == IPPROTO_DIVERT ||
+	    (SOCK_TYPE(inp-&gt;inp_socket) != SOCK_RAW &amp;&amp;
+	    SOCK_TYPE(inp-&gt;inp_socket) != SOCK_DGRAM)) {
+		<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+	}
+
+	error = 0;
+	<span class="enscript-keyword">switch</span> (sopt-&gt;sopt_name) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MULTICAST_IF</span>:
+		memset(&amp;mreqn, 0, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreqn));
+		<span class="enscript-keyword">if</span> (imo != NULL) {
+			IMO_LOCK(imo);
+			ifp = imo-&gt;imo_multicast_ifp;
+			<span class="enscript-keyword">if</span> (!in_nullhost(imo-&gt;imo_multicast_addr)) {
+				mreqn.imr_address = imo-&gt;imo_multicast_addr;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ifp != NULL) {
+				mreqn.imr_ifindex = ifp-&gt;if_index;
+				IFP_TO_IA(ifp, ia);
+				<span class="enscript-keyword">if</span> (ia != NULL) {
+					IFA_LOCK_SPIN(&amp;ia-&gt;ia_ifa);
+					mreqn.imr_address =
+					    IA_SIN(ia)-&gt;sin_addr;
+					IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+					IFA_REMREF(&amp;ia-&gt;ia_ifa);
+				}
+			}
+			IMO_UNLOCK(imo);
+		}
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_valsize == <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreqn)) {
+			error = sooptcopyout(sopt, &amp;mreqn,
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreqn));
+		} <span class="enscript-keyword">else</span> {
+			error = sooptcopyout(sopt, &amp;mreqn.imr_address,
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> in_addr));
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MULTICAST_IFINDEX</span>:
+		<span class="enscript-keyword">if</span> (imo != NULL)
+			IMO_LOCK(imo);
+		<span class="enscript-keyword">if</span> (imo == NULL || imo-&gt;imo_multicast_ifp == NULL) {
+			ifindex = 0;
+		} <span class="enscript-keyword">else</span> {
+			ifindex = imo-&gt;imo_multicast_ifp-&gt;if_index;
+		}
+		<span class="enscript-keyword">if</span> (imo != NULL)
+			IMO_UNLOCK(imo);
+		error = sooptcopyout(sopt, &amp;ifindex, <span class="enscript-keyword">sizeof</span> (ifindex));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MULTICAST_TTL</span>:
+		<span class="enscript-keyword">if</span> (imo == NULL) 
+			optval = coptval = IP_DEFAULT_MULTICAST_TTL;
+		<span class="enscript-keyword">else</span> {
+			IMO_LOCK(imo);
+			optval = coptval = imo-&gt;imo_multicast_ttl;
+			IMO_UNLOCK(imo);
+		}
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_valsize == <span class="enscript-keyword">sizeof</span>(u_char))
+			error = sooptcopyout(sopt, &amp;coptval, <span class="enscript-keyword">sizeof</span>(u_char));
+		<span class="enscript-keyword">else</span>
+			error = sooptcopyout(sopt, &amp;optval, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MULTICAST_LOOP</span>:
+		<span class="enscript-keyword">if</span> (imo == 0)
+			optval = coptval = IP_DEFAULT_MULTICAST_LOOP;
+		<span class="enscript-keyword">else</span> {
+			IMO_LOCK(imo);
+			optval = coptval = imo-&gt;imo_multicast_loop;
+			IMO_UNLOCK(imo);
+		}
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_valsize == <span class="enscript-keyword">sizeof</span>(u_char))
+			error = sooptcopyout(sopt, &amp;coptval, <span class="enscript-keyword">sizeof</span>(u_char));
+		<span class="enscript-keyword">else</span>
+			error = sooptcopyout(sopt, &amp;optval, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MSFILTER</span>:
+		<span class="enscript-keyword">if</span> (imo == NULL) {
+			error = EADDRNOTAVAIL;
+		} <span class="enscript-keyword">else</span> {
+			error = inp_get_source_filters(inp, sopt);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		error = ENOPROTOOPT;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Look up the ifnet to use for a multicast group membership,
+ * given the IPv4 address of an interface, and the IPv4 group address.
+ *
+ * This routine exists to support legacy multicast applications
+ * which do not understand that multicast memberships are scoped to
+ * specific physical links in the networking stack, or which need
+ * to join link-scope groups before IPv4 addresses are configured.
+ *
+ * If inp is non-NULL and is bound to an interface, use this socket's
+ * inp_boundif for any required routing table lookup.
+ *
+ * If the route lookup fails, attempt to use the first non-loopback
+ * interface with multicast capability in the system as a
+ * last resort. The legacy IPv4 ASM API requires that we do
+ * this in order to allow groups to be joined when the routing
+ * table has not yet been populated during boot.
+ *
+ * Returns NULL if no ifp could be found.
+ *
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ifnet *
+<span class="enscript-function-name">inp_lookup_mcast_ifp</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> inpcb *inp,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_in *gsin, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_addr ina)
+{
+	<span class="enscript-type">struct</span> ifnet	*ifp;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	 ifindex = 0;
+
+	VERIFY(gsin-&gt;sin_family == AF_INET);
+	VERIFY(IN_MULTICAST(ntohl(gsin-&gt;sin_addr.s_addr)));
+
+	ifp = NULL;
+	<span class="enscript-keyword">if</span> (!in_nullhost(ina)) {
+		<span class="enscript-type">struct</span> in_addr new_ina;
+		memcpy(&amp;new_ina, &amp;ina, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> in_addr));
+		ifp = ip_multicast_if(&amp;new_ina, &amp;ifindex);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> route ro;
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> ifscope = IFSCOPE_NONE;
+
+		<span class="enscript-keyword">if</span> (inp != NULL &amp;&amp; (inp-&gt;inp_flags &amp; INP_BOUND_IF))
+			ifscope = inp-&gt;inp_boundifp-&gt;if_index;
+
+		bzero(&amp;ro, <span class="enscript-keyword">sizeof</span> (ro));
+		memcpy(&amp;ro.ro_dst, gsin, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in));
+		rtalloc_scoped_ign(&amp;ro, 0, ifscope);
+		<span class="enscript-keyword">if</span> (ro.ro_rt != NULL) {
+			ifp = ro.ro_rt-&gt;rt_ifp;
+			VERIFY(ifp != NULL);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-type">struct</span> in_ifaddr *ia;
+			<span class="enscript-type">struct</span> ifnet *mifp;
+
+			mifp = NULL;
+			lck_rw_lock_shared(in_ifaddr_rwlock);
+			TAILQ_FOREACH(ia, &amp;in_ifaddrhead, ia_link) {
+				IFA_LOCK_SPIN(&amp;ia-&gt;ia_ifa);
+				mifp = ia-&gt;ia_ifp;
+				IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+				<span class="enscript-keyword">if</span> (!(mifp-&gt;if_flags &amp; IFF_LOOPBACK) &amp;&amp;
+				     (mifp-&gt;if_flags &amp; IFF_MULTICAST)) {
+					ifp = mifp;
+					<span class="enscript-keyword">break</span>;
+				}
+			}
+			lck_rw_done(in_ifaddr_rwlock);
+		}
+		ROUTE_RELEASE(&amp;ro);
+	}
+
+	<span class="enscript-keyword">return</span> (ifp);
+}
+
+<span class="enscript-comment">/*
+ * Join an IPv4 multicast group, possibly with a source.
+ *
+ * NB: sopt-&gt;sopt_val might point to the kernel address space. This means that
+ * we were called by the IPv6 stack due to the presence of an IPv6 v4 mapped
+ * address. In this scenario, sopt_p points to kernproc and sooptcopyin() will
+ * just issue an in-kernel memcpy.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">inp_join_group</span>(<span class="enscript-type">struct</span> inpcb *inp, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+	<span class="enscript-type">struct</span> group_source_req		 gsr;
+	sockunion_t			*gsa, *ssa;
+	<span class="enscript-type">struct</span> ifnet			*ifp;
+	<span class="enscript-type">struct</span> in_mfilter		*imf;
+	<span class="enscript-type">struct</span> ip_moptions		*imo;
+	<span class="enscript-type">struct</span> in_multi			*inm = NULL;
+	<span class="enscript-type">struct</span> in_msource		*lims;
+	size_t				 idx;
+	<span class="enscript-type">int</span>				 error, is_new;
+	<span class="enscript-type">struct</span> igmp_tparams		 itp;
+
+	bzero(&amp;itp, <span class="enscript-keyword">sizeof</span> (itp));
+	ifp = NULL;
+	imf = NULL;
+	error = 0;
+	is_new = 0;
+
+	memset(&amp;gsr, 0, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> group_source_req));
+	gsa = (sockunion_t *)&amp;gsr.gsr_group;
+	gsa-&gt;ss.ss_family = AF_UNSPEC;
+	ssa = (sockunion_t *)&amp;gsr.gsr_source;
+	ssa-&gt;ss.ss_family = AF_UNSPEC;
+
+	<span class="enscript-keyword">switch</span> (sopt-&gt;sopt_name) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_ADD_MEMBERSHIP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_ADD_SOURCE_MEMBERSHIP</span>: {
+		<span class="enscript-type">struct</span> ip_mreq_source	 mreqs;
+
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == IP_ADD_MEMBERSHIP) {
+			error = sooptcopyin(sopt, &amp;mreqs,
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreq),
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreq));
+			<span class="enscript-comment">/*
+			 * Do argument switcharoo from ip_mreq into
+			 * ip_mreq_source to avoid using two instances.
+			 */</span>
+			mreqs.imr_interface = mreqs.imr_sourceaddr;
+			mreqs.imr_sourceaddr.s_addr = INADDR_ANY;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == IP_ADD_SOURCE_MEMBERSHIP) {
+			error = sooptcopyin(sopt, &amp;mreqs,
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreq_source),
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreq_source));
+		}
+		<span class="enscript-keyword">if</span> (error) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: error copyin IP_ADD_MEMBERSHIP/&quot;</span>
+			    <span class="enscript-string">&quot;IP_ADD_SOURCE_MEMBERSHIP %d err=%d\n&quot;</span>,
+			    __func__, sopt-&gt;sopt_name, error));
+			<span class="enscript-keyword">return</span> (error);
+		}
+
+		gsa-&gt;sin.sin_family = AF_INET;
+		gsa-&gt;sin.sin_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in);
+		gsa-&gt;sin.sin_addr = mreqs.imr_multiaddr;
+
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == IP_ADD_SOURCE_MEMBERSHIP) {
+			ssa-&gt;sin.sin_family = AF_INET;
+			ssa-&gt;sin.sin_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in);
+			ssa-&gt;sin.sin_addr = mreqs.imr_sourceaddr;
+		}
+
+		<span class="enscript-keyword">if</span> (!IN_MULTICAST(ntohl(gsa-&gt;sin.sin_addr.s_addr)))
+			<span class="enscript-keyword">return</span> (EINVAL);
+
+		ifp = inp_lookup_mcast_ifp(inp, &amp;gsa-&gt;sin,
+		    mreqs.imr_interface);
+		IGMP_INET_PRINTF(mreqs.imr_interface,
+		    (<span class="enscript-string">&quot;%s: imr_interface = %s, ifp = 0x%llx\n&quot;</span>, __func__,
+		    _igmp_inet_buf, (uint64_t)VM_KERNEL_ADDRPERM(ifp)));
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MCAST_JOIN_GROUP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MCAST_JOIN_SOURCE_GROUP</span>:
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == MCAST_JOIN_GROUP) {
+			error = sooptcopyin(sopt, &amp;gsr,
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> group_req),
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> group_req));
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == MCAST_JOIN_SOURCE_GROUP) {
+			error = sooptcopyin(sopt, &amp;gsr,
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> group_source_req),
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> group_source_req));
+		}
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+
+		<span class="enscript-keyword">if</span> (gsa-&gt;sin.sin_family != AF_INET ||
+		    gsa-&gt;sin.sin_len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in))
+			<span class="enscript-keyword">return</span> (EINVAL);
+
+		<span class="enscript-comment">/*
+		 * Overwrite the port field if present, as the sockaddr
+		 * being copied in may be matched with a binary comparison.
+		 */</span>
+		gsa-&gt;sin.sin_port = 0;
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == MCAST_JOIN_SOURCE_GROUP) {
+			<span class="enscript-keyword">if</span> (ssa-&gt;sin.sin_family != AF_INET ||
+			    ssa-&gt;sin.sin_len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in))
+				<span class="enscript-keyword">return</span> (EINVAL);
+			ssa-&gt;sin.sin_port = 0;
+		}
+
+		<span class="enscript-keyword">if</span> (!IN_MULTICAST(ntohl(gsa-&gt;sin.sin_addr.s_addr)))
+			<span class="enscript-keyword">return</span> (EINVAL);
+
+		ifnet_head_lock_shared();
+		<span class="enscript-keyword">if</span> (gsr.gsr_interface == 0 ||
+		    (u_int)if_index &lt; gsr.gsr_interface) {
+			ifnet_head_done();
+			<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+		}
+		ifp = ifindex2ifnet[gsr.gsr_interface];
+		ifnet_head_done();
+
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: unknown sopt_name %d\n&quot;</span>,
+		    __func__, sopt-&gt;sopt_name));
+		<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (ifp == NULL || (ifp-&gt;if_flags &amp; IFF_MULTICAST) == 0)
+		<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+
+	imo = inp_findmoptions(inp);
+	<span class="enscript-keyword">if</span> (imo == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	IMO_LOCK(imo);
+	idx = imo_match_group(imo, ifp, &amp;gsa-&gt;sa);
+	<span class="enscript-keyword">if</span> (idx == (size_t)-1) {
+		is_new = 1;
+	} <span class="enscript-keyword">else</span> {
+		inm = imo-&gt;imo_membership[idx];
+		imf = &amp;imo-&gt;imo_mfilters[idx];
+		<span class="enscript-keyword">if</span> (ssa-&gt;ss.ss_family != AF_UNSPEC) {
+			<span class="enscript-comment">/*
+			 * MCAST_JOIN_SOURCE_GROUP on an exclusive membership
+			 * is an error. On an existing inclusive membership,
+			 * it just adds the source to the filter list.
+			 */</span>
+			<span class="enscript-keyword">if</span> (imf-&gt;imf_st[1] != MCAST_INCLUDE) {
+				error = EINVAL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imo_locked</span>;
+			}
+			<span class="enscript-comment">/*
+			 * Throw out duplicates.
+			 *
+			 * XXX FIXME: This makes a naive assumption that
+			 * even if entries exist for *ssa in this imf,
+			 * they will be rejected as dupes, even if they
+			 * are not valid in the current mode (in-mode).
+			 *
+			 * in_msource is transactioned just as for anything
+			 * else in SSM -- but note naive use of inm_graft()
+			 * below for allocating new filter entries.
+			 *
+			 * This is only an issue if someone mixes the
+			 * full-state SSM API with the delta-based API,
+			 * which is discouraged in the relevant RFCs.
+			 */</span>
+			lims = imo_match_source(imo, idx, &amp;ssa-&gt;sa);
+			<span class="enscript-keyword">if</span> (lims != NULL <span class="enscript-comment">/*&amp;&amp;
+			    lims-&gt;imsl_st[1] == MCAST_INCLUDE*/</span>) {
+				error = EADDRNOTAVAIL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imo_locked</span>;
+			}
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * MCAST_JOIN_GROUP on an existing exclusive
+			 * membership is an error; return EADDRINUSE
+			 * to preserve 4.4BSD API idempotence, and
+			 * avoid tedious detour to code below.
+			 * NOTE: This is bending RFC 3678 a bit.
+			 *
+			 * On an existing inclusive membership, this is also
+			 * an error; if you want to change filter mode,
+			 * you must use the userland API setsourcefilter().
+			 * XXX We don't reject this for imf in UNDEFINED
+			 * state at t1, because allocation of a filter
+			 * is atomic with allocation of a membership.
+			 */</span>
+			error = EINVAL;
+			<span class="enscript-comment">/* See comments above for EADDRINUSE */</span>
+			<span class="enscript-keyword">if</span> (imf-&gt;imf_st[1] == MCAST_EXCLUDE)
+				error = EADDRINUSE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imo_locked</span>;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Begin state merge transaction at socket layer.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (is_new) {
+		<span class="enscript-keyword">if</span> (imo-&gt;imo_num_memberships == imo-&gt;imo_max_memberships) {
+			error = imo_grow(imo, 0);
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imo_locked</span>;
+		}
+		<span class="enscript-comment">/*
+		 * Allocate the new slot upfront so we can deal with
+		 * grafting the new source filter in same code path
+		 * as for join-source on existing membership.
+		 */</span>
+		idx = imo-&gt;imo_num_memberships;
+		imo-&gt;imo_membership[idx] = NULL;
+		imo-&gt;imo_num_memberships++;
+		VERIFY(imo-&gt;imo_mfilters != NULL);
+		imf = &amp;imo-&gt;imo_mfilters[idx];
+		VERIFY(RB_EMPTY(&amp;imf-&gt;imf_sources));
+	}
+
+	<span class="enscript-comment">/*
+	 * Graft new source into filter list for this inpcb's
+	 * membership of the group. The in_multi may not have
+	 * been allocated yet if this is a new membership, however,
+	 * the in_mfilter slot will be allocated and must be initialized.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ssa-&gt;ss.ss_family != AF_UNSPEC) {
+		<span class="enscript-comment">/* Membership starts in IN mode */</span>
+		<span class="enscript-keyword">if</span> (is_new) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: new join w/source\n&quot;</span>, __func__));
+			imf_init(imf, MCAST_UNDEFINED, MCAST_INCLUDE);
+		} <span class="enscript-keyword">else</span> {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: %s source\n&quot;</span>, __func__, <span class="enscript-string">&quot;allow&quot;</span>));
+		}
+		lims = imf_graft(imf, MCAST_INCLUDE, &amp;ssa-&gt;sin);
+		<span class="enscript-keyword">if</span> (lims == NULL) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: merge imf state failed\n&quot;</span>,
+			    __func__));
+			error = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imo_free</span>;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* No address specified; Membership starts in EX mode */</span>
+		<span class="enscript-keyword">if</span> (is_new) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: new join w/o source\n&quot;</span>, __func__));
+			imf_init(imf, MCAST_UNDEFINED, MCAST_EXCLUDE);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Begin state merge transaction at IGMP layer.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (is_new) {
+		VERIFY(inm == NULL);
+		error = in_joingroup(ifp, &amp;gsa-&gt;sin.sin_addr, imf, &amp;inm);
+		VERIFY(inm != NULL || error != 0);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imo_free</span>;
+		imo-&gt;imo_membership[idx] = inm;	<span class="enscript-comment">/* from in_joingroup() */</span>
+	} <span class="enscript-keyword">else</span> {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: merge inm state\n&quot;</span>, __func__));
+		INM_LOCK(inm);
+		error = inm_merge(inm, imf);
+		<span class="enscript-keyword">if</span> (error) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: failed to merge inm state\n&quot;</span>,
+			    __func__));
+			INM_UNLOCK(inm);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imf_rollback</span>;
+		}
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: doing igmp downcall\n&quot;</span>, __func__));
+		error = igmp_change_state(inm, &amp;itp);
+		INM_UNLOCK(inm);
+		<span class="enscript-keyword">if</span> (error) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: failed igmp downcall\n&quot;</span>,
+			    __func__));
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imf_rollback</span>;
+		}
+	}
+
+<span class="enscript-reference">out_imf_rollback</span>:
+	<span class="enscript-keyword">if</span> (error) {
+		imf_rollback(imf);
+		<span class="enscript-keyword">if</span> (is_new)
+			imf_purge(imf);
+		<span class="enscript-keyword">else</span>
+			imf_reap(imf);
+	} <span class="enscript-keyword">else</span> {
+		imf_commit(imf);
+	}
+
+<span class="enscript-reference">out_imo_free</span>:
+	<span class="enscript-keyword">if</span> (error &amp;&amp; is_new) {
+		VERIFY(inm == NULL);
+		imo-&gt;imo_membership[idx] = NULL;
+		--imo-&gt;imo_num_memberships;
+	}
+
+<span class="enscript-reference">out_imo_locked</span>:
+	IMO_UNLOCK(imo);
+	IMO_REMREF(imo);	<span class="enscript-comment">/* from inp_findmoptions() */</span>
+
+	<span class="enscript-comment">/* schedule timer now that we've dropped the lock(s) */</span>
+	igmp_set_timeout(&amp;itp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Leave an IPv4 multicast group on an inpcb, possibly with a source.
+ *
+ * NB: sopt-&gt;sopt_val might point to the kernel address space. Refer to the
+ * block comment on top of inp_join_group() for more information.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">inp_leave_group</span>(<span class="enscript-type">struct</span> inpcb *inp, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+	<span class="enscript-type">struct</span> group_source_req		 gsr;
+	<span class="enscript-type">struct</span> ip_mreq_source		 mreqs;
+	sockunion_t			*gsa, *ssa;
+	<span class="enscript-type">struct</span> ifnet			*ifp;
+	<span class="enscript-type">struct</span> in_mfilter		*imf;
+	<span class="enscript-type">struct</span> ip_moptions		*imo;
+	<span class="enscript-type">struct</span> in_msource		*ims;
+	<span class="enscript-type">struct</span> in_multi			*inm = NULL;
+	size_t				 idx;
+	<span class="enscript-type">int</span>				 error, is_final;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>			 ifindex = 0;
+	<span class="enscript-type">struct</span> igmp_tparams		 itp;
+
+	bzero(&amp;itp, <span class="enscript-keyword">sizeof</span> (itp));
+	ifp = NULL;
+	error = 0;
+	is_final = 1;
+
+	memset(&amp;gsr, 0, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> group_source_req));
+	gsa = (sockunion_t *)&amp;gsr.gsr_group;
+	gsa-&gt;ss.ss_family = AF_UNSPEC;
+	ssa = (sockunion_t *)&amp;gsr.gsr_source;
+	ssa-&gt;ss.ss_family = AF_UNSPEC;
+
+	<span class="enscript-keyword">switch</span> (sopt-&gt;sopt_name) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_DROP_MEMBERSHIP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_DROP_SOURCE_MEMBERSHIP</span>:
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == IP_DROP_MEMBERSHIP) {
+			error = sooptcopyin(sopt, &amp;mreqs,
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreq),
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreq));
+			<span class="enscript-comment">/*
+			 * Swap interface and sourceaddr arguments,
+			 * as ip_mreq and ip_mreq_source are laid
+			 * out differently.
+			 */</span>
+			mreqs.imr_interface = mreqs.imr_sourceaddr;
+			mreqs.imr_sourceaddr.s_addr = INADDR_ANY;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == IP_DROP_SOURCE_MEMBERSHIP) {
+			error = sooptcopyin(sopt, &amp;mreqs,
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreq_source),
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreq_source));
+		}
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+
+		gsa-&gt;sin.sin_family = AF_INET;
+		gsa-&gt;sin.sin_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in);
+		gsa-&gt;sin.sin_addr = mreqs.imr_multiaddr;
+
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == IP_DROP_SOURCE_MEMBERSHIP) {
+			ssa-&gt;sin.sin_family = AF_INET;
+			ssa-&gt;sin.sin_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in);
+			ssa-&gt;sin.sin_addr = mreqs.imr_sourceaddr;
+		}
+		<span class="enscript-comment">/*
+		 * Attempt to look up hinted ifp from interface address.
+		 * Fallthrough with null ifp iff lookup fails, to
+		 * preserve 4.4BSD mcast API idempotence.
+		 * XXX NOTE WELL: The RFC 3678 API is preferred because
+		 * using an IPv4 address as a key is racy.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!in_nullhost(mreqs.imr_interface))
+			ifp = ip_multicast_if(&amp;mreqs.imr_interface, &amp;ifindex);
+
+		IGMP_INET_PRINTF(mreqs.imr_interface,
+		    (<span class="enscript-string">&quot;%s: imr_interface = %s, ifp = 0x%llx\n&quot;</span>, __func__,
+		    _igmp_inet_buf, (uint64_t)VM_KERNEL_ADDRPERM(ifp)));
+
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MCAST_LEAVE_GROUP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MCAST_LEAVE_SOURCE_GROUP</span>:
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == MCAST_LEAVE_GROUP) {
+			error = sooptcopyin(sopt, &amp;gsr,
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> group_req),
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> group_req));
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == MCAST_LEAVE_SOURCE_GROUP) {
+			error = sooptcopyin(sopt, &amp;gsr,
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> group_source_req),
+			    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> group_source_req));
+		}
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+
+		<span class="enscript-keyword">if</span> (gsa-&gt;sin.sin_family != AF_INET ||
+		    gsa-&gt;sin.sin_len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in))
+			<span class="enscript-keyword">return</span> (EINVAL);
+
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_name == MCAST_LEAVE_SOURCE_GROUP) {
+			<span class="enscript-keyword">if</span> (ssa-&gt;sin.sin_family != AF_INET ||
+			    ssa-&gt;sin.sin_len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in))
+				<span class="enscript-keyword">return</span> (EINVAL);
+		}
+
+		ifnet_head_lock_shared();
+		<span class="enscript-keyword">if</span> (gsr.gsr_interface == 0 ||
+		    (u_int)if_index &lt; gsr.gsr_interface) {
+			ifnet_head_done();
+			<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+		}
+
+		ifp = ifindex2ifnet[gsr.gsr_interface];
+		ifnet_head_done();
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: unknown sopt_name %d\n&quot;</span>,
+		    __func__, sopt-&gt;sopt_name));
+		<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (!IN_MULTICAST(ntohl(gsa-&gt;sin.sin_addr.s_addr)))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/*
+	 * Find the membership in the membership array.
+	 */</span>
+	imo = inp_findmoptions(inp);
+	<span class="enscript-keyword">if</span> (imo == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	IMO_LOCK(imo);
+	idx = imo_match_group(imo, ifp, &amp;gsa-&gt;sa);
+	<span class="enscript-keyword">if</span> (idx == (size_t)-1) {
+		error = EADDRNOTAVAIL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_locked</span>;
+	}
+	inm = imo-&gt;imo_membership[idx];
+	imf = &amp;imo-&gt;imo_mfilters[idx];
+
+	<span class="enscript-keyword">if</span> (ssa-&gt;ss.ss_family != AF_UNSPEC) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: opt=%d is_final=0\n&quot;</span>, __func__,
+		    sopt-&gt;sopt_name));
+		is_final = 0;
+	}
+
+	<span class="enscript-comment">/*
+	 * Begin state merge transaction at socket layer.
+	 */</span>
+
+	<span class="enscript-comment">/*
+	 * If we were instructed only to leave a given source, do so.
+	 * MCAST_LEAVE_SOURCE_GROUP is only valid for inclusive memberships.
+	 */</span>
+	<span class="enscript-keyword">if</span> (is_final) {
+		imf_leave(imf);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (imf-&gt;imf_st[0] == MCAST_EXCLUDE) {
+			error = EADDRNOTAVAIL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_locked</span>;
+		}
+		ims = imo_match_source(imo, idx, &amp;ssa-&gt;sa);
+		<span class="enscript-keyword">if</span> (ims == NULL) {
+			IGMP_INET_PRINTF(ssa-&gt;sin.sin_addr,
+			    (<span class="enscript-string">&quot;%s: source %s %spresent\n&quot;</span>, __func__,
+			    _igmp_inet_buf, <span class="enscript-string">&quot;not &quot;</span>));
+			error = EADDRNOTAVAIL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_locked</span>;
+		}
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: %s source\n&quot;</span>, __func__, <span class="enscript-string">&quot;block&quot;</span>));
+		error = imf_prune(imf, &amp;ssa-&gt;sin);
+		<span class="enscript-keyword">if</span> (error) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: merge imf state failed\n&quot;</span>,
+			    __func__));
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_locked</span>;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Begin state merge transaction at IGMP layer.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (is_final) {
+		<span class="enscript-comment">/*
+		 * Give up the multicast address record to which
+		 * the membership points.  Reference held in imo
+		 * will be released below.
+		 */</span>
+		(<span class="enscript-type">void</span>) in_leavegroup(inm, imf);
+	} <span class="enscript-keyword">else</span> {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: merge inm state\n&quot;</span>, __func__));
+		INM_LOCK(inm);
+		error = inm_merge(inm, imf);
+		<span class="enscript-keyword">if</span> (error) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: failed to merge inm state\n&quot;</span>,
+			    __func__));
+			INM_UNLOCK(inm);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imf_rollback</span>;
+		}
+
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: doing igmp downcall\n&quot;</span>, __func__));
+		error = igmp_change_state(inm, &amp;itp);
+		<span class="enscript-keyword">if</span> (error) {
+			IGMP_PRINTF((<span class="enscript-string">&quot;%s: failed igmp downcall\n&quot;</span>, __func__));
+		}
+		INM_UNLOCK(inm);
+	}
+
+<span class="enscript-reference">out_imf_rollback</span>:
+	<span class="enscript-keyword">if</span> (error)
+		imf_rollback(imf);
+	<span class="enscript-keyword">else</span>
+		imf_commit(imf);
+
+	imf_reap(imf);
+
+	<span class="enscript-keyword">if</span> (is_final) {
+		<span class="enscript-comment">/* Remove the gap in the membership and filter array. */</span>
+		VERIFY(inm == imo-&gt;imo_membership[idx]);
+		imo-&gt;imo_membership[idx] = NULL;
+		INM_REMREF(inm);
+		<span class="enscript-keyword">for</span> (++idx; idx &lt; imo-&gt;imo_num_memberships; ++idx) {
+			imo-&gt;imo_membership[idx-1] = imo-&gt;imo_membership[idx];
+			imo-&gt;imo_mfilters[idx-1] = imo-&gt;imo_mfilters[idx];
+		}
+		imo-&gt;imo_num_memberships--;
+	}
+
+<span class="enscript-reference">out_locked</span>:
+	IMO_UNLOCK(imo);
+	IMO_REMREF(imo);	<span class="enscript-comment">/* from inp_findmoptions() */</span>
+
+	<span class="enscript-comment">/* schedule timer now that we've dropped the lock(s) */</span>
+	igmp_set_timeout(&amp;itp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Select the interface for transmitting IPv4 multicast datagrams.
+ *
+ * Either an instance of struct in_addr or an instance of struct ip_mreqn
+ * may be passed to this socket option. An address of INADDR_ANY or an
+ * interface index of 0 is used to remove a previous selection.
+ * When no interface is selected, one is chosen for every send.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">inp_set_multicast_if</span>(<span class="enscript-type">struct</span> inpcb *inp, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+	<span class="enscript-type">struct</span> in_addr		 addr;
+	<span class="enscript-type">struct</span> ip_mreqn		 mreqn;
+	<span class="enscript-type">struct</span> ifnet		*ifp;
+	<span class="enscript-type">struct</span> ip_moptions	*imo;
+	<span class="enscript-type">int</span>			 error = 0 ;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		 ifindex = 0;
+
+	<span class="enscript-keyword">if</span> (sopt-&gt;sopt_valsize == <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreqn)) {
+		<span class="enscript-comment">/*
+		 * An interface index was specified using the
+		 * Linux-derived ip_mreqn structure.
+		 */</span>
+		error = sooptcopyin(sopt, &amp;mreqn, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreqn),
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip_mreqn));
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+
+		ifnet_head_lock_shared();
+		<span class="enscript-keyword">if</span> (mreqn.imr_ifindex &lt; 0 || if_index &lt; mreqn.imr_ifindex) {
+			ifnet_head_done();
+			<span class="enscript-keyword">return</span> (EINVAL);
+		}
+
+		<span class="enscript-keyword">if</span> (mreqn.imr_ifindex == 0) {
+			ifp = NULL;
+		} <span class="enscript-keyword">else</span> {
+			ifp = ifindex2ifnet[mreqn.imr_ifindex];
+			<span class="enscript-keyword">if</span> (ifp == NULL) {
+				ifnet_head_done();
+				<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+			}
+		}
+		ifnet_head_done();
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * An interface was specified by IPv4 address.
+		 * This is the traditional BSD usage.
+		 */</span>
+		error = sooptcopyin(sopt, &amp;addr, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> in_addr),
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> in_addr));
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+		<span class="enscript-keyword">if</span> (in_nullhost(addr)) {
+			ifp = NULL;
+		} <span class="enscript-keyword">else</span> {
+			ifp = ip_multicast_if(&amp;addr, &amp;ifindex);
+			<span class="enscript-keyword">if</span> (ifp == NULL) {
+				IGMP_INET_PRINTF(addr,
+				    (<span class="enscript-string">&quot;%s: can't find ifp for addr=%s\n&quot;</span>,
+				    __func__, _igmp_inet_buf));
+				<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+			}
+		}
+		<span class="enscript-comment">/* XXX remove? */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IGMP_DEBUG0</span>
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: ifp = 0x%llx, addr = %s\n&quot;</span>, __func__,
+		    (uint64_t)VM_KERNEL_ADDRPERM(ifp), inet_ntoa(addr)));
+#<span class="enscript-reference">endif</span>
+	}
+
+	<span class="enscript-comment">/* Reject interfaces which do not support multicast. */</span>
+	<span class="enscript-keyword">if</span> (ifp != NULL &amp;&amp; (ifp-&gt;if_flags &amp; IFF_MULTICAST) == 0)
+		<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+
+	imo = inp_findmoptions(inp);
+	<span class="enscript-keyword">if</span> (imo == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	IMO_LOCK(imo);
+	imo-&gt;imo_multicast_ifp = ifp;
+	<span class="enscript-keyword">if</span> (ifindex)
+		imo-&gt;imo_multicast_addr = addr;
+	<span class="enscript-keyword">else</span>
+		imo-&gt;imo_multicast_addr.s_addr = INADDR_ANY;
+	IMO_UNLOCK(imo);
+	IMO_REMREF(imo);	<span class="enscript-comment">/* from inp_findmoptions() */</span>
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Atomically set source filters on a socket for an IPv4 multicast group.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">inp_set_source_filters</span>(<span class="enscript-type">struct</span> inpcb *inp, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+	<span class="enscript-type">struct</span> __msfilterreq64	 msfr, msfr64;
+	<span class="enscript-type">struct</span> __msfilterreq32	 msfr32;
+	sockunion_t		*gsa;
+	<span class="enscript-type">struct</span> ifnet		*ifp;
+	<span class="enscript-type">struct</span> in_mfilter	*imf;
+	<span class="enscript-type">struct</span> ip_moptions	*imo;
+	<span class="enscript-type">struct</span> in_multi		*inm;
+	size_t			 idx;
+	<span class="enscript-type">int</span>			 error;
+	user_addr_t		 tmp_ptr;
+	<span class="enscript-type">struct</span> igmp_tparams	 itp;
+
+	bzero(&amp;itp, <span class="enscript-keyword">sizeof</span> (itp));
+
+	<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(current_proc())) {
+		error = sooptcopyin(sopt, &amp;msfr64,
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> __msfilterreq64),
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> __msfilterreq64));
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+		<span class="enscript-comment">/* we never use msfr.msfr_srcs; */</span>
+		memcpy(&amp;msfr, &amp;msfr64, <span class="enscript-keyword">sizeof</span>(msfr64));
+	} <span class="enscript-keyword">else</span> {
+		error = sooptcopyin(sopt, &amp;msfr32,
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> __msfilterreq32),
+		    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> __msfilterreq32));
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+		<span class="enscript-comment">/* we never use msfr.msfr_srcs; */</span>
+		memcpy(&amp;msfr, &amp;msfr32, <span class="enscript-keyword">sizeof</span>(msfr32));
+	}
+
+	<span class="enscript-keyword">if</span> ((size_t) msfr.msfr_nsrcs &gt;
+	    UINT32_MAX / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_storage))
+		msfr.msfr_nsrcs = UINT32_MAX / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_storage);
+
+	<span class="enscript-keyword">if</span> (msfr.msfr_nsrcs &gt; in_mcast_maxsocksrc)
+		<span class="enscript-keyword">return</span> (ENOBUFS);
+
+	<span class="enscript-keyword">if</span> ((msfr.msfr_fmode != MCAST_EXCLUDE &amp;&amp;
+	     msfr.msfr_fmode != MCAST_INCLUDE))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">if</span> (msfr.msfr_group.ss_family != AF_INET ||
+	    msfr.msfr_group.ss_len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	gsa = (sockunion_t *)&amp;msfr.msfr_group;
+	<span class="enscript-keyword">if</span> (!IN_MULTICAST(ntohl(gsa-&gt;sin.sin_addr.s_addr)))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	gsa-&gt;sin.sin_port = 0;	<span class="enscript-comment">/* ignore port */</span>
+
+	ifnet_head_lock_shared();
+	<span class="enscript-keyword">if</span> (msfr.msfr_ifindex == 0 || (u_int)if_index &lt; msfr.msfr_ifindex) {
+		ifnet_head_done();
+		<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+	}
+
+	ifp = ifindex2ifnet[msfr.msfr_ifindex];
+	ifnet_head_done();
+	<span class="enscript-keyword">if</span> (ifp == NULL)
+		<span class="enscript-keyword">return</span> (EADDRNOTAVAIL);
+
+	<span class="enscript-comment">/*
+	 * Check if this socket is a member of this group.
+	 */</span>
+	imo = inp_findmoptions(inp);
+	<span class="enscript-keyword">if</span> (imo == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	IMO_LOCK(imo);
+	idx = imo_match_group(imo, ifp, &amp;gsa-&gt;sa);
+	<span class="enscript-keyword">if</span> (idx == (size_t)-1 || imo-&gt;imo_mfilters == NULL) {
+		error = EADDRNOTAVAIL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imo_locked</span>;
+	}
+	inm = imo-&gt;imo_membership[idx];
+	imf = &amp;imo-&gt;imo_mfilters[idx];
+
+	<span class="enscript-comment">/*
+	 * Begin state merge transaction at socket layer.
+	 */</span>
+
+	imf-&gt;imf_st[1] = msfr.msfr_fmode;
+
+	<span class="enscript-comment">/*
+	 * Apply any new source filters, if present.
+	 * Make a copy of the user-space source vector so
+	 * that we may copy them with a single copyin. This
+	 * allows us to deal with page faults up-front.
+	 */</span>
+	<span class="enscript-keyword">if</span> (msfr.msfr_nsrcs &gt; 0) {
+		<span class="enscript-type">struct</span> in_msource	*lims;
+		<span class="enscript-type">struct</span> sockaddr_in	*psin;
+		<span class="enscript-type">struct</span> sockaddr_storage	*kss, *pkss;
+		<span class="enscript-type">int</span>			 i;
+
+		<span class="enscript-keyword">if</span> (IS_64BIT_PROCESS(current_proc()))
+			tmp_ptr = msfr64.msfr_srcs;
+		<span class="enscript-keyword">else</span>
+			tmp_ptr = CAST_USER_ADDR_T(msfr32.msfr_srcs);
+
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: loading %lu source list entries\n&quot;</span>,
+		    __func__, (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)msfr.msfr_nsrcs));
+		kss = _MALLOC((size_t) msfr.msfr_nsrcs * <span class="enscript-keyword">sizeof</span>(*kss),
+		    M_TEMP, M_WAITOK);
+		<span class="enscript-keyword">if</span> (kss == NULL) {
+			error = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imo_locked</span>;
+		}
+		error = copyin(tmp_ptr, kss,
+		    (size_t) msfr.msfr_nsrcs * <span class="enscript-keyword">sizeof</span>(*kss));
+		<span class="enscript-keyword">if</span> (error) {
+			FREE(kss, M_TEMP);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imo_locked</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Mark all source filters as UNDEFINED at t1.
+		 * Restore new group filter mode, as imf_leave()
+		 * will set it to INCLUDE.
+		 */</span>
+		imf_leave(imf);
+		imf-&gt;imf_st[1] = msfr.msfr_fmode;
+
+		<span class="enscript-comment">/*
+		 * Update socket layer filters at t1, lazy-allocating
+		 * new entries. This saves a bunch of memory at the
+		 * cost of one RB_FIND() per source entry; duplicate
+		 * entries in the msfr_nsrcs vector are ignored.
+		 * If we encounter an error, rollback transaction.
+		 *
+		 * XXX This too could be replaced with a set-symmetric
+		 * difference like loop to avoid walking from root
+		 * every time, as the key space is common.
+		 */</span>
+		<span class="enscript-keyword">for</span> (i = 0, pkss = kss; (u_int)i &lt; msfr.msfr_nsrcs;
+		    i++, pkss++) {
+			psin = (<span class="enscript-type">struct</span> sockaddr_in *)pkss;
+			<span class="enscript-keyword">if</span> (psin-&gt;sin_family != AF_INET) {
+				error = EAFNOSUPPORT;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (psin-&gt;sin_len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sockaddr_in)) {
+				error = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			error = imf_get_source(imf, psin, &amp;lims);
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">break</span>;
+			lims-&gt;imsl_st[1] = imf-&gt;imf_st[1];
+		}
+		FREE(kss, M_TEMP);
+	}
+
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imf_rollback</span>;
+
+	<span class="enscript-comment">/*
+	 * Begin state merge transaction at IGMP layer.
+	 */</span>
+	INM_LOCK(inm);
+	IGMP_PRINTF((<span class="enscript-string">&quot;%s: merge inm state\n&quot;</span>, __func__));
+	error = inm_merge(inm, imf);
+	<span class="enscript-keyword">if</span> (error) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: failed to merge inm state\n&quot;</span>, __func__));
+		INM_UNLOCK(inm);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_imf_rollback</span>;
+	}
+
+	IGMP_PRINTF((<span class="enscript-string">&quot;%s: doing igmp downcall\n&quot;</span>, __func__));
+	error = igmp_change_state(inm, &amp;itp);
+	INM_UNLOCK(inm);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IGMP_DEBUG</span>
+	<span class="enscript-keyword">if</span> (error)
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: failed igmp downcall\n&quot;</span>, __func__));
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-reference">out_imf_rollback</span>:
+	<span class="enscript-keyword">if</span> (error)
+		imf_rollback(imf);
+	<span class="enscript-keyword">else</span>
+		imf_commit(imf);
+
+	imf_reap(imf);
+
+<span class="enscript-reference">out_imo_locked</span>:
+	IMO_UNLOCK(imo);
+	IMO_REMREF(imo);	<span class="enscript-comment">/* from inp_findmoptions() */</span>
+
+	<span class="enscript-comment">/* schedule timer now that we've dropped the lock(s) */</span>
+	igmp_set_timeout(&amp;itp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Set the IP multicast options in response to user setsockopt().
+ *
+ * Many of the socket options handled in this function duplicate the
+ * functionality of socket options in the regular unicast API. However,
+ * it is not possible to merge the duplicate code, because the idempotence
+ * of the IPv4 multicast part of the BSD Sockets API must be preserved;
+ * the effects of these options must be treated as separate and distinct.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">inp_setmoptions</span>(<span class="enscript-type">struct</span> inpcb *inp, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+	<span class="enscript-type">struct</span> ip_moptions	*imo;
+	<span class="enscript-type">int</span>			 error;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		 ifindex;
+	<span class="enscript-type">struct</span> ifnet		*ifp;
+
+	error = 0;
+
+	<span class="enscript-comment">/*
+	 * If socket is neither of type SOCK_RAW or SOCK_DGRAM,
+	 * or is a divert socket, reject it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (SOCK_PROTO(inp-&gt;inp_socket) == IPPROTO_DIVERT ||
+	    (SOCK_TYPE(inp-&gt;inp_socket) != SOCK_RAW &amp;&amp;
+	     SOCK_TYPE(inp-&gt;inp_socket) != SOCK_DGRAM))
+		<span class="enscript-keyword">return</span> (EOPNOTSUPP);
+
+	<span class="enscript-keyword">switch</span> (sopt-&gt;sopt_name) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MULTICAST_IF</span>:
+		error = inp_set_multicast_if(inp, sopt);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MULTICAST_IFINDEX</span>:
+		<span class="enscript-comment">/*
+		 * Select the interface for outgoing multicast packets.
+		 */</span>
+		error = sooptcopyin(sopt, &amp;ifindex, <span class="enscript-keyword">sizeof</span> (ifindex),
+		    <span class="enscript-keyword">sizeof</span> (ifindex));
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">break</span>;
+
+		imo = inp_findmoptions(inp);
+		<span class="enscript-keyword">if</span> (imo == NULL) {
+			error = ENOMEM;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/*
+		 * Index 0 is used to remove a previous selection.
+		 * When no interface is selected, a default one is
+		 * chosen every time a multicast packet is sent.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ifindex == 0) {
+			IMO_LOCK(imo);
+			imo-&gt;imo_multicast_ifp = NULL;
+			IMO_UNLOCK(imo);
+			IMO_REMREF(imo);	<span class="enscript-comment">/* from inp_findmoptions() */</span>
+			<span class="enscript-keyword">break</span>;
+		}
+
+		ifnet_head_lock_shared();
+		<span class="enscript-comment">/* Don't need to check is ifindex is &lt; 0 since it's unsigned */</span>
+		<span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)if_index &lt; ifindex) {
+			ifnet_head_done();
+			IMO_REMREF(imo);	<span class="enscript-comment">/* from inp_findmoptions() */</span>
+			error = ENXIO;	<span class="enscript-comment">/* per IPV6_MULTICAST_IF */</span>
+			<span class="enscript-keyword">break</span>;
+		}
+		ifp = ifindex2ifnet[ifindex];
+		ifnet_head_done();
+
+		<span class="enscript-comment">/* If it's detached or isn't a multicast interface, bail out */</span>
+		<span class="enscript-keyword">if</span> (ifp == NULL || !(ifp-&gt;if_flags &amp; IFF_MULTICAST)) {
+			IMO_REMREF(imo);	<span class="enscript-comment">/* from inp_findmoptions() */</span>
+			error = EADDRNOTAVAIL;
+			<span class="enscript-keyword">break</span>;
+		}
+		IMO_LOCK(imo);
+		imo-&gt;imo_multicast_ifp = ifp;
+		<span class="enscript-comment">/*
+		 * Clear out any remnants of past IP_MULTICAST_IF.  The addr
+		 * isn't really used anywhere in the kernel; we could have
+		 * iterated thru the addresses of the interface and pick one
+		 * here, but that is redundant since ip_getmoptions() already
+		 * takes care of that for INADDR_ANY.
+		 */</span>
+		imo-&gt;imo_multicast_addr.s_addr = INADDR_ANY;
+		IMO_UNLOCK(imo);
+		IMO_REMREF(imo);	<span class="enscript-comment">/* from inp_findmoptions() */</span>
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MULTICAST_TTL</span>: {
+		u_char ttl;
+
+		<span class="enscript-comment">/*
+		 * Set the IP time-to-live for outgoing multicast packets.
+		 * The original multicast API required a char argument,
+		 * which is inconsistent with the rest of the socket API.
+		 * We allow either a char or an int.
+		 */</span>
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_valsize == <span class="enscript-keyword">sizeof</span>(u_char)) {
+			error = sooptcopyin(sopt, &amp;ttl, <span class="enscript-keyword">sizeof</span>(u_char),
+			    <span class="enscript-keyword">sizeof</span>(u_char));
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">break</span>;
+		} <span class="enscript-keyword">else</span> {
+			u_int ittl;
+
+			error = sooptcopyin(sopt, &amp;ittl, <span class="enscript-keyword">sizeof</span>(u_int),
+			    <span class="enscript-keyword">sizeof</span>(u_int));
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">if</span> (ittl &gt; 255) {
+				error = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			ttl = (u_char)ittl;
+		}
+		imo = inp_findmoptions(inp);
+		<span class="enscript-keyword">if</span> (imo == NULL) {
+			error = ENOMEM;
+			<span class="enscript-keyword">break</span>;
+		}
+		IMO_LOCK(imo);
+		imo-&gt;imo_multicast_ttl = ttl;
+		IMO_UNLOCK(imo);
+		IMO_REMREF(imo);	<span class="enscript-comment">/* from inp_findmoptions() */</span>
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MULTICAST_LOOP</span>: {
+		u_char loop;
+
+		<span class="enscript-comment">/*
+		 * Set the loopback flag for outgoing multicast packets.
+		 * Must be zero or one.  The original multicast API required a
+		 * char argument, which is inconsistent with the rest
+		 * of the socket API.  We allow either a char or an int.
+		 */</span>
+		<span class="enscript-keyword">if</span> (sopt-&gt;sopt_valsize == <span class="enscript-keyword">sizeof</span>(u_char)) {
+			error = sooptcopyin(sopt, &amp;loop, <span class="enscript-keyword">sizeof</span>(u_char),
+			    <span class="enscript-keyword">sizeof</span>(u_char));
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">break</span>;
+		} <span class="enscript-keyword">else</span> {
+			u_int iloop;
+
+			error = sooptcopyin(sopt, &amp;iloop, <span class="enscript-keyword">sizeof</span>(u_int),
+					    <span class="enscript-keyword">sizeof</span>(u_int));
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">break</span>;
+			loop = (u_char)iloop;
+		}
+		imo = inp_findmoptions(inp);
+		<span class="enscript-keyword">if</span> (imo == NULL) {
+			error = ENOMEM;
+			<span class="enscript-keyword">break</span>;
+		}
+		IMO_LOCK(imo);
+		imo-&gt;imo_multicast_loop = !!loop;
+		IMO_UNLOCK(imo);
+		IMO_REMREF(imo);	<span class="enscript-comment">/* from inp_findmoptions() */</span>
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_ADD_MEMBERSHIP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_ADD_SOURCE_MEMBERSHIP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MCAST_JOIN_GROUP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MCAST_JOIN_SOURCE_GROUP</span>:
+		error = inp_join_group(inp, sopt);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_DROP_MEMBERSHIP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_DROP_SOURCE_MEMBERSHIP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MCAST_LEAVE_GROUP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MCAST_LEAVE_SOURCE_GROUP</span>:
+		error = inp_leave_group(inp, sopt);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_BLOCK_SOURCE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_UNBLOCK_SOURCE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MCAST_BLOCK_SOURCE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MCAST_UNBLOCK_SOURCE</span>:
+		error = inp_block_unblock_source(inp, sopt);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MSFILTER</span>:
+		error = inp_set_source_filters(inp, sopt);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		error = EOPNOTSUPP;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Expose IGMP's multicast filter mode and source list(s) to userland,
+ * keyed by (ifindex, group).
+ * The filter mode is written out as a uint32_t, followed by
+ * 0..n of struct in_addr.
+ * For use by ifmcstat(8).
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+sysctl_ip_mcast_filters SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>)
+
+	<span class="enscript-type">struct</span> in_addr			 src, group;
+	<span class="enscript-type">struct</span> ifnet			*ifp;
+	<span class="enscript-type">struct</span> in_multi			*inm;
+	<span class="enscript-type">struct</span> in_multistep		step;
+	<span class="enscript-type">struct</span> ip_msource		*ims;
+	<span class="enscript-type">int</span>				*name;
+	<span class="enscript-type">int</span>				 retval = 0;
+	u_int				 namelen;
+	uint32_t			 fmode, ifindex;
+
+	name = (<span class="enscript-type">int</span> *)arg1;
+	namelen = (u_int)arg2;
+
+	<span class="enscript-keyword">if</span> (req-&gt;newptr != USER_ADDR_NULL)
+		<span class="enscript-keyword">return</span> (EPERM);
+
+	<span class="enscript-keyword">if</span> (namelen != 2)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	ifindex = name[0];
+	ifnet_head_lock_shared();
+	<span class="enscript-keyword">if</span> (ifindex &lt;= 0 || ifindex &gt; (u_int)if_index) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: ifindex %u out of range\n&quot;</span>,
+		    __func__, ifindex));
+		ifnet_head_done();
+		<span class="enscript-keyword">return</span> (ENOENT);
+	}
+
+	group.s_addr = name[1];
+	<span class="enscript-keyword">if</span> (!IN_MULTICAST(ntohl(group.s_addr))) {
+		IGMP_INET_PRINTF(group,
+		    (<span class="enscript-string">&quot;%s: group %s is not multicast\n&quot;</span>,
+		    __func__, _igmp_inet_buf));
+		ifnet_head_done();
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	ifp = ifindex2ifnet[ifindex];
+	ifnet_head_done();
+	<span class="enscript-keyword">if</span> (ifp == NULL) {
+		IGMP_PRINTF((<span class="enscript-string">&quot;%s: no ifp for ifindex %u\n&quot;</span>, __func__, ifindex));
+		<span class="enscript-keyword">return</span> (ENOENT);
+	}
+
+	in_multihead_lock_shared();
+	IN_FIRST_MULTI(step, inm);
+	<span class="enscript-keyword">while</span> (inm != NULL) {
+		INM_LOCK(inm);
+		<span class="enscript-keyword">if</span> (inm-&gt;inm_ifp != ifp)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">next</span>;
+
+		<span class="enscript-keyword">if</span> (!in_hosteq(inm-&gt;inm_addr, group))
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">next</span>;
+
+		fmode = inm-&gt;inm_st[1].iss_fmode;
+		retval = SYSCTL_OUT(req, &amp;fmode, <span class="enscript-keyword">sizeof</span>(uint32_t));
+		<span class="enscript-keyword">if</span> (retval != 0) {
+			INM_UNLOCK(inm);
+			<span class="enscript-keyword">break</span>;		<span class="enscript-comment">/* abort */</span>
+		}
+		RB_FOREACH(ims, ip_msource_tree, &amp;inm-&gt;inm_srcs) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IGMP_DEBUG</span>
+			<span class="enscript-type">struct</span> in_addr ina;
+			ina.s_addr = htonl(ims-&gt;ims_haddr);
+			IGMP_INET_PRINTF(ina,
+			    (<span class="enscript-string">&quot;%s: visit node %s\n&quot;</span>, __func__, _igmp_inet_buf));
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-comment">/*
+			 * Only copy-out sources which are in-mode.
+			 */</span>
+			<span class="enscript-keyword">if</span> (fmode != ims_get_mode(inm, ims, 1)) {
+				IGMP_PRINTF((<span class="enscript-string">&quot;%s: skip non-in-mode\n&quot;</span>,
+				    __func__));
+				<span class="enscript-keyword">continue</span>; <span class="enscript-comment">/* process next source */</span>
+			}
+			src.s_addr = htonl(ims-&gt;ims_haddr);
+			retval = SYSCTL_OUT(req, &amp;src, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> in_addr));
+			<span class="enscript-keyword">if</span> (retval != 0)
+				<span class="enscript-keyword">break</span>;	<span class="enscript-comment">/* process next inm */</span>
+		}
+<span class="enscript-reference">next</span>:
+		INM_UNLOCK(inm);
+		IN_NEXT_MULTI(step, inm);
+	}
+	in_multihead_lock_done();
+
+	<span class="enscript-keyword">return</span> (retval);
+}
+
+<span class="enscript-comment">/*
+ * XXX
+ * The whole multicast option thing needs to be re-thought.
+ * Several of these options are equally applicable to non-multicast
+ * transmission, and one (IP_MULTICAST_TTL) totally duplicates a
+ * standard option (IP_TTL).
+ */</span>
+<span class="enscript-comment">/*
+ * following RFC1724 section 3.3, 0.0.0.0/8 is interpreted as interface index.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ifnet *
+<span class="enscript-function-name">ip_multicast_if</span>(<span class="enscript-type">struct</span> in_addr *a, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *ifindexp)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> ifindex;
+	<span class="enscript-type">struct</span> ifnet *ifp;
+
+	<span class="enscript-keyword">if</span> (ifindexp != NULL)
+		*ifindexp = 0;
+	<span class="enscript-keyword">if</span> (ntohl(a-&gt;s_addr) &gt;&gt; 24 == 0) {
+		ifindex = ntohl(a-&gt;s_addr) &amp; 0xffffff;
+		ifnet_head_lock_shared();
+		<span class="enscript-comment">/* Don't need to check is ifindex is &lt; 0 since it's unsigned */</span>
+		<span class="enscript-keyword">if</span> ((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)if_index &lt; ifindex) {
+			ifnet_head_done();
+			<span class="enscript-keyword">return</span> (NULL);
+		}
+		ifp = ifindex2ifnet[ifindex];
+		ifnet_head_done();
+		<span class="enscript-keyword">if</span> (ifp != NULL &amp;&amp; ifindexp != NULL)
+			*ifindexp = ifindex;
+	} <span class="enscript-keyword">else</span> {
+		INADDR_TO_IFP(*a, ifp);
+	}
+	<span class="enscript-keyword">return</span> (ifp);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">in_multi_init</span>(<span class="enscript-type">void</span>)
+{
+	PE_parse_boot_argn(<span class="enscript-string">&quot;ifa_debug&quot;</span>, &amp;inm_debug, <span class="enscript-keyword">sizeof</span> (inm_debug));
+
+	<span class="enscript-comment">/* Setup lock group and attribute for in_multihead */</span>
+	in_multihead_lock_grp_attr = lck_grp_attr_alloc_init();
+	in_multihead_lock_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;in_multihead&quot;</span>,
+	    in_multihead_lock_grp_attr);
+	in_multihead_lock_attr = lck_attr_alloc_init();
+	lck_rw_init(&amp;in_multihead_lock, in_multihead_lock_grp,
+	    in_multihead_lock_attr);
+
+	lck_mtx_init(&amp;inm_trash_lock, in_multihead_lock_grp,
+	    in_multihead_lock_attr);
+	TAILQ_INIT(&amp;inm_trash_head);
+
+	inm_size = (inm_debug == 0) ? <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> in_multi) :
+	    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> in_multi_dbg);
+	inm_zone = zinit(inm_size, INM_ZONE_MAX * inm_size,
+	    0, INM_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (inm_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, INM_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(inm_zone, Z_EXPAND, TRUE);
+
+	ipms_size = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ip_msource);
+	ipms_zone = zinit(ipms_size, IPMS_ZONE_MAX * ipms_size,
+	    0, IPMS_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (ipms_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, IPMS_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(ipms_zone, Z_EXPAND, TRUE);
+
+	inms_size = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> in_msource);
+	inms_zone = zinit(inms_size, INMS_ZONE_MAX * inms_size,
+	    0, INMS_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (inms_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, INMS_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(inms_zone, Z_EXPAND, TRUE);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> in_multi *
+<span class="enscript-function-name">in_multi_alloc</span>(<span class="enscript-type">int</span> how)
+{
+	<span class="enscript-type">struct</span> in_multi *inm;
+
+	inm = (how == M_WAITOK) ? zalloc(inm_zone) : zalloc_noblock(inm_zone);
+	<span class="enscript-keyword">if</span> (inm != NULL) {
+		bzero(inm, inm_size);
+		lck_mtx_init(&amp;inm-&gt;inm_lock, in_multihead_lock_grp,
+		    in_multihead_lock_attr);
+		inm-&gt;inm_debug |= IFD_ALLOC;
+		<span class="enscript-keyword">if</span> (inm_debug != 0) {
+			inm-&gt;inm_debug |= IFD_DEBUG;
+			inm-&gt;inm_trace = inm_trace;
+		}
+	}
+	<span class="enscript-keyword">return</span> (inm);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">in_multi_free</span>(<span class="enscript-type">struct</span> in_multi *inm)
+{
+	INM_LOCK(inm);
+	<span class="enscript-keyword">if</span> (inm-&gt;inm_debug &amp; IFD_ATTACHED) {
+		panic(<span class="enscript-string">&quot;%s: attached inm=%p is being freed&quot;</span>, __func__, inm);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (inm-&gt;inm_ifma != NULL) {
+		panic(<span class="enscript-string">&quot;%s: ifma not NULL for inm=%p&quot;</span>, __func__, inm);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!(inm-&gt;inm_debug &amp; IFD_ALLOC)) {
+		panic(<span class="enscript-string">&quot;%s: inm %p cannot be freed&quot;</span>, __func__, inm);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (inm-&gt;inm_refcount != 0) {
+		panic(<span class="enscript-string">&quot;%s: non-zero refcount inm=%p&quot;</span>, __func__, inm);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (inm-&gt;inm_reqcnt != 0) {
+		panic(<span class="enscript-string">&quot;%s: non-zero reqcnt inm=%p&quot;</span>, __func__, inm);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-comment">/* Free any pending IGMPv3 state-change records */</span>
+	IF_DRAIN(&amp;inm-&gt;inm_scq);
+
+	inm-&gt;inm_debug &amp;= ~IFD_ALLOC;
+	<span class="enscript-keyword">if</span> ((inm-&gt;inm_debug &amp; (IFD_DEBUG | IFD_TRASHED)) ==
+	    (IFD_DEBUG | IFD_TRASHED)) {
+		lck_mtx_lock(&amp;inm_trash_lock);
+		TAILQ_REMOVE(&amp;inm_trash_head, (<span class="enscript-type">struct</span> in_multi_dbg *)inm,
+		    inm_trash_link);
+		lck_mtx_unlock(&amp;inm_trash_lock);
+		inm-&gt;inm_debug &amp;= ~IFD_TRASHED;
+	}
+	INM_UNLOCK(inm);
+
+	lck_mtx_destroy(&amp;inm-&gt;inm_lock, in_multihead_lock_grp);
+	zfree(inm_zone, inm);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">in_multi_attach</span>(<span class="enscript-type">struct</span> in_multi *inm)
+{
+	in_multihead_lock_assert(LCK_RW_ASSERT_EXCLUSIVE);
+	INM_LOCK_ASSERT_HELD(inm);
+
+	<span class="enscript-keyword">if</span> (inm-&gt;inm_debug &amp; IFD_ATTACHED) {
+		panic(<span class="enscript-string">&quot;%s: Attempt to attach an already attached inm=%p&quot;</span>,
+		    __func__, inm);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (inm-&gt;inm_debug &amp; IFD_TRASHED) {
+		panic(<span class="enscript-string">&quot;%s: Attempt to reattach a detached inm=%p&quot;</span>,
+		    __func__, inm);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	inm-&gt;inm_reqcnt++;
+	VERIFY(inm-&gt;inm_reqcnt == 1);
+	INM_ADDREF_LOCKED(inm);
+	inm-&gt;inm_debug |= IFD_ATTACHED;
+	<span class="enscript-comment">/*
+	 * Reattach case:  If debugging is enabled, take it
+	 * out of the trash list and clear IFD_TRASHED.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((inm-&gt;inm_debug &amp; (IFD_DEBUG | IFD_TRASHED)) ==
+	    (IFD_DEBUG | IFD_TRASHED)) {
+		<span class="enscript-comment">/* Become a regular mutex, just in case */</span>
+		INM_CONVERT_LOCK(inm);
+		lck_mtx_lock(&amp;inm_trash_lock);
+		TAILQ_REMOVE(&amp;inm_trash_head, (<span class="enscript-type">struct</span> in_multi_dbg *)inm,
+		    inm_trash_link);
+		lck_mtx_unlock(&amp;inm_trash_lock);
+		inm-&gt;inm_debug &amp;= ~IFD_TRASHED;
+	}
+
+	LIST_INSERT_HEAD(&amp;in_multihead, inm, inm_link);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">in_multi_detach</span>(<span class="enscript-type">struct</span> in_multi *inm)
+{
+	in_multihead_lock_assert(LCK_RW_ASSERT_EXCLUSIVE);
+	INM_LOCK_ASSERT_HELD(inm);
+
+	<span class="enscript-keyword">if</span> (inm-&gt;inm_reqcnt == 0) {
+		panic(<span class="enscript-string">&quot;%s: inm=%p negative reqcnt&quot;</span>, __func__, inm);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	--inm-&gt;inm_reqcnt;
+	<span class="enscript-keyword">if</span> (inm-&gt;inm_reqcnt &gt; 0)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">if</span> (!(inm-&gt;inm_debug &amp; IFD_ATTACHED)) {
+		panic(<span class="enscript-string">&quot;%s: Attempt to detach an unattached record inm=%p&quot;</span>,
+		    __func__, inm);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (inm-&gt;inm_debug &amp; IFD_TRASHED) {
+		panic(<span class="enscript-string">&quot;%s: inm %p is already in trash list&quot;</span>, __func__, inm);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-comment">/*
+	 * NOTE: Caller calls IFMA_REMREF
+	 */</span>
+	inm-&gt;inm_debug &amp;= ~IFD_ATTACHED;
+	LIST_REMOVE(inm, inm_link);
+
+	<span class="enscript-keyword">if</span> (inm-&gt;inm_debug &amp; IFD_DEBUG) {
+		<span class="enscript-comment">/* Become a regular mutex, just in case */</span>
+		INM_CONVERT_LOCK(inm);
+		lck_mtx_lock(&amp;inm_trash_lock);
+		TAILQ_INSERT_TAIL(&amp;inm_trash_head,
+		    (<span class="enscript-type">struct</span> in_multi_dbg *)inm, inm_trash_link);
+		lck_mtx_unlock(&amp;inm_trash_lock);
+		inm-&gt;inm_debug |= IFD_TRASHED;
+	}
+
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">inm_addref</span>(<span class="enscript-type">struct</span> in_multi *inm, <span class="enscript-type">int</span> locked)
+{
+	<span class="enscript-keyword">if</span> (!locked)
+		INM_LOCK_SPIN(inm);
+	<span class="enscript-keyword">else</span>
+		INM_LOCK_ASSERT_HELD(inm);
+
+	<span class="enscript-keyword">if</span> (++inm-&gt;inm_refcount == 0) {
+		panic(<span class="enscript-string">&quot;%s: inm=%p wraparound refcnt&quot;</span>, __func__, inm);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (inm-&gt;inm_trace != NULL) {
+		(*inm-&gt;inm_trace)(inm, TRUE);
+	}
+	<span class="enscript-keyword">if</span> (!locked)
+		INM_UNLOCK(inm);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">inm_remref</span>(<span class="enscript-type">struct</span> in_multi *inm, <span class="enscript-type">int</span> locked)
+{
+	<span class="enscript-type">struct</span> ifmultiaddr *ifma;
+	<span class="enscript-type">struct</span> igmp_ifinfo *igi;
+
+	<span class="enscript-keyword">if</span> (!locked)
+		INM_LOCK_SPIN(inm);
+	<span class="enscript-keyword">else</span>
+		INM_LOCK_ASSERT_HELD(inm);
+
+	<span class="enscript-keyword">if</span> (inm-&gt;inm_refcount == 0 || (inm-&gt;inm_refcount == 1 &amp;&amp; locked)) {
+		panic(<span class="enscript-string">&quot;%s: inm=%p negative/missing refcnt&quot;</span>, __func__, inm);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (inm-&gt;inm_trace != NULL) {
+		(*inm-&gt;inm_trace)(inm, FALSE);
+	}
+
+	--inm-&gt;inm_refcount;
+	<span class="enscript-keyword">if</span> (inm-&gt;inm_refcount &gt; 0) {
+		<span class="enscript-keyword">if</span> (!locked)
+			INM_UNLOCK(inm);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Synchronization with in_getmulti().  In the event the inm has been
+	 * detached, the underlying ifma would still be in the if_multiaddrs
+	 * list, and thus can be looked up via if_addmulti().  At that point,
+	 * the only way to find this inm is via ifma_protospec.  To avoid
+	 * race conditions between the last inm_remref() of that inm and its
+	 * use via ifma_protospec, in_multihead lock is used for serialization.
+	 * In order to avoid violating the lock order, we must drop inm_lock
+	 * before acquiring in_multihead lock.  To prevent the inm from being
+	 * freed prematurely, we hold an extra reference.
+	 */</span>
+	++inm-&gt;inm_refcount;
+	INM_UNLOCK(inm);
+	in_multihead_lock_shared();
+	INM_LOCK_SPIN(inm);
+	--inm-&gt;inm_refcount;
+	<span class="enscript-keyword">if</span> (inm-&gt;inm_refcount &gt; 0) {
+		<span class="enscript-comment">/* We've lost the race, so abort since inm is still in use */</span>
+		INM_UNLOCK(inm);
+		in_multihead_lock_done();
+		<span class="enscript-comment">/* If it was locked, return it as such */</span>
+		<span class="enscript-keyword">if</span> (locked)
+			INM_LOCK(inm);
+		<span class="enscript-keyword">return</span>;
+	}
+	inm_purge(inm);
+	ifma = inm-&gt;inm_ifma;
+	inm-&gt;inm_ifma = NULL;
+	inm-&gt;inm_ifp = NULL;
+	igi = inm-&gt;inm_igi;
+	inm-&gt;inm_igi = NULL;
+	INM_UNLOCK(inm);
+	IFMA_LOCK_SPIN(ifma);
+	ifma-&gt;ifma_protospec = NULL;
+	IFMA_UNLOCK(ifma);
+	in_multihead_lock_done();
+
+	in_multi_free(inm);
+	if_delmulti_ifma(ifma);
+	<span class="enscript-comment">/* Release reference held to the underlying ifmultiaddr */</span>
+	IFMA_REMREF(ifma);
+
+	<span class="enscript-keyword">if</span> (igi != NULL)
+		IGI_REMREF(igi);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">inm_trace</span>(<span class="enscript-type">struct</span> in_multi *inm, <span class="enscript-type">int</span> refhold)
+{
+	<span class="enscript-type">struct</span> in_multi_dbg *inm_dbg = (<span class="enscript-type">struct</span> in_multi_dbg *)inm;
+	ctrace_t *tr;
+	u_int32_t idx;
+	u_int16_t *cnt;
+
+	<span class="enscript-keyword">if</span> (!(inm-&gt;inm_debug &amp; IFD_DEBUG)) {
+		panic(<span class="enscript-string">&quot;%s: inm %p has no debug structure&quot;</span>, __func__, inm);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	<span class="enscript-keyword">if</span> (refhold) {
+		cnt = &amp;inm_dbg-&gt;inm_refhold_cnt;
+		tr = inm_dbg-&gt;inm_refhold;
+	} <span class="enscript-keyword">else</span> {
+		cnt = &amp;inm_dbg-&gt;inm_refrele_cnt;
+		tr = inm_dbg-&gt;inm_refrele;
+	}
+
+	idx = atomic_add_16_ov(cnt, 1) % INM_TRACE_HIST_SIZE;
+	ctrace_record(&amp;tr[idx]);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">in_multihead_lock_exclusive</span>(<span class="enscript-type">void</span>)
+{
+	lck_rw_lock_exclusive(&amp;in_multihead_lock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">in_multihead_lock_shared</span>(<span class="enscript-type">void</span>)
+{
+	lck_rw_lock_shared(&amp;in_multihead_lock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">in_multihead_lock_assert</span>(<span class="enscript-type">int</span> what)
+{
+	lck_rw_assert(&amp;in_multihead_lock, what);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">in_multihead_lock_done</span>(<span class="enscript-type">void</span>)
+{
+	lck_rw_done(&amp;in_multihead_lock);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ip_msource *
+<span class="enscript-function-name">ipms_alloc</span>(<span class="enscript-type">int</span> how)
+{
+	<span class="enscript-type">struct</span> ip_msource *ims;
+
+	ims = (how == M_WAITOK) ? zalloc(ipms_zone) : zalloc_noblock(ipms_zone);
+	<span class="enscript-keyword">if</span> (ims != NULL)
+		bzero(ims, ipms_size);
+
+	<span class="enscript-keyword">return</span> (ims);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipms_free</span>(<span class="enscript-type">struct</span> ip_msource *ims)
+{
+	zfree(ipms_zone, ims);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> in_msource *
+<span class="enscript-function-name">inms_alloc</span>(<span class="enscript-type">int</span> how)
+{
+	<span class="enscript-type">struct</span> in_msource *inms;
+
+	inms = (how == M_WAITOK) ? zalloc(inms_zone) :
+	    zalloc_noblock(inms_zone);
+	<span class="enscript-keyword">if</span> (inms != NULL)
+		bzero(inms, inms_size);
+
+	<span class="enscript-keyword">return</span> (inms);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">inms_free</span>(<span class="enscript-type">struct</span> in_msource *inms)
+{
+	zfree(inms_zone, inms);
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IGMP_DEBUG</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *inm_modestrs[] = { <span class="enscript-string">&quot;un\n&quot;</span>, <span class="enscript-string">&quot;in&quot;</span>, <span class="enscript-string">&quot;ex&quot;</span> };
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">inm_mode_str</span>(<span class="enscript-type">const</span> <span class="enscript-type">int</span> mode)
+{
+	<span class="enscript-keyword">if</span> (mode &gt;= MCAST_UNDEFINED &amp;&amp; mode &lt;= MCAST_EXCLUDE)
+		<span class="enscript-keyword">return</span> (inm_modestrs[mode]);
+	<span class="enscript-keyword">return</span> (<span class="enscript-string">&quot;??&quot;</span>);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *inm_statestrs[] = {
+	<span class="enscript-string">&quot;not-member\n&quot;</span>,
+	<span class="enscript-string">&quot;silent\n&quot;</span>,
+	<span class="enscript-string">&quot;reporting\n&quot;</span>,
+	<span class="enscript-string">&quot;idle\n&quot;</span>,
+	<span class="enscript-string">&quot;lazy\n&quot;</span>,
+	<span class="enscript-string">&quot;sleeping\n&quot;</span>,
+	<span class="enscript-string">&quot;awakening\n&quot;</span>,
+	<span class="enscript-string">&quot;query-pending\n&quot;</span>,
+	<span class="enscript-string">&quot;sg-query-pending\n&quot;</span>,
+	<span class="enscript-string">&quot;leaving&quot;</span>
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">inm_state_str</span>(<span class="enscript-type">const</span> <span class="enscript-type">int</span> state)
+{
+	<span class="enscript-keyword">if</span> (state &gt;= IGMP_NOT_MEMBER &amp;&amp; state &lt;= IGMP_LEAVING_MEMBER)
+		<span class="enscript-keyword">return</span> (inm_statestrs[state]);
+	<span class="enscript-keyword">return</span> (<span class="enscript-string">&quot;??&quot;</span>);
+}
+
+<span class="enscript-comment">/*
+ * Dump an in_multi structure to the console.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">inm_print</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_multi *inm)
+{
+	<span class="enscript-type">int</span> t;
+	<span class="enscript-type">char</span> buf[MAX_IPv4_STR_LEN];
+
+	INM_LOCK_ASSERT_HELD(__DECONST(<span class="enscript-type">struct</span> in_multi *, inm));
+
+	<span class="enscript-keyword">if</span> (igmp_debug == 0)
+		<span class="enscript-keyword">return</span>;
+
+	inet_ntop(AF_INET, &amp;inm-&gt;inm_addr, buf, <span class="enscript-keyword">sizeof</span>(buf));
+	printf(<span class="enscript-string">&quot;%s: --- begin inm 0x%llx ---\n&quot;</span>, __func__,
+	    (uint64_t)VM_KERNEL_ADDRPERM(inm));
+	printf(<span class="enscript-string">&quot;addr %s ifp 0x%llx(%s) ifma 0x%llx\n&quot;</span>,
+	    buf,
+	    (uint64_t)VM_KERNEL_ADDRPERM(inm-&gt;inm_ifp),
+	    if_name(inm-&gt;inm_ifp),
+	    (uint64_t)VM_KERNEL_ADDRPERM(inm-&gt;inm_ifma));
+	printf(<span class="enscript-string">&quot;timer %u state %s refcount %u scq.len %u\n&quot;</span>,
+	    inm-&gt;inm_timer,
+	    inm_state_str(inm-&gt;inm_state),
+	    inm-&gt;inm_refcount,
+	    inm-&gt;inm_scq.ifq_len);
+	printf(<span class="enscript-string">&quot;igi 0x%llx nsrc %lu sctimer %u scrv %u\n&quot;</span>,
+	    (uint64_t)VM_KERNEL_ADDRPERM(inm-&gt;inm_igi),
+	    inm-&gt;inm_nsrc,
+	    inm-&gt;inm_sctimer,
+	    inm-&gt;inm_scrv);
+	<span class="enscript-keyword">for</span> (t = 0; t &lt; 2; t++) {
+		printf(<span class="enscript-string">&quot;t%d: fmode %s asm %u ex %u in %u rec %u\n&quot;</span>, t,
+		    inm_mode_str(inm-&gt;inm_st[t].iss_fmode),
+		    inm-&gt;inm_st[t].iss_asm,
+		    inm-&gt;inm_st[t].iss_ex,
+		    inm-&gt;inm_st[t].iss_in,
+		    inm-&gt;inm_st[t].iss_rec);
+	}
+	printf(<span class="enscript-string">&quot;%s: --- end inm 0x%llx ---\n&quot;</span>, __func__,
+	    (uint64_t)VM_KERNEL_ADDRPERM(inm));
+}
+
+#<span class="enscript-reference">else</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">inm_print</span>(__unused <span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_multi *inm)
+{
+
+}
+
+#<span class="enscript-reference">endif</span>
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,137 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kxld.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kxld.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007-2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_KXLD_H</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_KXLD_H</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>       // boolean_t
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>   // kern_return_t
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine.h&gt;</span>       // cpu_type_t and cpu_subtype_t
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_types.h&quot;</span>
+
+<span class="enscript-comment">/*******************************************************************************
+* API
+*******************************************************************************/</span>
+
+<span class="enscript-comment">/*******************************************************************************
+* Creates a state object for the linker.  A context must be created for each
+* link thread and destroyed at the end of the thread's life.  A context should
+* be reused for all links occuring in that link thread.
+*   context             Returns a pointer to the new context object
+*   allocate callback   Callback to allocate memory for the linked kext
+*   log_callback        Callback for all kxld logging output
+*   flags               Flags to control the behavior of kxld
+*   cputype             The target arch's CPU type (0 for host arch)
+*   cpusubtype          The target arch's CPU subtype (0 for host subtype)
+*   pagesize            The target page size (0 for host page size)
+*******************************************************************************/</span>
+kern_return_t <span class="enscript-function-name">kxld_create_context</span>(
+    KXLDContext **context, 
+    KXLDAllocateCallback allocate_callback,
+    KXLDLoggingCallback log_callback,
+    KXLDFlags flags,
+    cpu_type_t cputype,
+    cpu_subtype_t cpusubtype,
+    vm_size_t pagesize)
+    __attribute__((nonnull(1,2),visibility(<span class="enscript-string">&quot;default&quot;</span>)));
+
+<span class="enscript-comment">/*******************************************************************************
+* Destroys a link context and frees all associated memory.  Should be called at
+* the end of a link thread's life.
+*******************************************************************************/</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">kxld_destroy_context</span>(
+    KXLDContext *context)
+    __attribute__((nonnull,visibility(<span class="enscript-string">&quot;default&quot;</span>)));
+
+<span class="enscript-comment">/*******************************************************************************
+* Links a kext against its dependencies, using a callback to allocate the memory 
+* at which it will be located.
+* NOTE: The object data itself must be mmapped with PROT_WRITE and MAP_PRIVATE
+*   context             The KXLDContext object for the current link thread.
+*   file                The kext object file read into memory.
+*                       Supported formats: Mach-O, Mach-O64, Fat.
+*   size                The size of the kext in memory.  Must be nonzero.
+*   name                The name, usually the bundle identifier, of the kext
+*   callback_data       Data that is to be passed to the callback functions.
+*   dependencies        An array of pointers to the kexts upon which this kext 
+*                       is dependent.
+*   num_dependencies    Number of entries in the 'dependencies' array.
+*   linked_object       This will be set to the address of the linked kext 
+*                       object. If the address provided by the 
+*                       kxld_alloc_callback is considered writable, this 
+*                       pointer will be set to that address.  Otherwise, the 
+*                       linked object will be written to a temporary buffer 
+*                       that should be freed by the caller.
+*   kmod_info_kern      Kernel address of the kmod_info_t structure.
+******************************************************************************/</span>
+kern_return_t <span class="enscript-function-name">kxld_link_file</span>(
+    KXLDContext *context,
+    u_char *file,
+    u_long size,
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name,
+    <span class="enscript-type">void</span> *callback_data,
+    KXLDDependency *dependencies,
+    u_int num_dependencies,
+    u_char **linked_object,
+    kxld_addr_t *kmod_info_kern)
+    __attribute__((nonnull(1,2,4,6,8,9), visibility(<span class="enscript-string">&quot;default&quot;</span>)));
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t <span class="enscript-function-name">kxld_validate_copyright_string</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *str)
+    __attribute__((pure, nonnull, visibility(<span class="enscript-string">&quot;default&quot;</span>)));
+
+#<span class="enscript-reference">endif</span> // <span class="enscript-variable-name">_KXLD_H_</span>
+
+</pre>
+<hr />
+</body></html>

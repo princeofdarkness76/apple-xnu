@@ -1,0 +1,2128 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kern_stackshot.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kern_stackshot.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stackshot.h&gt;</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IMPORTANCE_INHERITANCE</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_importance.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/appleapiopts.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;uuid/uuid.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kdp/kdp_dyld.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kdp/kdp_en_debugger.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libsa/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/version.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span> <span class="enscript-comment">/* bcopy */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/telemetry.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_fault.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_shared_region.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSKextLibPrivate.h&gt;</span>
+
+#<span class="enscript-reference">if</span> (<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__arm64__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">NAND_PANIC_DEVICE</span>)) &amp;&amp; !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">LEGACY_PANIC_LOGS</span>)
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span> <span class="enscript-comment">/* For gPanicBase/gPanicBase */</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> not_in_kdp;
+
+<span class="enscript-comment">/*
+ * TODO: Even hackier than the other pieces.  This should really
+ * be moved off of kdp_pmap, and we should probably separate
+ * machine_trace_thread out of the kdp code.
+ */</span>
+<span class="enscript-type">extern</span> pmap_t kdp_pmap;
+<span class="enscript-type">extern</span> addr64_t <span class="enscript-function-name">kdp_vtophys</span>(pmap_t pmap, addr64_t va);
+
+<span class="enscript-type">int</span> kdp_snapshot = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> stack_snapshot_ret = 0;
+<span class="enscript-type">static</span> uint32_t stack_snapshot_bytes_traced = 0;
+
+<span class="enscript-type">static</span> kcdata_descriptor_t stackshot_kcdata_p = NULL;
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> *stack_snapshot_buf;
+<span class="enscript-type">static</span> uint32_t stack_snapshot_bufsize;
+<span class="enscript-type">int</span> stack_snapshot_pid;
+<span class="enscript-type">static</span> uint32_t stack_snapshot_flags;
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> old_debugger;
+<span class="enscript-type">static</span> boolean_t stack_enable_faulting;
+
+<span class="enscript-type">void</span> *kernel_stackshot_buf = NULL; <span class="enscript-comment">/* Pointer to buffer for stackshots triggered from the kernel and retrieved later */</span>
+<span class="enscript-type">int</span> kernel_stackshot_buf_size =  0;
+
+<span class="enscript-type">void</span> *stackshot_snapbuf = NULL; <span class="enscript-comment">/* Used by stack_snapshot2 (to be removed) */</span>
+
+__private_extern__ <span class="enscript-type">void</span> stackshot_lock_init( <span class="enscript-type">void</span> );
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">memory_iszero</span>(<span class="enscript-type">void</span> *addr, size_t size);
+kern_return_t		stack_snapshot2(<span class="enscript-type">int</span> pid, user_addr_t tracebuf, uint32_t tracebuf_size, uint32_t flags, int32_t *retval);
+kern_return_t		stack_snapshot_from_kernel_internal(<span class="enscript-type">int</span> pid, <span class="enscript-type">void</span> *buf, uint32_t size, uint32_t flags, <span class="enscript-type">unsigned</span> *bytes_traced);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TELEMETRY</span>
+kern_return_t		stack_microstackshot(user_addr_t tracebuf, uint32_t tracebuf_size, uint32_t flags, int32_t *retval);
+#<span class="enscript-reference">endif</span>
+uint32_t		get_stackshot_estsize(uint32_t prev_size_hint);
+kern_return_t		kern_stack_snapshot_internal(<span class="enscript-type">int</span> stackshot_config_version, <span class="enscript-type">void</span> *stackshot_config,
+						size_t stackshot_config_size, boolean_t stackshot_from_user);
+<span class="enscript-type">void</span> 			do_stackshot(<span class="enscript-type">void</span>);
+<span class="enscript-type">void</span>			kdp_snapshot_preflight(<span class="enscript-type">int</span> pid, <span class="enscript-type">void</span> * tracebuf, uint32_t tracebuf_size, uint32_t flags, kcdata_descriptor_t data_p, boolean_t enable_faulting);
+<span class="enscript-type">void</span>			kdp_snapshot_postflight(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>		kdp_stackshot(<span class="enscript-type">int</span> pid, <span class="enscript-type">void</span> *tracebuf, uint32_t tracebuf_size, uint32_t flags, uint32_t *pbytesTraced);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>		kdp_stackshot_kcdata_format(<span class="enscript-type">int</span> pid, uint32_t trace_flags, uint32_t *pBytesTraced);
+<span class="enscript-type">int</span>			kdp_stack_snapshot_geterror(<span class="enscript-type">void</span>);
+uint32_t		kdp_stack_snapshot_bytes_traced(<span class="enscript-type">void</span>);
+<span class="enscript-type">int</span> 			kdp_stackshot(<span class="enscript-type">int</span> pid, <span class="enscript-type">void</span> *tracebuf, uint32_t tracebuf_size, uint32_t trace_flags, uint32_t *pbytesTraced);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 		pid_from_task(task_t task);
+<span class="enscript-type">static</span> uint64_t 	proc_uniqueid_from_task(task_t task);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>		kdp_mem_and_io_snapshot(<span class="enscript-type">struct</span> mem_and_io_snapshot *memio_snap);
+<span class="enscript-type">static</span> boolean_t	kdp_copyin(pmap_t p, uint64_t uaddr, <span class="enscript-type">void</span> *dest, size_t size);
+<span class="enscript-type">static</span> uint64_t		proc_was_throttled_from_task(task_t task);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>		proc_pid(<span class="enscript-type">void</span> *p);
+<span class="enscript-type">extern</span> uint64_t		proc_uniqueid(<span class="enscript-type">void</span> *p);
+<span class="enscript-type">extern</span> uint64_t		proc_was_throttled(<span class="enscript-type">void</span> *p);
+<span class="enscript-type">extern</span> uint64_t		proc_did_throttle(<span class="enscript-type">void</span> *p);
+<span class="enscript-type">static</span> uint64_t		proc_did_throttle_from_task(task_t task);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		proc_name_kdp(task_t  task, <span class="enscript-type">char</span> *buf, <span class="enscript-type">int</span> size);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>		proc_threadname_kdp(<span class="enscript-type">void</span> *uth, <span class="enscript-type">char</span> *buf, size_t size);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		proc_starttime_kdp(<span class="enscript-type">void</span> *p, uint64_t *tv_sec, uint64_t *tv_usec);
+<span class="enscript-type">extern</span> uint64_t		get_dispatchqueue_serialno_offset_from_proc(<span class="enscript-type">void</span> *p);
+<span class="enscript-type">static</span> uint64_t		proc_dispatchqueue_serialno_offset_from_task(task_t task);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>		memorystatus_get_pressure_status_kdp(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> 		count_busy_buffers(<span class="enscript-type">void</span>);   <span class="enscript-comment">/* must track with declaration in bsd/sys/buf_internal.h */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> 		bcopy_phys(addr64_t, addr64_t, vm_size_t);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>		machine_trace_thread(thread_t thread, <span class="enscript-type">char</span> *tracepos, <span class="enscript-type">char</span> *tracebound, <span class="enscript-type">int</span> nframes, boolean_t user_p, uint32_t *thread_trace_flags);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>		machine_trace_thread64(thread_t thread, <span class="enscript-type">char</span> *tracepos, <span class="enscript-type">char</span> *tracebound, <span class="enscript-type">int</span> nframes, boolean_t user_p, uint32_t *thread_trace_flags);
+
+<span class="enscript-comment">/* Validates that the given address is both a valid page and has
+ * default caching attributes for the current kdp_pmap.  Returns
+ * 0 if the address is invalid, and a kernel virtual address for
+ * the given address if it is valid.
+ */</span>
+vm_offset_t <span class="enscript-function-name">machine_trace_thread_get_kva</span>(vm_offset_t cur_target_addr, vm_map_t map, uint32_t *thread_trace_flags);
+
+<span class="enscript-comment">/* Clears caching information used by the above validation routine
+ * (in case the kdp_pmap has been changed or cleared).
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">machine_trace_thread_clear_validation_cache</span>(<span class="enscript-type">void</span>);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_FRAMES</span> 1000
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_LOADINFOS</span> 500
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">USECSPERSEC</span> 1000000
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TASK_IMP_WALK_LIMIT</span> 20
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> thread_snapshot *thread_snapshot_t;
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> task_snapshot *task_snapshot_t;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_KDP_INTERACTIVE_DEBUGGING</span>
+<span class="enscript-type">extern</span> kdp_send_t    kdp_en_send_pkt;
+#<span class="enscript-reference">endif</span> 
+
+<span class="enscript-comment">/*
+ * Globals to support machine_trace_thread_get_kva.
+ */</span>
+<span class="enscript-type">static</span> vm_offset_t prev_target_page = 0;
+<span class="enscript-type">static</span> vm_offset_t prev_target_kva = 0;
+<span class="enscript-type">static</span> boolean_t validate_next_addr = TRUE;
+
+<span class="enscript-comment">/*
+ * Stackshot locking and other defines.
+ */</span>
+<span class="enscript-type">static</span> lck_grp_t       *stackshot_subsys_lck_grp;
+<span class="enscript-type">static</span> lck_grp_attr_t  *stackshot_subsys_lck_grp_attr;
+<span class="enscript-type">static</span> lck_attr_t      *stackshot_subsys_lck_attr;
+<span class="enscript-type">static</span> lck_mtx_t	stackshot_subsys_mutex;
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">STACKSHOT_SUBSYS_LOCK</span>() lck_mtx_lock(&amp;stackshot_subsys_mutex)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">STACKSHOT_SUBSYS_UNLOCK</span>() lck_mtx_unlock(&amp;stackshot_subsys_mutex)
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-variable-name">defined</span> (<span class="enscript-variable-name">__x86_64__</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TRAP_DEBUGGER</span> __asm__ volatile(<span class="enscript-string">&quot;int3&quot;</span>)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">No</span> <span class="enscript-variable-name">TRAP_DEBUGGER</span> <span class="enscript-variable-name">definition</span> <span class="enscript-variable-name">for</span> <span class="enscript-variable-name">this</span> <span class="enscript-variable-name">architecture</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* Initialize the mutex governing access to the stack snapshot subsystem */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">stackshot_lock_init</span>( <span class="enscript-type">void</span> )
+{
+	stackshot_subsys_lck_grp_attr = lck_grp_attr_alloc_init();
+
+	stackshot_subsys_lck_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;stackshot_subsys_lock&quot;</span>, stackshot_subsys_lck_grp_attr);
+
+	stackshot_subsys_lck_attr = lck_attr_alloc_init();
+
+	lck_mtx_init(&amp;stackshot_subsys_mutex, stackshot_subsys_lck_grp, stackshot_subsys_lck_attr);
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SANE_BOOTPROFILE_TRACEBUF_SIZE</span> (64 * 1024 * 1024)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SANE_TRACEBUF_SIZE</span> (8 * 1024 * 1024)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">STACKSHOT_SUPP_SIZE</span> (16 * 1024) <span class="enscript-comment">/* Minimum stackshot size */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TASK_UUID_AVG_SIZE</span> (16 * sizeof(uuid_t)) <span class="enscript-comment">/* Average space consumed by UUIDs/task */</span>
+
+<span class="enscript-comment">/* 
+ * Method for grabbing timer values safely, in the sense that no infinite loop will occur 
+ * Certain flavors of the timer_grab function, which would seem to be the thing to use,   
+ * can loop infinitely if called while the timer is in the process of being updated.      
+ * Unfortunately, it is (rarely) possible to get inconsistent top and bottom halves of    
+ * the timer using this method. This seems insoluble, since stackshot runs in a context   
+ * where the timer might be half-updated, and has no way of yielding control just long    
+ * enough to finish the update.                                                           
+ */</span>
+
+<span class="enscript-type">static</span> uint64_t <span class="enscript-function-name">safe_grab_timer_value</span>(<span class="enscript-type">struct</span> timer *t)
+{
+#<span class="enscript-reference">if</span>   <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+  <span class="enscript-keyword">return</span> t-&gt;all_bits;
+#<span class="enscript-reference">else</span>
+  uint64_t time = t-&gt;high_bits;    <span class="enscript-comment">/* endian independent grab */</span>
+  time = (time &lt;&lt; 32) | t-&gt;low_bits;
+  <span class="enscript-keyword">return</span> time;
+#<span class="enscript-reference">endif</span>
+}
+
+<span class="enscript-comment">/*
+ * Old, inefficient stackshot call. This will be removed in the next release and is being replaced with
+ * two syscalls -- stack_snapshot_with_config and stack_microsnapshot.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">stack_snapshot2</span>(<span class="enscript-type">int</span> pid, user_addr_t tracebuf, uint32_t tracebuf_size, uint32_t flags, int32_t *retval)
+{
+	boolean_t istate;
+	<span class="enscript-type">int</span> error = KERN_SUCCESS;
+	<span class="enscript-type">unsigned</span> bytesTraced = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TELEMETRY</span>
+	<span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_GLOBAL_MICROSTACKSHOT_ENABLE) {
+		telemetry_global_ctl(1);
+		*retval = 0;
+		<span class="enscript-keyword">return</span> (0);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_GLOBAL_MICROSTACKSHOT_DISABLE) {
+		telemetry_global_ctl(0);
+		*retval = 0;
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_WINDOWED_MICROSTACKSHOTS_ENABLE) {
+		error = telemetry_enable_window();
+
+		<span class="enscript-keyword">if</span> (error != KERN_SUCCESS) {
+			<span class="enscript-comment">/* We are probably out of memory */</span>
+			*retval = -1;
+			<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+		}
+
+		*retval = 0;
+		<span class="enscript-keyword">return</span> (0);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_WINDOWED_MICROSTACKSHOTS_DISABLE) {
+		telemetry_disable_window();
+		*retval = 0;
+		<span class="enscript-keyword">return</span> (0);
+	}
+#<span class="enscript-reference">endif</span>
+
+	*retval = -1;
+	<span class="enscript-comment">/* Serialize tracing */</span>
+	STACKSHOT_SUBSYS_LOCK();
+
+	<span class="enscript-keyword">if</span> (tracebuf_size &lt;= 0) {
+		error = KERN_INVALID_ARGUMENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TELEMETRY</span>
+	<span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_GET_MICROSTACKSHOT) {
+
+		<span class="enscript-keyword">if</span> (tracebuf_size &gt; SANE_TRACEBUF_SIZE) {
+			error = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+		}
+
+		bytesTraced = tracebuf_size;
+		error = telemetry_gather(tracebuf, &amp;bytesTraced,
+		                         (flags &amp; STACKSHOT_SET_MICROSTACKSHOT_MARK) ? TRUE : FALSE);
+		*retval = (<span class="enscript-type">int</span>)bytesTraced;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_GET_WINDOWED_MICROSTACKSHOTS) {
+
+		<span class="enscript-keyword">if</span> (tracebuf_size &gt; SANE_TRACEBUF_SIZE) {
+			error = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+		}
+
+		bytesTraced = tracebuf_size;
+		error = telemetry_gather_windowed(tracebuf, &amp;bytesTraced);
+		*retval = (<span class="enscript-type">int</span>)bytesTraced;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_GET_BOOT_PROFILE) {
+
+		<span class="enscript-keyword">if</span> (tracebuf_size &gt; SANE_BOOTPROFILE_TRACEBUF_SIZE) {
+			error = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+		}
+
+		bytesTraced = tracebuf_size;
+		error = bootprofile_gather(tracebuf, &amp;bytesTraced);
+		*retval = (<span class="enscript-type">int</span>)bytesTraced;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (tracebuf_size &gt; SANE_TRACEBUF_SIZE) {
+		error = KERN_INVALID_ARGUMENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+	}
+
+	assert(stackshot_snapbuf == NULL);
+	<span class="enscript-keyword">if</span> (kmem_alloc_kobject(kernel_map, (vm_offset_t *)&amp;stackshot_snapbuf, tracebuf_size, VM_KERN_MEMORY_DIAG) != KERN_SUCCESS) {
+		error = KERN_RESOURCE_SHORTAGE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (panic_active()) {
+		error = KERN_RESOURCE_SHORTAGE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+	}
+
+	istate = ml_set_interrupts_enabled(FALSE);
+	<span class="enscript-comment">/* Preload trace parameters */</span>
+	kdp_snapshot_preflight(pid, stackshot_snapbuf, tracebuf_size, flags, NULL, FALSE);
+
+	<span class="enscript-comment">/* Trap to the debugger to obtain a coherent stack snapshot; this populates
+	 * the trace buffer
+	 */</span>
+
+	TRAP_DEBUGGER;
+
+	ml_set_interrupts_enabled(istate);
+
+	bytesTraced = kdp_stack_snapshot_bytes_traced();
+
+	<span class="enscript-keyword">if</span> (bytesTraced &gt; 0) {
+		<span class="enscript-keyword">if</span> ((error = copyout(stackshot_snapbuf, tracebuf,
+			((bytesTraced &lt; tracebuf_size) ?
+			    bytesTraced : tracebuf_size))))
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+		*retval = bytesTraced;
+	}
+	<span class="enscript-keyword">else</span> {
+		error = KERN_NOT_IN_SET;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+	}
+
+	error = kdp_stack_snapshot_geterror();
+	<span class="enscript-keyword">if</span> (error == -1) {
+		error = KERN_NO_SPACE;
+		*retval = -1;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+	}
+
+<span class="enscript-reference">error_exit</span>:
+	<span class="enscript-keyword">if</span> (stackshot_snapbuf != NULL)
+		kmem_free(kernel_map, (vm_offset_t) stackshot_snapbuf, tracebuf_size);
+	stackshot_snapbuf = NULL;
+	STACKSHOT_SUBSYS_UNLOCK();
+	<span class="enscript-keyword">return</span> error;
+}
+
+kern_return_t
+<span class="enscript-function-name">stack_snapshot_from_kernel_internal</span>(<span class="enscript-type">int</span> pid, <span class="enscript-type">void</span> *buf, uint32_t size, uint32_t flags, <span class="enscript-type">unsigned</span> *bytes_traced)
+{
+	<span class="enscript-type">int</span> error = 0;
+	boolean_t istate;
+
+	<span class="enscript-keyword">if</span> ((buf == NULL) || (size &lt;= 0) || (bytes_traced == NULL)) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	<span class="enscript-comment">/* cap in individual stackshot to SANE_TRACEBUF_SIZE */</span>
+	<span class="enscript-keyword">if</span> (size &gt; SANE_TRACEBUF_SIZE) {
+		size = SANE_TRACEBUF_SIZE;
+	}
+
+	<span class="enscript-comment">/* Serialize tracing */</span>
+	STACKSHOT_SUBSYS_LOCK();
+	istate = ml_set_interrupts_enabled(FALSE);
+
+
+	<span class="enscript-comment">/* Preload trace parameters*/</span>
+	kdp_snapshot_preflight(pid, buf, size, flags, NULL, FALSE);
+
+	<span class="enscript-comment">/* Trap to the debugger to obtain a coherent stack snapshot; this populates
+	 * the trace buffer
+	 */</span>
+	TRAP_DEBUGGER;
+
+	ml_set_interrupts_enabled(istate);
+
+	*bytes_traced = kdp_stack_snapshot_bytes_traced();
+
+	error = kdp_stack_snapshot_geterror();
+
+	STACKSHOT_SUBSYS_UNLOCK();
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_TELEMETRY</span>
+kern_return_t
+<span class="enscript-function-name">stack_microstackshot</span>(user_addr_t tracebuf, uint32_t tracebuf_size, uint32_t flags, int32_t *retval)
+{
+	<span class="enscript-type">int</span> error = KERN_SUCCESS;
+	uint32_t bytes_traced = 0;
+
+	*retval = -1;
+
+	<span class="enscript-comment">/*
+	 * Control related operations
+	 */</span>
+	<span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_GLOBAL_MICROSTACKSHOT_ENABLE) {
+		telemetry_global_ctl(1);
+		*retval = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_GLOBAL_MICROSTACKSHOT_DISABLE) {
+		telemetry_global_ctl(0);
+		*retval = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_WINDOWED_MICROSTACKSHOTS_ENABLE) {
+		error = telemetry_enable_window();
+
+		<span class="enscript-keyword">if</span> (error != KERN_SUCCESS) {
+			<span class="enscript-comment">/*
+			 * We are probably out of memory
+			 */</span>
+			*retval = -1;
+			error = KERN_RESOURCE_SHORTAGE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+		}
+
+		*retval = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_WINDOWED_MICROSTACKSHOTS_DISABLE) {
+		telemetry_disable_window();
+		*retval = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Data related operations
+	 */</span>
+	*retval = -1;
+
+	<span class="enscript-keyword">if</span> ((((<span class="enscript-type">void</span>*)tracebuf) == NULL) || (tracebuf_size == 0)) {
+		error = KERN_INVALID_ARGUMENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	STACKSHOT_SUBSYS_LOCK();
+
+	<span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_GET_MICROSTACKSHOT) {
+		<span class="enscript-keyword">if</span> (tracebuf_size &gt; SANE_TRACEBUF_SIZE) {
+			error = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">unlock_exit</span>;
+		}
+
+		bytes_traced = tracebuf_size;
+		error = telemetry_gather(tracebuf, &amp;bytes_traced,
+		                         (flags &amp; STACKSHOT_SET_MICROSTACKSHOT_MARK) ? TRUE : FALSE);
+		*retval = (<span class="enscript-type">int</span>)bytes_traced;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">unlock_exit</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_GET_WINDOWED_MICROSTACKSHOTS) {
+
+		<span class="enscript-keyword">if</span> (tracebuf_size &gt; SANE_TRACEBUF_SIZE) {
+			error = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">unlock_exit</span>;
+		}
+
+		bytes_traced = tracebuf_size;
+		error = telemetry_gather_windowed(tracebuf, &amp;bytes_traced);
+		*retval = (<span class="enscript-type">int</span>)bytes_traced;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">unlock_exit</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_GET_BOOT_PROFILE) {
+
+		<span class="enscript-keyword">if</span> (tracebuf_size &gt; SANE_BOOTPROFILE_TRACEBUF_SIZE) {
+			error = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">unlock_exit</span>;
+		}
+
+		bytes_traced = tracebuf_size;
+		error = bootprofile_gather(tracebuf, &amp;bytes_traced);
+		*retval = (<span class="enscript-type">int</span>)bytes_traced;
+	}
+
+<span class="enscript-reference">unlock_exit</span>:
+	STACKSHOT_SUBSYS_UNLOCK();
+<span class="enscript-reference">exit</span>:
+	<span class="enscript-keyword">return</span> error;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_TELEMETRY */</span>
+
+<span class="enscript-comment">/*
+ * Return the estimated size of a stackshot based on the
+ * number of currently running threads and tasks.
+ */</span>
+uint32_t
+<span class="enscript-function-name">get_stackshot_estsize</span>(uint32_t prev_size_hint)
+{
+	vm_size_t thread_total;
+	vm_size_t task_total;
+	uint32_t estimated_size;
+
+	thread_total = (threads_count * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_snapshot));
+	task_total = (tasks_count  * (<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> task_snapshot) + TASK_UUID_AVG_SIZE));
+
+	estimated_size = (uint32_t) VM_MAP_ROUND_PAGE((thread_total + task_total + STACKSHOT_SUPP_SIZE), PAGE_MASK);
+	<span class="enscript-keyword">if</span> (estimated_size &lt; prev_size_hint) {
+		estimated_size = (uint32_t) VM_MAP_ROUND_PAGE(prev_size_hint, PAGE_MASK);
+	}
+
+	<span class="enscript-keyword">return</span> estimated_size;
+}
+
+<span class="enscript-comment">/*
+ * stackshot_remap_buffer:	Utility function to remap bytes_traced bytes starting at stackshotbuf
+ *				into the current task's user space and subsequently copy out the address
+ *				at which the buffer has been mapped in user space to out_buffer_addr.
+ *
+ * Inputs:			stackshotbuf - pointer to the original buffer in the kernel's address space
+ *				bytes_traced - length of the buffer to remap starting from stackshotbuf
+ *				out_buffer_addr - pointer to placeholder where newly mapped buffer will be mapped.
+ *				out_size_addr - pointer to be filled in with the size of the buffer
+ *
+ * Outputs:			ENOSPC if there is not enough free space in the task's address space to remap the buffer
+ *				EINVAL for all other errors returned by task_remap_buffer/mach_vm_remap
+ *				an error from copyout
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">stackshot_remap_buffer</span>(<span class="enscript-type">void</span> *stackshotbuf, uint32_t bytes_traced, uint64_t out_buffer_addr, uint64_t out_size_addr)
+{
+	<span class="enscript-type">int</span> 			error = 0;
+	mach_vm_offset_t	stackshotbuf_user_addr = (mach_vm_offset_t)NULL;
+	vm_prot_t		cur_prot, max_prot;
+
+	error = mach_vm_remap(get_task_map(current_task()), &amp;stackshotbuf_user_addr, bytes_traced, 0,
+			VM_FLAGS_ANYWHERE, kernel_map, (mach_vm_offset_t)stackshotbuf, FALSE, &amp;cur_prot, &amp;max_prot, VM_INHERIT_DEFAULT);
+	<span class="enscript-comment">/*
+	 * If the call to mach_vm_remap fails, we return the appropriate converted error
+	 */</span>
+	<span class="enscript-keyword">if</span> (error == KERN_SUCCESS) {
+		<span class="enscript-comment">/*
+		 * If we fail to copy out the address or size of the new buffer, we remove the buffer mapping that
+		 * we just made in the task's user space.
+		 */</span>
+		error = copyout(CAST_DOWN(<span class="enscript-type">void</span> *, &amp;stackshotbuf_user_addr), (user_addr_t)out_buffer_addr, <span class="enscript-keyword">sizeof</span>(stackshotbuf_user_addr));
+		<span class="enscript-keyword">if</span> (error != KERN_SUCCESS) {
+			mach_vm_deallocate(get_task_map(current_task()), stackshotbuf_user_addr, (mach_vm_size_t)bytes_traced);
+			<span class="enscript-keyword">return</span> error;
+		}
+		error = copyout(&amp;bytes_traced, (user_addr_t)out_size_addr, <span class="enscript-keyword">sizeof</span>(bytes_traced));
+		<span class="enscript-keyword">if</span> (error != KERN_SUCCESS) {
+			mach_vm_deallocate(get_task_map(current_task()), stackshotbuf_user_addr, (mach_vm_size_t)bytes_traced);
+			<span class="enscript-keyword">return</span> error;
+		}
+	}
+	<span class="enscript-keyword">return</span> error;
+}
+
+kern_return_t
+<span class="enscript-function-name">kern_stack_snapshot_internal</span>(<span class="enscript-type">int</span> stackshot_config_version, <span class="enscript-type">void</span> *stackshot_config, size_t stackshot_config_size, boolean_t stackshot_from_user)
+{
+	<span class="enscript-type">int</span> error = 0;
+	boolean_t prev_interrupt_state;
+	uint32_t bytes_traced = 0;
+	uint32_t stackshotbuf_size = 0;
+	<span class="enscript-type">void</span> * stackshotbuf = NULL;
+	kcdata_descriptor_t kcdata_p = NULL;
+
+	<span class="enscript-type">void</span> * buf_to_free = NULL;
+	<span class="enscript-type">int</span> size_to_free = 0;
+
+	<span class="enscript-comment">/* Parsed arguments */</span>
+	uint64_t		out_buffer_addr;
+	uint64_t		out_size_addr;
+	<span class="enscript-type">int</span>			pid = -1;
+	uint32_t		flags;
+	uint64_t		since_timestamp;
+	boolean_t		enable_faulting = FALSE;
+	uint32_t		size_hint = 0;
+
+	<span class="enscript-keyword">if</span>(stackshot_config == NULL) {
+		<span class="enscript-keyword">return</span> 	KERN_INVALID_ARGUMENT;
+	}
+
+	<span class="enscript-keyword">switch</span> (stackshot_config_version) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">STACKSHOT_CONFIG_TYPE</span>:
+			<span class="enscript-keyword">if</span> (stackshot_config_size != <span class="enscript-keyword">sizeof</span>(stackshot_config_t)) {
+				<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+			}
+			stackshot_config_t *config = (stackshot_config_t *) stackshot_config;
+			out_buffer_addr = config-&gt;sc_out_buffer_addr;
+			out_size_addr = config-&gt;sc_out_size_addr;
+			pid = config-&gt;sc_pid;
+			flags = config-&gt;sc_flags;
+			since_timestamp = config-&gt;sc_since_timestamp;
+			<span class="enscript-keyword">if</span> (config-&gt;sc_size &lt;= SANE_TRACEBUF_SIZE) {
+				size_hint = config-&gt;sc_size;
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+	}
+
+	<span class="enscript-comment">/*
+	 * Currently saving a kernel buffer is only supported from the internal/KEXT API.
+	 */</span>
+	<span class="enscript-keyword">if</span> (stackshot_from_user) {
+		<span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_SAVE_IN_KERNEL_BUFFER) {
+			<span class="enscript-keyword">return</span> KERN_NO_ACCESS;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (!(flags &amp; STACKSHOT_SAVE_IN_KERNEL_BUFFER)) {
+			<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_ENABLE_FAULTING) {
+		<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+	}
+
+	<span class="enscript-comment">/*
+	 * If we're not saving the buffer in the kernel pointer, we need places to copy into.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((!out_buffer_addr || !out_size_addr) &amp;&amp; !(flags &amp; STACKSHOT_SAVE_IN_KERNEL_BUFFER)) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	<span class="enscript-keyword">if</span> (since_timestamp != 0) {
+		<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+	}
+
+	STACKSHOT_SUBSYS_LOCK();
+
+	<span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_SAVE_IN_KERNEL_BUFFER) {
+		<span class="enscript-comment">/*
+		 * Don't overwrite an existing stackshot
+		 */</span>
+		<span class="enscript-keyword">if</span> (kernel_stackshot_buf != NULL) {
+			error = KERN_MEMORY_PRESENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_RETRIEVE_EXISTING_BUFFER) {
+		<span class="enscript-keyword">if</span> ((kernel_stackshot_buf == NULL) || (kernel_stackshot_buf_size &lt;= 0)) {
+			error = KERN_NOT_IN_SET;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+		}
+		error = stackshot_remap_buffer(kernel_stackshot_buf, kernel_stackshot_buf_size,
+						out_buffer_addr, out_size_addr);
+		<span class="enscript-comment">/*
+		 * If we successfully remapped the buffer into the user's address space, we 
+		 * set buf_to_free and size_to_free so the prior kernel mapping will be removed
+		 * and then clear the kernel stackshot pointer and associated size.
+		 */</span>
+		<span class="enscript-keyword">if</span> (error == KERN_SUCCESS) {
+			buf_to_free = kernel_stackshot_buf;
+			size_to_free = (<span class="enscript-type">int</span>) VM_MAP_ROUND_PAGE(kernel_stackshot_buf_size, PAGE_MASK);
+			kernel_stackshot_buf = NULL;
+			kernel_stackshot_buf_size = 0;
+		}
+		
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+	}
+
+	stackshotbuf_size = get_stackshot_estsize(size_hint);
+
+	<span class="enscript-keyword">for</span> (; stackshotbuf_size &lt;= SANE_TRACEBUF_SIZE; stackshotbuf_size &lt;&lt;= 1) {
+		<span class="enscript-keyword">if</span> (kmem_alloc(kernel_map, (vm_offset_t *)&amp;stackshotbuf, stackshotbuf_size, VM_KERN_MEMORY_DIAG) != KERN_SUCCESS) {
+			error = KERN_RESOURCE_SHORTAGE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * If someone has panicked, don't try and enter the debugger
+		 */</span>
+		<span class="enscript-keyword">if</span> (panic_active()) {
+			error = KERN_RESOURCE_SHORTAGE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (flags &amp; STACKSHOT_KCDATA_FORMAT) {
+			kcdata_p = kcdata_memory_alloc_init((mach_vm_address_t)stackshotbuf, KCDATA_BUFFER_BEGIN_STACKSHOT, stackshotbuf_size, KCFLAG_USE_MEMCOPY);
+		}
+
+
+		<span class="enscript-comment">/*
+		 * Disable interrupts and save the current interrupt state.
+		 */</span>
+		prev_interrupt_state = ml_set_interrupts_enabled(FALSE);
+
+		<span class="enscript-comment">/*
+		 * Load stackshot parameters.
+		 */</span>
+		kdp_snapshot_preflight(pid, stackshotbuf, stackshotbuf_size, flags, kcdata_p, enable_faulting);
+
+		<span class="enscript-comment">/*
+		 * Trap to the debugger to obtain a stackshot (this will populate the buffer).
+		 */</span>
+		TRAP_DEBUGGER;
+
+		ml_set_interrupts_enabled(prev_interrupt_state);
+
+		<span class="enscript-comment">/*
+		 * If we didn't allocate a big enough buffer, deallocate and try again.
+		 */</span>
+		error = kdp_stack_snapshot_geterror();
+		<span class="enscript-keyword">if</span> (error == -1) {
+			<span class="enscript-keyword">if</span> (kcdata_p != NULL) {
+				kcdata_memory_destroy(kcdata_p);
+				kcdata_p = NULL;
+				stackshot_kcdata_p = NULL;
+			}
+			kmem_free(kernel_map, (vm_offset_t)stackshotbuf, stackshotbuf_size);
+			stackshotbuf = NULL;
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		bytes_traced = kdp_stack_snapshot_bytes_traced();
+
+		<span class="enscript-keyword">if</span> (bytes_traced &lt;= 0) {
+			error = KERN_NOT_IN_SET;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+		}
+
+		assert(bytes_traced &lt;= stackshotbuf_size);
+		<span class="enscript-keyword">if</span> (!(flags &amp; STACKSHOT_SAVE_IN_KERNEL_BUFFER)) {
+			error = stackshot_remap_buffer(stackshotbuf, bytes_traced, out_buffer_addr, out_size_addr);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Save the stackshot in the kernel buffer.
+		 */</span>
+		kernel_stackshot_buf = stackshotbuf;
+		kernel_stackshot_buf_size =  bytes_traced;
+		<span class="enscript-comment">/*
+		 * Figure out if we didn't use all the pages in the buffer. If so, we set buf_to_free to the beginning of
+		 * the next page after the end of the stackshot in the buffer so that the kmem_free clips the buffer and
+		 * update size_to_free for kmem_free accordingly.
+		 */</span>
+		size_to_free = stackshotbuf_size - (<span class="enscript-type">int</span>) VM_MAP_ROUND_PAGE(bytes_traced, PAGE_MASK);
+
+		assert(size_to_free &gt;= 0);
+
+		<span class="enscript-keyword">if</span> (size_to_free != 0) {
+			buf_to_free = (<span class="enscript-type">void</span> *)((uint64_t)stackshotbuf + stackshotbuf_size - size_to_free);
+		}
+
+		stackshotbuf = NULL;
+		stackshotbuf_size = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (stackshotbuf_size &gt; SANE_TRACEBUF_SIZE) {
+		error = KERN_RESOURCE_SHORTAGE;
+	}
+
+<span class="enscript-reference">error_exit</span>:
+	<span class="enscript-keyword">if</span> (kcdata_p != NULL) {
+		kcdata_memory_destroy(kcdata_p);
+		kcdata_p = NULL;
+		stackshot_kcdata_p = NULL;
+	}
+
+	<span class="enscript-keyword">if</span> (stackshotbuf != NULL) {
+		kmem_free(kernel_map, (vm_offset_t)stackshotbuf, stackshotbuf_size);
+	}
+	<span class="enscript-keyword">if</span> (buf_to_free  != NULL) {
+		kmem_free(kernel_map, (vm_offset_t)buf_to_free, size_to_free);
+	}
+	STACKSHOT_SUBSYS_UNLOCK();
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-comment">/* Cache stack snapshot parameters in preparation for a trace */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_snapshot_preflight</span>(<span class="enscript-type">int</span> pid, <span class="enscript-type">void</span> * tracebuf, uint32_t tracebuf_size, uint32_t flags,
+					   kcdata_descriptor_t data_p, boolean_t enable_faulting)
+{
+	stack_snapshot_pid = pid;
+	stack_snapshot_buf = tracebuf;
+	stack_snapshot_bufsize = tracebuf_size;
+	stack_snapshot_flags = flags;
+	stack_enable_faulting = enable_faulting;
+	<span class="enscript-keyword">if</span> (data_p != NULL) {
+		stackshot_kcdata_p = data_p;
+	}
+	kdp_snapshot++;
+	<span class="enscript-comment">/* Mark this debugger as active, since the polled mode driver that 
+	 * ordinarily does this may not be enabled (yet), or since KDB may be
+	 * the primary debugger.
+	 */</span>
+	old_debugger = current_debugger;
+	<span class="enscript-keyword">if</span> (old_debugger != KDP_CUR_DB) {
+		current_debugger = KDP_CUR_DB;
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_snapshot_postflight</span>(<span class="enscript-type">void</span>)
+{
+	kdp_snapshot--;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_KDP_INTERACTIVE_DEBUGGING</span>
+	<span class="enscript-keyword">if</span> (
+			(kdp_en_send_pkt == NULL) || (old_debugger == KDB_CUR_DB))
+		current_debugger = old_debugger;
+#<span class="enscript-reference">else</span> 
+	current_debugger = old_debugger;
+#<span class="enscript-reference">endif</span> 
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdp_stack_snapshot_geterror</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> stack_snapshot_ret;
+}
+
+uint32_t
+<span class="enscript-function-name">kdp_stack_snapshot_bytes_traced</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> stack_snapshot_bytes_traced;
+}
+
+<span class="enscript-type">static</span> boolean_t <span class="enscript-function-name">memory_iszero</span>(<span class="enscript-type">void</span> *addr, size_t size)
+{
+	<span class="enscript-type">char</span> *data = (<span class="enscript-type">char</span> *)addr;
+	<span class="enscript-keyword">for</span> (size_t i = 0; i &lt; size; i++){
+		<span class="enscript-keyword">if</span> (data[i] != 0)
+			<span class="enscript-keyword">return</span> FALSE;
+	}
+	<span class="enscript-keyword">return</span> TRUE;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kdp_stackshot_kcdata_format</span>(<span class="enscript-type">int</span> pid, uint32_t trace_flags, uint32_t *pBytesTraced)
+{
+	<span class="enscript-comment">/* convenience macros specific only for this function */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">kcd_end_address</span>(kcd) ((void *)((uint64_t)((kcd)-&gt;kcd_addr_begin) + kcdata_memory_get_used_bytes((kcd))))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">kcd_max_address</span>(kcd) ((void *)((kcd)-&gt;kcd_addr_begin + (kcd)-&gt;kcd_length))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">kcd_exit_on_error</span>(action)                                 \
+	<span class="enscript-keyword">do</span> {                                                      \
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != (error = (action))) {         \
+			<span class="enscript-keyword">if</span> (error == KERN_RESOURCE_SHORTAGE) {    \
+				error = -1;                       \
+			}                                         \
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;                          \
+		}                                                 \
+	} <span class="enscript-keyword">while</span> (0); <span class="enscript-comment">/* end kcd_exit_on_error */</span>
+
+	<span class="enscript-type">int</span> error = 0;
+	mach_vm_address_t out_addr = 0;
+	uint64_t abs_time;
+	<span class="enscript-type">struct</span> task_snapshot_v2 *cur_tsnap;
+	uint64_t system_state_flags = 0;
+	<span class="enscript-type">int</span> saved_count = 0;
+	task_t task = TASK_NULL;
+	thread_t thread = THREAD_NULL;
+	mach_timebase_info_data_t timebase = {0, 0};
+	uint64_t microsecs = 0, secs = 0;
+	uint32_t length_to_copy, tmp32;
+
+	abs_time = mach_absolute_time();
+	clock_get_calendar_microtime((clock_sec_t*)&amp;secs, (clock_usec_t*)&amp;microsecs);
+
+	<span class="enscript-comment">/* process the flags */</span>
+	boolean_t dispatch_p = ((trace_flags &amp; STACKSHOT_GET_DQ) != 0);
+	boolean_t save_loadinfo_p = ((trace_flags &amp; STACKSHOT_SAVE_LOADINFO) != 0);
+	boolean_t save_kextloadinfo_p = ((trace_flags &amp; STACKSHOT_SAVE_KEXT_LOADINFO) != 0);
+	boolean_t save_userframes_p = ((trace_flags &amp; STACKSHOT_SAVE_KERNEL_FRAMES_ONLY) == 0);
+	boolean_t save_donating_pids_p = ((trace_flags &amp; STACKSHOT_SAVE_IMP_DONATION_PIDS) != 0);
+
+	<span class="enscript-keyword">if</span> (<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">void</span> *) == 8)
+		system_state_flags |= kKernel64_p;
+
+	<span class="enscript-keyword">if</span> (stackshot_kcdata_p == NULL || pBytesTraced == NULL) {
+		error = -1;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+	}
+
+	<span class="enscript-comment">/* begin saving data into the buffer */</span>
+	*pBytesTraced = 0;
+	kcd_exit_on_error(kcdata_add_uint32_with_description(stackshot_kcdata_p, trace_flags, <span class="enscript-string">&quot;stackshot_in_flags&quot;</span>));
+	kcd_exit_on_error(kcdata_add_uint32_with_description(stackshot_kcdata_p, (uint32_t)pid, <span class="enscript-string">&quot;stackshot_in_pid&quot;</span>));
+	kcd_exit_on_error(kcdata_add_uint64_with_description(stackshot_kcdata_p, system_state_flags, <span class="enscript-string">&quot;system_state_flags&quot;</span>));
+	tmp32 = PAGE_SIZE;
+	kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, STACKSHOT_KCTYPE_KERN_PAGE_SIZE, <span class="enscript-keyword">sizeof</span>(uint32_t), &amp;out_addr));
+	memcpy((<span class="enscript-type">void</span> *)out_addr, &amp;tmp32, <span class="enscript-keyword">sizeof</span>(tmp32));
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_JETSAM</span>
+	tmp32 = memorystatus_get_pressure_status_kdp();
+	kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, STACKSHOT_KCTYPE_JETSAM_LEVEL, <span class="enscript-keyword">sizeof</span>(uint32_t), &amp;out_addr));
+	memcpy((<span class="enscript-type">void</span> *)out_addr, &amp;tmp32, <span class="enscript-keyword">sizeof</span>(tmp32));
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* save boot-args and osversion string */</span>
+	length_to_copy =  MIN((uint32_t)(strlen(version) + 1), OSVERSIZE);
+	kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, STACKSHOT_KCTYPE_OSVERSION, length_to_copy, &amp;out_addr));
+	strlcpy((<span class="enscript-type">char</span>*)out_addr, &amp;version[0], length_to_copy);
+
+	length_to_copy =  MIN((uint32_t)(strlen(PE_boot_args()) + 1), OSVERSIZE);
+	kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, STACKSHOT_KCTYPE_BOOTARGS, length_to_copy, &amp;out_addr));
+	strlcpy((<span class="enscript-type">char</span>*)out_addr, PE_boot_args(), length_to_copy);
+
+	<span class="enscript-comment">/* setup mach_absolute_time and timebase info */</span>
+	clock_timebase_info(&amp;timebase);
+	kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, KCDATA_TYPE_TIMEBASE, <span class="enscript-keyword">sizeof</span>(timebase), &amp;out_addr));
+	memcpy((<span class="enscript-type">void</span> *)out_addr, &amp;timebase, <span class="enscript-keyword">sizeof</span>(timebase));
+
+	kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, KCDATA_TYPE_MACH_ABSOLUTE_TIME, <span class="enscript-keyword">sizeof</span>(uint64_t), &amp;out_addr));
+	memcpy((<span class="enscript-type">void</span> *)out_addr, &amp;abs_time, <span class="enscript-keyword">sizeof</span>(uint64_t));
+
+	microsecs = microsecs + (secs * USECSPERSEC);
+	kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, KCDATA_TYPE_USECS_SINCE_EPOCH, <span class="enscript-keyword">sizeof</span>(uint64_t), &amp;out_addr));
+	memcpy((<span class="enscript-type">void</span> *)out_addr, &amp;microsecs, <span class="enscript-keyword">sizeof</span>(uint64_t));
+
+	<span class="enscript-comment">/* reserve space of system level shared cache load info */</span>
+	<span class="enscript-type">struct</span> dyld_uuid_info_64 *sys_shared_cache_loadinfo;
+	kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, STACKSHOT_KCTYPE_SHAREDCACHE_LOADINFO, <span class="enscript-keyword">sizeof</span>(kernel_uuid_info), &amp;out_addr));
+	sys_shared_cache_loadinfo = (<span class="enscript-type">struct</span> dyld_uuid_info_64 *)out_addr;
+	bzero((<span class="enscript-type">void</span> *)sys_shared_cache_loadinfo, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dyld_uuid_info_64));
+
+	<span class="enscript-comment">/* Add requested information first */</span>
+	<span class="enscript-keyword">if</span> (trace_flags &amp; STACKSHOT_GET_GLOBAL_MEM_STATS) {
+		kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, STACKSHOT_KCTYPE_GLOBAL_MEM_STATS, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> mem_and_io_snapshot), &amp;out_addr));
+		kdp_mem_and_io_snapshot((<span class="enscript-type">struct</span> mem_and_io_snapshot *)out_addr);
+	}
+
+	<span class="enscript-comment">/* Iterate over tasks */</span>
+	queue_head_t *task_list = &amp;tasks;
+	queue_iterate(task_list, task, task_t, tasks) {
+		<span class="enscript-type">int</span> task_pid;
+		<span class="enscript-keyword">if</span> ((task == NULL) || !ml_validate_nofault((vm_offset_t) task, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> task)))
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+
+		task_pid = pid_from_task(task);
+		<span class="enscript-keyword">if</span> (!task-&gt;active) {
+			<span class="enscript-comment">/*
+			 * Not interested in terminated tasks without threads, and
+			 * at the moment, stackshot can't handle a task  without a name.
+			 */</span>
+			<span class="enscript-keyword">if</span> (queue_empty(&amp;task-&gt;threads) || task_pid == -1) {
+				<span class="enscript-keyword">continue</span>;
+			}
+		}
+
+		<span class="enscript-comment">/* Trace everything, unless a process was specified */</span>
+		<span class="enscript-keyword">if</span> ((pid == -1) || (pid == task_pid)) {
+
+			uint64_t task_uniqueid = proc_uniqueid_from_task(task);
+			boolean_t task64 = task_has_64BitAddr(task);
+			boolean_t have_map = (task-&gt;map != NULL) &amp;&amp; (ml_validate_nofault((vm_offset_t)(task-&gt;map), <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> _vm_map)));
+			boolean_t have_pmap = have_map &amp;&amp; (task-&gt;map-&gt;pmap != NULL) &amp;&amp; (ml_validate_nofault((vm_offset_t)(task-&gt;map-&gt;pmap), <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pmap)));
+
+			<span class="enscript-comment">/* add task snapshot marker */</span>
+			kcd_exit_on_error(kcdata_add_container_marker(stackshot_kcdata_p, KCDATA_TYPE_CONTAINER_BEGIN, STACKSHOT_KCCONTAINER_TASK, task_uniqueid));
+
+			<span class="enscript-comment">/* add task_snapshot_v2 struct data */</span>
+			kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, STACKSHOT_KCTYPE_TASK_SNAPSHOT, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> task_snapshot_v2), &amp;out_addr));
+			cur_tsnap = (<span class="enscript-type">struct</span> task_snapshot_v2 *)out_addr;
+			bzero(cur_tsnap, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> task_snapshot_v2));
+
+			cur_tsnap-&gt;ts_pid = task_pid;
+			cur_tsnap-&gt;ts_unique_pid = task_uniqueid;
+
+			<span class="enscript-comment">/* Add the BSD process identifiers */</span>
+			<span class="enscript-keyword">if</span> (task_pid != -1 &amp;&amp; task-&gt;bsd_info != NULL)
+				proc_name_kdp(task, cur_tsnap-&gt;ts_p_comm, <span class="enscript-keyword">sizeof</span>(cur_tsnap-&gt;ts_p_comm));
+			<span class="enscript-keyword">else</span> {
+				cur_tsnap-&gt;ts_p_comm[0] = <span class="enscript-string">'\0'</span>;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_INHERITANCE</span> &amp;&amp; (<span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>)
+				<span class="enscript-keyword">if</span> (task-&gt;task_imp_base != NULL) {
+					strlcpy(cur_tsnap-&gt;ts_p_comm, &amp;task-&gt;task_imp_base-&gt;iit_procname[0],
+					        MIN((<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(task-&gt;task_imp_base-&gt;iit_procname), (<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(cur_tsnap-&gt;ts_p_comm)));
+				}
+#<span class="enscript-reference">endif</span>
+			}
+
+			<span class="enscript-keyword">if</span> (task64)
+				cur_tsnap-&gt;ts_ss_flags |= kUser64_p;
+			<span class="enscript-keyword">if</span> (!task-&gt;active || task_is_a_corpse(task))
+				cur_tsnap-&gt;ts_ss_flags |= kTerminatedSnapshot;
+			<span class="enscript-keyword">if</span> (task-&gt;pidsuspended)
+				cur_tsnap-&gt;ts_ss_flags |= kPidSuspended;
+			<span class="enscript-keyword">if</span> (task-&gt;frozen)
+				cur_tsnap-&gt;ts_ss_flags |= kFrozen;
+			<span class="enscript-keyword">if</span> (task-&gt;effective_policy.darwinbg == 1)
+				cur_tsnap-&gt;ts_ss_flags |= kTaskDarwinBG;
+			<span class="enscript-keyword">if</span> (task-&gt;requested_policy.t_role == TASK_FOREGROUND_APPLICATION)
+				cur_tsnap-&gt;ts_ss_flags |= kTaskIsForeground;
+			<span class="enscript-keyword">if</span> (task-&gt;requested_policy.t_boosted == 1)
+				cur_tsnap-&gt;ts_ss_flags |= kTaskIsBoosted;
+			<span class="enscript-keyword">if</span> (task-&gt;effective_policy.t_sup_active == 1)
+				cur_tsnap-&gt;ts_ss_flags |= kTaskIsSuppressed;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_INHERITANCE</span>
+			<span class="enscript-keyword">if</span> (task-&gt;task_imp_base) {
+				<span class="enscript-keyword">if</span> (task-&gt;task_imp_base-&gt;iit_donor)
+					cur_tsnap-&gt;ts_ss_flags |= kTaskIsImpDonor;
+				<span class="enscript-keyword">if</span> (task-&gt;task_imp_base-&gt;iit_live_donor)
+					cur_tsnap-&gt;ts_ss_flags |= kTaskIsLiveImpDonor;
+			}
+#<span class="enscript-reference">endif</span>
+
+			cur_tsnap-&gt;ts_latency_qos = (task-&gt;effective_policy.t_latency_qos == LATENCY_QOS_TIER_UNSPECIFIED) ?
+				LATENCY_QOS_TIER_UNSPECIFIED : ((0xFF &lt;&lt; 16) | task-&gt;effective_policy.t_latency_qos);
+			cur_tsnap-&gt;ts_suspend_count = task-&gt;suspend_count;
+			cur_tsnap-&gt;ts_p_start_sec = 0;
+			proc_starttime_kdp(task-&gt;bsd_info, &amp;cur_tsnap-&gt;ts_p_start_sec, NULL);
+
+			cur_tsnap-&gt;ts_task_size = have_pmap ? (pmap_resident_count(task-&gt;map-&gt;pmap) * PAGE_SIZE) : 0;
+			cur_tsnap-&gt;ts_max_resident_size = get_task_resident_max(task);
+			cur_tsnap-&gt;ts_faults = task-&gt;faults;
+			cur_tsnap-&gt;ts_pageins = task-&gt;pageins;
+			cur_tsnap-&gt;ts_cow_faults = task-&gt;cow_faults;
+			cur_tsnap-&gt;ts_user_time_in_terminated_threads = task-&gt;total_user_time;
+			cur_tsnap-&gt;ts_system_time_in_terminated_threads = task-&gt;total_system_time;
+			cur_tsnap-&gt;ts_was_throttled = (uint32_t) proc_was_throttled_from_task(task);
+			cur_tsnap-&gt;ts_did_throttle = (uint32_t) proc_did_throttle_from_task(task);
+
+			<span class="enscript-comment">/* Check for shared cache information */</span>
+			<span class="enscript-keyword">do</span> {
+				uint8_t shared_cache_identifier[16];
+				uint64_t shared_cache_slide;
+				uint64_t shared_cache_base_address = 0;
+				boolean_t found_shared_cache_info = TRUE;
+
+				<span class="enscript-keyword">if</span> (task-&gt;shared_region &amp;&amp; ml_validate_nofault((vm_offset_t)task-&gt;shared_region, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> vm_shared_region))) {
+					<span class="enscript-type">struct</span> vm_shared_region *sr = task-&gt;shared_region;
+					shared_cache_base_address = sr-&gt;sr_base_address + sr-&gt;sr_first_mapping;
+				}
+
+				<span class="enscript-keyword">if</span> (!shared_cache_base_address ||
+						!kdp_copyin(task-&gt;map-&gt;pmap, shared_cache_base_address + offsetof(<span class="enscript-type">struct</span> _dyld_cache_header, uuid), shared_cache_identifier, <span class="enscript-keyword">sizeof</span>(shared_cache_identifier))
+				   ) {
+					found_shared_cache_info = FALSE;
+				}
+
+				<span class="enscript-keyword">if</span> (task-&gt;shared_region) {
+					<span class="enscript-comment">/*
+					 * No refcounting here, but we are in debugger
+					 * context, so that should be safe.
+					 */</span>
+					shared_cache_slide = task-&gt;shared_region-&gt;sr_slide_info.slide;
+				} <span class="enscript-keyword">else</span> {
+					shared_cache_slide = 0;
+				}
+
+				<span class="enscript-keyword">if</span> (found_shared_cache_info == FALSE)
+					<span class="enscript-keyword">break</span>;
+
+				<span class="enscript-keyword">if</span> (task_pid == 1) {
+					<span class="enscript-comment">/* save launchd's shared cache info as system level */</span>
+					bcopy(shared_cache_identifier, sys_shared_cache_loadinfo-&gt;imageUUID, <span class="enscript-keyword">sizeof</span>(sys_shared_cache_loadinfo-&gt;imageUUID));
+					sys_shared_cache_loadinfo-&gt;imageLoadAddress = shared_cache_slide;
+					<span class="enscript-keyword">break</span>;
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-keyword">if</span> (shared_cache_slide == sys_shared_cache_loadinfo-&gt;imageLoadAddress &amp;&amp;
+							0 == memcmp(shared_cache_identifier, sys_shared_cache_loadinfo-&gt;imageUUID, <span class="enscript-keyword">sizeof</span>(sys_shared_cache_loadinfo-&gt;imageUUID))) {
+						<span class="enscript-comment">/* skip adding shared cache info. its same as system level one */</span>
+						<span class="enscript-keyword">break</span>;
+					}
+				}
+
+				kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, STACKSHOT_KCTYPE_SHAREDCACHE_LOADINFO, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dyld_uuid_info_64), &amp;out_addr));
+				<span class="enscript-type">struct</span> dyld_uuid_info_64 *shared_cache_data = (<span class="enscript-type">struct</span> dyld_uuid_info_64 *)out_addr;
+				shared_cache_data-&gt;imageLoadAddress = shared_cache_slide;
+				bcopy(shared_cache_identifier, shared_cache_data-&gt;imageUUID, <span class="enscript-keyword">sizeof</span>(shared_cache_data-&gt;imageUUID));
+
+			} <span class="enscript-keyword">while</span>(0);
+
+			<span class="enscript-comment">/* I/O Statistics if any counters are non zero */</span>
+			assert(IO_NUM_PRIORITIES == STACKSHOT_IO_NUM_PRIORITIES);
+			<span class="enscript-keyword">if</span> (task-&gt;task_io_stats &amp;&amp; !memory_iszero(task-&gt;task_io_stats, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> io_stat_info))) {
+				kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, STACKSHOT_KCTYPE_IOSTATS, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> io_stats_snapshot), &amp;out_addr));
+				<span class="enscript-type">struct</span> io_stats_snapshot *_iostat = (<span class="enscript-type">struct</span> io_stats_snapshot *)out_addr;
+				_iostat-&gt;ss_disk_reads_count = task-&gt;task_io_stats-&gt;disk_reads.count;
+				_iostat-&gt;ss_disk_reads_size = task-&gt;task_io_stats-&gt;disk_reads.size;
+				_iostat-&gt;ss_disk_writes_count = (task-&gt;task_io_stats-&gt;total_io.count - task-&gt;task_io_stats-&gt;disk_reads.count);
+				_iostat-&gt;ss_disk_writes_size = (task-&gt;task_io_stats-&gt;total_io.size - task-&gt;task_io_stats-&gt;disk_reads.size);
+				_iostat-&gt;ss_paging_count = task-&gt;task_io_stats-&gt;paging.count;
+				_iostat-&gt;ss_paging_size = task-&gt;task_io_stats-&gt;paging.size;
+				_iostat-&gt;ss_non_paging_count = (task-&gt;task_io_stats-&gt;total_io.count - task-&gt;task_io_stats-&gt;paging.count);
+				_iostat-&gt;ss_non_paging_size = (task-&gt;task_io_stats-&gt;total_io.size - task-&gt;task_io_stats-&gt;paging.size);
+				_iostat-&gt;ss_metadata_count = task-&gt;task_io_stats-&gt;metadata.count;
+				_iostat-&gt;ss_metadata_size = task-&gt;task_io_stats-&gt;metadata.size;
+				_iostat-&gt;ss_data_count = (task-&gt;task_io_stats-&gt;total_io.count - task-&gt;task_io_stats-&gt;metadata.count);
+				_iostat-&gt;ss_data_size = (task-&gt;task_io_stats-&gt;total_io.size - task-&gt;task_io_stats-&gt;metadata.size);
+				<span class="enscript-keyword">for</span>(<span class="enscript-type">int</span> i = 0; i &lt; IO_NUM_PRIORITIES; i++) {
+					_iostat-&gt;ss_io_priority_count[i] = task-&gt;task_io_stats-&gt;io_priority[i].count;
+					_iostat-&gt;ss_io_priority_size[i] = task-&gt;task_io_stats-&gt;io_priority[i].size;
+				}
+			}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_INHERITANCE</span>
+			<span class="enscript-keyword">if</span> (save_donating_pids_p) {
+				kcd_exit_on_error(((((mach_vm_address_t) kcd_end_address(stackshot_kcdata_p) + (TASK_IMP_WALK_LIMIT * <span class="enscript-keyword">sizeof</span>(int32_t)))
+							&lt; (mach_vm_address_t) kcd_max_address(stackshot_kcdata_p)) ? KERN_SUCCESS : KERN_RESOURCE_SHORTAGE));
+				saved_count = task_importance_list_pids(task, TASK_IMP_LIST_DONATING_PIDS, (<span class="enscript-type">void</span> *)kcd_end_address(stackshot_kcdata_p), TASK_IMP_WALK_LIMIT);
+				<span class="enscript-keyword">if</span> (saved_count &gt; 0)
+					kcd_exit_on_error(kcdata_get_memory_addr_for_array(stackshot_kcdata_p, STASKSHOT_KCTYPE_DONATING_PIDS, <span class="enscript-keyword">sizeof</span>(int32_t), saved_count, &amp;out_addr));
+			}
+#<span class="enscript-reference">endif</span>
+
+			<span class="enscript-comment">/* place load info and libraries now */</span>
+			uint32_t uuid_info_count = 0;
+			mach_vm_address_t uuid_info_addr = 0;
+			<span class="enscript-keyword">if</span> (save_loadinfo_p &amp;&amp; have_pmap &amp;&amp; task-&gt;active &amp;&amp; task_pid &gt; 0) {
+				<span class="enscript-comment">/* Read the dyld_all_image_infos struct from the task memory to get UUID array count and location */</span>
+				<span class="enscript-keyword">if</span> (task64) {
+					<span class="enscript-type">struct</span> user64_dyld_all_image_infos task_image_infos;
+					<span class="enscript-keyword">if</span> (kdp_copyin(task-&gt;map-&gt;pmap, task-&gt;all_image_info_addr, &amp;task_image_infos, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user64_dyld_all_image_infos))) {
+						uuid_info_count = (uint32_t)task_image_infos.uuidArrayCount;
+						uuid_info_addr = task_image_infos.uuidArray;
+					}
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-type">struct</span> user32_dyld_all_image_infos task_image_infos;
+					<span class="enscript-keyword">if</span> (kdp_copyin(task-&gt;map-&gt;pmap, task-&gt;all_image_info_addr, &amp;task_image_infos, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user32_dyld_all_image_infos))) {
+						uuid_info_count = task_image_infos.uuidArrayCount;
+						uuid_info_addr = task_image_infos.uuidArray;
+					}
+				}
+
+				<span class="enscript-comment">/*
+				 * If we get a NULL uuid_info_addr (which can happen when we catch dyld in the middle of updating
+				 * this data structure), we zero the uuid_info_count so that we won't even try to save load info
+				 * for this task.
+				 */</span>
+				<span class="enscript-keyword">if</span> (!uuid_info_addr) {
+					uuid_info_count = 0;
+				}
+			}
+
+			<span class="enscript-keyword">if</span> (have_pmap &amp;&amp; task_pid == 0) {
+				<span class="enscript-keyword">if</span> (save_kextloadinfo_p &amp;&amp; ml_validate_nofault((vm_offset_t)(gLoadedKextSummaries), <span class="enscript-keyword">sizeof</span>(OSKextLoadedKextSummaryHeader))) {
+					uuid_info_count = gLoadedKextSummaries-&gt;numSummaries + 1; <span class="enscript-comment">/* include main kernel UUID */</span>
+				} <span class="enscript-keyword">else</span> {
+					uuid_info_count = 1; <span class="enscript-comment">/* atleast include kernel uuid */</span>
+				}
+			}
+
+			<span class="enscript-keyword">if</span> (task_pid &gt; 0 &amp;&amp; uuid_info_count &gt; 0 &amp;&amp; uuid_info_count &lt; MAX_LOADINFOS) {
+				uint32_t uuid_info_size = (uint32_t)(task64 ? <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user64_dyld_uuid_info) : <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user32_dyld_uuid_info));
+				uint32_t uuid_info_array_size = uuid_info_count * uuid_info_size;
+
+				kcd_exit_on_error(kcdata_get_memory_addr_for_array(stackshot_kcdata_p,
+							(task64 ? KCDATA_TYPE_LIBRARY_LOADINFO64 : KCDATA_TYPE_LIBRARY_LOADINFO),
+							uuid_info_size,
+							uuid_info_count,
+							&amp;out_addr));
+
+
+				<span class="enscript-comment">/* Copy in the UUID info array
+				 * It may be nonresident, in which case just fix up nloadinfos to 0 in the task_snap
+				 */</span>
+				<span class="enscript-keyword">if</span> (have_pmap &amp;&amp; !kdp_copyin(task-&gt;map-&gt;pmap, uuid_info_addr, (<span class="enscript-type">void</span> *)out_addr, uuid_info_array_size)) {
+					bzero((<span class="enscript-type">void</span> *)out_addr, uuid_info_array_size);
+				}
+
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (task_pid == 0 &amp;&amp; uuid_info_count &gt; 0 &amp;&amp; uuid_info_count &lt; MAX_LOADINFOS) {
+				uintptr_t image_load_address;
+
+				<span class="enscript-keyword">do</span> {
+					<span class="enscript-keyword">if</span> (!kernel_uuid || !ml_validate_nofault((vm_offset_t)kernel_uuid, <span class="enscript-keyword">sizeof</span>(uuid_t))) {
+						<span class="enscript-comment">/* Kernel UUID not found or inaccessible */</span>
+						<span class="enscript-keyword">break</span>;
+					}
+					kcd_exit_on_error(kcdata_get_memory_addr_for_array(stackshot_kcdata_p,
+								(<span class="enscript-keyword">sizeof</span>(kernel_uuid_info) == <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user64_dyld_uuid_info))? KCDATA_TYPE_LIBRARY_LOADINFO64: KCDATA_TYPE_LIBRARY_LOADINFO,
+								<span class="enscript-keyword">sizeof</span>(kernel_uuid_info), uuid_info_count, &amp;out_addr)
+							);
+					kernel_uuid_info *uuid_info_array = (kernel_uuid_info *)out_addr;
+					image_load_address = (uintptr_t)VM_KERNEL_UNSLIDE(vm_kernel_stext);
+					uuid_info_array[0].imageLoadAddress = image_load_address;
+					memcpy(&amp;uuid_info_array[0].imageUUID, kernel_uuid, <span class="enscript-keyword">sizeof</span>(uuid_t));
+
+					<span class="enscript-keyword">if</span> (save_kextloadinfo_p &amp;&amp; ml_validate_nofault((vm_offset_t)(&amp;gLoadedKextSummaries-&gt;summaries[0]),
+								gLoadedKextSummaries-&gt;entry_size * gLoadedKextSummaries-&gt;numSummaries)) {
+						uint32_t kexti;
+						<span class="enscript-keyword">for</span> (kexti=0 ; kexti &lt; gLoadedKextSummaries-&gt;numSummaries; kexti++) {
+							image_load_address = (uintptr_t)VM_KERNEL_UNSLIDE(gLoadedKextSummaries-&gt;summaries[kexti].address);
+							uuid_info_array[kexti + 1].imageLoadAddress = image_load_address;
+							memcpy(&amp;uuid_info_array[kexti + 1].imageUUID, &amp;gLoadedKextSummaries-&gt;summaries[kexti].uuid, <span class="enscript-keyword">sizeof</span>(uuid_t));
+						}
+					}
+				} <span class="enscript-keyword">while</span>(0);
+			}
+
+			<span class="enscript-comment">/* Iterate over task threads */</span>
+			queue_iterate(&amp;task-&gt;threads, thread, thread_t, task_threads){
+				uint64_t tval;
+				uint64_t thread_uniqueid = 0;
+				<span class="enscript-type">char</span> cur_thread_name[STACKSHOT_MAX_THREAD_NAME_SIZE];
+
+				<span class="enscript-keyword">if</span> ((thread == NULL) || !ml_validate_nofault((vm_offset_t) thread, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread)))
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+
+				<span class="enscript-keyword">if</span> (!save_userframes_p &amp;&amp; thread-&gt;kernel_stack == 0)
+					<span class="enscript-keyword">continue</span>;
+
+				thread_uniqueid = thread_tid(thread);
+
+				<span class="enscript-comment">/* add thread marker */</span>
+				kcd_exit_on_error(kcdata_add_container_marker(stackshot_kcdata_p, KCDATA_TYPE_CONTAINER_BEGIN, STACKSHOT_KCCONTAINER_THREAD, thread_uniqueid));
+				kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, STACKSHOT_KCTYPE_THREAD_SNAPSHOT, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_snapshot_v2), &amp;out_addr));
+				<span class="enscript-type">struct</span> thread_snapshot_v2 * cur_thread_snap = (<span class="enscript-type">struct</span> thread_snapshot_v2 *)out_addr;
+
+				<span class="enscript-comment">/* Populate the thread snapshot header */</span>
+				cur_thread_snap-&gt;ths_thread_id = thread_uniqueid;
+				cur_thread_snap-&gt;ths_state = thread-&gt;state;
+				cur_thread_snap-&gt;ths_ss_flags = 0;
+				cur_thread_snap-&gt;ths_base_priority = thread-&gt;base_pri;
+				cur_thread_snap-&gt;ths_sched_priority = thread-&gt;sched_pri;
+				cur_thread_snap-&gt;ths_sched_flags = thread-&gt;sched_flags;
+				cur_thread_snap-&gt;ths_wait_event = VM_KERNEL_UNSLIDE_OR_PERM(thread-&gt;wait_event);
+				cur_thread_snap-&gt;ths_continuation = VM_KERNEL_UNSLIDE(thread-&gt;continuation);
+				cur_thread_snap-&gt;ths_last_run_time = thread-&gt;last_run_time;
+				cur_thread_snap-&gt;ths_last_made_runnable_time = thread-&gt;last_made_runnable_time;
+				cur_thread_snap-&gt;ths_io_tier = proc_get_effective_thread_policy(thread, TASK_POLICY_IO);
+				cur_thread_snap-&gt;ths_eqos = thread-&gt;effective_policy.thep_qos;
+				cur_thread_snap-&gt;ths_rqos = thread-&gt;requested_policy.thrp_qos;
+				cur_thread_snap-&gt;ths_rqos_override = thread-&gt;requested_policy.thrp_qos_override;
+				cur_thread_snap-&gt;ths_total_syscalls = thread-&gt;syscalls_mach + thread-&gt;syscalls_unix;
+				cur_thread_snap-&gt;ths_dqserialnum = 0;
+
+				tval = safe_grab_timer_value(&amp;thread-&gt;user_timer);
+				cur_thread_snap-&gt;ths_user_time = tval;
+				tval = safe_grab_timer_value(&amp;thread-&gt;system_timer);
+
+				<span class="enscript-keyword">if</span> (thread-&gt;precise_user_kernel_time) {
+					cur_thread_snap-&gt;ths_sys_time = tval;
+				} <span class="enscript-keyword">else</span> {
+					cur_thread_snap-&gt;ths_user_time += tval;
+					cur_thread_snap-&gt;ths_sys_time = 0;
+				}
+
+				<span class="enscript-keyword">if</span> (thread-&gt;effective_policy.darwinbg)
+					cur_thread_snap-&gt;ths_ss_flags |= kThreadDarwinBG;
+				<span class="enscript-keyword">if</span> (proc_get_effective_thread_policy(thread, TASK_POLICY_PASSIVE_IO))
+					cur_thread_snap-&gt;ths_ss_flags |= kThreadIOPassive;
+				<span class="enscript-keyword">if</span> (thread-&gt;suspend_count &gt; 0)
+					cur_thread_snap-&gt;ths_ss_flags |= kThreadSuspended;
+
+				<span class="enscript-keyword">if</span> (thread-&gt;options &amp; TH_OPT_GLOBAL_FORCED_IDLE) {
+					cur_thread_snap-&gt;ths_ss_flags |= kGlobalForcedIdle;
+				}
+
+				<span class="enscript-keyword">if</span> (IPC_VOUCHER_NULL != thread-&gt;ith_voucher)
+					cur_thread_snap-&gt;ths_voucher_identifier = VM_KERNEL_ADDRPERM(thread-&gt;ith_voucher);
+				<span class="enscript-keyword">if</span> (dispatch_p &amp;&amp; (task != kernel_task) &amp;&amp; (task-&gt;active) &amp;&amp; have_pmap) {
+					uint64_t dqkeyaddr = thread_dispatchqaddr(thread);
+					<span class="enscript-keyword">if</span> (dqkeyaddr != 0) {
+						uint64_t dqaddr = 0;
+						<span class="enscript-keyword">if</span> (kdp_copyin(task-&gt;map-&gt;pmap, dqkeyaddr, &amp;dqaddr, (task64 ? 8 : 4)) &amp;&amp; (dqaddr != 0)) {
+							uint64_t dqserialnumaddr = dqaddr + proc_dispatchqueue_serialno_offset_from_task(task);
+							uint64_t dqserialnum = 0;
+							<span class="enscript-keyword">if</span> (kdp_copyin(task-&gt;map-&gt;pmap, dqserialnumaddr, &amp;dqserialnum, (task64 ? 8 : 4))) {
+								cur_thread_snap-&gt;ths_ss_flags |= kHasDispatchSerial;
+								cur_thread_snap-&gt;ths_dqserialnum = dqserialnum;
+							}
+						}
+					}
+				}
+
+				<span class="enscript-comment">/* if there is thread name then add to buffer */</span>
+				cur_thread_name[0] = <span class="enscript-string">'\0'</span>;
+				proc_threadname_kdp(thread-&gt;uthread, cur_thread_name, STACKSHOT_MAX_THREAD_NAME_SIZE);
+				<span class="enscript-keyword">if</span> (strnlen(cur_thread_name, STACKSHOT_MAX_THREAD_NAME_SIZE) &gt; 0) {
+					kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, STACKSHOT_KCTYPE_THREAD_NAME, <span class="enscript-keyword">sizeof</span>(cur_thread_name), &amp;out_addr));
+					bcopy((<span class="enscript-type">void</span> *)cur_thread_name, (<span class="enscript-type">void</span> *)out_addr, <span class="enscript-keyword">sizeof</span>(cur_thread_name));
+				}
+
+				<span class="enscript-comment">/* I/O Statistics */</span>
+				assert(IO_NUM_PRIORITIES == STACKSHOT_IO_NUM_PRIORITIES);
+				<span class="enscript-keyword">if</span> (thread-&gt;thread_io_stats &amp;&amp; !memory_iszero(thread-&gt;thread_io_stats, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> io_stat_info))) {
+					kcd_exit_on_error(kcdata_get_memory_addr(stackshot_kcdata_p, STACKSHOT_KCTYPE_IOSTATS, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> io_stats_snapshot), &amp;out_addr));
+					<span class="enscript-type">struct</span> io_stats_snapshot *_iostat = (<span class="enscript-type">struct</span> io_stats_snapshot *)out_addr;
+					_iostat-&gt;ss_disk_reads_count = thread-&gt;thread_io_stats-&gt;disk_reads.count;
+					_iostat-&gt;ss_disk_reads_size = thread-&gt;thread_io_stats-&gt;disk_reads.size;
+					_iostat-&gt;ss_disk_writes_count = (thread-&gt;thread_io_stats-&gt;total_io.count - thread-&gt;thread_io_stats-&gt;disk_reads.count);
+					_iostat-&gt;ss_disk_writes_size = (thread-&gt;thread_io_stats-&gt;total_io.size - thread-&gt;thread_io_stats-&gt;disk_reads.size);
+					_iostat-&gt;ss_paging_count = thread-&gt;thread_io_stats-&gt;paging.count;
+					_iostat-&gt;ss_paging_size = thread-&gt;thread_io_stats-&gt;paging.size;
+					_iostat-&gt;ss_non_paging_count = (thread-&gt;thread_io_stats-&gt;total_io.count - thread-&gt;thread_io_stats-&gt;paging.count);
+					_iostat-&gt;ss_non_paging_size = (thread-&gt;thread_io_stats-&gt;total_io.size - thread-&gt;thread_io_stats-&gt;paging.size);
+					_iostat-&gt;ss_metadata_count = thread-&gt;thread_io_stats-&gt;metadata.count;
+					_iostat-&gt;ss_metadata_size = thread-&gt;thread_io_stats-&gt;metadata.size;
+					_iostat-&gt;ss_data_count = (thread-&gt;thread_io_stats-&gt;total_io.count - thread-&gt;thread_io_stats-&gt;metadata.count);
+					_iostat-&gt;ss_data_size = (thread-&gt;thread_io_stats-&gt;total_io.size - thread-&gt;thread_io_stats-&gt;metadata.size);
+					<span class="enscript-keyword">for</span>(<span class="enscript-type">int</span> i = 0; i &lt; IO_NUM_PRIORITIES; i++) {
+						_iostat-&gt;ss_io_priority_count[i] = thread-&gt;thread_io_stats-&gt;io_priority[i].count;
+						_iostat-&gt;ss_io_priority_size[i] = thread-&gt;thread_io_stats-&gt;io_priority[i].size;
+					}
+				}
+
+				<span class="enscript-comment">/* Trace user stack, if any */</span>
+				<span class="enscript-keyword">if</span> (save_userframes_p &amp;&amp; task-&gt;active &amp;&amp; thread-&gt;task-&gt;map != kernel_map) {
+					uint32_t thread_snapshot_flags = 0;
+					<span class="enscript-comment">/* 64-bit task? */</span>
+					<span class="enscript-keyword">if</span> (task_has_64BitAddr(thread-&gt;task)) {
+						out_addr = (mach_vm_address_t)kcd_end_address(stackshot_kcdata_p);
+						saved_count = machine_trace_thread64(thread, (<span class="enscript-type">char</span> *)out_addr, (<span class="enscript-type">char</span> *)kcd_max_address(stackshot_kcdata_p), MAX_FRAMES, TRUE, &amp;thread_snapshot_flags);
+						<span class="enscript-keyword">if</span> (saved_count &gt; 0) {
+							kcd_exit_on_error(kcdata_get_memory_addr_for_array(stackshot_kcdata_p,
+									STACKSHOT_KCTYPE_USER_STACKFRAME64,
+									<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> stack_snapshot_frame64),
+									saved_count/<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> stack_snapshot_frame64),
+									&amp;out_addr));
+							cur_thread_snap-&gt;ths_ss_flags |= kUser64_p;
+						}
+					}
+					<span class="enscript-keyword">else</span> {
+						out_addr = (mach_vm_address_t)kcd_end_address(stackshot_kcdata_p);
+						saved_count = machine_trace_thread(thread, (<span class="enscript-type">char</span> *)out_addr, (<span class="enscript-type">char</span> *)kcd_max_address(stackshot_kcdata_p), MAX_FRAMES, TRUE, &amp;thread_snapshot_flags);
+						<span class="enscript-keyword">if</span> (saved_count &gt; 0) {
+							kcd_exit_on_error(kcdata_get_memory_addr_for_array(stackshot_kcdata_p,
+										STACKSHOT_KCTYPE_USER_STACKFRAME,
+										<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> stack_snapshot_frame32),
+										saved_count/<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> stack_snapshot_frame32),
+										&amp;out_addr));
+						}
+					}
+
+					<span class="enscript-keyword">if</span> (thread_snapshot_flags != 0) {
+						cur_thread_snap-&gt;ths_ss_flags |= thread_snapshot_flags;
+					}
+				}
+
+				<span class="enscript-comment">/* Call through to the machine specific trace routines
+				 * Frames are added past the snapshot header.
+				 */</span>
+				<span class="enscript-keyword">if</span> (thread-&gt;kernel_stack != 0) {
+					uint32_t thread_snapshot_flags = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+					out_addr = (mach_vm_address_t)kcd_end_address(stackshot_kcdata_p);
+					saved_count = machine_trace_thread64(thread, (<span class="enscript-type">char</span> *)out_addr, (<span class="enscript-type">char</span> *)kcd_max_address(stackshot_kcdata_p), MAX_FRAMES, FALSE, &amp;thread_snapshot_flags);
+					<span class="enscript-keyword">if</span> (saved_count &gt; 0){
+						cur_thread_snap-&gt;ths_ss_flags |= kKernel64_p;
+						kcd_exit_on_error(kcdata_get_memory_addr_for_array(stackshot_kcdata_p,
+									STACKSHOT_KCTYPE_KERN_STACKFRAME64,
+									<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> stack_snapshot_frame64),
+									saved_count/<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> stack_snapshot_frame64),
+									&amp;out_addr));
+					}
+#<span class="enscript-reference">else</span>
+					out_addr = (mach_vm_address_t)kcd_end_address(stackshot_kcdata_p);
+					saved_count = machine_trace_thread(thread, (<span class="enscript-type">char</span> *)out_addr, (<span class="enscript-type">char</span> *)kcd_max_address(stackshot_kcdata_p), MAX_FRAMES, FALSE, &amp;thread_snapshot_flags);
+					<span class="enscript-keyword">if</span> (saved_count &gt; 0) {
+						kcd_exit_on_error(kcdata_get_memory_addr_for_array(stackshot_kcdata_p,
+									STACKSHOT_KCTYPE_KERN_STACKFRAME,
+									<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> stack_snapshot_frame32),
+									saved_count/<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> stack_snapshot_frame32),
+									&amp;out_addr));
+					}
+#<span class="enscript-reference">endif</span>
+					<span class="enscript-keyword">if</span> (thread_snapshot_flags != 0) {
+						cur_thread_snap-&gt;ths_ss_flags |= thread_snapshot_flags;
+					}
+				}
+				<span class="enscript-comment">/* mark end of thread snapshot data */</span>
+				kcd_exit_on_error(kcdata_add_container_marker(stackshot_kcdata_p, KCDATA_TYPE_CONTAINER_END, STACKSHOT_KCCONTAINER_THREAD, thread_uniqueid));
+			}
+			<span class="enscript-comment">/* mark end of task snapshot data */</span>
+			kcd_exit_on_error(kcdata_add_container_marker(stackshot_kcdata_p, KCDATA_TYPE_CONTAINER_END, STACKSHOT_KCCONTAINER_TASK, task_uniqueid));
+		}
+	}
+
+	<span class="enscript-comment">/*  === END of populating stackshot data === */</span>
+
+	*pBytesTraced = (uint32_t) kcdata_memory_get_used_bytes(stackshot_kcdata_p);
+<span class="enscript-reference">error_exit</span>:
+	<span class="enscript-comment">/* Release stack snapshot wait indicator */</span>
+	kdp_snapshot_postflight();
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kdp_stackshot</span>(<span class="enscript-type">int</span> pid, <span class="enscript-type">void</span> *tracebuf, uint32_t tracebuf_size, uint32_t trace_flags, uint32_t *pbytesTraced)
+{
+	<span class="enscript-type">char</span> *tracepos = (<span class="enscript-type">char</span> *) tracebuf;
+	<span class="enscript-type">char</span> *tracebound = tracepos + tracebuf_size;
+	uint32_t tracebytes = 0;
+	<span class="enscript-type">int</span> error = 0, i;
+
+	task_t task = TASK_NULL;
+	thread_t thread = THREAD_NULL;
+	<span class="enscript-type">unsigned</span> framesize = 2 * <span class="enscript-keyword">sizeof</span>(vm_offset_t);
+
+	queue_head_t *task_list = &amp;tasks;
+	boolean_t is_active_list = TRUE;
+	
+	boolean_t dispatch_p = ((trace_flags &amp; STACKSHOT_GET_DQ) != 0);
+	boolean_t save_loadinfo_p = ((trace_flags &amp; STACKSHOT_SAVE_LOADINFO) != 0);
+	boolean_t save_kextloadinfo_p = ((trace_flags &amp; STACKSHOT_SAVE_KEXT_LOADINFO) != 0);
+	boolean_t save_userframes_p = ((trace_flags &amp; STACKSHOT_SAVE_KERNEL_FRAMES_ONLY) == 0);
+	boolean_t save_donating_pids_p = ((trace_flags &amp; STACKSHOT_SAVE_IMP_DONATION_PIDS) != 0);
+
+	<span class="enscript-keyword">if</span>(trace_flags &amp; STACKSHOT_GET_GLOBAL_MEM_STATS) {
+	  <span class="enscript-keyword">if</span>(tracepos + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> mem_and_io_snapshot) &gt; tracebound) {
+	    error = -1;
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+	  }
+	  kdp_mem_and_io_snapshot((<span class="enscript-type">struct</span> mem_and_io_snapshot *)tracepos);
+	  tracepos += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> mem_and_io_snapshot);
+	}
+	
+
+<span class="enscript-reference">walk_list</span>:
+	queue_iterate(task_list, task, task_t, tasks) {
+		<span class="enscript-keyword">if</span> ((task == NULL) || !ml_validate_nofault((vm_offset_t) task, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> task)))
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+
+		<span class="enscript-type">int</span> task_pid = pid_from_task(task);
+		uint64_t task_uniqueid = proc_uniqueid_from_task(task);
+		boolean_t task64 = task_has_64BitAddr(task);
+
+		<span class="enscript-keyword">if</span> (!task-&gt;active || task_is_a_corpse(task)) {
+			<span class="enscript-comment">/*
+			 * Not interested in terminated tasks without threads, and
+			 * at the moment, stackshot can't handle a task  without a name.
+			 */</span>
+			<span class="enscript-keyword">if</span> (queue_empty(&amp;task-&gt;threads) || task_pid == -1) {
+				<span class="enscript-keyword">continue</span>;
+			}
+		}
+
+		<span class="enscript-comment">/* Trace everything, unless a process was specified */</span>
+		<span class="enscript-keyword">if</span> ((pid == -1) || (pid == task_pid)) {
+			task_snapshot_t task_snap;
+			thread_snapshot_t tsnap = NULL;
+			uint32_t uuid_info_count = 0;
+			mach_vm_address_t uuid_info_addr = 0;
+			boolean_t have_map = (task-&gt;map != NULL) &amp;&amp; 
+				(ml_validate_nofault((vm_offset_t)(task-&gt;map), <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> _vm_map)));
+			boolean_t have_pmap = have_map &amp;&amp; (task-&gt;map-&gt;pmap != NULL) &amp;&amp;
+				(ml_validate_nofault((vm_offset_t)(task-&gt;map-&gt;pmap), <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pmap)));
+			uint64_t shared_cache_base_address = 0;
+
+			<span class="enscript-keyword">if</span> (have_pmap &amp;&amp; task-&gt;active &amp;&amp; save_loadinfo_p &amp;&amp; task_pid &gt; 0) {
+				<span class="enscript-comment">// Read the dyld_all_image_infos struct from the task memory to get UUID array count and location
+</span>				<span class="enscript-keyword">if</span> (task64) {
+					<span class="enscript-type">struct</span> user64_dyld_all_image_infos task_image_infos;
+					<span class="enscript-keyword">if</span> (kdp_copyin(task-&gt;map-&gt;pmap, task-&gt;all_image_info_addr, &amp;task_image_infos, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user64_dyld_all_image_infos))) {
+						uuid_info_count = (uint32_t)task_image_infos.uuidArrayCount;
+						uuid_info_addr = task_image_infos.uuidArray;
+					}
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-type">struct</span> user32_dyld_all_image_infos task_image_infos;
+					<span class="enscript-keyword">if</span> (kdp_copyin(task-&gt;map-&gt;pmap, task-&gt;all_image_info_addr, &amp;task_image_infos, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user32_dyld_all_image_infos))) {
+						uuid_info_count = task_image_infos.uuidArrayCount;
+						uuid_info_addr = task_image_infos.uuidArray;
+					}
+				}
+
+				<span class="enscript-comment">// If we get a NULL uuid_info_addr (which can happen when we catch dyld in the middle of updating
+</span>				<span class="enscript-comment">// this data structure), we zero the uuid_info_count so that we won't even try to save load info
+</span>				<span class="enscript-comment">// for this task.
+</span>				<span class="enscript-keyword">if</span> (!uuid_info_addr) {
+					uuid_info_count = 0;
+				}
+			}
+
+			<span class="enscript-keyword">if</span> (have_pmap &amp;&amp; task_pid == 0) {
+				<span class="enscript-keyword">if</span> (save_kextloadinfo_p &amp;&amp; ml_validate_nofault((vm_offset_t)(gLoadedKextSummaries), <span class="enscript-keyword">sizeof</span>(OSKextLoadedKextSummaryHeader))) {
+					uuid_info_count = gLoadedKextSummaries-&gt;numSummaries + 1; <span class="enscript-comment">/* include main kernel UUID */</span>
+				}<span class="enscript-keyword">else</span> {
+					uuid_info_count = 1; <span class="enscript-comment">/* atleast include kernel uuid */</span>
+				}
+			}
+
+			<span class="enscript-keyword">if</span> (tracepos + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> task_snapshot) &gt; tracebound) {
+				error = -1;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+			}
+
+			task_snap = (task_snapshot_t) tracepos;
+			task_snap-&gt;snapshot_magic = STACKSHOT_TASK_SNAPSHOT_MAGIC;
+			task_snap-&gt;pid = task_pid;
+			task_snap-&gt;uniqueid = task_uniqueid;
+			task_snap-&gt;nloadinfos = uuid_info_count;
+			task_snap-&gt;donating_pid_count = 0;
+
+			<span class="enscript-comment">/* Add the BSD process identifiers */</span>
+			<span class="enscript-keyword">if</span> (task_pid != -1)
+				proc_name_kdp(task, task_snap-&gt;p_comm, <span class="enscript-keyword">sizeof</span>(task_snap-&gt;p_comm));
+			<span class="enscript-keyword">else</span>
+				task_snap-&gt;p_comm[0] = <span class="enscript-string">'\0'</span>;
+			task_snap-&gt;ss_flags = 0;
+			<span class="enscript-keyword">if</span> (task64)
+				task_snap-&gt;ss_flags |= kUser64_p;
+			<span class="enscript-keyword">if</span> (task64 &amp;&amp; task_pid == 0)
+				task_snap-&gt;ss_flags |= kKernel64_p;
+			<span class="enscript-keyword">if</span> (!task-&gt;active || task_is_a_corpse(task))
+				task_snap-&gt;ss_flags |= kTerminatedSnapshot;
+			<span class="enscript-keyword">if</span>(task-&gt;pidsuspended) task_snap-&gt;ss_flags |= kPidSuspended;
+			<span class="enscript-keyword">if</span>(task-&gt;frozen) task_snap-&gt;ss_flags |= kFrozen;
+
+			<span class="enscript-keyword">if</span> (task-&gt;effective_policy.darwinbg == 1) {
+				task_snap-&gt;ss_flags |= kTaskDarwinBG;
+			}
+			
+			<span class="enscript-keyword">if</span> (task-&gt;requested_policy.t_role == TASK_FOREGROUND_APPLICATION) {
+				task_snap-&gt;ss_flags |= kTaskIsForeground;
+			}
+
+			<span class="enscript-keyword">if</span> (task-&gt;requested_policy.t_boosted == 1) {
+				task_snap-&gt;ss_flags |= kTaskIsBoosted;
+			}
+
+			<span class="enscript-keyword">if</span> (task-&gt;effective_policy.t_sup_active == 1)
+				task_snap-&gt;ss_flags |= kTaskIsSuppressed;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_INHERITANCE</span>
+			<span class="enscript-keyword">if</span> (task-&gt;task_imp_base) {
+				<span class="enscript-keyword">if</span> (task-&gt;task_imp_base-&gt;iit_donor) {
+					task_snap-&gt;ss_flags |= kTaskIsImpDonor;
+}
+
+				<span class="enscript-keyword">if</span> (task-&gt;task_imp_base-&gt;iit_live_donor) {
+					task_snap-&gt;ss_flags |= kTaskIsLiveImpDonor;
+				}
+			}
+#<span class="enscript-reference">endif</span>
+
+			task_snap-&gt;latency_qos = (task-&gt;effective_policy.t_latency_qos == LATENCY_QOS_TIER_UNSPECIFIED) ?
+			                         LATENCY_QOS_TIER_UNSPECIFIED : ((0xFF &lt;&lt; 16) | task-&gt;effective_policy.t_latency_qos);
+
+			task_snap-&gt;suspend_count = task-&gt;suspend_count;
+			task_snap-&gt;task_size = have_pmap ? pmap_resident_count(task-&gt;map-&gt;pmap) : 0;
+			task_snap-&gt;faults = task-&gt;faults;
+			task_snap-&gt;pageins = task-&gt;pageins;
+			task_snap-&gt;cow_faults = task-&gt;cow_faults;
+
+			task_snap-&gt;user_time_in_terminated_threads = task-&gt;total_user_time;
+			task_snap-&gt;system_time_in_terminated_threads = task-&gt;total_system_time;
+			<span class="enscript-comment">/*
+			 * The throttling counters are maintained as 64-bit counters in the proc
+			 * structure. However, we reserve 32-bits (each) for them in the task_snapshot
+			 * struct to save space and since we do not expect them to overflow 32-bits. If we
+			 * find these values overflowing in the future, the fix would be to simply 
+			 * upgrade these counters to 64-bit in the task_snapshot struct
+			 */</span>
+			task_snap-&gt;was_throttled = (uint32_t) proc_was_throttled_from_task(task);
+			task_snap-&gt;did_throttle = (uint32_t) proc_did_throttle_from_task(task);
+
+			<span class="enscript-comment">/* fetch some useful BSD info: */</span>
+			task_snap-&gt;p_start_sec = task_snap-&gt;p_start_usec = 0;
+			proc_starttime_kdp(task-&gt;bsd_info, &amp;task_snap-&gt;p_start_sec, &amp;task_snap-&gt;p_start_usec);
+			<span class="enscript-keyword">if</span> (task-&gt;shared_region &amp;&amp; ml_validate_nofault((vm_offset_t)task-&gt;shared_region,
+														   <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> vm_shared_region))) {
+				<span class="enscript-type">struct</span> vm_shared_region *sr = task-&gt;shared_region;
+
+				shared_cache_base_address = sr-&gt;sr_base_address + sr-&gt;sr_first_mapping;
+			}
+			<span class="enscript-keyword">if</span> (!shared_cache_base_address
+				|| !kdp_copyin(task-&gt;map-&gt;pmap, shared_cache_base_address + offsetof(<span class="enscript-type">struct</span> _dyld_cache_header, uuid), task_snap-&gt;shared_cache_identifier, <span class="enscript-keyword">sizeof</span>(task_snap-&gt;shared_cache_identifier))) {
+				memset(task_snap-&gt;shared_cache_identifier, 0x0, <span class="enscript-keyword">sizeof</span>(task_snap-&gt;shared_cache_identifier));
+			}
+			<span class="enscript-keyword">if</span> (task-&gt;shared_region) {
+				<span class="enscript-comment">/*
+				 * No refcounting here, but we are in debugger
+				 * context, so that should be safe.
+				 */</span>
+				task_snap-&gt;shared_cache_slide = task-&gt;shared_region-&gt;sr_slide_info.slide;
+			} <span class="enscript-keyword">else</span> {
+				task_snap-&gt;shared_cache_slide = 0;
+			}
+
+			<span class="enscript-comment">/* I/O Statistics */</span>
+			assert(IO_NUM_PRIORITIES == STACKSHOT_IO_NUM_PRIORITIES);
+
+			<span class="enscript-keyword">if</span> (task-&gt;task_io_stats) {
+				task_snap-&gt;disk_reads_count = task-&gt;task_io_stats-&gt;disk_reads.count;
+				task_snap-&gt;disk_reads_size = task-&gt;task_io_stats-&gt;disk_reads.size;
+				task_snap-&gt;disk_writes_count = (task-&gt;task_io_stats-&gt;total_io.count - task-&gt;task_io_stats-&gt;disk_reads.count);
+				task_snap-&gt;disk_writes_size = (task-&gt;task_io_stats-&gt;total_io.size - task-&gt;task_io_stats-&gt;disk_reads.size);
+				<span class="enscript-keyword">for</span>(i = 0; i &lt; IO_NUM_PRIORITIES; i++) {
+					task_snap-&gt;io_priority_count[i] = task-&gt;task_io_stats-&gt;io_priority[i].count;
+					task_snap-&gt;io_priority_size[i] = task-&gt;task_io_stats-&gt;io_priority[i].size;
+				}
+				task_snap-&gt;paging_count = task-&gt;task_io_stats-&gt;paging.count;
+				task_snap-&gt;paging_size = task-&gt;task_io_stats-&gt;paging.size;
+				task_snap-&gt;non_paging_count = (task-&gt;task_io_stats-&gt;total_io.count - task-&gt;task_io_stats-&gt;paging.count);
+				task_snap-&gt;non_paging_size = (task-&gt;task_io_stats-&gt;total_io.size - task-&gt;task_io_stats-&gt;paging.size);
+				task_snap-&gt;metadata_count = task-&gt;task_io_stats-&gt;metadata.count;
+				task_snap-&gt;metadata_size = task-&gt;task_io_stats-&gt;metadata.size;
+				task_snap-&gt;data_count = (task-&gt;task_io_stats-&gt;total_io.count - task-&gt;task_io_stats-&gt;metadata.count);
+				task_snap-&gt;data_size = (task-&gt;task_io_stats-&gt;total_io.size - task-&gt;task_io_stats-&gt;metadata.size);
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* zero from disk_reads_count to end of structure */</span>
+				memset(&amp;task_snap-&gt;disk_reads_count, 0, offsetof(<span class="enscript-type">struct</span> task_snapshot, metadata_size) - offsetof(<span class="enscript-type">struct</span> task_snapshot, disk_reads_count)); 
+			}
+			tracepos += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> task_snapshot);
+
+			<span class="enscript-keyword">if</span> (task_pid &gt; 0 &amp;&amp; uuid_info_count &gt; 0) {
+				uint32_t uuid_info_size = (uint32_t)(task64 ? <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user64_dyld_uuid_info) : <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user32_dyld_uuid_info));
+				uint32_t uuid_info_array_size = uuid_info_count * uuid_info_size;
+
+				<span class="enscript-keyword">if</span> (tracepos + uuid_info_array_size &gt; tracebound) {
+					error = -1;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+				}
+
+				<span class="enscript-comment">// Copy in the UUID info array
+</span>				<span class="enscript-comment">// It may be nonresident, in which case just fix up nloadinfos to 0 in the task_snap
+</span>				<span class="enscript-keyword">if</span> (have_pmap &amp;&amp; !kdp_copyin(task-&gt;map-&gt;pmap, uuid_info_addr, tracepos, uuid_info_array_size))
+					task_snap-&gt;nloadinfos = 0;
+				<span class="enscript-keyword">else</span>
+					tracepos += uuid_info_array_size;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (task_pid == 0 &amp;&amp; uuid_info_count &gt; 0) {
+				uint32_t uuid_info_size = (uint32_t)<span class="enscript-keyword">sizeof</span>(kernel_uuid_info);
+				uint32_t uuid_info_array_size = uuid_info_count * uuid_info_size;
+				uint32_t  uuid_offset = offsetof(kernel_uuid_info, imageUUID);
+				uintptr_t image_load_address;
+
+				<span class="enscript-keyword">if</span> (tracepos + uuid_info_array_size &gt; tracebound) {
+					error = -1;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+				}
+
+				<span class="enscript-keyword">do</span> {
+
+					<span class="enscript-keyword">if</span> (!kernel_uuid || !ml_validate_nofault((vm_offset_t)kernel_uuid, <span class="enscript-keyword">sizeof</span>(uuid_t))) {
+						<span class="enscript-comment">/* Kernel UUID not found or inaccessible */</span>
+						task_snap-&gt;nloadinfos = 0;
+						<span class="enscript-keyword">break</span>;
+					}
+					image_load_address = (uintptr_t)VM_KERNEL_UNSLIDE(vm_kernel_stext);
+					memcpy(tracepos, &amp;image_load_address, <span class="enscript-keyword">sizeof</span>(uintptr_t));
+					memcpy((tracepos + uuid_offset), kernel_uuid, <span class="enscript-keyword">sizeof</span>(uuid_t));
+					tracepos += uuid_info_size;
+
+					<span class="enscript-keyword">if</span> (save_kextloadinfo_p &amp;&amp; ml_validate_nofault((vm_offset_t)(&amp;gLoadedKextSummaries-&gt;summaries[0]),
+											gLoadedKextSummaries-&gt;entry_size * gLoadedKextSummaries-&gt;numSummaries)) {
+						uint32_t kexti;
+						<span class="enscript-keyword">for</span> (kexti=0 ; kexti &lt; gLoadedKextSummaries-&gt;numSummaries; kexti++) {
+							image_load_address = (uintptr_t)VM_KERNEL_UNSLIDE(gLoadedKextSummaries-&gt;summaries[kexti].address);
+							memcpy(tracepos, &amp;image_load_address, <span class="enscript-keyword">sizeof</span>(uintptr_t));
+							memcpy((tracepos + uuid_offset), &amp;gLoadedKextSummaries-&gt;summaries[kexti].uuid, <span class="enscript-keyword">sizeof</span>(uuid_t));
+							tracepos += uuid_info_size;
+						}
+					} <span class="enscript-keyword">else</span> {
+						<span class="enscript-comment">/* kext summary invalid, but kernel UUID was copied */</span>
+						task_snap-&gt;nloadinfos = 1;
+						<span class="enscript-keyword">break</span>;
+					}
+				} <span class="enscript-keyword">while</span>(0);
+			}
+			
+			<span class="enscript-keyword">if</span> (save_donating_pids_p) {
+				<span class="enscript-keyword">if</span> (tracepos + (TASK_IMP_WALK_LIMIT * <span class="enscript-keyword">sizeof</span>(int32_t)) &gt; tracebound) {
+					error = -1;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+				}
+
+				task_snap-&gt;donating_pid_count = task_importance_list_pids(task, TASK_IMP_LIST_DONATING_PIDS, tracepos, TASK_IMP_WALK_LIMIT);
+				tracepos += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>) * task_snap-&gt;donating_pid_count;
+			}
+
+			queue_iterate(&amp;task-&gt;threads, thread, thread_t, task_threads){
+				uint64_t tval;
+
+				<span class="enscript-keyword">if</span> ((thread == NULL) || !ml_validate_nofault((vm_offset_t) thread, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread)))
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+
+				<span class="enscript-keyword">if</span> (((tracepos + 4 * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_snapshot)) &gt; tracebound)) {
+					error = -1;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">error_exit</span>;
+				}
+                <span class="enscript-keyword">if</span> (!save_userframes_p &amp;&amp; thread-&gt;kernel_stack == 0)
+                    <span class="enscript-keyword">continue</span>;
+
+				<span class="enscript-comment">/* Populate the thread snapshot header */</span>
+				tsnap = (thread_snapshot_t) tracepos;
+				tsnap-&gt;thread_id = thread_tid(thread);
+				tsnap-&gt;state = thread-&gt;state;
+				tsnap-&gt;priority = thread-&gt;base_pri;
+				tsnap-&gt;sched_pri = thread-&gt;sched_pri;
+				tsnap-&gt;sched_flags = thread-&gt;sched_flags;
+				tsnap-&gt;wait_event = VM_KERNEL_UNSLIDE_OR_PERM(thread-&gt;wait_event);
+				tsnap-&gt;continuation = VM_KERNEL_UNSLIDE(thread-&gt;continuation);
+				tval = safe_grab_timer_value(&amp;thread-&gt;user_timer);
+				tsnap-&gt;user_time = tval;
+				tval = safe_grab_timer_value(&amp;thread-&gt;system_timer);
+				<span class="enscript-keyword">if</span> (thread-&gt;precise_user_kernel_time) {
+					tsnap-&gt;system_time = tval;
+				} <span class="enscript-keyword">else</span> {
+					tsnap-&gt;user_time += tval;
+					tsnap-&gt;system_time = 0;
+				}
+				tsnap-&gt;snapshot_magic = STACKSHOT_THREAD_SNAPSHOT_MAGIC;
+				bzero(&amp;tsnap-&gt;pth_name, STACKSHOT_MAX_THREAD_NAME_SIZE);
+				proc_threadname_kdp(thread-&gt;uthread, &amp;tsnap-&gt;pth_name[0], STACKSHOT_MAX_THREAD_NAME_SIZE);
+				tracepos += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_snapshot);
+				tsnap-&gt;ss_flags = 0;
+				<span class="enscript-comment">/* I/O Statistics */</span>
+				assert(IO_NUM_PRIORITIES == STACKSHOT_IO_NUM_PRIORITIES);
+				<span class="enscript-keyword">if</span> (thread-&gt;thread_io_stats) {
+					tsnap-&gt;disk_reads_count = thread-&gt;thread_io_stats-&gt;disk_reads.count;
+					tsnap-&gt;disk_reads_size = thread-&gt;thread_io_stats-&gt;disk_reads.size;
+					tsnap-&gt;disk_writes_count = (thread-&gt;thread_io_stats-&gt;total_io.count - thread-&gt;thread_io_stats-&gt;disk_reads.count);
+					tsnap-&gt;disk_writes_size = (thread-&gt;thread_io_stats-&gt;total_io.size - thread-&gt;thread_io_stats-&gt;disk_reads.size);
+					<span class="enscript-keyword">for</span>(i = 0; i &lt; IO_NUM_PRIORITIES; i++) {
+						tsnap-&gt;io_priority_count[i] = thread-&gt;thread_io_stats-&gt;io_priority[i].count;
+						tsnap-&gt;io_priority_size[i] = thread-&gt;thread_io_stats-&gt;io_priority[i].size;
+					}
+					tsnap-&gt;paging_count = thread-&gt;thread_io_stats-&gt;paging.count;
+					tsnap-&gt;paging_size = thread-&gt;thread_io_stats-&gt;paging.size;
+					tsnap-&gt;non_paging_count = (thread-&gt;thread_io_stats-&gt;total_io.count - thread-&gt;thread_io_stats-&gt;paging.count);
+					tsnap-&gt;non_paging_size = (thread-&gt;thread_io_stats-&gt;total_io.size - thread-&gt;thread_io_stats-&gt;paging.size);
+					tsnap-&gt;metadata_count = thread-&gt;thread_io_stats-&gt;metadata.count;
+					tsnap-&gt;metadata_size = thread-&gt;thread_io_stats-&gt;metadata.size;
+					tsnap-&gt;data_count = (thread-&gt;thread_io_stats-&gt;total_io.count - thread-&gt;thread_io_stats-&gt;metadata.count);
+					tsnap-&gt;data_size = (thread-&gt;thread_io_stats-&gt;total_io.size - thread-&gt;thread_io_stats-&gt;metadata.size);
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-comment">/* zero from disk_reads_count to end of structure */</span>
+					memset(&amp;tsnap-&gt;disk_reads_count, 0, 
+						offsetof(<span class="enscript-type">struct</span> thread_snapshot, metadata_size) - offsetof(<span class="enscript-type">struct</span> thread_snapshot, disk_reads_count));
+				}
+
+				<span class="enscript-keyword">if</span> (thread-&gt;effective_policy.darwinbg) {
+					tsnap-&gt;ss_flags |= kThreadDarwinBG;
+				}
+				
+				tsnap-&gt;io_tier = proc_get_effective_thread_policy(thread, TASK_POLICY_IO);
+				<span class="enscript-keyword">if</span> (proc_get_effective_thread_policy(thread, TASK_POLICY_PASSIVE_IO)) {
+					tsnap-&gt;ss_flags |= kThreadIOPassive;
+				}
+				
+				<span class="enscript-keyword">if</span> (thread-&gt;suspend_count &gt; 0) {
+					tsnap-&gt;ss_flags |= kThreadSuspended;
+				}
+
+				<span class="enscript-keyword">if</span> (thread-&gt;options &amp; TH_OPT_GLOBAL_FORCED_IDLE) {
+					tsnap-&gt;ss_flags |= kGlobalForcedIdle;
+				}
+
+				<span class="enscript-keyword">if</span> (IPC_VOUCHER_NULL != thread-&gt;ith_voucher) {
+					tsnap-&gt;voucher_identifier = VM_KERNEL_ADDRPERM(thread-&gt;ith_voucher);
+				}
+
+				tsnap-&gt;ts_qos = thread-&gt;effective_policy.thep_qos;
+				tsnap-&gt;ts_rqos = thread-&gt;requested_policy.thrp_qos;
+				tsnap-&gt;ts_rqos_override = thread-&gt;requested_policy.thrp_qos_override;
+				<span class="enscript-comment">/* zero out unused data. */</span>
+				tsnap-&gt;_reserved[0] = 0;
+				tsnap-&gt;_reserved[1] = 0;
+				tsnap-&gt;_reserved[2] = 0;
+				tsnap-&gt;total_syscalls = thread-&gt;syscalls_mach + thread-&gt;syscalls_unix;
+
+				<span class="enscript-keyword">if</span> (dispatch_p &amp;&amp; (task != kernel_task) &amp;&amp; (task-&gt;active) &amp;&amp; have_pmap) {
+					uint64_t dqkeyaddr = thread_dispatchqaddr(thread);
+					<span class="enscript-keyword">if</span> (dqkeyaddr != 0) {
+						uint64_t dqaddr = 0;
+						<span class="enscript-keyword">if</span> (kdp_copyin(task-&gt;map-&gt;pmap, dqkeyaddr, &amp;dqaddr, (task64 ? 8 : 4)) &amp;&amp; (dqaddr != 0)) {
+							uint64_t dqserialnumaddr = dqaddr + proc_dispatchqueue_serialno_offset_from_task(task);
+							uint64_t dqserialnum = 0;
+							<span class="enscript-keyword">if</span> (kdp_copyin(task-&gt;map-&gt;pmap, dqserialnumaddr, &amp;dqserialnum, (task64 ? 8 : 4))) {
+								tsnap-&gt;ss_flags |= kHasDispatchSerial;
+								memcpy(tracepos, &amp;dqserialnum, <span class="enscript-keyword">sizeof</span>(dqserialnum));
+								tracepos += 8;
+							}
+						}
+					}
+				}
+<span class="enscript-comment">/* Call through to the machine specific trace routines
+ * Frames are added past the snapshot header.
+ */</span>
+				tracebytes = 0;
+				<span class="enscript-keyword">if</span> (thread-&gt;kernel_stack != 0) {
+					uint32_t thread_snapshot_flags = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)					
+					tracebytes = machine_trace_thread64(thread, tracepos, tracebound, MAX_FRAMES, FALSE, &amp;thread_snapshot_flags);
+					tsnap-&gt;ss_flags |= kKernel64_p;
+					framesize = 16;
+#<span class="enscript-reference">else</span>
+					tracebytes = machine_trace_thread(thread, tracepos, tracebound, MAX_FRAMES, FALSE, &amp;thread_snapshot_flags);
+					framesize = 8;
+#<span class="enscript-reference">endif</span>
+					<span class="enscript-keyword">if</span> (thread_snapshot_flags != 0) {
+						tsnap-&gt;ss_flags |= thread_snapshot_flags;
+					}
+				}
+				tsnap-&gt;nkern_frames = tracebytes/framesize;
+				tracepos += tracebytes;
+				tracebytes = 0;
+				<span class="enscript-comment">/* Trace user stack, if any */</span>
+				<span class="enscript-keyword">if</span> (save_userframes_p &amp;&amp; task-&gt;active &amp;&amp; thread-&gt;task-&gt;map != kernel_map) {
+					uint32_t thread_snapshot_flags = 0;
+					<span class="enscript-comment">/* 64-bit task? */</span>
+					<span class="enscript-keyword">if</span> (task_has_64BitAddr(thread-&gt;task)) {
+						tracebytes = machine_trace_thread64(thread, tracepos, tracebound, MAX_FRAMES, TRUE, &amp;thread_snapshot_flags);
+						tsnap-&gt;ss_flags |= kUser64_p;
+						framesize = 16;
+					}
+					<span class="enscript-keyword">else</span> {
+						tracebytes = machine_trace_thread(thread, tracepos, tracebound, MAX_FRAMES, TRUE, &amp;thread_snapshot_flags);
+						framesize = 8;
+					}
+					<span class="enscript-keyword">if</span> (thread_snapshot_flags != 0) {
+						tsnap-&gt;ss_flags |= thread_snapshot_flags;
+					}
+				}
+				tsnap-&gt;nuser_frames = tracebytes/framesize;
+				tracepos += tracebytes;
+				tracebytes = 0;
+			}
+
+            <span class="enscript-keyword">if</span> (!save_userframes_p &amp;&amp; tsnap == NULL) {
+                <span class="enscript-comment">/*
+                 * No thread info is collected due to lack of kernel frames.
+                 * Remove information about this task also
+                 */</span>
+                tracepos = (<span class="enscript-type">char</span> *)task_snap;
+            }
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (is_active_list) { 
+		is_active_list = FALSE;
+		task_list = &amp;terminated_tasks;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">walk_list</span>;
+	}
+
+<span class="enscript-reference">error_exit</span>:
+	<span class="enscript-comment">/* Release stack snapshot wait indicator */</span>
+	kdp_snapshot_postflight();
+
+	*pbytesTraced = (uint32_t)(tracepos - (<span class="enscript-type">char</span> *) tracebuf);
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pid_from_task</span>(task_t task)
+{
+	<span class="enscript-type">int</span> pid = -1;
+
+	<span class="enscript-keyword">if</span> (task-&gt;bsd_info) {
+		pid = proc_pid(task-&gt;bsd_info);
+	} <span class="enscript-keyword">else</span> {
+		pid = task_pid(task);
+	}
+
+	<span class="enscript-keyword">return</span> pid;
+}
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">proc_uniqueid_from_task</span>(task_t task)
+{
+	uint64_t uniqueid = ~(0ULL);
+
+	<span class="enscript-keyword">if</span> (task-&gt;bsd_info)
+		uniqueid = proc_uniqueid(task-&gt;bsd_info);
+
+	<span class="enscript-keyword">return</span> uniqueid;
+}
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">proc_was_throttled_from_task</span>(task_t task)
+{
+	uint64_t was_throttled = 0;
+
+	<span class="enscript-keyword">if</span> (task-&gt;bsd_info)
+		was_throttled = proc_was_throttled(task-&gt;bsd_info);
+	
+	<span class="enscript-keyword">return</span> was_throttled;
+}
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">proc_did_throttle_from_task</span>(task_t task)
+{
+	uint64_t did_throttle = 0;
+
+	<span class="enscript-keyword">if</span> (task-&gt;bsd_info)
+		did_throttle = proc_did_throttle(task-&gt;bsd_info);
+	
+	<span class="enscript-keyword">return</span> did_throttle;
+}
+
+<span class="enscript-type">static</span> uint64_t
+<span class="enscript-function-name">proc_dispatchqueue_serialno_offset_from_task</span>(task_t task)
+{
+	uint64_t dq_serialno_offset = 0;
+
+	<span class="enscript-keyword">if</span> (task-&gt;bsd_info) {
+		dq_serialno_offset = get_dispatchqueue_serialno_offset_from_proc(task-&gt;bsd_info);
+	}
+
+	<span class="enscript-keyword">return</span> dq_serialno_offset;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_mem_and_io_snapshot</span>(<span class="enscript-type">struct</span> mem_and_io_snapshot *memio_snap)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> pages_reclaimed;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> pages_wanted;
+	kern_return_t kErr;
+
+	processor_t processor;
+	vm_statistics64_t stat;
+	vm_statistics64_data_t host_vm_stat;
+
+	processor = processor_list;
+	stat = &amp;PROCESSOR_DATA(processor, vm_stat);
+	host_vm_stat = *stat;
+
+	<span class="enscript-keyword">if</span> (processor_count &gt; 1) {
+		<span class="enscript-comment">/*
+		 * processor_list may be in the process of changing as we are
+		 * attempting a stackshot.  Ordinarily it will be lock protected,
+		 * but it is not safe to lock in the context of the debugger.
+		 * Fortunately we never remove elements from the processor list,
+		 * and only add to to the end of the list, so we SHOULD be able
+		 * to walk it.  If we ever want to truly tear down processors,
+		 * this will have to change.
+		 */</span>
+		<span class="enscript-keyword">while</span> ((processor = processor-&gt;processor_list) != NULL) {
+			stat = &amp;PROCESSOR_DATA(processor, vm_stat);
+			host_vm_stat.compressions += stat-&gt;compressions;
+			host_vm_stat.decompressions += stat-&gt;decompressions;
+		}
+	}
+
+	memio_snap-&gt;snapshot_magic = STACKSHOT_MEM_AND_IO_SNAPSHOT_MAGIC;
+	memio_snap-&gt;free_pages = vm_page_free_count;
+	memio_snap-&gt;active_pages = vm_page_active_count;
+	memio_snap-&gt;inactive_pages = vm_page_inactive_count;
+	memio_snap-&gt;purgeable_pages = vm_page_purgeable_count;
+	memio_snap-&gt;wired_pages = vm_page_wire_count;
+	memio_snap-&gt;speculative_pages = vm_page_speculative_count;
+	memio_snap-&gt;throttled_pages = vm_page_throttled_count;
+	memio_snap-&gt;busy_buffer_count = count_busy_buffers();
+	memio_snap-&gt;filebacked_pages = vm_page_pageable_external_count;
+	memio_snap-&gt;compressions = (uint32_t)host_vm_stat.compressions;
+	memio_snap-&gt;decompressions = (uint32_t)host_vm_stat.decompressions;
+	memio_snap-&gt;compressor_size = VM_PAGE_COMPRESSOR_COUNT;
+	kErr = mach_vm_pressure_monitor(FALSE, VM_PRESSURE_TIME_WINDOW, &amp;pages_reclaimed, &amp;pages_wanted);
+
+	<span class="enscript-keyword">if</span> ( ! kErr ) {
+		memio_snap-&gt;pages_wanted = (uint32_t)pages_wanted;
+		memio_snap-&gt;pages_reclaimed = (uint32_t)pages_reclaimed;
+		memio_snap-&gt;pages_wanted_reclaimed_valid = 1;
+	} <span class="enscript-keyword">else</span> {
+		memio_snap-&gt;pages_wanted = 0;
+		memio_snap-&gt;pages_reclaimed = 0;
+		memio_snap-&gt;pages_wanted_reclaimed_valid = 0;
+	}
+}
+
+boolean_t
+<span class="enscript-function-name">kdp_copyin</span>(pmap_t p, uint64_t uaddr, <span class="enscript-type">void</span> *dest, size_t size) 
+{
+	size_t rem = size;
+	<span class="enscript-type">char</span> *kvaddr = dest;
+
+#<span class="enscript-reference">if</span> (<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__arm64__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">NAND_PANIC_DEVICE</span>)) &amp;&amp; !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">LEGACY_PANIC_LOGS</span>)
+	<span class="enscript-comment">/* Identify if destination buffer is in panic storage area */</span>
+	<span class="enscript-keyword">if</span> ((vm_offset_t)dest &gt;= gPanicBase &amp;&amp; (vm_offset_t)dest &lt; gPanicBase + gPanicSize) {
+		<span class="enscript-keyword">if</span> (((vm_offset_t)dest + size) &gt;= (gPanicBase + gPanicSize)) {
+			<span class="enscript-keyword">return</span> FALSE;
+		}
+		ppnum_t upn = pmap_find_phys(p, uaddr);
+		uint64_t phys_src = ptoa_64(upn) | (uaddr &amp; PAGE_MASK);
+		<span class="enscript-type">void</span> *src_va = (<span class="enscript-type">void</span>*)phystokv(phys_src);
+		<span class="enscript-keyword">if</span> (upn &amp;&amp; pmap_valid_page(upn)) {
+			bcopy(src_va, kvaddr, size);
+			<span class="enscript-keyword">return</span> TRUE;
+		}
+		<span class="enscript-keyword">return</span> FALSE;
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">while</span> (rem) {
+		ppnum_t upn = pmap_find_phys(p, uaddr);
+		uint64_t phys_src = ptoa_64(upn) | (uaddr &amp; PAGE_MASK);
+		uint64_t phys_dest = kvtophys((vm_offset_t)kvaddr);
+		uint64_t src_rem = PAGE_SIZE - (phys_src &amp; PAGE_MASK);
+		uint64_t dst_rem = PAGE_SIZE - (phys_dest &amp; PAGE_MASK);
+		size_t cur_size = (uint32_t) MIN(src_rem, dst_rem);
+		cur_size = MIN(cur_size, rem);
+
+		<span class="enscript-keyword">if</span> (upn &amp;&amp; pmap_valid_page(upn) &amp;&amp; phys_dest) {
+			bcopy_phys(phys_src, phys_dest, cur_size);
+		}
+		<span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">break</span>;
+		uaddr += cur_size;
+		kvaddr += cur_size;
+		rem -= cur_size;
+	}
+	<span class="enscript-keyword">return</span> (rem == 0);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">do_stackshot</span>()
+{
+    <span class="enscript-keyword">if</span> (stack_snapshot_flags &amp; STACKSHOT_KCDATA_FORMAT) {
+        stack_snapshot_ret = kdp_stackshot_kcdata_format(stack_snapshot_pid,
+	    stack_snapshot_flags,
+	    &amp;stack_snapshot_bytes_traced);
+    }
+    <span class="enscript-keyword">else</span> {
+        stack_snapshot_ret = kdp_stackshot(stack_snapshot_pid,
+	    stack_snapshot_buf, stack_snapshot_bufsize,
+	    stack_snapshot_flags, &amp;stack_snapshot_bytes_traced);
+    }
+}
+
+<span class="enscript-comment">/*
+ * A fantastical routine that tries to be fast about returning
+ * translations.  Caches the last page we found a translation
+ * for, so that we can be quick about multiple queries to the
+ * same page.  It turns out this is exactly the workflow
+ * machine_trace_thread and its relatives tend to throw at us.
+ *
+ * Please zero the nasty global this uses after a bulk lookup;
+ * this isn't safe across a switch of the kdp_pmap or changes
+ * to a pmap.
+ *
+ * This also means that if zero is a valid KVA, we are
+ * screwed.  Sucks to be us.  Fortunately, this should never
+ * happen.
+ */</span>
+vm_offset_t
+<span class="enscript-function-name">machine_trace_thread_get_kva</span>(vm_offset_t cur_target_addr, vm_map_t map, uint32_t *thread_trace_flags)
+{
+	<span class="enscript-type">unsigned</span> cur_wimg_bits;
+	vm_offset_t cur_target_page;
+	vm_offset_t cur_phys_addr;
+	vm_offset_t kern_virt_target_addr;
+
+	cur_target_page = atop(cur_target_addr);
+
+	<span class="enscript-keyword">if</span> ((cur_target_page != prev_target_page) || validate_next_addr) {
+		<span class="enscript-comment">/*
+		 * Alright; it wasn't our previous page.  So
+		 * we must validate that there is a page
+		 * table entry for this address under the
+		 * current kdp_pmap, and that it has default
+		 * cache attributes (otherwise it may not be
+		 * safe to access it).
+		 */</span>
+		cur_phys_addr = kdp_vtophys(kdp_pmap ? kdp_pmap : kernel_pmap, cur_target_addr);
+
+		<span class="enscript-keyword">if</span> (!pmap_valid_page((ppnum_t) atop(cur_phys_addr))) {
+
+			<span class="enscript-keyword">if</span> (!stack_enable_faulting) {
+				<span class="enscript-keyword">return</span> 0;
+			}
+
+			<span class="enscript-comment">/*
+			 * The pmap doesn't have a valid page so we start at the top level
+			 * vm map and try a lightweight fault.
+			 */</span>
+			cur_phys_addr = kdp_lightweight_fault(map, (cur_target_addr &amp; ~PAGE_MASK), thread_trace_flags);
+			cur_phys_addr += (cur_target_addr &amp; PAGE_MASK);
+
+			<span class="enscript-keyword">if</span> (!pmap_valid_page((ppnum_t) atop(cur_phys_addr)))
+				<span class="enscript-keyword">return</span> 0;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * This check is done in kdp_lightweight_fault for the fault path.
+			 */</span>
+			cur_wimg_bits = pmap_cache_attributes((ppnum_t) atop(cur_phys_addr));
+
+			<span class="enscript-keyword">if</span> ((cur_wimg_bits &amp; VM_WIMG_MASK) != VM_WIMG_DEFAULT) {
+				<span class="enscript-keyword">return</span> 0;
+			}
+		}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__x86_64__</span>
+		kern_virt_target_addr = (vm_offset_t) PHYSMAP_PTOV(cur_phys_addr);
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">Oh</span> <span class="enscript-variable-name">come</span> <span class="enscript-variable-name">on</span>... <span class="enscript-variable-name">we</span> <span class="enscript-variable-name">should</span> <span class="enscript-variable-name">really</span> <span class="enscript-variable-name">unify</span> <span class="enscript-variable-name">the</span> <span class="enscript-variable-name">physical</span> -&gt; <span class="enscript-variable-name">kernel</span> <span class="enscript-variable-name">virtual</span> <span class="enscript-variable-name">interface</span>
+#<span class="enscript-reference">endif</span>
+		prev_target_page = cur_target_page;
+		prev_target_kva = (kern_virt_target_addr &amp; ~PAGE_MASK);
+		validate_next_addr = FALSE;
+		<span class="enscript-keyword">return</span> kern_virt_target_addr;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* We found a translation, so stash this page */</span>
+		kern_virt_target_addr = prev_target_kva + (cur_target_addr &amp; PAGE_MASK);
+		<span class="enscript-keyword">return</span> kern_virt_target_addr;
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">machine_trace_thread_clear_validation_cache</span>(<span class="enscript-type">void</span>)
+{
+	validate_next_addr = TRUE;
+}
+
+</pre>
+<hr />
+</body></html>

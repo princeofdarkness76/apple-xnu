@@ -1,0 +1,970 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>tcp_sack.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">tcp_sack.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2004-2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1988, 1990, 1993, 1995
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">_IP_VHL</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/in6_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_var.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+<span class="enscript-comment">//#define	TCPOUTFLAGS
+</span>#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_fsm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_seq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_timer.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcpip.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">TCPDEBUG</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_debug.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPSEC</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipsec.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/*IPSEC*/</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+<span class="enscript-type">int</span>	tcp_do_sack = 1;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, sack, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;tcp_do_sack, 0,
+	<span class="enscript-string">&quot;Enable/Disable TCP SACK support&quot;</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> tcp_sack_maxholes = 128;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, sack_maxholes, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;tcp_sack_maxholes, 0, 
+    <span class="enscript-string">&quot;Maximum number of TCP SACK holes allowed per connection&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> tcp_sack_globalmaxholes = 65536;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, sack_globalmaxholes, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;tcp_sack_globalmaxholes, 0, 
+    <span class="enscript-string">&quot;Global maximum number of TCP SACK holes&quot;</span>);
+
+<span class="enscript-type">static</span> SInt32 tcp_sack_globalholes = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, sack_globalholes, CTLFLAG_RD | CTLFLAG_LOCKED,
+    &amp;tcp_sack_globalholes, 0,
+    <span class="enscript-string">&quot;Global number of TCP SACK holes currently allocated&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> tcp_detect_reordering = 1;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> tcp_dsack_ignore_hw_duplicates = 0;
+
+#<span class="enscript-reference">if</span> (<span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>)
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, detect_reordering,
+    CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;tcp_detect_reordering, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, ignore_hw_duplicates,
+    CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;tcp_dsack_ignore_hw_duplicates, 0, <span class="enscript-string">&quot;&quot;</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* (DEVELOPMENT || DEBUG) */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> zone *sack_hole_zone;
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">TCP_VALIDATE_SACK_SEQ_NUMBERS</span>(_tp_, _sb_, _ack_) \
+    (SEQ_GT((_sb_)-&gt;end, (_sb_)-&gt;start) &amp;&amp; \
+    SEQ_GT((_sb_)-&gt;start, (_tp_)-&gt;snd_una) &amp;&amp; \
+    SEQ_GT((_sb_)-&gt;start, (_ack_)) &amp;&amp; \
+    SEQ_LT((_sb_)-&gt;start, (_tp_)-&gt;snd_max) &amp;&amp; \
+    SEQ_GT((_sb_)-&gt;end, (_tp_)-&gt;snd_una) &amp;&amp; \
+    SEQ_LEQ((_sb_)-&gt;end, (_tp_)-&gt;snd_max))
+
+<span class="enscript-comment">/*
+ * This function is called upon receipt of new valid data (while not in header
+ * prediction mode), and it updates the ordered list of sacks.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_update_sack_list</span>(<span class="enscript-type">struct</span> tcpcb *tp, tcp_seq rcv_start, tcp_seq rcv_end)
+{
+	<span class="enscript-comment">/*
+	 * First reported block MUST be the most recent one.  Subsequent
+	 * blocks SHOULD be in the order in which they arrived at the
+	 * receiver.  These two conditions make the implementation fully
+	 * compliant with RFC 2018.
+	 */</span>
+	<span class="enscript-type">struct</span> sackblk head_blk, saved_blks[MAX_SACK_BLKS];
+	<span class="enscript-type">int</span> num_head, num_saved, i;
+
+	<span class="enscript-comment">/* SACK block for the received segment. */</span>
+	head_blk.start = rcv_start;
+	head_blk.end = rcv_end;
+
+	<span class="enscript-comment">/*
+	 * Merge updated SACK blocks into head_blk, and
+	 * save unchanged SACK blocks into saved_blks[].
+	 * num_saved will have the number of the saved SACK blocks.
+	 */</span>
+	num_saved = 0;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; tp-&gt;rcv_numsacks; i++) {
+		tcp_seq start = tp-&gt;sackblks[i].start;
+		tcp_seq end = tp-&gt;sackblks[i].end;
+		<span class="enscript-keyword">if</span> (SEQ_GEQ(start, end) || SEQ_LEQ(start, tp-&gt;rcv_nxt)) {
+			<span class="enscript-comment">/*
+			 * Discard this SACK block.
+			 */</span>
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (SEQ_LEQ(head_blk.start, end) &amp;&amp;
+			   SEQ_GEQ(head_blk.end, start)) {
+			<span class="enscript-comment">/*
+			 * Merge this SACK block into head_blk.
+			 * This SACK block itself will be discarded.
+			 */</span>
+			<span class="enscript-keyword">if</span> (SEQ_GT(head_blk.start, start))
+				head_blk.start = start;
+			<span class="enscript-keyword">if</span> (SEQ_LT(head_blk.end, end))
+				head_blk.end = end;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * Save this SACK block.
+			 */</span>
+			saved_blks[num_saved].start = start;
+			saved_blks[num_saved].end = end;
+			num_saved++;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Update SACK list in tp-&gt;sackblks[].
+	 */</span>
+	num_head = 0;
+	<span class="enscript-keyword">if</span> (SEQ_GT(head_blk.start, tp-&gt;rcv_nxt)) {
+		<span class="enscript-comment">/*
+		 * The received data segment is an out-of-order segment.
+		 * Put head_blk at the top of SACK list.
+		 */</span>
+		tp-&gt;sackblks[0] = head_blk;
+		num_head = 1;
+		<span class="enscript-comment">/*
+		 * If the number of saved SACK blocks exceeds its limit,
+		 * discard the last SACK block.
+		 */</span>
+		<span class="enscript-keyword">if</span> (num_saved &gt;= MAX_SACK_BLKS)
+			num_saved--;
+	}
+	<span class="enscript-keyword">if</span> (num_saved &gt; 0) {
+		<span class="enscript-comment">/*
+		 * Copy the saved SACK blocks back.
+		 */</span>
+		bcopy(saved_blks, &amp;tp-&gt;sackblks[num_head],
+		      <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sackblk) * num_saved);
+	}
+
+	<span class="enscript-comment">/* Save the number of SACK blocks. */</span>
+	tp-&gt;rcv_numsacks = num_head + num_saved;
+
+	<span class="enscript-comment">/* If we are requesting SACK recovery, reset the stretch-ack state
+	 * so that connection will generate more acks after recovery and
+	 * sender's cwnd will open.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((tp-&gt;t_flags &amp; TF_STRETCHACK) != 0 &amp;&amp; tp-&gt;rcv_numsacks &gt; 0)
+		tcp_reset_stretch_ack(tp);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">TRAFFIC_MGT</span>
+	<span class="enscript-keyword">if</span> (tp-&gt;acc_iaj &gt; 0 &amp;&amp; tp-&gt;rcv_numsacks &gt; 0) 
+		reset_acc_iaj(tp);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* TRAFFIC_MGT */</span>
+}
+
+<span class="enscript-comment">/*
+ * Delete all receiver-side SACK information.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_clean_sackreport</span>( <span class="enscript-type">struct</span> tcpcb *tp)
+{
+
+	tp-&gt;rcv_numsacks = 0;
+	bzero(&amp;tp-&gt;sackblks[0], <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sackblk) * MAX_SACK_BLKS);
+}
+
+<span class="enscript-comment">/*
+ * Allocate struct sackhole.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> sackhole *
+<span class="enscript-function-name">tcp_sackhole_alloc</span>(<span class="enscript-type">struct</span> tcpcb *tp, tcp_seq start, tcp_seq end)
+{
+	<span class="enscript-type">struct</span> sackhole *hole;
+
+	<span class="enscript-keyword">if</span> (tp-&gt;snd_numholes &gt;= tcp_sack_maxholes ||
+	    tcp_sack_globalholes &gt;= tcp_sack_globalmaxholes) {
+		tcpstat.tcps_sack_sboverflow++;
+		<span class="enscript-keyword">return</span> NULL;
+	}
+
+	hole = (<span class="enscript-type">struct</span> sackhole *)zalloc(sack_hole_zone);
+	<span class="enscript-keyword">if</span> (hole == NULL)
+		<span class="enscript-keyword">return</span> NULL;
+
+	hole-&gt;start = start;
+	hole-&gt;end = end;
+	hole-&gt;rxmit = start;
+
+	tp-&gt;snd_numholes++;
+	OSIncrementAtomic(&amp;tcp_sack_globalholes);
+
+	<span class="enscript-keyword">return</span> hole;
+}
+
+<span class="enscript-comment">/*
+ * Free struct sackhole.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_sackhole_free</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> sackhole *hole)
+{
+	zfree(sack_hole_zone, hole);
+
+	tp-&gt;snd_numholes--;
+	OSDecrementAtomic(&amp;tcp_sack_globalholes);
+}
+
+<span class="enscript-comment">/*
+ * Insert new SACK hole into scoreboard.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> sackhole *
+<span class="enscript-function-name">tcp_sackhole_insert</span>(<span class="enscript-type">struct</span> tcpcb *tp, tcp_seq start, tcp_seq end,
+		    <span class="enscript-type">struct</span> sackhole *after)
+{
+	<span class="enscript-type">struct</span> sackhole *hole;
+
+	<span class="enscript-comment">/* Allocate a new SACK hole. */</span>
+	hole = tcp_sackhole_alloc(tp, start, end);
+	<span class="enscript-keyword">if</span> (hole == NULL)
+		<span class="enscript-keyword">return</span> NULL;
+	hole-&gt;rxmit_start = tcp_now;
+	<span class="enscript-comment">/* Insert the new SACK hole into scoreboard */</span>
+	<span class="enscript-keyword">if</span> (after != NULL)
+		TAILQ_INSERT_AFTER(&amp;tp-&gt;snd_holes, after, hole, scblink);
+	<span class="enscript-keyword">else</span>
+		TAILQ_INSERT_TAIL(&amp;tp-&gt;snd_holes, hole, scblink);
+
+	<span class="enscript-comment">/* Update SACK hint. */</span>
+	<span class="enscript-keyword">if</span> (tp-&gt;sackhint.nexthole == NULL)
+		tp-&gt;sackhint.nexthole = hole;
+
+	<span class="enscript-keyword">return</span>(hole);
+}
+
+<span class="enscript-comment">/*
+ * Remove SACK hole from scoreboard.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_sackhole_remove</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> sackhole *hole)
+{
+	<span class="enscript-comment">/* Update SACK hint. */</span>
+	<span class="enscript-keyword">if</span> (tp-&gt;sackhint.nexthole == hole)
+		tp-&gt;sackhint.nexthole = TAILQ_NEXT(hole, scblink);
+
+	<span class="enscript-comment">/* Remove this SACK hole. */</span>
+	TAILQ_REMOVE(&amp;tp-&gt;snd_holes, hole, scblink);
+
+	<span class="enscript-comment">/* Free this SACK hole. */</span>
+	tcp_sackhole_free(tp, hole);
+}
+<span class="enscript-comment">/*
+ * When a new ack with SACK is received, check if it indicates packet
+ * reordering. If there is packet reordering, the socket is marked and
+ * the late time offset by which the packet was reordered with
+ * respect to its closest neighboring packets is computed.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_sack_detect_reordering</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> sackhole *s,
+    tcp_seq sacked_seq, tcp_seq snd_fack)
+{
+	int32_t rext = 0, reordered = 0;
+
+	<span class="enscript-comment">/*
+	 * If the SACK hole is past snd_fack, this is from new SACK
+	 * information, so we can ignore it.
+	 */</span>
+	<span class="enscript-keyword">if</span> (SEQ_GT(s-&gt;end, snd_fack))
+		<span class="enscript-keyword">return</span>;
+	<span class="enscript-comment">/*
+	 * If there has been a retransmit timeout, then the timestamp on 
+	 * the SACK segment will be newer. This might lead to a
+	 * false-positive. Avoid re-ordering detection in this case.
+	 */</span>
+	<span class="enscript-keyword">if</span> (tp-&gt;t_rxtshift &gt; 0)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/*
+	 * Detect reordering from SACK information by checking
+	 * if recently sacked data was never retransmitted from this hole.
+	 */</span>
+	<span class="enscript-keyword">if</span> (SEQ_LT(s-&gt;rxmit, sacked_seq)) {
+		reordered = 1;
+		tcpstat.tcps_avoid_rxmt++;
+	}
+
+	<span class="enscript-keyword">if</span> (reordered) {
+		<span class="enscript-keyword">if</span> (tcp_detect_reordering == 1 &amp;&amp;
+		    !(tp-&gt;t_flagsext &amp; TF_PKTS_REORDERED)) {
+			tp-&gt;t_flagsext |= TF_PKTS_REORDERED;
+			tcpstat.tcps_detect_reordering++;
+		}
+
+		tcpstat.tcps_reordered_pkts++;
+
+		VERIFY(SEQ_GEQ(snd_fack, s-&gt;rxmit));
+
+		<span class="enscript-keyword">if</span> (s-&gt;rxmit_start &gt; 0) {
+			rext = timer_diff(tcp_now, 0, s-&gt;rxmit_start, 0);
+			<span class="enscript-keyword">if</span> (rext &lt; 0)
+				<span class="enscript-keyword">return</span>;
+
+			<span class="enscript-comment">/*
+			 * We take the maximum reorder window to schedule
+			 * DELAYFR timer as that will take care of jitter
+			 * on the network path.
+			 *
+			 * Computing average and standard deviation seems
+			 * to cause unnecessary retransmissions when there
+			 * is high jitter.
+			 *
+			 * We set a maximum of SRTT/2 and a minimum of
+			 * 10 ms on the reorder window.
+			 */</span>
+			tp-&gt;t_reorderwin = max(tp-&gt;t_reorderwin, rext);
+			tp-&gt;t_reorderwin = min(tp-&gt;t_reorderwin,
+			    (tp-&gt;t_srtt &gt;&gt; (TCP_RTT_SHIFT - 1)));
+			tp-&gt;t_reorderwin = max(tp-&gt;t_reorderwin, 10);
+		}
+	}
+}
+
+<span class="enscript-comment">/*
+ * Process cumulative ACK and the TCP SACK option to update the scoreboard.
+ * tp-&gt;snd_holes is an ordered list of holes (oldest to newest, in terms of
+ * the sequence space).
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_sack_doack</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcpopt *to, <span class="enscript-type">struct</span> tcphdr *th, 
+	u_int32_t *newbytes_acked)
+{
+	<span class="enscript-type">struct</span> sackhole *cur, *temp;
+	<span class="enscript-type">struct</span> sackblk sack, sack_blocks[TCP_MAX_SACK + 1], *sblkp;
+	<span class="enscript-type">int</span> i, j, num_sack_blks;
+	tcp_seq old_snd_fack = 0, th_ack = th-&gt;th_ack;
+
+	num_sack_blks = 0;
+	<span class="enscript-comment">/*
+	 * If SND.UNA will be advanced by SEG.ACK, and if SACK holes exist,
+	 * treat [SND.UNA, SEG.ACK) as if it is a SACK block.
+	 */</span>
+	<span class="enscript-keyword">if</span> (SEQ_LT(tp-&gt;snd_una, th_ack) &amp;&amp; !TAILQ_EMPTY(&amp;tp-&gt;snd_holes)) {
+		sack_blocks[num_sack_blks].start = tp-&gt;snd_una;
+		sack_blocks[num_sack_blks++].end = th_ack;
+	}
+	<span class="enscript-comment">/*
+	 * Append received valid SACK blocks to sack_blocks[].
+	 * Check that the SACK block range is valid.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; to-&gt;to_nsacks; i++) {
+		bcopy((to-&gt;to_sacks + i * TCPOLEN_SACK),
+		    &amp;sack, <span class="enscript-keyword">sizeof</span>(sack));
+		sack.start = ntohl(sack.start);
+		sack.end = ntohl(sack.end);
+		<span class="enscript-keyword">if</span> (TCP_VALIDATE_SACK_SEQ_NUMBERS(tp, &amp;sack, th_ack))
+			sack_blocks[num_sack_blks++] = sack;
+	}
+
+	<span class="enscript-comment">/*
+	 * Return if SND.UNA is not advanced and no valid SACK block
+	 * is received.
+	 */</span>
+	<span class="enscript-keyword">if</span> (num_sack_blks == 0)
+		<span class="enscript-keyword">return</span>;
+
+	VERIFY(num_sack_blks &lt;= (TCP_MAX_SACK + 1));
+	<span class="enscript-comment">/*
+	 * Sort the SACK blocks so we can update the scoreboard
+	 * with just one pass. The overhead of sorting upto 4+1 elements
+	 * is less than making upto 4+1 passes over the scoreboard.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; num_sack_blks; i++) {
+		<span class="enscript-keyword">for</span> (j = i + 1; j &lt; num_sack_blks; j++) {
+			<span class="enscript-keyword">if</span> (SEQ_GT(sack_blocks[i].end, sack_blocks[j].end)) {
+				sack = sack_blocks[i];
+				sack_blocks[i] = sack_blocks[j];
+				sack_blocks[j] = sack;
+			}
+		}
+	}
+	<span class="enscript-keyword">if</span> (TAILQ_EMPTY(&amp;tp-&gt;snd_holes)) {
+		<span class="enscript-comment">/*
+		 * Empty scoreboard. Need to initialize snd_fack (it may be
+		 * uninitialized or have a bogus value). Scoreboard holes
+		 * (from the sack blocks received) are created later below (in
+		 * the logic that adds holes to the tail of the scoreboard).
+		 */</span>
+		tp-&gt;snd_fack = SEQ_MAX(tp-&gt;snd_una, th_ack);
+		*newbytes_acked += (tp-&gt;snd_fack - tp-&gt;snd_una);
+	}
+
+	old_snd_fack = tp-&gt;snd_fack;
+	<span class="enscript-comment">/*
+	 * In the while-loop below, incoming SACK blocks (sack_blocks[])
+	 * and SACK holes (snd_holes) are traversed from their tails with
+	 * just one pass in order to reduce the number of compares especially
+	 * when the bandwidth-delay product is large.
+	 * Note: Typically, in the first RTT of SACK recovery, the highest
+	 * three or four SACK blocks with the same ack number are received.
+	 * In the second RTT, if retransmitted data segments are not lost,
+	 * the highest three or four SACK blocks with ack number advancing
+	 * are received.
+	 */</span>
+	sblkp = &amp;sack_blocks[num_sack_blks - 1];	<span class="enscript-comment">/* Last SACK block */</span>
+	<span class="enscript-keyword">if</span> (SEQ_LT(tp-&gt;snd_fack, sblkp-&gt;start)) {
+		<span class="enscript-comment">/*
+		 * The highest SACK block is beyond fack.
+		 * Append new SACK hole at the tail.
+		 * If the second or later highest SACK blocks are also
+		 * beyond the current fack, they will be inserted by
+		 * way of hole splitting in the while-loop below.
+		 */</span>
+		temp = tcp_sackhole_insert(tp, tp-&gt;snd_fack,sblkp-&gt;start,NULL);
+		<span class="enscript-keyword">if</span> (temp != NULL) {
+			tp-&gt;snd_fack = sblkp-&gt;end;
+			*newbytes_acked += (sblkp-&gt;end - sblkp-&gt;start);
+
+			<span class="enscript-comment">/* Go to the previous sack block. */</span>
+			sblkp--;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* 
+			 * We failed to add a new hole based on the current 
+			 * sack block.  Skip over all the sack blocks that 
+			 * fall completely to the right of snd_fack and proceed
+			 * to trim the scoreboard based on the remaining sack
+			 * blocks. This also trims the scoreboard for th_ack 
+			 * (which is sack_blocks[0]).
+			 */</span>
+			<span class="enscript-keyword">while</span> (sblkp &gt;= sack_blocks &amp;&amp; 
+			       SEQ_LT(tp-&gt;snd_fack, sblkp-&gt;start))
+				sblkp--;
+			<span class="enscript-keyword">if</span> (sblkp &gt;= sack_blocks &amp;&amp; 
+			    SEQ_LT(tp-&gt;snd_fack, sblkp-&gt;end)) {
+				*newbytes_acked += (sblkp-&gt;end - tp-&gt;snd_fack);
+				tp-&gt;snd_fack = sblkp-&gt;end;
+			}
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (SEQ_LT(tp-&gt;snd_fack, sblkp-&gt;end)) {
+		<span class="enscript-comment">/* fack is advanced. */</span>
+		*newbytes_acked += (sblkp-&gt;end - tp-&gt;snd_fack);
+		tp-&gt;snd_fack = sblkp-&gt;end;
+	}
+	<span class="enscript-comment">/* We must have at least one SACK hole in scoreboard */</span>
+	cur = TAILQ_LAST(&amp;tp-&gt;snd_holes, sackhole_head); <span class="enscript-comment">/* Last SACK hole */</span>
+	<span class="enscript-comment">/*
+	 * Since the incoming sack blocks are sorted, we can process them
+	 * making one sweep of the scoreboard.
+	 */</span>
+	<span class="enscript-keyword">while</span> (sblkp &gt;= sack_blocks  &amp;&amp; cur != NULL) {
+		<span class="enscript-keyword">if</span> (SEQ_GEQ(sblkp-&gt;start, cur-&gt;end)) {
+			<span class="enscript-comment">/*
+			 * SACKs data beyond the current hole.
+			 * Go to the previous sack block.
+			 */</span>
+			sblkp--;
+			<span class="enscript-keyword">continue</span>;
+		}
+		<span class="enscript-keyword">if</span> (SEQ_LEQ(sblkp-&gt;end, cur-&gt;start)) {
+			<span class="enscript-comment">/*
+			 * SACKs data before the current hole.
+			 * Go to the previous hole.
+			 */</span>
+			cur = TAILQ_PREV(cur, sackhole_head, scblink);
+			<span class="enscript-keyword">continue</span>;
+		}
+		tp-&gt;sackhint.sack_bytes_rexmit -= (cur-&gt;rxmit - cur-&gt;start);
+		<span class="enscript-keyword">if</span> (SEQ_LEQ(sblkp-&gt;start, cur-&gt;start)) {
+			<span class="enscript-comment">/* Data acks at least the beginning of hole */</span>
+			<span class="enscript-keyword">if</span> (SEQ_GEQ(sblkp-&gt;end, cur-&gt;end)) {
+				<span class="enscript-comment">/* Acks entire hole, so delete hole */</span>
+				*newbytes_acked += (cur-&gt;end - cur-&gt;start);
+
+				tcp_sack_detect_reordering(tp, cur,
+				    cur-&gt;end, old_snd_fack);
+				temp = cur;
+				cur = TAILQ_PREV(cur, sackhole_head, scblink);
+				tcp_sackhole_remove(tp, temp);
+				<span class="enscript-comment">/*
+				 * The sack block may ack all or part of the next
+				 * hole too, so continue onto the next hole.
+				 */</span>
+				<span class="enscript-keyword">continue</span>;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* Move start of hole forward */</span>
+				*newbytes_acked += (sblkp-&gt;end - cur-&gt;start);
+				tcp_sack_detect_reordering(tp, cur,
+				    sblkp-&gt;end, old_snd_fack);
+				cur-&gt;start = sblkp-&gt;end;
+				cur-&gt;rxmit = SEQ_MAX(cur-&gt;rxmit, cur-&gt;start);
+			}
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* Data acks at least the end of hole */</span>
+			<span class="enscript-keyword">if</span> (SEQ_GEQ(sblkp-&gt;end, cur-&gt;end)) {
+				<span class="enscript-comment">/* Move end of hole backward */</span>
+				*newbytes_acked += (cur-&gt;end - sblkp-&gt;start);
+				tcp_sack_detect_reordering(tp, cur,
+				    cur-&gt;end, old_snd_fack);
+				cur-&gt;end = sblkp-&gt;start;
+				cur-&gt;rxmit = SEQ_MIN(cur-&gt;rxmit, cur-&gt;end);
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/*
+				 * ACKs some data in the middle of a hole;
+				 * need to split current hole
+				 */</span>
+				*newbytes_acked += (sblkp-&gt;end - sblkp-&gt;start);
+				tcp_sack_detect_reordering(tp, cur,
+				    sblkp-&gt;end, old_snd_fack);
+				temp = tcp_sackhole_insert(tp, sblkp-&gt;end,
+				    cur-&gt;end, cur);
+				<span class="enscript-keyword">if</span> (temp != NULL) {
+					<span class="enscript-keyword">if</span> (SEQ_GT(cur-&gt;rxmit, temp-&gt;rxmit)) {
+						temp-&gt;rxmit = cur-&gt;rxmit;
+						tp-&gt;sackhint.sack_bytes_rexmit
+							+= (temp-&gt;rxmit
+							    - temp-&gt;start);
+					}
+					cur-&gt;end = sblkp-&gt;start;
+					cur-&gt;rxmit = SEQ_MIN(cur-&gt;rxmit,
+							     cur-&gt;end);
+					<span class="enscript-comment">/*
+					 * Reset the rxmit_start to that of
+					 * the current hole as that will
+					 * help to compute the reorder
+					 * window correctly
+					 */</span>
+					temp-&gt;rxmit_start = cur-&gt;rxmit_start;
+				}
+			}
+		}
+		tp-&gt;sackhint.sack_bytes_rexmit += (cur-&gt;rxmit - cur-&gt;start);
+		<span class="enscript-comment">/*
+		 * Testing sblkp-&gt;start against cur-&gt;start tells us whether
+		 * we're done with the sack block or the sack hole.
+		 * Accordingly, we advance one or the other.
+		 */</span>
+		<span class="enscript-keyword">if</span> (SEQ_LEQ(sblkp-&gt;start, cur-&gt;start))
+			cur = TAILQ_PREV(cur, sackhole_head, scblink);
+		<span class="enscript-keyword">else</span>
+			sblkp--;
+	}
+}
+
+<span class="enscript-comment">/*
+ * Free all SACK holes to clear the scoreboard.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_free_sackholes</span>(<span class="enscript-type">struct</span> tcpcb *tp)
+{
+	<span class="enscript-type">struct</span> sackhole *q;
+
+	<span class="enscript-keyword">while</span> ((q = TAILQ_FIRST(&amp;tp-&gt;snd_holes)) != NULL)
+		tcp_sackhole_remove(tp, q);
+	tp-&gt;sackhint.sack_bytes_rexmit = 0;
+	tp-&gt;sackhint.nexthole = NULL;
+	tp-&gt;sack_newdata = 0;
+
+}
+
+<span class="enscript-comment">/*
+ * Partial ack handling within a sack recovery episode. 
+ * Keeping this very simple for now. When a partial ack
+ * is received, force snd_cwnd to a value that will allow
+ * the sender to transmit no more than 2 segments.
+ * If necessary, a better scheme can be adopted at a 
+ * later point, but for now, the goal is to prevent the
+ * sender from bursting a large amount of data in the midst
+ * of sack recovery.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_sack_partialack</span>(tp, th)
+	<span class="enscript-type">struct</span> tcpcb *tp;
+	<span class="enscript-type">struct</span> tcphdr *th;
+{
+	<span class="enscript-type">int</span> num_segs = 1;
+
+	tp-&gt;t_timer[TCPT_REXMT] = 0;
+	tp-&gt;t_rtttime = 0;
+	<span class="enscript-comment">/* send one or 2 segments based on how much new data was acked */</span>
+	<span class="enscript-keyword">if</span> (((BYTES_ACKED(th, tp)) / tp-&gt;t_maxseg) &gt; 2)
+		num_segs = 2;
+	tp-&gt;snd_cwnd = (tp-&gt;sackhint.sack_bytes_rexmit +
+		(tp-&gt;snd_nxt - tp-&gt;sack_newdata) +
+		num_segs * tp-&gt;t_maxseg);
+	<span class="enscript-keyword">if</span> (tp-&gt;snd_cwnd &gt; tp-&gt;snd_ssthresh)
+		tp-&gt;snd_cwnd = tp-&gt;snd_ssthresh;
+	<span class="enscript-keyword">if</span> (SEQ_LT(tp-&gt;snd_fack, tp-&gt;snd_recover) &amp;&amp;
+	    tp-&gt;snd_fack == th-&gt;th_ack &amp;&amp; TAILQ_EMPTY(&amp;tp-&gt;snd_holes)) {
+		<span class="enscript-type">struct</span> sackhole *temp;
+		<span class="enscript-comment">/*
+		 * we received a partial ack but there is no sack_hole
+		 * that will cover the remaining seq space. In this case,
+		 * create a hole from snd_fack to snd_recover so that
+		 * the sack recovery will continue.
+		 */</span>
+		temp = tcp_sackhole_insert(tp, tp-&gt;snd_fack,
+		    tp-&gt;snd_recover, NULL);
+		<span class="enscript-keyword">if</span> (temp != NULL)
+			tp-&gt;snd_fack = tp-&gt;snd_recover;
+	}
+	(<span class="enscript-type">void</span>) tcp_output(tp);
+}
+
+<span class="enscript-comment">/*
+ * Debug version of tcp_sack_output() that walks the scoreboard. Used for
+ * now to sanity check the hint.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> sackhole *
+<span class="enscript-function-name">tcp_sack_output_debug</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">int</span> *sack_bytes_rexmt)
+{
+	<span class="enscript-type">struct</span> sackhole *p;
+
+	*sack_bytes_rexmt = 0;
+	TAILQ_FOREACH(p, &amp;tp-&gt;snd_holes, scblink) {
+		<span class="enscript-keyword">if</span> (SEQ_LT(p-&gt;rxmit, p-&gt;end)) {
+			<span class="enscript-keyword">if</span> (SEQ_LT(p-&gt;rxmit, tp-&gt;snd_una)) {<span class="enscript-comment">/* old SACK hole */</span>
+				<span class="enscript-keyword">continue</span>;
+			}
+			*sack_bytes_rexmt += (p-&gt;rxmit - p-&gt;start);
+			<span class="enscript-keyword">break</span>;
+		}
+		*sack_bytes_rexmt += (p-&gt;rxmit - p-&gt;start);
+	}
+	<span class="enscript-keyword">return</span> (p);
+}
+
+<span class="enscript-comment">/*
+ * Returns the next hole to retransmit and the number of retransmitted bytes
+ * from the scoreboard. We store both the next hole and the number of
+ * retransmitted bytes as hints (and recompute these on the fly upon SACK/ACK
+ * reception). This avoids scoreboard traversals completely.
+ *
+ * The loop here will traverse *at most* one link. Here's the argument.
+ * For the loop to traverse more than 1 link before finding the next hole to
+ * retransmit, we would need to have at least 1 node following the current hint
+ * with (rxmit == end). But, for all holes following the current hint,
+ * (start == rxmit), since we have not yet retransmitted from them. Therefore,
+ * in order to traverse more 1 link in the loop below, we need to have at least
+ * one node following the current hint with (start == rxmit == end).
+ * But that can't happen, (start == end) means that all the data in that hole
+ * has been sacked, in which case, the hole would have been removed from the
+ * scoreboard.
+ */</span>
+<span class="enscript-type">struct</span> sackhole *
+<span class="enscript-function-name">tcp_sack_output</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">int</span> *sack_bytes_rexmt)
+{
+	<span class="enscript-type">struct</span> sackhole *hole = NULL, *dbg_hole = NULL;
+	<span class="enscript-type">int</span> dbg_bytes_rexmt;
+
+	dbg_hole = tcp_sack_output_debug(tp, &amp;dbg_bytes_rexmt);
+	*sack_bytes_rexmt = tp-&gt;sackhint.sack_bytes_rexmit;
+	hole = tp-&gt;sackhint.nexthole;
+	<span class="enscript-keyword">if</span> (hole == NULL || SEQ_LT(hole-&gt;rxmit, hole-&gt;end))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	<span class="enscript-keyword">while</span> ((hole = TAILQ_NEXT(hole, scblink)) != NULL) {
+		<span class="enscript-keyword">if</span> (SEQ_LT(hole-&gt;rxmit, hole-&gt;end)) {
+			tp-&gt;sackhint.nexthole = hole;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (dbg_hole != hole) {
+		printf(<span class="enscript-string">&quot;%s: Computed sack hole not the same as cached value\n&quot;</span>, __func__);
+		hole = dbg_hole;
+	}
+	<span class="enscript-keyword">if</span> (*sack_bytes_rexmt != dbg_bytes_rexmt) {
+		printf(<span class="enscript-string">&quot;%s: Computed sack_bytes_retransmitted (%d) not &quot;</span>
+		       <span class="enscript-string">&quot;the same as cached value (%d)\n&quot;</span>,
+		       __func__, dbg_bytes_rexmt, *sack_bytes_rexmt);
+		*sack_bytes_rexmt = dbg_bytes_rexmt;
+	}
+	<span class="enscript-keyword">return</span> (hole);
+}
+
+<span class="enscript-comment">/*
+ * After a timeout, the SACK list may be rebuilt.  This SACK information
+ * should be used to avoid retransmitting SACKed data.  This function
+ * traverses the SACK list to see if snd_nxt should be moved forward.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_sack_adjust</span>(<span class="enscript-type">struct</span> tcpcb *tp)
+{
+	<span class="enscript-type">struct</span> sackhole *p, *cur = TAILQ_FIRST(&amp;tp-&gt;snd_holes);
+
+	<span class="enscript-keyword">if</span> (cur == NULL)
+		<span class="enscript-keyword">return</span>; <span class="enscript-comment">/* No holes */</span>
+	<span class="enscript-keyword">if</span> (SEQ_GEQ(tp-&gt;snd_nxt, tp-&gt;snd_fack))
+		<span class="enscript-keyword">return</span>; <span class="enscript-comment">/* We're already beyond any SACKed blocks */</span>
+	<span class="enscript-comment">/*
+	 * Two cases for which we want to advance snd_nxt:
+	 * i) snd_nxt lies between end of one hole and beginning of another
+	 * ii) snd_nxt lies between end of last hole and snd_fack
+	 */</span>
+	<span class="enscript-keyword">while</span> ((p = TAILQ_NEXT(cur, scblink)) != NULL) {
+		<span class="enscript-keyword">if</span> (SEQ_LT(tp-&gt;snd_nxt, cur-&gt;end))
+			<span class="enscript-keyword">return</span>;
+		<span class="enscript-keyword">if</span> (SEQ_GEQ(tp-&gt;snd_nxt, p-&gt;start))
+			cur = p;
+		<span class="enscript-keyword">else</span> {
+			tp-&gt;snd_nxt = p-&gt;start;
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (SEQ_LT(tp-&gt;snd_nxt, cur-&gt;end))
+		<span class="enscript-keyword">return</span>;
+	tp-&gt;snd_nxt = tp-&gt;snd_fack;
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * This function returns TRUE if more than (tcprexmtthresh - 1) * SMSS
+ * bytes with sequence numbers greater than snd_una have been SACKed. 
+ */</span>
+boolean_t
+<span class="enscript-function-name">tcp_sack_byte_islost</span>(<span class="enscript-type">struct</span> tcpcb *tp)
+{
+	u_int32_t unacked_bytes, sndhole_bytes = 0;
+	<span class="enscript-type">struct</span> sackhole *sndhole;
+	<span class="enscript-keyword">if</span> (!SACK_ENABLED(tp) || IN_FASTRECOVERY(tp) ||
+	    TAILQ_EMPTY(&amp;tp-&gt;snd_holes) ||
+	    (tp-&gt;t_flagsext &amp; TF_PKTS_REORDERED))
+		<span class="enscript-keyword">return</span> (FALSE);
+
+	unacked_bytes = tp-&gt;snd_max - tp-&gt;snd_una;
+
+	TAILQ_FOREACH(sndhole, &amp;tp-&gt;snd_holes, scblink) {
+		sndhole_bytes += (sndhole-&gt;end - sndhole-&gt;start);
+	}
+
+	VERIFY(unacked_bytes &gt;= sndhole_bytes);
+	<span class="enscript-keyword">return</span> ((unacked_bytes - sndhole_bytes) &gt;
+	    ((tcprexmtthresh - 1) * tp-&gt;t_maxseg));
+}
+
+<span class="enscript-comment">/*
+ * Process any DSACK options that might be present on an input packet
+ */</span>
+
+boolean_t
+<span class="enscript-function-name">tcp_sack_process_dsack</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> tcpopt *to,
+    <span class="enscript-type">struct</span> tcphdr *th)
+{
+	<span class="enscript-type">struct</span> sackblk first_sack, second_sack;
+	<span class="enscript-type">struct</span> tcp_rxt_seg *rxseg;
+
+	bcopy(to-&gt;to_sacks, &amp;first_sack, <span class="enscript-keyword">sizeof</span>(first_sack));
+	first_sack.start = ntohl(first_sack.start);
+	first_sack.end = ntohl(first_sack.end);
+
+	<span class="enscript-keyword">if</span> (to-&gt;to_nsacks &gt; 1) {
+		bcopy((to-&gt;to_sacks + TCPOLEN_SACK), &amp;second_sack,
+		    <span class="enscript-keyword">sizeof</span>(second_sack));
+		second_sack.start = ntohl(second_sack.start);
+		second_sack.end = ntohl(second_sack.end);
+	}
+
+	<span class="enscript-keyword">if</span> (SEQ_LT(first_sack.start, th-&gt;th_ack) &amp;&amp;
+	    SEQ_LEQ(first_sack.end, th-&gt;th_ack)) {
+		<span class="enscript-comment">/*
+		 * There is a dsack option reporting a duplicate segment
+		 * also covered by cumulative acknowledgement.
+		 *
+		 * Validate the sequence numbers before looking at dsack
+		 * option. The duplicate notification can come after
+		 * snd_una moves forward. In order to set a window of valid
+		 * sequence numbers to look for, we set a maximum send
+		 * window within which the DSACK option will be processed.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!(TCP_DSACK_SEQ_IN_WINDOW(tp, first_sack.start, th-&gt;th_ack) &amp;&amp;
+		    TCP_DSACK_SEQ_IN_WINDOW(tp, first_sack.end, th-&gt;th_ack))) {
+			to-&gt;to_nsacks--;
+			to-&gt;to_sacks += TCPOLEN_SACK;
+			tcpstat.tcps_dsack_recvd_old++;
+
+			<span class="enscript-comment">/*
+			 * returning true here so that the ack will not be
+			 * treated as duplicate ack.
+			 */</span>
+			<span class="enscript-keyword">return</span> (TRUE);
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (to-&gt;to_nsacks &gt; 1 &amp;&amp;
+	    SEQ_LEQ(second_sack.start, first_sack.start) &amp;&amp;
+	    SEQ_GEQ(second_sack.end, first_sack.end)) {
+		<span class="enscript-comment">/*
+		 * there is a dsack option in the first block not
+		 * covered by the cumulative acknowledgement but covered
+		 * by the second sack block.
+		 *
+		 * verify the sequence numbes on the second sack block
+		 * before processing the DSACK option. Returning false
+		 * here will treat the ack as a duplicate ack.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!TCP_VALIDATE_SACK_SEQ_NUMBERS(tp, &amp;second_sack,
+		    th-&gt;th_ack)) {
+			to-&gt;to_nsacks--;
+			to-&gt;to_sacks += TCPOLEN_SACK;
+			tcpstat.tcps_dsack_recvd_old++;
+			<span class="enscript-keyword">return</span> (TRUE);
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* no dsack options, proceed with processing the sack */</span>
+		<span class="enscript-keyword">return</span> (FALSE);
+	}
+
+	<span class="enscript-comment">/* Update the tcpopt pointer to exclude dsack block */</span>
+	to-&gt;to_nsacks--;
+	to-&gt;to_sacks += TCPOLEN_SACK;
+	tcpstat.tcps_dsack_recvd++;
+
+	<span class="enscript-comment">/* ignore DSACK option, if DSACK is disabled */</span>
+	<span class="enscript-keyword">if</span> (tp-&gt;t_flagsext &amp; TF_DISABLE_DSACK)
+		<span class="enscript-keyword">return</span> (TRUE);
+
+	<span class="enscript-comment">/* If the DSACK is for TLP mark it as such */</span>
+	<span class="enscript-keyword">if</span> ((tp-&gt;t_flagsext &amp; TF_SENT_TLPROBE) &amp;&amp;
+	    first_sack.end == tp-&gt;t_tlphighrxt) {
+		<span class="enscript-keyword">if</span> ((rxseg = tcp_rxtseg_find(tp, first_sack.start,
+		    (first_sack.end - 1))) != NULL)
+			rxseg-&gt;rx_flags |= TCP_RXT_DSACK_FOR_TLP;
+	}
+	<span class="enscript-comment">/* Update the sender's retransmit segment state */</span>
+	<span class="enscript-keyword">if</span> (((tp-&gt;t_rxtshift == 1 &amp;&amp; first_sack.start == tp-&gt;snd_una) ||
+	    ((tp-&gt;t_flagsext &amp; TF_SENT_TLPROBE) &amp;&amp;
+	    first_sack.end == tp-&gt;t_tlphighrxt)) &amp;&amp;
+	    TAILQ_EMPTY(&amp;tp-&gt;snd_holes) &amp;&amp;
+	    SEQ_GT(th-&gt;th_ack, tp-&gt;snd_una)) {
+		<span class="enscript-comment">/*
+		 * If the dsack is for a retransmitted packet and one of
+		 * the two cases is true, it indicates ack loss:
+		 * - retransmit timeout and first_sack.start == snd_una
+		 * - TLP probe and first_sack.end == tlphighrxt
+		 *
+		 * Ignore dsack and do not update state when there is
+		 * ack loss
+		 */</span>
+		tcpstat.tcps_dsack_ackloss++;
+
+		<span class="enscript-keyword">return</span> (TRUE);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((rxseg = tcp_rxtseg_find(tp, first_sack.start,
+	    (first_sack.end - 1))) == NULL) {
+		<span class="enscript-comment">/*
+		 * Duplicate notification was not triggered by a
+		 * retransmission. This might be due to network duplication,
+		 * disable further DSACK processing.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!tcp_dsack_ignore_hw_duplicates) {
+			tp-&gt;t_flagsext |= TF_DISABLE_DSACK;
+			tcpstat.tcps_dsack_disable++;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * If the segment was retransmitted only once, mark it as
+		 * spurious. Otherwise ignore the duplicate notification.
+		 */</span>
+		<span class="enscript-keyword">if</span> (rxseg-&gt;rx_count == 1)
+			rxseg-&gt;rx_flags |= TCP_RXT_SPURIOUS;
+		<span class="enscript-keyword">else</span>
+			rxseg-&gt;rx_flags &amp;= ~TCP_RXT_SPURIOUS;
+	}
+	<span class="enscript-keyword">return</span> (TRUE);
+}
+</pre>
+<hr />
+</body></html>

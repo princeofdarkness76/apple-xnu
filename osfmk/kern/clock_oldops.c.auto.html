@@ -1,0 +1,844 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>clock_oldops.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">clock_oldops.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/*
+ *	DEPRECATED INTERFACES - Should be removed
+ *
+ *	Purpose:	Routines for the creation and use of kernel
+ *			alarm clock services. This file and the ipc
+ *			routines in kern/ipc_clock.c constitute the
+ *			machine-independent clock service layer.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_traps.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_time.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/clock_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/clock_reply.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/clock_priv_server.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_host_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv_server.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Actual clock alarm structure. Used for user clock_sleep() and
+ * clock_alarm() calls. Alarms are allocated from the alarm free
+ * list and entered in time priority order into the active alarm
+ * chain of the target clock.
+ */</span>
+<span class="enscript-type">struct</span>	alarm {
+	<span class="enscript-type">struct</span>	alarm	*al_next;		<span class="enscript-comment">/* next alarm in chain */</span>
+	<span class="enscript-type">struct</span>	alarm	*al_prev;		<span class="enscript-comment">/* previous alarm in chain */</span>
+	<span class="enscript-type">int</span>				al_status;		<span class="enscript-comment">/* alarm status */</span>
+	mach_timespec_t	al_time;		<span class="enscript-comment">/* alarm time */</span>
+	<span class="enscript-type">struct</span> {				<span class="enscript-comment">/* message alarm data */</span>
+		<span class="enscript-type">int</span>				type;		<span class="enscript-comment">/* alarm type */</span>
+		ipc_port_t		port;		<span class="enscript-comment">/* alarm port */</span>
+		mach_msg_type_name_t
+						port_type;	<span class="enscript-comment">/* alarm port type */</span>
+		<span class="enscript-type">struct</span>	clock	*clock;		<span class="enscript-comment">/* alarm clock */</span>
+		<span class="enscript-type">void</span>			*data;		<span class="enscript-comment">/* alarm data */</span>
+	} al_alrm;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">al_type</span>		al_alrm.type
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">al_port</span>		al_alrm.port
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">al_port_type</span>	al_alrm.port_type
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">al_clock</span>	al_alrm.clock
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">al_data</span>		al_alrm.data
+	<span class="enscript-type">long</span>			al_seqno;		<span class="enscript-comment">/* alarm sequence number */</span>
+};
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> alarm	alarm_data_t;
+
+<span class="enscript-comment">/* alarm status */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ALARM_FREE</span>	0		<span class="enscript-comment">/* alarm is on free list */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ALARM_SLEEP</span>	1		<span class="enscript-comment">/* active clock_sleep() */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ALARM_CLOCK</span>	2		<span class="enscript-comment">/* active clock_alarm() */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ALARM_DONE</span>	4		<span class="enscript-comment">/* alarm has expired */</span>
+
+<span class="enscript-comment">/* local data declarations */</span>
+<span class="enscript-function-name">decl_simple_lock_data</span>(<span class="enscript-type">static</span>,alarm_lock)	<span class="enscript-comment">/* alarm synchronization */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span>	zone		*alarm_zone;	<span class="enscript-comment">/* zone for user alarms */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span>	alarm		*alrmfree;		<span class="enscript-comment">/* alarm free list pointer */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span>	alarm		*alrmdone;		<span class="enscript-comment">/* alarm done list pointer */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span>	alarm		*alrmlist;
+<span class="enscript-type">static</span> <span class="enscript-type">long</span>					alrm_seqno;		<span class="enscript-comment">/* uniquely identifies alarms */</span>
+<span class="enscript-type">static</span> thread_call_data_t	alarm_done_call;
+<span class="enscript-type">static</span> timer_call_data_t	alarm_expire_timer;
+
+<span class="enscript-type">extern</span>	<span class="enscript-type">struct</span> clock	clock_list[];
+<span class="enscript-type">extern</span>	<span class="enscript-type">int</span>		clock_count;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>		post_alarm(
+					alarm_t			alarm);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>		set_alarm(
+					mach_timespec_t	*alarm_time);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>		check_time(
+					alarm_type_t	alarm_type,
+					mach_timespec_t	*alarm_time,
+					mach_timespec_t	*clock_time);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>		alarm_done(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>		alarm_expire(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> kern_return_t	clock_sleep_internal(
+							clock_t				clock,
+							sleep_type_t		sleep_type,
+							mach_timespec_t		*sleep_time);
+
+<span class="enscript-type">int</span>		rtclock_init(<span class="enscript-type">void</span>);
+
+kern_return_t	rtclock_gettime(
+	mach_timespec_t			*cur_time);
+
+kern_return_t	rtclock_getattr(
+	clock_flavor_t			flavor,
+	clock_attr_t			attr,
+	mach_msg_type_number_t	*count);
+
+<span class="enscript-type">struct</span> clock_ops sysclk_ops = {
+	NULL,			rtclock_init,
+	rtclock_gettime,
+	rtclock_getattr,
+};
+
+kern_return_t	calend_gettime(
+	mach_timespec_t			*cur_time);
+
+kern_return_t	calend_getattr(
+	clock_flavor_t			flavor,
+	clock_attr_t			attr,
+	mach_msg_type_number_t	*count);
+
+<span class="enscript-type">struct</span> clock_ops calend_ops = {
+	NULL, NULL,
+	calend_gettime,
+	calend_getattr,
+};
+
+<span class="enscript-comment">/*
+ *	Macros to lock/unlock clock system.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">LOCK_ALARM</span>(s)			\
+	s = splclock();			\
+	simple_lock(&amp;alarm_lock);
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">UNLOCK_ALARM</span>(s)			\
+	simple_unlock(&amp;alarm_lock);	\
+	splx(s);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">clock_oldconfig</span>(<span class="enscript-type">void</span>)
+{
+	clock_t			clock;
+	<span class="enscript-type">register</span> <span class="enscript-type">int</span> 	i;
+
+	simple_lock_init(&amp;alarm_lock, 0);
+	thread_call_setup(&amp;alarm_done_call, (thread_call_func_t)alarm_done, NULL);
+	timer_call_setup(&amp;alarm_expire_timer, (timer_call_func_t)alarm_expire, NULL);
+
+	<span class="enscript-comment">/*
+	 * Configure clock devices.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; clock_count; i++) {
+		clock = &amp;clock_list[i];
+		<span class="enscript-keyword">if</span> (clock-&gt;cl_ops &amp;&amp; clock-&gt;cl_ops-&gt;c_config) {
+			<span class="enscript-keyword">if</span> ((*clock-&gt;cl_ops-&gt;c_config)() == 0)
+				clock-&gt;cl_ops = NULL;
+		}
+	}
+
+	<span class="enscript-comment">/* start alarm sequence numbers at 0 */</span>
+	alrm_seqno = 0;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">clock_oldinit</span>(<span class="enscript-type">void</span>)
+{
+	clock_t			clock;
+	<span class="enscript-type">register</span> <span class="enscript-type">int</span>	i;
+
+	<span class="enscript-comment">/*
+	 * Initialize basic clock structures.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; clock_count; i++) {
+		clock = &amp;clock_list[i];
+		<span class="enscript-keyword">if</span> (clock-&gt;cl_ops &amp;&amp; clock-&gt;cl_ops-&gt;c_init)
+			(*clock-&gt;cl_ops-&gt;c_init)();
+	}
+}
+
+<span class="enscript-comment">/*
+ * Initialize the clock ipc service facility.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">clock_service_create</span>(<span class="enscript-type">void</span>)
+{
+	clock_t			clock;
+	<span class="enscript-type">register</span> <span class="enscript-type">int</span>	i;
+
+	<span class="enscript-comment">/*
+	 * Initialize ipc clock services.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; clock_count; i++) {
+		clock = &amp;clock_list[i];
+		<span class="enscript-keyword">if</span> (clock-&gt;cl_ops) {
+			ipc_clock_init(clock);
+			ipc_clock_enable(clock);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Perform miscellaneous late
+	 * initialization.
+	 */</span>
+	i = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> alarm);
+	alarm_zone = zinit(i, (4096/i)*i, 10*i, <span class="enscript-string">&quot;alarms&quot;</span>);
+}
+
+<span class="enscript-comment">/*
+ * Get the service port on a clock.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">host_get_clock_service</span>(
+	host_t			host,
+	clock_id_t		clock_id,
+	clock_t			*clock)		<span class="enscript-comment">/* OUT */</span>
+{
+	<span class="enscript-keyword">if</span> (host == HOST_NULL || clock_id &lt; 0 || clock_id &gt;= clock_count) {
+		*clock = CLOCK_NULL;
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	}
+
+	*clock = &amp;clock_list[clock_id];
+	<span class="enscript-keyword">if</span> ((*clock)-&gt;cl_ops == 0)
+		<span class="enscript-keyword">return</span> (KERN_FAILURE);
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ * Get the control port on a clock.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">host_get_clock_control</span>(
+	host_priv_t		host_priv,
+	clock_id_t		clock_id,
+	clock_t			*clock)		<span class="enscript-comment">/* OUT */</span>
+{
+	<span class="enscript-keyword">if</span> (host_priv == HOST_PRIV_NULL ||
+			clock_id &lt; 0 || clock_id &gt;= clock_count) {
+		*clock = CLOCK_NULL;
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	}
+
+	*clock = &amp;clock_list[clock_id];
+	<span class="enscript-keyword">if</span> ((*clock)-&gt;cl_ops == 0)
+		<span class="enscript-keyword">return</span> (KERN_FAILURE);
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ * Get the current clock time.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">clock_get_time</span>(
+	clock_t			clock,
+	mach_timespec_t	*cur_time)	<span class="enscript-comment">/* OUT */</span>
+{
+	<span class="enscript-keyword">if</span> (clock == CLOCK_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	<span class="enscript-keyword">return</span> ((*clock-&gt;cl_ops-&gt;c_gettime)(cur_time));
+}
+
+kern_return_t
+<span class="enscript-function-name">rtclock_gettime</span>(
+	mach_timespec_t		*time)	<span class="enscript-comment">/* OUT */</span>
+{
+	clock_sec_t		secs;
+	clock_nsec_t	nsecs;
+
+	clock_get_system_nanotime(&amp;secs, &amp;nsecs);
+	time-&gt;tv_sec = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)secs;
+	time-&gt;tv_nsec = nsecs;
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+kern_return_t
+<span class="enscript-function-name">calend_gettime</span>(
+	mach_timespec_t		*time)	<span class="enscript-comment">/* OUT */</span>
+{
+	clock_sec_t		secs;
+	clock_nsec_t	nsecs;
+
+	clock_get_calendar_nanotime(&amp;secs, &amp;nsecs);
+	time-&gt;tv_sec = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)secs;
+	time-&gt;tv_nsec = nsecs;
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ * Get clock attributes.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">clock_get_attributes</span>(
+	clock_t					clock,
+	clock_flavor_t			flavor,
+	clock_attr_t			attr,		<span class="enscript-comment">/* OUT */</span>
+	mach_msg_type_number_t	*count)		<span class="enscript-comment">/* IN/OUT */</span>
+{
+	<span class="enscript-keyword">if</span> (clock == CLOCK_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	<span class="enscript-keyword">if</span> (clock-&gt;cl_ops-&gt;c_getattr)
+		<span class="enscript-keyword">return</span> (clock-&gt;cl_ops-&gt;c_getattr(flavor, attr, count));
+	<span class="enscript-keyword">return</span> (KERN_FAILURE);
+}
+
+kern_return_t
+<span class="enscript-function-name">rtclock_getattr</span>(
+	clock_flavor_t			flavor,
+	clock_attr_t			attr,		<span class="enscript-comment">/* OUT */</span>
+	mach_msg_type_number_t	*count)		<span class="enscript-comment">/* IN/OUT */</span>
+{
+	<span class="enscript-keyword">if</span> (*count != 1)
+		<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+	<span class="enscript-keyword">switch</span> (flavor) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLOCK_GET_TIME_RES</span>:	<span class="enscript-comment">/* &gt;0 res */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLOCK_ALARM_CURRES</span>:	<span class="enscript-comment">/* =0 no alarm */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLOCK_ALARM_MINRES</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLOCK_ALARM_MAXRES</span>:
+		*(clock_res_t *) attr = NSEC_PER_SEC / 100;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (KERN_INVALID_VALUE);
+	}
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+kern_return_t
+<span class="enscript-function-name">calend_getattr</span>(
+	clock_flavor_t			flavor,
+	clock_attr_t			attr,		<span class="enscript-comment">/* OUT */</span>
+	mach_msg_type_number_t	*count)		<span class="enscript-comment">/* IN/OUT */</span>
+{
+	<span class="enscript-keyword">if</span> (*count != 1)
+		<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+	<span class="enscript-keyword">switch</span> (flavor) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLOCK_GET_TIME_RES</span>:	<span class="enscript-comment">/* &gt;0 res */</span>
+		*(clock_res_t *) attr = NSEC_PER_SEC / 100;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLOCK_ALARM_CURRES</span>:	<span class="enscript-comment">/* =0 no alarm */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLOCK_ALARM_MINRES</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CLOCK_ALARM_MAXRES</span>:
+		*(clock_res_t *) attr = 0;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (KERN_INVALID_VALUE);
+	}
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ * Set the current clock time.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">clock_set_time</span>(
+	clock_t					clock,
+__unused mach_timespec_t	new_time)
+{
+	<span class="enscript-keyword">if</span> (clock == CLOCK_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	<span class="enscript-keyword">return</span> (KERN_FAILURE);
+}
+
+<span class="enscript-comment">/*
+ * Set the clock alarm resolution.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">clock_set_attributes</span>(
+	clock_t						clock,
+__unused clock_flavor_t			flavor,
+__unused clock_attr_t			attr,
+__unused mach_msg_type_number_t	count)
+{
+	<span class="enscript-keyword">if</span> (clock == CLOCK_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	<span class="enscript-keyword">return</span> (KERN_FAILURE);
+}
+
+<span class="enscript-comment">/*
+ * Setup a clock alarm.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">clock_alarm</span>(
+	clock_t					clock,
+	alarm_type_t			alarm_type,
+	mach_timespec_t			alarm_time,
+	ipc_port_t				alarm_port,
+	mach_msg_type_name_t	alarm_port_type)
+{
+	alarm_t					alarm;
+	mach_timespec_t			clock_time;
+	<span class="enscript-type">int</span>						chkstat;
+	kern_return_t			reply_code;
+	spl_t					s;
+
+	<span class="enscript-keyword">if</span> (clock == CLOCK_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+	<span class="enscript-keyword">if</span> (clock != &amp;clock_list[SYSTEM_CLOCK])
+		<span class="enscript-keyword">return</span> (KERN_FAILURE);
+	<span class="enscript-keyword">if</span> (IP_VALID(alarm_port) == 0)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_CAPABILITY);
+
+	<span class="enscript-comment">/*
+	 * Check alarm parameters. If parameters are invalid,
+	 * send alarm message immediately.
+	 */</span>
+	(*clock-&gt;cl_ops-&gt;c_gettime)(&amp;clock_time);
+	chkstat = check_time(alarm_type, &amp;alarm_time, &amp;clock_time);
+	<span class="enscript-keyword">if</span> (chkstat &lt;= 0) {
+		reply_code = (chkstat &lt; 0 ? KERN_INVALID_VALUE : KERN_SUCCESS);
+		clock_alarm_reply(alarm_port, alarm_port_type,
+				  reply_code, alarm_type, clock_time);
+		<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+	}
+
+	<span class="enscript-comment">/*
+	 * Get alarm and add to clock alarm list.
+	 */</span>
+
+	LOCK_ALARM(s);
+	<span class="enscript-keyword">if</span> ((alarm = alrmfree) == 0) {
+		UNLOCK_ALARM(s);
+		alarm = (alarm_t) zalloc(alarm_zone);
+		<span class="enscript-keyword">if</span> (alarm == 0)
+			<span class="enscript-keyword">return</span> (KERN_RESOURCE_SHORTAGE);
+		LOCK_ALARM(s);
+	}
+	<span class="enscript-keyword">else</span>
+		alrmfree = alarm-&gt;al_next;
+
+	alarm-&gt;al_status = ALARM_CLOCK;
+	alarm-&gt;al_time = alarm_time;
+	alarm-&gt;al_type = alarm_type;
+	alarm-&gt;al_port = alarm_port;
+	alarm-&gt;al_port_type = alarm_port_type;
+	alarm-&gt;al_clock = clock;
+	alarm-&gt;al_seqno = alrm_seqno++;
+	post_alarm(alarm);
+	UNLOCK_ALARM(s);
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ * Sleep on a clock. System trap. User-level libmach clock_sleep
+ * interface call takes a mach_timespec_t sleep_time argument which it
+ * converts to sleep_sec and sleep_nsec arguments which are then
+ * passed to clock_sleep_trap.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">clock_sleep_trap</span>(
+	<span class="enscript-type">struct</span> clock_sleep_trap_args *args)
+{
+	mach_port_name_t	clock_name = args-&gt;clock_name;
+	sleep_type_t		sleep_type = args-&gt;sleep_type;
+	<span class="enscript-type">int</span>					sleep_sec = args-&gt;sleep_sec;
+	<span class="enscript-type">int</span>					sleep_nsec = args-&gt;sleep_nsec;
+	mach_vm_address_t	wakeup_time_addr = args-&gt;wakeup_time;  
+	clock_t				clock;
+	mach_timespec_t		swtime;
+	kern_return_t		rvalue;
+
+	<span class="enscript-comment">/*
+	 * Convert the trap parameters.
+	 */</span>
+	<span class="enscript-keyword">if</span> (clock_name == MACH_PORT_NULL)
+		clock = &amp;clock_list[SYSTEM_CLOCK];
+	<span class="enscript-keyword">else</span>
+		clock = port_name_to_clock(clock_name);
+
+	swtime.tv_sec  = sleep_sec;
+	swtime.tv_nsec = sleep_nsec;
+
+	<span class="enscript-comment">/*
+	 * Call the actual clock_sleep routine.
+	 */</span>
+	rvalue = clock_sleep_internal(clock, sleep_type, &amp;swtime);
+
+	<span class="enscript-comment">/*
+	 * Return current time as wakeup time.
+	 */</span>
+	<span class="enscript-keyword">if</span> (rvalue != KERN_INVALID_ARGUMENT &amp;&amp; rvalue != KERN_FAILURE) {
+		copyout((<span class="enscript-type">char</span> *)&amp;swtime, wakeup_time_addr, <span class="enscript-keyword">sizeof</span>(mach_timespec_t));
+	}
+	<span class="enscript-keyword">return</span> (rvalue);
+}	
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">clock_sleep_internal</span>(
+	clock_t				clock,
+	sleep_type_t		sleep_type,
+	mach_timespec_t		*sleep_time)
+{
+	alarm_t				alarm;
+	mach_timespec_t		clock_time;
+	kern_return_t		rvalue;
+	<span class="enscript-type">int</span>					chkstat;
+	spl_t				s;
+
+	<span class="enscript-keyword">if</span> (clock == CLOCK_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">if</span> (clock != &amp;clock_list[SYSTEM_CLOCK])
+		<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+	<span class="enscript-comment">/*
+	 * Check sleep parameters. If parameters are invalid
+	 * return an error, otherwise post alarm request.
+	 */</span>
+	(*clock-&gt;cl_ops-&gt;c_gettime)(&amp;clock_time);
+
+	chkstat = check_time(sleep_type, sleep_time, &amp;clock_time);
+	<span class="enscript-keyword">if</span> (chkstat &lt; 0)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_VALUE);
+	rvalue = KERN_SUCCESS;
+	<span class="enscript-keyword">if</span> (chkstat &gt; 0) {
+		wait_result_t wait_result;
+
+		<span class="enscript-comment">/*
+		 * Get alarm and add to clock alarm list.
+		 */</span>
+
+		LOCK_ALARM(s);
+		<span class="enscript-keyword">if</span> ((alarm = alrmfree) == 0) {
+			UNLOCK_ALARM(s);
+			alarm = (alarm_t) zalloc(alarm_zone);
+			<span class="enscript-keyword">if</span> (alarm == 0)
+				<span class="enscript-keyword">return</span> (KERN_RESOURCE_SHORTAGE);
+			LOCK_ALARM(s);
+		}
+		<span class="enscript-keyword">else</span>
+			alrmfree = alarm-&gt;al_next;
+
+		<span class="enscript-comment">/*
+		 * Wait for alarm to occur.
+		 */</span>
+		wait_result = assert_wait((event_t)alarm, THREAD_ABORTSAFE);
+		<span class="enscript-keyword">if</span> (wait_result == THREAD_WAITING) {
+			alarm-&gt;al_time = *sleep_time;
+			alarm-&gt;al_status = ALARM_SLEEP;
+			post_alarm(alarm);
+			UNLOCK_ALARM(s);
+
+			wait_result = thread_block(THREAD_CONTINUE_NULL);
+
+			<span class="enscript-comment">/*
+			 * Note if alarm expired normally or whether it
+			 * was aborted. If aborted, delete alarm from
+			 * clock alarm list. Return alarm to free list.
+			 */</span>
+			LOCK_ALARM(s);
+			<span class="enscript-keyword">if</span> (alarm-&gt;al_status != ALARM_DONE) {
+				assert(wait_result != THREAD_AWAKENED);
+				<span class="enscript-keyword">if</span> (((alarm-&gt;al_prev)-&gt;al_next = alarm-&gt;al_next) != NULL)
+					(alarm-&gt;al_next)-&gt;al_prev = alarm-&gt;al_prev;
+				rvalue = KERN_ABORTED;
+			}
+			*sleep_time = alarm-&gt;al_time;
+			alarm-&gt;al_status = ALARM_FREE;
+		} <span class="enscript-keyword">else</span> {
+			assert(wait_result == THREAD_INTERRUPTED);
+			assert(alarm-&gt;al_status == ALARM_FREE);
+			rvalue = KERN_ABORTED;
+		}
+		alarm-&gt;al_next = alrmfree;
+		alrmfree = alarm;
+		UNLOCK_ALARM(s);
+	}
+	<span class="enscript-keyword">else</span>
+		*sleep_time = clock_time;
+
+	<span class="enscript-keyword">return</span> (rvalue);
+}
+
+<span class="enscript-comment">/*
+ * Service clock alarm expirations.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">alarm_expire</span>(<span class="enscript-type">void</span>)
+{
+	clock_t				clock;
+	<span class="enscript-type">register</span> alarm_t	alrm1;
+	<span class="enscript-type">register</span> alarm_t	alrm2;
+	mach_timespec_t		clock_time;
+	mach_timespec_t		*alarm_time;
+	spl_t				s;
+
+	clock = &amp;clock_list[SYSTEM_CLOCK];
+	(*clock-&gt;cl_ops-&gt;c_gettime)(&amp;clock_time);
+
+	<span class="enscript-comment">/*
+	 * Update clock alarm list. Alarms that are due are moved
+	 * to the alarmdone list to be serviced by a thread callout.
+	 */</span>
+	LOCK_ALARM(s);
+	alrm1 = (alarm_t)&amp;alrmlist;
+	<span class="enscript-keyword">while</span> ((alrm2 = alrm1-&gt;al_next) != NULL) {
+		alarm_time = &amp;alrm2-&gt;al_time;
+		<span class="enscript-keyword">if</span> (CMP_MACH_TIMESPEC(alarm_time, &amp;clock_time) &gt; 0)
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-comment">/*
+		 * Alarm has expired, so remove it from the
+		 * clock alarm list.
+		 */</span>  
+		<span class="enscript-keyword">if</span> ((alrm1-&gt;al_next = alrm2-&gt;al_next) != NULL)
+			(alrm1-&gt;al_next)-&gt;al_prev = alrm1;
+
+		<span class="enscript-comment">/*
+		 * If a clock_sleep() alarm, wakeup the thread
+		 * which issued the clock_sleep() call.
+		 */</span>
+		<span class="enscript-keyword">if</span> (alrm2-&gt;al_status == ALARM_SLEEP) {
+			alrm2-&gt;al_next = NULL;
+			alrm2-&gt;al_status = ALARM_DONE;
+			alrm2-&gt;al_time = clock_time;
+			thread_wakeup((event_t)alrm2);
+		}
+
+ 		<span class="enscript-comment">/*
+		 * If a clock_alarm() alarm, place the alarm on
+		 * the alarm done list and schedule the alarm
+		 * delivery mechanism.
+		 */</span>
+		<span class="enscript-keyword">else</span> {
+			assert(alrm2-&gt;al_status == ALARM_CLOCK);
+			<span class="enscript-keyword">if</span> ((alrm2-&gt;al_next = alrmdone) != NULL)
+				alrmdone-&gt;al_prev = alrm2;
+			<span class="enscript-keyword">else</span>
+				thread_call_enter(&amp;alarm_done_call);
+			alrm2-&gt;al_prev = (alarm_t)&amp;alrmdone;
+			alrmdone = alrm2;
+			alrm2-&gt;al_status = ALARM_DONE;
+			alrm2-&gt;al_time = clock_time;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Setup to expire for the next pending alarm.
+	 */</span>
+	<span class="enscript-keyword">if</span> (alrm2)
+		set_alarm(alarm_time);
+	UNLOCK_ALARM(s);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">alarm_done</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">register</span> alarm_t	alrm;
+	kern_return_t		code;
+	spl_t				s;
+
+	LOCK_ALARM(s);
+	<span class="enscript-keyword">while</span> ((alrm = alrmdone) != NULL) {
+		<span class="enscript-keyword">if</span> ((alrmdone = alrm-&gt;al_next) != NULL)
+			alrmdone-&gt;al_prev = (alarm_t)&amp;alrmdone;
+		UNLOCK_ALARM(s);
+
+		code = (alrm-&gt;al_status == ALARM_DONE? KERN_SUCCESS: KERN_ABORTED);
+		<span class="enscript-keyword">if</span> (alrm-&gt;al_port != IP_NULL) {
+			<span class="enscript-comment">/* Deliver message to designated port */</span>
+			<span class="enscript-keyword">if</span> (IP_VALID(alrm-&gt;al_port)) {
+				clock_alarm_reply(alrm-&gt;al_port, alrm-&gt;al_port_type, code,
+								  				alrm-&gt;al_type, alrm-&gt;al_time);
+			}
+
+			LOCK_ALARM(s);
+			alrm-&gt;al_status = ALARM_FREE;
+			alrm-&gt;al_next = alrmfree;
+			alrmfree = alrm;
+		}
+		<span class="enscript-keyword">else</span>
+			panic(<span class="enscript-string">&quot;clock_alarm_deliver&quot;</span>);
+	}
+
+	UNLOCK_ALARM(s);
+}
+
+<span class="enscript-comment">/*
+ * Post an alarm on the active alarm list.
+ *
+ * Always called from within a LOCK_ALARM() code section.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">post_alarm</span>(
+	alarm_t				alarm)
+{
+	<span class="enscript-type">register</span> alarm_t	alrm1, alrm2;
+	mach_timespec_t		*alarm_time;
+	mach_timespec_t		*queue_time;
+
+	<span class="enscript-comment">/*
+	 * Traverse alarm list until queue time is greater
+	 * than alarm time, then insert alarm.
+	 */</span>
+	alarm_time = &amp;alarm-&gt;al_time;
+	alrm1 = (alarm_t)&amp;alrmlist;
+	<span class="enscript-keyword">while</span> ((alrm2 = alrm1-&gt;al_next) != NULL) {
+		queue_time = &amp;alrm2-&gt;al_time;
+		<span class="enscript-keyword">if</span> (CMP_MACH_TIMESPEC(queue_time, alarm_time) &gt; 0)
+			<span class="enscript-keyword">break</span>;
+		alrm1 = alrm2;
+	}
+	alrm1-&gt;al_next = alarm;
+	alarm-&gt;al_next = alrm2;
+	alarm-&gt;al_prev = alrm1;
+	<span class="enscript-keyword">if</span> (alrm2)
+		alrm2-&gt;al_prev  = alarm;
+
+	<span class="enscript-comment">/*
+	 * If the inserted alarm is the 'earliest' alarm,
+	 * reset the device layer alarm time accordingly.
+	 */</span>
+	<span class="enscript-keyword">if</span> (alrmlist == alarm)
+		set_alarm(alarm_time);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">set_alarm</span>(
+	mach_timespec_t		*alarm_time)
+{
+	uint64_t	abstime;
+
+	nanotime_to_absolutetime(alarm_time-&gt;tv_sec, alarm_time-&gt;tv_nsec, &amp;abstime);
+	timer_call_enter_with_leeway(&amp;alarm_expire_timer, NULL, abstime, 0, TIMER_CALL_USER_NORMAL, FALSE);
+}
+
+<span class="enscript-comment">/*
+ * Check the validity of 'alarm_time' and 'alarm_type'. If either
+ * argument is invalid, return a negative value. If the 'alarm_time'
+ * is now, return a 0 value. If the 'alarm_time' is in the future,
+ * return a positive value.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">check_time</span>(
+	alarm_type_t		alarm_type,
+	mach_timespec_t		*alarm_time,
+	mach_timespec_t		*clock_time)
+{
+	<span class="enscript-type">int</span>					result;
+
+	<span class="enscript-keyword">if</span> (BAD_ALRMTYPE(alarm_type))
+		<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">if</span> (BAD_MACH_TIMESPEC(alarm_time))
+		<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">if</span> ((alarm_type &amp; ALRMTYPE) == TIME_RELATIVE)
+		ADD_MACH_TIMESPEC(alarm_time, clock_time);
+
+	result = CMP_MACH_TIMESPEC(alarm_time, clock_time);
+
+	<span class="enscript-keyword">return</span> ((result &gt;= 0)? result: 0);
+}
+
+#<span class="enscript-reference">ifndef</span>	<span class="enscript-variable-name">__LP64__</span>
+
+mach_timespec_t
+<span class="enscript-function-name">clock_get_system_value</span>(<span class="enscript-type">void</span>)
+{
+	clock_t				clock = &amp;clock_list[SYSTEM_CLOCK];
+	mach_timespec_t		value;
+
+	(<span class="enscript-type">void</span>) (*clock-&gt;cl_ops-&gt;c_gettime)(&amp;value);
+
+	<span class="enscript-keyword">return</span> value;
+}
+
+mach_timespec_t
+<span class="enscript-function-name">clock_get_calendar_value</span>(<span class="enscript-type">void</span>)
+{
+	clock_t				clock = &amp;clock_list[CALENDAR_CLOCK];
+	mach_timespec_t		value = MACH_TIMESPEC_ZERO;
+
+	(<span class="enscript-type">void</span>) (*clock-&gt;cl_ops-&gt;c_gettime)(&amp;value);
+
+	<span class="enscript-keyword">return</span> value;
+}
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* __LP64__ */</span>
+</pre>
+<hr />
+</body></html>

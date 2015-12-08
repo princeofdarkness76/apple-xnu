@@ -1,0 +1,1060 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kxld_sym.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kxld_sym.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdint.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/nlist.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/stab.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEBUG_ASSERT_COMPONENT_NAME_STRING</span> <span class="enscript-string">&quot;kxld&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;AssertMacros.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_sect.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_sym.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_util.h&quot;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">CXX_PREFIX</span>                      <span class="enscript-string">&quot;__Z&quot;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VTABLE_PREFIX</span>                   CXX_PREFIX <span class="enscript-string">&quot;TV&quot;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">OSOBJ_PREFIX</span>                    CXX_PREFIX <span class="enscript-string">&quot;N&quot;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">RESERVED_TOKEN</span>                  <span class="enscript-string">&quot;_RESERVED&quot;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">METACLASS_TOKEN</span>                 <span class="enscript-string">&quot;10gMetaClassE&quot;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SUPER_METACLASS_POINTER_TOKEN</span>   <span class="enscript-string">&quot;10superClassE&quot;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">METACLASS_VTABLE_PREFIX</span>         VTABLE_PREFIX <span class="enscript-string">&quot;N&quot;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">METACLASS_VTABLE_SUFFIX</span>         <span class="enscript-string">&quot;9MetaClassE&quot;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">CXX_PURE_VIRTUAL</span>                <span class="enscript-string">&quot;___cxa_pure_virtual&quot;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">FINAL_CLASS_TOKEN</span>               <span class="enscript-string">&quot;14__OSFinalClassEv&quot;</span>
+
+<span class="enscript-comment">/*******************************************************************************
+* Prototypes
+*******************************************************************************/</span>
+
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">init_predicates</span>(KXLDSym *sym, u_char n_type, u_short n_desc)
+    __attribute__((nonnull));
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">init_sym_sectnum</span>(KXLDSym *sym, u_int n_sect)
+    __attribute__((nonnull));
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">extract_inner_string</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *str, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *prefix, 
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *suffix, <span class="enscript-type">char</span> *buf, u_long len);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ILP32</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sym_init_from_macho32</span>(KXLDSym *sym, <span class="enscript-type">char</span> *strtab, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> nlist *src) 
+{
+    kern_return_t rval = KERN_FAILURE;
+
+    check(sym);
+    check(strtab);
+    check(src);
+
+    bzero(sym, <span class="enscript-keyword">sizeof</span>(*sym));
+    sym-&gt;name = strtab + src-&gt;n_un.n_strx;
+    sym-&gt;type = src-&gt;n_type;
+    sym-&gt;desc = src-&gt;n_desc;
+    sym-&gt;base_addr = src-&gt;n_value;
+    sym-&gt;link_addr = sym-&gt;base_addr;
+    
+    rval = init_predicates(sym, src-&gt;n_type, src-&gt;n_desc);
+    require_noerr(rval, finish);
+
+    (<span class="enscript-type">void</span>) init_sym_sectnum(sym, src-&gt;n_sect);
+
+    <span class="enscript-keyword">if</span> (kxld_sym_is_indirect(sym)) {
+        sym-&gt;alias = strtab + src-&gt;n_value;
+    }
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_ILP32 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_LP64</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sym_init_from_macho64</span>(KXLDSym *sym, <span class="enscript-type">char</span> *strtab, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> nlist_64 *src) 
+{
+    kern_return_t rval = KERN_FAILURE;
+
+    check(sym);
+    check(strtab);
+    check(src);
+
+    bzero(sym, <span class="enscript-keyword">sizeof</span>(*sym));
+    sym-&gt;name = strtab + src-&gt;n_un.n_strx;
+    sym-&gt;type = src-&gt;n_type;
+    sym-&gt;desc = src-&gt;n_desc;
+    sym-&gt;base_addr = src-&gt;n_value;
+    sym-&gt;link_addr = sym-&gt;base_addr;
+
+    rval = init_predicates(sym, src-&gt;n_type, src-&gt;n_desc);
+    require_noerr(rval, finish);
+
+    (<span class="enscript-type">void</span>) init_sym_sectnum(sym, src-&gt;n_sect);
+
+    <span class="enscript-keyword">if</span> (kxld_sym_is_indirect(sym)) {
+        sym-&gt;alias = strtab + src-&gt;n_value;
+    }
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_LP64 */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">kxld_sym_init_absolute</span>(KXLDSym *sym, <span class="enscript-type">char</span> *name, kxld_addr_t link_addr)
+{
+    check(sym);
+    check(name);
+
+    bzero(sym, <span class="enscript-keyword">sizeof</span>(*sym));
+
+    sym-&gt;name = name;
+    sym-&gt;link_addr = link_addr;
+    sym-&gt;type = N_ABS | N_EXT;
+    sym-&gt;sectnum = NO_SECT;
+
+    init_predicates(sym, N_ABS | N_EXT, 0);
+    sym-&gt;is_resolved = TRUE;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">init_predicates</span>(KXLDSym *sym, u_char n_type, u_short n_desc)
+{
+    kern_return_t rval = KERN_FAILURE;
+
+    check(sym);
+
+    <span class="enscript-comment">/* The type field is interpreted differently for normal symbols and stabs */</span>
+    <span class="enscript-keyword">if</span> (n_type &amp; N_STAB) {
+        sym-&gt;is_stab = 1;
+
+        <span class="enscript-keyword">switch</span> (n_type) {
+        <span class="enscript-comment">/* Labeled as NO_SECT in stab.h */</span>
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_GSYM</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_FNAME</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_RSYM</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_SSYM</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_LSYM</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_BINCL</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_PARAMS</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_VERSION</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_OLEVEL</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_PSYM</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_EINCL</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_EXCL</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_BCOMM</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_LENG</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_OPT</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_OSO</span>:
+            sym-&gt;is_absolute = 1;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-comment">/* Labeled as n_sect in stab.h */</span>
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_FUN</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_STSYM</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_LCSYM</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_BNSYM</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_SLINE</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_ENSYM</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_SO</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_SOL</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_ENTRY</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_ECOMM</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_ECOML</span>:
+        <span class="enscript-comment">/* These are labeled as NO_SECT in stab.h, but they are actually
+         * section-based on OS X.  We must mark them as such so they get
+         * relocated.
+         */</span>
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_RBRAC</span>:
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_LBRAC</span>:
+            sym-&gt;is_section = 1;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-reference">default</span>:
+            rval = KERN_FAILURE;
+            kxld_log(kKxldLogLinking, kKxldLogErr, kKxldLogMalformedMachO
+                <span class="enscript-string">&quot;Invalid N_STAB symbol type: %u.&quot;</span>, n_type);
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+            
+        <span class="enscript-comment">/* Don't care about the C++ predicates for stabs */</span>
+
+    } <span class="enscript-keyword">else</span> {
+        u_char type = n_type &amp; N_TYPE;
+
+        <span class="enscript-comment">/* The first set of type fields are mutually exclusive, so they can be
+         * set with a switch statement.
+         */</span>
+        <span class="enscript-keyword">switch</span> (type) {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_ABS</span>:
+            sym-&gt;is_absolute = 1;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_SECT</span>:
+            sym-&gt;is_section = 1;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_UNDF</span>:
+            <span class="enscript-keyword">if</span> (sym-&gt;base_addr) {
+                sym-&gt;is_common = 1;
+            } <span class="enscript-keyword">else</span> {
+                sym-&gt;is_undefined = 1;
+            }
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">N_INDR</span>:
+            sym-&gt;is_indirect = 1;
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-reference">default</span>:
+            rval = KERN_FAILURE;
+            kxld_log(kKxldLogLinking, kKxldLogErr, kKxldLogMalformedMachO
+                <span class="enscript-string">&quot;Invalid symbol type: %u.&quot;</span>, type);
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+        }
+
+        <span class="enscript-comment">/* Set the type-independent fields */</span>
+        <span class="enscript-keyword">if</span> ((n_type &amp; N_EXT) &amp;&amp; !(n_type &amp; N_PEXT)) {
+            sym-&gt;is_external = 1;
+        }
+
+        <span class="enscript-keyword">if</span> (n_desc &amp; N_DESC_DISCARDED) {
+            sym-&gt;is_obsolete = 1;
+        }
+
+        <span class="enscript-keyword">if</span> (n_desc &amp; N_WEAK_REF) {
+           sym-&gt;is_weak = 1;
+        }
+
+        <span class="enscript-keyword">if</span> (n_desc &amp; N_ARM_THUMB_DEF) {
+           sym-&gt;is_thumb = 1;
+           sym-&gt;base_addr |= 1;
+           sym-&gt;link_addr |= 1;
+        }
+
+        <span class="enscript-comment">/* Set the C++-specific fields */</span>
+        <span class="enscript-keyword">if</span> (!strncmp(CXX_PREFIX, sym-&gt;name, const_strlen(CXX_PREFIX))) {
+            sym-&gt;is_cxx = 1;
+
+            <span class="enscript-keyword">if</span> (streq_safe(sym-&gt;name, METACLASS_VTABLE_PREFIX, 
+                const_strlen(METACLASS_VTABLE_PREFIX)))
+            {
+                sym-&gt;is_meta_vtable = 1;
+            } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (streq_safe(sym-&gt;name, VTABLE_PREFIX, 
+                const_strlen(VTABLE_PREFIX))) 
+            {
+                sym-&gt;is_class_vtable = 1;
+            } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kxld_strstr(sym-&gt;name, RESERVED_TOKEN)) {
+                sym-&gt;is_padslot = 1;
+            } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kxld_strstr(sym-&gt;name, METACLASS_TOKEN)) {
+                sym-&gt;is_metaclass = 1;
+            } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kxld_strstr(sym-&gt;name, SUPER_METACLASS_POINTER_TOKEN)) {
+                sym-&gt;is_super_metaclass_pointer = 1;
+            }
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kxld_sym_name_is_pure_virtual(sym-&gt;name)) {
+            sym-&gt;is_cxx = 1;
+            sym-&gt;is_pure_virtual = 1;
+        }
+    }
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">init_sym_sectnum</span>(KXLDSym *sym, u_int n_sect)
+{
+    <span class="enscript-comment">/* The n_sect field is set to 0 when the symbol is not section-based, and
+     * the number of the section in which the symbol exists otherwise.
+     * Sometimes, symbols can be labeled as section-based, so we make sure that
+     * they have a valid section number, and set them as absolute if they don't.
+     */</span>
+
+    <span class="enscript-keyword">if</span> (kxld_sym_is_section(sym)) {
+        <span class="enscript-keyword">if</span> (n_sect) {
+            <span class="enscript-comment">/* Convert the section number to an index into the section index */</span>
+            sym-&gt;sectnum = n_sect - 1;
+        } <span class="enscript-keyword">else</span> {
+            sym-&gt;is_absolute = 1;
+            sym-&gt;is_section = 0;
+        }
+    }
+
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_sym_deinit</span>(KXLDSym *sym __unused)
+{
+    check(sym);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_sym_destroy</span>(KXLDSym *sym)
+{
+    check(sym);
+    kxld_sym_deinit(sym);
+    kxld_free(sym, <span class="enscript-keyword">sizeof</span>(*sym));
+}
+
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_absolute</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_absolute);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_section</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_section);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_defined</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> ((kxld_sym_is_absolute(sym) || kxld_sym_is_section(sym)) &amp;&amp; 
+        !kxld_sym_is_replaced(sym));
+}
+
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_defined_locally</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (kxld_sym_is_defined(sym) &amp;&amp; !sym-&gt;is_resolved);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_external</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_external);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_exported</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (kxld_sym_is_defined_locally(sym) &amp;&amp; kxld_sym_is_external(sym));
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_undefined</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_undefined);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_indirect</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_indirect);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_replaced</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_replaced);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_common</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_common);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_unresolved</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    <span class="enscript-keyword">return</span> ((kxld_sym_is_undefined(sym) &amp;&amp; !kxld_sym_is_replaced(sym)) ||
+            kxld_sym_is_indirect(sym) || kxld_sym_is_common(sym));
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_obsolete</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_obsolete);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_GOT</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_got</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_got);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_GOT */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_stab</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_stab);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_weak</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_weak);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_cxx</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_cxx);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_pure_virtual</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_pure_virtual);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_vtable</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> kxld_sym_is_class_vtable(sym) || kxld_sym_is_metaclass_vtable(sym);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_class_vtable</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_class_vtable);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_metaclass_vtable</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_meta_vtable);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_padslot</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_padslot);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_metaclass</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_metaclass);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_is_super_metaclass_pointer</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (0 != sym-&gt;is_super_metaclass_pointer);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_name_is_pure_virtual</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name)
+{
+    <span class="enscript-keyword">return</span> streq_safe(CXX_PURE_VIRTUAL, name, <span class="enscript-keyword">sizeof</span>(CXX_PURE_VIRTUAL));
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+boolean_t
+<span class="enscript-function-name">kxld_sym_name_is_padslot</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name)
+{
+    check(name);
+
+    <span class="enscript-keyword">return</span> (kxld_strstr(name, RESERVED_TOKEN) != 0);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_int
+<span class="enscript-function-name">kxld_sym_get_section_offset</span>(<span class="enscript-type">const</span> KXLDSym *sym, <span class="enscript-type">const</span> KXLDSect *sect)
+{
+    check(sym);
+
+    <span class="enscript-keyword">return</span> (u_int) (sym-&gt;base_addr - sect-&gt;base_addr);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_COMMON</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kxld_size_t
+<span class="enscript-function-name">kxld_sym_get_common_size</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    <span class="enscript-keyword">return</span> sym-&gt;base_addr;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_int
+<span class="enscript-function-name">kxld_sym_get_common_align</span>(<span class="enscript-type">const</span> KXLDSym *sym)
+{
+    u_int align = GET_COMM_ALIGN(sym-&gt;desc);
+    <span class="enscript-keyword">if</span> (!align) align = 3;
+
+    <span class="enscript-keyword">return</span> align;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_COMMON */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sym_get_class_name_from_metaclass</span>(<span class="enscript-type">const</span> KXLDSym *sym,
+    <span class="enscript-type">char</span> class_name[], u_long class_name_len)
+{
+    kern_return_t rval = KERN_FAILURE;
+
+    check(sym);
+    require_action(kxld_sym_is_metaclass(sym), finish, rval=KERN_FAILURE);
+
+    rval = extract_inner_string(sym-&gt;name, OSOBJ_PREFIX, METACLASS_TOKEN, 
+        class_name, class_name_len);
+    require_noerr(rval, finish);
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sym_get_class_name_from_super_metaclass_pointer</span>(<span class="enscript-type">const</span> KXLDSym *sym,
+    <span class="enscript-type">char</span> class_name[], u_long class_name_len)
+{
+    kern_return_t rval = KERN_FAILURE;
+
+    check(sym);
+    require_action(kxld_sym_is_super_metaclass_pointer(sym), finish, 
+        rval=KERN_FAILURE);
+
+    rval = extract_inner_string(sym-&gt;name, OSOBJ_PREFIX, 
+        SUPER_METACLASS_POINTER_TOKEN, class_name, class_name_len);
+    require_noerr(rval, finish);
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sym_get_class_name_from_vtable</span>(<span class="enscript-type">const</span> KXLDSym *sym,
+    <span class="enscript-type">char</span> class_name[], u_long class_name_len)
+{
+    kern_return_t rval = KERN_FAILURE;
+    
+    check(sym);
+    require_action(kxld_sym_is_class_vtable(sym), finish, rval=KERN_FAILURE);
+
+    rval = kxld_sym_get_class_name_from_vtable_name(sym-&gt;name,
+        class_name, class_name_len);
+    require_noerr(rval, finish);
+    
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t 
+<span class="enscript-function-name">kxld_sym_get_class_name_from_vtable_name</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *vtable_name,
+    <span class="enscript-type">char</span> class_name[], u_long class_name_len)
+{
+    kern_return_t rval = KERN_FAILURE;
+
+    check(vtable_name);
+
+    rval = extract_inner_string(vtable_name, VTABLE_PREFIX, NULL,
+        class_name, class_name_len);
+    require_noerr(rval, finish);
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sym_get_vtable_name_from_class_name</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *class_name, 
+    <span class="enscript-type">char</span> vtable_name[], u_long vtable_name_len)
+{
+    kern_return_t rval = KERN_FAILURE;
+    u_long outlen = 0;
+
+    check(class_name);
+    check(vtable_name);
+
+    outlen = strlcpy(vtable_name, VTABLE_PREFIX, vtable_name_len);
+    require_action(outlen &lt; vtable_name_len, finish, 
+        rval=KERN_FAILURE);
+
+    outlen = strlcat(vtable_name, class_name, vtable_name_len);
+    require_action(outlen &lt; vtable_name_len, finish, 
+        rval=KERN_FAILURE);
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sym_get_meta_vtable_name_from_class_name</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *class_name, 
+    <span class="enscript-type">char</span> meta_vtable_name[], u_long meta_vtable_name_len)
+{
+    kern_return_t rval = KERN_FAILURE;
+    u_long outlen = 0;
+
+    check(class_name);
+    check(meta_vtable_name);
+
+    outlen = strlcpy(meta_vtable_name, METACLASS_VTABLE_PREFIX,
+        meta_vtable_name_len);
+    require_action(outlen &lt; meta_vtable_name_len, finish,
+        rval=KERN_FAILURE);
+
+    outlen = strlcat(meta_vtable_name, class_name, meta_vtable_name_len);
+    require_action(outlen &lt; meta_vtable_name_len, finish, 
+        rval=KERN_FAILURE);
+
+    outlen = strlcat(meta_vtable_name, METACLASS_VTABLE_SUFFIX, 
+        meta_vtable_name_len);
+    require_action(outlen &lt; meta_vtable_name_len, finish, 
+        rval=KERN_FAILURE);
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sym_get_final_sym_name_from_class_name</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *class_name, 
+    <span class="enscript-type">char</span> final_sym_name[], u_long final_sym_name_len)
+{
+    kern_return_t rval = KERN_FAILURE;
+    u_long outlen = 0;
+
+    check(class_name);
+    check(final_sym_name);
+
+    outlen = strlcpy(final_sym_name, OSOBJ_PREFIX, final_sym_name_len);
+    require_action(outlen &lt; final_sym_name_len, finish, 
+        rval=KERN_FAILURE);
+
+    outlen = strlcat(final_sym_name, class_name, final_sym_name_len);
+    require_action(outlen &lt; final_sym_name_len, finish, 
+        rval=KERN_FAILURE);
+
+    outlen = strlcat(final_sym_name, FINAL_CLASS_TOKEN, final_sym_name_len);
+    require_action(outlen &lt; final_sym_name_len, finish, 
+        rval=KERN_FAILURE);
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_long
+<span class="enscript-function-name">kxld_sym_get_function_prefix_from_class_name</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *class_name,
+    <span class="enscript-type">char</span> function_prefix[], u_long function_prefix_len)
+{
+    u_long rval = 0;
+    u_long outlen = 0;
+
+    check(class_name);
+    check(function_prefix);
+
+    outlen = strlcpy(function_prefix, OSOBJ_PREFIX, function_prefix_len);
+    require(outlen &lt; function_prefix_len, finish);
+
+    outlen = strlcat(function_prefix, class_name, function_prefix_len);
+    require(outlen &lt; function_prefix_len, finish);
+
+    rval = outlen;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">extract_inner_string</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *str, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *prefix, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *suffix, 
+    <span class="enscript-type">char</span> *buf, u_long len)
+{
+    kern_return_t rval = KERN_FAILURE;
+    u_long prelen = 0, suflen = 0, striplen = 0;
+
+    check(str);
+    check(buf);
+
+    prelen = (prefix) ? strlen(prefix) : 0;
+    suflen = (suffix) ? strlen(suffix) : 0;
+    striplen = strlen(str) - prelen - suflen;
+
+    require_action(striplen &lt; len, finish, rval=KERN_FAILURE);
+
+    strncpy(buf, str + prelen, striplen);
+    buf[striplen] = <span class="enscript-string">'\0'</span>;
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_GOT</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_sym_set_got</span>(KXLDSym *sym)
+{
+    sym-&gt;is_got = 1;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_GOT */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_sym_relocate</span>(KXLDSym *sym, <span class="enscript-type">const</span> KXLDSect *sect)
+{
+    <span class="enscript-keyword">if</span> (kxld_sym_is_section(sym)) {
+        sym-&gt;link_addr = sym-&gt;base_addr - sect-&gt;base_addr + sect-&gt;link_addr;
+        sym-&gt;relocated_sectnum = sect-&gt;sectnum;
+    }
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ILP32</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sym_export_macho_32</span>(<span class="enscript-type">const</span> KXLDSym *sym, u_char *_nl, <span class="enscript-type">char</span> *strtab, 
+    u_long *stroff, u_long strsize)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">struct</span> nlist *nl = (<span class="enscript-type">struct</span> nlist *) ((<span class="enscript-type">void</span> *) _nl);
+    <span class="enscript-type">char</span> *str = NULL;
+    <span class="enscript-type">long</span> bytes = 0;
+
+    check(sym);
+    check(nl);
+    check(strtab);
+    check(stroff);
+
+    bytes = strlen(sym-&gt;name) + 1;
+    require_action((u_long)bytes &lt;= strsize - *stroff, finish,
+        rval = KERN_FAILURE);
+
+    nl-&gt;n_type = sym-&gt;type;
+    nl-&gt;n_sect = (kxld_sym_is_section(sym)) ? sym-&gt;relocated_sectnum + 1 : 0;
+    nl-&gt;n_desc = sym-&gt;desc;
+    nl-&gt;n_un.n_strx = (uint32_t) *stroff;
+    nl-&gt;n_value = (uint32_t) sym-&gt;link_addr;
+    <span class="enscript-keyword">if</span> (sym-&gt;is_thumb) {
+        nl-&gt;n_value &amp;= ~0x1U;
+    }
+
+    str = (<span class="enscript-type">char</span> *) (strtab + *stroff);
+    strlcpy(str, sym-&gt;name, strsize - *stroff);
+
+    *stroff += bytes;
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_ILP32 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_LP64</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sym_export_macho_64</span>(<span class="enscript-type">const</span> KXLDSym *sym, u_char *_nl, <span class="enscript-type">char</span> *strtab,
+    u_long *stroff, u_long strsize)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">struct</span> nlist_64 *nl = (<span class="enscript-type">struct</span> nlist_64 *) ((<span class="enscript-type">void</span> *) _nl);
+    <span class="enscript-type">char</span> *str = NULL;
+    <span class="enscript-type">long</span> bytes = 0;
+
+    check(sym);
+    check(nl);
+    check(strtab);
+    check(stroff);
+
+    bytes = strlen(sym-&gt;name) + 1;
+    require_action((u_long)bytes &lt;= strsize - *stroff, finish,
+        rval = KERN_FAILURE);
+
+    nl-&gt;n_type = sym-&gt;type;
+    nl-&gt;n_sect = (kxld_sym_is_section(sym)) ? sym-&gt;relocated_sectnum + 1 : 0;
+    nl-&gt;n_desc = sym-&gt;desc;
+    nl-&gt;n_un.n_strx = (uint32_t) *stroff;
+    nl-&gt;n_value = (uint64_t) sym-&gt;link_addr;
+    <span class="enscript-keyword">if</span> (sym-&gt;is_thumb) {
+        nl-&gt;n_value &amp;= ~0x1ULL;
+    }
+
+    str = (<span class="enscript-type">char</span> *) (strtab + *stroff);
+    strlcpy(str, sym-&gt;name, strsize - *stroff);
+
+    *stroff += bytes;
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_LP64 */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sym_resolve</span>(KXLDSym *sym, kxld_addr_t addr) 
+{
+    kern_return_t rval = KERN_FAILURE;
+
+    check(sym);
+
+    require_action(kxld_sym_is_undefined(sym) || kxld_sym_is_indirect(sym), 
+        finish, rval=KERN_FAILURE);
+
+    <span class="enscript-comment">/* Set the n_list data types */</span>
+
+    sym-&gt;link_addr = addr;
+    sym-&gt;type = N_ABS | N_EXT;
+    sym-&gt;sectnum = NO_SECT;
+ 
+    <span class="enscript-comment">/* Set the predicate bits for an externally resolved symbol. */</span>
+    
+    sym-&gt;is_external = TRUE;
+    sym-&gt;is_absolute = TRUE;
+    sym-&gt;is_resolved = TRUE;
+
+    <span class="enscript-comment">/* Clear the predicate bits for types that can be resolved */</span>
+
+    sym-&gt;is_undefined = FALSE;
+    sym-&gt;is_indirect = FALSE;
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+
+    <span class="enscript-keyword">return</span> rval;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_COMMON</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sym_resolve_common</span>(KXLDSym *sym, u_int sectnum, kxld_addr_t base_addr)
+{
+    kern_return_t rval = KERN_FAILURE;
+
+    check(sym);
+
+    require_action(kxld_sym_is_common(sym), finish, 
+        rval=KERN_FAILURE);
+
+    sym-&gt;base_addr = base_addr;
+    sym-&gt;link_addr = base_addr;
+    sym-&gt;type = N_SECT | N_EXT;
+    sym-&gt;sectnum = sectnum;
+    sym-&gt;desc = 0;
+
+    sym-&gt;is_absolute = FALSE;
+    sym-&gt;is_section = TRUE;
+    sym-&gt;is_undefined = FALSE;
+    sym-&gt;is_indirect = FALSE;
+    sym-&gt;is_common = FALSE;
+    sym-&gt;is_external = TRUE;
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_COMMON */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_sym_delete</span>(KXLDSym *sym)
+{
+    check(sym);
+
+    bzero(sym, <span class="enscript-keyword">sizeof</span>(*sym));
+    sym-&gt;is_replaced = TRUE;
+}
+
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_sym_patch</span>(KXLDSym *sym)
+{
+    check(sym);
+
+    sym-&gt;is_replaced = TRUE;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_sym_mark_private</span>(KXLDSym *sym)
+{
+    check(sym);
+
+    sym-&gt;type |= N_PEXT;
+    sym-&gt;is_external = FALSE;
+}
+
+</pre>
+<hr />
+</body></html>

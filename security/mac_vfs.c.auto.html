@@ -1,0 +1,1966 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mac_vfs.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mac_vfs.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*-
+ * Copyright (c) 1999, 2000, 2001, 2002 Robert N. M. Watson
+ * Copyright (c) 2001 Ilmar S. Habibulin
+ * Copyright (c) 2001, 2002, 2003, 2004 Networks Associates Technology, Inc.
+ * Copyright (c) 2005 SPARTA, Inc.
+ *
+ * This software was developed by Robert Watson and Ilmar Habibulin for the
+ * TrustedBSD Project.
+ *
+ * This software was developed for the FreeBSD Project in part by Network
+ * Associates Laboratories, the Security Research Division of Network
+ * Associates, Inc. under DARPA/SPAWAR contract N66001-01-C-8035 (&quot;CBOSS&quot;),
+ * as part of the DARPA CHATS research program.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/imgact.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/pipe.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/posix_sem.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/posix_shm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/devfs/devfsdefs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/devfs/fdesc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_internal.h&gt;</span>
+
+<span class="enscript-comment">/* convert {R,W,X}_OK values to V{READ,WRITE,EXEC} */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ACCESS_MODE_TO_VNODE_MASK</span>(m)	(m &lt;&lt; 6)
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> label *
+<span class="enscript-function-name">mac_devfsdirent_label_alloc</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_labelzone_alloc(MAC_WAITOK);
+	<span class="enscript-keyword">if</span> (label == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+	MAC_PERFORM(devfs_label_init, label);
+	<span class="enscript-keyword">return</span> (label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_devfs_label_init</span>(<span class="enscript-type">struct</span> devnode *de)
+{
+
+	de-&gt;dn_label = mac_devfsdirent_label_alloc();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> label *
+<span class="enscript-function-name">mac_mount_label_alloc</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_labelzone_alloc(MAC_WAITOK);
+	<span class="enscript-keyword">if</span> (label == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+	MAC_PERFORM(mount_label_init, label);
+	<span class="enscript-keyword">return</span> (label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mount_label_init</span>(<span class="enscript-type">struct</span> mount *mp)
+{
+
+	mp-&gt;mnt_mntlabel = mac_mount_label_alloc();
+}
+
+<span class="enscript-type">struct</span> label *
+<span class="enscript-function-name">mac_vnode_label_alloc</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_labelzone_alloc(MAC_WAITOK);
+	<span class="enscript-keyword">if</span> (label == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+	MAC_PERFORM(vnode_label_init, label);
+	<span class="enscript-keyword">return</span> (label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_vnode_label_init</span>(vnode_t vp)
+{
+	vp-&gt;v_label = mac_vnode_label_alloc();
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_label_init_needed</span>(vnode_t vp)
+{
+	<span class="enscript-keyword">return</span> (mac_label_vnodes != 0 &amp;&amp; vp-&gt;v_label == NULL);
+}
+
+<span class="enscript-comment">/* 
+ * vnode labels are allocated at the same time as vnodes, but vnodes are never
+ * freed.  Instead, we want to remove any sensitive information before putting
+ * them on the free list for reuse.
+*/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_vnode_label_recycle</span>(vnode_t vp)
+{
+
+	MAC_PERFORM(vnode_label_recycle, vp-&gt;v_label);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_devfs_label_free</span>(<span class="enscript-type">struct</span> label *label)
+{
+	MAC_PERFORM(devfs_label_destroy, label);
+	mac_labelzone_free(label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_devfs_label_destroy</span>(<span class="enscript-type">struct</span> devnode *de)
+{
+	<span class="enscript-keyword">if</span> (de-&gt;dn_label != NULL) {
+		mac_devfs_label_free(de-&gt;dn_label);
+		de-&gt;dn_label = NULL;
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mount_label_free</span>(<span class="enscript-type">struct</span> label *label)
+{
+
+	MAC_PERFORM(mount_label_destroy, label);
+	mac_labelzone_free(label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mount_label_destroy</span>(<span class="enscript-type">struct</span> mount *mp)
+{
+	<span class="enscript-keyword">if</span> (mp-&gt;mnt_mntlabel != NULL) {
+		mac_mount_label_free(mp-&gt;mnt_mntlabel);
+		mp-&gt;mnt_mntlabel = NULL;
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_vnode_label_free</span>(<span class="enscript-type">struct</span> label *label)
+{
+	MAC_PERFORM(vnode_label_destroy, label);
+	mac_labelzone_free(label);
+}
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__APPLE__</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_vnode_label_destroy</span>(<span class="enscript-type">struct</span> vnode *vp)
+{
+	<span class="enscript-keyword">if</span> (vp-&gt;v_label != NULL) {
+		mac_vnode_label_free(vp-&gt;v_label);
+		vp-&gt;v_label = NULL;
+	}
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_vnode_label_copy</span>(<span class="enscript-type">struct</span> label *src, <span class="enscript-type">struct</span> label *dest)
+{
+	<span class="enscript-keyword">if</span> (src == NULL) {
+		MAC_PERFORM(vnode_label_init, dest);
+	} <span class="enscript-keyword">else</span> {
+		MAC_PERFORM(vnode_label_copy, src, dest);
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_label_externalize_audit</span>(<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> mac *mac)
+{
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-comment">/* It is assumed that any necessary vnode locking is done on entry */</span>
+	error = MAC_EXTERNALIZE_AUDIT(vnode, vp-&gt;v_label,
+	    mac-&gt;m_string, mac-&gt;m_buflen);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_label_externalize</span>(<span class="enscript-type">struct</span> label *label, <span class="enscript-type">char</span> *elements,
+    <span class="enscript-type">char</span> *outbuf, size_t outbuflen, <span class="enscript-type">int</span> flags __unused)
+{
+	<span class="enscript-type">int</span> error;
+
+	error = MAC_EXTERNALIZE(vnode, label, elements, outbuf, outbuflen);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_label_internalize</span>(<span class="enscript-type">struct</span> label *label, <span class="enscript-type">char</span> *string)
+{
+	<span class="enscript-type">int</span> error;
+
+	error = MAC_INTERNALIZE(vnode, label, string);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_mount_label_internalize</span>(<span class="enscript-type">struct</span> label *label, <span class="enscript-type">char</span> *string)
+{
+	<span class="enscript-type">int</span> error;
+
+	error = MAC_INTERNALIZE(mount, label, string);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_mount_label_externalize</span>(<span class="enscript-type">struct</span> label *label, <span class="enscript-type">char</span> *elements,
+    <span class="enscript-type">char</span> *outbuf, size_t outbuflen)
+{
+	<span class="enscript-type">int</span> error;
+
+	error = MAC_EXTERNALIZE(mount, label, elements, outbuf, outbuflen);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_devfs_label_copy</span>(<span class="enscript-type">struct</span> label *src, <span class="enscript-type">struct</span> label *dest)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_device_enforce)
+        <span class="enscript-keyword">return</span>;
+#<span class="enscript-reference">endif</span>
+
+	MAC_PERFORM(devfs_label_copy, src, dest);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_devfs_label_update</span>(<span class="enscript-type">struct</span> mount *mp, <span class="enscript-type">struct</span> devnode *de,
+    <span class="enscript-type">struct</span> vnode *vp)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_device_enforce)
+        <span class="enscript-keyword">return</span>;
+#<span class="enscript-reference">endif</span>
+
+	MAC_PERFORM(devfs_label_update, mp, de, de-&gt;dn_label, vp,
+	    vp-&gt;v_label);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_label_associate</span>(<span class="enscript-type">struct</span> mount *mp, <span class="enscript-type">struct</span> vnode *vp, vfs_context_t ctx)
+{
+	<span class="enscript-type">struct</span> devnode *dnp;
+	<span class="enscript-type">struct</span> fdescnode *fnp;
+	<span class="enscript-type">int</span> error = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> (error);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* XXX: should not inspect v_tag in kernel! */</span>
+	<span class="enscript-keyword">switch</span> (vp-&gt;v_tag) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VT_DEVFS</span>:
+		dnp = VTODN(vp);
+		mac_vnode_label_associate_devfs(mp, dnp, vp);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">VT_FDESC</span>:
+		fnp = VTOFDESC(vp);
+		error = mac_vnode_label_associate_fdesc(mp, fnp, vp, ctx);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		error = mac_vnode_label_associate_extattr(mp, vp);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_vnode_label_associate_devfs</span>(<span class="enscript-type">struct</span> mount *mp, <span class="enscript-type">struct</span> devnode *de,
+    <span class="enscript-type">struct</span> vnode *vp)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_device_enforce)
+        <span class="enscript-keyword">return</span>;
+#<span class="enscript-reference">endif</span>
+
+	MAC_PERFORM(vnode_label_associate_devfs,
+	    mp, mp ? mp-&gt;mnt_mntlabel : NULL,
+	    de, de-&gt;dn_label,
+	    vp, vp-&gt;v_label);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_label_associate_extattr</span>(<span class="enscript-type">struct</span> mount *mp, <span class="enscript-type">struct</span> vnode *vp)
+{
+	<span class="enscript-type">int</span> error;
+
+	MAC_CHECK(vnode_label_associate_extattr, mp, mp-&gt;mnt_mntlabel, vp,
+	    vp-&gt;v_label);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_vnode_label_associate_singlelabel</span>(<span class="enscript-type">struct</span> mount *mp, <span class="enscript-type">struct</span> vnode *vp)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span>;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (!mac_label_vnodes)
+		<span class="enscript-keyword">return</span>;
+
+	MAC_PERFORM(vnode_label_associate_singlelabel, mp,
+	    mp ? mp-&gt;mnt_mntlabel : NULL, vp, vp-&gt;v_label);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_notify_create</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> mount *mp,
+    <span class="enscript-type">struct</span> vnode *dvp, <span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> componentname *cnp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> (0);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+		<span class="enscript-keyword">return</span> (0);
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_notify_create, cred, mp, mp-&gt;mnt_mntlabel,
+	    dvp, dvp-&gt;v_label, vp, vp-&gt;v_label, cnp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_vnode_notify_rename</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp,
+    <span class="enscript-type">struct</span> vnode *dvp, <span class="enscript-type">struct</span> componentname *cnp)
+{
+	kauth_cred_t cred;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span>;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span>;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_PERFORM(vnode_notify_rename, cred, vp, vp-&gt;v_label,
+	    dvp, dvp-&gt;v_label, cnp);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_vnode_notify_open</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">int</span> acc_flags)
+{
+	kauth_cred_t cred;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span>;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span>;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_PERFORM(vnode_notify_open, cred, vp, vp-&gt;v_label, acc_flags);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_vnode_notify_link</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp,
+		      <span class="enscript-type">struct</span> vnode *dvp, <span class="enscript-type">struct</span> componentname *cnp)
+{
+	kauth_cred_t cred;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span>;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span>;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_PERFORM(vnode_notify_link, cred, dvp, dvp-&gt;v_label, vp, vp-&gt;v_label, cnp);
+}
+
+<span class="enscript-comment">/*
+ * Extended attribute 'name' was updated via
+ * vn_setxattr() or vn_removexattr().  Allow the
+ * policy to update the vnode label.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_vnode_label_update_extattr</span>(<span class="enscript-type">struct</span> mount *mp, <span class="enscript-type">struct</span> vnode *vp,
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name)
+{
+	<span class="enscript-type">int</span> error = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span>;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (!mac_label_vnodes)
+		<span class="enscript-keyword">return</span>;
+
+	MAC_PERFORM(vnode_label_update_extattr, mp, mp-&gt;mnt_mntlabel, vp,
+		    vp-&gt;v_label, name);
+	<span class="enscript-keyword">if</span> (error == 0)
+		<span class="enscript-keyword">return</span>;
+
+	vnode_lock(vp);
+	vnode_relabel(vp);
+	vnode_unlock(vp);
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_label_store</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp,
+    <span class="enscript-type">struct</span> label *intlabel)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (!mac_label_vnodes ||
+	    !mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+		<span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_label_store, cred, vp, vp-&gt;v_label, intlabel);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_cred_label_update_execve</span>(vfs_context_t ctx, kauth_cred_t new, <span class="enscript-type">struct</span> vnode *vp, off_t offset,
+	<span class="enscript-type">struct</span> vnode *scriptvp, <span class="enscript-type">struct</span> label *scriptvnodelabel, <span class="enscript-type">struct</span> label *execl, u_int *csflags,
+	<span class="enscript-type">void</span> *macextensions, <span class="enscript-type">int</span> *disjoint, <span class="enscript-type">int</span> *labelupdateerror)
+{
+	kauth_cred_t cred;
+	*disjoint = 0;
+	<span class="enscript-type">int</span> error;
+	posix_cred_t pcred = posix_cred_get(new);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_proc_enforce || !mac_vnode_enforce)
+        <span class="enscript-keyword">return</span>;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* mark the new cred to indicate &quot;matching&quot; includes the label */</span>
+	pcred-&gt;cr_flags |= CRF_MAC_ENFORCE;
+
+	cred = vfs_context_ucred(ctx);
+
+	<span class="enscript-comment">/*
+	 * NB: Cannot use MAC_CHECK macro because we need a sequence point after
+	 *     calling exec_spawnattr_getmacpolicyinfo() and before passing the
+	 *     spawnattrlen as an argument to the hook.
+	 */</span>
+	{
+		<span class="enscript-type">struct</span> mac_policy_conf *mpc;
+		u_int i;
+
+		error = 0;
+		<span class="enscript-keyword">for</span> (i = 0; i&lt; mac_policy_list.staticmax; i++) {
+			mpc = mac_policy_list.entries[i].mpc;
+			<span class="enscript-keyword">if</span> (mpc == NULL)
+				<span class="enscript-keyword">continue</span>;
+
+			mpo_cred_label_update_execve_t *hook = mpc-&gt;mpc_ops-&gt;mpo_cred_label_update_execve;
+			<span class="enscript-keyword">if</span> (hook == NULL)
+				<span class="enscript-keyword">continue</span>;
+
+			size_t spawnattrlen = 0;
+			<span class="enscript-type">void</span> *spawnattr = exec_spawnattr_getmacpolicyinfo(macextensions, mpc-&gt;mpc_name, &amp;spawnattrlen);
+
+			error = mac_error_select(hook(cred, new, vfs_context_proc(ctx), vp, offset, scriptvp,
+						 vp-&gt;v_label, scriptvnodelabel, execl, csflags, spawnattr, spawnattrlen, disjoint),
+						 error);
+		}
+		<span class="enscript-keyword">if</span> (mac_policy_list_conditional_busy() != 0) { 
+			<span class="enscript-keyword">for</span> (; i &lt;= mac_policy_list.maxindex; i++) {
+				mpc = mac_policy_list.entries[i].mpc;
+				<span class="enscript-keyword">if</span> (mpc == NULL)
+					<span class="enscript-keyword">continue</span>;
+
+				mpo_cred_label_update_execve_t *hook = mpc-&gt;mpc_ops-&gt;mpo_cred_label_update_execve;
+				<span class="enscript-keyword">if</span> (hook == NULL)
+					<span class="enscript-keyword">continue</span>;
+
+				size_t spawnattrlen = 0;
+				<span class="enscript-type">void</span> *spawnattr = exec_spawnattr_getmacpolicyinfo(macextensions, mpc-&gt;mpc_name, &amp;spawnattrlen);
+
+				error = mac_error_select(hook(cred, new, vfs_context_proc(ctx), vp, offset, scriptvp,
+						     vp-&gt;v_label, scriptvnodelabel, execl, csflags, spawnattr, spawnattrlen, disjoint),
+							 error);
+			}
+			mac_policy_list_unbusy();
+		}
+	}
+	*labelupdateerror = error;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_cred_check_label_update_execve</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp, off_t offset,
+	<span class="enscript-type">struct</span> vnode *scriptvp, <span class="enscript-type">struct</span> label *scriptvnodelabel, <span class="enscript-type">struct</span> label *execlabel,
+	<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">void</span> *macextensions)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> result = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_proc_enforce || !mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> result;
+#<span class="enscript-reference">endif</span>
+
+	cred = vfs_context_ucred(ctx);
+
+	<span class="enscript-comment">/*
+	 * NB: Cannot use MAC_BOOLEAN macro because we need a sequence point after
+	 *     calling exec_spawnattr_getmacpolicyinfo() and before passing the
+	 *     spawnattrlen as an argument to the hook.
+	 */</span>
+	{
+		<span class="enscript-type">struct</span> mac_policy_conf *mpc;
+		u_int i;
+
+		<span class="enscript-keyword">for</span> (i = 0; i&lt; mac_policy_list.staticmax; i++) {
+			mpc = mac_policy_list.entries[i].mpc;
+			<span class="enscript-keyword">if</span> (mpc == NULL)
+				<span class="enscript-keyword">continue</span>;
+
+			mpo_cred_check_label_update_execve_t *hook = mpc-&gt;mpc_ops-&gt;mpo_cred_check_label_update_execve;
+			<span class="enscript-keyword">if</span> (hook == NULL)
+				<span class="enscript-keyword">continue</span>;
+
+			size_t spawnattrlen = 0;
+			<span class="enscript-type">void</span> *spawnattr = exec_spawnattr_getmacpolicyinfo(macextensions, mpc-&gt;mpc_name, &amp;spawnattrlen);
+
+			result = result || hook(cred, vp, offset, scriptvp, vp-&gt;v_label, scriptvnodelabel, execlabel, p, spawnattr, spawnattrlen);
+		}
+		<span class="enscript-keyword">if</span> (mac_policy_list_conditional_busy() != 0) { 
+			<span class="enscript-keyword">for</span> (; i &lt;= mac_policy_list.maxindex; i++) {
+				mpc = mac_policy_list.entries[i].mpc;
+				<span class="enscript-keyword">if</span> (mpc == NULL)
+					<span class="enscript-keyword">continue</span>;
+
+				mpo_cred_check_label_update_execve_t *hook = mpc-&gt;mpc_ops-&gt;mpo_cred_check_label_update_execve;
+				<span class="enscript-keyword">if</span> (hook == NULL)
+					<span class="enscript-keyword">continue</span>;
+
+				size_t spawnattrlen = 0;
+				<span class="enscript-type">void</span> *spawnattr = exec_spawnattr_getmacpolicyinfo(macextensions, mpc-&gt;mpc_name, &amp;spawnattrlen);
+
+				result = result || hook(cred, vp, offset, scriptvp, vp-&gt;v_label, scriptvnodelabel, execlabel, p, spawnattr, spawnattrlen);
+			}
+			mac_policy_list_unbusy();
+		}
+	}
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_access</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp,
+    <span class="enscript-type">int</span> acc_mode)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> mask;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+		<span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	<span class="enscript-comment">/* Convert {R,W,X}_OK values to V{READ,WRITE,EXEC} for entry points */</span>
+	mask = ACCESS_MODE_TO_VNODE_MASK(acc_mode);
+	MAC_CHECK(vnode_check_access, cred, vp, vp-&gt;v_label, mask);
+	<span class="enscript-keyword">return</span> (error);
+ }
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_chdir</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *dvp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_chdir, cred, dvp, dvp-&gt;v_label);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_chroot</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *dvp,
+    <span class="enscript-type">struct</span> componentname *cnp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_chroot, cred, dvp, dvp-&gt;v_label, cnp);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_create</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *dvp,
+    <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">struct</span> vnode_attr *vap)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_create, cred, dvp, dvp-&gt;v_label, cnp, vap);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_unlink</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *dvp, <span class="enscript-type">struct</span> vnode *vp,
+    <span class="enscript-type">struct</span> componentname *cnp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_unlink, cred, dvp, dvp-&gt;v_label, vp,
+	    vp-&gt;v_label, cnp);
+	<span class="enscript-keyword">return</span> (error);
+}
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_deleteacl</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp,
+    acl_type_t type)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_deleteacl, cred, vp, vp-&gt;v_label, type);
+	<span class="enscript-keyword">return</span> (error);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_deleteextattr</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp,
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_deleteextattr, cred, vp, vp-&gt;v_label, name);
+	<span class="enscript-keyword">return</span> (error);
+}
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_exchangedata</span>(vfs_context_t ctx,
+    <span class="enscript-type">struct</span> vnode *v1, <span class="enscript-type">struct</span> vnode *v2)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_exchangedata, cred, v1, v1-&gt;v_label, 
+	    v2, v2-&gt;v_label);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_getacl</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp, acl_type_t type)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_getacl, cred, vp, vp-&gt;v_label, type);
+	<span class="enscript-keyword">return</span> (error);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_getattrlist</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp,
+    <span class="enscript-type">struct</span> attrlist *alist)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_getattrlist, cred, vp, vp-&gt;v_label, alist);
+
+	<span class="enscript-comment">/* Falsify results instead of returning error? */</span>
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_exec</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp,
+    <span class="enscript-type">struct</span> image_params *imgp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error = 0;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_proc_enforce || !mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+
+	cred = vfs_context_ucred(ctx);
+
+	<span class="enscript-comment">/*
+	 * NB: Cannot use MAC_CHECK macro because we need a sequence point after
+	 *     calling exec_spawnattr_getmacpolicyinfo() and before passing the
+	 *     spawnattrlen as an argument to the hook.
+	 */</span>
+	{
+		<span class="enscript-type">struct</span> mac_policy_conf *mpc;
+		u_int i;
+
+		<span class="enscript-keyword">for</span> (i = 0; i&lt; mac_policy_list.staticmax; i++) {
+			mpc = mac_policy_list.entries[i].mpc;
+			<span class="enscript-keyword">if</span> (mpc == NULL)
+				<span class="enscript-keyword">continue</span>;
+
+			mpo_vnode_check_exec_t *hook = mpc-&gt;mpc_ops-&gt;mpo_vnode_check_exec;
+			<span class="enscript-keyword">if</span> (hook == NULL)
+				<span class="enscript-keyword">continue</span>;
+
+			size_t spawnattrlen = 0;
+			<span class="enscript-type">void</span> *spawnattr = exec_spawnattr_getmacpolicyinfo(imgp-&gt;ip_px_smpx, mpc-&gt;mpc_name, &amp;spawnattrlen);
+
+			error = mac_error_select(
+					hook(cred,
+					     vp, imgp-&gt;ip_scriptvp, vp-&gt;v_label, imgp-&gt;ip_scriptlabelp,
+					     imgp-&gt;ip_execlabelp, &amp;imgp-&gt;ip_ndp-&gt;ni_cnd, &amp;imgp-&gt;ip_csflags,
+					     spawnattr, spawnattrlen), error);
+		}
+		<span class="enscript-keyword">if</span> (mac_policy_list_conditional_busy() != 0) { 
+			<span class="enscript-keyword">for</span> (; i &lt;= mac_policy_list.maxindex; i++) {
+				mpc = mac_policy_list.entries[i].mpc;
+				<span class="enscript-keyword">if</span> (mpc == NULL)
+					<span class="enscript-keyword">continue</span>;
+
+				mpo_vnode_check_exec_t *hook = mpc-&gt;mpc_ops-&gt;mpo_vnode_check_exec;
+				<span class="enscript-keyword">if</span> (hook == NULL)
+					<span class="enscript-keyword">continue</span>;
+
+				size_t spawnattrlen = 0;
+				<span class="enscript-type">void</span> *spawnattr = exec_spawnattr_getmacpolicyinfo(imgp-&gt;ip_px_smpx, mpc-&gt;mpc_name, &amp;spawnattrlen);
+
+				error = mac_error_select(
+						hook(cred,
+						     vp, imgp-&gt;ip_scriptvp, vp-&gt;v_label, imgp-&gt;ip_scriptlabelp,
+						     imgp-&gt;ip_execlabelp, &amp;imgp-&gt;ip_ndp-&gt;ni_cnd, &amp;imgp-&gt;ip_csflags,
+						     spawnattr, spawnattrlen), error);
+			}
+			mac_policy_list_unbusy();
+		}
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_fsgetpath</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_fsgetpath, cred, vp, vp-&gt;v_label);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_signature</span>(<span class="enscript-type">struct</span> vnode *vp, off_t macho_offset,
+			  <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *sha1,
+			  <span class="enscript-type">const</span> <span class="enscript-type">void</span> *signature, size_t size,
+			  <span class="enscript-type">int</span> flags, <span class="enscript-type">int</span> *is_platform_binary)
+{
+	<span class="enscript-type">int</span> error;
+	
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_proc_enforce || !mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+	
+	MAC_CHECK(vnode_check_signature, vp, vp-&gt;v_label, macho_offset, sha1, 
+							  signature, size, 
+							  flags, is_platform_binary);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_getacl</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp, acl_type_t type)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_getacl, cred, vp, vp-&gt;v_label, type);
+	<span class="enscript-keyword">return</span> (error);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_getextattr</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp,
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">struct</span> uio *uio)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_getextattr, cred, vp, vp-&gt;v_label,
+	    name, uio);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_ioctl</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp, u_int cmd)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_ioctl, cred, vp, vp-&gt;v_label, cmd);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_kqfilter</span>(vfs_context_t ctx, kauth_cred_t file_cred,
+    <span class="enscript-type">struct</span> knote *kn, <span class="enscript-type">struct</span> vnode *vp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_kqfilter, cred, file_cred, kn, vp,
+	    vp-&gt;v_label);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_link</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *dvp,
+    <span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> componentname *cnp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_link, cred, dvp, dvp-&gt;v_label, vp,
+	    vp-&gt;v_label, cnp);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_listextattr</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_listextattr, cred, vp, vp-&gt;v_label);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_lookup</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *dvp,
+    <span class="enscript-type">struct</span> componentname *cnp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_lookup, cred, dvp, dvp-&gt;v_label, cnp);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_open</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">int</span> acc_mode)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_open, cred, vp, vp-&gt;v_label, acc_mode);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_read</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> ucred *file_cred,
+    <span class="enscript-type">struct</span> vnode *vp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_read, cred, file_cred, vp,
+	    vp-&gt;v_label);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_readdir</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *dvp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_readdir, cred, dvp, dvp-&gt;v_label);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_readlink</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_readlink, cred, vp, vp-&gt;v_label);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_label_update</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp,
+    <span class="enscript-type">struct</span> label *newlabel)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_label_update, cred, vp, vp-&gt;v_label, newlabel);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_rename</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *dvp,
+    <span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">struct</span> vnode *tdvp,
+    <span class="enscript-type">struct</span> vnode *tvp, <span class="enscript-type">struct</span> componentname *tcnp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+
+	MAC_CHECK(vnode_check_rename_from, cred, dvp, dvp-&gt;v_label, vp,
+	    vp-&gt;v_label, cnp);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+
+	MAC_CHECK(vnode_check_rename_to, cred, tdvp, tdvp-&gt;v_label, tvp,
+	    tvp != NULL ? tvp-&gt;v_label : NULL, dvp == tdvp, tcnp);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+
+	MAC_CHECK(vnode_check_rename, cred, dvp, dvp-&gt;v_label, vp,
+	    vp-&gt;v_label, cnp, tdvp, tdvp-&gt;v_label, tvp,
+	    tvp != NULL ? tvp-&gt;v_label : NULL, tcnp);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_revoke</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_revoke, cred, vp, vp-&gt;v_label);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_searchfs</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> attrlist *alist)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_searchfs, cred, vp, vp-&gt;v_label, alist);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_select</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">int</span> which)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_select, cred, vp, vp-&gt;v_label, which);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_setacl</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp, acl_type_t type,
+    <span class="enscript-type">struct</span> acl *acl)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_setacl, cred, vp, vp-&gt;v_label, type, acl);
+	<span class="enscript-keyword">return</span> (error);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_setattrlist</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp,
+    <span class="enscript-type">struct</span> attrlist *alist)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_setattrlist, cred, vp, vp-&gt;v_label, alist);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_setextattr</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp,
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">struct</span> uio *uio)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_setextattr, cred, vp, vp-&gt;v_label,
+	    name, uio);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_setflags</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp, u_long flags)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_setflags, cred, vp, vp-&gt;v_label, flags);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_setmode</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp, mode_t mode)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_setmode, cred, vp, vp-&gt;v_label, mode);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_setowner</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp, uid_t uid,
+    gid_t gid)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_setowner, cred, vp, vp-&gt;v_label, uid, gid);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_setutimes</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp,
+    <span class="enscript-type">struct</span> timespec atime, <span class="enscript-type">struct</span> timespec mtime)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_setutimes, cred, vp, vp-&gt;v_label, atime,
+	    mtime);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_stat</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> ucred *file_cred,
+    <span class="enscript-type">struct</span> vnode *vp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_stat, cred, file_cred, vp,
+	    vp-&gt;v_label);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_truncate</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> ucred *file_cred,
+    <span class="enscript-type">struct</span> vnode *vp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_truncate, cred, file_cred, vp,
+	    vp-&gt;v_label);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_write</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> ucred *file_cred,
+    <span class="enscript-type">struct</span> vnode *vp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_write, cred, file_cred, vp, vp-&gt;v_label);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_uipc_bind</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *dvp,
+    <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">struct</span> vnode_attr *vap)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_uipc_bind, cred, dvp, dvp-&gt;v_label, cnp, vap);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_check_uipc_connect</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(vnode_check_uipc_connect, cred, vp, vp-&gt;v_label);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_vnode_label_update</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> label *newlabel)
+{
+	kauth_cred_t cred = vfs_context_ucred(ctx);
+	<span class="enscript-type">struct</span> label *tmpl = NULL;
+
+	<span class="enscript-keyword">if</span> (vp-&gt;v_label == NULL)
+		tmpl = mac_vnode_label_alloc();
+
+	vnode_lock(vp);
+
+	<span class="enscript-comment">/* recheck after lock */</span>
+	<span class="enscript-keyword">if</span> (vp-&gt;v_label == NULL) {
+		vp-&gt;v_label = tmpl;
+		tmpl = NULL;
+	}
+
+	MAC_PERFORM(vnode_label_update, cred, vp, vp-&gt;v_label, newlabel);
+	vnode_unlock(vp);
+
+	<span class="enscript-keyword">if</span> (tmpl != NULL)
+		mac_vnode_label_free(tmpl);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_find_sigs</span>(<span class="enscript-type">struct</span> proc *p, <span class="enscript-type">struct</span> vnode *vp, off_t offset)
+{
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_proc_enforce || !mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+
+	MAC_CHECK(vnode_find_sigs, p, vp, offset, vp-&gt;v_label);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_mount_label_associate</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> mount *mp)
+{
+	kauth_cred_t cred = vfs_context_ucred(ctx);
+
+	<span class="enscript-comment">/* XXX: eventually this logic may be handled by the policy? */</span>
+
+	<span class="enscript-comment">/* We desire MULTILABEL for the root filesystem. */</span>
+	<span class="enscript-keyword">if</span> ((mp-&gt;mnt_flag &amp; MNT_ROOTFS) &amp;&amp; 
+	    (strcmp(mp-&gt;mnt_vfsstat.f_fstypename, <span class="enscript-string">&quot;hfs&quot;</span>) == 0))
+		mp-&gt;mnt_flag |= MNT_MULTILABEL;
+
+	<span class="enscript-comment">/* MULTILABEL on DEVFS. */</span>
+	<span class="enscript-keyword">if</span> (strcmp(mp-&gt;mnt_vfsstat.f_fstypename, <span class="enscript-string">&quot;devfs&quot;</span>) == 0)
+		mp-&gt;mnt_flag |= MNT_MULTILABEL;
+
+	<span class="enscript-comment">/* MULTILABEL on FDESC pseudo-filesystem. */</span>
+	<span class="enscript-keyword">if</span> (strcmp(mp-&gt;mnt_vfsstat.f_fstypename, <span class="enscript-string">&quot;fdesc&quot;</span>) == 0)
+		mp-&gt;mnt_flag |= MNT_MULTILABEL;
+
+	<span class="enscript-comment">/* MULTILABEL on all NFS filesystems. */</span>
+	<span class="enscript-keyword">if</span> (strcmp(mp-&gt;mnt_vfsstat.f_fstypename, <span class="enscript-string">&quot;nfs&quot;</span>) == 0)
+		mp-&gt;mnt_flag |= MNT_MULTILABEL;
+
+	<span class="enscript-comment">/* MULTILABEL on all AFP filesystems. */</span>
+	<span class="enscript-keyword">if</span> (strcmp(mp-&gt;mnt_vfsstat.f_fstypename, <span class="enscript-string">&quot;afpfs&quot;</span>) == 0)
+		mp-&gt;mnt_flag |= MNT_MULTILABEL;
+
+	<span class="enscript-keyword">if</span> (mp-&gt;mnt_vtable != NULL) {
+		<span class="enscript-comment">/* Any filesystem that supports native XATTRs. */</span>
+		<span class="enscript-keyword">if</span> ((mp-&gt;mnt_vtable-&gt;vfc_vfsflags &amp; VFC_VFSNATIVEXATTR))
+			mp-&gt;mnt_flag |= MNT_MULTILABEL;
+
+		<span class="enscript-comment">/* Filesystem does not support multilabel. */</span>
+		<span class="enscript-keyword">if</span> ((mp-&gt;mnt_vtable-&gt;vfc_vfsflags &amp; VFC_VFSNOMACLABEL) &amp;&amp;
+		    (mp-&gt;mnt_flag &amp; MNT_MULTILABEL))
+			mp-&gt;mnt_flag &amp;= ~MNT_MULTILABEL;
+	}
+
+	MAC_PERFORM(mount_label_associate, cred, mp, mp-&gt;mnt_mntlabel);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	printf(<span class="enscript-string">&quot;MAC Framework enabling %s support: %s -&gt; %s (%s)\n&quot;</span>,
+		mp-&gt;mnt_flag &amp; MNT_MULTILABEL ? <span class="enscript-string">&quot;multilabel&quot;</span> : <span class="enscript-string">&quot;singlelabel&quot;</span>, 
+		mp-&gt;mnt_vfsstat.f_mntfromname,
+		mp-&gt;mnt_vfsstat.f_mntonname,
+		mp-&gt;mnt_vfsstat.f_fstypename);
+#<span class="enscript-reference">endif</span>
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_mount_check_mount</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> vnode *vp,
+    <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *vfc_name)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(mount_check_mount, cred, vp, vp-&gt;v_label, cnp, vfc_name);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_mount_check_remount</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> mount *mp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(mount_check_remount, cred, mp, mp-&gt;mnt_mntlabel);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_mount_check_umount</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> mount *mp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(mount_check_umount, cred, mp, mp-&gt;mnt_mntlabel);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_mount_check_getattr</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> mount *mp, 
+    <span class="enscript-type">struct</span> vfs_attr *vfa)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(mount_check_getattr, cred, mp, mp-&gt;mnt_mntlabel, vfa);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_mount_check_setattr</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> mount *mp, 
+    <span class="enscript-type">struct</span> vfs_attr *vfa)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(mount_check_setattr, cred, mp, mp-&gt;mnt_mntlabel, vfa);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_mount_check_stat</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> mount *mount)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(mount_check_stat, cred, mount, mount-&gt;mnt_mntlabel);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_mount_check_label_update</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> mount *mount)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(mount_check_label_update, cred, mount, mount-&gt;mnt_mntlabel);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_mount_check_fsctl</span>(vfs_context_t ctx, <span class="enscript-type">struct</span> mount *mp, u_int cmd)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = vfs_context_ucred(ctx);
+	MAC_CHECK(mount_check_fsctl, cred, mp, mp-&gt;mnt_mntlabel, cmd);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_devfs_label_associate_device</span>(dev_t dev, <span class="enscript-type">struct</span> devnode *de,
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *fullpath)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_device_enforce)
+        <span class="enscript-keyword">return</span>;
+#<span class="enscript-reference">endif</span>
+
+	MAC_PERFORM(devfs_label_associate_device, dev, de, de-&gt;dn_label,
+	    fullpath);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_devfs_label_associate_directory</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *dirname, <span class="enscript-type">int</span> dirnamelen,
+    <span class="enscript-type">struct</span> devnode *de, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *fullpath)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_device_enforce)
+        <span class="enscript-keyword">return</span>;
+#<span class="enscript-reference">endif</span>
+
+	MAC_PERFORM(devfs_label_associate_directory, dirname, dirnamelen, de,
+	    de-&gt;dn_label, fullpath);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">vn_setlabel</span>(<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> label *intlabel, vfs_context_t context)
+{
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_vnode_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (!mac_label_vnodes)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">if</span> (vp-&gt;v_mount == NULL) {
+		printf(<span class="enscript-string">&quot;vn_setlabel: null v_mount\n&quot;</span>);
+		<span class="enscript-keyword">if</span> (vp-&gt;v_type != VNON)
+			printf(<span class="enscript-string">&quot;vn_setlabel: null v_mount with non-VNON\n&quot;</span>);
+		<span class="enscript-keyword">return</span> (EBADF);
+	}
+
+	<span class="enscript-keyword">if</span> ((vp-&gt;v_mount-&gt;mnt_flag &amp; MNT_MULTILABEL) == 0)
+		<span class="enscript-keyword">return</span> (ENOTSUP);
+
+	<span class="enscript-comment">/*
+	 * Multi-phase commit.  First check the policies to confirm the
+	 * change is OK.  Then commit via the filesystem.  Finally,
+	 * update the actual vnode label.  Question: maybe the filesystem
+	 * should update the vnode at the end as part of VNOP_SETLABEL()?
+	 */</span>
+	error = mac_vnode_check_label_update(context, vp, intlabel);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+
+	error = VNOP_SETLABEL(vp, intlabel, context);
+	<span class="enscript-keyword">if</span> (error == ENOTSUP) {
+		error = mac_vnode_label_store(context, vp,
+						   intlabel);
+		<span class="enscript-keyword">if</span> (error) {
+			printf(<span class="enscript-string">&quot;%s: mac_vnode_label_store failed %d\n&quot;</span>,
+				__func__, error);
+			<span class="enscript-keyword">return</span> (error);
+		}
+		mac_vnode_label_update(context, vp, intlabel);
+	} <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">if</span> (error) {
+		printf(<span class="enscript-string">&quot;vn_setlabel: vop setlabel failed %d\n&quot;</span>, error);
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnode_label_associate_fdesc</span>(<span class="enscript-type">struct</span> mount *mp, <span class="enscript-type">struct</span> fdescnode *fnp,
+    <span class="enscript-type">struct</span> vnode *vp, vfs_context_t ctx)
+{
+	<span class="enscript-type">struct</span> fileproc *fp;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	<span class="enscript-type">struct</span> socket *so;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-type">struct</span> pipe *cpipe;
+	<span class="enscript-type">struct</span> vnode *fvp;
+	<span class="enscript-type">struct</span> proc *p;
+	<span class="enscript-type">int</span> error;
+
+	error = 0;
+
+	<span class="enscript-comment">/*
+	 * If no backing file, let the policy choose which label to use.
+	 */</span>
+	<span class="enscript-keyword">if</span> (fnp-&gt;fd_fd == -1) {
+		MAC_PERFORM(vnode_label_associate_file, vfs_context_ucred(ctx),
+		    mp, mp-&gt;mnt_mntlabel, NULL, NULL, vp, vp-&gt;v_label);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	p = vfs_context_proc(ctx);
+	error = fp_lookup(p, fnp-&gt;fd_fd, &amp;fp, 0);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+
+	<span class="enscript-keyword">if</span> (fp-&gt;f_fglob == NULL) {
+		error = EBADF;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">switch</span> (FILEGLOB_DTYPE(fp-&gt;f_fglob)) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTYPE_VNODE</span>:
+		fvp = (<span class="enscript-type">struct</span> vnode *)fp-&gt;f_fglob-&gt;fg_data;
+		<span class="enscript-keyword">if</span> ((error = vnode_getwithref(fvp)))
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		MAC_PERFORM(vnode_label_copy, fvp-&gt;v_label, vp-&gt;v_label);
+		(<span class="enscript-type">void</span>)vnode_put(fvp);
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_SOCKET_SUBSET</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTYPE_SOCKET</span>:
+		so = (<span class="enscript-type">struct</span> socket *)fp-&gt;f_fglob-&gt;fg_data;
+		socket_lock(so, 1);
+		MAC_PERFORM(vnode_label_associate_socket,
+			    vfs_context_ucred(ctx), (socket_t)so, so-&gt;so_label,
+		    vp, vp-&gt;v_label);
+		socket_unlock(so, 1);
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTYPE_PSXSHM</span>:
+		pshm_label_associate(fp, vp, ctx);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTYPE_PSXSEM</span>:
+		psem_label_associate(fp, vp, ctx);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTYPE_PIPE</span>:
+		cpipe = (<span class="enscript-type">struct</span> pipe *)fp-&gt;f_fglob-&gt;fg_data;
+		<span class="enscript-comment">/* kern/sys_pipe.c:pipe_select() suggests this test. */</span>
+		<span class="enscript-keyword">if</span> (cpipe == (<span class="enscript-type">struct</span> pipe *)-1) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		PIPE_LOCK(cpipe);
+		MAC_PERFORM(vnode_label_associate_pipe, vfs_context_ucred(ctx),
+		    cpipe, cpipe-&gt;pipe_label, vp, vp-&gt;v_label);
+		PIPE_UNLOCK(cpipe);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTYPE_KQUEUE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTYPE_FSEVENTS</span>:
+	<span class="enscript-reference">default</span>:
+		MAC_PERFORM(vnode_label_associate_file, vfs_context_ucred(ctx),
+		    mp, mp-&gt;mnt_mntlabel, fp-&gt;f_fglob, fp-&gt;f_fglob-&gt;fg_label,
+		    vp, vp-&gt;v_label);
+		<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">out</span>:
+	fp_drop(p, fnp-&gt;fd_fd, fp, 0);
+	<span class="enscript-keyword">return</span> (error);
+}
+</pre>
+<hr />
+</body></html>

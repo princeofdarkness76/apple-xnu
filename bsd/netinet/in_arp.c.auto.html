@@ -1,0 +1,1885 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>in_arp.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">in_arp.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2004-2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1989, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_arp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_arp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_dl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/dlil.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_llreach.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/if_ether.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">CONST_LLADDR</span>(s)	((const u_char*)((s)-&gt;sdl_data + (s)-&gt;sdl_nlen))
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> size_t MAX_HW_LEN = 10;
+
+<span class="enscript-comment">/*
+ * Synchronization notes:
+ *
+ * The global list of ARP entries are stored in llinfo_arp; an entry
+ * gets inserted into the list when the route is created and gets
+ * removed from the list when it is deleted; this is done as part
+ * of RTM_ADD/RTM_RESOLVE/RTM_DELETE in arp_rtrequest().
+ *
+ * Because rnh_lock and rt_lock for the entry are held during those
+ * operations, the same locks (and thus lock ordering) must be used
+ * elsewhere to access the relevant data structure fields:
+ *
+ * la_le.{le_next,le_prev}, la_rt
+ *
+ *	- Routing lock (rnh_lock)
+ *
+ * la_hold, la_asked, la_llreach, la_lastused, la_flags
+ *
+ *	- Routing entry lock (rt_lock)
+ *
+ * Due to the dependency on rt_lock, llinfo_arp has the same lifetime
+ * as the route entry itself.  When a route is deleted (RTM_DELETE),
+ * it is simply removed from the global list but the memory is not
+ * freed until the route itself is freed.
+ */</span>
+<span class="enscript-type">struct</span> llinfo_arp {
+	<span class="enscript-comment">/*
+	 * The following are protected by rnh_lock
+	 */</span>
+	LIST_ENTRY(llinfo_arp) la_le;
+	<span class="enscript-type">struct</span>	rtentry *la_rt;
+	<span class="enscript-comment">/*
+	 * The following are protected by rt_lock
+	 */</span>
+	<span class="enscript-type">struct</span>	mbuf *la_hold;		<span class="enscript-comment">/* last packet until resolved/timeout */</span>
+	<span class="enscript-type">struct</span>	if_llreach *la_llreach;	<span class="enscript-comment">/* link-layer reachability record */</span>
+	u_int64_t la_lastused;		<span class="enscript-comment">/* last used timestamp */</span>
+	u_int32_t la_asked;		<span class="enscript-comment">/* # of requests sent */</span>
+	u_int32_t la_maxtries;		<span class="enscript-comment">/* retry limit */</span>
+	uint32_t  la_flags;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LLINFO_RTRFAIL_EVTSENT</span>		0x1 <span class="enscript-comment">/* sent an ARP event */</span>
+};
+<span class="enscript-type">static</span> <span class="enscript-function-name">LIST_HEAD</span>(, llinfo_arp) llinfo_arp;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> arp_timeout_run;		<span class="enscript-comment">/* arp_timeout is scheduled to run */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">arp_timeout</span>(<span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">arp_sched_timeout</span>(<span class="enscript-type">struct</span> timeval *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">arptfree</span>(<span class="enscript-type">struct</span> llinfo_arp *, <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">arp_lookup_route</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_addr *, <span class="enscript-type">int</span>,
+    <span class="enscript-type">int</span>, route_t *, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> arp_getstat SYSCTL_HANDLER_ARGS;
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> llinfo_arp *<span class="enscript-function-name">arp_llinfo_alloc</span>(<span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">arp_llinfo_free</span>(<span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">arp_llinfo_purge</span>(<span class="enscript-type">struct</span> rtentry *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">arp_llinfo_get_ri</span>(<span class="enscript-type">struct</span> rtentry *, <span class="enscript-type">struct</span> rt_reach_info *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">arp_llinfo_get_iflri</span>(<span class="enscript-type">struct</span> rtentry *, <span class="enscript-type">struct</span> ifnet_llreach_info *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">arp_llinfo_refresh</span>(<span class="enscript-type">struct</span> rtentry *);
+
+<span class="enscript-type">static</span> __inline <span class="enscript-type">void</span> <span class="enscript-function-name">arp_llreach_use</span>(<span class="enscript-type">struct</span> llinfo_arp *);
+<span class="enscript-type">static</span> __inline <span class="enscript-type">int</span> <span class="enscript-function-name">arp_llreach_reachable</span>(<span class="enscript-type">struct</span> llinfo_arp *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">arp_llreach_alloc</span>(<span class="enscript-type">struct</span> rtentry *, <span class="enscript-type">struct</span> ifnet *, <span class="enscript-type">void</span> *,
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>, boolean_t);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">tvtohz</span>(<span class="enscript-type">struct</span> timeval *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> arpinit_done;
+
+<span class="enscript-function-name">SYSCTL_DECL</span>(_net_link_ether);
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_link_ether, PF_INET, inet, CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-comment">/* timer values */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> arpt_prune = (5*60*1); <span class="enscript-comment">/* walk list every 5 minutes */</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, prune_intvl,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;arpt_prune, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> arpt_keep = (20*60); <span class="enscript-comment">/* once resolved, good for 20 more minutes */</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, max_age,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;arpt_keep, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> arpt_down = 20;	<span class="enscript-comment">/* once declared down, don't send for 20 sec */</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, host_down_time,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;arpt_down, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> arp_llreach_base = (LL_BASE_REACHABLE / 1000); <span class="enscript-comment">/* seconds */</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, arp_llreach_base,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;arp_llreach_base, LL_BASE_REACHABLE,
+	<span class="enscript-string">&quot;default ARP link-layer reachability max lifetime (in seconds)&quot;</span>);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ARP_UNICAST_LIMIT</span> 5	<span class="enscript-comment">/* # of probes until ARP refresh broadcast */</span>
+<span class="enscript-type">static</span> u_int32_t arp_unicast_lim = ARP_UNICAST_LIMIT;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, arp_unicast_lim,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;arp_unicast_lim, ARP_UNICAST_LIMIT,
+	<span class="enscript-string">&quot;number of unicast ARP refresh probes before using broadcast&quot;</span>);
+
+<span class="enscript-type">static</span> u_int32_t arp_maxtries = 5;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, maxtries,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;arp_maxtries, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> useloopback = 1;	<span class="enscript-comment">/* use loopback interface for local traffic */</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, useloopback,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;useloopback, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> arp_proxyall = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, proxyall,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;arp_proxyall, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> arp_sendllconflict = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, sendllconflict,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;arp_sendllconflict, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> log_arp_warnings = 0;	<span class="enscript-comment">/* Thread safe: no accumulated state */</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, log_arp_warnings,
+	CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;log_arp_warnings, 0,
+	<span class="enscript-string">&quot;log arp warning messages&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> keep_announcements = 1;	<span class="enscript-comment">/* Thread safe: no aging of state */</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, keep_announcements,
+	CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;keep_announcements, 0,
+	<span class="enscript-string">&quot;keep arp announcements&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> send_conflicting_probes = 1;	<span class="enscript-comment">/* Thread safe: no accumulated state */</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, send_conflicting_probes,
+	CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;send_conflicting_probes, 0,
+	<span class="enscript-string">&quot;send conflicting link-local arp probes&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> arp_verbose;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, verbose,
+	CTLFLAG_RW | CTLFLAG_LOCKED, &amp;arp_verbose, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">struct</span> arpstat arpstat;
+<span class="enscript-function-name">SYSCTL_PROC</span>(_net_link_ether_inet, OID_AUTO, stats,
+	CTLTYPE_STRUCT | CTLFLAG_RD | CTLFLAG_LOCKED,
+	0, 0, arp_getstat, <span class="enscript-string">&quot;S,arpstat&quot;</span>,
+	<span class="enscript-string">&quot;ARP statistics (struct arpstat, net/if_arp.h)&quot;</span>);
+
+<span class="enscript-comment">/* these are deprecated (read-only); use net.link.generic.system node instead */</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, apple_hwcksum_tx,
+	CTLFLAG_RD | CTLFLAG_LOCKED, &amp;hwcksum_tx, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_ether_inet, OID_AUTO, apple_hwcksum_rx,
+	CTLFLAG_RD | CTLFLAG_LOCKED, &amp;hwcksum_rx, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *llinfo_arp_zone;
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">LLINFO_ARP_ZONE_MAX</span>	256		<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">LLINFO_ARP_ZONE_NAME</span>	<span class="enscript-string">&quot;llinfo_arp&quot;</span>	<span class="enscript-comment">/* name for zone */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">arp_init</span>(<span class="enscript-type">void</span>)
+{
+	VERIFY(!arpinit_done);
+
+	LIST_INIT(&amp;llinfo_arp);
+
+	llinfo_arp_zone = zinit(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> llinfo_arp),
+	    LLINFO_ARP_ZONE_MAX * <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> llinfo_arp), 0,
+	    LLINFO_ARP_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (llinfo_arp_zone == NULL)
+		panic(<span class="enscript-string">&quot;%s: failed allocating llinfo_arp_zone&quot;</span>, __func__);
+
+	zone_change(llinfo_arp_zone, Z_EXPAND, TRUE);
+	zone_change(llinfo_arp_zone, Z_CALLERACCT, FALSE);
+
+	arpinit_done = 1;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> llinfo_arp *
+<span class="enscript-function-name">arp_llinfo_alloc</span>(<span class="enscript-type">int</span> how)
+{
+	<span class="enscript-type">struct</span> llinfo_arp *la;
+
+	la = (how == M_WAITOK) ? zalloc(llinfo_arp_zone) :
+	    zalloc_noblock(llinfo_arp_zone);
+	<span class="enscript-keyword">if</span> (la != NULL)
+		bzero(la, <span class="enscript-keyword">sizeof</span> (*la));
+
+	<span class="enscript-keyword">return</span> (la);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">arp_llinfo_free</span>(<span class="enscript-type">void</span> *arg)
+{
+	<span class="enscript-type">struct</span> llinfo_arp *la = arg;
+
+	<span class="enscript-keyword">if</span> (la-&gt;la_le.le_next != NULL || la-&gt;la_le.le_prev != NULL) {
+		panic(<span class="enscript-string">&quot;%s: trying to free %p when it is in use&quot;</span>, __func__, la);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-comment">/* Just in case there's anything there, free it */</span>
+	<span class="enscript-keyword">if</span> (la-&gt;la_hold != NULL) {
+		m_freem(la-&gt;la_hold);
+		la-&gt;la_hold = NULL;
+		arpstat.purged++;
+	}
+
+	<span class="enscript-comment">/* Purge any link-layer info caching */</span>
+	VERIFY(la-&gt;la_rt-&gt;rt_llinfo == la);
+	<span class="enscript-keyword">if</span> (la-&gt;la_rt-&gt;rt_llinfo_purge != NULL)
+		la-&gt;la_rt-&gt;rt_llinfo_purge(la-&gt;la_rt);
+
+	zfree(llinfo_arp_zone, la);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">arp_llinfo_purge</span>(<span class="enscript-type">struct</span> rtentry *rt)
+{
+	<span class="enscript-type">struct</span> llinfo_arp *la = rt-&gt;rt_llinfo;
+
+	RT_LOCK_ASSERT_HELD(rt);
+	VERIFY(rt-&gt;rt_llinfo_purge == arp_llinfo_purge &amp;&amp; la != NULL);
+
+	<span class="enscript-keyword">if</span> (la-&gt;la_llreach != NULL) {
+		RT_CONVERT_LOCK(rt);
+		ifnet_llreach_free(la-&gt;la_llreach);
+		la-&gt;la_llreach = NULL;
+	}
+	la-&gt;la_lastused = 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">arp_llinfo_get_ri</span>(<span class="enscript-type">struct</span> rtentry *rt, <span class="enscript-type">struct</span> rt_reach_info *ri)
+{
+	<span class="enscript-type">struct</span> llinfo_arp *la = rt-&gt;rt_llinfo;
+	<span class="enscript-type">struct</span> if_llreach *lr = la-&gt;la_llreach;
+
+	<span class="enscript-keyword">if</span> (lr == NULL) {
+		bzero(ri, <span class="enscript-keyword">sizeof</span> (*ri));
+		ri-&gt;ri_rssi = IFNET_RSSI_UNKNOWN;
+		ri-&gt;ri_lqm = IFNET_LQM_THRESH_OFF;
+		ri-&gt;ri_npm = IFNET_NPM_THRESH_UNKNOWN;
+	} <span class="enscript-keyword">else</span> {
+		IFLR_LOCK(lr);
+		<span class="enscript-comment">/* Export to rt_reach_info structure */</span>
+		ifnet_lr2ri(lr, ri);
+		<span class="enscript-comment">/* Export ARP send expiration (calendar) time */</span>
+		ri-&gt;ri_snd_expire =
+		    ifnet_llreach_up2calexp(lr, la-&gt;la_lastused);
+		IFLR_UNLOCK(lr);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">arp_llinfo_get_iflri</span>(<span class="enscript-type">struct</span> rtentry *rt, <span class="enscript-type">struct</span> ifnet_llreach_info *iflri)
+{
+	<span class="enscript-type">struct</span> llinfo_arp *la = rt-&gt;rt_llinfo;
+	<span class="enscript-type">struct</span> if_llreach *lr = la-&gt;la_llreach;
+
+	<span class="enscript-keyword">if</span> (lr == NULL) {
+		bzero(iflri, <span class="enscript-keyword">sizeof</span> (*iflri));
+		iflri-&gt;iflri_rssi = IFNET_RSSI_UNKNOWN;
+		iflri-&gt;iflri_lqm = IFNET_LQM_THRESH_OFF;
+		iflri-&gt;iflri_npm = IFNET_NPM_THRESH_UNKNOWN;
+	} <span class="enscript-keyword">else</span> {
+		IFLR_LOCK(lr);
+		<span class="enscript-comment">/* Export to ifnet_llreach_info structure */</span>
+		ifnet_lr2iflri(lr, iflri);
+		<span class="enscript-comment">/* Export ARP send expiration (uptime) time */</span>
+		iflri-&gt;iflri_snd_expire =
+		    ifnet_llreach_up2upexp(lr, la-&gt;la_lastused);
+		IFLR_UNLOCK(lr);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">arp_llinfo_refresh</span>(<span class="enscript-type">struct</span> rtentry *rt)
+{
+	uint64_t timenow = net_uptime();
+	<span class="enscript-comment">/*
+	 * If route entry is permanent or if expiry is less
+	 * than timenow and extra time taken for unicast probe
+	 * we can't expedite the refresh
+	 */</span>
+	<span class="enscript-keyword">if</span> ((rt-&gt;rt_expire == 0) ||
+	    (rt-&gt;rt_flags &amp; RTF_STATIC) ||
+	    !(rt-&gt;rt_flags &amp; RTF_LLINFO)) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (rt-&gt;rt_expire &gt; timenow + arp_unicast_lim) {
+		rt-&gt;rt_expire = timenow + arp_unicast_lim;
+	}
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">arp_llreach_set_reachable</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">void</span> *addr, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> alen)
+{
+	<span class="enscript-comment">/* Nothing more to do if it's disabled */</span>
+	<span class="enscript-keyword">if</span> (arp_llreach_base == 0)
+		<span class="enscript-keyword">return</span>;
+
+	ifnet_llreach_set_reachable(ifp, ETHERTYPE_IP, addr, alen);
+}
+
+<span class="enscript-type">static</span> __inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">arp_llreach_use</span>(<span class="enscript-type">struct</span> llinfo_arp *la)
+{
+	<span class="enscript-keyword">if</span> (la-&gt;la_llreach != NULL)
+		la-&gt;la_lastused = net_uptime();
+}
+
+<span class="enscript-type">static</span> __inline <span class="enscript-type">int</span>
+<span class="enscript-function-name">arp_llreach_reachable</span>(<span class="enscript-type">struct</span> llinfo_arp *la)
+{
+	<span class="enscript-type">struct</span> if_llreach *lr;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *why = NULL;
+
+	<span class="enscript-comment">/* Nothing more to do if it's disabled; pretend it's reachable  */</span>
+	<span class="enscript-keyword">if</span> (arp_llreach_base == 0)
+		<span class="enscript-keyword">return</span> (1);
+
+	<span class="enscript-keyword">if</span> ((lr = la-&gt;la_llreach) == NULL) {
+		<span class="enscript-comment">/*
+		 * Link-layer reachability record isn't present for this
+		 * ARP entry; pretend it's reachable and use it as is.
+		 */</span>
+		<span class="enscript-keyword">return</span> (1);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ifnet_llreach_reachable(lr)) {
+		<span class="enscript-comment">/*
+		 * Record is present, it's not shared with other ARP
+		 * entries and a packet has recently been received
+		 * from the remote host; consider it reachable.
+		 */</span>
+		<span class="enscript-keyword">if</span> (lr-&gt;lr_reqcnt == 1)
+			<span class="enscript-keyword">return</span> (1);
+
+		<span class="enscript-comment">/* Prime it up, if this is the first time */</span>
+		<span class="enscript-keyword">if</span> (la-&gt;la_lastused == 0) {
+			VERIFY(la-&gt;la_llreach != NULL);
+			arp_llreach_use(la);
+		}
+
+		<span class="enscript-comment">/*
+		 * Record is present and shared with one or more ARP
+		 * entries, and a packet has recently been received
+		 * from the remote host.  Since it's shared by more
+		 * than one IP addresses, we can't rely on the link-
+		 * layer reachability alone; consider it reachable if
+		 * this ARP entry has been used &quot;recently.&quot;
+		 */</span>
+		<span class="enscript-keyword">if</span> (ifnet_llreach_reachable_delta(lr, la-&gt;la_lastused))
+			<span class="enscript-keyword">return</span> (1);
+
+		why = <span class="enscript-string">&quot;has alias(es) and hasn't been used in a while&quot;</span>;
+	} <span class="enscript-keyword">else</span> {
+		why = <span class="enscript-string">&quot;haven't heard from it in a while&quot;</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (arp_verbose &gt; 1) {
+		<span class="enscript-type">char</span> tmp[MAX_IPv4_STR_LEN];
+		u_int64_t now = net_uptime();
+
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: ARP probe(s) needed for %s; &quot;</span>
+		    <span class="enscript-string">&quot;%s [lastused %lld, lastrcvd %lld] secs ago\n&quot;</span>,
+		    if_name(lr-&gt;lr_ifp), inet_ntop(AF_INET,
+		    &amp;SIN(rt_key(la-&gt;la_rt))-&gt;sin_addr, tmp, <span class="enscript-keyword">sizeof</span> (tmp)), why,
+		    (la-&gt;la_lastused ? (int64_t)(now - la-&gt;la_lastused) : -1),
+		    (lr-&gt;lr_lastrcvd ? (int64_t)(now - lr-&gt;lr_lastrcvd) : -1));
+
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Obtain a link-layer source cache entry for the sender.
+ *
+ * NOTE: This is currently only for ARP/Ethernet.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">arp_llreach_alloc</span>(<span class="enscript-type">struct</span> rtentry *rt, <span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">void</span> *addr,
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> alen, boolean_t solicited)
+{
+	VERIFY(rt-&gt;rt_expire == 0 || rt-&gt;rt_rmx.rmx_expire != 0);
+	VERIFY(rt-&gt;rt_expire != 0 || rt-&gt;rt_rmx.rmx_expire == 0);
+
+	<span class="enscript-keyword">if</span> (arp_llreach_base != 0 &amp;&amp; rt-&gt;rt_expire != 0 &amp;&amp;
+	    !(rt-&gt;rt_ifp-&gt;if_flags &amp; IFF_LOOPBACK) &amp;&amp;
+	    ifp-&gt;if_addrlen == IF_LLREACH_MAXLEN &amp;&amp;	<span class="enscript-comment">/* Ethernet */</span>
+	    alen == ifp-&gt;if_addrlen) {
+		<span class="enscript-type">struct</span> llinfo_arp *la = rt-&gt;rt_llinfo;
+		<span class="enscript-type">struct</span> if_llreach *lr;
+		<span class="enscript-type">const</span> <span class="enscript-type">char</span> *why = NULL, *type = <span class="enscript-string">&quot;&quot;</span>;
+
+		<span class="enscript-comment">/* Become a regular mutex, just in case */</span>
+		RT_CONVERT_LOCK(rt);
+
+		<span class="enscript-keyword">if</span> ((lr = la-&gt;la_llreach) != NULL) {
+			type = (solicited ? <span class="enscript-string">&quot;ARP reply&quot;</span> : <span class="enscript-string">&quot;ARP announcement&quot;</span>);
+			<span class="enscript-comment">/*
+			 * If target has changed, create a new record;
+			 * otherwise keep existing record.
+			 */</span>
+			IFLR_LOCK(lr);
+			<span class="enscript-keyword">if</span> (bcmp(addr, lr-&gt;lr_key.addr, alen) != 0) {
+				IFLR_UNLOCK(lr);
+				<span class="enscript-comment">/* Purge any link-layer info caching */</span>
+				VERIFY(rt-&gt;rt_llinfo_purge != NULL);
+				rt-&gt;rt_llinfo_purge(rt);
+				lr = NULL;
+				why = <span class="enscript-string">&quot; for different target HW address; &quot;</span>
+				    <span class="enscript-string">&quot;using new llreach record&quot;</span>;
+			} <span class="enscript-keyword">else</span> {
+				lr-&gt;lr_probes = 0;	<span class="enscript-comment">/* reset probe count */</span>
+				IFLR_UNLOCK(lr);
+				<span class="enscript-keyword">if</span> (solicited) {
+					why = <span class="enscript-string">&quot; for same target HW address; &quot;</span>
+					    <span class="enscript-string">&quot;keeping existing llreach record&quot;</span>;
+				}
+			}
+		}
+
+		<span class="enscript-keyword">if</span> (lr == NULL) {
+			lr = la-&gt;la_llreach = ifnet_llreach_alloc(ifp,
+			    ETHERTYPE_IP, addr, alen, arp_llreach_base);
+			<span class="enscript-keyword">if</span> (lr != NULL) {
+				lr-&gt;lr_probes = 0;	<span class="enscript-comment">/* reset probe count */</span>
+				<span class="enscript-keyword">if</span> (why == NULL)
+					why = <span class="enscript-string">&quot;creating new llreach record&quot;</span>;
+			}
+		}
+
+		<span class="enscript-comment">/* Bump up retry ceiling to accomodate unicast retries */</span>
+		<span class="enscript-keyword">if</span> (lr != NULL)
+			la-&gt;la_maxtries = arp_maxtries + arp_unicast_lim;
+
+		<span class="enscript-keyword">if</span> (arp_verbose &gt; 1 &amp;&amp; lr != NULL &amp;&amp; why != NULL) {
+			<span class="enscript-type">char</span> tmp[MAX_IPv4_STR_LEN];
+
+			log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s%s for %s\n&quot;</span>, if_name(ifp),
+			    type, why, inet_ntop(AF_INET,
+			    &amp;SIN(rt_key(rt))-&gt;sin_addr, tmp, <span class="enscript-keyword">sizeof</span> (tmp)));
+		}
+	}
+}
+
+<span class="enscript-type">struct</span> arptf_arg {
+	<span class="enscript-type">int</span> draining;
+	uint32_t killed;
+	uint32_t aging;
+	uint32_t sticky;
+	uint32_t found;
+};
+
+<span class="enscript-comment">/*
+ * Free an arp entry.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">arptfree</span>(<span class="enscript-type">struct</span> llinfo_arp *la, <span class="enscript-type">void</span> *arg)
+{
+	<span class="enscript-type">struct</span> arptf_arg *ap = arg;
+	<span class="enscript-type">struct</span> rtentry *rt = la-&gt;la_rt;
+
+	lck_mtx_assert(rnh_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-comment">/* rnh_lock acquired by caller protects rt from going away */</span>
+	RT_LOCK(rt);
+
+	VERIFY(rt-&gt;rt_expire == 0 || rt-&gt;rt_rmx.rmx_expire != 0);
+	VERIFY(rt-&gt;rt_expire != 0 || rt-&gt;rt_rmx.rmx_expire == 0);
+
+	ap-&gt;found++;
+	<span class="enscript-keyword">if</span> (rt-&gt;rt_expire == 0 || (rt-&gt;rt_flags &amp; RTF_STATIC)) {
+		ap-&gt;sticky++;
+		<span class="enscript-comment">/* ARP entry is permanent? */</span>
+		<span class="enscript-keyword">if</span> (rt-&gt;rt_expire == 0) {
+			RT_UNLOCK(rt);
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+
+	<span class="enscript-comment">/* ARP entry hasn't expired and we're not draining? */</span>
+	<span class="enscript-keyword">if</span> (!ap-&gt;draining &amp;&amp; rt-&gt;rt_expire &gt; net_uptime()) {
+		RT_UNLOCK(rt);
+		ap-&gt;aging++;
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (rt-&gt;rt_refcnt &gt; 0) {
+		<span class="enscript-comment">/*
+		 * ARP entry has expired, with outstanding refcnt.
+		 * If we're not draining, force ARP query to be
+		 * generated next time this entry is used.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!ap-&gt;draining) {
+			<span class="enscript-type">struct</span> sockaddr_dl *sdl = SDL(rt-&gt;rt_gateway);
+			<span class="enscript-keyword">if</span> (sdl != NULL)
+				sdl-&gt;sdl_alen = 0;
+			la-&gt;la_asked = 0;
+			rt-&gt;rt_flags &amp;= ~RTF_REJECT;
+		}
+		RT_UNLOCK(rt);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!(rt-&gt;rt_flags &amp; RTF_STATIC)) {
+		<span class="enscript-comment">/*
+		 * ARP entry has no outstanding refcnt, and we're either
+		 * draining or it has expired; delete it from the routing
+		 * table.  Safe to drop rt_lock and use rt_key, since holding
+		 * rnh_lock here prevents another thread from calling
+		 * rt_setgate() on this route.
+		 */</span>
+		RT_UNLOCK(rt);
+		rtrequest_locked(RTM_DELETE, rt_key(rt), NULL,
+		    rt_mask(rt), 0, NULL);
+		arpstat.timeouts++;
+		ap-&gt;killed++;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* ARP entry is static; let it linger */</span>
+		RT_UNLOCK(rt);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">in_arpdrain</span>(<span class="enscript-type">void</span> *arg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>)
+	<span class="enscript-type">struct</span> llinfo_arp *la, *ola;
+	<span class="enscript-type">struct</span> arptf_arg farg;
+
+	<span class="enscript-keyword">if</span> (arp_verbose)
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: draining ARP entries\n&quot;</span>, __func__);
+
+	lck_mtx_lock(rnh_lock);
+	la = llinfo_arp.lh_first;
+	bzero(&amp;farg, <span class="enscript-keyword">sizeof</span> (farg));
+	farg.draining = 1;
+	<span class="enscript-keyword">while</span> ((ola = la) != NULL) {
+		la = la-&gt;la_le.le_next;
+		arptfree(ola, &amp;farg);
+	}
+	<span class="enscript-keyword">if</span> (arp_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: found %u, aging %u, sticky %u, killed %u\n&quot;</span>,
+		    __func__, farg.found, farg.aging, farg.sticky, farg.killed);
+	}
+	lck_mtx_unlock(rnh_lock);
+}
+
+<span class="enscript-comment">/*
+ * Timeout routine.  Age arp_tab entries periodically.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">arp_timeout</span>(<span class="enscript-type">void</span> *arg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>)
+	<span class="enscript-type">struct</span> llinfo_arp *la, *ola;
+	<span class="enscript-type">struct</span> timeval atv;
+	<span class="enscript-type">struct</span> arptf_arg farg;
+
+	lck_mtx_lock(rnh_lock);
+	la = llinfo_arp.lh_first;
+	bzero(&amp;farg, <span class="enscript-keyword">sizeof</span> (farg));
+	<span class="enscript-keyword">while</span> ((ola = la) != NULL) {
+		la = la-&gt;la_le.le_next;
+		arptfree(ola, &amp;farg);
+	}
+	<span class="enscript-keyword">if</span> (arp_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: found %u, aging %u, sticky %u, killed %u\n&quot;</span>,
+		    __func__, farg.found, farg.aging, farg.sticky, farg.killed);
+	}
+	atv.tv_usec = 0;
+	atv.tv_sec = arpt_prune;
+	<span class="enscript-comment">/* re-arm the timer if there's work to do */</span>
+	arp_timeout_run = 0;
+	<span class="enscript-keyword">if</span> (farg.aging &gt; 0)
+		arp_sched_timeout(&amp;atv);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (arp_verbose)
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: not rescheduling timer\n&quot;</span>, __func__);
+	lck_mtx_unlock(rnh_lock);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">arp_sched_timeout</span>(<span class="enscript-type">struct</span> timeval *atv)
+{
+	lck_mtx_assert(rnh_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (!arp_timeout_run) {
+		<span class="enscript-type">struct</span> timeval tv;
+
+		<span class="enscript-keyword">if</span> (atv == NULL) {
+			tv.tv_usec = 0;
+			tv.tv_sec = MAX(arpt_prune / 5, 1);
+			atv = &amp;tv;
+		}
+		<span class="enscript-keyword">if</span> (arp_verbose) {
+			log(LOG_DEBUG, <span class="enscript-string">&quot;%s: timer scheduled in &quot;</span>
+			    <span class="enscript-string">&quot;T+%llus.%lluu\n&quot;</span>, __func__,
+			    (uint64_t)atv-&gt;tv_sec, (uint64_t)atv-&gt;tv_usec);
+		}
+		arp_timeout_run = 1;
+		timeout(arp_timeout, NULL, tvtohz(atv));
+	}
+}
+
+<span class="enscript-comment">/*
+ * ifa_rtrequest() callback
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">arp_rtrequest</span>(<span class="enscript-type">int</span> req, <span class="enscript-type">struct</span> rtentry *rt, <span class="enscript-type">struct</span> sockaddr *sa)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">sa</span>)
+	<span class="enscript-type">struct</span> sockaddr *gate = rt-&gt;rt_gateway;
+	<span class="enscript-type">struct</span> llinfo_arp *la = rt-&gt;rt_llinfo;
+	<span class="enscript-type">static</span> <span class="enscript-type">struct</span> sockaddr_dl null_sdl =
+	    { .sdl_len = <span class="enscript-keyword">sizeof</span> (null_sdl), .sdl_family = AF_LINK };
+	uint64_t timenow;
+	<span class="enscript-type">char</span> buf[MAX_IPv4_STR_LEN];
+
+	VERIFY(arpinit_done);
+	lck_mtx_assert(rnh_lock, LCK_MTX_ASSERT_OWNED);
+	RT_LOCK_ASSERT_HELD(rt);
+
+	<span class="enscript-keyword">if</span> (rt-&gt;rt_flags &amp; RTF_GATEWAY)
+		<span class="enscript-keyword">return</span>;
+
+	timenow = net_uptime();
+	<span class="enscript-keyword">switch</span> (req) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">RTM_ADD</span>:
+		<span class="enscript-comment">/*
+		 * XXX: If this is a manually added route to interface
+		 * such as older version of routed or gated might provide,
+		 * restore cloning bit.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!(rt-&gt;rt_flags &amp; RTF_HOST) &amp;&amp; rt_mask(rt) != NULL &amp;&amp;
+		    SIN(rt_mask(rt))-&gt;sin_addr.s_addr != INADDR_BROADCAST)
+			rt-&gt;rt_flags |= RTF_CLONING;
+
+		<span class="enscript-keyword">if</span> (rt-&gt;rt_flags &amp; RTF_CLONING) {
+			<span class="enscript-comment">/*
+			 * Case 1: This route should come from a route to iface.
+			 */</span>
+			<span class="enscript-keyword">if</span> (rt_setgate(rt, rt_key(rt), SA(&amp;null_sdl)) == 0) {
+				gate = rt-&gt;rt_gateway;
+				SDL(gate)-&gt;sdl_type = rt-&gt;rt_ifp-&gt;if_type;
+				SDL(gate)-&gt;sdl_index = rt-&gt;rt_ifp-&gt;if_index;
+				<span class="enscript-comment">/*
+				 * In case we're called before 1.0 sec.
+				 * has elapsed.
+				 */</span>
+				rt_setexpire(rt, MAX(timenow, 1));
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/* Announce a new entry if requested. */</span>
+		<span class="enscript-keyword">if</span> (rt-&gt;rt_flags &amp; RTF_ANNOUNCE) {
+			<span class="enscript-keyword">if</span> (la != NULL)
+				arp_llreach_use(la); <span class="enscript-comment">/* Mark use timestamp */</span>
+			RT_UNLOCK(rt);
+			dlil_send_arp(rt-&gt;rt_ifp, ARPOP_REQUEST,
+			    SDL(gate), rt_key(rt), NULL, rt_key(rt), 0);
+			RT_LOCK(rt);
+			arpstat.txannounces++;
+		}
+		<span class="enscript-comment">/* FALLTHRU */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">RTM_RESOLVE</span>:
+		<span class="enscript-keyword">if</span> (gate-&gt;sa_family != AF_LINK ||
+		    gate-&gt;sa_len &lt; <span class="enscript-keyword">sizeof</span> (null_sdl)) {
+			arpstat.invalidreqs++;
+			log(LOG_ERR, <span class="enscript-string">&quot;%s: route to %s has bad gateway address &quot;</span>
+			    <span class="enscript-string">&quot;(sa_family %u sa_len %u) on %s\n&quot;</span>,
+			    __func__, inet_ntop(AF_INET,
+			    &amp;SIN(rt_key(rt))-&gt;sin_addr.s_addr, buf,
+			    <span class="enscript-keyword">sizeof</span> (buf)), gate-&gt;sa_family, gate-&gt;sa_len,
+			    if_name(rt-&gt;rt_ifp));
+			<span class="enscript-keyword">break</span>;
+		}
+		SDL(gate)-&gt;sdl_type = rt-&gt;rt_ifp-&gt;if_type;
+		SDL(gate)-&gt;sdl_index = rt-&gt;rt_ifp-&gt;if_index;
+
+		<span class="enscript-keyword">if</span> (la != NULL)
+			<span class="enscript-keyword">break</span>; <span class="enscript-comment">/* This happens on a route change */</span>
+
+		<span class="enscript-comment">/*
+		 * Case 2:  This route may come from cloning, or a manual route
+		 * add with a LL address.
+		 */</span>
+		rt-&gt;rt_llinfo = la = arp_llinfo_alloc(M_WAITOK);
+		<span class="enscript-keyword">if</span> (la == NULL) {
+			arpstat.reqnobufs++;
+			<span class="enscript-keyword">break</span>;
+		}
+		rt-&gt;rt_llinfo_get_ri	= arp_llinfo_get_ri;
+		rt-&gt;rt_llinfo_get_iflri	= arp_llinfo_get_iflri;
+		rt-&gt;rt_llinfo_purge	= arp_llinfo_purge;
+		rt-&gt;rt_llinfo_free	= arp_llinfo_free;
+		rt-&gt;rt_llinfo_refresh   = arp_llinfo_refresh;
+		rt-&gt;rt_flags |= RTF_LLINFO;
+		la-&gt;la_rt = rt;
+		LIST_INSERT_HEAD(&amp;llinfo_arp, la, la_le);
+		arpstat.inuse++;
+
+		<span class="enscript-comment">/* We have at least one entry; arm the timer if not already */</span>
+		arp_sched_timeout(NULL);
+
+		<span class="enscript-comment">/*
+		 * This keeps the multicast addresses from showing up
+		 * in `arp -a' listings as unresolved.  It's not actually
+		 * functional.  Then the same for broadcast.  For IPv4
+		 * link-local address, keep the entry around even after
+		 * it has expired.
+		 */</span>
+		<span class="enscript-keyword">if</span> (IN_MULTICAST(ntohl(SIN(rt_key(rt))-&gt;sin_addr.s_addr))) {
+			RT_UNLOCK(rt);
+			dlil_resolve_multi(rt-&gt;rt_ifp, rt_key(rt), gate,
+			    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_dl));
+			RT_LOCK(rt);
+			rt_setexpire(rt, 0);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (in_broadcast(SIN(rt_key(rt))-&gt;sin_addr,
+		    rt-&gt;rt_ifp)) {
+			<span class="enscript-type">struct</span> sockaddr_dl *gate_ll = SDL(gate);
+			size_t broadcast_len;
+			ifnet_llbroadcast_copy_bytes(rt-&gt;rt_ifp,
+			    LLADDR(gate_ll), <span class="enscript-keyword">sizeof</span> (gate_ll-&gt;sdl_data),
+			    &amp;broadcast_len);
+			gate_ll-&gt;sdl_alen = broadcast_len;
+			gate_ll-&gt;sdl_family = AF_LINK;
+			gate_ll-&gt;sdl_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_dl);
+			<span class="enscript-comment">/* In case we're called before 1.0 sec. has elapsed */</span>
+			rt_setexpire(rt, MAX(timenow, 1));
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (IN_LINKLOCAL(ntohl(SIN(rt_key(rt))-&gt;
+		    sin_addr.s_addr))) {
+			rt-&gt;rt_flags |= RTF_STATIC;
+		}
+
+		<span class="enscript-comment">/* Set default maximum number of retries */</span>
+		la-&gt;la_maxtries = arp_maxtries;
+
+		<span class="enscript-comment">/* Become a regular mutex, just in case */</span>
+		RT_CONVERT_LOCK(rt);
+		IFA_LOCK_SPIN(rt-&gt;rt_ifa);
+		<span class="enscript-keyword">if</span> (SIN(rt_key(rt))-&gt;sin_addr.s_addr ==
+		    (IA_SIN(rt-&gt;rt_ifa))-&gt;sin_addr.s_addr) {
+			IFA_UNLOCK(rt-&gt;rt_ifa);
+			<span class="enscript-comment">/*
+			 * This test used to be
+			 *	if (loif.if_flags &amp; IFF_UP)
+			 * It allowed local traffic to be forced through the
+			 * hardware by configuring the loopback down.  However,
+			 * it causes problems during network configuration
+			 * for boards that can't receive packets they send.
+			 * It is now necessary to clear &quot;useloopback&quot; and
+			 * remove the route to force traffic out to the
+			 * hardware.
+			 */</span>
+			rt_setexpire(rt, 0);
+			ifnet_lladdr_copy_bytes(rt-&gt;rt_ifp, LLADDR(SDL(gate)),
+			    SDL(gate)-&gt;sdl_alen = rt-&gt;rt_ifp-&gt;if_addrlen);
+			<span class="enscript-keyword">if</span> (useloopback) {
+				<span class="enscript-keyword">if</span> (rt-&gt;rt_ifp != lo_ifp) {
+					<span class="enscript-comment">/*
+					 * Purge any link-layer info caching.
+					 */</span>
+					<span class="enscript-keyword">if</span> (rt-&gt;rt_llinfo_purge != NULL)
+						rt-&gt;rt_llinfo_purge(rt);
+
+					<span class="enscript-comment">/*
+					 * Adjust route ref count for the
+					 * interfaces.
+					 */</span>
+					<span class="enscript-keyword">if</span> (rt-&gt;rt_if_ref_fn != NULL) {
+						rt-&gt;rt_if_ref_fn(lo_ifp, 1);
+						rt-&gt;rt_if_ref_fn(rt-&gt;rt_ifp, -1);
+					}
+				}
+				rt-&gt;rt_ifp = lo_ifp;
+				<span class="enscript-comment">/*
+				 * If rmx_mtu is not locked, update it
+				 * to the MTU used by the new interface.
+				 */</span>
+				<span class="enscript-keyword">if</span> (!(rt-&gt;rt_rmx.rmx_locks &amp; RTV_MTU))
+					rt-&gt;rt_rmx.rmx_mtu = rt-&gt;rt_ifp-&gt;if_mtu;
+			}
+		} <span class="enscript-keyword">else</span> {
+			IFA_UNLOCK(rt-&gt;rt_ifa);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">RTM_DELETE</span>:
+		<span class="enscript-keyword">if</span> (la == NULL)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-comment">/*
+		 * Unchain it but defer the actual freeing until the route
+		 * itself is to be freed.  rt-&gt;rt_llinfo still points to
+		 * llinfo_arp, and likewise, la-&gt;la_rt still points to this
+		 * route entry, except that RTF_LLINFO is now cleared.
+		 */</span>
+		LIST_REMOVE(la, la_le);
+		la-&gt;la_le.le_next = NULL;
+		la-&gt;la_le.le_prev = NULL;
+		arpstat.inuse--;
+
+		<span class="enscript-comment">/*
+		 * Purge any link-layer info caching.
+		 */</span>
+		<span class="enscript-keyword">if</span> (rt-&gt;rt_llinfo_purge != NULL)
+			rt-&gt;rt_llinfo_purge(rt);
+
+		rt-&gt;rt_flags &amp;= ~RTF_LLINFO;
+		<span class="enscript-keyword">if</span> (la-&gt;la_hold != NULL) {
+			m_freem(la-&gt;la_hold);
+			la-&gt;la_hold = NULL;
+			arpstat.purged++;
+		}
+	}
+}
+
+<span class="enscript-comment">/*
+ * convert hardware address to hex string for logging errors.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">sdl_addr_to_hex</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_dl *sdl, <span class="enscript-type">char</span> *orig_buf, <span class="enscript-type">int</span> buflen)
+{
+	<span class="enscript-type">char</span> *buf = orig_buf;
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">const</span> u_char *lladdr = (u_char *)(size_t)sdl-&gt;sdl_data;
+	<span class="enscript-type">int</span> maxbytes = buflen / 3;
+
+	<span class="enscript-keyword">if</span> (maxbytes &gt; sdl-&gt;sdl_alen) {
+		maxbytes = sdl-&gt;sdl_alen;
+	}
+	*buf = <span class="enscript-string">'\0'</span>;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; maxbytes; i++) {
+		snprintf(buf, 3, <span class="enscript-string">&quot;%02x&quot;</span>, lladdr[i]);
+		buf += 2;
+		*buf = (i == maxbytes - 1) ? <span class="enscript-string">'\0'</span> : <span class="enscript-string">':'</span>;
+		buf++;
+	}
+	<span class="enscript-keyword">return</span> (orig_buf);
+}
+
+<span class="enscript-comment">/*
+ * arp_lookup_route will lookup the route for a given address.
+ *
+ * The address must be for a host on a local network on this interface.
+ * If the returned route is non-NULL, the route is locked and the caller
+ * is responsible for unlocking it and releasing its reference.
+ */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">arp_lookup_route</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> in_addr *addr, <span class="enscript-type">int</span> create, <span class="enscript-type">int</span> proxy,
+    route_t *route, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> ifscope)
+{
+	<span class="enscript-type">struct</span> sockaddr_inarp sin =
+	    { <span class="enscript-keyword">sizeof</span> (sin), AF_INET, 0, { 0 }, { 0 }, 0, 0 };
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *why = NULL;
+	errno_t	error = 0;
+	route_t rt;
+
+	*route = NULL;
+
+	sin.sin_addr.s_addr = addr-&gt;s_addr;
+	sin.sin_other = proxy ? SIN_PROXY : 0;
+
+	<span class="enscript-comment">/*
+	 * If the destination is a link-local address, don't
+	 * constrain the lookup (don't scope it).
+	 */</span>
+	<span class="enscript-keyword">if</span> (IN_LINKLOCAL(ntohl(addr-&gt;s_addr)))
+		ifscope = IFSCOPE_NONE;
+
+	rt = rtalloc1_scoped((<span class="enscript-type">struct</span> sockaddr *)&amp;sin, create, 0, ifscope);
+	<span class="enscript-keyword">if</span> (rt == NULL)
+		<span class="enscript-keyword">return</span> (ENETUNREACH);
+
+	RT_LOCK(rt);
+
+	<span class="enscript-keyword">if</span> (rt-&gt;rt_flags &amp; RTF_GATEWAY) {
+		why = <span class="enscript-string">&quot;host is not on local network&quot;</span>;
+		error = ENETUNREACH;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!(rt-&gt;rt_flags &amp; RTF_LLINFO)) {
+		why = <span class="enscript-string">&quot;could not allocate llinfo&quot;</span>;
+		error = ENOMEM;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (rt-&gt;rt_gateway-&gt;sa_family != AF_LINK) {
+		why = <span class="enscript-string">&quot;gateway route is not ours&quot;</span>;
+		error = EPROTONOSUPPORT;
+	}
+
+	<span class="enscript-keyword">if</span> (error != 0) {
+		<span class="enscript-keyword">if</span> (create &amp;&amp; (arp_verbose || log_arp_warnings)) {
+			<span class="enscript-type">char</span> tmp[MAX_IPv4_STR_LEN];
+			log(LOG_DEBUG, <span class="enscript-string">&quot;%s: link#%d %s failed: %s\n&quot;</span>,
+			    __func__, ifscope, inet_ntop(AF_INET, addr, tmp,
+			    <span class="enscript-keyword">sizeof</span> (tmp)), why);
+		}
+
+		<span class="enscript-comment">/*
+		 * If there are no references to this route, and it is
+		 * a cloned route, and not static, and ARP had created
+		 * the route, then purge it from the routing table as
+		 * it is probably bogus.
+		 */</span>
+		<span class="enscript-keyword">if</span> (rt-&gt;rt_refcnt == 1 &amp;&amp;
+		    (rt-&gt;rt_flags &amp; (RTF_WASCLONED | RTF_STATIC)) ==
+		    RTF_WASCLONED) {
+			<span class="enscript-comment">/*
+			 * Prevent another thread from modiying rt_key,
+			 * rt_gateway via rt_setgate() after rt_lock is
+			 * dropped by marking the route as defunct.
+			 */</span>
+			rt-&gt;rt_flags |= RTF_CONDEMNED;
+			RT_UNLOCK(rt);
+			rtrequest(RTM_DELETE, rt_key(rt), rt-&gt;rt_gateway,
+			    rt_mask(rt), rt-&gt;rt_flags, NULL);
+			rtfree(rt);
+		} <span class="enscript-keyword">else</span> {
+			RT_REMREF_LOCKED(rt);
+			RT_UNLOCK(rt);
+		}
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	<span class="enscript-comment">/*
+	 * Caller releases reference and does RT_UNLOCK(rt).
+	 */</span>
+	*route = rt;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * This is the ARP pre-output routine; care must be taken to ensure that
+ * the &quot;hint&quot; route never gets freed via rtfree(), since the caller may
+ * have stored it inside a struct route with a reference held for that
+ * placeholder.
+ */</span>
+errno_t
+<span class="enscript-function-name">arp_lookup_ip</span>(ifnet_t ifp, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_in *net_dest,
+    <span class="enscript-type">struct</span> sockaddr_dl *ll_dest, size_t	ll_dest_len, route_t hint,
+    mbuf_t packet)
+{
+	route_t	route = NULL;	<span class="enscript-comment">/* output route */</span>
+	errno_t	result = 0;
+	<span class="enscript-type">struct</span> sockaddr_dl *gateway;
+	<span class="enscript-type">struct</span> llinfo_arp *llinfo = NULL;
+	uint64_t timenow;
+	<span class="enscript-type">int</span> unreachable = 0;
+	<span class="enscript-type">struct</span> if_llreach *lr;
+	<span class="enscript-type">struct</span> ifaddr *rt_ifa;
+	<span class="enscript-type">struct</span> sockaddr *sa;
+	uint32_t rtflags;
+	<span class="enscript-type">struct</span> sockaddr_dl sdl;
+
+	<span class="enscript-keyword">if</span> (net_dest-&gt;sin_family != AF_INET)
+		<span class="enscript-keyword">return</span> (EAFNOSUPPORT);
+
+	<span class="enscript-keyword">if</span> ((ifp-&gt;if_flags &amp; (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING))
+		<span class="enscript-keyword">return</span> (ENETDOWN);
+
+	<span class="enscript-comment">/*
+	 * If we were given a route, verify the route and grab the gateway
+	 */</span>
+	<span class="enscript-keyword">if</span> (hint != NULL) {
+		<span class="enscript-comment">/*
+		 * Callee holds a reference on the route and returns
+		 * with the route entry locked, upon success.
+		 */</span>
+		result = route_to_gwroute((<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *)
+		    net_dest, hint, &amp;route);
+		<span class="enscript-keyword">if</span> (result != 0)
+			<span class="enscript-keyword">return</span> (result);
+		<span class="enscript-keyword">if</span> (route != NULL)
+			RT_LOCK_ASSERT_HELD(route);
+	}
+
+	<span class="enscript-keyword">if</span> (packet-&gt;m_flags &amp; M_BCAST) {
+		size_t broadcast_len;
+		bzero(ll_dest, ll_dest_len);
+		result = ifnet_llbroadcast_copy_bytes(ifp, LLADDR(ll_dest),
+		    ll_dest_len - offsetof(<span class="enscript-type">struct</span> sockaddr_dl, sdl_data),
+		    &amp;broadcast_len);
+		<span class="enscript-keyword">if</span> (result == 0) {
+			ll_dest-&gt;sdl_alen = broadcast_len;
+			ll_dest-&gt;sdl_family = AF_LINK;
+			ll_dest-&gt;sdl_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_dl);
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+	}
+	<span class="enscript-keyword">if</span> (packet-&gt;m_flags &amp; M_MCAST) {
+		<span class="enscript-keyword">if</span> (route != NULL)
+			RT_UNLOCK(route);
+		result = dlil_resolve_multi(ifp,
+		    (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *)net_dest,
+		    (<span class="enscript-type">struct</span> sockaddr *)ll_dest, ll_dest_len);
+		<span class="enscript-keyword">if</span> (route != NULL)
+			RT_LOCK(route);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * If we didn't find a route, or the route doesn't have
+	 * link layer information, trigger the creation of the
+	 * route and link layer information.
+	 */</span>
+	<span class="enscript-keyword">if</span> (route == NULL || route-&gt;rt_llinfo == NULL) {
+		<span class="enscript-comment">/* Clean up now while we can */</span>
+		<span class="enscript-keyword">if</span> (route != NULL) {
+			<span class="enscript-keyword">if</span> (route == hint) {
+				RT_REMREF_LOCKED(route);
+				RT_UNLOCK(route);
+			} <span class="enscript-keyword">else</span> {
+				RT_UNLOCK(route);
+				rtfree(route);
+			}
+		}
+		<span class="enscript-comment">/*
+		 * Callee holds a reference on the route and returns
+		 * with the route entry locked, upon success.
+		 */</span>
+		result = arp_lookup_route(&amp;net_dest-&gt;sin_addr, 1, 0, &amp;route,
+		    ifp-&gt;if_index);
+		<span class="enscript-keyword">if</span> (result == 0)
+			RT_LOCK_ASSERT_HELD(route);
+	}
+
+	<span class="enscript-keyword">if</span> (result || route == NULL || (llinfo = route-&gt;rt_llinfo) == NULL) {
+		<span class="enscript-comment">/* In case result is 0 but no route, return an error */</span>
+		<span class="enscript-keyword">if</span> (result == 0)
+			result = EHOSTUNREACH;
+
+		<span class="enscript-keyword">if</span> (route != NULL &amp;&amp; route-&gt;rt_llinfo == NULL) {
+			<span class="enscript-type">char</span> tmp[MAX_IPv4_STR_LEN];
+			log(LOG_ERR, <span class="enscript-string">&quot;%s: can't allocate llinfo for %s\n&quot;</span>,
+			    __func__, inet_ntop(AF_INET, &amp;net_dest-&gt;sin_addr,
+			    tmp, <span class="enscript-keyword">sizeof</span> (tmp)));
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Now that we have the right route, is it filled in?
+	 */</span>
+	gateway = SDL(route-&gt;rt_gateway);
+	timenow = net_uptime();
+	VERIFY(route-&gt;rt_expire == 0 || route-&gt;rt_rmx.rmx_expire != 0);
+	VERIFY(route-&gt;rt_expire != 0 || route-&gt;rt_rmx.rmx_expire == 0);
+	<span class="enscript-keyword">if</span> ((route-&gt;rt_expire == 0 ||
+	    route-&gt;rt_expire &gt; timenow) &amp;&amp; gateway != NULL &amp;&amp;
+	    gateway-&gt;sdl_family == AF_LINK &amp;&amp; gateway-&gt;sdl_alen != 0 &amp;&amp;
+	    !(unreachable = !arp_llreach_reachable(llinfo))) {
+		bcopy(gateway, ll_dest, MIN(gateway-&gt;sdl_len, ll_dest_len));
+		result = 0;
+		arp_llreach_use(llinfo);	<span class="enscript-comment">/* Mark use timestamp */</span>
+		<span class="enscript-comment">/*
+		 * Start the unicast probe right before the entry expires.
+		 */</span>
+		lr = llinfo-&gt;la_llreach;
+		<span class="enscript-keyword">if</span> (lr == NULL)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+		rt_ifa = route-&gt;rt_ifa;
+		<span class="enscript-comment">/* Become a regular mutex, just in case */</span>
+		RT_CONVERT_LOCK(route);
+		IFLR_LOCK_SPIN(lr);
+		<span class="enscript-keyword">if</span> (route-&gt;rt_expire &lt;= timenow + arp_unicast_lim &amp;&amp;
+		    ifp-&gt;if_addrlen == IF_LLREACH_MAXLEN &amp;&amp;
+		    lr-&gt;lr_probes &lt;= arp_unicast_lim) {
+			lr-&gt;lr_probes++;
+			bzero(&amp;sdl, <span class="enscript-keyword">sizeof</span> (sdl));
+			sdl.sdl_alen = ifp-&gt;if_addrlen;
+			bcopy(&amp;lr-&gt;lr_key.addr, LLADDR(&amp;sdl),
+			    ifp-&gt;if_addrlen);
+			IFLR_UNLOCK(lr);
+			IFA_LOCK_SPIN(rt_ifa);
+			IFA_ADDREF_LOCKED(rt_ifa);
+			sa = rt_ifa-&gt;ifa_addr;
+			IFA_UNLOCK(rt_ifa);
+			rtflags = route-&gt;rt_flags;
+			RT_UNLOCK(route);
+			dlil_send_arp(ifp, ARPOP_REQUEST, NULL, sa,
+			    (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_dl *)&amp;sdl,
+			    (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *)net_dest, rtflags);
+			IFA_REMREF(rt_ifa);
+			RT_LOCK(route);
+		} <span class="enscript-keyword">else</span>
+			IFLR_UNLOCK(lr);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (unreachable) {
+		<span class="enscript-comment">/*
+		 * Discard existing answer in case we need to probe.
+		 */</span>
+		gateway-&gt;sdl_alen = 0;
+	}
+
+	<span class="enscript-keyword">if</span> (ifp-&gt;if_flags &amp; IFF_NOARP) {
+		result = ENOTSUP;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Route wasn't complete/valid. We need to arp.
+	 */</span>
+	<span class="enscript-keyword">if</span> (packet != NULL) {
+		<span class="enscript-keyword">if</span> (llinfo-&gt;la_hold != NULL) {
+			m_freem(llinfo-&gt;la_hold);
+			arpstat.dropped++;
+		}
+		llinfo-&gt;la_hold = packet;
+	}
+
+	<span class="enscript-keyword">if</span> (route-&gt;rt_expire) {
+		route-&gt;rt_flags &amp;= ~RTF_REJECT;
+		<span class="enscript-keyword">if</span> (llinfo-&gt;la_asked == 0 || route-&gt;rt_expire != timenow) {
+			rt_setexpire(route, timenow);
+			<span class="enscript-keyword">if</span> (llinfo-&gt;la_asked++ &lt; llinfo-&gt;la_maxtries) {
+				<span class="enscript-type">struct</span> kev_msg ev_msg;
+				<span class="enscript-type">struct</span> kev_in_arpfailure in_arpfailure;
+				boolean_t sendkev = FALSE;
+
+				rt_ifa = route-&gt;rt_ifa;
+				lr = llinfo-&gt;la_llreach;
+				<span class="enscript-comment">/* Become a regular mutex, just in case */</span>
+				RT_CONVERT_LOCK(route);
+				<span class="enscript-comment">/* Update probe count, if applicable */</span>
+				<span class="enscript-keyword">if</span> (lr != NULL) {
+					IFLR_LOCK_SPIN(lr);
+					lr-&gt;lr_probes++;
+					IFLR_UNLOCK(lr);
+				}
+				<span class="enscript-keyword">if</span> (ifp-&gt;if_addrlen == IF_LLREACH_MAXLEN &amp;&amp;
+				    route-&gt;rt_flags &amp; RTF_ROUTER &amp;&amp;
+				    llinfo-&gt;la_asked &gt; 1) {
+					sendkev = TRUE;
+					llinfo-&gt;la_flags |= LLINFO_RTRFAIL_EVTSENT;
+				}
+				IFA_LOCK_SPIN(rt_ifa);
+				IFA_ADDREF_LOCKED(rt_ifa);
+				sa = rt_ifa-&gt;ifa_addr;
+				IFA_UNLOCK(rt_ifa);
+				arp_llreach_use(llinfo); <span class="enscript-comment">/* Mark use tstamp */</span>
+				rtflags = route-&gt;rt_flags;
+				RT_UNLOCK(route);
+				dlil_send_arp(ifp, ARPOP_REQUEST, NULL, sa,
+				    NULL, (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *)net_dest,
+				    rtflags);
+				IFA_REMREF(rt_ifa);
+				<span class="enscript-keyword">if</span> (sendkev) {
+					bzero(&amp;ev_msg, <span class="enscript-keyword">sizeof</span>(ev_msg));
+					bzero(&amp;in_arpfailure, 
+					    <span class="enscript-keyword">sizeof</span>(in_arpfailure));
+					in_arpfailure.link_data.if_family =
+					    ifp-&gt;if_family;
+					in_arpfailure.link_data.if_unit =
+					    ifp-&gt;if_unit;
+					strlcpy(in_arpfailure.link_data.if_name,
+					    ifp-&gt;if_name, IFNAMSIZ);
+					ev_msg.vendor_code = KEV_VENDOR_APPLE;
+					ev_msg.kev_class = KEV_NETWORK_CLASS;
+					ev_msg.kev_subclass = KEV_INET_SUBCLASS;
+					ev_msg.event_code =
+					    KEV_INET_ARPRTRFAILURE;
+					ev_msg.dv[0].data_ptr = &amp;in_arpfailure;
+					ev_msg.dv[0].data_length =
+					    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span>
+						kev_in_arpfailure); 
+					kev_post_msg(&amp;ev_msg);
+				}
+				result = EJUSTRETURN;
+				RT_LOCK(route);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+			} <span class="enscript-keyword">else</span> {
+				route-&gt;rt_flags |= RTF_REJECT;
+				rt_setexpire(route,
+				    route-&gt;rt_expire + arpt_down);
+				llinfo-&gt;la_asked = 0;
+				<span class="enscript-comment">/*
+				 * Clear la_hold; don't free the packet since
+				 * we're not returning EJUSTRETURN; the caller
+				 * will handle the freeing.
+				 */</span>
+				llinfo-&gt;la_hold = NULL;
+				result = EHOSTUNREACH;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+			}
+		}
+	}
+
+	<span class="enscript-comment">/* The packet is now held inside la_hold (can &quot;packet&quot; be NULL?) */</span>
+	result = EJUSTRETURN;
+
+<span class="enscript-reference">release</span>:
+	<span class="enscript-keyword">if</span> (result == EHOSTUNREACH)
+		arpstat.dropped++;
+
+	<span class="enscript-keyword">if</span> (route != NULL) {
+		<span class="enscript-keyword">if</span> (route == hint) {
+			RT_REMREF_LOCKED(route);
+			RT_UNLOCK(route);
+		} <span class="enscript-keyword">else</span> {
+			RT_UNLOCK(route);
+			rtfree(route);
+		}
+	}
+	<span class="enscript-keyword">return</span> (result);
+}
+
+errno_t
+<span class="enscript-function-name">arp_ip_handle_input</span>(ifnet_t ifp, u_short arpop,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_dl *sender_hw, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_in *sender_ip,
+    <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr_in *target_ip)
+{
+	<span class="enscript-type">char</span> ipv4str[MAX_IPv4_STR_LEN];
+	<span class="enscript-type">struct</span> sockaddr_dl proxied;
+	<span class="enscript-type">struct</span> sockaddr_dl *gateway, *target_hw = NULL;
+	<span class="enscript-type">struct</span> ifaddr *ifa;
+	<span class="enscript-type">struct</span> in_ifaddr *ia;
+	<span class="enscript-type">struct</span> in_ifaddr *best_ia = NULL;
+	<span class="enscript-type">struct</span> sockaddr_in best_ia_sin;
+	route_t	route = NULL;
+	<span class="enscript-type">char</span> buf[3 * MAX_HW_LEN]; <span class="enscript-comment">/* enough for MAX_HW_LEN byte hw address */</span>
+	<span class="enscript-type">struct</span> llinfo_arp *llinfo;
+	errno_t	error;
+	<span class="enscript-type">int</span> created_announcement = 0;
+	<span class="enscript-type">int</span> bridged = 0, is_bridge = 0;
+
+	arpstat.received++;
+
+	<span class="enscript-comment">/* Do not respond to requests for 0.0.0.0 */</span>
+	<span class="enscript-keyword">if</span> (target_ip-&gt;sin_addr.s_addr == INADDR_ANY &amp;&amp; arpop == ARPOP_REQUEST)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-keyword">if</span> (ifp-&gt;if_bridge)
+		bridged = 1;
+	<span class="enscript-keyword">if</span> (ifp-&gt;if_type == IFT_BRIDGE)
+		is_bridge = 1;
+
+	<span class="enscript-keyword">if</span> (arpop == ARPOP_REPLY)
+		arpstat.rxreplies++;
+
+	<span class="enscript-comment">/*
+	 * Determine if this ARP is for us
+	 * For a bridge, we want to check the address irrespective
+	 * of the receive interface.
+	 */</span>
+	lck_rw_lock_shared(in_ifaddr_rwlock);
+	TAILQ_FOREACH(ia, INADDR_HASH(target_ip-&gt;sin_addr.s_addr), ia_hash) {
+		IFA_LOCK_SPIN(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">if</span> (((bridged &amp;&amp; ia-&gt;ia_ifp-&gt;if_bridge != NULL) ||
+		    (ia-&gt;ia_ifp == ifp)) &amp;&amp;
+		    ia-&gt;ia_addr.sin_addr.s_addr == target_ip-&gt;sin_addr.s_addr) {
+			best_ia = ia;
+			best_ia_sin = best_ia-&gt;ia_addr;
+			IFA_ADDREF_LOCKED(&amp;ia-&gt;ia_ifa);
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			lck_rw_done(in_ifaddr_rwlock);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">match</span>;
+		}
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+	}
+
+	TAILQ_FOREACH(ia, INADDR_HASH(sender_ip-&gt;sin_addr.s_addr), ia_hash) {
+		IFA_LOCK_SPIN(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">if</span> (((bridged &amp;&amp; ia-&gt;ia_ifp-&gt;if_bridge != NULL) ||
+		    (ia-&gt;ia_ifp == ifp)) &amp;&amp;
+		    ia-&gt;ia_addr.sin_addr.s_addr == sender_ip-&gt;sin_addr.s_addr) {
+			best_ia = ia;
+			best_ia_sin = best_ia-&gt;ia_addr;
+			IFA_ADDREF_LOCKED(&amp;ia-&gt;ia_ifa);
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			lck_rw_done(in_ifaddr_rwlock);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">match</span>;
+		}
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+	}
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">BDG_MEMBER_MATCHES_ARP</span>(addr, ifp, ia)				     \
+	(ia-&gt;ia_ifp-&gt;if_bridge == ifp-&gt;if_softc &amp;&amp;			     \
+	bcmp(IF_LLADDR(ia-&gt;ia_ifp), IF_LLADDR(ifp), ifp-&gt;if_addrlen) == 0 &amp;&amp; \
+	addr == ia-&gt;ia_addr.sin_addr.s_addr)
+	<span class="enscript-comment">/*
+	 * Check the case when bridge shares its MAC address with
+	 * some of its children, so packets are claimed by bridge
+	 * itself (bridge_input() does it first), but they are really
+	 * meant to be destined to the bridge member.
+	 */</span>
+	<span class="enscript-keyword">if</span> (is_bridge) {
+		TAILQ_FOREACH(ia, INADDR_HASH(target_ip-&gt;sin_addr.s_addr),
+		    ia_hash) {
+			IFA_LOCK_SPIN(&amp;ia-&gt;ia_ifa);
+			<span class="enscript-keyword">if</span> (BDG_MEMBER_MATCHES_ARP(target_ip-&gt;sin_addr.s_addr,
+			    ifp, ia)) {
+				ifp = ia-&gt;ia_ifp;
+				best_ia = ia;
+				best_ia_sin = best_ia-&gt;ia_addr;
+				IFA_ADDREF_LOCKED(&amp;ia-&gt;ia_ifa);
+				IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+				lck_rw_done(in_ifaddr_rwlock);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">match</span>;
+			}
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		}
+	}
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">BDG_MEMBER_MATCHES_ARP</span>
+	lck_rw_done(in_ifaddr_rwlock);
+
+	<span class="enscript-comment">/*
+	 * No match, use the first inet address on the receive interface
+	 * as a dummy address for the rest of the function; we may be
+	 * proxying for another address.
+	 */</span>
+	ifnet_lock_shared(ifp);
+	TAILQ_FOREACH(ifa, &amp;ifp-&gt;if_addrhead, ifa_link) {
+		IFA_LOCK_SPIN(ifa);
+		<span class="enscript-keyword">if</span> (ifa-&gt;ifa_addr-&gt;sa_family != AF_INET) {
+			IFA_UNLOCK(ifa);
+			<span class="enscript-keyword">continue</span>;
+		}
+		best_ia = (<span class="enscript-type">struct</span> in_ifaddr *)ifa;
+		best_ia_sin = best_ia-&gt;ia_addr;
+		IFA_ADDREF_LOCKED(ifa);
+		IFA_UNLOCK(ifa);
+		ifnet_lock_done(ifp);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">match</span>;
+	}
+	ifnet_lock_done(ifp);
+
+	<span class="enscript-comment">/*
+	 * If we're not a bridge member, or if we are but there's no
+	 * IPv4 address to use for the interface, drop the packet.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!bridged || best_ia == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+<span class="enscript-reference">match</span>:
+	<span class="enscript-comment">/* If the packet is from this interface, ignore the packet */</span>
+	<span class="enscript-keyword">if</span> (bcmp(CONST_LLADDR(sender_hw), IF_LLADDR(ifp),
+	    sender_hw-&gt;sdl_alen) == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	<span class="enscript-comment">/* Check for a conflict */</span>
+	<span class="enscript-keyword">if</span> (!bridged &amp;&amp;
+	    sender_ip-&gt;sin_addr.s_addr == best_ia_sin.sin_addr.s_addr) {
+		<span class="enscript-type">struct</span> kev_msg ev_msg;
+		<span class="enscript-type">struct</span> kev_in_collision	*in_collision;
+		u_char storage[<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_in_collision) + MAX_HW_LEN];
+
+		bzero(&amp;ev_msg, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_msg));
+		bzero(storage, (<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_in_collision) + MAX_HW_LEN));
+		in_collision = (<span class="enscript-type">struct</span> kev_in_collision *)(<span class="enscript-type">void</span> *)storage;
+		log(LOG_ERR, <span class="enscript-string">&quot;%s duplicate IP address %s sent from &quot;</span>
+		    <span class="enscript-string">&quot;address %s\n&quot;</span>, if_name(ifp),
+		    inet_ntop(AF_INET, &amp;sender_ip-&gt;sin_addr, ipv4str,
+		    <span class="enscript-keyword">sizeof</span> (ipv4str)), sdl_addr_to_hex(sender_hw, buf,
+		    <span class="enscript-keyword">sizeof</span> (buf)));
+
+		<span class="enscript-comment">/* Send a kernel event so anyone can learn of the conflict */</span>
+		in_collision-&gt;link_data.if_family = ifp-&gt;if_family;
+		in_collision-&gt;link_data.if_unit = ifp-&gt;if_unit;
+		strlcpy(&amp;in_collision-&gt;link_data.if_name[0],
+		    ifp-&gt;if_name, IFNAMSIZ);
+		in_collision-&gt;ia_ipaddr = sender_ip-&gt;sin_addr;
+		in_collision-&gt;hw_len = (sender_hw-&gt;sdl_alen &lt; MAX_HW_LEN) ?
+		    sender_hw-&gt;sdl_alen : MAX_HW_LEN;
+		bcopy(CONST_LLADDR(sender_hw), (caddr_t)in_collision-&gt;hw_addr,
+		    in_collision-&gt;hw_len);
+		ev_msg.vendor_code = KEV_VENDOR_APPLE;
+		ev_msg.kev_class = KEV_NETWORK_CLASS;
+		ev_msg.kev_subclass = KEV_INET_SUBCLASS;
+		ev_msg.event_code = KEV_INET_ARPCOLLISION;
+		ev_msg.dv[0].data_ptr = in_collision;
+		ev_msg.dv[0].data_length =
+		    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> kev_in_collision) + in_collision-&gt;hw_len;
+		ev_msg.dv[1].data_length = 0;
+		kev_post_msg(&amp;ev_msg);
+		arpstat.dupips++;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">respond</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Look up the routing entry. If it doesn't exist and we are the
+	 * target, and the sender isn't 0.0.0.0, go ahead and create one.
+	 * Callee holds a reference on the route and returns with the route
+	 * entry locked, upon success.
+	 */</span>
+	error = arp_lookup_route(&amp;sender_ip-&gt;sin_addr,
+	    (target_ip-&gt;sin_addr.s_addr == best_ia_sin.sin_addr.s_addr &amp;&amp;
+	    sender_ip-&gt;sin_addr.s_addr != 0), 0, &amp;route, ifp-&gt;if_index);
+
+	<span class="enscript-keyword">if</span> (error == 0)
+		RT_LOCK_ASSERT_HELD(route);
+
+	<span class="enscript-keyword">if</span> (error || route == NULL || route-&gt;rt_gateway == NULL) {
+		<span class="enscript-keyword">if</span> (arpop != ARPOP_REQUEST)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">respond</span>;
+
+		<span class="enscript-keyword">if</span> (arp_sendllconflict &amp;&amp; send_conflicting_probes != 0 &amp;&amp;
+		    (ifp-&gt;if_eflags &amp; IFEF_ARPLL) &amp;&amp;
+		    IN_LINKLOCAL(ntohl(target_ip-&gt;sin_addr.s_addr)) &amp;&amp;
+		    sender_ip-&gt;sin_addr.s_addr == INADDR_ANY) {
+			<span class="enscript-comment">/*
+			 * Verify this ARP probe doesn't conflict with
+			 * an IPv4LL we know of on another interface.
+			 */</span>
+			<span class="enscript-keyword">if</span> (route != NULL) {
+				RT_REMREF_LOCKED(route);
+				RT_UNLOCK(route);
+				route = NULL;
+			}
+			<span class="enscript-comment">/*
+			 * Callee holds a reference on the route and returns
+			 * with the route entry locked, upon success.
+			 */</span>
+			error = arp_lookup_route(&amp;target_ip-&gt;sin_addr, 0, 0,
+			    &amp;route, ifp-&gt;if_index);
+
+			<span class="enscript-keyword">if</span> (error != 0 || route == NULL ||
+			    route-&gt;rt_gateway == NULL)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">respond</span>;
+
+			RT_LOCK_ASSERT_HELD(route);
+
+			gateway = SDL(route-&gt;rt_gateway);
+			<span class="enscript-keyword">if</span> (route-&gt;rt_ifp != ifp &amp;&amp; gateway-&gt;sdl_alen != 0 &amp;&amp;
+			    (gateway-&gt;sdl_alen != sender_hw-&gt;sdl_alen ||
+			    bcmp(CONST_LLADDR(gateway), CONST_LLADDR(sender_hw),
+			    gateway-&gt;sdl_alen) != 0)) {
+				<span class="enscript-comment">/*
+				 * A node is probing for an IPv4LL we know
+				 * exists on a different interface. We respond
+				 * with a conflicting probe to force the new
+				 * device to pick a different IPv4LL address.
+				 */</span>
+				<span class="enscript-keyword">if</span> (arp_verbose || log_arp_warnings) {
+					log(LOG_INFO, <span class="enscript-string">&quot;arp: %s on %s sent &quot;</span>
+					    <span class="enscript-string">&quot;probe for %s, already on %s\n&quot;</span>,
+					    sdl_addr_to_hex(sender_hw, buf,
+					    <span class="enscript-keyword">sizeof</span> (buf)), if_name(ifp),
+					    inet_ntop(AF_INET,
+					    &amp;target_ip-&gt;sin_addr, ipv4str,
+					    <span class="enscript-keyword">sizeof</span> (ipv4str)),
+					    if_name(route-&gt;rt_ifp));
+					log(LOG_INFO, <span class="enscript-string">&quot;arp: sending &quot;</span>
+					    <span class="enscript-string">&quot;conflicting probe to %s on %s\n&quot;</span>,
+					    sdl_addr_to_hex(sender_hw, buf,
+					    <span class="enscript-keyword">sizeof</span> (buf)), if_name(ifp));
+				}
+				<span class="enscript-comment">/* Mark use timestamp */</span>
+				<span class="enscript-keyword">if</span> (route-&gt;rt_llinfo != NULL)
+					arp_llreach_use(route-&gt;rt_llinfo);
+				<span class="enscript-comment">/* We're done with the route */</span>
+				RT_REMREF_LOCKED(route);
+				RT_UNLOCK(route);
+				route = NULL;
+				<span class="enscript-comment">/*
+				 * Send a conservative unicast &quot;ARP probe&quot;.
+				 * This should force the other device to pick
+				 * a new number.  This will not force the
+				 * device to pick a new number if the device
+				 * has already assigned that number.  This will
+				 * not imply to the device that we own that
+				 * address.  The link address is always
+				 * present; it's never freed.
+				 */</span>
+				ifnet_lock_shared(ifp);
+				ifa = ifp-&gt;if_lladdr;
+				IFA_ADDREF(ifa);
+				ifnet_lock_done(ifp);
+				dlil_send_arp_internal(ifp, ARPOP_REQUEST,
+				    SDL(ifa-&gt;ifa_addr),
+				    (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *)sender_ip,
+				    sender_hw,
+				    (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *)target_ip);
+				IFA_REMREF(ifa);
+				ifa = NULL;
+				arpstat.txconflicts++;
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">respond</span>;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (keep_announcements != 0 &amp;&amp;
+		    target_ip-&gt;sin_addr.s_addr == sender_ip-&gt;sin_addr.s_addr) {
+			<span class="enscript-comment">/*
+			 * Don't create entry if link-local address and
+			 * link-local is disabled
+			 */</span>
+			<span class="enscript-keyword">if</span> (!IN_LINKLOCAL(ntohl(sender_ip-&gt;sin_addr.s_addr)) ||
+			    (ifp-&gt;if_eflags &amp; IFEF_ARPLL)) {
+				<span class="enscript-keyword">if</span> (route != NULL) {
+					RT_REMREF_LOCKED(route);
+					RT_UNLOCK(route);
+					route = NULL;
+				}
+				<span class="enscript-comment">/*
+				 * Callee holds a reference on the route and
+				 * returns with the route entry locked, upon
+				 * success.
+				 */</span>
+				error = arp_lookup_route(&amp;sender_ip-&gt;sin_addr,
+				    1, 0, &amp;route, ifp-&gt;if_index);
+
+				<span class="enscript-keyword">if</span> (error == 0)
+					RT_LOCK_ASSERT_HELD(route);
+
+				<span class="enscript-keyword">if</span> (error == 0 &amp;&amp; route != NULL &amp;&amp;
+				    route-&gt;rt_gateway != NULL)
+					created_announcement = 1;
+			}
+			<span class="enscript-keyword">if</span> (created_announcement == 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">respond</span>;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">respond</span>;
+		}
+	}
+
+	RT_LOCK_ASSERT_HELD(route);
+	VERIFY(route-&gt;rt_expire == 0 || route-&gt;rt_rmx.rmx_expire != 0);
+	VERIFY(route-&gt;rt_expire != 0 || route-&gt;rt_rmx.rmx_expire == 0);
+
+	gateway = SDL(route-&gt;rt_gateway);
+	<span class="enscript-keyword">if</span> (!bridged &amp;&amp; route-&gt;rt_ifp != ifp) {
+		<span class="enscript-keyword">if</span> (!IN_LINKLOCAL(ntohl(sender_ip-&gt;sin_addr.s_addr)) ||
+		    !(ifp-&gt;if_eflags &amp; IFEF_ARPLL)) {
+			<span class="enscript-keyword">if</span> (arp_verbose || log_arp_warnings)
+				log(LOG_ERR, <span class="enscript-string">&quot;arp: %s is on %s but got &quot;</span>
+				    <span class="enscript-string">&quot;reply from %s on %s\n&quot;</span>,
+				    inet_ntop(AF_INET, &amp;sender_ip-&gt;sin_addr,
+				    ipv4str, <span class="enscript-keyword">sizeof</span> (ipv4str)),
+				    if_name(route-&gt;rt_ifp),
+				    sdl_addr_to_hex(sender_hw, buf,
+				    <span class="enscript-keyword">sizeof</span> (buf)), if_name(ifp));
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">respond</span>;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* Don't change a permanent address */</span>
+			<span class="enscript-keyword">if</span> (route-&gt;rt_expire == 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">respond</span>;
+
+			<span class="enscript-comment">/*
+			 * We're about to check and/or change the route's ifp
+			 * and ifa, so do the lock dance: drop rt_lock, hold
+			 * rnh_lock and re-hold rt_lock to avoid violating the
+			 * lock ordering.  We have an extra reference on the
+			 * route, so it won't go away while we do this.
+			 */</span>
+			RT_UNLOCK(route);
+			lck_mtx_lock(rnh_lock);
+			RT_LOCK(route);
+			<span class="enscript-comment">/*
+			 * Don't change the cloned route away from the
+			 * parent's interface if the address did resolve
+			 * or if the route is defunct.  rt_ifp on both
+			 * the parent and the clone can now be freely
+			 * accessed now that we have acquired rnh_lock.
+			 */</span>
+			gateway = SDL(route-&gt;rt_gateway);
+			<span class="enscript-keyword">if</span> ((gateway-&gt;sdl_alen != 0 &amp;&amp;
+			    route-&gt;rt_parent != NULL &amp;&amp;
+			    route-&gt;rt_parent-&gt;rt_ifp == route-&gt;rt_ifp) ||
+			    (route-&gt;rt_flags &amp; RTF_CONDEMNED)) {
+				RT_REMREF_LOCKED(route);
+				RT_UNLOCK(route);
+				route = NULL;
+				lck_mtx_unlock(rnh_lock);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">respond</span>;
+			}
+			<span class="enscript-keyword">if</span> (route-&gt;rt_ifp != ifp) {
+				<span class="enscript-comment">/*
+				 * Purge any link-layer info caching.
+				 */</span>
+				<span class="enscript-keyword">if</span> (route-&gt;rt_llinfo_purge != NULL)
+					route-&gt;rt_llinfo_purge(route);
+
+				<span class="enscript-comment">/* Adjust route ref count for the interfaces */</span>
+				<span class="enscript-keyword">if</span> (route-&gt;rt_if_ref_fn != NULL) {
+					route-&gt;rt_if_ref_fn(ifp, 1);
+					route-&gt;rt_if_ref_fn(route-&gt;rt_ifp, -1);
+				}
+			}
+			<span class="enscript-comment">/* Change the interface when the existing route is on */</span>
+			route-&gt;rt_ifp = ifp;
+			<span class="enscript-comment">/*
+			 * If rmx_mtu is not locked, update it
+			 * to the MTU used by the new interface.
+			 */</span>
+			<span class="enscript-keyword">if</span> (!(route-&gt;rt_rmx.rmx_locks &amp; RTV_MTU))
+				route-&gt;rt_rmx.rmx_mtu = route-&gt;rt_ifp-&gt;if_mtu;
+
+			rtsetifa(route, &amp;best_ia-&gt;ia_ifa);
+			gateway-&gt;sdl_index = ifp-&gt;if_index;
+			RT_UNLOCK(route);
+			lck_mtx_unlock(rnh_lock);
+			RT_LOCK(route);
+			<span class="enscript-comment">/* Don't bother if the route is down */</span>
+			<span class="enscript-keyword">if</span> (!(route-&gt;rt_flags &amp; RTF_UP))
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">respond</span>;
+			<span class="enscript-comment">/* Refresh gateway pointer */</span>
+			gateway = SDL(route-&gt;rt_gateway);
+		}
+		RT_LOCK_ASSERT_HELD(route);
+	}
+
+	<span class="enscript-keyword">if</span> (gateway-&gt;sdl_alen != 0 &amp;&amp; bcmp(LLADDR(gateway),
+	    CONST_LLADDR(sender_hw), gateway-&gt;sdl_alen) != 0) {
+		<span class="enscript-keyword">if</span> (route-&gt;rt_expire != 0 &amp;&amp;
+		    (arp_verbose || log_arp_warnings)) {
+			<span class="enscript-type">char</span> buf2[3 * MAX_HW_LEN];
+			log(LOG_INFO, <span class="enscript-string">&quot;arp: %s moved from %s to %s on %s\n&quot;</span>,
+			    inet_ntop(AF_INET, &amp;sender_ip-&gt;sin_addr, ipv4str,
+			    <span class="enscript-keyword">sizeof</span> (ipv4str)),
+			    sdl_addr_to_hex(gateway, buf, <span class="enscript-keyword">sizeof</span> (buf)),
+			    sdl_addr_to_hex(sender_hw, buf2, <span class="enscript-keyword">sizeof</span> (buf2)),
+			    if_name(ifp));
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (route-&gt;rt_expire == 0) {
+			<span class="enscript-keyword">if</span> (arp_verbose || log_arp_warnings) {
+				log(LOG_ERR, <span class="enscript-string">&quot;arp: %s attempts to modify &quot;</span>
+				    <span class="enscript-string">&quot;permanent entry for %s on %s\n&quot;</span>,
+				    sdl_addr_to_hex(sender_hw, buf,
+				    <span class="enscript-keyword">sizeof</span> (buf)),
+				    inet_ntop(AF_INET, &amp;sender_ip-&gt;sin_addr,
+				    ipv4str, <span class="enscript-keyword">sizeof</span> (ipv4str)),
+				    if_name(ifp));
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">respond</span>;
+		}
+	}
+
+	<span class="enscript-comment">/* Copy the sender hardware address in to the route's gateway address */</span>
+	gateway-&gt;sdl_alen = sender_hw-&gt;sdl_alen;
+	bcopy(CONST_LLADDR(sender_hw), LLADDR(gateway), gateway-&gt;sdl_alen);
+
+	<span class="enscript-comment">/* Update the expire time for the route and clear the reject flag */</span>
+	<span class="enscript-keyword">if</span> (route-&gt;rt_expire != 0)
+		rt_setexpire(route, net_uptime() + arpt_keep);
+	route-&gt;rt_flags &amp;= ~RTF_REJECT;
+
+	<span class="enscript-comment">/* cache the gateway (sender HW) address */</span>
+	arp_llreach_alloc(route, ifp, LLADDR(gateway), gateway-&gt;sdl_alen,
+	    (arpop == ARPOP_REPLY));
+
+	llinfo = route-&gt;rt_llinfo;
+	<span class="enscript-comment">/* send a notification that the route is back up */</span>
+	<span class="enscript-keyword">if</span> (ifp-&gt;if_addrlen == IF_LLREACH_MAXLEN &amp;&amp;
+	    route-&gt;rt_flags &amp; RTF_ROUTER &amp;&amp; 
+	    llinfo-&gt;la_flags &amp; LLINFO_RTRFAIL_EVTSENT) {
+		<span class="enscript-type">struct</span> kev_msg ev_msg;
+		<span class="enscript-type">struct</span> kev_in_arpalive in_arpalive;
+
+		llinfo-&gt;la_flags &amp;= ~LLINFO_RTRFAIL_EVTSENT;
+		RT_UNLOCK(route);
+		bzero(&amp;ev_msg, <span class="enscript-keyword">sizeof</span>(ev_msg));
+		bzero(&amp;in_arpalive, <span class="enscript-keyword">sizeof</span>(in_arpalive));
+		in_arpalive.link_data.if_family = ifp-&gt;if_family;
+		in_arpalive.link_data.if_unit = ifp-&gt;if_unit;
+		strlcpy(in_arpalive.link_data.if_name, ifp-&gt;if_name, IFNAMSIZ);
+		ev_msg.vendor_code = KEV_VENDOR_APPLE;
+		ev_msg.kev_class = KEV_NETWORK_CLASS;
+		ev_msg.kev_subclass = KEV_INET_SUBCLASS;
+		ev_msg.event_code = KEV_INET_ARPRTRALIVE;
+		ev_msg.dv[0].data_ptr = &amp;in_arpalive;
+		ev_msg.dv[0].data_length = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kev_in_arpalive); 
+		kev_post_msg(&amp;ev_msg);
+		RT_LOCK(route);
+	}
+	<span class="enscript-comment">/* update the llinfo, send a queued packet if there is one */</span>
+	llinfo-&gt;la_asked = 0;
+	<span class="enscript-keyword">if</span> (llinfo-&gt;la_hold) {
+		<span class="enscript-type">struct</span> mbuf *m0 = llinfo-&gt;la_hold;
+		llinfo-&gt;la_hold = NULL;
+		RT_UNLOCK(route);
+		dlil_output(ifp, PF_INET, m0, (caddr_t)route,
+		    rt_key(route), 0, NULL);
+		RT_REMREF(route);
+		route = NULL;
+	}
+
+
+<span class="enscript-reference">respond</span>:
+	<span class="enscript-keyword">if</span> (route != NULL) {
+		<span class="enscript-comment">/* Mark use timestamp if we're going to send a reply */</span>
+		<span class="enscript-keyword">if</span> (arpop == ARPOP_REQUEST &amp;&amp; route-&gt;rt_llinfo != NULL)
+			arp_llreach_use(route-&gt;rt_llinfo);
+		RT_REMREF_LOCKED(route);
+		RT_UNLOCK(route);
+		route = NULL;
+	}
+
+	<span class="enscript-keyword">if</span> (arpop != ARPOP_REQUEST)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+	arpstat.rxrequests++;
+
+	<span class="enscript-comment">/* If we are not the target, check if we should proxy */</span>
+	<span class="enscript-keyword">if</span> (target_ip-&gt;sin_addr.s_addr != best_ia_sin.sin_addr.s_addr) {
+		<span class="enscript-comment">/*
+		 * Find a proxy route; callee holds a reference on the
+		 * route and returns with the route entry locked, upon
+		 * success.
+		 */</span>
+		error = arp_lookup_route(&amp;target_ip-&gt;sin_addr, 0, SIN_PROXY,
+		    &amp;route, ifp-&gt;if_index);
+
+		<span class="enscript-keyword">if</span> (error == 0) {
+			RT_LOCK_ASSERT_HELD(route);
+			<span class="enscript-comment">/*
+			 * Return proxied ARP replies only on the interface
+			 * or bridge cluster where this network resides.
+			 * Otherwise we may conflict with the host we are
+			 * proxying for.
+			 */</span>
+			<span class="enscript-keyword">if</span> (route-&gt;rt_ifp != ifp &amp;&amp;
+			    (route-&gt;rt_ifp-&gt;if_bridge != ifp-&gt;if_bridge ||
+			    ifp-&gt;if_bridge == NULL)) {
+				RT_REMREF_LOCKED(route);
+				RT_UNLOCK(route);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+			}
+			proxied = *SDL(route-&gt;rt_gateway);
+			target_hw = &amp;proxied;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * We don't have a route entry indicating we should
+			 * use proxy.  If we aren't supposed to proxy all,
+			 * we are done.
+			 */</span>
+			<span class="enscript-keyword">if</span> (!arp_proxyall)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+			<span class="enscript-comment">/*
+			 * See if we have a route to the target ip before
+			 * we proxy it.
+			 */</span>
+			route = rtalloc1_scoped((<span class="enscript-type">struct</span> sockaddr *)
+			    (size_t)target_ip, 0, 0, ifp-&gt;if_index);
+			<span class="enscript-keyword">if</span> (!route)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+			<span class="enscript-comment">/*
+			 * Don't proxy for hosts already on the same interface.
+			 */</span>
+			RT_LOCK(route);
+			<span class="enscript-keyword">if</span> (route-&gt;rt_ifp == ifp) {
+				RT_UNLOCK(route);
+				rtfree(route);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+			}
+		}
+		<span class="enscript-comment">/* Mark use timestamp */</span>
+		<span class="enscript-keyword">if</span> (route-&gt;rt_llinfo != NULL)
+			arp_llreach_use(route-&gt;rt_llinfo);
+		RT_REMREF_LOCKED(route);
+		RT_UNLOCK(route);
+	}
+
+	dlil_send_arp(ifp, ARPOP_REPLY,
+	    target_hw, (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *)target_ip,
+	    sender_hw, (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *)sender_ip, 0);
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (best_ia != NULL)
+		IFA_REMREF(&amp;best_ia-&gt;ia_ifa);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">arp_ifinit</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">struct</span> ifaddr *ifa)
+{
+	<span class="enscript-type">struct</span> sockaddr *sa;
+
+	IFA_LOCK(ifa);
+	ifa-&gt;ifa_rtrequest = arp_rtrequest;
+	ifa-&gt;ifa_flags |= RTF_CLONING;
+	sa = ifa-&gt;ifa_addr;
+	IFA_UNLOCK(ifa);
+	dlil_send_arp(ifp, ARPOP_REQUEST, NULL, sa, NULL, sa, 0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+arp_getstat SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-keyword">if</span> (req-&gt;oldptr == USER_ADDR_NULL)
+		req-&gt;oldlen = (size_t)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> arpstat);
+
+	<span class="enscript-keyword">return</span> (SYSCTL_OUT(req, &amp;arpstat, MIN(<span class="enscript-keyword">sizeof</span> (arpstat), req-&gt;oldlen)));
+}
+</pre>
+<hr />
+</body></html>

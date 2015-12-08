@@ -1,0 +1,559 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kpi_ipfilter.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kpi_ipfilter.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2004-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>	<span class="enscript-comment">/* for definition of NULL */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/endian.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_IP_VHL</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_protocol.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/in6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/kpi_ipfilter_var.h&gt;</span>
+
+
+<span class="enscript-comment">/*
+ * kipf_lock and kipf_ref protect the linkage of the list of IP filters
+ * An IP filter can be removed only when kipf_ref is zero
+ * If an IP filter cannot be removed because kipf_ref is not null, then 
+ * the IP filter is marjed and kipf_delayed_remove is set so that when 
+ * kipf_ref eventually goes down to zero, the IP filter is removed
+ */</span>
+<span class="enscript-function-name">decl_lck_mtx_data</span>(<span class="enscript-type">static</span>, kipf_lock_data);
+<span class="enscript-type">static</span> lck_mtx_t *kipf_lock = &amp;kipf_lock_data;
+<span class="enscript-type">static</span> u_int32_t kipf_ref = 0;
+<span class="enscript-type">static</span> u_int32_t kipf_delayed_remove = 0;
+u_int32_t kipf_count = 0;
+
+__private_extern__ <span class="enscript-type">struct</span> ipfilter_list	ipv4_filters = TAILQ_HEAD_INITIALIZER(ipv4_filters);
+__private_extern__ <span class="enscript-type">struct</span> ipfilter_list	ipv6_filters = TAILQ_HEAD_INITIALIZER(ipv6_filters);
+__private_extern__ <span class="enscript-type">struct</span> ipfilter_list	tbr_filters = TAILQ_HEAD_INITIALIZER(tbr_filters);
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipf_ref</span>(<span class="enscript-type">void</span>)
+{
+	lck_mtx_lock(kipf_lock);
+    kipf_ref++;
+	lck_mtx_unlock(kipf_lock);
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipf_unref</span>(<span class="enscript-type">void</span>)
+{
+	lck_mtx_lock(kipf_lock);
+
+    <span class="enscript-keyword">if</span> (kipf_ref == 0)
+    	panic(<span class="enscript-string">&quot;ipf_unref: kipf_ref == 0\n&quot;</span>);
+    	
+    kipf_ref--;
+    <span class="enscript-keyword">if</span> (kipf_ref == 0 &amp;&amp; kipf_delayed_remove != 0) {
+    	<span class="enscript-type">struct</span> ipfilter *filter;
+
+		<span class="enscript-keyword">while</span> ((filter = TAILQ_FIRST(&amp;tbr_filters))) {
+			ipf_detach_func ipf_detach = filter-&gt;ipf_filter.ipf_detach;
+			<span class="enscript-type">void</span>* cookie = filter-&gt;ipf_filter.cookie;
+			
+			TAILQ_REMOVE(filter-&gt;ipf_head, filter, ipf_link);
+			TAILQ_REMOVE(&amp;tbr_filters, filter, ipf_tbr);
+			kipf_delayed_remove--;
+
+			<span class="enscript-keyword">if</span> (ipf_detach) {
+				lck_mtx_unlock(kipf_lock);
+				ipf_detach(cookie);
+				lck_mtx_lock(kipf_lock);
+				<span class="enscript-comment">/* In case some filter got to run while we released the lock */</span>
+				<span class="enscript-keyword">if</span> (kipf_ref != 0)
+					<span class="enscript-keyword">break</span>;
+			}			
+		}
+   	} 
+	lck_mtx_unlock(kipf_lock);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipf_add</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ipf_filter* filter,
+	ipfilter_t *filter_ref,
+	<span class="enscript-type">struct</span> ipfilter_list *head)
+{
+	<span class="enscript-type">struct</span> ipfilter	*new_filter;
+	<span class="enscript-keyword">if</span> (filter-&gt;name == NULL || (filter-&gt;ipf_input == NULL &amp;&amp; filter-&gt;ipf_output == NULL))
+		<span class="enscript-keyword">return</span> EINVAL;
+	
+	MALLOC(new_filter, <span class="enscript-type">struct</span> ipfilter*, <span class="enscript-keyword">sizeof</span>(*new_filter), M_IFADDR, M_WAITOK);
+	<span class="enscript-keyword">if</span> (new_filter == NULL)
+		<span class="enscript-keyword">return</span> ENOMEM;
+	
+	lck_mtx_lock(kipf_lock);
+	new_filter-&gt;ipf_filter = *filter;
+	new_filter-&gt;ipf_head = head;
+	
+	TAILQ_INSERT_HEAD(head, new_filter, ipf_link);
+	
+	lck_mtx_unlock(kipf_lock);
+	
+	*filter_ref = (ipfilter_t)new_filter;
+
+	<span class="enscript-comment">/* This will force TCP to re-evaluate its use of TSO */</span>
+	OSAddAtomic(1, &amp;kipf_count);
+	routegenid_update();
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+errno_t
+<span class="enscript-function-name">ipf_addv4</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ipf_filter* filter,
+	ipfilter_t *filter_ref)
+{
+	<span class="enscript-keyword">return</span> ipf_add(filter, filter_ref, &amp;ipv4_filters);
+}
+
+errno_t
+<span class="enscript-function-name">ipf_addv6</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ipf_filter* filter,
+	ipfilter_t *filter_ref)
+{
+	<span class="enscript-keyword">return</span> ipf_add(filter, filter_ref, &amp;ipv6_filters);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipf_input_detached</span>(<span class="enscript-type">void</span> *cookie, mbuf_t *data, <span class="enscript-type">int</span> offset, u_int8_t protocol)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">cookie</span>, <span class="enscript-variable-name">data</span>, <span class="enscript-variable-name">offset</span>, <span class="enscript-variable-name">protocol</span>)
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	printf(<span class="enscript-string">&quot;ipf_input_detached\n&quot;</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipf_output_detached</span>(<span class="enscript-type">void</span> *cookie, mbuf_t *data, ipf_pktopts_t options)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">cookie</span>, <span class="enscript-variable-name">data</span>, <span class="enscript-variable-name">options</span>)
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	printf(<span class="enscript-string">&quot;ipf_output_detached\n&quot;</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+errno_t
+<span class="enscript-function-name">ipf_remove</span>(
+	ipfilter_t filter_ref)
+{
+	<span class="enscript-type">struct</span> ipfilter	*match = (<span class="enscript-type">struct</span> ipfilter*)filter_ref;
+	<span class="enscript-type">struct</span> ipfilter_list *head;
+	
+	<span class="enscript-keyword">if</span> (match == 0 || (match-&gt;ipf_head != &amp;ipv4_filters &amp;&amp; match-&gt;ipf_head != &amp;ipv6_filters))
+		<span class="enscript-keyword">return</span> EINVAL;
+	
+	head = match-&gt;ipf_head;
+	
+	lck_mtx_lock(kipf_lock);
+	TAILQ_FOREACH(match, head, ipf_link) {
+		<span class="enscript-keyword">if</span> (match == (<span class="enscript-type">struct</span> ipfilter*)filter_ref) {
+			ipf_detach_func ipf_detach = match-&gt;ipf_filter.ipf_detach;
+			<span class="enscript-type">void</span>* cookie = match-&gt;ipf_filter.cookie;
+			
+			<span class="enscript-comment">/*
+			 * Cannot detach when they are filters running
+			 */</span>
+			<span class="enscript-keyword">if</span> (kipf_ref) {
+				kipf_delayed_remove++;
+				TAILQ_INSERT_TAIL(&amp;tbr_filters, match, ipf_tbr);
+				match-&gt;ipf_filter.ipf_input = ipf_input_detached;
+				match-&gt;ipf_filter.ipf_output = ipf_output_detached;
+				lck_mtx_unlock(kipf_lock);
+			} <span class="enscript-keyword">else</span> {
+				TAILQ_REMOVE(head, match, ipf_link);
+				lck_mtx_unlock(kipf_lock);
+				<span class="enscript-keyword">if</span> (ipf_detach)
+					ipf_detach(cookie);
+				FREE(match, M_IFADDR);
+
+				<span class="enscript-comment">/* This will force TCP to re-evaluate its use of TSO */</span>
+				OSAddAtomic(-1, &amp;kipf_count);
+				routegenid_update();
+
+			}
+			<span class="enscript-keyword">return</span> 0;
+		}
+	}
+	lck_mtx_unlock(kipf_lock);
+	
+	<span class="enscript-keyword">return</span> ENOENT;
+}
+
+<span class="enscript-type">int</span> log_for_en1 = 0;
+
+errno_t
+<span class="enscript-function-name">ipf_inject_input</span>(
+	mbuf_t data,
+	ipfilter_t filter_ref)
+{
+	<span class="enscript-type">struct</span> mbuf	*m = (<span class="enscript-type">struct</span> mbuf*)data;
+	<span class="enscript-type">struct</span> m_tag *mtag = 0;
+	<span class="enscript-type">struct</span> ip *ip = mtod(m, <span class="enscript-type">struct</span> ip *);
+	u_int8_t	vers;
+	<span class="enscript-type">int</span> hlen;
+	errno_t error = 0;
+	protocol_family_t proto;
+
+	vers = IP_VHL_V(ip-&gt;ip_vhl);
+	
+	<span class="enscript-keyword">switch</span> (vers) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">4</span>:
+			proto = PF_INET;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">6</span>:
+			proto = PF_INET6;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			error = ENOTSUP;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	
+	<span class="enscript-keyword">if</span> (filter_ref == 0 &amp;&amp; m-&gt;m_pkthdr.rcvif == 0) {
+		m-&gt;m_pkthdr.rcvif = lo_ifp;
+		m-&gt;m_pkthdr.csum_data = 0;
+		m-&gt;m_pkthdr.csum_flags = 0;
+		<span class="enscript-keyword">if</span> (vers == 4) {
+			hlen = IP_VHL_HL(ip-&gt;ip_vhl) &lt;&lt; 2;
+			ip-&gt;ip_sum = 0;
+			ip-&gt;ip_sum = in_cksum(m, hlen);
+		}
+	}
+	<span class="enscript-keyword">if</span> (filter_ref != 0) {
+		mtag = m_tag_create(KERNEL_MODULE_TAG_ID, KERNEL_TAG_TYPE_IPFILT,
+					 	   <span class="enscript-keyword">sizeof</span> (ipfilter_t), M_NOWAIT, m);
+		<span class="enscript-keyword">if</span> (mtag == NULL) {
+			error = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}	
+		*(ipfilter_t*)(mtag+1) = filter_ref;
+		m_tag_prepend(m, mtag);
+	}
+	
+	error = proto_inject(proto, data);
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipf_injectv4_out</span>(mbuf_t data, ipfilter_t filter_ref, ipf_pktopts_t options)
+{
+	<span class="enscript-type">struct</span> route ro;
+	<span class="enscript-type">struct</span> ip	*ip;
+	<span class="enscript-type">struct</span> mbuf	*m = (<span class="enscript-type">struct</span> mbuf*)data;
+	errno_t error = 0;
+	<span class="enscript-type">struct</span> m_tag *mtag = NULL;
+	<span class="enscript-type">struct</span> ip_moptions *imo = NULL;
+	<span class="enscript-type">struct</span> ip_out_args ipoa = { IFSCOPE_NONE, { 0 }, 0, 0 };
+
+	<span class="enscript-comment">/* Make the IP header contiguous in the mbuf */</span>
+	<span class="enscript-keyword">if</span> ((size_t)m-&gt;m_len &lt; <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ip)) {
+		m = m_pullup(m, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ip));
+		<span class="enscript-keyword">if</span> (m == NULL)
+			<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+	ip = (<span class="enscript-type">struct</span> ip *)m_mtod(m);
+
+	<span class="enscript-keyword">if</span> (filter_ref != 0) {
+		mtag = m_tag_create(KERNEL_MODULE_TAG_ID,
+		    KERNEL_TAG_TYPE_IPFILT, <span class="enscript-keyword">sizeof</span> (ipfilter_t), M_NOWAIT, m);
+		<span class="enscript-keyword">if</span> (mtag == NULL) {
+			m_freem(m);
+			<span class="enscript-keyword">return</span> (ENOMEM);
+		}
+		*(ipfilter_t *)(mtag + 1) = filter_ref;
+		m_tag_prepend(m, mtag);
+	}
+
+	<span class="enscript-keyword">if</span> (options != NULL &amp;&amp; (options-&gt;ippo_flags &amp; IPPOF_MCAST_OPTS) &amp;&amp;
+	    (imo = ip_allocmoptions(M_DONTWAIT)) != NULL) {
+		imo-&gt;imo_multicast_ifp = options-&gt;ippo_mcast_ifnet;
+		imo-&gt;imo_multicast_ttl = options-&gt;ippo_mcast_ttl;
+		imo-&gt;imo_multicast_loop = options-&gt;ippo_mcast_loop;
+	}
+
+	<span class="enscript-keyword">if</span> (options != NULL) {
+		<span class="enscript-keyword">if</span> (options-&gt;ippo_flags &amp; IPPOF_SELECT_SRCIF)
+			ipoa.ipoa_flags |= IPOAF_SELECT_SRCIF;
+		<span class="enscript-keyword">if</span> (options-&gt;ippo_flags &amp; IPPOF_BOUND_IF) {
+			ipoa.ipoa_flags |= IPOAF_BOUND_IF;
+			ipoa.ipoa_boundif = options-&gt;ippo_flags &gt;&gt;
+			    IPPOF_SHIFT_IFSCOPE;
+		}
+		<span class="enscript-keyword">if</span> (options-&gt;ippo_flags &amp; IPPOF_NO_IFT_CELLULAR)
+			ipoa.ipoa_flags |= IPOAF_NO_CELLULAR;
+		<span class="enscript-keyword">if</span> (options-&gt;ippo_flags &amp; IPPOF_BOUND_SRCADDR)
+			ipoa.ipoa_flags |= IPOAF_BOUND_SRCADDR;
+		<span class="enscript-keyword">if</span> (options-&gt;ippo_flags &amp; IPPOF_NO_IFF_EXPENSIVE)
+			ipoa.ipoa_flags |= IPOAF_NO_EXPENSIVE;
+	}
+
+	bzero(&amp;ro, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> route));
+
+	<span class="enscript-comment">/* Put ip_len and ip_off in host byte order, ip_output expects that */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">BYTE_ORDER</span> != <span class="enscript-variable-name">BIG_ENDIAN</span>
+	NTOHS(ip-&gt;ip_len);
+	NTOHS(ip-&gt;ip_off);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* Send; enforce source interface selection via IP_OUTARGS flag */</span>
+	error = ip_output(m, NULL, &amp;ro,
+	    IP_ALLOWBROADCAST | IP_RAWOUTPUT | IP_OUTARGS, imo, &amp;ipoa);
+
+	<span class="enscript-comment">/* Release the route */</span>
+	ROUTE_RELEASE(&amp;ro);
+
+	<span class="enscript-keyword">if</span> (imo != NULL)
+		IMO_REMREF(imo);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipf_injectv6_out</span>(mbuf_t data, ipfilter_t filter_ref, ipf_pktopts_t options)
+{
+	<span class="enscript-type">struct</span> route_in6 ro;
+	<span class="enscript-type">struct</span> ip6_hdr	*ip6;
+	<span class="enscript-type">struct</span> mbuf	*m = (<span class="enscript-type">struct</span> mbuf*)data;
+	errno_t error = 0;
+	<span class="enscript-type">struct</span> m_tag *mtag = NULL;
+	<span class="enscript-type">struct</span> ip6_moptions *im6o = NULL;
+	<span class="enscript-type">struct</span> ip6_out_args ip6oa = { IFSCOPE_NONE, { 0 }, 0, 0 };
+
+	<span class="enscript-comment">/* Make the IP header contiguous in the mbuf */</span>
+	<span class="enscript-keyword">if</span> ((size_t)m-&gt;m_len &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_hdr)) {
+		m = m_pullup(m, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_hdr));
+		<span class="enscript-keyword">if</span> (m == NULL)
+			<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+	ip6 = (<span class="enscript-type">struct</span> ip6_hdr*)m_mtod(m);
+
+	<span class="enscript-keyword">if</span> (filter_ref != 0) {
+		mtag = m_tag_create(KERNEL_MODULE_TAG_ID,
+		    KERNEL_TAG_TYPE_IPFILT, <span class="enscript-keyword">sizeof</span> (ipfilter_t), M_NOWAIT, m);
+		<span class="enscript-keyword">if</span> (mtag == NULL) {
+			m_freem(m);
+			<span class="enscript-keyword">return</span> (ENOMEM);
+		}
+		*(ipfilter_t *)(mtag + 1) = filter_ref;
+		m_tag_prepend(m, mtag);
+	}
+
+	<span class="enscript-keyword">if</span> (options != NULL &amp;&amp; (options-&gt;ippo_flags &amp; IPPOF_MCAST_OPTS) &amp;&amp;
+	    (im6o = ip6_allocmoptions(M_DONTWAIT)) != NULL) {
+		im6o-&gt;im6o_multicast_ifp = options-&gt;ippo_mcast_ifnet;
+		im6o-&gt;im6o_multicast_hlim = options-&gt;ippo_mcast_ttl;
+		im6o-&gt;im6o_multicast_loop = options-&gt;ippo_mcast_loop;
+	}
+
+	<span class="enscript-keyword">if</span> (options != NULL) {
+		<span class="enscript-keyword">if</span> (options-&gt;ippo_flags &amp; IPPOF_SELECT_SRCIF)
+			ip6oa.ip6oa_flags |= IP6OAF_SELECT_SRCIF;
+		<span class="enscript-keyword">if</span> (options-&gt;ippo_flags &amp; IPPOF_BOUND_IF) {
+			ip6oa.ip6oa_flags |= IP6OAF_BOUND_IF;
+			ip6oa.ip6oa_boundif = options-&gt;ippo_flags &gt;&gt;
+			    IPPOF_SHIFT_IFSCOPE;
+		}
+		<span class="enscript-keyword">if</span> (options-&gt;ippo_flags &amp; IPPOF_NO_IFT_CELLULAR)
+			ip6oa.ip6oa_flags |= IP6OAF_NO_CELLULAR;
+		<span class="enscript-keyword">if</span> (options-&gt;ippo_flags &amp; IPPOF_BOUND_SRCADDR)
+			ip6oa.ip6oa_flags |= IP6OAF_BOUND_SRCADDR;
+		<span class="enscript-keyword">if</span> (options-&gt;ippo_flags &amp; IPPOF_NO_IFF_EXPENSIVE)
+			ip6oa.ip6oa_flags |= IP6OAF_NO_EXPENSIVE;
+	}
+
+	bzero(&amp;ro, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> route_in6));
+
+	<span class="enscript-comment">/*
+	 * Send  mbuf and ifscope information. Check for correctness
+	 * of ifscope information is done while searching for a route in 
+	 * ip6_output.
+	 */</span>
+	error = ip6_output(m, NULL, &amp;ro, IPV6_OUTARGS, im6o, NULL, &amp;ip6oa);
+
+	<span class="enscript-comment">/* Release the route */</span>
+	ROUTE_RELEASE(&amp;ro);
+
+	<span class="enscript-keyword">if</span> (im6o != NULL)
+		IM6O_REMREF(im6o);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+
+errno_t
+<span class="enscript-function-name">ipf_inject_output</span>(
+	mbuf_t data,
+	ipfilter_t filter_ref,
+	ipf_pktopts_t options)
+{
+	<span class="enscript-type">struct</span> mbuf	*m = (<span class="enscript-type">struct</span> mbuf*)data;
+	u_int8_t	vers;
+	errno_t		error = 0;
+
+	<span class="enscript-comment">/* Make one byte of the header contiguous in the mbuf */</span>
+	<span class="enscript-keyword">if</span> (m-&gt;m_len &lt; 1) {
+		m = m_pullup(m, 1);
+		<span class="enscript-keyword">if</span> (m == NULL) 
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	
+	vers = (*(u_int8_t*)m_mtod(m)) &gt;&gt; 4;
+	<span class="enscript-keyword">switch</span> (vers)
+	{
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">4</span>:
+			error = ipf_injectv4_out(data, filter_ref, options);
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">6</span>:
+			error = ipf_injectv6_out(data, filter_ref, options);
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-reference">default</span>:
+			m_freem(m);
+			error = ENOTSUP;
+			<span class="enscript-keyword">break</span>;
+	}
+
+<span class="enscript-reference">done</span>:	
+	<span class="enscript-keyword">return</span> error;
+}
+
+__private_extern__ ipfilter_t
+<span class="enscript-function-name">ipf_get_inject_filter</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	ipfilter_t filter_ref = 0;
+	<span class="enscript-type">struct</span> m_tag *mtag;
+	
+	mtag = m_tag_locate(m, KERNEL_MODULE_TAG_ID, KERNEL_TAG_TYPE_IPFILT, NULL);
+	<span class="enscript-keyword">if</span> (mtag) {
+		filter_ref = *(ipfilter_t *)(mtag+1);
+		
+		m_tag_delete(m, mtag);
+	}
+	<span class="enscript-keyword">return</span> filter_ref;
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ipf_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> error = 0;
+	lck_grp_attr_t *grp_attributes = 0;
+	lck_attr_t *lck_attributes = 0;
+	lck_grp_t *lck_grp = 0;
+	
+	grp_attributes = lck_grp_attr_alloc_init();
+	<span class="enscript-keyword">if</span> (grp_attributes == 0) {
+		printf(<span class="enscript-string">&quot;ipf_init: lck_grp_attr_alloc_init failed\n&quot;</span>);
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	
+	lck_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;IP Filter&quot;</span>, grp_attributes);
+	<span class="enscript-keyword">if</span> (lck_grp == 0) {
+		printf(<span class="enscript-string">&quot;ipf_init: lck_grp_alloc_init failed\n&quot;</span>);
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	
+	lck_attributes = lck_attr_alloc_init();
+	<span class="enscript-keyword">if</span> (lck_attributes == 0) {
+		printf(<span class="enscript-string">&quot;ipf_init: lck_attr_alloc_init failed\n&quot;</span>);
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	
+	lck_mtx_init(kipf_lock, lck_grp, lck_attributes);
+
+	<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (lck_grp) {
+		lck_grp_free(lck_grp);
+		lck_grp = 0;
+	}
+	<span class="enscript-keyword">if</span> (grp_attributes) {
+		lck_grp_attr_free(grp_attributes);
+		grp_attributes = 0;
+	}
+	<span class="enscript-keyword">if</span> (lck_attributes) {
+		lck_attr_free(lck_attributes);
+		lck_attributes = 0;
+	}
+	
+	<span class="enscript-keyword">return</span> error;
+}
+</pre>
+<hr />
+</body></html>

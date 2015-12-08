@@ -1,0 +1,2318 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pf_table.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pf_table.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007-2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*	$apfw: pf_table.c,v 1.4 2008/08/27 00:01:32 jhw Exp $ */</span>
+<span class="enscript-comment">/*	$OpenBSD: pf_table.c,v 1.68 2006/05/02 10:08:45 dhartmei Exp $	*/</span>
+
+<span class="enscript-comment">/*
+ * Copyright (c) 2002 Cedric Berger
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ *    - Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    - Redistributions in binary form must reproduce the above
+ *      copyright notice, this list of conditions and the following
+ *      disclaimer in the documentation and/or other materials provided
+ *      with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * &quot;AS IS&quot; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/radix.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/pfvar.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ACCEPT_FLAGS</span>(flags, oklist)		\
+	<span class="enscript-keyword">do</span> {					\
+		<span class="enscript-keyword">if</span> ((flags &amp; ~(oklist)) &amp;	\
+		    PFR_FLAG_ALLMASK)		\
+			<span class="enscript-keyword">return</span> (EINVAL);	\
+	} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">COPYIN</span>(from, to, size, flags)				\
+	((flags &amp; PFR_FLAG_USERIOCTL) ?				\
+	copyin((from), (to), (size)) :				\
+	(bcopy((<span class="enscript-type">void</span> *)(uintptr_t)(from), (to), (size)), 0))
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">COPYOUT</span>(from, to, size, flags)				\
+	((flags &amp; PFR_FLAG_USERIOCTL) ?				\
+	copyout((from), (to), (size)) :				\
+	(bcopy((from), (<span class="enscript-type">void</span> *)(uintptr_t)(to), (size)), 0))
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">FILLIN_SIN</span>(sin, addr)			\
+	<span class="enscript-keyword">do</span> {					\
+		(sin).sin_len = <span class="enscript-keyword">sizeof</span> (sin);	\
+		(sin).sin_family = AF_INET;	\
+		(sin).sin_addr = (addr);	\
+	} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">FILLIN_SIN6</span>(sin6, addr)				\
+	<span class="enscript-keyword">do</span> {						\
+		(sin6).sin6_len = <span class="enscript-keyword">sizeof</span> (sin6);	\
+		(sin6).sin6_family = AF_INET6;		\
+		(sin6).sin6_addr = (addr);		\
+	} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SWAP</span>(type, a1, a2)			\
+	<span class="enscript-keyword">do</span> {					\
+		type tmp = a1;			\
+		a1 = a2;			\
+		a2 = tmp;			\
+	} <span class="enscript-keyword">while</span> (0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SUNION2PF</span>(su, af) (((af) == AF_INET) ?	\
+	(<span class="enscript-type">struct</span> pf_addr *)&amp;(su)-&gt;sin.sin_addr :	\
+	(<span class="enscript-type">struct</span> pf_addr *)&amp;(su)-&gt;sin6.sin6_addr)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">AF_BITS</span>(af)		(((af) == AF_INET) ? 32 : 128)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ADDR_NETWORK</span>(ad)	((ad)-&gt;pfra_net &lt; AF_BITS((ad)-&gt;pfra_af))
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">KENTRY_NETWORK</span>(ke)	((ke)-&gt;pfrke_net &lt; AF_BITS((ke)-&gt;pfrke_af))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">KENTRY_RNF_ROOT</span>(ke) \
+		((((<span class="enscript-type">struct</span> radix_node *)(ke))-&gt;rn_flags &amp; RNF_ROOT) != 0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NO_ADDRESSES</span>		(-1)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ENQUEUE_UNMARKED_ONLY</span>	(1)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">INVERT_NEG_FLAG</span>		(1)
+
+<span class="enscript-type">struct</span> pfr_walktree {
+	<span class="enscript-type">enum</span> pfrw_op {
+		PFRW_MARK,
+		PFRW_SWEEP,
+		PFRW_ENQUEUE,
+		PFRW_GET_ADDRS,
+		PFRW_GET_ASTATS,
+		PFRW_POOL_GET,
+		PFRW_DYNADDR_UPDATE
+	}	 pfrw_op;
+	<span class="enscript-type">union</span> {
+		user_addr_t		 pfrw1_addr;
+		user_addr_t		 pfrw1_astats;
+		<span class="enscript-type">struct</span> pfr_kentryworkq	*pfrw1_workq;
+		<span class="enscript-type">struct</span> pfr_kentry	*pfrw1_kentry;
+		<span class="enscript-type">struct</span> pfi_dynaddr	*pfrw1_dyn;
+	}	 pfrw_1;
+	<span class="enscript-type">int</span>	 pfrw_free;
+	<span class="enscript-type">int</span>	 pfrw_flags;
+};
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">pfrw_addr</span>	pfrw_1.pfrw1_addr
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">pfrw_astats</span>	pfrw_1.pfrw1_astats
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">pfrw_workq</span>	pfrw_1.pfrw1_workq
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">pfrw_kentry</span>	pfrw_1.pfrw1_kentry
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">pfrw_dyn</span>	pfrw_1.pfrw1_dyn
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">pfrw_cnt</span>	pfrw_free
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">senderr</span>(e)	do { rv = (e); goto _bad; } while (0)
+
+<span class="enscript-type">struct</span> pool		 pfr_ktable_pl;
+<span class="enscript-type">struct</span> pool		 pfr_kentry_pl;
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pool		pfr_kentry_pl2;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> sockaddr_in	pfr_sin;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> sockaddr_in6	pfr_sin6;
+<span class="enscript-type">static</span> <span class="enscript-type">union</span> sockaddr_union	pfr_mask;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pf_addr		pfr_ffaddr;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_copyout_addr</span>(<span class="enscript-type">struct</span> pfr_addr *, <span class="enscript-type">struct</span> pfr_kentry *ke);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pfr_validate_addr</span>(<span class="enscript-type">struct</span> pfr_addr *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_enqueue_addrs</span>(<span class="enscript-type">struct</span> pfr_ktable *, <span class="enscript-type">struct</span> pfr_kentryworkq *,
+    <span class="enscript-type">int</span> *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_mark_addrs</span>(<span class="enscript-type">struct</span> pfr_ktable *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pfr_kentry *<span class="enscript-function-name">pfr_lookup_addr</span>(<span class="enscript-type">struct</span> pfr_ktable *,
+    <span class="enscript-type">struct</span> pfr_addr *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pfr_kentry *<span class="enscript-function-name">pfr_create_kentry</span>(<span class="enscript-type">struct</span> pfr_addr *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_destroy_kentries</span>(<span class="enscript-type">struct</span> pfr_kentryworkq *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_destroy_kentry</span>(<span class="enscript-type">struct</span> pfr_kentry *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_insert_kentries</span>(<span class="enscript-type">struct</span> pfr_ktable *,
+    <span class="enscript-type">struct</span> pfr_kentryworkq *, u_int64_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_remove_kentries</span>(<span class="enscript-type">struct</span> pfr_ktable *, <span class="enscript-type">struct</span> pfr_kentryworkq *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_clstats_kentries</span>(<span class="enscript-type">struct</span> pfr_kentryworkq *, u_int64_t, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_reset_feedback</span>(user_addr_t, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_prepare_network</span>(<span class="enscript-type">union</span> sockaddr_union *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pfr_route_kentry</span>(<span class="enscript-type">struct</span> pfr_ktable *, <span class="enscript-type">struct</span> pfr_kentry *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pfr_unroute_kentry</span>(<span class="enscript-type">struct</span> pfr_ktable *, <span class="enscript-type">struct</span> pfr_kentry *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pfr_walktree</span>(<span class="enscript-type">struct</span> radix_node *, <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pfr_validate_table</span>(<span class="enscript-type">struct</span> pfr_table *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pfr_fix_anchor</span>(<span class="enscript-type">char</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_commit_ktable</span>(<span class="enscript-type">struct</span> pfr_ktable *, u_int64_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_insert_ktables</span>(<span class="enscript-type">struct</span> pfr_ktableworkq *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_insert_ktable</span>(<span class="enscript-type">struct</span> pfr_ktable *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_setflags_ktables</span>(<span class="enscript-type">struct</span> pfr_ktableworkq *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_setflags_ktable</span>(<span class="enscript-type">struct</span> pfr_ktable *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_clstats_ktables</span>(<span class="enscript-type">struct</span> pfr_ktableworkq *, u_int64_t, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_clstats_ktable</span>(<span class="enscript-type">struct</span> pfr_ktable *, u_int64_t, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pfr_ktable *<span class="enscript-function-name">pfr_create_ktable</span>(<span class="enscript-type">struct</span> pfr_table *, u_int64_t, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_destroy_ktables</span>(<span class="enscript-type">struct</span> pfr_ktableworkq *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_destroy_ktable</span>(<span class="enscript-type">struct</span> pfr_ktable *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pfr_ktable_compare</span>(<span class="enscript-type">struct</span> pfr_ktable *, <span class="enscript-type">struct</span> pfr_ktable *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pfr_ktable *<span class="enscript-function-name">pfr_lookup_table</span>(<span class="enscript-type">struct</span> pfr_table *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pfr_clean_node_mask</span>(<span class="enscript-type">struct</span> pfr_ktable *, <span class="enscript-type">struct</span> pfr_kentryworkq *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pfr_table_count</span>(<span class="enscript-type">struct</span> pfr_table *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pfr_skip_table</span>(<span class="enscript-type">struct</span> pfr_table *, <span class="enscript-type">struct</span> pfr_ktable *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pfr_kentry *<span class="enscript-function-name">pfr_kentry_byidx</span>(<span class="enscript-type">struct</span> pfr_ktable *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);
+
+<span class="enscript-function-name">RB_PROTOTYPE_SC</span>(<span class="enscript-type">static</span>, pfr_ktablehead, pfr_ktable, pfrkt_tree,
+    pfr_ktable_compare);
+<span class="enscript-function-name">RB_GENERATE</span>(pfr_ktablehead, pfr_ktable, pfrkt_tree, pfr_ktable_compare);
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pfr_ktablehead	pfr_ktables;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pfr_table		pfr_nulltable;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			pfr_ktable_cnt;
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_initialize</span>(<span class="enscript-type">void</span>)
+{
+	pool_init(&amp;pfr_ktable_pl, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> pfr_ktable), 0, 0, 0,
+	    <span class="enscript-string">&quot;pfrktable&quot;</span>, NULL);
+	pool_init(&amp;pfr_kentry_pl, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> pfr_kentry), 0, 0, 0,
+	    <span class="enscript-string">&quot;pfrkentry&quot;</span>, NULL);
+	pool_init(&amp;pfr_kentry_pl2, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> pfr_kentry), 0, 0, 0,
+	    <span class="enscript-string">&quot;pfrkentry2&quot;</span>, NULL);
+
+	pfr_sin.sin_len = <span class="enscript-keyword">sizeof</span> (pfr_sin);
+	pfr_sin.sin_family = AF_INET;
+	pfr_sin6.sin6_len = <span class="enscript-keyword">sizeof</span> (pfr_sin6);
+	pfr_sin6.sin6_family = AF_INET6;
+
+	memset(&amp;pfr_ffaddr, 0xff, <span class="enscript-keyword">sizeof</span> (pfr_ffaddr));
+}
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_destroy</span>(<span class="enscript-type">void</span>)
+{
+	pool_destroy(&amp;pfr_ktable_pl);
+	pool_destroy(&amp;pfr_kentry_pl);
+	pool_destroy(&amp;pfr_kentry_pl2);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_clr_addrs</span>(<span class="enscript-type">struct</span> pfr_table *tbl, <span class="enscript-type">int</span> *ndel, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*kt;
+	<span class="enscript-type">struct</span> pfr_kentryworkq	 workq;
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_ATOMIC | PFR_FLAG_DUMMY);
+	<span class="enscript-keyword">if</span> (pfr_validate_table(tbl, 0, flags &amp; PFR_FLAG_USERIOCTL))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	kt = pfr_lookup_table(tbl);
+	<span class="enscript-keyword">if</span> (kt == NULL || !(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE))
+		<span class="enscript-keyword">return</span> (ESRCH);
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_flags &amp; PFR_TFLAG_CONST)
+		<span class="enscript-keyword">return</span> (EPERM);
+	pfr_enqueue_addrs(kt, &amp;workq, ndel, 0);
+
+	<span class="enscript-keyword">if</span> (!(flags &amp; PFR_FLAG_DUMMY)) {
+		pfr_remove_kentries(kt, &amp;workq);
+		<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_cnt) {
+			printf(<span class="enscript-string">&quot;pfr_clr_addrs: corruption detected (%d).\n&quot;</span>,
+			    kt-&gt;pfrkt_cnt);
+			kt-&gt;pfrkt_cnt = 0;
+		}
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_add_addrs</span>(<span class="enscript-type">struct</span> pfr_table *tbl, user_addr_t _addr, <span class="enscript-type">int</span> size,
+    <span class="enscript-type">int</span> *nadd, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*kt, *tmpkt;
+	<span class="enscript-type">struct</span> pfr_kentryworkq	 workq;
+	<span class="enscript-type">struct</span> pfr_kentry	*p, *q;
+	<span class="enscript-type">struct</span> pfr_addr		 ad;
+	<span class="enscript-type">int</span>			 i, rv, xadd = 0;
+	user_addr_t		 addr = _addr;
+	u_int64_t		 tzero = pf_calendar_time_second();
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_ATOMIC | PFR_FLAG_DUMMY |
+	    PFR_FLAG_FEEDBACK);
+	<span class="enscript-keyword">if</span> (pfr_validate_table(tbl, 0, flags &amp; PFR_FLAG_USERIOCTL))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	kt = pfr_lookup_table(tbl);
+	<span class="enscript-keyword">if</span> (kt == NULL || !(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE))
+		<span class="enscript-keyword">return</span> (ESRCH);
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_flags &amp; PFR_TFLAG_CONST)
+		<span class="enscript-keyword">return</span> (EPERM);
+	tmpkt = pfr_create_ktable(&amp;pfr_nulltable, 0, 0);
+	<span class="enscript-keyword">if</span> (tmpkt == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	SLIST_INIT(&amp;workq);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; size; i++, addr += <span class="enscript-keyword">sizeof</span> (ad)) {
+		<span class="enscript-keyword">if</span> (COPYIN(addr, &amp;ad, <span class="enscript-keyword">sizeof</span> (ad), flags))
+			senderr(EFAULT);
+		<span class="enscript-keyword">if</span> (pfr_validate_addr(&amp;ad))
+			senderr(EINVAL);
+		p = pfr_lookup_addr(kt, &amp;ad, 1);
+		q = pfr_lookup_addr(tmpkt, &amp;ad, 1);
+		<span class="enscript-keyword">if</span> (flags &amp; PFR_FLAG_FEEDBACK) {
+			<span class="enscript-keyword">if</span> (q != NULL)
+				ad.pfra_fback = PFR_FB_DUPLICATE;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (p == NULL)
+				ad.pfra_fback = PFR_FB_ADDED;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (p-&gt;pfrke_not != ad.pfra_not)
+				ad.pfra_fback = PFR_FB_CONFLICT;
+			<span class="enscript-keyword">else</span>
+				ad.pfra_fback = PFR_FB_NONE;
+		}
+		<span class="enscript-keyword">if</span> (p == NULL &amp;&amp; q == NULL) {
+			p = pfr_create_kentry(&amp;ad,
+			    !(flags &amp; PFR_FLAG_USERIOCTL));
+			<span class="enscript-keyword">if</span> (p == NULL)
+				senderr(ENOMEM);
+			<span class="enscript-keyword">if</span> (pfr_route_kentry(tmpkt, p)) {
+				pfr_destroy_kentry(p);
+				ad.pfra_fback = PFR_FB_NONE;
+			} <span class="enscript-keyword">else</span> {
+				SLIST_INSERT_HEAD(&amp;workq, p, pfrke_workq);
+				xadd++;
+			}
+		}
+		<span class="enscript-keyword">if</span> (flags &amp; PFR_FLAG_FEEDBACK)
+			<span class="enscript-keyword">if</span> (COPYOUT(&amp;ad, addr, <span class="enscript-keyword">sizeof</span> (ad), flags))
+				senderr(EFAULT);
+	}
+	pfr_clean_node_mask(tmpkt, &amp;workq);
+	<span class="enscript-keyword">if</span> (!(flags &amp; PFR_FLAG_DUMMY)) {
+		pfr_insert_kentries(kt, &amp;workq, tzero);
+	} <span class="enscript-keyword">else</span>
+		pfr_destroy_kentries(&amp;workq);
+	<span class="enscript-keyword">if</span> (nadd != NULL)
+		*nadd = xadd;
+	pfr_destroy_ktable(tmpkt, 0);
+	<span class="enscript-keyword">return</span> (0);
+<span class="enscript-reference">_bad</span>:
+	pfr_clean_node_mask(tmpkt, &amp;workq);
+	pfr_destroy_kentries(&amp;workq);
+	<span class="enscript-keyword">if</span> (flags &amp; PFR_FLAG_FEEDBACK)
+		pfr_reset_feedback(_addr, size, flags);
+	pfr_destroy_ktable(tmpkt, 0);
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_del_addrs</span>(<span class="enscript-type">struct</span> pfr_table *tbl, user_addr_t _addr, <span class="enscript-type">int</span> size,
+    <span class="enscript-type">int</span> *ndel, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*kt;
+	<span class="enscript-type">struct</span> pfr_kentryworkq	 workq;
+	<span class="enscript-type">struct</span> pfr_kentry	*p;
+	<span class="enscript-type">struct</span> pfr_addr		 ad;
+	user_addr_t		 addr = _addr;
+	<span class="enscript-type">int</span>			 i, rv, xdel = 0, log = 1;
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_ATOMIC | PFR_FLAG_DUMMY |
+	    PFR_FLAG_FEEDBACK);
+	<span class="enscript-keyword">if</span> (pfr_validate_table(tbl, 0, flags &amp; PFR_FLAG_USERIOCTL))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	kt = pfr_lookup_table(tbl);
+	<span class="enscript-keyword">if</span> (kt == NULL || !(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE))
+		<span class="enscript-keyword">return</span> (ESRCH);
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_flags &amp; PFR_TFLAG_CONST)
+		<span class="enscript-keyword">return</span> (EPERM);
+	<span class="enscript-comment">/*
+	 * there are two algorithms to choose from here.
+	 * with:
+	 *   n: number of addresses to delete
+	 *   N: number of addresses in the table
+	 *
+	 * one is O(N) and is better for large 'n'
+	 * one is O(n*LOG(N)) and is better for small 'n'
+	 *
+	 * following code try to decide which one is best.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = kt-&gt;pfrkt_cnt; i &gt; 0; i &gt;&gt;= 1)
+		log++;
+	<span class="enscript-keyword">if</span> (size &gt; kt-&gt;pfrkt_cnt/log) {
+		<span class="enscript-comment">/* full table scan */</span>
+		pfr_mark_addrs(kt);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* iterate over addresses to delete */</span>
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; size; i++, addr += <span class="enscript-keyword">sizeof</span> (ad)) {
+			<span class="enscript-keyword">if</span> (COPYIN(addr, &amp;ad, <span class="enscript-keyword">sizeof</span> (ad), flags))
+				<span class="enscript-keyword">return</span> (EFAULT);
+			<span class="enscript-keyword">if</span> (pfr_validate_addr(&amp;ad))
+				<span class="enscript-keyword">return</span> (EINVAL);
+			p = pfr_lookup_addr(kt, &amp;ad, 1);
+			<span class="enscript-keyword">if</span> (p != NULL)
+				p-&gt;pfrke_mark = 0;
+		}
+	}
+	SLIST_INIT(&amp;workq);
+	<span class="enscript-keyword">for</span> (addr = _addr, i = 0; i &lt; size; i++, addr += <span class="enscript-keyword">sizeof</span> (ad)) {
+		<span class="enscript-keyword">if</span> (COPYIN(addr, &amp;ad, <span class="enscript-keyword">sizeof</span> (ad), flags))
+			senderr(EFAULT);
+		<span class="enscript-keyword">if</span> (pfr_validate_addr(&amp;ad))
+			senderr(EINVAL);
+		p = pfr_lookup_addr(kt, &amp;ad, 1);
+		<span class="enscript-keyword">if</span> (flags &amp; PFR_FLAG_FEEDBACK) {
+			<span class="enscript-keyword">if</span> (p == NULL)
+				ad.pfra_fback = PFR_FB_NONE;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (p-&gt;pfrke_not != ad.pfra_not)
+				ad.pfra_fback = PFR_FB_CONFLICT;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (p-&gt;pfrke_mark)
+				ad.pfra_fback = PFR_FB_DUPLICATE;
+			<span class="enscript-keyword">else</span>
+				ad.pfra_fback = PFR_FB_DELETED;
+		}
+		<span class="enscript-keyword">if</span> (p != NULL &amp;&amp; p-&gt;pfrke_not == ad.pfra_not &amp;&amp;
+		    !p-&gt;pfrke_mark) {
+			p-&gt;pfrke_mark = 1;
+			SLIST_INSERT_HEAD(&amp;workq, p, pfrke_workq);
+			xdel++;
+		}
+		<span class="enscript-keyword">if</span> (flags &amp; PFR_FLAG_FEEDBACK)
+			<span class="enscript-keyword">if</span> (COPYOUT(&amp;ad, addr, <span class="enscript-keyword">sizeof</span> (ad), flags))
+				senderr(EFAULT);
+	}
+	<span class="enscript-keyword">if</span> (!(flags &amp; PFR_FLAG_DUMMY)) {
+		pfr_remove_kentries(kt, &amp;workq);
+	}
+	<span class="enscript-keyword">if</span> (ndel != NULL)
+		*ndel = xdel;
+	<span class="enscript-keyword">return</span> (0);
+<span class="enscript-reference">_bad</span>:
+	<span class="enscript-keyword">if</span> (flags &amp; PFR_FLAG_FEEDBACK)
+		pfr_reset_feedback(_addr, size, flags);
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_set_addrs</span>(<span class="enscript-type">struct</span> pfr_table *tbl, user_addr_t _addr, <span class="enscript-type">int</span> size,
+    <span class="enscript-type">int</span> *size2, <span class="enscript-type">int</span> *nadd, <span class="enscript-type">int</span> *ndel, <span class="enscript-type">int</span> *nchange, <span class="enscript-type">int</span> flags,
+    u_int32_t ignore_pfrt_flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*kt, *tmpkt;
+	<span class="enscript-type">struct</span> pfr_kentryworkq	 addq, delq, changeq;
+	<span class="enscript-type">struct</span> pfr_kentry	*p, *q;
+	<span class="enscript-type">struct</span> pfr_addr		 ad;
+	user_addr_t		 addr = _addr;
+	<span class="enscript-type">int</span>			 i, rv, xadd = 0, xdel = 0, xchange = 0;
+	u_int64_t		 tzero = pf_calendar_time_second();
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_ATOMIC | PFR_FLAG_DUMMY |
+	    PFR_FLAG_FEEDBACK);
+	<span class="enscript-keyword">if</span> (pfr_validate_table(tbl, ignore_pfrt_flags, flags &amp;
+	    PFR_FLAG_USERIOCTL))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	kt = pfr_lookup_table(tbl);
+	<span class="enscript-keyword">if</span> (kt == NULL || !(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE))
+		<span class="enscript-keyword">return</span> (ESRCH);
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_flags &amp; PFR_TFLAG_CONST)
+		<span class="enscript-keyword">return</span> (EPERM);
+	tmpkt = pfr_create_ktable(&amp;pfr_nulltable, 0, 0);
+	<span class="enscript-keyword">if</span> (tmpkt == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	pfr_mark_addrs(kt);
+	SLIST_INIT(&amp;addq);
+	SLIST_INIT(&amp;delq);
+	SLIST_INIT(&amp;changeq);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; size; i++, addr += <span class="enscript-keyword">sizeof</span> (ad)) {
+		<span class="enscript-keyword">if</span> (COPYIN(addr, &amp;ad, <span class="enscript-keyword">sizeof</span> (ad), flags))
+			senderr(EFAULT);
+		<span class="enscript-keyword">if</span> (pfr_validate_addr(&amp;ad))
+			senderr(EINVAL);
+		ad.pfra_fback = PFR_FB_NONE;
+		p = pfr_lookup_addr(kt, &amp;ad, 1);
+		<span class="enscript-keyword">if</span> (p != NULL) {
+			<span class="enscript-keyword">if</span> (p-&gt;pfrke_mark) {
+				ad.pfra_fback = PFR_FB_DUPLICATE;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">_skip</span>;
+			}
+			p-&gt;pfrke_mark = 1;
+			<span class="enscript-keyword">if</span> (p-&gt;pfrke_not != ad.pfra_not) {
+				SLIST_INSERT_HEAD(&amp;changeq, p, pfrke_workq);
+				ad.pfra_fback = PFR_FB_CHANGED;
+				xchange++;
+			}
+		} <span class="enscript-keyword">else</span> {
+			q = pfr_lookup_addr(tmpkt, &amp;ad, 1);
+			<span class="enscript-keyword">if</span> (q != NULL) {
+				ad.pfra_fback = PFR_FB_DUPLICATE;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">_skip</span>;
+			}
+			p = pfr_create_kentry(&amp;ad,
+			    !(flags &amp; PFR_FLAG_USERIOCTL));
+			<span class="enscript-keyword">if</span> (p == NULL)
+				senderr(ENOMEM);
+			<span class="enscript-keyword">if</span> (pfr_route_kentry(tmpkt, p)) {
+				pfr_destroy_kentry(p);
+				ad.pfra_fback = PFR_FB_NONE;
+			} <span class="enscript-keyword">else</span> {
+				SLIST_INSERT_HEAD(&amp;addq, p, pfrke_workq);
+				ad.pfra_fback = PFR_FB_ADDED;
+				xadd++;
+			}
+		}
+<span class="enscript-reference">_skip</span>:
+		<span class="enscript-keyword">if</span> (flags &amp; PFR_FLAG_FEEDBACK)
+			<span class="enscript-keyword">if</span> (COPYOUT(&amp;ad, addr, <span class="enscript-keyword">sizeof</span> (ad), flags))
+				senderr(EFAULT);
+	}
+	pfr_enqueue_addrs(kt, &amp;delq, &amp;xdel, ENQUEUE_UNMARKED_ONLY);
+	<span class="enscript-keyword">if</span> ((flags &amp; PFR_FLAG_FEEDBACK) &amp;&amp; *size2) {
+		<span class="enscript-keyword">if</span> (*size2 &lt; size+xdel) {
+			*size2 = size+xdel;
+			senderr(0);
+		}
+		i = 0;
+		addr = _addr + size;
+		SLIST_FOREACH(p, &amp;delq, pfrke_workq) {
+			pfr_copyout_addr(&amp;ad, p);
+			ad.pfra_fback = PFR_FB_DELETED;
+			<span class="enscript-keyword">if</span> (COPYOUT(&amp;ad, addr, <span class="enscript-keyword">sizeof</span> (ad), flags))
+				senderr(EFAULT);
+			addr += <span class="enscript-keyword">sizeof</span> (ad);
+			i++;
+		}
+	}
+	pfr_clean_node_mask(tmpkt, &amp;addq);
+	<span class="enscript-keyword">if</span> (!(flags &amp; PFR_FLAG_DUMMY)) {
+		pfr_insert_kentries(kt, &amp;addq, tzero);
+		pfr_remove_kentries(kt, &amp;delq);
+		pfr_clstats_kentries(&amp;changeq, tzero, INVERT_NEG_FLAG);
+	} <span class="enscript-keyword">else</span>
+		pfr_destroy_kentries(&amp;addq);
+	<span class="enscript-keyword">if</span> (nadd != NULL)
+		*nadd = xadd;
+	<span class="enscript-keyword">if</span> (ndel != NULL)
+		*ndel = xdel;
+	<span class="enscript-keyword">if</span> (nchange != NULL)
+		*nchange = xchange;
+	<span class="enscript-keyword">if</span> ((flags &amp; PFR_FLAG_FEEDBACK) &amp;&amp; size2)
+		*size2 = size+xdel;
+	pfr_destroy_ktable(tmpkt, 0);
+	<span class="enscript-keyword">return</span> (0);
+<span class="enscript-reference">_bad</span>:
+	pfr_clean_node_mask(tmpkt, &amp;addq);
+	pfr_destroy_kentries(&amp;addq);
+	<span class="enscript-keyword">if</span> (flags &amp; PFR_FLAG_FEEDBACK)
+		pfr_reset_feedback(_addr, size, flags);
+	pfr_destroy_ktable(tmpkt, 0);
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_tst_addrs</span>(<span class="enscript-type">struct</span> pfr_table *tbl, user_addr_t addr, <span class="enscript-type">int</span> size,
+	<span class="enscript-type">int</span> *nmatch, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*kt;
+	<span class="enscript-type">struct</span> pfr_kentry	*p;
+	<span class="enscript-type">struct</span> pfr_addr		 ad;
+	<span class="enscript-type">int</span>			 i, xmatch = 0;
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_REPLACE);
+	<span class="enscript-keyword">if</span> (pfr_validate_table(tbl, 0, 0))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	kt = pfr_lookup_table(tbl);
+	<span class="enscript-keyword">if</span> (kt == NULL || !(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE))
+		<span class="enscript-keyword">return</span> (ESRCH);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; size; i++, addr += <span class="enscript-keyword">sizeof</span> (ad)) {
+		<span class="enscript-keyword">if</span> (COPYIN(addr, &amp;ad, <span class="enscript-keyword">sizeof</span> (ad), flags))
+			<span class="enscript-keyword">return</span> (EFAULT);
+		<span class="enscript-keyword">if</span> (pfr_validate_addr(&amp;ad))
+			<span class="enscript-keyword">return</span> (EINVAL);
+		<span class="enscript-keyword">if</span> (ADDR_NETWORK(&amp;ad))
+			<span class="enscript-keyword">return</span> (EINVAL);
+		p = pfr_lookup_addr(kt, &amp;ad, 0);
+		<span class="enscript-keyword">if</span> (flags &amp; PFR_FLAG_REPLACE)
+			pfr_copyout_addr(&amp;ad, p);
+		ad.pfra_fback = (p == NULL) ? PFR_FB_NONE :
+		    (p-&gt;pfrke_not ? PFR_FB_NOTMATCH : PFR_FB_MATCH);
+		<span class="enscript-keyword">if</span> (p != NULL &amp;&amp; !p-&gt;pfrke_not)
+			xmatch++;
+		<span class="enscript-keyword">if</span> (COPYOUT(&amp;ad, addr, <span class="enscript-keyword">sizeof</span> (ad), flags))
+			<span class="enscript-keyword">return</span> (EFAULT);
+	}
+	<span class="enscript-keyword">if</span> (nmatch != NULL)
+		*nmatch = xmatch;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_get_addrs</span>(<span class="enscript-type">struct</span> pfr_table *tbl, user_addr_t addr, <span class="enscript-type">int</span> *size,
+	<span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*kt;
+	<span class="enscript-type">struct</span> pfr_walktree	 w;
+	<span class="enscript-type">int</span>			 rv;
+
+	ACCEPT_FLAGS(flags, 0);
+	<span class="enscript-keyword">if</span> (pfr_validate_table(tbl, 0, 0))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	kt = pfr_lookup_table(tbl);
+	<span class="enscript-keyword">if</span> (kt == NULL || !(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE))
+		<span class="enscript-keyword">return</span> (ESRCH);
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_cnt &gt; *size) {
+		*size = kt-&gt;pfrkt_cnt;
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	bzero(&amp;w, <span class="enscript-keyword">sizeof</span> (w));
+	w.pfrw_op = PFRW_GET_ADDRS;
+	w.pfrw_addr = addr;
+	w.pfrw_free = kt-&gt;pfrkt_cnt;
+	w.pfrw_flags = flags;
+	rv = kt-&gt;pfrkt_ip4-&gt;rnh_walktree(kt-&gt;pfrkt_ip4, pfr_walktree, &amp;w);
+	<span class="enscript-keyword">if</span> (!rv)
+		rv = kt-&gt;pfrkt_ip6-&gt;rnh_walktree(kt-&gt;pfrkt_ip6,
+		    pfr_walktree, &amp;w);
+	<span class="enscript-keyword">if</span> (rv)
+		<span class="enscript-keyword">return</span> (rv);
+
+	<span class="enscript-keyword">if</span> (w.pfrw_free) {
+		printf(<span class="enscript-string">&quot;pfr_get_addrs: corruption detected (%d).\n&quot;</span>,
+		    w.pfrw_free);
+		<span class="enscript-keyword">return</span> (ENOTTY);
+	}
+	*size = kt-&gt;pfrkt_cnt;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_get_astats</span>(<span class="enscript-type">struct</span> pfr_table *tbl, user_addr_t addr, <span class="enscript-type">int</span> *size,
+	<span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*kt;
+	<span class="enscript-type">struct</span> pfr_walktree	 w;
+	<span class="enscript-type">struct</span> pfr_kentryworkq	 workq;
+	<span class="enscript-type">int</span>			 rv;
+	u_int64_t		 tzero = pf_calendar_time_second();
+
+	<span class="enscript-comment">/* XXX PFR_FLAG_CLSTATS disabled */</span>
+	ACCEPT_FLAGS(flags, PFR_FLAG_ATOMIC);
+	<span class="enscript-keyword">if</span> (pfr_validate_table(tbl, 0, 0))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	kt = pfr_lookup_table(tbl);
+	<span class="enscript-keyword">if</span> (kt == NULL || !(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE))
+		<span class="enscript-keyword">return</span> (ESRCH);
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_cnt &gt; *size) {
+		*size = kt-&gt;pfrkt_cnt;
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	bzero(&amp;w, <span class="enscript-keyword">sizeof</span> (w));
+	w.pfrw_op = PFRW_GET_ASTATS;
+	w.pfrw_astats = addr;
+	w.pfrw_free = kt-&gt;pfrkt_cnt;
+	w.pfrw_flags = flags;
+	rv = kt-&gt;pfrkt_ip4-&gt;rnh_walktree(kt-&gt;pfrkt_ip4, pfr_walktree, &amp;w);
+	<span class="enscript-keyword">if</span> (!rv)
+		rv = kt-&gt;pfrkt_ip6-&gt;rnh_walktree(kt-&gt;pfrkt_ip6,
+		    pfr_walktree, &amp;w);
+	<span class="enscript-keyword">if</span> (!rv &amp;&amp; (flags &amp; PFR_FLAG_CLSTATS)) {
+		pfr_enqueue_addrs(kt, &amp;workq, NULL, 0);
+		pfr_clstats_kentries(&amp;workq, tzero, 0);
+	}
+	<span class="enscript-keyword">if</span> (rv)
+		<span class="enscript-keyword">return</span> (rv);
+
+	<span class="enscript-keyword">if</span> (w.pfrw_free) {
+		printf(<span class="enscript-string">&quot;pfr_get_astats: corruption detected (%d).\n&quot;</span>,
+		    w.pfrw_free);
+		<span class="enscript-keyword">return</span> (ENOTTY);
+	}
+	*size = kt-&gt;pfrkt_cnt;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_clr_astats</span>(<span class="enscript-type">struct</span> pfr_table *tbl, user_addr_t _addr, <span class="enscript-type">int</span> size,
+    <span class="enscript-type">int</span> *nzero, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*kt;
+	<span class="enscript-type">struct</span> pfr_kentryworkq	 workq;
+	<span class="enscript-type">struct</span> pfr_kentry	*p;
+	<span class="enscript-type">struct</span> pfr_addr		 ad;
+	user_addr_t		 addr = _addr;
+	<span class="enscript-type">int</span>			 i, rv, xzero = 0;
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_ATOMIC | PFR_FLAG_DUMMY |
+	    PFR_FLAG_FEEDBACK);
+	<span class="enscript-keyword">if</span> (pfr_validate_table(tbl, 0, 0))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	kt = pfr_lookup_table(tbl);
+	<span class="enscript-keyword">if</span> (kt == NULL || !(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE))
+		<span class="enscript-keyword">return</span> (ESRCH);
+	SLIST_INIT(&amp;workq);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; size; i++, addr += <span class="enscript-keyword">sizeof</span> (ad)) {
+		<span class="enscript-keyword">if</span> (COPYIN(addr, &amp;ad, <span class="enscript-keyword">sizeof</span> (ad), flags))
+			senderr(EFAULT);
+		<span class="enscript-keyword">if</span> (pfr_validate_addr(&amp;ad))
+			senderr(EINVAL);
+		p = pfr_lookup_addr(kt, &amp;ad, 1);
+		<span class="enscript-keyword">if</span> (flags &amp; PFR_FLAG_FEEDBACK) {
+			ad.pfra_fback = (p != NULL) ?
+			    PFR_FB_CLEARED : PFR_FB_NONE;
+			<span class="enscript-keyword">if</span> (COPYOUT(&amp;ad, addr, <span class="enscript-keyword">sizeof</span> (ad), flags))
+				senderr(EFAULT);
+		}
+		<span class="enscript-keyword">if</span> (p != NULL) {
+			SLIST_INSERT_HEAD(&amp;workq, p, pfrke_workq);
+			xzero++;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (!(flags &amp; PFR_FLAG_DUMMY)) {
+		pfr_clstats_kentries(&amp;workq, 0, 0);
+	}
+	<span class="enscript-keyword">if</span> (nzero != NULL)
+		*nzero = xzero;
+	<span class="enscript-keyword">return</span> (0);
+<span class="enscript-reference">_bad</span>:
+	<span class="enscript-keyword">if</span> (flags &amp; PFR_FLAG_FEEDBACK)
+		pfr_reset_feedback(_addr, size, flags);
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_validate_addr</span>(<span class="enscript-type">struct</span> pfr_addr *ad)
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">switch</span> (ad-&gt;pfra_af) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET</span>:
+		<span class="enscript-keyword">if</span> (ad-&gt;pfra_net &gt; 32)
+			<span class="enscript-keyword">return</span> (-1);
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET6</span>:
+		<span class="enscript-keyword">if</span> (ad-&gt;pfra_net &gt; 128)
+			<span class="enscript-keyword">return</span> (-1);
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	<span class="enscript-keyword">if</span> (ad-&gt;pfra_net &lt; 128 &amp;&amp;
+	    (((caddr_t)ad)[ad-&gt;pfra_net/8] &amp; (0xFF &gt;&gt; (ad-&gt;pfra_net%8))))
+			<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">for</span> (i = (ad-&gt;pfra_net+7)/8; i &lt; (<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span> (ad-&gt;pfra_u); i++)
+		<span class="enscript-keyword">if</span> (((caddr_t)ad)[i])
+			<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">if</span> (ad-&gt;pfra_not &amp;&amp; ad-&gt;pfra_not != 1)
+		<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">if</span> (ad-&gt;pfra_fback)
+		<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_enqueue_addrs</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, <span class="enscript-type">struct</span> pfr_kentryworkq *workq,
+	<span class="enscript-type">int</span> *naddr, <span class="enscript-type">int</span> sweep)
+{
+	<span class="enscript-type">struct</span> pfr_walktree	w;
+
+	SLIST_INIT(workq);
+	bzero(&amp;w, <span class="enscript-keyword">sizeof</span> (w));
+	w.pfrw_op = sweep ? PFRW_SWEEP : PFRW_ENQUEUE;
+	w.pfrw_workq = workq;
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_ip4 != NULL)
+		<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_ip4-&gt;rnh_walktree(kt-&gt;pfrkt_ip4,
+		    pfr_walktree, &amp;w))
+			printf(<span class="enscript-string">&quot;pfr_enqueue_addrs: IPv4 walktree failed.\n&quot;</span>);
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_ip6 != NULL)
+		<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_ip6-&gt;rnh_walktree(kt-&gt;pfrkt_ip6,
+		    pfr_walktree, &amp;w))
+			printf(<span class="enscript-string">&quot;pfr_enqueue_addrs: IPv6 walktree failed.\n&quot;</span>);
+	<span class="enscript-keyword">if</span> (naddr != NULL)
+		*naddr = w.pfrw_cnt;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_mark_addrs</span>(<span class="enscript-type">struct</span> pfr_ktable *kt)
+{
+	<span class="enscript-type">struct</span> pfr_walktree	w;
+
+	bzero(&amp;w, <span class="enscript-keyword">sizeof</span> (w));
+	w.pfrw_op = PFRW_MARK;
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_ip4-&gt;rnh_walktree(kt-&gt;pfrkt_ip4, pfr_walktree, &amp;w))
+		printf(<span class="enscript-string">&quot;pfr_mark_addrs: IPv4 walktree failed.\n&quot;</span>);
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_ip6-&gt;rnh_walktree(kt-&gt;pfrkt_ip6, pfr_walktree, &amp;w))
+		printf(<span class="enscript-string">&quot;pfr_mark_addrs: IPv6 walktree failed.\n&quot;</span>);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pfr_kentry *
+<span class="enscript-function-name">pfr_lookup_addr</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, <span class="enscript-type">struct</span> pfr_addr *ad, <span class="enscript-type">int</span> exact)
+{
+	<span class="enscript-type">union</span> sockaddr_union	 sa, mask;
+	<span class="enscript-type">struct</span> radix_node_head	*head;
+	<span class="enscript-type">struct</span> pfr_kentry	*ke;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	bzero(&amp;sa, <span class="enscript-keyword">sizeof</span> (sa));
+	<span class="enscript-keyword">if</span> (ad-&gt;pfra_af == AF_INET) {
+		FILLIN_SIN(sa.sin, ad-&gt;pfra_ip4addr);
+		head = kt-&gt;pfrkt_ip4;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ad-&gt;pfra_af == AF_INET6) {
+		FILLIN_SIN6(sa.sin6, ad-&gt;pfra_ip6addr);
+		head = kt-&gt;pfrkt_ip6;
+	}
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> NULL;
+	<span class="enscript-keyword">if</span> (ADDR_NETWORK(ad)) {
+		pfr_prepare_network(&amp;mask, ad-&gt;pfra_af, ad-&gt;pfra_net);
+		ke = (<span class="enscript-type">struct</span> pfr_kentry *)rn_lookup(&amp;sa, &amp;mask, head);
+		<span class="enscript-keyword">if</span> (ke &amp;&amp; KENTRY_RNF_ROOT(ke))
+			ke = NULL;
+	} <span class="enscript-keyword">else</span> {
+		ke = (<span class="enscript-type">struct</span> pfr_kentry *)rn_match(&amp;sa, head);
+		<span class="enscript-keyword">if</span> (ke &amp;&amp; KENTRY_RNF_ROOT(ke))
+			ke = NULL;
+		<span class="enscript-keyword">if</span> (exact &amp;&amp; ke &amp;&amp; KENTRY_NETWORK(ke))
+			ke = NULL;
+	}
+	<span class="enscript-keyword">return</span> (ke);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pfr_kentry *
+<span class="enscript-function-name">pfr_create_kentry</span>(<span class="enscript-type">struct</span> pfr_addr *ad, <span class="enscript-type">int</span> intr)
+{
+	<span class="enscript-type">struct</span> pfr_kentry	*ke;
+
+	<span class="enscript-keyword">if</span> (intr)
+		ke = pool_get(&amp;pfr_kentry_pl2, PR_WAITOK);
+	<span class="enscript-keyword">else</span>
+		ke = pool_get(&amp;pfr_kentry_pl, PR_WAITOK);
+	<span class="enscript-keyword">if</span> (ke == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+	bzero(ke, <span class="enscript-keyword">sizeof</span> (*ke));
+
+	<span class="enscript-keyword">if</span> (ad-&gt;pfra_af == AF_INET)
+		FILLIN_SIN(ke-&gt;pfrke_sa.sin, ad-&gt;pfra_ip4addr);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ad-&gt;pfra_af == AF_INET6)
+		FILLIN_SIN6(ke-&gt;pfrke_sa.sin6, ad-&gt;pfra_ip6addr);
+	ke-&gt;pfrke_af = ad-&gt;pfra_af;
+	ke-&gt;pfrke_net = ad-&gt;pfra_net;
+	ke-&gt;pfrke_not = ad-&gt;pfra_not;
+	ke-&gt;pfrke_intrpool = intr;
+	<span class="enscript-keyword">return</span> (ke);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_destroy_kentries</span>(<span class="enscript-type">struct</span> pfr_kentryworkq *workq)
+{
+	<span class="enscript-type">struct</span> pfr_kentry	*p, *q;
+
+	<span class="enscript-keyword">for</span> (p = SLIST_FIRST(workq); p != NULL; p = q) {
+		q = SLIST_NEXT(p, pfrke_workq);
+		pfr_destroy_kentry(p);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_destroy_kentry</span>(<span class="enscript-type">struct</span> pfr_kentry *ke)
+{
+	<span class="enscript-keyword">if</span> (ke-&gt;pfrke_intrpool)
+		pool_put(&amp;pfr_kentry_pl2, ke);
+	<span class="enscript-keyword">else</span>
+		pool_put(&amp;pfr_kentry_pl, ke);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_insert_kentries</span>(<span class="enscript-type">struct</span> pfr_ktable *kt,
+    <span class="enscript-type">struct</span> pfr_kentryworkq *workq, u_int64_t tzero)
+{
+	<span class="enscript-type">struct</span> pfr_kentry	*p;
+	<span class="enscript-type">int</span>			 rv, n = 0;
+
+	SLIST_FOREACH(p, workq, pfrke_workq) {
+		rv = pfr_route_kentry(kt, p);
+		<span class="enscript-keyword">if</span> (rv) {
+			printf(<span class="enscript-string">&quot;pfr_insert_kentries: cannot route entry &quot;</span>
+			    <span class="enscript-string">&quot;(code=%d).\n&quot;</span>, rv);
+			<span class="enscript-keyword">break</span>;
+		}
+		p-&gt;pfrke_tzero = tzero;
+		n++;
+	}
+	kt-&gt;pfrkt_cnt += n;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_insert_kentry</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, <span class="enscript-type">struct</span> pfr_addr *ad, u_int64_t tzero)
+{
+	<span class="enscript-type">struct</span> pfr_kentry	*p;
+	<span class="enscript-type">int</span>			 rv;
+
+	p = pfr_lookup_addr(kt, ad, 1);
+	<span class="enscript-keyword">if</span> (p != NULL)
+		<span class="enscript-keyword">return</span> (0);
+	p = pfr_create_kentry(ad, 1);
+	<span class="enscript-keyword">if</span> (p == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	rv = pfr_route_kentry(kt, p);
+	<span class="enscript-keyword">if</span> (rv)
+		<span class="enscript-keyword">return</span> (rv);
+
+	p-&gt;pfrke_tzero = tzero;
+	kt-&gt;pfrkt_cnt++;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_remove_kentries</span>(<span class="enscript-type">struct</span> pfr_ktable *kt,
+    <span class="enscript-type">struct</span> pfr_kentryworkq *workq)
+{
+	<span class="enscript-type">struct</span> pfr_kentry	*p;
+	<span class="enscript-type">int</span>			 n = 0;
+
+	SLIST_FOREACH(p, workq, pfrke_workq) {
+		pfr_unroute_kentry(kt, p);
+		n++;
+	}
+	kt-&gt;pfrkt_cnt -= n;
+	pfr_destroy_kentries(workq);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_clean_node_mask</span>(<span class="enscript-type">struct</span> pfr_ktable *kt,
+    <span class="enscript-type">struct</span> pfr_kentryworkq *workq)
+{
+	<span class="enscript-type">struct</span> pfr_kentry	*p;
+
+	SLIST_FOREACH(p, workq, pfrke_workq)
+		pfr_unroute_kentry(kt, p);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_clstats_kentries</span>(<span class="enscript-type">struct</span> pfr_kentryworkq *workq, u_int64_t tzero,
+    <span class="enscript-type">int</span> negchange)
+{
+	<span class="enscript-type">struct</span> pfr_kentry	*p;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	SLIST_FOREACH(p, workq, pfrke_workq) {
+		<span class="enscript-keyword">if</span> (negchange)
+			p-&gt;pfrke_not = !p-&gt;pfrke_not;
+		bzero(p-&gt;pfrke_packets, <span class="enscript-keyword">sizeof</span> (p-&gt;pfrke_packets));
+		bzero(p-&gt;pfrke_bytes, <span class="enscript-keyword">sizeof</span> (p-&gt;pfrke_bytes));
+		p-&gt;pfrke_tzero = tzero;
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_reset_feedback</span>(user_addr_t addr, <span class="enscript-type">int</span> size, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_addr	ad;
+	<span class="enscript-type">int</span>		i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; size; i++, addr += <span class="enscript-keyword">sizeof</span> (ad)) {
+		<span class="enscript-keyword">if</span> (COPYIN(addr, &amp;ad, <span class="enscript-keyword">sizeof</span> (ad), flags))
+			<span class="enscript-keyword">break</span>;
+		ad.pfra_fback = PFR_FB_NONE;
+		<span class="enscript-keyword">if</span> (COPYOUT(&amp;ad, addr, <span class="enscript-keyword">sizeof</span> (ad), flags))
+			<span class="enscript-keyword">break</span>;
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_prepare_network</span>(<span class="enscript-type">union</span> sockaddr_union *sa, <span class="enscript-type">int</span> af, <span class="enscript-type">int</span> net)
+{
+	<span class="enscript-type">int</span>	i;
+
+	bzero(sa, <span class="enscript-keyword">sizeof</span> (*sa));
+	<span class="enscript-keyword">if</span> (af == AF_INET) {
+		sa-&gt;sin.sin_len = <span class="enscript-keyword">sizeof</span> (sa-&gt;sin);
+		sa-&gt;sin.sin_family = AF_INET;
+		sa-&gt;sin.sin_addr.s_addr = net ? htonl(-1 &lt;&lt; (32-net)) : 0;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (af == AF_INET6) {
+		sa-&gt;sin6.sin6_len = <span class="enscript-keyword">sizeof</span> (sa-&gt;sin6);
+		sa-&gt;sin6.sin6_family = AF_INET6;
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; 4; i++) {
+			<span class="enscript-keyword">if</span> (net &lt;= 32) {
+				sa-&gt;sin6.sin6_addr.s6_addr32[i] =
+				    net ? htonl(-1 &lt;&lt; (32-net)) : 0;
+				<span class="enscript-keyword">break</span>;
+			}
+			sa-&gt;sin6.sin6_addr.s6_addr32[i] = 0xFFFFFFFF;
+			net -= 32;
+		}
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_route_kentry</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, <span class="enscript-type">struct</span> pfr_kentry *ke)
+{
+	<span class="enscript-type">union</span> sockaddr_union	 mask;
+	<span class="enscript-type">struct</span> radix_node	*rn;
+	<span class="enscript-type">struct</span> radix_node_head	*head;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	bzero(ke-&gt;pfrke_node, <span class="enscript-keyword">sizeof</span> (ke-&gt;pfrke_node));
+	<span class="enscript-keyword">if</span> (ke-&gt;pfrke_af == AF_INET)
+		head = kt-&gt;pfrkt_ip4;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ke-&gt;pfrke_af == AF_INET6)
+		head = kt-&gt;pfrkt_ip6;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> (-1);
+
+	<span class="enscript-keyword">if</span> (KENTRY_NETWORK(ke)) {
+		pfr_prepare_network(&amp;mask, ke-&gt;pfrke_af, ke-&gt;pfrke_net);
+		rn = rn_addroute(&amp;ke-&gt;pfrke_sa, &amp;mask, head, ke-&gt;pfrke_node);
+	} <span class="enscript-keyword">else</span>
+		rn = rn_addroute(&amp;ke-&gt;pfrke_sa, NULL, head, ke-&gt;pfrke_node);
+
+	<span class="enscript-keyword">return</span> (rn == NULL ? -1 : 0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_unroute_kentry</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, <span class="enscript-type">struct</span> pfr_kentry *ke)
+{
+	<span class="enscript-type">union</span> sockaddr_union	 mask;
+	<span class="enscript-type">struct</span> radix_node	*rn;
+	<span class="enscript-type">struct</span> radix_node_head	*head;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (ke-&gt;pfrke_af == AF_INET)
+		head = kt-&gt;pfrkt_ip4;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ke-&gt;pfrke_af == AF_INET6)
+		head = kt-&gt;pfrkt_ip6;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> (-1);
+
+	<span class="enscript-keyword">if</span> (KENTRY_NETWORK(ke)) {
+		pfr_prepare_network(&amp;mask, ke-&gt;pfrke_af, ke-&gt;pfrke_net);
+		rn = rn_delete(&amp;ke-&gt;pfrke_sa, &amp;mask, head);
+	} <span class="enscript-keyword">else</span>
+		rn = rn_delete(&amp;ke-&gt;pfrke_sa, NULL, head);
+
+	<span class="enscript-keyword">if</span> (rn == NULL) {
+		printf(<span class="enscript-string">&quot;pfr_unroute_kentry: delete failed.\n&quot;</span>);
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_copyout_addr</span>(<span class="enscript-type">struct</span> pfr_addr *ad, <span class="enscript-type">struct</span> pfr_kentry *ke)
+{
+	bzero(ad, <span class="enscript-keyword">sizeof</span> (*ad));
+	<span class="enscript-keyword">if</span> (ke == NULL)
+		<span class="enscript-keyword">return</span>;
+	ad-&gt;pfra_af = ke-&gt;pfrke_af;
+	ad-&gt;pfra_net = ke-&gt;pfrke_net;
+	ad-&gt;pfra_not = ke-&gt;pfrke_not;
+	<span class="enscript-keyword">if</span> (ad-&gt;pfra_af == AF_INET)
+		ad-&gt;pfra_ip4addr = ke-&gt;pfrke_sa.sin.sin_addr;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ad-&gt;pfra_af == AF_INET6)
+		ad-&gt;pfra_ip6addr = ke-&gt;pfrke_sa.sin6.sin6_addr;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_walktree</span>(<span class="enscript-type">struct</span> radix_node *rn, <span class="enscript-type">void</span> *arg)
+{
+	<span class="enscript-type">struct</span> pfr_kentry	*ke = (<span class="enscript-type">struct</span> pfr_kentry *)rn;
+	<span class="enscript-type">struct</span> pfr_walktree	*w = arg;
+	<span class="enscript-type">int</span>			 flags = w-&gt;pfrw_flags;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">switch</span> (w-&gt;pfrw_op) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PFRW_MARK</span>:
+		ke-&gt;pfrke_mark = 0;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PFRW_SWEEP</span>:
+		<span class="enscript-keyword">if</span> (ke-&gt;pfrke_mark)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PFRW_ENQUEUE</span>:
+		SLIST_INSERT_HEAD(w-&gt;pfrw_workq, ke, pfrke_workq);
+		w-&gt;pfrw_cnt++;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PFRW_GET_ADDRS</span>:
+		<span class="enscript-keyword">if</span> (w-&gt;pfrw_free-- &gt; 0) {
+			<span class="enscript-type">struct</span> pfr_addr ad;
+
+			pfr_copyout_addr(&amp;ad, ke);
+			<span class="enscript-keyword">if</span> (copyout(&amp;ad, w-&gt;pfrw_addr, <span class="enscript-keyword">sizeof</span> (ad)))
+				<span class="enscript-keyword">return</span> (EFAULT);
+			w-&gt;pfrw_addr += <span class="enscript-keyword">sizeof</span> (ad);
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PFRW_GET_ASTATS</span>:
+		<span class="enscript-keyword">if</span> (w-&gt;pfrw_free-- &gt; 0) {
+			<span class="enscript-type">struct</span> pfr_astats as;
+
+			pfr_copyout_addr(&amp;as.pfras_a, ke);
+
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+			<span class="enscript-comment">/* Initialized to avoid potential info leak to
+			 * userspace */</span>
+			as._pad = 0;
+#<span class="enscript-reference">endif</span>
+			bcopy(ke-&gt;pfrke_packets, as.pfras_packets,
+			    <span class="enscript-keyword">sizeof</span> (as.pfras_packets));
+			bcopy(ke-&gt;pfrke_bytes, as.pfras_bytes,
+			    <span class="enscript-keyword">sizeof</span> (as.pfras_bytes));
+			as.pfras_tzero = ke-&gt;pfrke_tzero;
+
+			<span class="enscript-keyword">if</span> (COPYOUT(&amp;as, w-&gt;pfrw_astats, <span class="enscript-keyword">sizeof</span> (as), flags))
+				<span class="enscript-keyword">return</span> (EFAULT);
+			w-&gt;pfrw_astats += <span class="enscript-keyword">sizeof</span> (as);
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PFRW_POOL_GET</span>:
+		<span class="enscript-keyword">if</span> (ke-&gt;pfrke_not)
+			<span class="enscript-keyword">break</span>; <span class="enscript-comment">/* negative entries are ignored */</span>
+		<span class="enscript-keyword">if</span> (!w-&gt;pfrw_cnt--) {
+			w-&gt;pfrw_kentry = ke;
+			<span class="enscript-keyword">return</span> (1); <span class="enscript-comment">/* finish search */</span>
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PFRW_DYNADDR_UPDATE</span>:
+		<span class="enscript-keyword">if</span> (ke-&gt;pfrke_af == AF_INET) {
+			<span class="enscript-keyword">if</span> (w-&gt;pfrw_dyn-&gt;pfid_acnt4++ &gt; 0)
+				<span class="enscript-keyword">break</span>;
+			pfr_prepare_network(&amp;pfr_mask, AF_INET, ke-&gt;pfrke_net);
+			w-&gt;pfrw_dyn-&gt;pfid_addr4 = *SUNION2PF(
+			    &amp;ke-&gt;pfrke_sa, AF_INET);
+			w-&gt;pfrw_dyn-&gt;pfid_mask4 = *SUNION2PF(
+			    &amp;pfr_mask, AF_INET);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ke-&gt;pfrke_af == AF_INET6) {
+			<span class="enscript-keyword">if</span> (w-&gt;pfrw_dyn-&gt;pfid_acnt6++ &gt; 0)
+				<span class="enscript-keyword">break</span>;
+			pfr_prepare_network(&amp;pfr_mask, AF_INET6, ke-&gt;pfrke_net);
+			w-&gt;pfrw_dyn-&gt;pfid_addr6 = *SUNION2PF(
+			    &amp;ke-&gt;pfrke_sa, AF_INET6);
+			w-&gt;pfrw_dyn-&gt;pfid_mask6 = *SUNION2PF(
+			    &amp;pfr_mask, AF_INET6);
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_clr_tables</span>(<span class="enscript-type">struct</span> pfr_table *filter, <span class="enscript-type">int</span> *ndel, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktableworkq	 workq;
+	<span class="enscript-type">struct</span> pfr_ktable	*p;
+	<span class="enscript-type">int</span>			 xdel = 0;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_ATOMIC | PFR_FLAG_DUMMY |
+	    PFR_FLAG_ALLRSETS);
+	<span class="enscript-keyword">if</span> (pfr_fix_anchor(filter-&gt;pfrt_anchor))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">if</span> (pfr_table_count(filter, flags) &lt; 0)
+		<span class="enscript-keyword">return</span> (ENOENT);
+
+	SLIST_INIT(&amp;workq);
+	RB_FOREACH(p, pfr_ktablehead, &amp;pfr_ktables) {
+		<span class="enscript-keyword">if</span> (pfr_skip_table(filter, p, flags))
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (strcmp(p-&gt;pfrkt_anchor, PF_RESERVED_ANCHOR) == 0)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (!(p-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE))
+			<span class="enscript-keyword">continue</span>;
+		p-&gt;pfrkt_nflags = p-&gt;pfrkt_flags &amp; ~PFR_TFLAG_ACTIVE;
+		SLIST_INSERT_HEAD(&amp;workq, p, pfrkt_workq);
+		xdel++;
+	}
+	<span class="enscript-keyword">if</span> (!(flags &amp; PFR_FLAG_DUMMY)) {
+		pfr_setflags_ktables(&amp;workq);
+	}
+	<span class="enscript-keyword">if</span> (ndel != NULL)
+		*ndel = xdel;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_add_tables</span>(user_addr_t tbl, <span class="enscript-type">int</span> size, <span class="enscript-type">int</span> *nadd, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktableworkq	 addq, changeq;
+	<span class="enscript-type">struct</span> pfr_ktable	*p, *q, *r, key;
+	<span class="enscript-type">int</span>			 i, rv, xadd = 0;
+	u_int64_t		 tzero = pf_calendar_time_second();
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_ATOMIC | PFR_FLAG_DUMMY);
+	SLIST_INIT(&amp;addq);
+	SLIST_INIT(&amp;changeq);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; size; i++, tbl += <span class="enscript-keyword">sizeof</span> (key.pfrkt_t)) {
+		<span class="enscript-keyword">if</span> (COPYIN(tbl, &amp;key.pfrkt_t, <span class="enscript-keyword">sizeof</span> (key.pfrkt_t), flags))
+			senderr(EFAULT);
+		pfr_table_copyin_cleanup(&amp;key.pfrkt_t);
+		<span class="enscript-keyword">if</span> (pfr_validate_table(&amp;key.pfrkt_t, PFR_TFLAG_USRMASK,
+		    flags &amp; PFR_FLAG_USERIOCTL))
+			senderr(EINVAL);
+		key.pfrkt_flags |= PFR_TFLAG_ACTIVE;
+		p = RB_FIND(pfr_ktablehead, &amp;pfr_ktables, &amp;key);
+		<span class="enscript-keyword">if</span> (p == NULL) {
+			p = pfr_create_ktable(&amp;key.pfrkt_t, tzero, 1);
+			<span class="enscript-keyword">if</span> (p == NULL)
+				senderr(ENOMEM);
+			SLIST_FOREACH(q, &amp;addq, pfrkt_workq) {
+				<span class="enscript-keyword">if</span> (!pfr_ktable_compare(p, q))
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">_skip</span>;
+			}
+			SLIST_INSERT_HEAD(&amp;addq, p, pfrkt_workq);
+			xadd++;
+			<span class="enscript-keyword">if</span> (!key.pfrkt_anchor[0])
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">_skip</span>;
+
+			<span class="enscript-comment">/* find or create root table */</span>
+			bzero(key.pfrkt_anchor, <span class="enscript-keyword">sizeof</span> (key.pfrkt_anchor));
+			r = RB_FIND(pfr_ktablehead, &amp;pfr_ktables, &amp;key);
+			<span class="enscript-keyword">if</span> (r != NULL) {
+				p-&gt;pfrkt_root = r;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">_skip</span>;
+			}
+			SLIST_FOREACH(q, &amp;addq, pfrkt_workq) {
+				<span class="enscript-keyword">if</span> (!pfr_ktable_compare(&amp;key, q)) {
+					p-&gt;pfrkt_root = q;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">_skip</span>;
+				}
+			}
+			key.pfrkt_flags = 0;
+			r = pfr_create_ktable(&amp;key.pfrkt_t, 0, 1);
+			<span class="enscript-keyword">if</span> (r == NULL)
+				senderr(ENOMEM);
+			SLIST_INSERT_HEAD(&amp;addq, r, pfrkt_workq);
+			p-&gt;pfrkt_root = r;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!(p-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE)) {
+			SLIST_FOREACH(q, &amp;changeq, pfrkt_workq)
+				<span class="enscript-keyword">if</span> (!pfr_ktable_compare(&amp;key, q))
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">_skip</span>;
+			p-&gt;pfrkt_nflags = (p-&gt;pfrkt_flags &amp;
+			    ~PFR_TFLAG_USRMASK) | key.pfrkt_flags;
+			SLIST_INSERT_HEAD(&amp;changeq, p, pfrkt_workq);
+			xadd++;
+		}
+<span class="enscript-reference">_skip</span>:
+	;
+	}
+	<span class="enscript-keyword">if</span> (!(flags &amp; PFR_FLAG_DUMMY)) {
+		pfr_insert_ktables(&amp;addq);
+		pfr_setflags_ktables(&amp;changeq);
+	} <span class="enscript-keyword">else</span>
+		pfr_destroy_ktables(&amp;addq, 0);
+	<span class="enscript-keyword">if</span> (nadd != NULL)
+		*nadd = xadd;
+	<span class="enscript-keyword">return</span> (0);
+<span class="enscript-reference">_bad</span>:
+	pfr_destroy_ktables(&amp;addq, 0);
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_del_tables</span>(user_addr_t tbl, <span class="enscript-type">int</span> size, <span class="enscript-type">int</span> *ndel, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktableworkq	 workq;
+	<span class="enscript-type">struct</span> pfr_ktable	*p, *q, key;
+	<span class="enscript-type">int</span>			 i, xdel = 0;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_ATOMIC | PFR_FLAG_DUMMY);
+	SLIST_INIT(&amp;workq);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; size; i++, tbl += <span class="enscript-keyword">sizeof</span> (key.pfrkt_t)) {
+		<span class="enscript-keyword">if</span> (COPYIN(tbl, &amp;key.pfrkt_t, <span class="enscript-keyword">sizeof</span> (key.pfrkt_t), flags))
+			<span class="enscript-keyword">return</span> (EFAULT);
+		pfr_table_copyin_cleanup(&amp;key.pfrkt_t);
+		<span class="enscript-keyword">if</span> (pfr_validate_table(&amp;key.pfrkt_t, 0,
+		    flags &amp; PFR_FLAG_USERIOCTL))
+			<span class="enscript-keyword">return</span> (EINVAL);
+		p = RB_FIND(pfr_ktablehead, &amp;pfr_ktables, &amp;key);
+		<span class="enscript-keyword">if</span> (p != NULL &amp;&amp; (p-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE)) {
+			SLIST_FOREACH(q, &amp;workq, pfrkt_workq)
+				<span class="enscript-keyword">if</span> (!pfr_ktable_compare(p, q))
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">_skip</span>;
+			p-&gt;pfrkt_nflags = p-&gt;pfrkt_flags &amp; ~PFR_TFLAG_ACTIVE;
+			SLIST_INSERT_HEAD(&amp;workq, p, pfrkt_workq);
+			xdel++;
+		}
+<span class="enscript-reference">_skip</span>:
+	;
+	}
+
+	<span class="enscript-keyword">if</span> (!(flags &amp; PFR_FLAG_DUMMY)) {
+		pfr_setflags_ktables(&amp;workq);
+	}
+	<span class="enscript-keyword">if</span> (ndel != NULL)
+		*ndel = xdel;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_get_tables</span>(<span class="enscript-type">struct</span> pfr_table *filter, user_addr_t tbl, <span class="enscript-type">int</span> *size,
+	<span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*p;
+	<span class="enscript-type">int</span>			 n, nn;
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_ALLRSETS);
+	<span class="enscript-keyword">if</span> (pfr_fix_anchor(filter-&gt;pfrt_anchor))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	n = nn = pfr_table_count(filter, flags);
+	<span class="enscript-keyword">if</span> (n &lt; 0)
+		<span class="enscript-keyword">return</span> (ENOENT);
+	<span class="enscript-keyword">if</span> (n &gt; *size) {
+		*size = n;
+		<span class="enscript-keyword">return</span> (0);
+	}
+	RB_FOREACH(p, pfr_ktablehead, &amp;pfr_ktables) {
+		<span class="enscript-keyword">if</span> (pfr_skip_table(filter, p, flags))
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (n-- &lt;= 0)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (COPYOUT(&amp;p-&gt;pfrkt_t, tbl, <span class="enscript-keyword">sizeof</span> (p-&gt;pfrkt_t), flags))
+			<span class="enscript-keyword">return</span> (EFAULT);
+		tbl += <span class="enscript-keyword">sizeof</span> (p-&gt;pfrkt_t);
+	}
+	<span class="enscript-keyword">if</span> (n) {
+		printf(<span class="enscript-string">&quot;pfr_get_tables: corruption detected (%d).\n&quot;</span>, n);
+		<span class="enscript-keyword">return</span> (ENOTTY);
+	}
+	*size = nn;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_get_tstats</span>(<span class="enscript-type">struct</span> pfr_table *filter, user_addr_t tbl, <span class="enscript-type">int</span> *size,
+	<span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*p;
+	<span class="enscript-type">struct</span> pfr_ktableworkq	 workq;
+	<span class="enscript-type">int</span>			 n, nn;
+	u_int64_t		 tzero = pf_calendar_time_second();
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-comment">/* XXX PFR_FLAG_CLSTATS disabled */</span>
+	ACCEPT_FLAGS(flags, PFR_FLAG_ATOMIC | PFR_FLAG_ALLRSETS);
+	<span class="enscript-keyword">if</span> (pfr_fix_anchor(filter-&gt;pfrt_anchor))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	n = nn = pfr_table_count(filter, flags);
+	<span class="enscript-keyword">if</span> (n &lt; 0)
+		<span class="enscript-keyword">return</span> (ENOENT);
+	<span class="enscript-keyword">if</span> (n &gt; *size) {
+		*size = n;
+		<span class="enscript-keyword">return</span> (0);
+	}
+	SLIST_INIT(&amp;workq);
+	RB_FOREACH(p, pfr_ktablehead, &amp;pfr_ktables) {
+		<span class="enscript-keyword">if</span> (pfr_skip_table(filter, p, flags))
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (n-- &lt;= 0)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (COPYOUT(&amp;p-&gt;pfrkt_ts, tbl, <span class="enscript-keyword">sizeof</span> (p-&gt;pfrkt_ts), flags)) {
+			<span class="enscript-keyword">return</span> (EFAULT);
+		}
+		tbl += <span class="enscript-keyword">sizeof</span> (p-&gt;pfrkt_ts);
+		SLIST_INSERT_HEAD(&amp;workq, p, pfrkt_workq);
+	}
+	<span class="enscript-keyword">if</span> (flags &amp; PFR_FLAG_CLSTATS)
+		pfr_clstats_ktables(&amp;workq, tzero,
+		    flags &amp; PFR_FLAG_ADDRSTOO);
+	<span class="enscript-keyword">if</span> (n) {
+		printf(<span class="enscript-string">&quot;pfr_get_tstats: corruption detected (%d).\n&quot;</span>, n);
+		<span class="enscript-keyword">return</span> (ENOTTY);
+	}
+	*size = nn;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_clr_tstats</span>(user_addr_t tbl, <span class="enscript-type">int</span> size, <span class="enscript-type">int</span> *nzero, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktableworkq	 workq;
+	<span class="enscript-type">struct</span> pfr_ktable	*p, key;
+	<span class="enscript-type">int</span>			 i, xzero = 0;
+	u_int64_t		 tzero = pf_calendar_time_second();
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_ATOMIC | PFR_FLAG_DUMMY |
+	    PFR_FLAG_ADDRSTOO);
+	SLIST_INIT(&amp;workq);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; size; i++, tbl += <span class="enscript-keyword">sizeof</span> (key.pfrkt_t)) {
+		<span class="enscript-keyword">if</span> (COPYIN(tbl, &amp;key.pfrkt_t, <span class="enscript-keyword">sizeof</span> (key.pfrkt_t), flags))
+			<span class="enscript-keyword">return</span> (EFAULT);
+		pfr_table_copyin_cleanup(&amp;key.pfrkt_t);
+		<span class="enscript-keyword">if</span> (pfr_validate_table(&amp;key.pfrkt_t, 0, 0))
+			<span class="enscript-keyword">return</span> (EINVAL);
+		p = RB_FIND(pfr_ktablehead, &amp;pfr_ktables, &amp;key);
+		<span class="enscript-keyword">if</span> (p != NULL) {
+			SLIST_INSERT_HEAD(&amp;workq, p, pfrkt_workq);
+			xzero++;
+		}
+	}
+	<span class="enscript-keyword">if</span> (!(flags &amp; PFR_FLAG_DUMMY)) {
+		pfr_clstats_ktables(&amp;workq, tzero, flags &amp; PFR_FLAG_ADDRSTOO);
+	}
+	<span class="enscript-keyword">if</span> (nzero != NULL)
+		*nzero = xzero;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_set_tflags</span>(user_addr_t tbl, <span class="enscript-type">int</span> size, <span class="enscript-type">int</span> setflag, <span class="enscript-type">int</span> clrflag,
+	<span class="enscript-type">int</span> *nchange, <span class="enscript-type">int</span> *ndel, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktableworkq	 workq;
+	<span class="enscript-type">struct</span> pfr_ktable	*p, *q, key;
+	<span class="enscript-type">int</span>			 i, xchange = 0, xdel = 0;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_ATOMIC | PFR_FLAG_DUMMY);
+	<span class="enscript-keyword">if</span> ((setflag &amp; ~PFR_TFLAG_USRMASK) ||
+	    (clrflag &amp; ~PFR_TFLAG_USRMASK) ||
+	    (setflag &amp; clrflag))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	SLIST_INIT(&amp;workq);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; size; i++, tbl += <span class="enscript-keyword">sizeof</span> (key.pfrkt_t)) {
+		<span class="enscript-keyword">if</span> (COPYIN(tbl, &amp;key.pfrkt_t, <span class="enscript-keyword">sizeof</span> (key.pfrkt_t), flags))
+			<span class="enscript-keyword">return</span> (EFAULT);
+		pfr_table_copyin_cleanup(&amp;key.pfrkt_t);
+		<span class="enscript-keyword">if</span> (pfr_validate_table(&amp;key.pfrkt_t, 0,
+		    flags &amp; PFR_FLAG_USERIOCTL))
+			<span class="enscript-keyword">return</span> (EINVAL);
+		p = RB_FIND(pfr_ktablehead, &amp;pfr_ktables, &amp;key);
+		<span class="enscript-keyword">if</span> (p != NULL &amp;&amp; (p-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE)) {
+			p-&gt;pfrkt_nflags = (p-&gt;pfrkt_flags | setflag) &amp;
+			    ~clrflag;
+			<span class="enscript-keyword">if</span> (p-&gt;pfrkt_nflags == p-&gt;pfrkt_flags)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">_skip</span>;
+			SLIST_FOREACH(q, &amp;workq, pfrkt_workq)
+				<span class="enscript-keyword">if</span> (!pfr_ktable_compare(p, q))
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">_skip</span>;
+			SLIST_INSERT_HEAD(&amp;workq, p, pfrkt_workq);
+			<span class="enscript-keyword">if</span> ((p-&gt;pfrkt_flags &amp; PFR_TFLAG_PERSIST) &amp;&amp;
+			    (clrflag &amp; PFR_TFLAG_PERSIST) &amp;&amp;
+			    !(p-&gt;pfrkt_flags &amp; PFR_TFLAG_REFERENCED))
+				xdel++;
+			<span class="enscript-keyword">else</span>
+				xchange++;
+		}
+<span class="enscript-reference">_skip</span>:
+	;
+	}
+	<span class="enscript-keyword">if</span> (!(flags &amp; PFR_FLAG_DUMMY)) {
+		pfr_setflags_ktables(&amp;workq);
+	}
+	<span class="enscript-keyword">if</span> (nchange != NULL)
+		*nchange = xchange;
+	<span class="enscript-keyword">if</span> (ndel != NULL)
+		*ndel = xdel;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_ina_begin</span>(<span class="enscript-type">struct</span> pfr_table *trs, u_int32_t *ticket, <span class="enscript-type">int</span> *ndel, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktableworkq	 workq;
+	<span class="enscript-type">struct</span> pfr_ktable	*p;
+	<span class="enscript-type">struct</span> pf_ruleset	*rs;
+	<span class="enscript-type">int</span>			 xdel = 0;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_DUMMY);
+	rs = pf_find_or_create_ruleset(trs-&gt;pfrt_anchor);
+	<span class="enscript-keyword">if</span> (rs == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	SLIST_INIT(&amp;workq);
+	RB_FOREACH(p, pfr_ktablehead, &amp;pfr_ktables) {
+		<span class="enscript-keyword">if</span> (!(p-&gt;pfrkt_flags &amp; PFR_TFLAG_INACTIVE) ||
+		    pfr_skip_table(trs, p, 0))
+			<span class="enscript-keyword">continue</span>;
+		p-&gt;pfrkt_nflags = p-&gt;pfrkt_flags &amp; ~PFR_TFLAG_INACTIVE;
+		SLIST_INSERT_HEAD(&amp;workq, p, pfrkt_workq);
+		xdel++;
+	}
+	<span class="enscript-keyword">if</span> (!(flags &amp; PFR_FLAG_DUMMY)) {
+		pfr_setflags_ktables(&amp;workq);
+		<span class="enscript-keyword">if</span> (ticket != NULL)
+			*ticket = ++rs-&gt;tticket;
+		rs-&gt;topen = 1;
+	} <span class="enscript-keyword">else</span>
+		pf_remove_if_empty_ruleset(rs);
+	<span class="enscript-keyword">if</span> (ndel != NULL)
+		*ndel = xdel;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_ina_define</span>(<span class="enscript-type">struct</span> pfr_table *tbl, user_addr_t addr, <span class="enscript-type">int</span> size,
+    <span class="enscript-type">int</span> *nadd, <span class="enscript-type">int</span> *naddr, u_int32_t ticket, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktableworkq	 tableq;
+	<span class="enscript-type">struct</span> pfr_kentryworkq	 addrq;
+	<span class="enscript-type">struct</span> pfr_ktable	*kt, *rt, *shadow, key;
+	<span class="enscript-type">struct</span> pfr_kentry	*p;
+	<span class="enscript-type">struct</span> pfr_addr		 ad;
+	<span class="enscript-type">struct</span> pf_ruleset	*rs;
+	<span class="enscript-type">int</span>			 i, rv, xadd = 0, xaddr = 0;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_DUMMY | PFR_FLAG_ADDRSTOO);
+	<span class="enscript-keyword">if</span> (size &amp;&amp; !(flags &amp; PFR_FLAG_ADDRSTOO))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">if</span> (pfr_validate_table(tbl, PFR_TFLAG_USRMASK,
+	    flags &amp; PFR_FLAG_USERIOCTL))
+		<span class="enscript-keyword">return</span> (EINVAL);
+	rs = pf_find_ruleset(tbl-&gt;pfrt_anchor);
+	<span class="enscript-keyword">if</span> (rs == NULL || !rs-&gt;topen || ticket != rs-&gt;tticket)
+		<span class="enscript-keyword">return</span> (EBUSY);
+	tbl-&gt;pfrt_flags |= PFR_TFLAG_INACTIVE;
+	SLIST_INIT(&amp;tableq);
+	kt = RB_FIND(pfr_ktablehead, &amp;pfr_ktables, (<span class="enscript-type">struct</span> pfr_ktable *)(<span class="enscript-type">void</span> *)tbl);
+	<span class="enscript-keyword">if</span> (kt == NULL) {
+		kt = pfr_create_ktable(tbl, 0, 1);
+		<span class="enscript-keyword">if</span> (kt == NULL)
+			<span class="enscript-keyword">return</span> (ENOMEM);
+		SLIST_INSERT_HEAD(&amp;tableq, kt, pfrkt_workq);
+		xadd++;
+		<span class="enscript-keyword">if</span> (!tbl-&gt;pfrt_anchor[0])
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">_skip</span>;
+
+		<span class="enscript-comment">/* find or create root table */</span>
+		bzero(&amp;key, <span class="enscript-keyword">sizeof</span> (key));
+		strlcpy(key.pfrkt_name, tbl-&gt;pfrt_name,
+		    <span class="enscript-keyword">sizeof</span> (key.pfrkt_name));
+		rt = RB_FIND(pfr_ktablehead, &amp;pfr_ktables, &amp;key);
+		<span class="enscript-keyword">if</span> (rt != NULL) {
+			kt-&gt;pfrkt_root = rt;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">_skip</span>;
+		}
+		rt = pfr_create_ktable(&amp;key.pfrkt_t, 0, 1);
+		<span class="enscript-keyword">if</span> (rt == NULL) {
+			pfr_destroy_ktables(&amp;tableq, 0);
+			<span class="enscript-keyword">return</span> (ENOMEM);
+		}
+		SLIST_INSERT_HEAD(&amp;tableq, rt, pfrkt_workq);
+		kt-&gt;pfrkt_root = rt;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_INACTIVE))
+		xadd++;
+<span class="enscript-reference">_skip</span>:
+	shadow = pfr_create_ktable(tbl, 0, 0);
+	<span class="enscript-keyword">if</span> (shadow == NULL) {
+		pfr_destroy_ktables(&amp;tableq, 0);
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	}
+	SLIST_INIT(&amp;addrq);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; size; i++, addr += <span class="enscript-keyword">sizeof</span> (ad)) {
+		<span class="enscript-keyword">if</span> (COPYIN(addr, &amp;ad, <span class="enscript-keyword">sizeof</span> (ad), flags))
+			senderr(EFAULT);
+		<span class="enscript-keyword">if</span> (pfr_validate_addr(&amp;ad))
+			senderr(EINVAL);
+		<span class="enscript-keyword">if</span> (pfr_lookup_addr(shadow, &amp;ad, 1) != NULL)
+			<span class="enscript-keyword">continue</span>;
+		p = pfr_create_kentry(&amp;ad, 0);
+		<span class="enscript-keyword">if</span> (p == NULL)
+			senderr(ENOMEM);
+		<span class="enscript-keyword">if</span> (pfr_route_kentry(shadow, p)) {
+			pfr_destroy_kentry(p);
+			<span class="enscript-keyword">continue</span>;
+		}
+		SLIST_INSERT_HEAD(&amp;addrq, p, pfrke_workq);
+		xaddr++;
+	}
+	<span class="enscript-keyword">if</span> (!(flags &amp; PFR_FLAG_DUMMY)) {
+		<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_shadow != NULL)
+			pfr_destroy_ktable(kt-&gt;pfrkt_shadow, 1);
+		kt-&gt;pfrkt_flags |= PFR_TFLAG_INACTIVE;
+		pfr_insert_ktables(&amp;tableq);
+		shadow-&gt;pfrkt_cnt = (flags &amp; PFR_FLAG_ADDRSTOO) ?
+		    xaddr : NO_ADDRESSES;
+		kt-&gt;pfrkt_shadow = shadow;
+	} <span class="enscript-keyword">else</span> {
+		pfr_clean_node_mask(shadow, &amp;addrq);
+		pfr_destroy_ktable(shadow, 0);
+		pfr_destroy_ktables(&amp;tableq, 0);
+		pfr_destroy_kentries(&amp;addrq);
+	}
+	<span class="enscript-keyword">if</span> (nadd != NULL)
+		*nadd = xadd;
+	<span class="enscript-keyword">if</span> (naddr != NULL)
+		*naddr = xaddr;
+	<span class="enscript-keyword">return</span> (0);
+<span class="enscript-reference">_bad</span>:
+	pfr_destroy_ktable(shadow, 0);
+	pfr_destroy_ktables(&amp;tableq, 0);
+	pfr_destroy_kentries(&amp;addrq);
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_ina_rollback</span>(<span class="enscript-type">struct</span> pfr_table *trs, u_int32_t ticket, <span class="enscript-type">int</span> *ndel, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktableworkq	 workq;
+	<span class="enscript-type">struct</span> pfr_ktable	*p;
+	<span class="enscript-type">struct</span> pf_ruleset	*rs;
+	<span class="enscript-type">int</span>			 xdel = 0;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_DUMMY);
+	rs = pf_find_ruleset(trs-&gt;pfrt_anchor);
+	<span class="enscript-keyword">if</span> (rs == NULL || !rs-&gt;topen || ticket != rs-&gt;tticket)
+		<span class="enscript-keyword">return</span> (0);
+	SLIST_INIT(&amp;workq);
+	RB_FOREACH(p, pfr_ktablehead, &amp;pfr_ktables) {
+		<span class="enscript-keyword">if</span> (!(p-&gt;pfrkt_flags &amp; PFR_TFLAG_INACTIVE) ||
+		    pfr_skip_table(trs, p, 0))
+			<span class="enscript-keyword">continue</span>;
+		p-&gt;pfrkt_nflags = p-&gt;pfrkt_flags &amp; ~PFR_TFLAG_INACTIVE;
+		SLIST_INSERT_HEAD(&amp;workq, p, pfrkt_workq);
+		xdel++;
+	}
+	<span class="enscript-keyword">if</span> (!(flags &amp; PFR_FLAG_DUMMY)) {
+		pfr_setflags_ktables(&amp;workq);
+		rs-&gt;topen = 0;
+		pf_remove_if_empty_ruleset(rs);
+	}
+	<span class="enscript-keyword">if</span> (ndel != NULL)
+		*ndel = xdel;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_ina_commit</span>(<span class="enscript-type">struct</span> pfr_table *trs, u_int32_t ticket, <span class="enscript-type">int</span> *nadd,
+    <span class="enscript-type">int</span> *nchange, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*p, *q;
+	<span class="enscript-type">struct</span> pfr_ktableworkq	 workq;
+	<span class="enscript-type">struct</span> pf_ruleset	*rs;
+	<span class="enscript-type">int</span>			 xadd = 0, xchange = 0;
+	u_int64_t		 tzero = pf_calendar_time_second();
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	ACCEPT_FLAGS(flags, PFR_FLAG_ATOMIC | PFR_FLAG_DUMMY);
+	rs = pf_find_ruleset(trs-&gt;pfrt_anchor);
+	<span class="enscript-keyword">if</span> (rs == NULL || !rs-&gt;topen || ticket != rs-&gt;tticket)
+		<span class="enscript-keyword">return</span> (EBUSY);
+
+	SLIST_INIT(&amp;workq);
+	RB_FOREACH(p, pfr_ktablehead, &amp;pfr_ktables) {
+		<span class="enscript-keyword">if</span> (!(p-&gt;pfrkt_flags &amp; PFR_TFLAG_INACTIVE) ||
+		    pfr_skip_table(trs, p, 0))
+			<span class="enscript-keyword">continue</span>;
+		SLIST_INSERT_HEAD(&amp;workq, p, pfrkt_workq);
+		<span class="enscript-keyword">if</span> (p-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE)
+			xchange++;
+		<span class="enscript-keyword">else</span>
+			xadd++;
+	}
+
+	<span class="enscript-keyword">if</span> (!(flags &amp; PFR_FLAG_DUMMY)) {
+		<span class="enscript-keyword">for</span> (p = SLIST_FIRST(&amp;workq); p != NULL; p = q) {
+			q = SLIST_NEXT(p, pfrkt_workq);
+			pfr_commit_ktable(p, tzero);
+		}
+		rs-&gt;topen = 0;
+		pf_remove_if_empty_ruleset(rs);
+	}
+	<span class="enscript-keyword">if</span> (nadd != NULL)
+		*nadd = xadd;
+	<span class="enscript-keyword">if</span> (nchange != NULL)
+		*nchange = xchange;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_commit_ktable</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, u_int64_t tzero)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*shadow = kt-&gt;pfrkt_shadow;
+	<span class="enscript-type">int</span>			 nflags;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (shadow-&gt;pfrkt_cnt == NO_ADDRESSES) {
+		<span class="enscript-keyword">if</span> (!(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE))
+			pfr_clstats_ktable(kt, tzero, 1);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE) {
+		<span class="enscript-comment">/* kt might contain addresses */</span>
+		<span class="enscript-type">struct</span> pfr_kentryworkq	 addrq, addq, changeq, delq, garbageq;
+		<span class="enscript-type">struct</span> pfr_kentry	*p, *q, *next;
+		<span class="enscript-type">struct</span> pfr_addr		 ad;
+
+		pfr_enqueue_addrs(shadow, &amp;addrq, NULL, 0);
+		pfr_mark_addrs(kt);
+		SLIST_INIT(&amp;addq);
+		SLIST_INIT(&amp;changeq);
+		SLIST_INIT(&amp;delq);
+		SLIST_INIT(&amp;garbageq);
+		pfr_clean_node_mask(shadow, &amp;addrq);
+		<span class="enscript-keyword">for</span> (p = SLIST_FIRST(&amp;addrq); p != NULL; p = next) {
+			next = SLIST_NEXT(p, pfrke_workq);	<span class="enscript-comment">/* XXX */</span>
+			pfr_copyout_addr(&amp;ad, p);
+			q = pfr_lookup_addr(kt, &amp;ad, 1);
+			<span class="enscript-keyword">if</span> (q != NULL) {
+				<span class="enscript-keyword">if</span> (q-&gt;pfrke_not != p-&gt;pfrke_not)
+					SLIST_INSERT_HEAD(&amp;changeq, q,
+					    pfrke_workq);
+				q-&gt;pfrke_mark = 1;
+				SLIST_INSERT_HEAD(&amp;garbageq, p, pfrke_workq);
+			} <span class="enscript-keyword">else</span> {
+				p-&gt;pfrke_tzero = tzero;
+				SLIST_INSERT_HEAD(&amp;addq, p, pfrke_workq);
+			}
+		}
+		pfr_enqueue_addrs(kt, &amp;delq, NULL, ENQUEUE_UNMARKED_ONLY);
+		pfr_insert_kentries(kt, &amp;addq, tzero);
+		pfr_remove_kentries(kt, &amp;delq);
+		pfr_clstats_kentries(&amp;changeq, tzero, INVERT_NEG_FLAG);
+		pfr_destroy_kentries(&amp;garbageq);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* kt cannot contain addresses */</span>
+		SWAP(<span class="enscript-type">struct</span> radix_node_head *, kt-&gt;pfrkt_ip4,
+		    shadow-&gt;pfrkt_ip4);
+		SWAP(<span class="enscript-type">struct</span> radix_node_head *, kt-&gt;pfrkt_ip6,
+		    shadow-&gt;pfrkt_ip6);
+		SWAP(<span class="enscript-type">int</span>, kt-&gt;pfrkt_cnt, shadow-&gt;pfrkt_cnt);
+		pfr_clstats_ktable(kt, tzero, 1);
+	}
+	nflags = ((shadow-&gt;pfrkt_flags &amp; PFR_TFLAG_USRMASK) |
+	    (kt-&gt;pfrkt_flags &amp; PFR_TFLAG_SETMASK) | PFR_TFLAG_ACTIVE) &amp;
+	    ~PFR_TFLAG_INACTIVE;
+	pfr_destroy_ktable(shadow, 0);
+	kt-&gt;pfrkt_shadow = NULL;
+	pfr_setflags_ktable(kt, nflags);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_table_copyin_cleanup</span>(<span class="enscript-type">struct</span> pfr_table *tbl)
+{
+	tbl-&gt;pfrt_anchor[<span class="enscript-keyword">sizeof</span> (tbl-&gt;pfrt_anchor) - 1] = <span class="enscript-string">'\0'</span>;
+	tbl-&gt;pfrt_name[<span class="enscript-keyword">sizeof</span> (tbl-&gt;pfrt_name) - 1] = <span class="enscript-string">'\0'</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_validate_table</span>(<span class="enscript-type">struct</span> pfr_table *tbl, <span class="enscript-type">int</span> allowedflags, <span class="enscript-type">int</span> no_reserved)
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">if</span> (!tbl-&gt;pfrt_name[0])
+		<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">if</span> (no_reserved &amp;&amp; strcmp(tbl-&gt;pfrt_anchor, PF_RESERVED_ANCHOR) == 0)
+		<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">if</span> (tbl-&gt;pfrt_name[PF_TABLE_NAME_SIZE-1])
+		<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">for</span> (i = strlen(tbl-&gt;pfrt_name); i &lt; PF_TABLE_NAME_SIZE; i++)
+		<span class="enscript-keyword">if</span> (tbl-&gt;pfrt_name[i])
+			<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">if</span> (pfr_fix_anchor(tbl-&gt;pfrt_anchor))
+		<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">if</span> (tbl-&gt;pfrt_flags &amp; ~allowedflags)
+		<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Rewrite anchors referenced by tables to remove slashes
+ * and check for validity.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_fix_anchor</span>(<span class="enscript-type">char</span> *anchor)
+{
+	size_t siz = MAXPATHLEN;
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">if</span> (anchor[0] == <span class="enscript-string">'/'</span>) {
+		<span class="enscript-type">char</span> *path;
+		<span class="enscript-type">int</span> off;
+
+		path = anchor;
+		off = 1;
+		<span class="enscript-keyword">while</span> (*++path == <span class="enscript-string">'/'</span>)
+			off++;
+		bcopy(path, anchor, siz - off);
+		memset(anchor + siz - off, 0, off);
+	}
+	<span class="enscript-keyword">if</span> (anchor[siz - 1])
+		<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">for</span> (i = strlen(anchor); i &lt; (<span class="enscript-type">int</span>)siz; i++)
+		<span class="enscript-keyword">if</span> (anchor[i])
+			<span class="enscript-keyword">return</span> (-1);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_table_count</span>(<span class="enscript-type">struct</span> pfr_table *filter, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> pf_ruleset *rs;
+
+	<span class="enscript-keyword">if</span> (flags &amp; PFR_FLAG_ALLRSETS)
+		<span class="enscript-keyword">return</span> (pfr_ktable_cnt);
+	<span class="enscript-keyword">if</span> (filter-&gt;pfrt_anchor[0]) {
+		rs = pf_find_ruleset(filter-&gt;pfrt_anchor);
+		<span class="enscript-keyword">return</span> ((rs != NULL) ? rs-&gt;tables : -1);
+	}
+	<span class="enscript-keyword">return</span> (pf_main_ruleset.tables);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_skip_table</span>(<span class="enscript-type">struct</span> pfr_table *filter, <span class="enscript-type">struct</span> pfr_ktable *kt, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-keyword">if</span> (flags &amp; PFR_FLAG_ALLRSETS)
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">if</span> (strcmp(filter-&gt;pfrt_anchor, kt-&gt;pfrkt_anchor))
+		<span class="enscript-keyword">return</span> (1);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_insert_ktables</span>(<span class="enscript-type">struct</span> pfr_ktableworkq *workq)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*p;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	SLIST_FOREACH(p, workq, pfrkt_workq)
+		pfr_insert_ktable(p);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_insert_ktable</span>(<span class="enscript-type">struct</span> pfr_ktable *kt)
+{
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	RB_INSERT(pfr_ktablehead, &amp;pfr_ktables, kt);
+	pfr_ktable_cnt++;
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_root != NULL)
+		<span class="enscript-keyword">if</span> (!kt-&gt;pfrkt_root-&gt;pfrkt_refcnt[PFR_REFCNT_ANCHOR]++)
+			pfr_setflags_ktable(kt-&gt;pfrkt_root,
+			    kt-&gt;pfrkt_root-&gt;pfrkt_flags|PFR_TFLAG_REFDANCHOR);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_setflags_ktables</span>(<span class="enscript-type">struct</span> pfr_ktableworkq *workq)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*p, *q;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">for</span> (p = SLIST_FIRST(workq); p; p = q) {
+		q = SLIST_NEXT(p, pfrkt_workq);
+		pfr_setflags_ktable(p, p-&gt;pfrkt_nflags);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_setflags_ktable</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, <span class="enscript-type">int</span> newf)
+{
+	<span class="enscript-type">struct</span> pfr_kentryworkq	addrq;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (!(newf &amp; PFR_TFLAG_REFERENCED) &amp;&amp;
+	    !(newf &amp; PFR_TFLAG_PERSIST))
+		newf &amp;= ~PFR_TFLAG_ACTIVE;
+	<span class="enscript-keyword">if</span> (!(newf &amp; PFR_TFLAG_ACTIVE))
+		newf &amp;= ~PFR_TFLAG_USRMASK;
+	<span class="enscript-keyword">if</span> (!(newf &amp; PFR_TFLAG_SETMASK)) {
+		RB_REMOVE(pfr_ktablehead, &amp;pfr_ktables, kt);
+		<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_root != NULL)
+			<span class="enscript-keyword">if</span> (!--kt-&gt;pfrkt_root-&gt;pfrkt_refcnt[PFR_REFCNT_ANCHOR])
+				pfr_setflags_ktable(kt-&gt;pfrkt_root,
+				    kt-&gt;pfrkt_root-&gt;pfrkt_flags &amp;
+				    ~PFR_TFLAG_REFDANCHOR);
+		pfr_destroy_ktable(kt, 1);
+		pfr_ktable_cnt--;
+		<span class="enscript-keyword">return</span>;
+	}
+	<span class="enscript-keyword">if</span> (!(newf &amp; PFR_TFLAG_ACTIVE) &amp;&amp; kt-&gt;pfrkt_cnt) {
+		pfr_enqueue_addrs(kt, &amp;addrq, NULL, 0);
+		pfr_remove_kentries(kt, &amp;addrq);
+	}
+	<span class="enscript-keyword">if</span> (!(newf &amp; PFR_TFLAG_INACTIVE) &amp;&amp; kt-&gt;pfrkt_shadow != NULL) {
+		pfr_destroy_ktable(kt-&gt;pfrkt_shadow, 1);
+		kt-&gt;pfrkt_shadow = NULL;
+	}
+	kt-&gt;pfrkt_flags = newf;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_clstats_ktables</span>(<span class="enscript-type">struct</span> pfr_ktableworkq *workq, u_int64_t tzero, <span class="enscript-type">int</span> recurse)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*p;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	SLIST_FOREACH(p, workq, pfrkt_workq)
+		pfr_clstats_ktable(p, tzero, recurse);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_clstats_ktable</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, u_int64_t tzero, <span class="enscript-type">int</span> recurse)
+{
+	<span class="enscript-type">struct</span> pfr_kentryworkq	 addrq;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (recurse) {
+		pfr_enqueue_addrs(kt, &amp;addrq, NULL, 0);
+		pfr_clstats_kentries(&amp;addrq, tzero, 0);
+	}
+	bzero(kt-&gt;pfrkt_packets, <span class="enscript-keyword">sizeof</span> (kt-&gt;pfrkt_packets));
+	bzero(kt-&gt;pfrkt_bytes, <span class="enscript-keyword">sizeof</span> (kt-&gt;pfrkt_bytes));
+	kt-&gt;pfrkt_match = kt-&gt;pfrkt_nomatch = 0;
+	kt-&gt;pfrkt_tzero = tzero;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pfr_ktable *
+<span class="enscript-function-name">pfr_create_ktable</span>(<span class="enscript-type">struct</span> pfr_table *tbl, u_int64_t tzero, <span class="enscript-type">int</span> attachruleset)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*kt;
+	<span class="enscript-type">struct</span> pf_ruleset	*rs;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	kt = pool_get(&amp;pfr_ktable_pl, PR_WAITOK);
+	<span class="enscript-keyword">if</span> (kt == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+	bzero(kt, <span class="enscript-keyword">sizeof</span> (*kt));
+	kt-&gt;pfrkt_t = *tbl;
+
+	<span class="enscript-keyword">if</span> (attachruleset) {
+		rs = pf_find_or_create_ruleset(tbl-&gt;pfrt_anchor);
+		<span class="enscript-keyword">if</span> (!rs) {
+			pfr_destroy_ktable(kt, 0);
+			<span class="enscript-keyword">return</span> (NULL);
+		}
+		kt-&gt;pfrkt_rs = rs;
+		rs-&gt;tables++;
+	}
+
+	<span class="enscript-keyword">if</span> (!rn_inithead((<span class="enscript-type">void</span> **)&amp;kt-&gt;pfrkt_ip4,
+	    offsetof(<span class="enscript-type">struct</span> sockaddr_in, sin_addr) * 8) ||
+	    !rn_inithead((<span class="enscript-type">void</span> **)&amp;kt-&gt;pfrkt_ip6,
+	    offsetof(<span class="enscript-type">struct</span> sockaddr_in6, sin6_addr) * 8)) {
+		pfr_destroy_ktable(kt, 0);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+	kt-&gt;pfrkt_tzero = tzero;
+
+	<span class="enscript-keyword">return</span> (kt);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_destroy_ktables</span>(<span class="enscript-type">struct</span> pfr_ktableworkq *workq, <span class="enscript-type">int</span> flushaddr)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*p, *q;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">for</span> (p = SLIST_FIRST(workq); p; p = q) {
+		q = SLIST_NEXT(p, pfrkt_workq);
+		pfr_destroy_ktable(p, flushaddr);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_destroy_ktable</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, <span class="enscript-type">int</span> flushaddr)
+{
+	<span class="enscript-type">struct</span> pfr_kentryworkq	 addrq;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (flushaddr) {
+		pfr_enqueue_addrs(kt, &amp;addrq, NULL, 0);
+		pfr_clean_node_mask(kt, &amp;addrq);
+		pfr_destroy_kentries(&amp;addrq);
+	}
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_ip4 != NULL)
+		_FREE((caddr_t)kt-&gt;pfrkt_ip4, M_RTABLE);
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_ip6 != NULL)
+		_FREE((caddr_t)kt-&gt;pfrkt_ip6, M_RTABLE);
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_shadow != NULL)
+		pfr_destroy_ktable(kt-&gt;pfrkt_shadow, flushaddr);
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_rs != NULL) {
+		kt-&gt;pfrkt_rs-&gt;tables--;
+		pf_remove_if_empty_ruleset(kt-&gt;pfrkt_rs);
+	}
+	pool_put(&amp;pfr_ktable_pl, kt);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_ktable_compare</span>(<span class="enscript-type">struct</span> pfr_ktable *p, <span class="enscript-type">struct</span> pfr_ktable *q)
+{
+	<span class="enscript-type">int</span> d;
+
+	<span class="enscript-keyword">if</span> ((d = strncmp(p-&gt;pfrkt_name, q-&gt;pfrkt_name, PF_TABLE_NAME_SIZE)))
+		<span class="enscript-keyword">return</span> (d);
+	<span class="enscript-keyword">return</span> (strcmp(p-&gt;pfrkt_anchor, q-&gt;pfrkt_anchor));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pfr_ktable *
+<span class="enscript-function-name">pfr_lookup_table</span>(<span class="enscript-type">struct</span> pfr_table *tbl)
+{
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-comment">/* struct pfr_ktable start like a struct pfr_table */</span>
+	<span class="enscript-keyword">return</span> (RB_FIND(pfr_ktablehead, &amp;pfr_ktables,
+	    (<span class="enscript-type">struct</span> pfr_ktable *)(<span class="enscript-type">void</span> *)tbl));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_match_addr</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, <span class="enscript-type">struct</span> pf_addr *a, sa_family_t af)
+{
+	<span class="enscript-type">struct</span> pfr_kentry	*ke = NULL;
+	<span class="enscript-type">int</span>			 match;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (!(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE) &amp;&amp; kt-&gt;pfrkt_root != NULL)
+		kt = kt-&gt;pfrkt_root;
+	<span class="enscript-keyword">if</span> (!(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE))
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">switch</span> (af) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET</span>:
+		pfr_sin.sin_addr.s_addr = a-&gt;addr32[0];
+		ke = (<span class="enscript-type">struct</span> pfr_kentry *)rn_match(&amp;pfr_sin, kt-&gt;pfrkt_ip4);
+		<span class="enscript-keyword">if</span> (ke &amp;&amp; KENTRY_RNF_ROOT(ke))
+			ke = NULL;
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET6</span>:
+		bcopy(a, &amp;pfr_sin6.sin6_addr, <span class="enscript-keyword">sizeof</span> (pfr_sin6.sin6_addr));
+		ke = (<span class="enscript-type">struct</span> pfr_kentry *)rn_match(&amp;pfr_sin6, kt-&gt;pfrkt_ip6);
+		<span class="enscript-keyword">if</span> (ke &amp;&amp; KENTRY_RNF_ROOT(ke))
+			ke = NULL;
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+	}
+	match = (ke &amp;&amp; !ke-&gt;pfrke_not);
+	<span class="enscript-keyword">if</span> (match)
+		kt-&gt;pfrkt_match++;
+	<span class="enscript-keyword">else</span>
+		kt-&gt;pfrkt_nomatch++;
+	<span class="enscript-keyword">return</span> (match);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_update_stats</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, <span class="enscript-type">struct</span> pf_addr *a, sa_family_t af,
+    u_int64_t len, <span class="enscript-type">int</span> dir_out, <span class="enscript-type">int</span> op_pass, <span class="enscript-type">int</span> notrule)
+{
+	<span class="enscript-type">struct</span> pfr_kentry	*ke = NULL;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (!(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE) &amp;&amp; kt-&gt;pfrkt_root != NULL)
+		kt = kt-&gt;pfrkt_root;
+	<span class="enscript-keyword">if</span> (!(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE))
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">switch</span> (af) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET</span>:
+		pfr_sin.sin_addr.s_addr = a-&gt;addr32[0];
+		ke = (<span class="enscript-type">struct</span> pfr_kentry *)rn_match(&amp;pfr_sin, kt-&gt;pfrkt_ip4);
+		<span class="enscript-keyword">if</span> (ke &amp;&amp; KENTRY_RNF_ROOT(ke))
+			ke = NULL;
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET6</span>:
+		bcopy(a, &amp;pfr_sin6.sin6_addr, <span class="enscript-keyword">sizeof</span> (pfr_sin6.sin6_addr));
+		ke = (<span class="enscript-type">struct</span> pfr_kentry *)rn_match(&amp;pfr_sin6, kt-&gt;pfrkt_ip6);
+		<span class="enscript-keyword">if</span> (ke &amp;&amp; KENTRY_RNF_ROOT(ke))
+			ke = NULL;
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+	<span class="enscript-reference">default</span>:
+		;
+	}
+	<span class="enscript-keyword">if</span> ((ke == NULL || ke-&gt;pfrke_not) != notrule) {
+		<span class="enscript-keyword">if</span> (op_pass != PFR_OP_PASS)
+			printf(<span class="enscript-string">&quot;pfr_update_stats: assertion failed.\n&quot;</span>);
+		op_pass = PFR_OP_XPASS;
+	}
+	kt-&gt;pfrkt_packets[dir_out][op_pass]++;
+	kt-&gt;pfrkt_bytes[dir_out][op_pass] += len;
+	<span class="enscript-keyword">if</span> (ke != NULL &amp;&amp; op_pass != PFR_OP_XPASS) {
+		ke-&gt;pfrke_packets[dir_out][op_pass]++;
+		ke-&gt;pfrke_bytes[dir_out][op_pass] += len;
+	}
+}
+
+<span class="enscript-type">struct</span> pfr_ktable *
+<span class="enscript-function-name">pfr_attach_table</span>(<span class="enscript-type">struct</span> pf_ruleset *rs, <span class="enscript-type">char</span> *name)
+{
+	<span class="enscript-type">struct</span> pfr_ktable	*kt, *rt;
+	<span class="enscript-type">struct</span> pfr_table	 tbl;
+	<span class="enscript-type">struct</span> pf_anchor	*ac = rs-&gt;anchor;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	bzero(&amp;tbl, <span class="enscript-keyword">sizeof</span> (tbl));
+	strlcpy(tbl.pfrt_name, name, <span class="enscript-keyword">sizeof</span> (tbl.pfrt_name));
+	<span class="enscript-keyword">if</span> (ac != NULL)
+		strlcpy(tbl.pfrt_anchor, ac-&gt;path, <span class="enscript-keyword">sizeof</span> (tbl.pfrt_anchor));
+	kt = pfr_lookup_table(&amp;tbl);
+	<span class="enscript-keyword">if</span> (kt == NULL) {
+		kt = pfr_create_ktable(&amp;tbl, pf_calendar_time_second(), 1);
+		<span class="enscript-keyword">if</span> (kt == NULL)
+			<span class="enscript-keyword">return</span> (NULL);
+		<span class="enscript-keyword">if</span> (ac != NULL) {
+			bzero(tbl.pfrt_anchor, <span class="enscript-keyword">sizeof</span> (tbl.pfrt_anchor));
+			rt = pfr_lookup_table(&amp;tbl);
+			<span class="enscript-keyword">if</span> (rt == NULL) {
+				rt = pfr_create_ktable(&amp;tbl, 0, 1);
+				<span class="enscript-keyword">if</span> (rt == NULL) {
+					pfr_destroy_ktable(kt, 0);
+					<span class="enscript-keyword">return</span> (NULL);
+				}
+				pfr_insert_ktable(rt);
+			}
+			kt-&gt;pfrkt_root = rt;
+		}
+		pfr_insert_ktable(kt);
+	}
+	<span class="enscript-keyword">if</span> (!kt-&gt;pfrkt_refcnt[PFR_REFCNT_RULE]++)
+		pfr_setflags_ktable(kt, kt-&gt;pfrkt_flags|PFR_TFLAG_REFERENCED);
+	<span class="enscript-keyword">return</span> (kt);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_detach_table</span>(<span class="enscript-type">struct</span> pfr_ktable *kt)
+{
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (kt-&gt;pfrkt_refcnt[PFR_REFCNT_RULE] &lt;= 0)
+		printf(<span class="enscript-string">&quot;pfr_detach_table: refcount = %d.\n&quot;</span>,
+		    kt-&gt;pfrkt_refcnt[PFR_REFCNT_RULE]);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!--kt-&gt;pfrkt_refcnt[PFR_REFCNT_RULE])
+		pfr_setflags_ktable(kt, kt-&gt;pfrkt_flags&amp;~PFR_TFLAG_REFERENCED);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pfr_pool_get</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, <span class="enscript-type">int</span> *pidx, <span class="enscript-type">struct</span> pf_addr *counter,
+    <span class="enscript-type">struct</span> pf_addr **raddr, <span class="enscript-type">struct</span> pf_addr **rmask, sa_family_t af)
+{
+	<span class="enscript-type">struct</span> pfr_kentry	*ke, *ke2;
+	<span class="enscript-type">struct</span> pf_addr		*addr;
+	<span class="enscript-type">union</span> sockaddr_union	 mask;
+	<span class="enscript-type">int</span>			 idx = -1, use_counter = 0;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (af == AF_INET)
+		addr = (<span class="enscript-type">struct</span> pf_addr *)&amp;pfr_sin.sin_addr;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (af == AF_INET6)
+		addr = (<span class="enscript-type">struct</span> pf_addr *)&amp;pfr_sin6.sin6_addr;
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> (-1);
+
+	<span class="enscript-keyword">if</span> (!(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE) &amp;&amp; kt-&gt;pfrkt_root != NULL)
+		kt = kt-&gt;pfrkt_root;
+	<span class="enscript-keyword">if</span> (!(kt-&gt;pfrkt_flags &amp; PFR_TFLAG_ACTIVE))
+		<span class="enscript-keyword">return</span> (-1);
+
+	<span class="enscript-keyword">if</span> (pidx != NULL)
+		idx = *pidx;
+	<span class="enscript-keyword">if</span> (counter != NULL &amp;&amp; idx &gt;= 0)
+		use_counter = 1;
+	<span class="enscript-keyword">if</span> (idx &lt; 0)
+		idx = 0;
+
+<span class="enscript-reference">_next_block</span>:
+	ke = pfr_kentry_byidx(kt, idx, af);
+	<span class="enscript-keyword">if</span> (ke == NULL) {
+		kt-&gt;pfrkt_nomatch++;
+		<span class="enscript-keyword">return</span> (1);
+	}
+	pfr_prepare_network(&amp;pfr_mask, af, ke-&gt;pfrke_net);
+	*raddr = SUNION2PF(&amp;ke-&gt;pfrke_sa, af);
+	*rmask = SUNION2PF(&amp;pfr_mask, af);
+
+	<span class="enscript-keyword">if</span> (use_counter) {
+		<span class="enscript-comment">/* is supplied address within block? */</span>
+		<span class="enscript-keyword">if</span> (!PF_MATCHA(0, *raddr, *rmask, counter, af)) {
+			<span class="enscript-comment">/* no, go to next block in table */</span>
+			idx++;
+			use_counter = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">_next_block</span>;
+		}
+		PF_ACPY(addr, counter, af);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* use first address of block */</span>
+		PF_ACPY(addr, *raddr, af);
+	}
+
+	<span class="enscript-keyword">if</span> (!KENTRY_NETWORK(ke)) {
+		<span class="enscript-comment">/* this is a single IP address - no possible nested block */</span>
+		PF_ACPY(counter, addr, af);
+		*pidx = idx;
+		kt-&gt;pfrkt_match++;
+		<span class="enscript-keyword">return</span> (0);
+	}
+	<span class="enscript-keyword">for</span> (;;) {
+		<span class="enscript-comment">/* we don't want to use a nested block */</span>
+		<span class="enscript-keyword">if</span> (af == AF_INET)
+			ke2 = (<span class="enscript-type">struct</span> pfr_kentry *)rn_match(&amp;pfr_sin,
+			    kt-&gt;pfrkt_ip4);
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (af == AF_INET6)
+			ke2 = (<span class="enscript-type">struct</span> pfr_kentry *)rn_match(&amp;pfr_sin6,
+			    kt-&gt;pfrkt_ip6);
+		<span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">return</span> (-1); <span class="enscript-comment">/* never happens */</span>
+		<span class="enscript-comment">/* no need to check KENTRY_RNF_ROOT() here */</span>
+		<span class="enscript-keyword">if</span> (ke2 == ke) {
+			<span class="enscript-comment">/* lookup return the same block - perfect */</span>
+			PF_ACPY(counter, addr, af);
+			*pidx = idx;
+			kt-&gt;pfrkt_match++;
+			<span class="enscript-keyword">return</span> (0);
+		}
+
+		<span class="enscript-comment">/* we need to increase the counter past the nested block */</span>
+		pfr_prepare_network(&amp;mask, AF_INET, ke2-&gt;pfrke_net);
+		PF_POOLMASK(addr, addr, SUNION2PF(&amp;mask, af), &amp;pfr_ffaddr, af);
+		PF_AINC(addr, af);
+		<span class="enscript-keyword">if</span> (!PF_MATCHA(0, *raddr, *rmask, addr, af)) {
+			<span class="enscript-comment">/* ok, we reached the end of our main block */</span>
+			<span class="enscript-comment">/* go to next block in table */</span>
+			idx++;
+			use_counter = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">_next_block</span>;
+		}
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pfr_kentry *
+<span class="enscript-function-name">pfr_kentry_byidx</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, <span class="enscript-type">int</span> idx, <span class="enscript-type">int</span> af)
+{
+	<span class="enscript-type">struct</span> pfr_walktree	w;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	bzero(&amp;w, <span class="enscript-keyword">sizeof</span> (w));
+	w.pfrw_op = PFRW_POOL_GET;
+	w.pfrw_cnt = idx;
+
+	<span class="enscript-keyword">switch</span> (af) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET</span>:
+		(<span class="enscript-type">void</span>) kt-&gt;pfrkt_ip4-&gt;rnh_walktree(kt-&gt;pfrkt_ip4,
+		    pfr_walktree, &amp;w);
+		<span class="enscript-keyword">return</span> (w.pfrw_kentry);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET6</span>:
+		(<span class="enscript-type">void</span>) kt-&gt;pfrkt_ip6-&gt;rnh_walktree(kt-&gt;pfrkt_ip6,
+		    pfr_walktree, &amp;w);
+		<span class="enscript-keyword">return</span> (w.pfrw_kentry);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pfr_dynaddr_update</span>(<span class="enscript-type">struct</span> pfr_ktable *kt, <span class="enscript-type">struct</span> pfi_dynaddr *dyn)
+{
+	<span class="enscript-type">struct</span> pfr_walktree	w;
+
+	lck_mtx_assert(pf_lock, LCK_MTX_ASSERT_OWNED);
+
+	bzero(&amp;w, <span class="enscript-keyword">sizeof</span> (w));
+	w.pfrw_op = PFRW_DYNADDR_UPDATE;
+	w.pfrw_dyn = dyn;
+
+	dyn-&gt;pfid_acnt4 = 0;
+	dyn-&gt;pfid_acnt6 = 0;
+	<span class="enscript-keyword">if</span> (!dyn-&gt;pfid_af || dyn-&gt;pfid_af == AF_INET)
+		(<span class="enscript-type">void</span>) kt-&gt;pfrkt_ip4-&gt;rnh_walktree(kt-&gt;pfrkt_ip4,
+		    pfr_walktree, &amp;w);
+	<span class="enscript-keyword">if</span> (!dyn-&gt;pfid_af || dyn-&gt;pfid_af == AF_INET6)
+		(<span class="enscript-type">void</span>) kt-&gt;pfrkt_ip6-&gt;rnh_walktree(kt-&gt;pfrkt_ip6,
+		    pfr_walktree, &amp;w);
+}
+</pre>
+<hr />
+</body></html>

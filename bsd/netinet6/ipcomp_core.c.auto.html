@@ -1,0 +1,440 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ipcomp_core.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ipcomp_core.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*	$FreeBSD: src/sys/netinet6/ipcomp_core.c,v 1.1.2.2 2001/07/03 11:01:54 ume Exp $	*/</span>
+<span class="enscript-comment">/*	$KAME: ipcomp_core.c,v 1.24 2000/10/23 04:24:22 itojun Exp $	*/</span>
+
+<span class="enscript-comment">/*
+ * Copyright (C) 1999 WIDE Project.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the project nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+<span class="enscript-comment">/*
+ * RFC2393 IP payload compression protocol (IPComp).
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPCOMP_ZLIB</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/zlib.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipcomp.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipcomp6.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipsec.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipsec6.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPCOMP_ZLIB</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> *<span class="enscript-function-name">deflate_alloc</span>(<span class="enscript-type">void</span> *, u_int, u_int);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">deflate_free</span>(<span class="enscript-type">void</span> *, <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">deflate_common</span>(<span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">struct</span> mbuf *, size_t *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">deflate_compress</span>(<span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">struct</span> mbuf *, size_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">deflate_decompress</span>(<span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">struct</span> mbuf *, size_t *);
+
+<span class="enscript-comment">/*
+ * We need to use default window size (2^15 = 32Kbytes as of writing) for
+ * inbound case.  Otherwise we get interop problem.
+ * Use negative value to avoid Adler32 checksum.  This is an undocumented
+ * feature in zlib (see ipsec wg mailing list archive in January 2000).
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> deflate_policy = Z_DEFAULT_COMPRESSION;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> deflate_window_out = -12;
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">int</span> deflate_window_in = -1 * MAX_WBITS;	<span class="enscript-comment">/* don't change it */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> deflate_memlevel = MAX_MEM_LEVEL;
+
+<span class="enscript-type">static</span> z_stream	deflate_stream;
+<span class="enscript-type">static</span> z_stream	inflate_stream;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IPCOMP_ZLIB */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPCOMP_ZLIB</span>
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ipcomp_algorithm ipcomp_algorithms[] = {
+	{ deflate_compress, deflate_decompress, 90 },
+};
+#<span class="enscript-reference">else</span>
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ipcomp_algorithm ipcomp_algorithms[] __unused = {};
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ipcomp_algorithm *
+<span class="enscript-function-name">ipcomp_algorithm_lookup</span>(
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPCOMP_ZLIB</span>
+		<span class="enscript-type">int</span> idx
+#<span class="enscript-reference">else</span>
+		__unused <span class="enscript-type">int</span> idx
+#<span class="enscript-reference">endif</span>
+		)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPCOMP_ZLIB</span>
+ 	<span class="enscript-keyword">if</span> (idx == SADB_X_CALG_DEFLATE) {
+		<span class="enscript-comment">/*
+		 * Avert your gaze, ugly hack follows!
+		 * We init here so our malloc can allocate using M_WAIT.
+		 * We don't want to allocate if ipcomp isn't used, and we
+		 * don't want to allocate on the input or output path.
+		 * Allocation fails if we use M_NOWAIT because init allocates
+		 * something like 256k (ouch).
+		 */</span>
+		<span class="enscript-keyword">if</span> (deflate_stream.zalloc == NULL) {
+			deflate_stream.zalloc = deflate_alloc;
+			deflate_stream.zfree = deflate_free;
+			<span class="enscript-keyword">if</span> (deflateInit2(&amp;deflate_stream, deflate_policy, Z_DEFLATED,
+					deflate_window_out, deflate_memlevel, Z_DEFAULT_STRATEGY)) {
+				<span class="enscript-comment">/* Allocation failed */</span>
+				bzero(&amp;deflate_stream, <span class="enscript-keyword">sizeof</span>(deflate_stream));
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPSEC_DEBUG</span>
+				printf(<span class="enscript-string">&quot;ipcomp_algorithm_lookup: deflateInit2 failed.\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+			}
+		}
+		
+		<span class="enscript-keyword">if</span> (inflate_stream.zalloc == NULL) {
+			inflate_stream.zalloc = deflate_alloc;
+			inflate_stream.zfree = deflate_free;
+			<span class="enscript-keyword">if</span> (inflateInit2(&amp;inflate_stream, deflate_window_in)) {
+				<span class="enscript-comment">/* Allocation failed */</span>
+				bzero(&amp;inflate_stream, <span class="enscript-keyword">sizeof</span>(inflate_stream));
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPSEC_DEBUG</span>
+				printf(<span class="enscript-string">&quot;ipcomp_algorithm_lookup: inflateInit2 failed.\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+			}
+		}
+
+		<span class="enscript-keyword">return</span> &amp;ipcomp_algorithms[0];
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IPCOMP_ZLIB */</span>
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPCOMP_ZLIB</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> *
+<span class="enscript-function-name">deflate_alloc</span>(
+	__unused <span class="enscript-type">void</span> *aux,
+	u_int items,
+	u_int siz)
+{
+	<span class="enscript-type">void</span> *ptr;
+	ptr = _MALLOC(items * siz, M_TEMP, M_NOWAIT);
+	<span class="enscript-keyword">return</span> ptr;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">deflate_free</span>(
+	__unused <span class="enscript-type">void</span> *aux,
+	<span class="enscript-type">void</span> *ptr)
+{
+	FREE(ptr, M_TEMP);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">deflate_common</span>(m, md, lenp, mode)
+	<span class="enscript-type">struct</span> mbuf *m;
+	<span class="enscript-type">struct</span> mbuf *md;
+	size_t *lenp;
+	<span class="enscript-type">int</span> mode;	<span class="enscript-comment">/* 0: compress 1: decompress */</span>
+{
+	<span class="enscript-type">struct</span> mbuf *mprev;
+	<span class="enscript-type">struct</span> mbuf *p;
+	<span class="enscript-type">struct</span> mbuf *n = NULL, *n0 = NULL, **np;
+	z_stream *zs;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> zerror;
+	size_t offset;
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MOREBLOCK</span>() \
+<span class="enscript-keyword">do</span> { \
+	<span class="enscript-comment">/* keep the reply buffer into our chain */</span>		\
+	<span class="enscript-keyword">if</span> (n) {						\
+		n-&gt;m_len = zs-&gt;total_out - offset;		\
+		offset = zs-&gt;total_out;				\
+		*np = n;					\
+		np = &amp;n-&gt;m_next;				\
+		n = NULL;					\
+	}							\
+								\
+	<span class="enscript-comment">/* get a fresh reply buffer */</span>				\
+	MGET(n, M_DONTWAIT, MT_DATA);				\
+	<span class="enscript-keyword">if</span> (n) {						\
+		MCLGET(n, M_DONTWAIT);				\
+	}							\
+	<span class="enscript-keyword">if</span> (!n) {						\
+		error = ENOBUFS;				\
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;					\
+	}							\
+	n-&gt;m_len = 0;						\
+	n-&gt;m_len = M_TRAILINGSPACE(n);				\
+	n-&gt;m_next = NULL;					\
+	<span class="enscript-comment">/*							\
+	 * if this is the first reply buffer, reserve		\
+	 * region for ipcomp header.				\
+	 */</span>							\
+	<span class="enscript-keyword">if</span> (*np == NULL) {					\
+		n-&gt;m_len -= <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipcomp);		\
+		n-&gt;m_data += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipcomp);		\
+	}							\
+								\
+	zs-&gt;next_out = mtod(n, u_int8_t *);			\
+	zs-&gt;avail_out = n-&gt;m_len;				\
+} <span class="enscript-keyword">while</span> (0)
+
+	<span class="enscript-keyword">for</span> (mprev = m; mprev &amp;&amp; mprev-&gt;m_next != md; mprev = mprev-&gt;m_next)
+		;
+	<span class="enscript-keyword">if</span> (!mprev)
+		panic(<span class="enscript-string">&quot;md is not in m in deflate_common&quot;</span>);
+
+
+	zs = mode ? &amp;inflate_stream : &amp;deflate_stream;
+	<span class="enscript-keyword">if</span> (zs-&gt;zalloc == NULL) {
+		<span class="enscript-comment">/*
+		 * init is called in ipcomp_algorithm_lookup.
+		 * if zs-&gt;zalloc is NULL, either init hasn't been called (unlikely)
+		 * or init failed because of no memory.
+		 */</span>
+		error = ENOBUFS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+	}
+	
+	zs-&gt;next_in = 0;
+	zs-&gt;avail_in = 0;
+	zs-&gt;next_out = 0;
+	zs-&gt;avail_out = 0;
+
+	n0 = n = NULL;
+	np = &amp;n0;
+	offset = 0;
+	zerror = 0;
+	p = md;
+	<span class="enscript-keyword">while</span> (p &amp;&amp; p-&gt;m_len == 0) {
+		p = p-&gt;m_next;
+	}
+
+	<span class="enscript-comment">/* input stream and output stream are available */</span>
+	<span class="enscript-keyword">while</span> (p &amp;&amp; zs-&gt;avail_in == 0) {
+		<span class="enscript-comment">/* get input buffer */</span>
+		<span class="enscript-keyword">if</span> (p &amp;&amp; zs-&gt;avail_in == 0) {
+			zs-&gt;next_in = mtod(p, u_int8_t *);
+			zs-&gt;avail_in = p-&gt;m_len;
+			p = p-&gt;m_next;
+			<span class="enscript-keyword">while</span> (p &amp;&amp; p-&gt;m_len == 0) {
+				p = p-&gt;m_next;
+			}
+		}
+
+		<span class="enscript-comment">/* get output buffer */</span>
+		<span class="enscript-keyword">if</span> (zs-&gt;next_out == NULL || zs-&gt;avail_out == 0) {
+			MOREBLOCK();
+		}
+
+		zerror = mode ? inflate(zs, Z_NO_FLUSH)
+			      : deflate(zs, Z_NO_FLUSH);
+
+		<span class="enscript-keyword">if</span> (zerror == Z_STREAM_END)
+			; <span class="enscript-comment">/*once more.*/</span>
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (zerror == Z_OK) {
+			<span class="enscript-comment">/* inflate: Z_OK can indicate the end of decode */</span>
+			<span class="enscript-keyword">if</span> (mode &amp;&amp; !p &amp;&amp; zs-&gt;avail_out != 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">terminate</span>;
+			
+			<span class="enscript-comment">/* else once more.*/</span>
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (zs-&gt;msg) {
+				ipseclog((LOG_ERR, <span class="enscript-string">&quot;ipcomp_%scompress: &quot;</span>
+				    <span class="enscript-string">&quot;%sflate(Z_NO_FLUSH): %s\n&quot;</span>,
+				    mode ? <span class="enscript-string">&quot;de&quot;</span> : <span class="enscript-string">&quot;&quot;</span>, mode ? <span class="enscript-string">&quot;in&quot;</span> : <span class="enscript-string">&quot;de&quot;</span>,
+				    zs-&gt;msg));
+			} <span class="enscript-keyword">else</span> {
+				ipseclog((LOG_ERR, <span class="enscript-string">&quot;ipcomp_%scompress: &quot;</span>
+				    <span class="enscript-string">&quot;%sflate(Z_NO_FLUSH): unknown error (%d)\n&quot;</span>,
+				    mode ? <span class="enscript-string">&quot;de&quot;</span> : <span class="enscript-string">&quot;&quot;</span>, mode ? <span class="enscript-string">&quot;in&quot;</span> : <span class="enscript-string">&quot;de&quot;</span>,
+				    zerror));
+			}
+			mode ? inflateReset(zs) : deflateReset(zs);
+<span class="enscript-comment">/*			mode ? inflateEnd(zs) : deflateEnd(zs);*/</span>
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (zerror == Z_STREAM_END)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">terminate</span>;
+
+	<span class="enscript-comment">/* termination */</span>
+	<span class="enscript-keyword">while</span> (1) {
+		<span class="enscript-comment">/* get output buffer */</span>
+		<span class="enscript-keyword">if</span> (zs-&gt;next_out == NULL || zs-&gt;avail_out == 0) {
+			MOREBLOCK();
+		}
+
+		zerror = mode ? inflate(zs, Z_FINISH)
+			      : deflate(zs, Z_FINISH);
+
+		<span class="enscript-keyword">if</span> (zerror == Z_STREAM_END)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (zerror == Z_OK)
+			; <span class="enscript-comment">/*once more.*/</span>
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (zs-&gt;msg) {
+				ipseclog((LOG_ERR, <span class="enscript-string">&quot;ipcomp_%scompress: &quot;</span>
+				    <span class="enscript-string">&quot;%sflate(Z_FINISH): %s\n&quot;</span>,
+				    mode ? <span class="enscript-string">&quot;de&quot;</span> : <span class="enscript-string">&quot;&quot;</span>, mode ? <span class="enscript-string">&quot;in&quot;</span> : <span class="enscript-string">&quot;de&quot;</span>,
+				    zs-&gt;msg));
+			} <span class="enscript-keyword">else</span> {
+				ipseclog((LOG_ERR, <span class="enscript-string">&quot;ipcomp_%scompress: &quot;</span>
+				    <span class="enscript-string">&quot;%sflate(Z_FINISH): unknown error (%d)\n&quot;</span>,
+				    mode ? <span class="enscript-string">&quot;de&quot;</span> : <span class="enscript-string">&quot;&quot;</span>, mode ? <span class="enscript-string">&quot;in&quot;</span> : <span class="enscript-string">&quot;de&quot;</span>,
+				    zerror));
+			}
+			mode ? inflateReset(zs) : deflateReset(zs);
+<span class="enscript-comment">/*			mode ? inflateEnd(zs) : deflateEnd(zs); */</span>
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fail</span>;
+		}
+	}
+
+<span class="enscript-reference">terminate</span>:
+	<span class="enscript-comment">/* keep the final reply buffer into our chain */</span>
+	<span class="enscript-keyword">if</span> (n) {
+		n-&gt;m_len = zs-&gt;total_out - offset;
+		offset = zs-&gt;total_out;
+		*np = n;
+		np = &amp;n-&gt;m_next;
+		n = NULL;
+	}
+
+	<span class="enscript-comment">/* switch the mbuf to the new one */</span>
+	mprev-&gt;m_next = n0;
+	m_freem(md);
+	*lenp = zs-&gt;total_out;
+
+	<span class="enscript-comment">/* reset the inflate/deflate state */</span>
+	zerror = mode ? inflateReset(zs) : deflateReset(zs);
+	<span class="enscript-keyword">if</span> (zerror != Z_OK) {
+		<span class="enscript-comment">/*
+		 * A failure here is uncommon. If this does
+		 * fail, the packet can still be used but
+		 * the z_stream will be messed up so subsequent
+		 * inflates/deflates will probably fail.
+		 */</span>
+		<span class="enscript-keyword">if</span> (zs-&gt;msg) {
+			ipseclog((LOG_ERR, <span class="enscript-string">&quot;ipcomp_%scompress: &quot;</span>
+			    <span class="enscript-string">&quot;%sflateEnd: %s\n&quot;</span>,
+			    mode ? <span class="enscript-string">&quot;de&quot;</span> : <span class="enscript-string">&quot;&quot;</span>, mode ? <span class="enscript-string">&quot;in&quot;</span> : <span class="enscript-string">&quot;de&quot;</span>,
+			    zs-&gt;msg));
+		} <span class="enscript-keyword">else</span> {
+			ipseclog((LOG_ERR, <span class="enscript-string">&quot;ipcomp_%scompress: &quot;</span>
+			    <span class="enscript-string">&quot;%sflateEnd: unknown error (%d)\n&quot;</span>,
+			    mode ? <span class="enscript-string">&quot;de&quot;</span> : <span class="enscript-string">&quot;&quot;</span>, mode ? <span class="enscript-string">&quot;in&quot;</span> : <span class="enscript-string">&quot;de&quot;</span>,
+			    zerror));
+		}
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+
+<span class="enscript-reference">fail</span>:
+	<span class="enscript-keyword">if</span> (m)
+		m_freem(m);
+	<span class="enscript-keyword">if</span> (n)
+		m_freem(n);
+	<span class="enscript-keyword">if</span> (n0)
+		m_freem(n0);
+	<span class="enscript-keyword">return</span> error;
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">MOREBLOCK</span>
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">deflate_compress</span>(m, md, lenp)
+	<span class="enscript-type">struct</span> mbuf *m;
+	<span class="enscript-type">struct</span> mbuf *md;
+	size_t *lenp;
+{
+	<span class="enscript-keyword">if</span> (!m)
+		panic(<span class="enscript-string">&quot;m == NULL in deflate_compress&quot;</span>);
+	<span class="enscript-keyword">if</span> (!md)
+		panic(<span class="enscript-string">&quot;md == NULL in deflate_compress&quot;</span>);
+	<span class="enscript-keyword">if</span> (!lenp)
+		panic(<span class="enscript-string">&quot;lenp == NULL in deflate_compress&quot;</span>);
+
+	<span class="enscript-keyword">return</span> deflate_common(m, md, lenp, 0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">deflate_decompress</span>(m, md, lenp)
+	<span class="enscript-type">struct</span> mbuf *m;
+	<span class="enscript-type">struct</span> mbuf *md;
+	size_t *lenp;
+{
+	<span class="enscript-keyword">if</span> (!m)
+		panic(<span class="enscript-string">&quot;m == NULL in deflate_decompress&quot;</span>);
+	<span class="enscript-keyword">if</span> (!md)
+		panic(<span class="enscript-string">&quot;md == NULL in deflate_decompress&quot;</span>);
+	<span class="enscript-keyword">if</span> (!lenp)
+		panic(<span class="enscript-string">&quot;lenp == NULL in deflate_decompress&quot;</span>);
+
+	<span class="enscript-keyword">return</span> deflate_common(m, md, lenp, 1);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IPCOMP_ZLIB */</span>
+</pre>
+<hr />
+</body></html>

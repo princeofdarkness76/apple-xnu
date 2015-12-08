@@ -1,0 +1,406 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>vfs_journal.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">vfs_journal.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * This header contains the structures and function prototypes
+ * for the vfs journaling code.  The data types are not meant
+ * to be modified by user code.  Just use the functions and do
+ * not mess around with the structs.
+ */</span> 
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_SYS_VFS_JOURNAL_H_</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_SYS_VFS_JOURNAL_H_</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/appleapiopts.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__APPLE_API_UNSTABLE</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/disk.h&gt;</span>
+
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> _blk_info {
+    int32_t    bsize;
+    <span class="enscript-type">union</span> {
+	int32_t    cksum;
+	uint32_t   sequence_num;
+    } b;
+} _blk_info;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> block_info {
+    off_t       bnum;                <span class="enscript-comment">// block # on the file system device
+</span>    <span class="enscript-type">union</span> {
+	_blk_info   bi;
+	<span class="enscript-type">struct</span> buf *bp;
+    } u;
+} __attribute__((__packed__)) block_info;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> block_list_header {
+    u_int16_t   max_blocks;          <span class="enscript-comment">// max number of blocks in this chunk
+</span>    u_int16_t   num_blocks;          <span class="enscript-comment">// number of valid block numbers in block_nums
+</span>    int32_t     bytes_used;          <span class="enscript-comment">// how many bytes of this tbuffer are used
+</span>    uint32_t     checksum;            <span class="enscript-comment">// on-disk: checksum of this header and binfo[0]
+</span>    int32_t     flags;               <span class="enscript-comment">// check-checksums, initial blhdr, etc
+</span>    block_info  binfo[1];            <span class="enscript-comment">// so we can reference them by name
+</span>} block_list_header;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BLHDR_CHECK_CHECKSUMS</span>   0x0001
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BLHDR_FIRST_HEADER</span>      0x0002
+
+
+<span class="enscript-type">struct</span> journal;
+
+<span class="enscript-type">struct</span> jnl_trim_list {
+	uint32_t	allocated_count;
+	uint32_t	extent_count;
+	dk_extent_t *extents;
+};
+
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">void</span> (*jnl_trim_callback_t)(<span class="enscript-type">void</span> *arg, uint32_t extent_count, <span class="enscript-type">const</span> dk_extent_t *extents);
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> transaction {
+    <span class="enscript-type">int</span>                 tbuffer_size;  <span class="enscript-comment">// in bytes
+</span>    <span class="enscript-type">char</span>               *tbuffer;       <span class="enscript-comment">// memory copy of the transaction
+</span>    block_list_header  *blhdr;         <span class="enscript-comment">// points to the first byte of tbuffer
+</span>    <span class="enscript-type">int</span>                 num_blhdrs;    <span class="enscript-comment">// how many buffers we've allocated
+</span>    <span class="enscript-type">int</span>                 total_bytes;   <span class="enscript-comment">// total # of bytes in transaction
+</span>    <span class="enscript-type">int</span>                 num_flushed;   <span class="enscript-comment">// how many bytes have been flushed
+</span>    <span class="enscript-type">int</span>                 num_killed;    <span class="enscript-comment">// how many bytes were &quot;killed&quot;
+</span>    off_t               journal_start; <span class="enscript-comment">// where in the journal this transaction starts
+</span>    off_t               journal_end;   <span class="enscript-comment">// where in the journal this transaction ends
+</span>    <span class="enscript-type">struct</span> journal     *jnl;           <span class="enscript-comment">// ptr back to the journal structure
+</span>    <span class="enscript-type">struct</span> transaction *next;          <span class="enscript-comment">// list of tr's (either completed or to be free'd)
+</span>    uint32_t            sequence_num;
+	<span class="enscript-type">struct</span> jnl_trim_list trim;
+    boolean_t		delayed_header_write;
+	boolean_t       flush_on_completion; <span class="enscript-comment">//flush transaction immediately upon txn end.
+</span>} transaction;
+
+
+<span class="enscript-comment">/*
+ * This is written to block zero of the journal and it
+ * maintains overall state about the journal.
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> journal_header {
+    int32_t        magic;
+    int32_t        endian;
+    <span class="enscript-type">volatile</span> off_t start;         <span class="enscript-comment">// zero-based byte offset of the start of the first transaction
+</span>    <span class="enscript-type">volatile</span> off_t end;           <span class="enscript-comment">// zero-based byte offset of where free space begins
+</span>    off_t          size;          <span class="enscript-comment">// size in bytes of the entire journal
+</span>    int32_t        blhdr_size;    <span class="enscript-comment">// size in bytes of each block_list_header in the journal
+</span>    uint32_t        checksum;
+    int32_t        jhdr_size;     <span class="enscript-comment">// block size (in bytes) of the journal header
+</span>    uint32_t       sequence_num;  <span class="enscript-comment">// NEW FIELD: a monotonically increasing value assigned to all txn's
+</span>} journal_header;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">JOURNAL_HEADER_MAGIC</span>  0x4a4e4c78   // 'JNLx'
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ENDIAN_MAGIC</span>          0x12345678
+
+<span class="enscript-comment">//
+</span><span class="enscript-comment">// we only checksum the original size of the journal_header to remain
+</span><span class="enscript-comment">// backwards compatible.  the size of the original journal_heade is
+</span><span class="enscript-comment">// everything up to the the sequence_num field, hence we use the
+</span><span class="enscript-comment">// offsetof macro to calculate the size.
+</span><span class="enscript-comment">//
+</span>#<span class="enscript-reference">define</span> <span class="enscript-variable-name">JOURNAL_HEADER_CKSUM_SIZE</span>  (offsetof(struct journal_header, sequence_num))
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">OLD_JOURNAL_HEADER_MAGIC</span>  0x4a484452   // 'JHDR'
+
+
+<span class="enscript-comment">/*
+ * In memory structure about the journal.
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> journal {
+    lck_mtx_t           jlock;             <span class="enscript-comment">// protects the struct journal data
+</span>    lck_mtx_t		flock;             <span class="enscript-comment">// serializes flushing of journal
+</span>	lck_rw_t            trim_lock;         <span class="enscript-comment">// protects the async_trim field, below
+</span>
+
+    <span class="enscript-type">struct</span> vnode       *jdev;              <span class="enscript-comment">// vnode of the device where the journal lives
+</span>    off_t               jdev_offset;       <span class="enscript-comment">// byte offset to the start of the journal
+</span>    <span class="enscript-type">const</span> <span class="enscript-type">char</span>         *jdev_name;
+
+    <span class="enscript-type">struct</span> vnode       *fsdev;             <span class="enscript-comment">// vnode of the file system device
+</span>    <span class="enscript-type">struct</span> mount       *fsmount;           <span class="enscript-comment">// mount of the file system
+</span>    
+    <span class="enscript-type">void</span>              (*flush)(<span class="enscript-type">void</span> *arg); <span class="enscript-comment">// fs callback to flush meta data blocks
+</span>    <span class="enscript-type">void</span>               *flush_arg;         <span class="enscript-comment">// arg that's passed to flush()
+</span>
+    int32_t             flags;
+    int32_t             tbuffer_size;      <span class="enscript-comment">// default transaction buffer size
+</span>    boolean_t		flush_aborted;
+    boolean_t		flushing;
+    boolean_t		asyncIO;
+    boolean_t		writing_header;
+    boolean_t		write_header_failed;
+	
+    <span class="enscript-type">struct</span> jnl_trim_list *async_trim;      <span class="enscript-comment">// extents to be trimmed by transaction being asynchronously flushed
+</span>    jnl_trim_callback_t	trim_callback;
+    <span class="enscript-type">void</span>				*trim_callback_arg;
+    
+    <span class="enscript-type">char</span>               *header_buf;        <span class="enscript-comment">// in-memory copy of the journal header
+</span>    int32_t             header_buf_size;
+    journal_header     *jhdr;              <span class="enscript-comment">// points to the first byte of header_buf
+</span>
+	uint32_t		saved_sequence_num;
+	uint32_t		sequence_num;
+
+    off_t               max_read_size;
+    off_t               max_write_size;
+
+    transaction        *cur_tr;            <span class="enscript-comment">// for group-commit
+</span>    transaction        *completed_trs;     <span class="enscript-comment">// out-of-order transactions that completed
+</span>    transaction        *active_tr;         <span class="enscript-comment">// for nested transactions
+</span>    int32_t             nested_count;      <span class="enscript-comment">// for nested transactions
+</span>    <span class="enscript-type">void</span>               *owner;             <span class="enscript-comment">// a ptr that's unique to the calling process
+</span>
+    transaction        *tr_freeme;         <span class="enscript-comment">// transaction structs that need to be free'd
+</span>
+    <span class="enscript-type">volatile</span> off_t      active_start;      <span class="enscript-comment">// the active start that we only keep in memory
+</span>    lck_mtx_t           old_start_lock;    <span class="enscript-comment">// protects the old_start
+</span>    <span class="enscript-type">volatile</span> off_t      old_start[16];     <span class="enscript-comment">// this is how we do lazy start update
+</span>
+    <span class="enscript-type">int</span>                 last_flush_err;    <span class="enscript-comment">// last error from flushing the cache
+</span>    uint32_t            flush_counter;     <span class="enscript-comment">// a monotonically increasing value assigned on track cache flush
+</span>} journal;
+
+<span class="enscript-comment">/* internal-only journal flags (top 16 bits) */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">JOURNAL_CLOSE_PENDING</span>     0x00010000
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">JOURNAL_INVALID</span>           0x00020000
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">JOURNAL_FLUSHCACHE_ERR</span>    0x00040000   // means we already printed this err
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">JOURNAL_NEED_SWAP</span>         0x00080000   // swap any data read from disk
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">JOURNAL_DO_FUA_WRITES</span>     0x00100000   // do force-unit-access writes
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">JOURNAL_USE_UNMAP</span>         0x00200000   // device supports UNMAP (TRIM)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">JOURNAL_FEATURE_BARRIER</span>   0x00400000   // device supports barrier-only flush
+
+
+<span class="enscript-comment">/* journal_open/create options are always in the low-16 bits */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">JOURNAL_OPTION_FLAGS_MASK</span> 0x0000ffff
+
+__BEGIN_DECLS
+<span class="enscript-comment">/*
+ * Prototypes.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Call journal_init() to initialize the journaling code (sets up lock attributes)
+ */</span>
+<span class="enscript-type">void</span>      <span class="enscript-function-name">journal_init</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/*
+ * Call journal_create() to create a new journal.  You only
+ * call this once, typically at file system creation time.
+ *
+ * The &quot;jvp&quot; argument is the vnode where the journal is written.
+ * The journal starts at &quot;offset&quot; and is &quot;journal_size&quot; bytes long.
+ *
+ * The &quot;fsvp&quot; argument is the vnode of your file system.  It may be
+ * the same as &quot;jvp&quot;.
+ *
+ * The &quot;min_fs_block_size&quot; argument is the minimum block size
+ * (in bytes) that the file system will ever write.  Typically
+ * this is the block size of the file system (1k, 4k, etc) but
+ * on HFS+ it is the minimum block size of the underlying device.
+ *
+ * The flags argument lets you disable group commit if you
+ * want tighter guarantees on transactions (in exchange for
+ * lower performance).
+ *
+ * The tbuffer_size is the size of the transaction buffer
+ * used by the journal. If you specify zero, the journal code
+ * will use a reasonable defaults.  The tbuffer_size should 
+ * be an integer multiple of the min_fs_block_size.
+ *
+ * Returns a valid journal pointer or NULL if one could not
+ * be created.
+ */</span>
+journal *<span class="enscript-function-name">journal_create</span>(<span class="enscript-type">struct</span> vnode *jvp,
+						off_t         offset,
+						off_t         journal_size,
+						<span class="enscript-type">struct</span> vnode *fsvp,
+						size_t        min_fs_block_size,
+						int32_t       flags,
+						int32_t       tbuffer_size,
+						<span class="enscript-type">void</span>        (*flush)(<span class="enscript-type">void</span> *arg),
+						<span class="enscript-type">void</span>         *arg,
+						<span class="enscript-type">struct</span> mount *fsmount);
+
+<span class="enscript-comment">/*
+ * Call journal_open() when mounting an existing file system
+ * that has a previously created journal.  It will take care
+ * of validating the journal and replaying it if necessary.
+ *
+ * See journal_create() for a description of the arguments.
+ *
+ * Returns a valid journal pointer of NULL if it runs into
+ * trouble reading/playing back the journal.
+ */</span>
+journal  *<span class="enscript-function-name">journal_open</span>(<span class="enscript-type">struct</span> vnode *jvp,
+					   off_t         offset,
+					   off_t         journal_size,
+					   <span class="enscript-type">struct</span> vnode *fsvp,
+					   size_t        min_fs_block_size,
+					   int32_t       flags,
+					   int32_t       tbuffer_size,
+					   <span class="enscript-type">void</span>        (*flush)(<span class="enscript-type">void</span> *arg),
+					   <span class="enscript-type">void</span>         *arg,
+					   <span class="enscript-type">struct</span> mount *fsmount);
+
+<span class="enscript-comment">/*
+ * Test whether the journal is clean or not.  This is intended
+ * to be used when you're mounting read-only.  If the journal
+ * is not clean for some reason then you should not mount the
+ * volume as your data structures may be in an unknown state.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">journal_is_clean</span>(<span class="enscript-type">struct</span> vnode *jvp,
+		     off_t         offset,
+		     off_t         journal_size,
+		     <span class="enscript-type">struct</span> vnode *fsvp,
+                     size_t        min_fs_block_size);
+
+
+<span class="enscript-comment">/*
+ * Call journal_close() just before your file system is unmounted.
+ * It flushes any outstanding transactions and makes sure the
+ * journal is in a consistent state.
+ */</span>
+<span class="enscript-type">void</span>      <span class="enscript-function-name">journal_close</span>(journal *journalp);
+
+<span class="enscript-comment">/*
+ * flags for journal_create/open.  only can use 
+ * the low 16 bits for flags because internal 
+ * bits go in the high 16.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">JOURNAL_NO_GROUP_COMMIT</span>   0x00000001
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">JOURNAL_RESET</span>             0x00000002
+
+<span class="enscript-comment">/*
+ * Transaction related functions.
+ *
+ * Before you start modifying file system meta data, you
+ * should call journal_start_transaction().  Then before
+ * you modify each block, call journal_modify_block_start()
+ * and when you're done, journal_modify_block_end().  When
+ * you've modified the last block as part of a transaction,
+ * call journal_end_transaction() to commit the changes.
+ *
+ * If you decide to abort the modifications to a block you
+ * should call journal_modify_block_abort().
+ *
+ * If as part of a transaction you need want to throw out
+ * any previous copies of a block (because it got deleted)
+ * then call journal_kill_block().  This will mark it so
+ * that the journal does not play it back (effectively
+ * dropping it).
+ *
+ * journal_trim_add_extent() marks a range of bytes on the device which should
+ * be trimmed (invalidated, unmapped).  journal_trim_remove_extent() marks a
+ * range of bytes which should no longer be trimmed.  Accumulated extents
+ * will be trimmed when the transaction is flushed to the on-disk journal.
+ */</span>
+<span class="enscript-type">int</span>   <span class="enscript-function-name">journal_start_transaction</span>(journal *jnl);
+<span class="enscript-type">int</span>   <span class="enscript-function-name">journal_modify_block_start</span>(journal *jnl, <span class="enscript-type">struct</span> buf *bp);
+<span class="enscript-type">int</span>   <span class="enscript-function-name">journal_modify_block_abort</span>(journal *jnl, <span class="enscript-type">struct</span> buf *bp);
+<span class="enscript-type">int</span>   <span class="enscript-function-name">journal_modify_block_end</span>(journal *jnl, <span class="enscript-type">struct</span> buf *bp, <span class="enscript-type">void</span> (*func)(<span class="enscript-type">struct</span> buf *bp, <span class="enscript-type">void</span> *arg), <span class="enscript-type">void</span> *arg);
+<span class="enscript-type">int</span>   <span class="enscript-function-name">journal_kill_block</span>(journal *jnl, <span class="enscript-type">struct</span> buf *bp);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">BSD_KERNEL_PRIVATE</span>
+<span class="enscript-type">int</span>   <span class="enscript-function-name">journal_trim_add_extent</span>(journal *jnl, uint64_t offset, uint64_t length);
+<span class="enscript-type">int</span>   <span class="enscript-function-name">journal_trim_remove_extent</span>(journal *jnl, uint64_t offset, uint64_t length);
+<span class="enscript-type">void</span>  <span class="enscript-function-name">journal_trim_set_callback</span>(journal *jnl, jnl_trim_callback_t callback, <span class="enscript-type">void</span> *arg);
+<span class="enscript-type">int</span>   <span class="enscript-function-name">journal_trim_extent_overlap</span> (journal *jnl, uint64_t offset, uint64_t length, uint64_t *end);
+<span class="enscript-comment">/* Mark state in the journal that requests an immediate journal flush upon txn completion */</span>
+<span class="enscript-type">int</span>   <span class="enscript-function-name">journal_request_immediate_flush</span> (journal *jnl);
+#<span class="enscript-reference">endif</span>
+<span class="enscript-type">int</span>   <span class="enscript-function-name">journal_end_transaction</span>(journal *jnl);
+
+<span class="enscript-type">int</span>   <span class="enscript-function-name">journal_active</span>(journal *jnl);
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">enum</span> journal_flush_options {
+	JOURNAL_WAIT_FOR_IO       = 0x01,   <span class="enscript-comment">// Flush journal and metadata blocks, wait for async IO to complete.
+</span>	JOURNAL_FLUSH_FULL        = 0x02,   <span class="enscript-comment">// Flush track cache to media
+</span>} journal_flush_options_t;
+
+<span class="enscript-type">int</span>   <span class="enscript-function-name">journal_flush</span>(journal *jnl, journal_flush_options_t options);
+<span class="enscript-type">void</span> *<span class="enscript-function-name">journal_owner</span>(journal *jnl);    <span class="enscript-comment">// compare against current_thread()
+</span><span class="enscript-type">int</span>   <span class="enscript-function-name">journal_uses_fua</span>(journal *jnl);
+<span class="enscript-type">void</span>  <span class="enscript-function-name">journal_lock</span>(journal *jnl);
+<span class="enscript-type">void</span>  <span class="enscript-function-name">journal_unlock</span>(journal *jnl);
+
+
+<span class="enscript-comment">/*
+ * Relocate the journal.
+ * 
+ * You provide the new starting offset and size for the journal. You may
+ * optionally provide a new tbuffer_size; passing zero defaults to not
+ * changing the tbuffer size except as needed to fit within the new journal
+ * size.
+ * 
+ * You must have already started a transaction. The transaction may contain
+ * modified blocks (such as those needed to deallocate the old journal,
+ * allocate the new journal, and update the location and size of the journal
+ * in filesystem-private structures). Any transactions prior to the active
+ * transaction will be flushed to the old journal. The new journal will be
+ * initialized, and the blocks from the active transaction will be written to
+ * the new journal. The caller will need to update the structures that
+ * identify the location and size of the journal from the callback routine.
+ */</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">journal_relocate</span>(journal *jnl, off_t offset, off_t journal_size, int32_t tbuffer_size,
+	errno_t (*callback)(<span class="enscript-type">void</span> *), <span class="enscript-type">void</span> *callback_arg);
+
+uint32_t <span class="enscript-function-name">journal_current_txn</span>(journal *jnl);
+
+__END_DECLS
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE_API_UNSTABLE */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !_SYS_VFS_JOURNAL_H_ */</span>
+</pre>
+<hr />
+</body></html>

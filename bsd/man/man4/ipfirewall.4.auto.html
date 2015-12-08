@@ -1,0 +1,271 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ipfirewall.4</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ipfirewall.4&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+.Dd June 22, 1997
+.Dt IPFIREWALL 4
+.Os Darwin
+.Sh NAME
+.Nm ipfirewall
+.Nd IP packet filter and traffic accounting
+.Sh SYNOPSIS
+.Fd #include &lt;sys/types.h&gt;
+.Fd #include &lt;sys/queue.h&gt;
+.Fd #include &lt;netinet/in.h&gt;
+.Fd #include &lt;netinet/ip_fw.h&gt;
+.Ft int
+.Fn setsockopt raw_socket IPPROTO_IP &quot;ipfw option&quot; &quot;struct ipfw&quot; size
+.\&quot;--------------------------------------------------------------------------------------------
+.Sh DESCRIPTION
+.\&quot;--------------------------------------------------------------------------------------------
+IPFirewall (sometimes referred to as &quot;ipfw&quot;) is a system facility which allows filtering,
+redirecting, and other operations on IP packets travelling through network interfaces.  Packets
+are matched by applying an ordered list of pattern rules against each packet until a match is
+found, at which point the corresponding action is taken.  Rules are numbered from 1 to 65534;
+multiple rules may share the same number.
+.Pp
+There is one rule that always exists, rule number 65535.  This rule normally causes all packets
+to be dropped.  Hence, any packet which does not match a lower numbered rule will be dropped.
+However, the kernel compile time option
+.Dv IPFIREWALL_DEFAULT_TO_ACCEPT
+allows the administrator to change this fixed rule to permit everything.
+.Pp
+The buffer passed down via the socket-option call should contain a &quot;struct ip_fw&quot; that is
+initialized with the required parameters for the firewall command being invoked.  This
+structure is consistently required for every firewall command, even though in some cases
+the majority of its fields will go unused.  The reason for this is the API versioning that
+the firewall supports for the sake of backward compatibility.  The
+.Dv version
+field of this
+structure should always be set to
+.Dv IP_FW_CURRENT_API_VERSION
+or an EINVAL error will be returned.
+.Ss Commands
+The following socket options are used to manage the rule list:
+.Bl -tag -width &quot;IP_FW_FLUSH&quot;
+.It Dv IP_FW_ADD
+inserts the rule into the rule list
+.It Dv IP_FW_DEL
+deletes all rules having the matching rule number
+.It Dv IP_FW_GET
+returns the (first) rule having the matching rule number
+.It Dv IP_FW_ZERO
+zeros the statistics associated with all rules having the
+matching rule number.
+If the rule number is zero, all rules are zeroed.
+.It Dv IP_FW_FLUSH
+removes all rules (except 65535).
+.El
+.Pp
+When the kernel security level is greater than 2, only
+.Dv IP_FW_GET
+is allowed.
+.\&quot;--------------------------------------------------------------------------------------------
+.Ss Rule Structure
+.\&quot;--------------------------------------------------------------------------------------------
+Rules are described by the following structure:
+.Bd -literal
+/* One ipfw rule */
+struct ip_fw {
+    u_int32_t version;              /* Version of this structure.  Should always be */
+                                    /* set to IP_FW_CURRENT_API_VERSION by clients. */
+    void *context;                  /* Context that is usable by user processes to */
+                                    /* identify this rule. */
+    u_int64_t fw_pcnt,fw_bcnt;          /* Packet and byte counters */
+    struct in_addr fw_src, fw_dst;      /* Source and destination IP addr */
+    struct in_addr fw_smsk, fw_dmsk;    /* Mask for src and dest IP addr */
+    u_short fw_number;                  /* Rule number */
+    u_int fw_flg;                       /* Flags word */
+#define IP_FW_MAX_PORTS 10              /* A reasonable maximum */
+        union {
+        u_short fw_pts[IP_FW_MAX_PORTS];        /* Array of port numbers to match */
+#define IP_FW_ICMPTYPES_MAX     128
+#define IP_FW_ICMPTYPES_DIM     (IP_FW_ICMPTYPES_MAX / (sizeof(unsigned) * 8))
+        unsigned fw_icmptypes[IP_FW_ICMPTYPES_DIM]; /* ICMP types bitmap */
+        } fw_uar;
+    u_int fw_ipflg;                     /* IP flags word */
+    u_char fw_ipopt,fw_ipnopt;          /* IP options set/unset */
+    u_char fw_tcpopt,fw_tcpnopt;        /* TCP options set/unset */
+    u_char fw_tcpf,fw_tcpnf;            /* TCP flags set/unset */
+    long timestamp;                     /* timestamp (tv_sec) of last match */
+    union ip_fw_if fw_in_if, fw_out_if; /* Incoming and outgoing interfaces */
+    union {
+        u_short fu_divert_port;         /* Divert/tee port (options IPDIVERT) */
+        u_short fu_pipe_nr;             /* queue number (option DUMMYNET) */
+        u_short fu_skipto_rule;         /* SKIPTO command rule number */
+        u_short fu_reject_code;         /* REJECT response code */
+        struct sockaddr_in fu_fwd_ip;
+    } fw_un;
+    u_char fw_prot;                     /* IP protocol */
+        /*
+         * N'of src ports and # of dst ports in ports array (dst ports
+         * follow src ports; max of 10 ports in all; count of 0 means
+         * match all ports)
+         */
+    u_char fw_nports;
+    void *pipe_ptr;                    /* flow_set ptr for dummynet pipe */
+    void *next_rule_ptr ;              /* next rule in case of match */
+    uid_t fw_uid;                       /* uid to match */
+    int fw_logamount;                   /* amount to log */
+    u_int64_t fw_loghighest;            /* highest number packet to log */
+};
+
+The ip_fw.h header also contains macros for setting the fw_ports field and various
+flags and constants for setting other fields.
+.Ed
+.\&quot;--------------------------------------------------------------------------------------------
+.Ss Rule Actions
+.\&quot;--------------------------------------------------------------------------------------------
+Each rule has an action described by the IP_FW_F_COMMAND bits in the flags word:
+.Bl -tag -width &quot;IP_FW_F_DIVERT&quot;
+.It Dv IP_FW_F_DENY
+drop packet
+.It Dv IP_FW_F_REJECT
+drop packet; send rejection via ICMP or TCP
+.It Dv IP_FW_F_ACCEPT
+accept packet
+.It Dv IP_FW_F_COUNT
+increment counters; continue matching
+.It Dv IP_FW_F_DIVERT
+divert packet to a
+.Xr divert 4
+socket
+.It Dv IP_FW_F_TEE
+copy packet to a
+.Xr divert 4
+socket; continue
+.It Dv IP_FW_F_SKIPTO
+skip to rule number
+.Va fu_skipto_rule
+.El
+.Pp
+In the case of
+.Dv IP_FW_F_REJECT ,
+if the
+.Va fu_reject_code
+is a number from 0 to 255, then an ICMP unreachable packet is sent back to the
+original packet's source IP address, with the corresponding code.  Otherwise, the
+value must be 256 and the protocol
+.Dv IPPROTO_TCP ,
+in which case a TCP reset packet is sent instead.
+.Pp
+With
+.Dv IP_FW_F_SKIPTO ,
+all succeeding rules having rule number less than
+.Va fu_skipto_rule
+are skipped.
+.Ss Kernel Options
+Options in the kernel configuration file:
+.Bl -tag -width &quot;options IPFIREWALL_VERBOSE_LIMIT&quot;
+.It Cd options IPFIREWALL
+enable
+.Nm
+.It Cd options IPFIREWALL_VERBOSE
+enable firewall logging
+.It Cd options IPFIREWALL_VERBOSE_LIMIT
+limit firewall logging
+.It Cd options IPDIVERT
+enable
+.Xr divert 4
+sockets
+.El
+.Pp
+When packets match a rule with the
+.Dv IP_FW_F_PRN
+bit set, and if
+.Dv IPFIREWALL_VERBOSE
+has been enabled,a message is written to
+.Pa /dev/klog
+with the
+.Dv LOG_SECURITY
+facility
+(see
+.Xr syslog 3 )
+for further logging by
+.Xr syslogd 8 ;
+.Dv IPFIREWALL_VERBOSE_LIMIT
+limits the maximum number of times each rule can cause a log message. These variables are also
+available via the
+.Xr sysctl 3
+interface.
+.\&quot;--------------------------------------------------------------------------------------------
+.Sh RETURN VALUES
+.\&quot;--------------------------------------------------------------------------------------------
+The
+.Fn setsockopt
+function returns 0 on success.  Otherwise, -1 is returned and the global variable
+.Va errno
+is set to indicate the error.
+.\&quot;--------------------------------------------------------------------------------------------
+.Sh ERRORS
+.\&quot;--------------------------------------------------------------------------------------------
+The
+.Fn setsockopt
+function will fail if:
+.Bl -tag -width Er
+.It Bq Er EINVAL
+The IP option field was improperly formed;
+an option field was shorter than the minimum value
+or longer than the option buffer provided.
+.It Bq Er EINVAL
+A structural error in ip_fw structure occurred
+(n_src_p+n_dst_p too big, ports set for ALL/ICMP protocols etc.).
+.It Bq Er EINVAL
+The version field of the ip_fw structure was set to a value not supported by the
+currently-installed
+.Dv IPFirewall,
+or no ip_fw structure was passed to it at all.
+.It Bq Er EINVAL
+An invalid rule number was used.
+.El
+.\&quot;--------------------------------------------------------------------------------------------
+.Sh SEE ALSO
+.\&quot;--------------------------------------------------------------------------------------------
+.Xr setsockopt 2 ,
+.Xr divert 4 ,
+.Xr ip 4 ,
+.Xr ipfw 8 ,
+.Xr sysctl 8 ,
+.Xr syslogd 8
+.\&quot;--------------------------------------------------------------------------------------------
+.Sh BUGS
+.\&quot;--------------------------------------------------------------------------------------------
+The ``tee'' rule is not yet implemented (currently it has no effect).
+.Pp
+This man page still needs work.
+.\&quot;--------------------------------------------------------------------------------------------
+.Sh HISTORY
+.\&quot;--------------------------------------------------------------------------------------------
+The ipfw facility was initially written as package to BSDI by
+.An Daniel Boulet
+.Aq <a href="mailto:danny@BouletFermat.ab.ca">danny@BouletFermat.ab.ca</a> .
+It has been heavily modified and ported to
+.Fx
+by
+.An Ugen J.S. Antsilevich
+.Aq <a href="mailto:ugen@NetVision.net.il">ugen@NetVision.net.il</a> .
+.Pp
+Several enhancements added by
+.An Archie Cobbs
+.Aq <a href="mailto:archie@FreeBSD.org">archie@FreeBSD.org</a> .
+</pre>
+<hr />
+</body></html>

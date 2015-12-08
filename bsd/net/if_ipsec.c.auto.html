@@ -1,0 +1,1015 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>if_ipsec.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">if_ipsec.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2012-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kern_control.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_protocol.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_interface.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/bpf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_ipsec.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSMalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sockio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/in6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipsec.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipsec6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/flowadv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/necp.h&gt;</span>
+
+<span class="enscript-comment">/* Kernel Control functions */</span>
+<span class="enscript-type">static</span> errno_t	ipsec_ctl_connect(kern_ctl_ref kctlref, <span class="enscript-type">struct</span> sockaddr_ctl *sac,
+								  <span class="enscript-type">void</span> **unitinfo);
+<span class="enscript-type">static</span> errno_t	ipsec_ctl_disconnect(kern_ctl_ref kctlref, u_int32_t unit,
+									 <span class="enscript-type">void</span> *unitinfo);
+<span class="enscript-type">static</span> errno_t	ipsec_ctl_send(kern_ctl_ref kctlref, u_int32_t unit,
+							   <span class="enscript-type">void</span> *unitinfo, mbuf_t m, <span class="enscript-type">int</span> flags);
+<span class="enscript-type">static</span> errno_t	ipsec_ctl_getopt(kern_ctl_ref kctlref, u_int32_t unit, <span class="enscript-type">void</span> *unitinfo,
+								 <span class="enscript-type">int</span> opt, <span class="enscript-type">void</span> *data, size_t *len);
+<span class="enscript-type">static</span> errno_t	ipsec_ctl_setopt(kern_ctl_ref kctlref, u_int32_t unit, <span class="enscript-type">void</span> *unitinfo,
+								 <span class="enscript-type">int</span> opt, <span class="enscript-type">void</span> *data, size_t len);
+
+<span class="enscript-comment">/* Network Interface functions */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>     <span class="enscript-function-name">ipsec_start</span>(ifnet_t	interface);
+<span class="enscript-type">static</span> errno_t	ipsec_output(ifnet_t interface, mbuf_t data);
+<span class="enscript-type">static</span> errno_t	ipsec_demux(ifnet_t interface, mbuf_t data, <span class="enscript-type">char</span> *frame_header,
+							protocol_family_t *protocol);
+<span class="enscript-type">static</span> errno_t	ipsec_add_proto(ifnet_t interface, protocol_family_t protocol,
+								<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ifnet_demux_desc *demux_array,
+								u_int32_t demux_count);
+<span class="enscript-type">static</span> errno_t	ipsec_del_proto(ifnet_t interface, protocol_family_t protocol);
+<span class="enscript-type">static</span> errno_t	ipsec_ioctl(ifnet_t interface, u_long cmd, <span class="enscript-type">void</span> *data);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>		ipsec_detached(ifnet_t interface);
+
+<span class="enscript-comment">/* Protocol handlers */</span>
+<span class="enscript-type">static</span> errno_t	ipsec_attach_proto(ifnet_t interface, protocol_family_t proto);
+<span class="enscript-type">static</span> errno_t	ipsec_proto_input(ifnet_t interface, protocol_family_t protocol,
+								  mbuf_t m, <span class="enscript-type">char</span> *frame_header);
+<span class="enscript-type">static</span> errno_t <span class="enscript-function-name">ipsec_proto_pre_output</span>(ifnet_t interface, protocol_family_t protocol,
+									  mbuf_t *packet, <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *dest, <span class="enscript-type">void</span> *route,
+									  <span class="enscript-type">char</span> *frame_type, <span class="enscript-type">char</span> *link_layer_dest);
+
+<span class="enscript-type">static</span> kern_ctl_ref	ipsec_kctlref;
+<span class="enscript-type">static</span> u_int32_t	ipsec_family;
+<span class="enscript-type">static</span> OSMallocTag	ipsec_malloc_tag;
+<span class="enscript-type">static</span> SInt32		ipsec_ifcount = 0;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IPSECQ_MAXLEN</span> 256
+
+<span class="enscript-comment">/* Prepend length */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>*
+<span class="enscript-function-name">ipsec_alloc</span>(size_t size)
+{
+	size_t	*mem = OSMalloc(size + <span class="enscript-keyword">sizeof</span>(size_t), ipsec_malloc_tag);
+	
+	<span class="enscript-keyword">if</span> (mem) {
+		*mem = size + <span class="enscript-keyword">sizeof</span>(size_t);
+		mem++;
+	}
+	
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">void</span>*)mem;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipsec_free</span>(<span class="enscript-type">void</span> *ptr)
+{
+	size_t	*size = ptr;
+	size--;
+	OSFree(size, *size, ipsec_malloc_tag);
+}
+
+errno_t
+<span class="enscript-function-name">ipsec_register_control</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> kern_ctl_reg	kern_ctl;
+	errno_t				result = 0;
+	
+	<span class="enscript-comment">/* Create a tag to allocate memory */</span>
+	ipsec_malloc_tag = OSMalloc_Tagalloc(IPSEC_CONTROL_NAME, OSMT_DEFAULT);
+	
+	<span class="enscript-comment">/* Find a unique value for our interface family */</span>
+	result = mbuf_tag_id_find(IPSEC_CONTROL_NAME, &amp;ipsec_family);
+	<span class="enscript-keyword">if</span> (result != 0) {
+		printf(<span class="enscript-string">&quot;ipsec_register_control - mbuf_tag_id_find_internal failed: %d\n&quot;</span>, result);
+		<span class="enscript-keyword">return</span> result;
+	}
+	
+	bzero(&amp;kern_ctl, <span class="enscript-keyword">sizeof</span>(kern_ctl));
+	strlcpy(kern_ctl.ctl_name, IPSEC_CONTROL_NAME, <span class="enscript-keyword">sizeof</span>(kern_ctl.ctl_name));
+	kern_ctl.ctl_name[<span class="enscript-keyword">sizeof</span>(kern_ctl.ctl_name) - 1] = 0;
+	kern_ctl.ctl_flags = CTL_FLAG_PRIVILEGED; <span class="enscript-comment">/* Require root */</span>
+	kern_ctl.ctl_sendsize = 64 * 1024;
+	kern_ctl.ctl_recvsize = 64 * 1024;
+	kern_ctl.ctl_connect = ipsec_ctl_connect;
+	kern_ctl.ctl_disconnect = ipsec_ctl_disconnect;
+	kern_ctl.ctl_send = ipsec_ctl_send;
+	kern_ctl.ctl_setopt = ipsec_ctl_setopt;
+	kern_ctl.ctl_getopt = ipsec_ctl_getopt;
+	
+	result = ctl_register(&amp;kern_ctl, &amp;ipsec_kctlref);
+	<span class="enscript-keyword">if</span> (result != 0) {
+		printf(<span class="enscript-string">&quot;ipsec_register_control - ctl_register failed: %d\n&quot;</span>, result);
+		<span class="enscript-keyword">return</span> result;
+	}
+	
+	<span class="enscript-comment">/* Register the protocol plumbers */</span>
+	<span class="enscript-keyword">if</span> ((result = proto_register_plumber(PF_INET, ipsec_family,
+										 ipsec_attach_proto, NULL)) != 0) {
+		printf(<span class="enscript-string">&quot;ipsec_register_control - proto_register_plumber(PF_INET, %d) failed: %d\n&quot;</span>,
+			   ipsec_family, result);
+		ctl_deregister(ipsec_kctlref);
+		<span class="enscript-keyword">return</span> result;
+	}
+	
+	<span class="enscript-comment">/* Register the protocol plumbers */</span>
+	<span class="enscript-keyword">if</span> ((result = proto_register_plumber(PF_INET6, ipsec_family,
+										 ipsec_attach_proto, NULL)) != 0) {
+		proto_unregister_plumber(PF_INET, ipsec_family);
+		ctl_deregister(ipsec_kctlref);
+		printf(<span class="enscript-string">&quot;ipsec_register_control - proto_register_plumber(PF_INET6, %d) failed: %d\n&quot;</span>,
+			   ipsec_family, result);
+		<span class="enscript-keyword">return</span> result;
+	}
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* Helpers */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ipsec_interface_isvalid</span> (ifnet_t interface)
+{
+    <span class="enscript-type">struct</span> ipsec_pcb *pcb = NULL;
+    
+    <span class="enscript-keyword">if</span> (interface == NULL)
+        <span class="enscript-keyword">return</span> 0;
+    
+    pcb = ifnet_softc(interface);
+    
+    <span class="enscript-keyword">if</span> (pcb == NULL)
+        <span class="enscript-keyword">return</span> 0;
+    
+    <span class="enscript-comment">/* When ctl disconnects, ipsec_unit is set to 0 */</span>
+    <span class="enscript-keyword">if</span> (pcb-&gt;ipsec_unit == 0)
+        <span class="enscript-keyword">return</span> 0;
+    
+    <span class="enscript-keyword">return</span> 1;
+}
+
+<span class="enscript-comment">/* Kernel control functions */</span>
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipsec_ctl_connect</span>(kern_ctl_ref		kctlref,
+				  <span class="enscript-type">struct</span> sockaddr_ctl	*sac,
+				  <span class="enscript-type">void</span>				**unitinfo)
+{
+	<span class="enscript-type">struct</span> ifnet_init_eparams	ipsec_init;
+	<span class="enscript-type">struct</span> ipsec_pcb				*pcb;
+	errno_t						result;
+	<span class="enscript-type">struct</span> ifnet_stats_param 	stats;
+	
+	<span class="enscript-comment">/* kernel control allocates, interface frees */</span>
+	pcb = ipsec_alloc(<span class="enscript-keyword">sizeof</span>(*pcb));
+	<span class="enscript-keyword">if</span> (pcb == NULL)
+		<span class="enscript-keyword">return</span> ENOMEM;
+	
+	<span class="enscript-comment">/* Setup the protocol control block */</span>
+	bzero(pcb, <span class="enscript-keyword">sizeof</span>(*pcb));
+	*unitinfo = pcb;
+	pcb-&gt;ipsec_ctlref = kctlref;
+	pcb-&gt;ipsec_unit = sac-&gt;sc_unit;
+	pcb-&gt;ipsec_output_service_class = MBUF_SC_OAM;
+	
+	printf(<span class="enscript-string">&quot;ipsec_ctl_connect: creating interface ipsec%d\n&quot;</span>, pcb-&gt;ipsec_unit - 1);
+	
+	<span class="enscript-comment">/* Create the interface */</span>
+	bzero(&amp;ipsec_init, <span class="enscript-keyword">sizeof</span>(ipsec_init));
+	ipsec_init.ver = IFNET_INIT_CURRENT_VERSION;
+	ipsec_init.len = <span class="enscript-keyword">sizeof</span> (ipsec_init);
+	ipsec_init.name = <span class="enscript-string">&quot;ipsec&quot;</span>;
+	ipsec_init.start = ipsec_start;
+	ipsec_init.unit = pcb-&gt;ipsec_unit - 1;
+	ipsec_init.family = ipsec_family;
+	ipsec_init.type = IFT_OTHER;
+	ipsec_init.demux = ipsec_demux;
+	ipsec_init.add_proto = ipsec_add_proto;
+	ipsec_init.del_proto = ipsec_del_proto;
+	ipsec_init.softc = pcb;
+	ipsec_init.ioctl = ipsec_ioctl;
+	ipsec_init.detach = ipsec_detached;
+	
+	result = ifnet_allocate_extended(&amp;ipsec_init, &amp;pcb-&gt;ipsec_ifp);
+	<span class="enscript-keyword">if</span> (result != 0) {
+		printf(<span class="enscript-string">&quot;ipsec_ctl_connect - ifnet_allocate failed: %d\n&quot;</span>, result);
+		ipsec_free(pcb);
+		<span class="enscript-keyword">return</span> result;
+	}
+	OSIncrementAtomic(&amp;ipsec_ifcount);
+	
+	<span class="enscript-comment">/* Set flags and additional information. */</span>
+	ifnet_set_mtu(pcb-&gt;ipsec_ifp, 1500);
+	ifnet_set_flags(pcb-&gt;ipsec_ifp, IFF_UP | IFF_MULTICAST | IFF_POINTOPOINT, 0xffff);
+	
+	<span class="enscript-comment">/* The interface must generate its own IPv6 LinkLocal address,
+	 * if possible following the recommendation of RFC2472 to the 64bit interface ID
+	 */</span>
+	ifnet_set_eflags(pcb-&gt;ipsec_ifp, IFEF_NOAUTOIPV6LL, IFEF_NOAUTOIPV6LL);
+	
+	<span class="enscript-comment">/* Reset the stats in case as the interface may have been recycled */</span>
+	bzero(&amp;stats, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ifnet_stats_param));
+	ifnet_set_stat(pcb-&gt;ipsec_ifp, &amp;stats);
+	
+	<span class="enscript-comment">/* Attach the interface */</span>
+	result = ifnet_attach(pcb-&gt;ipsec_ifp, NULL);
+	<span class="enscript-keyword">if</span> (result != 0) {
+		printf(<span class="enscript-string">&quot;ipsec_ctl_connect - ifnet_allocate failed: %d\n&quot;</span>, result);
+		ifnet_release(pcb-&gt;ipsec_ifp);
+		ipsec_free(pcb);
+	}
+	
+	<span class="enscript-comment">/* Attach to bpf */</span>
+	<span class="enscript-keyword">if</span> (result == 0)
+		bpfattach(pcb-&gt;ipsec_ifp, DLT_NULL, 4);
+	
+	<span class="enscript-comment">/* The interfaces resoures allocated, mark it as running */</span>
+	<span class="enscript-keyword">if</span> (result == 0)
+		ifnet_set_flags(pcb-&gt;ipsec_ifp, IFF_RUNNING, IFF_RUNNING);
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipsec_detach_ip</span>(ifnet_t				interface,
+				protocol_family_t	protocol,
+				socket_t			pf_socket)
+{
+	errno_t result = EPROTONOSUPPORT;
+	
+	<span class="enscript-comment">/* Attempt a detach */</span>
+	<span class="enscript-keyword">if</span> (protocol == PF_INET) {
+		<span class="enscript-type">struct</span> ifreq	ifr;
+		
+		bzero(&amp;ifr, <span class="enscript-keyword">sizeof</span>(ifr));
+		snprintf(ifr.ifr_name, <span class="enscript-keyword">sizeof</span>(ifr.ifr_name), <span class="enscript-string">&quot;%s%d&quot;</span>,
+				 ifnet_name(interface), ifnet_unit(interface));
+		
+		result = sock_ioctl(pf_socket, SIOCPROTODETACH, &amp;ifr);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (protocol == PF_INET6) {
+		<span class="enscript-type">struct</span> in6_ifreq	ifr6;
+		
+		bzero(&amp;ifr6, <span class="enscript-keyword">sizeof</span>(ifr6));
+		snprintf(ifr6.ifr_name, <span class="enscript-keyword">sizeof</span>(ifr6.ifr_name), <span class="enscript-string">&quot;%s%d&quot;</span>,
+				 ifnet_name(interface), ifnet_unit(interface));
+		
+		result = sock_ioctl(pf_socket, SIOCPROTODETACH_IN6, &amp;ifr6);
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipsec_remove_address</span>(ifnet_t				interface,
+					 protocol_family_t	protocol,
+					 ifaddr_t			address,
+					 socket_t			pf_socket)
+{
+	errno_t result = 0;
+	
+	<span class="enscript-comment">/* Attempt a detach */</span>
+	<span class="enscript-keyword">if</span> (protocol == PF_INET) {
+		<span class="enscript-type">struct</span> ifreq	ifr;
+		
+		bzero(&amp;ifr, <span class="enscript-keyword">sizeof</span>(ifr));
+		snprintf(ifr.ifr_name, <span class="enscript-keyword">sizeof</span>(ifr.ifr_name), <span class="enscript-string">&quot;%s%d&quot;</span>,
+				 ifnet_name(interface), ifnet_unit(interface));
+		result = ifaddr_address(address, &amp;ifr.ifr_addr, <span class="enscript-keyword">sizeof</span>(ifr.ifr_addr));
+		<span class="enscript-keyword">if</span> (result != 0) {
+			printf(<span class="enscript-string">&quot;ipsec_remove_address - ifaddr_address failed: %d&quot;</span>, result);
+		}
+		<span class="enscript-keyword">else</span> {
+			result = sock_ioctl(pf_socket, SIOCDIFADDR, &amp;ifr);
+			<span class="enscript-keyword">if</span> (result != 0) {
+				printf(<span class="enscript-string">&quot;ipsec_remove_address - SIOCDIFADDR failed: %d&quot;</span>, result);
+			}
+		}
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (protocol == PF_INET6) {
+		<span class="enscript-type">struct</span> in6_ifreq	ifr6;
+		
+		bzero(&amp;ifr6, <span class="enscript-keyword">sizeof</span>(ifr6));
+		snprintf(ifr6.ifr_name, <span class="enscript-keyword">sizeof</span>(ifr6.ifr_name), <span class="enscript-string">&quot;%s%d&quot;</span>,
+				 ifnet_name(interface), ifnet_unit(interface));
+		result = ifaddr_address(address, (<span class="enscript-type">struct</span> sockaddr*)&amp;ifr6.ifr_addr,
+								<span class="enscript-keyword">sizeof</span>(ifr6.ifr_addr));
+		<span class="enscript-keyword">if</span> (result != 0) {
+			printf(<span class="enscript-string">&quot;ipsec_remove_address - ifaddr_address failed (v6): %d&quot;</span>,
+				   result);
+		}
+		<span class="enscript-keyword">else</span> {
+			result = sock_ioctl(pf_socket, SIOCDIFADDR_IN6, &amp;ifr6);
+			<span class="enscript-keyword">if</span> (result != 0) {
+				printf(<span class="enscript-string">&quot;ipsec_remove_address - SIOCDIFADDR_IN6 failed: %d&quot;</span>,
+					   result);
+			}
+		}
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipsec_cleanup_family</span>(ifnet_t				interface,
+					 protocol_family_t	protocol)
+{
+	errno_t		result = 0;
+	socket_t	pf_socket = NULL;
+	ifaddr_t	*addresses = NULL;
+	<span class="enscript-type">int</span>			i;
+	
+	<span class="enscript-keyword">if</span> (protocol != PF_INET &amp;&amp; protocol != PF_INET6) {
+		printf(<span class="enscript-string">&quot;ipsec_cleanup_family - invalid protocol family %d\n&quot;</span>, protocol);
+		<span class="enscript-keyword">return</span>;
+	}
+	
+	<span class="enscript-comment">/* Create a socket for removing addresses and detaching the protocol */</span>
+	result = sock_socket(protocol, SOCK_DGRAM, 0, NULL, NULL, &amp;pf_socket);
+	<span class="enscript-keyword">if</span> (result != 0) {
+		<span class="enscript-keyword">if</span> (result != EAFNOSUPPORT)
+			printf(<span class="enscript-string">&quot;ipsec_cleanup_family - failed to create %s socket: %d\n&quot;</span>,
+				   protocol == PF_INET ? <span class="enscript-string">&quot;IP&quot;</span> : <span class="enscript-string">&quot;IPv6&quot;</span>, result);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+	}
+	
+	<span class="enscript-comment">/* always set SS_PRIV, we want to close and detach regardless */</span>
+	sock_setpriv(pf_socket, 1);
+	
+	result = ipsec_detach_ip(interface, protocol, pf_socket);
+	<span class="enscript-keyword">if</span> (result == 0 || result == ENXIO) {
+		<span class="enscript-comment">/* We are done! We either detached or weren't attached. */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (result != EBUSY) {
+		<span class="enscript-comment">/* Uh, not really sure what happened here... */</span>
+		printf(<span class="enscript-string">&quot;ipsec_cleanup_family - ipsec_detach_ip failed: %d\n&quot;</span>, result);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+	}
+	
+	<span class="enscript-comment">/*
+	 * At this point, we received an EBUSY error. This means there are
+	 * addresses attached. We should detach them and then try again.
+	 */</span>
+	result = ifnet_get_address_list_family(interface, &amp;addresses, protocol);
+	<span class="enscript-keyword">if</span> (result != 0) {
+		printf(<span class="enscript-string">&quot;fnet_get_address_list_family(%s%d, 0xblah, %s) - failed: %d\n&quot;</span>,
+			   ifnet_name(interface), ifnet_unit(interface),
+			   protocol == PF_INET ? <span class="enscript-string">&quot;PF_INET&quot;</span> : <span class="enscript-string">&quot;PF_INET6&quot;</span>, result);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">cleanup</span>;
+	}
+	
+	<span class="enscript-keyword">for</span> (i = 0; addresses[i] != 0; i++) {
+		ipsec_remove_address(interface, protocol, addresses[i], pf_socket);
+	}
+	ifnet_free_address_list(addresses);
+	addresses = NULL;
+	
+	<span class="enscript-comment">/*
+	 * The addresses should be gone, we should try the remove again.
+	 */</span>
+	result = ipsec_detach_ip(interface, protocol, pf_socket);
+	<span class="enscript-keyword">if</span> (result != 0 &amp;&amp; result != ENXIO) {
+		printf(<span class="enscript-string">&quot;ipsec_cleanup_family - ipsec_detach_ip failed: %d\n&quot;</span>, result);
+	}
+	
+<span class="enscript-reference">cleanup</span>:
+	<span class="enscript-keyword">if</span> (pf_socket != NULL)
+		sock_close(pf_socket);
+	
+	<span class="enscript-keyword">if</span> (addresses != NULL)
+		ifnet_free_address_list(addresses);
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipsec_ctl_disconnect</span>(__unused kern_ctl_ref	kctlref,
+					 __unused u_int32_t		unit,
+					 <span class="enscript-type">void</span>					*unitinfo)
+{
+	<span class="enscript-type">struct</span> ipsec_pcb	*pcb = unitinfo;
+	ifnet_t			ifp = pcb-&gt;ipsec_ifp;
+	errno_t			result = 0;
+	
+	pcb-&gt;ipsec_ctlref = NULL;
+	pcb-&gt;ipsec_unit = 0;
+	
+	<span class="enscript-comment">/*
+	 * We want to do everything in our power to ensure that the interface
+	 * really goes away when the socket is closed. We must remove IP/IPv6
+	 * addresses and detach the protocols. Finally, we can remove and
+	 * release the interface.
+	 */</span>
+    key_delsp_for_ipsec_if(ifp);
+    
+	ipsec_cleanup_family(ifp, AF_INET);
+	ipsec_cleanup_family(ifp, AF_INET6);
+	
+	<span class="enscript-keyword">if</span> ((result = ifnet_detach(ifp)) != 0) {
+		printf(<span class="enscript-string">&quot;ipsec_ctl_disconnect - ifnet_detach failed: %d\n&quot;</span>, result);
+	}
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipsec_ctl_send</span>(__unused kern_ctl_ref	kctlref,
+			   __unused u_int32_t		unit,
+			   __unused <span class="enscript-type">void</span>			*unitinfo,
+			   mbuf_t                  m,
+			   __unused <span class="enscript-type">int</span>			flags)
+{
+    <span class="enscript-comment">/* Receive messages from the control socket. Currently unused. */</span>
+    mbuf_freem(m);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipsec_ctl_setopt</span>(__unused kern_ctl_ref	kctlref,
+				 __unused u_int32_t		unit,
+				 <span class="enscript-type">void</span>					*unitinfo,
+				 <span class="enscript-type">int</span>						opt,
+				 <span class="enscript-type">void</span>					*data,
+				 size_t					len)
+{
+	<span class="enscript-type">struct</span> ipsec_pcb			*pcb = unitinfo;
+	errno_t					result = 0;
+	
+	<span class="enscript-comment">/* check for privileges for privileged options */</span>
+	<span class="enscript-keyword">switch</span> (opt) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_OPT_FLAGS</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_OPT_EXT_IFDATA_STATS</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_OPT_SET_DELEGATE_INTERFACE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_OPT_OUTPUT_TRAFFIC_CLASS</span>:
+			<span class="enscript-keyword">if</span> (kauth_cred_issuser(kauth_cred_get()) == 0) {
+				<span class="enscript-keyword">return</span> EPERM;
+			}
+			<span class="enscript-keyword">break</span>;
+	}
+	
+	<span class="enscript-keyword">switch</span> (opt) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_OPT_FLAGS</span>:
+			<span class="enscript-keyword">if</span> (len != <span class="enscript-keyword">sizeof</span>(u_int32_t))
+				result = EMSGSIZE;
+			<span class="enscript-keyword">else</span>
+				pcb-&gt;ipsec_flags = *(u_int32_t *)data;
+			<span class="enscript-keyword">break</span>;
+			
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_OPT_EXT_IFDATA_STATS</span>:
+			<span class="enscript-keyword">if</span> (len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)) {
+				result = EMSGSIZE;
+				<span class="enscript-keyword">break</span>;
+			}
+			pcb-&gt;ipsec_ext_ifdata_stats = (*(<span class="enscript-type">int</span> *)data) ? 1 : 0;
+			<span class="enscript-keyword">break</span>;
+			
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_OPT_INC_IFDATA_STATS_IN</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_OPT_INC_IFDATA_STATS_OUT</span>: {
+			<span class="enscript-type">struct</span> ipsec_stats_param *utsp = (<span class="enscript-type">struct</span> ipsec_stats_param *)data;
+			
+			<span class="enscript-keyword">if</span> (utsp == NULL || len &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipsec_stats_param)) {
+				result = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (!pcb-&gt;ipsec_ext_ifdata_stats) {
+				result = EINVAL;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (opt == IPSEC_OPT_INC_IFDATA_STATS_IN)
+				ifnet_stat_increment_in(pcb-&gt;ipsec_ifp, utsp-&gt;utsp_packets,
+										utsp-&gt;utsp_bytes, utsp-&gt;utsp_errors);
+			<span class="enscript-keyword">else</span>
+				ifnet_stat_increment_out(pcb-&gt;ipsec_ifp, utsp-&gt;utsp_packets,
+										 utsp-&gt;utsp_bytes, utsp-&gt;utsp_errors);
+			<span class="enscript-keyword">break</span>;
+		}
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_OPT_SET_DELEGATE_INTERFACE</span>: {
+			ifnet_t		del_ifp = NULL;
+			<span class="enscript-type">char</span>            name[IFNAMSIZ];
+			
+			<span class="enscript-keyword">if</span> (len &gt; IFNAMSIZ - 1) {
+				result = EMSGSIZE;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (len != 0) {   <span class="enscript-comment">/* if len==0, del_ifp will be NULL causing the delegate to be removed */</span>
+				bcopy(data, name, len);
+				name[len] = 0;
+				result = ifnet_find_by_name(name, &amp;del_ifp);
+			}
+			<span class="enscript-keyword">if</span> (result == 0) {
+				result = ifnet_set_delegate(pcb-&gt;ipsec_ifp, del_ifp);
+				<span class="enscript-keyword">if</span> (del_ifp)
+					ifnet_release(del_ifp);
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+			
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_OPT_OUTPUT_TRAFFIC_CLASS</span>: {
+			<span class="enscript-keyword">if</span> (len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)) {
+				result = EMSGSIZE;
+				<span class="enscript-keyword">break</span>;
+			}
+			mbuf_svc_class_t output_service_class = so_tc2msc(*(<span class="enscript-type">int</span> *)data);
+			<span class="enscript-keyword">if</span> (output_service_class == MBUF_SC_UNSPEC) {
+				pcb-&gt;ipsec_output_service_class = MBUF_SC_OAM;
+			} <span class="enscript-keyword">else</span> {
+				pcb-&gt;ipsec_output_service_class = output_service_class;
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+			
+		<span class="enscript-reference">default</span>:
+			result = ENOPROTOOPT;
+			<span class="enscript-keyword">break</span>;
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipsec_ctl_getopt</span>(__unused kern_ctl_ref	kctlref,
+				 __unused u_int32_t		unit,
+				 <span class="enscript-type">void</span>					*unitinfo,
+				 <span class="enscript-type">int</span>						opt,
+				 <span class="enscript-type">void</span>					*data,
+				 size_t					*len)
+{
+	<span class="enscript-type">struct</span> ipsec_pcb			*pcb = unitinfo;
+	errno_t					result = 0;
+	
+	<span class="enscript-keyword">switch</span> (opt) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_OPT_FLAGS</span>:
+			<span class="enscript-keyword">if</span> (*len != <span class="enscript-keyword">sizeof</span>(u_int32_t))
+				result = EMSGSIZE;
+			<span class="enscript-keyword">else</span>
+				*(u_int32_t *)data = pcb-&gt;ipsec_flags;
+			<span class="enscript-keyword">break</span>;
+			
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_OPT_EXT_IFDATA_STATS</span>:
+			<span class="enscript-keyword">if</span> (*len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>))
+				result = EMSGSIZE;
+			<span class="enscript-keyword">else</span>
+				*(<span class="enscript-type">int</span> *)data = (pcb-&gt;ipsec_ext_ifdata_stats) ? 1 : 0;
+			<span class="enscript-keyword">break</span>;
+			
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_OPT_IFNAME</span>:
+			*len = snprintf(data, *len, <span class="enscript-string">&quot;%s%d&quot;</span>, ifnet_name(pcb-&gt;ipsec_ifp), ifnet_unit(pcb-&gt;ipsec_ifp)) + 1;
+			<span class="enscript-keyword">break</span>;
+			
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_OPT_OUTPUT_TRAFFIC_CLASS</span>: {
+			<span class="enscript-keyword">if</span> (*len != <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)) {
+				result = EMSGSIZE;
+				<span class="enscript-keyword">break</span>;
+			}
+			*(<span class="enscript-type">int</span> *)data = so_svc2tc(pcb-&gt;ipsec_output_service_class);
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-reference">default</span>:
+			result = ENOPROTOOPT;
+			<span class="enscript-keyword">break</span>;
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-comment">/* Network Interface functions */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipsec_output</span>(ifnet_t	interface,
+             mbuf_t     data)
+{
+	<span class="enscript-type">struct</span> ipsec_pcb	*pcb = ifnet_softc(interface);
+    <span class="enscript-type">struct</span> ipsec_output_state ipsec_state;
+    <span class="enscript-type">struct</span> route ro;
+    <span class="enscript-type">struct</span> route_in6 ro6;
+    <span class="enscript-type">int</span>	length;
+    <span class="enscript-type">struct</span> ip *ip;
+    <span class="enscript-type">struct</span> ip6_hdr *ip6;
+    <span class="enscript-type">struct</span> ip_out_args ipoa;
+    <span class="enscript-type">struct</span> ip6_out_args ip6oa;
+    <span class="enscript-type">int</span> error = 0;
+    u_int ip_version = 0;
+    uint32_t af;
+    <span class="enscript-type">int</span> flags = 0;
+    <span class="enscript-type">struct</span> flowadv *adv = NULL;
+    
+	<span class="enscript-comment">// Make sure this packet isn't looping through the interface
+</span>	<span class="enscript-keyword">if</span> (necp_get_last_interface_index_from_packet(data) == interface-&gt;if_index) {
+		error = -1;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ipsec_output_err</span>;
+	}
+	
+	<span class="enscript-comment">// Mark the interface so NECP can evaluate tunnel policy
+</span>	necp_mark_packet_from_interface(data, interface);
+	
+    ip = mtod(data, <span class="enscript-type">struct</span> ip *);
+    ip_version = ip-&gt;ip_v;
+	
+    <span class="enscript-keyword">switch</span> (ip_version) {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">4</span>:
+            <span class="enscript-comment">/* Tap */</span>
+            af = AF_INET;
+            bpf_tap_out(pcb-&gt;ipsec_ifp, DLT_NULL, data, &amp;af, <span class="enscript-keyword">sizeof</span>(af));
+			
+            <span class="enscript-comment">/* Apply encryption */</span>
+            bzero(&amp;ipsec_state, <span class="enscript-keyword">sizeof</span>(ipsec_state));
+            ipsec_state.m = data;
+            ipsec_state.dst = (<span class="enscript-type">struct</span> sockaddr *)&amp;ip-&gt;ip_dst;
+            bzero(&amp;ipsec_state.ro, <span class="enscript-keyword">sizeof</span>(ipsec_state.ro));
+			
+            error = ipsec4_interface_output(&amp;ipsec_state, interface);
+            <span class="enscript-comment">/* Tunneled in IPv6 - packet is gone */</span>
+            <span class="enscript-keyword">if</span> (error == 0 &amp;&amp; ipsec_state.tunneled == 6) {
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+            }
+
+            data = ipsec_state.m;
+            <span class="enscript-keyword">if</span> (error || data == NULL) {
+                printf(<span class="enscript-string">&quot;ipsec_output: ipsec4_output error %d.\n&quot;</span>, error);
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">ipsec_output_err</span>;
+            }
+            
+            <span class="enscript-comment">/* Set traffic class, set flow */</span>
+            m_set_service_class(data, pcb-&gt;ipsec_output_service_class);
+            data-&gt;m_pkthdr.pkt_flowsrc = FLOWSRC_IFNET;
+            data-&gt;m_pkthdr.pkt_flowid = interface-&gt;if_flowhash;
+            data-&gt;m_pkthdr.pkt_proto = ip-&gt;ip_p;
+            data-&gt;m_pkthdr.pkt_flags = (PKTF_FLOW_ID | PKTF_FLOW_ADV | PKTF_FLOW_LOCALSRC);
+            
+            <span class="enscript-comment">/* Flip endian-ness for ip_output */</span>
+            ip = mtod(data, <span class="enscript-type">struct</span> ip *);
+            NTOHS(ip-&gt;ip_len);
+            NTOHS(ip-&gt;ip_off);
+            
+            <span class="enscript-comment">/* Increment statistics */</span>
+            length = mbuf_pkthdr_len(data);
+            ifnet_stat_increment_out(interface, 1, length, 0);
+			
+            <span class="enscript-comment">/* Send to ip_output */</span>
+            bzero(&amp;ro, <span class="enscript-keyword">sizeof</span>(ro));
+			
+            flags = IP_OUTARGS |	<span class="enscript-comment">/* Passing out args to specify interface */</span>
+			IP_NOIPSEC;				<span class="enscript-comment">/* To ensure the packet doesn't go through ipsec twice */</span>
+			
+            bzero(&amp;ipoa, <span class="enscript-keyword">sizeof</span>(ipoa));
+            ipoa.ipoa_flowadv.code = 0;
+            ipoa.ipoa_flags = IPOAF_SELECT_SRCIF | IPOAF_BOUND_SRCADDR;
+            <span class="enscript-keyword">if</span> (ipsec_state.outgoing_if) {
+                ipoa.ipoa_boundif = ipsec_state.outgoing_if;
+                ipoa.ipoa_flags |= IPOAF_BOUND_IF;
+            }
+            
+            adv = &amp;ipoa.ipoa_flowadv;
+            
+            (<span class="enscript-type">void</span>) ip_output(data, NULL, &amp;ro, flags, NULL, &amp;ipoa);
+            data = NULL;
+            
+            <span class="enscript-keyword">if</span> (adv-&gt;code == FADV_FLOW_CONTROLLED || adv-&gt;code == FADV_SUSPENDED) {
+                error = ENOBUFS;
+                ifnet_disable_output(interface);
+            }
+            
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">6</span>:
+            af = AF_INET6;
+            bpf_tap_out(pcb-&gt;ipsec_ifp, DLT_NULL, data, &amp;af, <span class="enscript-keyword">sizeof</span>(af));
+            
+            data = ipsec6_splithdr(data);
+			<span class="enscript-keyword">if</span> (data == NULL) {
+				printf(<span class="enscript-string">&quot;ipsec_output: ipsec6_splithdr returned NULL\n&quot;</span>);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">ipsec_output_err</span>;
+			}
+
+            ip6 = mtod(data, <span class="enscript-type">struct</span> ip6_hdr *);
+			
+            bzero(&amp;ipsec_state, <span class="enscript-keyword">sizeof</span>(ipsec_state));
+            ipsec_state.m = data;
+            ipsec_state.dst = (<span class="enscript-type">struct</span> sockaddr *)&amp;ip6-&gt;ip6_dst;
+            bzero(&amp;ipsec_state.ro, <span class="enscript-keyword">sizeof</span>(ipsec_state.ro));
+            
+            error = ipsec6_interface_output(&amp;ipsec_state, interface, &amp;ip6-&gt;ip6_nxt, ipsec_state.m);
+            <span class="enscript-keyword">if</span> (error == 0 &amp;&amp; ipsec_state.tunneled == 4)	<span class="enscript-comment">/* tunneled in IPv4 - packet is gone */</span>
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+            data = ipsec_state.m;
+            <span class="enscript-keyword">if</span> (error || data == NULL) {
+                printf(<span class="enscript-string">&quot;ipsec_output: ipsec6_output error %d.\n&quot;</span>, error);
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">ipsec_output_err</span>;
+            }
+            
+            <span class="enscript-comment">/* Set traffic class, set flow */</span>
+            m_set_service_class(data, pcb-&gt;ipsec_output_service_class);
+            data-&gt;m_pkthdr.pkt_flowsrc = FLOWSRC_IFNET;
+            data-&gt;m_pkthdr.pkt_flowid = interface-&gt;if_flowhash;
+            data-&gt;m_pkthdr.pkt_proto = ip6-&gt;ip6_nxt;
+            data-&gt;m_pkthdr.pkt_flags = (PKTF_FLOW_ID | PKTF_FLOW_ADV | PKTF_FLOW_LOCALSRC);
+            
+            <span class="enscript-comment">/* Increment statistics */</span>
+            length = mbuf_pkthdr_len(data);
+            ifnet_stat_increment_out(interface, 1, length, 0);
+            
+            <span class="enscript-comment">/* Send to ip6_output */</span>
+            bzero(&amp;ro6, <span class="enscript-keyword">sizeof</span>(ro6));
+            
+            flags = IPV6_OUTARGS;
+            
+            bzero(&amp;ip6oa, <span class="enscript-keyword">sizeof</span>(ip6oa));
+            ip6oa.ip6oa_flowadv.code = 0;
+            ip6oa.ip6oa_flags = IPOAF_SELECT_SRCIF | IPOAF_BOUND_SRCADDR;
+            <span class="enscript-keyword">if</span> (ipsec_state.outgoing_if) {
+                ip6oa.ip6oa_boundif = ipsec_state.outgoing_if;
+                ip6oa.ip6oa_flags |= IPOAF_BOUND_IF;
+            }
+            
+            adv = &amp;ip6oa.ip6oa_flowadv;
+            
+            (<span class="enscript-type">void</span>) ip6_output(data, NULL, &amp;ro6, flags, NULL, NULL, &amp;ip6oa);
+            data = NULL;
+            
+            <span class="enscript-keyword">if</span> (adv-&gt;code == FADV_FLOW_CONTROLLED || adv-&gt;code == FADV_SUSPENDED) {
+                error = ENOBUFS;
+                ifnet_disable_output(interface);
+            }
+            
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+        <span class="enscript-reference">default</span>:
+            printf(<span class="enscript-string">&quot;ipsec_output: Received unknown packet version %d.\n&quot;</span>, ip_version);
+            error = -1;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">ipsec_output_err</span>;
+    }
+	
+<span class="enscript-reference">done</span>:
+    <span class="enscript-keyword">return</span> error;
+    
+<span class="enscript-reference">ipsec_output_err</span>:
+    <span class="enscript-keyword">if</span> (data)
+        mbuf_freem(data);
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipsec_start</span>(ifnet_t	interface)
+{
+	mbuf_t data;
+
+	<span class="enscript-keyword">for</span> (;;) {
+		<span class="enscript-keyword">if</span> (ifnet_dequeue(interface, &amp;data) != 0)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (ipsec_output(interface, data) != 0)
+			<span class="enscript-keyword">break</span>;
+	}
+}
+
+<span class="enscript-comment">/* Network Interface functions */</span>
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipsec_demux</span>(__unused ifnet_t	interface,
+			mbuf_t				data,
+			__unused <span class="enscript-type">char</span>		*frame_header,
+			protocol_family_t	*protocol)
+{
+    <span class="enscript-type">struct</span> ip *ip;
+    u_int ip_version;
+    
+	<span class="enscript-keyword">while</span> (data != NULL &amp;&amp; mbuf_len(data) &lt; 1) {
+		data = mbuf_next(data);
+	}
+	
+	<span class="enscript-keyword">if</span> (data == NULL)
+		<span class="enscript-keyword">return</span> ENOENT;
+    
+    ip = mtod(data, <span class="enscript-type">struct</span> ip *);
+    ip_version = ip-&gt;ip_v;
+    
+    <span class="enscript-keyword">switch</span>(ip_version) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">4</span>:
+            *protocol = PF_INET;
+			<span class="enscript-keyword">return</span> 0;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">6</span>:
+            *protocol = PF_INET6;
+			<span class="enscript-keyword">return</span> 0;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">break</span>;
+	}
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipsec_add_proto</span>(__unused ifnet_t						interface,
+				protocol_family_t						protocol,
+				__unused <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ifnet_demux_desc	*demux_array,
+				__unused u_int32_t						demux_count)
+{
+	<span class="enscript-keyword">switch</span>(protocol) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PF_INET</span>:
+			<span class="enscript-keyword">return</span> 0;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">PF_INET6</span>:
+			<span class="enscript-keyword">return</span> 0;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">break</span>;
+	}
+	
+	<span class="enscript-keyword">return</span> ENOPROTOOPT;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipsec_del_proto</span>(__unused ifnet_t 			interface,
+				__unused protocol_family_t	protocol)
+{
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipsec_ioctl</span>(ifnet_t		interface,
+			u_long		command,
+			<span class="enscript-type">void</span>		*data)
+{
+	errno_t	result = 0;
+	
+	<span class="enscript-keyword">switch</span>(command) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFMTU</span>:
+			ifnet_set_mtu(interface, ((<span class="enscript-type">struct</span> ifreq*)data)-&gt;ifr_mtu);
+			<span class="enscript-keyword">break</span>;
+			
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSIFFLAGS</span>:
+			<span class="enscript-comment">/* ifioctl() takes care of it */</span>
+			<span class="enscript-keyword">break</span>;
+			
+		<span class="enscript-reference">default</span>:
+			result = EOPNOTSUPP;
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipsec_detached</span>(
+			   ifnet_t	interface)
+{
+	<span class="enscript-type">struct</span> ipsec_pcb	*pcb = ifnet_softc(interface);
+    
+	ifnet_release(pcb-&gt;ipsec_ifp);
+	ipsec_free(pcb);
+    
+	OSDecrementAtomic(&amp;ipsec_ifcount);
+}
+
+<span class="enscript-comment">/* Protocol Handlers */</span>
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipsec_proto_input</span>(ifnet_t interface,
+				  protocol_family_t	protocol,
+				  mbuf_t m,
+				  __unused <span class="enscript-type">char</span> *frame_header)
+{
+	<span class="enscript-type">struct</span> ip *ip;
+	uint32_t af = 0;
+	ip = mtod(m, <span class="enscript-type">struct</span> ip *);
+	<span class="enscript-keyword">if</span> (ip-&gt;ip_v == 4)
+		af = AF_INET;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ip-&gt;ip_v == 6)
+		af = AF_INET6;
+	
+	mbuf_pkthdr_setrcvif(m, interface);
+	bpf_tap_in(interface, DLT_NULL, m, &amp;af, <span class="enscript-keyword">sizeof</span>(af));
+	
+	<span class="enscript-keyword">if</span> (proto_input(protocol, m) != 0) {
+		ifnet_stat_increment_in(interface, 0, 0, 1);
+		m_freem(m);
+	} <span class="enscript-keyword">else</span> {
+		ifnet_stat_increment_in(interface, 1, m-&gt;m_pkthdr.len, 0);
+	}
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipsec_proto_pre_output</span>(__unused ifnet_t	interface,
+					   protocol_family_t	protocol,
+					   __unused mbuf_t		*packet,
+					   __unused <span class="enscript-type">const</span> <span class="enscript-type">struct</span> sockaddr *dest,
+					   __unused <span class="enscript-type">void</span> *route,
+					   __unused <span class="enscript-type">char</span> *frame_type,
+					   __unused <span class="enscript-type">char</span> *link_layer_dest)
+{
+	
+	*(protocol_family_t *)(<span class="enscript-type">void</span> *)frame_type = protocol;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> errno_t
+<span class="enscript-function-name">ipsec_attach_proto</span>(ifnet_t				interface,
+				   protocol_family_t	protocol)
+{
+	<span class="enscript-type">struct</span> ifnet_attach_proto_param	proto;
+	errno_t							result;
+	
+	bzero(&amp;proto, <span class="enscript-keyword">sizeof</span>(proto));
+	proto.input = ipsec_proto_input;
+	proto.pre_output = ipsec_proto_pre_output;
+	
+	result = ifnet_attach_protocol(interface, protocol, &amp;proto);
+	<span class="enscript-keyword">if</span> (result != 0 &amp;&amp; result != EEXIST) {
+		printf(<span class="enscript-string">&quot;ipsec_attach_inet - ifnet_attach_protocol %d failed: %d\n&quot;</span>,
+			   protocol, result);
+	}
+	
+	<span class="enscript-keyword">return</span> result;
+}
+
+errno_t
+<span class="enscript-function-name">ipsec_inject_inbound_packet</span>(ifnet_t	interface,
+							mbuf_t packet)
+{
+	errno_t error;
+	protocol_family_t protocol;
+	<span class="enscript-keyword">if</span> ((error = ipsec_demux(interface, packet, NULL, &amp;protocol)) != 0) {
+		<span class="enscript-keyword">return</span> error;
+	}
+	
+	<span class="enscript-keyword">return</span> ipsec_proto_input(interface, protocol, packet, NULL);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipsec_set_pkthdr_for_interface</span>(ifnet_t interface, mbuf_t packet, <span class="enscript-type">int</span> family)
+{
+	<span class="enscript-keyword">if</span> (packet != NULL &amp;&amp; interface != NULL) {
+		<span class="enscript-type">struct</span> ipsec_pcb *pcb = ifnet_softc(interface);
+		<span class="enscript-keyword">if</span> (pcb != NULL) {
+			<span class="enscript-comment">/* Set traffic class, set flow */</span>
+			m_set_service_class(packet, pcb-&gt;ipsec_output_service_class);
+			packet-&gt;m_pkthdr.pkt_flowsrc = FLOWSRC_IFNET;
+			packet-&gt;m_pkthdr.pkt_flowid = interface-&gt;if_flowhash;
+			<span class="enscript-keyword">if</span> (family == AF_INET) {
+				<span class="enscript-type">struct</span> ip *ip = mtod(packet, <span class="enscript-type">struct</span> ip *);
+				packet-&gt;m_pkthdr.pkt_proto = ip-&gt;ip_p;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (family == AF_INET6) {
+				<span class="enscript-type">struct</span> ip6_hdr *ip6 = mtod(packet, <span class="enscript-type">struct</span> ip6_hdr *);
+				packet-&gt;m_pkthdr.pkt_proto = ip6-&gt;ip6_nxt;
+			}
+			packet-&gt;m_pkthdr.pkt_flags = (PKTF_FLOW_ID | PKTF_FLOW_ADV | PKTF_FLOW_LOCALSRC);
+		}
+	}
+}
+</pre>
+<hr />
+</body></html>

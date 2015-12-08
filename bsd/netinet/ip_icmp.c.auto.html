@@ -1,0 +1,1299 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ip_icmp.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ip_icmp.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1988, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)ip_icmp.c	8.2 (Berkeley) 1/4/94
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/endian.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_IP_VHL</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_icmp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/icmp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_fsm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_seq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_timer.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcpip.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPSEC</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipsec.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netkey/key.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NECP</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/necp.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* NECP */</span>
+
+ <span class="enscript-comment">/* XXX This one should go in sys/mbuf.h. It is used to avoid that
+ * a firewall-generated packet loops forever through the firewall.
+ */</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">M_SKIP_FIREWALL</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">M_SKIP_FIREWALL</span>         0x4000
+#<span class="enscript-reference">endif</span> 
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC_NET */</span>
+
+
+<span class="enscript-comment">/*
+ * ICMP routines: error generation, receive packet processing, and
+ * routines to turnaround packets back to the originator, and
+ * host table maintenance routines.
+ */</span>
+
+<span class="enscript-type">struct</span>	icmpstat icmpstat;
+<span class="enscript-function-name">SYSCTL_STRUCT</span>(_net_inet_icmp, ICMPCTL_STATS, stats,
+    CTLFLAG_RD | CTLFLAG_LOCKED,
+    &amp;icmpstat, icmpstat, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	icmpmaskrepl = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_icmp, ICMPCTL_MASKREPL, maskrepl,
+    CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;icmpmaskrepl, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	icmptimestamp = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_icmp, ICMPCTL_TIMESTAMP, timestamp,
+    CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;icmptimestamp, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	drop_redirect = 1;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_icmp, OID_AUTO, drop_redirect,
+    CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;drop_redirect, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	log_redirect = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_icmp, OID_AUTO, log_redirect,
+    CTLFLAG_RW | CTLFLAG_LOCKED,
+    &amp;log_redirect, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">const</span> <span class="enscript-type">static</span> <span class="enscript-type">int</span> icmp_datalen = 8;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">ICMP_BANDLIM</span> 
+
+<span class="enscript-comment">/* Default values in case CONFIG_ICMP_BANDLIM is not defined in the MASTER file */</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">CONFIG_ICMP_BANDLIM</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">CONFIG_ICMP_BANDLIM</span> 250
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_ICMP_BANDLIM */</span>
+
+<span class="enscript-comment">/*    
+ * ICMP error-response bandwidth limiting sysctl.  If not enabled, sysctl
+ *      variable content is -1 and read-only.
+ */</span>     
+    
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>      icmplim = CONFIG_ICMP_BANDLIM;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_icmp, ICMPCTL_ICMPLIM, icmplim, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;icmplim, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* ICMP_BANDLIM */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>      icmplim = -1;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_icmp, ICMPCTL_ICMPLIM, icmplim, CTLFLAG_RD | CTLFLAG_LOCKED,
+	&amp;icmplim, 0, <span class="enscript-string">&quot;&quot;</span>);
+	
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* ICMP_BANDLIM */</span>
+
+<span class="enscript-comment">/*
+ * ICMP broadcast echo sysctl
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	icmpbmcastecho = 1;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_icmp, OID_AUTO, bmcastecho, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;icmpbmcastecho, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">ICMPPRINTFS</span>
+<span class="enscript-type">int</span>	icmpprintfs = 0;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	icmp_reflect(<span class="enscript-type">struct</span> mbuf *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	icmp_send(<span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">struct</span> mbuf *);
+
+<span class="enscript-comment">/*
+ * Generate an error packet of type error
+ * in response to bad packet ip.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">icmp_error</span>(
+	<span class="enscript-type">struct</span> mbuf *n,
+	<span class="enscript-type">int</span> type,
+	<span class="enscript-type">int</span> code,
+	u_int32_t dest,
+	u_int32_t nextmtu)
+{
+	<span class="enscript-type">struct</span> ip *oip, *nip;
+	<span class="enscript-type">struct</span> icmp *icp;
+	<span class="enscript-type">struct</span> mbuf *m;
+	u_int32_t oiphlen, icmplen, icmpelen, nlen;
+
+	<span class="enscript-comment">/* Expect 32-bit aligned data pointer on strict-align platforms */</span>
+	MBUF_STRICT_DATA_ALIGNMENT_CHECK_32(n);
+
+	oip = mtod(n, <span class="enscript-type">struct</span> ip *);
+	oiphlen = IP_VHL_HL(oip-&gt;ip_vhl) &lt;&lt; 2;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">ICMPPRINTFS</span>
+	<span class="enscript-keyword">if</span> (icmpprintfs)
+		printf(<span class="enscript-string">&quot;icmp_error(0x%llx, %x, %d)\n&quot;</span>,
+		    (uint64_t)VM_KERNEL_ADDRPERM(oip), type, code);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (type != ICMP_REDIRECT)
+		icmpstat.icps_error++;
+	<span class="enscript-comment">/*
+	 * Don't send error if not the first fragment of message.
+	 * Don't error if the old packet protocol was ICMP
+	 * error message, only known informational types.
+	 */</span>
+	<span class="enscript-keyword">if</span> (oip-&gt;ip_off &amp; ~(IP_MF|IP_DF))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+
+	<span class="enscript-keyword">if</span> (oip-&gt;ip_p == IPPROTO_ICMP &amp;&amp; type != ICMP_REDIRECT &amp;&amp;
+	  n-&gt;m_len &gt;= oiphlen + ICMP_MINLEN &amp;&amp;
+	  !ICMP_INFOTYPE(((<span class="enscript-type">struct</span> icmp *)(<span class="enscript-type">void</span> *)((caddr_t)oip + oiphlen))-&gt;
+	  icmp_type)) {
+		icmpstat.icps_oldicmp++;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+	}
+	<span class="enscript-comment">/*
+	 * Don't send error in response to a multicast or
+	 * broadcast packet
+	 */</span>
+	<span class="enscript-keyword">if</span> (n-&gt;m_flags &amp; (M_BCAST|M_MCAST))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+
+	<span class="enscript-comment">/*
+	 * Calculate the length to quote from original packet and prevent
+	 * the ICMP mbuf from overflowing.
+	 */</span>
+	nlen = m_length(n);
+	<span class="enscript-keyword">if</span> (oip-&gt;ip_p == IPPROTO_TCP) {
+		<span class="enscript-type">struct</span> tcphdr *th;
+		u_int16_t tcphlen;
+
+		<span class="enscript-keyword">if</span> (oiphlen + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> tcphdr) &gt; n-&gt;m_len &amp;&amp;
+		    n-&gt;m_next == NULL)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">stdreply</span>;
+		<span class="enscript-keyword">if</span> (n-&gt;m_len &lt; (oiphlen + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> tcphdr)) &amp;&amp;
+		    (n = m_pullup(n, (oiphlen + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> tcphdr)))) == NULL)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+
+		th = (<span class="enscript-type">struct</span> tcphdr *)(<span class="enscript-type">void</span> *)((caddr_t)oip + oiphlen);
+		<span class="enscript-keyword">if</span> (th != ((<span class="enscript-type">struct</span> tcphdr *)P2ROUNDDOWN(th,
+		    <span class="enscript-keyword">sizeof</span>(u_int32_t))))
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+		tcphlen = th-&gt;th_off &lt;&lt; 2;
+		<span class="enscript-keyword">if</span> (tcphlen &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> tcphdr))
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+		<span class="enscript-keyword">if</span> (oip-&gt;ip_len &lt; (oiphlen + tcphlen))
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+		<span class="enscript-keyword">if</span> ((oiphlen + tcphlen) &gt; n-&gt;m_len &amp;&amp; n-&gt;m_next == NULL)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">stdreply</span>;
+		<span class="enscript-keyword">if</span> (n-&gt;m_len &lt; (oiphlen + tcphlen) &amp;&amp;
+		    (n = m_pullup(n, (oiphlen + tcphlen))) == NULL)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+
+		icmpelen = max(tcphlen, min(icmp_datalen,
+		    (oip-&gt;ip_len - oiphlen)));
+	} <span class="enscript-keyword">else</span>
+<span class="enscript-reference">stdreply</span>:	icmpelen = max(ICMP_MINLEN, min(icmp_datalen,
+		    (ntohs(oip-&gt;ip_len) - oiphlen)));
+
+	icmplen = min(oiphlen + icmpelen, min(nlen, oip-&gt;ip_len));
+	<span class="enscript-keyword">if</span> (icmplen &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+	<span class="enscript-comment">/*
+	 * First, formulate icmp message
+	 */</span>
+	<span class="enscript-keyword">if</span> (MHLEN &gt; (<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip) + ICMP_MINLEN + icmplen))
+		m = m_gethdr(M_DONTWAIT, MT_HEADER);	<span class="enscript-comment">/* MAC-OK */</span>
+	<span class="enscript-keyword">else</span>
+		m = m_getcl(M_DONTWAIT, MT_DATA, M_PKTHDR);
+
+	<span class="enscript-keyword">if</span> (m == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+
+	<span class="enscript-keyword">if</span> (n-&gt;m_flags &amp; M_SKIP_FIREWALL) {
+		<span class="enscript-comment">/*
+		 * set M_SKIP_FIREWALL to skip firewall check, since
+		 * we're called from firewall
+		 */</span>
+		m-&gt;m_flags |= M_SKIP_FIREWALL;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+	mac_mbuf_label_associate_netlayer(n, m);
+#<span class="enscript-reference">endif</span>
+	m-&gt;m_len = icmplen + ICMP_MINLEN; <span class="enscript-comment">/* for ICMP header and data */</span>
+	MH_ALIGN(m, m-&gt;m_len);
+	icp = mtod(m, <span class="enscript-type">struct</span> icmp *);
+	<span class="enscript-keyword">if</span> ((u_int)type &gt; ICMP_MAXTYPE) {
+		m_freem(m);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+	}
+	icmpstat.icps_outhist[type]++;
+	icp-&gt;icmp_type = type;
+	<span class="enscript-keyword">if</span> (type == ICMP_REDIRECT)
+		icp-&gt;icmp_gwaddr.s_addr = dest;
+	<span class="enscript-keyword">else</span> {
+		icp-&gt;icmp_void = 0;
+		<span class="enscript-comment">/*
+		 * The following assignments assume an overlay with the
+		 * zeroed icmp_void field.
+		 */</span>
+		<span class="enscript-keyword">if</span> (type == ICMP_PARAMPROB) {
+			icp-&gt;icmp_pptr = code;
+			code = 0;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (type == ICMP_UNREACH &amp;&amp;
+		    code == ICMP_UNREACH_NEEDFRAG &amp;&amp; nextmtu != 0) {
+			icp-&gt;icmp_nextmtu = htons(nextmtu);
+		}
+	}
+
+	icp-&gt;icmp_code = code;
+	m_copydata(n, 0, icmplen, (caddr_t)&amp;icp-&gt;icmp_ip);
+	nip = &amp;icp-&gt;icmp_ip;
+
+	<span class="enscript-comment">/*
+	 * Convert fields to network representation.
+	 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">BYTE_ORDER</span> != <span class="enscript-variable-name">BIG_ENDIAN</span>
+	HTONS(nip-&gt;ip_len);
+	HTONS(nip-&gt;ip_off);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-comment">/*
+	 * Now, copy old ip header (without options)
+	 * in front of icmp message.
+	 */</span>
+	<span class="enscript-keyword">if</span> (m-&gt;m_data - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip) &lt; m-&gt;m_pktdat) {
+		m_freem(m);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+	}
+	m-&gt;m_data -= <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip);
+	m-&gt;m_len += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip);
+	m-&gt;m_pkthdr.len = m-&gt;m_len;
+	m-&gt;m_pkthdr.rcvif = n-&gt;m_pkthdr.rcvif;
+	nip = mtod(m, <span class="enscript-type">struct</span> ip *);
+	bcopy((caddr_t)oip, (caddr_t)nip, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip));
+	nip-&gt;ip_len = m-&gt;m_len;
+	nip-&gt;ip_vhl = IP_VHL_BORING;
+	nip-&gt;ip_p = IPPROTO_ICMP;
+	nip-&gt;ip_tos = 0;
+	nip-&gt;ip_off = 0;
+	icmp_reflect(m);
+
+<span class="enscript-reference">freeit</span>:
+	m_freem(n);
+}
+
+<span class="enscript-comment">/*
+ * Process a received ICMP message.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">icmp_input</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> hlen)
+{
+	<span class="enscript-type">struct</span> sockaddr_in icmpsrc, icmpdst, icmpgw;
+	<span class="enscript-type">struct</span> icmp *icp;
+	<span class="enscript-type">struct</span> ip *ip = mtod(m, <span class="enscript-type">struct</span> ip *);
+	<span class="enscript-type">int</span> icmplen;
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">struct</span> in_ifaddr *ia;
+	<span class="enscript-type">void</span> (*ctlfunc)(<span class="enscript-type">int</span>, <span class="enscript-type">struct</span> sockaddr *, <span class="enscript-type">void</span> *);
+	<span class="enscript-type">int</span> code;
+
+	<span class="enscript-comment">/* Expect 32-bit aligned data pointer on strict-align platforms */</span>
+	MBUF_STRICT_DATA_ALIGNMENT_CHECK_32(m);
+
+	icmplen = ip-&gt;ip_len;
+
+	<span class="enscript-comment">/*
+	 * Locate icmp structure in mbuf, and check
+	 * that not corrupted and of at least minimum length.
+	 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">ICMPPRINTFS</span>
+	<span class="enscript-keyword">if</span> (icmpprintfs) {
+		<span class="enscript-type">char</span> buf[MAX_IPv4_STR_LEN];
+		<span class="enscript-type">char</span> ipv4str[MAX_IPv4_STR_LEN];
+
+		printf(<span class="enscript-string">&quot;icmp_input from %s to %s, len %d\n&quot;</span>,
+		       inet_ntop(AF_INET, &amp;ip-&gt;ip_src, buf, <span class="enscript-keyword">sizeof</span>(buf)),
+		       inet_ntop(AF_INET, &amp;ip-&gt;ip_dst, ipv4str, <span class="enscript-keyword">sizeof</span>(ipv4str)),
+		       icmplen);
+	}
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (icmplen &lt; ICMP_MINLEN) {
+		icmpstat.icps_tooshort++;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+	}
+	i = hlen + min(icmplen, ICMP_ADVLENMIN);
+	<span class="enscript-keyword">if</span> (m-&gt;m_len &lt; i &amp;&amp; (m = m_pullup(m, i)) == 0)  {
+		icmpstat.icps_tooshort++;
+		<span class="enscript-keyword">return</span>;
+	}
+	ip = mtod(m, <span class="enscript-type">struct</span> ip *);
+	m-&gt;m_len -= hlen;
+	m-&gt;m_data += hlen;
+	icp = mtod(m, <span class="enscript-type">struct</span> icmp *);
+	<span class="enscript-keyword">if</span> (in_cksum(m, icmplen)) {
+		icmpstat.icps_checksum++;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+	}
+	m-&gt;m_len += hlen;
+	m-&gt;m_data -= hlen;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">ICMPPRINTFS</span>
+	<span class="enscript-keyword">if</span> (icmpprintfs)
+		printf(<span class="enscript-string">&quot;icmp_input, type %d code %d\n&quot;</span>, icp-&gt;icmp_type,
+		    icp-&gt;icmp_code);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * Message type specific processing.
+	 */</span>
+	<span class="enscript-keyword">if</span> (icp-&gt;icmp_type &gt; ICMP_MAXTYPE)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">raw</span>;
+
+	<span class="enscript-comment">/* Initialize */</span>
+	bzero(&amp;icmpsrc, <span class="enscript-keyword">sizeof</span> (icmpsrc));
+	icmpsrc.sin_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in);
+	icmpsrc.sin_family = AF_INET;
+	bzero(&amp;icmpdst, <span class="enscript-keyword">sizeof</span> (icmpdst));
+	icmpdst.sin_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in);
+	icmpdst.sin_family = AF_INET;
+	bzero(&amp;icmpgw, <span class="enscript-keyword">sizeof</span> (icmpgw));
+	icmpgw.sin_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in);
+	icmpgw.sin_family = AF_INET;
+
+	icmpstat.icps_inhist[icp-&gt;icmp_type]++;
+	code = icp-&gt;icmp_code;
+	<span class="enscript-keyword">switch</span> (icp-&gt;icmp_type) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH</span>:
+		<span class="enscript-keyword">switch</span> (code) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_NET</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_HOST</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_SRCFAIL</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_NET_UNKNOWN</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_HOST_UNKNOWN</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_ISOLATED</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_TOSNET</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_TOSHOST</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_HOST_PRECEDENCE</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_PRECEDENCE_CUTOFF</span>:
+				code = PRC_UNREACH_NET;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_NEEDFRAG</span>:
+				code = PRC_MSGSIZE;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-comment">/*
+			 * RFC 1122, Sections 3.2.2.1 and 4.2.3.9.
+			 * Treat subcodes 2,3 as immediate RST
+			 */</span>
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_PROTOCOL</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_PORT</span>:
+				code = PRC_UNREACH_PORT;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_NET_PROHIB</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_HOST_PROHIB</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_UNREACH_FILTER_PROHIB</span>:
+				code = PRC_UNREACH_ADMIN_PROHIB;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-reference">default</span>:
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">badcode</span>;
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">deliver</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_TIMXCEED</span>:
+		<span class="enscript-keyword">if</span> (code &gt; 1)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">badcode</span>;
+		code += PRC_TIMXCEED_INTRANS;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">deliver</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_PARAMPROB</span>:
+		<span class="enscript-keyword">if</span> (code &gt; 1)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">badcode</span>;
+		code = PRC_PARAMPROB;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">deliver</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_SOURCEQUENCH</span>:
+		<span class="enscript-keyword">if</span> (code)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">badcode</span>;
+		code = PRC_QUENCH;
+	<span class="enscript-reference">deliver</span>:
+		<span class="enscript-comment">/*
+		 * Problem with datagram; advise higher level routines.
+		 */</span>
+		<span class="enscript-keyword">if</span> (icmplen &lt; ICMP_ADVLENMIN || icmplen &lt; ICMP_ADVLEN(icp) ||
+		    IP_VHL_HL(icp-&gt;icmp_ip.ip_vhl) &lt; (<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip) &gt;&gt; 2)) {
+			icmpstat.icps_badlen++;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+		}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">BYTE_ORDER</span> != <span class="enscript-variable-name">BIG_ENDIAN</span>
+		NTOHS(icp-&gt;icmp_ip.ip_len);
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-comment">/* Discard ICMP's in response to multicast packets */</span>
+		<span class="enscript-keyword">if</span> (IN_MULTICAST(ntohl(icp-&gt;icmp_ip.ip_dst.s_addr)))
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">badcode</span>;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">ICMPPRINTFS</span>
+		<span class="enscript-keyword">if</span> (icmpprintfs)
+			printf(<span class="enscript-string">&quot;deliver to protocol %d\n&quot;</span>, icp-&gt;icmp_ip.ip_p);
+#<span class="enscript-reference">endif</span>
+		icmpsrc.sin_addr = icp-&gt;icmp_ip.ip_dst;
+
+		<span class="enscript-comment">/*
+		 * XXX if the packet contains [IPv4 AH TCP], we can't make a
+		 * notification to TCP layer.
+		 */</span>
+		ctlfunc = ip_protox[icp-&gt;icmp_ip.ip_p]-&gt;pr_ctlinput;
+		<span class="enscript-keyword">if</span> (ctlfunc)
+			(*ctlfunc)(code, (<span class="enscript-type">struct</span> sockaddr *)&amp;icmpsrc,
+				   (<span class="enscript-type">void</span> *)&amp;icp-&gt;icmp_ip);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">badcode</span>:
+		icmpstat.icps_badcode++;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_ECHO</span>:
+		<span class="enscript-keyword">if</span> (!icmpbmcastecho
+		    &amp;&amp; (m-&gt;m_flags &amp; (M_MCAST | M_BCAST)) != 0) {
+			icmpstat.icps_bmcastecho++;
+			<span class="enscript-keyword">break</span>;
+		}
+		icp-&gt;icmp_type = ICMP_ECHOREPLY;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">ICMP_BANDLIM</span>
+		<span class="enscript-keyword">if</span> (badport_bandlim(BANDLIM_ICMP_ECHO) &lt; 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+		<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">reflect</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_TSTAMP</span>:
+
+		<span class="enscript-keyword">if</span> (icmptimestamp == 0)
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">if</span> (!icmpbmcastecho
+		    &amp;&amp; (m-&gt;m_flags &amp; (M_MCAST | M_BCAST)) != 0) {
+			icmpstat.icps_bmcasttstamp++;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (icmplen &lt; ICMP_TSLEN) {
+			icmpstat.icps_badlen++;
+			<span class="enscript-keyword">break</span>;
+		}
+		icp-&gt;icmp_type = ICMP_TSTAMPREPLY;
+		icp-&gt;icmp_rtime = iptime();
+		icp-&gt;icmp_ttime = icp-&gt;icmp_rtime;	<span class="enscript-comment">/* bogus, do later! */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">ICMP_BANDLIM</span>
+		<span class="enscript-keyword">if</span> (badport_bandlim(BANDLIM_ICMP_TSTAMP) &lt; 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">freeit</span>;
+		<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">reflect</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_MASKREQ</span>:
+		<span class="enscript-keyword">if</span> (icmpmaskrepl == 0)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-comment">/*
+		 * We are not able to respond with all ones broadcast
+		 * unless we receive it over a point-to-point interface.
+		 */</span>
+		<span class="enscript-keyword">if</span> (icmplen &lt; ICMP_MASKLEN)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">switch</span> (ip-&gt;ip_dst.s_addr) {
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">INADDR_BROADCAST</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">INADDR_ANY</span>:
+			icmpdst.sin_addr = ip-&gt;ip_src;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:
+			icmpdst.sin_addr = ip-&gt;ip_dst;
+		}
+		ia = (<span class="enscript-type">struct</span> in_ifaddr *)ifaof_ifpforaddr(
+			    (<span class="enscript-type">struct</span> sockaddr *)&amp;icmpdst, m-&gt;m_pkthdr.rcvif);
+		<span class="enscript-keyword">if</span> (ia == 0)
+			<span class="enscript-keyword">break</span>;
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">if</span> (ia-&gt;ia_ifp == 0) {
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			IFA_REMREF(&amp;ia-&gt;ia_ifa);
+			ia = NULL;
+			<span class="enscript-keyword">break</span>;
+		}
+		icp-&gt;icmp_type = ICMP_MASKREPLY;
+		icp-&gt;icmp_mask = ia-&gt;ia_sockmask.sin_addr.s_addr;
+		<span class="enscript-keyword">if</span> (ip-&gt;ip_src.s_addr == 0) {
+			<span class="enscript-keyword">if</span> (ia-&gt;ia_ifp-&gt;if_flags &amp; IFF_BROADCAST)
+			    ip-&gt;ip_src = satosin(&amp;ia-&gt;ia_broadaddr)-&gt;sin_addr;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ia-&gt;ia_ifp-&gt;if_flags &amp; IFF_POINTOPOINT)
+			    ip-&gt;ip_src = satosin(&amp;ia-&gt;ia_dstaddr)-&gt;sin_addr;
+		}
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+		IFA_REMREF(&amp;ia-&gt;ia_ifa);
+<span class="enscript-reference">reflect</span>:
+		ip-&gt;ip_len += hlen;	<span class="enscript-comment">/* since ip_input deducts this */</span>
+		icmpstat.icps_reflect++;
+		icmpstat.icps_outhist[icp-&gt;icmp_type]++;
+		icmp_reflect(m);
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_REDIRECT</span>:
+		<span class="enscript-keyword">if</span> (log_redirect) {
+			u_int32_t src, dst, gw;
+
+			src = ntohl(ip-&gt;ip_src.s_addr);
+			dst = ntohl(icp-&gt;icmp_ip.ip_dst.s_addr);
+			gw = ntohl(icp-&gt;icmp_gwaddr.s_addr);
+			printf(<span class="enscript-string">&quot;icmp redirect from %d.%d.%d.%d: &quot;</span>
+			       <span class="enscript-string">&quot;%d.%d.%d.%d =&gt; %d.%d.%d.%d\n&quot;</span>,
+			       (<span class="enscript-type">int</span>)(src &gt;&gt; 24), (<span class="enscript-type">int</span>)((src &gt;&gt; 16) &amp; 0xff),
+			       (<span class="enscript-type">int</span>)((src &gt;&gt; 8) &amp; 0xff), (<span class="enscript-type">int</span>)(src &amp; 0xff),
+			       (<span class="enscript-type">int</span>)(dst &gt;&gt; 24), (<span class="enscript-type">int</span>)((dst &gt;&gt; 16) &amp; 0xff),
+			       (<span class="enscript-type">int</span>)((dst &gt;&gt; 8) &amp; 0xff), (<span class="enscript-type">int</span>)(dst &amp; 0xff),
+			       (<span class="enscript-type">int</span>)(gw &gt;&gt; 24), (<span class="enscript-type">int</span>)((gw &gt;&gt; 16) &amp; 0xff),
+			       (<span class="enscript-type">int</span>)((gw &gt;&gt; 8) &amp; 0xff), (<span class="enscript-type">int</span>)(gw &amp; 0xff));
+		}
+		<span class="enscript-keyword">if</span> (drop_redirect)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (code &gt; 3)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">badcode</span>;
+		<span class="enscript-keyword">if</span> (icmplen &lt; ICMP_ADVLENMIN || icmplen &lt; ICMP_ADVLEN(icp) ||
+		    IP_VHL_HL(icp-&gt;icmp_ip.ip_vhl) &lt; (<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip) &gt;&gt; 2)) {
+			icmpstat.icps_badlen++;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/*
+		 * Short circuit routing redirects to force
+		 * immediate change in the kernel's routing
+		 * tables.  The message is also handed to anyone
+		 * listening on a raw socket (e.g. the routing
+		 * daemon for use in updating its tables).
+		 */</span>
+		icmpgw.sin_addr = ip-&gt;ip_src;
+		icmpdst.sin_addr = icp-&gt;icmp_gwaddr;
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">ICMPPRINTFS</span>
+		<span class="enscript-keyword">if</span> (icmpprintfs) {
+			<span class="enscript-type">char</span> buf[MAX_IPv4_STR_LEN];
+
+			printf(<span class="enscript-string">&quot;redirect dst %s to %s\n&quot;</span>,
+			       inet_ntop(AF_INET, &amp;icp-&gt;icmp_ip.ip_dst, buf, <span class="enscript-keyword">sizeof</span>(buf)),
+			       inet_ntop(AF_INET, &amp;icp-&gt;icmp_gwaddr, ipv4str,
+			       			 <span class="enscript-keyword">sizeof</span>(ipv4str)));
+		}
+#<span class="enscript-reference">endif</span>
+		icmpsrc.sin_addr = icp-&gt;icmp_ip.ip_dst;
+		rtredirect(m-&gt;m_pkthdr.rcvif, (<span class="enscript-type">struct</span> sockaddr *)&amp;icmpsrc,
+		  (<span class="enscript-type">struct</span> sockaddr *)&amp;icmpdst, NULL, RTF_GATEWAY | RTF_HOST,
+		  (<span class="enscript-type">struct</span> sockaddr *)&amp;icmpgw, NULL);
+		pfctlinput(PRC_REDIRECT_HOST, (<span class="enscript-type">struct</span> sockaddr *)&amp;icmpsrc);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPSEC</span>
+		key_sa_routechange((<span class="enscript-type">struct</span> sockaddr *)&amp;icmpsrc);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * No kernel processing for the following;
+	 * just fall through to send to raw listener.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_ECHOREPLY</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_ROUTERADVERT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_ROUTERSOLICIT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_TSTAMPREPLY</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_IREQREPLY</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_MASKREPLY</span>:
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+
+<span class="enscript-reference">raw</span>:
+	rip_input(m, hlen);
+	<span class="enscript-keyword">return</span>;
+
+<span class="enscript-reference">freeit</span>:
+	m_freem(m);
+}
+
+<span class="enscript-comment">/*
+ * Reflect the ip packet back to the source
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">icmp_reflect</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">struct</span> ip *ip = mtod(m, <span class="enscript-type">struct</span> ip *);
+	<span class="enscript-type">struct</span> sockaddr_in icmpdst;
+	<span class="enscript-type">struct</span> in_ifaddr *ia;
+	<span class="enscript-type">struct</span> in_addr t;
+	<span class="enscript-type">struct</span> mbuf *opts = NULL;
+	<span class="enscript-type">int</span> optlen = (IP_VHL_HL(ip-&gt;ip_vhl) &lt;&lt; 2) - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip);
+
+	<span class="enscript-keyword">if</span> (!in_canforward(ip-&gt;ip_src) &amp;&amp;
+	    ((ntohl(ip-&gt;ip_src.s_addr) &amp; IN_CLASSA_NET) !=
+	     (IN_LOOPBACKNET &lt;&lt; IN_CLASSA_NSHIFT))) {
+		m_freem(m);	<span class="enscript-comment">/* Bad return address */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;	<span class="enscript-comment">/* Ip_output() will check for broadcast */</span>
+	}
+	t = ip-&gt;ip_dst;
+	ip-&gt;ip_dst = ip-&gt;ip_src;
+	<span class="enscript-comment">/*
+	 * If the incoming packet was addressed directly to us,
+	 * use dst as the src for the reply.  Otherwise (broadcast
+	 * or anonymous), use the address which corresponds
+	 * to the incoming interface.
+	 */</span>
+	lck_rw_lock_shared(in_ifaddr_rwlock);
+	TAILQ_FOREACH(ia, INADDR_HASH(t.s_addr), ia_hash) {
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">if</span> (t.s_addr == IA_SIN(ia)-&gt;sin_addr.s_addr) {
+			IFA_ADDREF_LOCKED(&amp;ia-&gt;ia_ifa);
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">match</span>;
+		}
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+	}
+	<span class="enscript-comment">/*
+	 * Slow path; check for broadcast addresses.  Find a source
+	 * IP address to use when replying to the broadcast request;
+	 * let IP handle the source interface selection work.
+	 */</span>
+	<span class="enscript-keyword">for</span> (ia = in_ifaddrhead.tqh_first; ia; ia = ia-&gt;ia_link.tqe_next) {
+		IFA_LOCK(&amp;ia-&gt;ia_ifa);
+		<span class="enscript-keyword">if</span> (ia-&gt;ia_ifp &amp;&amp; (ia-&gt;ia_ifp-&gt;if_flags &amp; IFF_BROADCAST) &amp;&amp;
+		    t.s_addr == satosin(&amp;ia-&gt;ia_broadaddr)-&gt;sin_addr.s_addr) {
+			IFA_ADDREF_LOCKED(&amp;ia-&gt;ia_ifa);
+			IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			<span class="enscript-keyword">break</span>;
+		}
+		IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+	}
+<span class="enscript-reference">match</span>:
+	lck_rw_done(in_ifaddr_rwlock);
+
+	<span class="enscript-comment">/* Initialize */</span>
+	bzero(&amp;icmpdst, <span class="enscript-keyword">sizeof</span> (icmpdst));
+	icmpdst.sin_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in);
+	icmpdst.sin_family = AF_INET;
+	icmpdst.sin_addr = t;
+	<span class="enscript-keyword">if</span> ((ia == (<span class="enscript-type">struct</span> in_ifaddr *)0) &amp;&amp; m-&gt;m_pkthdr.rcvif)
+		ia = (<span class="enscript-type">struct</span> in_ifaddr *)ifaof_ifpforaddr(
+			(<span class="enscript-type">struct</span> sockaddr *)&amp;icmpdst, m-&gt;m_pkthdr.rcvif);
+	<span class="enscript-comment">/*
+	 * The following happens if the packet was not addressed to us,
+	 * and was received on an interface with no IP address.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ia == (<span class="enscript-type">struct</span> in_ifaddr *)0) {
+		lck_rw_lock_shared(in_ifaddr_rwlock);
+		ia = in_ifaddrhead.tqh_first;
+		<span class="enscript-keyword">if</span> (ia == (<span class="enscript-type">struct</span> in_ifaddr *)0) {<span class="enscript-comment">/* no address yet, bail out */</span>
+			lck_rw_done(in_ifaddr_rwlock);
+			m_freem(m);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		IFA_ADDREF(&amp;ia-&gt;ia_ifa);
+		lck_rw_done(in_ifaddr_rwlock);
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+	mac_netinet_icmp_reply(m);
+#<span class="enscript-reference">endif</span>
+	IFA_LOCK_SPIN(&amp;ia-&gt;ia_ifa);
+	t = IA_SIN(ia)-&gt;sin_addr;
+	IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+	ip-&gt;ip_src = t;
+	ip-&gt;ip_ttl = ip_defttl;
+	IFA_REMREF(&amp;ia-&gt;ia_ifa);
+	ia = NULL;
+
+	<span class="enscript-keyword">if</span> (optlen &gt; 0) {
+		u_char *cp;
+		<span class="enscript-type">int</span> opt, cnt;
+		u_int len;
+
+		<span class="enscript-comment">/*
+		 * Retrieve any source routing from the incoming packet;
+		 * add on any record-route or timestamp options.
+		 */</span>
+		cp = (u_char *) (ip + 1);
+		<span class="enscript-keyword">if</span> ((opts = ip_srcroute()) == 0 &amp;&amp;
+		    (opts = m_gethdr(M_DONTWAIT, MT_HEADER))) {	<span class="enscript-comment">/* MAC-OK */</span>
+			opts-&gt;m_len = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> in_addr);
+			mtod(opts, <span class="enscript-type">struct</span> in_addr *)-&gt;s_addr = 0;
+		}
+		<span class="enscript-keyword">if</span> (opts) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">ICMPPRINTFS</span>
+		    <span class="enscript-keyword">if</span> (icmpprintfs)
+			    printf(<span class="enscript-string">&quot;icmp_reflect optlen %d rt %d =&gt; &quot;</span>,
+				optlen, opts-&gt;m_len);
+#<span class="enscript-reference">endif</span>
+		    <span class="enscript-keyword">for</span> (cnt = optlen; cnt &gt; 0; cnt -= len, cp += len) {
+			    opt = cp[IPOPT_OPTVAL];
+			    <span class="enscript-keyword">if</span> (opt == IPOPT_EOL)
+				    <span class="enscript-keyword">break</span>;
+			    <span class="enscript-keyword">if</span> (opt == IPOPT_NOP)
+				    len = 1;
+			    <span class="enscript-keyword">else</span> {
+				    <span class="enscript-keyword">if</span> (cnt &lt; IPOPT_OLEN + <span class="enscript-keyword">sizeof</span>(*cp))
+					    <span class="enscript-keyword">break</span>;
+				    len = cp[IPOPT_OLEN];
+				    <span class="enscript-keyword">if</span> (len &lt; IPOPT_OLEN + <span class="enscript-keyword">sizeof</span>(*cp) ||
+				        len &gt; cnt)
+					    <span class="enscript-keyword">break</span>;
+			    }
+			    <span class="enscript-comment">/*
+			     * Should check for overflow, but it &quot;can't happen&quot;
+			     */</span>
+			    <span class="enscript-keyword">if</span> (opt == IPOPT_RR || opt == IPOPT_TS ||
+				opt == IPOPT_SECURITY) {
+				    bcopy((caddr_t)cp,
+					mtod(opts, caddr_t) + opts-&gt;m_len, len);
+				    opts-&gt;m_len += len;
+			    }
+		    }
+		    <span class="enscript-comment">/* Terminate &amp; pad, if necessary */</span>
+		    cnt = opts-&gt;m_len % 4;
+		    <span class="enscript-keyword">if</span> (cnt) {
+			    <span class="enscript-keyword">for</span> (; cnt &lt; 4; cnt++) {
+				    *(mtod(opts, caddr_t) + opts-&gt;m_len) =
+					IPOPT_EOL;
+				    opts-&gt;m_len++;
+			    }
+		    }
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">ICMPPRINTFS</span>
+		    <span class="enscript-keyword">if</span> (icmpprintfs)
+			    printf(<span class="enscript-string">&quot;%d\n&quot;</span>, opts-&gt;m_len);
+#<span class="enscript-reference">endif</span>
+		}
+		<span class="enscript-comment">/*
+		 * Now strip out original options by copying rest of first
+		 * mbuf's data back, and adjust the IP length.
+		 */</span>
+		ip-&gt;ip_len -= optlen;
+		ip-&gt;ip_vhl = IP_VHL_BORING;
+		m-&gt;m_len -= optlen;
+		<span class="enscript-keyword">if</span> (m-&gt;m_flags &amp; M_PKTHDR)
+			m-&gt;m_pkthdr.len -= optlen;
+		optlen += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip);
+		bcopy((caddr_t)ip + optlen, (caddr_t)(ip + 1),
+			 (<span class="enscript-type">unsigned</span>)(m-&gt;m_len - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip)));
+	}
+	m-&gt;m_flags &amp;= ~(M_BCAST|M_MCAST);
+	icmp_send(m, opts);
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (opts)
+		(<span class="enscript-type">void</span>)m_free(opts);
+}
+
+<span class="enscript-comment">/*
+ * Send an icmp packet back to the ip level,
+ * after supplying a checksum.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">icmp_send</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> mbuf *opts)
+{
+	<span class="enscript-type">struct</span> ip *ip = mtod(m, <span class="enscript-type">struct</span> ip *);
+	<span class="enscript-type">int</span> hlen;
+	<span class="enscript-type">struct</span> icmp *icp;
+	<span class="enscript-type">struct</span> route ro;
+	<span class="enscript-type">struct</span> ip_out_args ipoa = { IFSCOPE_NONE, { 0 },
+	    IPOAF_SELECT_SRCIF | IPOAF_BOUND_SRCADDR, 0 };
+
+	<span class="enscript-keyword">if</span> (!(m-&gt;m_pkthdr.pkt_flags &amp; PKTF_LOOP) &amp;&amp; m-&gt;m_pkthdr.rcvif != NULL) {
+		ipoa.ipoa_boundif = m-&gt;m_pkthdr.rcvif-&gt;if_index;
+		ipoa.ipoa_flags |= IPOAF_BOUND_IF;
+	}
+
+	hlen = IP_VHL_HL(ip-&gt;ip_vhl) &lt;&lt; 2;
+	m-&gt;m_data += hlen;
+	m-&gt;m_len -= hlen;
+	icp = mtod(m, <span class="enscript-type">struct</span> icmp *);
+	icp-&gt;icmp_cksum = 0;
+	icp-&gt;icmp_cksum = in_cksum(m, ip-&gt;ip_len - hlen);
+	m-&gt;m_data -= hlen;
+	m-&gt;m_len += hlen;
+	m-&gt;m_pkthdr.rcvif = NULL;
+	m-&gt;m_pkthdr.csum_data = 0;
+	m-&gt;m_pkthdr.csum_flags = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">ICMPPRINTFS</span>
+	<span class="enscript-keyword">if</span> (icmpprintfs) {
+		<span class="enscript-type">char</span> buf[MAX_IPv4_STR_LEN];
+		<span class="enscript-type">char</span> ipv4str[MAX_IPv4_STR_LEN];
+
+		printf(<span class="enscript-string">&quot;icmp_send dst %s src %s\n&quot;</span>,
+		       inet_ntop(AF_INET, &amp;ip-&gt;ip_dst, buf, <span class="enscript-keyword">sizeof</span>(buf)),
+		       inet_ntop(AF_INET, &amp;ip-&gt;ip_src, ipv4str, <span class="enscript-keyword">sizeof</span>(ipv4str)));
+	}
+#<span class="enscript-reference">endif</span>
+	bzero(&amp;ro, <span class="enscript-keyword">sizeof</span> ro);
+	(<span class="enscript-type">void</span>) ip_output(m, opts, &amp;ro, IP_OUTARGS, NULL, &amp;ipoa);
+	ROUTE_RELEASE(&amp;ro);
+}
+
+u_int32_t
+<span class="enscript-function-name">iptime</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> timeval atv;
+	u_int32_t t;
+
+	getmicrotime(&amp;atv);
+	t = (atv.tv_sec % (24*60*60)) * 1000 + atv.tv_usec / 1000;
+	<span class="enscript-keyword">return</span> (htonl(t));
+}
+
+#<span class="enscript-reference">if</span> 1
+<span class="enscript-comment">/*
+ * Return the next larger or smaller MTU plateau (table from RFC 1191)
+ * given current value MTU.  If DIR is less than zero, a larger plateau
+ * is returned; otherwise, a smaller value is returned.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ip_next_mtu</span>(<span class="enscript-type">int</span> mtu, <span class="enscript-type">int</span> dir)
+{
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> mtutab[] = {
+		65535, 32000, 17914, 8166, 4352, 2002, 1492, 1006, 508, 296,
+		68, 0
+	};
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; (<span class="enscript-keyword">sizeof</span> mtutab) / (<span class="enscript-keyword">sizeof</span> mtutab[0]); i++) {
+		<span class="enscript-keyword">if</span> (mtu &gt;= mtutab[i])
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (dir &lt; 0) {
+		<span class="enscript-keyword">if</span> (i == 0) {
+			<span class="enscript-keyword">return</span> 0;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span> mtutab[i - 1];
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (mtutab[i] == 0) {
+			<span class="enscript-keyword">return</span> 0;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span>(mtu &gt; mtutab[i]) {
+			<span class="enscript-keyword">return</span> mtutab[i];
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">return</span> mtutab[i + 1];
+		}
+	}
+}
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">ICMP_BANDLIM</span>
+
+<span class="enscript-comment">/*
+ * badport_bandlim() - check for ICMP bandwidth limit
+ *
+ *	Return 0 if it is ok to send an ICMP error response, -1 if we have
+ *	hit our bandwidth limit and it is not ok.  
+ *
+ *	If icmplim is &lt;= 0, the feature is disabled and 0 is returned.
+ *
+ *	For now we separate the TCP and UDP subsystems w/ different 'which'
+ *	values.  We may eventually remove this separation (and simplify the
+ *	code further).
+ *
+ *	Note that the printing of the error message is delayed so we can
+ *	properly print the icmp error rate that the system was trying to do
+ *	(i.e. 22000/100 pps, etc...).  This can cause long delays in printing
+ *	the 'final' error, but it doesn't make sense to solve the printing 
+ *	delay with more complex code.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">badport_bandlim</span>(<span class="enscript-type">int</span> which)
+{
+	<span class="enscript-type">static</span> uint64_t lticks[BANDLIM_MAX + 1];
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> lpackets[BANDLIM_MAX + 1];
+	uint64_t time = net_uptime();
+	<span class="enscript-type">int</span> secs;
+
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *bandlimittype[] = {
+		<span class="enscript-string">&quot;Limiting icmp unreach response&quot;</span>,
+		<span class="enscript-string">&quot;Limiting icmp ping response&quot;</span>,
+		<span class="enscript-string">&quot;Limiting icmp tstamp response&quot;</span>,
+		<span class="enscript-string">&quot;Limiting closed port RST response&quot;</span>,
+		<span class="enscript-string">&quot;Limiting open port RST response&quot;</span>
+		};
+
+	<span class="enscript-comment">/*
+	 * Return ok status if feature disabled or argument out of
+	 * ranage.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (icmplim &lt;= 0 || which &gt; BANDLIM_MAX || which &lt; 0)
+		<span class="enscript-keyword">return</span>(0);
+
+	secs = time - lticks[which];
+
+	<span class="enscript-comment">/*
+	 * reset stats when cumulative delta exceeds one second.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (secs &gt; 1) {
+		<span class="enscript-keyword">if</span> (lpackets[which] &gt; icmplim) {
+			printf(<span class="enscript-string">&quot;%s from %d to %d packets per second\n&quot;</span>,
+				bandlimittype[which],
+				lpackets[which],
+				icmplim
+			);
+		}
+		lticks[which] = time;
+		lpackets[which] = 0;
+	}
+
+	<span class="enscript-comment">/*
+	 * bump packet count
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (++lpackets[which] &gt; icmplim) {
+		<span class="enscript-keyword">return</span>(-1);
+	}
+	<span class="enscript-keyword">return</span>(0);
+}
+
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__APPLE__</span>
+
+<span class="enscript-comment">/*
+ * Non-privileged ICMP socket operations
+ * - send ICMP echo request
+ * - all ICMP
+ * - limited socket options
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_icmp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+
+<span class="enscript-type">extern</span> u_int32_t rip_sendspace;
+<span class="enscript-type">extern</span> u_int32_t rip_recvspace;
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> inpcbinfo ripcbinfo;
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">rip_abort</span>(<span class="enscript-type">struct</span> socket *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">rip_bind</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">struct</span> sockaddr *, <span class="enscript-type">struct</span> proc *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">rip_connect</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">struct</span> sockaddr *, <span class="enscript-type">struct</span> proc *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">rip_detach</span>(<span class="enscript-type">struct</span> socket *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">rip_disconnect</span>(<span class="enscript-type">struct</span> socket *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">rip_shutdown</span>(<span class="enscript-type">struct</span> socket *);
+
+__private_extern__ <span class="enscript-type">int</span> icmp_dgram_send(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> flags, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> sockaddr *nam, <span class="enscript-type">struct</span> mbuf *control, <span class="enscript-type">struct</span> proc *p);
+__private_extern__ <span class="enscript-type">int</span> icmp_dgram_attach(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> proto, <span class="enscript-type">struct</span> proc *p);
+__private_extern__ <span class="enscript-type">int</span> icmp_dgram_ctloutput(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockopt *sopt);
+
+__private_extern__ <span class="enscript-type">struct</span> pr_usrreqs icmp_dgram_usrreqs = {
+	.pru_abort =		rip_abort,
+	.pru_attach =		icmp_dgram_attach,
+	.pru_bind =		rip_bind,
+	.pru_connect =		rip_connect,
+	.pru_control =		in_control,
+	.pru_detach =		rip_detach,
+	.pru_disconnect =	rip_disconnect,
+	.pru_peeraddr =		in_getpeeraddr,
+	.pru_send =		icmp_dgram_send,
+	.pru_shutdown =		rip_shutdown,
+	.pru_sockaddr =		in_getsockaddr,
+	.pru_sosend =		sosend,
+	.pru_soreceive =	soreceive,
+};
+
+<span class="enscript-comment">/* Like rip_attach but without root privilege enforcement */</span>
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">icmp_dgram_attach</span>(<span class="enscript-type">struct</span> socket *so, __unused <span class="enscript-type">int</span> proto, <span class="enscript-type">struct</span> proc *p)
+{
+        <span class="enscript-type">struct</span> inpcb *inp;
+        <span class="enscript-type">int</span> error;
+
+        inp = sotoinpcb(so);
+        <span class="enscript-keyword">if</span> (inp)
+                panic(<span class="enscript-string">&quot;icmp_dgram_attach&quot;</span>);
+
+        error = soreserve(so, rip_sendspace, rip_recvspace);
+        <span class="enscript-keyword">if</span> (error)
+                <span class="enscript-keyword">return</span> error;
+        error = in_pcballoc(so, &amp;ripcbinfo, p);
+        <span class="enscript-keyword">if</span> (error)
+                <span class="enscript-keyword">return</span> error;
+        inp = (<span class="enscript-type">struct</span> inpcb *)so-&gt;so_pcb;       
+        inp-&gt;inp_vflag |= INP_IPV4;
+        inp-&gt;inp_ip_p = IPPROTO_ICMP;
+        inp-&gt;inp_ip_ttl = ip_defttl;
+        <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Raw IP socket option processing.
+ */</span>
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">icmp_dgram_ctloutput</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockopt *sopt)
+{
+	<span class="enscript-type">int</span>	error;
+
+	<span class="enscript-keyword">if</span> (sopt-&gt;sopt_level != IPPROTO_IP)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">switch</span> (sopt-&gt;sopt_name) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_OPTIONS</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_HDRINCL</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_TOS</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_TTL</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_RECVOPTS</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_RECVRETOPTS</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_RECVDSTADDR</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_RETOPTS</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MULTICAST_IF</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MULTICAST_IFINDEX</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MULTICAST_TTL</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MULTICAST_LOOP</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_ADD_MEMBERSHIP</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_DROP_MEMBERSHIP</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_MULTICAST_VIF</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_PORTRANGE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_RECVIF</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_IPSEC_POLICY</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_STRIPHDR</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_RECVTTL</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_BOUND_IF</span>:
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_FORCE_OUT_IFP</span>
+                <span class="enscript-keyword">case</span> <span class="enscript-reference">IP_FORCE_OUT_IFP</span>:
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IP_NO_IFT_CELLULAR</span>:
+			error = rip_ctloutput(so, sopt);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:
+			error = EINVAL;
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">icmp_dgram_send</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> flags, <span class="enscript-type">struct</span> mbuf *m,
+    <span class="enscript-type">struct</span> sockaddr *nam, <span class="enscript-type">struct</span> mbuf *control, <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">struct</span> ip *ip;
+	<span class="enscript-type">struct</span> inpcb *inp = sotoinpcb(so);
+	<span class="enscript-type">int</span> hlen;
+	<span class="enscript-type">struct</span> icmp *icp;
+        <span class="enscript-type">struct</span> in_ifaddr *ia = NULL;
+	<span class="enscript-type">int</span> icmplen;
+	<span class="enscript-type">int</span> error = EINVAL;
+
+	<span class="enscript-keyword">if</span> (inp == NULL
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NECP</span>
+		|| (necp_socket_should_use_flow_divert(inp))
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* NECP */</span>
+		) {
+		<span class="enscript-keyword">if</span> (inp != NULL)
+			error = EPROTOTYPE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ((inp-&gt;inp_flags &amp; INP_HDRINCL) != 0) {
+		<span class="enscript-comment">/* Expect 32-bit aligned data ptr on strict-align platforms */</span>
+		MBUF_STRICT_DATA_ALIGNMENT_CHECK_32(m);
+		<span class="enscript-comment">/*
+		 * This is not raw IP, we liberal only for fields TOS,
+		 * id and TTL.
+		 */</span>
+		ip = mtod(m, <span class="enscript-type">struct</span> ip *);
+
+		hlen = IP_VHL_HL(ip-&gt;ip_vhl) &lt;&lt; 2;
+		<span class="enscript-comment">/* Some sanity checks */</span>
+		<span class="enscript-keyword">if</span> (m-&gt;m_pkthdr.len &lt; hlen + ICMP_MINLEN) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		<span class="enscript-comment">/* Only IPv4 */</span>
+		<span class="enscript-keyword">if</span> (IP_VHL_V(ip-&gt;ip_vhl) != 4)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		<span class="enscript-keyword">if</span> (hlen &lt; 20 || hlen &gt; 40 || ip-&gt;ip_len != m-&gt;m_pkthdr.len)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		<span class="enscript-comment">/* Bogus fragments can tie up peer resources */</span>
+		<span class="enscript-keyword">if</span> ((ip-&gt;ip_off &amp; ~IP_DF) !=  0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		<span class="enscript-comment">/* Allow only ICMP even for user provided IP header */</span>
+		<span class="enscript-keyword">if</span> (ip-&gt;ip_p != IPPROTO_ICMP)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		<span class="enscript-comment">/*
+		 * To prevent spoofing, specified source address must
+		 * be one of ours.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ip-&gt;ip_src.s_addr != INADDR_ANY) {
+			socket_unlock(so, 0);
+			lck_rw_lock_shared(in_ifaddr_rwlock);
+			<span class="enscript-keyword">if</span> (TAILQ_EMPTY(&amp;in_ifaddrhead)) {
+				lck_rw_done(in_ifaddr_rwlock);
+				socket_lock(so, 0);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+			TAILQ_FOREACH(ia, INADDR_HASH(ip-&gt;ip_src.s_addr),
+			    ia_hash) {
+				IFA_LOCK(&amp;ia-&gt;ia_ifa);
+				<span class="enscript-keyword">if</span> (IA_SIN(ia)-&gt;sin_addr.s_addr ==
+				    ip-&gt;ip_src.s_addr) {
+					IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+					lck_rw_done(in_ifaddr_rwlock);
+					socket_lock(so, 0);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">ours</span>;
+				}
+				IFA_UNLOCK(&amp;ia-&gt;ia_ifa);
+			}
+			lck_rw_done(in_ifaddr_rwlock);
+			socket_lock(so, 0);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+<span class="enscript-reference">ours</span>:
+		<span class="enscript-comment">/* Do not trust we got a valid checksum */</span>
+		ip-&gt;ip_sum = 0;
+
+		icp = (<span class="enscript-type">struct</span> icmp *)(<span class="enscript-type">void</span> *)(((<span class="enscript-type">char</span> *)m-&gt;m_data) + hlen);
+		icmplen = m-&gt;m_pkthdr.len - hlen;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> ((icmplen = m-&gt;m_pkthdr.len) &lt; ICMP_MINLEN) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		icp = mtod(m, <span class="enscript-type">struct</span> icmp *);
+	}
+	<span class="enscript-comment">/*
+	 * Allow only to send request types with code 0
+	 */</span>
+	<span class="enscript-keyword">if</span> (icp-&gt;icmp_code != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	<span class="enscript-keyword">switch</span> (icp-&gt;icmp_type) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_ECHO</span>:
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_TSTAMP</span>:
+			<span class="enscript-keyword">if</span> (icmplen != 20)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">ICMP_MASKREQ</span>:
+			<span class="enscript-keyword">if</span> (icmplen != 12)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+	<span class="enscript-keyword">return</span> (rip_send(so, flags, m, nam, control, p));
+<span class="enscript-reference">bad</span>:
+	VERIFY(error != 0);
+
+	<span class="enscript-keyword">if</span> (m != NULL)
+		m_freem(m);
+	<span class="enscript-keyword">if</span> (control != NULL)
+		m_freem(control);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE__ */</span>
+</pre>
+<hr />
+</body></html>

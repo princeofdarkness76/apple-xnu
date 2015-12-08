@@ -1,0 +1,1426 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>audit_bsm_token.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">audit_bsm_token.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*-
+ * Copyright (c) 2004-2009 Apple Inc.
+ * Copyright (c) 2005 SPARTA, Inc.
+ * All rights reserved.
+ *
+ * This code was developed in part by Robert N. M. Watson, Senior Principal
+ * Scientist, SPARTA, Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1.  Redistributions of source code must retain the above copyright
+ *     notice, this list of conditions and the following disclaimer.
+ * 2.  Redistributions in binary form must reproduce the above copyright
+ *     notice, this list of conditions and the following disclaimer in the
+ *     documentation and/or other materials provided with the distribution.
+ * 3.  Neither the name of Apple Inc. (&quot;Apple&quot;) nor the names of
+ *     its contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS &quot;AS IS&quot; AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+ * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/un.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/event.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ucred.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ipc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit_record.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit_bsd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit_private.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_AUDIT</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">GET_TOKEN_AREA</span>(t, dptr, length) do {				\
+	t = malloc(<span class="enscript-keyword">sizeof</span>(token_t), M_AUDITBSM, M_WAITOK);		\
+	t-&gt;t_data = malloc(length, M_AUDITBSM, M_WAITOK | M_ZERO);	\
+	t-&gt;len = length;						\
+	dptr = t-&gt;t_data;						\
+} <span class="enscript-keyword">while</span> (0)
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * argument #              1 byte
+ * argument value          4 bytes/8 bytes (32-bit/64-bit value)
+ * text length             2 bytes
+ * text                    N bytes + 1 terminating NULL byte
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_arg32</span>(<span class="enscript-type">char</span> n, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *text, u_int32_t v)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	u_int16_t textlen;
+
+	textlen = strlen(text);
+	textlen += 1;
+
+	GET_TOKEN_AREA(t, dptr, 2 * <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int32_t) +
+	    <span class="enscript-keyword">sizeof</span>(u_int16_t) + textlen);
+
+	ADD_U_CHAR(dptr, AUT_ARG32);
+	ADD_U_CHAR(dptr, n);
+	ADD_U_INT32(dptr, v);
+	ADD_U_INT16(dptr, textlen);
+	ADD_STRING(dptr, text, textlen);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_arg64</span>(<span class="enscript-type">char</span> n, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *text, u_int64_t v)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	u_int16_t textlen;
+
+	textlen = strlen(text);
+	textlen += 1;
+
+	GET_TOKEN_AREA(t, dptr, 2 * <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int64_t) +
+	    <span class="enscript-keyword">sizeof</span>(u_int16_t) + textlen);
+
+	ADD_U_CHAR(dptr, AUT_ARG64);
+	ADD_U_CHAR(dptr, n);
+	ADD_U_INT64(dptr, v);
+	ADD_U_INT16(dptr, textlen);
+	ADD_STRING(dptr, text, textlen);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_arg</span>(<span class="enscript-type">char</span> n, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *text, u_int32_t v)
+{
+
+	<span class="enscript-keyword">return</span> (au_to_arg32(n, text, v));
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">_KERNEL</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">KERNEL</span>)
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * file access mode        4 bytes
+ * owner user ID           4 bytes
+ * owner group ID          4 bytes
+ * file system ID          4 bytes
+ * node ID                 8 bytes
+ * device                  4 bytes/8 bytes (32-bit/64-bit)
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_attr32</span>(<span class="enscript-type">struct</span> vnode_au_info *vni)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	u_int16_t pad0_16 = 0;
+	u_int32_t pad0_32 = 0;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 2 * <span class="enscript-keyword">sizeof</span>(u_int16_t) +
+	    3 * <span class="enscript-keyword">sizeof</span>(u_int32_t) + <span class="enscript-keyword">sizeof</span>(u_int64_t) + <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_ATTR32);
+
+	<span class="enscript-comment">/*
+	 * Darwin defines the size for the file mode
+	 * as 2 bytes; BSM defines 4 so pad with 0
+	 */</span>
+	ADD_U_INT16(dptr, pad0_16);
+	ADD_U_INT16(dptr, vni-&gt;vn_mode);
+
+	ADD_U_INT32(dptr, vni-&gt;vn_uid);
+	ADD_U_INT32(dptr, vni-&gt;vn_gid);
+	ADD_U_INT32(dptr, vni-&gt;vn_fsid);
+
+	<span class="enscript-comment">/*
+	 * Some systems use 32-bit file ID's, others use 64-bit file IDs.
+	 * Attempt to handle both, and let the compiler sort it out.  If we
+	 * could pick this out at compile-time, it would be better, so as to
+	 * avoid the else case below.
+	 */</span>
+	<span class="enscript-keyword">if</span> (<span class="enscript-keyword">sizeof</span>(vni-&gt;vn_fileid) == <span class="enscript-keyword">sizeof</span>(uint32_t)) {
+		ADD_U_INT32(dptr, pad0_32);
+		ADD_U_INT32(dptr, vni-&gt;vn_fileid);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (<span class="enscript-keyword">sizeof</span>(vni-&gt;vn_fileid) == <span class="enscript-keyword">sizeof</span>(uint64_t))
+		ADD_U_INT64(dptr, vni-&gt;vn_fileid);
+	<span class="enscript-keyword">else</span>
+		ADD_U_INT64(dptr, 0LL);
+
+	ADD_U_INT32(dptr, vni-&gt;vn_dev);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_attr64</span>(<span class="enscript-type">struct</span> vnode_au_info *vni)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	u_int16_t pad0_16 = 0;
+	u_int16_t pad0_32 = 0;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 2 * <span class="enscript-keyword">sizeof</span>(u_int16_t) +
+	    3 * <span class="enscript-keyword">sizeof</span>(u_int32_t) + <span class="enscript-keyword">sizeof</span>(u_int64_t) * 2);
+
+	ADD_U_CHAR(dptr, AUT_ATTR64);
+
+	<span class="enscript-comment">/*
+	 * Darwin defines the size for the file mode 
+	 * as 2 bytes; BSM defines 4 so pad with 0
+	 */</span>
+	ADD_U_INT16(dptr, pad0_16);
+	ADD_U_INT16(dptr, vni-&gt;vn_mode);
+
+	ADD_U_INT32(dptr, vni-&gt;vn_uid);
+	ADD_U_INT32(dptr, vni-&gt;vn_gid);
+	ADD_U_INT32(dptr, vni-&gt;vn_fsid);
+
+	<span class="enscript-comment">/*
+	 * Some systems use 32-bit file ID's, other's use 64-bit file IDs.
+	 * Attempt to handle both, and let the compiler sort it out.  If we
+	 * could pick this out at compile-time, it would be better, so as to
+	 * avoid the else case below.
+	 */</span>
+	<span class="enscript-keyword">if</span> (<span class="enscript-keyword">sizeof</span>(vni-&gt;vn_fileid) == <span class="enscript-keyword">sizeof</span>(uint32_t)) {
+		ADD_U_INT32(dptr, pad0_32);
+		ADD_U_INT32(dptr, vni-&gt;vn_fileid);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (<span class="enscript-keyword">sizeof</span>(vni-&gt;vn_fileid) == <span class="enscript-keyword">sizeof</span>(uint64_t))
+		ADD_U_INT64(dptr, vni-&gt;vn_fileid);
+	<span class="enscript-keyword">else</span>
+		ADD_U_INT64(dptr, 0LL);
+
+	ADD_U_INT64(dptr, vni-&gt;vn_dev);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_attr</span>(<span class="enscript-type">struct</span> vnode_au_info *vni)
+{
+
+	<span class="enscript-keyword">return</span> (au_to_attr32(vni));
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(_KERNEL) || defined(KERNEL) */</span>
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * how to print            1 byte
+ * basic unit              1 byte
+ * unit count              1 byte
+ * data items              (depends on basic unit)
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_data</span>(<span class="enscript-type">char</span> unit_print, <span class="enscript-type">char</span> unit_type, <span class="enscript-type">char</span> unit_count, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *p)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	size_t datasize, totdata;
+
+	<span class="enscript-comment">/* Determine the size of the basic unit. */</span>
+	<span class="enscript-keyword">switch</span> (unit_type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUR_BYTE</span>:
+	<span class="enscript-comment">/* case AUR_CHAR: */</span>
+		datasize = AUR_BYTE_SIZE;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUR_SHORT</span>:
+		datasize = AUR_SHORT_SIZE;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUR_INT32</span>:
+	<span class="enscript-comment">/* case AUR_INT: */</span>
+		datasize = AUR_INT32_SIZE;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUR_INT64</span>:
+		datasize = AUR_INT64_SIZE;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-comment">/* For unknown assume byte. */</span>
+		datasize = AUR_BYTE_SIZE;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	totdata = datasize * (size_t)unit_count;
+
+	GET_TOKEN_AREA(t, dptr, 4 * <span class="enscript-keyword">sizeof</span>(u_char) + totdata);
+
+	ADD_U_CHAR(dptr, AUT_DATA);
+	ADD_U_CHAR(dptr, unit_print);
+	ADD_U_CHAR(dptr, unit_type);
+	ADD_U_CHAR(dptr, unit_count);
+	ADD_MEM(dptr, p, totdata);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * status		   4 bytes
+ * return value            4 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_exit</span>(<span class="enscript-type">int</span> retval, <span class="enscript-type">int</span> err)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 2 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_EXIT);
+	ADD_U_INT32(dptr, err);
+	ADD_U_INT32(dptr, retval);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_groups</span>(<span class="enscript-type">int</span> *groups)
+{
+
+	<span class="enscript-keyword">return</span> (au_to_newgroups(AUDIT_MAX_GROUPS, (gid_t *)groups));
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * number groups           2 bytes
+ * group list              count * 4 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_newgroups</span>(u_int16_t n, gid_t *groups)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	<span class="enscript-type">int</span> i;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int16_t) +
+	    n * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_NEWGROUPS);
+	ADD_U_INT16(dptr, n);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; n; i++)
+		ADD_U_INT32(dptr, groups[i]);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * internet address        4 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_in_addr</span>(<span class="enscript-type">struct</span> in_addr *internet_addr)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(uint32_t));
+
+	ADD_U_CHAR(dptr, AUT_IN_ADDR);
+	ADD_MEM(dptr, &amp;internet_addr-&gt;s_addr, <span class="enscript-keyword">sizeof</span>(uint32_t));
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * address type/length     4 bytes
+ * address                16 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_in_addr_ex</span>(<span class="enscript-type">struct</span> in6_addr *internet_addr)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	u_int32_t type = AU_IPv6;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 5 * <span class="enscript-keyword">sizeof</span>(uint32_t));
+
+	ADD_U_CHAR(dptr, AUT_IN_ADDR_EX);
+	ADD_U_INT32(dptr, type);
+	ADD_MEM(dptr, internet_addr, 4 * <span class="enscript-keyword">sizeof</span>(uint32_t));
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * ip header		   20 bytes
+ *
+ * The IP header should be submitted in network byte order.
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_ip</span>(<span class="enscript-type">struct</span> ip *ip)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip));
+
+	ADD_U_CHAR(dptr, AUT_IP);
+	ADD_MEM(dptr, ip, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip));
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * object ID type          1 byte
+ * object ID               4 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_ipc</span>(<span class="enscript-type">char</span> type, <span class="enscript-type">int</span> id)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, 2 * <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_IPC);
+	ADD_U_CHAR(dptr, type);
+	ADD_U_INT32(dptr, id);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * owner user ID           4 bytes
+ * owner group ID          4 bytes
+ * creator user ID         4 bytes
+ * creator group ID        4 bytes
+ * access mode             4 bytes
+ * slot sequence #         4 bytes
+ * key                     4 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_ipc_perm</span>(<span class="enscript-type">struct</span> ipc_perm *perm)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	u_int16_t pad0 = 0;
+
+	<span class="enscript-keyword">if</span> (perm == NULL)
+		<span class="enscript-keyword">return</span> NULL;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 12 * <span class="enscript-keyword">sizeof</span>(u_int16_t) +
+	    <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_IPC_PERM);
+
+	<span class="enscript-comment">/*
+	 * Darwin defines the size for the file mode 
+	 * as 2 bytes; BSM defines 4 so pad with 0
+	 */</span>
+	ADD_U_INT32(dptr, perm-&gt;uid);
+	ADD_U_INT32(dptr, perm-&gt;gid);
+	ADD_U_INT32(dptr, perm-&gt;cuid);
+	ADD_U_INT32(dptr, perm-&gt;cgid);
+
+	ADD_U_INT16(dptr, pad0);
+	ADD_U_INT16(dptr, perm-&gt;mode);
+
+	ADD_U_INT16(dptr, pad0);
+	ADD_U_INT16(dptr, perm-&gt;_seq);
+
+	ADD_U_INT16(dptr, pad0);
+	ADD_U_INT16(dptr, perm-&gt;_key);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * port IP address         2 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_iport</span>(u_int16_t iport)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int16_t));
+
+	ADD_U_CHAR(dptr, AUT_IPORT);
+	ADD_U_INT16(dptr, iport);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * size                    2 bytes
+ * data                    size bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_opaque</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *data, uint16_t bytes)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int16_t) + bytes);
+
+	ADD_U_CHAR(dptr, AUT_OPAQUE);
+	ADD_U_INT16(dptr, bytes);
+	ADD_MEM(dptr, data, bytes);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * seconds of time         4 bytes
+ * milliseconds of time    4 bytes
+ * file name len           2 bytes
+ * file pathname           N bytes + 1 terminating NULL byte
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_file</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *file, <span class="enscript-type">struct</span> timeval tm)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	u_int16_t filelen;
+	u_int32_t timems;
+
+	filelen = strlen(file);
+	filelen += 1;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 2 * <span class="enscript-keyword">sizeof</span>(u_int32_t) +
+	    <span class="enscript-keyword">sizeof</span>(u_int16_t) + filelen);
+
+	timems = tm.tv_usec/1000;
+
+	ADD_U_CHAR(dptr, AUT_OTHER_FILE32);
+	ADD_U_INT32(dptr, tm.tv_sec);
+	ADD_U_INT32(dptr, timems);	<span class="enscript-comment">/* We need time in ms. */</span>
+	ADD_U_INT16(dptr, filelen);
+	ADD_STRING(dptr, file, filelen);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * text length             2 bytes
+ * text                    N bytes + 1 terminating NULL byte
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_text</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *text)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	u_int16_t textlen;
+
+	textlen = strlen(text);
+	textlen += 1;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int16_t) + textlen);
+
+	ADD_U_CHAR(dptr, AUT_TEXT);
+	ADD_U_INT16(dptr, textlen);
+	ADD_STRING(dptr, text, textlen);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * path length             2 bytes
+ * path                    N bytes + 1 terminating NULL byte
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_path</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *text)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	u_int16_t textlen;
+
+	textlen = strlen(text);
+	textlen += 1;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int16_t) + textlen);
+
+	ADD_U_CHAR(dptr, AUT_PATH);
+	ADD_U_INT16(dptr, textlen);
+	ADD_STRING(dptr, text, textlen);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * audit ID                4 bytes
+ * effective user ID       4 bytes
+ * effective group ID      4 bytes
+ * real user ID            4 bytes
+ * real group ID           4 bytes
+ * process ID              4 bytes
+ * session ID              4 bytes
+ * terminal ID
+ *   port ID               4 bytes/8 bytes (32-bit/64-bit value)
+ *   machine address       4 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_process32</span>(au_id_t auid, uid_t euid, gid_t egid, uid_t ruid, gid_t rgid,
+    pid_t pid, au_asid_t sid, au_tid_t *tid)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 9 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_PROCESS32);
+	ADD_U_INT32(dptr, auid);
+	ADD_U_INT32(dptr, euid);
+	ADD_U_INT32(dptr, egid);
+	ADD_U_INT32(dptr, ruid);
+	ADD_U_INT32(dptr, rgid);
+	ADD_U_INT32(dptr, pid);
+	ADD_U_INT32(dptr, sid);
+	ADD_U_INT32(dptr, tid-&gt;port);
+	ADD_MEM(dptr, &amp;tid-&gt;machine, <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_process64</span>(au_id_t auid, uid_t euid, gid_t egid, uid_t ruid, gid_t rgid,
+    pid_t pid, au_asid_t sid, au_tid_t *tid)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 8 * <span class="enscript-keyword">sizeof</span>(u_int32_t) +
+	    <span class="enscript-keyword">sizeof</span>(u_int64_t));
+
+	ADD_U_CHAR(dptr, AUT_PROCESS64);
+	ADD_U_INT32(dptr, auid);
+	ADD_U_INT32(dptr, euid);
+	ADD_U_INT32(dptr, egid);
+	ADD_U_INT32(dptr, ruid);
+	ADD_U_INT32(dptr, rgid);
+	ADD_U_INT32(dptr, pid);
+	ADD_U_INT32(dptr, sid);
+	ADD_U_INT64(dptr, tid-&gt;port);
+	ADD_MEM(dptr, &amp;tid-&gt;machine, <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_process</span>(au_id_t auid, uid_t euid, gid_t egid, uid_t ruid, gid_t rgid,
+    pid_t pid, au_asid_t sid, au_tid_t *tid)
+{
+
+	<span class="enscript-keyword">return</span> (au_to_process32(auid, euid, egid, ruid, rgid, pid, sid,
+	    tid));
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * audit ID                4 bytes
+ * effective user ID       4 bytes
+ * effective group ID      4 bytes
+ * real user ID            4 bytes
+ * real group ID           4 bytes
+ * process ID              4 bytes
+ * session ID              4 bytes
+ * terminal ID
+ *   port ID               4 bytes/8 bytes (32-bit/64-bit value)
+ *   address type-len      4 bytes
+ *   machine address    4/16 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_process32_ex</span>(au_id_t auid, uid_t euid, gid_t egid, uid_t ruid,
+    gid_t rgid, pid_t pid, au_asid_t sid, au_tid_addr_t *tid)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	KASSERT((tid-&gt;at_type == AU_IPv4) || (tid-&gt;at_type == AU_IPv6),
+	    (<span class="enscript-string">&quot;au_to_process32_ex: type %u&quot;</span>, (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)tid-&gt;at_type));
+	<span class="enscript-keyword">if</span> (tid-&gt;at_type == AU_IPv6)
+		GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 13 *
+		    <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	<span class="enscript-keyword">else</span>
+		GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 10 *
+		    <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_PROCESS32_EX);
+	ADD_U_INT32(dptr, auid);
+	ADD_U_INT32(dptr, euid);
+	ADD_U_INT32(dptr, egid);
+	ADD_U_INT32(dptr, ruid);
+	ADD_U_INT32(dptr, rgid);
+	ADD_U_INT32(dptr, pid);
+	ADD_U_INT32(dptr, sid);
+	ADD_U_INT32(dptr, tid-&gt;at_port);
+	ADD_U_INT32(dptr, tid-&gt;at_type);
+	<span class="enscript-keyword">if</span> (tid-&gt;at_type == AU_IPv6)
+		ADD_MEM(dptr, &amp;tid-&gt;at_addr[0], 4 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	<span class="enscript-keyword">else</span>
+		ADD_MEM(dptr, &amp;tid-&gt;at_addr[0], <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_process64_ex</span>(au_id_t auid, uid_t euid, gid_t egid, uid_t ruid,
+    gid_t rgid, pid_t pid, au_asid_t sid, au_tid_addr_t *tid)
+{
+	token_t *t = NULL;
+	u_char *dptr = NULL;
+
+	<span class="enscript-keyword">if</span> (tid-&gt;at_type == AU_IPv4)
+		GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) +
+		    7 * <span class="enscript-keyword">sizeof</span>(u_int32_t) + <span class="enscript-keyword">sizeof</span>(u_int64_t) +
+		    2 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (tid-&gt;at_type == AU_IPv6)
+		GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) +
+		    7 * <span class="enscript-keyword">sizeof</span>(u_int32_t) + <span class="enscript-keyword">sizeof</span>(u_int64_t) +
+		    5 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	<span class="enscript-keyword">else</span>
+		panic(<span class="enscript-string">&quot;au_to_process64_ex: invalidate at_type (%d)&quot;</span>,
+		    tid-&gt;at_type);
+
+	ADD_U_CHAR(dptr, AUT_PROCESS64_EX);
+	ADD_U_INT32(dptr, auid);
+	ADD_U_INT32(dptr, euid);
+	ADD_U_INT32(dptr, egid);
+	ADD_U_INT32(dptr, ruid);
+	ADD_U_INT32(dptr, rgid);
+	ADD_U_INT32(dptr, pid);
+	ADD_U_INT32(dptr, sid);
+	ADD_U_INT64(dptr, tid-&gt;at_port);
+	ADD_U_INT32(dptr, tid-&gt;at_type);
+	ADD_MEM(dptr, &amp;tid-&gt;at_addr[0], <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	<span class="enscript-keyword">if</span> (tid-&gt;at_type == AU_IPv6) {
+		ADD_MEM(dptr, &amp;tid-&gt;at_addr[1], <span class="enscript-keyword">sizeof</span>(u_int32_t));
+		ADD_MEM(dptr, &amp;tid-&gt;at_addr[2], <span class="enscript-keyword">sizeof</span>(u_int32_t));
+		ADD_MEM(dptr, &amp;tid-&gt;at_addr[3], <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	}
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_process_ex</span>(au_id_t auid, uid_t euid, gid_t egid, uid_t ruid,
+    gid_t rgid, pid_t pid, au_asid_t sid, au_tid_addr_t *tid)
+{
+
+	<span class="enscript-keyword">return</span> (au_to_process32_ex(auid, euid, egid, ruid, rgid, pid, sid,
+	    tid));
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * error status            1 byte
+ * return value            4 bytes/8 bytes (32-bit/64-bit value)
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_return32</span>(<span class="enscript-type">char</span> status, u_int32_t ret)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, 2 * <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_RETURN32);
+	ADD_U_CHAR(dptr, status);
+	ADD_U_INT32(dptr, ret);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_return64</span>(<span class="enscript-type">char</span> status, u_int64_t ret)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, 2 * <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int64_t));
+
+	ADD_U_CHAR(dptr, AUT_RETURN64);
+	ADD_U_CHAR(dptr, status);
+	ADD_U_INT64(dptr, ret);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_return</span>(<span class="enscript-type">char</span> status, u_int32_t ret)
+{
+
+	<span class="enscript-keyword">return</span> (au_to_return32(status, ret));
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * sequence number         4 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_seq</span>(<span class="enscript-type">long</span> audit_count)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_SEQ);
+	ADD_U_INT32(dptr, (u_int32_t) audit_count);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID		1 byte
+ * socket domain	2 bytes
+ * socket type		2 bytes
+ * address type		2 bytes
+ * local port		2 bytes
+ * local address	4 bytes/16 bytes (IPv4/IPv6 address)
+ * remote port		2 bytes
+ * remote address	4 bytes/16 bytes (IPv4/IPv6 address)
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_socket_ex</span>(u_short so_domain, u_short so_type,
+    <span class="enscript-type">struct</span> sockaddr *sa_local, <span class="enscript-type">struct</span> sockaddr *sa_remote)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	<span class="enscript-type">struct</span> sockaddr_in *sin;
+	<span class="enscript-type">struct</span> sockaddr_in6 *sin6;
+
+	<span class="enscript-keyword">if</span> (so_domain == AF_INET)
+		GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) +
+		    5 * <span class="enscript-keyword">sizeof</span>(u_int16_t) + 2 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (so_domain == AF_INET6)
+		GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) +
+		    5 * <span class="enscript-keyword">sizeof</span>(u_int16_t) + 8 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span> (NULL);
+
+	ADD_U_CHAR(dptr, AUT_SOCKET_EX);
+	ADD_U_INT16(dptr, au_domain_to_bsm(so_domain));
+	ADD_U_INT16(dptr, au_socket_type_to_bsm(so_type));
+	<span class="enscript-keyword">if</span> (so_domain == AF_INET) {
+		ADD_U_INT16(dptr, AU_IPv4);
+		sin = (<span class="enscript-type">struct</span> sockaddr_in *)sa_local;
+		ADD_MEM(dptr,  &amp;sin-&gt;sin_port, <span class="enscript-keyword">sizeof</span>(uint16_t));
+		ADD_MEM(dptr, &amp;sin-&gt;sin_addr.s_addr, <span class="enscript-keyword">sizeof</span>(uint32_t));
+		sin = (<span class="enscript-type">struct</span> sockaddr_in *)sa_remote;
+		ADD_MEM(dptr, &amp;sin-&gt;sin_port, <span class="enscript-keyword">sizeof</span>(uint16_t));
+		ADD_MEM(dptr, &amp;sin-&gt;sin_addr.s_addr, <span class="enscript-keyword">sizeof</span>(uint32_t));
+	} <span class="enscript-keyword">else</span> <span class="enscript-comment">/* if (so_domain == AF_INET6) */</span> {
+		ADD_U_INT16(dptr, AU_IPv6);
+		sin6 = (<span class="enscript-type">struct</span> sockaddr_in6 *)sa_local;
+		ADD_MEM(dptr, &amp;sin6-&gt;sin6_port, <span class="enscript-keyword">sizeof</span>(uint16_t));
+		ADD_MEM(dptr, &amp;sin6-&gt;sin6_addr, 4 * <span class="enscript-keyword">sizeof</span>(uint32_t));
+		sin6 = (<span class="enscript-type">struct</span> sockaddr_in6 *)sa_remote;
+		ADD_MEM(dptr, &amp;sin6-&gt;sin6_port, <span class="enscript-keyword">sizeof</span>(uint16_t));
+		ADD_MEM(dptr, &amp;sin6-&gt;sin6_addr, 4 * <span class="enscript-keyword">sizeof</span>(uint32_t));
+	}
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * socket family           2 bytes
+ * path                    (up to) 104 bytes + NULL
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_sock_unix</span>(<span class="enscript-type">struct</span> sockaddr_un *so)
+{
+	token_t *t;
+	u_char *dptr;
+	size_t slen;
+
+	<span class="enscript-comment">/*
+	 * Please note that sun_len may not be correctly set and sun_path may
+	 * not be NULL terminated.
+	 */</span>
+	<span class="enscript-keyword">if</span> (so-&gt;sun_len &gt;= offsetof(<span class="enscript-type">struct</span> sockaddr_un, sun_path)) 
+		slen = min(so-&gt;sun_len - offsetof(<span class="enscript-type">struct</span> sockaddr_un, sun_path),
+		    strnlen(so-&gt;sun_path, <span class="enscript-keyword">sizeof</span>(so-&gt;sun_path)));
+	<span class="enscript-keyword">else</span>
+		slen = strnlen(so-&gt;sun_path, <span class="enscript-keyword">sizeof</span>(so-&gt;sun_path));
+
+	GET_TOKEN_AREA(t, dptr, 3 * <span class="enscript-keyword">sizeof</span>(u_char) + slen + 1);
+
+	ADD_U_CHAR(dptr, AUT_SOCKUNIX);
+	<span class="enscript-comment">/* BSM token has two bytes for family */</span>
+	ADD_U_CHAR(dptr, 0);
+	ADD_U_CHAR(dptr, so-&gt;sun_family);
+	<span class="enscript-keyword">if</span> (slen)
+		ADD_MEM(dptr, so-&gt;sun_path, slen);
+	ADD_U_CHAR(dptr, <span class="enscript-string">'\0'</span>); <span class="enscript-comment">/* make the path a null-terminated string */</span>
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * socket family           2 bytes
+ * local port              2 bytes
+ * socket address          4 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_sock_inet32</span>(<span class="enscript-type">struct</span> sockaddr_in *so)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 2 * <span class="enscript-keyword">sizeof</span>(uint16_t) +
+	    <span class="enscript-keyword">sizeof</span>(uint32_t));
+
+	ADD_U_CHAR(dptr, AUT_SOCKINET32);
+	<span class="enscript-comment">/*
+	 * Convert sin_family to the BSM value.  Assume that both the port and
+	 * the address in the sockaddr_in are already in network byte order,
+	 * but family is in local byte order.
+	 */</span>
+	ADD_U_INT16(dptr, au_domain_to_bsm(so-&gt;sin_family));
+	ADD_MEM(dptr, &amp;so-&gt;sin_port, <span class="enscript-keyword">sizeof</span>(uint16_t));
+	ADD_MEM(dptr, &amp;so-&gt;sin_addr.s_addr, <span class="enscript-keyword">sizeof</span>(uint32_t));
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * socket family           2 bytes
+ * local port              2 bytes
+ * socket address          16 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_sock_inet128</span>(<span class="enscript-type">struct</span> sockaddr_in6 *so)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 2 * <span class="enscript-keyword">sizeof</span>(u_int16_t) +
+	    4 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_SOCKINET128);
+	ADD_U_INT16(dptr, au_domain_to_bsm(so-&gt;sin6_family));
+
+	ADD_U_INT16(dptr, so-&gt;sin6_port);
+	ADD_MEM(dptr, &amp;so-&gt;sin6_addr, 4 * <span class="enscript-keyword">sizeof</span>(uint32_t));
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_sock_inet</span>(<span class="enscript-type">struct</span> sockaddr_in *so)
+{
+
+	<span class="enscript-keyword">return</span> (au_to_sock_inet32(so));
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * audit ID                4 bytes
+ * effective user ID       4 bytes
+ * effective group ID      4 bytes
+ * real user ID            4 bytes
+ * real group ID           4 bytes
+ * process ID              4 bytes
+ * session ID              4 bytes
+ * terminal ID
+ *   port ID               4 bytes/8 bytes (32-bit/64-bit value)
+ *   machine address       4 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_subject32</span>(au_id_t auid, uid_t euid, gid_t egid, uid_t ruid, gid_t rgid,
+    pid_t pid, au_asid_t sid, au_tid_t *tid)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 9 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_SUBJECT32);
+	ADD_U_INT32(dptr, auid);
+	ADD_U_INT32(dptr, euid);
+	ADD_U_INT32(dptr, egid);
+	ADD_U_INT32(dptr, ruid);
+	ADD_U_INT32(dptr, rgid);
+	ADD_U_INT32(dptr, pid);
+	ADD_U_INT32(dptr, sid);
+	ADD_U_INT32(dptr, tid-&gt;port);
+	ADD_MEM(dptr, &amp;tid-&gt;machine, <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_subject64</span>(au_id_t auid, uid_t euid, gid_t egid, uid_t ruid, gid_t rgid,
+    pid_t pid, au_asid_t sid, au_tid_t *tid)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 7 * <span class="enscript-keyword">sizeof</span>(u_int32_t) +
+	    <span class="enscript-keyword">sizeof</span>(u_int64_t) + <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_SUBJECT64);
+	ADD_U_INT32(dptr, auid);
+	ADD_U_INT32(dptr, euid);
+	ADD_U_INT32(dptr, egid);
+	ADD_U_INT32(dptr, ruid);
+	ADD_U_INT32(dptr, rgid);
+	ADD_U_INT32(dptr, pid);
+	ADD_U_INT32(dptr, sid);
+	ADD_U_INT64(dptr, tid-&gt;port);
+	ADD_MEM(dptr, &amp;tid-&gt;machine, <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_subject</span>(au_id_t auid, uid_t euid, gid_t egid, uid_t ruid, gid_t rgid,
+    pid_t pid, au_asid_t sid, au_tid_t *tid)
+{
+
+	<span class="enscript-keyword">return</span> (au_to_subject32(auid, euid, egid, ruid, rgid, pid, sid,
+	    tid));
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * audit ID                4 bytes
+ * effective user ID       4 bytes
+ * effective group ID      4 bytes
+ * real user ID            4 bytes
+ * real group ID           4 bytes
+ * process ID              4 bytes
+ * session ID              4 bytes
+ * terminal ID
+ *   port ID               4 bytes/8 bytes (32-bit/64-bit value)
+ *   address type/length   4 bytes
+ *   machine address    4/16 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_subject32_ex</span>(au_id_t auid, uid_t euid, gid_t egid, uid_t ruid,
+    gid_t rgid, pid_t pid, au_asid_t sid, au_tid_addr_t *tid)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+
+	KASSERT((tid-&gt;at_type == AU_IPv4) || (tid-&gt;at_type == AU_IPv6),
+	    (<span class="enscript-string">&quot;au_to_subject32_ex: type %u&quot;</span>, (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)tid-&gt;at_type));
+	<span class="enscript-keyword">if</span> (tid-&gt;at_type == AU_IPv6)
+		GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 13 *
+		    <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	<span class="enscript-keyword">else</span>
+		GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + 10 *
+		    <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_SUBJECT32_EX);
+	ADD_U_INT32(dptr, auid);
+	ADD_U_INT32(dptr, euid);
+	ADD_U_INT32(dptr, egid);
+	ADD_U_INT32(dptr, ruid);
+	ADD_U_INT32(dptr, rgid);
+	ADD_U_INT32(dptr, pid);
+	ADD_U_INT32(dptr, sid);
+	ADD_U_INT32(dptr, tid-&gt;at_port);
+	ADD_U_INT32(dptr, tid-&gt;at_type);
+	<span class="enscript-keyword">if</span> (tid-&gt;at_type == AU_IPv6)
+		ADD_MEM(dptr, &amp;tid-&gt;at_addr[0], 4 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	<span class="enscript-keyword">else</span>
+		ADD_MEM(dptr, &amp;tid-&gt;at_addr[0], <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_subject64_ex</span>(au_id_t auid, uid_t euid, gid_t egid, uid_t ruid,
+    gid_t rgid, pid_t pid, au_asid_t sid, au_tid_addr_t *tid)
+{
+	token_t *t = NULL;
+	u_char *dptr = NULL;
+
+	<span class="enscript-keyword">if</span> (tid-&gt;at_type == AU_IPv4)
+		GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) +
+		    7 * <span class="enscript-keyword">sizeof</span>(u_int32_t) + <span class="enscript-keyword">sizeof</span>(u_int64_t) +
+		    2 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (tid-&gt;at_type == AU_IPv6)
+		GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) +
+		    7 * <span class="enscript-keyword">sizeof</span>(u_int32_t) + <span class="enscript-keyword">sizeof</span>(u_int64_t) +
+		    5 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	<span class="enscript-keyword">else</span>
+		panic(<span class="enscript-string">&quot;au_to_subject64_ex: invalid at_type (%d)&quot;</span>,
+		    tid-&gt;at_type);
+
+	ADD_U_CHAR(dptr, AUT_SUBJECT64_EX);
+	ADD_U_INT32(dptr, auid);
+	ADD_U_INT32(dptr, euid);
+	ADD_U_INT32(dptr, egid);
+	ADD_U_INT32(dptr, ruid);
+	ADD_U_INT32(dptr, rgid);
+	ADD_U_INT32(dptr, pid);
+	ADD_U_INT32(dptr, sid);
+	ADD_U_INT64(dptr, tid-&gt;at_port);
+	ADD_U_INT32(dptr, tid-&gt;at_type);
+	<span class="enscript-keyword">if</span> (tid-&gt;at_type == AU_IPv6)
+		ADD_MEM(dptr, &amp;tid-&gt;at_addr[0], 4 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	<span class="enscript-keyword">else</span>
+		ADD_MEM(dptr, &amp;tid-&gt;at_addr[0], <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_subject_ex</span>(au_id_t auid, uid_t euid, gid_t egid, uid_t ruid,
+    gid_t rgid, pid_t pid, au_asid_t sid, au_tid_addr_t *tid)
+{
+
+	<span class="enscript-keyword">return</span> (au_to_subject32_ex(auid, euid, egid, ruid, rgid, pid, sid,
+	    tid));
+}
+
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">_KERNEL</span>) &amp;&amp; !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">KERNEL</span>) &amp;&amp; <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">HAVE_AUDIT_SYSCALLS</span>)
+<span class="enscript-comment">/*
+ * Collects audit information for the current process
+ * and creates a subject token from it
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_me</span>(<span class="enscript-type">void</span>)
+{
+	auditinfo_t auinfo;
+
+	<span class="enscript-keyword">if</span> (getaudit(&amp;auinfo) != 0)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	<span class="enscript-keyword">return</span> (au_to_subject32(auinfo.ai_auid, geteuid(), getegid(),
+	    getuid(), getgid(), getpid(), auinfo.ai_asid, &amp;auinfo.ai_termid));
+}
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">_KERNEL</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">KERNEL</span>)
+<span class="enscript-type">static</span> token_t *
+<span class="enscript-function-name">au_to_exec_strings</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *strs, <span class="enscript-type">int</span> count, u_char type)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	u_int32_t totlen;
+	<span class="enscript-type">int</span> ctr;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *p;
+
+	totlen = 0;
+	ctr = count;
+	p = strs;
+	<span class="enscript-keyword">while</span> (ctr-- &gt; 0) {
+		totlen += strlen(p) + 1;
+		p = strs + totlen;
+	}
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int32_t) + totlen);
+	ADD_U_CHAR(dptr, type);
+	ADD_U_INT32(dptr, count);
+	ADD_STRING(dptr, strs, totlen);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID         1 byte
+ * count            4 bytes
+ * text             count null-terminated strings
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_exec_args</span>(<span class="enscript-type">char</span> *args, <span class="enscript-type">int</span> argc)
+{
+
+	<span class="enscript-keyword">return</span> (au_to_exec_strings(args, argc, AUT_EXEC_ARGS));
+}
+
+<span class="enscript-comment">/*
+ * token ID         1 byte
+ * count            4 bytes
+ * text             count null-terminated strings
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_exec_env</span>(<span class="enscript-type">char</span> *envs, <span class="enscript-type">int</span> envc)
+{
+
+	<span class="enscript-keyword">return</span> (au_to_exec_strings(envs, envc, AUT_EXEC_ENV));
+}
+#<span class="enscript-reference">else</span>
+<span class="enscript-comment">/*
+ * token ID        1 byte
+ * count           4 bytes
+ * text            count null-terminated strings
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_exec_args</span>(<span class="enscript-type">char</span> **argv)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *nextarg;
+	<span class="enscript-type">int</span> i, count = 0;
+	size_t totlen = 0;
+
+	nextarg = *argv;
+
+	<span class="enscript-keyword">while</span> (nextarg != NULL) {
+		<span class="enscript-type">int</span> nextlen;
+
+		nextlen = strlen(nextarg);
+		totlen += nextlen + 1;
+		count++;
+		nextarg = *(argv + count);
+	}
+
+	totlen += count * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">char</span>);	<span class="enscript-comment">/* nul terminations. */</span>
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int32_t) + totlen);
+
+	ADD_U_CHAR(dptr, AUT_EXEC_ARGS);
+	ADD_U_INT32(dptr, count);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		nextarg = *(argv + i);
+		ADD_MEM(dptr, nextarg, strlen(nextarg) + 1);
+	}
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * zonename length         2 bytes
+ * zonename                N bytes + 1 terminating NULL byte
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_zonename</span>(<span class="enscript-type">char</span> *zonename)
+{
+	u_char *dptr = NULL;
+	u_int16_t textlen;
+	token_t *t;
+
+	textlen = strlen(zonename);
+	textlen += 1;
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int16_t) + textlen);
+	ADD_U_CHAR(dptr, AUT_ZONENAME);
+	ADD_U_INT16(dptr, textlen);
+	ADD_STRING(dptr, zonename, textlen);
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID               1 byte
+ * count                  4 bytes
+ * text                   count null-terminated strings
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_exec_env</span>(<span class="enscript-type">char</span> **envp)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	<span class="enscript-type">int</span> i, count = 0;
+	size_t totlen = 0;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *nextenv;
+
+	nextenv = *envp;
+
+	<span class="enscript-keyword">while</span> (nextenv != NULL) {
+		<span class="enscript-type">int</span> nextlen;
+
+		nextlen = strlen(nextenv);
+		totlen += nextlen + 1;
+		count++;
+		nextenv = *(envp + count);
+	}
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int32_t) + totlen);
+
+	ADD_U_CHAR(dptr, AUT_EXEC_ENV);
+	ADD_U_INT32(dptr, count);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; count; i++) {
+		nextenv = *(envp + i);
+		ADD_MEM(dptr, nextenv, strlen(nextenv) + 1);
+	}
+
+	<span class="enscript-keyword">return</span> (t);
+}
+#<span class="enscript-reference">endif</span>  <span class="enscript-comment">/* !(defined(_KERNEL) || defined(KERNEL)) */</span>
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * record byte count       4 bytes
+ * version #               1 byte
+ * event type              2 bytes
+ * event modifier          2 bytes
+ * address type/length     4 bytes
+ * machine address         4 bytes/16 bytes (IPv4/IPv6 address)
+ * seconds of time         4 bytes/8 bytes  (32/64-bits)
+ * milliseconds of time    4 bytes/8 bytes  (32/64-bits) 
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_header32_ex_tm</span>(<span class="enscript-type">int</span> rec_size, au_event_t e_type, au_emod_t e_mod,
+    <span class="enscript-type">struct</span> timeval tm, <span class="enscript-type">struct</span> auditinfo_addr *aia)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	u_int32_t timems;
+	<span class="enscript-type">struct</span> au_tid_addr *tid;
+
+	tid = &amp;aia-&gt;ai_termid;
+	KASSERT(tid-&gt;at_type == AU_IPv4 || tid-&gt;at_type == AU_IPv6,
+	    (<span class="enscript-string">&quot;au_to_header32_ex_tm: invalid address family&quot;</span>));
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int32_t) +
+	    <span class="enscript-keyword">sizeof</span>(u_char) + 2 * <span class="enscript-keyword">sizeof</span>(u_int16_t) + 3 * <span class="enscript-keyword">sizeof</span>(u_int32_t) +
+	    tid-&gt;at_type);
+
+	ADD_U_CHAR(dptr, AUT_HEADER32_EX);
+	ADD_U_INT32(dptr, rec_size);
+	ADD_U_CHAR(dptr, AUDIT_HEADER_VERSION_OPENBSM);
+	ADD_U_INT16(dptr, e_type);
+	ADD_U_INT16(dptr, e_mod);
+	ADD_U_INT32(dptr, tid-&gt;at_type);
+	<span class="enscript-keyword">if</span> (tid-&gt;at_type == AU_IPv6)
+		ADD_MEM(dptr, &amp;tid-&gt;at_addr[0], 4 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	<span class="enscript-keyword">else</span>
+		ADD_MEM(dptr, &amp;tid-&gt;at_addr[0], <span class="enscript-keyword">sizeof</span>(u_int32_t));
+	timems = tm.tv_usec / 1000;
+	<span class="enscript-comment">/* Add the timestamp */</span>
+	ADD_U_INT32(dptr, tm.tv_sec);
+	ADD_U_INT32(dptr, timems);	<span class="enscript-comment">/* We need time in ms. */</span>
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * record byte count       4 bytes
+ * version #               1 byte    [2]
+ * event type              2 bytes
+ * event modifier          2 bytes
+ * seconds of time         4 bytes/8 bytes (32-bit/64-bit value)
+ * milliseconds of time    4 bytes/8 bytes (32-bit/64-bit value)
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_header32_tm</span>(<span class="enscript-type">int</span> rec_size, au_event_t e_type, au_emod_t e_mod,
+    <span class="enscript-type">struct</span> timeval tm)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	u_int32_t timems;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int32_t) +
+	    <span class="enscript-keyword">sizeof</span>(u_char) + 2 * <span class="enscript-keyword">sizeof</span>(u_int16_t) + 2 * <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_HEADER32);
+	ADD_U_INT32(dptr, rec_size);
+	ADD_U_CHAR(dptr, AUDIT_HEADER_VERSION_OPENBSM);
+	ADD_U_INT16(dptr, e_type);
+	ADD_U_INT16(dptr, e_mod);
+
+	timems = tm.tv_usec/1000;
+	<span class="enscript-comment">/* Add the timestamp */</span>
+	ADD_U_INT32(dptr, tm.tv_sec);
+	ADD_U_INT32(dptr, timems);	<span class="enscript-comment">/* We need time in ms. */</span>
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+token_t *
+<span class="enscript-function-name">au_to_header64_tm</span>(<span class="enscript-type">int</span> rec_size, au_event_t e_type, au_emod_t e_mod,
+    <span class="enscript-type">struct</span> timeval tm)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	u_int32_t timems;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int32_t) +
+	    <span class="enscript-keyword">sizeof</span>(u_char) + 2 * <span class="enscript-keyword">sizeof</span>(u_int16_t) + 2 * <span class="enscript-keyword">sizeof</span>(u_int64_t));
+
+	ADD_U_CHAR(dptr, AUT_HEADER64);
+	ADD_U_INT32(dptr, rec_size);
+	ADD_U_CHAR(dptr, AUDIT_HEADER_VERSION_OPENBSM);
+	ADD_U_INT16(dptr, e_type);
+	ADD_U_INT16(dptr, e_mod);
+
+	timems = tm.tv_usec/1000;
+	<span class="enscript-comment">/* Add the timestamp */</span>
+	ADD_U_INT64(dptr, tm.tv_sec);
+	ADD_U_INT64(dptr, timems);	<span class="enscript-comment">/* We need time in ms. */</span>
+
+	<span class="enscript-keyword">return</span> (t);
+}
+
+<span class="enscript-comment">/*
+ * token ID                1 byte
+ * trailer magic number    2 bytes
+ * record byte count       4 bytes
+ */</span>
+token_t *
+<span class="enscript-function-name">au_to_trailer</span>(<span class="enscript-type">int</span> rec_size)
+{
+	token_t *t;
+	u_char *dptr = NULL;
+	u_int16_t magic = AUT_TRAILER_MAGIC;
+
+	GET_TOKEN_AREA(t, dptr, <span class="enscript-keyword">sizeof</span>(u_char) + <span class="enscript-keyword">sizeof</span>(u_int16_t) +
+	    <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+	ADD_U_CHAR(dptr, AUT_TRAILER);
+	ADD_U_INT16(dptr, magic);
+	ADD_U_INT32(dptr, rec_size);
+
+	<span class="enscript-keyword">return</span> (t);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_AUDIT */</span>
+</pre>
+<hr />
+</body></html>

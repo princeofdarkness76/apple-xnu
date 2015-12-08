@@ -1,0 +1,603 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>fifo_vnops.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">fifo_vnops.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1990, 1993, 1995
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)fifo_vnops.c	8.4 (Berkeley) 8/10/94
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/fifofs/fifo.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vfs/vfs_support.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">VOPFUNC</span> int (*)(void *)
+
+<span class="enscript-function-name">int</span> (**fifo_vnodeop_p)(<span class="enscript-type">void</span> *);
+<span class="enscript-type">struct</span> vnodeopv_entry_desc fifo_vnodeop_entries[] = {
+	{ &amp;vnop_default_desc, (VOPFUNC)vn_default_error },
+	{ &amp;vnop_lookup_desc, (VOPFUNC)fifo_lookup },		<span class="enscript-comment">/* lookup */</span>
+	{ &amp;vnop_create_desc, (VOPFUNC)err_create },		<span class="enscript-comment">/* create */</span>
+	{ &amp;vnop_mknod_desc, (VOPFUNC)err_mknod },		<span class="enscript-comment">/* mknod */</span>
+	{ &amp;vnop_open_desc, (VOPFUNC)fifo_open },			<span class="enscript-comment">/* open */</span>
+	{ &amp;vnop_close_desc, (VOPFUNC)fifo_close },		<span class="enscript-comment">/* close */</span>
+	{ &amp;vnop_access_desc, (VOPFUNC)fifo_access },		<span class="enscript-comment">/* access */</span>
+	{ &amp;vnop_getattr_desc, (VOPFUNC)fifo_getattr },		<span class="enscript-comment">/* getattr */</span>
+	{ &amp;vnop_setattr_desc, (VOPFUNC)fifo_setattr },		<span class="enscript-comment">/* setattr */</span>
+	{ &amp;vnop_read_desc, (VOPFUNC)fifo_read },			<span class="enscript-comment">/* read */</span>
+	{ &amp;vnop_write_desc, (VOPFUNC)fifo_write },		<span class="enscript-comment">/* write */</span>
+	{ &amp;vnop_ioctl_desc, (VOPFUNC)fifo_ioctl },		<span class="enscript-comment">/* ioctl */</span>
+	{ &amp;vnop_select_desc, (VOPFUNC)fifo_select },		<span class="enscript-comment">/* select */</span>
+	{ &amp;vnop_revoke_desc, (VOPFUNC)fifo_revoke },		<span class="enscript-comment">/* revoke */</span>
+	{ &amp;vnop_mmap_desc, (VOPFUNC)err_mmap },			<span class="enscript-comment">/* mmap */</span>
+	{ &amp;vnop_fsync_desc, (VOPFUNC)fifo_fsync },		<span class="enscript-comment">/* fsync */</span>
+	{ &amp;vnop_remove_desc, (VOPFUNC)err_remove },		<span class="enscript-comment">/* remove */</span>
+	{ &amp;vnop_link_desc, (VOPFUNC)err_link },			<span class="enscript-comment">/* link */</span>
+	{ &amp;vnop_rename_desc, (VOPFUNC)err_rename },		<span class="enscript-comment">/* rename */</span>
+	{ &amp;vnop_mkdir_desc, (VOPFUNC)err_mkdir },		<span class="enscript-comment">/* mkdir */</span>
+	{ &amp;vnop_rmdir_desc, (VOPFUNC)err_rmdir },		<span class="enscript-comment">/* rmdir */</span>
+	{ &amp;vnop_symlink_desc, (VOPFUNC)err_symlink },		<span class="enscript-comment">/* symlink */</span>
+	{ &amp;vnop_readdir_desc, (VOPFUNC)err_readdir },		<span class="enscript-comment">/* readdir */</span>
+	{ &amp;vnop_readlink_desc, (VOPFUNC)err_readlink },		<span class="enscript-comment">/* readlink */</span>
+	{ &amp;vnop_inactive_desc, (VOPFUNC)fifo_inactive },		<span class="enscript-comment">/* inactive */</span>
+	{ &amp;vnop_reclaim_desc, (VOPFUNC)fifo_reclaim },		<span class="enscript-comment">/* reclaim */</span>
+	{ &amp;vnop_strategy_desc, (VOPFUNC)err_strategy },		<span class="enscript-comment">/* strategy */</span>
+	{ &amp;vnop_pathconf_desc, (VOPFUNC)fifo_pathconf },		<span class="enscript-comment">/* pathconf */</span>
+	{ &amp;vnop_advlock_desc, (VOPFUNC)fifo_advlock },		<span class="enscript-comment">/* advlock */</span>
+	{ &amp;vnop_bwrite_desc, (VOPFUNC)fifo_bwrite },		<span class="enscript-comment">/* bwrite */</span>
+	{ &amp;vnop_pagein_desc, (VOPFUNC)err_pagein },		<span class="enscript-comment">/* Pagein */</span>
+	{ &amp;vnop_pageout_desc, (VOPFUNC)err_pageout },		<span class="enscript-comment">/* Pageout */</span>
+        { &amp;vnop_copyfile_desc, (VOPFUNC)err_copyfile },		<span class="enscript-comment">/* Copyfile */</span>
+	{ &amp;vnop_blktooff_desc, (VOPFUNC)err_blktooff },		<span class="enscript-comment">/* blktooff */</span>
+	{ &amp;vnop_offtoblk_desc, (VOPFUNC)err_offtoblk },		<span class="enscript-comment">/* offtoblk */</span>
+	{ &amp;vnop_blockmap_desc, (VOPFUNC)err_blockmap },			<span class="enscript-comment">/* blockmap */</span>
+	{ (<span class="enscript-type">struct</span> vnodeop_desc*)NULL, (<span class="enscript-type">int</span>(*)())NULL }
+};
+<span class="enscript-type">struct</span> vnodeopv_desc fifo_vnodeop_opv_desc =
+	{ &amp;fifo_vnodeop_p, fifo_vnodeop_entries };
+
+<span class="enscript-comment">/*
+ * Trivial lookup routine that always fails.
+ */</span>
+<span class="enscript-comment">/* ARGSUSED */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fifo_lookup</span>(<span class="enscript-type">struct</span> vnop_lookup_args *ap)
+{
+	
+	*ap-&gt;a_vpp = NULL;
+	<span class="enscript-keyword">return</span> (ENOTDIR);
+}
+
+<span class="enscript-comment">/*
+ * Open called to set up a new instance of a fifo or
+ * to find an active instance of a fifo.
+ */</span>
+<span class="enscript-comment">/* ARGSUSED */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fifo_open</span>(<span class="enscript-type">struct</span> vnop_open_args *ap)
+{
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	<span class="enscript-type">struct</span> fifoinfo *fip;
+	<span class="enscript-type">struct</span> socket *rso, *wso;
+	<span class="enscript-type">int</span> error;
+
+	vnode_lock(vp);
+
+<span class="enscript-reference">retry</span>:
+
+	fip = vp-&gt;v_fifoinfo;
+
+	<span class="enscript-keyword">if</span> (fip == (<span class="enscript-type">struct</span> fifoinfo *)0)
+		panic(<span class="enscript-string">&quot;fifo_open with no fifoinfo&quot;</span>);
+
+	<span class="enscript-keyword">if</span> ((fip-&gt;fi_flags &amp; FIFO_CREATED) == 0) {
+		<span class="enscript-keyword">if</span> (fip-&gt;fi_flags &amp; FIFO_INCREATE) {
+			fip-&gt;fi_flags |= FIFO_CREATEWAIT;	
+			error = msleep(&amp;fip-&gt;fi_flags, &amp;vp-&gt;v_lock, PRIBIO | PCATCH, <span class="enscript-string">&quot;fifocreatewait&quot;</span>, NULL);
+			<span class="enscript-keyword">if</span> (error) {
+				vnode_unlock(vp);
+				<span class="enscript-keyword">return</span>(error);
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry</span>;
+		} <span class="enscript-keyword">else</span> {
+			fip-&gt;fi_flags |= FIFO_INCREATE;	
+			vnode_unlock(vp);
+			<span class="enscript-keyword">if</span> ( (error = socreate(AF_LOCAL, &amp;rso, SOCK_STREAM, 0)) ) {
+			        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad1</span>;
+			}
+
+			<span class="enscript-keyword">if</span> ( (error = socreate(AF_LOCAL, &amp;wso, SOCK_STREAM, 0)) ) {
+				(<span class="enscript-type">void</span>)soclose(rso);
+			        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad1</span>;
+			}
+
+			<span class="enscript-keyword">if</span> ( (error = soconnect2(wso, rso)) ) {
+				(<span class="enscript-type">void</span>)soclose(wso);
+				(<span class="enscript-type">void</span>)soclose(rso);
+			        <span class="enscript-keyword">goto</span> <span class="enscript-reference">bad1</span>;
+			}
+			fip-&gt;fi_readers = fip-&gt;fi_writers = 0;
+
+			<span class="enscript-comment">/* Lock ordering between wso and rso does not matter here 
+		 	 * because they are just created and no one has a reference to them
+		 	 */</span>
+	        	socket_lock(wso, 1);
+			wso-&gt;so_state |= SS_CANTRCVMORE;
+			wso-&gt;so_snd.sb_lowat = PIPE_BUF;
+	        	socket_unlock(wso, 1);
+
+	        	socket_lock(rso, 1);
+			rso-&gt;so_state |= SS_CANTSENDMORE;
+	        	socket_unlock(rso, 1);
+
+			vnode_lock(vp);
+			fip-&gt;fi_readsock = rso;
+			fip-&gt;fi_writesock = wso;
+
+			fip-&gt;fi_flags |= FIFO_CREATED;
+			fip-&gt;fi_flags &amp;= ~FIFO_INCREATE;
+			
+			<span class="enscript-keyword">if</span> ((fip-&gt;fi_flags &amp; FIFO_CREATEWAIT)) {
+				fip-&gt;fi_flags &amp;= ~FIFO_CREATEWAIT;
+				wakeup(&amp;fip-&gt;fi_flags);
+			}
+			<span class="enscript-comment">/* vnode lock is held  to process further */</span>
+		}
+	}
+
+	<span class="enscript-comment">/* vnode is locked at this point */</span>
+	<span class="enscript-comment">/* fifo in created already */</span>
+	<span class="enscript-keyword">if</span> (ap-&gt;a_mode &amp; FREAD) {
+		fip-&gt;fi_readers++;
+		<span class="enscript-keyword">if</span> (fip-&gt;fi_readers == 1) {
+			socket_lock(fip-&gt;fi_writesock, 1);
+			fip-&gt;fi_writesock-&gt;so_state &amp;= ~SS_CANTSENDMORE;
+			socket_unlock(fip-&gt;fi_writesock, 1);
+
+			<span class="enscript-keyword">if</span> (fip-&gt;fi_writers &gt; 0)
+				wakeup((caddr_t)&amp;fip-&gt;fi_writers);
+		}
+	}
+	<span class="enscript-keyword">if</span> (ap-&gt;a_mode &amp; FWRITE) {
+		fip-&gt;fi_writers++;
+		<span class="enscript-keyword">if</span> (fip-&gt;fi_writers == 1) {
+			socket_lock(fip-&gt;fi_readsock, 1);
+			fip-&gt;fi_readsock-&gt;so_state &amp;= ~SS_CANTRCVMORE;
+			socket_unlock(fip-&gt;fi_readsock, 1);
+	
+			<span class="enscript-keyword">if</span> (fip-&gt;fi_readers &gt; 0)
+				wakeup((caddr_t)&amp;fip-&gt;fi_readers);
+		}
+	}
+	<span class="enscript-keyword">if</span> ((ap-&gt;a_mode &amp; FREAD) &amp;&amp; (ap-&gt;a_mode &amp; O_NONBLOCK) == 0) {
+		<span class="enscript-keyword">if</span> (fip-&gt;fi_writers == 0) {
+			error = msleep((caddr_t)&amp;fip-&gt;fi_readers, &amp;vp-&gt;v_lock,
+					PCATCH | PSOCK, <span class="enscript-string">&quot;fifoor&quot;</span>, NULL);
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			<span class="enscript-keyword">if</span> (fip-&gt;fi_readers == 1) {
+				<span class="enscript-keyword">if</span> (fip-&gt;fi_writers &gt; 0)
+					wakeup((caddr_t)&amp;fip-&gt;fi_writers);
+			}
+		}
+	}
+	<span class="enscript-keyword">if</span> (ap-&gt;a_mode &amp; FWRITE) {
+		<span class="enscript-keyword">if</span> (ap-&gt;a_mode &amp; O_NONBLOCK) {
+			<span class="enscript-keyword">if</span> (fip-&gt;fi_readers == 0) {
+					error = ENXIO;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (fip-&gt;fi_readers == 0) {
+				error = msleep((caddr_t)&amp;fip-&gt;fi_writers,&amp;vp-&gt;v_lock,
+						PCATCH | PSOCK, <span class="enscript-string">&quot;fifoow&quot;</span>, NULL);
+				<span class="enscript-keyword">if</span> (error)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+				<span class="enscript-keyword">if</span> (fip-&gt;fi_writers == 1) {
+					<span class="enscript-keyword">if</span> (fip-&gt;fi_readers &gt; 0)
+						wakeup((caddr_t)&amp;fip-&gt;fi_readers);
+				}
+			}
+		}
+	}
+
+	vnode_unlock(vp);
+	<span class="enscript-keyword">return</span> (0);
+<span class="enscript-reference">bad</span>:
+	fifo_close_internal(vp, ap-&gt;a_mode, ap-&gt;a_context, 1);
+
+	vnode_unlock(vp);
+	<span class="enscript-keyword">return</span> (error);
+<span class="enscript-reference">bad1</span>:
+	vnode_lock(vp);
+
+	fip-&gt;fi_flags &amp;= ~FIFO_INCREATE;
+			
+	<span class="enscript-keyword">if</span> ((fip-&gt;fi_flags &amp; FIFO_CREATEWAIT)) {
+		fip-&gt;fi_flags &amp;= ~FIFO_CREATEWAIT;
+		wakeup(&amp;fip-&gt;fi_flags);
+	}
+	vnode_unlock(vp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Vnode op for read
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fifo_read</span>(<span class="enscript-type">struct</span> vnop_read_args *ap)
+{
+	<span class="enscript-type">struct</span> uio *uio = ap-&gt;a_uio;
+	<span class="enscript-type">struct</span> socket *rso = ap-&gt;a_vp-&gt;v_fifoinfo-&gt;fi_readsock;
+	user_ssize_t startresid;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> rflags;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-keyword">if</span> (uio-&gt;uio_rw != UIO_READ)
+		panic(<span class="enscript-string">&quot;fifo_read mode&quot;</span>);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (uio_resid(uio) == 0)
+		<span class="enscript-keyword">return</span> (0);
+
+	rflags = (ap-&gt;a_ioflag &amp; IO_NDELAY) ? MSG_NBIO : 0;
+
+	startresid = uio_resid(uio);
+
+	<span class="enscript-comment">/* fifo conformance - if we have a reader open on the fifo but no 
+	 * writers then we need to make sure we do not block.  We do that by 
+	 * checking the receive buffer and if empty set error to EWOULDBLOCK.
+	 * If error is set to EWOULDBLOCK we skip the call into soreceive
+	 */</span>
+	error = 0;
+	<span class="enscript-keyword">if</span> (ap-&gt;a_vp-&gt;v_fifoinfo-&gt;fi_writers &lt; 1) {
+		socket_lock(rso, 1);
+		error = (rso-&gt;so_rcv.sb_cc == 0) ? EWOULDBLOCK : 0;
+		socket_unlock(rso, 1);
+	}
+
+	<span class="enscript-comment">/* skip soreceive to avoid blocking when we have no writers */</span>
+	<span class="enscript-keyword">if</span> (error != EWOULDBLOCK) {
+		error = soreceive(rso, (<span class="enscript-type">struct</span> sockaddr **)0, uio, (<span class="enscript-type">struct</span> mbuf **)0,
+	    					(<span class="enscript-type">struct</span> mbuf **)0, &amp;rflags);
+		<span class="enscript-keyword">if</span> (error == 0 &amp;&amp; ap-&gt;a_vp-&gt;v_knotes.slh_first != NULL)
+			KNOTE(&amp;ap-&gt;a_vp-&gt;v_knotes, 0);
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* clear EWOULDBLOCK and return EOF (zero) */</span>
+		error = 0;
+	}
+	<span class="enscript-comment">/*
+	 * Clear EOF indication after first such return.
+	 */</span>
+	<span class="enscript-keyword">if</span> (uio_resid(uio) == startresid) {
+		socket_lock(rso, 1);
+		rso-&gt;so_state &amp;= ~SS_CANTRCVMORE;
+		socket_unlock(rso, 1);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Vnode op for write
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fifo_write</span>(<span class="enscript-type">struct</span> vnop_write_args *ap)
+{
+	<span class="enscript-type">struct</span> socket *wso = ap-&gt;a_vp-&gt;v_fifoinfo-&gt;fi_writesock;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-keyword">if</span> (ap-&gt;a_uio-&gt;uio_rw != UIO_WRITE)
+		panic(<span class="enscript-string">&quot;fifo_write mode&quot;</span>);
+#<span class="enscript-reference">endif</span>
+	error = sosend(wso, (<span class="enscript-type">struct</span> sockaddr *)0, ap-&gt;a_uio, NULL,
+		       (<span class="enscript-type">struct</span> mbuf *)0, (ap-&gt;a_ioflag &amp; IO_NDELAY) ? MSG_NBIO : 0);
+	<span class="enscript-keyword">if</span> (error == 0 &amp;&amp; ap-&gt;a_vp-&gt;v_knotes.slh_first != NULL)
+		KNOTE(&amp;ap-&gt;a_vp-&gt;v_knotes, 0);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Device ioctl operation.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fifo_ioctl</span>(<span class="enscript-type">struct</span> vnop_ioctl_args *ap)
+{
+	<span class="enscript-type">struct</span> fileproc filetmp;
+	<span class="enscript-type">struct</span> fileglob filefg;
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (ap-&gt;a_command == FIONBIO)
+		<span class="enscript-keyword">return</span> (0);
+	bzero(&amp;filetmp, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> fileproc));
+	filetmp.f_fglob = &amp;filefg;
+	<span class="enscript-keyword">if</span> (ap-&gt;a_fflag &amp; FREAD) {
+		filetmp.f_fglob-&gt;fg_data = (caddr_t)ap-&gt;a_vp-&gt;v_fifoinfo-&gt;fi_readsock;
+		error = soo_ioctl(&amp;filetmp, ap-&gt;a_command, ap-&gt;a_data, ap-&gt;a_context);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+	}
+	<span class="enscript-keyword">if</span> (ap-&gt;a_fflag &amp; FWRITE) {
+		filetmp.f_fglob-&gt;fg_data = (caddr_t)ap-&gt;a_vp-&gt;v_fifoinfo-&gt;fi_writesock;
+		error = soo_ioctl(&amp;filetmp, ap-&gt;a_command, ap-&gt;a_data, ap-&gt;a_context);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">return</span> (error);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fifo_select</span>(<span class="enscript-type">struct</span> vnop_select_args *ap)
+{
+	<span class="enscript-type">struct</span> fileproc filetmp;
+	<span class="enscript-type">struct</span> fileglob filefg;
+	<span class="enscript-type">int</span> ready;
+
+	bzero(&amp;filetmp, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> fileproc));
+	filetmp.f_fglob = &amp;filefg;
+	<span class="enscript-keyword">if</span> (ap-&gt;a_which &amp; FREAD) {
+		filetmp.f_fglob-&gt;fg_data = (caddr_t)ap-&gt;a_vp-&gt;v_fifoinfo-&gt;fi_readsock;
+		ready = soo_select(&amp;filetmp, ap-&gt;a_which, ap-&gt;a_wql, ap-&gt;a_context);
+		<span class="enscript-keyword">if</span> (ready)
+			<span class="enscript-keyword">return</span> (ready);
+	}
+	<span class="enscript-keyword">if</span> (ap-&gt;a_which &amp; FWRITE) {
+		filetmp.f_fglob-&gt;fg_data = (caddr_t)ap-&gt;a_vp-&gt;v_fifoinfo-&gt;fi_writesock;
+		ready = soo_select(&amp;filetmp, ap-&gt;a_which, ap-&gt;a_wql, ap-&gt;a_context);
+		<span class="enscript-keyword">if</span> (ready)
+			<span class="enscript-keyword">return</span> (ready);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fifo_inactive</span>(__unused <span class="enscript-type">struct</span> vnop_inactive_args *ap)
+{
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * Device close routine
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fifo_close</span>(<span class="enscript-type">struct</span> vnop_close_args *ap)
+{
+	<span class="enscript-keyword">return</span> fifo_close_internal(ap-&gt;a_vp, ap-&gt;a_fflag, ap-&gt;a_context, 0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fifo_close_internal</span>(vnode_t vp, <span class="enscript-type">int</span> fflag, __unused vfs_context_t context, <span class="enscript-type">int</span> locked)
+{
+	<span class="enscript-type">struct</span> fifoinfo *fip = vp-&gt;v_fifoinfo;
+	<span class="enscript-type">int</span> error1, error2;
+	<span class="enscript-type">struct</span> socket *rso;
+	<span class="enscript-type">struct</span> socket *wso;
+
+	<span class="enscript-keyword">if</span> (!locked)
+		vnode_lock(vp);
+
+	<span class="enscript-keyword">if</span> ((fip-&gt;fi_flags &amp; FIFO_CREATED) == 0) {
+		<span class="enscript-keyword">if</span> (!locked)
+			vnode_unlock(vp);
+		<span class="enscript-keyword">return</span>(0);
+
+	}
+		
+	<span class="enscript-keyword">if</span> (fflag &amp; FREAD) {
+		fip-&gt;fi_readers--;
+		<span class="enscript-keyword">if</span> (fip-&gt;fi_readers == 0){
+			socket_lock(fip-&gt;fi_writesock, 1);
+			socantsendmore(fip-&gt;fi_writesock);
+			socket_unlock(fip-&gt;fi_writesock, 1);
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (fflag &amp; FWRITE) {
+		fip-&gt;fi_writers--;
+		<span class="enscript-keyword">if</span> (fip-&gt;fi_writers == 0) {
+			socket_lock(fip-&gt;fi_readsock, 1);
+			socantrcvmore(fip-&gt;fi_readsock);
+			socket_unlock(fip-&gt;fi_readsock, 1);
+		}
+	}
+#<span class="enscript-reference">if</span> 0
+	<span class="enscript-keyword">if</span> (vnode_isinuse_locked(vp, 0, 1)) {
+		<span class="enscript-keyword">if</span> (!locked)
+			vnode_unlock(vp);
+		<span class="enscript-keyword">return</span> (0);
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (fip-&gt;fi_writers || fip-&gt;fi_readers) {
+		<span class="enscript-keyword">if</span> (!locked)
+			vnode_unlock(vp);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	wso = fip-&gt;fi_writesock;
+	rso = fip-&gt;fi_readsock;
+	fip-&gt;fi_readsock = NULL;
+	fip-&gt;fi_writesock = NULL;
+	fip-&gt;fi_flags &amp;= ~FIFO_CREATED;
+	<span class="enscript-keyword">if</span> (!locked)
+		vnode_unlock(vp);
+	error1 = soclose(rso);
+	error2 = soclose(wso);
+
+	<span class="enscript-keyword">if</span> (error1)
+		<span class="enscript-keyword">return</span> (error1);
+	<span class="enscript-keyword">return</span> (error2);
+}
+
+<span class="enscript-comment">/*
+ * Print out internal contents of a fifo vnode.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">fifo_printinfo</span>(<span class="enscript-type">struct</span> vnode *vp)
+{
+	<span class="enscript-type">struct</span> fifoinfo *fip = vp-&gt;v_fifoinfo;
+
+	printf(<span class="enscript-string">&quot;, fifo with %ld readers and %ld writers&quot;</span>,
+		fip-&gt;fi_readers, fip-&gt;fi_writers);
+}
+
+<span class="enscript-comment">/*
+ * Return POSIX pathconf information applicable to fifo's.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fifo_pathconf</span>(<span class="enscript-type">struct</span> vnop_pathconf_args *ap)
+{
+	<span class="enscript-keyword">switch</span> (ap-&gt;a_name) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_LINK_MAX</span>:
+		*ap-&gt;a_retval = LINK_MAX;
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_PIPE_BUF</span>:
+		*ap-&gt;a_retval = PIPE_BUF;
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">_PC_CHOWN_RESTRICTED</span>:
+		*ap-&gt;a_retval = 200112;		<span class="enscript-comment">/* _POSIX_CHOWN_RESTRICTED */</span>
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+	<span class="enscript-comment">/* NOTREACHED */</span>
+}
+
+<span class="enscript-comment">/*
+ * Fifo failed operation
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fifo_ebadf</span>(__unused <span class="enscript-type">void</span> *dummy)
+{
+
+	<span class="enscript-keyword">return</span> (EBADF);
+}
+
+<span class="enscript-comment">/*
+ * Fifo advisory byte-level locks.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fifo_advlock</span>(__unused <span class="enscript-type">struct</span> vnop_advlock_args *ap)
+{
+
+	<span class="enscript-keyword">return</span> (ENOTSUP);
+}
+
+
+<span class="enscript-comment">/* You'd certainly better have an iocount on the vnode! */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fifo_freespace</span>(<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">long</span> *count) 
+{
+	<span class="enscript-type">struct</span> socket *rsock;
+	rsock = vp-&gt;v_fifoinfo-&gt;fi_readsock;
+	socket_lock(rsock, 1);
+	*count = sbspace(&amp;rsock-&gt;so_rcv);
+	socket_unlock(rsock, 1);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fifo_charcount</span>(<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">int</span> *count) 
+{
+	<span class="enscript-type">int</span> mcount;
+	<span class="enscript-type">int</span> err = sock_ioctl(vp-&gt;v_fifoinfo-&gt;fi_readsock, FIONREAD, (<span class="enscript-type">void</span>*)&amp;mcount);
+	<span class="enscript-keyword">if</span> (err == 0) {
+		*count = mcount;
+	}
+	<span class="enscript-keyword">return</span> err;
+}
+</pre>
+<hr />
+</body></html>

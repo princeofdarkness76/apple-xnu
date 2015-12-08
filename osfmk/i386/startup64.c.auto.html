@@ -1,0 +1,287 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>startup64.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">startup64.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2006-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine/vm_types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_prot.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_page.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/thread.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>			<span class="enscript-comment">/* prototyping */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/misc_protos.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpuid.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_cpu.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/seg.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/postcode.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">dump_regs64</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">dump_gdt</span>(<span class="enscript-type">void</span> *);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">dump_ldt</span>(<span class="enscript-type">void</span> *);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">dump_idt</span>(<span class="enscript-type">void</span> *);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">dump_tss</span>(<span class="enscript-type">void</span> *);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">dump_frame32</span>(x86_saved_state32_t *sp);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">dump_frame64</span>(x86_saved_state64_t *sp);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">dump_frame</span>(x86_saved_state_t *sp);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dump_frame</span>(x86_saved_state_t *sp)
+{
+	<span class="enscript-keyword">if</span> (is_saved_state32(sp))
+		dump_frame32(&amp;sp-&gt;ss_32);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (is_saved_state64(sp))
+		dump_frame64(&amp;sp-&gt;ss_64);
+	<span class="enscript-keyword">else</span>
+		kprintf(<span class="enscript-string">&quot;dump_frame(%p) unknown type %d\n&quot;</span>, sp, sp-&gt;flavor);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dump_frame32</span>(x86_saved_state32_t *sp)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	i;
+	uint32_t	*ip = (uint32_t *) sp;
+
+	kprintf(<span class="enscript-string">&quot;dump_frame32(%p):\n&quot;</span>, sp);
+	
+	<span class="enscript-keyword">for</span> (i = 0;
+	     i &lt; <span class="enscript-keyword">sizeof</span>(x86_saved_state32_t)/<span class="enscript-keyword">sizeof</span>(uint32_t);
+	     i++, ip++)
+		kprintf(<span class="enscript-string">&quot;%p: 0x%08x\n&quot;</span>, ip, *ip);
+
+	kprintf(<span class="enscript-string">&quot;sp-&gt;gs:     0x%08x\n&quot;</span>, sp-&gt;gs);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;fs:     0x%08x\n&quot;</span>, sp-&gt;fs);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;es:     0x%08x\n&quot;</span>, sp-&gt;es);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;ds:     0x%08x\n&quot;</span>, sp-&gt;ds);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;edi:    0x%08x\n&quot;</span>, sp-&gt;edi);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;esi:    0x%08x\n&quot;</span>, sp-&gt;esi);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;ebp:    0x%08x\n&quot;</span>, sp-&gt;ebp);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;cr2:    0x%08x\n&quot;</span>, sp-&gt;cr2);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;ebx:    0x%08x\n&quot;</span>, sp-&gt;ebx);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;edx:    0x%08x\n&quot;</span>, sp-&gt;edx);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;ecx:    0x%08x\n&quot;</span>, sp-&gt;ecx);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;eax:    0x%08x\n&quot;</span>, sp-&gt;eax);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;trapno: 0x%08x\n&quot;</span>, sp-&gt;eax);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;eip:    0x%08x\n&quot;</span>, sp-&gt;eip);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;cs:     0x%08x\n&quot;</span>, sp-&gt;cs);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;efl:    0x%08x\n&quot;</span>, sp-&gt;efl);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;uesp:   0x%08x\n&quot;</span>, sp-&gt;uesp);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;ss:     0x%08x\n&quot;</span>, sp-&gt;ss);
+
+	postcode(0x99);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dump_frame64</span>(x86_saved_state64_t *sp)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	i;
+	uint64_t	*ip = (uint64_t *) sp;
+
+	kprintf(<span class="enscript-string">&quot;dump_frame64(%p):\n&quot;</span>, sp);
+	
+	<span class="enscript-keyword">for</span> (i = 0;
+	     i &lt; <span class="enscript-keyword">sizeof</span>(x86_saved_state64_t)/<span class="enscript-keyword">sizeof</span>(uint64_t);
+	     i++, ip++)
+		kprintf(<span class="enscript-string">&quot;%p: 0x%016llx\n&quot;</span>, ip, *ip);
+
+	kprintf(<span class="enscript-string">&quot;sp-&gt;isf.trapno: 0x%08x\n&quot;</span>, sp-&gt;isf.trapno);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;isf.trapfn: 0x%016llx\n&quot;</span>, sp-&gt;isf.trapfn);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;isf.err:    0x%016llx\n&quot;</span>, sp-&gt;isf.err);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;isf.rip:    0x%016llx\n&quot;</span>, sp-&gt;isf.rip);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;isf.cs:     0x%016llx\n&quot;</span>, sp-&gt;isf.cs);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;isf.rflags: 0x%016llx\n&quot;</span>, sp-&gt;isf.rflags);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;isf.rsp:    0x%016llx\n&quot;</span>, sp-&gt;isf.rsp);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;isf.ss:     0x%016llx\n&quot;</span>, sp-&gt;isf.ss);
+
+	kprintf(<span class="enscript-string">&quot;sp-&gt;fs:         0x%016x\n&quot;</span>, sp-&gt;fs);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;gs:         0x%016x\n&quot;</span>, sp-&gt;gs);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;rax:        0x%016llx\n&quot;</span>, sp-&gt;rax);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;rcx:        0x%016llx\n&quot;</span>, sp-&gt;rcx);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;rbx:        0x%016llx\n&quot;</span>, sp-&gt;rbx);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;rbp:        0x%016llx\n&quot;</span>, sp-&gt;rbp);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;r11:        0x%016llx\n&quot;</span>, sp-&gt;r11);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;r12:        0x%016llx\n&quot;</span>, sp-&gt;r12);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;r13:        0x%016llx\n&quot;</span>, sp-&gt;r13);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;r14:        0x%016llx\n&quot;</span>, sp-&gt;r14);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;r15:        0x%016llx\n&quot;</span>, sp-&gt;r15);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;cr2:        0x%016llx\n&quot;</span>, sp-&gt;cr2);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;r9:         0x%016llx\n&quot;</span>, sp-&gt;r9);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;r8:         0x%016llx\n&quot;</span>, sp-&gt;r8);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;r10:        0x%016llx\n&quot;</span>, sp-&gt;r10);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;rdx:        0x%016llx\n&quot;</span>, sp-&gt;rdx);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;rsi:        0x%016llx\n&quot;</span>, sp-&gt;rsi);
+	kprintf(<span class="enscript-string">&quot;sp-&gt;rdi:        0x%016llx\n&quot;</span>, sp-&gt;rdi);
+
+	postcode(0x98);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dump_gdt</span>(<span class="enscript-type">void</span> *gdtp)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	i;
+	uint32_t	*ip = (uint32_t *) gdtp;
+
+	kprintf(<span class="enscript-string">&quot;GDT:\n&quot;</span>);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; GDTSZ; i++, ip += 2) {
+		kprintf(<span class="enscript-string">&quot;%p: 0x%08x\n&quot;</span>, ip+0, *(ip+0));
+		kprintf(<span class="enscript-string">&quot;%p: 0x%08x\n&quot;</span>, ip+1, *(ip+1));
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dump_ldt</span>(<span class="enscript-type">void</span> *ldtp)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	i;
+	uint32_t	*ip = (uint32_t *) ldtp;
+
+	kprintf(<span class="enscript-string">&quot;LDT:\n&quot;</span>);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; LDTSZ_MIN; i++, ip += 2) {
+		kprintf(<span class="enscript-string">&quot;%p: 0x%08x\n&quot;</span>, ip+0, *(ip+0));
+		kprintf(<span class="enscript-string">&quot;%p: 0x%08x\n&quot;</span>, ip+1, *(ip+1));
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dump_idt</span>(<span class="enscript-type">void</span> *idtp)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	i;
+	uint32_t	*ip = (uint32_t *) idtp;
+
+	kprintf(<span class="enscript-string">&quot;IDT64:\n&quot;</span>);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; 16; i++, ip += 4) {
+		kprintf(<span class="enscript-string">&quot;%p: 0x%08x\n&quot;</span>, ip+0, *(ip+0));
+		kprintf(<span class="enscript-string">&quot;%p: 0x%08x\n&quot;</span>, ip+1, *(ip+1));
+		kprintf(<span class="enscript-string">&quot;%p: 0x%08x\n&quot;</span>, ip+2, *(ip+2));
+		kprintf(<span class="enscript-string">&quot;%p: 0x%08x\n&quot;</span>, ip+3, *(ip+3));
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dump_tss</span>(<span class="enscript-type">void</span> *tssp)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	i;
+	uint32_t	*ip = (uint32_t *) tssp;
+
+	kprintf(<span class="enscript-string">&quot;TSS64:\n&quot;</span>);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; <span class="enscript-keyword">sizeof</span>(master_ktss64)/<span class="enscript-keyword">sizeof</span>(uint32_t); i++, ip++) {
+		kprintf(<span class="enscript-string">&quot;%p: 0x%08x\n&quot;</span>, ip+0, *(ip+0));
+	}
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">dump_regs64</span>(<span class="enscript-type">void</span>)
+{
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SNAP_REG</span>(reg)						\
+	uint64_t	reg;					\
+	__asm__ <span class="enscript-type">volatile</span>(<span class="enscript-string">&quot;mov %%&quot;</span> #reg <span class="enscript-string">&quot;, %0&quot;</span> : <span class="enscript-string">&quot;=m&quot;</span> (reg))
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">KPRINT_REG</span>(reg)						\
+	kprintf(<span class="enscript-string">&quot;%3s: %p\n&quot;</span>, #reg, (<span class="enscript-type">void</span> *) reg)
+
+	SNAP_REG(rsp);
+	SNAP_REG(rbp);
+	SNAP_REG(rax);
+	SNAP_REG(rbx);
+	SNAP_REG(rcx);
+	SNAP_REG(rdx);
+	SNAP_REG(rsi);
+	SNAP_REG(rdi);
+	SNAP_REG(r8);
+	SNAP_REG(r9);
+	SNAP_REG(r10);
+	SNAP_REG(r11);
+	SNAP_REG(r12);
+	SNAP_REG(r13);
+	SNAP_REG(r14);
+
+	KPRINT_REG(rsp);
+	KPRINT_REG(rbp);
+	KPRINT_REG(rax);
+	KPRINT_REG(rbx);
+	KPRINT_REG(rcx);
+	KPRINT_REG(rdx);
+	KPRINT_REG(rsi);
+	KPRINT_REG(rdi);
+	KPRINT_REG(r8);
+	KPRINT_REG(r9);
+	KPRINT_REG(r10);
+	KPRINT_REG(r11);
+	KPRINT_REG(r12);
+	KPRINT_REG(r13);
+	KPRINT_REG(r14);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+</pre>
+<hr />
+</body></html>

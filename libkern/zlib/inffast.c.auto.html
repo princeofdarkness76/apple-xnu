@@ -1,0 +1,372 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>inffast.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">inffast.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* inffast.c -- fast decoding
+ * Copyright (C) 1995-2004 Mark Adler
+ * For conditions of distribution and use, see copyright notice in zlib.h
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;zutil.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;inftrees.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;inflate.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;inffast.h&quot;</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">ASMINF</span>
+
+<span class="enscript-comment">/* Allow machine dependent optimization for post-increment or pre-increment.
+   Based on testing to date,
+   Pre-increment preferred for:
+   - PowerPC G3 (Adler)
+   - MIPS R5000 (Randers-Pehrson)
+   Post-increment preferred for:
+   - none
+   No measurable difference:
+   - Pentium III (Anderson)
+   - M68060 (Nikl)
+ */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">POSTINC</span>
+#  <span class="enscript-reference">define</span> <span class="enscript-variable-name">OFF</span> 0
+#  <span class="enscript-reference">define</span> <span class="enscript-function-name">PUP</span>(a) *(a)++
+#<span class="enscript-reference">else</span>
+#  <span class="enscript-reference">define</span> <span class="enscript-variable-name">OFF</span> 1
+#  <span class="enscript-reference">define</span> <span class="enscript-function-name">PUP</span>(a) *++(a)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+   Decode literal, length, and distance codes and write out the resulting
+   literal and match bytes until either not enough input or output is
+   available, an end-of-block is encountered, or a data error is encountered.
+   When large enough input and output buffers are supplied to inflate(), for
+   example, a 16K input buffer and a 64K output buffer, more than 95% of the
+   inflate execution time is spent in this routine.
+
+   Entry assumptions:
+
+        state-&gt;mode == LEN
+        strm-&gt;avail_in &gt;= 6
+        strm-&gt;avail_out &gt;= 258
+        start &gt;= strm-&gt;avail_out
+        state-&gt;bits &lt; 8
+
+   On return, state-&gt;mode is one of:
+
+        LEN -- ran out of enough output space or enough available input
+        TYPE -- reached end of block code, inflate() to interpret next block
+        BAD -- error in block data
+
+   Notes:
+
+    - The maximum input bits used by a length/distance pair is 15 bits for the
+      length code, 5 bits for the length extra, 15 bits for the distance code,
+      and 13 bits for the distance extra.  This totals 48 bits, or six bytes.
+      Therefore if strm-&gt;avail_in &gt;= 6, then there is enough input to avoid
+      checking for available input while decoding.
+
+    - The maximum bytes that a single length/distance pair can output is 258
+      bytes, which is the maximum length that can be coded.  inflate_fast()
+      requires strm-&gt;avail_out &gt;= 258 for each loop to avoid checking for
+      output space.
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">inflate_fast</span>(strm, start)
+z_streamp strm;
+<span class="enscript-type">unsigned</span> start;         <span class="enscript-comment">/* inflate()'s starting value for strm-&gt;avail_out */</span>
+{
+    <span class="enscript-type">struct</span> inflate_state FAR *state;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *in;      <span class="enscript-comment">/* local strm-&gt;next_in */</span>
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *last;    <span class="enscript-comment">/* while in &lt; last, enough input available */</span>
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *out;     <span class="enscript-comment">/* local strm-&gt;next_out */</span>
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *beg;     <span class="enscript-comment">/* inflate()'s initial strm-&gt;next_out */</span>
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *end;     <span class="enscript-comment">/* while out &lt; end, enough space available */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">INFLATE_STRICT</span>
+    <span class="enscript-type">unsigned</span> dmax;              <span class="enscript-comment">/* maximum distance from zlib header */</span>
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-type">unsigned</span> wsize;             <span class="enscript-comment">/* window size or zero if not using window */</span>
+    <span class="enscript-type">unsigned</span> whave;             <span class="enscript-comment">/* valid bytes in the window */</span>
+    <span class="enscript-type">unsigned</span> write;             <span class="enscript-comment">/* window write index */</span>
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *window;  <span class="enscript-comment">/* allocated sliding window, if wsize != 0 */</span>
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> hold;         <span class="enscript-comment">/* local strm-&gt;hold */</span>
+    <span class="enscript-type">unsigned</span> bits;              <span class="enscript-comment">/* local strm-&gt;bits */</span>
+    code <span class="enscript-type">const</span> FAR *lcode;      <span class="enscript-comment">/* local strm-&gt;lencode */</span>
+    code <span class="enscript-type">const</span> FAR *dcode;      <span class="enscript-comment">/* local strm-&gt;distcode */</span>
+    <span class="enscript-type">unsigned</span> lmask;             <span class="enscript-comment">/* mask for first level of length codes */</span>
+    <span class="enscript-type">unsigned</span> dmask;             <span class="enscript-comment">/* mask for first level of distance codes */</span>
+    code this;                  <span class="enscript-comment">/* retrieved table entry */</span>
+    <span class="enscript-type">unsigned</span> op;                <span class="enscript-comment">/* code bits, operation, extra bits, or */</span>
+                                <span class="enscript-comment">/*  window position, window bytes to copy */</span>
+    <span class="enscript-type">unsigned</span> len;               <span class="enscript-comment">/* match length, unused bytes */</span>
+    <span class="enscript-type">unsigned</span> dist;              <span class="enscript-comment">/* match distance */</span>
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> FAR *from;    <span class="enscript-comment">/* where to copy match from */</span>
+
+    <span class="enscript-comment">/* copy state to local variables */</span>
+    state = (<span class="enscript-type">struct</span> inflate_state FAR *)strm-&gt;state;
+    in = strm-&gt;next_in - OFF;
+    last = in + (strm-&gt;avail_in - 5);
+    out = strm-&gt;next_out - OFF;
+    beg = out - (start - strm-&gt;avail_out);
+    end = out + (strm-&gt;avail_out - 257);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">INFLATE_STRICT</span>
+    dmax = state-&gt;dmax;
+#<span class="enscript-reference">endif</span>
+    wsize = state-&gt;wsize;
+    whave = state-&gt;whave;
+    write = state-&gt;write;
+    window = state-&gt;window;
+    hold = state-&gt;hold;
+    bits = state-&gt;bits;
+    lcode = state-&gt;lencode;
+    dcode = state-&gt;distcode;
+    lmask = (1U &lt;&lt; state-&gt;lenbits) - 1;
+    dmask = (1U &lt;&lt; state-&gt;distbits) - 1;
+
+    <span class="enscript-comment">/* decode literals and length/distances until end-of-block or not enough
+       input data or output space */</span>
+    <span class="enscript-keyword">do</span> {
+        <span class="enscript-keyword">if</span> (bits &lt; 15) {
+            hold += (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)(PUP(in)) &lt;&lt; bits;
+            bits += 8;
+            hold += (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)(PUP(in)) &lt;&lt; bits;
+            bits += 8;
+        }
+        this = lcode[hold &amp; lmask];
+      <span class="enscript-reference">dolen</span>:
+        op = (<span class="enscript-type">unsigned</span>)(this.bits);
+        hold &gt;&gt;= op;
+        bits -= op;
+        op = (<span class="enscript-type">unsigned</span>)(this.op);
+        <span class="enscript-keyword">if</span> (op == 0) {                          <span class="enscript-comment">/* literal */</span>
+            Tracevv((stderr, this.val &gt;= 0x20 &amp;&amp; this.val &lt; 0x7f ?
+                    <span class="enscript-string">&quot;inflate:         literal '%c'\n&quot;</span> :
+                    <span class="enscript-string">&quot;inflate:         literal 0x%02x\n&quot;</span>, this.val));
+            PUP(out) = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)(this.val);
+        }
+        <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (op &amp; 16) {                     <span class="enscript-comment">/* length base */</span>
+            len = (<span class="enscript-type">unsigned</span>)(this.val);
+            op &amp;= 15;                           <span class="enscript-comment">/* number of extra bits */</span>
+            <span class="enscript-keyword">if</span> (op) {
+                <span class="enscript-keyword">if</span> (bits &lt; op) {
+                    hold += (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)(PUP(in)) &lt;&lt; bits;
+                    bits += 8;
+                }
+                len += (<span class="enscript-type">unsigned</span>)hold &amp; ((1U &lt;&lt; op) - 1);
+                hold &gt;&gt;= op;
+                bits -= op;
+            }
+            Tracevv((stderr, <span class="enscript-string">&quot;inflate:         length %u\n&quot;</span>, len));
+            <span class="enscript-keyword">if</span> (bits &lt; 15) {
+                hold += (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)(PUP(in)) &lt;&lt; bits;
+                bits += 8;
+                hold += (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)(PUP(in)) &lt;&lt; bits;
+                bits += 8;
+            }
+            this = dcode[hold &amp; dmask];
+          <span class="enscript-reference">dodist</span>:
+            op = (<span class="enscript-type">unsigned</span>)(this.bits);
+            hold &gt;&gt;= op;
+            bits -= op;
+            op = (<span class="enscript-type">unsigned</span>)(this.op);
+            <span class="enscript-keyword">if</span> (op &amp; 16) {                      <span class="enscript-comment">/* distance base */</span>
+                dist = (<span class="enscript-type">unsigned</span>)(this.val);
+                op &amp;= 15;                       <span class="enscript-comment">/* number of extra bits */</span>
+                <span class="enscript-keyword">if</span> (bits &lt; op) {
+                    hold += (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)(PUP(in)) &lt;&lt; bits;
+                    bits += 8;
+                    <span class="enscript-keyword">if</span> (bits &lt; op) {
+                        hold += (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)(PUP(in)) &lt;&lt; bits;
+                        bits += 8;
+                    }
+                }
+                dist += (<span class="enscript-type">unsigned</span>)hold &amp; ((1U &lt;&lt; op) - 1);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">INFLATE_STRICT</span>
+                <span class="enscript-keyword">if</span> (dist &gt; dmax) {
+                    strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid distance too far back&quot;</span>;
+                    state-&gt;mode = BAD;
+                    <span class="enscript-keyword">break</span>;
+                }
+#<span class="enscript-reference">endif</span>
+                hold &gt;&gt;= op;
+                bits -= op;
+                Tracevv((stderr, <span class="enscript-string">&quot;inflate:         distance %u\n&quot;</span>, dist));
+                op = (<span class="enscript-type">unsigned</span>)(out - beg);     <span class="enscript-comment">/* max distance in output */</span>
+                <span class="enscript-keyword">if</span> (dist &gt; op) {                <span class="enscript-comment">/* see if copy from window */</span>
+                    op = dist - op;             <span class="enscript-comment">/* distance back in window */</span>
+                    <span class="enscript-keyword">if</span> (op &gt; whave) {
+                        strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid distance too far back&quot;</span>;
+                        state-&gt;mode = BAD;
+                        <span class="enscript-keyword">break</span>;
+                    }
+                    from = window - OFF;
+                    <span class="enscript-keyword">if</span> (write == 0) {           <span class="enscript-comment">/* very common case */</span>
+                        from += wsize - op;
+                        <span class="enscript-keyword">if</span> (op &lt; len) {         <span class="enscript-comment">/* some from window */</span>
+                            len -= op;
+                            <span class="enscript-keyword">do</span> {
+                                PUP(out) = PUP(from);
+                            } <span class="enscript-keyword">while</span> (--op);
+                            from = out - dist;  <span class="enscript-comment">/* rest from output */</span>
+                        }
+                    }
+                    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (write &lt; op) {      <span class="enscript-comment">/* wrap around window */</span>
+                        from += wsize + write - op;
+                        op -= write;
+                        <span class="enscript-keyword">if</span> (op &lt; len) {         <span class="enscript-comment">/* some from end of window */</span>
+                            len -= op;
+                            <span class="enscript-keyword">do</span> {
+                                PUP(out) = PUP(from);
+                            } <span class="enscript-keyword">while</span> (--op);
+                            from = window - OFF;
+                            <span class="enscript-keyword">if</span> (write &lt; len) {  <span class="enscript-comment">/* some from start of window */</span>
+                                op = write;
+                                len -= op;
+                                <span class="enscript-keyword">do</span> {
+                                    PUP(out) = PUP(from);
+                                } <span class="enscript-keyword">while</span> (--op);
+                                from = out - dist;      <span class="enscript-comment">/* rest from output */</span>
+                            }
+                        }
+                    }
+                    <span class="enscript-keyword">else</span> {                      <span class="enscript-comment">/* contiguous in window */</span>
+                        from += write - op;
+                        <span class="enscript-keyword">if</span> (op &lt; len) {         <span class="enscript-comment">/* some from window */</span>
+                            len -= op;
+                            <span class="enscript-keyword">do</span> {
+                                PUP(out) = PUP(from);
+                            } <span class="enscript-keyword">while</span> (--op);
+                            from = out - dist;  <span class="enscript-comment">/* rest from output */</span>
+                        }
+                    }
+                    <span class="enscript-keyword">while</span> (len &gt; 2) {
+                        PUP(out) = PUP(from);
+                        PUP(out) = PUP(from);
+                        PUP(out) = PUP(from);
+                        len -= 3;
+                    }
+                    <span class="enscript-keyword">if</span> (len) {
+                        PUP(out) = PUP(from);
+                        <span class="enscript-keyword">if</span> (len &gt; 1)
+                            PUP(out) = PUP(from);
+                    }
+                }
+                <span class="enscript-keyword">else</span> {
+                    from = out - dist;          <span class="enscript-comment">/* copy direct from output */</span>
+                    <span class="enscript-keyword">do</span> {                        <span class="enscript-comment">/* minimum length is three */</span>
+                        PUP(out) = PUP(from);
+                        PUP(out) = PUP(from);
+                        PUP(out) = PUP(from);
+                        len -= 3;
+                    } <span class="enscript-keyword">while</span> (len &gt; 2);
+                    <span class="enscript-keyword">if</span> (len) {
+                        PUP(out) = PUP(from);
+                        <span class="enscript-keyword">if</span> (len &gt; 1)
+                            PUP(out) = PUP(from);
+                    }
+                }
+            }
+            <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((op &amp; 64) == 0) {          <span class="enscript-comment">/* 2nd level distance code */</span>
+                this = dcode[this.val + (hold &amp; ((1U &lt;&lt; op) - 1))];
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">dodist</span>;
+            }
+            <span class="enscript-keyword">else</span> {
+                strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid distance code&quot;</span>;
+                state-&gt;mode = BAD;
+                <span class="enscript-keyword">break</span>;
+            }
+        }
+        <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((op &amp; 64) == 0) {              <span class="enscript-comment">/* 2nd level length code */</span>
+            this = lcode[this.val + (hold &amp; ((1U &lt;&lt; op) - 1))];
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">dolen</span>;
+        }
+        <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (op &amp; 32) {                     <span class="enscript-comment">/* end-of-block */</span>
+            Tracevv((stderr, <span class="enscript-string">&quot;inflate:         end of block\n&quot;</span>));
+            state-&gt;mode = TYPE;
+            <span class="enscript-keyword">break</span>;
+        }
+        <span class="enscript-keyword">else</span> {
+            strm-&gt;msg = (<span class="enscript-type">char</span> *)<span class="enscript-string">&quot;invalid literal/length code&quot;</span>;
+            state-&gt;mode = BAD;
+            <span class="enscript-keyword">break</span>;
+        }
+    } <span class="enscript-keyword">while</span> (in &lt; last &amp;&amp; out &lt; end);
+
+    <span class="enscript-comment">/* return unused bytes (on entry, bits &lt; 8, so in won't go too far back) */</span>
+    len = bits &gt;&gt; 3;
+    in -= len;
+    bits -= len &lt;&lt; 3;
+    hold &amp;= (1U &lt;&lt; bits) - 1;
+
+    <span class="enscript-comment">/* update state and return */</span>
+    strm-&gt;next_in = in + OFF;
+    strm-&gt;next_out = out + OFF;
+    strm-&gt;avail_in = (<span class="enscript-type">unsigned</span>)(in &lt; last ? 5 + (last - in) : 5 - (in - last));
+    strm-&gt;avail_out = (<span class="enscript-type">unsigned</span>)(out &lt; end ?
+                                 257 + (end - out) : 257 - (out - end));
+    state-&gt;hold = hold;
+    state-&gt;bits = bits;
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+   inflate_fast() speedups that turned out slower (on a PowerPC G3 750CXe):
+   - Using bit fields for code structure
+   - Different op definition to avoid &amp; for extra bits (do &amp; for table bits)
+   - Three separate decoding do-loops for direct, window, and write == 0
+   - Special case for distance &gt; 1 copies to do overlapped load and store copy
+   - Explicit branch predictions (based on measured branch probabilities)
+   - Deferring match copy and interspersed it with decoding subsequent codes
+   - Swapping literal/length else
+   - Swapping window/direct else
+   - Larger unrolled copy loops (three is about right)
+   - Moving len -= 3 statement into middle of loop
+ */</span>
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !ASMINF */</span>
+
+</pre>
+<hr />
+</body></html>

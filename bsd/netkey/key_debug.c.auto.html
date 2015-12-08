@@ -1,0 +1,823 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>key_debug.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">key_debug.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*	$FreeBSD: src/sys/netkey/key_debug.c,v 1.10.2.5 2002/04/28 05:40:28 suz Exp $	*/</span>
+<span class="enscript-comment">/*	$KAME: key_debug.c,v 1.26 2001/06/27 10:46:50 sakane Exp $	*/</span>
+
+<span class="enscript-comment">/*
+ * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the project nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netkey/key_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netkey/key_debug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipsec.h&gt;</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ctype.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !KERNEL */</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">KERNEL</span>) || (<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">KERNEL</span>) &amp;&amp; <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">IPSEC_DEBUG</span>))
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kdebug_sadb_prop</span>(<span class="enscript-type">struct</span> sadb_ext *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kdebug_sadb_identity</span>(<span class="enscript-type">struct</span> sadb_ext *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kdebug_sadb_supported</span>(<span class="enscript-type">struct</span> sadb_ext *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kdebug_sadb_lifetime</span>(<span class="enscript-type">struct</span> sadb_ext *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kdebug_sadb_sa</span>(<span class="enscript-type">struct</span> sadb_ext *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kdebug_sadb_address</span>(<span class="enscript-type">struct</span> sadb_ext *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kdebug_sadb_key</span>(<span class="enscript-type">struct</span> sadb_ext *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kdebug_sadb_x_sa2</span>(<span class="enscript-type">struct</span> sadb_ext *);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kdebug_secreplay</span>(<span class="enscript-type">struct</span> secreplay *);
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">panic</span>(param)	{ printf(param); exit(-1); }
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* NOTE: host byte order */</span>
+
+<span class="enscript-comment">/* %%%: about struct sadb_msg */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_sadb</span>(base)
+	<span class="enscript-type">struct</span> sadb_msg *base;
+{
+	<span class="enscript-type">struct</span> sadb_ext *ext;
+	<span class="enscript-type">int</span> tlen, extlen;
+
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (base == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_sadb: NULL pointer was passed.\n&quot;</span>);
+
+	printf(<span class="enscript-string">&quot;sadb_msg{ version=%u type=%u errno=%u satype=%u\n&quot;</span>,
+	    base-&gt;sadb_msg_version, base-&gt;sadb_msg_type,
+	    base-&gt;sadb_msg_errno, base-&gt;sadb_msg_satype);
+	printf(<span class="enscript-string">&quot;  len=%u reserved=%u seq=%u pid=%u\n&quot;</span>,
+	    base-&gt;sadb_msg_len, base-&gt;sadb_msg_reserved,
+	    base-&gt;sadb_msg_seq, base-&gt;sadb_msg_pid);
+
+	tlen = PFKEY_UNUNIT64(base-&gt;sadb_msg_len) - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sadb_msg);
+	ext = (<span class="enscript-type">struct</span> sadb_ext *)((caddr_t)base + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sadb_msg));
+
+	<span class="enscript-keyword">while</span> (tlen &gt; 0) {
+		printf(<span class="enscript-string">&quot;sadb_ext{ len=%u type=%u }\n&quot;</span>,
+		    ext-&gt;sadb_ext_len, ext-&gt;sadb_ext_type);
+
+		<span class="enscript-keyword">if</span> (ext-&gt;sadb_ext_len == 0) {
+			printf(<span class="enscript-string">&quot;kdebug_sadb: invalid ext_len=0 was passed.\n&quot;</span>);
+			<span class="enscript-keyword">return</span>;
+		}
+		<span class="enscript-keyword">if</span> (ext-&gt;sadb_ext_len &gt; tlen) {
+			printf(<span class="enscript-string">&quot;kdebug_sadb: ext_len exceeds end of buffer.\n&quot;</span>);
+			<span class="enscript-keyword">return</span>;
+		}
+
+		<span class="enscript-keyword">switch</span> (ext-&gt;sadb_ext_type) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_SA</span>:
+			kdebug_sadb_sa(ext);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_LIFETIME_CURRENT</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_LIFETIME_HARD</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_LIFETIME_SOFT</span>:
+			kdebug_sadb_lifetime(ext);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_ADDRESS_SRC</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_ADDRESS_DST</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_ADDRESS_PROXY</span>:
+			kdebug_sadb_address(ext);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_KEY_AUTH</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_KEY_ENCRYPT</span>:
+			kdebug_sadb_key(ext);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_IDENTITY_SRC</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_IDENTITY_DST</span>:
+			kdebug_sadb_identity(ext);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_SENSITIVITY</span>:
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_PROPOSAL</span>:
+			kdebug_sadb_prop(ext);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_SUPPORTED_AUTH</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_SUPPORTED_ENCRYPT</span>:
+			kdebug_sadb_supported(ext);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_SPIRANGE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_X_EXT_KMPRIVATE</span>:
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_X_EXT_POLICY</span>:
+			kdebug_sadb_x_policy(ext);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_X_EXT_SA2</span>:
+			kdebug_sadb_x_sa2(ext);
+			<span class="enscript-keyword">break</span>;
+                <span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_SESSION_ID</span>:
+			kdebug_sadb_session_id(ext);
+		        <span class="enscript-keyword">break</span>;
+                <span class="enscript-keyword">case</span> <span class="enscript-reference">SADB_EXT_SASTAT</span>:
+			kdebug_sadb_sastat(ext);
+		        <span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			printf(<span class="enscript-string">&quot;kdebug_sadb: invalid ext_type %u was passed.\n&quot;</span>,
+			    ext-&gt;sadb_ext_type);
+			<span class="enscript-keyword">return</span>;
+		}
+
+		extlen = PFKEY_UNUNIT64(ext-&gt;sadb_ext_len);
+		tlen -= extlen;
+		ext = (<span class="enscript-type">struct</span> sadb_ext *)((caddr_t)ext + extlen);
+	}
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_sadb_prop</span>(ext)
+	<span class="enscript-type">struct</span> sadb_ext *ext;
+{
+	<span class="enscript-type">struct</span> sadb_prop *prop = (<span class="enscript-type">struct</span> sadb_prop *)ext;
+	<span class="enscript-type">struct</span> sadb_comb *comb;
+	<span class="enscript-type">int</span> len;
+
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (ext == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_sadb_prop: NULL pointer was passed.\n&quot;</span>);
+
+	len = (PFKEY_UNUNIT64(prop-&gt;sadb_prop_len) - <span class="enscript-keyword">sizeof</span>(*prop))
+		/ <span class="enscript-keyword">sizeof</span>(*comb);
+	comb = (<span class="enscript-type">struct</span> sadb_comb *)(prop + 1);
+	printf(<span class="enscript-string">&quot;sadb_prop{ replay=%u\n&quot;</span>, prop-&gt;sadb_prop_replay);
+
+	<span class="enscript-keyword">while</span> (len--) {
+		printf(<span class="enscript-string">&quot;sadb_comb{ auth=%u encrypt=%u &quot;</span>
+			<span class="enscript-string">&quot;flags=0x%04x reserved=0x%08x\n&quot;</span>,
+			comb-&gt;sadb_comb_auth, comb-&gt;sadb_comb_encrypt,
+			comb-&gt;sadb_comb_flags, comb-&gt;sadb_comb_reserved);
+
+		printf(<span class="enscript-string">&quot;  auth_minbits=%u auth_maxbits=%u &quot;</span>
+			<span class="enscript-string">&quot;encrypt_minbits=%u encrypt_maxbits=%u\n&quot;</span>,
+			comb-&gt;sadb_comb_auth_minbits,
+			comb-&gt;sadb_comb_auth_maxbits,
+			comb-&gt;sadb_comb_encrypt_minbits,
+			comb-&gt;sadb_comb_encrypt_maxbits);
+
+		printf(<span class="enscript-string">&quot;  soft_alloc=%u hard_alloc=%u &quot;</span>
+			<span class="enscript-string">&quot;soft_bytes=%lu hard_bytes=%lu\n&quot;</span>,
+			comb-&gt;sadb_comb_soft_allocations,
+			comb-&gt;sadb_comb_hard_allocations,
+			(u_int32_t)comb-&gt;sadb_comb_soft_bytes,
+			(u_int32_t)comb-&gt;sadb_comb_hard_bytes);
+
+		printf(<span class="enscript-string">&quot;  soft_alloc=%lu hard_alloc=%lu &quot;</span>
+			<span class="enscript-string">&quot;soft_bytes=%lu hard_bytes=%lu }\n&quot;</span>,
+			(u_int32_t)comb-&gt;sadb_comb_soft_addtime,
+			(u_int32_t)comb-&gt;sadb_comb_hard_addtime,
+			(u_int32_t)comb-&gt;sadb_comb_soft_usetime,
+			(u_int32_t)comb-&gt;sadb_comb_hard_usetime);
+		comb++;
+	}
+	printf(<span class="enscript-string">&quot;}\n&quot;</span>);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_sadb_identity</span>(ext)
+	<span class="enscript-type">struct</span> sadb_ext *ext;
+{
+	<span class="enscript-type">struct</span> sadb_ident *id = (<span class="enscript-type">struct</span> sadb_ident *)ext;
+	<span class="enscript-type">int</span> len;
+
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (ext == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_sadb_identity: NULL pointer was passed.\n&quot;</span>);
+
+	len = PFKEY_UNUNIT64(id-&gt;sadb_ident_len) - <span class="enscript-keyword">sizeof</span>(*id);
+	printf(<span class="enscript-string">&quot;sadb_ident_%s{&quot;</span>,
+	    id-&gt;sadb_ident_exttype == SADB_EXT_IDENTITY_SRC ? <span class="enscript-string">&quot;src&quot;</span> : <span class="enscript-string">&quot;dst&quot;</span>);
+	<span class="enscript-keyword">switch</span> (id-&gt;sadb_ident_type) {
+	<span class="enscript-reference">default</span>:
+		printf(<span class="enscript-string">&quot; type=%d id=%lu&quot;</span>,
+			id-&gt;sadb_ident_type, (u_int32_t)id-&gt;sadb_ident_id);
+		<span class="enscript-keyword">if</span> (len) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+			ipsec_hexdump((caddr_t)(id + 1), len); <span class="enscript-comment">/*XXX cast ?*/</span>
+#<span class="enscript-reference">else</span>
+			<span class="enscript-type">char</span> *p, *ep;
+			printf(<span class="enscript-string">&quot;\n  str=\&quot;&quot;</span>);
+			p = (<span class="enscript-type">char</span> *)(id + 1);
+			ep = p + len;
+			<span class="enscript-keyword">for</span> (<span class="enscript-comment">/*nothing*/</span>; *p &amp;&amp; p &lt; ep; p++) {
+				<span class="enscript-keyword">if</span> (isprint(*p))
+					printf(<span class="enscript-string">&quot;%c&quot;</span>, *p &amp; 0xff);
+				<span class="enscript-keyword">else</span>
+					printf(<span class="enscript-string">&quot;\\%03o&quot;</span>, *p &amp; 0xff);
+			}
+#<span class="enscript-reference">endif</span>
+			printf(<span class="enscript-string">&quot;\&quot;&quot;</span>);
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+
+	printf(<span class="enscript-string">&quot; }\n&quot;</span>);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_sadb_supported</span>(ext)
+	<span class="enscript-type">struct</span> sadb_ext *ext;
+{
+	<span class="enscript-type">struct</span> sadb_supported *sup = (<span class="enscript-type">struct</span> sadb_supported *)ext;
+	<span class="enscript-type">struct</span> sadb_alg *alg;
+	<span class="enscript-type">int</span> len;
+
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (ext == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_sadb_supported: NULL pointer was passed.\n&quot;</span>);
+
+	len = (PFKEY_UNUNIT64(sup-&gt;sadb_supported_len) - <span class="enscript-keyword">sizeof</span>(*sup))
+		/ <span class="enscript-keyword">sizeof</span>(*alg);
+	alg = (<span class="enscript-type">struct</span> sadb_alg *)(sup + 1);
+	printf(<span class="enscript-string">&quot;sadb_sup{\n&quot;</span>);
+	<span class="enscript-keyword">while</span> (len--) {
+		printf(<span class="enscript-string">&quot;  { id=%d ivlen=%d min=%d max=%d }\n&quot;</span>,
+			alg-&gt;sadb_alg_id, alg-&gt;sadb_alg_ivlen,
+			alg-&gt;sadb_alg_minbits, alg-&gt;sadb_alg_maxbits);
+		alg++;
+	}
+	printf(<span class="enscript-string">&quot;}\n&quot;</span>);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_sadb_lifetime</span>(ext)
+	<span class="enscript-type">struct</span> sadb_ext *ext;
+{
+	<span class="enscript-type">struct</span> sadb_lifetime *lft = (<span class="enscript-type">struct</span> sadb_lifetime *)ext;
+
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (ext == NULL)
+		printf(<span class="enscript-string">&quot;kdebug_sadb_lifetime: NULL pointer was passed.\n&quot;</span>);
+
+	printf(<span class="enscript-string">&quot;sadb_lifetime{ alloc=%u, bytes=%u\n&quot;</span>,
+		lft-&gt;sadb_lifetime_allocations,
+		(u_int32_t)lft-&gt;sadb_lifetime_bytes);
+	printf(<span class="enscript-string">&quot;  addtime=%u, usetime=%u }\n&quot;</span>,
+		(u_int32_t)lft-&gt;sadb_lifetime_addtime,
+		(u_int32_t)lft-&gt;sadb_lifetime_usetime);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_sadb_sa</span>(ext)
+	<span class="enscript-type">struct</span> sadb_ext *ext;
+{
+	<span class="enscript-type">struct</span> sadb_sa *sa = (<span class="enscript-type">struct</span> sadb_sa *)ext;
+
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (ext == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_sadb_sa: NULL pointer was passed.\n&quot;</span>);
+
+	printf(<span class="enscript-string">&quot;sadb_sa{ spi=%u replay=%u state=%u\n&quot;</span>,
+	    (u_int32_t)ntohl(sa-&gt;sadb_sa_spi), sa-&gt;sadb_sa_replay,
+	    sa-&gt;sadb_sa_state);
+	printf(<span class="enscript-string">&quot;  auth=%u encrypt=%u flags=0x%08x }\n&quot;</span>,
+	    sa-&gt;sadb_sa_auth, sa-&gt;sadb_sa_encrypt, sa-&gt;sadb_sa_flags);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_sadb_address</span>(ext)
+	<span class="enscript-type">struct</span> sadb_ext *ext;
+{
+	<span class="enscript-type">struct</span> sadb_address *addr = (<span class="enscript-type">struct</span> sadb_address *)ext;
+
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (ext == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_sadb_address: NULL pointer was passed.\n&quot;</span>);
+
+	printf(<span class="enscript-string">&quot;sadb_address{ proto=%u prefixlen=%u reserved=0x%02x%02x }\n&quot;</span>,
+	    addr-&gt;sadb_address_proto, addr-&gt;sadb_address_prefixlen,
+	    ((u_char *)&amp;addr-&gt;sadb_address_reserved)[0],
+	    ((u_char *)&amp;addr-&gt;sadb_address_reserved)[1]);
+
+	kdebug_sockaddr((<span class="enscript-type">struct</span> sockaddr *)((caddr_t)ext + <span class="enscript-keyword">sizeof</span>(*addr)));
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_sadb_key</span>(ext)
+	<span class="enscript-type">struct</span> sadb_ext *ext;
+{
+	<span class="enscript-type">struct</span> sadb_key *key = (<span class="enscript-type">struct</span> sadb_key *)ext;
+
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (ext == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_sadb_key: NULL pointer was passed.\n&quot;</span>);
+
+	printf(<span class="enscript-string">&quot;sadb_key{ bits=%u reserved=%u\n&quot;</span>,
+	    key-&gt;sadb_key_bits, key-&gt;sadb_key_reserved);
+	printf(<span class="enscript-string">&quot;  key=&quot;</span>);
+
+	<span class="enscript-comment">/* sanity check 2 */</span>
+	<span class="enscript-keyword">if</span> ((key-&gt;sadb_key_bits &gt;&gt; 3) &gt;
+		(PFKEY_UNUNIT64(key-&gt;sadb_key_len) - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sadb_key))) {
+		printf(<span class="enscript-string">&quot;kdebug_sadb_key: key length mismatch, bit:%d len:%ld.\n&quot;</span>,
+			key-&gt;sadb_key_bits &gt;&gt; 3,
+			(<span class="enscript-type">long</span>)PFKEY_UNUNIT64(key-&gt;sadb_key_len) - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sadb_key));
+	}
+
+	ipsec_hexdump((caddr_t)key + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> sadb_key),
+	              key-&gt;sadb_key_bits &gt;&gt; 3);
+	printf(<span class="enscript-string">&quot; }\n&quot;</span>);
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_sadb_x_sa2</span>(ext)
+	<span class="enscript-type">struct</span> sadb_ext *ext;
+{
+	<span class="enscript-type">struct</span> sadb_x_sa2 *sa2 = (<span class="enscript-type">struct</span> sadb_x_sa2 *)ext;
+
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (ext == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_sadb_x_sa2: NULL pointer was passed.\n&quot;</span>);
+
+	printf(<span class="enscript-string">&quot;sadb_x_sa2{ mode=%u reqid=%u\n&quot;</span>,
+	    sa2-&gt;sadb_x_sa2_mode, sa2-&gt;sadb_x_sa2_reqid);
+	printf(<span class="enscript-string">&quot;  reserved1=%u reserved2=%u sequence=%u }\n&quot;</span>,
+	    sa2-&gt;sadb_x_sa2_reserved1, sa2-&gt;sadb_x_sa2_reserved2,
+	    sa2-&gt;sadb_x_sa2_sequence);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_sadb_session_id</span>(ext)
+	<span class="enscript-type">struct</span> sadb_ext *ext;
+{
+       <span class="enscript-type">struct</span> sadb_session_id *p = (__typeof__(p))ext;
+
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (ext == NULL)
+	        panic(<span class="enscript-string">&quot;kdebug_sadb_session_id: NULL pointer was passed.\n&quot;</span>);
+
+	printf(<span class="enscript-string">&quot;sadb_session_id{ id0=%llx, id1=%llx}\n&quot;</span>,
+	        p-&gt;sadb_session_id_v[0],
+	        p-&gt;sadb_session_id_v[1]);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_sadb_sastat</span>(ext)
+	<span class="enscript-type">struct</span> sadb_ext *ext;
+{
+       <span class="enscript-type">struct</span> sadb_sastat *p = (__typeof__(p))ext;
+	<span class="enscript-type">struct</span> sastat      *stats;
+	<span class="enscript-type">int</span>    i;
+
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (ext == NULL)
+	        panic(<span class="enscript-string">&quot;kdebug_sadb_sastat: NULL pointer was passed.\n&quot;</span>);
+
+	printf(<span class="enscript-string">&quot;sadb_sastat{ dir=%u num=%u\n&quot;</span>,
+	        p-&gt;sadb_sastat_dir, p-&gt;sadb_sastat_list_len);
+	stats = (__typeof__(stats))(p + 1);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; p-&gt;sadb_sastat_list_len; i++) {
+	       printf(<span class="enscript-string">&quot;  spi=%x,\n&quot;</span>,
+		      stats[i].spi);
+	}
+	printf(<span class="enscript-string">&quot;}\n&quot;</span>);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_sadb_x_policy</span>(ext)
+	<span class="enscript-type">struct</span> sadb_ext *ext;
+{
+	<span class="enscript-type">struct</span> sadb_x_policy *xpl = (<span class="enscript-type">struct</span> sadb_x_policy *)ext;
+	<span class="enscript-type">struct</span> sockaddr *addr;
+
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (ext == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_sadb_x_policy: NULL pointer was passed.\n&quot;</span>);
+
+	printf(<span class="enscript-string">&quot;sadb_x_policy{ type=%u dir=%u id=%x }\n&quot;</span>,
+		xpl-&gt;sadb_x_policy_type, xpl-&gt;sadb_x_policy_dir,
+		xpl-&gt;sadb_x_policy_id);
+
+	<span class="enscript-keyword">if</span> (xpl-&gt;sadb_x_policy_type == IPSEC_POLICY_IPSEC) {
+		<span class="enscript-type">int</span> tlen;
+		<span class="enscript-type">struct</span> sadb_x_ipsecrequest *xisr;
+
+		tlen = PFKEY_UNUNIT64(xpl-&gt;sadb_x_policy_len) - <span class="enscript-keyword">sizeof</span>(*xpl);
+		xisr = (<span class="enscript-type">struct</span> sadb_x_ipsecrequest *)(xpl + 1);
+
+		<span class="enscript-keyword">while</span> (tlen &gt; 0) {
+			printf(<span class="enscript-string">&quot; { len=%u proto=%u mode=%u level=%u reqid=%u\n&quot;</span>,
+				xisr-&gt;sadb_x_ipsecrequest_len,
+				xisr-&gt;sadb_x_ipsecrequest_proto,
+				xisr-&gt;sadb_x_ipsecrequest_mode,
+				xisr-&gt;sadb_x_ipsecrequest_level,
+				xisr-&gt;sadb_x_ipsecrequest_reqid);
+
+			<span class="enscript-keyword">if</span> (xisr-&gt;sadb_x_ipsecrequest_len &gt; <span class="enscript-keyword">sizeof</span>(*xisr)) {
+				addr = (<span class="enscript-type">struct</span> sockaddr *)(xisr + 1);
+				kdebug_sockaddr(addr);
+				addr = (<span class="enscript-type">struct</span> sockaddr *)((caddr_t)addr
+							+ addr-&gt;sa_len);
+				kdebug_sockaddr(addr);
+			}
+
+			printf(<span class="enscript-string">&quot; }\n&quot;</span>);
+
+			<span class="enscript-comment">/* prevent infinite loop */</span>
+			<span class="enscript-keyword">if</span> (xisr-&gt;sadb_x_ipsecrequest_len &lt;= 0) {
+				printf(<span class="enscript-string">&quot;kdebug_sadb_x_policy: wrong policy struct.\n&quot;</span>);
+				<span class="enscript-keyword">return</span>;
+			}
+			<span class="enscript-comment">/* prevent overflow */</span>
+			<span class="enscript-keyword">if</span> (xisr-&gt;sadb_x_ipsecrequest_len &gt; tlen) {
+				printf(<span class="enscript-string">&quot;invalid ipsec policy length\n&quot;</span>);
+				<span class="enscript-keyword">return</span>;
+			}
+
+			tlen -= xisr-&gt;sadb_x_ipsecrequest_len;
+
+			xisr = (<span class="enscript-type">struct</span> sadb_x_ipsecrequest *)((caddr_t)xisr
+			                + xisr-&gt;sadb_x_ipsecrequest_len);
+		}
+
+		<span class="enscript-keyword">if</span> (tlen != 0)
+			panic(<span class="enscript-string">&quot;kdebug_sadb_x_policy: wrong policy struct.\n&quot;</span>);
+	}
+
+	<span class="enscript-keyword">return</span>;
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+<span class="enscript-comment">/* %%%: about SPD and SAD */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_secpolicy</span>(sp)
+	<span class="enscript-type">struct</span> secpolicy *sp;
+{
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (sp == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_secpolicy: NULL pointer was passed.\n&quot;</span>);
+
+	printf(<span class="enscript-string">&quot;secpolicy{ refcnt=%u state=%u policy=%u\n&quot;</span>,
+		sp-&gt;refcnt, sp-&gt;state, sp-&gt;policy);
+
+	kdebug_secpolicyindex(&amp;sp-&gt;spidx);
+
+	<span class="enscript-keyword">switch</span> (sp-&gt;policy) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_POLICY_DISCARD</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_POLICY_GENERATE</span>:
+		printf(<span class="enscript-string">&quot;  type=discard }\n&quot;</span>);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_POLICY_NONE</span>:
+		printf(<span class="enscript-string">&quot;  type=none }\n&quot;</span>);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_POLICY_IPSEC</span>:
+	    {
+		<span class="enscript-type">struct</span> ipsecrequest *isr;
+		<span class="enscript-keyword">for</span> (isr = sp-&gt;req; isr != NULL; isr = isr-&gt;next) {
+
+			printf(<span class="enscript-string">&quot;  level=%u\n&quot;</span>, isr-&gt;level);
+			kdebug_secasindex(&amp;isr-&gt;saidx);
+
+		}
+		printf(<span class="enscript-string">&quot;  }\n&quot;</span>);
+	    }
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_POLICY_BYPASS</span>:
+		printf(<span class="enscript-string">&quot;  type=bypass }\n&quot;</span>);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IPSEC_POLICY_ENTRUST</span>:
+		printf(<span class="enscript-string">&quot;  type=entrust }\n&quot;</span>);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		printf(<span class="enscript-string">&quot;kdebug_secpolicy: Invalid policy found. %d\n&quot;</span>,
+			sp-&gt;policy);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_secpolicyindex</span>(spidx)
+	<span class="enscript-type">struct</span> secpolicyindex *spidx;
+{
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (spidx == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_secpolicyindex: NULL pointer was passed.\n&quot;</span>);
+
+	printf(<span class="enscript-string">&quot;secpolicyindex{ dir=%u prefs=%u prefd=%u ul_proto=%u internal_if=%s\n&quot;</span>,
+		spidx-&gt;dir, spidx-&gt;prefs, spidx-&gt;prefd, spidx-&gt;ul_proto,
+           (spidx-&gt;internal_if) ? spidx-&gt;internal_if-&gt;if_xname : <span class="enscript-string">&quot;N/A&quot;</span>);
+
+	ipsec_hexdump((caddr_t)&amp;spidx-&gt;src,
+		((<span class="enscript-type">struct</span> sockaddr *)&amp;spidx-&gt;src)-&gt;sa_len);
+	printf(<span class="enscript-string">&quot;\n&quot;</span>);
+	ipsec_hexdump((caddr_t)&amp;spidx-&gt;dst,
+		((<span class="enscript-type">struct</span> sockaddr *)&amp;spidx-&gt;dst)-&gt;sa_len);
+	printf(<span class="enscript-string">&quot;}\n&quot;</span>);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_secasindex</span>(saidx)
+	<span class="enscript-type">struct</span> secasindex *saidx;
+{
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (saidx == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_secpolicyindex: NULL pointer was passed.\n&quot;</span>);
+
+	printf(<span class="enscript-string">&quot;secasindex{ mode=%u proto=%u\n&quot;</span>,
+		saidx-&gt;mode, saidx-&gt;proto);
+
+	ipsec_hexdump((caddr_t)&amp;saidx-&gt;src,
+		((<span class="enscript-type">struct</span> sockaddr *)&amp;saidx-&gt;src)-&gt;sa_len);
+	printf(<span class="enscript-string">&quot;\n&quot;</span>);
+	ipsec_hexdump((caddr_t)&amp;saidx-&gt;dst,
+		((<span class="enscript-type">struct</span> sockaddr *)&amp;saidx-&gt;dst)-&gt;sa_len);
+	printf(<span class="enscript-string">&quot;\n&quot;</span>);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_secasv</span>(sav)
+	<span class="enscript-type">struct</span> secasvar *sav;
+{
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (sav == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_secasv: NULL pointer was passed.\n&quot;</span>);
+
+	printf(<span class="enscript-string">&quot;secas{&quot;</span>);
+	kdebug_secasindex(&amp;sav-&gt;sah-&gt;saidx);
+
+	printf(<span class="enscript-string">&quot;  refcnt=%u state=%u auth=%u enc=%u\n&quot;</span>,
+	    sav-&gt;refcnt, sav-&gt;state, sav-&gt;alg_auth, sav-&gt;alg_enc);
+	printf(<span class="enscript-string">&quot;  spi=%u flags=%u\n&quot;</span>,
+	    (u_int32_t)ntohl(sav-&gt;spi), sav-&gt;flags);
+
+	<span class="enscript-keyword">if</span> (sav-&gt;key_auth != NULL)
+		kdebug_sadb_key((<span class="enscript-type">struct</span> sadb_ext *)sav-&gt;key_auth);
+	<span class="enscript-keyword">if</span> (sav-&gt;key_enc != NULL)
+		kdebug_sadb_key((<span class="enscript-type">struct</span> sadb_ext *)sav-&gt;key_enc);
+	<span class="enscript-keyword">if</span> (sav-&gt;iv != NULL) {
+		printf(<span class="enscript-string">&quot;  iv=&quot;</span>);
+		ipsec_hexdump(sav-&gt;iv, sav-&gt;ivlen ? sav-&gt;ivlen : 8);
+		printf(<span class="enscript-string">&quot;\n&quot;</span>);
+	}
+
+	<span class="enscript-keyword">if</span> (sav-&gt;replay != NULL)
+		kdebug_secreplay(sav-&gt;replay);
+	<span class="enscript-keyword">if</span> (sav-&gt;lft_c != NULL)
+		kdebug_sadb_lifetime((<span class="enscript-type">struct</span> sadb_ext *)sav-&gt;lft_c);
+	<span class="enscript-keyword">if</span> (sav-&gt;lft_h != NULL)
+		kdebug_sadb_lifetime((<span class="enscript-type">struct</span> sadb_ext *)sav-&gt;lft_h);
+	<span class="enscript-keyword">if</span> (sav-&gt;lft_s != NULL)
+		kdebug_sadb_lifetime((<span class="enscript-type">struct</span> sadb_ext *)sav-&gt;lft_s);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">notyet</span>
+	<span class="enscript-comment">/* XXX: misc[123] ? */</span>
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_secreplay</span>(rpl)
+	<span class="enscript-type">struct</span> secreplay *rpl;
+{
+	<span class="enscript-type">int</span> len, l;
+
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (rpl == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_secreplay: NULL pointer was passed.\n&quot;</span>);
+
+	printf(<span class="enscript-string">&quot; secreplay{ count=%u wsize=%u seq=%u lastseq=%u&quot;</span>,
+	    rpl-&gt;count, rpl-&gt;wsize, rpl-&gt;seq, rpl-&gt;lastseq);
+
+	<span class="enscript-keyword">if</span> (rpl-&gt;bitmap == NULL) {
+		printf(<span class="enscript-string">&quot; }\n&quot;</span>);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	printf(<span class="enscript-string">&quot;\n   bitmap { &quot;</span>);
+
+	<span class="enscript-keyword">for</span> (len = 0; len &lt; rpl-&gt;wsize; len++) {
+		<span class="enscript-keyword">for</span> (l = 7; l &gt;= 0; l--)
+			printf(<span class="enscript-string">&quot;%u&quot;</span>, (((rpl-&gt;bitmap)[len] &gt;&gt; l) &amp; 1) ? 1 : 0);
+	}
+	printf(<span class="enscript-string">&quot; }\n&quot;</span>);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_mbufhdr</span>(m)
+	<span class="enscript-type">struct</span> mbuf *m;
+{
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (m == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	printf(<span class="enscript-string">&quot;mbuf(0x%llx){ m_next:0x%llx m_nextpkt:0x%llx m_data:0x%llx &quot;</span>
+	    <span class="enscript-string">&quot;m_len:%d m_type:0x%02x m_flags:0x%02x }\n&quot;</span>,
+	    (uint64_t)VM_KERNEL_ADDRPERM(m),
+	    (uint64_t)VM_KERNEL_ADDRPERM(m-&gt;m_next),
+	    (uint64_t)VM_KERNEL_ADDRPERM(m-&gt;m_nextpkt),
+	    (uint64_t)VM_KERNEL_ADDRPERM(m-&gt;m_data),
+	    m-&gt;m_len, m-&gt;m_type, m-&gt;m_flags);
+
+	<span class="enscript-keyword">if</span> (m-&gt;m_flags &amp; M_PKTHDR) {
+		printf(<span class="enscript-string">&quot;  m_pkthdr{ len:%d rcvif:0x%llx }\n&quot;</span>,
+		    m-&gt;m_pkthdr.len,
+		    (uint64_t)VM_KERNEL_ADDRPERM(m-&gt;m_pkthdr.rcvif));
+	}
+
+	<span class="enscript-keyword">if</span> (m-&gt;m_flags &amp; M_EXT) {
+		printf(<span class="enscript-string">&quot;  m_ext{ ext_buf:0x%llx ext_free:0x%llx &quot;</span>
+		       <span class="enscript-string">&quot;ext_size:%u ext_ref:0x%llx }\n&quot;</span>,
+			(uint64_t)VM_KERNEL_ADDRPERM(m-&gt;m_ext.ext_buf),
+			(uint64_t)VM_KERNEL_ADDRPERM(m-&gt;m_ext.ext_free),
+			m-&gt;m_ext.ext_size,
+			(uint64_t)VM_KERNEL_ADDRPERM(m-&gt;m_ext.ext_refs));
+	}
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_mbuf</span>(m0)
+	<span class="enscript-type">struct</span> mbuf *m0;
+{
+	<span class="enscript-type">struct</span> mbuf *m = m0;
+	<span class="enscript-type">int</span> i, j;
+
+	<span class="enscript-keyword">for</span> (j = 0; m; m = m-&gt;m_next) {
+		kdebug_mbufhdr(m);
+		printf(<span class="enscript-string">&quot;  m_data:\n&quot;</span>);
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; m-&gt;m_len; i++) {
+			<span class="enscript-keyword">if</span> (i &amp;&amp; i % 32 == 0)
+				printf(<span class="enscript-string">&quot;\n&quot;</span>);
+			<span class="enscript-keyword">if</span> (i % 4 == 0)
+				printf(<span class="enscript-string">&quot; &quot;</span>);
+			printf(<span class="enscript-string">&quot;%02x&quot;</span>, mtod(m, u_char *)[i]);
+			j++;
+		}
+		printf(<span class="enscript-string">&quot;\n&quot;</span>);
+	}
+
+	<span class="enscript-keyword">return</span>;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KERNEL */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kdebug_sockaddr</span>(addr)
+	<span class="enscript-type">struct</span> sockaddr *addr;
+{
+	<span class="enscript-type">struct</span> sockaddr_in *sin4;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-type">struct</span> sockaddr_in6 *sin6;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* sanity check */</span>
+	<span class="enscript-keyword">if</span> (addr == NULL)
+		panic(<span class="enscript-string">&quot;kdebug_sockaddr: NULL pointer was passed.\n&quot;</span>);
+
+	<span class="enscript-comment">/* NOTE: We deal with port number as host byte order. */</span>
+	printf(<span class="enscript-string">&quot;sockaddr{ len=%u family=%u&quot;</span>, addr-&gt;sa_len, addr-&gt;sa_family);
+
+	<span class="enscript-keyword">switch</span> (addr-&gt;sa_family) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET</span>:
+		sin4 = (<span class="enscript-type">struct</span> sockaddr_in *)addr;
+		printf(<span class="enscript-string">&quot; port=%u\n&quot;</span>, ntohs(sin4-&gt;sin_port));
+		ipsec_hexdump((caddr_t)&amp;sin4-&gt;sin_addr, <span class="enscript-keyword">sizeof</span>(sin4-&gt;sin_addr));
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">INET6</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET6</span>:
+		sin6 = (<span class="enscript-type">struct</span> sockaddr_in6 *)addr;
+		printf(<span class="enscript-string">&quot; port=%u\n&quot;</span>, ntohs(sin6-&gt;sin6_port));
+		printf(<span class="enscript-string">&quot;  flowinfo=0x%08x, scope_id=0x%08x\n&quot;</span>,
+		    sin6-&gt;sin6_flowinfo, sin6-&gt;sin6_scope_id);
+		ipsec_hexdump((caddr_t)&amp;sin6-&gt;sin6_addr,
+		    <span class="enscript-keyword">sizeof</span>(sin6-&gt;sin6_addr));
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+	}
+
+	printf(<span class="enscript-string">&quot;  }\n&quot;</span>);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipsec_bindump</span>(buf, len)
+	caddr_t buf;
+	<span class="enscript-type">int</span> len;
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; len; i++)
+		printf(<span class="enscript-string">&quot;%c&quot;</span>, (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)buf[i]);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipsec_hexdump</span>(buf, len)
+	caddr_t buf;
+	<span class="enscript-type">int</span> len;
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; len; i++) {
+		<span class="enscript-keyword">if</span> (i != 0 &amp;&amp; i % 32 == 0) printf(<span class="enscript-string">&quot;\n&quot;</span>);
+		<span class="enscript-keyword">if</span> (i % 4 == 0) printf(<span class="enscript-string">&quot; &quot;</span>);
+		printf(<span class="enscript-string">&quot;%02x&quot;</span>, (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)buf[i]);
+	}
+#<span class="enscript-reference">if</span> 0
+	<span class="enscript-keyword">if</span> (i % 32 != 0) printf(<span class="enscript-string">&quot;\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span>;
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !defined(KERNEL) || (defined(KERNEL) &amp;&amp; defined(IPSEC_DEBUG)) */</span>
+</pre>
+<hr />
+</body></html>

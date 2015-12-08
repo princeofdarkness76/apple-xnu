@@ -1,0 +1,295 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>setsegname.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">setsegname.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this
+ * file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;errno.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mman.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/swap.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdbool.h&gt;</span>
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">writeFile</span>(<span class="enscript-type">int</span> fd, <span class="enscript-type">const</span> <span class="enscript-type">void</span> * data, size_t length)
+{
+    <span class="enscript-type">int</span> error = 0;
+
+    <span class="enscript-keyword">if</span> (length != (size_t)write(fd, data, length)) {
+        error = -1;
+    }
+
+    <span class="enscript-keyword">if</span> (error != 0) {
+        perror(<span class="enscript-string">&quot;couldn't write output&quot;</span>);
+    }
+
+    <span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">readFile</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *path, vm_offset_t * objAddr, vm_size_t * objSize)
+{
+    <span class="enscript-type">int</span> error = -1;
+    <span class="enscript-type">int</span> fd;
+    <span class="enscript-type">struct</span> stat stat_buf;
+
+    *objAddr = 0;
+    *objSize = 0;
+
+    <span class="enscript-keyword">do</span> {
+        <span class="enscript-keyword">if</span> ((fd = open(path, O_RDONLY)) == -1) {
+            <span class="enscript-keyword">continue</span>;
+        }
+
+        <span class="enscript-keyword">if</span> (fstat(fd, &amp;stat_buf) == -1) {
+            <span class="enscript-keyword">continue</span>;
+        }
+
+        <span class="enscript-keyword">if</span> (0 == (stat_buf.st_mode &amp; S_IFREG)) {
+            <span class="enscript-keyword">continue</span>;
+        }
+
+        <span class="enscript-keyword">if</span> (0 == stat_buf.st_size) {
+            error = 0;
+            <span class="enscript-keyword">continue</span>;
+        }
+
+        *objSize = stat_buf.st_size;
+
+        *objAddr = (vm_offset_t)mmap(NULL <span class="enscript-comment">/* address */</span>, *objSize,
+            PROT_READ|PROT_WRITE, MAP_FILE|MAP_PRIVATE <span class="enscript-comment">/* flags */</span>,
+            fd, 0 <span class="enscript-comment">/* offset */</span>);
+
+        <span class="enscript-keyword">if</span> ((<span class="enscript-type">void</span> *)*objAddr == MAP_FAILED) {
+                *objAddr = 0;
+                *objSize = 0;
+            <span class="enscript-keyword">continue</span>;
+        }
+
+        error = 0;
+
+    } <span class="enscript-keyword">while</span> (false);
+
+    <span class="enscript-keyword">if</span> (-1 != fd) {
+        close(fd);
+    }
+    <span class="enscript-keyword">if</span> (error) {
+        fprintf(stderr, <span class="enscript-string">&quot;couldn't read %s: %s\n&quot;</span>, path, strerror(errno));
+    }
+
+    <span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">usage</span>(<span class="enscript-type">void</span>)
+{
+    fprintf(stderr, <span class="enscript-string">&quot;Usage: %s [-s OLDSEGNAME] -n NEWSEGNAME input -o output\n&quot;</span>, getprogname());
+    exit(1);
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">main</span>(<span class="enscript-type">int</span> argc, <span class="enscript-type">char</span> * argv[])
+{
+    <span class="enscript-type">int</span>                     error;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span>            * output_name = NULL;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span>            * input_name = NULL;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span>            * oldseg_name = NULL;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span>            * newseg_name = NULL;
+    <span class="enscript-type">struct</span> mach_header    * hdr;
+    <span class="enscript-type">struct</span> mach_header_64 * hdr64;
+    <span class="enscript-type">struct</span> load_command   * cmds;
+    boolean_t		        swap = false;
+    uint32_t		        ncmds, cmdtype;
+    uint32_t		        len;
+    vm_offset_t		        input;
+    vm_size_t		        input_size;
+    uint32_t		        nsects = 0;
+    uint32_t                * flags = NULL;
+    uint32_t		        attr;
+    <span class="enscript-type">typedef</span> <span class="enscript-type">char</span>            segname_t[16];
+    segname_t             * names = NULL;
+    <span class="enscript-type">int</span>                     ch;
+
+
+    <span class="enscript-keyword">while</span> ((ch = getopt(argc, argv, <span class="enscript-string">&quot;s:n:o:&quot;</span>)) != -1) {
+        <span class="enscript-keyword">switch</span> (ch) {
+            <span class="enscript-keyword">case</span> <span class="enscript-string">'s'</span>:
+                oldseg_name = optarg;
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-keyword">case</span> <span class="enscript-string">'n'</span>:
+                newseg_name = optarg;
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-keyword">case</span> <span class="enscript-string">'o'</span>:
+                output_name = optarg;
+                <span class="enscript-keyword">break</span>;
+            <span class="enscript-keyword">case</span> <span class="enscript-string">'?'</span>:
+            <span class="enscript-reference">default</span>:
+                usage();
+        }
+    }
+
+    argc -= optind;
+    argv += optind;
+
+	<span class="enscript-keyword">if</span> ((argc != 1) || !newseg_name || !output_name) {
+        usage();
+    }
+
+    input_name = argv[0];
+
+    error = readFile(input_name, &amp;input, &amp;input_size);
+    <span class="enscript-keyword">if</span> (error) {
+        exit(1);
+    }
+
+    hdr = (typeof(hdr)) input;
+    <span class="enscript-keyword">switch</span> (hdr-&gt;magic) {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">MH_CIGAM</span>:
+            swap = true;
+            <span class="enscript-comment">// fall thru
+</span>        <span class="enscript-keyword">case</span> <span class="enscript-reference">MH_MAGIC</span>:
+            ncmds = hdr-&gt;ncmds;
+            cmds  = (typeof(cmds)) (hdr+1);
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">MH_CIGAM_64</span>:
+            swap = true;
+            <span class="enscript-comment">// fall thru
+</span>        <span class="enscript-keyword">case</span> <span class="enscript-reference">MH_MAGIC_64</span>:
+            hdr64 = (typeof(hdr64)) hdr;
+            ncmds = hdr64-&gt;ncmds;
+            cmds  = (typeof(cmds)) (hdr64+1);
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-reference">default</span>:
+            fprintf(stderr, <span class="enscript-string">&quot;not macho input file\n&quot;</span>);
+            exit(1);
+            <span class="enscript-keyword">break</span>;
+    }
+
+    <span class="enscript-keyword">if</span> (swap) {
+        ncmds = OSSwapInt32(ncmds);
+    }
+    <span class="enscript-keyword">while</span> (ncmds--) {
+        cmdtype = cmds-&gt;cmd;
+        <span class="enscript-keyword">if</span> (swap) {
+            cmdtype = OSSwapInt32(cmdtype);
+        }
+        nsects = 0;
+        len    = 0;
+        <span class="enscript-keyword">if</span> (LC_SEGMENT == cmdtype) {
+            <span class="enscript-type">struct</span> segment_command * segcmd;
+            <span class="enscript-type">struct</span> section         * sects;
+
+            segcmd = (typeof(segcmd)) cmds;
+            nsects = segcmd-&gt;nsects;
+            sects  = (typeof(sects))(segcmd + 1);
+            names  = &amp;sects-&gt;segname;
+            flags  = &amp;sects-&gt;flags;
+            len    = <span class="enscript-keyword">sizeof</span>(*sects);
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (LC_SEGMENT_64 == cmdtype) {
+            <span class="enscript-type">struct</span> segment_command_64 * segcmd;
+            <span class="enscript-type">struct</span> section_64         * sects;
+
+            segcmd = (typeof(segcmd)) cmds;
+            nsects = segcmd-&gt;nsects;
+            sects  = (typeof(sects))(segcmd + 1);
+            names  = &amp;sects-&gt;segname;
+            flags  = &amp;sects-&gt;flags;
+            len    = <span class="enscript-keyword">sizeof</span>(*sects);
+        }
+
+        <span class="enscript-keyword">if</span> (swap)
+            nsects = OSSwapInt32(nsects);
+        <span class="enscript-keyword">while</span> (nsects--) {
+            attr = *flags;
+            <span class="enscript-keyword">if</span> (swap) {
+                attr = OSSwapInt32(attr);
+            }
+
+            <span class="enscript-keyword">if</span> (!(S_ATTR_DEBUG &amp; attr)) {
+                <span class="enscript-keyword">if</span> (!oldseg_name ||
+                    0 == strncmp(oldseg_name, (<span class="enscript-type">char</span> *)names, <span class="enscript-keyword">sizeof</span>(*names))) {
+                    memset(names, 0x0, <span class="enscript-keyword">sizeof</span>(*names));
+                    strncpy((<span class="enscript-type">char</span> *)names, newseg_name, <span class="enscript-keyword">sizeof</span>(*names));
+                }
+            }
+        
+            names = (typeof(names))(((uintptr_t) names) + len);
+            flags = (typeof(flags))(((uintptr_t) flags) + len);
+        }
+
+        len = cmds-&gt;cmdsize;
+        <span class="enscript-keyword">if</span> (swap) {
+            len = OSSwapInt32(len);
+        }
+        cmds = (typeof(cmds))(((uintptr_t) cmds) + len);
+    }
+
+    <span class="enscript-type">int</span> fd = open(output_name, O_WRONLY|O_CREAT|O_TRUNC, 0755);
+    <span class="enscript-keyword">if</span> (-1 == fd) {
+        error = -1;
+    } <span class="enscript-keyword">else</span> {
+        error = writeFile(fd, (<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) input, input_size);
+        close(fd);
+    }
+
+    <span class="enscript-keyword">if</span> (error) {
+        fprintf(stderr, <span class="enscript-string">&quot;couldn't write output: %s\n&quot;</span>, strerror(errno));
+        exit(1);
+    }
+
+    exit(0);
+    <span class="enscript-keyword">return</span> 0;
+}
+</pre>
+<hr />
+</body></html>

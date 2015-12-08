@@ -1,0 +1,1230 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>tty_dev.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">tty_dev.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1997-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1989, 1993
+ *      The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the University of
+ *      California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)tty_pty.c	8.4 (Berkeley) 2/20/95
+ */</span>
+
+<span class="enscript-comment">/* Common callbacks for the pseudo-teletype driver (pty/tty)
+ * and cloning pseudo-teletype driver (ptmx/pts).
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/tty.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>		<span class="enscript-comment">/* _devfs_setattr() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>			<span class="enscript-comment">/* _devfs_setattr() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signalvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/devfs/devfs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/devfs/devfsdefs.h&gt;</span>	<span class="enscript-comment">/* DEVFS_LOCK()/DEVFS_UNLOCK() */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;tty_dev.h&quot;</span>
+
+<span class="enscript-comment">/* XXX belongs in devfs somewhere - LATER */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">_devfs_setattr</span>(<span class="enscript-type">void</span> *, <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span>, uid_t, gid_t);
+
+<span class="enscript-comment">/*
+ * Forward declarations
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ptcwakeup</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">int</span> flag);
+__XNU_PRIVATE_EXTERN	d_open_t	ptsopen;
+__XNU_PRIVATE_EXTERN	d_close_t	ptsclose;
+__XNU_PRIVATE_EXTERN	d_read_t	ptsread;
+__XNU_PRIVATE_EXTERN	d_write_t	ptswrite;
+__XNU_PRIVATE_EXTERN	d_ioctl_t	ptyioctl;	<span class="enscript-comment">/* common ioctl */</span>
+__XNU_PRIVATE_EXTERN	d_stop_t	ptsstop;
+__XNU_PRIVATE_EXTERN	d_reset_t	ptsreset;
+__XNU_PRIVATE_EXTERN	d_select_t	ptsselect;
+__XNU_PRIVATE_EXTERN	d_open_t	ptcopen;
+__XNU_PRIVATE_EXTERN	d_close_t	ptcclose;
+__XNU_PRIVATE_EXTERN	d_read_t	ptcread;
+__XNU_PRIVATE_EXTERN	d_write_t	ptcwrite;
+__XNU_PRIVATE_EXTERN	d_stop_t	ptcstop;	<span class="enscript-comment">/* NO-OP */</span>
+__XNU_PRIVATE_EXTERN	d_reset_t	ptcreset;
+__XNU_PRIVATE_EXTERN	d_select_t	ptcselect;
+
+<span class="enscript-comment">/*
+ * XXX Should be devfs function... and use VATTR mechanisms, per
+ * XXX vnode_setattr2(); only we maybe can't really get back to the
+ * XXX vnode here for cloning devices (but it works for *cloned* devices
+ * XXX that are not themselves cloning).
+ *
+ * Returns:	0			Success
+ *	namei:???
+ *	vnode_setattr:???
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">_devfs_setattr</span>(<span class="enscript-type">void</span> * handle, <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> mode, uid_t uid, gid_t gid)
+{
+	devdirent_t		*direntp = (devdirent_t *)handle;
+	devnode_t		*devnodep;
+	<span class="enscript-type">int</span>			error = EACCES;
+	vfs_context_t		ctx = vfs_context_current();;
+	<span class="enscript-type">struct</span> vnode_attr	va;
+
+	VATTR_INIT(&amp;va);
+	VATTR_SET(&amp;va, va_uid, uid);
+	VATTR_SET(&amp;va, va_gid, gid);
+	VATTR_SET(&amp;va, va_mode, mode &amp; ALLPERMS);
+
+	<span class="enscript-comment">/*
+	 * If the TIOCPTYGRANT loses the race with the clone operation because
+	 * this function is not part of devfs, and therefore can't take the
+	 * devfs lock to protect the direntp update, then force user space to
+	 * redrive the grant request.
+	 */</span>
+	<span class="enscript-keyword">if</span> (direntp == NULL || (devnodep = direntp-&gt;de_dnp) == NULL) {
+		error = ERESTART;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Only do this if we are operating on device that doesn't clone
+	 * each time it's referenced.  We perform a lookup on the device
+	 * to insure we get the right instance.  We can't just use the call
+	 * to devfs_dntovn() to get the vp for the operation, because
+	 * dn_dvm may not have been initialized.
+	 */</span>
+	<span class="enscript-keyword">if</span> (devnodep-&gt;dn_clone == NULL) {
+		<span class="enscript-type">struct</span> nameidata nd;
+		<span class="enscript-type">char</span> name[128];
+
+		snprintf(name, <span class="enscript-keyword">sizeof</span>(name), <span class="enscript-string">&quot;/dev/%s&quot;</span>, direntp-&gt;de_name);
+		NDINIT(&amp;nd, LOOKUP, OP_SETATTR, FOLLOW, UIO_SYSSPACE, CAST_USER_ADDR_T(name), ctx);
+		error = namei(&amp;nd);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		error = vnode_setattr(nd.ni_vp, &amp;va, ctx);
+		vnode_put(nd.ni_vp);
+		nameidone(&amp;nd);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span>(error);
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BUFSIZ</span> 100		<span class="enscript-comment">/* Chunk size iomoved to/from user */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> tty_dev_t *tty_dev_head;
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">tty_dev_register</span>(<span class="enscript-type">struct</span> tty_dev_t *driver)
+{
+	<span class="enscript-keyword">if</span> (driver) {
+		driver-&gt;next = tty_dev_head;
+		tty_dev_head = driver;
+	}
+}
+
+<span class="enscript-comment">/*
+ * Given a minor number, return the corresponding structure for that minor
+ * number.  If there isn't one, and the create flag is specified, we create
+ * one if possible.
+ *
+ * Parameters:	minor			Minor number of ptmx device
+ *		open_flag		PF_OPEN_M	First open of master
+ *					PF_OPEN_S	First open of slave
+ *					0		Just want ioctl struct
+ *
+ * Returns:	NULL			Did not exist/could not create
+ *		!NULL			structure corresponding minor number
+ *
+ * Locks:	tty_lock() on ptmx_ioctl-&gt;pt_tty NOT held on entry or exit.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> tty_dev_t *
+<span class="enscript-function-name">pty_get_driver</span>(dev_t dev)
+{
+	<span class="enscript-type">int</span> major = major(dev);
+	<span class="enscript-type">struct</span> tty_dev_t *driver;
+	<span class="enscript-keyword">for</span> (driver = tty_dev_head; driver != NULL; driver = driver-&gt;next) {
+		<span class="enscript-keyword">if</span> ((driver-&gt;master == major || driver-&gt;slave == major)) {
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-keyword">return</span> driver;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ptmx_ioctl *
+<span class="enscript-function-name">pty_get_ioctl</span>(dev_t dev, <span class="enscript-type">int</span> open_flag, <span class="enscript-type">struct</span> tty_dev_t **out_driver)
+{
+	<span class="enscript-type">struct</span> tty_dev_t *driver = pty_get_driver(dev);
+	<span class="enscript-keyword">if</span> (out_driver) {
+		*out_driver = driver;
+	}
+	<span class="enscript-keyword">if</span> (driver &amp;&amp; driver-&gt;open) {
+		<span class="enscript-keyword">return</span> driver-&gt;open(minor(dev), open_flag);
+	}
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-comment">/*
+ * Locks:	tty_lock() of old_ptmx_ioctl-&gt;pt_tty NOT held for this call.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pty_free_ioctl</span>(dev_t dev, <span class="enscript-type">int</span> open_flag)
+{
+	<span class="enscript-type">struct</span> tty_dev_t *driver = pty_get_driver(dev);
+	<span class="enscript-keyword">if</span> (driver &amp;&amp; driver-&gt;free) {
+		<span class="enscript-keyword">return</span> driver-&gt;free(minor(dev), open_flag);
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pty_get_name</span>(dev_t dev, <span class="enscript-type">char</span> *buffer, size_t size)
+{
+	<span class="enscript-type">struct</span> tty_dev_t *driver = pty_get_driver(dev);
+	<span class="enscript-keyword">if</span> (driver &amp;&amp; driver-&gt;name) {
+		<span class="enscript-keyword">return</span> driver-&gt;name(minor(dev), buffer, size);
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptsopen</span>(dev_t dev, <span class="enscript-type">int</span> flag, __unused <span class="enscript-type">int</span> devtype, __unused <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> tty_dev_t *driver;
+	<span class="enscript-type">struct</span> ptmx_ioctl *pti = pty_get_ioctl(dev, PF_OPEN_S, &amp;driver);
+	<span class="enscript-keyword">if</span> (pti == NULL) {
+		<span class="enscript-keyword">return</span> ENXIO;
+	}
+	<span class="enscript-keyword">if</span> (!(pti-&gt;pt_flags &amp; PF_UNLOCKED)) {
+		<span class="enscript-keyword">return</span> EAGAIN;
+	}
+
+	<span class="enscript-type">struct</span> tty *tp = pti-&gt;pt_tty;
+	tty_lock(tp);
+
+	<span class="enscript-keyword">if</span> ((tp-&gt;t_state &amp; TS_ISOPEN) == 0) {
+		termioschars(&amp;tp-&gt;t_termios);	<span class="enscript-comment">/* Set up default chars */</span>
+		tp-&gt;t_iflag = TTYDEF_IFLAG;
+		tp-&gt;t_oflag = TTYDEF_OFLAG;
+		tp-&gt;t_lflag = TTYDEF_LFLAG;
+		tp-&gt;t_cflag = TTYDEF_CFLAG;
+		tp-&gt;t_ispeed = tp-&gt;t_ospeed = TTYDEF_SPEED;
+		ttsetwater(tp);		<span class="enscript-comment">/* would be done in xxparam() */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((tp-&gt;t_state &amp; TS_XCLUDE) &amp;&amp; kauth_cred_issuser(kauth_cred_get())) {
+	        error = EBUSY;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (tp-&gt;t_oproc)			<span class="enscript-comment">/* Ctrlr still around. */</span>
+		(<span class="enscript-type">void</span>)(*linesw[tp-&gt;t_line].l_modem)(tp, 1);
+	<span class="enscript-keyword">while</span> ((tp-&gt;t_state &amp; TS_CARR_ON) == 0) {
+		<span class="enscript-keyword">if</span> (flag&amp;FNONBLOCK)
+			<span class="enscript-keyword">break</span>;
+		error = ttysleep(tp, TSA_CARR_ON(tp), TTIPRI | PCATCH, __FUNCTION__, 0);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	error = (*linesw[tp-&gt;t_line].l_open)(dev, tp);
+	<span class="enscript-comment">/* Successful open; mark as open by the slave */</span>
+
+	pti-&gt;pt_flags |= PF_OPEN_S;
+	CLR(tp-&gt;t_state, TS_IOCTL_NOT_OK);
+	<span class="enscript-keyword">if</span> (error == 0)
+		ptcwakeup(tp, FREAD|FWRITE);
+
+<span class="enscript-reference">out</span>:
+	tty_unlock(tp);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptsclose</span>(dev_t dev, <span class="enscript-type">int</span> flag, __unused <span class="enscript-type">int</span> mode, __unused proc_t p)
+{
+	<span class="enscript-type">int</span> err;
+
+	<span class="enscript-comment">/*
+	 * This is temporary until the VSX conformance tests
+	 * are fixed.  They are hanging with a deadlock
+	 * where close() will not complete without t_timeout set
+	 */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">FIX_VSX_HANG</span>	1
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">FIX_VSX_HANG</span>
+	<span class="enscript-type">int</span> save_timeout;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-type">struct</span> tty_dev_t *driver;
+	<span class="enscript-type">struct</span> ptmx_ioctl *pti = pty_get_ioctl(dev, 0, &amp;driver);
+	<span class="enscript-type">struct</span> tty *tp;
+	
+	<span class="enscript-keyword">if</span> (pti == NULL)
+		<span class="enscript-keyword">return</span> (ENXIO);
+
+	tp = pti-&gt;pt_tty;
+	tty_lock(tp);
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">FIX_VSX_HANG</span>
+	save_timeout = tp-&gt;t_timeout;
+	tp-&gt;t_timeout = 60;
+#<span class="enscript-reference">endif</span>
+	err = (*linesw[tp-&gt;t_line].l_close)(tp, flag);
+	ptsstop(tp, FREAD|FWRITE);
+	(<span class="enscript-type">void</span>) ttyclose(tp);
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">FIX_VSX_HANG</span>
+	tp-&gt;t_timeout = save_timeout;
+#<span class="enscript-reference">endif</span>
+	tty_unlock(tp);
+
+	<span class="enscript-keyword">if</span> ((flag &amp; IO_REVOKE) == IO_REVOKE &amp;&amp; driver-&gt;revoke) {
+		driver-&gt;revoke(minor(dev), tp);
+	}
+	<span class="enscript-comment">/* unconditional, just like ttyclose() */</span>
+	pty_free_ioctl(dev, PF_OPEN_S);
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptsread</span>(dev_t dev, <span class="enscript-type">struct</span> uio *uio, <span class="enscript-type">int</span> flag)
+{
+	proc_t p = current_proc();
+	<span class="enscript-type">struct</span> ptmx_ioctl *pti = pty_get_ioctl(dev, 0, NULL);
+	<span class="enscript-type">struct</span> tty *tp;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> uthread *ut;
+	<span class="enscript-type">struct</span> pgrp *pg;
+
+	<span class="enscript-keyword">if</span> (pti == NULL)
+		<span class="enscript-keyword">return</span> (ENXIO);
+	tp = pti-&gt;pt_tty;
+	tty_lock(tp);
+
+	ut = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(current_thread());
+<span class="enscript-reference">again</span>:
+	<span class="enscript-keyword">if</span> (pti-&gt;pt_flags &amp; PF_REMOTE) {
+		<span class="enscript-keyword">while</span> (isbackground(p, tp)) {
+			<span class="enscript-keyword">if</span> ((p-&gt;p_sigignore &amp; sigmask(SIGTTIN)) ||
+			    (ut-&gt;uu_sigmask &amp; sigmask(SIGTTIN)) ||
+			    p-&gt;p_lflag &amp; P_LPPWAIT) {
+				error = EIO;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+
+
+			pg = proc_pgrp(p);
+			<span class="enscript-keyword">if</span> (pg == PGRP_NULL) {
+				error = EIO;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			<span class="enscript-comment">/*
+			 * SAFE: We about to drop the lock ourselves by
+			 * SAFE: erroring out or sleeping anyway.
+			 */</span>
+			tty_unlock(tp);
+			<span class="enscript-keyword">if</span> (pg-&gt;pg_jobc == 0) {
+				pg_rele(pg);
+				tty_lock(tp);
+				error = EIO;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			pgsignal(pg, SIGTTIN, 1);
+			pg_rele(pg);
+			tty_lock(tp);
+
+			error = ttysleep(tp, &amp;ptsread, TTIPRI | PCATCH | PTTYBLOCK, __FUNCTION__, hz);
+			<span class="enscript-keyword">if</span> (error)
+			        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-keyword">if</span> (tp-&gt;t_canq.c_cc == 0) {
+			<span class="enscript-keyword">if</span> (flag &amp; IO_NDELAY) {
+				error = EWOULDBLOCK;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			error = ttysleep(tp, TSA_PTS_READ(tp), TTIPRI | PCATCH, __FUNCTION__, 0);
+			<span class="enscript-keyword">if</span> (error)
+			        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+		}
+		<span class="enscript-keyword">while</span> (tp-&gt;t_canq.c_cc &gt; 1 &amp;&amp; uio_resid(uio) &gt; 0) {
+			<span class="enscript-type">int</span> cc;
+			<span class="enscript-type">char</span> buf[BUFSIZ];
+
+			cc = MIN((<span class="enscript-type">int</span>)uio_resid(uio), BUFSIZ);
+			<span class="enscript-comment">// Don't copy the very last byte
+</span>			cc = MIN(cc, tp-&gt;t_canq.c_cc - 1);
+			cc = q_to_b(&amp;tp-&gt;t_canq, (u_char *)buf, cc);
+			error = uiomove(buf, cc, uio);
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (tp-&gt;t_canq.c_cc == 1)
+			(<span class="enscript-type">void</span>) getc(&amp;tp-&gt;t_canq);
+		<span class="enscript-keyword">if</span> (tp-&gt;t_canq.c_cc)
+		        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	} <span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">if</span> (tp-&gt;t_oproc)
+			error = (*linesw[tp-&gt;t_line].l_read)(tp, uio, flag);
+	ptcwakeup(tp, FWRITE);
+<span class="enscript-reference">out</span>:
+	tty_unlock(tp);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Write to pseudo-tty.
+ * Wakeups of controlling tty will happen
+ * indirectly, when tty driver calls ptsstart.
+ */</span>
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptswrite</span>(dev_t dev, <span class="enscript-type">struct</span> uio *uio, <span class="enscript-type">int</span> flag)
+{
+	<span class="enscript-type">struct</span> ptmx_ioctl *pti = pty_get_ioctl(dev, 0, NULL);
+	<span class="enscript-type">struct</span> tty *tp;
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (pti == NULL)
+		<span class="enscript-keyword">return</span> (ENXIO);
+	tp = pti-&gt;pt_tty;
+	tty_lock(tp);
+
+	<span class="enscript-keyword">if</span> (tp-&gt;t_oproc == 0)
+		error = EIO;
+	<span class="enscript-keyword">else</span>
+	        error = (*linesw[tp-&gt;t_line].l_write)(tp, uio, flag);
+
+	tty_unlock(tp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Start output on pseudo-tty.
+ * Wake up process selecting or sleeping for input from controlling tty.
+ *
+ * t_oproc for this driver; called from within the line discipline
+ *
+ * Locks:	Assumes tp is locked on entry, remains locked on exit
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ptsstart</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	<span class="enscript-type">struct</span> ptmx_ioctl *pti = pty_get_ioctl(tp-&gt;t_dev, 0, NULL);
+	<span class="enscript-keyword">if</span> (pti == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	<span class="enscript-keyword">if</span> (tp-&gt;t_state &amp; TS_TTSTOP)
+	        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	<span class="enscript-keyword">if</span> (pti-&gt;pt_flags &amp; PF_STOPPED) {
+		pti-&gt;pt_flags &amp;= ~PF_STOPPED;
+		pti-&gt;pt_send = TIOCPKT_START;
+	}
+	ptcwakeup(tp, FREAD);
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * Locks:	Assumes tty_lock() is held over this call.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ptcwakeup</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">int</span> flag)
+{
+	<span class="enscript-type">struct</span> ptmx_ioctl *pti = pty_get_ioctl(tp-&gt;t_dev, 0, NULL);
+	<span class="enscript-keyword">if</span> (pti == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (flag &amp; FREAD) {
+		selwakeup(&amp;pti-&gt;pt_selr);
+		wakeup(TSA_PTC_READ(tp));
+	}
+	<span class="enscript-keyword">if</span> (flag &amp; FWRITE) {
+		selwakeup(&amp;pti-&gt;pt_selw);
+		wakeup(TSA_PTC_WRITE(tp));
+	}
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptcopen</span>(dev_t dev, __unused <span class="enscript-type">int</span> flag, __unused <span class="enscript-type">int</span> devtype, __unused proc_t p)
+{
+	<span class="enscript-type">struct</span> tty_dev_t *driver;
+	<span class="enscript-type">struct</span> ptmx_ioctl *pti = pty_get_ioctl(dev, PF_OPEN_M, &amp;driver);
+	<span class="enscript-keyword">if</span> (pti == NULL) {
+	        <span class="enscript-keyword">return</span> (ENXIO);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (pti == (<span class="enscript-type">struct</span> ptmx_ioctl*)-1) {
+		<span class="enscript-keyword">return</span> (EREDRIVEOPEN);
+	}
+
+	<span class="enscript-type">struct</span> tty *tp = pti-&gt;pt_tty;
+	tty_lock(tp);
+
+	<span class="enscript-comment">/* If master is open OR slave is still draining, pty is still busy */</span>
+	<span class="enscript-keyword">if</span> (tp-&gt;t_oproc || (tp-&gt;t_state &amp; TS_ISOPEN)) {
+		tty_unlock(tp);
+		<span class="enscript-comment">/*
+		 * If master is closed, we are the only reference, so we
+		 * need to clear the master open bit
+		 */</span>
+		<span class="enscript-keyword">if</span> (!tp-&gt;t_oproc) {
+			pty_free_ioctl(dev, PF_OPEN_M);
+		}
+		<span class="enscript-keyword">return</span> EBUSY;
+	}
+	tp-&gt;t_oproc = ptsstart;
+	CLR(tp-&gt;t_state, TS_ZOMBIE);
+	SET(tp-&gt;t_state, TS_IOCTL_NOT_OK);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">sun4c</span>
+	tp-&gt;t_stop = ptsstop;
+#<span class="enscript-reference">endif</span>
+	(<span class="enscript-type">void</span>)(*linesw[tp-&gt;t_line].l_modem)(tp, 1);
+	tp-&gt;t_lflag &amp;= ~EXTPROC;
+
+	<span class="enscript-keyword">if</span> (driver-&gt;open_reset) {
+		pti-&gt;pt_flags = PF_UNLOCKED;
+		pti-&gt;pt_send = 0;
+		pti-&gt;pt_ucntl = 0;
+	}
+
+	tty_unlock(tp);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptcclose</span>(dev_t dev, __unused <span class="enscript-type">int</span> flags, __unused <span class="enscript-type">int</span> fmt, __unused proc_t p)
+{
+	<span class="enscript-type">struct</span> tty_dev_t *driver;
+	<span class="enscript-type">struct</span> ptmx_ioctl *pti = pty_get_ioctl(dev, 0, &amp;driver);
+	<span class="enscript-type">struct</span> tty *tp;
+
+	<span class="enscript-keyword">if</span> (pti == NULL)
+		<span class="enscript-keyword">return</span> (ENXIO);
+	tp = pti-&gt;pt_tty;
+	tty_lock(tp);
+
+	(<span class="enscript-type">void</span>)(*linesw[tp-&gt;t_line].l_modem)(tp, 0);
+
+	<span class="enscript-comment">/*
+	 * XXX MDMBUF makes no sense for ptys but would inhibit the above
+	 * l_modem().  CLOCAL makes sense but isn't supported.   Special
+	 * l_modem()s that ignore carrier drop make no sense for ptys but
+	 * may be in use because other parts of the line discipline make
+	 * sense for ptys.  Recover by doing everything that a normal
+	 * ttymodem() would have done except for sending a SIGHUP.
+	 */</span>
+	<span class="enscript-keyword">if</span> (tp-&gt;t_state &amp; TS_ISOPEN) {
+		tp-&gt;t_state &amp;= ~(TS_CARR_ON | TS_CONNECTED);
+		tp-&gt;t_state |= TS_ZOMBIE;
+		ttyflush(tp, FREAD | FWRITE);
+	}
+
+	tp-&gt;t_oproc = 0;		<span class="enscript-comment">/* mark closed */</span>
+
+	tty_unlock(tp);
+
+	pty_free_ioctl(dev, PF_OPEN_M);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-keyword">if</span> (driver-&gt;mac_notify) {
+		mac_pty_notify_close(p, tp, dev, NULL);
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptcread</span>(dev_t dev, <span class="enscript-type">struct</span> uio *uio, <span class="enscript-type">int</span> flag)
+{
+	<span class="enscript-type">struct</span> ptmx_ioctl *pti = pty_get_ioctl(dev, 0, NULL);
+	<span class="enscript-type">struct</span> tty *tp;
+	<span class="enscript-type">char</span> buf[BUFSIZ];
+	<span class="enscript-type">int</span> error = 0, cc;
+
+	<span class="enscript-keyword">if</span> (pti == NULL)
+		<span class="enscript-keyword">return</span> (ENXIO);
+	tp = pti-&gt;pt_tty;
+	tty_lock(tp);
+
+	<span class="enscript-comment">/*
+	 * We want to block until the slave
+	 * is open, and there's something to read;
+	 * but if we lost the slave or we're NBIO,
+	 * then return the appropriate error instead.
+	 */</span>
+	<span class="enscript-keyword">for</span> (;;) {
+		<span class="enscript-keyword">if</span> (tp-&gt;t_state &amp; TS_ISOPEN) {
+			<span class="enscript-keyword">if</span> (pti-&gt;pt_flags &amp; PF_PKT &amp;&amp; pti-&gt;pt_send) {
+				error = ureadc((<span class="enscript-type">int</span>)pti-&gt;pt_send, uio);
+				<span class="enscript-keyword">if</span> (error)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+				<span class="enscript-keyword">if</span> (pti-&gt;pt_send &amp; TIOCPKT_IOCTL) {
+					cc = MIN((<span class="enscript-type">int</span>)uio_resid(uio),
+						(<span class="enscript-type">int</span>)<span class="enscript-keyword">sizeof</span>(tp-&gt;t_termios));
+					uiomove((caddr_t)&amp;tp-&gt;t_termios, cc,
+						uio);
+				}
+				pti-&gt;pt_send = 0;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			<span class="enscript-keyword">if</span> (pti-&gt;pt_flags &amp; PF_UCNTL &amp;&amp; pti-&gt;pt_ucntl) {
+				error = ureadc((<span class="enscript-type">int</span>)pti-&gt;pt_ucntl, uio);
+				<span class="enscript-keyword">if</span> (error)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+				pti-&gt;pt_ucntl = 0;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			<span class="enscript-keyword">if</span> (tp-&gt;t_outq.c_cc &amp;&amp; (tp-&gt;t_state&amp;TS_TTSTOP) == 0)
+				<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> ((tp-&gt;t_state &amp; TS_CONNECTED) == 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;	<span class="enscript-comment">/* EOF */</span>
+		<span class="enscript-keyword">if</span> (flag &amp; IO_NDELAY) {
+			error = EWOULDBLOCK;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		error = ttysleep(tp, TSA_PTC_READ(tp), TTIPRI | PCATCH, __FUNCTION__, 0);
+		<span class="enscript-keyword">if</span> (error)
+		        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (pti-&gt;pt_flags &amp; (PF_PKT|PF_UCNTL))
+		error = ureadc(0, uio);
+	<span class="enscript-keyword">while</span> (uio_resid(uio) &gt; 0 &amp;&amp; error == 0) {
+		cc = q_to_b(&amp;tp-&gt;t_outq, (u_char *)buf, MIN((<span class="enscript-type">int</span>)uio_resid(uio), BUFSIZ));
+		<span class="enscript-keyword">if</span> (cc &lt;= 0)
+			<span class="enscript-keyword">break</span>;
+		error = uiomove(buf, cc, uio);
+	}
+	(*linesw[tp-&gt;t_line].l_start)(tp);
+
+<span class="enscript-reference">out</span>:
+	tty_unlock(tp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Line discipline callback
+ *
+ * Locks:	tty_lock() is assumed held on entry and exit.
+ */</span>
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptsstop</span>(<span class="enscript-type">struct</span> tty* tp, <span class="enscript-type">int</span> flush)
+{
+	<span class="enscript-type">struct</span> ptmx_ioctl *pti = pty_get_ioctl(tp-&gt;t_dev, 0, NULL);
+	<span class="enscript-type">int</span> flag;
+
+	<span class="enscript-keyword">if</span> (pti == NULL)
+		<span class="enscript-keyword">return</span> (ENXIO);
+
+	<span class="enscript-comment">/* note: FLUSHREAD and FLUSHWRITE already ok */</span>
+	<span class="enscript-keyword">if</span> (flush == 0) {
+		flush = TIOCPKT_STOP;
+		pti-&gt;pt_flags |= PF_STOPPED;
+	} <span class="enscript-keyword">else</span>
+		pti-&gt;pt_flags &amp;= ~PF_STOPPED;
+	pti-&gt;pt_send |= flush;
+	<span class="enscript-comment">/* change of perspective */</span>
+	flag = 0;
+	<span class="enscript-keyword">if</span> (flush &amp; FREAD)
+		flag |= FWRITE;
+	<span class="enscript-keyword">if</span> (flush &amp; FWRITE)
+		flag |= FREAD;
+	ptcwakeup(tp, flag);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptsreset</span>(__unused <span class="enscript-type">int</span> uban)
+{
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ptsselect</span>(dev_t dev, <span class="enscript-type">int</span> rw, <span class="enscript-type">void</span> *wql, proc_t p)
+{
+	<span class="enscript-type">struct</span> ptmx_ioctl *pti = pty_get_ioctl(dev, 0, NULL);
+	<span class="enscript-type">struct</span> tty *tp;
+	<span class="enscript-type">int</span> retval = 0;
+
+	<span class="enscript-keyword">if</span> (pti == NULL)
+		<span class="enscript-keyword">return</span> (ENXIO);
+	tp = pti-&gt;pt_tty;
+	<span class="enscript-keyword">if</span> (tp == NULL)
+		<span class="enscript-keyword">return</span> (ENXIO);
+
+	tty_lock(tp);
+
+	<span class="enscript-keyword">switch</span> (rw) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FREAD</span>:
+		<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_ZOMBIE)) {
+			retval = 1;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		retval = ttnread(tp);
+		<span class="enscript-keyword">if</span> (retval &gt; 0) {
+			<span class="enscript-keyword">break</span>;
+		}
+
+		selrecord(p, &amp;tp-&gt;t_rsel, wql);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FWRITE</span>:
+		<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_ZOMBIE)) {
+			retval = 1;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> ((tp-&gt;t_outq.c_cc &lt;= tp-&gt;t_lowat) &amp;&amp;
+				ISSET(tp-&gt;t_state, TS_CONNECTED)) {
+			retval = tp-&gt;t_hiwat - tp-&gt;t_outq.c_cc;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		selrecord(p, &amp;tp-&gt;t_wsel, wql);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	tty_unlock(tp);
+	<span class="enscript-keyword">return</span> (retval);
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptcselect</span>(dev_t dev, <span class="enscript-type">int</span> rw, <span class="enscript-type">void</span> *wql, proc_t p)
+{
+	<span class="enscript-type">struct</span> tty_dev_t *driver;
+	<span class="enscript-type">struct</span> ptmx_ioctl *pti = pty_get_ioctl(dev, 0, &amp;driver);
+	<span class="enscript-type">struct</span> tty *tp;
+	<span class="enscript-type">int</span> retval = 0;
+
+	<span class="enscript-keyword">if</span> (pti == NULL)
+		<span class="enscript-keyword">return</span> (ENXIO);
+	tp = pti-&gt;pt_tty;
+	tty_lock(tp);
+
+	<span class="enscript-keyword">if</span> ((tp-&gt;t_state &amp; TS_CONNECTED) == 0) {
+		retval = 1;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">switch</span> (rw) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FREAD</span>:
+		<span class="enscript-comment">/*
+		 * Need to block timeouts (ttrstart).
+		 */</span>
+		<span class="enscript-keyword">if</span> ((tp-&gt;t_state&amp;TS_ISOPEN) &amp;&amp;
+		     tp-&gt;t_outq.c_cc &amp;&amp; (tp-&gt;t_state&amp;TS_TTSTOP) == 0) {
+			retval = (driver-&gt;fix_7828447) ? tp-&gt;t_outq.c_cc : 1;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/* FALLTHROUGH */</span>
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:					<span class="enscript-comment">/* exceptional */</span>
+		<span class="enscript-keyword">if</span> ((tp-&gt;t_state&amp;TS_ISOPEN) &amp;&amp;
+		    ((pti-&gt;pt_flags &amp; PF_PKT &amp;&amp; pti-&gt;pt_send) ||
+		     (pti-&gt;pt_flags &amp; PF_UCNTL &amp;&amp; pti-&gt;pt_ucntl))) {
+			retval = 1;
+			<span class="enscript-keyword">break</span>;
+		}
+		selrecord(p, &amp;pti-&gt;pt_selr, wql);
+		<span class="enscript-keyword">break</span>;
+
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FWRITE</span>:
+		<span class="enscript-keyword">if</span> (tp-&gt;t_state&amp;TS_ISOPEN) {
+			<span class="enscript-keyword">if</span> (pti-&gt;pt_flags &amp; PF_REMOTE) {
+			    <span class="enscript-keyword">if</span> (tp-&gt;t_canq.c_cc == 0) {
+				retval = (driver-&gt;fix_7828447) ? (TTYHOG - 1) : 1;
+				<span class="enscript-keyword">break</span>;
+			    }
+			} <span class="enscript-keyword">else</span> {
+			    retval = (TTYHOG - 2) - (tp-&gt;t_rawq.c_cc + tp-&gt;t_canq.c_cc);
+			    <span class="enscript-keyword">if</span> (retval &gt; 0) {
+				    retval = (driver-&gt;fix_7828447) ? retval : 1;
+				    <span class="enscript-keyword">break</span>;
+			    }
+			    <span class="enscript-keyword">if</span> (tp-&gt;t_canq.c_cc == 0 &amp;&amp; (tp-&gt;t_lflag&amp;ICANON)) {
+				    retval = 1;
+				    <span class="enscript-keyword">break</span>;
+			    }
+			    retval = 0;
+			}
+		}
+		selrecord(p, &amp;pti-&gt;pt_selw, wql);
+		<span class="enscript-keyword">break</span>;
+
+	}
+<span class="enscript-reference">out</span>:
+	tty_unlock(tp);
+
+	<span class="enscript-keyword">return</span> (retval);
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptcstop</span>(__unused <span class="enscript-type">struct</span> tty *tp, __unused <span class="enscript-type">int</span> flush)
+{
+	<span class="enscript-keyword">return</span> (0);
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptcreset</span>(__unused <span class="enscript-type">int</span> uban)
+{
+	<span class="enscript-keyword">return</span> (0);
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptcwrite</span>(dev_t dev, <span class="enscript-type">struct</span> uio *uio, <span class="enscript-type">int</span> flag)
+{
+	<span class="enscript-type">struct</span> ptmx_ioctl *pti = pty_get_ioctl(dev, 0, NULL);
+	<span class="enscript-type">struct</span> tty *tp;
+	u_char *cp = NULL;
+	<span class="enscript-type">int</span> cc = 0;
+	u_char locbuf[BUFSIZ];
+	<span class="enscript-type">int</span> wcnt = 0;
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-keyword">if</span> (pti == NULL)
+		<span class="enscript-keyword">return</span> (ENXIO);
+	tp = pti-&gt;pt_tty;
+	tty_lock(tp);
+
+<span class="enscript-reference">again</span>:
+	<span class="enscript-keyword">if</span> ((tp-&gt;t_state &amp; TS_ISOPEN) == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">block</span>;
+	<span class="enscript-keyword">if</span> (pti-&gt;pt_flags &amp; PF_REMOTE) {
+		<span class="enscript-keyword">if</span> (tp-&gt;t_canq.c_cc)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">block</span>;
+		<span class="enscript-keyword">while</span> ((uio_resid(uio) &gt; 0 || cc &gt; 0) &amp;&amp;
+		       tp-&gt;t_canq.c_cc &lt; TTYHOG - 1) {
+			<span class="enscript-keyword">if</span> (cc == 0) {
+				cc = MIN((<span class="enscript-type">int</span>)uio_resid(uio), BUFSIZ);
+				cc = MIN(cc, TTYHOG - 1 - tp-&gt;t_canq.c_cc);
+				cp = locbuf;
+				error = uiomove((caddr_t)cp, cc, uio);
+				<span class="enscript-keyword">if</span> (error)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+				<span class="enscript-comment">/* check again for safety */</span>
+				<span class="enscript-keyword">if</span> ((tp-&gt;t_state &amp; TS_ISOPEN) == 0) {
+					<span class="enscript-comment">/* adjust as usual */</span>
+					uio_setresid(uio, (uio_resid(uio) + cc));
+					error = EIO;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+				}
+			}
+			<span class="enscript-keyword">if</span> (cc &gt; 0) {
+				cc = b_to_q((u_char *)cp, cc, &amp;tp-&gt;t_canq);
+				<span class="enscript-comment">/*
+				 * XXX we don't guarantee that the canq size
+				 * is &gt;= TTYHOG, so the above b_to_q() may
+				 * leave some bytes uncopied.  However, space
+				 * is guaranteed for the null terminator if
+				 * we don't fail here since (TTYHOG - 1) is
+				 * not a multiple of CBSIZE.
+				 */</span>
+				<span class="enscript-keyword">if</span> (cc &gt; 0)
+					<span class="enscript-keyword">break</span>;
+			}
+		}
+		<span class="enscript-comment">/* adjust for data copied in but not written */</span>
+		uio_setresid(uio, (uio_resid(uio) + cc));
+		(<span class="enscript-type">void</span>) putc(0, &amp;tp-&gt;t_canq);
+		ttwakeup(tp);
+		wakeup(TSA_PTS_READ(tp));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">while</span> (uio_resid(uio) &gt; 0 || cc &gt; 0) {
+		<span class="enscript-keyword">if</span> (cc == 0) {
+			cc = MIN((<span class="enscript-type">int</span>)uio_resid(uio), BUFSIZ);
+			cp = locbuf;
+			error = uiomove((caddr_t)cp, cc, uio);
+			<span class="enscript-keyword">if</span> (error)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			<span class="enscript-comment">/* check again for safety */</span>
+			<span class="enscript-keyword">if</span> ((tp-&gt;t_state &amp; TS_ISOPEN) == 0) {
+				<span class="enscript-comment">/* adjust for data copied in but not written */</span>
+				uio_setresid(uio, (uio_resid(uio) + cc));
+				error = EIO;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+		}
+		<span class="enscript-keyword">while</span> (cc &gt; 0) {
+			<span class="enscript-keyword">if</span> ((tp-&gt;t_rawq.c_cc + tp-&gt;t_canq.c_cc) &gt;= TTYHOG - 2 &amp;&amp;
+			   (tp-&gt;t_canq.c_cc &gt; 0 || !(tp-&gt;t_lflag&amp;ICANON))) {
+				wakeup(TSA_HUP_OR_INPUT(tp));
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">block</span>;
+			}
+			(*linesw[tp-&gt;t_line].l_rint)(*cp++, tp);
+			wcnt++;
+			cc--;
+		}
+		cc = 0;
+	}
+<span class="enscript-reference">out</span>:
+	tty_unlock(tp);
+
+	<span class="enscript-keyword">return</span> (error);
+
+<span class="enscript-reference">block</span>:
+	<span class="enscript-comment">/*
+	 * Come here to wait for slave to open, for space
+	 * in outq, or space in rawq, or an empty canq.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((tp-&gt;t_state &amp; TS_CONNECTED) == 0) {
+		<span class="enscript-comment">/* adjust for data copied in but not written */</span>
+		uio_setresid(uio, (uio_resid(uio) + cc));
+		error = EIO;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (flag &amp; IO_NDELAY) {
+		<span class="enscript-comment">/* adjust for data copied in but not written */</span>
+		uio_setresid(uio, (uio_resid(uio) + cc));
+		<span class="enscript-keyword">if</span> (wcnt == 0)
+			error = EWOULDBLOCK;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	error = ttysleep(tp, TSA_PTC_WRITE(tp), TTOPRI | PCATCH, __FUNCTION__, 0);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-comment">/* adjust for data copied in but not written */</span>
+		uio_setresid(uio, (uio_resid(uio) + cc));
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ptyioctl</span>(dev_t dev, u_long cmd, caddr_t data, <span class="enscript-type">int</span> flag, <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">struct</span> tty_dev_t *driver;
+	<span class="enscript-type">struct</span> ptmx_ioctl *pti = pty_get_ioctl(dev, 0, &amp;driver);
+	<span class="enscript-type">struct</span> tty *tp;
+	<span class="enscript-type">int</span> stop, error = 0;
+	<span class="enscript-type">int</span> allow_ext_ioctl = 1;
+
+	<span class="enscript-keyword">if</span> (pti == NULL)
+		<span class="enscript-keyword">return</span> (ENXIO);
+	tp = pti-&gt;pt_tty;
+	tty_lock(tp);
+
+	u_char *cc = tp-&gt;t_cc;
+
+	<span class="enscript-comment">/*
+	 * Do not permit extended ioctls on the master side of the pty unless
+	 * the slave side has been successfully opened and initialized.
+	 */</span>
+	<span class="enscript-keyword">if</span> (major(dev) == driver-&gt;master &amp;&amp;
+	    driver-&gt;fix_7070978 &amp;&amp;
+	    ISSET(tp-&gt;t_state, TS_IOCTL_NOT_OK)) {
+		allow_ext_ioctl = 0;
+	}
+
+	<span class="enscript-comment">/*
+	 * IF CONTROLLER STTY THEN MUST FLUSH TO PREVENT A HANG.
+	 * ttywflush(tp) will hang if there are characters in the outq.
+	 */</span>
+	<span class="enscript-keyword">if</span> (cmd == TIOCEXT &amp;&amp; allow_ext_ioctl) {
+		<span class="enscript-comment">/*
+		 * When the EXTPROC bit is being toggled, we need
+		 * to send an TIOCPKT_IOCTL if the packet driver
+		 * is turned on.
+		 */</span>
+		<span class="enscript-keyword">if</span> (*(<span class="enscript-type">int</span> *)data) {
+			<span class="enscript-keyword">if</span> (pti-&gt;pt_flags &amp; PF_PKT) {
+				pti-&gt;pt_send |= TIOCPKT_IOCTL;
+				ptcwakeup(tp, FREAD);
+			}
+			tp-&gt;t_lflag |= EXTPROC;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> ((tp-&gt;t_lflag &amp; EXTPROC) &amp;&amp;
+			    (pti-&gt;pt_flags &amp; PF_PKT)) {
+				pti-&gt;pt_send |= TIOCPKT_IOCTL;
+				ptcwakeup(tp, FREAD);
+			}
+			tp-&gt;t_lflag &amp;= ~EXTPROC;
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	} <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">if</span> (cdevsw[major(dev)].d_open == ptcopen) {
+		<span class="enscript-keyword">switch</span> (cmd) {
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCGPGRP</span>:
+			<span class="enscript-comment">/*
+			 * We aviod calling ttioctl on the controller since,
+			 * in that case, tp must be the controlling terminal.
+			 */</span>
+			*(<span class="enscript-type">int</span> *)data = tp-&gt;t_pgrp ? tp-&gt;t_pgrp-&gt;pg_id : 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCPKT</span>:
+			<span class="enscript-keyword">if</span> (*(<span class="enscript-type">int</span> *)data) {
+			        <span class="enscript-keyword">if</span> (pti-&gt;pt_flags &amp; PF_UCNTL) {
+					error = EINVAL;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+				}
+				pti-&gt;pt_flags |= PF_PKT;
+			} <span class="enscript-keyword">else</span>
+				pti-&gt;pt_flags &amp;= ~PF_PKT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCUCNTL</span>:
+			<span class="enscript-keyword">if</span> (*(<span class="enscript-type">int</span> *)data) {
+			        <span class="enscript-keyword">if</span> (pti-&gt;pt_flags &amp; PF_PKT) {
+					error = EINVAL;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+				}
+				pti-&gt;pt_flags |= PF_UCNTL;
+			} <span class="enscript-keyword">else</span>
+				pti-&gt;pt_flags &amp;= ~PF_UCNTL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCREMOTE</span>:
+			<span class="enscript-keyword">if</span> (*(<span class="enscript-type">int</span> *)data)
+				pti-&gt;pt_flags |= PF_REMOTE;
+			<span class="enscript-keyword">else</span>
+				pti-&gt;pt_flags &amp;= ~PF_REMOTE;
+			ttyflush(tp, FREAD|FWRITE);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETP</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETN</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETD</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETA_32</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETAW_32</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETAF_32</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETA_64</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETAW_64</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETAF_64</span>:
+			ndflush(&amp;tp-&gt;t_outq, tp-&gt;t_outq.c_cc);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSIG</span>:
+			<span class="enscript-keyword">if</span> (*(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *)data &gt;= NSIG ||
+			    *(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *)data == 0) {
+				error = EINVAL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			<span class="enscript-keyword">if</span> ((tp-&gt;t_lflag&amp;NOFLSH) == 0)
+				ttyflush(tp, FREAD|FWRITE);
+			<span class="enscript-keyword">if</span> ((*(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *)data == SIGINFO) &amp;&amp;
+			    ((tp-&gt;t_lflag&amp;NOKERNINFO) == 0))
+				ttyinfo_locked(tp);
+			<span class="enscript-comment">/*
+			 * SAFE: All callers drop the lock on return and
+			 * SAFE: the linesw[] will short circut this call
+			 * SAFE: if the ioctl() is eaten before the lower
+			 * SAFE: level code gets to see it.
+			 */</span>
+			tty_unlock(tp);
+			tty_pgsignal(tp, *(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *)data, 1);
+			tty_lock(tp);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCPTYGRANT</span>:	<span class="enscript-comment">/* grantpt(3) */</span>
+			<span class="enscript-comment">/*
+			 * Change the uid of the slave to that of the calling
+			 * thread, change the gid of the slave to GID_TTY,
+			 * change the mode to 0620 (rw--w----).
+			 */</span>
+			{
+				error = _devfs_setattr(pti-&gt;pt_devhandle, 0620, kauth_getuid(), GID_TTY);
+				<span class="enscript-keyword">if</span> (major(dev) == driver-&gt;master) {
+					<span class="enscript-keyword">if</span> (driver-&gt;mac_notify) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+						<span class="enscript-keyword">if</span> (!error) {
+							tty_unlock(tp);
+							mac_pty_notify_grant(p, tp, dev, NULL);
+							tty_lock(tp);
+						}
+#<span class="enscript-reference">endif</span>
+					} <span class="enscript-keyword">else</span> {
+						error = 0;
+					}
+				}
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCPTYGNAME</span>:	<span class="enscript-comment">/* ptsname(3) */</span>
+			<span class="enscript-comment">/*
+			 * Report the name of the slave device in *data
+			 * (128 bytes max.).  Use the same template string
+			 * used for calling devfs_make_node() to create it.
+			 */</span>
+			pty_get_name(dev, data, 128);
+			error = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCPTYUNLK</span>:	<span class="enscript-comment">/* unlockpt(3) */</span>
+			<span class="enscript-comment">/*
+			 * Unlock the slave device so that it can be opened.
+			 */</span>
+			<span class="enscript-keyword">if</span> (major(dev) == driver-&gt;master) {
+				pti-&gt;pt_flags |= PF_UNLOCKED;
+			}
+			error = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Fail all other calls; pty masters are not serial devices;
+		 * we only pretend they are when the slave side of the pty is
+		 * already open.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!allow_ext_ioctl) {
+			error = ENOTTY;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+	error = (*linesw[tp-&gt;t_line].l_ioctl)(tp, cmd, data, flag, p);
+	<span class="enscript-keyword">if</span> (error == ENOTTY) {
+		error = ttioctl_locked(tp, cmd, data, flag, p);
+		<span class="enscript-keyword">if</span> (error == ENOTTY) {
+			<span class="enscript-keyword">if</span> (pti-&gt;pt_flags &amp; PF_UCNTL &amp;&amp; (cmd &amp; ~0xff) == UIOCCMD(0)) {
+				<span class="enscript-comment">/* Process the UIOCMD ioctl group */</span>
+				<span class="enscript-keyword">if</span> (cmd &amp; 0xff) {
+					pti-&gt;pt_ucntl = (u_char)cmd;
+					ptcwakeup(tp, FREAD);
+				}
+				error = 0;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cmd == TIOCSBRK || cmd == TIOCCBRK) {
+				<span class="enscript-comment">/*
+				 * POSIX conformance; rdar://3936338
+				 *
+				 * Clear ENOTTY in the case of setting or
+				 * clearing a break failing because pty's
+				 * don't support break like real serial
+				 * ports.
+				 */</span>
+				error = 0;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * If external processing and packet mode send ioctl packet.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((tp-&gt;t_lflag&amp;EXTPROC) &amp;&amp; (pti-&gt;pt_flags &amp; PF_PKT)) {
+		<span class="enscript-keyword">switch</span>(cmd) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETA_32</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETAW_32</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETAF_32</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETA_64</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETAW_64</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETAF_64</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETP</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETN</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETC</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSLTC</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCLBIS</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCLBIC</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCLSET</span>:
+			pti-&gt;pt_send |= TIOCPKT_IOCTL;
+			ptcwakeup(tp, FREAD);
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	stop = (tp-&gt;t_iflag &amp; IXON) &amp;&amp; CCEQ(cc[VSTOP], CTRL(<span class="enscript-string">'s'</span>))
+		&amp;&amp; CCEQ(cc[VSTART], CTRL(<span class="enscript-string">'q'</span>));
+	<span class="enscript-keyword">if</span> (pti-&gt;pt_flags &amp; PF_NOSTOP) {
+		<span class="enscript-keyword">if</span> (stop) {
+			pti-&gt;pt_send &amp;= ~TIOCPKT_NOSTOP;
+			pti-&gt;pt_send |= TIOCPKT_DOSTOP;
+			pti-&gt;pt_flags &amp;= ~PF_NOSTOP;
+			ptcwakeup(tp, FREAD);
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (!stop) {
+			pti-&gt;pt_send &amp;= ~TIOCPKT_DOSTOP;
+			pti-&gt;pt_send |= TIOCPKT_NOSTOP;
+			pti-&gt;pt_flags |= PF_NOSTOP;
+			ptcwakeup(tp, FREAD);
+		}
+	}
+<span class="enscript-reference">out</span>:
+	tty_unlock(tp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+</pre>
+<hr />
+</body></html>

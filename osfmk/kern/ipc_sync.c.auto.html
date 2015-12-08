@@ -1,0 +1,236 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ipc_sync.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ipc_sync.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ * 
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sync_sema.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sync_lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_kobject.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_sync.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_space.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/semaphore.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/lock_set_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_port_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+
+
+<span class="enscript-comment">/*
+ *	Routine:	port_name_to_semaphore
+ *	Purpose:
+ *		Convert from a port name in the current space to a semaphore.
+ *		Produces a semaphore ref, which may be null.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">port_name_to_semaphore</span>(
+	mach_port_name_t 	name,
+	semaphore_t 		*semaphorep)
+{
+	ipc_port_t kern_port;
+	kern_return_t kr;
+
+	<span class="enscript-keyword">if</span> (!MACH_PORT_VALID(name)) {
+		*semaphorep = SEMAPHORE_NULL;
+		<span class="enscript-keyword">return</span> KERN_INVALID_NAME;
+	}
+
+	kr = ipc_object_translate(current_space(), name, MACH_PORT_RIGHT_SEND,
+				  (ipc_object_t *) &amp;kern_port);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		*semaphorep = SEMAPHORE_NULL;
+		<span class="enscript-keyword">return</span> kr;
+	}
+	<span class="enscript-comment">/* have the port locked */</span>
+	assert(IP_VALID(kern_port));
+
+	*semaphorep = convert_port_to_semaphore(kern_port);
+	ip_unlock(kern_port);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	convert_port_to_semaphore
+ *	Purpose:
+ *		Convert from a port to a semaphore.
+ *		Doesn't consume the port [send-right] ref;
+ *		produces a semaphore ref, which may be null.
+ *	Conditions:
+ *		Caller has a send-right reference to port.
+ *		Port may or may not be locked.
+ */</span>
+semaphore_t
+<span class="enscript-function-name">convert_port_to_semaphore</span> (ipc_port_t port)
+{
+
+	<span class="enscript-keyword">if</span> (IP_VALID(port)) {
+		semaphore_t semaphore;
+
+		<span class="enscript-comment">/*
+		 * No need to lock because we have a reference on the
+		 * port, and if it is a true semaphore port, that reference
+		 * keeps the semaphore bound to the port (and active).
+		 */</span>
+		<span class="enscript-keyword">if</span> (ip_kotype(port) == IKOT_SEMAPHORE) {
+			assert(ip_active(port));
+			semaphore = (semaphore_t) port-&gt;ip_kobject;
+			semaphore_reference(semaphore);
+			<span class="enscript-keyword">return</span> (semaphore);
+		}
+	}
+	<span class="enscript-keyword">return</span> SEMAPHORE_NULL;
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	convert_semaphore_to_port
+ *	Purpose:
+ *		Convert a semaphore reference to a send right to a
+ *		semaphore port.
+ *
+ *		Consumes the semaphore reference.  If the semaphore
+ *		port currently has no send rights (or doesn't exist
+ *		yet), the reference is donated to the port to represent
+ *		all extant send rights collectively.
+ */</span>
+ipc_port_t
+<span class="enscript-function-name">convert_semaphore_to_port</span> (semaphore_t semaphore)
+{
+	ipc_port_t port, send;
+
+	<span class="enscript-keyword">if</span> (semaphore == SEMAPHORE_NULL)
+		<span class="enscript-keyword">return</span> (IP_NULL);
+
+	<span class="enscript-comment">/* caller is donating a reference */</span>
+	port = semaphore-&gt;port;
+
+	<span class="enscript-keyword">if</span> (!IP_VALID(port)) {
+		port = ipc_port_alloc_kernel();
+		assert(IP_VALID(port));
+		ipc_kobject_set_atomically(port, (ipc_kobject_t) semaphore, IKOT_SEMAPHORE);
+
+		<span class="enscript-comment">/* If we lose the race, deallocate and pick up the other guy's port */</span>
+		<span class="enscript-keyword">if</span> (!OSCompareAndSwapPtr(IP_NULL, port, &amp;semaphore-&gt;port)) {
+			ipc_port_dealloc_kernel(port);
+			port = semaphore-&gt;port;
+			assert(ip_kotype(port) == IKOT_SEMAPHORE);
+			assert(port-&gt;ip_kobject == (ipc_kobject_t)semaphore);
+		}
+	}
+
+	ip_lock(port);
+	assert(ip_active(port));
+	send = ipc_port_make_send_locked(port);
+
+	<span class="enscript-keyword">if</span> (1 == port-&gt;ip_srights) {
+		ipc_port_t old_notify;
+
+		<span class="enscript-comment">/* transfer our ref to the port, and arm the no-senders notification */</span>
+		assert(IP_NULL == port-&gt;ip_nsrequest);
+		ipc_port_nsrequest(port, port-&gt;ip_mscount, ipc_port_make_sonce_locked(port), &amp;old_notify);
+		<span class="enscript-comment">/* port unlocked */</span>
+		assert(IP_NULL == old_notify);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* piggyback on the existing port reference, so consume ours */</span>
+		ip_unlock(port);
+		semaphore_dereference(semaphore);
+	}
+	<span class="enscript-keyword">return</span> (send);
+}
+
+<span class="enscript-comment">/*
+ * Routine:	semaphore_notify
+ * Purpose:
+ *	Called whenever the Mach port system detects no-senders
+ *	on the semaphore port.
+ *
+ *	When a send-right is first created, a no-senders
+ *	notification is armed (and a semaphore reference is donated).
+ *
+ *	A no-senders notification will be posted when no one else holds a
+ *	send-right (reference) to the semaphore's port. This notification function
+ *	will consume the semaphore reference donated to the extant collection of
+ *	send-rights.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">semaphore_notify</span>(mach_msg_header_t *msg)
+{
+	mach_no_senders_notification_t *notification = (<span class="enscript-type">void</span> *)msg;
+	ipc_port_t port = notification-&gt;not_header.msgh_remote_port;
+	semaphore_t semaphore;
+
+	assert(ip_active(port));
+	assert(IKOT_SEMAPHORE == ip_kotype(port));
+	semaphore = (semaphore_t)port-&gt;ip_kobject;
+
+	semaphore_dereference(semaphore);
+}
+
+lock_set_t
+<span class="enscript-function-name">convert_port_to_lock_set</span> (__unused ipc_port_t port)
+{
+	<span class="enscript-keyword">return</span> (LOCK_SET_NULL);
+}
+
+ipc_port_t
+<span class="enscript-function-name">convert_lock_set_to_port</span> (__unused lock_set_t lock_set)
+{
+	<span class="enscript-keyword">return</span> (IP_NULL);
+}
+
+</pre>
+<hr />
+</body></html>

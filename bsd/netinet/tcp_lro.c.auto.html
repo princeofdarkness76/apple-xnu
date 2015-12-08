@@ -1,0 +1,940 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>tcp_lro.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">tcp_lro.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2011-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/dlil.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_seq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcpip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_lro.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/lro_ext.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> lrocount = 0; <span class="enscript-comment">/* A counter used for debugging only */</span>
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> lro_seq_outoforder = 0; <span class="enscript-comment">/* Counter for debugging */</span>
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> lro_seq_mismatch = 0; <span class="enscript-comment">/* Counter for debugging */</span>
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> lro_flushes = 0; <span class="enscript-comment">/* Counter for tracking number of flushes */</span>
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> lro_single_flushes = 0;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> lro_double_flushes = 0;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> lro_good_flushes = 0;
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> coalesc_sz = LRO_MX_COALESCE_PKTS;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, lro_sz, CTLFLAG_RW | CTLFLAG_LOCKED,
+		&amp;coalesc_sz, 0, <span class="enscript-string">&quot;Max coalescing size&quot;</span>);
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> coalesc_time = LRO_MX_TIME_TO_BUFFER;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_tcp, OID_AUTO, lro_time, CTLFLAG_RW | CTLFLAG_LOCKED,
+		&amp;coalesc_time, 0, <span class="enscript-string">&quot;Max coalescing time&quot;</span>);
+
+<span class="enscript-type">struct</span> lro_flow lro_flow_list[TCP_LRO_NUM_FLOWS]; 
+
+<span class="enscript-type">char</span> lro_flow_map[TCP_LRO_FLOW_MAP]; 
+
+<span class="enscript-type">static</span> lck_attr_t *tcp_lro_mtx_attr = NULL;		<span class="enscript-comment">/* mutex attributes */</span>
+<span class="enscript-type">static</span> lck_grp_t *tcp_lro_mtx_grp = NULL;		<span class="enscript-comment">/* mutex group */</span>
+<span class="enscript-type">static</span> lck_grp_attr_t *tcp_lro_mtx_grp_attr = NULL;	<span class="enscript-comment">/* mutex group attrs */</span>
+<span class="enscript-function-name">decl_lck_mtx_data</span>( ,tcp_lro_lock);	<span class="enscript-comment">/* Used to synchronize updates */</span>
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> lro_byte_count = 0;
+
+uint64_t lro_deadline = 0; <span class="enscript-comment">/* LRO's sense of time - protected by tcp_lro_lock */</span>
+uint32_t lro_timer_set = 0;
+
+<span class="enscript-comment">/* Some LRO stats */</span>
+u_int32_t lro_pkt_count = 0; <span class="enscript-comment">/* Number of packets encountered in an LRO period */</span>
+thread_call_t tcp_lro_timer;
+
+<span class="enscript-type">extern</span> u_int32_t kipf_count;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	tcp_lro_timer_proc(<span class="enscript-type">void</span>*, <span class="enscript-type">void</span>*);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	lro_update_stats(<span class="enscript-type">struct</span> mbuf*);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	lro_update_flush_stats(<span class="enscript-type">struct</span> mbuf *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	tcp_lro_flush_flows(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	tcp_lro_sched_timer(uint64_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	lro_proto_input(<span class="enscript-type">struct</span> mbuf *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">lro_tcp_xsum_validate</span>(<span class="enscript-type">struct</span> mbuf*,  <span class="enscript-type">struct</span> ip *,
+				<span class="enscript-type">struct</span> tcphdr*);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">tcp_lro_process_pkt</span>(<span class="enscript-type">struct</span> mbuf*, <span class="enscript-type">struct</span> ip*, <span class="enscript-type">struct</span> tcphdr*,
+				<span class="enscript-type">int</span>);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_lro_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> i;
+
+	bzero(lro_flow_list, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> lro_flow) * TCP_LRO_NUM_FLOWS);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; TCP_LRO_FLOW_MAP; i++) {
+		lro_flow_map[i] = TCP_LRO_FLOW_UNINIT;
+	}
+
+	<span class="enscript-comment">/*
+	 * allocate lock group attribute, group and attribute for tcp_lro_lock
+	 */</span>
+	tcp_lro_mtx_grp_attr = lck_grp_attr_alloc_init();
+	tcp_lro_mtx_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;tcplro&quot;</span>, tcp_lro_mtx_grp_attr);
+	tcp_lro_mtx_attr = lck_attr_alloc_init();
+	lck_mtx_init(&amp;tcp_lro_lock, tcp_lro_mtx_grp, tcp_lro_mtx_attr);
+
+	tcp_lro_timer = thread_call_allocate(tcp_lro_timer_proc, NULL);
+	<span class="enscript-keyword">if</span> (tcp_lro_timer == NULL) {
+		panic_plain(<span class="enscript-string">&quot;%s: unable to allocate lro timer&quot;</span>, __func__);
+	}
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">tcp_lro_matching_tuple</span>(<span class="enscript-type">struct</span> ip* ip_hdr, <span class="enscript-type">struct</span> tcphdr *tcp_hdr, <span class="enscript-type">int</span> *hash, 
+			<span class="enscript-type">int</span> *flow_id )
+{
+	<span class="enscript-type">struct</span> lro_flow *flow;
+	tcp_seq seqnum;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> off = 0;
+	<span class="enscript-type">int</span> payload_len = 0;
+
+	*hash = LRO_HASH(ip_hdr-&gt;ip_src.s_addr, ip_hdr-&gt;ip_dst.s_addr, 
+		tcp_hdr-&gt;th_sport, tcp_hdr-&gt;th_dport, (TCP_LRO_FLOW_MAP - 1));
+
+	*flow_id = lro_flow_map[*hash];
+	<span class="enscript-keyword">if</span> (*flow_id == TCP_LRO_FLOW_NOTFOUND) {
+		<span class="enscript-keyword">return</span> TCP_LRO_NAN;
+	}
+
+	seqnum = tcp_hdr-&gt;th_seq;
+	off = tcp_hdr-&gt;th_off &lt;&lt; 2;
+	payload_len = ip_hdr-&gt;ip_len - off;
+
+	flow = &amp;lro_flow_list[*flow_id];
+
+	<span class="enscript-keyword">if</span> ((flow-&gt;lr_faddr.s_addr == ip_hdr-&gt;ip_src.s_addr) &amp;&amp;
+			(flow-&gt;lr_laddr.s_addr == ip_hdr-&gt;ip_dst.s_addr) &amp;&amp;
+			(flow-&gt;lr_fport == tcp_hdr-&gt;th_sport) &amp;&amp;
+			(flow-&gt;lr_lport == tcp_hdr-&gt;th_dport)) {
+		<span class="enscript-keyword">if</span> (flow-&gt;lr_tcphdr == NULL) {
+			<span class="enscript-keyword">if</span> (ntohl(seqnum) == flow-&gt;lr_seq) {
+				<span class="enscript-keyword">return</span> TCP_LRO_COALESCE;
+			}
+			<span class="enscript-keyword">if</span> (lrodebug &gt;= 4) {
+				printf(<span class="enscript-string">&quot;%s: seqnum = %x, lr_seq = %x\n&quot;</span>,
+					__func__, ntohl(seqnum), flow-&gt;lr_seq);
+			}
+			lro_seq_mismatch++;
+			<span class="enscript-keyword">if</span> (SEQ_GT(ntohl(seqnum), flow-&gt;lr_seq)) {
+				lro_seq_outoforder++;
+				<span class="enscript-comment">/* 
+				 * Whenever we receive out of order packets it
+				 * signals loss and recovery and LRO doesn't 
+				 * let flows recover quickly. So eject.
+				 */</span>
+				 flow-&gt;lr_flags |= LRO_EJECT_REQ;
+
+			}
+			<span class="enscript-keyword">return</span> TCP_LRO_NAN;
+		}
+
+		<span class="enscript-keyword">if</span> (flow-&gt;lr_flags &amp; LRO_EJECT_REQ) {
+			<span class="enscript-keyword">if</span> (lrodebug)
+				printf(<span class="enscript-string">&quot;%s: eject. \n&quot;</span>, __func__);
+			<span class="enscript-keyword">return</span> TCP_LRO_EJECT_FLOW;
+		}
+		<span class="enscript-keyword">if</span> (SEQ_GT(tcp_hdr-&gt;th_ack, flow-&gt;lr_tcphdr-&gt;th_ack)) { 
+			<span class="enscript-keyword">if</span> (lrodebug) {
+				printf(<span class="enscript-string">&quot;%s: th_ack = %x flow_ack = %x \n&quot;</span>, 
+					__func__, tcp_hdr-&gt;th_ack, 
+					flow-&gt;lr_tcphdr-&gt;th_ack);
+			}
+			<span class="enscript-keyword">return</span> TCP_LRO_EJECT_FLOW;
+		}
+
+		<span class="enscript-keyword">if</span> (ntohl(seqnum) == (ntohl(lro_flow_list[*flow_id].lr_tcphdr-&gt;th_seq) + lro_flow_list[*flow_id].lr_len)) { 
+			<span class="enscript-keyword">return</span> TCP_LRO_COALESCE;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* LRO does not handle loss recovery well, eject */</span>
+			flow-&gt;lr_flags |= LRO_EJECT_REQ;
+			<span class="enscript-keyword">return</span> TCP_LRO_EJECT_FLOW;
+		}
+	}
+	<span class="enscript-keyword">if</span> (lrodebug) printf(<span class="enscript-string">&quot;tcp_lro_matching_tuple: collision \n&quot;</span>);
+	<span class="enscript-keyword">return</span> TCP_LRO_COLLISION;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_lro_init_flow</span>(<span class="enscript-type">int</span> flow_id, <span class="enscript-type">struct</span> ip* ip_hdr, <span class="enscript-type">struct</span> tcphdr *tcp_hdr, 
+			<span class="enscript-type">int</span> hash, u_int32_t timestamp, <span class="enscript-type">int</span> payload_len)
+{
+	<span class="enscript-type">struct</span> lro_flow *flow = NULL;
+
+	flow = &amp;lro_flow_list[flow_id];
+
+	flow-&gt;lr_hash_map = hash;
+	flow-&gt;lr_faddr.s_addr = ip_hdr-&gt;ip_src.s_addr;
+	flow-&gt;lr_laddr.s_addr = ip_hdr-&gt;ip_dst.s_addr;
+	flow-&gt;lr_fport = tcp_hdr-&gt;th_sport;
+	flow-&gt;lr_lport = tcp_hdr-&gt;th_dport;
+	lro_flow_map[hash] = flow_id;
+	flow-&gt;lr_timestamp = timestamp;
+	flow-&gt;lr_seq = ntohl(tcp_hdr-&gt;th_seq) + payload_len;
+	flow-&gt;lr_flags = 0;
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_lro_coalesce</span>(<span class="enscript-type">int</span> flow_id, <span class="enscript-type">struct</span> mbuf *lro_mb, <span class="enscript-type">struct</span> tcphdr *tcphdr, 
+			<span class="enscript-type">int</span> payload_len, <span class="enscript-type">int</span> drop_hdrlen, <span class="enscript-type">struct</span> tcpopt *topt, 
+			u_int32_t* tsval, u_int32_t* tsecr, <span class="enscript-type">int</span> thflags)
+{
+	<span class="enscript-type">struct</span> lro_flow *flow = NULL;
+	<span class="enscript-type">struct</span> mbuf *last;
+	<span class="enscript-type">struct</span> ip *ip = NULL;
+
+	flow =  &amp;lro_flow_list[flow_id];
+	<span class="enscript-keyword">if</span> (flow-&gt;lr_mhead) {
+		<span class="enscript-keyword">if</span> (lrodebug) 
+			printf(<span class="enscript-string">&quot;%s: lr_mhead %x %d \n&quot;</span>, __func__, flow-&gt;lr_seq,
+				payload_len);
+		m_adj(lro_mb, drop_hdrlen);
+
+		last = flow-&gt;lr_mtail;
+		<span class="enscript-keyword">while</span> (last-&gt;m_next != NULL) {
+			last = last-&gt;m_next;
+		}
+		last-&gt;m_next = lro_mb;
+
+		flow-&gt;lr_mtail = lro_mb;
+
+		ip = mtod(flow-&gt;lr_mhead, <span class="enscript-type">struct</span> ip *);
+		ip-&gt;ip_len += lro_mb-&gt;m_pkthdr.len;
+		flow-&gt;lr_mhead-&gt;m_pkthdr.len += lro_mb-&gt;m_pkthdr.len;
+
+		<span class="enscript-keyword">if</span> (flow-&gt;lr_len == 0) {
+			panic_plain(<span class="enscript-string">&quot;%s: Inconsistent LRO flow state&quot;</span>, __func__);
+		}
+		flow-&gt;lr_len += payload_len;
+		flow-&gt;lr_seq += payload_len;
+		<span class="enscript-comment">/* 
+		 * This bit is re-OR'd each time a packet is added to the 
+		 * large coalesced packet.
+		 */</span>
+		flow-&gt;lr_mhead-&gt;m_pkthdr.pkt_flags |= PKTF_SW_LRO_PKT;
+		flow-&gt;lr_mhead-&gt;m_pkthdr.lro_npkts++; <span class="enscript-comment">/* for tcpstat.tcps_rcvpack */</span>
+		<span class="enscript-keyword">if</span> (flow-&gt;lr_mhead-&gt;m_pkthdr.lro_pktlen &lt; 
+				lro_mb-&gt;m_pkthdr.lro_pktlen) {
+			<span class="enscript-comment">/* 
+			 * For TCP Inter Arrival Jitter calculation, return max  
+			 * size encountered while coalescing a stream of pkts.
+			 */</span>
+			flow-&gt;lr_mhead-&gt;m_pkthdr.lro_pktlen = 
+						lro_mb-&gt;m_pkthdr.lro_pktlen;
+		}
+        	<span class="enscript-comment">/* Update the timestamp value */</span>
+		<span class="enscript-keyword">if</span> (topt-&gt;to_flags &amp; TOF_TS) {
+			<span class="enscript-keyword">if</span> ((flow-&gt;lr_tsval) &amp;&amp; 
+				(TSTMP_GT(topt-&gt;to_tsval, ntohl(*(flow-&gt;lr_tsval))))) {
+				*(flow-&gt;lr_tsval) = htonl(topt-&gt;to_tsval);
+			}
+			<span class="enscript-keyword">if</span> ((flow-&gt;lr_tsecr) &amp;&amp;
+				(topt-&gt;to_tsecr != 0) &amp;&amp;
+				(TSTMP_GT(topt-&gt;to_tsecr, ntohl(*(flow-&gt;lr_tsecr))))) {
+				<span class="enscript-keyword">if</span> (lrodebug &gt;= 2) {
+					printf(<span class="enscript-string">&quot;%s: instantaneous RTT = %d \n&quot;</span>, __func__, 
+						topt-&gt;to_tsecr - ntohl(*(flow-&gt;lr_tsecr)));
+				}
+				*(flow-&gt;lr_tsecr) = htonl(topt-&gt;to_tsecr);
+			}
+		}
+		<span class="enscript-comment">/* Coalesce the flags */</span>
+		<span class="enscript-keyword">if</span> (thflags) {
+			flow-&gt;lr_tcphdr-&gt;th_flags |= thflags;
+		}
+		<span class="enscript-comment">/* Update receive window */</span>
+		flow-&gt;lr_tcphdr-&gt;th_win = tcphdr-&gt;th_win;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (lro_mb) {
+			flow-&gt;lr_mhead = flow-&gt;lr_mtail = lro_mb;
+			flow-&gt;lr_mhead-&gt;m_pkthdr.pkt_flags |= PKTF_SW_LRO_PKT;
+			flow-&gt;lr_tcphdr = tcphdr;
+			<span class="enscript-keyword">if</span> ((topt) &amp;&amp; (topt-&gt;to_flags &amp; TOF_TS)) {
+				ASSERT(tsval != NULL);
+				ASSERT(tsecr != NULL);
+				flow-&gt;lr_tsval = tsval; 
+				flow-&gt;lr_tsecr = tsecr;
+			}        
+			flow-&gt;lr_len = payload_len;
+			calculate_tcp_clock();
+			flow-&gt;lr_timestamp = tcp_now;
+			tcp_lro_sched_timer(0);
+		}	
+		flow-&gt;lr_seq = ntohl(tcphdr-&gt;th_seq) + payload_len;
+	}
+	<span class="enscript-keyword">if</span> (lro_mb) { 
+		tcpstat.tcps_coalesced_pack++;
+	}	
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">tcp_lro_eject_flow</span>(<span class="enscript-type">int</span> flow_id)
+{
+	<span class="enscript-type">struct</span> mbuf *mb = NULL;
+
+	mb = lro_flow_list[flow_id].lr_mhead;
+	ASSERT(lro_flow_map[lro_flow_list[flow_id].lr_hash_map] == flow_id);
+	lro_flow_map[lro_flow_list[flow_id].lr_hash_map] = TCP_LRO_FLOW_UNINIT;
+	bzero(&amp;lro_flow_list[flow_id], <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> lro_flow));
+	
+	<span class="enscript-keyword">return</span> mb;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf*
+<span class="enscript-function-name">tcp_lro_eject_coalesced_pkt</span>(<span class="enscript-type">int</span> flow_id)
+{
+	<span class="enscript-type">struct</span> mbuf *mb = NULL;
+	mb = lro_flow_list[flow_id].lr_mhead;
+	lro_flow_list[flow_id].lr_mhead = 
+		lro_flow_list[flow_id].lr_mtail = NULL;
+	lro_flow_list[flow_id].lr_tcphdr = NULL;
+	<span class="enscript-keyword">return</span> mb;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf*
+<span class="enscript-function-name">tcp_lro_insert_flow</span>(<span class="enscript-type">struct</span> mbuf *lro_mb, <span class="enscript-type">struct</span> ip *ip_hdr, 
+			<span class="enscript-type">struct</span> tcphdr *tcp_hdr, <span class="enscript-type">int</span> payload_len, 
+			<span class="enscript-type">int</span> drop_hdrlen, <span class="enscript-type">int</span> hash, <span class="enscript-type">struct</span> tcpopt *topt, 
+			u_int32_t *tsval, u_int32_t *tsecr)
+{
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> slot_available = 0;
+	<span class="enscript-type">int</span> candidate_flow = 0; 
+	u_int32_t oldest_timestamp;
+	<span class="enscript-type">struct</span> mbuf *mb = NULL;
+	<span class="enscript-type">int</span> collision = 0;
+
+	oldest_timestamp = tcp_now;
+	
+	<span class="enscript-comment">/* handle collision */</span>
+	<span class="enscript-keyword">if</span> (lro_flow_map[hash] != TCP_LRO_FLOW_UNINIT) {
+		<span class="enscript-keyword">if</span> (lrodebug) {
+			collision = 1;
+		}
+		candidate_flow = lro_flow_map[hash];
+		tcpstat.tcps_flowtbl_collision++;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">kick_flow</span>;
+	}
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; TCP_LRO_NUM_FLOWS; i++) {
+		<span class="enscript-keyword">if</span> (lro_flow_list[i].lr_mhead == NULL) {
+			candidate_flow = i;
+			slot_available = 1;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (oldest_timestamp &gt;= lro_flow_list[i].lr_timestamp) {
+			candidate_flow = i;
+			oldest_timestamp = lro_flow_list[i].lr_timestamp;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (!slot_available) {
+		tcpstat.tcps_flowtbl_full++;
+<span class="enscript-reference">kick_flow</span>:
+		<span class="enscript-comment">/* kick the oldest flow */</span>
+		mb = tcp_lro_eject_flow(candidate_flow);
+
+		<span class="enscript-keyword">if</span> (lrodebug) {
+			<span class="enscript-keyword">if</span> (!slot_available) {
+				printf(<span class="enscript-string">&quot;%s: slot unavailable.\n&quot;</span>,__func__);
+			}
+			<span class="enscript-keyword">if</span> (collision) {
+				printf(<span class="enscript-string">&quot;%s: collision.\n&quot;</span>,__func__);
+			}
+		}
+	} <span class="enscript-keyword">else</span> {
+		candidate_flow = i; <span class="enscript-comment">/* this is now the flow to be used */</span>
+
+	}
+
+	tcp_lro_init_flow(candidate_flow, ip_hdr, tcp_hdr, hash, 
+				tcp_now, payload_len);
+	tcp_lro_coalesce(candidate_flow, lro_mb, tcp_hdr, payload_len, 
+				drop_hdrlen, topt, tsval, tsecr, 0);
+	<span class="enscript-keyword">return</span> mb;
+}
+
+<span class="enscript-type">struct</span> mbuf*
+<span class="enscript-function-name">tcp_lro_process_pkt</span>(<span class="enscript-type">struct</span> mbuf *lro_mb, <span class="enscript-type">struct</span> ip *ip_hdr, 
+				<span class="enscript-type">struct</span> tcphdr *tcp_hdr, <span class="enscript-type">int</span> drop_hdrlen)
+{
+	<span class="enscript-type">int</span> flow_id = TCP_LRO_FLOW_UNINIT;
+	<span class="enscript-type">int</span> hash;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> off = 0;
+	<span class="enscript-type">int</span> eject_flow = 0;
+	<span class="enscript-type">int</span> optlen;
+	<span class="enscript-type">int</span> retval = 0;
+	<span class="enscript-type">struct</span> mbuf *mb = NULL;
+	<span class="enscript-type">int</span> payload_len = 0;
+	u_char *optp = NULL;
+	<span class="enscript-type">int</span> thflags = 0;
+	<span class="enscript-type">struct</span> tcpopt to;
+	<span class="enscript-type">int</span> ret_response = TCP_LRO_CONSUMED;
+	<span class="enscript-type">int</span> coalesced = 0, tcpflags = 0, unknown_tcpopts = 0;
+	u_int8_t ecn;
+	
+	<span class="enscript-keyword">if</span> (lro_mb-&gt;m_len &lt; (int32_t)<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> tcpiphdr)) {
+		<span class="enscript-keyword">if</span> ((lro_mb = m_pullup(lro_mb, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> tcpiphdr))) == 0) {
+			tcpstat.tcps_rcvshort++;
+			m_freem(lro_mb); 
+			<span class="enscript-keyword">if</span> (lrodebug) {
+				printf(<span class="enscript-string">&quot;tcp_lro_process_pkt:mbuf too short.\n&quot;</span>);
+			}
+			<span class="enscript-keyword">return</span> NULL;
+		}
+	}
+
+	<span class="enscript-comment">/* Just in case */</span>
+	lro_mb-&gt;m_pkthdr.pkt_flags &amp;= ~PKTF_SW_LRO_DID_CSUM;
+
+	<span class="enscript-keyword">if</span> ((lro_mb = lro_tcp_xsum_validate(lro_mb, ip_hdr, tcp_hdr)) == NULL) {
+		<span class="enscript-keyword">if</span> (lrodebug) {
+			printf(<span class="enscript-string">&quot;tcp_lro_process_pkt: TCP xsum failed.\n&quot;</span>);
+		}
+		<span class="enscript-keyword">return</span> NULL; 
+	}
+
+	<span class="enscript-comment">/* Update stats */</span>
+	lro_pkt_count++;
+
+	<span class="enscript-comment">/* Avoids checksumming in tcp_input */</span>
+	lro_mb-&gt;m_pkthdr.pkt_flags |= PKTF_SW_LRO_DID_CSUM;
+
+	off = tcp_hdr-&gt;th_off &lt;&lt; 2;
+	optlen = off - <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> tcphdr);
+	payload_len = ip_hdr-&gt;ip_len - off;
+	optp = (u_char *)(tcp_hdr + 1);
+	<span class="enscript-comment">/*
+	 * Do quick retrieval of timestamp options (&quot;options
+	 * prediction?&quot;).  If timestamp is the only option and it's
+	 * formatted as recommended in RFC 1323 appendix A, we
+	 * quickly get the values now and not bother calling
+	 * tcp_dooptions(), etc.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((optlen == TCPOLEN_TSTAMP_APPA ||
+			(optlen &gt; TCPOLEN_TSTAMP_APPA &amp;&amp;
+			optp[TCPOLEN_TSTAMP_APPA] == TCPOPT_EOL)) &amp;&amp;
+			*(u_int32_t *)optp == htonl(TCPOPT_TSTAMP_HDR) &amp;&amp;
+			(tcp_hdr-&gt;th_flags &amp; TH_SYN) == 0) {
+			to.to_flags |= TOF_TS;
+			to.to_tsval = ntohl(*(u_int32_t *)(<span class="enscript-type">void</span> *)(optp + 4));
+			to.to_tsecr = ntohl(*(u_int32_t *)(<span class="enscript-type">void</span> *)(optp + 8));
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * If TCP timestamps are not in use, or not the first option, 
+		 * skip LRO path since timestamps are used to avoid LRO 
+		 * from introducing additional latencies for retransmissions
+		 * and other slow-paced transmissions.
+		 */</span>
+		to.to_flags = to.to_tsecr = 0;
+		eject_flow = 1;
+	}
+
+	<span class="enscript-comment">/* list all the conditions that can trigger a flow ejection here */</span>
+	
+	thflags = tcp_hdr-&gt;th_flags;
+	<span class="enscript-keyword">if</span> (thflags &amp; (TH_SYN | TH_URG | TH_ECE | TH_CWR | TH_PUSH | TH_RST | TH_FIN)) { 
+		eject_flow = tcpflags = 1;
+	} 
+	
+	<span class="enscript-keyword">if</span> (optlen &amp;&amp; !((optlen == TCPOLEN_TSTAMP_APPA) &amp;&amp; 
+			(to.to_flags &amp; TOF_TS))) {
+		eject_flow = unknown_tcpopts = 1;
+	} 
+	
+	<span class="enscript-keyword">if</span> (payload_len &lt;= LRO_MIN_COALESC_SZ) { <span class="enscript-comment">/* zero payload ACK */</span>
+		eject_flow = 1;
+	}
+
+	<span class="enscript-comment">/* Can't coalesce ECN marked packets. */</span>
+	ecn = ip_hdr-&gt;ip_tos &amp; IPTOS_ECN_MASK;
+	<span class="enscript-keyword">if</span> (ecn == IPTOS_ECN_CE) {
+		<span class="enscript-comment">/*
+		 * ECN needs quick notification
+		 */</span>
+		<span class="enscript-keyword">if</span> (lrodebug) {
+			printf(<span class="enscript-string">&quot;%s: ECE bits set.\n&quot;</span>, __func__);
+		}
+		eject_flow = 1;
+	}
+
+	lck_mtx_lock_spin(&amp;tcp_lro_lock);
+
+	retval = tcp_lro_matching_tuple(ip_hdr, tcp_hdr, &amp;hash, &amp;flow_id);
+
+	<span class="enscript-keyword">switch</span> (retval) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TCP_LRO_NAN</span>:
+		lck_mtx_unlock(&amp;tcp_lro_lock);
+		ret_response = TCP_LRO_FLOW_NOTFOUND;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TCP_LRO_COALESCE</span>:
+		<span class="enscript-keyword">if</span> ((payload_len != 0) &amp;&amp; (unknown_tcpopts == 0) &amp;&amp; 
+			(tcpflags == 0) &amp;&amp; (ecn != IPTOS_ECN_CE) &amp;&amp; (to.to_flags &amp; TOF_TS)) { 
+			tcp_lro_coalesce(flow_id, lro_mb, tcp_hdr, payload_len,
+				drop_hdrlen, &amp;to, 
+				(to.to_flags &amp; TOF_TS) ? (u_int32_t *)(<span class="enscript-type">void</span> *)(optp + 4) : NULL,
+				(to.to_flags &amp; TOF_TS) ? (u_int32_t *)(<span class="enscript-type">void</span> *)(optp + 8) : NULL,
+				thflags);
+			<span class="enscript-keyword">if</span> (lrodebug &gt;= 2) { 
+				printf(<span class="enscript-string">&quot;tcp_lro_process_pkt: coalesce len = %d. flow_id = %d payload_len = %d drop_hdrlen = %d optlen = %d lport = %d seqnum = %x.\n&quot;</span>,
+					lro_flow_list[flow_id].lr_len, flow_id, 
+					payload_len, drop_hdrlen, optlen,
+					ntohs(lro_flow_list[flow_id].lr_lport),
+					ntohl(tcp_hdr-&gt;th_seq));
+			}
+			<span class="enscript-keyword">if</span> (lro_flow_list[flow_id].lr_mhead-&gt;m_pkthdr.lro_npkts &gt;= coalesc_sz) {
+				eject_flow = 1;
+			}
+			coalesced = 1;
+		}
+		<span class="enscript-keyword">if</span> (eject_flow) {
+			mb = tcp_lro_eject_coalesced_pkt(flow_id);
+			lro_flow_list[flow_id].lr_seq = ntohl(tcp_hdr-&gt;th_seq) +
+								payload_len;
+			calculate_tcp_clock();					
+			u_int8_t timestamp = tcp_now - lro_flow_list[flow_id].lr_timestamp;					
+			lck_mtx_unlock(&amp;tcp_lro_lock);
+			<span class="enscript-keyword">if</span> (mb) {
+				mb-&gt;m_pkthdr.lro_elapsed = timestamp;
+				lro_proto_input(mb);
+			}
+			<span class="enscript-keyword">if</span> (!coalesced) {
+				<span class="enscript-keyword">if</span> (lrodebug &gt;= 2) {
+					printf(<span class="enscript-string">&quot;%s: pkt payload_len = %d \n&quot;</span>, __func__, payload_len);
+				}
+				lro_proto_input(lro_mb);
+			}
+		} <span class="enscript-keyword">else</span> {
+			lck_mtx_unlock(&amp;tcp_lro_lock);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TCP_LRO_EJECT_FLOW</span>:
+		mb = tcp_lro_eject_coalesced_pkt(flow_id);
+		calculate_tcp_clock();
+		u_int8_t timestamp = tcp_now - lro_flow_list[flow_id].lr_timestamp;
+		lck_mtx_unlock(&amp;tcp_lro_lock);
+		<span class="enscript-keyword">if</span> (mb) {
+			<span class="enscript-keyword">if</span> (lrodebug) 
+				printf(<span class="enscript-string">&quot;tcp_lro_process_pkt eject_flow, len = %d\n&quot;</span>, mb-&gt;m_pkthdr.len);
+			mb-&gt;m_pkthdr.lro_elapsed = timestamp;
+			lro_proto_input(mb);
+		}
+
+		lro_proto_input(lro_mb);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TCP_LRO_COLLISION</span>:
+		lck_mtx_unlock(&amp;tcp_lro_lock);
+		ret_response = TCP_LRO_FLOW_NOTFOUND;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		lck_mtx_unlock(&amp;tcp_lro_lock);
+		panic_plain(<span class="enscript-string">&quot;%s: unrecognized type %d&quot;</span>, __func__, retval);
+		<span class="enscript-keyword">break</span>; 
+	}
+
+	<span class="enscript-keyword">if</span> (ret_response == TCP_LRO_FLOW_NOTFOUND) {
+		lro_proto_input(lro_mb);
+	}
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_lro_timer_proc</span>(<span class="enscript-type">void</span> *arg1, <span class="enscript-type">void</span> *arg2)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+
+	lck_mtx_lock_spin(&amp;tcp_lro_lock);
+	lro_timer_set = 0;
+	lck_mtx_unlock(&amp;tcp_lro_lock);
+	tcp_lro_flush_flows();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_lro_flush_flows</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> i = 0;
+	<span class="enscript-type">struct</span> mbuf *mb;
+	<span class="enscript-type">struct</span> lro_flow *flow;
+	<span class="enscript-type">int</span> tcpclock_updated = 0;
+
+	lck_mtx_lock(&amp;tcp_lro_lock);
+
+	<span class="enscript-keyword">while</span> (i &lt; TCP_LRO_NUM_FLOWS) {
+		flow = &amp;lro_flow_list[i];
+		<span class="enscript-keyword">if</span> (flow-&gt;lr_mhead != NULL) {
+			
+			<span class="enscript-keyword">if</span> (!tcpclock_updated) {
+				calculate_tcp_clock();
+				tcpclock_updated = 1;
+			}
+
+			<span class="enscript-keyword">if</span> (lrodebug &gt;= 2) 
+				printf(<span class="enscript-string">&quot;tcp_lro_flush_flows: len =%d n_pkts = %d %d %d \n&quot;</span>,
+					flow-&gt;lr_len, 
+					flow-&gt;lr_mhead-&gt;m_pkthdr.lro_npkts, 
+					flow-&gt;lr_timestamp, tcp_now);
+
+			u_int8_t timestamp = tcp_now - flow-&gt;lr_timestamp;
+
+			mb = tcp_lro_eject_flow(i);
+
+			<span class="enscript-keyword">if</span> (mb) {
+				mb-&gt;m_pkthdr.lro_elapsed = timestamp;
+				lck_mtx_unlock(&amp;tcp_lro_lock);
+				lro_update_flush_stats(mb);
+				lro_proto_input(mb);
+				lck_mtx_lock(&amp;tcp_lro_lock);
+			}
+		}
+		i++;
+	}
+	lck_mtx_unlock(&amp;tcp_lro_lock);
+}
+
+<span class="enscript-comment">/*
+ * Must be called with tcp_lro_lock held.
+ * The hint is non-zero for longer waits. The wait time dictated by coalesc_time
+ * takes precedence, so lro_timer_set is not set for the hint case
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_lro_sched_timer</span>(uint64_t hint)
+{
+	<span class="enscript-keyword">if</span> (lro_timer_set) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	lro_timer_set = 1;
+	<span class="enscript-keyword">if</span> (!hint) {
+		<span class="enscript-comment">/* the intent is to wake up every coalesc_time msecs */</span>
+		clock_interval_to_deadline(coalesc_time, 
+			(NSEC_PER_SEC / TCP_RETRANSHZ), &amp;lro_deadline);
+	} <span class="enscript-keyword">else</span> {
+		clock_interval_to_deadline(hint, NSEC_PER_SEC / TCP_RETRANSHZ,
+                        &amp;lro_deadline);
+	}
+	thread_call_enter_delayed(tcp_lro_timer, lro_deadline);
+}
+
+<span class="enscript-type">struct</span> mbuf*
+<span class="enscript-function-name">tcp_lro</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> hlen)
+{
+	<span class="enscript-type">struct</span> ip *ip_hdr;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> tlen;
+	<span class="enscript-type">struct</span> tcphdr * tcp_hdr = NULL;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> off = 0;
+
+	<span class="enscript-keyword">if</span> (kipf_count != 0) 
+		<span class="enscript-keyword">return</span> m;
+
+	<span class="enscript-comment">/* 
+	 * Experiments on cellular show that the RTT is much higher  
+	 * than the coalescing time of 5 msecs, causing lro to flush
+	 * 80% of the time on a single packet. Increasing 
+	 * coalescing time for cellular does not show marked 
+	 * improvement to throughput either. Loopback perf is hurt
+	 * by the 5 msec latency and it already sends large packets.
+	 */</span>
+	<span class="enscript-keyword">if</span> (IFNET_IS_CELLULAR(m-&gt;m_pkthdr.rcvif) ||
+		(m-&gt;m_pkthdr.rcvif-&gt;if_type == IFT_LOOP)) {
+		<span class="enscript-keyword">return</span> m;
+	}
+
+	ip_hdr = mtod(m, <span class="enscript-type">struct</span> ip*);
+
+	<span class="enscript-comment">/* don't deal with IP options */</span>
+	<span class="enscript-keyword">if</span> (hlen &gt; <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ip))
+		<span class="enscript-keyword">return</span> (m);
+
+	<span class="enscript-comment">/* only TCP is coalesced */</span>
+	<span class="enscript-keyword">if</span> (ip_hdr-&gt;ip_p != IPPROTO_TCP) {
+		<span class="enscript-keyword">return</span> m;
+	}
+
+	<span class="enscript-keyword">if</span> (m-&gt;m_len &lt; (int32_t) <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> tcpiphdr)) {
+		<span class="enscript-keyword">if</span> (lrodebug) printf(<span class="enscript-string">&quot;tcp_lro m_pullup \n&quot;</span>);
+		<span class="enscript-keyword">if</span> ((m = m_pullup(m, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> tcpiphdr))) == 0) {
+			tcpstat.tcps_rcvshort++; 
+			<span class="enscript-keyword">if</span> (lrodebug) {
+				printf(<span class="enscript-string">&quot;ip_lro: rcvshort.\n&quot;</span>);
+			}
+			<span class="enscript-keyword">return</span> NULL;
+		}
+	}
+
+	tcp_hdr = (<span class="enscript-type">struct</span> tcphdr *)((caddr_t)ip_hdr + hlen);
+	tlen = ip_hdr-&gt;ip_len ; <span class="enscript-comment">//ignore IP header bytes len
+</span>	m-&gt;m_pkthdr.lro_pktlen = tlen; <span class="enscript-comment">/* Used to return max pkt encountered to tcp */</span>
+	m-&gt;m_pkthdr.lro_npkts = 1; <span class="enscript-comment">/* Initialize a counter to hold num pkts coalesced */</span>
+	m-&gt;m_pkthdr.lro_elapsed = 0; <span class="enscript-comment">/* Initialize the field to carry elapsed time */</span>
+	off = tcp_hdr-&gt;th_off &lt;&lt; 2;
+	<span class="enscript-keyword">if</span> (off &lt; <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> tcphdr) || off &gt; tlen) {
+		tcpstat.tcps_rcvbadoff++; 
+		<span class="enscript-keyword">if</span> (lrodebug) {
+			printf(<span class="enscript-string">&quot;ip_lro: TCP off greater than TCP header.\n&quot;</span>);
+		}
+		<span class="enscript-keyword">return</span> m;
+	}
+
+	<span class="enscript-keyword">return</span> (tcp_lro_process_pkt(m, ip_hdr, tcp_hdr, hlen + off));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">lro_proto_input</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">struct</span> ip* ip_hdr = mtod(m, <span class="enscript-type">struct</span> ip*);
+
+	<span class="enscript-keyword">if</span> (lrodebug &gt;= 3) {
+		printf(<span class="enscript-string">&quot;lro_proto_input: ip_len = %d \n&quot;</span>, 
+			ip_hdr-&gt;ip_len);
+	}
+	lro_update_stats(m);
+	ip_proto_dispatch_in_wrapper(m, ip_hdr-&gt;ip_hl &lt;&lt; 2, ip_hdr-&gt;ip_p);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">lro_tcp_xsum_validate</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> ip *ip, <span class="enscript-type">struct</span> tcphdr * th)
+{
+	<span class="enscript-comment">/* Expect 32-bit aligned data pointer on strict-align platforms */</span>
+	MBUF_STRICT_DATA_ALIGNMENT_CHECK_32(m);
+
+	<span class="enscript-comment">/* we shouldn't get here for IP with options; hence sizeof (ip) */</span>
+	<span class="enscript-keyword">if</span> (tcp_input_checksum(AF_INET, m, th, <span class="enscript-keyword">sizeof</span> (*ip), ip-&gt;ip_len)) {
+		<span class="enscript-keyword">if</span> (lrodebug)
+			printf(<span class="enscript-string">&quot;%s: bad xsum and drop m = 0x%llx.\n&quot;</span>, __func__,
+			(uint64_t)VM_KERNEL_ADDRPERM(m));
+		m_freem(m);
+		<span class="enscript-keyword">return</span> (NULL);
+	}
+
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-comment">/*
+ * When TCP detects a stable, steady flow without out of ordering, 
+ * with a sufficiently high cwnd, it invokes LRO.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">tcp_start_coalescing</span>(<span class="enscript-type">struct</span> ip *ip_hdr, <span class="enscript-type">struct</span> tcphdr *tcp_hdr, <span class="enscript-type">int</span> tlen) 
+{
+	<span class="enscript-type">int</span> hash;
+	<span class="enscript-type">int</span> flow_id;
+	<span class="enscript-type">struct</span> mbuf *eject_mb;
+	<span class="enscript-type">struct</span> lro_flow *lf;
+
+	hash = LRO_HASH(ip_hdr-&gt;ip_src.s_addr, ip_hdr-&gt;ip_dst.s_addr, 
+		tcp_hdr-&gt;th_sport, tcp_hdr-&gt;th_dport,
+		(TCP_LRO_FLOW_MAP - 1));
+
+	
+	lck_mtx_lock_spin(&amp;tcp_lro_lock);
+	flow_id = lro_flow_map[hash];
+	<span class="enscript-keyword">if</span> (flow_id != TCP_LRO_FLOW_NOTFOUND) {
+		lf = &amp;lro_flow_list[flow_id];
+		<span class="enscript-keyword">if</span> ((lf-&gt;lr_faddr.s_addr == ip_hdr-&gt;ip_src.s_addr) &amp;&amp;
+		    (lf-&gt;lr_laddr.s_addr == ip_hdr-&gt;ip_dst.s_addr) &amp;&amp;
+		    (lf-&gt;lr_fport == tcp_hdr-&gt;th_sport) &amp;&amp;
+		    (lf-&gt;lr_lport == tcp_hdr-&gt;th_dport)) {
+		    	<span class="enscript-keyword">if</span> ((lf-&gt;lr_tcphdr == NULL) &amp;&amp;
+		    		(lf-&gt;lr_seq != (tcp_hdr-&gt;th_seq + tlen))) {
+				lf-&gt;lr_seq = tcp_hdr-&gt;th_seq + tlen;
+			}	
+			lf-&gt;lr_flags &amp;= ~LRO_EJECT_REQ;
+		}
+		lck_mtx_unlock(&amp;tcp_lro_lock); 
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	HTONL(tcp_hdr-&gt;th_seq);
+	HTONL(tcp_hdr-&gt;th_ack);
+	eject_mb = 
+		tcp_lro_insert_flow(NULL, ip_hdr, tcp_hdr, tlen, 0, hash, 
+		NULL, NULL, NULL);
+
+	lck_mtx_unlock(&amp;tcp_lro_lock);
+
+	NTOHL(tcp_hdr-&gt;th_seq);
+	NTOHL(tcp_hdr-&gt;th_ack);
+	<span class="enscript-keyword">if</span> (lrodebug &gt;= 3) {
+		printf(<span class="enscript-string">&quot;%s: src = %x dst = %x sport = %d dport = %d seq %x \n&quot;</span>,
+			__func__, ip_hdr-&gt;ip_src.s_addr, ip_hdr-&gt;ip_dst.s_addr,
+			tcp_hdr-&gt;th_sport, tcp_hdr-&gt;th_dport, tcp_hdr-&gt;th_seq);
+	}
+	ASSERT(eject_mb == NULL);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * When TCP detects loss or idle condition, it stops offloading
+ * to LRO. 
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">tcp_lro_remove_state</span>(<span class="enscript-type">struct</span> in_addr saddr, <span class="enscript-type">struct</span> in_addr daddr, 
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> sport, <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> dport)
+{
+	<span class="enscript-type">int</span> hash, flow_id;
+	<span class="enscript-type">struct</span> lro_flow *lf;
+
+	hash = LRO_HASH(daddr.s_addr, saddr.s_addr, dport, sport,
+		(TCP_LRO_FLOW_MAP - 1));
+	lck_mtx_lock_spin(&amp;tcp_lro_lock);
+	flow_id = lro_flow_map[hash];
+	<span class="enscript-keyword">if</span> (flow_id == TCP_LRO_FLOW_UNINIT) {
+		lck_mtx_unlock(&amp;tcp_lro_lock);
+		<span class="enscript-keyword">return</span> 0;
+	}
+	lf = &amp;lro_flow_list[flow_id];
+	<span class="enscript-keyword">if</span> ((lf-&gt;lr_faddr.s_addr == daddr.s_addr) &amp;&amp; 
+	    (lf-&gt;lr_laddr.s_addr == saddr.s_addr) &amp;&amp;
+	    (lf-&gt;lr_fport == dport) &amp;&amp;
+	    (lf-&gt;lr_lport == sport)) {
+		<span class="enscript-keyword">if</span> (lrodebug) {
+			printf(<span class="enscript-string">&quot;%s: %x %x\n&quot;</span>, __func__, 
+				lf-&gt;lr_flags, lf-&gt;lr_seq);
+		}
+		lf-&gt;lr_flags |= LRO_EJECT_REQ;
+	}
+	lck_mtx_unlock(&amp;tcp_lro_lock);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tcp_update_lro_seq</span>(__uint32_t rcv_nxt, <span class="enscript-type">struct</span> in_addr saddr, <span class="enscript-type">struct</span> in_addr daddr,
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> sport, <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> dport)
+{
+	<span class="enscript-type">int</span> hash, flow_id;
+	<span class="enscript-type">struct</span> lro_flow *lf;
+
+	hash = LRO_HASH(daddr.s_addr, saddr.s_addr, dport, sport, 
+		(TCP_LRO_FLOW_MAP - 1));
+	lck_mtx_lock_spin(&amp;tcp_lro_lock);
+	flow_id = lro_flow_map[hash];
+	<span class="enscript-keyword">if</span> (flow_id == TCP_LRO_FLOW_UNINIT) {
+		lck_mtx_unlock(&amp;tcp_lro_lock);
+		<span class="enscript-keyword">return</span>;
+	}
+	lf = &amp;lro_flow_list[flow_id];
+	<span class="enscript-keyword">if</span> ((lf-&gt;lr_faddr.s_addr == daddr.s_addr) &amp;&amp;
+	    (lf-&gt;lr_laddr.s_addr == saddr.s_addr) &amp;&amp;
+	    (lf-&gt;lr_fport == dport) &amp;&amp;
+	    (lf-&gt;lr_lport == sport) &amp;&amp;
+	    (lf-&gt;lr_tcphdr == NULL)) {
+		lf-&gt;lr_seq = (tcp_seq)rcv_nxt;
+	}
+	lck_mtx_unlock(&amp;tcp_lro_lock);
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">lro_update_stats</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-keyword">switch</span>(m-&gt;m_pkthdr.lro_npkts) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>: <span class="enscript-comment">/* fall through */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">1</span>: 
+		<span class="enscript-keyword">break</span>;
+	
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">2</span>: 
+		tcpstat.tcps_lro_twopack++;
+		<span class="enscript-keyword">break</span>;
+	
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">3</span>: <span class="enscript-comment">/* fall through */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">4</span>:
+		tcpstat.tcps_lro_multpack++;
+		<span class="enscript-keyword">break</span>;
+	
+	<span class="enscript-reference">default</span>: 
+		tcpstat.tcps_lro_largepack++;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">lro_update_flush_stats</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	lro_flushes++;
+	<span class="enscript-keyword">switch</span>(m-&gt;m_pkthdr.lro_npkts) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>: ASSERT(0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">1</span>: lro_single_flushes++;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">2</span>: lro_double_flushes++;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>: lro_good_flushes++;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span>;
+}
+</pre>
+<hr />
+</body></html>

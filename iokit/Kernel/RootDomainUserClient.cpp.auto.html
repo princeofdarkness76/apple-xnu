@@ -1,0 +1,409 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>RootDomainUserClient.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">RootDomainUserClient.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2012 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1999 Apple Computer, Inc.  All rights reserved.
+ *
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOLib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKitKeys.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOBufferMemoryDescriptor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;RootDomainUserClient.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/pwr_mgt/IOPMLibDefs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/pwr_mgt/IOPMPrivate.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOUserClient
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(RootDomainUserClient, IOUserClient)
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">RootDomainUserClient::initWithTask</span>(task_t owningTask, <span class="enscript-type">void</span> *security_id,
+                    UInt32 type, OSDictionary * properties)
+{
+    <span class="enscript-keyword">if</span> (properties)
+    properties-&gt;setObject(kIOUserClientCrossEndianCompatibleKey, kOSBooleanTrue);
+
+    <span class="enscript-keyword">if</span> (!super::initWithTask(owningTask, security_id, type, properties))
+    <span class="enscript-keyword">return</span> false;
+
+    fOwningTask = owningTask;
+    task_reference (fOwningTask);
+    <span class="enscript-keyword">return</span> true;
+}
+
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">RootDomainUserClient::start</span>( IOService * provider )
+{
+    assert(OSDynamicCast(IOPMrootDomain, provider));
+    <span class="enscript-keyword">if</span>(!super::start(provider))
+        <span class="enscript-keyword">return</span> false;
+    fOwner = (IOPMrootDomain *)provider;
+
+
+    <span class="enscript-keyword">return</span> true;
+}
+
+IOReturn <span class="enscript-function-name">RootDomainUserClient::secureSleepSystem</span>( uint32_t *return_code )
+{
+    <span class="enscript-keyword">return</span> secureSleepSystemOptions(NULL, 0, return_code);
+}
+
+IOReturn <span class="enscript-function-name">RootDomainUserClient::secureSleepSystemOptions</span>(
+    <span class="enscript-type">const</span> <span class="enscript-type">void</span>      *inOptions,
+    IOByteCount     inOptionsSize,
+    uint32_t        *returnCode)
+{
+
+    <span class="enscript-type">int</span>             local_priv = 0;
+    <span class="enscript-type">int</span>             admin_priv = 0;
+    IOReturn        ret = kIOReturnNotPrivileged;
+    OSDictionary    *unserializedOptions =  NULL;
+    OSString        *unserializeErrorString = NULL;
+
+    ret = clientHasPrivilege(fOwningTask, kIOClientPrivilegeLocalUser);
+    local_priv = (kIOReturnSuccess == ret);
+
+    ret = clientHasPrivilege(fOwningTask, kIOClientPrivilegeAdministrator);
+    admin_priv = (kIOReturnSuccess == ret);
+
+
+    <span class="enscript-keyword">if</span> (inOptions)
+    {
+        unserializedOptions = OSDynamicCast( OSDictionary,
+                                             OSUnserializeXML((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)inOptions, inOptionsSize, &amp;unserializeErrorString));
+
+        <span class="enscript-keyword">if</span> (!unserializedOptions) {
+            IOLog(<span class="enscript-string">&quot;IOPMRootDomain SleepSystem unserialization failure: %s\n&quot;</span>,
+                unserializeErrorString ? unserializeErrorString-&gt;getCStringNoCopy() : <span class="enscript-string">&quot;Unknown&quot;</span>);
+        }
+    }
+
+    <span class="enscript-keyword">if</span> ( (local_priv || admin_priv) &amp;&amp; fOwner )
+    {
+        proc_t p;
+        p = (proc_t)get_bsdtask_info(fOwningTask);
+        <span class="enscript-keyword">if</span> (p) {
+            fOwner-&gt;setProperty(<span class="enscript-string">&quot;SleepRequestedByPID&quot;</span>, proc_pid(p), 32);
+        }
+
+        <span class="enscript-keyword">if</span> (unserializedOptions)
+        {
+            <span class="enscript-comment">// Publish Sleep Options in registry under root_domain
+</span>            fOwner-&gt;setProperty( kRootDomainSleepOptionsKey, unserializedOptions);
+
+            *returnCode = fOwner-&gt;sleepSystemOptions( unserializedOptions );
+
+            unserializedOptions-&gt;release();
+        } <span class="enscript-keyword">else</span> {
+            <span class="enscript-comment">// No options
+</span>            <span class="enscript-comment">// Clear any pre-existing options
+</span>            fOwner-&gt;removeProperty( kRootDomainSleepOptionsKey );
+
+            *returnCode = fOwner-&gt;sleepSystemOptions( NULL );
+        }
+
+    } <span class="enscript-keyword">else</span> {
+        *returnCode = kIOReturnNotPrivileged;
+    }
+
+    <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOReturn <span class="enscript-function-name">RootDomainUserClient::secureSetAggressiveness</span>(
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>   type,
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>   newLevel,
+    <span class="enscript-type">int</span>             *return_code )
+{
+    <span class="enscript-type">int</span>             local_priv = 0;
+    <span class="enscript-type">int</span>             admin_priv = 0;
+    IOReturn        ret = kIOReturnNotPrivileged;
+
+    ret = clientHasPrivilege(fOwningTask, kIOClientPrivilegeLocalUser);
+    local_priv = (kIOReturnSuccess == ret);
+
+    ret = clientHasPrivilege(fOwningTask, kIOClientPrivilegeAdministrator);
+    admin_priv = (kIOReturnSuccess == ret);
+
+    <span class="enscript-keyword">if</span>((local_priv || admin_priv) &amp;&amp; fOwner) {
+        *return_code = fOwner-&gt;setAggressiveness(type, newLevel);
+    } <span class="enscript-keyword">else</span> {
+        *return_code = kIOReturnNotPrivileged;
+    }
+    <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOReturn <span class="enscript-function-name">RootDomainUserClient::secureSetMaintenanceWakeCalendar</span>(
+    IOPMCalendarStruct      *inCalendar,
+    uint32_t                *returnCode)
+{
+    <span class="enscript-type">int</span>                     admin_priv = 0;
+    IOReturn                ret = kIOReturnNotPrivileged;
+
+    ret = clientHasPrivilege(fOwningTask, kIOClientPrivilegeAdministrator);
+    admin_priv = (kIOReturnSuccess == ret);
+
+    <span class="enscript-keyword">if</span> (admin_priv &amp;&amp; fOwner) {
+        *returnCode = fOwner-&gt;setMaintenanceWakeCalendar(inCalendar);
+    } <span class="enscript-keyword">else</span> {
+        *returnCode = kIOReturnNotPrivileged;
+    }
+    <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOReturn <span class="enscript-function-name">RootDomainUserClient::secureSetUserAssertionLevels</span>(
+    uint32_t    assertionBitfield)
+{
+    <span class="enscript-type">int</span>                     admin_priv = 0;
+    IOReturn                ret = kIOReturnNotPrivileged;
+
+    ret = clientHasPrivilege(fOwningTask, kIOClientPrivilegeAdministrator);
+    admin_priv = (kIOReturnSuccess == ret);
+
+    <span class="enscript-keyword">if</span> (admin_priv &amp;&amp; fOwner) {
+        ret = fOwner-&gt;setPMAssertionUserLevels(assertionBitfield);
+    } <span class="enscript-keyword">else</span> {
+        ret = kIOReturnNotPrivileged;
+    }
+    <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOReturn <span class="enscript-function-name">RootDomainUserClient::secureGetSystemSleepType</span>(
+    uint32_t    *outSleepType)
+{
+    <span class="enscript-type">int</span>                     admin_priv = 0;
+    IOReturn                ret;
+
+    ret = clientHasPrivilege(fOwningTask, kIOClientPrivilegeAdministrator);
+    admin_priv = (kIOReturnSuccess == ret);
+
+    <span class="enscript-keyword">if</span> (admin_priv &amp;&amp; fOwner) {
+        ret = fOwner-&gt;getSystemSleepType(outSleepType);
+    } <span class="enscript-keyword">else</span> {
+        ret = kIOReturnNotPrivileged;
+    }
+    <span class="enscript-keyword">return</span> ret;
+}
+
+IOReturn <span class="enscript-function-name">RootDomainUserClient::clientClose</span>( <span class="enscript-type">void</span> )
+{
+    detach(fOwner);
+
+    <span class="enscript-keyword">if</span>(fOwningTask) {
+        task_deallocate(fOwningTask);
+        fOwningTask = 0;
+    }
+
+    <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOReturn <span class="enscript-function-name">RootDomainUserClient::externalMethod</span>(
+    uint32_t selector,
+    IOExternalMethodArguments * arguments,
+    IOExternalMethodDispatch * dispatch __unused,
+    OSObject * target __unused,
+    <span class="enscript-type">void</span> * reference __unused )
+{
+    IOReturn    ret = kIOReturnBadArgument;
+
+    <span class="enscript-keyword">switch</span> (selector)
+    {
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMSetAggressiveness</span>:
+            <span class="enscript-keyword">if</span> ((2 == arguments-&gt;scalarInputCount)
+                &amp;&amp; (1 == arguments-&gt;scalarOutputCount))
+            {
+                ret = <span class="enscript-keyword">this</span>-&gt;secureSetAggressiveness(
+                                (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)arguments-&gt;scalarInput[0],
+                                (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)arguments-&gt;scalarInput[1],
+                                (<span class="enscript-type">int</span> *)&amp;arguments-&gt;scalarOutput[0]);
+            }
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMGetAggressiveness</span>:
+            <span class="enscript-keyword">if</span> ((1 == arguments-&gt;scalarInputCount)
+                &amp;&amp; (1 == arguments-&gt;scalarOutputCount))
+            {
+                ret = fOwner-&gt;getAggressiveness(
+                                (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)arguments-&gt;scalarInput[0],
+                                (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> *)&amp;arguments-&gt;scalarOutput[0]);
+            }
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMSleepSystem</span>:
+            <span class="enscript-keyword">if</span> (1 == arguments-&gt;scalarOutputCount)
+            {
+                ret = <span class="enscript-keyword">this</span>-&gt;secureSleepSystem(
+                                (uint32_t *)&amp;arguments-&gt;scalarOutput[0]);
+            }
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMAllowPowerChange</span>:
+            <span class="enscript-keyword">if</span> (1 == arguments-&gt;scalarInputCount)
+            {
+                ret = fOwner-&gt;allowPowerChange(
+                                arguments-&gt;scalarInput[0]);
+            }
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMCancelPowerChange</span>:
+            <span class="enscript-keyword">if</span> (1 == arguments-&gt;scalarInputCount)
+            {
+                ret = fOwner-&gt;cancelPowerChange(
+                                arguments-&gt;scalarInput[0]);
+            }
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMShutdownSystem</span>:
+            <span class="enscript-comment">// deperecated interface
+</span>            ret = kIOReturnUnsupported;
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMRestartSystem</span>:
+            <span class="enscript-comment">// deperecated interface
+</span>            ret = kIOReturnUnsupported;
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMSleepSystemOptions</span>:
+            ret = <span class="enscript-keyword">this</span>-&gt;secureSleepSystemOptions(
+                    arguments-&gt;structureInput,
+                    arguments-&gt;structureInputSize,
+                    (uint32_t *)&amp;arguments-&gt;scalarOutput[0]);
+            <span class="enscript-keyword">break</span>;
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMSetMaintenanceWakeCalendar</span>:
+            ret = <span class="enscript-keyword">this</span>-&gt;secureSetMaintenanceWakeCalendar(
+                    (IOPMCalendarStruct *)arguments-&gt;structureInput,
+                    (uint32_t *)&amp;arguments-&gt;structureOutput);
+            arguments-&gt;structureOutputSize = <span class="enscript-keyword">sizeof</span>(uint32_t);
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMSetUserAssertionLevels</span>:
+            ret = <span class="enscript-keyword">this</span>-&gt;secureSetUserAssertionLevels(
+                        (uint32_t)arguments-&gt;scalarInput[0]);
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMActivityTickle</span>:
+            <span class="enscript-keyword">if</span> ( fOwner-&gt;checkSystemCanSustainFullWake() )
+            {
+               fOwner-&gt;reportUserInput( );
+               fOwner-&gt;setProperty(kIOPMRootDomainWakeTypeKey, <span class="enscript-string">&quot;UserActivity Assertion&quot;</span>);
+            }
+            ret = kIOReturnSuccess;
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMSetClamshellSleepState</span>:
+            fOwner-&gt;setDisableClamShellSleep(arguments-&gt;scalarInput[0] ? true : false);
+            ret = kIOReturnSuccess;
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMGetSystemSleepType</span>:
+            <span class="enscript-keyword">if</span> (1 == arguments-&gt;scalarOutputCount)
+            {
+                ret = <span class="enscript-keyword">this</span>-&gt;secureGetSystemSleepType(
+                        (uint32_t *) &amp;arguments-&gt;scalarOutput[0]);
+            }
+            <span class="enscript-keyword">break</span>;
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMSleepWakeWatchdogEnable</span>:
+            ret = clientHasPrivilege(fOwningTask, kIOClientPrivilegeAdministrator);
+            <span class="enscript-keyword">if</span> (ret == kIOReturnSuccess)
+               fOwner-&gt;sleepWakeDebugEnableWdog();
+            <span class="enscript-keyword">break</span>;
+
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMSleepWakeDebugTrig</span>:
+            ret = clientHasPrivilege(fOwningTask, kIOClientPrivilegeAdministrator);
+            <span class="enscript-keyword">if</span> (ret == kIOReturnSuccess)
+               fOwner-&gt;sleepWakeDebugTrig(false);
+            <span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kPMSetDisplayPowerOn</span>:
+            <span class="enscript-keyword">if</span> (1 == arguments-&gt;scalarInputCount)
+            {
+                ret = clientHasPrivilege(fOwningTask, kIOClientPrivilegeAdministrator);
+                <span class="enscript-keyword">if</span> (ret == kIOReturnSuccess)
+                    fOwner-&gt;setDisplayPowerOn((uint32_t)arguments-&gt;scalarInput[0]);
+            }
+            <span class="enscript-keyword">break</span>;
+
+        <span class="enscript-reference">default</span>:
+            <span class="enscript-comment">// bad selector
+</span>            <span class="enscript-keyword">return</span> kIOReturnBadArgument;
+    }
+
+    <span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-comment">/* getTargetAndMethodForIndex
+ * Not used. We prefer to use externalMethod() for user client invocations.
+ * We maintain getTargetAndExternalMethod since it's an exported symbol,
+ * and only for that reason.
+ */</span>
+IOExternalMethod * <span class="enscript-function-name">RootDomainUserClient::getTargetAndMethodForIndex</span>(
+    IOService ** targetP, UInt32 index )
+{
+    <span class="enscript-comment">// DO NOT EDIT
+</span>    <span class="enscript-keyword">return</span> super::getTargetAndMethodForIndex(targetP, index);
+}
+
+<span class="enscript-comment">/* setPreventative
+ * Does nothing. Exists only for exported symbol compatibility.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">RootDomainUserClient::setPreventative</span>(UInt32 on_off, UInt32 types_of_sleep)
+{ <span class="enscript-keyword">return</span>; } <span class="enscript-comment">// DO NOT EDIT
+</span></pre>
+<hr />
+</body></html>

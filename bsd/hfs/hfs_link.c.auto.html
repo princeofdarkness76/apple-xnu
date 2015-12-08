@@ -1,0 +1,1456 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>hfs_link.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">hfs_link.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1999-2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vfs/vfs_support.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fsctl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_catalog.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_format.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_endian.h&quot;</span>
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> cur_link_id = 0;
+
+<span class="enscript-comment">/*
+ * Private directories where hardlink inodes reside.
+ */</span>
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> *hfs_private_names[] = {
+	HFSPLUSMETADATAFOLDER,      <span class="enscript-comment">/* FILE HARDLINKS */</span>
+	HFSPLUS_DIR_METADATA_FOLDER <span class="enscript-comment">/* DIRECTORY HARDLINKS */</span>
+};
+
+
+<span class="enscript-comment">/*
+ * Hardlink inodes save the head of their link chain in a
+ * private extended attribute.  The following calls are
+ * used to access this attribute.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">setfirstlink</span>(<span class="enscript-type">struct</span> hfsmount * hfsmp, cnid_t fileid, cnid_t firstlink);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">getfirstlink</span>(<span class="enscript-type">struct</span> hfsmount * hfsmp, cnid_t fileid, cnid_t *firstlink);
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">hfs_makelink</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> vnode *src_vp, <span class="enscript-type">struct</span> cnode *cp, 
+		<span class="enscript-type">struct</span> cnode *dcp, <span class="enscript-type">struct</span> componentname *cnp);
+<span class="enscript-comment">/*
+ * Create a new catalog link record
+ *
+ * An indirect link is a reference to an inode (the real
+ * file or directory record).
+ *
+ * All the indirect links for a given inode are chained
+ * together in a doubly linked list.
+ *
+ * Pre-Leopard file hard links do not have kHFSHasLinkChainBit 
+ * set and do not have first/prev/next link IDs i.e. the values 
+ * are zero.  If a new link is being added to an existing 
+ * pre-Leopard file hard link chain, do not set kHFSHasLinkChainBit.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">createindirectlink</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, u_int32_t linknum, <span class="enscript-type">struct</span> cat_desc *descp,
+                   cnid_t nextcnid, cnid_t *linkcnid, <span class="enscript-type">int</span> is_inode_linkchain_set)
+{
+	<span class="enscript-type">struct</span> FndrFileInfo *fip;
+	<span class="enscript-type">struct</span> cat_attr attr;
+
+	<span class="enscript-keyword">if</span> (linknum == 0) {
+		printf(<span class="enscript-string">&quot;hfs: createindirectlink: linknum is zero!\n&quot;</span>);
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-comment">/* Setup the default attributes */</span>
+	bzero(&amp;attr, <span class="enscript-keyword">sizeof</span>(attr));
+	
+	<span class="enscript-comment">/* Links are matched to inodes by link ID and to volumes by create date */</span>
+	attr.ca_linkref = linknum;
+	attr.ca_itime = hfsmp-&gt;hfs_metadata_createdate;
+	attr.ca_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
+	attr.ca_recflags = kHFSHasLinkChainMask | kHFSThreadExistsMask;
+	attr.ca_flags = UF_IMMUTABLE;
+	fip = (<span class="enscript-type">struct</span> FndrFileInfo *)&amp;attr.ca_finderinfo;
+
+	<span class="enscript-keyword">if</span> (descp-&gt;cd_flags &amp; CD_ISDIR) {
+		fip-&gt;fdType    = SWAP_BE32 (kHFSAliasType);
+		fip-&gt;fdCreator = SWAP_BE32 (kHFSAliasCreator);
+		fip-&gt;fdFlags   = SWAP_BE16 (kIsAlias);
+	} <span class="enscript-keyword">else</span> <span class="enscript-comment">/* file */</span> {
+		fip-&gt;fdType    = SWAP_BE32 (kHardLinkFileType);
+		fip-&gt;fdCreator = SWAP_BE32 (kHFSPlusCreator);
+		fip-&gt;fdFlags   = SWAP_BE16 (kHasBeenInited);
+		<span class="enscript-comment">/* If the file inode does not have kHFSHasLinkChainBit set 
+		 * and the next link chain ID is zero, assume that this 
+		 * is pre-Leopard file inode.  Therefore clear the bit.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((is_inode_linkchain_set == 0) &amp;&amp; (nextcnid == 0)) {
+			attr.ca_recflags &amp;= ~kHFSHasLinkChainMask;
+		}
+	}
+	<span class="enscript-comment">/* Create the indirect link directly in the catalog */</span>
+	<span class="enscript-keyword">return</span> cat_createlink(hfsmp, descp, &amp;attr, nextcnid, linkcnid);
+}
+
+
+<span class="enscript-comment">/*
+ * Make a link to the cnode cp in the directory dp
+ * using the name in cnp.  src_vp is the vnode that 
+ * corresponds to 'cp' which was part of the arguments to
+ * hfs_vnop_link.
+ *
+ * The cnodes cp and dcp must be locked.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_makelink</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> vnode *src_vp, <span class="enscript-type">struct</span> cnode *cp, 
+		<span class="enscript-type">struct</span> cnode *dcp, <span class="enscript-type">struct</span> componentname *cnp)
+{
+	vfs_context_t ctx = cnp-&gt;cn_context;
+	<span class="enscript-type">struct</span> proc *p = vfs_context_proc(ctx);
+	u_int32_t indnodeno = 0;
+	<span class="enscript-type">char</span> inodename[32]; 
+	<span class="enscript-type">struct</span> cat_desc to_desc;
+	<span class="enscript-type">struct</span> cat_desc link_desc;
+	<span class="enscript-type">int</span> newlink = 0;
+	<span class="enscript-type">int</span> lockflags;
+	<span class="enscript-type">int</span> retval = 0;
+	cat_cookie_t cookie;
+	cnid_t orig_cnid;
+	cnid_t linkcnid;
+	cnid_t orig_firstlink;
+	<span class="enscript-type">enum</span> privdirtype type;
+
+	type = S_ISDIR(cp-&gt;c_mode) ? DIR_HARDLINKS : FILE_HARDLINKS;
+
+	<span class="enscript-keyword">if</span> (cur_link_id == 0) {
+		cur_link_id = ((random() &amp; 0x3fffffff) + 100);
+	}
+	
+	<span class="enscript-comment">/* We don't allow link nodes in our private system directories. */</span>
+	<span class="enscript-keyword">if</span> (dcp-&gt;c_fileid == hfsmp-&gt;hfs_private_desc[FILE_HARDLINKS].cd_cnid ||
+	    dcp-&gt;c_fileid == hfsmp-&gt;hfs_private_desc[DIR_HARDLINKS].cd_cnid) {
+		<span class="enscript-keyword">return</span> (EPERM);
+	}
+
+	bzero(&amp;cookie, <span class="enscript-keyword">sizeof</span>(cat_cookie_t));
+	<span class="enscript-comment">/* Reserve some space in the Catalog file. */</span>
+	<span class="enscript-keyword">if</span> ((retval = cat_preflight(hfsmp, (2 * CAT_CREATE)+ CAT_RENAME, &amp;cookie, p))) {
+		<span class="enscript-keyword">return</span> (retval);
+	}
+
+	lockflags = SFL_CATALOG | SFL_ATTRIBUTE;
+	<span class="enscript-comment">/* Directory hard links allocate space for a symlink. */</span>
+	<span class="enscript-keyword">if</span> (type == DIR_HARDLINKS) {
+		lockflags |= SFL_BITMAP;
+	}
+	lockflags = hfs_systemfile_lock(hfsmp, lockflags, HFS_EXCLUSIVE_LOCK);
+
+	<span class="enscript-comment">/* Save the current cnid value so we restore it if an error occurs. */</span>
+	orig_cnid = cp-&gt;c_desc.cd_cnid;
+
+	<span class="enscript-comment">/*
+	 * If this is a new hardlink then we need to create the inode
+	 * and replace the original file/dir object with a link node.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((cp-&gt;c_linkcount == 2) &amp;&amp; !(cp-&gt;c_flag &amp; C_HARDLINK)) {
+		newlink = 1;
+		bzero(&amp;to_desc, <span class="enscript-keyword">sizeof</span>(to_desc));
+		to_desc.cd_parentcnid = hfsmp-&gt;hfs_private_desc[type].cd_cnid;
+		to_desc.cd_cnid = cp-&gt;c_fileid;
+		to_desc.cd_flags = (type == DIR_HARDLINKS) ? CD_ISDIR : 0;
+
+		<span class="enscript-keyword">do</span> {
+			<span class="enscript-keyword">if</span> (type == DIR_HARDLINKS) {
+				<span class="enscript-comment">/* Directory hardlinks always use the cnid. */</span>
+				indnodeno = cp-&gt;c_fileid;
+				MAKE_DIRINODE_NAME(inodename, <span class="enscript-keyword">sizeof</span>(inodename),
+							indnodeno);
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* Get a unique indirect node number */</span>
+				<span class="enscript-keyword">if</span> (retval == 0) {
+					indnodeno = cp-&gt;c_fileid;
+				} <span class="enscript-keyword">else</span> {
+					indnodeno = cur_link_id++;
+				}
+				MAKE_INODE_NAME(inodename, <span class="enscript-keyword">sizeof</span>(inodename),
+						indnodeno);
+			}
+			<span class="enscript-comment">/* Move original file/dir to data node directory */</span>
+			to_desc.cd_nameptr = (<span class="enscript-type">const</span> u_int8_t *)inodename;
+			to_desc.cd_namelen = strlen(inodename);
+		
+			retval = cat_rename(hfsmp, &amp;cp-&gt;c_desc, &amp;hfsmp-&gt;hfs_private_desc[type],
+					&amp;to_desc, NULL);
+
+			<span class="enscript-keyword">if</span> (retval != 0 &amp;&amp; retval != EEXIST) {
+			    printf(<span class="enscript-string">&quot;hfs_makelink: cat_rename to %s failed (%d) fileid=%d, vol=%s\n&quot;</span>,
+				inodename, retval, cp-&gt;c_fileid, hfsmp-&gt;vcbVN);
+			}
+		} <span class="enscript-keyword">while</span> ((retval == EEXIST) &amp;&amp; (type == FILE_HARDLINKS));
+		<span class="enscript-keyword">if</span> (retval)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		<span class="enscript-comment">/*
+		 * Replace original file/dir with a link record.
+		 */</span>
+		
+		bzero(&amp;link_desc, <span class="enscript-keyword">sizeof</span>(link_desc));
+		link_desc.cd_nameptr = cp-&gt;c_desc.cd_nameptr;
+		link_desc.cd_namelen = cp-&gt;c_desc.cd_namelen;
+		link_desc.cd_parentcnid = cp-&gt;c_parentcnid;
+		link_desc.cd_flags = S_ISDIR(cp-&gt;c_mode) ? CD_ISDIR : 0;
+
+		retval = createindirectlink(hfsmp, indnodeno, &amp;link_desc, 0, &amp;linkcnid, true);
+		<span class="enscript-keyword">if</span> (retval) {
+			<span class="enscript-type">int</span> err;
+
+			<span class="enscript-comment">/* Restore the cnode's cnid. */</span>
+			cp-&gt;c_desc.cd_cnid = orig_cnid;
+
+			<span class="enscript-comment">/* Put the original file back. */</span>
+			err = cat_rename(hfsmp, &amp;to_desc, &amp;dcp-&gt;c_desc, &amp;cp-&gt;c_desc, NULL);
+			<span class="enscript-keyword">if</span> (err) {
+				<span class="enscript-keyword">if</span> (err != EIO &amp;&amp; err != ENXIO)
+					printf(<span class="enscript-string">&quot;hfs_makelink: error %d from cat_rename backout 1&quot;</span>, err);
+				hfs_mark_inconsistent(hfsmp, HFS_ROLLBACK_FAILED);
+			}
+			<span class="enscript-keyword">if</span> (retval != EIO &amp;&amp; retval != ENXIO) {
+				printf(<span class="enscript-string">&quot;hfs_makelink: createindirectlink (1) failed: %d\n&quot;</span>, retval);
+				retval = EIO;
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		cp-&gt;c_attr.ca_linkref = indnodeno;
+		cp-&gt;c_desc.cd_cnid = linkcnid;
+		<span class="enscript-comment">/* Directory hard links store the first link in an attribute. */</span>
+		<span class="enscript-keyword">if</span> (type == DIR_HARDLINKS) {
+			<span class="enscript-keyword">if</span> (setfirstlink(hfsmp, cp-&gt;c_fileid, linkcnid) == 0)
+				cp-&gt;c_attr.ca_recflags |= kHFSHasAttributesMask;
+		} <span class="enscript-keyword">else</span> <span class="enscript-comment">/* FILE_HARDLINKS */</span> {
+			cp-&gt;c_attr.ca_firstlink = linkcnid;
+		}
+		cp-&gt;c_attr.ca_recflags |= kHFSHasLinkChainMask;
+	} <span class="enscript-keyword">else</span> {
+		indnodeno = cp-&gt;c_attr.ca_linkref;
+	}
+
+	<span class="enscript-comment">/*
+	 * Create a catalog entry for the new link (parentID + name).
+	 */</span>
+	
+	bzero(&amp;link_desc, <span class="enscript-keyword">sizeof</span>(link_desc));
+	link_desc.cd_nameptr = (<span class="enscript-type">const</span> u_int8_t *)cnp-&gt;cn_nameptr;
+	link_desc.cd_namelen = strlen(cnp-&gt;cn_nameptr);
+	link_desc.cd_parentcnid = dcp-&gt;c_fileid;
+	link_desc.cd_flags = S_ISDIR(cp-&gt;c_mode) ? CD_ISDIR : 0;
+
+	<span class="enscript-comment">/* Directory hard links store the first link in an attribute. */</span>
+	<span class="enscript-keyword">if</span> (type == DIR_HARDLINKS) {
+		retval = getfirstlink(hfsmp, cp-&gt;c_fileid, &amp;orig_firstlink);
+	} <span class="enscript-keyword">else</span> <span class="enscript-comment">/* FILE_HARDLINKS */</span> {
+		orig_firstlink = cp-&gt;c_attr.ca_firstlink;
+	}
+	<span class="enscript-keyword">if</span> (retval == 0)
+		retval = createindirectlink(hfsmp, indnodeno, &amp;link_desc, 
+				orig_firstlink, &amp;linkcnid, 
+				(cp-&gt;c_attr.ca_recflags &amp; kHFSHasLinkChainMask));
+	<span class="enscript-keyword">if</span> (retval &amp;&amp; newlink) {
+		<span class="enscript-type">int</span> err;
+
+		<span class="enscript-comment">/* Get rid of new link */</span>
+		(<span class="enscript-type">void</span>) cat_delete(hfsmp, &amp;cp-&gt;c_desc, &amp;cp-&gt;c_attr);
+		
+		<span class="enscript-comment">/* Restore the cnode's cnid. */</span>
+		cp-&gt;c_desc.cd_cnid = orig_cnid;
+		
+		<span class="enscript-comment">/* Put the original file back. */</span>
+		err = cat_rename(hfsmp, &amp;to_desc, &amp;dcp-&gt;c_desc, &amp;cp-&gt;c_desc, NULL);
+		<span class="enscript-keyword">if</span> (err) {
+			<span class="enscript-keyword">if</span> (err != EIO &amp;&amp; err != ENXIO)
+				printf(<span class="enscript-string">&quot;hfs_makelink: error %d from cat_rename backout 2&quot;</span>, err);
+			hfs_mark_inconsistent(hfsmp, HFS_ROLLBACK_FAILED);
+		}
+
+		cp-&gt;c_attr.ca_linkref = 0;
+
+		<span class="enscript-keyword">if</span> (retval != EIO &amp;&amp; retval != ENXIO) {
+			printf(<span class="enscript-string">&quot;hfs_makelink: createindirectlink (2) failed: %d\n&quot;</span>, retval);
+			retval = EIO;
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (retval == 0) {
+
+	    <span class="enscript-comment">/* Update the original first link to point back to the new first link. */</span>
+	    <span class="enscript-keyword">if</span> (cp-&gt;c_attr.ca_recflags &amp; kHFSHasLinkChainMask) {
+		(<span class="enscript-type">void</span>) cat_update_siblinglinks(hfsmp, orig_firstlink, linkcnid, HFS_IGNORABLE_LINK);
+
+		<span class="enscript-comment">/* Update the inode's first link value. */</span>
+		<span class="enscript-keyword">if</span> (type == DIR_HARDLINKS) {
+		    <span class="enscript-keyword">if</span> (setfirstlink(hfsmp, cp-&gt;c_fileid, linkcnid) == 0)
+			cp-&gt;c_attr.ca_recflags |= kHFSHasAttributesMask;
+		} <span class="enscript-keyword">else</span> {
+		    cp-&gt;c_attr.ca_firstlink = linkcnid;
+		}
+	    }
+	    <span class="enscript-comment">/*
+	     * Finally, if this is a new hardlink then:
+	     *  - update the private system directory
+	     *  - mark the cnode as a hard link
+	     */</span>
+	    <span class="enscript-keyword">if</span> (newlink) {
+		vnode_t vp;
+		
+		hfsmp-&gt;hfs_private_attr[type].ca_entries++;
+		<span class="enscript-comment">/* From application perspective, directory hard link is a 
+		 * normal directory.  Therefore count the new directory 
+		 * hard link for folder count calculation.
+		 */</span>
+		<span class="enscript-keyword">if</span> (type == DIR_HARDLINKS) {
+			INC_FOLDERCOUNT(hfsmp, hfsmp-&gt;hfs_private_attr[type]);
+		}
+		retval = cat_update(hfsmp, &amp;hfsmp-&gt;hfs_private_desc[type],
+		    &amp;hfsmp-&gt;hfs_private_attr[type], NULL, NULL);
+		<span class="enscript-keyword">if</span> (retval) {
+			<span class="enscript-keyword">if</span> (retval != EIO &amp;&amp; retval != ENXIO) {
+				printf(<span class="enscript-string">&quot;hfs_makelink: cat_update of privdir failed! (%d)\n&quot;</span>, retval);
+				retval = EIO;
+			}
+			hfs_mark_inconsistent(hfsmp, HFS_OP_INCOMPLETE);
+		}
+		cp-&gt;c_flag |= C_HARDLINK;
+
+		<span class="enscript-comment">/*
+		 * Now we need to mark the vnodes as being hardlinks via the vnode_setmultipath call.
+		 * Note that we're calling vnode_get here, which should simply add an iocount if possible, without
+		 * doing much checking.  It's safe to call this because we are protected by the cnode lock, which
+		 * ensures that anyone trying to reclaim it will block until we release it.  vnode_get will usually 
+		 * give us an extra iocount, unless the vnode is about to be reclaimed (and has no iocounts).  
+		 * In that case, we'd error out, but we'd also not care if we added the VISHARDLINK bit to the vnode.  
+		 * 
+		 * As for the iocount we're about to add, we can't necessarily always call vnode_put here.  
+		 * If the one we add is the only iocount on the vnode, and there was
+		 * sufficient vnode pressure, it could go through VNOP_INACTIVE immediately, which would
+		 * require the cnode lock and cause us to double-lock panic.  We can only call vnode_put if we know
+		 * that the vnode we're operating on is the one with which we came into hfs_vnop_link, because
+		 * that means VFS took an iocount on it for us.  If it's *not* the one that we came into the call 
+		 * with, then mark it as NEED_VNODE_PUT to have hfs_unlock drop it for us.  hfs_vnop_link will 
+		 * unlock the cnode when it is finished.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((vp = cp-&gt;c_vp) != NULLVP) {
+			<span class="enscript-keyword">if</span> (vnode_get(vp) == 0) {
+				vnode_setmultipath(vp);
+				<span class="enscript-keyword">if</span> (vp == src_vp) {
+					<span class="enscript-comment">/* we have an iocount on data fork vnode already. */</span>
+					vnode_put(vp);
+				}
+				<span class="enscript-keyword">else</span> {
+					cp-&gt;c_flag |= C_NEED_DVNODE_PUT;
+				}
+			}
+		}
+		<span class="enscript-keyword">if</span> ((vp = cp-&gt;c_rsrc_vp) != NULLVP) {
+			<span class="enscript-keyword">if</span> (vnode_get(vp) == 0) {
+				vnode_setmultipath(vp);
+				<span class="enscript-keyword">if</span> (vp == src_vp) {
+					vnode_put(vp);
+				}
+				<span class="enscript-keyword">else</span> {
+					cp-&gt;c_flag |= C_NEED_RVNODE_PUT;
+				}
+			}
+		}
+			cp-&gt;c_flag |= C_MODIFIED;
+		cp-&gt;c_touch_chgtime = TRUE;
+	    }
+	}
+<span class="enscript-reference">out</span>:
+	hfs_systemfile_unlock(hfsmp, lockflags);
+
+	cat_postflight(hfsmp, &amp;cookie, p);
+	
+	<span class="enscript-keyword">if</span> (retval == 0 &amp;&amp; newlink) {
+		hfs_volupdate(hfsmp, VOL_MKFILE, 0);
+	}
+	<span class="enscript-keyword">return</span> (retval);
+}
+
+
+<span class="enscript-comment">/*
+ * link vnode operation
+ *
+ *  IN vnode_t  a_vp;
+ *  IN vnode_t  a_tdvp;
+ *  IN struct componentname  *a_cnp;
+ *  IN vfs_context_t  a_context;
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_vnop_link</span>(<span class="enscript-type">struct</span> vnop_link_args *ap)
+{
+	<span class="enscript-type">struct</span> hfsmount *hfsmp;
+	<span class="enscript-type">struct</span> vnode *vp = ap-&gt;a_vp;
+	<span class="enscript-type">struct</span> vnode *tdvp = ap-&gt;a_tdvp;
+	<span class="enscript-type">struct</span> vnode *fdvp = NULLVP;
+	<span class="enscript-type">struct</span> componentname *cnp = ap-&gt;a_cnp;
+	<span class="enscript-type">struct</span> cnode *cp;
+	<span class="enscript-type">struct</span> cnode *tdcp;
+	<span class="enscript-type">struct</span> cnode *fdcp = NULL;
+	<span class="enscript-type">struct</span> cat_desc todesc;
+	cnid_t parentcnid;
+	<span class="enscript-type">int</span> lockflags = 0;
+	<span class="enscript-type">int</span> intrans = 0;
+	<span class="enscript-type">enum</span> vtype v_type;
+	<span class="enscript-type">int</span> error, ret;
+
+	hfsmp = VTOHFS(vp);
+	v_type = vnode_vtype(vp);
+
+	<span class="enscript-comment">/* No hard links in HFS standard file systems. */</span>
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_flags &amp; HFS_STANDARD) {
+		<span class="enscript-keyword">return</span> (ENOTSUP);
+	}
+	<span class="enscript-comment">/* Linking to a special file is not permitted. */</span>
+	<span class="enscript-keyword">if</span> (v_type == VBLK || v_type == VCHR) {
+		<span class="enscript-keyword">return</span> (EPERM);  
+	}
+
+	<span class="enscript-comment">/*
+	 * For now, return ENOTSUP for a symlink target. This can happen
+	 * for linkat(2) when called without AT_SYMLINK_FOLLOW.
+	 */</span>
+	<span class="enscript-keyword">if</span> (v_type == VLNK)
+		<span class="enscript-keyword">return</span> (ENOTSUP);
+
+	cp = VTOC(vp);
+
+	<span class="enscript-keyword">if</span> (v_type == VDIR) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_DIRLINK</span>
+		<span class="enscript-comment">/* Make sure our private directory exists. */</span>
+		<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_private_desc[DIR_HARDLINKS].cd_cnid == 0) {
+			<span class="enscript-keyword">return</span> (EPERM);
+		}
+		<span class="enscript-comment">/*
+		 * Directory hardlinks (ADLs) have only been qualified on
+		 * journaled HFS+.  If/when they are tested on non-journaled
+		 * file systems then this test can be removed.
+		 */</span>
+		<span class="enscript-keyword">if</span> (hfsmp-&gt;jnl == NULL) {
+			<span class="enscript-keyword">return</span> (EPERM);
+		}
+
+		<span class="enscript-comment">/* Directory hardlinks also need the parent of the original directory. */</span>
+		<span class="enscript-keyword">if</span> ((error = hfs_vget(hfsmp, hfs_currentparent(cp, <span class="enscript-comment">/* have_lock: */</span> false),
+							  &amp;fdvp, 1, 0))) {
+			<span class="enscript-keyword">return</span> (error);
+		}
+#<span class="enscript-reference">else</span>
+		<span class="enscript-comment">/* some platforms don't support directory hardlinks. */</span>
+		<span class="enscript-keyword">return</span> EPERM;
+#<span class="enscript-reference">endif</span>
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* Make sure our private directory exists. */</span>
+		<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_private_desc[FILE_HARDLINKS].cd_cnid == 0) {
+			<span class="enscript-keyword">return</span> (ENOTSUP);
+		}
+	}
+	<span class="enscript-keyword">if</span> (hfs_freeblks(hfsmp, 0) == 0) {
+		<span class="enscript-keyword">if</span> (fdvp) {
+			vnode_put(fdvp);
+		}
+		<span class="enscript-keyword">return</span> (ENOSPC);
+	}
+
+	check_for_tracked_file(vp, VTOC(vp)-&gt;c_ctime, NAMESPACE_HANDLER_LINK_CREATE, NULL);
+
+
+	<span class="enscript-comment">/* Lock the cnodes. */</span>
+	<span class="enscript-keyword">if</span> (fdvp) {
+		<span class="enscript-keyword">if</span> ((error = hfs_lockfour(VTOC(tdvp), VTOC(vp), VTOC(fdvp), NULL, HFS_EXCLUSIVE_LOCK, NULL))) {
+			<span class="enscript-keyword">if</span> (fdvp) {
+				vnode_put(fdvp);
+		    	}
+			<span class="enscript-keyword">return</span> (error);
+		}
+		fdcp = VTOC(fdvp);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> ((error = hfs_lockpair(VTOC(tdvp), VTOC(vp), HFS_EXCLUSIVE_LOCK))) {
+			<span class="enscript-keyword">return</span> (error);
+		}
+	}
+	tdcp = VTOC(tdvp);
+	<span class="enscript-comment">/* grab the parent CNID from originlist after grabbing cnode locks */</span>
+	parentcnid = hfs_currentparent(cp, <span class="enscript-comment">/* have_lock: */</span> true);
+
+	<span class="enscript-comment">/* 
+	 * Make sure we didn't race the src or dst parent directories with rmdir.
+	 * Note that we should only have a src parent directory cnode lock 
+	 * if we're dealing with a directory hardlink here.
+	 */</span>
+	<span class="enscript-keyword">if</span> (fdcp) {
+		<span class="enscript-keyword">if</span> (fdcp-&gt;c_flag &amp; (C_NOEXISTS | C_DELETED)) {
+			error = ENOENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (tdcp-&gt;c_flag &amp; (C_NOEXISTS | C_DELETED)) {
+		error = ENOENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/* Check the source for errors: 
+	 * too many links, immutable, race with unlink
+	 */</span>
+	<span class="enscript-keyword">if</span> (cp-&gt;c_linkcount &gt;= HFS_LINK_MAX) {
+		error = EMLINK;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (cp-&gt;c_bsdflags &amp; (IMMUTABLE | APPEND)) {
+		error = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (cp-&gt;c_flag &amp; (C_NOEXISTS | C_DELETED)) {
+		error = ENOENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	tdcp-&gt;c_flag |= C_DIR_MODIFICATION;
+
+	<span class="enscript-keyword">if</span> (hfs_start_transaction(hfsmp) != 0) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	intrans = 1;
+
+	todesc.cd_flags = (v_type == VDIR) ? CD_ISDIR : 0;
+	todesc.cd_encoding = 0;
+	todesc.cd_nameptr = (<span class="enscript-type">const</span> u_int8_t *)cnp-&gt;cn_nameptr;
+	todesc.cd_namelen = cnp-&gt;cn_namelen;
+	todesc.cd_parentcnid = tdcp-&gt;c_fileid;
+	todesc.cd_hint = 0;
+	todesc.cd_cnid = 0;
+
+	lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
+
+	<span class="enscript-comment">/* If destination exists then we lost a race with create. */</span>
+	<span class="enscript-keyword">if</span> (cat_lookup(hfsmp, &amp;todesc, 0, 0, NULL, NULL, NULL, NULL) == 0) {
+		error = EEXIST;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (cp-&gt;c_flag &amp; C_HARDLINK) {
+		<span class="enscript-type">struct</span> cat_attr cattr;
+
+		<span class="enscript-comment">/* If inode is missing then we lost a race with unlink. */</span>
+		<span class="enscript-keyword">if</span> ((cat_idlookup(hfsmp, cp-&gt;c_fileid, 0, 0, NULL, &amp;cattr, NULL) != 0) ||
+		    (cattr.ca_fileid != cp-&gt;c_fileid)) {
+			error = ENOENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	} <span class="enscript-keyword">else</span> {
+		cnid_t fileid;
+
+		<span class="enscript-comment">/* If source is missing then we lost a race with unlink. */</span>
+		<span class="enscript-keyword">if</span> ((cat_lookup(hfsmp, &amp;cp-&gt;c_desc, 0, 0, NULL, NULL, NULL, &amp;fileid) != 0) ||
+		    (fileid != cp-&gt;c_fileid)) {
+			error = ENOENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+	<span class="enscript-comment">/* 
+	 * All directory links must reside in an non-ARCHIVED hierarchy.
+	 */</span>
+	<span class="enscript-keyword">if</span> (v_type == VDIR) {
+		<span class="enscript-comment">/*
+		 * - Source parent and destination parent cannot match
+		 * - A link is not permitted in the root directory
+		 * - Parent of 'pointed at' directory is not the root directory
+		 * - The 'pointed at' directory (source) is not an ancestor
+		 *   of the new directory hard link (destination).
+		 * - No ancestor of the new directory hard link (destination) 
+		 *   is a directory hard link.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((parentcnid == tdcp-&gt;c_fileid) ||
+		    (tdcp-&gt;c_fileid == kHFSRootFolderID) ||
+		    (parentcnid == kHFSRootFolderID) ||
+		    cat_check_link_ancestry(hfsmp, tdcp-&gt;c_fileid, cp-&gt;c_fileid)) {
+			error = EPERM;  <span class="enscript-comment">/* abide by the rules, you did not */</span>
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+	hfs_systemfile_unlock(hfsmp, lockflags);
+	lockflags = 0;
+
+	cp-&gt;c_linkcount++;
+	cp-&gt;c_flag |= C_MODIFIED;
+	cp-&gt;c_touch_chgtime = TRUE;
+	error = hfs_makelink(hfsmp, vp, cp, tdcp, cnp);
+	<span class="enscript-keyword">if</span> (error) {
+		cp-&gt;c_linkcount--;
+		hfs_volupdate(hfsmp, VOL_UPDATE, 0);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* Invalidate negative cache entries in the destination directory */</span>
+		<span class="enscript-keyword">if</span> (tdcp-&gt;c_flag &amp; C_NEG_ENTRIES) {
+			cache_purge_negatives(tdvp);
+			tdcp-&gt;c_flag &amp;= ~C_NEG_ENTRIES;
+		}
+
+		<span class="enscript-comment">/* Update the target directory and volume stats */</span>
+		tdcp-&gt;c_entries++;
+		<span class="enscript-keyword">if</span> (v_type == VDIR) {
+			INC_FOLDERCOUNT(hfsmp, tdcp-&gt;c_attr);
+			tdcp-&gt;c_attr.ca_recflags |= kHFSHasChildLinkMask;
+
+			<span class="enscript-comment">/* Set kHFSHasChildLinkBit in the destination hierarchy */</span>
+			error = cat_set_childlinkbit(hfsmp, tdcp-&gt;c_parentcnid);
+			<span class="enscript-keyword">if</span> (error) {
+				printf (<span class="enscript-string">&quot;hfs_vnop_link: error updating destination parent chain for id=%u, vol=%s\n&quot;</span>, tdcp-&gt;c_cnid, hfsmp-&gt;vcbVN);
+				error = 0;
+			}
+		}
+		tdcp-&gt;c_dirchangecnt++;
+		tdcp-&gt;c_flag |= C_MODIFIED;
+		hfs_incr_gencount(tdcp);
+		tdcp-&gt;c_touch_chgtime = TRUE;
+		tdcp-&gt;c_touch_modtime = TRUE;
+
+		error = hfs_update(tdvp, 0);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">if</span> (error != EIO &amp;&amp; error != ENXIO) {
+				printf(<span class="enscript-string">&quot;hfs_vnop_link: error %d updating tdvp %p\n&quot;</span>, error, tdvp);
+				error = EIO;
+			}
+			hfs_mark_inconsistent(hfsmp, HFS_OP_INCOMPLETE);
+		}
+
+		<span class="enscript-keyword">if</span> ((v_type == VDIR) &amp;&amp; 
+		    (fdcp != NULL) &amp;&amp; 
+		    ((fdcp-&gt;c_attr.ca_recflags &amp; kHFSHasChildLinkMask) == 0)) {
+
+			fdcp-&gt;c_attr.ca_recflags |= kHFSHasChildLinkMask;
+			fdcp-&gt;c_flag |= C_MODIFIED;
+			fdcp-&gt;c_touch_chgtime = TRUE;
+			error = hfs_update(fdvp, 0);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">if</span> (error != EIO &amp;&amp; error != ENXIO) {
+					printf(<span class="enscript-string">&quot;hfs_vnop_link: error %d updating fdvp %p\n&quot;</span>, error, fdvp);
+					<span class="enscript-comment">// No point changing error as it's set immediate below
+</span>				}
+				hfs_mark_inconsistent(hfsmp, HFS_OP_INCOMPLETE);
+			}
+
+			<span class="enscript-comment">/* Set kHFSHasChildLinkBit in the source hierarchy */</span>
+			error = cat_set_childlinkbit(hfsmp, fdcp-&gt;c_parentcnid);
+			<span class="enscript-keyword">if</span> (error) {
+				printf (<span class="enscript-string">&quot;hfs_vnop_link: error updating source parent chain for id=%u, vol=%s\n&quot;</span>, fdcp-&gt;c_cnid, hfsmp-&gt;vcbVN);
+				error = 0;
+			}
+		}
+		hfs_volupdate(hfsmp, VOL_MKFILE,
+			(tdcp-&gt;c_cnid == kHFSRootFolderID));
+	}
+
+	<span class="enscript-keyword">if</span> (error == 0 &amp;&amp; (ret = hfs_update(vp, 0)) != 0) {
+		<span class="enscript-keyword">if</span> (ret != EIO &amp;&amp; ret != ENXIO)
+			printf(<span class="enscript-string">&quot;hfs_vnop_link: error %d updating vp @ %p\n&quot;</span>, ret, vp);
+		hfs_mark_inconsistent(hfsmp, HFS_OP_INCOMPLETE);
+	}
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (lockflags) {
+		hfs_systemfile_unlock(hfsmp, lockflags);
+	}
+	<span class="enscript-keyword">if</span> (intrans) {
+		hfs_end_transaction(hfsmp);
+	}
+
+	tdcp-&gt;c_flag &amp;= ~C_DIR_MODIFICATION;
+	wakeup((caddr_t)&amp;tdcp-&gt;c_flag);
+
+	<span class="enscript-keyword">if</span> (fdcp) {
+		hfs_unlockfour(tdcp, cp, fdcp, NULL);
+	} <span class="enscript-keyword">else</span> {
+		hfs_unlockpair(tdcp, cp);
+	}
+	<span class="enscript-keyword">if</span> (fdvp) {
+		vnode_put(fdvp);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * Remove a link to a hardlink file/dir.
+ *
+ * Note: dvp and vp cnodes are already locked.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_unlink</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> vnode *dvp, <span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">int</span> skip_reserve)
+{
+	<span class="enscript-type">struct</span> cnode *cp;
+	<span class="enscript-type">struct</span> cnode *dcp;
+	<span class="enscript-type">struct</span> cat_desc cndesc;
+	<span class="enscript-type">struct</span> timeval tv;
+	<span class="enscript-type">char</span> inodename[32];
+	cnid_t  prevlinkid;
+	cnid_t  nextlinkid;
+	<span class="enscript-type">int</span> lockflags = 0;
+	<span class="enscript-type">int</span> started_tr;
+	<span class="enscript-type">int</span> error;
+	
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_flags &amp; HFS_STANDARD) {
+		<span class="enscript-keyword">return</span> (EPERM);
+	}
+	cp = VTOC(vp);
+	dcp = VTOC(dvp);
+
+	dcp-&gt;c_flag |= C_DIR_MODIFICATION;
+	
+	<span class="enscript-comment">/* Remove the entry from the namei cache: */</span>
+	cache_purge(vp);
+
+	<span class="enscript-keyword">if</span> ((error = hfs_start_transaction(hfsmp)) != 0) {
+		started_tr = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	started_tr = 1;
+
+	<span class="enscript-comment">/* 
+	 * Protect against a race with rename by using the component
+	 * name passed in and parent id from dvp (instead of using 
+	 * the cp-&gt;c_desc which may have changed).  
+	 *
+	 * Re-lookup the component name so we get the correct cnid
+	 * for the name (as opposed to the c_cnid in the cnode which
+	 * could have changed before the cnode was locked).
+	 */</span>
+	cndesc.cd_flags = vnode_isdir(vp) ? CD_ISDIR : 0;
+	cndesc.cd_encoding = cp-&gt;c_desc.cd_encoding;
+	cndesc.cd_nameptr = (<span class="enscript-type">const</span> u_int8_t *)cnp-&gt;cn_nameptr;
+	cndesc.cd_namelen = cnp-&gt;cn_namelen;
+	cndesc.cd_parentcnid = dcp-&gt;c_fileid;
+	cndesc.cd_hint = dcp-&gt;c_childhint;
+
+	lockflags = SFL_CATALOG | SFL_ATTRIBUTE;
+	<span class="enscript-keyword">if</span> (cndesc.cd_flags &amp; CD_ISDIR) {
+		<span class="enscript-comment">/* We'll be removing the alias resource allocation blocks. */</span>
+		lockflags |= SFL_BITMAP;
+	}
+	lockflags = hfs_systemfile_lock(hfsmp, lockflags, HFS_EXCLUSIVE_LOCK);
+
+	<span class="enscript-keyword">if</span> ((error = cat_lookuplink(hfsmp, &amp;cndesc, &amp;cndesc.cd_cnid, &amp;prevlinkid, &amp;nextlinkid))) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/* Reserve some space in the catalog file. */</span>
+	<span class="enscript-keyword">if</span> (!skip_reserve &amp;&amp; (error = cat_preflight(hfsmp, 2 * CAT_DELETE, NULL, 0))) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/* Purge any cached origin entries for a directory or file hard link. */</span>
+	hfs_relorigin(cp, dcp-&gt;c_fileid);
+	<span class="enscript-keyword">if</span> (dcp-&gt;c_fileid != dcp-&gt;c_cnid) {
+		hfs_relorigin(cp, dcp-&gt;c_cnid);
+	}
+
+	<span class="enscript-comment">/* Delete the link record. */</span>
+	<span class="enscript-keyword">if</span> ((error = cat_deletelink(hfsmp, &amp;cndesc))) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/* Update the parent directory. */</span>
+	<span class="enscript-keyword">if</span> (dcp-&gt;c_entries &gt; 0) {
+		dcp-&gt;c_entries--;
+	}
+	<span class="enscript-keyword">if</span> (cndesc.cd_flags &amp; CD_ISDIR) {
+		DEC_FOLDERCOUNT(hfsmp, dcp-&gt;c_attr);
+	}
+	dcp-&gt;c_dirchangecnt++;
+	hfs_incr_gencount(dcp);
+	microtime(&amp;tv);
+	dcp-&gt;c_touch_chgtime = dcp-&gt;c_touch_modtime = true;
+	dcp-&gt;c_flag |= C_MODIFIED;
+	hfs_update(dcp-&gt;c_vp, 0);
+
+	<span class="enscript-comment">/*
+	 * If this is the last link then we need to process the inode.
+	 * Otherwise we need to fix up the link chain.
+	 */</span>
+	--cp-&gt;c_linkcount;
+	<span class="enscript-keyword">if</span> (cp-&gt;c_linkcount &lt; 1) {
+		<span class="enscript-type">char</span> delname[32];
+		<span class="enscript-type">struct</span> cat_desc to_desc;
+		<span class="enscript-type">struct</span> cat_desc from_desc;
+
+		<span class="enscript-comment">/*
+		 * If a file inode or directory inode is being deleted, rename 
+		 * it to an open deleted file.  This ensures that deletion 
+		 * of inode and its corresponding extended attributes does 
+		 * not overflow the journal.  This inode will be deleted 
+		 * either in hfs_vnop_inactive() or in hfs_remove_orphans(). 
+		 * Note: a rename failure here is not fatal.
+		 */</span>	
+		bzero(&amp;from_desc, <span class="enscript-keyword">sizeof</span>(from_desc));
+		bzero(&amp;to_desc, <span class="enscript-keyword">sizeof</span>(to_desc));
+		<span class="enscript-keyword">if</span> (vnode_isdir(vp)) {
+			<span class="enscript-keyword">if</span> (cp-&gt;c_entries != 0) {
+				panic(<span class="enscript-string">&quot;hfs_unlink: dir not empty (id %d, %d entries)&quot;</span>, cp-&gt;c_fileid, cp-&gt;c_entries);
+			}
+			MAKE_DIRINODE_NAME(inodename, <span class="enscript-keyword">sizeof</span>(inodename),
+						cp-&gt;c_attr.ca_linkref);
+			from_desc.cd_parentcnid = hfsmp-&gt;hfs_private_desc[DIR_HARDLINKS].cd_cnid;
+			from_desc.cd_flags = CD_ISDIR;
+			to_desc.cd_flags = CD_ISDIR;
+		} <span class="enscript-keyword">else</span> { 
+			MAKE_INODE_NAME(inodename, <span class="enscript-keyword">sizeof</span>(inodename),
+					cp-&gt;c_attr.ca_linkref);
+			from_desc.cd_parentcnid = hfsmp-&gt;hfs_private_desc[FILE_HARDLINKS].cd_cnid;
+			from_desc.cd_flags = 0;
+			to_desc.cd_flags = 0;
+		}
+		from_desc.cd_nameptr = (<span class="enscript-type">const</span> u_int8_t *)inodename;
+		from_desc.cd_namelen = strlen(inodename);
+		from_desc.cd_cnid = cp-&gt;c_fileid;
+
+		MAKE_DELETED_NAME(delname, <span class="enscript-keyword">sizeof</span>(delname), cp-&gt;c_fileid);
+		to_desc.cd_nameptr = (<span class="enscript-type">const</span> u_int8_t *)delname;
+		to_desc.cd_namelen = strlen(delname);
+		to_desc.cd_parentcnid = hfsmp-&gt;hfs_private_desc[FILE_HARDLINKS].cd_cnid;
+		to_desc.cd_cnid = cp-&gt;c_fileid;
+
+		error = cat_rename(hfsmp, &amp;from_desc, &amp;hfsmp-&gt;hfs_private_desc[FILE_HARDLINKS],
+				   &amp;to_desc, (<span class="enscript-type">struct</span> cat_desc *)NULL);
+		<span class="enscript-keyword">if</span> (error == 0) {
+			cp-&gt;c_flag |= C_DELETED;
+			cp-&gt;c_attr.ca_recflags &amp;= ~kHFSHasLinkChainMask;
+			cp-&gt;c_attr.ca_firstlink = 0;
+			<span class="enscript-keyword">if</span> (vnode_isdir(vp)) {
+				hfsmp-&gt;hfs_private_attr[DIR_HARDLINKS].ca_entries--;
+				DEC_FOLDERCOUNT(hfsmp, hfsmp-&gt;hfs_private_attr[DIR_HARDLINKS]);
+
+				hfsmp-&gt;hfs_private_attr[FILE_HARDLINKS].ca_entries++;
+				INC_FOLDERCOUNT(hfsmp, hfsmp-&gt;hfs_private_attr[FILE_HARDLINKS]);
+
+				(<span class="enscript-type">void</span>)cat_update(hfsmp, &amp;hfsmp-&gt;hfs_private_desc[DIR_HARDLINKS],
+					&amp;hfsmp-&gt;hfs_private_attr[DIR_HARDLINKS], NULL, NULL);
+				(<span class="enscript-type">void</span>)cat_update(hfsmp, &amp;hfsmp-&gt;hfs_private_desc[FILE_HARDLINKS],
+					&amp;hfsmp-&gt;hfs_private_attr[FILE_HARDLINKS], NULL, NULL);
+			}
+		} <span class="enscript-keyword">else</span> {
+			error = 0;  <span class="enscript-comment">/* rename failure here is not fatal */</span>
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-comment">/* Still some links left */</span> {
+		cnid_t firstlink;
+
+		<span class="enscript-comment">/*
+		 * Update the start of the link chain.
+		 * Note: Directory hard links store the first link in an attribute.
+		 */</span>
+		<span class="enscript-keyword">if</span> (vnode_isdir(vp) &amp;&amp;
+		    getfirstlink(hfsmp, cp-&gt;c_fileid, &amp;firstlink) == 0 &amp;&amp;
+		    firstlink == cndesc.cd_cnid) {
+			<span class="enscript-keyword">if</span> (setfirstlink(hfsmp, cp-&gt;c_fileid, nextlinkid) == 0)
+				cp-&gt;c_attr.ca_recflags |= kHFSHasAttributesMask;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cp-&gt;c_attr.ca_firstlink == cndesc.cd_cnid) {
+			cp-&gt;c_attr.ca_firstlink = nextlinkid;
+		}
+		<span class="enscript-comment">/* Update previous link. */</span>
+		<span class="enscript-keyword">if</span> (prevlinkid) {
+			(<span class="enscript-type">void</span>) cat_update_siblinglinks(hfsmp, prevlinkid, HFS_IGNORABLE_LINK, nextlinkid);
+		}
+		<span class="enscript-comment">/* Update next link. */</span>
+		<span class="enscript-keyword">if</span> (nextlinkid) {
+			(<span class="enscript-type">void</span>) cat_update_siblinglinks(hfsmp, nextlinkid, prevlinkid, HFS_IGNORABLE_LINK);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * The call to cat_releasedesc below will only release the name
+	 * buffer; it does not zero out the rest of the fields in the
+	 * 'cat_desc' data structure.
+	 *
+	 * As a result, since there are still other links at this point,
+	 * we need to make the current cnode descriptor point to the raw
+	 * inode.  If a path-based system call comes along first, it will
+	 * replace the descriptor with a valid link ID.  If a userland
+	 * process already has a file descriptor open, then they will
+	 * bypass that lookup, though.  Replacing the descriptor CNID with
+	 * the raw inode will force it to generate a new full path.
+	 */</span>
+	cp-&gt;c_cnid = cp-&gt;c_fileid;
+
+	<span class="enscript-comment">/* Push new link count to disk. */</span>
+	cp-&gt;c_ctime = tv.tv_sec;	
+	(<span class="enscript-type">void</span>) cat_update(hfsmp, &amp;cp-&gt;c_desc, &amp;cp-&gt;c_attr, NULL, NULL);
+
+	<span class="enscript-comment">/* All done with the system files. */</span>
+	hfs_systemfile_unlock(hfsmp, lockflags);
+	lockflags = 0;
+
+	<span class="enscript-comment">/* Update file system stats. */</span>
+	hfs_volupdate(hfsmp, VOL_RMFILE, (dcp-&gt;c_cnid == kHFSRootFolderID));
+
+	<span class="enscript-comment">/*
+	 * All done with this cnode's descriptor...
+	 *
+	 * Note: all future catalog calls for this cnode may be
+	 * by fileid only.  This is OK for HFS (which doesn't have
+	 * file thread records) since HFS doesn't support hard links.
+	 */</span>
+	cat_releasedesc(&amp;cp-&gt;c_desc);
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (lockflags) {
+		hfs_systemfile_unlock(hfsmp, lockflags);
+	}
+	<span class="enscript-keyword">if</span> (started_tr) {
+		hfs_end_transaction(hfsmp);
+	}
+
+	dcp-&gt;c_flag &amp;= ~C_DIR_MODIFICATION;
+	wakeup((caddr_t)&amp;dcp-&gt;c_flag);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * Initialize the HFS+ private system directories.
+ *
+ * These directories are used to hold the inodes
+ * for file and directory hardlinks as well as
+ * open-unlinked files.
+ *
+ * If they don't yet exist they will get created.
+ *
+ * This call is assumed to be made during mount.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_privatedir_init</span>(<span class="enscript-type">struct</span> hfsmount * hfsmp, <span class="enscript-type">enum</span> privdirtype type)
+{
+	<span class="enscript-type">struct</span> vnode * dvp = NULLVP;
+	<span class="enscript-type">struct</span> cnode * dcp = NULL;
+	<span class="enscript-type">struct</span> cat_desc *priv_descp;
+	<span class="enscript-type">struct</span> cat_attr *priv_attrp;
+	<span class="enscript-type">struct</span> FndrDirInfo * fndrinfo;
+	<span class="enscript-type">struct</span> timeval tv;
+	<span class="enscript-type">int</span> lockflags;
+	<span class="enscript-type">int</span> trans = 0;
+	<span class="enscript-type">int</span> error;
+	
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_flags &amp; HFS_STANDARD) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	priv_descp = &amp;hfsmp-&gt;hfs_private_desc[type];
+	priv_attrp = &amp;hfsmp-&gt;hfs_private_attr[type];
+
+	<span class="enscript-comment">/* Check if directory already exists. */</span>
+	<span class="enscript-keyword">if</span> (priv_descp-&gt;cd_cnid != 0) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	priv_descp-&gt;cd_parentcnid = kRootDirID;
+	priv_descp-&gt;cd_nameptr = (<span class="enscript-type">const</span> u_int8_t *)hfs_private_names[type];
+	priv_descp-&gt;cd_namelen = strlen((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)priv_descp-&gt;cd_nameptr);
+	priv_descp-&gt;cd_flags = CD_ISDIR | CD_DECOMPOSED;
+
+	lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
+	error = cat_lookup(hfsmp, priv_descp, 0, 0, NULL, priv_attrp, NULL, NULL);
+	hfs_systemfile_unlock(hfsmp, lockflags);
+
+	<span class="enscript-keyword">if</span> (error == 0) {
+		<span class="enscript-keyword">if</span> (type == FILE_HARDLINKS) {
+			hfsmp-&gt;hfs_metadata_createdate = priv_attrp-&gt;ca_itime;
+		}
+		priv_descp-&gt;cd_cnid = priv_attrp-&gt;ca_fileid;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	<span class="enscript-comment">/* Directory is missing, if this is read-only then we're done. */</span>
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_flags &amp; HFS_READ_ONLY) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	<span class="enscript-comment">/* Grab the root directory so we can update it later. */</span>
+	<span class="enscript-keyword">if</span> (hfs_vget(hfsmp, kRootDirID, &amp;dvp, 0, 0) != 0) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	dcp = VTOC(dvp);
+
+	<span class="enscript-comment">/* Setup the default attributes */</span>
+	bzero(priv_attrp, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> cat_attr));
+	priv_attrp-&gt;ca_flags = UF_IMMUTABLE | UF_HIDDEN;
+	priv_attrp-&gt;ca_mode = S_IFDIR;
+	<span class="enscript-keyword">if</span> (type == DIR_HARDLINKS) {
+		priv_attrp-&gt;ca_mode |= S_ISVTX | S_IRUSR | S_IXUSR | S_IRGRP |
+		                       S_IXGRP | S_IROTH | S_IXOTH;
+	}
+	priv_attrp-&gt;ca_linkcount = 1;
+	priv_attrp-&gt;ca_itime = hfsmp-&gt;hfs_itime;
+	priv_attrp-&gt;ca_recflags = kHFSHasFolderCountMask;
+	
+	fndrinfo = (<span class="enscript-type">struct</span> FndrDirInfo *)&amp;priv_attrp-&gt;ca_finderinfo;
+	fndrinfo-&gt;frLocation.v = SWAP_BE16(16384);
+	fndrinfo-&gt;frLocation.h = SWAP_BE16(16384);
+	fndrinfo-&gt;frFlags = SWAP_BE16(kIsInvisible + kNameLocked);		
+
+	<span class="enscript-keyword">if</span> (hfs_start_transaction(hfsmp) != 0) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	trans = 1;
+
+	<span class="enscript-comment">/* Need the catalog and EA b-trees for CNID acquisition */</span>
+	lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG | SFL_ATTRIBUTE, HFS_EXCLUSIVE_LOCK);
+
+	<span class="enscript-comment">/* Make sure there's space in the Catalog file. */</span>
+	<span class="enscript-keyword">if</span> (cat_preflight(hfsmp, CAT_CREATE, NULL, 0) != 0) {
+		hfs_systemfile_unlock(hfsmp, lockflags);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	<span class="enscript-comment">/* Get the CNID for use */</span>
+	cnid_t new_id;
+	<span class="enscript-keyword">if</span> ((error = cat_acquire_cnid(hfsmp, &amp;new_id))) {
+		hfs_systemfile_unlock (hfsmp, lockflags);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	
+	<span class="enscript-comment">/* Create the private directory on disk. */</span>
+	error = cat_create(hfsmp, new_id, priv_descp, priv_attrp, NULL);
+	<span class="enscript-keyword">if</span> (error == 0) {
+		priv_descp-&gt;cd_cnid = priv_attrp-&gt;ca_fileid;
+
+		<span class="enscript-comment">/* Update the parent directory */</span>
+		dcp-&gt;c_entries++;
+		INC_FOLDERCOUNT(hfsmp, dcp-&gt;c_attr);
+		dcp-&gt;c_dirchangecnt++;
+		hfs_incr_gencount(dcp);
+		microtime(&amp;tv);
+		dcp-&gt;c_ctime = tv.tv_sec;
+		dcp-&gt;c_mtime = tv.tv_sec;
+		(<span class="enscript-type">void</span>) cat_update(hfsmp, &amp;dcp-&gt;c_desc, &amp;dcp-&gt;c_attr, NULL, NULL);
+	}
+
+	hfs_systemfile_unlock(hfsmp, lockflags);
+	
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	<span class="enscript-keyword">if</span> (type == FILE_HARDLINKS) {
+		hfsmp-&gt;hfs_metadata_createdate = priv_attrp-&gt;ca_itime;
+	}
+	hfs_volupdate(hfsmp, VOL_MKDIR, 1);
+<span class="enscript-reference">exit</span>:
+	<span class="enscript-keyword">if</span> (trans) {
+		hfs_end_transaction(hfsmp);
+	}
+	<span class="enscript-keyword">if</span> (dvp) {
+		hfs_unlock(dcp);
+		vnode_put(dvp);
+	}
+	<span class="enscript-keyword">if</span> ((error == 0) &amp;&amp; (type == DIR_HARDLINKS)) {
+		hfs_xattr_init(hfsmp);
+	}
+}
+
+
+<span class="enscript-comment">/*
+ * Lookup a hardlink link (from chain)
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_lookup_siblinglinks</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, cnid_t linkfileid, cnid_t *prevlinkid,  cnid_t *nextlinkid)
+{
+	<span class="enscript-type">int</span> lockflags;
+	<span class="enscript-type">int</span> error;
+
+	*prevlinkid = 0;
+	*nextlinkid = 0;
+
+	lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
+
+	error = cat_lookup_siblinglinks(hfsmp, linkfileid, prevlinkid, nextlinkid);
+	<span class="enscript-keyword">if</span> (error == ENOLINK) {
+		hfs_systemfile_unlock(hfsmp, lockflags);
+		lockflags = hfs_systemfile_lock(hfsmp, SFL_ATTRIBUTE, HFS_SHARED_LOCK);
+
+		error = getfirstlink(hfsmp, linkfileid, nextlinkid);
+	}
+	hfs_systemfile_unlock(hfsmp, lockflags);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/* Find the oldest / last hardlink in the link chain */</span>
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">hfs_lookup_lastlink</span> (<span class="enscript-type">struct</span> hfsmount *hfsmp, cnid_t linkfileid, 
+		cnid_t *lastid, <span class="enscript-type">struct</span> cat_desc *cdesc) {
+	<span class="enscript-type">int</span> lockflags;
+	<span class="enscript-type">int</span> error;
+
+	*lastid = 0;
+	
+	lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
+
+	error = cat_lookup_lastlink(hfsmp, linkfileid, lastid, cdesc);
+	
+	hfs_systemfile_unlock(hfsmp, lockflags);
+	
+	<span class="enscript-comment">/*
+	 * cat_lookup_lastlink will zero out the lastid/cdesc arguments as needed
+	 * upon error cases.
+	 */</span> 	
+	<span class="enscript-keyword">return</span> error;
+}
+
+
+<span class="enscript-comment">/*
+ * Cache the origin of a directory or file hard link
+ *
+ * cnode must be lock on entry
+ */</span>
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_savelinkorigin</span>(cnode_t *cp, cnid_t parentcnid)
+{
+	linkorigin_t *origin = NULL;
+	thread_t thread = current_thread();
+	<span class="enscript-type">int</span> count = 0;
+	<span class="enscript-type">int</span> maxorigins = (S_ISDIR(cp-&gt;c_mode)) ? MAX_CACHED_ORIGINS : MAX_CACHED_FILE_ORIGINS;
+	<span class="enscript-comment">/*
+	 *  Look for an existing origin first.  If not found, create/steal one.
+	 */</span>
+	TAILQ_FOREACH(origin, &amp;cp-&gt;c_originlist, lo_link) {
+		++count;
+		<span class="enscript-keyword">if</span> (origin-&gt;lo_thread == thread) {
+			TAILQ_REMOVE(&amp;cp-&gt;c_originlist, origin, lo_link);
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (origin == NULL) {
+		<span class="enscript-comment">/* Recycle the last (i.e., the oldest) if we have too many. */</span>
+		<span class="enscript-keyword">if</span> (count &gt; maxorigins) {
+			origin = TAILQ_LAST(&amp;cp-&gt;c_originlist, hfs_originhead);
+			TAILQ_REMOVE(&amp;cp-&gt;c_originlist, origin, lo_link);
+		} <span class="enscript-keyword">else</span> {
+			MALLOC(origin, linkorigin_t *, <span class="enscript-keyword">sizeof</span>(linkorigin_t), M_TEMP, M_WAITOK);
+		}
+		origin-&gt;lo_thread = thread;
+	}
+	origin-&gt;lo_cnid = cp-&gt;c_cnid;
+	origin-&gt;lo_parentcnid = parentcnid;
+	TAILQ_INSERT_HEAD(&amp;cp-&gt;c_originlist, origin, lo_link);
+}
+
+<span class="enscript-comment">/*
+ * Release any cached origins for a directory or file hard link
+ *
+ * cnode must be lock on entry
+ */</span>
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_relorigins</span>(<span class="enscript-type">struct</span> cnode *cp)
+{
+	linkorigin_t *origin, *prev;
+
+	TAILQ_FOREACH_SAFE(origin, &amp;cp-&gt;c_originlist, lo_link, prev) {
+		FREE(origin, M_TEMP);
+	}
+	TAILQ_INIT(&amp;cp-&gt;c_originlist);
+}
+
+<span class="enscript-comment">/*
+ * Release a specific origin for a directory or file hard link
+ *
+ * cnode must be lock on entry
+ */</span>
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_relorigin</span>(<span class="enscript-type">struct</span> cnode *cp, cnid_t parentcnid)
+{
+	linkorigin_t *origin, *prev;
+	thread_t thread = current_thread();
+
+	TAILQ_FOREACH_SAFE(origin, &amp;cp-&gt;c_originlist, lo_link, prev) {
+		<span class="enscript-keyword">if</span> (origin-&gt;lo_thread == thread) {
+			TAILQ_REMOVE(&amp;cp-&gt;c_originlist, origin, lo_link);
+			FREE(origin, M_TEMP);
+			<span class="enscript-keyword">break</span>;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (origin-&gt;lo_parentcnid == parentcnid) {
+			<span class="enscript-comment">/*
+			 * If the threads don't match, then we don't want to
+			 * delete the entry because that might cause other threads
+			 * to fall back and use whatever happens to be in
+			 * c_parentcnid or the wrong link ID.  By setting the
+			 * values to zero here, it should serve as an indication
+			 * that the path is no longer valid and that's better than
+			 * using a random parent ID or link ID.
+			 */</span>
+			origin-&gt;lo_parentcnid = 0;
+			origin-&gt;lo_cnid = 0;
+		}
+	}
+}
+
+<span class="enscript-comment">/*
+ * Test if a directory or file hard link has a cached origin
+ *
+ * cnode must be lock on entry
+ */</span>
+__private_extern__
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_haslinkorigin</span>(cnode_t *cp)
+{
+	<span class="enscript-keyword">if</span> (cp-&gt;c_flag &amp; C_HARDLINK) {
+		linkorigin_t *origin;
+		thread_t thread = current_thread();
+	
+		TAILQ_FOREACH(origin, &amp;cp-&gt;c_originlist, lo_link) {
+			<span class="enscript-keyword">if</span> (origin-&gt;lo_thread == thread) {
+				<span class="enscript-keyword">return</span> origin-&gt;lo_cnid != 0;
+			}
+		}
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Obtain the current parent cnid of a directory or file hard link
+ *
+ * cnode must be lock on entry
+ */</span>
+__private_extern__
+cnid_t
+<span class="enscript-function-name">hfs_currentparent</span>(cnode_t *cp, bool have_lock)
+{
+	<span class="enscript-keyword">if</span> (cp-&gt;c_flag &amp; C_HARDLINK) {
+		<span class="enscript-keyword">if</span> (!have_lock)
+			hfs_lock_always(cp, HFS_SHARED_LOCK);
+
+		linkorigin_t *origin;
+		thread_t thread = current_thread();
+
+		TAILQ_FOREACH(origin, &amp;cp-&gt;c_originlist, lo_link) {
+			<span class="enscript-keyword">if</span> (origin-&gt;lo_thread == thread) {
+				<span class="enscript-keyword">if</span> (!have_lock)
+					hfs_unlock(cp);
+				<span class="enscript-keyword">return</span> (origin-&gt;lo_parentcnid);
+			}
+		}
+
+		<span class="enscript-keyword">if</span> (!have_lock)
+			hfs_unlock(cp);
+	}
+	<span class="enscript-keyword">return</span> (cp-&gt;c_parentcnid);
+}
+
+<span class="enscript-comment">/*
+ * Obtain the current cnid of a directory or file hard link
+ *
+ * cnode must be lock on entry
+ */</span>
+__private_extern__
+cnid_t
+<span class="enscript-function-name">hfs_currentcnid</span>(cnode_t *cp)
+{
+	<span class="enscript-keyword">if</span> (cp-&gt;c_flag &amp; C_HARDLINK) {
+		linkorigin_t *origin;
+		thread_t thread = current_thread();
+	
+		TAILQ_FOREACH(origin, &amp;cp-&gt;c_originlist, lo_link) {
+			<span class="enscript-keyword">if</span> (origin-&gt;lo_thread == thread) {
+				<span class="enscript-keyword">return</span> (origin-&gt;lo_cnid);
+			}
+		}
+	}
+	<span class="enscript-keyword">return</span> (cp-&gt;c_cnid);
+}
+
+
+<span class="enscript-comment">/*
+ * Set the first link attribute for a given file id.
+ *
+ * The attributes b-tree must already be locked.
+ * If journaling is enabled, a transaction must already be started.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">setfirstlink</span>(<span class="enscript-type">struct</span> hfsmount * hfsmp, cnid_t fileid, cnid_t firstlink)
+{
+	FCB * btfile;
+	BTreeIterator * iterator;
+	FSBufferDescriptor btdata;
+	u_int8_t attrdata[FIRST_LINK_XATTR_REC_SIZE];
+	HFSPlusAttrData *dataptr;
+	<span class="enscript-type">int</span> result;
+	u_int16_t datasize;
+
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_attribute_cp == NULL) {
+		<span class="enscript-keyword">return</span> (EPERM);
+	}
+	MALLOC(iterator, BTreeIterator *, <span class="enscript-keyword">sizeof</span>(*iterator), M_TEMP, M_WAITOK);
+	bzero(iterator, <span class="enscript-keyword">sizeof</span>(*iterator));
+
+	result = hfs_buildattrkey(fileid, FIRST_LINK_XATTR_NAME, (HFSPlusAttrKey *)&amp;iterator-&gt;key);
+	<span class="enscript-keyword">if</span> (result) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	dataptr = (HFSPlusAttrData *)&amp;attrdata[0];
+	dataptr-&gt;recordType = kHFSPlusAttrInlineData;
+	dataptr-&gt;reserved[0] = 0;
+	dataptr-&gt;reserved[1] = 0;
+
+	<span class="enscript-comment">/*
+	 * Since attrData is variable length, we calculate the size of
+	 * attrData by subtracting the size of all other members of
+	 * structure HFSPlusAttData from the size of attrdata.
+	 */</span>
+	(<span class="enscript-type">void</span>)snprintf((<span class="enscript-type">char</span> *)&amp;dataptr-&gt;attrData[0],
+			<span class="enscript-keyword">sizeof</span>(dataptr) - (4 * <span class="enscript-keyword">sizeof</span>(uint32_t)),
+		        <span class="enscript-string">&quot;%lu&quot;</span>, (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)firstlink);
+	dataptr-&gt;attrSize = 1 + strlen((<span class="enscript-type">char</span> *)&amp;dataptr-&gt;attrData[0]);
+
+	<span class="enscript-comment">/* Calculate size of record rounded up to multiple of 2 bytes. */</span>
+	datasize = <span class="enscript-keyword">sizeof</span>(HFSPlusAttrData) - 2 + dataptr-&gt;attrSize + ((dataptr-&gt;attrSize &amp; 1) ? 1 : 0);
+
+	btdata.bufferAddress = dataptr;
+	btdata.itemSize = datasize;
+	btdata.itemCount = 1;
+
+	btfile = hfsmp-&gt;hfs_attribute_cp-&gt;c_datafork;
+
+	<span class="enscript-comment">/* Insert the attribute. */</span>
+	result = BTInsertRecord(btfile, iterator, &amp;btdata, datasize);
+	<span class="enscript-keyword">if</span> (result == btExists) {
+		result = BTReplaceRecord(btfile, iterator, &amp;btdata, datasize);
+	}
+	(<span class="enscript-type">void</span>) BTFlushPath(btfile);
+<span class="enscript-reference">out</span>:
+	FREE(iterator, M_TEMP);
+
+	<span class="enscript-keyword">return</span> MacToVFSError(result);
+}
+
+<span class="enscript-comment">/*
+ * Get the first link attribute for a given file id.
+ *
+ * The attributes b-tree must already be locked.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">getfirstlink</span>(<span class="enscript-type">struct</span> hfsmount * hfsmp, cnid_t fileid, cnid_t *firstlink)
+{
+	FCB * btfile;
+	BTreeIterator * iterator;
+	FSBufferDescriptor btdata;
+	u_int8_t attrdata[FIRST_LINK_XATTR_REC_SIZE];
+	HFSPlusAttrData *dataptr;
+	<span class="enscript-type">int</span> result;
+	u_int16_t datasize;
+
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_attribute_cp == NULL) {
+		<span class="enscript-keyword">return</span> (EPERM);
+	}
+	MALLOC(iterator, BTreeIterator *, <span class="enscript-keyword">sizeof</span>(*iterator), M_TEMP, M_WAITOK);
+	bzero(iterator, <span class="enscript-keyword">sizeof</span>(*iterator));
+
+	result = hfs_buildattrkey(fileid, FIRST_LINK_XATTR_NAME, (HFSPlusAttrKey *)&amp;iterator-&gt;key);
+	<span class="enscript-keyword">if</span> (result)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	dataptr = (HFSPlusAttrData *)&amp;attrdata[0];
+	datasize = <span class="enscript-keyword">sizeof</span>(attrdata);
+
+	btdata.bufferAddress = dataptr;
+	btdata.itemSize = <span class="enscript-keyword">sizeof</span>(attrdata);
+	btdata.itemCount = 1;
+
+	btfile = hfsmp-&gt;hfs_attribute_cp-&gt;c_datafork;
+
+	result = BTSearchRecord(btfile, iterator, &amp;btdata, NULL, NULL);
+	<span class="enscript-keyword">if</span> (result)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	<span class="enscript-keyword">if</span> (dataptr-&gt;attrSize &lt; 3) {
+		result = ENOENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	*firstlink = strtoul((<span class="enscript-type">char</span>*)&amp;dataptr-&gt;attrData[0], NULL, 10);
+<span class="enscript-reference">out</span>:
+	FREE(iterator, M_TEMP);
+
+	<span class="enscript-keyword">return</span> MacToVFSError(result);
+}
+
+errno_t <span class="enscript-function-name">hfs_first_link</span>(hfsmount_t *hfsmp, cnode_t *cp, cnid_t *link_id)
+{
+	errno_t error = 0;
+
+	<span class="enscript-keyword">if</span> (S_ISDIR(cp-&gt;c_mode)) {
+		<span class="enscript-type">int</span> lockf = hfs_systemfile_lock(hfsmp, SFL_ATTRIBUTE, HFS_SHARED_LOCK);
+
+		error = getfirstlink(hfsmp, cp-&gt;c_fileid, link_id);
+
+		hfs_systemfile_unlock(hfsmp, lockf);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (cp-&gt;c_attr.ca_firstlink)
+			*link_id = cp-&gt;c_attr.ca_firstlink;
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">// This can happen if the cnode has been deleted
+</span>			error = ENOENT;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> error;
+}
+</pre>
+<hr />
+</body></html>

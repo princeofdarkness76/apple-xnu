@@ -1,0 +1,299 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOInterleavedMemoryDescriptor.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOInterleavedMemoryDescriptor.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2000 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOLib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOInterleavedMemoryDescriptor.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOMemoryDescriptor
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IOInterleavedMemoryDescriptor, IOMemoryDescriptor)
+
+IOInterleavedMemoryDescriptor * <span class="enscript-function-name">IOInterleavedMemoryDescriptor::withCapacity</span>(
+                                  IOByteCount           capacity,
+                                  IODirection           direction )
+{
+    <span class="enscript-comment">//
+</span>    <span class="enscript-comment">// Create a new IOInterleavedMemoryDescriptor.  The &quot;buffer&quot; will be made up
+</span>    <span class="enscript-comment">// of several memory descriptors, that are to be chained end-to-end to make up
+</span>    <span class="enscript-comment">// a single memory descriptor.
+</span>    <span class="enscript-comment">//
+</span>
+    IOInterleavedMemoryDescriptor * me = <span class="enscript-keyword">new</span> IOInterleavedMemoryDescriptor;
+
+    <span class="enscript-keyword">if</span> ( me &amp;&amp; !me-&gt;initWithCapacity(
+                                  <span class="enscript-comment">/* capacity  */</span> capacity,
+                                  <span class="enscript-comment">/* direction */</span> direction ))
+    {
+	    me-&gt;release();
+	    me = 0;
+    }
+
+    <span class="enscript-keyword">return</span> me;
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOInterleavedMemoryDescriptor::initWithCapacity</span>(
+                                  IOByteCount           capacity,
+                                  IODirection           direction )
+{
+    <span class="enscript-comment">//
+</span>    <span class="enscript-comment">// Initialize an IOInterleavedMemoryDescriptor. The &quot;buffer&quot; will be made up
+</span>    <span class="enscript-comment">// of several memory descriptors, that are to be chained end-to-end to make up
+</span>    <span class="enscript-comment">// a single memory descriptor.
+</span>    <span class="enscript-comment">//
+</span>
+    assert(capacity);
+
+    <span class="enscript-comment">// Ask our superclass' opinion.
+</span>    <span class="enscript-keyword">if</span> ( super::init() == false )  <span class="enscript-keyword">return</span> false;
+    
+    <span class="enscript-comment">// Initialize our minimal state.
+</span>
+    _flags                  = direction;
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__LP64__</span>
+    _direction              = (IODirection) (_flags &amp; kIOMemoryDirectionMask);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !__LP64__ */</span>
+    _length                 = 0;
+    _mappings               = 0;
+    _tag                    = 0;
+    _descriptorCount        = 0;
+    _descriptors            = IONew(IOMemoryDescriptor *, capacity);
+    _descriptorOffsets      = IONew(IOByteCount, capacity);
+    _descriptorLengths      = IONew(IOByteCount, capacity);
+
+    <span class="enscript-keyword">if</span> ( (_descriptors == 0) || (_descriptorOffsets == 0) || (_descriptorLengths == 0) )
+        <span class="enscript-keyword">return</span> false;
+
+    _descriptorCapacity     = capacity;
+
+    <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOInterleavedMemoryDescriptor::clearMemoryDescriptors</span>( IODirection direction )
+{
+    UInt32 index;
+
+    <span class="enscript-keyword">for</span> ( index = 0; index &lt; _descriptorCount; index++ )
+    {
+        <span class="enscript-keyword">if</span> ( _descriptorPrepared )
+	    _descriptors[index]-&gt;complete(getDirection());
+
+	_descriptors[index]-&gt;release();
+	_descriptors[index] = 0;
+
+	_descriptorOffsets[index] = 0;
+	_descriptorLengths[index] = 0;
+    }
+
+    <span class="enscript-keyword">if</span> ( direction != kIODirectionNone )
+    {
+        _flags = (_flags &amp; ~kIOMemoryDirectionMask) | direction;
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__LP64__</span>
+        _direction = (IODirection) (_flags &amp; kIOMemoryDirectionMask);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !__LP64__ */</span>
+    }
+
+    _descriptorCount = 0;
+    _length = 0;
+    _mappings = 0;
+    _tag = 0;
+
+};
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOInterleavedMemoryDescriptor::setMemoryDescriptor</span>(
+                                             IOMemoryDescriptor * descriptor,
+					     IOByteCount offset,
+					     IOByteCount length )
+{
+    <span class="enscript-keyword">if</span> ( _descriptorPrepared || (_descriptorCount == _descriptorCapacity) )
+        <span class="enscript-keyword">return</span> false;
+
+    <span class="enscript-keyword">if</span> ( (offset + length) &gt; descriptor-&gt;getLength() )
+        <span class="enscript-keyword">return</span> false;
+
+<span class="enscript-comment">//    if ( descriptor-&gt;getDirection() != getDirection() )
+</span><span class="enscript-comment">//        return false;
+</span>
+    descriptor-&gt;retain();
+    _descriptors[_descriptorCount] = descriptor;
+    _descriptorOffsets[_descriptorCount] = offset;
+    _descriptorLengths[_descriptorCount] = length;
+
+    _descriptorCount++;
+
+    _length += length;
+
+    <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOInterleavedMemoryDescriptor::free</span>()
+{
+    <span class="enscript-comment">//
+</span>    <span class="enscript-comment">// Free all of this object's outstanding resources.
+</span>    <span class="enscript-comment">//
+</span>
+    <span class="enscript-keyword">if</span> ( _descriptors )
+    {
+        <span class="enscript-keyword">for</span> ( <span class="enscript-type">unsigned</span> index = 0; index &lt; _descriptorCount; index++ ) 
+            _descriptors[index]-&gt;release();
+
+        <span class="enscript-keyword">if</span> ( _descriptors != 0 )
+            IODelete(_descriptors, IOMemoryDescriptor *, _descriptorCapacity);
+
+        <span class="enscript-keyword">if</span> ( _descriptorOffsets != 0 )
+            IODelete(_descriptorOffsets, IOMemoryDescriptor *, _descriptorCapacity);
+
+        <span class="enscript-keyword">if</span> ( _descriptorLengths != 0 )
+            IODelete(_descriptorLengths, IOMemoryDescriptor *, _descriptorCapacity);
+    }
+
+    <span class="enscript-reference">super</span>::free();
+}
+
+IOReturn <span class="enscript-function-name">IOInterleavedMemoryDescriptor::prepare</span>(IODirection forDirection)
+{
+    <span class="enscript-comment">//
+</span>    <span class="enscript-comment">// Prepare the memory for an I/O transfer.
+</span>    <span class="enscript-comment">//
+</span>    <span class="enscript-comment">// This involves paging in the memory and wiring it down for the duration
+</span>    <span class="enscript-comment">// of the transfer.  The complete() method finishes the processing of the
+</span>    <span class="enscript-comment">// memory after the I/O transfer finishes.
+</span>    <span class="enscript-comment">//
+</span>
+    <span class="enscript-type">unsigned</span> index;
+    IOReturn status = kIOReturnSuccess;
+    IOReturn statusUndo;
+
+    <span class="enscript-keyword">if</span> ( forDirection == kIODirectionNone )
+    {
+        forDirection = getDirection();
+    }
+
+    <span class="enscript-keyword">for</span> ( index = 0; index &lt; _descriptorCount; index++ ) 
+    {
+        status = _descriptors[index]-&gt;prepare(forDirection);
+        <span class="enscript-keyword">if</span> ( status != kIOReturnSuccess )  <span class="enscript-keyword">break</span>;
+    }
+
+    <span class="enscript-keyword">if</span> ( status != kIOReturnSuccess )
+    {
+        <span class="enscript-keyword">for</span> ( <span class="enscript-type">unsigned</span> indexUndo = 0; indexUndo &lt; index; indexUndo++ )
+        {
+            statusUndo = _descriptors[index]-&gt;complete(forDirection);
+            assert(statusUndo == kIOReturnSuccess);
+        }
+    }
+
+    <span class="enscript-keyword">if</span> ( status == kIOReturnSuccess ) _descriptorPrepared = true;
+
+    <span class="enscript-keyword">return</span> status;
+}
+
+IOReturn <span class="enscript-function-name">IOInterleavedMemoryDescriptor::complete</span>(IODirection forDirection)
+{
+    <span class="enscript-comment">//
+</span>    <span class="enscript-comment">// Complete processing of the memory after an I/O transfer finishes.
+</span>    <span class="enscript-comment">//
+</span>    <span class="enscript-comment">// This method shouldn't be called unless a prepare() was previously issued;
+</span>    <span class="enscript-comment">// the prepare() and complete() must occur in pairs, before and after an I/O
+</span>    <span class="enscript-comment">// transfer.
+</span>    <span class="enscript-comment">//
+</span>
+    IOReturn status;
+    IOReturn statusFinal = kIOReturnSuccess;
+
+    <span class="enscript-keyword">if</span> ( forDirection == kIODirectionNone )
+    {
+        forDirection = getDirection();
+    }
+
+    <span class="enscript-keyword">for</span> ( <span class="enscript-type">unsigned</span> index = 0; index &lt; _descriptorCount; index++ ) 
+    {
+        status = _descriptors[index]-&gt;complete(forDirection);
+        <span class="enscript-keyword">if</span> ( status != kIOReturnSuccess )  statusFinal = status;
+        assert(status == kIOReturnSuccess);
+    }
+
+    _descriptorPrepared = false;
+
+    <span class="enscript-keyword">return</span> statusFinal;
+}
+
+addr64_t <span class="enscript-function-name">IOInterleavedMemoryDescriptor::getPhysicalSegment</span>( 
+                                                       IOByteCount   offset,
+                                                       IOByteCount * length,
+                                                       IOOptionBits  options )
+{
+    <span class="enscript-comment">//
+</span>    <span class="enscript-comment">// This method returns the physical address of the byte at the given offset
+</span>    <span class="enscript-comment">// into the memory,  and optionally the length of the physically contiguous
+</span>    <span class="enscript-comment">// segment from that offset.
+</span>    <span class="enscript-comment">//
+</span>
+    addr64_t pa;
+
+    assert(offset &lt;= _length);
+
+    <span class="enscript-keyword">for</span> ( <span class="enscript-type">unsigned</span> index = 0; index &lt; _descriptorCount; index++ ) 
+    {
+        <span class="enscript-keyword">if</span> ( offset &lt; _descriptorLengths[index] )
+        {
+            pa = _descriptors[index]-&gt;getPhysicalSegment(_descriptorOffsets[index] + offset, length, options);
+	    <span class="enscript-keyword">if</span> ((_descriptorLengths[index] - offset) &lt; *length) *length = _descriptorLengths[index] - offset;
+            <span class="enscript-keyword">return</span> pa;
+        }
+        offset -= _descriptorLengths[index];
+    }
+
+    <span class="enscript-keyword">if</span> ( length )  *length = 0;
+
+    <span class="enscript-keyword">return</span> 0;
+}
+</pre>
+<hr />
+</body></html>

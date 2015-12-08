@@ -1,0 +1,359 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>tcp_timer.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">tcp_timer.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2014 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)tcp_timer.h	8.1 (Berkeley) 6/10/93
+ * $FreeBSD: src/sys/netinet/tcp_timer.h,v 1.18 1999/12/29 04:41:03 peter Exp $
+ */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_NETINET_TCP_TIMER_H_</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_NETINET_TCP_TIMER_H_</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/appleapiopts.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">BSD_KERNEL_PRIVATE</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread_call.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* BSD_KERNEL_PRIVATE */</span>
+
+<span class="enscript-comment">/* Keep the external definition the same for binary compatibility */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCPT_NTIMERS_EXT</span>	4
+
+<span class="enscript-comment">/*
+ * Definitions of the TCP timers.
+ *
+ * The TCPT_PTO timer is used for probing for a tail loss in a send window.
+ * If this probe gets acknowledged using SACK, it will allow the connection
+ * to enter fast-recovery instead of hitting a retransmit timeout. A probe
+ * timeout will send the last unacknowledged segment to generate more acks
+ * with SACK information which can be used for fast-retransmiting the lost
+ * packets. This will fire in the order of 10ms.
+ * 
+ * The TCPT_REXMT timer is used to force retransmissions.
+ * The TCP has the TCPT_REXMT timer set whenever segments
+ * have been sent for which ACKs are expected but not yet
+ * received.  If an ACK is received which advances tp-&gt;snd_una,
+ * then the retransmit timer is cleared (if there are no more
+ * outstanding segments) or reset to the base value (if there
+ * are more ACKs expected).  Whenever the retransmit timer goes off,
+ * we retransmit one unacknowledged segment, and do a backoff
+ * on the retransmit timer.
+ *
+ * The TCPT_DELACK timer is used for transmitting delayed acknowledgements
+ * if an acknowledgement was delayed in anticipation of a new segment.
+ *
+ * The TCPT_PERSIST timer is used to keep window size information
+ * flowing even if the window goes shut.  If all previous transmissions
+ * have been acknowledged(so that there are no retransmissions in progress),
+ * and the window is too small to bother sending anything, then we start
+ * the TCPT_PERSIST timer.  When it expires, if the window is nonzero,
+ * we go to transmit state.  Otherwise, at intervals send a single byte
+ * into the peer's window to force him to update our window information.
+ * We do this at most as often as TCPT_PERSMIN time intervals,
+ * but no more frequently than the current estimate of round-trip
+ * packet time.  The TCPT_PERSIST timer is cleared whenever we receive
+ * a window update from the peer.
+ *
+ * The TCPT_KEEP timer is used to keep connections alive.  If an
+ * connection is idle (no segments received) for TCPTV_KEEP_INIT amount 
+ * of time, but not yet established, then we drop the connection.
+ * Once the connection is established, if the connection is idle for
+ * TCPTV_KEEP_IDLE time (and keepalives have been enabled on the socket),
+ * we begin to probe the connection.  We force the peer to send us a
+ * segment by sending:
+ *	&lt;SEQ=SND.UNA-1&gt;&lt;ACK=RCV.NXT&gt;&lt;CTL=ACK&gt;
+ * This segment is (deliberately) outside the window, and should elicit
+ * an ack segment in response from the peer.  If, despite the TCPT_KEEP
+ * initiated segments we cannot elicit a response from a peer in
+ * TCPT_MAXIDLE amount of time probing, then we drop the connection.
+ *
+ * The TCPT_2MSL timer is used for keeping the conenction in Time-wait state
+ * before fully closing it so that the connection 4-tuple can be reused.
+ */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">BSD_KERNEL_PRIVATE</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_PTO</span>	0	<span class="enscript-comment">/* Probe timeout */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_DELAYFR</span>	1	<span class="enscript-comment">/* Delay recovery if there is reordering */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_REXMT</span>	2	<span class="enscript-comment">/* retransmit */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_DELACK</span>	3	<span class="enscript-comment">/* delayed ack */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_PERSIST</span>	4	<span class="enscript-comment">/* retransmit persistence */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_KEEP</span>	5	<span class="enscript-comment">/* keep alive */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_2MSL</span>	6	<span class="enscript-comment">/* 2*msl quiet time timer */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MPTCP</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCPT_JACK_RXMT</span>	7	<span class="enscript-comment">/* retransmit timer for join ack */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCPT_MAX</span>	7
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* MPTCP */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_MAX</span>	6
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !MPTCP */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_NONE</span>	(TCPT_MAX + 1)	
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_NTIMERS</span>	(TCPT_MAX + 1)
+
+<span class="enscript-comment">/* External definitions */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_REXMT_EXT</span>		0
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCPT_PERSIST_EXT</span>	1
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_KEEP_EXT</span>		2
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_2MSL_EXT</span>		3
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCPT_DELACK_EXT</span>		4
+
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !BSD_KERNEL_PRIVATE */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_REXMT</span>	0		<span class="enscript-comment">/* retransmit */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_PERSIST</span>	1		<span class="enscript-comment">/* retransmit persistence */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_KEEP</span>	2		<span class="enscript-comment">/* keep alive */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_2MSL</span>	3		<span class="enscript-comment">/* 2*msl quiet time timer */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_DELACK</span>	4		<span class="enscript-comment">/* delayed ack timer */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MPTCP</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_JACK_RXMT</span>	5	<span class="enscript-comment">/* retransmit timer for join ack */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_MAX</span>	5
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* MPTCP */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_MAX</span>	4
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !MPTCP */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_NONE</span>	(TCPT_MAX + 1)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPT_NTIMERS</span>	(TCPT_MAX + 1)
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* BSD_KERNEL_PRIVATE */</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">BSD_KERNEL_PRIVATE</span>
+<span class="enscript-comment">/*
+ * Time constants.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPTV_MSL</span>	( 15*TCP_RETRANSHZ)	<span class="enscript-comment">/* max seg lifetime */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPTV_SRTTBASE</span>	0	<span class="enscript-comment">/* base roundtrip time; if 0, no idea yet */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPTV_RTOBASE</span>	(  1*TCP_RETRANSHZ)	<span class="enscript-comment">/* assumed RTO if no info */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPTV_SRTTDFLT</span>	(  1*TCP_RETRANSHZ)	<span class="enscript-comment">/* assumed RTT if no info */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPTV_PERSMIN</span>	(  5*TCP_RETRANSHZ)	<span class="enscript-comment">/* retransmit persistence */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPTV_PERSMAX</span>	( 60*TCP_RETRANSHZ)	<span class="enscript-comment">/* maximum persist interval */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPTV_KEEP_INIT</span>	( 75*TCP_RETRANSHZ)	<span class="enscript-comment">/* connect keep alive */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPTV_KEEP_IDLE</span>	(120*60*TCP_RETRANSHZ)	<span class="enscript-comment">/* time before probing */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPTV_KEEPINTVL</span>	( 75*TCP_RETRANSHZ)	<span class="enscript-comment">/* default probe interval */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPTV_KEEPCNT</span>	8			<span class="enscript-comment">/* max probes before drop */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPTV_REXMTMAX</span>	( 64*TCP_RETRANSHZ )	<span class="enscript-comment">/* max REXMT value */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCPTV_REXMTMIN</span>	( TCP_RETRANSHZ/33 )	<span class="enscript-comment">/* min REXMT for non-local connections */</span>
+
+<span class="enscript-comment">/*
+ * Window for counting received bytes to see if ack-stretching
+ * can start (default 100 ms)
+ */</span> 
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCPTV_UNACKWIN</span>	( TCP_RETRANSHZ/10 )
+
+<span class="enscript-comment">/* Receiver idle time, avoid ack-stretching after this idle time */</span>  
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCPTV_MAXRCVIDLE</span> (TCP_RETRANSHZ/5 )
+
+<span class="enscript-comment">/*
+ * No ack stretching during slow-start, until we see some packets.
+ * By the time the receiver gets 512 packets, the senders cwnd 
+ * should open by a few hundred packets consdering the 
+ * slow-start progression.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCP_RCV_SS_PKTCOUNT</span>     512
+
+<span class="enscript-comment">/* Receiver idle time, for rcv socket buffer resizing */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCPTV_RCVBUFIDLE</span> (TCP_RETRANSHZ/2)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCPTV_TWTRUNC</span>	8		<span class="enscript-comment">/* RTO factor to truncate TW */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCP_LINGERTIME</span>	120		<span class="enscript-comment">/* linger at most 2 minutes */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TCP_MAXRXTSHIFT</span>	12		<span class="enscript-comment">/* maximum retransmits */</span>
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">TCPTIMERS</span>
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> *tcptimers[] =
+    { <span class="enscript-string">&quot;REXMT&quot;</span>, <span class="enscript-string">&quot;PERSIST&quot;</span>, <span class="enscript-string">&quot;KEEP&quot;</span>, <span class="enscript-string">&quot;2MSL&quot;</span> , <span class="enscript-string">&quot;DELACK&quot;</span>};
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* TCPTIMERS */</span>
+
+<span class="enscript-comment">/*
+ * Persist, keep, 2msl and MPTCP's join-ack timer as slow timers which can
+ * be coalesced at a higher granularity (500 ms).
+ *
+ * Rexmt and delayed ack timers are considered as fast timers which run 
+ * in the order of 100ms.
+ *
+ * Probe timeout is a quick timer which will run in the order of 10ms.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">IS_TIMER_HZ_500MS</span>(i)	((i) &gt;= TCPT_PERSIST)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">IS_TIMER_HZ_100MS</span>(i)	((i) &gt;= TCPT_REXMT &amp;&amp; (i) &lt; TCPT_PERSIST) 
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IS_TIMER_HZ_10MS</span>(i)	((i) &lt; TCPT_REXMT)
+
+<span class="enscript-type">struct</span> tcptimerlist;
+
+<span class="enscript-type">struct</span> tcptimerentry {
+	LIST_ENTRY(tcptimerentry) le;	<span class="enscript-comment">/* links for timer list */</span> 
+	uint32_t timer_start;	<span class="enscript-comment">/* tcp clock when the timer was started */</span>
+	uint16_t index;		<span class="enscript-comment">/* index of lowest timer that needs to run first */</span>
+	uint16_t mode;		<span class="enscript-comment">/* Bit-wise OR of timers that are active */</span>
+	uint32_t runtime;	<span class="enscript-comment">/* deadline at which the first timer has to fire */</span>
+};
+
+<span class="enscript-function-name">LIST_HEAD</span>(timerlisthead, tcptimerentry);
+
+<span class="enscript-type">struct</span> tcptimerlist {
+	<span class="enscript-type">struct</span> timerlisthead lhead;	<span class="enscript-comment">/* head of the list */</span>
+	lck_mtx_t *mtx;		<span class="enscript-comment">/* lock to protect the list */</span>
+	lck_attr_t *mtx_attr;	<span class="enscript-comment">/* mutex attributes */</span>
+	lck_grp_t *mtx_grp;	<span class="enscript-comment">/* mutex group definition */</span>
+	lck_grp_attr_t *mtx_grp_attr;	<span class="enscript-comment">/* mutex group attributes */</span>
+	thread_call_t call;	<span class="enscript-comment">/* call entry */</span>
+	uint32_t runtime;	<span class="enscript-comment">/* time at which this list is going to run */</span>
+	uint32_t entries;	<span class="enscript-comment">/* Number of entries on the list */</span>
+	uint32_t maxentries;	<span class="enscript-comment">/* Max number of entries at any time */</span>
+
+	<span class="enscript-comment">/* Set desired mode when timer list running */</span>
+	boolean_t running;	<span class="enscript-comment">/* Set when timer list is being processed */</span>
+	boolean_t scheduled;	<span class="enscript-comment">/* set when the timer is scheduled */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCP_TIMERLIST_10MS_MODE</span> 0x1
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCP_TIMERLIST_100MS_MODE</span> 0x2
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCP_TIMERLIST_500MS_MODE</span> 0x4
+	uint32_t mode;		<span class="enscript-comment">/* Current mode of the timer */</span>
+	uint32_t pref_mode;	<span class="enscript-comment">/* Preferred mode set by a connection */</span>
+	uint32_t pref_offset;	<span class="enscript-comment">/* Preferred offset set by a connection */</span>
+	uint32_t idleruns;	<span class="enscript-comment">/* Number of times the list has been idle in fast mode */</span>
+	<span class="enscript-type">struct</span> tcptimerentry *next_te;	<span class="enscript-comment">/* next timer entry pointer to process */</span>
+	u_int16_t probe_if_index; <span class="enscript-comment">/* Interface index that needs to send probes */</span>
+
+};
+
+<span class="enscript-comment">/* number of idle runs allowed for TCP timer list in fast or quick modes */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCP_FASTMODE_IDLERUN_MAX</span> 10
+
+<span class="enscript-comment">/*
+ * Minimum retransmit timeout is set to 30ms. We add a slop of 
+ * 200 ms to the retransmit value to account for processing 
+ * variance and delayed ack. This extra 200ms will help to avoid 
+ * spurious retransmits by taking into consideration the receivers 
+ * that wait for delayed ack timer instead of generating an ack 
+ * for every two packets.
+ *
+ * On a local link, the minimum retransmit timeout is 100ms and
+ * variance is set to 0. This will make the sender a little bit more
+ * aggressive on local link. When the connection is not established yet,
+ * there is no need to add an extra 200ms to retransmit timeout because
+ * the initial value is high (1s) and delayed ack is not a problem in 
+ * that case.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCPTV_REXMTSLOP</span> ( TCP_RETRANSHZ/5 )	<span class="enscript-comment">/* extra 200 ms slop */</span>
+
+<span class="enscript-comment">/* macro to decide when retransmit slop (described above) should be added */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TCP_ADD_REXMTSLOP</span>(tp) (tp-&gt;t_state &gt;= TCPS_ESTABLISHED) 
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">TCPT_RANGESET</span>(tv, value, tvmin, tvmax, addslop) do { \
+	(tv) = ((addslop) ? tcp_rexmt_slop : 0) + (value); \
+	<span class="enscript-keyword">if</span> ((uint32_t)(tv) &lt; (uint32_t)(tvmin)) \
+		(tv) = (tvmin); \
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((uint32_t)(tv) &gt; (uint32_t)(tvmax)) \
+		(tv) = (tvmax); \
+} <span class="enscript-keyword">while</span>(0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TCP_CONN_KEEPIDLE</span>(tp) \
+	((tp)-&gt;t_keepidle &amp;&amp; \
+	((tp)-&gt;t_inpcb-&gt;inp_socket-&gt;so_options &amp; SO_KEEPALIVE) ? \
+		(tp)-&gt;t_keepidle : tcp_keepidle)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TCP_CONN_KEEPINIT</span>(tp) \
+	(((tp)-&gt;t_keepinit &gt; 0) ? (tp)-&gt;t_keepinit : tcp_keepinit)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TCP_CONN_KEEPCNT</span>(tp) \
+	(((tp)-&gt;t_keepcnt &gt; 0) ? (tp)-&gt;t_keepcnt : tcp_keepcnt)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TCP_CONN_KEEPINTVL</span>(tp) \
+	(((tp)-&gt;t_keepintvl &gt; 0) ? (tp)-&gt;t_keepintvl : tcp_keepintvl)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TCP_CONN_MAXIDLE</span>(tp) \
+	(TCP_CONN_KEEPCNT(tp) * TCP_CONN_KEEPINTVL(tp))
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TCP_IDLETIMEOUT</span>(tp) \
+	(((TCP_ADD_REXMTSLOP(tp)) ? 0 : tcp_rexmt_slop) + tp-&gt;t_rxtcur)
+
+<span class="enscript-function-name">TAILQ_HEAD</span>(tcptailq, tcpcb);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> tcp_keepinit;	<span class="enscript-comment">/* time to establish connection */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> tcp_keepidle;	<span class="enscript-comment">/* time before keepalive probes begin */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> tcp_keepintvl;	<span class="enscript-comment">/* time between keepalive probes */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> tcp_keepcnt;		<span class="enscript-comment">/* number of keepalives */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> tcp_delack;		<span class="enscript-comment">/* delayed ack timer */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> tcp_maxpersistidle;
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> tcp_msl;
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> tcp_ttl;		<span class="enscript-comment">/* time to live for TCP segs */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> tcp_backoff[];
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> tcp_rexmt_slop;
+<span class="enscript-type">extern</span> u_int32_t tcp_max_persist_timeout;	<span class="enscript-comment">/* Maximum persistence for Zero Window Probes */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">OFFSET_FROM_START</span>(tp, off) ((tcp_now + (off)) - (tp)-&gt;tentry.timer_start)
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* BSD_KERNEL_PRIVATE */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !_NETINET_TCP_TIMER_H_ */</span>
+
+</pre>
+<hr />
+</body></html>

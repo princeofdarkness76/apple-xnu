@@ -1,0 +1,128 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>MakeInc.dir</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">MakeInc.dir&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+# -*- mode: makefile;-*-
+#
+# Copyright (C) 1999-2012 Apple Inc. All rights reserved.
+#
+# MakeInc.dir contains the recursion rules for the build system.
+# For instance, the &quot;build_installhdrs_md&quot; target is auto-generated
+# such that make(1) recurses into a specified set of subdirectories
+# (building &quot;build_installhdrs_md&quot; in turn at each level) before
+# building the special &quot;do_installhdrs_md&quot; target at the current
+# level. &quot;do_installhdrs_md&quot; is defined in MakeInc.rule.
+#
+
+# $(1) is the name of the target to produce that will perform the
+#      recursive behavior via dependencies
+# $(2) is a list of subdirectories to recurse into
+# $(3) is the target to build with a sub-make after
+#      the subdirectories have been recursed into
+# $(4) should be &quot;1&quot; if TARGET should be pinned to the per-arch
+#      build COMPONENT directory, or empty if it should recurse
+#      in lockstep with the source recursion
+define RECURSIVE_BUILD_RULES_template
+$(1)_recurse_target_list = $$(addprefix $(1)_recurse_into_,$(2))
+
+.PHONY: $$($(1)_recurse_target_list)
+
+$$($(1)_recurse_target_list):
+	$$(_v)$$(MKDIR) $$(CURDIR)/$$(patsubst $(1)_recurse_into_%,%,$$@)
+	$$(_v)$${MAKE} -C $$(CURDIR)/$$(patsubst $(1)_recurse_into_%,%,$$@)	\
+		-f $$(SOURCE)$$(patsubst $(1)_recurse_into_%,%,$$@)/Makefile	\
+		CURRENT_KERNEL_CONFIG=$${CURRENT_KERNEL_CONFIG}		\
+		CURRENT_ARCH_CONFIG=$${CURRENT_ARCH_CONFIG}		\
+		CURRENT_MACHINE_CONFIG=$${CURRENT_MACHINE_CONFIG}	\
+		CURRENT_BUILD_CONFIG=$${CURRENT_BUILD_CONFIG}		\
+		SOURCE=$$(SOURCE)$$(patsubst $(1)_recurse_into_%,%,$$@)/	\
+		RELATIVE_SOURCE_PATH=$$(RELATIVE_SOURCE_PATH)/$$(patsubst $(1)_recurse_into_%,%,$$@)	\
+		TARGET=$(if $(4),$${OBJPATH}/$$(COMPONENT),$$(TARGET)$$(patsubst $(1)_recurse_into_%,%,$$@)/)		\
+		OBJPATH=$${OBJPATH}		     			\
+		$(1);
+
+.PHONY: $(1)
+
+$(1): $$($(1)_recurse_target_list)
+	$$(_v)$${MAKE} -C $$(CURDIR)						\
+		-f $$(firstword $$(MAKEFILE_LIST))				\
+		CURRENT_KERNEL_CONFIG=$${CURRENT_KERNEL_CONFIG}			\
+		CURRENT_ARCH_CONFIG=$${CURRENT_ARCH_CONFIG}			\
+		CURRENT_MACHINE_CONFIG=$${CURRENT_MACHINE_CONFIG}		\
+		CURRENT_BUILD_CONFIG=$${CURRENT_BUILD_CONFIG}			\
+		SOURCE=$$(SOURCE)						\
+		RELATIVE_SOURCE_PATH=$$(RELATIVE_SOURCE_PATH)			\
+		TARGET=$$(TARGET)						\
+		OBJPATH=$${OBJPATH}		     				\
+		$(3);
+endef
+
+#
+# Setup pass for  all architectures for all Configuration/Architecture options
+#
+$(eval $(call RECURSIVE_BUILD_RULES_template,build_setup,$(SETUP_SUBDIRS),do_build_setup,))
+
+#
+# Install machine independent kernel header files 
+#
+$(eval $(call RECURSIVE_BUILD_RULES_template,build_installhdrs_mi,$(INSTINC_SUBDIRS),do_installhdrs_mi,))
+
+#
+# Install machine dependent kernel header files 
+#
+$(eval $(call RECURSIVE_BUILD_RULES_template,build_installhdrs_md,$(INSTINC_SUBDIRS_$(CURRENT_ARCH_CONFIG)),do_installhdrs_md,))
+
+#
+# Install machine independent kernel header files 
+#
+$(eval $(call RECURSIVE_BUILD_RULES_template,build_exporthdrs_mi,$(EXPINC_SUBDIRS),do_exporthdrs_mi,))
+
+#
+# Install machine dependent kernel header files 
+#
+$(eval $(call RECURSIVE_BUILD_RULES_template,build_exporthdrs_md,$(EXPINC_SUBDIRS_$(CURRENT_ARCH_CONFIG)),do_exporthdrs_md,))
+
+#
+# Build all architectures for all Configuration/Architecture options
+#
+$(eval $(call RECURSIVE_BUILD_RULES_template,build_all,$(COMP_SUBDIRS) $(COMP_SUBDIRS_$(CURRENT_ARCH_CONFIG)),do_build_all,1))
+
+#
+# Post-process build results
+#
+$(eval $(call RECURSIVE_BUILD_RULES_template,config_all,$(CONFIG_SUBDIRS),do_config_all,1))
+
+#
+# Install for all architectures for all Configuration/Architecture options
+#
+$(eval $(call RECURSIVE_BUILD_RULES_template,build_install_primary,$(INST_SUBDIRS),do_build_install_primary,1))
+$(eval $(call RECURSIVE_BUILD_RULES_template,build_install_non_primary,$(INST_SUBDIRS),do_build_install_non_primary,1))
+$(eval $(call RECURSIVE_BUILD_RULES_template,config_install,$(CONFIG_SUBDIRS),do_config_install,1))
+
+#
+# Install text files
+#
+$(eval $(call RECURSIVE_BUILD_RULES_template,textfiles_install,$(INSTTEXTFILES_SUBDIRS),do_textfiles_install,))
+
+# vim: set ft=make:
+</pre>
+<hr />
+</body></html>

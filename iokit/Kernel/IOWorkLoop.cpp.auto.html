@@ -1,0 +1,668 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOWorkLoop.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOWorkLoop.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOWorkLoop.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOEventSource.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOInterruptEventSource.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOCommandGate.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOTimeStamp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKitDebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSDebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> OSObject
+
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IOWorkLoop, OSObject);
+
+<span class="enscript-comment">// Block of unused functions intended for future use
+</span>#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__LP64__</span>
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOWorkLoop, 0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOWorkLoop, 1);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOWorkLoop, 2);
+#<span class="enscript-reference">else</span>
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IOWorkLoop, 0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IOWorkLoop, 1);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IOWorkLoop, 2);
+#<span class="enscript-reference">endif</span>
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOWorkLoop, 3);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOWorkLoop, 4);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOWorkLoop, 5);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOWorkLoop, 6);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOWorkLoop, 7);
+
+<span class="enscript-type">enum</span> IOWorkLoopState { kLoopRestart = 0x1, kLoopTerminate = 0x2 };
+<span class="enscript-type">static</span> <span class="enscript-type">inline</span> <span class="enscript-type">void</span> <span class="enscript-function-name">SETP</span>(<span class="enscript-type">void</span> *addr, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> flag)
+    { <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *num = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *) addr; *num |= flag; }
+<span class="enscript-type">static</span> <span class="enscript-type">inline</span> <span class="enscript-type">void</span> <span class="enscript-function-name">CLRP</span>(<span class="enscript-type">void</span> *addr, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> flag)
+    { <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *num = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *) addr; *num &amp;= ~flag; }
+<span class="enscript-type">static</span> <span class="enscript-type">inline</span> <span class="enscript-type">bool</span> <span class="enscript-function-name">ISSETP</span>(<span class="enscript-type">void</span> *addr, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> flag)
+    { <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *num = (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *) addr; <span class="enscript-keyword">return</span> (*num &amp; flag) != 0; }
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">fFlags</span> loopRestart
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">passiveEventChain</span>	reserved-&gt;passiveEventChain
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IOKITSTATS</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsRegisterCounter</span>() \
+<span class="enscript-keyword">do</span> { \
+	reserved-&gt;counter = IOStatistics::registerWorkLoop(<span class="enscript-keyword">this</span>); \
+} <span class="enscript-keyword">while</span>(0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsUnregisterCounter</span>() \
+<span class="enscript-keyword">do</span> { \
+	<span class="enscript-keyword">if</span> (reserved) \
+		<span class="enscript-reference">IOStatistics</span>::unregisterWorkLoop(reserved-&gt;counter); \
+} <span class="enscript-keyword">while</span>(0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsOpenGate</span>() \
+<span class="enscript-keyword">do</span> { \
+	<span class="enscript-reference">IOStatistics</span>::countWorkLoopOpenGate(reserved-&gt;counter); \
+} <span class="enscript-keyword">while</span>(0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsCloseGate</span>() \
+<span class="enscript-keyword">do</span> { \
+	<span class="enscript-reference">IOStatistics</span>::countWorkLoopCloseGate(reserved-&gt;counter); \
+} <span class="enscript-keyword">while</span>(0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsAttachEventSource</span>() \
+<span class="enscript-keyword">do</span> { \
+	<span class="enscript-reference">IOStatistics</span>::attachWorkLoopEventSource(reserved-&gt;counter, inEvent-&gt;reserved-&gt;counter); \
+} <span class="enscript-keyword">while</span>(0)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsDetachEventSource</span>() \
+<span class="enscript-keyword">do</span> { \
+	<span class="enscript-reference">IOStatistics</span>::detachWorkLoopEventSource(reserved-&gt;counter, inEvent-&gt;reserved-&gt;counter); \
+} <span class="enscript-keyword">while</span>(0)
+
+#<span class="enscript-reference">else</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsRegisterCounter</span>()
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsUnregisterCounter</span>()
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsOpenGate</span>()
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsCloseGate</span>()
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsAttachEventSource</span>()
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsDetachEventSource</span>()
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IOKITSTATS */</span>
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOWorkLoop::init</span>()
+{
+    <span class="enscript-comment">// The super init and gateLock allocation MUST be done first.
+</span>    <span class="enscript-keyword">if</span> ( !super::init() )
+        <span class="enscript-keyword">return</span> false;
+	
+	<span class="enscript-comment">// Allocate our ExpansionData if it hasn't been allocated already.
+</span>	<span class="enscript-keyword">if</span> ( !reserved )
+	{
+		reserved = IONew(ExpansionData,1);
+		<span class="enscript-keyword">if</span> ( !reserved )
+			<span class="enscript-keyword">return</span> false;
+		
+		bzero(reserved,<span class="enscript-keyword">sizeof</span>(ExpansionData));
+	}
+	
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	OSBacktrace ( reserved-&gt;allocationBacktrace, <span class="enscript-keyword">sizeof</span> ( reserved-&gt;allocationBacktrace ) / <span class="enscript-keyword">sizeof</span> ( reserved-&gt;allocationBacktrace[0] ) );
+#<span class="enscript-reference">endif</span>
+	
+    <span class="enscript-keyword">if</span> ( gateLock == NULL ) {
+        <span class="enscript-keyword">if</span> ( !( gateLock = IORecursiveLockAlloc()) )
+            <span class="enscript-keyword">return</span> false;
+    }
+	
+    <span class="enscript-keyword">if</span> ( workToDoLock == NULL ) {
+        <span class="enscript-keyword">if</span> ( !(workToDoLock = IOSimpleLockAlloc()) )
+            <span class="enscript-keyword">return</span> false;
+        IOSimpleLockInit(workToDoLock);
+        workToDo = false;
+    }
+
+    IOStatisticsRegisterCounter();
+
+    <span class="enscript-keyword">if</span> ( controlG == NULL ) {
+        controlG = IOCommandGate::commandGate(
+            <span class="enscript-keyword">this</span>,
+            OSMemberFunctionCast(
+                <span class="enscript-reference">IOCommandGate</span>::Action,
+                <span class="enscript-keyword">this</span>,
+                &amp;IOWorkLoop::_maintRequest));
+
+        <span class="enscript-keyword">if</span> ( !controlG )
+            <span class="enscript-keyword">return</span> false;
+        <span class="enscript-comment">// Point the controlGate at the workLoop.  Usually addEventSource
+</span>        <span class="enscript-comment">// does this automatically.  The problem is in this case addEventSource
+</span>        <span class="enscript-comment">// uses the control gate and it has to be bootstrapped.
+</span>        controlG-&gt;setWorkLoop(<span class="enscript-keyword">this</span>);
+        <span class="enscript-keyword">if</span> (addEventSource(controlG) != kIOReturnSuccess)
+            <span class="enscript-keyword">return</span> false;
+    }
+
+    <span class="enscript-keyword">if</span> ( workThread == NULL ) {
+        thread_continue_t cptr = OSMemberFunctionCast(
+            thread_continue_t,
+            <span class="enscript-keyword">this</span>,
+            &amp;IOWorkLoop::threadMain);
+        <span class="enscript-keyword">if</span> (KERN_SUCCESS != kernel_thread_start(cptr, <span class="enscript-keyword">this</span>, &amp;workThread))
+            <span class="enscript-keyword">return</span> false;
+    }
+
+    (<span class="enscript-type">void</span>) thread_set_tag(workThread, THREAD_TAG_IOWORKLOOP);
+    <span class="enscript-keyword">return</span> true;
+}
+
+IOWorkLoop *
+<span class="enscript-function-name">IOWorkLoop::workLoop</span>()
+{
+    <span class="enscript-keyword">return</span> IOWorkLoop::workLoopWithOptions(0);
+}
+
+IOWorkLoop *
+<span class="enscript-function-name">IOWorkLoop::workLoopWithOptions</span>(IOOptionBits options)
+{
+	IOWorkLoop *me = <span class="enscript-keyword">new</span> IOWorkLoop;
+	
+	<span class="enscript-keyword">if</span> (me &amp;&amp; options) {
+		me-&gt;reserved = IONew(ExpansionData,1);
+		<span class="enscript-keyword">if</span> (!me-&gt;reserved) {
+			me-&gt;release();
+			<span class="enscript-keyword">return</span> 0;
+		}
+		bzero(me-&gt;reserved,<span class="enscript-keyword">sizeof</span>(ExpansionData));
+		me-&gt;reserved-&gt;options = options;
+	}
+	
+	<span class="enscript-keyword">if</span> (me &amp;&amp; !me-&gt;init()) {
+		me-&gt;release();
+		<span class="enscript-keyword">return</span> 0;
+	}
+	
+	<span class="enscript-keyword">return</span> me;
+}
+
+<span class="enscript-comment">// Free is called twice:
+</span><span class="enscript-comment">// First when the atomic retainCount transitions from 1 -&gt; 0
+</span><span class="enscript-comment">// Secondly when the work loop itself is commiting hari kari
+</span><span class="enscript-comment">// Hence the each leg of the free must be single threaded.
+</span><span class="enscript-type">void</span> <span class="enscript-function-name">IOWorkLoop::free</span>()
+{
+    <span class="enscript-keyword">if</span> (workThread) {
+	IOInterruptState is;
+
+	<span class="enscript-comment">// If we are here then we must be trying to shut down this work loop
+</span>	<span class="enscript-comment">// in this case disable all of the event source, mark the loop
+</span>	<span class="enscript-comment">// as terminating and wakeup the work thread itself and return
+</span>	<span class="enscript-comment">// Note: we hold the gate across the entire operation mainly for the 
+</span>	<span class="enscript-comment">// benefit of our event sources so we can disable them cleanly.
+</span>	closeGate();
+
+	disableAllEventSources();
+
+        is = IOSimpleLockLockDisableInterrupt(workToDoLock);
+	SETP(&amp;fFlags, kLoopTerminate);
+        thread_wakeup_one((<span class="enscript-type">void</span> *) &amp;workToDo);
+        IOSimpleLockUnlockEnableInterrupt(workToDoLock, is);
+
+	openGate();
+    }
+    <span class="enscript-keyword">else</span> <span class="enscript-comment">/* !workThread */</span> {
+        IOEventSource *event, *next;
+
+        <span class="enscript-keyword">for</span> (event = eventChain; event; event = next) {
+            next = event-&gt;getNext();
+            event-&gt;setWorkLoop(0);
+            event-&gt;setNext(0);
+            event-&gt;release();
+        }
+        eventChain = 0;
+
+        <span class="enscript-keyword">for</span> (event = passiveEventChain; event; event = next) {
+            next = event-&gt;getNext();
+            event-&gt;setWorkLoop(0);
+            event-&gt;setNext(0);
+            event-&gt;release();
+        }
+        passiveEventChain = 0;
+
+	<span class="enscript-comment">// Either we have a partial initialization to clean up
+</span>	<span class="enscript-comment">// or the workThread itself is performing hari-kari.
+</span>	<span class="enscript-comment">// Either way clean up all of our resources and return.
+</span>	
+	<span class="enscript-keyword">if</span> (controlG) {
+	    controlG-&gt;workLoop = 0;
+	    controlG-&gt;release();
+	    controlG = 0;
+	}
+
+	<span class="enscript-keyword">if</span> (workToDoLock) {
+	    IOSimpleLockFree(workToDoLock);
+	    workToDoLock = 0;
+	}
+
+	<span class="enscript-keyword">if</span> (gateLock) {
+	    IORecursiveLockFree(gateLock);
+	    gateLock = 0;
+	}
+	
+	IOStatisticsUnregisterCounter();
+	
+	<span class="enscript-keyword">if</span> (reserved) {
+	    IODelete(reserved, ExpansionData, 1);
+	    reserved = 0;
+	}
+
+	<span class="enscript-reference">super</span>::free();
+    }
+}
+
+IOReturn <span class="enscript-function-name">IOWorkLoop::addEventSource</span>(IOEventSource *newEvent)
+{
+    <span class="enscript-keyword">return</span> controlG-&gt;runCommand((<span class="enscript-type">void</span> *) mAddEvent, (<span class="enscript-type">void</span> *) newEvent);
+}
+    
+IOReturn <span class="enscript-function-name">IOWorkLoop::removeEventSource</span>(IOEventSource *toRemove)
+{
+    <span class="enscript-keyword">return</span> controlG-&gt;runCommand((<span class="enscript-type">void</span> *) mRemoveEvent, (<span class="enscript-type">void</span> *) toRemove);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOWorkLoop::enableAllEventSources</span>() <span class="enscript-type">const</span>
+{
+    IOEventSource *event;
+
+    <span class="enscript-keyword">for</span> (event = eventChain; event; event = event-&gt;getNext())
+        event-&gt;enable();
+
+    <span class="enscript-keyword">for</span> (event = passiveEventChain; event; event = event-&gt;getNext())
+        event-&gt;enable();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOWorkLoop::disableAllEventSources</span>() <span class="enscript-type">const</span>
+{
+    IOEventSource *event;
+
+    <span class="enscript-keyword">for</span> (event = eventChain; event; event = event-&gt;getNext())
+		event-&gt;disable();
+	
+	<span class="enscript-comment">/* NOTE: controlG is in passiveEventChain since it's an IOCommandGate */</span>
+    <span class="enscript-keyword">for</span> (event = passiveEventChain; event; event = event-&gt;getNext())
+        <span class="enscript-keyword">if</span> (event != controlG)	<span class="enscript-comment">// Don't disable the control gate
+</span>            event-&gt;disable();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOWorkLoop::enableAllInterrupts</span>() <span class="enscript-type">const</span>
+{
+    IOEventSource *event;
+	
+    <span class="enscript-keyword">for</span> (event = eventChain; event; event = event-&gt;getNext())
+        <span class="enscript-keyword">if</span> (OSDynamicCast(IOInterruptEventSource, event))
+            event-&gt;enable();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOWorkLoop::disableAllInterrupts</span>() <span class="enscript-type">const</span>
+{
+    IOEventSource *event;
+	
+    <span class="enscript-keyword">for</span> (event = eventChain; event; event = event-&gt;getNext())
+        <span class="enscript-keyword">if</span> (OSDynamicCast(IOInterruptEventSource, event))
+            event-&gt;disable();
+}
+
+
+<span class="enscript-comment">/* virtual */</span> <span class="enscript-type">bool</span> IOWorkLoop::runEventSources()
+{
+    <span class="enscript-type">bool</span> res = false;
+    <span class="enscript-type">bool</span> traceWL = (gIOKitTrace &amp; kIOTraceWorkLoops) ? true : false;
+    <span class="enscript-type">bool</span> traceES = (gIOKitTrace &amp; kIOTraceEventSources) ? true : false;
+    
+    closeGate();
+    <span class="enscript-keyword">if</span> (ISSETP(&amp;fFlags, kLoopTerminate))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">abort</span>;
+	
+    <span class="enscript-keyword">if</span> (traceWL)
+    	IOTimeStampStartConstant(IODBG_WORKLOOP(IOWL_WORK), (uintptr_t) <span class="enscript-keyword">this</span>);
+	
+    <span class="enscript-type">bool</span> more;
+    <span class="enscript-keyword">do</span> {
+		CLRP(&amp;fFlags, kLoopRestart);
+		more = false;
+		IOInterruptState is = IOSimpleLockLockDisableInterrupt(workToDoLock);
+		workToDo = false;
+		IOSimpleLockUnlockEnableInterrupt(workToDoLock, is);
+		<span class="enscript-comment">/* NOTE: only loop over event sources in eventChain. Bypass &quot;passive&quot; event sources for performance */</span>
+		<span class="enscript-keyword">for</span> (IOEventSource *evnt = eventChain; evnt; evnt = evnt-&gt;getNext()) {
+			
+			<span class="enscript-keyword">if</span> (traceES)
+				IOTimeStampStartConstant(IODBG_WORKLOOP(IOWL_CLIENT), (uintptr_t) <span class="enscript-keyword">this</span>, (uintptr_t) evnt);
+			
+			more |= evnt-&gt;checkForWork();
+			
+			<span class="enscript-keyword">if</span> (traceES)
+				IOTimeStampEndConstant(IODBG_WORKLOOP(IOWL_CLIENT), (uintptr_t) <span class="enscript-keyword">this</span>, (uintptr_t) evnt);
+			
+			<span class="enscript-keyword">if</span> (ISSETP(&amp;fFlags, kLoopTerminate))
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">abort</span>;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (fFlags &amp; kLoopRestart) {
+				more = true;
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+    } <span class="enscript-keyword">while</span> (more);
+	
+    res = true;
+	
+    <span class="enscript-keyword">if</span> (traceWL)
+    	IOTimeStampEndConstant(IODBG_WORKLOOP(IOWL_WORK), (uintptr_t) <span class="enscript-keyword">this</span>);
+	
+<span class="enscript-reference">abort</span>:
+    openGate();
+    <span class="enscript-keyword">return</span> res;
+}
+
+<span class="enscript-comment">/* virtual */</span> <span class="enscript-type">void</span> IOWorkLoop::threadMain()
+{
+<span class="enscript-reference">restartThread</span>:
+    <span class="enscript-keyword">do</span> {
+	<span class="enscript-keyword">if</span> ( !runEventSources() )
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">exitThread</span>;
+
+	IOInterruptState is = IOSimpleLockLockDisableInterrupt(workToDoLock);
+        <span class="enscript-keyword">if</span> ( !ISSETP(&amp;fFlags, kLoopTerminate) &amp;&amp; !workToDo) {
+	    assert_wait((<span class="enscript-type">void</span> *) &amp;workToDo, false);
+	    IOSimpleLockUnlockEnableInterrupt(workToDoLock, is);
+	    thread_continue_t cptr = NULL;
+	    <span class="enscript-keyword">if</span> (!reserved || !(kPreciousStack &amp; reserved-&gt;options))
+		cptr = OSMemberFunctionCast(
+			thread_continue_t, <span class="enscript-keyword">this</span>, &amp;IOWorkLoop::threadMain);
+	    thread_block_parameter(cptr, <span class="enscript-keyword">this</span>);
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">restartThread</span>;
+	    <span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-comment">// At this point we either have work to do or we need
+</span>	<span class="enscript-comment">// to commit suicide.  But no matter 
+</span>	<span class="enscript-comment">// Clear the simple lock and retore the interrupt state
+</span>	IOSimpleLockUnlockEnableInterrupt(workToDoLock, is);
+    } <span class="enscript-keyword">while</span>(workToDo);
+
+<span class="enscript-reference">exitThread</span>:
+	thread_t thread = workThread;
+    workThread = 0;	<span class="enscript-comment">// Say we don't have a loop and free ourselves
+</span>    free();
+
+	thread_deallocate(thread);
+    (<span class="enscript-type">void</span>) thread_terminate(thread);
+}
+
+IOThread <span class="enscript-function-name">IOWorkLoop::getThread</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> workThread;
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOWorkLoop::onThread</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> (IOThreadSelf() == workThread);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOWorkLoop::inGate</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> IORecursiveLockHaveLock(gateLock);
+}
+
+<span class="enscript-comment">// Internal APIs used by event sources to control the thread
+</span><span class="enscript-type">void</span> <span class="enscript-function-name">IOWorkLoop::signalWorkAvailable</span>()
+{
+    <span class="enscript-keyword">if</span> (workToDoLock) {
+        IOInterruptState is = IOSimpleLockLockDisableInterrupt(workToDoLock);
+        workToDo = true;
+        thread_wakeup_one((<span class="enscript-type">void</span> *) &amp;workToDo);
+        IOSimpleLockUnlockEnableInterrupt(workToDoLock, is);
+    }
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOWorkLoop::openGate</span>()
+{
+    IOStatisticsOpenGate();
+    IORecursiveLockUnlock(gateLock);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOWorkLoop::closeGate</span>()
+{
+    IORecursiveLockLock(gateLock);
+    IOStatisticsCloseGate();
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOWorkLoop::tryCloseGate</span>()
+{
+    <span class="enscript-type">bool</span> res = (IORecursiveLockTryLock(gateLock) != 0);
+    <span class="enscript-keyword">if</span> (res) {
+        IOStatisticsCloseGate();
+    }
+    <span class="enscript-keyword">return</span> res;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">IOWorkLoop::sleepGate</span>(<span class="enscript-type">void</span> *event, UInt32 interuptibleType)
+{
+    <span class="enscript-type">int</span> res; 
+    IOStatisticsOpenGate();
+    res = IORecursiveLockSleep(gateLock, event, interuptibleType);
+    IOStatisticsCloseGate();
+    <span class="enscript-keyword">return</span> res;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">IOWorkLoop::sleepGate</span>(<span class="enscript-type">void</span> *event, AbsoluteTime deadline, UInt32 interuptibleType)
+{
+    <span class="enscript-type">int</span> res; 
+    IOStatisticsOpenGate();
+    res = IORecursiveLockSleepDeadline(gateLock, event, deadline, interuptibleType);
+    IOStatisticsCloseGate();
+    <span class="enscript-keyword">return</span> res;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOWorkLoop::wakeupGate</span>(<span class="enscript-type">void</span> *event, <span class="enscript-type">bool</span> oneThread)
+{
+    IORecursiveLockWakeup(gateLock, event, oneThread);
+}
+
+IOReturn <span class="enscript-function-name">IOWorkLoop::runAction</span>(Action inAction, OSObject *target,
+                                  <span class="enscript-type">void</span> *arg0, <span class="enscript-type">void</span> *arg1,
+                                  <span class="enscript-type">void</span> *arg2, <span class="enscript-type">void</span> *arg3)
+{
+    IOReturn res;
+
+    <span class="enscript-comment">// closeGate is recursive so don't worry if we already hold the lock.
+</span>    closeGate();
+    res = (*inAction)(target, arg0, arg1, arg2, arg3);
+    openGate();
+
+    <span class="enscript-keyword">return</span> res;
+}
+
+IOReturn <span class="enscript-function-name">IOWorkLoop::_maintRequest</span>(<span class="enscript-type">void</span> *inC, <span class="enscript-type">void</span> *inD, <span class="enscript-type">void</span> *, <span class="enscript-type">void</span> *)
+{
+    maintCommandEnum command = (maintCommandEnum) (uintptr_t) inC;
+    IOEventSource *inEvent = (IOEventSource *) inD;
+    IOReturn res = kIOReturnSuccess;
+
+    <span class="enscript-keyword">switch</span> (command)
+    {
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">mAddEvent</span>:
+        <span class="enscript-keyword">if</span> (!inEvent-&gt;getWorkLoop()) {
+            SETP(&amp;fFlags, kLoopRestart);
+
+            inEvent-&gt;retain();
+            inEvent-&gt;setWorkLoop(<span class="enscript-keyword">this</span>);
+            inEvent-&gt;setNext(0);
+
+    		<span class="enscript-comment">/* Check if this is a passive or active event source being added */</span>
+    		<span class="enscript-keyword">if</span> (eventSourcePerformsWork(inEvent)) {
+    		
+	            <span class="enscript-keyword">if</span> (!eventChain)
+    	            eventChain = inEvent;
+        	    <span class="enscript-keyword">else</span> {
+            	    IOEventSource *event, *next;
+    
+                	<span class="enscript-keyword">for</span> (event = eventChain; (next = event-&gt;getNext()); event = next)
+                    	;
+                	event-&gt;setNext(inEvent);
+                	
+            	}
+            	
+            }
+            <span class="enscript-keyword">else</span> {
+    		
+	            <span class="enscript-keyword">if</span> (!passiveEventChain)
+    	            passiveEventChain = inEvent;
+        	    <span class="enscript-keyword">else</span> {
+            	    IOEventSource *event, *next;
+    
+                	<span class="enscript-keyword">for</span> (event = passiveEventChain; (next = event-&gt;getNext()); event = next)
+                    	;
+                	event-&gt;setNext(inEvent);
+                	
+            	}
+            	
+            }
+            IOStatisticsAttachEventSource();
+        }
+        <span class="enscript-keyword">break</span>;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">mRemoveEvent</span>:
+        <span class="enscript-keyword">if</span> (inEvent-&gt;getWorkLoop()) {
+        	IOStatisticsDetachEventSource();
+    		
+        	<span class="enscript-keyword">if</span> (eventSourcePerformsWork(inEvent)) {
+				<span class="enscript-keyword">if</span> (eventChain == inEvent)
+					eventChain = inEvent-&gt;getNext();
+				<span class="enscript-keyword">else</span> {
+					IOEventSource *event, *next = 0;
+		
+					event = eventChain;
+					<span class="enscript-keyword">if</span> (event) <span class="enscript-keyword">while</span> ((next = event-&gt;getNext()) &amp;&amp; (next != inEvent))
+						event = next;
+		
+					<span class="enscript-keyword">if</span> (!next) {
+						res = kIOReturnBadArgument;
+						<span class="enscript-keyword">break</span>;
+					}
+					event-&gt;setNext(inEvent-&gt;getNext());
+				}
+    		}
+    		<span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> (passiveEventChain == inEvent)
+					passiveEventChain = inEvent-&gt;getNext();
+				<span class="enscript-keyword">else</span> {
+					IOEventSource *event, *next = 0;
+		
+					event = passiveEventChain;
+					<span class="enscript-keyword">if</span> (event) <span class="enscript-keyword">while</span> ((next = event-&gt;getNext()) &amp;&amp; (next != inEvent))
+						event = next;
+		
+					<span class="enscript-keyword">if</span> (!next) {
+						res = kIOReturnBadArgument;
+						<span class="enscript-keyword">break</span>;
+					}
+					event-&gt;setNext(inEvent-&gt;getNext());
+				}
+    		}
+    		
+            inEvent-&gt;setWorkLoop(0);
+            inEvent-&gt;setNext(0);
+            inEvent-&gt;release();
+            SETP(&amp;fFlags, kLoopRestart);
+        }
+        <span class="enscript-keyword">break</span>;
+
+    <span class="enscript-reference">default</span>:
+        <span class="enscript-keyword">return</span> kIOReturnUnsupported;
+    }
+
+    <span class="enscript-keyword">return</span> res;
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IOWorkLoop::eventSourcePerformsWork</span>(IOEventSource *inEventSource)
+{
+	<span class="enscript-type">bool</span>	result = true;
+
+	<span class="enscript-comment">/*
+	 * The idea here is to see if the subclass of IOEventSource has overridden checkForWork().
+	 * The assumption is that if you override checkForWork(), you need to be
+	 * active and not passive.
+	 *
+	 * We picked a known quantity controlG that does not override
+	 * IOEventSource::checkForWork(), namely the IOCommandGate associated with
+	 * the workloop to which this event source is getting attached.
+	 * 
+	 * We do a pointer comparison on the offset in the vtable for inNewEvent against
+	 * the offset in the vtable for inReferenceEvent. This works because
+	 * IOCommandGate's slot for checkForWork() has the address of
+	 * IOEventSource::checkForWork() in it.
+	 * 
+	 * Think of OSMemberFunctionCast yielding the value at the vtable offset for
+	 * checkForWork() here. We're just testing to see if it's the same or not.
+	 *
+	 */</span>
+	<span class="enscript-keyword">if</span> (controlG) {
+		<span class="enscript-type">void</span> *	ptr1;
+		<span class="enscript-type">void</span> *	ptr2;
+		
+		ptr1 = OSMemberFunctionCast(<span class="enscript-type">void</span>*, inEventSource, &amp;IOEventSource::checkForWork);
+		ptr2 = OSMemberFunctionCast(<span class="enscript-type">void</span>*, controlG, &amp;IOEventSource::checkForWork);
+		
+		<span class="enscript-keyword">if</span> (ptr1 == ptr2)
+			result = false;
+	}
+	
+    <span class="enscript-keyword">return</span> result;
+}
+</pre>
+<hr />
+</body></html>

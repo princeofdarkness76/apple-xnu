@@ -1,0 +1,687 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>audit_bsm_errno.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">audit_bsm_errno.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*-
+ * Copyright (c) 2008-2011 Apple Inc.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1.  Redistributions of source code must retain the above copyright
+ *     notice, this list of conditions and the following disclaimer.
+ * 2.  Redistributions in binary form must reproduce the above copyright
+ *     notice, this list of conditions and the following disclaimer in the
+ *     documentation and/or other materials provided with the distribution.
+ * 3.  Neither the name of Apple Inc. (&quot;Apple&quot;) nor the names of
+ *     its contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS &quot;AS IS&quot; AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+ * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit_errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit_record.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_AUDIT</span>
+<span class="enscript-comment">/*
+ * Different operating systems use different numeric constants for different
+ * error numbers, and sometimes error numbers don't exist in more than one
+ * operating system.  These routines convert between BSM and local error
+ * number spaces, subject to the above realities.  BSM error numbers are
+ * stored in a single 8-bit character, so don't have a byte order.
+ *
+ * Don't include string definitions when this code is compiled into a kernel.
+ */</span>
+<span class="enscript-type">struct</span> bsm_errno {
+	<span class="enscript-type">int</span>		 be_bsm_errno;
+	<span class="enscript-type">int</span>		 be_local_errno;
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">KERNEL</span>) &amp;&amp; !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">_KERNEL</span>)
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*be_strerror;
+#<span class="enscript-reference">endif</span>
+};
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ERRNO_NO_LOCAL_MAPPING</span>	-600
+
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">KERNEL</span>) &amp;&amp; !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">_KERNEL</span>)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ES</span>(x)	x
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ES</span>(x)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Mapping table -- please maintain in numeric sorted order with respect to
+ * the BSM constant.  Today we do a linear lookup, but could switch to a
+ * binary search if it makes sense.  We only ifdef errors that aren't
+ * generally available, but it does make the table a lot more ugly.
+ *
+ * XXXRW: It would be nice to have a similar ordered table mapping to BSM
+ * constant from local constant, but the order of local constants varies by
+ * OS.  Really we need to build that table at compile-time but don't do that
+ * yet.
+ *
+ * XXXRW: We currently embed English-language error strings here, but should
+ * support catalogues; these are only used if the OS doesn't have an error
+ * string using strerror(3).
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">struct</span> bsm_errno bsm_errnos[] = {
+	{ BSM_ERRNO_ESUCCESS, 0, ES(<span class="enscript-string">&quot;Success&quot;</span>) },
+	{ BSM_ERRNO_EPERM, EPERM, ES(<span class="enscript-string">&quot;Operation not permitted&quot;</span>) },
+	{ BSM_ERRNO_ENOENT, ENOENT, ES(<span class="enscript-string">&quot;No such file or directory&quot;</span>) },
+	{ BSM_ERRNO_ESRCH, ESRCH, ES(<span class="enscript-string">&quot;No such process&quot;</span>) },
+	{ BSM_ERRNO_EINTR, EINTR, ES(<span class="enscript-string">&quot;Interrupted system call&quot;</span>) },
+	{ BSM_ERRNO_EIO, EIO, ES(<span class="enscript-string">&quot;Input/output error&quot;</span>) },
+	{ BSM_ERRNO_ENXIO, ENXIO, ES(<span class="enscript-string">&quot;Device not configured&quot;</span>) },
+	{ BSM_ERRNO_E2BIG, E2BIG, ES(<span class="enscript-string">&quot;Argument list too long&quot;</span>) },
+	{ BSM_ERRNO_ENOEXEC, ENOEXEC, ES(<span class="enscript-string">&quot;Exec format error&quot;</span>) },
+	{ BSM_ERRNO_EBADF, EBADF, ES(<span class="enscript-string">&quot;Bad file descriptor&quot;</span>) },
+	{ BSM_ERRNO_ECHILD, ECHILD, ES(<span class="enscript-string">&quot;No child processes&quot;</span>) },
+	{ BSM_ERRNO_EAGAIN, EAGAIN, ES(<span class="enscript-string">&quot;Resource temporarily unavailable&quot;</span>) },
+	{ BSM_ERRNO_ENOMEM, ENOMEM, ES(<span class="enscript-string">&quot;Cannot allocate memory&quot;</span>) },
+	{ BSM_ERRNO_EACCES, EACCES, ES(<span class="enscript-string">&quot;Permission denied&quot;</span>) },
+	{ BSM_ERRNO_EFAULT, EFAULT, ES(<span class="enscript-string">&quot;Bad address&quot;</span>) },
+	{ BSM_ERRNO_ENOTBLK, ENOTBLK, ES(<span class="enscript-string">&quot;Block device required&quot;</span>) },
+	{ BSM_ERRNO_EBUSY, EBUSY, ES(<span class="enscript-string">&quot;Device busy&quot;</span>) },
+	{ BSM_ERRNO_EEXIST, EEXIST, ES(<span class="enscript-string">&quot;File exists&quot;</span>) },
+	{ BSM_ERRNO_EXDEV, EXDEV, ES(<span class="enscript-string">&quot;Cross-device link&quot;</span>) },
+	{ BSM_ERRNO_ENODEV, ENODEV, ES(<span class="enscript-string">&quot;Operation not supported by device&quot;</span>) },
+	{ BSM_ERRNO_ENOTDIR, ENOTDIR, ES(<span class="enscript-string">&quot;Not a directory&quot;</span>) },
+	{ BSM_ERRNO_EISDIR, EISDIR, ES(<span class="enscript-string">&quot;Is a directory&quot;</span>) },
+	{ BSM_ERRNO_EINVAL, EINVAL, ES(<span class="enscript-string">&quot;Invalid argument&quot;</span>) },
+	{ BSM_ERRNO_ENFILE, ENFILE, ES(<span class="enscript-string">&quot;Too many open files in system&quot;</span>) },
+	{ BSM_ERRNO_EMFILE, EMFILE, ES(<span class="enscript-string">&quot;Too many open files&quot;</span>) },
+	{ BSM_ERRNO_ENOTTY, ENOTTY, ES(<span class="enscript-string">&quot;Inappropriate ioctl for device&quot;</span>) },
+	{ BSM_ERRNO_ETXTBSY, ETXTBSY, ES(<span class="enscript-string">&quot;Text file busy&quot;</span>) },
+	{ BSM_ERRNO_EFBIG, EFBIG, ES(<span class="enscript-string">&quot;File too large&quot;</span>) },
+	{ BSM_ERRNO_ENOSPC, ENOSPC, ES(<span class="enscript-string">&quot;No space left on device&quot;</span>) },
+	{ BSM_ERRNO_ESPIPE, ESPIPE, ES(<span class="enscript-string">&quot;Illegal seek&quot;</span>) },
+	{ BSM_ERRNO_EROFS, EROFS, ES(<span class="enscript-string">&quot;Read-only file system&quot;</span>) },
+	{ BSM_ERRNO_EMLINK, EMLINK, ES(<span class="enscript-string">&quot;Too many links&quot;</span>) },
+	{ BSM_ERRNO_EPIPE, EPIPE, ES(<span class="enscript-string">&quot;Broken pipe&quot;</span>) },
+	{ BSM_ERRNO_EDOM, EDOM, ES(<span class="enscript-string">&quot;Numerical argument out of domain&quot;</span>) },
+	{ BSM_ERRNO_ERANGE, ERANGE, ES(<span class="enscript-string">&quot;Result too large&quot;</span>) },
+	{ BSM_ERRNO_ENOMSG, ENOMSG, ES(<span class="enscript-string">&quot;No message of desired type&quot;</span>) },
+	{ BSM_ERRNO_EIDRM, EIDRM, ES(<span class="enscript-string">&quot;Identifier removed&quot;</span>) },
+	{ BSM_ERRNO_ECHRNG,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ECHRNG</span>
+	ECHRNG,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Channel number out of range&quot;</span>) },
+	{ BSM_ERRNO_EL2NSYNC,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EL2NSYNC</span>
+	EL2NSYNC,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Level 2 not synchronized&quot;</span>) },
+	{ BSM_ERRNO_EL3HLT,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EL3HLT</span>
+	EL3HLT,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Level 3 halted&quot;</span>) },
+	{ BSM_ERRNO_EL3RST,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EL3RST</span>
+	EL3RST,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Level 3 reset&quot;</span>) },
+	{ BSM_ERRNO_ELNRNG,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ELNRNG</span>
+	ELNRNG,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Link number out of range&quot;</span>) },
+	{ BSM_ERRNO_EUNATCH,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EUNATCH</span>
+	EUNATCH,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Protocol driver not attached&quot;</span>) },
+	{ BSM_ERRNO_ENOCSI,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ENOCSI</span>
+	ENOCSI,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;No CSI structure available&quot;</span>) },
+	{ BSM_ERRNO_EL2HLT,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EL2HLT</span>
+	EL2HLT,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Level 2 halted&quot;</span>) },
+	{ BSM_ERRNO_EDEADLK, EDEADLK, ES(<span class="enscript-string">&quot;Resource deadlock avoided&quot;</span>) },
+	{ BSM_ERRNO_ENOLCK, ENOLCK, ES(<span class="enscript-string">&quot;No locks available&quot;</span>) },
+	{ BSM_ERRNO_ECANCELED, ECANCELED, ES(<span class="enscript-string">&quot;Operation canceled&quot;</span>) },
+	{ BSM_ERRNO_ENOTSUP, ENOTSUP, ES(<span class="enscript-string">&quot;Operation not supported&quot;</span>) },
+	{ BSM_ERRNO_EDQUOT, EDQUOT, ES(<span class="enscript-string">&quot;Disc quota exceeded&quot;</span>) },
+	{ BSM_ERRNO_EBADE,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EBADE</span>
+	EBADE,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Invalid exchange&quot;</span>) },
+	{ BSM_ERRNO_EBADR,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EBADR</span>
+	EBADR,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Invalid request descriptor&quot;</span>) },
+	{ BSM_ERRNO_EXFULL,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EXFULL</span>
+	EXFULL,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Exchange full&quot;</span>) },
+	{ BSM_ERRNO_ENOANO,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ENOANO</span>
+	ENOANO,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;No anode&quot;</span>) },
+	{ BSM_ERRNO_EBADRQC,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EBADRQC</span>
+	EBADRQC,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Invalid request descriptor&quot;</span>) },
+	{ BSM_ERRNO_EBADSLT,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EBADSLT</span>
+	EBADSLT,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Invalid slot&quot;</span>) },
+	{ BSM_ERRNO_EDEADLOCK,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EDEADLOCK</span>
+	EDEADLOCK,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Resource deadlock avoided&quot;</span>) },
+	{ BSM_ERRNO_EBFONT,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EBFONT</span>
+	EBFONT,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Bad font file format&quot;</span>) },
+	{ BSM_ERRNO_EOWNERDEAD,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EOWNERDEAD</span>
+	EOWNERDEAD,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Process died with the lock&quot;</span>) },
+	{ BSM_ERRNO_ENOTRECOVERABLE,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ENOTRECOVERABLE</span>
+	ENOTRECOVERABLE,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Lock is not recoverable&quot;</span>) },
+	{ BSM_ERRNO_ENOSTR,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ENOSTR</span>
+	ENOSTR,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Device not a stream&quot;</span>) },
+	{ BSM_ERRNO_ENONET,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ENONET</span>
+	ENONET,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Machine is not on the network&quot;</span>) },
+	{ BSM_ERRNO_ENOPKG,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ENOPKG</span>
+	ENOPKG,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Package not installed&quot;</span>) },
+	{ BSM_ERRNO_EREMOTE, EREMOTE,
+	    ES(<span class="enscript-string">&quot;Too many levels of remote in path&quot;</span>) },
+	{ BSM_ERRNO_ENOLINK,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ENOLINK</span>
+	ENOLINK,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Link has been severed&quot;</span>) },
+	{ BSM_ERRNO_EADV,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EADV</span>
+	EADV,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Advertise error&quot;</span>) },
+	{ BSM_ERRNO_ESRMNT,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ESRMNT</span>
+	ESRMNT,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;srmount error&quot;</span>) },
+	{ BSM_ERRNO_ECOMM,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ECOMM</span>
+	ECOMM,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Communication error on send&quot;</span>) },
+	{ BSM_ERRNO_EPROTO,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EPROTO</span>
+	EPROTO,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Protocol error&quot;</span>) },
+	{ BSM_ERRNO_ELOCKUNMAPPED,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ELOCKUNMAPPED</span>
+	ELOCKUNMAPPED,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Locked lock was unmapped&quot;</span>) },
+	{ BSM_ERRNO_ENOTACTIVE,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ENOTACTIVE</span>
+	ENOTACTIVE,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Facility is not active&quot;</span>) },
+	{ BSM_ERRNO_EMULTIHOP,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EMULTIHOP</span>
+	EMULTIHOP,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Multihop attempted&quot;</span>) },
+	{ BSM_ERRNO_EBADMSG,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EBADMSG</span>
+	EBADMSG,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Bad message&quot;</span>) },
+	{ BSM_ERRNO_ENAMETOOLONG, ENAMETOOLONG, ES(<span class="enscript-string">&quot;File name too long&quot;</span>) },
+	{ BSM_ERRNO_EOVERFLOW, EOVERFLOW,
+	    ES(<span class="enscript-string">&quot;Value too large to be stored in data type&quot;</span>) },
+	{ BSM_ERRNO_ENOTUNIQ,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ENOTUNIQ</span>
+	ENOTUNIQ,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Given log name not unique&quot;</span>) },
+	{ BSM_ERRNO_EBADFD,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EBADFD</span>
+	EBADFD,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Given f.d. invalid for this operation&quot;</span>) },
+	{ BSM_ERRNO_EREMCHG,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EREMCHG</span>
+	EREMCHG,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Remote address changed&quot;</span>) },
+	{ BSM_ERRNO_ELIBACC,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ELIBACC</span>
+	ELIBACC,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Can't access a needed shared lib&quot;</span>) },
+	{ BSM_ERRNO_ELIBBAD,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ELIBBAD</span>
+	ELIBBAD,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Accessing a corrupted shared lib&quot;</span>) },
+	{ BSM_ERRNO_ELIBSCN,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ELIBSCN</span>
+	ELIBSCN,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;.lib section in a.out corrupted&quot;</span>) },
+	{ BSM_ERRNO_ELIBMAX,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ELIBMAX</span>
+	ELIBMAX,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Attempting to link in too many libs&quot;</span>) },
+	{ BSM_ERRNO_ELIBEXEC,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ELIBEXEC</span>
+	ELIBEXEC,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Attempting to exec a shared library&quot;</span>) },
+	{ BSM_ERRNO_EILSEQ, EILSEQ, ES(<span class="enscript-string">&quot;Illegal byte sequence&quot;</span>) },
+	{ BSM_ERRNO_ENOSYS, ENOSYS, ES(<span class="enscript-string">&quot;Function not implemented&quot;</span>) },
+	{ BSM_ERRNO_ELOOP, ELOOP, ES(<span class="enscript-string">&quot;Too many levels of symbolic links&quot;</span>) },
+	{ BSM_ERRNO_ERESTART,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ERESTART</span>
+	ERESTART,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Restart syscall&quot;</span>) },
+	{ BSM_ERRNO_ESTRPIPE,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ESTRPIPE</span>
+	ESTRPIPE,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;If pipe/FIFO, don't sleep in stream head&quot;</span>) },
+	{ BSM_ERRNO_ENOTEMPTY, ENOTEMPTY, ES(<span class="enscript-string">&quot;Directory not empty&quot;</span>) },
+	{ BSM_ERRNO_EUSERS, EUSERS, ES(<span class="enscript-string">&quot;Too many users&quot;</span>) },
+	{ BSM_ERRNO_ENOTSOCK, ENOTSOCK,
+	    ES(<span class="enscript-string">&quot;Socket operation on non-socket&quot;</span>) },
+	{ BSM_ERRNO_EDESTADDRREQ, EDESTADDRREQ,
+	    ES(<span class="enscript-string">&quot;Destination address required&quot;</span>) },
+	{ BSM_ERRNO_EMSGSIZE, EMSGSIZE, ES(<span class="enscript-string">&quot;Message too long&quot;</span>) },
+	{ BSM_ERRNO_EPROTOTYPE, EPROTOTYPE,
+	    ES(<span class="enscript-string">&quot;Protocol wrong type for socket&quot;</span>) },
+	{ BSM_ERRNO_ENOPROTOOPT, ENOPROTOOPT, ES(<span class="enscript-string">&quot;Protocol not available&quot;</span>) },
+	{ BSM_ERRNO_EPROTONOSUPPORT, EPROTONOSUPPORT,
+	    ES(<span class="enscript-string">&quot;Protocol not supported&quot;</span>) },
+	{ BSM_ERRNO_ESOCKTNOSUPPORT, ESOCKTNOSUPPORT,
+	    ES(<span class="enscript-string">&quot;Socket type not supported&quot;</span>) },
+	{ BSM_ERRNO_EOPNOTSUPP, EOPNOTSUPP, ES(<span class="enscript-string">&quot;Operation not supported&quot;</span>) },
+	{ BSM_ERRNO_EPFNOSUPPORT, EPFNOSUPPORT,
+	    ES(<span class="enscript-string">&quot;Protocol family not supported&quot;</span>) },
+	{ BSM_ERRNO_EAFNOSUPPORT, EAFNOSUPPORT,
+	    ES(<span class="enscript-string">&quot;Address family not supported by protocol family&quot;</span>) },
+	{ BSM_ERRNO_EADDRINUSE, EADDRINUSE, ES(<span class="enscript-string">&quot;Address already in use&quot;</span>) },
+	{ BSM_ERRNO_EADDRNOTAVAIL, EADDRNOTAVAIL,
+	    ES(<span class="enscript-string">&quot;Can't assign requested address&quot;</span>) },
+	{ BSM_ERRNO_ENETDOWN, ENETDOWN, ES(<span class="enscript-string">&quot;Network is down&quot;</span>) },
+	{ BSM_ERRNO_ENETRESET, ENETRESET,
+	    ES(<span class="enscript-string">&quot;Network dropped connection on reset&quot;</span>) },
+	{ BSM_ERRNO_ECONNABORTED, ECONNABORTED,
+	    ES(<span class="enscript-string">&quot;Software caused connection abort&quot;</span>) },
+	{ BSM_ERRNO_ECONNRESET, ECONNRESET, ES(<span class="enscript-string">&quot;Connection reset by peer&quot;</span>) },
+	{ BSM_ERRNO_ENOBUFS, ENOBUFS, ES(<span class="enscript-string">&quot;No buffer space available&quot;</span>) },
+	{ BSM_ERRNO_EISCONN, EISCONN, ES(<span class="enscript-string">&quot;Socket is already connected&quot;</span>) },
+	{ BSM_ERRNO_ENOTCONN, ENOTCONN, ES(<span class="enscript-string">&quot;Socket is not connected&quot;</span>) },
+	{ BSM_ERRNO_ESHUTDOWN, ESHUTDOWN,
+	    ES(<span class="enscript-string">&quot;Can't send after socket shutdown&quot;</span>) },
+	{ BSM_ERRNO_ETOOMANYREFS, ETOOMANYREFS,
+	    ES(<span class="enscript-string">&quot;Too many references: can't splice&quot;</span>) },
+	{ BSM_ERRNO_ETIMEDOUT, ETIMEDOUT, ES(<span class="enscript-string">&quot;Operation timed out&quot;</span>) },
+	{ BSM_ERRNO_ECONNREFUSED, ECONNREFUSED, ES(<span class="enscript-string">&quot;Connection refused&quot;</span>) },
+	{ BSM_ERRNO_EHOSTDOWN, EHOSTDOWN, ES(<span class="enscript-string">&quot;Host is down&quot;</span>) },
+	{ BSM_ERRNO_EHOSTUNREACH, EHOSTUNREACH, ES(<span class="enscript-string">&quot;No route to host&quot;</span>) },
+	{ BSM_ERRNO_EALREADY, EALREADY, ES(<span class="enscript-string">&quot;Operation already in progress&quot;</span>) },
+	{ BSM_ERRNO_EINPROGRESS, EINPROGRESS,
+	    ES(<span class="enscript-string">&quot;Operation now in progress&quot;</span>) },
+	{ BSM_ERRNO_ESTALE, ESTALE, ES(<span class="enscript-string">&quot;Stale NFS file handle&quot;</span>) },
+	{ BSM_ERRNO_EQFULL, EQFULL, ES(<span class="enscript-string">&quot;Interface output queue is full&quot;</span>) },
+	{ BSM_ERRNO_EPWROFF,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EPWROFF</span>
+	EPWROFF,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Device power is off&quot;</span>) },
+	{ BSM_ERRNO_EDEVERR,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EDEVERR</span>
+	EDEVERR,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Device error&quot;</span>) },
+	{ BSM_ERRNO_EBADEXEC,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EBADEXEC</span>
+	EBADEXEC,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Bad executable&quot;</span>) },
+	{ BSM_ERRNO_EBADARCH,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EBADARCH</span>
+	EBADARCH,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Bad CPU type in executable&quot;</span>) },
+	{ BSM_ERRNO_ESHLIBVERS,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ESHLIBVERS</span>
+	ESHLIBVERS,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Shared library version mismatch&quot;</span>) },
+	{ BSM_ERRNO_EBADMACHO,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EBADMACHO</span>
+	EBADMACHO,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Malformed Macho file&quot;</span>) },
+	{ BSM_ERRNO_EPOLICY,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EPOLICY</span>
+	EPOLICY,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Operation failed by policy&quot;</span>) },
+	{ BSM_ERRNO_EDOTDOT,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EDOTDOT</span>
+	EDOTDOT,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;RFS specific error&quot;</span>) },
+	{ BSM_ERRNO_EUCLEAN,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EUCLEAN</span>
+	EUCLEAN,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Structure needs cleaning&quot;</span>) },
+	{ BSM_ERRNO_ENOTNAM,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ENOTNAM</span>
+	ENOTNAM,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Not a XENIX named type file&quot;</span>) },
+	{ BSM_ERRNO_ENAVAIL,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ENAVAIL</span>
+	ENAVAIL,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;No XENIX semaphores available&quot;</span>) },
+	{ BSM_ERRNO_EISNAM,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EISNAM</span>
+	EISNAM,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Is a named type file&quot;</span>) },
+	{ BSM_ERRNO_EREMOTEIO,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EREMOTEIO</span>
+	EREMOTEIO,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Remote I/O error&quot;</span>) },
+	{ BSM_ERRNO_ENOMEDIUM,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ENOMEDIUM</span>
+	ENOMEDIUM,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;No medium found&quot;</span>) },
+	{ BSM_ERRNO_EMEDIUMTYPE,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EMEDIUMTYPE</span>
+	EMEDIUMTYPE,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Wrong medium type&quot;</span>) },
+	{ BSM_ERRNO_ENOKEY,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">ENOKEY</span>
+	ENOKEY,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Required key not available&quot;</span>) },
+	{ BSM_ERRNO_EKEYEXPIRED,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EKEEXPIRED</span>
+	EKEYEXPIRED,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Key has expired&quot;</span>) },
+	{ BSM_ERRNO_EKEYREVOKED,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EKEYREVOKED</span>
+	EKEYREVOKED,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Key has been revoked&quot;</span>) },
+	{ BSM_ERRNO_EKEYREJECTED,
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">EKEREJECTED</span>
+	EKEYREJECTED,
+#<span class="enscript-reference">else</span>
+	ERRNO_NO_LOCAL_MAPPING,
+#<span class="enscript-reference">endif</span>
+	ES(<span class="enscript-string">&quot;Key was rejected by service&quot;</span>) },
+};
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">int</span> bsm_errnos_count = <span class="enscript-keyword">sizeof</span>(bsm_errnos) / <span class="enscript-keyword">sizeof</span>(bsm_errnos[0]);
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">struct</span> bsm_errno *
+<span class="enscript-function-name">bsm_lookup_errno_local</span>(<span class="enscript-type">int</span> local_errno)
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; bsm_errnos_count; i++) {
+		<span class="enscript-keyword">if</span> (bsm_errnos[i].be_local_errno == local_errno)
+			<span class="enscript-keyword">return</span> (&amp;bsm_errnos[i]);
+	}
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-comment">/*
+ * Conversion to the BSM errno space isn't allowed to fail; we simply map to
+ * BSM_ERRNO_UNKNOWN and let the remote endpoint deal with it.
+ */</span>
+u_char
+<span class="enscript-function-name">au_errno_to_bsm</span>(<span class="enscript-type">int</span> local_errno)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> bsm_errno *bsme;
+
+	bsme = bsm_lookup_errno_local(local_errno);
+	<span class="enscript-keyword">if</span> (bsme == NULL)
+		<span class="enscript-keyword">return</span> (BSM_ERRNO_UNKNOWN);
+	<span class="enscript-keyword">return</span> (bsme-&gt;be_bsm_errno);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">struct</span> bsm_errno *
+<span class="enscript-function-name">bsm_lookup_errno_bsm</span>(u_char bsm_errno)
+{
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; bsm_errnos_count; i++) {
+		<span class="enscript-keyword">if</span> (bsm_errnos[i].be_bsm_errno == bsm_errno)
+			<span class="enscript-keyword">return</span> (&amp;bsm_errnos[i]);
+	}
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-comment">/*
+ * Converstion from a BSM error to a local error number may fail if either
+ * OpenBSM doesn't recognize the error on the wire, or because there is no
+ * appropriate local mapping.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">au_bsm_to_errno</span>(u_char bsm_errno, <span class="enscript-type">int</span> *errorp)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> bsm_errno *bsme;
+
+	bsme = bsm_lookup_errno_bsm(bsm_errno);
+	<span class="enscript-keyword">if</span> (bsme == NULL || bsme-&gt;be_local_errno == ERRNO_NO_LOCAL_MAPPING)
+		<span class="enscript-keyword">return</span> (-1);
+	*errorp = bsme-&gt;be_local_errno;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">KERNEL</span>) &amp;&amp; !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">_KERNEL</span>)
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">au_strerror</span>(u_char bsm_errno)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> bsm_errno *bsme;
+
+	bsme = bsm_lookup_errno_bsm(bsm_errno);
+	<span class="enscript-keyword">if</span> (bsme == NULL)
+		<span class="enscript-keyword">return</span> (<span class="enscript-string">&quot;Unrecognized BSM error&quot;</span>);
+	<span class="enscript-keyword">if</span> (bsme-&gt;be_local_errno != ERRNO_NO_LOCAL_MAPPING)
+		<span class="enscript-keyword">return</span> (strerror(bsme-&gt;be_local_errno));
+	<span class="enscript-keyword">return</span> (bsme-&gt;be_strerror);
+}
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_AUDIT */</span>
+</pre>
+<hr />
+</body></html>

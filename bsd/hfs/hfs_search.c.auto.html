@@ -1,0 +1,1432 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>hfs_search.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">hfs_search.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1997-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ *
+ *	@(#)hfs_search.c
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine/vm_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signalvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/attr.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/utfconv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_dbg.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_catalog.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_attrlist.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_endian.h&quot;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfscommon/headers/FileMgrInternal.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfscommon/headers/HFSUnicodeWrappers.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfscommon/headers/BTreesPrivate.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfscommon/headers/BTreeScanner.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfscommon/headers/CatalogPrivate.h&quot;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_SEARCHFS</span>
+
+<span class="enscript-comment">/* Search criterea. */</span>
+<span class="enscript-type">struct</span> directoryInfoSpec
+{
+	u_int32_t   numFiles;
+};
+
+<span class="enscript-type">struct</span> fileInfoSpec
+{
+	off_t		dataLogicalLength;
+	off_t		dataPhysicalLength;
+	off_t		resourceLogicalLength;
+	off_t		resourcePhysicalLength;
+};
+
+<span class="enscript-type">struct</span> searchinfospec
+{
+	u_char			name[kHFSPlusMaxFileNameBytes];
+	u_int32_t			nameLength;
+	<span class="enscript-type">char</span>			attributes;		<span class="enscript-comment">// see IM:Files 2-100
+</span>	u_int32_t			nodeID;
+	u_int32_t			parentDirID;
+	<span class="enscript-type">struct</span> timespec		creationDate;		
+	<span class="enscript-type">struct</span> timespec		modificationDate;		
+	<span class="enscript-type">struct</span> timespec		changeDate;	
+	<span class="enscript-type">struct</span> timespec		accessDate;		
+	<span class="enscript-type">struct</span> timespec		lastBackupDate;	
+	u_int8_t		finderInfo[32];
+	uid_t			uid;	
+	gid_t			gid;
+	mode_t			mask;
+	<span class="enscript-type">struct</span> fileInfoSpec	f;
+	<span class="enscript-type">struct</span> directoryInfoSpec d;
+};
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> searchinfospec searchinfospec_t;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ResolveHardlink</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, HFSPlusCatalogFile *recp);
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">UnpackSearchAttributeBlock</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> attrlist *alist,
+		searchinfospec_t *searchInfo, <span class="enscript-type">void</span> *attributeBuffer, <span class="enscript-type">int</span> firstblock);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">CheckCriteria</span>(	ExtendedVCB *vcb, 
+							u_long searchBits,
+							<span class="enscript-type">struct</span> attrlist *attrList, 
+							CatalogRecord *rec,
+							CatalogKey *key, 
+							searchinfospec_t *searchInfo1,
+							searchinfospec_t *searchInfo2,
+							<span class="enscript-type">struct</span> vfs_context *ctx);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">CheckAccess</span>(ExtendedVCB *vcb, u_long searchBits, CatalogKey *key, <span class="enscript-type">struct</span> vfs_context *ctx);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">InsertMatch</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, uio_t a_uio, CatalogRecord *rec,
+			CatalogKey *key, <span class="enscript-type">struct</span> attrlist *returnAttrList,
+			<span class="enscript-type">void</span> *attributesBuffer, <span class="enscript-type">void</span> *variableBuffer,
+			uint32_t * nummatches );
+
+<span class="enscript-type">static</span> Boolean <span class="enscript-function-name">CompareRange</span>(u_long val, u_long low, u_long high);
+<span class="enscript-type">static</span> Boolean <span class="enscript-function-name">CompareWideRange</span>(u_int64_t val, u_int64_t low, u_int64_t high);
+
+<span class="enscript-type">static</span> Boolean <span class="enscript-function-name">CompareRange</span>( u_long val, u_long low, u_long high )
+{
+	<span class="enscript-keyword">return</span>( (val &gt;= low) &amp;&amp; (val &lt;= high) );
+}
+
+<span class="enscript-type">static</span> Boolean <span class="enscript-function-name">CompareWideRange</span>( u_int64_t val, u_int64_t low, u_int64_t high )
+{
+	<span class="enscript-keyword">return</span>( (val &gt;= low) &amp;&amp; (val &lt;= high) );
+}
+<span class="enscript-comment">//#define CompareRange(val, low, high)	((val &gt;= low) &amp;&amp; (val &lt;= high))
+</span>			
+
+<span class="enscript-comment">/************************************************************************/</span>
+<span class="enscript-comment">/* Entry for searchfs()                                                 */</span>
+<span class="enscript-comment">/************************************************************************/</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">errSearchBufferFull</span>	101	<span class="enscript-comment">/* Internal search errors */</span>
+<span class="enscript-comment">/*
+#
+#% searchfs	vp	L L L
+#
+vnop_searchfs {
+    IN struct vnode *vp;
+    IN off_t length;
+    IN int flags;
+    IN kauth_cred_t cred;
+    IN struct proc *p;
+};
+*/</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_vnop_search</span>(ap)
+	<span class="enscript-type">struct</span> vnop_searchfs_args *ap; <span class="enscript-comment">/*
+		struct vnodeop_desc *a_desc;
+		struct vnode *a_vp;
+		void *a_searchparams1;
+		void *a_searchparams2;
+		struct attrlist *a_searchattrs;
+		u_long a_maxmatches;
+		struct timeval *a_timelimit;
+		struct attrlist *a_returnattrs;
+		u_long *a_nummatches;
+		u_long a_scriptcode;
+		u_long a_options;
+		struct uio *a_uio;
+		struct searchstate *a_searchstate;
+		vfs_context_t a_context;
+	*/</span>
+{
+	ExtendedVCB *vcb = VTOVCB(ap-&gt;a_vp);
+	<span class="enscript-type">struct</span> hfsmount *hfsmp;
+	FCB * catalogFCB;
+	searchinfospec_t searchInfo1;
+	searchinfospec_t searchInfo2;
+	<span class="enscript-type">void</span> *attributesBuffer = NULL;
+	<span class="enscript-type">void</span> *variableBuffer;
+	u_int32_t fixedBlockSize;
+	u_int32_t eachReturnBufferSize;
+	<span class="enscript-type">struct</span> proc *p = current_proc();
+	<span class="enscript-type">int</span> err = E_NONE;
+	<span class="enscript-type">int</span> isHFSPlus;
+	CatalogKey * myCurrentKeyPtr;
+	CatalogRecord * myCurrentDataPtr;
+	CatPosition * myCatPositionPtr;
+	BTScanState myBTScanState;
+	user_addr_t user_start = 0;
+	user_size_t user_len = 0;
+	int32_t searchTime;
+	<span class="enscript-type">int</span> lockflags;
+	<span class="enscript-type">struct</span> uthread	*ut;
+	boolean_t timerExpired = FALSE;
+	boolean_t needThrottle = FALSE;
+
+	<span class="enscript-comment">/* XXX Parameter check a_searchattrs? */</span>
+
+	*(ap-&gt;a_nummatches) = 0;
+
+	<span class="enscript-keyword">if</span> (ap-&gt;a_options &amp; ~SRCHFS_VALIDOPTIONSMASK) {
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-comment">/*
+	 * Fail requests for attributes that HFS does not support for the
+	 * items that match the search criteria.  Note that these checks
+	 * are for the OUTBOUND attributes to be returned (not search criteria).
+	 */</span>
+	<span class="enscript-keyword">if</span> ((ap-&gt;a_returnattrs-&gt;commonattr &amp; ~HFS_ATTR_CMN_VALID) ||
+	    (ap-&gt;a_returnattrs-&gt;volattr != 0) ||
+	    (ap-&gt;a_returnattrs-&gt;dirattr &amp; ~HFS_ATTR_DIR_VALID) ||
+	    (ap-&gt;a_returnattrs-&gt;fileattr &amp; ~HFS_ATTR_FILE_VALID) ||
+	    (ap-&gt;a_returnattrs-&gt;forkattr != 0)) {
+
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-comment">/* SRCHFS_SKIPLINKS requires root access.
+	 * This option cannot be used with either
+	 * the ATTR_CMN_NAME or ATTR_CMN_PAROBJID
+	 * attributes.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ap-&gt;a_options &amp; SRCHFS_SKIPLINKS) {
+		attrgroup_t attrs;
+
+		attrs = ap-&gt;a_searchattrs-&gt;commonattr | ap-&gt;a_returnattrs-&gt;commonattr;
+		<span class="enscript-keyword">if</span> (attrs &amp; (ATTR_CMN_NAME | ATTR_CMN_PAROBJID)) {
+			<span class="enscript-keyword">return</span> (EINVAL);
+		}
+
+		<span class="enscript-keyword">if</span> ((err = vfs_context_suser(ap-&gt;a_context))) {
+			<span class="enscript-keyword">return</span> (err);
+		}
+	}
+
+	<span class="enscript-comment">// If both 32-bit and 64-bit parent ids or file ids are given	   
+</span>	<span class="enscript-comment">// then return an error.
+</span>
+	attrgroup_t test_attrs=ap-&gt;a_searchattrs-&gt;commonattr;
+
+	<span class="enscript-keyword">if</span> (((test_attrs &amp; ATTR_CMN_OBJID) &amp;&amp; (test_attrs &amp; ATTR_CMN_FILEID)) ||
+			((test_attrs &amp; ATTR_CMN_PARENTID) &amp;&amp; (test_attrs &amp; ATTR_CMN_PAROBJID))) {
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-keyword">if</span> (uio_resid(ap-&gt;a_uio) &lt;= 0) {
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	isHFSPlus = (vcb-&gt;vcbSigWord == kHFSPlusSigWord);
+	hfsmp = VTOHFS(ap-&gt;a_vp);
+	
+	searchTime = kMaxMicroSecsInKernel;
+	<span class="enscript-keyword">if</span> (ap-&gt;a_timelimit-&gt;tv_sec == 0 &amp;&amp;
+	    ap-&gt;a_timelimit-&gt;tv_usec &gt; 0 &amp;&amp;
+	    ap-&gt;a_timelimit-&gt;tv_usec &lt; kMaxMicroSecsInKernel) {
+		searchTime = ap-&gt;a_timelimit-&gt;tv_usec;
+	}
+
+	<span class="enscript-comment">/* UnPack the search boundries, searchInfo1, searchInfo2 */</span>
+	err = UnpackSearchAttributeBlock(hfsmp, ap-&gt;a_searchattrs,
+				&amp;searchInfo1, ap-&gt;a_searchparams1, 1);
+	<span class="enscript-keyword">if</span> (err) { 
+		<span class="enscript-keyword">return</span> err;
+	}
+	err = UnpackSearchAttributeBlock(hfsmp, ap-&gt;a_searchattrs,
+				&amp;searchInfo2, ap-&gt;a_searchparams2, 0);
+	<span class="enscript-keyword">if</span> (err) {
+		<span class="enscript-keyword">return</span> err;
+	}
+	<span class="enscript-comment">//shadow search bits if 64-bit file/parent ids are used	
+</span>	<span class="enscript-keyword">if</span> (ap-&gt;a_searchattrs-&gt;commonattr &amp; ATTR_CMN_FILEID) 
+		ap-&gt;a_searchattrs-&gt;commonattr |= ATTR_CMN_OBJID;
+	<span class="enscript-keyword">if</span> (ap-&gt;a_searchattrs-&gt;commonattr &amp; ATTR_CMN_PARENTID) 
+		ap-&gt;a_searchattrs-&gt;commonattr |= ATTR_CMN_PAROBJID;
+
+	fixedBlockSize = <span class="enscript-keyword">sizeof</span>(u_int32_t) + hfs_attrblksize(ap-&gt;a_returnattrs);	<span class="enscript-comment">/* u_int32_t for length word */</span>
+
+	eachReturnBufferSize = fixedBlockSize;
+
+	<span class="enscript-keyword">if</span> ( ap-&gt;a_returnattrs-&gt;commonattr &amp; ATTR_CMN_NAME )	<span class="enscript-comment">/* XXX should be more robust! */</span>
+		eachReturnBufferSize += kHFSPlusMaxFileNameBytes + 1;
+
+	MALLOC( attributesBuffer, <span class="enscript-type">void</span> *, eachReturnBufferSize, M_TEMP, M_WAITOK );
+	<span class="enscript-keyword">if</span> (attributesBuffer == NULL) {
+		err = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+	}
+	bzero(attributesBuffer, eachReturnBufferSize);
+	variableBuffer = (<span class="enscript-type">void</span>*)((<span class="enscript-type">char</span>*) attributesBuffer + fixedBlockSize);
+
+	<span class="enscript-comment">// XXXdbg - have to lock the user's buffer so we don't fault
+</span>	<span class="enscript-comment">// while holding the shared catalog file lock.  see the comment
+</span>	<span class="enscript-comment">// in hfs_readdir() for more details.
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-keyword">if</span> (hfsmp-&gt;jnl &amp;&amp; uio_isuserspace(ap-&gt;a_uio)) {
+		user_start = uio_curriovbase(ap-&gt;a_uio);
+		user_len = uio_curriovlen(ap-&gt;a_uio);
+
+		<span class="enscript-keyword">if</span> ((err = vslock(user_start, user_len)) != 0) {
+			user_start = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+		}
+	}
+
+	lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
+
+	catalogFCB = GetFileControlBlock(vcb-&gt;catalogRefNum);
+	myCurrentKeyPtr = NULL;
+	myCurrentDataPtr = NULL;
+	myCatPositionPtr = (CatPosition *)ap-&gt;a_searchstate;
+
+	<span class="enscript-keyword">if</span> (ap-&gt;a_options &amp; SRCHFS_START) {
+		<span class="enscript-comment">/* Starting a new search. */</span>
+		<span class="enscript-comment">/* Make sure the on-disk Catalog file is current */</span>
+		(<span class="enscript-type">void</span>) hfs_fsync(vcb-&gt;catalogRefNum, MNT_WAIT, 0, p);
+		<span class="enscript-keyword">if</span> (hfsmp-&gt;jnl) {
+		    hfs_systemfile_unlock(hfsmp, lockflags);
+		    hfs_flush(hfsmp, HFS_FLUSH_JOURNAL);
+		    lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
+		}
+
+		ap-&gt;a_options &amp;= ~SRCHFS_START;
+		bzero((caddr_t)myCatPositionPtr, <span class="enscript-keyword">sizeof</span>(*myCatPositionPtr));
+		err = BTScanInitialize(catalogFCB, 0, 0, 0, kCatSearchBufferSize, &amp;myBTScanState);
+		<span class="enscript-keyword">if</span> (err) {
+			hfs_systemfile_unlock(hfsmp, lockflags);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* Resuming a search. */</span>
+		err = BTScanInitialize(catalogFCB, myCatPositionPtr-&gt;nextNode, 
+					myCatPositionPtr-&gt;nextRecord, 
+					myCatPositionPtr-&gt;recordsFound,
+					kCatSearchBufferSize, 
+					&amp;myBTScanState);
+		<span class="enscript-comment">/* Make sure Catalog hasn't changed. */</span>
+		<span class="enscript-keyword">if</span> (err == 0
+		&amp;&amp;  myCatPositionPtr-&gt;writeCount != myBTScanState.btcb-&gt;writeCount) {
+			myCatPositionPtr-&gt;writeCount = myBTScanState.btcb-&gt;writeCount;
+			err = EBUSY; <span class="enscript-comment">/* catChangedErr */</span>
+		}
+	}
+	hfs_systemfile_unlock(hfsmp, lockflags);
+
+	<span class="enscript-keyword">if</span> (err)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+
+	<span class="enscript-keyword">if</span> (throttle_get_io_policy(&amp;ut) == IOPOL_THROTTLE)
+		needThrottle = TRUE;
+	<span class="enscript-comment">/*
+	 * Check all the catalog btree records...
+	 *   return the attributes for matching items
+	 */</span>
+	<span class="enscript-keyword">for</span> (;;) {
+		<span class="enscript-type">struct</span> timeval myCurrentTime;
+		<span class="enscript-type">struct</span> timeval myElapsedTime;
+		
+		err = BTScanNextRecord(&amp;myBTScanState, timerExpired, 
+			(<span class="enscript-type">void</span> **)&amp;myCurrentKeyPtr, (<span class="enscript-type">void</span> **)&amp;myCurrentDataPtr, 
+			NULL);
+		<span class="enscript-keyword">if</span> (err)
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-comment">/* Resolve any hardlinks */</span>
+		<span class="enscript-keyword">if</span> (isHFSPlus &amp;&amp; (ap-&gt;a_options &amp; SRCHFS_SKIPLINKS) == 0) {
+			ResolveHardlink(vcb, (HFSPlusCatalogFile *)myCurrentDataPtr);
+		}
+		<span class="enscript-keyword">if</span> (CheckCriteria( vcb, ap-&gt;a_options, ap-&gt;a_searchattrs, myCurrentDataPtr,
+				myCurrentKeyPtr, &amp;searchInfo1, &amp;searchInfo2, ap-&gt;a_context )
+		&amp;&amp;  CheckAccess(vcb, ap-&gt;a_options, myCurrentKeyPtr, ap-&gt;a_context)) {
+			err = InsertMatch(hfsmp, ap-&gt;a_uio, myCurrentDataPtr, 
+					myCurrentKeyPtr, ap-&gt;a_returnattrs,
+					attributesBuffer, variableBuffer, ap-&gt;a_nummatches);
+			<span class="enscript-keyword">if</span> (err) {
+				<span class="enscript-comment">/*
+				 * The last match didn't fit so come back
+				 * to this record on the next trip.
+				 */</span>
+				--myBTScanState.recordsFound;
+				--myBTScanState.recordNum;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			<span class="enscript-keyword">if</span> (*(ap-&gt;a_nummatches) &gt;= ap-&gt;a_maxmatches)
+				<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (timerExpired == FALSE) {
+			<span class="enscript-comment">/*
+			 * Check our elapsed time and bail if we've hit the max.
+			 * The idea here is to throttle the amount of time we
+			 * spend in the kernel.
+			 */</span>
+			microuptime(&amp;myCurrentTime);
+			timersub(&amp;myCurrentTime, &amp;myBTScanState.startTime, &amp;myElapsedTime);
+			<span class="enscript-comment">/*
+			 * Note: assumes kMaxMicroSecsInKernel is less than 1,000,000
+			 */</span>
+			<span class="enscript-keyword">if</span> (myElapsedTime.tv_sec &gt; 0
+			    ||  myElapsedTime.tv_usec &gt;= searchTime) {
+				timerExpired = TRUE;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (needThrottle == TRUE) {
+				<span class="enscript-keyword">if</span> (throttle_io_will_be_throttled(ut-&gt;uu_lowpri_window, HFSTOVFS(hfsmp)))
+					timerExpired = TRUE;
+			}
+		}
+	}
+
+	<span class="enscript-comment">/* Update catalog position */</span>
+	myCatPositionPtr-&gt;writeCount = myBTScanState.btcb-&gt;writeCount;
+
+	BTScanTerminate(&amp;myBTScanState, &amp;myCatPositionPtr-&gt;nextNode, 
+			&amp;myCatPositionPtr-&gt;nextRecord, 
+			&amp;myCatPositionPtr-&gt;recordsFound);
+
+	<span class="enscript-keyword">if</span> ( err == E_NONE ) {
+		err = EAGAIN;	<span class="enscript-comment">/* signal to the user to call searchfs again */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( err == errSearchBufferFull ) {
+		<span class="enscript-keyword">if</span> ( *(ap-&gt;a_nummatches) &gt; 0 )
+			err = EAGAIN;
+ 		<span class="enscript-keyword">else</span>
+			err = ENOBUFS;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( err == btNotFound ) {
+		err = E_NONE;	<span class="enscript-comment">/* the entire disk has been searched */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( err == fsBTTimeOutErr ) {
+		err = EAGAIN;
+	}
+
+<span class="enscript-reference">ExitThisRoutine</span>:
+	<span class="enscript-keyword">if</span> (attributesBuffer)
+		FREE(attributesBuffer, M_TEMP);
+
+	<span class="enscript-keyword">if</span> (user_start) {
+		vsunlock(user_start, user_len, TRUE);
+	}
+
+	<span class="enscript-keyword">return</span> (MacToVFSError(err));
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ResolveHardlink</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, HFSPlusCatalogFile *recp)
+{
+	u_int32_t type, creator;
+	<span class="enscript-type">int</span> isdirlink = 0;
+	<span class="enscript-type">int</span> isfilelink = 0;
+	time_t filecreatedate;
+ 
+	<span class="enscript-keyword">if</span> (recp-&gt;recordType != kHFSPlusFileRecord) {
+		<span class="enscript-keyword">return</span>;
+	}
+	type = SWAP_BE32(recp-&gt;userInfo.fdType);
+	creator = SWAP_BE32(recp-&gt;userInfo.fdCreator);
+	filecreatedate = to_bsd_time(recp-&gt;createDate);
+
+	<span class="enscript-keyword">if</span> ((type == kHardLinkFileType &amp;&amp; creator == kHFSPlusCreator) &amp;&amp;
+	    (filecreatedate == (time_t)hfsmp-&gt;hfs_itime ||
+	     filecreatedate == (time_t)hfsmp-&gt;hfs_metadata_createdate)) {
+		isfilelink = 1;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((type == kHFSAliasType &amp;&amp; creator == kHFSAliasCreator) &amp;&amp;
+	           (recp-&gt;flags &amp; kHFSHasLinkChainMask) &amp;&amp;
+	           (filecreatedate == (time_t)hfsmp-&gt;hfs_itime ||
+	            filecreatedate == (time_t)hfsmp-&gt;hfs_metadata_createdate)) {
+		isdirlink = 1;
+	}
+
+	<span class="enscript-keyword">if</span> (isfilelink || isdirlink) {
+		cnid_t saved_cnid;
+		<span class="enscript-type">int</span> lockflags;
+
+		<span class="enscript-comment">/* Export link's cnid (a unique value) instead of inode's cnid */</span>
+		saved_cnid = recp-&gt;fileID;
+		lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
+
+		(<span class="enscript-type">void</span>) cat_resolvelink(hfsmp, recp-&gt;hl_linkReference, isdirlink, recp);
+
+		recp-&gt;fileID = saved_cnid;
+		hfs_systemfile_unlock(hfsmp, lockflags);
+	}
+}
+
+
+<span class="enscript-type">static</span> Boolean
+<span class="enscript-function-name">CompareMasked</span>(<span class="enscript-type">const</span> u_int32_t *thisValue, <span class="enscript-type">const</span> u_int32_t *compareData,
+		<span class="enscript-type">const</span> u_int32_t *compareMask, u_int32_t count)
+{
+	Boolean	matched;
+	u_int32_t	i;
+	
+	matched = true;		<span class="enscript-comment">/* Assume it will all match */</span>
+	
+	<span class="enscript-keyword">for</span> (i=0; i&lt;count; i++) {
+		<span class="enscript-keyword">if</span> (((*thisValue++ ^ *compareData++) &amp; *compareMask++) != 0) {
+			matched = false;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	
+	<span class="enscript-keyword">return</span> matched;
+}
+
+
+<span class="enscript-type">static</span> Boolean
+<span class="enscript-function-name">ComparePartialUnicodeName</span> (<span class="enscript-type">register</span> ConstUniCharArrayPtr str, <span class="enscript-type">register</span> ItemCount s_len,
+			   <span class="enscript-type">register</span> ConstUniCharArrayPtr find, <span class="enscript-type">register</span> ItemCount f_len, <span class="enscript-type">int</span> caseSensitive )
+{
+	<span class="enscript-keyword">if</span> (f_len == 0 || s_len == 0) {
+		<span class="enscript-keyword">return</span> FALSE;
+	}
+
+	<span class="enscript-keyword">if</span> (caseSensitive) {
+		<span class="enscript-keyword">do</span> {
+			<span class="enscript-keyword">if</span> (s_len-- &lt; f_len)
+				<span class="enscript-keyword">return</span> FALSE;
+		} <span class="enscript-keyword">while</span> (UnicodeBinaryCompare(str++, f_len, find, f_len) != 0);
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">do</span> {
+			<span class="enscript-keyword">if</span> (s_len-- &lt; f_len)
+				<span class="enscript-keyword">return</span> FALSE;
+		} <span class="enscript-keyword">while</span> (FastUnicodeCompare(str++, f_len, find, f_len) != 0);
+	}
+
+	<span class="enscript-keyword">return</span> TRUE;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+<span class="enscript-type">static</span> Boolean
+<span class="enscript-function-name">ComparePartialPascalName</span> ( <span class="enscript-type">register</span> ConstStr31Param str, <span class="enscript-type">register</span> ConstStr31Param find )
+{
+	<span class="enscript-type">register</span> u_char s_len = str[0];
+	<span class="enscript-type">register</span> u_char f_len = find[0];
+	<span class="enscript-type">register</span> u_char *tsp;
+	Str31 tmpstr;
+
+	<span class="enscript-keyword">if</span> (f_len == 0 || s_len == 0)
+		<span class="enscript-keyword">return</span> FALSE;
+
+	bcopy(str, tmpstr, s_len + 1);
+	tsp = &amp;tmpstr[0];
+
+	<span class="enscript-keyword">while</span> (s_len-- &gt;= f_len) {
+		*tsp = f_len;
+
+		<span class="enscript-keyword">if</span> (FastRelString(tsp++, find) == 0)
+			<span class="enscript-keyword">return</span> TRUE;
+	}
+
+	<span class="enscript-keyword">return</span> FALSE;
+}
+#<span class="enscript-reference">endif</span>
+
+
+<span class="enscript-comment">/*
+ * Check to see if caller has access rights to this item
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">CheckAccess</span>(ExtendedVCB *theVCBPtr, u_long searchBits, CatalogKey *theKeyPtr, <span class="enscript-type">struct</span> vfs_context *ctx)
+{
+	Boolean				isHFSPlus;
+	<span class="enscript-type">int</span>					myErr;
+	<span class="enscript-type">int</span>					myResult; 	
+	HFSCatalogNodeID 	myNodeID;
+	hfsmount_t *		hfsmp;
+	<span class="enscript-type">struct</span> FndrDirInfo	*finfop;
+	<span class="enscript-type">struct</span> vnode * 		vp = NULL;
+
+	myResult = 0;	<span class="enscript-comment">/* default to &quot;no access&quot; */</span>
+		
+	<span class="enscript-keyword">if</span> (!vfs_context_suser(ctx))  {
+		myResult = 1;	<span class="enscript-comment">/* allow access */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>; <span class="enscript-comment">/* root always has access */</span>
+	}
+
+	hfsmp = VCBTOHFS( theVCBPtr );
+	isHFSPlus = ( theVCBPtr-&gt;vcbSigWord == kHFSPlusSigWord );
+	<span class="enscript-keyword">if</span> ( isHFSPlus )
+		myNodeID = theKeyPtr-&gt;hfsPlus.parentID;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+	<span class="enscript-keyword">else</span>
+		myNodeID = theKeyPtr-&gt;hfs.parentID;
+#<span class="enscript-reference">endif</span>
+	
+	<span class="enscript-keyword">while</span> ( myNodeID &gt;= kRootDirID ) {
+		cnode_t *	cp;
+		
+		<span class="enscript-comment">/* now go get catalog data for this directory */</span>
+		myErr = hfs_vget(hfsmp, myNodeID, &amp;vp, 0, 0);
+		<span class="enscript-keyword">if</span> ( myErr ) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;	<span class="enscript-comment">/* no access */</span>
+		}
+
+		cp = VTOC(vp);
+		finfop = (<span class="enscript-type">struct</span> FndrDirInfo *)&amp;cp-&gt;c_attr.ca_finderinfo[0];
+
+		<span class="enscript-keyword">if</span> ( searchBits &amp; SRCHFS_SKIPPACKAGES ) {
+		    <span class="enscript-keyword">if</span> (   (SWAP_BE16(finfop-&gt;frFlags) &amp; kHasBundle)
+			|| (cp-&gt;c_desc.cd_nameptr != NULL
+			    &amp;&amp; is_package_name((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)cp-&gt;c_desc.cd_nameptr, cp-&gt;c_desc.cd_namelen)) ) {
+				myResult = 0;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+		    }
+		}
+
+		<span class="enscript-keyword">if</span> ( searchBits &amp; SRCHFS_SKIPINAPPROPRIATE ) {
+		    <span class="enscript-keyword">if</span> ( cp-&gt;c_parentcnid == kRootDirID &amp;&amp; cp-&gt;c_desc.cd_nameptr != NULL &amp;&amp;
+			     vn_searchfs_inappropriate_name((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)cp-&gt;c_desc.cd_nameptr, cp-&gt;c_desc.cd_namelen) ) {
+				myResult = 0;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+		    }
+		}
+
+		<span class="enscript-keyword">if</span> ( (searchBits &amp; SRCHFS_SKIPINVISIBLE) &amp;&amp; 
+			 (SWAP_BE16(finfop-&gt;frFlags) &amp; kIsInvisible) ) {
+		    myResult = 0;
+		    <span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+		}
+
+		myNodeID = cp-&gt;c_parentcnid;	<span class="enscript-comment">/* move up the hierarchy */</span>
+		hfs_unlock(VTOC(vp));
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+		<span class="enscript-keyword">if</span> (vp-&gt;v_type == VDIR) {
+			myErr = mac_vnode_check_readdir(ctx, vp);
+		} <span class="enscript-keyword">else</span> {
+			myErr = mac_vnode_check_stat(ctx, NOCRED, vp);
+		}
+		<span class="enscript-keyword">if</span> (myErr) {
+			vnode_put(vp);
+			vp = NULL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MAC */</span>
+
+		<span class="enscript-keyword">if</span> (vp-&gt;v_type == VDIR) {
+		    myErr = vnode_authorize(vp, NULL, (KAUTH_VNODE_SEARCH | KAUTH_VNODE_LIST_DIRECTORY), ctx);
+		} <span class="enscript-keyword">else</span> {
+		    myErr = vnode_authorize(vp, NULL, (KAUTH_VNODE_SEARCH), ctx);
+		}
+		vnode_put(vp);
+		vp = NULL;
+		<span class="enscript-keyword">if</span> ( myErr ) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;	<span class="enscript-comment">/* no access */</span>
+		}
+	}
+	myResult = 1;	<span class="enscript-comment">/* allow access */</span>
+
+<span class="enscript-reference">ExitThisRoutine</span>:
+	<span class="enscript-keyword">if</span> ( vp != NULL ) {
+		hfs_unlock(VTOC(vp));
+		vnode_put(vp);
+	}
+	<span class="enscript-keyword">return</span> ( myResult );
+	
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">CheckCriteria</span>(	ExtendedVCB *vcb, 
+				u_long searchBits,
+				<span class="enscript-type">struct</span> attrlist *attrList, 
+				CatalogRecord *rec, 
+				CatalogKey *key,
+				searchinfospec_t  *searchInfo1, 
+				searchinfospec_t *searchInfo2,
+				<span class="enscript-type">struct</span> vfs_context *ctx)
+{
+	Boolean matched, atleastone;
+	Boolean isHFSPlus;
+	attrgroup_t searchAttributes;
+	<span class="enscript-type">struct</span> cat_attr c_attr;
+	<span class="enscript-type">struct</span> cat_fork datafork;
+	<span class="enscript-type">struct</span> cat_fork rsrcfork;
+	<span class="enscript-type">int</span> force_case_sensitivity = proc_is_forcing_hfs_case_sensitivity(vfs_context_proc(ctx));
+	
+	bzero(&amp;c_attr, <span class="enscript-keyword">sizeof</span>(c_attr));
+	isHFSPlus = (vcb-&gt;vcbSigWord == kHFSPlusSigWord);
+
+	<span class="enscript-keyword">switch</span> (rec-&gt;recordType) {
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSFolderRecord</span>:
+			<span class="enscript-keyword">if</span> ( (searchBits &amp; SRCHFS_MATCHDIRS) == 0 ) {	<span class="enscript-comment">/* If we are NOT searching folders */</span>
+				matched = false;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			}
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSFileRecord</span>:
+			<span class="enscript-keyword">if</span> ( (searchBits &amp; SRCHFS_MATCHFILES) == 0 ) {	<span class="enscript-comment">/* If we are NOT searching files */</span>
+				matched = false;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			}
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSPlusFolderRecord</span>:
+			<span class="enscript-keyword">if</span> ( (searchBits &amp; SRCHFS_MATCHDIRS) == 0 ) {	<span class="enscript-comment">/* If we are NOT searching folders */</span>
+				matched = false;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			}
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSPlusFileRecord</span>:
+			<span class="enscript-comment">/* Check if hardlink links should be skipped. */</span>
+			<span class="enscript-keyword">if</span> (searchBits &amp; SRCHFS_SKIPLINKS) {
+				cnid_t parid = key-&gt;hfsPlus.parentID;
+				HFSPlusCatalogFile *filep = (HFSPlusCatalogFile *)rec;
+
+				<span class="enscript-keyword">if</span> ((SWAP_BE32(filep-&gt;userInfo.fdType) == kHardLinkFileType) &amp;&amp;
+						(SWAP_BE32(filep-&gt;userInfo.fdCreator) == kHFSPlusCreator)) {
+					<span class="enscript-keyword">return</span> (false);	<span class="enscript-comment">/* skip over file link records */</span>
+				} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((parid == vcb-&gt;hfs_private_desc[FILE_HARDLINKS].cd_cnid) &amp;&amp;
+						(filep-&gt;bsdInfo.special.linkCount == 0)) {
+					<span class="enscript-keyword">return</span> (false);	<span class="enscript-comment">/* skip over unlinked files */</span>
+				} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((SWAP_BE32(filep-&gt;userInfo.fdType) == kHFSAliasType) &amp;&amp;
+						(SWAP_BE32(filep-&gt;userInfo.fdCreator) == kHFSAliasCreator) &amp;&amp;
+						(filep-&gt;flags &amp; kHFSHasLinkChainMask)) {
+					<span class="enscript-keyword">return</span> (false);	<span class="enscript-comment">/* skip over dir link records */</span>
+				}
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (key-&gt;hfsPlus.parentID == vcb-&gt;hfs_private_desc[FILE_HARDLINKS].cd_cnid) {
+				<span class="enscript-keyword">return</span> (false);	<span class="enscript-comment">/* skip over private files */</span>
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (key-&gt;hfsPlus.parentID == vcb-&gt;hfs_private_desc[DIR_HARDLINKS].cd_cnid) {
+				<span class="enscript-keyword">return</span> (false);	<span class="enscript-comment">/* skip over private files */</span>
+			}
+
+			<span class="enscript-keyword">if</span> ( (searchBits &amp; SRCHFS_MATCHFILES) == 0 ) {	<span class="enscript-comment">/* If we are NOT searching files */</span>
+				matched = false;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			}
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:	<span class="enscript-comment">/* Never match a thread record or any other type. */</span>
+			<span class="enscript-keyword">return</span>( false );	<span class="enscript-comment">/* Not a file or folder record, so can't search it */</span>
+	}
+	
+	matched = true;		<span class="enscript-comment">/* Assume we got a match */</span>
+	atleastone = false;	<span class="enscript-comment">/* Dont insert unless we match at least one criteria */</span>
+	
+	<span class="enscript-comment">/* First, attempt to match the name -- either partial or complete */</span>
+	<span class="enscript-keyword">if</span> ( attrList-&gt;commonattr &amp; ATTR_CMN_NAME ) {
+		<span class="enscript-keyword">if</span> (isHFSPlus) {
+			<span class="enscript-type">int</span> case_sensitive = 0;
+
+			<span class="enscript-comment">/*
+			 * Longstanding default behavior here is to use a non-case-sensitive 
+			 * search, even on case-sensitive filesystems. 
+			 * 
+			 * We only force case sensitivity if the controlling process has explicitly
+			 * asked for it in the proc flags, and only if they are not doing
+			 * a partial name match.  Consider that if you are doing a partial
+			 * name match (&quot;all files that begin with 'image'&quot;), the likelihood is 
+			 * high that you would want to see all matches, even those that do not
+			 * explicitly match the case.
+			 */</span>
+			<span class="enscript-keyword">if</span> (force_case_sensitivity) {
+				case_sensitive = 1;
+			}
+
+			<span class="enscript-comment">/* Check for partial/full HFS Plus name match */</span>
+
+			<span class="enscript-keyword">if</span> ( searchBits &amp; SRCHFS_MATCHPARTIALNAMES ) {
+				<span class="enscript-comment">/* always use a case-INSENSITIVE search here */</span>
+				matched = ComparePartialUnicodeName(key-&gt;hfsPlus.nodeName.unicode,
+								    key-&gt;hfsPlus.nodeName.length,
+								    (UniChar*)searchInfo1-&gt;name,
+								    searchInfo1-&gt;nameLength, 0);
+			} 
+			<span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* Full name match.  Are we HFSX (case sensitive) or HFS+ ? */</span>
+				<span class="enscript-keyword">if</span> (case_sensitive) {
+					matched = (UnicodeBinaryCompare(key-&gt;hfsPlus.nodeName.unicode,
+								key-&gt;hfsPlus.nodeName.length,
+								(UniChar*)searchInfo1-&gt;name,
+								searchInfo1-&gt;nameLength ) == 0);
+				}
+				<span class="enscript-keyword">else</span> {
+					matched = (FastUnicodeCompare(key-&gt;hfsPlus.nodeName.unicode,
+								key-&gt;hfsPlus.nodeName.length,
+								(UniChar*)searchInfo1-&gt;name,
+								searchInfo1-&gt;nameLength ) == 0);
+				}
+			}
+		}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* Check for partial/full HFS name match */</span>
+
+			<span class="enscript-keyword">if</span> ( searchBits &amp; SRCHFS_MATCHPARTIALNAMES )
+				matched = ComparePartialPascalName(key-&gt;hfs.nodeName, (u_char*)searchInfo1-&gt;name);
+			<span class="enscript-keyword">else</span> <span class="enscript-comment">/* full HFS name match */</span>
+				matched = (FastRelString(key-&gt;hfs.nodeName, (u_char*)searchInfo1-&gt;name) == 0);
+		}
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-keyword">if</span> ( matched == false || (searchBits &amp; ~SRCHFS_MATCHPARTIALNAMES) == 0 )
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;	<span class="enscript-comment">/* no match, or nothing more to compare */</span>
+
+		atleastone = true;
+	}
+
+	<span class="enscript-comment">/* Convert catalog record into cat_attr format. */</span>
+	cat_convertattr(VCBTOHFS(vcb), rec, &amp;c_attr, &amp;datafork, &amp;rsrcfork);
+	
+	<span class="enscript-keyword">if</span> (searchBits &amp; SRCHFS_SKIPINVISIBLE) {
+	    <span class="enscript-type">int</span> flags;
+	    
+	    <span class="enscript-keyword">switch</span> (rec-&gt;recordType) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSFolderRecord</span>:
+				{
+					<span class="enscript-type">struct</span> FndrDirInfo *finder_info;
+
+					finder_info = (<span class="enscript-type">struct</span> FndrDirInfo *)&amp;c_attr.ca_finderinfo[0];
+					flags = SWAP_BE16(finder_info-&gt;frFlags);
+					<span class="enscript-keyword">break</span>;
+				}
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSFileRecord</span>:
+				{
+					<span class="enscript-type">struct</span> FndrFileInfo *finder_info;
+
+					finder_info = (<span class="enscript-type">struct</span> FndrFileInfo *)&amp;c_attr.ca_finderinfo[0];
+					flags = SWAP_BE16(finder_info-&gt;fdFlags);
+					<span class="enscript-keyword">break</span>;
+				}
+#<span class="enscript-reference">endif</span>
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSPlusFolderRecord</span>: 
+				{
+					<span class="enscript-type">struct</span> FndrDirInfo *finder_info;
+
+					finder_info = (<span class="enscript-type">struct</span> FndrDirInfo *)&amp;c_attr.ca_finderinfo[0];
+					flags = SWAP_BE16(finder_info-&gt;frFlags);
+					<span class="enscript-keyword">break</span>;
+				}
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">kHFSPlusFileRecord</span>: 
+				{
+					<span class="enscript-type">struct</span> FndrFileInfo *finder_info;
+
+					finder_info = (<span class="enscript-type">struct</span> FndrFileInfo *)&amp;c_attr.ca_finderinfo[0];
+					flags = SWAP_BE16(finder_info-&gt;fdFlags);
+					<span class="enscript-keyword">break</span>;
+				}
+
+			<span class="enscript-reference">default</span>: 
+				{
+					flags = kIsInvisible;
+					<span class="enscript-keyword">break</span>;
+				}
+		}
+
+		<span class="enscript-keyword">if</span> (flags &amp; kIsInvisible) {
+			matched = false;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+		}
+	}
+	
+		    
+
+	<span class="enscript-comment">/* Now that we have a record worth searching, see if it matches the search attributes */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+	<span class="enscript-keyword">if</span> (rec-&gt;recordType == kHFSFileRecord ||
+	    rec-&gt;recordType == kHFSPlusFileRecord) {
+#<span class="enscript-reference">else</span>
+	<span class="enscript-keyword">if</span> (rec-&gt;recordType == kHFSPlusFileRecord) {
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-keyword">if</span> ((attrList-&gt;fileattr &amp; ~ATTR_FILE_VALIDMASK) != 0) {	<span class="enscript-comment">/* attr we do know about  */</span>
+			matched = false;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((attrList-&gt;fileattr &amp; ATTR_FILE_VALIDMASK) != 0) {
+		searchAttributes = attrList-&gt;fileattr;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+			<span class="enscript-keyword">if</span> ( c_attr.ca_flags &amp; UF_COMPRESSED ) {
+				<span class="enscript-comment">/* for compressed files, set the data length to the uncompressed data size */</span>
+				<span class="enscript-keyword">if</span> (( searchAttributes &amp; ATTR_FILE_DATALENGTH ) || 
+					( searchAttributes &amp; ATTR_FILE_DATAALLOCSIZE ) ) {
+					<span class="enscript-keyword">if</span> ( 0 == hfs_uncompressed_size_of_compressed_file(vcb, NULL, c_attr.ca_fileid, &amp;datafork.cf_size, 1) ) { <span class="enscript-comment">/* 1 == don't take the cnode lock */</span>
+						datafork.cf_blocks = rsrcfork.cf_blocks;
+					}	
+				}
+			<span class="enscript-comment">/* treat compressed files as if their resource fork is empty */</span>
+				<span class="enscript-keyword">if</span> (( searchAttributes &amp; ATTR_FILE_RSRCLENGTH ) || 
+					( searchAttributes &amp; ATTR_FILE_RSRCALLOCSIZE ) ) {
+					rsrcfork.cf_size = 0;
+					rsrcfork.cf_blocks = 0;
+				}
+			}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* HFS_COMPRESSION */</span>
+			
+		<span class="enscript-comment">/* File logical length (data fork) */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_FILE_DATALENGTH ) {
+			matched = CompareWideRange(
+			    datafork.cf_size,
+			    searchInfo1-&gt;f.dataLogicalLength,
+			    searchInfo2-&gt;f.dataLogicalLength);
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+				atleastone = true;
+		}
+	
+		<span class="enscript-comment">/* File physical length (data fork) */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_FILE_DATAALLOCSIZE ) {
+			matched = CompareWideRange(
+			    (u_int64_t)datafork.cf_blocks * (u_int64_t)vcb-&gt;blockSize,
+			    searchInfo1-&gt;f.dataPhysicalLength,
+			    searchInfo2-&gt;f.dataPhysicalLength);
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+				atleastone = true;
+		}
+
+		<span class="enscript-comment">/* File logical length (resource fork) */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_FILE_RSRCLENGTH ) {
+			matched = CompareWideRange(
+			    rsrcfork.cf_size,
+			    searchInfo1-&gt;f.resourceLogicalLength,
+			    searchInfo2-&gt;f.resourceLogicalLength);
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+				atleastone = true;
+		}
+		
+		<span class="enscript-comment">/* File physical length (resource fork) */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_FILE_RSRCALLOCSIZE ) {
+			matched = CompareWideRange(
+			    (u_int64_t)rsrcfork.cf_blocks * (u_int64_t)vcb-&gt;blockSize,
+			    searchInfo1-&gt;f.resourcePhysicalLength,
+			    searchInfo2-&gt;f.resourcePhysicalLength);
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+				atleastone = true;
+			}
+		}
+		<span class="enscript-keyword">else</span> {
+			atleastone = true;	<span class="enscript-comment">/* to match SRCHFS_MATCHFILES */</span>
+		}
+	}
+	<span class="enscript-comment">/*
+	 * Check the directory attributes
+	 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (rec-&gt;recordType == kHFSFolderRecord ||
+	         rec-&gt;recordType == kHFSPlusFolderRecord) {
+#<span class="enscript-reference">else</span>
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (rec-&gt;recordType == kHFSPlusFolderRecord) {
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">if</span> ((attrList-&gt;dirattr &amp; ~ATTR_DIR_VALIDMASK) != 0) {	<span class="enscript-comment">/* attr we do know about  */</span>
+			matched = false;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((attrList-&gt;dirattr &amp; ATTR_DIR_VALIDMASK) != 0) {
+		searchAttributes = attrList-&gt;dirattr;
+		
+		<span class="enscript-comment">/* Directory valence */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_DIR_ENTRYCOUNT ) {
+			matched = CompareRange(c_attr.ca_entries,
+					searchInfo1-&gt;d.numFiles,
+					searchInfo2-&gt;d.numFiles );
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+				atleastone = true;
+			}
+		}
+		<span class="enscript-keyword">else</span> {
+			atleastone = true;		<span class="enscript-comment">/* to match SRCHFS_MATCHDIRS */</span>
+		}
+	}
+	
+	<span class="enscript-comment">/*
+	 * Check the common attributes
+	 */</span>
+	searchAttributes = attrList-&gt;commonattr;
+	<span class="enscript-keyword">if</span> ( (searchAttributes &amp; ATTR_CMN_VALIDMASK) != 0 ) {
+		<span class="enscript-comment">/* node ID */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_CMN_OBJID ) {
+			matched = CompareRange(c_attr.ca_fileid,
+					searchInfo1-&gt;nodeID,
+					searchInfo2-&gt;nodeID );
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			atleastone = true;
+		}
+
+		<span class="enscript-comment">/* Parent ID */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_CMN_PAROBJID ) {
+			HFSCatalogNodeID parentID;
+			
+			<span class="enscript-keyword">if</span> (isHFSPlus)
+				parentID = key-&gt;hfsPlus.parentID;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+			<span class="enscript-keyword">else</span>
+				parentID = key-&gt;hfs.parentID;
+#<span class="enscript-reference">endif</span>
+				
+			matched = CompareRange(parentID, searchInfo1-&gt;parentDirID,
+					searchInfo2-&gt;parentDirID );
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			atleastone = true;
+		}
+
+		<span class="enscript-comment">/* Finder Info &amp; Extended Finder Info where extFinderInfo is last 32 bytes */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_CMN_FNDRINFO ) {
+			u_int32_t *thisValue;
+			thisValue = (u_int32_t *) &amp;c_attr.ca_finderinfo;
+
+			<span class="enscript-comment">/* 
+			 * Note: ioFlFndrInfo and ioDrUsrWds have the same offset in search info, so
+			 * no need to test the object type here.
+			 */</span>
+			matched = CompareMasked(thisValue,
+					(u_int32_t *)&amp;searchInfo1-&gt;finderInfo,
+					(u_int32_t *) &amp;searchInfo2-&gt;finderInfo, 8);
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			atleastone = true;
+		}
+
+		<span class="enscript-comment">/* Create date */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_CMN_CRTIME ) {
+			matched = CompareRange(c_attr.ca_itime,
+					searchInfo1-&gt;creationDate.tv_sec,
+					searchInfo2-&gt;creationDate.tv_sec);
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			atleastone = true;
+		}
+	
+		<span class="enscript-comment">/* Mod date */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_CMN_MODTIME ) {
+			matched = CompareRange(c_attr.ca_mtime,
+					searchInfo1-&gt;modificationDate.tv_sec,
+					searchInfo2-&gt;modificationDate.tv_sec);
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			atleastone = true;
+		}
+	
+		<span class="enscript-comment">/* Change Time */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_CMN_CHGTIME ) {
+			matched = CompareRange(c_attr.ca_ctime,
+					searchInfo1-&gt;changeDate.tv_sec,
+					searchInfo2-&gt;changeDate.tv_sec);
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			atleastone = true;
+		}
+	
+		<span class="enscript-comment">/* Access date */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_CMN_ACCTIME ) {
+			matched = CompareRange(c_attr.ca_atime,
+					searchInfo1-&gt;accessDate.tv_sec,
+					searchInfo2-&gt;accessDate.tv_sec);
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			atleastone = true;
+		}
+
+		<span class="enscript-comment">/* Backup date */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_CMN_BKUPTIME ) {
+			matched = CompareRange(c_attr.ca_btime,
+					searchInfo1-&gt;lastBackupDate.tv_sec,
+					searchInfo2-&gt;lastBackupDate.tv_sec);
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			atleastone = true;
+		}
+	
+		<span class="enscript-comment">/* User ID */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_CMN_OWNERID ) {
+			matched = CompareRange(c_attr.ca_uid,
+					searchInfo1-&gt;uid, searchInfo2-&gt;uid);
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			atleastone = true;
+		}
+
+		<span class="enscript-comment">/* Group ID */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_CMN_GRPID ) {
+			matched = CompareRange(c_attr.ca_gid,
+					searchInfo1-&gt;gid, searchInfo2-&gt;gid);
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			atleastone = true;
+		}
+
+		<span class="enscript-comment">/* mode */</span>
+		<span class="enscript-keyword">if</span> ( searchAttributes &amp; ATTR_CMN_ACCESSMASK ) {
+			matched = CompareRange((u_int32_t)c_attr.ca_mode, 
+					(u_int32_t)searchInfo1-&gt;mask,
+					(u_int32_t)searchInfo2-&gt;mask);
+			<span class="enscript-keyword">if</span> (matched == false) <span class="enscript-keyword">goto</span> <span class="enscript-reference">TestDone</span>;
+			atleastone = true;
+		}
+	}
+
+	<span class="enscript-comment">/* If we got here w/o matching any, then set to false */</span>
+	<span class="enscript-keyword">if</span> (! atleastone)
+		matched = false;
+	
+<span class="enscript-reference">TestDone</span>:
+	<span class="enscript-comment">/*
+	 * Finally, determine whether we need to negate the sense of the match
+	 * (i.e. find all objects that DON'T match).
+	 */</span>
+	<span class="enscript-keyword">if</span> ( searchBits &amp; SRCHFS_NEGATEPARAMS )
+		matched = !matched;
+	
+	<span class="enscript-keyword">return</span>( matched );
+}
+
+
+<span class="enscript-comment">/*
+ * Adds another record to the packed array for output
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">InsertMatch</span>(<span class="enscript-type">struct</span> hfsmount *hfsmp, uio_t a_uio, CatalogRecord *rec,
+            CatalogKey *key, <span class="enscript-type">struct</span> attrlist *returnAttrList,
+            <span class="enscript-type">void</span> *attributesBuffer, <span class="enscript-type">void</span> *variableBuffer, uint32_t * nummatches)
+{
+	<span class="enscript-type">int</span> err;
+	<span class="enscript-type">void</span> *rovingAttributesBuffer;
+	<span class="enscript-type">void</span> *rovingVariableBuffer;
+	<span class="enscript-type">long</span> packedBufferSize;
+	<span class="enscript-type">struct</span> attrblock attrblk;
+	<span class="enscript-type">struct</span> cat_desc c_desc;
+	<span class="enscript-type">struct</span> cat_attr c_attr;
+	<span class="enscript-type">struct</span> cat_fork datafork;
+	<span class="enscript-type">struct</span> cat_fork rsrcfork;
+
+	bzero(&amp;c_desc, <span class="enscript-keyword">sizeof</span>(c_desc));
+	bzero(&amp;c_attr, <span class="enscript-keyword">sizeof</span>(c_attr));
+	rovingAttributesBuffer = (<span class="enscript-type">char</span>*)attributesBuffer + <span class="enscript-keyword">sizeof</span>(u_int32_t); <span class="enscript-comment">/* Reserve space for length field */</span>
+	rovingVariableBuffer = variableBuffer;
+
+	<span class="enscript-comment">/* Convert catalog record into cat_attr format. */</span>
+	cat_convertattr(hfsmp, rec, &amp;c_attr, &amp;datafork, &amp;rsrcfork);
+
+	<span class="enscript-comment">/* Hide our private meta data directories */</span>
+	<span class="enscript-keyword">if</span> (c_attr.ca_fileid == hfsmp-&gt;hfs_private_desc[FILE_HARDLINKS].cd_cnid ||
+	    c_attr.ca_fileid == hfsmp-&gt;hfs_private_desc[DIR_HARDLINKS].cd_cnid) {
+		err = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	<span class="enscript-comment">/* Hide the private journal files */</span>
+	<span class="enscript-keyword">if</span> (hfsmp-&gt;jnl &amp;&amp;
+	    ((c_attr.ca_fileid == hfsmp-&gt;hfs_jnlfileid) ||
+	     (c_attr.ca_fileid == hfsmp-&gt;hfs_jnlinfoblkid))) {
+		err = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (returnAttrList-&gt;commonattr &amp; ATTR_CMN_NAME) {
+		err = cat_convertkey(hfsmp, key, rec, &amp;c_desc);
+		<span class="enscript-keyword">if</span> (err) {
+			<span class="enscript-comment">/* This means that we probably had a CNID error */</span>
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+		}
+	} <span class="enscript-keyword">else</span> {
+		c_desc.cd_cnid = c_attr.ca_fileid;
+		<span class="enscript-keyword">if</span> ((hfsmp-&gt;hfs_flags &amp; HFS_STANDARD) == 0) 
+			c_desc.cd_parentcnid = key-&gt;hfsPlus.parentID;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+		<span class="enscript-keyword">else</span>
+			c_desc.cd_parentcnid = key-&gt;hfs.parentID;
+#<span class="enscript-reference">endif</span>
+
+	}
+
+	attrblk.ab_attrlist = returnAttrList;
+	attrblk.ab_attrbufpp = &amp;rovingAttributesBuffer;
+	attrblk.ab_varbufpp = &amp;rovingVariableBuffer;
+	attrblk.ab_flags = 0;
+	attrblk.ab_blocksize = 0;
+	attrblk.ab_context = vfs_context_current();
+
+	hfs_packattrblk(&amp;attrblk, hfsmp, NULL, &amp;c_desc, &amp;c_attr, &amp;datafork, &amp;rsrcfork, vfs_context_current());
+
+	packedBufferSize = (<span class="enscript-type">char</span>*)rovingVariableBuffer - (<span class="enscript-type">char</span>*)attributesBuffer;
+
+	<span class="enscript-keyword">if</span> ( packedBufferSize &gt; uio_resid(a_uio) )
+		<span class="enscript-keyword">return</span>( errSearchBufferFull );
+
+   	(* nummatches)++;
+	
+	*((u_int32_t *)attributesBuffer) = packedBufferSize;	<span class="enscript-comment">/* Store length of fixed + var block */</span>
+	
+	err = uiomove( (caddr_t)attributesBuffer, packedBufferSize, a_uio );
+<span class="enscript-reference">exit</span>:
+	cat_releasedesc(&amp;c_desc);
+	
+	<span class="enscript-keyword">return</span>( err );
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">UnpackSearchAttributeBlock</span>( <span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> attrlist	*alist, 
+		searchinfospec_t *searchInfo, <span class="enscript-type">void</span> *attributeBuffer, <span class="enscript-type">int</span> firstblock)
+{
+	attrgroup_t		a;
+	u_int32_t			bufferSize;
+	boolean_t       is_64_bit;
+
+    DBG_ASSERT(searchInfo != NULL);
+    
+    is_64_bit = proc_is64bit(current_proc());
+
+    bufferSize = *((u_int32_t *)attributeBuffer);
+	<span class="enscript-keyword">if</span> (bufferSize == 0)
+		<span class="enscript-keyword">return</span> (EINVAL);	<span class="enscript-comment">/* XXX -DJB is a buffer size of zero ever valid for searchfs? */</span>
+
+	attributeBuffer = (u_int32_t *)attributeBuffer + 1; <span class="enscript-comment">/* advance past the size */</span>
+	
+	<span class="enscript-comment">/* 
+	 * UnPack common attributes
+	 */</span>
+	a = alist-&gt;commonattr;
+	<span class="enscript-keyword">if</span> ( a != 0 ) {
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_CMN_NAME ) {
+			<span class="enscript-keyword">if</span> (firstblock) {
+				<span class="enscript-comment">/* Only use the attrreference_t for the first searchparams */</span>
+				<span class="enscript-type">char</span> *s;
+				u_int32_t len;
+
+				s = (<span class="enscript-type">char</span>*) attributeBuffer + ((attrreference_t *) attributeBuffer)-&gt;attr_dataoffset;
+				len = ((attrreference_t *) attributeBuffer)-&gt;attr_length;
+
+				<span class="enscript-keyword">if</span> (len &gt; <span class="enscript-keyword">sizeof</span>(searchInfo-&gt;name))
+					<span class="enscript-keyword">return</span> (EINVAL);
+
+
+				<span class="enscript-keyword">if</span> ((hfsmp-&gt;hfs_flags &amp; HFS_STANDARD) == 0) {
+					size_t ucslen;
+					<span class="enscript-comment">/* Convert name to Unicode to match HFS Plus B-Tree names */</span>
+
+					<span class="enscript-keyword">if</span> (len &gt; 0) {
+						<span class="enscript-keyword">if</span> (utf8_decodestr((u_int8_t *)s, len-1, (UniChar*)searchInfo-&gt;name, &amp;ucslen,
+									<span class="enscript-keyword">sizeof</span>(searchInfo-&gt;name), <span class="enscript-string">':'</span>, UTF_DECOMPOSED | UTF_ESCAPE_ILLEGAL))
+							<span class="enscript-keyword">return</span> (EINVAL);
+
+						searchInfo-&gt;nameLength = ucslen / <span class="enscript-keyword">sizeof</span>(UniChar);
+					} <span class="enscript-keyword">else</span> {
+						searchInfo-&gt;nameLength = 0;
+					}
+				}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+				<span class="enscript-keyword">else</span> {
+					<span class="enscript-comment">/* Convert name to pascal string to match HFS (Standard) B-Tree names */</span>
+
+					<span class="enscript-keyword">if</span> (len &gt; 0) {
+						<span class="enscript-keyword">if</span> (utf8_to_hfs(HFSTOVCB(hfsmp), len-1, (u_char *)s, (u_char*)searchInfo-&gt;name) != 0)
+							<span class="enscript-keyword">return</span> (EINVAL);
+
+						searchInfo-&gt;nameLength = searchInfo-&gt;name[0];
+					} <span class="enscript-keyword">else</span> {
+						searchInfo-&gt;name[0] = searchInfo-&gt;nameLength = 0;
+					}
+				}
+#<span class="enscript-reference">endif</span>	
+			}
+			attributeBuffer = (attrreference_t*) attributeBuffer +1;
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_CMN_OBJID ) {
+			searchInfo-&gt;nodeID = ((fsobj_id_t *) attributeBuffer)-&gt;fid_objno;	<span class="enscript-comment">/* ignore fid_generation */</span>
+			attributeBuffer = (fsobj_id_t *)attributeBuffer + 1;
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_CMN_PAROBJID ) {
+			searchInfo-&gt;parentDirID = ((fsobj_id_t *) attributeBuffer)-&gt;fid_objno;  <span class="enscript-comment">/* ignore fid_generation */</span>
+			attributeBuffer = (fsobj_id_t *)attributeBuffer + 1;
+		}
+
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_CMN_CRTIME ) {
+            <span class="enscript-keyword">if</span> (is_64_bit) {
+                <span class="enscript-type">struct</span> user64_timespec tmp;
+                tmp = *((<span class="enscript-type">struct</span> user64_timespec *)attributeBuffer);
+                searchInfo-&gt;creationDate.tv_sec = (time_t)tmp.tv_sec;
+                searchInfo-&gt;creationDate.tv_nsec = tmp.tv_nsec;
+				attributeBuffer = (<span class="enscript-type">struct</span> user64_timespec *)attributeBuffer + 1;
+            }
+            <span class="enscript-keyword">else</span> {
+                <span class="enscript-type">struct</span> user32_timespec tmp;
+                tmp = *((<span class="enscript-type">struct</span> user32_timespec *)attributeBuffer);
+                searchInfo-&gt;creationDate.tv_sec = (time_t)tmp.tv_sec;
+                searchInfo-&gt;creationDate.tv_nsec = tmp.tv_nsec;
+				attributeBuffer = (<span class="enscript-type">struct</span> user32_timespec *)attributeBuffer + 1;
+            }
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_CMN_MODTIME ) {
+            <span class="enscript-keyword">if</span> (is_64_bit) {
+                <span class="enscript-type">struct</span> user64_timespec tmp;
+                tmp = *((<span class="enscript-type">struct</span> user64_timespec *)attributeBuffer);
+                searchInfo-&gt;modificationDate.tv_sec = (time_t)tmp.tv_sec;
+                searchInfo-&gt;modificationDate.tv_nsec = tmp.tv_nsec;
+				attributeBuffer = (<span class="enscript-type">struct</span> user64_timespec *)attributeBuffer + 1;
+            }
+            <span class="enscript-keyword">else</span> {
+                <span class="enscript-type">struct</span> user32_timespec tmp;
+                tmp = *((<span class="enscript-type">struct</span> user32_timespec *)attributeBuffer);
+                searchInfo-&gt;modificationDate.tv_sec = (time_t)tmp.tv_sec;
+                searchInfo-&gt;modificationDate.tv_nsec = tmp.tv_nsec;
+				attributeBuffer = (<span class="enscript-type">struct</span> user32_timespec *)attributeBuffer + 1;
+            }
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_CMN_CHGTIME ) {
+            <span class="enscript-keyword">if</span> (is_64_bit) {
+                <span class="enscript-type">struct</span> user64_timespec tmp;
+                tmp = *((<span class="enscript-type">struct</span> user64_timespec *)attributeBuffer);
+                searchInfo-&gt;changeDate.tv_sec = (time_t)tmp.tv_sec;
+                searchInfo-&gt;changeDate.tv_nsec = tmp.tv_nsec;
+				attributeBuffer = (<span class="enscript-type">struct</span> user64_timespec *)attributeBuffer + 1;
+            }
+            <span class="enscript-keyword">else</span> {
+                <span class="enscript-type">struct</span> user32_timespec tmp;
+                tmp = *((<span class="enscript-type">struct</span> user32_timespec *)attributeBuffer);
+                searchInfo-&gt;changeDate.tv_sec = (time_t)tmp.tv_sec;
+                searchInfo-&gt;changeDate.tv_nsec = tmp.tv_nsec;
+				attributeBuffer = (<span class="enscript-type">struct</span> user32_timespec *)attributeBuffer + 1;
+            }
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_CMN_ACCTIME ) {
+            <span class="enscript-keyword">if</span> (is_64_bit) {
+                <span class="enscript-type">struct</span> user64_timespec tmp;
+                tmp = *((<span class="enscript-type">struct</span> user64_timespec *)attributeBuffer);
+                searchInfo-&gt;accessDate.tv_sec = (time_t)tmp.tv_sec;
+                searchInfo-&gt;accessDate.tv_nsec = tmp.tv_nsec;
+				attributeBuffer = (<span class="enscript-type">struct</span> user64_timespec *)attributeBuffer + 1;
+            }
+            <span class="enscript-keyword">else</span> {
+                <span class="enscript-type">struct</span> user32_timespec tmp;
+                tmp = *((<span class="enscript-type">struct</span> user32_timespec *)attributeBuffer);
+                searchInfo-&gt;accessDate.tv_sec = (time_t)tmp.tv_sec;
+                searchInfo-&gt;accessDate.tv_nsec = tmp.tv_nsec;
+				attributeBuffer = (<span class="enscript-type">struct</span> user32_timespec *)attributeBuffer + 1;
+            }
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_CMN_BKUPTIME ) {
+            <span class="enscript-keyword">if</span> (is_64_bit) {
+                <span class="enscript-type">struct</span> user64_timespec tmp;
+                tmp = *((<span class="enscript-type">struct</span> user64_timespec *)attributeBuffer);
+                searchInfo-&gt;lastBackupDate.tv_sec = (time_t)tmp.tv_sec;
+                searchInfo-&gt;lastBackupDate.tv_nsec = tmp.tv_nsec;
+				attributeBuffer = (<span class="enscript-type">struct</span> user64_timespec *)attributeBuffer + 1;
+            }
+            <span class="enscript-keyword">else</span> {
+                <span class="enscript-type">struct</span> user32_timespec tmp;
+                tmp = *((<span class="enscript-type">struct</span> user32_timespec *)attributeBuffer);
+                searchInfo-&gt;lastBackupDate.tv_sec = (time_t)tmp.tv_sec;
+                searchInfo-&gt;lastBackupDate.tv_nsec = tmp.tv_nsec;
+				attributeBuffer = (<span class="enscript-type">struct</span> user32_timespec *)attributeBuffer + 1;
+            }
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_CMN_FNDRINFO ) {
+			bcopy( attributeBuffer, searchInfo-&gt;finderInfo, <span class="enscript-keyword">sizeof</span>(searchInfo-&gt;finderInfo) );
+			attributeBuffer = (u_int8_t *)attributeBuffer + 32;
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_CMN_OWNERID ) {
+			searchInfo-&gt;uid = *((uid_t *)attributeBuffer);
+			attributeBuffer = (uid_t *)attributeBuffer + 1;
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_CMN_GRPID ) {
+			searchInfo-&gt;gid = *((gid_t *)attributeBuffer);
+			attributeBuffer = (gid_t *)attributeBuffer + 1;
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_CMN_ACCESSMASK ) {
+			searchInfo-&gt;mask = *((mode_t *)attributeBuffer);
+			attributeBuffer = (mode_t *)attributeBuffer + 1;
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_CMN_FILEID ) {
+			searchInfo-&gt;nodeID = (u_int32_t)*((u_int64_t *) attributeBuffer);	
+			attributeBuffer = (u_int64_t *)attributeBuffer + 1;
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_CMN_PARENTID ) {
+			searchInfo-&gt;parentDirID = (u_int32_t)*((u_int64_t *) attributeBuffer);	
+			attributeBuffer = (u_int64_t *)attributeBuffer + 1;
+		}
+	}
+
+	a = alist-&gt;dirattr;
+	<span class="enscript-keyword">if</span> ( a != 0 ) {
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_DIR_ENTRYCOUNT ) {
+			searchInfo-&gt;d.numFiles = *((u_int32_t *)attributeBuffer);
+			attributeBuffer = (u_int32_t *)attributeBuffer + 1;
+		}
+	}
+
+	a = alist-&gt;fileattr;
+	<span class="enscript-keyword">if</span> ( a != 0 ) {
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_FILE_DATALENGTH ) {
+			searchInfo-&gt;f.dataLogicalLength = *((off_t *)attributeBuffer);
+			attributeBuffer = (off_t *)attributeBuffer + 1;
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_FILE_DATAALLOCSIZE ) {
+			searchInfo-&gt;f.dataPhysicalLength = *((off_t *)attributeBuffer);
+			attributeBuffer = (off_t *)attributeBuffer + 1;
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_FILE_RSRCLENGTH ) {
+			searchInfo-&gt;f.resourceLogicalLength = *((off_t *)attributeBuffer);
+			attributeBuffer = (off_t *)attributeBuffer + 1;
+		}
+		<span class="enscript-keyword">if</span> ( a &amp; ATTR_FILE_RSRCALLOCSIZE ) {
+			searchInfo-&gt;f.resourcePhysicalLength = *((off_t *)attributeBuffer);
+			attributeBuffer = (off_t *)attributeBuffer + 1;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* CONFIG_SEARCHFS */</span>
+</pre>
+<hr />
+</body></html>

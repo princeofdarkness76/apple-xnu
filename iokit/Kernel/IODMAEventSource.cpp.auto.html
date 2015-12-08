@@ -1,0 +1,239 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IODMAEventSource.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IODMAEventSource.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2000 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IODMAEventSource.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOService.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;IOKitKernelInternal.h&quot;</span>
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOEventSource
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IODMAEventSource, IOEventSource);
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODMAEventSource::init</span>(OSObject *inOwner,
+			    IOService *inProvider,
+			    Action inCompletion,
+			    Action inNotification,
+			    UInt32 inDMAIndex)
+{
+  IOReturn result;
+  
+  <span class="enscript-keyword">if</span> (!super::init(inOwner)) <span class="enscript-keyword">return</span> false;
+  
+  <span class="enscript-keyword">if</span> (inProvider == 0) <span class="enscript-keyword">return</span> false;
+  
+  dmaProvider = inProvider;
+  dmaIndex = 0xFFFFFFFF;
+  dmaCompletionAction = inCompletion;
+  dmaNotificationAction = inNotification;
+  
+  dmaController = IODMAController::getController(dmaProvider, inDMAIndex);
+  <span class="enscript-keyword">if</span> (dmaController == 0) <span class="enscript-keyword">return</span> false;
+  dmaController-&gt;retain();
+  
+  result = dmaController-&gt;initDMAChannel(dmaProvider, <span class="enscript-keyword">this</span>, &amp;dmaIndex, inDMAIndex);
+  <span class="enscript-keyword">if</span> (result != kIOReturnSuccess) <span class="enscript-keyword">return</span> false;
+  
+  queue_init(&amp;dmaCommandsCompleted);
+  dmaCommandsCompletedLock = IOSimpleLockAlloc();
+  
+  <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IODMAEventSource::free</span>()
+{
+    <span class="enscript-keyword">if</span> (dmaCommandsCompletedLock != NULL) IOSimpleLockFree(dmaCommandsCompletedLock);
+    <span class="enscript-reference">super</span>::free();
+}
+
+IODMAEventSource *<span class="enscript-function-name">IODMAEventSource::dmaEventSource</span>(OSObject *inOwner,
+						   IOService *inProvider,
+						   Action inCompletion,
+						   Action inNotification,
+						   UInt32 inDMAIndex)
+{
+  IODMAEventSource *dmaES = <span class="enscript-keyword">new</span> IODMAEventSource;
+  
+  <span class="enscript-keyword">if</span> (dmaES &amp;&amp; !dmaES-&gt;init(inOwner, inProvider, inCompletion, inNotification, inDMAIndex)) {
+    dmaES-&gt;release();
+    <span class="enscript-keyword">return</span> 0;
+  }
+  
+  <span class="enscript-keyword">return</span> dmaES;
+}
+
+IOReturn <span class="enscript-function-name">IODMAEventSource::startDMACommand</span>(IODMACommand *dmaCommand, IODirection direction, IOByteCount byteCount, IOByteCount byteOffset)
+{
+  IOReturn result;
+  
+  <span class="enscript-keyword">if</span> ((dmaController == 0) || (dmaIndex == 0xFFFFFFFF)) <span class="enscript-keyword">return</span> kIOReturnError;
+  
+  <span class="enscript-keyword">if</span> (dmaSynchBusy) <span class="enscript-keyword">return</span> kIOReturnBusy;
+  
+  <span class="enscript-keyword">if</span> (dmaCompletionAction == 0) dmaSynchBusy = true;
+  
+  result = dmaController-&gt;startDMACommand(dmaIndex, dmaCommand, direction, byteCount, byteOffset);
+  
+  <span class="enscript-keyword">if</span> (result != kIOReturnSuccess) {
+    dmaSynchBusy = false;
+    <span class="enscript-keyword">return</span> result;
+  }
+  
+  <span class="enscript-keyword">while</span> (dmaSynchBusy) sleepGate(&amp;dmaSynchBusy, THREAD_UNINT);
+  
+  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOReturn <span class="enscript-function-name">IODMAEventSource::stopDMACommand</span>(<span class="enscript-type">bool</span> flush, uint64_t timeout)
+{
+  <span class="enscript-keyword">if</span> ((dmaController == 0) || (dmaIndex == 0xFFFFFFFF)) <span class="enscript-keyword">return</span> kIOReturnError;
+  
+  <span class="enscript-keyword">return</span> dmaController-&gt;stopDMACommand(dmaIndex, flush, timeout);
+}
+
+
+IOReturn <span class="enscript-function-name">IODMAEventSource::queryDMACommand</span>(IODMACommand **dmaCommand, IOByteCount *transferCount, <span class="enscript-type">bool</span> waitForIdle)
+{
+  <span class="enscript-keyword">if</span> ((dmaController == 0) || (dmaIndex == 0xFFFFFFFF)) <span class="enscript-keyword">return</span> kIOReturnError;
+  
+  <span class="enscript-keyword">return</span> dmaController-&gt;queryDMACommand(dmaIndex, dmaCommand, transferCount, waitForIdle);
+}
+
+
+IOByteCount <span class="enscript-function-name">IODMAEventSource::getFIFODepth</span>(IODirection direction)
+{
+  <span class="enscript-keyword">if</span> ((dmaController == 0) || (dmaIndex == 0xFFFFFFFF)) <span class="enscript-keyword">return</span> 0;
+  
+  <span class="enscript-keyword">return</span> dmaController-&gt;getFIFODepth(dmaIndex, direction);
+}
+
+
+IOReturn <span class="enscript-function-name">IODMAEventSource::setFIFODepth</span>(IOByteCount depth)
+{
+  <span class="enscript-keyword">if</span> ((dmaController == 0) || (dmaIndex == 0xFFFFFFFF)) <span class="enscript-keyword">return</span> kIOReturnError;
+  
+  <span class="enscript-keyword">return</span> dmaController-&gt;setFIFODepth(dmaIndex, depth);
+}
+
+
+IOByteCount <span class="enscript-function-name">IODMAEventSource::validFIFODepth</span>(IOByteCount depth, IODirection direction)
+{
+  <span class="enscript-keyword">if</span> ((dmaController == 0) || (dmaIndex == 0xFFFFFFFF)) <span class="enscript-keyword">return</span> kIOReturnError;
+  
+  <span class="enscript-keyword">return</span> dmaController-&gt;validFIFODepth(dmaIndex, depth, direction);
+}
+
+
+IOReturn <span class="enscript-function-name">IODMAEventSource::setFrameSize</span>(UInt8 byteCount)
+{
+  <span class="enscript-keyword">if</span> ((dmaController == 0) || (dmaIndex == 0xFFFFFFFF)) <span class="enscript-keyword">return</span> kIOReturnError;
+  
+  <span class="enscript-keyword">return</span> dmaController-&gt;setFrameSize(dmaIndex, byteCount);
+}
+
+<span class="enscript-comment">// protected
+</span>
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODMAEventSource::checkForWork</span>(<span class="enscript-type">void</span>)
+{
+  IODMACommand     *dmaCommand = NULL;
+  <span class="enscript-type">bool</span> work, again;
+  
+  IOSimpleLockLock(dmaCommandsCompletedLock);
+  work = !queue_empty(&amp;dmaCommandsCompleted);
+  <span class="enscript-keyword">if</span> (work) {
+    queue_remove_first(&amp;dmaCommandsCompleted, dmaCommand, IODMACommand *, fCommandChain);
+    again = !queue_empty(&amp;dmaCommandsCompleted);
+  } <span class="enscript-keyword">else</span> {
+    again = false;
+  }
+  IOSimpleLockUnlock(dmaCommandsCompletedLock);
+
+  <span class="enscript-keyword">if</span> (work) {
+    (*dmaCompletionAction)(owner, <span class="enscript-keyword">this</span>, dmaCommand, dmaCommand-&gt;reserved-&gt;fStatus, dmaCommand-&gt;reserved-&gt;fActualByteCount, dmaCommand-&gt;reserved-&gt;fTimeStamp);
+  }
+  
+  <span class="enscript-keyword">return</span> again;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IODMAEventSource::completeDMACommand</span>(IODMACommand *dmaCommand)
+{
+  <span class="enscript-keyword">if</span> (dmaCompletionAction != 0) {
+    IOSimpleLockLock(dmaCommandsCompletedLock);
+    queue_enter(&amp;dmaCommandsCompleted, dmaCommand, IODMACommand *, fCommandChain);
+    IOSimpleLockUnlock(dmaCommandsCompletedLock);
+    
+    signalWorkAvailable();
+  } <span class="enscript-keyword">else</span> {
+    dmaSynchBusy = false;
+    wakeupGate(&amp;dmaSynchBusy, true);
+  }
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IODMAEventSource::notifyDMACommand</span>(IODMACommand *dmaCommand, IOReturn status, IOByteCount actualByteCount, AbsoluteTime timeStamp)
+{
+  dmaCommand-&gt;reserved-&gt;fStatus = status;
+  dmaCommand-&gt;reserved-&gt;fActualByteCount = actualByteCount;
+  dmaCommand-&gt;reserved-&gt;fTimeStamp = timeStamp;
+  
+  <span class="enscript-keyword">if</span> (dmaNotificationAction != 0) (*dmaNotificationAction)(owner, <span class="enscript-keyword">this</span>, dmaCommand, status, actualByteCount, timeStamp);
+}
+
+IOReturn <span class="enscript-function-name">IODMAEventSource::setDMAConfig</span>(UInt32 newReqIndex)
+{
+  <span class="enscript-keyword">return</span> dmaController-&gt;setDMAConfig(dmaIndex, dmaProvider, newReqIndex);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IODMAEventSource::validDMAConfig</span>(UInt32 newReqIndex)
+{
+  <span class="enscript-keyword">return</span> dmaController-&gt;validDMAConfig(dmaIndex, dmaProvider, newReqIndex);
+}
+</pre>
+<hr />
+</body></html>

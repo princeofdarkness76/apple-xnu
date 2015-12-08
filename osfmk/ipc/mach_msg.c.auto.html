@@ -1,0 +1,614 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mach_msg.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mach_msg.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by McAfee Research in 2004 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ * Copyright (c) 2005 SPARTA, Inc.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+<span class="enscript-comment">/*
+ *	File:	ipc/mach_msg.c
+ *	Author:	Rich Draves
+ *	Date:	1989
+ *
+ *	Exported message traps.  See mach/message.h.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/message.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mig_errors.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_traps.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/counters.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_kobject.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_mig.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/exception.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/syscall_subr.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_kmsg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_mqueue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_notify.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_pset.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_space.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_entry.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_importance.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_mach_internal.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">offsetof</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">offsetof</span>(type, member)  ((size_t)(&amp;((type *)0)-&gt;member))
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* offsetof */</span>
+
+<span class="enscript-comment">/*
+ * Forward declarations - kernel internal routines
+ */</span>
+
+mach_msg_return_t <span class="enscript-function-name">mach_msg_send</span>(
+	mach_msg_header_t	*msg,
+	mach_msg_option_t	option,
+	mach_msg_size_t		send_size,
+	mach_msg_timeout_t	send_timeout,
+	mach_port_name_t	notify);
+
+mach_msg_return_t <span class="enscript-function-name">mach_msg_receive</span>(
+	mach_msg_header_t	*msg,
+	mach_msg_option_t	option,
+	mach_msg_size_t		rcv_size,
+	mach_port_name_t	rcv_name,
+	mach_msg_timeout_t	rcv_timeout,
+	<span class="enscript-type">void</span> 			(*continuation)(mach_msg_return_t),
+	mach_msg_size_t		slist_size);
+
+
+mach_msg_return_t <span class="enscript-function-name">msg_receive_error</span>(
+	ipc_kmsg_t		kmsg,
+	mach_vm_address_t	msg_addr,
+	mach_msg_option_t	option,
+	mach_port_seqno_t	seqno,
+	ipc_space_t		space);
+
+security_token_t KERNEL_SECURITY_TOKEN = KERNEL_SECURITY_TOKEN_VALUE;
+audit_token_t KERNEL_AUDIT_TOKEN = KERNEL_AUDIT_TOKEN_VALUE;
+
+mach_msg_format_0_trailer_t trailer_template = {
+	<span class="enscript-comment">/* mach_msg_trailer_type_t */</span> MACH_MSG_TRAILER_FORMAT_0,
+	<span class="enscript-comment">/* mach_msg_trailer_size_t */</span> MACH_MSG_TRAILER_MINIMUM_SIZE,
+        <span class="enscript-comment">/* mach_port_seqno_t */</span>       0,
+	<span class="enscript-comment">/* security_token_t */</span>        KERNEL_SECURITY_TOKEN_VALUE
+};
+
+<span class="enscript-comment">/*
+ *	Routine:	mach_msg_send [Kernel Internal]
+ *	Purpose:
+ *		Routine for kernel-task threads to send a message.
+ *
+ *		Unlike mach_msg_send_from_kernel(), this routine
+ *		looks port names up in the kernel's port namespace
+ *		and copies in the kernel virtual memory (instead
+ *		of taking a vm_map_copy_t pointer for OOL descriptors).
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Sent the message.
+ *		MACH_SEND_MSG_TOO_SMALL	Message smaller than a header.
+ *		MACH_SEND_NO_BUFFER	Couldn't allocate buffer.
+ *		MACH_SEND_INVALID_DATA	Couldn't copy message data.
+ *		MACH_SEND_INVALID_HEADER
+ *			Illegal value in the message header bits.
+ *		MACH_SEND_INVALID_DEST	The space is dead.
+ *		MACH_SEND_INVALID_NOTIFY	Bad notify port.
+ *		MACH_SEND_INVALID_DEST	Can't copyin destination port.
+ *		MACH_SEND_INVALID_REPLY	Can't copyin reply port.
+ *		MACH_SEND_TIMED_OUT	Timeout expired without delivery.
+ *		MACH_SEND_INTERRUPTED	Delivery interrupted.
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">mach_msg_send</span>(
+	mach_msg_header_t	*msg,
+	mach_msg_option_t	option,
+	mach_msg_size_t		send_size,
+	mach_msg_timeout_t	send_timeout,
+	__unused mach_port_name_t	notify)
+{
+	ipc_space_t space = current_space();
+	vm_map_t map = current_map();
+	ipc_kmsg_t kmsg;
+	mach_msg_return_t mr;
+	mach_msg_size_t	msg_and_trailer_size;
+	mach_msg_max_trailer_t	*trailer;
+
+	<span class="enscript-keyword">if</span> ((send_size &lt; <span class="enscript-keyword">sizeof</span>(mach_msg_header_t)) || (send_size &amp; 3))
+		<span class="enscript-keyword">return</span> MACH_SEND_MSG_TOO_SMALL;
+
+	<span class="enscript-keyword">if</span> (send_size &gt; MACH_MSG_SIZE_MAX - MAX_TRAILER_SIZE)
+		<span class="enscript-keyword">return</span> MACH_SEND_TOO_LARGE;
+	
+	msg_and_trailer_size = send_size + MAX_TRAILER_SIZE;
+
+	kmsg = ipc_kmsg_alloc(msg_and_trailer_size);
+
+	<span class="enscript-keyword">if</span> (kmsg == IKM_NULL)
+		<span class="enscript-keyword">return</span> MACH_SEND_NO_BUFFER;
+
+	(<span class="enscript-type">void</span>) memcpy((<span class="enscript-type">void</span> *) kmsg-&gt;ikm_header, (<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) msg, send_size);
+
+	kmsg-&gt;ikm_header-&gt;msgh_size = send_size;
+
+	<span class="enscript-comment">/* 
+	 * reserve for the trailer the largest space (MAX_TRAILER_SIZE)
+	 * However, the internal size field of the trailer (msgh_trailer_size)
+	 * is initialized to the minimum (sizeof(mach_msg_trailer_t)), to optimize
+	 * the cases where no implicit data is requested.
+	 */</span>
+	trailer = (mach_msg_max_trailer_t *) ((vm_offset_t)kmsg-&gt;ikm_header + send_size);
+	trailer-&gt;msgh_sender = current_thread()-&gt;task-&gt;sec_token;
+	trailer-&gt;msgh_audit = current_thread()-&gt;task-&gt;audit_token;
+	trailer-&gt;msgh_trailer_type = MACH_MSG_TRAILER_FORMAT_0;
+	trailer-&gt;msgh_trailer_size = MACH_MSG_TRAILER_MINIMUM_SIZE;
+
+	mr = ipc_kmsg_copyin(kmsg, space, map, &amp;option);
+
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+		ipc_kmsg_free(kmsg);
+		<span class="enscript-keyword">return</span> mr;
+	}
+
+	mr = ipc_kmsg_send(kmsg, option, send_timeout);
+
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+	    mr |= ipc_kmsg_copyout_pseudo(kmsg, space, map, MACH_MSG_BODY_NULL);
+	    (<span class="enscript-type">void</span>) memcpy((<span class="enscript-type">void</span> *) msg, (<span class="enscript-type">const</span> <span class="enscript-type">void</span> *) kmsg-&gt;ikm_header, 
+			  kmsg-&gt;ikm_header-&gt;msgh_size);
+	    ipc_kmsg_free(kmsg);
+	}
+
+	<span class="enscript-keyword">return</span> mr;
+}
+
+<span class="enscript-comment">/* 
+ * message header as seen at user-space
+ * (for MACH_RCV_LARGE/IDENTITY updating)
+ */</span>
+<span class="enscript-type">typedef</span>	<span class="enscript-type">struct</span> 
+{
+  mach_msg_bits_t	msgh_bits;
+  mach_msg_size_t	msgh_size;
+  mach_port_name_t	msgh_remote_port;
+  mach_port_name_t	msgh_local_port;
+  mach_msg_size_t 	msgh_reserved;
+  mach_msg_id_t		msgh_id;
+} mach_msg_user_header_t;
+
+<span class="enscript-comment">/*
+ *	Routine:	mach_msg_receive_results
+ *	Purpose:
+ *		Receive a message.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Received a message.
+ *		MACH_RCV_INVALID_NAME	The name doesn't denote a right,
+ *			or the denoted right is not receive or port set.
+ *		MACH_RCV_IN_SET		Receive right is a member of a set.
+ *		MACH_RCV_TOO_LARGE	Message wouldn't fit into buffer.
+ *		MACH_RCV_TIMED_OUT	Timeout expired without a message.
+ *		MACH_RCV_INTERRUPTED	Reception interrupted.
+ *		MACH_RCV_PORT_DIED	Port/set died while receiving.
+ *		MACH_RCV_PORT_CHANGED	Port moved into set while receiving.
+ *		MACH_RCV_INVALID_DATA	Couldn't copy to user buffer.
+ *		MACH_RCV_INVALID_NOTIFY	Bad notify port.
+ *		MACH_RCV_HEADER_ERROR
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">mach_msg_receive_results</span>(<span class="enscript-type">void</span>)
+{
+	thread_t          self = current_thread();
+	ipc_space_t       space = current_space();
+	vm_map_t          map = current_map();
+
+	ipc_object_t      object = self-&gt;ith_object;
+	mach_msg_return_t mr = self-&gt;ith_state;
+	mach_vm_address_t msg_addr = self-&gt;ith_msg_addr;
+	mach_msg_option_t option = self-&gt;ith_option;
+	ipc_kmsg_t        kmsg = self-&gt;ith_kmsg;
+	mach_port_seqno_t seqno = self-&gt;ith_seqno;
+	mach_msg_trailer_size_t trailer_size;
+
+	io_release(object);
+
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+
+	  <span class="enscript-keyword">if</span> (mr == MACH_RCV_TOO_LARGE ) {
+	    <span class="enscript-keyword">if</span> (option &amp; MACH_RCV_LARGE) {
+	      <span class="enscript-comment">/*
+	       * We need to inform the user-level code that it needs more
+	       * space.  The value for how much space was returned in the
+	       * msize save area instead of the message (which was left on
+	       * the queue).
+	       */</span>
+	      <span class="enscript-keyword">if</span> (option &amp; MACH_RCV_LARGE_IDENTITY) {
+		      <span class="enscript-keyword">if</span> (copyout((<span class="enscript-type">char</span> *) &amp;self-&gt;ith_receiver_name,
+				  msg_addr + offsetof(mach_msg_user_header_t, msgh_local_port),
+				  <span class="enscript-keyword">sizeof</span>(mach_port_name_t)))
+			      mr = MACH_RCV_INVALID_DATA;
+	      }
+	      <span class="enscript-keyword">if</span> (copyout((<span class="enscript-type">char</span> *) &amp;self-&gt;ith_msize,
+			  msg_addr + offsetof(mach_msg_user_header_t, msgh_size),
+			  <span class="enscript-keyword">sizeof</span>(mach_msg_size_t)))
+	      	mr = MACH_RCV_INVALID_DATA;
+	    } <span class="enscript-keyword">else</span> {
+
+	    	<span class="enscript-comment">/* discard importance in message */</span>
+	    	ipc_importance_clean(kmsg);
+
+		<span class="enscript-keyword">if</span> (msg_receive_error(kmsg, msg_addr, option, seqno, space)
+		    == MACH_RCV_INVALID_DATA)
+		    mr = MACH_RCV_INVALID_DATA;
+	    }
+	  }
+	  <span class="enscript-keyword">return</span> mr;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_INHERITANCE</span>
+
+	<span class="enscript-comment">/* adopt/transform any importance attributes carried in the message */</span>
+	ipc_importance_receive(kmsg, option);
+
+#<span class="enscript-reference">endif</span>  <span class="enscript-comment">/* IMPORTANCE_INHERITANCE */</span>
+
+	trailer_size = ipc_kmsg_add_trailer(kmsg, space, option, self, seqno, FALSE, 
+			kmsg-&gt;ikm_header-&gt;msgh_remote_port-&gt;ip_context);
+	mr = ipc_kmsg_copyout(kmsg, space, map, MACH_MSG_BODY_NULL, option);
+
+	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+		<span class="enscript-comment">/* already received importance, so have to undo that here */</span>
+		ipc_importance_unreceive(kmsg, option);
+
+		<span class="enscript-keyword">if</span> ((mr &amp;~ MACH_MSG_MASK) == MACH_RCV_BODY_ERROR) {
+			<span class="enscript-keyword">if</span> (ipc_kmsg_put(msg_addr, kmsg, kmsg-&gt;ikm_header-&gt;msgh_size +
+			   trailer_size) == MACH_RCV_INVALID_DATA)
+				mr = MACH_RCV_INVALID_DATA;
+		} 
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (msg_receive_error(kmsg, msg_addr, option, seqno, space) 
+						== MACH_RCV_INVALID_DATA)
+				mr = MACH_RCV_INVALID_DATA;
+		}
+	} <span class="enscript-keyword">else</span> {
+		mr = ipc_kmsg_put(msg_addr,
+				  kmsg,
+				  kmsg-&gt;ikm_header-&gt;msgh_size + 
+				  trailer_size);
+	}
+
+	<span class="enscript-keyword">return</span> mr;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	mach_msg_receive [Kernel Internal]
+ *	Purpose:
+ *		Routine for kernel-task threads to actively receive a message.
+ *
+ *		Unlike being dispatched to by ipc_kobject_server() or the
+ *		reply part of mach_msg_rpc_from_kernel(), this routine
+ *		looks up the receive port name in the kernel's port
+ * 		namespace and copies out received port rights to that namespace
+ *		as well.  Out-of-line memory is copied out the kernel's
+ *		address space (rather than just providing the vm_map_copy_t).
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	Received a message.
+ *		See &lt;mach/message.h&gt; for list of MACH_RCV_XXX errors.
+ */</span>
+mach_msg_return_t
+<span class="enscript-function-name">mach_msg_receive</span>(
+	mach_msg_header_t	*msg,
+	mach_msg_option_t	option,
+	mach_msg_size_t		rcv_size,
+	mach_port_name_t	rcv_name,
+	mach_msg_timeout_t	rcv_timeout,
+	<span class="enscript-type">void</span>			(*continuation)(mach_msg_return_t),
+	__unused mach_msg_size_t slist_size)
+{
+	thread_t self = current_thread();
+	ipc_space_t space = current_space();
+	ipc_object_t object;
+	ipc_mqueue_t mqueue;
+	mach_msg_return_t mr;
+
+	mr = ipc_mqueue_copyin(space, rcv_name, &amp;mqueue, &amp;object);
+ 	<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+		<span class="enscript-keyword">return</span> mr;
+	}
+	<span class="enscript-comment">/* hold ref for object */</span>
+
+	self-&gt;ith_msg_addr = CAST_DOWN(mach_vm_address_t, msg);
+	self-&gt;ith_object = object;
+	self-&gt;ith_msize = rcv_size;
+	self-&gt;ith_option = option;
+	self-&gt;ith_continuation = continuation;
+
+	ipc_mqueue_receive(mqueue, option, rcv_size, rcv_timeout, THREAD_ABORTSAFE);
+	<span class="enscript-keyword">if</span> ((option &amp; MACH_RCV_TIMEOUT) &amp;&amp; rcv_timeout == 0)
+		thread_poll_yield(self);
+	<span class="enscript-keyword">return</span> mach_msg_receive_results();
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mach_msg_receive_continue</span>(<span class="enscript-type">void</span>)
+{
+	thread_t self = current_thread();
+
+	(*self-&gt;ith_continuation)(mach_msg_receive_results());
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	mach_msg_overwrite_trap [mach trap]
+ *	Purpose:
+ *		Possibly send a message; possibly receive a message.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		All of mach_msg_send and mach_msg_receive error codes.
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">mach_msg_overwrite_trap</span>(
+	<span class="enscript-type">struct</span> mach_msg_overwrite_trap_args *args)
+{
+  	mach_vm_address_t	msg_addr = args-&gt;msg;
+	mach_msg_option_t	option = args-&gt;option;
+	mach_msg_size_t		send_size = args-&gt;send_size;
+	mach_msg_size_t		rcv_size = args-&gt;rcv_size;
+	mach_port_name_t	rcv_name = args-&gt;rcv_name;
+	mach_msg_timeout_t	msg_timeout = args-&gt;timeout;
+	__unused mach_port_name_t notify = args-&gt;notify;
+	mach_vm_address_t	rcv_msg_addr = args-&gt;rcv_msg;
+	__unused mach_port_seqno_t temp_seqno = 0;
+
+	mach_msg_return_t  mr = MACH_MSG_SUCCESS;
+	vm_map_t map = current_map();
+
+	<span class="enscript-comment">/* Only accept options allowed by the user */</span>
+	option &amp;= MACH_MSG_OPTION_USER;
+
+	<span class="enscript-keyword">if</span> (option &amp; MACH_SEND_MSG) {
+		ipc_space_t space = current_space();
+		ipc_kmsg_t kmsg;
+
+		mr = ipc_kmsg_get(msg_addr, send_size, &amp;kmsg);
+
+		<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS)
+			<span class="enscript-keyword">return</span> mr;
+
+		mr = ipc_kmsg_copyin(kmsg, space, map, &amp;option);
+
+		<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+			ipc_kmsg_free(kmsg);
+			<span class="enscript-keyword">return</span> mr;
+		}
+
+		mr = ipc_kmsg_send(kmsg, option, msg_timeout);
+
+		<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+			mr |= ipc_kmsg_copyout_pseudo(kmsg, space, map, MACH_MSG_BODY_NULL);
+			(<span class="enscript-type">void</span>) ipc_kmsg_put(msg_addr, kmsg, kmsg-&gt;ikm_header-&gt;msgh_size);
+			<span class="enscript-keyword">return</span> mr;
+		}
+
+	}
+
+	<span class="enscript-keyword">if</span> (option &amp; MACH_RCV_MSG) {
+		thread_t self = current_thread();
+		ipc_space_t space = current_space();
+		ipc_object_t object;
+		ipc_mqueue_t mqueue;
+
+		mr = ipc_mqueue_copyin(space, rcv_name, &amp;mqueue, &amp;object);
+		<span class="enscript-keyword">if</span> (mr != MACH_MSG_SUCCESS) {
+			<span class="enscript-keyword">return</span> mr;
+		}
+		<span class="enscript-comment">/* hold ref for object */</span>
+
+		<span class="enscript-keyword">if</span> (rcv_msg_addr != (mach_vm_address_t)0)
+			self-&gt;ith_msg_addr = rcv_msg_addr;
+		<span class="enscript-keyword">else</span>
+			self-&gt;ith_msg_addr = msg_addr;
+		self-&gt;ith_object = object;
+		self-&gt;ith_msize = rcv_size;
+		self-&gt;ith_option = option;
+		self-&gt;ith_receiver_name = MACH_PORT_NULL;
+		self-&gt;ith_continuation = thread_syscall_return;
+
+		ipc_mqueue_receive(mqueue, option, rcv_size, msg_timeout, THREAD_ABORTSAFE);
+		<span class="enscript-keyword">if</span> ((option &amp; MACH_RCV_TIMEOUT) &amp;&amp; msg_timeout == 0)
+			thread_poll_yield(self);
+		<span class="enscript-keyword">return</span> mach_msg_receive_results();
+	}
+
+	<span class="enscript-keyword">return</span> MACH_MSG_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	mach_msg_trap [mach trap]
+ *	Purpose:
+ *		Possibly send a message; possibly receive a message.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		All of mach_msg_send and mach_msg_receive error codes.
+ */</span>
+
+mach_msg_return_t
+<span class="enscript-function-name">mach_msg_trap</span>(
+	<span class="enscript-type">struct</span> mach_msg_overwrite_trap_args *args)
+{
+	kern_return_t kr;
+	args-&gt;rcv_msg = (mach_vm_address_t)0;
+
+ 	kr = mach_msg_overwrite_trap(args);
+	<span class="enscript-keyword">return</span> kr;
+}
+ 
+
+<span class="enscript-comment">/*
+ *	Routine:	msg_receive_error	[internal]
+ *	Purpose:
+ *		Builds a minimal header/trailer and copies it to
+ *		the user message buffer.  Invoked when in the case of a
+ *		MACH_RCV_TOO_LARGE or MACH_RCV_BODY_ERROR error.
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		MACH_MSG_SUCCESS	minimal header/trailer copied
+ *		MACH_RCV_INVALID_DATA	copyout to user buffer failed
+ */</span>
+	
+mach_msg_return_t
+<span class="enscript-function-name">msg_receive_error</span>(
+	ipc_kmsg_t		kmsg,
+	mach_vm_address_t	msg_addr,
+	mach_msg_option_t	option,
+	mach_port_seqno_t	seqno,
+	ipc_space_t		space)
+{
+	mach_vm_address_t	context;
+	mach_msg_trailer_size_t trailer_size;
+	mach_msg_max_trailer_t	*trailer;
+
+	context = kmsg-&gt;ikm_header-&gt;msgh_remote_port-&gt;ip_context;
+
+	<span class="enscript-comment">/*
+	 * Copy out the destination port in the message.
+ 	 * Destroy all other rights and memory in the message.
+	 */</span>
+	ipc_kmsg_copyout_dest(kmsg, space);
+
+	<span class="enscript-comment">/*
+	 * Build a minimal message with the requested trailer.
+	 */</span>
+	trailer = (mach_msg_max_trailer_t *) 
+			((vm_offset_t)kmsg-&gt;ikm_header +
+			round_msg(<span class="enscript-keyword">sizeof</span>(mach_msg_header_t)));
+	kmsg-&gt;ikm_header-&gt;msgh_size = <span class="enscript-keyword">sizeof</span>(mach_msg_header_t);
+	bcopy(  (<span class="enscript-type">char</span> *)&amp;trailer_template, 
+		(<span class="enscript-type">char</span> *)trailer, 
+		<span class="enscript-keyword">sizeof</span>(trailer_template));
+
+	trailer_size = ipc_kmsg_add_trailer(kmsg, space, 
+			option, current_thread(), seqno,
+			TRUE, context);
+
+	<span class="enscript-comment">/*
+	 * Copy the message to user space
+	 */</span>
+	<span class="enscript-keyword">if</span> (ipc_kmsg_put(msg_addr, kmsg, kmsg-&gt;ikm_header-&gt;msgh_size +
+			trailer_size) == MACH_RCV_INVALID_DATA)
+		<span class="enscript-keyword">return</span>(MACH_RCV_INVALID_DATA);
+	<span class="enscript-keyword">else</span> 
+		<span class="enscript-keyword">return</span>(MACH_MSG_SUCCESS);
+}
+</pre>
+<hr />
+</body></html>

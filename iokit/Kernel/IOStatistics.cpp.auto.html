@@ -1,0 +1,1306 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOStatistics.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOStatistics.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2010 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/system.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSKext.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOStatisticsPrivate.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOUserClient.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOEventSource.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKitDebug.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IOKITSTATS</span>
+<span class="enscript-type">bool</span> IOStatistics::enabled = false;
+
+uint32_t IOStatistics::sequenceID = 0;
+
+uint32_t IOStatistics::lastClassIndex = 0;
+uint32_t IOStatistics::lastKextIndex = 0;
+
+uint32_t IOStatistics::loadedKexts = 0;
+uint32_t IOStatistics::registeredClasses = 0;
+uint32_t IOStatistics::registeredCounters = 0;
+uint32_t IOStatistics::registeredWorkloops = 0;
+
+uint32_t IOStatistics::attachedEventSources = 0;
+
+IOWorkLoopDependency *IOStatistics::nextWorkLoopDependency = NULL;
+
+<span class="enscript-comment">/* Logging */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LOG_LEVEL</span> 0
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">LOG</span>(level, format, ...) \
+<span class="enscript-keyword">do</span> { \
+	<span class="enscript-keyword">if</span> (level &lt;= LOG_LEVEL) \
+		printf(format, ##__VA_ARGS__); \
+} <span class="enscript-keyword">while</span> (0)
+
+<span class="enscript-comment">/* Locks */</span>
+
+IORWLock *IOStatistics::lock = NULL;
+
+<span class="enscript-comment">/* Kext tree */</span>
+
+KextNode *IOStatistics::kextHint = NULL;
+
+IOStatistics::KextTreeHead IOStatistics::kextHead = RB_INITIALIZER(&amp;IOStatistics::kextHead);
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">IOStatistics::kextNodeCompare</span>(KextNode *e1, KextNode *e2) 
+{
+    <span class="enscript-keyword">if</span> (e1-&gt;kext &lt; e2-&gt;kext)
+        <span class="enscript-keyword">return</span> -1;
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (e1-&gt;kext &gt; e2-&gt;kext)
+        <span class="enscript-keyword">return</span> 1;
+    <span class="enscript-keyword">else</span>
+        <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-function-name">RB_GENERATE</span>(IOStatistics::KextTree, KextNode, link, kextNodeCompare);
+
+<span class="enscript-comment">/* Kext tree ordered by address */</span>
+
+IOStatistics::KextAddressTreeHead IOStatistics::kextAddressHead = RB_INITIALIZER(&amp;IOStatistics::kextAddressHead);
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">IOStatistics::kextAddressNodeCompare</span>(KextNode *e1, KextNode *e2) 
+{
+    <span class="enscript-keyword">if</span> (e1-&gt;address &lt; e2-&gt;address)
+        <span class="enscript-keyword">return</span> -1;
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (e1-&gt;address &gt; e2-&gt;address)
+        <span class="enscript-keyword">return</span> 1; 
+    <span class="enscript-keyword">else</span>
+        <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-function-name">RB_GENERATE</span>(IOStatistics::KextAddressTree, KextNode, addressLink, kextAddressNodeCompare);
+
+<span class="enscript-comment">/* Class tree */</span>
+
+IOStatistics::ClassTreeHead IOStatistics::classHead = RB_INITIALIZER(&amp;IOStatistics::classHead);
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">IOStatistics::classNodeCompare</span>(ClassNode *e1, ClassNode *e2) {
+    <span class="enscript-keyword">if</span> (e1-&gt;metaClass &lt; e2-&gt;metaClass)
+        <span class="enscript-keyword">return</span> -1;
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (e1-&gt;metaClass &gt; e2-&gt;metaClass)
+        <span class="enscript-keyword">return</span> 1;
+    <span class="enscript-keyword">else</span>
+        <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-function-name">RB_GENERATE</span>(IOStatistics::ClassTree, ClassNode, tLink, classNodeCompare);
+
+<span class="enscript-comment">/* Workloop dependencies */</span>
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">IOWorkLoopCounter::loadTagCompare</span>(IOWorkLoopDependency *e1, IOWorkLoopDependency *e2) {
+    <span class="enscript-keyword">if</span> (e1-&gt;loadTag &lt; e2-&gt;loadTag)
+        <span class="enscript-keyword">return</span> -1;
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (e1-&gt;loadTag &gt; e2-&gt;loadTag)
+        <span class="enscript-keyword">return</span> 1;
+    <span class="enscript-keyword">else</span>
+        <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-function-name">RB_GENERATE</span>(IOWorkLoopCounter::DependencyTree, IOWorkLoopDependency, link, IOWorkLoopCounter::loadTagCompare);
+
+<span class="enscript-comment">/* sysctl stuff */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 
+<span class="enscript-function-name">oid_sysctl</span>(__unused <span class="enscript-type">struct</span> sysctl_oid *oidp, __unused <span class="enscript-type">void</span> *arg1, <span class="enscript-type">int</span> arg2, <span class="enscript-type">struct</span> sysctl_req *req)
+{
+	<span class="enscript-type">int</span> error = EINVAL;
+	uint32_t request = arg2;
+
+	<span class="enscript-keyword">switch</span> (request)
+	{
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOStatisticsGeneral</span>:
+			error = IOStatistics::getStatistics(req);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOStatisticsWorkLoop</span>:
+			error = IOStatistics::getWorkLoopStatistics(req);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOStatisticsUserClient</span>:
+			error = IOStatistics::getUserClientStatistics(req);
+			<span class="enscript-keyword">break</span>;		
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> error;
+}
+ 
+<span class="enscript-function-name">SYSCTL_NODE</span>(_debug, OID_AUTO, iokit_statistics, CTLFLAG_RW | CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;IOStatistics&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-function-name">SYSCTL_PROC</span>(_debug_iokit_statistics, OID_AUTO, general,
+	    CTLTYPE_STRUCT | CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN | CTLFLAG_LOCKED,
+	    0, kIOStatisticsGeneral, oid_sysctl, <span class="enscript-string">&quot;S&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-function-name">SYSCTL_PROC</span>(_debug_iokit_statistics, OID_AUTO, workloop,
+	    CTLTYPE_STRUCT | CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN | CTLFLAG_LOCKED,
+	    0, kIOStatisticsWorkLoop, oid_sysctl, <span class="enscript-string">&quot;S&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-function-name">SYSCTL_PROC</span>(_debug_iokit_statistics, OID_AUTO, userclient,
+	    CTLTYPE_STRUCT | CTLFLAG_RW | CTLFLAG_NOAUTO | CTLFLAG_KERN | CTLFLAG_LOCKED,
+	    0, kIOStatisticsUserClient, oid_sysctl, <span class="enscript-string">&quot;S&quot;</span>, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOStatistics::initialize</span>()
+{
+	<span class="enscript-keyword">if</span> (enabled) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* Only enabled if the boot argument is set. */</span>
+	<span class="enscript-keyword">if</span> (!(kIOStatistics &amp; gIOKitDebug)) {
+		<span class="enscript-keyword">return</span>;
+	}
+	
+	sysctl_register_oid(&amp;sysctl__debug_iokit_statistics_general);
+	sysctl_register_oid(&amp;sysctl__debug_iokit_statistics_workloop);
+	sysctl_register_oid(&amp;sysctl__debug_iokit_statistics_userclient);
+	
+	lock = IORWLockAlloc();
+	<span class="enscript-keyword">if</span> (!lock) {
+		<span class="enscript-keyword">return</span>;
+	}
+	
+	nextWorkLoopDependency = (IOWorkLoopDependency*)kalloc(<span class="enscript-keyword">sizeof</span>(IOWorkLoopDependency));
+	<span class="enscript-keyword">if</span> (!nextWorkLoopDependency) {
+		<span class="enscript-keyword">return</span>;
+	}
+	
+	enabled = true;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOStatistics::onKextLoad</span>(OSKext *kext, kmod_info_t *kmod_info) 
+{
+	KextNode *ke;
+
+	assert(kext &amp;&amp; kmod_info);
+
+	<span class="enscript-keyword">if</span> (!enabled) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	LOG(1, <span class="enscript-string">&quot;IOStatistics::onKextLoad: %s, tag %d, address 0x%llx, address end 0x%llx\n&quot;</span>,
+		kext-&gt;getIdentifierCString(), kmod_info-&gt;id, (uint64_t)kmod_info-&gt;address, (uint64_t)(kmod_info-&gt;address + kmod_info-&gt;size));
+
+	ke = (KextNode *)kalloc(<span class="enscript-keyword">sizeof</span>(KextNode));
+	<span class="enscript-keyword">if</span> (!ke) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	memset(ke, 0, <span class="enscript-keyword">sizeof</span>(KextNode));
+	
+	ke-&gt;kext = kext;
+	ke-&gt;loadTag = kmod_info-&gt;id;
+	ke-&gt;address = kmod_info-&gt;address;
+	ke-&gt;address_end = kmod_info-&gt;address + kmod_info-&gt;size;
+
+	SLIST_INIT(&amp;ke-&gt;classList);
+	TAILQ_INIT(&amp;ke-&gt;userClientCallList);
+
+	IORWLockWrite(lock);
+
+	RB_INSERT(KextTree, &amp;kextHead, ke);
+	RB_INSERT(KextAddressTree, &amp;kextAddressHead, ke);
+	
+	sequenceID++;
+	loadedKexts++;
+	lastKextIndex++;
+	
+	IORWLockUnlock(lock);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOStatistics::onKextUnload</span>(OSKext *kext) 
+{
+	KextNode sought, *found;
+	
+	assert(kext);
+	
+	<span class="enscript-keyword">if</span> (!enabled) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	LOG(1, <span class="enscript-string">&quot;IOStatistics::onKextUnload: %s\n&quot;</span>, kext-&gt;getIdentifierCString());
+	
+	IORWLockWrite(lock);
+
+	sought.kext = kext;
+	found = RB_FIND(KextTree, &amp;kextHead, &amp;sought);
+	<span class="enscript-keyword">if</span> (found) {
+		IOWorkLoopCounter *wlc;
+		IOUserClientProcessEntry *uce;
+
+		<span class="enscript-comment">/* Disconnect workloop counters; cleanup takes place in unregisterWorkLoop() */</span>
+		<span class="enscript-keyword">while</span> ((wlc = SLIST_FIRST(&amp;found-&gt;workLoopList))) {
+			SLIST_REMOVE_HEAD(&amp;found-&gt;workLoopList, link);
+			wlc-&gt;parentKext = NULL;
+		}
+
+		<span class="enscript-comment">/* Free up the user client list */</span>
+		<span class="enscript-keyword">while</span> ((uce = TAILQ_FIRST(&amp;found-&gt;userClientCallList))) {
+			TAILQ_REMOVE(&amp;found-&gt;userClientCallList, uce, link);
+			kfree(uce, <span class="enscript-keyword">sizeof</span>(IOUserClientProcessEntry));
+		}
+
+		<span class="enscript-comment">/* Remove from kext trees */</span>
+		RB_REMOVE(KextTree, &amp;kextHead, found);
+		RB_REMOVE(KextAddressTree, &amp;kextAddressHead, found);
+
+		<span class="enscript-comment">/*
+		 * Clear a matching kextHint to avoid use after free in
+		 * onClassAdded() for a class add after a KEXT unload.
+		 */</span>
+		<span class="enscript-keyword">if</span> (found == kextHint) {
+			kextHint = NULL;
+		}
+		
+		<span class="enscript-comment">/* Finally, free the class node */</span>
+		kfree(found, <span class="enscript-keyword">sizeof</span>(KextNode));
+		
+		sequenceID++;
+		loadedKexts--;
+	}
+	<span class="enscript-keyword">else</span> {
+		panic(<span class="enscript-string">&quot;IOStatistics::onKextUnload: cannot find kext: %s&quot;</span>, kext-&gt;getIdentifierCString());
+	}
+
+	IORWLockUnlock(lock);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOStatistics::onClassAdded</span>(OSKext *parentKext, OSMetaClass *metaClass) 
+{
+	ClassNode *ce;
+	KextNode soughtKext, *foundKext = NULL;
+
+	assert(parentKext &amp;&amp; metaClass);
+
+	<span class="enscript-keyword">if</span> (!enabled) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	LOG(1, <span class="enscript-string">&quot;IOStatistics::onClassAdded: %s\n&quot;</span>, metaClass-&gt;getClassName());
+
+	ce = (ClassNode *)kalloc(<span class="enscript-keyword">sizeof</span>(ClassNode));
+	<span class="enscript-keyword">if</span> (!ce) {
+		<span class="enscript-keyword">return</span>;	
+	}
+
+	memset(ce, 0, <span class="enscript-keyword">sizeof</span>(ClassNode));
+
+	IORWLockWrite(lock);
+
+	<span class="enscript-comment">/* Hinted? */</span>
+	<span class="enscript-keyword">if</span> (kextHint &amp;&amp; kextHint-&gt;kext == parentKext) {
+		foundKext = kextHint;
+	}
+	<span class="enscript-keyword">else</span> {
+		soughtKext.kext = parentKext;
+		foundKext = RB_FIND(KextTree, &amp;kextHead, &amp;soughtKext);
+	}
+
+	<span class="enscript-keyword">if</span> (foundKext) {
+		ClassNode soughtClass, *foundClass = NULL;
+		<span class="enscript-type">const</span> OSMetaClass *superClass;
+
+		ce-&gt;metaClass = metaClass;
+		ce-&gt;classID = lastClassIndex++;
+		ce-&gt;parentKext = foundKext;
+		
+		<span class="enscript-comment">/* Has superclass? */</span>
+	 	superClass = ce-&gt;metaClass-&gt;getSuperClass();
+		<span class="enscript-keyword">if</span> (superClass) {
+			soughtClass.metaClass = superClass;
+			foundClass = RB_FIND(ClassTree, &amp;classHead, &amp;soughtClass);
+		}
+		ce-&gt;superClassID = foundClass ? foundClass-&gt;classID : (uint32_t)(-1);
+
+		SLIST_INIT(&amp;ce-&gt;counterList);
+		SLIST_INIT(&amp;ce-&gt;userClientList);
+		
+		RB_INSERT(ClassTree, &amp;classHead, ce);
+		SLIST_INSERT_HEAD(&amp;foundKext-&gt;classList, ce, lLink);
+		
+		foundKext-&gt;classes++;
+		
+		kextHint = foundKext;
+		
+		sequenceID++;	
+		registeredClasses++;
+	}
+	<span class="enscript-keyword">else</span> {
+		panic(<span class="enscript-string">&quot;IOStatistics::onClassAdded: cannot find parent kext: %s&quot;</span>, parentKext-&gt;getIdentifierCString());
+	}
+	
+	IORWLockUnlock(lock);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOStatistics::onClassRemoved</span>(OSKext *parentKext, OSMetaClass *metaClass) 
+{
+	ClassNode sought, *found;
+
+	assert(parentKext &amp;&amp; metaClass);
+
+	<span class="enscript-keyword">if</span> (!enabled) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	LOG(1, <span class="enscript-string">&quot;IOStatistics::onClassRemoved: %s\n&quot;</span>, metaClass-&gt;getClassName());
+
+	IORWLockWrite(lock);
+
+	sought.metaClass = metaClass;
+	found = RB_FIND(ClassTree, &amp;classHead, &amp;sought);
+	<span class="enscript-keyword">if</span> (found) {
+		IOEventSourceCounter *esc;
+		IOUserClientCounter *ucc;
+		
+		<span class="enscript-comment">/* Free up the list of counters */</span>
+		<span class="enscript-keyword">while</span> ((esc = SLIST_FIRST(&amp;found-&gt;counterList))) {
+			SLIST_REMOVE_HEAD(&amp;found-&gt;counterList, link);
+			kfree(esc, <span class="enscript-keyword">sizeof</span>(IOEventSourceCounter));
+		}
+
+		<span class="enscript-comment">/* Free up the user client list */</span>
+		<span class="enscript-keyword">while</span> ((ucc = SLIST_FIRST(&amp;found-&gt;userClientList))) {
+			SLIST_REMOVE_HEAD(&amp;found-&gt;userClientList, link);
+			kfree(ucc, <span class="enscript-keyword">sizeof</span>(IOUserClientCounter));
+		}
+
+		<span class="enscript-comment">/* Remove from class tree */</span>
+		RB_REMOVE(ClassTree, &amp;classHead, found);
+		
+		<span class="enscript-comment">/* Remove from parent */</span>
+		SLIST_REMOVE(&amp;found-&gt;parentKext-&gt;classList, found, ClassNode, lLink);
+		
+		<span class="enscript-comment">/* Finally, free the class node */</span>
+		kfree(found, <span class="enscript-keyword">sizeof</span>(ClassNode));
+		
+		sequenceID++;
+		registeredClasses--;
+	}
+	<span class="enscript-keyword">else</span> {
+		panic(<span class="enscript-string">&quot;IOStatistics::onClassRemoved: cannot find class: %s&quot;</span>, metaClass-&gt;getClassName());
+	}
+
+	IORWLockUnlock(lock);
+}
+
+IOEventSourceCounter *<span class="enscript-function-name">IOStatistics::registerEventSource</span>(OSObject *inOwner)
+{
+	IOEventSourceCounter *counter = NULL;
+	ClassNode sought, *found = NULL;
+	boolean_t createDummyCounter = FALSE;
+	
+	assert(inOwner);
+
+	<span class="enscript-keyword">if</span> (!enabled) {
+		<span class="enscript-keyword">return</span> NULL;
+	}
+
+	counter = (IOEventSourceCounter*)kalloc(<span class="enscript-keyword">sizeof</span>(IOEventSourceCounter));
+	<span class="enscript-keyword">if</span> (!counter) {
+		<span class="enscript-keyword">return</span> NULL;
+	}
+	
+	memset(counter, 0, <span class="enscript-keyword">sizeof</span>(IOEventSourceCounter));
+
+	IORWLockWrite(lock);
+
+	<span class="enscript-comment">/* Workaround for &lt;rdar://problem/7158117&gt; - create a dummy counter when inOwner is bad.
+	 * We use retainCount here as our best indication that the pointer is awry.
+	 */</span>
+	<span class="enscript-keyword">if</span> (inOwner-&gt;retainCount &gt; 0xFFFFFF) {
+		kprintf(<span class="enscript-string">&quot;IOStatistics::registerEventSource - bad metaclass %p\n&quot;</span>, inOwner);
+		createDummyCounter = TRUE;
+	}
+	<span class="enscript-keyword">else</span> {
+		sought.metaClass = inOwner-&gt;getMetaClass();
+		found = RB_FIND(ClassTree, &amp;classHead, &amp;sought);
+	}
+
+	<span class="enscript-keyword">if</span> (found) {
+		counter-&gt;parentClass = found;
+		SLIST_INSERT_HEAD(&amp;found-&gt;counterList, counter, link);
+		registeredCounters++;
+	}
+
+	<span class="enscript-keyword">if</span> (!(createDummyCounter || found)) {
+		panic(<span class="enscript-string">&quot;IOStatistics::registerEventSource: cannot find parent class: %s&quot;</span>, inOwner-&gt;getMetaClass()-&gt;getClassName());
+	}
+	
+	IORWLockUnlock(lock);
+	
+	<span class="enscript-keyword">return</span> counter;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOStatistics::unregisterEventSource</span>(IOEventSourceCounter *counter)
+{
+	<span class="enscript-keyword">if</span> (!counter) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	IORWLockWrite(lock);
+
+	<span class="enscript-keyword">if</span> (counter-&gt;parentClass) {
+		SLIST_REMOVE(&amp;counter-&gt;parentClass-&gt;counterList, counter, IOEventSourceCounter, link);
+		registeredCounters--;
+	}
+	kfree(counter, <span class="enscript-keyword">sizeof</span>(IOEventSourceCounter));
+	
+	IORWLockUnlock(lock);
+}
+
+IOWorkLoopCounter* <span class="enscript-function-name">IOStatistics::registerWorkLoop</span>(IOWorkLoop *workLoop)
+{
+	IOWorkLoopCounter *counter = NULL;
+	KextNode *found;
+
+	assert(workLoop);
+
+	<span class="enscript-keyword">if</span> (!enabled) {
+		<span class="enscript-keyword">return</span> NULL;
+	}
+
+	counter = (IOWorkLoopCounter*)kalloc(<span class="enscript-keyword">sizeof</span>(IOWorkLoopCounter));
+	<span class="enscript-keyword">if</span> (!counter) {
+		<span class="enscript-keyword">return</span> NULL;
+	}
+    
+	memset(counter, 0, <span class="enscript-keyword">sizeof</span>(IOWorkLoopCounter));
+
+	found = getKextNodeFromBacktrace(TRUE);
+	<span class="enscript-keyword">if</span> (!found) {
+		panic(<span class="enscript-string">&quot;IOStatistics::registerWorkLoop: cannot find parent kext&quot;</span>);
+	}
+
+	counter-&gt;parentKext = found;
+	counter-&gt;workLoop = workLoop;
+	RB_INIT(&amp;counter-&gt;dependencyHead);
+	SLIST_INSERT_HEAD(&amp;found-&gt;workLoopList, counter, link);
+	registeredWorkloops++;
+
+	releaseKextNode(found);
+
+	<span class="enscript-keyword">return</span> counter;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOStatistics::unregisterWorkLoop</span>(IOWorkLoopCounter *counter)
+{
+	<span class="enscript-keyword">if</span> (!counter) {
+		<span class="enscript-keyword">return</span>;
+	}
+	
+	IORWLockWrite(lock);
+	<span class="enscript-keyword">if</span> (counter-&gt;parentKext) {
+		SLIST_REMOVE(&amp;counter-&gt;parentKext-&gt;workLoopList, counter, IOWorkLoopCounter, link);
+	}
+	kfree(counter, <span class="enscript-keyword">sizeof</span>(IOWorkLoopCounter));
+	registeredWorkloops--;
+	
+	IORWLockUnlock(lock);
+}
+
+IOUserClientCounter *<span class="enscript-function-name">IOStatistics::registerUserClient</span>(IOUserClient *userClient)
+{
+	ClassNode sought, *found;
+	IOUserClientCounter *counter = NULL;
+
+	assert(userClient);
+
+	<span class="enscript-keyword">if</span> (!enabled) {
+		<span class="enscript-keyword">return</span> NULL;
+	}
+
+	counter = (IOUserClientCounter*)kalloc(<span class="enscript-keyword">sizeof</span>(IOUserClientCounter));
+	<span class="enscript-keyword">if</span> (!counter) {
+		<span class="enscript-keyword">return</span> NULL;
+	}
+	
+	memset(counter, 0, <span class="enscript-keyword">sizeof</span>(IOUserClientCounter));
+
+	IORWLockWrite(lock);
+
+	sought.metaClass = userClient-&gt;getMetaClass();
+
+	found = RB_FIND(ClassTree, &amp;classHead, &amp;sought);
+	<span class="enscript-keyword">if</span> (found) {
+		counter-&gt;parentClass = found;
+		SLIST_INSERT_HEAD(&amp;found-&gt;userClientList, counter, link);
+	}
+	<span class="enscript-keyword">else</span> {
+		panic(<span class="enscript-string">&quot;IOStatistics::registerUserClient: cannot find parent class: %s&quot;</span>, sought.metaClass-&gt;getClassName());
+	}
+
+	IORWLockUnlock(lock);
+
+	<span class="enscript-keyword">return</span> counter;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOStatistics::unregisterUserClient</span>(IOUserClientCounter *counter)
+{
+	<span class="enscript-keyword">if</span> (!counter) {
+		<span class="enscript-keyword">return</span>;
+	}
+	
+	IORWLockWrite(lock);
+	
+	SLIST_REMOVE(&amp;counter-&gt;parentClass-&gt;userClientList, counter, IOUserClientCounter, link);
+	kfree(counter, <span class="enscript-keyword">sizeof</span>(IOUserClientCounter));
+
+	IORWLockUnlock(lock);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOStatistics::attachWorkLoopEventSource</span>(IOWorkLoopCounter *wlc, IOEventSourceCounter *esc) 
+{
+	<span class="enscript-keyword">if</span> (!wlc) {
+        <span class="enscript-keyword">return</span>;
+	}
+    
+	IORWLockWrite(lock);
+	
+	<span class="enscript-keyword">if</span> (!nextWorkLoopDependency) {
+		<span class="enscript-keyword">return</span>;
+	}
+	
+	attachedEventSources++;
+	wlc-&gt;attachedEventSources++;
+	
+	<span class="enscript-comment">/* Track the kext dependency */</span>
+	nextWorkLoopDependency-&gt;loadTag = esc-&gt;parentClass-&gt;parentKext-&gt;loadTag;
+	<span class="enscript-keyword">if</span> (NULL == RB_INSERT(IOWorkLoopCounter::DependencyTree, &amp;wlc-&gt;dependencyHead, nextWorkLoopDependency)) {
+		nextWorkLoopDependency = (IOWorkLoopDependency*)kalloc(<span class="enscript-keyword">sizeof</span>(IOWorkLoopDependency));
+	}
+    
+	IORWLockUnlock(lock);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOStatistics::detachWorkLoopEventSource</span>(IOWorkLoopCounter *wlc, IOEventSourceCounter *esc) 
+{
+	IOWorkLoopDependency sought, *found;
+    
+	<span class="enscript-keyword">if</span> (!wlc) {
+		<span class="enscript-keyword">return</span>;
+	}
+    
+	IORWLockWrite(lock);
+
+	attachedEventSources--;
+	wlc-&gt;attachedEventSources--;
+	
+	sought.loadTag = esc-&gt;parentClass-&gt;parentKext-&gt;loadTag;
+
+	found = RB_FIND(IOWorkLoopCounter::DependencyTree, &amp;wlc-&gt;dependencyHead, &amp;sought);
+	<span class="enscript-keyword">if</span> (found) {
+		RB_REMOVE(IOWorkLoopCounter::DependencyTree, &amp;wlc-&gt;dependencyHead, found);
+		kfree(found, <span class="enscript-keyword">sizeof</span>(IOWorkLoopDependency));
+	}
+
+	IORWLockUnlock(lock);
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">IOStatistics::getStatistics</span>(sysctl_req *req)
+{
+	<span class="enscript-type">int</span> error;
+	uint32_t calculatedSize, size;
+	<span class="enscript-type">char</span> *buffer, *ptr;
+	IOStatisticsHeader *header;
+
+	assert(IOStatistics::enabled &amp;&amp; req);
+    
+	IORWLockRead(IOStatistics::lock);
+
+	<span class="enscript-comment">/* Work out how much we need to allocate. IOStatisticsKext is of variable size. */</span>
+	calculatedSize = <span class="enscript-keyword">sizeof</span>(IOStatisticsHeader) + 
+					 <span class="enscript-keyword">sizeof</span>(IOStatisticsGlobal) +
+					(<span class="enscript-keyword">sizeof</span>(IOStatisticsKext) * loadedKexts) + (<span class="enscript-keyword">sizeof</span>(uint32_t) * registeredClasses) + 
+					(<span class="enscript-keyword">sizeof</span>(IOStatisticsMemory) * loadedKexts) +
+					(<span class="enscript-keyword">sizeof</span>(IOStatisticsClass) * registeredClasses) +
+					(<span class="enscript-keyword">sizeof</span>(IOStatisticsCounter) * registeredClasses) +
+					(<span class="enscript-keyword">sizeof</span>(IOStatisticsKextIdentifier) * loadedKexts) +
+					(<span class="enscript-keyword">sizeof</span>(IOStatisticsClassName) * registeredClasses);
+
+	<span class="enscript-comment">/* Size request? */</span>
+	<span class="enscript-keyword">if</span> (req-&gt;oldptr == USER_ADDR_NULL) {
+		error = SYSCTL_OUT(req, NULL, calculatedSize);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	
+	<span class="enscript-comment">/* Read only */</span>
+	<span class="enscript-keyword">if</span> (req-&gt;newptr != USER_ADDR_NULL) {
+		error = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	buffer = (<span class="enscript-type">char</span>*)kalloc(calculatedSize);
+	<span class="enscript-keyword">if</span> (!buffer) {
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	memset(buffer, 0, calculatedSize);
+	
+	ptr = buffer;
+	
+	header = (IOStatisticsHeader*)((<span class="enscript-type">void</span>*)ptr);
+
+	header-&gt;sig = IOSTATISTICS_SIG;
+	header-&gt;ver = IOSTATISTICS_VER;
+
+	header-&gt;seq = sequenceID;
+
+	ptr += <span class="enscript-keyword">sizeof</span>(IOStatisticsHeader);
+
+	<span class="enscript-comment">/* Global data - seq, timers, interrupts, etc) */</span>
+	header-&gt;globalStatsOffset = <span class="enscript-keyword">sizeof</span>(IOStatisticsHeader);
+	size = copyGlobalStatistics((IOStatisticsGlobal*)((<span class="enscript-type">void</span>*)ptr));
+	ptr += size;
+
+	<span class="enscript-comment">/* Kext statistics */</span>
+	header-&gt;kextStatsOffset = header-&gt;globalStatsOffset + size;
+	size = copyKextStatistics((IOStatisticsKext*)((<span class="enscript-type">void</span>*)ptr));
+	ptr += size;
+
+	<span class="enscript-comment">/* Memory allocation info */</span>
+	header-&gt;memoryStatsOffset = header-&gt;kextStatsOffset + size;
+	size = copyMemoryStatistics((IOStatisticsMemory*)((<span class="enscript-type">void</span>*)ptr));
+	ptr += size;
+	
+	<span class="enscript-comment">/* Class statistics */</span>
+	header-&gt;classStatsOffset = header-&gt;memoryStatsOffset + size;
+	size = copyClassStatistics((IOStatisticsClass*)((<span class="enscript-type">void</span>*)ptr));
+	ptr += size;
+	
+	<span class="enscript-comment">/* Dynamic class counter data */</span>
+	header-&gt;counterStatsOffset = header-&gt;classStatsOffset + size;
+	size = copyCounterStatistics((IOStatisticsCounter*)((<span class="enscript-type">void</span>*)ptr));
+	ptr += size;
+	
+	<span class="enscript-comment">/* Kext identifiers */</span>
+	header-&gt;kextIdentifiersOffset = header-&gt;counterStatsOffset + size;
+	size = copyKextIdentifiers((IOStatisticsKextIdentifier*)((<span class="enscript-type">void</span>*)ptr));
+	ptr += size;
+
+	<span class="enscript-comment">/* Class names */</span>
+	header-&gt;classNamesOffset = header-&gt;kextIdentifiersOffset + size;
+	size = copyClassNames((IOStatisticsClassName*)ptr);
+	ptr += size;
+	
+	LOG(2, <span class="enscript-string">&quot;IOStatistics::getStatistics - calculatedSize 0x%x, kexts 0x%x, classes 0x%x.\n&quot;</span>,
+	 	calculatedSize, loadedKexts, registeredClasses);
+
+	assert( (uint32_t)(ptr - buffer) == calculatedSize );
+
+	error = SYSCTL_OUT(req, buffer, calculatedSize);
+
+	kfree(buffer, calculatedSize);
+
+<span class="enscript-reference">exit</span>:
+	IORWLockUnlock(IOStatistics::lock);
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">IOStatistics::getWorkLoopStatistics</span>(sysctl_req *req)
+{
+	<span class="enscript-type">int</span> error;
+	uint32_t calculatedSize, size;
+	<span class="enscript-type">char</span> *buffer;
+	IOStatisticsWorkLoopHeader *header;
+
+	assert(IOStatistics::enabled &amp;&amp; req);
+
+	IORWLockRead(IOStatistics::lock);
+
+	<span class="enscript-comment">/* Approximate how much we need to allocate (worse case estimate) */</span>
+	calculatedSize = <span class="enscript-keyword">sizeof</span>(IOStatisticsWorkLoop) * registeredWorkloops +
+					 <span class="enscript-keyword">sizeof</span>(uint32_t) * attachedEventSources;
+
+	<span class="enscript-comment">/* Size request? */</span>
+	<span class="enscript-keyword">if</span> (req-&gt;oldptr == USER_ADDR_NULL) {
+		error = SYSCTL_OUT(req, NULL, calculatedSize);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+	
+	<span class="enscript-comment">/* Read only */</span>
+	<span class="enscript-keyword">if</span> (req-&gt;newptr != USER_ADDR_NULL) {
+		error = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	buffer = (<span class="enscript-type">char</span>*)kalloc(calculatedSize);
+	<span class="enscript-keyword">if</span> (!buffer) {
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	header = (IOStatisticsWorkLoopHeader*)((<span class="enscript-type">void</span>*)buffer);
+	
+	header-&gt;sig = IOSTATISTICS_SIG_WORKLOOP;
+	header-&gt;ver = IOSTATISTICS_VER;
+
+	header-&gt;seq = sequenceID;
+	
+	header-&gt;workloopCount = registeredWorkloops;
+
+	size = copyWorkLoopStatistics(&amp;header-&gt;workLoopStats);
+
+	LOG(2, <span class="enscript-string">&quot;IOStatistics::getWorkLoopStatistics: calculatedSize %d, size %d\n&quot;</span>, calculatedSize, size);
+
+	assert( size &lt;= calculatedSize );
+
+	error = SYSCTL_OUT(req, buffer, size);
+
+	kfree(buffer, calculatedSize);
+
+<span class="enscript-reference">exit</span>:
+	IORWLockUnlock(IOStatistics::lock);
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">IOStatistics::getUserClientStatistics</span>(sysctl_req *req)
+{	
+	<span class="enscript-type">int</span> error;
+	uint32_t calculatedSize, size;
+	<span class="enscript-type">char</span> *buffer;
+	uint32_t requestedLoadTag = 0;
+	IOStatisticsUserClientHeader *header;
+
+	assert(IOStatistics::enabled &amp;&amp; req);
+
+	IORWLockRead(IOStatistics::lock);
+
+	<span class="enscript-comment">/* Work out how much we need to allocate */</span>
+	calculatedSize = <span class="enscript-keyword">sizeof</span>(IOStatisticsUserClientHeader) + 
+					 <span class="enscript-keyword">sizeof</span>(IOStatisticsUserClientCall) * IOKIT_STATISTICS_RECORDED_USERCLIENT_PROCS * loadedKexts;
+	
+	<span class="enscript-comment">/* Size request? */</span>
+	<span class="enscript-keyword">if</span> (req-&gt;oldptr == USER_ADDR_NULL) {
+		error = SYSCTL_OUT(req, NULL, calculatedSize);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	<span class="enscript-comment">/* Kext request (potentially) valid? */</span>
+	<span class="enscript-keyword">if</span> (!req-&gt;newptr || req-&gt;newlen &lt; <span class="enscript-keyword">sizeof</span>(requestedLoadTag)) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	SYSCTL_IN(req, &amp;requestedLoadTag, <span class="enscript-keyword">sizeof</span>(requestedLoadTag));
+	
+	LOG(2, <span class="enscript-string">&quot;IOStatistics::getUserClientStatistics - requesting kext w/load tag: %d\n&quot;</span>, requestedLoadTag);
+
+	buffer = (<span class="enscript-type">char</span>*)kalloc(calculatedSize);
+	<span class="enscript-keyword">if</span> (!buffer) {
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit</span>;
+	}
+
+	header = (IOStatisticsUserClientHeader*)((<span class="enscript-type">void</span>*)buffer);
+
+	header-&gt;sig = IOSTATISTICS_SIG_USERCLIENT;
+	header-&gt;ver = IOSTATISTICS_VER;
+	
+	header-&gt;seq = sequenceID;
+
+	header-&gt;processes = 0;
+
+	size = copyUserClientStatistics(header, requestedLoadTag);
+	
+	assert((<span class="enscript-keyword">sizeof</span>(IOStatisticsUserClientHeader) + size) &lt;= calculatedSize);
+	
+	<span class="enscript-keyword">if</span> (size) {
+		error = SYSCTL_OUT(req, buffer, <span class="enscript-keyword">sizeof</span>(IOStatisticsUserClientHeader) + size);
+	}
+	<span class="enscript-keyword">else</span> {
+		error = EINVAL;
+	}
+
+	kfree(buffer, calculatedSize);
+
+<span class="enscript-reference">exit</span>:
+	IORWLockUnlock(IOStatistics::lock);
+	<span class="enscript-keyword">return</span> error;
+}
+
+uint32_t <span class="enscript-function-name">IOStatistics::copyGlobalStatistics</span>(IOStatisticsGlobal *stats)
+{
+	stats-&gt;kextCount = loadedKexts;
+	stats-&gt;classCount = registeredClasses;
+	stats-&gt;workloops = registeredWorkloops;
+	
+	<span class="enscript-keyword">return</span> <span class="enscript-keyword">sizeof</span>(IOStatisticsGlobal);
+}
+
+uint32_t <span class="enscript-function-name">IOStatistics::copyKextStatistics</span>(IOStatisticsKext *stats)
+{
+	KextNode *ke;
+	ClassNode *ce;
+	uint32_t index = 0;
+
+	RB_FOREACH(ke, KextTree, &amp;kextHead) {
+		stats-&gt;loadTag = ke-&gt;loadTag;
+		ke-&gt;kext-&gt;getSizeInfo(&amp;stats-&gt;loadSize, &amp;stats-&gt;wiredSize);
+
+		stats-&gt;classes = ke-&gt;classes;
+
+		<span class="enscript-comment">/* Append indices of owned classes */</span>
+		SLIST_FOREACH(ce, &amp;ke-&gt;classList, lLink) {
+			stats-&gt;classIndexes[index++] = ce-&gt;classID;
+		}
+		
+		stats = (IOStatisticsKext *)((<span class="enscript-type">void</span>*)((<span class="enscript-type">char</span>*)stats + <span class="enscript-keyword">sizeof</span>(IOStatisticsKext) + (ke-&gt;classes * <span class="enscript-keyword">sizeof</span>(uint32_t))));
+	}
+
+	<span class="enscript-keyword">return</span> (<span class="enscript-keyword">sizeof</span>(IOStatisticsKext) * loadedKexts + <span class="enscript-keyword">sizeof</span>(uint32_t) * registeredClasses);
+}
+
+uint32_t <span class="enscript-function-name">IOStatistics::copyMemoryStatistics</span>(IOStatisticsMemory *stats)
+{
+	KextNode *ke;
+
+	RB_FOREACH(ke, KextTree, &amp;kextHead) {
+		stats-&gt;allocatedSize = ke-&gt;memoryCounters[kIOStatisticsMalloc];
+		stats-&gt;freedSize = ke-&gt;memoryCounters[kIOStatisticsFree]; 
+		stats-&gt;allocatedAlignedSize = ke-&gt;memoryCounters[kIOStatisticsMallocAligned];
+		stats-&gt;freedAlignedSize = ke-&gt;memoryCounters[kIOStatisticsFreeAligned];
+		stats-&gt;allocatedContiguousSize = ke-&gt;memoryCounters[kIOStatisticsMallocContiguous];
+		stats-&gt;freedContiguousSize = ke-&gt;memoryCounters[kIOStatisticsFreeContiguous];
+		stats-&gt;allocatedPageableSize = ke-&gt;memoryCounters[kIOStatisticsMallocPageable];
+		stats-&gt;freedPageableSize = ke-&gt;memoryCounters[kIOStatisticsFreePageable];
+		stats++;
+	}
+	
+	<span class="enscript-keyword">return</span> (<span class="enscript-keyword">sizeof</span>(IOStatisticsMemory) * loadedKexts);
+}
+
+uint32_t <span class="enscript-function-name">IOStatistics::copyClassStatistics</span>(IOStatisticsClass *stats)
+{
+	KextNode *ke;
+	ClassNode *ce;
+
+	RB_FOREACH(ke, KextTree, &amp;kextHead) {
+		SLIST_FOREACH(ce, &amp;ke-&gt;classList, lLink) {
+			stats-&gt;classID = ce-&gt;classID;
+			stats-&gt;superClassID = ce-&gt;superClassID;		
+			stats-&gt;classSize = ce-&gt;metaClass-&gt;getClassSize();
+
+			stats++;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> <span class="enscript-keyword">sizeof</span>(IOStatisticsClass) * registeredClasses;
+}
+
+uint32_t <span class="enscript-function-name">IOStatistics::copyCounterStatistics</span>(IOStatisticsCounter *stats)
+{
+	KextNode *ke;
+	ClassNode *ce;
+
+	RB_FOREACH(ke, KextTree, &amp;kextHead) {
+		SLIST_FOREACH(ce, &amp;ke-&gt;classList, lLink) {
+			IOUserClientCounter *userClientCounter;
+			IOEventSourceCounter *counter;
+
+			stats-&gt;classID = ce-&gt;classID;
+			stats-&gt;classInstanceCount = ce-&gt;metaClass-&gt;getInstanceCount();
+
+			IOStatisticsUserClients *uc = &amp;stats-&gt;userClientStatistics;
+
+			<span class="enscript-comment">/* User client counters */</span>
+			SLIST_FOREACH(userClientCounter, &amp;ce-&gt;userClientList, link) {
+				uc-&gt;clientCalls += userClientCounter-&gt;clientCalls;
+				uc-&gt;created++;
+			}
+
+			IOStatisticsInterruptEventSources *iec = &amp;stats-&gt;interruptEventSourceStatistics;
+			IOStatisticsInterruptEventSources *fiec = &amp;stats-&gt;filterInterruptEventSourceStatistics;
+			IOStatisticsTimerEventSources *tec = &amp;stats-&gt;timerEventSourceStatistics;
+			IOStatisticsCommandGates *cgc = &amp;stats-&gt;commandGateStatistics;
+			IOStatisticsCommandQueues *cqc = &amp;stats-&gt;commandQueueStatistics;
+			IOStatisticsDerivedEventSources *dec = &amp;stats-&gt;derivedEventSourceStatistics;
+
+			<span class="enscript-comment">/* Event source counters */</span>
+			SLIST_FOREACH(counter, &amp;ce-&gt;counterList, link) {
+				<span class="enscript-keyword">switch</span> (counter-&gt;type) {	
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOStatisticsInterruptEventSourceCounter</span>:
+						iec-&gt;created++;
+						iec-&gt;produced += counter-&gt;u.interrupt.produced;
+						iec-&gt;checksForWork += counter-&gt;u.interrupt.checksForWork;
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOStatisticsFilterInterruptEventSourceCounter</span>:
+						fiec-&gt;created++;
+						fiec-&gt;produced += counter-&gt;u.filter.produced;
+						fiec-&gt;checksForWork += counter-&gt;u.filter.checksForWork;
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOStatisticsTimerEventSourceCounter</span>:
+						tec-&gt;created++;
+						tec-&gt;timeouts += counter-&gt;u.timer.timeouts;
+						tec-&gt;checksForWork += counter-&gt;u.timer.checksForWork;
+						tec-&gt;timeOnGate += counter-&gt;timeOnGate;
+						tec-&gt;closeGateCalls += counter-&gt;closeGateCalls;
+						tec-&gt;openGateCalls += counter-&gt;openGateCalls;
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOStatisticsCommandGateCounter</span>:
+						cgc-&gt;created++;
+						cgc-&gt;timeOnGate += counter-&gt;timeOnGate;
+						cgc-&gt;actionCalls += counter-&gt;u.commandGate.actionCalls;
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOStatisticsCommandQueueCounter</span>:
+						cqc-&gt;created++;
+						cqc-&gt;actionCalls += counter-&gt;u.commandQueue.actionCalls;
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">kIOStatisticsDerivedEventSourceCounter</span>:
+						dec-&gt;created++;
+						dec-&gt;timeOnGate += counter-&gt;timeOnGate;
+						dec-&gt;closeGateCalls += counter-&gt;closeGateCalls;
+						dec-&gt;openGateCalls += counter-&gt;openGateCalls;
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-reference">default</span>:
+						<span class="enscript-keyword">break</span>;
+				}
+			}
+		
+			stats++;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> <span class="enscript-keyword">sizeof</span>(IOStatisticsCounter) * registeredClasses;
+}
+
+uint32_t <span class="enscript-function-name">IOStatistics::copyKextIdentifiers</span>(IOStatisticsKextIdentifier *kextIDs)
+{
+	KextNode *ke;
+
+	RB_FOREACH(ke, KextTree, &amp;kextHead) {
+		strncpy(kextIDs-&gt;identifier, ke-&gt;kext-&gt;getIdentifierCString(), kIOStatisticsDriverNameLength);
+		kextIDs++;
+	}
+
+	<span class="enscript-keyword">return</span> (<span class="enscript-keyword">sizeof</span>(IOStatisticsKextIdentifier) * loadedKexts);
+}
+
+uint32_t <span class="enscript-function-name">IOStatistics::copyClassNames</span>(IOStatisticsClassName *classNames)
+{
+	KextNode *ke;
+	ClassNode *ce;
+
+	RB_FOREACH(ke, KextTree, &amp;kextHead) {
+		SLIST_FOREACH(ce, &amp;ke-&gt;classList, lLink) {
+			strncpy(classNames-&gt;name, ce-&gt;metaClass-&gt;getClassName(), kIOStatisticsClassNameLength);
+			classNames++;
+		}
+	}
+		
+	<span class="enscript-keyword">return</span> (<span class="enscript-keyword">sizeof</span>(IOStatisticsClassName) * registeredClasses);
+}
+
+uint32_t <span class="enscript-function-name">IOStatistics::copyWorkLoopStatistics</span>(IOStatisticsWorkLoop *stats) 
+{
+	KextNode *ke;
+	IOWorkLoopCounter *wlc;
+	IOWorkLoopDependency *dependentNode;
+	uint32_t size, accumulatedSize = 0;
+
+	RB_FOREACH(ke, KextTree, &amp;kextHead) {
+		SLIST_FOREACH(wlc, &amp;ke-&gt;workLoopList, link) {
+			stats-&gt;kextLoadTag = ke-&gt;loadTag;
+			stats-&gt;attachedEventSources = wlc-&gt;attachedEventSources;
+			stats-&gt;timeOnGate = wlc-&gt;timeOnGate;
+			stats-&gt;dependentKexts = 0;
+			RB_FOREACH(dependentNode, IOWorkLoopCounter::DependencyTree, &amp;wlc-&gt;dependencyHead) {
+				stats-&gt;dependentKextLoadTags[stats-&gt;dependentKexts] = dependentNode-&gt;loadTag;
+				stats-&gt;dependentKexts++;
+			}
+			
+			size = <span class="enscript-keyword">sizeof</span>(IOStatisticsWorkLoop) + (<span class="enscript-keyword">sizeof</span>(uint32_t) * stats-&gt;dependentKexts);
+			
+			accumulatedSize += size;
+			stats = (IOStatisticsWorkLoop*)((<span class="enscript-type">void</span>*)((<span class="enscript-type">char</span>*)stats + size));
+		}
+	}
+
+	<span class="enscript-keyword">return</span> accumulatedSize;
+}
+
+uint32_t <span class="enscript-function-name">IOStatistics::copyUserClientStatistics</span>(IOStatisticsUserClientHeader *stats, uint32_t loadTag) 
+{
+	KextNode *sought, *found = NULL;
+	uint32_t procs = 0;
+	IOUserClientProcessEntry *processEntry;
+
+	RB_FOREACH(sought, KextTree, &amp;kextHead) {
+		<span class="enscript-keyword">if</span> (sought-&gt;loadTag == loadTag) {
+			found = sought;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	
+	<span class="enscript-keyword">if</span> (!found) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	TAILQ_FOREACH(processEntry, &amp;found-&gt;userClientCallList, link) {
+		strncpy(stats-&gt;userClientCalls[procs].processName, processEntry-&gt;processName, kIOStatisticsProcessNameLength);
+		stats-&gt;userClientCalls[procs].pid = processEntry-&gt;pid;
+		stats-&gt;userClientCalls[procs].calls = processEntry-&gt;calls;
+		stats-&gt;processes++;
+		procs++;
+	}
+
+	<span class="enscript-keyword">return</span> <span class="enscript-keyword">sizeof</span>(IOStatisticsUserClientCall) * stats-&gt;processes;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOStatistics::storeUserClientCallInfo</span>(IOUserClient *userClient, IOUserClientCounter *counter)
+{	
+	OSString *ossUserClientCreator = NULL;
+	int32_t pid = -1;
+	KextNode *parentKext;
+	IOUserClientProcessEntry *entry, *nextEntry, *prevEntry = NULL;
+	uint32_t count = 0;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *ptr = NULL;
+	OSObject *obj;
+	
+	<span class="enscript-comment">/* TODO: see if this can be more efficient */</span>
+	obj = userClient-&gt;copyProperty(<span class="enscript-string">&quot;IOUserClientCreator&quot;</span>,
+					gIOServicePlane,
+					kIORegistryIterateRecursively | kIORegistryIterateParents);
+
+	<span class="enscript-keyword">if</span> (!obj)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err_nounlock</span>;
+
+	ossUserClientCreator = OSDynamicCast(OSString, obj);
+
+	<span class="enscript-keyword">if</span> (ossUserClientCreator) {
+		uint32_t len, lenIter = 0; 
+		
+		ptr = ossUserClientCreator-&gt;getCStringNoCopy();
+		len = ossUserClientCreator-&gt;getLength();
+		
+		<span class="enscript-keyword">while</span> ((*ptr != <span class="enscript-string">' '</span>) &amp;&amp; (lenIter &lt; len)) {
+			ptr++;
+			lenIter++;
+		}
+		
+		<span class="enscript-keyword">if</span> (lenIter &lt; len) {
+			ptr++; <span class="enscript-comment">// Skip the space
+</span>			lenIter++;
+			pid = 0;
+			<span class="enscript-keyword">while</span> ( (*ptr != <span class="enscript-string">','</span>) &amp;&amp; (lenIter &lt; len)) {
+				pid = pid*10 + (*ptr - <span class="enscript-string">'0'</span>);
+				ptr++;
+				lenIter++;
+			}
+			
+			<span class="enscript-keyword">if</span>(lenIter == len) {
+				pid = -1;
+			} <span class="enscript-keyword">else</span> {
+				ptr += 2;
+			}
+		}
+	}
+	
+	<span class="enscript-keyword">if</span> (-1 == pid)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err_nounlock</span>;
+	
+	IORWLockWrite(lock);
+
+	parentKext = counter-&gt;parentClass-&gt;parentKext;
+
+	TAILQ_FOREACH(entry, &amp;parentKext-&gt;userClientCallList, link) {
+		<span class="enscript-keyword">if</span> (entry-&gt;pid == pid) {
+			<span class="enscript-comment">/* Found, so increment count and move to the head */</span>
+			entry-&gt;calls++;
+			<span class="enscript-keyword">if</span> (count) {
+				TAILQ_REMOVE(&amp;parentKext-&gt;userClientCallList, entry, link);
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* At the head already, so increment and return */</span>
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">err_unlock</span>;
+			}
+		}
+		
+		count++;
+	}
+
+	<span class="enscript-keyword">if</span> (!entry) {
+		<span class="enscript-keyword">if</span> (count == IOKIT_STATISTICS_RECORDED_USERCLIENT_PROCS) {
+			<span class="enscript-comment">/* Max elements hit, so reuse the last */</span>
+			entry = TAILQ_LAST(&amp;parentKext-&gt;userClientCallList, ProcessEntryList);
+			TAILQ_REMOVE(&amp;parentKext-&gt;userClientCallList, entry, link);
+		}
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* Otherwise, allocate a new entry */</span>
+			entry = (IOUserClientProcessEntry*)kalloc(<span class="enscript-keyword">sizeof</span>(IOUserClientProcessEntry));
+			<span class="enscript-keyword">if</span> (!entry) {
+			    IORWLockUnlock(lock);
+				<span class="enscript-keyword">return</span>;
+			}
+		}
+
+		strncpy(entry-&gt;processName, ptr, kIOStatisticsProcessNameLength);
+		entry-&gt;pid = pid;
+		entry-&gt;calls = 1;
+	}
+	
+	TAILQ_FOREACH(nextEntry, &amp;parentKext-&gt;userClientCallList, link) {
+		<span class="enscript-keyword">if</span> (nextEntry-&gt;calls &lt;= entry-&gt;calls)
+			<span class="enscript-keyword">break</span>;
+			
+		prevEntry = nextEntry;
+	}
+	
+	<span class="enscript-keyword">if</span> (!prevEntry)
+		TAILQ_INSERT_HEAD(&amp;parentKext-&gt;userClientCallList, entry, link);
+	<span class="enscript-keyword">else</span>
+		TAILQ_INSERT_AFTER(&amp;parentKext-&gt;userClientCallList, prevEntry, entry, link);
+	
+<span class="enscript-reference">err_unlock</span>:
+	IORWLockUnlock(lock);
+        
+<span class="enscript-reference">err_nounlock</span>:
+	<span class="enscript-keyword">if</span> (obj)
+		obj-&gt;release();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOStatistics::countUserClientCall</span>(IOUserClient *client) {
+	<span class="enscript-reference">IOUserClient</span>::ExpansionData *data;
+	IOUserClientCounter *counter;
+    
+	<span class="enscript-comment">/* Guard against an uninitialized client object - &lt;rdar://problem/8577946&gt; */</span>
+	<span class="enscript-keyword">if</span> (!(data = client-&gt;reserved)) {
+		<span class="enscript-keyword">return</span>;
+	}
+    
+	<span class="enscript-keyword">if</span> ((counter = data-&gt;counter)) {
+		storeUserClientCallInfo(client, counter);
+		OSIncrementAtomic(&amp;counter-&gt;clientCalls);
+	}
+}
+
+KextNode *<span class="enscript-function-name">IOStatistics::getKextNodeFromBacktrace</span>(boolean_t write) {
+	<span class="enscript-type">const</span> uint32_t btMin = 3;
+
+	<span class="enscript-type">void</span> *bt[16];
+	<span class="enscript-type">unsigned</span> btCount = <span class="enscript-keyword">sizeof</span>(bt) / <span class="enscript-keyword">sizeof</span>(bt[0]);
+	vm_offset_t *scanAddr = NULL;
+	uint32_t i;
+	KextNode *found = NULL, *ke = NULL;
+
+	<span class="enscript-comment">/*
+	 * Gathering the backtrace is a significant source of
+	 * overhead. OSBacktrace does many safety checks that
+	 * are not needed in this situation.
+	 */</span>
+	btCount = fastbacktrace((uintptr_t*)bt, btCount);
+
+	<span class="enscript-keyword">if</span> (write) {
+		IORWLockWrite(lock);
+	} <span class="enscript-keyword">else</span> {
+		IORWLockRead(lock);
+	}
+
+	<span class="enscript-comment">/* Ignore first levels */</span>
+	scanAddr = (vm_offset_t *)&amp;bt[btMin - 1];
+
+	<span class="enscript-keyword">for</span> (i = btMin - 1; i &lt; btCount; i++, scanAddr++) {
+		ke = RB_ROOT(&amp;kextAddressHead);
+		<span class="enscript-keyword">while</span> (ke) {
+			<span class="enscript-keyword">if</span> (*scanAddr &lt; ke-&gt;address) {
+				ke = RB_LEFT(ke, addressLink);
+			}
+			<span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> ((*scanAddr &lt; ke-&gt;address_end) &amp;&amp; (*scanAddr &gt;= ke-&gt;address)) {
+ 					<span class="enscript-keyword">if</span> (!ke-&gt;kext-&gt;isKernelComponent()) {
+ 						<span class="enscript-keyword">return</span> ke;
+					} <span class="enscript-keyword">else</span> {
+						found = ke;
+					}
+				}
+				ke = RB_RIGHT(ke, addressLink);
+			}
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (!found) {
+		IORWLockUnlock(lock);
+	}
+  
+	<span class="enscript-keyword">return</span> found;
+}
+  
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOStatistics::releaseKextNode</span>(KextNode *node) {
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">node</span>)
+	IORWLockUnlock(lock);
+}
+
+<span class="enscript-comment">/* IOLib allocations */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOStatistics::countAlloc</span>(uint32_t index, vm_size_t size) {
+	KextNode *ke;
+  
+	<span class="enscript-keyword">if</span> (!enabled) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	ke = getKextNodeFromBacktrace(FALSE);
+	<span class="enscript-keyword">if</span> (ke) {
+		OSAddAtomic(size, &amp;ke-&gt;memoryCounters[index]);
+		releaseKextNode(ke);
+	}
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IOKITSTATS */</span>
+</pre>
+<hr />
+</body></html>

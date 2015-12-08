@@ -1,0 +1,1200 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pktap.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pktap.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2012-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sockio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/bpf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/pktap.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">_IP_VHL</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/udp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/udp_var.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/in6_pcb.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> inpcbinfo ripcbinfo;
+
+<span class="enscript-type">struct</span> pktap_softc {
+	LIST_ENTRY(pktap_softc)		pktp_link;
+	uint32_t					pktp_unit;
+	uint32_t					pktp_dlt_raw_count;
+	uint32_t					pktp_dlt_pkttap_count;
+	<span class="enscript-type">struct</span> ifnet				*pktp_ifp;
+	<span class="enscript-type">struct</span> pktap_filter			pktp_filters[PKTAP_MAX_FILTERS];
+};
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">PKTAP_DEBUG</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PKTAP_DEBUG</span> 1
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PKTAP_DEBUG */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PKTAP_FILTER_OK</span>	0		<span class="enscript-comment">/* Packet passes filter checks */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PKTAP_FILTER_SKIP</span> 1		<span class="enscript-comment">/* Do not tap this packet */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> pktap_inited = 0;
+
+<span class="enscript-function-name">SYSCTL_DECL</span>(_net_link);
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_link, IFT_PKTAP, pktap,
+    CTLFLAG_RW  |CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;pktap virtual interface&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> pktap_total_tap_count = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_pktap, OID_AUTO, total_tap_count,
+    CTLFLAG_RD | CTLFLAG_LOCKED, &amp;pktap_total_tap_count, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> u_int64_t pktap_count_unknown_if_type = 0;
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_net_link_pktap, OID_AUTO, count_unknown_if_type,
+    CTLFLAG_RD | CTLFLAG_LOCKED, &amp;pktap_count_unknown_if_type, <span class="enscript-string">&quot;&quot;</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> pktap_log = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_link_pktap, OID_AUTO, log,
+    CTLFLAG_RW | CTLFLAG_LOCKED, &amp;pktap_log, 0, <span class="enscript-string">&quot;&quot;</span>);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">PKTAP_LOG</span>(mask, fmt, ...) \
+<span class="enscript-keyword">do</span> { \
+	<span class="enscript-keyword">if</span> ((pktap_log &amp; mask)) \
+		printf(<span class="enscript-string">&quot;%s:%d &quot;</span> fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__); \
+} <span class="enscript-keyword">while</span> (false)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PKTP_LOG_FUNC</span> 0x01
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PKTP_LOG_FILTER</span> 0x02
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PKTP_LOG_INPUT</span> 0x04
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PKTP_LOG_OUTPUT</span> 0x08
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PKTP_LOG_ERROR</span> 0x10
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PKTP_LOG_NOPCB</span> 0x20
+
+<span class="enscript-comment">/*
+ * pktap_lck_rw protects the global list of pktap interfaces
+ */</span>
+<span class="enscript-function-name">decl_lck_rw_data</span>(<span class="enscript-type">static</span>, pktap_lck_rw_data);
+<span class="enscript-type">static</span> lck_rw_t *pktap_lck_rw = &amp;pktap_lck_rw_data;
+<span class="enscript-type">static</span> lck_grp_t *pktap_lck_grp = NULL;
+<span class="enscript-type">static</span> lck_attr_t *pktap_lck_attr = NULL;
+
+<span class="enscript-type">static</span> <span class="enscript-function-name">LIST_HEAD</span>(pktap_list, pktap_softc) pktap_list =
+    LIST_HEAD_INITIALIZER(pktap_list);
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">pktap_clone_create</span>(<span class="enscript-type">struct</span> if_clone *, u_int32_t, <span class="enscript-type">void</span> *);
+<span class="enscript-type">int</span> <span class="enscript-function-name">pktap_clone_destroy</span>(<span class="enscript-type">struct</span> ifnet *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> if_clone pktap_cloner =
+	IF_CLONE_INITIALIZER(PKTAP_IFNAME,
+		pktap_clone_create,
+		pktap_clone_destroy,
+		0,
+		IF_MAXUNIT);
+
+errno_t <span class="enscript-function-name">pktap_if_output</span>(ifnet_t, mbuf_t);
+errno_t <span class="enscript-function-name">pktap_demux</span>(ifnet_t, mbuf_t, <span class="enscript-type">char</span> *, protocol_family_t *);
+errno_t <span class="enscript-function-name">pktap_add_proto</span>(ifnet_t, protocol_family_t,
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> ifnet_demux_desc *, u_int32_t);
+errno_t <span class="enscript-function-name">pktap_del_proto</span>(ifnet_t, protocol_family_t);
+errno_t <span class="enscript-function-name">pktap_getdrvspec</span>(ifnet_t, <span class="enscript-type">struct</span> ifdrv64 *);
+errno_t <span class="enscript-function-name">pktap_setdrvspec</span>(ifnet_t, <span class="enscript-type">struct</span> ifdrv64 *);
+errno_t <span class="enscript-function-name">pktap_ioctl</span>(ifnet_t, <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>, <span class="enscript-type">void</span> *);
+<span class="enscript-type">void</span> <span class="enscript-function-name">pktap_detach</span>(ifnet_t);
+<span class="enscript-type">int</span> <span class="enscript-function-name">pktap_filter_evaluate</span>(<span class="enscript-type">struct</span> pktap_softc *, <span class="enscript-type">struct</span> ifnet *);
+<span class="enscript-type">void</span> <span class="enscript-function-name">pktap_bpf_tap</span>(<span class="enscript-type">struct</span> ifnet *, protocol_family_t, <span class="enscript-type">struct</span> mbuf *,
+    u_int32_t, u_int32_t, <span class="enscript-type">int</span>);
+errno_t <span class="enscript-function-name">pktap_tap_callback</span>(ifnet_t, u_int32_t, bpf_tap_mode);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pktap_hexdump</span>(<span class="enscript-type">int</span> mask, <span class="enscript-type">void</span> *addr, size_t len)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *buf = addr;
+	size_t i;
+
+	<span class="enscript-keyword">if</span> (!(pktap_log &amp; mask))
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; len; i++) {
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>  h = (buf[i] &amp; 0xf0) &gt;&gt; 4;
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>  l = buf[i] &amp; 0x0f;
+
+		<span class="enscript-keyword">if</span> (i != 0) {
+			<span class="enscript-keyword">if</span> (i % 32 == 0)
+				printf(<span class="enscript-string">&quot;\n&quot;</span>);
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (i % 4 == 0)
+				printf(<span class="enscript-string">&quot; &quot;</span>);
+		}
+		printf(<span class="enscript-string">&quot;%c%c&quot;</span>,
+			h &lt; 10 ? h + <span class="enscript-string">'0'</span> : h - 10 + <span class="enscript-string">'a'</span>,
+			l &lt; 10 ? l + <span class="enscript-string">'0'</span> : l - 10 + <span class="enscript-string">'a'</span>);
+	}
+	<span class="enscript-keyword">if</span> (i % 32 != 0)
+		printf(<span class="enscript-string">&quot;\n&quot;</span>);
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">pktap_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> error = 0;
+	lck_grp_attr_t *lck_grp_attr = NULL;
+
+	<span class="enscript-comment">/* Make sure we're called only once */</span>
+	VERIFY(pktap_inited == 0);
+
+	pktap_inited = 1;
+
+	lck_grp_attr = lck_grp_attr_alloc_init();
+	pktap_lck_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;pktap&quot;</span>, lck_grp_attr);
+	pktap_lck_attr = lck_attr_alloc_init();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PKTAP_DEBUG</span>
+	lck_attr_setdebug(pktap_lck_attr);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PKTAP_DEBUG */</span>
+	lck_rw_init(pktap_lck_rw, pktap_lck_grp, pktap_lck_attr);
+	lck_grp_attr_free(lck_grp_attr);
+
+	LIST_INIT(&amp;pktap_list);
+
+	error = if_clone_attach(&amp;pktap_cloner);
+	<span class="enscript-keyword">if</span> (error != 0)
+		panic(<span class="enscript-string">&quot;%s: if_clone_attach() failed, error %d\n&quot;</span>,
+		    __func__, error);
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">pktap_clone_create</span>(<span class="enscript-type">struct</span> if_clone *ifc, u_int32_t unit, __unused <span class="enscript-type">void</span> *params)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> pktap_softc *pktap = NULL;
+	<span class="enscript-type">struct</span> ifnet_init_params if_init;
+
+	PKTAP_LOG(PKTP_LOG_FUNC, <span class="enscript-string">&quot;unit %u\n&quot;</span>, unit);
+
+	pktap = _MALLOC(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pktap_softc), M_DEVBUF,
+	    M_WAITOK | M_ZERO);
+	<span class="enscript-keyword">if</span> (pktap == NULL) {
+		printf(<span class="enscript-string">&quot;%s: _MALLOC failed\n&quot;</span>, __func__);
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	pktap-&gt;pktp_unit = unit;
+
+	<span class="enscript-comment">/*
+	 * By default accept packet from physical interfaces
+	 */</span>
+	pktap-&gt;pktp_filters[0].filter_op = PKTAP_FILTER_OP_PASS;
+	pktap-&gt;pktp_filters[0].filter_param = PKTAP_FILTER_PARAM_IF_TYPE;
+	pktap-&gt;pktp_filters[0].filter_param_if_type = IFT_ETHER;
+
+	pktap-&gt;pktp_filters[1].filter_op = PKTAP_FILTER_OP_PASS;
+	pktap-&gt;pktp_filters[1].filter_param = PKTAP_FILTER_PARAM_IF_TYPE;
+	pktap-&gt;pktp_filters[1].filter_param_if_type = IFT_IEEE1394;
+	<span class="enscript-comment">/*
+	 * We do not use a set_bpf_tap() function as we rather rely on the more
+	 * accurate callback passed to bpf_attach()
+	 */</span>
+	bzero(&amp;if_init, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ifnet_init_params));
+	if_init.name = ifc-&gt;ifc_name;
+	if_init.unit = unit;
+	if_init.type = IFT_PKTAP;
+	if_init.family = IFNET_FAMILY_LOOPBACK;
+	if_init.output = pktap_if_output;
+	if_init.demux = pktap_demux;
+	if_init.add_proto = pktap_add_proto;
+	if_init.del_proto = pktap_del_proto;
+	if_init.softc = pktap;
+	if_init.ioctl = pktap_ioctl;
+	if_init.detach = pktap_detach;
+
+	error = ifnet_allocate(&amp;if_init, &amp;pktap-&gt;pktp_ifp);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		printf(<span class="enscript-string">&quot;%s: ifnet_allocate failed, error %d\n&quot;</span>,
+		    __func__, error);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	ifnet_set_flags(pktap-&gt;pktp_ifp, IFF_UP, IFF_UP);
+
+	error = ifnet_attach(pktap-&gt;pktp_ifp, NULL);
+	<span class="enscript-keyword">if</span> (error != 0) {
+		printf(<span class="enscript-string">&quot;%s: ifnet_attach failed - error %d\n&quot;</span>, __func__, error);
+		ifnet_release(pktap-&gt;pktp_ifp);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-comment">/* Attach DLT_PKTAP as the default DLT */</span>
+	bpf_attach(pktap-&gt;pktp_ifp, DLT_PKTAP, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pktap_header),
+	    NULL, pktap_tap_callback);
+	bpf_attach(pktap-&gt;pktp_ifp, DLT_RAW, 0, NULL, pktap_tap_callback);
+
+	<span class="enscript-comment">/* Take a reference and add to the global list */</span>
+	ifnet_reference(pktap-&gt;pktp_ifp);
+	lck_rw_lock_exclusive(pktap_lck_rw);
+	LIST_INSERT_HEAD(&amp;pktap_list, pktap, pktp_link);
+	lck_rw_done(pktap_lck_rw);
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (error != 0) {
+		<span class="enscript-keyword">if</span> (pktap != NULL)
+			_FREE(pktap, M_DEVBUF);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">pktap_clone_destroy</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">int</span> error = 0;
+
+	PKTAP_LOG(PKTP_LOG_FUNC, <span class="enscript-string">&quot;%s\n&quot;</span>, ifp-&gt;if_xname);
+
+	(<span class="enscript-type">void</span>) ifnet_detach(ifp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * This function is called whenever a DLT is set on the interface:
+ * - When interface is attached to a BPF device via BIOCSETIF for the
+ *   default DLT
+ * - Whenever a new DLT is selected via BIOCSDLT
+ * - When the interface is detached from a BPF device (direction is zero)
+ */</span>
+__private_extern__ errno_t
+<span class="enscript-function-name">pktap_tap_callback</span>(ifnet_t ifp, u_int32_t dlt, bpf_tap_mode direction)
+{
+	<span class="enscript-type">struct</span> pktap_softc *pktap;
+
+	pktap = ifp-&gt;if_softc;
+	<span class="enscript-keyword">if</span> (pktap == NULL) {
+		printf(<span class="enscript-string">&quot;%s: if_softc is NULL for ifp %s\n&quot;</span>, __func__,
+		    ifp-&gt;if_xname);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">switch</span> (dlt) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DLT_RAW</span>:
+			<span class="enscript-keyword">if</span> (direction == 0) {
+				<span class="enscript-keyword">if</span> (pktap-&gt;pktp_dlt_raw_count &gt; 0) {
+					pktap-&gt;pktp_dlt_raw_count--;
+					OSAddAtomic(-1, &amp;pktap_total_tap_count);
+
+				}
+			} <span class="enscript-keyword">else</span> {
+				pktap-&gt;pktp_dlt_raw_count++;
+				OSAddAtomic(1, &amp;pktap_total_tap_count);
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DLT_PKTAP</span>:
+			<span class="enscript-keyword">if</span> (direction == 0) {
+				<span class="enscript-keyword">if</span> (pktap-&gt;pktp_dlt_pkttap_count &gt; 0) {
+					pktap-&gt;pktp_dlt_pkttap_count--;
+					OSAddAtomic(-1, &amp;pktap_total_tap_count);
+				}
+			} <span class="enscript-keyword">else</span> {
+				pktap-&gt;pktp_dlt_pkttap_count++;
+				OSAddAtomic(1, &amp;pktap_total_tap_count);
+			}
+			<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">done</span>:
+	<span class="enscript-comment">/*
+	 * Attachements count must be positive and we're in trouble
+	 * if we have more that 2**31 attachements
+	 */</span>
+	VERIFY(pktap_total_tap_count &gt;= 0);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+__private_extern__ errno_t
+<span class="enscript-function-name">pktap_if_output</span>(ifnet_t ifp, mbuf_t m)
+{
+	PKTAP_LOG(PKTP_LOG_FUNC, <span class="enscript-string">&quot;%s\n&quot;</span>, ifp-&gt;if_xname);
+	mbuf_freem(m);
+	<span class="enscript-keyword">return</span> (ENOTSUP);
+}
+
+__private_extern__ errno_t
+<span class="enscript-function-name">pktap_demux</span>(ifnet_t ifp, __unused mbuf_t m, __unused <span class="enscript-type">char</span> *header,
+	__unused protocol_family_t *ppf)
+{
+	PKTAP_LOG(PKTP_LOG_FUNC, <span class="enscript-string">&quot;%s\n&quot;</span>, ifp-&gt;if_xname);
+	<span class="enscript-keyword">return</span> (ENOTSUP);
+}
+
+__private_extern__ errno_t
+<span class="enscript-function-name">pktap_add_proto</span>(__unused ifnet_t ifp, protocol_family_t pf,
+    __unused <span class="enscript-type">const</span> <span class="enscript-type">struct</span> ifnet_demux_desc *dmx, __unused u_int32_t cnt)
+{
+	PKTAP_LOG(PKTP_LOG_FUNC, <span class="enscript-string">&quot;%s pf %u\n&quot;</span>, ifp-&gt;if_xname, pf);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+__private_extern__ errno_t
+<span class="enscript-function-name">pktap_del_proto</span>(__unused ifnet_t ifp, __unused protocol_family_t pf)
+{
+	PKTAP_LOG(PKTP_LOG_FUNC, <span class="enscript-string">&quot;%s pf %u\n&quot;</span>, ifp-&gt;if_xname, pf);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+__private_extern__ errno_t
+<span class="enscript-function-name">pktap_getdrvspec</span>(ifnet_t ifp, <span class="enscript-type">struct</span> ifdrv64 *ifd)
+{
+	errno_t error = 0;
+	<span class="enscript-type">struct</span> pktap_softc *pktap;
+	<span class="enscript-type">int</span> i;
+
+	PKTAP_LOG(PKTP_LOG_FUNC, <span class="enscript-string">&quot;%s\n&quot;</span>, ifp-&gt;if_xname);
+
+	pktap = ifp-&gt;if_softc;
+	<span class="enscript-keyword">if</span> (pktap == NULL) {
+		error = ENOENT;
+		printf(<span class="enscript-string">&quot;%s: pktap NULL - error %d\n&quot;</span>, __func__, error);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">switch</span> (ifd-&gt;ifd_cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PKTP_CMD_FILTER_GET</span>: {
+		<span class="enscript-type">struct</span> x_pktap_filter x_filters[PKTAP_MAX_FILTERS];
+
+		bzero(&amp;x_filters, <span class="enscript-keyword">sizeof</span>(x_filters));
+
+		<span class="enscript-keyword">if</span> (ifd-&gt;ifd_len &lt; PKTAP_MAX_FILTERS * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x_pktap_filter)) {
+			printf(<span class="enscript-string">&quot;%s: PKTP_CMD_FILTER_GET ifd_len %llu too small - error %d\n&quot;</span>,
+				__func__, ifd-&gt;ifd_len, error);
+			error = EINVAL;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; PKTAP_MAX_FILTERS; i++) {
+			<span class="enscript-type">struct</span> pktap_filter *pktap_filter = pktap-&gt;pktp_filters + i;
+			<span class="enscript-type">struct</span> x_pktap_filter *x_filter = x_filters + i;
+
+			x_filter-&gt;filter_op = pktap_filter-&gt;filter_op;
+			x_filter-&gt;filter_param = pktap_filter-&gt;filter_param;
+
+			<span class="enscript-keyword">if</span> (pktap_filter-&gt;filter_param == PKTAP_FILTER_PARAM_IF_TYPE)
+				x_filter-&gt;filter_param_if_type = pktap_filter-&gt;filter_param_if_type;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (pktap_filter-&gt;filter_param == PKTAP_FILTER_PARAM_IF_NAME)
+				strlcpy(x_filter-&gt;filter_param_if_name,
+						pktap_filter-&gt;filter_param_if_name,
+						<span class="enscript-keyword">sizeof</span>(x_filter-&gt;filter_param_if_name));
+		}
+		error = copyout(x_filters, ifd-&gt;ifd_data,
+			PKTAP_MAX_FILTERS * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x_pktap_filter));
+		<span class="enscript-keyword">if</span> (error) {
+			printf(<span class="enscript-string">&quot;%s: PKTP_CMD_FILTER_GET copyout - error %d\n&quot;</span>, __func__, error);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PKTP_CMD_TAP_COUNT</span>: {
+		uint32_t tap_count = pktap-&gt;pktp_dlt_raw_count + pktap-&gt;pktp_dlt_pkttap_count;
+
+		<span class="enscript-keyword">if</span> (ifd-&gt;ifd_len &lt; <span class="enscript-keyword">sizeof</span>(tap_count)) {
+			printf(<span class="enscript-string">&quot;%s: PKTP_CMD_TAP_COUNT ifd_len %llu too small - error %d\n&quot;</span>,
+				__func__, ifd-&gt;ifd_len, error);
+			error = EINVAL;
+			<span class="enscript-keyword">break</span>;
+		}
+		error = copyout(&amp;tap_count, ifd-&gt;ifd_data, <span class="enscript-keyword">sizeof</span>(tap_count));
+		<span class="enscript-keyword">if</span> (error) {
+			printf(<span class="enscript-string">&quot;%s: PKTP_CMD_TAP_COUNT copyout - error %d\n&quot;</span>, __func__, error);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-reference">default</span>:
+		error = EINVAL;
+		<span class="enscript-keyword">break</span>;
+	}
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+
+__private_extern__ errno_t
+<span class="enscript-function-name">pktap_setdrvspec</span>(ifnet_t ifp, <span class="enscript-type">struct</span> ifdrv64 *ifd)
+{
+	errno_t error = 0;
+	<span class="enscript-type">struct</span> pktap_softc *pktap;
+
+	PKTAP_LOG(PKTP_LOG_FUNC, <span class="enscript-string">&quot;%s\n&quot;</span>, ifp-&gt;if_xname);
+
+	pktap = ifp-&gt;if_softc;
+	<span class="enscript-keyword">if</span> (pktap == NULL) {
+		error = ENOENT;
+		printf(<span class="enscript-string">&quot;%s: pktap NULL - error %d\n&quot;</span>, __func__, error);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+
+	<span class="enscript-keyword">switch</span> (ifd-&gt;ifd_cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PKTP_CMD_FILTER_SET</span>: {
+		<span class="enscript-type">struct</span> x_pktap_filter user_filters[PKTAP_MAX_FILTERS];
+		<span class="enscript-type">int</span> i;
+		<span class="enscript-type">int</span> got_op_none = 0;
+
+		<span class="enscript-keyword">if</span> (ifd-&gt;ifd_len != PKTAP_MAX_FILTERS * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> x_pktap_filter)) {
+			printf(<span class="enscript-string">&quot;%s: PKTP_CMD_FILTER_SET bad ifd_len %llu - error %d\n&quot;</span>,
+				__func__, ifd-&gt;ifd_len, error);
+			error = EINVAL;
+			<span class="enscript-keyword">break</span>;
+		}
+		error = copyin(ifd-&gt;ifd_data, &amp;user_filters, ifd-&gt;ifd_len);
+		<span class="enscript-keyword">if</span> (error) {
+			printf(<span class="enscript-string">&quot;%s: copyin - error %d\n&quot;</span>, __func__, error);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		<span class="enscript-comment">/*
+		 * Validate user provided parameters
+		 */</span>
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; PKTAP_MAX_FILTERS; i++) {
+			<span class="enscript-type">struct</span> x_pktap_filter *x_filter = user_filters + i;
+
+			<span class="enscript-keyword">switch</span> (x_filter-&gt;filter_op) {
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">PKTAP_FILTER_OP_NONE</span>:
+					<span class="enscript-comment">/* Following entries must be PKTAP_FILTER_OP_NONE */</span>
+					got_op_none = 1;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">PKTAP_FILTER_OP_PASS</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">PKTAP_FILTER_OP_SKIP</span>:
+					<span class="enscript-comment">/* Invalid after PKTAP_FILTER_OP_NONE */</span>
+					<span class="enscript-keyword">if</span> (got_op_none) {
+						error = EINVAL;
+						<span class="enscript-keyword">break</span>;
+					}
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-reference">default</span>:
+					error = EINVAL;
+					<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (error != 0)
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">switch</span> (x_filter-&gt;filter_param) {
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">PKTAP_FILTER_OP_NONE</span>:
+					<span class="enscript-keyword">if</span> (x_filter-&gt;filter_op != PKTAP_FILTER_OP_NONE) {
+						error = EINVAL;
+						<span class="enscript-keyword">break</span>;
+					}
+					<span class="enscript-keyword">break</span>;
+
+				<span class="enscript-comment">/*
+				 * Do not allow to tap a pktap from a pktap
+				 */</span>
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">PKTAP_FILTER_PARAM_IF_TYPE</span>:
+					<span class="enscript-keyword">if</span> (x_filter-&gt;filter_param_if_type == IFT_PKTAP ||
+						x_filter-&gt;filter_param_if_type &gt; 0xff) {
+						error = EINVAL;
+						<span class="enscript-keyword">break</span>;
+					}
+					<span class="enscript-keyword">break</span>;
+
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">PKTAP_FILTER_PARAM_IF_NAME</span>:
+					<span class="enscript-keyword">if</span> (strncmp(x_filter-&gt;filter_param_if_name, PKTAP_IFNAME,
+							strlen(PKTAP_IFNAME)) == 0) {
+						error = EINVAL;
+						<span class="enscript-keyword">break</span>;
+					}
+					<span class="enscript-keyword">break</span>;
+
+				<span class="enscript-reference">default</span>:
+					error = EINVAL;
+					<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (error != 0)
+				<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; PKTAP_MAX_FILTERS; i++) {
+			<span class="enscript-type">struct</span> pktap_filter *pktap_filter = pktap-&gt;pktp_filters + i;
+			<span class="enscript-type">struct</span> x_pktap_filter *x_filter = user_filters + i;
+
+			pktap_filter-&gt;filter_op = x_filter-&gt;filter_op;
+			pktap_filter-&gt;filter_param = x_filter-&gt;filter_param;
+
+			<span class="enscript-keyword">if</span> (pktap_filter-&gt;filter_param == PKTAP_FILTER_PARAM_IF_TYPE)
+				pktap_filter-&gt;filter_param_if_type = x_filter-&gt;filter_param_if_type;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (pktap_filter-&gt;filter_param == PKTAP_FILTER_PARAM_IF_NAME) {
+				size_t len;
+
+				strlcpy(pktap_filter-&gt;filter_param_if_name,
+						x_filter-&gt;filter_param_if_name,
+						<span class="enscript-keyword">sizeof</span>(pktap_filter-&gt;filter_param_if_name));
+				<span class="enscript-comment">/*
+				 * If name does not end with a number then it's a &quot;wildcard&quot; match
+				 * where we compare the prefix of the interface name
+				 */</span>
+				len = strlen(pktap_filter-&gt;filter_param_if_name);
+				<span class="enscript-keyword">if</span> (pktap_filter-&gt;filter_param_if_name[len] &lt; <span class="enscript-string">'0'</span> ||
+					pktap_filter-&gt;filter_param_if_name[len] &gt; <span class="enscript-string">'9'</span>)
+					pktap_filter-&gt;filter_ifname_prefix_len = len;
+			}
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-reference">default</span>:
+		error = EINVAL;
+		<span class="enscript-keyword">break</span>;
+	}
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+
+__private_extern__ errno_t
+<span class="enscript-function-name">pktap_ioctl</span>(ifnet_t ifp, <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> cmd, <span class="enscript-type">void</span> *data)
+{
+	errno_t error = 0;
+
+	PKTAP_LOG(PKTP_LOG_FUNC, <span class="enscript-string">&quot;%s\n&quot;</span>, ifp-&gt;if_xname);
+
+	<span class="enscript-keyword">if</span> ((cmd &amp; IOC_IN)) {
+		error = kauth_authorize_generic(kauth_cred_get(), KAUTH_GENERIC_ISSUSER);
+		<span class="enscript-keyword">if</span> (error) {
+			PKTAP_LOG(PKTP_LOG_ERROR,
+				<span class="enscript-string">&quot;%s: kauth_authorize_generic(KAUTH_GENERIC_ISSUSER) - error %d\n&quot;</span>,
+				__func__, error);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+	}
+
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGDRVSPEC32</span>: {
+		<span class="enscript-type">struct</span> ifdrv64 ifd;
+		<span class="enscript-type">struct</span> ifdrv32 *ifd32 = (<span class="enscript-type">struct</span> ifdrv32 *)data;
+
+		memcpy(ifd.ifd_name, ifd32-&gt;ifd_name, <span class="enscript-keyword">sizeof</span>(ifd.ifd_name));
+		ifd.ifd_cmd = ifd32-&gt;ifd_cmd;
+		ifd.ifd_len = ifd32-&gt;ifd_len;
+		ifd.ifd_data = ifd32-&gt;ifd_data;
+
+		error = pktap_getdrvspec(ifp, &amp;ifd);
+
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCGDRVSPEC64</span>: {
+		<span class="enscript-type">struct</span> ifdrv64 *ifd64 = (<span class="enscript-type">struct</span> ifdrv64 *)data;
+
+		error = pktap_getdrvspec(ifp, ifd64);
+
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSDRVSPEC32</span>: {
+		<span class="enscript-type">struct</span> ifdrv64 ifd;
+		<span class="enscript-type">struct</span> ifdrv32 *ifd32 = (<span class="enscript-type">struct</span> ifdrv32 *)data;
+
+		memcpy(ifd.ifd_name, ifd32-&gt;ifd_name, <span class="enscript-keyword">sizeof</span>(ifd.ifd_name));
+		ifd.ifd_cmd = ifd32-&gt;ifd_cmd;
+		ifd.ifd_len = ifd32-&gt;ifd_len;
+		ifd.ifd_data = ifd32-&gt;ifd_data;
+
+		error = pktap_setdrvspec(ifp, &amp;ifd);
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">SIOCSDRVSPEC64</span>: {
+		<span class="enscript-type">struct</span> ifdrv64 *ifd64 = (<span class="enscript-type">struct</span> ifdrv64 *)data;
+
+		error = pktap_setdrvspec(ifp, ifd64);
+
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-reference">default</span>:
+		error = ENOTSUP;
+		<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">pktap_detach</span>(ifnet_t ifp)
+{
+	<span class="enscript-type">struct</span> pktap_softc *pktap;
+
+	PKTAP_LOG(PKTP_LOG_FUNC, <span class="enscript-string">&quot;%s\n&quot;</span>, ifp-&gt;if_xname);
+
+	lck_rw_lock_exclusive(pktap_lck_rw);
+
+	pktap = ifp-&gt;if_softc;
+	ifp-&gt;if_softc = NULL;
+	LIST_REMOVE(pktap, pktp_link);
+
+	lck_rw_done(pktap_lck_rw);
+
+	<span class="enscript-comment">/* Drop reference as it's no more on the global list */</span>
+	ifnet_release(ifp);
+
+	_FREE(pktap, M_DEVBUF);
+
+	<span class="enscript-comment">/* This is for the reference taken by ifnet_attach() */</span>
+	(<span class="enscript-type">void</span>) ifnet_release(ifp);
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">pktap_filter_evaluate</span>(<span class="enscript-type">struct</span> pktap_softc *pktap, <span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> result = PKTAP_FILTER_SKIP; <span class="enscript-comment">/* Need positive matching rule to pass */</span>
+	<span class="enscript-type">int</span> match = 0;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; PKTAP_MAX_FILTERS; i++) {
+		<span class="enscript-type">struct</span> pktap_filter *pktap_filter = pktap-&gt;pktp_filters + i;
+		size_t len = pktap_filter-&gt;filter_ifname_prefix_len != 0 ?
+			pktap_filter-&gt;filter_ifname_prefix_len : PKTAP_IFXNAMESIZE;
+
+		<span class="enscript-keyword">switch</span> (pktap_filter-&gt;filter_op) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">PKTAP_FILTER_OP_NONE</span>:
+				match = 1;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">PKTAP_FILTER_OP_PASS</span>:
+				<span class="enscript-keyword">if</span> (pktap_filter-&gt;filter_param == PKTAP_FILTER_PARAM_IF_TYPE) {
+					<span class="enscript-keyword">if</span> (pktap_filter-&gt;filter_param_if_type == 0 ||
+						ifp-&gt;if_type == pktap_filter-&gt;filter_param_if_type) {
+						result = PKTAP_FILTER_OK;
+						match = 1;
+						PKTAP_LOG(PKTP_LOG_FILTER, <span class="enscript-string">&quot;pass %s match type %u\n&quot;</span>,
+							ifp-&gt;if_xname, pktap_filter-&gt;filter_param_if_type);
+						<span class="enscript-keyword">break</span>;
+					}
+				}
+				<span class="enscript-keyword">if</span> (pktap_filter-&gt;filter_param == PKTAP_FILTER_PARAM_IF_NAME) {
+					<span class="enscript-keyword">if</span> (strncmp(ifp-&gt;if_xname, pktap_filter-&gt;filter_param_if_name,
+							len) == 0) {
+						result = PKTAP_FILTER_OK;
+						match = 1;
+						PKTAP_LOG(PKTP_LOG_FILTER, <span class="enscript-string">&quot;pass %s match name %s\n&quot;</span>,
+							ifp-&gt;if_xname, pktap_filter-&gt;filter_param_if_name);
+						<span class="enscript-keyword">break</span>;
+					}
+				}
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">PKTAP_FILTER_OP_SKIP</span>:
+				<span class="enscript-keyword">if</span> (pktap_filter-&gt;filter_param == PKTAP_FILTER_PARAM_IF_TYPE) {
+					<span class="enscript-keyword">if</span> (pktap_filter-&gt;filter_param_if_type == 0 ||
+						ifp-&gt;if_type == pktap_filter-&gt;filter_param_if_type) {
+						result = PKTAP_FILTER_SKIP;
+						match = 1;
+						PKTAP_LOG(PKTP_LOG_FILTER, <span class="enscript-string">&quot;skip %s match type %u\n&quot;</span>,
+							ifp-&gt;if_xname, pktap_filter-&gt;filter_param_if_type);
+						<span class="enscript-keyword">break</span>;
+					}
+				}
+				<span class="enscript-keyword">if</span> (pktap_filter-&gt;filter_param == PKTAP_FILTER_PARAM_IF_NAME) {
+					<span class="enscript-keyword">if</span> (strncmp(ifp-&gt;if_xname, pktap_filter-&gt;filter_param_if_name,
+							len) == 0) {
+						result = PKTAP_FILTER_SKIP;
+						match = 1;
+						PKTAP_LOG(PKTP_LOG_FILTER, <span class="enscript-string">&quot;skip %s match name %s\n&quot;</span>,
+							ifp-&gt;if_xname, pktap_filter-&gt;filter_param_if_name);
+						<span class="enscript-keyword">break</span>;
+					}
+				}
+				<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (match)
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (match == 0) {
+		PKTAP_LOG(PKTP_LOG_FILTER, <span class="enscript-string">&quot;%s no match\n&quot;</span>,
+			ifp-&gt;if_xname);
+	}
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pktap_set_procinfo</span>(<span class="enscript-type">struct</span> pktap_header *hdr, <span class="enscript-type">struct</span> so_procinfo *soprocinfo)
+{
+	hdr-&gt;pth_pid = soprocinfo-&gt;spi_pid;
+	proc_name(soprocinfo-&gt;spi_pid, hdr-&gt;pth_comm, MAXCOMLEN);
+	<span class="enscript-keyword">if</span> (soprocinfo-&gt;spi_pid != 0)
+		uuid_copy(hdr-&gt;pth_uuid, soprocinfo-&gt;spi_uuid);
+
+	<span class="enscript-comment">/*
+	 * When not delegated, the effective pid is the same as the real pid
+	 */</span>
+	<span class="enscript-keyword">if</span> (soprocinfo-&gt;spi_delegated != 0) {
+		hdr-&gt;pth_flags |= PTH_FLAG_PROC_DELEGATED;
+		hdr-&gt;pth_epid = soprocinfo-&gt;spi_epid;
+		proc_name(soprocinfo-&gt;spi_epid, hdr-&gt;pth_ecomm, MAXCOMLEN);
+		uuid_copy(hdr-&gt;pth_euuid, soprocinfo-&gt;spi_euuid);
+	}
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">pktap_finalize_proc_info</span>(<span class="enscript-type">struct</span> pktap_header *hdr)
+{
+	<span class="enscript-type">int</span> found;
+	<span class="enscript-type">struct</span> so_procinfo soprocinfo;
+
+	<span class="enscript-keyword">if</span> (!(hdr-&gt;pth_flags &amp; PTH_FLAG_DELAY_PKTAP))
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/*
+	 * Clear the flag as it's internal
+	 */</span>
+	hdr-&gt;pth_flags &amp;= ~PTH_FLAG_DELAY_PKTAP;
+
+	<span class="enscript-keyword">if</span> (hdr-&gt;pth_ipproto == IPPROTO_TCP)
+		found = inp_findinpcb_procinfo(&amp;tcbinfo, hdr-&gt;pth_flowid,
+		    &amp;soprocinfo);
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (hdr-&gt;pth_ipproto == IPPROTO_UDP)
+		found = inp_findinpcb_procinfo(&amp;udbinfo, hdr-&gt;pth_flowid,
+		    &amp;soprocinfo);
+	<span class="enscript-keyword">else</span>
+		found = inp_findinpcb_procinfo(&amp;ripcbinfo, hdr-&gt;pth_flowid,
+		    &amp;soprocinfo);
+
+	<span class="enscript-keyword">if</span> (found == 1)
+		pktap_set_procinfo(hdr, &amp;soprocinfo);
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">pktap_fill_proc_info</span>(<span class="enscript-type">struct</span> pktap_header *hdr, protocol_family_t proto,
+	<span class="enscript-type">struct</span> mbuf *m, u_int32_t pre, <span class="enscript-type">int</span> outgoing, <span class="enscript-type">struct</span> ifnet *ifp)
+{
+	<span class="enscript-type">int</span> found = 0;
+	<span class="enscript-type">struct</span> so_procinfo soprocinfo;
+
+	<span class="enscript-comment">/*
+	 * Getting the pid and procname is expensive
+	 * For outgoing, do the lookup only if there's an
+	 * associated socket as indicated by the flowhash
+	 */</span>
+	<span class="enscript-keyword">if</span> (outgoing != 0 &amp;&amp; m-&gt;m_pkthdr.pkt_flowsrc == FLOWSRC_INPCB) {
+		<span class="enscript-comment">/*
+		 * To avoid lock ordering issues we delay the process lookup
+		 * to the BPF read as we cannot
+		 * assume the socket lock is unlocked on output
+		 */</span>
+		found = 0;
+		hdr-&gt;pth_flags |= PTH_FLAG_DELAY_PKTAP;
+		hdr-&gt;pth_flowid = m-&gt;m_pkthdr.pkt_flowid;
+		<span class="enscript-keyword">if</span> (m-&gt;m_pkthdr.pkt_flags &amp; PKTF_FLOW_RAWSOCK)
+			hdr-&gt;pth_ipproto = IPPROTO_RAW;
+		<span class="enscript-keyword">else</span>		
+			hdr-&gt;pth_ipproto = m-&gt;m_pkthdr.pkt_proto;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (outgoing == 0) {
+		<span class="enscript-type">struct</span> inpcb *inp = NULL;
+
+		<span class="enscript-keyword">if</span> (proto == PF_INET) {
+			<span class="enscript-type">struct</span> ip ip;
+			errno_t error;
+			size_t hlen;
+			<span class="enscript-type">struct</span> in_addr faddr, laddr;
+			u_short fport, lport;
+			<span class="enscript-type">struct</span> inpcbinfo *pcbinfo = NULL;
+			<span class="enscript-type">int</span> wildcard = 0;
+
+			error = mbuf_copydata(m, pre, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip), &amp;ip);
+			<span class="enscript-keyword">if</span> (error != 0) {
+				PKTAP_LOG(PKTP_LOG_ERROR,
+				    <span class="enscript-string">&quot;mbuf_copydata tcp v4 failed for %s\n&quot;</span>,
+				    hdr-&gt;pth_ifname);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+			}
+			hlen = IP_VHL_HL(ip.ip_vhl) &lt;&lt; 2;
+
+			faddr = ip.ip_src;
+			laddr = ip.ip_dst;
+
+			<span class="enscript-keyword">if</span> (ip.ip_p == IPPROTO_TCP) {
+				<span class="enscript-type">struct</span> tcphdr th;
+
+				error = mbuf_copydata(m, pre + hlen,
+					<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> tcphdr), &amp;th);
+				<span class="enscript-keyword">if</span> (error != 0)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+				fport = th.th_sport;
+				lport = th.th_dport;
+
+				pcbinfo = &amp;tcbinfo;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ip.ip_p == IPPROTO_UDP) {
+				<span class="enscript-type">struct</span> udphdr uh;
+
+				error = mbuf_copydata(m, pre + hlen,
+					<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> udphdr), &amp;uh);
+				<span class="enscript-keyword">if</span> (error != 0) {
+					PKTAP_LOG(PKTP_LOG_ERROR,
+					    <span class="enscript-string">&quot;mbuf_copydata udp v4 failed for %s\n&quot;</span>,
+					    hdr-&gt;pth_ifname);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+				}
+				fport = uh.uh_sport;
+				lport = uh.uh_dport;
+
+				pcbinfo = &amp;udbinfo;
+				wildcard = 1;
+			}
+			<span class="enscript-keyword">if</span> (pcbinfo != NULL) {
+				inp = in_pcblookup_hash(pcbinfo, faddr, fport,
+					laddr, lport, wildcard, outgoing ? NULL : ifp);
+
+				<span class="enscript-keyword">if</span> (inp == NULL &amp;&amp; hdr-&gt;pth_iftype != IFT_LOOP)
+					PKTAP_LOG(PKTP_LOG_NOPCB,
+					    <span class="enscript-string">&quot;in_pcblookup_hash no pcb %s\n&quot;</span>,
+					    hdr-&gt;pth_ifname);
+			} <span class="enscript-keyword">else</span> {
+				PKTAP_LOG(PKTP_LOG_NOPCB,
+				    <span class="enscript-string">&quot;unknown ip_p %u on %s\n&quot;</span>,
+				    ip.ip_p, hdr-&gt;pth_ifname);
+				pktap_hexdump(PKTP_LOG_NOPCB, &amp;ip, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip));
+			}
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (proto == PF_INET6) {
+			<span class="enscript-type">struct</span> ip6_hdr ip6;
+			errno_t error;
+			<span class="enscript-type">struct</span> in6_addr *faddr;
+			<span class="enscript-type">struct</span> in6_addr *laddr;
+			u_short fport, lport;
+			<span class="enscript-type">struct</span> inpcbinfo *pcbinfo = NULL;
+			<span class="enscript-type">int</span> wildcard = 0;
+
+			error = mbuf_copydata(m, pre, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_hdr), &amp;ip6);
+			<span class="enscript-keyword">if</span> (error != 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+
+			faddr = &amp;ip6.ip6_src;
+			laddr = &amp;ip6.ip6_dst;
+
+			<span class="enscript-keyword">if</span> (ip6.ip6_nxt == IPPROTO_TCP) {
+				<span class="enscript-type">struct</span> tcphdr th;
+
+				error = mbuf_copydata(m, pre + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_hdr),
+					<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> tcphdr), &amp;th);
+				<span class="enscript-keyword">if</span> (error != 0) {
+					PKTAP_LOG(PKTP_LOG_ERROR,
+					    <span class="enscript-string">&quot;mbuf_copydata tcp v6 failed for %s\n&quot;</span>,
+					    hdr-&gt;pth_ifname);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+				}
+
+				fport = th.th_sport;
+				lport = th.th_dport;
+
+				pcbinfo = &amp;tcbinfo;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ip6.ip6_nxt == IPPROTO_UDP) {
+				<span class="enscript-type">struct</span> udphdr uh;
+
+				error = mbuf_copydata(m, pre + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_hdr),
+					<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> udphdr), &amp;uh);
+				<span class="enscript-keyword">if</span> (error != 0) {
+					PKTAP_LOG(PKTP_LOG_ERROR,
+					    <span class="enscript-string">&quot;mbuf_copydata udp v6 failed for %s\n&quot;</span>,
+					    hdr-&gt;pth_ifname);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+				}
+
+				fport = uh.uh_sport;
+				lport = uh.uh_dport;
+
+				pcbinfo = &amp;udbinfo;
+				wildcard = 1;
+			}
+			<span class="enscript-keyword">if</span> (pcbinfo != NULL) {
+				inp = in6_pcblookup_hash(pcbinfo, faddr, fport,
+					laddr, lport, wildcard, outgoing ? NULL : ifp);
+
+				<span class="enscript-keyword">if</span> (inp == NULL &amp;&amp; hdr-&gt;pth_iftype != IFT_LOOP)
+					PKTAP_LOG(PKTP_LOG_NOPCB,
+					    <span class="enscript-string">&quot;in6_pcblookup_hash no pcb %s\n&quot;</span>,
+					    hdr-&gt;pth_ifname);
+			} <span class="enscript-keyword">else</span> {
+				PKTAP_LOG(PKTP_LOG_NOPCB,
+				    <span class="enscript-string">&quot;unknown ip6.ip6_nxt %u on %s\n&quot;</span>,
+				    ip6.ip6_nxt, hdr-&gt;pth_ifname);
+				pktap_hexdump(PKTP_LOG_NOPCB, &amp;ip6, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_hdr));
+			}
+		}
+		<span class="enscript-keyword">if</span> (inp != NULL) {
+			<span class="enscript-keyword">if</span> (inp-&gt;inp_state != INPCB_STATE_DEAD &amp;&amp; inp-&gt;inp_socket != NULL) {
+				found = 1;
+				inp_get_soprocinfo(inp, &amp;soprocinfo);
+			}
+			in_pcb_checkstate(inp, WNT_RELEASE, 0);
+		}
+	}
+<span class="enscript-reference">done</span>:
+	<span class="enscript-comment">/*
+	 * -1 means PID not found
+	 */</span>
+	hdr-&gt;pth_pid = -1;
+	hdr-&gt;pth_epid = -1;
+	<span class="enscript-keyword">if</span> (found != 0)
+		pktap_set_procinfo(hdr, &amp;soprocinfo);
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">pktap_bpf_tap</span>(<span class="enscript-type">struct</span> ifnet *ifp, protocol_family_t proto, <span class="enscript-type">struct</span> mbuf *m,
+    u_int32_t pre, u_int32_t post, <span class="enscript-type">int</span> outgoing)
+{
+	<span class="enscript-type">struct</span> pktap_softc *pktap;
+	<span class="enscript-type">void</span> (*bpf_tap_func)(ifnet_t, u_int32_t, mbuf_t, <span class="enscript-type">void</span> *, size_t) =
+		outgoing ? bpf_tap_out : bpf_tap_in;
+
+	lck_rw_lock_shared(pktap_lck_rw);
+
+	<span class="enscript-comment">/*
+	 * No need to take the ifnet_lock as the struct ifnet field if_bpf is
+	 * protected by the BPF subsystem
+	 */</span>
+	LIST_FOREACH(pktap, &amp;pktap_list, pktp_link) {
+		<span class="enscript-type">int</span> filter_result;
+
+		filter_result = pktap_filter_evaluate(pktap, ifp);
+		<span class="enscript-keyword">if</span> (filter_result == PKTAP_FILTER_SKIP)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (pktap-&gt;pktp_dlt_raw_count &gt; 0) {
+			<span class="enscript-comment">/* We accept only IPv4 and IPv6 packets for the raw DLT */</span>
+			<span class="enscript-keyword">if</span> ((proto == AF_INET ||proto == AF_INET6) &amp;&amp;
+				!(m-&gt;m_pkthdr.pkt_flags &amp; PKTF_INET_RESOLVE)) {
+				<span class="enscript-comment">/*
+				 * We can play just with the length of the first mbuf in the
+				 * chain because bpf_tap_imp() disregard the packet length
+				 * of the mbuf packet header.
+				 */</span>
+				<span class="enscript-keyword">if</span> (mbuf_setdata(m, m-&gt;m_data + pre,  m-&gt;m_len - pre) == 0) {
+					bpf_tap_func(pktap-&gt;pktp_ifp, DLT_RAW, m, NULL, 0);
+					mbuf_setdata(m, m-&gt;m_data - pre, m-&gt;m_len + pre);
+				}
+			}
+		}
+
+		<span class="enscript-keyword">if</span> (pktap-&gt;pktp_dlt_pkttap_count &gt; 0) {
+			<span class="enscript-type">struct</span> {
+				<span class="enscript-type">struct</span> pktap_header hdr;
+				u_int32_t proto;
+			} hdr_buffer;
+			<span class="enscript-type">struct</span> pktap_header *hdr = &amp;hdr_buffer.hdr;
+			size_t hdr_size = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pktap_header);
+			<span class="enscript-type">int</span> unknown_if_type = 0;
+			size_t data_adjust = 0;
+			u_int32_t pre_adjust = 0;
+
+			<span class="enscript-comment">/* Verify the structure is packed */</span>
+			_CASSERT(<span class="enscript-keyword">sizeof</span>(hdr_buffer) == <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pktap_header) + <span class="enscript-keyword">sizeof</span>(u_int32_t));
+
+			bzero(&amp;hdr_buffer, <span class="enscript-keyword">sizeof</span>(hdr_buffer));
+			hdr-&gt;pth_length = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pktap_header);
+			hdr-&gt;pth_type_next = PTH_TYPE_PACKET;
+
+			<span class="enscript-comment">/*
+			 * Set DLT of packet based on interface type
+			 */</span>
+			<span class="enscript-keyword">switch</span> (ifp-&gt;if_type) {
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_LOOP</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_GIF</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_STF</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_CELLULAR</span>:
+					<span class="enscript-comment">/*
+					 * Packets from pdp interfaces have no loopback
+					 * header that contain the protocol number.
+					 * As BPF just concatenate the header and the
+					 * packet content in a single buffer,
+					 * stash the protocol after the pktap header
+					 * and adjust the size of the header accordingly
+					 */</span>
+					hdr-&gt;pth_dlt = DLT_NULL;
+					<span class="enscript-keyword">if</span> (pre == 0) {
+						hdr_buffer.proto = proto;
+						hdr_size = <span class="enscript-keyword">sizeof</span>(hdr_buffer);
+						pre_adjust = <span class="enscript-keyword">sizeof</span>(hdr_buffer.proto);
+					}
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_ETHER</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_BRIDGE</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_L2VLAN</span>:
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_IEEE8023ADLAG</span>:
+					hdr-&gt;pth_dlt = DLT_EN10MB;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_PPP</span>:
+					hdr-&gt;pth_dlt = DLT_PPP;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_IEEE1394</span>:
+					hdr-&gt;pth_dlt = DLT_APPLE_IP_OVER_IEEE1394;
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">case</span> <span class="enscript-reference">IFT_OTHER</span>:
+					<span class="enscript-keyword">if</span> (strncmp(ifp-&gt;if_name, <span class="enscript-string">&quot;utun&quot;</span>, strlen(<span class="enscript-string">&quot;utun&quot;</span>)) == 0) {
+						<span class="enscript-comment">/*
+						 * For utun:
+						 * - incoming packets do not have the prefix set to four
+						 * - some packets are as small as two bytes!
+						 */</span>
+						<span class="enscript-keyword">if</span> (m_pktlen(m) &lt; 4)
+							<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+						<span class="enscript-keyword">if</span> (proto != AF_INET &amp;&amp; proto != AF_INET6)
+							<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+						<span class="enscript-keyword">if</span> (proto == AF_INET &amp;&amp; (size_t) m_pktlen(m) - 4 &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip))
+							<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+						<span class="enscript-keyword">if</span> (proto == AF_INET6 &amp;&amp; (size_t) m_pktlen(m) - 4 &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_hdr))
+							<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+						<span class="enscript-comment">/*
+						 * Skip the protocol in the mbuf as it's in network order
+						 */</span>
+						pre = 4;
+						data_adjust = 4;
+						hdr-&gt;pth_dlt = DLT_NULL;
+						hdr_buffer.proto = proto;
+						hdr_size = <span class="enscript-keyword">sizeof</span>(hdr_buffer);
+						<span class="enscript-keyword">break</span>;
+					}
+				<span class="enscript-reference">default</span>:
+					<span class="enscript-keyword">if</span> (pre == 0)
+						hdr-&gt;pth_dlt = DLT_RAW;
+					<span class="enscript-keyword">else</span>
+						unknown_if_type = 1;
+					<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (unknown_if_type) {
+				PKTAP_LOG(PKTP_LOG_FUNC,
+				    <span class="enscript-string">&quot;unknown if_type %u for %s\n&quot;</span>,
+				    ifp-&gt;if_type, ifp-&gt;if_xname);
+				pktap_count_unknown_if_type += 1;
+			} <span class="enscript-keyword">else</span> {
+				snprintf(hdr-&gt;pth_ifname, <span class="enscript-keyword">sizeof</span>(hdr-&gt;pth_ifname), <span class="enscript-string">&quot;%s&quot;</span>,
+					ifp-&gt;if_xname);
+				hdr-&gt;pth_flags |= outgoing ? PTH_FLAG_DIR_OUT : PTH_FLAG_DIR_IN;
+				hdr-&gt;pth_protocol_family = proto;
+				hdr-&gt;pth_frame_pre_length = pre + pre_adjust;
+				hdr-&gt;pth_frame_post_length = post;
+				hdr-&gt;pth_iftype = ifp-&gt;if_type;
+				hdr-&gt;pth_ifunit = ifp-&gt;if_unit;
+
+				pktap_fill_proc_info(hdr, proto, m, pre, outgoing, ifp);
+
+				hdr-&gt;pth_svc = so_svc2tc(m-&gt;m_pkthdr.pkt_svc);
+
+				<span class="enscript-keyword">if</span> (data_adjust == 0) {
+					bpf_tap_func(pktap-&gt;pktp_ifp, DLT_PKTAP, m, hdr, hdr_size);
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-comment">/*
+					 * We can play just with the length of the first mbuf in the
+					 * chain because bpf_tap_imp() disregard the packet length
+					 * of the mbuf packet header.
+					 */</span>
+					<span class="enscript-keyword">if</span> (mbuf_setdata(m, m-&gt;m_data + data_adjust,  m-&gt;m_len - data_adjust) == 0) {
+						bpf_tap_func(pktap-&gt;pktp_ifp, DLT_PKTAP, m, hdr, hdr_size);
+						mbuf_setdata(m, m-&gt;m_data - data_adjust, m-&gt;m_len + data_adjust);
+					}
+				}
+			}
+		}
+	}
+<span class="enscript-reference">done</span>:
+	lck_rw_done(pktap_lck_rw);
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">pktap_input</span>(<span class="enscript-type">struct</span> ifnet *ifp, protocol_family_t proto, <span class="enscript-type">struct</span> mbuf *m,
+    <span class="enscript-type">char</span> *frame_header)
+{
+	<span class="enscript-type">char</span> *hdr = (<span class="enscript-type">char</span> *)mbuf_data(m);
+	<span class="enscript-type">char</span> *start = (<span class="enscript-type">char</span> *)mbuf_datastart(m);
+
+	<span class="enscript-comment">/* Fast path */</span>
+	<span class="enscript-keyword">if</span> (pktap_total_tap_count == 0)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/* Make sure the frame header is fully contained in the  mbuf */</span>
+	<span class="enscript-keyword">if</span> (frame_header != NULL &amp;&amp; frame_header &gt;= start &amp;&amp; frame_header &lt;= hdr) {
+		size_t o_len = m-&gt;m_len;
+		u_int32_t pre = hdr - frame_header;
+
+		<span class="enscript-keyword">if</span> (mbuf_setdata(m, frame_header, o_len + pre) == 0) {
+			PKTAP_LOG(PKTP_LOG_INPUT, <span class="enscript-string">&quot;ifp %s proto %u pre %u post %u\n&quot;</span>,
+				ifp-&gt;if_xname, proto, pre, 0);
+
+			pktap_bpf_tap(ifp, proto, m,  pre, 0, 0);
+			mbuf_setdata(m, hdr, o_len);
+		}
+	} <span class="enscript-keyword">else</span> {
+		PKTAP_LOG(PKTP_LOG_INPUT, <span class="enscript-string">&quot;ifp %s proto %u pre %u post %u\n&quot;</span>,
+			ifp-&gt;if_xname, proto, 0, 0);
+
+		pktap_bpf_tap(ifp, proto, m, 0, 0, 0);
+	}
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">pktap_output</span>(<span class="enscript-type">struct</span> ifnet *ifp, protocol_family_t proto, <span class="enscript-type">struct</span> mbuf *m,
+    u_int32_t pre, u_int32_t post)
+{
+	<span class="enscript-comment">/* Fast path */</span>
+	<span class="enscript-keyword">if</span> (pktap_total_tap_count == 0)
+		<span class="enscript-keyword">return</span>;
+
+	PKTAP_LOG(PKTP_LOG_OUTPUT, <span class="enscript-string">&quot;ifp %s proto %u pre %u post %u\n&quot;</span>,
+		ifp-&gt;if_xname, proto, pre, post);
+
+	pktap_bpf_tap(ifp, proto, m, pre, post, 1);
+}
+</pre>
+<hr />
+</body></html>

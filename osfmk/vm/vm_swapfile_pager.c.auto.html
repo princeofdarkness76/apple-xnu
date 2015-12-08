@@ -1,0 +1,903 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>vm_swapfile_pager.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">vm_swapfile_pager.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_control.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/upl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_kobject.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+
+<span class="enscript-comment">/* 
+ * APPLE SWAPFILE MEMORY PAGER 
+ *
+ * This external memory manager (EMM) handles mappings of the swap files.
+ * Swap files are not regular files and are used solely to store contents of
+ * anonymous memory mappings while not resident in memory.
+ * There's no valid reason to map a swap file.  This just puts extra burden
+ * on the system, is potentially a security issue and is not reliable since
+ * the contents can change at any time with pageout operations.
+ * Here are some of the issues with mapping a swap file.
+ * * PERFORMANCE:
+ *   Each page in the swap file belong to an anonymous memory object. Mapping
+ *   the swap file makes those pages also accessible via a vnode memory
+ *   object and each page can now be resident twice.
+ * * SECURITY:
+ *   Mapping a swap file allows access to other processes' memory.  Swap files
+ *   are only accessible by the &quot;root&quot; super-user, who can already access any
+ *   process's memory, so this is not a real issue but if permissions on the
+ *   swap file got changed, it could become one.
+ *   Swap files are not &quot;zero-filled&quot; on creation, so until their contents are
+ *   overwritten with pageout operations, they still contain whatever was on
+ *   the disk blocks they were allocated.  The &quot;super-user&quot; could see the
+ *   contents of free blocks anyway, so this is not a new security issue but
+ *   it may be perceive as one.
+ * * ENCRYPTED SWAP:
+ *   When swap is encrypted, one does not expect to find any clear contents
+ *   in the swap files.  Since unused blocks are not scrubbed, they could still
+ *   contain clear contents.  If these contents are visible through a mapping
+ *   of the swap file, it makes it look like swap is not really encrypted.
+ *   
+ * We can't legitimately prevent a user process with appropriate privileges
+ * from mapping a swap file, but we can prevent it from accessing its actual
+ * contents.
+ * This pager mostly handles page-in request (from memory_object_data_request())
+ * for swap file mappings and just returns bogus data.
+ * Pageouts are not handled, so mmap() has to make sure it does not allow
+ * writable (i.e. MAP_SHARED and PROT_WRITE) mappings of swap files.
+ */</span>
+
+<span class="enscript-comment">/* forward declarations */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">swapfile_pager_reference</span>(memory_object_t mem_obj);
+<span class="enscript-type">void</span> <span class="enscript-function-name">swapfile_pager_deallocate</span>(memory_object_t mem_obj);
+kern_return_t <span class="enscript-function-name">swapfile_pager_init</span>(memory_object_t mem_obj,
+				       memory_object_control_t control,
+				       memory_object_cluster_size_t pg_size);
+kern_return_t <span class="enscript-function-name">swapfile_pager_terminate</span>(memory_object_t mem_obj);
+kern_return_t <span class="enscript-function-name">swapfile_pager_data_request</span>(memory_object_t mem_obj,
+					       memory_object_offset_t offset,
+					       memory_object_cluster_size_t length,
+					       vm_prot_t protection_required,
+					       memory_object_fault_info_t fault_info);
+kern_return_t <span class="enscript-function-name">swapfile_pager_data_return</span>(memory_object_t mem_obj,
+					      memory_object_offset_t offset,
+					      memory_object_cluster_size_t	data_cnt,
+					      memory_object_offset_t *resid_offset,
+					      <span class="enscript-type">int</span> *io_error,
+					      boolean_t dirty,
+					      boolean_t kernel_copy,
+					      <span class="enscript-type">int</span> upl_flags);
+kern_return_t <span class="enscript-function-name">swapfile_pager_data_initialize</span>(memory_object_t mem_obj,
+						  memory_object_offset_t offset,
+						  memory_object_cluster_size_t data_cnt);
+kern_return_t <span class="enscript-function-name">swapfile_pager_data_unlock</span>(memory_object_t mem_obj,
+					      memory_object_offset_t offset,
+					      memory_object_size_t size,
+					      vm_prot_t desired_access);
+kern_return_t <span class="enscript-function-name">swapfile_pager_synchronize</span>(memory_object_t mem_obj,
+					      memory_object_offset_t offset,
+					      memory_object_size_t length,
+					      vm_sync_t sync_flags);
+kern_return_t <span class="enscript-function-name">swapfile_pager_map</span>(memory_object_t mem_obj,
+				      vm_prot_t prot);
+kern_return_t <span class="enscript-function-name">swapfile_pager_last_unmap</span>(memory_object_t mem_obj);
+
+<span class="enscript-comment">/*
+ * Vector of VM operations for this EMM.
+ * These routines are invoked by VM via the memory_object_*() interfaces.
+ */</span>
+<span class="enscript-type">const</span> <span class="enscript-type">struct</span> memory_object_pager_ops swapfile_pager_ops = {
+	swapfile_pager_reference,
+	swapfile_pager_deallocate,
+	swapfile_pager_init,
+	swapfile_pager_terminate,
+	swapfile_pager_data_request,
+	swapfile_pager_data_return,
+	swapfile_pager_data_initialize,
+	swapfile_pager_data_unlock,
+	swapfile_pager_synchronize,
+	swapfile_pager_map,
+	swapfile_pager_last_unmap,
+	NULL, <span class="enscript-comment">/* data_reclaim */</span>
+	<span class="enscript-string">&quot;swapfile pager&quot;</span>
+};
+
+<span class="enscript-comment">/*
+ * The &quot;swapfile_pager&quot; describes a memory object backed by
+ * the &quot;swapfile&quot; EMM.
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> swapfile_pager {
+	<span class="enscript-type">struct</span> ipc_object_header pager_header;	<span class="enscript-comment">/* fake ip_kotype() */</span>
+	memory_object_pager_ops_t pager_ops;	<span class="enscript-comment">/* == &amp;swapfile_pager_ops */</span>
+	queue_chain_t		pager_queue;	<span class="enscript-comment">/* next &amp; prev pagers */</span>
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		ref_count;	<span class="enscript-comment">/* reference count */</span>
+	boolean_t		is_ready;	<span class="enscript-comment">/* is this pager ready ? */</span>
+	boolean_t		is_mapped;	<span class="enscript-comment">/* is this pager mapped ? */</span>
+	memory_object_control_t pager_control;	<span class="enscript-comment">/* mem object control handle */</span>
+	<span class="enscript-type">struct</span> vnode 		*swapfile_vnode;<span class="enscript-comment">/* the swapfile's vnode */</span>
+} *swapfile_pager_t;
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">SWAPFILE_PAGER_NULL</span>	((swapfile_pager_t) NULL)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">pager_ikot</span> pager_header.io_bits
+
+<span class="enscript-comment">/*
+ * List of memory objects managed by this EMM.
+ * The list is protected by the &quot;swapfile_pager_lock&quot; lock.
+ */</span>
+<span class="enscript-type">int</span> swapfile_pager_count = 0;		<span class="enscript-comment">/* number of pagers */</span>
+queue_head_t swapfile_pager_queue;
+<span class="enscript-function-name">decl_lck_mtx_data</span>(,swapfile_pager_lock)
+
+<span class="enscript-comment">/*
+ * Statistics &amp; counters.
+ */</span>
+<span class="enscript-type">int</span> swapfile_pager_count_max = 0;
+
+
+lck_grp_t		swapfile_pager_lck_grp;
+lck_grp_attr_t		swapfile_pager_lck_grp_attr;
+lck_attr_t		swapfile_pager_lck_attr;
+
+
+<span class="enscript-comment">/* internal prototypes */</span>
+swapfile_pager_t <span class="enscript-function-name">swapfile_pager_create</span>(<span class="enscript-type">struct</span> vnode *vp);
+swapfile_pager_t <span class="enscript-function-name">swapfile_pager_lookup</span>(memory_object_t mem_obj);
+<span class="enscript-type">void</span> <span class="enscript-function-name">swapfile_pager_dequeue</span>(swapfile_pager_t pager);
+<span class="enscript-type">void</span> <span class="enscript-function-name">swapfile_pager_deallocate_internal</span>(swapfile_pager_t pager,
+					boolean_t locked);
+<span class="enscript-type">void</span> <span class="enscript-function-name">swapfile_pager_terminate_internal</span>(swapfile_pager_t pager);
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-type">int</span> swapfile_pagerdebug = 0;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PAGER_ALL</span>		0xffffffff
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PAGER_INIT</span>		0x00000001
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PAGER_PAGEIN</span>		0x00000002
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PAGER_DEBUG</span>(LEVEL, A)						\
+	MACRO_BEGIN							\
+	<span class="enscript-keyword">if</span> ((swapfile_pagerdebug &amp; LEVEL)==LEVEL) {		\
+		printf A;						\
+	}								\
+	MACRO_END
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PAGER_DEBUG</span>(LEVEL, A)
+#<span class="enscript-reference">endif</span>
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">swapfile_pager_bootstrap</span>(<span class="enscript-type">void</span>)
+{
+	lck_grp_attr_setdefault(&amp;swapfile_pager_lck_grp_attr);
+	lck_grp_init(&amp;swapfile_pager_lck_grp, <span class="enscript-string">&quot;swapfile pager&quot;</span>, &amp;swapfile_pager_lck_grp_attr);
+	lck_attr_setdefault(&amp;swapfile_pager_lck_attr);
+	lck_mtx_init(&amp;swapfile_pager_lock, &amp;swapfile_pager_lck_grp, &amp;swapfile_pager_lck_attr);
+	queue_init(&amp;swapfile_pager_queue);
+}
+
+<span class="enscript-comment">/*
+ * swapfile_pager_init()
+ *
+ * Initialize the memory object and makes it ready to be used and mapped.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">swapfile_pager_init</span>(
+	memory_object_t		mem_obj, 
+	memory_object_control_t	control, 
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">DEBUG</span>
+	__unused
+#<span class="enscript-reference">endif</span>
+	memory_object_cluster_size_t pg_size)
+{
+	swapfile_pager_t	pager;
+	kern_return_t   	kr;
+	memory_object_attr_info_data_t  attributes;
+
+	PAGER_DEBUG(PAGER_ALL,
+		    (<span class="enscript-string">&quot;swapfile_pager_init: %p, %p, %x\n&quot;</span>,
+		     mem_obj, control, pg_size));
+
+	<span class="enscript-keyword">if</span> (control == MEMORY_OBJECT_CONTROL_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	pager = swapfile_pager_lookup(mem_obj);
+
+	memory_object_control_reference(control);
+
+	pager-&gt;pager_control = control;
+
+	attributes.copy_strategy = MEMORY_OBJECT_COPY_DELAY;
+	attributes.cluster_size = (1 &lt;&lt; (PAGE_SHIFT));
+	attributes.may_cache_object = FALSE;
+	attributes.temporary = TRUE;
+
+	kr = memory_object_change_attributes(
+					control,
+					MEMORY_OBJECT_ATTRIBUTE_INFO,
+					(memory_object_info_t) &amp;attributes,
+					MEMORY_OBJECT_ATTR_INFO_COUNT);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS)
+		panic(<span class="enscript-string">&quot;swapfile_pager_init: &quot;</span>
+		      <span class="enscript-string">&quot;memory_object_change_attributes() failed&quot;</span>);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * swapfile_data_return()
+ *
+ * Handles page-out requests from VM.  This should never happen since
+ * the pages provided by this EMM are not supposed to be dirty or dirtied
+ * and VM should simply discard the contents and reclaim the pages if it
+ * needs to.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">swapfile_pager_data_return</span>(
+        __unused memory_object_t	mem_obj,
+        __unused memory_object_offset_t	offset,
+        __unused memory_object_cluster_size_t		data_cnt,
+        __unused memory_object_offset_t	*resid_offset,
+	__unused <span class="enscript-type">int</span>			*io_error,
+	__unused boolean_t		dirty,
+	__unused boolean_t		kernel_copy,
+	__unused <span class="enscript-type">int</span>			upl_flags)  
+{
+	panic(<span class="enscript-string">&quot;swapfile_pager_data_return: should never get called&quot;</span>);
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+kern_return_t
+<span class="enscript-function-name">swapfile_pager_data_initialize</span>(
+	__unused memory_object_t	mem_obj,
+	__unused memory_object_offset_t	offset,
+	__unused memory_object_cluster_size_t		data_cnt)
+{
+	panic(<span class="enscript-string">&quot;swapfile_pager_data_initialize: should never get called&quot;</span>);
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+kern_return_t
+<span class="enscript-function-name">swapfile_pager_data_unlock</span>(
+	__unused memory_object_t	mem_obj,
+	__unused memory_object_offset_t	offset,
+	__unused memory_object_size_t		size,
+	__unused vm_prot_t		desired_access)
+{
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+<span class="enscript-comment">/*
+ * swapfile_pager_data_request()
+ *
+ * Handles page-in requests from VM.
+ */</span>
+kern_return_t	
+<span class="enscript-function-name">swapfile_pager_data_request</span>(
+	memory_object_t		mem_obj,
+	memory_object_offset_t	offset,
+	memory_object_cluster_size_t		length,
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">DEBUG</span>
+	__unused
+#<span class="enscript-reference">endif</span>
+	vm_prot_t		protection_required,
+	__unused memory_object_fault_info_t mo_fault_info)
+{
+	swapfile_pager_t	pager;
+	memory_object_control_t	mo_control;
+	upl_t			upl;
+	<span class="enscript-type">int</span>			upl_flags;
+	upl_size_t		upl_size;
+	upl_page_info_t		*upl_pl = NULL;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		pl_count;
+	vm_object_t		dst_object;
+	kern_return_t		kr, retval;
+	vm_map_offset_t		kernel_mapping;
+	vm_offset_t		dst_vaddr;
+	<span class="enscript-type">char</span>			*dst_ptr;
+	vm_offset_t		cur_offset;
+	vm_map_entry_t		map_entry;
+
+	PAGER_DEBUG(PAGER_ALL, (<span class="enscript-string">&quot;swapfile_pager_data_request: %p, %llx, %x, %x\n&quot;</span>, mem_obj, offset, length, protection_required));
+
+	kernel_mapping = 0;
+	upl = NULL;
+	upl_pl = NULL;
+
+	pager = swapfile_pager_lookup(mem_obj);
+	assert(pager-&gt;is_ready);
+	assert(pager-&gt;ref_count &gt; 1); <span class="enscript-comment">/* pager is alive and mapped */</span>
+
+	PAGER_DEBUG(PAGER_PAGEIN, (<span class="enscript-string">&quot;swapfile_pager_data_request: %p, %llx, %x, %x, pager %p\n&quot;</span>, mem_obj, offset, length, protection_required, pager));
+
+	<span class="enscript-comment">/*
+	 * Gather in a UPL all the VM pages requested by VM.
+	 */</span>
+	mo_control = pager-&gt;pager_control;
+
+	upl_size = length;
+	upl_flags =
+		UPL_RET_ONLY_ABSENT |
+		UPL_SET_LITE |
+		UPL_NO_SYNC |
+		UPL_CLEAN_IN_PLACE |	<span class="enscript-comment">/* triggers UPL_CLEAR_DIRTY */</span>
+		UPL_SET_INTERNAL;
+	pl_count = 0;
+	kr = memory_object_upl_request(mo_control,
+				       offset, upl_size,
+				       &amp;upl, NULL, NULL, upl_flags);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		retval = kr;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	dst_object = mo_control-&gt;moc_object;
+	assert(dst_object != VM_OBJECT_NULL);
+
+
+	<span class="enscript-comment">/*
+	 * Reserve a virtual page in the kernel address space to map each
+	 * destination physical page when it's its turn to be processed.
+	 */</span>
+	vm_object_reference(kernel_object);	<span class="enscript-comment">/* ref. for mapping */</span>
+	kr = vm_map_find_space(kernel_map,
+			       &amp;kernel_mapping,
+			       PAGE_SIZE_64,
+			       0,
+			       0,
+			       &amp;map_entry);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		vm_object_deallocate(kernel_object);
+		retval = kr;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	VME_OBJECT_SET(map_entry, kernel_object);
+	VME_OFFSET_SET(map_entry, kernel_mapping - VM_MIN_KERNEL_ADDRESS);
+	vm_map_unlock(kernel_map);
+	dst_vaddr = CAST_DOWN(vm_offset_t, kernel_mapping);
+	dst_ptr = (<span class="enscript-type">char</span> *) dst_vaddr;
+
+	<span class="enscript-comment">/*
+	 * Fill in the contents of the pages requested by VM.
+	 */</span>
+	upl_pl = UPL_GET_INTERNAL_PAGE_LIST(upl);
+	pl_count = length / PAGE_SIZE;
+	<span class="enscript-keyword">for</span> (cur_offset = 0; cur_offset &lt; length; cur_offset += PAGE_SIZE) {
+		ppnum_t dst_pnum;
+
+		<span class="enscript-keyword">if</span> (!upl_page_present(upl_pl, (<span class="enscript-type">int</span>)(cur_offset / PAGE_SIZE))) {
+			<span class="enscript-comment">/* this page is not in the UPL: skip it */</span>
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Establish an explicit pmap mapping of the destination
+		 * physical page.
+		 * We can't do a regular VM mapping because the VM page
+		 * is &quot;busy&quot;.
+		 */</span>
+		dst_pnum = (ppnum_t)
+			upl_phys_page(upl_pl, (<span class="enscript-type">int</span>)(cur_offset / PAGE_SIZE));
+		assert(dst_pnum != 0);
+		pmap_enter(kernel_pmap,
+			   kernel_mapping,
+			   dst_pnum,
+			   VM_PROT_READ | VM_PROT_WRITE,
+			   VM_PROT_NONE,
+			   0,
+			   TRUE);
+
+		memset(dst_ptr, <span class="enscript-string">'\0'</span>, PAGE_SIZE);
+		<span class="enscript-comment">/* add an end-of-line to keep line counters happy */</span>
+		dst_ptr[PAGE_SIZE-1] = <span class="enscript-string">'\n'</span>;
+		
+		<span class="enscript-comment">/*
+		 * Remove the pmap mapping of the destination page
+		 * in the kernel.
+		 */</span>
+		pmap_remove(kernel_pmap,
+			    (addr64_t) kernel_mapping,
+			    (addr64_t) (kernel_mapping + PAGE_SIZE_64));
+
+	}
+
+	retval = KERN_SUCCESS;
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (upl != NULL) {
+		<span class="enscript-comment">/* clean up the UPL */</span>
+
+		<span class="enscript-comment">/*
+		 * The pages are currently dirty because we've just been
+		 * writing on them, but as far as we're concerned, they're
+		 * clean since they contain their &quot;original&quot; contents as
+		 * provided by us, the pager.
+		 * Tell the UPL to mark them &quot;clean&quot;.
+		 */</span>
+		upl_clear_dirty(upl, TRUE);
+
+		<span class="enscript-comment">/* abort or commit the UPL */</span>
+		<span class="enscript-keyword">if</span> (retval != KERN_SUCCESS) {
+			upl_abort(upl, 0);
+		} <span class="enscript-keyword">else</span> {
+			boolean_t empty;
+			upl_commit_range(upl, 0, upl-&gt;size, 
+					 UPL_COMMIT_CS_VALIDATED,
+					 upl_pl, pl_count, &amp;empty);
+		}
+
+		<span class="enscript-comment">/* and deallocate the UPL */</span>
+		upl_deallocate(upl);
+		upl = NULL;
+	}
+	<span class="enscript-keyword">if</span> (kernel_mapping != 0) {
+		<span class="enscript-comment">/* clean up the mapping of the source and destination pages */</span>
+		kr = vm_map_remove(kernel_map,
+				   kernel_mapping,
+				   kernel_mapping + PAGE_SIZE_64,
+				   VM_MAP_NO_FLAGS);
+		assert(kr == KERN_SUCCESS);
+		kernel_mapping = 0;
+		dst_vaddr = 0;
+	}
+
+	<span class="enscript-keyword">return</span> retval;
+}
+
+<span class="enscript-comment">/*
+ * swapfile_pager_reference()
+ *
+ * Get a reference on this memory object.
+ * For external usage only.  Assumes that the initial reference count is not 0,
+ * i.e one should not &quot;revive&quot; a dead pager this way.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">swapfile_pager_reference</span>(
+	memory_object_t		mem_obj)
+{	
+	swapfile_pager_t	pager;
+
+	pager = swapfile_pager_lookup(mem_obj);
+
+	lck_mtx_lock(&amp;swapfile_pager_lock);
+	assert(pager-&gt;ref_count &gt; 0);
+	pager-&gt;ref_count++;
+	lck_mtx_unlock(&amp;swapfile_pager_lock);
+}
+
+
+<span class="enscript-comment">/*
+ * swapfile_pager_dequeue:
+ *
+ * Removes a pager from the list of pagers.
+ *
+ * The caller must hold &quot;swapfile_pager_lock&quot;.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">swapfile_pager_dequeue</span>(
+	swapfile_pager_t pager)
+{
+	assert(!pager-&gt;is_mapped);
+
+	queue_remove(&amp;swapfile_pager_queue,
+		     pager,
+		     swapfile_pager_t,
+		     pager_queue);
+	pager-&gt;pager_queue.next = NULL;
+	pager-&gt;pager_queue.prev = NULL;
+	
+	swapfile_pager_count--;
+}
+
+<span class="enscript-comment">/*
+ * swapfile_pager_terminate_internal:
+ *
+ * Trigger the asynchronous termination of the memory object associated
+ * with this pager.
+ * When the memory object is terminated, there will be one more call
+ * to memory_object_deallocate() (i.e. swapfile_pager_deallocate())
+ * to finish the clean up.
+ *
+ * &quot;swapfile_pager_lock&quot; should not be held by the caller.
+ * We don't need the lock because the pager has already been removed from
+ * the pagers' list and is now ours exclusively.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">swapfile_pager_terminate_internal</span>(
+	swapfile_pager_t pager)
+{
+	assert(pager-&gt;is_ready);
+	assert(!pager-&gt;is_mapped);
+
+	<span class="enscript-keyword">if</span> (pager-&gt;swapfile_vnode != NULL) {
+		pager-&gt;swapfile_vnode = NULL;
+	}
+
+	<span class="enscript-comment">/* trigger the destruction of the memory object */</span>
+	memory_object_destroy(pager-&gt;pager_control, 0);
+}
+
+<span class="enscript-comment">/*
+ * swapfile_pager_deallocate_internal()
+ *
+ * Release a reference on this pager and free it when the last
+ * reference goes away.
+ * Can be called with swapfile_pager_lock held or not but always returns
+ * with it unlocked.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">swapfile_pager_deallocate_internal</span>(
+	swapfile_pager_t	pager,
+	boolean_t		locked)
+{
+	<span class="enscript-keyword">if</span> (! locked) {
+		lck_mtx_lock(&amp;swapfile_pager_lock);
+	}
+
+	<span class="enscript-comment">/* drop a reference on this pager */</span>
+	pager-&gt;ref_count--;
+
+	<span class="enscript-keyword">if</span> (pager-&gt;ref_count == 1) {
+		<span class="enscript-comment">/*
+		 * Only the &quot;named&quot; reference is left, which means that
+		 * no one is really holding on to this pager anymore.
+		 * Terminate it.
+		 */</span>
+		swapfile_pager_dequeue(pager);
+		<span class="enscript-comment">/* the pager is all ours: no need for the lock now */</span>
+		lck_mtx_unlock(&amp;swapfile_pager_lock);
+		swapfile_pager_terminate_internal(pager);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (pager-&gt;ref_count == 0) {
+		<span class="enscript-comment">/*
+		 * Dropped the existence reference;  the memory object has
+		 * been terminated.  Do some final cleanup and release the
+		 * pager structure.
+		 */</span>
+		lck_mtx_unlock(&amp;swapfile_pager_lock);
+		<span class="enscript-keyword">if</span> (pager-&gt;pager_control != MEMORY_OBJECT_CONTROL_NULL) {
+			memory_object_control_deallocate(pager-&gt;pager_control);
+			pager-&gt;pager_control = MEMORY_OBJECT_CONTROL_NULL;
+		}
+		kfree(pager, <span class="enscript-keyword">sizeof</span> (*pager));
+		pager = SWAPFILE_PAGER_NULL;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* there are still plenty of references:  keep going... */</span>
+		lck_mtx_unlock(&amp;swapfile_pager_lock);
+	}
+
+	<span class="enscript-comment">/* caution: lock is not held on return... */</span>
+}
+
+<span class="enscript-comment">/*
+ * swapfile_pager_deallocate()
+ *
+ * Release a reference on this pager and free it when the last
+ * reference goes away.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">swapfile_pager_deallocate</span>(
+	memory_object_t		mem_obj)
+{
+	swapfile_pager_t	pager;
+
+	PAGER_DEBUG(PAGER_ALL, (<span class="enscript-string">&quot;swapfile_pager_deallocate: %p\n&quot;</span>, mem_obj));
+	pager = swapfile_pager_lookup(mem_obj);
+	swapfile_pager_deallocate_internal(pager, FALSE);
+}
+
+<span class="enscript-comment">/*
+ *
+ */</span>
+kern_return_t
+<span class="enscript-function-name">swapfile_pager_terminate</span>(
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">DEBUG</span>
+	__unused
+#<span class="enscript-reference">endif</span>
+	memory_object_t	mem_obj)
+{
+	PAGER_DEBUG(PAGER_ALL, (<span class="enscript-string">&quot;swapfile_pager_terminate: %p\n&quot;</span>, mem_obj));
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *
+ */</span>
+kern_return_t
+<span class="enscript-function-name">swapfile_pager_synchronize</span>(
+	memory_object_t		mem_obj,
+	memory_object_offset_t	offset,
+	memory_object_size_t		length,
+	__unused vm_sync_t		sync_flags)
+{
+	swapfile_pager_t	pager;
+
+	PAGER_DEBUG(PAGER_ALL, (<span class="enscript-string">&quot;swapfile_pager_synchronize: %p\n&quot;</span>, mem_obj));
+
+	pager = swapfile_pager_lookup(mem_obj);
+
+	memory_object_synchronize_completed(pager-&gt;pager_control,
+					    offset, length);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * swapfile_pager_map()
+ *
+ * This allows VM to let us, the EMM, know that this memory object
+ * is currently mapped one or more times.  This is called by VM each time
+ * the memory object gets mapped and we take one extra reference on the
+ * memory object to account for all its mappings.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">swapfile_pager_map</span>(
+	memory_object_t		mem_obj,
+	__unused vm_prot_t	prot)
+{
+	swapfile_pager_t	pager;
+
+	PAGER_DEBUG(PAGER_ALL, (<span class="enscript-string">&quot;swapfile_pager_map: %p\n&quot;</span>, mem_obj));
+
+	pager = swapfile_pager_lookup(mem_obj);
+
+	lck_mtx_lock(&amp;swapfile_pager_lock);
+	assert(pager-&gt;is_ready);
+	assert(pager-&gt;ref_count &gt; 0); <span class="enscript-comment">/* pager is alive */</span>
+	<span class="enscript-keyword">if</span> (pager-&gt;is_mapped == FALSE) {
+		<span class="enscript-comment">/*
+		 * First mapping of this pager:  take an extra reference
+		 * that will remain until all the mappings of this pager
+		 * are removed.
+		 */</span>
+		pager-&gt;is_mapped = TRUE;
+		pager-&gt;ref_count++;
+	}
+	lck_mtx_unlock(&amp;swapfile_pager_lock);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * swapfile_pager_last_unmap()
+ *
+ * This is called by VM when this memory object is no longer mapped anywhere.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">swapfile_pager_last_unmap</span>(
+	memory_object_t		mem_obj)
+{
+	swapfile_pager_t	pager;
+
+	PAGER_DEBUG(PAGER_ALL,
+		    (<span class="enscript-string">&quot;swapfile_pager_last_unmap: %p\n&quot;</span>, mem_obj));
+
+	pager = swapfile_pager_lookup(mem_obj);
+
+	lck_mtx_lock(&amp;swapfile_pager_lock);
+	<span class="enscript-keyword">if</span> (pager-&gt;is_mapped) {
+		<span class="enscript-comment">/*
+		 * All the mappings are gone, so let go of the one extra
+		 * reference that represents all the mappings of this pager.
+		 */</span>
+		pager-&gt;is_mapped = FALSE;
+		swapfile_pager_deallocate_internal(pager, TRUE);
+		<span class="enscript-comment">/* caution: deallocate_internal() released the lock ! */</span>
+	} <span class="enscript-keyword">else</span> {
+		lck_mtx_unlock(&amp;swapfile_pager_lock);
+	}
+	
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+
+<span class="enscript-comment">/*
+ *
+ */</span>
+swapfile_pager_t
+<span class="enscript-function-name">swapfile_pager_lookup</span>(
+	memory_object_t	 mem_obj)
+{
+	swapfile_pager_t	pager;
+
+	__IGNORE_WCASTALIGN(pager = (swapfile_pager_t) mem_obj);
+	assert(pager-&gt;pager_ops == &amp;swapfile_pager_ops);
+	assert(pager-&gt;ref_count &gt; 0);
+	<span class="enscript-keyword">return</span> pager;
+}
+
+swapfile_pager_t
+<span class="enscript-function-name">swapfile_pager_create</span>(
+	<span class="enscript-type">struct</span> vnode 		*vp)
+{
+	swapfile_pager_t	pager, pager2;
+	memory_object_control_t	control;
+	kern_return_t		kr;
+
+	pager = (swapfile_pager_t) kalloc(<span class="enscript-keyword">sizeof</span> (*pager));
+	<span class="enscript-keyword">if</span> (pager == SWAPFILE_PAGER_NULL) {
+		<span class="enscript-keyword">return</span> SWAPFILE_PAGER_NULL;
+	}
+
+	<span class="enscript-comment">/*
+	 * The vm_map call takes both named entry ports and raw memory
+	 * objects in the same parameter.  We need to make sure that
+	 * vm_map does not see this object as a named entry port.  So,
+	 * we reserve the second word in the object for a fake ip_kotype
+	 * setting - that will tell vm_map to use it as a memory object.
+	 */</span>
+	pager-&gt;pager_ops = &amp;swapfile_pager_ops;
+	pager-&gt;pager_ikot = IKOT_MEMORY_OBJECT;
+	pager-&gt;is_ready = FALSE;<span class="enscript-comment">/* not ready until it has a &quot;name&quot; */</span>
+	pager-&gt;ref_count = 1;	<span class="enscript-comment">/* setup reference */</span>
+	pager-&gt;is_mapped = FALSE;
+	pager-&gt;pager_control = MEMORY_OBJECT_CONTROL_NULL;
+	pager-&gt;swapfile_vnode = vp;
+	
+	lck_mtx_lock(&amp;swapfile_pager_lock);
+	<span class="enscript-comment">/* see if anyone raced us to create a pager for the same object */</span>
+	queue_iterate(&amp;swapfile_pager_queue,
+		      pager2,
+		      swapfile_pager_t,
+		      pager_queue) {
+		<span class="enscript-keyword">if</span> (pager2-&gt;swapfile_vnode == vp) {
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (! queue_end(&amp;swapfile_pager_queue,
+			(queue_entry_t) pager2)) {
+		<span class="enscript-comment">/* while we hold the lock, transfer our setup ref to winner */</span>
+		pager2-&gt;ref_count++;
+		<span class="enscript-comment">/* we lost the race, down with the loser... */</span>
+		lck_mtx_unlock(&amp;swapfile_pager_lock);
+		pager-&gt;swapfile_vnode = NULL;
+		kfree(pager, <span class="enscript-keyword">sizeof</span> (*pager));
+		<span class="enscript-comment">/* ... and go with the winner */</span>
+		pager = pager2;
+		<span class="enscript-comment">/* let the winner make sure the pager gets ready */</span>
+		<span class="enscript-keyword">return</span> pager;
+	}
+
+	<span class="enscript-comment">/* enter new pager at the head of our list of pagers */</span>
+	queue_enter_first(&amp;swapfile_pager_queue,
+			  pager,
+			  swapfile_pager_t,
+			  pager_queue);
+	swapfile_pager_count++;
+	<span class="enscript-keyword">if</span> (swapfile_pager_count &gt; swapfile_pager_count_max) {
+		swapfile_pager_count_max = swapfile_pager_count;
+	}
+	lck_mtx_unlock(&amp;swapfile_pager_lock);
+
+	kr = memory_object_create_named((memory_object_t) pager,
+					0,
+					&amp;control);
+	assert(kr == KERN_SUCCESS);
+
+	lck_mtx_lock(&amp;swapfile_pager_lock);
+	<span class="enscript-comment">/* the new pager is now ready to be used */</span>
+	pager-&gt;is_ready = TRUE;
+	lck_mtx_unlock(&amp;swapfile_pager_lock);
+
+	<span class="enscript-comment">/* wakeup anyone waiting for this pager to be ready */</span>
+	thread_wakeup(&amp;pager-&gt;is_ready);
+
+	<span class="enscript-keyword">return</span> pager;
+}
+
+<span class="enscript-comment">/*
+ * swapfile_pager_setup()
+ *
+ * Provide the caller with a memory object backed by the provided
+ * &quot;backing_object&quot; VM object.  If such a memory object already exists,
+ * re-use it, otherwise create a new memory object.
+ */</span>
+memory_object_t
+<span class="enscript-function-name">swapfile_pager_setup</span>(
+	<span class="enscript-type">struct</span> vnode *vp)
+{
+	swapfile_pager_t	pager;
+
+	lck_mtx_lock(&amp;swapfile_pager_lock);
+
+	queue_iterate(&amp;swapfile_pager_queue,
+		      pager,
+		      swapfile_pager_t,
+		      pager_queue) {
+		<span class="enscript-keyword">if</span> (pager-&gt;swapfile_vnode == vp) {
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (queue_end(&amp;swapfile_pager_queue,
+		      (queue_entry_t) pager)) {
+		<span class="enscript-comment">/* no existing pager for this backing object */</span>
+		pager = SWAPFILE_PAGER_NULL;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* make sure pager doesn't disappear */</span>
+		pager-&gt;ref_count++;
+	}
+
+	lck_mtx_unlock(&amp;swapfile_pager_lock);
+
+	<span class="enscript-keyword">if</span> (pager == SWAPFILE_PAGER_NULL) {
+		pager = swapfile_pager_create(vp);
+		<span class="enscript-keyword">if</span> (pager == SWAPFILE_PAGER_NULL) {
+			<span class="enscript-keyword">return</span> MEMORY_OBJECT_NULL;
+		}
+	}
+
+	lck_mtx_lock(&amp;swapfile_pager_lock);
+	<span class="enscript-keyword">while</span> (!pager-&gt;is_ready) {
+		lck_mtx_sleep(&amp;swapfile_pager_lock,
+			LCK_SLEEP_DEFAULT,
+			&amp;pager-&gt;is_ready,
+			THREAD_UNINT);
+	}
+	lck_mtx_unlock(&amp;swapfile_pager_lock);
+
+	<span class="enscript-keyword">return</span> (memory_object_t) pager;
+}	
+
+memory_object_control_t
+<span class="enscript-function-name">swapfile_pager_control</span>(
+	memory_object_t	mem_obj)
+{
+	swapfile_pager_t	pager;
+
+	pager = swapfile_pager_lookup(mem_obj);
+
+	<span class="enscript-keyword">return</span> pager-&gt;pager_control;
+}
+</pre>
+<hr />
+</body></html>

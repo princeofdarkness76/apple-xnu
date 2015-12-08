@@ -1,0 +1,697 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>dp_backing_file.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">dp_backing_file.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/buf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ubc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_PROTECT</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cprotect.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;default_pager/default_pager_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;default_pager/default_pager_object.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit_kevents.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_traps.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vnode_pager.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">macx_init</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> lck_grp_t *macx_lock_group;
+<span class="enscript-type">static</span> lck_mtx_t *macx_lock;
+
+<span class="enscript-comment">/*
+ * temporary support for delayed instantiation
+ * of default_pager
+ */</span>
+<span class="enscript-type">int</span> default_pager_init_flag = 0;
+
+<span class="enscript-type">struct</span> bs_map		bs_port_table[MAX_BACKING_STORE] = { 
+	{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},
+	{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},
+	{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},
+	{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},
+	{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},
+	{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},
+	{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},
+	{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},
+	{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},
+	{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0}};
+
+<span class="enscript-comment">/* ###################################################### */</span>
+
+<span class="enscript-comment">/*
+ *	Routine:	macx_init
+ *	Function:
+ *		Initialize locks so that only one caller can change
+ *      state at a time.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">macx_init</span>(<span class="enscript-type">void</span>)
+{
+	macx_lock_group = lck_grp_alloc_init(<span class="enscript-string">&quot;macx&quot;</span>, NULL);
+	macx_lock = lck_mtx_alloc_init(macx_lock_group, NULL);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	macx_backing_store_recovery
+ *	Function:
+ *		Syscall interface to set a tasks privilege
+ *		level so that it is not subject to 
+ *		macx_backing_store_suspend
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">macx_backing_store_recovery</span>(
+	<span class="enscript-type">struct</span> macx_backing_store_recovery_args *args)
+{
+	<span class="enscript-type">int</span>		pid = args-&gt;pid;
+	<span class="enscript-type">int</span>		error;
+	<span class="enscript-type">struct</span> proc	*p =  current_proc();
+
+	<span class="enscript-keyword">if</span> ((error = suser(kauth_cred_get(), 0)))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">backing_store_recovery_return</span>;
+
+	<span class="enscript-comment">/* for now restrict backing_store_recovery */</span>
+	<span class="enscript-comment">/* usage to only present task */</span>
+	<span class="enscript-keyword">if</span>(pid != proc_selfpid()) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">backing_store_recovery_return</span>;
+	}
+
+	task_backing_store_privileged(p-&gt;task);
+
+<span class="enscript-reference">backing_store_recovery_return</span>:
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	macx_backing_store_suspend
+ *	Function:
+ *		Syscall interface to stop new demand for 
+ *		backing store when backing store is low
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">macx_backing_store_suspend</span>(
+	<span class="enscript-type">struct</span> macx_backing_store_suspend_args *args)
+{
+	boolean_t	suspend = args-&gt;suspend;
+	<span class="enscript-type">int</span>		error;
+
+	lck_mtx_lock(macx_lock);
+	<span class="enscript-keyword">if</span> ((error = suser(kauth_cred_get(), 0)))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">backing_store_suspend_return</span>;
+
+	<span class="enscript-comment">/* Multiple writers protected by macx_lock */</span>
+	vm_backing_store_disable(suspend);
+
+<span class="enscript-reference">backing_store_suspend_return</span>:
+	lck_mtx_unlock(macx_lock);
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-type">extern</span> boolean_t backing_store_stop_compaction;
+<span class="enscript-type">extern</span> boolean_t compressor_store_stop_compaction;
+
+<span class="enscript-comment">/*
+ *	Routine:	macx_backing_store_compaction
+ *	Function:
+ *		Turn compaction of swap space on or off.  This is
+ *		used during shutdown/restart so	that the kernel 
+ *		doesn't waste time compacting swap files that are 
+ *		about to be deleted anyway.  Compaction	is always 
+ *		on by default when the system comes up and is turned 
+ *		off when a shutdown/restart is requested.  It is 
+ *		re-enabled if the shutdown/restart is aborted for any reason.
+ *
+ *  This routine assumes macx_lock has been locked by macx_triggers -&gt;
+ *      mach_macx_triggers -&gt; macx_backing_store_compaction
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">macx_backing_store_compaction</span>(<span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">int</span> error;
+
+	lck_mtx_assert(macx_lock, LCK_MTX_ASSERT_OWNED);
+	<span class="enscript-keyword">if</span> ((error = suser(kauth_cred_get(), 0)))
+		<span class="enscript-keyword">return</span> error;
+
+	<span class="enscript-keyword">if</span> (flags &amp; SWAP_COMPACT_DISABLE) {
+		backing_store_stop_compaction = TRUE;
+		compressor_store_stop_compaction = TRUE;
+
+		kprintf(<span class="enscript-string">&quot;backing_store_stop_compaction = TRUE\n&quot;</span>);
+
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flags &amp; SWAP_COMPACT_ENABLE) {
+		backing_store_stop_compaction = FALSE;
+		compressor_store_stop_compaction = FALSE;
+
+		kprintf(<span class="enscript-string">&quot;backing_store_stop_compaction = FALSE\n&quot;</span>);
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	macx_triggers
+ *	Function:
+ *		Syscall interface to set the call backs for low and
+ *		high water marks.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">macx_triggers</span>(
+	<span class="enscript-type">struct</span> macx_triggers_args *args)
+{
+	<span class="enscript-type">int</span>	error;
+
+	lck_mtx_lock(macx_lock);
+	error = suser(kauth_cred_get(), 0);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+
+	error = mach_macx_triggers(args);
+	
+	lck_mtx_unlock(macx_lock);
+	<span class="enscript-keyword">return</span> error;
+}
+
+
+<span class="enscript-type">extern</span> boolean_t dp_isssd;
+
+<span class="enscript-comment">/*
+ * In the compressed pager world, the swapfiles are created by the kernel.
+ * Well, all except the first one. That swapfile is absorbed by the kernel at
+ * the end of the macx_swapon function (if swap is enabled). That's why
+ * we allow the first invocation of macx_swapon to succeed.
+ *
+ * If the compressor pool is running low, the kernel messages the dynamic pager
+ * on the port it has registered with the kernel. That port can transport 1 of 2
+ * pieces of information to dynamic pager: create a swapfile or delete a swapfile.
+ *
+ * We choose to transmit the former. So, that message tells dynamic pager
+ * to create a swapfile and activate it by calling macx_swapon. 
+ *
+ * We deny this new macx_swapon request. That leads dynamic pager to interpret the
+ * failure as a serious error and notify all it's clients that swap is running low.
+ * That's how we get the loginwindow &quot;Resume / Force Quit Applications&quot; dialog to appear.
+ *
+ * NOTE: 
+ * If the kernel has already created multiple swapfiles by the time the compressor
+ * pool is running low (and it has to play this trick), dynamic pager won't be able to
+ * create a file in user-space and, that too will lead to a similar notification blast
+ * to all of it's clients. So, that behaves as desired too.
+ */</span>
+boolean_t	macx_swapon_allowed = TRUE;
+
+<span class="enscript-comment">/*
+ *	Routine:	macx_swapon
+ *	Function:
+ *		Syscall interface to add a file to backing store
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">macx_swapon</span>(
+	<span class="enscript-type">struct</span> macx_swapon_args *args)
+{
+	<span class="enscript-type">int</span>			size = args-&gt;size;
+	vnode_t			vp = (vnode_t)NULL; 
+	<span class="enscript-type">struct</span> nameidata 	nd, *ndp;
+	<span class="enscript-type">register</span> <span class="enscript-type">int</span>		error;
+	kern_return_t		kr;
+	mach_port_t		backing_store;
+	memory_object_default_t	default_pager;
+	<span class="enscript-type">int</span>			i;
+	off_t			file_size;
+	vfs_context_t		ctx = vfs_context_current();
+	<span class="enscript-type">struct</span> proc		*p =  current_proc();
+	<span class="enscript-type">int</span>			dp_cluster_size;
+
+	AUDIT_MACH_SYSCALL_ENTER(AUE_SWAPON);
+	AUDIT_ARG(value32, args-&gt;priority);
+	
+	lck_mtx_lock(macx_lock);
+
+	<span class="enscript-keyword">if</span> (COMPRESSED_PAGER_IS_ACTIVE) {
+		<span class="enscript-keyword">if</span> (macx_swapon_allowed == FALSE) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapon_bailout</span>;
+		} <span class="enscript-keyword">else</span> {
+			macx_swapon_allowed = FALSE;
+			error = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapon_bailout</span>;
+		}
+	}
+
+	ndp = &amp;nd;
+
+	<span class="enscript-keyword">if</span> ((error = suser(kauth_cred_get(), 0)))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapon_bailout</span>;
+
+	<span class="enscript-comment">/*
+	 * Get a vnode for the paging area.
+	 */</span>
+	NDINIT(ndp, LOOKUP, OP_LOOKUP, FOLLOW | LOCKLEAF | AUDITVNPATH1,
+	       ((IS_64BIT_PROCESS(p)) ? UIO_USERSPACE64 : UIO_USERSPACE32),
+	       (user_addr_t) args-&gt;filename, ctx);
+
+	<span class="enscript-keyword">if</span> ((error = namei(ndp)))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapon_bailout</span>;
+	nameidone(ndp);
+	vp = ndp-&gt;ni_vp;
+
+	<span class="enscript-keyword">if</span> (vp-&gt;v_type != VREG) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapon_bailout</span>;
+	}
+
+	<span class="enscript-comment">/* get file size */</span>
+	<span class="enscript-keyword">if</span> ((error = vnode_size(vp, &amp;file_size, ctx)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapon_bailout</span>;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	vnode_lock(vp);
+	error = mac_system_check_swapon(vfs_context_ucred(ctx), vp);
+	vnode_unlock(vp);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapon_bailout</span>;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* resize to desired size if it's too small */</span>
+	<span class="enscript-keyword">if</span> ((file_size &lt; (off_t)size) &amp;&amp; ((error = vnode_setsize(vp, (off_t)size, 0, ctx)) != 0))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapon_bailout</span>;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_PROTECT</span>
+	{
+		<span class="enscript-comment">/* initialize content protection keys manually */</span>
+		<span class="enscript-keyword">if</span> ((error = cp_handle_vnop(vp, CP_WRITE_ACCESS, 0)) != 0) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapon_bailout</span>;
+ 		}
+	}
+#<span class="enscript-reference">endif</span>
+
+
+	<span class="enscript-keyword">if</span> (default_pager_init_flag == 0) {
+		start_def_pager(NULL);
+		default_pager_init_flag = 1;
+	}
+
+	<span class="enscript-comment">/* add new backing store to list */</span>
+	i = 0;
+	<span class="enscript-keyword">while</span>(bs_port_table[i].vp != 0) {
+		<span class="enscript-keyword">if</span>(i == MAX_BACKING_STORE)
+			<span class="enscript-keyword">break</span>;
+		i++;
+	}
+	<span class="enscript-keyword">if</span>(i == MAX_BACKING_STORE) {
+	   	error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapon_bailout</span>;
+	}
+
+	<span class="enscript-comment">/* remember the vnode. This vnode has namei() reference */</span>
+	bs_port_table[i].vp = vp;
+	
+	<span class="enscript-comment">/*
+	 * Look to see if we are already paging to this file.
+	 */</span>
+	<span class="enscript-comment">/* make certain the copy send of kernel call will work */</span>
+	default_pager = MEMORY_OBJECT_DEFAULT_NULL;
+	kr = host_default_memory_manager(host_priv_self(), &amp;default_pager, 0);
+	<span class="enscript-keyword">if</span>(kr != KERN_SUCCESS) {
+	   error = EAGAIN;
+	   bs_port_table[i].vp = 0;
+	   <span class="enscript-keyword">goto</span> <span class="enscript-reference">swapon_bailout</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ((dp_isssd = vnode_pager_isSSD(vp)) == TRUE) {
+		<span class="enscript-comment">/*
+		 * keep the cluster size small since the
+		 * seek cost is effectively 0 which means
+		 * we don't care much about fragmentation
+		 */</span>
+		dp_cluster_size = 2 * PAGE_SIZE;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * use the default cluster size
+		 */</span>
+		dp_cluster_size = 0;
+	}
+	kr = default_pager_backing_store_create(default_pager, 
+					-1, <span class="enscript-comment">/* default priority */</span>
+					dp_cluster_size,
+					&amp;backing_store);
+	memory_object_default_deallocate(default_pager);
+
+	<span class="enscript-keyword">if</span>(kr != KERN_SUCCESS) {
+	   error = ENOMEM;
+	   bs_port_table[i].vp = 0;
+	   <span class="enscript-keyword">goto</span> <span class="enscript-reference">swapon_bailout</span>;
+	}
+
+	<span class="enscript-comment">/* Mark this vnode as being used for swapfile */</span>
+	vnode_lock_spin(vp);
+	SET(vp-&gt;v_flag, VSWAP);
+	vnode_unlock(vp);
+
+	<span class="enscript-comment">/*
+	 * NOTE: we are able to supply PAGE_SIZE here instead of
+	 *	an actual record size or block number because:
+	 *	a: we do not support offsets from the beginning of the
+	 *		file (allowing for non page size/record modulo offsets.
+	 *	b: because allow paging will be done modulo page size
+	 */</span>
+
+	kr = default_pager_add_file(backing_store, (vnode_ptr_t) vp,
+				PAGE_SIZE, (<span class="enscript-type">int</span>)(file_size/PAGE_SIZE));
+	<span class="enscript-keyword">if</span>(kr != KERN_SUCCESS) {
+	   bs_port_table[i].vp = 0;
+	   <span class="enscript-keyword">if</span>(kr == KERN_INVALID_ARGUMENT)
+		error = EINVAL;
+	   <span class="enscript-keyword">else</span> 
+		error = ENOMEM;
+
+	   <span class="enscript-comment">/* This vnode is not to be used for swapfile */</span>
+	   vnode_lock_spin(vp);
+	   CLR(vp-&gt;v_flag, VSWAP);
+	   vnode_unlock(vp);
+
+	   <span class="enscript-keyword">goto</span> <span class="enscript-reference">swapon_bailout</span>;
+	}
+	bs_port_table[i].bs = (<span class="enscript-type">void</span> *)backing_store;
+	error = 0;
+
+	ubc_setthreadcred(vp, p, current_thread());
+
+	<span class="enscript-comment">/*
+	 * take a long term reference on the vnode to keep
+	 * vnreclaim() away from this vnode.
+	 */</span>
+	vnode_ref(vp);
+
+<span class="enscript-reference">swapon_bailout</span>:
+	<span class="enscript-keyword">if</span> (vp) {
+		vnode_put(vp);
+	}
+	lck_mtx_unlock(macx_lock);
+	AUDIT_MACH_SYSCALL_EXIT(error);
+
+	<span class="enscript-keyword">if</span> (error)
+		printf(<span class="enscript-string">&quot;macx_swapon FAILED - %d\n&quot;</span>, error);
+	<span class="enscript-keyword">else</span>
+		printf(<span class="enscript-string">&quot;macx_swapon SUCCESS\n&quot;</span>);
+
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	macx_swapoff
+ *	Function:
+ *		Syscall interface to remove a file from backing store
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">macx_swapoff</span>(
+	<span class="enscript-type">struct</span> macx_swapoff_args *args)
+{
+	__unused <span class="enscript-type">int</span>	flags = args-&gt;flags;
+	kern_return_t	kr;
+	mach_port_t	backing_store;
+
+	<span class="enscript-type">struct</span> vnode		*vp = 0; 
+	<span class="enscript-type">struct</span> nameidata 	nd, *ndp;
+	<span class="enscript-type">struct</span> proc		*p =  current_proc();
+	<span class="enscript-type">int</span>			i;
+	<span class="enscript-type">int</span>			error;
+	vfs_context_t ctx = vfs_context_current();
+	<span class="enscript-type">int</span>			orig_iopol_disk;
+
+	AUDIT_MACH_SYSCALL_ENTER(AUE_SWAPOFF);
+
+	lck_mtx_lock(macx_lock);
+	
+	backing_store = NULL;
+	ndp = &amp;nd;
+
+	<span class="enscript-keyword">if</span> ((error = suser(kauth_cred_get(), 0)))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapoff_bailout</span>;
+
+	<span class="enscript-comment">/*
+	 * Get the vnode for the paging area.
+	 */</span>
+	NDINIT(ndp, LOOKUP, OP_LOOKUP, FOLLOW | LOCKLEAF | AUDITVNPATH1,
+	       ((IS_64BIT_PROCESS(p)) ? UIO_USERSPACE64 : UIO_USERSPACE32),
+	       (user_addr_t) args-&gt;filename, ctx);
+
+	<span class="enscript-keyword">if</span> ((error = namei(ndp)))
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapoff_bailout</span>;
+	nameidone(ndp);
+	vp = ndp-&gt;ni_vp;
+
+	<span class="enscript-keyword">if</span> (vp-&gt;v_type != VREG) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapoff_bailout</span>;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	vnode_lock(vp);
+	error = mac_system_check_swapoff(vfs_context_ucred(ctx), vp);
+	vnode_unlock(vp);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapoff_bailout</span>;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">for</span>(i = 0; i &lt; MAX_BACKING_STORE; i++) {
+		<span class="enscript-keyword">if</span>(bs_port_table[i].vp == vp) {
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (i == MAX_BACKING_STORE) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">swapoff_bailout</span>;
+	}
+	backing_store = (mach_port_t)bs_port_table[i].bs;
+
+	orig_iopol_disk = proc_get_task_policy(current_task(), current_thread(),
+	                                       TASK_POLICY_INTERNAL, TASK_POLICY_IOPOL);
+
+	proc_set_task_policy(current_task(), current_thread(), TASK_POLICY_INTERNAL,
+	                     TASK_POLICY_IOPOL, IOPOL_THROTTLE);
+
+	kr = default_pager_backing_store_delete(backing_store);
+
+	proc_set_task_policy(current_task(), current_thread(), TASK_POLICY_INTERNAL,
+	                     TASK_POLICY_IOPOL, orig_iopol_disk);
+
+	<span class="enscript-keyword">switch</span> (kr) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_SUCCESS</span>:
+			error = 0;
+			bs_port_table[i].vp = 0;
+			<span class="enscript-comment">/* This vnode is no longer used for swapfile */</span>
+			vnode_lock_spin(vp);
+			CLR(vp-&gt;v_flag, VSWAP);
+			vnode_unlock(vp);
+
+			<span class="enscript-comment">/* get rid of macx_swapon() &quot;long term&quot; reference */</span>
+			vnode_rele(vp);
+
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_FAILURE</span>:
+			error = EAGAIN;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			error = EAGAIN;
+			<span class="enscript-keyword">break</span>;
+	}
+
+<span class="enscript-reference">swapoff_bailout</span>:
+	<span class="enscript-comment">/* get rid of macx_swapoff() namei() reference */</span>
+	<span class="enscript-keyword">if</span> (vp)
+		vnode_put(vp);
+	lck_mtx_unlock(macx_lock);
+	AUDIT_MACH_SYSCALL_EXIT(error);
+
+	<span class="enscript-keyword">if</span> (error)
+		printf(<span class="enscript-string">&quot;macx_swapoff FAILED - %d\n&quot;</span>, error);
+	<span class="enscript-keyword">else</span>
+		printf(<span class="enscript-string">&quot;macx_swapoff SUCCESS\n&quot;</span>);
+
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	macx_swapinfo
+ *	Function:
+ *		Syscall interface to get general swap statistics
+ */</span>
+<span class="enscript-type">extern</span> uint64_t <span class="enscript-function-name">vm_swap_get_total_space</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> uint64_t <span class="enscript-function-name">vm_swap_get_used_space</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> uint64_t <span class="enscript-function-name">vm_swap_get_free_space</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> boolean_t vm_swap_up;
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">macx_swapinfo</span>(
+	memory_object_size_t	*total_p,
+	memory_object_size_t	*avail_p,
+	vm_size_t		*pagesize_p,
+	boolean_t		*encrypted_p)
+{
+	<span class="enscript-type">int</span>			error;
+	memory_object_default_t	default_pager;
+	default_pager_info_64_t	dpi64;
+	kern_return_t		kr;
+
+	error = 0;
+	<span class="enscript-keyword">if</span> (COMPRESSED_PAGER_IS_ACTIVE || DEFAULT_FREEZER_COMPRESSED_PAGER_IS_ACTIVE) {
+
+		<span class="enscript-keyword">if</span> (vm_swap_up == TRUE) {
+
+			*total_p = vm_swap_get_total_space();
+			*avail_p = vm_swap_get_free_space();
+			*pagesize_p = (vm_size_t)PAGE_SIZE_64;
+			*encrypted_p = TRUE;
+
+		} <span class="enscript-keyword">else</span> {
+
+			*total_p = 0;
+			*avail_p = 0;
+			*pagesize_p = 0;
+			*encrypted_p = FALSE;
+		}
+	} <span class="enscript-keyword">else</span> {
+
+		<span class="enscript-comment">/*
+		 * Get a handle on the default pager.
+		 */</span>
+		default_pager = MEMORY_OBJECT_DEFAULT_NULL;
+		kr = host_default_memory_manager(host_priv_self(), &amp;default_pager, 0);
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+			error = EAGAIN;	<span class="enscript-comment">/* XXX why EAGAIN ? */</span>
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		<span class="enscript-keyword">if</span> (default_pager == MEMORY_OBJECT_DEFAULT_NULL) {
+			<span class="enscript-comment">/*
+			 * The default pager has not initialized yet,
+			 * so it can't be using any swap space at all.
+			 */</span>
+			*total_p = 0;
+			*avail_p = 0;
+			*pagesize_p = 0;
+			*encrypted_p = FALSE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		
+		<span class="enscript-comment">/*
+		 * Get swap usage data from default pager.
+		 */</span>
+		kr = default_pager_info_64(default_pager, &amp;dpi64);
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+			error = ENOTSUP;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Provide default pager info to caller.
+		 */</span>
+		*total_p = dpi64.dpi_total_space;
+		*avail_p = dpi64.dpi_free_space;
+		*pagesize_p = dpi64.dpi_page_size;
+		<span class="enscript-keyword">if</span> (dpi64.dpi_flags &amp; DPI_ENCRYPTED) {
+			*encrypted_p = TRUE;
+		} <span class="enscript-keyword">else</span> {
+			*encrypted_p = FALSE;
+		}
+
+<span class="enscript-reference">done</span>:
+		<span class="enscript-keyword">if</span> (default_pager != MEMORY_OBJECT_DEFAULT_NULL) {
+			<span class="enscript-comment">/* release our handle on default pager */</span>
+			memory_object_default_deallocate(default_pager);
+		}
+	}
+	<span class="enscript-keyword">return</span> error;
+}
+</pre>
+<hr />
+</body></html>

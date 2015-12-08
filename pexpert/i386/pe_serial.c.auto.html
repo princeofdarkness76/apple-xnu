@@ -1,0 +1,234 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pe_serial.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pe_serial.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * file: pe_serial.c
+ *       Polled-mode 16x50 UART driver.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+
+<span class="enscript-comment">/* standard port addresses */</span>
+<span class="enscript-type">enum</span> {
+    COM1_PORT_ADDR = 0x3f8,
+    COM2_PORT_ADDR = 0x2f8
+};
+
+<span class="enscript-comment">/* UART register offsets */</span>
+<span class="enscript-type">enum</span> {
+    UART_RBR = 0,  <span class="enscript-comment">/* receive buffer Register   (R) */</span>
+    UART_THR = 0,  <span class="enscript-comment">/* transmit holding register (W) */</span>
+    UART_DLL = 0,  <span class="enscript-comment">/* DLAB = 1, divisor latch (LSB) */</span>
+    UART_IER = 1,  <span class="enscript-comment">/* interrupt enable register     */</span>
+    UART_DLM = 1,  <span class="enscript-comment">/* DLAB = 1, divisor latch (MSB) */</span>
+    UART_IIR = 2,  <span class="enscript-comment">/* interrupt ident register (R)  */</span>
+    UART_FCR = 2,  <span class="enscript-comment">/* fifo control register (W)     */</span>
+    UART_LCR = 3,  <span class="enscript-comment">/* line control register         */</span>
+    UART_MCR = 4,  <span class="enscript-comment">/* modem control register        */</span>
+    UART_LSR = 5,  <span class="enscript-comment">/* line status register          */</span>
+    UART_MSR = 6,  <span class="enscript-comment">/* modem status register         */</span>
+    UART_SCR = 7   <span class="enscript-comment">/* scratch register              */</span>
+};
+
+<span class="enscript-type">enum</span> {
+    UART_LCR_8BITS = 0x03,
+    UART_LCR_DLAB  = 0x80
+};
+
+<span class="enscript-type">enum</span> {
+    UART_MCR_DTR   = 0x01,
+    UART_MCR_RTS   = 0x02,
+    UART_MCR_OUT1  = 0x04,
+    UART_MCR_OUT2  = 0x08,
+    UART_MCR_LOOP  = 0x10
+};
+
+<span class="enscript-type">enum</span> {
+    UART_LSR_DR    = 0x01,
+    UART_LSR_OE    = 0x02,
+    UART_LSR_PE    = 0x04,
+    UART_LSR_FE    = 0x08,
+    UART_LSR_THRE  = 0x20
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> uart_baud_rate = 115200;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">UART_PORT_ADDR</span>  COM1_PORT_ADDR
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">UART_CLOCK</span>  1843200   <span class="enscript-comment">/* 1.8432 MHz clock */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">WRITE</span>(r, v)  outb(UART_PORT_ADDR + UART_##r, v)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">READ</span>(r)      inb(UART_PORT_ADDR + UART_##r)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DELAY</span>(x)     { volatile int _d_; for (_d_ = 0; _d_ &lt; (10000*x); _d_++) ; }
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> uart_initted = 0;   <span class="enscript-comment">/* 1 if init'ed */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uart_probe</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-comment">/* Verify that the Scratch Register is accessible */</span>
+
+    WRITE( SCR, 0x5a );
+    <span class="enscript-keyword">if</span> (READ(SCR) != 0x5a) <span class="enscript-keyword">return</span> 0;
+    WRITE( SCR, 0xa5 );
+    <span class="enscript-keyword">if</span> (READ(SCR) != 0xa5) <span class="enscript-keyword">return</span> 0;
+    <span class="enscript-keyword">return</span> 1;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">uart_set_baud_rate</span>( <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> baud_rate )
+{
+    <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> lcr = READ( LCR );
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>       div;
+
+    <span class="enscript-keyword">if</span> (baud_rate == 0) baud_rate = 9600;
+    div = UART_CLOCK / 16 / baud_rate;
+    WRITE( LCR, lcr | UART_LCR_DLAB );
+    WRITE( DLM, (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)(div &gt;&gt; 8) );
+    WRITE( DLL, (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>) div );
+    WRITE( LCR, lcr &amp; ~UART_LCR_DLAB);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">uart_putc</span>( <span class="enscript-type">char</span> c )
+{
+    <span class="enscript-keyword">if</span> (!uart_initted) <span class="enscript-keyword">return</span>;
+
+    <span class="enscript-comment">/* Wait for THR empty */</span>
+    <span class="enscript-keyword">while</span> ( !(READ(LSR) &amp; UART_LSR_THRE) ) DELAY(1);
+
+    WRITE( THR, c );
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">uart_getc</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-comment">/*
+     * This function returns:
+     * -1 : no data
+     * -2 : receiver error
+     * &gt;0 : character received
+     */</span>
+
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> lsr;
+
+    <span class="enscript-keyword">if</span> (!uart_initted) <span class="enscript-keyword">return</span> -1;
+
+    lsr = READ( LSR );
+
+    <span class="enscript-keyword">if</span> ( lsr &amp; (UART_LSR_FE | UART_LSR_PE | UART_LSR_OE) )
+    {
+        READ( RBR ); <span class="enscript-comment">/* discard */</span>
+        <span class="enscript-keyword">return</span> -2;
+    }
+
+    <span class="enscript-keyword">if</span> ( lsr &amp; UART_LSR_DR )
+    {
+        <span class="enscript-keyword">return</span> READ( RBR );
+    }
+
+    <span class="enscript-keyword">return</span> -1;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">serial_init</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-type">unsigned</span> serial_baud_rate = 0;
+	
+    <span class="enscript-keyword">if</span> ( uart_probe() == 0 ) <span class="enscript-keyword">return</span> 0;
+
+    <span class="enscript-comment">/* Disable hardware interrupts */</span>
+
+    WRITE( MCR, 0 );
+    WRITE( IER, 0 );
+
+    <span class="enscript-comment">/* Disable FIFO's for 16550 devices */</span>
+
+    WRITE( FCR, 0 );
+
+    <span class="enscript-comment">/* Set for 8-bit, no parity, DLAB bit cleared */</span>
+
+    WRITE( LCR, UART_LCR_8BITS );
+
+    <span class="enscript-comment">/* Set baud rate - use the supplied boot-arg if available */</span>
+
+    <span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;serialbaud&quot;</span>, &amp;serial_baud_rate, <span class="enscript-keyword">sizeof</span> (serial_baud_rate)))
+    {
+	    <span class="enscript-comment">/* Valid divisor? */</span>
+	    <span class="enscript-keyword">if</span> (!((UART_CLOCK / 16) % serial_baud_rate)) {
+		    uart_baud_rate = serial_baud_rate;
+	    }
+    }
+    uart_set_baud_rate( uart_baud_rate );
+
+    <span class="enscript-comment">/* Assert DTR# and RTS# lines (OUT2?) */</span>
+
+    WRITE( MCR, UART_MCR_DTR | UART_MCR_RTS );
+
+    <span class="enscript-comment">/* Clear any garbage in the input buffer */</span>
+
+    READ( RBR );
+
+    uart_initted = 1;
+
+    <span class="enscript-keyword">return</span> 1;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">serial_putc</span>( <span class="enscript-type">char</span> c )
+{
+    uart_putc(c);
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">serial_getc</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-keyword">return</span> uart_getc();
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,645 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kxld_sect.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kxld_sect.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/loader.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/reloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEBUG_ASSERT_COMPONENT_NAME_STRING</span> <span class="enscript-string">&quot;kxld&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;AssertMacros.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_reloc.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_sect.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_seg.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_symtab.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;kxld_util.h&quot;</span>
+
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">export_macho</span>(<span class="enscript-type">const</span> KXLDSect *sect, u_char *buf, u_long offset, 
+    u_long bufsize);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ILP32</span>
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">sect_export_macho_header_32</span>(<span class="enscript-type">const</span> KXLDSect *sect, u_char *buf, 
+    u_long *header_offset, u_long header_size, u_long data_offset);
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_LP64</span>
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">sect_export_macho_header_64</span>(<span class="enscript-type">const</span> KXLDSect *sect, u_char *buf, 
+    u_long *header_offset, u_long header_size, u_long data_offset);
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ILP32</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sect_init_from_macho_32</span>(KXLDSect *sect, u_char *macho, u_long *sect_offset,
+    u_int sectnum, <span class="enscript-type">const</span> KXLDRelocator *relocator)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">struct</span> section *src = (<span class="enscript-type">struct</span> section *) ((<span class="enscript-type">void</span> *) (macho + *sect_offset));
+    <span class="enscript-type">struct</span> relocation_info *relocs = NULL;
+
+    check(sect);
+    check(macho);
+    check(src);
+
+    strlcpy(sect-&gt;segname, src-&gt;segname, <span class="enscript-keyword">sizeof</span>(sect-&gt;segname));
+    strlcpy(sect-&gt;sectname, src-&gt;sectname, <span class="enscript-keyword">sizeof</span>(sect-&gt;sectname));
+    sect-&gt;base_addr = src-&gt;addr;
+    sect-&gt;link_addr = src-&gt;addr;
+    sect-&gt;size = src-&gt;size;
+    sect-&gt;sectnum = sectnum;
+    sect-&gt;flags = src-&gt;flags;
+    sect-&gt;align = src-&gt;align;
+    sect-&gt;reserved1 = src-&gt;reserved1;
+    sect-&gt;reserved2 = src-&gt;reserved2;
+
+    <span class="enscript-keyword">if</span> (src-&gt;offset) {
+        sect-&gt;data = macho + src-&gt;offset;
+    } <span class="enscript-keyword">else</span> {
+        sect-&gt;data = NULL;
+    }
+
+    relocs = (<span class="enscript-type">struct</span> relocation_info *) ((<span class="enscript-type">void</span> *) (macho + src-&gt;reloff));
+
+    rval = kxld_reloc_create_macho(&amp;sect-&gt;relocs, relocator, 
+        relocs, src-&gt;nreloc);
+    require_noerr(rval, finish);
+
+    *sect_offset += <span class="enscript-keyword">sizeof</span>(*src);
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">if</span> (rval) kxld_sect_deinit(sect);
+
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_ILP32 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_LP64</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sect_init_from_macho_64</span>(KXLDSect *sect, u_char *macho, u_long *sect_offset,
+    u_int sectnum, <span class="enscript-type">const</span> KXLDRelocator *relocator)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">struct</span> section_64 *src = (<span class="enscript-type">struct</span> section_64 *) ((<span class="enscript-type">void</span> *) (macho + *sect_offset));
+    <span class="enscript-type">struct</span> relocation_info *relocs = NULL;
+
+    check(sect);
+    check(macho);
+    check(src);
+
+    strlcpy(sect-&gt;segname, src-&gt;segname, <span class="enscript-keyword">sizeof</span>(sect-&gt;segname));
+    strlcpy(sect-&gt;sectname, src-&gt;sectname, <span class="enscript-keyword">sizeof</span>(sect-&gt;sectname));
+    sect-&gt;base_addr = src-&gt;addr;
+    sect-&gt;link_addr = src-&gt;addr;
+    sect-&gt;size = src-&gt;size;
+    sect-&gt;sectnum = sectnum;
+    sect-&gt;flags = src-&gt;flags;
+    sect-&gt;align = src-&gt;align;
+    sect-&gt;reserved1 = src-&gt;reserved1;
+    sect-&gt;reserved2 = src-&gt;reserved2;
+
+    <span class="enscript-keyword">if</span> (src-&gt;offset) {
+        sect-&gt;data = macho + src-&gt;offset;
+    } <span class="enscript-keyword">else</span> {
+        sect-&gt;data = NULL;
+    }
+
+    relocs = (<span class="enscript-type">struct</span> relocation_info *) ((<span class="enscript-type">void</span> *) (macho + src-&gt;reloff));
+
+    rval = kxld_reloc_create_macho(&amp;sect-&gt;relocs, relocator, 
+        relocs, src-&gt;nreloc);
+    require_noerr(rval, finish);
+
+    *sect_offset += <span class="enscript-keyword">sizeof</span>(*src);
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">if</span> (rval) kxld_sect_deinit(sect);
+
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_LP64 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_GOT</span>
+<span class="enscript-comment">/*******************************************************************************
+* Assumes GOT is comprised of kxld_addr_t entries
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sect_init_got</span>(KXLDSect *sect, u_int ngots)
+{
+    kern_return_t rval = KERN_FAILURE;
+
+    check(sect);
+
+    strlcpy(sect-&gt;segname, KXLD_SEG_GOT, <span class="enscript-keyword">sizeof</span>(sect-&gt;segname));
+    strlcpy(sect-&gt;sectname, KXLD_SECT_GOT, <span class="enscript-keyword">sizeof</span>(sect-&gt;sectname));
+    sect-&gt;base_addr = 0;
+    sect-&gt;link_addr = 0;
+    sect-&gt;flags = 0;
+    sect-&gt;align = 4;
+    sect-&gt;reserved1 = 0;
+    sect-&gt;reserved2 = 0;
+
+    sect-&gt;size = ngots * <span class="enscript-keyword">sizeof</span>(kxld_addr_t);
+    sect-&gt;data = kxld_alloc((u_long) sect-&gt;size);
+    require_action(sect-&gt;data, finish, rval=KERN_RESOURCE_SHORTAGE);
+
+    sect-&gt;allocated = TRUE;
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_GOT */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_COMMON</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_sect_init_zerofill</span>(KXLDSect *sect, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *segname, 
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *sectname, kxld_size_t size, u_int align)
+{
+    check(sect);
+    check(segname);
+    check(sectname);
+
+    strlcpy(sect-&gt;segname, segname, <span class="enscript-keyword">sizeof</span>(sect-&gt;segname));
+    strlcpy(sect-&gt;sectname, sectname, <span class="enscript-keyword">sizeof</span>(sect-&gt;sectname));
+    sect-&gt;size = size;
+    sect-&gt;align = align;
+    sect-&gt;base_addr = 0;
+    sect-&gt;link_addr = 0;
+    sect-&gt;flags = S_ZEROFILL;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_COMMON */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_sect_clear</span>(KXLDSect *sect)
+{
+    check(sect);
+
+    <span class="enscript-keyword">if</span> (sect-&gt;allocated) {
+        kxld_free(sect-&gt;data, (u_long) sect-&gt;size);
+        sect-&gt;allocated = FALSE;
+    }
+
+    bzero(sect-&gt;sectname, <span class="enscript-keyword">sizeof</span>(sect-&gt;sectname));
+    bzero(sect-&gt;segname, <span class="enscript-keyword">sizeof</span>(sect-&gt;segname));
+    sect-&gt;data = NULL;
+    sect-&gt;base_addr = 0;
+    sect-&gt;link_addr = 0;
+    sect-&gt;size = 0;
+    sect-&gt;flags = 0;
+    sect-&gt;align = 0;
+    sect-&gt;reserved1 = 0;
+    sect-&gt;reserved2 = 0;
+    kxld_array_clear(&amp;sect-&gt;relocs);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_sect_deinit</span>(KXLDSect *sect)
+{
+    check(sect);
+
+    <span class="enscript-keyword">if</span> (streq_safe(sect-&gt;sectname, KXLD_SECT_GOT, <span class="enscript-keyword">sizeof</span>(KXLD_SECT_GOT))) {
+        kxld_free(sect-&gt;data, (u_long) sect-&gt;size);
+    }
+
+    kxld_array_deinit(&amp;sect-&gt;relocs);
+    bzero(sect, <span class="enscript-keyword">sizeof</span>(*sect));
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_int 
+<span class="enscript-function-name">kxld_sect_get_num_relocs</span>(<span class="enscript-type">const</span> KXLDSect *sect)
+{
+    check(sect);
+
+    <span class="enscript-keyword">return</span> sect-&gt;relocs.nitems;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_long
+<span class="enscript-function-name">kxld_sect_get_macho_header_size</span>(boolean_t is_32_bit)
+{
+    <span class="enscript-keyword">if</span> (is_32_bit) {
+        <span class="enscript-keyword">return</span> <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> section);
+    } <span class="enscript-keyword">else</span> {
+        <span class="enscript-keyword">return</span> <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> section_64);
+    }
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_long
+<span class="enscript-function-name">kxld_sect_get_macho_data_size</span>(<span class="enscript-type">const</span> KXLDSect *sect)
+{
+    u_long size = 0;
+
+    check(sect);
+
+    <span class="enscript-keyword">if</span> (sect-&gt;data) {
+        size = (u_long) sect-&gt;size;
+    }
+
+    <span class="enscript-keyword">return</span> size;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_GOT</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+u_int
+<span class="enscript-function-name">kxld_sect_get_ngots</span>(<span class="enscript-type">const</span> KXLDSect *sect, <span class="enscript-type">const</span> KXLDRelocator *relocator,
+    <span class="enscript-type">const</span> KXLDSymtab *symtab)
+{
+    <span class="enscript-type">const</span> KXLDReloc *reloc = NULL;
+    KXLDSym *sym = NULL;
+    u_int ngots = 0;
+    u_int i = 0;
+    
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; sect-&gt;relocs.nitems; ++i) {
+        reloc = kxld_array_get_item(&amp;sect-&gt;relocs, i);
+
+        <span class="enscript-keyword">if</span> (relocator-&gt;reloc_has_got(reloc-&gt;reloc_type)) {
+            <span class="enscript-comment">/* @TODO This assumes 64-bit symbols (which is valid at the
+             * moment since only x86_64 has a GOT)
+             */</span>
+            sym = kxld_reloc_get_symbol(relocator, reloc, sect-&gt;data, symtab);
+            <span class="enscript-keyword">if</span> (!kxld_sym_is_got(sym)) {
+                kxld_sym_set_got(sym);
+                ++ngots;
+            }
+        }
+    }
+
+    <span class="enscript-keyword">return</span> ngots;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_GOT */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+* Each section must be aligned at a certain power of two.  To figure out that 
+* alignment, we mask for the low bits that may need to be adjusted.  If they are 
+* non zero, we then subtract them from the target alignment to find the offset, 
+* and then add that offset to the link address.
+*******************************************************************************/</span>
+kxld_addr_t
+<span class="enscript-function-name">kxld_sect_align_address</span>(<span class="enscript-type">const</span> KXLDSect *sect, kxld_addr_t address)
+{
+    <span class="enscript-keyword">return</span> kxld_align_address(address, sect-&gt;align);
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sect_export_macho_to_file_buffer</span>(<span class="enscript-type">const</span> KXLDSect *sect, u_char *buf,
+    u_long *header_offset, u_long header_size, u_long *data_offset, 
+    u_long data_size, boolean_t is_32_bit __unused)
+{
+    kern_return_t rval = KERN_FAILURE;
+
+    check(sect);
+    check(buf);
+    check(header_offset);
+    check(data_offset);
+
+    <span class="enscript-comment">/* If there is no data to export, we only need to write the header.  We
+     * make it a separate call so that we don't modify data_offset.
+     */</span>
+    <span class="enscript-keyword">if</span> (!sect-&gt;data) {
+        KXLD_3264_FUNC(is_32_bit, rval,
+            sect_export_macho_header_32, sect_export_macho_header_64,
+            sect, buf, header_offset, header_size, <span class="enscript-comment">/* data_offset */</span> 0);
+        require_noerr(rval, finish);
+    } <span class="enscript-keyword">else</span> {
+        *data_offset = (u_long) kxld_sect_align_address(sect, *data_offset);
+
+        KXLD_3264_FUNC(is_32_bit, rval,
+            sect_export_macho_header_32, sect_export_macho_header_64,
+            sect, buf, header_offset, header_size, *data_offset);
+        require_noerr(rval, finish);
+
+        rval = export_macho(sect, buf, *data_offset, data_size);
+        require_noerr(rval, finish);
+
+        *data_offset += (u_long) sect-&gt;size;
+    }
+        
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sect_export_macho_to_vm</span>(<span class="enscript-type">const</span> KXLDSect *sect, u_char *buf, 
+    u_long *header_offset, u_long header_size, 
+    kxld_addr_t link_addr, u_long data_size, 
+    boolean_t is_32_bit __unused)
+{
+    kern_return_t rval = KERN_FAILURE;
+    u_long data_offset = (u_long) (sect-&gt;link_addr - link_addr);
+
+    check(sect);
+    check(buf);
+    check(header_offset);
+
+    KXLD_3264_FUNC(is_32_bit, rval,
+        sect_export_macho_header_32, sect_export_macho_header_64,
+        sect, buf, header_offset, header_size, data_offset);
+    require_noerr(rval, finish);
+
+    rval = export_macho(sect, buf, data_offset, data_size);
+    require_noerr(rval, finish);
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">export_macho</span>(<span class="enscript-type">const</span> KXLDSect *sect, u_char *buf, u_long offset, u_long bufsize)
+{
+    kern_return_t rval = KERN_FAILURE;
+
+    check(sect);
+    check(buf);
+
+    <span class="enscript-keyword">if</span> (!sect-&gt;data) {
+        rval = KERN_SUCCESS;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    <span class="enscript-comment">/* Verify that the section is properly aligned */</span>
+
+    require_action(kxld_sect_align_address(sect, offset) == offset, finish,
+        rval = KERN_FAILURE);
+
+    <span class="enscript-comment">/* Verify that we have enough space to copy */</span>
+
+    require_action(sect-&gt;size &lt;= bufsize - offset, finish,
+        rval=KERN_FAILURE);
+
+    <span class="enscript-comment">/* Copy section data */</span>
+
+    <span class="enscript-keyword">switch</span> (sect-&gt;flags &amp; SECTION_TYPE) {
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_NON_LAZY_SYMBOL_POINTERS</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_MOD_INIT_FUNC_POINTERS</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_MOD_TERM_FUNC_POINTERS</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_REGULAR</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_CSTRING_LITERALS</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_4BYTE_LITERALS</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_8BYTE_LITERALS</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_LITERAL_POINTERS</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_COALESCED</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_16BYTE_LITERALS</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_SYMBOL_STUBS</span>:
+        memcpy(buf + offset, sect-&gt;data, (size_t)sect-&gt;size);
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_ZEROFILL</span>: <span class="enscript-comment">/* sect-&gt;data should be NULL, so we'll never get here */</span>
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_LAZY_SYMBOL_POINTERS</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_GB_ZEROFILL</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_INTERPOSING</span>:
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">S_DTRACE_DOF</span>:
+    <span class="enscript-reference">default</span>:
+        rval = KERN_FAILURE;
+        kxld_log(kKxldLogLinking, kKxldLogErr, kKxldLogMalformedMachO
+            <span class="enscript-string">&quot;Invalid section type: %u.&quot;</span>, sect-&gt;flags &amp; SECTION_TYPE);
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_ILP32</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">sect_export_macho_header_32</span>(<span class="enscript-type">const</span> KXLDSect *sect, u_char *buf, 
+    u_long *header_offset, u_long header_size, u_long data_offset)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">struct</span> section *secthdr = NULL;
+
+    check(sect);
+    check(buf);
+    check(header_offset);
+    
+    require_action(<span class="enscript-keyword">sizeof</span>(*secthdr) &lt;= header_size - *header_offset, finish,
+        rval=KERN_FAILURE);
+    secthdr = (<span class="enscript-type">struct</span> section *) ((<span class="enscript-type">void</span> *) (buf + *header_offset));
+    *header_offset += <span class="enscript-keyword">sizeof</span>(*secthdr);
+
+    <span class="enscript-comment">/* Initalize header */</span>
+
+    strlcpy(secthdr-&gt;sectname, sect-&gt;sectname, <span class="enscript-keyword">sizeof</span>(secthdr-&gt;sectname));
+    strlcpy(secthdr-&gt;segname, sect-&gt;segname, <span class="enscript-keyword">sizeof</span>(secthdr-&gt;segname));
+    secthdr-&gt;addr = (uint32_t) sect-&gt;link_addr;
+    secthdr-&gt;size = (uint32_t) sect-&gt;size;
+    secthdr-&gt;offset = (uint32_t) ((sect-&gt;data) ? data_offset : 0);
+    secthdr-&gt;align = sect-&gt;align;
+    secthdr-&gt;reloff = 0;
+    secthdr-&gt;nreloc = 0;
+    secthdr-&gt;flags = sect-&gt;flags;
+    secthdr-&gt;reserved1 = sect-&gt;reserved1;
+    secthdr-&gt;reserved2 = sect-&gt;reserved2;
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_ILP32 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_LP64</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">sect_export_macho_header_64</span>(<span class="enscript-type">const</span> KXLDSect *sect, u_char *buf, 
+    u_long *header_offset, u_long header_size, u_long data_offset)
+{
+    kern_return_t rval = KERN_FAILURE;
+    <span class="enscript-type">struct</span> section_64 *secthdr = NULL;
+
+    check(sect);
+    check(buf);
+    check(header_offset);
+    
+    require_action(<span class="enscript-keyword">sizeof</span>(*secthdr) &lt;= header_size - *header_offset, finish,
+        rval=KERN_FAILURE);
+    secthdr = (<span class="enscript-type">struct</span> section_64 *) ((<span class="enscript-type">void</span> *) (buf + *header_offset));
+    *header_offset += <span class="enscript-keyword">sizeof</span>(*secthdr);
+
+    <span class="enscript-comment">/* Initalize header */</span>
+
+    strlcpy(secthdr-&gt;sectname, sect-&gt;sectname, <span class="enscript-keyword">sizeof</span>(secthdr-&gt;sectname));
+    strlcpy(secthdr-&gt;segname, sect-&gt;segname, <span class="enscript-keyword">sizeof</span>(secthdr-&gt;segname));
+    secthdr-&gt;addr = (uint64_t) sect-&gt;link_addr;
+    secthdr-&gt;size = (uint64_t) sect-&gt;size;
+    secthdr-&gt;offset = (uint32_t) ((sect-&gt;data) ? data_offset : 0);
+    secthdr-&gt;align = sect-&gt;align;
+    secthdr-&gt;reloff = 0;
+    secthdr-&gt;nreloc = 0;
+    secthdr-&gt;flags = sect-&gt;flags;
+    secthdr-&gt;reserved1 = sect-&gt;reserved1;
+    secthdr-&gt;reserved2 = sect-&gt;reserved2;
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_LP64 */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_COMMON</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kxld_size_t
+<span class="enscript-function-name">kxld_sect_grow</span>(KXLDSect *sect, kxld_size_t nbytes, u_int align)
+{
+    kxld_size_t size = kxld_align_address(sect-&gt;size, align);
+
+    <span class="enscript-keyword">if</span> (align &gt; sect-&gt;align) sect-&gt;align = align;
+    sect-&gt;size = size + nbytes;
+
+    <span class="enscript-keyword">return</span> size;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_COMMON */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kxld_sect_relocate</span>(KXLDSect *sect, kxld_addr_t link_addr)
+{
+    sect-&gt;link_addr = kxld_sect_align_address(sect, 
+        sect-&gt;link_addr + link_addr);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KXLD_USER_OR_GOT</span>
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sect_populate_got</span>(KXLDSect *sect, KXLDSymtab *symtab, 
+    boolean_t swap __unused)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDSymtabIterator iter;
+    KXLDSym *sym = NULL;
+    kxld_addr_t *entry = NULL;
+    kxld_addr_t entry_addr = 0;
+
+    check(sect);
+    check(symtab);
+    require(streq_safe(sect-&gt;segname, KXLD_SEG_GOT, <span class="enscript-keyword">sizeof</span>(KXLD_SEG_GOT)), 
+        finish);
+    require(streq_safe(sect-&gt;sectname, KXLD_SECT_GOT, <span class="enscript-keyword">sizeof</span>(KXLD_SECT_GOT)), 
+        finish);
+
+    kxld_symtab_iterator_init(&amp;iter, symtab, kxld_sym_is_got, FALSE);
+    
+    entry = (kxld_addr_t *) sect-&gt;data;
+    entry_addr = sect-&gt;link_addr;
+    <span class="enscript-keyword">while</span> ((sym = kxld_symtab_iterator_get_next(&amp;iter))) {
+        *entry = sym-&gt;link_addr;
+        sym-&gt;got_addr = entry_addr;
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">KERNEL</span>
+        <span class="enscript-keyword">if</span> (swap) *entry = OSSwapInt64(*entry);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !KERNEL */</span>
+
+        ++entry;
+        entry_addr += <span class="enscript-keyword">sizeof</span>(*entry);
+    }
+
+    rval = KERN_SUCCESS;
+
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KXLD_USER_OR_GOT */</span>
+
+<span class="enscript-comment">/*******************************************************************************
+*******************************************************************************/</span>
+kern_return_t
+<span class="enscript-function-name">kxld_sect_process_relocs</span>(KXLDSect *sect, KXLDRelocator *relocator)
+{
+    kern_return_t rval = KERN_FAILURE;
+    KXLDReloc *reloc = NULL;
+    u_int i = 0;
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; sect-&gt;relocs.nitems; ++i) {
+        reloc = kxld_array_get_item(&amp;sect-&gt;relocs, i);
+        rval = kxld_relocator_process_sect_reloc(relocator, reloc, sect);
+        require_noerr(rval, finish);
+    }
+
+    rval = KERN_SUCCESS;
+<span class="enscript-reference">finish</span>:
+    <span class="enscript-keyword">return</span> rval;
+}
+
+</pre>
+<hr />
+</body></html>

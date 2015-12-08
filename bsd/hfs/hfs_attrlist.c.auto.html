@@ -1,0 +1,1753 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>hfs_attrlist.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">hfs_attrlist.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * hfs_attrlist.c - HFS attribute list processing
+ *
+ * Copyright (c) 1998-2002, Apple Computer, Inc.  All Rights Reserved.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/attr.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fsctl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_cnode.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_mount.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_dbg.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_attrlist.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;hfs_btreeio.h&quot;</span>
+
+<span class="enscript-comment">/* Packing routines: */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">packnameattr</span>(<span class="enscript-type">struct</span> attrblock *abp, <span class="enscript-type">struct</span> vnode *vp,
+			<span class="enscript-type">const</span> u_int8_t *name, <span class="enscript-type">int</span> namelen);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">packcommonattr</span>(<span class="enscript-type">struct</span> attrblock *abp, <span class="enscript-type">struct</span> hfsmount *hfsmp,
+			<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> cat_desc * cdp,
+			<span class="enscript-type">struct</span> cat_attr * cap, <span class="enscript-type">struct</span> vfs_context *ctx);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">packfileattr</span>(<span class="enscript-type">struct</span> attrblock *abp, <span class="enscript-type">struct</span> hfsmount *hfsmp,
+			<span class="enscript-type">struct</span> cat_attr *cattrp, <span class="enscript-type">struct</span> cat_fork *datafork,
+			<span class="enscript-type">struct</span> cat_fork *rsrcfork, <span class="enscript-type">struct</span> vnode *vp);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">packdirattr</span>(<span class="enscript-type">struct</span> attrblock *abp, <span class="enscript-type">struct</span> hfsmount *hfsmp,
+			<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> cat_desc * descp,
+			<span class="enscript-type">struct</span> cat_attr * cattrp);
+
+<span class="enscript-type">static</span> u_int32_t <span class="enscript-function-name">hfs_real_user_access</span>(vnode_t vp, vfs_context_t ctx);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">get_vattr_data_for_attrs</span>(<span class="enscript-type">struct</span> attrlist *, <span class="enscript-type">struct</span> vnode_attr *,
+    <span class="enscript-type">struct</span> hfsmount *, <span class="enscript-type">struct</span> vnode *, <span class="enscript-type">struct</span> cat_desc *, <span class="enscript-type">struct</span> cat_attr *,
+    <span class="enscript-type">struct</span> cat_fork *, <span class="enscript-type">struct</span> cat_fork *, vfs_context_t);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">vattr_data_for_common_attrs</span>(<span class="enscript-type">struct</span> attrlist *, <span class="enscript-type">struct</span> vnode_attr *,
+    <span class="enscript-type">struct</span> hfsmount *, <span class="enscript-type">struct</span> vnode *, <span class="enscript-type">struct</span> cat_desc *, <span class="enscript-type">struct</span> cat_attr *,
+    vfs_context_t);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">vattr_data_for_dir_attrs</span>(<span class="enscript-type">struct</span> attrlist *, <span class="enscript-type">struct</span> vnode_attr *,
+    <span class="enscript-type">struct</span> hfsmount *, <span class="enscript-type">struct</span> vnode *, <span class="enscript-type">struct</span> cat_desc *, <span class="enscript-type">struct</span> cat_attr *);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">vattr_data_for_file_attrs</span>(<span class="enscript-type">struct</span> attrlist *, <span class="enscript-type">struct</span> vnode_attr *,
+    <span class="enscript-type">struct</span> hfsmount *, <span class="enscript-type">struct</span> cat_attr *, <span class="enscript-type">struct</span> cat_fork *, <span class="enscript-type">struct</span> cat_fork *,
+    <span class="enscript-type">struct</span> vnode *vp);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">hfs_readdirattr_internal</span>(<span class="enscript-type">struct</span> vnode *, <span class="enscript-type">struct</span> attrlist *,
+    <span class="enscript-type">struct</span> vnode_attr *, uio_t, uint64_t, <span class="enscript-type">int</span>, uint32_t *, <span class="enscript-type">int</span> *, <span class="enscript-type">int</span> *,
+    vfs_context_t);
+
+<span class="enscript-comment">/*
+ * readdirattr operation will return attributes for the items in the
+ * directory specified. 
+ *
+ * It does not do . and .. entries. The problem is if you are at the root of the
+ * hfs directory and go to .. you could be crossing a mountpoint into a
+ * different (ufs) file system. The attributes that apply for it may not 
+ * apply for the file system you are doing the readdirattr on. To make life 
+ * simpler, this call will only return entries in its directory, hfs like.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_vnop_readdirattr</span>(ap)
+	<span class="enscript-type">struct</span> vnop_readdirattr_args <span class="enscript-comment">/* {
+		struct vnode *a_vp;
+		struct attrlist *a_alist;
+		struct uio *a_uio;
+		u_long a_maxcount;
+		u_long a_options;
+		u_long *a_newstate;
+		int *a_eofflag;
+		u_long *a_actualcount;
+		vfs_context_t a_context;
+	} */</span> *ap;
+{
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> attrlist *alist = ap-&gt;a_alist;
+
+	<span class="enscript-comment">/* Check for invalid options and buffer space. */</span>
+	<span class="enscript-keyword">if</span> (((ap-&gt;a_options &amp; ~(FSOPT_NOINMEMUPDATE | FSOPT_NOFOLLOW)) != 0) ||
+	    (ap-&gt;a_maxcount &lt;= 0)) {
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+	<span class="enscript-comment">/*
+	 * Reject requests for unsupported attributes.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((alist-&gt;bitmapcount != ATTR_BIT_MAP_COUNT) ||
+	    (alist-&gt;commonattr &amp; ~HFS_ATTR_CMN_VALID) ||
+	    (alist-&gt;volattr  != 0) ||
+	    (alist-&gt;dirattr &amp; ~HFS_ATTR_DIR_VALID) ||
+	    (alist-&gt;fileattr &amp; ~HFS_ATTR_FILE_VALID) ||
+	    (alist-&gt;forkattr != 0)) {
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	error = hfs_readdirattr_internal(ap-&gt;a_vp, alist, NULL, ap-&gt;a_uio,
+	    (uint64_t)ap-&gt;a_options, ap-&gt;a_maxcount, ap-&gt;a_newstate,
+	    ap-&gt;a_eofflag, (<span class="enscript-type">int</span> *)ap-&gt;a_actualcount, ap-&gt;a_context);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * getattrlistbulk, like readdirattr, will return attributes for the items in
+ * the directory specified.
+ *
+ * It does not do . and .. entries. The problem is if you are at the root of the
+ * hfs directory and go to .. you could be crossing a mountpoint into a
+ * different (ufs) file system. The attributes that apply for it may not
+ * apply for the file system you are doing the readdirattr on. To make life
+ * simpler, this call will only return entries in its directory, hfs like.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_vnop_getattrlistbulk</span>(ap)
+	<span class="enscript-type">struct</span> vnop_getattrlistbulk_args <span class="enscript-comment">/* {
+		struct vnodeop_desc *a_desc;
+		vnode_t a_vp;
+		struct attrlist *a_alist;
+		struct vnode_attr *a_vap;
+		struct uio *a_uio;
+		void *a_private;
+		uint64_t a_options;
+		int32_t *a_eofflag;
+		int32_t *a_actualcount;
+		vfs_context_t a_context;
+	} */</span> *ap;
+{
+	<span class="enscript-type">int</span> error = 0;
+
+	error = hfs_readdirattr_internal(ap-&gt;a_vp, ap-&gt;a_alist, ap-&gt;a_vap,
+	    ap-&gt;a_uio, (uint64_t)ap-&gt;a_options, 0, NULL, ap-&gt;a_eofflag,
+	    (<span class="enscript-type">int</span> *)ap-&gt;a_actualcount, ap-&gt;a_context);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Common function for both hfs_vnop_readdirattr and hfs_vnop_getattrlistbulk.
+ * This either fills in a vnode_attr structure or fills in an attrbute buffer
+ * Currently the difference in behaviour required for the two vnops is keyed
+ * on whether the passed in vnode_attr pointer is null or not. If the pointer
+ * is null we fill in buffer passed and if it is not null we fill in the fields
+ * of the vnode_attr structure.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_readdirattr_internal</span>(<span class="enscript-type">struct</span> vnode *dvp, <span class="enscript-type">struct</span> attrlist *alist,
+    <span class="enscript-type">struct</span> vnode_attr *vap, uio_t uio, uint64_t options, <span class="enscript-type">int</span> maxcount,
+    uint32_t *newstate, <span class="enscript-type">int</span> *eofflag, <span class="enscript-type">int</span> *actualcount, vfs_context_t ctx)
+{
+	<span class="enscript-type">struct</span> cnode *dcp;
+	<span class="enscript-type">struct</span> hfsmount * hfsmp;
+	u_int32_t fixedblocksize;
+	u_int32_t maxattrblocksize;
+	u_int32_t currattrbufsize;
+	<span class="enscript-type">void</span> *attrbufptr = NULL;
+	<span class="enscript-type">void</span> *attrptr = NULL;
+	<span class="enscript-type">void</span> *varptr = NULL;
+	caddr_t namebuf = NULL;
+	<span class="enscript-type">struct</span> attrblock attrblk;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> index = 0;
+	<span class="enscript-type">int</span> i = 0;
+	<span class="enscript-type">struct</span> cat_desc *lastdescp = NULL;
+	<span class="enscript-type">struct</span> cat_entrylist *ce_list = NULL;
+	directoryhint_t *dirhint = NULL;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> tag;
+	<span class="enscript-type">int</span> maxentries;
+	<span class="enscript-type">int</span> lockflags;
+	u_int32_t dirchg = 0;
+	<span class="enscript-type">int</span> reachedeof = 0;
+
+	*(actualcount) = 0;
+	*(eofflag) = 0;
+
+	<span class="enscript-keyword">if</span> ((uio_resid(uio) &lt;= 0) || (uio_iovcnt(uio) &gt; 1))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">if</span> (VTOC(dvp)-&gt;c_bsdflags &amp; UF_COMPRESSED) {
+		<span class="enscript-type">int</span> compressed = hfs_file_is_compressed(VTOC(dvp), 0);  <span class="enscript-comment">/* 0 == take the cnode lock */</span>
+
+		<span class="enscript-keyword">if</span> (!compressed) {
+			error = check_for_dataless_file(dvp, NAMESPACE_HANDLER_READ_OP);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">return</span> error;
+			}
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Take an exclusive directory lock since we manipulate the directory hints
+	 */</span>
+	<span class="enscript-keyword">if</span> ((error = hfs_lock(VTOC(dvp), HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
+		<span class="enscript-keyword">return</span> (error);
+	}
+	dcp = VTOC(dvp);
+	hfsmp = VTOHFS(dvp);
+
+	dirchg = dcp-&gt;c_dirchangecnt;
+
+	<span class="enscript-comment">/* Extract directory index and tag (sequence number) from uio_offset */</span>
+	index = uio_offset(uio) &amp; HFS_INDEX_MASK;
+	tag = uio_offset(uio) &amp; ~HFS_INDEX_MASK;
+
+	<span class="enscript-comment">/*
+	 * We can't just use the valence as an optimization to avoid
+	 * going to the catalog.  It might be wrong (== 0), and that would
+	 * cause us to avoid iterating the directory when it might actually have
+	 * contents.  Instead, use the catalog to tell us when we've hit EOF
+	 * for this directory
+	 */</span>
+
+	<span class="enscript-comment">/* Get a buffer to hold packed attributes. */</span>
+	fixedblocksize = (<span class="enscript-keyword">sizeof</span>(u_int32_t) + hfs_attrblksize(alist)); <span class="enscript-comment">/* 4 bytes for length */</span>
+
+	<span class="enscript-keyword">if</span> (!vap) {
+		maxattrblocksize = fixedblocksize;
+		<span class="enscript-keyword">if</span> (alist-&gt;commonattr &amp; ATTR_CMN_NAME)
+			maxattrblocksize += kHFSPlusMaxFileNameBytes + 1;
+
+		MALLOC(attrbufptr, <span class="enscript-type">void</span> *, maxattrblocksize, M_TEMP, M_WAITOK);
+		<span class="enscript-keyword">if</span> (attrbufptr == NULL) {
+			error = ENOMEM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit2</span>;
+		}
+		attrptr = attrbufptr;
+		varptr = (<span class="enscript-type">char</span> *)attrbufptr + fixedblocksize;  <span class="enscript-comment">/* Point to variable-length storage */</span>
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> ((alist-&gt;commonattr &amp; ATTR_CMN_NAME) &amp;&amp; !vap-&gt;va_name) {
+			MALLOC(namebuf, caddr_t, MAXPATHLEN, M_TEMP, M_WAITOK);
+			<span class="enscript-keyword">if</span> (!namebuf) {
+				error = ENOMEM;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit2</span>;
+			}
+			vap-&gt;va_name = namebuf;
+		}
+	}
+	<span class="enscript-comment">/* Get a detached directory hint (cnode must be locked exclusive) */</span>	
+	dirhint = hfs_getdirhint(dcp, ((index - 1) &amp; HFS_INDEX_MASK) | tag, TRUE);
+
+	<span class="enscript-comment">/* Hide tag from catalog layer. */</span>
+	dirhint-&gt;dh_index &amp;= HFS_INDEX_MASK;
+	<span class="enscript-keyword">if</span> (dirhint-&gt;dh_index == HFS_INDEX_MASK) {
+		dirhint-&gt;dh_index = -1;
+	}
+
+	<span class="enscript-comment">/*
+	 * Obtain a list of catalog entries and pack their attributes until
+	 * the output buffer is full or maxcount entries have been packed.
+	 */</span>
+
+	<span class="enscript-comment">/*
+	 * Constrain our list size.
+	 */</span>
+	maxentries = uio_resid(uio) / (fixedblocksize + HFS_AVERAGE_NAME_SIZE);
+	<span class="enscript-comment">/* There is maxcount for the bulk vnop */</span>
+	<span class="enscript-keyword">if</span> (!vap)
+		maxentries = min(maxentries, maxcount);
+	maxentries = min(maxentries, MAXCATENTRIES);
+	<span class="enscript-keyword">if</span> (maxentries &lt; 1) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit2</span>;
+	}
+
+	<span class="enscript-comment">/* Initialize a catalog entry list. */</span>
+	MALLOC(ce_list, <span class="enscript-type">struct</span> cat_entrylist *, CE_LIST_SIZE(maxentries), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (ce_list == NULL) {
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit2</span>;
+	}
+	bzero(ce_list, CE_LIST_SIZE(maxentries));
+	ce_list-&gt;maxentries = maxentries;
+
+	<span class="enscript-comment">/*
+	 * Populate the ce_list from the catalog file.
+	 */</span>
+	lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
+	 
+	error = cat_getentriesattr(hfsmp, dirhint, ce_list, &amp;reachedeof);
+	<span class="enscript-comment">/* Don't forget to release the descriptors later! */</span>
+
+	hfs_systemfile_unlock(hfsmp, lockflags);
+
+	<span class="enscript-keyword">if</span> ((error == ENOENT) || (reachedeof != 0)) { 
+		*(eofflag) = TRUE;
+		error = 0;
+	}
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">exit1</span>;
+	}
+
+	<span class="enscript-comment">/* 
+	 * Check for a FS corruption in the valence. We're holding the cnode lock
+	 * exclusive since we need to serialize the directory hints, so if we found
+	 * that the valence reported 0, but we actually found some items here, then
+	 * silently minimally self-heal and bump the valence to 1.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((dcp-&gt;c_entries == 0) &amp;&amp; (ce_list-&gt;realentries &gt; 0)) {
+		dcp-&gt;c_entries++;
+		dcp-&gt;c_flag |= C_MODIFIED;
+		printf(<span class="enscript-string">&quot;hfs_vnop_readdirattr: repairing valence to non-zero! \n&quot;</span>);
+		<span class="enscript-comment">/* force an update on dcp while we're still holding the lock. */</span>
+		hfs_update(dvp, 0);
+	}
+
+	<span class="enscript-comment">/*
+	 * Drop the directory lock so we don't deadlock when we:
+	 *   - acquire a child cnode lock
+	 *   - make calls to vnode_authorize()
+	 *   - make calls to kauth_cred_ismember_gid()
+	 */</span>
+	hfs_unlock(dcp);
+	dcp = NULL;
+
+	<span class="enscript-comment">/* Process the catalog entries. */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; (<span class="enscript-type">int</span>)ce_list-&gt;realentries; ++i) {
+		<span class="enscript-type">struct</span> cnode *cp = NULL;
+		<span class="enscript-type">struct</span> vnode *vp = NULL;
+		<span class="enscript-type">struct</span> cat_desc * cdescp;
+		<span class="enscript-type">struct</span> cat_attr * cattrp;
+		<span class="enscript-type">struct</span> cat_fork c_datafork;
+		<span class="enscript-type">struct</span> cat_fork c_rsrcfork;
+
+		bzero(&amp;c_datafork, <span class="enscript-keyword">sizeof</span>(c_datafork));
+		bzero(&amp;c_rsrcfork, <span class="enscript-keyword">sizeof</span>(c_rsrcfork));
+		cdescp = &amp;ce_list-&gt;entry[i].ce_desc;
+		cattrp = &amp;ce_list-&gt;entry[i].ce_attr;
+		c_datafork.cf_size   = ce_list-&gt;entry[i].ce_datasize;
+		c_datafork.cf_blocks = ce_list-&gt;entry[i].ce_datablks;
+		c_rsrcfork.cf_size   = ce_list-&gt;entry[i].ce_rsrcsize;
+		c_rsrcfork.cf_blocks = ce_list-&gt;entry[i].ce_rsrcblks;
+
+		<span class="enscript-keyword">if</span> (((alist-&gt;commonattr &amp; ATTR_CMN_USERACCESS) &amp;&amp;
+		    (cattrp-&gt;ca_recflags &amp; kHFSHasSecurityMask))
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_PROTECT</span>
+		    ||
+		   ((alist-&gt;commonattr &amp; ATTR_CMN_DATA_PROTECT_FLAGS) &amp;&amp; (vap))
+#<span class="enscript-reference">endif</span>
+		    ) {
+			<span class="enscript-comment">/*
+			 * Obtain vnode for our vnode_authorize() calls.
+			 */</span>
+			<span class="enscript-keyword">if</span> (hfs_vget(hfsmp, cattrp-&gt;ca_fileid, &amp;vp, 0, 0) != 0) {
+				vp = NULL;
+			}
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (vap || !(options &amp; FSOPT_NOINMEMUPDATE)) {
+			<span class="enscript-comment">/* Get in-memory cnode data (if any). */</span>
+			vp = hfs_chash_getvnode(hfsmp, cattrp-&gt;ca_fileid, 0, 0, 0);
+		}
+		<span class="enscript-keyword">if</span> (vp != NULL) {
+			cp = VTOC(vp);
+			<span class="enscript-comment">/* Only use cnode's decriptor for non-hardlinks */</span>
+			<span class="enscript-keyword">if</span> (!(cp-&gt;c_flag &amp; C_HARDLINK))
+				cdescp = &amp;cp-&gt;c_desc;
+			cattrp = &amp;cp-&gt;c_attr;
+			<span class="enscript-keyword">if</span> (cp-&gt;c_datafork) {
+				c_datafork.cf_size   = cp-&gt;c_datafork-&gt;ff_size;
+				c_datafork.cf_blocks = cp-&gt;c_datafork-&gt;ff_blocks;
+			}
+			<span class="enscript-keyword">if</span> (cp-&gt;c_rsrcfork) {
+				c_rsrcfork.cf_size   = cp-&gt;c_rsrcfork-&gt;ff_size;
+				c_rsrcfork.cf_blocks = cp-&gt;c_rsrcfork-&gt;ff_blocks;
+			}
+			<span class="enscript-comment">/* All done with cnode. */</span>
+			hfs_unlock(cp);
+			cp = NULL;
+		}
+
+		<span class="enscript-keyword">if</span> (!vap) {
+			*((u_int32_t *)attrptr) = 0;
+			attrptr = ((u_int32_t *)attrptr) + 1;
+			attrblk.ab_attrlist = alist;
+			attrblk.ab_attrbufpp = &amp;attrptr;
+			attrblk.ab_varbufpp = &amp;varptr;
+			attrblk.ab_flags = 0;
+			attrblk.ab_blocksize = maxattrblocksize;
+			attrblk.ab_context = ctx;
+
+			<span class="enscript-comment">/* Pack catalog entries into attribute buffer. */</span>
+			hfs_packattrblk(&amp;attrblk, hfsmp, vp, cdescp, cattrp, &amp;c_datafork, &amp;c_rsrcfork, ctx);
+			currattrbufsize = ((<span class="enscript-type">char</span> *)varptr - (<span class="enscript-type">char</span> *)attrbufptr);
+
+			<span class="enscript-comment">/* All done with vnode. */</span>
+			<span class="enscript-keyword">if</span> (vp != NULL) {
+				vnode_put(vp);
+				vp = NULL;
+			}
+
+			<span class="enscript-comment">/* Make sure there's enough buffer space remaining. */</span>
+			<span class="enscript-comment">// LP64todo - fix this!
+</span>			<span class="enscript-keyword">if</span> (uio_resid(uio) &lt; 0 ||
+				currattrbufsize &gt; (u_int32_t)uio_resid(uio)) {
+				<span class="enscript-keyword">break</span>;
+			} <span class="enscript-keyword">else</span> {
+				*((u_int32_t *)attrbufptr) = currattrbufsize;
+				error = uiomove((caddr_t)attrbufptr, currattrbufsize, uio);
+				<span class="enscript-keyword">if</span> (error != E_NONE) {
+					<span class="enscript-keyword">break</span>;
+				}
+				attrptr = attrbufptr;
+				<span class="enscript-comment">/* Point to variable-length storage */</span>
+				varptr = (<span class="enscript-type">char</span> *)attrbufptr + fixedblocksize;
+				<span class="enscript-comment">/* Save the last valid catalog entry */</span>
+				lastdescp = &amp;ce_list-&gt;entry[i].ce_desc;
+				index++;
+				*actualcount += 1;
+
+				<span class="enscript-comment">/* Termination checks */</span>
+				<span class="enscript-keyword">if</span> ((--maxcount &lt;= 0) ||
+				    <span class="enscript-comment">// LP64todo - fix this!
+</span>				    uio_resid(uio) &lt; 0 ||
+				    ((u_int32_t)uio_resid(uio) &lt; (fixedblocksize + HFS_AVERAGE_NAME_SIZE))){
+					<span class="enscript-keyword">break</span>;
+				}
+			}
+		} <span class="enscript-keyword">else</span> {
+			size_t orig_resid = (size_t)uio_resid(uio);
+			size_t resid;
+
+			get_vattr_data_for_attrs(alist, vap, hfsmp, vp, cdescp,
+			    cattrp, &amp;c_datafork, &amp;c_rsrcfork, ctx);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_PROTECT</span>
+			<span class="enscript-keyword">if</span> ((alist-&gt;commonattr &amp; ATTR_CMN_DATA_PROTECT_FLAGS) &amp;&amp;
+			    vp) {
+				<span class="enscript-type">int</span> class;
+
+				<span class="enscript-keyword">if</span> (!cp_vnode_getclass(vp, &amp;class)) {
+					VATTR_RETURN(vap, va_dataprotect_class,
+					    (uint32_t)class);
+				}
+			}
+#<span class="enscript-reference">endif</span>
+			error = vfs_attr_pack(vp, uio, alist, options, vap,
+			    NULL, ctx);
+
+			<span class="enscript-comment">/* All done with vnode. */</span>
+			<span class="enscript-keyword">if</span> (vp) {
+				vnode_put(vp);
+				vp = NULL;
+			}
+
+			resid = uio_resid(uio);
+
+			<span class="enscript-comment">/* Was this entry succesful ? */</span>
+			<span class="enscript-keyword">if</span> (error || resid == orig_resid)
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-comment">/* Save the last valid catalog entry */</span>
+			lastdescp = &amp;ce_list-&gt;entry[i].ce_desc;
+			index++;
+			*actualcount += 1;
+
+			<span class="enscript-comment">/* Do we have the bare minimum for the next entry ? */</span>
+			<span class="enscript-keyword">if</span> (resid &lt; <span class="enscript-keyword">sizeof</span>(uint32_t))
+				<span class="enscript-keyword">break</span>;
+		}
+	} <span class="enscript-comment">/* for each catalog entry */</span>
+
+	<span class="enscript-comment">/*
+	 * If we couldn't fit all the entries requested in the user's buffer,
+	 * it's not EOF.
+	 */</span>
+	<span class="enscript-keyword">if</span> (*eofflag &amp;&amp; (*actualcount &lt; (<span class="enscript-type">int</span>)ce_list-&gt;realentries))
+		*eofflag = 0;
+
+	<span class="enscript-comment">/* If we skipped catalog entries for reserved files that should
+	 * not be listed in namespace, update the index accordingly.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ce_list-&gt;skipentries) {
+		index += ce_list-&gt;skipentries;
+		ce_list-&gt;skipentries = 0;
+	}
+
+	<span class="enscript-comment">/* 
+	 * If there are more entries then save the last name. 
+	 * Key this behavior based on whether or not we observed EOFFLAG. 
+	 *
+	 * Do not use the valence as a way to determine if we hit EOF, since
+	 * it can be wrong.  Use the catalog's output only.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((*(eofflag) == 0) &amp;&amp;  lastdescp != NULL) {
+
+		<span class="enscript-comment">/* Remember last entry */</span>
+		<span class="enscript-keyword">if</span> ((dirhint-&gt;dh_desc.cd_flags &amp; CD_HASBUF) &amp;&amp;
+		    (dirhint-&gt;dh_desc.cd_nameptr != NULL)) {
+			dirhint-&gt;dh_desc.cd_flags &amp;= ~CD_HASBUF;
+			vfs_removename((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)dirhint-&gt;dh_desc.cd_nameptr);
+		}
+		dirhint-&gt;dh_desc.cd_namelen = lastdescp-&gt;cd_namelen;
+		dirhint-&gt;dh_desc.cd_nameptr = (<span class="enscript-type">const</span> u_int8_t *)
+		vfs_addname((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)lastdescp-&gt;cd_nameptr, lastdescp-&gt;cd_namelen, 0, 0);
+		dirhint-&gt;dh_desc.cd_flags |= CD_HASBUF;
+		dirhint-&gt;dh_index = index - 1;
+		dirhint-&gt;dh_desc.cd_cnid = lastdescp-&gt;cd_cnid;
+		dirhint-&gt;dh_desc.cd_hint = lastdescp-&gt;cd_hint;
+		dirhint-&gt;dh_desc.cd_encoding = lastdescp-&gt;cd_encoding;
+	} 
+
+	<span class="enscript-comment">/* All done with the catalog descriptors. */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; (<span class="enscript-type">int</span>)ce_list-&gt;realentries; ++i)
+		cat_releasedesc(&amp;ce_list-&gt;entry[i].ce_desc);
+	ce_list-&gt;realentries = 0;
+
+	(<span class="enscript-type">void</span>) hfs_lock(VTOC(dvp), HFS_EXCLUSIVE_LOCK, HFS_LOCK_ALLOW_NOEXISTS);
+	dcp = VTOC(dvp);
+
+<span class="enscript-reference">exit1</span>:
+	<span class="enscript-comment">/* Pack directory index and tag into uio_offset. */</span>
+	<span class="enscript-keyword">while</span> (tag == 0) tag = (++dcp-&gt;c_dirhinttag) &lt;&lt; HFS_INDEX_BITS;	
+	uio_setoffset(uio, index | tag);
+	dirhint-&gt;dh_index |= tag;
+
+<span class="enscript-reference">exit2</span>:
+	<span class="enscript-keyword">if</span> (newstate)
+		*newstate = dirchg;
+
+	<span class="enscript-comment">/* 
+	 * Drop directory hint on error or if there are no more entries,
+	 * only if EOF was seen.
+	 */</span>
+	<span class="enscript-keyword">if</span> (dirhint) {
+		<span class="enscript-keyword">if</span> ((error != 0) || *(eofflag))
+			hfs_reldirhint(dcp, dirhint);
+		<span class="enscript-keyword">else</span>
+			hfs_insertdirhint(dcp, dirhint);
+	}
+	<span class="enscript-keyword">if</span> (namebuf) {
+		FREE(namebuf, M_TEMP);
+		vap-&gt;va_name = NULL;
+	}
+	<span class="enscript-keyword">if</span> (attrbufptr)
+		FREE(attrbufptr, M_TEMP);
+	<span class="enscript-keyword">if</span> (ce_list)
+		FREE(ce_list, M_TEMP);
+
+	<span class="enscript-keyword">if</span> (vap &amp;&amp; *actualcount &amp;&amp; error)
+		error = 0;
+
+	hfs_unlock(dcp);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*==================== Attribute list support routines ====================*/</span>
+
+<span class="enscript-comment">/*
+ * Pack cnode attributes into an attribute block.
+ */</span>
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">hfs_packattrblk</span>(<span class="enscript-type">struct</span> attrblock *abp,
+		<span class="enscript-type">struct</span> hfsmount *hfsmp,
+		<span class="enscript-type">struct</span> vnode *vp,
+		<span class="enscript-type">struct</span> cat_desc *descp,
+		<span class="enscript-type">struct</span> cat_attr *attrp,
+		<span class="enscript-type">struct</span> cat_fork *datafork,
+		<span class="enscript-type">struct</span> cat_fork *rsrcfork,
+		<span class="enscript-type">struct</span> vfs_context *ctx)
+{
+	<span class="enscript-type">struct</span> attrlist *attrlistp = abp-&gt;ab_attrlist;
+
+	<span class="enscript-keyword">if</span> (attrlistp-&gt;commonattr)
+		packcommonattr(abp, hfsmp, vp, descp, attrp, ctx);
+
+	<span class="enscript-keyword">if</span> (attrlistp-&gt;dirattr &amp;&amp; S_ISDIR(attrp-&gt;ca_mode))
+		packdirattr(abp, hfsmp, vp, descp,attrp);
+
+	<span class="enscript-keyword">if</span> (attrlistp-&gt;fileattr &amp;&amp; !S_ISDIR(attrp-&gt;ca_mode))
+		packfileattr(abp, hfsmp, attrp, datafork, rsrcfork, vp);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">char</span>*
+<span class="enscript-function-name">mountpointname</span>(<span class="enscript-type">struct</span> mount *mp)
+{
+	size_t namelength = strlen(mp-&gt;mnt_vfsstat.f_mntonname);
+	<span class="enscript-type">int</span> foundchars = 0;
+	<span class="enscript-type">char</span> *c;
+	
+	<span class="enscript-keyword">if</span> (namelength == 0)
+		<span class="enscript-keyword">return</span> (NULL);
+	
+	<span class="enscript-comment">/*
+	 * Look backwards through the name string, looking for
+	 * the first slash encountered (which must precede the
+	 * last part of the pathname).
+	 */</span>
+	<span class="enscript-keyword">for</span> (c = mp-&gt;mnt_vfsstat.f_mntonname + namelength - 1;
+	     namelength &gt; 0; --c, --namelength) {
+		<span class="enscript-keyword">if</span> (*c != <span class="enscript-string">'/'</span>) {
+			foundchars = 1;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (foundchars) {
+			<span class="enscript-keyword">return</span> (c + 1);
+		}
+	}
+	
+	<span class="enscript-keyword">return</span> (mp-&gt;mnt_vfsstat.f_mntonname);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">packnameattr</span>(
+	<span class="enscript-type">struct</span> attrblock *abp,
+	<span class="enscript-type">struct</span> vnode *vp,
+	<span class="enscript-type">const</span> u_int8_t *name,
+	<span class="enscript-type">int</span> namelen)
+{
+	<span class="enscript-type">void</span> *varbufptr;
+	<span class="enscript-type">struct</span> attrreference * attr_refptr;
+	<span class="enscript-type">char</span> *mpname;
+	size_t mpnamelen;
+	u_int32_t attrlength;
+	u_int8_t empty = 0;
+	
+	<span class="enscript-comment">/* A cnode's name may be incorrect for the root of a mounted
+	 * filesystem (it can be mounted on a different directory name
+	 * than the name of the volume, such as &quot;blah-1&quot;).  So for the
+	 * root directory, it's best to return the last element of the
+	 location where the volume's mounted:
+	 */</span>
+	<span class="enscript-keyword">if</span> ((vp != NULL) &amp;&amp; vnode_isvroot(vp) &amp;&amp;
+	    (mpname = mountpointname(vnode_mount(vp)))) {
+		mpnamelen = strlen(mpname);
+		
+		<span class="enscript-comment">/* Trim off any trailing slashes: */</span>
+		<span class="enscript-keyword">while</span> ((mpnamelen &gt; 0) &amp;&amp; (mpname[mpnamelen-1] == <span class="enscript-string">'/'</span>))
+			--mpnamelen;
+
+		<span class="enscript-comment">/* If there's anything left, use it instead of the volume's name */</span>
+		<span class="enscript-keyword">if</span> (mpnamelen &gt; 0) {
+			name = (u_int8_t *)mpname;
+			namelen = mpnamelen;
+		}
+	}
+	<span class="enscript-keyword">if</span> (name == NULL) {
+		name = &amp;empty;
+		namelen = 0;
+	}
+
+	varbufptr = *abp-&gt;ab_varbufpp;
+	attr_refptr = (<span class="enscript-type">struct</span> attrreference *)(*abp-&gt;ab_attrbufpp);
+
+	attrlength = namelen + 1;
+	attr_refptr-&gt;attr_dataoffset = (<span class="enscript-type">char</span> *)varbufptr - (<span class="enscript-type">char</span> *)attr_refptr;
+	attr_refptr-&gt;attr_length = attrlength;
+	(<span class="enscript-type">void</span>) strncpy((<span class="enscript-type">char</span> *)varbufptr, (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) name, attrlength);
+	<span class="enscript-comment">/*
+	 * Advance beyond the space just allocated and
+	 * round up to the next 4-byte boundary:
+	 */</span>
+	varbufptr = ((<span class="enscript-type">char</span> *)varbufptr) + attrlength + ((4 - (attrlength &amp; 3)) &amp; 3);
+	++attr_refptr;
+
+	*abp-&gt;ab_attrbufpp = attr_refptr;
+	*abp-&gt;ab_varbufpp = varbufptr;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">packcommonattr</span>(
+	<span class="enscript-type">struct</span> attrblock *abp,
+	<span class="enscript-type">struct</span> hfsmount *hfsmp,
+	<span class="enscript-type">struct</span> vnode *vp,
+	<span class="enscript-type">struct</span> cat_desc * cdp,
+	<span class="enscript-type">struct</span> cat_attr * cap,
+	<span class="enscript-type">struct</span> vfs_context * ctx)
+{
+	attrgroup_t attr = abp-&gt;ab_attrlist-&gt;commonattr;
+	<span class="enscript-type">struct</span> mount *mp = HFSTOVFS(hfsmp);
+	<span class="enscript-type">void</span> *attrbufptr = *abp-&gt;ab_attrbufpp;
+	<span class="enscript-type">void</span> *varbufptr = *abp-&gt;ab_varbufpp;
+	boolean_t is_64_bit = proc_is64bit(vfs_context_proc(ctx));
+	uid_t cuid = 1;
+	<span class="enscript-type">int</span> isroot = 0;
+
+	<span class="enscript-keyword">if</span> (attr &amp; (ATTR_CMN_OWNERID | ATTR_CMN_GRPID)) {
+		cuid = kauth_cred_getuid(vfs_context_ucred(ctx));
+		isroot = cuid == 0;
+	}
+	
+	<span class="enscript-keyword">if</span> (ATTR_CMN_NAME &amp; attr) {
+		packnameattr(abp, vp, cdp-&gt;cd_nameptr, cdp-&gt;cd_namelen);
+		attrbufptr = *abp-&gt;ab_attrbufpp;
+		varbufptr = *abp-&gt;ab_varbufpp;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_DEVID &amp; attr) {
+		*((dev_t *)attrbufptr) = hfsmp-&gt;hfs_raw_dev;
+		attrbufptr = ((dev_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_FSID &amp; attr) {
+		fsid_t fsid;
+		
+		fsid.val[0] = hfsmp-&gt;hfs_raw_dev;
+		fsid.val[1] = vfs_typenum(mp);
+		*((fsid_t *)attrbufptr) = fsid;
+		attrbufptr = ((fsid_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_OBJTYPE &amp; attr) {
+		*((fsobj_type_t *)attrbufptr) = IFTOVT(cap-&gt;ca_mode);
+		attrbufptr = ((fsobj_type_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_OBJTAG &amp; attr) {
+		*((fsobj_tag_t *)attrbufptr) = VT_HFS;
+		attrbufptr = ((fsobj_tag_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-comment">/*
+	 * Exporting file IDs from HFS Plus:
+	 *
+	 * For &quot;normal&quot; files the c_fileid is the same value as the
+	 * c_cnid.  But for hard link files, they are different - the
+	 * c_cnid belongs to the active directory entry (ie the link)
+	 * and the c_fileid is for the actual inode (ie the data file).
+	 *
+	 * The stat call (getattr) will always return the c_fileid
+	 * and Carbon APIs, which are hardlink-ignorant, will always
+	 * receive the c_cnid (from getattrlist).
+	 */</span>
+	<span class="enscript-keyword">if</span> (ATTR_CMN_OBJID &amp; attr) {
+		((fsobj_id_t *)attrbufptr)-&gt;fid_objno = cdp-&gt;cd_cnid;
+		((fsobj_id_t *)attrbufptr)-&gt;fid_generation = 0;
+		attrbufptr = ((fsobj_id_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_OBJPERMANENTID &amp; attr) {
+		((fsobj_id_t *)attrbufptr)-&gt;fid_objno = cdp-&gt;cd_cnid;
+		((fsobj_id_t *)attrbufptr)-&gt;fid_generation = 0;
+		attrbufptr = ((fsobj_id_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_PAROBJID &amp; attr) {
+		((fsobj_id_t *)attrbufptr)-&gt;fid_objno = cdp-&gt;cd_parentcnid;
+		((fsobj_id_t *)attrbufptr)-&gt;fid_generation = 0;
+		attrbufptr = ((fsobj_id_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_SCRIPT &amp; attr) {
+		*((text_encoding_t *)attrbufptr) = cdp-&gt;cd_encoding;
+		attrbufptr = ((text_encoding_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_CRTIME &amp; attr) {
+	    <span class="enscript-keyword">if</span> (is_64_bit) {
+            ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr)-&gt;tv_sec = cap-&gt;ca_itime;
+            ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr)-&gt;tv_nsec = 0;
+			attrbufptr = ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr) + 1;
+	    }
+	    <span class="enscript-keyword">else</span> {
+            ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr)-&gt;tv_sec = cap-&gt;ca_itime;
+            ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr)-&gt;tv_nsec = 0;
+			attrbufptr = ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr) + 1;
+	    }
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_MODTIME &amp; attr) {
+	    <span class="enscript-keyword">if</span> (is_64_bit) {
+             ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr)-&gt;tv_sec = cap-&gt;ca_mtime;
+             ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr)-&gt;tv_nsec = 0;
+			 attrbufptr = ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr) + 1;
+	    }
+	    <span class="enscript-keyword">else</span> {
+            ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr)-&gt;tv_sec = cap-&gt;ca_mtime;
+            ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr)-&gt;tv_nsec = 0;
+			attrbufptr = ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr) + 1;
+	    }
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_CHGTIME &amp; attr) {
+	    <span class="enscript-keyword">if</span> (is_64_bit) {
+            ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr)-&gt;tv_sec = cap-&gt;ca_ctime;
+            ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr)-&gt;tv_nsec = 0;
+			attrbufptr = ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr) + 1;
+	    }
+	    <span class="enscript-keyword">else</span> {
+            ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr)-&gt;tv_sec = cap-&gt;ca_ctime;
+            ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr)-&gt;tv_nsec = 0;
+			attrbufptr = ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr) + 1;
+	    }
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_ACCTIME &amp; attr) {
+	    <span class="enscript-keyword">if</span> (is_64_bit) {
+            ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr)-&gt;tv_sec = cap-&gt;ca_atime;
+            ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr)-&gt;tv_nsec = 0;
+			attrbufptr = ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr) + 1;
+	    }
+	    <span class="enscript-keyword">else</span> {
+            ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr)-&gt;tv_sec = cap-&gt;ca_atime;
+            ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr)-&gt;tv_nsec = 0;
+			attrbufptr = ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr) + 1;
+	    }
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_BKUPTIME &amp; attr) {
+	    <span class="enscript-keyword">if</span> (is_64_bit) {
+            ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr)-&gt;tv_sec = cap-&gt;ca_btime;
+            ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr)-&gt;tv_nsec = 0;
+			attrbufptr = ((<span class="enscript-type">struct</span> user64_timespec *)attrbufptr) + 1;
+	    }
+	    <span class="enscript-keyword">else</span> {
+            ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr)-&gt;tv_sec = cap-&gt;ca_btime;
+            ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr)-&gt;tv_nsec = 0;
+			attrbufptr = ((<span class="enscript-type">struct</span> user32_timespec *)attrbufptr) + 1;
+	    }
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_FNDRINFO &amp; attr) {
+		u_int8_t *finfo = NULL;
+		bcopy(&amp;cap-&gt;ca_finderinfo, attrbufptr, <span class="enscript-keyword">sizeof</span>(u_int8_t) * 32);
+		finfo = (u_int8_t*)attrbufptr;
+
+		<span class="enscript-comment">/* Don't expose a symlink's private type/creator. */</span>
+		<span class="enscript-keyword">if</span> (S_ISLNK(cap-&gt;ca_mode)) {
+			<span class="enscript-type">struct</span> FndrFileInfo *fip;
+
+			fip = (<span class="enscript-type">struct</span> FndrFileInfo *)attrbufptr;
+			fip-&gt;fdType = 0;
+			fip-&gt;fdCreator = 0;
+		}
+
+		<span class="enscript-comment">/* advance 16 bytes into the attrbuf */</span>
+		finfo = finfo + 16;
+
+		<span class="enscript-comment">/* also don't expose the date_added or write_gen_counter fields */</span>
+		<span class="enscript-keyword">if</span> (S_ISREG(cap-&gt;ca_mode) || S_ISLNK(cap-&gt;ca_mode)) {
+			<span class="enscript-type">struct</span> FndrExtendedFileInfo *extinfo = (<span class="enscript-type">struct</span> FndrExtendedFileInfo *)finfo;
+			extinfo-&gt;document_id = 0;
+			extinfo-&gt;date_added = 0;
+			extinfo-&gt;write_gen_counter = 0;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (S_ISDIR(cap-&gt;ca_mode)) {
+			<span class="enscript-type">struct</span> FndrExtendedDirInfo *extinfo = (<span class="enscript-type">struct</span> FndrExtendedDirInfo *)finfo;
+			extinfo-&gt;document_id = 0;
+			extinfo-&gt;date_added = 0;
+			extinfo-&gt;write_gen_counter = 0;
+		}
+
+		attrbufptr = (<span class="enscript-type">char</span> *)attrbufptr + <span class="enscript-keyword">sizeof</span>(u_int8_t) * 32;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_OWNERID &amp; attr) {
+		uid_t nuid = cap-&gt;ca_uid;
+
+		<span class="enscript-keyword">if</span> (!isroot) {
+			<span class="enscript-keyword">if</span> (((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)vfs_flags(HFSTOVFS(hfsmp))) &amp; MNT_UNKNOWNPERMISSIONS)
+				nuid = cuid;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (nuid == UNKNOWNUID)
+				nuid = cuid;
+		}
+
+		*((uid_t *)attrbufptr) = nuid;
+		attrbufptr = ((uid_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_GRPID &amp; attr) {
+		gid_t ngid = cap-&gt;ca_gid;
+
+		<span class="enscript-keyword">if</span> (!isroot) {
+			gid_t cgid = kauth_cred_getgid(vfs_context_ucred(ctx));
+			<span class="enscript-keyword">if</span> (((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)vfs_flags(HFSTOVFS(hfsmp))) &amp; MNT_UNKNOWNPERMISSIONS)
+				ngid = cgid;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ngid == UNKNOWNUID)
+				ngid = cgid;
+		}
+
+		*((gid_t *)attrbufptr) = ngid;
+		attrbufptr = ((gid_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_ACCESSMASK &amp; attr) {
+		<span class="enscript-comment">/*
+		 * [2856576]  Since we are dynamically changing the owner, also
+		 * effectively turn off the set-user-id and set-group-id bits,
+		 * just like chmod(2) would when changing ownership.  This prevents
+		 * a security hole where set-user-id programs run as whoever is
+		 * logged on (or root if nobody is logged in yet!)
+		 */</span>
+		*((u_int32_t *)attrbufptr) = (cap-&gt;ca_uid == UNKNOWNUID) ?
+			cap-&gt;ca_mode &amp; ~(S_ISUID | S_ISGID) : cap-&gt;ca_mode;
+		attrbufptr = ((u_int32_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_FLAGS &amp; attr) {
+		*((u_int32_t *)attrbufptr) = cap-&gt;ca_flags;
+		attrbufptr = ((u_int32_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_USERACCESS &amp; attr) {
+		u_int32_t user_access;
+
+		<span class="enscript-comment">/* Take the long path when we have an ACL */</span>
+		<span class="enscript-keyword">if</span> ((vp != NULLVP) &amp;&amp; (cap-&gt;ca_recflags &amp; kHFSHasSecurityMask)) {
+			user_access = hfs_real_user_access(vp, abp-&gt;ab_context);
+		} <span class="enscript-keyword">else</span> {
+			user_access = DerivePermissionSummary(cap-&gt;ca_uid, cap-&gt;ca_gid,
+			                  cap-&gt;ca_mode, mp, vfs_context_ucred(ctx), 0);
+		}
+		<span class="enscript-comment">/* Also consider READ-ONLY file system. */</span>
+		<span class="enscript-keyword">if</span> (vfs_flags(mp) &amp; MNT_RDONLY) {
+			user_access &amp;= ~W_OK;
+		}
+		<span class="enscript-comment">/* Locked objects are not writable either */</span>
+		<span class="enscript-keyword">if</span> ((cap-&gt;ca_flags &amp; UF_IMMUTABLE) &amp;&amp; (vfs_context_suser(abp-&gt;ab_context) != 0))
+			user_access &amp;= ~W_OK;
+		<span class="enscript-keyword">if</span> ((cap-&gt;ca_flags &amp; SF_IMMUTABLE) &amp;&amp; (vfs_context_suser(abp-&gt;ab_context) == 0))
+			user_access &amp;= ~W_OK;
+
+		*((u_int32_t *)attrbufptr) = user_access;
+		attrbufptr = ((u_int32_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_FILEID &amp; attr) {
+		*((u_int64_t *)attrbufptr) = cap-&gt;ca_fileid;
+		attrbufptr = ((u_int64_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_CMN_PARENTID &amp; attr) {
+		*((u_int64_t *)attrbufptr) = cdp-&gt;cd_parentcnid;
+		attrbufptr = ((u_int64_t *)attrbufptr) + 1;
+	}
+	
+	*abp-&gt;ab_attrbufpp = attrbufptr;
+	*abp-&gt;ab_varbufpp = varbufptr;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">packdirattr</span>(
+	<span class="enscript-type">struct</span> attrblock *abp,
+	<span class="enscript-type">struct</span> hfsmount *hfsmp,
+	<span class="enscript-type">struct</span> vnode *vp,
+	<span class="enscript-type">struct</span> cat_desc * descp,
+	<span class="enscript-type">struct</span> cat_attr * cattrp)
+{
+	attrgroup_t attr = abp-&gt;ab_attrlist-&gt;dirattr;
+	<span class="enscript-type">void</span> *attrbufptr = *abp-&gt;ab_attrbufpp;
+	u_int32_t entries;
+
+	<span class="enscript-comment">/*
+	 * The DIR_LINKCOUNT is the count of real directory hard links.
+	 * (i.e. its not the sum of the implied &quot;.&quot; and &quot;..&quot; references
+	 *  typically used in stat's st_nlink field)
+	 */</span>
+	<span class="enscript-keyword">if</span> (ATTR_DIR_LINKCOUNT &amp; attr) {
+		*((u_int32_t *)attrbufptr) = cattrp-&gt;ca_linkcount;
+		attrbufptr = ((u_int32_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_DIR_ENTRYCOUNT &amp; attr) {
+		entries = cattrp-&gt;ca_entries;
+
+		<span class="enscript-keyword">if</span> (descp-&gt;cd_parentcnid == kHFSRootParentID) {
+			<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_private_desc[FILE_HARDLINKS].cd_cnid != 0)
+				--entries;	    <span class="enscript-comment">/* hide private dir */</span>
+			<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_private_desc[DIR_HARDLINKS].cd_cnid != 0)
+				--entries;	    <span class="enscript-comment">/* hide private dir */</span>
+			<span class="enscript-keyword">if</span> (hfsmp-&gt;jnl ||
+			    ((hfsmp-&gt;vcbAtrb &amp; kHFSVolumeJournaledMask) &amp;&amp;
+			     (hfsmp-&gt;hfs_flags &amp; HFS_READ_ONLY)))
+				entries -= 2;	<span class="enscript-comment">/* hide the journal files */</span>
+		}
+
+		*((u_int32_t *)attrbufptr) = entries;
+		attrbufptr = ((u_int32_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_DIR_MOUNTSTATUS &amp; attr) {
+		<span class="enscript-keyword">if</span> (vp != NULL &amp;&amp; vnode_mountedhere(vp) != NULL)
+			*((u_int32_t *)attrbufptr) = DIR_MNTSTATUS_MNTPOINT;
+		<span class="enscript-keyword">else</span>
+			*((u_int32_t *)attrbufptr) = 0;
+		attrbufptr = ((u_int32_t *)attrbufptr) + 1;
+	}
+	*abp-&gt;ab_attrbufpp = attrbufptr;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">packfileattr</span>(
+	<span class="enscript-type">struct</span> attrblock *abp,
+	<span class="enscript-type">struct</span> hfsmount *hfsmp,
+	<span class="enscript-type">struct</span> cat_attr *cattrp,
+	<span class="enscript-type">struct</span> cat_fork *datafork,
+	<span class="enscript-type">struct</span> cat_fork *rsrcfork,
+	<span class="enscript-type">struct</span> vnode *vp)
+{
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">HFS_COMPRESSION</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">vp</span>)
+#<span class="enscript-reference">endif</span>
+	attrgroup_t attr = abp-&gt;ab_attrlist-&gt;fileattr;
+	<span class="enscript-type">void</span> *attrbufptr = *abp-&gt;ab_attrbufpp;
+	<span class="enscript-type">void</span> *varbufptr = *abp-&gt;ab_varbufpp;
+	u_int32_t allocblksize;
+
+	allocblksize = HFSTOVCB(hfsmp)-&gt;blockSize;
+
+	off_t datasize = datafork-&gt;cf_size;
+	off_t totalsize = datasize + rsrcfork-&gt;cf_size;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	<span class="enscript-type">int</span> handle_compressed;
+	handle_compressed =  (cattrp-&gt;ca_flags &amp; UF_COMPRESSED);<span class="enscript-comment">// &amp;&amp; hfs_file_is_compressed(VTOC(vp), 1);
+</span>	
+	<span class="enscript-keyword">if</span> (handle_compressed) {
+		<span class="enscript-keyword">if</span> (attr &amp; (ATTR_FILE_DATALENGTH|ATTR_FILE_TOTALSIZE)) {
+			<span class="enscript-keyword">if</span> ( 0 == hfs_uncompressed_size_of_compressed_file(hfsmp, vp, cattrp-&gt;ca_fileid, &amp;datasize, 1) ) { <span class="enscript-comment">/* 1 == don't take the cnode lock */</span>
+				<span class="enscript-comment">/* total size of a compressed file is just the data size */</span>
+				totalsize = datasize;
+			}
+		}
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (ATTR_FILE_LINKCOUNT &amp; attr) {
+		*((u_int32_t *)attrbufptr) = cattrp-&gt;ca_linkcount;
+		attrbufptr = ((u_int32_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_FILE_TOTALSIZE &amp; attr) {
+		*((off_t *)attrbufptr) = totalsize;
+		attrbufptr = ((off_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_FILE_ALLOCSIZE &amp; attr) {
+		*((off_t *)attrbufptr) =
+			(off_t)cattrp-&gt;ca_blocks * (off_t)allocblksize;
+		attrbufptr = ((off_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_FILE_IOBLOCKSIZE &amp; attr) {
+		*((u_int32_t *)attrbufptr) = hfsmp-&gt;hfs_logBlockSize;
+		attrbufptr = ((u_int32_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_FILE_CLUMPSIZE &amp; attr) {
+		*((u_int32_t *)attrbufptr) = hfsmp-&gt;vcbClpSiz;
+		attrbufptr = ((u_int32_t *)attrbufptr) + 1;
+	}
+	<span class="enscript-keyword">if</span> (ATTR_FILE_DEVTYPE &amp; attr) {
+		<span class="enscript-keyword">if</span> (S_ISBLK(cattrp-&gt;ca_mode) || S_ISCHR(cattrp-&gt;ca_mode))
+			*((u_int32_t *)attrbufptr) = (u_int32_t)cattrp-&gt;ca_rdev;
+		<span class="enscript-keyword">else</span>
+			*((u_int32_t *)attrbufptr) = 0;
+		attrbufptr = ((u_int32_t *)attrbufptr) + 1;
+	}
+	
+	<span class="enscript-keyword">if</span> (ATTR_FILE_DATALENGTH &amp; attr) {
+		*((off_t *)attrbufptr) = datasize;
+		attrbufptr = ((off_t *)attrbufptr) + 1;
+	}
+	
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	<span class="enscript-comment">/* fake the data fork size on a decmpfs compressed file to reflect the 
+	 * uncompressed size. This ensures proper reading and copying of these files.
+	 * NOTE: we may need to get the vnode here because the vnode parameter
+	 * passed by hfs_vnop_readdirattr() may be null. 
+	 */</span>
+	
+	<span class="enscript-keyword">if</span> ( handle_compressed ) {
+		<span class="enscript-keyword">if</span> (attr &amp; ATTR_FILE_DATAALLOCSIZE) {
+			*((off_t *)attrbufptr) = (off_t)rsrcfork-&gt;cf_blocks * (off_t)allocblksize;
+			attrbufptr = ((off_t *)attrbufptr) + 1;
+		}
+		<span class="enscript-keyword">if</span> (attr &amp; ATTR_FILE_RSRCLENGTH) {
+			*((off_t *)attrbufptr) = 0;
+			attrbufptr = ((off_t *)attrbufptr) + 1;
+		}
+		<span class="enscript-keyword">if</span> (attr &amp; ATTR_FILE_RSRCALLOCSIZE) {
+			*((off_t *)attrbufptr) = 0;
+			attrbufptr = ((off_t *)attrbufptr) + 1;
+		}
+	}
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span>
+	{
+		<span class="enscript-keyword">if</span> (ATTR_FILE_DATAALLOCSIZE &amp; attr) {
+			*((off_t *)attrbufptr) = (off_t)datafork-&gt;cf_blocks * (off_t)allocblksize;
+			attrbufptr = ((off_t *)attrbufptr) + 1;
+		}
+		<span class="enscript-keyword">if</span> (ATTR_FILE_RSRCLENGTH &amp; attr) {
+			*((off_t *)attrbufptr) = rsrcfork-&gt;cf_size;
+			attrbufptr = ((off_t *)attrbufptr) + 1;
+		}
+		<span class="enscript-keyword">if</span> (ATTR_FILE_RSRCALLOCSIZE &amp; attr) {
+			*((off_t *)attrbufptr) = (off_t)rsrcfork-&gt;cf_blocks * (off_t)allocblksize;
+			attrbufptr = ((off_t *)attrbufptr) + 1;
+		}
+	}
+	*abp-&gt;ab_attrbufpp = attrbufptr;
+	*abp-&gt;ab_varbufpp = varbufptr;
+}
+
+<span class="enscript-comment">/*
+ * Calculate the total size of an attribute block.
+ */</span>
+__private_extern__
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">hfs_attrblksize</span>(<span class="enscript-type">struct</span> attrlist *attrlist)
+{
+	<span class="enscript-type">int</span> size;
+	attrgroup_t a;
+	<span class="enscript-type">int</span> sizeof_timespec;
+	boolean_t is_64_bit = proc_is64bit(current_proc());
+	
+    <span class="enscript-keyword">if</span> (is_64_bit) 
+        sizeof_timespec = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user64_timespec);
+    <span class="enscript-keyword">else</span>
+        sizeof_timespec = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> user32_timespec);
+
+	DBG_ASSERT((attrlist-&gt;commonattr &amp; ~ATTR_CMN_VALIDMASK) == 0);
+
+	DBG_ASSERT((attrlist-&gt;volattr &amp; ~ATTR_VOL_VALIDMASK) == 0);
+
+	DBG_ASSERT((attrlist-&gt;dirattr &amp; ~ATTR_DIR_VALIDMASK) == 0);
+
+	DBG_ASSERT((attrlist-&gt;fileattr &amp; ~ATTR_FILE_VALIDMASK) == 0);
+
+	DBG_ASSERT((attrlist-&gt;forkattr &amp; ~ATTR_FORK_VALIDMASK) == 0);
+
+	size = 0;
+	
+	<span class="enscript-keyword">if</span> ((a = attrlist-&gt;commonattr) != 0) {
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_NAME) size += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> attrreference);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_DEVID) size += <span class="enscript-keyword">sizeof</span>(dev_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_FSID) size += <span class="enscript-keyword">sizeof</span>(fsid_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_OBJTYPE) size += <span class="enscript-keyword">sizeof</span>(fsobj_type_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_OBJTAG) size += <span class="enscript-keyword">sizeof</span>(fsobj_tag_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_OBJID) size += <span class="enscript-keyword">sizeof</span>(fsobj_id_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_OBJPERMANENTID) size += <span class="enscript-keyword">sizeof</span>(fsobj_id_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_PAROBJID) size += <span class="enscript-keyword">sizeof</span>(fsobj_id_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_SCRIPT) size += <span class="enscript-keyword">sizeof</span>(text_encoding_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_CRTIME) size += sizeof_timespec;
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_MODTIME) size += sizeof_timespec;
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_CHGTIME) size += sizeof_timespec;
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_ACCTIME) size += sizeof_timespec;
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_BKUPTIME) size += sizeof_timespec;
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_FNDRINFO) size += 32 * <span class="enscript-keyword">sizeof</span>(u_int8_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_OWNERID) size += <span class="enscript-keyword">sizeof</span>(uid_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_GRPID) size += <span class="enscript-keyword">sizeof</span>(gid_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_ACCESSMASK) size += <span class="enscript-keyword">sizeof</span>(u_int32_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_FLAGS) size += <span class="enscript-keyword">sizeof</span>(u_int32_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_USERACCESS) size += <span class="enscript-keyword">sizeof</span>(u_int32_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_FILEID) size += <span class="enscript-keyword">sizeof</span>(u_int64_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_CMN_PARENTID) size += <span class="enscript-keyword">sizeof</span>(u_int64_t);
+	}
+	<span class="enscript-keyword">if</span> ((a = attrlist-&gt;dirattr) != 0) {
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_DIR_LINKCOUNT) size += <span class="enscript-keyword">sizeof</span>(u_int32_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_DIR_ENTRYCOUNT) size += <span class="enscript-keyword">sizeof</span>(u_int32_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_DIR_MOUNTSTATUS) size += <span class="enscript-keyword">sizeof</span>(u_int32_t);
+	}
+	<span class="enscript-keyword">if</span> ((a = attrlist-&gt;fileattr) != 0) {
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_FILE_LINKCOUNT) size += <span class="enscript-keyword">sizeof</span>(u_int32_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_FILE_TOTALSIZE) size += <span class="enscript-keyword">sizeof</span>(off_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_FILE_ALLOCSIZE) size += <span class="enscript-keyword">sizeof</span>(off_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_FILE_IOBLOCKSIZE) size += <span class="enscript-keyword">sizeof</span>(u_int32_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_FILE_CLUMPSIZE) size += <span class="enscript-keyword">sizeof</span>(u_int32_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_FILE_DEVTYPE) size += <span class="enscript-keyword">sizeof</span>(u_int32_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_FILE_DATALENGTH) size += <span class="enscript-keyword">sizeof</span>(off_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_FILE_DATAALLOCSIZE) size += <span class="enscript-keyword">sizeof</span>(off_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_FILE_RSRCLENGTH) size += <span class="enscript-keyword">sizeof</span>(off_t);
+		<span class="enscript-keyword">if</span> (a &amp; ATTR_FILE_RSRCALLOCSIZE) size += <span class="enscript-keyword">sizeof</span>(off_t);
+	}
+
+	<span class="enscript-keyword">return</span> (size);
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KAUTH_DIR_WRITE_RIGHTS</span>		(KAUTH_VNODE_ACCESS | KAUTH_VNODE_ADD_FILE | \
+                                	 KAUTH_VNODE_ADD_SUBDIRECTORY | \
+                                	 KAUTH_VNODE_DELETE_CHILD)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KAUTH_DIR_READ_RIGHTS</span>		(KAUTH_VNODE_ACCESS | KAUTH_VNODE_LIST_DIRECTORY)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KAUTH_DIR_EXECUTE_RIGHTS</span>	(KAUTH_VNODE_ACCESS | KAUTH_VNODE_SEARCH)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KAUTH_FILE_WRITE_RIGHTS</span>		(KAUTH_VNODE_ACCESS | KAUTH_VNODE_WRITE_DATA)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KAUTH_FILE_READRIGHTS</span>		(KAUTH_VNODE_ACCESS | KAUTH_VNODE_READ_DATA)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KAUTH_FILE_EXECUTE_RIGHTS</span>	(KAUTH_VNODE_ACCESS | KAUTH_VNODE_EXECUTE)
+
+
+<span class="enscript-comment">/*
+ * Compute the same [expensive] user_access value as getattrlist does
+ */</span>
+<span class="enscript-type">static</span> u_int32_t
+<span class="enscript-function-name">hfs_real_user_access</span>(vnode_t vp, vfs_context_t ctx)
+{
+	u_int32_t user_access = 0;
+
+	<span class="enscript-keyword">if</span> (vnode_isdir(vp)) {
+		<span class="enscript-keyword">if</span> (vnode_authorize(vp, NULLVP, KAUTH_DIR_WRITE_RIGHTS, ctx) == 0)
+			user_access |= W_OK;
+		<span class="enscript-keyword">if</span> (vnode_authorize(vp, NULLVP, KAUTH_DIR_READ_RIGHTS, ctx) == 0)
+			user_access |= R_OK;
+		<span class="enscript-keyword">if</span> (vnode_authorize(vp, NULLVP, KAUTH_DIR_EXECUTE_RIGHTS, ctx) == 0)
+			user_access |= X_OK;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (vnode_authorize(vp, NULLVP, KAUTH_FILE_WRITE_RIGHTS, ctx) == 0)
+			user_access |= W_OK;
+		<span class="enscript-keyword">if</span> (vnode_authorize(vp, NULLVP, KAUTH_FILE_READRIGHTS, ctx) == 0)
+			user_access |= R_OK;
+		<span class="enscript-keyword">if</span> (vnode_authorize(vp, NULLVP, KAUTH_FILE_EXECUTE_RIGHTS, ctx) == 0)
+			user_access |= X_OK;
+	}
+	<span class="enscript-keyword">return</span> (user_access);
+}
+		
+
+u_int32_t
+<span class="enscript-function-name">DerivePermissionSummary</span>(uid_t obj_uid, gid_t obj_gid, mode_t obj_mode,
+		<span class="enscript-type">struct</span> mount *mp, kauth_cred_t cred, __unused <span class="enscript-type">struct</span> proc *p)
+{
+	u_int32_t permissions;
+
+	<span class="enscript-keyword">if</span> (obj_uid == UNKNOWNUID)
+		obj_uid = kauth_cred_getuid(cred);
+
+	<span class="enscript-comment">/* User id 0 (root) always gets access. */</span>
+	<span class="enscript-keyword">if</span> (!suser(cred, NULL)) {
+		permissions = R_OK | W_OK | X_OK;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">Exit</span>;
+	};
+
+	<span class="enscript-comment">/* Otherwise, check the owner. */</span>
+	<span class="enscript-keyword">if</span> (hfs_owner_rights(VFSTOHFS(mp), obj_uid, cred, NULL, false) == 0) {
+		permissions = ((u_int32_t)obj_mode &amp; S_IRWXU) &gt;&gt; 6;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">Exit</span>;
+	}
+
+	<span class="enscript-comment">/* Otherwise, check the groups. */</span>
+	<span class="enscript-keyword">if</span> (! (((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)vfs_flags(mp)) &amp; MNT_UNKNOWNPERMISSIONS)) {
+		<span class="enscript-type">int</span> is_member;
+
+		<span class="enscript-keyword">if</span> (kauth_cred_ismember_gid(cred, obj_gid, &amp;is_member) == 0 &amp;&amp; is_member) {
+			permissions = ((u_int32_t)obj_mode &amp; S_IRWXG) &gt;&gt; 3;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">Exit</span>;
+		}
+	}
+
+	<span class="enscript-comment">/* Otherwise, settle for 'others' access. */</span>
+	permissions = (u_int32_t)obj_mode &amp; S_IRWXO;
+
+<span class="enscript-reference">Exit</span>:
+	<span class="enscript-keyword">return</span> (permissions);    
+}
+
+
+<span class="enscript-comment">/*
+ * ===========================================================================
+ * Support functions for filling up a vnode_attr structure based on attributes
+ * requested.
+ * ===========================================================================
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">get_vattr_data_for_attrs</span>(<span class="enscript-type">struct</span> attrlist *alp, <span class="enscript-type">struct</span> vnode_attr *vap,
+    <span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> cat_desc *descp,
+    <span class="enscript-type">struct</span> cat_attr *atrp, <span class="enscript-type">struct</span> cat_fork *datafork, <span class="enscript-type">struct</span> cat_fork *rsrcfork,
+    vfs_context_t ctx)
+{
+	<span class="enscript-keyword">if</span> (alp-&gt;commonattr)
+		vattr_data_for_common_attrs(alp, vap, hfsmp, vp, descp, atrp,
+		ctx);
+
+	<span class="enscript-keyword">if</span> (alp-&gt;dirattr &amp;&amp; S_ISDIR(atrp-&gt;ca_mode))
+		vattr_data_for_dir_attrs(alp, vap, hfsmp, vp, descp, atrp);
+
+	<span class="enscript-keyword">if</span> (alp-&gt;fileattr &amp;&amp; !S_ISDIR(atrp-&gt;ca_mode)) {
+		vattr_data_for_file_attrs(alp, vap, hfsmp, atrp, datafork,
+		    rsrcfork, vp);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">copy_name_attr</span>(<span class="enscript-type">struct</span> vnode_attr *vap, <span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">const</span> u_int8_t *name,
+    <span class="enscript-type">int</span> namelen)
+{
+	<span class="enscript-type">char</span> *mpname;
+	size_t mpnamelen;
+	u_int32_t attrlength;
+	u_int8_t empty = 0;
+
+	<span class="enscript-comment">/* A cnode's name may be incorrect for the root of a mounted
+	 * filesystem (it can be mounted on a different directory name
+	 * than the name of the volume, such as &quot;blah-1&quot;).  So for the
+	 * root directory, it's best to return the last element of the
+	 location where the volume's mounted:
+	 */</span>
+	<span class="enscript-keyword">if</span> ((vp != NULL) &amp;&amp; vnode_isvroot(vp) &amp;&amp;
+	    (mpname = mountpointname(vnode_mount(vp)))) {
+		mpnamelen = strlen(mpname);
+
+		<span class="enscript-comment">/* Trim off any trailing slashes: */</span>
+		<span class="enscript-keyword">while</span> ((mpnamelen &gt; 0) &amp;&amp; (mpname[mpnamelen-1] == <span class="enscript-string">'/'</span>))
+			--mpnamelen;
+
+		<span class="enscript-comment">/* If there's anything left, use it instead of the volume's name */</span>
+		<span class="enscript-keyword">if</span> (mpnamelen &gt; 0) {
+			name = (u_int8_t *)mpname;
+			namelen = mpnamelen;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (name == NULL) {
+		name = &amp;empty;
+		namelen = 0;
+	}
+
+	attrlength = namelen + 1;
+	(<span class="enscript-type">void</span>) strncpy((<span class="enscript-type">char</span> *)vap-&gt;va_name, (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) name, attrlength);
+	<span class="enscript-comment">/*
+	 * round upto 8 and zero out the rounded up bytes.
+	 */</span>
+	attrlength = min(kHFSPlusMaxFileNameBytes, ((attrlength + 7) &amp; ~0x07));
+	bzero(vap-&gt;va_name + attrlength, kHFSPlusMaxFileNameBytes - attrlength);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vattr_data_for_common_attrs</span>( <span class="enscript-type">struct</span> attrlist *alp, <span class="enscript-type">struct</span> vnode_attr *vap,
+    <span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> cat_desc *cdp,
+    <span class="enscript-type">struct</span> cat_attr *cap, vfs_context_t ctx)
+{
+	attrgroup_t attr = alp-&gt;commonattr;
+	<span class="enscript-type">struct</span> mount *mp = HFSTOVFS(hfsmp);
+	uid_t cuid = 1;
+	<span class="enscript-type">int</span> isroot = 0;
+
+	<span class="enscript-keyword">if</span> (attr &amp; (ATTR_CMN_OWNERID | ATTR_CMN_GRPID)) {
+		cuid = kauth_cred_getuid(vfs_context_ucred(ctx));
+		isroot = cuid == 0;
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_NAME &amp; attr) {
+		<span class="enscript-keyword">if</span> (vap-&gt;va_name) {
+			copy_name_attr(vap, vp, cdp-&gt;cd_nameptr,
+			    cdp-&gt;cd_namelen);
+			VATTR_SET_SUPPORTED(vap, va_name);
+		} <span class="enscript-keyword">else</span> {
+			VATTR_CLEAR_SUPPORTED(vap, va_name);
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_DEVID &amp; attr) {
+		vap-&gt;va_devid = hfsmp-&gt;hfs_raw_dev;
+		VATTR_SET_SUPPORTED(vap, va_devid);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_FSID &amp; attr) {
+		vap-&gt;va_fsid64.val[0] = hfsmp-&gt;hfs_raw_dev;
+		vap-&gt;va_fsid64.val[1] = vfs_typenum(mp);
+		VATTR_SET_SUPPORTED(vap, va_fsid64);
+	}
+	<span class="enscript-comment">/*
+	 * We always provide the objtype even if not asked because VFS helper
+	 * functions depend on knowing the object's type.
+	 */</span>
+	vap-&gt;va_objtype = IFTOVT(cap-&gt;ca_mode);
+	VATTR_SET_SUPPORTED(vap, va_objtype);
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_OBJTAG &amp; attr) {
+		vap-&gt;va_objtag = VT_HFS;
+		VATTR_SET_SUPPORTED(vap, va_objtag);
+	}
+	<span class="enscript-comment">/*
+	 * Exporting file IDs from HFS Plus:
+	 *
+	 * For &quot;normal&quot; files the c_fileid is the same value as the
+	 * c_cnid.  But for hard link files, they are different - the
+	 * c_cnid belongs to the active directory entry (ie the link)
+	 * and the c_fileid is for the actual inode (ie the data file).
+	 *
+	 * The stat call (getattr) will always return the c_fileid
+	 * and Carbon APIs, which are hardlink-ignorant, will always
+	 * receive the c_cnid (from getattrlist).
+	 */</span>
+	<span class="enscript-keyword">if</span> ((ATTR_CMN_OBJID &amp; attr) ||
+	    (ATTR_CMN_OBJPERMANENTID &amp; attr)) {
+		vap-&gt;va_linkid = cdp-&gt;cd_cnid;
+		VATTR_SET_SUPPORTED(vap, va_linkid);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_PAROBJID &amp; attr) {
+		vap-&gt;va_parentid = cdp-&gt;cd_parentcnid;
+		VATTR_SET_SUPPORTED(vap, va_parentid);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_SCRIPT &amp; attr) {
+		vap-&gt;va_encoding = cdp-&gt;cd_encoding;
+		VATTR_SET_SUPPORTED(vap, va_encoding);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_CRTIME &amp; attr) {
+		vap-&gt;va_create_time.tv_sec = cap-&gt;ca_itime;
+		vap-&gt;va_create_time.tv_nsec = 0;
+		VATTR_SET_SUPPORTED(vap, va_create_time);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_MODTIME &amp; attr) {
+		vap-&gt;va_modify_time.tv_sec = cap-&gt;ca_mtime;
+		vap-&gt;va_modify_time.tv_nsec = 0;
+		VATTR_SET_SUPPORTED(vap, va_modify_time);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_CHGTIME &amp; attr) {
+		vap-&gt;va_change_time.tv_sec = cap-&gt;ca_ctime;
+		vap-&gt;va_change_time.tv_nsec = 0;
+		VATTR_SET_SUPPORTED(vap, va_change_time);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_ACCTIME &amp; attr) {
+		vap-&gt;va_access_time.tv_sec = cap-&gt;ca_atime;
+		vap-&gt;va_access_time.tv_nsec = 0;
+		VATTR_SET_SUPPORTED(vap, va_access_time);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_BKUPTIME &amp; attr) {
+		vap-&gt;va_backup_time.tv_sec = cap-&gt;ca_btime;
+		vap-&gt;va_backup_time.tv_nsec = 0;
+		VATTR_SET_SUPPORTED(vap, va_backup_time);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_FNDRINFO &amp; attr) {
+		u_int8_t *finfo = NULL;
+
+		bcopy(&amp;cap-&gt;ca_finderinfo, &amp;vap-&gt;va_finderinfo[0],
+		    <span class="enscript-keyword">sizeof</span>(u_int8_t) * 32);
+		finfo = (u_int8_t*)(&amp;vap-&gt;va_finderinfo[0]);
+
+		<span class="enscript-comment">/* Don't expose a symlink's private type/creator. */</span>
+		<span class="enscript-keyword">if</span> (S_ISLNK(cap-&gt;ca_mode)) {
+			<span class="enscript-type">struct</span> FndrFileInfo *fip;
+
+			fip = (<span class="enscript-type">struct</span> FndrFileInfo *)finfo;
+			fip-&gt;fdType = 0;
+			fip-&gt;fdCreator = 0;
+		}
+
+		<span class="enscript-comment">/* advance 16 bytes into the attrbuf */</span>
+		finfo = finfo + 16;
+
+		<span class="enscript-comment">/* also don't expose the date_added or write_gen_counter fields */</span>
+		<span class="enscript-keyword">if</span> (S_ISREG(cap-&gt;ca_mode) || S_ISLNK(cap-&gt;ca_mode)) {
+			<span class="enscript-type">struct</span> FndrExtendedFileInfo *extinfo =
+			    (<span class="enscript-type">struct</span> FndrExtendedFileInfo *)finfo;
+			extinfo-&gt;document_id = 0;
+			extinfo-&gt;date_added = 0;
+			extinfo-&gt;write_gen_counter = 0;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (S_ISDIR(cap-&gt;ca_mode)) {
+			<span class="enscript-type">struct</span> FndrExtendedDirInfo *extinfo =
+			    (<span class="enscript-type">struct</span> FndrExtendedDirInfo *)finfo;
+			extinfo-&gt;document_id = 0;
+			extinfo-&gt;date_added = 0;
+			extinfo-&gt;write_gen_counter = 0;
+		}
+
+		VATTR_SET_SUPPORTED(vap, va_finderinfo);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_OWNERID &amp; attr) {
+		uid_t nuid = cap-&gt;ca_uid;
+
+		<span class="enscript-keyword">if</span> (!isroot) {
+			<span class="enscript-keyword">if</span> (((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)vfs_flags(HFSTOVFS(hfsmp))) &amp; MNT_UNKNOWNPERMISSIONS)
+				nuid = cuid;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (nuid == UNKNOWNUID)
+				nuid = cuid;
+		}
+
+		vap-&gt;va_uid = nuid;
+		VATTR_SET_SUPPORTED(vap, va_uid);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_GRPID &amp; attr) {
+		gid_t ngid = cap-&gt;ca_gid;
+
+		<span class="enscript-keyword">if</span> (!isroot) {
+			gid_t cgid = kauth_cred_getgid(vfs_context_ucred(ctx));
+			<span class="enscript-keyword">if</span> (((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>)vfs_flags(HFSTOVFS(hfsmp))) &amp; MNT_UNKNOWNPERMISSIONS)
+				ngid = cgid;
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ngid == UNKNOWNUID)
+				ngid = cgid;
+		}
+
+		vap-&gt;va_gid = ngid;
+		VATTR_SET_SUPPORTED(vap, va_gid);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_ACCESSMASK &amp; attr) {
+		uint32_t nmode;
+		<span class="enscript-comment">/*
+		 * [2856576]  Since we are dynamically changing the owner, also
+		 * effectively turn off the set-user-id and set-group-id bits,
+		 * just like chmod(2) would when changing ownership.  This prevents
+		 * a security hole where set-user-id programs run as whoever is
+		 * logged on (or root if nobody is logged in yet!)
+		 */</span>
+		nmode = (cap-&gt;ca_uid == UNKNOWNUID) ?
+		    cap-&gt;ca_mode &amp; ~(S_ISUID | S_ISGID) : cap-&gt;ca_mode;
+
+		vap-&gt;va_mode = nmode;
+		VATTR_SET_SUPPORTED(vap, va_mode);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_FLAGS &amp; attr) {
+		vap-&gt;va_flags = cap-&gt;ca_flags;
+		VATTR_SET_SUPPORTED(vap, va_flags);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_GEN_COUNT &amp; attr) {
+		vap-&gt;va_write_gencount = hfs_get_gencount_from_blob(
+		    (<span class="enscript-type">const</span> uint8_t *)cap-&gt;ca_finderinfo, cap-&gt;ca_mode);
+		VATTR_SET_SUPPORTED(vap, va_write_gencount);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_DOCUMENT_ID &amp; attr) {
+		vap-&gt;va_document_id = hfs_get_document_id_from_blob(
+		    (<span class="enscript-type">const</span> uint8_t *)cap-&gt;ca_finderinfo, cap-&gt;ca_mode);
+		VATTR_SET_SUPPORTED(vap, va_document_id);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_USERACCESS &amp; attr) {
+		u_int32_t user_access;
+
+		<span class="enscript-comment">/* Take the long path when we have an ACL */</span>
+		<span class="enscript-keyword">if</span> ((vp != NULLVP) &amp;&amp; (cap-&gt;ca_recflags &amp; kHFSHasSecurityMask)) {
+			user_access = hfs_real_user_access(vp, ctx);
+		} <span class="enscript-keyword">else</span> {
+			user_access = DerivePermissionSummary(cap-&gt;ca_uid, cap-&gt;ca_gid,
+			                  cap-&gt;ca_mode, mp, vfs_context_ucred(ctx), 0);
+		}
+		<span class="enscript-comment">/* Also consider READ-ONLY file system. */</span>
+		<span class="enscript-keyword">if</span> (vfs_flags(mp) &amp; MNT_RDONLY) {
+			user_access &amp;= ~W_OK;
+		}
+		<span class="enscript-comment">/* Locked objects are not writable either */</span>
+		<span class="enscript-keyword">if</span> ((cap-&gt;ca_flags &amp; UF_IMMUTABLE) &amp;&amp; (vfs_context_suser(ctx) != 0))
+			user_access &amp;= ~W_OK;
+		<span class="enscript-keyword">if</span> ((cap-&gt;ca_flags &amp; SF_IMMUTABLE) &amp;&amp; (vfs_context_suser(ctx) == 0))
+			user_access &amp;= ~W_OK;
+
+		vap-&gt;va_user_access = user_access;
+		VATTR_SET_SUPPORTED(vap, va_user_access);
+	}
+
+	<span class="enscript-comment">/*
+	 * Right now the best we can do is tell if we *don't* have extended
+	 * security (like hfs_vnop_getattr).
+	 */</span>
+	<span class="enscript-keyword">if</span> (ATTR_CMN_EXTENDED_SECURITY &amp; attr) {
+		<span class="enscript-keyword">if</span> (!(cap-&gt;ca_recflags &amp; kHFSHasSecurityMask)) {
+			vap-&gt;va_acl = (kauth_acl_t) KAUTH_FILESEC_NONE;
+			VATTR_SET_SUPPORTED(vap, va_acl);
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_FILEID &amp; attr) {
+		vap-&gt;va_fileid = cap-&gt;ca_fileid;
+		VATTR_SET_SUPPORTED(vap, va_fileid);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_PARENTID &amp; attr) {
+		vap-&gt;va_parentid = cdp-&gt;cd_parentcnid;
+		VATTR_SET_SUPPORTED(vap, va_parentid);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_CMN_ADDEDTIME &amp; attr) {
+		<span class="enscript-keyword">if</span> (cap-&gt;ca_recflags &amp; kHFSHasDateAddedMask) {
+			vap-&gt;va_addedtime.tv_sec = hfs_get_dateadded_from_blob(
+			    (<span class="enscript-type">const</span> uint8_t *)cap-&gt;ca_finderinfo, cap-&gt;ca_mode);
+			vap-&gt;va_addedtime.tv_nsec = 0;
+			VATTR_SET_SUPPORTED(vap, va_addedtime);
+		}
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vattr_data_for_dir_attrs</span>(<span class="enscript-type">struct</span> attrlist *alp, <span class="enscript-type">struct</span> vnode_attr *vap,
+    <span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">struct</span> cat_desc * descp,
+    <span class="enscript-type">struct</span> cat_attr * cattrp)
+{
+	attrgroup_t attr = alp-&gt;dirattr;
+	u_int32_t entries;
+
+	<span class="enscript-comment">/*
+	 * The DIR_LINKCOUNT is the count of real directory hard links.
+	 * (i.e. its not the sum of the implied &quot;.&quot; and &quot;..&quot; references
+	 *  typically used in stat's st_nlink field)
+	 */</span>
+	<span class="enscript-keyword">if</span> (ATTR_DIR_LINKCOUNT &amp; attr) {
+			vap-&gt;va_dirlinkcount = cattrp-&gt;ca_linkcount;
+			VATTR_SET_SUPPORTED(vap, va_dirlinkcount);
+	}
+	<span class="enscript-keyword">if</span> (ATTR_DIR_ENTRYCOUNT &amp; attr) {
+		entries = cattrp-&gt;ca_entries;
+
+		<span class="enscript-keyword">if</span> (descp-&gt;cd_parentcnid == kHFSRootParentID) {
+			<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_private_desc[FILE_HARDLINKS].cd_cnid != 0)
+				--entries;	    <span class="enscript-comment">/* hide private dir */</span>
+			<span class="enscript-keyword">if</span> (hfsmp-&gt;hfs_private_desc[DIR_HARDLINKS].cd_cnid != 0)
+				--entries;	    <span class="enscript-comment">/* hide private dir */</span>
+			<span class="enscript-keyword">if</span> (hfsmp-&gt;jnl ||
+			    ((hfsmp-&gt;vcbAtrb &amp; kHFSVolumeJournaledMask) &amp;&amp;
+			     (hfsmp-&gt;hfs_flags &amp; HFS_READ_ONLY)))
+				entries -= 2;	<span class="enscript-comment">/* hide the journal files */</span>
+		}
+
+		vap-&gt;va_nchildren = entries;
+		VATTR_SET_SUPPORTED(vap, va_nchildren);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_DIR_MOUNTSTATUS &amp; attr) {
+		<span class="enscript-comment">/*
+		 * There is not vnode_attr for mount point status.
+		 * XXX. Should there be ?
+		 */</span>
+		u_int32_t mstatus = 0;
+
+		<span class="enscript-keyword">if</span> (vp != NULL &amp;&amp; vnode_mountedhere(vp) != NULL)
+			mstatus = DIR_MNTSTATUS_MNTPOINT;
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">vattr_data_for_file_attrs</span>(<span class="enscript-type">struct</span> attrlist *alp, <span class="enscript-type">struct</span> vnode_attr *vap,
+    <span class="enscript-type">struct</span> hfsmount *hfsmp, <span class="enscript-type">struct</span> cat_attr *cattrp, <span class="enscript-type">struct</span> cat_fork *datafork,
+    <span class="enscript-type">struct</span> cat_fork *rsrcfork, <span class="enscript-type">struct</span> vnode *vp)
+{
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">HFS_COMPRESSION</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">vp</span>)
+#<span class="enscript-reference">endif</span>
+	attrgroup_t attr = alp-&gt;fileattr;
+	off_t da_size, rsrc_len, rsrc_alloc;
+	u_int32_t allocblksize;
+
+	allocblksize = HFSTOVCB(hfsmp)-&gt;blockSize;
+
+	off_t datasize = datafork-&gt;cf_size;
+	off_t totalsize = datasize + rsrcfork-&gt;cf_size;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	<span class="enscript-type">int</span> handle_compressed;
+	handle_compressed =  (cattrp-&gt;ca_flags &amp; UF_COMPRESSED);<span class="enscript-comment">// &amp;&amp; hfs_file_is_compressed(VTOC(vp), 1);
+</span>
+	<span class="enscript-keyword">if</span> (handle_compressed) {
+		<span class="enscript-keyword">if</span> (attr &amp; (ATTR_FILE_DATALENGTH|ATTR_FILE_TOTALSIZE)) {
+			<span class="enscript-keyword">if</span> ( 0 == hfs_uncompressed_size_of_compressed_file(hfsmp, vp, cattrp-&gt;ca_fileid, &amp;datasize, 1) ) { <span class="enscript-comment">/* 1 == don't take the cnode lock */</span>
+				<span class="enscript-comment">/* total size of a compressed file is just the data size */</span>
+				totalsize = datasize;
+			}
+		}
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (ATTR_FILE_LINKCOUNT &amp; attr) {
+		vap-&gt;va_nlink = cattrp-&gt;ca_linkcount;
+		VATTR_SET_SUPPORTED(vap, va_nlink);
+	}
+	<span class="enscript-keyword">if</span> (ATTR_FILE_TOTALSIZE &amp; attr) {
+		VATTR_RETURN(vap, va_total_size, totalsize);
+	}
+	<span class="enscript-keyword">if</span> (ATTR_FILE_ALLOCSIZE &amp; attr) {
+		 VATTR_RETURN(vap, va_total_alloc,
+			    (off_t)cattrp-&gt;ca_blocks * (off_t)allocblksize );
+	}
+	<span class="enscript-keyword">if</span> (ATTR_FILE_IOBLOCKSIZE &amp; attr) {
+		VATTR_RETURN(vap, va_iosize,  hfsmp-&gt;hfs_logBlockSize);
+	}
+
+	<span class="enscript-comment">/* ATTR_FILE_CLUMPSIZE is obsolete */</span>
+
+	<span class="enscript-keyword">if</span> (ATTR_FILE_DEVTYPE &amp; attr) {
+		dev_t dev = 0;
+
+		<span class="enscript-keyword">if</span> (S_ISBLK(cattrp-&gt;ca_mode) || S_ISCHR(cattrp-&gt;ca_mode))
+			dev = (u_int32_t)cattrp-&gt;ca_rdev;
+
+		VATTR_RETURN(vap, va_rdev, dev);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_FILE_DATALENGTH &amp; attr) {
+		VATTR_RETURN(vap, va_data_size, datasize);
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">HFS_COMPRESSION</span>
+	<span class="enscript-comment">/* fake the data fork size on a decmpfs compressed file to reflect the
+	 * uncompressed size. This ensures proper reading and copying of these
+	 * files.
+	 * NOTE: we may need to get the vnode here because the vnode parameter
+	 * passed by hfs_vnop_readdirattr() may be null.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (handle_compressed) {
+		da_size = (off_t)rsrcfork-&gt;cf_blocks * (off_t)allocblksize;
+		rsrc_len = 0;
+		rsrc_alloc = 0;
+	}
+	<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span>
+	{
+		da_size = (off_t)datafork-&gt;cf_blocks * (off_t)allocblksize;
+		rsrc_len = rsrcfork-&gt;cf_size;
+		rsrc_alloc = (off_t)rsrcfork-&gt;cf_blocks * (off_t)allocblksize;
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_FILE_DATAALLOCSIZE &amp; attr) {
+		VATTR_RETURN(vap, va_data_alloc, da_size);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_FILE_RSRCLENGTH &amp; attr) {
+		VATTR_RETURN(vap, va_rsrc_length, rsrc_len);
+	}
+
+	<span class="enscript-keyword">if</span> (ATTR_FILE_RSRCALLOCSIZE &amp; attr) {
+		VATTR_RETURN(vap, va_rsrc_alloc, rsrc_alloc);
+	}
+}
+</pre>
+<hr />
+</body></html>

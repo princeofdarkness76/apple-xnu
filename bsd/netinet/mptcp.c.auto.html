@@ -1,0 +1,1122 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mptcp.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mptcp.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2012-2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mcache.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/sdt.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;dev/random/randomdev.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_fsm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_seq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/mptcp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/mptcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/mptcp_seq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/mptcp_opt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/mptcp_timer.h&gt;</span>
+
+<span class="enscript-type">int</span> mptcp_enable = 1;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, enable, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_enable, 0, <span class="enscript-string">&quot;Enable Multipath TCP Support&quot;</span>);
+
+<span class="enscript-comment">/* Number of times to try negotiating MPTCP on SYN retransmissions */</span>
+<span class="enscript-type">int</span> mptcp_mpcap_retries = MPTCP_CAPABLE_RETRIES;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, mptcp_cap_retr,
+	CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_mpcap_retries, 0, <span class="enscript-string">&quot;Number of MP Capable SYN Retries&quot;</span>);
+
+<span class="enscript-comment">/*
+ * By default, DSS checksum is turned off, revisit if we ever do
+ * MPTCP for non SSL Traffic.
+ */</span>
+<span class="enscript-type">int</span> mptcp_dss_csum = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, dss_csum, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_dss_csum, 0, <span class="enscript-string">&quot;Enable DSS checksum&quot;</span>);
+
+<span class="enscript-comment">/*
+ * When mptcp_fail_thresh number of retransmissions are sent, subflow failover
+ * is attempted on a different path.
+ */</span>
+<span class="enscript-type">int</span> mptcp_fail_thresh = 1;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, fail, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_fail_thresh, 0, <span class="enscript-string">&quot;Failover threshold&quot;</span>);
+
+
+<span class="enscript-comment">/*
+ * MPTCP subflows have TCP keepalives set to ON. Set a conservative keeptime
+ * as carrier networks mostly have a 30 minute to 60 minute NAT Timeout.
+ * Some carrier networks have a timeout of 10 or 15 minutes.
+ */</span>
+<span class="enscript-type">int</span> mptcp_subflow_keeptime = 60*14;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, keepalive, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_subflow_keeptime, 0, <span class="enscript-string">&quot;Keepalive in seconds&quot;</span>);
+
+<span class="enscript-comment">/*
+ * MP_PRIO option.
+ */</span>
+<span class="enscript-type">int</span> mptcp_mpprio_enable = 1;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, mpprio, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_mpprio_enable, 0, <span class="enscript-string">&quot;Enable MP_PRIO option&quot;</span>);
+
+<span class="enscript-comment">/*
+ * REMOVE_ADDR option.
+ */</span>
+<span class="enscript-type">int</span> mptcp_remaddr_enable = 1;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, remaddr, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_remaddr_enable, 0, <span class="enscript-string">&quot;Enable REMOVE_ADDR option&quot;</span>);
+
+<span class="enscript-comment">/*
+ * FastJoin Option
+ */</span>
+<span class="enscript-type">int</span> mptcp_fastjoin = 1;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, fastjoin, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_fastjoin, 0, <span class="enscript-string">&quot;Enable FastJoin Option&quot;</span>);
+
+<span class="enscript-type">int</span> mptcp_zerortt_fastjoin = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, zerortt_fastjoin, CTLFLAG_RW |
+	CTLFLAG_LOCKED, &amp;mptcp_zerortt_fastjoin, 0,
+	<span class="enscript-string">&quot;Enable Zero RTT Fast Join&quot;</span>);
+
+<span class="enscript-comment">/*
+ * R/W Notification on resume
+ */</span>
+<span class="enscript-type">int</span> mptcp_rwnotify = 0;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, rwnotify, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_rwnotify, 0, <span class="enscript-string">&quot;Enable RW notify on resume&quot;</span>);
+
+<span class="enscript-comment">/*
+ * Using RTT history for sending new data
+ */</span>
+<span class="enscript-type">int</span> mptcp_use_rtthist = 1;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, rtthist, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_use_rtthist, 0, <span class="enscript-string">&quot;Disable RTT History&quot;</span>);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MPTCP_RTTHIST_MINTHRESH</span> 500
+<span class="enscript-type">int</span> mptcp_rtthist_rtthresh = 600;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, rtthist_thresh, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_rtthist_rtthresh, 0, <span class="enscript-string">&quot;Rtt threshold&quot;</span>);
+
+<span class="enscript-comment">/*
+ * Use RTO history for sending new data
+ */</span>
+<span class="enscript-type">int</span> mptcp_use_rto = 1;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, userto, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_use_rto, 0, <span class="enscript-string">&quot;Disable RTO for subflow selection&quot;</span>);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MPTCP_RTO_MINTHRESH</span> 1000
+<span class="enscript-type">int</span> mptcp_rtothresh = 1500;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, rto_thresh, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_rtothresh, 0, <span class="enscript-string">&quot;RTO threshold&quot;</span>);
+
+<span class="enscript-comment">/*
+ * Use server's chosen path for sending new data
+ */</span>
+<span class="enscript-type">int</span> mptcp_peerswitch = 1;
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_mptcp, OID_AUTO, use_peer, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_peerswitch, 0, <span class="enscript-string">&quot;Use peer&quot;</span>);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MPTCP_PEERSWITCH_CNTMIN</span> 3
+uint32_t mptcp_peerswitch_cnt = 3;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_net_inet_mptcp, OID_AUTO, peerswitchno, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_peerswitch_cnt, 0, <span class="enscript-string">&quot;Set threshold based on peer's data arrival&quot;</span>);
+
+<span class="enscript-comment">/*
+ * Probe the preferred path, when it is not in use
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MPTCP_PROBETO_MIN</span> 500
+uint32_t mptcp_probeto = 1000;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_net_inet_mptcp, OID_AUTO, probeto, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_probeto, 0, <span class="enscript-string">&quot;Disable probing by setting to 0&quot;</span>);
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MPTCP_PROBE_MX</span> 15
+uint32_t mptcp_probecnt = 5;
+<span class="enscript-function-name">SYSCTL_UINT</span>(_net_inet_mptcp, OID_AUTO, probecnt, CTLFLAG_RW | CTLFLAG_LOCKED,
+	&amp;mptcp_probecnt, 0, <span class="enscript-string">&quot;Number of probe writes&quot;</span>);
+
+<span class="enscript-comment">/*
+ * Static declarations
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">mptcp_validate_csum</span>(<span class="enscript-type">struct</span> tcpcb *, <span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> uint16_t <span class="enscript-function-name">mptcp_input_csum</span>(<span class="enscript-type">struct</span> tcpcb *, <span class="enscript-type">struct</span> mbuf *, <span class="enscript-type">int</span>);
+
+<span class="enscript-comment">/*
+ * MPTCP input, called when data has been read from a subflow socket.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mptcp_input</span>(<span class="enscript-type">struct</span> mptses *mpte, <span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">struct</span> socket *mp_so;
+	<span class="enscript-type">struct</span> mptcb *mp_tp = NULL;
+	u_int64_t mb_dsn;
+	u_int32_t mb_datalen;
+	<span class="enscript-type">int</span> count = 0;
+	<span class="enscript-type">struct</span> mbuf *save = NULL, *prev = NULL;
+	<span class="enscript-type">struct</span> mbuf *freelist = NULL, *tail = NULL;
+	boolean_t in_fallback = FALSE;
+
+	VERIFY(m-&gt;m_flags &amp; M_PKTHDR);
+
+	MPTE_LOCK_ASSERT_HELD(mpte);	<span class="enscript-comment">/* same as MP socket lock */</span>
+	mp_so = mpte-&gt;mpte_mppcb-&gt;mpp_socket;
+
+	DTRACE_MPTCP(input);
+
+	<span class="enscript-comment">/*
+	 * Each mbuf contains MPTCP Data Sequence Map
+	 * Process the data for reassembly, delivery to MPTCP socket
+	 * client, etc.
+	 *
+	 */</span>
+	count = mp_so-&gt;so_rcv.sb_cc;
+
+	VERIFY(m != NULL);
+	mp_tp = mpte-&gt;mpte_mptcb;
+	VERIFY(mp_tp != NULL);
+
+	<span class="enscript-comment">/* Ok to check for this flag without lock as its set in this thread */</span>
+	in_fallback = (mp_tp-&gt;mpt_flags &amp; MPTCPF_FALLBACK_TO_TCP);
+
+	<span class="enscript-comment">/*
+	 * In the degraded fallback case, data is accepted without DSS map
+	 */</span>
+	<span class="enscript-keyword">if</span> (in_fallback) {
+<span class="enscript-reference">fallback</span>: 
+		<span class="enscript-comment">/* 
+		 * assume degraded flow as this may be the first packet 
+		 * without DSS, and the subflow state is not updated yet. 
+		 */</span>
+		<span class="enscript-keyword">if</span> (sbappendstream(&amp;mp_so-&gt;so_rcv, m))
+			sorwakeup(mp_so);
+		DTRACE_MPTCP5(receive__degraded, <span class="enscript-type">struct</span> mbuf *, m,
+		    <span class="enscript-type">struct</span> socket *, mp_so,
+		    <span class="enscript-type">struct</span> sockbuf *, &amp;mp_so-&gt;so_rcv,
+		    <span class="enscript-type">struct</span> sockbuf *, &amp;mp_so-&gt;so_snd,
+		    <span class="enscript-type">struct</span> mptses *, mpte);
+		count = mp_so-&gt;so_rcv.sb_cc - count;
+		mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Receiver: Fallback read %d bytes\n&quot;</span>,
+		    count), MPTCP_RECEIVER_DBG, MPTCP_LOGLVL_VERBOSE);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	MPT_LOCK(mp_tp);
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-comment">/* If fallback occurs, mbufs will not have PKTF_MPTCP set */</span>
+		<span class="enscript-keyword">if</span> (!(m-&gt;m_pkthdr.pkt_flags &amp; PKTF_MPTCP)) {
+			MPT_UNLOCK(mp_tp);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">fallback</span>;
+		}
+
+		save = m-&gt;m_next;
+		<span class="enscript-comment">/*
+		 * A single TCP packet formed of multiple mbufs
+		 * holds DSS mapping in the first mbuf of the chain.
+		 * Other mbufs in the chain may have M_PKTHDR set
+		 * even though they belong to the same TCP packet
+		 * and therefore use the DSS mapping stored in the
+		 * first mbuf of the mbuf chain. mptcp_input() can
+		 * get an mbuf chain with multiple TCP packets.
+		 */</span>
+		<span class="enscript-keyword">while</span> (save &amp;&amp; (!(save-&gt;m_flags &amp; M_PKTHDR) ||
+		    !(save-&gt;m_pkthdr.pkt_flags &amp; PKTF_MPTCP))) {
+			prev = save;
+			save = save-&gt;m_next;
+		}
+		<span class="enscript-keyword">if</span> (prev)
+			prev-&gt;m_next = NULL;
+		<span class="enscript-keyword">else</span>
+			m-&gt;m_next = NULL;
+
+		mb_dsn = m-&gt;m_pkthdr.mp_dsn;
+		mb_datalen = m-&gt;m_pkthdr.mp_rlen;
+
+		<span class="enscript-keyword">if</span> (MPTCP_SEQ_GT(mb_dsn, mp_tp-&gt;mpt_rcvatmark)) {
+			tcpstat.tcps_mp_oodata++;
+			MPT_UNLOCK(mp_tp);
+			m_freem(m);
+			<span class="enscript-keyword">return</span>;
+			<span class="enscript-comment">/*
+			 * Reassembly queue support here in future. Per spec,
+			 * senders must implement retransmission timer to
+			 * retransmit unacked data. Dropping out of order
+			 * gives a slight hit on performance but allows us to
+			 * deploy MPTCP and protects us against in-window DoS
+			 * attacks that attempt to use up memory by sending
+			 * out of order data. When doing load sharing across
+			 * subflows, out of order support is a must.
+			 */</span>
+		}
+
+		<span class="enscript-keyword">if</span> (MPTCP_SEQ_LT(mb_dsn, mp_tp-&gt;mpt_rcvatmark)) {
+			<span class="enscript-keyword">if</span> (MPTCP_SEQ_LEQ((mb_dsn + mb_datalen),
+			    mp_tp-&gt;mpt_rcvatmark)) {
+				<span class="enscript-keyword">if</span> (freelist == NULL)
+					freelist = m;
+				<span class="enscript-keyword">else</span>
+					tail-&gt;m_next = m;
+
+				<span class="enscript-keyword">if</span> (prev != NULL)
+					tail = prev;
+				<span class="enscript-keyword">else</span>
+					tail = m;
+
+				m = save;
+				prev = save = NULL;
+				<span class="enscript-keyword">continue</span>;
+			} <span class="enscript-keyword">else</span> {
+				m_adj(m, (mp_tp-&gt;mpt_rcvatmark - mb_dsn));
+			}
+			mptcplog((LOG_INFO, <span class="enscript-string">&quot;MPTCP Receiver: Left Edge %llu\n&quot;</span>,
+			    mp_tp-&gt;mpt_rcvatmark),
+			    MPTCP_RECEIVER_DBG, MPTCP_LOGLVL_VERBOSE);
+		}
+
+		MPT_UNLOCK(mp_tp);
+		<span class="enscript-keyword">if</span> (sbappendstream(&amp;mp_so-&gt;so_rcv, m)) {
+			sorwakeup(mp_so);
+		}
+		DTRACE_MPTCP6(receive, <span class="enscript-type">struct</span> mbuf *, m, <span class="enscript-type">struct</span> socket *, mp_so,
+		    <span class="enscript-type">struct</span> sockbuf *, &amp;mp_so-&gt;so_rcv,
+		    <span class="enscript-type">struct</span> sockbuf *, &amp;mp_so-&gt;so_snd,
+		    <span class="enscript-type">struct</span> mptses *, mpte,
+		    <span class="enscript-type">struct</span> mptcb *, mp_tp);
+		MPT_LOCK(mp_tp);
+		count = mp_so-&gt;so_rcv.sb_cc - count;
+		tcpstat.tcps_mp_rcvtotal++;
+		tcpstat.tcps_mp_rcvbytes += count;
+		mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Receiver: Read %d bytes\n&quot;</span>, count),
+		    MPTCP_RECEIVER_DBG, MPTCP_LOGLVL_VERBOSE);
+
+		<span class="enscript-comment">/*
+		 * The data received at the MPTCP layer will never exceed the
+		 * receive window because anything to the right of the
+		 * receive window will be trimmed at the subflow level.
+		 */</span>
+		mp_tp-&gt;mpt_rcvwnd = mptcp_sbspace(mp_tp);
+		mp_tp-&gt;mpt_rcvatmark += count;
+		m = save;
+		prev = save = NULL;
+		count = mp_so-&gt;so_rcv.sb_cc;
+	} <span class="enscript-keyword">while</span> (m);
+	MPT_UNLOCK(mp_tp);
+
+	<span class="enscript-keyword">if</span> (freelist)
+		m_freem(freelist);
+}
+
+<span class="enscript-comment">/*
+ * MPTCP output.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mptcp_output</span>(<span class="enscript-type">struct</span> mptses *mpte)
+{
+	<span class="enscript-type">struct</span> mptsub *mpts;
+	<span class="enscript-type">struct</span> mptsub *mpts_tried = NULL;
+	<span class="enscript-type">struct</span> socket *mp_so;
+	<span class="enscript-type">struct</span> mptsub *preferred_mpts = NULL;
+	<span class="enscript-type">int</span> error = 0;
+
+	MPTE_LOCK_ASSERT_HELD(mpte);	<span class="enscript-comment">/* same as MP socket lock */</span>
+	mp_so = mpte-&gt;mpte_mppcb-&gt;mpp_socket;
+	<span class="enscript-keyword">if</span> (mp_so-&gt;so_state &amp; SS_CANTSENDMORE) {
+		mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Sender: cantsendmore\n&quot;</span>),
+		    MPTCP_SENDER_DBG, MPTCP_LOGLVL_VERBOSE);
+		<span class="enscript-keyword">return</span> (EPIPE);
+	}
+
+<span class="enscript-reference">try_again</span>:
+	<span class="enscript-comment">/* get the &quot;best&quot; subflow to be used for transmission */</span>
+	mpts = mptcp_get_subflow(mpte, NULL, &amp;preferred_mpts);
+	<span class="enscript-keyword">if</span> (mpts == NULL) {
+		mptcplog((LOG_ERR, <span class="enscript-string">&quot;MPTCP Sender: mp_so 0x%llx no subflow\n&quot;</span>,
+		    (u_int64_t)VM_KERNEL_ADDRPERM(mp_so)),
+		    MPTCP_SENDER_DBG, MPTCP_LOGLVL_LOG);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Sender: mp_so 0x%llx using cid %d \n&quot;</span>,
+	    (uint64_t)VM_KERNEL_ADDRPERM(mp_so), mpts-&gt;mpts_connid),
+	    MPTCP_SENDER_DBG, MPTCP_LOGLVL_VERBOSE);
+
+	<span class="enscript-comment">/* In case there's just one flow, we reattempt later */</span>
+	MPTS_LOCK(mpts);
+	<span class="enscript-keyword">if</span> ((mpts_tried != NULL) &amp;&amp; ((mpts == mpts_tried) ||
+	    (mpts-&gt;mpts_flags &amp; MPTSF_FAILINGOVER))) {
+		MPTS_UNLOCK(mpts);
+		MPTS_LOCK(mpts_tried);
+		mpts_tried-&gt;mpts_flags &amp;= ~MPTSF_FAILINGOVER;
+		mpts_tried-&gt;mpts_flags |= MPTSF_ACTIVE;
+		MPTS_UNLOCK(mpts_tried);
+		mptcp_start_timer(mpte, MPTT_REXMT);
+		mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Sender: mp_so 0x%llx retry later\n&quot;</span>,
+		    (u_int64_t)VM_KERNEL_ADDRPERM(mp_so)),
+		    MPTCP_SENDER_DBG, MPTCP_LOGLVL_VERBOSE);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	DTRACE_MPTCP3(output, <span class="enscript-type">struct</span> mptses *, mpte, <span class="enscript-type">struct</span> mptsub *, mpts,
+	    <span class="enscript-type">struct</span> socket *, mp_so);
+	error = mptcp_subflow_output(mpte, mpts);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-comment">/* can be a temporary loss of source address or other error */</span>
+		mpts-&gt;mpts_flags |= MPTSF_FAILINGOVER;
+		mpts-&gt;mpts_flags &amp;= ~MPTSF_ACTIVE;
+		mpts_tried = mpts;
+		MPTS_UNLOCK(mpts);
+		mptcplog((LOG_INFO, <span class="enscript-string">&quot;MPTCP Sender: Error = %d \n&quot;</span>, error),
+		    MPTCP_SENDER_DBG, MPTCP_LOGLVL_LOG);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">try_again</span>;
+	}
+	<span class="enscript-comment">/* The model is to have only one active flow at a time */</span>
+	mpts-&gt;mpts_flags |= MPTSF_ACTIVE;
+	mpts-&gt;mpts_probesoon = mpts-&gt;mpts_probecnt = 0;
+	MPTS_UNLOCK(mpts);
+
+	<span class="enscript-comment">/* Allows us to update the smoothed rtt */</span>
+	<span class="enscript-keyword">if</span> ((mptcp_probeto) &amp;&amp; (mptcp_probeto &gt;= MPTCP_PROBETO_MIN) &amp;&amp;
+	    (mpts != preferred_mpts) &amp;&amp; (preferred_mpts != NULL)) {
+		MPTS_LOCK(preferred_mpts);
+		<span class="enscript-keyword">if</span> (preferred_mpts-&gt;mpts_probesoon) {
+			<span class="enscript-keyword">if</span> ((tcp_now - preferred_mpts-&gt;mpts_probesoon) &gt;
+			    mptcp_probeto) {
+				(<span class="enscript-type">void</span>) mptcp_subflow_output(mpte, preferred_mpts);
+				<span class="enscript-keyword">if</span> (preferred_mpts-&gt;mpts_probecnt &gt;=
+				    MIN(mptcp_probecnt, MPTCP_PROBE_MX)) {
+					preferred_mpts-&gt;mpts_probesoon = 0;
+					preferred_mpts-&gt;mpts_probecnt = 0;
+				}
+			}
+		} <span class="enscript-keyword">else</span> {
+			preferred_mpts-&gt;mpts_probesoon = tcp_now;
+			preferred_mpts-&gt;mpts_probecnt = 0;
+		}
+		MPTS_UNLOCK(preferred_mpts);
+	}
+
+	<span class="enscript-keyword">if</span> (mpte-&gt;mpte_active_sub == NULL) {
+		mpte-&gt;mpte_active_sub = mpts;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (mpte-&gt;mpte_active_sub != mpts) {
+		mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Sender: switch [cid %d, srtt %d]&quot;</span>
+		    <span class="enscript-string">&quot;to [cid %d, srtt %d]\n&quot;</span>,
+		    mpte-&gt;mpte_active_sub-&gt;mpts_connid,
+		    mpte-&gt;mpte_active_sub-&gt;mpts_srtt &gt;&gt; 5,
+		    mpts-&gt;mpts_connid,
+		    mpts-&gt;mpts_srtt &gt;&gt; 5),
+		    MPTCP_SENDER_DBG | MPTCP_SOCKET_DBG, MPTCP_LOGLVL_LOG);
+
+		MPTS_LOCK(mpte-&gt;mpte_active_sub);
+		mpte-&gt;mpte_active_sub-&gt;mpts_flags &amp;= ~MPTSF_ACTIVE;
+		mpts-&gt;mpts_peerswitch = 0;
+		MPTS_UNLOCK(mpte-&gt;mpte_active_sub);
+		mpte-&gt;mpte_active_sub = mpts;
+		tcpstat.tcps_mp_switches++;
+	}
+<span class="enscript-reference">out</span>:
+	<span class="enscript-comment">/* subflow errors should not be percolated back up */</span>
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * Return the most eligible subflow to be used for sending data.
+ * This function also serves to check if any alternate subflow is available
+ * or not. best and second_best flows are chosen by their priority. third_best
+ * could be best or second_best but is under loss at the time of evaluation.
+ */</span>
+<span class="enscript-type">struct</span> mptsub *
+<span class="enscript-function-name">mptcp_get_subflow</span>(<span class="enscript-type">struct</span> mptses *mpte, <span class="enscript-type">struct</span> mptsub *ignore, <span class="enscript-type">struct</span> mptsub **preferred)
+{
+	<span class="enscript-type">struct</span> mptsub *mpts;
+	<span class="enscript-type">struct</span> mptsub *best = NULL;
+	<span class="enscript-type">struct</span> mptsub *second_best = NULL;
+	<span class="enscript-type">struct</span> mptsub *third_best = NULL;
+	<span class="enscript-type">struct</span> mptsub *symptoms_best = NULL;
+	<span class="enscript-type">struct</span> socket *so = NULL;
+
+	MPTE_LOCK_ASSERT_HELD(mpte);	<span class="enscript-comment">/* same as MP socket lock */</span>
+
+	TAILQ_FOREACH(mpts, &amp;mpte-&gt;mpte_subflows, mpts_entry) {
+		MPTS_LOCK(mpts);
+
+		<span class="enscript-keyword">if</span> ((ignore) &amp;&amp; (mpts == ignore)) {
+			MPTS_UNLOCK(mpts);
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/* There can only be one subflow in degraded state */</span>
+		<span class="enscript-keyword">if</span> (mpts-&gt;mpts_flags &amp; MPTSF_MP_DEGRADED) {
+			MPTS_UNLOCK(mpts);
+			best = mpts;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Subflows with Fastjoin allow data to be written before
+		 * the subflow is mp capable.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!(mpts-&gt;mpts_flags &amp; MPTSF_MP_CAPABLE) &amp;&amp;
+		    !(mpts-&gt;mpts_flags &amp; MPTSF_FASTJ_REQD)) {
+			MPTS_UNLOCK(mpts);
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (mpts-&gt;mpts_flags &amp; MPTSF_SUSPENDED) {
+			MPTS_UNLOCK(mpts);
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-keyword">if</span> ((mpts-&gt;mpts_flags &amp; MPTSF_DISCONNECTED) ||
+		    (mpts-&gt;mpts_flags &amp; MPTSF_DISCONNECTING)) {
+			MPTS_UNLOCK(mpts);
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (mpts-&gt;mpts_flags &amp; MPTSF_FAILINGOVER) {
+			so = mpts-&gt;mpts_socket;
+			<span class="enscript-keyword">if</span> ((so) &amp;&amp; (!(so-&gt;so_flags &amp; SOF_PCBCLEARING))) {
+				socket_lock(so, 1);
+				<span class="enscript-keyword">if</span> ((so-&gt;so_snd.sb_cc == 0) &amp;&amp;
+				    (mptcp_no_rto_spike(so))) {
+					mpts-&gt;mpts_flags &amp;= ~MPTSF_FAILINGOVER;
+					so-&gt;so_flags &amp;= ~SOF_MP_TRYFAILOVER;
+					socket_unlock(so, 1);
+				} <span class="enscript-keyword">else</span> {
+					third_best = mpts;
+					mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Sender: &quot;</span>
+					    <span class="enscript-string">&quot;%s cid %d in failover\n&quot;</span>,
+					    __func__, third_best-&gt;mpts_connid),
+					    MPTCP_SENDER_DBG,
+					    MPTCP_LOGLVL_VERBOSE);
+					socket_unlock(so, 1);
+					MPTS_UNLOCK(mpts);
+					<span class="enscript-keyword">continue</span>;
+				}
+			} <span class="enscript-keyword">else</span> {
+				MPTS_UNLOCK(mpts);
+				<span class="enscript-keyword">continue</span>;
+			}
+		}
+
+		<span class="enscript-comment">/* When there are no preferred flows, use first one in list */</span>
+		<span class="enscript-keyword">if</span> ((!second_best) &amp;&amp; !(mpts-&gt;mpts_flags &amp; MPTSF_PREFERRED))
+			second_best = mpts;
+
+		<span class="enscript-keyword">if</span> (mpts-&gt;mpts_flags &amp; MPTSF_PREFERRED) {
+			best = mpts;
+		}
+
+		MPTS_UNLOCK(mpts);
+	}
+
+	<span class="enscript-comment">/*
+	 * If there is no preferred or backup subflow, and there is no active
+	 * subflow use the last usable subflow.
+	 */</span>
+	<span class="enscript-keyword">if</span> (best == NULL) {
+		<span class="enscript-keyword">return</span> (second_best ? second_best : third_best);
+	}
+
+	<span class="enscript-keyword">if</span> (second_best == NULL) {
+		<span class="enscript-keyword">return</span> (best ? best : third_best);
+	}
+
+	<span class="enscript-keyword">if</span> (preferred != NULL)
+		*preferred = best;
+
+	<span class="enscript-comment">/* Use a hint from symptomsd if it exists */</span>
+	symptoms_best = mptcp_use_symptoms_hints(best, second_best);
+	<span class="enscript-keyword">if</span> (symptoms_best != NULL)
+		<span class="enscript-keyword">return</span> (symptoms_best);
+
+	<span class="enscript-comment">/* Compare RTTs, select second_best if best's rtt exceeds rttthresh */</span>
+	<span class="enscript-keyword">if</span> ((mptcp_use_rtthist) &amp;&amp;
+	    (best-&gt;mpts_srtt) &amp;&amp; (second_best-&gt;mpts_srtt) &amp;&amp;
+	    (best-&gt;mpts_srtt &gt; second_best-&gt;mpts_srtt) &amp;&amp;
+	    (best-&gt;mpts_srtt &gt;= MAX((MPTCP_RTTHIST_MINTHRESH &lt;&lt; 5),
+	    (mptcp_rtthist_rtthresh &lt;&lt; 5)))) {
+		tcpstat.tcps_mp_sel_rtt++;
+		mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Sender: %s best cid %d&quot;</span>
+		    <span class="enscript-string">&quot; at rtt %d,  second cid %d at rtt %d\n&quot;</span>, __func__,
+		    best-&gt;mpts_connid, best-&gt;mpts_srtt &gt;&gt; 5,
+		    second_best-&gt;mpts_connid,
+		    second_best-&gt;mpts_srtt &gt;&gt; 5),
+		    MPTCP_SENDER_DBG, MPTCP_LOGLVL_LOG);
+		<span class="enscript-keyword">return</span> (second_best);
+	}
+
+	<span class="enscript-comment">/* Compare RTOs, select second_best if best's rto exceeds rtothresh */</span>
+	<span class="enscript-keyword">if</span> ((mptcp_use_rto) &amp;&amp;
+	    (best-&gt;mpts_rxtcur) &amp;&amp; (second_best-&gt;mpts_rxtcur) &amp;&amp;
+	    (best-&gt;mpts_rxtcur &gt; second_best-&gt;mpts_rxtcur) &amp;&amp;
+	    (best-&gt;mpts_rxtcur &gt;=
+	    MAX(MPTCP_RTO_MINTHRESH, mptcp_rtothresh))) {
+		tcpstat.tcps_mp_sel_rto++;
+		mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Sender: %s best cid %d&quot;</span>
+		    <span class="enscript-string">&quot; at rto %d, second cid %d at rto %d\n&quot;</span>, __func__,
+		    best-&gt;mpts_connid, best-&gt;mpts_rxtcur,
+		    second_best-&gt;mpts_connid, second_best-&gt;mpts_rxtcur),
+		    MPTCP_SENDER_DBG, MPTCP_LOGLVL_LOG);
+
+		<span class="enscript-keyword">return</span> (second_best);
+	}
+
+	<span class="enscript-comment">/* If second_best received data, use second_best */</span>
+	<span class="enscript-keyword">if</span> (mptcp_peerswitch &amp;&amp;
+	    (second_best-&gt;mpts_peerswitch &gt;
+	    MAX(MPTCP_PEERSWITCH_CNTMIN, mptcp_peerswitch_cnt))) {
+		tcpstat.tcps_mp_sel_peer++;
+		mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Sender: %s: best cid %d&quot;</span>
+		    <span class="enscript-string">&quot; but using cid %d after receiving %d segments\n&quot;</span>,
+		    __func__, best-&gt;mpts_connid, second_best-&gt;mpts_connid,
+		    second_best-&gt;mpts_peerswitch), MPTCP_SENDER_DBG,
+		    MPTCP_LOGLVL_LOG);
+		<span class="enscript-keyword">return</span> (second_best);
+	}
+	<span class="enscript-keyword">return</span> (best);
+}
+
+<span class="enscript-type">struct</span> mptsub *
+<span class="enscript-function-name">mptcp_get_pending_subflow</span>(<span class="enscript-type">struct</span> mptses *mpte, <span class="enscript-type">struct</span> mptsub *ignore)
+{
+	<span class="enscript-type">struct</span> mptsub *mpts = NULL;
+	
+	MPTE_LOCK_ASSERT_HELD(mpte);    <span class="enscript-comment">/* same as MP socket lock */</span>
+
+	TAILQ_FOREACH(mpts, &amp;mpte-&gt;mpte_subflows, mpts_entry) {
+		MPTS_LOCK(mpts);
+
+		<span class="enscript-keyword">if</span> ((ignore) &amp;&amp; (mpts == ignore)) {
+			MPTS_UNLOCK(mpts);
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (mpts-&gt;mpts_flags &amp; MPTSF_CONNECT_PENDING) {
+			MPTS_UNLOCK(mpts);
+			<span class="enscript-keyword">break</span>;
+		}
+
+		MPTS_UNLOCK(mpts);
+	}
+	<span class="enscript-keyword">return</span> (mpts);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">mptcp_event_to_str</span>(uint32_t event)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *c = <span class="enscript-string">&quot;UNDEFINED&quot;</span>;
+	<span class="enscript-keyword">switch</span> (event) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPCE_CLOSE</span>:
+		c = <span class="enscript-string">&quot;MPCE_CLOSE&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPCE_RECV_DATA_ACK</span>:
+		c = <span class="enscript-string">&quot;MPCE_RECV_DATA_ACK&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPCE_RECV_DATA_FIN</span>:
+		c = <span class="enscript-string">&quot;MPCE_RECV_DATA_FIN&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span> (c);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">mptcp_state_to_str</span>(mptcp_state_t state)
+{
+        <span class="enscript-type">const</span> <span class="enscript-type">char</span> *c = <span class="enscript-string">&quot;UNDEFINED&quot;</span>;
+	<span class="enscript-keyword">switch</span> (state) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_CLOSED</span>:
+		c = <span class="enscript-string">&quot;MPTCPS_CLOSED&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_LISTEN</span>:
+		c = <span class="enscript-string">&quot;MPTCPS_LISTEN&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_ESTABLISHED</span>:
+		c = <span class="enscript-string">&quot;MPTCPS_ESTABLISHED&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_CLOSE_WAIT</span>:
+		c = <span class="enscript-string">&quot;MPTCPS_CLOSE_WAIT&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_FIN_WAIT_1</span>:
+		c = <span class="enscript-string">&quot;MPTCPS_FIN_WAIT_1&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_CLOSING</span>:
+		c = <span class="enscript-string">&quot;MPTCPS_CLOSING&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_LAST_ACK</span>:
+		c = <span class="enscript-string">&quot;MPTCPS_LAST_ACK&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_FIN_WAIT_2</span>:
+		c = <span class="enscript-string">&quot;MPTCPS_FIN_WAIT_2&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_TIME_WAIT</span>:
+		c = <span class="enscript-string">&quot;MPTCPS_TIME_WAIT&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_FASTCLOSE_WAIT</span>:
+		c = <span class="enscript-string">&quot;MPTCPS_FASTCLOSE_WAIT&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_TERMINATE</span>:
+		c = <span class="enscript-string">&quot;MPTCPS_TERMINATE&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span> (c);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mptcp_close_fsm</span>(<span class="enscript-type">struct</span> mptcb *mp_tp, uint32_t event)
+{
+	MPT_LOCK_ASSERT_HELD(mp_tp);
+	mptcp_state_t old_state = mp_tp-&gt;mpt_state;
+
+	DTRACE_MPTCP2(state__change, <span class="enscript-type">struct</span> mptcb *, mp_tp, 
+	    uint32_t, event);
+
+	<span class="enscript-keyword">switch</span> (mp_tp-&gt;mpt_state) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_CLOSED</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_LISTEN</span>:
+		mp_tp-&gt;mpt_state = MPTCPS_CLOSED;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_ESTABLISHED</span>:
+		<span class="enscript-keyword">if</span> (event == MPCE_CLOSE) {
+			mp_tp-&gt;mpt_state = MPTCPS_FIN_WAIT_1;
+			mp_tp-&gt;mpt_sndmax += 1; <span class="enscript-comment">/* adjust for Data FIN */</span>
+		}	
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (event == MPCE_RECV_DATA_FIN) {
+			mp_tp-&gt;mpt_rcvnxt += 1; <span class="enscript-comment">/* adj remote data FIN */</span>
+			mp_tp-&gt;mpt_state = MPTCPS_CLOSE_WAIT;
+		}	
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_CLOSE_WAIT</span>:
+		<span class="enscript-keyword">if</span> (event == MPCE_CLOSE) {
+			mp_tp-&gt;mpt_state = MPTCPS_LAST_ACK;
+			mp_tp-&gt;mpt_sndmax += 1; <span class="enscript-comment">/* adjust for Data FIN */</span>
+		}	
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_FIN_WAIT_1</span>:
+		<span class="enscript-keyword">if</span> (event == MPCE_RECV_DATA_ACK)
+			mp_tp-&gt;mpt_state = MPTCPS_FIN_WAIT_2;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (event == MPCE_RECV_DATA_FIN) {
+			mp_tp-&gt;mpt_rcvnxt += 1; <span class="enscript-comment">/* adj remote data FIN */</span>
+			mp_tp-&gt;mpt_state = MPTCPS_CLOSING;
+		}	
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_CLOSING</span>:
+		<span class="enscript-keyword">if</span> (event == MPCE_RECV_DATA_ACK)
+			mp_tp-&gt;mpt_state = MPTCPS_TIME_WAIT;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_LAST_ACK</span>:
+		<span class="enscript-keyword">if</span> (event == MPCE_RECV_DATA_ACK)
+			mp_tp-&gt;mpt_state = MPTCPS_TERMINATE;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_FIN_WAIT_2</span>:
+		<span class="enscript-keyword">if</span> (event == MPCE_RECV_DATA_FIN) {
+			mp_tp-&gt;mpt_rcvnxt += 1; <span class="enscript-comment">/* adj remote data FIN */</span>
+			mp_tp-&gt;mpt_state = MPTCPS_TIME_WAIT;
+		}	
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_TIME_WAIT</span>:
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_FASTCLOSE_WAIT</span>:
+		<span class="enscript-keyword">if</span> (event == MPCE_CLOSE) {
+			<span class="enscript-comment">/* no need to adjust for data FIN */</span>
+			mp_tp-&gt;mpt_state = MPTCPS_TERMINATE;
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MPTCPS_TERMINATE</span>:
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		VERIFY(0);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	DTRACE_MPTCP2(state__change, <span class="enscript-type">struct</span> mptcb *, mp_tp, 
+	    uint32_t, event);
+	mptcplog((LOG_INFO, <span class="enscript-string">&quot;MPTCP State: %s to %s on event %s\n&quot;</span>,
+	    mptcp_state_to_str(old_state),
+	    mptcp_state_to_str(mp_tp-&gt;mpt_state),
+	    mptcp_event_to_str(event)),
+	    MPTCP_STATE_DBG, MPTCP_LOGLVL_LOG);
+}
+
+<span class="enscript-comment">/*
+ * Update the mptcb send state variables, but the actual sbdrop occurs
+ * in MPTCP layer
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mptcp_data_ack_rcvd</span>(<span class="enscript-type">struct</span> mptcb *mp_tp, <span class="enscript-type">struct</span> tcpcb *tp, u_int64_t full_dack)
+{
+	u_int64_t acked = 0;
+
+	acked = full_dack - mp_tp-&gt;mpt_snduna;
+
+	<span class="enscript-keyword">if</span> (acked) {
+		mp_tp-&gt;mpt_snduna += acked;
+		<span class="enscript-comment">/* In degraded mode, we may get some Data ACKs */</span>
+		<span class="enscript-keyword">if</span> ((tp-&gt;t_mpflags &amp; TMPF_TCP_FALLBACK) &amp;&amp;
+			!(mp_tp-&gt;mpt_flags &amp; MPTCPF_POST_FALLBACK_SYNC) &amp;&amp;
+			MPTCP_SEQ_GT(mp_tp-&gt;mpt_sndnxt, mp_tp-&gt;mpt_snduna)) {
+			<span class="enscript-comment">/* bring back sndnxt to retransmit MPTCP data */</span>
+			mp_tp-&gt;mpt_sndnxt = mp_tp-&gt;mpt_dsn_at_csum_fail;
+			mp_tp-&gt;mpt_flags |= MPTCPF_POST_FALLBACK_SYNC;
+			tp-&gt;t_inpcb-&gt;inp_socket-&gt;so_flags1 |= 
+			    SOF1_POST_FALLBACK_SYNC;
+		}
+	}
+	<span class="enscript-keyword">if</span> ((full_dack == mp_tp-&gt;mpt_sndmax) &amp;&amp;
+	    (mp_tp-&gt;mpt_state &gt;= MPTCPS_FIN_WAIT_1)) {
+		mptcp_close_fsm(mp_tp, MPCE_RECV_DATA_ACK);
+		tp-&gt;t_mpflags &amp;= ~TMPF_SEND_DFIN;
+	}
+}
+
+<span class="enscript-comment">/* If you change this function, match up mptcp_update_rcv_state_f */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mptcp_update_dss_rcv_state</span>(<span class="enscript-type">struct</span> mptcp_dsn_opt *dss_info, <span class="enscript-type">struct</span> tcpcb *tp,
+    uint16_t csum)
+{
+	<span class="enscript-type">struct</span> mptcb *mp_tp = tptomptp(tp);
+	u_int64_t full_dsn = 0;
+
+	NTOHL(dss_info-&gt;mdss_dsn);
+	NTOHL(dss_info-&gt;mdss_subflow_seqn);
+	NTOHS(dss_info-&gt;mdss_data_len);
+
+	<span class="enscript-comment">/* XXX for autosndbuf grow sb here */</span>
+	MPT_LOCK(mp_tp);
+	MPTCP_EXTEND_DSN(mp_tp-&gt;mpt_rcvnxt, dss_info-&gt;mdss_dsn, full_dsn);
+	MPT_UNLOCK(mp_tp);
+	mptcp_update_rcv_state_meat(mp_tp, tp,
+	    full_dsn, dss_info-&gt;mdss_subflow_seqn, dss_info-&gt;mdss_data_len,
+	    csum);
+
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mptcp_update_rcv_state_meat</span>(<span class="enscript-type">struct</span> mptcb *mp_tp, <span class="enscript-type">struct</span> tcpcb *tp,
+    u_int64_t full_dsn, u_int32_t seqn, u_int16_t mdss_data_len,
+    uint16_t csum)
+{
+	<span class="enscript-keyword">if</span> (mdss_data_len == 0) {
+		mptcplog((LOG_INFO, <span class="enscript-string">&quot;MPTCP Receiver: Infinite Mapping.\n&quot;</span>),
+		    MPTCP_RECEIVER_DBG, MPTCP_LOGLVL_LOG);
+
+		<span class="enscript-keyword">if</span> ((mp_tp-&gt;mpt_flags &amp; MPTCPF_CHECKSUM) &amp;&amp; (csum != 0)) {
+			mptcplog((LOG_ERR, <span class="enscript-string">&quot;MPTCP Receiver: Bad checksum %x \n&quot;</span>,
+			    csum), MPTCP_RECEIVER_DBG, MPTCP_LOGLVL_ERR);
+		}
+		mptcp_notify_mpfail(tp-&gt;t_inpcb-&gt;inp_socket);
+		<span class="enscript-keyword">return</span>;
+	}
+	MPT_LOCK(mp_tp);
+		mptcplog((LOG_DEBUG,
+		    <span class="enscript-string">&quot;MPTCP Receiver: seqn = %x len = %x full = %llx &quot;</span>
+		    <span class="enscript-string">&quot;rcvnxt = %llu \n&quot;</span>,
+		    seqn, mdss_data_len, full_dsn, mp_tp-&gt;mpt_rcvnxt),
+		    MPTCP_RECEIVER_DBG, MPTCP_LOGLVL_VERBOSE);
+
+	<span class="enscript-comment">/* Process a Data FIN packet , handled in mptcp_do_fin_opt */</span>
+	<span class="enscript-keyword">if</span> ((seqn == 0) &amp;&amp; (mdss_data_len == 1)) {
+		mptcplog((LOG_INFO, <span class="enscript-string">&quot;MPTCP Receiver: Data FIN in %s state \n&quot;</span>,
+		    mptcp_state_to_str(mp_tp-&gt;mpt_state)),
+		    MPTCP_RECEIVER_DBG, MPTCP_LOGLVL_LOG);
+		MPT_UNLOCK(mp_tp);
+		<span class="enscript-keyword">return</span>;
+	}
+	MPT_UNLOCK(mp_tp);
+	mptcp_notify_mpready(tp-&gt;t_inpcb-&gt;inp_socket);
+	tp-&gt;t_rcv_map.mpt_dsn = full_dsn;
+	tp-&gt;t_rcv_map.mpt_sseq = seqn;
+	tp-&gt;t_rcv_map.mpt_len = mdss_data_len;
+	tp-&gt;t_rcv_map.mpt_csum = csum;
+	tp-&gt;t_mpflags |= TMPF_EMBED_DSN;
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mptcp_update_rcv_state_f</span>(<span class="enscript-type">struct</span> mptcp_dss_ack_opt *dss_info, <span class="enscript-type">struct</span> tcpcb *tp,
+    uint16_t csum)
+{
+	u_int64_t full_dsn = 0;
+	<span class="enscript-type">struct</span> mptcb *mp_tp = tptomptp(tp);
+
+	NTOHL(dss_info-&gt;mdss_dsn);
+	NTOHL(dss_info-&gt;mdss_subflow_seqn);
+	NTOHS(dss_info-&gt;mdss_data_len);
+	MPT_LOCK(mp_tp);
+	MPTCP_EXTEND_DSN(mp_tp-&gt;mpt_rcvnxt, dss_info-&gt;mdss_dsn, full_dsn);
+	MPT_UNLOCK(mp_tp);
+	mptcp_update_rcv_state_meat(mp_tp, tp,
+	    full_dsn,
+	    dss_info-&gt;mdss_subflow_seqn,
+	    dss_info-&gt;mdss_data_len,
+	    csum);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mptcp_update_rcv_state_g</span>(<span class="enscript-type">struct</span> mptcp_dss64_ack32_opt *dss_info,
+    <span class="enscript-type">struct</span> tcpcb *tp, uint16_t csum)
+{
+	u_int64_t dsn = mptcp_ntoh64(dss_info-&gt;mdss_dsn);
+	<span class="enscript-type">struct</span> mptcb *mp_tp = tptomptp(tp);
+
+	NTOHL(dss_info-&gt;mdss_subflow_seqn);
+	NTOHS(dss_info-&gt;mdss_data_len);
+	mptcp_update_rcv_state_meat(mp_tp, tp,
+	    dsn,
+	    dss_info-&gt;mdss_subflow_seqn,
+	    dss_info-&gt;mdss_data_len,
+	    csum);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">mptcp_validate_dss_map</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> mbuf *m,
+    <span class="enscript-type">int</span> hdrlen)
+{
+	u_int32_t sseq, datalen;
+
+	<span class="enscript-keyword">if</span> (!(m-&gt;m_pkthdr.pkt_flags &amp; PKTF_MPTCP))
+		<span class="enscript-keyword">return</span> 0;
+
+	sseq = m-&gt;m_pkthdr.mp_rseq + tp-&gt;irs;
+	datalen = m-&gt;m_pkthdr.mp_rlen;
+
+#<span class="enscript-reference">if</span> 0
+	<span class="enscript-comment">/* enable this to test TCP fallback post connection establishment */</span>
+	<span class="enscript-keyword">if</span> (SEQ_GT(sseq, (tp-&gt;irs+1)))
+		datalen = m-&gt;m_pkthdr.len - hdrlen - 1;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* unacceptable DSS option, fallback to TCP */</span>
+	<span class="enscript-keyword">if</span> (m-&gt;m_pkthdr.len &gt; ((<span class="enscript-type">int</span>) datalen + hdrlen)) {
+		mptcplog((LOG_ERR, <span class="enscript-string">&quot;MPTCP Receiver: &quot;</span>
+		    <span class="enscript-string">&quot;%s: mbuf len %d, MPTCP expected %d&quot;</span>,
+		    __func__, m-&gt;m_pkthdr.len, datalen),
+		    MPTCP_RECEIVER_DBG, MPTCP_LOGLVL_LOG);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span> 0;
+	}
+	tp-&gt;t_mpflags |= TMPF_SND_MPFAIL;
+	mptcp_notify_mpfail(so);
+	m_freem(m);
+	<span class="enscript-keyword">return</span> -1;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mptcp_input_preproc</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> drop_hdrlen)
+{
+	<span class="enscript-keyword">if</span> (mptcp_validate_csum(tp, m, drop_hdrlen) != 0)
+		<span class="enscript-keyword">return</span> -1;
+
+	mptcp_insert_rmap(tp, m);
+	<span class="enscript-keyword">if</span> (mptcp_validate_dss_map(tp-&gt;t_inpcb-&gt;inp_socket, tp, m,
+	    drop_hdrlen) != 0)
+		<span class="enscript-keyword">return</span> -1;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * MPTCP Checksum support
+ * The checksum is calculated whenever the MPTCP DSS option is included
+ * in the TCP packet. The checksum includes the sum of the MPTCP psuedo
+ * header and the actual data indicated by the length specified in the
+ * DSS option.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">mptcp_validate_csum</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> drop_hdrlen)
+{
+	uint16_t mptcp_csum = 0;
+	mptcp_csum = mptcp_input_csum(tp, m, drop_hdrlen);
+	<span class="enscript-keyword">if</span> (mptcp_csum) {
+		tp-&gt;t_mpflags |= TMPF_SND_MPFAIL;
+		tp-&gt;t_mpflags &amp;= ~TMPF_EMBED_DSN;
+		mptcp_notify_mpfail(tp-&gt;t_inpcb-&gt;inp_socket);
+		m_freem(m);
+		tcpstat.tcps_mp_badcsum++;
+		<span class="enscript-keyword">return</span> -1;
+	}
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> uint16_t
+<span class="enscript-function-name">mptcp_input_csum</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> off)
+{
+	<span class="enscript-type">struct</span> mptcb *mp_tp = tptomptp(tp);
+	uint32_t sum = 0;
+	uint64_t dsn;
+	uint32_t sseq;
+	uint16_t len;
+	uint16_t csum;
+
+	<span class="enscript-keyword">if</span> (mp_tp == NULL)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">if</span> (!(mp_tp-&gt;mpt_flags &amp; MPTCPF_CHECKSUM))
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">if</span> (!(tp-&gt;t_mpflags &amp; TMPF_EMBED_DSN))
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">if</span> (tp-&gt;t_mpflags &amp; TMPF_TCP_FALLBACK)
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-comment">/* 
+	 * The remote side may send a packet with fewer bytes than the
+	 * claimed DSS checksum length.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((<span class="enscript-type">int</span>)m_length2(m, NULL) &lt; (off + tp-&gt;t_rcv_map.mpt_len))
+		<span class="enscript-keyword">return</span> (0xffff);
+
+	<span class="enscript-keyword">if</span> (tp-&gt;t_rcv_map.mpt_len != 0)
+		sum = m_sum16(m, off, tp-&gt;t_rcv_map.mpt_len);
+
+	dsn = mptcp_hton64(tp-&gt;t_rcv_map.mpt_dsn);
+	sseq = htonl(tp-&gt;t_rcv_map.mpt_sseq);
+	len = htons(tp-&gt;t_rcv_map.mpt_len);
+	csum = tp-&gt;t_rcv_map.mpt_csum;
+	sum += in_pseudo64(dsn, sseq, (len + csum));
+	ADDCARRY(sum);
+	DTRACE_MPTCP3(checksum__result, <span class="enscript-type">struct</span> tcpcb *, tp, <span class="enscript-type">struct</span> mbuf *, m,
+	    uint32_t, sum);
+	mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Receiver: sum = %x \n&quot;</span>, sum),
+	    MPTCP_RECEIVER_DBG, MPTCP_LOGLVL_VERBOSE);
+	<span class="enscript-keyword">return</span> (~sum &amp; 0xffff);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mptcp_output_csum</span>(<span class="enscript-type">struct</span> tcpcb *tp, <span class="enscript-type">struct</span> mbuf *m, int32_t len,
+    <span class="enscript-type">unsigned</span> hdrlen, u_int64_t dss_val, u_int32_t *sseqp)
+{
+	<span class="enscript-type">struct</span> mptcb *mp_tp = tptomptp(tp);
+	u_int32_t sum = 0;
+	uint32_t sseq;
+	uint16_t dss_len;
+	uint16_t csum = 0;
+	uint16_t *csump = NULL;
+
+	<span class="enscript-keyword">if</span> (mp_tp == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (!(mp_tp-&gt;mpt_flags &amp; MPTCPF_CHECKSUM))
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (sseqp == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (len)
+		sum = m_sum16(m, hdrlen, len);
+
+	dss_val = mptcp_hton64(dss_val);
+	sseq = *sseqp;
+	dss_len = *(uint16_t *)(<span class="enscript-type">void</span> *)((u_char*)sseqp + <span class="enscript-keyword">sizeof</span> (u_int32_t));
+	sum += in_pseudo64(dss_val, sseq, (dss_len + csum));
+
+	ADDCARRY(sum);
+	sum = ~sum &amp; 0xffff;
+	csump = (uint16_t *)(<span class="enscript-type">void</span> *)((u_char*)sseqp + <span class="enscript-keyword">sizeof</span> (u_int32_t) +
+	    <span class="enscript-keyword">sizeof</span> (uint16_t));
+	DTRACE_MPTCP3(checksum__result, <span class="enscript-type">struct</span> tcpcb *, tp, <span class="enscript-type">struct</span> mbuf *, m,
+	    uint32_t, sum);
+	*csump = sum;
+	mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Sender: sum = %x \n&quot;</span>, sum),
+	    MPTCP_SENDER_DBG, MPTCP_LOGLVL_VERBOSE);
+}
+
+<span class="enscript-comment">/*
+ * When WiFi signal starts fading, there's more loss and RTT spikes.
+ * Check if there has been a large spike by comparing against
+ * a tolerable RTT spike threshold.
+ */</span>
+boolean_t
+<span class="enscript-function-name">mptcp_no_rto_spike</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> tcpcb *tp = intotcpcb(sotoinpcb(so));
+	int32_t spike = 0;
+
+	<span class="enscript-keyword">if</span> (tp-&gt;t_rxtcur &gt; MAX(mptcp_rtothresh, MPTCP_RTO_MINTHRESH)) {
+		spike = tp-&gt;t_rxtcur - mptcp_rtothresh;
+
+		mptcplog((LOG_DEBUG, <span class="enscript-string">&quot;MPTCP Socket: %s: spike = %d rto = %d&quot;</span>
+		    <span class="enscript-string">&quot;best = %d cur = %d\n&quot;</span>, __func__, spike,
+		    tp-&gt;t_rxtcur, tp-&gt;t_rttbest &gt;&gt; TCP_RTT_SHIFT,
+		    tp-&gt;t_rttcur),
+		    (MPTCP_SOCKET_DBG|MPTCP_SENDER_DBG), MPTCP_LOGLVL_LOG);
+
+	}
+
+	<span class="enscript-keyword">if</span> (spike &gt; 0 ) {
+		<span class="enscript-keyword">return</span> (FALSE);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span> (TRUE);
+	}
+}
+</pre>
+<hr />
+</body></html>

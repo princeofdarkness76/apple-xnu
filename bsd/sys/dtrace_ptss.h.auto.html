@@ -1,0 +1,131 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>dtrace_ptss.h</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">dtrace_ptss.h&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_DTRACE_PTSS_H_</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">_DTRACE_PTSS_H_</span>
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">__cplusplus</span>
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> {
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * The pid provider needs a small per thread scratch space,
+ * in the address space of the user task. This code is used to
+ * manage that space.
+ *
+ * High level design:
+ *
+ * To avoid serialization, this is a (mostly) lockless allocator. If
+ * a new page has to be allocated, the process's sprlock will be acquired.
+ * 
+ * NOTE: The dtrace copyin/copyout code is still the shared code that
+ * can handle unmapped pages, so the scratch space isn't wired for now.
+ * * Each page in user space is wired. It cannot be paged out, because
+ * * dtrace's copyin/copyout is only guaranteed to handle pages already
+ * * in memory. 
+ *
+ * Each page in user space is represented by a dt_ptss_page. Page entries
+ * are chained. Once allocated, a page is not freed until dtrace &quot;cleans up&quot;
+ * that process.
+ *
+ * Clean up works like this:
+ *
+ * At process exit, free all kernel allocated memory, but ignore user pages.
+ * At process exec, free all kernel allocated memory, but ignore user pages.
+ * At process fork, free user pages copied from parent, and do not allocate kernel memory.
+ *
+ * This is making the assumption that it is faster to let the bulk vm_map
+ * operations in exec/exit do their work, instead of explicit page free(s)
+ * via mach_vm_deallocate.
+ *
+ * As each page is allocated, its entries are chained and added to the
+ * free_list. To claim an entry, cas it off the list. When a thread exits,
+ * cas its entry onto the list. We could potentially optimize this by
+ * keeping a head/tail, and cas'ing the frees to the tail instead of the
+ * head. Without evidence to support such a need, it seems better to keep
+ * things simple for now.
+ */</span>
+
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DTRACE_PTSS_SCRATCH_SPACE_PER_THREAD</span> (64)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DTRACE_PTSS_ENTRIES_PER_PAGE</span> (PAGE_SIZE / DTRACE_PTSS_SCRATCH_SPACE_PER_THREAD)
+
+<span class="enscript-type">struct</span> dtrace_ptss_page_entry {
+	<span class="enscript-type">struct</span> dtrace_ptss_page_entry*	next;
+	user_addr_t			addr;
+};
+
+<span class="enscript-type">struct</span> dtrace_ptss_page {
+	<span class="enscript-type">struct</span> dtrace_ptss_page*       next;
+	<span class="enscript-type">struct</span> dtrace_ptss_page_entry  entries[PAGE_MAX_SIZE / DTRACE_PTSS_SCRATCH_SPACE_PER_THREAD]; 
+};
+
+<span class="enscript-type">struct</span> dtrace_ptss_page_entry*	dtrace_ptss_claim_entry(<span class="enscript-type">struct</span> proc* p); <span class="enscript-comment">/* sprlock not held */</span>
+<span class="enscript-type">struct</span> dtrace_ptss_page_entry*	dtrace_ptss_claim_entry_locked(<span class="enscript-type">struct</span> proc* p); <span class="enscript-comment">/* sprlock held */</span>
+<span class="enscript-type">void</span>				dtrace_ptss_release_entry(<span class="enscript-type">struct</span> proc* p, <span class="enscript-type">struct</span> dtrace_ptss_page_entry* e);
+
+<span class="enscript-type">struct</span> dtrace_ptss_page*	dtrace_ptss_allocate_page(<span class="enscript-type">struct</span> proc* p);
+<span class="enscript-type">void</span>				dtrace_ptss_free_page(<span class="enscript-type">struct</span> proc* p, <span class="enscript-type">struct</span> dtrace_ptss_page* ptss_page);
+
+<span class="enscript-type">void</span>				dtrace_ptss_enable(<span class="enscript-type">struct</span> proc* p);
+<span class="enscript-type">void</span>				dtrace_ptss_exec_exit(<span class="enscript-type">struct</span> proc* p);
+<span class="enscript-type">void</span>				dtrace_ptss_fork(<span class="enscript-type">struct</span> proc* parent, <span class="enscript-type">struct</span> proc* child);
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">__cplusplus</span>
+}
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* _DTRACE_PTSS_H_ */</span>
+
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,3323 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ipc_importance.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ipc_importance.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/notify.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_importance.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_voucher.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_kobject.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_tt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/mach_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_voucher_attr_control.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine/sdt.h&gt;</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>	proc_pid(<span class="enscript-type">void</span> *);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>	proc_selfpid(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> uint64_t <span class="enscript-function-name">proc_uniqueid</span>(<span class="enscript-type">void</span> *p);
+<span class="enscript-type">extern</span> <span class="enscript-type">char</span>	*proc_name_address(<span class="enscript-type">void</span> *p);
+
+<span class="enscript-comment">/*
+ * Globals for delayed boost drop processing.
+ */</span>
+<span class="enscript-type">static</span> queue_head_t ipc_importance_delayed_drop_queue;
+<span class="enscript-type">static</span> thread_call_t ipc_importance_delayed_drop_call;
+<span class="enscript-type">static</span> uint64_t ipc_importance_delayed_drop_timestamp;
+<span class="enscript-type">static</span> boolean_t ipc_importance_delayed_drop_call_requested = FALSE;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DENAP_DROP_TARGET</span> (1000 * NSEC_PER_MSEC) <span class="enscript-comment">/* optimum denap delay */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DENAP_DROP_SKEW</span>    (100 * NSEC_PER_MSEC) <span class="enscript-comment">/* request skew for wakeup */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DENAP_DROP_LEEWAY</span>  (2 * DENAP_DROP_SKEW)  <span class="enscript-comment">/* specified wakeup leeway */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DENAP_DROP_DELAY</span> (DENAP_DROP_TARGET + DENAP_DROP_SKEW)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DENAP_DROP_FLAGS</span> (THREAD_CALL_DELAY_SYS_NORMAL | THREAD_CALL_DELAY_LEEWAY)
+
+<span class="enscript-comment">/*
+ * Importance Voucher Attribute Manager
+ */</span>
+
+<span class="enscript-type">static</span> lck_spin_t ipc_importance_lock_data;	<span class="enscript-comment">/* single lock for now */</span>
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ipc_importance_lock_init</span>() \
+	lck_spin_init(&amp;ipc_importance_lock_data, &amp;ipc_lck_grp, &amp;ipc_lck_attr)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ipc_importance_lock_destroy</span>() \
+	lck_spin_destroy(&amp;ipc_importance_lock_data, &amp;ipc_lck_grp)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ipc_importance_lock</span>() \
+	lck_spin_lock(&amp;ipc_importance_lock_data)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ipc_importance_lock_try</span>() \
+	lck_spin_try_lock(&amp;ipc_importance_lock_data)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ipc_importance_unlock</span>() \
+	lck_spin_unlock(&amp;ipc_importance_lock_data)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ipc_importance_sleep</span>(elem) lck_spin_sleep(&amp;ipc_importance_lock_data,	\
+					LCK_SLEEP_DEFAULT,			\
+					(event_t)(elem),			\
+					THREAD_UNINT)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ipc_importance_wakeup</span>(elem) thread_wakeup((event_t)(elem))
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IIE_REF_DEBUG</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">incr_ref_counter</span>(x) (hw_atomic_add(&amp;(x), 1))
+
+<span class="enscript-type">static</span> inline
+uint32_t <span class="enscript-function-name">ipc_importance_reference_internal</span>(ipc_importance_elem_t elem) 
+{
+	incr_ref_counter(elem-&gt;iie_refs_added);
+	<span class="enscript-keyword">return</span> (hw_atomic_add(&amp;elem-&gt;iie_bits, 1) &amp; IIE_REFS_MASK);
+}
+
+<span class="enscript-type">static</span> inline
+uint32_t <span class="enscript-function-name">ipc_importance_release_internal</span>(ipc_importance_elem_t elem)
+{
+	incr_ref_counter(elem-&gt;iie_refs_dropped);
+	<span class="enscript-keyword">return</span> (hw_atomic_sub(&amp;elem-&gt;iie_bits, 1) &amp; IIE_REFS_MASK);
+}
+
+<span class="enscript-type">static</span> inline 
+uint32_t <span class="enscript-function-name">ipc_importance_task_reference_internal</span>(ipc_importance_task_t task_imp)
+{
+  uint32_t out;
+  out = ipc_importance_reference_internal(&amp;task_imp-&gt;iit_elem);
+  incr_ref_counter(task_imp-&gt;iit_elem.iie_task_refs_added);
+  <span class="enscript-keyword">return</span> out;
+}
+
+<span class="enscript-type">static</span> inline
+uint32_t <span class="enscript-function-name">ipc_importance_task_release_internal</span>(ipc_importance_task_t task_imp)
+{
+  uint32_t out;
+
+  assert(1 &lt; IIT_REFS(task_imp));
+  incr_ref_counter(task_imp-&gt;iit_elem.iie_task_refs_dropped);
+  out = ipc_importance_release_internal(&amp;task_imp-&gt;iit_elem);
+  <span class="enscript-keyword">return</span> out;
+}
+
+<span class="enscript-type">static</span> inline
+<span class="enscript-type">void</span> <span class="enscript-function-name">ipc_importance_counter_init</span>(ipc_importance_elem_t elem)
+{
+  
+	elem-&gt;iie_refs_added = 0;
+	elem-&gt;iie_refs_dropped = 0;
+	elem-&gt;iie_kmsg_refs_added = 0;
+	elem-&gt;iie_kmsg_refs_inherited = 0;
+	elem-&gt;iie_kmsg_refs_coalesced = 0;
+	elem-&gt;iie_kmsg_refs_dropped = 0;
+	elem-&gt;iie_task_refs_added = 0;
+	elem-&gt;iie_task_refs_added_inherit_from = 0;
+	elem-&gt;iie_task_refs_added_transition = 0;
+	elem-&gt;iie_task_refs_self_added = 0;
+	elem-&gt;iie_task_refs_inherited = 0;
+	elem-&gt;iie_task_refs_coalesced = 0;
+	elem-&gt;iie_task_refs_dropped = 0;
+}
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">incr_ref_counter</span>(x)
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-type">static</span> queue_head_t global_iit_alloc_queue;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* TODO: remove this varibale when interactive daemon audit is complete */</span>
+boolean_t ipc_importance_interactive_receiver = FALSE;
+
+<span class="enscript-type">static</span> zone_t ipc_importance_task_zone;
+<span class="enscript-type">static</span> zone_t ipc_importance_inherit_zone;
+
+<span class="enscript-type">static</span> ipc_voucher_attr_control_t ipc_importance_control;
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_kmsg_link
+ *	Purpose:
+ *		Link the kmsg onto the appropriate propagation chain.
+ *		If the element is a task importance, we link directly
+ *		on its propagation chain. Otherwise, we link onto the
+ *		destination task of the inherit.
+ *	Conditions:
+ *		Importance lock held.
+ *		Caller is donating an importance elem reference to the kmsg.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_kmsg_link</span>(
+	ipc_kmsg_t		kmsg,
+	ipc_importance_elem_t	elem)
+{
+	ipc_importance_elem_t link_elem;
+
+	assert(IIE_NULL == kmsg-&gt;ikm_importance);
+
+	link_elem = (IIE_TYPE_INHERIT == IIE_TYPE(elem)) ?
+		(ipc_importance_elem_t)((ipc_importance_inherit_t)elem)-&gt;iii_to_task :
+		elem;
+
+	queue_enter(&amp;link_elem-&gt;iie_kmsgs, kmsg, ipc_kmsg_t, ikm_inheritance);
+	kmsg-&gt;ikm_importance = elem;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_kmsg_unlink
+ *	Purpose:
+ *		Unlink the kmsg from its current propagation chain.
+ *		If the element is a task importance, we unlink directly
+ *		from its propagation chain. Otherwise, we unlink from the
+ *		destination task of the inherit.
+ *	Returns:
+ *		The reference to the importance element it was linked on.
+ *	Conditions:
+ *		Importance lock held.
+ *		Caller is responsible for dropping reference on returned elem.
+ */</span>
+<span class="enscript-type">static</span> ipc_importance_elem_t
+<span class="enscript-function-name">ipc_importance_kmsg_unlink</span>(
+	ipc_kmsg_t		kmsg)
+{
+	ipc_importance_elem_t elem = kmsg-&gt;ikm_importance;
+
+	<span class="enscript-keyword">if</span> (IIE_NULL != elem) {
+		ipc_importance_elem_t unlink_elem;
+
+		unlink_elem = (IIE_TYPE_INHERIT == IIE_TYPE(elem)) ?
+			(ipc_importance_elem_t)((ipc_importance_inherit_t)elem)-&gt;iii_to_task : 
+			elem;
+
+		queue_remove(&amp;unlink_elem-&gt;iie_kmsgs, kmsg, ipc_kmsg_t, ikm_inheritance);
+		kmsg-&gt;ikm_importance = IIE_NULL;
+	}
+	<span class="enscript-keyword">return</span> elem;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_inherit_link
+ *	Purpose:
+ *		Link the inherit onto the appropriate propagation chain.
+ *		If the element is a task importance, we link directly
+ *		on its propagation chain. Otherwise, we link onto the
+ *		destination task of the inherit.
+ *	Conditions:
+ *		Importance lock held.
+ *		Caller is donating an elem importance reference to the inherit.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_inherit_link</span>(
+	ipc_importance_inherit_t inherit,
+	ipc_importance_elem_t elem)
+{
+	ipc_importance_elem_t link_elem;
+
+	assert(IIE_NULL == inherit-&gt;iii_from_elem);
+	link_elem = (IIE_TYPE_INHERIT == IIE_TYPE(elem)) ?
+		(ipc_importance_elem_t)((ipc_importance_inherit_t)elem)-&gt;iii_to_task :
+		elem;
+
+	queue_enter(&amp;link_elem-&gt;iie_inherits, inherit, 
+		    ipc_importance_inherit_t, iii_inheritance);
+	inherit-&gt;iii_from_elem = elem;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_inherit_unlink
+ *	Purpose:
+ *		Unlink the inherit from its current propagation chain.
+ *		If the element is a task importance, we unlink directly
+ *		from its propagation chain. Otherwise, we unlink from the
+ *		destination task of the inherit.
+ *	Returns:
+ *		The reference to the importance element it was linked on.
+ *	Conditions:
+ *		Importance lock held.
+ *		Caller is responsible for dropping reference on returned elem.
+ */</span>
+<span class="enscript-type">static</span> ipc_importance_elem_t
+<span class="enscript-function-name">ipc_importance_inherit_unlink</span>(
+	ipc_importance_inherit_t inherit)
+{
+	ipc_importance_elem_t elem = inherit-&gt;iii_from_elem;
+
+	<span class="enscript-keyword">if</span> (IIE_NULL != elem) {
+		ipc_importance_elem_t unlink_elem;
+
+		unlink_elem = (IIE_TYPE_INHERIT == IIE_TYPE(elem)) ?
+			(ipc_importance_elem_t)((ipc_importance_inherit_t)elem)-&gt;iii_to_task : 
+			elem;
+
+		queue_remove(&amp;unlink_elem-&gt;iie_inherits, inherit, 
+			     ipc_importance_inherit_t, iii_inheritance);
+		inherit-&gt;iii_from_elem = IIE_NULL;
+	}
+	<span class="enscript-keyword">return</span> elem;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_reference
+ *	Purpose:
+ *		Add a reference to the importance element.
+ *	Conditions:
+ *		Caller must hold a reference on the element.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_reference</span>(ipc_importance_elem_t elem)
+{
+	assert(0 &lt; IIE_REFS(elem));
+	ipc_importance_reference_internal(elem);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_release_locked
+ *	Purpose:
+ *		Release a reference on an importance attribute value,
+ *		unlinking and deallocating the attribute if the last reference.
+ *	Conditions:
+ *		Entered with importance lock held, leaves with it unlocked.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_release_locked</span>(ipc_importance_elem_t elem)
+{
+	assert(0 &lt; IIE_REFS(elem));
+
+	<span class="enscript-keyword">if</span> (0 &lt; ipc_importance_release_internal(elem)) {
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+		ipc_importance_inherit_t temp_inherit;
+		ipc_importance_task_t link_task;
+		ipc_kmsg_t temp_kmsg;
+		uint32_t expected = 0;
+
+		<span class="enscript-keyword">if</span> (0 &lt; elem-&gt;iie_made)
+	  		expected++;
+
+		link_task = (IIE_TYPE_INHERIT == IIE_TYPE(elem)) ?
+			((ipc_importance_inherit_t)elem)-&gt;iii_to_task : 
+			(ipc_importance_task_t)elem;
+
+		queue_iterate(&amp;link_task-&gt;iit_kmsgs, temp_kmsg, ipc_kmsg_t, ikm_inheritance)
+			<span class="enscript-keyword">if</span> (temp_kmsg-&gt;ikm_importance == elem)
+				expected++;
+		queue_iterate(&amp;link_task-&gt;iit_inherits, temp_inherit,
+			      ipc_importance_inherit_t, iii_inheritance)
+			<span class="enscript-keyword">if</span> (temp_inherit-&gt;iii_from_elem == elem)
+				expected++;
+
+		<span class="enscript-keyword">if</span> (IIE_REFS(elem) &lt; expected)
+			panic(<span class="enscript-string">&quot;ipc_importance_release_locked (%p)&quot;</span>, elem);
+#<span class="enscript-reference">endif</span>
+		ipc_importance_unlock();
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* last ref */</span>
+	<span class="enscript-comment">/* can't get to no refs if we contribute to something else's importance */</span>
+	assert(queue_empty(&amp;elem-&gt;iie_kmsgs));
+	assert(queue_empty(&amp;elem-&gt;iie_inherits));
+
+	<span class="enscript-keyword">switch</span> (IIE_TYPE(elem)) {
+
+	<span class="enscript-comment">/* just a &quot;from&quot; task reference to drop */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IIE_TYPE_TASK</span>:
+	{
+		ipc_importance_task_t task_elem;
+
+		task_elem = (ipc_importance_task_t)elem;
+		assert(TASK_NULL == task_elem-&gt;iit_task);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+		queue_remove(&amp;global_iit_alloc_queue, task_elem, ipc_importance_task_t, iit_allocation);
+#<span class="enscript-reference">endif</span>
+
+		ipc_importance_unlock();
+
+		zfree(ipc_importance_task_zone, task_elem);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/* dropping an inherit element */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IIE_TYPE_INHERIT</span>:
+	{
+		ipc_importance_inherit_t inherit;
+		ipc_importance_elem_t from_elem;
+		ipc_importance_task_t to_task;
+
+
+		inherit = (ipc_importance_inherit_t)elem;
+		to_task = inherit-&gt;iii_to_task;
+		assert(IIT_NULL != to_task);
+		assert(!inherit-&gt;iii_donating);
+
+		<span class="enscript-comment">/* unlink and release the inherit */</span>
+		assert(ipc_importance_task_is_any_receiver_type(to_task));
+		from_elem = ipc_importance_inherit_unlink(inherit);
+		assert(IIE_NULL != from_elem);
+		ipc_importance_release_locked(from_elem);
+		<span class="enscript-comment">/* unlocked on return */</span>
+
+		ipc_importance_task_release(to_task);
+
+		zfree(ipc_importance_inherit_zone, inherit);
+		<span class="enscript-keyword">break</span>;
+	}
+	}
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_release
+ *	Purpose:
+ *		Release a reference on an importance attribute value,
+ *		unlinking and deallocating the attribute if the last reference.
+ *	Conditions:
+ *		nothing locked on entrance, nothing locked on exit.
+ *		May block.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_release</span>(ipc_importance_elem_t elem)
+{
+	<span class="enscript-keyword">if</span> (IIE_NULL == elem)
+		<span class="enscript-keyword">return</span>;
+
+	ipc_importance_lock();
+	ipc_importance_release_locked(elem);
+	<span class="enscript-comment">/* unlocked */</span>
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_reference
+
+
+ *	Purpose:
+ *		Retain a reference on a task importance attribute value.
+ *	Conditions:
+ *		nothing locked on entrance, nothing locked on exit.
+ *		caller holds a reference already.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_task_reference</span>(ipc_importance_task_t task_elem)
+{
+	<span class="enscript-keyword">if</span> (IIT_NULL == task_elem)
+		<span class="enscript-keyword">return</span>;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IIE_REF_DEBUG</span>
+	incr_ref_counter(task_elem-&gt;iit_elem.iie_task_refs_added);
+#<span class="enscript-reference">endif</span>
+	ipc_importance_reference(&amp;task_elem-&gt;iit_elem);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_release
+ *	Purpose:
+ *		Release a reference on a task importance attribute value,
+ *		unlinking and deallocating the attribute if the last reference.
+ *	Conditions:
+ *		nothing locked on entrance, nothing locked on exit.
+ *		May block.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_task_release</span>(ipc_importance_task_t task_elem)
+{
+	<span class="enscript-keyword">if</span> (IIT_NULL == task_elem)
+		<span class="enscript-keyword">return</span>;
+
+	ipc_importance_lock();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IIE_REF_DEBUG</span>
+	incr_ref_counter(task_elem-&gt;iit_elem.iie_task_refs_dropped);
+#<span class="enscript-reference">endif</span>
+	ipc_importance_release_locked(&amp;task_elem-&gt;iit_elem);
+	<span class="enscript-comment">/* unlocked */</span>
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_release_locked
+ *	Purpose:
+ *		Release a reference on a task importance attribute value,
+ *		unlinking and deallocating the attribute if the last reference.
+ *	Conditions:
+ *		importance lock held on entry, nothing locked on exit.
+ *		May block.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_task_release_locked</span>(ipc_importance_task_t task_elem)
+{
+	<span class="enscript-keyword">if</span> (IIT_NULL == task_elem) {
+		ipc_importance_unlock();
+		<span class="enscript-keyword">return</span>;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IIE_REF_DEBUG</span>
+	incr_ref_counter(task_elem-&gt;iit_elem.iie_task_refs_dropped);
+#<span class="enscript-reference">endif</span>
+	ipc_importance_release_locked(&amp;task_elem-&gt;iit_elem);
+	<span class="enscript-comment">/* unlocked */</span>
+}
+
+<span class="enscript-comment">/*
+ * Routines for importance donation/inheritance/boosting
+ */</span>
+
+
+<span class="enscript-comment">/*
+ * External importance assertions are managed by the process in userspace
+ * Internal importance assertions are the responsibility of the kernel
+ * Assertions are changed from internal to external via task_importance_externalize_assertion
+ */</span>
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_check_transition
+ *	Purpose:
+ *		Increase or decrement the internal task importance counter of the
+ *		specified task and determine if propagation and a task policy
+ *		update is required.
+ *
+ *		If it is already enqueued for a policy update, steal it from that queue
+ *		(as we are reversing that update before it happens).
+ *
+ *	Conditions:
+ *		Called with the importance lock held.
+ *		It is the caller's responsibility to perform the propagation of the
+ *		transition and/or policy changes by checking the return value.
+ */</span>
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">ipc_importance_task_check_transition</span>(
+	ipc_importance_task_t task_imp,
+	iit_update_type_t type,
+	uint32_t delta)
+{
+
+	task_t target_task = task_imp-&gt;iit_task;
+	boolean_t boost = (IIT_UPDATE_HOLD == type);
+	boolean_t before_boosted, after_boosted;
+
+	<span class="enscript-keyword">if</span> (!ipc_importance_task_is_any_receiver_type(task_imp))
+		<span class="enscript-keyword">return</span> FALSE;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+	<span class="enscript-type">int</span> target_pid = task_pid(target_task);
+
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, (IMPORTANCE_CODE(IMP_ASSERTION, (((boost) ? IMP_HOLD : IMP_DROP) | TASK_POLICY_INTERNAL))) | DBG_FUNC_START,
+					  proc_selfpid(), target_pid, task_imp-&gt;iit_assertcnt, IIT_EXTERN(task_imp), 0);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* snapshot the effective boosting status before making any changes */</span>
+	before_boosted = (task_imp-&gt;iit_assertcnt &gt; 0);
+
+	<span class="enscript-comment">/* Adjust the assertcnt appropriately */</span>
+	<span class="enscript-keyword">if</span> (boost) {
+		task_imp-&gt;iit_assertcnt += delta;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+        DTRACE_BOOST6(send_boost, task_t, target_task, <span class="enscript-type">int</span>, target_pid,
+                      task_t, current_task(), <span class="enscript-type">int</span>, proc_selfpid(), <span class="enscript-type">int</span>, delta, <span class="enscript-type">int</span>, task_imp-&gt;iit_assertcnt);
+#<span class="enscript-reference">endif</span>
+	} <span class="enscript-keyword">else</span> {
+	  	<span class="enscript-comment">// assert(delta &lt;= task_imp-&gt;iit_assertcnt);
+</span>		<span class="enscript-keyword">if</span> (delta &gt; task_imp-&gt;iit_assertcnt - IIT_EXTERN(task_imp)) {
+			<span class="enscript-comment">/* TODO: Turn this back into a panic &lt;rdar://problem/12592649&gt; */</span>
+			<span class="enscript-keyword">if</span> (target_task != TASK_NULL) {
+				printf(<span class="enscript-string">&quot;Over-release of kernel-internal importance assertions for pid %d (%s), &quot;</span>
+				       <span class="enscript-string">&quot;dropping %d assertion(s) but task only has %d remaining (%d external).\n&quot;</span>,
+				       task_pid(target_task),
+				       (target_task-&gt;bsd_info == NULL) ? <span class="enscript-string">&quot;&quot;</span> : proc_name_address(target_task-&gt;bsd_info),
+				       delta,
+				       task_imp-&gt;iit_assertcnt,
+				       IIT_EXTERN(task_imp));
+			}
+			task_imp-&gt;iit_assertcnt = IIT_EXTERN(task_imp);
+		} <span class="enscript-keyword">else</span> {
+			task_imp-&gt;iit_assertcnt -= delta;
+		}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+		<span class="enscript-comment">// This convers both legacy and voucher-based importance.
+</span>		DTRACE_BOOST4(drop_boost, task_t, target_task, <span class="enscript-type">int</span>, target_pid, <span class="enscript-type">int</span>, delta, <span class="enscript-type">int</span>, task_imp-&gt;iit_assertcnt);
+#<span class="enscript-reference">endif</span>
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, (IMPORTANCE_CODE(IMP_ASSERTION, (((boost) ? IMP_HOLD : IMP_DROP) | TASK_POLICY_INTERNAL))) | DBG_FUNC_END,
+				  proc_selfpid(), target_pid, task_imp-&gt;iit_assertcnt, IIT_EXTERN(task_imp), 0);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* did the change result in an effective donor status change? */</span>
+	after_boosted = (task_imp-&gt;iit_assertcnt &gt; 0);
+
+	<span class="enscript-keyword">if</span> (after_boosted != before_boosted) {
+
+		<span class="enscript-comment">/* 
+		 * If the task importance is already on an update queue, we just reversed the need for a
+		 * pending policy update.  If the queue is any other than the delayed-drop-queue, pull it 
+		 * off that queue and release the reference it got going onto the update queue.  If it is
+		 * the delayed-drop-queue we leave it in place in case it comes back into the drop state
+		 * before its time delay is up.
+		 *
+		 * We still need to propagate the change downstream to reverse the assertcnt effects,
+		 * but we no longer need to update this task's boost policy state.
+		 *
+		 * Otherwise, mark it as needing a policy update.
+		 */</span>
+		assert(0 == task_imp-&gt;iit_updatepolicy);
+		<span class="enscript-keyword">if</span> (NULL != task_imp-&gt;iit_updateq) {
+			<span class="enscript-keyword">if</span> (&amp;ipc_importance_delayed_drop_queue != task_imp-&gt;iit_updateq) {
+				queue_remove(task_imp-&gt;iit_updateq, task_imp, ipc_importance_task_t, iit_updates);
+				task_imp-&gt;iit_updateq = NULL;
+				ipc_importance_task_release_internal(task_imp); <span class="enscript-comment">/* can't be last ref */</span>
+			}
+		} <span class="enscript-keyword">else</span> {
+			task_imp-&gt;iit_updatepolicy = 1;
+		}
+		<span class="enscript-keyword">return</span> TRUE;
+	}
+
+	<span class="enscript-keyword">return</span> FALSE;
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_propagate_helper
+ *	Purpose:
+ *		Increase or decrement the internal task importance counter of all
+ *		importance tasks inheriting from the specified one.  If this causes
+ *		that importance task to change state, add it to the list of tasks
+ *		to do a policy update against.
+ *	Conditions:
+ *		Called with the importance lock held.
+ *		It is the caller's responsibility to iterate down the generated list
+ *		and propagate any subsequent assertion changes from there.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_task_propagate_helper</span>(
+	ipc_importance_task_t task_imp,
+	iit_update_type_t type,
+	queue_t propagation)
+{
+	ipc_importance_task_t temp_task_imp;
+
+	<span class="enscript-comment">/* 
+	 * iterate the downstream kmsgs, adjust their boosts, 
+	 * and capture the next task to adjust for each message
+	 */</span>
+
+	ipc_kmsg_t temp_kmsg;
+
+	queue_iterate(&amp;task_imp-&gt;iit_kmsgs, temp_kmsg, ipc_kmsg_t, ikm_inheritance) {
+		mach_msg_header_t *hdr = temp_kmsg-&gt;ikm_header;
+		mach_port_delta_t delta;
+		ipc_port_t port;
+
+		<span class="enscript-comment">/* toggle the kmsg importance bit as a barrier to parallel adjusts */</span>
+		<span class="enscript-keyword">if</span> (IIT_UPDATE_HOLD == type) {
+			<span class="enscript-keyword">if</span> (MACH_MSGH_BITS_RAISED_IMPORTANCE(hdr-&gt;msgh_bits)) {
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			<span class="enscript-comment">/* mark the message as now carrying importance */</span>
+			hdr-&gt;msgh_bits |= MACH_MSGH_BITS_RAISEIMP;
+			delta = 1;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (!MACH_MSGH_BITS_RAISED_IMPORTANCE(hdr-&gt;msgh_bits)) {
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			<span class="enscript-comment">/* clear the message as now carrying importance */</span>
+			hdr-&gt;msgh_bits &amp;= ~MACH_MSGH_BITS_RAISEIMP;
+			delta = -1;
+		}
+
+		<span class="enscript-comment">/* determine the task importance to adjust as result (if any) */</span>
+		port = (ipc_port_t) hdr-&gt;msgh_remote_port;
+		assert(IP_VALID(port));
+		ip_lock(port);
+		temp_task_imp = IIT_NULL;
+		<span class="enscript-keyword">if</span> (!ipc_port_importance_delta_internal(port, &amp;delta, &amp;temp_task_imp)) {
+			ip_unlock(port);
+		}
+
+		<span class="enscript-comment">/* no task importance to adjust associated with the port? */</span>
+		<span class="enscript-keyword">if</span> (IIT_NULL == temp_task_imp) {
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/* hold a reference on temp_task_imp */</span>
+
+		<span class="enscript-comment">/* Adjust the task assertions and determine if an edge was crossed */</span>
+		<span class="enscript-keyword">if</span> (ipc_importance_task_check_transition(temp_task_imp, type, 1)) {
+			incr_ref_counter(task_imp-&gt;iit_elem.iie_task_refs_added_transition);
+			queue_enter(propagation, temp_task_imp, ipc_importance_task_t, iit_props);
+			<span class="enscript-comment">/* reference donated */</span>
+		} <span class="enscript-keyword">else</span> {
+			ipc_importance_task_release_internal(temp_task_imp);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * iterate the downstream importance inherits
+	 * and capture the next task importance to boost for each
+	 */</span>
+	ipc_importance_inherit_t temp_inherit;
+
+	queue_iterate(&amp;task_imp-&gt;iit_inherits, temp_inherit, ipc_importance_inherit_t, iii_inheritance) {
+		uint32_t assertcnt = III_EXTERN(temp_inherit); 
+
+		temp_task_imp = temp_inherit-&gt;iii_to_task;
+		assert(IIT_NULL != temp_task_imp);
+
+		<span class="enscript-keyword">if</span> (IIT_UPDATE_HOLD == type) {
+			<span class="enscript-comment">/* if no undropped externcnts in the inherit, nothing to do */</span>
+			<span class="enscript-keyword">if</span> (0 == assertcnt) {
+				assert(temp_inherit-&gt;iii_donating == FALSE);
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			<span class="enscript-comment">/* nothing to do if the inherit is already donating (forced donation) */</span>
+			<span class="enscript-keyword">if</span> (temp_inherit-&gt;iii_donating) {
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			<span class="enscript-comment">/* mark it donating and contribute to the task externcnts */</span>
+			temp_inherit-&gt;iii_donating = TRUE;
+			temp_task_imp-&gt;iit_externcnt += temp_inherit-&gt;iii_externcnt;
+			temp_task_imp-&gt;iit_externdrop += temp_inherit-&gt;iii_externdrop;
+
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* if no contributing assertions, move on */</span>
+			<span class="enscript-keyword">if</span> (0 == assertcnt) {
+				assert(temp_inherit-&gt;iii_donating == FALSE);
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			<span class="enscript-comment">/* nothing to do if the inherit is not donating */</span>
+			<span class="enscript-keyword">if</span> (!temp_inherit-&gt;iii_donating) { 
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			<span class="enscript-comment">/* mark it no longer donating */</span>
+			temp_inherit-&gt;iii_donating = FALSE;
+
+			<span class="enscript-comment">/* remove the contribution the inherit made to the to-task */</span>
+			assert(IIT_EXTERN(temp_task_imp) &gt;= III_EXTERN(temp_inherit));
+			assert(temp_task_imp-&gt;iit_externcnt &gt;= temp_inherit-&gt;iii_externcnt);
+			assert(temp_task_imp-&gt;iit_externdrop &gt;= temp_inherit-&gt;iii_externdrop);
+			temp_task_imp-&gt;iit_externcnt -= temp_inherit-&gt;iii_externcnt;
+			temp_task_imp-&gt;iit_externdrop -= temp_inherit-&gt;iii_externdrop;
+
+		}
+
+		<span class="enscript-comment">/* Adjust the task assertions and determine if an edge was crossed */</span>
+		assert(ipc_importance_task_is_any_receiver_type(temp_task_imp));
+		<span class="enscript-keyword">if</span> (ipc_importance_task_check_transition(temp_task_imp, type, assertcnt)) {
+			ipc_importance_task_reference(temp_task_imp);
+			incr_ref_counter(task_imp-&gt;iit_elem.iie_task_refs_added_transition);
+			queue_enter(propagation, temp_task_imp, ipc_importance_task_t, iit_props);
+		} 
+	}
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_process_updates
+ *	Purpose:
+ *	        Process the queue of task importances and apply the policy
+ *		update called for.  Only process tasks in the queue with an
+ *		update timestamp less than the supplied max.
+ *	Conditions:
+ *		Called and returns with importance locked.
+ *		May drop importance lock and block temporarily.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_task_process_updates</span>(
+	queue_t   supplied_queue,
+	boolean_t boost,
+	uint64_t  max_timestamp)
+{
+	ipc_importance_task_t task_imp;
+	queue_head_t second_chance;
+	queue_t queue = supplied_queue;
+
+	<span class="enscript-comment">/*
+	 * This queue will hold the task's we couldn't trylock on first pass.
+	 * By using a second (private) queue, we guarantee all tasks that get
+	 * entered on this queue have a timestamp under the maximum.
+	 */</span>
+	queue_init(&amp;second_chance);
+
+	<span class="enscript-comment">/* process any resulting policy updates */</span>
+ <span class="enscript-reference">retry</span>:
+	<span class="enscript-keyword">while</span>(!queue_empty(queue)) {
+		task_t target_task;
+		<span class="enscript-type">struct</span> task_pend_token pend_token = {};
+
+		task_imp = (ipc_importance_task_t)queue_first(queue);
+		assert(0 == task_imp-&gt;iit_updatepolicy);
+		assert(queue == task_imp-&gt;iit_updateq);
+
+		<span class="enscript-comment">/* if timestamp is too big, we're done */</span>
+		<span class="enscript-keyword">if</span> (task_imp-&gt;iit_updatetime &gt; max_timestamp) {
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/* we were given a reference on each task in the queue */</span>
+
+		<span class="enscript-comment">/* remove it from the supplied queue */</span>
+		queue_remove(queue, task_imp, ipc_importance_task_t, iit_updates);
+		task_imp-&gt;iit_updateq = NULL;
+
+		target_task = task_imp-&gt;iit_task;
+
+		<span class="enscript-comment">/* Is it well on the way to exiting? */</span>
+		<span class="enscript-keyword">if</span> (TASK_NULL == target_task) {
+			ipc_importance_task_release_locked(task_imp);
+			<span class="enscript-comment">/* importance unlocked */</span>
+			ipc_importance_lock();
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/* Has the update been reversed on the hysteresis queue? */</span>
+		<span class="enscript-keyword">if</span> (0 &lt; task_imp-&gt;iit_assertcnt &amp;&amp;
+		    queue == &amp;ipc_importance_delayed_drop_queue) {
+			ipc_importance_task_release_locked(task_imp);
+			<span class="enscript-comment">/* importance unlocked */</span>
+			ipc_importance_lock();
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/* 
+		 * Can we get the task lock out-of-order? 
+		 * If not, stick this back on the second-chance queue.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!task_lock_try(target_task)) {
+			boolean_t should_wait_lock = (queue == &amp;second_chance);
+			task_imp-&gt;iit_updateq = &amp;second_chance;
+		
+			<span class="enscript-comment">/*
+			 * If we're already processing second-chances on
+			 * tasks, keep this task on the front of the queue.
+			 * We will wait for the task lock before coming
+			 * back and trying again, and we have a better
+			 * chance of re-acquiring the lock if we come back
+			 * to it right away.
+			 */</span>
+			<span class="enscript-keyword">if</span> (should_wait_lock){
+				task_reference(target_task);
+				queue_enter_first(&amp;second_chance, task_imp,
+						  ipc_importance_task_t, iit_updates);
+			} <span class="enscript-keyword">else</span> {
+				queue_enter(&amp;second_chance, task_imp, 
+					    ipc_importance_task_t, iit_updates);
+			}
+			ipc_importance_unlock();
+			
+			<span class="enscript-keyword">if</span> (should_wait_lock) {
+				task_lock(target_task);
+				task_unlock(target_task);
+				task_deallocate(target_task);
+			}
+
+			ipc_importance_lock();
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/* is it going away? */</span>
+		<span class="enscript-keyword">if</span> (!target_task-&gt;active) {
+			task_unlock(target_task);
+			ipc_importance_task_release_locked(task_imp);
+			<span class="enscript-comment">/* importance unlocked */</span>
+			ipc_importance_lock();
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/* take a task reference for while we don't have the importance lock */</span>
+		task_reference(target_task);
+
+		<span class="enscript-comment">/* count the transition */</span>
+		<span class="enscript-keyword">if</span> (boost)
+			task_imp-&gt;iit_transitions++;
+
+		ipc_importance_unlock();
+
+		<span class="enscript-comment">/* apply the policy adjust to the target task (while it is still locked) */</span>
+		task_update_boost_locked(target_task, boost, &amp;pend_token);
+
+		<span class="enscript-comment">/* complete the policy update with the task unlocked */</span>
+		ipc_importance_task_release(task_imp);
+		task_unlock(target_task);
+		task_policy_update_complete_unlocked(target_task, THREAD_NULL, &amp;pend_token);
+		task_deallocate(target_task);
+
+		ipc_importance_lock();
+	}
+
+	<span class="enscript-comment">/* If there are tasks we couldn't update the first time, try again */</span>
+	<span class="enscript-keyword">if</span> (!queue_empty(&amp;second_chance)) {
+		queue = &amp;second_chance;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry</span>;
+	}
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_delayed_drop_scan
+ *	Purpose:
+ *	        The thread call routine to scan the delayed drop queue,
+ *		requesting all updates with a deadline up to the last target
+ *		for the thread-call (which is DENAP_DROP_SKEW beyond the first
+ *		thread's optimum delay).
+ *		update to drop its boost.
+ *	Conditions:
+ *		Nothing locked
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_task_delayed_drop_scan</span>(
+	__unused <span class="enscript-type">void</span> *arg1,
+	__unused <span class="enscript-type">void</span> *arg2) 
+{
+	ipc_importance_lock();
+
+	<span class="enscript-comment">/* process all queued task drops with timestamps up to TARGET(first)+SKEW */</span>
+	ipc_importance_task_process_updates(&amp;ipc_importance_delayed_drop_queue, 
+					    FALSE,
+					    ipc_importance_delayed_drop_timestamp);
+
+	<span class="enscript-comment">/* importance lock may have been temporarily dropped */</span>
+
+	<span class="enscript-comment">/* If there are any entries left in the queue, re-arm the call here */</span>
+	<span class="enscript-keyword">if</span> (!queue_empty(&amp;ipc_importance_delayed_drop_queue)) {
+		ipc_importance_task_t task_imp;
+		uint64_t deadline;
+		uint64_t leeway;
+
+		task_imp = (ipc_importance_task_t)queue_first(&amp;ipc_importance_delayed_drop_queue);
+
+		nanoseconds_to_absolutetime(DENAP_DROP_DELAY, &amp;deadline);
+		deadline += task_imp-&gt;iit_updatetime;
+		ipc_importance_delayed_drop_timestamp = deadline;
+
+		nanoseconds_to_absolutetime(DENAP_DROP_LEEWAY, &amp;leeway);
+
+		thread_call_enter_delayed_with_leeway(
+					ipc_importance_delayed_drop_call,
+					NULL,
+					deadline,
+					leeway,
+					DENAP_DROP_FLAGS);
+	} <span class="enscript-keyword">else</span> {
+		ipc_importance_delayed_drop_call_requested = FALSE;
+	}
+	ipc_importance_unlock();
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_delayed_drop
+ *	Purpose:
+ *		Queue the specified task importance for delayed policy
+ *		update to drop its boost.
+ *	Conditions:
+ *		Called with the importance lock held.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_task_delayed_drop</span>(ipc_importance_task_t task_imp)
+{
+	uint64_t timestamp = mach_absolute_time(); <span class="enscript-comment">/* no mach_approximate_time() in kernel */</span>
+
+	assert(ipc_importance_delayed_drop_call != NULL);
+
+	<span class="enscript-comment">/*
+	 * If still on an update queue from a previous change,
+	 * remove it first (and use that reference).  Otherwise, take
+	 * a new reference for the delay drop update queue.
+	 */</span>
+	<span class="enscript-keyword">if</span> (NULL != task_imp-&gt;iit_updateq) {
+		queue_remove(task_imp-&gt;iit_updateq, task_imp, 
+			     ipc_importance_task_t, iit_updates);
+	} <span class="enscript-keyword">else</span> {
+		ipc_importance_task_reference_internal(task_imp);
+	}
+
+	task_imp-&gt;iit_updateq = &amp;ipc_importance_delayed_drop_queue;
+	task_imp-&gt;iit_updatetime = timestamp;
+
+	queue_enter(&amp;ipc_importance_delayed_drop_queue, task_imp, 
+		    ipc_importance_task_t, iit_updates);
+
+	<span class="enscript-comment">/* request the delayed thread-call if not already requested */</span>
+	<span class="enscript-keyword">if</span> (!ipc_importance_delayed_drop_call_requested) {
+		uint64_t deadline;
+		uint64_t leeway;
+
+		nanoseconds_to_absolutetime(DENAP_DROP_DELAY, &amp;deadline);
+		deadline += task_imp-&gt;iit_updatetime;
+		ipc_importance_delayed_drop_timestamp = deadline;
+
+		nanoseconds_to_absolutetime(DENAP_DROP_LEEWAY, &amp;leeway);
+
+		ipc_importance_delayed_drop_call_requested = TRUE;
+		thread_call_enter_delayed_with_leeway(
+					ipc_importance_delayed_drop_call,
+					NULL,
+					deadline,
+					leeway,
+					DENAP_DROP_FLAGS);
+	}
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_propagate_assertion_locked
+ *	Purpose:
+ *		Propagate the importance transition type to every item
+ *		If this causes a boost to be applied, determine if that
+ *		boost should propagate downstream.
+ *	Conditions:
+ *		Called with the importance lock held.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_task_propagate_assertion_locked</span>(
+	ipc_importance_task_t task_imp,
+	iit_update_type_t type,
+	boolean_t update_task_imp)
+{
+	boolean_t boost = (IIT_UPDATE_HOLD == type);
+	ipc_importance_task_t temp_task_imp;
+	queue_head_t propagate;
+	queue_head_t updates;
+
+	queue_init(&amp;updates);
+	queue_init(&amp;propagate);
+
+	<span class="enscript-comment">/*
+	 * If we're going to update the policy for the provided task,
+	 * enqueue it on the propagate queue itself.  Otherwise, only
+	 * enqueue downstream things.
+	 */</span>
+	<span class="enscript-keyword">if</span> (update_task_imp) {
+		queue_enter(&amp;propagate, task_imp, ipc_importance_task_t, iit_props);
+	} <span class="enscript-keyword">else</span> {
+		ipc_importance_task_propagate_helper(task_imp, type, &amp;propagate);
+	}
+
+	<span class="enscript-comment">/*
+	 * for each item on the propagation list, propagate any change downstream,
+	 * adding new tasks to propagate further if they transistioned as well.
+	 */</span>
+	<span class="enscript-keyword">while</span> (!queue_empty(&amp;propagate)) {
+		boolean_t need_update;
+
+		queue_remove_first(&amp;propagate, temp_task_imp, ipc_importance_task_t, iit_props);
+		assert(IIT_NULL != temp_task_imp);
+
+		<span class="enscript-comment">/* only propagate for receivers not already marked as a donor */</span>
+		<span class="enscript-keyword">if</span> (!ipc_importance_task_is_marked_donor(temp_task_imp) &amp;&amp;
+		    ipc_importance_task_is_marked_receiver(temp_task_imp)) {
+			ipc_importance_task_propagate_helper(temp_task_imp, type, &amp;propagate);
+		}
+
+		<span class="enscript-comment">/* if we have a policy update to apply, enqueue a reference for later processing */</span>
+		need_update = (0 != temp_task_imp-&gt;iit_updatepolicy);
+		temp_task_imp-&gt;iit_updatepolicy = 0;
+		<span class="enscript-keyword">if</span> (need_update &amp;&amp; TASK_NULL != temp_task_imp-&gt;iit_task) {
+			<span class="enscript-keyword">if</span> (NULL == temp_task_imp-&gt;iit_updateq) {
+
+				<span class="enscript-comment">/*
+				 * If a downstream task that needs an update is subjects to AppNap,
+				 * drop boosts according to the delay hysteresis.  Otherwise,
+				 * immediate update it.
+				 */</span>
+				<span class="enscript-keyword">if</span> (!boost &amp;&amp; temp_task_imp != task_imp &amp;&amp;
+				    ipc_importance_delayed_drop_call != NULL &amp;&amp;
+				    ipc_importance_task_is_marked_denap_receiver(temp_task_imp)) {
+					ipc_importance_task_delayed_drop(temp_task_imp);
+				} <span class="enscript-keyword">else</span> {
+					temp_task_imp-&gt;iit_updatetime = 0;
+					temp_task_imp-&gt;iit_updateq = &amp;updates;
+					ipc_importance_task_reference_internal(temp_task_imp);
+					<span class="enscript-keyword">if</span> (boost) {
+						queue_enter(&amp;updates, temp_task_imp,
+							    ipc_importance_task_t, iit_updates);
+					} <span class="enscript-keyword">else</span> {
+						queue_enter_first(&amp;updates, temp_task_imp,
+								  ipc_importance_task_t, iit_updates);
+					}
+				}
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* Must already be on the AppNap hysteresis queue */</span>
+				assert(ipc_importance_delayed_drop_call != NULL);
+				assert(ipc_importance_task_is_marked_denap_receiver(temp_task_imp));
+			}	
+		}
+	}
+
+	<span class="enscript-comment">/* apply updates to task (may drop importance lock) */</span>
+	<span class="enscript-keyword">if</span> (!queue_empty(&amp;updates)) {
+		ipc_importance_task_process_updates(&amp;updates, boost, 0);
+	}
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_hold_internal_assertion_locked
+ *	Purpose:
+ *		Increment the assertion count on the task importance.
+ *		If this results in a boost state change in that task,
+ *		prepare to update task policy for this task AND, if
+ *		if not just waking out of App Nap, all down-stream
+ *		tasks that have a similar transition through inheriting
+ *		this update.
+ *	Conditions:
+ *		importance locked on entry and exit.
+ *		May temporarily drop importance lock and block.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">ipc_importance_task_hold_internal_assertion_locked</span>(ipc_importance_task_t task_imp, uint32_t count)
+{
+	<span class="enscript-keyword">if</span> (ipc_importance_task_check_transition(task_imp, IIT_UPDATE_HOLD, count)) {
+		ipc_importance_task_propagate_assertion_locked(task_imp, IIT_UPDATE_HOLD, TRUE);
+	}
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_drop_internal_assertion_locked
+ *	Purpose:
+ *		Decrement the assertion count on the task importance.
+ *		If this results in a boost state change in that task,
+ *		prepare to update task policy for this task AND, if
+ *		if not just waking out of App Nap, all down-stream
+ *		tasks that have a similar transition through inheriting
+ *		this update.
+ *	Conditions:
+ *		importance locked on entry and exit.
+ *		May temporarily drop importance lock and block.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">ipc_importance_task_drop_internal_assertion_locked</span>(ipc_importance_task_t task_imp, uint32_t count)
+{
+	<span class="enscript-keyword">if</span> (ipc_importance_task_check_transition(task_imp, IIT_UPDATE_DROP, count)) {
+		ipc_importance_task_propagate_assertion_locked(task_imp, IIT_UPDATE_DROP, TRUE);
+	}
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *      Routine:        ipc_importance_task_hold_internal_assertion
+ *      Purpose:
+ *              Increment the assertion count on the task importance.
+ *              If this results in a 0-&gt;1 change in that count,
+ *              prepare to update task policy for this task AND
+ *              (potentially) all down-stream tasks that have a
+ *		similar transition through inheriting this update.
+ *      Conditions:
+ *              Nothing locked
+ *              May block after dropping importance lock.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ipc_importance_task_hold_internal_assertion</span>(ipc_importance_task_t task_imp, uint32_t count)
+{
+	<span class="enscript-type">int</span> ret = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (ipc_importance_task_is_any_receiver_type(task_imp)) {
+		ipc_importance_lock();
+		ret = ipc_importance_task_hold_internal_assertion_locked(task_imp, count);
+		ipc_importance_unlock();
+	}
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_drop_internal_assertion
+ *	Purpose:
+ *		Decrement the assertion count on the task importance.
+ *		If this results in a X-&gt;0 change in that count,
+ *		prepare to update task policy for this task AND
+ *		all down-stream tasks that have a similar transition
+ *		through inheriting this drop update.
+ *	Conditions:
+ *		Nothing locked on entry.
+ *		May block after dropping importance lock.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ipc_importance_task_drop_internal_assertion</span>(ipc_importance_task_t task_imp, uint32_t count)
+{
+	kern_return_t ret = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (ipc_importance_task_is_any_receiver_type(task_imp)) {
+		ipc_importance_lock();
+		ret = ipc_importance_task_drop_internal_assertion_locked(task_imp, count);
+		ipc_importance_unlock();
+	}
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-comment">/*
+ *      Routine:        ipc_importance_task_hold_file_lock_assertion
+ *      Purpose:
+ *              Increment the file lock assertion count on the task importance.
+ *              If this results in a 0-&gt;1 change in that count,
+ *              prepare to update task policy for this task AND
+ *              (potentially) all down-stream tasks that have a
+ *		similar transition through inheriting this update.
+ *      Conditions:
+ *              Nothing locked
+ *              May block after dropping importance lock.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ipc_importance_task_hold_file_lock_assertion</span>(ipc_importance_task_t task_imp, uint32_t count)
+{
+	kern_return_t ret = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (ipc_importance_task_is_any_receiver_type(task_imp)) {
+		ipc_importance_lock();
+		ret = ipc_importance_task_hold_internal_assertion_locked(task_imp, count);
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS == ret) {
+			task_imp-&gt;iit_filelocks += count;
+		}
+		ipc_importance_unlock();
+	}
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_drop_file_lock_assertion
+ *	Purpose:
+ *		Decrement the assertion count on the task importance.
+ *		If this results in a X-&gt;0 change in that count,
+ *		prepare to update task policy for this task AND
+ *		all down-stream tasks that have a similar transition
+ *		through inheriting this drop update.
+ *	Conditions:
+ *		Nothing locked on entry.
+ *		May block after dropping importance lock.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ipc_importance_task_drop_file_lock_assertion</span>(ipc_importance_task_t task_imp, uint32_t count)
+{
+	kern_return_t ret = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (ipc_importance_task_is_any_receiver_type(task_imp)) {
+		ipc_importance_lock();
+		<span class="enscript-keyword">if</span> (count &lt;= task_imp-&gt;iit_filelocks) {
+			task_imp-&gt;iit_filelocks -= count;
+			ret = ipc_importance_task_drop_internal_assertion_locked(task_imp, count);
+		} <span class="enscript-keyword">else</span> {
+			ret = KERN_INVALID_ARGUMENT;
+		}
+		ipc_importance_unlock();
+	}
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_hold_legacy_external_assertion
+ *	Purpose:
+ *		Increment the external assertion count on the task importance.
+ *		This cannot result in an 0-&gt;1 transition, as the caller must
+ *		already hold an external boost.
+ *	Conditions:
+ *		Nothing locked on entry.
+ *		May block after dropping importance lock.
+ *		A queue of task importance structures is returned
+ *		by ipc_importance_task_hold_assertion_locked(). Each
+ *		needs to be updated (outside the importance lock hold).
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ipc_importance_task_hold_legacy_external_assertion</span>(ipc_importance_task_t task_imp, uint32_t count)
+{
+	task_t target_task;
+	uint32_t target_assertcnt;
+	uint32_t target_externcnt;
+	uint32_t target_legacycnt;
+
+	kern_return_t ret;
+
+	ipc_importance_lock();
+	target_task = task_imp-&gt;iit_task;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+	<span class="enscript-type">int</span> target_pid = task_pid(target_task);
+
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, (IMPORTANCE_CODE(IMP_ASSERTION, (IMP_HOLD | TASK_POLICY_EXTERNAL))) | DBG_FUNC_START,
+		proc_selfpid(), target_pid, task_imp-&gt;iit_assertcnt, IIT_LEGACY_EXTERN(task_imp), 0);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (IIT_LEGACY_EXTERN(task_imp) == 0) {
+		<span class="enscript-comment">/* Only allowed to take a new boost assertion when holding an external boost */</span>
+		<span class="enscript-comment">/* save data for diagnostic printf below */</span>
+		target_assertcnt = task_imp-&gt;iit_assertcnt;
+		target_externcnt = IIT_EXTERN(task_imp);
+		target_legacycnt = IIT_LEGACY_EXTERN(task_imp);
+		ret = KERN_FAILURE;
+		count = 0;
+	} <span class="enscript-keyword">else</span> {
+		assert(ipc_importance_task_is_any_receiver_type(task_imp));
+		assert(0 &lt; task_imp-&gt;iit_assertcnt);
+		assert(0 &lt; IIT_EXTERN(task_imp));
+		task_imp-&gt;iit_assertcnt += count;
+		task_imp-&gt;iit_externcnt += count;
+		task_imp-&gt;iit_legacy_externcnt += count;
+		ret = KERN_SUCCESS;
+	}
+	ipc_importance_unlock();
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, (IMPORTANCE_CODE(IMP_ASSERTION, (IMP_HOLD | TASK_POLICY_EXTERNAL))) | DBG_FUNC_END,
+				  proc_selfpid(), target_pid, task_imp-&gt;iit_assertcnt, IIT_LEGACY_EXTERN(task_imp), 0);
+        <span class="enscript-comment">// This covers the legacy case where a task takes an extra boost.
+</span>	DTRACE_BOOST5(receive_boost, task_t, target_task, <span class="enscript-type">int</span>, target_pid, <span class="enscript-type">int</span>, proc_selfpid(), <span class="enscript-type">int</span>, count, <span class="enscript-type">int</span>, task_imp-&gt;iit_assertcnt);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (KERN_FAILURE == ret &amp;&amp; target_task != TASK_NULL) {
+		printf(<span class="enscript-string">&quot;BUG in process %s[%d]: &quot;</span>
+		       <span class="enscript-string">&quot;attempt to acquire an additional legacy external boost assertion without holding an existing legacy external assertion. &quot;</span>
+		       <span class="enscript-string">&quot;(%d total, %d external, %d legacy-external)\n&quot;</span>,
+		       proc_name_address(target_task-&gt;bsd_info), task_pid(target_task),
+		       target_assertcnt, target_externcnt, target_legacycnt);
+	}
+
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_drop_legacy_external_assertion
+ *	Purpose:
+ *		Drop the legacy external assertion count on the task and
+ *		reflect that change to total external assertion count and
+ *		then onto the internal importance count.
+ *
+ *		If this results in a X-&gt;0 change in the internal,
+ *		count, prepare to update task policy for this task AND
+ *		all down-stream tasks that have a similar transition
+ *		through inheriting this update.
+ *	Conditions:
+ *		Nothing locked on entry.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ipc_importance_task_drop_legacy_external_assertion</span>(ipc_importance_task_t task_imp, uint32_t count)
+{
+	<span class="enscript-type">int</span> ret = KERN_SUCCESS;
+	task_t target_task;
+	uint32_t target_assertcnt;
+	uint32_t target_externcnt;
+	uint32_t target_legacycnt;
+
+	<span class="enscript-keyword">if</span> (count &gt; 1) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+		
+	ipc_importance_lock();
+	target_task = task_imp-&gt;iit_task;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+	<span class="enscript-type">int</span> target_pid = task_pid(target_task);
+
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, (IMPORTANCE_CODE(IMP_ASSERTION, (IMP_DROP | TASK_POLICY_EXTERNAL))) | DBG_FUNC_START,
+		proc_selfpid(), target_pid, task_imp-&gt;iit_assertcnt, IIT_LEGACY_EXTERN(task_imp), 0);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (count &gt; IIT_LEGACY_EXTERN(task_imp)) {
+		<span class="enscript-comment">/* Process over-released its boost count - save data for diagnostic printf */</span>
+		<span class="enscript-comment">/* TODO: If count &gt; 1, we should clear out as many external assertions as there are left. */</span>
+		target_assertcnt = task_imp-&gt;iit_assertcnt;
+		target_externcnt = IIT_EXTERN(task_imp);
+		target_legacycnt = IIT_LEGACY_EXTERN(task_imp);
+		ret = KERN_FAILURE;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* 
+		 * decrement legacy external count from the top level and reflect
+		 * into internal for this and all subsequent updates.
+		 */</span>
+		assert(ipc_importance_task_is_any_receiver_type(task_imp));
+		assert(IIT_EXTERN(task_imp) &gt;= count);
+
+		task_imp-&gt;iit_legacy_externdrop += count;
+		task_imp-&gt;iit_externdrop += count;
+
+		<span class="enscript-comment">/* reset extern counters (if appropriate) */</span>
+		<span class="enscript-keyword">if</span> (IIT_LEGACY_EXTERN(task_imp) == 0) {
+			<span class="enscript-keyword">if</span> (IIT_EXTERN(task_imp) != 0) {
+				task_imp-&gt;iit_externcnt -= task_imp-&gt;iit_legacy_externcnt;
+				task_imp-&gt;iit_externdrop -= task_imp-&gt;iit_legacy_externdrop;
+			} <span class="enscript-keyword">else</span> {
+				task_imp-&gt;iit_externcnt = 0;
+				task_imp-&gt;iit_externdrop = 0;
+			}
+			task_imp-&gt;iit_legacy_externcnt = 0;
+			task_imp-&gt;iit_legacy_externdrop = 0;
+		}
+		
+		<span class="enscript-comment">/* reflect the drop to the internal assertion count (and effect any importance change) */</span>
+		<span class="enscript-keyword">if</span> (ipc_importance_task_check_transition(task_imp, IIT_UPDATE_DROP, count)) {
+			ipc_importance_task_propagate_assertion_locked(task_imp, IIT_UPDATE_DROP, TRUE);
+		}
+		ret = KERN_SUCCESS;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, (IMPORTANCE_CODE(IMP_ASSERTION, (IMP_DROP | TASK_POLICY_EXTERNAL))) | DBG_FUNC_END,
+					  proc_selfpid(), target_pid, task_imp-&gt;iit_assertcnt, IIT_LEGACY_EXTERN(task_imp), 0);
+#<span class="enscript-reference">endif</span>
+
+	ipc_importance_unlock();
+
+	<span class="enscript-comment">/* delayed printf for user-supplied data failures */</span>
+	<span class="enscript-keyword">if</span> (KERN_FAILURE == ret &amp;&amp; TASK_NULL != target_task) {
+		printf(<span class="enscript-string">&quot;BUG in process %s[%d]: over-released legacy external boost assertions (%d total, %d external, %d legacy-external)\n&quot;</span>,
+		       proc_name_address(target_task-&gt;bsd_info), task_pid(target_task),
+		       target_assertcnt, target_externcnt, target_legacycnt);
+	}
+
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+
+
+<span class="enscript-comment">/* Transfer an assertion to legacy userspace responsibility */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">ipc_importance_task_externalize_legacy_assertion</span>(ipc_importance_task_t task_imp, uint32_t count, __unused <span class="enscript-type">int</span> sender_pid)
+{
+	task_t target_task;
+
+	assert(IIT_NULL != task_imp);
+	target_task = task_imp-&gt;iit_task;
+
+	<span class="enscript-keyword">if</span> (TASK_NULL == target_task ||
+	    !ipc_importance_task_is_any_receiver_type(task_imp)) {
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+	<span class="enscript-type">int</span> target_pid = task_pid(target_task);
+
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, (IMPORTANCE_CODE(IMP_ASSERTION, IMP_EXTERN)) | DBG_FUNC_START,
+	        proc_selfpid(), target_pid, task_imp-&gt;iit_assertcnt, IIT_EXTERN(task_imp), 0);
+#<span class="enscript-reference">endif</span>
+
+	ipc_importance_lock();
+	<span class="enscript-comment">/* assert(task_imp-&gt;iit_assertcnt &gt;= IIT_EXTERN(task_imp) + count); */</span>
+	assert(IIT_EXTERN(task_imp) &gt;= IIT_LEGACY_EXTERN(task_imp));
+	task_imp-&gt;iit_legacy_externcnt += count;
+	task_imp-&gt;iit_externcnt += count;
+	ipc_importance_unlock();
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, (IMPORTANCE_CODE(IMP_ASSERTION, IMP_EXTERN)) | DBG_FUNC_END,
+				  proc_selfpid(), target_pid, task_imp-&gt;iit_assertcnt, IIT_LEGACY_EXTERN(task_imp), 0);
+    <span class="enscript-comment">// This is the legacy boosting path
+</span>	DTRACE_BOOST5(receive_boost, task_t, target_task, <span class="enscript-type">int</span>, target_pid, <span class="enscript-type">int</span>, sender_pid, <span class="enscript-type">int</span>, count, <span class="enscript-type">int</span>, IIT_LEGACY_EXTERN(task_imp));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IMPORTANCE_DEBUG */</span>
+
+	<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_update_live_donor
+ *	Purpose:
+ *		Read the live donor status and update the live_donor bit/propagate the change in importance.
+ *	Conditions:
+ *		Nothing locked on entrance, nothing locked on exit.
+ *
+ *		TODO: Need tracepoints around this function...
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_task_update_live_donor</span>(ipc_importance_task_t task_imp)
+{
+	uint32_t task_live_donor;
+	boolean_t before_donor;
+	boolean_t after_donor;
+	task_t target_task;
+  
+	assert(task_imp != NULL);
+
+	<span class="enscript-comment">/*
+	 * Nothing to do if the task is not marked as expecting
+	 * live donor updates.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!ipc_importance_task_is_marked_live_donor(task_imp)) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+	ipc_importance_lock();
+
+	<span class="enscript-comment">/* If the task got disconnected on the way here, no use (or ability) adjusting live donor status */</span>
+	target_task = task_imp-&gt;iit_task;
+	<span class="enscript-keyword">if</span> (TASK_NULL == target_task) {
+		ipc_importance_unlock();
+		<span class="enscript-keyword">return</span>;
+	}
+	before_donor = ipc_importance_task_is_marked_donor(task_imp);
+
+	<span class="enscript-comment">/* snapshot task live donor status - may change, but another call will accompany the change */</span>
+	task_live_donor = target_task-&gt;effective_policy.t_live_donor;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+	<span class="enscript-type">int</span> target_pid = task_pid(target_task);
+
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+	                          (IMPORTANCE_CODE(IMP_DONOR_CHANGE, IMP_DONOR_UPDATE_LIVE_DONOR_STATE)) | DBG_FUNC_START,
+	                          target_pid, task_imp-&gt;iit_donor, task_live_donor, before_donor, 0);
+#<span class="enscript-reference">endif</span>	                          
+
+	<span class="enscript-comment">/* update the task importance live donor status based on the task's value */</span>
+	task_imp-&gt;iit_donor = task_live_donor;
+
+	after_donor = ipc_importance_task_is_marked_donor(task_imp);
+
+	<span class="enscript-comment">/* Has the effectiveness of being a donor changed as a result of this update? */</span>
+	<span class="enscript-keyword">if</span> (before_donor != after_donor) {
+		iit_update_type_t type;
+
+		<span class="enscript-comment">/* propagate assertions without updating the current task policy (already handled) */</span>
+		<span class="enscript-keyword">if</span> (0 == before_donor) {
+			task_imp-&gt;iit_transitions++;
+			type = IIT_UPDATE_HOLD;
+		} <span class="enscript-keyword">else</span> {
+			type = IIT_UPDATE_DROP;
+		}
+		ipc_importance_task_propagate_assertion_locked(task_imp, type, FALSE);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+	                          (IMPORTANCE_CODE(IMP_DONOR_CHANGE, IMP_DONOR_UPDATE_LIVE_DONOR_STATE)) | DBG_FUNC_END,
+	                          target_pid, task_imp-&gt;iit_donor, task_live_donor, after_donor, 0);
+#<span class="enscript-reference">endif</span>
+
+	ipc_importance_unlock();
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_mark_donor
+ *	Purpose:
+ *		Set the task importance donor flag.
+ *	Conditions:
+ *		Nothing locked on entrance, nothing locked on exit.
+ *
+ *		This is only called while the task is being constructed,
+ *		so no need to update task policy or propagate downstream.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_task_mark_donor</span>(ipc_importance_task_t task_imp, boolean_t donating)
+{
+	assert(task_imp != NULL);
+
+	ipc_importance_lock();
+
+	<span class="enscript-type">int</span> old_donor = task_imp-&gt;iit_donor;
+
+	task_imp-&gt;iit_donor = (donating ? 1 : 0);
+
+	<span class="enscript-keyword">if</span> (task_imp-&gt;iit_donor &gt; 0 &amp;&amp; old_donor == 0)
+		task_imp-&gt;iit_transitions++;
+
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+	                          (IMPORTANCE_CODE(IMP_DONOR_CHANGE, IMP_DONOR_INIT_DONOR_STATE)) | DBG_FUNC_NONE,
+	                          task_pid(task_imp-&gt;iit_task), donating,
+	                          old_donor, task_imp-&gt;iit_donor, 0);
+	
+	ipc_importance_unlock();
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_marked_donor
+ *	Purpose:
+ *		Query the donor flag for the given task importance.
+ *	Conditions:
+ *		May be called without taking the importance lock.
+ *		In that case, donor status can change so you must
+ *		check only once for each donation event.
+ */</span>
+boolean_t
+<span class="enscript-function-name">ipc_importance_task_is_marked_donor</span>(ipc_importance_task_t task_imp)
+{
+	<span class="enscript-keyword">if</span> (IIT_NULL == task_imp) {
+  		<span class="enscript-keyword">return</span> FALSE;
+	}
+	<span class="enscript-keyword">return</span> (0 != task_imp-&gt;iit_donor);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_mark_live_donor
+ *	Purpose:
+ *		Indicate that the task is eligible for live donor updates.
+ *	Conditions:
+ *		Nothing locked on entrance, nothing locked on exit.
+ *
+ *		This is only called while the task is being constructed.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_task_mark_live_donor</span>(ipc_importance_task_t task_imp, boolean_t live_donating)
+{
+	assert(task_imp != NULL);
+
+	ipc_importance_lock();
+	task_imp-&gt;iit_live_donor = (live_donating ? 1 : 0);
+	ipc_importance_unlock();
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_marked_live_donor
+ *	Purpose:
+ *		Query the live donor and donor flags for the given task importance.
+ *	Conditions:
+ *		May be called without taking the importance lock.
+ *		In that case, donor status can change so you must
+ *		check only once for each donation event.
+ */</span>
+boolean_t
+<span class="enscript-function-name">ipc_importance_task_is_marked_live_donor</span>(ipc_importance_task_t task_imp)
+{
+	<span class="enscript-keyword">if</span> (IIT_NULL == task_imp) {
+  		<span class="enscript-keyword">return</span> FALSE;
+	}
+	<span class="enscript-keyword">return</span> (0 != task_imp-&gt;iit_live_donor);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_is_donor
+ *	Purpose:
+ *		Query the full donor status for the given task importance.
+ *	Conditions:
+ *		May be called without taking the importance lock.
+ *		In that case, donor status can change so you must
+ *		check only once for each donation event.
+ */</span>
+boolean_t
+<span class="enscript-function-name">ipc_importance_task_is_donor</span>(ipc_importance_task_t task_imp)
+{
+	<span class="enscript-keyword">if</span> (IIT_NULL == task_imp) {
+  		<span class="enscript-keyword">return</span> FALSE;
+	}
+	<span class="enscript-keyword">return</span> (ipc_importance_task_is_marked_donor(task_imp) ||
+		(ipc_importance_task_is_marked_receiver(task_imp) &amp;&amp;
+		 task_imp-&gt;iit_assertcnt &gt; 0));
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_is_never_donor
+ *	Purpose:
+ *		Query if a given task can ever donate importance.
+ *	Conditions:
+ *		May be called without taking the importance lock.
+ *		Condition is permanent for a give task.		
+ */</span>
+boolean_t
+<span class="enscript-function-name">ipc_importance_task_is_never_donor</span>(ipc_importance_task_t task_imp)
+{
+	<span class="enscript-keyword">if</span> (IIT_NULL == task_imp) {
+  		<span class="enscript-keyword">return</span> FALSE;
+	}
+	<span class="enscript-keyword">return</span> (!ipc_importance_task_is_marked_donor(task_imp) &amp;&amp;
+		!ipc_importance_task_is_marked_live_donor(task_imp) &amp;&amp;
+		!ipc_importance_task_is_marked_receiver(task_imp));
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_mark_receiver
+ *	Purpose:
+ *		Update the task importance receiver flag.
+ *	Conditions:
+ *		Nothing locked on entrance, nothing locked on exit.
+ *		This can only be invoked before the task is discoverable,
+ *		so no worries about atomicity(?)
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_task_mark_receiver</span>(ipc_importance_task_t task_imp, boolean_t receiving)
+{
+	assert(task_imp != NULL);	
+
+	ipc_importance_lock();
+	<span class="enscript-keyword">if</span> (receiving) {
+		assert(task_imp-&gt;iit_assertcnt == 0);
+		assert(task_imp-&gt;iit_externcnt == 0);
+		assert(task_imp-&gt;iit_externdrop == 0);
+		assert(task_imp-&gt;iit_denap == 0);
+		task_imp-&gt;iit_receiver = 1;  <span class="enscript-comment">/* task can receive importance boost */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (task_imp-&gt;iit_receiver) {
+		assert(task_imp-&gt;iit_denap == 0);
+		<span class="enscript-keyword">if</span> (task_imp-&gt;iit_assertcnt != 0 || IIT_EXTERN(task_imp) != 0) {
+			panic(<span class="enscript-string">&quot;disabling imp_receiver on task with pending importance boosts!&quot;</span>);
+		}
+		task_imp-&gt;iit_receiver = 0;
+	}
+	ipc_importance_unlock();
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_marked_receiver
+ *	Purpose:
+ *		Query the receiver flag for the given task importance.
+ *	Conditions:
+ *		May be called without taking the importance lock as
+ *		the importance flag can never change after task init.
+ */</span>
+boolean_t
+<span class="enscript-function-name">ipc_importance_task_is_marked_receiver</span>(ipc_importance_task_t task_imp)
+{
+	<span class="enscript-keyword">return</span> (IIT_NULL != task_imp &amp;&amp; 0 != task_imp-&gt;iit_receiver);
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_mark_denap_receiver
+ *	Purpose:
+ *		Update the task importance de-nap receiver flag.
+ *	Conditions:
+ *		Nothing locked on entrance, nothing locked on exit.
+ *		This can only be invoked before the task is discoverable,
+ *		so no worries about atomicity(?)
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_task_mark_denap_receiver</span>(ipc_importance_task_t task_imp, boolean_t denap)
+{
+	assert(task_imp != NULL);	
+
+	ipc_importance_lock();
+	<span class="enscript-keyword">if</span> (denap) {
+		assert(task_imp-&gt;iit_assertcnt == 0);
+		assert(task_imp-&gt;iit_externcnt == 0);
+		assert(task_imp-&gt;iit_receiver == 0);
+		task_imp-&gt;iit_denap = 1;  <span class="enscript-comment">/* task can receive de-nap boost */</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (task_imp-&gt;iit_denap) {
+		assert(task_imp-&gt;iit_receiver == 0);
+		<span class="enscript-keyword">if</span> (0 &lt; task_imp-&gt;iit_assertcnt || 0 &lt; IIT_EXTERN(task_imp)) {
+			panic(<span class="enscript-string">&quot;disabling de-nap on task with pending de-nap boosts!&quot;</span>);
+		}
+		task_imp-&gt;iit_denap = 0;
+	}
+	ipc_importance_unlock();
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_marked_denap_receiver
+ *	Purpose:
+ *		Query the de-nap receiver flag for the given task importance.
+ *	Conditions:
+ *		May be called without taking the importance lock as
+ *		the de-nap flag can never change after task init.
+ */</span>
+boolean_t
+<span class="enscript-function-name">ipc_importance_task_is_marked_denap_receiver</span>(ipc_importance_task_t task_imp)
+{
+	<span class="enscript-keyword">return</span> (IIT_NULL != task_imp &amp;&amp; 0 != task_imp-&gt;iit_denap);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_is_denap_receiver
+ *	Purpose:
+ *		Query the full de-nap receiver status for the given task importance.
+ *		For now, that is simply whether the receiver flag is set.
+ *	Conditions:
+ *		May be called without taking the importance lock as
+ *		the de-nap receiver flag can never change after task init.
+ */</span>
+boolean_t
+<span class="enscript-function-name">ipc_importance_task_is_denap_receiver</span>(ipc_importance_task_t task_imp)
+{
+	<span class="enscript-keyword">return</span> (ipc_importance_task_is_marked_denap_receiver(task_imp));
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_task_is_any_receiver_type
+ *	Purpose:
+ *		Query if the task is marked to receive boosts - either
+ *		importance or denap.
+ *	Conditions:
+ *		May be called without taking the importance lock as both
+ *		the importance and de-nap receiver flags can never change
+ *		after task init.
+ */</span>
+boolean_t
+<span class="enscript-function-name">ipc_importance_task_is_any_receiver_type</span>(ipc_importance_task_t task_imp)
+{
+	<span class="enscript-keyword">return</span> (ipc_importance_task_is_marked_receiver(task_imp) ||
+		ipc_importance_task_is_marked_denap_receiver(task_imp));
+}
+
+#<span class="enscript-reference">if</span> 0 <span class="enscript-comment">/* currently unused */</span>
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_inherit_reference
+ *	Purpose:
+ *		Add a reference to the inherit importance element.
+ *	Conditions:
+ *		Caller most hold a reference on the inherit element.
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_inherit_reference</span>(ipc_importance_inherit_t inherit)
+{
+	ipc_importance_reference(&amp;inherit-&gt;iii_elem);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* currently unused */</span>
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_inherit_release_locked
+ *	Purpose:
+ *		Release a reference on an inherit importance attribute value,
+ *		unlinking and deallocating the attribute if the last reference.
+ *	Conditions:
+ *		Entered with importance lock held, leaves with it unlocked.
+ */</span>
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_inherit_release_locked</span>(ipc_importance_inherit_t inherit)
+{
+	ipc_importance_release_locked(&amp;inherit-&gt;iii_elem);
+}
+
+#<span class="enscript-reference">if</span> 0 <span class="enscript-comment">/* currently unused */</span>
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_inherit_release
+ *	Purpose:
+ *		Release a reference on an inherit importance attribute value,
+ *		unlinking and deallocating the attribute if the last reference.
+ *	Conditions:
+ *		nothing locked on entrance, nothing locked on exit.
+ *		May block.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_inherit_release</span>(ipc_importance_inherit_t inherit)
+{
+	<span class="enscript-keyword">if</span> (III_NULL != inherit)
+		ipc_importance_release(&amp;inherit-&gt;iii_elem);
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* 0 currently unused */</span>
+	
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_for_task
+ *	Purpose:
+ *		Create a reference for the specified task's base importance
+ *		element.  If the base importance element doesn't exist, make it and
+ *		bind it to the active task.  If the task is inactive, there isn't
+ *		any need to return a new reference.
+ *	Conditions:
+ *		If made is true, a &quot;made&quot; reference is returned (for donating to
+ *		the voucher system).  Otherwise	an internal reference is returned.
+ *
+ *		Nothing locked on entry.  May block.
+ */</span>
+ipc_importance_task_t
+<span class="enscript-function-name">ipc_importance_for_task</span>(task_t task, boolean_t made)
+{
+	ipc_importance_task_t task_elem;
+	boolean_t first_pass = TRUE;
+
+	assert(TASK_NULL != task);
+
+ <span class="enscript-reference">retry</span>:
+	<span class="enscript-comment">/* No use returning anything for inactive task */</span>
+	<span class="enscript-keyword">if</span> (!task-&gt;active)
+		<span class="enscript-keyword">return</span> IIT_NULL;
+
+	ipc_importance_lock();
+	task_elem = task-&gt;task_imp_base;
+	<span class="enscript-keyword">if</span> (IIT_NULL != task_elem) {
+		<span class="enscript-comment">/* Add a made reference (borrowing active task ref to do it) */</span>
+		<span class="enscript-keyword">if</span> (made) {
+			<span class="enscript-keyword">if</span> (0 == task_elem-&gt;iit_made++) {
+				assert(IIT_REFS_MAX &gt; IIT_REFS(task_elem));
+				ipc_importance_task_reference_internal(task_elem);
+			}
+		} <span class="enscript-keyword">else</span> {
+			assert(IIT_REFS_MAX &gt; IIT_REFS(task_elem));
+			ipc_importance_task_reference_internal(task_elem);
+		}
+		ipc_importance_unlock();
+		<span class="enscript-keyword">return</span> task_elem;
+	}
+	ipc_importance_unlock();
+
+	<span class="enscript-keyword">if</span> (!first_pass)
+		<span class="enscript-keyword">return</span> IIT_NULL;
+	first_pass = FALSE;
+
+	<span class="enscript-comment">/* Need to make one - may race with others (be prepared to drop) */</span>
+	task_elem = (ipc_importance_task_t)zalloc(ipc_importance_task_zone);
+	<span class="enscript-keyword">if</span> (IIT_NULL == task_elem)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry</span>;
+
+	task_elem-&gt;iit_bits = IIE_TYPE_TASK | 2; <span class="enscript-comment">/* one for task, one for return/made */</span>
+	task_elem-&gt;iit_made = (made) ? 1 : 0;
+	task_elem-&gt;iit_task = task; <span class="enscript-comment">/* take actual ref when we're sure */</span>
+	task_elem-&gt;iit_updateq = NULL;
+	task_elem-&gt;iit_receiver = 0;
+	task_elem-&gt;iit_denap = 0;
+	task_elem-&gt;iit_donor = 0;
+	task_elem-&gt;iit_live_donor = 0;
+	task_elem-&gt;iit_updatepolicy = 0;
+	task_elem-&gt;iit_reserved = 0;
+	task_elem-&gt;iit_filelocks = 0;
+	task_elem-&gt;iit_updatetime = 0;
+	task_elem-&gt;iit_transitions = 0;
+	task_elem-&gt;iit_assertcnt = 0;
+	task_elem-&gt;iit_externcnt = 0;
+	task_elem-&gt;iit_externdrop = 0;
+	task_elem-&gt;iit_legacy_externcnt = 0;
+	task_elem-&gt;iit_legacy_externdrop = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IIE_REF_DEBUG</span>
+	ipc_importance_counter_init(&amp;task_elem-&gt;iit_elem);
+#<span class="enscript-reference">endif</span>
+	queue_init(&amp;task_elem-&gt;iit_kmsgs);
+	queue_init(&amp;task_elem-&gt;iit_inherits);
+
+	ipc_importance_lock();
+	<span class="enscript-keyword">if</span> (!task-&gt;active) {
+		ipc_importance_unlock();
+		zfree(ipc_importance_task_zone, task_elem);
+		<span class="enscript-keyword">return</span> IIT_NULL;
+	}
+
+	<span class="enscript-comment">/* did we lose the race? */</span>
+	<span class="enscript-keyword">if</span> (IIT_NULL != task-&gt;task_imp_base) {
+		ipc_importance_unlock();
+		zfree(ipc_importance_task_zone, task_elem);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry</span>;
+	}
+
+	<span class="enscript-comment">/* we won the race */</span>
+	task-&gt;task_imp_base = task_elem;
+	task_reference(task);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	queue_enter(&amp;global_iit_alloc_queue, task_elem, ipc_importance_task_t, iit_allocation);
+	task_importance_update_owner_info(task);
+#<span class="enscript-reference">endif</span>
+	ipc_importance_unlock();
+
+	<span class="enscript-keyword">return</span> task_elem;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">task_importance_update_owner_info</span>(task_t task) {
+
+	<span class="enscript-keyword">if</span> (task != TASK_NULL &amp;&amp; task-&gt;task_imp_base != IIT_NULL) {
+		ipc_importance_task_t task_elem = task-&gt;task_imp_base;
+
+		task_elem-&gt;iit_bsd_pid = task_pid(task);
+		<span class="enscript-keyword">if</span> (task-&gt;bsd_info) {
+			strncpy(&amp;task_elem-&gt;iit_procname[0], proc_name_address(task-&gt;bsd_info), 16);
+			task_elem-&gt;iit_procname[16] = <span class="enscript-string">'\0'</span>;
+		} <span class="enscript-keyword">else</span> {
+			strncpy(&amp;task_elem-&gt;iit_procname[0], <span class="enscript-string">&quot;unknown&quot;</span>, 16);
+		}
+	}
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_reset_locked
+ *	Purpose:
+ *		Reset a task's IPC importance (the task is going away or exec'ing)
+ *
+ *		Remove the donor bit and legacy externalized assertions from the
+ *		current task importance and see if that wipes out downstream donations.
+ *	Conditions:
+ *		importance lock held.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_reset_locked</span>(ipc_importance_task_t task_imp, boolean_t donor)
+{
+	boolean_t before_donor, after_donor;
+
+	<span class="enscript-comment">/* remove the donor bit, live-donor bit and externalized boosts */</span>
+	before_donor = ipc_importance_task_is_donor(task_imp);
+	<span class="enscript-keyword">if</span> (donor) {
+		task_imp-&gt;iit_donor = 0;
+	}
+	assert(IIT_LEGACY_EXTERN(task_imp) &lt;= IIT_EXTERN(task_imp));
+	assert(task_imp-&gt;iit_legacy_externcnt &lt;= task_imp-&gt;iit_externcnt);
+	assert(task_imp-&gt;iit_legacy_externdrop &lt;= task_imp-&gt;iit_externdrop);
+	task_imp-&gt;iit_externcnt -= task_imp-&gt;iit_legacy_externcnt;
+	task_imp-&gt;iit_externdrop -= task_imp-&gt;iit_legacy_externdrop;
+
+	<span class="enscript-comment">/* assert(IIT_LEGACY_EXTERN(task_imp) &lt;= task_imp-&gt;iit_assertcnt); */</span>
+	<span class="enscript-keyword">if</span> (IIT_LEGACY_EXTERN(task_imp) &lt; task_imp-&gt;iit_assertcnt) {
+		task_imp-&gt;iit_assertcnt -= IIT_LEGACY_EXTERN(task_imp);
+	} <span class="enscript-keyword">else</span> {
+		assert(IIT_LEGACY_EXTERN(task_imp) == task_imp-&gt;iit_assertcnt);
+		task_imp-&gt;iit_assertcnt = 0;
+	}
+	task_imp-&gt;iit_legacy_externcnt = 0;
+	task_imp-&gt;iit_legacy_externdrop = 0;
+	after_donor = ipc_importance_task_is_donor(task_imp);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	<span class="enscript-keyword">if</span> (task_imp-&gt;iit_assertcnt &gt; 0 &amp;&amp; task_imp-&gt;iit_live_donor) {
+		printf(<span class="enscript-string">&quot;Live donor task %s[%d] still has %d importance assertions after reset\n&quot;</span>, 
+		       task_imp-&gt;iit_procname, task_imp-&gt;iit_bsd_pid, task_imp-&gt;iit_assertcnt);
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* propagate a downstream drop if there was a change in donor status */</span>
+	<span class="enscript-keyword">if</span> (after_donor != before_donor) {
+		ipc_importance_task_propagate_assertion_locked(task_imp, IIT_UPDATE_DROP, FALSE);
+	}
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_reset
+ *	Purpose:
+ *		Reset a task's IPC importance
+ *
+ *		The task is being reset, although staying around. Arrange to have the
+ *		external state of the task reset from the importance.
+ *	Conditions:
+ *		importance lock not held.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_reset</span>(ipc_importance_task_t task_imp, boolean_t donor)
+{
+	<span class="enscript-keyword">if</span> (IIT_NULL == task_imp) {
+		<span class="enscript-keyword">return</span>;
+	}
+	ipc_importance_lock();
+	ipc_importance_reset_locked(task_imp, donor);
+	ipc_importance_unlock();
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_disconnect_task
+ *	Purpose:
+ *		Disconnect a task from its importance.
+ *
+ *		Clear the task pointer from the importance and drop the
+ *		reference the task held on the importance object.  Before
+ *		doing that, reset the effects the current task holds on
+ *		the importance and see if that wipes out downstream donations.
+ *
+ *		We allow the upstream boosts to continue to affect downstream
+ *		even though the local task is being effectively pulled from
+ *		the chain.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_disconnect_task</span>(task_t task)
+{
+	ipc_importance_task_t task_imp;
+
+	task_lock(task);
+	ipc_importance_lock();
+	task_imp = task-&gt;task_imp_base;
+
+	<span class="enscript-comment">/* did somebody beat us to it? */</span>
+	<span class="enscript-keyword">if</span> (IIT_NULL == task_imp) {
+		ipc_importance_unlock();
+		task_unlock(task);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* disconnect the task from this importance */</span>
+	assert(task_imp-&gt;iit_task == task);
+	task_imp-&gt;iit_task = TASK_NULL;
+	task-&gt;task_imp_base = IIT_NULL;
+	task_unlock(task);
+	
+	<span class="enscript-comment">/* reset the effects the current task hold on the importance */</span>
+	ipc_importance_reset_locked(task_imp, TRUE);
+
+	ipc_importance_task_release_locked(task_imp);
+	<span class="enscript-comment">/* importance unlocked */</span>
+
+	<span class="enscript-comment">/* deallocate the task now that the importance is unlocked */</span>
+	task_deallocate(task);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_send
+ *	Purpose:
+ *		Post the importance voucher attribute [if sent] or a static
+ *		importance boost depending upon options and conditions.
+ *	Conditions:
+ *		Destination port locked on entry and exit, may be dropped during the call.
+ *	Returns:
+ *		A boolean identifying if the port lock was tempoarily dropped.
+ */</span>
+boolean_t
+<span class="enscript-function-name">ipc_importance_send</span>(
+	ipc_kmsg_t		kmsg,
+	mach_msg_option_t	option)
+{
+	ipc_port_t port = (ipc_port_t) kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+	boolean_t port_lock_dropped = FALSE;
+	ipc_importance_elem_t elem;
+	task_t task;
+	ipc_importance_task_t task_imp;
+	kern_return_t kr;
+
+
+	assert(IP_VALID(port));
+
+	<span class="enscript-comment">/* If no donation to be made, return quickly */</span>
+	<span class="enscript-keyword">if</span> ((port-&gt;ip_impdonation == 0) ||
+	    (option &amp; MACH_SEND_NOIMPORTANCE) != 0) {
+		<span class="enscript-keyword">return</span> port_lock_dropped;
+	}
+
+	task = current_task();
+
+	<span class="enscript-comment">/* If forced sending a static boost, go update the port */</span>
+	<span class="enscript-keyword">if</span> ((option &amp; MACH_SEND_IMPORTANCE) != 0) {
+		kmsg-&gt;ikm_header-&gt;msgh_bits |= MACH_MSGH_BITS_RAISEIMP;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">portupdate</span>;
+	}
+
+	task_imp = task-&gt;task_imp_base;
+	assert(IIT_NULL != task_imp);
+
+	<span class="enscript-comment">/* If the sender can never donate importance, nothing to do */</span>
+	<span class="enscript-keyword">if</span> (ipc_importance_task_is_never_donor(task_imp)) {
+		<span class="enscript-keyword">return</span> port_lock_dropped;
+	}
+
+	elem = IIE_NULL;
+
+	<span class="enscript-comment">/* If importance receiver and passing a voucher, look for importance in there */</span>
+	<span class="enscript-keyword">if</span> (IP_VALID(kmsg-&gt;ikm_voucher) &amp;&amp;
+	    ipc_importance_task_is_marked_receiver(task_imp)) {
+		mach_voucher_attr_value_handle_t vals[MACH_VOUCHER_ATTR_VALUE_MAX_NESTED];
+		mach_voucher_attr_value_handle_array_size_t val_count;
+		ipc_voucher_t voucher;
+			
+		assert(ip_kotype(kmsg-&gt;ikm_voucher) == IKOT_VOUCHER);
+		voucher = (ipc_voucher_t)kmsg-&gt;ikm_voucher-&gt;ip_kobject;
+
+		<span class="enscript-comment">/* check to see if the voucher has an importance attribute */</span>
+		val_count = MACH_VOUCHER_ATTR_VALUE_MAX_NESTED;
+		kr = mach_voucher_attr_control_get_values(ipc_importance_control, voucher,
+							  vals, &amp;val_count);
+		assert(KERN_SUCCESS == kr);
+
+		<span class="enscript-comment">/*
+		 * Only use importance associated with our task (either directly
+		 * or through an inherit that donates to our task).
+		 */</span>
+		<span class="enscript-keyword">if</span> (0 &lt; val_count) {
+			ipc_importance_elem_t check_elem;
+
+			check_elem = (ipc_importance_elem_t)vals[0];
+			assert(IIE_NULL != check_elem);
+			<span class="enscript-keyword">if</span> (IIE_TYPE_INHERIT == IIE_TYPE(check_elem)) {
+				ipc_importance_inherit_t inherit;
+				inherit = (ipc_importance_inherit_t) check_elem;
+				<span class="enscript-keyword">if</span> (inherit-&gt;iii_to_task == task_imp) {
+					elem = check_elem;
+				}
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (check_elem == (ipc_importance_elem_t)task_imp) {
+				elem = check_elem;
+			}
+		}
+	}
+
+	<span class="enscript-comment">/* If we haven't found an importance attribute to send yet, use the task's */</span>
+	<span class="enscript-keyword">if</span> (IIE_NULL == elem) {
+		elem = (ipc_importance_elem_t)task_imp;
+	}
+
+	<span class="enscript-comment">/* take a reference for the message to hold */</span>
+	ipc_importance_reference_internal(elem);
+
+	<span class="enscript-comment">/* acquire the importance lock while trying to hang on to port lock */</span>
+	<span class="enscript-keyword">if</span> (!ipc_importance_lock_try()) {
+		port_lock_dropped = TRUE;
+		ip_unlock(port);
+		ipc_importance_lock();
+	}
+
+	<span class="enscript-comment">/* link kmsg onto the donor element propagation chain */</span>
+	ipc_importance_kmsg_link(kmsg, elem);
+	<span class="enscript-comment">/* elem reference transfered to kmsg */</span>
+
+	incr_ref_counter(elem-&gt;iie_kmsg_refs_added);
+
+	<span class="enscript-comment">/* If the sender isn't currently a donor, no need to apply boost */</span>
+	<span class="enscript-keyword">if</span> (!ipc_importance_task_is_donor(task_imp)) {
+		ipc_importance_unlock();
+
+		<span class="enscript-comment">/* re-acquire port lock, if needed */</span>
+		<span class="enscript-keyword">if</span> (TRUE == port_lock_dropped)
+			ip_lock(port);
+
+		<span class="enscript-keyword">return</span> port_lock_dropped;
+	}
+
+	<span class="enscript-comment">/* Mark the fact that we are (currently) donating through this message */</span>
+	kmsg-&gt;ikm_header-&gt;msgh_bits |= MACH_MSGH_BITS_RAISEIMP;
+
+	<span class="enscript-comment">/*
+	 * If we need to relock the port, do it with the importance still locked.
+	 * This assures we get to add the importance boost through the port to
+	 * the task BEFORE anyone else can attempt to undo that operation because
+	 * the sender lost donor status.
+	 */</span>
+	<span class="enscript-keyword">if</span> (TRUE == port_lock_dropped) {
+		ip_lock(port);
+	}
+	ipc_importance_unlock();
+
+ <span class="enscript-reference">portupdate</span>:
+				
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+	<span class="enscript-keyword">if</span> (kdebug_enable) {
+		mach_msg_max_trailer_t *dbgtrailer = (mach_msg_max_trailer_t *)
+		        	((vm_offset_t)kmsg-&gt;ikm_header + round_msg(kmsg-&gt;ikm_header-&gt;msgh_size));
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> sender_pid = dbgtrailer-&gt;msgh_audit.val[5];
+		mach_msg_id_t imp_msgh_id = kmsg-&gt;ikm_header-&gt;msgh_id;
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, (IMPORTANCE_CODE(IMP_MSG, IMP_MSG_SEND)) | DBG_FUNC_START,
+		                           task_pid(task), sender_pid, imp_msgh_id, 0, 0);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IMPORTANCE_DEBUG */</span>
+
+	<span class="enscript-comment">/* adjust port boost count (with port locked) */</span>
+	<span class="enscript-keyword">if</span> (TRUE == ipc_port_importance_delta(port, 1)) {
+		port_lock_dropped = TRUE;
+		ip_lock(port);
+	}
+	<span class="enscript-keyword">return</span> port_lock_dropped;
+}
+	
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_inherit_from
+ *	Purpose:
+ *		Create a &quot;made&quot; reference for an importance attribute representing
+ *		an inheritance between the sender of a message (if linked) and the
+ *		current task importance.  If the message is not linked, a static
+ *		boost may be created, based on the boost state of the message.
+ *
+ *		Any transfer from kmsg linkage to inherit linkage must be atomic.
+ *
+ *		If the task is inactive, there isn't any need to return a new reference.
+ *	Conditions:
+ *		Nothing locked on entry.  May block.
+ */</span>
+<span class="enscript-type">static</span> ipc_importance_inherit_t
+<span class="enscript-function-name">ipc_importance_inherit_from</span>(ipc_kmsg_t kmsg)
+{
+	ipc_importance_task_t	task_imp = IIT_NULL;
+	ipc_importance_elem_t 	from_elem = kmsg-&gt;ikm_importance;
+	ipc_importance_elem_t 	elem;
+	task_t	task_self = current_task();
+
+	ipc_port_t port = kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+	ipc_importance_inherit_t inherit = III_NULL;
+	ipc_importance_inherit_t alloc = III_NULL;
+	ipc_importance_inherit_t temp_inherit;
+	boolean_t cleared_self_donation = FALSE;
+	boolean_t donating;
+	uint32_t depth = 1;
+
+	<span class="enscript-comment">/* The kmsg must have an importance donor or static boost to proceed */</span>
+	<span class="enscript-keyword">if</span> (IIE_NULL == kmsg-&gt;ikm_importance &amp;&amp;
+	    !MACH_MSGH_BITS_RAISED_IMPORTANCE(kmsg-&gt;ikm_header-&gt;msgh_bits)) {
+		<span class="enscript-keyword">return</span> III_NULL;
+	}
+
+	<span class="enscript-comment">/* 
+	 * No need to set up an inherit linkage if the dest isn't a receiver
+	 * of one type or the other.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!ipc_importance_task_is_any_receiver_type(task_self-&gt;task_imp_base)) {
+		ipc_importance_lock();
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_locked</span>;
+	}
+
+	<span class="enscript-comment">/* Grab a reference on the importance of the destination */</span>
+	task_imp = ipc_importance_for_task(task_self, FALSE);
+
+	ipc_importance_lock();
+
+	<span class="enscript-keyword">if</span> (IIT_NULL == task_imp) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_locked</span>;
+	}
+
+	incr_ref_counter(task_imp-&gt;iit_elem.iie_task_refs_added_inherit_from);
+
+	<span class="enscript-comment">/* If message is already associated with an inherit... */</span>
+	<span class="enscript-keyword">if</span> (IIE_TYPE_INHERIT == IIE_TYPE(from_elem)) {
+		ipc_importance_inherit_t from_inherit = (ipc_importance_inherit_t)from_elem;
+
+		<span class="enscript-comment">/* already targeting our task? - just use it */</span>
+		<span class="enscript-keyword">if</span> (from_inherit-&gt;iii_to_task == task_imp) {
+			<span class="enscript-comment">/* clear self-donation if not also present in inherit */</span>
+			<span class="enscript-keyword">if</span> (!from_inherit-&gt;iii_donating &amp;&amp;
+			    MACH_MSGH_BITS_RAISED_IMPORTANCE(kmsg-&gt;ikm_header-&gt;msgh_bits)) {
+				kmsg-&gt;ikm_header-&gt;msgh_bits &amp;= ~MACH_MSGH_BITS_RAISEIMP;
+				cleared_self_donation = TRUE;
+			}
+			inherit = from_inherit;
+				
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (III_DEPTH_MAX == III_DEPTH(from_inherit)) {
+			ipc_importance_task_t to_task;
+			ipc_importance_elem_t unlinked_from;
+
+			<span class="enscript-comment">/*
+			 * Chain too long. Switch to looking
+			 * directly at the from_inherit's to-task
+			 * as our source of importance. 
+			 */</span>
+			to_task = from_inherit-&gt;iii_to_task;
+			ipc_importance_task_reference(to_task);
+			from_elem = (ipc_importance_elem_t)to_task;
+			depth = III_DEPTH_RESET | 1;
+
+			<span class="enscript-comment">/* Fixup the kmsg linkage to reflect change */</span>
+			unlinked_from = ipc_importance_kmsg_unlink(kmsg);
+			assert(unlinked_from == (ipc_importance_elem_t)from_inherit);
+			ipc_importance_kmsg_link(kmsg, from_elem);
+			ipc_importance_inherit_release_locked(from_inherit);
+			<span class="enscript-comment">/* importance unlocked */</span>
+			ipc_importance_lock();
+
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* inheriting from an inherit */</span>
+			depth = from_inherit-&gt;iii_depth + 1;
+		}
+	} 
+
+	<span class="enscript-comment">/* 
+	 * Don't allow a task to inherit from itself (would keep it permanently
+	 * boosted even if all other donors to the task went away).
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (from_elem == (ipc_importance_elem_t)task_imp) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out_locked</span>;
+	}
+
+	<span class="enscript-comment">/* 
+	 * But if the message isn't associated with any linked source, it is
+	 * intended to be permanently boosting (static boost from kernel).
+	 * In that case DO let the process permanently boost itself.
+	 */</span>
+	<span class="enscript-keyword">if</span> (IIE_NULL == from_elem) {
+		assert(MACH_MSGH_BITS_RAISED_IMPORTANCE(kmsg-&gt;ikm_header-&gt;msgh_bits));
+		ipc_importance_task_reference_internal(task_imp);
+		from_elem = (ipc_importance_elem_t)task_imp;
+	}
+	
+	<span class="enscript-comment">/* 
+	 * Now that we have the from_elem figured out,
+	 * check to see if we already have an inherit for this pairing
+	 */</span>
+	<span class="enscript-keyword">while</span> (III_NULL == inherit) {
+		queue_iterate(&amp;from_elem-&gt;iie_inherits, temp_inherit,
+			      ipc_importance_inherit_t, iii_inheritance) {
+			<span class="enscript-keyword">if</span> (temp_inherit-&gt;iii_to_task == task_imp &amp;&amp;
+			    temp_inherit-&gt;iii_depth == depth) {
+				inherit = temp_inherit;
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+
+		<span class="enscript-comment">/* Do we have to allocate a new inherit */</span>
+		<span class="enscript-keyword">if</span> (III_NULL == inherit) {
+			<span class="enscript-keyword">if</span> (III_NULL != alloc) {
+				<span class="enscript-keyword">break</span>;
+			}
+
+			<span class="enscript-comment">/* allocate space */</span>
+			ipc_importance_unlock();
+			alloc = (ipc_importance_inherit_t)
+				zalloc(ipc_importance_inherit_zone);
+			ipc_importance_lock();
+		}
+	}
+
+	<span class="enscript-comment">/* snapshot the donating status while we have importance locked */</span>
+	donating = MACH_MSGH_BITS_RAISED_IMPORTANCE(kmsg-&gt;ikm_header-&gt;msgh_bits);
+
+	<span class="enscript-keyword">if</span> (III_NULL != inherit) {
+		<span class="enscript-comment">/* We found one, piggyback on that */</span>
+		assert(0 &lt; III_REFS(inherit));
+		assert(0 &lt; IIE_REFS(inherit-&gt;iii_from_elem));
+		assert(inherit-&gt;iii_externcnt &gt;= inherit-&gt;iii_made);
+
+		<span class="enscript-comment">/* add in a made reference */</span>
+		<span class="enscript-keyword">if</span> (0 == inherit-&gt;iii_made++) {
+			assert(III_REFS_MAX &gt; III_REFS(inherit));
+			ipc_importance_inherit_reference_internal(inherit);
+		}
+
+		<span class="enscript-comment">/* Reflect the inherit's change of status into the task boosts */</span>
+		<span class="enscript-keyword">if</span> (0 == III_EXTERN(inherit)) {
+			assert(!inherit-&gt;iii_donating);
+			inherit-&gt;iii_donating = donating;
+			<span class="enscript-keyword">if</span> (donating) {
+				task_imp-&gt;iit_externcnt += inherit-&gt;iii_externcnt;
+				task_imp-&gt;iit_externdrop += inherit-&gt;iii_externdrop;
+			}
+		} <span class="enscript-keyword">else</span> {
+			assert(donating == inherit-&gt;iii_donating);
+		}
+
+		<span class="enscript-comment">/* add in a external reference for this use of the inherit */</span>
+		inherit-&gt;iii_externcnt++;
+		<span class="enscript-keyword">if</span> (donating) {
+			task_imp-&gt;iit_externcnt++;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* initialize the previously allocated space */</span>
+		inherit = alloc;
+		inherit-&gt;iii_bits = IIE_TYPE_INHERIT | 1;
+		inherit-&gt;iii_made = 1;
+		inherit-&gt;iii_externcnt = 1;
+		inherit-&gt;iii_externdrop = 0;
+		inherit-&gt;iii_depth = depth;
+		inherit-&gt;iii_to_task = task_imp;
+		inherit-&gt;iii_from_elem = IIE_NULL;
+		queue_init(&amp;inherit-&gt;iii_kmsgs);
+		queue_init(&amp;inherit-&gt;iii_inherits);
+
+		<span class="enscript-comment">/* If donating, reflect that in the task externcnt */</span>
+		<span class="enscript-keyword">if</span> (donating) {
+			inherit-&gt;iii_donating = TRUE;
+			task_imp-&gt;iit_externcnt++;
+		} <span class="enscript-keyword">else</span> {
+			inherit-&gt;iii_donating = FALSE;
+		}
+
+		<span class="enscript-comment">/*
+		 * Chain our new inherit on the element it inherits from.
+		 * The new inherit takes our reference on from_elem.
+		 */</span>
+		ipc_importance_inherit_link(inherit, from_elem);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IIE_REF_DEBUG</span>
+		ipc_importance_counter_init(&amp;inherit-&gt;iii_elem);
+		from_elem-&gt;iie_kmsg_refs_inherited++;
+		task_imp-&gt;iit_elem.iie_task_refs_inherited++;
+#<span class="enscript-reference">endif</span>
+	}
+
+ <span class="enscript-reference">out_locked</span>:
+	<span class="enscript-comment">/* 
+	 * for those paths that came straight here: snapshot the donating status
+	 * (this should match previous snapshot for other paths).
+	 */</span>
+	donating = MACH_MSGH_BITS_RAISED_IMPORTANCE(kmsg-&gt;ikm_header-&gt;msgh_bits);
+
+	<span class="enscript-comment">/* unlink the kmsg inheritance (if any) */</span>
+	elem = ipc_importance_kmsg_unlink(kmsg);
+	assert(elem == from_elem);
+
+	<span class="enscript-comment">/* If we didn't create a new inherit, we have some resources to release */</span>
+	<span class="enscript-keyword">if</span> (III_NULL == inherit || inherit != alloc) {
+		<span class="enscript-keyword">if</span> (IIE_NULL != from_elem) {
+			<span class="enscript-keyword">if</span> (III_NULL != inherit) {
+				incr_ref_counter(from_elem-&gt;iie_kmsg_refs_coalesced);
+			} <span class="enscript-keyword">else</span> {
+				incr_ref_counter(from_elem-&gt;iie_kmsg_refs_dropped);
+			}
+			ipc_importance_release_locked(from_elem);
+			<span class="enscript-comment">/* importance unlocked */</span>
+		} <span class="enscript-keyword">else</span> {
+			ipc_importance_unlock();
+		}
+
+		<span class="enscript-keyword">if</span> (IIT_NULL != task_imp) {
+			<span class="enscript-keyword">if</span> (III_NULL != inherit) {
+				incr_ref_counter(task_imp-&gt;iit_elem.iie_task_refs_coalesced);
+			}
+			ipc_importance_task_release(task_imp);
+		}
+
+		<span class="enscript-keyword">if</span> (III_NULL != alloc)
+			zfree(ipc_importance_inherit_zone, alloc);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* from_elem and task_imp references transferred to new inherit */</span>
+		ipc_importance_unlock();
+	}
+
+	<span class="enscript-comment">/* decrement port boost count */</span> 
+	<span class="enscript-keyword">if</span> (donating) {
+		ip_lock(port);
+		<span class="enscript-keyword">if</span> (III_NULL != inherit) {
+			<span class="enscript-comment">/* task assertions transferred to inherit, just adjust port count */</span>
+			ipc_port_impcount_delta(port, -1, IP_NULL);
+			ip_unlock(port);
+		}  <span class="enscript-keyword">else</span>	{
+			<span class="enscript-comment">/* drop importance from port and destination task */</span>
+			<span class="enscript-keyword">if</span> (ipc_port_importance_delta(port, -1) == FALSE) {
+				ip_unlock(port);
+			}
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cleared_self_donation) {
+		ip_lock(port);
+		<span class="enscript-comment">/* drop cleared donation from port and destination task */</span>
+		<span class="enscript-keyword">if</span> (ipc_port_importance_delta(port, -1) == FALSE) {
+			ip_unlock(port);
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (III_NULL != inherit) {
+		<span class="enscript-comment">/* have an associated importance attr, even if currently not donating */</span>
+		kmsg-&gt;ikm_header-&gt;msgh_bits |= MACH_MSGH_BITS_RAISEIMP;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* we won't have an importance attribute associated with our message */</span>
+		kmsg-&gt;ikm_header-&gt;msgh_bits &amp;= ~MACH_MSGH_BITS_RAISEIMP;
+	}
+
+	<span class="enscript-keyword">return</span> inherit;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_receive
+ *	Purpose:
+ *		Process importance attributes in a received message.
+ *
+ *		If an importance voucher attribute was sent, transform
+ *		that into an attribute value reflecting the inheritance
+ *		from the sender to the receiver.
+ *
+ *		If a static boost is received (or the voucher isn't on
+ *		a voucher-based boost), export a static boost.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_receive</span>(
+	ipc_kmsg_t 		kmsg,
+	mach_msg_option_t	option)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> sender_pid = ((mach_msg_max_trailer_t *)
+				   ((vm_offset_t)kmsg-&gt;ikm_header + 
+				    round_msg(kmsg-&gt;ikm_header-&gt;msgh_size)))-&gt;msgh_audit.val[5];
+	task_t task_self = current_task();
+	<span class="enscript-type">int</span> impresult = -1;
+	
+	<span class="enscript-comment">/* convert to a voucher with an inherit importance attribute? */</span>
+	<span class="enscript-keyword">if</span> ((option &amp; MACH_RCV_VOUCHER) != 0) {
+		uint8_t recipes[2 * <span class="enscript-keyword">sizeof</span>(ipc_voucher_attr_recipe_data_t) + 
+				<span class="enscript-keyword">sizeof</span>(mach_voucher_attr_value_handle_t)];
+		ipc_voucher_attr_raw_recipe_array_size_t recipe_size = 0;
+		ipc_voucher_attr_recipe_t recipe = (ipc_voucher_attr_recipe_t)recipes;
+			ipc_voucher_t recv_voucher;
+		mach_voucher_attr_value_handle_t handle;
+		ipc_importance_inherit_t inherit;
+		kern_return_t kr;
+
+		<span class="enscript-comment">/* set up recipe to copy the old voucher */</span>
+		<span class="enscript-keyword">if</span> (IP_VALID(kmsg-&gt;ikm_voucher)) {
+			ipc_voucher_t sent_voucher = (ipc_voucher_t)kmsg-&gt;ikm_voucher-&gt;ip_kobject;
+
+			recipe-&gt;key = MACH_VOUCHER_ATTR_KEY_ALL;
+			recipe-&gt;command = MACH_VOUCHER_ATTR_COPY;
+			recipe-&gt;previous_voucher = sent_voucher;
+			recipe-&gt;content_size = 0;
+			recipe_size += <span class="enscript-keyword">sizeof</span>(*recipe);
+		}
+
+		<span class="enscript-comment">/*
+		 * create an inheritance attribute from the kmsg (may be NULL)
+		 * transferring any boosts from the kmsg linkage through the
+		 * port directly to the new inheritance object.
+		 */</span>
+		inherit = ipc_importance_inherit_from(kmsg);
+		handle = (mach_voucher_attr_value_handle_t)inherit;
+
+		assert(IIE_NULL == kmsg-&gt;ikm_importance);
+
+		<span class="enscript-comment">/*
+		 * Only create a new voucher if we have an inherit object
+		 * (from the ikm_importance field of the incoming message), OR
+		 * we have a valid incoming voucher. If we have neither of
+		 * these things then there is no need to create a new voucher.
+		 */</span>
+		<span class="enscript-keyword">if</span> (IP_VALID(kmsg-&gt;ikm_voucher) || inherit != III_NULL) {
+			<span class="enscript-comment">/* replace the importance attribute with the handle we created */</span>
+			<span class="enscript-comment">/*  our made reference on the inherit is donated to the voucher */</span>
+			recipe = (ipc_voucher_attr_recipe_t)&amp;recipes[recipe_size];
+			recipe-&gt;key = MACH_VOUCHER_ATTR_KEY_IMPORTANCE;
+			recipe-&gt;command = MACH_VOUCHER_ATTR_SET_VALUE_HANDLE;
+			recipe-&gt;previous_voucher = IPC_VOUCHER_NULL;
+			recipe-&gt;content_size = <span class="enscript-keyword">sizeof</span>(mach_voucher_attr_value_handle_t);
+			*(mach_voucher_attr_value_handle_t *)(<span class="enscript-type">void</span> *)recipe-&gt;content = handle;
+			recipe_size += <span class="enscript-keyword">sizeof</span>(*recipe) + <span class="enscript-keyword">sizeof</span>(mach_voucher_attr_value_handle_t);
+
+			kr = ipc_voucher_attr_control_create_mach_voucher(ipc_importance_control,
+									  recipes,
+									  recipe_size,
+									  &amp;recv_voucher);
+			assert(KERN_SUCCESS == kr);
+
+			<span class="enscript-comment">/* swap the voucher port (and set voucher bits in case it didn't already exist) */</span>
+			kmsg-&gt;ikm_header-&gt;msgh_bits |= (MACH_MSG_TYPE_MOVE_SEND &lt;&lt; 16);
+			ipc_port_release_send(kmsg-&gt;ikm_voucher);
+			kmsg-&gt;ikm_voucher = convert_voucher_to_port(recv_voucher);
+			<span class="enscript-keyword">if</span> (III_NULL != inherit)
+				impresult = 2;
+		}
+	} <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* Don't want a voucher */</span>
+
+		<span class="enscript-comment">/* got linked importance? have to drop */</span>
+		<span class="enscript-keyword">if</span> (IIE_NULL != kmsg-&gt;ikm_importance) {
+			ipc_importance_elem_t elem;
+
+			ipc_importance_lock();
+			elem = ipc_importance_kmsg_unlink(kmsg);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IIE_REF_DEBUG</span>
+			elem-&gt;iie_kmsg_refs_dropped++;
+#<span class="enscript-reference">endif</span>
+			ipc_importance_release_locked(elem);
+			<span class="enscript-comment">/* importance unlocked */</span>
+		}
+
+		<span class="enscript-comment">/* With kmsg unlinked, can safely examine message importance attribute. */</span>
+		<span class="enscript-keyword">if</span> (MACH_MSGH_BITS_RAISED_IMPORTANCE(kmsg-&gt;ikm_header-&gt;msgh_bits)) {
+			ipc_importance_task_t task_imp = task_self-&gt;task_imp_base;
+			ipc_port_t port = kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+
+			<span class="enscript-comment">/* defensive deduction for release builds lacking the assert */</span>
+			ip_lock(port);
+			ipc_port_impcount_delta(port, -1, IP_NULL);
+			ip_unlock(port);
+
+			<span class="enscript-comment">/* will user accept legacy responsibility for the importance boost */</span>
+			<span class="enscript-keyword">if</span> (KERN_SUCCESS == ipc_importance_task_externalize_legacy_assertion(task_imp, 1, sender_pid)) {
+				impresult = 1;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* The importance boost never applied to task (clear the bit) */</span>
+				kmsg-&gt;ikm_header-&gt;msgh_bits &amp;= ~MACH_MSGH_BITS_RAISEIMP;
+				impresult = 0;
+			}
+		}
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IMPORTANCE_DEBUG</span>
+	<span class="enscript-keyword">if</span> (-1 &lt; impresult)
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, (IMPORTANCE_CODE(IMP_MSG, IMP_MSG_DELV)) | DBG_FUNC_NONE,
+				sender_pid, task_pid(task_self),
+				kmsg-&gt;ikm_header-&gt;msgh_id, impresult, 0);
+	<span class="enscript-keyword">if</span> (impresult == 2){
+		<span class="enscript-comment">/*
+		 * This probe only covers new voucher-based path.  Legacy importance
+		 * will trigger the probe in ipc_importance_task_externalize_assertion() 
+		 * above and have impresult==1 here.
+		 */</span>
+		DTRACE_BOOST5(receive_boost, task_t, task_self, <span class="enscript-type">int</span>, task_pid(task_self), <span class="enscript-type">int</span>, sender_pid, <span class="enscript-type">int</span>, 1, <span class="enscript-type">int</span>, task_self-&gt;task_imp_base-&gt;iit_assertcnt);
+    }
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IMPORTANCE_DEBUG */</span>
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_unreceive
+ *	Purpose:
+ *		Undo receive of importance attributes in a message.
+ *
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_unreceive</span>(
+	ipc_kmsg_t 		kmsg,
+	mach_msg_option_t	__unused option)
+{
+	<span class="enscript-comment">/* importance should already be in the voucher and out of the kmsg */</span>
+	assert(IIE_NULL == kmsg-&gt;ikm_importance);
+
+	<span class="enscript-comment">/* See if there is a legacy boost to be dropped from receiver */</span>
+	<span class="enscript-keyword">if</span> (MACH_MSGH_BITS_RAISED_IMPORTANCE(kmsg-&gt;ikm_header-&gt;msgh_bits)) {
+		ipc_importance_task_t task_imp;
+
+		kmsg-&gt;ikm_header-&gt;msgh_bits &amp;= ~MACH_MSGH_BITS_RAISEIMP;
+		task_imp = current_task()-&gt;task_imp_base;
+		<span class="enscript-keyword">if</span> (!IP_VALID(kmsg-&gt;ikm_voucher) &amp;&amp; IIT_NULL != task_imp) {
+			ipc_importance_task_drop_legacy_external_assertion(task_imp, 1);
+		}
+		<span class="enscript-comment">/*
+		 * ipc_kmsg_copyout_dest() will consume the voucher
+		 * and any contained importance.
+		 */</span>
+	}
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_clean
+ *	Purpose:
+ *		Clean up importance state in a kmsg that is being cleaned.
+ *		Unlink the importance chain if one was set up, and drop
+ *		the reference this kmsg held on the donor.  Then check to
+ *		if importance was carried to the port, and remove that if
+ *		needed.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_clean</span>(
+	ipc_kmsg_t		kmsg)
+{
+	ipc_port_t		port;
+
+	<span class="enscript-comment">/* Is the kmsg still linked? If so, remove that first */</span>
+	<span class="enscript-keyword">if</span> (IIE_NULL != kmsg-&gt;ikm_importance) {
+		ipc_importance_elem_t	elem;
+
+		ipc_importance_lock();
+		elem = ipc_importance_kmsg_unlink(kmsg);
+		assert(IIE_NULL != elem);
+		ipc_importance_release_locked(elem);
+		<span class="enscript-comment">/* importance unlocked */</span>
+	}
+
+	<span class="enscript-comment">/* See if there is a legacy importance boost to be dropped from port */</span>
+	<span class="enscript-keyword">if</span> (MACH_MSGH_BITS_RAISED_IMPORTANCE(kmsg-&gt;ikm_header-&gt;msgh_bits)) {
+		kmsg-&gt;ikm_header-&gt;msgh_bits &amp;= ~MACH_MSGH_BITS_RAISEIMP;
+		port = kmsg-&gt;ikm_header-&gt;msgh_remote_port;
+		<span class="enscript-keyword">if</span> (IP_VALID(port)) {
+			ip_lock(port);
+			<span class="enscript-comment">/* inactive ports already had their importance boosts dropped */</span>
+			<span class="enscript-keyword">if</span> (!ip_active(port) || 
+			    ipc_port_importance_delta(port, -1) == FALSE) {
+				ip_unlock(port);
+			}
+		}
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_assert_clean</span>(__assert_only ipc_kmsg_t kmsg)
+{
+  assert(IIE_NULL == kmsg-&gt;ikm_importance);
+  assert(!MACH_MSGH_BITS_RAISED_IMPORTANCE(kmsg-&gt;ikm_header-&gt;msgh_bits));
+}
+
+<span class="enscript-comment">/*
+ * IPC Importance Attribute Manager definition
+ */</span>
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">ipc_importance_release_value</span>(
+	ipc_voucher_attr_manager_t		manager,
+	mach_voucher_attr_key_t			key,
+	mach_voucher_attr_value_handle_t	value,
+	mach_voucher_attr_value_reference_t	sync);
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">ipc_importance_get_value</span>(
+	ipc_voucher_attr_manager_t			manager,
+	mach_voucher_attr_key_t				key,
+	mach_voucher_attr_recipe_command_t		command,
+	mach_voucher_attr_value_handle_array_t		prev_values,
+	mach_voucher_attr_value_handle_array_size_t	prev_value_count,
+	mach_voucher_attr_content_t			content,
+	mach_voucher_attr_content_size_t		content_size,
+	mach_voucher_attr_value_handle_t		*out_value,
+	ipc_voucher_t					*out_value_voucher);
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">ipc_importance_extract_content</span>(
+	ipc_voucher_attr_manager_t			manager,
+	mach_voucher_attr_key_t				key,
+	mach_voucher_attr_value_handle_array_t		values,
+	mach_voucher_attr_value_handle_array_size_t	value_count,
+	mach_voucher_attr_recipe_command_t		*out_command,
+	mach_voucher_attr_content_t			out_content,
+	mach_voucher_attr_content_size_t		*in_out_content_size);
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">ipc_importance_command</span>(
+	ipc_voucher_attr_manager_t			manager,
+	mach_voucher_attr_key_t				key,
+	mach_voucher_attr_value_handle_array_t		values,
+	mach_msg_type_number_t				value_count,
+	mach_voucher_attr_command_t			command,
+	mach_voucher_attr_content_t			in_content,
+	mach_voucher_attr_content_size_t		in_content_size,
+	mach_voucher_attr_content_t			out_content,
+	mach_voucher_attr_content_size_t		*out_content_size);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_manager_release</span>(
+	ipc_voucher_attr_manager_t		manager);
+
+<span class="enscript-type">struct</span> ipc_voucher_attr_manager ipc_importance_manager = {
+	.ivam_release_value =	ipc_importance_release_value,
+	.ivam_get_value =	ipc_importance_get_value,
+	.ivam_extract_content =	ipc_importance_extract_content,
+	.ivam_command = 	ipc_importance_command,
+	.ivam_release =		ipc_importance_manager_release,
+};
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IMPORTANCE_ASSERT_KEY</span>(key) assert(MACH_VOUCHER_ATTR_KEY_IMPORTANCE == (key))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IMPORTANCE_ASSERT_MANAGER</span>(manager) assert(&amp;ipc_importance_manager == (manager))
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_release_value [Voucher Attribute Manager Interface]
+ *	Purpose:
+ *		Release what the voucher system believes is the last &quot;made&quot; reference
+ *		on an importance attribute value handle.  The sync parameter is used to
+ *		avoid races with new made references concurrently being returned to the
+ *		voucher system in other threads.
+ *	Conditions:
+ *		Nothing locked on entry.  May block.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">ipc_importance_release_value</span>(
+	ipc_voucher_attr_manager_t		__assert_only manager,
+	mach_voucher_attr_key_t			__assert_only key,
+	mach_voucher_attr_value_handle_t	value,
+	mach_voucher_attr_value_reference_t	sync)
+{
+	ipc_importance_elem_t elem;
+
+	IMPORTANCE_ASSERT_MANAGER(manager);
+	IMPORTANCE_ASSERT_KEY(key);
+	assert(0 &lt; sync);
+
+	elem = (ipc_importance_elem_t)value;
+
+	ipc_importance_lock();
+
+	<span class="enscript-comment">/* Any oustanding made refs? */</span>
+	<span class="enscript-keyword">if</span> (sync != elem-&gt;iie_made) {
+		assert(sync &lt; elem-&gt;iie_made);
+		ipc_importance_unlock();
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+
+	<span class="enscript-comment">/* clear made */</span> 
+	elem-&gt;iie_made = 0;
+
+	<span class="enscript-comment">/* 
+	 * If there are pending external boosts represented by this attribute, 
+	 * drop them from the apropriate task 
+	 */</span>
+	<span class="enscript-keyword">if</span> (IIE_TYPE_INHERIT == IIE_TYPE(elem)) {
+		ipc_importance_inherit_t inherit = (ipc_importance_inherit_t)elem;
+
+		assert(inherit-&gt;iii_externcnt &gt;= inherit-&gt;iii_externdrop);
+
+		<span class="enscript-keyword">if</span> (inherit-&gt;iii_donating) {
+			ipc_importance_task_t imp_task = inherit-&gt;iii_to_task;
+			uint32_t assertcnt = III_EXTERN(inherit);
+
+			assert(ipc_importance_task_is_any_receiver_type(imp_task));
+			assert(imp_task-&gt;iit_externcnt &gt;= inherit-&gt;iii_externcnt);
+			assert(imp_task-&gt;iit_externdrop &gt;= inherit-&gt;iii_externdrop);
+			imp_task-&gt;iit_externcnt -= inherit-&gt;iii_externcnt;
+			imp_task-&gt;iit_externdrop -= inherit-&gt;iii_externdrop;
+			inherit-&gt;iii_externcnt = 0;
+			inherit-&gt;iii_externdrop = 0;
+			inherit-&gt;iii_donating = FALSE;
+
+			<span class="enscript-comment">/* adjust the internal assertions - and propagate if needed */</span>
+			<span class="enscript-keyword">if</span> (ipc_importance_task_check_transition(imp_task, IIT_UPDATE_DROP, assertcnt)) {
+				ipc_importance_task_propagate_assertion_locked(imp_task, IIT_UPDATE_DROP, TRUE);
+			}
+		} <span class="enscript-keyword">else</span> {
+			inherit-&gt;iii_externcnt = 0;
+			inherit-&gt;iii_externdrop = 0;
+		}
+	} 
+
+	<span class="enscript-comment">/* drop the made reference on elem */</span>
+	ipc_importance_release_locked(elem);
+	<span class="enscript-comment">/* returns unlocked */</span>
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_get_value [Voucher Attribute Manager Interface]
+ *	Purpose:
+ *		Convert command and content data into a reference on a [potentially new]
+ *		attribute value.  The importance attribute manager will only allow the
+ *		caller to get a value for the current task's importance, or to redeem
+ *		an importance attribute from an existing voucher.
+ *	Conditions:
+ *		Nothing locked on entry.  May block.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">ipc_importance_get_value</span>(
+	ipc_voucher_attr_manager_t			__assert_only manager,
+	mach_voucher_attr_key_t				__assert_only key,
+	mach_voucher_attr_recipe_command_t		command,
+	mach_voucher_attr_value_handle_array_t		prev_values,
+	mach_voucher_attr_value_handle_array_size_t	prev_value_count,
+	mach_voucher_attr_content_t			__unused content,
+	mach_voucher_attr_content_size_t		content_size,
+	mach_voucher_attr_value_handle_t		*out_value,
+	ipc_voucher_t					*out_value_voucher)
+{
+	ipc_importance_elem_t elem;
+	task_t self;
+
+	IMPORTANCE_ASSERT_MANAGER(manager);
+	IMPORTANCE_ASSERT_KEY(key);
+
+	<span class="enscript-keyword">if</span> (0 != content_size)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-comment">/* never an out voucher */</span>
+
+	<span class="enscript-keyword">switch</span> (command) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_VOUCHER_ATTR_REDEEM</span>:
+
+		<span class="enscript-comment">/* redeem of previous values is the value */</span>
+		<span class="enscript-keyword">if</span> (0 &lt; prev_value_count) {
+			elem = (ipc_importance_elem_t)prev_values[0];
+			assert(IIE_NULL != elem);
+
+			ipc_importance_lock();
+			assert(0 &lt; elem-&gt;iie_made);
+			elem-&gt;iie_made++;
+			ipc_importance_unlock();
+
+			*out_value = prev_values[0];
+			<span class="enscript-keyword">return</span> KERN_SUCCESS;
+		}
+
+		<span class="enscript-comment">/* redeem of default is default */</span>
+		*out_value = 0;
+		*out_value_voucher = IPC_VOUCHER_NULL;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_VOUCHER_ATTR_IMPORTANCE_SELF</span>:
+		self = current_task();
+
+		elem = (ipc_importance_elem_t)ipc_importance_for_task(self, TRUE);
+		<span class="enscript-comment">/* made reference added (or IIE_NULL which isn't referenced) */</span>
+
+		*out_value = (mach_voucher_attr_value_handle_t)elem;
+		*out_value_voucher = IPC_VOUCHER_NULL;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+		
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-comment">/* 
+		 * every other command is unknown
+		 *
+		 * Specifically, there is no mechanism provided to construct an
+		 * importance attribute for a task/process from just a pid or
+		 * task port.  It has to be copied (or redeemed) from a previous
+		 * voucher that has it.
+		 */</span>
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_extract_content [Voucher Attribute Manager Interface]
+ *	Purpose:
+ *		Extract meaning from the attribute value present in a voucher.  While
+ *		the real goal is to provide commands and data that can reproduce the
+ *		voucher's value &quot;out of thin air&quot;, this isn't possible with importance
+ *		attribute values.  Instead, return debug info to help track down dependencies.
+ *	Conditions:
+ *		Nothing locked on entry.  May block.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">ipc_importance_extract_content</span>(
+	ipc_voucher_attr_manager_t			__assert_only manager,
+	mach_voucher_attr_key_t				__assert_only key,
+	mach_voucher_attr_value_handle_array_t		values,
+	mach_voucher_attr_value_handle_array_size_t	value_count,
+	mach_voucher_attr_recipe_command_t		*out_command,
+	mach_voucher_attr_content_t			out_content,
+	mach_voucher_attr_content_size_t		*in_out_content_size)
+{
+	mach_voucher_attr_content_size_t size = 0;
+	ipc_importance_elem_t elem;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+
+	IMPORTANCE_ASSERT_MANAGER(manager);
+	IMPORTANCE_ASSERT_KEY(key);
+
+	<span class="enscript-comment">/* the first non-default value provides the data */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; value_count ; i++) {
+		elem = (ipc_importance_elem_t)values[i];
+		<span class="enscript-keyword">if</span> (IIE_NULL == elem)
+			<span class="enscript-keyword">continue</span>;
+
+		snprintf((<span class="enscript-type">char</span> *)out_content, *in_out_content_size, <span class="enscript-string">&quot;Importance for pid &quot;</span>);
+		size = (mach_voucher_attr_content_size_t)strlen((<span class="enscript-type">char</span> *)out_content);
+
+                <span class="enscript-keyword">for</span>(;;) {
+			ipc_importance_inherit_t inherit = III_NULL;
+			ipc_importance_task_t task_imp;
+			task_t task;
+			<span class="enscript-type">int</span> t_pid;
+
+			<span class="enscript-keyword">if</span> (IIE_TYPE_TASK == IIE_TYPE(elem)) {
+				task_imp = (ipc_importance_task_t)elem;
+				task = task_imp-&gt;iit_task;
+				t_pid = (TASK_NULL != task) ?
+				           task_pid(task) : -1;
+				snprintf((<span class="enscript-type">char</span> *)out_content + size, *in_out_content_size - size, <span class="enscript-string">&quot;%d&quot;</span>, t_pid);
+			} <span class="enscript-keyword">else</span> {
+				inherit = (ipc_importance_inherit_t)elem;
+				task_imp = inherit-&gt;iii_to_task;
+				task = task_imp-&gt;iit_task;
+				t_pid = (TASK_NULL != task) ?
+				           task_pid(task) : -1;
+				snprintf((<span class="enscript-type">char</span> *)out_content + size, *in_out_content_size - size, 
+					 <span class="enscript-string">&quot;%d (%d of %d boosts) %s from pid &quot;</span>, t_pid,
+					 III_EXTERN(inherit), inherit-&gt;iii_externcnt, 
+					 (inherit-&gt;iii_donating) ? <span class="enscript-string">&quot;donated&quot;</span> : <span class="enscript-string">&quot;linked&quot;</span>);
+			}
+			
+			size = (mach_voucher_attr_content_size_t)strlen((<span class="enscript-type">char</span> *)out_content);
+
+			<span class="enscript-keyword">if</span> (III_NULL == inherit)
+				<span class="enscript-keyword">break</span>;
+
+			elem = inherit-&gt;iii_from_elem;
+                }
+                size++; <span class="enscript-comment">/* account for NULL */</span>
+	}
+	*out_command = MACH_VOUCHER_ATTR_NOOP; <span class="enscript-comment">/* cannot be used to regenerate value */</span>
+	*in_out_content_size = size;
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_command [Voucher Attribute Manager Interface]
+ *	Purpose:
+ *		Run commands against the importance attribute value found in a voucher.
+ *		No such commands are currently supported.
+ *	Conditions:
+ *		Nothing locked on entry.  May block.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">ipc_importance_command</span>(
+	ipc_voucher_attr_manager_t		__assert_only manager,
+	mach_voucher_attr_key_t			__assert_only key,
+	mach_voucher_attr_value_handle_array_t	values,
+	mach_msg_type_number_t			value_count,
+	mach_voucher_attr_command_t		command,
+	mach_voucher_attr_content_t		in_content,
+	mach_voucher_attr_content_size_t	in_content_size,
+	mach_voucher_attr_content_t		out_content,
+	mach_voucher_attr_content_size_t	*out_content_size)
+{
+	ipc_importance_inherit_t inherit;
+	ipc_importance_task_t to_task;
+	uint32_t refs, *outrefsp;
+	mach_msg_type_number_t i;
+	uint32_t externcnt;
+
+	IMPORTANCE_ASSERT_MANAGER(manager);
+	IMPORTANCE_ASSERT_KEY(key);
+
+	<span class="enscript-keyword">if</span> (in_content_size != <span class="enscript-keyword">sizeof</span>(refs) ||
+	    (*out_content_size != 0 &amp;&amp; *out_content_size != <span class="enscript-keyword">sizeof</span>(refs))) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+	refs = *(uint32_t *)(<span class="enscript-type">void</span> *)in_content;
+	outrefsp = (*out_content_size != 0) ? (uint32_t *)(<span class="enscript-type">void</span> *)out_content : NULL;
+
+	<span class="enscript-keyword">if</span> (MACH_VOUCHER_IMPORTANCE_ATTR_DROP_EXTERNAL != command) {
+		<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+	}
+
+	<span class="enscript-comment">/* the first non-default value of the apropos type provides the data */</span>
+	inherit = III_NULL;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; value_count; i++) {
+		ipc_importance_elem_t elem = (ipc_importance_elem_t)values[i];
+
+		<span class="enscript-keyword">if</span> (IIE_NULL != elem &amp;&amp; IIE_TYPE_INHERIT == IIE_TYPE(elem)) {
+			inherit = (ipc_importance_inherit_t)elem;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (III_NULL == inherit) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+		
+	ipc_importance_lock();
+
+	<span class="enscript-keyword">if</span> (0 == refs) {
+		<span class="enscript-keyword">if</span> (NULL != outrefsp) {
+			*outrefsp = III_EXTERN(inherit);
+		}
+		ipc_importance_unlock();
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	to_task = inherit-&gt;iii_to_task;
+	assert(ipc_importance_task_is_any_receiver_type(to_task));
+
+	<span class="enscript-comment">/* if not donating to a denap receiver, it was called incorrectly */</span>
+	<span class="enscript-keyword">if</span> (!ipc_importance_task_is_marked_denap_receiver(to_task)) {
+		ipc_importance_unlock();
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT; <span class="enscript-comment">/* keeps dispatch happy */</span>
+	}
+
+	<span class="enscript-comment">/* Enough external references left to drop? */</span>
+	<span class="enscript-keyword">if</span> (III_EXTERN(inherit) &lt; refs) {
+		ipc_importance_unlock();
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+
+	<span class="enscript-comment">/* re-base external and internal counters at the inherit and the to-task (if apropos) */</span>
+	<span class="enscript-keyword">if</span> (inherit-&gt;iii_donating) {
+		assert(IIT_EXTERN(to_task) &gt;= III_EXTERN(inherit));
+		assert(to_task-&gt;iit_externcnt &gt;= inherit-&gt;iii_externcnt);
+		assert(to_task-&gt;iit_externdrop &gt;= inherit-&gt;iii_externdrop);
+		inherit-&gt;iii_externdrop += refs;
+		to_task-&gt;iit_externdrop += refs;
+		externcnt = III_EXTERN(inherit);
+		<span class="enscript-keyword">if</span> (0 == externcnt) {
+			inherit-&gt;iii_donating = FALSE;
+			to_task-&gt;iit_externcnt -= inherit-&gt;iii_externcnt;
+			to_task-&gt;iit_externdrop -= inherit-&gt;iii_externdrop;
+
+
+			<span class="enscript-comment">/* Start AppNap delay hysteresis - even if not the last boost for the task. */</span>
+			<span class="enscript-keyword">if</span> (ipc_importance_delayed_drop_call != NULL &amp;&amp;
+			    ipc_importance_task_is_marked_denap_receiver(to_task)) {
+				ipc_importance_task_delayed_drop(to_task);
+			} 
+
+			<span class="enscript-comment">/* drop task assertions associated with the dropped boosts */</span>
+			<span class="enscript-keyword">if</span> (ipc_importance_task_check_transition(to_task, IIT_UPDATE_DROP, refs)) {
+				ipc_importance_task_propagate_assertion_locked(to_task, IIT_UPDATE_DROP, TRUE);
+				<span class="enscript-comment">/* may have dropped and retaken importance lock */</span>
+			}
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* assert(to_task-&gt;iit_assertcnt &gt;= refs + externcnt); */</span>
+			<span class="enscript-comment">/* defensive deduction in case of assertcnt underflow */</span>
+			<span class="enscript-keyword">if</span> (to_task-&gt;iit_assertcnt &gt; refs + externcnt) {
+				to_task-&gt;iit_assertcnt -= refs;
+			} <span class="enscript-keyword">else</span> {
+				to_task-&gt;iit_assertcnt = externcnt;
+			}
+		}
+	} <span class="enscript-keyword">else</span> {
+		inherit-&gt;iii_externdrop += refs;
+		externcnt = III_EXTERN(inherit);
+	}
+
+	<span class="enscript-comment">/* capture result (if requested) */</span>
+	<span class="enscript-keyword">if</span> (NULL != outrefsp) {
+		*outrefsp = externcnt;
+	}
+
+	ipc_importance_unlock();
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_manager_release [Voucher Attribute Manager Interface]
+ *	Purpose:
+ *		Release the Voucher system's reference on the IPC importance attribute
+ *		manager.
+ *	Conditions:
+ *		As this can only occur after the manager drops the Attribute control
+ *		reference granted back at registration time, and that reference is never
+ *		dropped, this should never be called.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_manager_release</span>(
+	ipc_voucher_attr_manager_t		__assert_only manager)
+{
+	IMPORTANCE_ASSERT_MANAGER(manager);
+	panic(<span class="enscript-string">&quot;Voucher importance manager released&quot;</span>);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_init
+ *	Purpose:
+ *		Initialize the  IPC importance manager.
+ *	Conditions:
+ *		Zones and Vouchers are already initialized.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_init</span>(<span class="enscript-type">void</span>)
+{
+	natural_t ipc_importance_max = (task_max + thread_max) * 2;
+	<span class="enscript-type">char</span> temp_buf[26];
+	kern_return_t kr;
+
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;imp_interactive_receiver&quot;</span>, temp_buf, <span class="enscript-keyword">sizeof</span>(temp_buf))) {
+		ipc_importance_interactive_receiver = TRUE;
+	}
+
+	ipc_importance_task_zone = zinit(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipc_importance_task),
+					 ipc_importance_max * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipc_importance_task),
+					 <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipc_importance_task),
+					 <span class="enscript-string">&quot;ipc task importance&quot;</span>);
+	zone_change(ipc_importance_task_zone, Z_NOENCRYPT, TRUE);
+
+	ipc_importance_inherit_zone = zinit(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipc_importance_inherit),
+					    ipc_importance_max * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipc_importance_inherit),
+					    <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipc_importance_inherit),
+					    <span class="enscript-string">&quot;ipc importance inherit&quot;</span>);
+	zone_change(ipc_importance_inherit_zone, Z_NOENCRYPT, TRUE);
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span> 
+	queue_init(&amp;global_iit_alloc_queue);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* initialize global locking */</span>
+	ipc_importance_lock_init();
+
+	kr = ipc_register_well_known_mach_voucher_attr_manager(&amp;ipc_importance_manager,
+						(mach_voucher_attr_value_handle_t)0,
+						MACH_VOUCHER_ATTR_KEY_IMPORTANCE,
+						&amp;ipc_importance_control);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+		printf(<span class="enscript-string">&quot;Voucher importance manager register returned %d&quot;</span>, kr);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_importance_thread_call_init
+ *	Purpose:
+ *		Initialize the IPC importance code dependent upon
+ *		thread-call support being available.
+ *	Conditions:
+ *		Thread-call mechanism is already initialized.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_importance_thread_call_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">/* initialize delayed drop queue and thread-call */</span>
+	queue_init(&amp;ipc_importance_delayed_drop_queue);
+	ipc_importance_delayed_drop_call = 
+		thread_call_allocate(ipc_importance_task_delayed_drop_scan, NULL);
+	<span class="enscript-keyword">if</span> (NULL == ipc_importance_delayed_drop_call) {
+		panic(<span class="enscript-string">&quot;ipc_importance_init&quot;</span>);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Routing: task_importance_list_pids
+ * Purpose: list pids where task in donating importance.
+ * Conditions: To be called only from kdp stackshot code.
+ *             Will panic the system otherwise.
+ */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">task_importance_list_pids</span>(task_t task, <span class="enscript-type">int</span> flags, <span class="enscript-type">char</span> *pid_list, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> max_count)
+{
+	<span class="enscript-keyword">if</span> (kdp_lck_spin_is_acquired(&amp;ipc_importance_lock_data) ||
+	      max_count &lt; 1 ||
+	      task-&gt;task_imp_base == IIT_NULL ||
+	      pid_list == NULL ||
+	      flags != TASK_IMP_LIST_DONATING_PIDS) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> pidcount = 0;
+	task_t temp_task;
+	ipc_importance_task_t task_imp = task-&gt;task_imp_base;
+	ipc_kmsg_t temp_kmsg;
+	ipc_importance_inherit_t temp_inherit;
+	ipc_importance_elem_t elem;
+	<span class="enscript-type">int</span> target_pid = 0, previous_pid;
+
+	queue_iterate(&amp;task_imp-&gt;iit_inherits, temp_inherit, ipc_importance_inherit_t, iii_inheritance) {
+		<span class="enscript-comment">/* check space in buffer */</span>
+		<span class="enscript-keyword">if</span> (pidcount &gt;= max_count) 
+			<span class="enscript-keyword">break</span>;
+		previous_pid = target_pid;
+		target_pid = -1;
+
+		<span class="enscript-keyword">if</span> (temp_inherit-&gt;iii_donating) {
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+			target_pid = temp_inherit-&gt;iii_to_task-&gt;iit_bsd_pid;
+#<span class="enscript-reference">else</span>
+			temp_task = temp_inherit-&gt;iii_to_task-&gt;iit_task;
+			<span class="enscript-keyword">if</span> (temp_task != TASK_NULL) {
+				target_pid = task_pid(temp_task);
+			}
+#<span class="enscript-reference">endif</span>
+		}
+
+		<span class="enscript-keyword">if</span> (target_pid != -1 &amp;&amp; previous_pid != target_pid) {
+			memcpy(pid_list, &amp;target_pid, <span class="enscript-keyword">sizeof</span>(target_pid));
+			pid_list += <span class="enscript-keyword">sizeof</span>(target_pid);
+			pidcount++;
+		}
+
+	}
+
+	target_pid = 0;
+	queue_iterate(&amp;task_imp-&gt;iit_kmsgs, temp_kmsg, ipc_kmsg_t, ikm_inheritance) {
+		<span class="enscript-keyword">if</span> (pidcount &gt;= max_count)
+			<span class="enscript-keyword">break</span>;
+		previous_pid = target_pid;
+		target_pid = -1;
+		elem = temp_kmsg-&gt;ikm_importance;
+		temp_task = TASK_NULL;
+
+		<span class="enscript-keyword">if</span> (elem == IIE_NULL) {
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (!(temp_kmsg-&gt;ikm_header &amp;&amp; MACH_MSGH_BITS_RAISED_IMPORTANCE(temp_kmsg-&gt;ikm_header-&gt;msgh_bits))) {
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (IIE_TYPE_TASK == IIE_TYPE(elem) &amp;&amp; 
+			(((ipc_importance_task_t)elem)-&gt;iit_task != TASK_NULL)) {
+			target_pid = task_pid(((ipc_importance_task_t)elem)-&gt;iit_task);
+		} <span class="enscript-keyword">else</span> {
+			temp_inherit = (ipc_importance_inherit_t)elem;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+			target_pid = temp_inherit-&gt;iii_to_task-&gt;iit_bsd_pid;
+#<span class="enscript-reference">else</span>
+			temp_task = temp_inherit-&gt;iii_to_task-&gt;iit_task;
+			<span class="enscript-keyword">if</span> (temp_task != TASK_NULL) {
+				target_pid = task_pid(temp_task);
+			}
+#<span class="enscript-reference">endif</span>
+		}
+
+		<span class="enscript-keyword">if</span> (target_pid != -1 &amp;&amp; previous_pid != target_pid) {
+			memcpy(pid_list, &amp;target_pid, <span class="enscript-keyword">sizeof</span>(target_pid));
+			pid_list += <span class="enscript-keyword">sizeof</span>(target_pid);
+			pidcount++;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> pidcount;
+}
+
+</pre>
+<hr />
+</body></html>

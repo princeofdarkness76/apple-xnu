@@ -1,0 +1,2387 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mach_loader.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mach_loader.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ *	Copyright (C) 1988, 1989,  NeXT, Inc.
+ *
+ *	File:	kern/mach_loader.c
+ *	Author:	Avadis Tevanian, Jr.
+ *
+ *	Mach object file loader (kernel version, for now).
+ *
+ * 21-Jul-88  Avadis Tevanian, Jr. (avie) at NeXT
+ *	Started.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ubc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/imgact.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/codesign.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map.h&gt;</span>	<span class="enscript-comment">/* vm_allocate() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>	<span class="enscript-comment">/* mach_vm_allocate() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_statistics.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/vmparam.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/exec.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/pal_routines.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/mach_loader.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/mach_fat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/page_decrypt.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/fat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/loader.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/pmap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pager.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vnode_pager.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span> 
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOReturn.h&gt;</span>	<span class="enscript-comment">/* for kIOReturnNotPrivileged */</span>
+
+<span class="enscript-comment">/*
+ * XXX vm/pmap.h should not treat these prototypes as MACH_KERNEL_PRIVATE
+ * when KERNEL is defined.
+ */</span>
+<span class="enscript-type">extern</span> pmap_t	pmap_create(ledger_t ledger, vm_map_size_t size,
+				boolean_t is_64bit);
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">machine_thread_neon_state_initialize</span>(thread_t thread);
+
+<span class="enscript-comment">/* XXX should have prototypes in a shared header file */</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span>	get_map_nentries(vm_map_t);
+
+<span class="enscript-type">extern</span> kern_return_t	memory_object_signed(memory_object_control_t control,
+					     boolean_t is_signed);
+
+<span class="enscript-comment">/* An empty load_result_t */</span>
+<span class="enscript-type">static</span> load_result_t load_result_null = {
+	.mach_header = MACH_VM_MIN_ADDRESS,
+	.entry_point = MACH_VM_MIN_ADDRESS,
+	.user_stack = MACH_VM_MIN_ADDRESS,
+	.user_stack_size = 0,
+	.all_image_info_addr = MACH_VM_MIN_ADDRESS,
+	.all_image_info_size = 0,
+	.thread_count = 0,
+	.unixproc = 0,
+	.dynlinker = 0,
+	.needs_dynlinker = 0,
+	.prog_allocated_stack = 0,
+	.prog_stack_size = 0,
+	.validentry = 0,
+	.using_lcmain = 0,
+	.csflags = 0,
+	.has_pagezero = 0,
+	.uuid = { 0 },
+	.min_vm_addr = MACH_VM_MAX_ADDRESS,
+	.max_vm_addr = MACH_VM_MIN_ADDRESS,
+	.cs_end_offset = 0
+};
+
+<span class="enscript-comment">/*
+ * Prototypes of static functions.
+ */</span>
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">parse_machfile</span>(
+	<span class="enscript-type">struct</span> vnode		*vp,
+	vm_map_t		map,
+	thread_t		thread,
+	<span class="enscript-type">struct</span> mach_header	*header,
+	off_t			file_offset,
+	off_t			macho_size,
+	<span class="enscript-type">int</span>			depth,
+	int64_t			slide,
+	int64_t			dyld_slide,	
+	load_result_t		*result
+);
+
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">load_segment</span>(
+	<span class="enscript-type">struct</span> load_command		*lcp,
+	uint32_t			filetype,
+	<span class="enscript-type">void</span>				*control,
+	off_t				pager_offset,
+	off_t				macho_size,
+	<span class="enscript-type">struct</span> vnode			*vp,
+	vm_map_t			map,
+	int64_t				slide,
+	load_result_t			*result
+);
+
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">load_uuid</span>(
+	<span class="enscript-type">struct</span> uuid_command		*uulp,
+	<span class="enscript-type">char</span>				*command_end,
+	load_result_t			*result
+);
+
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">load_code_signature</span>(
+	<span class="enscript-type">struct</span> linkedit_data_command	*lcp,
+	<span class="enscript-type">struct</span> vnode			*vp,
+	off_t				macho_offset,
+	off_t				macho_size,
+	cpu_type_t			cputype,
+	load_result_t			*result);
+	
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_CODE_DECRYPTION</span>
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">set_code_unprotect</span>(
+	<span class="enscript-type">struct</span> encryption_info_command	*lcp,
+	caddr_t				addr,
+	vm_map_t			map,
+	int64_t				slide,
+	<span class="enscript-type">struct</span> vnode			*vp,
+	off_t				macho_offset,
+	cpu_type_t			cputype,
+	cpu_subtype_t			cpusubtype);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span>
+load_return_t
+<span class="enscript-function-name">load_main</span>(
+	<span class="enscript-type">struct</span> entry_point_command	*epc,
+	thread_t		thread,
+	int64_t				slide,
+	load_result_t		*result
+);
+
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">load_unixthread</span>(
+	<span class="enscript-type">struct</span> thread_command	*tcp,
+	thread_t			thread,
+	int64_t				slide,
+	load_result_t			*result
+);
+
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">load_threadstate</span>(
+	thread_t		thread,
+	uint32_t	*ts,
+	uint32_t	total_size
+);
+
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">load_threadstack</span>(
+	thread_t		thread,
+	uint32_t	*ts,
+	uint32_t	total_size,
+	mach_vm_offset_t	*user_stack,
+	<span class="enscript-type">int</span>				*customstack
+);
+
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">load_threadentry</span>(
+	thread_t		thread,
+	uint32_t	*ts,
+	uint32_t	total_size,
+	mach_vm_offset_t	*entry_point
+);
+
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">load_dylinker</span>(
+	<span class="enscript-type">struct</span> dylinker_command	*lcp,
+	integer_t		archbits,
+	vm_map_t				map,
+	thread_t			thread,
+	<span class="enscript-type">int</span>						depth,
+	int64_t			slide,
+	load_result_t			*result
+);
+
+<span class="enscript-type">struct</span> macho_data;
+
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">get_macho_vnode</span>(
+	<span class="enscript-type">char</span>				*path,
+	integer_t		archbits,
+	<span class="enscript-type">struct</span> mach_header	*mach_header,
+	off_t			*file_offset,
+	off_t			*macho_size,
+	<span class="enscript-type">struct</span> macho_data	*macho_data,
+	<span class="enscript-type">struct</span> vnode		**vpp
+);
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">widen_segment_command</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> segment_command *scp32,
+    <span class="enscript-type">struct</span> segment_command_64 *scp)
+{
+	scp-&gt;cmd = scp32-&gt;cmd;
+	scp-&gt;cmdsize = scp32-&gt;cmdsize;
+	bcopy(scp32-&gt;segname, scp-&gt;segname, <span class="enscript-keyword">sizeof</span>(scp-&gt;segname));
+	scp-&gt;vmaddr = scp32-&gt;vmaddr;
+	scp-&gt;vmsize = scp32-&gt;vmsize;
+	scp-&gt;fileoff = scp32-&gt;fileoff;
+	scp-&gt;filesize = scp32-&gt;filesize;
+	scp-&gt;maxprot = scp32-&gt;maxprot;
+	scp-&gt;initprot = scp32-&gt;initprot;
+	scp-&gt;nsects = scp32-&gt;nsects;
+	scp-&gt;flags = scp32-&gt;flags;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">note_all_image_info_section</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> segment_command_64 *scp,
+    boolean_t is64, size_t section_size, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *sections,
+    int64_t slide, load_result_t *result)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">union</span> {
+		<span class="enscript-type">struct</span> section s32;
+		<span class="enscript-type">struct</span> section_64 s64;
+	} *sectionp;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">if</span> (strncmp(scp-&gt;segname, <span class="enscript-string">&quot;__DATA&quot;</span>, <span class="enscript-keyword">sizeof</span>(scp-&gt;segname)) != 0)
+		<span class="enscript-keyword">return</span>;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; scp-&gt;nsects; ++i) {
+		sectionp = (<span class="enscript-type">const</span> <span class="enscript-type">void</span> *)
+		    ((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)sections + section_size * i);
+		<span class="enscript-keyword">if</span> (0 == strncmp(sectionp-&gt;s64.sectname, <span class="enscript-string">&quot;__all_image_info&quot;</span>,
+		    <span class="enscript-keyword">sizeof</span>(sectionp-&gt;s64.sectname))) {
+			result-&gt;all_image_info_addr =
+			    is64 ? sectionp-&gt;s64.addr : sectionp-&gt;s32.addr;
+			result-&gt;all_image_info_addr += slide;
+			result-&gt;all_image_info_size =
+			    is64 ? sectionp-&gt;s64.size : sectionp-&gt;s32.size;
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+}
+
+
+load_return_t
+<span class="enscript-function-name">load_machfile</span>(
+	<span class="enscript-type">struct</span> image_params	*imgp,
+	<span class="enscript-type">struct</span> mach_header	*header,
+	thread_t 		thread,
+	vm_map_t 		new_map,
+	load_result_t		*result
+)
+{
+	<span class="enscript-type">struct</span> vnode		*vp = imgp-&gt;ip_vp;
+	off_t			file_offset = imgp-&gt;ip_arch_offset;
+	off_t			macho_size = imgp-&gt;ip_arch_size;
+	off_t			file_size = imgp-&gt;ip_vattr-&gt;va_data_size;
+	
+	pmap_t			pmap = 0;	<span class="enscript-comment">/* protected by create_map */</span>
+	vm_map_t		map;
+	vm_map_t		old_map;
+	task_t			old_task = TASK_NULL; <span class="enscript-comment">/* protected by create_map */</span>
+	load_result_t		myresult;
+	load_return_t		lret;
+	boolean_t create_map = FALSE;
+	boolean_t enforce_hard_pagezero = TRUE;
+	<span class="enscript-type">int</span> spawn = (imgp-&gt;ip_flags &amp; IMGPF_SPAWN);
+	task_t task = current_task();
+	proc_t p = current_proc();
+	mach_vm_offset_t	aslr_offset = 0;
+	mach_vm_offset_t	dyld_aslr_offset = 0;
+	kern_return_t 		kret;
+
+	<span class="enscript-keyword">if</span> (macho_size &gt; file_size) {
+		<span class="enscript-keyword">return</span>(LOAD_BADMACHO);
+	}
+
+	<span class="enscript-keyword">if</span> (new_map == VM_MAP_NULL) {
+		create_map = TRUE;
+		old_task = current_task();
+	}
+
+	<span class="enscript-comment">/*
+	 * If we are spawning, we have created backing objects for the process
+	 * already, which include non-lazily creating the task map.  So we
+	 * are going to switch out the task map with one appropriate for the
+	 * bitness of the image being loaded.
+	 */</span>
+	<span class="enscript-keyword">if</span> (spawn) {
+		create_map = TRUE;
+		old_task = get_threadtask(thread);
+	}
+
+	<span class="enscript-keyword">if</span> (create_map) {
+		task_t ledger_task;
+		<span class="enscript-keyword">if</span> (imgp-&gt;ip_new_thread) {
+			ledger_task = get_threadtask(imgp-&gt;ip_new_thread);
+		} <span class="enscript-keyword">else</span> {
+			ledger_task = task;
+		}
+		pmap = pmap_create(get_task_ledger(ledger_task),
+				   (vm_map_size_t) 0,
+				   ((imgp-&gt;ip_flags &amp; IMGPF_IS_64BIT) != 0));
+		pal_switch_pmap(thread, pmap, imgp-&gt;ip_flags &amp; IMGPF_IS_64BIT);
+		map = vm_map_create(pmap,
+				0,
+				vm_compute_max_offset(((imgp-&gt;ip_flags &amp; IMGPF_IS_64BIT) == IMGPF_IS_64BIT)),
+				TRUE);
+	} <span class="enscript-keyword">else</span>
+		map = new_map;
+
+#<span class="enscript-reference">if</span>   (<span class="enscript-variable-name">__ARM_ARCH_7K__</span> &gt;= 2) &amp;&amp; <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">PLATFORM_WatchOS</span>)
+	<span class="enscript-comment">/* enforce 16KB alignment for watch targets with new ABI */</span>
+	vm_map_set_page_shift(map, SIXTEENK_PAGE_SHIFT);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __arm64__ */</span>
+
+#<span class="enscript-reference">ifndef</span>	<span class="enscript-variable-name">CONFIG_ENFORCE_SIGNED_CODE</span>
+	<span class="enscript-comment">/* This turns off faulting for executable pages, which allows
+	 * to circumvent Code Signing Enforcement. The per process
+	 * flag (CS_ENFORCEMENT) is not set yet, but we can use the
+	 * global flag.
+	 */</span>
+	<span class="enscript-keyword">if</span> ( !cs_enforcement(NULL) &amp;&amp; (header-&gt;flags &amp; MH_ALLOW_STACK_EXECUTION) )
+	        vm_map_disable_NX(map);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* Forcibly disallow execution from data pages on even if the arch
+	 * normally permits it. */</span>
+	<span class="enscript-keyword">if</span> ((header-&gt;flags &amp; MH_NO_HEAP_EXECUTION) &amp;&amp; !(imgp-&gt;ip_flags &amp; IMGPF_ALLOW_DATA_EXEC))
+		vm_map_disallow_data_exec(map);
+	
+	<span class="enscript-comment">/*
+	 * Compute a random offset for ASLR, and an independent random offset for dyld.
+	 */</span>
+	<span class="enscript-keyword">if</span> (!(imgp-&gt;ip_flags &amp; IMGPF_DISABLE_ASLR)) {
+		uint64_t max_slide_pages;
+
+		max_slide_pages = vm_map_get_max_aslr_slide_pages(map);
+
+		aslr_offset = random();
+		aslr_offset %= max_slide_pages;
+		aslr_offset &lt;&lt;= vm_map_page_shift(map);
+
+		dyld_aslr_offset = random();
+		dyld_aslr_offset %= max_slide_pages;
+		dyld_aslr_offset &lt;&lt;= vm_map_page_shift(map);
+	}
+	
+	<span class="enscript-keyword">if</span> (!result)
+		result = &amp;myresult;
+
+	*result = load_result_null;
+
+	lret = parse_machfile(vp, map, thread, header, file_offset, macho_size,
+	                      0, (int64_t)aslr_offset, (int64_t)dyld_aslr_offset, result);
+
+	<span class="enscript-keyword">if</span> (lret != LOAD_SUCCESS) {
+		<span class="enscript-keyword">if</span> (create_map) {
+			vm_map_deallocate(map);	<span class="enscript-comment">/* will lose pmap reference too */</span>
+		}
+		<span class="enscript-keyword">return</span>(lret);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__x86_64__</span>
+	<span class="enscript-comment">/*
+	 * On x86, for compatibility, don't enforce the hard page-zero restriction for 32-bit binaries.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((imgp-&gt;ip_flags &amp; IMGPF_IS_64BIT) == 0) {
+		enforce_hard_pagezero = FALSE;
+	}
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-comment">/*
+	 * Check to see if the page zero is enforced by the map-&gt;min_offset.
+	 */</span> 
+	<span class="enscript-keyword">if</span> (enforce_hard_pagezero &amp;&amp;
+	    (vm_map_has_hard_pagezero(map, 0x1000) == FALSE)) {
+		{
+			<span class="enscript-keyword">if</span> (create_map) {
+				vm_map_deallocate(map);	<span class="enscript-comment">/* will lose pmap reference too */</span>
+			}
+			<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 *	Commit to new map.
+	 *
+	 *	Swap the new map for the old, which  consumes our new map
+	 *	reference but each leaves us responsible for the old_map reference.
+	 *	That lets us get off the pmap associated with it, and
+	 *	then we can release it.
+	 */</span>
+
+	 <span class="enscript-keyword">if</span> (create_map) {
+		<span class="enscript-comment">/*
+		 * If this is an exec, then we are going to destroy the old
+		 * task, and it's correct to halt it; if it's spawn, the
+		 * task is not yet running, and it makes no sense.
+		 */</span>
+	 	<span class="enscript-keyword">if</span> (!spawn) {
+			<span class="enscript-comment">/*
+			 * Mark the task as halting and start the other
+			 * threads towards terminating themselves.  Then
+			 * make sure any threads waiting for a process
+			 * transition get informed that we are committed to
+			 * this transition, and then finally complete the
+			 * task halting (wait for threads and then cleanup
+			 * task resources).
+			 *
+			 * NOTE: task_start_halt() makes sure that no new
+			 * threads are created in the task during the transition.
+			 * We need to mark the workqueue as exiting before we
+			 * wait for threads to terminate (at the end of which
+			 * we no longer have a prohibition on thread creation).
+			 * 
+			 * Finally, clean up any lingering workqueue data structures
+			 * that may have been left behind by the workqueue threads
+			 * as they exited (and then clean up the work queue itself).
+			 */</span>
+			kret = task_start_halt(task);
+			<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) {
+				vm_map_deallocate(map);	<span class="enscript-comment">/* will lose pmap reference too */</span>
+				<span class="enscript-keyword">return</span> (LOAD_FAILURE);
+			}
+			proc_transcommit(p, 0);
+			workqueue_mark_exiting(p);
+			task_complete_halt(task);
+			workqueue_exit(p);
+			kqueue_dealloc(p-&gt;p_wqkqueue);
+			p-&gt;p_wqkqueue = NULL;
+		}
+		old_map = swap_task_map(old_task, thread, map, !spawn);
+		vm_map_deallocate(old_map);
+	}
+	<span class="enscript-keyword">return</span>(LOAD_SUCCESS);
+}
+
+<span class="enscript-type">int</span> macho_printf = 0;
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MACHO_PRINTF</span>(args)				\
+	<span class="enscript-keyword">do</span> {						\
+		<span class="enscript-keyword">if</span> (macho_printf) {			\
+			printf args;			\
+		}					\
+	} <span class="enscript-keyword">while</span> (0)
+
+<span class="enscript-comment">/*
+ * The file size of a mach-o file is limited to 32 bits; this is because
+ * this is the limit on the kalloc() of enough bytes for a mach_header and
+ * the contents of its sizeofcmds, which is currently constrained to 32
+ * bits in the file format itself.  We read into the kernel buffer the
+ * commands section, and then parse it in order to parse the mach-o file
+ * format load_command segment(s).  We are only interested in a subset of
+ * the total set of possible commands. If &quot;map&quot;==VM_MAP_NULL or
+ * &quot;thread&quot;==THREAD_NULL, do not make permament VM modifications,
+ * just preflight the parse.
+ */</span>
+<span class="enscript-type">static</span>
+load_return_t
+<span class="enscript-function-name">parse_machfile</span>(
+	<span class="enscript-type">struct</span> vnode 		*vp,       
+	vm_map_t		map,
+	thread_t		thread,
+	<span class="enscript-type">struct</span> mach_header	*header,
+	off_t			file_offset,
+	off_t			macho_size,
+	<span class="enscript-type">int</span>			depth,
+	int64_t			aslr_offset,
+	int64_t			dyld_aslr_offset,
+	load_result_t		*result
+)
+{
+	uint32_t		ncmds;
+	<span class="enscript-type">struct</span> load_command	*lcp;
+	<span class="enscript-type">struct</span> dylinker_command	*dlp = 0;
+	integer_t		dlarchbits = 0;
+	<span class="enscript-type">void</span> *			control;
+	load_return_t		ret = LOAD_SUCCESS;
+	caddr_t			addr;
+	<span class="enscript-type">void</span> *			kl_addr;
+	vm_size_t		size,kl_size;
+	size_t			offset;
+	size_t			oldoffset;	<span class="enscript-comment">/* for overflow check */</span>
+	<span class="enscript-type">int</span>			pass;
+	proc_t			p = current_proc();		<span class="enscript-comment">/* XXXX */</span>
+	<span class="enscript-type">int</span>			error;
+	<span class="enscript-type">int</span> 			resid = 0;
+	size_t			mach_header_sz = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> mach_header);
+	boolean_t		abi64;
+	boolean_t		got_code_signatures = FALSE;
+	int64_t			slide = 0;
+
+	<span class="enscript-keyword">if</span> (header-&gt;magic == MH_MAGIC_64 ||
+	    header-&gt;magic == MH_CIGAM_64) {
+	    	mach_header_sz = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> mach_header_64);
+	}
+
+	<span class="enscript-comment">/*
+	 *	Break infinite recursion
+	 */</span>
+	<span class="enscript-keyword">if</span> (depth &gt; 1) {
+		<span class="enscript-keyword">return</span>(LOAD_FAILURE);
+	}
+
+	depth++;
+
+	<span class="enscript-comment">/*
+	 *	Check to see if right machine type.
+	 */</span>
+	<span class="enscript-keyword">if</span> (((cpu_type_t)(header-&gt;cputype &amp; ~CPU_ARCH_MASK) != (cpu_type() &amp; ~CPU_ARCH_MASK)) ||
+	    !grade_binary(header-&gt;cputype, 
+	    	header-&gt;cpusubtype &amp; ~CPU_SUBTYPE_MASK))
+		<span class="enscript-keyword">return</span>(LOAD_BADARCH);
+		
+	abi64 = ((header-&gt;cputype &amp; CPU_ARCH_ABI64) == CPU_ARCH_ABI64);
+		
+	<span class="enscript-keyword">switch</span> (header-&gt;filetype) {
+	
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MH_EXECUTE</span>:
+		<span class="enscript-keyword">if</span> (depth != 1) {
+			<span class="enscript-keyword">return</span> (LOAD_FAILURE);
+		}
+
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MH_DYLINKER</span>:
+		<span class="enscript-keyword">if</span> (depth != 2) {
+			<span class="enscript-keyword">return</span> (LOAD_FAILURE);
+		}
+		<span class="enscript-keyword">break</span>;
+		
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (LOAD_FAILURE);
+	}
+
+	<span class="enscript-comment">/*
+	 *	Get the pager for the file.
+	 */</span>
+	control = ubc_getobject(vp, UBC_FLAGS_NONE);
+
+	<span class="enscript-comment">/*
+	 *	Map portion that must be accessible directly into
+	 *	kernel's map.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((off_t)(mach_header_sz + header-&gt;sizeofcmds) &gt; macho_size)
+		<span class="enscript-keyword">return</span>(LOAD_BADMACHO);
+
+	<span class="enscript-comment">/*
+	 *	Round size of Mach-O commands up to page boundry.
+	 */</span>
+	size = round_page(mach_header_sz + header-&gt;sizeofcmds);
+	<span class="enscript-keyword">if</span> (size &lt;= 0)
+		<span class="enscript-keyword">return</span>(LOAD_BADMACHO);
+
+	<span class="enscript-comment">/*
+	 * Map the load commands into kernel memory.
+	 */</span>
+	addr = 0;
+	kl_size = size;
+	kl_addr = kalloc(size);
+	addr = (caddr_t)kl_addr;
+	<span class="enscript-keyword">if</span> (addr == NULL)
+		<span class="enscript-keyword">return</span>(LOAD_NOSPACE);
+
+	error = vn_rdwr(UIO_READ, vp, addr, size, file_offset,
+	    UIO_SYSSPACE, 0, kauth_cred_get(), &amp;resid, p);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (kl_addr)
+			kfree(kl_addr, kl_size);
+		<span class="enscript-keyword">return</span>(LOAD_IOERROR);
+	}
+
+	<span class="enscript-keyword">if</span> (resid) {
+		<span class="enscript-comment">/* We must be able to read in as much as the mach_header indicated */</span>
+		<span class="enscript-keyword">if</span> (kl_addr)
+			kfree(kl_addr, kl_size);
+		<span class="enscript-keyword">return</span>(LOAD_BADMACHO);
+	}
+
+	<span class="enscript-comment">/*
+	 *	For PIE and dyld, slide everything by the ASLR offset.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((header-&gt;flags &amp; MH_PIE) || (header-&gt;filetype == MH_DYLINKER)) {
+		slide = aslr_offset;
+	}
+
+	 <span class="enscript-comment">/*
+	 *  Scan through the commands, processing each one as necessary.
+	 *  We parse in three passes through the headers:
+	 *  0: determine if TEXT and DATA boundary can be page-aligned
+	 *  1: thread state, uuid, code signature
+	 *  2: segments
+	 *  3: dyld, encryption, check entry point
+	 */</span>
+	
+	<span class="enscript-keyword">for</span> (pass = 0; pass &lt;= 3; pass++) {
+
+		<span class="enscript-keyword">if</span> (pass == 0) {
+			<span class="enscript-comment">/* see if we need to adjust the slide to re-align... */</span>
+			<span class="enscript-comment">/* no re-alignment needed on X86_64 or ARM32 kernel */</span>
+			<span class="enscript-keyword">continue</span>;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (pass == 1) {
+		}
+
+		<span class="enscript-comment">/*
+		 * Check that the entry point is contained in an executable segments
+		 */</span> 
+		<span class="enscript-keyword">if</span> ((pass == 3) &amp;&amp; (!result-&gt;using_lcmain &amp;&amp; result-&gt;validentry == 0)) {
+			thread_state_initialize(thread);
+			ret = LOAD_FAILURE;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Loop through each of the load_commands indicated by the
+		 * Mach-O header; if an absurd value is provided, we just
+		 * run off the end of the reserved section by incrementing
+		 * the offset too far, so we are implicitly fail-safe.
+		 */</span>
+		offset = mach_header_sz;
+		ncmds = header-&gt;ncmds;
+
+		<span class="enscript-keyword">while</span> (ncmds--) {
+			<span class="enscript-comment">/*
+			 *	Get a pointer to the command.
+			 */</span>
+			lcp = (<span class="enscript-type">struct</span> load_command *)(addr + offset);
+			oldoffset = offset;
+			offset += lcp-&gt;cmdsize;
+
+			<span class="enscript-comment">/*
+			 * Perform prevalidation of the struct load_command
+			 * before we attempt to use its contents.  Invalid
+			 * values are ones which result in an overflow, or
+			 * which can not possibly be valid commands, or which
+			 * straddle or exist past the reserved section at the
+			 * start of the image.
+			 */</span>
+			<span class="enscript-keyword">if</span> (oldoffset &gt; offset ||
+			    lcp-&gt;cmdsize &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> load_command) ||
+			    offset &gt; header-&gt;sizeofcmds + mach_header_sz) {
+				ret = LOAD_BADMACHO;
+				<span class="enscript-keyword">break</span>;
+			}
+
+			<span class="enscript-comment">/*
+			 * Act on struct load_command's for which kernel
+			 * intervention is required.
+			 */</span>
+			<span class="enscript-keyword">switch</span>(lcp-&gt;cmd) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">LC_SEGMENT</span>:
+				<span class="enscript-keyword">if</span> (pass == 0) {
+					<span class="enscript-keyword">break</span>;
+				}
+
+				<span class="enscript-keyword">if</span> (pass != 2)
+					<span class="enscript-keyword">break</span>;
+
+				<span class="enscript-keyword">if</span> (abi64) {
+					<span class="enscript-comment">/*
+					 * Having an LC_SEGMENT command for the
+					 * wrong ABI is invalid &lt;rdar://problem/11021230&gt;
+					 */</span>
+					ret = LOAD_BADMACHO;
+					<span class="enscript-keyword">break</span>;
+				}
+
+				ret = load_segment(lcp,
+				                   header-&gt;filetype,
+				                   control,
+				                   file_offset,
+				                   macho_size,
+				                   vp,
+				                   map,
+				                   slide,
+				                   result);
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">LC_SEGMENT_64</span>:
+				<span class="enscript-keyword">if</span> (pass != 2)
+					<span class="enscript-keyword">break</span>;
+
+				<span class="enscript-keyword">if</span> (!abi64) {
+					<span class="enscript-comment">/*
+					 * Having an LC_SEGMENT_64 command for the
+					 * wrong ABI is invalid &lt;rdar://problem/11021230&gt;
+					 */</span>
+					ret = LOAD_BADMACHO;
+					<span class="enscript-keyword">break</span>;
+				}
+
+				ret = load_segment(lcp,
+				                   header-&gt;filetype,
+				                   control,
+				                   file_offset,
+				                   macho_size,
+				                   vp,
+				                   map,
+				                   slide,
+				                   result);
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">LC_UNIXTHREAD</span>:
+				<span class="enscript-keyword">if</span> (pass != 1)
+					<span class="enscript-keyword">break</span>;
+				ret = load_unixthread(
+						 (<span class="enscript-type">struct</span> thread_command *) lcp,
+						 thread,
+						 slide,
+						 result);
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">LC_MAIN</span>:
+				<span class="enscript-keyword">if</span> (pass != 1)
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">if</span> (depth != 1)
+					<span class="enscript-keyword">break</span>;
+				ret = load_main(
+						 (<span class="enscript-type">struct</span> entry_point_command *) lcp,
+						 thread,
+						 slide,
+						 result);
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">LC_LOAD_DYLINKER</span>:
+				<span class="enscript-keyword">if</span> (pass != 3)
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">if</span> ((depth == 1) &amp;&amp; (dlp == 0)) {
+					dlp = (<span class="enscript-type">struct</span> dylinker_command *)lcp;
+					dlarchbits = (header-&gt;cputype &amp; CPU_ARCH_MASK);
+				} <span class="enscript-keyword">else</span> {
+					ret = LOAD_FAILURE;
+				}
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">LC_UUID</span>:
+				<span class="enscript-keyword">if</span> (pass == 1 &amp;&amp; depth == 1) {
+					ret = load_uuid((<span class="enscript-type">struct</span> uuid_command *) lcp,
+							(<span class="enscript-type">char</span> *)addr + mach_header_sz + header-&gt;sizeofcmds,
+							result);
+				}
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">LC_CODE_SIGNATURE</span>:
+				<span class="enscript-comment">/* CODE SIGNING */</span>
+				<span class="enscript-keyword">if</span> (pass != 1)
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-comment">/* pager -&gt; uip -&gt;
+				   load signatures &amp; store in uip
+				   set VM object &quot;signed_pages&quot;
+				*/</span>
+				ret = load_code_signature(
+					(<span class="enscript-type">struct</span> linkedit_data_command *) lcp,
+					vp,
+					file_offset,
+					macho_size,
+					header-&gt;cputype,
+					result);
+				<span class="enscript-keyword">if</span> (ret != LOAD_SUCCESS) {
+					printf(<span class="enscript-string">&quot;proc %d: load code signature error %d &quot;</span>
+					       <span class="enscript-string">&quot;for file \&quot;%s\&quot;\n&quot;</span>,
+					       p-&gt;p_pid, ret, vp-&gt;v_name);
+					<span class="enscript-comment">/*
+					 * Allow injections to be ignored on devices w/o enforcement enabled
+					 */</span>
+					<span class="enscript-keyword">if</span> (!cs_enforcement(NULL))
+					    ret = LOAD_SUCCESS; <span class="enscript-comment">/* ignore error */</span>
+
+				} <span class="enscript-keyword">else</span> {
+					got_code_signatures = TRUE;
+				}
+
+				<span class="enscript-keyword">if</span> (got_code_signatures) {
+					<span class="enscript-type">unsigned</span> tainted = CS_VALIDATE_TAINTED;
+					boolean_t valid = FALSE;
+					<span class="enscript-type">struct</span> cs_blob *blobs;
+					vm_size_t off = 0;
+
+
+					<span class="enscript-keyword">if</span> (cs_debug &gt; 10)
+						printf(<span class="enscript-string">&quot;validating initial pages of %s\n&quot;</span>, vp-&gt;v_name);
+					blobs = ubc_get_cs_blobs(vp);
+					
+					<span class="enscript-keyword">while</span> (off &lt; size &amp;&amp; ret == LOAD_SUCCESS) {
+					     tainted = CS_VALIDATE_TAINTED;
+
+					     valid = cs_validate_page(blobs,
+								      NULL,
+								      file_offset + off,
+								      addr + off,
+								      &amp;tainted);
+					     <span class="enscript-keyword">if</span> (!valid || (tainted &amp; CS_VALIDATE_TAINTED)) {
+						     <span class="enscript-keyword">if</span> (cs_debug)
+							     printf(<span class="enscript-string">&quot;CODE SIGNING: %s[%d]: invalid initial page at offset %lld validated:%d tainted:%d csflags:0x%x\n&quot;</span>, 
+								    vp-&gt;v_name, p-&gt;p_pid, (<span class="enscript-type">long</span> <span class="enscript-type">long</span>)(file_offset + off), valid, tainted, result-&gt;csflags);
+						     <span class="enscript-keyword">if</span> (cs_enforcement(NULL) ||
+							 (result-&gt;csflags &amp; (CS_HARD|CS_KILL|CS_ENFORCEMENT))) {
+							     ret = LOAD_FAILURE;
+						     }
+						     result-&gt;csflags &amp;= ~CS_VALID;
+					     }
+					     off += PAGE_SIZE;
+					}
+				}
+
+				<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_CODE_DECRYPTION</span>
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">LC_ENCRYPTION_INFO</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">LC_ENCRYPTION_INFO_64</span>:
+				<span class="enscript-keyword">if</span> (pass != 3)
+					<span class="enscript-keyword">break</span>;
+				ret = set_code_unprotect(
+					(<span class="enscript-type">struct</span> encryption_info_command *) lcp,
+					addr, map, slide, vp, file_offset,
+					header-&gt;cputype, header-&gt;cpusubtype);
+				<span class="enscript-keyword">if</span> (ret != LOAD_SUCCESS) {
+					printf(<span class="enscript-string">&quot;proc %d: set_code_unprotect() error %d &quot;</span>
+					       <span class="enscript-string">&quot;for file \&quot;%s\&quot;\n&quot;</span>,
+					       p-&gt;p_pid, ret, vp-&gt;v_name);
+					<span class="enscript-comment">/* 
+					 * Don't let the app run if it's 
+					 * encrypted but we failed to set up the
+					 * decrypter. If the keys are missing it will
+					 * return LOAD_DECRYPTFAIL.
+					 */</span>
+					 <span class="enscript-keyword">if</span> (ret == LOAD_DECRYPTFAIL) {
+						<span class="enscript-comment">/* failed to load due to missing FP keys */</span>
+						proc_lock(p);
+						p-&gt;p_lflag |= P_LTERM_DECRYPTFAIL;
+						proc_unlock(p);
+					 }
+					 psignal(p, SIGKILL);
+				}
+				<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-reference">default</span>:
+				<span class="enscript-comment">/* Other commands are ignored by the kernel */</span>
+				ret = LOAD_SUCCESS;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (ret != LOAD_SUCCESS)
+				<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (ret != LOAD_SUCCESS)
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (ret == LOAD_SUCCESS) { 
+		<span class="enscript-keyword">if</span> (! got_code_signatures) {
+			<span class="enscript-keyword">if</span> (cs_enforcement(NULL)) {
+				ret = LOAD_FAILURE;
+			} <span class="enscript-keyword">else</span> {
+                               <span class="enscript-comment">/*
+                                * No embedded signatures: look for detached by taskgated,
+                                * this is only done on OSX, on embedded platforms we expect everything
+                                * to be have embedded signatures.
+                                */</span>
+				<span class="enscript-type">struct</span> cs_blob *blob;
+
+				blob = ubc_cs_blob_get(vp, -1, file_offset);
+				<span class="enscript-keyword">if</span> (blob != NULL) {
+					<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> cs_flag_data = blob-&gt;csb_flags;
+					<span class="enscript-keyword">if</span>(0 != ubc_cs_generation_check(vp)) {
+						<span class="enscript-keyword">if</span> (0 != ubc_cs_blob_revalidate(vp, blob, 0)) {
+							<span class="enscript-comment">/* clear out the flag data if revalidation fails */</span>
+							cs_flag_data = 0;
+							result-&gt;csflags &amp;= ~CS_VALID;
+						}
+					}
+					<span class="enscript-comment">/* get flags to be applied to the process */</span>
+					result-&gt;csflags |= cs_flag_data;
+				}
+			}
+		}
+
+		<span class="enscript-comment">/* Make sure if we need dyld, we got it */</span>
+		<span class="enscript-keyword">if</span> (result-&gt;needs_dynlinker &amp;&amp; !dlp) {
+			ret = LOAD_FAILURE;
+		}
+
+		<span class="enscript-keyword">if</span> ((ret == LOAD_SUCCESS) &amp;&amp; (dlp != 0)) {
+			<span class="enscript-comment">/*
+			 * load the dylinker, and slide it by the independent DYLD ASLR
+			 * offset regardless of the PIE-ness of the main binary.
+			 */</span>
+			ret = load_dylinker(dlp, dlarchbits, map, thread, depth,
+					    dyld_aslr_offset, result);
+		}
+		
+		<span class="enscript-keyword">if</span>((ret == LOAD_SUCCESS) &amp;&amp; (depth == 1)) {
+			<span class="enscript-keyword">if</span> (result-&gt;thread_count == 0) {
+				ret = LOAD_FAILURE;
+			}
+	    }
+	}
+
+	<span class="enscript-keyword">if</span> (kl_addr )
+		kfree(kl_addr, kl_size);
+
+	<span class="enscript-keyword">return</span>(ret);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_CODE_DECRYPTION</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">APPLE_UNPROTECTED_HEADER_SIZE</span>	(3 * 4096)
+
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">unprotect_dsmos_segment</span>(
+	uint64_t	file_off,
+	uint64_t	file_size,
+	<span class="enscript-type">struct</span> vnode	*vp,
+	off_t		macho_offset,
+	vm_map_t	map,
+	vm_map_offset_t	map_addr,
+	vm_map_size_t	map_size)
+{
+	kern_return_t	kr;
+
+	<span class="enscript-comment">/*
+	 * The first APPLE_UNPROTECTED_HEADER_SIZE bytes (from offset 0 of
+	 * this part of a Universal binary) are not protected...
+	 * The rest needs to be &quot;transformed&quot;.
+	 */</span>
+	<span class="enscript-keyword">if</span> (file_off &lt;= APPLE_UNPROTECTED_HEADER_SIZE &amp;&amp;
+	    file_off + file_size &lt;= APPLE_UNPROTECTED_HEADER_SIZE) {
+		<span class="enscript-comment">/* it's all unprotected, nothing to do... */</span>
+		kr = KERN_SUCCESS;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (file_off &lt;= APPLE_UNPROTECTED_HEADER_SIZE) {
+			<span class="enscript-comment">/*
+			 * We start mapping in the unprotected area.
+			 * Skip the unprotected part...
+			 */</span>
+			vm_map_offset_t	delta;
+
+			delta = APPLE_UNPROTECTED_HEADER_SIZE;
+			delta -= file_off;
+			map_addr += delta;
+			map_size -= delta;
+		}
+		<span class="enscript-comment">/* ... transform the rest of the mapping. */</span>
+		<span class="enscript-type">struct</span> pager_crypt_info crypt_info;
+		crypt_info.page_decrypt = dsmos_page_transform;
+		crypt_info.crypt_ops = NULL;
+		crypt_info.crypt_end = NULL;
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">vp</span>, <span class="enscript-variable-name">macho_offset</span>)
+		crypt_info.crypt_ops = (<span class="enscript-type">void</span> *)0x2e69cf40;
+		vm_map_offset_t crypto_backing_offset;
+		crypto_backing_offset = -1; <span class="enscript-comment">/* i.e. use map entry's offset */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+		<span class="enscript-type">struct</span> proc *p;
+		p = current_proc();
+		printf(<span class="enscript-string">&quot;APPLE_PROTECT: %d[%s] map %p [0x%llx:0x%llx] %s(%s)\n&quot;</span>,
+		       p-&gt;p_pid, p-&gt;p_comm, map,
+		       (uint64_t) map_addr, (uint64_t) (map_addr + map_size),
+		       __FUNCTION__, vp-&gt;v_name);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEVELOPMENT || DEBUG */</span>
+		kr = vm_map_apple_protected(map,
+					    map_addr,
+					    map_addr + map_size,
+					    crypto_backing_offset,
+					    &amp;crypt_info);
+	}
+
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		<span class="enscript-keyword">return</span> LOAD_FAILURE;
+	}
+	<span class="enscript-keyword">return</span> LOAD_SUCCESS;
+}
+#<span class="enscript-reference">else</span>	<span class="enscript-comment">/* CONFIG_CODE_DECRYPTION */</span>
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">unprotect_dsmos_segment</span>(
+	__unused	uint64_t	file_off,
+	__unused	uint64_t	file_size,
+	__unused	<span class="enscript-type">struct</span> vnode	*vp,
+	__unused	off_t		macho_offset,
+	__unused	vm_map_t	map,
+	__unused	vm_map_offset_t	map_addr,
+	__unused	vm_map_size_t	map_size)
+{
+	<span class="enscript-keyword">return</span> LOAD_SUCCESS;
+}
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* CONFIG_CODE_DECRYPTION */</span>
+
+
+<span class="enscript-comment">/*
+ * map_segment:
+ *	Maps a Mach-O segment, taking care of mis-alignment (wrt the system
+ *	page size) issues.
+ * 
+ *	The mapping might result in 1, 2 or 3 map entries:
+ * 	1. for the first page, which could be overlap with the previous
+ * 	   mapping,
+ * 	2. for the center (if applicable),
+ * 	3. for the last page, which could overlap with the next mapping.
+ *
+ *	For each of those map entries, we might have to interpose a
+ *	&quot;fourk_pager&quot; to deal with mis-alignment wrt the system page size,
+ *	either in the mapping address and/or size or the file offset and/or
+ *	size.
+ *	The &quot;fourk_pager&quot; itself would be mapped with proper alignment
+ *	wrt the system page size and would then be populated with the
+ *	information about the intended mapping, with a &quot;4KB&quot; granularity.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">map_segment</span>(
+	vm_map_t		map,
+	vm_map_offset_t		vm_start,
+	vm_map_offset_t		vm_end,
+	memory_object_control_t	control,
+	vm_map_offset_t		file_start,
+	vm_map_offset_t		file_end,
+	vm_prot_t		initprot,
+	vm_prot_t		maxprot)
+{
+	<span class="enscript-type">int</span>		extra_vm_flags, cur_extra_vm_flags;
+	vm_map_offset_t	cur_offset, cur_start, cur_end;
+	kern_return_t	ret;
+	vm_map_offset_t	effective_page_mask;
+	
+	<span class="enscript-keyword">if</span> (vm_end &lt; vm_start ||
+	    file_end &lt; file_start) {
+		<span class="enscript-keyword">return</span> LOAD_BADMACHO;
+	}
+	<span class="enscript-keyword">if</span> (vm_end == vm_start ||
+	    file_end == file_start) {
+		<span class="enscript-comment">/* nothing to map... */</span>
+		<span class="enscript-keyword">return</span> LOAD_SUCCESS;
+	}
+
+	effective_page_mask = MAX(PAGE_MASK, vm_map_page_mask(map));
+
+	extra_vm_flags = 0;
+	<span class="enscript-keyword">if</span> (vm_map_page_aligned(vm_start, effective_page_mask) &amp;&amp;
+	    vm_map_page_aligned(vm_end, effective_page_mask) &amp;&amp;
+	    vm_map_page_aligned(file_start, effective_page_mask) &amp;&amp;
+	    vm_map_page_aligned(file_end, effective_page_mask)) {
+		<span class="enscript-comment">/* all page-aligned and map-aligned: proceed */</span>
+	} <span class="enscript-keyword">else</span> {
+		panic(<span class="enscript-string">&quot;map_segment: unexpected mis-alignment &quot;</span>
+		      <span class="enscript-string">&quot;vm[0x%llx:0x%llx] file[0x%llx:0x%llx]\n&quot;</span>,
+		      (uint64_t) vm_start,
+		      (uint64_t) vm_end,
+		      (uint64_t) file_start,
+		      (uint64_t) file_end);
+	}
+
+	cur_offset = 0;
+	cur_start = vm_start;
+	cur_end = vm_start;
+	<span class="enscript-keyword">if</span> (cur_end &gt;= vm_start + (file_end - file_start)) {
+		<span class="enscript-comment">/* all mapped: done */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	<span class="enscript-keyword">if</span> (vm_map_round_page(cur_end, effective_page_mask) &gt;=
+	    vm_map_trunc_page(vm_start + (file_end - file_start),
+			      effective_page_mask)) {
+		<span class="enscript-comment">/* no middle */</span>
+	} <span class="enscript-keyword">else</span> {
+		cur_start = cur_end;
+		<span class="enscript-keyword">if</span> ((vm_start &amp; effective_page_mask) !=
+		    (file_start &amp; effective_page_mask)) {
+			<span class="enscript-comment">/* one 4K pager for the middle */</span>
+			cur_extra_vm_flags = extra_vm_flags;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* regular mapping for the middle */</span>
+			cur_extra_vm_flags = 0;
+		}
+		cur_end = vm_map_trunc_page(vm_start + (file_end -
+							file_start),
+					    effective_page_mask);
+		<span class="enscript-keyword">if</span> (control != MEMORY_OBJECT_CONTROL_NULL) {
+			ret = vm_map_enter_mem_object_control(
+				map,
+				&amp;cur_start,
+				cur_end - cur_start,
+				(mach_vm_offset_t)0,
+				VM_FLAGS_FIXED | cur_extra_vm_flags,
+				control,
+				file_start + cur_offset,
+				TRUE, <span class="enscript-comment">/* copy */</span>
+				initprot, maxprot,
+				VM_INHERIT_DEFAULT);
+		} <span class="enscript-keyword">else</span> {
+			ret = vm_map_enter_mem_object(
+				map,
+				&amp;cur_start,
+				cur_end - cur_start,
+				(mach_vm_offset_t)0,
+				VM_FLAGS_FIXED | cur_extra_vm_flags,
+				IPC_PORT_NULL,
+				0, <span class="enscript-comment">/* offset */</span>
+				TRUE, <span class="enscript-comment">/* copy */</span>
+				initprot, maxprot,
+				VM_INHERIT_DEFAULT);
+		}
+		<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+			<span class="enscript-keyword">return</span> (LOAD_NOSPACE);
+		}
+		cur_offset += cur_end - cur_start;
+	}
+	<span class="enscript-keyword">if</span> (cur_end &gt;= vm_start + (file_end - file_start)) {
+		<span class="enscript-comment">/* all mapped: done */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+	cur_start = cur_end;
+<span class="enscript-reference">done</span>:
+	assert(cur_end &gt;= vm_start + (file_end - file_start));
+	<span class="enscript-keyword">return</span> LOAD_SUCCESS;
+}
+
+<span class="enscript-type">static</span>
+load_return_t
+<span class="enscript-function-name">load_segment</span>(
+	<span class="enscript-type">struct</span> load_command	*lcp,
+	uint32_t		filetype,
+	<span class="enscript-type">void</span> *			control,
+	off_t			pager_offset,
+	off_t			macho_size,
+	<span class="enscript-type">struct</span> vnode		*vp,
+	vm_map_t		map,
+	int64_t			slide,
+	load_result_t		*result)
+{
+	<span class="enscript-type">struct</span> segment_command_64 segment_command, *scp;
+	kern_return_t		ret;
+	vm_map_size_t		delta_size;
+	vm_prot_t 		initprot;
+	vm_prot_t		maxprot;
+	size_t			segment_command_size, total_section_size,
+				single_section_size;
+	vm_map_offset_t		file_offset, file_size;
+	vm_map_offset_t		vm_offset, vm_size;
+	vm_map_offset_t		vm_start, vm_end, vm_end_aligned;
+	vm_map_offset_t		file_start, file_end;
+	kern_return_t		kr;
+	boolean_t		verbose;
+	vm_map_size_t		effective_page_size;
+	vm_map_offset_t		effective_page_mask;
+
+	effective_page_size = MAX(PAGE_SIZE, vm_map_page_size(map));
+	effective_page_mask = MAX(PAGE_MASK, vm_map_page_mask(map));
+
+	verbose = FALSE;
+	<span class="enscript-keyword">if</span> (LC_SEGMENT_64 == lcp-&gt;cmd) {
+		segment_command_size = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> segment_command_64);
+		single_section_size  = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> section_64);
+	} <span class="enscript-keyword">else</span> {
+		segment_command_size = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> segment_command);
+		single_section_size  = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> section);
+	}
+	<span class="enscript-keyword">if</span> (lcp-&gt;cmdsize &lt; segment_command_size)
+		<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+	total_section_size = lcp-&gt;cmdsize - segment_command_size;
+
+	<span class="enscript-keyword">if</span> (LC_SEGMENT_64 == lcp-&gt;cmd) {
+		scp = (<span class="enscript-type">struct</span> segment_command_64 *)lcp;
+	} <span class="enscript-keyword">else</span> {
+		scp = &amp;segment_command;
+		widen_segment_command((<span class="enscript-type">struct</span> segment_command *)lcp, scp);
+	}
+
+	<span class="enscript-keyword">if</span> (verbose) {
+		MACHO_PRINTF((<span class="enscript-string">&quot;+++ load_segment %s &quot;</span>
+			      <span class="enscript-string">&quot;vm[0x%llx:0x%llx] file[0x%llx:0x%llx] &quot;</span>
+			      <span class="enscript-string">&quot;prot %d/%d flags 0x%x\n&quot;</span>,
+			      scp-&gt;segname,
+			      (uint64_t)(slide + scp-&gt;vmaddr),
+			      (uint64_t)(slide + scp-&gt;vmaddr + scp-&gt;vmsize),
+			      pager_offset + scp-&gt;fileoff,
+			      pager_offset + scp-&gt;fileoff + scp-&gt;filesize,
+			      scp-&gt;initprot,
+			      scp-&gt;maxprot,
+			      scp-&gt;flags));
+	}
+
+	<span class="enscript-comment">/*
+	 * Make sure what we get from the file is really ours (as specified
+	 * by macho_size).
+	 */</span>
+	<span class="enscript-keyword">if</span> (scp-&gt;fileoff + scp-&gt;filesize &lt; scp-&gt;fileoff ||
+	    scp-&gt;fileoff + scp-&gt;filesize &gt; (uint64_t)macho_size) {
+		<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+	}
+	<span class="enscript-comment">/*
+	 * Ensure that the number of sections specified would fit
+	 * within the load command size.
+	 */</span>
+	<span class="enscript-keyword">if</span> (total_section_size / single_section_size &lt; scp-&gt;nsects) {
+		<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+	}
+	<span class="enscript-comment">/*
+	 * Make sure the segment is page-aligned in the file.
+	 */</span>
+	file_offset = pager_offset + scp-&gt;fileoff;	<span class="enscript-comment">/* limited to 32 bits */</span>
+	file_size = scp-&gt;filesize;
+	<span class="enscript-keyword">if</span> ((file_offset &amp; PAGE_MASK_64) != 0 ||
+		<span class="enscript-comment">/* we can't mmap() it if it's not page-aligned in the file */</span>
+	    (file_offset &amp; vm_map_page_mask(map)) != 0) {
+		<span class="enscript-comment">/*
+		 * The 1st test would have failed if the system's page size
+		 * was what this process believe is the page size, so let's
+		 * fail here too for the sake of consistency.
+		 */</span>
+		<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+	}
+
+	<span class="enscript-comment">/*
+	 * If we have a code signature attached for this slice
+	 * require that the segments are within the signed part
+	 * of the file.
+	 */</span>
+	<span class="enscript-keyword">if</span> (result-&gt;cs_end_offset &amp;&amp;
+	    result-&gt;cs_end_offset &lt; (off_t)scp-&gt;fileoff &amp;&amp;
+	    result-&gt;cs_end_offset - scp-&gt;fileoff &lt; scp-&gt;filesize)
+        {
+		<span class="enscript-keyword">if</span> (cs_debug)
+			printf(<span class="enscript-string">&quot;section outside code signature\n&quot;</span>);
+		<span class="enscript-keyword">return</span> LOAD_BADMACHO;
+	}
+
+	vm_offset = scp-&gt;vmaddr + slide;
+	vm_size = scp-&gt;vmsize;
+
+	<span class="enscript-keyword">if</span> (vm_size == 0)
+		<span class="enscript-keyword">return</span> (LOAD_SUCCESS);
+	<span class="enscript-keyword">if</span> (scp-&gt;vmaddr == 0 &amp;&amp;
+	    file_size == 0 &amp;&amp;
+	    vm_size != 0 &amp;&amp;
+	    (scp-&gt;initprot &amp; VM_PROT_ALL) == VM_PROT_NONE &amp;&amp;
+	    (scp-&gt;maxprot &amp; VM_PROT_ALL) == VM_PROT_NONE) {
+		<span class="enscript-comment">/*
+		 * For PIE, extend page zero rather than moving it.  Extending
+		 * page zero keeps early allocations from falling predictably
+		 * between the end of page zero and the beginning of the first
+		 * slid segment.
+		 */</span>
+		<span class="enscript-comment">/*
+		 * This is a &quot;page zero&quot; segment:  it starts at address 0,
+		 * is not mapped from the binary file and is not accessible.
+		 * User-space should never be able to access that memory, so
+		 * make it completely off limits by raising the VM map's
+		 * minimum offset.
+		 */</span>
+		vm_end = vm_offset + vm_size;
+		<span class="enscript-keyword">if</span> (vm_end &lt; vm_offset) {
+			<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+		}
+		<span class="enscript-keyword">if</span> (verbose) {
+			MACHO_PRINTF((<span class="enscript-string">&quot;++++++ load_segment: &quot;</span>
+				      <span class="enscript-string">&quot;page_zero up to 0x%llx\n&quot;</span>,
+				      (uint64_t) vm_end));
+		}
+		{
+			vm_end = vm_map_round_page(vm_end,
+						   PAGE_MASK_64);
+			vm_end_aligned = vm_end;
+		}
+		ret = vm_map_raise_min_offset(map,
+					      vm_end_aligned);
+			
+		<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+			<span class="enscript-keyword">return</span> (LOAD_FAILURE);
+		}
+		<span class="enscript-keyword">return</span> (LOAD_SUCCESS);
+	} <span class="enscript-keyword">else</span> {
+	}
+
+	{
+		file_start = vm_map_trunc_page(file_offset,
+					       effective_page_mask);
+		file_end = vm_map_round_page(file_offset + file_size,
+					     effective_page_mask);
+		vm_start = vm_map_trunc_page(vm_offset,
+					     effective_page_mask);
+		vm_end = vm_map_round_page(vm_offset + vm_size,
+					   effective_page_mask);
+	}
+
+	<span class="enscript-keyword">if</span> (vm_start &lt; result-&gt;min_vm_addr)
+		result-&gt;min_vm_addr = vm_start;
+	<span class="enscript-keyword">if</span> (vm_end &gt; result-&gt;max_vm_addr)
+		result-&gt;max_vm_addr = vm_end;
+
+	<span class="enscript-keyword">if</span> (map == VM_MAP_NULL)
+		<span class="enscript-keyword">return</span> (LOAD_SUCCESS);
+
+	<span class="enscript-keyword">if</span> (vm_size &gt; 0) {
+		initprot = (scp-&gt;initprot) &amp; VM_PROT_ALL;
+		maxprot = (scp-&gt;maxprot) &amp; VM_PROT_ALL;
+		<span class="enscript-comment">/*
+		 *	Map a copy of the file into the address space.
+		 */</span>
+		<span class="enscript-keyword">if</span> (verbose) {
+			MACHO_PRINTF((<span class="enscript-string">&quot;++++++ load_segment: &quot;</span>
+				      <span class="enscript-string">&quot;mapping at vm [0x%llx:0x%llx] of &quot;</span>
+				      <span class="enscript-string">&quot;file [0x%llx:0x%llx]\n&quot;</span>,
+				      (uint64_t) vm_start,
+				      (uint64_t) vm_end,
+				      (uint64_t) file_start,
+				      (uint64_t) file_end));
+		}
+		ret = map_segment(map,
+				  vm_start,
+				  vm_end,
+				  control,
+				  file_start,
+				  file_end,
+				  initprot,
+				  maxprot);
+		<span class="enscript-keyword">if</span> (ret) {
+			<span class="enscript-keyword">return</span> LOAD_NOSPACE;
+		}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">FIXME</span>
+		<span class="enscript-comment">/*
+		 *	If the file didn't end on a page boundary,
+		 *	we need to zero the leftover.
+		 */</span>
+		delta_size = map_size - scp-&gt;filesize;
+		<span class="enscript-keyword">if</span> (delta_size &gt; 0) {
+			mach_vm_offset_t	tmp;
+	
+			ret = mach_vm_allocate(kernel_map, &amp;tmp, delta_size, VM_FLAGS_ANYWHERE| VM_MAKE_TAG(VM_KERN_MEMORY_BSD));
+			<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+				<span class="enscript-keyword">return</span>(LOAD_RESOURCE);
+			}
+	
+			<span class="enscript-keyword">if</span> (copyout(tmp, map_addr + scp-&gt;filesize,
+								delta_size)) {
+				(<span class="enscript-type">void</span>) mach_vm_deallocate(
+						kernel_map, tmp, delta_size);
+				<span class="enscript-keyword">return</span> (LOAD_FAILURE);
+			}
+	
+			(<span class="enscript-type">void</span>) mach_vm_deallocate(kernel_map, tmp, delta_size);
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* FIXME */</span>
+	}
+
+	<span class="enscript-comment">/*
+	 *	If the virtual size of the segment is greater
+	 *	than the size from the file, we need to allocate
+	 *	zero fill memory for the rest.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((vm_end - vm_start) &gt; (file_end - file_start)) {
+		delta_size = (vm_end - vm_start) - (file_end - file_start);
+	} <span class="enscript-keyword">else</span> {
+		delta_size = 0;
+	}
+	<span class="enscript-keyword">if</span> (delta_size &gt; 0) {
+		mach_vm_offset_t tmp;
+
+		tmp = vm_start + (file_end - file_start);
+		<span class="enscript-keyword">if</span> (verbose) {
+			MACHO_PRINTF((<span class="enscript-string">&quot;++++++ load_segment: &quot;</span>
+				      <span class="enscript-string">&quot;delta mapping vm [0x%llx:0x%llx]\n&quot;</span>,
+				      (uint64_t) tmp,
+				      (uint64_t) (tmp + delta_size)));
+		}
+		kr = map_segment(map,
+				 tmp,
+				 tmp + delta_size,
+				 MEMORY_OBJECT_CONTROL_NULL,
+				 0,
+				 delta_size,
+				 scp-&gt;initprot,
+				 scp-&gt;maxprot);
+		<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+			<span class="enscript-keyword">return</span>(LOAD_NOSPACE);
+		}
+	}
+
+	<span class="enscript-keyword">if</span> ( (scp-&gt;fileoff == 0) &amp;&amp; (scp-&gt;filesize != 0) )
+		result-&gt;mach_header = vm_offset;
+
+	<span class="enscript-keyword">if</span> (scp-&gt;flags &amp; SG_PROTECTED_VERSION_1) {
+		ret = unprotect_dsmos_segment(file_start,
+					      file_end - file_start,
+					      vp,
+					      pager_offset,
+					      map,
+					      vm_start,
+					      vm_end - vm_start);
+		<span class="enscript-keyword">if</span> (ret != LOAD_SUCCESS) {
+			<span class="enscript-keyword">return</span> ret;
+		}
+	} <span class="enscript-keyword">else</span> {
+		ret = LOAD_SUCCESS;
+	}
+
+	<span class="enscript-keyword">if</span> (LOAD_SUCCESS == ret &amp;&amp;
+	    filetype == MH_DYLINKER &amp;&amp;
+	    result-&gt;all_image_info_addr == MACH_VM_MIN_ADDRESS) {
+		note_all_image_info_section(scp,
+					    LC_SEGMENT_64 == lcp-&gt;cmd,
+					    single_section_size,
+					    ((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)lcp +
+					     segment_command_size),
+					    slide,
+					    result);
+	}
+
+	<span class="enscript-keyword">if</span> (result-&gt;entry_point != MACH_VM_MIN_ADDRESS) {
+		<span class="enscript-keyword">if</span> ((result-&gt;entry_point &gt;= vm_offset) &amp;&amp; (result-&gt;entry_point &lt; (vm_offset + vm_size))) {
+			<span class="enscript-keyword">if</span> ((scp-&gt;initprot &amp; (VM_PROT_READ|VM_PROT_EXECUTE)) == (VM_PROT_READ|VM_PROT_EXECUTE)) {
+				result-&gt;validentry = 1;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* right range but wrong protections, unset if previously validated */</span>
+				result-&gt;validentry = 0;
+			}
+		}
+	}
+
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-type">static</span>
+load_return_t
+<span class="enscript-function-name">load_uuid</span>(
+	<span class="enscript-type">struct</span> uuid_command	*uulp,
+	<span class="enscript-type">char</span>			*command_end,
+	load_result_t		*result
+)
+{
+		<span class="enscript-comment">/*
+		 * We need to check the following for this command:
+		 * - The command size should be atleast the size of struct uuid_command
+		 * - The UUID part of the command should be completely within the mach-o header
+		 */</span>
+
+		<span class="enscript-keyword">if</span> ((uulp-&gt;cmdsize &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> uuid_command)) ||
+		    (((<span class="enscript-type">char</span> *)uulp + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> uuid_command)) &gt; command_end)) {
+			<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+		}
+		
+		memcpy(&amp;result-&gt;uuid[0], &amp;uulp-&gt;uuid[0], <span class="enscript-keyword">sizeof</span>(result-&gt;uuid));
+		<span class="enscript-keyword">return</span> (LOAD_SUCCESS);
+}
+
+<span class="enscript-type">static</span>
+load_return_t
+<span class="enscript-function-name">load_main</span>(
+	<span class="enscript-type">struct</span> entry_point_command	*epc,
+	thread_t		thread,
+	int64_t				slide,
+	load_result_t		*result
+)
+{
+	mach_vm_offset_t addr;
+	kern_return_t	ret;
+	
+	<span class="enscript-keyword">if</span> (epc-&gt;cmdsize &lt; <span class="enscript-keyword">sizeof</span>(*epc))
+		<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+	<span class="enscript-keyword">if</span> (result-&gt;thread_count != 0) {
+		<span class="enscript-keyword">return</span> (LOAD_FAILURE);
+	}
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (LOAD_SUCCESS);
+	
+	<span class="enscript-comment">/* LC_MAIN specifies stack size but not location */</span>
+	<span class="enscript-keyword">if</span> (epc-&gt;stacksize) {
+		result-&gt;prog_stack_size = 1;
+		result-&gt;user_stack_size = epc-&gt;stacksize;
+	} <span class="enscript-keyword">else</span> {
+		result-&gt;prog_stack_size = 0;
+		result-&gt;user_stack_size = MAXSSIZ;
+	}
+	result-&gt;prog_allocated_stack = 0;
+
+	<span class="enscript-comment">/* use default location for stack */</span>
+	ret = thread_userstackdefault(thread, &amp;addr);
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span>(LOAD_FAILURE);
+
+	<span class="enscript-comment">/* The stack slides down from the default location */</span>
+	result-&gt;user_stack = addr;
+	result-&gt;user_stack -= slide;
+
+	<span class="enscript-keyword">if</span> (result-&gt;using_lcmain || result-&gt;entry_point != MACH_VM_MIN_ADDRESS) {
+		<span class="enscript-comment">/* Already processed LC_MAIN or LC_UNIXTHREAD */</span>
+		<span class="enscript-keyword">return</span> (LOAD_FAILURE);
+	}
+
+	<span class="enscript-comment">/* kernel does *not* use entryoff from LC_MAIN.	 Dyld uses it. */</span>
+	result-&gt;needs_dynlinker = TRUE;
+	result-&gt;using_lcmain = TRUE;
+
+	ret = thread_state_initialize( thread );
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+		<span class="enscript-keyword">return</span>(LOAD_FAILURE);
+	}
+
+
+	result-&gt;unixproc = TRUE;
+	result-&gt;thread_count++;
+
+	<span class="enscript-keyword">return</span>(LOAD_SUCCESS);
+}
+
+
+<span class="enscript-type">static</span>
+load_return_t
+<span class="enscript-function-name">load_unixthread</span>(
+	<span class="enscript-type">struct</span> thread_command	*tcp,
+	thread_t		thread,
+	int64_t				slide,
+	load_result_t		*result
+)
+{
+	load_return_t	ret;
+	<span class="enscript-type">int</span> customstack =0;
+	mach_vm_offset_t addr;
+	
+	<span class="enscript-keyword">if</span> (tcp-&gt;cmdsize &lt; <span class="enscript-keyword">sizeof</span>(*tcp))
+		<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+	<span class="enscript-keyword">if</span> (result-&gt;thread_count != 0) {
+		<span class="enscript-keyword">return</span> (LOAD_FAILURE);
+	}
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (LOAD_SUCCESS);
+	
+	ret = load_threadstack(thread,
+		       (uint32_t *)(((vm_offset_t)tcp) + 
+		       		<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_command)),
+		       tcp-&gt;cmdsize - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_command),
+		       &amp;addr,
+			   &amp;customstack);
+	<span class="enscript-keyword">if</span> (ret != LOAD_SUCCESS)
+		<span class="enscript-keyword">return</span>(ret);
+
+	<span class="enscript-comment">/* LC_UNIXTHREAD optionally specifies stack size and location */</span>
+    
+	<span class="enscript-keyword">if</span> (customstack) {
+		result-&gt;prog_stack_size = 0;	<span class="enscript-comment">/* unknown */</span>
+		result-&gt;prog_allocated_stack = 1;
+	} <span class="enscript-keyword">else</span> {
+		result-&gt;prog_allocated_stack = 0;
+		result-&gt;prog_stack_size = 0;
+		result-&gt;user_stack_size = MAXSSIZ;
+	}
+
+	<span class="enscript-comment">/* The stack slides down from the default location */</span>
+	result-&gt;user_stack = addr;
+	result-&gt;user_stack -= slide;
+
+	ret = load_threadentry(thread,
+		       (uint32_t *)(((vm_offset_t)tcp) + 
+		       		<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_command)),
+		       tcp-&gt;cmdsize - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_command),
+		       &amp;addr);
+	<span class="enscript-keyword">if</span> (ret != LOAD_SUCCESS)
+		<span class="enscript-keyword">return</span>(ret);
+
+	<span class="enscript-keyword">if</span> (result-&gt;using_lcmain || result-&gt;entry_point != MACH_VM_MIN_ADDRESS) {
+		<span class="enscript-comment">/* Already processed LC_MAIN or LC_UNIXTHREAD */</span>
+		<span class="enscript-keyword">return</span> (LOAD_FAILURE);
+	}
+
+	result-&gt;entry_point = addr;
+	result-&gt;entry_point += slide;
+
+	ret = load_threadstate(thread,
+		       (uint32_t *)(((vm_offset_t)tcp) + 
+		       		<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_command)),
+		       tcp-&gt;cmdsize - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> thread_command));
+	<span class="enscript-keyword">if</span> (ret != LOAD_SUCCESS)
+		<span class="enscript-keyword">return</span> (ret);
+
+
+	result-&gt;unixproc = TRUE;
+	result-&gt;thread_count++;
+
+	<span class="enscript-keyword">return</span>(LOAD_SUCCESS);
+}
+
+<span class="enscript-type">static</span>
+load_return_t
+<span class="enscript-function-name">load_threadstate</span>(
+	thread_t	thread,
+	uint32_t	*ts,
+	uint32_t	total_size
+)
+{
+	kern_return_t	ret;
+	uint32_t	size;
+	<span class="enscript-type">int</span>		flavor;
+	uint32_t	thread_size;
+	uint32_t	*local_ts;
+	uint32_t	local_ts_size;
+
+	local_ts = NULL;
+	local_ts_size = 0;
+
+	ret = thread_state_initialize( thread );
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+		ret = LOAD_FAILURE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+	}
+    
+	<span class="enscript-keyword">if</span> (total_size &gt; 0) {
+		local_ts_size = total_size;
+		local_ts = kalloc(local_ts_size);
+		<span class="enscript-keyword">if</span> (local_ts == NULL) {
+			ret = LOAD_FAILURE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		memcpy(local_ts, ts, local_ts_size);
+		ts = local_ts;
+	}
+
+	<span class="enscript-comment">/*
+	 * Set the new thread state; iterate through the state flavors in
+	 * the mach-o file.
+	 */</span>
+	<span class="enscript-keyword">while</span> (total_size &gt; 0) {
+		flavor = *ts++;
+		size = *ts++;
+		<span class="enscript-keyword">if</span> (UINT32_MAX-2 &lt; size ||
+		    UINT32_MAX/<span class="enscript-keyword">sizeof</span>(uint32_t) &lt; size+2) {
+			ret = LOAD_BADMACHO;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		thread_size = (size+2)*<span class="enscript-keyword">sizeof</span>(uint32_t);
+		<span class="enscript-keyword">if</span> (thread_size &gt; total_size) {
+			ret = LOAD_BADMACHO;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		total_size -= thread_size;
+		<span class="enscript-comment">/*
+		 * Third argument is a kernel space pointer; it gets cast
+		 * to the appropriate type in machine_thread_set_state()
+		 * based on the value of flavor.
+		 */</span>
+		ret = thread_setstatus(thread, flavor, (thread_state_t)ts, size);
+		<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+			ret = LOAD_FAILURE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+		}
+		ts += size;	<span class="enscript-comment">/* ts is a (uint32_t *) */</span>
+	}
+	ret = LOAD_SUCCESS;
+
+<span class="enscript-reference">done</span>:
+	<span class="enscript-keyword">if</span> (local_ts != NULL) {
+		kfree(local_ts, local_ts_size);
+		local_ts = NULL;
+	}
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-type">static</span>
+load_return_t
+<span class="enscript-function-name">load_threadstack</span>(
+	thread_t	thread,
+	uint32_t	*ts,
+	uint32_t	total_size,
+	mach_vm_offset_t	*user_stack,
+	<span class="enscript-type">int</span> *customstack
+)
+{
+	kern_return_t	ret;
+	uint32_t	size;
+	<span class="enscript-type">int</span>		flavor;
+	uint32_t	stack_size;
+
+	<span class="enscript-keyword">while</span> (total_size &gt; 0) {
+		flavor = *ts++;
+		size = *ts++;
+		<span class="enscript-keyword">if</span> (UINT32_MAX-2 &lt; size ||
+		    UINT32_MAX/<span class="enscript-keyword">sizeof</span>(uint32_t) &lt; size+2)
+			<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+		stack_size = (size+2)*<span class="enscript-keyword">sizeof</span>(uint32_t);
+		<span class="enscript-keyword">if</span> (stack_size &gt; total_size)
+			<span class="enscript-keyword">return</span>(LOAD_BADMACHO);
+		total_size -= stack_size;
+
+		<span class="enscript-comment">/*
+		 * Third argument is a kernel space pointer; it gets cast
+		 * to the appropriate type in thread_userstack() based on
+		 * the value of flavor.
+		 */</span>
+		ret = thread_userstack(thread, flavor, (thread_state_t)ts, size, user_stack, customstack);
+		<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+			<span class="enscript-keyword">return</span>(LOAD_FAILURE);
+		}
+		ts += size;	<span class="enscript-comment">/* ts is a (uint32_t *) */</span>
+	}
+	<span class="enscript-keyword">return</span>(LOAD_SUCCESS);
+}
+
+<span class="enscript-type">static</span>
+load_return_t
+<span class="enscript-function-name">load_threadentry</span>(
+	thread_t	thread,
+	uint32_t	*ts,
+	uint32_t	total_size,
+	mach_vm_offset_t	*entry_point
+)
+{
+	kern_return_t	ret;
+	uint32_t	size;
+	<span class="enscript-type">int</span>		flavor;
+	uint32_t	entry_size;
+
+	<span class="enscript-comment">/*
+	 *	Set the thread state.
+	 */</span>
+	*entry_point = MACH_VM_MIN_ADDRESS;
+	<span class="enscript-keyword">while</span> (total_size &gt; 0) {
+		flavor = *ts++;
+		size = *ts++;
+		<span class="enscript-keyword">if</span> (UINT32_MAX-2 &lt; size ||
+		    UINT32_MAX/<span class="enscript-keyword">sizeof</span>(uint32_t) &lt; size+2)
+			<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+		entry_size = (size+2)*<span class="enscript-keyword">sizeof</span>(uint32_t);
+		<span class="enscript-keyword">if</span> (entry_size &gt; total_size)
+			<span class="enscript-keyword">return</span>(LOAD_BADMACHO);
+		total_size -= entry_size;
+		<span class="enscript-comment">/*
+		 * Third argument is a kernel space pointer; it gets cast
+		 * to the appropriate type in thread_entrypoint() based on
+		 * the value of flavor.
+		 */</span>
+		ret = thread_entrypoint(thread, flavor, (thread_state_t)ts, size, entry_point);
+		<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+			<span class="enscript-keyword">return</span>(LOAD_FAILURE);
+		}
+		ts += size;	<span class="enscript-comment">/* ts is a (uint32_t *) */</span>
+	}
+	<span class="enscript-keyword">return</span>(LOAD_SUCCESS);
+}
+
+<span class="enscript-type">struct</span> macho_data {
+	<span class="enscript-type">struct</span> nameidata	__nid;
+	<span class="enscript-type">union</span> macho_vnode_header {
+		<span class="enscript-type">struct</span> mach_header	mach_header;
+		<span class="enscript-type">struct</span> fat_header	fat_header;
+		<span class="enscript-type">char</span>	__pad[512];
+	} __header;
+};
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEFAULT_DYLD_PATH</span> <span class="enscript-string">&quot;/usr/lib/dyld&quot;</span>
+
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">load_dylinker</span>(
+	<span class="enscript-type">struct</span> dylinker_command	*lcp,
+	integer_t		archbits,
+	vm_map_t		map,
+	thread_t	thread,
+	<span class="enscript-type">int</span>			depth,
+	int64_t			slide,
+	load_result_t		*result
+)
+{
+	<span class="enscript-type">char</span>			*name;
+	<span class="enscript-type">char</span>			*p;
+	<span class="enscript-type">struct</span> vnode		*vp = NULLVP;	<span class="enscript-comment">/* set by get_macho_vnode() */</span>
+	<span class="enscript-type">struct</span> mach_header	*header;
+	off_t			file_offset = 0; <span class="enscript-comment">/* set by get_macho_vnode() */</span>
+	off_t			macho_size = 0;	<span class="enscript-comment">/* set by get_macho_vnode() */</span>
+	load_result_t		*myresult;
+	kern_return_t		ret;
+	<span class="enscript-type">struct</span> macho_data	*macho_data;
+	<span class="enscript-type">struct</span> {
+		<span class="enscript-type">struct</span> mach_header	__header;
+		load_result_t		__myresult;
+		<span class="enscript-type">struct</span> macho_data	__macho_data;
+	} *dyld_data;
+
+	<span class="enscript-keyword">if</span> (lcp-&gt;cmdsize &lt; <span class="enscript-keyword">sizeof</span>(*lcp))
+		<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+
+	name = (<span class="enscript-type">char</span> *)lcp + lcp-&gt;name.offset;
+	<span class="enscript-comment">/*
+	 *	Check for a proper null terminated string.
+	 */</span>
+	p = name;
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-keyword">if</span> (p &gt;= (<span class="enscript-type">char</span> *)lcp + lcp-&gt;cmdsize)
+			<span class="enscript-keyword">return</span>(LOAD_BADMACHO);
+	} <span class="enscript-keyword">while</span> (*p++);
+
+#<span class="enscript-reference">if</span> !(<span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>)
+	<span class="enscript-keyword">if</span> (0 != strcmp(name, DEFAULT_DYLD_PATH)) {
+		<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* Allocate wad-of-data from heap to reduce excessively deep stacks */</span>
+
+	MALLOC(dyld_data, <span class="enscript-type">void</span> *, <span class="enscript-keyword">sizeof</span> (*dyld_data), M_TEMP, M_WAITOK);
+	header = &amp;dyld_data-&gt;__header;
+	myresult = &amp;dyld_data-&gt;__myresult;
+	macho_data = &amp;dyld_data-&gt;__macho_data;
+
+	ret = get_macho_vnode(name, archbits, header,
+	    &amp;file_offset, &amp;macho_size, macho_data, &amp;vp);
+	<span class="enscript-keyword">if</span> (ret)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">novp_out</span>;
+
+	*myresult = load_result_null;
+
+	<span class="enscript-comment">/*
+	 *	First try to map dyld in directly.  This should work most of
+	 *	the time since there shouldn't normally be something already
+	 *	mapped to its address.
+	 */</span>
+
+	ret = parse_machfile(vp, map, thread, header, file_offset,
+	                     macho_size, depth, slide, 0, myresult);
+
+	<span class="enscript-comment">/*
+	 *	If it turned out something was in the way, then we'll take
+	 *	take this longer path to preflight dyld's vm ranges, then
+	 *	map it at a free location in the address space.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (ret == LOAD_NOSPACE) {
+		mach_vm_offset_t	dyl_start, map_addr;
+		mach_vm_size_t	dyl_length;
+		int64_t			slide_amount;
+
+		*myresult = load_result_null;
+
+		<span class="enscript-comment">/*
+		 * Preflight parsing the Mach-O file with a NULL
+		 * map, which will return the ranges needed for a
+		 * subsequent map attempt (with a slide) in &quot;myresult&quot;
+		 */</span>
+		ret = parse_machfile(vp, VM_MAP_NULL, THREAD_NULL, header,
+		                     file_offset, macho_size, depth,
+		                     0 <span class="enscript-comment">/* slide */</span>, 0, myresult);
+
+		<span class="enscript-keyword">if</span> (ret != LOAD_SUCCESS) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+
+		dyl_start = myresult-&gt;min_vm_addr;
+		dyl_length = myresult-&gt;max_vm_addr - myresult-&gt;min_vm_addr;
+
+		dyl_length += slide;
+
+		<span class="enscript-comment">/* To find an appropriate load address, do a quick allocation */</span>
+		map_addr = dyl_start;
+		ret = mach_vm_allocate(map, &amp;map_addr, dyl_length, VM_FLAGS_ANYWHERE);
+		<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+			ret = LOAD_NOSPACE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+
+		ret = mach_vm_deallocate(map, map_addr, dyl_length);
+		<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+			ret = LOAD_NOSPACE;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		
+		<span class="enscript-keyword">if</span> (map_addr &lt; dyl_start)
+			slide_amount = -(int64_t)(dyl_start - map_addr);
+		<span class="enscript-keyword">else</span>
+			slide_amount = (int64_t)(map_addr - dyl_start);
+
+		slide_amount += slide;
+
+		*myresult = load_result_null;
+
+		ret = parse_machfile(vp, map, thread, header,
+		                     file_offset, macho_size, depth,
+		                     slide_amount, 0, myresult);
+
+		<span class="enscript-keyword">if</span> (ret) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (ret == LOAD_SUCCESS) {		
+		result-&gt;dynlinker = TRUE;
+		result-&gt;entry_point = myresult-&gt;entry_point;
+		result-&gt;validentry = myresult-&gt;validentry;
+		result-&gt;all_image_info_addr = myresult-&gt;all_image_info_addr;
+		result-&gt;all_image_info_size = myresult-&gt;all_image_info_size;
+		<span class="enscript-keyword">if</span> (myresult-&gt;platform_binary) {
+			result-&gt;csflags |= CS_DYLD_PLATFORM;
+		}
+	}
+<span class="enscript-reference">out</span>:
+	vnode_put(vp);
+<span class="enscript-reference">novp_out</span>:
+	FREE(dyld_data, M_TEMP);
+	<span class="enscript-keyword">return</span> (ret);
+
+}
+
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">load_code_signature</span>(
+	<span class="enscript-type">struct</span> linkedit_data_command	*lcp,
+	<span class="enscript-type">struct</span> vnode			*vp,
+	off_t				macho_offset,
+	off_t				macho_size,
+	cpu_type_t			cputype,
+	load_result_t			*result)
+{
+	<span class="enscript-type">int</span>		ret;
+	kern_return_t	kr;
+	vm_offset_t	addr;
+	<span class="enscript-type">int</span>		resid;
+	<span class="enscript-type">struct</span> cs_blob	*blob;
+	<span class="enscript-type">int</span>		error;
+	vm_size_t	blob_size;
+
+	addr = 0;
+	blob = NULL;
+
+	<span class="enscript-keyword">if</span> (lcp-&gt;cmdsize != <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> linkedit_data_command) ||
+	    lcp-&gt;dataoff + lcp-&gt;datasize &gt; macho_size) {
+		ret = LOAD_BADMACHO;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	blob = ubc_cs_blob_get(vp, cputype, macho_offset);
+	<span class="enscript-keyword">if</span> (blob != NULL) {
+		<span class="enscript-comment">/* we already have a blob for this vnode and cputype */</span>
+		<span class="enscript-keyword">if</span> (blob-&gt;csb_cpu_type == cputype &amp;&amp;
+		    blob-&gt;csb_base_offset == macho_offset &amp;&amp;
+		    blob-&gt;csb_mem_size == lcp-&gt;datasize) {
+			<span class="enscript-comment">/* it matches the blob we want here, lets verify the version */</span>
+			<span class="enscript-keyword">if</span>(0 != ubc_cs_generation_check(vp)) {
+				<span class="enscript-keyword">if</span> (0 != ubc_cs_blob_revalidate(vp, blob, 0)) {
+					ret = LOAD_FAILURE; <span class="enscript-comment">/* set error same as from ubc_cs_blob_add */</span>
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+				}
+			}
+			ret = LOAD_SUCCESS;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* the blob has changed for this vnode: fail ! */</span>
+			ret = LOAD_BADMACHO;
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	blob_size = lcp-&gt;datasize;
+	kr = ubc_cs_blob_allocate(&amp;addr, &amp;blob_size);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		ret = LOAD_NOSPACE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	
+	resid = 0;
+	error = vn_rdwr(UIO_READ,
+			vp,
+			(caddr_t) addr,
+			lcp-&gt;datasize,
+			macho_offset + lcp-&gt;dataoff,
+			UIO_SYSSPACE,
+			0,
+			kauth_cred_get(),
+			&amp;resid,
+			current_proc());
+	<span class="enscript-keyword">if</span> (error || resid != 0) {
+		ret = LOAD_IOERROR;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (ubc_cs_blob_add(vp,
+			    cputype,
+			    macho_offset,
+			    addr,
+			    lcp-&gt;datasize,
+			    0,
+			    &amp;blob)) {
+		ret = LOAD_FAILURE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* ubc_cs_blob_add() has consumed &quot;addr&quot; */</span>
+		addr = 0;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CHECK_CS_VALIDATION_BITMAP</span>
+	ubc_cs_validation_bitmap_allocate( vp );
+#<span class="enscript-reference">endif</span>
+		
+	ret = LOAD_SUCCESS;
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (ret == LOAD_SUCCESS) {
+		<span class="enscript-keyword">if</span> (blob == NULL)
+			panic(<span class="enscript-string">&quot;sucess, but no blob!&quot;</span>);
+
+		result-&gt;csflags |= blob-&gt;csb_flags;
+		result-&gt;platform_binary = blob-&gt;csb_platform_binary;
+		result-&gt;cs_end_offset = blob-&gt;csb_end_offset;
+	}
+	<span class="enscript-keyword">if</span> (addr != 0) {
+		ubc_cs_blob_deallocate(addr, blob_size);
+		addr = 0;
+	}
+
+	<span class="enscript-keyword">return</span> ret;
+}
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_CODE_DECRYPTION</span>
+
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">set_code_unprotect</span>(
+	<span class="enscript-type">struct</span> encryption_info_command *eip,
+	caddr_t addr, 	
+	vm_map_t map,
+	int64_t slide,
+	<span class="enscript-type">struct</span> vnode *vp,
+	off_t macho_offset,
+	cpu_type_t cputype,
+	cpu_subtype_t cpusubtype)
+{
+	<span class="enscript-type">int</span> error, len;
+	pager_crypt_info_t crypt_info;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> * cryptname = 0;
+	<span class="enscript-type">char</span> *vpath;
+	
+	size_t offset;
+	<span class="enscript-type">struct</span> segment_command_64 *seg64;
+	<span class="enscript-type">struct</span> segment_command *seg32;
+	vm_map_offset_t map_offset, map_size;
+	vm_object_offset_t crypto_backing_offset;
+	kern_return_t kr;
+
+	<span class="enscript-keyword">if</span> (eip-&gt;cmdsize &lt; <span class="enscript-keyword">sizeof</span>(*eip)) <span class="enscript-keyword">return</span> LOAD_BADMACHO;
+	
+	<span class="enscript-keyword">switch</span>(eip-&gt;cryptid) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+			<span class="enscript-comment">/* not encrypted, just an empty load command */</span>
+			<span class="enscript-keyword">return</span> LOAD_SUCCESS;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">1</span>:
+			cryptname=<span class="enscript-string">&quot;com.apple.unfree&quot;</span>;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">0x10</span>:	
+			<span class="enscript-comment">/* some random cryptid that you could manually put into
+			 * your binary if you want NULL */</span>
+			cryptname=<span class="enscript-string">&quot;com.apple.null&quot;</span>;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span> LOAD_BADMACHO;
+	}
+	
+	<span class="enscript-keyword">if</span> (map == VM_MAP_NULL) <span class="enscript-keyword">return</span> (LOAD_SUCCESS);
+	<span class="enscript-keyword">if</span> (NULL == text_crypter_create) <span class="enscript-keyword">return</span> LOAD_FAILURE;
+
+	MALLOC_ZONE(vpath, <span class="enscript-type">char</span> *, MAXPATHLEN, M_NAMEI, M_WAITOK);
+	<span class="enscript-keyword">if</span>(vpath == NULL) <span class="enscript-keyword">return</span> LOAD_FAILURE;
+	
+	len = MAXPATHLEN;
+	error = vn_getpath(vp, vpath, &amp;len);
+	<span class="enscript-keyword">if</span> (error) {
+		FREE_ZONE(vpath, MAXPATHLEN, M_NAMEI);
+		<span class="enscript-keyword">return</span> LOAD_FAILURE;
+	}
+	
+	<span class="enscript-comment">/* set up decrypter first */</span>
+	crypt_file_data_t crypt_data = {
+		.filename = vpath,
+		.cputype = cputype,
+		.cpusubtype = cpusubtype};
+	kr=text_crypter_create(&amp;crypt_info, cryptname, (<span class="enscript-type">void</span>*)&amp;crypt_data);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	<span class="enscript-type">struct</span> proc *p;
+	p  = current_proc();
+	printf(<span class="enscript-string">&quot;APPLE_PROTECT: %d[%s] map %p %s(%s) -&gt; 0x%x\n&quot;</span>,
+	       p-&gt;p_pid, p-&gt;p_comm, map, __FUNCTION__, vpath, kr);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEVELOPMENT || DEBUG */</span>
+	FREE_ZONE(vpath, MAXPATHLEN, M_NAMEI);
+	
+	<span class="enscript-keyword">if</span>(kr) {
+		printf(<span class="enscript-string">&quot;set_code_unprotect: unable to create decrypter %s, kr=%d\n&quot;</span>,
+		       cryptname, kr);
+		<span class="enscript-keyword">if</span> (kr == kIOReturnNotPrivileged) {
+			<span class="enscript-comment">/* text encryption returned decryption failure */</span>
+			<span class="enscript-keyword">return</span>(LOAD_DECRYPTFAIL);
+		 }<span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">return</span> LOAD_RESOURCE;
+	}
+	
+	<span class="enscript-comment">/* this is terrible, but we have to rescan the load commands to find the
+	 * virtual address of this encrypted stuff. This code is gonna look like
+	 * the dyld source one day... */</span>
+	<span class="enscript-type">struct</span> mach_header *header = (<span class="enscript-type">struct</span> mach_header *)addr;
+	size_t mach_header_sz = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> mach_header);
+	<span class="enscript-keyword">if</span> (header-&gt;magic == MH_MAGIC_64 ||
+	    header-&gt;magic == MH_CIGAM_64) {
+	    	mach_header_sz = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> mach_header_64);
+	}
+	offset = mach_header_sz;
+	uint32_t ncmds = header-&gt;ncmds;
+	<span class="enscript-keyword">while</span> (ncmds--) {
+		<span class="enscript-comment">/*
+		 *	Get a pointer to the command.
+		 */</span>
+		<span class="enscript-type">struct</span> load_command *lcp = (<span class="enscript-type">struct</span> load_command *)(addr + offset);
+		offset += lcp-&gt;cmdsize;
+		
+		<span class="enscript-keyword">switch</span>(lcp-&gt;cmd) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">LC_SEGMENT_64</span>:
+				seg64 = (<span class="enscript-type">struct</span> segment_command_64 *)lcp;
+				<span class="enscript-keyword">if</span> ((seg64-&gt;fileoff &lt;= eip-&gt;cryptoff) &amp;&amp;
+				    (seg64-&gt;fileoff+seg64-&gt;filesize &gt;= 
+				     eip-&gt;cryptoff+eip-&gt;cryptsize)) {
+					map_offset = seg64-&gt;vmaddr + eip-&gt;cryptoff - seg64-&gt;fileoff + slide;
+					map_size = eip-&gt;cryptsize;
+					crypto_backing_offset = macho_offset + eip-&gt;cryptoff;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">remap_now</span>;
+				}
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">LC_SEGMENT</span>:
+				seg32 = (<span class="enscript-type">struct</span> segment_command *)lcp;
+				<span class="enscript-keyword">if</span> ((seg32-&gt;fileoff &lt;= eip-&gt;cryptoff) &amp;&amp;
+				    (seg32-&gt;fileoff+seg32-&gt;filesize &gt;= 
+				     eip-&gt;cryptoff+eip-&gt;cryptsize)) {
+					map_offset = seg32-&gt;vmaddr + eip-&gt;cryptoff - seg32-&gt;fileoff + slide;
+					map_size = eip-&gt;cryptsize;
+					crypto_backing_offset = macho_offset + eip-&gt;cryptoff;
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">remap_now</span>;
+				}
+		}
+	}
+	
+	<span class="enscript-comment">/* if we get here, did not find anything */</span>
+	<span class="enscript-keyword">return</span> LOAD_BADMACHO;
+	
+<span class="enscript-reference">remap_now</span>:
+	<span class="enscript-comment">/* now remap using the decrypter */</span>
+	MACHO_PRINTF((<span class="enscript-string">&quot;+++ set_code_unprotect: vm[0x%llx:0x%llx]\n&quot;</span>,
+		      (uint64_t) map_offset,
+		      (uint64_t) (map_offset+map_size)));
+	kr = vm_map_apple_protected(map,
+				    map_offset,
+				    map_offset+map_size,
+				    crypto_backing_offset,
+				    &amp;crypt_info);
+	<span class="enscript-keyword">if</span> (kr) {
+		printf(<span class="enscript-string">&quot;set_code_unprotect(): mapping failed with %x\n&quot;</span>, kr);
+		<span class="enscript-keyword">return</span> LOAD_PROTECT;
+	}
+	
+	<span class="enscript-keyword">return</span> LOAD_SUCCESS;
+}
+
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * This routine exists to support the load_dylinker().
+ *
+ * This routine has its own, separate, understanding of the FAT file format,
+ * which is terrifically unfortunate.
+ */</span>
+<span class="enscript-type">static</span>
+load_return_t
+<span class="enscript-function-name">get_macho_vnode</span>(
+	<span class="enscript-type">char</span>			*path,
+	integer_t		archbits,
+	<span class="enscript-type">struct</span> mach_header	*mach_header,
+	off_t			*file_offset,
+	off_t			*macho_size,
+	<span class="enscript-type">struct</span> macho_data	*data,
+	<span class="enscript-type">struct</span> vnode		**vpp
+)
+{
+	<span class="enscript-type">struct</span> vnode		*vp;
+	vfs_context_t		ctx = vfs_context_current();
+	proc_t			p = vfs_context_proc(ctx);
+	kauth_cred_t		kerncred;
+	<span class="enscript-type">struct</span> nameidata	*ndp = &amp;data-&gt;__nid;
+	boolean_t		is_fat;
+	<span class="enscript-type">struct</span> fat_arch		fat_arch;
+	<span class="enscript-type">int</span>			error;
+	<span class="enscript-type">int</span> resid;
+	<span class="enscript-type">union</span> macho_vnode_header *header = &amp;data-&gt;__header;
+	off_t fsize = (off_t)0;
+
+	<span class="enscript-comment">/*
+	 * Capture the kernel credential for use in the actual read of the
+	 * file, since the user doing the execution may have execute rights
+	 * but not read rights, but to exec something, we have to either map
+	 * or read it into the new process address space, which requires
+	 * read rights.  This is to deal with lack of common credential
+	 * serialization code which would treat NOCRED as &quot;serialize 'root'&quot;.
+	 */</span>
+	kerncred = vfs_context_ucred(vfs_context_kernel());
+
+	<span class="enscript-comment">/* init the namei data to point the file user's program name */</span>
+	NDINIT(ndp, LOOKUP, OP_OPEN, FOLLOW | LOCKLEAF, UIO_SYSSPACE, CAST_USER_ADDR_T(path), ctx);
+
+	<span class="enscript-keyword">if</span> ((error = namei(ndp)) != 0) {
+		<span class="enscript-keyword">if</span> (error == ENOENT) {
+			error = LOAD_ENOENT;
+		} <span class="enscript-keyword">else</span> {
+			error = LOAD_FAILURE;
+		}
+		<span class="enscript-keyword">return</span>(error);
+	}
+	nameidone(ndp);
+	vp = ndp-&gt;ni_vp;
+
+	<span class="enscript-comment">/* check for regular file */</span>
+	<span class="enscript-keyword">if</span> (vp-&gt;v_type != VREG) {
+		error = LOAD_PROTECT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad1</span>;
+	}
+
+	<span class="enscript-comment">/* get size */</span>
+	<span class="enscript-keyword">if</span> ((error = vnode_size(vp, &amp;fsize, ctx)) != 0) {
+		error = LOAD_FAILURE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad1</span>;
+	}
+
+	<span class="enscript-comment">/* Check mount point */</span>
+	<span class="enscript-keyword">if</span> (vp-&gt;v_mount-&gt;mnt_flag &amp; MNT_NOEXEC) {
+		error = LOAD_PROTECT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad1</span>;
+	}
+
+	<span class="enscript-comment">/* check access */</span>
+	<span class="enscript-keyword">if</span> ((error = vnode_authorize(vp, NULL, KAUTH_VNODE_EXECUTE | KAUTH_VNODE_READ_DATA, ctx)) != 0) {
+		error = LOAD_PROTECT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad1</span>;
+	}
+
+	<span class="enscript-comment">/* try to open it */</span>
+	<span class="enscript-keyword">if</span> ((error = VNOP_OPEN(vp, FREAD, ctx)) != 0) {
+		error = LOAD_PROTECT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad1</span>;
+	}
+
+	<span class="enscript-keyword">if</span> ((error = vn_rdwr(UIO_READ, vp, (caddr_t)header, <span class="enscript-keyword">sizeof</span> (*header), 0,
+	    UIO_SYSSPACE, IO_NODELOCKED, kerncred, &amp;resid, p)) != 0) {
+		error = LOAD_IOERROR;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad2</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (resid) {
+		error = LOAD_BADMACHO;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad2</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (header-&gt;mach_header.magic == MH_MAGIC ||
+	    header-&gt;mach_header.magic == MH_MAGIC_64) {
+		is_fat = FALSE;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (OSSwapBigToHostInt32(header-&gt;fat_header.magic) == FAT_MAGIC) {
+	    is_fat = TRUE;
+	} <span class="enscript-keyword">else</span> {
+		error = LOAD_BADMACHO;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad2</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (is_fat) {
+
+		error = fatfile_validate_fatarches((vm_offset_t)(&amp;header-&gt;fat_header),
+						<span class="enscript-keyword">sizeof</span>(*header));
+		<span class="enscript-keyword">if</span> (error != LOAD_SUCCESS) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad2</span>;
+		}
+
+		<span class="enscript-comment">/* Look up our architecture in the fat file. */</span>
+		error = fatfile_getarch_with_bits(archbits,
+						(vm_offset_t)(&amp;header-&gt;fat_header), <span class="enscript-keyword">sizeof</span>(*header), &amp;fat_arch);
+		<span class="enscript-keyword">if</span> (error != LOAD_SUCCESS)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad2</span>;
+
+		<span class="enscript-comment">/* Read the Mach-O header out of it */</span>
+		error = vn_rdwr(UIO_READ, vp, (caddr_t)&amp;header-&gt;mach_header,
+		    <span class="enscript-keyword">sizeof</span> (header-&gt;mach_header), fat_arch.offset,
+		    UIO_SYSSPACE, IO_NODELOCKED, kerncred, &amp;resid, p);
+		<span class="enscript-keyword">if</span> (error) {
+			error = LOAD_IOERROR;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad2</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (resid) {
+			error = LOAD_BADMACHO;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad2</span>;
+		}
+
+		<span class="enscript-comment">/* Is this really a Mach-O? */</span>
+		<span class="enscript-keyword">if</span> (header-&gt;mach_header.magic != MH_MAGIC &amp;&amp;
+		    header-&gt;mach_header.magic != MH_MAGIC_64) {
+			error = LOAD_BADMACHO;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad2</span>;
+		}
+
+		*file_offset = fat_arch.offset;
+		*macho_size = fat_arch.size;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * Force get_macho_vnode() to fail if the architecture bits
+		 * do not match the expected architecture bits.  This in
+		 * turn causes load_dylinker() to fail for the same reason,
+		 * so it ensures the dynamic linker and the binary are in
+		 * lock-step.  This is potentially bad, if we ever add to
+		 * the CPU_ARCH_* bits any bits that are desirable but not
+		 * required, since the dynamic linker might work, but we will
+		 * refuse to load it because of this check.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((cpu_type_t)(header-&gt;mach_header.cputype &amp; CPU_ARCH_MASK) != archbits) {
+			error = LOAD_BADARCH;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad2</span>;
+		}
+
+		*file_offset = 0;
+		*macho_size = fsize;
+	}
+
+	*mach_header = header-&gt;mach_header;
+	*vpp = vp;
+
+	ubc_setsize(vp, fsize);
+	<span class="enscript-keyword">return</span> (error);
+
+<span class="enscript-reference">bad2</span>:
+	(<span class="enscript-type">void</span>) VNOP_CLOSE(vp, FREAD, ctx);
+<span class="enscript-reference">bad1</span>:
+	vnode_put(vp);
+	<span class="enscript-keyword">return</span>(error);
+}
+</pre>
+<hr />
+</body></html>

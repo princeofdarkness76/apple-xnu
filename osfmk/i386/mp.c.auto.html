@@ -1,0 +1,1976 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mp.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mp.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach_rt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach_kdp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach_ldebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;gprof.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/startup.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/timer_queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_data.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/pms.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/timer_call.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;prng/random.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;profiling/profile-mk.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/bit_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/proc_reg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpu_threads.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp_desc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/trap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/postcode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/mp_events.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/lapic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/cpuid.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/fpu.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_cpu.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/pmCPU.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MCA</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/machine_check.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;i386/acpi.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;chud/chud_xnu.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;chud/chud_xnu_private.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;console/serial_protos.h&gt;</span>
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MP_DEBUG</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PAUSE</span>		delay(1000000)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DBG</span>(x...)	kprintf(x)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DBG</span>(x...)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PAUSE</span>
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MP_DEBUG */</span>
+
+<span class="enscript-comment">/* Debugging/test trace events: */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TRACE_MP_TLB_FLUSH</span>		MACHDBG_CODE(DBG_MACH_MP, 0)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TRACE_MP_CPUS_CALL</span>		MACHDBG_CODE(DBG_MACH_MP, 1)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TRACE_MP_CPUS_CALL_LOCAL</span>	MACHDBG_CODE(DBG_MACH_MP, 2)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TRACE_MP_CPUS_CALL_ACTION</span>	MACHDBG_CODE(DBG_MACH_MP, 3)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TRACE_MP_CPUS_CALL_NOBUF</span>	MACHDBG_CODE(DBG_MACH_MP, 4)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TRACE_MP_CPU_FAST_START</span>		MACHDBG_CODE(DBG_MACH_MP, 5)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TRACE_MP_CPU_START</span>		MACHDBG_CODE(DBG_MACH_MP, 6)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TRACE_MP_CPU_DEACTIVATE</span>		MACHDBG_CODE(DBG_MACH_MP, 7)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ABS</span>(v)		(((v) &gt; 0)?(v):-(v))
+
+<span class="enscript-type">void</span> 		slave_boot_init(<span class="enscript-type">void</span>);
+<span class="enscript-type">void</span>		i386_cpu_IPI(<span class="enscript-type">int</span> cpu);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_KDP</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	mp_kdp_wait(boolean_t flush, boolean_t isNMI);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MACH_KDP */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	mp_rendezvous_action(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 	mp_broadcast_action(<span class="enscript-type">void</span>);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_KDP</span>
+<span class="enscript-type">static</span> boolean_t	cpu_signal_pending(<span class="enscript-type">int</span> cpu, mp_event_t event);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MACH_KDP */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>		NMIInterruptHandler(x86_saved_state_t *regs);
+
+boolean_t 		smp_initialized = FALSE;
+uint32_t 		TSC_sync_margin = 0xFFF;
+<span class="enscript-type">volatile</span> boolean_t	force_immediate_debugger_NMI = FALSE;
+<span class="enscript-type">volatile</span> boolean_t	pmap_tlb_flush_timeout = FALSE;
+<span class="enscript-function-name">decl_simple_lock_data</span>(,mp_kdp_lock);
+
+<span class="enscript-function-name">decl_lck_mtx_data</span>(<span class="enscript-type">static</span>, mp_cpu_boot_lock);
+lck_mtx_ext_t	mp_cpu_boot_lock_ext;
+
+<span class="enscript-comment">/* Variables needed for MP rendezvous. */</span>
+<span class="enscript-function-name">decl_simple_lock_data</span>(,mp_rv_lock);
+<span class="enscript-type">static</span> <span class="enscript-function-name">void</span>	(*mp_rv_setup_func)(<span class="enscript-type">void</span> *arg);
+<span class="enscript-type">static</span> <span class="enscript-function-name">void</span>	(*mp_rv_action_func)(<span class="enscript-type">void</span> *arg);
+<span class="enscript-type">static</span> <span class="enscript-function-name">void</span>	(*mp_rv_teardown_func)(<span class="enscript-type">void</span> *arg);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	*mp_rv_func_arg;
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> <span class="enscript-type">int</span>	mp_rv_ncpus;
+			<span class="enscript-comment">/* Cache-aligned barriers: */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> <span class="enscript-type">long</span>	mp_rv_entry    __attribute__((aligned(64)));
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> <span class="enscript-type">long</span>	mp_rv_exit     __attribute__((aligned(64)));
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> <span class="enscript-type">long</span>	mp_rv_complete __attribute__((aligned(64)));
+
+<span class="enscript-type">volatile</span>	uint64_t	debugger_entry_time;
+<span class="enscript-type">volatile</span>	uint64_t	debugger_exit_time;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_KDP</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kdp/kdp.h&gt;</span>
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> kdp_snapshot;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> _kdp_xcpu_call_func {
+	kdp_x86_xcpu_func_t func;
+	<span class="enscript-type">void</span>     *arg0, *arg1;
+	<span class="enscript-type">volatile</span> <span class="enscript-type">long</span>     ret;
+	<span class="enscript-type">volatile</span> uint16_t cpu;
+} kdp_xcpu_call_func = {
+	.cpu  = KDP_XCPU_NONE
+};
+
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* Variables needed for MP broadcast. */</span>
+<span class="enscript-type">static</span> <span class="enscript-function-name">void</span>        (*mp_bc_action_func)(<span class="enscript-type">void</span> *arg);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>        *mp_bc_func_arg;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>     	mp_bc_ncpus;
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> <span class="enscript-type">long</span>   mp_bc_count;
+<span class="enscript-function-name">decl_lck_mtx_data</span>(<span class="enscript-type">static</span>, mp_bc_lock);
+lck_mtx_ext_t	mp_bc_lock_ext;
+<span class="enscript-type">static</span>	<span class="enscript-type">volatile</span> <span class="enscript-type">int</span> 	debugger_cpu = -1;
+<span class="enscript-type">volatile</span> <span class="enscript-type">long</span>	 NMIPI_acks = 0;
+<span class="enscript-type">volatile</span> <span class="enscript-type">long</span>	 NMI_count = 0;
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>	NMI_cpus(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	mp_cpus_call_init(<span class="enscript-type">void</span>); 
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	mp_cpus_call_action(<span class="enscript-type">void</span>); 
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	mp_call_PM(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">static</span> boolean_t	mp_cpus_call_wait_timeout = FALSE;
+
+<span class="enscript-type">char</span>		mp_slave_stack[PAGE_SIZE] __attribute__((aligned(PAGE_SIZE))); <span class="enscript-comment">// Temp stack for slave init
+</span>
+<span class="enscript-comment">/* PAL-related routines */</span>
+boolean_t <span class="enscript-function-name">i386_smp_init</span>(<span class="enscript-type">int</span> nmi_vector, i386_intr_func_t nmi_handler, 
+		<span class="enscript-type">int</span> ipi_vector, i386_intr_func_t ipi_handler);
+<span class="enscript-type">void</span> <span class="enscript-function-name">i386_start_cpu</span>(<span class="enscript-type">int</span> lapic_id, <span class="enscript-type">int</span> cpu_num);
+<span class="enscript-type">void</span> <span class="enscript-function-name">i386_send_NMI</span>(<span class="enscript-type">int</span> cpu);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">GPROF</span>
+<span class="enscript-comment">/*
+ * Initialize dummy structs for profiling. These aren't used but
+ * allows hertz_tick() to be built with GPROF defined.
+ */</span>
+<span class="enscript-type">struct</span> profile_vars _profile_vars;
+<span class="enscript-type">struct</span> profile_vars *_profile_vars_cpus[MAX_CPUS] = { &amp;_profile_vars };
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">GPROF_INIT</span>()							\
+{									\
+	<span class="enscript-type">int</span>	i;							\
+									\
+	<span class="enscript-comment">/* Hack to initialize pointers to unused profiling structs */</span>	\
+	<span class="enscript-keyword">for</span> (i = 1; i &lt; MAX_CPUS; i++)				\
+		_profile_vars_cpus[i] = &amp;_profile_vars;			\
+}
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">GPROF_INIT</span>()
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* GPROF */</span>
+
+<span class="enscript-type">static</span> lck_grp_t 	smp_lck_grp;
+<span class="enscript-type">static</span> lck_grp_attr_t	smp_lck_grp_attr;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NUM_CPU_WARM_CALLS</span>	20
+<span class="enscript-type">struct</span> timer_call	cpu_warm_call_arr[NUM_CPU_WARM_CALLS];
+queue_head_t 		cpu_warm_call_list;
+<span class="enscript-function-name">decl_simple_lock_data</span>(<span class="enscript-type">static</span>, cpu_warm_lock);
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> cpu_warm_data {
+	timer_call_t 	cwd_call;
+	uint64_t	cwd_deadline;
+	<span class="enscript-type">int</span>		cwd_result;
+} *cpu_warm_data_t;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>		cpu_prewarm_init(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 		cpu_warm_timer_call_func(call_entry_param_t p0, call_entry_param_t p1);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 		_cpu_warm_setup(<span class="enscript-type">void</span> *arg);
+<span class="enscript-type">static</span> timer_call_t 	grab_warm_timer_call(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>		free_warm_timer_call(timer_call_t call);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">smp_init</span>(<span class="enscript-type">void</span>)
+{
+	simple_lock_init(&amp;mp_kdp_lock, 0);
+	simple_lock_init(&amp;mp_rv_lock, 0);
+	lck_grp_attr_setdefault(&amp;smp_lck_grp_attr);
+	lck_grp_init(&amp;smp_lck_grp, <span class="enscript-string">&quot;i386_smp&quot;</span>, &amp;smp_lck_grp_attr);
+	lck_mtx_init_ext(&amp;mp_cpu_boot_lock, &amp;mp_cpu_boot_lock_ext, &amp;smp_lck_grp, LCK_ATTR_NULL);
+	lck_mtx_init_ext(&amp;mp_bc_lock, &amp;mp_bc_lock_ext, &amp;smp_lck_grp, LCK_ATTR_NULL);
+	console_init();
+
+	<span class="enscript-keyword">if</span>(!i386_smp_init(LAPIC_NMI_INTERRUPT, NMIInterruptHandler, 
+				LAPIC_VECTOR(INTERPROCESSOR), cpu_signal_handler))
+		<span class="enscript-keyword">return</span>;
+
+	cpu_thread_init();
+
+	GPROF_INIT();
+	DBGLOG_CPU_INIT(master_cpu);
+
+	mp_cpus_call_init();
+	mp_cpus_call_cpu_init(master_cpu);
+
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;TSC_sync_margin&quot;</span>,
+					&amp;TSC_sync_margin, <span class="enscript-keyword">sizeof</span>(TSC_sync_margin))) {
+		kprintf(<span class="enscript-string">&quot;TSC sync Margin 0x%x\n&quot;</span>, TSC_sync_margin);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (cpuid_vmm_present()) {
+		kprintf(<span class="enscript-string">&quot;TSC sync margin disabled\n&quot;</span>);
+		TSC_sync_margin = 0;
+	}
+	smp_initialized = TRUE;
+
+	cpu_prewarm_init();
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	<span class="enscript-type">int</span>			target_cpu;
+	<span class="enscript-type">int</span>			target_lapic;
+	<span class="enscript-type">int</span>			starter_cpu;
+} processor_start_info_t;
+<span class="enscript-type">static</span> processor_start_info_t	start_info	  __attribute__((aligned(64)));
+
+<span class="enscript-comment">/* 
+ * Cache-alignment is to avoid cross-cpu false-sharing interference.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> <span class="enscript-type">long</span>		tsc_entry_barrier __attribute__((aligned(64)));
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> <span class="enscript-type">long</span>		tsc_exit_barrier  __attribute__((aligned(64)));
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> uint64_t	tsc_target	  __attribute__((aligned(64)));
+
+<span class="enscript-comment">/*
+ * Poll a CPU to see when it has marked itself as running.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_wait_for_cpu_up</span>(<span class="enscript-type">int</span> slot_num, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> iters, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> usecdelay)
+{
+	<span class="enscript-keyword">while</span> (iters-- &gt; 0) {
+		<span class="enscript-keyword">if</span> (cpu_datap(slot_num)-&gt;cpu_running)
+			<span class="enscript-keyword">break</span>;
+		delay(usecdelay);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Quickly bring a CPU back online which has been halted.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">intel_startCPU_fast</span>(<span class="enscript-type">int</span> slot_num)
+{
+	kern_return_t	rc;
+
+	<span class="enscript-comment">/*
+	 * Try to perform a fast restart
+	 */</span>
+	rc = pmCPUExitHalt(slot_num);
+	<span class="enscript-keyword">if</span> (rc != KERN_SUCCESS)
+		<span class="enscript-comment">/*
+		 * The CPU was not eligible for a fast restart.
+		 */</span>
+		<span class="enscript-keyword">return</span>(rc);
+
+	KERNEL_DEBUG_CONSTANT(
+		TRACE_MP_CPU_FAST_START | DBG_FUNC_START,
+		slot_num, 0, 0, 0, 0);
+
+	<span class="enscript-comment">/*
+	 * Wait until the CPU is back online.
+	 */</span>
+	mp_disable_preemption();
+    
+	<span class="enscript-comment">/*
+	 * We use short pauses (1us) for low latency.  30,000 iterations is
+	 * longer than a full restart would require so it should be more
+	 * than long enough.
+	 */</span>
+
+	mp_wait_for_cpu_up(slot_num, 30000, 1);
+	mp_enable_preemption();
+
+	KERNEL_DEBUG_CONSTANT(
+		TRACE_MP_CPU_FAST_START | DBG_FUNC_END,
+		slot_num, cpu_datap(slot_num)-&gt;cpu_running, 0, 0, 0);
+
+	<span class="enscript-comment">/*
+	 * Check to make sure that the CPU is really running.  If not,
+	 * go through the slow path.
+	 */</span>
+	<span class="enscript-keyword">if</span> (cpu_datap(slot_num)-&gt;cpu_running)
+		<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>(KERN_FAILURE);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">started_cpu</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">/* Here on the started cpu with cpu_running set TRUE */</span>
+
+	<span class="enscript-keyword">if</span> (TSC_sync_margin &amp;&amp;
+	    start_info.target_cpu == cpu_number()) {
+		<span class="enscript-comment">/*
+		 * I've just started-up, synchronize again with the starter cpu
+		 * and then snap my TSC.
+		 */</span>
+		tsc_target   = 0;
+		atomic_decl(&amp;tsc_entry_barrier, 1);
+		<span class="enscript-keyword">while</span> (tsc_entry_barrier != 0)
+			;	<span class="enscript-comment">/* spin for starter and target at barrier */</span>
+		tsc_target = rdtsc64();
+		atomic_decl(&amp;tsc_exit_barrier, 1);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">start_cpu</span>(<span class="enscript-type">void</span> *arg)
+{
+	<span class="enscript-type">int</span>			i = 1000;
+	processor_start_info_t	*psip = (processor_start_info_t *) arg;
+
+	<span class="enscript-comment">/* Ignore this if the current processor is not the starter */</span>
+	<span class="enscript-keyword">if</span> (cpu_number() != psip-&gt;starter_cpu)
+		<span class="enscript-keyword">return</span>;
+
+	DBG(<span class="enscript-string">&quot;start_cpu(%p) about to start cpu %d, lapic %d\n&quot;</span>,
+		arg, psip-&gt;target_cpu, psip-&gt;target_lapic);
+
+	KERNEL_DEBUG_CONSTANT(
+		TRACE_MP_CPU_START | DBG_FUNC_START,
+		psip-&gt;target_cpu,
+		psip-&gt;target_lapic, 0, 0, 0);
+
+	i386_start_cpu(psip-&gt;target_lapic, psip-&gt;target_cpu);
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">POSTCODE_DELAY</span>
+	<span class="enscript-comment">/* Wait much longer if postcodes are displayed for a delay period. */</span>
+	i *= 10000;
+#<span class="enscript-reference">endif</span>
+	DBG(<span class="enscript-string">&quot;start_cpu(%p) about to wait for cpu %d\n&quot;</span>,
+		arg, psip-&gt;target_cpu);
+
+	mp_wait_for_cpu_up(psip-&gt;target_cpu, i*100, 100);
+
+	KERNEL_DEBUG_CONSTANT(
+		TRACE_MP_CPU_START | DBG_FUNC_END,
+		psip-&gt;target_cpu,
+		cpu_datap(psip-&gt;target_cpu)-&gt;cpu_running, 0, 0, 0);
+
+	<span class="enscript-keyword">if</span> (TSC_sync_margin &amp;&amp;
+	    cpu_datap(psip-&gt;target_cpu)-&gt;cpu_running) {
+		<span class="enscript-comment">/*
+		 * Compare the TSC from the started processor with ours.
+		 * Report and log/panic if it diverges by more than
+		 * TSC_sync_margin (TSC_SYNC_MARGIN) ticks. This margin
+		 * can be overriden by boot-arg (with 0 meaning no checking).
+		 */</span>
+		uint64_t	tsc_starter;
+		int64_t		tsc_delta;
+		atomic_decl(&amp;tsc_entry_barrier, 1);
+		<span class="enscript-keyword">while</span> (tsc_entry_barrier != 0)
+			;	<span class="enscript-comment">/* spin for both processors at barrier */</span>
+		tsc_starter = rdtsc64();
+		atomic_decl(&amp;tsc_exit_barrier, 1);
+		<span class="enscript-keyword">while</span> (tsc_exit_barrier != 0)
+			;	<span class="enscript-comment">/* spin for target to store its TSC */</span>
+		tsc_delta = tsc_target - tsc_starter;
+		kprintf(<span class="enscript-string">&quot;TSC sync for cpu %d: 0x%016llx delta 0x%llx (%lld)\n&quot;</span>,
+			psip-&gt;target_cpu, tsc_target, tsc_delta, tsc_delta);
+		<span class="enscript-keyword">if</span> (ABS(tsc_delta) &gt; (int64_t) TSC_sync_margin) { 
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+			panic(
+#<span class="enscript-reference">else</span>
+			printf(
+#<span class="enscript-reference">endif</span>
+				<span class="enscript-string">&quot;Unsynchronized  TSC for cpu %d: &quot;</span>
+					<span class="enscript-string">&quot;0x%016llx, delta 0x%llx\n&quot;</span>,
+				psip-&gt;target_cpu, tsc_target, tsc_delta);
+		}
+	}
+}
+
+kern_return_t
+<span class="enscript-function-name">intel_startCPU</span>(
+	<span class="enscript-type">int</span>	slot_num)
+{
+	<span class="enscript-type">int</span>		lapic = cpu_to_lapic[slot_num];
+	boolean_t	istate;
+
+	assert(lapic != -1);
+
+	DBGLOG_CPU_INIT(slot_num);
+
+	DBG(<span class="enscript-string">&quot;intel_startCPU(%d) lapic_id=%d\n&quot;</span>, slot_num, lapic);
+	DBG(<span class="enscript-string">&quot;IdlePTD(%p): 0x%x\n&quot;</span>, &amp;IdlePTD, (<span class="enscript-type">int</span>) (uintptr_t)IdlePTD);
+
+	<span class="enscript-comment">/*
+	 * Initialize (or re-initialize) the descriptor tables for this cpu.
+	 * Propagate processor mode to slave.
+	 */</span>
+	cpu_desc_init64(cpu_datap(slot_num));
+
+	<span class="enscript-comment">/* Serialize use of the slave boot stack, etc. */</span>
+	lck_mtx_lock(&amp;mp_cpu_boot_lock);
+
+	istate = ml_set_interrupts_enabled(FALSE);
+	<span class="enscript-keyword">if</span> (slot_num == get_cpu_number()) {
+		ml_set_interrupts_enabled(istate);
+		lck_mtx_unlock(&amp;mp_cpu_boot_lock);
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	start_info.starter_cpu  = cpu_number();
+	start_info.target_cpu   = slot_num;
+	start_info.target_lapic = lapic;
+	tsc_entry_barrier = 2;
+	tsc_exit_barrier = 2;
+
+	<span class="enscript-comment">/*
+	 * Perform the processor startup sequence with all running
+	 * processors rendezvous'ed. This is required during periods when
+	 * the cache-disable bit is set for MTRR/PAT initialization.
+	 */</span>
+	mp_rendezvous_no_intrs(start_cpu, (<span class="enscript-type">void</span> *) &amp;start_info);
+
+	start_info.target_cpu = 0;
+
+	ml_set_interrupts_enabled(istate);
+	lck_mtx_unlock(&amp;mp_cpu_boot_lock);
+
+	<span class="enscript-keyword">if</span> (!cpu_datap(slot_num)-&gt;cpu_running) {
+		kprintf(<span class="enscript-string">&quot;Failed to start CPU %02d\n&quot;</span>, slot_num);
+		printf(<span class="enscript-string">&quot;Failed to start CPU %02d, rebooting...\n&quot;</span>, slot_num);
+		delay(1000000);
+		halt_cpu();
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	} <span class="enscript-keyword">else</span> {
+		kprintf(<span class="enscript-string">&quot;Started cpu %d (lapic id %08x)\n&quot;</span>, slot_num, lapic);
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+}
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MP_DEBUG</span>
+cpu_signal_event_log_t	*cpu_signal[MAX_CPUS];
+cpu_signal_event_log_t	*cpu_handle[MAX_CPUS];
+
+<span class="enscript-function-name">MP_EVENT_NAME_DECL</span>();
+
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MP_DEBUG */</span>
+
+<span class="enscript-comment">/*
+ * Note: called with NULL state when polling for TLB flush and cross-calls.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cpu_signal_handler</span>(x86_saved_state_t *regs)
+{
+#<span class="enscript-reference">if</span>	!<span class="enscript-variable-name">MACH_KDP</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span> (<span class="enscript-variable-name">regs</span>)
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !MACH_KDP */</span>
+	<span class="enscript-type">int</span>		my_cpu;
+	<span class="enscript-type">volatile</span> <span class="enscript-type">int</span>	*my_word;
+
+	SCHED_STATS_IPI(current_processor());
+
+	my_cpu = cpu_number();
+	my_word = &amp;cpu_data_ptr[my_cpu]-&gt;cpu_signals;
+	<span class="enscript-comment">/* Store the initial set of signals for diagnostics. New
+	 * signals could arrive while these are being processed
+	 * so it's no more than a hint.
+	 */</span>
+
+	cpu_data_ptr[my_cpu]-&gt;cpu_prior_signals = *my_word;
+
+	<span class="enscript-keyword">do</span> {
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MACH_KDP</span>
+		<span class="enscript-keyword">if</span> (i_bit(MP_KDP, my_word)) {
+			DBGLOG(cpu_handle,my_cpu,MP_KDP);
+			i_bit_clear(MP_KDP, my_word);
+<span class="enscript-comment">/* Ensure that the i386_kernel_state at the base of the
+ * current thread's stack (if any) is synchronized with the
+ * context at the moment of the interrupt, to facilitate
+ * access through the debugger.
+ */</span>
+			sync_iss_to_iks(regs);
+			<span class="enscript-keyword">if</span> (pmsafe_debug &amp;&amp; !kdp_snapshot)
+				pmSafeMode(&amp;current_cpu_datap()-&gt;lcpu, PM_SAFE_FL_SAFE);
+			mp_kdp_wait(TRUE, FALSE);
+			<span class="enscript-keyword">if</span> (pmsafe_debug &amp;&amp; !kdp_snapshot)
+				pmSafeMode(&amp;current_cpu_datap()-&gt;lcpu, PM_SAFE_FL_NORMAL);
+		} <span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MACH_KDP */</span>
+		<span class="enscript-keyword">if</span> (i_bit(MP_TLB_FLUSH, my_word)) {
+			DBGLOG(cpu_handle,my_cpu,MP_TLB_FLUSH);
+			i_bit_clear(MP_TLB_FLUSH, my_word);
+			pmap_update_interrupt();
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (i_bit(MP_RENDEZVOUS, my_word)) {
+			DBGLOG(cpu_handle,my_cpu,MP_RENDEZVOUS);
+			i_bit_clear(MP_RENDEZVOUS, my_word);
+			mp_rendezvous_action();
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (i_bit(MP_BROADCAST, my_word)) {
+			DBGLOG(cpu_handle,my_cpu,MP_BROADCAST);
+			i_bit_clear(MP_BROADCAST, my_word);
+			mp_broadcast_action();
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (i_bit(MP_CHUD, my_word)) {
+			DBGLOG(cpu_handle,my_cpu,MP_CHUD);
+			i_bit_clear(MP_CHUD, my_word);
+			chudxnu_cpu_signal_handler();
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (i_bit(MP_CALL, my_word)) {
+			DBGLOG(cpu_handle,my_cpu,MP_CALL);
+			i_bit_clear(MP_CALL, my_word);
+			mp_cpus_call_action();
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (i_bit(MP_CALL_PM, my_word)) {
+			DBGLOG(cpu_handle,my_cpu,MP_CALL_PM);
+			i_bit_clear(MP_CALL_PM, my_word);
+			mp_call_PM();
+		}
+		<span class="enscript-keyword">if</span> (regs == NULL) {
+			<span class="enscript-comment">/* Called to poll only for cross-calls and TLB flush */</span>
+			<span class="enscript-keyword">break</span>;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (i_bit(MP_AST, my_word)) {
+			DBGLOG(cpu_handle,my_cpu,MP_AST);
+			i_bit_clear(MP_AST, my_word);
+			ast_check(cpu_to_processor(my_cpu));
+		}
+	} <span class="enscript-keyword">while</span> (*my_word);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kprintf_break_lock</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">NMIInterruptHandler</span>(x86_saved_state_t *regs)
+{
+	<span class="enscript-type">void</span> 		*stackptr;
+
+	<span class="enscript-keyword">if</span> (panic_active() &amp;&amp; !panicDebugging) {
+		<span class="enscript-keyword">if</span> (pmsafe_debug)
+			pmSafeMode(&amp;current_cpu_datap()-&gt;lcpu, PM_SAFE_FL_SAFE);
+		<span class="enscript-keyword">for</span>(;;)
+			cpu_pause();
+	}
+
+	atomic_incl(&amp;NMIPI_acks, 1);
+	atomic_incl(&amp;NMI_count, 1);
+	sync_iss_to_iks_unconditionally(regs);
+	__asm__ <span class="enscript-type">volatile</span>(<span class="enscript-string">&quot;movq %%rbp, %0&quot;</span> : <span class="enscript-string">&quot;=m&quot;</span> (stackptr));
+
+	<span class="enscript-keyword">if</span> (cpu_number() == debugger_cpu)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">NMExit</span>;
+
+	<span class="enscript-keyword">if</span> (spinlock_timed_out) {
+		<span class="enscript-type">char</span> pstr[192];
+		snprintf(&amp;pstr[0], <span class="enscript-keyword">sizeof</span>(pstr), <span class="enscript-string">&quot;Panic(CPU %d): NMIPI for spinlock acquisition timeout, spinlock: %p, spinlock owner: %p, current_thread: %p, spinlock_owner_cpu: 0x%x\n&quot;</span>, cpu_number(), spinlock_timed_out, (<span class="enscript-type">void</span> *) spinlock_timed_out-&gt;interlock.lock_data, current_thread(), spinlock_owner_cpu);
+		panic_i386_backtrace(stackptr, 64, &amp;pstr[0], TRUE, regs);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (mp_cpus_call_wait_timeout) {
+		<span class="enscript-type">char</span> pstr[192];
+		snprintf(&amp;pstr[0], <span class="enscript-keyword">sizeof</span>(pstr), <span class="enscript-string">&quot;Panic(CPU %d): Unresponsive processor, this CPU timed-out during cross-call\n&quot;</span>, cpu_number());
+		panic_i386_backtrace(stackptr, 64, &amp;pstr[0], TRUE, regs);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (pmap_tlb_flush_timeout == TRUE) {
+		<span class="enscript-type">char</span> pstr[128];
+		snprintf(&amp;pstr[0], <span class="enscript-keyword">sizeof</span>(pstr), <span class="enscript-string">&quot;Panic(CPU %d): Unresponsive processor (this CPU did not acknowledge interrupts) TLB state:0x%x\n&quot;</span>, cpu_number(), current_cpu_datap()-&gt;cpu_tlb_invalid);
+		panic_i386_backtrace(stackptr, 48, &amp;pstr[0], TRUE, regs);
+	} 
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_KDP</span>
+	<span class="enscript-keyword">if</span> (pmsafe_debug &amp;&amp; !kdp_snapshot)
+		pmSafeMode(&amp;current_cpu_datap()-&gt;lcpu, PM_SAFE_FL_SAFE);
+	current_cpu_datap()-&gt;cpu_NMI_acknowledged = TRUE;
+	i_bit_clear(MP_KDP, &amp;current_cpu_datap()-&gt;cpu_signals);
+	<span class="enscript-keyword">if</span> (pmap_tlb_flush_timeout ||
+	    spinlock_timed_out ||
+	    mp_cpus_call_wait_timeout ||
+	    panic_active()) {
+		mp_kdp_wait(FALSE, TRUE);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (virtualized &amp;&amp; (debug_boot_arg &amp; DB_NMI)) {
+		<span class="enscript-comment">/*
+		 * Under a VMM with the debug boot-arg set, drop into kdp.
+		 * Since an NMI is involved, there's a risk of contending with
+		 * a panic. And side-effects of NMIs may result in entry into, 
+		 * and continuing from, the debugger being unreliable.
+		 */</span>
+		kprintf_break_lock();
+		kprintf(<span class="enscript-string">&quot;Debugger entry requested by NMI\n&quot;</span>);
+		kdp_i386_trap(T_DEBUG, saved_state64(regs), 0, 0);
+		printf(<span class="enscript-string">&quot;Debugger entry requested by NMI\n&quot;</span>);
+	} <span class="enscript-keyword">else</span> {
+		mp_kdp_wait(FALSE, FALSE);
+	}
+	<span class="enscript-keyword">if</span> (pmsafe_debug &amp;&amp; !kdp_snapshot)
+		pmSafeMode(&amp;current_cpu_datap()-&gt;lcpu, PM_SAFE_FL_NORMAL);
+#<span class="enscript-reference">endif</span>
+<span class="enscript-reference">NMExit</span>:	
+	<span class="enscript-keyword">return</span> 1;
+}
+
+
+<span class="enscript-comment">/*
+ * cpu_interrupt is really just to be used by the scheduler to
+ * get a CPU's attention it may not always issue an IPI.  If an
+ * IPI is always needed then use i386_cpu_IPI.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cpu_interrupt</span>(<span class="enscript-type">int</span> cpu)
+{
+	boolean_t did_IPI = FALSE;
+
+	<span class="enscript-keyword">if</span> (smp_initialized
+	    &amp;&amp; pmCPUExitIdle(cpu_datap(cpu))) {
+		i386_cpu_IPI(cpu);
+		did_IPI = TRUE;
+	}
+
+	KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SCHED, MACH_REMOTE_AST), cpu, did_IPI, 0, 0, 0);
+}
+
+<span class="enscript-comment">/*
+ * Send a true NMI via the local APIC to the specified CPU.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cpu_NMI_interrupt</span>(<span class="enscript-type">int</span> cpu)
+{
+	<span class="enscript-keyword">if</span> (smp_initialized) {
+		i386_send_NMI(cpu);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">NMI_cpus</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	cpu;
+	boolean_t	intrs_enabled;
+	uint64_t	tsc_timeout;
+
+	intrs_enabled = ml_set_interrupts_enabled(FALSE);
+
+	<span class="enscript-keyword">for</span> (cpu = 0; cpu &lt; real_ncpus; cpu++) {
+		<span class="enscript-keyword">if</span> (!cpu_datap(cpu)-&gt;cpu_running)
+			<span class="enscript-keyword">continue</span>;
+		cpu_datap(cpu)-&gt;cpu_NMI_acknowledged = FALSE;
+		cpu_NMI_interrupt(cpu);
+		tsc_timeout = !machine_timeout_suspended() ?
+				rdtsc64() + (1000 * 1000 * 1000 * 10ULL) :
+				~0ULL;
+		<span class="enscript-keyword">while</span> (!cpu_datap(cpu)-&gt;cpu_NMI_acknowledged) {
+			handle_pending_TLB_flushes();
+			cpu_pause();
+			<span class="enscript-keyword">if</span> (rdtsc64() &gt; tsc_timeout)
+				panic(<span class="enscript-string">&quot;NMI_cpus() timeout cpu %d&quot;</span>, cpu);
+		}
+		cpu_datap(cpu)-&gt;cpu_NMI_acknowledged = FALSE;
+	}
+
+	ml_set_interrupts_enabled(intrs_enabled);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-function-name">void</span>	(* <span class="enscript-type">volatile</span> mp_PM_func)(<span class="enscript-type">void</span>) = NULL;
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_call_PM</span>(<span class="enscript-type">void</span>)
+{
+	assert(!ml_get_interrupts_enabled());
+
+	<span class="enscript-keyword">if</span> (mp_PM_func != NULL)
+		mp_PM_func();
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cpu_PM_interrupt</span>(<span class="enscript-type">int</span> cpu)
+{
+	assert(!ml_get_interrupts_enabled());
+
+	<span class="enscript-keyword">if</span> (mp_PM_func != NULL) {
+		<span class="enscript-keyword">if</span> (cpu == cpu_number())
+			mp_PM_func();
+		<span class="enscript-keyword">else</span>
+			i386_signal_cpu(cpu, MP_CALL_PM, ASYNC);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">PM_interrupt_register</span>(<span class="enscript-type">void</span> (*fn)(<span class="enscript-type">void</span>))
+{
+	mp_PM_func = fn;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">i386_signal_cpu</span>(<span class="enscript-type">int</span> cpu, mp_event_t event, mp_sync_t mode)
+{
+	<span class="enscript-type">volatile</span> <span class="enscript-type">int</span>	*signals = &amp;cpu_datap(cpu)-&gt;cpu_signals;
+	uint64_t	tsc_timeout;
+
+	
+	<span class="enscript-keyword">if</span> (!cpu_datap(cpu)-&gt;cpu_running)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (event == MP_TLB_FLUSH)
+	        KERNEL_DEBUG(TRACE_MP_TLB_FLUSH | DBG_FUNC_START, cpu, 0, 0, 0, 0);
+
+	DBGLOG(cpu_signal, cpu, event);
+	
+	i_bit_set(event, signals);
+	i386_cpu_IPI(cpu);
+	<span class="enscript-keyword">if</span> (mode == SYNC) {
+	   <span class="enscript-reference">again</span>:
+		tsc_timeout = !machine_timeout_suspended() ?
+					rdtsc64() + (1000*1000*1000) :
+					~0ULL;
+		<span class="enscript-keyword">while</span> (i_bit(event, signals) &amp;&amp; rdtsc64() &lt; tsc_timeout) {
+			cpu_pause();
+		}
+		<span class="enscript-keyword">if</span> (i_bit(event, signals)) {
+			DBG(<span class="enscript-string">&quot;i386_signal_cpu(%d, 0x%x, SYNC) timed out\n&quot;</span>,
+				cpu, event);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (event == MP_TLB_FLUSH)
+	        KERNEL_DEBUG(TRACE_MP_TLB_FLUSH | DBG_FUNC_END, cpu, 0, 0, 0, 0);
+}
+
+<span class="enscript-comment">/*
+ * Send event to all running cpus.
+ * Called with the topology locked.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">i386_signal_cpus</span>(mp_event_t event, mp_sync_t mode)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	cpu;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	my_cpu = cpu_number();
+
+	assert(hw_lock_held((hw_lock_t)&amp;x86_topo_lock));
+
+	<span class="enscript-keyword">for</span> (cpu = 0; cpu &lt; real_ncpus; cpu++) {
+		<span class="enscript-keyword">if</span> (cpu == my_cpu || !cpu_datap(cpu)-&gt;cpu_running)
+			<span class="enscript-keyword">continue</span>;
+		i386_signal_cpu(cpu, event, mode);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Return the number of running cpus.
+ * Called with the topology locked.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">i386_active_cpus</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	cpu;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	ncpus = 0;
+
+	assert(hw_lock_held((hw_lock_t)&amp;x86_topo_lock));
+
+	<span class="enscript-keyword">for</span> (cpu = 0; cpu &lt; real_ncpus; cpu++) {
+		<span class="enscript-keyword">if</span> (cpu_datap(cpu)-&gt;cpu_running)
+			ncpus++;
+	}
+	<span class="enscript-keyword">return</span>(ncpus);
+}
+
+<span class="enscript-comment">/*
+ * Helper function called when busy-waiting: panic if too long
+ * a TSC-based time has elapsed since the start of the spin.
+ */</span>
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">mp_spin_timeout</span>(uint64_t tsc_start)
+{
+	uint64_t	tsc_timeout;
+
+	cpu_pause();
+	<span class="enscript-keyword">if</span> (machine_timeout_suspended())
+		<span class="enscript-keyword">return</span> FALSE;
+
+	<span class="enscript-comment">/*
+	 * The timeout is 4 * the spinlock timeout period
+	 * unless we have serial console printing (kprintf) enabled
+	 * in which case we allow an even greater margin.
+	 */</span>
+	tsc_timeout = disable_serial_output ? (uint64_t) LockTimeOutTSC &lt;&lt; 2
+					    : (uint64_t) LockTimeOutTSC &lt;&lt; 4;
+	<span class="enscript-keyword">return</span>  (rdtsc64() &gt; tsc_start + tsc_timeout);
+}
+
+<span class="enscript-comment">/*
+ * Helper function to take a spinlock while ensuring that incoming IPIs
+ * are still serviced if interrupts are masked while we spin.
+ */</span>
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">mp_safe_spin_lock</span>(usimple_lock_t lock)
+{
+	<span class="enscript-keyword">if</span> (ml_get_interrupts_enabled()) {
+		simple_lock(lock);
+		<span class="enscript-keyword">return</span> TRUE;
+	} <span class="enscript-keyword">else</span> {
+		uint64_t tsc_spin_start = rdtsc64();
+		<span class="enscript-keyword">while</span> (!simple_lock_try(lock)) {
+			cpu_signal_handler(NULL);
+			<span class="enscript-keyword">if</span> (mp_spin_timeout(tsc_spin_start)) {
+				uint32_t lock_cpu;
+				uintptr_t lowner = (uintptr_t)
+						   lock-&gt;interlock.lock_data;
+				spinlock_timed_out = lock;
+				lock_cpu = spinlock_timeout_NMI(lowner);
+				panic(<span class="enscript-string">&quot;mp_safe_spin_lock() timed out,&quot;</span>
+				      <span class="enscript-string">&quot; lock: %p, owner thread: 0x%lx,&quot;</span>
+				      <span class="enscript-string">&quot; current_thread: %p, owner on CPU 0x%x&quot;</span>,
+				      lock, lowner,
+				      current_thread(), lock_cpu);
+			}
+		}
+		<span class="enscript-keyword">return</span> FALSE;
+	} 
+}
+
+<span class="enscript-comment">/*
+ * All-CPU rendezvous:
+ * 	- CPUs are signalled,
+ *	- all execute the setup function (if specified),
+ *	- rendezvous (i.e. all cpus reach a barrier),
+ *	- all execute the action function (if specified),
+ *	- rendezvous again,
+ *	- execute the teardown function (if specified), and then
+ *	- resume.
+ *
+ * Note that the supplied external functions _must_ be reentrant and aware
+ * that they are running in parallel and in an unknown lock context.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_rendezvous_action</span>(<span class="enscript-type">void</span>)
+{
+	boolean_t	intrs_enabled;
+	uint64_t	tsc_spin_start;
+
+	<span class="enscript-comment">/* setup function */</span>
+	<span class="enscript-keyword">if</span> (mp_rv_setup_func != NULL)
+		mp_rv_setup_func(mp_rv_func_arg);
+
+	intrs_enabled = ml_get_interrupts_enabled();
+
+	<span class="enscript-comment">/* spin on entry rendezvous */</span>
+	atomic_incl(&amp;mp_rv_entry, 1);
+	tsc_spin_start = rdtsc64();
+	<span class="enscript-keyword">while</span> (mp_rv_entry &lt; mp_rv_ncpus) {
+		<span class="enscript-comment">/* poll for pesky tlb flushes if interrupts disabled */</span>
+		<span class="enscript-keyword">if</span> (!intrs_enabled)
+			handle_pending_TLB_flushes();
+		<span class="enscript-keyword">if</span> (mp_spin_timeout(tsc_spin_start))
+			panic(<span class="enscript-string">&quot;mp_rendezvous_action() entry&quot;</span>);
+	}
+
+	<span class="enscript-comment">/* action function */</span>
+	<span class="enscript-keyword">if</span> (mp_rv_action_func != NULL)
+		mp_rv_action_func(mp_rv_func_arg);
+
+	<span class="enscript-comment">/* spin on exit rendezvous */</span>
+	atomic_incl(&amp;mp_rv_exit, 1);
+	tsc_spin_start = rdtsc64();
+	<span class="enscript-keyword">while</span> (mp_rv_exit &lt; mp_rv_ncpus) {
+		<span class="enscript-keyword">if</span> (!intrs_enabled)
+			handle_pending_TLB_flushes();
+		<span class="enscript-keyword">if</span> (mp_spin_timeout(tsc_spin_start))
+			panic(<span class="enscript-string">&quot;mp_rendezvous_action() exit&quot;</span>);
+	}
+
+	<span class="enscript-comment">/* teardown function */</span>
+	<span class="enscript-keyword">if</span> (mp_rv_teardown_func != NULL)
+		mp_rv_teardown_func(mp_rv_func_arg);
+
+	<span class="enscript-comment">/* Bump completion count */</span>
+	atomic_incl(&amp;mp_rv_complete, 1);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_rendezvous</span>(<span class="enscript-type">void</span> (*setup_func)(<span class="enscript-type">void</span> *), 
+	      <span class="enscript-type">void</span> (*action_func)(<span class="enscript-type">void</span> *),
+	      <span class="enscript-type">void</span> (*teardown_func)(<span class="enscript-type">void</span> *),
+	      <span class="enscript-type">void</span> *arg)
+{
+	uint64_t	tsc_spin_start;
+
+	<span class="enscript-keyword">if</span> (!smp_initialized) {
+		<span class="enscript-keyword">if</span> (setup_func != NULL)
+			setup_func(arg);
+		<span class="enscript-keyword">if</span> (action_func != NULL)
+			action_func(arg);
+		<span class="enscript-keyword">if</span> (teardown_func != NULL)
+			teardown_func(arg);
+		<span class="enscript-keyword">return</span>;
+	}
+		
+	<span class="enscript-comment">/* obtain rendezvous lock */</span>
+	(<span class="enscript-type">void</span>) mp_safe_spin_lock(&amp;mp_rv_lock);
+
+	<span class="enscript-comment">/* set static function pointers */</span>
+	mp_rv_setup_func = setup_func;
+	mp_rv_action_func = action_func;
+	mp_rv_teardown_func = teardown_func;
+	mp_rv_func_arg = arg;
+
+	mp_rv_entry    = 0;
+	mp_rv_exit     = 0;
+	mp_rv_complete = 0;
+
+	<span class="enscript-comment">/*
+	 * signal other processors, which will call mp_rendezvous_action()
+	 * with interrupts disabled
+	 */</span>
+	(<span class="enscript-type">void</span>) mp_safe_spin_lock(&amp;x86_topo_lock);
+	mp_rv_ncpus = i386_active_cpus();
+	i386_signal_cpus(MP_RENDEZVOUS, ASYNC);
+	simple_unlock(&amp;x86_topo_lock);
+
+	<span class="enscript-comment">/* call executor function on this cpu */</span>
+	mp_rendezvous_action();
+
+	<span class="enscript-comment">/*
+	 * Spin for everyone to complete.
+	 * This is necessary to ensure that all processors have proceeded
+	 * from the exit barrier before we release the rendezvous structure.
+	 */</span>
+	tsc_spin_start = rdtsc64();
+	<span class="enscript-keyword">while</span> (mp_rv_complete &lt; mp_rv_ncpus) {
+		<span class="enscript-keyword">if</span> (mp_spin_timeout(tsc_spin_start))
+			panic(<span class="enscript-string">&quot;mp_rendezvous() timeout&quot;</span>);
+	}
+	
+	<span class="enscript-comment">/* Tidy up */</span>
+	mp_rv_setup_func = NULL;
+	mp_rv_action_func = NULL;
+	mp_rv_teardown_func = NULL;
+	mp_rv_func_arg = NULL;
+
+	<span class="enscript-comment">/* release lock */</span>
+	simple_unlock(&amp;mp_rv_lock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_rendezvous_break_lock</span>(<span class="enscript-type">void</span>)
+{
+	simple_lock_init(&amp;mp_rv_lock, 0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">setup_disable_intrs</span>(__unused <span class="enscript-type">void</span> * param_not_used)
+{
+	<span class="enscript-comment">/* disable interrupts before the first barrier */</span>
+	boolean_t intr = ml_set_interrupts_enabled(FALSE);
+
+	current_cpu_datap()-&gt;cpu_iflag = intr;
+	DBG(<span class="enscript-string">&quot;CPU%d: %s\n&quot;</span>, get_cpu_number(), __FUNCTION__);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">teardown_restore_intrs</span>(__unused <span class="enscript-type">void</span> * param_not_used)
+{
+	<span class="enscript-comment">/* restore interrupt flag following MTRR changes */</span>
+	ml_set_interrupts_enabled(current_cpu_datap()-&gt;cpu_iflag);
+	DBG(<span class="enscript-string">&quot;CPU%d: %s\n&quot;</span>, get_cpu_number(), __FUNCTION__);
+}
+
+<span class="enscript-comment">/*
+ * A wrapper to mp_rendezvous() to call action_func() with interrupts disabled.
+ * This is exported for use by kexts.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_rendezvous_no_intrs</span>(
+	      <span class="enscript-type">void</span> (*action_func)(<span class="enscript-type">void</span> *),
+	      <span class="enscript-type">void</span> *arg)
+{
+	mp_rendezvous(setup_disable_intrs,
+		      action_func,
+		      teardown_restore_intrs,
+		      arg);	
+}
+
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	queue_chain_t	link;			<span class="enscript-comment">/* queue linkage */</span>
+	<span class="enscript-type">void</span>		(*func)(<span class="enscript-type">void</span> *,<span class="enscript-type">void</span> *);	<span class="enscript-comment">/* routine to call */</span>
+	<span class="enscript-type">void</span>		*arg0;			<span class="enscript-comment">/* routine's 1st arg */</span>
+	<span class="enscript-type">void</span>		*arg1;			<span class="enscript-comment">/* routine's 2nd arg */</span>
+	cpumask_t	*maskp;			<span class="enscript-comment">/* completion response mask */</span>
+} mp_call_t;
+
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	queue_head_t		queue;
+	decl_simple_lock_data(,	lock);
+} mp_call_queue_t;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MP_CPUS_CALL_BUFS_PER_CPU</span>	MAX_CPUS
+<span class="enscript-type">static</span> mp_call_queue_t	mp_cpus_call_freelist;
+<span class="enscript-type">static</span> mp_call_queue_t	mp_cpus_call_head[MAX_CPUS];
+
+<span class="enscript-type">static</span> inline boolean_t
+<span class="enscript-function-name">mp_call_head_lock</span>(mp_call_queue_t *cqp)
+{
+	boolean_t	intrs_enabled;
+
+	intrs_enabled = ml_set_interrupts_enabled(FALSE);
+	simple_lock(&amp;cqp-&gt;lock);
+
+	<span class="enscript-keyword">return</span> intrs_enabled;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_cpus_NMIPI</span>(cpumask_t cpu_mask) {
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> cpu, cpu_bit;
+	uint64_t deadline;
+
+	<span class="enscript-keyword">for</span> (cpu = 0, cpu_bit = 1; cpu &lt; real_ncpus; cpu++, cpu_bit &lt;&lt;= 1) {
+		<span class="enscript-keyword">if</span> (cpu_mask &amp; cpu_bit)
+			cpu_NMI_interrupt(cpu);
+	}
+	deadline = mach_absolute_time() + (LockTimeOut);
+	<span class="enscript-keyword">while</span> (mach_absolute_time() &lt; deadline)
+		cpu_pause();
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+<span class="enscript-type">static</span> inline boolean_t
+<span class="enscript-function-name">mp_call_head_is_locked</span>(mp_call_queue_t *cqp)
+{
+	<span class="enscript-keyword">return</span> !ml_get_interrupts_enabled() &amp;&amp;
+		hw_lock_held((hw_lock_t)&amp;cqp-&gt;lock);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_call_head_unlock</span>(mp_call_queue_t *cqp, boolean_t intrs_enabled)
+{
+	simple_unlock(&amp;cqp-&gt;lock);
+	ml_set_interrupts_enabled(intrs_enabled);
+}
+
+<span class="enscript-type">static</span> inline mp_call_t *
+<span class="enscript-function-name">mp_call_alloc</span>(<span class="enscript-type">void</span>)
+{
+	mp_call_t	*callp = NULL;
+	boolean_t	intrs_enabled;
+	mp_call_queue_t	*cqp = &amp;mp_cpus_call_freelist;
+
+	intrs_enabled = mp_call_head_lock(cqp);
+	<span class="enscript-keyword">if</span> (!queue_empty(&amp;cqp-&gt;queue))
+		queue_remove_first(&amp;cqp-&gt;queue, callp, typeof(callp), link);
+	mp_call_head_unlock(cqp, intrs_enabled);
+
+	<span class="enscript-keyword">return</span> callp;
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_call_free</span>(mp_call_t *callp)
+{
+	boolean_t	intrs_enabled;
+	mp_call_queue_t	*cqp = &amp;mp_cpus_call_freelist;
+
+	intrs_enabled = mp_call_head_lock(cqp);
+	queue_enter_first(&amp;cqp-&gt;queue, callp, typeof(callp), link);
+	mp_call_head_unlock(cqp, intrs_enabled);
+}
+
+<span class="enscript-type">static</span> inline mp_call_t *
+<span class="enscript-function-name">mp_call_dequeue_locked</span>(mp_call_queue_t *cqp)
+{
+	mp_call_t	*callp = NULL;
+
+	assert(mp_call_head_is_locked(cqp));
+	<span class="enscript-keyword">if</span> (!queue_empty(&amp;cqp-&gt;queue))
+		queue_remove_first(&amp;cqp-&gt;queue, callp, typeof(callp), link);
+	<span class="enscript-keyword">return</span> callp;
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_call_enqueue_locked</span>(
+	mp_call_queue_t	*cqp,
+	mp_call_t	*callp)
+{
+	queue_enter(&amp;cqp-&gt;queue, callp, typeof(callp), link);
+}
+
+<span class="enscript-comment">/* Called on the boot processor to initialize global structures */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_cpus_call_init</span>(<span class="enscript-type">void</span>)
+{
+	mp_call_queue_t	*cqp = &amp;mp_cpus_call_freelist;
+
+	DBG(<span class="enscript-string">&quot;mp_cpus_call_init()\n&quot;</span>);
+	simple_lock_init(&amp;cqp-&gt;lock, 0);
+	queue_init(&amp;cqp-&gt;queue);
+}
+
+<span class="enscript-comment">/*
+ * Called at processor registration to add call buffers to the free list
+ * and to initialize the per-cpu call queue.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_cpus_call_cpu_init</span>(<span class="enscript-type">int</span> cpu)
+{
+	<span class="enscript-type">int</span>		i;
+	mp_call_queue_t	*cqp = &amp;mp_cpus_call_head[cpu];
+	mp_call_t	*callp;
+
+	simple_lock_init(&amp;cqp-&gt;lock, 0);
+	queue_init(&amp;cqp-&gt;queue);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; MP_CPUS_CALL_BUFS_PER_CPU; i++) {
+		callp = (mp_call_t *) kalloc(<span class="enscript-keyword">sizeof</span>(mp_call_t));
+		mp_call_free(callp);
+	}
+
+	DBG(<span class="enscript-string">&quot;mp_cpus_call_init(%d) done\n&quot;</span>, cpu);
+}
+
+<span class="enscript-comment">/*
+ * This is called from cpu_signal_handler() to process an MP_CALL signal.
+ * And also from i386_deactivate_cpu() when a cpu is being taken offline.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_cpus_call_action</span>(<span class="enscript-type">void</span>)
+{
+	mp_call_queue_t	*cqp;
+	boolean_t	intrs_enabled;
+	mp_call_t	*callp;
+	mp_call_t	call;
+
+	assert(!ml_get_interrupts_enabled());
+	cqp = &amp;mp_cpus_call_head[cpu_number()];
+	intrs_enabled = mp_call_head_lock(cqp);
+	<span class="enscript-keyword">while</span> ((callp = mp_call_dequeue_locked(cqp)) != NULL) {
+		<span class="enscript-comment">/* Copy call request to the stack to free buffer */</span>
+		call = *callp;
+		mp_call_free(callp);
+		<span class="enscript-keyword">if</span> (call.func != NULL) {
+			mp_call_head_unlock(cqp, intrs_enabled);
+			KERNEL_DEBUG_CONSTANT(
+				TRACE_MP_CPUS_CALL_ACTION,
+				call.func, call.arg0, call.arg1, call.maskp, 0);
+			call.func(call.arg0, call.arg1);
+			(<span class="enscript-type">void</span>) mp_call_head_lock(cqp);
+		}
+		<span class="enscript-keyword">if</span> (call.maskp != NULL)
+			i_bit_set(cpu_number(), call.maskp);
+	}
+	mp_call_head_unlock(cqp, intrs_enabled);
+}
+
+<span class="enscript-comment">/*
+ * mp_cpus_call() runs a given function on cpus specified in a given cpu mask.
+ * Possible modes are:
+ *  SYNC:   function is called serially on target cpus in logical cpu order
+ *	    waiting for each call to be acknowledged before proceeding
+ *  ASYNC:  function call is queued to the specified cpus
+ *	    waiting for all calls to complete in parallel before returning
+ *  NOSYNC: function calls are queued
+ *	    but we return before confirmation of calls completing. 
+ * The action function may be NULL.
+ * The cpu mask may include the local cpu. Offline cpus are ignored.
+ * The return value is the number of cpus on which the call was made or queued.
+ */</span>
+cpu_t
+<span class="enscript-function-name">mp_cpus_call</span>(
+	cpumask_t	cpus,
+	mp_sync_t	mode,
+        <span class="enscript-type">void</span>		(*action_func)(<span class="enscript-type">void</span> *),
+        <span class="enscript-type">void</span>		*arg)
+{
+	<span class="enscript-keyword">return</span> mp_cpus_call1(
+			cpus,
+			mode,
+			(<span class="enscript-type">void</span> (*)(<span class="enscript-type">void</span> *,<span class="enscript-type">void</span> *))action_func,
+			arg,
+			NULL,
+			NULL,
+			NULL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_cpus_call_wait</span>(boolean_t	intrs_enabled,
+		  cpumask_t	cpus_called,
+		  cpumask_t	*cpus_responded)
+{
+	mp_call_queue_t		*cqp;
+	uint64_t		tsc_spin_start;
+
+	cqp = &amp;mp_cpus_call_head[cpu_number()];
+
+	tsc_spin_start = rdtsc64();
+	<span class="enscript-keyword">while</span> (*cpus_responded != cpus_called) {
+		<span class="enscript-keyword">if</span> (!intrs_enabled) {
+			<span class="enscript-comment">/* Sniffing w/o locking */</span>
+			<span class="enscript-keyword">if</span> (!queue_empty(&amp;cqp-&gt;queue))
+				mp_cpus_call_action();
+			cpu_signal_handler(NULL);
+		}
+		<span class="enscript-keyword">if</span> (mp_spin_timeout(tsc_spin_start)) {
+			cpumask_t	cpus_unresponsive;
+
+			mp_cpus_call_wait_timeout = TRUE;
+			cpus_unresponsive = cpus_called &amp; ~(*cpus_responded);
+			mp_cpus_NMIPI(cpus_unresponsive);
+			panic(<span class="enscript-string">&quot;mp_cpus_call_wait() timeout, cpus: 0x%llx&quot;</span>,
+				cpus_unresponsive);
+		}
+	}
+}
+
+cpu_t
+<span class="enscript-function-name">mp_cpus_call1</span>(
+	cpumask_t	cpus,
+	mp_sync_t	mode,
+        <span class="enscript-type">void</span>		(*action_func)(<span class="enscript-type">void</span> *, <span class="enscript-type">void</span> *),
+        <span class="enscript-type">void</span>		*arg0,
+        <span class="enscript-type">void</span>		*arg1,
+	cpumask_t	*cpus_calledp,
+	cpumask_t	*cpus_notcalledp)
+{
+	cpu_t		cpu;
+	boolean_t	intrs_enabled = FALSE;
+	boolean_t	call_self = FALSE;
+	cpumask_t	cpus_called = 0;
+	cpumask_t	cpus_notcalled = 0;
+	cpumask_t	cpus_responded = 0;
+	<span class="enscript-type">long</span> 		cpus_call_count = 0;
+	uint64_t	tsc_spin_start;
+	boolean_t	topo_lock;
+
+	KERNEL_DEBUG_CONSTANT(
+		TRACE_MP_CPUS_CALL | DBG_FUNC_START,
+		cpus, mode, VM_KERNEL_UNSLIDE(action_func), arg0, arg1);
+
+	<span class="enscript-keyword">if</span> (!smp_initialized) {
+		<span class="enscript-keyword">if</span> ((cpus &amp; CPUMASK_SELF) == 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		<span class="enscript-keyword">if</span> (action_func != NULL) {
+			intrs_enabled = ml_set_interrupts_enabled(FALSE);
+			action_func(arg0, arg1);
+			ml_set_interrupts_enabled(intrs_enabled);
+		}
+		call_self = TRUE;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Queue the call for each non-local requested cpu.
+	 * This is performed under the topo lock to prevent changes to
+	 * cpus online state and to prevent concurrent rendezvouses --
+	 * although an exception is made if we're calling only the master
+	 * processor since that always remains active. Note: this exception
+	 * is expected for longterm timer nosync cross-calls to the master cpu.
+	 */</span> 
+	mp_disable_preemption();
+	intrs_enabled = ml_get_interrupts_enabled();
+	topo_lock = (cpus != cpu_to_cpumask(master_cpu));
+	<span class="enscript-keyword">if</span> (topo_lock) {
+		ml_set_interrupts_enabled(FALSE);
+		(<span class="enscript-type">void</span>) mp_safe_spin_lock(&amp;x86_topo_lock);
+	}
+	<span class="enscript-keyword">for</span> (cpu = 0; cpu &lt; (cpu_t) real_ncpus; cpu++) {
+		<span class="enscript-keyword">if</span> (((cpu_to_cpumask(cpu) &amp; cpus) == 0) ||
+		    !cpu_datap(cpu)-&gt;cpu_running)
+			<span class="enscript-keyword">continue</span>;
+		tsc_spin_start = rdtsc64();
+		<span class="enscript-keyword">if</span> (cpu == (cpu_t) cpu_number()) {
+			<span class="enscript-comment">/*
+			 * We don't IPI ourself and if calling asynchronously,
+			 * we defer our call until we have signalled all others.
+			 */</span>
+			call_self = TRUE;
+			<span class="enscript-keyword">if</span> (mode == SYNC &amp;&amp; action_func != NULL) {
+				KERNEL_DEBUG_CONSTANT(
+					TRACE_MP_CPUS_CALL_LOCAL,
+					VM_KERNEL_UNSLIDE(action_func),
+					arg0, arg1, 0, 0);
+				action_func(arg0, arg1);
+			}
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * Here to queue a call to cpu and IPI.
+			 * Spinning for request buffer unless NOSYNC.
+			 */</span>
+			mp_call_t	*callp = NULL;
+			mp_call_queue_t	*cqp = &amp;mp_cpus_call_head[cpu];
+			boolean_t	intrs_inner;
+
+		<span class="enscript-reference">queue_call</span>:
+			<span class="enscript-keyword">if</span> (callp == NULL)
+				callp = mp_call_alloc();
+			intrs_inner = mp_call_head_lock(cqp);
+			<span class="enscript-keyword">if</span> (mode == NOSYNC) {
+				<span class="enscript-keyword">if</span> (callp == NULL) {
+					cpus_notcalled |= cpu_to_cpumask(cpu);
+					mp_call_head_unlock(cqp, intrs_inner);
+					KERNEL_DEBUG_CONSTANT(
+						TRACE_MP_CPUS_CALL_NOBUF,
+						cpu, 0, 0, 0, 0);
+					<span class="enscript-keyword">continue</span>;
+				}
+				callp-&gt;maskp = NULL;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> (callp == NULL) {
+					mp_call_head_unlock(cqp, intrs_inner);
+					KERNEL_DEBUG_CONSTANT(
+						TRACE_MP_CPUS_CALL_NOBUF,
+						cpu, 0, 0, 0, 0);
+					<span class="enscript-keyword">if</span> (!intrs_inner) {
+						<span class="enscript-comment">/* Sniffing w/o locking */</span>
+						<span class="enscript-keyword">if</span> (!queue_empty(&amp;cqp-&gt;queue))
+							mp_cpus_call_action();
+						handle_pending_TLB_flushes();
+					}
+					<span class="enscript-keyword">if</span> (mp_spin_timeout(tsc_spin_start))
+						panic(<span class="enscript-string">&quot;mp_cpus_call1() timeout&quot;</span>);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">queue_call</span>;
+				}
+				callp-&gt;maskp = &amp;cpus_responded;
+			}
+			callp-&gt;func = action_func;
+			callp-&gt;arg0 = arg0;
+			callp-&gt;arg1 = arg1;
+			mp_call_enqueue_locked(cqp, callp);
+			cpus_call_count++;
+			cpus_called |= cpu_to_cpumask(cpu);
+			i386_signal_cpu(cpu, MP_CALL, ASYNC);
+			mp_call_head_unlock(cqp, intrs_inner);
+			<span class="enscript-keyword">if</span> (mode == SYNC) {
+				mp_cpus_call_wait(intrs_inner, cpus_called, &amp;cpus_responded);
+			}
+		}
+	}
+	<span class="enscript-keyword">if</span> (topo_lock) {
+		simple_unlock(&amp;x86_topo_lock);
+		ml_set_interrupts_enabled(intrs_enabled);
+	}
+
+	<span class="enscript-comment">/* Call locally if mode not SYNC */</span>
+	<span class="enscript-keyword">if</span> (mode != SYNC &amp;&amp; call_self ) {
+		KERNEL_DEBUG_CONSTANT(
+			TRACE_MP_CPUS_CALL_LOCAL,
+			VM_KERNEL_UNSLIDE(action_func), arg0, arg1, 0, 0);
+		<span class="enscript-keyword">if</span> (action_func != NULL) {
+			ml_set_interrupts_enabled(FALSE);
+			action_func(arg0, arg1);
+			ml_set_interrupts_enabled(intrs_enabled);
+		}
+	}
+
+	<span class="enscript-comment">/* Safe to allow pre-emption now */</span>
+	mp_enable_preemption();
+
+	<span class="enscript-comment">/* For ASYNC, now wait for all signaled cpus to complete their calls */</span>
+	<span class="enscript-keyword">if</span> (mode == ASYNC)
+		mp_cpus_call_wait(intrs_enabled, cpus_called, &amp;cpus_responded);
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (call_self){
+		cpus_called |= cpu_to_cpumask(cpu);
+		cpus_call_count++;
+	}
+
+	<span class="enscript-keyword">if</span> (cpus_calledp)
+		*cpus_calledp = cpus_called;
+	<span class="enscript-keyword">if</span> (cpus_notcalledp)
+		*cpus_notcalledp = cpus_notcalled;
+
+	KERNEL_DEBUG_CONSTANT(
+		TRACE_MP_CPUS_CALL | DBG_FUNC_END,
+		cpus_call_count, cpus_called, cpus_notcalled, 0, 0);
+
+	<span class="enscript-keyword">return</span> (cpu_t) cpus_call_count;
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_broadcast_action</span>(<span class="enscript-type">void</span>)
+{
+   <span class="enscript-comment">/* call action function */</span>
+   <span class="enscript-keyword">if</span> (mp_bc_action_func != NULL)
+       mp_bc_action_func(mp_bc_func_arg);
+
+   <span class="enscript-comment">/* if we're the last one through, wake up the instigator */</span>
+   <span class="enscript-keyword">if</span> (atomic_decl_and_test(&amp;mp_bc_count, 1))
+       thread_wakeup(((event_t)(uintptr_t) &amp;mp_bc_count));
+}
+
+<span class="enscript-comment">/*
+ * mp_broadcast() runs a given function on all active cpus.
+ * The caller blocks until the functions has run on all cpus.
+ * The caller will also block if there is another pending braodcast.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_broadcast</span>(
+         <span class="enscript-type">void</span> (*action_func)(<span class="enscript-type">void</span> *),
+         <span class="enscript-type">void</span> *arg)
+{
+   <span class="enscript-keyword">if</span> (!smp_initialized) {
+       <span class="enscript-keyword">if</span> (action_func != NULL)
+	           action_func(arg);
+       <span class="enscript-keyword">return</span>;
+   }
+       
+   <span class="enscript-comment">/* obtain broadcast lock */</span>
+   lck_mtx_lock(&amp;mp_bc_lock);
+
+   <span class="enscript-comment">/* set static function pointers */</span>
+   mp_bc_action_func = action_func;
+   mp_bc_func_arg = arg;
+
+   assert_wait((event_t)(uintptr_t)&amp;mp_bc_count, THREAD_UNINT);
+
+   <span class="enscript-comment">/*
+    * signal other processors, which will call mp_broadcast_action()
+    */</span>
+   simple_lock(&amp;x86_topo_lock);
+   mp_bc_ncpus = i386_active_cpus();   <span class="enscript-comment">/* total including this cpu */</span>
+   mp_bc_count = mp_bc_ncpus;
+   i386_signal_cpus(MP_BROADCAST, ASYNC);
+
+   <span class="enscript-comment">/* call executor function on this cpu */</span>
+   mp_broadcast_action();
+   simple_unlock(&amp;x86_topo_lock);
+
+   <span class="enscript-comment">/* block for all cpus to have run action_func */</span>
+   <span class="enscript-keyword">if</span> (mp_bc_ncpus &gt; 1)
+       thread_block(THREAD_CONTINUE_NULL);
+   <span class="enscript-keyword">else</span>
+       clear_wait(current_thread(), THREAD_AWAKENED);
+       
+   <span class="enscript-comment">/* release lock */</span>
+   lck_mtx_unlock(&amp;mp_bc_lock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_cpus_kick</span>(cpumask_t cpus)
+{
+	cpu_t		cpu;
+	boolean_t	intrs_enabled = FALSE;
+
+	intrs_enabled = ml_set_interrupts_enabled(FALSE);
+	mp_safe_spin_lock(&amp;x86_topo_lock);
+
+	<span class="enscript-keyword">for</span> (cpu = 0; cpu &lt; (cpu_t) real_ncpus; cpu++) {
+		<span class="enscript-keyword">if</span> ((cpu == (cpu_t) cpu_number())
+			|| ((cpu_to_cpumask(cpu) &amp; cpus) == 0)
+			|| (!cpu_datap(cpu)-&gt;cpu_running))
+		{
+				<span class="enscript-keyword">continue</span>;
+		}
+
+		lapic_send_ipi(cpu, LAPIC_VECTOR(KICK));
+	}
+
+	simple_unlock(&amp;x86_topo_lock);
+	ml_set_interrupts_enabled(intrs_enabled);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">i386_activate_cpu</span>(<span class="enscript-type">void</span>)
+{
+	cpu_data_t	*cdp = current_cpu_datap();
+
+	assert(!ml_get_interrupts_enabled());
+
+	<span class="enscript-keyword">if</span> (!smp_initialized) {
+		cdp-&gt;cpu_running = TRUE;
+		<span class="enscript-keyword">return</span>;
+	}
+
+	simple_lock(&amp;x86_topo_lock);
+	cdp-&gt;cpu_running = TRUE;
+	started_cpu();
+	simple_unlock(&amp;x86_topo_lock);
+	flush_tlb_raw();
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">i386_deactivate_cpu</span>(<span class="enscript-type">void</span>)
+{
+	cpu_data_t	*cdp = current_cpu_datap();
+
+	assert(!ml_get_interrupts_enabled());
+ 
+	KERNEL_DEBUG_CONSTANT(
+		TRACE_MP_CPU_DEACTIVATE | DBG_FUNC_START,
+		0, 0, 0, 0, 0);
+
+	simple_lock(&amp;x86_topo_lock);
+	cdp-&gt;cpu_running = FALSE;
+	simple_unlock(&amp;x86_topo_lock);
+
+	<span class="enscript-comment">/*
+	 * Move all of this cpu's timers to the master/boot cpu,
+	 * and poke it in case there's a sooner deadline for it to schedule.
+	 */</span>
+	timer_queue_shutdown(&amp;cdp-&gt;rtclock_timer.queue);
+	mp_cpus_call(cpu_to_cpumask(master_cpu), ASYNC, timer_queue_expire_local, NULL);
+
+	<span class="enscript-comment">/*
+	 * Open an interrupt window
+	 * and ensure any pending IPI or timer is serviced
+	 */</span>
+	mp_disable_preemption();
+	ml_set_interrupts_enabled(TRUE);
+
+	<span class="enscript-keyword">while</span> (cdp-&gt;cpu_signals &amp;&amp; x86_lcpu()-&gt;rtcDeadline != EndOfAllTime)
+		cpu_pause();
+	<span class="enscript-comment">/*
+	 * Ensure there's no remaining timer deadline set
+	 * - AICPM may have left one active.
+	 */</span>
+	setPop(0);
+
+	ml_set_interrupts_enabled(FALSE);
+	mp_enable_preemption();
+
+	KERNEL_DEBUG_CONSTANT(
+		TRACE_MP_CPU_DEACTIVATE | DBG_FUNC_END,
+		0, 0, 0, 0, 0);
+}
+
+<span class="enscript-type">int</span>	pmsafe_debug	= 1;
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MACH_KDP</span>
+<span class="enscript-type">volatile</span> boolean_t	mp_kdp_trap = FALSE;
+<span class="enscript-type">volatile</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>	mp_kdp_ncpus;
+boolean_t		mp_kdp_state;
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_kdp_enter</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	cpu;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	ncpus = 0;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	my_cpu;
+	uint64_t	tsc_timeout;
+
+	DBG(<span class="enscript-string">&quot;mp_kdp_enter()\n&quot;</span>);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	<span class="enscript-keyword">if</span> (!smp_initialized)
+		simple_lock_init(&amp;mp_kdp_lock, 0);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * Here to enter the debugger.
+	 * In case of races, only one cpu is allowed to enter kdp after
+	 * stopping others.
+	 */</span>
+	mp_kdp_state = ml_set_interrupts_enabled(FALSE);
+	my_cpu = cpu_number();
+
+	<span class="enscript-keyword">if</span> (my_cpu == (<span class="enscript-type">unsigned</span>) debugger_cpu) {
+		kprintf(<span class="enscript-string">&quot;\n\nRECURSIVE DEBUGGER ENTRY DETECTED\n\n&quot;</span>);
+		kdp_reset();
+		<span class="enscript-keyword">return</span>;
+	}
+
+	cpu_datap(my_cpu)-&gt;debugger_entry_time = mach_absolute_time();
+	simple_lock(&amp;mp_kdp_lock);
+
+	<span class="enscript-keyword">if</span> (pmsafe_debug &amp;&amp; !kdp_snapshot)
+	    pmSafeMode(&amp;current_cpu_datap()-&gt;lcpu, PM_SAFE_FL_SAFE);
+
+	<span class="enscript-keyword">while</span> (mp_kdp_trap) {
+		simple_unlock(&amp;mp_kdp_lock);
+		DBG(<span class="enscript-string">&quot;mp_kdp_enter() race lost\n&quot;</span>);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_KDP</span>
+		mp_kdp_wait(TRUE, FALSE);
+#<span class="enscript-reference">endif</span>
+		simple_lock(&amp;mp_kdp_lock);
+	}
+	debugger_cpu = my_cpu;
+	ncpus = 1;
+	mp_kdp_ncpus = 1;	<span class="enscript-comment">/* self */</span>
+	mp_kdp_trap = TRUE;
+	debugger_entry_time = cpu_datap(my_cpu)-&gt;debugger_entry_time;
+	simple_unlock(&amp;mp_kdp_lock);
+
+	<span class="enscript-comment">/*
+	 * Deliver a nudge to other cpus, counting how many
+	 */</span>
+	DBG(<span class="enscript-string">&quot;mp_kdp_enter() signaling other processors\n&quot;</span>);
+	<span class="enscript-keyword">if</span> (force_immediate_debugger_NMI == FALSE) {
+		<span class="enscript-keyword">for</span> (cpu = 0; cpu &lt; real_ncpus; cpu++) {
+			<span class="enscript-keyword">if</span> (cpu == my_cpu || !cpu_datap(cpu)-&gt;cpu_running)
+				<span class="enscript-keyword">continue</span>;
+			ncpus++;
+			i386_signal_cpu(cpu, MP_KDP, ASYNC);
+		}
+		<span class="enscript-comment">/*
+		 * Wait other processors to synchronize
+		 */</span>
+		DBG(<span class="enscript-string">&quot;mp_kdp_enter() waiting for (%d) processors to suspend\n&quot;</span>, ncpus);
+
+		<span class="enscript-comment">/*
+		 * This timeout is rather arbitrary; we don't want to NMI
+		 * processors that are executing at potentially
+		 * &quot;unsafe-to-interrupt&quot; points such as the trampolines,
+		 * but neither do we want to lose state by waiting too long.
+		 */</span>
+		tsc_timeout = rdtsc64() + (ncpus * 1000 * 1000 * 10ULL);
+
+		<span class="enscript-keyword">if</span> (virtualized)
+			tsc_timeout = ~0ULL;
+
+		<span class="enscript-keyword">while</span> (mp_kdp_ncpus != ncpus &amp;&amp; rdtsc64() &lt; tsc_timeout) {
+			<span class="enscript-comment">/*
+			 * A TLB shootdown request may be pending--this would
+			 * result in the requesting processor waiting in
+			 * PMAP_UPDATE_TLBS() until this processor deals with it.
+			 * Process it, so it can now enter mp_kdp_wait()
+			 */</span>
+			handle_pending_TLB_flushes();
+			cpu_pause();
+		}
+		<span class="enscript-comment">/* If we've timed out, and some processor(s) are still unresponsive,
+		 * interrupt them with an NMI via the local APIC.
+		 */</span>
+		<span class="enscript-keyword">if</span> (mp_kdp_ncpus != ncpus) {
+			<span class="enscript-keyword">for</span> (cpu = 0; cpu &lt; real_ncpus; cpu++) {
+				<span class="enscript-keyword">if</span> (cpu == my_cpu || !cpu_datap(cpu)-&gt;cpu_running)
+					<span class="enscript-keyword">continue</span>;
+				<span class="enscript-keyword">if</span> (cpu_signal_pending(cpu, MP_KDP))
+					cpu_NMI_interrupt(cpu);
+			}
+		}
+	}
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">for</span> (cpu = 0; cpu &lt; real_ncpus; cpu++) {
+			<span class="enscript-keyword">if</span> (cpu == my_cpu || !cpu_datap(cpu)-&gt;cpu_running)
+				<span class="enscript-keyword">continue</span>;
+			cpu_NMI_interrupt(cpu);
+		}
+
+	DBG(<span class="enscript-string">&quot;mp_kdp_enter() %d processors done %s\n&quot;</span>,
+	    (<span class="enscript-type">int</span>)mp_kdp_ncpus, (mp_kdp_ncpus == ncpus) ? <span class="enscript-string">&quot;OK&quot;</span> : <span class="enscript-string">&quot;timed out&quot;</span>);
+	
+	postcode(MP_KDP_ENTER);
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">cpu_signal_pending</span>(<span class="enscript-type">int</span> cpu, mp_event_t event)
+{
+	<span class="enscript-type">volatile</span> <span class="enscript-type">int</span>	*signals = &amp;cpu_datap(cpu)-&gt;cpu_signals;
+	boolean_t retval = FALSE;
+
+	<span class="enscript-keyword">if</span> (i_bit(event, signals))
+		retval = TRUE;
+	<span class="enscript-keyword">return</span> retval;
+}
+
+<span class="enscript-type">long</span> <span class="enscript-function-name">kdp_x86_xcpu_invoke</span>(<span class="enscript-type">const</span> uint16_t lcpu, kdp_x86_xcpu_func_t func,
+			 <span class="enscript-type">void</span> *arg0, <span class="enscript-type">void</span> *arg1)
+{
+	<span class="enscript-keyword">if</span> (lcpu &gt; (real_ncpus - 1))
+		<span class="enscript-keyword">return</span> -1;
+
+        <span class="enscript-keyword">if</span> (func == NULL)
+		<span class="enscript-keyword">return</span> -1;
+
+	kdp_xcpu_call_func.func = func;
+        kdp_xcpu_call_func.ret  = -1;
+	kdp_xcpu_call_func.arg0 = arg0;
+	kdp_xcpu_call_func.arg1 = arg1;
+	kdp_xcpu_call_func.cpu  = lcpu;
+	DBG(<span class="enscript-string">&quot;Invoking function %p on CPU %d\n&quot;</span>, func, (int32_t)lcpu);
+	<span class="enscript-keyword">while</span> (kdp_xcpu_call_func.cpu != KDP_XCPU_NONE)
+		cpu_pause();
+        <span class="enscript-keyword">return</span> kdp_xcpu_call_func.ret;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kdp_x86_xcpu_poll</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">if</span> ((uint16_t)cpu_number() == kdp_xcpu_call_func.cpu) {
+            kdp_xcpu_call_func.ret = 
+		    kdp_xcpu_call_func.func(kdp_xcpu_call_func.arg0,
+					    kdp_xcpu_call_func.arg1,
+					    cpu_number());
+		kdp_xcpu_call_func.cpu = KDP_XCPU_NONE;
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_kdp_wait</span>(boolean_t flush, boolean_t isNMI)
+{
+	DBG(<span class="enscript-string">&quot;mp_kdp_wait()\n&quot;</span>);
+	<span class="enscript-comment">/* If an I/O port has been specified as a debugging aid, issue a read */</span>
+	panic_io_port_read();
+	current_cpu_datap()-&gt;debugger_ipi_time = mach_absolute_time();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MCA</span>
+	<span class="enscript-comment">/* If we've trapped due to a machine-check, save MCA registers */</span>
+	mca_check_save();
+#<span class="enscript-reference">endif</span>
+
+	atomic_incl((<span class="enscript-type">volatile</span> <span class="enscript-type">long</span> *)&amp;mp_kdp_ncpus, 1);
+	<span class="enscript-keyword">while</span> (mp_kdp_trap || (isNMI == TRUE)) {
+	        <span class="enscript-comment">/*
+		 * A TLB shootdown request may be pending--this would result
+		 * in the requesting processor waiting in PMAP_UPDATE_TLBS()
+		 * until this processor handles it.
+		 * Process it, so it can now enter mp_kdp_wait()
+		 */</span>
+		<span class="enscript-keyword">if</span> (flush)
+			handle_pending_TLB_flushes();
+
+		kdp_x86_xcpu_poll();
+		cpu_pause();
+	}
+
+	atomic_decl((<span class="enscript-type">volatile</span> <span class="enscript-type">long</span> *)&amp;mp_kdp_ncpus, 1);
+	DBG(<span class="enscript-string">&quot;mp_kdp_wait() done\n&quot;</span>);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mp_kdp_exit</span>(<span class="enscript-type">void</span>)
+{
+	DBG(<span class="enscript-string">&quot;mp_kdp_exit()\n&quot;</span>);
+	debugger_cpu = -1;
+	atomic_decl((<span class="enscript-type">volatile</span> <span class="enscript-type">long</span> *)&amp;mp_kdp_ncpus, 1);
+
+	debugger_exit_time = mach_absolute_time();
+
+	mp_kdp_trap = FALSE;
+	mfence();
+
+	<span class="enscript-comment">/* Wait other processors to stop spinning. XXX needs timeout */</span>
+	DBG(<span class="enscript-string">&quot;mp_kdp_exit() waiting for processors to resume\n&quot;</span>);
+	<span class="enscript-keyword">while</span> (mp_kdp_ncpus &gt; 0) {
+	        <span class="enscript-comment">/*
+		 * a TLB shootdown request may be pending... this would result in the requesting
+		 * processor waiting in PMAP_UPDATE_TLBS() until this processor deals with it.
+		 * Process it, so it can now enter mp_kdp_wait()
+		 */</span>
+	        handle_pending_TLB_flushes();
+
+		cpu_pause();
+	}
+
+	<span class="enscript-keyword">if</span> (pmsafe_debug &amp;&amp; !kdp_snapshot)
+	    pmSafeMode(&amp;current_cpu_datap()-&gt;lcpu, PM_SAFE_FL_NORMAL);
+
+	debugger_exit_time = mach_absolute_time();
+
+	DBG(<span class="enscript-string">&quot;mp_kdp_exit() done\n&quot;</span>);
+	(<span class="enscript-type">void</span>) ml_set_interrupts_enabled(mp_kdp_state);
+	postcode(0);
+}
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MACH_KDP */</span>
+
+boolean_t
+<span class="enscript-function-name">mp_recent_debugger_activity</span>() {
+	uint64_t abstime = mach_absolute_time();
+	<span class="enscript-keyword">return</span> (((abstime - debugger_entry_time) &lt; LastDebuggerEntryAllowance) ||
+	    ((abstime - debugger_exit_time) &lt; LastDebuggerEntryAllowance));
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">init_ast_check</span>(
+	__unused processor_t	processor)
+{
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cause_ast_check</span>(
+	processor_t	processor)
+{
+	<span class="enscript-type">int</span>	cpu = processor-&gt;cpu_id;
+
+	<span class="enscript-keyword">if</span> (cpu != cpu_number()) {
+		i386_signal_cpu(cpu, MP_AST, ASYNC);
+		KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SCHED, MACH_REMOTE_AST), cpu, 1, 0, 0, 0);
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">slave_machine_init</span>(<span class="enscript-type">void</span> *param)
+{
+	<span class="enscript-comment">/*
+ 	 * Here in process context, but with interrupts disabled.
+	 */</span>
+	DBG(<span class="enscript-string">&quot;slave_machine_init() CPU%d\n&quot;</span>, get_cpu_number());
+
+	<span class="enscript-keyword">if</span> (param == FULL_SLAVE_INIT) {
+		<span class="enscript-comment">/*
+		 * Cold start
+		 */</span>
+		clock_init();
+	}
+	cpu_machine_init();	<span class="enscript-comment">/* Interrupts enabled hereafter */</span>
+}
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">cpu_number</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">cpu_number</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span> get_cpu_number();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cpu_prewarm_init</span>()
+{
+	<span class="enscript-type">int</span> i;
+
+	simple_lock_init(&amp;cpu_warm_lock, 0);
+	queue_init(&amp;cpu_warm_call_list);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; NUM_CPU_WARM_CALLS; i++) {
+		enqueue_head(&amp;cpu_warm_call_list, (queue_entry_t)&amp;cpu_warm_call_arr[i]);
+	}
+}
+
+<span class="enscript-type">static</span> timer_call_t
+<span class="enscript-function-name">grab_warm_timer_call</span>()
+{
+	spl_t x;
+	timer_call_t call = NULL;
+
+	x = splsched();
+	simple_lock(&amp;cpu_warm_lock);
+	<span class="enscript-keyword">if</span> (!queue_empty(&amp;cpu_warm_call_list)) {
+		call = (timer_call_t) dequeue_head(&amp;cpu_warm_call_list);
+	}
+	simple_unlock(&amp;cpu_warm_lock);
+	splx(x);
+
+	<span class="enscript-keyword">return</span> call;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">free_warm_timer_call</span>(timer_call_t call)
+{
+	spl_t x;
+
+	x = splsched();
+	simple_lock(&amp;cpu_warm_lock);
+	enqueue_head(&amp;cpu_warm_call_list, (queue_entry_t)call);
+	simple_unlock(&amp;cpu_warm_lock);
+	splx(x);
+}
+
+<span class="enscript-comment">/*
+ * Runs in timer call context (interrupts disabled).
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cpu_warm_timer_call_func</span>(
+		call_entry_param_t p0,
+		__unused call_entry_param_t p1)
+{
+	free_warm_timer_call((timer_call_t)p0);
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * Runs with interrupts disabled on the CPU we wish to warm (i.e. CPU 0).
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">_cpu_warm_setup</span>(
+		<span class="enscript-type">void</span> *arg)
+{
+	cpu_warm_data_t cwdp = (cpu_warm_data_t)arg;
+
+	timer_call_enter(cwdp-&gt;cwd_call, cwdp-&gt;cwd_deadline, TIMER_CALL_SYS_CRITICAL | TIMER_CALL_LOCAL);
+	cwdp-&gt;cwd_result = 0;
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * Not safe to call with interrupts disabled.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ml_interrupt_prewarm</span>(
+	uint64_t 	deadline)
+{
+	<span class="enscript-type">struct</span> cpu_warm_data cwd;
+	timer_call_t call;
+	cpu_t ct;
+
+	<span class="enscript-keyword">if</span> (ml_get_interrupts_enabled() == FALSE) {
+		panic(<span class="enscript-string">&quot;%s: Interrupts disabled?\n&quot;</span>, __FUNCTION__);
+	}
+
+	<span class="enscript-comment">/* 
+	 * If the platform doesn't need our help, say that we succeeded. 
+	 */</span>
+	<span class="enscript-keyword">if</span> (!ml_get_interrupt_prewake_applicable()) {
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	<span class="enscript-comment">/*
+	 * Grab a timer call to use.
+	 */</span>
+	call = grab_warm_timer_call();
+	<span class="enscript-keyword">if</span> (call == NULL) {
+		<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+	}
+
+	timer_call_setup(call, cpu_warm_timer_call_func, call);
+	cwd.cwd_call = call;
+	cwd.cwd_deadline = deadline;
+	cwd.cwd_result = 0;
+
+	<span class="enscript-comment">/*
+	 * For now, non-local interrupts happen on the master processor.
+	 */</span>
+	ct = mp_cpus_call(cpu_to_cpumask(master_cpu), SYNC, _cpu_warm_setup, &amp;cwd);
+	<span class="enscript-keyword">if</span> (ct == 0) {
+		free_warm_timer_call(call);
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span> cwd.cwd_result;
+	}
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,440 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>lockstat.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">lockstat.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the &quot;License&quot;).
+ * You may not use this file except in compliance with the License.
+ *
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or <a href="http://www.opensolaris.org/os/licensing.">http://www.opensolaris.org/os/licensing.</a>
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets &quot;[]&quot; replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
+ * Use is subject to license terms.
+ */</span>
+
+<span class="enscript-comment">/* #pragma ident	&quot;@(#)lockstat.c	1.12	08/01/16 SMI&quot; */</span>
+
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_KERNEL</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_KERNEL</span> <span class="enscript-comment">/* Solaris vs. Darwin */</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;miscfs/devfs/devfs.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_impl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_glue.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/lockstat.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">membar_producer</span> dtrace_membar_producer
+
+<span class="enscript-comment">/*
+ * Hot patch values, x86
+ */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">NOP</span>	0x90
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">RET</span>	0xc3
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LOCKSTAT_AFRAMES</span> 1
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">error</span> <span class="enscript-string">&quot;not ported to this architecture&quot;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> lockstat_probe {
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*lsp_func;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*lsp_name;
+	<span class="enscript-type">int</span>		lsp_probe;
+	dtrace_id_t	lsp_id;
+} lockstat_probe_t;
+
+lockstat_probe_t lockstat_probes[] =
+{
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+	<span class="enscript-comment">/* Only provide implemented probes for each architecture  */</span>
+	{ LS_LCK_MTX_LOCK,	LSA_ACQUIRE,	LS_LCK_MTX_LOCK_ACQUIRE, DTRACE_IDNONE },
+	{ LS_LCK_MTX_LOCK,	LSA_SPIN,	LS_LCK_MTX_LOCK_SPIN, DTRACE_IDNONE },
+	{ LS_LCK_MTX_LOCK,	LSA_BLOCK,	LS_LCK_MTX_LOCK_BLOCK, DTRACE_IDNONE },	
+	{ LS_LCK_MTX_TRY_LOCK,	LSA_ACQUIRE,	LS_LCK_MTX_TRY_LOCK_ACQUIRE, DTRACE_IDNONE },
+	{ LS_LCK_MTX_TRY_SPIN_LOCK, LSA_ACQUIRE, LS_LCK_MTX_TRY_SPIN_LOCK_ACQUIRE, DTRACE_IDNONE },
+	{ LS_LCK_MTX_UNLOCK,	LSA_RELEASE,	LS_LCK_MTX_UNLOCK_RELEASE, DTRACE_IDNONE },
+	{ LS_LCK_MTX_EXT_LOCK,	LSA_ACQUIRE,	LS_LCK_MTX_EXT_LOCK_ACQUIRE, DTRACE_IDNONE },
+	{ LS_LCK_MTX_EXT_LOCK,	LSA_SPIN,	LS_LCK_MTX_EXT_LOCK_SPIN, DTRACE_IDNONE },
+	{ LS_LCK_MTX_EXT_LOCK,	LSA_BLOCK,	LS_LCK_MTX_EXT_LOCK_BLOCK, DTRACE_IDNONE },
+<span class="enscript-comment">//	{ LS_LCK_MTX_EXT_TRY_LOCK, LSA_ACQUIRE,	LS_LCK_MTX_TRY_EXT_LOCK_ACQUIRE, DTRACE_IDNONE },	
+</span>	{ LS_LCK_MTX_EXT_UNLOCK,   LSA_RELEASE,	LS_LCK_MTX_EXT_UNLOCK_RELEASE, DTRACE_IDNONE },
+	{ LS_LCK_MTX_LOCK_SPIN_LOCK,	LSA_ACQUIRE,	LS_LCK_MTX_LOCK_SPIN_ACQUIRE, DTRACE_IDNONE },
+	{ LS_LCK_RW_LOCK_SHARED,	LSR_ACQUIRE,	LS_LCK_RW_LOCK_SHARED_ACQUIRE, DTRACE_IDNONE },
+	{ LS_LCK_RW_LOCK_SHARED,	LSR_BLOCK,	LS_LCK_RW_LOCK_SHARED_BLOCK, DTRACE_IDNONE },
+	{ LS_LCK_RW_LOCK_SHARED,	LSR_SPIN,	LS_LCK_RW_LOCK_SHARED_SPIN, DTRACE_IDNONE },
+	{ LS_LCK_RW_LOCK_EXCL,		LSR_ACQUIRE,	LS_LCK_RW_LOCK_EXCL_ACQUIRE, DTRACE_IDNONE },
+	{ LS_LCK_RW_LOCK_EXCL,		LSR_BLOCK,	LS_LCK_RW_LOCK_EXCL_BLOCK, DTRACE_IDNONE },
+	{ LS_LCK_RW_LOCK_EXCL,		LSR_SPIN,	LS_LCK_RW_LOCK_EXCL_SPIN, DTRACE_IDNONE },
+	{ LS_LCK_RW_DONE,		LSR_RELEASE,	LS_LCK_RW_DONE_RELEASE, DTRACE_IDNONE },
+	{ LS_LCK_RW_TRY_LOCK_SHARED,	LSR_ACQUIRE,	LS_LCK_RW_TRY_LOCK_SHARED_ACQUIRE, DTRACE_IDNONE },
+	{ LS_LCK_RW_TRY_LOCK_EXCL,	LSR_ACQUIRE,	LS_LCK_RW_TRY_LOCK_EXCL_ACQUIRE, DTRACE_IDNONE },
+	{ LS_LCK_RW_LOCK_SHARED_TO_EXCL, LSR_UPGRADE,	LS_LCK_RW_LOCK_SHARED_TO_EXCL_UPGRADE, DTRACE_IDNONE },
+	{ LS_LCK_RW_LOCK_SHARED_TO_EXCL,	LSR_SPIN,	LS_LCK_RW_LOCK_SHARED_TO_EXCL_SPIN, DTRACE_IDNONE },
+	{ LS_LCK_RW_LOCK_SHARED_TO_EXCL,	LSR_BLOCK,	LS_LCK_RW_LOCK_SHARED_TO_EXCL_BLOCK, DTRACE_IDNONE },	
+	{ LS_LCK_RW_LOCK_EXCL_TO_SHARED,	LSR_DOWNGRADE,	LS_LCK_RW_LOCK_EXCL_TO_SHARED_DOWNGRADE, DTRACE_IDNONE },
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">LATER</span>
+	<span class="enscript-comment">/* Interlock and spinlock measurements would be nice, but later */</span>
+	{ LS_LCK_SPIN_LOCK,	LSS_ACQUIRE,	LS_LCK_SPIN_LOCK_ACQUIRE, DTRACE_IDNONE },
+	{ LS_LCK_SPIN_LOCK,	LSS_SPIN,	LS_LCK_SPIN_LOCK_SPIN, DTRACE_IDNONE },
+	{ LS_LCK_SPIN_UNLOCK,	LSS_RELEASE,	LS_LCK_SPIN_UNLOCK_RELEASE, DTRACE_IDNONE },
+
+	{ LS_LCK_RW_LOCK_EXCL_TO_SHARED,	LSA_ILK_SPIN,	LS_LCK_RW_LOCK_EXCL_TO_SHARED_ILK_SPIN, DTRACE_IDNONE },
+	{ LS_LCK_MTX_LOCK,	LSA_ILK_SPIN,	LS_LCK_MTX_LOCK_ILK_SPIN, DTRACE_IDNONE },
+	{ LS_LCK_MTX_EXT_LOCK,	LSA_ILK_SPIN,	LS_LCK_MTX_EXT_LOCK_ILK_SPIN, DTRACE_IDNONE },
+	{ LS_LCK_RW_TRY_LOCK_EXCL,	LSA_ILK_SPIN,	LS_LCK_RW_TRY_LOCK_EXCL_ILK_SPIN, DTRACE_IDNONE },
+	{ LS_LCK_RW_TRY_LOCK_SHARED,	LSA_SPIN,	LS_LCK_RW_TRY_LOCK_SHARED_SPIN, DTRACE_IDNONE },
+#<span class="enscript-reference">endif</span>
+
+	{ NULL, NULL, 0, 0 }
+};
+
+dtrace_id_t lockstat_probemap[LS_NPROBES];
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">lck_mtx_lock_lockstat_patch_point</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">lck_mtx_try_lock_lockstat_patch_point</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">lck_mtx_try_lock_spin_lockstat_patch_point</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">lck_mtx_unlock_lockstat_patch_point</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">lck_mtx_lock_ext_lockstat_patch_point</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">lck_mtx_ext_unlock_lockstat_patch_point</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">lck_rw_lock_shared_lockstat_patch_point</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">lck_rw_lock_exclusive_lockstat_patch_point</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">lck_rw_lock_shared_to_exclusive_lockstat_patch_point</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">lck_rw_try_lock_shared_lockstat_patch_point</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">lck_rw_try_lock_exclusive_lockstat_patch_point</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">lck_mtx_lock_spin_lockstat_patch_point</span>(<span class="enscript-type">void</span>);
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_DTRACE */</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> lockstat_assembly_probe {
+	<span class="enscript-type">int</span> lsap_probe;
+	vm_offset_t * lsap_patch_point;
+} lockstat_assembly_probe_t;
+	
+
+	lockstat_assembly_probe_t assembly_probes[] =
+	{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+		<span class="enscript-comment">/*
+		 * On x86 these points are better done via hot patches, which ensure
+		 * there is zero overhead when not in use.  On x86 these patch points
+		 * are swapped between the return instruction and a no-op, with the
+		 * Dtrace call following the return.
+		 */</span> 
+		{ LS_LCK_MTX_LOCK_ACQUIRE,		(vm_offset_t *) lck_mtx_lock_lockstat_patch_point },
+		{ LS_LCK_MTX_TRY_LOCK_ACQUIRE,		(vm_offset_t *) lck_mtx_try_lock_lockstat_patch_point },
+		{ LS_LCK_MTX_TRY_SPIN_LOCK_ACQUIRE,	(vm_offset_t *) lck_mtx_try_lock_spin_lockstat_patch_point },
+		{ LS_LCK_MTX_UNLOCK_RELEASE,		(vm_offset_t *) lck_mtx_unlock_lockstat_patch_point },
+		{ LS_LCK_MTX_EXT_LOCK_ACQUIRE,		(vm_offset_t *) lck_mtx_lock_ext_lockstat_patch_point },
+		{ LS_LCK_MTX_EXT_UNLOCK_RELEASE,	(vm_offset_t *) lck_mtx_ext_unlock_lockstat_patch_point },
+		{ LS_LCK_RW_LOCK_SHARED_ACQUIRE,	(vm_offset_t *) lck_rw_lock_shared_lockstat_patch_point },
+		{ LS_LCK_RW_LOCK_EXCL_ACQUIRE,		(vm_offset_t *) lck_rw_lock_exclusive_lockstat_patch_point },
+		{ LS_LCK_RW_LOCK_SHARED_TO_EXCL_UPGRADE,(vm_offset_t *) lck_rw_lock_shared_to_exclusive_lockstat_patch_point },
+		{ LS_LCK_RW_TRY_LOCK_SHARED_ACQUIRE,	(vm_offset_t *) lck_rw_try_lock_shared_lockstat_patch_point },
+		{ LS_LCK_RW_TRY_LOCK_EXCL_ACQUIRE,	(vm_offset_t *) lck_rw_try_lock_exclusive_lockstat_patch_point },
+		{ LS_LCK_MTX_LOCK_SPIN_ACQUIRE,		(vm_offset_t *) lck_mtx_lock_spin_lockstat_patch_point },
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-comment">/* No assembly patch points for ARM */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_DTRACE */</span>
+		{ LS_LCK_INVALID, NULL }
+};
+
+
+<span class="enscript-comment">/*
+ * APPLE NOTE:
+ * Hot patch is used to manipulate probe points by swapping between
+ * no-op and return instructions.
+ * The active flag indicates whether the probe point will turn on or off.
+ *	on == plant a NOP and thus fall through to the probe call
+ *     off == plant a RET and thus avoid the probe call completely
+ * The ls_probe identifies which probe we will patch.
+ */</span>
+<span class="enscript-type">static</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">lockstat_hot_patch</span>(boolean_t active, <span class="enscript-type">int</span> ls_probe)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">active</span>)
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-comment">/*
+	 * Loop through entire table, in case there are
+	 * multiple patch points per probe. 
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; assembly_probes[i].lsap_patch_point; i++) {
+		<span class="enscript-keyword">if</span> (ls_probe == assembly_probes[i].lsap_probe)
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+		{			
+			uint8_t instr;
+			instr = (active ? NOP : RET );
+			(<span class="enscript-type">void</span>) ml_nofault_copy( (vm_offset_t)&amp;instr, *(assembly_probes[i].lsap_patch_point), 
+								<span class="enscript-keyword">sizeof</span>(instr));
+		}
+#<span class="enscript-reference">endif</span>
+	} <span class="enscript-comment">/* for */</span>
+}
+
+<span class="enscript-function-name">void</span> (*lockstat_probe)(dtrace_id_t, uint64_t, uint64_t,
+				    uint64_t, uint64_t, uint64_t);
+
+
+<span class="enscript-comment">/*
+ * APPLE NOTE:
+ * This wrapper is used only by assembler hot patched probes.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">lockstat_probe_wrapper</span>(<span class="enscript-type">int</span> probe, uintptr_t lp, <span class="enscript-type">int</span> rwflag)
+{
+	dtrace_id_t id;
+	id = lockstat_probemap[probe];
+	<span class="enscript-keyword">if</span> (id != 0)
+	{
+		(*lockstat_probe)(id, (uintptr_t)lp, (uint64_t)rwflag, 0,0,0);
+	}
+}
+
+<span class="enscript-type">static</span> dev_info_t	*lockstat_devi;	<span class="enscript-comment">/* saved in xxattach() for xxinfo() */</span>
+<span class="enscript-type">static</span> dtrace_provider_id_t lockstat_id;
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">lockstat_enable</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>) <span class="enscript-comment">/* __APPLE__ */</span>
+    
+	lockstat_probe_t *probe = parg;
+
+	ASSERT(!lockstat_probemap[probe-&gt;lsp_probe]);
+
+	lockstat_probemap[probe-&gt;lsp_probe] = id;
+	membar_producer();
+
+	lockstat_hot_patch(TRUE, probe-&gt;lsp_probe);
+	membar_producer();
+	<span class="enscript-keyword">return</span>(0);
+
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">lockstat_disable</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>, <span class="enscript-variable-name">id</span>) <span class="enscript-comment">/* __APPLE__ */</span>
+
+	lockstat_probe_t *probe = parg;
+	<span class="enscript-type">int</span> i;
+
+	ASSERT(lockstat_probemap[probe-&gt;lsp_probe]);
+
+	lockstat_probemap[probe-&gt;lsp_probe] = 0;
+	lockstat_hot_patch(FALSE, probe-&gt;lsp_probe);
+	membar_producer();
+
+	<span class="enscript-comment">/*
+	 * See if we have any probes left enabled.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; LS_NPROBES; i++) {
+		<span class="enscript-keyword">if</span> (lockstat_probemap[i]) {
+			<span class="enscript-comment">/*
+			 * This probe is still enabled.  We don't need to deal
+			 * with waiting for all threads to be out of the
+			 * lockstat critical sections; just return.
+			 */</span>
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">lockstat_provide</span>(<span class="enscript-type">void</span> *arg, <span class="enscript-type">const</span> dtrace_probedesc_t *desc)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>, <span class="enscript-variable-name">desc</span>) <span class="enscript-comment">/* __APPLE__ */</span>
+    
+	<span class="enscript-type">int</span> i = 0;
+
+	<span class="enscript-keyword">for</span> (i = 0; lockstat_probes[i].lsp_func != NULL; i++) {
+		lockstat_probe_t *probe = &amp;lockstat_probes[i];
+
+		<span class="enscript-keyword">if</span> (dtrace_probe_lookup(lockstat_id, <span class="enscript-string">&quot;mach_kernel&quot;</span>,
+		    probe-&gt;lsp_func, probe-&gt;lsp_name) != 0)
+			<span class="enscript-keyword">continue</span>;
+
+		ASSERT(!probe-&gt;lsp_id);
+		probe-&gt;lsp_id = dtrace_probe_create(lockstat_id,
+		    <span class="enscript-string">&quot;mach_kernel&quot;</span>, probe-&gt;lsp_func, probe-&gt;lsp_name,
+		    LOCKSTAT_AFRAMES, probe);
+	}
+}
+
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">lockstat_destroy</span>(<span class="enscript-type">void</span> *arg, dtrace_id_t id, <span class="enscript-type">void</span> *parg)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">arg</span>, <span class="enscript-variable-name">id</span>) <span class="enscript-comment">/* __APPLE__ */</span>
+    
+	lockstat_probe_t *probe = parg;
+
+	ASSERT(!lockstat_probemap[probe-&gt;lsp_probe]);
+	probe-&gt;lsp_id = 0;
+}
+
+<span class="enscript-type">static</span> dtrace_pattr_t lockstat_attr = {
+{ DTRACE_STABILITY_EVOLVING, DTRACE_STABILITY_EVOLVING, DTRACE_CLASS_COMMON },
+{ DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_UNKNOWN },
+{ DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_UNKNOWN },
+{ DTRACE_STABILITY_EVOLVING, DTRACE_STABILITY_EVOLVING, DTRACE_CLASS_COMMON },
+{ DTRACE_STABILITY_EVOLVING, DTRACE_STABILITY_EVOLVING, DTRACE_CLASS_COMMON },
+};
+
+<span class="enscript-type">static</span> dtrace_pops_t lockstat_pops = {
+	lockstat_provide,
+	NULL,
+	lockstat_enable,
+	lockstat_disable,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	lockstat_destroy
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">lockstat_attach</span>(dev_info_t *devi, ddi_attach_cmd_t cmd)
+{
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DDI_ATTACH</span>:
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DDI_RESUME</span>:
+		<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (DDI_FAILURE);
+	}
+
+	<span class="enscript-keyword">if</span> (ddi_create_minor_node(devi, <span class="enscript-string">&quot;lockstat&quot;</span>, S_IFCHR, 0,
+	    DDI_PSEUDO, 0) == DDI_FAILURE ||
+	    dtrace_register(<span class="enscript-string">&quot;lockstat&quot;</span>, &amp;lockstat_attr, DTRACE_PRIV_KERNEL,
+	    NULL, &amp;lockstat_pops, NULL, &amp;lockstat_id) != 0) {
+		ddi_remove_minor_node(devi, NULL);
+		<span class="enscript-keyword">return</span> (DDI_FAILURE);
+	}
+
+	lockstat_probe = dtrace_probe;
+	membar_producer();
+
+	ddi_report_dev(devi);
+	lockstat_devi = devi;
+	<span class="enscript-keyword">return</span> (DDI_SUCCESS);
+}
+
+d_open_t _lockstat_open;
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">_lockstat_open</span>(dev_t dev, <span class="enscript-type">int</span> flags, <span class="enscript-type">int</span> devtype, <span class="enscript-type">struct</span> proc *p)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">dev</span>,<span class="enscript-variable-name">flags</span>,<span class="enscript-variable-name">devtype</span>,<span class="enscript-variable-name">p</span>)
+	<span class="enscript-keyword">return</span> 0;
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">LOCKSTAT_MAJOR</span>  -24 <span class="enscript-comment">/* let the kernel pick the device number */</span>
+
+<span class="enscript-comment">/*
+ * A struct describing which functions will get invoked for certain
+ * actions.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> cdevsw lockstat_cdevsw =
+{
+	_lockstat_open,		<span class="enscript-comment">/* open */</span>
+	eno_opcl,			<span class="enscript-comment">/* close */</span>
+	eno_rdwrt,			<span class="enscript-comment">/* read */</span>
+	eno_rdwrt,			<span class="enscript-comment">/* write */</span>
+	eno_ioctl,			<span class="enscript-comment">/* ioctl */</span>
+	(stop_fcn_t *)nulldev, <span class="enscript-comment">/* stop */</span>
+	(reset_fcn_t *)nulldev, <span class="enscript-comment">/* reset */</span>
+	NULL,				<span class="enscript-comment">/* tty's */</span>
+	eno_select,			<span class="enscript-comment">/* select */</span>
+	eno_mmap,			<span class="enscript-comment">/* mmap */</span>
+	eno_strat,			<span class="enscript-comment">/* strategy */</span>
+	eno_getc,			<span class="enscript-comment">/* getc */</span>
+	eno_putc,			<span class="enscript-comment">/* putc */</span>
+	0					<span class="enscript-comment">/* type */</span>
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> gLockstatInited = 0;
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">lockstat_init</span>( <span class="enscript-type">void</span> );
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">lockstat_init</span>( <span class="enscript-type">void</span> )
+{
+	<span class="enscript-keyword">if</span> (0 == gLockstatInited)
+	{
+		<span class="enscript-type">int</span> majdevno = cdevsw_add(LOCKSTAT_MAJOR, &amp;lockstat_cdevsw);
+		
+		<span class="enscript-keyword">if</span> (majdevno &lt; 0) {
+			printf(<span class="enscript-string">&quot;lockstat_init: failed to allocate a major number!\n&quot;</span>);
+			gLockstatInited = 0;
+			<span class="enscript-keyword">return</span>;
+		}
+
+		lockstat_attach( (dev_info_t	*)(uintptr_t)majdevno, DDI_ATTACH );
+		gLockstatInited = 1;
+	} <span class="enscript-keyword">else</span>
+		panic(<span class="enscript-string">&quot;lockstat_init: called twice!\n&quot;</span>);
+}
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">LOCKSTAT_MAJOR</span>
+</pre>
+<hr />
+</body></html>

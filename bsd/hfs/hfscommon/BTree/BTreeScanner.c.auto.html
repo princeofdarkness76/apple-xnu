@@ -1,0 +1,435 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>BTreeScanner.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">BTreeScanner.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1996-2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ *
+ *	@(#)BTreeScanner.c
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../../hfs_endian.h&quot;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../headers/BTreeScanner.h&quot;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">FindNextLeafNode</span>(	BTScanState *scanState, Boolean avoidIO );
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ReadMultipleNodes</span>( 	BTScanState *scanState );
+
+
+<span class="enscript-comment">//_________________________________________________________________________________
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Routine:	BTScanNextRecord
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Purpose:	Return the next leaf record in a scan.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Inputs:
+</span><span class="enscript-comment">//		scanState		Scanner's current state
+</span><span class="enscript-comment">//		avoidIO			If true, don't do any I/O to refill the buffer
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Outputs:
+</span><span class="enscript-comment">//		key				Key of found record (points into buffer)
+</span><span class="enscript-comment">//		data			Data of found record (points into buffer)
+</span><span class="enscript-comment">//		dataSize		Size of data in found record
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Result:
+</span><span class="enscript-comment">//		noErr			Found a valid record
+</span><span class="enscript-comment">//		btNotFound		No more records
+</span><span class="enscript-comment">//		???				Needed to do I/O to get next node, but avoidIO set
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Notes:
+</span><span class="enscript-comment">//		This routine returns pointers to the found record's key and data.  It
+</span><span class="enscript-comment">//		does not copy the key or data to a caller-supplied buffer (like
+</span><span class="enscript-comment">//		GetBTreeRecord would).  The caller must not modify the key or data.
+</span><span class="enscript-comment">//_________________________________________________________________________________
+</span>
+<span class="enscript-type">int</span> <span class="enscript-function-name">BTScanNextRecord</span>(	BTScanState *	scanState,
+						Boolean			avoidIO,
+						<span class="enscript-type">void</span> * *		key,
+						<span class="enscript-type">void</span> * *		data,
+						u_int32_t *		dataSize  )
+{
+	<span class="enscript-type">int</span>				err;
+	u_int16_t		dataSizeShort;
+	
+	err = noErr;
+
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	If this is the first call, there won't be any nodes in the buffer, so go
+</span>	<span class="enscript-comment">//	find the first first leaf node (if any).
+</span>	<span class="enscript-comment">//	
+</span>	<span class="enscript-keyword">if</span> ( scanState-&gt;nodesLeftInBuffer == 0 )
+	{
+		err = FindNextLeafNode( scanState, avoidIO );
+	}
+
+	<span class="enscript-keyword">while</span> ( err == noErr ) 
+	{ 
+		<span class="enscript-comment">//	See if we have a record in the current node
+</span>		err = GetRecordByIndex( scanState-&gt;btcb, scanState-&gt;currentNodePtr, 
+								scanState-&gt;recordNum, (KeyPtr *) key, 
+								(u_int8_t **) data, &amp;dataSizeShort  );
+
+		<span class="enscript-keyword">if</span> ( err == noErr )
+		{
+			++scanState-&gt;recordsFound;
+			++scanState-&gt;recordNum;
+			<span class="enscript-keyword">if</span> (dataSize != NULL)
+				*dataSize = dataSizeShort;
+			<span class="enscript-keyword">return</span> noErr;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (err &gt; 0)
+		{
+			<span class="enscript-comment">//	We didn't get the node through the cache, so we can't invalidate it.
+</span>			<span class="enscript-comment">//XXX Should we do something else to avoid seeing the same record again?
+</span>			<span class="enscript-keyword">return</span> err;
+		}
+		
+		<span class="enscript-comment">//	We're done with the current node.  See if we've returned all the records
+</span>		<span class="enscript-keyword">if</span> ( scanState-&gt;recordsFound &gt;= scanState-&gt;btcb-&gt;leafRecords )
+		{
+			<span class="enscript-keyword">return</span> btNotFound;
+		}
+
+		<span class="enscript-comment">//	Move to the first record of the next leaf node
+</span>		scanState-&gt;recordNum = 0; 
+		err = FindNextLeafNode( scanState, avoidIO );
+	}
+	
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	If we got an EOF error from FindNextLeafNode, then there are no more leaf
+</span>	<span class="enscript-comment">//	records to be found.
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-keyword">if</span> ( err == fsEndOfIterationErr )
+		err = btNotFound;
+	
+	<span class="enscript-keyword">return</span> err;
+	
+} <span class="enscript-comment">/* BTScanNextRecord */</span>
+
+
+<span class="enscript-comment">//_________________________________________________________________________________
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Routine:	FindNextLeafNode
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Purpose:	Point to the next leaf node in the buffer.  Read more nodes
+</span><span class="enscript-comment">//				into the buffer if needed (and allowed).
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Inputs:
+</span><span class="enscript-comment">//		scanState		Scanner's current state
+</span><span class="enscript-comment">//		avoidIO			If true, don't do any I/O to refill the buffer
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Result:
+</span><span class="enscript-comment">//		noErr			Found a valid record
+</span><span class="enscript-comment">//		fsEndOfIterationErr	No more nodes in file
+</span><span class="enscript-comment">//		???				Needed to do I/O to get next node, but avoidIO set
+</span><span class="enscript-comment">//_________________________________________________________________________________
+</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">FindNextLeafNode</span>(	BTScanState *scanState, Boolean avoidIO )
+{
+	<span class="enscript-type">int</span> err;
+	BlockDescriptor block;
+	FileReference fref;
+	
+	err = noErr;		<span class="enscript-comment">// Assume everything will be OK
+</span>	
+	<span class="enscript-keyword">while</span> ( 1 ) 
+	{
+		<span class="enscript-keyword">if</span> ( scanState-&gt;nodesLeftInBuffer == 0 ) 
+		{
+			<span class="enscript-comment">//	Time to read some more nodes into the buffer
+</span>			<span class="enscript-keyword">if</span> ( avoidIO ) 
+			{
+				<span class="enscript-keyword">return</span> fsBTTimeOutErr;
+			}
+			<span class="enscript-keyword">else</span> 
+			{
+				<span class="enscript-comment">//	read some more nodes into buffer
+</span>				err = ReadMultipleNodes( scanState );
+				<span class="enscript-keyword">if</span> ( err != noErr ) 
+					<span class="enscript-keyword">break</span>;
+			}
+		}
+		<span class="enscript-keyword">else</span> 
+		{
+			<span class="enscript-comment">//	Adjust the node counters and point to the next node in the buffer
+</span>			++scanState-&gt;nodeNum;
+			--scanState-&gt;nodesLeftInBuffer;
+			
+			<span class="enscript-comment">//	If we've looked at all nodes in the tree, then we're done
+</span>			<span class="enscript-keyword">if</span> ( scanState-&gt;nodeNum &gt;= scanState-&gt;btcb-&gt;totalNodes )
+				<span class="enscript-keyword">return</span> fsEndOfIterationErr;
+
+			<span class="enscript-keyword">if</span> ( scanState-&gt;nodesLeftInBuffer == 0 )
+			{
+				scanState-&gt;recordNum = 0; 
+				<span class="enscript-keyword">continue</span>; 
+			}
+
+			scanState-&gt;currentNodePtr = (BTNodeDescriptor *)(((u_int8_t *)scanState-&gt;currentNodePtr) 
+										+ scanState-&gt;btcb-&gt;nodeSize);
+		}
+		
+		<span class="enscript-comment">/* Fake a BlockDescriptor */</span>
+		block.blockHeader = NULL;	<span class="enscript-comment">/* No buffer cache buffer */</span>
+		block.buffer = scanState-&gt;currentNodePtr;
+		block.blockNum = scanState-&gt;nodeNum;
+		block.blockSize = scanState-&gt;btcb-&gt;nodeSize;
+		block.blockReadFromDisk = 1;
+		block.isModified = 0;
+		
+		fref = scanState-&gt;btcb-&gt;fileRefNum;
+		
+		<span class="enscript-comment">/* This node was read from disk, so it must be swapped/checked.
+		 * Since we are reading multiple nodes, we might have read an 
+		 * unused node.  Therefore we allow swapping of unused nodes.
+		 */</span>
+		err = hfs_swap_BTNode(&amp;block, fref, kSwapBTNodeBigToHost, true);
+		<span class="enscript-keyword">if</span> ( err != noErr ) {
+			printf(<span class="enscript-string">&quot;hfs: FindNextLeafNode: Error from hfs_swap_BTNode (node %u)\n&quot;</span>, scanState-&gt;nodeNum);
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-keyword">if</span> ( scanState-&gt;currentNodePtr-&gt;kind == kBTLeafNode )
+			<span class="enscript-keyword">break</span>;
+	}
+	
+	<span class="enscript-keyword">return</span> err;
+	
+} <span class="enscript-comment">/* FindNextLeafNode */</span>
+
+
+<span class="enscript-comment">//_________________________________________________________________________________
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Routine:	ReadMultipleNodes
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Purpose:	Read one or more nodes into the buffer.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Inputs:
+</span><span class="enscript-comment">//		theScanStatePtr		Scanner's current state
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Result:
+</span><span class="enscript-comment">//		noErr				One or nodes were read
+</span><span class="enscript-comment">//		fsEndOfIterationErr		No nodes left in file, none in buffer
+</span><span class="enscript-comment">//_________________________________________________________________________________
+</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ReadMultipleNodes</span>( BTScanState *theScanStatePtr )
+{
+	<span class="enscript-type">int</span>						myErr = E_NONE;
+	BTreeControlBlockPtr  	myBTreeCBPtr;
+	daddr64_t				myPhyBlockNum;
+	u_int32_t				myBufferSize;
+	<span class="enscript-type">struct</span> vnode *			myDevPtr;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>			myBlockRun;
+	u_int32_t				myBlocksInBufferCount;
+
+	<span class="enscript-comment">// release old buffer if we have one
+</span>	<span class="enscript-keyword">if</span> ( theScanStatePtr-&gt;bufferPtr != NULL )
+	{
+	        buf_markinvalid(theScanStatePtr-&gt;bufferPtr);
+		buf_brelse( theScanStatePtr-&gt;bufferPtr );
+		theScanStatePtr-&gt;bufferPtr = NULL;
+		theScanStatePtr-&gt;currentNodePtr = NULL;
+	}
+	
+	myBTreeCBPtr = theScanStatePtr-&gt;btcb;
+			
+	<span class="enscript-comment">// map logical block in catalog btree file to physical block on volume
+</span>	myErr = hfs_bmap(myBTreeCBPtr-&gt;fileRefNum, theScanStatePtr-&gt;nodeNum, 
+	                 &amp;myDevPtr, &amp;myPhyBlockNum, &amp;myBlockRun);
+	<span class="enscript-keyword">if</span> ( myErr != E_NONE )
+	{
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+	}
+
+	<span class="enscript-comment">// bmap block run gives us the remaining number of valid blocks (number of blocks 
+</span>	<span class="enscript-comment">// minus the first).  so if there are 10 valid blocks our run number will be 9.
+</span>	<span class="enscript-comment">// blocks, in our case is the same as nodes (both are 4K)
+</span>	myBlocksInBufferCount = (theScanStatePtr-&gt;bufferSize / myBTreeCBPtr-&gt;nodeSize );
+	myBufferSize = theScanStatePtr-&gt;bufferSize;
+	<span class="enscript-keyword">if</span> ( (myBlockRun + 1) &lt; myBlocksInBufferCount )
+	{
+		myBufferSize = (myBlockRun + 1) * myBTreeCBPtr-&gt;nodeSize;
+	}
+	
+	<span class="enscript-comment">// now read blocks from the device 
+</span>	myErr = (<span class="enscript-type">int</span>)buf_meta_bread(myDevPtr, 
+	                       myPhyBlockNum, 
+	                       myBufferSize,  
+	                       NOCRED, 
+	                       &amp;theScanStatePtr-&gt;bufferPtr );
+	<span class="enscript-keyword">if</span> ( myErr != E_NONE )
+	{
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ExitThisRoutine</span>;
+	}
+
+	theScanStatePtr-&gt;nodesLeftInBuffer = buf_count(theScanStatePtr-&gt;bufferPtr) / theScanStatePtr-&gt;btcb-&gt;nodeSize;
+	theScanStatePtr-&gt;currentNodePtr = (BTNodeDescriptor *) buf_dataptr(theScanStatePtr-&gt;bufferPtr);
+
+<span class="enscript-reference">ExitThisRoutine</span>:
+	<span class="enscript-keyword">return</span> myErr;
+	
+} <span class="enscript-comment">/* ReadMultipleNodes */</span>
+
+
+
+<span class="enscript-comment">//_________________________________________________________________________________
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Routine:	BTScanInitialize
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Purpose:	Prepare to start a new BTree scan, or resume a previous one.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Inputs:
+</span><span class="enscript-comment">//		btreeFile		The B-Tree's file control block
+</span><span class="enscript-comment">//		startingNode	Initial node number
+</span><span class="enscript-comment">//		startingRecord	Initial record number within node
+</span><span class="enscript-comment">//		recordsFound	Number of valid records found so far
+</span><span class="enscript-comment">//		bufferSize		Size (in bytes) of buffer
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Outputs:
+</span><span class="enscript-comment">//		scanState		Scanner's current state; pass to other scanner calls
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Notes:
+</span><span class="enscript-comment">//		To begin a new scan and see all records in the B-Tree, pass zeroes for
+</span><span class="enscript-comment">//		startingNode, startingRecord, and recordsFound.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//		To resume a scan from the point of a previous BTScanTerminate, use the
+</span><span class="enscript-comment">//		values returned by BTScanTerminate as input for startingNode, startingRecord,
+</span><span class="enscript-comment">//		and recordsFound.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//		When resuming a scan, the caller should check the B-tree's write count.  If
+</span><span class="enscript-comment">//		it is different from the write count when the scan was terminated, then the
+</span><span class="enscript-comment">//		tree may have changed and the current state may be incorrect.  In particular,
+</span><span class="enscript-comment">//		you may see some records more than once, or never see some records.  Also,
+</span><span class="enscript-comment">//		the scanner may not be able to detect when all leaf records have been seen,
+</span><span class="enscript-comment">//		and will have to scan through many empty nodes.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//		XXXÊPerhaps the write count should be managed by BTScanInitialize and
+</span><span class="enscript-comment">//		XXX BTScanTerminate?  This would avoid the caller having to peek at
+</span><span class="enscript-comment">//		XXX internal B-Tree structures.
+</span><span class="enscript-comment">//_________________________________________________________________________________
+</span>
+<span class="enscript-type">int</span>		BTScanInitialize(	<span class="enscript-type">const</span> FCB *		btreeFile,
+							u_int32_t		startingNode,
+							u_int32_t		startingRecord,
+							u_int32_t		recordsFound,
+							u_int32_t		bufferSize,
+							BTScanState	*	scanState     )
+{
+	BTreeControlBlock	*btcb;
+	
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Make sure this is a valid B-Tree file
+</span>	<span class="enscript-comment">//
+</span>	btcb = (BTreeControlBlock *) btreeFile-&gt;fcbBTCBPtr;
+	<span class="enscript-keyword">if</span> (btcb == NULL)
+		<span class="enscript-keyword">return</span> fsBTInvalidFileErr;
+	
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Make sure buffer size is big enough, and a multiple of the
+</span>	<span class="enscript-comment">//	B-Tree node size
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-keyword">if</span> ( bufferSize &lt; btcb-&gt;nodeSize )
+		<span class="enscript-keyword">return</span> paramErr;
+	bufferSize = (bufferSize / btcb-&gt;nodeSize) * btcb-&gt;nodeSize;
+
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Set up the scanner's state
+</span>	<span class="enscript-comment">//
+</span>	scanState-&gt;bufferSize			= bufferSize;
+	scanState-&gt;bufferPtr 			= NULL;
+	scanState-&gt;btcb					= btcb;
+	scanState-&gt;nodeNum				= startingNode;
+	scanState-&gt;recordNum			= startingRecord;
+	scanState-&gt;currentNodePtr		= NULL;
+	scanState-&gt;nodesLeftInBuffer	= 0;		<span class="enscript-comment">// no nodes currently in buffer
+</span>	scanState-&gt;recordsFound			= recordsFound;
+	microuptime(&amp;scanState-&gt;startTime);			<span class="enscript-comment">// initialize our throttle
+</span>		
+	<span class="enscript-keyword">return</span> noErr;
+	
+} <span class="enscript-comment">/* BTScanInitialize */</span>
+
+
+<span class="enscript-comment">//_________________________________________________________________________________
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Routine:	BTScanTerminate
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Purpose:	Return state information about a scan so that it can be resumed
+</span><span class="enscript-comment">//				later via BTScanInitialize.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Inputs:
+</span><span class="enscript-comment">//		scanState		Scanner's current state
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Outputs:
+</span><span class="enscript-comment">//		nextNode		Node number to resume a scan (pass to BTScanInitialize)
+</span><span class="enscript-comment">//		nextRecord		Record number to resume a scan (pass to BTScanInitialize)
+</span><span class="enscript-comment">//		recordsFound	Valid records seen so far (pass to BTScanInitialize)
+</span><span class="enscript-comment">//_________________________________________________________________________________
+</span>
+<span class="enscript-type">int</span>	 BTScanTerminate(	BTScanState *		scanState,
+						u_int32_t *			startingNode,
+						u_int32_t *			startingRecord,
+						u_int32_t *			recordsFound	)
+{
+	*startingNode	= scanState-&gt;nodeNum;
+	*startingRecord	= scanState-&gt;recordNum;
+	*recordsFound	= scanState-&gt;recordsFound;
+
+	<span class="enscript-keyword">if</span> ( scanState-&gt;bufferPtr != NULL )
+	{
+		buf_markinvalid(scanState-&gt;bufferPtr);
+		buf_brelse( scanState-&gt;bufferPtr );
+		scanState-&gt;bufferPtr = NULL;
+		scanState-&gt;currentNodePtr = NULL;
+	}
+	
+	<span class="enscript-keyword">return</span> noErr;
+	
+} <span class="enscript-comment">/* BTScanTerminate */</span>
+
+
+</pre>
+<hr />
+</body></html>

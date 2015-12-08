@@ -1,0 +1,857 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>KQMPMMtest.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">KQMPMMtest.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;AvailabilityMacros.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_policy.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pthread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;err.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pthread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_error.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/notify.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;servers/bootstrap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/event.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/select.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signal.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MAX</span>(A, B) ((A) &lt; (B) ? (B) : (A))
+
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	mach_msg_header_t	header;
+	mach_msg_trailer_t	trailer;		<span class="enscript-comment">// subtract this when sending
+</span>} ipc_trivial_message;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	mach_msg_header_t	header;
+	u_int32_t		numbers[0];
+	mach_msg_trailer_t	trailer;		<span class="enscript-comment">// subtract this when sending
+</span>} ipc_inline_message;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	mach_msg_header_t		header;
+	mach_msg_body_t			body;
+	mach_msg_ool_descriptor_t	descriptor;
+	mach_msg_trailer_t		trailer;	<span class="enscript-comment">// subtract this when sending
+</span>} ipc_complex_message;
+
+<span class="enscript-type">enum</span> {
+	msg_type_trivial = 0,
+	msg_type_inline = 1,
+	msg_type_complex = 2
+};
+
+<span class="enscript-type">struct</span> port_args {
+	<span class="enscript-type">int</span> server_num;
+	<span class="enscript-type">int</span> req_size;
+	mach_msg_header_t *req_msg;
+	<span class="enscript-type">int</span> reply_size;
+	mach_msg_header_t *reply_msg;
+	mach_port_t port;
+	mach_port_t pset;
+};
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">union</span> {
+	pid_t		pid;
+	pthread_t	tid;
+} thread_id_t;
+
+<span class="enscript-comment">/* Global options */</span>
+<span class="enscript-type">static</span> boolean_t	verbose = FALSE;
+<span class="enscript-type">static</span> boolean_t	affinity = FALSE;
+<span class="enscript-type">static</span> boolean_t	timeshare = FALSE;
+<span class="enscript-type">static</span> boolean_t	threaded = FALSE;
+<span class="enscript-type">static</span> boolean_t	oneway = FALSE;
+<span class="enscript-type">static</span> boolean_t	do_select = FALSE;
+<span class="enscript-type">int</span>			msg_type;
+<span class="enscript-type">int</span>			num_ints;
+<span class="enscript-type">int</span>			num_msgs;
+<span class="enscript-type">int</span>			num_clients;
+<span class="enscript-type">int</span>			num_servers;
+<span class="enscript-type">int</span>			client_delay;
+<span class="enscript-type">int</span>			client_spin;
+<span class="enscript-type">int</span>			client_pages;
+<span class="enscript-type">char</span>			**server_port_name;
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">signal_handler</span>(<span class="enscript-type">int</span> sig) {
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">usage</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *progname) {
+	fprintf(stderr, <span class="enscript-string">&quot;usage: %s [options]\n&quot;</span>, progname);
+	fprintf(stderr, <span class="enscript-string">&quot;where options are:\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    -affinity\t\tthreads use affinity\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    -timeshare\t\tthreads use timeshare\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    -threaded\t\tuse (p)threads\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    -verbose\t\tbe verbose\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    -oneway\t\tdo not request return reply\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    -count num\t\tnumber of messages to send\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    -type trivial|inline|complex\ttype of messages to send\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    -numints num\tnumber of 32-bit ints to send in messages\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    -servers num\tnumber of servers threads to run\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    -clients num\tnumber of clients per server\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    -delay num\t\tmicroseconds to sleep clients between messages\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    -work num\t\tmicroseconds of client work\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    -pages num\t\tpages of memory touched by client work\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    -select   \t\tselect prior to calling kevent().\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;default values are:\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    . no affinity\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    . not timeshare\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    . not verbose\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    . not oneway\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    . client sends 100000 messages\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    . inline message type\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    . 64 32-bit integers in inline/complex messages\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    . (num_available_processors+1)%%2 servers\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    . 4 clients per server\n&quot;</span>);
+	fprintf(stderr, <span class="enscript-string">&quot;    . no delay\n&quot;</span>);
+	exit(1);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">parse_args</span>(<span class="enscript-type">int</span> argc, <span class="enscript-type">char</span> *argv[]) {
+	host_basic_info_data_t		info;
+	mach_msg_type_number_t		count;
+	kern_return_t			result;
+
+	<span class="enscript-comment">/* Initialize defaults */</span>
+	msg_type = msg_type_trivial;
+	num_ints = 64;
+	num_msgs = 100000;
+	client_delay = 0;
+	num_clients = 4;
+
+	count = HOST_BASIC_INFO_COUNT;
+	result = host_info(mach_host_self(), HOST_BASIC_INFO, 
+			(host_info_t)&amp;info, &amp;count);
+	<span class="enscript-keyword">if</span> (result == KERN_SUCCESS &amp;&amp; info.avail_cpus &gt; 1)
+		num_servers = info.avail_cpus / 2;
+	<span class="enscript-keyword">else</span>
+		num_servers = 1;
+
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *progname = argv[0];
+	argc--; argv++;
+	<span class="enscript-keyword">while</span> (0 &lt; argc) {
+		<span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;-verbose&quot;</span>, argv[0])) {
+			verbose = TRUE;
+			argc--; argv++;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;-affinity&quot;</span>, argv[0])) {
+			affinity = TRUE;
+			argc--; argv++;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;-timeshare&quot;</span>, argv[0])) {
+			timeshare = TRUE;
+			argc--; argv++;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;-threaded&quot;</span>, argv[0])) {
+			threaded = TRUE;
+			argc--; argv++;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;-oneway&quot;</span>, argv[0])) {
+			oneway = TRUE;
+			argc--; argv++;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;-type&quot;</span>, argv[0])) {
+			<span class="enscript-keyword">if</span> (argc &lt; 2) 
+				usage(progname);
+			<span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;trivial&quot;</span>, argv[1])) {
+				msg_type = msg_type_trivial;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;inline&quot;</span>, argv[1])) {
+				msg_type = msg_type_inline;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;complex&quot;</span>, argv[1])) {
+				msg_type = msg_type_complex;
+			} <span class="enscript-keyword">else</span> 
+				usage(progname);
+			argc -= 2; argv += 2;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;-numints&quot;</span>, argv[0])) {
+			<span class="enscript-keyword">if</span> (argc &lt; 2) 
+				usage(progname);
+			num_ints = strtoul(argv[1], NULL, 0);
+			argc -= 2; argv += 2;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;-count&quot;</span>, argv[0])) {
+			<span class="enscript-keyword">if</span> (argc &lt; 2) 
+				usage(progname);
+			num_msgs = strtoul(argv[1], NULL, 0);
+			argc -= 2; argv += 2;
+		}  <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;-clients&quot;</span>, argv[0])) {
+			<span class="enscript-keyword">if</span> (argc &lt; 2) 
+				usage(progname);
+			num_clients = strtoul(argv[1], NULL, 0);
+			argc -= 2; argv += 2;
+		}  <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;-servers&quot;</span>, argv[0])) {
+			<span class="enscript-keyword">if</span> (argc &lt; 2) 
+				usage(progname);
+			num_servers = strtoul(argv[1], NULL, 0);
+			argc -= 2; argv += 2;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;-delay&quot;</span>, argv[0])) {
+			<span class="enscript-keyword">if</span> (argc &lt; 2) 
+				usage(progname);
+			client_delay = strtoul(argv[1], NULL, 0);
+			argc -= 2; argv += 2;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;-spin&quot;</span>, argv[0])) {
+			<span class="enscript-keyword">if</span> (argc &lt; 2) 
+				usage(progname);
+			client_spin = strtoul(argv[1], NULL, 0);
+			argc -= 2; argv += 2;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;-pages&quot;</span>, argv[0])) {
+			<span class="enscript-keyword">if</span> (argc &lt; 2) 
+				usage(progname);
+			client_pages = strtoul(argv[1], NULL, 0);
+			argc -= 2; argv += 2;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (0 == strcmp(<span class="enscript-string">&quot;-select&quot;</span>, argv[0])) {
+			do_select = TRUE;
+			argc--; argv++;
+		} <span class="enscript-keyword">else</span> 
+			usage(progname);
+	}
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">setup_server_ports</span>(<span class="enscript-type">struct</span> port_args *ports)
+{
+	kern_return_t ret = 0;
+	mach_port_t bsport;
+
+	ports-&gt;req_size = MAX(<span class="enscript-keyword">sizeof</span>(ipc_inline_message) +  
+			<span class="enscript-keyword">sizeof</span>(u_int32_t) * num_ints, 
+			<span class="enscript-keyword">sizeof</span>(ipc_complex_message));
+	ports-&gt;reply_size = <span class="enscript-keyword">sizeof</span>(ipc_trivial_message) - 
+		<span class="enscript-keyword">sizeof</span>(mach_msg_trailer_t);
+	ports-&gt;req_msg = malloc(ports-&gt;req_size);
+	ports-&gt;reply_msg = malloc(ports-&gt;reply_size);
+
+	ret = mach_port_allocate(mach_task_self(), 
+			MACH_PORT_RIGHT_RECEIVE,  
+			&amp;(ports-&gt;port));
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+		mach_error(<span class="enscript-string">&quot;mach_port_allocate(): &quot;</span>, ret);
+		exit(1);
+	}
+
+	ret = mach_port_allocate(mach_task_self(), 
+			MACH_PORT_RIGHT_PORT_SET,  
+			&amp;(ports-&gt;pset));
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+		mach_error(<span class="enscript-string">&quot;mach_port_allocate(): &quot;</span>, ret);
+		exit(1);
+	}
+	
+	ret = mach_port_insert_member(mach_task_self(),
+			ports-&gt;port,
+			ports-&gt;pset);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+		mach_error(<span class="enscript-string">&quot;mach_port_insert_member(): &quot;</span>, ret);
+		exit(1);
+	}
+
+	ret = mach_port_insert_right(mach_task_self(), 
+			ports-&gt;port, 
+			ports-&gt;port, 
+			MACH_MSG_TYPE_MAKE_SEND);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+		mach_error(<span class="enscript-string">&quot;mach_port_insert_right(): &quot;</span>, ret);
+		exit(1);
+	}
+
+	ret = task_get_bootstrap_port(mach_task_self(), &amp;bsport);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+		mach_error(<span class="enscript-string">&quot;task_get_bootstrap_port(): &quot;</span>, ret);
+		exit(1);
+	}
+
+	<span class="enscript-keyword">if</span> (verbose) {
+		printf(<span class="enscript-string">&quot;server waiting for IPC messages from client on port '%s'.\n&quot;</span>,
+			server_port_name[ports-&gt;server_num]);
+	}
+	ret = bootstrap_register(bsport,
+				 server_port_name[ports-&gt;server_num],
+				 ports-&gt;port);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+		mach_error(<span class="enscript-string">&quot;bootstrap_register(): &quot;</span>, ret);
+		exit(1);
+	}
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">setup_client_ports</span>(<span class="enscript-type">struct</span> port_args *ports)
+{
+	kern_return_t ret = 0;
+	<span class="enscript-keyword">switch</span>(msg_type) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">msg_type_trivial</span>:
+			ports-&gt;req_size = <span class="enscript-keyword">sizeof</span>(ipc_trivial_message);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">msg_type_inline</span>:
+			ports-&gt;req_size = <span class="enscript-keyword">sizeof</span>(ipc_inline_message) +  
+				<span class="enscript-keyword">sizeof</span>(u_int32_t) * num_ints;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">msg_type_complex</span>:
+			ports-&gt;req_size = <span class="enscript-keyword">sizeof</span>(ipc_complex_message);
+			<span class="enscript-keyword">break</span>;
+	}
+	ports-&gt;req_size -= <span class="enscript-keyword">sizeof</span>(mach_msg_trailer_t);
+	ports-&gt;reply_size = <span class="enscript-keyword">sizeof</span>(ipc_trivial_message);
+	ports-&gt;req_msg = malloc(ports-&gt;req_size);
+	ports-&gt;reply_msg = malloc(ports-&gt;reply_size);
+
+	ret = mach_port_allocate(mach_task_self(), 
+			MACH_PORT_RIGHT_RECEIVE,  
+			&amp;(ports-&gt;port));
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+		mach_error(<span class="enscript-string">&quot;mach_port_allocate(): &quot;</span>, ret);
+		exit(1);
+	}
+	<span class="enscript-keyword">if</span> (verbose) {
+		printf(<span class="enscript-string">&quot;Client sending %d %s IPC messages to port '%s' in %s mode.\n&quot;</span>,
+				num_msgs, (msg_type == msg_type_inline) ? 
+				<span class="enscript-string">&quot;inline&quot;</span> :  ((msg_type == msg_type_complex) ? 
+					<span class="enscript-string">&quot;complex&quot;</span> : <span class="enscript-string">&quot;trivial&quot;</span>),  
+				server_port_name[ports-&gt;server_num],
+				(oneway ? <span class="enscript-string">&quot;oneway&quot;</span> : <span class="enscript-string">&quot;rpc&quot;</span>));
+	}
+
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_setup</span>(<span class="enscript-type">int</span> tag) {
+	kern_return_t			ret;
+        thread_extended_policy_data_t   epolicy;
+        thread_affinity_policy_data_t   policy;
+
+	<span class="enscript-keyword">if</span> (!timeshare) {
+		epolicy.timeshare = FALSE;
+		ret = thread_policy_set(
+				mach_thread_self(), THREAD_EXTENDED_POLICY,
+				(thread_policy_t) &amp;epolicy,
+				THREAD_EXTENDED_POLICY_COUNT);
+		<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS)
+			printf(<span class="enscript-string">&quot;thread_policy_set(THREAD_EXTENDED_POLICY) returned %d\n&quot;</span>, ret);
+	}
+
+        <span class="enscript-keyword">if</span> (affinity) {
+                policy.affinity_tag = tag;
+                ret = thread_policy_set(
+                                mach_thread_self(), THREAD_AFFINITY_POLICY,
+                                (thread_policy_t) &amp;policy,
+                                THREAD_AFFINITY_POLICY_COUNT);
+                <span class="enscript-keyword">if</span> (ret != KERN_SUCCESS)
+                        printf(<span class="enscript-string">&quot;thread_policy_set(THREAD_AFFINITY_POLICY) returned %d\n&quot;</span>, ret);
+        }
+}
+
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">server</span>(<span class="enscript-type">void</span> *serverarg) 
+{
+	<span class="enscript-type">int</span> kq;
+	<span class="enscript-type">struct</span> kevent64_s kev[1];
+	<span class="enscript-type">int</span> err;
+	<span class="enscript-type">int</span> count;
+	<span class="enscript-type">struct</span> port_args args;
+	<span class="enscript-type">int</span> idx;
+	kern_return_t ret;
+	<span class="enscript-type">int</span> totalmsg = num_msgs * num_clients;
+	fd_set readfds;
+
+	args.server_num = (<span class="enscript-type">int</span>) (<span class="enscript-type">long</span>) serverarg;
+	setup_server_ports(&amp;args);
+
+	thread_setup(args.server_num + 1);
+	
+	kq = kqueue();
+	<span class="enscript-keyword">if</span> (kq == -1) {
+		perror(<span class="enscript-string">&quot;kqueue&quot;</span>);
+		exit(1);
+	}
+	EV_SET64(&amp;kev[0], args.pset, EVFILT_MACHPORT, (EV_ADD | EV_CLEAR | EV_DISPATCH), 
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIRECT_MSG_RCV</span>
+		 MACH_RCV_MSG|MACH_RCV_LARGE, 0, 0, (mach_vm_address_t)args.req_msg, args.req_size);
+#<span class="enscript-reference">else</span>
+		0, 0, 0, 0, 0);
+#<span class="enscript-reference">endif</span>
+	err = kevent64(kq, kev, 1, NULL, 0, 0, NULL);
+	<span class="enscript-keyword">if</span> (err == -1) {
+		perror(<span class="enscript-string">&quot;kevent&quot;</span>);
+		exit(1);
+	}
+	
+	<span class="enscript-keyword">for</span> (idx = 0; idx &lt; totalmsg; idx++) {
+
+		<span class="enscript-keyword">if</span> (verbose) 
+			printf(<span class="enscript-string">&quot;server awaiting message %d\n&quot;</span>, idx);
+	<span class="enscript-reference">retry</span>:
+		<span class="enscript-keyword">if</span> (do_select) {
+			FD_ZERO(&amp;readfds);
+			FD_SET(kq, &amp;readfds);
+
+			<span class="enscript-keyword">if</span> (verbose)
+				printf(<span class="enscript-string">&quot;Calling select() prior to kevent64().\n&quot;</span>);
+
+			count = select(kq + 1, &amp;readfds, NULL, NULL, NULL);
+			<span class="enscript-keyword">if</span> (count == -1) {
+				perror(<span class="enscript-string">&quot;select&quot;</span>);
+				exit(1);
+			}
+		}
+
+		EV_SET64(&amp;kev[0], args.pset, EVFILT_MACHPORT, EV_ENABLE, 
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIRECT_MSG_RCV</span>
+			 MACH_RCV_MSG|MACH_RCV_LARGE, 0, 0, (mach_vm_address_t)args.req_msg, args.req_size);
+#<span class="enscript-reference">else</span>
+			0, 0, 0, 0, 0);
+#<span class="enscript-reference">endif</span>
+		err = kevent64(kq, kev, 1, kev, 1, 0, NULL);
+		<span class="enscript-keyword">if</span> (err == -1) {
+			perror(<span class="enscript-string">&quot;kevent64&quot;</span>);
+			exit(1);
+		}		
+		<span class="enscript-keyword">if</span> (err == 0) {
+		  <span class="enscript-comment">// printf(&quot;kevent64: returned zero\n&quot;);
+</span>			<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry</span>;
+		}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIRECT_MSG_RCV</span>
+		ret = kev[0].fflags;
+		<span class="enscript-keyword">if</span> (MACH_MSG_SUCCESS != ret) {
+			<span class="enscript-keyword">if</span> (verbose)
+				printf(<span class="enscript-string">&quot;kevent64() mach_msg_return=%d&quot;</span>, ret);
+			mach_error(<span class="enscript-string">&quot;kevent64 (msg receive): &quot;</span>, ret);
+			exit(1);
+		} 
+#<span class="enscript-reference">else</span>
+		<span class="enscript-keyword">if</span> (kev[0].data != args.port)
+			printf(<span class="enscript-string">&quot;kevent64(MACH_PORT_NULL) port name (%lld) != expected (0x%x)\n&quot;</span>, kev[0].data, args.port);
+
+		args.req_msg-&gt;msgh_bits = 0;
+		args.req_msg-&gt;msgh_size = args.req_size;
+		args.req_msg-&gt;msgh_local_port = args.port;
+		ret = mach_msg(args.req_msg,  
+				MACH_RCV_MSG|MACH_RCV_INTERRUPT|MACH_RCV_LARGE, 
+				0, 
+				args.req_size,  
+				args.pset, 
+				MACH_MSG_TIMEOUT_NONE, 
+				MACH_PORT_NULL);
+		<span class="enscript-keyword">if</span> (MACH_RCV_INTERRUPTED == ret)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (MACH_MSG_SUCCESS != ret) {
+			<span class="enscript-keyword">if</span> (verbose)
+				printf(<span class="enscript-string">&quot;mach_msg() ret=%d&quot;</span>, ret);
+			mach_error(<span class="enscript-string">&quot;mach_msg (receive): &quot;</span>, ret);
+			exit(1);
+		}
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">if</span> (verbose)
+			printf(<span class="enscript-string">&quot;server received message %d\n&quot;</span>, idx);
+		<span class="enscript-keyword">if</span> (args.req_msg-&gt;msgh_bits &amp; MACH_MSGH_BITS_COMPLEX) {
+			ret = vm_deallocate(mach_task_self(),  
+					(vm_address_t)((ipc_complex_message *)args.req_msg)-&gt;descriptor.address,  
+					((ipc_complex_message *)args.req_msg)-&gt;descriptor.size);
+		}
+
+		<span class="enscript-keyword">if</span> (1 == args.req_msg-&gt;msgh_id) {
+			<span class="enscript-keyword">if</span> (verbose) 
+				printf(<span class="enscript-string">&quot;server sending reply %d\n&quot;</span>, idx);
+			args.reply_msg-&gt;msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND,  
+					MACH_MSG_TYPE_MAKE_SEND);
+			args.reply_msg-&gt;msgh_size = args.reply_size;
+			args.reply_msg-&gt;msgh_remote_port = args.req_msg-&gt;msgh_remote_port;
+			args.reply_msg-&gt;msgh_local_port = args.req_msg-&gt;msgh_local_port;
+			args.reply_msg-&gt;msgh_id = 2;
+			ret = mach_msg(args.reply_msg, 
+					MACH_SEND_MSG, 
+					args.reply_size, 
+					0, 
+					MACH_PORT_NULL, 
+					MACH_MSG_TIMEOUT_NONE,  
+					MACH_PORT_NULL);
+			<span class="enscript-keyword">if</span> (MACH_MSG_SUCCESS != ret) {
+				mach_error(<span class="enscript-string">&quot;mach_msg (send): &quot;</span>, ret);
+				exit(1);
+			}
+		}
+	}
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">client_spin_loop</span>(<span class="enscript-type">unsigned</span> count, <span class="enscript-type">void</span> (fn)(<span class="enscript-type">void</span>))
+{
+	<span class="enscript-keyword">while</span> (count--)
+		fn();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">long</span>	dummy_memory;
+<span class="enscript-type">static</span> <span class="enscript-type">long</span>	*client_memory = &amp;dummy_memory;
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">client_work_atom</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span>	i;
+
+	<span class="enscript-keyword">if</span> (++i &gt; client_pages * PAGE_SIZE / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span>))
+		i = 0;
+	client_memory[i] = 0;
+}
+
+<span class="enscript-type">static</span>	<span class="enscript-type">int</span>	calibration_count = 10000;
+<span class="enscript-type">static</span>	<span class="enscript-type">int</span>	calibration_usec;
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> *
+<span class="enscript-function-name">calibrate_client_work</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">long</span>		dummy;
+	<span class="enscript-type">struct</span> timeval	nowtv;
+	<span class="enscript-type">struct</span> timeval	warmuptv = { 0, 100 * 1000 }; <span class="enscript-comment">/* 100ms */</span>
+	<span class="enscript-type">struct</span> timeval	starttv;
+	<span class="enscript-type">struct</span> timeval	endtv;
+
+	<span class="enscript-keyword">if</span> (client_spin) {
+		<span class="enscript-comment">/* Warm-up the stepper first... */</span>
+		gettimeofday(&amp;nowtv, NULL);
+		timeradd(&amp;nowtv, &amp;warmuptv, &amp;endtv);
+		<span class="enscript-keyword">do</span> {
+			client_spin_loop(calibration_count, client_work_atom);
+			gettimeofday(&amp;nowtv, NULL);
+		} <span class="enscript-keyword">while</span> (timercmp(&amp;nowtv, &amp;endtv, &lt; ));	
+	
+		<span class="enscript-comment">/* Now do the calibration */</span>
+		<span class="enscript-keyword">while</span> (TRUE) {
+			gettimeofday(&amp;starttv, NULL);
+			client_spin_loop(calibration_count, client_work_atom);
+			gettimeofday(&amp;endtv, NULL);
+			<span class="enscript-keyword">if</span> (endtv.tv_sec - starttv.tv_sec &gt; 1) {
+				calibration_count /= 10;
+				<span class="enscript-keyword">continue</span>;
+			}
+			calibration_usec = endtv.tv_usec - starttv.tv_usec;
+			<span class="enscript-keyword">if</span> (endtv.tv_usec &lt; starttv.tv_usec) {
+				calibration_usec += 1000000;
+			}
+			<span class="enscript-keyword">if</span> (calibration_usec &lt; 1000) {
+				calibration_count *= 10;
+				<span class="enscript-keyword">continue</span>;
+			}
+			calibration_count /= calibration_usec;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (verbose)
+			printf(<span class="enscript-string">&quot;calibration_count=%d calibration_usec=%d\n&quot;</span>,
+				calibration_count, calibration_usec);
+	}
+        <span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> *
+<span class="enscript-function-name">client_work</span>(<span class="enscript-type">void</span>)
+{
+
+	<span class="enscript-keyword">if</span> (client_spin) {
+		client_spin_loop(calibration_count*client_spin,
+				 client_work_atom);
+	}
+	
+	<span class="enscript-keyword">if</span> (client_delay) {
+		usleep(client_delay);
+	}
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-type">void</span> *<span class="enscript-function-name">client</span>(<span class="enscript-type">void</span> *threadarg) 
+{
+	<span class="enscript-type">struct</span> port_args args;
+	<span class="enscript-type">int</span> idx;
+	mach_msg_header_t *req, *reply; 
+	mach_port_t bsport, servport;
+	kern_return_t ret;
+	<span class="enscript-type">int</span> server_num = (<span class="enscript-type">int</span>) threadarg;
+	<span class="enscript-type">void</span> *ints = malloc(<span class="enscript-keyword">sizeof</span>(u_int32_t) * num_ints);
+
+	<span class="enscript-keyword">if</span> (verbose) 
+		printf(<span class="enscript-string">&quot;client(%d) started, server port name %s\n&quot;</span>,
+			server_num, server_port_name[server_num]);
+
+	args.server_num = server_num;
+	thread_setup(server_num + 1);
+
+	<span class="enscript-comment">/* find server port */</span>
+	ret = task_get_bootstrap_port(mach_task_self(), &amp;bsport);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+		mach_error(<span class="enscript-string">&quot;task_get_bootstrap_port(): &quot;</span>, ret);
+		exit(1);
+	}
+	ret = bootstrap_look_up(bsport,
+				server_port_name[server_num],
+				&amp;servport); 
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+		mach_error(<span class="enscript-string">&quot;bootstrap_look_up(): &quot;</span>, ret);
+		exit(1);
+	}
+
+	setup_client_ports(&amp;args);
+
+	<span class="enscript-comment">/* Allocate and touch memory */</span>
+	<span class="enscript-keyword">if</span> (client_pages) {
+		<span class="enscript-type">unsigned</span>	i;
+		client_memory = (<span class="enscript-type">long</span> *) malloc(client_pages * PAGE_SIZE);
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; client_pages; i++)
+			client_memory[i * PAGE_SIZE / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span>)] = 0;
+	}
+	
+	<span class="enscript-comment">/* start message loop */</span>
+	<span class="enscript-keyword">for</span> (idx = 0; idx &lt; num_msgs; idx++) {
+		req = args.req_msg;
+		reply = args.reply_msg;
+
+		req-&gt;msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, 
+				MACH_MSG_TYPE_MAKE_SEND);
+		req-&gt;msgh_size = args.req_size;
+		req-&gt;msgh_remote_port = servport;
+		req-&gt;msgh_local_port = args.port;
+		req-&gt;msgh_id = oneway ? 0 : 1;
+		<span class="enscript-keyword">if</span> (msg_type == msg_type_complex) {
+			(req)-&gt;msgh_bits |=  MACH_MSGH_BITS_COMPLEX;
+			((ipc_complex_message *)req)-&gt;body.msgh_descriptor_count = 1;
+			((ipc_complex_message *)req)-&gt;descriptor.address = ints;
+			((ipc_complex_message *)req)-&gt;descriptor.size = 
+				num_ints * <span class="enscript-keyword">sizeof</span>(u_int32_t);
+			((ipc_complex_message *)req)-&gt;descriptor.deallocate = FALSE;
+			((ipc_complex_message *)req)-&gt;descriptor.copy = MACH_MSG_VIRTUAL_COPY;
+			((ipc_complex_message *)req)-&gt;descriptor.type = MACH_MSG_OOL_DESCRIPTOR;
+		}
+		<span class="enscript-keyword">if</span> (verbose) 
+			printf(<span class="enscript-string">&quot;client sending message %d\n&quot;</span>, idx);
+		ret = mach_msg(req,  
+				MACH_SEND_MSG, 
+				args.req_size, 
+				0, 
+				MACH_PORT_NULL,  
+				MACH_MSG_TIMEOUT_NONE, 
+				MACH_PORT_NULL);
+		<span class="enscript-keyword">if</span> (MACH_MSG_SUCCESS != ret) {
+			mach_error(<span class="enscript-string">&quot;mach_msg (send): &quot;</span>, ret);
+			fprintf(stderr, <span class="enscript-string">&quot;bailing after %u iterations\n&quot;</span>, idx);
+			exit(1);
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (!oneway) {
+			<span class="enscript-keyword">if</span> (verbose) 
+				printf(<span class="enscript-string">&quot;client awaiting reply %d\n&quot;</span>, idx);
+			reply-&gt;msgh_bits = 0;
+			reply-&gt;msgh_size = args.reply_size;
+			reply-&gt;msgh_local_port = args.port;
+			ret = mach_msg(args.reply_msg,  
+					MACH_RCV_MSG|MACH_RCV_INTERRUPT, 
+					0, 
+					args.reply_size, 
+					args.port,  
+					MACH_MSG_TIMEOUT_NONE, 
+					MACH_PORT_NULL);
+			<span class="enscript-keyword">if</span> (MACH_MSG_SUCCESS != ret) {
+				mach_error(<span class="enscript-string">&quot;mach_msg (receive): &quot;</span>, ret);
+				fprintf(stderr, <span class="enscript-string">&quot;bailing after %u iterations\n&quot;</span>,
+						idx);
+				exit(1);
+			}
+			<span class="enscript-keyword">if</span> (verbose) 
+				printf(<span class="enscript-string">&quot;client received reply %d\n&quot;</span>, idx);
+		}
+
+		client_work();
+	}
+
+	free(ints);
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_spawn</span>(thread_id_t *thread, <span class="enscript-type">void</span> *(fn)(<span class="enscript-type">void</span> *), <span class="enscript-type">void</span> *arg) {
+	<span class="enscript-keyword">if</span> (threaded) {
+		kern_return_t	ret;
+		ret = pthread_create(
+				&amp;thread-&gt;tid,
+				NULL,
+				fn,
+				arg);
+		<span class="enscript-keyword">if</span> (ret != 0)
+			err(1, <span class="enscript-string">&quot;pthread_create()&quot;</span>);
+		<span class="enscript-keyword">if</span> (verbose)
+			printf(<span class="enscript-string">&quot;created pthread %p\n&quot;</span>, thread-&gt;tid);
+	} <span class="enscript-keyword">else</span> {
+		thread-&gt;pid = fork();
+		<span class="enscript-keyword">if</span> (thread-&gt;pid == 0) {
+			<span class="enscript-keyword">if</span> (verbose)
+				printf(<span class="enscript-string">&quot;calling %p(%p)\n&quot;</span>, fn, arg);
+			fn(arg);
+			exit(0);
+		}
+		<span class="enscript-keyword">if</span> (verbose)
+			printf(<span class="enscript-string">&quot;forked pid %d\n&quot;</span>, thread-&gt;pid);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_join</span>(thread_id_t *thread) {
+	<span class="enscript-keyword">if</span> (threaded) {
+		kern_return_t	ret;
+		<span class="enscript-keyword">if</span> (verbose)
+			printf(<span class="enscript-string">&quot;joining thread %p\n&quot;</span>, thread-&gt;tid);
+		ret = pthread_join(thread-&gt;tid, NULL);
+		<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS)
+			err(1, <span class="enscript-string">&quot;pthread_join(%p)&quot;</span>, thread-&gt;tid);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">int</span>	stat;
+		<span class="enscript-keyword">if</span> (verbose)
+			printf(<span class="enscript-string">&quot;waiting for pid %d\n&quot;</span>, thread-&gt;pid);
+		waitpid(thread-&gt;pid, &amp;stat, 0);
+	}
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">wait_for_servers</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span>		i;
+	<span class="enscript-type">int</span>		retry_count = 10;
+	mach_port_t	bsport, servport;
+	kern_return_t	ret;
+
+	<span class="enscript-comment">/* find server port */</span>
+	ret = task_get_bootstrap_port(mach_task_self(), &amp;bsport);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+		mach_error(<span class="enscript-string">&quot;task_get_bootstrap_port(): &quot;</span>, ret);
+		exit(1);
+	}
+
+	<span class="enscript-keyword">while</span> (retry_count-- &gt; 0) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; num_servers; i++) {
+			ret = bootstrap_look_up(bsport,
+					server_port_name[i],
+					&amp;servport); 
+			<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+		<span class="enscript-keyword">if</span> (ret == KERN_SUCCESS)
+			<span class="enscript-keyword">return</span>;
+		usleep(100 * 1000);	<span class="enscript-comment">/* 100ms */</span>
+	}
+	fprintf(stderr, <span class="enscript-string">&quot;Server(s) failed to register\n&quot;</span>);
+	exit(1);
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">main</span>(<span class="enscript-type">int</span> argc, <span class="enscript-type">char</span> *argv[]) 
+{
+	<span class="enscript-type">int</span>		i;
+	<span class="enscript-type">int</span>		j;
+	thread_id_t	*client_id;
+	thread_id_t	*server_id;
+
+	signal(SIGINT, signal_handler);
+	parse_args(argc, argv);
+
+	calibrate_client_work();
+
+	<span class="enscript-comment">/*
+	 * If we're using affinity create an empty namespace now
+	 * so this is shared by all our offspring.
+	 */</span>
+	<span class="enscript-keyword">if</span> (affinity)
+		thread_setup(0);
+
+	server_id = (thread_id_t *) malloc(num_servers * <span class="enscript-keyword">sizeof</span>(thread_id_t));
+	server_port_name = (<span class="enscript-type">char</span> **) malloc(num_servers * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">char</span> *));
+	<span class="enscript-keyword">if</span> (verbose)
+		printf(<span class="enscript-string">&quot;creating %d servers\n&quot;</span>, num_servers);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; num_servers; i++) {
+		server_port_name[i] = (<span class="enscript-type">char</span> *) malloc(<span class="enscript-keyword">sizeof</span>(<span class="enscript-string">&quot;PORT.pppppp.xx&quot;</span>));
+		<span class="enscript-comment">/* PORT names include pid of main process for disambiguation */</span>
+		sprintf(server_port_name[i], <span class="enscript-string">&quot;PORT.%06d.%02d&quot;</span>, getpid(), i);
+		thread_spawn(&amp;server_id[i], server, (<span class="enscript-type">void</span> *) (<span class="enscript-type">long</span>) i);
+	}
+
+	<span class="enscript-type">int</span> totalclients = num_servers * num_clients;
+	<span class="enscript-type">int</span> totalmsg = num_msgs * totalclients;
+	<span class="enscript-type">struct</span> timeval starttv, endtv, deltatv;
+
+	<span class="enscript-comment">/*
+	 * Wait for all servers to have registered all ports before starting
+	 * the clients and the clock.
+	 */</span>
+	wait_for_servers();
+	
+	printf(<span class="enscript-string">&quot;%d server%s, %d client%s per server (%d total) %u messages...&quot;</span>, 
+			num_servers, (num_servers &gt; 1)? <span class="enscript-string">&quot;s&quot;</span> : <span class="enscript-string">&quot;&quot;</span>,
+			num_clients, (num_clients &gt; 1)? <span class="enscript-string">&quot;s&quot;</span> : <span class="enscript-string">&quot;&quot;</span>,
+			totalclients,
+			totalmsg);
+	fflush(stdout);
+
+	<span class="enscript-comment">/* Call gettimeofday() once and throw away result; some implementations
+	 * (like Mach's) cache some time zone info on first call.
+	 */</span>
+	gettimeofday(&amp;starttv, NULL);
+	gettimeofday(&amp;starttv, NULL);
+
+	client_id = (thread_id_t *) malloc(totalclients * <span class="enscript-keyword">sizeof</span>(thread_id_t));
+	<span class="enscript-keyword">if</span> (verbose)
+		printf(<span class="enscript-string">&quot;creating %d clients\n&quot;</span>, totalclients);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; num_servers; i++) {
+		<span class="enscript-keyword">for</span> (j = 0; j &lt; num_clients; j++) {
+			thread_spawn(
+				&amp;client_id[(i*num_clients) + j],
+				client,
+				(<span class="enscript-type">void</span> *) (<span class="enscript-type">long</span>) i);
+		}
+	}
+
+	<span class="enscript-comment">/* Wait for servers to complete */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; num_servers; i++) {
+		thread_join(&amp;server_id[i]);
+	}
+
+	gettimeofday(&amp;endtv, NULL);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; totalclients; i++) {
+		thread_join(&amp;client_id[i]);
+	}
+
+	<span class="enscript-comment">/* report results */</span>
+	deltatv.tv_sec = endtv.tv_sec - starttv.tv_sec;
+	deltatv.tv_usec = endtv.tv_usec - starttv.tv_usec;
+	<span class="enscript-keyword">if</span> (endtv.tv_usec &lt; starttv.tv_usec) {
+		deltatv.tv_sec--;
+		deltatv.tv_usec += 1000000;
+	}
+
+	<span class="enscript-type">double</span> dsecs = (<span class="enscript-type">double</span>) deltatv.tv_sec + 
+		1.0E-6 * (<span class="enscript-type">double</span>) deltatv.tv_usec;
+
+	printf(<span class="enscript-string">&quot; in %ld.%03u seconds\n&quot;</span>,  
+	       (<span class="enscript-type">long</span>)deltatv.tv_sec, deltatv.tv_usec/1000);
+	printf(<span class="enscript-string">&quot;  throughput in messages/sec:     %g\n&quot;</span>,
+			(<span class="enscript-type">double</span>)totalmsg / dsecs);
+	printf(<span class="enscript-string">&quot;  average message latency (usec): %2.3g\n&quot;</span>, 
+			dsecs * 1.0E6 / (<span class="enscript-type">double</span>) totalmsg);
+
+	<span class="enscript-keyword">return</span> (0);
+
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,2625 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ip_dummynet.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ip_dummynet.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2002 Luigi Rizzo, Universita` di Pisa
+ * Portions Copyright (c) 2000 Akamba Corp.
+ * All rights reserved
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/netinet/ip_dummynet.c,v 1.84 2004/08/25 09:31:30 pjd Exp $
+ */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DUMMYNET_DEBUG</span>
+
+<span class="enscript-comment">/*
+ * This module implements IP dummynet, a bandwidth limiter/delay emulator
+ * used in conjunction with the ipfw package.
+ * Description of the data structures used is in ip_dummynet.h
+ * Here you mainly find the following blocks of code:
+ *  + variable declarations;
+ *  + heap management functions;
+ *  + scheduler and dummynet functions;
+ *  + configuration and initialization.
+ *
+ * NOTA BENE: critical sections are protected by the &quot;dummynet lock&quot;.
+ *
+ * Most important Changes:
+ *
+ * 010124: Fixed WF2Q behaviour
+ * 010122: Fixed spl protection.
+ * 000601: WF2Q support
+ * 000106: large rewrite, use heaps to handle very many pipes.
+ * 980513:	initial release
+ *
+ * include files marked with XXX are probably not needed
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>			<span class="enscript-comment">/* XXX */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_protocol.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DUMMYNET</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_protocol.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DUMMYNET */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_fw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_dummynet.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>       <span class="enscript-comment">/* for ip6_input, ip6_output prototypes */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_var.h&gt;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> ip_fw default_rule;
+
+<span class="enscript-comment">/*
+ * We keep a private variable for the simulation time, but we could
+ * probably use an existing one (&quot;softticks&quot; in sys/kern/kern_timer.c)
+ */</span>
+<span class="enscript-type">static</span> dn_key curr_time = 0 ; <span class="enscript-comment">/* current simulation time */</span>
+
+<span class="enscript-comment">/* this is for the timer that fires to call dummynet() - we only enable the timer when
+	there are packets to process, otherwise it's disabled */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> timer_enabled = 0;	
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> dn_hash_size = 64 ;	<span class="enscript-comment">/* default hash size */</span>
+
+<span class="enscript-comment">/* statistics on number of queue searches and search steps */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> searches, search_steps ;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> pipe_expire = 1 ;   <span class="enscript-comment">/* expire queue if empty */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> dn_max_ratio = 16 ; <span class="enscript-comment">/* max queues/buckets ratio */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> red_lookup_depth = 256;	<span class="enscript-comment">/* RED - default lookup table depth */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> red_avg_pkt_size = 512;      <span class="enscript-comment">/* RED - default medium packet size */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> red_max_pkt_size = 1500;     <span class="enscript-comment">/* RED - default max packet size */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> serialize = 0;
+
+<span class="enscript-comment">/*
+ * Three heaps contain queues and pipes that the scheduler handles:
+ *
+ * ready_heap contains all dn_flow_queue related to fixed-rate pipes.
+ *
+ * wfq_ready_heap contains the pipes associated with WF2Q flows
+ *
+ * extract_heap contains pipes associated with delay lines.
+ *
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> dn_heap ready_heap, extract_heap, wfq_ready_heap ;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">heap_init</span>(<span class="enscript-type">struct</span> dn_heap *h, <span class="enscript-type">int</span> size) ;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">heap_insert</span> (<span class="enscript-type">struct</span> dn_heap *h, dn_key key1, <span class="enscript-type">void</span> *p);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">heap_extract</span>(<span class="enscript-type">struct</span> dn_heap *h, <span class="enscript-type">void</span> *obj);
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	transmit_event(<span class="enscript-type">struct</span> dn_pipe *pipe, <span class="enscript-type">struct</span> mbuf **head,
+		    <span class="enscript-type">struct</span> mbuf **tail);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	ready_event(<span class="enscript-type">struct</span> dn_flow_queue *q, <span class="enscript-type">struct</span> mbuf **head,
+		    <span class="enscript-type">struct</span> mbuf **tail);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	ready_event_wfq(<span class="enscript-type">struct</span> dn_pipe *p, <span class="enscript-type">struct</span> mbuf **head,
+		    <span class="enscript-type">struct</span> mbuf **tail);
+
+<span class="enscript-comment">/* 
+ * Packets are retrieved from queues in Dummynet in chains instead of
+ * packet-by-packet.  The entire list of packets is first dequeued and
+ * sent out by the following function.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">dummynet_send</span>(<span class="enscript-type">struct</span> mbuf *m);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">HASHSIZE</span>	16
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">HASH</span>(num)	((((num) &gt;&gt; 8) ^ ((num) &gt;&gt; 4) ^ (num)) &amp; 0x0f)
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> dn_pipe_head	pipehash[HASHSIZE];	<span class="enscript-comment">/* all pipes */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> dn_flow_set_head	flowsethash[HASHSIZE];	<span class="enscript-comment">/* all flowsets */</span>
+
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">SYSCTL_NODE</span>
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_inet_ip, OID_AUTO, dummynet,
+		CTLFLAG_RW | CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;Dummynet&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_ip_dummynet, OID_AUTO, hash_size,
+	    CTLFLAG_RW | CTLFLAG_LOCKED, &amp;dn_hash_size, 0, <span class="enscript-string">&quot;Default hash table size&quot;</span>);
+<span class="enscript-function-name">SYSCTL_QUAD</span>(_net_inet_ip_dummynet, OID_AUTO, curr_time,
+	    CTLFLAG_RD | CTLFLAG_LOCKED, &amp;curr_time, <span class="enscript-string">&quot;Current tick&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_ip_dummynet, OID_AUTO, ready_heap,
+	    CTLFLAG_RD | CTLFLAG_LOCKED, &amp;ready_heap.size, 0, <span class="enscript-string">&quot;Size of ready heap&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_ip_dummynet, OID_AUTO, extract_heap,
+	    CTLFLAG_RD | CTLFLAG_LOCKED, &amp;extract_heap.size, 0, <span class="enscript-string">&quot;Size of extract heap&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_ip_dummynet, OID_AUTO, searches,
+	    CTLFLAG_RD | CTLFLAG_LOCKED, &amp;searches, 0, <span class="enscript-string">&quot;Number of queue searches&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_ip_dummynet, OID_AUTO, search_steps,
+	    CTLFLAG_RD | CTLFLAG_LOCKED, &amp;search_steps, 0, <span class="enscript-string">&quot;Number of queue search steps&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_ip_dummynet, OID_AUTO, expire,
+	    CTLFLAG_RW | CTLFLAG_LOCKED, &amp;pipe_expire, 0, <span class="enscript-string">&quot;Expire queue if empty&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_ip_dummynet, OID_AUTO, max_chain_len,
+	    CTLFLAG_RW | CTLFLAG_LOCKED, &amp;dn_max_ratio, 0, 
+	<span class="enscript-string">&quot;Max ratio between dynamic queues and buckets&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_ip_dummynet, OID_AUTO, red_lookup_depth,
+	CTLFLAG_RD | CTLFLAG_LOCKED, &amp;red_lookup_depth, 0, <span class="enscript-string">&quot;Depth of RED lookup table&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_ip_dummynet, OID_AUTO, red_avg_pkt_size,
+	CTLFLAG_RD | CTLFLAG_LOCKED, &amp;red_avg_pkt_size, 0, <span class="enscript-string">&quot;RED Medium packet size&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_ip_dummynet, OID_AUTO, red_max_pkt_size,
+	CTLFLAG_RD | CTLFLAG_LOCKED, &amp;red_max_pkt_size, 0, <span class="enscript-string">&quot;RED Max packet size&quot;</span>);
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">DUMMYNET_DEBUG</span>
+<span class="enscript-type">int</span>	dummynet_debug = 0;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">SYSCTL_NODE</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_net_inet_ip_dummynet, OID_AUTO, debug, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;dummynet_debug,
+	    0, <span class="enscript-string">&quot;control debugging printfs&quot;</span>);
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">DPRINTF</span>(X)	if (dummynet_debug) printf X
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">DPRINTF</span>(X)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* contrary to the comment above random(), it does not actually
+ * return a value [0, 2^31 - 1], which breaks plr amongst other
+ * things. Masking it should work even if the behavior of
+ * the function is fixed.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MY_RANDOM</span> (random() &amp; 0x7FFFFFFF)
+
+<span class="enscript-comment">/* dummynet lock */</span>
+<span class="enscript-type">static</span> lck_grp_t         *dn_mutex_grp;
+<span class="enscript-type">static</span> lck_grp_attr_t    *dn_mutex_grp_attr;
+<span class="enscript-type">static</span> lck_attr_t        *dn_mutex_attr;
+<span class="enscript-function-name">decl_lck_mtx_data</span>(<span class="enscript-type">static</span>, dn_mutex_data);
+<span class="enscript-type">static</span> lck_mtx_t         *dn_mutex = &amp;dn_mutex_data;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">config_pipe</span>(<span class="enscript-type">struct</span> dn_pipe *p);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ip_dn_ctl</span>(<span class="enscript-type">struct</span> sockopt *sopt);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">dummynet</span>(<span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">dummynet_flush</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">void</span> <span class="enscript-function-name">dummynet_drain</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> ip_dn_io_t dummynet_io;
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">if_tx_rdy</span>(<span class="enscript-type">struct</span> ifnet *ifp);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">cp_flow_set_to_64_user</span>(<span class="enscript-type">struct</span> dn_flow_set *set, <span class="enscript-type">struct</span> dn_flow_set_64 *fs_bp);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">cp_queue_to_64_user</span>( <span class="enscript-type">struct</span> dn_flow_queue *q, <span class="enscript-type">struct</span> dn_flow_queue_64 *qp);
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> *<span class="enscript-function-name">cp_pipe_to_64_user</span>(<span class="enscript-type">struct</span> dn_pipe *p, <span class="enscript-type">struct</span> dn_pipe_64 *pipe_bp);
+<span class="enscript-type">static</span> <span class="enscript-type">char</span>* <span class="enscript-function-name">dn_copy_set_64</span>(<span class="enscript-type">struct</span> dn_flow_set *set, <span class="enscript-type">char</span> *bp);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cp_pipe_from_user_64</span>( <span class="enscript-type">struct</span> sockopt *sopt, <span class="enscript-type">struct</span> dn_pipe *p );
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">cp_flow_set_to_32_user</span>(<span class="enscript-type">struct</span> dn_flow_set *set, <span class="enscript-type">struct</span> dn_flow_set_32 *fs_bp);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">cp_queue_to_32_user</span>( <span class="enscript-type">struct</span> dn_flow_queue *q, <span class="enscript-type">struct</span> dn_flow_queue_32 *qp);
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> *<span class="enscript-function-name">cp_pipe_to_32_user</span>(<span class="enscript-type">struct</span> dn_pipe *p, <span class="enscript-type">struct</span> dn_pipe_32 *pipe_bp);
+<span class="enscript-type">static</span> <span class="enscript-type">char</span>* <span class="enscript-function-name">dn_copy_set_32</span>(<span class="enscript-type">struct</span> dn_flow_set *set, <span class="enscript-type">char</span> *bp);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cp_pipe_from_user_32</span>( <span class="enscript-type">struct</span> sockopt *sopt, <span class="enscript-type">struct</span> dn_pipe *p );
+
+
+<span class="enscript-comment">/*
+ * Heap management functions.
+ *
+ * In the heap, first node is element 0. Children of i are 2i+1 and 2i+2.
+ * Some macros help finding parent/children so we can optimize them.
+ *
+ * heap_init() is called to expand the heap when needed.
+ * Increment size in blocks of 16 entries.
+ * XXX failure to allocate a new element is a pretty bad failure
+ * as we basically stall a whole queue forever!!
+ * Returns 1 on error, 0 on success
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">HEAP_FATHER</span>(x) ( ( (x) - 1 ) / 2 )
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">HEAP_LEFT</span>(x) ( 2*(x) + 1 )
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">HEAP_IS_LEFT</span>(x) ( (x) &amp; 1 )
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">HEAP_RIGHT</span>(x) ( 2*(x) + 2 )
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">HEAP_SWAP</span>(a, b, buffer) { buffer = a ; a = b ; b = buffer ; }
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">HEAP_INCREMENT</span>	15
+
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">cp_pipe_from_user_32</span>( <span class="enscript-type">struct</span> sockopt *sopt, <span class="enscript-type">struct</span> dn_pipe *p )
+{
+	<span class="enscript-type">struct</span> dn_pipe_32 user_pipe_32;
+	<span class="enscript-type">int</span> error=0;
+	
+	error = sooptcopyin(sopt, &amp;user_pipe_32, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_pipe_32), <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_pipe_32));
+	<span class="enscript-keyword">if</span> ( !error ){
+		p-&gt;pipe_nr = user_pipe_32.pipe_nr;
+		p-&gt;bandwidth = user_pipe_32.bandwidth;
+		p-&gt;delay = user_pipe_32.delay;
+		p-&gt;V = user_pipe_32.V;
+		p-&gt;sum = user_pipe_32.sum;
+		p-&gt;numbytes = user_pipe_32.numbytes;
+		p-&gt;sched_time = user_pipe_32.sched_time;
+		bcopy( user_pipe_32.if_name, p-&gt;if_name, IFNAMSIZ);
+		p-&gt;ready = user_pipe_32.ready;
+		
+		p-&gt;fs.fs_nr = user_pipe_32.fs.fs_nr;
+		p-&gt;fs.flags_fs = user_pipe_32.fs.flags_fs;
+		p-&gt;fs.parent_nr = user_pipe_32.fs.parent_nr;
+		p-&gt;fs.weight = user_pipe_32.fs.weight;
+		p-&gt;fs.qsize = user_pipe_32.fs.qsize;
+		p-&gt;fs.plr = user_pipe_32.fs.plr;
+		p-&gt;fs.flow_mask = user_pipe_32.fs.flow_mask;
+		p-&gt;fs.rq_size = user_pipe_32.fs.rq_size;
+		p-&gt;fs.rq_elements = user_pipe_32.fs.rq_elements;
+		p-&gt;fs.last_expired = user_pipe_32.fs.last_expired;
+		p-&gt;fs.backlogged = user_pipe_32.fs.backlogged;
+		p-&gt;fs.w_q = user_pipe_32.fs.w_q;
+		p-&gt;fs.max_th = user_pipe_32.fs.max_th;
+		p-&gt;fs.min_th = user_pipe_32.fs.min_th;
+		p-&gt;fs.max_p = user_pipe_32.fs.max_p;
+		p-&gt;fs.c_1 = user_pipe_32.fs.c_1;
+		p-&gt;fs.c_2 = user_pipe_32.fs.c_2;
+		p-&gt;fs.c_3 = user_pipe_32.fs.c_3;
+		p-&gt;fs.c_4 = user_pipe_32.fs.c_4;
+		p-&gt;fs.lookup_depth = user_pipe_32.fs.lookup_depth;
+		p-&gt;fs.lookup_step = user_pipe_32.fs.lookup_step;
+		p-&gt;fs.lookup_weight = user_pipe_32.fs.lookup_weight;
+		p-&gt;fs.avg_pkt_size = user_pipe_32.fs.avg_pkt_size;
+		p-&gt;fs.max_pkt_size = user_pipe_32.fs.max_pkt_size;
+	}
+	<span class="enscript-keyword">return</span> error;
+}
+
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">cp_pipe_from_user_64</span>( <span class="enscript-type">struct</span> sockopt *sopt, <span class="enscript-type">struct</span> dn_pipe *p )
+{
+	<span class="enscript-type">struct</span> dn_pipe_64 user_pipe_64;
+	<span class="enscript-type">int</span> error=0;
+	
+	error = sooptcopyin(sopt, &amp;user_pipe_64, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_pipe_64), <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_pipe_64));
+	<span class="enscript-keyword">if</span> ( !error ){
+		p-&gt;pipe_nr = user_pipe_64.pipe_nr;
+		p-&gt;bandwidth = user_pipe_64.bandwidth;
+		p-&gt;delay = user_pipe_64.delay;
+		p-&gt;V = user_pipe_64.V;
+		p-&gt;sum = user_pipe_64.sum;
+		p-&gt;numbytes = user_pipe_64.numbytes;
+		p-&gt;sched_time = user_pipe_64.sched_time;
+		bcopy( user_pipe_64.if_name, p-&gt;if_name, IFNAMSIZ);
+		p-&gt;ready = user_pipe_64.ready;
+		
+		p-&gt;fs.fs_nr = user_pipe_64.fs.fs_nr;
+		p-&gt;fs.flags_fs = user_pipe_64.fs.flags_fs;
+		p-&gt;fs.parent_nr = user_pipe_64.fs.parent_nr;
+		p-&gt;fs.weight = user_pipe_64.fs.weight;
+		p-&gt;fs.qsize = user_pipe_64.fs.qsize;
+		p-&gt;fs.plr = user_pipe_64.fs.plr;
+		p-&gt;fs.flow_mask = user_pipe_64.fs.flow_mask;
+		p-&gt;fs.rq_size = user_pipe_64.fs.rq_size;
+		p-&gt;fs.rq_elements = user_pipe_64.fs.rq_elements;
+		p-&gt;fs.last_expired = user_pipe_64.fs.last_expired;
+		p-&gt;fs.backlogged = user_pipe_64.fs.backlogged;
+		p-&gt;fs.w_q = user_pipe_64.fs.w_q;
+		p-&gt;fs.max_th = user_pipe_64.fs.max_th;
+		p-&gt;fs.min_th = user_pipe_64.fs.min_th;
+		p-&gt;fs.max_p = user_pipe_64.fs.max_p;
+		p-&gt;fs.c_1 = user_pipe_64.fs.c_1;
+		p-&gt;fs.c_2 = user_pipe_64.fs.c_2;
+		p-&gt;fs.c_3 = user_pipe_64.fs.c_3;
+		p-&gt;fs.c_4 = user_pipe_64.fs.c_4;
+		p-&gt;fs.lookup_depth = user_pipe_64.fs.lookup_depth;
+		p-&gt;fs.lookup_step = user_pipe_64.fs.lookup_step;
+		p-&gt;fs.lookup_weight = user_pipe_64.fs.lookup_weight;
+		p-&gt;fs.avg_pkt_size = user_pipe_64.fs.avg_pkt_size;
+		p-&gt;fs.max_pkt_size = user_pipe_64.fs.max_pkt_size;
+	}
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cp_flow_set_to_32_user</span>(<span class="enscript-type">struct</span> dn_flow_set *set, <span class="enscript-type">struct</span> dn_flow_set_32 *fs_bp)
+{
+	fs_bp-&gt;fs_nr = set-&gt;fs_nr;
+	fs_bp-&gt;flags_fs = set-&gt;flags_fs ;
+	fs_bp-&gt;parent_nr = set-&gt;parent_nr ;
+	fs_bp-&gt;weight = set-&gt;weight ;
+	fs_bp-&gt;qsize = set-&gt;qsize ;
+	fs_bp-&gt;plr = set-&gt;plr ;
+	fs_bp-&gt;flow_mask = set-&gt;flow_mask ;
+	fs_bp-&gt;rq_size = set-&gt;rq_size ;
+	fs_bp-&gt;rq_elements = set-&gt;rq_elements ;
+	fs_bp-&gt;last_expired = set-&gt;last_expired ;
+	fs_bp-&gt;backlogged = set-&gt;backlogged ;
+	fs_bp-&gt;w_q = set-&gt;w_q ;
+	fs_bp-&gt;max_th = set-&gt;max_th ;
+	fs_bp-&gt;min_th = set-&gt;min_th ;
+	fs_bp-&gt;max_p = set-&gt;max_p ;
+	fs_bp-&gt;c_1 = set-&gt;c_1 ;
+	fs_bp-&gt;c_2 = set-&gt;c_2 ;
+	fs_bp-&gt;c_3 = set-&gt;c_3 ;
+	fs_bp-&gt;c_4 = set-&gt;c_4 ;
+	fs_bp-&gt;w_q_lookup = CAST_DOWN_EXPLICIT(user32_addr_t, set-&gt;w_q_lookup) ;
+	fs_bp-&gt;lookup_depth = set-&gt;lookup_depth ;
+	fs_bp-&gt;lookup_step = set-&gt;lookup_step ;
+	fs_bp-&gt;lookup_weight = set-&gt;lookup_weight ;
+	fs_bp-&gt;avg_pkt_size = set-&gt;avg_pkt_size ;
+	fs_bp-&gt;max_pkt_size = set-&gt;max_pkt_size ;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cp_flow_set_to_64_user</span>(<span class="enscript-type">struct</span> dn_flow_set *set, <span class="enscript-type">struct</span> dn_flow_set_64 *fs_bp)
+{
+	fs_bp-&gt;fs_nr = set-&gt;fs_nr;
+	fs_bp-&gt;flags_fs = set-&gt;flags_fs ;
+	fs_bp-&gt;parent_nr = set-&gt;parent_nr ;
+	fs_bp-&gt;weight = set-&gt;weight ;
+	fs_bp-&gt;qsize = set-&gt;qsize ;
+	fs_bp-&gt;plr = set-&gt;plr ;
+	fs_bp-&gt;flow_mask = set-&gt;flow_mask ;
+	fs_bp-&gt;rq_size = set-&gt;rq_size ;
+	fs_bp-&gt;rq_elements = set-&gt;rq_elements ;
+	fs_bp-&gt;last_expired = set-&gt;last_expired ;
+	fs_bp-&gt;backlogged = set-&gt;backlogged ;
+	fs_bp-&gt;w_q = set-&gt;w_q ;
+	fs_bp-&gt;max_th = set-&gt;max_th ;
+	fs_bp-&gt;min_th = set-&gt;min_th ;
+	fs_bp-&gt;max_p = set-&gt;max_p ;
+	fs_bp-&gt;c_1 = set-&gt;c_1 ;
+	fs_bp-&gt;c_2 = set-&gt;c_2 ;
+	fs_bp-&gt;c_3 = set-&gt;c_3 ;
+	fs_bp-&gt;c_4 = set-&gt;c_4 ;
+	fs_bp-&gt;w_q_lookup = CAST_DOWN(user64_addr_t, set-&gt;w_q_lookup) ;
+	fs_bp-&gt;lookup_depth = set-&gt;lookup_depth ;
+	fs_bp-&gt;lookup_step = set-&gt;lookup_step ;
+	fs_bp-&gt;lookup_weight = set-&gt;lookup_weight ;
+	fs_bp-&gt;avg_pkt_size = set-&gt;avg_pkt_size ;
+	fs_bp-&gt;max_pkt_size = set-&gt;max_pkt_size ;
+}
+
+<span class="enscript-type">static</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">cp_queue_to_32_user</span>( <span class="enscript-type">struct</span> dn_flow_queue *q, <span class="enscript-type">struct</span> dn_flow_queue_32 *qp)
+{
+	qp-&gt;id = q-&gt;id;
+	qp-&gt;len = q-&gt;len;
+	qp-&gt;len_bytes = q-&gt;len_bytes;
+	qp-&gt;numbytes = q-&gt;numbytes;
+	qp-&gt;tot_pkts = q-&gt;tot_pkts;
+	qp-&gt;tot_bytes = q-&gt;tot_bytes;
+	qp-&gt;drops = q-&gt;drops;
+	qp-&gt;hash_slot = q-&gt;hash_slot;
+	qp-&gt;avg = q-&gt;avg;
+	qp-&gt;count = q-&gt;count;
+	qp-&gt;random = q-&gt;random;
+	qp-&gt;q_time = q-&gt;q_time;
+	qp-&gt;heap_pos = q-&gt;heap_pos;
+	qp-&gt;sched_time = q-&gt;sched_time;
+	qp-&gt;S = q-&gt;S;
+	qp-&gt;F = q-&gt;F;
+}
+
+<span class="enscript-type">static</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">cp_queue_to_64_user</span>( <span class="enscript-type">struct</span> dn_flow_queue *q, <span class="enscript-type">struct</span> dn_flow_queue_64 *qp)
+{
+	qp-&gt;id = q-&gt;id;
+	qp-&gt;len = q-&gt;len;
+	qp-&gt;len_bytes = q-&gt;len_bytes;
+	qp-&gt;numbytes = q-&gt;numbytes;
+	qp-&gt;tot_pkts = q-&gt;tot_pkts;
+	qp-&gt;tot_bytes = q-&gt;tot_bytes;
+	qp-&gt;drops = q-&gt;drops;
+	qp-&gt;hash_slot = q-&gt;hash_slot;
+	qp-&gt;avg = q-&gt;avg;
+	qp-&gt;count = q-&gt;count;
+	qp-&gt;random = q-&gt;random;
+	qp-&gt;q_time = q-&gt;q_time;
+	qp-&gt;heap_pos = q-&gt;heap_pos;
+	qp-&gt;sched_time = q-&gt;sched_time;
+	qp-&gt;S = q-&gt;S;
+	qp-&gt;F = q-&gt;F;
+}
+
+<span class="enscript-type">static</span>
+<span class="enscript-type">char</span> *<span class="enscript-function-name">cp_pipe_to_32_user</span>(<span class="enscript-type">struct</span> dn_pipe *p, <span class="enscript-type">struct</span> dn_pipe_32 *pipe_bp)
+{
+	<span class="enscript-type">char</span>	*bp;
+	
+	pipe_bp-&gt;pipe_nr = p-&gt;pipe_nr;
+	pipe_bp-&gt;bandwidth = p-&gt;bandwidth;
+	pipe_bp-&gt;delay = p-&gt;delay;
+	bcopy( &amp;(p-&gt;scheduler_heap), &amp;(pipe_bp-&gt;scheduler_heap), <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_heap_32));
+	pipe_bp-&gt;scheduler_heap.p = CAST_DOWN_EXPLICIT(user32_addr_t, pipe_bp-&gt;scheduler_heap.p);
+	bcopy( &amp;(p-&gt;not_eligible_heap), &amp;(pipe_bp-&gt;not_eligible_heap), <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_heap_32));
+	pipe_bp-&gt;not_eligible_heap.p = CAST_DOWN_EXPLICIT(user32_addr_t, pipe_bp-&gt;not_eligible_heap.p);
+	bcopy( &amp;(p-&gt;idle_heap), &amp;(pipe_bp-&gt;idle_heap), <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_heap_32));
+	pipe_bp-&gt;idle_heap.p = CAST_DOWN_EXPLICIT(user32_addr_t, pipe_bp-&gt;idle_heap.p);
+	pipe_bp-&gt;V = p-&gt;V;
+	pipe_bp-&gt;sum = p-&gt;sum;
+	pipe_bp-&gt;numbytes = p-&gt;numbytes;
+	pipe_bp-&gt;sched_time = p-&gt;sched_time;
+	bcopy( p-&gt;if_name, pipe_bp-&gt;if_name, IFNAMSIZ);
+	pipe_bp-&gt;ifp = CAST_DOWN_EXPLICIT(user32_addr_t, p-&gt;ifp);
+	pipe_bp-&gt;ready = p-&gt;ready;
+	
+	cp_flow_set_to_32_user( &amp;(p-&gt;fs), &amp;(pipe_bp-&gt;fs));
+	
+	pipe_bp-&gt;delay = (pipe_bp-&gt;delay * 1000) / (hz*10) ; 
+	<span class="enscript-comment">/*
+	 * XXX the following is a hack based on -&gt;next being the
+	 * first field in dn_pipe and dn_flow_set. The correct
+	 * solution would be to move the dn_flow_set to the beginning
+	 * of struct dn_pipe.
+	 */</span>
+	pipe_bp-&gt;next = CAST_DOWN_EXPLICIT( user32_addr_t, DN_IS_PIPE );
+	<span class="enscript-comment">/* clean pointers */</span>
+	pipe_bp-&gt;head = pipe_bp-&gt;tail = (user32_addr_t) 0 ;
+	pipe_bp-&gt;fs.next = (user32_addr_t)0 ;
+	pipe_bp-&gt;fs.pipe = (user32_addr_t)0 ;
+	pipe_bp-&gt;fs.rq = (user32_addr_t)0 ;
+	bp = ((<span class="enscript-type">char</span> *)pipe_bp) + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_pipe_32);
+	<span class="enscript-keyword">return</span>( dn_copy_set_32( &amp;(p-&gt;fs), bp) );
+}
+
+<span class="enscript-type">static</span>
+<span class="enscript-type">char</span> *<span class="enscript-function-name">cp_pipe_to_64_user</span>(<span class="enscript-type">struct</span> dn_pipe *p, <span class="enscript-type">struct</span> dn_pipe_64 *pipe_bp)
+{
+	<span class="enscript-type">char</span>	*bp;
+	
+	pipe_bp-&gt;pipe_nr = p-&gt;pipe_nr;
+	pipe_bp-&gt;bandwidth = p-&gt;bandwidth;
+	pipe_bp-&gt;delay = p-&gt;delay;
+	bcopy( &amp;(p-&gt;scheduler_heap), &amp;(pipe_bp-&gt;scheduler_heap), <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_heap_64));
+	pipe_bp-&gt;scheduler_heap.p = CAST_DOWN(user64_addr_t, pipe_bp-&gt;scheduler_heap.p);
+	bcopy( &amp;(p-&gt;not_eligible_heap), &amp;(pipe_bp-&gt;not_eligible_heap), <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_heap_64));
+	pipe_bp-&gt;not_eligible_heap.p = CAST_DOWN(user64_addr_t, pipe_bp-&gt;not_eligible_heap.p);
+	bcopy( &amp;(p-&gt;idle_heap), &amp;(pipe_bp-&gt;idle_heap), <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_heap_64));
+	pipe_bp-&gt;idle_heap.p = CAST_DOWN(user64_addr_t, pipe_bp-&gt;idle_heap.p);
+	pipe_bp-&gt;V = p-&gt;V;
+	pipe_bp-&gt;sum = p-&gt;sum;
+	pipe_bp-&gt;numbytes = p-&gt;numbytes;
+	pipe_bp-&gt;sched_time = p-&gt;sched_time;
+	bcopy( p-&gt;if_name, pipe_bp-&gt;if_name, IFNAMSIZ);
+	pipe_bp-&gt;ifp = CAST_DOWN(user64_addr_t, p-&gt;ifp);
+	pipe_bp-&gt;ready = p-&gt;ready;
+	
+	cp_flow_set_to_64_user( &amp;(p-&gt;fs), &amp;(pipe_bp-&gt;fs));
+	
+	pipe_bp-&gt;delay = (pipe_bp-&gt;delay * 1000) / (hz*10) ; 
+	<span class="enscript-comment">/*
+	 * XXX the following is a hack based on -&gt;next being the
+	 * first field in dn_pipe and dn_flow_set. The correct
+	 * solution would be to move the dn_flow_set to the beginning
+	 * of struct dn_pipe.
+	 */</span>
+	pipe_bp-&gt;next = CAST_DOWN( user64_addr_t, DN_IS_PIPE );
+	<span class="enscript-comment">/* clean pointers */</span>
+	pipe_bp-&gt;head = pipe_bp-&gt;tail = USER_ADDR_NULL ;
+	pipe_bp-&gt;fs.next = USER_ADDR_NULL ;
+	pipe_bp-&gt;fs.pipe = USER_ADDR_NULL ;
+	pipe_bp-&gt;fs.rq = USER_ADDR_NULL ;
+	bp = ((<span class="enscript-type">char</span> *)pipe_bp) + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_pipe_64);
+	<span class="enscript-keyword">return</span>( dn_copy_set_64( &amp;(p-&gt;fs), bp) );
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">heap_init</span>(<span class="enscript-type">struct</span> dn_heap *h, <span class="enscript-type">int</span> new_size)
+{
+    <span class="enscript-type">struct</span> dn_heap_entry *p;
+
+    <span class="enscript-keyword">if</span> (h-&gt;size &gt;= new_size ) {
+	printf(<span class="enscript-string">&quot;dummynet: heap_init, Bogus call, have %d want %d\n&quot;</span>,
+		h-&gt;size, new_size);
+	<span class="enscript-keyword">return</span> 0 ;
+    }
+    new_size = (new_size + HEAP_INCREMENT ) &amp; ~HEAP_INCREMENT ;
+    p = _MALLOC(new_size * <span class="enscript-keyword">sizeof</span>(*p), M_DUMMYNET, M_DONTWAIT );
+    <span class="enscript-keyword">if</span> (p == NULL) {
+	printf(<span class="enscript-string">&quot;dummynet: heap_init, resize %d failed\n&quot;</span>, new_size );
+	<span class="enscript-keyword">return</span> 1 ; <span class="enscript-comment">/* error */</span>
+    }
+    <span class="enscript-keyword">if</span> (h-&gt;size &gt; 0) {
+	bcopy(h-&gt;p, p, h-&gt;size * <span class="enscript-keyword">sizeof</span>(*p) );
+	FREE(h-&gt;p, M_DUMMYNET);
+    }
+    h-&gt;p = p ;
+    h-&gt;size = new_size ;
+    <span class="enscript-keyword">return</span> 0 ;
+}
+
+<span class="enscript-comment">/*
+ * Insert element in heap. Normally, p != NULL, we insert p in
+ * a new position and bubble up. If p == NULL, then the element is
+ * already in place, and key is the position where to start the
+ * bubble-up.
+ * Returns 1 on failure (cannot allocate new heap entry)
+ *
+ * If offset &gt; 0 the position (index, int) of the element in the heap is
+ * also stored in the element itself at the given offset in bytes.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SET_OFFSET</span>(heap, node) \
+    <span class="enscript-keyword">if</span> (heap-&gt;offset &gt; 0) \
+	    *((<span class="enscript-type">int</span> *)((<span class="enscript-type">char</span> *)(heap-&gt;p[node].object) + heap-&gt;offset)) = node ;
+<span class="enscript-comment">/*
+ * RESET_OFFSET is used for sanity checks. It sets offset to an invalid value.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">RESET_OFFSET</span>(heap, node) \
+    <span class="enscript-keyword">if</span> (heap-&gt;offset &gt; 0) \
+	    *((<span class="enscript-type">int</span> *)((<span class="enscript-type">char</span> *)(heap-&gt;p[node].object) + heap-&gt;offset)) = -1 ;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">heap_insert</span>(<span class="enscript-type">struct</span> dn_heap *h, dn_key key1, <span class="enscript-type">void</span> *p)
+{
+    <span class="enscript-type">int</span> son = h-&gt;elements ;
+
+    <span class="enscript-keyword">if</span> (p == NULL)	<span class="enscript-comment">/* data already there, set starting point */</span>
+	son = key1 ;
+    <span class="enscript-keyword">else</span> {		<span class="enscript-comment">/* insert new element at the end, possibly resize */</span>
+	son = h-&gt;elements ;
+	<span class="enscript-keyword">if</span> (son == h-&gt;size) <span class="enscript-comment">/* need resize... */</span>
+	    <span class="enscript-keyword">if</span> (heap_init(h, h-&gt;elements+1) )
+		<span class="enscript-keyword">return</span> 1 ; <span class="enscript-comment">/* failure... */</span>
+	h-&gt;p[son].object = p ;
+	h-&gt;p[son].key = key1 ;
+	h-&gt;elements++ ;
+    }
+    <span class="enscript-keyword">while</span> (son &gt; 0) {				<span class="enscript-comment">/* bubble up */</span>
+	<span class="enscript-type">int</span> father = HEAP_FATHER(son) ;
+	<span class="enscript-type">struct</span> dn_heap_entry tmp  ;
+
+	<span class="enscript-keyword">if</span> (DN_KEY_LT( h-&gt;p[father].key, h-&gt;p[son].key ) )
+	    <span class="enscript-keyword">break</span> ; <span class="enscript-comment">/* found right position */</span>
+	<span class="enscript-comment">/* son smaller than father, swap and repeat */</span>
+	HEAP_SWAP(h-&gt;p[son], h-&gt;p[father], tmp) ;
+	SET_OFFSET(h, son);
+	son = father ;
+    }
+    SET_OFFSET(h, son);
+    <span class="enscript-keyword">return</span> 0 ;
+}
+
+<span class="enscript-comment">/*
+ * remove top element from heap, or obj if obj != NULL
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">heap_extract</span>(<span class="enscript-type">struct</span> dn_heap *h, <span class="enscript-type">void</span> *obj)
+{
+    <span class="enscript-type">int</span> child, father, maxelt = h-&gt;elements - 1 ;
+
+    <span class="enscript-keyword">if</span> (maxelt &lt; 0) {
+	printf(<span class="enscript-string">&quot;dummynet: warning, extract from empty heap 0x%llx\n&quot;</span>,
+	    (uint64_t)VM_KERNEL_ADDRPERM(h));
+	<span class="enscript-keyword">return</span> ;
+    }
+    father = 0 ; <span class="enscript-comment">/* default: move up smallest child */</span>
+    <span class="enscript-keyword">if</span> (obj != NULL) { <span class="enscript-comment">/* extract specific element, index is at offset */</span>
+	<span class="enscript-keyword">if</span> (h-&gt;offset &lt;= 0)
+	    panic(<span class="enscript-string">&quot;dummynet: heap_extract from middle not supported on this heap!!!\n&quot;</span>);
+	father = *((<span class="enscript-type">int</span> *)((<span class="enscript-type">char</span> *)obj + h-&gt;offset)) ;
+	<span class="enscript-keyword">if</span> (father &lt; 0 || father &gt;= h-&gt;elements) {
+	    printf(<span class="enscript-string">&quot;dummynet: heap_extract, father %d out of bound 0..%d\n&quot;</span>,
+		father, h-&gt;elements);
+	    panic(<span class="enscript-string">&quot;dummynet: heap_extract&quot;</span>);
+	}
+    }
+    RESET_OFFSET(h, father);
+    child = HEAP_LEFT(father) ;		<span class="enscript-comment">/* left child */</span>
+    <span class="enscript-keyword">while</span> (child &lt;= maxelt) {		<span class="enscript-comment">/* valid entry */</span>
+	<span class="enscript-keyword">if</span> (child != maxelt &amp;&amp; DN_KEY_LT(h-&gt;p[child+1].key, h-&gt;p[child].key) )
+	    child = child+1 ;		<span class="enscript-comment">/* take right child, otherwise left */</span>
+	h-&gt;p[father] = h-&gt;p[child] ;
+	SET_OFFSET(h, father);
+	father = child ;
+	child = HEAP_LEFT(child) ;   <span class="enscript-comment">/* left child for next loop */</span>
+    }
+    h-&gt;elements-- ;
+    <span class="enscript-keyword">if</span> (father != maxelt) {
+	<span class="enscript-comment">/*
+	 * Fill hole with last entry and bubble up, reusing the insert code
+	 */</span>
+	h-&gt;p[father] = h-&gt;p[maxelt] ;
+	heap_insert(h, father, NULL); <span class="enscript-comment">/* this one cannot fail */</span>
+    }
+}
+
+<span class="enscript-comment">/*
+ * heapify() will reorganize data inside an array to maintain the
+ * heap property. It is needed when we delete a bunch of entries.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">heapify</span>(<span class="enscript-type">struct</span> dn_heap *h)
+{
+    <span class="enscript-type">int</span> i ;
+
+    <span class="enscript-keyword">for</span> (i = 0 ; i &lt; h-&gt;elements ; i++ )
+	heap_insert(h, i , NULL) ;
+}
+
+<span class="enscript-comment">/*
+ * cleanup the heap and free data structure
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">heap_free</span>(<span class="enscript-type">struct</span> dn_heap *h)
+{
+    <span class="enscript-keyword">if</span> (h-&gt;size &gt;0 )
+	FREE(h-&gt;p, M_DUMMYNET);
+    bzero(h, <span class="enscript-keyword">sizeof</span>(*h));
+}
+
+<span class="enscript-comment">/*
+ * --- end of heap management functions ---
+ */</span>
+
+<span class="enscript-comment">/*
+ * Return the mbuf tag holding the dummynet state.  As an optimization
+ * this is assumed to be the first tag on the list.  If this turns out
+ * wrong we'll need to search the list.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> dn_pkt_tag *
+<span class="enscript-function-name">dn_tag_get</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+    <span class="enscript-type">struct</span> m_tag *mtag = m_tag_first(m);
+
+    <span class="enscript-keyword">if</span> (!(mtag != NULL &amp;&amp;
+          mtag-&gt;m_tag_id == KERNEL_MODULE_TAG_ID &amp;&amp;
+          mtag-&gt;m_tag_type == KERNEL_TAG_TYPE_DUMMYNET))
+	panic(<span class="enscript-string">&quot;packet on dummynet queue w/o dummynet tag: 0x%llx&quot;</span>,
+	    (uint64_t)VM_KERNEL_ADDRPERM(m));
+
+    <span class="enscript-keyword">return</span> (<span class="enscript-type">struct</span> dn_pkt_tag *)(mtag+1);
+}
+
+<span class="enscript-comment">/*
+ * Scheduler functions:
+ *
+ * transmit_event() is called when the delay-line needs to enter
+ * the scheduler, either because of existing pkts getting ready,
+ * or new packets entering the queue. The event handled is the delivery
+ * time of the packet.
+ *
+ * ready_event() does something similar with fixed-rate queues, and the
+ * event handled is the finish time of the head pkt.
+ *
+ * wfq_ready_event() does something similar with WF2Q queues, and the
+ * event handled is the start time of the head pkt.
+ *
+ * In all cases, we make sure that the data structures are consistent
+ * before passing pkts out, because this might trigger recursive
+ * invocations of the procedures.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">transmit_event</span>(<span class="enscript-type">struct</span> dn_pipe *pipe, <span class="enscript-type">struct</span> mbuf **head, <span class="enscript-type">struct</span> mbuf **tail)
+{
+	<span class="enscript-type">struct</span> mbuf *m ;
+	<span class="enscript-type">struct</span> dn_pkt_tag *pkt = NULL;
+	u_int64_t schedule_time;
+
+	lck_mtx_assert(dn_mutex, LCK_MTX_ASSERT_OWNED);
+        ASSERT(serialize &gt;= 0);
+	<span class="enscript-keyword">if</span> (serialize == 0) {
+		<span class="enscript-keyword">while</span> ((m = pipe-&gt;head) != NULL) {
+			pkt = dn_tag_get(m);
+			<span class="enscript-keyword">if</span> (!DN_KEY_LEQ(pkt-&gt;dn_output_time, curr_time))
+				<span class="enscript-keyword">break</span>;
+
+			pipe-&gt;head = m-&gt;m_nextpkt;
+			<span class="enscript-keyword">if</span> (*tail != NULL)
+				(*tail)-&gt;m_nextpkt = m;
+			<span class="enscript-keyword">else</span>
+				*head = m;
+			*tail = m;
+		}
+		
+		<span class="enscript-keyword">if</span> (*tail != NULL)
+			(*tail)-&gt;m_nextpkt = NULL;
+	}
+
+	schedule_time = pkt == NULL || DN_KEY_LEQ(pkt-&gt;dn_output_time, curr_time) ?
+		curr_time + 1 : pkt-&gt;dn_output_time;
+
+	<span class="enscript-comment">/* if there are leftover packets, put the pipe into the heap for next ready event */</span>
+	<span class="enscript-keyword">if</span> ((m = pipe-&gt;head) != NULL) {
+		pkt = dn_tag_get(m);
+		<span class="enscript-comment">/* XXX should check errors on heap_insert, by draining the
+		 * whole pipe p and hoping in the future we are more successful
+		 */</span>
+		heap_insert(&amp;extract_heap, schedule_time, pipe);
+	}
+}
+
+<span class="enscript-comment">/*
+ * the following macro computes how many ticks we have to wait
+ * before being able to transmit a packet. The credit is taken from
+ * either a pipe (WF2Q) or a flow_queue (per-flow queueing)
+ */</span>
+ 
+<span class="enscript-comment">/* hz is 100, which gives a granularity of 10ms in the old timer. 
+ * The timer has been changed to fire every 1ms, so the use of
+ * hz has been modified here. All instances of hz have been left
+ * in place but adjusted by a factor of 10 so that hz is functionally 
+ * equal to 1000.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">SET_TICKS</span>(_m, q, p)	\
+    ((_m)-&gt;m_pkthdr.len*8*(hz*10) - (q)-&gt;numbytes + p-&gt;bandwidth - 1 ) / \
+	    p-&gt;bandwidth ;
+
+<span class="enscript-comment">/*
+ * extract pkt from queue, compute output time (could be now)
+ * and put into delay line (p_queue)
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">move_pkt</span>(<span class="enscript-type">struct</span> mbuf *pkt, <span class="enscript-type">struct</span> dn_flow_queue *q,
+	<span class="enscript-type">struct</span> dn_pipe *p, <span class="enscript-type">int</span> len)
+{
+    <span class="enscript-type">struct</span> dn_pkt_tag *dt = dn_tag_get(pkt);
+
+    q-&gt;head = pkt-&gt;m_nextpkt ;
+    q-&gt;len-- ;
+    q-&gt;len_bytes -= len ;
+
+    dt-&gt;dn_output_time = curr_time + p-&gt;delay ;
+
+    <span class="enscript-keyword">if</span> (p-&gt;head == NULL)
+	p-&gt;head = pkt;
+    <span class="enscript-keyword">else</span>
+	p-&gt;tail-&gt;m_nextpkt = pkt;
+    p-&gt;tail = pkt;
+    p-&gt;tail-&gt;m_nextpkt = NULL;
+}
+
+<span class="enscript-comment">/*
+ * ready_event() is invoked every time the queue must enter the
+ * scheduler, either because the first packet arrives, or because
+ * a previously scheduled event fired.
+ * On invokation, drain as many pkts as possible (could be 0) and then
+ * if there are leftover packets reinsert the pkt in the scheduler.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ready_event</span>(<span class="enscript-type">struct</span> dn_flow_queue *q, <span class="enscript-type">struct</span> mbuf **head, <span class="enscript-type">struct</span> mbuf **tail)
+{
+    <span class="enscript-type">struct</span> mbuf *pkt;
+    <span class="enscript-type">struct</span> dn_pipe *p = q-&gt;fs-&gt;pipe ;
+    <span class="enscript-type">int</span> p_was_empty ;
+
+	lck_mtx_assert(dn_mutex, LCK_MTX_ASSERT_OWNED);
+	
+    <span class="enscript-keyword">if</span> (p == NULL) {
+		printf(<span class="enscript-string">&quot;dummynet: ready_event pipe is gone\n&quot;</span>);
+		<span class="enscript-keyword">return</span> ;
+    }
+    p_was_empty = (p-&gt;head == NULL) ;
+
+    <span class="enscript-comment">/*
+     * schedule fixed-rate queues linked to this pipe:
+     * Account for the bw accumulated since last scheduling, then
+     * drain as many pkts as allowed by q-&gt;numbytes and move to
+     * the delay line (in p) computing output time.
+     * bandwidth==0 (no limit) means we can drain the whole queue,
+     * setting len_scaled = 0 does the job.
+     */</span>
+    q-&gt;numbytes += ( curr_time - q-&gt;sched_time ) * p-&gt;bandwidth;
+    <span class="enscript-keyword">while</span> ( (pkt = q-&gt;head) != NULL ) {
+	<span class="enscript-type">int</span> len = pkt-&gt;m_pkthdr.len;
+	<span class="enscript-type">int</span> len_scaled = p-&gt;bandwidth ? len*8*(hz*10) : 0 ;
+	<span class="enscript-keyword">if</span> (len_scaled &gt; q-&gt;numbytes )
+	    <span class="enscript-keyword">break</span> ;
+	q-&gt;numbytes -= len_scaled ;
+	move_pkt(pkt, q, p, len);
+    }
+    <span class="enscript-comment">/*
+     * If we have more packets queued, schedule next ready event
+     * (can only occur when bandwidth != 0, otherwise we would have
+     * flushed the whole queue in the previous loop).
+     * To this purpose we record the current time and compute how many
+     * ticks to go for the finish time of the packet.
+     */</span>
+    <span class="enscript-keyword">if</span> ( (pkt = q-&gt;head) != NULL ) { <span class="enscript-comment">/* this implies bandwidth != 0 */</span>
+	dn_key t = SET_TICKS(pkt, q, p); <span class="enscript-comment">/* ticks i have to wait */</span>
+	q-&gt;sched_time = curr_time ;
+	heap_insert(&amp;ready_heap, curr_time + t, (<span class="enscript-type">void</span> *)q );
+	<span class="enscript-comment">/* XXX should check errors on heap_insert, and drain the whole
+	 * queue on error hoping next time we are luckier.
+	 */</span>
+    } <span class="enscript-keyword">else</span> {	<span class="enscript-comment">/* RED needs to know when the queue becomes empty */</span>
+	q-&gt;q_time = curr_time;
+	q-&gt;numbytes = 0;
+    }
+    <span class="enscript-comment">/*
+     * If the delay line was empty call transmit_event(p) now.
+     * Otherwise, the scheduler will take care of it.
+     */</span>
+    <span class="enscript-keyword">if</span> (p_was_empty)
+		transmit_event(p, head, tail);
+}
+
+<span class="enscript-comment">/*
+ * Called when we can transmit packets on WF2Q queues. Take pkts out of
+ * the queues at their start time, and enqueue into the delay line.
+ * Packets are drained until p-&gt;numbytes &lt; 0. As long as
+ * len_scaled &gt;= p-&gt;numbytes, the packet goes into the delay line
+ * with a deadline p-&gt;delay. For the last packet, if p-&gt;numbytes&lt;0,
+ * there is an additional delay.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ready_event_wfq</span>(<span class="enscript-type">struct</span> dn_pipe *p, <span class="enscript-type">struct</span> mbuf **head, <span class="enscript-type">struct</span> mbuf **tail)
+{
+    <span class="enscript-type">int</span> p_was_empty = (p-&gt;head == NULL) ;
+    <span class="enscript-type">struct</span> dn_heap *sch = &amp;(p-&gt;scheduler_heap);
+    <span class="enscript-type">struct</span> dn_heap *neh = &amp;(p-&gt;not_eligible_heap) ;
+	int64_t p_numbytes = p-&gt;numbytes;
+
+	lck_mtx_assert(dn_mutex, LCK_MTX_ASSERT_OWNED);
+
+    <span class="enscript-keyword">if</span> (p-&gt;if_name[0] == 0) <span class="enscript-comment">/* tx clock is simulated */</span>
+	p_numbytes += ( curr_time - p-&gt;sched_time ) * p-&gt;bandwidth;
+    <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* tx clock is for real, the ifq must be empty or this is a NOP */</span>
+	<span class="enscript-keyword">if</span> (p-&gt;ifp &amp;&amp; !IFCQ_IS_EMPTY(&amp;p-&gt;ifp-&gt;if_snd))
+	    <span class="enscript-keyword">return</span> ;
+	<span class="enscript-keyword">else</span> {
+	    DPRINTF((<span class="enscript-string">&quot;dummynet: pipe %d ready from %s --\n&quot;</span>,
+		p-&gt;pipe_nr, p-&gt;if_name));
+	}
+    }
+
+    <span class="enscript-comment">/*
+     * While we have backlogged traffic AND credit, we need to do
+     * something on the queue.
+     */</span>
+    <span class="enscript-keyword">while</span> ( p_numbytes &gt;=0 &amp;&amp; (sch-&gt;elements&gt;0 || neh-&gt;elements &gt;0) ) {
+	<span class="enscript-keyword">if</span> (sch-&gt;elements &gt; 0) { <span class="enscript-comment">/* have some eligible pkts to send out */</span>
+	    <span class="enscript-type">struct</span> dn_flow_queue *q = sch-&gt;p[0].object ;
+	    <span class="enscript-type">struct</span> mbuf *pkt = q-&gt;head;
+	    <span class="enscript-type">struct</span> dn_flow_set *fs = q-&gt;fs;
+	    u_int64_t len = pkt-&gt;m_pkthdr.len;
+	    <span class="enscript-type">int</span> len_scaled = p-&gt;bandwidth ? len*8*(hz*10) : 0 ;
+
+	    heap_extract(sch, NULL); <span class="enscript-comment">/* remove queue from heap */</span>
+	    p_numbytes -= len_scaled ;
+	    move_pkt(pkt, q, p, len);
+
+	    p-&gt;V += (len&lt;&lt;MY_M) / p-&gt;sum ; <span class="enscript-comment">/* update V */</span>
+	    q-&gt;S = q-&gt;F ; <span class="enscript-comment">/* update start time */</span>
+	    <span class="enscript-keyword">if</span> (q-&gt;len == 0) { <span class="enscript-comment">/* Flow not backlogged any more */</span>
+		fs-&gt;backlogged-- ;
+		heap_insert(&amp;(p-&gt;idle_heap), q-&gt;F, q);
+	    } <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* still backlogged */</span>
+		<span class="enscript-comment">/*
+		 * update F and position in backlogged queue, then
+		 * put flow in not_eligible_heap (we will fix this later).
+		 */</span>
+		len = (q-&gt;head)-&gt;m_pkthdr.len;
+		q-&gt;F += (len&lt;&lt;MY_M)/(u_int64_t) fs-&gt;weight ;
+		<span class="enscript-keyword">if</span> (DN_KEY_LEQ(q-&gt;S, p-&gt;V))
+		    heap_insert(neh, q-&gt;S, q);
+		<span class="enscript-keyword">else</span>
+		    heap_insert(sch, q-&gt;F, q);
+	    }
+	}
+	<span class="enscript-comment">/*
+	 * now compute V = max(V, min(S_i)). Remember that all elements in sch
+	 * have by definition S_i &lt;= V so if sch is not empty, V is surely
+	 * the max and we must not update it. Conversely, if sch is empty
+	 * we only need to look at neh.
+	 */</span>
+	<span class="enscript-keyword">if</span> (sch-&gt;elements == 0 &amp;&amp; neh-&gt;elements &gt; 0)
+	    p-&gt;V = MAX64 ( p-&gt;V, neh-&gt;p[0].key );
+	<span class="enscript-comment">/* move from neh to sch any packets that have become eligible */</span>
+	<span class="enscript-keyword">while</span> (neh-&gt;elements &gt; 0 &amp;&amp; DN_KEY_LEQ(neh-&gt;p[0].key, p-&gt;V) ) {
+	    <span class="enscript-type">struct</span> dn_flow_queue *q = neh-&gt;p[0].object ;
+	    heap_extract(neh, NULL);
+	    heap_insert(sch, q-&gt;F, q);
+	}
+
+	<span class="enscript-keyword">if</span> (p-&gt;if_name[0] != <span class="enscript-string">'\0'</span>) {<span class="enscript-comment">/* tx clock is from a real thing */</span>
+	    p_numbytes = -1 ; <span class="enscript-comment">/* mark not ready for I/O */</span>
+	    <span class="enscript-keyword">break</span> ;
+	}
+    }
+    <span class="enscript-keyword">if</span> (sch-&gt;elements == 0 &amp;&amp; neh-&gt;elements == 0 &amp;&amp; p_numbytes &gt;= 0
+	    &amp;&amp; p-&gt;idle_heap.elements &gt; 0) {
+	<span class="enscript-comment">/*
+	 * no traffic and no events scheduled. We can get rid of idle-heap.
+	 */</span>
+	<span class="enscript-type">int</span> i ;
+
+	<span class="enscript-keyword">for</span> (i = 0 ; i &lt; p-&gt;idle_heap.elements ; i++) {
+	    <span class="enscript-type">struct</span> dn_flow_queue *q = p-&gt;idle_heap.p[i].object ;
+
+	    q-&gt;F = 0 ;
+	    q-&gt;S = q-&gt;F + 1 ;
+	}
+	p-&gt;sum = 0 ;
+	p-&gt;V = 0 ;
+	p-&gt;idle_heap.elements = 0 ;
+    }
+    <span class="enscript-comment">/*
+     * If we are getting clocks from dummynet (not a real interface) and
+     * If we are under credit, schedule the next ready event.
+     * Also fix the delivery time of the last packet.
+     */</span>
+    <span class="enscript-keyword">if</span> (p-&gt;if_name[0]==0 &amp;&amp; p_numbytes &lt; 0) { <span class="enscript-comment">/* this implies bandwidth &gt;0 */</span>
+	dn_key t=0 ; <span class="enscript-comment">/* number of ticks i have to wait */</span>
+
+	<span class="enscript-keyword">if</span> (p-&gt;bandwidth &gt; 0)
+	    t = ( p-&gt;bandwidth -1 - p_numbytes) / p-&gt;bandwidth ;
+	dn_tag_get(p-&gt;tail)-&gt;dn_output_time += t ;
+	p-&gt;sched_time = curr_time ;
+	heap_insert(&amp;wfq_ready_heap, curr_time + t, (<span class="enscript-type">void</span> *)p);
+	<span class="enscript-comment">/* XXX should check errors on heap_insert, and drain the whole
+	 * queue on error hoping next time we are luckier.
+	 */</span>
+    }
+		
+	<span class="enscript-comment">/* Fit (adjust if necessary) 64bit result into 32bit variable. */</span>
+    <span class="enscript-keyword">if</span> (p_numbytes &gt; INT_MAX)
+		p-&gt;numbytes = INT_MAX;
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (p_numbytes &lt; INT_MIN)
+		p-&gt;numbytes = INT_MIN;
+    <span class="enscript-keyword">else</span>
+		p-&gt;numbytes = p_numbytes;
+
+    <span class="enscript-comment">/*
+     * If the delay line was empty call transmit_event(p) now.
+     * Otherwise, the scheduler will take care of it.
+     */</span>
+    <span class="enscript-keyword">if</span> (p_was_empty)
+		transmit_event(p, head, tail);
+
+}
+
+<span class="enscript-comment">/*
+ * This is called every 1ms. It is used to
+ * increment the current tick counter and schedule expired events.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">dummynet</span>(__unused <span class="enscript-type">void</span> * unused)
+{
+    <span class="enscript-type">void</span> *p ; <span class="enscript-comment">/* generic parameter to handler */</span>
+    <span class="enscript-type">struct</span> dn_heap *h ;
+    <span class="enscript-type">struct</span> dn_heap *heaps[3];
+    <span class="enscript-type">struct</span> mbuf *head = NULL, *tail = NULL;
+    <span class="enscript-type">int</span> i;
+    <span class="enscript-type">struct</span> dn_pipe *pe ;
+    <span class="enscript-type">struct</span> timespec ts;
+    <span class="enscript-type">struct</span> timeval	tv;
+
+    heaps[0] = &amp;ready_heap ;		<span class="enscript-comment">/* fixed-rate queues */</span>
+    heaps[1] = &amp;wfq_ready_heap ;	<span class="enscript-comment">/* wfq queues */</span>
+    heaps[2] = &amp;extract_heap ;		<span class="enscript-comment">/* delay line */</span>
+
+	lck_mtx_lock(dn_mutex);
+	
+        <span class="enscript-comment">/* make all time measurements in milliseconds (ms) -  
+         * here we convert secs and usecs to msecs (just divide the 
+	 * usecs and take the closest whole number).
+         */</span>
+        microuptime(&amp;tv);
+        curr_time = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+
+    <span class="enscript-keyword">for</span> (i=0; i &lt; 3 ; i++) {
+	h = heaps[i];
+	<span class="enscript-keyword">while</span> (h-&gt;elements &gt; 0 &amp;&amp; DN_KEY_LEQ(h-&gt;p[0].key, curr_time) ) {
+		<span class="enscript-keyword">if</span> (h-&gt;p[0].key &gt; curr_time)
+			printf(<span class="enscript-string">&quot;dummynet: warning, heap %d is %d ticks late\n&quot;</span>,
+				i, (<span class="enscript-type">int</span>)(curr_time - h-&gt;p[0].key));
+		p = h-&gt;p[0].object ; <span class="enscript-comment">/* store a copy before heap_extract */</span>
+		heap_extract(h, NULL); <span class="enscript-comment">/* need to extract before processing */</span>
+		<span class="enscript-keyword">if</span> (i == 0)
+			ready_event(p, &amp;head, &amp;tail) ;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (i == 1) {
+			<span class="enscript-type">struct</span> dn_pipe *pipe = p;
+			<span class="enscript-keyword">if</span> (pipe-&gt;if_name[0] != <span class="enscript-string">'\0'</span>)
+				printf(<span class="enscript-string">&quot;dummynet: bad ready_event_wfq for pipe %s\n&quot;</span>,
+				pipe-&gt;if_name);
+			<span class="enscript-keyword">else</span>
+				ready_event_wfq(p, &amp;head, &amp;tail) ;
+		} <span class="enscript-keyword">else</span> {
+			transmit_event(p, &amp;head, &amp;tail);
+		}
+	}
+    }
+    <span class="enscript-comment">/* sweep pipes trying to expire idle flow_queues */</span>
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; HASHSIZE; i++)
+	SLIST_FOREACH(pe, &amp;pipehash[i], next)
+	<span class="enscript-keyword">if</span> (pe-&gt;idle_heap.elements &gt; 0 &amp;&amp;
+		DN_KEY_LT(pe-&gt;idle_heap.p[0].key, pe-&gt;V) ) {
+	    <span class="enscript-type">struct</span> dn_flow_queue *q = pe-&gt;idle_heap.p[0].object ;
+
+	    heap_extract(&amp;(pe-&gt;idle_heap), NULL);
+	    q-&gt;S = q-&gt;F + 1 ; <span class="enscript-comment">/* mark timestamp as invalid */</span>
+	    pe-&gt;sum -= q-&gt;fs-&gt;weight ;
+	}
+
+	<span class="enscript-comment">/* check the heaps to see if there's still stuff in there, and 
+	 * only set the timer if there are packets to process 
+	 */</span>
+	timer_enabled = 0;
+	<span class="enscript-keyword">for</span> (i=0; i &lt; 3 ; i++) {
+		h = heaps[i];
+		<span class="enscript-keyword">if</span> (h-&gt;elements &gt; 0) { <span class="enscript-comment">// set the timer
+</span>			ts.tv_sec = 0;
+			ts.tv_nsec = 1 * 1000000;	<span class="enscript-comment">// 1ms
+</span>			timer_enabled = 1;
+			bsd_timeout(dummynet, NULL, &amp;ts);
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+ 
+	<span class="enscript-keyword">if</span> (head != NULL)
+		serialize++;
+	
+	lck_mtx_unlock(dn_mutex);
+
+	<span class="enscript-comment">/* Send out the de-queued list of ready-to-send packets */</span>
+	<span class="enscript-keyword">if</span> (head != NULL) {
+		dummynet_send(head);
+		lck_mtx_lock(dn_mutex);
+		serialize--;
+		lck_mtx_unlock(dn_mutex);
+	}
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">dummynet_send</span>(<span class="enscript-type">struct</span> mbuf *m)
+{
+	<span class="enscript-type">struct</span> dn_pkt_tag *pkt;
+	<span class="enscript-type">struct</span> mbuf *n;
+
+	<span class="enscript-keyword">for</span> (; m != NULL; m = n) {
+		n = m-&gt;m_nextpkt;
+		m-&gt;m_nextpkt = NULL;
+		pkt = dn_tag_get(m);
+
+		DPRINTF((<span class="enscript-string">&quot;dummynet_send m: 0x%llx dn_dir: %d dn_flags: 0x%x\n&quot;</span>,
+		    (uint64_t)VM_KERNEL_ADDRPERM(m), pkt-&gt;dn_dir,
+		    pkt-&gt;dn_flags));
+
+	<span class="enscript-keyword">switch</span> (pkt-&gt;dn_dir) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DN_TO_IP_OUT</span>: {
+			<span class="enscript-type">struct</span> route tmp_rt;
+
+			<span class="enscript-comment">/* route is already in the packet's dn_ro */</span>
+			bzero(&amp;tmp_rt, <span class="enscript-keyword">sizeof</span> (tmp_rt));
+
+			<span class="enscript-comment">/* Force IP_RAWOUTPUT as the IP header is fully formed */</span>
+			pkt-&gt;dn_flags |= IP_RAWOUTPUT | IP_FORWARDING;
+			(<span class="enscript-type">void</span>)ip_output(m, NULL, &amp;tmp_rt, pkt-&gt;dn_flags, NULL, NULL);
+			ROUTE_RELEASE(&amp;tmp_rt);
+			<span class="enscript-keyword">break</span> ;
+		}
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DN_TO_IP_IN</span> :
+			proto_inject(PF_INET, m);
+			<span class="enscript-keyword">break</span> ;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">INET6</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DN_TO_IP6_OUT</span>: {
+			<span class="enscript-comment">/* routes already in the packet's dn_{ro6,pmtu} */</span>
+			ip6_output(m, NULL, NULL, IPV6_FORWARDING, NULL, NULL, NULL);
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DN_TO_IP6_IN</span>:
+			proto_inject(PF_INET6, m);
+			<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>	
+		<span class="enscript-reference">default</span>:
+			printf(<span class="enscript-string">&quot;dummynet: bad switch %d!\n&quot;</span>, pkt-&gt;dn_dir);
+			m_freem(m);
+			<span class="enscript-keyword">break</span> ;
+	}
+	}
+}
+
+
+ 
+<span class="enscript-comment">/*
+ * called by an interface when tx_rdy occurs.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">if_tx_rdy</span>(<span class="enscript-type">struct</span> ifnet *ifp)
+{
+    <span class="enscript-type">struct</span> dn_pipe *p;
+	<span class="enscript-type">struct</span> mbuf *head = NULL, *tail = NULL;
+	<span class="enscript-type">int</span> i;
+	
+	lck_mtx_lock(dn_mutex);
+	
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; HASHSIZE; i++)
+		SLIST_FOREACH(p, &amp;pipehash[i], next)
+		<span class="enscript-keyword">if</span> (p-&gt;ifp == ifp)
+			<span class="enscript-keyword">break</span> ;
+    <span class="enscript-keyword">if</span> (p == NULL) {
+	<span class="enscript-type">char</span> buf[32];
+	snprintf(buf, <span class="enscript-keyword">sizeof</span>(buf), <span class="enscript-string">&quot;%s&quot;</span>, if_name(ifp));
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; HASHSIZE; i++)
+		SLIST_FOREACH(p, &amp;pipehash[i], next)
+	    <span class="enscript-keyword">if</span> (!strcmp(p-&gt;if_name, buf) ) {
+		p-&gt;ifp = ifp ;
+		DPRINTF((<span class="enscript-string">&quot;dummynet: ++ tx rdy from %s (now found)\n&quot;</span>, buf));
+		<span class="enscript-keyword">break</span> ;
+	    }
+    }
+    <span class="enscript-keyword">if</span> (p != NULL) {
+	DPRINTF((<span class="enscript-string">&quot;dummynet: ++ tx rdy from %s - qlen %d\n&quot;</span>, if_name(ifp),
+		IFCQ_LEN(&amp;ifp-&gt;if_snd)));
+	p-&gt;numbytes = 0 ; <span class="enscript-comment">/* mark ready for I/O */</span>
+	ready_event_wfq(p, &amp;head, &amp;tail);
+    }
+	
+	<span class="enscript-keyword">if</span> (head != NULL) {
+		serialize++;
+	}
+	
+	lck_mtx_unlock(dn_mutex);
+
+	<span class="enscript-comment">/* Send out the de-queued list of ready-to-send packets */</span>
+	<span class="enscript-keyword">if</span> (head != NULL) {
+		dummynet_send(head);
+		lck_mtx_lock(dn_mutex);
+		serialize--;
+		lck_mtx_unlock(dn_mutex);
+	}
+    <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * Unconditionally expire empty queues in case of shortage.
+ * Returns the number of queues freed.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">expire_queues</span>(<span class="enscript-type">struct</span> dn_flow_set *fs)
+{
+    <span class="enscript-type">struct</span> dn_flow_queue *q, *prev ;
+    <span class="enscript-type">int</span> i, initial_elements = fs-&gt;rq_elements ;
+	<span class="enscript-type">struct</span> timeval timenow;
+
+	<span class="enscript-comment">/* reviewed for getmicrotime usage */</span>
+	getmicrotime(&amp;timenow);
+
+    <span class="enscript-keyword">if</span> (fs-&gt;last_expired == timenow.tv_sec)
+	<span class="enscript-keyword">return</span> 0 ;
+    fs-&gt;last_expired = timenow.tv_sec ;
+    <span class="enscript-keyword">for</span> (i = 0 ; i &lt;= fs-&gt;rq_size ; i++) <span class="enscript-comment">/* last one is overflow */</span>
+	<span class="enscript-keyword">for</span> (prev=NULL, q = fs-&gt;rq[i] ; q != NULL ; )
+	    <span class="enscript-keyword">if</span> (q-&gt;head != NULL || q-&gt;S != q-&gt;F+1) {
+  		prev = q ;
+  	        q = q-&gt;next ;
+  	    } <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* entry is idle, expire it */</span>
+		<span class="enscript-type">struct</span> dn_flow_queue *old_q = q ;
+
+		<span class="enscript-keyword">if</span> (prev != NULL)
+		    prev-&gt;next = q = q-&gt;next ;
+		<span class="enscript-keyword">else</span>
+		    fs-&gt;rq[i] = q = q-&gt;next ;
+		fs-&gt;rq_elements-- ;
+		FREE(old_q, M_DUMMYNET);
+	    }
+    <span class="enscript-keyword">return</span> initial_elements - fs-&gt;rq_elements ;
+}
+
+<span class="enscript-comment">/*
+ * If room, create a new queue and put at head of slot i;
+ * otherwise, create or use the default queue.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> dn_flow_queue *
+<span class="enscript-function-name">create_queue</span>(<span class="enscript-type">struct</span> dn_flow_set *fs, <span class="enscript-type">int</span> i)
+{
+    <span class="enscript-type">struct</span> dn_flow_queue *q ;
+
+    <span class="enscript-keyword">if</span> (fs-&gt;rq_elements &gt; fs-&gt;rq_size * dn_max_ratio &amp;&amp;
+	    expire_queues(fs) == 0) {
+	<span class="enscript-comment">/*
+	 * No way to get room, use or create overflow queue.
+	 */</span>
+	i = fs-&gt;rq_size ;
+	<span class="enscript-keyword">if</span> ( fs-&gt;rq[i] != NULL )
+	    <span class="enscript-keyword">return</span> fs-&gt;rq[i] ;
+    }
+    q = _MALLOC(<span class="enscript-keyword">sizeof</span>(*q), M_DUMMYNET, M_DONTWAIT | M_ZERO);
+    <span class="enscript-keyword">if</span> (q == NULL) {
+	printf(<span class="enscript-string">&quot;dummynet: sorry, cannot allocate queue for new flow\n&quot;</span>);
+	<span class="enscript-keyword">return</span> NULL ;
+    }
+    q-&gt;fs = fs ;
+    q-&gt;hash_slot = i ;
+    q-&gt;next = fs-&gt;rq[i] ;
+    q-&gt;S = q-&gt;F + 1;   <span class="enscript-comment">/* hack - mark timestamp as invalid */</span>
+    fs-&gt;rq[i] = q ;
+    fs-&gt;rq_elements++ ;
+    <span class="enscript-keyword">return</span> q ;
+}
+
+<span class="enscript-comment">/*
+ * Given a flow_set and a pkt in last_pkt, find a matching queue
+ * after appropriate masking. The queue is moved to front
+ * so that further searches take less time.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> dn_flow_queue *
+<span class="enscript-function-name">find_queue</span>(<span class="enscript-type">struct</span> dn_flow_set *fs, <span class="enscript-type">struct</span> ip_flow_id *id)
+{
+    <span class="enscript-type">int</span> i = 0 ; <span class="enscript-comment">/* we need i and q for new allocations */</span>
+    <span class="enscript-type">struct</span> dn_flow_queue *q, *prev;
+    <span class="enscript-type">int</span> is_v6 = IS_IP6_FLOW_ID(id);
+
+    <span class="enscript-keyword">if</span> ( !(fs-&gt;flags_fs &amp; DN_HAVE_FLOW_MASK) )
+	q = fs-&gt;rq[0] ;
+    <span class="enscript-keyword">else</span> {
+	<span class="enscript-comment">/* first, do the masking, then hash */</span>
+	id-&gt;dst_port &amp;= fs-&gt;flow_mask.dst_port ;
+	id-&gt;src_port &amp;= fs-&gt;flow_mask.src_port ;
+	id-&gt;proto &amp;= fs-&gt;flow_mask.proto ;
+	id-&gt;flags = 0 ; <span class="enscript-comment">/* we don't care about this one */</span>
+        <span class="enscript-keyword">if</span> (is_v6) {
+            APPLY_MASK(&amp;id-&gt;dst_ip6, &amp;fs-&gt;flow_mask.dst_ip6);
+            APPLY_MASK(&amp;id-&gt;src_ip6, &amp;fs-&gt;flow_mask.src_ip6);
+            id-&gt;flow_id6 &amp;= fs-&gt;flow_mask.flow_id6;
+
+            i = ((id-&gt;dst_ip6.__u6_addr.__u6_addr32[0]) &amp; 0xffff)^
+                ((id-&gt;dst_ip6.__u6_addr.__u6_addr32[1]) &amp; 0xffff)^
+                ((id-&gt;dst_ip6.__u6_addr.__u6_addr32[2]) &amp; 0xffff)^
+                ((id-&gt;dst_ip6.__u6_addr.__u6_addr32[3]) &amp; 0xffff)^
+
+                ((id-&gt;dst_ip6.__u6_addr.__u6_addr32[0] &gt;&gt; 15) &amp; 0xffff)^
+                ((id-&gt;dst_ip6.__u6_addr.__u6_addr32[1] &gt;&gt; 15) &amp; 0xffff)^
+                ((id-&gt;dst_ip6.__u6_addr.__u6_addr32[2] &gt;&gt; 15) &amp; 0xffff)^
+                ((id-&gt;dst_ip6.__u6_addr.__u6_addr32[3] &gt;&gt; 15) &amp; 0xffff)^
+
+                ((id-&gt;src_ip6.__u6_addr.__u6_addr32[0] &lt;&lt; 1) &amp; 0xfffff)^
+                ((id-&gt;src_ip6.__u6_addr.__u6_addr32[1] &lt;&lt; 1) &amp; 0xfffff)^
+                ((id-&gt;src_ip6.__u6_addr.__u6_addr32[2] &lt;&lt; 1) &amp; 0xfffff)^
+                ((id-&gt;src_ip6.__u6_addr.__u6_addr32[3] &lt;&lt; 1) &amp; 0xfffff)^
+
+                ((id-&gt;src_ip6.__u6_addr.__u6_addr32[0] &gt;&gt; 16) &amp; 0xffff)^
+                ((id-&gt;src_ip6.__u6_addr.__u6_addr32[1] &gt;&gt; 16) &amp; 0xffff)^
+                ((id-&gt;src_ip6.__u6_addr.__u6_addr32[2] &gt;&gt; 16) &amp; 0xffff)^
+                ((id-&gt;src_ip6.__u6_addr.__u6_addr32[3] &gt;&gt; 16) &amp; 0xffff)^
+
+                (id-&gt;dst_port &lt;&lt; 1) ^ (id-&gt;src_port) ^
+                (id-&gt;proto ) ^
+                (id-&gt;flow_id6);
+        } <span class="enscript-keyword">else</span> {
+            id-&gt;dst_ip &amp;= fs-&gt;flow_mask.dst_ip ;
+            id-&gt;src_ip &amp;= fs-&gt;flow_mask.src_ip ;
+
+            i = ( (id-&gt;dst_ip) &amp; 0xffff ) ^
+                ( (id-&gt;dst_ip &gt;&gt; 15) &amp; 0xffff ) ^
+                ( (id-&gt;src_ip &lt;&lt; 1) &amp; 0xffff ) ^
+                ( (id-&gt;src_ip &gt;&gt; 16 ) &amp; 0xffff ) ^
+                (id-&gt;dst_port &lt;&lt; 1) ^ (id-&gt;src_port) ^
+                (id-&gt;proto );
+        }
+	i = i % fs-&gt;rq_size ;
+	<span class="enscript-comment">/* finally, scan the current list for a match */</span>
+	searches++ ;
+	<span class="enscript-keyword">for</span> (prev=NULL, q = fs-&gt;rq[i] ; q ; ) {
+	    search_steps++;
+            <span class="enscript-keyword">if</span> (is_v6 &amp;&amp;
+                    IN6_ARE_ADDR_EQUAL(&amp;id-&gt;dst_ip6,&amp;q-&gt;id.dst_ip6) &amp;&amp;
+                    IN6_ARE_ADDR_EQUAL(&amp;id-&gt;src_ip6,&amp;q-&gt;id.src_ip6) &amp;&amp;
+                    id-&gt;dst_port == q-&gt;id.dst_port &amp;&amp;
+                    id-&gt;src_port == q-&gt;id.src_port &amp;&amp;
+                    id-&gt;proto == q-&gt;id.proto &amp;&amp;
+                    id-&gt;flags == q-&gt;id.flags &amp;&amp;
+                    id-&gt;flow_id6 == q-&gt;id.flow_id6)
+                <span class="enscript-keyword">break</span> ; <span class="enscript-comment">/* found */</span>
+
+            <span class="enscript-keyword">if</span> (!is_v6 &amp;&amp; id-&gt;dst_ip == q-&gt;id.dst_ip &amp;&amp;
+                    id-&gt;src_ip == q-&gt;id.src_ip &amp;&amp;
+                    id-&gt;dst_port == q-&gt;id.dst_port &amp;&amp;
+                    id-&gt;src_port == q-&gt;id.src_port &amp;&amp;
+                    id-&gt;proto == q-&gt;id.proto &amp;&amp;
+                    id-&gt;flags == q-&gt;id.flags)
+                <span class="enscript-keyword">break</span> ; <span class="enscript-comment">/* found */</span>
+
+            <span class="enscript-comment">/* No match. Check if we can expire the entry */</span>
+	    <span class="enscript-keyword">if</span> (pipe_expire &amp;&amp; q-&gt;head == NULL &amp;&amp; q-&gt;S == q-&gt;F+1 ) {
+		<span class="enscript-comment">/* entry is idle and not in any heap, expire it */</span>
+		<span class="enscript-type">struct</span> dn_flow_queue *old_q = q ;
+
+		<span class="enscript-keyword">if</span> (prev != NULL)
+		    prev-&gt;next = q = q-&gt;next ;
+		<span class="enscript-keyword">else</span>
+		    fs-&gt;rq[i] = q = q-&gt;next ;
+		fs-&gt;rq_elements-- ;
+		FREE(old_q, M_DUMMYNET);
+		<span class="enscript-keyword">continue</span> ;
+	    }
+	    prev = q ;
+	    q = q-&gt;next ;
+	}
+	<span class="enscript-keyword">if</span> (q &amp;&amp; prev != NULL) { <span class="enscript-comment">/* found and not in front */</span>
+	    prev-&gt;next = q-&gt;next ;
+	    q-&gt;next = fs-&gt;rq[i] ;
+	    fs-&gt;rq[i] = q ;
+	}
+    }
+    <span class="enscript-keyword">if</span> (q == NULL) { <span class="enscript-comment">/* no match, need to allocate a new entry */</span>
+	q = create_queue(fs, i);
+	<span class="enscript-keyword">if</span> (q != NULL)
+	q-&gt;id = *id ;
+    }
+    <span class="enscript-keyword">return</span> q ;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">red_drops</span>(<span class="enscript-type">struct</span> dn_flow_set *fs, <span class="enscript-type">struct</span> dn_flow_queue *q, <span class="enscript-type">int</span> len)
+{
+    <span class="enscript-comment">/*
+     * RED algorithm
+     *
+     * RED calculates the average queue size (avg) using a low-pass filter
+     * with an exponential weighted (w_q) moving average:
+     * 	avg  &lt;-  (1-w_q) * avg + w_q * q_size
+     * where q_size is the queue length (measured in bytes or * packets).
+     *
+     * If q_size == 0, we compute the idle time for the link, and set
+     *	avg = (1 - w_q)^(idle/s)
+     * where s is the time needed for transmitting a medium-sized packet.
+     *
+     * Now, if avg &lt; min_th the packet is enqueued.
+     * If avg &gt; max_th the packet is dropped. Otherwise, the packet is
+     * dropped with probability P function of avg.
+     *
+     */</span>
+
+    int64_t p_b = 0;
+    <span class="enscript-comment">/* queue in bytes or packets ? */</span>
+    u_int q_size = (fs-&gt;flags_fs &amp; DN_QSIZE_IS_BYTES) ? q-&gt;len_bytes : q-&gt;len;
+
+    DPRINTF((<span class="enscript-string">&quot;\ndummynet: %d q: %2u &quot;</span>, (<span class="enscript-type">int</span>) curr_time, q_size));
+
+    <span class="enscript-comment">/* average queue size estimation */</span>
+    <span class="enscript-keyword">if</span> (q_size != 0) {
+	<span class="enscript-comment">/*
+	 * queue is not empty, avg &lt;- avg + (q_size - avg) * w_q
+	 */</span>
+	<span class="enscript-type">int</span> diff = SCALE(q_size) - q-&gt;avg;
+	int64_t v = SCALE_MUL((int64_t) diff, (int64_t) fs-&gt;w_q);
+
+	q-&gt;avg += (<span class="enscript-type">int</span>) v;
+    } <span class="enscript-keyword">else</span> {
+	<span class="enscript-comment">/*
+	 * queue is empty, find for how long the queue has been
+	 * empty and use a lookup table for computing
+	 * (1 - * w_q)^(idle_time/s) where s is the time to send a
+	 * (small) packet.
+	 * XXX check wraps...
+	 */</span>
+	<span class="enscript-keyword">if</span> (q-&gt;avg) {
+	    u_int t = (curr_time - q-&gt;q_time) / fs-&gt;lookup_step;
+
+	    q-&gt;avg = (t &lt; fs-&gt;lookup_depth) ?
+		    SCALE_MUL(q-&gt;avg, fs-&gt;w_q_lookup[t]) : 0;
+	}
+    }
+    DPRINTF((<span class="enscript-string">&quot;dummynet: avg: %u &quot;</span>, SCALE_VAL(q-&gt;avg)));
+
+    <span class="enscript-comment">/* should i drop ? */</span>
+
+    <span class="enscript-keyword">if</span> (q-&gt;avg &lt; fs-&gt;min_th) {
+	q-&gt;count = -1;
+	<span class="enscript-keyword">return</span> 0; <span class="enscript-comment">/* accept packet ; */</span>
+    }
+    <span class="enscript-keyword">if</span> (q-&gt;avg &gt;= fs-&gt;max_th) { <span class="enscript-comment">/* average queue &gt;=  max threshold */</span>
+	<span class="enscript-keyword">if</span> (fs-&gt;flags_fs &amp; DN_IS_GENTLE_RED) {
+	    <span class="enscript-comment">/*
+	     * According to Gentle-RED, if avg is greater than max_th the
+	     * packet is dropped with a probability
+	     *	p_b = c_3 * avg - c_4
+	     * where c_3 = (1 - max_p) / max_th, and c_4 = 1 - 2 * max_p
+	     */</span>
+	    p_b = SCALE_MUL((int64_t) fs-&gt;c_3, (int64_t) q-&gt;avg) - fs-&gt;c_4;
+	} <span class="enscript-keyword">else</span> {
+	    q-&gt;count = -1;
+	    DPRINTF((<span class="enscript-string">&quot;dummynet: - drop&quot;</span>));
+	    <span class="enscript-keyword">return</span> 1 ;
+	}
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (q-&gt;avg &gt; fs-&gt;min_th) {
+	<span class="enscript-comment">/*
+	 * we compute p_b using the linear dropping function p_b = c_1 *
+	 * avg - c_2, where c_1 = max_p / (max_th - min_th), and c_2 =
+	 * max_p * min_th / (max_th - min_th)
+	 */</span>
+	p_b = SCALE_MUL((int64_t) fs-&gt;c_1, (int64_t) q-&gt;avg) - fs-&gt;c_2;
+    }
+    <span class="enscript-keyword">if</span> (fs-&gt;flags_fs &amp; DN_QSIZE_IS_BYTES)
+	p_b = (p_b * len) / fs-&gt;max_pkt_size;
+    <span class="enscript-keyword">if</span> (++q-&gt;count == 0)
+	q-&gt;random = MY_RANDOM &amp; 0xffff;
+    <span class="enscript-keyword">else</span> {
+	<span class="enscript-comment">/*
+	 * q-&gt;count counts packets arrived since last drop, so a greater
+	 * value of q-&gt;count means a greater packet drop probability.
+	 */</span>
+	<span class="enscript-keyword">if</span> (SCALE_MUL(p_b, SCALE((int64_t) q-&gt;count)) &gt; q-&gt;random) {
+	    q-&gt;count = 0;
+	    DPRINTF((<span class="enscript-string">&quot;dummynet: - red drop&quot;</span>));
+	    <span class="enscript-comment">/* after a drop we calculate a new random value */</span>
+	    q-&gt;random = MY_RANDOM &amp; 0xffff;
+	    <span class="enscript-keyword">return</span> 1;    <span class="enscript-comment">/* drop */</span>
+	}
+    }
+    <span class="enscript-comment">/* end of RED algorithm */</span>
+    <span class="enscript-keyword">return</span> 0 ; <span class="enscript-comment">/* accept */</span>
+}
+
+<span class="enscript-type">static</span> __inline
+<span class="enscript-type">struct</span> dn_flow_set *
+<span class="enscript-function-name">locate_flowset</span>(<span class="enscript-type">int</span> fs_nr)
+{
+    <span class="enscript-type">struct</span> dn_flow_set *fs;
+    SLIST_FOREACH(fs, &amp;flowsethash[HASH(fs_nr)], next)
+		<span class="enscript-keyword">if</span> (fs-&gt;fs_nr == fs_nr)
+			<span class="enscript-keyword">return</span> fs ;
+			
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-type">static</span> __inline <span class="enscript-type">struct</span> dn_pipe *
+<span class="enscript-function-name">locate_pipe</span>(<span class="enscript-type">int</span> pipe_nr)
+{
+	<span class="enscript-type">struct</span> dn_pipe *pipe;
+
+	SLIST_FOREACH(pipe, &amp;pipehash[HASH(pipe_nr)], next)
+		<span class="enscript-keyword">if</span> (pipe-&gt;pipe_nr == pipe_nr)
+			<span class="enscript-keyword">return</span> (pipe);
+
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+
+
+<span class="enscript-comment">/*
+ * dummynet hook for packets. Below 'pipe' is a pipe or a queue
+ * depending on whether WF2Q or fixed bw is used.
+ *
+ * pipe_nr	pipe or queue the packet is destined for.
+ * dir		where shall we send the packet after dummynet.
+ * m		the mbuf with the packet
+ * ifp		the 'ifp' parameter from the caller.
+ *		NULL in ip_input, destination interface in ip_output,
+ *		real_dst in bdg_forward
+ * ro		route parameter (only used in ip_output, NULL otherwise)
+ * dst		destination address, only used by ip_output
+ * rule		matching rule, in case of multiple passes
+ * flags	flags from the caller, only used in ip_output
+ *
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">dummynet_io</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> pipe_nr, <span class="enscript-type">int</span> dir, <span class="enscript-type">struct</span> ip_fw_args *fwa, <span class="enscript-type">int</span> client)
+{
+    <span class="enscript-type">struct</span> mbuf *head = NULL, *tail = NULL;
+    <span class="enscript-type">struct</span> dn_pkt_tag *pkt;
+    <span class="enscript-type">struct</span> m_tag *mtag;
+    <span class="enscript-type">struct</span> dn_flow_set *fs = NULL;
+    <span class="enscript-type">struct</span> dn_pipe *pipe ;
+    u_int64_t len = m-&gt;m_pkthdr.len ;
+    <span class="enscript-type">struct</span> dn_flow_queue *q = NULL ;
+    <span class="enscript-type">int</span> is_pipe = 0;
+    <span class="enscript-type">struct</span> timespec ts;
+    <span class="enscript-type">struct</span> timeval	tv;
+
+    DPRINTF((<span class="enscript-string">&quot;dummynet_io m: 0x%llx pipe: %d dir: %d client: %d\n&quot;</span>,
+        (uint64_t)VM_KERNEL_ADDRPERM(m), pipe_nr, dir, client));
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPFIREWALL</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPFW2</span>
+    <span class="enscript-keyword">if</span> (client == DN_CLIENT_IPFW) {
+        ipfw_insn *cmd = fwa-&gt;fwa_ipfw_rule-&gt;cmd + fwa-&gt;fwa_ipfw_rule-&gt;act_ofs;
+
+        <span class="enscript-keyword">if</span> (cmd-&gt;opcode == O_LOG)
+	    cmd += F_LEN(cmd);
+        is_pipe = (cmd-&gt;opcode == O_PIPE);
+    }
+#<span class="enscript-reference">else</span>
+    <span class="enscript-keyword">if</span> (client == DN_CLIENT_IPFW)
+        is_pipe = (fwa-&gt;fwa_ipfw_rule-&gt;fw_flg &amp; IP_FW_F_COMMAND) == IP_FW_F_PIPE;
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IPFIREWALL */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DUMMYNET</span>
+    <span class="enscript-keyword">if</span> (client == DN_CLIENT_PF)
+    	is_pipe = fwa-&gt;fwa_flags == DN_IS_PIPE ? 1 : 0;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DUMMYNET */</span>
+
+    pipe_nr &amp;= 0xffff ;
+
+ 	lck_mtx_lock(dn_mutex);
+
+	<span class="enscript-comment">/* make all time measurements in milliseconds (ms) - 
+         * here we convert secs and usecs to msecs (just divide the 
+         * usecs and take the closest whole number).
+	 */</span>
+    microuptime(&amp;tv);
+	curr_time = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+	
+   <span class="enscript-comment">/*
+     * This is a dummynet rule, so we expect an O_PIPE or O_QUEUE rule.
+     */</span>
+    <span class="enscript-keyword">if</span> (is_pipe) {
+		pipe = locate_pipe(pipe_nr);
+		<span class="enscript-keyword">if</span> (pipe != NULL)
+			fs = &amp;(pipe-&gt;fs);
+	} <span class="enscript-keyword">else</span>
+		fs = locate_flowset(pipe_nr);
+	
+	
+    <span class="enscript-keyword">if</span> (fs == NULL){
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">dropit</span> ;	<span class="enscript-comment">/* this queue/pipe does not exist! */</span>
+    }
+    pipe = fs-&gt;pipe ;
+    <span class="enscript-keyword">if</span> (pipe == NULL) { <span class="enscript-comment">/* must be a queue, try find a matching pipe */</span>
+	pipe = locate_pipe(fs-&gt;parent_nr);
+
+	<span class="enscript-keyword">if</span> (pipe != NULL)
+	    fs-&gt;pipe = pipe ;
+	<span class="enscript-keyword">else</span> {
+	    printf(<span class="enscript-string">&quot;dummynet: no pipe %d for queue %d, drop pkt\n&quot;</span>,
+		fs-&gt;parent_nr, fs-&gt;fs_nr);
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">dropit</span> ;
+	}
+    }
+    q = find_queue(fs, &amp;(fwa-&gt;fwa_id));
+    <span class="enscript-keyword">if</span> ( q == NULL )
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">dropit</span> ;		<span class="enscript-comment">/* cannot allocate queue		*/</span>
+    <span class="enscript-comment">/*
+     * update statistics, then check reasons to drop pkt
+     */</span>
+    q-&gt;tot_bytes += len ;
+    q-&gt;tot_pkts++ ;
+    <span class="enscript-keyword">if</span> ( fs-&gt;plr &amp;&amp; (MY_RANDOM &lt; fs-&gt;plr) )
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">dropit</span> ;		<span class="enscript-comment">/* random pkt drop			*/</span>
+    <span class="enscript-keyword">if</span> ( fs-&gt;flags_fs &amp; DN_QSIZE_IS_BYTES) {
+    	<span class="enscript-keyword">if</span> (q-&gt;len_bytes &gt; fs-&gt;qsize)
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">dropit</span> ;	<span class="enscript-comment">/* queue size overflow			*/</span>
+    } <span class="enscript-keyword">else</span> {
+	<span class="enscript-keyword">if</span> (q-&gt;len &gt;= fs-&gt;qsize)
+	    <span class="enscript-keyword">goto</span> <span class="enscript-reference">dropit</span> ;	<span class="enscript-comment">/* queue count overflow			*/</span>
+    }
+    <span class="enscript-keyword">if</span> ( fs-&gt;flags_fs &amp; DN_IS_RED &amp;&amp; red_drops(fs, q, len) )
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">dropit</span> ;
+
+    <span class="enscript-comment">/* XXX expensive to zero, see if we can remove it*/</span>
+    mtag = m_tag_create(KERNEL_MODULE_TAG_ID, KERNEL_TAG_TYPE_DUMMYNET,
+    		<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_pkt_tag), M_NOWAIT, m);
+    <span class="enscript-keyword">if</span> ( mtag == NULL )
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">dropit</span> ;		<span class="enscript-comment">/* cannot allocate packet header	*/</span>
+    m_tag_prepend(m, mtag);	<span class="enscript-comment">/* attach to mbuf chain */</span>
+
+    pkt = (<span class="enscript-type">struct</span> dn_pkt_tag *)(mtag+1);
+    bzero(pkt, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_pkt_tag));
+    <span class="enscript-comment">/* ok, i can handle the pkt now... */</span>
+    <span class="enscript-comment">/* build and enqueue packet + parameters */</span>
+    <span class="enscript-comment">/*
+     * PF is checked before ipfw so remember ipfw rule only when
+     * the caller is ipfw. When the caller is PF, fwa_ipfw_rule
+     * is a fake rule just used for convenience
+     */</span>
+    <span class="enscript-keyword">if</span> (client == DN_CLIENT_IPFW)
+    	pkt-&gt;dn_ipfw_rule = fwa-&gt;fwa_ipfw_rule;
+    pkt-&gt;dn_pf_rule = fwa-&gt;fwa_pf_rule;
+    pkt-&gt;dn_dir = dir ;
+    pkt-&gt;dn_client = client;
+
+    pkt-&gt;dn_ifp = fwa-&gt;fwa_oif;
+    <span class="enscript-keyword">if</span> (dir == DN_TO_IP_OUT) {
+		<span class="enscript-comment">/*
+		 * We need to copy *ro because for ICMP pkts (and maybe others)
+		 * the caller passed a pointer into the stack; dst might also be
+		 * a pointer into *ro so it needs to be updated.
+		 */</span>
+		<span class="enscript-keyword">if</span> (fwa-&gt;fwa_ro) {
+			route_copyout(&amp;pkt-&gt;dn_ro, fwa-&gt;fwa_ro, <span class="enscript-keyword">sizeof</span> (pkt-&gt;dn_ro));
+		}
+		<span class="enscript-keyword">if</span> (fwa-&gt;fwa_dst) {
+			<span class="enscript-keyword">if</span> (fwa-&gt;fwa_dst == (<span class="enscript-type">struct</span> sockaddr_in *)&amp;fwa-&gt;fwa_ro-&gt;ro_dst) <span class="enscript-comment">/* dst points into ro */</span>
+				fwa-&gt;fwa_dst = (<span class="enscript-type">struct</span> sockaddr_in *)&amp;(pkt-&gt;dn_ro.ro_dst) ;
+	
+			bcopy (fwa-&gt;fwa_dst, &amp;pkt-&gt;dn_dst, <span class="enscript-keyword">sizeof</span>(pkt-&gt;dn_dst));
+		}
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (dir == DN_TO_IP6_OUT) {
+		<span class="enscript-keyword">if</span> (fwa-&gt;fwa_ro6) {
+			route_copyout((<span class="enscript-type">struct</span> route *)&amp;pkt-&gt;dn_ro6,
+			    (<span class="enscript-type">struct</span> route *)fwa-&gt;fwa_ro6, <span class="enscript-keyword">sizeof</span> (pkt-&gt;dn_ro6));
+		}
+		<span class="enscript-keyword">if</span> (fwa-&gt;fwa_ro6_pmtu) {
+			route_copyout((<span class="enscript-type">struct</span> route *)&amp;pkt-&gt;dn_ro6_pmtu,
+			    (<span class="enscript-type">struct</span> route *)fwa-&gt;fwa_ro6_pmtu, <span class="enscript-keyword">sizeof</span> (pkt-&gt;dn_ro6_pmtu));
+		}
+		<span class="enscript-keyword">if</span> (fwa-&gt;fwa_dst6) {
+			<span class="enscript-keyword">if</span> (fwa-&gt;fwa_dst6 == (<span class="enscript-type">struct</span> sockaddr_in6 *)&amp;fwa-&gt;fwa_ro6-&gt;ro_dst) <span class="enscript-comment">/* dst points into ro */</span>
+				fwa-&gt;fwa_dst6 = (<span class="enscript-type">struct</span> sockaddr_in6 *)&amp;(pkt-&gt;dn_ro6.ro_dst) ;
+	
+			bcopy (fwa-&gt;fwa_dst6, &amp;pkt-&gt;dn_dst6, <span class="enscript-keyword">sizeof</span>(pkt-&gt;dn_dst6));
+		}
+		pkt-&gt;dn_origifp = fwa-&gt;fwa_origifp;
+		pkt-&gt;dn_mtu = fwa-&gt;fwa_mtu;
+		pkt-&gt;dn_alwaysfrag = fwa-&gt;fwa_alwaysfrag;
+		pkt-&gt;dn_unfragpartlen = fwa-&gt;fwa_unfragpartlen;
+		<span class="enscript-keyword">if</span> (fwa-&gt;fwa_exthdrs) {
+			bcopy (fwa-&gt;fwa_exthdrs, &amp;pkt-&gt;dn_exthdrs, <span class="enscript-keyword">sizeof</span>(pkt-&gt;dn_exthdrs));
+			<span class="enscript-comment">/* 
+			 * Need to zero out the source structure so the mbufs
+			 * won't be freed by ip6_output()
+			 */</span> 
+			bzero(fwa-&gt;fwa_exthdrs, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip6_exthdrs));
+		}
+    }
+    <span class="enscript-keyword">if</span> (dir == DN_TO_IP_OUT || dir == DN_TO_IP6_OUT) {
+		pkt-&gt;dn_flags = fwa-&gt;fwa_oflags;
+		<span class="enscript-keyword">if</span> (fwa-&gt;fwa_ipoa != NULL)
+			pkt-&gt;dn_ipoa = *(fwa-&gt;fwa_ipoa);
+    }
+    <span class="enscript-keyword">if</span> (q-&gt;head == NULL)
+	q-&gt;head = m;
+    <span class="enscript-keyword">else</span>
+	q-&gt;tail-&gt;m_nextpkt = m;
+    q-&gt;tail = m;
+    q-&gt;len++;
+    q-&gt;len_bytes += len ;
+
+    <span class="enscript-keyword">if</span> ( q-&gt;head != m )		<span class="enscript-comment">/* flow was not idle, we are done */</span>
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">done</span>;
+    <span class="enscript-comment">/*
+     * If we reach this point the flow was previously idle, so we need
+     * to schedule it. This involves different actions for fixed-rate or
+     * WF2Q queues.
+     */</span>
+    <span class="enscript-keyword">if</span> (is_pipe) {
+	<span class="enscript-comment">/*
+	 * Fixed-rate queue: just insert into the ready_heap.
+	 */</span>
+	dn_key t = 0 ;
+	<span class="enscript-keyword">if</span> (pipe-&gt;bandwidth)
+	    t = SET_TICKS(m, q, pipe);
+	q-&gt;sched_time = curr_time ;
+	<span class="enscript-keyword">if</span> (t == 0)	<span class="enscript-comment">/* must process it now */</span>
+	    ready_event( q , &amp;head, &amp;tail );
+	<span class="enscript-keyword">else</span>
+	    heap_insert(&amp;ready_heap, curr_time + t , q );
+    } <span class="enscript-keyword">else</span> {
+	<span class="enscript-comment">/*
+	 * WF2Q. First, compute start time S: if the flow was idle (S=F+1)
+	 * set S to the virtual time V for the controlling pipe, and update
+	 * the sum of weights for the pipe; otherwise, remove flow from
+	 * idle_heap and set S to max(F,V).
+	 * Second, compute finish time F = S + len/weight.
+	 * Third, if pipe was idle, update V=max(S, V).
+	 * Fourth, count one more backlogged flow.
+	 */</span>
+	<span class="enscript-keyword">if</span> (DN_KEY_GT(q-&gt;S, q-&gt;F)) { <span class="enscript-comment">/* means timestamps are invalid */</span>
+	    q-&gt;S = pipe-&gt;V ;
+	    pipe-&gt;sum += fs-&gt;weight ; <span class="enscript-comment">/* add weight of new queue */</span>
+	} <span class="enscript-keyword">else</span> {
+	    heap_extract(&amp;(pipe-&gt;idle_heap), q);
+	    q-&gt;S = MAX64(q-&gt;F, pipe-&gt;V ) ;
+	}
+	q-&gt;F = q-&gt;S + ( len&lt;&lt;MY_M )/(u_int64_t) fs-&gt;weight;
+
+	<span class="enscript-keyword">if</span> (pipe-&gt;not_eligible_heap.elements == 0 &amp;&amp;
+		pipe-&gt;scheduler_heap.elements == 0)
+	    pipe-&gt;V = MAX64 ( q-&gt;S, pipe-&gt;V );
+	fs-&gt;backlogged++ ;
+	<span class="enscript-comment">/*
+	 * Look at eligibility. A flow is not eligibile if S&gt;V (when
+	 * this happens, it means that there is some other flow already
+	 * scheduled for the same pipe, so the scheduler_heap cannot be
+	 * empty). If the flow is not eligible we just store it in the
+	 * not_eligible_heap. Otherwise, we store in the scheduler_heap
+	 * and possibly invoke ready_event_wfq() right now if there is
+	 * leftover credit.
+	 * Note that for all flows in scheduler_heap (SCH), S_i &lt;= V,
+	 * and for all flows in not_eligible_heap (NEH), S_i &gt; V .
+	 * So when we need to compute max( V, min(S_i) ) forall i in SCH+NEH,
+	 * we only need to look into NEH.
+	 */</span>
+	<span class="enscript-keyword">if</span> (DN_KEY_GT(q-&gt;S, pipe-&gt;V) ) { <span class="enscript-comment">/* not eligible */</span>
+	    <span class="enscript-keyword">if</span> (pipe-&gt;scheduler_heap.elements == 0)
+		printf(<span class="enscript-string">&quot;dummynet: ++ ouch! not eligible but empty scheduler!\n&quot;</span>);
+	    heap_insert(&amp;(pipe-&gt;not_eligible_heap), q-&gt;S, q);
+	} <span class="enscript-keyword">else</span> {
+	    heap_insert(&amp;(pipe-&gt;scheduler_heap), q-&gt;F, q);
+	    <span class="enscript-keyword">if</span> (pipe-&gt;numbytes &gt;= 0) { <span class="enscript-comment">/* pipe is idle */</span>
+		<span class="enscript-keyword">if</span> (pipe-&gt;scheduler_heap.elements != 1)
+		    printf(<span class="enscript-string">&quot;dummynet: OUCH! pipe should have been idle!\n&quot;</span>);
+		DPRINTF((<span class="enscript-string">&quot;dummynet: waking up pipe %d at %d\n&quot;</span>,
+			pipe-&gt;pipe_nr, (<span class="enscript-type">int</span>)(q-&gt;F &gt;&gt; MY_M)));
+		pipe-&gt;sched_time = curr_time ;
+		ready_event_wfq(pipe, &amp;head, &amp;tail);
+	    }
+	}
+    }
+<span class="enscript-reference">done</span>:
+	<span class="enscript-comment">/* start the timer and set global if not already set */</span>
+	<span class="enscript-keyword">if</span> (!timer_enabled) {
+		ts.tv_sec = 0;
+		ts.tv_nsec = 1 * 1000000;	<span class="enscript-comment">// 1ms
+</span>		timer_enabled = 1;
+		bsd_timeout(dummynet, NULL, &amp;ts);
+	}
+
+	lck_mtx_unlock(dn_mutex);
+	
+	<span class="enscript-keyword">if</span> (head != NULL) {
+		dummynet_send(head);
+	}
+
+    <span class="enscript-keyword">return</span> 0;
+
+<span class="enscript-reference">dropit</span>:
+    <span class="enscript-keyword">if</span> (q)
+	q-&gt;drops++ ;
+	lck_mtx_unlock(dn_mutex);
+    m_freem(m);
+    <span class="enscript-keyword">return</span> ( (fs &amp;&amp; (fs-&gt;flags_fs &amp; DN_NOERROR)) ? 0 : ENOBUFS);
+}
+
+<span class="enscript-comment">/*
+ * Below, the ROUTE_RELEASE is only needed when (pkt-&gt;dn_dir == DN_TO_IP_OUT)
+ * Doing this would probably save us the initial bzero of dn_pkt
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">DN_FREE_PKT</span>(_m) do {					\
+	<span class="enscript-type">struct</span> m_tag *tag = m_tag_locate(m, KERNEL_MODULE_TAG_ID, KERNEL_TAG_TYPE_DUMMYNET, NULL); \
+	<span class="enscript-keyword">if</span> (tag) {						\
+		<span class="enscript-type">struct</span> dn_pkt_tag *n = (<span class="enscript-type">struct</span> dn_pkt_tag *)(tag+1);	\
+		ROUTE_RELEASE(&amp;n-&gt;dn_ro);			\
+	}							\
+	m_tag_delete(_m, tag);					\
+	m_freem(_m);						\
+} <span class="enscript-keyword">while</span> (0)
+
+<span class="enscript-comment">/*
+ * Dispose all packets and flow_queues on a flow_set.
+ * If all=1, also remove red lookup table and other storage,
+ * including the descriptor itself.
+ * For the one in dn_pipe MUST also cleanup ready_heap...
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">purge_flow_set</span>(<span class="enscript-type">struct</span> dn_flow_set *fs, <span class="enscript-type">int</span> all)
+{
+    <span class="enscript-type">struct</span> dn_flow_queue *q, *qn ;
+    <span class="enscript-type">int</span> i ;
+
+	lck_mtx_assert(dn_mutex, LCK_MTX_ASSERT_OWNED);
+
+    <span class="enscript-keyword">for</span> (i = 0 ; i &lt;= fs-&gt;rq_size ; i++ ) {
+	<span class="enscript-keyword">for</span> (q = fs-&gt;rq[i] ; q ; q = qn ) {
+	    <span class="enscript-type">struct</span> mbuf *m, *mnext;
+
+	    mnext = q-&gt;head;
+	    <span class="enscript-keyword">while</span> ((m = mnext) != NULL) {
+		mnext = m-&gt;m_nextpkt;
+		DN_FREE_PKT(m);
+	    }
+	    qn = q-&gt;next ;
+	    FREE(q, M_DUMMYNET);
+	}
+	fs-&gt;rq[i] = NULL ;
+    }
+    fs-&gt;rq_elements = 0 ;
+    <span class="enscript-keyword">if</span> (all) {
+	<span class="enscript-comment">/* RED - free lookup table */</span>
+	<span class="enscript-keyword">if</span> (fs-&gt;w_q_lookup)
+	    FREE(fs-&gt;w_q_lookup, M_DUMMYNET);
+	<span class="enscript-keyword">if</span> (fs-&gt;rq)
+	    FREE(fs-&gt;rq, M_DUMMYNET);
+	<span class="enscript-comment">/* if this fs is not part of a pipe, free it */</span>
+	<span class="enscript-keyword">if</span> (fs-&gt;pipe &amp;&amp; fs != &amp;(fs-&gt;pipe-&gt;fs) )
+	    FREE(fs, M_DUMMYNET);
+    }
+}
+
+<span class="enscript-comment">/*
+ * Dispose all packets queued on a pipe (not a flow_set).
+ * Also free all resources associated to a pipe, which is about
+ * to be deleted.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">purge_pipe</span>(<span class="enscript-type">struct</span> dn_pipe *pipe)
+{
+    <span class="enscript-type">struct</span> mbuf *m, *mnext;
+
+    purge_flow_set( &amp;(pipe-&gt;fs), 1 );
+
+    mnext = pipe-&gt;head;
+    <span class="enscript-keyword">while</span> ((m = mnext) != NULL) {
+	mnext = m-&gt;m_nextpkt;
+	DN_FREE_PKT(m);
+    }
+
+    heap_free( &amp;(pipe-&gt;scheduler_heap) );
+    heap_free( &amp;(pipe-&gt;not_eligible_heap) );
+    heap_free( &amp;(pipe-&gt;idle_heap) );
+}
+
+<span class="enscript-comment">/*
+ * Delete all pipes and heaps returning memory. Must also
+ * remove references from all ipfw rules to all pipes.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">dummynet_flush</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> dn_pipe *pipe, *pipe1;
+	<span class="enscript-type">struct</span> dn_flow_set *fs, *fs1;
+	<span class="enscript-type">int</span> i;
+
+	lck_mtx_lock(dn_mutex);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPFW2</span>
+	<span class="enscript-comment">/* remove all references to pipes ...*/</span>
+	flush_pipe_ptrs(NULL);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IPFW2 */</span>
+
+	<span class="enscript-comment">/* Free heaps so we don't have unwanted events. */</span>
+	heap_free(&amp;ready_heap);
+	heap_free(&amp;wfq_ready_heap);
+	heap_free(&amp;extract_heap);
+
+	<span class="enscript-comment">/*
+	 * Now purge all queued pkts and delete all pipes.
+	 *
+	 * XXXGL: can we merge the for(;;) cycles into one or not?
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; HASHSIZE; i++)
+		SLIST_FOREACH_SAFE(fs, &amp;flowsethash[i], next, fs1) {
+			SLIST_REMOVE(&amp;flowsethash[i], fs, dn_flow_set, next);
+			purge_flow_set(fs, 1);
+		}
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; HASHSIZE; i++)
+		SLIST_FOREACH_SAFE(pipe, &amp;pipehash[i], next, pipe1) {
+			SLIST_REMOVE(&amp;pipehash[i], pipe, dn_pipe, next);
+			purge_pipe(pipe);
+			FREE(pipe, M_DUMMYNET);
+		}
+	lck_mtx_unlock(dn_mutex);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">dn_ipfw_rule_delete_fs</span>(<span class="enscript-type">struct</span> dn_flow_set *fs, <span class="enscript-type">void</span> *r)
+{
+    <span class="enscript-type">int</span> i ;
+    <span class="enscript-type">struct</span> dn_flow_queue *q ;
+    <span class="enscript-type">struct</span> mbuf *m ;
+
+    <span class="enscript-keyword">for</span> (i = 0 ; i &lt;= fs-&gt;rq_size ; i++) <span class="enscript-comment">/* last one is ovflow */</span>
+	<span class="enscript-keyword">for</span> (q = fs-&gt;rq[i] ; q ; q = q-&gt;next )
+	    <span class="enscript-keyword">for</span> (m = q-&gt;head ; m ; m = m-&gt;m_nextpkt ) {
+		<span class="enscript-type">struct</span> dn_pkt_tag *pkt = dn_tag_get(m) ;
+		<span class="enscript-keyword">if</span> (pkt-&gt;dn_ipfw_rule == r)
+		    pkt-&gt;dn_ipfw_rule = &amp;default_rule ;
+	    }
+}
+<span class="enscript-comment">/*
+ * when a firewall rule is deleted, scan all queues and remove the flow-id
+ * from packets matching this rule.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dn_ipfw_rule_delete</span>(<span class="enscript-type">void</span> *r)
+{
+    <span class="enscript-type">struct</span> dn_pipe *p ;
+    <span class="enscript-type">struct</span> dn_flow_set *fs ;
+    <span class="enscript-type">struct</span> dn_pkt_tag *pkt ;
+    <span class="enscript-type">struct</span> mbuf *m ;
+    <span class="enscript-type">int</span> i;
+
+	lck_mtx_lock(dn_mutex);
+
+    <span class="enscript-comment">/*
+     * If the rule references a queue (dn_flow_set), then scan
+     * the flow set, otherwise scan pipes. Should do either, but doing
+     * both does not harm.
+     */</span>
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; HASHSIZE; i++)
+	SLIST_FOREACH(fs, &amp;flowsethash[i], next)
+		dn_ipfw_rule_delete_fs(fs, r);
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; HASHSIZE; i++)
+	SLIST_FOREACH(p, &amp;pipehash[i], next) {
+		fs = &amp;(p-&gt;fs);
+		dn_ipfw_rule_delete_fs(fs, r);
+		<span class="enscript-keyword">for</span> (m = p-&gt;head ; m ; m = m-&gt;m_nextpkt ) {
+			pkt = dn_tag_get(m);
+			<span class="enscript-keyword">if</span> (pkt-&gt;dn_ipfw_rule == r)
+				pkt-&gt;dn_ipfw_rule = &amp;default_rule;
+		}
+	}
+	lck_mtx_unlock(dn_mutex);
+}
+
+<span class="enscript-comment">/*
+ * setup RED parameters
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">config_red</span>(<span class="enscript-type">struct</span> dn_flow_set *p, <span class="enscript-type">struct</span> dn_flow_set * x)
+{
+    <span class="enscript-type">int</span> i;
+
+    x-&gt;w_q = p-&gt;w_q;
+    x-&gt;min_th = SCALE(p-&gt;min_th);
+    x-&gt;max_th = SCALE(p-&gt;max_th);
+    x-&gt;max_p = p-&gt;max_p;
+
+    x-&gt;c_1 = p-&gt;max_p / (p-&gt;max_th - p-&gt;min_th);
+    x-&gt;c_2 = SCALE_MUL(x-&gt;c_1, SCALE(p-&gt;min_th));
+    <span class="enscript-keyword">if</span> (x-&gt;flags_fs &amp; DN_IS_GENTLE_RED) {
+	x-&gt;c_3 = (SCALE(1) - p-&gt;max_p) / p-&gt;max_th;
+	x-&gt;c_4 = (SCALE(1) - 2 * p-&gt;max_p);
+    }
+
+    <span class="enscript-comment">/* if the lookup table already exist, free and create it again */</span>
+    <span class="enscript-keyword">if</span> (x-&gt;w_q_lookup) {
+	FREE(x-&gt;w_q_lookup, M_DUMMYNET);
+	x-&gt;w_q_lookup = NULL ;
+    }
+    <span class="enscript-keyword">if</span> (red_lookup_depth == 0) {
+	printf(<span class="enscript-string">&quot;\ndummynet: net.inet.ip.dummynet.red_lookup_depth must be &gt; 0\n&quot;</span>);
+	FREE(x, M_DUMMYNET);
+	<span class="enscript-keyword">return</span> EINVAL;
+    }
+    x-&gt;lookup_depth = red_lookup_depth;
+    x-&gt;w_q_lookup = (u_int *) _MALLOC(x-&gt;lookup_depth * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>),
+	    M_DUMMYNET, M_DONTWAIT);
+    <span class="enscript-keyword">if</span> (x-&gt;w_q_lookup == NULL) {
+	printf(<span class="enscript-string">&quot;dummynet: sorry, cannot allocate red lookup table\n&quot;</span>);
+	FREE(x, M_DUMMYNET);
+	<span class="enscript-keyword">return</span> ENOSPC;
+    }
+
+    <span class="enscript-comment">/* fill the lookup table with (1 - w_q)^x */</span>
+    x-&gt;lookup_step = p-&gt;lookup_step ;
+    x-&gt;lookup_weight = p-&gt;lookup_weight ;
+    x-&gt;w_q_lookup[0] = SCALE(1) - x-&gt;w_q;
+    <span class="enscript-keyword">for</span> (i = 1; i &lt; x-&gt;lookup_depth; i++)
+	x-&gt;w_q_lookup[i] = SCALE_MUL(x-&gt;w_q_lookup[i - 1], x-&gt;lookup_weight);
+    <span class="enscript-keyword">if</span> (red_avg_pkt_size &lt; 1)
+	red_avg_pkt_size = 512 ;
+    x-&gt;avg_pkt_size = red_avg_pkt_size ;
+    <span class="enscript-keyword">if</span> (red_max_pkt_size &lt; 1)
+	red_max_pkt_size = 1500 ;
+    x-&gt;max_pkt_size = red_max_pkt_size ;
+    <span class="enscript-keyword">return</span> 0 ;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">alloc_hash</span>(<span class="enscript-type">struct</span> dn_flow_set *x, <span class="enscript-type">struct</span> dn_flow_set *pfs)
+{
+    <span class="enscript-keyword">if</span> (x-&gt;flags_fs &amp; DN_HAVE_FLOW_MASK) {     <span class="enscript-comment">/* allocate some slots */</span>
+	<span class="enscript-type">int</span> l = pfs-&gt;rq_size;
+
+	<span class="enscript-keyword">if</span> (l == 0)
+	    l = dn_hash_size;
+	<span class="enscript-keyword">if</span> (l &lt; 4)
+	    l = 4;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (l &gt; DN_MAX_HASH_SIZE)
+	    l = DN_MAX_HASH_SIZE;
+	x-&gt;rq_size = l;
+    } <span class="enscript-keyword">else</span>                  <span class="enscript-comment">/* one is enough for null mask */</span>
+	x-&gt;rq_size = 1;
+    x-&gt;rq = _MALLOC((1 + x-&gt;rq_size) * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_flow_queue *),
+	    M_DUMMYNET, M_DONTWAIT | M_ZERO);
+    <span class="enscript-keyword">if</span> (x-&gt;rq == NULL) {
+	printf(<span class="enscript-string">&quot;dummynet: sorry, cannot allocate queue\n&quot;</span>);
+	<span class="enscript-keyword">return</span> ENOSPC;
+    }
+    x-&gt;rq_elements = 0;
+    <span class="enscript-keyword">return</span> 0 ;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">set_fs_parms</span>(<span class="enscript-type">struct</span> dn_flow_set *x, <span class="enscript-type">struct</span> dn_flow_set *src)
+{
+    x-&gt;flags_fs = src-&gt;flags_fs;
+    x-&gt;qsize = src-&gt;qsize;
+    x-&gt;plr = src-&gt;plr;
+    x-&gt;flow_mask = src-&gt;flow_mask;
+    <span class="enscript-keyword">if</span> (x-&gt;flags_fs &amp; DN_QSIZE_IS_BYTES) {
+	<span class="enscript-keyword">if</span> (x-&gt;qsize &gt; 1024*1024)
+	    x-&gt;qsize = 1024*1024 ;
+    } <span class="enscript-keyword">else</span> {
+	<span class="enscript-keyword">if</span> (x-&gt;qsize == 0)
+	    x-&gt;qsize = 50 ;
+	<span class="enscript-keyword">if</span> (x-&gt;qsize &gt; 100)
+	    x-&gt;qsize = 50 ;
+    }
+    <span class="enscript-comment">/* configuring RED */</span>
+    <span class="enscript-keyword">if</span> ( x-&gt;flags_fs &amp; DN_IS_RED )
+	config_red(src, x) ;    <span class="enscript-comment">/* XXX should check errors */</span>
+}
+
+<span class="enscript-comment">/*
+ * setup pipe or queue parameters.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">config_pipe</span>(<span class="enscript-type">struct</span> dn_pipe *p)
+{
+    <span class="enscript-type">int</span> i, r;
+    <span class="enscript-type">struct</span> dn_flow_set *pfs = &amp;(p-&gt;fs);
+    <span class="enscript-type">struct</span> dn_flow_queue *q;
+
+    <span class="enscript-comment">/*
+     * The config program passes parameters as follows:
+     * bw = bits/second (0 means no limits),
+     * delay = ms, must be translated into ticks.
+     * qsize = slots/bytes
+     */</span>
+    p-&gt;delay = ( p-&gt;delay * (hz*10) ) / 1000 ;
+    <span class="enscript-comment">/* We need either a pipe number or a flow_set number */</span>
+    <span class="enscript-keyword">if</span> (p-&gt;pipe_nr == 0 &amp;&amp; pfs-&gt;fs_nr == 0)
+	<span class="enscript-keyword">return</span> EINVAL ;
+    <span class="enscript-keyword">if</span> (p-&gt;pipe_nr != 0 &amp;&amp; pfs-&gt;fs_nr != 0)
+	<span class="enscript-keyword">return</span> EINVAL ;
+    <span class="enscript-keyword">if</span> (p-&gt;pipe_nr != 0) { <span class="enscript-comment">/* this is a pipe */</span>
+	<span class="enscript-type">struct</span> dn_pipe *x, *b;
+
+	lck_mtx_lock(dn_mutex);
+
+	<span class="enscript-comment">/* locate pipe */</span>
+	b = locate_pipe(p-&gt;pipe_nr);
+	
+	<span class="enscript-keyword">if</span> (b == NULL || b-&gt;pipe_nr != p-&gt;pipe_nr) { <span class="enscript-comment">/* new pipe */</span>
+	    x = _MALLOC(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_pipe), M_DUMMYNET, M_DONTWAIT | M_ZERO) ;
+	    <span class="enscript-keyword">if</span> (x == NULL) {
+	    lck_mtx_unlock(dn_mutex);
+		printf(<span class="enscript-string">&quot;dummynet: no memory for new pipe\n&quot;</span>);
+		<span class="enscript-keyword">return</span> ENOSPC;
+	    }
+	    x-&gt;pipe_nr = p-&gt;pipe_nr;
+	    x-&gt;fs.pipe = x ;
+	    <span class="enscript-comment">/* idle_heap is the only one from which we extract from the middle.
+	     */</span>
+	    x-&gt;idle_heap.size = x-&gt;idle_heap.elements = 0 ;
+	    x-&gt;idle_heap.offset=offsetof(<span class="enscript-type">struct</span> dn_flow_queue, heap_pos);
+	} <span class="enscript-keyword">else</span> {
+	    x = b;
+	    <span class="enscript-comment">/* Flush accumulated credit for all queues */</span>
+	    <span class="enscript-keyword">for</span> (i = 0; i &lt;= x-&gt;fs.rq_size; i++)
+		<span class="enscript-keyword">for</span> (q = x-&gt;fs.rq[i]; q; q = q-&gt;next)
+		    q-&gt;numbytes = 0;
+	}
+
+	x-&gt;bandwidth = p-&gt;bandwidth ;
+	x-&gt;numbytes = 0; <span class="enscript-comment">/* just in case... */</span>
+	bcopy(p-&gt;if_name, x-&gt;if_name, <span class="enscript-keyword">sizeof</span>(p-&gt;if_name) );
+	x-&gt;ifp = NULL ; <span class="enscript-comment">/* reset interface ptr */</span>
+	x-&gt;delay = p-&gt;delay ;
+	set_fs_parms(&amp;(x-&gt;fs), pfs);
+
+
+	<span class="enscript-keyword">if</span> ( x-&gt;fs.rq == NULL ) { <span class="enscript-comment">/* a new pipe */</span>
+	    r = alloc_hash(&amp;(x-&gt;fs), pfs) ;
+	    <span class="enscript-keyword">if</span> (r) {
+		lck_mtx_unlock(dn_mutex);
+		FREE(x, M_DUMMYNET);
+		<span class="enscript-keyword">return</span> r ;
+	    }
+	    SLIST_INSERT_HEAD(&amp;pipehash[HASH(x-&gt;pipe_nr)],
+			    x, next);
+	}
+	lck_mtx_unlock(dn_mutex);
+    } <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* config queue */</span>
+	<span class="enscript-type">struct</span> dn_flow_set *x, *b ;
+
+	lck_mtx_lock(dn_mutex);
+	<span class="enscript-comment">/* locate flow_set */</span>
+	b = locate_flowset(pfs-&gt;fs_nr);
+
+	<span class="enscript-keyword">if</span> (b == NULL || b-&gt;fs_nr != pfs-&gt;fs_nr) { <span class="enscript-comment">/* new  */</span>
+	    <span class="enscript-keyword">if</span> (pfs-&gt;parent_nr == 0) {	<span class="enscript-comment">/* need link to a pipe */</span>
+	    	lck_mtx_unlock(dn_mutex);
+			<span class="enscript-keyword">return</span> EINVAL ;
+		}
+	    x = _MALLOC(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_flow_set), M_DUMMYNET, M_DONTWAIT | M_ZERO);
+	    <span class="enscript-keyword">if</span> (x == NULL) {
+	    	lck_mtx_unlock(dn_mutex);
+			printf(<span class="enscript-string">&quot;dummynet: no memory for new flow_set\n&quot;</span>);
+			<span class="enscript-keyword">return</span> ENOSPC;
+	    }
+	    x-&gt;fs_nr = pfs-&gt;fs_nr;
+	    x-&gt;parent_nr = pfs-&gt;parent_nr;
+	    x-&gt;weight = pfs-&gt;weight ;
+	    <span class="enscript-keyword">if</span> (x-&gt;weight == 0)
+		x-&gt;weight = 1 ;
+	    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (x-&gt;weight &gt; 100)
+		x-&gt;weight = 100 ;
+	} <span class="enscript-keyword">else</span> {
+	    <span class="enscript-comment">/* Change parent pipe not allowed; must delete and recreate */</span>
+	    <span class="enscript-keyword">if</span> (pfs-&gt;parent_nr != 0 &amp;&amp; b-&gt;parent_nr != pfs-&gt;parent_nr) {
+	    	lck_mtx_unlock(dn_mutex);
+			<span class="enscript-keyword">return</span> EINVAL ;
+		}
+	    x = b;
+	}
+	set_fs_parms(x, pfs);
+
+	<span class="enscript-keyword">if</span> ( x-&gt;rq == NULL ) { <span class="enscript-comment">/* a new flow_set */</span>
+	    r = alloc_hash(x, pfs) ;
+	    <span class="enscript-keyword">if</span> (r) {
+		lck_mtx_unlock(dn_mutex);
+		FREE(x, M_DUMMYNET);
+		<span class="enscript-keyword">return</span> r ;
+	    }
+	    SLIST_INSERT_HEAD(&amp;flowsethash[HASH(x-&gt;fs_nr)],
+			    x, next);
+	}
+	lck_mtx_unlock(dn_mutex);
+    }
+    <span class="enscript-keyword">return</span> 0 ;
+}
+
+<span class="enscript-comment">/*
+ * Helper function to remove from a heap queues which are linked to
+ * a flow_set about to be deleted.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fs_remove_from_heap</span>(<span class="enscript-type">struct</span> dn_heap *h, <span class="enscript-type">struct</span> dn_flow_set *fs)
+{
+    <span class="enscript-type">int</span> i = 0, found = 0 ;
+    <span class="enscript-keyword">for</span> (; i &lt; h-&gt;elements ;)
+	<span class="enscript-keyword">if</span> ( ((<span class="enscript-type">struct</span> dn_flow_queue *)h-&gt;p[i].object)-&gt;fs == fs) {
+	    h-&gt;elements-- ;
+	    h-&gt;p[i] = h-&gt;p[h-&gt;elements] ;
+	    found++ ;
+	} <span class="enscript-keyword">else</span>
+	    i++ ;
+    <span class="enscript-keyword">if</span> (found)
+	heapify(h);
+}
+
+<span class="enscript-comment">/*
+ * helper function to remove a pipe from a heap (can be there at most once)
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pipe_remove_from_heap</span>(<span class="enscript-type">struct</span> dn_heap *h, <span class="enscript-type">struct</span> dn_pipe *p)
+{
+    <span class="enscript-keyword">if</span> (h-&gt;elements &gt; 0) {
+	<span class="enscript-type">int</span> i = 0 ;
+	<span class="enscript-keyword">for</span> (i=0; i &lt; h-&gt;elements ; i++ ) {
+	    <span class="enscript-keyword">if</span> (h-&gt;p[i].object == p) { <span class="enscript-comment">/* found it */</span>
+		h-&gt;elements-- ;
+		h-&gt;p[i] = h-&gt;p[h-&gt;elements] ;
+		heapify(h);
+		<span class="enscript-keyword">break</span> ;
+	    }
+	}
+    }
+}
+
+<span class="enscript-comment">/*
+ * drain all queues. Called in case of severe mbuf shortage.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dummynet_drain</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-type">struct</span> dn_flow_set *fs;
+    <span class="enscript-type">struct</span> dn_pipe *p;
+    <span class="enscript-type">struct</span> mbuf *m, *mnext;
+	<span class="enscript-type">int</span> i;
+
+	lck_mtx_assert(dn_mutex, LCK_MTX_ASSERT_OWNED);
+
+    heap_free(&amp;ready_heap);
+    heap_free(&amp;wfq_ready_heap);
+    heap_free(&amp;extract_heap);
+    <span class="enscript-comment">/* remove all references to this pipe from flow_sets */</span>
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; HASHSIZE; i++)
+	SLIST_FOREACH(fs, &amp;flowsethash[i], next)
+		purge_flow_set(fs, 0);
+
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; HASHSIZE; i++)
+	SLIST_FOREACH(p, &amp;pipehash[i], next) {
+		purge_flow_set(&amp;(p-&gt;fs), 0);	
+
+	mnext = p-&gt;head;
+	<span class="enscript-keyword">while</span> ((m = mnext) != NULL) {
+	    mnext = m-&gt;m_nextpkt;
+	    DN_FREE_PKT(m);
+	}
+	p-&gt;head = p-&gt;tail = NULL ;
+    }
+}
+
+<span class="enscript-comment">/*
+ * Fully delete a pipe or a queue, cleaning up associated info.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">delete_pipe</span>(<span class="enscript-type">struct</span> dn_pipe *p)
+{
+    <span class="enscript-keyword">if</span> (p-&gt;pipe_nr == 0 &amp;&amp; p-&gt;fs.fs_nr == 0)
+	<span class="enscript-keyword">return</span> EINVAL ;
+    <span class="enscript-keyword">if</span> (p-&gt;pipe_nr != 0 &amp;&amp; p-&gt;fs.fs_nr != 0)
+	<span class="enscript-keyword">return</span> EINVAL ;
+    <span class="enscript-keyword">if</span> (p-&gt;pipe_nr != 0) { <span class="enscript-comment">/* this is an old-style pipe */</span>
+	<span class="enscript-type">struct</span> dn_pipe *b;
+	<span class="enscript-type">struct</span> dn_flow_set *fs;
+	<span class="enscript-type">int</span> i;
+
+	lck_mtx_lock(dn_mutex);
+	<span class="enscript-comment">/* locate pipe */</span>
+	b = locate_pipe(p-&gt;pipe_nr);
+	<span class="enscript-keyword">if</span>(b == NULL){
+		lck_mtx_unlock(dn_mutex);
+	    <span class="enscript-keyword">return</span> EINVAL ; <span class="enscript-comment">/* not found */</span>
+	}
+
+	<span class="enscript-comment">/* Unlink from list of pipes. */</span>
+	SLIST_REMOVE(&amp;pipehash[HASH(b-&gt;pipe_nr)], b, dn_pipe, next);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPFW2</span>
+	<span class="enscript-comment">/* remove references to this pipe from the ip_fw rules. */</span>
+	flush_pipe_ptrs(&amp;(b-&gt;fs));
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IPFW2 */</span>
+
+	<span class="enscript-comment">/* Remove all references to this pipe from flow_sets. */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; HASHSIZE; i++)
+	    SLIST_FOREACH(fs, &amp;flowsethash[i], next)
+		<span class="enscript-keyword">if</span> (fs-&gt;pipe == b) {
+			printf(<span class="enscript-string">&quot;dummynet: ++ ref to pipe %d from fs %d\n&quot;</span>,
+			    p-&gt;pipe_nr, fs-&gt;fs_nr);
+			fs-&gt;pipe = NULL ;
+			purge_flow_set(fs, 0);
+		}
+	fs_remove_from_heap(&amp;ready_heap, &amp;(b-&gt;fs));
+
+	purge_pipe(b);	<span class="enscript-comment">/* remove all data associated to this pipe */</span>
+	<span class="enscript-comment">/* remove reference to here from extract_heap and wfq_ready_heap */</span>
+	pipe_remove_from_heap(&amp;extract_heap, b);
+	pipe_remove_from_heap(&amp;wfq_ready_heap, b);
+	lck_mtx_unlock(dn_mutex);
+	
+	FREE(b, M_DUMMYNET);
+    } <span class="enscript-keyword">else</span> { <span class="enscript-comment">/* this is a WF2Q queue (dn_flow_set) */</span>
+	<span class="enscript-type">struct</span> dn_flow_set *b;
+
+	lck_mtx_lock(dn_mutex);
+	<span class="enscript-comment">/* locate set */</span>
+	b = locate_flowset(p-&gt;fs.fs_nr);
+	<span class="enscript-keyword">if</span> (b == NULL) {
+		lck_mtx_unlock(dn_mutex);
+	    <span class="enscript-keyword">return</span> EINVAL ; <span class="enscript-comment">/* not found */</span>
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPFW2</span>
+	<span class="enscript-comment">/* remove references to this flow_set from the ip_fw rules. */</span>
+	flush_pipe_ptrs(b);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IPFW2 */</span>
+
+	<span class="enscript-comment">/* Unlink from list of flowsets. */</span>
+	SLIST_REMOVE( &amp;flowsethash[HASH(b-&gt;fs_nr)], b, dn_flow_set, next);
+
+	<span class="enscript-keyword">if</span> (b-&gt;pipe != NULL) {
+	    <span class="enscript-comment">/* Update total weight on parent pipe and cleanup parent heaps */</span>
+	    b-&gt;pipe-&gt;sum -= b-&gt;weight * b-&gt;backlogged ;
+	    fs_remove_from_heap(&amp;(b-&gt;pipe-&gt;not_eligible_heap), b);
+	    fs_remove_from_heap(&amp;(b-&gt;pipe-&gt;scheduler_heap), b);
+#<span class="enscript-reference">if</span> 1	<span class="enscript-comment">/* XXX should i remove from idle_heap as well ? */</span>
+	    fs_remove_from_heap(&amp;(b-&gt;pipe-&gt;idle_heap), b);
+#<span class="enscript-reference">endif</span>
+	}
+	purge_flow_set(b, 1);
+	lck_mtx_unlock(dn_mutex);
+    }
+    <span class="enscript-keyword">return</span> 0 ;
+}
+
+<span class="enscript-comment">/*
+ * helper function used to copy data from kernel in DUMMYNET_GET
+ */</span>
+<span class="enscript-type">static</span> 
+<span class="enscript-type">char</span>* <span class="enscript-function-name">dn_copy_set_32</span>(<span class="enscript-type">struct</span> dn_flow_set *set, <span class="enscript-type">char</span> *bp)
+{
+    <span class="enscript-type">int</span> i, copied = 0 ;
+    <span class="enscript-type">struct</span> dn_flow_queue *q;
+	<span class="enscript-type">struct</span> dn_flow_queue_32 *qp = (<span class="enscript-type">struct</span> dn_flow_queue_32 *)bp;
+	
+	lck_mtx_assert(dn_mutex, LCK_MTX_ASSERT_OWNED);
+	
+    <span class="enscript-keyword">for</span> (i = 0 ; i &lt;= set-&gt;rq_size ; i++)
+		<span class="enscript-keyword">for</span> (q = set-&gt;rq[i] ; q ; q = q-&gt;next, qp++ ) {
+			<span class="enscript-keyword">if</span> (q-&gt;hash_slot != i)
+				printf(<span class="enscript-string">&quot;dummynet: ++ at %d: wrong slot (have %d, &quot;</span>
+					   <span class="enscript-string">&quot;should be %d)\n&quot;</span>, copied, q-&gt;hash_slot, i);
+			<span class="enscript-keyword">if</span> (q-&gt;fs != set)
+				printf(<span class="enscript-string">&quot;dummynet: ++ at %d: wrong fs ptr &quot;</span>
+				    <span class="enscript-string">&quot;(have 0x%llx, should be 0x%llx)\n&quot;</span>, i,
+				    (uint64_t)VM_KERNEL_ADDRPERM(q-&gt;fs),
+				    (uint64_t)VM_KERNEL_ADDRPERM(set));
+			copied++ ;
+			cp_queue_to_32_user( q, qp );
+			<span class="enscript-comment">/* cleanup pointers */</span>
+			qp-&gt;next = (user32_addr_t)0 ;
+			qp-&gt;head = qp-&gt;tail = (user32_addr_t)0 ;
+			qp-&gt;fs = (user32_addr_t)0 ;
+		}
+    <span class="enscript-keyword">if</span> (copied != set-&gt;rq_elements)
+		printf(<span class="enscript-string">&quot;dummynet: ++ wrong count, have %d should be %d\n&quot;</span>,
+			   copied, set-&gt;rq_elements);
+    <span class="enscript-keyword">return</span> (<span class="enscript-type">char</span> *)qp ;
+}
+
+<span class="enscript-type">static</span> 
+<span class="enscript-type">char</span>* <span class="enscript-function-name">dn_copy_set_64</span>(<span class="enscript-type">struct</span> dn_flow_set *set, <span class="enscript-type">char</span> *bp)
+{
+    <span class="enscript-type">int</span> i, copied = 0 ;
+    <span class="enscript-type">struct</span> dn_flow_queue *q;
+	<span class="enscript-type">struct</span> dn_flow_queue_64 *qp = (<span class="enscript-type">struct</span> dn_flow_queue_64 *)bp;
+	
+	lck_mtx_assert(dn_mutex, LCK_MTX_ASSERT_OWNED);
+	
+    <span class="enscript-keyword">for</span> (i = 0 ; i &lt;= set-&gt;rq_size ; i++)
+		<span class="enscript-keyword">for</span> (q = set-&gt;rq[i] ; q ; q = q-&gt;next, qp++ ) {
+			<span class="enscript-keyword">if</span> (q-&gt;hash_slot != i)
+				printf(<span class="enscript-string">&quot;dummynet: ++ at %d: wrong slot (have %d, &quot;</span>
+					   <span class="enscript-string">&quot;should be %d)\n&quot;</span>, copied, q-&gt;hash_slot, i);
+			<span class="enscript-keyword">if</span> (q-&gt;fs != set)
+				printf(<span class="enscript-string">&quot;dummynet: ++ at %d: wrong fs ptr &quot;</span>
+				    <span class="enscript-string">&quot;(have 0x%llx, should be 0x%llx)\n&quot;</span>, i,
+				    (uint64_t)VM_KERNEL_ADDRPERM(q-&gt;fs),
+				    (uint64_t)VM_KERNEL_ADDRPERM(set));
+			copied++ ;
+			<span class="enscript-comment">//bcopy(q, qp, sizeof(*q));
+</span>			cp_queue_to_64_user( q, qp );
+			<span class="enscript-comment">/* cleanup pointers */</span>
+			qp-&gt;next = USER_ADDR_NULL ;
+			qp-&gt;head = qp-&gt;tail = USER_ADDR_NULL ;
+			qp-&gt;fs = USER_ADDR_NULL ;
+		}
+    <span class="enscript-keyword">if</span> (copied != set-&gt;rq_elements)
+		printf(<span class="enscript-string">&quot;dummynet: ++ wrong count, have %d should be %d\n&quot;</span>,
+			   copied, set-&gt;rq_elements);
+    <span class="enscript-keyword">return</span> (<span class="enscript-type">char</span> *)qp ;
+}
+
+<span class="enscript-type">static</span> size_t
+<span class="enscript-function-name">dn_calc_size</span>(<span class="enscript-type">int</span> is64user)
+{
+    <span class="enscript-type">struct</span> dn_flow_set *set ;
+    <span class="enscript-type">struct</span> dn_pipe *p ;
+    size_t size = 0 ;
+	size_t pipesize;
+	size_t queuesize;
+	size_t setsize;
+	<span class="enscript-type">int</span> i;
+
+	lck_mtx_assert(dn_mutex, LCK_MTX_ASSERT_OWNED);
+	<span class="enscript-keyword">if</span> ( is64user ){
+		pipesize = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_pipe_64);
+		queuesize = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_flow_queue_64);
+		setsize = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_flow_set_64);
+	}
+	<span class="enscript-keyword">else</span> {
+		pipesize = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_pipe_32);
+		queuesize = <span class="enscript-keyword">sizeof</span>( <span class="enscript-type">struct</span> dn_flow_queue_32 );
+		setsize = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_flow_set_32);
+	}
+    <span class="enscript-comment">/*
+     * compute size of data structures: list of pipes and flow_sets.
+     */</span>
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; HASHSIZE; i++) {
+	SLIST_FOREACH(p, &amp;pipehash[i], next)
+		size += <span class="enscript-keyword">sizeof</span>(*p) +
+		    p-&gt;fs.rq_elements * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_flow_queue);
+	SLIST_FOREACH(set, &amp;flowsethash[i], next)
+		size += <span class="enscript-keyword">sizeof</span> (*set) +
+		    set-&gt;rq_elements * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_flow_queue);
+    }
+    <span class="enscript-keyword">return</span> size;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">dummynet_get</span>(<span class="enscript-type">struct</span> sockopt *sopt)
+{
+    <span class="enscript-type">char</span> *buf, *bp=NULL; <span class="enscript-comment">/* bp is the &quot;copy-pointer&quot; */</span>
+    size_t size ;
+    <span class="enscript-type">struct</span> dn_flow_set *set ;
+    <span class="enscript-type">struct</span> dn_pipe *p ;
+    <span class="enscript-type">int</span> error=0, i ;
+	<span class="enscript-type">int</span>	is64user = 0;
+
+    <span class="enscript-comment">/* XXX lock held too long */</span>
+    lck_mtx_lock(dn_mutex);
+    <span class="enscript-comment">/*
+     * XXX: Ugly, but we need to allocate memory with M_WAITOK flag and we
+     *      cannot use this flag while holding a mutex.
+     */</span>
+	<span class="enscript-keyword">if</span> (proc_is64bit(sopt-&gt;sopt_p))
+		is64user = 1;
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; 10; i++) {
+		size = dn_calc_size(is64user);
+		lck_mtx_unlock(dn_mutex);
+		buf = _MALLOC(size, M_TEMP, M_WAITOK);
+		<span class="enscript-keyword">if</span> (buf == NULL)
+			<span class="enscript-keyword">return</span> ENOBUFS;
+		lck_mtx_lock(dn_mutex);
+		<span class="enscript-keyword">if</span> (size == dn_calc_size(is64user))
+			<span class="enscript-keyword">break</span>;
+		FREE(buf, M_TEMP);
+		buf = NULL;
+    }
+    <span class="enscript-keyword">if</span> (buf == NULL) {
+		lck_mtx_unlock(dn_mutex);
+		<span class="enscript-keyword">return</span> ENOBUFS ;
+    }
+
+
+    bp = buf;
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; HASHSIZE; i++)
+	SLIST_FOREACH(p, &amp;pipehash[i], next) {
+		<span class="enscript-comment">/*
+		 * copy pipe descriptor into *bp, convert delay back to ms,
+		 * then copy the flow_set descriptor(s) one at a time.
+		 * After each flow_set, copy the queue descriptor it owns.
+		 */</span>
+		<span class="enscript-keyword">if</span> ( is64user ){
+			bp = cp_pipe_to_64_user(p, (<span class="enscript-type">struct</span> dn_pipe_64 *)bp);
+		}
+		<span class="enscript-keyword">else</span>{
+			bp = cp_pipe_to_32_user(p, (<span class="enscript-type">struct</span> dn_pipe_32 *)bp);
+		}
+    }
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; HASHSIZE; i++)
+	SLIST_FOREACH(set, &amp;flowsethash[i], next) {
+		<span class="enscript-type">struct</span> dn_flow_set_64 *fs_bp = (<span class="enscript-type">struct</span> dn_flow_set_64 *)bp ;
+		cp_flow_set_to_64_user(set, fs_bp);
+		<span class="enscript-comment">/* XXX same hack as above */</span>
+		fs_bp-&gt;next = CAST_DOWN(user64_addr_t, DN_IS_QUEUE);
+		fs_bp-&gt;pipe = USER_ADDR_NULL;
+		fs_bp-&gt;rq = USER_ADDR_NULL ;
+		bp += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dn_flow_set_64);
+		bp = dn_copy_set_64( set, bp );
+    }
+    lck_mtx_unlock(dn_mutex);
+
+    error = sooptcopyout(sopt, buf, size);
+    FREE(buf, M_TEMP);
+    <span class="enscript-keyword">return</span> error ;
+}
+
+<span class="enscript-comment">/*
+ * Handler for the various dummynet socket options (get, flush, config, del)
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ip_dn_ctl</span>(<span class="enscript-type">struct</span> sockopt *sopt)
+{
+    <span class="enscript-type">int</span> error = 0 ;
+    <span class="enscript-type">struct</span> dn_pipe *p, tmp_pipe;
+
+    <span class="enscript-comment">/* Disallow sets in really-really secure mode. */</span>
+    <span class="enscript-keyword">if</span> (sopt-&gt;sopt_dir == SOPT_SET &amp;&amp; securelevel &gt;= 3)
+	<span class="enscript-keyword">return</span> (EPERM);
+
+    <span class="enscript-keyword">switch</span> (sopt-&gt;sopt_name) {
+    <span class="enscript-keyword">default</span> :
+	printf(<span class="enscript-string">&quot;dummynet: -- unknown option %d&quot;</span>, sopt-&gt;sopt_name);
+	<span class="enscript-keyword">return</span> EINVAL ;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">IP_DUMMYNET_GET</span> :
+	error = dummynet_get(sopt);
+	<span class="enscript-keyword">break</span> ;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">IP_DUMMYNET_FLUSH</span> :
+	dummynet_flush() ;
+	<span class="enscript-keyword">break</span> ;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">IP_DUMMYNET_CONFIGURE</span> :
+	p = &amp;tmp_pipe ;
+	<span class="enscript-keyword">if</span> (proc_is64bit(sopt-&gt;sopt_p))
+		error = cp_pipe_from_user_64( sopt, p );
+	<span class="enscript-keyword">else</span>
+		error = cp_pipe_from_user_32( sopt, p );
+
+	<span class="enscript-keyword">if</span> (error)
+	    <span class="enscript-keyword">break</span> ;
+	error = config_pipe(p);
+	<span class="enscript-keyword">break</span> ;
+
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">IP_DUMMYNET_DEL</span> :	<span class="enscript-comment">/* remove a pipe or queue */</span>
+	p = &amp;tmp_pipe ;
+	<span class="enscript-keyword">if</span> (proc_is64bit(sopt-&gt;sopt_p))
+		error = cp_pipe_from_user_64( sopt, p );
+	<span class="enscript-keyword">else</span>
+		error = cp_pipe_from_user_32( sopt, p );
+	<span class="enscript-keyword">if</span> (error)
+	    <span class="enscript-keyword">break</span> ;
+
+	error = delete_pipe(p);
+	<span class="enscript-keyword">break</span> ;
+    }
+    <span class="enscript-keyword">return</span> error ;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ip_dn_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">/* setup locks */</span>
+	dn_mutex_grp_attr = lck_grp_attr_alloc_init();
+	dn_mutex_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;dn&quot;</span>, dn_mutex_grp_attr);
+	dn_mutex_attr = lck_attr_alloc_init();
+	lck_mtx_init(dn_mutex, dn_mutex_grp, dn_mutex_attr);
+
+	ready_heap.size = ready_heap.elements = 0 ;
+	ready_heap.offset = 0 ;
+
+	wfq_ready_heap.size = wfq_ready_heap.elements = 0 ;
+	wfq_ready_heap.offset = 0 ;
+
+	extract_heap.size = extract_heap.elements = 0 ;
+	extract_heap.offset = 0 ;
+	ip_dn_ctl_ptr = ip_dn_ctl;
+	ip_dn_io_ptr = dummynet_io;
+
+	bzero(&amp;default_rule, <span class="enscript-keyword">sizeof</span> default_rule);
+	
+	default_rule.act_ofs = 0;
+	default_rule.rulenum = IPFW_DEFAULT_RULE;
+	default_rule.cmd_len = 1;
+	default_rule.set = RESVD_SET;
+
+	default_rule.cmd[0].len = 1;
+	default_rule.cmd[0].opcode = 
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IPFIREWALL_DEFAULT_TO_ACCEPT</span>
+                                (1) ? O_ACCEPT :
+#<span class="enscript-reference">endif</span>
+                                O_DENY;
+}
+</pre>
+<hr />
+</body></html>

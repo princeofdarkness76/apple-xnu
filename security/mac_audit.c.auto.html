@@ -1,0 +1,440 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mac_audit.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mac_audit.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2006-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1999, 2000, 2001, 2002 Robert N. M. Watson
+ * Copyright (c) 2001 Ilmar S. Habibulin
+ * Copyright (c) 2001, 2002, 2003, 2004 Networks Associates Technology, Inc.
+ *
+ * This software was developed by Robert Watson and Ilmar Habibulin for the
+ * TrustedBSD Project.
+ *
+ * This software was developed for the FreeBSD Project in part by Network
+ * Associates Laboratories, the Security Research Division of Network
+ * Associates, Inc. under DARPA/SPAWAR contract N66001-01-C-8035 (&quot;CBOSS&quot;),
+ * as part of the DARPA CHATS research program.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>  
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>  
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>  
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsd/bsm/audit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsd/security/audit/audit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsd/sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_AUDIT</span>
+
+<span class="enscript-comment">/* The zone allocator is initialized in mac_base.c. */</span>
+zone_t mac_audit_data_zone;
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_system_check_audit</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">void</span> *record, <span class="enscript-type">int</span> length)
+{
+	<span class="enscript-type">int</span> error;
+
+	MAC_CHECK(system_check_audit, cred, record, length);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_system_check_auditon</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">int</span> cmd)
+{
+	<span class="enscript-type">int</span> error;
+
+	MAC_CHECK(system_check_auditon, cred, cmd);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_system_check_auditctl</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> vnode *vp)
+{
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> label *vl = vp ? vp-&gt;v_label : NULL;
+
+	MAC_CHECK(system_check_auditctl, cred, vp, vl);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_proc_check_getauid</span>(<span class="enscript-type">struct</span> proc *curp)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_proc_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    
+	<span class="enscript-keyword">if</span> (!mac_proc_check_enforce(curp, MAC_PROC_ENFORCE))
+		<span class="enscript-keyword">return</span> 0;
+
+	cred = kauth_cred_proc_ref(curp);
+	MAC_CHECK(proc_check_getauid, cred);
+	kauth_cred_unref(&amp;cred);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_proc_check_setauid</span>(<span class="enscript-type">struct</span> proc *curp, uid_t auid)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_proc_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_proc_check_enforce(curp, MAC_PROC_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = kauth_cred_proc_ref(curp);
+	MAC_CHECK(proc_check_setauid, cred, auid);
+	kauth_cred_unref(&amp;cred);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">mac_proc_check_getaudit</span>(<span class="enscript-type">struct</span> proc *curp) 
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_proc_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_proc_check_enforce(curp, MAC_PROC_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = kauth_cred_proc_ref(curp);
+	MAC_CHECK(proc_check_getaudit, cred);
+	kauth_cred_unref(&amp;cred);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_proc_check_setaudit</span>(<span class="enscript-type">struct</span> proc *curp, <span class="enscript-type">struct</span> auditinfo_addr *ai)
+{
+	kauth_cred_t cred;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SECURITY_MAC_CHECK_ENFORCE</span>
+    <span class="enscript-comment">/* 21167099 - only check if we allow write */</span>
+    <span class="enscript-keyword">if</span> (!mac_proc_enforce)
+        <span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+    <span class="enscript-keyword">if</span> (!mac_proc_check_enforce(curp, MAC_PROC_ENFORCE))
+        <span class="enscript-keyword">return</span> 0;
+
+	cred = kauth_cred_proc_ref(curp);
+	MAC_CHECK(proc_check_setaudit, cred, ai);
+	kauth_cred_unref(&amp;cred);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-comment">/*
+ * This is the framework entry point for MAC policies to use to add
+ * arbitrary data to the current audit record.
+ * (Currently not supported, as no existing audit viewers would 
+ * display this format)
+ * 
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_audit_data</span>(<span class="enscript-type">int</span> len, u_char *data, mac_policy_handle_t handle)
+{
+	<span class="enscript-type">char</span> *sanitized;
+
+	<span class="enscript-keyword">if</span> ((len &lt;= 0) || (len &gt; MAC_AUDIT_DATA_LIMIT))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	sanitized = (<span class="enscript-type">char</span> *)zalloc(mac_audit_data_zone);
+
+	bcopy(data, sanitized, len);
+	<span class="enscript-keyword">return</span> (audit_mac_data(MAC_AUDIT_DATA_TYPE, len, sanitized));
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * This is the entry point a MAC policy will call to add NULL-
+ * terminated ASCII text to the current audit record.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_audit_text</span>(<span class="enscript-type">char</span> *text, mac_policy_handle_t handle)
+{
+	<span class="enscript-type">char</span> *sanitized;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name;
+	<span class="enscript-type">int</span> i, size, plen, len;
+
+	name = mac_get_mpc(handle)-&gt;mpc_name;
+	len = strlen(text);
+	plen = 2 + strlen(name);
+	<span class="enscript-keyword">if</span> (plen + len &gt;= MAC_AUDIT_DATA_LIMIT)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/*
+	 * Make sure the text is only composed of only ASCII printable
+	 * characters.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i=0; i &lt; len; i++)
+		<span class="enscript-keyword">if</span> (text[i] &lt; (<span class="enscript-type">char</span>) 32 || text[i] &gt; (<span class="enscript-type">char</span>) 126)
+			<span class="enscript-keyword">return</span> (EINVAL);
+
+	size = len + plen + 1;
+ 	sanitized = (<span class="enscript-type">char</span> *)zalloc(mac_audit_data_zone);
+
+	strlcpy(sanitized, name, MAC_AUDIT_DATA_LIMIT);
+	strncat(sanitized, <span class="enscript-string">&quot;: &quot;</span>, MAC_AUDIT_DATA_LIMIT - plen + 2);
+	strncat(sanitized, text, MAC_AUDIT_DATA_LIMIT - plen);
+
+	<span class="enscript-keyword">return</span> (audit_mac_data(MAC_AUDIT_TEXT_TYPE, size, (u_char *)sanitized));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_audit_check_preselect</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> syscode, <span class="enscript-type">void</span> *args)
+{
+	<span class="enscript-type">struct</span> mac_policy_conf *mpc;
+	<span class="enscript-type">int</span> ret, error;
+	u_int i;
+
+	ret = MAC_AUDIT_DEFAULT;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; mac_policy_list.staticmax; i++) {
+		mpc = mac_policy_list.entries[i].mpc;
+		<span class="enscript-keyword">if</span> (mpc == NULL)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (mpc-&gt;mpc_ops-&gt;mpo_audit_check_preselect != NULL) {
+			error = mpc-&gt;mpc_ops-&gt;mpo_audit_check_preselect(cred,
+			    syscode, args);
+			ret = (ret &gt; error ? ret : error);
+		}
+	}
+	<span class="enscript-keyword">if</span> (mac_policy_list_conditional_busy() != 0) {
+		<span class="enscript-keyword">for</span> (; i &lt;= mac_policy_list.maxindex; i++) {
+			mpc = mac_policy_list.entries[i].mpc;
+			<span class="enscript-keyword">if</span> (mpc == NULL)
+				<span class="enscript-keyword">continue</span>;
+
+			<span class="enscript-keyword">if</span> (mpc-&gt;mpc_ops-&gt;mpo_audit_check_preselect != NULL) {
+				error = mpc-&gt;mpc_ops-&gt;mpo_audit_check_preselect(cred,
+				    syscode, args);
+				ret = (ret &gt; error ? ret : error);
+			}
+		}
+		mac_policy_list_unbusy();
+	}
+
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_audit_check_postselect</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> syscode,
+    <span class="enscript-type">void</span> *args, <span class="enscript-type">int</span> error, <span class="enscript-type">int</span> retval, <span class="enscript-type">int</span> mac_forced)
+{
+	<span class="enscript-type">struct</span> mac_policy_conf *mpc;
+	<span class="enscript-type">int</span> ret, mac_error;
+	u_int i;
+
+	<span class="enscript-comment">/*
+	 * If the audit was forced by a MAC policy by mac_audit_check_preselect(),
+	 * echo that.
+	 */</span>
+	<span class="enscript-keyword">if</span> (mac_forced)
+		<span class="enscript-keyword">return</span> (MAC_AUDIT_YES);
+
+	ret = MAC_AUDIT_DEFAULT;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; mac_policy_list.staticmax; i++) {
+		mpc = mac_policy_list.entries[i].mpc;
+		<span class="enscript-keyword">if</span> (mpc == NULL)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (mpc-&gt;mpc_ops-&gt;mpo_audit_check_postselect != NULL) {
+			mac_error = mpc-&gt;mpc_ops-&gt;mpo_audit_check_postselect(cred,
+			    syscode, args, error, retval);
+			ret = (ret &gt; mac_error ? ret : mac_error);
+		}
+	}
+	<span class="enscript-keyword">if</span> (mac_policy_list_conditional_busy() != 0) {
+		<span class="enscript-keyword">for</span> (; i &lt;= mac_policy_list.maxindex; i++) {
+			mpc = mac_policy_list.entries[i].mpc;
+			<span class="enscript-keyword">if</span> (mpc == NULL)
+				<span class="enscript-keyword">continue</span>;
+
+			<span class="enscript-keyword">if</span> (mpc-&gt;mpc_ops-&gt;mpo_audit_check_postselect != NULL) {
+				mac_error = mpc-&gt;mpc_ops-&gt;mpo_audit_check_postselect(cred,
+				    syscode, args, error, retval);
+				ret = (ret &gt; mac_error ? ret : mac_error);
+			}
+		}
+		mac_policy_list_unbusy();
+	}
+
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+#<span class="enscript-reference">else</span>	<span class="enscript-comment">/* !CONFIG_AUDIT */</span>
+
+<span class="enscript-comment">/*
+ * Function stubs for when AUDIT isn't defined.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_system_check_audit</span>(__unused <span class="enscript-type">struct</span> ucred *cred, __unused <span class="enscript-type">void</span> *record, __unused <span class="enscript-type">int</span> length)
+{
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_system_check_auditon</span>(__unused <span class="enscript-type">struct</span> ucred *cred, __unused <span class="enscript-type">int</span> cmd)
+{
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_system_check_auditctl</span>(__unused <span class="enscript-type">struct</span> ucred *cred, __unused <span class="enscript-type">struct</span> vnode *vp)
+{
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_proc_check_getauid</span>(__unused <span class="enscript-type">struct</span> proc *curp)
+{
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_proc_check_setauid</span>(__unused <span class="enscript-type">struct</span> proc *curp, __unused uid_t auid)
+{
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_proc_check_getaudit</span>(__unused <span class="enscript-type">struct</span> proc *curp)
+{
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_proc_check_setaudit</span>(__unused <span class="enscript-type">struct</span> proc *curp,
+    __unused <span class="enscript-type">struct</span> auditinfo_addr *ai)
+{
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_audit_check_preselect</span>(__unused <span class="enscript-type">struct</span> ucred *cred, __unused <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> syscode,
+    __unused <span class="enscript-type">void</span> *args)
+{
+
+	<span class="enscript-keyword">return</span> (MAC_AUDIT_DEFAULT);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_audit_check_postselect</span>(__unused <span class="enscript-type">struct</span> ucred *cred, __unused <span class="enscript-type">unsigned</span> <span class="enscript-type">short</span> syscode,
+    __unused <span class="enscript-type">void</span> *args, __unused <span class="enscript-type">int</span> error, __unused <span class="enscript-type">int</span> retval, __unused <span class="enscript-type">int</span> mac_forced)
+{
+
+	<span class="enscript-keyword">return</span> (MAC_AUDIT_DEFAULT);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_audit_text</span>(__unused <span class="enscript-type">char</span> *text, __unused mac_policy_handle_t handle)
+{
+	<span class="enscript-keyword">return</span> (0);
+}
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* !CONFIG_AUDIT */</span>
+</pre>
+<hr />
+</body></html>

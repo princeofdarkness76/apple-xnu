@@ -1,0 +1,983 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>thread_act.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">thread_act.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_FREE_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1993 The University of Utah and
+ * the Center for Software Science (CSS).  All rights reserved.
+ *
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ *
+ * THE UNIVERSITY OF UTAH AND CSS ALLOW FREE USE OF THIS SOFTWARE IN ITS &quot;AS
+ * IS&quot; CONDITION.  THE UNIVERSITY OF UTAH AND CSS DISCLAIM ANY LIABILITY OF
+ * ANY KIND FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ *
+ * CSS requests users of this software to return to <a href="mailto:css-dist@cs.utah.edu">css-dist@cs.utah.edu</a> any
+ * improvements that they make and grant CSS redistribution rights.
+ *
+ *	Author:	Bryan Ford, University of Utah CSS
+ *
+ *	Thread management routines
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/alert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/rpc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act_server.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ast.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/mach_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/extmod_statistics.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/exception.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_mig.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_tt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/machine.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/spl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/syscall_subr.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sync_lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/processor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/timer.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/affinity.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/rpc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_mach_internal.h&gt;</span>
+
+<span class="enscript-type">void</span>			act_abort(thread_t);
+<span class="enscript-type">void</span>			install_special_handler_locked(thread_t);
+<span class="enscript-type">void</span>			special_handler_continue(<span class="enscript-type">void</span>);
+
+<span class="enscript-comment">/*
+ * Internal routine to mark a thread as started.
+ * Always called with the thread mutex locked.
+ *
+ * Note: function intentionally declared with the noinline attribute to
+ * prevent multiple declaration of probe symbols in this file; we would
+ * prefer &quot;#pragma noinline&quot;, but gcc does not support it.
+ * PR-6385749 -- the lwp-start probe should fire from within the context
+ * of the newly created thread.  Commented out for now, in case we
+ * turn it into a dead code probe.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_start_internal</span>(
+	thread_t			thread)
+{
+	clear_wait(thread, THREAD_AWAKENED);
+	thread-&gt;started = TRUE;
+	<span class="enscript-comment">// DTRACE_PROC1(lwp__start, thread_t, thread);
+</span>}
+
+<span class="enscript-comment">/*
+ * Internal routine to terminate a thread.
+ * Sometimes called with task already locked.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_terminate_internal</span>(
+	thread_t			thread)
+{
+	kern_return_t		result = KERN_SUCCESS;
+
+	thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;active) {
+		thread-&gt;active = FALSE;
+
+		act_abort(thread);
+
+		<span class="enscript-keyword">if</span> (thread-&gt;started)
+			clear_wait(thread, THREAD_INTERRUPTED);
+		<span class="enscript-keyword">else</span> {
+			thread_start_internal(thread);
+		}
+	}
+	<span class="enscript-keyword">else</span>
+		result = KERN_TERMINATED;
+
+	<span class="enscript-keyword">if</span> (thread-&gt;affinity_set != NULL)
+		thread_affinity_terminate(thread);
+
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">if</span> (thread != current_thread() &amp;&amp; result == KERN_SUCCESS)
+		thread_wait(thread, FALSE);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ * Terminate a thread.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_terminate</span>(
+	thread_t		thread)
+{
+	kern_return_t	result;
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">if</span> (	thread-&gt;task == kernel_task		&amp;&amp;
+			thread != current_thread()			)
+		<span class="enscript-keyword">return</span> (KERN_FAILURE);
+
+	result = thread_terminate_internal(thread);
+
+	<span class="enscript-comment">/*
+	 * If a kernel thread is terminating itself, force an AST here.
+	 * Kernel threads don't normally pass through the AST checking
+	 * code - and all threads finish their own termination in the
+	 * special handler APC.
+	 */</span>
+	<span class="enscript-keyword">if</span> (thread-&gt;task == kernel_task) {
+		ml_set_interrupts_enabled(FALSE);
+		ast_taken(AST_APC, TRUE);
+		panic(<span class="enscript-string">&quot;thread_terminate&quot;</span>);
+	}
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ * Suspend execution of the specified thread.
+ * This is a recursive-style suspension of the thread, a count of
+ * suspends is maintained.
+ *
+ * Called with thread mutex held.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_hold</span>(
+	<span class="enscript-type">register</span> thread_t	thread)
+{
+	<span class="enscript-keyword">if</span> (thread-&gt;suspend_count++ == 0) {
+		install_special_handler(thread);
+		<span class="enscript-keyword">if</span> (thread-&gt;started)
+			thread_wakeup_one(&amp;thread-&gt;suspend_count);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Decrement internal suspension count, setting thread
+ * runnable when count falls to zero.
+ *
+ * Called with thread mutex held.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_release</span>(
+	<span class="enscript-type">register</span> thread_t	thread)
+{
+	<span class="enscript-keyword">if</span> (	thread-&gt;suspend_count &gt; 0		&amp;&amp;
+			--thread-&gt;suspend_count == 0	) {
+		<span class="enscript-keyword">if</span> (thread-&gt;started)
+			thread_wakeup_one(&amp;thread-&gt;suspend_count);
+		<span class="enscript-keyword">else</span> {
+			thread_start_internal(thread);
+		}
+	}
+}
+
+kern_return_t
+<span class="enscript-function-name">thread_suspend</span>(
+	<span class="enscript-type">register</span> thread_t	thread)
+{
+	thread_t			self = current_thread();
+	kern_return_t		result = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL || thread-&gt;task == kernel_task)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;active) {
+		<span class="enscript-keyword">if</span> (	thread-&gt;user_stop_count++ == 0		&amp;&amp;
+				thread-&gt;suspend_count++ == 0		) {
+			install_special_handler(thread);
+			<span class="enscript-keyword">if</span> (thread != self)
+				thread_wakeup_one(&amp;thread-&gt;suspend_count);
+		}
+	}
+	<span class="enscript-keyword">else</span>
+		result = KERN_TERMINATED;
+
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">if</span> (thread != self &amp;&amp; result == KERN_SUCCESS)
+		thread_wait(thread, FALSE);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+kern_return_t
+<span class="enscript-function-name">thread_resume</span>(
+	<span class="enscript-type">register</span> thread_t	thread)
+{
+	kern_return_t		result = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL || thread-&gt;task == kernel_task)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;active) {
+		<span class="enscript-keyword">if</span> (thread-&gt;user_stop_count &gt; 0) {
+			<span class="enscript-keyword">if</span> (	--thread-&gt;user_stop_count == 0		&amp;&amp;
+					--thread-&gt;suspend_count == 0		) {
+				<span class="enscript-keyword">if</span> (thread-&gt;started)
+					thread_wakeup_one(&amp;thread-&gt;suspend_count);
+				<span class="enscript-keyword">else</span> {
+					thread_start_internal(thread);
+				}
+			}
+		}
+		<span class="enscript-keyword">else</span>
+			result = KERN_FAILURE;
+	}
+	<span class="enscript-keyword">else</span>
+		result = KERN_TERMINATED;
+
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ *	thread_depress_abort:
+ *
+ *	Prematurely abort priority depression if there is one.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_depress_abort</span>(
+	<span class="enscript-type">register</span> thread_t	thread)
+{
+	kern_return_t		result;
+
+    <span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+    thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;active)
+		result = thread_depress_abort_internal(thread);
+	<span class="enscript-keyword">else</span>
+		result = KERN_TERMINATED;
+
+    thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+
+<span class="enscript-comment">/*
+ * Indicate that the activation should run its
+ * special handler to detect a condition.
+ *
+ * Called with thread mutex held.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">act_abort</span>(
+	thread_t	thread)
+{
+	spl_t		s = splsched();
+
+	thread_lock(thread);
+
+	<span class="enscript-keyword">if</span> (!(thread-&gt;sched_flags &amp; TH_SFLAG_ABORT)) {
+		thread-&gt;sched_flags |= TH_SFLAG_ABORT;
+		install_special_handler_locked(thread);
+	}
+	<span class="enscript-keyword">else</span>
+		thread-&gt;sched_flags &amp;= ~TH_SFLAG_ABORTSAFELY;
+
+	thread_unlock(thread);
+	splx(s);
+}
+	
+kern_return_t
+<span class="enscript-function-name">thread_abort</span>(
+	<span class="enscript-type">register</span> thread_t	thread)
+{
+	kern_return_t	result = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;active) {
+		act_abort(thread);
+		clear_wait(thread, THREAD_INTERRUPTED);
+	}
+	<span class="enscript-keyword">else</span>
+		result = KERN_TERMINATED;
+
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+kern_return_t
+<span class="enscript-function-name">thread_abort_safely</span>(
+	thread_t		thread)
+{
+	kern_return_t	result = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;active) {
+		spl_t		s = splsched();
+
+		thread_lock(thread);
+		<span class="enscript-keyword">if</span> (!thread-&gt;at_safe_point ||
+				clear_wait_internal(thread, THREAD_INTERRUPTED) != KERN_SUCCESS) {
+			<span class="enscript-keyword">if</span> (!(thread-&gt;sched_flags &amp; TH_SFLAG_ABORT)) {
+				thread-&gt;sched_flags |= TH_SFLAG_ABORTED_MASK;
+				install_special_handler_locked(thread);
+			}
+		}
+		thread_unlock(thread);
+		splx(s);
+	}
+	<span class="enscript-keyword">else</span>
+		result = KERN_TERMINATED;
+		
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*** backward compatibility hacks ***/</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_special_ports.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+
+kern_return_t
+<span class="enscript-function-name">thread_info</span>(
+	thread_t			thread,
+	thread_flavor_t			flavor,
+	thread_info_t			thread_info_out,
+	mach_msg_type_number_t	*thread_info_count)
+{
+	kern_return_t			result;
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;active || thread-&gt;inspection)
+		result = thread_info_internal(
+						thread, flavor, thread_info_out, thread_info_count);
+	<span class="enscript-keyword">else</span>
+		result = KERN_TERMINATED;
+
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+kern_return_t
+<span class="enscript-function-name">thread_get_state</span>(
+	<span class="enscript-type">register</span> thread_t		thread,
+	<span class="enscript-type">int</span>						flavor,
+	thread_state_t			state,			<span class="enscript-comment">/* pointer to OUT array */</span>
+	mach_msg_type_number_t	*state_count)	<span class="enscript-comment">/*IN/OUT*/</span>
+{
+	kern_return_t		result = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;active) {
+		<span class="enscript-keyword">if</span> (thread != current_thread()) {
+			thread_hold(thread);
+
+			thread_mtx_unlock(thread);
+
+			<span class="enscript-keyword">if</span> (thread_stop(thread, FALSE)) {
+				thread_mtx_lock(thread);
+				result = machine_thread_get_state(
+										thread, flavor, state, state_count);
+				thread_unstop(thread);
+			}
+			<span class="enscript-keyword">else</span> {
+				thread_mtx_lock(thread);
+				result = KERN_ABORTED;
+			}
+
+			thread_release(thread);
+		}
+		<span class="enscript-keyword">else</span>
+			result = machine_thread_get_state(
+									thread, flavor, state, state_count);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (thread-&gt;inspection)
+	{
+		result = machine_thread_get_state(
+									thread, flavor, state, state_count);
+	}
+	<span class="enscript-keyword">else</span>
+		result = KERN_TERMINATED;
+
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ *	Change thread's machine-dependent state.  Called with nothing
+ *	locked.  Returns same way.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">thread_set_state_internal</span>(
+	<span class="enscript-type">register</span> thread_t		thread,
+	<span class="enscript-type">int</span>						flavor,
+	thread_state_t			state,
+	mach_msg_type_number_t	state_count,
+	boolean_t				from_user)
+{
+	kern_return_t		result = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;active) {
+		<span class="enscript-keyword">if</span> (thread != current_thread()) {
+			thread_hold(thread);
+
+			thread_mtx_unlock(thread);
+
+			<span class="enscript-keyword">if</span> (thread_stop(thread, TRUE)) {
+				thread_mtx_lock(thread);
+				result = machine_thread_set_state(
+										thread, flavor, state, state_count);
+				thread_unstop(thread);
+			}
+			<span class="enscript-keyword">else</span> {
+				thread_mtx_lock(thread);
+				result = KERN_ABORTED;
+			}
+
+			thread_release(thread);
+		}
+		<span class="enscript-keyword">else</span>
+			result = machine_thread_set_state(
+									thread, flavor, state, state_count);
+	}
+	<span class="enscript-keyword">else</span>
+		result = KERN_TERMINATED;
+
+	<span class="enscript-keyword">if</span> ((result == KERN_SUCCESS) &amp;&amp; from_user)
+		extmod_statistics_incr_thread_set_state(thread);
+
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/* No prototype, since thread_act_server.h has the _from_user version if KERNEL_SERVER */</span> 
+kern_return_t
+<span class="enscript-function-name">thread_set_state</span>(
+	<span class="enscript-type">register</span> thread_t		thread,
+	<span class="enscript-type">int</span>						flavor,
+	thread_state_t			state,
+	mach_msg_type_number_t	state_count);
+
+kern_return_t
+<span class="enscript-function-name">thread_set_state</span>(
+	<span class="enscript-type">register</span> thread_t		thread,
+	<span class="enscript-type">int</span>						flavor,
+	thread_state_t			state,
+	mach_msg_type_number_t	state_count)
+{
+	<span class="enscript-keyword">return</span> thread_set_state_internal(thread, flavor, state, state_count, FALSE);
+}
+ 
+kern_return_t
+<span class="enscript-function-name">thread_set_state_from_user</span>(
+	<span class="enscript-type">register</span> thread_t		thread,
+	<span class="enscript-type">int</span>						flavor,
+	thread_state_t			state,
+	mach_msg_type_number_t	state_count)
+{
+	<span class="enscript-keyword">return</span> thread_set_state_internal(thread, flavor, state, state_count, TRUE);
+}
+ 
+<span class="enscript-comment">/*
+ * Kernel-internal &quot;thread&quot; interfaces used outside this file:
+ */</span>
+
+<span class="enscript-comment">/* Initialize (or re-initialize) a thread state.  Called from execve
+ * with nothing locked, returns same way.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_state_initialize</span>(
+	<span class="enscript-type">register</span> thread_t		thread)
+{
+	kern_return_t		result = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;active) {
+		<span class="enscript-keyword">if</span> (thread != current_thread()) {
+			thread_hold(thread);
+
+			thread_mtx_unlock(thread);
+
+			<span class="enscript-keyword">if</span> (thread_stop(thread, TRUE)) {
+				thread_mtx_lock(thread);
+				result = machine_thread_state_initialize( thread );
+				thread_unstop(thread);
+			}
+			<span class="enscript-keyword">else</span> {
+				thread_mtx_lock(thread);
+				result = KERN_ABORTED;
+			}
+
+			thread_release(thread);
+		}
+		<span class="enscript-keyword">else</span>
+			result = machine_thread_state_initialize( thread );
+	}
+	<span class="enscript-keyword">else</span>
+		result = KERN_TERMINATED;
+
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+
+kern_return_t
+<span class="enscript-function-name">thread_dup</span>(
+	<span class="enscript-type">register</span> thread_t	target)
+{
+	thread_t			self = current_thread();
+	kern_return_t		result = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (target == THREAD_NULL || target == self)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	thread_mtx_lock(target);
+
+	<span class="enscript-keyword">if</span> (target-&gt;active) {
+		thread_hold(target);
+
+		thread_mtx_unlock(target);
+
+		<span class="enscript-keyword">if</span> (thread_stop(target, TRUE)) {
+			thread_mtx_lock(target);
+			result = machine_thread_dup(self, target);
+			<span class="enscript-keyword">if</span> (self-&gt;affinity_set != AFFINITY_SET_NULL)
+				thread_affinity_dup(self, target);
+			thread_unstop(target);
+		}
+		<span class="enscript-keyword">else</span> {
+			thread_mtx_lock(target);
+			result = KERN_ABORTED;
+		}
+
+		thread_release(target);
+	}
+	<span class="enscript-keyword">else</span>
+		result = KERN_TERMINATED;
+
+	thread_mtx_unlock(target);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+
+<span class="enscript-comment">/*
+ *	thread_setstatus:
+ *
+ *	Set the status of the specified thread.
+ *	Called with (and returns with) no locks held.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_setstatus</span>(
+	<span class="enscript-type">register</span> thread_t		thread,
+	<span class="enscript-type">int</span>						flavor,
+	thread_state_t			tstate,
+	mach_msg_type_number_t	count)
+{
+
+	<span class="enscript-keyword">return</span> (thread_set_state(thread, flavor, tstate, count));
+}
+
+<span class="enscript-comment">/*
+ *	thread_getstatus:
+ *
+ *	Get the status of the specified thread.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_getstatus</span>(
+	<span class="enscript-type">register</span> thread_t		thread,
+	<span class="enscript-type">int</span>						flavor,
+	thread_state_t			tstate,
+	mach_msg_type_number_t	*count)
+{
+	<span class="enscript-keyword">return</span> (thread_get_state(thread, flavor, tstate, count));
+}
+
+<span class="enscript-comment">/*
+ *	Change thread's machine-dependent userspace TSD base.
+ *  Called with nothing locked.  Returns same way.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">thread_set_tsd_base</span>(
+	thread_t			thread,
+	mach_vm_offset_t	tsd_base)
+{
+	kern_return_t		result = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (thread == THREAD_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;active) {
+		<span class="enscript-keyword">if</span> (thread != current_thread()) {
+			thread_hold(thread);
+
+			thread_mtx_unlock(thread);
+
+			<span class="enscript-keyword">if</span> (thread_stop(thread, TRUE)) {
+				thread_mtx_lock(thread);
+				result = machine_thread_set_tsd_base(thread, tsd_base);
+				thread_unstop(thread);
+			}
+			<span class="enscript-keyword">else</span> {
+				thread_mtx_lock(thread);
+				result = KERN_ABORTED;
+			}
+
+			thread_release(thread);
+		}
+		<span class="enscript-keyword">else</span>
+			result = machine_thread_set_tsd_base(thread, tsd_base);
+	}
+	<span class="enscript-keyword">else</span>
+		result = KERN_TERMINATED;
+
+	thread_mtx_unlock(thread);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ * install_special_handler:
+ *
+ *	Install the special returnhandler that handles suspension and
+ *	termination, if it hasn't been installed already.
+ *
+ *	Called with the thread mutex held.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">install_special_handler</span>(
+	thread_t		thread)
+{
+	spl_t		s = splsched();
+
+	thread_lock(thread);
+	install_special_handler_locked(thread);
+	thread_unlock(thread);
+	splx(s);
+}
+
+<span class="enscript-comment">/*
+ * install_special_handler_locked:
+ *
+ *	Do the work of installing the special_handler.
+ *
+ *	Called with the thread mutex and scheduling lock held.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">install_special_handler_locked</span>(
+	thread_t				thread)
+{
+	
+	<span class="enscript-comment">/*
+	 * Temporarily undepress, so target has
+	 * a chance to do locking required to
+	 * block itself in special_handler().
+	 */</span>
+	<span class="enscript-keyword">if</span> (thread-&gt;sched_flags &amp; TH_SFLAG_DEPRESSED_MASK)
+		thread_recompute_sched_pri(thread, TRUE);
+
+	thread_ast_set(thread, AST_APC);
+
+	<span class="enscript-keyword">if</span> (thread == current_thread())
+		ast_propagate(thread-&gt;ast);
+	<span class="enscript-keyword">else</span> {
+		processor_t		processor = thread-&gt;last_processor;
+
+		<span class="enscript-keyword">if</span> (	processor != PROCESSOR_NULL					&amp;&amp;
+				processor-&gt;state == PROCESSOR_RUNNING		&amp;&amp;
+				processor-&gt;active_thread == thread			)
+			cause_ast_check(processor);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Activation control support routines internal to this file:
+ *
+ */</span>
+
+<span class="enscript-comment">/*
+ * special_handler_continue
+ *
+ * Continuation routine for the special handler blocks.  It checks
+ * to see whether there has been any new suspensions.  If so, it
+ * installs the special handler again.  Otherwise, it checks to see
+ * if the current depression needs to be re-instated (it may have
+ * been temporarily removed in order to get to this point in a hurry).
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">special_handler_continue</span>(<span class="enscript-type">void</span>)
+{
+	thread_t		thread = current_thread();
+
+	thread_mtx_lock(thread);
+
+	<span class="enscript-keyword">if</span> (thread-&gt;suspend_count &gt; 0)
+		install_special_handler(thread);
+	<span class="enscript-keyword">else</span> {
+		spl_t			s = splsched();
+
+		thread_lock(thread);
+		<span class="enscript-keyword">if</span> (thread-&gt;sched_flags &amp; TH_SFLAG_DEPRESSED_MASK) {
+			processor_t		myprocessor = thread-&gt;last_processor;
+
+			thread-&gt;sched_pri = DEPRESSPRI;
+			myprocessor-&gt;current_pri = thread-&gt;sched_pri;
+		}
+		thread_unlock(thread);
+		splx(s);
+	}
+
+	thread_mtx_unlock(thread);
+
+	thread_exception_return();
+	<span class="enscript-comment">/*NOTREACHED*/</span>
+}
+
+<span class="enscript-comment">/*
+ * special_handler	- handles suspension, termination.  Called
+ * with nothing locked.  Returns (if it returns) the same way.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">special_handler</span>(
+	thread_t				thread)
+{
+	spl_t		s;
+
+	thread_mtx_lock(thread);
+
+	s = splsched();
+	thread_lock(thread);
+	thread-&gt;sched_flags &amp;= ~TH_SFLAG_ABORTED_MASK;
+	thread_unlock(thread);
+	splx(s);
+
+	<span class="enscript-comment">/*
+	 * If we're suspended, go to sleep and wait for someone to wake us up.
+	 */</span>
+	<span class="enscript-keyword">if</span> (thread-&gt;active) {
+		<span class="enscript-keyword">if</span> (thread-&gt;suspend_count &gt; 0) {
+			assert_wait(&amp;thread-&gt;suspend_count, THREAD_ABORTSAFE);
+			thread_mtx_unlock(thread);
+			thread_block((thread_continue_t)special_handler_continue);
+			<span class="enscript-comment">/*NOTREACHED*/</span>
+		}
+	}
+	<span class="enscript-keyword">else</span> {
+		thread_mtx_unlock(thread);
+
+		thread_terminate_self();
+		<span class="enscript-comment">/*NOTREACHED*/</span>
+	}
+
+	thread_mtx_unlock(thread);
+}
+
+<span class="enscript-comment">/* Prototype, see justification above */</span>
+kern_return_t
+<span class="enscript-function-name">act_set_state</span>(
+	thread_t				thread,
+	<span class="enscript-type">int</span>						flavor,
+	thread_state_t			state,
+	mach_msg_type_number_t	count);
+
+kern_return_t
+<span class="enscript-function-name">act_set_state</span>(
+	thread_t				thread,
+	<span class="enscript-type">int</span>						flavor,
+	thread_state_t			state,
+	mach_msg_type_number_t	count)
+{
+    <span class="enscript-keyword">if</span> (thread == current_thread())
+	    <span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+    <span class="enscript-keyword">return</span> (thread_set_state(thread, flavor, state, count));
+    
+}
+
+kern_return_t
+<span class="enscript-function-name">act_set_state_from_user</span>(
+	thread_t				thread,
+	<span class="enscript-type">int</span>						flavor,
+	thread_state_t			state,
+	mach_msg_type_number_t	count)
+{
+    <span class="enscript-keyword">if</span> (thread == current_thread())
+	    <span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+    <span class="enscript-keyword">return</span> (thread_set_state_from_user(thread, flavor, state, count));
+    
+}
+
+kern_return_t
+<span class="enscript-function-name">act_get_state</span>(
+	thread_t				thread,
+	<span class="enscript-type">int</span>						flavor,
+	thread_state_t			state,
+	mach_msg_type_number_t	*count)
+{
+    <span class="enscript-keyword">if</span> (thread == current_thread())
+	    <span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+    <span class="enscript-keyword">return</span> (thread_get_state(thread, flavor, state, count));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">act_set_ast</span>(
+	    thread_t thread,
+	    ast_t ast)
+{
+	spl_t s = splsched();
+
+	<span class="enscript-keyword">if</span> (thread == current_thread()) {
+		thread_ast_set(thread, ast);
+		ast_propagate(thread-&gt;ast);
+	} <span class="enscript-keyword">else</span> {
+		processor_t processor;
+
+		thread_lock(thread);
+		thread_ast_set(thread, ast);
+		processor = thread-&gt;last_processor;
+		<span class="enscript-keyword">if</span> ( processor != PROCESSOR_NULL            &amp;&amp;
+		     processor-&gt;state == PROCESSOR_RUNNING  &amp;&amp;
+		     processor-&gt;active_thread == thread     )
+			cause_ast_check(processor);
+		thread_unlock(thread);
+	}
+
+	splx(s);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">act_set_astbsd</span>(
+	thread_t	thread)
+{
+	act_set_ast( thread, AST_BSD );
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">act_set_kperf</span>(
+	thread_t	thread)
+{
+	<span class="enscript-comment">/* safety check */</span>
+	<span class="enscript-keyword">if</span> (thread != current_thread())
+		<span class="enscript-keyword">if</span>( !ml_get_interrupts_enabled() )
+			panic(<span class="enscript-string">&quot;unsafe act_set_kperf operation&quot;</span>);
+
+	act_set_ast( thread, AST_KPERF );
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">act_set_astmacf</span>(
+	thread_t	thread)
+{
+	act_set_ast( thread, AST_MACF);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">set_astledger</span>(thread_t thread)
+{
+	act_set_ast(thread, AST_LEDGER);
+}
+
+
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,696 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOBufferMemoryDescriptor.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOBufferMemoryDescriptor.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2000 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_IOMEMORYDESCRIPTOR_INTERNAL_</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/assert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/system.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOLib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOMapper.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOBufferMemoryDescriptor.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSDebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;IOKitKernelInternal.h&quot;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IOALLOCDEBUG</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSCPPDebug.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOStatisticsPrivate.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IOKITSTATS</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsAlloc</span>(type, size) \
+<span class="enscript-keyword">do</span> { \
+	<span class="enscript-reference">IOStatistics</span>::countAlloc(type, size); \
+} <span class="enscript-keyword">while</span> (0)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsAlloc</span>(type, size)
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IOKITSTATS */</span>
+
+
+__BEGIN_DECLS
+<span class="enscript-type">void</span> <span class="enscript-function-name">ipc_port_release_send</span>(ipc_port_t port);
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/pmap.h&gt;</span>
+
+__END_DECLS
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">enum</span>
+{
+    kInternalFlagPhysical      = 0x00000001,
+    kInternalFlagPageSized     = 0x00000002,
+    kInternalFlagPageAllocated = 0x00000004
+};
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOGeneralMemoryDescriptor
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IOBufferMemoryDescriptor,
+				IOGeneralMemoryDescriptor);
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">static</span> uintptr_t <span class="enscript-function-name">IOBMDPageProc</span>(iopa_t * a)
+{
+    kern_return_t kr;
+    vm_address_t  vmaddr  = 0;
+    <span class="enscript-type">int</span>           options = 0; <span class="enscript-comment">// KMA_LOMEM;
+</span>
+    kr = kernel_memory_allocate(kernel_map, &amp;vmaddr,
+				page_size, 0, options, VM_KERN_MEMORY_IOKIT);
+
+    <span class="enscript-keyword">if</span> (KERN_SUCCESS != kr) vmaddr = 0;
+    <span class="enscript-keyword">else</span> 		    bzero((<span class="enscript-type">void</span> *) vmaddr, page_size);
+
+    <span class="enscript-keyword">return</span> ((uintptr_t) vmaddr);
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__LP64__</span>
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOBufferMemoryDescriptor::initWithOptions</span>(
+                               IOOptionBits options,
+                               vm_size_t    capacity,
+                               vm_offset_t  alignment,
+			       task_t	    inTask)
+{
+    mach_vm_address_t physicalMask = 0;
+    <span class="enscript-keyword">return</span> (initWithPhysicalMask(inTask, options, capacity, alignment, physicalMask));
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !__LP64__ */</span>
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOBufferMemoryDescriptor::initWithPhysicalMask</span>(
+				task_t		  inTask,
+				IOOptionBits      options,
+				mach_vm_size_t    capacity,
+				mach_vm_address_t alignment,
+				mach_vm_address_t physicalMask)
+{
+    task_t		  mapTask = NULL;
+    vm_map_t 		  vmmap = NULL;
+    mach_vm_address_t     highestMask = 0;
+    IOOptionBits	  iomdOptions = kIOMemoryTypeVirtual64 | kIOMemoryAsReference;
+    IODMAMapSpecification mapSpec;
+    <span class="enscript-type">bool</span>                  mapped = false;
+    <span class="enscript-type">bool</span>                  needZero;
+
+    <span class="enscript-keyword">if</span> (!capacity) <span class="enscript-keyword">return</span> false;
+
+    _options   	      = options;
+    _capacity         = capacity;
+    _internalFlags    = 0;
+    _internalReserved = 0;
+    _buffer	      = 0;
+
+    _ranges.v64 = IONew(IOAddressRange, 1);
+    <span class="enscript-keyword">if</span> (!_ranges.v64)
+	<span class="enscript-keyword">return</span> (false);
+    _ranges.v64-&gt;address = 0;
+    _ranges.v64-&gt;length  = 0;
+    <span class="enscript-comment">//  make sure super::free doesn't dealloc _ranges before super::init
+</span>    _flags = kIOMemoryAsReference;
+
+    <span class="enscript-comment">// Grab IOMD bits from the Buffer MD options
+</span>    iomdOptions  |= (options &amp; kIOBufferDescriptorMemoryFlags);
+
+    <span class="enscript-keyword">if</span> (!(kIOMemoryMapperNone &amp; options))
+    {
+	<span class="enscript-reference">IOMapper</span>::checkForSystemMapper();
+	mapped = (0 != IOMapper::gSystem);
+    }
+    needZero = (mapped || (0 != (kIOMemorySharingTypeMask &amp; options)));
+
+    <span class="enscript-keyword">if</span> (physicalMask &amp;&amp; (alignment &lt;= 1))
+    {
+	alignment   = ((physicalMask ^ (-1ULL)) &amp; (physicalMask - 1));
+	highestMask = (physicalMask | alignment);
+	alignment++;
+	<span class="enscript-keyword">if</span> (alignment &lt; page_size)
+            alignment = page_size;
+    }
+
+    <span class="enscript-keyword">if</span> ((options &amp; (kIOMemorySharingTypeMask | kIOMapCacheMask | kIOMemoryClearEncrypt)) &amp;&amp; (alignment &lt; page_size))
+	alignment = page_size;
+
+    <span class="enscript-keyword">if</span> (alignment &gt;= page_size)
+	capacity = round_page(capacity);
+
+    <span class="enscript-keyword">if</span> (alignment &gt; page_size)
+	options |= kIOMemoryPhysicallyContiguous;
+
+    _alignment = alignment;
+
+    <span class="enscript-keyword">if</span> ((capacity + alignment) &lt; _capacity) <span class="enscript-keyword">return</span> (false);
+
+    <span class="enscript-keyword">if</span> ((inTask != kernel_task) &amp;&amp; !(options &amp; kIOMemoryPageable))
+	<span class="enscript-keyword">return</span> false;
+
+    bzero(&amp;mapSpec, <span class="enscript-keyword">sizeof</span>(mapSpec));
+    mapSpec.alignment      = _alignment;
+    mapSpec.numAddressBits = 64;
+    <span class="enscript-keyword">if</span> (highestMask &amp;&amp; mapped)
+    {
+	<span class="enscript-keyword">if</span> (highestMask &lt;= 0xFFFFFFFF)
+	    mapSpec.numAddressBits = (32 - __builtin_clz((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) highestMask));
+	<span class="enscript-keyword">else</span>
+	    mapSpec.numAddressBits = (64 - __builtin_clz((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) (highestMask &gt;&gt; 32)));
+	highestMask = 0;
+    }
+
+    <span class="enscript-comment">// set memory entry cache mode, pageable, purgeable
+</span>    iomdOptions |= ((options &amp; kIOMapCacheMask) &gt;&gt; kIOMapCacheShift) &lt;&lt; kIOMemoryBufferCacheShift;
+    <span class="enscript-keyword">if</span> (options &amp; kIOMemoryPageable)
+    {
+	iomdOptions |= kIOMemoryBufferPageable;
+	<span class="enscript-keyword">if</span> (options &amp; kIOMemoryPurgeable) iomdOptions |= kIOMemoryBufferPurgeable;
+    }
+    <span class="enscript-keyword">else</span>
+    {
+	vmmap = kernel_map;
+
+	<span class="enscript-comment">// Buffer shouldn't auto prepare they should be prepared explicitly
+</span>	<span class="enscript-comment">// But it never was enforced so what are you going to do?
+</span>	iomdOptions |= kIOMemoryAutoPrepare;
+
+	<span class="enscript-comment">/* Allocate a wired-down buffer inside kernel space. */</span>
+
+	<span class="enscript-type">bool</span> contig = (0 != (options &amp; kIOMemoryHostPhysicallyContiguous));
+
+	<span class="enscript-keyword">if</span> (!contig &amp;&amp; (0 != (options &amp; kIOMemoryPhysicallyContiguous)))
+	{
+	    contig |= (!mapped);
+	    contig |= (0 != (kIOMemoryMapperNone &amp; options));
+#<span class="enscript-reference">if</span> 0
+	    <span class="enscript-comment">// treat kIOMemoryPhysicallyContiguous as kIOMemoryHostPhysicallyContiguous for now
+</span>	    contig |= true;
+#<span class="enscript-reference">endif</span>
+	}
+
+	<span class="enscript-keyword">if</span> (contig || highestMask || (alignment &gt; page_size))
+	{
+            _internalFlags |= kInternalFlagPhysical;
+            <span class="enscript-keyword">if</span> (highestMask)
+            {
+                _internalFlags |= kInternalFlagPageSized;
+                capacity = round_page(capacity);
+            }
+            _buffer = (<span class="enscript-type">void</span> *) IOKernelAllocateWithPhysicalRestrict(
+            				capacity, highestMask, alignment, contig);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (needZero
+		  &amp;&amp; ((capacity + alignment) &lt;= (page_size - gIOPageAllocChunkBytes)))
+	{
+            _internalFlags |= kInternalFlagPageAllocated;
+            needZero        = false;
+            _buffer         = (<span class="enscript-type">void</span> *) iopa_alloc(&amp;gIOBMDPageAllocator, &amp;IOBMDPageProc, capacity, alignment);
+	    <span class="enscript-keyword">if</span> (_buffer)
+	    {
+		IOStatisticsAlloc(kIOStatisticsMallocAligned, capacity);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IOALLOCDEBUG</span>
+		OSAddAtomic(capacity, &amp;debug_iomalloc_size);
+#<span class="enscript-reference">endif</span>
+	    }
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (alignment &gt; 1)
+	{
+            _buffer = IOMallocAligned(capacity, alignment);
+	}
+	<span class="enscript-keyword">else</span>
+	{
+            _buffer = IOMalloc(capacity);
+	}
+	<span class="enscript-keyword">if</span> (!_buffer)
+	{
+            <span class="enscript-keyword">return</span> false;
+	}
+	<span class="enscript-keyword">if</span> (needZero) bzero(_buffer, capacity);
+    }
+
+    <span class="enscript-keyword">if</span>( (options &amp; (kIOMemoryPageable | kIOMapCacheMask))) {
+	vm_size_t	size = round_page(capacity);
+
+	<span class="enscript-comment">// initWithOptions will create memory entry
+</span>	iomdOptions |= kIOMemoryPersistent;
+
+	<span class="enscript-keyword">if</span>( options &amp; kIOMemoryPageable) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IOALLOCDEBUG</span>
+	    OSAddAtomicLong(size, &amp;debug_iomallocpageable_size);
+#<span class="enscript-reference">endif</span>
+	    mapTask = inTask;
+	    <span class="enscript-keyword">if</span> (NULL == inTask)
+		inTask = kernel_task;
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (options &amp; kIOMapCacheMask)
+	{
+	    <span class="enscript-comment">// Prefetch each page to put entries into the pmap
+</span>	    <span class="enscript-type">volatile</span> UInt8 *	startAddr = (UInt8 *)_buffer;
+	    <span class="enscript-type">volatile</span> UInt8 *	endAddr   = (UInt8 *)_buffer + capacity;
+
+	    <span class="enscript-keyword">while</span> (startAddr &lt; endAddr)
+	    {
+		UInt8 dummyVar = *startAddr;
+		(<span class="enscript-type">void</span>) dummyVar;
+		startAddr += page_size;
+ 	    }
+	}
+    }
+
+    _ranges.v64-&gt;address = (mach_vm_address_t) _buffer;;
+    _ranges.v64-&gt;length  = _capacity;
+
+    <span class="enscript-keyword">if</span> (!super::initWithOptions(_ranges.v64, 1, 0,
+				inTask, iomdOptions, <span class="enscript-comment">/* System mapper */</span> 0))
+	<span class="enscript-keyword">return</span> false;
+
+    <span class="enscript-comment">// give any system mapper the allocation params
+</span>    <span class="enscript-keyword">if</span> (kIOReturnSuccess != dmaCommandOperation(kIOMDAddDMAMapSpec, 
+    						&amp;mapSpec, <span class="enscript-keyword">sizeof</span>(mapSpec)))
+	<span class="enscript-keyword">return</span> false;
+
+    <span class="enscript-keyword">if</span> (mapTask)
+    {
+	<span class="enscript-keyword">if</span> (!reserved) {
+	    reserved = IONew( ExpansionData, 1 );
+	    <span class="enscript-keyword">if</span>( !reserved)
+		<span class="enscript-keyword">return</span>( false );
+	}
+	reserved-&gt;map = createMappingInTask(mapTask, 0, 
+			    kIOMapAnywhere | (options &amp; kIOMapPrefault) | (options &amp; kIOMapCacheMask), 0, 0);
+	<span class="enscript-keyword">if</span> (!reserved-&gt;map)
+	{
+	    _buffer = 0;
+	    <span class="enscript-keyword">return</span>( false );
+	}
+	release();	    <span class="enscript-comment">// map took a retain on this
+</span>	reserved-&gt;map-&gt;retain();
+	removeMapping(reserved-&gt;map);
+	mach_vm_address_t buffer = reserved-&gt;map-&gt;getAddress();
+	_buffer = (<span class="enscript-type">void</span> *) buffer;
+	<span class="enscript-keyword">if</span> (kIOMemoryTypeVirtual64 == (kIOMemoryTypeMask &amp; iomdOptions))
+	    _ranges.v64-&gt;address = buffer;
+    }
+
+    setLength(_capacity);
+
+    <span class="enscript-keyword">return</span> true;
+}
+
+IOBufferMemoryDescriptor * <span class="enscript-function-name">IOBufferMemoryDescriptor::inTaskWithOptions</span>(
+					    task_t       inTask,
+                                            IOOptionBits options,
+                                            vm_size_t    capacity,
+                                            vm_offset_t  alignment)
+{
+    IOBufferMemoryDescriptor *me = <span class="enscript-keyword">new</span> IOBufferMemoryDescriptor;
+    
+    <span class="enscript-keyword">if</span> (me &amp;&amp; !me-&gt;initWithPhysicalMask(inTask, options, capacity, alignment, 0)) {
+	me-&gt;release();
+	me = 0;
+    }
+    <span class="enscript-keyword">return</span> me;
+}
+
+IOBufferMemoryDescriptor * <span class="enscript-function-name">IOBufferMemoryDescriptor::inTaskWithPhysicalMask</span>(
+					    task_t	      inTask,
+                                            IOOptionBits      options,
+                                            mach_vm_size_t    capacity,
+                                            mach_vm_address_t physicalMask)
+{
+    IOBufferMemoryDescriptor *me = <span class="enscript-keyword">new</span> IOBufferMemoryDescriptor;
+    
+    <span class="enscript-keyword">if</span> (me &amp;&amp; !me-&gt;initWithPhysicalMask(inTask, options, capacity, 1, physicalMask))
+    {
+	me-&gt;release();
+	me = 0;
+    }
+    <span class="enscript-keyword">return</span> me;
+}
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__LP64__</span>
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOBufferMemoryDescriptor::initWithOptions</span>(
+                               IOOptionBits options,
+                               vm_size_t    capacity,
+                               vm_offset_t  alignment)
+{
+    <span class="enscript-keyword">return</span> (initWithPhysicalMask(kernel_task, options, capacity, alignment, (mach_vm_address_t)0));
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !__LP64__ */</span>
+
+IOBufferMemoryDescriptor * <span class="enscript-function-name">IOBufferMemoryDescriptor::withOptions</span>(
+                                            IOOptionBits options,
+                                            vm_size_t    capacity,
+                                            vm_offset_t  alignment)
+{
+    IOBufferMemoryDescriptor *me = <span class="enscript-keyword">new</span> IOBufferMemoryDescriptor;
+    
+    <span class="enscript-keyword">if</span> (me &amp;&amp; !me-&gt;initWithPhysicalMask(kernel_task, options, capacity, alignment, 0)) {
+	me-&gt;release();
+	me = 0;
+    }
+    <span class="enscript-keyword">return</span> me;
+}
+
+
+<span class="enscript-comment">/*
+ * withCapacity:
+ *
+ * Returns a new IOBufferMemoryDescriptor with a buffer large enough to
+ * hold capacity bytes.  The descriptor's length is initially set to the capacity.
+ */</span>
+IOBufferMemoryDescriptor *
+<span class="enscript-function-name">IOBufferMemoryDescriptor::withCapacity</span>(vm_size_t   inCapacity,
+                                       IODirection inDirection,
+                                       <span class="enscript-type">bool</span>        inContiguous)
+{
+    <span class="enscript-keyword">return</span>( IOBufferMemoryDescriptor::withOptions(
+               inDirection | kIOMemoryUnshared
+                | (inContiguous ? kIOMemoryPhysicallyContiguous : 0),
+               inCapacity, inContiguous ? inCapacity : 1 ));
+}
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__LP64__</span>
+<span class="enscript-comment">/*
+ * initWithBytes:
+ *
+ * Initialize a new IOBufferMemoryDescriptor preloaded with bytes (copied).
+ * The descriptor's length and capacity are set to the input buffer's size.
+ */</span>
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOBufferMemoryDescriptor::initWithBytes</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> * inBytes,
+                                             vm_size_t    inLength,
+                                             IODirection  inDirection,
+                                             <span class="enscript-type">bool</span>         inContiguous)
+{
+    <span class="enscript-keyword">if</span> (!initWithPhysicalMask(kernel_task, inDirection | kIOMemoryUnshared
+			      | (inContiguous ? kIOMemoryPhysicallyContiguous : 0),
+			      inLength, inLength, (mach_vm_address_t)0))
+        <span class="enscript-keyword">return</span> false;
+
+    <span class="enscript-comment">// start out with no data
+</span>    setLength(0);
+
+    <span class="enscript-keyword">if</span> (!appendBytes(inBytes, inLength))
+        <span class="enscript-keyword">return</span> false;
+
+    <span class="enscript-keyword">return</span> true;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !__LP64__ */</span>
+
+<span class="enscript-comment">/*
+ * withBytes:
+ *
+ * Returns a new IOBufferMemoryDescriptor preloaded with bytes (copied).
+ * The descriptor's length and capacity are set to the input buffer's size.
+ */</span>
+IOBufferMemoryDescriptor *
+<span class="enscript-function-name">IOBufferMemoryDescriptor::withBytes</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> * inBytes,
+                                    vm_size_t    inLength,
+                                    IODirection  inDirection,
+                                    <span class="enscript-type">bool</span>         inContiguous)
+{
+    IOBufferMemoryDescriptor *me = <span class="enscript-keyword">new</span> IOBufferMemoryDescriptor;
+
+    <span class="enscript-keyword">if</span> (me &amp;&amp; !me-&gt;initWithPhysicalMask(
+               kernel_task, inDirection | kIOMemoryUnshared
+                | (inContiguous ? kIOMemoryPhysicallyContiguous : 0),
+               inLength, inLength, 0 ))
+    {
+	me-&gt;release();
+	me = 0;
+    }
+
+    <span class="enscript-keyword">if</span> (me)
+    {
+	<span class="enscript-comment">// start out with no data
+</span>	me-&gt;setLength(0);
+
+	<span class="enscript-keyword">if</span> (!me-&gt;appendBytes(inBytes, inLength))
+	{
+	    me-&gt;release();
+	    me = 0;
+	}
+    }
+    <span class="enscript-keyword">return</span> me;
+}
+
+<span class="enscript-comment">/*
+ * free:
+ *
+ * Free resources
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOBufferMemoryDescriptor::free</span>()
+{
+    <span class="enscript-comment">// Cache all of the relevant information on the stack for use
+</span>    <span class="enscript-comment">// after we call super::free()!
+</span>    IOOptionBits     flags         = _flags;
+    IOOptionBits     internalFlags = _internalFlags;
+    IOOptionBits     options   = _options;
+    vm_size_t        size      = _capacity;
+    <span class="enscript-type">void</span> *           buffer    = _buffer;
+    IOMemoryMap *    map       = 0;
+    IOAddressRange * range     = _ranges.v64;
+    vm_offset_t      alignment = _alignment;
+
+    <span class="enscript-keyword">if</span> (alignment &gt;= page_size)
+	size = round_page(size);
+
+    <span class="enscript-keyword">if</span> (reserved)
+    {
+	map = reserved-&gt;map;
+        IODelete( reserved, ExpansionData, 1 );
+	<span class="enscript-keyword">if</span> (map)
+	    map-&gt;release();
+    }
+
+    <span class="enscript-comment">/* super::free may unwire - deallocate buffer afterwards */</span>
+    <span class="enscript-reference">super</span>::free();
+
+    <span class="enscript-keyword">if</span> (options &amp; kIOMemoryPageable)
+    {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IOALLOCDEBUG</span>
+	OSAddAtomicLong(-(round_page(size)), &amp;debug_iomallocpageable_size);
+#<span class="enscript-reference">endif</span>
+    }
+    <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (buffer)
+    {
+	<span class="enscript-keyword">if</span> (kInternalFlagPageSized &amp; internalFlags) size = round_page(size);
+
+        <span class="enscript-keyword">if</span> (kInternalFlagPhysical &amp; internalFlags)
+        {
+            IOKernelFreePhysical((mach_vm_address_t) buffer, size);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (kInternalFlagPageAllocated &amp; internalFlags)
+	{
+	    uintptr_t page;
+            page = iopa_free(&amp;gIOBMDPageAllocator, (uintptr_t) buffer, size);
+	    <span class="enscript-keyword">if</span> (page)
+	    {
+		kmem_free(kernel_map, page, page_size);
+	    }
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IOALLOCDEBUG</span>
+		OSAddAtomic(-size, &amp;debug_iomalloc_size);
+#<span class="enscript-reference">endif</span>
+	    IOStatisticsAlloc(kIOStatisticsFreeAligned, size);
+	}
+        <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (alignment &gt; 1)
+	{
+            IOFreeAligned(buffer, size);
+	}
+        <span class="enscript-keyword">else</span>
+	{
+            IOFree(buffer, size);
+	}
+    }
+    <span class="enscript-keyword">if</span> (range &amp;&amp; (kIOMemoryAsReference &amp; flags))
+	IODelete(range, IOAddressRange, 1);
+}
+
+<span class="enscript-comment">/*
+ * getCapacity:
+ *
+ * Get the buffer capacity
+ */</span>
+vm_size_t <span class="enscript-function-name">IOBufferMemoryDescriptor::getCapacity</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> _capacity;
+}
+
+<span class="enscript-comment">/*
+ * setLength:
+ *
+ * Change the buffer length of the memory descriptor.  When a new buffer
+ * is created, the initial length of the buffer is set to be the same as
+ * the capacity.  The length can be adjusted via setLength for a shorter
+ * transfer (there is no need to create more buffer descriptors when you
+ * can reuse an existing one, even for different transfer sizes).   Note
+ * that the specified length must not exceed the capacity of the buffer.
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOBufferMemoryDescriptor::setLength</span>(vm_size_t length)
+{
+    assert(length &lt;= _capacity);
+
+    _length = length;
+    _ranges.v64-&gt;length = length;
+}
+
+<span class="enscript-comment">/*
+ * setDirection:
+ *
+ * Change the direction of the transfer.  This method allows one to redirect
+ * the descriptor's transfer direction.  This eliminates the need to destroy
+ * and create new buffers when different transfer directions are needed.
+ */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOBufferMemoryDescriptor::setDirection</span>(IODirection direction)
+{
+    _flags = (_flags &amp; ~kIOMemoryDirectionMask) | direction;
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__LP64__</span>
+    _direction = (IODirection) (_flags &amp; kIOMemoryDirectionMask);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !__LP64__ */</span>
+}
+
+<span class="enscript-comment">/*
+ * appendBytes:
+ *
+ * Add some data to the end of the buffer.  This method automatically
+ * maintains the memory descriptor buffer length.  Note that appendBytes
+ * will not copy past the end of the memory descriptor's current capacity.
+ */</span>
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IOBufferMemoryDescriptor::appendBytes</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> * bytes, vm_size_t withLength)
+{
+    vm_size_t   actualBytesToCopy = min(withLength, _capacity - _length);
+    IOByteCount offset;
+
+    assert(_length &lt;= _capacity);
+
+    offset = _length;
+    _length += actualBytesToCopy;
+    _ranges.v64-&gt;length += actualBytesToCopy;
+
+    <span class="enscript-keyword">if</span> (_task == kernel_task)
+	bcopy(<span class="enscript-comment">/* from */</span> bytes, (<span class="enscript-type">void</span> *)(_ranges.v64-&gt;address + offset),
+	      actualBytesToCopy);
+    <span class="enscript-keyword">else</span>
+	writeBytes(offset, bytes, actualBytesToCopy);
+
+    <span class="enscript-keyword">return</span> true;
+}
+
+<span class="enscript-comment">/*
+ * getBytesNoCopy:
+ *
+ * Return the virtual address of the beginning of the buffer
+ */</span>
+<span class="enscript-type">void</span> * <span class="enscript-function-name">IOBufferMemoryDescriptor::getBytesNoCopy</span>()
+{
+    <span class="enscript-keyword">if</span> (kIOMemoryTypePhysical64 == (_flags &amp; kIOMemoryTypeMask))
+	<span class="enscript-keyword">return</span> _buffer;
+    <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">return</span> (<span class="enscript-type">void</span> *)_ranges.v64-&gt;address;
+}
+
+
+<span class="enscript-comment">/*
+ * getBytesNoCopy:
+ *
+ * Return the virtual address of an offset from the beginning of the buffer
+ */</span>
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">IOBufferMemoryDescriptor::getBytesNoCopy</span>(vm_size_t start, vm_size_t withLength)
+{
+    IOVirtualAddress address;
+    <span class="enscript-keyword">if</span> (kIOMemoryTypePhysical64 == (_flags &amp; kIOMemoryTypeMask))
+	address = (IOVirtualAddress) _buffer;
+    <span class="enscript-keyword">else</span>
+	address = _ranges.v64-&gt;address;
+
+   <span class="enscript-keyword">if</span> (start &lt; _length &amp;&amp; (start + withLength) &lt;= _length)
+        <span class="enscript-keyword">return</span> (<span class="enscript-type">void</span> *)(address + start);
+    <span class="enscript-keyword">return</span> 0;
+}
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">__LP64__</span>
+<span class="enscript-type">void</span> * <span class="enscript-function-name">IOBufferMemoryDescriptor::getVirtualSegment</span>(IOByteCount offset,
+							IOByteCount * lengthOfSegment)
+{
+    <span class="enscript-type">void</span> * bytes = getBytesNoCopy(offset, 0);
+    
+    <span class="enscript-keyword">if</span> (bytes &amp;&amp; lengthOfSegment)
+	*lengthOfSegment = _length - offset;
+
+    <span class="enscript-keyword">return</span> bytes;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !__LP64__ */</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__LP64__</span>
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 1);
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !__LP64__ */</span>
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IOBufferMemoryDescriptor, 0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IOBufferMemoryDescriptor, 1);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !__LP64__ */</span>
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 2);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 3);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 4);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 5);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 6);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 7);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 8);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 9);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 10);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 11);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 12);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 13);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 14);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOBufferMemoryDescriptor, 15);
+</pre>
+<hr />
+</body></html>

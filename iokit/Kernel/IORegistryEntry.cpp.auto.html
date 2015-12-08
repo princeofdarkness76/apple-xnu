@@ -1,0 +1,2131 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IORegistryEntry.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IORegistryEntry.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998 Apple Computer, Inc.  All rights reserved. 
+ *
+ * HISTORY
+ * 12 Nov 98 sdouglas created.
+ *
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IORegistryEntry.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSContainers.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOService.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKitKeys.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOLib.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/assert.h&gt;</span>
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> OSObject
+
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IORegistryEntry, OSObject)
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kIORegPlaneParentSuffix</span>		<span class="enscript-string">&quot;ParentLinks&quot;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kIORegPlaneChildSuffix</span>		<span class="enscript-string">&quot;ChildLinks&quot;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kIORegPlaneNameSuffix</span>		<span class="enscript-string">&quot;Name&quot;</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kIORegPlaneLocationSuffix</span>	<span class="enscript-string">&quot;Location&quot;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kIORegPlaneParentSuffixLen</span>	(sizeof(kIORegPlaneParentSuffix) - 1)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kIORegPlaneChildSuffixLen</span>	(sizeof(kIORegPlaneChildSuffix) - 1)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kIORegPlaneNameSuffixLen</span>	(sizeof(kIORegPlaneNameSuffix) - 1)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kIORegPlaneLocationSuffixLen</span>	(sizeof(kIORegPlaneLocationSuffix) - 1)
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KASLR_IOREG_DEBUG</span> 0
+
+<span class="enscript-type">static</span> IORegistryEntry * gRegistryRoot;
+<span class="enscript-type">static</span> OSDictionary * 	 gIORegistryPlanes;
+
+<span class="enscript-type">const</span> OSSymbol * 	gIONameKey;
+<span class="enscript-type">const</span> OSSymbol * 	gIOLocationKey;
+<span class="enscript-type">const</span> OSSymbol * 	gIORegistryEntryIDKey;
+
+<span class="enscript-type">enum</span> {
+    kParentSetIndex	= 0,
+    kChildSetIndex	= 1,
+    kNumSetIndex
+};
+<span class="enscript-type">enum</span> {
+    kIOMaxPlaneName	= 32
+};
+
+<span class="enscript-type">enum</span> { kIORegistryIDReserved = (1ULL &lt;&lt; 32) + 255 };
+
+<span class="enscript-type">static</span> uint64_t gIORegistryLastID = kIORegistryIDReserved;
+
+<span class="enscript-type">class</span> IORegistryPlane : <span class="enscript-type">public</span> OSObject {
+
+    <span class="enscript-type">friend</span> <span class="enscript-type">class</span> IORegistryEntry;
+
+    OSDeclareAbstractStructors(IORegistryPlane)
+
+    <span class="enscript-type">const</span> OSSymbol *	nameKey;
+    <span class="enscript-type">const</span> OSSymbol *	keys[ kNumSetIndex ];
+    <span class="enscript-type">const</span> OSSymbol *	pathNameKey;
+    <span class="enscript-type">const</span> OSSymbol *	pathLocationKey;
+    <span class="enscript-type">int</span>			reserved[2];
+
+<span class="enscript-type">public</span>:
+    <span class="enscript-type">virtual</span> <span class="enscript-type">bool</span> serialize(OSSerialize *s) <span class="enscript-type">const</span> APPLE_KEXT_OVERRIDE;
+};
+
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IORegistryPlane, OSObject)
+
+
+<span class="enscript-type">static</span> IORecursiveLock *	gPropertiesLock;
+<span class="enscript-type">static</span> SInt32			gIORegistryGenerationCount;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">UNLOCK</span>	lck_rw_done( &amp;gIORegistryLock )
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">RLOCK</span>	lck_rw_lock_shared( &amp;gIORegistryLock )
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">WLOCK</span>	lck_rw_lock_exclusive( &amp;gIORegistryLock );	\
+		gIORegistryGenerationCount++
+		<span class="enscript-comment">// make atomic
+</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PUNLOCK</span>	IORecursiveLockUnlock( gPropertiesLock )
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PLOCK</span>	IORecursiveLockLock( gPropertiesLock )
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IOREGSPLITTABLES</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IOREGSPLITTABLES</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">registryTable</span>()	fRegistryTable
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">registryTable</span>()	fPropertyTable
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">DEBUG_FREE</span>	1
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+lck_rw_t	gIORegistryLock;
+lck_grp_t       *gIORegistryLockGrp;
+lck_grp_attr_t  *gIORegistryLockGrpAttr;
+lck_attr_t      *gIORegistryLockAttr;
+
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+IORegistryEntry * <span class="enscript-function-name">IORegistryEntry::initialize</span>( <span class="enscript-type">void</span> )
+{
+   <span class="enscript-type">bool</span>			ok;
+
+    <span class="enscript-keyword">if</span>( !gRegistryRoot) {
+
+
+	gIORegistryLockGrpAttr = lck_grp_attr_alloc_init();
+	<span class="enscript-comment">//lck_grp_attr_setstat(gIORegistryLockGrpAttr);
+</span>	gIORegistryLockGrp = lck_grp_alloc_init(<span class="enscript-string">&quot;IORegistryLock&quot;</span>,  gIORegistryLockGrpAttr);
+	gIORegistryLockAttr = lck_attr_alloc_init();
+	lck_attr_rw_shared_priority(gIORegistryLockAttr);
+	<span class="enscript-comment">//lck_attr_setdebug(gIORegistryLockAttr);
+</span>	lck_rw_init( &amp;gIORegistryLock, gIORegistryLockGrp, gIORegistryLockAttr);
+
+	gRegistryRoot = <span class="enscript-keyword">new</span> IORegistryEntry;
+	gPropertiesLock = IORecursiveLockAlloc();
+	gIORegistryPlanes = OSDictionary::withCapacity( 1 );
+        
+	assert( gRegistryRoot &amp;&amp; gPropertiesLock
+		&amp;&amp; gIORegistryPlanes );
+        ok = gRegistryRoot-&gt;init();
+
+	<span class="enscript-keyword">if</span> (ok)
+	    gRegistryRoot-&gt;reserved-&gt;fRegistryEntryID = ++gIORegistryLastID;
+
+	gIONameKey = OSSymbol::withCStringNoCopy( <span class="enscript-string">&quot;IOName&quot;</span> );
+	gIOLocationKey = OSSymbol::withCStringNoCopy( <span class="enscript-string">&quot;IOLocation&quot;</span> );
+	gIORegistryEntryIDKey = OSSymbol::withCStringNoCopy( kIORegistryEntryIDKey );
+
+	assert( ok &amp;&amp; gIONameKey &amp;&amp; gIOLocationKey );
+
+	gRegistryRoot-&gt;setName( <span class="enscript-string">&quot;Root&quot;</span> );
+        gRegistryRoot-&gt;setProperty( kIORegistryPlanesKey, gIORegistryPlanes );
+    }
+
+    <span class="enscript-keyword">return</span>( gRegistryRoot );
+}
+
+IORegistryEntry * <span class="enscript-function-name">IORegistryEntry::getRegistryRoot</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-keyword">return</span>( gRegistryRoot );
+}
+
+SInt32 <span class="enscript-function-name">IORegistryEntry::getGenerationCount</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-keyword">return</span>( gIORegistryGenerationCount );
+}
+
+
+<span class="enscript-type">const</span> IORegistryPlane * <span class="enscript-function-name">IORegistryEntry::makePlane</span>( <span class="enscript-type">const</span> <span class="enscript-type">char</span> * name )
+{
+    IORegistryPlane *	plane;
+    <span class="enscript-type">const</span> OSSymbol *	nameKey;
+    <span class="enscript-type">const</span> OSSymbol *	parentKey;
+    <span class="enscript-type">const</span> OSSymbol *	childKey;
+    <span class="enscript-type">const</span> OSSymbol *	pathNameKey;
+    <span class="enscript-type">const</span> OSSymbol *	pathLocationKey;
+    <span class="enscript-type">char</span>		key[ kIOMaxPlaneName + 16 ];
+    <span class="enscript-type">char</span> *		end;
+
+    strlcpy( key, name, kIOMaxPlaneName + 1 );
+    end = key + strlen( key );
+
+    nameKey = OSSymbol::withCString( key);
+
+    strlcpy( end, kIORegPlaneParentSuffix, kIORegPlaneParentSuffixLen + 1 );
+    parentKey = OSSymbol::withCString( key);
+
+    strlcpy( end, kIORegPlaneChildSuffix, kIORegPlaneChildSuffixLen + 1 );
+    childKey = OSSymbol::withCString( key);
+
+    strlcpy( end, kIORegPlaneNameSuffix, kIORegPlaneNameSuffixLen + 1 );
+    pathNameKey = OSSymbol::withCString( key);
+
+    strlcpy( end, kIORegPlaneLocationSuffix, kIORegPlaneLocationSuffixLen + 1 );
+    pathLocationKey = OSSymbol::withCString( key);
+
+    plane = <span class="enscript-keyword">new</span> IORegistryPlane;
+
+    <span class="enscript-keyword">if</span>( plane &amp;&amp; plane-&gt;init()
+	&amp;&amp; nameKey &amp;&amp; parentKey &amp;&amp; childKey
+	&amp;&amp; pathNameKey &amp;&amp; pathLocationKey ) {
+
+	plane-&gt;nameKey = nameKey;
+	plane-&gt;keys[ kParentSetIndex ] = parentKey;
+	plane-&gt;keys[ kChildSetIndex ] = childKey;
+	plane-&gt;pathNameKey = pathNameKey;
+	plane-&gt;pathLocationKey = pathLocationKey;
+
+	WLOCK;
+        gIORegistryPlanes-&gt;setObject( nameKey, plane );
+	UNLOCK;
+
+    } <span class="enscript-keyword">else</span> {
+
+	<span class="enscript-keyword">if</span>( plane)
+	    plane-&gt;release();
+	<span class="enscript-keyword">if</span>( pathLocationKey)
+	    pathLocationKey-&gt;release();
+	<span class="enscript-keyword">if</span>( pathNameKey)
+	    pathNameKey-&gt;release();
+	<span class="enscript-keyword">if</span>( parentKey)
+	    parentKey-&gt;release();
+	<span class="enscript-keyword">if</span>( childKey)
+	    childKey-&gt;release();
+	<span class="enscript-keyword">if</span>( nameKey)
+	    nameKey-&gt;release();
+	plane = 0;
+    }
+
+    <span class="enscript-keyword">return</span>( plane);
+}
+
+<span class="enscript-type">const</span> IORegistryPlane * <span class="enscript-function-name">IORegistryEntry::getPlane</span>( <span class="enscript-type">const</span> <span class="enscript-type">char</span> * name )
+{
+    <span class="enscript-type">const</span> IORegistryPlane *	plane;
+
+    RLOCK;
+    plane = (<span class="enscript-type">const</span> IORegistryPlane *) gIORegistryPlanes-&gt;getObject( name );
+    UNLOCK;
+
+    <span class="enscript-keyword">return</span>( plane );
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryPlane::serialize</span>(OSSerialize *s) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span>( nameKey-&gt;serialize(s) );
+}
+
+<span class="enscript-type">enum</span> { kIORegCapacityIncrement = 4 };
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryEntry::init</span>( OSDictionary * dict )
+{
+    OSString *	prop;
+
+    <span class="enscript-keyword">if</span>( !super::init())
+	<span class="enscript-keyword">return</span>( false);
+
+    <span class="enscript-keyword">if</span> (!reserved)
+    {
+	reserved = IONew(ExpansionData, 1);
+	<span class="enscript-keyword">if</span> (!reserved)
+	    <span class="enscript-keyword">return</span> (false);
+	bzero(reserved, <span class="enscript-keyword">sizeof</span>(ExpansionData));
+    }
+    <span class="enscript-keyword">if</span>( dict) {
+	<span class="enscript-keyword">if</span> (OSCollection::kImmutable &amp; dict-&gt;setOptions(0, 0)) {
+	    dict = (OSDictionary *) dict-&gt;copyCollection();
+	    <span class="enscript-keyword">if</span> (!dict)
+           	<span class="enscript-keyword">return</span> (false);
+	} <span class="enscript-keyword">else</span>
+	    dict-&gt;retain();
+	<span class="enscript-keyword">if</span>( fPropertyTable)
+	    fPropertyTable-&gt;release();
+	fPropertyTable = dict;
+
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span>( !fPropertyTable) {
+        fPropertyTable = OSDictionary::withCapacity( kIORegCapacityIncrement );
+	<span class="enscript-keyword">if</span>( fPropertyTable)
+            fPropertyTable-&gt;setCapacityIncrement( kIORegCapacityIncrement );
+    }
+
+    <span class="enscript-keyword">if</span>( !fPropertyTable)
+        <span class="enscript-keyword">return</span>( false);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IOREGSPLITTABLES</span>
+    <span class="enscript-keyword">if</span>( !fRegistryTable) {
+	fRegistryTable = OSDictionary::withCapacity( kIORegCapacityIncrement );
+	<span class="enscript-keyword">if</span>( fRegistryTable)
+	    fRegistryTable-&gt;setCapacityIncrement( kIORegCapacityIncrement );
+    }
+
+    <span class="enscript-keyword">if</span>( (prop = OSDynamicCast( OSString, getProperty( gIONameKey)))) {
+        OSSymbol * sym = (OSSymbol *)OSSymbol::withString( prop);
+        <span class="enscript-comment">// ok for OSSymbol too
+</span>        setName( sym);
+        sym-&gt;release();
+    }
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IOREGSPLITTABLES */</span>
+
+    <span class="enscript-keyword">return</span>( true);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryEntry::init</span>( IORegistryEntry * old,
+				<span class="enscript-type">const</span> IORegistryPlane * plane )
+{
+    OSArray *		all;
+    IORegistryEntry *		next;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	index;
+
+    <span class="enscript-keyword">if</span>( !super::init())
+	<span class="enscript-keyword">return</span>( false);
+
+    WLOCK;
+
+    reserved = old-&gt;reserved;
+    old-&gt;reserved = NULL;
+
+    fPropertyTable = old-&gt;getPropertyTable();
+    fPropertyTable-&gt;retain();
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IOREGSPLITTABLES</span>
+    fRegistryTable = old-&gt;fRegistryTable;
+    old-&gt;fRegistryTable = (OSDictionary *) fRegistryTable-&gt;copyCollection();
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IOREGSPLITTABLES */</span>
+
+    old-&gt;registryTable()-&gt;removeObject( plane-&gt;keys[ kParentSetIndex ] );
+    old-&gt;registryTable()-&gt;removeObject( plane-&gt;keys[ kChildSetIndex ] );
+
+    all = getParentSetReference( plane );
+    <span class="enscript-keyword">if</span>( all) <span class="enscript-keyword">for</span>( index = 0;
+              (next = (IORegistryEntry *) all-&gt;getObject(index));
+              index++ ) {
+	    next-&gt;makeLink( <span class="enscript-keyword">this</span>, kChildSetIndex, plane );
+            next-&gt;breakLink( old, kChildSetIndex, plane );
+    }
+
+    all = getChildSetReference( plane );
+    <span class="enscript-keyword">if</span>( all) <span class="enscript-keyword">for</span>( index = 0;
+              (next = (IORegistryEntry *) all-&gt;getObject(index));
+              index++ ) {
+	    next-&gt;makeLink( <span class="enscript-keyword">this</span>, kParentSetIndex, plane );
+            next-&gt;breakLink( old, kParentSetIndex, plane );
+    }
+
+    UNLOCK;
+
+    <span class="enscript-keyword">return</span>( true );
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryEntry::free</span>( <span class="enscript-type">void</span> )
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG_FREE</span>
+    <span class="enscript-keyword">if</span>( registryTable() &amp;&amp; gIOServicePlane) {
+        <span class="enscript-keyword">if</span>( getParentSetReference( gIOServicePlane )
+            || getChildSetReference( gIOServicePlane )) {
+            panic(<span class="enscript-string">&quot;%s: attached at free()&quot;</span>, getName());
+        }
+    }
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-keyword">if</span>( getPropertyTable())
+        getPropertyTable()-&gt;release();
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IOREGSPLITTABLES</span>
+    <span class="enscript-keyword">if</span>( registryTable())
+        registryTable()-&gt;release();
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IOREGSPLITTABLES */</span>
+
+    <span class="enscript-keyword">if</span> (reserved)
+	IODelete(reserved, ExpansionData, 1);
+
+    <span class="enscript-reference">super</span>::free();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryEntry::setPropertyTable</span>( OSDictionary * dict )
+{
+    <span class="enscript-keyword">if</span>( fPropertyTable)
+	fPropertyTable-&gt;release();
+    <span class="enscript-keyword">if</span>( dict)
+	dict-&gt;retain();
+    fPropertyTable = dict;
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-comment">/* Wrappers to synchronize property table */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">wrap2</span>(type, constant)						\
+OSObject *								\
+<span class="enscript-function-name">IORegistryEntry::copyProperty</span>( type * aKey) constant			\
+{									\
+    OSObject *	obj;							\
+									\
+    PLOCK;								\
+    obj = getProperty( aKey );						\
+    <span class="enscript-keyword">if</span>( obj)								\
+        obj-&gt;retain();							\
+    PUNLOCK;								\
+									\
+    <span class="enscript-keyword">return</span>( obj );							\
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">wrap4</span>(type,constant) \
+OSObject * \
+<span class="enscript-function-name">IORegistryEntry::getProperty</span>( type *                  aKey, \
+                              <span class="enscript-type">const</span> IORegistryPlane * plane, \
+                              IOOptionBits            options ) constant \
+{ \
+    OSObject * obj = getProperty( aKey ); \
+    \
+    <span class="enscript-keyword">if</span> ( (0 == obj) &amp;&amp; plane &amp;&amp; (options &amp; kIORegistryIterateRecursively) ) { \
+        IORegistryEntry * entry = (IORegistryEntry *) <span class="enscript-keyword">this</span>; \
+        IORegistryIterator * iter; \
+        iter = IORegistryIterator::iterateOver( entry, plane, options ); \
+        \
+        <span class="enscript-keyword">if</span>(iter) { \
+            <span class="enscript-keyword">while</span> ( (0 == obj) &amp;&amp; (entry = iter-&gt;getNextObject()) ) { \
+                obj = entry-&gt;getProperty( aKey ); \
+            } \
+            iter-&gt;release(); \
+        } \
+    } \
+    \
+    <span class="enscript-keyword">return</span>( obj ); \
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">wrap5</span>(type,constant) \
+OSObject * \
+<span class="enscript-function-name">IORegistryEntry::copyProperty</span>( type *                  aKey, \
+                              <span class="enscript-type">const</span> IORegistryPlane * plane, \
+                              IOOptionBits            options ) constant \
+{ \
+    OSObject * obj = copyProperty( aKey ); \
+    \
+    <span class="enscript-keyword">if</span> ( (0 == obj) &amp;&amp; plane &amp;&amp; (options &amp; kIORegistryIterateRecursively) ) { \
+        IORegistryEntry * entry = (IORegistryEntry *) <span class="enscript-keyword">this</span>; \
+        IORegistryIterator * iter; \
+        iter = IORegistryIterator::iterateOver( entry, plane, options ); \
+        \
+        <span class="enscript-keyword">if</span>(iter) { \
+            <span class="enscript-keyword">while</span> ( (0 == obj) &amp;&amp; (entry = iter-&gt;getNextObject()) ) { \
+                obj = entry-&gt;copyProperty( aKey ); \
+            } \
+            iter-&gt;release(); \
+        } \
+    } \
+    \
+    <span class="enscript-keyword">return</span>( obj ); \
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryEntry::serializeProperties</span>( OSSerialize * s ) <span class="enscript-type">const</span>
+{
+<span class="enscript-comment">//    setProperty( getRetainCount(), 32, &quot;__retain&quot; );
+</span>
+    PLOCK;
+    OSCollection *snapshotProperties = getPropertyTable()-&gt;copyCollection();
+    PUNLOCK;
+
+    <span class="enscript-type">bool</span> ok =  snapshotProperties-&gt;serialize( s );
+    snapshotProperties-&gt;release();
+    <span class="enscript-keyword">return</span>( ok );
+}
+
+OSDictionary * <span class="enscript-function-name">IORegistryEntry::dictionaryWithProperties</span>( <span class="enscript-type">void</span> ) <span class="enscript-type">const</span>
+{
+    OSDictionary *	dict;
+
+    PLOCK;
+    dict = OSDictionary::withDictionary( getPropertyTable(),
+                            getPropertyTable()-&gt;getCapacity() );
+    PUNLOCK;
+
+    <span class="enscript-keyword">return</span>( dict );
+}
+
+IOReturn <span class="enscript-function-name">IORegistryEntry::setProperties</span>( OSObject * properties )
+{
+    <span class="enscript-keyword">return</span>( kIOReturnUnsupported );
+}
+
+<span class="enscript-function-name">wrap2</span>(<span class="enscript-type">const</span> OSSymbol, <span class="enscript-type">const</span>)       <span class="enscript-comment">// copyProperty() definition
+</span><span class="enscript-function-name">wrap2</span>(<span class="enscript-type">const</span> OSString, <span class="enscript-type">const</span>)       <span class="enscript-comment">// copyProperty() definition
+</span><span class="enscript-function-name">wrap2</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span>, <span class="enscript-type">const</span>)      	   <span class="enscript-comment">// copyProperty() definition
+</span>
+<span class="enscript-function-name">wrap4</span>(<span class="enscript-type">const</span> OSSymbol, <span class="enscript-type">const</span>)       <span class="enscript-comment">// getProperty() w/plane definition
+</span><span class="enscript-function-name">wrap4</span>(<span class="enscript-type">const</span> OSString, <span class="enscript-type">const</span>)       <span class="enscript-comment">// getProperty() w/plane definition
+</span><span class="enscript-function-name">wrap4</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span>, <span class="enscript-type">const</span>)           <span class="enscript-comment">// getProperty() w/plane definition
+</span>
+<span class="enscript-function-name">wrap5</span>(<span class="enscript-type">const</span> OSSymbol, <span class="enscript-type">const</span>)       <span class="enscript-comment">// copyProperty() w/plane definition
+</span><span class="enscript-function-name">wrap5</span>(<span class="enscript-type">const</span> OSString, <span class="enscript-type">const</span>)       <span class="enscript-comment">// copyProperty() w/plane definition
+</span><span class="enscript-function-name">wrap5</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span>, <span class="enscript-type">const</span>)           <span class="enscript-comment">// copyProperty() w/plane definition
+</span>
+
+OSObject *
+<span class="enscript-function-name">IORegistryEntry::getProperty</span>( <span class="enscript-type">const</span> OSSymbol * aKey) <span class="enscript-type">const</span>
+{
+    OSObject * obj;
+
+    PLOCK;
+    obj = getPropertyTable()-&gt;getObject( aKey );
+    PUNLOCK;
+
+    <span class="enscript-keyword">return</span>( obj );
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">IORegistryEntry::removeProperty</span>( <span class="enscript-type">const</span> OSSymbol * aKey)
+{
+    PLOCK;
+    getPropertyTable()-&gt;removeObject( aKey );
+    PUNLOCK;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KASLR_IOREG_DEBUG</span>
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> {
+    
+<span class="enscript-type">bool</span> <span class="enscript-function-name">ScanForAddrInObject</span>(OSObject * theObject, 
+                         <span class="enscript-type">int</span> indent);
+    
+}; <span class="enscript-comment">/* extern &quot;C&quot; */</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IORegistryEntry::setProperty</span>( <span class="enscript-type">const</span> OSSymbol * aKey, OSObject * anObject)
+{
+    <span class="enscript-type">bool</span> ret = false;
+
+    <span class="enscript-comment">// If we are inserting a collection class and the current entry
+</span>    <span class="enscript-comment">// is attached into the registry (inPlane()) then mark the collection
+</span>    <span class="enscript-comment">// as immutable.
+</span>    OSCollection *coll = OSDynamicCast(OSCollection, anObject);
+    <span class="enscript-type">bool</span> makeImmutable = (coll &amp;&amp; inPlane());
+
+    PLOCK;
+    <span class="enscript-keyword">if</span>( makeImmutable )
+	coll-&gt;setOptions( OSCollection::kMASK, OSCollection::kImmutable );
+
+    ret = getPropertyTable()-&gt;setObject( aKey, anObject );
+    PUNLOCK;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">KASLR_IOREG_DEBUG</span>
+    <span class="enscript-keyword">if</span> ( anObject &amp;&amp; strcmp(kIOKitDiagnosticsKey, aKey-&gt;getCStringNoCopy()) != 0 ) {
+        <span class="enscript-keyword">if</span> (ScanForAddrInObject(anObject, 0)) {
+            IOLog(<span class="enscript-string">&quot;%s: IORegistryEntry name %s with key \&quot;%s\&quot; \n&quot;</span>,
+                  __FUNCTION__,
+                  getName(0),
+                  aKey-&gt;getCStringNoCopy() );        
+        }
+    }
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-keyword">return</span> ret;
+}
+
+IOReturn IORegistryEntry::
+<span class="enscript-function-name">runPropertyAction</span>(Action inAction, OSObject *target,
+	<span class="enscript-type">void</span> *arg0, <span class="enscript-type">void</span> *arg1, <span class="enscript-type">void</span> *arg2, <span class="enscript-type">void</span> *arg3)
+{
+    IOReturn res;
+
+    <span class="enscript-comment">// closeGate is recursive so don't worry if we already hold the lock.
+</span>    PLOCK;
+    res = (*inAction)(target, arg0, arg1, arg2, arg3);
+    PUNLOCK;
+
+    <span class="enscript-keyword">return</span> res;
+}
+
+OSObject *
+<span class="enscript-function-name">IORegistryEntry::getProperty</span>( <span class="enscript-type">const</span> OSString * aKey) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">const</span> OSSymbol * tmpKey = OSSymbol::withString( aKey );
+    OSObject * obj = getProperty( tmpKey );
+
+    tmpKey-&gt;release();
+    <span class="enscript-keyword">return</span>( obj );
+}
+
+OSObject *
+<span class="enscript-function-name">IORegistryEntry::getProperty</span>( <span class="enscript-type">const</span> <span class="enscript-type">char</span> * aKey) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">const</span> OSSymbol * tmpKey = OSSymbol::withCString( aKey );
+    OSObject * obj = getProperty( tmpKey );
+
+    tmpKey-&gt;release();
+    <span class="enscript-keyword">return</span>( obj );
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">IORegistryEntry::removeProperty</span>( <span class="enscript-type">const</span> OSString * aKey)
+{
+    <span class="enscript-type">const</span> OSSymbol * tmpKey = OSSymbol::withString( aKey );
+    removeProperty( tmpKey );
+    tmpKey-&gt;release();
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">IORegistryEntry::removeProperty</span>( <span class="enscript-type">const</span> <span class="enscript-type">char</span> * aKey)
+{
+    <span class="enscript-type">const</span> OSSymbol * tmpKey = OSSymbol::withCString( aKey );
+    removeProperty( tmpKey );
+    tmpKey-&gt;release();
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IORegistryEntry::setProperty</span>( <span class="enscript-type">const</span> OSString * aKey, OSObject * anObject)
+{
+    <span class="enscript-type">const</span> OSSymbol * tmpKey = OSSymbol::withString( aKey );
+    <span class="enscript-type">bool</span> ret = setProperty( tmpKey, anObject );
+
+    tmpKey-&gt;release();
+    <span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IORegistryEntry::setProperty</span>( <span class="enscript-type">const</span> <span class="enscript-type">char</span> * aKey,  OSObject * anObject)
+{
+    <span class="enscript-type">const</span> OSSymbol * tmpKey = OSSymbol::withCString( aKey );
+    <span class="enscript-type">bool</span> ret = setProperty( tmpKey, anObject );
+
+    tmpKey-&gt;release();
+    <span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IORegistryEntry::setProperty</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> * aKey, <span class="enscript-type">const</span> <span class="enscript-type">char</span> * aString)
+{
+    <span class="enscript-type">bool</span> ret = false;
+    OSSymbol * aSymbol = (OSSymbol *) OSSymbol::withCString( aString );
+
+    <span class="enscript-keyword">if</span>( aSymbol) {
+        <span class="enscript-type">const</span> OSSymbol * tmpKey = OSSymbol::withCString( aKey );
+        ret = setProperty( tmpKey, aSymbol );
+
+        tmpKey-&gt;release();
+        aSymbol-&gt;release();
+    }
+    <span class="enscript-keyword">return</span>( ret );
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IORegistryEntry::setProperty</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> * aKey, <span class="enscript-type">bool</span> aBoolean)
+{
+    <span class="enscript-type">bool</span> ret = false;
+    OSBoolean * aBooleanObj = OSBoolean::withBoolean( aBoolean );
+
+    <span class="enscript-keyword">if</span>( aBooleanObj) {
+        <span class="enscript-type">const</span> OSSymbol * tmpKey = OSSymbol::withCString( aKey );
+        ret = setProperty( tmpKey, aBooleanObj );
+
+        tmpKey-&gt;release();
+        aBooleanObj-&gt;release();
+    }
+    <span class="enscript-keyword">return</span>( ret );
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IORegistryEntry::setProperty</span>( <span class="enscript-type">const</span> <span class="enscript-type">char</span> *       aKey,
+                              <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> <span class="enscript-type">long</span> aValue,
+                              <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>       aNumberOfBits)
+{
+    <span class="enscript-type">bool</span> ret = false;
+    OSNumber * anOffset = OSNumber::withNumber( aValue, aNumberOfBits );
+
+    <span class="enscript-keyword">if</span>( anOffset) {
+        <span class="enscript-type">const</span> OSSymbol * tmpKey = OSSymbol::withCString( aKey );
+        ret = setProperty( tmpKey, anOffset );
+
+        tmpKey-&gt;release();
+        anOffset-&gt;release();
+    }
+    <span class="enscript-keyword">return</span>( ret );
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IORegistryEntry::setProperty</span>( <span class="enscript-type">const</span> <span class="enscript-type">char</span> *      aKey,
+                              <span class="enscript-type">void</span> *		bytes,
+                              <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>      length)
+{
+    <span class="enscript-type">bool</span> ret = false;
+    OSData * data = OSData::withBytes( bytes, length );
+
+    <span class="enscript-keyword">if</span>( data) {
+        <span class="enscript-type">const</span> OSSymbol * tmpKey = OSSymbol::withCString( aKey );
+        ret = setProperty( tmpKey, data );
+
+        tmpKey-&gt;release();
+        data-&gt;release();
+    }
+    <span class="enscript-keyword">return</span>( ret );
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-comment">/* Name, location, paths */</span>
+
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> * <span class="enscript-function-name">IORegistryEntry::getName</span>( <span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    OSSymbol *		sym = 0;
+
+    RLOCK;
+    <span class="enscript-keyword">if</span>( plane)
+	sym = (OSSymbol *) registryTable()-&gt;getObject( plane-&gt;pathNameKey );
+    <span class="enscript-keyword">if</span>( !sym)
+	sym = (OSSymbol *) registryTable()-&gt;getObject( gIONameKey );
+    UNLOCK;
+
+    <span class="enscript-keyword">if</span>( sym)
+	<span class="enscript-keyword">return</span>( sym-&gt;getCStringNoCopy());
+    <span class="enscript-keyword">else</span>
+        <span class="enscript-keyword">return</span>( (getMetaClass())-&gt;getClassName());
+}
+
+<span class="enscript-type">const</span> OSSymbol * <span class="enscript-function-name">IORegistryEntry::copyName</span>(
+			<span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    OSSymbol *		sym = 0;
+
+    RLOCK;
+    <span class="enscript-keyword">if</span>( plane)
+	sym = (OSSymbol *) registryTable()-&gt;getObject( plane-&gt;pathNameKey );
+    <span class="enscript-keyword">if</span>( !sym)
+	sym = (OSSymbol *) registryTable()-&gt;getObject( gIONameKey );
+    <span class="enscript-keyword">if</span>( sym)
+	sym-&gt;retain();
+    UNLOCK;
+
+    <span class="enscript-keyword">if</span>( sym)
+	<span class="enscript-keyword">return</span>( sym );
+    <span class="enscript-keyword">else</span>
+        <span class="enscript-keyword">return</span>( OSSymbol::withCString((getMetaClass())-&gt;getClassName()) );
+}
+
+<span class="enscript-type">const</span> OSSymbol * <span class="enscript-function-name">IORegistryEntry::copyLocation</span>(
+			<span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    OSSymbol *		sym = 0;
+
+    RLOCK;
+    <span class="enscript-keyword">if</span>( plane)
+	sym = (OSSymbol *) registryTable()-&gt;getObject( plane-&gt;pathLocationKey );
+    <span class="enscript-keyword">if</span>( !sym)
+	sym = (OSSymbol *) registryTable()-&gt;getObject( gIOLocationKey );
+    <span class="enscript-keyword">if</span>( sym)
+	sym-&gt;retain();
+    UNLOCK;
+
+    <span class="enscript-keyword">return</span>( sym );
+}
+
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> * <span class="enscript-function-name">IORegistryEntry::getLocation</span>( <span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">const</span> OSSymbol *	sym = copyLocation( plane );
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *	result = 0;
+
+    <span class="enscript-keyword">if</span>( sym) {
+	result = sym-&gt;getCStringNoCopy();
+	sym-&gt;release();
+    }
+
+    <span class="enscript-keyword">return</span>( result );
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryEntry::setName</span>( <span class="enscript-type">const</span> OSSymbol * name,
+                            <span class="enscript-type">const</span> IORegistryPlane * plane )
+{
+    <span class="enscript-type">const</span> OSSymbol *	key;
+
+    <span class="enscript-keyword">if</span>( name) {
+        <span class="enscript-keyword">if</span>( plane)
+            key = plane-&gt;pathNameKey;
+        <span class="enscript-keyword">else</span>
+            key = gIONameKey;
+
+	WLOCK;
+        registryTable()-&gt;setObject( key, (OSObject *) name);
+	UNLOCK;
+    }
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryEntry::setName</span>( <span class="enscript-type">const</span> <span class="enscript-type">char</span> * name,
+                            <span class="enscript-type">const</span> IORegistryPlane * plane )
+{
+    OSSymbol * sym = (OSSymbol *)OSSymbol::withCString( name );
+    <span class="enscript-keyword">if</span> ( sym ) {
+        setName( sym, plane );
+        sym-&gt;release();
+    }
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryEntry::setLocation</span>( <span class="enscript-type">const</span> OSSymbol * location,
+                            <span class="enscript-type">const</span> IORegistryPlane * plane )
+{
+    <span class="enscript-type">const</span> OSSymbol *	key;
+
+    <span class="enscript-keyword">if</span>( location) {
+        <span class="enscript-keyword">if</span>( plane)
+            key = plane-&gt;pathLocationKey;
+        <span class="enscript-keyword">else</span>
+            key = gIOLocationKey;
+
+	WLOCK;
+        registryTable()-&gt;setObject( key, (OSObject *) location);
+	UNLOCK;
+    }
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryEntry::setLocation</span>( <span class="enscript-type">const</span> <span class="enscript-type">char</span> * location,
+                            <span class="enscript-type">const</span> IORegistryPlane * plane )
+{
+    OSSymbol * sym = (OSSymbol *)OSSymbol::withCString( location );
+    <span class="enscript-keyword">if</span> ( sym ) {
+        setLocation( sym, plane );
+        sym-&gt;release();
+    }
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IORegistryEntry::compareName</span>( OSString * name, OSString ** matched ) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">const</span> OSSymbol *	sym = copyName();
+    <span class="enscript-type">bool</span>		isEqual;
+
+    isEqual = sym-&gt;isEqualTo( name );
+
+    <span class="enscript-keyword">if</span>( isEqual &amp;&amp; matched) {
+	name-&gt;retain();
+	*matched = name;
+    }
+
+    <span class="enscript-keyword">if</span>( sym)
+	sym-&gt;release();
+
+    <span class="enscript-keyword">return</span>( isEqual );
+}
+
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">IORegistryEntry::compareNames</span>( OSObject * names, OSString ** matched ) <span class="enscript-type">const</span>
+{
+    OSString *		string;
+    OSCollection *	collection;
+    OSIterator *	iter = 0;
+    <span class="enscript-type">bool</span>		result = false;
+
+    <span class="enscript-keyword">if</span>( (collection = OSDynamicCast( OSCollection, names))) {
+	iter = OSCollectionIterator::withCollection( collection );
+	string = 0;
+    } <span class="enscript-keyword">else</span>
+	string = OSDynamicCast( OSString, names);
+
+    <span class="enscript-keyword">do</span> {
+	<span class="enscript-keyword">if</span>( string)
+            result = compareName( string, matched );
+
+    } <span class="enscript-keyword">while</span>( (false == result)
+	&amp;&amp; iter &amp;&amp; (string = OSDynamicCast( OSString, iter-&gt;getNextObject())));
+
+    <span class="enscript-keyword">if</span>( iter)
+	iter-&gt;release();
+
+    <span class="enscript-keyword">return</span>( result);
+}
+
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryEntry::getPath</span>(	<span class="enscript-type">char</span> * path, <span class="enscript-type">int</span> * length,
+				<span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    OSArray *		stack;
+    IORegistryEntry *	root;
+    <span class="enscript-type">const</span> IORegistryEntry * entry;
+    <span class="enscript-type">const</span> IORegistryEntry * parent;
+    <span class="enscript-type">const</span> OSSymbol *	alias;
+    <span class="enscript-type">int</span>			index;
+    <span class="enscript-type">int</span>			len, maxLength, compLen, aliasLen;
+    <span class="enscript-type">char</span> *		nextComp;
+    <span class="enscript-type">bool</span>		ok;
+
+   <span class="enscript-keyword">if</span>( !path || !length || !plane)
+	<span class="enscript-keyword">return</span>( false);
+
+    len = 0;
+    maxLength = *length - 2;
+    nextComp = path;
+
+    len = plane-&gt;nameKey-&gt;getLength();
+    <span class="enscript-keyword">if</span>( len &gt;= maxLength)
+	<span class="enscript-keyword">return</span>( false);
+    strlcpy( nextComp, plane-&gt;nameKey-&gt;getCStringNoCopy(), len + 1);
+    nextComp[ len++ ] = <span class="enscript-string">':'</span>;
+    nextComp += len;
+
+    <span class="enscript-keyword">if</span>( (alias = hasAlias( plane ))) {
+	aliasLen = alias-&gt;getLength();
+	len += aliasLen;
+	ok = (maxLength &gt; len);
+	*length = len;
+	<span class="enscript-keyword">if</span>( ok)
+	    strlcpy( nextComp, alias-&gt;getCStringNoCopy(), aliasLen + 1);
+	<span class="enscript-keyword">return</span>( ok );
+    }
+
+    stack = OSArray::withCapacity( getDepth( plane ));
+    <span class="enscript-keyword">if</span> (!stack) <span class="enscript-keyword">return</span>( false);
+
+    RLOCK;
+
+    parent = entry = <span class="enscript-keyword">this</span>;
+    root = gRegistryRoot-&gt;getChildEntry( plane );
+    <span class="enscript-keyword">while</span> (parent &amp;&amp; (parent != root))
+    {
+	<span class="enscript-comment">// stop below root
+</span>	entry = parent;
+	parent = entry-&gt;getParentEntry( plane );
+	stack-&gt;setObject( (OSObject *) entry );
+    }
+
+    ok = (0 != parent);
+    <span class="enscript-keyword">if</span> (ok)
+    {
+        index = stack-&gt;getCount();
+        <span class="enscript-keyword">if</span>( 0 == index) {
+
+            *nextComp++ = <span class="enscript-string">'/'</span>;
+            *nextComp = 0;
+            len++;
+
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">while</span>( ok &amp;&amp; ((--index) &gt;= 0)) {
+
+            entry = (IORegistryEntry *) stack-&gt;getObject((<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) index );
+            assert( entry );
+
+            <span class="enscript-keyword">if</span>( (alias = entry-&gt;hasAlias( plane ))) {
+                len = plane-&gt;nameKey-&gt;getLength() + 1;
+                nextComp = path + len;
+
+                compLen = alias-&gt;getLength();
+                ok = (maxLength &gt; (len + compLen));
+                <span class="enscript-keyword">if</span>( ok)
+                    strlcpy( nextComp, alias-&gt;getCStringNoCopy(), compLen + 1);
+            } <span class="enscript-keyword">else</span> {
+                compLen = maxLength - len;
+                ok = entry-&gt;getPathComponent( nextComp + 1, &amp;compLen, plane );
+
+                <span class="enscript-keyword">if</span>( ok &amp;&amp; compLen) {
+                    compLen++;
+                    *nextComp = <span class="enscript-string">'/'</span>;
+                }
+            }
+
+            <span class="enscript-keyword">if</span>( ok) {
+                len += compLen;
+                nextComp += compLen;
+            }
+        }
+        *length = len;
+    }
+    UNLOCK;
+    stack-&gt;release();
+
+    <span class="enscript-keyword">return</span>( ok );
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryEntry::getPathComponent</span>( <span class="enscript-type">char</span> * path, <span class="enscript-type">int</span> * length,
+                                        <span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">int</span>			len, locLen, maxLength;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *	compName;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *	loc;
+    <span class="enscript-type">bool</span>		ok;
+
+    maxLength = *length;
+
+    compName = getName( plane );
+    len = strlen( compName );
+    <span class="enscript-keyword">if</span>( (loc = getLocation( plane )))
+	locLen = 1 + strlen( loc );
+    <span class="enscript-keyword">else</span>
+	locLen = 0;
+
+    ok = ((len + locLen + 1) &lt; maxLength);
+    <span class="enscript-keyword">if</span>( ok) {
+        strlcpy( path, compName, len + 1 );
+	<span class="enscript-keyword">if</span>( loc) {
+            path += len;
+            len += locLen;
+            *path++ = <span class="enscript-string">'@'</span>;
+            strlcpy( path, loc, locLen );
+	}
+        *length = len;
+    }
+
+    <span class="enscript-keyword">return</span>( ok );
+}
+
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> * <span class="enscript-function-name">IORegistryEntry::matchPathLocation</span>( <span class="enscript-type">const</span> <span class="enscript-type">char</span> * cmp,
+				<span class="enscript-type">const</span> IORegistryPlane * plane )
+{
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span>	*	str;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span>	*	result = 0;
+    u_quad_t		num1, num2;
+    <span class="enscript-type">char</span>		lastPathChar, lastLocationChar;
+
+    str = getLocation( plane );
+    <span class="enscript-keyword">if</span>( str) {
+	lastPathChar = cmp[0];
+	lastLocationChar = str[0];
+	<span class="enscript-keyword">do</span> {
+            <span class="enscript-keyword">if</span>( lastPathChar) {
+                num1 = strtouq( cmp, (<span class="enscript-type">char</span> **) &amp;cmp, 16 );
+                lastPathChar = *cmp++;
+	    } <span class="enscript-keyword">else</span>
+                num1 = 0;
+
+            <span class="enscript-keyword">if</span>( lastLocationChar) {
+                num2 = strtouq( str, (<span class="enscript-type">char</span> **) &amp;str, 16 );
+                lastLocationChar = *str++;
+	    } <span class="enscript-keyword">else</span>
+                num2 = 0;
+
+            <span class="enscript-keyword">if</span>( num1 != num2)
+                <span class="enscript-keyword">break</span>;
+
+	    <span class="enscript-keyword">if</span> (!lastPathChar &amp;&amp; !lastLocationChar) {
+                result = cmp - 1;
+                <span class="enscript-keyword">break</span>;
+            }
+
+            <span class="enscript-keyword">if</span>( (<span class="enscript-string">','</span> != lastPathChar) &amp;&amp; (<span class="enscript-string">':'</span> != lastPathChar))
+		lastPathChar = 0;
+
+	    <span class="enscript-keyword">if</span> (lastPathChar &amp;&amp; lastLocationChar &amp;&amp; (lastPathChar != lastLocationChar))
+                <span class="enscript-keyword">break</span>;
+
+        } <span class="enscript-keyword">while</span>( true);
+    }
+
+    <span class="enscript-keyword">return</span>( result );
+}
+
+IORegistryEntry * <span class="enscript-function-name">IORegistryEntry::getChildFromComponent</span>( <span class="enscript-type">const</span> <span class="enscript-type">char</span> ** opath,
+				<span class="enscript-type">const</span> IORegistryPlane * plane )
+{
+    IORegistryEntry *	entry = 0;
+    OSArray *		set;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	index;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *	path;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *	cmp = 0;
+    <span class="enscript-type">char</span>		c;
+    size_t		len;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *	str;
+
+    set = getChildSetReference( plane );
+    <span class="enscript-keyword">if</span>( set) {
+
+	path = *opath;
+
+	<span class="enscript-keyword">for</span>( index = 0;
+             (entry = (IORegistryEntry *) set-&gt;getObject(index));
+             index++ ) {
+
+            cmp = path;
+
+            <span class="enscript-keyword">if</span>( *cmp != <span class="enscript-string">'@'</span>) {
+                str = entry-&gt;getName( plane );
+                len = strlen( str );
+                <span class="enscript-keyword">if</span>( strncmp( str, cmp, len ))
+                    <span class="enscript-keyword">continue</span>;
+                cmp += len;
+
+                c = *cmp;
+                <span class="enscript-keyword">if</span>( (c == 0) || (c == <span class="enscript-string">'/'</span>) || (c == <span class="enscript-string">':'</span>))
+                    <span class="enscript-keyword">break</span>;
+                <span class="enscript-keyword">if</span>( c != <span class="enscript-string">'@'</span>)
+                    <span class="enscript-keyword">continue</span>;
+            }
+            cmp++;
+            <span class="enscript-keyword">if</span>( (cmp = entry-&gt;matchPathLocation( cmp, plane )))
+                <span class="enscript-keyword">break</span>;
+        }
+        <span class="enscript-keyword">if</span>( entry)
+            *opath = cmp;
+    }
+
+    <span class="enscript-keyword">return</span>( entry );
+}
+
+<span class="enscript-type">const</span> OSSymbol * <span class="enscript-function-name">IORegistryEntry::hasAlias</span>( <span class="enscript-type">const</span> IORegistryPlane * plane,
+				<span class="enscript-type">char</span> * opath, <span class="enscript-type">int</span> * length ) <span class="enscript-type">const</span>
+{
+    IORegistryEntry *	entry;
+    IORegistryEntry *	entry2;
+    <span class="enscript-type">const</span> OSSymbol *	key;
+    <span class="enscript-type">const</span> OSSymbol *	bestKey = 0;
+    OSIterator *	iter;
+    OSData *		data;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> * 	path = <span class="enscript-string">&quot;/aliases&quot;</span>;
+
+    entry = IORegistryEntry::fromPath( path, plane );
+    <span class="enscript-keyword">if</span>( entry) {
+        RLOCK;
+        <span class="enscript-keyword">if</span>( (iter = OSCollectionIterator::withCollection(
+				entry-&gt;getPropertyTable() ))) {
+
+            <span class="enscript-keyword">while</span>( (key = (OSSymbol *) iter-&gt;getNextObject())) {
+
+                data = (OSData *) entry-&gt;getProperty( key );
+                path = (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) data-&gt;getBytesNoCopy();
+                <span class="enscript-keyword">if</span>( (entry2 = IORegistryEntry::fromPath( path, plane,
+						opath, length ))) {
+                    <span class="enscript-keyword">if</span>( <span class="enscript-keyword">this</span> == entry2) {
+                        <span class="enscript-keyword">if</span>( !bestKey
+			 || (bestKey-&gt;getLength() &gt; key-&gt;getLength()))
+                            <span class="enscript-comment">// pick the smallest alias
+</span>                            bestKey = key;
+                    }
+		    entry2-&gt;release();
+		}
+            }
+            iter-&gt;release();
+        }
+	entry-&gt;release();
+	UNLOCK;
+    }
+    <span class="enscript-keyword">return</span>( bestKey );
+}
+
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> * <span class="enscript-function-name">IORegistryEntry::dealiasPath</span>(
+			<span class="enscript-type">const</span> <span class="enscript-type">char</span> ** 		opath,
+			<span class="enscript-type">const</span> IORegistryPlane *	plane )
+{
+    IORegistryEntry *	entry;
+    OSData *		data;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> * 	path = *opath;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> * 	rpath = 0;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> * 	end;
+    <span class="enscript-type">char</span>		c;
+    <span class="enscript-type">char</span>		temp[ kIOMaxPlaneName + 1 ];
+
+    <span class="enscript-keyword">if</span>( path[0] == <span class="enscript-string">'/'</span>)
+	<span class="enscript-keyword">return</span>( rpath );
+
+    <span class="enscript-comment">// check for alias
+</span>    end = path;
+    <span class="enscript-keyword">while</span>( (c = *end++) &amp;&amp; (c != <span class="enscript-string">'/'</span>) &amp;&amp; (c != <span class="enscript-string">':'</span>))
+        {}
+    end--;
+    <span class="enscript-keyword">if</span>( (end - path) &lt; kIOMaxPlaneName) {
+        strlcpy( temp, path, end - path + 1 );
+
+        RLOCK;
+        entry = IORegistryEntry::fromPath( <span class="enscript-string">&quot;/aliases&quot;</span>, plane );
+        <span class="enscript-keyword">if</span>( entry) {
+            data = (OSData *) entry-&gt;getProperty( temp );
+            <span class="enscript-keyword">if</span>( data ) {
+                rpath = (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) data-&gt;getBytesNoCopy();
+                <span class="enscript-keyword">if</span>( rpath)
+                    *opath = end;
+            }
+	    entry-&gt;release();
+        }
+        UNLOCK;
+    }
+
+    <span class="enscript-keyword">return</span>( rpath );
+}
+
+IORegistryEntry * <span class="enscript-function-name">IORegistryEntry::fromPath</span>(
+                        <span class="enscript-type">const</span> <span class="enscript-type">char</span> * 		path,
+                        <span class="enscript-type">const</span> IORegistryPlane * plane,
+                        <span class="enscript-type">char</span> *			opath,
+			<span class="enscript-type">int</span> * 			length,
+                        IORegistryEntry * 	fromEntry )
+{
+    IORegistryEntry *	where = 0;
+    IORegistryEntry *	aliasEntry = 0;
+    IORegistryEntry *	next;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *	alias;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *	end;
+    <span class="enscript-type">int</span>			len = 0;
+    <span class="enscript-type">int</span>			len2;
+    <span class="enscript-type">char</span>		c;
+    <span class="enscript-type">char</span>		temp[ kIOMaxPlaneName + 1 ];
+
+    <span class="enscript-keyword">if</span>( 0 == path)
+	<span class="enscript-keyword">return</span>( 0 );
+
+    <span class="enscript-keyword">if</span>( 0 == plane) {
+	<span class="enscript-comment">// get plane name
+</span>        end = strchr( path, <span class="enscript-string">':'</span> );
+	<span class="enscript-keyword">if</span>( end &amp;&amp; ((end - path) &lt; kIOMaxPlaneName)) {
+	    strlcpy( temp, path, end - path + 1 );
+            plane = getPlane( temp );
+	    path = end + 1;
+	}
+    }
+    <span class="enscript-keyword">if</span>( 0 == plane)
+	<span class="enscript-keyword">return</span>( 0 );
+
+    <span class="enscript-comment">// check for alias
+</span>    end = path;
+    <span class="enscript-keyword">if</span>( (alias = dealiasPath( &amp;end, plane))) {
+        <span class="enscript-keyword">if</span>( length)
+            len = *length;
+        aliasEntry = IORegistryEntry::fromPath( alias, plane,
+                                    opath, &amp;len, fromEntry );
+        where = aliasEntry;
+        <span class="enscript-keyword">if</span>( where)
+            path = end;
+        <span class="enscript-keyword">else</span>
+            len = 0;
+    }
+
+    RLOCK;
+
+    <span class="enscript-keyword">do</span> {
+        <span class="enscript-keyword">if</span>( 0 == where) {
+            <span class="enscript-keyword">if</span>( (0 == fromEntry) &amp;&amp; (*path++ == <span class="enscript-string">'/'</span>))
+                fromEntry = gRegistryRoot-&gt;getChildEntry( plane );
+            where = fromEntry;
+            <span class="enscript-keyword">if</span>( 0 == where)
+                <span class="enscript-keyword">break</span>;
+        } <span class="enscript-keyword">else</span> {
+            c = *path++;
+            <span class="enscript-keyword">if</span>( c != <span class="enscript-string">'/'</span>) {
+                <span class="enscript-keyword">if</span>( c &amp;&amp; (c != <span class="enscript-string">':'</span>))	<span class="enscript-comment">// check valid terminator
+</span>                    where = 0;
+                <span class="enscript-keyword">break</span>;
+            }
+        }
+        next = where-&gt;getChildFromComponent( &amp;path, plane );
+        <span class="enscript-keyword">if</span>( next)
+            where = next;
+    } <span class="enscript-keyword">while</span>( next );
+
+    <span class="enscript-keyword">if</span>( where) {
+	<span class="enscript-comment">// check residual path
+</span>	<span class="enscript-keyword">if</span>( where != fromEntry)
+            path--;
+
+	<span class="enscript-keyword">if</span>( opath &amp;&amp; length) {
+            <span class="enscript-comment">// copy out residual path
+</span>	    len2 = strlen( path );
+	    <span class="enscript-keyword">if</span>( (len + len2) &lt; *length)
+                strlcpy( opath + len, path, len2 + 1 );
+	    *length = (len + len2);
+
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span>( path[0])
+	    <span class="enscript-comment">// no residual path =&gt; must be no tail for success
+</span>            where = 0;
+    }
+
+    <span class="enscript-keyword">if</span>( where)
+	where-&gt;retain();
+    <span class="enscript-keyword">if</span>( aliasEntry)
+        aliasEntry-&gt;release();
+
+    UNLOCK;
+
+    <span class="enscript-keyword">return</span>( where );
+}
+
+IORegistryEntry * <span class="enscript-function-name">IORegistryEntry::childFromPath</span>(
+			<span class="enscript-type">const</span> <span class="enscript-type">char</span> *		path,
+                        <span class="enscript-type">const</span> IORegistryPlane * plane,
+                        <span class="enscript-type">char</span> *			opath,
+                        <span class="enscript-type">int</span> *			len )
+{
+    <span class="enscript-keyword">return</span>( IORegistryEntry::fromPath( path, plane, opath, len, <span class="enscript-keyword">this</span> ));
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IOLinkIterator</span> OSCollectionIterator
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">super</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> OSObject
+
+<span class="enscript-type">inline</span> <span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryEntry::arrayMember</span>( OSArray * set,
+					  <span class="enscript-type">const</span> IORegistryEntry * member,
+					<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> * index ) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">int</span>		i;
+    OSObject *	probeObject;
+
+    <span class="enscript-keyword">for</span>( i = 0; (probeObject = set-&gt;getObject(i)); i++) {
+        <span class="enscript-keyword">if</span> (probeObject == (OSObject *) member) {
+	    <span class="enscript-keyword">if</span>( index)
+                *index = i;
+            <span class="enscript-keyword">return</span>( true );
+	}
+    }
+    <span class="enscript-keyword">return</span>( false );
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryEntry::makeLink</span>( IORegistryEntry * to,
+                                <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> relation,
+                                <span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    OSArray *	links;
+    <span class="enscript-type">bool</span>	result = false;
+
+    <span class="enscript-keyword">if</span>( (links = (OSArray *)
+		registryTable()-&gt;getObject( plane-&gt;keys[ relation ] ))) {
+
+	result = arrayMember( links, to );
+	<span class="enscript-keyword">if</span>( !result)
+            result = links-&gt;setObject( to );
+
+    } <span class="enscript-keyword">else</span> {
+
+	links = OSArray::withObjects( (<span class="enscript-type">const</span> OSObject **) &amp;to, 1, 1 );
+	result = (links != 0);
+	<span class="enscript-keyword">if</span>( result) {
+	    result = registryTable()-&gt;setObject( plane-&gt;keys[ relation ],
+                                          links );
+            links-&gt;release();
+	}
+    }
+
+    <span class="enscript-keyword">return</span>( result);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryEntry::breakLink</span>( IORegistryEntry * to,
+                                 <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> relation,
+                                 <span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    OSArray *		links;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	index;
+
+    <span class="enscript-keyword">if</span>( (links = (OSArray *)
+		registryTable()-&gt;getObject( plane-&gt;keys[ relation ]))) {
+
+	<span class="enscript-keyword">if</span>( arrayMember( links, to, &amp;index )) {
+            links-&gt;removeObject( index );
+	    <span class="enscript-keyword">if</span>( 0 == links-&gt;getCount())
+                registryTable()-&gt;removeObject( plane-&gt;keys[ relation ]);
+	    }
+    }
+}
+
+
+OSArray * <span class="enscript-function-name">IORegistryEntry::getParentSetReference</span>(
+				<span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">if</span>( plane)
+        <span class="enscript-keyword">return</span>( (OSArray *) registryTable()-&gt;getObject(
+                            plane-&gt;keys[ kParentSetIndex ]));
+    <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">return</span>( 0 );
+}
+
+OSIterator * <span class="enscript-function-name">IORegistryEntry::getParentIterator</span>(
+				<span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    OSArray *		links;
+    OSIterator *	iter;
+
+    <span class="enscript-keyword">if</span>( !plane)
+	<span class="enscript-keyword">return</span>( 0 );
+
+    RLOCK;
+    links = getParentSetReference( plane );
+    <span class="enscript-keyword">if</span>( 0 == links)
+	links = OSArray::withCapacity( 1 );
+    <span class="enscript-keyword">else</span>
+	links = OSArray::withArray( links, links-&gt;getCount() );
+    UNLOCK;
+
+    iter = IOLinkIterator::withCollection( links );
+
+    <span class="enscript-keyword">if</span>( links)
+        links-&gt;release();
+
+    <span class="enscript-keyword">return</span>( iter );
+}
+
+IORegistryEntry * <span class="enscript-function-name">IORegistryEntry::copyParentEntry</span>( <span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    IORegistryEntry *	entry = 0;
+    OSArray *		links;
+
+    RLOCK;
+
+    <span class="enscript-keyword">if</span>( (links = getParentSetReference( plane ))) {
+        entry = (IORegistryEntry *) links-&gt;getObject( 0 );
+        entry-&gt;retain();
+    }
+
+    UNLOCK;
+
+    <span class="enscript-keyword">return</span>( entry);
+}
+
+IORegistryEntry * <span class="enscript-function-name">IORegistryEntry::getParentEntry</span>( <span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    IORegistryEntry * entry;
+
+    entry = copyParentEntry( plane );
+    <span class="enscript-keyword">if</span>( entry)
+        entry-&gt;release();
+
+    <span class="enscript-keyword">return</span>( entry );
+}
+
+OSArray * <span class="enscript-function-name">IORegistryEntry::getChildSetReference</span>( <span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">if</span>( plane)
+        <span class="enscript-keyword">return</span>( (OSArray *) registryTable()-&gt;getObject(
+                            plane-&gt;keys[ kChildSetIndex ]));
+    <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">return</span>( 0 );
+}
+
+OSIterator * <span class="enscript-function-name">IORegistryEntry::getChildIterator</span>( <span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    OSArray *		links;
+    OSIterator *	iter;
+
+    <span class="enscript-keyword">if</span>( !plane)
+	<span class="enscript-keyword">return</span>( 0 );
+
+    RLOCK;
+    links = getChildSetReference( plane );
+    <span class="enscript-keyword">if</span>( 0 == links)
+        links = OSArray::withCapacity( 1 );
+    <span class="enscript-keyword">else</span>
+        links = OSArray::withArray( links, links-&gt;getCount() );
+    UNLOCK;
+
+    iter = IOLinkIterator::withCollection( links );
+
+    <span class="enscript-keyword">if</span>( links)
+        links-&gt;release();
+
+    <span class="enscript-keyword">return</span>( iter );
+}
+
+
+IORegistryEntry * <span class="enscript-function-name">IORegistryEntry::copyChildEntry</span>(
+				<span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    IORegistryEntry *	entry = 0;
+    OSArray *		links;
+
+    RLOCK;
+
+    <span class="enscript-keyword">if</span>( (links = getChildSetReference( plane ))) {
+	entry = (IORegistryEntry *) links-&gt;getObject( 0 );
+        entry-&gt;retain();
+    }
+
+    UNLOCK;
+
+    <span class="enscript-keyword">return</span>( entry);
+}
+
+IORegistryEntry * <span class="enscript-function-name">IORegistryEntry::getChildEntry</span>(
+				<span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    IORegistryEntry * entry;
+
+    entry = copyChildEntry( plane );
+    <span class="enscript-keyword">if</span>( entry)
+        entry-&gt;release();
+        
+    <span class="enscript-keyword">return</span>( entry );
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryEntry::applyToChildren</span>( IORegistryEntryApplierFunction applier,
+                                       <span class="enscript-type">void</span> * context,
+                                       <span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    OSArray *	 	array;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> 	index;
+    IORegistryEntry *	next;
+
+    <span class="enscript-keyword">if</span>( !plane)
+        <span class="enscript-keyword">return</span>;
+
+    RLOCK;
+    array = OSArray::withArray( getChildSetReference( plane ));
+    UNLOCK;
+    <span class="enscript-keyword">if</span>( array) {
+        <span class="enscript-keyword">for</span>( index = 0;
+             (next = (IORegistryEntry *) array-&gt;getObject( index ));
+             index++)
+            (*applier)(next, context);
+        array-&gt;release();
+    }
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryEntry::applyToParents</span>( IORegistryEntryApplierFunction applier,
+                                      <span class="enscript-type">void</span> * context,
+                                      <span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    OSArray *	 	array;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> 	index;
+    IORegistryEntry *	next;
+
+    <span class="enscript-keyword">if</span>( !plane)
+        <span class="enscript-keyword">return</span>;
+
+    RLOCK;
+    array = OSArray::withArray( getParentSetReference( plane ));
+    UNLOCK;
+    <span class="enscript-keyword">if</span>( array) {
+        <span class="enscript-keyword">for</span>( index = 0;
+             (next = (IORegistryEntry *) array-&gt;getObject( index ));
+             index++)
+            (*applier)(next, context);
+        array-&gt;release();
+    }
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryEntry::isChild</span>( IORegistryEntry * child,
+                                <span class="enscript-type">const</span> IORegistryPlane * plane,
+				<span class="enscript-type">bool</span> onlyChild ) <span class="enscript-type">const</span>
+{
+    OSArray *	links;
+    <span class="enscript-type">bool</span>	ret = false;
+
+    RLOCK;
+
+    <span class="enscript-keyword">if</span>( (links = getChildSetReference( plane ))) {
+	<span class="enscript-keyword">if</span>( (!onlyChild) || (1 == links-&gt;getCount()))
+            ret = arrayMember( links, child );
+    }
+    <span class="enscript-keyword">if</span>( ret &amp;&amp; (links = child-&gt;getParentSetReference( plane )))
+	ret = arrayMember( links, <span class="enscript-keyword">this</span> );
+
+    UNLOCK;
+
+    <span class="enscript-keyword">return</span>( ret);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryEntry::isParent</span>( IORegistryEntry * parent,
+                                <span class="enscript-type">const</span> IORegistryPlane * plane,
+				<span class="enscript-type">bool</span> onlyParent ) <span class="enscript-type">const</span>
+
+{
+    OSArray *	links;
+    <span class="enscript-type">bool</span>	ret = false;
+
+    RLOCK;
+
+    <span class="enscript-keyword">if</span>( (links = getParentSetReference( plane ))) {
+	<span class="enscript-keyword">if</span>( (!onlyParent) || (1 == links-&gt;getCount()))
+            ret = arrayMember( links, parent );
+    }
+    <span class="enscript-keyword">if</span>( ret &amp;&amp; (links = parent-&gt;getChildSetReference( plane )))
+	ret = arrayMember( links, <span class="enscript-keyword">this</span> );
+
+    UNLOCK;
+
+    <span class="enscript-keyword">return</span>( ret);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryEntry::inPlane</span>( <span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">bool</span> ret;
+
+    RLOCK;
+
+    <span class="enscript-keyword">if</span>( plane)
+	ret = (0 != getParentSetReference( plane ));
+    <span class="enscript-keyword">else</span> {
+
+	<span class="enscript-comment">// Check to see if this is in any plane.  If it is in a plane
+</span>	<span class="enscript-comment">// then the registryTable will contain a key with the ParentLinks
+</span>	<span class="enscript-comment">// suffix.  When we iterate over the keys looking for that suffix
+</span>	ret = false;
+
+	OSCollectionIterator *iter =
+	    <span class="enscript-reference">OSCollectionIterator</span>::withCollection( registryTable());
+	<span class="enscript-keyword">if</span>( iter) {
+	    <span class="enscript-type">const</span> OSSymbol *key;
+
+            <span class="enscript-keyword">while</span>( (key = (OSSymbol *) iter-&gt;getNextObject()) ) {
+		size_t keysuffix;
+
+		<span class="enscript-comment">// Get a pointer to this keys suffix
+</span>		keysuffix = key-&gt;getLength();
+		<span class="enscript-keyword">if</span> (keysuffix &lt;= kIORegPlaneParentSuffixLen)
+		    <span class="enscript-keyword">continue</span>;
+		keysuffix -= kIORegPlaneParentSuffixLen;
+		<span class="enscript-keyword">if</span>( !strncmp(key-&gt;getCStringNoCopy() + keysuffix, 
+				kIORegPlaneParentSuffix, 
+				kIORegPlaneParentSuffixLen + 1) ) {
+		    ret = true;
+		    <span class="enscript-keyword">break</span>;
+		}
+            }
+            iter-&gt;release();
+        }
+    }
+
+    UNLOCK;
+
+    <span class="enscript-keyword">return</span>( ret );
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryEntry::attachToParent</span>( IORegistryEntry * parent,
+                                <span class="enscript-type">const</span> IORegistryPlane * plane )
+{
+    OSArray *	links;
+    <span class="enscript-type">bool</span>	ret;
+    <span class="enscript-type">bool</span>	needParent;
+
+    <span class="enscript-keyword">if</span>( <span class="enscript-keyword">this</span> == parent)
+	<span class="enscript-keyword">return</span>( false );
+
+    WLOCK;
+
+    <span class="enscript-keyword">if</span> (!reserved-&gt;fRegistryEntryID)
+	reserved-&gt;fRegistryEntryID = ++gIORegistryLastID;
+
+    ret = makeLink( parent, kParentSetIndex, plane );
+
+    <span class="enscript-keyword">if</span>( (links = parent-&gt;getChildSetReference( plane )))
+	needParent = (false == arrayMember( links, <span class="enscript-keyword">this</span> ));
+    <span class="enscript-keyword">else</span>
+	needParent = true;
+
+    UNLOCK;
+
+    PLOCK;
+
+    <span class="enscript-comment">// Mark any collections in the property list as immutable
+</span>    OSDictionary *ptable = getPropertyTable();
+    OSCollectionIterator *iter =
+	<span class="enscript-reference">OSCollectionIterator</span>::withCollection( ptable );
+    <span class="enscript-keyword">if</span>( iter) {
+	<span class="enscript-type">const</span> OSSymbol *key;
+
+	<span class="enscript-keyword">while</span>( (key = (OSSymbol *) iter-&gt;getNextObject( ))) {
+	    <span class="enscript-comment">// Is object for key a collection?
+</span>	    OSCollection *coll =
+		OSDynamicCast( OSCollection, ptable-&gt;getObject( key ));
+
+	    <span class="enscript-keyword">if</span>( coll) {
+		<span class="enscript-comment">// Yup so mark it as immutable
+</span>		coll-&gt;setOptions( OSCollection::kMASK,
+				  <span class="enscript-reference">OSCollection</span>::kImmutable );
+	    }
+	}
+	iter-&gt;release();
+    }
+
+    PUNLOCK;
+
+    <span class="enscript-keyword">if</span>( needParent)
+        ret &amp;= parent-&gt;attachToChild( <span class="enscript-keyword">this</span>, plane );
+
+    <span class="enscript-keyword">return</span>( ret );
+}
+
+uint64_t <span class="enscript-function-name">IORegistryEntry::getRegistryEntryID</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-keyword">if</span> (reserved)
+	<span class="enscript-keyword">return</span> (reserved-&gt;fRegistryEntryID);
+    <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryEntry::attachToChild</span>( IORegistryEntry * child,
+                                        <span class="enscript-type">const</span> IORegistryPlane * plane )
+{
+    OSArray *	links;
+    <span class="enscript-type">bool</span>	ret;
+    <span class="enscript-type">bool</span>	needChild;
+
+    <span class="enscript-keyword">if</span>( <span class="enscript-keyword">this</span> == child)
+	<span class="enscript-keyword">return</span>( false );
+
+    WLOCK;
+
+    ret = makeLink( child, kChildSetIndex, plane );
+
+    <span class="enscript-keyword">if</span>( (links = child-&gt;getParentSetReference( plane )))
+	needChild = (false == arrayMember( links, <span class="enscript-keyword">this</span> ));
+    <span class="enscript-keyword">else</span>
+	needChild = true;
+
+    UNLOCK;
+
+    <span class="enscript-keyword">if</span>( needChild)
+	ret &amp;= child-&gt;attachToParent( <span class="enscript-keyword">this</span>, plane );
+
+    <span class="enscript-keyword">return</span>( ret );
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryEntry::detachFromParent</span>( IORegistryEntry * parent,
+                                <span class="enscript-type">const</span> IORegistryPlane * plane )
+{
+    OSArray *	links;
+    <span class="enscript-type">bool</span>	needParent;
+
+    WLOCK;
+
+    parent-&gt;retain();
+
+    breakLink( parent, kParentSetIndex, plane );
+
+    <span class="enscript-keyword">if</span>( (links = parent-&gt;getChildSetReference( plane )))
+	needParent = arrayMember( links, <span class="enscript-keyword">this</span> );
+    <span class="enscript-keyword">else</span>
+	needParent = false;
+
+<span class="enscript-comment">//    parent-&gt;breakLink( this, kChildSetIndex, plane );
+</span>
+    UNLOCK;
+
+    <span class="enscript-keyword">if</span>( needParent)
+	parent-&gt;detachFromChild( <span class="enscript-keyword">this</span>, plane );
+
+    parent-&gt;release();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryEntry::detachFromChild</span>( IORegistryEntry * child,
+                                <span class="enscript-type">const</span> IORegistryPlane * plane )
+{
+    OSArray *		links;
+    <span class="enscript-type">bool</span>	needChild;
+
+    WLOCK;
+
+    child-&gt;retain();
+
+    breakLink( child, kChildSetIndex, plane );
+
+    <span class="enscript-keyword">if</span>( (links = child-&gt;getParentSetReference( plane )))
+	needChild = arrayMember( links, <span class="enscript-keyword">this</span> );
+    <span class="enscript-keyword">else</span>
+	needChild = false;
+
+    UNLOCK;
+
+    <span class="enscript-keyword">if</span>( needChild)
+	child-&gt;detachFromParent( <span class="enscript-keyword">this</span>, plane );
+
+    child-&gt;release();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryEntry::detachAbove</span>( <span class="enscript-type">const</span> IORegistryPlane * plane )
+{
+    IORegistryEntry *	parent;
+
+    retain();
+    <span class="enscript-keyword">while</span>( (parent = copyParentEntry( plane )))
+    {
+	detachFromParent( parent, plane );
+	parent-&gt;release();
+    }
+    release();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryEntry::detachAll</span>( <span class="enscript-type">const</span> IORegistryPlane * plane )
+{
+    OSOrderedSet *		all;
+    IORegistryEntry *		next;
+    IORegistryIterator *	regIter;
+
+    regIter = IORegistryIterator::iterateOver( <span class="enscript-keyword">this</span>, plane, true );
+    <span class="enscript-keyword">if</span>( 0 == regIter)
+	<span class="enscript-keyword">return</span>;
+    all = regIter-&gt;iterateAll();
+    regIter-&gt;release();
+
+    detachAbove( plane );
+    <span class="enscript-keyword">if</span>( all) {
+	<span class="enscript-keyword">while</span>( (next = (IORegistryEntry *) all-&gt;getLastObject())) {
+
+            next-&gt;retain();
+            all-&gt;removeObject(next);
+
+            next-&gt;detachAbove( plane );
+            next-&gt;release();
+        }
+        all-&gt;release();
+    }
+}
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> <span class="enscript-function-name">IORegistryEntry::getDepth</span>( <span class="enscript-type">const</span> IORegistryPlane * plane ) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		depth = 1;
+    OSArray *			parents;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> 		oneDepth, maxParentDepth, count;
+    IORegistryEntry *		one;
+    <span class="enscript-type">const</span> IORegistryEntry *	next;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		index;
+
+    RLOCK;
+
+    next = <span class="enscript-keyword">this</span>;
+    <span class="enscript-keyword">while</span>( (parents = next-&gt;getParentSetReference( plane ))) {
+
+	count = parents-&gt;getCount();
+	<span class="enscript-keyword">if</span>( 0 == count)
+	    <span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">if</span>( 1 == count) {
+            depth++;
+            next = (IORegistryEntry *) parents-&gt;getObject( 0 );
+	} <span class="enscript-keyword">else</span> {
+	    <span class="enscript-comment">// painful
+</span>	    maxParentDepth = 0;
+	    <span class="enscript-keyword">for</span>( index = 0;
+		 (one = (IORegistryEntry *) parents-&gt;getObject( index ));
+		 index++ ) {
+                oneDepth = one-&gt;getDepth( plane );
+                <span class="enscript-keyword">if</span>( oneDepth &gt; maxParentDepth)
+                    maxParentDepth = oneDepth;
+            }
+            depth += maxParentDepth;
+	    <span class="enscript-keyword">break</span>;
+	}
+    }
+
+    UNLOCK;
+
+    <span class="enscript-keyword">return</span>( depth);
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">super</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> OSIterator
+
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IORegistryIterator, OSIterator)
+
+<span class="enscript-type">enum</span> { kIORegistryIteratorInvalidFlag = 0x80000000 };
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+IORegistryIterator *
+<span class="enscript-function-name">IORegistryIterator::iterateOver</span>( IORegistryEntry * root,
+                                 <span class="enscript-type">const</span> IORegistryPlane * plane,
+                                 IOOptionBits options )
+{
+    IORegistryIterator *	create;
+
+    <span class="enscript-keyword">if</span>( 0 == root)
+	<span class="enscript-keyword">return</span>( 0);
+    <span class="enscript-keyword">if</span>( 0 == plane)
+	<span class="enscript-keyword">return</span>( 0);
+
+    create = <span class="enscript-keyword">new</span> IORegistryIterator;
+    <span class="enscript-keyword">if</span>( create) {
+        <span class="enscript-keyword">if</span>( create-&gt;init()) {
+
+            root-&gt;retain();
+            create-&gt;root = root;
+            create-&gt;where = &amp;create-&gt;start;
+            create-&gt;start.current = root;
+            create-&gt;plane = plane;
+            create-&gt;options = options &amp; ~kIORegistryIteratorInvalidFlag;
+
+	} <span class="enscript-keyword">else</span> {
+	    create-&gt;release();
+	    create = 0;
+	}
+    }
+    <span class="enscript-keyword">return</span>( create);
+}
+
+IORegistryIterator *
+<span class="enscript-function-name">IORegistryIterator::iterateOver</span>( <span class="enscript-type">const</span> IORegistryPlane * plane,
+				 IOOptionBits options )
+{
+    <span class="enscript-keyword">return</span>( iterateOver( gRegistryRoot, plane, options ));
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryIterator::isValid</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-type">bool</span>		ok;
+    IORegCursor *	next;
+
+    next = where;
+
+    RLOCK;
+
+    ok = (0 == (kIORegistryIteratorInvalidFlag &amp; options));
+
+    <span class="enscript-keyword">while</span>( ok &amp;&amp; next) {
+	<span class="enscript-keyword">if</span>( where-&gt;iter)
+            ok = where-&gt;iter-&gt;isValid();
+	next = next-&gt;next;
+    }
+    UNLOCK;
+
+    <span class="enscript-keyword">return</span>( ok);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryIterator::enterEntry</span>( <span class="enscript-type">const</span> IORegistryPlane * enterPlane )
+{
+    IORegCursor *	prev;
+
+    prev = where;
+    where = (IORegCursor *) IOMalloc( <span class="enscript-keyword">sizeof</span>(IORegCursor));
+    assert( where);
+
+    <span class="enscript-keyword">if</span>( where) {
+        where-&gt;iter = 0;
+        where-&gt;next = prev;
+        where-&gt;current = prev-&gt;current;
+        plane = enterPlane;
+    }
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryIterator::enterEntry</span>( <span class="enscript-type">void</span> )
+{
+    enterEntry( plane );
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IORegistryIterator::exitEntry</span>( <span class="enscript-type">void</span> )
+{
+    IORegCursor *	gone;
+
+    <span class="enscript-keyword">if</span>( where-&gt;iter) {
+	where-&gt;iter-&gt;release();
+	where-&gt;iter = 0;
+        <span class="enscript-keyword">if</span>( where-&gt;current)<span class="enscript-comment">// &amp;&amp; (where != &amp;start))
+</span>            where-&gt;current-&gt;release();
+    }
+
+    <span class="enscript-keyword">if</span>( where != &amp;start) {
+	gone = where;
+        where = gone-&gt;next;
+        IOFree( gone, <span class="enscript-keyword">sizeof</span>(IORegCursor));
+	<span class="enscript-keyword">return</span>( true);
+
+    } <span class="enscript-keyword">else</span>
+        <span class="enscript-keyword">return</span>( false);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryIterator::reset</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-keyword">while</span>( exitEntry())
+	{}
+
+    <span class="enscript-keyword">if</span>( done) {
+	done-&gt;release();
+	done = 0;
+    }
+
+    where-&gt;current = root;
+    options &amp;= ~kIORegistryIteratorInvalidFlag;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IORegistryIterator::free</span>( <span class="enscript-type">void</span> )
+{
+    reset();
+
+    <span class="enscript-keyword">if</span>( root)
+        root-&gt;release();
+
+    <span class="enscript-reference">super</span>::free();
+}
+
+
+IORegistryEntry * <span class="enscript-function-name">IORegistryIterator::getNextObjectFlat</span>( <span class="enscript-type">void</span> )
+{
+    IORegistryEntry * 	next = 0;
+    OSArray *		links = 0;
+
+    RLOCK;
+
+    <span class="enscript-keyword">if</span>( (0 == where-&gt;iter)) {
+	<span class="enscript-comment">// just entered - create new iter
+</span>	<span class="enscript-keyword">if</span>( isValid()
+        &amp;&amp;  where-&gt;current
+        &amp;&amp;  (links = ( (options &amp; kIORegistryIterateParents) ?
+                        where-&gt;current-&gt;getParentSetReference( plane ) :
+                        where-&gt;current-&gt;getChildSetReference( plane ) )) )
+
+            where-&gt;iter = OSCollectionIterator::withCollection( links );
+
+    } <span class="enscript-keyword">else</span>
+	<span class="enscript-comment">// next sibling - release current
+</span>        <span class="enscript-keyword">if</span>( where-&gt;current)
+            where-&gt;current-&gt;release();
+
+    <span class="enscript-keyword">if</span>( where-&gt;iter) {
+
+        next = (IORegistryEntry *) where-&gt;iter-&gt;getNextObject();
+
+        <span class="enscript-keyword">if</span>( next)
+            next-&gt;retain();
+        <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span>( !where-&gt;iter-&gt;isValid())
+            options |= kIORegistryIteratorInvalidFlag;
+    }
+
+    where-&gt;current = next;
+
+    UNLOCK;
+
+    <span class="enscript-keyword">return</span>( next);
+}
+
+IORegistryEntry * <span class="enscript-function-name">IORegistryIterator::getNextObjectRecursive</span>( <span class="enscript-type">void</span> )
+{
+    IORegistryEntry *	next;
+
+    <span class="enscript-keyword">do</span>
+        next = getNextObjectFlat();
+    <span class="enscript-keyword">while</span>( (0 == next) &amp;&amp; exitEntry());
+
+    <span class="enscript-keyword">if</span>( next) {
+	<span class="enscript-keyword">if</span>( 0 == done)
+            done = OSOrderedSet::withCapacity( 10 );
+	<span class="enscript-keyword">if</span>( done-&gt;setObject((OSObject *) next)) {
+       	    <span class="enscript-comment">// done set didn't contain this one, so recurse
+</span>            enterEntry();
+	}
+    }
+    <span class="enscript-keyword">return</span>( next);
+}
+
+IORegistryEntry * <span class="enscript-function-name">IORegistryIterator::getNextObject</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-keyword">if</span>( options &amp; kIORegistryIterateRecursively)
+	<span class="enscript-keyword">return</span>( getNextObjectRecursive());
+    <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">return</span>( getNextObjectFlat());
+}
+
+IORegistryEntry * <span class="enscript-function-name">IORegistryIterator::getCurrentEntry</span>( <span class="enscript-type">void</span> )
+{
+    <span class="enscript-keyword">if</span>( isValid())
+	<span class="enscript-keyword">return</span>( where-&gt;current);
+    <span class="enscript-keyword">else</span>
+	<span class="enscript-keyword">return</span>( 0);
+}
+
+OSOrderedSet * <span class="enscript-function-name">IORegistryIterator::iterateAll</span>( <span class="enscript-type">void</span> )
+{
+    reset();
+    <span class="enscript-keyword">while</span>( getNextObjectRecursive())
+        {}
+    <span class="enscript-keyword">if</span>( done)
+        done-&gt;retain();
+    <span class="enscript-keyword">return</span>( done);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">__LP64__</span>
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 1);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 2);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 3);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 4);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 5);
+#<span class="enscript-reference">else</span>
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IORegistryEntry, 0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IORegistryEntry, 1);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IORegistryEntry, 2);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IORegistryEntry, 3);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IORegistryEntry, 4);
+<span class="enscript-function-name">OSMetaClassDefineReservedUsed</span>(IORegistryEntry, 5);
+#<span class="enscript-reference">endif</span>
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 6);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 7);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 8);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 9);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 10);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 11);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 12);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 13);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 14);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 15);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 16);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 17);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 18);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 19);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 20);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 21);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 22);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 23);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 24);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 25);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 26);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 27);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 28);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 29);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 30);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IORegistryEntry, 31);
+
+<span class="enscript-comment">/* inline function implementation */</span>
+OSDictionary * <span class="enscript-function-name">IORegistryEntry::getPropertyTable</span>( <span class="enscript-type">void</span> ) <span class="enscript-type">const</span>
+{ <span class="enscript-keyword">return</span>(fPropertyTable); }
+</pre>
+<hr />
+</body></html>

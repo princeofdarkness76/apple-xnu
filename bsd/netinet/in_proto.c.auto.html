@@ -1,0 +1,388 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>in_proto.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">in_proto.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)in_proto.c	8.2 (Berkeley) 2/9/95
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_icmp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/igmp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_timer.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcpip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/udp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/udp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_encap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_divert.h&gt;</span>
+
+
+<span class="enscript-comment">/*
+ * TCP/IP protocol family: IP, ICMP, UDP, TCP.
+ */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPSEC</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipsec.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ah.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPSEC_ESP</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/esp.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ipcomp.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IPSEC */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">in_dinit</span>(<span class="enscript-type">struct</span> domain *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ip_proto_input</span>(protocol_family_t, mbuf_t);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> domain inetdomain_s;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> pr_usrreqs nousrreqs;
+<span class="enscript-type">extern</span> <span class="enscript-type">struct</span> pr_usrreqs icmp_dgram_usrreqs;
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">icmp_dgram_ctloutput</span>(<span class="enscript-type">struct</span> socket *, <span class="enscript-type">struct</span> sockopt *);
+
+<span class="enscript-type">struct</span> domain *inetdomain = NULL;
+
+<span class="enscript-comment">/* Thanks to PPP, this still needs to be exported */</span>
+lck_mtx_t	*inet_domain_mutex;
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> protosw inetsw[] = {
+{
+	.pr_type =		0,
+	.pr_protocol =		0,
+	.pr_init =		ip_init,
+	.pr_drain =		ip_drain,
+	.pr_usrreqs =		&amp;nousrreqs,
+},
+{
+	.pr_type =		SOCK_DGRAM,
+	.pr_protocol =		IPPROTO_UDP,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_PROTOLOCK|PR_PCBLOCK|
+				PR_EVCONNINFO|PR_PRECONN_WRITE,
+	.pr_input =		udp_input,
+	.pr_ctlinput =		udp_ctlinput,
+	.pr_ctloutput =		udp_ctloutput,
+	.pr_init =		udp_init,
+	.pr_usrreqs =		&amp;udp_usrreqs,
+	.pr_lock =		udp_lock,
+	.pr_unlock =		udp_unlock,
+	.pr_getlock =		udp_getlock,
+},
+{
+	.pr_type =		SOCK_STREAM,
+	.pr_protocol =		IPPROTO_TCP,
+	.pr_flags =		PR_CONNREQUIRED|PR_WANTRCVD|PR_PCBLOCK|
+				PR_PROTOLOCK|PR_DISPOSE|PR_EVCONNINFO|
+				PR_PRECONN_WRITE|PR_DATA_IDEMPOTENT,
+	.pr_input =		tcp_input,
+	.pr_ctlinput =		tcp_ctlinput,
+	.pr_ctloutput =		tcp_ctloutput,
+	.pr_init =		tcp_init,
+	.pr_drain =		tcp_drain,
+	.pr_usrreqs =		&amp;tcp_usrreqs,
+	.pr_lock =		tcp_lock,
+	.pr_unlock =		tcp_unlock,
+	.pr_getlock =		tcp_getlock,
+},
+{
+	.pr_type =		SOCK_RAW,
+	.pr_protocol =		IPPROTO_RAW,
+	.pr_flags =		PR_ATOMIC|PR_ADDR,
+	.pr_input =		rip_input,
+	.pr_ctlinput =		rip_ctlinput,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_usrreqs =		&amp;rip_usrreqs,
+	.pr_unlock =		rip_unlock,
+},
+{
+	.pr_type =		SOCK_RAW,
+	.pr_protocol =		IPPROTO_ICMP,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		icmp_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_usrreqs =		&amp;rip_usrreqs,
+	.pr_unlock =		rip_unlock,
+},
+{
+	.pr_type =		SOCK_DGRAM,
+	.pr_protocol =		IPPROTO_ICMP,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		icmp_input,
+	.pr_ctloutput =		icmp_dgram_ctloutput,
+	.pr_usrreqs =		&amp;icmp_dgram_usrreqs,
+	.pr_unlock =		rip_unlock,
+},
+{
+	.pr_type =		SOCK_RAW,
+	.pr_protocol =		IPPROTO_IGMP,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		igmp_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_init =		igmp_init,
+	.pr_usrreqs =		&amp;rip_usrreqs,
+	.pr_unlock =		rip_unlock,
+},
+{
+	.pr_type =		SOCK_RAW,
+	.pr_protocol =		IPPROTO_GRE,
+	.pr_flags =		PR_ATOMIC|PR_ADDR,
+	.pr_input =		gre_input,
+	.pr_ctlinput =		rip_ctlinput,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_usrreqs =		&amp;rip_usrreqs,
+	.pr_unlock =		rip_unlock,
+},
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPSEC</span>
+{
+	.pr_type =		SOCK_RAW,
+	.pr_protocol =		IPPROTO_AH,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_PROTOLOCK,
+	.pr_input =		ah4_input,
+	.pr_usrreqs =		&amp;nousrreqs,
+},
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPSEC_ESP</span>
+{
+	.pr_type =		SOCK_RAW,
+	.pr_protocol =		IPPROTO_ESP,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_PROTOLOCK,
+	.pr_input =		esp4_input,
+	.pr_usrreqs =		&amp;nousrreqs,
+},
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IPSEC_ESP */</span>
+{
+	.pr_type =		SOCK_RAW,
+	.pr_protocol =		IPPROTO_IPCOMP,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_PROTOLOCK,
+	.pr_input =		ipcomp4_input,
+	.pr_usrreqs =		&amp;nousrreqs,
+},
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IPSEC */</span>
+{
+	.pr_type =		SOCK_RAW,
+	.pr_protocol =		IPPROTO_IPV4,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		encap4_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_init =		encap4_init,
+	.pr_usrreqs =		&amp;rip_usrreqs,
+	.pr_unlock =		rip_unlock,
+},
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">INET6</span>
+{
+	.pr_type =		SOCK_RAW,
+	.pr_protocol =		IPPROTO_IPV6,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		encap4_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_init =		encap4_init,
+	.pr_usrreqs =		&amp;rip_usrreqs,
+	.pr_unlock =		rip_unlock,
+},
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* INET6 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPDIVERT</span>
+{
+	.pr_type =		SOCK_RAW,
+	.pr_protocol =		IPPROTO_DIVERT,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_PCBLOCK,
+	.pr_input =		div_input,
+	.pr_ctloutput =		ip_ctloutput,
+	.pr_init =		div_init,
+	.pr_usrreqs =		&amp;div_usrreqs,
+	.pr_lock =		div_lock,
+	.pr_unlock =		div_unlock,
+	.pr_getlock =		div_getlock,
+},
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IPDIVERT */</span>
+<span class="enscript-comment">/* raw wildcard */</span>
+{
+	.pr_type =		SOCK_RAW,
+	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+	.pr_input =		rip_input,
+	.pr_ctloutput =		rip_ctloutput,
+	.pr_init =		rip_init,
+	.pr_usrreqs =		&amp;rip_usrreqs,
+	.pr_unlock =		rip_unlock,
+},
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> in_proto_count = (<span class="enscript-keyword">sizeof</span> (inetsw) / <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> protosw));
+
+<span class="enscript-type">struct</span> domain inetdomain_s = {
+	.dom_family =		PF_INET,
+	.dom_flags =		DOM_REENTRANT,
+	.dom_name =		<span class="enscript-string">&quot;internet&quot;</span>,
+	.dom_init =		in_dinit,
+	.dom_rtattach =		in_inithead,
+	.dom_rtoffset =		32,
+	.dom_maxrtkey =		<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in),
+	.dom_protohdrlen =	<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> tcpiphdr),
+};
+
+<span class="enscript-comment">/* Initialize the PF_INET domain, and add in the pre-defined protos */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">in_dinit</span>(<span class="enscript-type">struct</span> domain *dp)
+{
+	<span class="enscript-type">struct</span> protosw *pr;
+	<span class="enscript-type">int</span> i;
+	domain_unguard_t unguard;
+
+	VERIFY(!(dp-&gt;dom_flags &amp; DOM_INITIALIZED));
+	VERIFY(inetdomain == NULL);
+
+	inetdomain = dp;
+
+	<span class="enscript-comment">/*
+	 * Attach first, then initialize; ip_init() needs raw IP handler.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0, pr = &amp;inetsw[0]; i &lt; in_proto_count; i++, pr++)
+		net_add_proto(pr, dp, 0);
+	<span class="enscript-keyword">for</span> (i = 0, pr = &amp;inetsw[0]; i &lt; in_proto_count; i++, pr++)
+		net_init_proto(pr, dp);
+
+	inet_domain_mutex = dp-&gt;dom_mtx;
+
+	unguard = domain_unguard_deploy();
+	i = proto_register_input(PF_INET, ip_proto_input, NULL, 1);
+	<span class="enscript-keyword">if</span> (i != 0) {
+		panic(<span class="enscript-string">&quot;%s: failed to register PF_INET protocol: %d\n&quot;</span>,
+		    __func__, i);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	domain_unguard_release(unguard);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ip_proto_input</span>(protocol_family_t protocol, mbuf_t packet_list)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">protocol</span>)
+
+	<span class="enscript-keyword">if</span> (packet_list-&gt;m_nextpkt != NULL) {
+		ip_input_process_list(packet_list);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * XXX remove this path if ip_input_process_list is proven
+		 * to be stable and has minimum overhead on most platforms.
+		 */</span>
+		ip_input(packet_list);
+	}
+}
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net, PF_INET, inet,
+	CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;Internet Family&quot;</span>);
+
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_inet, IPPROTO_IP, ip,
+	CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;IP&quot;</span>);
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_inet, IPPROTO_ICMP, icmp,
+	CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;ICMP&quot;</span>);
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_inet, IPPROTO_UDP, udp,
+	CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;UDP&quot;</span>);
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_inet, IPPROTO_TCP, tcp,
+	CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;TCP&quot;</span>);
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_inet, IPPROTO_IGMP, igmp,
+	CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;IGMP&quot;</span>);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPSEC</span>
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_inet, IPPROTO_AH, ipsec,
+	CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;IPSEC&quot;</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IPSEC */</span>
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_inet, IPPROTO_RAW, raw,
+	CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;RAW&quot;</span>);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPDIVERT</span>
+<span class="enscript-function-name">SYSCTL_NODE</span>(_net_inet, IPPROTO_DIVERT, div,
+	CTLFLAG_RW|CTLFLAG_LOCKED, 0, <span class="enscript-string">&quot;DIVERT&quot;</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IPDIVERT */</span>
+</pre>
+<hr />
+</body></html>

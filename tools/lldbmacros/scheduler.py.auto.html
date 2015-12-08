@@ -1,0 +1,235 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>scheduler.py</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">scheduler.py&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-keyword">from</span> xnu <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> utils <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> process <span class="enscript-keyword">import</span> *
+
+<span class="enscript-comment"># TODO: write scheduler related macros here
+</span>
+<span class="enscript-comment"># Macro: showinterrupts
+</span>
+@lldb_command(<span class="enscript-string">'showinterrupts'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowInterrupts</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Prints IRQ, IPI and TMR counts for each CPU
+    &quot;&quot;&quot;</span> 
+    base_address = kern.GetLoadAddressForSymbol(<span class="enscript-string">'CpuDataEntries'</span>)
+    struct_size = 16  
+    <span class="enscript-keyword">for</span> x <span class="enscript-keyword">in</span> range (0, unsigned(kern.globals.machine_info.physical_cpu)):
+        element  = kern.GetValueFromAddress(base_address + (x * struct_size), <span class="enscript-string">'uintptr_t *'</span>)[1]
+        cpu_data_entry = Cast(element, <span class="enscript-string">'cpu_data_t *'</span>)
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;CPU {} IRQ: {:d}\n&quot;</span>.format(x, cpu_data_entry.cpu_stat.irq_ex_cnt)
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;CPU {} IPI: {:d}\n&quot;</span>.format(x, cpu_data_entry.cpu_stat.ipi_cnt)
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;CPU {} TMR: {:d}\n&quot;</span>.format(x, cpu_data_entry.cpu_stat.timer_cnt)        
+<span class="enscript-comment"># EndMacro: showinterrupts
+</span>
+<span class="enscript-comment"># Macro: showactiveinterrupts
+</span>
+@lldb_command(<span class="enscript-string">'showactiveinterrupts'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowActiveInterrupts</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  Prints the interrupts that are unmasked &amp; active with the Interrupt Controller
+         Usage: showactiveinterrupts &lt;address of Interrupt Controller object&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;No arguments passed&quot;</span>
+        <span class="enscript-keyword">print</span> ShowActiveInterrupts.__doc__
+        <span class="enscript-keyword">return</span> False
+    aic = kern.GetValueFromAddress(cmd_args[0], <span class="enscript-string">'AppleInterruptController *'</span>)
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> aic:
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;unknown arguments:&quot;</span>, str(cmd_args)
+        <span class="enscript-keyword">return</span> False
+
+    aic_base = unsigned(aic._aicBaseAddress)
+    current_interrupt = 0
+    aic_imc_base = aic_base + 0x4180
+    aic_him_offset = 0x80
+    current_pointer = aic_imc_base
+    unmasked = dereference(kern.GetValueFromAddress(current_pointer, <span class="enscript-string">'uintptr_t *'</span>))
+    active = dereference(kern.GetValueFromAddress(current_pointer + aic_him_offset, <span class="enscript-string">'uintptr_t *'</span>))
+    group_count = 0
+    mask = 1
+    <span class="enscript-keyword">while</span> current_interrupt &lt; 192:
+        <span class="enscript-keyword">if</span> (((unmasked &amp; mask) == 0) <span class="enscript-keyword">and</span> (active &amp; mask)):
+            <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Interrupt {:d} unmasked and active\n&quot;</span>.format(current_interrupt)
+        current_interrupt = current_interrupt + 1
+        <span class="enscript-keyword">if</span> (current_interrupt % 32 == 0):
+            mask = 1
+            group_count = group_count + 1
+            unmasked = dereference(kern.GetValueFromAddress(current_pointer + (4 * group_count), <span class="enscript-string">'uintptr_t *'</span>))
+            active = dereference(kern.GetValueFromAddress((current_pointer + aic_him_offset) + (4 * group_count), <span class="enscript-string">'uintptr_t *'</span>))
+        <span class="enscript-keyword">else</span>:
+            mask = mask &lt;&lt; 1
+<span class="enscript-comment"># EndMacro: showactiveinterrupts
+</span>
+
+@lldb_command(<span class="enscript-string">'showcurrentabstime'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowCurremtAbsTime</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot;  Routine to print latest absolute time known to system before being stopped.
+         Usage: showcurrentabstime
+    &quot;&quot;&quot;</span>
+    pset = addressof(kern.globals.pset0)
+    cur_abstime = 0
+
+    <span class="enscript-keyword">while</span> unsigned(pset) != 0:
+        <span class="enscript-keyword">for</span> processor <span class="enscript-keyword">in</span> IterateQueue(pset.active_queue, <span class="enscript-string">&quot;processor_t&quot;</span>, <span class="enscript-string">&quot;processor_queue&quot;</span>):
+            <span class="enscript-keyword">if</span> unsigned(processor.last_dispatch) &gt; cur_abstime:
+                cur_abstime = unsigned(processor.last_dispatch)
+
+        <span class="enscript-keyword">for</span> processor <span class="enscript-keyword">in</span> IterateQueue(pset.idle_queue, <span class="enscript-string">&quot;processor_t&quot;</span>, <span class="enscript-string">&quot;processor_queue&quot;</span>):
+            <span class="enscript-keyword">if</span> unsigned(processor.last_dispatch) &gt; cur_abstime:
+                cur_abstime = unsigned(processor.last_dispatch)
+
+        <span class="enscript-keyword">for</span> processor <span class="enscript-keyword">in</span> IterateQueue(pset.idle_secondary_queue, <span class="enscript-string">&quot;processor_t&quot;</span>, <span class="enscript-string">&quot;processor_queue&quot;</span>):
+            <span class="enscript-keyword">if</span> unsigned(processor.last_dispatch) &gt; cur_abstime:
+                cur_abstime = unsigned(processor.last_dispatch)
+
+        pset = pset.pset_list
+
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Last dispatch time known: %d MATUs&quot;</span> % cur_abstime
+
+
+@lldb_command(<span class="enscript-string">'abs2nano'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowAbstimeToNanoTime</span>(cmd_args=[]):
+    <span class="enscript-string">&quot;&quot;&quot; convert mach_absolute_time units to nano seconds
+        Usage: (lldb) abs2nano &lt;timestamp in MATUs&gt;
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cmd_args:
+        <span class="enscript-keyword">raise</span> ArgumentError(<span class="enscript-string">&quot;Invalid argument&quot;</span>)
+    timedata = ArgumentStringToInt(cmd_args[0])
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;%d ns&quot;</span> % kern.GetNanotimeFromAbstime(timedata)
+
+ <span class="enscript-comment"># Macro: showschedhistory
+</span>
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowThreadSchedHistory</span>(thread, most_recent_dispatch):
+    out_str = <span class="enscript-string">&quot;&quot;</span>
+    thread_name = <span class="enscript-string">&quot;&quot;</span>
+
+    <span class="enscript-keyword">if</span> int(thread.uthread) != 0:
+        uthread = Cast(thread.uthread, <span class="enscript-string">'uthread *'</span>)
+        <span class="enscript-comment">#check for thread name
+</span>        <span class="enscript-keyword">if</span> int(uthread.pth_name) != 0 :
+            th_name_strval = Cast(uthread.pth_name, <span class="enscript-string">'char *'</span>)
+            <span class="enscript-keyword">if</span> len(str(th_name_strval)) &gt; 0 :
+                thread_name = str(th_name_strval)
+
+    task = thread.task
+    task_name = <span class="enscript-string">&quot;unknown&quot;</span>
+    <span class="enscript-keyword">if</span> task <span class="enscript-keyword">and</span> unsigned(task.bsd_info):
+        p = Cast(task.bsd_info, <span class="enscript-string">'proc *'</span>)
+        task_name = str(p.p_name)
+
+    sched_mode = <span class="enscript-string">&quot;&quot;</span>
+
+    mode = str(thread.sched_mode)
+    <span class="enscript-keyword">if</span> <span class="enscript-string">&quot;TIMESHARE&quot;</span> <span class="enscript-keyword">in</span> mode:
+        sched_mode+=<span class="enscript-string">&quot;timeshare&quot;</span>
+    <span class="enscript-keyword">elif</span> <span class="enscript-string">&quot;FIXED&quot;</span> <span class="enscript-keyword">in</span> mode:
+        sched_mode+=<span class="enscript-string">&quot;fixed&quot;</span>
+    <span class="enscript-keyword">elif</span> <span class="enscript-string">&quot;REALTIME&quot;</span> <span class="enscript-keyword">in</span> mode:
+        sched_mode+=<span class="enscript-string">&quot;realtime&quot;</span>
+
+    <span class="enscript-keyword">if</span> (unsigned(thread.bound_processor) != 0):
+        sched_mode+=<span class="enscript-string">&quot;-bound&quot;</span>
+
+    <span class="enscript-comment"># TH_SFLAG_THROTTLED
+</span>    <span class="enscript-keyword">if</span> (unsigned(thread.sched_flags) &amp; 0x0004):
+        sched_mode+=<span class="enscript-string">&quot;-BG&quot;</span>
+
+    state = thread.state
+
+    thread_state_chars = {0x0:<span class="enscript-string">''</span>, 0x1:<span class="enscript-string">'W'</span>, 0x2:<span class="enscript-string">'S'</span>, 0x4:<span class="enscript-string">'R'</span>, 0x8:<span class="enscript-string">'U'</span>, 0x10:<span class="enscript-string">'H'</span>, 0x20:<span class="enscript-string">'A'</span>, 0x40:<span class="enscript-string">'P'</span>, 0x80:<span class="enscript-string">'I'</span>}
+    state_str = <span class="enscript-string">''</span>
+    mask = 0x1
+    <span class="enscript-keyword">while</span> mask &lt;= 0x80 :
+        state_str += thread_state_chars[int(state &amp; mask)]
+        mask = mask &lt;&lt; 1
+
+    last_on = thread.computation_epoch
+    last_off = thread.last_run_time
+
+    time_on_abs = unsigned(last_off - last_on)
+    time_on_us = kern.GetNanotimeFromAbstime(time_on_abs) / 1000.0
+
+    time_since_off_abs = unsigned(most_recent_dispatch - last_off)
+    time_since_off_us = kern.GetNanotimeFromAbstime(time_since_off_abs) / 1000.0
+    time_since_on_abs = unsigned(most_recent_dispatch - last_on)
+    time_since_on_us = kern.GetNanotimeFromAbstime(time_since_on_abs) / 1000.0
+
+    fmt  = <span class="enscript-string">&quot;0x{t:&lt;16x} 0x{t.thread_id:&lt;8x} {t.computation_epoch:16d} {t.last_run_time:16d} {time_on_us:16.3f} {time_since_off_us:16.3f} {time_since_on_us:16.3f}&quot;</span>
+    fmt2 = <span class="enscript-string">&quot; {t.base_pri:2d} {t.sched_pri:2d} {t.task_priority:2d} {t.max_priority:2d} {sched_mode:19s}&quot;</span>
+    fmt3 = <span class="enscript-string">&quot; {state:9s} {t.cpu_usage:10d} {t.cpu_delta:10d} {t.sched_usage:10d} {t.sched_stamp:10d} {t.pri_shift:10d} {name:s} {thread_name:s}&quot;</span>
+
+    out_str = fmt.format(t=thread, sched_mode=sched_mode, time_on_us=time_on_us, time_since_off_us=time_since_off_us, time_since_on_us=time_since_on_us)
+    out_str += fmt2.format(t=thread, sched_mode=sched_mode)
+    out_str += fmt3.format(t=thread, state=state_str, name=task_name, thread_name=thread_name)
+
+    <span class="enscript-keyword">return</span> out_str
+
+@lldb_command(<span class="enscript-string">'showschedhistory'</span>)
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">ShowSchedHistory</span>(cmd_args=None):
+    <span class="enscript-string">&quot;&quot;&quot; Routine to print out thread scheduling history
+    &quot;&quot;&quot;</span>
+
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Processors: {:d} Runnable threads: {:d} Timeshare threads: {:d} Background threads {:d}\n&quot;</span>.format(
+            kern.globals.processor_avail_count, kern.globals.sched_run_count, kern.globals.sched_share_count, kern.globals.sched_background_count)
+
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Mach factor: {:d} Load factor: {:d} Last sched tick {:d}\n&quot;</span>.format(
+            kern.globals.sched_mach_factor, kern.globals.sched_load_average, kern.globals.sched_tick_last_abstime)
+
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Sched tick: {:d} Fixed shift: {:d} Pri shift: {:d} Background pri shift {:d}\n&quot;</span>.format(
+            kern.globals.sched_tick, kern.globals.sched_fixed_shift, kern.globals.sched_pri_shift, kern.globals.sched_background_pri_shift)
+
+    processor_list = kern.GetGlobalVariable(<span class="enscript-string">'processor_list'</span>)
+
+    most_recent_dispatch = 0
+    current_processor = processor_list
+    <span class="enscript-keyword">while</span> unsigned(current_processor) &gt; 0:
+        active_thread = current_processor.active_thread
+        <span class="enscript-keyword">if</span> unsigned(active_thread) != 0 :
+            task_val = active_thread.task
+            proc_val = Cast(task_val.bsd_info, <span class="enscript-string">'proc *'</span>)
+            proc_name = str(proc_val.p_name)
+
+        last_dispatch = unsigned(current_processor.last_dispatch)
+
+        <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Processor last dispatch: {last_dispatch:16d} Active thread: 0x{t:&lt;16x} 0x{t.thread_id:&lt;8x} {proc_name:s}&quot;</span>.format(t=active_thread, last_dispatch=last_dispatch, proc_name=proc_name)
+
+        <span class="enscript-keyword">if</span> last_dispatch &gt; most_recent_dispatch :
+            most_recent_dispatch = last_dispatch
+
+        current_processor = current_processor.processor_list
+
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;Most recent dispatch: &quot;</span> + str(most_recent_dispatch)
+
+    <span class="enscript-keyword">print</span> <span class="enscript-string">&quot;{:&lt;18s} {:&lt;10s} {:&gt;16s} {:&gt;16s} {:&gt;16s} {:&gt;16s} {:&gt;16s} {:2s} {:2s} {:2s} {:&gt;2s} {:&lt;19s} {:&lt;9s} {:&gt;10s} {:&gt;10s} {:&gt;10s} {:&gt;10s} {:&gt;10s} {:&gt;16s} {:&gt;16s}&quot;</span>.format(
+            <span class="enscript-string">&quot;thread&quot;</span>, <span class="enscript-string">&quot;id&quot;</span>, <span class="enscript-string">&quot;on-core&quot;</span>, <span class="enscript-string">&quot;off-core&quot;</span>, <span class="enscript-string">&quot;last-duration&quot;</span>, <span class="enscript-string">&quot;since-off&quot;</span>, <span class="enscript-string">&quot;since-on&quot;</span>, <span class="enscript-string">&quot;BP&quot;</span>, <span class="enscript-string">&quot;SP&quot;</span>, <span class="enscript-string">&quot;TP&quot;</span>, <span class="enscript-string">&quot;MP&quot;</span>, <span class="enscript-string">&quot;sched-mode&quot;</span>, <span class="enscript-string">&quot;state&quot;</span>, <span class="enscript-string">&quot;cpu-usage&quot;</span>, <span class="enscript-string">&quot;delta&quot;</span>, <span class="enscript-string">&quot;sch-usage&quot;</span>, <span class="enscript-string">&quot;stamp&quot;</span>, <span class="enscript-string">&quot;shift&quot;</span>, <span class="enscript-string">&quot;task&quot;</span>, <span class="enscript-string">&quot;thread-name&quot;</span>)
+
+    <span class="enscript-keyword">for</span> thread <span class="enscript-keyword">in</span> IterateQueue(kern.globals.threads, <span class="enscript-string">'thread *'</span>, <span class="enscript-string">'threads'</span>):
+        <span class="enscript-keyword">print</span> ShowThreadSchedHistory(thread, most_recent_dispatch)
+
+    <span class="enscript-keyword">return</span>
+
+<span class="enscript-comment"># EndMacro: showschedhistory
+</span>
+</pre>
+<hr />
+</body></html>

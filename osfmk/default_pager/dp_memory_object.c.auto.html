@@ -1,0 +1,1218 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>dp_memory_object.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">dp_memory_object.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+
+<span class="enscript-comment">/*
+ *	Default Pager.
+ *		Memory Object Management.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;default_pager_internal.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;default_pager/default_pager_object_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_default_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_control.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/upl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/memory_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span> 
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+<span class="enscript-comment">/* forward declaration */</span>
+vstruct_t <span class="enscript-function-name">vs_object_create</span>(dp_size_t size);
+
+<span class="enscript-comment">/*
+ * List of all vstructs.  A specific vstruct is
+ * found directly via its port, this list is
+ * only used for monitoring purposes by the
+ * default_pager_object* calls and by ps_delete
+ * when abstract memory objects must be scanned
+ * to remove any live storage on a segment which
+ * is to be removed.
+ */</span>
+<span class="enscript-type">struct</span> vstruct_list_head	vstruct_list;
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vstruct_list_insert</span>(
+	vstruct_t vs)
+{
+	VSL_LOCK();
+	queue_enter(&amp;vstruct_list.vsl_queue, vs, vstruct_t, vs_links);
+	vstruct_list.vsl_count++;
+	VSL_UNLOCK();
+}
+
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vstruct_list_delete</span>(
+	vstruct_t vs)
+{
+	queue_remove(&amp;vstruct_list.vsl_queue, vs, vstruct_t, vs_links);
+	vstruct_list.vsl_count--;
+}
+
+<span class="enscript-comment">/*
+ * We use the sequence numbers on requests to regulate
+ * our parallelism.  In general, we allow multiple reads and writes
+ * to proceed in parallel, with the exception that reads must
+ * wait for previous writes to finish.  (Because the kernel might
+ * generate a data-request for a page on the heels of a data-write
+ * for the same page, and we must avoid returning stale data.)
+ * terminate requests wait for proceeding reads and writes to finish.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	default_pager_total = 0;		<span class="enscript-comment">/* debugging */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	default_pager_wait_seqno = 0;		<span class="enscript-comment">/* debugging */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	default_pager_wait_read = 0;		<span class="enscript-comment">/* debugging */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	default_pager_wait_write = 0;		<span class="enscript-comment">/* debugging */</span>
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vs_async_wait</span>(
+	vstruct_t	vs)
+{
+
+	ASSERT(vs-&gt;vs_async_pending &gt;= 0);
+	<span class="enscript-keyword">while</span> (vs-&gt;vs_async_pending &gt; 0) {
+		vs-&gt;vs_waiting_async = TRUE;
+		assert_wait(&amp;vs-&gt;vs_async_pending, THREAD_UNINT);
+		VS_UNLOCK(vs);
+		thread_block(THREAD_CONTINUE_NULL);
+		VS_LOCK(vs);
+	}
+	ASSERT(vs-&gt;vs_async_pending == 0);
+}
+
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">PARALLEL</span>
+<span class="enscript-comment">/* 
+ * Waits for correct sequence number.  Leaves pager locked.
+ *
+ * JMM - Sequence numbers guarantee ordering of requests generated
+ *	 by a single thread if the receiver is multithreaded and
+ *	 the interfaces are asynchronous (i.e. sender can generate
+ *	 more than one request before the first is received in the
+ *	 pager).  Normally, IPC would generate these number in that
+ *	 case.  But we are trying to avoid using IPC for the in-kernel
+ *	 scenario. Since these are actually invoked synchronously
+ *	 anyway (in-kernel), we can just fake the sequence number
+ *	 generation here (thus avoiding the dependence on IPC).
+ */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vs_lock</span>(
+	vstruct_t		vs)
+{
+	mach_port_seqno_t	seqno;
+
+	default_pager_total++;
+	VS_LOCK(vs);
+
+	seqno = vs-&gt;vs_next_seqno++;
+
+	<span class="enscript-keyword">while</span> (vs-&gt;vs_seqno != seqno) {
+		default_pager_wait_seqno++;
+		vs-&gt;vs_waiting_seqno = TRUE;
+		assert_wait(&amp;vs-&gt;vs_seqno, THREAD_UNINT);
+		VS_UNLOCK(vs);
+		thread_block(THREAD_CONTINUE_NULL);
+		VS_LOCK(vs);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Increments sequence number and unlocks pager.
+ */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vs_unlock</span>(vstruct_t vs)
+{
+	vs-&gt;vs_seqno++;
+	<span class="enscript-keyword">if</span> (vs-&gt;vs_waiting_seqno) {
+		vs-&gt;vs_waiting_seqno = FALSE;
+		VS_UNLOCK(vs);
+		thread_wakeup(&amp;vs-&gt;vs_seqno);
+		<span class="enscript-keyword">return</span>;
+	}
+	VS_UNLOCK(vs);
+}
+
+<span class="enscript-comment">/* 
+ * Start a read - one more reader.  Pager must be locked.
+ */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vs_start_read</span>(
+	vstruct_t vs)
+{
+	vs-&gt;vs_readers++;
+}
+
+<span class="enscript-comment">/*
+ * Wait for readers.  Unlocks and relocks pager if wait needed.
+ */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vs_wait_for_readers</span>(
+	vstruct_t vs)
+{
+	<span class="enscript-keyword">while</span> (vs-&gt;vs_readers != 0) {
+		default_pager_wait_read++;
+		vs-&gt;vs_waiting_read = TRUE;
+		assert_wait(&amp;vs-&gt;vs_readers, THREAD_UNINT);
+		VS_UNLOCK(vs);
+		thread_block(THREAD_CONTINUE_NULL);
+		VS_LOCK(vs);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Finish a read.  Pager is unlocked and returns unlocked.
+ */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vs_finish_read</span>(
+	vstruct_t vs)
+{
+	VS_LOCK(vs);
+	<span class="enscript-keyword">if</span> (--vs-&gt;vs_readers == 0 &amp;&amp; vs-&gt;vs_waiting_read) {
+		vs-&gt;vs_waiting_read = FALSE;
+		VS_UNLOCK(vs);
+		thread_wakeup(&amp;vs-&gt;vs_readers);
+		<span class="enscript-keyword">return</span>;
+	}
+	VS_UNLOCK(vs);
+}
+
+<span class="enscript-comment">/*
+ * Start a write - one more writer.  Pager must be locked.
+ */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vs_start_write</span>(
+	vstruct_t vs)
+{
+	vs-&gt;vs_writers++;
+}
+
+<span class="enscript-comment">/* 
+ * Wait for writers.  Unlocks and relocks pager if wait needed.
+ */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vs_wait_for_writers</span>(
+	vstruct_t vs)
+{
+	<span class="enscript-keyword">while</span> (vs-&gt;vs_writers != 0) {
+		default_pager_wait_write++;
+		vs-&gt;vs_waiting_write = TRUE;
+		assert_wait(&amp;vs-&gt;vs_writers, THREAD_UNINT);
+		VS_UNLOCK(vs);
+		thread_block(THREAD_CONTINUE_NULL);
+		VS_LOCK(vs);
+	}
+	vs_async_wait(vs);
+}
+
+<span class="enscript-comment">/* This is to be used for the transfer from segment code ONLY */</span>
+<span class="enscript-comment">/* The transfer code holds off vs destruction by keeping the  */</span>
+<span class="enscript-comment">/* vs_async_wait count non-zero.  It will not ocnflict with   */</span>
+<span class="enscript-comment">/* other writers on an async basis because it only writes on  */</span>
+<span class="enscript-comment">/* a cluster basis into fresh (as of sync time) cluster locations */</span>
+
+__private_extern__ <span class="enscript-type">void</span> 
+<span class="enscript-function-name">vs_wait_for_sync_writers</span>(
+        vstruct_t vs)
+{
+        <span class="enscript-keyword">while</span> (vs-&gt;vs_writers != 0) {
+                default_pager_wait_write++;
+		vs-&gt;vs_waiting_write = TRUE;
+                assert_wait(&amp;vs-&gt;vs_writers, THREAD_UNINT);
+                VS_UNLOCK(vs);
+                thread_block(THREAD_CONTINUE_NULL);
+                VS_LOCK(vs);
+        }
+}       
+
+
+<span class="enscript-comment">/*
+ * Finish a write.  Pager is unlocked and returns unlocked.
+ */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">vs_finish_write</span>(
+	vstruct_t vs)
+{
+	VS_LOCK(vs);
+	<span class="enscript-keyword">if</span> (--vs-&gt;vs_writers == 0 &amp;&amp; vs-&gt;vs_waiting_write) {
+		vs-&gt;vs_waiting_write = FALSE;
+		VS_UNLOCK(vs);
+		thread_wakeup(&amp;vs-&gt;vs_writers);
+		<span class="enscript-keyword">return</span>;
+	}
+	VS_UNLOCK(vs);
+}
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* PARALLEL */</span>
+
+vstruct_t
+<span class="enscript-function-name">vs_object_create</span>(
+	dp_size_t size)
+{
+	vstruct_t	vs;
+
+	<span class="enscript-comment">/*
+	 * Allocate a vstruct. If there are any problems, then report them
+	 * to the console.
+	 */</span>
+	vs = ps_vstruct_create(size);
+	<span class="enscript-keyword">if</span> (vs == VSTRUCT_NULL) {
+		dprintf((<span class="enscript-string">&quot;vs_object_create: unable to allocate %s\n&quot;</span>,
+			 <span class="enscript-string">&quot;-- either run swapon command or reboot&quot;</span>));
+		<span class="enscript-keyword">return</span> VSTRUCT_NULL;
+	}
+
+	<span class="enscript-keyword">return</span> vs;
+}
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-type">void</span> <span class="enscript-function-name">default_pager_add</span>(vstruct_t, boolean_t);	<span class="enscript-comment">/* forward */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">default_pager_add</span>(
+	vstruct_t vs,
+	boolean_t internal)
+{
+	memory_object_t		mem_obj = vs-&gt;vs_mem_obj;
+	mach_port_t		pset;
+	mach_port_mscount_t 	sync;
+	mach_port_t		previous;
+	kern_return_t		kr;
+	<span class="enscript-type">static</span> <span class="enscript-type">char</span>		here[] = <span class="enscript-string">&quot;default_pager_add&quot;</span>;
+
+	<span class="enscript-comment">/*
+	 * The port currently has a make-send count of zero,
+	 * because either we just created the port or we just
+	 * received the port in a memory_object_create request.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (internal) {
+		<span class="enscript-comment">/* possibly generate an immediate no-senders notification */</span>
+		sync = 0;
+		pset = default_pager_internal_set;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* delay notification till send right is created */</span>
+		sync = 1;
+		pset = default_pager_external_set;
+	}
+
+	ip_lock(mem_obj);  <span class="enscript-comment">/* unlocked in nsrequest below */</span>
+	ipc_port_make_sonce_locked(mem_obj);
+	ipc_port_nsrequest(mem_obj, sync, mem_obj, &amp;previous);
+}
+
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">const</span> <span class="enscript-type">struct</span> memory_object_pager_ops default_pager_ops = {
+	dp_memory_object_reference,
+	dp_memory_object_deallocate,
+	dp_memory_object_init,
+	dp_memory_object_terminate,
+	dp_memory_object_data_request,
+	dp_memory_object_data_return,
+	dp_memory_object_data_initialize,
+	dp_memory_object_data_unlock,
+	dp_memory_object_synchronize,
+	dp_memory_object_map,
+	dp_memory_object_last_unmap,
+	dp_memory_object_data_reclaim,
+	<span class="enscript-string">&quot;default pager&quot;</span>
+};
+
+kern_return_t
+<span class="enscript-function-name">dp_memory_object_init</span>(
+	memory_object_t		mem_obj,
+	memory_object_control_t	control,
+	__unused memory_object_cluster_size_t pager_page_size)
+{
+	vstruct_t		vs;
+
+	assert(pager_page_size == vm_page_size);
+
+	memory_object_control_reference(control);
+
+	vs_lookup(mem_obj, vs);
+	vs_lock(vs);
+
+	<span class="enscript-keyword">if</span> (vs-&gt;vs_control != MEMORY_OBJECT_CONTROL_NULL)
+		Panic(<span class="enscript-string">&quot;bad request&quot;</span>);
+
+	vs-&gt;vs_control = control;
+	vs_unlock(vs);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+kern_return_t
+<span class="enscript-function-name">dp_memory_object_synchronize</span>(
+	memory_object_t		mem_obj,
+	memory_object_offset_t	offset,
+	memory_object_size_t		length,
+	__unused vm_sync_t		flags)
+{
+	vstruct_t	vs;
+
+	vs_lookup(mem_obj, vs);
+	vs_lock(vs);
+	vs_unlock(vs);
+
+	memory_object_synchronize_completed(vs-&gt;vs_control, offset, length);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+kern_return_t
+<span class="enscript-function-name">dp_memory_object_map</span>(
+	__unused memory_object_t	mem_obj,
+	__unused vm_prot_t		prot)
+{
+	panic(<span class="enscript-string">&quot;dp_memory_object_map&quot;</span>);
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+kern_return_t
+<span class="enscript-function-name">dp_memory_object_last_unmap</span>(
+	__unused memory_object_t	mem_obj)
+{
+	panic(<span class="enscript-string">&quot;dp_memory_object_last_unmap&quot;</span>);
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+kern_return_t
+<span class="enscript-function-name">dp_memory_object_data_reclaim</span>(
+	memory_object_t		mem_obj,
+	boolean_t		reclaim_backing_store)
+{
+	vstruct_t		vs;
+	kern_return_t		retval;
+
+	vs_lookup(mem_obj, vs);
+	<span class="enscript-keyword">for</span> (;;) {
+		vs_lock(vs);
+		vs_async_wait(vs);
+		<span class="enscript-keyword">if</span> (!vs-&gt;vs_xfer_pending) {
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	vs-&gt;vs_xfer_pending = TRUE;
+	vs_unlock(vs);
+
+	retval = ps_vstruct_reclaim(vs, TRUE, reclaim_backing_store);
+
+	vs_lock(vs);
+	vs-&gt;vs_xfer_pending = FALSE;
+	vs_unlock(vs);
+
+	<span class="enscript-keyword">return</span> retval;
+}
+
+kern_return_t
+<span class="enscript-function-name">dp_memory_object_terminate</span>(
+	memory_object_t		mem_obj)
+{
+	memory_object_control_t	control;
+	vstruct_t		vs;
+
+	<span class="enscript-comment">/* 
+	 * control port is a receive right, not a send right.
+	 */</span>
+
+	vs_lookup(mem_obj, vs);
+	vs_lock(vs);
+
+	<span class="enscript-comment">/*
+	 * Wait for read and write requests to terminate.
+	 */</span>
+
+	vs_wait_for_readers(vs);
+	vs_wait_for_writers(vs);
+
+	<span class="enscript-comment">/*
+	 * After memory_object_terminate both memory_object_init
+	 * and a no-senders notification are possible, so we need
+	 * to clean up our reference to the memory_object_control
+	 * to prepare for a new init.
+	 */</span>
+
+	control = vs-&gt;vs_control;
+	vs-&gt;vs_control = MEMORY_OBJECT_CONTROL_NULL;
+
+	<span class="enscript-comment">/* a bit of special case ugliness here.  Wakeup any waiting reads */</span>
+	<span class="enscript-comment">/* these data requests had to be removed from the seqno traffic   */</span>
+	<span class="enscript-comment">/* based on a performance bottleneck with large memory objects    */</span>
+	<span class="enscript-comment">/* the problem will right itself with the new component based     */</span>
+	<span class="enscript-comment">/* synchronous interface.  The new async will be able to return   */</span>
+	<span class="enscript-comment">/* failure during its sync phase.   In the mean time ... */</span>
+
+	thread_wakeup(&amp;vs-&gt;vs_writers);
+	thread_wakeup(&amp;vs-&gt;vs_async_pending);
+
+	vs_unlock(vs);
+
+	<span class="enscript-comment">/*
+	 * Now we deallocate our reference on the control.
+	 */</span>
+	memory_object_control_deallocate(control);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dp_memory_object_reference</span>(
+	memory_object_t		mem_obj)
+{
+	vstruct_t		vs;
+
+	vs_lookup_safe(mem_obj, vs);
+	<span class="enscript-keyword">if</span> (vs == VSTRUCT_NULL)
+		<span class="enscript-keyword">return</span>;
+
+	VS_LOCK(vs);
+	assert(vs-&gt;vs_references &gt; 0);
+	vs-&gt;vs_references++;
+	VS_UNLOCK(vs);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dp_memory_object_deallocate</span>(
+	memory_object_t		mem_obj)
+{
+	vstruct_t		vs;
+	mach_port_seqno_t	seqno;
+
+	<span class="enscript-comment">/*
+	 * Because we don't give out multiple first references
+	 * for a memory object, there can't be a race
+	 * between getting a deallocate call and creating
+	 * a new reference for the object.
+	 */</span>
+
+	vs_lookup_safe(mem_obj, vs);
+	<span class="enscript-keyword">if</span> (vs == VSTRUCT_NULL)
+		<span class="enscript-keyword">return</span>;
+
+	VS_LOCK(vs);
+	<span class="enscript-keyword">if</span> (--vs-&gt;vs_references &gt; 0) {
+		VS_UNLOCK(vs);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	seqno = vs-&gt;vs_next_seqno++;
+	<span class="enscript-keyword">while</span> (vs-&gt;vs_seqno != seqno) {
+		default_pager_wait_seqno++;
+		vs-&gt;vs_waiting_seqno = TRUE;
+		assert_wait(&amp;vs-&gt;vs_seqno, THREAD_UNINT);
+		VS_UNLOCK(vs);
+		thread_block(THREAD_CONTINUE_NULL);
+		VS_LOCK(vs);
+	}
+
+	vs_async_wait(vs);	<span class="enscript-comment">/* wait for pending async IO */</span>
+
+	<span class="enscript-comment">/* do not delete the vs structure until the referencing pointers */</span>
+	<span class="enscript-comment">/* in the vstruct list have been expunged */</span>
+
+	<span class="enscript-comment">/* get VSL_LOCK out of order by using TRY mechanism */</span>
+	<span class="enscript-keyword">while</span>(!VSL_LOCK_TRY()) {
+		VS_UNLOCK(vs);
+		VSL_LOCK();
+		VSL_UNLOCK();
+		VS_LOCK(vs);
+		vs_async_wait(vs);	<span class="enscript-comment">/* wait for pending async IO */</span>
+	}
+
+
+	<span class="enscript-comment">/*
+	 * We shouldn't get a deallocation call
+	 * when the kernel has the object cached.
+	 */</span>
+	<span class="enscript-keyword">if</span> (vs-&gt;vs_control != MEMORY_OBJECT_CONTROL_NULL)
+		Panic(<span class="enscript-string">&quot;bad request&quot;</span>);
+
+	<span class="enscript-comment">/*
+	 * Unlock the pager (though there should be no one
+	 * waiting for it).
+	 */</span>
+	VS_UNLOCK(vs);
+
+	<span class="enscript-comment">/* Lock out paging segment removal for the duration of this */</span>
+	<span class="enscript-comment">/* call.  We are vulnerable to losing a paging segment we rely */</span>
+	<span class="enscript-comment">/* on as soon as we remove ourselves from the VSL and unlock */</span>
+
+	<span class="enscript-comment">/* Keep our thread from blocking on attempt to trigger backing */</span>
+	<span class="enscript-comment">/* store release */</span>
+	backing_store_release_trigger_disable += 1;
+
+	<span class="enscript-comment">/*
+	 * Remove the memory object port association, and then
+	 * the destroy the port itself.  We must remove the object
+	 * from the port list before deallocating the pager,
+	 * because of default_pager_objects.
+	 */</span>
+	vstruct_list_delete(vs);
+	VSL_UNLOCK();
+
+	ps_vstruct_dealloc(vs);
+
+	VSL_LOCK();
+	backing_store_release_trigger_disable -= 1;
+	<span class="enscript-keyword">if</span>(backing_store_release_trigger_disable == 0) {
+		thread_wakeup((event_t)&amp;backing_store_release_trigger_disable);
+	}
+	VSL_UNLOCK();
+}
+
+kern_return_t
+<span class="enscript-function-name">dp_memory_object_data_request</span>(
+	memory_object_t		mem_obj,
+	memory_object_offset_t	offset,
+	memory_object_cluster_size_t		length,
+	__unused vm_prot_t	protection_required,
+        memory_object_fault_info_t	fault_info)
+{
+	vstruct_t		vs;
+	kern_return_t		kr = KERN_SUCCESS;
+
+	GSTAT(global_stats.gs_pagein_calls++);
+
+
+	<span class="enscript-comment">/* CDY at this moment vs_lookup panics when presented with the wrong */</span>
+	<span class="enscript-comment">/* port.  As we are expanding this pager to support user interfaces */</span>
+	<span class="enscript-comment">/* this should be changed to return kern_failure */</span>
+	vs_lookup(mem_obj, vs);
+	vs_lock(vs);
+
+	<span class="enscript-comment">/* We are going to relax the strict sequencing here for performance */</span>
+	<span class="enscript-comment">/* reasons.  We can do this because we know that the read and */</span>
+	<span class="enscript-comment">/* write threads are different and we rely on synchronization */</span>
+	<span class="enscript-comment">/* of read and write requests at the cache memory_object level */</span>
+	<span class="enscript-comment">/* break out wait_for_writers, all of this goes away when */</span>
+	<span class="enscript-comment">/* we get real control of seqno with the new component interface */</span>
+
+	<span class="enscript-keyword">if</span> (vs-&gt;vs_writers != 0) {
+		<span class="enscript-comment">/* you can't hold on to the seqno and go */</span>
+		<span class="enscript-comment">/* to sleep like that */</span>
+		vs_unlock(vs);  <span class="enscript-comment">/* bump internal count of seqno */</span>
+		VS_LOCK(vs);
+		<span class="enscript-keyword">while</span> (vs-&gt;vs_writers != 0) {
+			default_pager_wait_write++;
+			vs-&gt;vs_waiting_write = TRUE;
+			assert_wait(&amp;vs-&gt;vs_writers, THREAD_UNINT);
+			VS_UNLOCK(vs);
+			thread_block(THREAD_CONTINUE_NULL);
+			VS_LOCK(vs);
+			vs_async_wait(vs);
+		}
+		<span class="enscript-keyword">if</span>(vs-&gt;vs_control == MEMORY_OBJECT_CONTROL_NULL) {
+			VS_UNLOCK(vs);
+			<span class="enscript-keyword">return</span> KERN_FAILURE;
+		}
+		vs_start_read(vs);
+		VS_UNLOCK(vs);
+	} <span class="enscript-keyword">else</span> {
+		vs_start_read(vs);
+		vs_unlock(vs);
+	}
+
+	<span class="enscript-comment">/*
+	 * Request must be on a page boundary and a multiple of pages.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((offset &amp; vm_page_mask) != 0 || (length &amp; vm_page_mask) != 0)
+		Panic(<span class="enscript-string">&quot;bad alignment&quot;</span>);
+
+	assert((dp_offset_t) offset == offset);
+	kr = pvs_cluster_read(vs, (dp_offset_t) offset, length, fault_info);
+
+	<span class="enscript-comment">/* Regular data requests have a non-zero length and always return KERN_SUCCESS.  
+	   Their actual success is determined by the fact that they provide a page or not, 
+	   i.e whether we call upl_commit() or upl_abort().  A length of 0 means that the 
+	   caller is only asking if the pager has a copy of that page or not.  The answer to 
+	   that question is provided by the return value.  KERN_SUCCESS means that the pager 
+	   does have that page.
+	*/</span>
+	<span class="enscript-keyword">if</span>(length) {
+		kr = KERN_SUCCESS;
+	}
+	
+	vs_finish_read(vs);
+
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ * memory_object_data_initialize: check whether we already have each page, and
+ * write it if we do not.  The implementation is far from optimized, and
+ * also assumes that the default_pager is single-threaded.
+ */</span>
+<span class="enscript-comment">/*  It is questionable whether or not a pager should decide what is relevant */</span>
+<span class="enscript-comment">/* and what is not in data sent from the kernel.  Data initialize has been */</span>
+<span class="enscript-comment">/* changed to copy back all data sent to it in preparation for its eventual */</span>
+<span class="enscript-comment">/* merge with data return.  It is the kernel that should decide what pages */</span>
+<span class="enscript-comment">/* to write back.  As of the writing of this note, this is indeed the case */</span>
+<span class="enscript-comment">/* the kernel writes back one page at a time through this interface */</span>
+
+kern_return_t
+<span class="enscript-function-name">dp_memory_object_data_initialize</span>(
+	memory_object_t		mem_obj,
+	memory_object_offset_t	offset,
+	memory_object_cluster_size_t		size)
+{
+	vstruct_t	vs;
+
+	DP_DEBUG(DEBUG_MO_EXTERNAL,
+		 (<span class="enscript-string">&quot;mem_obj=0x%x,offset=0x%x,cnt=0x%x\n&quot;</span>,
+		  (<span class="enscript-type">int</span>)mem_obj, (<span class="enscript-type">int</span>)offset, (<span class="enscript-type">int</span>)size));
+	GSTAT(global_stats.gs_pages_init += atop_32(size));
+
+	vs_lookup(mem_obj, vs);
+	vs_lock(vs);
+	vs_start_write(vs);
+	vs_unlock(vs);
+
+	<span class="enscript-comment">/*
+	 * Write the data via clustered writes. vs_cluster_write will
+	 * loop if the address range specified crosses cluster
+	 * boundaries.
+	 */</span>
+	assert((upl_offset_t) offset == offset);
+	vs_cluster_write(vs, 0, (upl_offset_t)offset, size, FALSE, 0);
+
+	vs_finish_write(vs);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+kern_return_t
+<span class="enscript-function-name">dp_memory_object_data_unlock</span>(
+	__unused memory_object_t		mem_obj,
+	__unused memory_object_offset_t	offset,
+	__unused memory_object_size_t		size,
+	__unused vm_prot_t		desired_access)
+{
+	Panic(<span class="enscript-string">&quot;dp_memory_object_data_unlock: illegal&quot;</span>);
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+
+<span class="enscript-comment">/*ARGSUSED8*/</span>
+kern_return_t
+<span class="enscript-function-name">dp_memory_object_data_return</span>(
+	memory_object_t		mem_obj,
+	memory_object_offset_t	offset,
+	memory_object_cluster_size_t			size,
+	__unused memory_object_offset_t	*resid_offset,
+	__unused <span class="enscript-type">int</span>		*io_error,
+	__unused boolean_t	dirty,
+	__unused boolean_t	kernel_copy,
+	__unused <span class="enscript-type">int</span>	upl_flags)
+{
+	vstruct_t	vs;
+
+	DP_DEBUG(DEBUG_MO_EXTERNAL,
+		 (<span class="enscript-string">&quot;mem_obj=0x%x,offset=0x%x,size=0x%x\n&quot;</span>,
+		  (<span class="enscript-type">int</span>)mem_obj, (<span class="enscript-type">int</span>)offset, (<span class="enscript-type">int</span>)size));
+	GSTAT(global_stats.gs_pageout_calls++);
+
+	<span class="enscript-comment">/* This routine is called by the pageout thread.  The pageout thread */</span>
+	<span class="enscript-comment">/* cannot be blocked by read activities unless the read activities   */</span>
+	<span class="enscript-comment">/* Therefore the grant of vs lock must be done on a try versus a      */</span>
+	<span class="enscript-comment">/* blocking basis.  The code below relies on the fact that the       */</span>
+	<span class="enscript-comment">/* interface is synchronous.  Should this interface be again async   */</span>
+	<span class="enscript-comment">/* for some type  of pager in the future the pages will have to be   */</span>
+	<span class="enscript-comment">/* returned through a separate, asynchronous path.		     */</span>
+
+	vs_lookup(mem_obj, vs);
+
+        default_pager_total++;
+
+	<span class="enscript-comment">/* might be unreachable if VS_TRY_LOCK is, by definition, always true */</span>
+	__unreachable_ok_push
+	<span class="enscript-keyword">if</span>(!VS_TRY_LOCK(vs)) {
+		<span class="enscript-comment">/* the call below will not be done by caller when we have */</span>
+		<span class="enscript-comment">/* a synchronous interface */</span>
+		<span class="enscript-comment">/* return KERN_LOCK_OWNED; */</span>
+		upl_t		upl;
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	page_list_count = 0;
+		memory_object_super_upl_request(vs-&gt;vs_control,
+					(memory_object_offset_t)offset,
+					size, size,
+					&amp;upl, NULL, &amp;page_list_count,
+					UPL_NOBLOCK | UPL_CLEAN_IN_PLACE 
+					| UPL_NO_SYNC | UPL_COPYOUT_FROM);
+		upl_abort(upl,0);
+		upl_deallocate(upl);
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+	__unreachable_ok_pop
+
+	<span class="enscript-keyword">if</span> ((vs-&gt;vs_seqno != vs-&gt;vs_next_seqno++)
+			|| (vs-&gt;vs_readers)
+			|| (vs-&gt;vs_xfer_pending)) {
+		upl_t		upl;
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	page_list_count = 0;
+
+		vs-&gt;vs_next_seqno--;
+                VS_UNLOCK(vs);
+
+		<span class="enscript-comment">/* the call below will not be done by caller when we have */</span>
+		<span class="enscript-comment">/* a synchronous interface */</span>
+		<span class="enscript-comment">/* return KERN_LOCK_OWNED; */</span>
+		memory_object_super_upl_request(vs-&gt;vs_control,
+                                (memory_object_offset_t)offset,
+				size, size,
+				&amp;upl, NULL, &amp;page_list_count,
+				UPL_NOBLOCK | UPL_CLEAN_IN_PLACE 
+					| UPL_NO_SYNC | UPL_COPYOUT_FROM);
+		upl_abort(upl,0);
+		upl_deallocate(upl);
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	<span class="enscript-keyword">if</span> ((size % vm_page_size) != 0)
+		Panic(<span class="enscript-string">&quot;bad alignment&quot;</span>);
+
+	vs_start_write(vs);
+
+
+        vs-&gt;vs_async_pending += 1;  <span class="enscript-comment">/* protect from backing store contraction */</span>
+	vs_unlock(vs);
+
+	<span class="enscript-comment">/*
+	 * Write the data via clustered writes. vs_cluster_write will
+	 * loop if the address range specified crosses cluster
+	 * boundaries.
+	 */</span>
+	assert((upl_offset_t) offset == offset);
+	vs_cluster_write(vs, 0, (upl_offset_t) offset, size, FALSE, 0);
+
+	vs_finish_write(vs);
+
+	<span class="enscript-comment">/* temporary, need a finer lock based on cluster */</span>
+
+	VS_LOCK(vs);
+	vs-&gt;vs_async_pending -= 1;  <span class="enscript-comment">/* release vs_async_wait */</span>
+	<span class="enscript-keyword">if</span> (vs-&gt;vs_async_pending == 0 &amp;&amp; vs-&gt;vs_waiting_async) {
+		vs-&gt;vs_waiting_async = FALSE;
+		VS_UNLOCK(vs);
+		thread_wakeup(&amp;vs-&gt;vs_async_pending);
+	} <span class="enscript-keyword">else</span> {
+		VS_UNLOCK(vs);
+	}
+
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * Routine:	default_pager_memory_object_create
+ * Purpose:
+ * 	Handle requests for memory objects from the
+ * 	kernel.
+ * Notes:
+ * 	Because we only give out the default memory
+ * 	manager port to the kernel, we don't have to
+ * 	be so paranoid about the contents.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">default_pager_memory_object_create</span>(
+	__unused memory_object_default_t	dmm,
+	vm_size_t		new_size,
+	memory_object_t		*new_mem_obj)
+{
+	vstruct_t		vs;
+
+	assert(dmm == default_pager_object);
+
+	<span class="enscript-keyword">if</span> ((dp_size_t) new_size != new_size) {
+		<span class="enscript-comment">/* 32-bit overflow */</span>
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	vs = vs_object_create((dp_size_t) new_size);
+	<span class="enscript-keyword">if</span> (vs == VSTRUCT_NULL)
+		<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+
+	vs-&gt;vs_next_seqno = 0;
+
+	<span class="enscript-comment">/*
+	 * Set up associations between this memory object
+	 * and this default_pager structure
+	 */</span>
+
+	vs-&gt;vs_pager_ops = &amp;default_pager_ops;
+	vs-&gt;vs_pager_header.io_bits = IKOT_MEMORY_OBJECT;
+
+	<span class="enscript-comment">/*
+	 * After this, other threads might receive requests
+	 * for this memory object or find it in the port list.
+	 */</span>
+
+	vstruct_list_insert(vs);
+	*new_mem_obj = vs_to_mem_obj(vs);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * Create an external object.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">default_pager_object_create</span>(
+	default_pager_t default_pager,
+	vm_size_t	size,
+	memory_object_t	*mem_objp)
+{
+	vstruct_t	vs;
+
+	<span class="enscript-keyword">if</span> (default_pager != default_pager_object)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-keyword">if</span> ((dp_size_t) size != size) {
+		<span class="enscript-comment">/* 32-bit overflow */</span>
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	vs = vs_object_create((dp_size_t) size);
+	<span class="enscript-keyword">if</span> (vs == VSTRUCT_NULL)
+		<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+
+	<span class="enscript-comment">/*
+	 * Set up associations between the default pager
+	 * and this vstruct structure
+	 */</span>
+	vs-&gt;vs_pager_ops = &amp;default_pager_ops;
+	vstruct_list_insert(vs);
+	*mem_objp = vs_to_mem_obj(vs);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+kern_return_t
+<span class="enscript-function-name">default_pager_objects</span>(
+	default_pager_t			default_pager,
+	default_pager_object_array_t	*objectsp,
+	mach_msg_type_number_t		*ocountp,
+	mach_port_array_t		*portsp,
+	mach_msg_type_number_t		*pcountp)
+{
+	vm_offset_t		oaddr = 0;	<span class="enscript-comment">/* memory for objects */</span>
+	vm_size_t		osize = 0;	<span class="enscript-comment">/* current size */</span>
+	default_pager_object_t	* objects;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		opotential = 0;
+
+	vm_map_copy_t		pcopy = 0;	<span class="enscript-comment">/* copy handle for pagers */</span>
+	vm_size_t		psize = 0;	<span class="enscript-comment">/* current size */</span>
+	memory_object_t		* pagers;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		ppotential = 0;
+
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		actual;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		num_objects;
+	kern_return_t		kr;
+	vstruct_t		entry;
+
+	<span class="enscript-keyword">if</span> (default_pager != default_pager_object)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-comment">/*
+	 * We will send no more than this many
+	 */</span>
+	actual = vstruct_list.vsl_count;
+
+	<span class="enscript-comment">/*
+	 * Out out-of-line port arrays are simply kalloc'ed.
+	 */</span>
+	psize = vm_map_round_page(actual * <span class="enscript-keyword">sizeof</span> (*pagers),
+				  vm_map_page_mask(ipc_kernel_map));
+	ppotential = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) (psize / <span class="enscript-keyword">sizeof</span> (*pagers));
+	pagers = (memory_object_t *)kalloc(psize);
+	<span class="enscript-keyword">if</span> (0 == pagers)
+		<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+		
+	<span class="enscript-comment">/*
+	 * returned out of line data must be allocated out
+	 * the ipc_kernel_map, wired down, filled in, and
+	 * then &quot;copied in&quot; as if it had been sent by a
+	 * user process.
+	 */</span>
+	osize = vm_map_round_page(actual * <span class="enscript-keyword">sizeof</span> (*objects),
+				  vm_map_page_mask(ipc_kernel_map));
+	opotential = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) (osize / <span class="enscript-keyword">sizeof</span> (*objects));
+	kr = kmem_alloc(ipc_kernel_map, &amp;oaddr, osize, VM_KERN_MEMORY_IPC);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr) {
+		kfree(pagers, psize);
+		<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+	}
+	objects = (default_pager_object_t *)oaddr;
+
+
+	<span class="enscript-comment">/*
+	 * Now scan the list.
+	 */</span>
+
+	VSL_LOCK();
+
+	num_objects = 0;
+	queue_iterate(&amp;vstruct_list.vsl_queue, entry, vstruct_t, vs_links) {
+
+		memory_object_t			pager;
+		vm_size_t			size;
+
+		<span class="enscript-keyword">if</span> ((num_objects &gt;= opotential) ||
+		    (num_objects &gt;= ppotential)) {
+
+			<span class="enscript-comment">/*
+			 * This should be rare.  In any case,
+			 * we will only miss recent objects,
+			 * because they are added at the end.
+			 */</span>
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * Avoid interfering with normal operations
+		 */</span>
+		<span class="enscript-keyword">if</span> (!VS_MAP_TRY_LOCK(entry))
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">not_this_one</span>;
+		size = ps_vstruct_allocated_size(entry);
+		VS_MAP_UNLOCK(entry);
+
+		VS_LOCK(entry);
+
+		<span class="enscript-comment">/*
+		 * We need a reference for our caller.  Adding this
+		 * reference through the linked list could race with
+		 * destruction of the object.  If we find the object
+		 * has no references, just give up on it.
+		 */</span>
+		VS_LOCK(entry);
+		<span class="enscript-keyword">if</span> (entry-&gt;vs_references == 0) {
+			VS_UNLOCK(entry);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">not_this_one</span>;
+		}
+		pager = vs_to_mem_obj(entry);
+		dp_memory_object_reference(pager);
+		VS_UNLOCK(entry);
+
+		<span class="enscript-comment">/* the arrays are wired, so no deadlock worries */</span>
+
+		objects[num_objects].dpo_object = (vm_offset_t) entry;
+		objects[num_objects].dpo_size = size;
+		pagers [num_objects++] = pager;
+		<span class="enscript-keyword">continue</span>;
+
+	    <span class="enscript-reference">not_this_one</span>:
+		<span class="enscript-comment">/*
+		 * Do not return garbage
+		 */</span>
+		objects[num_objects].dpo_object = (vm_offset_t) 0;
+		objects[num_objects].dpo_size = 0;
+		pagers[num_objects++] = MEMORY_OBJECT_NULL;
+
+	}
+
+	VSL_UNLOCK();
+
+	<span class="enscript-comment">/* clear out any excess allocation */</span>
+	<span class="enscript-keyword">while</span> (num_objects &lt; opotential) {
+		objects[--opotential].dpo_object = (vm_offset_t) 0;
+		objects[opotential].dpo_size = 0;
+	}
+	<span class="enscript-keyword">while</span> (num_objects &lt; ppotential) {
+		pagers[--ppotential] = MEMORY_OBJECT_NULL;
+	}
+
+	kr = vm_map_unwire(ipc_kernel_map,
+			   vm_map_trunc_page(oaddr,
+					     vm_map_page_mask(ipc_kernel_map)),
+			   vm_map_round_page(oaddr + osize,
+					     vm_map_page_mask(ipc_kernel_map)),
+			   FALSE);
+	assert(KERN_SUCCESS == kr);
+	kr = vm_map_copyin(ipc_kernel_map, (vm_map_address_t)oaddr,
+			   (vm_map_size_t)osize, TRUE, &amp;pcopy);
+	assert(KERN_SUCCESS == kr);
+
+	*objectsp = (default_pager_object_array_t)objects;
+	*ocountp = num_objects;
+	*portsp = (mach_port_array_t)pcopy;
+	*pcountp = num_objects;
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+kern_return_t
+<span class="enscript-function-name">default_pager_object_pages</span>(
+	default_pager_t		default_pager,
+	mach_port_t			memory_object,
+	default_pager_page_array_t	*pagesp,
+	mach_msg_type_number_t		*countp)
+{
+	vm_offset_t			addr = 0; <span class="enscript-comment">/* memory for page offsets */</span>
+	vm_size_t			size = 0; <span class="enscript-comment">/* current memory size */</span>
+	vm_map_copy_t			copy;
+	default_pager_page_t		* pages = 0;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>			potential;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>			actual;
+	kern_return_t			kr;
+	memory_object_t			object;
+
+	<span class="enscript-keyword">if</span> (default_pager != default_pager_object)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	object = (memory_object_t) memory_object;
+
+	potential = 0;
+	<span class="enscript-keyword">for</span> (;;) {
+		vstruct_t	entry;
+
+		VSL_LOCK();
+		queue_iterate(&amp;vstruct_list.vsl_queue, entry, vstruct_t,
+			      vs_links) {
+			VS_LOCK(entry);
+			<span class="enscript-keyword">if</span> (vs_to_mem_obj(entry) == object) {
+				VSL_UNLOCK();
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">found_object</span>;
+			}
+			VS_UNLOCK(entry);
+		}
+		VSL_UNLOCK();
+
+		<span class="enscript-comment">/* did not find the object */</span>
+		<span class="enscript-keyword">if</span> (0 != addr)
+			kmem_free(ipc_kernel_map, addr, size);
+
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	    <span class="enscript-reference">found_object</span>:
+
+		<span class="enscript-keyword">if</span> (!VS_MAP_TRY_LOCK(entry)) {
+			<span class="enscript-comment">/* oh well bad luck */</span>
+			<span class="enscript-type">int</span> wresult;
+
+			VS_UNLOCK(entry);
+
+			assert_wait_timeout((event_t)assert_wait_timeout, THREAD_UNINT, 1, 1000*NSEC_PER_USEC);
+			wresult = thread_block(THREAD_CONTINUE_NULL);
+			assert(wresult == THREAD_TIMED_OUT);
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		actual = ps_vstruct_allocated_pages(entry, pages, potential);
+		VS_MAP_UNLOCK(entry);
+		VS_UNLOCK(entry);
+
+		<span class="enscript-keyword">if</span> (actual &lt;= potential)
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-comment">/* allocate more memory */</span>
+		<span class="enscript-keyword">if</span> (0 != addr)
+			kmem_free(ipc_kernel_map, addr, size);
+
+		size = vm_map_round_page(actual * <span class="enscript-keyword">sizeof</span> (*pages),
+					 vm_map_page_mask(ipc_kernel_map));
+		kr = kmem_alloc(ipc_kernel_map, &amp;addr, size, VM_KERN_MEMORY_IPC);
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+			<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+
+		pages = (default_pager_page_t *)addr;
+		potential = (<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) (size / <span class="enscript-keyword">sizeof</span> (*pages));
+	}
+
+	<span class="enscript-comment">/*
+	 * Clear unused memory.
+	 */</span>
+	<span class="enscript-keyword">while</span> (actual &lt; potential)
+		pages[--potential].dpp_offset = 0;
+
+	kr = vm_map_unwire(ipc_kernel_map,
+			   vm_map_trunc_page(addr,
+					     vm_map_page_mask(ipc_kernel_map)),
+			   vm_map_round_page(addr + size,
+					     vm_map_page_mask(ipc_kernel_map)),
+			   FALSE);
+	assert(KERN_SUCCESS == kr);
+	kr = vm_map_copyin(ipc_kernel_map, (vm_map_address_t)addr,
+			   (vm_map_size_t)size, TRUE, &amp;copy);
+	assert(KERN_SUCCESS == kr);
+
+	
+	*pagesp = (default_pager_page_array_t)copy;
+	*countp = actual;
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+</pre>
+<hr />
+</body></html>

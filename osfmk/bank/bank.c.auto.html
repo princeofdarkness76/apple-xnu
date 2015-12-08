@@ -1,0 +1,1046 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>bank.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">bank.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2012-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bank/bank_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bank/bank_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_special_ports.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ledger.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_voucher_attr_control.h&gt;</span>
+
+<span class="enscript-type">static</span> zone_t bank_task_zone, bank_account_zone;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_BANK_TASK</span>     (CONFIG_TASK_MAX)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_BANK_ACCOUNT</span>  (CONFIG_TASK_MAX + CONFIG_THREAD_MAX)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">BANK_ELEMENT_TO_HANDLE</span>(x) (CAST_DOWN(bank_handle_t, (x)))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">HANDLE_TO_BANK_ELEMENT</span>(x) (CAST_DOWN(bank_element_t, (x)))
+
+<span class="enscript-comment">/* Need macro since bank_element_t is 4 byte aligned on release kernel and direct type case gives compilation error */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">CAST_TO_BANK_TASK</span>(x) ((bank_task_t)((void *)(x)))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">CAST_TO_BANK_ACCOUNT</span>(x) ((bank_account_t)((void *)(x)))
+
+ipc_voucher_attr_control_t  bank_voucher_attr_control;    <span class="enscript-comment">/* communication channel from ATM to voucher system */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+queue_head_t bank_tasks_list;
+queue_head_t bank_accounts_list;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> ledger_template_t bank_ledger_template = NULL;
+<span class="enscript-type">struct</span> _bank_ledger_indices bank_ledgers = { -1 };
+
+<span class="enscript-type">static</span> bank_task_t <span class="enscript-function-name">bank_task_alloc_init</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> bank_account_t <span class="enscript-function-name">bank_account_alloc_init</span>(bank_task_t bank_holder, bank_task_t bank_merchant);
+<span class="enscript-type">static</span> bank_task_t <span class="enscript-function-name">get_bank_task_context</span>(task_t task);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">bank_task_dealloc</span>(bank_task_t bank_task, mach_voucher_attr_value_reference_t sync);
+<span class="enscript-type">static</span> kern_return_t <span class="enscript-function-name">bank_account_dealloc_with_sync</span>(bank_account_t bank_account, mach_voucher_attr_value_reference_t sync);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">bank_rollup_chit_to_tasks</span>(ledger_t bill, bank_task_t bank_holder, bank_task_t bank_merchant);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">init_bank_ledgers</span>(<span class="enscript-type">void</span>);
+
+kern_return_t
+<span class="enscript-function-name">bank_release_value</span>(
+	ipc_voucher_attr_manager_t __assert_only manager,
+	mach_voucher_attr_key_t __assert_only key,
+	mach_voucher_attr_value_handle_t value,
+	mach_voucher_attr_value_reference_t sync);
+
+kern_return_t
+<span class="enscript-function-name">bank_get_value</span>(
+	ipc_voucher_attr_manager_t __assert_only manager,
+	mach_voucher_attr_key_t __assert_only key,
+	mach_voucher_attr_recipe_command_t command,
+	mach_voucher_attr_value_handle_array_t prev_values,
+	mach_msg_type_number_t __assert_only prev_value_count,
+	mach_voucher_attr_content_t recipe,
+	mach_voucher_attr_content_size_t recipe_size,
+	mach_voucher_attr_value_handle_t *out_value,
+	ipc_voucher_t *out_value_voucher);
+
+kern_return_t
+<span class="enscript-function-name">bank_extract_content</span>(
+	ipc_voucher_attr_manager_t __assert_only manager,
+	mach_voucher_attr_key_t __assert_only key,
+	mach_voucher_attr_value_handle_array_t values,
+	mach_msg_type_number_t value_count,
+	mach_voucher_attr_recipe_command_t *out_command,
+	mach_voucher_attr_content_t out_recipe,
+	mach_voucher_attr_content_size_t *in_out_recipe_size);
+
+kern_return_t
+<span class="enscript-function-name">bank_command</span>(
+	ipc_voucher_attr_manager_t __assert_only manager,
+	mach_voucher_attr_key_t __assert_only key,
+	mach_voucher_attr_value_handle_array_t values,
+	mach_msg_type_number_t value_count,
+	mach_voucher_attr_command_t command,
+	mach_voucher_attr_content_t in_content,
+	mach_voucher_attr_content_size_t in_content_size,
+	mach_voucher_attr_content_t out_content,
+	mach_voucher_attr_content_size_t *in_out_content_size);
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bank_release</span>(ipc_voucher_attr_manager_t __assert_only manager);
+
+<span class="enscript-comment">/*
+ * communication channel from voucher system to ATM
+ */</span>
+<span class="enscript-type">struct</span> ipc_voucher_attr_manager bank_manager = {
+	.ivam_release_value    = bank_release_value,
+	.ivam_get_value        = bank_get_value,
+	.ivam_extract_content  = bank_extract_content,
+	.ivam_command	       = bank_command,
+	.ivam_release          = bank_release,
+};
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+<span class="enscript-function-name">decl_lck_mtx_data</span>(, bank_tasks_list_lock);
+<span class="enscript-function-name">decl_lck_mtx_data</span>(, bank_accounts_list_lock);
+
+lck_grp_t		bank_dev_lock_grp;
+lck_attr_t		bank_dev_lock_attr;
+lck_grp_attr_t		bank_dev_lock_grp_attr;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Lock group attributes for bank sub system.
+ */</span>
+lck_grp_t		bank_lock_grp;
+lck_attr_t		bank_lock_attr;
+lck_grp_attr_t		bank_lock_grp_attr;
+
+<span class="enscript-comment">/*
+ * Routine: bank_init
+ * Purpose: Initialize the BANK subsystem.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bank_init</span>()
+{
+	kern_return_t kr = KERN_SUCCESS;
+	<span class="enscript-comment">/* setup zones for bank_task and bank_account objects */</span>
+	bank_task_zone       = zinit(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> bank_task),
+	                       MAX_BANK_TASK * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> bank_task),
+	                       <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> bank_task),
+	                       <span class="enscript-string">&quot;bank_task&quot;</span>);
+
+	bank_account_zone    = zinit(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> bank_account),
+	                       MAX_BANK_ACCOUNT * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> bank_account),
+	                       <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> bank_account),
+	                       <span class="enscript-string">&quot;bank_account&quot;</span>);
+
+	init_bank_ledgers();
+
+	<span class="enscript-comment">/* Initialize bank lock group and lock attributes. */</span>
+	lck_grp_attr_setdefault(&amp;bank_lock_grp_attr);
+	lck_grp_init(&amp;bank_lock_grp, <span class="enscript-string">&quot;bank_lock&quot;</span>, &amp;bank_lock_grp_attr);
+	lck_attr_setdefault(&amp;bank_lock_attr);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	<span class="enscript-comment">/* Initialize global bank development lock group and lock attributes. */</span>
+	lck_grp_attr_setdefault(&amp;bank_dev_lock_grp_attr);
+	lck_grp_init(&amp;bank_dev_lock_grp, <span class="enscript-string">&quot;bank_dev_lock&quot;</span>, &amp;bank_dev_lock_grp_attr);
+	lck_attr_setdefault(&amp;bank_dev_lock_attr);
+
+	lck_mtx_init(&amp;bank_tasks_list_lock, &amp;bank_dev_lock_grp, &amp;bank_dev_lock_attr);
+	lck_mtx_init(&amp;bank_accounts_list_lock, &amp;bank_dev_lock_grp, &amp;bank_dev_lock_attr);
+
+	queue_init(&amp;bank_tasks_list);
+	queue_init(&amp;bank_accounts_list);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* Register the bank manager with the Vouchers sub system. */</span>
+	kr = ipc_register_well_known_mach_voucher_attr_manager(
+	                &amp;bank_manager,
+	                0,
+	                MACH_VOUCHER_ATTR_KEY_BANK,
+	                &amp;bank_voucher_attr_control);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS )
+		panic(<span class="enscript-string">&quot;BANK subsystem initialization failed&quot;</span>);
+
+	kprintf(<span class="enscript-string">&quot;BANK subsystem is initialized\n&quot;</span>);
+	<span class="enscript-keyword">return</span> ;
+}
+
+
+<span class="enscript-comment">/*
+ * BANK Resource Manager Routines.
+ */</span>
+
+
+<span class="enscript-comment">/*
+ * Routine: bank_release_value
+ * Purpose: Release a value, if sync matches the sync count in value.
+ * Returns: KERN_SUCCESS: on Successful deletion.
+ *          KERN_FAILURE: if sync value does not matches.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">bank_release_value</span>(
+	ipc_voucher_attr_manager_t		__assert_only manager,
+	mach_voucher_attr_key_t			__assert_only key,
+	mach_voucher_attr_value_handle_t		      value,
+	mach_voucher_attr_value_reference_t	          sync)
+{
+	bank_task_t bank_task = BANK_TASK_NULL;
+	bank_element_t bank_element = BANK_ELEMENT_NULL;
+	bank_account_t bank_account = BANK_ACCOUNT_NULL;
+	kern_return_t kr = KERN_SUCCESS;
+
+	assert(MACH_VOUCHER_ATTR_KEY_BANK == key);
+	assert(manager == &amp;bank_manager);
+
+
+	bank_element = HANDLE_TO_BANK_ELEMENT(value);
+	<span class="enscript-keyword">if</span> (bank_element == BANK_DEFAULT_VALUE) {
+		<span class="enscript-comment">/* Return success for default value */</span>
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+
+	<span class="enscript-keyword">if</span> (bank_element-&gt;be_type == BANK_TASK) {
+		bank_task = CAST_TO_BANK_TASK(bank_element);
+		
+		<span class="enscript-keyword">if</span> (bank_task-&gt;bt_made != (<span class="enscript-type">int</span>)sync) {
+			<span class="enscript-keyword">return</span> KERN_FAILURE;
+		}
+
+		bank_task_made_release_num(bank_task, sync);
+		bank_task_dealloc(bank_task, sync);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (bank_element-&gt;be_type == BANK_ACCOUNT) {
+		bank_account = CAST_TO_BANK_ACCOUNT(bank_element);
+		kr = bank_account_dealloc_with_sync(bank_account, sync);
+	} <span class="enscript-keyword">else</span> {
+		panic(<span class="enscript-string">&quot;Bogus bank type: %d passed in get_value\n&quot;</span>, bank_element-&gt;be_type);
+	}
+
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: bank_get_value
+ */</span>
+kern_return_t
+<span class="enscript-function-name">bank_get_value</span>(
+	ipc_voucher_attr_manager_t 		__assert_only manager,
+	mach_voucher_attr_key_t 		__assert_only key,
+	mach_voucher_attr_recipe_command_t 	          command,
+	mach_voucher_attr_value_handle_array_t 	      prev_values,
+	mach_msg_type_number_t 			      prev_value_count,
+	mach_voucher_attr_content_t          __unused recipe,
+	mach_voucher_attr_content_size_t     __unused recipe_size,
+	mach_voucher_attr_value_handle_t             *out_value,
+	ipc_voucher_t 				                 *out_value_voucher)
+{
+	bank_task_t bank_task = BANK_TASK_NULL;
+	bank_task_t bank_holder = BANK_TASK_NULL;
+	bank_task_t bank_merchant = BANK_TASK_NULL;
+	bank_element_t bank_element = BANK_ELEMENT_NULL;
+	bank_account_t bank_account = BANK_ACCOUNT_NULL;
+	bank_account_t old_bank_account = BANK_ACCOUNT_NULL;
+	mach_voucher_attr_value_handle_t bank_handle;
+	task_t task;
+	kern_return_t kr = KERN_SUCCESS;
+	mach_msg_type_number_t i;
+
+	assert(MACH_VOUCHER_ATTR_KEY_BANK == key);
+	assert(manager == &amp;bank_manager);
+
+	<span class="enscript-comment">/* never an out voucher */</span>
+	*out_value_voucher = IPC_VOUCHER_NULL;
+
+	<span class="enscript-keyword">switch</span> (command) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_VOUCHER_ATTR_BANK_CREATE</span>:
+
+		<span class="enscript-comment">/* Get the bank context from the current task and take a reference on it. */</span>
+		task = current_task();
+		bank_task = get_bank_task_context(task);
+		<span class="enscript-keyword">if</span> (bank_task == BANK_TASK_NULL)
+			<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+
+		bank_task_reference(bank_task);
+		bank_task_made_reference(bank_task);
+
+		*out_value = BANK_ELEMENT_TO_HANDLE(bank_task);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_VOUCHER_ATTR_REDEEM</span>:
+
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; prev_value_count; i++) {
+			bank_handle = prev_values[i];
+			bank_element = HANDLE_TO_BANK_ELEMENT(bank_handle);
+
+			<span class="enscript-keyword">if</span> (bank_element == BANK_DEFAULT_VALUE)
+				<span class="enscript-keyword">continue</span>;
+
+			task = current_task();
+			<span class="enscript-keyword">if</span> (bank_element-&gt;be_type == BANK_TASK) {
+				bank_holder = CAST_TO_BANK_TASK(bank_element);
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (bank_element-&gt;be_type == BANK_ACCOUNT) {
+				old_bank_account = CAST_TO_BANK_ACCOUNT(bank_element);
+				bank_holder = old_bank_account-&gt;ba_holder;
+			} <span class="enscript-keyword">else</span> {
+				panic(<span class="enscript-string">&quot;Bogus bank type: %d passed in get_value\n&quot;</span>, bank_element-&gt;be_type);
+			}
+
+			bank_merchant = get_bank_task_context(task);
+			<span class="enscript-keyword">if</span> (bank_merchant == BANK_TASK_NULL)
+				<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+
+			<span class="enscript-comment">/* Check if trying to redeem for self task, return the bank task */</span>
+			<span class="enscript-keyword">if</span> (bank_holder == bank_merchant) {
+				bank_task_reference(bank_holder);
+				bank_task_made_reference(bank_holder);
+				*out_value = BANK_ELEMENT_TO_HANDLE(bank_holder);
+				<span class="enscript-keyword">return</span> kr;
+			}
+
+			bank_account = bank_account_alloc_init(bank_holder, bank_merchant);
+			<span class="enscript-keyword">if</span> (bank_account == BANK_ACCOUNT_NULL)
+				<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+
+			*out_value = BANK_ELEMENT_TO_HANDLE(bank_account);
+			<span class="enscript-keyword">return</span> kr;
+		}
+
+		*out_value = BANK_ELEMENT_TO_HANDLE(BANK_DEFAULT_VALUE);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		kr = KERN_INVALID_ARGUMENT;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+<span class="enscript-comment">/*
+ * Routine: bank_extract_content
+ * Purpose: Extract a set of aid from an array of voucher values.
+ * Returns: KERN_SUCCESS: on Success.
+ *          KERN_FAILURE: one of the value is not present in the hash.
+ *          KERN_NO_SPACE: insufficeint buffer provided to fill an array of aid.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">bank_extract_content</span>(
+	ipc_voucher_attr_manager_t      __assert_only manager,
+	mach_voucher_attr_key_t         __assert_only key,
+	mach_voucher_attr_value_handle_array_t        values,
+	mach_msg_type_number_t 			              value_count,
+	mach_voucher_attr_recipe_command_t           *out_command,
+	mach_voucher_attr_content_t                   out_recipe,
+	mach_voucher_attr_content_size_t             *in_out_recipe_size)
+{
+	bank_task_t bank_task = BANK_TASK_NULL;
+	bank_element_t bank_element = BANK_ELEMENT_NULL;
+	bank_account_t bank_account = BANK_ACCOUNT_NULL;
+	mach_voucher_attr_value_handle_t bank_handle;
+	<span class="enscript-type">char</span> buf[MACH_VOUCHER_BANK_CONTENT_SIZE];
+	mach_msg_type_number_t i;
+
+	assert(MACH_VOUCHER_ATTR_KEY_BANK == key);
+	assert(manager == &amp;bank_manager);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; value_count; i++) {
+		bank_handle = values[i];
+		bank_element = HANDLE_TO_BANK_ELEMENT(bank_handle);
+		<span class="enscript-keyword">if</span> (bank_element == BANK_DEFAULT_VALUE)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (MACH_VOUCHER_BANK_CONTENT_SIZE &gt; *in_out_recipe_size) {
+			*in_out_recipe_size = 0;
+			<span class="enscript-keyword">return</span> KERN_NO_SPACE;
+		}
+
+		<span class="enscript-keyword">if</span> (bank_element-&gt;be_type == BANK_TASK) {
+			bank_task = CAST_TO_BANK_TASK(bank_element);
+			snprintf(buf, MACH_VOUCHER_BANK_CONTENT_SIZE, 
+			         <span class="enscript-string">&quot; Bank Context for a pid %d\n&quot;</span>, bank_task-&gt;bt_pid);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (bank_element-&gt;be_type == BANK_ACCOUNT) {
+			bank_account = CAST_TO_BANK_ACCOUNT(bank_element);
+			snprintf(buf, MACH_VOUCHER_BANK_CONTENT_SIZE,
+			         <span class="enscript-string">&quot; Bank Account linking holder pid %d with merchant pid %d\n&quot;</span>,
+				 bank_account-&gt;ba_holder-&gt;bt_pid,
+				 bank_account-&gt;ba_merchant-&gt;bt_pid);
+		} <span class="enscript-keyword">else</span> {
+			panic(<span class="enscript-string">&quot;Bogus bank type: %d passed in get_value\n&quot;</span>, bank_element-&gt;be_type);
+		}
+
+
+		memcpy(&amp;out_recipe[0], buf, strlen(buf) + 1);
+		*out_command = MACH_VOUCHER_ATTR_BANK_NULL;
+		*in_out_recipe_size = (mach_voucher_attr_content_size_t)strlen(buf) + 1;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * Routine: bank_command
+ * Purpose: Execute a command against a set of ATM values.
+ * Returns: KERN_SUCCESS: On successful execution of command.
+ 	    KERN_FAILURE: On failure.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">bank_command</span>(
+	ipc_voucher_attr_manager_t 		   __assert_only manager,
+	mach_voucher_attr_key_t 		   __assert_only key,
+	mach_voucher_attr_value_handle_array_t 	__unused values,
+	mach_msg_type_number_t 			__unused value_count,
+	mach_voucher_attr_command_t		 __unused command,
+	mach_voucher_attr_content_t 	   __unused in_content,
+	mach_voucher_attr_content_size_t   __unused in_content_size,
+	mach_voucher_attr_content_t 	   __unused out_content,
+	mach_voucher_attr_content_size_t   __unused *out_content_size)
+{
+	bank_task_t bank_task = BANK_TASK_NULL;
+	bank_element_t bank_element = BANK_ELEMENT_NULL;
+	bank_account_t bank_account = BANK_ACCOUNT_NULL;
+	mach_voucher_attr_value_handle_t bank_handle;
+	mach_msg_type_number_t i;
+	int32_t pid;
+
+	assert(MACH_VOUCHER_ATTR_KEY_BANK == key);
+	assert(manager == &amp;bank_manager);
+
+	<span class="enscript-keyword">switch</span> (command) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BANK_ORIGINATOR_PID</span>:
+
+		<span class="enscript-keyword">if</span> ((<span class="enscript-keyword">sizeof</span>(pid)) &gt; *out_content_size) {
+			*out_content_size = 0;
+			<span class="enscript-keyword">return</span> KERN_NO_SPACE;
+		}
+
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; value_count; i++) {
+			bank_handle = values[i];
+			bank_element = HANDLE_TO_BANK_ELEMENT(bank_handle);
+			<span class="enscript-keyword">if</span> (bank_element == BANK_DEFAULT_VALUE)
+				<span class="enscript-keyword">continue</span>;
+
+			<span class="enscript-keyword">if</span> (bank_element-&gt;be_type == BANK_TASK) {
+				bank_task = CAST_TO_BANK_TASK(bank_element);
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (bank_element-&gt;be_type == BANK_ACCOUNT) {
+				bank_account = CAST_TO_BANK_ACCOUNT(bank_element);
+				bank_task = bank_account-&gt;ba_holder;
+			} <span class="enscript-keyword">else</span> {
+				panic(<span class="enscript-string">&quot;Bogus bank type: %d passed in voucher_command\n&quot;</span>, bank_element-&gt;be_type);
+			}
+			pid = bank_task-&gt;bt_pid;
+
+			memcpy(&amp;out_content[0], &amp;pid, <span class="enscript-keyword">sizeof</span>(pid));
+			*out_content_size = (mach_voucher_attr_content_size_t)<span class="enscript-keyword">sizeof</span>(pid);
+			<span class="enscript-keyword">return</span> KERN_SUCCESS;
+		}
+		<span class="enscript-comment">/* In the case of no value, return error KERN_INVALID_VALUE */</span>
+		*out_content_size = 0;
+		<span class="enscript-keyword">return</span> KERN_INVALID_VALUE;
+
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bank_release</span>(
+	ipc_voucher_attr_manager_t 		__assert_only manager)
+{
+	assert(manager == &amp;bank_manager);
+}
+
+
+
+<span class="enscript-comment">/*
+ * Bank Internal Routines.
+ */</span>
+
+<span class="enscript-comment">/*
+ * Routine: bank_task_alloc_init
+ * Purpose: Allocate and initialize a bank task structure.
+ * Returns: bank_task_t on Success.
+ *          BANK_TASK_NULL: on Failure.
+ * Notes:   Leaves the task and creditcard blank and has only 1 ref,
+            needs to take 1 extra ref after the task field is initialized.
+ */</span>
+<span class="enscript-type">static</span> bank_task_t
+<span class="enscript-function-name">bank_task_alloc_init</span>(<span class="enscript-type">void</span>)
+{
+	bank_task_t new_bank_task;
+
+	new_bank_task = (bank_task_t) zalloc(bank_task_zone);
+	<span class="enscript-keyword">if</span> (new_bank_task == BANK_TASK_NULL)
+		<span class="enscript-keyword">return</span> BANK_TASK_NULL;
+
+	new_bank_task-&gt;bt_type = BANK_TASK;
+	new_bank_task-&gt;bt_refs = 1;
+	new_bank_task-&gt;bt_made = 0;
+	new_bank_task-&gt;bt_pid = 0;
+	new_bank_task-&gt;bt_creditcard = NULL;
+	queue_init(&amp;new_bank_task-&gt;bt_accounts_to_pay);
+	queue_init(&amp;new_bank_task-&gt;bt_accounts_to_charge);
+	lck_mtx_init(&amp;new_bank_task-&gt;bt_acc_to_pay_lock, &amp;bank_lock_grp, &amp;bank_lock_attr);
+	lck_mtx_init(&amp;new_bank_task-&gt;bt_acc_to_charge_lock, &amp;bank_lock_grp, &amp;bank_lock_attr);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	new_bank_task-&gt;bt_task = NULL;
+	lck_mtx_lock(&amp;bank_tasks_list_lock);
+	queue_enter(&amp;bank_tasks_list, new_bank_task, bank_task_t, bt_global_elt);
+	lck_mtx_unlock(&amp;bank_tasks_list_lock);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span> (new_bank_task);
+}
+
+<span class="enscript-comment">/*
+ * Routine: bank_account_alloc_init
+ * Purpose: Allocate and Initialize the bank account struct.
+ * Returns: bank_account_t : On Success.
+ *          BANK_ACCOUNT_NULL: On Failure.
+ */</span>
+<span class="enscript-type">static</span> bank_account_t
+<span class="enscript-function-name">bank_account_alloc_init</span>(
+	bank_task_t bank_holder,
+	bank_task_t bank_merchant)
+{
+	bank_account_t new_bank_account;
+	bank_account_t bank_account;
+	boolean_t entry_found = FALSE;
+	ledger_t new_ledger = ledger_instantiate(bank_ledger_template, LEDGER_CREATE_INACTIVE_ENTRIES);
+
+	<span class="enscript-keyword">if</span> (new_ledger == NULL)
+		<span class="enscript-keyword">return</span> BANK_ACCOUNT_NULL;
+
+	ledger_entry_setactive(new_ledger, bank_ledgers.cpu_time);
+	new_bank_account = (bank_account_t) zalloc(bank_account_zone);
+	<span class="enscript-keyword">if</span> (new_bank_account == BANK_ACCOUNT_NULL) {
+		ledger_dereference(new_ledger);
+		<span class="enscript-keyword">return</span> BANK_ACCOUNT_NULL;
+	}
+
+	new_bank_account-&gt;ba_type = BANK_ACCOUNT;
+	new_bank_account-&gt;ba_refs = 1;
+	new_bank_account-&gt;ba_made = 1;
+	new_bank_account-&gt;ba_pid = 0;
+	new_bank_account-&gt;ba_bill = new_ledger;
+	new_bank_account-&gt;ba_merchant = bank_merchant;
+	new_bank_account-&gt;ba_holder = bank_holder;
+
+	<span class="enscript-comment">/* Iterate through accounts need to pay list to find the existing entry */</span>
+	lck_mtx_lock(&amp;bank_holder-&gt;bt_acc_to_pay_lock);
+	queue_iterate(&amp;bank_holder-&gt;bt_accounts_to_pay, bank_account, bank_account_t, ba_next_acc_to_pay) {
+		<span class="enscript-keyword">if</span> (bank_account-&gt;ba_merchant != bank_merchant)
+			<span class="enscript-keyword">continue</span>;
+
+		entry_found = TRUE;
+		<span class="enscript-comment">/* Take a made ref, since this value would be returned to voucher system. */</span>
+		bank_account_reference(bank_account);
+		bank_account_made_reference(bank_account);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (!entry_found) {
+	
+		<span class="enscript-comment">/*  Create a linkage between the holder and the merchant task, Grab both the list locks before adding it to the list. */</span>
+		lck_mtx_lock(&amp;bank_merchant-&gt;bt_acc_to_charge_lock);
+	
+		<span class="enscript-comment">/* Add the account entry into Accounts need to pay account link list. */</span>
+		queue_enter(&amp;bank_holder-&gt;bt_accounts_to_pay, new_bank_account, bank_account_t, ba_next_acc_to_pay);
+
+		<span class="enscript-comment">/* Add the account entry into Accounts need to charge account link list. */</span>
+		queue_enter(&amp;bank_merchant-&gt;bt_accounts_to_charge, new_bank_account, bank_account_t, ba_next_acc_to_charge);
+
+		lck_mtx_unlock(&amp;bank_merchant-&gt;bt_acc_to_charge_lock);
+	}
+
+	lck_mtx_unlock(&amp;bank_holder-&gt;bt_acc_to_pay_lock);
+
+	<span class="enscript-keyword">if</span> (entry_found) {
+		ledger_dereference(new_ledger);
+		zfree(bank_account_zone, new_bank_account);
+		<span class="enscript-keyword">return</span> bank_account;
+	}
+	
+	bank_task_reference(bank_holder);
+	bank_task_reference(bank_merchant);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	new_bank_account-&gt;ba_task = NULL;
+	lck_mtx_lock(&amp;bank_accounts_list_lock);
+	queue_enter(&amp;bank_accounts_list, new_bank_account, bank_account_t, ba_global_elt);
+	lck_mtx_unlock(&amp;bank_accounts_list_lock);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> (new_bank_account);
+}
+
+<span class="enscript-comment">/*
+ * Routine: get_bank_task_context
+ * Purpose: Get the bank context of the given task
+ * Returns: bank_task_t on Success.
+ *          BANK_TASK_NULL: on Failure.
+ * Note:    Initialize bank context if NULL.
+ */</span>
+<span class="enscript-type">static</span> bank_task_t
+<span class="enscript-function-name">get_bank_task_context</span>(task_t task)
+{
+	bank_task_t bank_task;
+
+	<span class="enscript-keyword">if</span> (task-&gt;bank_context)
+		<span class="enscript-keyword">return</span> (task-&gt;bank_context);
+
+	bank_task = bank_task_alloc_init();
+
+	<span class="enscript-comment">/* Grab the task lock and check if we won the race. */</span>
+	task_lock(task);
+	<span class="enscript-keyword">if</span> (task-&gt;bank_context) {
+		task_unlock(task);
+		<span class="enscript-keyword">if</span> (bank_task != BANK_TASK_NULL) 
+			bank_task_dealloc(bank_task, 1);
+		<span class="enscript-keyword">return</span> (task-&gt;bank_context);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (bank_task == BANK_TASK_NULL) {
+		task_unlock(task);
+		<span class="enscript-keyword">return</span> BANK_TASK_NULL;
+	}
+	<span class="enscript-comment">/* We won the race. Take a ref on the ledger and initialize bank task. */</span>
+	bank_task-&gt;bt_creditcard = task-&gt;ledger;
+	bank_task-&gt;bt_pid = task_pid(task);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	bank_task-&gt;bt_task = task;
+#<span class="enscript-reference">endif</span>
+	ledger_reference(task-&gt;ledger);
+
+	task-&gt;bank_context = bank_task;
+	task_unlock(task);
+	
+	<span class="enscript-keyword">return</span> (bank_task);
+}
+	
+<span class="enscript-comment">/*
+ * Routine: bank_task_dealloc
+ * Purpose: Drops the reference on bank task.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">bank_task_dealloc</span>(
+	bank_task_t bank_task,
+	mach_voucher_attr_value_reference_t sync)
+{
+	assert(bank_task-&gt;bt_refs &gt;= 0);
+
+	<span class="enscript-keyword">if</span> (bank_task_release_num(bank_task, sync) &gt; (<span class="enscript-type">int</span>)sync)
+		<span class="enscript-keyword">return</span>;
+
+	assert(bank_task-&gt;bt_refs == 0);
+	assert(queue_empty(&amp;bank_task-&gt;bt_accounts_to_pay));
+	assert(queue_empty(&amp;bank_task-&gt;bt_accounts_to_charge));
+
+	ledger_dereference(bank_task-&gt;bt_creditcard);
+	lck_mtx_destroy(&amp;bank_task-&gt;bt_acc_to_pay_lock, &amp;bank_lock_grp);
+	lck_mtx_destroy(&amp;bank_task-&gt;bt_acc_to_charge_lock, &amp;bank_lock_grp);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	lck_mtx_lock(&amp;bank_tasks_list_lock);
+	queue_remove(&amp;bank_tasks_list, bank_task, bank_task_t, bt_global_elt);
+	lck_mtx_unlock(&amp;bank_tasks_list_lock);
+#<span class="enscript-reference">endif</span>
+
+	zfree(bank_task_zone, bank_task);
+}
+
+<span class="enscript-comment">/*
+ * Routine: bank_account_dealloc_with_sync
+ * Purpose: Drop the reference on bank account if the sync matches.
+ * Returns: KERN_SUCCESS if sync matches.
+ *          KERN_FAILURE on mismatch.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">bank_account_dealloc_with_sync</span>(
+	bank_account_t bank_account,
+	mach_voucher_attr_value_reference_t sync)
+{
+	bank_task_t bank_holder = bank_account-&gt;ba_holder;
+	bank_task_t bank_merchant = bank_account-&gt;ba_merchant;
+
+	<span class="enscript-comment">/* Grab the acc to pay list lock and check the sync value */</span>
+	lck_mtx_lock(&amp;bank_holder-&gt;bt_acc_to_pay_lock);
+
+	<span class="enscript-keyword">if</span> (bank_account-&gt;ba_made != (<span class="enscript-type">int</span>)sync) {
+		lck_mtx_unlock(&amp;bank_holder-&gt;bt_acc_to_pay_lock);
+		<span class="enscript-keyword">return</span> KERN_FAILURE;
+	}
+		
+	bank_account_made_release_num(bank_account, sync);
+
+	<span class="enscript-keyword">if</span> (bank_account_release_num(bank_account, sync) &gt; (<span class="enscript-type">int</span>)sync)
+		panic(<span class="enscript-string">&quot;Sync and ref value did not match for bank account %p\n&quot;</span>, bank_account);
+
+
+	<span class="enscript-comment">/* Grab both the acc to pay and acc to charge locks */</span>
+	lck_mtx_lock(&amp;bank_merchant-&gt;bt_acc_to_charge_lock);
+
+	bank_rollup_chit_to_tasks(bank_account-&gt;ba_bill, bank_holder, bank_merchant);
+	
+	<span class="enscript-comment">/* Remove the account entry from Accounts need to pay account link list. */</span>
+	queue_remove(&amp;bank_holder-&gt;bt_accounts_to_pay, bank_account, bank_account_t, ba_next_acc_to_pay);
+	
+	<span class="enscript-comment">/* Remove the account entry from Accounts need to charge account link list. */</span>
+	queue_remove(&amp;bank_merchant-&gt;bt_accounts_to_charge, bank_account, bank_account_t, ba_next_acc_to_charge);
+	
+	lck_mtx_unlock(&amp;bank_merchant-&gt;bt_acc_to_charge_lock);
+	lck_mtx_unlock(&amp;bank_holder-&gt;bt_acc_to_pay_lock);
+
+	ledger_dereference(bank_account-&gt;ba_bill);
+
+	<span class="enscript-comment">/* Drop the reference of bank holder and merchant */</span>
+	bank_task_dealloc(bank_holder, 1);
+	bank_task_dealloc(bank_merchant, 1);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	lck_mtx_lock(&amp;bank_accounts_list_lock);
+	queue_remove(&amp;bank_accounts_list, bank_account, bank_account_t, ba_global_elt);
+	lck_mtx_unlock(&amp;bank_accounts_list_lock);
+#<span class="enscript-reference">endif</span>
+	
+	zfree(bank_account_zone, bank_account);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * Routine: bank_rollup_chit_to_tasks
+ * Purpose: Debit and Credit holder's and merchant's ledgers.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">bank_rollup_chit_to_tasks</span>(
+	ledger_t bill,
+	bank_task_t bank_holder,
+	bank_task_t bank_merchant)
+{
+	ledger_amount_t credit;
+	ledger_amount_t debit;
+	kern_return_t ret;
+
+	ret = ledger_get_entries(bill, bank_ledgers.cpu_time, &amp;credit, &amp;debit);
+	<span class="enscript-keyword">if</span> (ret != KERN_SUCCESS) {
+		<span class="enscript-keyword">return</span>;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	<span class="enscript-keyword">if</span> (debit != 0) {
+		panic(<span class="enscript-string">&quot;bank_rollup: debit: %lld non zero\n&quot;</span>, debit);
+	}
+#<span class="enscript-reference">endif</span>
+
+	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, (BANK_CODE(BANK_ACCOUNT_INFO, (BANK_SETTLE_CPU_TIME))) | DBG_FUNC_NONE,
+			bank_merchant-&gt;bt_pid, bank_holder-&gt;bt_pid, credit, debit, 0);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	ledger_credit(bank_holder-&gt;bt_creditcard, task_ledgers.cpu_time_billed_to_me, credit);
+	ledger_debit(bank_holder-&gt;bt_creditcard, task_ledgers.cpu_time_billed_to_me, debit);
+	
+	ledger_credit(bank_merchant-&gt;bt_creditcard, task_ledgers.cpu_time_billed_to_others, credit);
+	ledger_debit(bank_merchant-&gt;bt_creditcard, task_ledgers.cpu_time_billed_to_others, debit);
+#<span class="enscript-reference">endif</span>
+}
+
+
+
+<span class="enscript-comment">/*
+ * Routine: bank_task_destroy
+ * Purpose: Drops reference on bank task.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bank_task_destroy</span>(bank_task_t bank_task)
+{
+	bank_task_dealloc(bank_task, 1);
+}
+
+<span class="enscript-comment">/*
+ * Routine: init_bank_ledgers
+ * Purpose: Initialize template for bank ledgers.
+ * Returns: None.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">init_bank_ledgers</span>(<span class="enscript-type">void</span>) {
+	ledger_template_t t;
+	<span class="enscript-type">int</span> idx;
+	
+	assert(bank_ledger_template == NULL);
+
+	<span class="enscript-keyword">if</span> ((t = ledger_template_create(<span class="enscript-string">&quot;Bank ledger&quot;</span>)) == NULL)
+		panic(<span class="enscript-string">&quot;couldn't create bank ledger template&quot;</span>);
+
+	<span class="enscript-keyword">if</span> ((idx = ledger_entry_add(t, <span class="enscript-string">&quot;cpu_time&quot;</span>, <span class="enscript-string">&quot;sched&quot;</span>, <span class="enscript-string">&quot;ns&quot;</span>)) &lt; 0) {
+		panic(<span class="enscript-string">&quot;couldn't create cpu_time entry for bank ledger template&quot;</span>);
+	}
+
+	bank_ledgers.cpu_time = idx;
+	bank_ledger_template = t;
+}
+
+<span class="enscript-comment">/*
+ * Routine: bank_billed_time
+ * Purpose: Walk throught the Accounts need to pay account list and get the current billing balance.
+ * Returns: balance.
+ */</span>
+uint64_t
+<span class="enscript-function-name">bank_billed_time</span>(bank_task_t bank_task)
+{
+	int64_t balance = 0;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	bank_account_t bank_account;
+	int64_t temp = 0;
+	kern_return_t kr;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (bank_task == BANK_TASK_NULL) {
+		<span class="enscript-keyword">return</span> balance;
+	}
+	
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	lck_mtx_lock(&amp;bank_task-&gt;bt_acc_to_pay_lock);
+
+	kr = ledger_get_balance(bank_task-&gt;bt_creditcard, task_ledgers.cpu_time_billed_to_me, &amp;temp);
+	<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS &amp;&amp; temp &gt;= 0) {
+		balance += temp;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	<span class="enscript-keyword">else</span> {
+		printf(<span class="enscript-string">&quot;bank_bill_time: ledger_get_balance failed or negative balance in ledger: %lld\n&quot;</span>, temp);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEVELOPMENT || DEBUG */</span>
+
+	queue_iterate(&amp;bank_task-&gt;bt_accounts_to_pay, bank_account, bank_account_t, ba_next_acc_to_pay) {
+		temp = 0;
+		kr = ledger_get_balance(bank_account-&gt;ba_bill, bank_ledgers.cpu_time, &amp;temp);
+		<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS &amp;&amp; temp &gt;= 0) {
+			balance += temp;
+		}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+		<span class="enscript-keyword">else</span> {
+			printf(<span class="enscript-string">&quot;bank_bill_time: ledger_get_balance failed or negative balance in ledger: %lld\n&quot;</span>, temp);
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEVELOPMENT || DEBUG */</span>
+	}
+	lck_mtx_unlock(&amp;bank_task-&gt;bt_acc_to_pay_lock);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span> (uint64_t)balance;
+}
+
+<span class="enscript-comment">/*
+ * Routine: bank_serviced_time
+ * Purpose: Walk throught the Account need to charge account list and get the current balance to be charged.
+ * Returns: balance.
+ */</span>
+uint64_t
+<span class="enscript-function-name">bank_serviced_time</span>(bank_task_t bank_task)
+{
+	int64_t balance = 0;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	bank_account_t bank_account;
+	int64_t temp = 0;
+	kern_return_t kr;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (bank_task == BANK_TASK_NULL) {
+		<span class="enscript-keyword">return</span> balance;
+	}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span>
+	lck_mtx_lock(&amp;bank_task-&gt;bt_acc_to_charge_lock);
+
+	kr = ledger_get_balance(bank_task-&gt;bt_creditcard, task_ledgers.cpu_time_billed_to_others, &amp;temp);
+	<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS &amp;&amp; temp &gt;= 0) {
+		balance += temp;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+	<span class="enscript-keyword">else</span> {
+		printf(<span class="enscript-string">&quot;bank_serviced_time: ledger_get_balance failed or negative balance in ledger: %lld\n&quot;</span>, temp);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEVELOPMENT || DEBUG */</span>
+
+	queue_iterate(&amp;bank_task-&gt;bt_accounts_to_charge, bank_account, bank_account_t, ba_next_acc_to_charge) {
+		temp = 0;
+		kr = ledger_get_balance(bank_account-&gt;ba_bill, bank_ledgers.cpu_time, &amp;temp);
+		<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS &amp;&amp; temp &gt;= 0) {
+			balance += temp;
+		}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+		<span class="enscript-keyword">else</span> {
+			printf(<span class="enscript-string">&quot;bank_serviced_time: ledger_get_balance failed or negative balance in ledger: %lld\n&quot;</span>, temp);
+		}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEVELOPMENT || DEBUG */</span>
+	}
+	lck_mtx_unlock(&amp;bank_task-&gt;bt_acc_to_charge_lock);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span> (uint64_t)balance;
+}
+
+<span class="enscript-comment">/*
+ * Routine: bank_get_voucher_ledger
+ * Purpose: Get the bankledger (chit) from the voucher.
+ * Returns: bank_ledger if bank_account attribute present in voucher.
+ *          NULL on no attribute ot bank_task attribute.
+ */</span>
+ledger_t
+<span class="enscript-function-name">bank_get_voucher_ledger</span>(ipc_voucher_t voucher)
+{
+	bank_element_t bank_element = BANK_ELEMENT_NULL;
+	bank_account_t bank_account = BANK_ACCOUNT_NULL;
+	mach_voucher_attr_value_handle_t vals[MACH_VOUCHER_ATTR_VALUE_MAX_NESTED];
+	mach_voucher_attr_value_handle_array_size_t val_count;
+	ledger_t bankledger = NULL;
+	kern_return_t kr;
+
+	val_count = MACH_VOUCHER_ATTR_VALUE_MAX_NESTED;
+	kr = mach_voucher_attr_control_get_values(bank_voucher_attr_control,
+				voucher,
+				vals,
+				&amp;val_count);
+
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> NULL;
+
+	<span class="enscript-keyword">if</span> (val_count == 0)
+		<span class="enscript-keyword">return</span> NULL;
+
+	bank_element = HANDLE_TO_BANK_ELEMENT(vals[0]);
+	<span class="enscript-keyword">if</span> (bank_element == BANK_DEFAULT_VALUE)
+		<span class="enscript-keyword">return</span> NULL;
+
+	<span class="enscript-keyword">if</span> (bank_element-&gt;be_type == BANK_TASK) {
+		bankledger = NULL;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (bank_element-&gt;be_type == BANK_ACCOUNT) {
+		bank_account = CAST_TO_BANK_ACCOUNT(bank_element);
+		bankledger = bank_account-&gt;ba_bill;
+	} <span class="enscript-keyword">else</span> {
+		panic(<span class="enscript-string">&quot;Bogus bank type: %d passed in bank_get_voucher_ledger\n&quot;</span>, bank_element-&gt;be_type);
+	}
+
+	<span class="enscript-keyword">return</span> (bankledger);
+}
+
+<span class="enscript-comment">/*
+ * Routine: bank_swap_thread_bank_ledger
+ * Purpose: swap the bank ledger on the thread.
+ * Retunrs: None.
+ * Note: Should be only called for current thread or thread which is not started.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">bank_swap_thread_bank_ledger</span>(thread_t thread __unused, ledger_t new_ledger __unused)
+{
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">CONFIG_BANK</span> 
+	spl_t			s;
+	processor_t		processor;
+	ledger_t old_ledger = thread-&gt;t_bankledger;
+	int64_t ctime, effective_ledger_time_consumed = 0; 
+	int64_t remainder = 0, consumed = 0; 
+	
+	<span class="enscript-keyword">if</span> (old_ledger == NULL &amp;&amp; new_ledger == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	assert((thread == current_thread() || thread-&gt;started == 0));
+
+	s = splsched();
+	thread_lock(thread);
+
+	<span class="enscript-comment">/*
+	 * Calculation of time elapsed by the thread before voucher swap.
+	 * Following is the timeline which shows all the variables used in the calculation below.
+	 *
+	 *               thread ledger
+	 *                 cpu_time
+	 *                    |&lt;-          consumed            -&gt;|&lt;- remainder  -&gt;|
+	 * timeline  -----------------------------------------------------------------&gt;
+	 *                    |                                  |                |
+	 *             thread_dispatch                        ctime           quantum end
+	 *
+	 *                           |&lt;-effective_ledger_time -&gt; |
+	 *               deduct_bank_ledger_time
+	 */</span>
+
+	ctime = mach_absolute_time();
+	processor = thread-&gt;last_processor;
+	<span class="enscript-keyword">if</span> (processor != NULL) {
+		<span class="enscript-keyword">if</span> ((int64_t)processor-&gt;quantum_end &gt; ctime)
+			remainder = (int64_t)processor-&gt;quantum_end - ctime;
+	
+		consumed = thread-&gt;quantum_remaining - remainder;
+		effective_ledger_time_consumed = consumed - thread-&gt;t_deduct_bank_ledger_time;
+	}
+
+	thread-&gt;t_deduct_bank_ledger_time = consumed;
+
+	thread-&gt;t_bankledger = new_ledger;
+
+	thread_unlock(thread);
+	splx(s);
+	
+	<span class="enscript-keyword">if</span> (old_ledger != NULL)
+		ledger_credit(old_ledger,
+			bank_ledgers.cpu_time,
+			effective_ledger_time_consumed);
+#<span class="enscript-reference">endif</span>
+}
+
+</pre>
+<hr />
+</body></html>

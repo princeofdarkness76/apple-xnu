@@ -1,0 +1,410 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>raw_usrreq.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">raw_usrreq.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1980, 1986, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)raw_usrreq.c	8.1 (Berkeley) 6/10/93
+ * $FreeBSD: src/sys/net/raw_usrreq.c,v 1.18 1999/08/28 00:48:28 peter Exp $
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/raw_cb.h&gt;</span>
+
+<span class="enscript-function-name">decl_lck_mtx_data</span>(,raw_mtx_data);	<span class="enscript-comment">/*### global raw cb mutex for now */</span>
+lck_mtx_t 	*raw_mtx = &amp;raw_mtx_data;
+lck_attr_t 	*raw_mtx_attr;
+lck_grp_t 	*raw_mtx_grp;
+lck_grp_attr_t 	*raw_mtx_grp_attr;
+<span class="enscript-comment">/*
+ * Initialize raw connection block q.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">raw_init</span>(<span class="enscript-type">struct</span> protosw *pp, <span class="enscript-type">struct</span> domain *dp)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">pp</span>, <span class="enscript-variable-name">dp</span>)
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> raw_initialized = 0;
+
+	<span class="enscript-comment">/* This is called by key_init as well, so do it only once */</span>
+	<span class="enscript-keyword">if</span> (!raw_initialized) {
+		raw_initialized = 1;
+
+		raw_mtx_grp_attr = lck_grp_attr_alloc_init();
+		raw_mtx_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;rawcb&quot;</span>, raw_mtx_grp_attr);
+		raw_mtx_attr = lck_attr_alloc_init();
+
+		lck_mtx_init(raw_mtx, raw_mtx_grp, raw_mtx_attr);
+		LIST_INIT(&amp;rawcb_list);
+	}
+}
+
+
+<span class="enscript-comment">/*
+ * Raw protocol input routine.  Find the socket
+ * associated with the packet(s) and move them over.  If
+ * nothing exists for this packet, drop it.
+ */</span>
+<span class="enscript-comment">/*
+ * Raw protocol interface.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">raw_input</span>(<span class="enscript-type">struct</span> mbuf *m0, <span class="enscript-type">struct</span> sockproto *proto, <span class="enscript-type">struct</span> sockaddr *src,
+	  <span class="enscript-type">struct</span> sockaddr *dst)
+{
+	<span class="enscript-type">struct</span> rawcb *rp;
+	<span class="enscript-type">struct</span> mbuf *m = m0;
+	<span class="enscript-type">int</span> sockets = 0;
+	<span class="enscript-type">struct</span> socket *last;
+	<span class="enscript-type">int</span> error;
+
+<span class="enscript-comment">//####LD raw_input is called from many places, input &amp; output path. We have to assume the 
+</span><span class="enscript-comment">//####LD socket we'll find and need to append to is unlocked.
+</span><span class="enscript-comment">//####LD calls from the output (locked) path need to make sure the socket is not locked when
+</span><span class="enscript-comment">//####LD we call in raw_input
+</span>	last = NULL;
+	lck_mtx_lock(raw_mtx);
+	LIST_FOREACH(rp, &amp;rawcb_list, list) {
+		<span class="enscript-keyword">if</span> (rp-&gt;rcb_proto.sp_family != proto-&gt;sp_family)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (rp-&gt;rcb_proto.sp_protocol  &amp;&amp;
+		    rp-&gt;rcb_proto.sp_protocol != proto-&gt;sp_protocol)
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-comment">/*
+		 * We assume the lower level routines have
+		 * placed the address in a canonical format
+		 * suitable for a structure comparison.
+		 *
+		 * Note that if the lengths are not the same
+		 * the comparison will fail at the first byte.
+		 */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">equal</span>(a1, a2) \
+  (bcmp((caddr_t)(a1), (caddr_t)(a2), a1-&gt;sa_len) == 0)
+		<span class="enscript-keyword">if</span> (rp-&gt;rcb_laddr &amp;&amp; !equal(rp-&gt;rcb_laddr, dst))
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (rp-&gt;rcb_faddr &amp;&amp; !equal(rp-&gt;rcb_faddr, src))
+			<span class="enscript-keyword">continue</span>;
+		<span class="enscript-keyword">if</span> (last) {
+			<span class="enscript-type">struct</span> mbuf *n;
+			n = m_copy(m, 0, (<span class="enscript-type">int</span>)M_COPYALL);
+			<span class="enscript-keyword">if</span> (n) {
+				socket_lock(last, 1);
+				<span class="enscript-keyword">if</span> (sbappendaddr(&amp;last-&gt;so_rcv, src,
+				    n, (<span class="enscript-type">struct</span> mbuf *)0, &amp;error) != 0) {
+					sorwakeup(last);
+					sockets++;
+				}
+				socket_unlock(last, 1);
+			}
+		}
+		last = rp-&gt;rcb_socket;
+	}
+	<span class="enscript-keyword">if</span> (last) {
+		socket_lock(last, 1);
+		<span class="enscript-keyword">if</span> (sbappendaddr(&amp;last-&gt;so_rcv, src,
+		    m, (<span class="enscript-type">struct</span> mbuf *)0, &amp;error) != 0) {
+			sorwakeup(last);
+			sockets++;
+		}
+		socket_unlock(last, 1);
+	} <span class="enscript-keyword">else</span>
+		m_freem(m);
+	lck_mtx_unlock(raw_mtx);
+}
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">raw_ctlinput</span>(<span class="enscript-type">int</span> cmd, __unused <span class="enscript-type">struct</span> sockaddr *arg, __unused <span class="enscript-type">void</span> *dummy)
+{
+
+	<span class="enscript-keyword">if</span> (cmd &lt; 0 || cmd &gt;= PRC_NCMDS)
+		<span class="enscript-keyword">return</span>;
+	<span class="enscript-comment">/* INCOMPLETE */</span>
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">raw_uabort</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> rawcb *rp = sotorawcb(so);
+
+	lck_mtx_t * mutex_held;
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_getlock != NULL)
+		mutex_held = (*so-&gt;so_proto-&gt;pr_getlock)(so, 0);
+	<span class="enscript-keyword">else</span>
+		mutex_held = so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+	lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (rp == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+	raw_disconnect(rp);
+	sofree(so);
+	soisdisconnected(so);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* pru_accept is EOPNOTSUPP */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">raw_uattach</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> proto, __unused <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">struct</span> rawcb *rp = sotorawcb(so);
+
+	<span class="enscript-keyword">if</span> (rp == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+		<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_PRIV) == 0)
+			<span class="enscript-keyword">return</span> (EPERM);
+	<span class="enscript-keyword">return</span> raw_attach(so, proto);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">raw_ubind</span>(__unused <span class="enscript-type">struct</span> socket *so, __unused <span class="enscript-type">struct</span> sockaddr *nam, __unused <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-keyword">return</span> EINVAL;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">raw_uconnect</span>(__unused <span class="enscript-type">struct</span> socket *so, __unused <span class="enscript-type">struct</span> sockaddr *nam, __unused <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-keyword">return</span> EINVAL;
+}
+
+<span class="enscript-comment">/* pru_connect2 is EOPNOTSUPP */</span>
+<span class="enscript-comment">/* pru_control is EOPNOTSUPP */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">raw_udetach</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> rawcb *rp = sotorawcb(so);
+
+	lck_mtx_t * mutex_held;
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_getlock != NULL)
+		mutex_held = (*so-&gt;so_proto-&gt;pr_getlock)(so, 0);
+	<span class="enscript-keyword">else</span>
+		mutex_held = so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+	lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+	<span class="enscript-keyword">if</span> (rp == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	raw_detach(rp);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">raw_udisconnect</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> rawcb *rp = sotorawcb(so);
+
+	<span class="enscript-keyword">if</span> (rp == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+	<span class="enscript-keyword">if</span> (rp-&gt;rcb_faddr == 0) {
+		<span class="enscript-keyword">return</span> ENOTCONN;
+	}
+	raw_disconnect(rp);
+	soisdisconnected(so);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* pru_listen is EOPNOTSUPP */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">raw_upeeraddr</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr **nam)
+{
+	<span class="enscript-type">struct</span> rawcb *rp = sotorawcb(so);
+
+	<span class="enscript-keyword">if</span> (rp == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+	<span class="enscript-keyword">if</span> (rp-&gt;rcb_faddr == 0) {
+		<span class="enscript-keyword">return</span> ENOTCONN;
+	}
+	*nam = dup_sockaddr(rp-&gt;rcb_faddr, 1);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* pru_rcvd is EOPNOTSUPP */</span>
+<span class="enscript-comment">/* pru_rcvoob is EOPNOTSUPP */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">raw_usend</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> flags, <span class="enscript-type">struct</span> mbuf *m,
+	  <span class="enscript-type">struct</span> sockaddr *nam, <span class="enscript-type">struct</span> mbuf *control, __unused <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> rawcb *rp = sotorawcb(so);
+
+	lck_mtx_t * mutex_held;
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_getlock != NULL)
+		mutex_held = (*so-&gt;so_proto-&gt;pr_getlock)(so, 0);
+	<span class="enscript-keyword">else</span>
+		mutex_held = so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+	lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (rp == 0) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (flags &amp; PRUS_OOB) {
+		error = EOPNOTSUPP;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_output == NULL) {
+		error = EOPNOTSUPP;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (control &amp;&amp; control-&gt;m_len) {
+		error = EOPNOTSUPP;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+	}
+	<span class="enscript-keyword">if</span> (nam) {
+		<span class="enscript-keyword">if</span> (rp-&gt;rcb_faddr) {
+			error = EISCONN;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+		}
+		rp-&gt;rcb_faddr = nam;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (rp-&gt;rcb_faddr == 0) {
+		error = ENOTCONN;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">release</span>;
+	}
+	error = (*so-&gt;so_proto-&gt;pr_output)(m, so);
+	m = NULL;
+	<span class="enscript-keyword">if</span> (nam)
+		rp-&gt;rcb_faddr = NULL;
+<span class="enscript-reference">release</span>:
+	<span class="enscript-keyword">if</span> (m != NULL)
+		m_freem(m);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/* pru_sense is null */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">raw_ushutdown</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> rawcb *rp = sotorawcb(so);
+	lck_mtx_t * mutex_held;
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_getlock != NULL)
+		mutex_held = (*so-&gt;so_proto-&gt;pr_getlock)(so, 0);
+	<span class="enscript-keyword">else</span>
+		mutex_held = so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx;
+	lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-keyword">if</span> (rp == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+	socantsendmore(so);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">raw_usockaddr</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr **nam)
+{
+	<span class="enscript-type">struct</span> rawcb *rp = sotorawcb(so);
+
+	<span class="enscript-keyword">if</span> (rp == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+	<span class="enscript-keyword">if</span> (rp-&gt;rcb_laddr == 0)
+		<span class="enscript-keyword">return</span> EINVAL;
+	*nam = dup_sockaddr(rp-&gt;rcb_laddr, 1);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">struct</span> pr_usrreqs raw_usrreqs = {
+	.pru_abort =		raw_uabort,
+	.pru_attach =		raw_uattach,
+	.pru_bind =		raw_ubind,
+	.pru_connect =		raw_uconnect,
+	.pru_detach =		raw_udetach,
+	.pru_disconnect =	raw_udisconnect,
+	.pru_peeraddr =		raw_upeeraddr,
+	.pru_send =		raw_usend,
+	.pru_shutdown =		raw_ushutdown,
+	.pru_sockaddr =		raw_usockaddr,
+	.pru_sosend =		sosend,
+	.pru_soreceive =	soreceive,
+};
+</pre>
+<hr />
+</body></html>

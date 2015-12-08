@@ -1,0 +1,247 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>vm_init.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">vm_init.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2011 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989,1988,1987 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+<span class="enscript-comment">/*
+ *	File:	vm/vm_init.c
+ *	Author:	Avadis Tevanian, Jr., Michael Wayne Young
+ *	Date:	1985
+ *
+ *	Initialize the Virtual Memory subsystem.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/machine/vm_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kext_alloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_page.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/memory_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_fault.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_init.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ZONE_MAP_MIN</span> CONFIG_ZONE_MAP_MIN
+
+<span class="enscript-comment">/* Maximum zone size is 1.5G */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ZONE_MAP_MAX</span> (1024 * 1024 * 1536) 
+
+<span class="enscript-type">const</span> vm_offset_t vm_min_kernel_address = VM_MIN_KERNEL_AND_KEXT_ADDRESS;
+<span class="enscript-type">const</span> vm_offset_t vm_max_kernel_address = VM_MAX_KERNEL_ADDRESS;
+
+boolean_t vm_kernel_ready = FALSE;
+boolean_t kmem_ready = FALSE;
+boolean_t kmem_alloc_ready = FALSE;
+boolean_t zlog_ready = FALSE;
+
+vm_offset_t kmapoff_kaddr;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> kmapoff_pgcnt;
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_mem_bootstrap_log</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *message)
+{
+<span class="enscript-comment">//	kprintf(&quot;vm_mem_bootstrap: %s\n&quot;, message);
+</span>	kernel_debug_string_simple(message);
+}
+
+<span class="enscript-comment">/*
+ *	vm_mem_bootstrap initializes the virtual memory system.
+ *	This is done only by the first cpu up.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_mem_bootstrap</span>(<span class="enscript-type">void</span>)
+{
+	vm_offset_t	start, end;
+	vm_size_t zsizearg;
+	mach_vm_size_t zsize;
+
+	<span class="enscript-comment">/*
+	 *	Initializes resident memory structures.
+	 *	From here on, all physical memory is accounted for,
+	 *	and we use only virtual addresses.
+	 */</span>
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;vm_page_bootstrap&quot;</span>);
+	vm_page_bootstrap(&amp;start, &amp;end);
+
+	<span class="enscript-comment">/*
+	 *	Initialize other VM packages
+	 */</span>
+
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;zone_bootstrap&quot;</span>);
+	zone_bootstrap();
+
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;vm_object_bootstrap&quot;</span>);
+	vm_object_bootstrap();
+
+	vm_kernel_ready = TRUE;
+
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;vm_map_init&quot;</span>);
+	vm_map_init();
+
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;kmem_init&quot;</span>);
+	kmem_init(start, end);
+	kmem_ready = TRUE;
+	<span class="enscript-comment">/*
+	 * Eat a random amount of kernel_map to fuzz subsequent heap, zone and
+	 * stack addresses. (With a 4K page and 9 bits of randomness, this
+	 * eats at most 2M of VA from the map.)
+	 */</span>
+	<span class="enscript-keyword">if</span> (!PE_parse_boot_argn(<span class="enscript-string">&quot;kmapoff&quot;</span>, &amp;kmapoff_pgcnt,
+	    <span class="enscript-keyword">sizeof</span> (kmapoff_pgcnt)))
+		kmapoff_pgcnt = early_random() &amp; 0x1ff;	<span class="enscript-comment">/* 9 bits */</span>
+
+	<span class="enscript-keyword">if</span> (kmapoff_pgcnt &gt; 0 &amp;&amp;
+	    vm_allocate(kernel_map, &amp;kmapoff_kaddr,
+	    kmapoff_pgcnt * PAGE_SIZE_64, VM_FLAGS_ANYWHERE | VM_MAKE_TAG(VM_KERN_MEMORY_OSFMK)) != KERN_SUCCESS)
+		panic(<span class="enscript-string">&quot;cannot vm_allocate %u kernel_map pages&quot;</span>, kmapoff_pgcnt);
+
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;pmap_init&quot;</span>);
+	pmap_init();
+	
+	kmem_alloc_ready = TRUE;
+
+	<span class="enscript-keyword">if</span> (PE_parse_boot_argn(<span class="enscript-string">&quot;zsize&quot;</span>, &amp;zsizearg, <span class="enscript-keyword">sizeof</span> (zsizearg)))
+		zsize = zsizearg * 1024ULL * 1024ULL;
+	<span class="enscript-keyword">else</span> {
+		zsize = sane_size &gt;&gt; 2;				<span class="enscript-comment">/* Get target zone size as 1/4 of physical memory */</span>
+	}
+
+	<span class="enscript-keyword">if</span> (zsize &lt; ZONE_MAP_MIN)
+		zsize = ZONE_MAP_MIN;	<span class="enscript-comment">/* Clamp to min */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+	zsize += zsize &gt;&gt; 1;
+#<span class="enscript-reference">endif</span>  <span class="enscript-comment">/* __LP64__ */</span>
+	<span class="enscript-keyword">if</span> (zsize &gt; sane_size &gt;&gt; 1)
+		zsize = sane_size &gt;&gt; 1;	<span class="enscript-comment">/* Clamp to half of RAM max */</span>
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">__LP64__</span>
+	<span class="enscript-keyword">if</span> (zsize &gt; ZONE_MAP_MAX)
+		zsize = ZONE_MAP_MAX;	<span class="enscript-comment">/* Clamp to 1.5GB max for K32 */</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !__LP64__ */</span>
+
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;kext_alloc_init&quot;</span>);
+	kext_alloc_init();
+
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;zone_init&quot;</span>);
+	assert((vm_size_t) zsize == zsize);
+	zone_init((vm_size_t) zsize);	<span class="enscript-comment">/* Allocate address space for zones */</span>
+
+	<span class="enscript-comment">/* The vm_page_zone must be created prior to kalloc_init; that
+	 * routine can trigger zalloc()s (for e.g. mutex statistic structure
+	 * initialization). The vm_page_zone must exist to saisfy fictitious
+	 * page allocations (which are used for guard pages by the guard
+	 * mode zone allocator).
+	 */</span>
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;vm_page_module_init&quot;</span>);
+	vm_page_module_init();
+
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;kalloc_init&quot;</span>);
+	kalloc_init();
+
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;vm_fault_init&quot;</span>);
+	vm_fault_init();
+
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;memory_manager_default_init&quot;</span>);
+	memory_manager_default_init();
+
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;memory_object_control_bootstrap&quot;</span>);
+	memory_object_control_bootstrap();
+
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;device_pager_bootstrap&quot;</span>);
+	device_pager_bootstrap();
+
+	vm_paging_map_init();
+
+	vm_mem_bootstrap_log(<span class="enscript-string">&quot;vm_mem_bootstrap done&quot;</span>);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vm_mem_init</span>(<span class="enscript-type">void</span>)
+{
+	vm_object_init();
+}
+</pre>
+<hr />
+</body></html>

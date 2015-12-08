@@ -1,0 +1,3726 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ubc_subr.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ubc_subr.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1999-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* 
+ *	File:	ubc_subr.c
+ *	Author:	Umesh Vaishampayan [<a href="mailto:umeshv@apple.com">umeshv@apple.com</a>]
+ *		05-Aug-1999	umeshv	Created.
+ *
+ *	Functions related to Unified Buffer cache.
+ *
+ * Caller of UBC functions MUST have a valid reference on the vnode.
+ *
+ */</span> 
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mman.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ubc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ucred.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/buf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/codesign.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/codedir_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fsevents.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_control.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/upl.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span> <span class="enscript-comment">/* last */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/crypto/sha1.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/crypto/sha2.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdbool.h&gt;</span>
+
+<span class="enscript-comment">/* XXX These should be in a BSD accessible Mach header, but aren't. */</span>
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">memory_object_pages_resident</span>(memory_object_control_t,
+							boolean_t *);
+<span class="enscript-type">extern</span> kern_return_t	memory_object_signed(memory_object_control_t control,
+					     boolean_t is_signed);
+<span class="enscript-type">extern</span> boolean_t	memory_object_is_slid(memory_object_control_t	control);
+<span class="enscript-type">extern</span> boolean_t	memory_object_is_signed(memory_object_control_t);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">Debugger</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *message);
+
+
+<span class="enscript-comment">/* XXX no one uses this interface! */</span>
+kern_return_t <span class="enscript-function-name">ubc_page_op_with_control</span>(
+	memory_object_control_t	 control,
+	off_t		         f_offset,
+	<span class="enscript-type">int</span>		         ops,
+	ppnum_t	                 *phys_entryp,
+	<span class="enscript-type">int</span>		         *flagsp);
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">assert</span>)
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">assert</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">assert</span>(cond)    \
+    ((<span class="enscript-type">void</span>) ((cond) ? 0 : panic(<span class="enscript-string">&quot;Assert failed: %s&quot;</span>, # cond)))
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/assert.h&gt;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DIAGNOSTIC */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ubc_info_init_internal</span>(<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">int</span> withfsize, off_t filesize);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ubc_umcallback</span>(vnode_t, <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">ubc_msync_internal</span>(vnode_t, off_t, off_t, off_t *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ubc_cs_free</span>(<span class="enscript-type">struct</span> ubc_info *uip);
+
+<span class="enscript-type">struct</span> zone	*ubc_info_zone;
+<span class="enscript-type">static</span> uint32_t	cs_blob_generation_count = 1;
+
+<span class="enscript-comment">/*
+ * CODESIGNING
+ * Routines to navigate code signing data structures in the kernel...
+ */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> cs_debug;
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PAGE_SHIFT_4K</span>		(12)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PAGE_SIZE_4K</span>		((1&lt;&lt;PAGE_SHIFT_4K))
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PAGE_MASK_4K</span>		((PAGE_SIZE_4K-1))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">round_page_4K</span>(x)	(((vm_offset_t)(x) + PAGE_MASK_4K) &amp; ~((vm_offset_t)PAGE_MASK_4K))
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">cs_valid_range</span>(
+	<span class="enscript-type">const</span> <span class="enscript-type">void</span> *start,
+	<span class="enscript-type">const</span> <span class="enscript-type">void</span> *end,
+	<span class="enscript-type">const</span> <span class="enscript-type">void</span> *lower_bound,
+	<span class="enscript-type">const</span> <span class="enscript-type">void</span> *upper_bound)
+{
+	<span class="enscript-keyword">if</span> (upper_bound &lt; lower_bound ||
+	    end &lt; start) {
+		<span class="enscript-keyword">return</span> FALSE;
+	}
+
+	<span class="enscript-keyword">if</span> (start &lt; lower_bound ||
+	    end &gt; upper_bound) {
+		<span class="enscript-keyword">return</span> FALSE;
+	}
+
+	<span class="enscript-keyword">return</span> TRUE;
+}
+
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">void</span> (*cs_md_init)(<span class="enscript-type">void</span> *ctx);
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">void</span> (*cs_md_update)(<span class="enscript-type">void</span> *ctx, <span class="enscript-type">const</span> <span class="enscript-type">void</span> *data, size_t size);
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">void</span> (*cs_md_final)(<span class="enscript-type">void</span> *hash, <span class="enscript-type">void</span> *ctx);
+
+<span class="enscript-type">struct</span> cs_hash {
+    uint8_t		cs_type;
+    size_t		cs_cd_size;
+    size_t		cs_size;
+    size_t		cs_digest_size;
+    cs_md_init		cs_init;
+    cs_md_update 	cs_update;
+    cs_md_final		cs_final;
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> cs_hash cs_hash_sha1 = {
+    .cs_type = CS_HASHTYPE_SHA1,
+    .cs_cd_size = CS_SHA1_LEN,
+    .cs_size = CS_SHA1_LEN,
+    .cs_digest_size = SHA_DIGEST_LENGTH,
+    .cs_init = (cs_md_init)SHA1Init,
+    .cs_update = (cs_md_update)SHA1Update,
+    .cs_final = (cs_md_final)SHA1Final,
+};
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPTO_SHA2</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> cs_hash cs_hash_sha256 = {
+    .cs_type = CS_HASHTYPE_SHA256,
+    .cs_cd_size = SHA256_DIGEST_LENGTH,
+    .cs_size = SHA256_DIGEST_LENGTH,
+    .cs_digest_size = SHA256_DIGEST_LENGTH,
+    .cs_init = (cs_md_init)SHA256_Init,
+    .cs_update = (cs_md_update)SHA256_Update,
+    .cs_final = (cs_md_final)SHA256_Final,
+};
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> cs_hash cs_hash_sha256_truncate = {
+    .cs_type = CS_HASHTYPE_SHA256_TRUNCATED,
+    .cs_cd_size = CS_SHA256_TRUNCATED_LEN,
+    .cs_size = CS_SHA256_TRUNCATED_LEN,
+    .cs_digest_size = SHA256_DIGEST_LENGTH,
+    .cs_init = (cs_md_init)SHA256_Init,
+    .cs_update = (cs_md_update)SHA256_Update,
+    .cs_final = (cs_md_final)SHA256_Final,
+};
+#<span class="enscript-reference">endif</span>
+    
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> cs_hash *
+<span class="enscript-function-name">cs_find_md</span>(uint8_t type)
+{
+	<span class="enscript-keyword">if</span> (type == CS_HASHTYPE_SHA1) {
+		<span class="enscript-keyword">return</span> &amp;cs_hash_sha1;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CRYPTO_SHA2</span>
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (type == CS_HASHTYPE_SHA256) {
+		<span class="enscript-keyword">return</span> &amp;cs_hash_sha256;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (type == CS_HASHTYPE_SHA256_TRUNCATED) {
+		<span class="enscript-keyword">return</span> &amp;cs_hash_sha256_truncate;
+#<span class="enscript-reference">endif</span>
+	}
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-type">union</span> cs_hash_union {
+	SHA1_CTX		sha1ctxt;
+	SHA256_CTX		sha256ctx;
+};
+
+
+<span class="enscript-comment">/*
+ * Locate the CodeDirectory from an embedded signature blob
+ */</span>
+<span class="enscript-type">const</span> 
+CS_CodeDirectory *<span class="enscript-function-name">findCodeDirectory</span>(
+	<span class="enscript-type">const</span> CS_SuperBlob *embedded,
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *lower_bound,
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *upper_bound)
+{
+	<span class="enscript-type">const</span> CS_CodeDirectory *cd = NULL;
+
+	<span class="enscript-keyword">if</span> (embedded &amp;&amp;
+	    cs_valid_range(embedded, embedded + 1, lower_bound, upper_bound) &amp;&amp;
+	    ntohl(embedded-&gt;magic) == CSMAGIC_EMBEDDED_SIGNATURE) {
+		<span class="enscript-type">const</span> CS_BlobIndex *limit;
+		<span class="enscript-type">const</span> CS_BlobIndex *p;
+
+		limit = &amp;embedded-&gt;index[ntohl(embedded-&gt;count)];
+		<span class="enscript-keyword">if</span> (!cs_valid_range(&amp;embedded-&gt;index[0], limit,
+				    lower_bound, upper_bound)) {
+			<span class="enscript-keyword">return</span> NULL;
+		}
+		<span class="enscript-keyword">for</span> (p = embedded-&gt;index; p &lt; limit; ++p) {
+			<span class="enscript-keyword">if</span> (ntohl(p-&gt;type) == CSSLOT_CODEDIRECTORY) {
+				<span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *base;
+
+				base = (<span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *)embedded;
+				cd = (<span class="enscript-type">const</span> CS_CodeDirectory *)(base + ntohl(p-&gt;offset));
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * Detached signatures come as a bare CS_CodeDirectory,
+		 * without a blob.
+		 */</span>
+		cd = (<span class="enscript-type">const</span> CS_CodeDirectory *) embedded;
+	}
+
+	<span class="enscript-keyword">if</span> (cd &amp;&amp;
+	    cs_valid_range(cd, cd + 1, lower_bound, upper_bound) &amp;&amp;
+	    cs_valid_range(cd, (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) cd + ntohl(cd-&gt;length),
+			   lower_bound, upper_bound) &amp;&amp;
+	    cs_valid_range(cd, (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) cd + ntohl(cd-&gt;hashOffset),
+			   lower_bound, upper_bound) &amp;&amp;
+	    cs_valid_range(cd, (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) cd +
+			   ntohl(cd-&gt;hashOffset) +
+			   (ntohl(cd-&gt;nCodeSlots) * SHA1_RESULTLEN),
+			   lower_bound, upper_bound) &amp;&amp;
+	    
+	    ntohl(cd-&gt;magic) == CSMAGIC_CODEDIRECTORY) {
+		<span class="enscript-keyword">return</span> cd;
+	}
+
+	<span class="enscript-comment">// not found or not a valid code directory
+</span>	<span class="enscript-keyword">return</span> NULL;
+}
+
+
+<span class="enscript-comment">/*
+ * Locating a page hash
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">hashes</span>(
+	<span class="enscript-type">const</span> CS_CodeDirectory *cd,
+	uint32_t page,
+	size_t hash_len,
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *lower_bound,
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *upper_bound)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *base, *top, *hash;
+	uint32_t nCodeSlots = ntohl(cd-&gt;nCodeSlots);
+
+	assert(cs_valid_range(cd, cd + 1, lower_bound, upper_bound));
+
+	<span class="enscript-keyword">if</span>((ntohl(cd-&gt;version) &gt;= CS_SUPPORTSSCATTER) &amp;&amp; (ntohl(cd-&gt;scatterOffset))) {
+		<span class="enscript-comment">/* Get first scatter struct */</span>
+		<span class="enscript-type">const</span> SC_Scatter *scatter = (<span class="enscript-type">const</span> SC_Scatter*)
+			((<span class="enscript-type">const</span> <span class="enscript-type">char</span>*)cd + ntohl(cd-&gt;scatterOffset));
+		uint32_t hashindex=0, scount, sbase=0;
+		<span class="enscript-comment">/* iterate all scatter structs */</span>
+		<span class="enscript-keyword">do</span> {
+			<span class="enscript-keyword">if</span>((<span class="enscript-type">const</span> <span class="enscript-type">char</span>*)scatter &gt; (<span class="enscript-type">const</span> <span class="enscript-type">char</span>*)cd + ntohl(cd-&gt;length)) {
+				<span class="enscript-keyword">if</span>(cs_debug) {
+					printf(<span class="enscript-string">&quot;CODE SIGNING: Scatter extends past Code Directory\n&quot;</span>);
+				}
+				<span class="enscript-keyword">return</span> NULL;
+			}
+			
+			scount = ntohl(scatter-&gt;count);
+			uint32_t new_base = ntohl(scatter-&gt;base);
+
+			<span class="enscript-comment">/* last scatter? */</span>
+			<span class="enscript-keyword">if</span> (scount == 0) {
+				<span class="enscript-keyword">return</span> NULL;
+			}
+			
+			<span class="enscript-keyword">if</span>((hashindex &gt; 0) &amp;&amp; (new_base &lt;= sbase)) {
+				<span class="enscript-keyword">if</span>(cs_debug) {
+					printf(<span class="enscript-string">&quot;CODE SIGNING: unordered Scatter, prev base %d, cur base %d\n&quot;</span>,
+					sbase, new_base);
+				}
+				<span class="enscript-keyword">return</span> NULL;	<span class="enscript-comment">/* unordered scatter array */</span>
+			}
+			sbase = new_base;
+
+			<span class="enscript-comment">/* this scatter beyond page we're looking for? */</span>
+			<span class="enscript-keyword">if</span> (sbase &gt; page) {
+				<span class="enscript-keyword">return</span> NULL;
+			}
+			
+			<span class="enscript-keyword">if</span> (sbase+scount &gt;= page) {
+				<span class="enscript-comment">/* Found the scatter struct that is 
+				 * referencing our page */</span>
+
+				<span class="enscript-comment">/* base = address of first hash covered by scatter */</span>
+				base = (<span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *)cd + ntohl(cd-&gt;hashOffset) + 
+					hashindex * hash_len;
+				<span class="enscript-comment">/* top = address of first hash after this scatter */</span>
+				top = base + scount * hash_len;
+				<span class="enscript-keyword">if</span> (!cs_valid_range(base, top, lower_bound, 
+						    upper_bound) ||
+				    hashindex &gt; nCodeSlots) {
+					<span class="enscript-keyword">return</span> NULL;
+				}
+				
+				<span class="enscript-keyword">break</span>;
+			}
+			
+			<span class="enscript-comment">/* this scatter struct is before the page we're looking 
+			 * for. Iterate. */</span>
+			hashindex+=scount;
+			scatter++;
+		} <span class="enscript-keyword">while</span>(1);
+		
+		hash = base + (page - sbase) * hash_len;
+	} <span class="enscript-keyword">else</span> {
+		base = (<span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *)cd + ntohl(cd-&gt;hashOffset);
+		top = base + nCodeSlots * hash_len;
+		<span class="enscript-keyword">if</span> (!cs_valid_range(base, top, lower_bound, upper_bound) ||
+		    page &gt; nCodeSlots) {
+			<span class="enscript-keyword">return</span> NULL;
+		}
+		assert(page &lt; nCodeSlots);
+
+		hash = base + page * hash_len;
+	}
+	
+	<span class="enscript-keyword">if</span> (!cs_valid_range(hash, hash + hash_len,
+			    lower_bound, upper_bound)) {
+		hash = NULL;
+	}
+
+	<span class="enscript-keyword">return</span> hash;
+}
+
+<span class="enscript-comment">/*
+ * cs_validate_codedirectory
+ *
+ * Validate that pointers inside the code directory to make sure that
+ * all offsets and lengths are constrained within the buffer.
+ *
+ * Parameters:	cd			Pointer to code directory buffer
+ *		length			Length of buffer
+ *
+ * Returns:	0			Success
+ *		EBADEXEC		Invalid code signature
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cs_validate_codedirectory</span>(<span class="enscript-type">const</span> CS_CodeDirectory *cd, size_t length)
+{
+	<span class="enscript-type">struct</span> cs_hash *hashtype;
+
+	<span class="enscript-keyword">if</span> (length &lt; <span class="enscript-keyword">sizeof</span>(*cd))
+		<span class="enscript-keyword">return</span> EBADEXEC;
+	<span class="enscript-keyword">if</span> (ntohl(cd-&gt;magic) != CSMAGIC_CODEDIRECTORY)
+		<span class="enscript-keyword">return</span> EBADEXEC;
+	<span class="enscript-keyword">if</span> (cd-&gt;pageSize != PAGE_SHIFT_4K)
+		<span class="enscript-keyword">return</span> EBADEXEC;
+	hashtype = cs_find_md(cd-&gt;hashType);
+	<span class="enscript-keyword">if</span> (hashtype == NULL)
+		<span class="enscript-keyword">return</span> EBADEXEC;
+
+	<span class="enscript-keyword">if</span> (cd-&gt;hashSize != hashtype-&gt;cs_cd_size)
+		<span class="enscript-keyword">return</span> EBADEXEC;
+
+
+	<span class="enscript-keyword">if</span> (length &lt; ntohl(cd-&gt;hashOffset))
+		<span class="enscript-keyword">return</span> EBADEXEC;
+
+	<span class="enscript-comment">/* check that nSpecialSlots fits in the buffer in front of hashOffset */</span>
+	<span class="enscript-keyword">if</span> (ntohl(cd-&gt;hashOffset) / hashtype-&gt;cs_size &lt; ntohl(cd-&gt;nSpecialSlots))
+		<span class="enscript-keyword">return</span> EBADEXEC;
+
+	<span class="enscript-comment">/* check that codeslots fits in the buffer */</span>
+	<span class="enscript-keyword">if</span> ((length - ntohl(cd-&gt;hashOffset)) / hashtype-&gt;cs_size &lt;  ntohl(cd-&gt;nCodeSlots))
+		<span class="enscript-keyword">return</span> EBADEXEC;
+	
+	<span class="enscript-keyword">if</span> (ntohl(cd-&gt;version) &gt;= CS_SUPPORTSSCATTER &amp;&amp; cd-&gt;scatterOffset) {
+
+		<span class="enscript-keyword">if</span> (length &lt; ntohl(cd-&gt;scatterOffset))
+			<span class="enscript-keyword">return</span> EBADEXEC;
+
+		<span class="enscript-type">const</span> SC_Scatter *scatter = (<span class="enscript-type">const</span> SC_Scatter *)
+			(((<span class="enscript-type">const</span> uint8_t *)cd) + ntohl(cd-&gt;scatterOffset));
+		uint32_t nPages = 0;
+
+		<span class="enscript-comment">/*
+		 * Check each scatter buffer, since we don't know the
+		 * length of the scatter buffer array, we have to
+		 * check each entry.
+		 */</span>
+		<span class="enscript-keyword">while</span>(1) {
+			<span class="enscript-comment">/* check that the end of each scatter buffer in within the length */</span>
+			<span class="enscript-keyword">if</span> (((<span class="enscript-type">const</span> uint8_t *)scatter) + <span class="enscript-keyword">sizeof</span>(scatter[0]) &gt; (<span class="enscript-type">const</span> uint8_t *)cd + length)
+				<span class="enscript-keyword">return</span> EBADEXEC;
+			uint32_t scount = ntohl(scatter-&gt;count);
+			<span class="enscript-keyword">if</span> (scount == 0)
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">if</span> (nPages + scount &lt; nPages)
+				<span class="enscript-keyword">return</span> EBADEXEC;
+			nPages += scount;
+			scatter++;
+
+			<span class="enscript-comment">/* XXX check that basees doesn't overlap */</span>
+			<span class="enscript-comment">/* XXX check that targetOffset doesn't overlap */</span>
+		}
+#<span class="enscript-reference">if</span> 0 <span class="enscript-comment">/* rdar://12579439 */</span>
+		<span class="enscript-keyword">if</span> (nPages != ntohl(cd-&gt;nCodeSlots))
+			<span class="enscript-keyword">return</span> EBADEXEC;
+#<span class="enscript-reference">endif</span>
+	}
+
+	<span class="enscript-keyword">if</span> (length &lt; ntohl(cd-&gt;identOffset))
+		<span class="enscript-keyword">return</span> EBADEXEC;
+
+	<span class="enscript-comment">/* identifier is NUL terminated string */</span>
+	<span class="enscript-keyword">if</span> (cd-&gt;identOffset) {
+		<span class="enscript-type">const</span> uint8_t *ptr = (<span class="enscript-type">const</span> uint8_t *)cd + ntohl(cd-&gt;identOffset);
+		<span class="enscript-keyword">if</span> (memchr(ptr, 0, length - ntohl(cd-&gt;identOffset)) == NULL)
+			<span class="enscript-keyword">return</span> EBADEXEC;
+	}
+
+	<span class="enscript-comment">/* team identifier is NULL terminated string */</span>
+	<span class="enscript-keyword">if</span> (ntohl(cd-&gt;version) &gt;= CS_SUPPORTSTEAMID &amp;&amp; ntohl(cd-&gt;teamOffset)) {
+		<span class="enscript-keyword">if</span> (length &lt; ntohl(cd-&gt;teamOffset))
+			<span class="enscript-keyword">return</span> EBADEXEC;
+
+		<span class="enscript-type">const</span> uint8_t *ptr = (<span class="enscript-type">const</span> uint8_t *)cd + ntohl(cd-&gt;teamOffset);
+		<span class="enscript-keyword">if</span> (memchr(ptr, 0, length - ntohl(cd-&gt;teamOffset)) == NULL)
+			<span class="enscript-keyword">return</span> EBADEXEC;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ *
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cs_validate_blob</span>(<span class="enscript-type">const</span> CS_GenericBlob *blob, size_t length)
+{
+	<span class="enscript-keyword">if</span> (length &lt; <span class="enscript-keyword">sizeof</span>(CS_GenericBlob) || length &lt; ntohl(blob-&gt;length))
+		<span class="enscript-keyword">return</span> EBADEXEC;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * cs_validate_csblob
+ *
+ * Validate that superblob/embedded code directory to make sure that
+ * all internal pointers are valid.
+ *
+ * Will validate both a superblob csblob and a &quot;raw&quot; code directory.
+ *
+ *
+ * Parameters:	buffer			Pointer to code signature
+ *		length			Length of buffer
+ *		rcd			returns pointer to code directory
+ *
+ * Returns:	0			Success
+ *		EBADEXEC		Invalid code signature
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cs_validate_csblob</span>(<span class="enscript-type">const</span> uint8_t *addr, size_t length,
+		   <span class="enscript-type">const</span> CS_CodeDirectory **rcd)
+{
+	<span class="enscript-type">const</span> CS_GenericBlob *blob = (<span class="enscript-type">const</span> CS_GenericBlob *)(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *)addr;
+	<span class="enscript-type">int</span> error;
+
+	*rcd = NULL;
+
+	error = cs_validate_blob(blob, length);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+
+	length = ntohl(blob-&gt;length);
+
+	<span class="enscript-keyword">if</span> (ntohl(blob-&gt;magic) == CSMAGIC_EMBEDDED_SIGNATURE) {
+		<span class="enscript-type">const</span> CS_SuperBlob *sb = (<span class="enscript-type">const</span> CS_SuperBlob *)blob;
+		uint32_t n, count = ntohl(sb-&gt;count);
+
+		<span class="enscript-keyword">if</span> (length &lt; <span class="enscript-keyword">sizeof</span>(CS_SuperBlob))
+			<span class="enscript-keyword">return</span> EBADEXEC;
+
+		<span class="enscript-comment">/* check that the array of BlobIndex fits in the rest of the data */</span>
+		<span class="enscript-keyword">if</span> ((length - <span class="enscript-keyword">sizeof</span>(CS_SuperBlob)) / <span class="enscript-keyword">sizeof</span>(CS_BlobIndex) &lt; count)
+			<span class="enscript-keyword">return</span> EBADEXEC;
+
+		<span class="enscript-comment">/* now check each BlobIndex */</span>
+		<span class="enscript-keyword">for</span> (n = 0; n &lt; count; n++) {
+			<span class="enscript-type">const</span> CS_BlobIndex *blobIndex = &amp;sb-&gt;index[n];
+			<span class="enscript-keyword">if</span> (length &lt; ntohl(blobIndex-&gt;offset))
+				<span class="enscript-keyword">return</span> EBADEXEC;
+
+			<span class="enscript-type">const</span> CS_GenericBlob *subBlob =
+				(<span class="enscript-type">const</span> CS_GenericBlob *)(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *)(addr + ntohl(blobIndex-&gt;offset));
+
+			size_t subLength = length - ntohl(blobIndex-&gt;offset);
+
+			<span class="enscript-keyword">if</span> ((error = cs_validate_blob(subBlob, subLength)) != 0)
+				<span class="enscript-keyword">return</span> error;
+			subLength = ntohl(subBlob-&gt;length);
+
+			<span class="enscript-comment">/* extra validation for CDs, that is also returned */</span>
+			<span class="enscript-keyword">if</span> (ntohl(blobIndex-&gt;type) == CSSLOT_CODEDIRECTORY) {
+				<span class="enscript-type">const</span> CS_CodeDirectory *cd = (<span class="enscript-type">const</span> CS_CodeDirectory *)subBlob;
+				<span class="enscript-keyword">if</span> ((error = cs_validate_codedirectory(cd, subLength)) != 0)
+					<span class="enscript-keyword">return</span> error;
+				*rcd = cd;
+			}
+		}
+
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ntohl(blob-&gt;magic) == CSMAGIC_CODEDIRECTORY) {
+
+		<span class="enscript-keyword">if</span> ((error = cs_validate_codedirectory((<span class="enscript-type">const</span> CS_CodeDirectory *)(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *)addr, length)) != 0)
+			<span class="enscript-keyword">return</span> error;
+		*rcd = (<span class="enscript-type">const</span> CS_CodeDirectory *)blob;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span> EBADEXEC;
+	}
+
+	<span class="enscript-keyword">if</span> (*rcd == NULL)
+		<span class="enscript-keyword">return</span> EBADEXEC;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * cs_find_blob_bytes
+ *
+ * Find an blob from the superblob/code directory. The blob must have
+ * been been validated by cs_validate_csblob() before calling
+ * this. Use csblob_find_blob() instead.
+ * 
+ * Will also find a &quot;raw&quot; code directory if its stored as well as
+ * searching the superblob.
+ *
+ * Parameters:	buffer			Pointer to code signature
+ *		length			Length of buffer
+ *		type			type of blob to find
+ *		magic			the magic number for that blob
+ *
+ * Returns:	pointer			Success
+ *		NULL			Buffer not found
+ */</span>
+
+<span class="enscript-type">const</span> CS_GenericBlob *
+<span class="enscript-function-name">csblob_find_blob_bytes</span>(<span class="enscript-type">const</span> uint8_t *addr, size_t length, uint32_t type, uint32_t magic)
+{
+	<span class="enscript-type">const</span> CS_GenericBlob *blob = (<span class="enscript-type">const</span> CS_GenericBlob *)(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *)addr;
+
+	<span class="enscript-keyword">if</span> (ntohl(blob-&gt;magic) == CSMAGIC_EMBEDDED_SIGNATURE) {
+		<span class="enscript-type">const</span> CS_SuperBlob *sb = (<span class="enscript-type">const</span> CS_SuperBlob *)blob;
+		size_t n, count = ntohl(sb-&gt;count);
+
+		<span class="enscript-keyword">for</span> (n = 0; n &lt; count; n++) {
+			<span class="enscript-keyword">if</span> (ntohl(sb-&gt;index[n].type) != type)
+				<span class="enscript-keyword">continue</span>;
+			uint32_t offset = ntohl(sb-&gt;index[n].offset);
+			<span class="enscript-keyword">if</span> (length - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">const</span> CS_GenericBlob) &lt; offset)
+				<span class="enscript-keyword">return</span> NULL;
+			blob = (<span class="enscript-type">const</span> CS_GenericBlob *)(<span class="enscript-type">const</span> <span class="enscript-type">void</span> *)(addr + offset);
+			<span class="enscript-keyword">if</span> (ntohl(blob-&gt;magic) != magic)
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-keyword">return</span> blob;
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (type == CSSLOT_CODEDIRECTORY
+		   &amp;&amp; ntohl(blob-&gt;magic) == CSMAGIC_CODEDIRECTORY
+		   &amp;&amp; magic == CSMAGIC_CODEDIRECTORY)
+		<span class="enscript-keyword">return</span> blob;
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+
+<span class="enscript-type">const</span> CS_GenericBlob *
+<span class="enscript-function-name">csblob_find_blob</span>(<span class="enscript-type">struct</span> cs_blob *csblob, uint32_t type, uint32_t magic)
+{
+	<span class="enscript-keyword">if</span> ((csblob-&gt;csb_flags &amp; CS_VALID) == 0)
+		<span class="enscript-keyword">return</span> NULL;
+	<span class="enscript-keyword">return</span> csblob_find_blob_bytes((<span class="enscript-type">const</span> uint8_t *)csblob-&gt;csb_mem_kaddr, csblob-&gt;csb_mem_size, type, magic);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> uint8_t *
+<span class="enscript-function-name">find_special_slot</span>(<span class="enscript-type">const</span> CS_CodeDirectory *cd, size_t slotsize, uint32_t slot)
+{
+	<span class="enscript-comment">/* there is no zero special slot since that is the first code slot */</span>
+	<span class="enscript-keyword">if</span> (ntohl(cd-&gt;nSpecialSlots) &lt; slot || slot == 0)
+		<span class="enscript-keyword">return</span> NULL;
+
+	<span class="enscript-keyword">return</span> ((<span class="enscript-type">const</span> uint8_t *)cd + ntohl(cd-&gt;hashOffset) - (slotsize * slot));
+}
+
+<span class="enscript-type">static</span> uint8_t cshash_zero[CS_HASH_MAX_SIZE] = { 0 };
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">csblob_get_entitlements</span>(<span class="enscript-type">struct</span> cs_blob *csblob, <span class="enscript-type">void</span> **out_start, size_t *out_length)
+{
+	uint8_t computed_hash[CS_HASH_MAX_SIZE];
+	<span class="enscript-type">const</span> CS_GenericBlob *entitlements;
+	<span class="enscript-type">const</span> CS_CodeDirectory *code_dir;
+	<span class="enscript-type">const</span> uint8_t *embedded_hash;
+	<span class="enscript-type">union</span> cs_hash_union context;
+
+	*out_start = NULL;
+	*out_length = 0;
+
+	<span class="enscript-keyword">if</span> (csblob-&gt;csb_hashtype == NULL || csblob-&gt;csb_hashtype-&gt;cs_digest_size &gt; <span class="enscript-keyword">sizeof</span>(computed_hash))
+	    <span class="enscript-keyword">return</span> EBADEXEC;
+
+	<span class="enscript-keyword">if</span> ((code_dir = (<span class="enscript-type">const</span> CS_CodeDirectory *)csblob_find_blob(csblob, CSSLOT_CODEDIRECTORY, CSMAGIC_CODEDIRECTORY)) == NULL)
+		<span class="enscript-keyword">return</span> 0;
+
+	entitlements = csblob_find_blob(csblob, CSSLOT_ENTITLEMENTS, CSMAGIC_EMBEDDED_ENTITLEMENTS);
+	embedded_hash = find_special_slot(code_dir, csblob-&gt;csb_hashtype-&gt;cs_size, CSSLOT_ENTITLEMENTS);
+
+	<span class="enscript-keyword">if</span> (embedded_hash == NULL) {
+		<span class="enscript-keyword">if</span> (entitlements)
+			<span class="enscript-keyword">return</span> EBADEXEC;
+		<span class="enscript-keyword">return</span> 0;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (entitlements == NULL &amp;&amp; memcmp(embedded_hash, cshash_zero, csblob-&gt;csb_hashtype-&gt;cs_size) != 0) {
+		<span class="enscript-keyword">return</span> EBADEXEC;
+	}
+
+	csblob-&gt;csb_hashtype-&gt;cs_init(&amp;context);
+	csblob-&gt;csb_hashtype-&gt;cs_update(&amp;context, entitlements, ntohl(entitlements-&gt;length));
+	csblob-&gt;csb_hashtype-&gt;cs_final(computed_hash, &amp;context);
+
+	<span class="enscript-keyword">if</span> (memcmp(computed_hash, embedded_hash, csblob-&gt;csb_hashtype-&gt;cs_size) != 0)
+		<span class="enscript-keyword">return</span> EBADEXEC;
+
+	*out_start = __DECONST(<span class="enscript-type">void</span> *, entitlements);
+	*out_length = ntohl(entitlements-&gt;length);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*
+ * CODESIGNING
+ * End of routines to navigate code signing data structures in the kernel.
+ */</span>
+
+
+
+<span class="enscript-comment">/*
+ * ubc_init
+ * 
+ * Initialization of the zone for Unified Buffer Cache.
+ *
+ * Parameters:	(void)
+ *
+ * Returns:	(void)
+ *
+ * Implicit returns:
+ *		ubc_info_zone(global)	initialized for subsequent allocations
+ */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">ubc_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span>	i;
+
+	i = (vm_size_t) <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ubc_info);
+
+	ubc_info_zone = zinit (i, 10000*i, 8192, <span class="enscript-string">&quot;ubc_info zone&quot;</span>);
+
+	zone_change(ubc_info_zone, Z_NOENCRYPT, TRUE);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_info_init
+ *
+ * Allocate and attach an empty ubc_info structure to a vnode
+ *
+ * Parameters:	vp			Pointer to the vnode
+ *
+ * Returns:	0			Success
+ *	vnode_size:ENOMEM		Not enough space
+ *	vnode_size:???			Other error from vnode_getattr
+ *
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_info_init</span>(<span class="enscript-type">struct</span> vnode *vp)
+{
+	<span class="enscript-keyword">return</span>(ubc_info_init_internal(vp, 0, 0));
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_info_init_withsize
+ *
+ * Allocate and attach a sized ubc_info structure to a vnode
+ *
+ * Parameters:	vp			Pointer to the vnode
+ *		filesize		The size of the file
+ *
+ * Returns:	0			Success
+ *	vnode_size:ENOMEM		Not enough space
+ *	vnode_size:???			Other error from vnode_getattr
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_info_init_withsize</span>(<span class="enscript-type">struct</span> vnode *vp, off_t filesize)
+{
+	<span class="enscript-keyword">return</span>(ubc_info_init_internal(vp, 1, filesize));
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_info_init_internal
+ *
+ * Allocate and attach a ubc_info structure to a vnode
+ *
+ * Parameters:	vp			Pointer to the vnode
+ *		withfsize{0,1}		Zero if the size should be obtained
+ *					from the vnode; otherwise, use filesize
+ *		filesize		The size of the file, if withfsize == 1
+ *
+ * Returns:	0			Success
+ *	vnode_size:ENOMEM		Not enough space
+ *	vnode_size:???			Other error from vnode_getattr
+ *
+ * Notes:	We call a blocking zalloc(), and the zone was created as an
+ *		expandable and collectable zone, so if no memory is available,
+ *		it is possible for zalloc() to block indefinitely.  zalloc()
+ *		may also panic if the zone of zones is exhausted, since it's
+ *		NOT expandable.
+ *
+ *		We unconditionally call vnode_pager_setup(), even if this is
+ *		a reuse of a ubc_info; in that case, we should probably assert
+ *		that it does not already have a pager association, but do not.
+ *
+ *		Since memory_object_create_named() can only fail from receiving
+ *		an invalid pager argument, the explicit check and panic is
+ *		merely precautionary.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_info_init_internal</span>(vnode_t vp, <span class="enscript-type">int</span> withfsize, off_t filesize)
+{
+	<span class="enscript-type">register</span> <span class="enscript-type">struct</span> ubc_info	*uip;
+	<span class="enscript-type">void</span> *  pager;
+	<span class="enscript-type">int</span> error = 0;
+	kern_return_t kret;
+	memory_object_control_t control;
+
+	uip = vp-&gt;v_ubcinfo;
+
+	<span class="enscript-comment">/*
+	 * If there is not already a ubc_info attached to the vnode, we
+	 * attach one; otherwise, we will reuse the one that's there.
+	 */</span>
+	<span class="enscript-keyword">if</span> (uip == UBC_INFO_NULL) {
+
+		uip = (<span class="enscript-type">struct</span> ubc_info *) zalloc(ubc_info_zone);
+		bzero((<span class="enscript-type">char</span> *)uip, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ubc_info));
+
+		uip-&gt;ui_vnode = vp;
+		uip-&gt;ui_flags = UI_INITED;
+		uip-&gt;ui_ucred = NOCRED;
+	}
+	assert(uip-&gt;ui_flags != UI_NONE);
+	assert(uip-&gt;ui_vnode == vp);
+
+	<span class="enscript-comment">/* now set this ubc_info in the vnode */</span>
+	vp-&gt;v_ubcinfo = uip;
+
+	<span class="enscript-comment">/*
+	 * Allocate a pager object for this vnode
+	 *
+	 * XXX The value of the pager parameter is currently ignored.
+	 * XXX Presumably, this API changed to avoid the race between
+	 * XXX setting the pager and the UI_HASPAGER flag.
+	 */</span>
+	pager = (<span class="enscript-type">void</span> *)vnode_pager_setup(vp, uip-&gt;ui_pager);
+	assert(pager);
+
+	<span class="enscript-comment">/*
+	 * Explicitly set the pager into the ubc_info, after setting the
+	 * UI_HASPAGER flag.
+	 */</span>
+	SET(uip-&gt;ui_flags, UI_HASPAGER);
+	uip-&gt;ui_pager = pager;
+
+	<span class="enscript-comment">/*
+	 * Note: We can not use VNOP_GETATTR() to get accurate
+	 * value of ui_size because this may be an NFS vnode, and
+	 * nfs_getattr() can call vinvalbuf(); if this happens,
+	 * ubc_info is not set up to deal with that event.
+	 * So use bogus size.
+	 */</span>
+
+	<span class="enscript-comment">/*
+	 * create a vnode - vm_object association
+	 * memory_object_create_named() creates a &quot;named&quot; reference on the
+	 * memory object we hold this reference as long as the vnode is
+	 * &quot;alive.&quot;  Since memory_object_create_named() took its own reference
+	 * on the vnode pager we passed it, we can drop the reference
+	 * vnode_pager_setup() returned here.
+	 */</span>
+	kret = memory_object_create_named(pager,
+		(memory_object_size_t)uip-&gt;ui_size, &amp;control);
+	vnode_pager_deallocate(pager); 
+	<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS)
+		panic(<span class="enscript-string">&quot;ubc_info_init: memory_object_create_named returned %d&quot;</span>, kret);
+
+	assert(control);
+	uip-&gt;ui_control = control;	<span class="enscript-comment">/* cache the value of the mo control */</span>
+	SET(uip-&gt;ui_flags, UI_HASOBJREF);	<span class="enscript-comment">/* with a named reference */</span>
+
+	<span class="enscript-keyword">if</span> (withfsize == 0) {
+		<span class="enscript-comment">/* initialize the size */</span>
+		error = vnode_size(vp, &amp;uip-&gt;ui_size, vfs_context_current());
+		<span class="enscript-keyword">if</span> (error)
+			uip-&gt;ui_size = 0;
+	} <span class="enscript-keyword">else</span> {
+		uip-&gt;ui_size = filesize;
+	}
+	vp-&gt;v_lflag |= VNAMED_UBC;	<span class="enscript-comment">/* vnode has a named ubc reference */</span>
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_info_free
+ *
+ * Free a ubc_info structure
+ *
+ * Parameters:	uip			A pointer to the ubc_info to free
+ *
+ * Returns:	(void)
+ *
+ * Notes:	If there is a credential that has subsequently been associated
+ *		with the ubc_info via a call to ubc_setcred(), the reference
+ *		to the credential is dropped.
+ *
+ *		It's actually impossible for a ubc_info.ui_control to take the
+ *		value MEMORY_OBJECT_CONTROL_NULL.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ubc_info_free</span>(<span class="enscript-type">struct</span> ubc_info *uip)
+{
+	<span class="enscript-keyword">if</span> (IS_VALID_CRED(uip-&gt;ui_ucred)) {
+		kauth_cred_unref(&amp;uip-&gt;ui_ucred);
+	}
+
+	<span class="enscript-keyword">if</span> (uip-&gt;ui_control != MEMORY_OBJECT_CONTROL_NULL)
+		memory_object_control_deallocate(uip-&gt;ui_control);
+	
+	cluster_release(uip);
+	ubc_cs_free(uip);
+
+	zfree(ubc_info_zone, uip);
+	<span class="enscript-keyword">return</span>;
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ubc_info_deallocate</span>(<span class="enscript-type">struct</span> ubc_info *uip)
+{
+        ubc_info_free(uip);
+}
+
+errno_t <span class="enscript-function-name">mach_to_bsd_errno</span>(kern_return_t mach_err)
+{
+	<span class="enscript-keyword">switch</span> (mach_err) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_SUCCESS</span>:
+		<span class="enscript-keyword">return</span> 0;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ADDRESS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ARGUMENT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NOT_IN_SET</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_NAME</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_TASK</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_RIGHT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_VALUE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_CAPABILITY</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_HOST</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_MEMORY_PRESENT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_PROCESSOR_SET</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_POLICY</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_ALREADY_WAITING</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_DEFAULT_SET</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_EXCEPTION_PROTECTED</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_LEDGER</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_MEMORY_CONTROL</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_SECURITY</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NOT_DEPRESSED</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_LOCK_OWNED</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_LOCK_OWNED_SELF</span>:
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_PROTECTION_FAILURE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NOT_RECEIVER</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NO_ACCESS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_POLICY_STATIC</span>:
+		<span class="enscript-keyword">return</span> EACCES;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NO_SPACE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_RESOURCE_SHORTAGE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_UREFS_OVERFLOW</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_OBJECT</span>:
+		<span class="enscript-keyword">return</span> ENOMEM;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_FAILURE</span>:
+		<span class="enscript-keyword">return</span> EIO;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_MEMORY_FAILURE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_POLICY_LIMIT</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_CODESIGN_ERROR</span>:
+		<span class="enscript-keyword">return</span> EPERM;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_MEMORY_ERROR</span>:
+		<span class="enscript-keyword">return</span> EBUSY;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_ALREADY_IN_SET</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NAME_EXISTS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_RIGHT_EXISTS</span>:
+		<span class="enscript-keyword">return</span> EEXIST;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_ABORTED</span>:
+		<span class="enscript-keyword">return</span> EINTR;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_TERMINATED</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_LOCK_SET_DESTROYED</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_LOCK_UNSTABLE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_SEMAPHORE_DESTROYED</span>:
+		<span class="enscript-keyword">return</span> ENOENT;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_RPC_SERVER_TERMINATED</span>:
+		<span class="enscript-keyword">return</span> ECONNRESET;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NOT_SUPPORTED</span>:
+		<span class="enscript-keyword">return</span> ENOTSUP;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NODE_DOWN</span>:
+		<span class="enscript-keyword">return</span> ENETDOWN;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NOT_WAITING</span>:
+		<span class="enscript-keyword">return</span> ENOENT;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_OPERATION_TIMED_OUT</span>:
+		<span class="enscript-keyword">return</span> ETIMEDOUT;
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> EIO;
+	}
+}
+
+<span class="enscript-comment">/*
+ * ubc_setsize_ex
+ *
+ * Tell the VM that the the size of the file represented by the vnode has
+ * changed
+ *
+ * Parameters:	vp	   The vp whose backing file size is
+ *					   being changed
+ *				nsize  The new size of the backing file
+ *				opts   Options
+ *
+ * Returns:	EINVAL for new size &lt; 0
+ *			ENOENT if no UBC info exists
+ *          EAGAIN if UBC_SETSIZE_NO_FS_REENTRY option is set and new_size &lt; old size
+ *          Other errors (mapped to errno_t) returned by VM functions
+ *
+ * Notes:   This function will indicate success if the new size is the
+ *		    same or larger than the old size (in this case, the
+ *		    remainder of the file will require modification or use of
+ *		    an existing upl to access successfully).
+ *
+ *		    This function will fail if the new file size is smaller,
+ *		    and the memory region being invalidated was unable to
+ *		    actually be invalidated and/or the last page could not be
+ *		    flushed, if the new size is not aligned to a page
+ *		    boundary.  This is usually indicative of an I/O error.
+ */</span>
+errno_t <span class="enscript-function-name">ubc_setsize_ex</span>(<span class="enscript-type">struct</span> vnode *vp, off_t nsize, ubc_setsize_opts_t opts)
+{
+	off_t osize;	<span class="enscript-comment">/* ui_size before change */</span>
+	off_t lastpg, olastpgend, lastoff;
+	<span class="enscript-type">struct</span> ubc_info *uip;
+	memory_object_control_t control;
+	kern_return_t kret = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (nsize &lt; (off_t)0)
+		<span class="enscript-keyword">return</span> EINVAL;
+
+	<span class="enscript-keyword">if</span> (!UBCINFOEXISTS(vp))
+		<span class="enscript-keyword">return</span> ENOENT;
+
+	uip = vp-&gt;v_ubcinfo;
+	osize = uip-&gt;ui_size;
+
+	<span class="enscript-keyword">if</span> (ISSET(opts, UBC_SETSIZE_NO_FS_REENTRY) &amp;&amp; nsize &lt; osize)
+		<span class="enscript-keyword">return</span> EAGAIN;
+
+	<span class="enscript-comment">/*
+	 * Update the size before flushing the VM
+	 */</span>
+	uip-&gt;ui_size = nsize;
+
+	<span class="enscript-keyword">if</span> (nsize &gt;= osize) {	<span class="enscript-comment">/* Nothing more to do */</span>
+		<span class="enscript-keyword">if</span> (nsize &gt; osize) {
+			lock_vnode_and_post(vp, NOTE_EXTEND);
+		}
+
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-comment">/*
+	 * When the file shrinks, invalidate the pages beyond the
+	 * new size. Also get rid of garbage beyond nsize on the
+	 * last page. The ui_size already has the nsize, so any
+	 * subsequent page-in will zero-fill the tail properly
+	 */</span>
+	lastpg = trunc_page_64(nsize);
+	olastpgend = round_page_64(osize);
+	control = uip-&gt;ui_control;
+	assert(control);
+	lastoff = (nsize &amp; PAGE_MASK_64);
+
+	<span class="enscript-keyword">if</span> (lastoff) {
+		upl_t		upl;
+		upl_page_info_t	*pl;
+
+		<span class="enscript-comment">/*
+		 * new EOF ends up in the middle of a page
+		 * zero the tail of this page if it's currently
+		 * present in the cache
+		 */</span>
+		kret = ubc_create_upl(vp, lastpg, PAGE_SIZE, &amp;upl, &amp;pl, UPL_SET_LITE);
+
+		<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS)
+		        panic(<span class="enscript-string">&quot;ubc_setsize: ubc_create_upl (error = %d)\n&quot;</span>, kret);
+
+		<span class="enscript-keyword">if</span> (upl_valid_page(pl, 0))
+		        cluster_zero(upl, (uint32_t)lastoff, PAGE_SIZE - (uint32_t)lastoff, NULL);
+
+		ubc_upl_abort_range(upl, 0, PAGE_SIZE, UPL_ABORT_FREE_ON_EMPTY);
+
+		lastpg += PAGE_SIZE_64;
+	}
+	<span class="enscript-keyword">if</span> (olastpgend &gt; lastpg) {
+		<span class="enscript-type">int</span>	flags;
+
+		<span class="enscript-keyword">if</span> (lastpg == 0)
+			flags = MEMORY_OBJECT_DATA_FLUSH_ALL;
+		<span class="enscript-keyword">else</span>
+			flags = MEMORY_OBJECT_DATA_FLUSH;
+		<span class="enscript-comment">/*
+		 * invalidate the pages beyond the new EOF page
+		 *
+		 */</span>
+		kret = memory_object_lock_request(control,
+										  (memory_object_offset_t)lastpg,
+										  (memory_object_size_t)(olastpgend - lastpg), NULL, NULL,
+										  MEMORY_OBJECT_RETURN_NONE, flags, VM_PROT_NO_CHANGE);
+		<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS)
+		        printf(<span class="enscript-string">&quot;ubc_setsize: invalidate failed (error = %d)\n&quot;</span>, kret);
+	}
+	<span class="enscript-keyword">return</span> mach_to_bsd_errno(kret);
+}
+
+<span class="enscript-comment">// Returns true for success
+</span><span class="enscript-type">int</span> <span class="enscript-function-name">ubc_setsize</span>(vnode_t vp, off_t nsize)
+{
+	<span class="enscript-keyword">return</span> ubc_setsize_ex(vp, nsize, 0) == 0;
+}
+
+<span class="enscript-comment">/*
+ * ubc_getsize
+ *
+ * Get the size of the file assocated with the specified vnode
+ *
+ * Parameters:	vp			The vnode whose size is of interest
+ *
+ * Returns:	0			There is no ubc_info associated with
+ *					this vnode, or the size is zero
+ *		!0			The size of the file
+ *
+ * Notes:	Using this routine, it is not possible for a caller to
+ *		successfully distinguish between a vnode associate with a zero
+ *		length file, and a vnode with no associated ubc_info.  The
+ *		caller therefore needs to not care, or needs to ensure that
+ *		they have previously successfully called ubc_info_init() or
+ *		ubc_info_init_withsize().
+ */</span>
+off_t
+<span class="enscript-function-name">ubc_getsize</span>(<span class="enscript-type">struct</span> vnode *vp)
+{
+	<span class="enscript-comment">/* people depend on the side effect of this working this way
+	 * as they call this for directory 
+	 */</span>
+	<span class="enscript-keyword">if</span> (!UBCINFOEXISTS(vp))
+		<span class="enscript-keyword">return</span> ((off_t)0);
+	<span class="enscript-keyword">return</span> (vp-&gt;v_ubcinfo-&gt;ui_size);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_umount
+ *
+ * Call ubc_msync(vp, 0, EOF, NULL, UBC_PUSHALL) on all the vnodes for this
+ * mount point
+ *
+ * Parameters:	mp			The mount point
+ *
+ * Returns:	0			Success
+ *
+ * Notes:	There is no failure indication for this function.
+ *
+ *		This function is used in the unmount path; since it may block
+ *		I/O indefinitely, it should not be used in the forced unmount
+ *		path, since a device unavailability could also block that
+ *		indefinitely.
+ *
+ *		Because there is no device ejection interlock on USB, FireWire,
+ *		or similar devices, it's possible that an ejection that begins
+ *		subsequent to the vnode_iterate() completing, either on one of
+ *		those devices, or a network mount for which the server quits
+ *		responding, etc., may cause the caller to block indefinitely.
+ */</span>
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_umount</span>(<span class="enscript-type">struct</span> mount *mp)
+{
+	vnode_iterate(mp, 0, ubc_umcallback, 0);
+	<span class="enscript-keyword">return</span>(0);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_umcallback
+ *
+ * Used by ubc_umount() as an internal implementation detail; see ubc_umount()
+ * and vnode_iterate() for details of implementation.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_umcallback</span>(vnode_t vp, __unused <span class="enscript-type">void</span> * args)
+{
+
+	<span class="enscript-keyword">if</span> (UBCINFOEXISTS(vp)) {
+
+		(<span class="enscript-type">void</span>) ubc_msync(vp, (off_t)0, ubc_getsize(vp), NULL, UBC_PUSHALL);
+	}
+	<span class="enscript-keyword">return</span> (VNODE_RETURNED);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_getcred
+ *
+ * Get the credentials currently active for the ubc_info associated with the
+ * vnode.
+ *
+ * Parameters:	vp			The vnode whose ubc_info credentials
+ *					are to be retrieved
+ *
+ * Returns:	!NOCRED			The credentials
+ *		NOCRED			If there is no ubc_info for the vnode,
+ *					or if there is one, but it has not had
+ *					any credentials associated with it via
+ *					a call to ubc_setcred()
+ */</span>
+kauth_cred_t
+<span class="enscript-function-name">ubc_getcred</span>(<span class="enscript-type">struct</span> vnode *vp)
+{
+        <span class="enscript-keyword">if</span> (UBCINFOEXISTS(vp))
+	        <span class="enscript-keyword">return</span> (vp-&gt;v_ubcinfo-&gt;ui_ucred);
+
+	<span class="enscript-keyword">return</span> (NOCRED);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_setthreadcred
+ *
+ * If they are not already set, set the credentials of the ubc_info structure
+ * associated with the vnode to those of the supplied thread; otherwise leave
+ * them alone.
+ *
+ * Parameters:	vp			The vnode whose ubc_info creds are to
+ *					be set
+ *		p			The process whose credentials are to
+ *					be used, if not running on an assumed
+ *					credential
+ *		thread			The thread whose credentials are to
+ *					be used
+ *
+ * Returns:	1			This vnode has no associated ubc_info
+ *		0			Success
+ *
+ * Notes:	This function takes a proc parameter to account for bootstrap
+ *		issues where a task or thread may call this routine, either
+ *		before credentials have been initialized by bsd_init(), or if
+ *		there is no BSD info asscoiate with a mach thread yet.  This
+ *		is known to happen in both the initial swap and memory mapping
+ *		calls.
+ *
+ *		This function is generally used only in the following cases:
+ *
+ *		o	a memory mapped file via the mmap() system call
+ *		o	a swap store backing file
+ *		o	subsequent to a successful write via vn_write()
+ *
+ *		The information is then used by the NFS client in order to
+ *		cons up a wire message in either the page-in or page-out path.
+ *
+ *		There are two potential problems with the use of this API:
+ *
+ *		o	Because the write path only set it on a successful
+ *			write, there is a race window between setting the
+ *			credential and its use to evict the pages to the
+ *			remote file server
+ *
+ *		o	Because a page-in may occur prior to a write, the
+ *			credential may not be set at this time, if the page-in
+ *			is not the result of a mapping established via mmap().
+ *
+ *		In both these cases, this will be triggered from the paging
+ *		path, which will instead use the credential of the current
+ *		process, which in this case is either the dynamic_pager or
+ *		the kernel task, both of which utilize &quot;root&quot; credentials.
+ *
+ *		This may potentially permit operations to occur which should
+ *		be denied, or it may cause to be denied operations which
+ *		should be permitted, depending on the configuration of the NFS
+ *		server.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_setthreadcred</span>(<span class="enscript-type">struct</span> vnode *vp, proc_t p, thread_t thread)
+{
+	<span class="enscript-type">struct</span> ubc_info *uip;
+	kauth_cred_t credp;
+	<span class="enscript-type">struct</span> uthread  *uthread = get_bsdthread_info(thread);
+
+	<span class="enscript-keyword">if</span> (!UBCINFOEXISTS(vp))
+		<span class="enscript-keyword">return</span> (1); 
+
+	vnode_lock(vp);
+
+	uip = vp-&gt;v_ubcinfo;
+	credp = uip-&gt;ui_ucred;
+
+	<span class="enscript-keyword">if</span> (!IS_VALID_CRED(credp)) {
+		<span class="enscript-comment">/* use per-thread cred, if assumed identity, else proc cred */</span>
+		<span class="enscript-keyword">if</span> (uthread == NULL || (uthread-&gt;uu_flag &amp; UT_SETUID) == 0) {
+			uip-&gt;ui_ucred = kauth_cred_proc_ref(p);
+		} <span class="enscript-keyword">else</span> {
+			uip-&gt;ui_ucred = uthread-&gt;uu_ucred;
+			kauth_cred_ref(uip-&gt;ui_ucred);
+		}
+	} 
+	vnode_unlock(vp);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_setcred
+ *
+ * If they are not already set, set the credentials of the ubc_info structure
+ * associated with the vnode to those of the process; otherwise leave them
+ * alone.
+ *
+ * Parameters:	vp			The vnode whose ubc_info creds are to
+ *					be set
+ *		p			The process whose credentials are to
+ *					be used
+ *
+ * Returns:	0			This vnode has no associated ubc_info
+ *		1			Success
+ *
+ * Notes:	The return values for this function are inverted from nearly
+ *		all other uses in the kernel.
+ *
+ *		See also ubc_setthreadcred(), above.
+ *
+ *		This function is considered deprecated, and generally should
+ *		not be used, as it is incompatible with per-thread credentials;
+ *		it exists for legacy KPI reasons.
+ *
+ * DEPRECATION:	ubc_setcred() is being deprecated. Please use 
+ *		ubc_setthreadcred() instead.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_setcred</span>(<span class="enscript-type">struct</span> vnode *vp, proc_t p)
+{
+	<span class="enscript-type">struct</span> ubc_info *uip;
+	kauth_cred_t credp;
+
+	<span class="enscript-comment">/* If there is no ubc_info, deny the operation */</span>
+	<span class="enscript-keyword">if</span> ( !UBCINFOEXISTS(vp))
+		<span class="enscript-keyword">return</span> (0); 
+
+	<span class="enscript-comment">/*
+	 * Check to see if there is already a credential reference in the
+	 * ubc_info; if there is not, take one on the supplied credential.
+	 */</span>
+	vnode_lock(vp);
+	uip = vp-&gt;v_ubcinfo;
+	credp = uip-&gt;ui_ucred;
+	<span class="enscript-keyword">if</span> (!IS_VALID_CRED(credp)) {
+		uip-&gt;ui_ucred = kauth_cred_proc_ref(p);
+	} 
+	vnode_unlock(vp);
+
+	<span class="enscript-keyword">return</span> (1);
+}
+
+<span class="enscript-comment">/*
+ * ubc_getpager
+ *
+ * Get the pager associated with the ubc_info associated with the vnode.
+ *
+ * Parameters:	vp			The vnode to obtain the pager from
+ *
+ * Returns:	!VNODE_PAGER_NULL	The memory_object_t for the pager
+ *		VNODE_PAGER_NULL	There is no ubc_info for this vnode
+ *
+ * Notes:	For each vnode that has a ubc_info associated with it, that
+ *		ubc_info SHALL have a pager associated with it, so in the
+ *		normal case, it's impossible to return VNODE_PAGER_NULL for
+ *		a vnode with an associated ubc_info.
+ */</span>
+__private_extern__ memory_object_t
+<span class="enscript-function-name">ubc_getpager</span>(<span class="enscript-type">struct</span> vnode *vp)
+{
+        <span class="enscript-keyword">if</span> (UBCINFOEXISTS(vp))
+	        <span class="enscript-keyword">return</span> (vp-&gt;v_ubcinfo-&gt;ui_pager);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_getobject
+ *
+ * Get the memory object control associated with the ubc_info associated with
+ * the vnode
+ *
+ * Parameters:	vp			The vnode to obtain the memory object
+ *					from
+ *		flags			DEPRECATED
+ *
+ * Returns:	!MEMORY_OBJECT_CONTROL_NULL
+ *		MEMORY_OBJECT_CONTROL_NULL
+ *
+ * Notes:	Historically, if the flags were not &quot;do not reactivate&quot;, this
+ *		function would look up the memory object using the pager if
+ *		it did not exist (this could be the case if the vnode had
+ *		been previously reactivated).  The flags would also permit a
+ *		hold to be requested, which would have created an object
+ *		reference, if one had not already existed.  This usage is
+ *		deprecated, as it would permit a race between finding and
+ *		taking the reference vs. a single reference being dropped in
+ *		another thread.
+ */</span>
+memory_object_control_t
+<span class="enscript-function-name">ubc_getobject</span>(<span class="enscript-type">struct</span> vnode *vp, __unused <span class="enscript-type">int</span> flags)
+{
+        <span class="enscript-keyword">if</span> (UBCINFOEXISTS(vp))
+	        <span class="enscript-keyword">return</span>((vp-&gt;v_ubcinfo-&gt;ui_control));
+
+	<span class="enscript-keyword">return</span> (MEMORY_OBJECT_CONTROL_NULL);
+}
+
+boolean_t
+<span class="enscript-function-name">ubc_strict_uncached_IO</span>(<span class="enscript-type">struct</span> vnode *vp)
+{
+        boolean_t result = FALSE;
+
+	<span class="enscript-keyword">if</span> (UBCINFOEXISTS(vp)) {
+	        result = memory_object_is_slid(vp-&gt;v_ubcinfo-&gt;ui_control);
+	}
+	<span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-comment">/*
+ * ubc_blktooff
+ *
+ * Convert a given block number to a memory backing object (file) offset for a
+ * given vnode
+ *
+ * Parameters:	vp			The vnode in which the block is located
+ *		blkno			The block number to convert
+ *
+ * Returns:	!-1			The offset into the backing object
+ *		-1			There is no ubc_info associated with
+ *					the vnode
+ *		-1			An error occurred in the underlying VFS
+ *					while translating the block to an
+ *					offset; the most likely cause is that
+ *					the caller specified a block past the
+ *					end of the file, but this could also be
+ *					any other error from VNOP_BLKTOOFF().
+ *
+ * Note:	Representing the error in band loses some information, but does
+ *		not occlude a valid offset, since an off_t of -1 is normally
+ *		used to represent EOF.  If we had a more reliable constant in
+ *		our header files for it (i.e. explicitly cast to an off_t), we
+ *		would use it here instead.
+ */</span>
+off_t
+<span class="enscript-function-name">ubc_blktooff</span>(vnode_t vp, daddr64_t blkno)
+{
+	off_t file_offset = -1;
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (UBCINFOEXISTS(vp)) {
+		error = VNOP_BLKTOOFF(vp, blkno, &amp;file_offset);
+		<span class="enscript-keyword">if</span> (error)
+			file_offset = -1;
+	}
+
+	<span class="enscript-keyword">return</span> (file_offset);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_offtoblk
+ *
+ * Convert a given offset in a memory backing object into a block number for a
+ * given vnode
+ *
+ * Parameters:	vp			The vnode in which the offset is
+ *					located
+ *		offset			The offset into the backing object
+ *
+ * Returns:	!-1			The returned block number
+ *		-1			There is no ubc_info associated with
+ *					the vnode
+ *		-1			An error occurred in the underlying VFS
+ *					while translating the block to an
+ *					offset; the most likely cause is that
+ *					the caller specified a block past the
+ *					end of the file, but this could also be
+ *					any other error from VNOP_OFFTOBLK().
+ *
+ * Note:	Representing the error in band loses some information, but does
+ *		not occlude a valid block number, since block numbers exceed
+ *		the valid range for offsets, due to their relative sizes.  If
+ *		we had a more reliable constant than -1 in our header files
+ *		for it (i.e. explicitly cast to an daddr64_t), we would use it
+ *		here instead.
+ */</span>
+daddr64_t
+<span class="enscript-function-name">ubc_offtoblk</span>(vnode_t vp, off_t offset)
+{
+	daddr64_t blkno = -1;
+	<span class="enscript-type">int</span> error = 0;
+
+	<span class="enscript-keyword">if</span> (UBCINFOEXISTS(vp)) {
+		error = VNOP_OFFTOBLK(vp, offset, &amp;blkno);
+		<span class="enscript-keyword">if</span> (error)
+			blkno = -1;
+	}
+
+	<span class="enscript-keyword">return</span> (blkno);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_pages_resident
+ *
+ * Determine whether or not a given vnode has pages resident via the memory
+ * object control associated with the ubc_info associated with the vnode
+ *
+ * Parameters:	vp			The vnode we want to know about
+ *
+ * Returns:	1			Yes
+ *		0			No
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_pages_resident</span>(vnode_t vp)
+{
+	kern_return_t		kret;
+	boolean_t			has_pages_resident;
+	
+	<span class="enscript-keyword">if</span> (!UBCINFOEXISTS(vp))
+		<span class="enscript-keyword">return</span> (0);
+			
+	<span class="enscript-comment">/*
+	 * The following call may fail if an invalid ui_control is specified,
+	 * or if there is no VM object associated with the control object.  In
+	 * either case, reacting to it as if there were no pages resident will
+	 * result in correct behavior.
+	 */</span>
+	kret = memory_object_pages_resident(vp-&gt;v_ubcinfo-&gt;ui_control, &amp;has_pages_resident);
+	
+	<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span> (0);
+		
+	<span class="enscript-keyword">if</span> (has_pages_resident == TRUE)
+		<span class="enscript-keyword">return</span> (1);
+		
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * ubc_msync
+ *
+ * Clean and/or invalidate a range in the memory object that backs this vnode
+ *
+ * Parameters:	vp			The vnode whose associated ubc_info's
+ *					associated memory object is to have a
+ *					range invalidated within it
+ *		beg_off			The start of the range, as an offset
+ *		end_off			The end of the range, as an offset
+ *		resid_off		The address of an off_t supplied by the
+ *					caller; may be set to NULL to ignore
+ *		flags			See ubc_msync_internal()
+ *
+ * Returns:	0			Success
+ *		!0			Failure; an errno is returned
+ *
+ * Implicit Returns:
+ *		*resid_off, modified	If non-NULL, the  contents are ALWAYS
+ *					modified; they are initialized to the
+ *					beg_off, and in case of an I/O error,
+ *					the difference between beg_off and the
+ *					current value will reflect what was
+ *					able to be written before the error
+ *					occurred.  If no error is returned, the
+ *					value of the resid_off is undefined; do
+ *					NOT use it in place of end_off if you
+ *					intend to increment from the end of the
+ *					last call and call iteratively.
+ *
+ * Notes:	see ubc_msync_internal() for more detailed information.
+ *
+ */</span>
+errno_t
+<span class="enscript-function-name">ubc_msync</span>(vnode_t vp, off_t beg_off, off_t end_off, off_t *resid_off, <span class="enscript-type">int</span> flags)
+{
+        <span class="enscript-type">int</span> retval;
+	<span class="enscript-type">int</span> io_errno = 0;
+	
+	<span class="enscript-keyword">if</span> (resid_off)
+	        *resid_off = beg_off;
+
+        retval = ubc_msync_internal(vp, beg_off, end_off, resid_off, flags, &amp;io_errno);
+
+	<span class="enscript-keyword">if</span> (retval == 0 &amp;&amp; io_errno == 0)
+	        <span class="enscript-keyword">return</span> (EINVAL);
+	<span class="enscript-keyword">return</span> (io_errno);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_msync_internal
+ *
+ * Clean and/or invalidate a range in the memory object that backs this vnode
+ *
+ * Parameters:	vp			The vnode whose associated ubc_info's
+ *					associated memory object is to have a
+ *					range invalidated within it
+ *		beg_off			The start of the range, as an offset
+ *		end_off			The end of the range, as an offset
+ *		resid_off		The address of an off_t supplied by the
+ *					caller; may be set to NULL to ignore
+ *		flags			MUST contain at least one of the flags
+ *					UBC_INVALIDATE, UBC_PUSHDIRTY, or
+ *					UBC_PUSHALL; if UBC_PUSHDIRTY is used,
+ *					UBC_SYNC may also be specified to cause
+ *					this function to block until the
+ *					operation is complete.  The behavior
+ *					of UBC_SYNC is otherwise undefined.
+ *		io_errno		The address of an int to contain the
+ *					errno from a failed I/O operation, if
+ *					one occurs; may be set to NULL to
+ *					ignore
+ *
+ * Returns:	1			Success
+ *		0			Failure
+ *
+ * Implicit Returns:
+ *		*resid_off, modified	The contents of this offset MAY be
+ *					modified; in case of an I/O error, the
+ *					difference between beg_off and the
+ *					current value will reflect what was
+ *					able to be written before the error
+ *					occurred.
+ *		*io_errno, modified	The contents of this offset are set to
+ *					an errno, if an error occurs; if the
+ *					caller supplies an io_errno parameter,
+ *					they should be careful to initialize it
+ *					to 0 before calling this function to
+ *					enable them to distinguish an error
+ *					with a valid *resid_off from an invalid
+ *					one, and to avoid potentially falsely
+ *					reporting an error, depending on use.
+ *
+ * Notes:	If there is no ubc_info associated with the vnode supplied,
+ *		this function immediately returns success.
+ *
+ *		If the value of end_off is less than or equal to beg_off, this
+ *		function immediately returns success; that is, end_off is NOT
+ *		inclusive.
+ *
+ *		IMPORTANT: one of the flags UBC_INVALIDATE, UBC_PUSHDIRTY, or
+ *		UBC_PUSHALL MUST be specified; that is, it is NOT possible to
+ *		attempt to block on in-progress I/O by calling this function
+ *		with UBC_PUSHDIRTY, and then later call it with just UBC_SYNC
+ *		in order to block pending on the I/O already in progress.
+ *
+ *		The start offset is truncated to the page boundary and the
+ *		size is adjusted to include the last page in the range; that
+ *		is, end_off on exactly a page boundary will not change if it
+ *		is rounded, and the range of bytes written will be from the
+ *		truncate beg_off to the rounded (end_off - 1).
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_msync_internal</span>(vnode_t vp, off_t beg_off, off_t end_off, off_t *resid_off, <span class="enscript-type">int</span> flags, <span class="enscript-type">int</span> *io_errno)
+{
+	memory_object_size_t	tsize;
+	kern_return_t		kret;
+	<span class="enscript-type">int</span> request_flags = 0;
+	<span class="enscript-type">int</span> flush_flags   = MEMORY_OBJECT_RETURN_NONE;
+	
+	<span class="enscript-keyword">if</span> ( !UBCINFOEXISTS(vp))
+	        <span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">if</span> ((flags &amp; (UBC_INVALIDATE | UBC_PUSHDIRTY | UBC_PUSHALL)) == 0)
+	        <span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">if</span> (end_off &lt;= beg_off)
+	        <span class="enscript-keyword">return</span> (1);
+
+	<span class="enscript-keyword">if</span> (flags &amp; UBC_INVALIDATE)
+	        <span class="enscript-comment">/*
+		 * discard the resident pages
+		 */</span>
+		request_flags = (MEMORY_OBJECT_DATA_FLUSH | MEMORY_OBJECT_DATA_NO_CHANGE);
+
+	<span class="enscript-keyword">if</span> (flags &amp; UBC_SYNC)
+	        <span class="enscript-comment">/*
+		 * wait for all the I/O to complete before returning
+		 */</span>
+	        request_flags |= MEMORY_OBJECT_IO_SYNC;
+
+	<span class="enscript-keyword">if</span> (flags &amp; UBC_PUSHDIRTY)
+	        <span class="enscript-comment">/*
+		 * we only return the dirty pages in the range
+		 */</span>
+	        flush_flags = MEMORY_OBJECT_RETURN_DIRTY;
+
+	<span class="enscript-keyword">if</span> (flags &amp; UBC_PUSHALL)
+	        <span class="enscript-comment">/*
+		 * then return all the interesting pages in the range (both
+		 * dirty and precious) to the pager
+		 */</span>
+	        flush_flags = MEMORY_OBJECT_RETURN_ALL;
+
+	beg_off = trunc_page_64(beg_off);
+	end_off = round_page_64(end_off);
+	tsize   = (memory_object_size_t)end_off - beg_off;
+
+	<span class="enscript-comment">/* flush and/or invalidate pages in the range requested */</span>
+	kret = memory_object_lock_request(vp-&gt;v_ubcinfo-&gt;ui_control,
+					  beg_off, tsize,
+					  (memory_object_offset_t *)resid_off,
+					  io_errno, flush_flags, request_flags,
+					  VM_PROT_NO_CHANGE);
+	
+	<span class="enscript-keyword">return</span> ((kret == KERN_SUCCESS) ? 1 : 0);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_map
+ *
+ * Explicitly map a vnode that has an associate ubc_info, and add a reference
+ * to it for the ubc system, if there isn't one already, so it will not be
+ * recycled while it's in use, and set flags on the ubc_info to indicate that
+ * we have done this
+ *
+ * Parameters:	vp			The vnode to map
+ *		flags			The mapping flags for the vnode; this
+ *					will be a combination of one or more of
+ *					PROT_READ, PROT_WRITE, and PROT_EXEC
+ *
+ * Returns:	0			Success
+ *		EPERM			Permission was denied
+ *
+ * Notes:	An I/O reference on the vnode must already be held on entry
+ *
+ *		If there is no ubc_info associated with the vnode, this function
+ *		will return success.
+ *
+ *		If a permission error occurs, this function will return
+ *		failure; all other failures will cause this function to return
+ *		success.
+ *
+ *		IMPORTANT: This is an internal use function, and its symbols
+ *		are not exported, hence its error checking is not very robust.
+ *		It is primarily used by:
+ *
+ *		o	mmap(), when mapping a file
+ *		o	When mapping a shared file (a shared library in the
+ *			shared segment region)
+ *		o	When loading a program image during the exec process
+ *
+ *		...all of these uses ignore the return code, and any fault that
+ *		results later because of a failure is handled in the fix-up path
+ *		of the fault handler.  The interface exists primarily as a
+ *		performance hint.
+ *
+ *		Given that third party implementation of the type of interfaces
+ *		that would use this function, such as alternative executable
+ *		formats, etc., are unsupported, this function is not exported
+ *		for general use.
+ *
+ *		The extra reference is held until the VM system unmaps the
+ *		vnode from its own context to maintain a vnode reference in
+ *		cases like open()/mmap()/close(), which leave the backing
+ *		object referenced by a mapped memory region in a process
+ *		address space.
+ */</span>
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_map</span>(vnode_t vp, <span class="enscript-type">int</span> flags)
+{
+	<span class="enscript-type">struct</span> ubc_info *uip;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> need_ref = 0;
+	<span class="enscript-type">int</span> need_wakeup = 0;
+
+	<span class="enscript-keyword">if</span> (UBCINFOEXISTS(vp)) {
+
+		vnode_lock(vp);
+		uip = vp-&gt;v_ubcinfo;
+
+		<span class="enscript-keyword">while</span> (ISSET(uip-&gt;ui_flags, UI_MAPBUSY)) {
+			SET(uip-&gt;ui_flags, UI_MAPWAITING);
+			(<span class="enscript-type">void</span>) msleep(&amp;uip-&gt;ui_flags, &amp;vp-&gt;v_lock,
+				      PRIBIO, <span class="enscript-string">&quot;ubc_map&quot;</span>, NULL);
+		}
+		SET(uip-&gt;ui_flags, UI_MAPBUSY);
+		vnode_unlock(vp);
+
+		error = VNOP_MMAP(vp, flags, vfs_context_current());
+
+		<span class="enscript-keyword">if</span> (error != EPERM)
+		        error = 0;
+
+		vnode_lock_spin(vp);
+
+		<span class="enscript-keyword">if</span> (error == 0) {
+			<span class="enscript-keyword">if</span> ( !ISSET(uip-&gt;ui_flags, UI_ISMAPPED))
+			        need_ref = 1;
+			SET(uip-&gt;ui_flags, (UI_WASMAPPED | UI_ISMAPPED));
+			<span class="enscript-keyword">if</span> (flags &amp; PROT_WRITE) {
+				SET(uip-&gt;ui_flags, UI_MAPPEDWRITE);
+			}
+		}
+		CLR(uip-&gt;ui_flags, UI_MAPBUSY);
+
+		<span class="enscript-keyword">if</span> (ISSET(uip-&gt;ui_flags, UI_MAPWAITING)) {
+			CLR(uip-&gt;ui_flags, UI_MAPWAITING);
+			need_wakeup = 1;
+		}
+		vnode_unlock(vp);
+
+		<span class="enscript-keyword">if</span> (need_wakeup)
+			wakeup(&amp;uip-&gt;ui_flags);
+
+		<span class="enscript-keyword">if</span> (need_ref)
+			vnode_ref(vp);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_destroy_named
+ *
+ * Destroy the named memory object associated with the ubc_info control object
+ * associated with the designated vnode, if there is a ubc_info associated
+ * with the vnode, and a control object is associated with it
+ *
+ * Parameters:	vp			The designated vnode
+ *
+ * Returns:	(void)
+ *
+ * Notes:	This function is called on vnode termination for all vnodes,
+ *		and must therefore not assume that there is a ubc_info that is
+ *		associated with the vnode, nor that there is a control object
+ *		associated with the ubc_info.
+ *
+ *		If all the conditions necessary are present, this function
+ *		calls memory_object_destory(), which will in turn end up
+ *		calling ubc_unmap() to release any vnode references that were
+ *		established via ubc_map().
+ *
+ *		IMPORTANT: This is an internal use function that is used
+ *		exclusively by the internal use function vclean().
+ */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">ubc_destroy_named</span>(vnode_t vp)
+{
+	memory_object_control_t control;
+	<span class="enscript-type">struct</span> ubc_info *uip;
+	kern_return_t kret;
+
+	<span class="enscript-keyword">if</span> (UBCINFOEXISTS(vp)) {
+	        uip = vp-&gt;v_ubcinfo;
+
+		<span class="enscript-comment">/* Terminate the memory object  */</span>
+		control = ubc_getobject(vp, UBC_HOLDOBJECT);
+		<span class="enscript-keyword">if</span> (control != MEMORY_OBJECT_CONTROL_NULL) {
+		        kret = memory_object_destroy(control, 0);
+			<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS)
+			        panic(<span class="enscript-string">&quot;ubc_destroy_named: memory_object_destroy failed&quot;</span>);
+		}
+	}
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_isinuse
+ *
+ * Determine whether or not a vnode is currently in use by ubc at a level in
+ * excess of the requested busycount
+ *
+ * Parameters:	vp			The vnode to check
+ *		busycount		The threshold busy count, used to bias
+ *					the count usually already held by the
+ *					caller to avoid races
+ *
+ * Returns:	1			The vnode is in use over the threshold
+ *		0			The vnode is not in use over the
+ *					threshold
+ *
+ * Notes:	Because the vnode is only held locked while actually asking
+ *		the use count, this function only represents a snapshot of the
+ *		current state of the vnode.  If more accurate information is
+ *		required, an additional busycount should be held by the caller
+ *		and a non-zero busycount used.
+ *
+ *		If there is no ubc_info associated with the vnode, this
+ *		function will report that the vnode is not in use by ubc.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_isinuse</span>(<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">int</span> busycount)
+{
+	<span class="enscript-keyword">if</span> ( !UBCINFOEXISTS(vp))
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">return</span>(ubc_isinuse_locked(vp, busycount, 0));
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_isinuse_locked
+ *
+ * Determine whether or not a vnode is currently in use by ubc at a level in
+ * excess of the requested busycount
+ *
+ * Parameters:	vp			The vnode to check
+ *		busycount		The threshold busy count, used to bias
+ *					the count usually already held by the
+ *					caller to avoid races
+ *		locked			True if the vnode is already locked by
+ *					the caller
+ *
+ * Returns:	1			The vnode is in use over the threshold
+ *		0			The vnode is not in use over the
+ *					threshold
+ *
+ * Notes:	If the vnode is not locked on entry, it is locked while
+ *		actually asking the use count.  If this is the case, this
+ *		function only represents a snapshot of the current state of
+ *		the vnode.  If more accurate information is required, the
+ *		vnode lock should be held by the caller, otherwise an
+ *		additional busycount should be held by the caller and a
+ *		non-zero busycount used.
+ *
+ *		If there is no ubc_info associated with the vnode, this
+ *		function will report that the vnode is not in use by ubc.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_isinuse_locked</span>(<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">int</span> busycount, <span class="enscript-type">int</span> locked)
+{
+	<span class="enscript-type">int</span> retval = 0;
+
+
+	<span class="enscript-keyword">if</span> (!locked)
+		vnode_lock_spin(vp);
+
+	<span class="enscript-keyword">if</span> ((vp-&gt;v_usecount - vp-&gt;v_kusecount) &gt; busycount)
+		retval = 1;
+
+	<span class="enscript-keyword">if</span> (!locked)
+		vnode_unlock(vp);
+	<span class="enscript-keyword">return</span> (retval);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_unmap
+ *
+ * Reverse the effects of a ubc_map() call for a given vnode
+ *
+ * Parameters:	vp			vnode to unmap from ubc
+ *
+ * Returns:	(void)
+ *
+ * Notes:	This is an internal use function used by vnode_pager_unmap().
+ *		It will attempt to obtain a reference on the supplied vnode,
+ *		and if it can do so, and there is an associated ubc_info, and
+ *		the flags indicate that it was mapped via ubc_map(), then the
+ *		flag is cleared, the mapping removed, and the reference taken
+ *		by ubc_map() is released.
+ *
+ *		IMPORTANT: This MUST only be called by the VM
+ *		to prevent race conditions.
+ */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">ubc_unmap</span>(<span class="enscript-type">struct</span> vnode *vp)
+{
+	<span class="enscript-type">struct</span> ubc_info *uip;
+	<span class="enscript-type">int</span>	need_rele = 0;
+	<span class="enscript-type">int</span>	need_wakeup = 0;
+
+	<span class="enscript-keyword">if</span> (vnode_getwithref(vp))
+	        <span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (UBCINFOEXISTS(vp)) {
+		bool want_fsevent = false;
+
+		vnode_lock(vp);
+		uip = vp-&gt;v_ubcinfo;
+
+		<span class="enscript-keyword">while</span> (ISSET(uip-&gt;ui_flags, UI_MAPBUSY)) {
+			SET(uip-&gt;ui_flags, UI_MAPWAITING);
+			(<span class="enscript-type">void</span>) msleep(&amp;uip-&gt;ui_flags, &amp;vp-&gt;v_lock,
+				      PRIBIO, <span class="enscript-string">&quot;ubc_unmap&quot;</span>, NULL);
+		}
+		SET(uip-&gt;ui_flags, UI_MAPBUSY);
+
+		<span class="enscript-keyword">if</span> (ISSET(uip-&gt;ui_flags, UI_ISMAPPED)) {
+			<span class="enscript-keyword">if</span> (ISSET(uip-&gt;ui_flags, UI_MAPPEDWRITE))
+				want_fsevent = true;
+
+			need_rele = 1;
+
+			<span class="enscript-comment">/*
+			 * We want to clear the mapped flags after we've called
+			 * VNOP_MNOMAP to avoid certain races and allow
+			 * VNOP_MNOMAP to call ubc_is_mapped_writable.
+			 */</span>
+		}
+		vnode_unlock(vp);
+
+		<span class="enscript-keyword">if</span> (need_rele) {
+				vfs_context_t ctx = vfs_context_current();
+
+		        (<span class="enscript-type">void</span>)VNOP_MNOMAP(vp, ctx);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_FSE</span>
+				<span class="enscript-comment">/*
+				 * Why do we want an fsevent here?  Normally the
+				 * content modified fsevent is posted when a file is
+				 * closed and only if it's written to via conventional
+				 * means.  It's perfectly legal to close a file and
+				 * keep your mappings and we don't currently track
+				 * whether it was written to via a mapping.
+				 * Therefore, we need to post an fsevent here if the
+				 * file was mapped writable.  This may result in false
+				 * events, i.e. we post a notification when nothing
+				 * has really changed.
+				 */</span>
+				<span class="enscript-keyword">if</span> (want_fsevent &amp;&amp; need_fsevent(FSE_CONTENT_MODIFIED, vp)) {
+					add_fsevent(FSE_CONTENT_MODIFIED, ctx,
+								FSE_ARG_VNODE, vp,
+								FSE_ARG_DONE);
+				}
+#<span class="enscript-reference">endif</span>
+
+		        vnode_rele(vp);
+		}
+
+		vnode_lock_spin(vp);
+
+		<span class="enscript-keyword">if</span> (need_rele)
+			CLR(uip-&gt;ui_flags, UI_ISMAPPED | UI_MAPPEDWRITE);
+
+		CLR(uip-&gt;ui_flags, UI_MAPBUSY);
+
+		<span class="enscript-keyword">if</span> (ISSET(uip-&gt;ui_flags, UI_MAPWAITING)) {
+			CLR(uip-&gt;ui_flags, UI_MAPWAITING);
+			need_wakeup = 1;
+		}
+		vnode_unlock(vp);
+
+		<span class="enscript-keyword">if</span> (need_wakeup)
+		        wakeup(&amp;uip-&gt;ui_flags);
+
+	}
+	<span class="enscript-comment">/*
+	 * the drop of the vnode ref will cleanup
+	 */</span>
+	vnode_put(vp);
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_page_op
+ *
+ * Manipulate individual page state for a vnode with an associated ubc_info
+ * with an associated memory object control.
+ *
+ * Parameters:	vp			The vnode backing the page
+ *		f_offset		A file offset interior to the page
+ *		ops			The operations to perform, as a bitmap
+ *					(see below for more information)
+ *		phys_entryp		The address of a ppnum_t; may be NULL
+ *					to ignore
+ *		flagsp			A pointer to an int to contain flags;
+ *					may be NULL to ignore
+ *
+ * Returns:	KERN_SUCCESS		Success
+ *		KERN_INVALID_ARGUMENT	If the memory object control has no VM
+ *					object associated
+ *		KERN_INVALID_OBJECT	If UPL_POP_PHYSICAL and the object is
+ *					not physically contiguous
+ *		KERN_INVALID_OBJECT	If !UPL_POP_PHYSICAL and the object is
+ *					physically contiguous
+ *		KERN_FAILURE		If the page cannot be looked up
+ *
+ * Implicit Returns:
+ *		*phys_entryp (modified)	If phys_entryp is non-NULL and
+ *					UPL_POP_PHYSICAL
+ *		*flagsp (modified)	If flagsp is non-NULL and there was
+ *					!UPL_POP_PHYSICAL and a KERN_SUCCESS
+ *
+ * Notes:	For object boundaries, it is considerably more efficient to
+ *		ensure that f_offset is in fact on a page boundary, as this
+ *		will avoid internal use of the hash table to identify the
+ *		page, and would therefore skip a number of early optimizations.
+ *		Since this is a page operation anyway, the caller should try
+ *		to pass only a page aligned offset because of this.
+ *
+ *		*flagsp may be modified even if this function fails.  If it is
+ *		modified, it will contain the condition of the page before the
+ *		requested operation was attempted; these will only include the
+ *		bitmap flags, and not the PL_POP_PHYSICAL, UPL_POP_DUMP,
+ *		UPL_POP_SET, or UPL_POP_CLR bits.
+ *
+ *		The flags field may contain a specific operation, such as
+ *		UPL_POP_PHYSICAL or UPL_POP_DUMP:
+ *
+ *		o	UPL_POP_PHYSICAL	Fail if not contiguous; if
+ *						*phys_entryp and successful, set
+ *						*phys_entryp
+ *		o	UPL_POP_DUMP		Dump the specified page
+ *
+ *		Otherwise, it is treated as a bitmap of one or more page
+ *		operations to perform on the final memory object; allowable
+ *		bit values are:
+ *
+ *		o	UPL_POP_DIRTY		The page is dirty
+ *		o	UPL_POP_PAGEOUT		The page is paged out
+ *		o	UPL_POP_PRECIOUS	The page is precious
+ *		o	UPL_POP_ABSENT		The page is absent
+ *		o	UPL_POP_BUSY		The page is busy
+ *
+ *		If the page status is only being queried and not modified, then
+ *		not other bits should be specified.  However, if it is being
+ *		modified, exactly ONE of the following bits should be set:
+ *
+ *		o	UPL_POP_SET		Set the current bitmap bits
+ *		o	UPL_POP_CLR		Clear the current bitmap bits
+ *
+ *		Thus to effect a combination of setting an clearing, it may be
+ *		necessary to call this function twice.  If this is done, the
+ *		set should be used before the clear, since clearing may trigger
+ *		a wakeup on the destination page, and if the page is backed by
+ *		an encrypted swap file, setting will trigger the decryption
+ *		needed before the wakeup occurs.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ubc_page_op</span>(
+	<span class="enscript-type">struct</span> vnode 	*vp,
+	off_t		f_offset,
+	<span class="enscript-type">int</span>		ops,
+	ppnum_t	*phys_entryp,
+	<span class="enscript-type">int</span>		*flagsp)
+{
+	memory_object_control_t		control;
+
+	control = ubc_getobject(vp, UBC_FLAGS_NONE);
+	<span class="enscript-keyword">if</span> (control == MEMORY_OBJECT_CONTROL_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-keyword">return</span> (memory_object_page_op(control,
+				      (memory_object_offset_t)f_offset,
+				      ops,
+				      phys_entryp,
+				      flagsp));
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_range_op
+ *
+ * Manipulate page state for a range of memory for a vnode with an associated
+ * ubc_info with an associated memory object control, when page level state is
+ * not required to be returned from the call (i.e. there are no phys_entryp or
+ * flagsp parameters to this call, and it takes a range which may contain
+ * multiple pages, rather than an offset interior to a single page).
+ *
+ * Parameters:	vp			The vnode backing the page
+ *		f_offset_beg		A file offset interior to the start page
+ *		f_offset_end		A file offset interior to the end page
+ *		ops			The operations to perform, as a bitmap
+ *					(see below for more information)
+ *		range			The address of an int; may be NULL to
+ *					ignore
+ *
+ * Returns:	KERN_SUCCESS		Success
+ *		KERN_INVALID_ARGUMENT	If the memory object control has no VM
+ *					object associated
+ *		KERN_INVALID_OBJECT	If the object is physically contiguous
+ *
+ * Implicit Returns:
+ *		*range (modified)	If range is non-NULL, its contents will
+ *					be modified to contain the number of
+ *					bytes successfully operated upon.
+ *
+ * Notes:	IMPORTANT: This function cannot be used on a range that
+ *		consists of physically contiguous pages.
+ *
+ *		For object boundaries, it is considerably more efficient to
+ *		ensure that f_offset_beg and f_offset_end are in fact on page
+ *		boundaries, as this will avoid internal use of the hash table
+ *		to identify the page, and would therefore skip a number of
+ *		early optimizations.  Since this is an operation on a set of
+ *		pages anyway, the caller should try to pass only a page aligned
+ *		offsets because of this.
+ *
+ *		*range will be modified only if this function succeeds.
+ *
+ *		The flags field MUST contain a specific operation; allowable
+ *		values are:
+ *
+ *		o	UPL_ROP_ABSENT	Returns the extent of the range
+ *					presented which is absent, starting
+ *					with the start address presented
+ *
+ *		o	UPL_ROP_PRESENT	Returns the extent of the range
+ *					presented which is present (resident),
+ *					starting with the start address
+ *					presented
+ *		o	UPL_ROP_DUMP	Dump the pages which are found in the
+ *					target object for the target range.
+ *
+ *		IMPORTANT: For UPL_ROP_ABSENT and UPL_ROP_PRESENT; if there are
+ *		multiple regions in the range, only the first matching region
+ *		is returned.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ubc_range_op</span>(
+	<span class="enscript-type">struct</span> vnode 	*vp,
+	off_t		f_offset_beg,
+	off_t		f_offset_end,
+	<span class="enscript-type">int</span>             ops,
+	<span class="enscript-type">int</span>             *range)
+{
+	memory_object_control_t		control;
+
+	control = ubc_getobject(vp, UBC_FLAGS_NONE);
+	<span class="enscript-keyword">if</span> (control == MEMORY_OBJECT_CONTROL_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-keyword">return</span> (memory_object_range_op(control,
+				      (memory_object_offset_t)f_offset_beg,
+				      (memory_object_offset_t)f_offset_end,
+				      ops,
+				      range));
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_create_upl
+ *
+ * Given a vnode, cause the population of a portion of the vm_object; based on
+ * the nature of the request, the pages returned may contain valid data, or
+ * they may be uninitialized.
+ *
+ * Parameters:	vp			The vnode from which to create the upl
+ *		f_offset		The start offset into the backing store
+ *					represented by the vnode
+ *		bufsize			The size of the upl to create
+ *		uplp			Pointer to the upl_t to receive the
+ *					created upl; MUST NOT be NULL
+ *		plp			Pointer to receive the internal page
+ *					list for the created upl; MAY be NULL
+ *					to ignore
+ *
+ * Returns:	KERN_SUCCESS		The requested upl has been created
+ *		KERN_INVALID_ARGUMENT	The bufsize argument is not an even
+ *					multiple of the page size
+ *		KERN_INVALID_ARGUMENT	There is no ubc_info associated with
+ *					the vnode, or there is no memory object
+ *					control associated with the ubc_info 
+ *	memory_object_upl_request:KERN_INVALID_VALUE
+ *					The supplied upl_flags argument is
+ *					invalid
+ * Implicit Returns:
+ *		*uplp (modified)	
+ *		*plp (modified)		If non-NULL, the value of *plp will be
+ *					modified to point to the internal page
+ *					list; this modification may occur even
+ *					if this function is unsuccessful, in
+ *					which case the contents may be invalid
+ *
+ * Note:	If successful, the returned *uplp MUST subsequently be freed
+ *		via a call to ubc_upl_commit(), ubc_upl_commit_range(),
+ *		ubc_upl_abort(), or ubc_upl_abort_range().
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ubc_create_upl</span>(
+	<span class="enscript-type">struct</span> vnode	*vp,
+	off_t 		f_offset,
+	<span class="enscript-type">int</span>		bufsize,
+	upl_t		*uplp,
+	upl_page_info_t	**plp,
+	<span class="enscript-type">int</span>		uplflags)
+{
+	memory_object_control_t		control;
+	kern_return_t			kr;
+
+	<span class="enscript-keyword">if</span> (plp != NULL)
+		*plp = NULL;
+	*uplp = NULL;
+	
+	<span class="enscript-keyword">if</span> (bufsize &amp; 0xfff)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-keyword">if</span> (bufsize &gt; MAX_UPL_SIZE_BYTES)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-keyword">if</span> (uplflags &amp; (UPL_UBC_MSYNC | UPL_UBC_PAGEOUT | UPL_UBC_PAGEIN)) {
+
+		<span class="enscript-keyword">if</span> (uplflags &amp; UPL_UBC_MSYNC) {
+			uplflags &amp;= UPL_RET_ONLY_DIRTY;
+
+			uplflags |= UPL_COPYOUT_FROM | UPL_CLEAN_IN_PLACE |
+				    UPL_SET_INTERNAL | UPL_SET_LITE;
+
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (uplflags &amp; UPL_UBC_PAGEOUT) {
+			uplflags &amp;= UPL_RET_ONLY_DIRTY;
+
+			<span class="enscript-keyword">if</span> (uplflags &amp; UPL_RET_ONLY_DIRTY)
+				uplflags |= UPL_NOBLOCK;
+
+			uplflags |= UPL_FOR_PAGEOUT | UPL_CLEAN_IN_PLACE |
+                                    UPL_COPYOUT_FROM | UPL_SET_INTERNAL | UPL_SET_LITE;
+		} <span class="enscript-keyword">else</span> {
+			uplflags |= UPL_RET_ONLY_ABSENT |
+				    UPL_NO_SYNC | UPL_CLEAN_IN_PLACE |
+				    UPL_SET_INTERNAL | UPL_SET_LITE;
+
+			<span class="enscript-comment">/*
+			 * if the requested size == PAGE_SIZE, we don't want to set
+			 * the UPL_NOBLOCK since we may be trying to recover from a
+			 * previous partial pagein I/O that occurred because we were low
+			 * on memory and bailed early in order to honor the UPL_NOBLOCK...
+			 * since we're only asking for a single page, we can block w/o fear
+			 * of tying up pages while waiting for more to become available
+			 */</span>
+			<span class="enscript-keyword">if</span> (bufsize &gt; PAGE_SIZE)
+				uplflags |= UPL_NOBLOCK;
+		}
+	} <span class="enscript-keyword">else</span> {
+		uplflags &amp;= ~UPL_FOR_PAGEOUT;
+
+		<span class="enscript-keyword">if</span> (uplflags &amp; UPL_WILL_BE_DUMPED) {
+			uplflags &amp;= ~UPL_WILL_BE_DUMPED;
+			uplflags |= (UPL_NO_SYNC|UPL_SET_INTERNAL);
+		} <span class="enscript-keyword">else</span>
+			uplflags |= (UPL_NO_SYNC|UPL_CLEAN_IN_PLACE|UPL_SET_INTERNAL);
+	}
+	control = ubc_getobject(vp, UBC_FLAGS_NONE);
+	<span class="enscript-keyword">if</span> (control == MEMORY_OBJECT_CONTROL_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	kr = memory_object_upl_request(control, f_offset, bufsize, uplp, NULL, NULL, uplflags);
+	<span class="enscript-keyword">if</span> (kr == KERN_SUCCESS &amp;&amp; plp != NULL)
+		*plp = UPL_GET_INTERNAL_PAGE_LIST(*uplp);
+	<span class="enscript-keyword">return</span> kr;
+}
+		
+					  		      
+<span class="enscript-comment">/*
+ * ubc_upl_maxbufsize
+ *
+ * Return the maximum bufsize ubc_create_upl( ) will take.
+ *
+ * Parameters:	none
+ *
+ * Returns:	maximum size buffer (in bytes) ubc_create_upl( ) will take.
+ */</span>
+upl_size_t 
+<span class="enscript-function-name">ubc_upl_maxbufsize</span>(
+	<span class="enscript-type">void</span>)
+{
+	<span class="enscript-keyword">return</span>(MAX_UPL_SIZE_BYTES);
+}
+
+<span class="enscript-comment">/*
+ * ubc_upl_map
+ *
+ * Map the page list assocated with the supplied upl into the kernel virtual
+ * address space at the virtual address indicated by the dst_addr argument;
+ * the entire upl is mapped
+ *
+ * Parameters:	upl			The upl to map
+ *		dst_addr		The address at which to map the upl
+ *
+ * Returns:	KERN_SUCCESS		The upl has been mapped
+ *		KERN_INVALID_ARGUMENT	The upl is UPL_NULL
+ *		KERN_FAILURE		The upl is already mapped
+ *	vm_map_enter:KERN_INVALID_ARGUMENT
+ *					A failure code from vm_map_enter() due
+ *					to an invalid argument
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ubc_upl_map</span>(
+	upl_t		upl,
+	vm_offset_t	*dst_addr)
+{
+	<span class="enscript-keyword">return</span> (vm_upl_map(kernel_map, upl, dst_addr));
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_upl_unmap
+ *
+ * Unmap the page list assocated with the supplied upl from the kernel virtual
+ * address space; the entire upl is unmapped.
+ *
+ * Parameters:	upl			The upl to unmap
+ *
+ * Returns:	KERN_SUCCESS		The upl has been unmapped
+ *		KERN_FAILURE		The upl is not currently mapped
+ *		KERN_INVALID_ARGUMENT	If the upl is UPL_NULL
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ubc_upl_unmap</span>(
+	upl_t	upl)
+{
+	<span class="enscript-keyword">return</span>(vm_upl_unmap(kernel_map, upl));
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_upl_commit
+ *
+ * Commit the contents of the upl to the backing store
+ *
+ * Parameters:	upl			The upl to commit
+ *
+ * Returns:	KERN_SUCCESS		The upl has been committed
+ *		KERN_INVALID_ARGUMENT	The supplied upl was UPL_NULL
+ *		KERN_FAILURE		The supplied upl does not represent
+ *					device memory, and the offset plus the
+ *					size would exceed the actual size of
+ *					the upl
+ *
+ * Notes:	In practice, the only return value for this function should be
+ *		KERN_SUCCESS, unless there has been data structure corruption;
+ *		since the upl is deallocated regardless of success or failure,
+ *		there's really nothing to do about this other than panic.
+ *
+ *		IMPORTANT: Use of this function should not be mixed with use of
+ *		ubc_upl_commit_range(), due to the unconditional deallocation
+ *		by this function.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ubc_upl_commit</span>(
+	upl_t 			upl)
+{
+	upl_page_info_t	*pl;
+	kern_return_t 	kr;
+
+	pl = UPL_GET_INTERNAL_PAGE_LIST(upl);
+	kr = upl_commit(upl, pl, MAX_UPL_SIZE_BYTES &gt;&gt; PAGE_SHIFT);
+	upl_deallocate(upl);
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_upl_commit
+ *
+ * Commit the contents of the specified range of the upl to the backing store
+ *
+ * Parameters:	upl			The upl to commit
+ *		offset			The offset into the upl
+ *		size			The size of the region to be committed,
+ *					starting at the specified offset
+ *		flags			commit type (see below)
+ *
+ * Returns:	KERN_SUCCESS		The range has been committed
+ *		KERN_INVALID_ARGUMENT	The supplied upl was UPL_NULL
+ *		KERN_FAILURE		The supplied upl does not represent
+ *					device memory, and the offset plus the
+ *					size would exceed the actual size of
+ *					the upl
+ *
+ * Notes:	IMPORTANT: If the commit is successful, and the object is now
+ *		empty, the upl will be deallocated.  Since the caller cannot
+ *		check that this is the case, the UPL_COMMIT_FREE_ON_EMPTY flag
+ *		should generally only be used when the offset is 0 and the size
+ *		is equal to the upl size.
+ *
+ *		The flags argument is a bitmap of flags on the rage of pages in
+ *		the upl to be committed; allowable flags are:
+ *
+ *		o	UPL_COMMIT_FREE_ON_EMPTY	Free the upl when it is
+ *							both empty and has been
+ *							successfully committed
+ *		o	UPL_COMMIT_CLEAR_DIRTY		Clear each pages dirty
+ *							bit; will prevent a
+ *							later pageout
+ *		o	UPL_COMMIT_SET_DIRTY		Set each pages dirty
+ *							bit; will cause a later
+ *							pageout
+ *		o	UPL_COMMIT_INACTIVATE		Clear each pages
+ *							reference bit; the page
+ *							will not be accessed
+ *		o	UPL_COMMIT_ALLOW_ACCESS		Unbusy each page; pages
+ *							become busy when an
+ *							IOMemoryDescriptor is
+ *							mapped or redirected,
+ *							and we have to wait for
+ *							an IOKit driver
+ *
+ *		The flag UPL_COMMIT_NOTIFY_EMPTY is used internally, and should
+ *		not be specified by the caller.
+ *
+ *		The UPL_COMMIT_CLEAR_DIRTY and UPL_COMMIT_SET_DIRTY flags are
+ *		mutually exclusive, and should not be combined.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ubc_upl_commit_range</span>(
+	upl_t 			upl,
+	upl_offset_t		offset,
+	upl_size_t		size,
+	<span class="enscript-type">int</span>				flags)
+{
+	upl_page_info_t	*pl;
+	boolean_t		empty;
+	kern_return_t 	kr;
+
+	<span class="enscript-keyword">if</span> (flags &amp; UPL_COMMIT_FREE_ON_EMPTY)
+		flags |= UPL_COMMIT_NOTIFY_EMPTY;
+
+	<span class="enscript-keyword">if</span> (flags &amp; UPL_COMMIT_KERNEL_ONLY_FLAGS) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	pl = UPL_GET_INTERNAL_PAGE_LIST(upl);
+
+	kr = upl_commit_range(upl, offset, size, flags,
+			      pl, MAX_UPL_SIZE_BYTES &gt;&gt; PAGE_SHIFT, &amp;empty);
+
+	<span class="enscript-keyword">if</span>((flags &amp; UPL_COMMIT_FREE_ON_EMPTY) &amp;&amp; empty)
+		upl_deallocate(upl);
+
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_upl_abort_range
+ *
+ * Abort the contents of the specified range of the specified upl
+ *
+ * Parameters:	upl			The upl to abort
+ *		offset			The offset into the upl
+ *		size			The size of the region to be aborted,
+ *					starting at the specified offset
+ *		abort_flags		abort type (see below)
+ *
+ * Returns:	KERN_SUCCESS		The range has been aborted
+ *		KERN_INVALID_ARGUMENT	The supplied upl was UPL_NULL
+ *		KERN_FAILURE		The supplied upl does not represent
+ *					device memory, and the offset plus the
+ *					size would exceed the actual size of
+ *					the upl
+ *
+ * Notes:	IMPORTANT: If the abort is successful, and the object is now
+ *		empty, the upl will be deallocated.  Since the caller cannot
+ *		check that this is the case, the UPL_ABORT_FREE_ON_EMPTY flag
+ *		should generally only be used when the offset is 0 and the size
+ *		is equal to the upl size.
+ *
+ *		The abort_flags argument is a bitmap of flags on the range of
+ *		pages in the upl to be aborted; allowable flags are:
+ *
+ *		o	UPL_ABORT_FREE_ON_EMPTY	Free the upl when it is both
+ *						empty and has been successfully
+ *						aborted
+ *		o	UPL_ABORT_RESTART	The operation must be restarted
+ *		o	UPL_ABORT_UNAVAILABLE	The pages are unavailable
+ *		o	UPL_ABORT_ERROR		An I/O error occurred
+ *		o	UPL_ABORT_DUMP_PAGES	Just free the pages
+ *		o	UPL_ABORT_NOTIFY_EMPTY	RESERVED
+ *		o	UPL_ABORT_ALLOW_ACCESS	RESERVED
+ *
+ *		The UPL_ABORT_NOTIFY_EMPTY is an internal use flag and should
+ *		not be specified by the caller.  It is intended to fulfill the
+ *		same role as UPL_COMMIT_NOTIFY_EMPTY does in the function
+ *		ubc_upl_commit_range(), but is never referenced internally.
+ *
+ *		The UPL_ABORT_ALLOW_ACCESS is defined, but neither set nor
+ *		referenced; do not use it.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ubc_upl_abort_range</span>(
+	upl_t			upl,
+	upl_offset_t		offset,
+	upl_size_t		size,
+	<span class="enscript-type">int</span>				abort_flags)
+{
+	kern_return_t 	kr;
+	boolean_t		empty = FALSE;
+
+	<span class="enscript-keyword">if</span> (abort_flags &amp; UPL_ABORT_FREE_ON_EMPTY)
+		abort_flags |= UPL_ABORT_NOTIFY_EMPTY;
+
+	kr = upl_abort_range(upl, offset, size, abort_flags, &amp;empty);
+
+	<span class="enscript-keyword">if</span>((abort_flags &amp; UPL_ABORT_FREE_ON_EMPTY) &amp;&amp; empty)
+		upl_deallocate(upl);
+
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_upl_abort
+ *
+ * Abort the contents of the specified upl
+ *
+ * Parameters:	upl			The upl to abort
+ *		abort_type		abort type (see below)
+ *
+ * Returns:	KERN_SUCCESS		The range has been aborted
+ *		KERN_INVALID_ARGUMENT	The supplied upl was UPL_NULL
+ *		KERN_FAILURE		The supplied upl does not represent
+ *					device memory, and the offset plus the
+ *					size would exceed the actual size of
+ *					the upl
+ *
+ * Notes:	IMPORTANT: If the abort is successful, and the object is now
+ *		empty, the upl will be deallocated.  Since the caller cannot
+ *		check that this is the case, the UPL_ABORT_FREE_ON_EMPTY flag
+ *		should generally only be used when the offset is 0 and the size
+ *		is equal to the upl size.
+ *
+ *		The abort_type is a bitmap of flags on the range of
+ *		pages in the upl to be aborted; allowable flags are:
+ *
+ *		o	UPL_ABORT_FREE_ON_EMPTY	Free the upl when it is both
+ *						empty and has been successfully
+ *						aborted
+ *		o	UPL_ABORT_RESTART	The operation must be restarted
+ *		o	UPL_ABORT_UNAVAILABLE	The pages are unavailable
+ *		o	UPL_ABORT_ERROR		An I/O error occurred
+ *		o	UPL_ABORT_DUMP_PAGES	Just free the pages
+ *		o	UPL_ABORT_NOTIFY_EMPTY	RESERVED
+ *		o	UPL_ABORT_ALLOW_ACCESS	RESERVED
+ *
+ *		The UPL_ABORT_NOTIFY_EMPTY is an internal use flag and should
+ *		not be specified by the caller.  It is intended to fulfill the
+ *		same role as UPL_COMMIT_NOTIFY_EMPTY does in the function
+ *		ubc_upl_commit_range(), but is never referenced internally.
+ *
+ *		The UPL_ABORT_ALLOW_ACCESS is defined, but neither set nor
+ *		referenced; do not use it.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ubc_upl_abort</span>(
+	upl_t			upl,
+	<span class="enscript-type">int</span>				abort_type)
+{
+	kern_return_t	kr;
+
+	kr = upl_abort(upl, abort_type);
+	upl_deallocate(upl);
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+<span class="enscript-comment">/*
+ * ubc_upl_pageinfo
+ *
+ *  Retrieve the internal page list for the specified upl
+ *
+ * Parameters:	upl			The upl to obtain the page list from
+ *
+ * Returns:	!NULL			The (upl_page_info_t *) for the page
+ *					list internal to the upl
+ *		NULL			Error/no page list associated
+ *
+ * Notes:	IMPORTANT: The function is only valid on internal objects
+ *		where the list request was made with the UPL_INTERNAL flag.
+ *
+ *		This function is a utility helper function, since some callers
+ *		may not have direct access to the header defining the macro,
+ *		due to abstraction layering constraints.
+ */</span>
+upl_page_info_t *
+<span class="enscript-function-name">ubc_upl_pageinfo</span>(
+	upl_t			upl)
+{	       
+	<span class="enscript-keyword">return</span> (UPL_GET_INTERNAL_PAGE_LIST(upl));
+}
+
+
+<span class="enscript-type">int</span> 
+<span class="enscript-function-name">UBCINFOEXISTS</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> vnode * vp)
+{
+        <span class="enscript-keyword">return</span>((vp) &amp;&amp; ((vp)-&gt;v_type == VREG) &amp;&amp; ((vp)-&gt;v_ubcinfo != UBC_INFO_NULL));
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ubc_upl_range_needed</span>(
+	upl_t		upl,
+	<span class="enscript-type">int</span>		index,
+	<span class="enscript-type">int</span>		count)
+{
+	upl_range_needed(upl, index, count);
+}
+
+boolean_t <span class="enscript-function-name">ubc_is_mapped</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> vnode *vp, boolean_t *writable)
+{
+	<span class="enscript-keyword">if</span> (!UBCINFOEXISTS(vp) || !ISSET(vp-&gt;v_ubcinfo-&gt;ui_flags, UI_ISMAPPED))
+		<span class="enscript-keyword">return</span> FALSE;
+	<span class="enscript-keyword">if</span> (writable)
+		*writable = ISSET(vp-&gt;v_ubcinfo-&gt;ui_flags, UI_MAPPEDWRITE);
+	<span class="enscript-keyword">return</span> TRUE;
+}
+
+boolean_t <span class="enscript-function-name">ubc_is_mapped_writable</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> vnode *vp)
+{
+	boolean_t writable;
+	<span class="enscript-keyword">return</span> ubc_is_mapped(vp, &amp;writable) &amp;&amp; writable;
+}
+
+
+<span class="enscript-comment">/*
+ * CODE SIGNING
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">CS_BLOB_PAGEABLE</span> 0
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> SInt32 cs_blob_size = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> SInt32 cs_blob_count = 0;
+<span class="enscript-type">static</span> SInt32 cs_blob_size_peak = 0;
+<span class="enscript-type">static</span> UInt32 cs_blob_size_max = 0;
+<span class="enscript-type">static</span> SInt32 cs_blob_count_peak = 0;
+
+<span class="enscript-type">int</span> cs_validation = 1;
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">SECURE_KERNEL</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, cs_validation, CTLFLAG_RW | CTLFLAG_LOCKED, &amp;cs_validation, 0, <span class="enscript-string">&quot;Do validate code signatures&quot;</span>);
+#<span class="enscript-reference">endif</span>
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, cs_blob_count, CTLFLAG_RD | CTLFLAG_LOCKED, (<span class="enscript-type">int</span> *)(uintptr_t)&amp;cs_blob_count, 0, <span class="enscript-string">&quot;Current number of code signature blobs&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, cs_blob_size, CTLFLAG_RD | CTLFLAG_LOCKED, (<span class="enscript-type">int</span> *)(uintptr_t)&amp;cs_blob_size, 0, <span class="enscript-string">&quot;Current size of all code signature blobs&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, cs_blob_count_peak, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;cs_blob_count_peak, 0, <span class="enscript-string">&quot;Peak number of code signature blobs&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, cs_blob_size_peak, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;cs_blob_size_peak, 0, <span class="enscript-string">&quot;Peak size of code signature blobs&quot;</span>);
+<span class="enscript-function-name">SYSCTL_INT</span>(_vm, OID_AUTO, cs_blob_size_max, CTLFLAG_RD | CTLFLAG_LOCKED, &amp;cs_blob_size_max, 0, <span class="enscript-string">&quot;Size of biggest code signature blob&quot;</span>);
+
+<span class="enscript-comment">/*
+ * Function: csblob_parse_teamid
+ *
+ * Description: This function returns a pointer to the team id
+ 		stored within the codedirectory of the csblob.
+		If the codedirectory predates team-ids, it returns
+		NULL.
+		This does not copy the name but returns a pointer to
+		it within the CD. Subsequently, the CD must be
+		available when this is used.
+*/</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">csblob_parse_teamid</span>(<span class="enscript-type">struct</span> cs_blob *csblob)
+{
+	<span class="enscript-type">const</span> CS_CodeDirectory *cd;
+
+	<span class="enscript-keyword">if</span> ((cd = (<span class="enscript-type">const</span> CS_CodeDirectory *)csblob_find_blob(
+						csblob, CSSLOT_CODEDIRECTORY, CSMAGIC_CODEDIRECTORY)) == NULL)
+		<span class="enscript-keyword">return</span> NULL;
+
+	<span class="enscript-keyword">if</span> (ntohl(cd-&gt;version) &lt; CS_SUPPORTSTEAMID)
+		<span class="enscript-keyword">return</span> NULL;
+
+	<span class="enscript-keyword">if</span> (cd-&gt;teamOffset == 0)
+		<span class="enscript-keyword">return</span> NULL;
+
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name = ((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)cd) + ntohl(cd-&gt;teamOffset);
+	<span class="enscript-keyword">if</span> (cs_debug &gt; 1)
+		printf(<span class="enscript-string">&quot;found team-id %s in cdblob\n&quot;</span>, name);
+
+	<span class="enscript-keyword">return</span> name;
+}
+
+
+kern_return_t
+<span class="enscript-function-name">ubc_cs_blob_allocate</span>(
+	vm_offset_t	*blob_addr_p,
+	vm_size_t	*blob_size_p)
+{
+	kern_return_t	kr;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CS_BLOB_PAGEABLE</span>
+	*blob_size_p = round_page(*blob_size_p);
+	kr = kmem_alloc(kernel_map, blob_addr_p, *blob_size_p, VM_KERN_MEMORY_SECURITY);
+#<span class="enscript-reference">else</span>	<span class="enscript-comment">/* CS_BLOB_PAGEABLE */</span>
+	*blob_addr_p = (vm_offset_t) kalloc_tag(*blob_size_p, VM_KERN_MEMORY_SECURITY);
+	<span class="enscript-keyword">if</span> (*blob_addr_p == 0) {
+		kr = KERN_NO_SPACE;
+	} <span class="enscript-keyword">else</span> {
+		kr = KERN_SUCCESS;
+	}
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* CS_BLOB_PAGEABLE */</span>
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ubc_cs_blob_deallocate</span>(
+	vm_offset_t	blob_addr,
+	vm_size_t	blob_size)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CS_BLOB_PAGEABLE</span>
+	kmem_free(kernel_map, blob_addr, blob_size);
+#<span class="enscript-reference">else</span>	<span class="enscript-comment">/* CS_BLOB_PAGEABLE */</span>
+	kfree((<span class="enscript-type">void</span> *) blob_addr, blob_size);
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* CS_BLOB_PAGEABLE */</span>
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_cs_blob_add</span>(
+	<span class="enscript-type">struct</span> vnode	*vp,
+	cpu_type_t	cputype,
+	off_t		base_offset,
+	vm_address_t	addr,
+	vm_size_t	size,
+	__unused <span class="enscript-type">int</span>	flags,
+	<span class="enscript-type">struct</span> cs_blob	**ret_blob)
+{
+	kern_return_t		kr;
+	<span class="enscript-type">struct</span> ubc_info		*uip;
+	<span class="enscript-type">struct</span> cs_blob		*blob, *oblob;
+	<span class="enscript-type">int</span>			error;
+	ipc_port_t		blob_handle;
+	memory_object_size_t	blob_size;
+	<span class="enscript-type">const</span> CS_CodeDirectory *cd;
+	off_t			blob_start_offset, blob_end_offset;
+	<span class="enscript-type">union</span> cs_hash_union	mdctx;
+	boolean_t		record_mtime;
+	<span class="enscript-type">int</span>			cs_flags;
+
+	record_mtime = FALSE;
+	cs_flags = 0;
+	<span class="enscript-keyword">if</span> (ret_blob)
+	    *ret_blob = NULL;
+
+	blob_handle = IPC_PORT_NULL;
+
+	blob = (<span class="enscript-type">struct</span> cs_blob *) kalloc(<span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> cs_blob));
+	<span class="enscript-keyword">if</span> (blob == NULL) {
+		<span class="enscript-keyword">return</span> ENOMEM;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CS_BLOB_PAGEABLE</span>
+	<span class="enscript-comment">/* get a memory entry on the blob */</span>
+	blob_size = (memory_object_size_t) size;
+	kr = mach_make_memory_entry_64(kernel_map,
+				       &amp;blob_size,
+				       addr,
+				       VM_PROT_READ,
+				       &amp;blob_handle,
+				       IPC_PORT_NULL);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (memory_object_round_page(blob_size) !=
+	    (memory_object_size_t) round_page(size)) {
+		printf(<span class="enscript-string">&quot;ubc_cs_blob_add: size mismatch 0x%llx 0x%lx !?\n&quot;</span>,
+		       blob_size, (size_t)size);
+		panic(<span class="enscript-string">&quot;XXX FBDP size mismatch 0x%llx 0x%lx\n&quot;</span>, blob_size, (size_t)size);
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+#<span class="enscript-reference">else</span>
+	blob_size = (memory_object_size_t) size;
+	blob_handle = IPC_PORT_NULL;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* fill in the new blob */</span>
+	blob-&gt;csb_cpu_type = cputype;
+	blob-&gt;csb_base_offset = base_offset;
+	blob-&gt;csb_mem_size = size;
+	blob-&gt;csb_mem_offset = 0;
+	blob-&gt;csb_mem_handle = blob_handle;
+	blob-&gt;csb_mem_kaddr = addr;
+	blob-&gt;csb_flags = 0;
+	blob-&gt;csb_platform_binary = 0;
+	blob-&gt;csb_platform_path = 0;
+	blob-&gt;csb_teamid = NULL;
+	
+	<span class="enscript-comment">/*
+	 * Validate the blob's contents
+	 */</span>
+
+	error = cs_validate_csblob((<span class="enscript-type">const</span> uint8_t *)addr, size, &amp;cd);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (cs_debug)
+			printf(<span class="enscript-string">&quot;CODESIGNING: csblob invalid: %d\n&quot;</span>, error);
+		blob-&gt;csb_flags = 0;
+		blob-&gt;csb_start_offset = 0;
+		blob-&gt;csb_end_offset = 0;
+		memset(blob-&gt;csb_cdhash, 0, <span class="enscript-keyword">sizeof</span>(blob-&gt;csb_cdhash));
+		<span class="enscript-comment">/* let the vnode checker determine if the signature is valid or not */</span>
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *md_base;
+		uint8_t hash[CS_HASH_MAX_SIZE];
+		<span class="enscript-type">int</span> md_size;
+
+		blob-&gt;csb_hashtype = cs_find_md(cd-&gt;hashType);
+		<span class="enscript-keyword">if</span> (blob-&gt;csb_hashtype == NULL || blob-&gt;csb_hashtype-&gt;cs_digest_size &gt; <span class="enscript-keyword">sizeof</span>(hash))
+			panic(<span class="enscript-string">&quot;validated CodeDirectory but unsupported type&quot;</span>);
+		<span class="enscript-keyword">if</span> (blob-&gt;csb_hashtype-&gt;cs_cd_size &lt; CS_CDHASH_LEN) {
+			<span class="enscript-keyword">if</span> (cs_debug) 
+				printf(<span class="enscript-string">&quot;cs_cd_size is too small for a cdhash\n&quot;</span>);
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		    
+		blob-&gt;csb_flags = (ntohl(cd-&gt;flags) &amp; CS_ALLOWED_MACHO) | CS_VALID;
+		blob-&gt;csb_end_offset = round_page_4K(ntohl(cd-&gt;codeLimit));
+		<span class="enscript-keyword">if</span>((ntohl(cd-&gt;version) &gt;= CS_SUPPORTSSCATTER) &amp;&amp; (ntohl(cd-&gt;scatterOffset))) {
+			<span class="enscript-type">const</span> SC_Scatter *scatter = (<span class="enscript-type">const</span> SC_Scatter*)
+				((<span class="enscript-type">const</span> <span class="enscript-type">char</span>*)cd + ntohl(cd-&gt;scatterOffset));
+			blob-&gt;csb_start_offset = ntohl(scatter-&gt;base) * PAGE_SIZE_4K;
+		} <span class="enscript-keyword">else</span> {
+			blob-&gt;csb_start_offset = 0;
+		}
+		<span class="enscript-comment">/* compute the blob's cdhash */</span>
+		md_base = (<span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *) cd;
+		md_size = ntohl(cd-&gt;length);
+
+		blob-&gt;csb_hashtype-&gt;cs_init(&amp;mdctx);
+		blob-&gt;csb_hashtype-&gt;cs_update(&amp;mdctx, md_base, md_size);
+		blob-&gt;csb_hashtype-&gt;cs_final(hash, &amp;mdctx);
+
+		memcpy(blob-&gt;csb_cdhash, hash, CS_CDHASH_LEN);
+	}
+
+	<span class="enscript-comment">/* 
+	 * Let policy module check whether the blob's signature is accepted.
+	 */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_vnode_check_signature(vp, 
+					  base_offset, 
+					  blob-&gt;csb_cdhash, 
+					  (<span class="enscript-type">const</span> <span class="enscript-type">void</span>*)addr, size,
+					  flags, &amp;cs_flags);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (cs_debug) 
+			printf(<span class="enscript-string">&quot;check_signature[pid: %d], error = %d\n&quot;</span>, current_proc()-&gt;p_pid, error);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> ((flags &amp; MAC_VNODE_CHECK_DYLD_SIM) &amp;&amp; !(cs_flags &amp; CS_PLATFORM_BINARY)) {
+		<span class="enscript-keyword">if</span> (cs_debug)
+			printf(<span class="enscript-string">&quot;check_signature[pid: %d], is not apple signed\n&quot;</span>, current_proc()-&gt;p_pid);
+		error = EPERM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+#<span class="enscript-reference">endif</span>	
+	
+	<span class="enscript-keyword">if</span> (cs_flags &amp; CS_PLATFORM_BINARY) {
+		<span class="enscript-keyword">if</span> (cs_debug &gt; 1)
+			printf(<span class="enscript-string">&quot;check_signature[pid: %d]: platform binary\n&quot;</span>, current_proc()-&gt;p_pid);
+		blob-&gt;csb_platform_binary = 1;
+		blob-&gt;csb_platform_path = !!(cs_flags &amp; CS_PLATFORM_PATH);
+	} <span class="enscript-keyword">else</span> {
+		blob-&gt;csb_platform_binary = 0;
+		blob-&gt;csb_platform_path = 0;
+		blob-&gt;csb_teamid = csblob_parse_teamid(blob);
+		<span class="enscript-keyword">if</span> (cs_debug &gt; 1) {
+			<span class="enscript-keyword">if</span> (blob-&gt;csb_teamid)
+				printf(<span class="enscript-string">&quot;check_signature[pid: %d]: team-id is %s\n&quot;</span>, current_proc()-&gt;p_pid, blob-&gt;csb_teamid);
+			<span class="enscript-keyword">else</span>
+				printf(<span class="enscript-string">&quot;check_signature[pid: %d]: no team-id\n&quot;</span>, current_proc()-&gt;p_pid);
+		}
+	}
+	
+	<span class="enscript-comment">/*
+	 * Validate the blob's coverage
+	 */</span>
+	blob_start_offset = blob-&gt;csb_base_offset + blob-&gt;csb_start_offset;
+	blob_end_offset = blob-&gt;csb_base_offset + blob-&gt;csb_end_offset;
+
+	<span class="enscript-keyword">if</span> (blob_start_offset &gt;= blob_end_offset ||
+	    blob_start_offset &lt; 0 ||
+	    blob_end_offset &lt;= 0) {
+		<span class="enscript-comment">/* reject empty or backwards blob */</span>
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	vnode_lock(vp);
+	<span class="enscript-keyword">if</span> (! UBCINFOEXISTS(vp)) {
+		vnode_unlock(vp);
+		error = ENOENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	uip = vp-&gt;v_ubcinfo;
+
+	<span class="enscript-comment">/* check if this new blob overlaps with an existing blob */</span>
+	<span class="enscript-keyword">for</span> (oblob = uip-&gt;cs_blobs;
+	     oblob != NULL;
+	     oblob = oblob-&gt;csb_next) {
+		 off_t oblob_start_offset, oblob_end_offset;
+
+		 <span class="enscript-comment">/* check for conflicting teamid */</span>
+		 <span class="enscript-keyword">if</span> (blob-&gt;csb_platform_binary) { <span class="enscript-comment">//platform binary needs to be the same for app slices
+</span>			 <span class="enscript-keyword">if</span> (!oblob-&gt;csb_platform_binary) {
+				 vnode_unlock(vp);
+				 error = EALREADY;
+				 <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			 }
+		 } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (blob-&gt;csb_teamid) { <span class="enscript-comment">//teamid binary needs to be the same for app slices
+</span>		 	<span class="enscript-keyword">if</span> (oblob-&gt;csb_platform_binary ||
+			    oblob-&gt;csb_teamid == NULL ||
+			    strcmp(oblob-&gt;csb_teamid, blob-&gt;csb_teamid) != 0) {
+				vnode_unlock(vp);
+				error = EALREADY;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+		 } <span class="enscript-keyword">else</span> { <span class="enscript-comment">// non teamid binary needs to be the same for app slices
+</span>		 	<span class="enscript-keyword">if</span> (oblob-&gt;csb_platform_binary ||
+				oblob-&gt;csb_teamid != NULL) {
+				vnode_unlock(vp);
+				error = EALREADY;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+		 }
+
+		 oblob_start_offset = (oblob-&gt;csb_base_offset +
+				       oblob-&gt;csb_start_offset);
+		 oblob_end_offset = (oblob-&gt;csb_base_offset +
+				     oblob-&gt;csb_end_offset);
+		 <span class="enscript-keyword">if</span> (blob_start_offset &gt;= oblob_end_offset ||
+		     blob_end_offset &lt;= oblob_start_offset) {
+			 <span class="enscript-comment">/* no conflict with this existing blob */</span>
+		 } <span class="enscript-keyword">else</span> {
+			 <span class="enscript-comment">/* conflict ! */</span>
+			 <span class="enscript-keyword">if</span> (blob_start_offset == oblob_start_offset &amp;&amp;
+			     blob_end_offset == oblob_end_offset &amp;&amp;
+			     blob-&gt;csb_mem_size == oblob-&gt;csb_mem_size &amp;&amp;
+			     blob-&gt;csb_flags == oblob-&gt;csb_flags &amp;&amp;
+			     (blob-&gt;csb_cpu_type == CPU_TYPE_ANY ||
+			      oblob-&gt;csb_cpu_type == CPU_TYPE_ANY ||
+			      blob-&gt;csb_cpu_type == oblob-&gt;csb_cpu_type) &amp;&amp;
+			     !bcmp(blob-&gt;csb_cdhash,
+				   oblob-&gt;csb_cdhash,
+				   CS_CDHASH_LEN)) {
+				 <span class="enscript-comment">/*
+				  * We already have this blob:
+				  * we'll return success but
+				  * throw away the new blob.
+				  */</span>
+				 <span class="enscript-keyword">if</span> (oblob-&gt;csb_cpu_type == CPU_TYPE_ANY) {
+					 <span class="enscript-comment">/*
+					  * The old blob matches this one
+					  * but doesn't have any CPU type.
+					  * Update it with whatever the caller
+					  * provided this time.
+					  */</span>
+					 oblob-&gt;csb_cpu_type = cputype;
+				 }
+				 vnode_unlock(vp);
+				 <span class="enscript-keyword">if</span> (ret_blob)
+					 *ret_blob = oblob;
+				 error = EAGAIN;
+				 <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			 } <span class="enscript-keyword">else</span> {
+				 <span class="enscript-comment">/* different blob: reject the new one */</span>
+				 vnode_unlock(vp);
+				 error = EALREADY;
+				 <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			 }
+		 }
+
+	}
+
+
+	<span class="enscript-comment">/* mark this vnode's VM object as having &quot;signed pages&quot; */</span>
+	kr = memory_object_signed(uip-&gt;ui_control, TRUE);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		vnode_unlock(vp);
+		error = ENOENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (uip-&gt;cs_blobs == NULL) {
+		<span class="enscript-comment">/* loading 1st blob: record the file's current &quot;modify time&quot; */</span>
+		record_mtime = TRUE;
+	}
+
+	<span class="enscript-comment">/* set the generation count for cs_blobs */</span>
+	uip-&gt;cs_add_gen = cs_blob_generation_count;
+
+	<span class="enscript-comment">/*
+	 * Add this blob to the list of blobs for this vnode.
+	 * We always add at the front of the list and we never remove a
+	 * blob from the list, so ubc_cs_get_blobs() can return whatever
+	 * the top of the list was and that list will remain valid
+	 * while we validate a page, even after we release the vnode's lock.
+	 */</span>
+	blob-&gt;csb_next = uip-&gt;cs_blobs;
+	uip-&gt;cs_blobs = blob;
+
+	OSAddAtomic(+1, &amp;cs_blob_count);
+	<span class="enscript-keyword">if</span> (cs_blob_count &gt; cs_blob_count_peak) {
+		cs_blob_count_peak = cs_blob_count; <span class="enscript-comment">/* XXX atomic ? */</span>
+	}
+	OSAddAtomic((SInt32) +blob-&gt;csb_mem_size, &amp;cs_blob_size);
+	<span class="enscript-keyword">if</span> ((SInt32) cs_blob_size &gt; cs_blob_size_peak) {
+		cs_blob_size_peak = (SInt32) cs_blob_size; <span class="enscript-comment">/* XXX atomic ? */</span>
+	}
+	<span class="enscript-keyword">if</span> ((UInt32) blob-&gt;csb_mem_size &gt; cs_blob_size_max) {
+		cs_blob_size_max = (UInt32) blob-&gt;csb_mem_size;
+	}
+
+	<span class="enscript-keyword">if</span> (cs_debug &gt; 1) {
+		proc_t p;
+		<span class="enscript-type">const</span> <span class="enscript-type">char</span> *name = vnode_getname_printable(vp);
+		p = current_proc();
+		printf(<span class="enscript-string">&quot;CODE SIGNING: proc %d(%s) &quot;</span>
+		       <span class="enscript-string">&quot;loaded %s signatures for file (%s) &quot;</span>
+		       <span class="enscript-string">&quot;range 0x%llx:0x%llx flags 0x%x\n&quot;</span>,
+		       p-&gt;p_pid, p-&gt;p_comm,
+		       blob-&gt;csb_cpu_type == -1 ? <span class="enscript-string">&quot;detached&quot;</span> : <span class="enscript-string">&quot;embedded&quot;</span>,
+		       name,
+		       blob-&gt;csb_base_offset + blob-&gt;csb_start_offset,
+		       blob-&gt;csb_base_offset + blob-&gt;csb_end_offset,
+		       blob-&gt;csb_flags);
+		vnode_putname_printable(name);
+	}
+
+	vnode_unlock(vp);
+
+	<span class="enscript-keyword">if</span> (record_mtime) {
+		vnode_mtime(vp, &amp;uip-&gt;cs_mtime, vfs_context_current());
+	}
+
+	<span class="enscript-keyword">if</span> (ret_blob)
+		*ret_blob = blob;
+
+	error = 0;	<span class="enscript-comment">/* success ! */</span>
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (cs_debug)
+			printf(<span class="enscript-string">&quot;check_signature[pid: %d]: error = %d\n&quot;</span>, current_proc()-&gt;p_pid, error);
+
+		<span class="enscript-comment">/* we failed; release what we allocated */</span>
+		<span class="enscript-keyword">if</span> (blob) {
+			kfree(blob, <span class="enscript-keyword">sizeof</span> (*blob));
+			blob = NULL;
+		}
+		<span class="enscript-keyword">if</span> (blob_handle != IPC_PORT_NULL) {
+			mach_memory_entry_port_release(blob_handle);
+			blob_handle = IPC_PORT_NULL;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (error == EAGAIN) {
+		<span class="enscript-comment">/*
+		 * See above:  error is EAGAIN if we were asked 
+		 * to add an existing blob again.  We cleaned the new
+		 * blob and we want to return success.
+		 */</span>
+		error = 0;
+		<span class="enscript-comment">/*
+		 * Since we're not failing, consume the data we received.
+		 */</span>
+		ubc_cs_blob_deallocate(addr, size);
+	}
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">csvnode_print_debug</span>(<span class="enscript-type">struct</span> vnode *vp)
+{
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*name = NULL;
+	<span class="enscript-type">struct</span> ubc_info	*uip;
+	<span class="enscript-type">struct</span> cs_blob *blob;
+
+	name = vnode_getname_printable(vp);
+	<span class="enscript-keyword">if</span> (name) {
+		printf(<span class="enscript-string">&quot;csvnode: name: %s\n&quot;</span>, name);
+		vnode_putname_printable(name);
+	}
+
+	vnode_lock_spin(vp);
+
+	<span class="enscript-keyword">if</span> (! UBCINFOEXISTS(vp)) {
+		blob = NULL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	uip = vp-&gt;v_ubcinfo;
+	<span class="enscript-keyword">for</span> (blob = uip-&gt;cs_blobs; blob != NULL; blob = blob-&gt;csb_next) {
+		printf(<span class="enscript-string">&quot;csvnode: range: %lu -&gt; %lu flags: 0x%08x platform: %s path: %s team: %s\n&quot;</span>,
+		       (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)blob-&gt;csb_start_offset,
+		       (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span>)blob-&gt;csb_end_offset,
+		       blob-&gt;csb_flags,
+		       blob-&gt;csb_platform_binary ? <span class="enscript-string">&quot;yes&quot;</span> : <span class="enscript-string">&quot;no&quot;</span>,
+		       blob-&gt;csb_platform_path ? <span class="enscript-string">&quot;yes&quot;</span> : <span class="enscript-string">&quot;no&quot;</span>,
+		       blob-&gt;csb_teamid ? blob-&gt;csb_teamid : <span class="enscript-string">&quot;&lt;NO-TEAM&gt;&quot;</span>);
+	}
+
+<span class="enscript-reference">out</span>:
+	vnode_unlock(vp);
+
+}
+
+<span class="enscript-type">struct</span> cs_blob *
+<span class="enscript-function-name">ubc_cs_blob_get</span>(
+	<span class="enscript-type">struct</span> vnode	*vp,
+	cpu_type_t	cputype,
+	off_t		offset)
+{
+	<span class="enscript-type">struct</span> ubc_info	*uip;
+	<span class="enscript-type">struct</span> cs_blob	*blob;
+	off_t offset_in_blob;
+
+	vnode_lock_spin(vp);
+
+	<span class="enscript-keyword">if</span> (! UBCINFOEXISTS(vp)) {
+		blob = NULL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	uip = vp-&gt;v_ubcinfo;
+	<span class="enscript-keyword">for</span> (blob = uip-&gt;cs_blobs;
+	     blob != NULL;
+	     blob = blob-&gt;csb_next) {
+		<span class="enscript-keyword">if</span> (cputype != -1 &amp;&amp; blob-&gt;csb_cpu_type == cputype) {
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-keyword">if</span> (offset != -1) {
+			offset_in_blob = offset - blob-&gt;csb_base_offset;
+			<span class="enscript-keyword">if</span> (offset_in_blob &gt;= blob-&gt;csb_start_offset &amp;&amp;
+			    offset_in_blob &lt; blob-&gt;csb_end_offset) {
+				<span class="enscript-comment">/* our offset is covered by this blob */</span>
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+	}
+
+<span class="enscript-reference">out</span>:
+	vnode_unlock(vp);
+
+	<span class="enscript-keyword">return</span> blob;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ubc_cs_free</span>(
+	<span class="enscript-type">struct</span> ubc_info	*uip)
+{
+	<span class="enscript-type">struct</span> cs_blob	*blob, *next_blob;
+
+	<span class="enscript-keyword">for</span> (blob = uip-&gt;cs_blobs;
+	     blob != NULL;
+	     blob = next_blob) {
+		next_blob = blob-&gt;csb_next;
+		<span class="enscript-keyword">if</span> (blob-&gt;csb_mem_kaddr != 0) {
+			ubc_cs_blob_deallocate(blob-&gt;csb_mem_kaddr,
+					       blob-&gt;csb_mem_size);
+			blob-&gt;csb_mem_kaddr = 0;
+		}
+		<span class="enscript-keyword">if</span> (blob-&gt;csb_mem_handle != IPC_PORT_NULL) {
+			mach_memory_entry_port_release(blob-&gt;csb_mem_handle);
+		}
+		blob-&gt;csb_mem_handle = IPC_PORT_NULL;
+		OSAddAtomic(-1, &amp;cs_blob_count);
+		OSAddAtomic((SInt32) -blob-&gt;csb_mem_size, &amp;cs_blob_size);
+		kfree(blob, <span class="enscript-keyword">sizeof</span> (*blob));
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CHECK_CS_VALIDATION_BITMAP</span>
+	ubc_cs_validation_bitmap_deallocate( uip-&gt;ui_vnode );
+#<span class="enscript-reference">endif</span>
+	uip-&gt;cs_blobs = NULL;
+}
+
+<span class="enscript-comment">/* check cs blob generation on vnode
+ * returns:
+ *    0         : Success, the cs_blob attached is current
+ *    ENEEDAUTH : Generation count mismatch. Needs authentication again.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_cs_generation_check</span>(
+	<span class="enscript-type">struct</span> vnode	*vp)
+{
+	<span class="enscript-type">int</span> retval = ENEEDAUTH;
+
+	vnode_lock_spin(vp);
+
+	<span class="enscript-keyword">if</span> (UBCINFOEXISTS(vp) &amp;&amp; vp-&gt;v_ubcinfo-&gt;cs_add_gen == cs_blob_generation_count) {
+		retval = 0;
+	}
+
+	vnode_unlock(vp);
+	<span class="enscript-keyword">return</span> retval;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_cs_blob_revalidate</span>(
+	<span class="enscript-type">struct</span> vnode	*vp,
+	<span class="enscript-type">struct</span> cs_blob *blob,
+	__unused <span class="enscript-type">int</span> flags
+	)
+{
+	<span class="enscript-type">int</span> error = 0;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-type">int</span> cs_flags = 0;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-type">const</span> CS_CodeDirectory *cd = NULL;
+	
+	assert(vp != NULL);
+	assert(blob != NULL);
+
+	error = cs_validate_csblob((<span class="enscript-type">const</span> uint8_t *)blob-&gt;csb_mem_kaddr, blob-&gt;csb_mem_size, &amp;cd);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (cs_debug) {
+			printf(<span class="enscript-string">&quot;CODESIGNING: csblob invalid: %d\n&quot;</span>, error);
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/* callout to mac_vnode_check_signature */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_vnode_check_signature(vp, blob-&gt;csb_base_offset, blob-&gt;csb_cdhash,
+					  (<span class="enscript-type">const</span> <span class="enscript-type">void</span>*)blob-&gt;csb_mem_kaddr, (<span class="enscript-type">int</span>)blob-&gt;csb_mem_size,
+					  flags, &amp;cs_flags);
+	<span class="enscript-keyword">if</span> (cs_debug &amp;&amp; error) {
+			printf(<span class="enscript-string">&quot;revalidate: check_signature[pid: %d], error = %d\n&quot;</span>, current_proc()-&gt;p_pid, error);
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/* update generation number if success */</span>
+	vnode_lock_spin(vp);
+	<span class="enscript-keyword">if</span> (UBCINFOEXISTS(vp)) {
+		<span class="enscript-keyword">if</span> (error == 0)
+			vp-&gt;v_ubcinfo-&gt;cs_add_gen = cs_blob_generation_count;
+		<span class="enscript-keyword">else</span>
+			vp-&gt;v_ubcinfo-&gt;cs_add_gen = 0;
+	}
+
+	vnode_unlock(vp);
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cs_blob_reset_cache</span>()
+{
+	<span class="enscript-comment">/* incrementing odd no by 2 makes sure '0' is never reached. */</span>
+	OSAddAtomic(+2, &amp;cs_blob_generation_count);
+	printf(<span class="enscript-string">&quot;Reseting cs_blob cache from all vnodes. \n&quot;</span>);
+}
+
+<span class="enscript-type">struct</span> cs_blob *
+<span class="enscript-function-name">ubc_get_cs_blobs</span>(
+	<span class="enscript-type">struct</span> vnode	*vp)
+{
+	<span class="enscript-type">struct</span> ubc_info	*uip;
+	<span class="enscript-type">struct</span> cs_blob	*blobs;
+
+	<span class="enscript-comment">/*
+	 * No need to take the vnode lock here.  The caller must be holding
+	 * a reference on the vnode (via a VM mapping or open file descriptor),
+	 * so the vnode will not go away.  The ubc_info stays until the vnode
+	 * goes away.  And we only modify &quot;blobs&quot; by adding to the head of the
+	 * list.
+	 * The ubc_info could go away entirely if the vnode gets reclaimed as
+	 * part of a forced unmount.  In the case of a code-signature validation
+	 * during a page fault, the &quot;paging_in_progress&quot; reference on the VM
+	 * object guarantess that the vnode pager (and the ubc_info) won't go
+	 * away during the fault.
+	 * Other callers need to protect against vnode reclaim by holding the
+	 * vnode lock, for example.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (! UBCINFOEXISTS(vp)) {
+		blobs = NULL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	uip = vp-&gt;v_ubcinfo;
+	blobs = uip-&gt;cs_blobs;
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> blobs;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ubc_get_cs_mtime</span>(
+	<span class="enscript-type">struct</span> vnode	*vp,
+	<span class="enscript-type">struct</span> timespec	*cs_mtime)
+{
+	<span class="enscript-type">struct</span> ubc_info	*uip;
+
+	<span class="enscript-keyword">if</span> (! UBCINFOEXISTS(vp)) {
+		cs_mtime-&gt;tv_sec = 0;
+		cs_mtime-&gt;tv_nsec = 0;
+		<span class="enscript-keyword">return</span>;
+	}
+
+	uip = vp-&gt;v_ubcinfo;
+	cs_mtime-&gt;tv_sec = uip-&gt;cs_mtime.tv_sec;
+	cs_mtime-&gt;tv_nsec = uip-&gt;cs_mtime.tv_nsec;
+}
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> cs_validate_page_no_hash = 0;
+<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> cs_validate_page_bad_hash = 0;
+boolean_t
+<span class="enscript-function-name">cs_validate_page</span>(
+	<span class="enscript-type">void</span>			*_blobs,
+	memory_object_t		pager,
+	memory_object_offset_t	page_offset,
+	<span class="enscript-type">const</span> <span class="enscript-type">void</span>		*data,
+	<span class="enscript-type">unsigned</span>		*tainted)
+{
+	<span class="enscript-type">union</span> cs_hash_union	mdctx;
+	<span class="enscript-type">struct</span> cs_hash		*hashtype = NULL;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>		actual_hash[CS_HASH_MAX_SIZE];
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>		expected_hash[SHA1_RESULTLEN];
+	boolean_t		found_hash;
+	<span class="enscript-type">struct</span> cs_blob		*blobs, *blob;
+	<span class="enscript-type">const</span> CS_CodeDirectory	*cd;
+	<span class="enscript-type">const</span> CS_SuperBlob	*embedded;
+	<span class="enscript-type">const</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>	*hash;
+	boolean_t		validated;
+	off_t			offset;	<span class="enscript-comment">/* page offset in the file */</span>
+	size_t			size;
+	off_t			codeLimit = 0;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>		*lower_bound, *upper_bound;
+	vm_offset_t		kaddr, blob_addr;
+	vm_size_t		ksize;
+	kern_return_t		kr;
+
+	offset = page_offset;
+
+	<span class="enscript-comment">/* retrieve the expected hash */</span>
+	found_hash = FALSE;
+	blobs = (<span class="enscript-type">struct</span> cs_blob *) _blobs;
+
+	<span class="enscript-keyword">for</span> (blob = blobs;
+	     blob != NULL;
+	     blob = blob-&gt;csb_next) {
+		offset = page_offset - blob-&gt;csb_base_offset;
+		<span class="enscript-keyword">if</span> (offset &lt; blob-&gt;csb_start_offset ||
+		    offset &gt;= blob-&gt;csb_end_offset) {
+			<span class="enscript-comment">/* our page is not covered by this blob */</span>
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/* map the blob in the kernel address space */</span>
+		kaddr = blob-&gt;csb_mem_kaddr;
+		<span class="enscript-keyword">if</span> (kaddr == 0) {
+			ksize = (vm_size_t) (blob-&gt;csb_mem_size +
+					     blob-&gt;csb_mem_offset);
+			kr = vm_map(kernel_map,
+				    &amp;kaddr,
+				    ksize,
+				    0,
+				    VM_FLAGS_ANYWHERE,
+				    blob-&gt;csb_mem_handle,
+				    0,
+				    TRUE,
+				    VM_PROT_READ,
+				    VM_PROT_READ,
+				    VM_INHERIT_NONE);
+			<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+				<span class="enscript-comment">/* XXX FBDP what to do !? */</span>
+				printf(<span class="enscript-string">&quot;cs_validate_page: failed to map blob, &quot;</span>
+				       <span class="enscript-string">&quot;size=0x%lx kr=0x%x\n&quot;</span>,
+				       (size_t)blob-&gt;csb_mem_size, kr);
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+
+		blob_addr = kaddr + blob-&gt;csb_mem_offset;
+		
+		lower_bound = CAST_DOWN(<span class="enscript-type">char</span> *, blob_addr);
+		upper_bound = lower_bound + blob-&gt;csb_mem_size;
+
+		embedded = (<span class="enscript-type">const</span> CS_SuperBlob *) blob_addr;
+		cd = findCodeDirectory(embedded, lower_bound, upper_bound);
+		<span class="enscript-keyword">if</span> (cd != NULL) {
+			<span class="enscript-comment">/* all CD's that have been injected is already validated */</span>
+
+			offset = page_offset - blob-&gt;csb_base_offset;
+			<span class="enscript-keyword">if</span> (offset &lt; blob-&gt;csb_start_offset ||
+			    offset &gt;= blob-&gt;csb_end_offset) {
+				<span class="enscript-comment">/* our page is not covered by this blob */</span>
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			hashtype = blob-&gt;csb_hashtype;
+			<span class="enscript-keyword">if</span> (hashtype == NULL)
+				panic(<span class="enscript-string">&quot;unknown hash type ?&quot;</span>);
+			<span class="enscript-keyword">if</span> (hashtype-&gt;cs_digest_size &gt; <span class="enscript-keyword">sizeof</span>(actual_hash))
+				panic(<span class="enscript-string">&quot;hash size too large&quot;</span>);
+
+			codeLimit = ntohl(cd-&gt;codeLimit);
+
+			hash = hashes(cd, (uint32_t)(offset&gt;&gt;PAGE_SHIFT_4K),
+				      hashtype-&gt;cs_size,
+				      lower_bound, upper_bound);
+			<span class="enscript-keyword">if</span> (hash != NULL) {
+				bcopy(hash, expected_hash, <span class="enscript-keyword">sizeof</span>(expected_hash));
+				found_hash = TRUE;
+			}
+
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (found_hash == FALSE) {
+		<span class="enscript-comment">/*
+		 * We can't verify this page because there is no signature
+		 * for it (yet).  It's possible that this part of the object
+		 * is not signed, or that signatures for that part have not
+		 * been loaded yet.
+		 * Report that the page has not been validated and let the
+		 * caller decide if it wants to accept it or not.
+		 */</span>
+		cs_validate_page_no_hash++;
+		<span class="enscript-keyword">if</span> (cs_debug &gt; 1) {
+			printf(<span class="enscript-string">&quot;CODE SIGNING: cs_validate_page: &quot;</span>
+			       <span class="enscript-string">&quot;mobj %p off 0x%llx: no hash to validate !?\n&quot;</span>,
+			       pager, page_offset);
+		}
+		validated = FALSE;
+		*tainted = 0;
+	} <span class="enscript-keyword">else</span> {
+
+		*tainted = 0;
+
+		size = PAGE_SIZE_4K;
+		<span class="enscript-type">const</span> uint32_t *asha1, *esha1;
+		<span class="enscript-keyword">if</span> ((off_t)(offset + size) &gt; codeLimit) {
+			<span class="enscript-comment">/* partial page at end of segment */</span>
+			assert(offset &lt; codeLimit);
+			size = (size_t) (codeLimit &amp; PAGE_MASK_4K);
+			*tainted |= CS_VALIDATE_NX;
+		}
+
+		hashtype-&gt;cs_init(&amp;mdctx);
+		hashtype-&gt;cs_update(&amp;mdctx, data, size);
+		hashtype-&gt;cs_final(actual_hash, &amp;mdctx);
+
+		asha1 = (<span class="enscript-type">const</span> uint32_t *) actual_hash;
+		esha1 = (<span class="enscript-type">const</span> uint32_t *) expected_hash;
+
+		<span class="enscript-keyword">if</span> (bcmp(expected_hash, actual_hash, hashtype-&gt;cs_cd_size) != 0) {
+			<span class="enscript-keyword">if</span> (cs_debug) {
+				printf(<span class="enscript-string">&quot;CODE SIGNING: cs_validate_page: &quot;</span>
+				       <span class="enscript-string">&quot;mobj %p off 0x%llx size 0x%lx: &quot;</span>
+				       <span class="enscript-string">&quot;actual [0x%x 0x%x 0x%x 0x%x 0x%x] != &quot;</span>
+				       <span class="enscript-string">&quot;expected [0x%x 0x%x 0x%x 0x%x 0x%x]\n&quot;</span>,
+				       pager, page_offset, size,
+				       asha1[0], asha1[1], asha1[2],
+				       asha1[3], asha1[4],
+				       esha1[0], esha1[1], esha1[2],
+				       esha1[3], esha1[4]);
+			}
+			cs_validate_page_bad_hash++;
+			*tainted |= CS_VALIDATE_TAINTED;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (cs_debug &gt; 10) {
+				printf(<span class="enscript-string">&quot;CODE SIGNING: cs_validate_page: &quot;</span>
+				       <span class="enscript-string">&quot;mobj %p off 0x%llx size 0x%lx: &quot;</span>
+				       <span class="enscript-string">&quot;SHA1 OK\n&quot;</span>,
+				       pager, page_offset, size);
+			}
+		}
+		validated = TRUE;
+	}
+	
+	<span class="enscript-keyword">return</span> validated;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ubc_cs_getcdhash</span>(
+	vnode_t		vp,
+	off_t		offset,
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>	*cdhash)
+{
+	<span class="enscript-type">struct</span> cs_blob	*blobs, *blob;
+	off_t		rel_offset;
+	<span class="enscript-type">int</span>		ret;
+
+	vnode_lock(vp);
+
+	blobs = ubc_get_cs_blobs(vp);
+	<span class="enscript-keyword">for</span> (blob = blobs;
+	     blob != NULL;
+	     blob = blob-&gt;csb_next) {
+		<span class="enscript-comment">/* compute offset relative to this blob */</span>
+		rel_offset = offset - blob-&gt;csb_base_offset;
+		<span class="enscript-keyword">if</span> (rel_offset &gt;= blob-&gt;csb_start_offset &amp;&amp;
+		    rel_offset &lt; blob-&gt;csb_end_offset) {
+			<span class="enscript-comment">/* this blob does cover our &quot;offset&quot; ! */</span>
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (blob == NULL) {
+		<span class="enscript-comment">/* we didn't find a blob covering &quot;offset&quot; */</span>
+		ret = EBADEXEC; <span class="enscript-comment">/* XXX any better error ? */</span>
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* get the SHA1 hash of that blob */</span>
+		bcopy(blob-&gt;csb_cdhash, cdhash, <span class="enscript-keyword">sizeof</span> (blob-&gt;csb_cdhash));
+		ret = 0;
+	}
+
+	vnode_unlock(vp);
+
+	<span class="enscript-keyword">return</span> ret;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CHECK_CS_VALIDATION_BITMAP</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">stob</span>(s)	((atop_64((s)) + 07) &gt;&gt; 3)
+<span class="enscript-type">extern</span>	boolean_t	root_fs_upgrade_try;
+
+<span class="enscript-comment">/*
+ * Should we use the code-sign bitmap to avoid repeated code-sign validation?
+ * Depends:
+ * a) Is the target vnode on the root filesystem?
+ * b) Has someone tried to mount the root filesystem read-write?
+ * If answers are (a) yes AND (b) no, then we can use the bitmap.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">USE_CODE_SIGN_BITMAP</span>(vp)	( (vp != NULL) &amp;&amp; (vp-&gt;v_mount != NULL) &amp;&amp; (vp-&gt;v_mount-&gt;mnt_flag &amp; MNT_ROOTFS) &amp;&amp; !root_fs_upgrade_try) 
+kern_return_t
+<span class="enscript-function-name">ubc_cs_validation_bitmap_allocate</span>(
+	vnode_t		vp)
+{
+	kern_return_t	kr = KERN_SUCCESS;
+	<span class="enscript-type">struct</span> ubc_info *uip;
+	<span class="enscript-type">char</span>		*target_bitmap;
+	vm_object_size_t	bitmap_size;
+
+	<span class="enscript-keyword">if</span> ( ! USE_CODE_SIGN_BITMAP(vp) || (! UBCINFOEXISTS(vp))) {
+		kr = KERN_INVALID_ARGUMENT;
+	} <span class="enscript-keyword">else</span> {
+		uip = vp-&gt;v_ubcinfo;
+
+		<span class="enscript-keyword">if</span> ( uip-&gt;cs_valid_bitmap == NULL ) {
+			bitmap_size = stob(uip-&gt;ui_size);
+			target_bitmap = (<span class="enscript-type">char</span>*) kalloc( (vm_size_t)bitmap_size );
+			<span class="enscript-keyword">if</span> (target_bitmap == 0) {
+				kr = KERN_NO_SPACE;
+			} <span class="enscript-keyword">else</span> {
+				kr = KERN_SUCCESS;
+			}
+			<span class="enscript-keyword">if</span>( kr == KERN_SUCCESS ) {
+				memset( target_bitmap, 0, (size_t)bitmap_size);
+				uip-&gt;cs_valid_bitmap = (<span class="enscript-type">void</span>*)target_bitmap;
+				uip-&gt;cs_valid_bitmap_size = bitmap_size;
+			}
+		}
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+kern_return_t
+<span class="enscript-function-name">ubc_cs_check_validation_bitmap</span> (
+	vnode_t			vp,
+	memory_object_offset_t		offset,
+	<span class="enscript-type">int</span>			optype)
+{
+	kern_return_t	kr = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> ( ! USE_CODE_SIGN_BITMAP(vp) || ! UBCINFOEXISTS(vp)) {
+		kr = KERN_INVALID_ARGUMENT;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> ubc_info *uip = vp-&gt;v_ubcinfo;
+		<span class="enscript-type">char</span>		*target_bitmap = uip-&gt;cs_valid_bitmap;
+
+		<span class="enscript-keyword">if</span> ( target_bitmap == NULL ) {
+		       kr = KERN_INVALID_ARGUMENT;
+		} <span class="enscript-keyword">else</span> {
+			uint64_t	bit, byte;
+			bit = atop_64( offset );
+			byte = bit &gt;&gt; 3;
+
+			<span class="enscript-keyword">if</span> ( byte &gt; uip-&gt;cs_valid_bitmap_size ) {
+			       kr = KERN_INVALID_ARGUMENT;
+			} <span class="enscript-keyword">else</span> {
+
+				<span class="enscript-keyword">if</span> (optype == CS_BITMAP_SET) {
+					target_bitmap[byte] |= (1 &lt;&lt; (bit &amp; 07));
+					kr = KERN_SUCCESS;
+				} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (optype == CS_BITMAP_CLEAR) {
+					target_bitmap[byte] &amp;= ~(1 &lt;&lt; (bit &amp; 07));
+					kr = KERN_SUCCESS;
+				} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (optype == CS_BITMAP_CHECK) {
+					<span class="enscript-keyword">if</span> ( target_bitmap[byte] &amp; (1 &lt;&lt; (bit &amp; 07))) {
+						kr = KERN_SUCCESS;
+					} <span class="enscript-keyword">else</span> {
+						kr = KERN_FAILURE;
+					}
+				}
+			}
+		}
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ubc_cs_validation_bitmap_deallocate</span>(
+	vnode_t		vp)
+{
+	<span class="enscript-type">struct</span> ubc_info *uip;
+	<span class="enscript-type">void</span>		*target_bitmap;
+	vm_object_size_t	bitmap_size;
+
+	<span class="enscript-keyword">if</span> ( UBCINFOEXISTS(vp)) {
+		uip = vp-&gt;v_ubcinfo;
+
+		<span class="enscript-keyword">if</span> ( (target_bitmap = uip-&gt;cs_valid_bitmap) != NULL ) {
+			bitmap_size = uip-&gt;cs_valid_bitmap_size;
+			kfree( target_bitmap, (vm_size_t) bitmap_size );
+			uip-&gt;cs_valid_bitmap = NULL;
+		}
+	}
+}
+#<span class="enscript-reference">else</span>
+kern_return_t	ubc_cs_validation_bitmap_allocate(__unused vnode_t vp){
+	<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+}
+
+kern_return_t <span class="enscript-function-name">ubc_cs_check_validation_bitmap</span>(
+	__unused <span class="enscript-type">struct</span> vnode *vp, 
+	__unused memory_object_offset_t offset,
+	__unused <span class="enscript-type">int</span> optype){
+
+	<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+}
+
+<span class="enscript-type">void</span>	ubc_cs_validation_bitmap_deallocate(__unused vnode_t vp){
+	<span class="enscript-keyword">return</span>;
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CHECK_CS_VALIDATION_BITMAP */</span>
+</pre>
+<hr />
+</body></html>

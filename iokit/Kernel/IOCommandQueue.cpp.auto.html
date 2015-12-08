@@ -1,0 +1,322 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOCommandQueue.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOCommandQueue.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1998-2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__LP64__</span>)
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOCommandQueue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOWorkLoop.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOTimeStamp.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKitDebug.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/sync_policy.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IOKITSTATS</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsInitializeCounter</span>() \
+	<span class="enscript-reference">IOStatistics</span>::setCounterType(reserved-&gt;counter, kIOStatisticsCommandQueueCounter)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsActionCall</span>() \
+	<span class="enscript-reference">IOStatistics</span>::countCommandQueueActionCall(reserved-&gt;counter)
+
+#<span class="enscript-reference">else</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsInitializeCounter</span>()
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IOStatisticsActionCall</span>()
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IOKITSTATS */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NUM_FIELDS_IN_COMMAND</span>	4
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> commandEntryTag {
+    <span class="enscript-type">void</span> *f[NUM_FIELDS_IN_COMMAND];
+} commandEntryT;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOEventSource
+
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IOCommandQueue, IOEventSource)
+
+<span class="enscript-comment">/*[
+Instance Methods
+
+initWithNext:owner:action:size:
+    - initWithNext: (IOEventSource *) inNext
+            owner: (id) inOwner
+            action: (SEL) inAction
+              size: (int) inSize;
+
+Primary initialiser for the IOCommandQueue class.  Returns an
+IOCommandQueue object that is initialised with the next object in
+the chain and the owner and action. On return the signalWorkAvailableIMP
+has been cached for this function.
+
+If the object fails to initialise for some reason then [self free] will
+be called and nil will be returned.
+
+See also: initWithNext:owner:action:(IOEventSource)
+]*/</span>
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOCommandQueue::init</span>(OSObject *inOwner,
+                          IOCommandQueueAction inAction,
+                          <span class="enscript-type">int</span> inSize)
+{
+    <span class="enscript-keyword">if</span> ( !super::init(inOwner, (IOEventSourceAction) inAction) )
+        <span class="enscript-keyword">return</span> false;
+    
+    <span class="enscript-keyword">if</span> (KERN_SUCCESS
+    !=  semaphore_create(kernel_task, &amp;producerSema, SYNC_POLICY_FIFO, inSize))
+        <span class="enscript-keyword">return</span> false;
+
+    size = inSize + 1; <span class="enscript-comment">/* Allocate one more entry than needed */</span>
+
+    queue = (<span class="enscript-type">void</span> *)kalloc(size * <span class="enscript-keyword">sizeof</span>(commandEntryT));
+    <span class="enscript-keyword">if</span> (!queue)
+        <span class="enscript-keyword">return</span> false;
+
+    producerLock = IOLockAlloc();
+    <span class="enscript-keyword">if</span> (!producerLock)
+        <span class="enscript-keyword">return</span> false;
+
+    producerIndex = consumerIndex = 0;
+
+    IOStatisticsInitializeCounter();
+
+    <span class="enscript-keyword">return</span> true;
+}
+
+IOCommandQueue *
+<span class="enscript-function-name">IOCommandQueue::commandQueue</span>(OSObject *inOwner,
+                             IOCommandQueueAction inAction,
+                             <span class="enscript-type">int</span> inSize)
+{
+    IOCommandQueue *me = <span class="enscript-keyword">new</span> IOCommandQueue;
+
+    <span class="enscript-keyword">if</span> (me &amp;&amp; !me-&gt;init(inOwner, inAction, inSize)) {
+        me-&gt;free();
+        <span class="enscript-keyword">return</span> 0;
+    }
+
+    <span class="enscript-keyword">return</span> me;
+}
+
+<span class="enscript-comment">/*[
+free
+    - free
+
+Mandatory free of the object independent of the current retain count.
+Returns nil.
+]*/</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOCommandQueue::free</span>()
+{
+    <span class="enscript-keyword">if</span> (queue)
+        kfree(queue, size * <span class="enscript-keyword">sizeof</span>(commandEntryT));
+    <span class="enscript-keyword">if</span> (producerSema)
+        semaphore_destroy(kernel_task, producerSema);
+    <span class="enscript-keyword">if</span> (producerLock)
+        IOLockFree(producerLock);
+
+    <span class="enscript-reference">super</span>::free();
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NUM_FIELDS_IN_COMMAND</span> != 4
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">IOCommandQueue</span>::<span class="enscript-variable-name">checkForWork</span> <span class="enscript-variable-name">needs</span> <span class="enscript-variable-name">to</span> <span class="enscript-variable-name">be</span> <span class="enscript-variable-name">updated</span> <span class="enscript-variable-name">for</span> <span class="enscript-variable-name">new</span> <span class="enscript-variable-name">command</span> <span class="enscript-variable-name">size</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOCommandQueue::checkForWork</span>()
+{
+    <span class="enscript-type">void</span>	*field0, *field1, *field2, *field3;
+	<span class="enscript-type">bool</span>	trace = ( gIOKitTrace &amp; kIOTraceCommandGates ) ? true : false;
+
+    <span class="enscript-keyword">if</span> (!enabled || consumerIndex == producerIndex)
+        <span class="enscript-keyword">return</span> false;
+
+    {
+        commandEntryT *q = (commandEntryT *) queue;
+        <span class="enscript-type">int</span> localIndex = consumerIndex;
+
+        field0 = q[localIndex].f[0]; field1 = q[localIndex].f[1];
+        field2 = q[localIndex].f[2]; field3 = q[localIndex].f[3];
+        semaphore_signal(producerSema);
+    }
+
+    <span class="enscript-keyword">if</span> (++consumerIndex &gt;= size)
+        consumerIndex = 0;
+
+	<span class="enscript-keyword">if</span> (trace)
+		IOTimeStampStartConstant(IODBG_CMDQ(IOCMDQ_ACTION),
+								 (uintptr_t) action, (uintptr_t) owner);
+	
+    IOStatisticsActionCall();
+    (*(IOCommandQueueAction) action)(owner, field0, field1, field2, field3);
+	
+	<span class="enscript-keyword">if</span> (trace)
+		IOTimeStampEndConstant(IODBG_CMDQ(IOCMDQ_ACTION),
+							   (uintptr_t) action, (uintptr_t) owner);
+	
+    <span class="enscript-keyword">return</span> (consumerIndex != producerIndex);
+}
+
+<span class="enscript-comment">/*[
+enqueueSleep:command:
+    - (kern_return_t) enqueueSleepRaw: (BOOL) gotoSleep
+                               field0: (void *) field0 field1: (void *) field1
+                               field2: (void *) field2 field3: (void *) field3;
+
+Key method that enqueues the four input fields onto the command queue
+and calls signalWorkAvailable to indicate that work is available to the
+consumer.  This routine is safe against multiple threaded producers.
+
+A family of convenience functions have been provided to assist with the
+enqueueing of an method selector and an integer tag.  This relies on the
+IODevice rawCommandOccurred... command to forward on the requests.
+
+See also: signalWorkAvailable, checkForWork
+]*/</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NUM_FIELDS_IN_COMMAND</span> != 4
+#<span class="enscript-reference">error</span> <span class="enscript-variable-name">IOCommandQueue</span>::<span class="enscript-variable-name">enqueueCommand</span> <span class="enscript-variable-name">needs</span> <span class="enscript-variable-name">to</span> <span class="enscript-variable-name">be</span> <span class="enscript-variable-name">updated</span>
+#<span class="enscript-reference">endif</span>
+
+kern_return_t
+<span class="enscript-function-name">IOCommandQueue::enqueueCommand</span>(<span class="enscript-type">bool</span> gotoSleep,
+                               <span class="enscript-type">void</span> *field0, <span class="enscript-type">void</span> *field1,
+                               <span class="enscript-type">void</span> *field2, <span class="enscript-type">void</span> *field3)
+{
+    kern_return_t rtn = KERN_SUCCESS;
+    <span class="enscript-type">int</span> retry;
+
+    <span class="enscript-comment">/* Make sure there is room in the queue before doing anything else */</span>
+
+    <span class="enscript-keyword">if</span> (gotoSleep) {
+        retry = 0;
+        <span class="enscript-keyword">do</span>
+        rtn = semaphore_wait(producerSema);
+        <span class="enscript-keyword">while</span>(     (KERN_SUCCESS != rtn)
+		&amp;&amp; (KERN_OPERATION_TIMED_OUT != rtn)
+		&amp;&amp; (KERN_SEMAPHORE_DESTROYED != rtn)
+		&amp;&amp; (KERN_TERMINATED != rtn)
+		&amp;&amp; ((retry++) &lt; 4));
+    } <span class="enscript-keyword">else</span>
+        rtn = semaphore_timedwait(producerSema, MACH_TIMESPEC_ZERO);
+
+    <span class="enscript-keyword">if</span> (KERN_SUCCESS != rtn)
+        <span class="enscript-keyword">return</span> rtn;
+
+    <span class="enscript-comment">/* Block other producers */</span>
+    IOTakeLock(producerLock);
+
+    <span class="enscript-comment">/*
+     * Make sure that we update the current producer entry before we
+     * increment the producer pointer.  This avoids a nasty race as the
+     * as the test for work is producerIndex != consumerIndex and a signal.
+     */</span>
+    {
+        commandEntryT *q = (commandEntryT *) queue;
+        <span class="enscript-type">int</span> localIndex = producerIndex;
+
+        q[localIndex].f[0] = field0; q[localIndex].f[1] = field1;
+        q[localIndex].f[2] = field2; q[localIndex].f[3] = field3;
+    }
+    <span class="enscript-keyword">if</span> (++producerIndex &gt;= size)
+        producerIndex = 0;
+
+    <span class="enscript-comment">/* Clear to allow other producers to go now */</span>
+    IOUnlock(producerLock);
+
+    <span class="enscript-comment">/*
+     * Right we have created some new work, we had better make sure that
+     * we notify the work loop that it has to test producerIndex.
+     */</span>
+    signalWorkAvailable();
+    <span class="enscript-keyword">return</span> rtn;
+}
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">IOCommandQueue::performAndFlush</span>(OSObject *target,
+                                    IOCommandQueueAction inAction)
+{
+    <span class="enscript-type">int</span> numEntries;
+    kern_return_t rtn;
+
+    <span class="enscript-comment">// Set the defaults if necessary
+</span>    <span class="enscript-keyword">if</span> (!target)
+        target = owner;
+    <span class="enscript-keyword">if</span> (!inAction)
+        inAction = (IOCommandQueueAction) action;
+
+    <span class="enscript-comment">// Lock out the producers first
+</span>    <span class="enscript-keyword">do</span> {
+        rtn = semaphore_timedwait(producerSema, MACH_TIMESPEC_ZERO);
+    } <span class="enscript-keyword">while</span> (rtn == KERN_SUCCESS);
+
+    <span class="enscript-comment">// now step over all remaining entries in the command queue
+</span>    <span class="enscript-keyword">for</span> (numEntries = 0; consumerIndex != producerIndex; ) {
+        <span class="enscript-type">void</span> *field0, *field1, *field2, *field3;
+
+        {
+            commandEntryT *q = (commandEntryT *) queue;
+            <span class="enscript-type">int</span> localIndex = consumerIndex;
+
+            field0 = q[localIndex].f[0]; field1 = q[localIndex].f[1];
+            field2 = q[localIndex].f[2]; field3 = q[localIndex].f[3];
+        }
+
+        <span class="enscript-keyword">if</span> (++consumerIndex &gt;= size)
+            consumerIndex = 0;
+
+        (*inAction)(target, field0, field1, field2, field3);
+    }
+
+    <span class="enscript-comment">// finally refill the producer semaphore to size - 1
+</span>    <span class="enscript-keyword">for</span> (<span class="enscript-type">int</span> i = 1; i &lt; size; i++)
+        semaphore_signal(producerSema);
+
+    <span class="enscript-keyword">return</span> numEntries;
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !defined(__LP64__) */</span>
+</pre>
+<hr />
+</body></html>

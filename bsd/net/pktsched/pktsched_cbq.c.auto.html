@@ -1,0 +1,730 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>pktsched_cbq.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">pktsched_cbq.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007-2012 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*	$OpenBSD: altq_cbq.c,v 1.23 2007/09/13 20:40:02 chl Exp $	*/</span>
+<span class="enscript-comment">/*	$KAME: altq_cbq.c,v 1.9 2000/12/14 08:12:45 thorpej Exp $	*/</span>
+
+<span class="enscript-comment">/*
+ * Copyright (c) Sun Microsystems, Inc. 1993-1998 All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the SMCC Technology
+ *      Development Group at Sun Microsystems, Inc.
+ *
+ * 4. The name of the Sun Microsystems, Inc nor may not be used to endorse or
+ *      promote products derived from this software without specific prior
+ *      written permission.
+ *
+ * SUN MICROSYSTEMS DOES NOT CLAIM MERCHANTABILITY OF THIS SOFTWARE OR THE
+ * SUITABILITY OF THIS SOFTWARE FOR ANY PARTICULAR PURPOSE.  The software is
+ * provided &quot;as is&quot; without express or implied warranty of any kind.
+ *
+ * These notices must be retained in any copies of any part of this software.
+ */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PKTSCHED_CBQ</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/net_osdep.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/pktsched/pktsched_cbq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Forward Declarations.
+ */</span>
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cbq_enqueue_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *, <span class="enscript-type">struct</span> mbuf *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> mbuf *<span class="enscript-function-name">cbq_dequeue_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *, cqdq_op_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cbq_request_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *, cqrq_t, <span class="enscript-type">void</span> *);
+#<span class="enscript-reference">endif</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cbq_class_destroy</span>(cbq_state_t *, <span class="enscript-type">struct</span> rm_class *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cbq_destroy_locked</span>(cbq_state_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> rm_class *<span class="enscript-function-name">cbq_clh_to_clp</span>(cbq_state_t *, u_int32_t);
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *<span class="enscript-function-name">cbq_style</span>(cbq_state_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">cbq_clear_interface</span>(cbq_state_t *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">cbqrestart</span>(<span class="enscript-type">struct</span> ifclassq *);
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CBQ_ZONE_MAX</span>	32		<span class="enscript-comment">/* maximum elements in zone */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CBQ_ZONE_NAME</span>	<span class="enscript-string">&quot;pktsched_cbq&quot;</span>	<span class="enscript-comment">/* zone name */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> cbq_size;		<span class="enscript-comment">/* size of zone element */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> zone *cbq_zone;		<span class="enscript-comment">/* zone for cbq */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cbq_init</span>(<span class="enscript-type">void</span>)
+{
+	_CASSERT(CBQCLF_RED == RMCF_RED);
+	_CASSERT(CBQCLF_ECN == RMCF_ECN);
+	_CASSERT(CBQCLF_RIO == RMCF_RIO);
+	_CASSERT(CBQCLF_FLOWVALVE == RMCF_FLOWVALVE);
+	_CASSERT(CBQCLF_CLEARDSCP == RMCF_CLEARDSCP);
+	_CASSERT(CBQCLF_WRR == RMCF_WRR);
+	_CASSERT(CBQCLF_EFFICIENT == RMCF_EFFICIENT);
+	_CASSERT(CBQCLF_BLUE == RMCF_BLUE);
+	_CASSERT(CBQCLF_SFB == RMCF_SFB);
+	_CASSERT(CBQCLF_FLOWCTL == RMCF_FLOWCTL);
+	_CASSERT(CBQCLF_LAZY == RMCF_LAZY);
+
+	cbq_size = <span class="enscript-keyword">sizeof</span> (cbq_state_t);
+	cbq_zone = zinit(cbq_size, CBQ_ZONE_MAX * cbq_size, 0, CBQ_ZONE_NAME);
+	<span class="enscript-keyword">if</span> (cbq_zone == NULL) {
+		panic(<span class="enscript-string">&quot;%s: failed allocating %s&quot;</span>, __func__, CBQ_ZONE_NAME);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	zone_change(cbq_zone, Z_EXPAND, TRUE);
+	zone_change(cbq_zone, Z_CALLERACCT, TRUE);
+
+	rmclass_init();
+}
+
+cbq_state_t *
+<span class="enscript-function-name">cbq_alloc</span>(<span class="enscript-type">struct</span> ifnet *ifp, <span class="enscript-type">int</span> how, boolean_t altq)
+{
+	cbq_state_t	*cbqp;
+
+	<span class="enscript-comment">/* allocate and initialize cbq_state_t */</span>
+	cbqp = (how == M_WAITOK) ? zalloc(cbq_zone) : zalloc_noblock(cbq_zone);
+	<span class="enscript-keyword">if</span> (cbqp == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+
+	bzero(cbqp, cbq_size);
+	CALLOUT_INIT(&amp;cbqp-&gt;cbq_callout);
+	cbqp-&gt;cbq_qlen = 0;
+	cbqp-&gt;ifnp.ifq_ = &amp;ifp-&gt;if_snd;		<span class="enscript-comment">/* keep the ifclassq */</span>
+	<span class="enscript-keyword">if</span> (altq)
+		cbqp-&gt;cbq_flags |= CBQSF_ALTQ;
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s scheduler allocated\n&quot;</span>,
+		    if_name(ifp), cbq_style(cbqp));
+	}
+
+	<span class="enscript-keyword">return</span> (cbqp);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cbq_destroy</span>(cbq_state_t *cbqp)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = cbqp-&gt;ifnp.ifq_;
+	<span class="enscript-type">int</span> err;
+
+	IFCQ_LOCK(ifq);
+	err = cbq_destroy_locked(cbqp);
+	IFCQ_UNLOCK(ifq);
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cbq_destroy_locked</span>(cbq_state_t *cbqp)
+{
+	IFCQ_LOCK_ASSERT_HELD(cbqp-&gt;ifnp.ifq_);
+
+	(<span class="enscript-type">void</span>) cbq_clear_interface(cbqp);
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s scheduler destroyed\n&quot;</span>,
+		    if_name(CBQS_IFP(cbqp)), cbq_style(cbqp));
+	}
+
+	<span class="enscript-keyword">if</span> (cbqp-&gt;ifnp.default_)
+		cbq_class_destroy(cbqp, cbqp-&gt;ifnp.default_);
+	<span class="enscript-keyword">if</span> (cbqp-&gt;ifnp.root_)
+		cbq_class_destroy(cbqp, cbqp-&gt;ifnp.root_);
+
+	<span class="enscript-comment">/* deallocate cbq_state_t */</span>
+	zfree(cbq_zone, cbqp);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cbq_add_queue</span>(cbq_state_t *cbqp, u_int32_t qlimit, u_int32_t priority,
+    u_int32_t minburst, u_int32_t maxburst, u_int32_t pktsize,
+    u_int32_t maxpktsize, u_int32_t ns_per_byte, u_int32_t maxidle, <span class="enscript-type">int</span> minidle,
+    u_int32_t offtime, u_int32_t flags, u_int32_t parent_qid, u_int32_t qid,
+    <span class="enscript-type">struct</span> rm_class **clp)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">minburst</span>, <span class="enscript-variable-name">maxburst</span>, <span class="enscript-variable-name">maxpktsize</span>)
+	<span class="enscript-type">struct</span> rm_class	*borrow, *parent;
+	<span class="enscript-type">struct</span> rm_class	*cl;
+	<span class="enscript-type">int</span> i, error;
+
+	IFCQ_LOCK_ASSERT_HELD(cbqp-&gt;ifnp.ifq_);
+
+	<span class="enscript-comment">/* Sanitize flags unless internally configured */</span>
+	<span class="enscript-keyword">if</span> (cbqp-&gt;cbq_flags &amp; CBQSF_ALTQ)
+		flags &amp;= CBQCLF_USERFLAGS;
+
+	<span class="enscript-comment">/*
+	 * find a free slot in the class table.  if the slot matching
+	 * the lower bits of qid is free, use this slot.  otherwise,
+	 * use the first free slot.
+	 */</span>
+	i = qid % CBQ_MAX_CLASSES;
+	<span class="enscript-keyword">if</span> (cbqp-&gt;cbq_class_tbl[i] != NULL) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; CBQ_MAX_CLASSES; i++)
+			<span class="enscript-keyword">if</span> (cbqp-&gt;cbq_class_tbl[i] == NULL)
+				<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">if</span> (i == CBQ_MAX_CLASSES)
+			<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-comment">/* check parameters */</span>
+	<span class="enscript-keyword">if</span> (priority &gt;= CBQ_MAXPRI)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">if</span> (ns_per_byte == 0) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s invalid inverse data rate\n&quot;</span>,
+		    if_name(CBQS_IFP(cbqp)), cbq_style(cbqp));
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-comment">/* Get pointers to parent and borrow classes.  */</span>
+	parent = cbq_clh_to_clp(cbqp, parent_qid);
+	<span class="enscript-keyword">if</span> (flags &amp; CBQCLF_BORROW)
+		borrow = parent;
+	<span class="enscript-keyword">else</span>
+		borrow = NULL;
+
+	<span class="enscript-comment">/*
+	 * A class must borrow from its parent or it can not
+	 * borrow at all.  Hence, borrow can be null.
+	 */</span>
+	<span class="enscript-keyword">if</span> (parent == NULL &amp;&amp; (flags &amp; CBQCLF_ROOTCLASS) == 0) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s no parent class!\n&quot;</span>,
+		    if_name(CBQS_IFP(cbqp)), cbq_style(cbqp));
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-keyword">if</span> ((borrow != parent) &amp;&amp; (borrow != NULL)) {
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s borrow class != parent\n&quot;</span>,
+		    if_name(CBQS_IFP(cbqp)), cbq_style(cbqp));
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-comment">/*
+	 * check parameters
+	 */</span>
+	<span class="enscript-keyword">switch</span> (flags &amp; CBQCLF_CLASSMASK) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CBQCLF_ROOTCLASS</span>:
+		<span class="enscript-keyword">if</span> (parent != NULL) {
+			log(LOG_ERR, <span class="enscript-string">&quot;%s: %s parent exists\n&quot;</span>,
+			    if_name(CBQS_IFP(cbqp)), cbq_style(cbqp));
+			<span class="enscript-keyword">return</span> (EINVAL);
+		}
+		<span class="enscript-keyword">if</span> (cbqp-&gt;ifnp.root_) {
+			log(LOG_ERR, <span class="enscript-string">&quot;%s: %s root class exists\n&quot;</span>,
+			    if_name(CBQS_IFP(cbqp)), cbq_style(cbqp));
+			<span class="enscript-keyword">return</span> (EINVAL);
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CBQCLF_DEFCLASS</span>:
+		<span class="enscript-keyword">if</span> (cbqp-&gt;ifnp.default_) {
+			log(LOG_ERR, <span class="enscript-string">&quot;%s: %s default class exists\n&quot;</span>,
+			    if_name(CBQS_IFP(cbqp)), cbq_style(cbqp));
+			<span class="enscript-keyword">return</span> (EINVAL);
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-comment">/* more than two flags bits set */</span>
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: %s invalid class flags 0x%x\n&quot;</span>,
+		    if_name(CBQS_IFP(cbqp)), cbq_style(cbqp),
+		    (flags &amp; CBQCLF_CLASSMASK));
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+	<span class="enscript-comment">/*
+	 * create a class.  if this is a root class, initialize the
+	 * interface.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((flags &amp; CBQCLF_CLASSMASK) == CBQCLF_ROOTCLASS) {
+		error = rmc_init(cbqp-&gt;ifnp.ifq_, &amp;cbqp-&gt;ifnp, ns_per_byte,
+		    cbqrestart, qid, qlimit, RM_MAXQUEUED, maxidle, minidle,
+		    offtime, flags);
+		<span class="enscript-keyword">if</span> (error != 0)
+			<span class="enscript-keyword">return</span> (error);
+		cl = cbqp-&gt;ifnp.root_;
+	} <span class="enscript-keyword">else</span> {
+		cl = rmc_newclass(priority, &amp;cbqp-&gt;ifnp, ns_per_byte,
+		    rmc_delay_action, qid, qlimit, parent, borrow, maxidle,
+		    minidle, offtime, pktsize, flags);
+	}
+	<span class="enscript-keyword">if</span> (cl == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+
+	<span class="enscript-comment">/* return handle to user space. */</span>
+	cl-&gt;stats_.handle = qid;
+	cl-&gt;stats_.depth = cl-&gt;depth_;
+
+	<span class="enscript-comment">/* save the allocated class */</span>
+	cbqp-&gt;cbq_class_tbl[i] = cl;
+
+	<span class="enscript-keyword">if</span> ((flags &amp; CBQCLF_CLASSMASK) == CBQCLF_DEFCLASS)
+		cbqp-&gt;ifnp.default_ = cl;
+
+	<span class="enscript-keyword">if</span> (clp != NULL)
+		*clp = cl;
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s created qid=%d pri=%d qlimit=%d &quot;</span>
+		    <span class="enscript-string">&quot;flags=%b\n&quot;</span>, if_name(CBQS_IFP(cbqp)), cbq_style(cbqp),
+		    qid, priority, qlimit, flags, CBQCLF_BITS);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cbq_remove_queue</span>(cbq_state_t *cbqp, u_int32_t qid)
+{
+	<span class="enscript-type">struct</span> rm_class	*cl;
+	<span class="enscript-type">int</span> i;
+
+	IFCQ_LOCK_ASSERT_HELD(cbqp-&gt;ifnp.ifq_);
+
+	<span class="enscript-keyword">if</span> ((cl = cbq_clh_to_clp(cbqp, qid)) == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/* if we are a parent class, then return an error. */</span>
+	<span class="enscript-keyword">if</span> (RMC_IS_A_PARENT_CLASS(cl))
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-comment">/* delete the class */</span>
+	rmc_delete_class(&amp;cbqp-&gt;ifnp, cl);
+
+	<span class="enscript-comment">/*
+	 * free the class handle
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; CBQ_MAX_CLASSES; i++) {
+		<span class="enscript-keyword">if</span> (cbqp-&gt;cbq_class_tbl[i] == cl) {
+			cbqp-&gt;cbq_class_tbl[i] = NULL;
+			<span class="enscript-keyword">if</span> (cl == cbqp-&gt;ifnp.root_)
+				cbqp-&gt;ifnp.root_ = NULL;
+			<span class="enscript-keyword">if</span> (cl == cbqp-&gt;ifnp.default_)
+				cbqp-&gt;ifnp.default_ = NULL;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * int
+ * cbq_class_destroy(cbq_mod_state_t *, struct rm_class *) - This
+ *	function destroys a given traffic class.  Before destroying
+ *	the class, all traffic for that class is released.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cbq_class_destroy</span>(cbq_state_t *cbqp, <span class="enscript-type">struct</span> rm_class *cl)
+{
+	<span class="enscript-type">int</span>	i;
+
+	IFCQ_LOCK_ASSERT_HELD(cbqp-&gt;ifnp.ifq_);
+
+	<span class="enscript-keyword">if</span> (pktsched_verbose) {
+		log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s destroyed qid=%d pri=%d\n&quot;</span>,
+		    if_name(CBQS_IFP(cbqp)), cbq_style(cbqp),
+		    cl-&gt;stats_.handle, cl-&gt;pri_);
+	}
+
+	<span class="enscript-comment">/* delete the class */</span>
+	rmc_delete_class(&amp;cbqp-&gt;ifnp, cl);
+
+	<span class="enscript-comment">/*
+	 * free the class handle
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; CBQ_MAX_CLASSES; i++)
+		<span class="enscript-keyword">if</span> (cbqp-&gt;cbq_class_tbl[i] == cl)
+			cbqp-&gt;cbq_class_tbl[i] = NULL;
+
+	<span class="enscript-keyword">if</span> (cl == cbqp-&gt;ifnp.root_)
+		cbqp-&gt;ifnp.root_ = NULL;
+	<span class="enscript-keyword">if</span> (cl == cbqp-&gt;ifnp.default_)
+		cbqp-&gt;ifnp.default_ = NULL;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* convert class handle to class pointer */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> rm_class *
+<span class="enscript-function-name">cbq_clh_to_clp</span>(cbq_state_t *cbqp, u_int32_t chandle)
+{
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">struct</span> rm_class *cl;
+
+	IFCQ_LOCK_ASSERT_HELD(cbqp-&gt;ifnp.ifq_);
+
+	<span class="enscript-comment">/*
+	 * first, try optimistically the slot matching the lower bits of
+	 * the handle.  if it fails, do the linear table search.
+	 */</span>
+	i = chandle % CBQ_MAX_CLASSES;
+	<span class="enscript-keyword">if</span> ((cl = cbqp-&gt;cbq_class_tbl[i]) != NULL &amp;&amp;
+	    cl-&gt;stats_.handle == chandle)
+		<span class="enscript-keyword">return</span> (cl);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; CBQ_MAX_CLASSES; i++)
+		<span class="enscript-keyword">if</span> ((cl = cbqp-&gt;cbq_class_tbl[i]) != NULL &amp;&amp;
+		    cl-&gt;stats_.handle == chandle)
+			<span class="enscript-keyword">return</span> (cl);
+	<span class="enscript-keyword">return</span> (NULL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">cbq_style</span>(cbq_state_t *cbqp)
+{
+	<span class="enscript-keyword">return</span> ((cbqp-&gt;cbq_flags &amp; CBQSF_ALTQ) ? <span class="enscript-string">&quot;ALTQ_CBQ&quot;</span> : <span class="enscript-string">&quot;CBQ&quot;</span>);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">cbq_clear_interface</span>(cbq_state_t *cbqp)
+{
+	<span class="enscript-type">int</span>		 again, i;
+	<span class="enscript-type">struct</span> rm_class	*cl;
+
+	IFCQ_LOCK_ASSERT_HELD(cbqp-&gt;ifnp.ifq_);
+
+	<span class="enscript-comment">/* clear out the classes now */</span>
+	<span class="enscript-keyword">do</span> {
+		again = 0;
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; CBQ_MAX_CLASSES; i++) {
+			<span class="enscript-keyword">if</span> ((cl = cbqp-&gt;cbq_class_tbl[i]) != NULL) {
+				<span class="enscript-keyword">if</span> (RMC_IS_A_PARENT_CLASS(cl))
+					again++;
+				<span class="enscript-keyword">else</span> {
+					cbq_class_destroy(cbqp, cl);
+					cbqp-&gt;cbq_class_tbl[i] = NULL;
+					<span class="enscript-keyword">if</span> (cl == cbqp-&gt;ifnp.root_)
+						cbqp-&gt;ifnp.root_ = NULL;
+					<span class="enscript-keyword">if</span> (cl == cbqp-&gt;ifnp.default_)
+						cbqp-&gt;ifnp.default_ = NULL;
+				}
+			}
+		}
+	} <span class="enscript-keyword">while</span> (again);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/* copy the stats info in rm_class to class_states_t */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cbq_get_class_stats</span>(cbq_state_t *cbqp, u_int32_t qid, class_stats_t *statsp)
+{
+	<span class="enscript-type">struct</span> rm_class	*cl;
+
+	IFCQ_LOCK_ASSERT_HELD(cbqp-&gt;ifnp.ifq_);
+
+	<span class="enscript-keyword">if</span> ((cl = cbq_clh_to_clp(cbqp, qid)) == NULL)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	statsp-&gt;xmit_cnt	= cl-&gt;stats_.xmit_cnt;
+	statsp-&gt;drop_cnt	= cl-&gt;stats_.drop_cnt;
+	statsp-&gt;over		= cl-&gt;stats_.over;
+	statsp-&gt;borrows		= cl-&gt;stats_.borrows;
+	statsp-&gt;overactions	= cl-&gt;stats_.overactions;
+	statsp-&gt;delays		= cl-&gt;stats_.delays;
+
+	statsp-&gt;depth		= cl-&gt;depth_;
+	statsp-&gt;priority	= cl-&gt;pri_;
+	statsp-&gt;maxidle		= cl-&gt;maxidle_;
+	statsp-&gt;minidle		= cl-&gt;minidle_;
+	statsp-&gt;offtime		= cl-&gt;offtime_;
+	statsp-&gt;qmax		= qlimit(&amp;cl-&gt;q_);
+	statsp-&gt;ns_per_byte	= cl-&gt;ns_per_byte_;
+	statsp-&gt;wrr_allot	= cl-&gt;w_allotment_;
+	statsp-&gt;qcnt		= qlen(&amp;cl-&gt;q_);
+	statsp-&gt;avgidle		= cl-&gt;avgidle_;
+
+	statsp-&gt;qtype		= qtype(&amp;cl-&gt;q_);
+	statsp-&gt;qstate		= qstate(&amp;cl-&gt;q_);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RED</span>
+	<span class="enscript-keyword">if</span> (q_is_red(&amp;cl-&gt;q_))
+		red_getstats(cl-&gt;red_, &amp;statsp-&gt;red[0]);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RED */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_RIO</span>
+	<span class="enscript-keyword">if</span> (q_is_rio(&amp;cl-&gt;q_))
+		rio_getstats(cl-&gt;rio_, &amp;statsp-&gt;red[0]);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_RIO */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CLASSQ_BLUE</span>
+	<span class="enscript-keyword">if</span> (q_is_blue(&amp;cl-&gt;q_))
+		blue_getstats(cl-&gt;blue_, &amp;statsp-&gt;blue);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CLASSQ_BLUE */</span>
+	<span class="enscript-keyword">if</span> (q_is_sfb(&amp;cl-&gt;q_) &amp;&amp; cl-&gt;sfb_ != NULL)
+		sfb_getstats(cl-&gt;sfb_, &amp;statsp-&gt;sfb);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cbq_enqueue</span>(cbq_state_t *cbqp, <span class="enscript-type">struct</span> rm_class *cl, <span class="enscript-type">struct</span> mbuf *m,
+    <span class="enscript-type">struct</span> pf_mtag *t)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = cbqp-&gt;ifnp.ifq_;
+	<span class="enscript-type">int</span> len, ret;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	<span class="enscript-comment">/* grab class set by classifier */</span>
+	<span class="enscript-keyword">if</span> (!(m-&gt;m_flags &amp; M_PKTHDR)) {
+		<span class="enscript-comment">/* should not happen */</span>
+		log(LOG_ERR, <span class="enscript-string">&quot;%s: packet for %s does not have pkthdr\n&quot;</span>,
+		    if_name(ifq-&gt;ifcq_ifp));
+		IFCQ_CONVERT_LOCK(ifq);
+		m_freem(m);
+		<span class="enscript-keyword">return</span> (ENOBUFS);
+	}
+
+	<span class="enscript-keyword">if</span> (cl == NULL) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PF_ALTQ</span>
+		cl = cbq_clh_to_clp(cbqp, t-&gt;pftag_qid);
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !PF_ALTQ */</span>
+		cl = cbq_clh_to_clp(cbqp, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !PF_ALTQ */</span>
+		<span class="enscript-keyword">if</span> (cl == NULL) {
+			cl = cbqp-&gt;ifnp.default_;
+			<span class="enscript-keyword">if</span> (cl == NULL) {
+				IFCQ_CONVERT_LOCK(ifq);
+				m_freem(m);
+				<span class="enscript-keyword">return</span> (ENOBUFS);
+			}
+		}
+	}
+
+	len = m_pktlen(m);
+
+	ret = rmc_queue_packet(cl, m, t);
+	<span class="enscript-keyword">if</span> (ret != 0) {
+		<span class="enscript-keyword">if</span> (ret == CLASSQEQ_SUCCESS_FC) {
+			<span class="enscript-comment">/* packet enqueued, return advisory feedback */</span>
+			ret = EQFULL;
+		} <span class="enscript-keyword">else</span> {
+			VERIFY(ret == CLASSQEQ_DROPPED ||
+			    ret == CLASSQEQ_DROPPED_FC ||
+			    ret == CLASSQEQ_DROPPED_SP);
+			<span class="enscript-comment">/* packet has been freed in rmc_queue_packet */</span>
+			PKTCNTR_ADD(&amp;cl-&gt;stats_.drop_cnt, 1, len);
+			IFCQ_DROP_ADD(ifq, 1, len);
+			<span class="enscript-keyword">switch</span> (ret) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQEQ_DROPPED</span>:
+				<span class="enscript-keyword">return</span> (ENOBUFS);
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQEQ_DROPPED_FC</span>:
+				<span class="enscript-keyword">return</span> (EQFULL);
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CLASSQEQ_DROPPED_SP</span>:
+				<span class="enscript-keyword">return</span> (EQSUSPENDED);
+			}
+			<span class="enscript-comment">/* NOT REACHED */</span>
+		}
+	}
+
+	<span class="enscript-comment">/* successfully queued. */</span>
+	++cbqp-&gt;cbq_qlen;
+	IFCQ_INC_LEN(ifq);
+	IFCQ_INC_BYTES(ifq, len);
+
+	<span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-type">struct</span> mbuf *
+<span class="enscript-function-name">cbq_dequeue</span>(cbq_state_t *cbqp, cqdq_op_t op)
+{
+	<span class="enscript-type">struct</span> ifclassq *ifq = cbqp-&gt;ifnp.ifq_;
+	<span class="enscript-type">struct</span> mbuf *m;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+
+	m = rmc_dequeue_next(&amp;cbqp-&gt;ifnp, op);
+
+	<span class="enscript-keyword">if</span> (m &amp;&amp; op == CLASSQDQ_REMOVE) {
+		--cbqp-&gt;cbq_qlen;  <span class="enscript-comment">/* decrement # of packets in cbq */</span>
+		IFCQ_DEC_LEN(ifq);
+		IFCQ_DEC_BYTES(ifq, m_pktlen(m));
+		IFCQ_XMIT_ADD(ifq, 1, m_pktlen(m));
+
+		<span class="enscript-comment">/* Update the class. */</span>
+		rmc_update_class_util(&amp;cbqp-&gt;ifnp);
+	}
+	<span class="enscript-keyword">return</span> (m);
+}
+
+<span class="enscript-comment">/*
+ * void
+ * cbqrestart(queue_t *) - Restart sending of data.
+ * called from rmc_restart via timeout after waking up
+ * a suspended class.
+ *	Returns:	NONE
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">cbqrestart</span>(<span class="enscript-type">struct</span> ifclassq *ifq)
+{
+	u_int32_t qlen;
+
+	IFCQ_LOCK(ifq);
+	qlen = IFCQ_LEN(ifq);
+	IFCQ_UNLOCK(ifq);
+
+	<span class="enscript-keyword">if</span> (qlen &gt; 0)
+		ifnet_start(ifq-&gt;ifcq_ifp);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cbq_purge</span>(cbq_state_t *cbqp)
+{
+	<span class="enscript-type">struct</span> rm_class	*cl;
+	<span class="enscript-type">int</span>		 i;
+
+	IFCQ_LOCK_ASSERT_HELD(cbqp-&gt;ifnp.ifq_);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; CBQ_MAX_CLASSES; i++) {
+		<span class="enscript-keyword">if</span> ((cl = cbqp-&gt;cbq_class_tbl[i]) != NULL) {
+			<span class="enscript-keyword">if</span> (!qempty(&amp;cl-&gt;q_) &amp;&amp; pktsched_verbose) {
+				log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s purge qid=%d pri=%d &quot;</span>
+				    <span class="enscript-string">&quot;qlen=%d\n&quot;</span>, if_name(CBQS_IFP(cbqp)),
+				    cbq_style(cbqp), cl-&gt;stats_.handle,
+				    cl-&gt;pri_, qlen(&amp;cl-&gt;q_));
+			}
+			rmc_dropall(cl);
+		}
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cbq_event</span>(cbq_state_t *cbqp, cqev_t ev)
+{
+	<span class="enscript-type">struct</span> rm_class	*cl;
+	<span class="enscript-type">int</span>		 i;
+
+	IFCQ_LOCK_ASSERT_HELD(cbqp-&gt;ifnp.ifq_);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; CBQ_MAX_CLASSES; i++) {
+		<span class="enscript-keyword">if</span> ((cl = cbqp-&gt;cbq_class_tbl[i]) != NULL) {
+			<span class="enscript-keyword">if</span> (pktsched_verbose) {
+				log(LOG_DEBUG, <span class="enscript-string">&quot;%s: %s update qid=%d pri=%d &quot;</span>
+				    <span class="enscript-string">&quot;event=%s\n&quot;</span>, if_name(CBQS_IFP(cbqp)),
+				    cbq_style(cbqp), cl-&gt;stats_.handle,
+				    cl-&gt;pri_, ifclassq_ev2str(ev));
+			}
+			rmc_updateq(cl, ev);
+		}
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cqb_setup_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq, u_int32_t flags)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">ifq</span>, <span class="enscript-variable-name">flags</span>)
+	<span class="enscript-keyword">return</span> (ENXIO);		<span class="enscript-comment">/* not yet */</span>
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cbq_teardown_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq)
+{
+	cbq_state_t *cbqp = ifq-&gt;ifcq_disc;
+	<span class="enscript-type">int</span> i;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(cbqp != NULL &amp;&amp; ifq-&gt;ifcq_type == PKTSCHEDT_CBQ);
+
+	(<span class="enscript-type">void</span>) cbq_destroy_locked(cbqp);
+
+	ifq-&gt;ifcq_disc = NULL;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; IFCQ_SC_MAX; i++) {
+		ifq-&gt;ifcq_disc_slots[i].qid = 0;
+		ifq-&gt;ifcq_disc_slots[i].cl = NULL;
+	}
+
+	<span class="enscript-keyword">return</span> (ifclassq_detach(ifq));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">cbq_getqstats_ifclassq</span>(<span class="enscript-type">struct</span> ifclassq *ifq, u_int32_t slot,
+    <span class="enscript-type">struct</span> if_ifclassq_stats *ifqs)
+{
+	cbq_state_t *cbqp = ifq-&gt;ifcq_disc;
+
+	IFCQ_LOCK_ASSERT_HELD(ifq);
+	VERIFY(ifq-&gt;ifcq_type == PKTSCHEDT_CBQ);
+
+	<span class="enscript-keyword">if</span> (slot &gt;= IFCQ_SC_MAX)
+		<span class="enscript-keyword">return</span> (EINVAL);
+
+	<span class="enscript-keyword">return</span> (cbq_get_class_stats(cbqp, ifq-&gt;ifcq_disc_slots[slot].qid,
+	    &amp;ifqs-&gt;ifqs_cbq_stats));
+}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PKTSCHED_CBQ */</span>
+</pre>
+<hr />
+</body></html>

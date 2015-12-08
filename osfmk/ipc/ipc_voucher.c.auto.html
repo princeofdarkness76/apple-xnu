@@ -1,0 +1,2996 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ipc_voucher.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ipc_voucher.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/notify.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_voucher.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_kobject.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_tt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/mach_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_voucher_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_voucher_attr_control_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_host_server.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Sysctl variable; enable and disable tracing of voucher contents
+ */</span>
+uint32_t ipc_voucher_trace_contents = 0;
+
+<span class="enscript-type">static</span> zone_t ipc_voucher_zone;
+<span class="enscript-type">static</span> zone_t ipc_voucher_attr_control_zone;
+
+<span class="enscript-comment">/*
+ * Voucher hash table
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IV_HASH_BUCKETS</span> 127
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IV_HASH_BUCKET</span>(x) ((x) % IV_HASH_BUCKETS)
+
+<span class="enscript-type">static</span> queue_head_t ivht_bucket[IV_HASH_BUCKETS];
+<span class="enscript-type">static</span> lck_spin_t ivht_lock_data;
+<span class="enscript-type">static</span> uint32_t ivht_count = 0;
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ivht_lock_init</span>() \
+	lck_spin_init(&amp;ivht_lock_data, &amp;ipc_lck_grp, &amp;ipc_lck_attr)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ivht_lock_destroy</span>() \
+	lck_spin_destroy(&amp;ivht_lock_data, &amp;ipc_lck_grp)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ivht_lock</span>() \
+	lck_spin_lock(&amp;ivht_lock_data)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ivht_lock_try</span>() \
+	lck_spin_try_lock(&amp;ivht_lock_data)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ivht_unlock</span>() \
+	lck_spin_unlock(&amp;ivht_lock_data)
+
+<span class="enscript-comment">/*
+ * Global table of resource manager registrations
+ *
+ * NOTE: For now, limited to well-known resource managers
+ * eventually, will include dynamic allocations requiring
+ * table growth and hashing by key.
+ */</span>
+<span class="enscript-type">static</span> iv_index_t ivgt_keys_in_use = MACH_VOUCHER_ATTR_KEY_NUM_WELL_KNOWN;
+<span class="enscript-type">static</span> ipc_voucher_global_table_element iv_global_table[MACH_VOUCHER_ATTR_KEY_NUM_WELL_KNOWN];
+<span class="enscript-type">static</span> lck_spin_t ivgt_lock_data; 
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ivgt_lock_init</span>() \
+	lck_spin_init(&amp;ivgt_lock_data, &amp;ipc_lck_grp, &amp;ipc_lck_attr)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ivgt_lock_destroy</span>() \
+	lck_spin_destroy(&amp;ivgt_lock_data, &amp;ipc_lck_grp)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ivgt_lock</span>() \
+	lck_spin_lock(&amp;ivgt_lock_data)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ivgt_lock_try</span>() \
+	lck_spin_try_lock(&amp;ivgt_lock_data)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ivgt_unlock</span>() \
+	lck_spin_unlock(&amp;ivgt_lock_data)
+
+ipc_voucher_t <span class="enscript-function-name">iv_alloc</span>(iv_index_t entries);
+<span class="enscript-type">void</span> <span class="enscript-function-name">iv_dealloc</span>(ipc_voucher_t iv, boolean_t unhash);
+
+<span class="enscript-type">static</span> inline iv_refs_t
+<span class="enscript-function-name">iv_reference</span>(ipc_voucher_t iv)
+{
+	iv_refs_t refs;
+
+	refs = hw_atomic_add(&amp;iv-&gt;iv_refs, 1);
+	<span class="enscript-keyword">return</span> refs;
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span>
+<span class="enscript-function-name">iv_release</span>(ipc_voucher_t iv)
+{
+	iv_refs_t refs;
+
+	assert(0 &lt; iv-&gt;iv_refs);
+	refs = hw_atomic_sub(&amp;iv-&gt;iv_refs, 1);
+	<span class="enscript-keyword">if</span> (0 == refs)
+		iv_dealloc(iv, TRUE);
+}
+
+<span class="enscript-comment">/*
+ * freelist helper macros
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IV_FREELIST_END</span> ((iv_index_t) 0)
+
+<span class="enscript-comment">/*
+ * Attribute value hashing helper macros
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">IV_HASH_END</span> UINT32_MAX
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">IV_HASH_VAL</span>(sz, val) \
+	(((val) &gt;&gt; 3) % (sz))
+
+<span class="enscript-type">static</span> inline iv_index_t
+<span class="enscript-function-name">iv_hash_value</span>(
+	iv_index_t key_index,
+	mach_voucher_attr_value_handle_t value)
+{
+	ipc_voucher_attr_control_t ivac;
+
+	ivac = iv_global_table[key_index].ivgte_control;
+	assert(IVAC_NULL != ivac);
+	<span class="enscript-keyword">return</span> IV_HASH_VAL(ivac-&gt;ivac_init_table_size, value);
+}
+
+<span class="enscript-comment">/*
+ * Convert a key to an index.  This key-index is used to both index
+ * into the voucher table of attribute cache indexes and also the
+ * table of resource managers by key.
+ *
+ * For now, well-known keys have a one-to-one mapping of indexes
+ * into these tables.  But as time goes on, that may not always
+ * be the case (sparse use over time).  This isolates the code from
+ * having to change in these cases - yet still lets us keep a densely
+ * packed set of tables.
+ */</span>
+<span class="enscript-type">static</span> inline iv_index_t
+<span class="enscript-function-name">iv_key_to_index</span>(mach_voucher_attr_key_t key)
+{
+	<span class="enscript-keyword">if</span> (MACH_VOUCHER_ATTR_KEY_ALL == key ||
+	    MACH_VOUCHER_ATTR_KEY_NUM_WELL_KNOWN &lt; key)
+		<span class="enscript-keyword">return</span> IV_UNUSED_KEYINDEX;
+	<span class="enscript-keyword">return</span> (iv_index_t)key - 1;
+}
+
+<span class="enscript-type">static</span> inline mach_voucher_attr_key_t
+<span class="enscript-function-name">iv_index_to_key</span>(iv_index_t key_index)
+{
+	<span class="enscript-keyword">if</span> (MACH_VOUCHER_ATTR_KEY_NUM_WELL_KNOWN &gt; key_index)
+		<span class="enscript-keyword">return</span> iv_global_table[key_index].ivgte_key;
+	<span class="enscript-keyword">return</span> MACH_VOUCHER_ATTR_KEY_NONE;
+		
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ivace_release</span>(iv_index_t key_index, iv_index_t value_index);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ivace_lookup_values</span>(iv_index_t key_index, iv_index_t value_index, 
+				mach_voucher_attr_value_handle_array_t	values,
+				mach_voucher_attr_value_handle_array_size_t *count);
+
+<span class="enscript-type">static</span> iv_index_t <span class="enscript-function-name">iv_lookup</span>(ipc_voucher_t, iv_index_t);
+
+				
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ivgt_lookup</span>(iv_index_t,
+			boolean_t,
+			ipc_voucher_attr_manager_t *,
+			ipc_voucher_attr_control_t *);
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">MACH_VOUCHER_ATTR_KEY_USER_DATA</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">MACH_VOUCHER_ATTR_KEY_TEST</span>)
+<span class="enscript-type">void</span> <span class="enscript-function-name">user_data_attr_manager_init</span>(<span class="enscript-type">void</span>);
+#<span class="enscript-reference">endif</span> 
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_voucher_init</span>(<span class="enscript-type">void</span>)
+{
+	natural_t ipc_voucher_max = (task_max + thread_max) * 2;
+	natural_t attr_manager_max = MACH_VOUCHER_ATTR_KEY_NUM_WELL_KNOWN;
+	iv_index_t i;
+
+	ipc_voucher_zone = zinit(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipc_voucher),
+				 ipc_voucher_max * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipc_voucher),
+				 <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipc_voucher),
+				 <span class="enscript-string">&quot;ipc vouchers&quot;</span>);
+	zone_change(ipc_voucher_zone, Z_NOENCRYPT, TRUE);
+
+	ipc_voucher_attr_control_zone = zinit(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipc_voucher_attr_control),
+				 attr_manager_max * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipc_voucher_attr_control),
+				 <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ipc_voucher_attr_control),
+				 <span class="enscript-string">&quot;ipc voucher attr controls&quot;</span>);
+	zone_change(ipc_voucher_attr_control_zone, Z_NOENCRYPT, TRUE);
+
+	<span class="enscript-comment">/* initialize voucher hash */</span>
+	ivht_lock_init();
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; IV_HASH_BUCKETS; i++)
+		queue_init(&amp;ivht_bucket[i]);
+
+	<span class="enscript-comment">/* initialize global table locking */</span>
+	ivgt_lock_init();
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">MACH_VOUCHER_ATTR_KEY_USER_DATA</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">MACH_VOUCHER_ATTR_KEY_TEST</span>)
+	user_data_attr_manager_init();
+#<span class="enscript-reference">endif</span>
+}
+
+ipc_voucher_t
+<span class="enscript-function-name">iv_alloc</span>(iv_index_t entries)
+{
+	ipc_voucher_t iv;
+	iv_index_t i;
+
+
+	iv = (ipc_voucher_t)zalloc(ipc_voucher_zone);
+	<span class="enscript-keyword">if</span> (IV_NULL == iv)
+		<span class="enscript-keyword">return</span> IV_NULL;
+		
+	iv-&gt;iv_refs = 1;
+	iv-&gt;iv_sum = 0;
+	iv-&gt;iv_hash = 0;
+	iv-&gt;iv_port = IP_NULL;
+
+	<span class="enscript-keyword">if</span> (entries &gt; IV_ENTRIES_INLINE) {
+		iv_entry_t table;
+
+		<span class="enscript-comment">/* TODO - switch to ipc_table method of allocation */</span>
+		table = (iv_entry_t) kalloc(<span class="enscript-keyword">sizeof</span>(*table) * entries);
+		<span class="enscript-keyword">if</span> (IVE_NULL == table) {
+			zfree(ipc_voucher_zone, iv);
+			<span class="enscript-keyword">return</span> IV_NULL;
+		}
+		iv-&gt;iv_table = table;
+		iv-&gt;iv_table_size = entries;
+	} <span class="enscript-keyword">else</span> {
+		iv-&gt;iv_table = iv-&gt;iv_inline_table;
+		iv-&gt;iv_table_size = IV_ENTRIES_INLINE;
+	}
+
+	<span class="enscript-comment">/* initialize the table entries */</span>
+	<span class="enscript-keyword">for</span> (i=0; i &lt; iv-&gt;iv_table_size; i++)
+		iv-&gt;iv_table[i] = IV_UNUSED_VALINDEX;
+		
+	<span class="enscript-keyword">return</span> (iv);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	iv_set
+ *	Purpose:
+ *		Set the voucher's value index for a given key index.
+ *	Conditions:
+ *		This is only called during voucher creation, as
+ *		they are immutable once references are distributed.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">iv_set</span>(ipc_voucher_t iv, 
+       iv_index_t key_index,
+       iv_index_t value_index)
+{
+	assert(key_index &lt; iv-&gt;iv_table_size);
+	iv-&gt;iv_table[key_index] = value_index;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">iv_dealloc</span>(ipc_voucher_t iv, boolean_t unhash)
+{
+	ipc_port_t port = iv-&gt;iv_port;
+	natural_t i;
+
+	<span class="enscript-comment">/*
+	 * Do we have to remove it from the hash?
+	 */</span>
+	<span class="enscript-keyword">if</span> (unhash) {
+		ivht_lock();
+		assert(0 == iv-&gt;iv_refs);
+		assert(IV_HASH_BUCKETS &gt; iv-&gt;iv_hash);
+		queue_remove(&amp;ivht_bucket[iv-&gt;iv_hash], iv, ipc_voucher_t, iv_hash_link);
+		ivht_count--;
+		ivht_unlock();
+
+		KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_IPC,MACH_IPC_VOUCHER_DESTROY) | DBG_FUNC_NONE,
+				      VM_KERNEL_ADDRPERM((uintptr_t)iv), 0, ivht_count, 0, 0);
+
+	} <span class="enscript-keyword">else</span>
+		assert(0 == --iv-&gt;iv_refs);
+
+	<span class="enscript-comment">/*
+	 * if a port was allocated for this voucher,
+	 * it must not have any remaining send rights,
+	 * because the port's reference on the voucher
+	 * is gone.  We can just discard it now.
+	 */</span>
+	<span class="enscript-keyword">if</span> (IP_VALID(port)) {
+		assert(ip_active(port));
+		assert(port-&gt;ip_srights == 0);
+
+		ipc_port_dealloc_kernel(port);
+	}
+
+	<span class="enscript-comment">/* release the attribute references held by this voucher */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; iv-&gt;iv_table_size; i++) {
+		ivace_release(i, iv-&gt;iv_table[i]);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">MACH_ASSERT</span>
+		iv_set(iv, i, ~0);
+#<span class="enscript-reference">endif</span>
+	}
+			
+	<span class="enscript-keyword">if</span> (iv-&gt;iv_table != iv-&gt;iv_inline_table)
+		kfree(iv-&gt;iv_table, 
+		      iv-&gt;iv_table_size * <span class="enscript-keyword">sizeof</span>(*iv-&gt;iv_table));
+
+	zfree(ipc_voucher_zone, iv);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	iv_lookup
+ *	Purpose:
+ *		Find the voucher's value index for a given key_index
+ *	Conditions:
+ *		Vouchers are immutable, so no locking required to do
+ *		a lookup.
+ */</span>
+<span class="enscript-type">static</span> inline iv_index_t
+<span class="enscript-function-name">iv_lookup</span>(ipc_voucher_t iv, iv_index_t key_index)
+{
+	<span class="enscript-keyword">if</span> (key_index &lt; iv-&gt;iv_table_size)
+		<span class="enscript-keyword">return</span> iv-&gt;iv_table[key_index];
+	<span class="enscript-keyword">return</span> IV_UNUSED_VALINDEX;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	unsafe_convert_port_to_voucher
+ *	Purpose:
+ *		Unsafe conversion of a port to a voucher.
+ *		Intended only for use by trace and debugging
+ *		code. Consumes nothing, validates very little,
+ *		produces an unreferenced voucher, which you
+ *		MAY NOT use as a voucher, only log as an
+ *		address.
+ *	Conditions:
+ *		Caller has a send-right reference to port.
+ *		Port may or may not be locked.
+ */</span>
+uintptr_t
+<span class="enscript-function-name">unsafe_convert_port_to_voucher</span>(
+	ipc_port_t	port)
+{
+	<span class="enscript-keyword">if</span> (IP_VALID(port)) {
+		uintptr_t voucher = (uintptr_t) port-&gt;ip_kobject;
+
+		<span class="enscript-comment">/*
+		 * No need to lock because we have a reference on the
+		 * port, and if it is a true voucher port, that reference
+		 * keeps the voucher bound to the port (and active).
+		 */</span>
+		<span class="enscript-keyword">if</span> (ip_kotype(port) == IKOT_VOUCHER)
+			<span class="enscript-keyword">return</span> (voucher);
+	}
+	<span class="enscript-keyword">return</span> (uintptr_t)IV_NULL;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	convert_port_to_voucher
+ *	Purpose:
+ *		Convert from a port to a voucher.
+ *		Doesn't consume the port [send-right] ref;
+ *		produces a voucher ref,	which may be null.
+ *	Conditions:
+ *		Caller has a send-right reference to port.
+ *		Port may or may not be locked.
+ */</span>
+ipc_voucher_t
+<span class="enscript-function-name">convert_port_to_voucher</span>(
+	ipc_port_t	port)
+{
+	<span class="enscript-keyword">if</span> (IP_VALID(port)) {
+		ipc_voucher_t voucher = (ipc_voucher_t) port-&gt;ip_kobject;
+
+		<span class="enscript-comment">/*
+		 * No need to lock because we have a reference on the
+		 * port, and if it is a true voucher port, that reference
+		 * keeps the voucher bound to the port (and active).
+		 */</span>
+		<span class="enscript-keyword">if</span> (ip_kotype(port) != IKOT_VOUCHER)
+			<span class="enscript-keyword">return</span> IV_NULL;
+
+		assert(ip_active(port));
+
+		ipc_voucher_reference(voucher);
+		<span class="enscript-keyword">return</span> (voucher);
+	}
+	<span class="enscript-keyword">return</span> IV_NULL;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	convert_port_name_to_voucher
+ *	Purpose:
+ *		Convert from a port name in the current space to a voucher.
+ *		Produces a voucher ref,	which may be null.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+
+ipc_voucher_t
+<span class="enscript-function-name">convert_port_name_to_voucher</span>(
+	mach_port_name_t	voucher_name)
+{
+	ipc_voucher_t iv;
+	kern_return_t kr;
+	ipc_port_t port;
+
+	<span class="enscript-keyword">if</span> (MACH_PORT_VALID(voucher_name)) {
+		kr = ipc_port_translate_send(current_space(), voucher_name, &amp;port);
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+			<span class="enscript-keyword">return</span> IV_NULL;
+
+		iv = convert_port_to_voucher(port);
+		ip_unlock(port);
+		<span class="enscript-keyword">return</span> iv;
+	}
+	<span class="enscript-keyword">return</span> IV_NULL;
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_voucher_reference</span>(ipc_voucher_t voucher)
+{
+	iv_refs_t refs;
+
+	<span class="enscript-keyword">if</span> (IPC_VOUCHER_NULL == voucher)
+		<span class="enscript-keyword">return</span>;
+
+	refs = iv_reference(voucher);
+	assert(1 &lt; refs);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_voucher_release</span>(ipc_voucher_t voucher)
+{
+	<span class="enscript-keyword">if</span> (IPC_VOUCHER_NULL != voucher)
+		iv_release(voucher);
+}
+
+<span class="enscript-comment">/*
+ * Routine:	ipc_voucher_notify
+ * Purpose:
+ *	Called whenever the Mach port system detects no-senders
+ *	on the voucher port.
+ *
+ *	Each time the send-right count goes positive, a no-senders 
+ *	notification is armed (and a voucher reference is donated).
+ *	So, each notification that comes in must release a voucher
+ *	reference.  If more send rights have been added since it
+ *	fired (asynchronously), they will be protected by a different
+ *	reference hold.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_voucher_notify</span>(mach_msg_header_t *msg)
+{
+	mach_no_senders_notification_t *notification = (<span class="enscript-type">void</span> *)msg;
+	ipc_port_t port = notification-&gt;not_header.msgh_remote_port;
+	ipc_voucher_t iv;
+
+	assert(ip_active(port));
+	assert(IKOT_VOUCHER == ip_kotype(port));
+	iv = (ipc_voucher_t)port-&gt;ip_kobject;
+
+	ipc_voucher_release(iv);
+}
+
+<span class="enscript-comment">/*
+ * Convert a voucher to a port.
+ */</span>
+ipc_port_t
+<span class="enscript-function-name">convert_voucher_to_port</span>(ipc_voucher_t voucher)
+{
+	ipc_port_t	port, send;
+
+	<span class="enscript-keyword">if</span> (IV_NULL == voucher)
+		<span class="enscript-keyword">return</span> (IP_NULL);
+
+	assert(0 &lt; voucher-&gt;iv_refs);
+
+	<span class="enscript-comment">/* create a port if needed */</span>
+	port = voucher-&gt;iv_port;
+	<span class="enscript-keyword">if</span> (!IP_VALID(port)) {
+		port = ipc_port_alloc_kernel();
+		assert(IP_VALID(port));
+		ipc_kobject_set_atomically(port, (ipc_kobject_t) voucher, IKOT_VOUCHER);
+
+		<span class="enscript-comment">/* If we lose the race, deallocate and pick up the other guy's port */</span>
+		<span class="enscript-keyword">if</span> (!OSCompareAndSwapPtr(IP_NULL, port, &amp;voucher-&gt;iv_port)) {
+			ipc_port_dealloc_kernel(port);
+			port = voucher-&gt;iv_port;
+			assert(ip_kotype(port) == IKOT_VOUCHER);
+			assert(port-&gt;ip_kobject == (ipc_kobject_t)voucher);
+		}
+	}
+	
+	ip_lock(port);
+	assert(ip_active(port));
+	send = ipc_port_make_send_locked(port);
+
+	<span class="enscript-keyword">if</span> (1 == port-&gt;ip_srights) {
+		ipc_port_t old_notify;
+
+		<span class="enscript-comment">/* transfer our ref to the port, and arm the no-senders notification */</span>
+		assert(IP_NULL == port-&gt;ip_nsrequest);
+		ipc_port_nsrequest(port, port-&gt;ip_mscount, ipc_port_make_sonce_locked(port), &amp;old_notify);
+		<span class="enscript-comment">/* port unlocked */</span>
+		assert(IP_NULL == old_notify);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* piggyback on the existing port reference, so consume ours */</span>
+		ip_unlock(port);
+		ipc_voucher_release(voucher);
+	}
+	<span class="enscript-keyword">return</span> (send);
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ivace_reset_data</span>(ivace_elem, next_index) {       \
+	(ivace_elem)-&gt;ivace_value = 0xDEADC0DEDEADC0DE;  \
+	(ivace_elem)-&gt;ivace_refs = 0;                    \
+	(ivace_elem)-&gt;ivace_made = 0;                    \
+	(ivace_elem)-&gt;ivace_free = TRUE;                 \
+	(ivace_elem)-&gt;ivace_releasing = FALSE;           \
+	(ivace_elem)-&gt;ivace_layered = 0;                 \
+	(ivace_elem)-&gt;ivace_index = IV_HASH_END;         \
+	(ivace_elem)-&gt;ivace_next = (next_index);         \
+}
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ivace_copy_data</span>(ivace_src_elem, ivace_dst_elem) {  \
+	(ivace_dst_elem)-&gt;ivace_value = (ivace_src_elem)-&gt;ivace_value; \
+	(ivace_dst_elem)-&gt;ivace_refs = (ivace_src_elem)-&gt;ivace_refs;   \
+	(ivace_dst_elem)-&gt;ivace_made = (ivace_src_elem)-&gt;ivace_made;   \
+	(ivace_dst_elem)-&gt;ivace_free = (ivace_src_elem)-&gt;ivace_free;   \
+	(ivace_dst_elem)-&gt;ivace_layered = (ivace_src_elem)-&gt;ivace_layered;   \
+	(ivace_dst_elem)-&gt;ivace_releasing = (ivace_src_elem)-&gt;ivace_releasing; \
+	(ivace_dst_elem)-&gt;ivace_index = (ivace_src_elem)-&gt;ivace_index; \
+	(ivace_dst_elem)-&gt;ivace_next = (ivace_src_elem)-&gt;ivace_next; \
+}
+
+ipc_voucher_attr_control_t
+<span class="enscript-function-name">ivac_alloc</span>(iv_index_t key_index)
+{
+	ipc_voucher_attr_control_t ivac;
+	ivac_entry_t table;
+	natural_t i;
+
+
+	ivac = (ipc_voucher_attr_control_t)zalloc(ipc_voucher_attr_control_zone);
+	<span class="enscript-keyword">if</span> (IVAC_NULL == ivac)
+		<span class="enscript-keyword">return</span> IVAC_NULL;
+		
+	ivac-&gt;ivac_refs = 1;
+	ivac-&gt;ivac_is_growing = FALSE;
+	ivac-&gt;ivac_port = IP_NULL;
+
+	<span class="enscript-comment">/* start with just the inline table */</span>
+	table =	(ivac_entry_t) kalloc(IVAC_ENTRIES_MIN * <span class="enscript-keyword">sizeof</span>(ivac_entry));
+	ivac-&gt;ivac_table = table;
+	ivac-&gt;ivac_table_size = IVAC_ENTRIES_MIN;
+	ivac-&gt;ivac_init_table_size = IVAC_ENTRIES_MIN;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; ivac-&gt;ivac_table_size; i++) {
+		ivace_reset_data(&amp;table[i], i+1);
+	}
+
+	<span class="enscript-comment">/* the default table entry is never on freelist */</span>
+	table[0].ivace_next = IV_HASH_END;
+	table[0].ivace_free = FALSE;
+	table[i-1].ivace_next = IV_FREELIST_END;
+	ivac-&gt;ivac_freelist = 1;
+	ivac_lock_init(ivac);
+	ivac-&gt;ivac_key_index = key_index;
+	<span class="enscript-keyword">return</span> (ivac);
+}
+	
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ivac_dealloc</span>(ipc_voucher_attr_control_t ivac)
+{
+	ipc_voucher_attr_manager_t ivam = IVAM_NULL;
+	iv_index_t key_index = ivac-&gt;ivac_key_index;
+	ipc_port_t port = ivac-&gt;ivac_port;
+	natural_t i;
+
+	<span class="enscript-comment">/*
+	 * If the control is in the global table, we
+	 * have to remove it from there before we (re)confirm
+	 * that the reference count is still zero.
+	 */</span>
+	ivgt_lock();
+	<span class="enscript-keyword">if</span> (ivac-&gt;ivac_refs &gt; 0) {
+		ivgt_unlock();
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* take it out of the global table */</span>
+	<span class="enscript-keyword">if</span> (iv_global_table[key_index].ivgte_control == ivac) {
+		ivam = iv_global_table[key_index].ivgte_manager;
+		iv_global_table[key_index].ivgte_manager = IVAM_NULL;
+		iv_global_table[key_index].ivgte_control = IVAC_NULL;
+		iv_global_table[key_index].ivgte_key = MACH_VOUCHER_ATTR_KEY_NONE;
+	}
+	ivgt_unlock();
+
+	<span class="enscript-comment">/* release the reference held on the resource manager */</span>
+	<span class="enscript-keyword">if</span> (IVAM_NULL != ivam)
+		(ivam-&gt;ivam_release)(ivam);
+
+	<span class="enscript-comment">/*
+	 * if a port was allocated for this voucher,
+	 * it must not have any remaining send rights,
+	 * because the port's reference on the voucher
+	 * is gone.  We can just discard it now.
+	 */</span>
+	<span class="enscript-keyword">if</span> (IP_VALID(port)) {
+		assert(ip_active(port));
+		assert(port-&gt;ip_srights == 0);
+
+		ipc_port_dealloc_kernel(port);
+	}
+
+	<span class="enscript-comment">/*
+	 * the resource manager's control reference and all references
+	 * held by the specific value caches are gone, so free the
+	 * table.
+	 */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MACH_DEBUG</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; ivac-&gt;ivac_table_size; i++)
+		<span class="enscript-keyword">if</span> (ivac-&gt;ivac_table[i].ivace_refs != 0)
+			panic(<span class="enscript-string">&quot;deallocing a resource manager with live refs to its attr values\n&quot;</span>);
+#<span class="enscript-reference">endif</span>
+	kfree(ivac-&gt;ivac_table, ivac-&gt;ivac_table_size * <span class="enscript-keyword">sizeof</span>(*ivac-&gt;ivac_table));
+	ivac_lock_destroy(ivac);
+	zfree(ipc_voucher_attr_control_zone, ivac);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_voucher_attr_control_reference</span>(ipc_voucher_attr_control_t control)
+{
+	ivac_reference(control);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_voucher_attr_control_release</span>(ipc_voucher_attr_control_t control)
+{
+	ivac_release(control);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	convert_port_to_voucher_attr_control reference
+ *	Purpose:
+ *		Convert from a port to a voucher attribute control.
+ *		Doesn't consume the port ref; produces a voucher ref,
+ *		which may be null.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+ipc_voucher_attr_control_t
+<span class="enscript-function-name">convert_port_to_voucher_attr_control</span>(
+	ipc_port_t	port)
+{
+	<span class="enscript-keyword">if</span> (IP_VALID(port)) {
+		ipc_voucher_attr_control_t ivac = (ipc_voucher_attr_control_t) port-&gt;ip_kobject;
+
+		<span class="enscript-comment">/*
+		 * No need to lock because we have a reference on the
+		 * port, and if it is a true voucher control port,
+		 * that reference keeps the voucher bound to the port
+		 * (and active).
+		 */</span>
+		<span class="enscript-keyword">if</span> (ip_kotype(port) != IKOT_VOUCHER_ATTR_CONTROL)
+			<span class="enscript-keyword">return</span> IVAC_NULL;
+
+		assert(ip_active(port));
+
+		ivac_reference(ivac);
+		<span class="enscript-keyword">return</span> (ivac);
+	}
+	<span class="enscript-keyword">return</span> IVAC_NULL;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_voucher_attr_control_notify</span>(mach_msg_header_t *msg)
+{
+	mach_no_senders_notification_t *notification = (<span class="enscript-type">void</span> *)msg;
+	ipc_port_t port = notification-&gt;not_header.msgh_remote_port;
+	ipc_voucher_attr_control_t ivac;
+
+	assert(IKOT_VOUCHER_ATTR_CONTROL == ip_kotype(port));
+	ip_lock(port);
+	assert(ip_active(port));
+
+	<span class="enscript-comment">/* if no new send rights, drop a control reference */</span>
+	<span class="enscript-keyword">if</span> (port-&gt;ip_mscount == notification-&gt;not_count) {
+		ivac = (ipc_voucher_attr_control_t)port-&gt;ip_kobject;
+		ip_unlock(port);
+
+		ivac_release(ivac);
+	}
+	ip_unlock(port);
+}
+
+<span class="enscript-comment">/*
+ * Convert a voucher attr control to a port.
+ */</span>
+ipc_port_t
+<span class="enscript-function-name">convert_voucher_attr_control_to_port</span>(ipc_voucher_attr_control_t control)
+{
+	ipc_port_t	port, send;
+
+	<span class="enscript-keyword">if</span> (IVAC_NULL == control)
+		<span class="enscript-keyword">return</span> (IP_NULL);
+
+	<span class="enscript-comment">/* create a port if needed */</span>
+	port = control-&gt;ivac_port;
+	<span class="enscript-keyword">if</span> (!IP_VALID(port)) {
+		port = ipc_port_alloc_kernel();
+		assert(IP_VALID(port));
+		<span class="enscript-keyword">if</span> (OSCompareAndSwapPtr(IP_NULL, port, &amp;control-&gt;ivac_port)) {
+			ip_lock(port);
+			ipc_kobject_set_atomically(port, (ipc_kobject_t) control, IKOT_VOUCHER_ATTR_CONTROL);
+		} <span class="enscript-keyword">else</span> {
+			ipc_port_dealloc_kernel(port);
+			port = control-&gt;ivac_port;
+			ip_lock(port);
+			assert(ip_kotype(port) == IKOT_VOUCHER_ATTR_CONTROL);
+			assert(port-&gt;ip_kobject == (ipc_kobject_t)control);
+		}
+	} <span class="enscript-keyword">else</span> 
+		ip_lock(port);
+
+	assert(ip_active(port));
+	send = ipc_port_make_send_locked(port);
+
+	<span class="enscript-keyword">if</span> (1 == port-&gt;ip_srights) {
+		ipc_port_t old_notify;
+
+		<span class="enscript-comment">/* transfer our ref to the port, and arm the no-senders notification */</span>
+		assert(IP_NULL == port-&gt;ip_nsrequest);
+		ipc_port_nsrequest(port, port-&gt;ip_mscount, ipc_port_make_sonce_locked(port), &amp;old_notify);
+		assert(IP_NULL == old_notify);
+		ip_unlock(port);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* piggyback on the existing port reference, so consume ours */</span>
+		ip_unlock(port);
+		ivac_release(control);
+	}
+	<span class="enscript-keyword">return</span> (send);
+}
+
+<span class="enscript-comment">/*
+ * Look up the values for a given &lt;key, index&gt; pair.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ivace_lookup_values</span>(
+	iv_index_t		 		key_index,
+	iv_index_t				value_index,
+	mach_voucher_attr_value_handle_array_t		values,
+	mach_voucher_attr_value_handle_array_size_t	*count)
+{
+	ipc_voucher_attr_control_t ivac;
+	ivac_entry_t ivace;
+
+	<span class="enscript-keyword">if</span> (IV_UNUSED_VALINDEX == value_index ||
+	    MACH_VOUCHER_ATTR_KEY_NUM_WELL_KNOWN &lt;= key_index) {
+		*count = 0;
+		<span class="enscript-keyword">return</span>;
+	}
+
+	ivac = iv_global_table[key_index].ivgte_control;
+	assert(IVAC_NULL != ivac);
+
+	<span class="enscript-comment">/*
+	 * Get the entry and then the linked values.
+	 */</span>
+	ivac_lock(ivac);
+	assert(value_index &lt; ivac-&gt;ivac_table_size);
+	ivace = &amp;ivac-&gt;ivac_table[value_index];
+
+	<span class="enscript-comment">/*
+	 * TODO: support chained values (for effective vouchers).
+	 */</span>
+	assert(ivace-&gt;ivace_refs &gt; 0);
+	values[0] = ivace-&gt;ivace_value;
+	ivac_unlock(ivac);
+	*count = 1;
+}
+
+<span class="enscript-comment">/*
+ *  ivac_grow_table - Allocate a bigger table of attribute values
+ *
+ *  Conditions:	ivac is locked on entry and again on return
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ivac_grow_table</span>(ipc_voucher_attr_control_t ivac)
+{
+	iv_index_t i = 0;
+
+	<span class="enscript-comment">/* NOTE: do not modify *_table and *_size values once set */</span>
+	ivac_entry_t new_table = NULL, old_table = NULL;
+	iv_index_t new_size, old_size;
+
+	<span class="enscript-keyword">if</span> (ivac-&gt;ivac_is_growing) {
+		ivac_sleep(ivac);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	ivac-&gt;ivac_is_growing = 1;
+	<span class="enscript-keyword">if</span> (ivac-&gt;ivac_table_size &gt;= IVAC_ENTRIES_MAX) {
+		panic(<span class="enscript-string">&quot;Cannot grow ipc space beyond IVAC_ENTRIES_MAX. Some process is leaking vouchers&quot;</span>);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	old_size = ivac-&gt;ivac_table_size;
+	ivac_unlock(ivac);
+
+	new_size = old_size * 2;
+
+	assert(new_size &gt; old_size);
+	assert(new_size &lt; IVAC_ENTRIES_MAX);
+
+	new_table = kalloc(<span class="enscript-keyword">sizeof</span>(ivac_entry) * new_size);
+	<span class="enscript-keyword">if</span> (!new_table){
+		panic(<span class="enscript-string">&quot;Failed to grow ivac table to size %d\n&quot;</span>, new_size);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* setup the free list for new entries */</span>
+	<span class="enscript-keyword">for</span> (i = old_size; i &lt; new_size; i++) {
+		ivace_reset_data(&amp;new_table[i], i+1);
+	}
+
+	ivac_lock(ivac);
+	
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; ivac-&gt;ivac_table_size; i++){
+		ivace_copy_data(&amp;ivac-&gt;ivac_table[i], &amp;new_table[i]);
+	}
+
+	old_table = ivac-&gt;ivac_table;
+
+	ivac-&gt;ivac_table = new_table;
+	ivac-&gt;ivac_table_size = new_size;
+	
+	<span class="enscript-comment">/* adding new free entries at head of freelist */</span>
+	ivac-&gt;ivac_table[new_size - 1].ivace_next = ivac-&gt;ivac_freelist;
+	ivac-&gt;ivac_freelist = old_size;
+	ivac-&gt;ivac_is_growing = 0;
+	ivac_wakeup(ivac);
+
+	<span class="enscript-keyword">if</span> (old_table){
+		ivac_unlock(ivac);
+		kfree(old_table, old_size * <span class="enscript-keyword">sizeof</span>(ivac_entry));
+		ivac_lock(ivac);
+	}
+}
+
+<span class="enscript-comment">/*
+ * ivace_reference_by_index
+ *
+ * Take an additional reference on the &lt;key_index, val_index&gt;
+ * cached value. It is assumed the caller already holds a
+ * reference to the same cached key-value pair.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ivace_reference_by_index</span>(
+	iv_index_t 	key_index,
+	iv_index_t	val_index)
+{
+	ipc_voucher_attr_control_t ivac;
+	ivac_entry_t ivace;
+
+	<span class="enscript-keyword">if</span> (IV_UNUSED_VALINDEX == val_index)
+		<span class="enscript-keyword">return</span>;
+
+	ivgt_lookup(key_index, FALSE, NULL, &amp;ivac);
+	assert(IVAC_NULL != ivac);
+
+	ivac_lock(ivac);
+	assert(val_index &lt; ivac-&gt;ivac_table_size);
+	ivace = &amp;ivac-&gt;ivac_table[val_index];
+
+	assert(0xdeadc0dedeadc0de != ivace-&gt;ivace_value);
+	assert(0 &lt; ivace-&gt;ivace_refs);
+	assert(!ivace-&gt;ivace_free);
+	ivace-&gt;ivace_refs++;
+	ivac_unlock(ivac);
+}
+
+
+<span class="enscript-comment">/*
+ * Look up the values for a given &lt;key, index&gt; pair.
+ *
+ * Consumes a reference on the passed voucher control.
+ * Either it is donated to a newly-created value cache
+ * or it is released (if we piggy back on an existing
+ * value cache entry).
+ */</span>
+<span class="enscript-type">static</span> iv_index_t
+<span class="enscript-function-name">ivace_reference_by_value</span>(
+	ipc_voucher_attr_control_t	ivac,
+	mach_voucher_attr_value_handle_t  	value)
+{
+	ivac_entry_t ivace = IVACE_NULL;
+	iv_index_t hash_index;
+	iv_index_t index;
+
+	<span class="enscript-keyword">if</span> (IVAC_NULL == ivac) {
+		<span class="enscript-keyword">return</span> IV_UNUSED_VALINDEX;
+	}
+
+ 	ivac_lock(ivac);
+<span class="enscript-reference">restart</span>:
+	hash_index = IV_HASH_VAL(ivac-&gt;ivac_init_table_size, value);
+	index = ivac-&gt;ivac_table[hash_index].ivace_index;
+	<span class="enscript-keyword">while</span> (index != IV_HASH_END) {
+		assert(index &lt; ivac-&gt;ivac_table_size);
+		ivace = &amp;ivac-&gt;ivac_table[index];
+		assert(!ivace-&gt;ivace_free);
+
+		<span class="enscript-keyword">if</span> (ivace-&gt;ivace_value == value)
+			<span class="enscript-keyword">break</span>;
+
+		assert(ivace-&gt;ivace_next != index);
+		index = ivace-&gt;ivace_next;
+	}
+
+	<span class="enscript-comment">/* found it? */</span>
+	<span class="enscript-keyword">if</span> (index != IV_HASH_END) { 
+		<span class="enscript-comment">/* only add reference on non-default value */</span>
+		<span class="enscript-keyword">if</span> (IV_UNUSED_VALINDEX != index) {
+			ivace-&gt;ivace_refs++;
+			ivace-&gt;ivace_made++;
+		}
+
+		ivac_unlock(ivac);
+		ivac_release(ivac);
+		<span class="enscript-keyword">return</span> index;
+	}
+
+	<span class="enscript-comment">/* insert new entry in the table */</span>
+	index = ivac-&gt;ivac_freelist;
+	<span class="enscript-keyword">if</span> (IV_FREELIST_END == index) {
+		<span class="enscript-comment">/* freelist empty */</span>
+		ivac_grow_table(ivac);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">restart</span>;
+	}
+
+	<span class="enscript-comment">/* take the entry off the freelist */</span>
+	ivace = &amp;ivac-&gt;ivac_table[index];
+	ivac-&gt;ivac_freelist = ivace-&gt;ivace_next;
+
+	<span class="enscript-comment">/* initialize the new entry */</span>
+	ivace-&gt;ivace_value = value;
+	ivace-&gt;ivace_refs = 1;
+	ivace-&gt;ivace_made = 1;
+	ivace-&gt;ivace_free = FALSE;
+
+	<span class="enscript-comment">/* insert the new entry in the proper hash chain */</span>
+	ivace-&gt;ivace_next = ivac-&gt;ivac_table[hash_index].ivace_index;
+	ivac-&gt;ivac_table[hash_index].ivace_index = index;
+	ivac_unlock(ivac);
+
+	<span class="enscript-comment">/* donated passed in ivac reference to new entry */</span>
+
+	<span class="enscript-keyword">return</span> index;
+}
+
+<span class="enscript-comment">/*
+ * Release a reference on the given &lt;key_index, value_index&gt; pair.
+ *
+ * Conditions:	called with nothing locked, as it may cause
+ *		callouts and/or messaging to the resource 
+ *		manager.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">ivace_release</span>(
+	iv_index_t key_index,	  
+	iv_index_t value_index)
+{
+	ipc_voucher_attr_control_t ivac;
+	ipc_voucher_attr_manager_t ivam;
+	mach_voucher_attr_value_handle_t value;
+	mach_voucher_attr_value_reference_t made;
+	mach_voucher_attr_key_t key;
+	iv_index_t hash_index;
+	ivac_entry_t ivace;
+	kern_return_t kr;
+
+	<span class="enscript-comment">/* cant release the default value */</span>
+	<span class="enscript-keyword">if</span> (IV_UNUSED_VALINDEX == value_index)
+		<span class="enscript-keyword">return</span>;
+
+	ivgt_lookup(key_index, FALSE, &amp;ivam, &amp;ivac);
+	assert(IVAC_NULL != ivac);
+	assert(IVAM_NULL != ivam);
+
+	ivac_lock(ivac);
+	assert(value_index &lt; ivac-&gt;ivac_table_size);
+	ivace = &amp;ivac-&gt;ivac_table[value_index];
+
+	assert(0 &lt; ivace-&gt;ivace_refs);
+
+	<span class="enscript-keyword">if</span> (0 &lt; --ivace-&gt;ivace_refs) {
+		ivac_unlock(ivac);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	key = iv_index_to_key(key_index);
+	assert(MACH_VOUCHER_ATTR_KEY_NONE != key);
+
+	<span class="enscript-comment">/*
+	 * if last return reply is still pending,
+	 * let it handle this later return when
+	 * the previous reply comes in.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ivace-&gt;ivace_releasing) {
+		ivac_unlock(ivac);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/* claim releasing */</span>
+	ivace-&gt;ivace_releasing = TRUE;
+	value = ivace-&gt;ivace_value;
+
+ <span class="enscript-reference">redrive</span>:
+	assert(value == ivace-&gt;ivace_value);
+	assert(!ivace-&gt;ivace_free);
+	made = ivace-&gt;ivace_made;
+	ivac_unlock(ivac);
+
+	<span class="enscript-comment">/* callout to manager's release_value */</span>
+	kr = (ivam-&gt;ivam_release_value)(ivam, key, value, made);
+
+	<span class="enscript-comment">/* recalculate entry address as table may have changed */</span>
+	ivac_lock(ivac);
+	ivace = &amp;ivac-&gt;ivac_table[value_index];
+	assert(value == ivace-&gt;ivace_value);
+
+	<span class="enscript-comment">/*
+	 * new made values raced with this return.  If the
+	 * manager OK'ed the prior release, we have to start
+	 * the made numbering over again (pretend the race
+	 * didn't happen). If the entry has zero refs again,
+	 * re-drive the release.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ivace-&gt;ivace_made != made) {
+		assert(made &lt; ivace-&gt;ivace_made);
+
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS == kr)
+			ivace-&gt;ivace_made -= made;
+
+		<span class="enscript-keyword">if</span> (0 == ivace-&gt;ivace_refs)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">redrive</span>;
+
+		ivace-&gt;ivace_releasing = FALSE;
+		ivac_unlock(ivac);
+		<span class="enscript-keyword">return</span>;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * If the manager returned FAILURE, someone took a 
+		 * reference on the value but have not updated the ivace,
+		 * release the lock and return since thread who got
+		 * the new reference will update the ivace and will have
+		 * non-zero reference on the value.
+		 */</span>
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr) {
+			ivace-&gt;ivace_releasing = FALSE;
+			ivac_unlock(ivac);
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+
+	assert(0 == ivace-&gt;ivace_refs);
+
+	<span class="enscript-comment">/*
+	 * going away - remove entry from its hash
+	 * If its at the head of the hash bucket list (common), unchain
+	 * at the head. Otherwise walk the chain until the next points
+	 * at this entry, and remove it from the the list there.
+	 */</span>
+	hash_index = iv_hash_value(key_index, value);
+	<span class="enscript-keyword">if</span> (ivac-&gt;ivac_table[hash_index].ivace_index == value_index) {
+		ivac-&gt;ivac_table[hash_index].ivace_index = ivace-&gt;ivace_next;
+	} <span class="enscript-keyword">else</span> {
+		hash_index = ivac-&gt;ivac_table[hash_index].ivace_index;
+		assert(IV_HASH_END != hash_index);
+		<span class="enscript-keyword">while</span> (ivac-&gt;ivac_table[hash_index].ivace_next != value_index) {
+			hash_index = ivac-&gt;ivac_table[hash_index].ivace_next;
+			assert(IV_HASH_END != hash_index);
+		}
+		ivac-&gt;ivac_table[hash_index].ivace_next = ivace-&gt;ivace_next;
+	}
+
+	<span class="enscript-comment">/* Put this entry on the freelist */</span>
+	ivace-&gt;ivace_value = 0xdeadc0dedeadc0de;
+	ivace-&gt;ivace_releasing = FALSE;
+	ivace-&gt;ivace_free = TRUE;
+	ivace-&gt;ivace_made = 0;
+	ivace-&gt;ivace_next = ivac-&gt;ivac_freelist;
+	ivac-&gt;ivac_freelist = value_index;
+	ivac_unlock(ivac);
+
+	<span class="enscript-comment">/* release the reference this value held on its cache control */</span>
+	ivac_release(ivac);
+
+	<span class="enscript-keyword">return</span>;
+}
+
+
+<span class="enscript-comment">/*
+ * ivgt_looup
+ *
+ * Lookup an entry in the global table from the context of a manager
+ * registration.  Adds a reference to the control to keep the results
+ * around (if needed).
+ *
+ * Because of the calling point, we can't be sure the manager is
+ * [fully] registered yet.  So, we must hold the global table lock
+ * during the lookup to synchronize with in-parallel registrations
+ * (and possible table growth).
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ivgt_lookup</span>(iv_index_t key_index,
+	    boolean_t take_reference,
+	    ipc_voucher_attr_manager_t *manager,
+	    ipc_voucher_attr_control_t *control)
+{
+	ipc_voucher_attr_control_t ivac;
+
+	<span class="enscript-keyword">if</span> (key_index &lt; MACH_VOUCHER_ATTR_KEY_NUM_WELL_KNOWN) {
+		ivgt_lock();
+		<span class="enscript-keyword">if</span> (NULL != manager)
+			*manager = iv_global_table[key_index].ivgte_manager;
+		ivac = iv_global_table[key_index].ivgte_control;
+		<span class="enscript-keyword">if</span> (IVAC_NULL != ivac) {
+			assert(key_index == ivac-&gt;ivac_key_index);
+			<span class="enscript-keyword">if</span> (take_reference) {
+				assert(NULL != control);
+				ivac_reference(ivac);
+			}
+		}
+		ivgt_unlock();
+		<span class="enscript-keyword">if</span> (NULL != control)
+			*control = ivac;
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (NULL != manager)
+			*manager = IVAM_NULL;
+		<span class="enscript-keyword">if</span> (NULL != control)
+			*control = IVAC_NULL;
+	}
+}
+
+<span class="enscript-comment">/*
+ *	Routine: 	ipc_replace_voucher_value
+ *	Purpose:
+ *		Replace the &lt;voucher, key&gt; value with the results of
+ *		running the supplied command through the resource
+ *		manager's get-value callback.
+ *	Conditions:
+ *		Nothing locked (may invoke user-space repeatedly).
+ *		Caller holds references on voucher and previous voucher.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">ipc_replace_voucher_value</span>(
+	ipc_voucher_t				voucher,
+	mach_voucher_attr_key_t 		key,
+	mach_voucher_attr_recipe_command_t	command,
+	ipc_voucher_t				prev_voucher,
+	mach_voucher_attr_content_t		content,
+	mach_voucher_attr_content_size_t        content_size)
+{
+	mach_voucher_attr_value_handle_t previous_vals[MACH_VOUCHER_ATTR_VALUE_MAX_NESTED];
+	mach_voucher_attr_value_handle_array_size_t previous_vals_count;
+	mach_voucher_attr_value_handle_t new_value;
+	ipc_voucher_t new_value_voucher;
+	ipc_voucher_attr_manager_t ivam;
+	ipc_voucher_attr_control_t ivac;
+	iv_index_t prev_val_index;
+	iv_index_t save_val_index;
+	iv_index_t val_index;
+	iv_index_t key_index;
+	kern_return_t kr;
+	
+	<span class="enscript-comment">/*
+	 * Get the manager for this key_index.
+	 * Returns a reference on the control.
+	 */</span>
+	key_index = iv_key_to_index(key);
+	ivgt_lookup(key_index, TRUE, &amp;ivam, &amp;ivac);
+	<span class="enscript-keyword">if</span> (IVAM_NULL == ivam)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-comment">/* save the current value stored in the forming voucher */</span>
+	save_val_index = iv_lookup(voucher, key_index);
+
+	<span class="enscript-comment">/*
+	 * Get the previous value(s) for this key creation.
+	 * If a previous voucher is specified, they come from there.
+	 * Otherwise, they come from the intermediate values already
+	 * in the forming voucher.
+	 */</span>
+	prev_val_index = (IV_NULL != prev_voucher) ?
+		         iv_lookup(prev_voucher, key_index) :
+		         save_val_index;
+	ivace_lookup_values(key_index, prev_val_index,
+			    previous_vals, &amp;previous_vals_count);
+
+	<span class="enscript-comment">/* Call out to resource manager to get new value */</span>
+	new_value_voucher = IV_NULL;
+	kr = (ivam-&gt;ivam_get_value)(
+				    ivam, key, command,
+				    previous_vals, previous_vals_count,
+				    content, content_size,
+				    &amp;new_value, &amp;new_value_voucher);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr) {
+		ivac_release(ivac);
+		<span class="enscript-keyword">return</span> kr;
+	}
+
+	<span class="enscript-comment">/* TODO: value insertion from returned voucher */</span>
+	<span class="enscript-keyword">if</span> (IV_NULL != new_value_voucher)
+		iv_release(new_value_voucher);
+
+	<span class="enscript-comment">/*
+	 * Find or create a slot in the table associated
+	 * with this attribute value.  The ivac reference
+	 * is transferred to a new value, or consumed if
+	 * we find a matching existing value.
+	 */</span>
+	val_index = ivace_reference_by_value(ivac, new_value);
+	iv_set(voucher, key_index, val_index);
+
+	<span class="enscript-comment">/*
+	 * release saved old value from the newly forming voucher
+	 * This is saved until the end to avoid churning the
+	 * release logic in cases where the same value is returned
+	 * as was there before.
+	 */</span>
+	ivace_release(key_index, save_val_index);
+	
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine: 	ipc_directly_replace_voucher_value
+ *	Purpose:
+ *		Replace the &lt;voucher, key&gt; value with the value-handle
+ *		supplied directly by the attribute manager.
+ *	Conditions:
+ *		Nothing locked.
+ *		Caller holds references on voucher.
+ *		A made reference to the value-handle is donated by the caller.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">ipc_directly_replace_voucher_value</span>(
+	ipc_voucher_t				voucher,
+	mach_voucher_attr_key_t 		key,
+	mach_voucher_attr_value_handle_t	new_value)
+{
+	ipc_voucher_attr_manager_t ivam;
+	ipc_voucher_attr_control_t ivac;
+	iv_index_t save_val_index;
+	iv_index_t val_index;
+	iv_index_t key_index;
+	
+	<span class="enscript-comment">/*
+	 * Get the manager for this key_index.
+	 * Returns a reference on the control.
+	 */</span>
+	key_index = iv_key_to_index(key);
+	ivgt_lookup(key_index, TRUE, &amp;ivam, &amp;ivac);
+	<span class="enscript-keyword">if</span> (IVAM_NULL == ivam)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-comment">/* save the current value stored in the forming voucher */</span>
+	save_val_index = iv_lookup(voucher, key_index);
+
+	<span class="enscript-comment">/*
+	 * Find or create a slot in the table associated
+	 * with this attribute value.  The ivac reference
+	 * is transferred to a new value, or consumed if
+	 * we find a matching existing value.
+	 */</span>
+	val_index = ivace_reference_by_value(ivac, new_value);
+	iv_set(voucher, key_index, val_index);
+
+	<span class="enscript-comment">/*
+	 * release saved old value from the newly forming voucher
+	 * This is saved until the end to avoid churning the
+	 * release logic in cases where the same value is returned
+	 * as was there before.
+	 */</span>
+	ivace_release(key_index, save_val_index);
+	
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">ipc_execute_voucher_recipe_command</span>(
+	ipc_voucher_t 				voucher,
+	mach_voucher_attr_key_t			key,
+	mach_voucher_attr_recipe_command_t	command,
+	ipc_voucher_t				prev_iv,
+	mach_voucher_attr_content_t		content,
+	mach_voucher_attr_content_size_t	content_size,
+	boolean_t				key_priv)
+{
+	iv_index_t prev_val_index;
+	iv_index_t val_index;
+	kern_return_t kr;
+
+	<span class="enscript-keyword">switch</span> (command) {
+
+	<span class="enscript-comment">/*
+	 * MACH_VOUCHER_ATTR_COPY
+	 *	Copy the attribute(s) from the previous voucher to the new
+	 *	one.  A wildcard key is an acceptable value - indicating a
+	 *	desire to copy all the attribute values from the previous
+	 *	voucher.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_VOUCHER_ATTR_COPY</span>:
+		
+		<span class="enscript-comment">/* no recipe data on a copy */</span>
+		<span class="enscript-keyword">if</span> (0 &lt; content_size)
+			<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+		<span class="enscript-comment">/* nothing to copy from? - done */</span>
+		<span class="enscript-keyword">if</span> (IV_NULL == prev_iv)
+			<span class="enscript-keyword">return</span> KERN_SUCCESS;
+
+		<span class="enscript-keyword">if</span> (MACH_VOUCHER_ATTR_KEY_ALL == key) {
+			iv_index_t limit, j;
+
+			<span class="enscript-comment">/* reconcile possible difference in voucher sizes */</span>
+			limit = (prev_iv-&gt;iv_table_size &lt; voucher-&gt;iv_table_size) ?
+			        prev_iv-&gt;iv_table_size :
+				voucher-&gt;iv_table_size;
+
+			<span class="enscript-comment">/* wildcard matching */</span>
+			<span class="enscript-keyword">for</span> (j = 0; j &lt; limit; j++) {
+				<span class="enscript-comment">/* release old value being replaced */</span>
+				val_index = iv_lookup(voucher, j);
+				ivace_release(j, val_index);
+
+				<span class="enscript-comment">/* replace with reference to prev voucher's value */</span>
+				prev_val_index = iv_lookup(prev_iv, j);
+				ivace_reference_by_index(j, prev_val_index);
+				iv_set(voucher, j, prev_val_index);
+			}
+		} <span class="enscript-keyword">else</span> {
+			iv_index_t key_index;
+
+			<span class="enscript-comment">/* copy just one key */</span>
+			key_index = iv_key_to_index(key);
+			<span class="enscript-keyword">if</span> (ivgt_keys_in_use &lt; key_index)
+				<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+			<span class="enscript-comment">/* release old value being replaced */</span>
+			val_index = iv_lookup(voucher, key_index);
+			ivace_release(key_index, val_index);
+
+			<span class="enscript-comment">/* replace with reference to prev voucher's value */</span>
+			prev_val_index = iv_lookup(prev_iv, key_index);
+			ivace_reference_by_index(key_index, prev_val_index);
+			iv_set(voucher, key_index, prev_val_index);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * MACH_VOUCHER_ATTR_REMOVE
+	 *	Remove the attribute(s) from the under construction voucher.
+	 *	A wildcard key is an acceptable value - indicating a desire
+	 *	to remove all the attribute values set up so far in the voucher.
+	 *	If a previous voucher is specified, only remove the value it
+	 *	it matches the value in the previous voucher.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_VOUCHER_ATTR_REMOVE</span>:
+		<span class="enscript-comment">/* no recipe data on a remove */</span>
+		<span class="enscript-keyword">if</span> (0 &lt; content_size)
+			<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+		<span class="enscript-keyword">if</span> (MACH_VOUCHER_ATTR_KEY_ALL == key) {
+			iv_index_t limit, j;
+
+			<span class="enscript-comment">/* reconcile possible difference in voucher sizes */</span>
+			limit = (IV_NULL == prev_iv) ? voucher-&gt;iv_table_size :
+				((prev_iv-&gt;iv_table_size &lt; voucher-&gt;iv_table_size) ?
+				 prev_iv-&gt;iv_table_size : voucher-&gt;iv_table_size);
+
+			<span class="enscript-comment">/* wildcard matching */</span>
+			<span class="enscript-keyword">for</span> (j = 0; j &lt; limit; j++) {
+				val_index = iv_lookup(voucher, j);
+
+				<span class="enscript-comment">/* If not matched in previous, skip */</span>
+				<span class="enscript-keyword">if</span> (IV_NULL != prev_iv) {
+					prev_val_index = iv_lookup(prev_iv, j);
+					<span class="enscript-keyword">if</span> (val_index != prev_val_index)
+						<span class="enscript-keyword">continue</span>;
+				}
+				<span class="enscript-comment">/* release and clear */</span>
+				ivace_release(j, val_index);
+				iv_set(voucher, j, IV_UNUSED_VALINDEX);
+			}
+		} <span class="enscript-keyword">else</span> {
+			iv_index_t key_index;
+
+			<span class="enscript-comment">/* copy just one key */</span>
+			key_index = iv_key_to_index(key);
+			<span class="enscript-keyword">if</span> (ivgt_keys_in_use &lt; key_index)
+				<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+			val_index = iv_lookup(voucher, key_index);
+
+			<span class="enscript-comment">/* If not matched in previous, skip */</span>
+			<span class="enscript-keyword">if</span> (IV_NULL != prev_iv) {
+				prev_val_index = iv_lookup(prev_iv, key_index);
+				<span class="enscript-keyword">if</span> (val_index != prev_val_index)
+					<span class="enscript-keyword">break</span>;
+			}
+
+			<span class="enscript-comment">/* release and clear */</span>
+			ivace_release(key_index, val_index);
+			iv_set(voucher, key_index, IV_UNUSED_VALINDEX);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * MACH_VOUCHER_ATTR_SET_VALUE_HANDLE
+	 *	Use key-privilege to set a value handle for the attribute directly,
+	 *	rather than triggering a callback into the attribute manager to
+	 *	interpret a recipe to generate the value handle.
+	 */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_VOUCHER_ATTR_SET_VALUE_HANDLE</span>:
+		<span class="enscript-keyword">if</span> (key_priv) {
+			mach_voucher_attr_value_handle_t new_value;
+
+			<span class="enscript-keyword">if</span> (<span class="enscript-keyword">sizeof</span>(mach_voucher_attr_value_handle_t) != content_size)
+				<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+			
+			new_value = *(mach_voucher_attr_value_handle_t *)(<span class="enscript-type">void</span> *)content;
+			kr = ipc_directly_replace_voucher_value(voucher,
+								key,
+								new_value);
+			<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+				<span class="enscript-keyword">return</span> kr;
+		} <span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">return</span> KERN_INVALID_CAPABILITY;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-comment">/*
+	 * MACH_VOUCHER_ATTR_REDEEM
+	 *	Redeem the attribute(s) from the previous voucher for a possibly
+	 *	new value in the new voucher. A wildcard key is an acceptable value,
+	 *	indicating a desire to redeem all the values.
+	 */</span> 	
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_VOUCHER_ATTR_REDEEM</span>:
+
+		<span class="enscript-keyword">if</span> (MACH_VOUCHER_ATTR_KEY_ALL == key) {
+			iv_index_t limit, j;
+
+			<span class="enscript-comment">/* reconcile possible difference in voucher sizes */</span>
+			<span class="enscript-keyword">if</span> (IV_NULL != prev_iv)
+				limit = (prev_iv-&gt;iv_table_size &lt; voucher-&gt;iv_table_size) ?
+					prev_iv-&gt;iv_table_size :
+					voucher-&gt;iv_table_size;
+			<span class="enscript-keyword">else</span>
+				limit = voucher-&gt;iv_table_size;
+
+			<span class="enscript-comment">/* wildcard matching */</span>
+			<span class="enscript-keyword">for</span> (j = 0; j &lt; limit; j++) {
+				mach_voucher_attr_key_t j_key;
+
+				j_key = iv_index_to_key(j);
+
+				<span class="enscript-comment">/* skip non-existent managers */</span>
+				<span class="enscript-keyword">if</span> (MACH_VOUCHER_ATTR_KEY_NONE == j_key)
+					<span class="enscript-keyword">continue</span>;
+
+				<span class="enscript-comment">/* get the new value from redeem (skip empty previous) */</span>
+				kr = ipc_replace_voucher_value(voucher,
+							       j_key,
+							       command,
+							       prev_iv,
+							       content,
+							       content_size);
+				<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+					<span class="enscript-keyword">return</span> kr;
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/* fall thru for single key redemption */</span>
+
+	<span class="enscript-comment">/*
+	 * DEFAULT:
+	 *	Replace the current value for the &lt;voucher, key&gt; pair with whatever
+	 *	value the resource manager returns for the command and recipe
+	 *	combination provided.
+	 */</span>
+	<span class="enscript-reference">default</span>:
+		kr = ipc_replace_voucher_value(voucher,
+					       key,
+					       command,
+					       prev_iv,
+					       content,
+					       content_size);
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+			<span class="enscript-keyword">return</span> kr;
+
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine: 	iv_checksum
+ *	Purpose:
+ *		Compute the voucher sum.  This is more position-
+ *		relevant than many other checksums - important for
+ *		vouchers (arrays of low, oft-reused, indexes).
+ */</span>
+<span class="enscript-type">static</span> inline iv_index_t
+<span class="enscript-function-name">iv_checksum</span>(ipc_voucher_t voucher, boolean_t *emptyp)
+{
+	iv_index_t c = 0;
+
+	boolean_t empty = TRUE;
+	<span class="enscript-keyword">if</span> (0 &lt; voucher-&gt;iv_table_size) {
+		iv_index_t i = voucher-&gt;iv_table_size - 1;
+	
+		<span class="enscript-keyword">do</span> {
+			iv_index_t v = voucher-&gt;iv_table[i];
+			c = c &lt;&lt; 3 | c &gt;&gt; (32 - 3);		<span class="enscript-comment">/* rotate */</span>
+			c = ~c;					<span class="enscript-comment">/* invert */</span>
+			<span class="enscript-keyword">if</span> (0 &lt; v) {
+				c += v;				<span class="enscript-comment">/* add in */</span>
+				empty = FALSE;
+			}
+		} <span class="enscript-keyword">while</span> (0 &lt; i--);
+	}
+	*emptyp = empty;
+	<span class="enscript-keyword">return</span> c;
+}
+
+<span class="enscript-comment">/*
+ *	Routine: 	iv_dedup
+ *	Purpose:
+ *		See if the set of values represented by this new voucher
+ *		already exist in another voucher.  If so return a reference
+ *		to the existing voucher and deallocate the voucher provided.
+ *		Otherwise, insert this one in the hash and return it.
+ *	Conditions:
+ *		A voucher reference is donated on entry.
+ *	Returns:
+ *		A voucher reference (may be different than on entry).
+ */</span>
+<span class="enscript-type">static</span> ipc_voucher_t
+<span class="enscript-function-name">iv_dedup</span>(ipc_voucher_t new_iv)
+{
+	boolean_t empty;
+	iv_index_t sum; 
+	iv_index_t hash;
+	ipc_voucher_t iv;
+
+	sum = iv_checksum(new_iv, &amp;empty);
+
+	<span class="enscript-comment">/* If all values are default, that's the empty (NULL) voucher */</span>
+	<span class="enscript-keyword">if</span> (empty) {
+		iv_dealloc(new_iv, FALSE);
+		<span class="enscript-keyword">return</span> IV_NULL;
+	}
+
+	hash = IV_HASH_BUCKET(sum);
+
+	ivht_lock();
+	queue_iterate(&amp;ivht_bucket[hash], iv, ipc_voucher_t, iv_hash_link) {
+		assert(iv-&gt;iv_hash == hash);
+
+		<span class="enscript-comment">/* if not already deallocating and sums match... */</span>
+		<span class="enscript-keyword">if</span> (0 &lt; iv-&gt;iv_refs &amp;&amp; iv-&gt;iv_sum == sum) {
+			iv_refs_t refs;
+			iv_index_t i;
+
+			assert(iv-&gt;iv_table_size &lt;= new_iv-&gt;iv_table_size);
+		
+			<span class="enscript-comment">/* and common entries match... */</span>
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; iv-&gt;iv_table_size; i++)
+				<span class="enscript-keyword">if</span> (iv-&gt;iv_table[i] != new_iv-&gt;iv_table[i])
+					<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">if</span> (i &lt; iv-&gt;iv_table_size)
+				<span class="enscript-keyword">continue</span>;
+
+			<span class="enscript-comment">/* and all extra entries in new one are unused... */</span>
+			<span class="enscript-keyword">while</span> (i &lt; new_iv-&gt;iv_table_size)
+				<span class="enscript-keyword">if</span> (new_iv-&gt;iv_table[i++] != IV_UNUSED_VALINDEX)
+					<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">if</span> (i &lt; new_iv-&gt;iv_table_size)
+				<span class="enscript-keyword">continue</span>;
+
+			<span class="enscript-comment">/* ... we found a match... */</span>
+
+			<span class="enscript-comment">/* can we get a ref before it hits 0
+			 *
+			 * This is thread safe. The reference is just an atomic
+			 * add. If the reference count is zero when we adjust it,
+			 * no other thread can have a reference to the voucher.
+			 * The dealloc code requires holding the ivht_lock, so
+			 * the voucher cannot be yanked out from under us.
+			 */</span>
+			refs = iv_reference(iv);
+			<span class="enscript-keyword">if</span> (1 == refs) {
+				<span class="enscript-comment">/* drats! going away. Put back to zero */</span>
+				iv-&gt;iv_refs = 0;
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			ivht_unlock();
+
+			<span class="enscript-comment">/* referenced previous, so deallocate the new one */</span>
+			iv_dealloc(new_iv, FALSE);
+			<span class="enscript-keyword">return</span> iv;
+		}
+	}
+
+	<span class="enscript-comment">/* add the new voucher to the hash, and return it */</span>
+	new_iv-&gt;iv_sum = sum;
+	new_iv-&gt;iv_hash = hash;
+	queue_enter(&amp;ivht_bucket[hash], new_iv, ipc_voucher_t, iv_hash_link);
+	ivht_count++;
+	ivht_unlock();
+
+	<span class="enscript-comment">/*
+	 * This code is disabled for KDEBUG_LEVEL_IST and KDEBUG_LEVEL_NONE
+	 */</span>
+#<span class="enscript-reference">if</span> (<span class="enscript-variable-name">KDEBUG_LEVEL</span> &gt;= <span class="enscript-variable-name">KDEBUG_LEVEL_STANDARD</span>)
+	<span class="enscript-keyword">if</span> (kdebug_enable &amp; ~KDEBUG_ENABLE_PPT) {
+		uintptr_t voucher_addr = VM_KERNEL_ADDRPERM((uintptr_t)new_iv);
+		uintptr_t attr_tracepoints_needed = 0;
+
+		<span class="enscript-keyword">if</span> (ipc_voucher_trace_contents) {
+			<span class="enscript-comment">/*
+			 * voucher_contents sizing is a bit more constrained
+			 * than might be obvious.
+			 *
+			 * This is typically a uint8_t typed array. However,
+			 * we want to access it as a uintptr_t to efficiently
+			 * copyout the data in tracepoints.
+			 *
+			 * This constrains the size to uintptr_t bytes, and
+			 * adds a minimimum alignment requirement equivalent
+			 * to a uintptr_t.
+			 *
+			 * Further constraining the size is the fact that it
+			 * is copied out 4 uintptr_t chunks at a time. We do
+			 * NOT want to run off the end of the array and copyout
+			 * random stack data.
+			 *
+			 * So the minimum size is 4 * sizeof(uintptr_t), and
+			 * the minimum alignment is uintptr_t aligned.
+			 */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PAYLOAD_PER_TRACEPOINT</span> (4 * sizeof(uintptr_t))
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PAYLOAD_SIZE</span> 1024
+
+			_Static_assert(PAYLOAD_SIZE % PAYLOAD_PER_TRACEPOINT == 0, <span class="enscript-string">&quot;size invariant violated&quot;</span>);
+
+			mach_voucher_attr_raw_recipe_array_size_t payload_size = PAYLOAD_SIZE;
+			uintptr_t payload[PAYLOAD_SIZE / <span class="enscript-keyword">sizeof</span>(uintptr_t)];
+			kern_return_t kr;
+
+			kr = mach_voucher_extract_all_attr_recipes(new_iv, (mach_voucher_attr_raw_recipe_array_t)payload, &amp;payload_size);
+			<span class="enscript-keyword">if</span> (KERN_SUCCESS == kr) {
+				attr_tracepoints_needed = (payload_size + PAYLOAD_PER_TRACEPOINT - 1) / PAYLOAD_PER_TRACEPOINT;
+
+				<span class="enscript-comment">/*
+				 * To prevent leaking data from the stack, we
+				 * need to zero data to the end of a tracepoint
+				 * payload.
+				 */</span>
+				size_t remainder = payload_size % PAYLOAD_PER_TRACEPOINT;
+				<span class="enscript-keyword">if</span> (remainder) {
+					bzero((uint8_t*)payload + payload_size,
+					      PAYLOAD_PER_TRACEPOINT - remainder);
+				}
+			}
+
+			KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_IPC,MACH_IPC_VOUCHER_CREATE) | DBG_FUNC_NONE,
+					      voucher_addr,
+					      new_iv-&gt;iv_table_size, ivht_count, payload_size, 0);
+
+			uintptr_t index = 0;
+			<span class="enscript-keyword">while</span> (attr_tracepoints_needed--) {
+				KERNEL_DEBUG_CONSTANT1(MACHDBG_CODE(DBG_MACH_IPC,MACH_IPC_VOUCHER_CREATE_ATTR_DATA) | DBG_FUNC_NONE,
+						       payload[index],
+						       payload[index+1],
+						       payload[index+2],
+						       payload[index+3],
+						       voucher_addr);
+				index += 4;
+			}
+		} <span class="enscript-keyword">else</span> {
+			KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_IPC,MACH_IPC_VOUCHER_CREATE) | DBG_FUNC_NONE,
+					      voucher_addr,
+					      new_iv-&gt;iv_table_size, ivht_count, 0, 0);
+		}
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KDEBUG_LEVEL &gt;= KDEBUG_LEVEL_STANDARD */</span>
+
+	<span class="enscript-keyword">return</span> new_iv;
+}
+
+<span class="enscript-comment">/*
+ *	Routine: 	ipc_create_mach_voucher
+ *	Purpose:
+ *		Create a new mach voucher and initialize it with the
+ *		value(s) created by having the appropriate resource
+ *		managers interpret the supplied recipe commands and
+ *		data.
+ *	Conditions:
+ *		Nothing locked (may invoke user-space repeatedly).
+ *		Caller holds references on previous vouchers.
+ *		Previous vouchers are passed as voucher indexes.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ipc_create_mach_voucher</span>(
+	ipc_voucher_attr_raw_recipe_array_t 		recipes,
+	ipc_voucher_attr_raw_recipe_array_size_t	recipe_size,
+	ipc_voucher_t 					*new_voucher)
+{
+	ipc_voucher_attr_recipe_t sub_recipe;
+	ipc_voucher_attr_recipe_size_t recipe_used = 0;
+	ipc_voucher_t voucher;
+	kern_return_t kr = KERN_SUCCESS;
+
+	<span class="enscript-comment">/* if nothing to do ... */</span>
+	<span class="enscript-keyword">if</span> (0 == recipe_size) {
+		*new_voucher = IV_NULL;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	<span class="enscript-comment">/* allocate a voucher */</span>
+	voucher = iv_alloc(ivgt_keys_in_use);
+	<span class="enscript-keyword">if</span> (IV_NULL == voucher)
+		<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+
+	<span class="enscript-comment">/* iterate over the recipe items */</span>
+	<span class="enscript-keyword">while</span> (0 &lt; recipe_size - recipe_used) {
+
+		<span class="enscript-keyword">if</span> (recipe_size - recipe_used &lt; <span class="enscript-keyword">sizeof</span>(*sub_recipe)) {
+			kr = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/* find the next recipe */</span>
+		sub_recipe = (ipc_voucher_attr_recipe_t)(<span class="enscript-type">void</span> *)&amp;recipes[recipe_used];
+		<span class="enscript-keyword">if</span> (recipe_size - recipe_used - <span class="enscript-keyword">sizeof</span>(*sub_recipe) &lt; sub_recipe-&gt;content_size) {
+			kr = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+		recipe_used += <span class="enscript-keyword">sizeof</span>(*sub_recipe) + sub_recipe-&gt;content_size;
+
+		kr = ipc_execute_voucher_recipe_command(voucher,
+							sub_recipe-&gt;key,
+							sub_recipe-&gt;command,
+							sub_recipe-&gt;previous_voucher,
+							sub_recipe-&gt;content,
+							sub_recipe-&gt;content_size,
+							FALSE);
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kr) {
+		*new_voucher = iv_dedup(voucher);
+	} <span class="enscript-keyword">else</span> {
+		iv_dealloc(voucher, FALSE);
+		*new_voucher = IV_NULL;
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ *	Routine: 	ipc_voucher_attr_control_create_mach_voucher
+ *	Purpose:
+ *		Create a new mach voucher and initialize it with the
+ *		value(s) created by having the appropriate resource
+ *		managers interpret the supplied recipe commands and
+ *		data.
+ *
+ *		The resource manager control's privilege over its
+ *		particular key value is reflected on to the execution
+ *		code, allowing internal commands (like setting a
+ *		key value handle directly, rather than having to
+ *		create a recipe, that will generate a callback just
+ *		to get the value.
+ *
+ *	Conditions:
+ *		Nothing locked (may invoke user-space repeatedly).
+ *		Caller holds references on previous vouchers.
+ *		Previous vouchers are passed as voucher indexes.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ipc_voucher_attr_control_create_mach_voucher</span>(
+	ipc_voucher_attr_control_t			control,
+	ipc_voucher_attr_raw_recipe_array_t 		recipes,
+	ipc_voucher_attr_raw_recipe_array_size_t	recipe_size,
+	ipc_voucher_t 					*new_voucher)
+{
+	mach_voucher_attr_key_t control_key;
+	ipc_voucher_attr_recipe_t sub_recipe;
+	ipc_voucher_attr_recipe_size_t recipe_used = 0;
+	ipc_voucher_t voucher = IV_NULL;
+	kern_return_t kr = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (IPC_VOUCHER_ATTR_CONTROL_NULL == control)
+		<span class="enscript-keyword">return</span> KERN_INVALID_CAPABILITY;
+
+	<span class="enscript-comment">/* if nothing to do ... */</span>
+	<span class="enscript-keyword">if</span> (0 == recipe_size) {
+		*new_voucher = IV_NULL;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	<span class="enscript-comment">/* allocate new voucher */</span>
+	voucher = iv_alloc(ivgt_keys_in_use);
+	<span class="enscript-keyword">if</span> (IV_NULL == voucher)
+		<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+
+	control_key = iv_index_to_key(control-&gt;ivac_key_index);
+
+	<span class="enscript-comment">/* iterate over the recipe items */</span>
+	<span class="enscript-keyword">while</span> (0 &lt; recipe_size - recipe_used) {
+
+		<span class="enscript-keyword">if</span> (recipe_size - recipe_used &lt; <span class="enscript-keyword">sizeof</span>(*sub_recipe)) {
+			kr = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/* find the next recipe */</span>
+		sub_recipe = (ipc_voucher_attr_recipe_t)(<span class="enscript-type">void</span> *)&amp;recipes[recipe_used];
+		<span class="enscript-keyword">if</span> (recipe_size - recipe_used - <span class="enscript-keyword">sizeof</span>(*sub_recipe) &lt; sub_recipe-&gt;content_size) {
+			kr = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+		recipe_used += <span class="enscript-keyword">sizeof</span>(*sub_recipe) + sub_recipe-&gt;content_size;
+
+		kr = ipc_execute_voucher_recipe_command(voucher,
+							sub_recipe-&gt;key,
+							sub_recipe-&gt;command,
+							sub_recipe-&gt;previous_voucher,
+							sub_recipe-&gt;content,
+							sub_recipe-&gt;content_size,
+							(sub_recipe-&gt;key == control_key));
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kr) {
+		*new_voucher = iv_dedup(voucher);
+	} <span class="enscript-keyword">else</span> {
+		*new_voucher = IV_NULL;
+		iv_dealloc(voucher, FALSE);
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ * 	ipc_register_well_known_mach_voucher_attr_manager
+ *
+ *	Register the resource manager responsible for a given key value.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">ipc_register_well_known_mach_voucher_attr_manager</span>(
+	ipc_voucher_attr_manager_t manager,
+	mach_voucher_attr_value_handle_t default_value,
+        mach_voucher_attr_key_t key,
+	ipc_voucher_attr_control_t *control)
+{
+	ipc_voucher_attr_control_t new_control;
+	iv_index_t key_index;
+	iv_index_t hash_index;
+
+	<span class="enscript-keyword">if</span> (IVAM_NULL == manager)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	key_index = iv_key_to_index(key);
+	<span class="enscript-keyword">if</span> (IV_UNUSED_KEYINDEX == key_index)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	new_control = ivac_alloc(key_index);
+	<span class="enscript-keyword">if</span> (IVAC_NULL == new_control)
+		<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+
+	<span class="enscript-comment">/* insert the default value into slot 0 */</span>
+	new_control-&gt;ivac_table[IV_UNUSED_VALINDEX].ivace_value = default_value;
+	new_control-&gt;ivac_table[IV_UNUSED_VALINDEX].ivace_refs = IVACE_REFS_MAX;
+	new_control-&gt;ivac_table[IV_UNUSED_VALINDEX].ivace_made = IVACE_REFS_MAX;
+	assert(IV_HASH_END == new_control-&gt;ivac_table[IV_UNUSED_VALINDEX].ivace_next);
+
+	ivgt_lock();
+	<span class="enscript-keyword">if</span> (IVAM_NULL != iv_global_table[key_index].ivgte_manager) {
+		ivgt_unlock();
+		ivac_release(new_control);
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	<span class="enscript-comment">/* fill in the global table slot for this key */</span>
+	iv_global_table[key_index].ivgte_manager = manager;
+	iv_global_table[key_index].ivgte_control = new_control;
+	iv_global_table[key_index].ivgte_key = key;
+
+	<span class="enscript-comment">/* insert the default value into the hash (in case it is returned later) */</span>
+	hash_index = iv_hash_value(key_index, default_value);
+	assert(IV_HASH_END == new_control-&gt;ivac_table[hash_index].ivace_index);
+	new_control-&gt;ivac_table[hash_index].ivace_index = IV_UNUSED_VALINDEX;
+
+	ivgt_unlock();
+	
+	<span class="enscript-comment">/* return the reference on the new cache control to the caller */</span>
+	*control = new_control;
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * 	Routine:	mach_voucher_extract_attr_content
+ *	Purpose:
+ *		Extract the content for a given &lt;voucher, key&gt; pair.
+ *
+ *		If a value other than the default is present for this
+ *		&lt;voucher,key&gt; pair, we need to contact the resource
+ *		manager to extract the content/meaning of the value(s)
+ *		present.  Otherwise, return success (but no data).
+ *
+ *	Conditions:
+ *		Nothing locked - as it may upcall to user-space.
+ *		The caller holds a reference on the voucher.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">mach_voucher_extract_attr_content</span>(
+	ipc_voucher_t				voucher,
+	mach_voucher_attr_key_t			key,
+	mach_voucher_attr_content_t		content,
+	mach_voucher_attr_content_size_t	*in_out_size)
+{
+	mach_voucher_attr_value_handle_t vals[MACH_VOUCHER_ATTR_VALUE_MAX_NESTED];
+	mach_voucher_attr_value_handle_array_size_t vals_count;
+	mach_voucher_attr_recipe_command_t command;
+	ipc_voucher_attr_manager_t manager;
+	iv_index_t value_index;
+	iv_index_t key_index;
+	kern_return_t kr;
+
+
+	<span class="enscript-keyword">if</span> (IV_NULL == voucher)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	key_index = iv_key_to_index(key);
+
+	value_index = iv_lookup(voucher, key_index);
+	<span class="enscript-keyword">if</span> (IV_UNUSED_VALINDEX == value_index) {
+		*in_out_size = 0;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	<span class="enscript-comment">/*
+	 * Get the manager for this key_index.  The
+	 * existence of a non-default value for this
+	 * slot within our voucher will keep the
+	 * manager referenced during the callout.
+	 */</span>
+	ivgt_lookup(key_index, FALSE, &amp;manager, NULL);
+	assert(IVAM_NULL != manager);
+
+	<span class="enscript-comment">/*
+	 * Get the value(s) to pass to the manager
+	 * for this value_index.
+	 */</span>
+	ivace_lookup_values(key_index, value_index,
+			    vals, &amp;vals_count);
+	assert(0 &lt; vals_count);
+
+	<span class="enscript-comment">/* callout to manager */</span>
+	
+	kr = (manager-&gt;ivam_extract_content)(manager, key, 
+					     vals, vals_count,
+					     &amp;command,
+					     content, in_out_size);
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ * 	Routine:	mach_voucher_extract_attr_recipe
+ *	Purpose:
+ *		Extract a recipe for a given &lt;voucher, key&gt; pair.
+ *
+ *		If a value other than the default is present for this
+ *		&lt;voucher,key&gt; pair, we need to contact the resource
+ *		manager to extract the content/meaning of the value(s)
+ *		present.  Otherwise, return success (but no data).
+ *
+ *	Conditions:
+ *		Nothing locked - as it may upcall to user-space.
+ *		The caller holds a reference on the voucher.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">mach_voucher_extract_attr_recipe</span>(
+	ipc_voucher_t				voucher,
+	mach_voucher_attr_key_t			key,
+	mach_voucher_attr_raw_recipe_t		raw_recipe,
+	mach_voucher_attr_raw_recipe_size_t	*in_out_size)
+{
+	mach_voucher_attr_value_handle_t vals[MACH_VOUCHER_ATTR_VALUE_MAX_NESTED];
+	mach_voucher_attr_value_handle_array_size_t vals_count;
+	ipc_voucher_attr_manager_t manager;
+	mach_voucher_attr_recipe_t recipe;
+	iv_index_t value_index;
+	iv_index_t key_index;
+	kern_return_t kr;
+
+
+	<span class="enscript-keyword">if</span> (IV_NULL == voucher)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	key_index = iv_key_to_index(key);
+
+	value_index = iv_lookup(voucher, key_index);
+	<span class="enscript-keyword">if</span> (IV_UNUSED_VALINDEX == value_index) {
+		*in_out_size = 0;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	<span class="enscript-keyword">if</span> (*in_out_size &lt; <span class="enscript-keyword">sizeof</span>(*recipe))
+		<span class="enscript-keyword">return</span> KERN_NO_SPACE;
+
+	recipe = (mach_voucher_attr_recipe_t)(<span class="enscript-type">void</span> *)raw_recipe;
+	recipe-&gt;key = key;
+	recipe-&gt;command = MACH_VOUCHER_ATTR_NOOP;
+	recipe-&gt;previous_voucher = MACH_VOUCHER_NAME_NULL;
+	recipe-&gt;content_size = *in_out_size - <span class="enscript-keyword">sizeof</span>(*recipe);
+
+	<span class="enscript-comment">/*
+	 * Get the manager for this key_index.  The
+	 * existence of a non-default value for this
+	 * slot within our voucher will keep the
+	 * manager referenced during the callout.
+	 */</span>
+	ivgt_lookup(key_index, FALSE, &amp;manager, NULL);
+	assert(IVAM_NULL != manager);
+
+	<span class="enscript-comment">/*
+	 * Get the value(s) to pass to the manager
+	 * for this value_index.
+	 */</span>
+	ivace_lookup_values(key_index, value_index,
+			    vals, &amp;vals_count);
+	assert(0 &lt; vals_count);
+
+	<span class="enscript-comment">/* callout to manager */</span>
+	kr = (manager-&gt;ivam_extract_content)(manager, key, 
+					     vals, vals_count,
+					     &amp;recipe-&gt;command,
+					     recipe-&gt;content, &amp;recipe-&gt;content_size);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kr) {
+	  assert(*in_out_size - <span class="enscript-keyword">sizeof</span>(*recipe) &gt;= recipe-&gt;content_size);
+	  *in_out_size = <span class="enscript-keyword">sizeof</span>(*recipe) + recipe-&gt;content_size;
+	}
+
+	<span class="enscript-keyword">return</span> kr;
+}
+
+
+
+<span class="enscript-comment">/*
+ *	Routine: 	mach_voucher_extract_all_attr_recipes
+ *	Purpose:
+ *		Extract all the (non-default) contents for a given voucher,
+ *		building up a recipe that could be provided to a future 
+ *		voucher creation call.
+ *	Conditions:		
+ *		Nothing locked (may invoke user-space).
+ *		Caller holds a reference on the supplied voucher.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">mach_voucher_extract_all_attr_recipes</span>(
+	ipc_voucher_t					voucher,
+	mach_voucher_attr_raw_recipe_array_t		recipes,
+	mach_voucher_attr_raw_recipe_array_size_t	*in_out_size)
+{
+	mach_voucher_attr_recipe_size_t recipe_size = *in_out_size;
+	mach_voucher_attr_recipe_size_t recipe_used = 0;
+	iv_index_t key_index;
+
+	<span class="enscript-keyword">if</span> (IV_NULL == voucher)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-keyword">for</span> (key_index = 0; key_index &lt; voucher-&gt;iv_table_size; key_index++) {
+		mach_voucher_attr_value_handle_t vals[MACH_VOUCHER_ATTR_VALUE_MAX_NESTED];
+		mach_voucher_attr_value_handle_array_size_t vals_count;
+		mach_voucher_attr_content_size_t content_size;
+		ipc_voucher_attr_manager_t manager;
+		mach_voucher_attr_recipe_t recipe;
+		mach_voucher_attr_key_t key;
+		iv_index_t value_index;
+		kern_return_t kr;
+
+		<span class="enscript-comment">/* don't output anything for a default value */</span>
+		value_index = iv_lookup(voucher, key_index);
+		<span class="enscript-keyword">if</span> (IV_UNUSED_VALINDEX == value_index)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">if</span> (recipe_size - recipe_used &lt; <span class="enscript-keyword">sizeof</span>(*recipe))
+			<span class="enscript-keyword">return</span> KERN_NO_SPACE;
+
+		recipe = (mach_voucher_attr_recipe_t)(<span class="enscript-type">void</span> *)&amp;recipes[recipe_used];
+		content_size = recipe_size - recipe_used - <span class="enscript-keyword">sizeof</span>(*recipe);
+		
+		<span class="enscript-comment">/*
+		 * Get the manager for this key_index.  The
+		 * existence of a non-default value for this
+		 * slot within our voucher will keep the
+		 * manager referenced during the callout.
+		 */</span>
+		ivgt_lookup(key_index, FALSE, &amp;manager, NULL);
+		assert(IVAM_NULL != manager);
+
+		<span class="enscript-comment">/*
+		 * Get the value(s) to pass to the manager
+		 * for this value_index.
+		 */</span>
+		ivace_lookup_values(key_index, value_index,
+				    vals, &amp;vals_count);
+		assert(0 &lt; vals_count);
+
+		key = iv_index_to_key(key_index);
+
+		recipe-&gt;key = key;
+		recipe-&gt;command = MACH_VOUCHER_ATTR_NOOP;
+		recipe-&gt;content_size = content_size;
+
+		<span class="enscript-comment">/* callout to manager */</span>
+		kr = (manager-&gt;ivam_extract_content)(manager, key, 
+					     vals, vals_count,
+					     &amp;recipe-&gt;command,
+					     recipe-&gt;content, &amp;recipe-&gt;content_size);
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+			<span class="enscript-keyword">return</span> kr;
+
+		assert(recipe-&gt;content_size &lt;= content_size);
+		recipe_used += <span class="enscript-keyword">sizeof</span>(*recipe) + recipe-&gt;content_size;
+	}
+
+	*in_out_size = recipe_used;
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine: 	mach_voucher_debug_info
+ *	Purpose:
+ *		Extract all the (non-default) contents for a given mach port name,
+ *		building up a recipe that could be provided to a future 
+ *		voucher creation call.
+ *	Conditions:
+ *		Nothing locked (may invoke user-space).
+ *		Caller may not hold a reference on the supplied voucher.
+ */</span>
+#<span class="enscript-reference">if</span> !(<span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>)
+kern_return_t
+<span class="enscript-function-name">mach_voucher_debug_info</span>(
+	ipc_space_t 					__unused space,
+	mach_port_name_t				__unused voucher_name,
+	mach_voucher_attr_raw_recipe_array_t		__unused recipes,
+	mach_voucher_attr_raw_recipe_array_size_t	__unused *in_out_size)
+{
+	<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+}
+#<span class="enscript-reference">else</span>
+kern_return_t
+<span class="enscript-function-name">mach_voucher_debug_info</span>(
+	ipc_space_t 					space,
+	mach_port_name_t				voucher_name,
+	mach_voucher_attr_raw_recipe_array_t		recipes,
+	mach_voucher_attr_raw_recipe_array_size_t	*in_out_size)
+{
+	ipc_voucher_t voucher = IPC_VOUCHER_NULL;
+	kern_return_t kr;
+	ipc_port_t port = MACH_PORT_NULL;
+
+	<span class="enscript-keyword">if</span> (!MACH_PORT_VALID(voucher_name)) {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	kr = ipc_port_translate_send(space, voucher_name, &amp;port);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	voucher = convert_port_to_voucher(port);
+	ip_unlock(port);
+
+	<span class="enscript-keyword">if</span> (voucher) {
+		kr = mach_voucher_extract_all_attr_recipes(voucher, recipes, in_out_size);
+		ipc_voucher_release(voucher);
+		<span class="enscript-keyword">return</span> kr;
+	}
+
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * 	Routine:	mach_voucher_attr_command
+ *	Purpose:
+ *		Invoke an attribute-specific command through this voucher.
+ *
+ *		The voucher layout, membership, etc... is not altered
+ *		through the execution of this command.
+ *
+ *	Conditions:
+ *		Nothing locked - as it may upcall to user-space.
+ *		The caller holds a reference on the voucher.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">mach_voucher_attr_command</span>(
+	ipc_voucher_t						voucher,
+	mach_voucher_attr_key_t				key,
+	mach_voucher_attr_command_t			command,
+	mach_voucher_attr_content_t			in_content,
+	mach_voucher_attr_content_size_t	in_content_size,
+	mach_voucher_attr_content_t			out_content,
+	mach_voucher_attr_content_size_t	*out_content_size)
+{
+	mach_voucher_attr_value_handle_t vals[MACH_VOUCHER_ATTR_VALUE_MAX_NESTED];
+	mach_voucher_attr_value_handle_array_size_t vals_count;
+	ipc_voucher_attr_manager_t manager;
+	ipc_voucher_attr_control_t control;
+	iv_index_t value_index;
+	iv_index_t key_index;
+	kern_return_t kr;
+
+
+	<span class="enscript-keyword">if</span> (IV_NULL == voucher)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	key_index = iv_key_to_index(key);
+
+	<span class="enscript-comment">/*
+	 * Get the manager for this key_index.
+	 * Allowing commands against the default value
+	 * for an attribute means that we have to hold
+	 * reference on the attribute manager control
+	 * to keep the manager around during the command
+	 * execution.
+	 */</span>
+	ivgt_lookup(key_index, TRUE, &amp;manager, &amp;control);
+	assert(IVAM_NULL != manager);
+
+	<span class="enscript-comment">/*
+	 * Get the values for this &lt;voucher, key&gt; pair
+	 * to pass to the attribute manager.  It is still
+	 * permissible to execute a command against the
+	 * default value (empty value array).
+	 */</span>
+	value_index = iv_lookup(voucher, key_index);
+	ivace_lookup_values(key_index, value_index,
+			    vals, &amp;vals_count);
+
+	<span class="enscript-comment">/* callout to manager */</span>
+	kr = (manager-&gt;ivam_command)(manager, key, 
+				     vals, vals_count,
+				     command,
+				     in_content, in_content_size,
+				     out_content, out_content_size);
+
+	<span class="enscript-comment">/* release reference on control */</span>
+	ivac_release(control);
+
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ * 	Routine:	mach_voucher_attr_control_get_values
+ *	Purpose:
+ *		For a given voucher, get the value handle associated with the
+ *		specified attribute manager.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">mach_voucher_attr_control_get_values</span>(
+	ipc_voucher_attr_control_t control,
+	ipc_voucher_t voucher,
+	mach_voucher_attr_value_handle_array_t out_values,
+	mach_voucher_attr_value_handle_array_size_t *in_out_size)
+{
+	iv_index_t key_index, value_index;
+
+	<span class="enscript-keyword">if</span> (IPC_VOUCHER_ATTR_CONTROL_NULL == control)
+		<span class="enscript-keyword">return</span> KERN_INVALID_CAPABILITY;
+
+	<span class="enscript-keyword">if</span> (IV_NULL == voucher)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-keyword">if</span> (0 == *in_out_size)
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+
+	key_index = control-&gt;ivac_key_index;
+
+	assert(0 &lt; voucher-&gt;iv_refs);
+	value_index = iv_lookup(voucher, key_index);
+	ivace_lookup_values(key_index, value_index,
+			    out_values, in_out_size);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+
+<span class="enscript-comment">/*
+ * 	Routine:	mach_voucher_attr_control_create_mach_voucher
+ *	Purpose:
+ *		Create a new mach voucher and initialize it by processing the
+ *		supplied recipe(s).
+ *
+ *		Coming in on the attribute control port denotes special privileges
+ *		over they key associated with the control port.
+ *
+ *		Coming in from user-space, each recipe item will have a previous
+ *		recipe port name that needs to be converted to a voucher.  Because
+ *		we can't rely on the port namespace to hold a reference on each
+ *		previous voucher port for the duration of processing that command,
+ *		we have to convert the name to a voucher reference and release it
+ *		after the command processing is done.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">mach_voucher_attr_control_create_mach_voucher</span>(
+	ipc_voucher_attr_control_t control,
+	mach_voucher_attr_raw_recipe_array_t recipes,
+	mach_voucher_attr_raw_recipe_size_t recipe_size,
+	ipc_voucher_t *new_voucher)
+{
+	mach_voucher_attr_key_t control_key;
+	mach_voucher_attr_recipe_t sub_recipe;
+	mach_voucher_attr_recipe_size_t recipe_used = 0;
+	ipc_voucher_t voucher = IV_NULL;
+	kern_return_t kr = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (IPC_VOUCHER_ATTR_CONTROL_NULL == control)
+		<span class="enscript-keyword">return</span> KERN_INVALID_CAPABILITY;
+
+	<span class="enscript-comment">/* if nothing to do ... */</span>
+	<span class="enscript-keyword">if</span> (0 == recipe_size) {
+		*new_voucher = IV_NULL;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	<span class="enscript-comment">/* allocate new voucher */</span>
+	voucher = iv_alloc(ivgt_keys_in_use);
+	<span class="enscript-keyword">if</span> (IV_NULL == voucher)
+		<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+
+	control_key = iv_index_to_key(control-&gt;ivac_key_index);
+
+	<span class="enscript-comment">/* iterate over the recipe items */</span>
+	<span class="enscript-keyword">while</span> (0 &lt; recipe_size - recipe_used) {
+		ipc_voucher_t prev_iv;
+
+		<span class="enscript-keyword">if</span> (recipe_size - recipe_used &lt; <span class="enscript-keyword">sizeof</span>(*sub_recipe)) {
+			kr = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/* find the next recipe */</span>
+		sub_recipe = (mach_voucher_attr_recipe_t)(<span class="enscript-type">void</span> *)&amp;recipes[recipe_used];
+		<span class="enscript-keyword">if</span> (recipe_size - recipe_used - <span class="enscript-keyword">sizeof</span>(*sub_recipe) &lt; sub_recipe-&gt;content_size) {
+			kr = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+		recipe_used += <span class="enscript-keyword">sizeof</span>(*sub_recipe) + sub_recipe-&gt;content_size;
+
+		<span class="enscript-comment">/* convert voucher port name (current space) into a voucher reference */</span>
+		prev_iv = convert_port_name_to_voucher(sub_recipe-&gt;previous_voucher);
+		<span class="enscript-keyword">if</span> (MACH_PORT_NULL != sub_recipe-&gt;previous_voucher &amp;&amp; IV_NULL == prev_iv) {
+			kr = KERN_INVALID_CAPABILITY;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		kr = ipc_execute_voucher_recipe_command(voucher,
+							sub_recipe-&gt;key,
+							sub_recipe-&gt;command,
+							prev_iv,
+							sub_recipe-&gt;content,
+							sub_recipe-&gt;content_size,
+							(sub_recipe-&gt;key == control_key));
+		ipc_voucher_release(prev_iv);
+
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kr) {
+		*new_voucher = iv_dedup(voucher);
+	} <span class="enscript-keyword">else</span> {
+		*new_voucher = IV_NULL;
+		iv_dealloc(voucher, FALSE);
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ * 	Routine:	host_create_mach_voucher
+ *	Purpose:
+ *		Create a new mach voucher and initialize it by processing the
+ *		supplied recipe(s).
+ *
+ *		Comming in from user-space, each recipe item will have a previous
+ *		recipe port name that needs to be converted to a voucher.  Because
+ *		we can't rely on the port namespace to hold a reference on each
+ *		previous voucher port for the duration of processing that command,
+ *		we have to convert the name to a voucher reference and release it
+ *		after the command processing is done.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">host_create_mach_voucher</span>(
+	host_t host,
+	mach_voucher_attr_raw_recipe_array_t recipes,
+	mach_voucher_attr_raw_recipe_size_t recipe_size,
+	ipc_voucher_t *new_voucher)
+{
+	mach_voucher_attr_recipe_t sub_recipe;
+	mach_voucher_attr_recipe_size_t recipe_used = 0;
+	ipc_voucher_t voucher = IV_NULL;
+	kern_return_t kr = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (host == HOST_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-comment">/* if nothing to do ... */</span>
+	<span class="enscript-keyword">if</span> (0 == recipe_size) {
+		*new_voucher = IV_NULL;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+
+	<span class="enscript-comment">/* allocate new voucher */</span>
+	voucher = iv_alloc(ivgt_keys_in_use);
+	<span class="enscript-keyword">if</span> (IV_NULL == voucher)
+		<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+
+	<span class="enscript-comment">/* iterate over the recipe items */</span>
+	<span class="enscript-keyword">while</span> (0 &lt; recipe_size - recipe_used) {
+		ipc_voucher_t prev_iv;
+
+		<span class="enscript-keyword">if</span> (recipe_size - recipe_used &lt; <span class="enscript-keyword">sizeof</span>(*sub_recipe)) {
+			kr = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-comment">/* find the next recipe */</span>
+		sub_recipe = (mach_voucher_attr_recipe_t)(<span class="enscript-type">void</span> *)&amp;recipes[recipe_used];
+		<span class="enscript-keyword">if</span> (recipe_size - recipe_used - <span class="enscript-keyword">sizeof</span>(*sub_recipe) &lt; sub_recipe-&gt;content_size) {
+			kr = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+		recipe_used += <span class="enscript-keyword">sizeof</span>(*sub_recipe) + sub_recipe-&gt;content_size;
+
+		<span class="enscript-comment">/* convert voucher port name (current space) into a voucher reference */</span>
+		prev_iv = convert_port_name_to_voucher(sub_recipe-&gt;previous_voucher);
+		<span class="enscript-keyword">if</span> (MACH_PORT_NULL != sub_recipe-&gt;previous_voucher &amp;&amp; IV_NULL == prev_iv) {
+			kr = KERN_INVALID_CAPABILITY;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		kr = ipc_execute_voucher_recipe_command(voucher,
+							sub_recipe-&gt;key,
+							sub_recipe-&gt;command,
+							prev_iv,
+							sub_recipe-&gt;content,
+							sub_recipe-&gt;content_size,
+							FALSE);
+		ipc_voucher_release(prev_iv);
+
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == kr) {
+		*new_voucher = iv_dedup(voucher);
+	} <span class="enscript-keyword">else</span> {
+		*new_voucher = IV_NULL;
+		iv_dealloc(voucher, FALSE);
+	}
+	<span class="enscript-keyword">return</span> kr;
+}
+
+<span class="enscript-comment">/*
+ * 	Routine:	host_register_well_known_mach_voucher_attr_manager
+ *	Purpose:
+ *		Register the user-level resource manager responsible for a given
+ * 		key value.  
+ *	Conditions:
+ *		The manager port passed in has to be converted/wrapped
+ *		in an ipc_voucher_attr_manager_t structure and then call the
+ *		internal variant.  We have a generic ipc voucher manager
+ *		type that implements a MIG proxy out to user-space just for
+ *		this purpose.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">host_register_well_known_mach_voucher_attr_manager</span>(
+        host_t host,
+	mach_voucher_attr_manager_t __unused manager,
+	mach_voucher_attr_value_handle_t __unused default_value,
+        mach_voucher_attr_key_t __unused key,
+	ipc_voucher_attr_control_t __unused *control)
+{
+	<span class="enscript-keyword">if</span> (HOST_NULL == host)
+		<span class="enscript-keyword">return</span> KERN_INVALID_HOST;
+
+#<span class="enscript-reference">if</span> 1
+	<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+#<span class="enscript-reference">else</span>
+	<span class="enscript-comment">/*
+	 * Allocate a mig_voucher_attr_manager_t that provides the
+	 * MIG proxy functions for the three manager callbacks and
+	 * store the port right in there.
+	 *
+	 * If the user-space manager dies, we'll detect it on our
+	 * next upcall, and cleanup the proxy at that point.
+	 */</span>
+	mig_voucher_attr_manager_t proxy;
+	kern_return_t kr;
+
+	proxy = mvam_alloc(manager);
+
+	kr = ipc_register_well_known_mach_voucher_attr_manager(&amp;proxy-&gt;mvam_manager,
+							       default_value,
+							       key,
+							       control);
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+		mvam_release(proxy);
+
+	<span class="enscript-keyword">return</span> kr;
+#<span class="enscript-reference">endif</span>
+}
+
+<span class="enscript-comment">/*
+ * 	Routine:	host_register_mach_voucher_attr_manager
+ *	Purpose:
+ *		Register the user-space resource manager and return a
+ *		dynamically allocated key.
+ *	Conditions:
+ *		Wrap the supplied port with the MIG proxy ipc
+ *		voucher resource manager, and then call the internal
+ *		variant.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">host_register_mach_voucher_attr_manager</span>(
+        host_t host,
+	mach_voucher_attr_manager_t __unused manager,
+	mach_voucher_attr_value_handle_t __unused default_value,
+        mach_voucher_attr_key_t __unused *key,
+	ipc_voucher_attr_control_t __unused *control)
+{
+	<span class="enscript-keyword">if</span> (HOST_NULL == host)
+		<span class="enscript-keyword">return</span> KERN_INVALID_HOST;
+
+	<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+}
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">MACH_VOUCHER_ATTR_KEY_USER_DATA</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">MACH_VOUCHER_ATTR_KEY_TEST</span>)
+
+<span class="enscript-comment">/*
+ * Build-in a simple User Data Resource Manager
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">USER_DATA_MAX_DATA</span>	(16*1024)
+
+<span class="enscript-type">struct</span> user_data_value_element {
+	mach_voucher_attr_value_reference_t	e_made;
+	mach_voucher_attr_content_size_t	e_size;
+	iv_index_t				e_sum;
+	iv_index_t				e_hash;
+	queue_chain_t				e_hash_link;
+	uint8_t					e_data[];
+};
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> user_data_value_element *user_data_element_t;
+
+<span class="enscript-comment">/*
+ * User Data Voucher Hash Table
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">USER_DATA_HASH_BUCKETS</span> 127
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">USER_DATA_HASH_BUCKET</span>(x) ((x) % USER_DATA_HASH_BUCKETS)
+
+<span class="enscript-type">static</span> queue_head_t user_data_bucket[USER_DATA_HASH_BUCKETS];
+<span class="enscript-type">static</span> lck_spin_t user_data_lock_data;
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">user_data_lock_init</span>() \
+	lck_spin_init(&amp;user_data_lock_data, &amp;ipc_lck_grp, &amp;ipc_lck_attr)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">user_data_lock_destroy</span>() \
+	lck_spin_destroy(&amp;user_data_lock_data, &amp;ipc_lck_grp)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">user_data_lock</span>() \
+	lck_spin_lock(&amp;user_data_lock_data)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">user_data_lock_try</span>() \
+	lck_spin_try_lock(&amp;user_data_lock_data)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">user_data_unlock</span>() \
+	lck_spin_unlock(&amp;user_data_lock_data)
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">user_data_release_value</span>(
+	ipc_voucher_attr_manager_t		manager,
+	mach_voucher_attr_key_t			key,
+	mach_voucher_attr_value_handle_t	value,
+	mach_voucher_attr_value_reference_t	sync);
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">user_data_get_value</span>(
+	ipc_voucher_attr_manager_t			manager,
+	mach_voucher_attr_key_t				key,
+	mach_voucher_attr_recipe_command_t		command,
+	mach_voucher_attr_value_handle_array_t		prev_values,
+	mach_voucher_attr_value_handle_array_size_t	prev_value_count,
+	mach_voucher_attr_content_t			content,
+	mach_voucher_attr_content_size_t		content_size,
+	mach_voucher_attr_value_handle_t		*out_value,
+	ipc_voucher_t					*out_value_voucher);
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">user_data_extract_content</span>(
+	ipc_voucher_attr_manager_t			manager,
+	mach_voucher_attr_key_t				key,
+	mach_voucher_attr_value_handle_array_t		values,
+	mach_voucher_attr_value_handle_array_size_t	value_count,
+	mach_voucher_attr_recipe_command_t		*out_command,
+	mach_voucher_attr_content_t			out_content,
+	mach_voucher_attr_content_size_t		*in_out_content_size);
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">user_data_command</span>(
+	ipc_voucher_attr_manager_t				manager,
+	mach_voucher_attr_key_t					key,
+	mach_voucher_attr_value_handle_array_t	values,
+	mach_msg_type_number_t					value_count,
+	mach_voucher_attr_command_t				command,
+	mach_voucher_attr_content_t				in_content,
+	mach_voucher_attr_content_size_t		in_content_size,
+	mach_voucher_attr_content_t				out_content,
+	mach_voucher_attr_content_size_t		*out_content_size);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">user_data_release</span>(
+	ipc_voucher_attr_manager_t		manager);
+
+<span class="enscript-type">struct</span> ipc_voucher_attr_manager user_data_manager = {
+	.ivam_release_value =	user_data_release_value,
+	.ivam_get_value =	user_data_get_value,
+	.ivam_extract_content =	user_data_extract_content,
+	.ivam_command = 	user_data_command,
+	.ivam_release =		user_data_release,
+};
+
+ipc_voucher_attr_control_t user_data_control;
+ipc_voucher_attr_control_t test_control;
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">MACH_VOUCHER_ATTR_KEY_USER_DATA</span>) &amp;&amp; <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">MACH_VOUCHER_ATTR_KEY_TEST</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">USER_DATA_ASSERT_KEY</span>(key)				\
+	assert(MACH_VOUCHER_ATTR_KEY_USER_DATA == (key) || 	\
+	       MACH_VOUCHER_ATTR_KEY_TEST == (key));
+#<span class="enscript-reference">elif</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">MACH_VOUCHER_ATTR_KEY_USER_DATA</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">USER_DATA_ASSERT_KEY</span>(key) assert(MACH_VOUCHER_ATTR_KEY_USER_DATA == (key))
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">USER_DATA_ASSERT_KEY</span>(key) assert(MACH_VOUCHER_ATTR_KEY_TEST == (key))
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ *	Routine: 	user_data_release_value
+ *	Purpose:
+ *		Release a made reference on a specific value managed by
+ *		this voucher attribute manager.
+ *	Conditions:
+ *		Must remove the element associated with this value from
+ *		the hash if this is the last know made reference.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">user_data_release_value</span>(
+	ipc_voucher_attr_manager_t		__assert_only manager,
+	mach_voucher_attr_key_t			__assert_only key,
+	mach_voucher_attr_value_handle_t	value,
+	mach_voucher_attr_value_reference_t	sync)
+{
+	user_data_element_t elem;
+	iv_index_t hash;
+
+	assert (&amp;user_data_manager == manager);
+	USER_DATA_ASSERT_KEY(key);
+
+	elem = (user_data_element_t)value;
+	hash = elem-&gt;e_hash;
+
+	user_data_lock();
+	<span class="enscript-keyword">if</span> (sync == elem-&gt;e_made) {
+		queue_remove(&amp;user_data_bucket[hash], elem, user_data_element_t, e_hash_link);
+		user_data_unlock();
+		kfree(elem, <span class="enscript-keyword">sizeof</span>(*elem) + elem-&gt;e_size);
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+	assert(sync &lt; elem-&gt;e_made);
+	user_data_unlock();
+
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+<span class="enscript-comment">/*
+ *	Routine: 	user_data_checksum
+ *	Purpose:
+ *		Provide a rudimentary checksum for the data presented
+ *		to these voucher attribute managers.
+ */</span>
+<span class="enscript-type">static</span> iv_index_t
+<span class="enscript-function-name">user_data_checksum</span>(
+	mach_voucher_attr_content_t			content,
+	mach_voucher_attr_content_size_t		content_size)
+{
+	mach_voucher_attr_content_size_t i;
+	iv_index_t cksum = 0;
+
+	<span class="enscript-keyword">for</span>(i = 0; i &lt; content_size; i++, content++) {
+		cksum = (cksum &lt;&lt; 8) ^ (cksum + *(<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *)content);
+	}
+
+	<span class="enscript-keyword">return</span> (~cksum);
+}
+
+<span class="enscript-comment">/*
+ *	Routine: 	user_data_dedup
+ *	Purpose:
+ *		See if the content represented by this request already exists
+ *		in another user data element.  If so return a made reference
+ *		to the existing element.  Otherwise, create a new element and
+ *		return that (after inserting it in the hash).
+ *	Conditions:
+ *		Nothing locked.
+ *	Returns:
+ *		A made reference on the user_data_element_t
+ */</span>
+<span class="enscript-type">static</span> user_data_element_t
+<span class="enscript-function-name">user_data_dedup</span>(
+	mach_voucher_attr_content_t			content,
+	mach_voucher_attr_content_size_t		content_size)
+{
+	iv_index_t sum; 
+	iv_index_t hash;
+	user_data_element_t elem;
+	user_data_element_t alloc = NULL;
+
+	sum = user_data_checksum(content, content_size);
+	hash = USER_DATA_HASH_BUCKET(sum);
+
+ <span class="enscript-reference">retry</span>:
+	user_data_lock();
+	queue_iterate(&amp;user_data_bucket[hash], elem, user_data_element_t, e_hash_link) {
+		assert(elem-&gt;e_hash == hash);
+
+		<span class="enscript-comment">/* if sums match... */</span>
+		<span class="enscript-keyword">if</span> (elem-&gt;e_sum == sum &amp;&amp; elem-&gt;e_size == content_size) {
+			iv_index_t i;
+
+			<span class="enscript-comment">/* and all data matches */</span>
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; content_size; i++)
+				<span class="enscript-keyword">if</span> (elem-&gt;e_data[i] != content[i])
+					<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">if</span> (i &lt; content_size)
+				<span class="enscript-keyword">continue</span>;
+
+			<span class="enscript-comment">/* ... we found a match... */</span>
+
+			elem-&gt;e_made++;
+			user_data_unlock();
+
+			<span class="enscript-keyword">if</span> (NULL != alloc)
+				kfree(alloc, <span class="enscript-keyword">sizeof</span>(*alloc) + content_size);
+
+			<span class="enscript-keyword">return</span> elem;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (NULL == alloc) {
+		user_data_unlock();
+
+		alloc = (user_data_element_t)kalloc(<span class="enscript-keyword">sizeof</span>(*alloc) + content_size);
+		alloc-&gt;e_made = 1;
+		alloc-&gt;e_size = content_size;
+		alloc-&gt;e_sum = sum;
+		alloc-&gt;e_hash = hash;
+		memcpy(alloc-&gt;e_data, content, content_size);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">retry</span>;
+	}
+
+	queue_enter(&amp;user_data_bucket[hash], alloc, user_data_element_t, e_hash_link);
+	user_data_unlock();
+
+	<span class="enscript-keyword">return</span> alloc;
+}
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">user_data_get_value</span>(
+	ipc_voucher_attr_manager_t			__assert_only manager,
+	mach_voucher_attr_key_t				__assert_only key,
+	mach_voucher_attr_recipe_command_t		command,
+	mach_voucher_attr_value_handle_array_t		prev_values,
+	mach_voucher_attr_value_handle_array_size_t	prev_value_count,
+	mach_voucher_attr_content_t			content,
+	mach_voucher_attr_content_size_t		content_size,
+	mach_voucher_attr_value_handle_t		*out_value,
+	ipc_voucher_t					*out_value_voucher)
+{
+	user_data_element_t elem;
+
+	assert (&amp;user_data_manager == manager);
+	USER_DATA_ASSERT_KEY(key);
+
+	<span class="enscript-comment">/* never an out voucher */</span>
+	*out_value_voucher = IPC_VOUCHER_NULL;
+
+	<span class="enscript-keyword">switch</span> (command) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_VOUCHER_ATTR_REDEEM</span>:
+
+		<span class="enscript-comment">/* redeem of previous values is the value */</span>
+		<span class="enscript-keyword">if</span> (0 &lt; prev_value_count) {
+			elem = (user_data_element_t)prev_values[0];
+			assert(0 &lt; elem-&gt;e_made);
+			elem-&gt;e_made++;
+			*out_value = prev_values[0];
+			<span class="enscript-keyword">return</span> KERN_SUCCESS;
+		}
+
+		<span class="enscript-comment">/* redeem of default is default */</span>
+		*out_value = 0;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_VOUCHER_ATTR_USER_DATA_STORE</span>:
+		<span class="enscript-keyword">if</span> (USER_DATA_MAX_DATA &lt; content_size)
+			<span class="enscript-keyword">return</span> KERN_RESOURCE_SHORTAGE;
+
+		<span class="enscript-comment">/* empty is the default */</span>
+		<span class="enscript-keyword">if</span> (0 == content_size) {
+			*out_value = 0;
+			<span class="enscript-keyword">return</span> KERN_SUCCESS;
+		}
+
+		elem = user_data_dedup(content, content_size);
+		*out_value = (mach_voucher_attr_value_handle_t)elem;
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-comment">/* every other command is unknown */</span>
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+}
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">user_data_extract_content</span>(
+	ipc_voucher_attr_manager_t			__assert_only manager,
+	mach_voucher_attr_key_t				__assert_only key,
+	mach_voucher_attr_value_handle_array_t		values,
+	mach_voucher_attr_value_handle_array_size_t	value_count,
+	mach_voucher_attr_recipe_command_t		*out_command,
+	mach_voucher_attr_content_t			out_content,
+	mach_voucher_attr_content_size_t		*in_out_content_size)
+{
+	mach_voucher_attr_content_size_t size = 0;
+	user_data_element_t elem;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+
+	assert (&amp;user_data_manager == manager);
+	USER_DATA_ASSERT_KEY(key);
+
+	<span class="enscript-comment">/* concatenate the stored data items */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; value_count ; i++) {
+		elem = (user_data_element_t)values[i];
+		assert(USER_DATA_MAX_DATA &gt;= elem-&gt;e_size);
+
+		<span class="enscript-keyword">if</span> (size + elem-&gt;e_size &gt; *in_out_content_size)
+			<span class="enscript-keyword">return</span> KERN_NO_SPACE;
+
+		memcpy(&amp;out_content[size], elem-&gt;e_data, elem-&gt;e_size);
+		size += elem-&gt;e_size;
+	}
+	*out_command = MACH_VOUCHER_ATTR_BITS_STORE;
+	*in_out_content_size = size;
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">user_data_command</span>(
+	ipc_voucher_attr_manager_t				__assert_only manager,
+	mach_voucher_attr_key_t					__assert_only key,
+	mach_voucher_attr_value_handle_array_t	__unused values,
+	mach_msg_type_number_t					__unused value_count,
+	mach_voucher_attr_command_t				__unused command,
+	mach_voucher_attr_content_t				__unused in_content,
+	mach_voucher_attr_content_size_t		__unused in_content_size,
+	mach_voucher_attr_content_t				__unused out_content,
+	mach_voucher_attr_content_size_t		__unused *out_content_size)
+{
+	assert (&amp;user_data_manager == manager);
+	USER_DATA_ASSERT_KEY(key);
+	<span class="enscript-keyword">return</span> KERN_FAILURE;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">user_data_release</span>(
+	ipc_voucher_attr_manager_t		manager)
+{
+	<span class="enscript-keyword">if</span> (manager != &amp;user_data_manager)
+		<span class="enscript-keyword">return</span>;
+
+	panic(<span class="enscript-string">&quot;Voucher user-data manager released&quot;</span>);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> user_data_manager_inited = 0;
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">user_data_attr_manager_init</span>()
+{
+	kern_return_t kr;
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">MACH_VOUCHER_ATTR_KEY_USER_DATA</span>)	
+	<span class="enscript-keyword">if</span> ((user_data_manager_inited &amp; 0x1) != 0x1) {
+		kr = ipc_register_well_known_mach_voucher_attr_manager(&amp;user_data_manager,
+						(mach_voucher_attr_value_handle_t)0,
+						MACH_VOUCHER_ATTR_KEY_USER_DATA,
+						&amp;user_data_control);
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+			printf(<span class="enscript-string">&quot;Voucher user-data manager register(USER-DATA) returned %d&quot;</span>, kr);
+		<span class="enscript-keyword">else</span>
+			user_data_manager_inited |= 0x1;
+	}
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">MACH_VOUCHER_ATTR_KEY_TEST</span>)
+	<span class="enscript-keyword">if</span> ((user_data_manager_inited &amp; 0x2) != 0x2) {
+		kr = ipc_register_well_known_mach_voucher_attr_manager(&amp;user_data_manager,
+						(mach_voucher_attr_value_handle_t)0,
+						MACH_VOUCHER_ATTR_KEY_TEST,
+						&amp;test_control);
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != kr)
+			printf(<span class="enscript-string">&quot;Voucher user-data manager register(TEST) returned %d&quot;</span>, kr);
+		<span class="enscript-keyword">else</span>
+			user_data_manager_inited |= 0x2;
+	}
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">MACH_VOUCHER_ATTR_KEY_USER_DATA</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">MACH_VOUCHER_ATTR_KEY_TEST</span>)
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-keyword">for</span> (i=0; i &lt; USER_DATA_HASH_BUCKETS; i++)
+		queue_init(&amp;user_data_bucket[i]);
+
+	user_data_lock_init();
+#<span class="enscript-reference">endif</span>
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* MACH_DEBUG */</span>
+</pre>
+<hr />
+</body></html>

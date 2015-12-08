@@ -1,0 +1,417 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>nfs_upcall.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">nfs_upcall.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2011-2014 Apple Inc.  All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdint.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/rpcv2.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfsproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;nfs/nfs.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NFS_UC_DEBUG</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DPRINT</span>(fmt, ...) printf(fmt,## __VA_ARGS__)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DPRINT</span>(fmt, ...)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">struct</span> nfsrv_uc_arg {
+	TAILQ_ENTRY(nfsrv_uc_arg) nua_svcq;
+	socket_t nua_so;
+	<span class="enscript-type">struct</span> nfsrv_sock *nua_slp;
+	<span class="enscript-type">int</span> nua_waitflag;  <span class="enscript-comment">/* Should always be MBUF_DONTWAIT */</span>
+	uint32_t nua_flags;
+	uint32_t nua_qi;
+};
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NFS_UC_QUEUED</span>	0x0001
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NFS_UC_HASH_SZ</span> 7
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">NFS_UC_HASH</span>(x) ((((uint32_t)(uintptr_t)(x)) &gt;&gt; 3) % nfsrv_uc_thread_count)
+
+<span class="enscript-function-name">TAILQ_HEAD</span>(nfsrv_uc_q, nfsrv_uc_arg);
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> nfsrv_uc_queue {
+	lck_mtx_t		*ucq_lock;
+	<span class="enscript-type">struct</span> nfsrv_uc_q	ucq_queue[1];
+	thread_t		ucq_thd;
+	uint32_t		ucq_flags;
+} nfsrv_uc_queue_tbl[NFS_UC_HASH_SZ];
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">NFS_UC_QUEUE_SLEEPING</span>	0x0001
+
+<span class="enscript-type">static</span> lck_grp_t *nfsrv_uc_group;
+<span class="enscript-type">static</span> lck_mtx_t *nfsrv_uc_shutdown_lock;
+<span class="enscript-type">static</span> <span class="enscript-type">volatile</span> <span class="enscript-type">int</span> nfsrv_uc_shutdown = 0;
+<span class="enscript-type">static</span> int32_t nfsrv_uc_thread_count;
+
+<span class="enscript-type">extern</span> kern_return_t <span class="enscript-function-name">thread_terminate</span>(thread_t);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NFS_UC_Q_DEBUG</span>
+<span class="enscript-type">int</span> nfsrv_uc_use_proxy = 1;
+uint32_t nfsrv_uc_queue_limit;
+uint32_t nfsrv_uc_queue_max_seen;
+<span class="enscript-type">volatile</span> uint32_t nfsrv_uc_queue_count;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Thread that dequeues up-calls and runs the nfsrv_rcv routine
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nfsrv_uc_thread</span>(<span class="enscript-type">void</span> *arg, wait_result_t wr __unused)
+{
+	<span class="enscript-type">int</span> qi = (<span class="enscript-type">int</span>)(uintptr_t)arg;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">struct</span> nfsrv_uc_arg *ep = NULL;
+	<span class="enscript-type">struct</span> nfsrv_uc_queue *myqueue = &amp;nfsrv_uc_queue_tbl[qi];
+
+	DPRINT(<span class="enscript-string">&quot;nfsrv_uc_thread %d started\n&quot;</span>, qi);
+	<span class="enscript-keyword">while</span> (!nfsrv_uc_shutdown) {
+		lck_mtx_lock(myqueue-&gt;ucq_lock);
+
+		<span class="enscript-keyword">while</span> (!nfsrv_uc_shutdown &amp;&amp; TAILQ_EMPTY(myqueue-&gt;ucq_queue)) {
+			myqueue-&gt;ucq_flags |= NFS_UC_QUEUE_SLEEPING;
+			error = msleep(myqueue, myqueue-&gt;ucq_lock, PSOCK, <span class="enscript-string">&quot;nfsd_upcall_handler&quot;</span>, NULL);
+			myqueue-&gt;ucq_flags &amp;= ~NFS_UC_QUEUE_SLEEPING;
+			<span class="enscript-keyword">if</span> (error) {
+				printf(<span class="enscript-string">&quot;nfsrv_uc_thread received error %d\n&quot;</span>, error);
+			}
+		}
+		<span class="enscript-keyword">if</span> (nfsrv_uc_shutdown) {
+			lck_mtx_unlock(myqueue-&gt;ucq_lock);
+			<span class="enscript-keyword">break</span>;
+		}
+
+
+		ep = TAILQ_FIRST(myqueue-&gt;ucq_queue);
+		DPRINT(<span class="enscript-string">&quot;nfsrv_uc_thread:%d dequeue %p from %p\n&quot;</span>, qi, ep, myqueue);
+
+		TAILQ_REMOVE(myqueue-&gt;ucq_queue, ep, nua_svcq);
+
+		ep-&gt;nua_flags &amp;= ~NFS_UC_QUEUED;
+
+		lck_mtx_unlock(myqueue-&gt;ucq_lock);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NFS_UC_Q_DEBUG</span>
+		OSDecrementAtomic(&amp;nfsrv_uc_queue_count);
+#<span class="enscript-reference">endif</span>
+
+		DPRINT(<span class="enscript-string">&quot;calling nfsrv_rcv for %p\n&quot;</span>, (<span class="enscript-type">void</span> *)ep-&gt;nua_slp);
+		nfsrv_rcv(ep-&gt;nua_so, (<span class="enscript-type">void</span> *)ep-&gt;nua_slp, ep-&gt;nua_waitflag);
+	}
+
+	lck_mtx_lock(nfsrv_uc_shutdown_lock);
+	nfsrv_uc_thread_count--;
+	wakeup(&amp;nfsrv_uc_thread_count);
+	lck_mtx_unlock(nfsrv_uc_shutdown_lock);
+
+	thread_terminate(current_thread());
+}
+
+<span class="enscript-comment">/*
+ * Dequeue a closed nfsrv_sock if needed from the up-call queue.
+ * Call from nfsrv_zapsock
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfsrv_uc_dequeue</span>(<span class="enscript-type">struct</span> nfsrv_sock *slp)
+{
+	<span class="enscript-type">struct</span> nfsrv_uc_arg *ap = slp-&gt;ns_ua;
+	<span class="enscript-type">struct</span> nfsrv_uc_queue *myqueue = &amp;nfsrv_uc_queue_tbl[ap-&gt;nua_qi];
+
+	<span class="enscript-comment">/*
+	 * We assume that the socket up-calls have been stop and the socket
+	 * is shutting down so no need for acquiring the lock to check that
+	 * the flag is cleared.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ap == NULL || (ap-&gt;nua_flags &amp; NFS_UC_QUEUED) == 0)
+		<span class="enscript-keyword">return</span>;
+	<span class="enscript-comment">/* If we're queued we might race with nfsrv_uc_thread */</span>
+	lck_mtx_lock(myqueue-&gt;ucq_lock);
+	<span class="enscript-keyword">if</span> (ap-&gt;nua_flags &amp; NFS_UC_QUEUED) {
+		printf(<span class="enscript-string">&quot;nfsrv_uc_dequeue remove %p\n&quot;</span>, ap);
+		TAILQ_REMOVE(myqueue-&gt;ucq_queue, ap, nua_svcq);
+		ap-&gt;nua_flags &amp;= ~NFS_UC_QUEUED;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NFS_UC_Q_DEBUG</span>
+		OSDecrementAtomic(&amp;nfsrv_uc_queue_count);
+#<span class="enscript-reference">endif</span>		
+	}
+	FREE(slp-&gt;ns_ua, M_TEMP);
+	slp-&gt;ns_ua = NULL;
+	lck_mtx_unlock(myqueue-&gt;ucq_lock);
+}
+
+<span class="enscript-comment">/*
+ * Allocate and initialize globals for nfsrv_sock up-call support.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfsrv_uc_init</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> i;
+
+	nfsrv_uc_group = lck_grp_alloc_init(<span class="enscript-string">&quot;nfs_upcall_locks&quot;</span>, LCK_GRP_ATTR_NULL);
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; NFS_UC_HASH_SZ; i++) {
+		TAILQ_INIT(nfsrv_uc_queue_tbl[i].ucq_queue);
+		nfsrv_uc_queue_tbl[i].ucq_lock = lck_mtx_alloc_init(nfsrv_uc_group, LCK_ATTR_NULL);
+		nfsrv_uc_queue_tbl[i].ucq_thd = THREAD_NULL;
+		nfsrv_uc_queue_tbl[i].ucq_flags = 0;
+	}
+	nfsrv_uc_shutdown_lock = lck_mtx_alloc_init(nfsrv_uc_group, LCK_ATTR_NULL);
+}
+
+<span class="enscript-comment">/*
+ * Start up-call threads to service nfsrv_sock(s)
+ * Called from the first call of nfsrv_uc_addsock
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nfsrv_uc_start</span>(<span class="enscript-type">void</span>)
+{
+	int32_t i;
+	<span class="enscript-type">int</span> error;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NFS_UC_Q_DEBUG</span>
+	<span class="enscript-keyword">if</span> (!nfsrv_uc_use_proxy)
+		<span class="enscript-keyword">return</span>;
+#<span class="enscript-reference">endif</span>
+	DPRINT(<span class="enscript-string">&quot;nfsrv_uc_start\n&quot;</span>);
+
+	<span class="enscript-comment">/* Wait until previous shutdown finishes */</span>
+	lck_mtx_lock(nfsrv_uc_shutdown_lock);
+	<span class="enscript-keyword">while</span> (nfsrv_uc_shutdown || nfsrv_uc_thread_count &gt; 0)
+		msleep(&amp;nfsrv_uc_thread_count, nfsrv_uc_shutdown_lock, PSOCK, <span class="enscript-string">&quot;nfsd_upcall_shutdown_wait&quot;</span>, NULL);
+
+	<span class="enscript-comment">/* Start up-call threads */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; NFS_UC_HASH_SZ; i++) {
+		error = kernel_thread_start(nfsrv_uc_thread, (<span class="enscript-type">void</span> *)(uintptr_t)i, &amp;nfsrv_uc_queue_tbl[nfsrv_uc_thread_count].ucq_thd);
+		<span class="enscript-keyword">if</span> (!error) {
+			nfsrv_uc_thread_count++;
+		} <span class="enscript-keyword">else</span> {
+			printf(<span class="enscript-string">&quot;nfsd: Could not start nfsrv_uc_thread: %d\n&quot;</span>, error);
+		}
+	}
+	<span class="enscript-keyword">if</span> (nfsrv_uc_thread_count == 0) {
+		printf(<span class="enscript-string">&quot;nfsd: Could not start nfsd proxy up-call service. Falling back\n&quot;</span>);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+<span class="enscript-reference">out</span>:
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NFS_UC_Q_DEBUG</span>
+	nfsrv_uc_queue_count = 0ULL;
+	nfsrv_uc_queue_max_seen = 0ULL;
+#<span class="enscript-reference">endif</span>
+	lck_mtx_unlock(nfsrv_uc_shutdown_lock);
+}
+
+<span class="enscript-comment">/*
+ * Stop the up-call threads.
+ * Called from nfsrv_uc_cleanup.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nfsrv_uc_stop</span>(<span class="enscript-type">void</span>)
+{
+	int32_t i;
+	int32_t thread_count = nfsrv_uc_thread_count;
+
+	DPRINT(<span class="enscript-string">&quot;Entering nfsrv_uc_stop\n&quot;</span>);
+
+	<span class="enscript-comment">/* Signal up-call threads to stop */</span>
+	nfsrv_uc_shutdown = 1;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; thread_count; i++) {
+		lck_mtx_lock(nfsrv_uc_queue_tbl[i].ucq_lock);
+		wakeup(&amp;nfsrv_uc_queue_tbl[i]);
+		lck_mtx_unlock(nfsrv_uc_queue_tbl[i].ucq_lock);
+	}
+
+	<span class="enscript-comment">/* Wait until they are done shutting down */</span>
+	lck_mtx_lock(nfsrv_uc_shutdown_lock);
+	<span class="enscript-keyword">while</span> (nfsrv_uc_thread_count &gt; 0)
+		msleep(&amp;nfsrv_uc_thread_count, nfsrv_uc_shutdown_lock, PSOCK, <span class="enscript-string">&quot;nfsd_upcall_shutdown_stop&quot;</span>, NULL);
+
+	<span class="enscript-comment">/* Deallocate old threads */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; nfsrv_uc_thread_count; i++) {
+		<span class="enscript-keyword">if</span> (nfsrv_uc_queue_tbl[i].ucq_thd != THREAD_NULL)
+			thread_deallocate(nfsrv_uc_queue_tbl[i].ucq_thd);
+		nfsrv_uc_queue_tbl[i].ucq_thd = THREAD_NULL;
+	}
+
+	<span class="enscript-comment">/* Enable restarting */</span>
+	nfsrv_uc_shutdown = 0;
+	lck_mtx_unlock(nfsrv_uc_shutdown_lock);
+}
+
+<span class="enscript-comment">/*
+ * Shutdown up-calls for nfsrv_socks.
+ *	Make sure nothing is queued on the up-call queues
+ *	Shutdown the up-call threads
+ * Called from nfssvc_cleanup.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfsrv_uc_cleanup</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span> i;
+
+	DPRINT(<span class="enscript-string">&quot;Entering nfsrv_uc_cleanup\n&quot;</span>);
+
+	<span class="enscript-comment">/*
+	 * Every thing should be dequeued at this point or will be as sockets are closed
+	 * but to be safe, we'll make sure.
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; NFS_UC_HASH_SZ; i++) {
+		<span class="enscript-type">struct</span> nfsrv_uc_queue *queue = &amp;nfsrv_uc_queue_tbl[i];
+
+		lck_mtx_lock(queue-&gt;ucq_lock);
+		<span class="enscript-keyword">while</span> (!TAILQ_EMPTY(queue-&gt;ucq_queue)) {
+			<span class="enscript-type">struct</span> nfsrv_uc_arg *ep = TAILQ_FIRST(queue-&gt;ucq_queue);
+			TAILQ_REMOVE(queue-&gt;ucq_queue, ep, nua_svcq);
+			ep-&gt;nua_flags &amp;= ~NFS_UC_QUEUED;
+		}
+		lck_mtx_unlock(queue-&gt;ucq_lock);
+	}
+
+	nfsrv_uc_stop();
+}
+
+<span class="enscript-comment">/*
+ * This is the nfs up-call routine for server sockets.
+ * We used to set nfsrv_rcv as the up-call routine, but
+ * recently that seems like we are doing to much work for
+ * the interface thread, so we just queue the arguments
+ * that we would have gotten for nfsrv_rcv and let a
+ * worker thread dequeue them and pass them on to nfsrv_rcv.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nfsrv_uc_proxy</span>(socket_t so, <span class="enscript-type">void</span> *arg, <span class="enscript-type">int</span> waitflag)
+{
+	<span class="enscript-type">struct</span> nfsrv_uc_arg *uap = (<span class="enscript-type">struct</span> nfsrv_uc_arg *)arg;
+	<span class="enscript-type">int</span> qi = uap-&gt;nua_qi;
+	<span class="enscript-type">struct</span> nfsrv_uc_queue *myqueue = &amp;nfsrv_uc_queue_tbl[qi];
+
+	lck_mtx_lock(myqueue-&gt;ucq_lock);
+	DPRINT(<span class="enscript-string">&quot;nfsrv_uc_proxy called for %p (%p)\n&quot;</span>, uap, uap-&gt;nua_slp);
+	DPRINT(<span class="enscript-string">&quot;\tUp-call queued on %d for wakeup of %p\n&quot;</span>, qi, myqueue);
+	<span class="enscript-keyword">if</span> (uap == NULL || uap-&gt;nua_flags &amp; NFS_UC_QUEUED) {
+		lck_mtx_unlock(myqueue-&gt;ucq_lock);
+		<span class="enscript-keyword">return</span>;  <span class="enscript-comment">/* Already queued or freed */</span>
+	}
+
+	uap-&gt;nua_so = so;
+	uap-&gt;nua_waitflag = waitflag;
+
+	TAILQ_INSERT_TAIL(myqueue-&gt;ucq_queue, uap, nua_svcq);
+
+	uap-&gt;nua_flags |= NFS_UC_QUEUED;
+	<span class="enscript-keyword">if</span> (myqueue-&gt;ucq_flags | NFS_UC_QUEUE_SLEEPING)
+		wakeup(myqueue);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">NFS_UC_Q_DEBUG</span>
+	{
+		uint32_t count = OSIncrementAtomic(&amp;nfsrv_uc_queue_count);
+	
+		<span class="enscript-comment">/* This is a bit racey but just for debug */</span>
+		<span class="enscript-keyword">if</span> (count &gt; nfsrv_uc_queue_max_seen)
+			nfsrv_uc_queue_max_seen = count;
+
+		<span class="enscript-keyword">if</span> (nfsrv_uc_queue_limit &amp;&amp; count &gt; nfsrv_uc_queue_limit) {
+			panic(<span class="enscript-string">&quot;nfsd up-call queue limit exceeded\n&quot;</span>);
+		}
+	}
+#<span class="enscript-reference">endif</span>
+	lck_mtx_unlock(myqueue-&gt;ucq_lock);
+}
+
+
+<span class="enscript-comment">/*
+ * Set the up-call routine on the socket associated with the passed in
+ * nfsrv_sock.
+ * Assumes nfsd_mutex is held.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">nfsrv_uc_addsock</span>(<span class="enscript-type">struct</span> nfsrv_sock *slp, <span class="enscript-type">int</span> start)
+{
+	<span class="enscript-type">int</span> on = 1;
+	<span class="enscript-type">struct</span> nfsrv_uc_arg *arg;
+
+	<span class="enscript-keyword">if</span> (start &amp;&amp; nfsrv_uc_thread_count == 0)
+		nfsrv_uc_start();
+
+	<span class="enscript-comment">/*
+	 * We don't take a lock since once we're up nfsrv_uc_thread_count does
+	 * not change until shutdown and then we should not be adding sockets to
+	 * generate up-calls.
+	 */</span>
+	<span class="enscript-keyword">if</span> (nfsrv_uc_thread_count) {
+		MALLOC(arg, <span class="enscript-type">struct</span> nfsrv_uc_arg *, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> nfsrv_uc_arg), M_TEMP, M_WAITOK | M_ZERO);
+		<span class="enscript-keyword">if</span> (arg == NULL)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">direct</span>;
+
+		slp-&gt;ns_ua = arg;
+		arg-&gt;nua_slp = slp;
+		arg-&gt;nua_qi = NFS_UC_HASH(slp);
+
+		sock_setupcall(slp-&gt;ns_so, nfsrv_uc_proxy, arg);
+	} <span class="enscript-keyword">else</span> {
+<span class="enscript-reference">direct</span>:
+		slp-&gt;ns_ua = NULL;
+		DPRINT(<span class="enscript-string">&quot;setting nfsrv_rcv up-call\n&quot;</span>);
+		sock_setupcall(slp-&gt;ns_so, nfsrv_rcv, slp);
+	}
+
+	<span class="enscript-comment">/* just playin' it safe */</span>
+	sock_setsockopt(slp-&gt;ns_so, SOL_SOCKET, SO_UPCALLCLOSEWAIT, &amp;on, <span class="enscript-keyword">sizeof</span>(on));
+
+	<span class="enscript-keyword">return</span>;
+}
+
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,1229 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kern_authorization.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kern_authorization.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2004-2011 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*
+ * Centralized authorisation framework.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/appleapiopts.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>	<span class="enscript-comment">/* XXX trim includes */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/acct.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ucred.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/timeb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/times.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/message.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_security.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+
+<span class="enscript-comment">/*
+ * Authorization scopes.
+ */</span>
+
+lck_grp_t *kauth_lck_grp;
+<span class="enscript-type">static</span> lck_mtx_t *kauth_scope_mtx;
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">KAUTH_SCOPELOCK</span>()	lck_mtx_lock(kauth_scope_mtx);
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">KAUTH_SCOPEUNLOCK</span>()	lck_mtx_unlock(kauth_scope_mtx);
+
+<span class="enscript-comment">/*
+ * We support listeners for scopes that have not been registered yet.
+ * If a listener comes in for a scope that is not active we hang the listener
+ * off our kauth_dangling_listeners list and once the scope becomes active we
+ * remove it from kauth_dangling_listeners and add it to the active scope.
+ */</span>
+<span class="enscript-type">struct</span> kauth_listener {
+	TAILQ_ENTRY(kauth_listener)	kl_link;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *				kl_identifier;
+	kauth_scope_callback_t		kl_callback;
+	<span class="enscript-type">void</span> *						kl_idata;
+};
+
+<span class="enscript-comment">/* XXX - kauth_todo - there is a race if a scope listener is removed while we
+ * we are in the kauth_authorize_action code path.  We intentionally do not take
+ * a scope lock in order to get the best possible performance.  we will fix this 
+ * post Tiger. 
+ * Until the race is fixed our kext clients are responsible for all active 
+ * requests that may be in their callback code or on the way to their callback
+ * code before they free kauth_listener.kl_callback or kauth_listener.kl_idata.
+ * We keep copies of these in our kauth_local_listener in an attempt to limit 
+ * our expose to unlisten race. 
+ */</span>
+<span class="enscript-type">struct</span> kauth_local_listener {
+	kauth_listener_t			kll_listenerp;
+	kauth_scope_callback_t		kll_callback;
+	<span class="enscript-type">void</span> *						kll_idata;
+};
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> kauth_local_listener *kauth_local_listener_t;
+
+<span class="enscript-type">static</span> <span class="enscript-function-name">TAILQ_HEAD</span>(,kauth_listener) kauth_dangling_listeners;
+
+<span class="enscript-comment">/* 
+ * Scope listeners need to be reworked to be dynamic.
+ * We intentionally used a static table to avoid locking issues with linked 
+ * lists.  The listeners may be called quite often.
+ * XXX - kauth_todo
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KAUTH_SCOPE_MAX_LISTENERS</span>  15
+
+<span class="enscript-type">struct</span> kauth_scope {
+	TAILQ_ENTRY(kauth_scope)	ks_link;
+	<span class="enscript-type">volatile</span> <span class="enscript-type">struct</span> kauth_local_listener  ks_listeners[KAUTH_SCOPE_MAX_LISTENERS];
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span> *				ks_identifier;
+	kauth_scope_callback_t		ks_callback;
+	<span class="enscript-type">void</span> *						ks_idata;
+	u_int						ks_flags;
+};
+
+<span class="enscript-comment">/* values for kauth_scope.ks_flags */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">KS_F_HAS_LISTENERS</span>		(1 &lt;&lt; 0)
+
+<span class="enscript-type">static</span> <span class="enscript-function-name">TAILQ_HEAD</span>(,kauth_scope)	kauth_scopes;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">kauth_add_callback_to_scope</span>(kauth_scope_t sp, kauth_listener_t klp);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	kauth_scope_init(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> kauth_scope_t <span class="enscript-function-name">kauth_alloc_scope</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *identifier, kauth_scope_callback_t callback, <span class="enscript-type">void</span> *idata);
+<span class="enscript-type">static</span> kauth_listener_t <span class="enscript-function-name">kauth_alloc_listener</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *identifier, kauth_scope_callback_t callback, <span class="enscript-type">void</span> *idata);
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	kauth_scope_valid(kauth_scope_t scope);
+#<span class="enscript-reference">endif</span>
+
+kauth_scope_t	kauth_scope_process;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	kauth_authorize_process_callback(kauth_cred_t _credential, <span class="enscript-type">void</span> *_idata, kauth_action_t _action,
+    uintptr_t arg0, uintptr_t arg1, __unused uintptr_t arg2, __unused uintptr_t arg3);
+kauth_scope_t	kauth_scope_generic;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	kauth_authorize_generic_callback(kauth_cred_t _credential, <span class="enscript-type">void</span> *_idata, kauth_action_t _action,
+    uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3);
+kauth_scope_t	kauth_scope_fileop;
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> 		cansignal(<span class="enscript-type">struct</span> proc *, kauth_cred_t, <span class="enscript-type">struct</span> proc *, <span class="enscript-type">int</span>, <span class="enscript-type">int</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">char</span> *	get_pathbuff(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>		release_pathbuff(<span class="enscript-type">char</span> *path);
+
+<span class="enscript-comment">/*
+ * Initialization.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kauth_init</span>(<span class="enscript-type">void</span>)
+{
+	lck_grp_attr_t	*grp_attributes;
+
+	TAILQ_INIT(&amp;kauth_scopes);
+	TAILQ_INIT(&amp;kauth_dangling_listeners);
+
+	<span class="enscript-comment">/* set up our lock group */</span>
+	grp_attributes = lck_grp_attr_alloc_init();
+	kauth_lck_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;kauth&quot;</span>, grp_attributes);
+	lck_grp_attr_free(grp_attributes);
+
+	<span class="enscript-comment">/* bring up kauth subsystem components */</span>
+	kauth_cred_init();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_EXT_RESOLVER</span>
+	kauth_identity_init();
+	kauth_groups_init();
+#<span class="enscript-reference">endif</span>
+	kauth_scope_init();
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_EXT_RESOLVER</span>
+	kauth_resolver_init();
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-comment">/* can't alloc locks after this */</span>
+	lck_grp_free(kauth_lck_grp);
+	kauth_lck_grp = NULL;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kauth_scope_init</span>(<span class="enscript-type">void</span>)
+{
+	kauth_scope_mtx = lck_mtx_alloc_init(kauth_lck_grp, 0 <span class="enscript-comment">/*LCK_ATTR_NULL*/</span>);
+	kauth_scope_process = kauth_register_scope(KAUTH_SCOPE_PROCESS, kauth_authorize_process_callback, NULL);
+	kauth_scope_generic = kauth_register_scope(KAUTH_SCOPE_GENERIC, kauth_authorize_generic_callback, NULL);
+	kauth_scope_fileop = kauth_register_scope(KAUTH_SCOPE_FILEOP, NULL, NULL);
+}
+
+<span class="enscript-comment">/*
+ * Scope registration.
+ */</span>
+
+<span class="enscript-type">static</span> kauth_scope_t
+<span class="enscript-function-name">kauth_alloc_scope</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *identifier, kauth_scope_callback_t callback, <span class="enscript-type">void</span> *idata)
+{
+	kauth_scope_t	sp;
+
+	<span class="enscript-comment">/*
+	 * Allocate and populate the scope structure.
+	 */</span>
+	MALLOC(sp, kauth_scope_t, <span class="enscript-keyword">sizeof</span>(*sp), M_KAUTH, M_WAITOK | M_ZERO);
+	<span class="enscript-keyword">if</span> (sp == NULL)
+		<span class="enscript-keyword">return</span>(NULL);
+	sp-&gt;ks_flags = 0;
+	sp-&gt;ks_identifier = identifier;
+	sp-&gt;ks_idata = idata;
+	sp-&gt;ks_callback = callback;
+	<span class="enscript-keyword">return</span>(sp);
+}
+
+<span class="enscript-type">static</span> kauth_listener_t
+<span class="enscript-function-name">kauth_alloc_listener</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *identifier, kauth_scope_callback_t callback, <span class="enscript-type">void</span> *idata)
+{
+	kauth_listener_t lsp;
+
+	<span class="enscript-comment">/*
+	 * Allocate and populate the listener structure.
+	 */</span>
+	MALLOC(lsp, kauth_listener_t, <span class="enscript-keyword">sizeof</span>(*lsp), M_KAUTH, M_WAITOK);
+	<span class="enscript-keyword">if</span> (lsp == NULL)
+		<span class="enscript-keyword">return</span>(NULL);
+	lsp-&gt;kl_identifier = identifier;
+	lsp-&gt;kl_idata = idata;
+	lsp-&gt;kl_callback = callback;
+	<span class="enscript-keyword">return</span>(lsp);
+}
+
+kauth_scope_t
+<span class="enscript-function-name">kauth_register_scope</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *identifier, kauth_scope_callback_t callback, <span class="enscript-type">void</span> *idata)
+{
+	kauth_scope_t		sp, tsp;
+	kauth_listener_t	klp;
+
+	<span class="enscript-keyword">if</span> ((sp = kauth_alloc_scope(identifier, callback, idata)) == NULL)
+		<span class="enscript-keyword">return</span>(NULL);
+
+	<span class="enscript-comment">/*
+	 * Lock the list and insert.
+	 */</span>
+	KAUTH_SCOPELOCK();
+	TAILQ_FOREACH(tsp, &amp;kauth_scopes, ks_link) {
+		<span class="enscript-comment">/* duplicate! */</span>
+		<span class="enscript-keyword">if</span> (strncmp(tsp-&gt;ks_identifier, identifier, 
+					strlen(tsp-&gt;ks_identifier) + 1) == 0) {
+			KAUTH_SCOPEUNLOCK();
+			FREE(sp, M_KAUTH);
+			<span class="enscript-keyword">return</span>(NULL);
+		}
+	}
+	TAILQ_INSERT_TAIL(&amp;kauth_scopes, sp, ks_link);
+
+	<span class="enscript-comment">/*
+	 * Look for listeners waiting for this scope, move them to the active scope
+	 * listener table.
+	 * Note that we have to restart the scan every time we remove an entry
+	 * from the list, since we can't remove the current item from the list.
+	 */</span>
+<span class="enscript-reference">restart</span>:
+	TAILQ_FOREACH(klp, &amp;kauth_dangling_listeners, kl_link) {
+		<span class="enscript-keyword">if</span> (strncmp(klp-&gt;kl_identifier, sp-&gt;ks_identifier,
+					strlen(klp-&gt;kl_identifier) + 1) == 0) {
+			<span class="enscript-comment">/* found a match on the dangling listener list.  add it to the
+			 * the active scope.
+			 */</span>
+			<span class="enscript-keyword">if</span> (kauth_add_callback_to_scope(sp, klp) == 0) {
+				TAILQ_REMOVE(&amp;kauth_dangling_listeners, klp, kl_link);
+			}
+			<span class="enscript-keyword">else</span> {
+#<span class="enscript-reference">if</span> 0
+				printf(<span class="enscript-string">&quot;%s - failed to add listener to scope \&quot;%s\&quot; \n&quot;</span>, __FUNCTION__, sp-&gt;ks_identifier);
+#<span class="enscript-reference">endif</span>
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">restart</span>;
+		}
+	}
+
+	KAUTH_SCOPEUNLOCK();
+	<span class="enscript-keyword">return</span>(sp);
+}
+
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kauth_deregister_scope</span>(kauth_scope_t scope)
+{
+	<span class="enscript-type">int</span>		i;
+
+	KAUTH_SCOPELOCK();
+
+	TAILQ_REMOVE(&amp;kauth_scopes, scope, ks_link);
+	
+	<span class="enscript-comment">/* relocate listeners back to the waiting list */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; KAUTH_SCOPE_MAX_LISTENERS; i++) {
+		<span class="enscript-keyword">if</span> (scope-&gt;ks_listeners[i].kll_listenerp != NULL) {
+			TAILQ_INSERT_TAIL(&amp;kauth_dangling_listeners, scope-&gt;ks_listeners[i].kll_listenerp, kl_link);
+			scope-&gt;ks_listeners[i].kll_listenerp = NULL;
+			<span class="enscript-comment">/* 
+			 * XXX - kauth_todo - WARNING, do not clear kll_callback or
+			 * kll_idata here.  they are part of our scope unlisten race hack
+			 */</span>
+		}
+	}
+	KAUTH_SCOPEUNLOCK();
+	FREE(scope, M_KAUTH);
+	
+	<span class="enscript-keyword">return</span>;
+}
+
+kauth_listener_t
+<span class="enscript-function-name">kauth_listen_scope</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *identifier, kauth_scope_callback_t callback, <span class="enscript-type">void</span> *idata)
+{
+	kauth_listener_t klp;
+	kauth_scope_t	sp;
+
+	<span class="enscript-keyword">if</span> ((klp = kauth_alloc_listener(identifier, callback, idata)) == NULL)
+		<span class="enscript-keyword">return</span>(NULL);
+
+	<span class="enscript-comment">/*
+	 * Lock the scope list and check to see whether this scope already exists.
+	 */</span>
+	KAUTH_SCOPELOCK();
+	TAILQ_FOREACH(sp, &amp;kauth_scopes, ks_link) {
+		<span class="enscript-keyword">if</span> (strncmp(sp-&gt;ks_identifier, identifier,
+					strlen(sp-&gt;ks_identifier) + 1) == 0) {
+			<span class="enscript-comment">/* scope exists, add it to scope listener table */</span>
+			<span class="enscript-keyword">if</span> (kauth_add_callback_to_scope(sp, klp) == 0) {
+				KAUTH_SCOPEUNLOCK();
+				<span class="enscript-keyword">return</span>(klp);
+			}
+			<span class="enscript-comment">/* table already full */</span>
+			KAUTH_SCOPEUNLOCK();
+			FREE(klp, M_KAUTH);
+			<span class="enscript-keyword">return</span>(NULL);
+		}
+	}
+	
+	<span class="enscript-comment">/* scope doesn't exist, put on waiting list. */</span>
+	TAILQ_INSERT_TAIL(&amp;kauth_dangling_listeners, klp, kl_link);
+
+	KAUTH_SCOPEUNLOCK();
+
+	<span class="enscript-keyword">return</span>(klp);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kauth_unlisten_scope</span>(kauth_listener_t listener)
+{
+	kauth_scope_t		sp;
+	kauth_listener_t 	klp;
+	<span class="enscript-type">int</span>					i, listener_count, do_free;
+	
+	KAUTH_SCOPELOCK();
+
+	<span class="enscript-comment">/* search the active scope for this listener */</span>
+	TAILQ_FOREACH(sp, &amp;kauth_scopes, ks_link) {
+		do_free = 0;
+		<span class="enscript-keyword">if</span> ((sp-&gt;ks_flags &amp; KS_F_HAS_LISTENERS) != 0) {
+			listener_count = 0;
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; KAUTH_SCOPE_MAX_LISTENERS; i++) {
+				<span class="enscript-keyword">if</span> (sp-&gt;ks_listeners[i].kll_listenerp == listener) {
+					sp-&gt;ks_listeners[i].kll_listenerp = NULL;
+					do_free = 1;
+					<span class="enscript-comment">/* 
+					 * XXX - kauth_todo - WARNING, do not clear kll_callback or
+					 * kll_idata here.  they are part of our scope unlisten race hack
+					 */</span>
+				}
+				<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (sp-&gt;ks_listeners[i].kll_listenerp != NULL) {
+					listener_count++;
+				}
+			}
+			<span class="enscript-keyword">if</span> (do_free) {
+				<span class="enscript-keyword">if</span> (listener_count == 0) {
+					sp-&gt;ks_flags &amp;= ~KS_F_HAS_LISTENERS;
+				}
+				KAUTH_SCOPEUNLOCK();
+				FREE(listener, M_KAUTH);
+				<span class="enscript-keyword">return</span>;
+			}
+		}
+	}
+
+	<span class="enscript-comment">/* if not active, check the dangling list */</span>
+	TAILQ_FOREACH(klp, &amp;kauth_dangling_listeners, kl_link) {
+		<span class="enscript-keyword">if</span> (klp == listener) {
+			TAILQ_REMOVE(&amp;kauth_dangling_listeners, klp, kl_link);
+			KAUTH_SCOPEUNLOCK();
+			FREE(listener, M_KAUTH);
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+
+	KAUTH_SCOPEUNLOCK();
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * Authorization requests.
+ *
+ * Returns:	0			Success
+ *		EPERM			Operation not permitted
+ *
+ * Imputed:	*arg3, modified		Callback return - depends on callback
+ *					modification of *arg3, if any
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kauth_authorize_action</span>(kauth_scope_t scope, kauth_cred_t credential, kauth_action_t action,
+    uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3)
+{
+	<span class="enscript-type">int</span> result, ret, i;
+
+	<span class="enscript-comment">/* ask the scope */</span>
+	<span class="enscript-keyword">if</span> (scope-&gt;ks_callback != NULL)
+		result = scope-&gt;ks_callback(credential, scope-&gt;ks_idata, action, arg0, arg1, arg2, arg3);
+	<span class="enscript-keyword">else</span>
+		result = KAUTH_RESULT_DEFER;
+
+	<span class="enscript-comment">/* check with listeners */</span>
+	<span class="enscript-keyword">if</span> ((scope-&gt;ks_flags &amp; KS_F_HAS_LISTENERS) != 0) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; KAUTH_SCOPE_MAX_LISTENERS; i++) {
+			<span class="enscript-comment">/* XXX - kauth_todo - there is a race here if listener is removed - we will fix this post Tiger. 
+			 * Until the race is fixed our kext clients are responsible for all active requests that may
+			 * be in their callbacks or on the way to their callbacks before they free kl_callback or kl_idata.
+			 * We keep copies of these in our kauth_local_listener in an attempt to limit our expose to 
+			 * unlisten race. 
+			 */</span>
+			<span class="enscript-keyword">if</span> (scope-&gt;ks_listeners[i].kll_listenerp == NULL || 
+				scope-&gt;ks_listeners[i].kll_callback == NULL) 
+				<span class="enscript-keyword">continue</span>;
+
+			ret = scope-&gt;ks_listeners[i].kll_callback(
+					credential, scope-&gt;ks_listeners[i].kll_idata, 
+					action, arg0, arg1, arg2, arg3);
+			<span class="enscript-keyword">if</span> ((ret == KAUTH_RESULT_DENY) ||
+				(result == KAUTH_RESULT_DEFER))
+				result = ret;
+		}
+	}
+
+	<span class="enscript-comment">/* we need an explicit allow, or the auth fails */</span>
+ 	<span class="enscript-comment">/* XXX need a mechanism for auth failure to be signalled vs. denial */</span>
+ 	<span class="enscript-keyword">return</span>(result == KAUTH_RESULT_ALLOW ? 0 : EPERM);
+}
+
+<span class="enscript-comment">/*
+ * Default authorization handlers.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kauth_authorize_allow</span>(__unused kauth_cred_t credential, __unused <span class="enscript-type">void</span> *idata, __unused kauth_action_t action,
+     __unused uintptr_t arg0, __unused uintptr_t arg1, __unused uintptr_t arg2, __unused uintptr_t arg3)
+{
+
+	<span class="enscript-keyword">return</span>(KAUTH_RESULT_ALLOW);
+}
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-comment">/*
+ * Debugging support.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kauth_scope_valid</span>(kauth_scope_t scope)
+{
+	kauth_scope_t	sp;
+
+	KAUTH_SCOPELOCK();
+	TAILQ_FOREACH(sp, &amp;kauth_scopes, ks_link) {
+		<span class="enscript-keyword">if</span> (sp == scope)
+			<span class="enscript-keyword">break</span>;
+	}
+	KAUTH_SCOPEUNLOCK();
+	<span class="enscript-keyword">return</span>((sp == NULL) ? 0 : 1);
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Process authorization scope.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kauth_authorize_process</span>(kauth_cred_t credential, kauth_action_t action, <span class="enscript-type">struct</span> proc *process, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3)
+{
+	<span class="enscript-keyword">return</span>(kauth_authorize_action(kauth_scope_process, credential, action, (uintptr_t)process, arg1, arg2, arg3));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kauth_authorize_process_callback</span>(kauth_cred_t credential, __unused <span class="enscript-type">void</span> *idata, kauth_action_t action,
+    uintptr_t arg0, uintptr_t arg1, __unused uintptr_t arg2, __unused uintptr_t arg3)
+{
+	<span class="enscript-keyword">switch</span>(action) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_PROCESS_CANSIGNAL</span>:
+		panic(<span class="enscript-string">&quot;KAUTH_PROCESS_CANSIGNAL not implemented&quot;</span>);
+		<span class="enscript-comment">/* XXX credential wrong here */</span>
+		<span class="enscript-comment">/* arg0 - process to signal
+		 * arg1 - signal to send the process
+		 */</span>
+		<span class="enscript-keyword">if</span> (cansignal(current_proc(), credential, (<span class="enscript-type">struct</span> proc *)arg0, (<span class="enscript-type">int</span>)arg1, 0))
+			<span class="enscript-keyword">return</span>(KAUTH_RESULT_ALLOW);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_PROCESS_CANTRACE</span>:
+		<span class="enscript-comment">/* current_proc() - process that will do the tracing 
+		 * arg0 - process to be traced 
+		 * arg1 - pointer to int - reason (errno) for denial 
+		 */</span>
+		<span class="enscript-keyword">if</span> (cantrace(current_proc(), credential, (proc_t)arg0, (<span class="enscript-type">int</span> *)arg1))
+			<span class="enscript-keyword">return</span>(KAUTH_RESULT_ALLOW);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/* no explicit result, so defer to others in the chain */</span>
+	<span class="enscript-keyword">return</span>(KAUTH_RESULT_DEFER);
+}
+
+<span class="enscript-comment">/*
+ * File system operation authorization scope.  This is really only a notification
+ * of the file system operation, not an authorization check.  Thus the result is
+ * not relevant.
+ * arguments passed to KAUTH_FILEOP_OPEN listeners
+ *		arg0 is pointer to vnode (vnode *) for given user path.
+ *		arg1 is pointer to path (char *) passed in to open.
+ * arguments passed to KAUTH_FILEOP_CLOSE listeners
+ *		arg0 is pointer to vnode (vnode *) for file to be closed.
+ *		arg1 is pointer to path (char *) of file to be closed.
+ *		arg2 is close flags.
+ * arguments passed to KAUTH_FILEOP_RENAME listeners
+ *		arg0 is pointer to &quot;from&quot; path (char *).
+ *		arg1 is pointer to &quot;to&quot; path (char *).
+ * arguments passed to KAUTH_FILEOP_EXCHANGE listeners
+ *		arg0 is pointer to file 1 path (char *).
+ *		arg1 is pointer to file 2 path (char *).
+ * arguments passed to KAUTH_FILEOP_EXEC listeners
+ *		arg0 is pointer to vnode (vnode *) for executable.
+ *		arg1 is pointer to path (char *) to executable.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kauth_authorize_fileop_has_listeners</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-comment">/*
+	 * return 1 if we have any listeners for the fileop scope
+	 * otherwize return 0
+	 */</span>
+	<span class="enscript-keyword">if</span> ((kauth_scope_fileop-&gt;ks_flags &amp; KS_F_HAS_LISTENERS) != 0) {
+		<span class="enscript-keyword">return</span>(1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kauth_authorize_fileop</span>(kauth_cred_t credential, kauth_action_t action, uintptr_t arg0, uintptr_t arg1)
+{
+	<span class="enscript-type">char</span> 		*namep = NULL;
+	<span class="enscript-type">int</span>			name_len;
+	uintptr_t	arg2 = 0;
+	
+	<span class="enscript-comment">/* we do not have a primary handler for the fileop scope so bail out if 
+	 * there are no listeners.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((kauth_scope_fileop-&gt;ks_flags &amp; KS_F_HAS_LISTENERS) == 0) {
+		<span class="enscript-keyword">return</span>(0);
+	}
+
+	<span class="enscript-keyword">if</span> (action == KAUTH_FILEOP_OPEN || action == KAUTH_FILEOP_CLOSE || action == KAUTH_FILEOP_EXEC) {
+		<span class="enscript-comment">/* get path to the given vnode as a convenience to our listeners.
+		 */</span>
+		namep = get_pathbuff();
+		name_len = MAXPATHLEN;
+		<span class="enscript-keyword">if</span> (vn_getpath((vnode_t)arg0, namep, &amp;name_len) != 0) {
+			release_pathbuff(namep);
+			<span class="enscript-keyword">return</span>(0);
+		}
+		<span class="enscript-keyword">if</span> (action == KAUTH_FILEOP_CLOSE) {
+			arg2 = arg1;  <span class="enscript-comment">/* close has some flags that come in via arg1 */</span>
+		}
+		arg1 = (uintptr_t)namep;
+	}	
+	kauth_authorize_action(kauth_scope_fileop, credential, action, arg0, arg1, arg2, 0);
+	
+	<span class="enscript-keyword">if</span> (namep != NULL) {
+		release_pathbuff(namep);
+	}
+	
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/*
+ * Generic authorization scope.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kauth_authorize_generic</span>(kauth_cred_t credential, kauth_action_t action)
+{
+	<span class="enscript-keyword">if</span> (credential == NULL)
+		panic(<span class="enscript-string">&quot;auth against NULL credential&quot;</span>);
+
+	<span class="enscript-keyword">return</span>(kauth_authorize_action(kauth_scope_generic, credential, action, 0, 0, 0, 0));
+		
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kauth_authorize_generic_callback</span>(kauth_cred_t credential, __unused <span class="enscript-type">void</span> *idata, kauth_action_t action,
+     __unused uintptr_t arg0, __unused uintptr_t arg1, __unused uintptr_t arg2, __unused uintptr_t arg3)
+{
+	<span class="enscript-keyword">switch</span>(action) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_GENERIC_ISSUSER</span>:
+		<span class="enscript-comment">/* XXX == 0 ? */</span>
+		<span class="enscript-keyword">return</span>((kauth_cred_getuid(credential) == 0) ?
+		    KAUTH_RESULT_ALLOW : KAUTH_RESULT_DENY);
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-comment">/* no explicit result, so defer to others in the chain */</span>
+	<span class="enscript-keyword">return</span>(KAUTH_RESULT_DEFER);
+}
+
+<span class="enscript-comment">/*
+ * ACL evaluator.
+ *
+ * Determines whether the credential has the requested rights for an object secured by the supplied
+ * ACL.
+ *
+ * Evaluation proceeds from the top down, with access denied if any ACE denies any of the requested
+ * rights, or granted if all of the requested rights are satisfied by the ACEs so far.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kauth_acl_evaluate</span>(kauth_cred_t cred, kauth_acl_eval_t eval)
+{
+	<span class="enscript-type">int</span> applies, error, i, gotguid;
+	kauth_ace_t ace;
+	guid_t guid;
+	uint32_t rights;
+	<span class="enscript-type">int</span> wkguid;
+
+	<span class="enscript-comment">/* always allowed to do nothing */</span>
+	<span class="enscript-keyword">if</span> (eval-&gt;ae_requested == 0) {
+		eval-&gt;ae_result = KAUTH_RESULT_ALLOW;
+		<span class="enscript-keyword">return</span>(0);
+	}
+
+	eval-&gt;ae_residual = eval-&gt;ae_requested;
+	eval-&gt;ae_found_deny = FALSE;
+
+	<span class="enscript-comment">/*
+	 * Get our guid for comparison purposes.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((error = kauth_cred_getguid(cred, &amp;guid)) != 0) {
+		KAUTH_DEBUG(<span class="enscript-string">&quot;    ACL - can't get credential GUID (%d)&quot;</span>, error);
+		error = 0;
+		gotguid = 0;
+	} <span class="enscript-keyword">else</span> {
+		gotguid = 1;
+	}
+
+	KAUTH_DEBUG(<span class="enscript-string">&quot;    ACL - %d entries, initial residual %x&quot;</span>, eval-&gt;ae_count, eval-&gt;ae_residual);
+	<span class="enscript-keyword">for</span> (i = 0, ace = eval-&gt;ae_acl; i &lt; eval-&gt;ae_count; i++, ace++) {
+
+		<span class="enscript-comment">/*
+		 * Skip inherit-only entries.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ace-&gt;ace_flags &amp; KAUTH_ACE_ONLY_INHERIT)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-comment">/*
+		 * Expand generic rights, if appropriate.
+		 */</span>
+		rights = ace-&gt;ace_rights;
+		<span class="enscript-keyword">if</span> (rights &amp; KAUTH_ACE_GENERIC_ALL)
+			rights |= eval-&gt;ae_exp_gall;
+		<span class="enscript-keyword">if</span> (rights &amp; KAUTH_ACE_GENERIC_READ)
+			rights |= eval-&gt;ae_exp_gread;
+		<span class="enscript-keyword">if</span> (rights &amp; KAUTH_ACE_GENERIC_WRITE)
+			rights |= eval-&gt;ae_exp_gwrite;
+		<span class="enscript-keyword">if</span> (rights &amp; KAUTH_ACE_GENERIC_EXECUTE)
+			rights |= eval-&gt;ae_exp_gexec;
+
+		<span class="enscript-comment">/*
+		 * Determine whether this entry applies to the current request.  This
+		 * saves us checking the GUID if the entry has nothing to do with what
+		 * we're currently doing.
+		 */</span>
+		<span class="enscript-keyword">switch</span>(ace-&gt;ace_flags &amp; KAUTH_ACE_KINDMASK) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_ACE_PERMIT</span>:
+			<span class="enscript-keyword">if</span> (!(eval-&gt;ae_residual &amp; rights))
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_ACE_DENY</span>:
+			<span class="enscript-keyword">if</span> (!(eval-&gt;ae_requested &amp; rights))
+				<span class="enscript-keyword">continue</span>;
+			eval-&gt;ae_found_deny = TRUE;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-comment">/* we don't recognise this ACE, skip it */</span>
+			<span class="enscript-keyword">continue</span>;
+		}
+	
+		<span class="enscript-comment">/*
+		 * Verify whether this entry applies to the credential.
+		 */</span>
+		wkguid = kauth_wellknown_guid(&amp;ace-&gt;ace_applicable);
+		<span class="enscript-keyword">switch</span>(wkguid) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_WKG_OWNER</span>:
+			applies = eval-&gt;ae_options &amp; KAUTH_AEVAL_IS_OWNER;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_WKG_GROUP</span>:
+			<span class="enscript-keyword">if</span> (!gotguid || (eval-&gt;ae_options &amp; KAUTH_AEVAL_IN_GROUP_UNKNOWN))
+				applies = ((ace-&gt;ace_flags &amp; KAUTH_ACE_KINDMASK) == KAUTH_ACE_DENY);
+			<span class="enscript-keyword">else</span>
+				applies = eval-&gt;ae_options &amp; KAUTH_AEVAL_IN_GROUP;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-comment">/* we short-circuit these here rather than wasting time calling the group membership code */</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_WKG_EVERYBODY</span>:
+			applies = 1;
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_WKG_NOBODY</span>:
+			applies = 0;
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-comment">/* check to see whether it's exactly us, or a group we are a member of */</span>
+			applies = !gotguid ? 0 : kauth_guid_equal(&amp;guid, &amp;ace-&gt;ace_applicable);
+			KAUTH_DEBUG(<span class="enscript-string">&quot;    ACL - ACE applicable &quot;</span> K_UUID_FMT <span class="enscript-string">&quot; caller &quot;</span> K_UUID_FMT <span class="enscript-string">&quot; %smatched&quot;</span>,
+			    K_UUID_ARG(ace-&gt;ace_applicable), K_UUID_ARG(guid), applies ? <span class="enscript-string">&quot;&quot;</span> : <span class="enscript-string">&quot;not &quot;</span>);
+		
+			<span class="enscript-keyword">if</span> (!applies) {
+				error = !gotguid ? ENOENT : kauth_cred_ismember_guid(cred, &amp;ace-&gt;ace_applicable, &amp;applies);
+				<span class="enscript-comment">/*
+				 * If we can't resolve group membership, we have to limit misbehaviour.
+				 * If the ACE is an 'allow' ACE, assume the cred is not a member (avoid
+				 * granting excess access).  If the ACE is a 'deny' ACE, assume the cred
+				 * is a member (avoid failing to deny).
+				 */</span>
+				<span class="enscript-keyword">if</span> (error != 0) {
+					KAUTH_DEBUG(<span class="enscript-string">&quot;    ACL[%d] - can't get membership, making pessimistic assumption&quot;</span>, i);
+					<span class="enscript-keyword">switch</span>(ace-&gt;ace_flags &amp; KAUTH_ACE_KINDMASK) {
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_ACE_PERMIT</span>:
+						applies = 0;
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_ACE_DENY</span>:
+						applies = 1;
+						<span class="enscript-keyword">break</span>;
+					}
+				} <span class="enscript-keyword">else</span> {
+					KAUTH_DEBUG(<span class="enscript-string">&quot;    ACL - %s group member&quot;</span>, applies ? <span class="enscript-string">&quot;is&quot;</span> : <span class="enscript-string">&quot;not&quot;</span>);
+				}
+			} <span class="enscript-keyword">else</span> {
+				KAUTH_DEBUG(<span class="enscript-string">&quot;    ACL - entry matches caller&quot;</span>);
+			}
+		}
+		<span class="enscript-keyword">if</span> (!applies)
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-comment">/*
+		 * Apply ACE to outstanding rights.
+		 */</span>
+		<span class="enscript-keyword">switch</span>(ace-&gt;ace_flags &amp; KAUTH_ACE_KINDMASK) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_ACE_PERMIT</span>:
+			<span class="enscript-comment">/* satisfy any rights that this ACE grants */</span>
+			eval-&gt;ae_residual = eval-&gt;ae_residual &amp; ~rights;
+			KAUTH_DEBUG(<span class="enscript-string">&quot;    ACL[%d] - rights %x leave residual %x&quot;</span>, i, rights, eval-&gt;ae_residual);
+			<span class="enscript-comment">/* all rights satisfied? */</span>
+			<span class="enscript-keyword">if</span> (eval-&gt;ae_residual == 0) {
+				eval-&gt;ae_result = KAUTH_RESULT_ALLOW;
+				<span class="enscript-keyword">return</span>(0);
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_ACE_DENY</span>:
+			<span class="enscript-comment">/* deny the request if any of the requested rights is denied */</span>
+			<span class="enscript-keyword">if</span> (eval-&gt;ae_requested &amp; rights) {
+				KAUTH_DEBUG(<span class="enscript-string">&quot;    ACL[%d] - denying based on %x&quot;</span>, i, rights);
+				eval-&gt;ae_result = KAUTH_RESULT_DENY;
+				<span class="enscript-keyword">return</span>(0);
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			KAUTH_DEBUG(<span class="enscript-string">&quot;    ACL - unknown entry kind %d&quot;</span>, ace-&gt;ace_flags &amp; KAUTH_ACE_KINDMASK);
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-comment">/* if not permitted, defer to other modes of authorisation */</span>
+	eval-&gt;ae_result = KAUTH_RESULT_DEFER;
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/*
+ * Perform ACL inheritance and umask-ACL handling.
+ *
+ * Entries are inherited from the ACL on dvp.  A caller-supplied
+ * ACL is in initial, and the result is output into product.
+ * If the process has a umask ACL and one is not supplied, we use
+ * the umask ACL.
+ * If isdir is set, the resultant ACL is for a directory, otherwise it is for a file.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kauth_acl_inherit</span>(vnode_t dvp, kauth_acl_t initial, kauth_acl_t *product, <span class="enscript-type">int</span> isdir, vfs_context_t ctx)
+{
+	<span class="enscript-type">int</span>	entries, error, index;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+	<span class="enscript-type">struct</span> vnode_attr dva;
+	kauth_acl_t inherit, result;
+
+	<span class="enscript-comment">/*
+	 * Fetch the ACL from the directory.  This should never fail.
+	 * Note that we don't manage inheritance when the remote server is
+	 * doing authorization, since this means server enforcement of
+	 * inheritance semantics; we just want to compose the initial
+	 * ACL and any inherited ACE entries from the container object.
+	 *
+	 * XXX TODO: &lt;rdar://3634665&gt; wants a &quot;umask ACL&quot; from the process.
+	 */</span>
+	inherit = NULL;
+	<span class="enscript-comment">/*
+	 * If there is no initial ACL, or there is, and the initial ACLs
+	 * flags do not request &quot;no inheritance&quot;, then we inherit.  This allows
+	 * initial object creation via open_extended() and mkdir_extended()
+	 * to reject inheritance for themselves and for inferior nodes by
+	 * specifying a non-NULL inital ACL which has the KAUTH_ACL_NO_INHERIT
+	 * flag set in the flags field.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((initial == NULL || !(initial-&gt;acl_flags &amp; KAUTH_ACL_NO_INHERIT)) &amp;&amp;
+	    (dvp != NULL) &amp;&amp; !vfs_authopaque(vnode_mount(dvp))) {
+		VATTR_INIT(&amp;dva);
+		VATTR_WANTED(&amp;dva, va_acl);
+		<span class="enscript-keyword">if</span> ((error = vnode_getattr(dvp, &amp;dva, ctx)) != 0) {
+			KAUTH_DEBUG(<span class="enscript-string">&quot;    ERROR - could not get parent directory ACL for inheritance&quot;</span>);
+			<span class="enscript-keyword">return</span>(error);
+		}
+		<span class="enscript-keyword">if</span> (VATTR_IS_SUPPORTED(&amp;dva, va_acl)) {
+			inherit = dva.va_acl;
+			<span class="enscript-comment">/*
+			 * If there is an ACL on the parent directory, then
+			 * there are potentially inheritable ACE entries, but
+			 * if the flags on the directory ACL say not to
+			 * inherit, then we don't inherit.  This allows for
+			 * per directory rerooting of the inheritable ACL
+			 * hierarchy.
+			 */</span>
+			<span class="enscript-keyword">if</span> (inherit != NULL &amp;&amp; inherit-&gt;acl_flags &amp; KAUTH_ACL_NO_INHERIT) {
+				kauth_acl_free(inherit);
+				inherit = NULL;
+			}
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 * Compute the number of entries in the result ACL by scanning the
+	 * input lists.
+	 */</span>
+	entries = 0;
+	<span class="enscript-keyword">if</span> (inherit != NULL) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; inherit-&gt;acl_entrycount; i++) {
+			<span class="enscript-keyword">if</span> (inherit-&gt;acl_ace[i].ace_flags &amp; (isdir ? KAUTH_ACE_DIRECTORY_INHERIT : KAUTH_ACE_FILE_INHERIT))
+				entries++;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (initial == NULL) {
+		<span class="enscript-comment">/*
+		 * XXX 3634665 TODO: if the initial ACL is not specfied by
+		 * XXX the caller, fetch the umask ACL from the process,
+		 * and use it in place of &quot;initial&quot;.
+		 */</span>
+	}
+
+	<span class="enscript-keyword">if</span> (initial != NULL) {
+		<span class="enscript-keyword">if</span> (initial-&gt;acl_entrycount != KAUTH_FILESEC_NOACL)
+			entries += initial-&gt;acl_entrycount;
+		<span class="enscript-keyword">else</span>
+			initial = NULL;
+	}
+
+	<span class="enscript-comment">/*
+	 * If there is no initial ACL, and no inheritable entries, the
+	 * object should be created with no ACL at all.
+	 * Note that this differs from the case where the initial ACL
+	 * is empty, in which case the object must also have an empty ACL.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((entries == 0) &amp;&amp; (initial == NULL)) {
+		*product = NULL;
+		error = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	
+	<span class="enscript-comment">/*
+	 * Allocate the result buffer.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((result = kauth_acl_alloc(entries)) == NULL) {
+		KAUTH_DEBUG(<span class="enscript-string">&quot;    ERROR - could not allocate %d-entry result buffer for inherited ACL&quot;</span>, entries);
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Composition is simply:
+	 *  - initial direct ACEs
+	 *  - inherited ACEs from new parent
+	 */</span>
+	index = 0;
+	<span class="enscript-keyword">if</span> (initial != NULL) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; initial-&gt;acl_entrycount; i++) {
+			<span class="enscript-keyword">if</span> (!(initial-&gt;acl_ace[i].ace_flags &amp; KAUTH_ACE_INHERITED)) {
+				result-&gt;acl_ace[index++] = initial-&gt;acl_ace[i];
+			}
+		}
+		KAUTH_DEBUG(<span class="enscript-string">&quot;    INHERIT - applied %d of %d initial entries&quot;</span>, index, initial-&gt;acl_entrycount);
+	}
+	<span class="enscript-keyword">if</span> (inherit != NULL) {
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; inherit-&gt;acl_entrycount; i++) {
+			<span class="enscript-comment">/*
+			 * Inherit onto this object?  We inherit only if
+			 * the target object is a container object and the
+			 * KAUTH_ACE_DIRECTORY_INHERIT bit is set, OR if
+			 * if the target object is not a container, and
+			 * the KAUTH_ACE_FILE_INHERIT bit is set.
+			 */</span>
+			<span class="enscript-keyword">if</span> (inherit-&gt;acl_ace[i].ace_flags &amp; (isdir ? KAUTH_ACE_DIRECTORY_INHERIT : KAUTH_ACE_FILE_INHERIT)) {
+				result-&gt;acl_ace[index] = inherit-&gt;acl_ace[i];
+				result-&gt;acl_ace[index].ace_flags |= KAUTH_ACE_INHERITED;
+				result-&gt;acl_ace[index].ace_flags &amp;= ~KAUTH_ACE_ONLY_INHERIT;
+				<span class="enscript-comment">/*
+				 * We do not re-inherit inheritance flags
+				 * if the ACE from the container has a
+				 * KAUTH_ACE_LIMIT_INHERIT, OR if the new
+				 * object is not itself a container (since
+				 * inheritance is always container-based).
+				 */</span>
+				<span class="enscript-keyword">if</span> ((result-&gt;acl_ace[index].ace_flags &amp; KAUTH_ACE_LIMIT_INHERIT) || !isdir) {
+					result-&gt;acl_ace[index].ace_flags &amp;=
+					    ~(KAUTH_ACE_INHERIT_CONTROL_FLAGS);
+				}
+				index++;
+			}
+		}
+	}
+	result-&gt;acl_entrycount = index;
+	*product = result;
+	KAUTH_DEBUG(<span class="enscript-string">&quot;    INHERIT - product ACL has %d entries&quot;</span>, index);
+	error = 0;
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (inherit != NULL)
+		kauth_acl_free(inherit);
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-comment">/*
+ * Optimistically copy in a kauth_filesec structure
+ *
+ * Parameters:	xsecurity		user space kauth_filesec_t
+ *		xsecdstpp		pointer to kauth_filesec_t to be
+ *					modified to contain the contain a
+ *					pointer to an allocated copy of the
+ *					user space argument
+ *
+ * Returns:	0			Success
+ *		ENOMEM			Insufficient memory for the copy.
+ *		EINVAL			The user space data was invalid, or
+ *					there were too many ACE entries.
+ *		EFAULT			The user space address was invalid;
+ *					this may mean 'fsec_entrycount' in
+ *					the user copy is corrupt/incorrect.
+ *
+ * Implicit returns: xsecdestpp, modified (only if successful!)
+ *
+ * Notes:	The returned kauth_filesec_t is in host byte order
+ *
+ *		The caller is responsible for freeing the returned
+ *		kauth_filesec_t in the success case using the function
+ *		kauth_filesec_free()
+ *
+ *		Our largest initial guess is 32; this needs to move to
+ *		a manifest constant in &lt;sys/kauth.h&gt;.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kauth_copyinfilesec</span>(user_addr_t xsecurity, kauth_filesec_t *xsecdestpp)
+{
+	user_addr_t uaddr, known_bound;
+	<span class="enscript-type">int</span> error;
+	kauth_filesec_t fsec;
+	u_int32_t count;
+	size_t copysize;
+	
+	error = 0;
+	fsec = NULL;
+
+	<span class="enscript-comment">/*
+	 * Make a guess at the size of the filesec.  We start with the base
+	 * pointer, and look at how much room is left on the page, clipped
+	 * to a sensible upper bound.  If it turns out this isn't enough,
+	 * we'll size based on the actual ACL contents and come back again.
+	 *
+	 * The upper bound must be less than KAUTH_ACL_MAX_ENTRIES.  The
+	 * value here is fairly arbitrary.  It's ok to have a zero count.
+	 */</span>
+	known_bound = xsecurity +  KAUTH_FILESEC_SIZE(0);
+	uaddr = mach_vm_round_page(known_bound);
+	count = (uaddr - known_bound) / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> kauth_ace);
+	<span class="enscript-keyword">if</span> (count &gt; 32)
+		count = 32;
+<span class="enscript-reference">restart</span>:
+	<span class="enscript-keyword">if</span> ((fsec = kauth_filesec_alloc(count)) == NULL) {
+		error = ENOMEM;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	copysize = KAUTH_FILESEC_SIZE(count);
+	<span class="enscript-keyword">if</span> ((error = copyin(xsecurity, (caddr_t)fsec, copysize)) != 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	<span class="enscript-comment">/* validate the filesec header */</span>
+	<span class="enscript-keyword">if</span> (fsec-&gt;fsec_magic != KAUTH_FILESEC_MAGIC) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Is there an ACL payload, and is it too big?
+	 */</span>
+	<span class="enscript-keyword">if</span> ((fsec-&gt;fsec_entrycount != KAUTH_FILESEC_NOACL) &amp;&amp;
+	    (fsec-&gt;fsec_entrycount &gt; count)) {
+		<span class="enscript-keyword">if</span> (fsec-&gt;fsec_entrycount &gt; KAUTH_ACL_MAX_ENTRIES) {
+			<span class="enscript-comment">/* XXX This should be E2BIG */</span>
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		count = fsec-&gt;fsec_entrycount;
+		kauth_filesec_free(fsec);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">restart</span>;
+	}
+	
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">if</span> (fsec)
+			kauth_filesec_free(fsec);
+	} <span class="enscript-keyword">else</span> {
+		*xsecdestpp = fsec;
+		AUDIT_ARG(opaque, fsec, copysize);
+	}
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-comment">/*
+ * Allocate a block of memory containing a filesec structure, immediately
+ * followed by 'count' kauth_ace structures.
+ *
+ * Parameters:	count			Number of kauth_ace structures needed
+ *
+ * Returns:	!NULL			A pointer to the allocated block
+ *		NULL			Invalid 'count' or insufficient memory
+ *
+ * Notes:	Returned memory area assumes that the structures are packed
+ *		densely, so this function may only be used by code that also
+ *		assumes no padding following structures.
+ *
+ *		The returned structure must be freed by the caller using the
+ *		function kauth_filesec_free(), in case we decide to use an
+ *		allocation mechanism that is aware of the object size at some
+ *		point, since the object size is only available by introspecting
+ *		the object itself.
+ */</span>
+kauth_filesec_t
+<span class="enscript-function-name">kauth_filesec_alloc</span>(<span class="enscript-type">int</span> count)
+{
+	kauth_filesec_t	fsp;
+	
+	<span class="enscript-comment">/* if the caller hasn't given us a valid size hint, assume the worst */</span>
+	<span class="enscript-keyword">if</span> ((count &lt; 0) || (count &gt; KAUTH_ACL_MAX_ENTRIES))
+		<span class="enscript-keyword">return</span>(NULL);
+
+	MALLOC(fsp, kauth_filesec_t, KAUTH_FILESEC_SIZE(count), M_KAUTH, M_WAITOK);
+	<span class="enscript-keyword">if</span> (fsp != NULL) {
+		fsp-&gt;fsec_magic = KAUTH_FILESEC_MAGIC;
+		fsp-&gt;fsec_owner = kauth_null_guid;
+		fsp-&gt;fsec_group = kauth_null_guid;
+		fsp-&gt;fsec_entrycount = KAUTH_FILESEC_NOACL;
+		fsp-&gt;fsec_flags = 0;
+	}
+	<span class="enscript-keyword">return</span>(fsp);
+}	
+
+<span class="enscript-comment">/*
+ * Free a kauth_filesec_t that was previous allocated, either by a direct
+ * call to kauth_filesec_alloc() or by calling a function that calls it.
+ *
+ * Parameters:	fsp			kauth_filesec_t to free
+ *
+ * Returns:	(void)
+ *
+ * Notes:	The kauth_filesec_t to be freed is assumed to be in host
+ *		byte order so that this function can introspect it in the
+ *		future to determine its size, if necesssary.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kauth_filesec_free</span>(kauth_filesec_t fsp)
+{
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KAUTH_DEBUG_ENABLE</span>
+	<span class="enscript-keyword">if</span> (fsp == KAUTH_FILESEC_NONE)
+		panic(<span class="enscript-string">&quot;freeing KAUTH_FILESEC_NONE&quot;</span>);
+	<span class="enscript-keyword">if</span> (fsp == KAUTH_FILESEC_WANTED)
+		panic(<span class="enscript-string">&quot;freeing KAUTH_FILESEC_WANTED&quot;</span>);
+#<span class="enscript-reference">endif</span>
+	FREE(fsp, M_KAUTH);
+}
+
+<span class="enscript-comment">/*
+ * Set the endianness of a filesec and an ACL; if 'acl' is NULL, use the 
+ * ACL interior to 'fsec' instead.  If the endianness doesn't change, then
+ * this function will have no effect.
+ *
+ * Parameters:	kendian			The endianness to set; this is either
+ *					KAUTH_ENDIAN_HOST or KAUTH_ENDIAN_DISK.
+ *		fsec			The filesec to convert.
+ *		acl			The ACL to convert (optional)
+ *
+ * Returns:	(void)
+ *
+ * Notes:	We use ntohl() because it has a transitive property on Intel
+ *		machines and no effect on PPC mancines.  This guarantees us
+ *		that the swapping only occurs if the endiannes is wrong.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kauth_filesec_acl_setendian</span>(<span class="enscript-type">int</span> kendian, kauth_filesec_t fsec, kauth_acl_t acl)
+{
+ 	uint32_t	compare_magic = KAUTH_FILESEC_MAGIC;
+	uint32_t	invert_magic = ntohl(KAUTH_FILESEC_MAGIC);
+	uint32_t	compare_acl_entrycount;
+	uint32_t	i;
+
+	<span class="enscript-keyword">if</span> (compare_magic == invert_magic)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/* If no ACL, use ACL interior to 'fsec' instead */</span>
+	<span class="enscript-keyword">if</span> (acl == NULL)
+		acl = &amp;fsec-&gt;fsec_acl;
+
+	compare_acl_entrycount = acl-&gt;acl_entrycount;
+
+	<span class="enscript-comment">/*
+	 * Only convert what needs to be converted, and only if the arguments
+	 * are valid.  The following switch and tests effectively reject
+	 * conversions on invalid magic numbers as a desirable side effect.
+	 */</span>
+ 	<span class="enscript-keyword">switch</span>(kendian) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_ENDIAN_HOST</span>:		<span class="enscript-comment">/* not in host, convert to host */</span>
+		<span class="enscript-keyword">if</span> (fsec-&gt;fsec_magic != invert_magic)
+			<span class="enscript-keyword">return</span>;
+		<span class="enscript-comment">/* acl_entrycount is byteswapped */</span>
+		compare_acl_entrycount = ntohl(acl-&gt;acl_entrycount);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KAUTH_ENDIAN_DISK</span>:		<span class="enscript-comment">/* not in disk, convert to disk */</span>
+		<span class="enscript-keyword">if</span> (fsec-&gt;fsec_magic != compare_magic)
+			<span class="enscript-keyword">return</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:			<span class="enscript-comment">/* bad argument */</span>
+		<span class="enscript-keyword">return</span>;
+	}
+	
+	<span class="enscript-comment">/* We are go for conversion */</span>
+	fsec-&gt;fsec_magic = ntohl(fsec-&gt;fsec_magic);
+	acl-&gt;acl_entrycount = ntohl(acl-&gt;acl_entrycount);
+	<span class="enscript-keyword">if</span> (compare_acl_entrycount != KAUTH_FILESEC_NOACL) {
+		acl-&gt;acl_flags = ntohl(acl-&gt;acl_flags);
+
+		<span class="enscript-comment">/* swap ACE rights and flags */</span>
+		<span class="enscript-keyword">for</span> (i = 0; i &lt; compare_acl_entrycount; i++) {
+			acl-&gt;acl_ace[i].ace_flags = ntohl(acl-&gt;acl_ace[i].ace_flags);
+			acl-&gt;acl_ace[i].ace_rights = ntohl(acl-&gt;acl_ace[i].ace_rights);
+		}
+	}
+ }
+
+
+<span class="enscript-comment">/*
+ * Allocate an ACL buffer.
+ */</span>
+kauth_acl_t
+<span class="enscript-function-name">kauth_acl_alloc</span>(<span class="enscript-type">int</span> count)
+{
+	kauth_acl_t	aclp;
+	
+	<span class="enscript-comment">/* if the caller hasn't given us a valid size hint, assume the worst */</span>
+	<span class="enscript-keyword">if</span> ((count &lt; 0) || (count &gt; KAUTH_ACL_MAX_ENTRIES))
+		<span class="enscript-keyword">return</span>(NULL);
+
+	MALLOC(aclp, kauth_acl_t, KAUTH_ACL_SIZE(count), M_KAUTH, M_WAITOK);
+	<span class="enscript-keyword">if</span> (aclp != NULL) {
+		aclp-&gt;acl_entrycount = 0;
+		aclp-&gt;acl_flags = 0;
+	}
+	<span class="enscript-keyword">return</span>(aclp);
+}	
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">kauth_acl_free</span>(kauth_acl_t aclp)
+{
+	FREE(aclp, M_KAUTH);
+}
+
+
+<span class="enscript-comment">/*
+ * WARNING - caller must hold KAUTH_SCOPELOCK
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">kauth_add_callback_to_scope</span>(kauth_scope_t sp, kauth_listener_t klp)
+{
+	<span class="enscript-type">int</span>		i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; KAUTH_SCOPE_MAX_LISTENERS; i++) {
+		<span class="enscript-keyword">if</span> (sp-&gt;ks_listeners[i].kll_listenerp == NULL) {
+			sp-&gt;ks_listeners[i].kll_callback = klp-&gt;kl_callback;
+			sp-&gt;ks_listeners[i].kll_idata = klp-&gt;kl_idata;
+			sp-&gt;ks_listeners[i].kll_listenerp = klp;
+			sp-&gt;ks_flags |= KS_F_HAS_LISTENERS;
+			<span class="enscript-keyword">return</span>(0);
+		}
+	}
+	<span class="enscript-keyword">return</span>(ENOSPC);
+}
+</pre>
+<hr />
+</body></html>

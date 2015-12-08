@@ -1,0 +1,659 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>lmbench_lat_ctx.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">lmbench_lat_ctx.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2006 Apple Inc.  All Rights Reserved.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+
+<span class="enscript-comment">/*
+ *	Order of Execution
+ *
+ *	benchmark_init
+ *
+ *	benchmark_optswitch
+ *
+ *		benchmark_initrun
+ *
+ *			benchmark_initworker
+ *				benchmark_initbatch
+ *					benchmark
+ *				benchmark_finibatch
+ *				benchmark_initbatch
+ *					benchmark
+ *				benchmark_finibatch, etc.
+ *			benchmark_finiworker
+ *
+ *		benchmark_result
+ *
+ *		benchmark_finirun
+ *
+ *	benchmark_fini
+ */</span>
+
+
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">__sun</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">ident</span>	<span class="enscript-string">&quot;@(#)trivial.c	1.0	08/17/06 Apple Inc.&quot;</span>
+#<span class="enscript-reference">endif</span>
+
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;signal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;strings.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../libmicro.h&quot;</span>
+
+#<span class="enscript-reference">if</span> 1
+# <span class="enscript-reference">define</span> <span class="enscript-function-name">debug</span>(fmt, args...)	(void) fprintf(stderr, fmt <span class="enscript-string">&quot;\n&quot;</span> , ##args)
+#<span class="enscript-reference">else</span>
+# <span class="enscript-reference">define</span> <span class="enscript-function-name">debug</span>(fmt, args...)
+#<span class="enscript-reference">endif</span>
+
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">MAXPROC</span>	2048
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CHUNK</span>	(4&lt;&lt;10)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TRIPS</span>	5
+#<span class="enscript-reference">ifndef</span>	<span class="enscript-variable-name">max</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">max</span>(a, b)	((a) &gt; (b) ? (a) : (b))
+#<span class="enscript-reference">endif</span>
+
+
+<span class="enscript-comment">/*
+ *	Your state variables should live in the tsd_t struct below
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	<span class="enscript-type">int</span>	process_size;
+	<span class="enscript-type">double</span>	overhead;
+	<span class="enscript-type">int</span>	procs;
+	pid_t*	pids;
+	<span class="enscript-type">int</span>	**p;
+	<span class="enscript-type">void</span>*	data;
+} tsd_t;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 	opts = 1;
+
+<span class="enscript-type">void</span>	doit(<span class="enscript-type">int</span> rd, <span class="enscript-type">int</span> wr, <span class="enscript-type">int</span> process_size);
+<span class="enscript-type">int</span>		create_pipes(<span class="enscript-type">int</span> **p, <span class="enscript-type">int</span> procs);
+<span class="enscript-type">int</span>		create_daemons(<span class="enscript-type">int</span> **p, pid_t *pids, <span class="enscript-type">int</span> procs, <span class="enscript-type">int</span> process_size);
+<span class="enscript-type">void</span>	initialize_overhead(<span class="enscript-type">void</span>* tsd);
+<span class="enscript-type">void</span>	cleanup_overhead(<span class="enscript-type">void</span>* tsd);
+<span class="enscript-type">void</span>	benchmark_overhead(<span class="enscript-type">void</span>* tsd);
+<span class="enscript-type">void</span>	initialize(<span class="enscript-type">void</span>* tsd);
+<span class="enscript-type">void</span>	cleanup(<span class="enscript-type">void</span>* tsd);
+<span class="enscript-type">long</span>	bread(<span class="enscript-type">void</span>* buf, <span class="enscript-type">long</span> nbytes);
+
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> *** <span class="enscript-variable-name">lmbench</span> <span class="enscript-variable-name">routines</span>
+
+<span class="enscript-comment">/*
+ * lmbench routines, etc. brought over for this benchmark
+ */</span>
+ 
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">morefds</span>(<span class="enscript-type">void</span>)
+{
+#<span class="enscript-reference">ifdef</span>  <span class="enscript-variable-name">RLIMIT_NOFILE</span>
+        <span class="enscript-type">struct</span>  rlimit r;
+
+        getrlimit(RLIMIT_NOFILE, &amp;r);
+        r.rlim_cur = r.rlim_max;
+        setrlimit(RLIMIT_NOFILE, &amp;r);
+#<span class="enscript-reference">endif</span>
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">doit</span>(<span class="enscript-type">int</span> rd, <span class="enscript-type">int</span> wr, <span class="enscript-type">int</span> process_size)
+{
+	<span class="enscript-type">int</span>	msg;
+	<span class="enscript-type">void</span>*	data = NULL;
+
+	<span class="enscript-keyword">if</span> (process_size) {
+		data = malloc(process_size);
+		<span class="enscript-keyword">if</span> (data) bzero(data, process_size);
+	}
+	<span class="enscript-keyword">for</span> ( ;; ) {
+		<span class="enscript-keyword">if</span> (read(rd, &amp;msg, <span class="enscript-keyword">sizeof</span>(msg)) != <span class="enscript-keyword">sizeof</span>(msg)) {
+			debug(<span class="enscript-string">&quot;read/write on pipe&quot;</span>); 
+			<span class="enscript-keyword">break</span>;
+		}
+		bread(data, process_size);
+		<span class="enscript-keyword">if</span> (write(wr, &amp;msg, <span class="enscript-keyword">sizeof</span>(msg)) != <span class="enscript-keyword">sizeof</span>(msg)) {
+			debug(<span class="enscript-string">&quot;read/write on pipe&quot;</span>);
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	exit(0);
+}
+
+<span class="enscript-comment">/*
+ * Return the number of processors in this host
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">sched_ncpus</span>()
+{
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MP_NPROCS</span>
+	<span class="enscript-comment">/* SGI IRIX interface */</span>
+	<span class="enscript-keyword">return</span> sysmp(MP_NPROCS);
+#<span class="enscript-reference">elif</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">HAVE_MPCTL</span>)
+	<span class="enscript-comment">/* HP-UX interface */</span>
+	<span class="enscript-keyword">return</span> mpctl(MPC_GETNUMSPUS_SYS, 0, 0);
+#<span class="enscript-reference">elif</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">_SC_NPROCESSORS_ONLN</span>)
+	<span class="enscript-comment">/* AIX, Solaris, and Linux interface */</span>
+	<span class="enscript-keyword">return</span> sysconf(_SC_NPROCESSORS_ONLN);
+#<span class="enscript-reference">elif</span> <span class="enscript-variable-name">__APPLE__</span>
+	<span class="enscript-type">char</span> *name=<span class="enscript-string">&quot;hw.activecpu&quot;</span>;
+	<span class="enscript-type">int</span> cpus, retval;	
+	size_t len = 4;
+	retval=sysctlbyname(name, &amp;cpus, &amp;len, NULL, 0);
+	<span class="enscript-comment">/* Check retval here */</span>	
+	debug(<span class="enscript-string">&quot;cpus = %d retval = %d&quot;</span>, cpus, retval);
+	<span class="enscript-keyword">return</span> cpus;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span> 1;
+}
+
+<span class="enscript-comment">/*
+ * Use to get sequentially created processes &quot;far&quot; away from
+ * each other in an SMP.
+ *
+ * XXX: probably doesn't work for NCPUS not a power of two.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">reverse_bits</span>(<span class="enscript-type">int</span> cpu)
+{
+	<span class="enscript-type">int</span>	i;
+	<span class="enscript-type">int</span>	nbits;
+	<span class="enscript-type">int</span>	max = sched_ncpus() - 1;
+	<span class="enscript-type">int</span>	cpu_reverse = 0;
+
+	<span class="enscript-keyword">for</span> (i = max&gt;&gt;1, nbits = 1; i &gt; 0; i &gt;&gt;= 1, nbits++)
+	  ;
+	<span class="enscript-comment">/* now reverse the bits */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; nbits; i++) {
+		<span class="enscript-keyword">if</span> (cpu &amp; (1&lt;&lt;i))
+			cpu_reverse |= (1&lt;&lt;(nbits-i-1));
+	}
+	<span class="enscript-keyword">return</span> cpu_reverse;
+}
+
+
+<span class="enscript-comment">/*
+ * The interface used by benchmp.
+ *
+ * childno is the &quot;logical&quot; child id number.  
+ *	In range [0, ..., parallel-1].
+ * benchproc is the &quot;logical&quot; id within the benchmark process.  The
+ *	benchmp-created process is logical ID zero, child processes
+ *	created by the benchmark range from [1, ..., nbenchprocs].
+ * nbenchprocs is the number of child processes that each benchmark
+ * 	process will create.  Most benchmarks will leave this zero,
+ *	but some such as the pipe() benchmarks will not.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">handle_scheduler</span>(<span class="enscript-type">int</span> childno, <span class="enscript-type">int</span> benchproc, <span class="enscript-type">int</span> nbenchprocs)
+{
+	<span class="enscript-type">int</span>	cpu = 0;
+	<span class="enscript-type">char</span>*	sched = getenv(<span class="enscript-string">&quot;LMBENCH_SCHED&quot;</span>);
+	
+	<span class="enscript-keyword">if</span> (!sched || strcasecmp(sched, <span class="enscript-string">&quot;DEFAULT&quot;</span>) == 0) {
+		<span class="enscript-comment">/* do nothing.  Allow scheduler to control placement */</span>
+		<span class="enscript-keyword">return</span> 0;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (strcasecmp(sched, <span class="enscript-string">&quot;SINGLE&quot;</span>) == 0) {
+		<span class="enscript-comment">/* assign all processes to CPU 0 */</span>
+		cpu = 0;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (strcasecmp(sched, <span class="enscript-string">&quot;BALANCED&quot;</span>) == 0) {
+		<span class="enscript-comment">/* assign each benchmark process to its own processor,
+		 * but child processes will share the CPU with the
+		 * parent.
+		 */</span>
+		cpu = childno;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (strcasecmp(sched, <span class="enscript-string">&quot;BALANCED_SPREAD&quot;</span>) == 0) {
+		<span class="enscript-comment">/* 
+		 * assign each benchmark process to its own processor, 
+		 * logically as far away from neighboring IDs as 
+		 * possible.  This can help identify bus contention
+		 * issues in SMPs with hierarchical busses or NUMA
+		 * memory.
+		 */</span>
+		cpu = reverse_bits(childno);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (strcasecmp(sched, <span class="enscript-string">&quot;UNIQUE&quot;</span>) == 0) {
+		<span class="enscript-comment">/*
+		 * assign each benchmark process and each child process
+		 * to its own processor.
+		 */</span>
+		cpu = childno * (nbenchprocs + 1) + benchproc;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (strcasecmp(sched, <span class="enscript-string">&quot;UNIQUE_SPREAD&quot;</span>) == 0) {
+		<span class="enscript-comment">/* 
+		 * assign each benchmark process and each child process
+		 * to its own processor, logically as far away from 
+		 * neighboring IDs as possible.  This can help identify 
+		 * bus contention issues in SMPs with hierarchical busses
+		 * or NUMA memory.
+		 */</span>
+		cpu = reverse_bits(childno * (nbenchprocs + 1) + benchproc);
+	} 
+#<span class="enscript-reference">if</span> 0 // <span class="enscript-variable-name">BLOB</span>
+	  <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (strncasecmp(sched, <span class="enscript-string">&quot;CUSTOM &quot;</span>, strlen(<span class="enscript-string">&quot;CUSTOM &quot;</span>)) == 0) {
+		cpu = custom(sched + strlen(<span class="enscript-string">&quot;CUSTOM&quot;</span>), childno);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (strncasecmp(sched, <span class="enscript-string">&quot;CUSTOM_UNIQUE &quot;</span>, strlen(<span class="enscript-string">&quot;CUSTOM_UNIQUE &quot;</span>)) == 0) {
+		cpu = custom(sched + strlen(<span class="enscript-string">&quot;CUSTOM_UNIQUE&quot;</span>), 
+			     childno * (nbenchprocs + 1) + benchproc);
+	} 
+#<span class="enscript-reference">endif</span> // <span class="enscript-variable-name">BLOB</span>
+		<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* default action: do nothing */</span>
+		<span class="enscript-keyword">return</span> 0;
+	}
+	debug(<span class="enscript-string">&quot;cpu = %d, sched_ncpus() = %d&quot;</span>, cpu, sched_ncpus());
+	<span class="enscript-keyword">return</span> 0;
+<span class="enscript-comment">//	return sched_pin(cpu % sched_ncpus());
+</span>}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">create_daemons</span>(<span class="enscript-type">int</span> **p, pid_t *pids, <span class="enscript-type">int</span> procs, <span class="enscript-type">int</span> process_size)
+{
+	<span class="enscript-type">int</span>	i, j;
+	<span class="enscript-type">int</span>	msg;
+
+	<span class="enscript-comment">/*
+	 * Use the pipes as a ring, and fork off a bunch of processes
+	 * to pass the byte through their part of the ring.
+	 *
+	 * Do the sum in each process and get that time before moving on.
+	 */</span>
+	handle_scheduler(getpid(), 0, procs-1);
+     	<span class="enscript-keyword">for</span> (i = 1; i &lt; procs; ++i) {
+		<span class="enscript-keyword">switch</span> (pids[i] = fork()) {
+		    <span class="enscript-keyword">case</span> <span class="enscript-reference">-1</span>:	<span class="enscript-comment">/* could not fork, out of processes? */</span>
+			<span class="enscript-keyword">return</span> i;
+
+		    <span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:	<span class="enscript-comment">/* child */</span>
+			handle_scheduler(getpid(), i, procs-1);
+			<span class="enscript-keyword">for</span> (j = 0; j &lt; procs; ++j) {
+				<span class="enscript-keyword">if</span> (j != i - 1) close(p[j][0]);
+				<span class="enscript-keyword">if</span> (j != i) close(p[j][1]);
+			}
+			doit(p[i-1][0], p[i][1], process_size);
+			<span class="enscript-comment">/* NOTREACHED */</span>
+
+		    <span class="enscript-reference">default</span>:	<span class="enscript-comment">/* parent */</span>
+			;
+	    	}
+	}
+
+	<span class="enscript-comment">/*
+	 * Go once around the loop to make sure that everyone is ready and
+	 * to get the token in the pipeline.
+	 */</span>
+	<span class="enscript-keyword">if</span> (write(p[0][1], &amp;msg, <span class="enscript-keyword">sizeof</span>(msg)) != <span class="enscript-keyword">sizeof</span>(msg) ||
+	    read(p[procs-1][0], &amp;msg, <span class="enscript-keyword">sizeof</span>(msg)) != <span class="enscript-keyword">sizeof</span>(msg)) {
+		debug(<span class="enscript-string">&quot;write/read/write on pipe&quot;</span>); 
+		exit(1);
+	}
+	<span class="enscript-keyword">return</span> procs;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">create_pipes</span>(<span class="enscript-type">int</span> **p, <span class="enscript-type">int</span> procs)
+{
+	<span class="enscript-type">int</span>	i;
+	<span class="enscript-comment">/*
+	 * Get a bunch of pipes.
+	 */</span>
+	morefds();
+     	<span class="enscript-keyword">for</span> (i = 0; i &lt; procs; ++i) {
+		<span class="enscript-keyword">if</span> (pipe(p[i]) == -1) {
+			<span class="enscript-keyword">return</span> i;
+		}
+	}
+	<span class="enscript-keyword">return</span> procs;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">initialize_overhead</span>(<span class="enscript-type">void</span>* cookie)
+{
+    <span class="enscript-type">int</span> i;
+    <span class="enscript-type">int</span> procs;
+    <span class="enscript-type">int</span>* p;
+    tsd_t	*pState = (tsd_t *)cookie;
+
+    pState-&gt;pids = NULL;
+    pState-&gt;p = (<span class="enscript-type">int</span>**)malloc(pState-&gt;procs * (<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>*) + 2 * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>)));
+    p = (<span class="enscript-type">int</span>*)&amp;pState-&gt;p[pState-&gt;procs];
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; pState-&gt;procs; ++i) {
+        pState-&gt;p[i] = p;
+        p += 2;
+    }
+
+    pState-&gt;data = (pState-&gt;process_size &gt; 0) ? malloc(pState-&gt;process_size) : NULL;
+    <span class="enscript-keyword">if</span> (pState-&gt;data)
+        bzero(pState-&gt;data, pState-&gt;process_size);
+
+    procs = create_pipes(pState-&gt;p, pState-&gt;procs);
+    <span class="enscript-keyword">if</span> (procs &lt; pState-&gt;procs) {
+    	debug(<span class="enscript-string">&quot;procs &lt; pState-&gt;procs&quot;</span>);
+        cleanup_overhead(cookie);
+        exit(1);
+    }
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cleanup_overhead</span>(<span class="enscript-type">void</span>* tsd)
+{
+	<span class="enscript-type">int</span> 	i;
+	tsd_t	*ts = (tsd_t *)tsd;
+
+     	<span class="enscript-keyword">for</span> (i = 0; i &lt; ts-&gt;procs; ++i) {
+		close(ts-&gt;p[i][0]);
+		close(ts-&gt;p[i][1]);
+	}
+
+	free(ts-&gt;p);
+	<span class="enscript-keyword">if</span> (ts-&gt;data) free(ts-&gt;data);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">cleanup</span>(<span class="enscript-type">void</span>* cookie)
+{
+    <span class="enscript-type">int</span> 	i;
+    tsd_t	*pState = (tsd_t *)cookie;
+
+
+    <span class="enscript-comment">/*
+     * Close the pipes and kill the children.
+     */</span>
+    cleanup_overhead(cookie);
+        <span class="enscript-keyword">for</span> (i = 1; pState-&gt;pids &amp;&amp; i &lt; pState-&gt;procs; ++i) {
+        <span class="enscript-keyword">if</span> (pState-&gt;pids[i] &gt; 0) {
+            kill(pState-&gt;pids[i], SIGKILL);
+            waitpid(pState-&gt;pids[i], NULL, 0);
+        }
+    }
+    <span class="enscript-keyword">if</span> (pState-&gt;pids)
+        free(pState-&gt;pids);
+    pState-&gt;pids = NULL;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">benchmark_overhead</span>(<span class="enscript-type">void</span>* tsd)
+{
+	tsd_t	*ts = (tsd_t *)tsd;
+	<span class="enscript-type">int</span>	i = 0;
+	<span class="enscript-type">int</span>	msg = 1;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; lm_optB; i++) {
+		<span class="enscript-keyword">if</span> (write(ts-&gt;p[i][1], &amp;msg, <span class="enscript-keyword">sizeof</span>(msg)) != <span class="enscript-keyword">sizeof</span>(msg)) {
+			debug(<span class="enscript-string">&quot;read/write on pipe&quot;</span>);
+			exit(1);				
+		}
+		<span class="enscript-keyword">if</span> (read(ts-&gt;p[i][0], &amp;msg, <span class="enscript-keyword">sizeof</span>(msg)) != <span class="enscript-keyword">sizeof</span>(msg)) {
+			debug(<span class="enscript-string">&quot;read/write on pipe&quot;</span>);
+			exit(1);
+		}
+		<span class="enscript-keyword">if</span> (++i == ts-&gt;procs) {
+			i = 0;
+		}
+		bread(ts-&gt;data, ts-&gt;process_size);
+	}
+}
+
+<span class="enscript-comment">/* analogous to bzero, bcopy, etc., except that it just reads
+ * data into the processor
+ */</span>
+<span class="enscript-type">long</span>
+<span class="enscript-function-name">bread</span>(<span class="enscript-type">void</span>* buf, <span class="enscript-type">long</span> nbytes)
+{
+	<span class="enscript-type">long</span> sum = 0;
+	<span class="enscript-type">register</span> <span class="enscript-type">long</span> *p, *next;
+	<span class="enscript-type">register</span> <span class="enscript-type">char</span> *end;
+
+	p = (<span class="enscript-type">long</span>*)buf;
+	end = (<span class="enscript-type">char</span>*)buf + nbytes;
+	<span class="enscript-keyword">for</span> (next = p + 128; (<span class="enscript-type">void</span>*)next &lt;= (<span class="enscript-type">void</span>*)end; p = next, next += 128) {
+		sum +=
+			p[0]+p[1]+p[2]+p[3]+p[4]+p[5]+p[6]+p[7]+
+			p[8]+p[9]+p[10]+p[11]+p[12]+p[13]+p[14]+
+			p[15]+p[16]+p[17]+p[18]+p[19]+p[20]+p[21]+
+			p[22]+p[23]+p[24]+p[25]+p[26]+p[27]+p[28]+
+			p[29]+p[30]+p[31]+p[32]+p[33]+p[34]+p[35]+
+			p[36]+p[37]+p[38]+p[39]+p[40]+p[41]+p[42]+
+			p[43]+p[44]+p[45]+p[46]+p[47]+p[48]+p[49]+
+			p[50]+p[51]+p[52]+p[53]+p[54]+p[55]+p[56]+
+			p[57]+p[58]+p[59]+p[60]+p[61]+p[62]+p[63]+
+			p[64]+p[65]+p[66]+p[67]+p[68]+p[69]+p[70]+
+			p[71]+p[72]+p[73]+p[74]+p[75]+p[76]+p[77]+
+			p[78]+p[79]+p[80]+p[81]+p[82]+p[83]+p[84]+
+			p[85]+p[86]+p[87]+p[88]+p[89]+p[90]+p[91]+
+			p[92]+p[93]+p[94]+p[95]+p[96]+p[97]+p[98]+
+			p[99]+p[100]+p[101]+p[102]+p[103]+p[104]+
+			p[105]+p[106]+p[107]+p[108]+p[109]+p[110]+
+			p[111]+p[112]+p[113]+p[114]+p[115]+p[116]+
+			p[117]+p[118]+p[119]+p[120]+p[121]+p[122]+
+			p[123]+p[124]+p[125]+p[126]+p[127];
+	}
+	<span class="enscript-keyword">for</span> (next = p + 16; (<span class="enscript-type">void</span>*)next &lt;= (<span class="enscript-type">void</span>*)end; p = next, next += 16) {
+		sum +=
+			p[0]+p[1]+p[2]+p[3]+p[4]+p[5]+p[6]+p[7]+
+			p[8]+p[9]+p[10]+p[11]+p[12]+p[13]+p[14]+
+			p[15];
+	}
+	<span class="enscript-keyword">for</span> (next = p + 1; (<span class="enscript-type">void</span>*)next &lt;= (<span class="enscript-type">void</span>*)end; p = next, next++) {
+		sum += *p;
+	}
+	<span class="enscript-keyword">return</span> sum;
+}
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> *** <span class="enscript-variable-name">darbench</span> <span class="enscript-variable-name">routines</span>
+
+
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initbatch</span>(<span class="enscript-type">void</span> *tsd)
+{
+	<span class="enscript-comment">/*
+	 * initialize your state variables here second
+	 */</span>
+	tsd_t			*ts = (tsd_t *)tsd;
+	<span class="enscript-type">int</span> procs;
+
+	initialize_overhead(tsd);
+
+	ts-&gt;pids = (pid_t*)malloc(ts-&gt;procs * <span class="enscript-keyword">sizeof</span>(pid_t));
+	<span class="enscript-keyword">if</span> (ts-&gt;pids == NULL)
+		exit(1);
+	bzero((<span class="enscript-type">void</span>*)ts-&gt;pids, ts-&gt;procs * <span class="enscript-keyword">sizeof</span>(pid_t));
+	procs = create_daemons(ts-&gt;p, ts-&gt;pids, 
+			       ts-&gt;procs, ts-&gt;process_size);
+	<span class="enscript-keyword">if</span> (procs &lt; ts-&gt;procs) {
+		cleanup(tsd);
+		exit(1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_finirun</span>()
+{
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_init</span>()
+{
+	<span class="enscript-comment">/* 
+	 *	the lm_optstr must be defined here or no options for you
+	 *
+	 * 	...and the framework will throw an error
+	 *
+	 */</span>
+	(<span class="enscript-type">void</span>) sprintf(lm_optstr, <span class="enscript-string">&quot;s:&quot;</span>);
+	<span class="enscript-comment">/*
+	 *	working hypothesis:
+	 *	
+	 * 	tsd_t is the struct that we can pass around our
+	 *	state info in
+	 *
+	 *	lm_tsdsize will allocate the space we need for this
+	 *	structure throughout the rest of the framework
+	 */</span>
+	lm_tsdsize = <span class="enscript-keyword">sizeof</span> (tsd_t);
+
+	(<span class="enscript-type">void</span>) sprintf(lm_usage,
+		<span class="enscript-string">&quot;		[-s kbytes]\n&quot;</span>
+		<span class="enscript-string">&quot;		processes [processes ...]\n&quot;</span>);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_fini</span>()
+{
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_finibatch</span>(<span class="enscript-type">void</span> *tsd)
+{
+	tsd_t			*ts = (tsd_t *)tsd;
+	<span class="enscript-type">int</span> i;
+	
+	<span class="enscript-comment">/*
+	 * Close the pipes and kill the children.
+	 */</span>
+	cleanup_overhead(tsd);
+     	<span class="enscript-keyword">for</span> (i = 1; ts-&gt;pids &amp;&amp; i &lt; ts-&gt;procs; ++i) {
+		<span class="enscript-keyword">if</span> (ts-&gt;pids[i] &gt; 0) {
+			kill(ts-&gt;pids[i], SIGKILL);
+			waitpid(ts-&gt;pids[i], NULL, 0);
+		}
+	}
+	<span class="enscript-keyword">if</span> (ts-&gt;pids)
+		free(ts-&gt;pids);
+	ts-&gt;pids = NULL;
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">char</span> *
+<span class="enscript-function-name">benchmark_result</span>()
+{
+	<span class="enscript-type">static</span> <span class="enscript-type">char</span>		result = <span class="enscript-string">'\0'</span>;
+	<span class="enscript-keyword">return</span> (&amp;result);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_finiworker</span>(<span class="enscript-type">void</span> *tsd)
+{
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_optswitch</span>(<span class="enscript-type">int</span> opt, <span class="enscript-type">char</span> *optarg)
+{
+	
+	<span class="enscript-keyword">switch</span> (opt) {
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'s'</span>:
+		opts = sizetoint(optarg);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initworker</span>(<span class="enscript-type">void</span> *tsd)
+{
+	tsd_t		*ts = (tsd_t *)tsd;
+	
+	ts-&gt;process_size = opts;
+	 
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initrun</span>()
+{
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark</span>(<span class="enscript-type">void</span> *tsd, result_t *res)
+{
+	<span class="enscript-comment">/* 
+	 *	initialize your state variables here last
+	 * 
+	 * 	and realize that you are paying for your initialization here
+	 *	and it is really a bad idea
+	 */</span>
+	tsd_t		*ts = (tsd_t *)tsd;
+	<span class="enscript-type">int</span>			i;
+	<span class="enscript-type">int</span>			msg=1;
+	
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; lm_optB; i++) {
+		<span class="enscript-keyword">if</span> (write(ts-&gt;p[0][1], &amp;msg, <span class="enscript-keyword">sizeof</span>(msg)) !=
+		    <span class="enscript-keyword">sizeof</span>(msg)) {
+			debug(<span class="enscript-string">&quot;read/write on pipe&quot;</span>);
+			exit(1);
+		}
+		<span class="enscript-keyword">if</span> (read(ts-&gt;p[ts-&gt;procs-1][0], &amp;msg, <span class="enscript-keyword">sizeof</span>(msg)) != <span class="enscript-keyword">sizeof</span>(msg)) {
+			debug(<span class="enscript-string">&quot;read/write on pipe&quot;</span>);
+			exit(1);
+		}
+		bread(ts-&gt;data, ts-&gt;process_size);
+	}
+	res-&gt;re_count = i;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+</pre>
+<hr />
+</body></html>

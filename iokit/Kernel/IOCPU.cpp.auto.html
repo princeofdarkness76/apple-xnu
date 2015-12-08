@@ -1,0 +1,894 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>IOCPU.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">IOCPU.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1999-2000 Apple Computer, Inc.  All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1999-2000 Apple Computer, Inc.  All rights reserved.
+ *
+ *  DRI: Josh de Cesare
+ *
+ */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> {
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;pexpert/pexpert.h&gt;</span>
+}
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOLib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOPlatformExpert.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/pwr_mgt/RootDomain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/pwr_mgt/IOPMPrivate.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOUserClient.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKitKeysPrivate.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOCPU.h&gt;</span>
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/queue.h&gt;</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-function-name">kern_return_t</span> (*iocpu_platform_action_t)(<span class="enscript-type">void</span> * refcon0, <span class="enscript-type">void</span> * refcon1, uint32_t priority,
+						 <span class="enscript-type">void</span> * param1, <span class="enscript-type">void</span> * param2, <span class="enscript-type">void</span> * param3,
+						 <span class="enscript-type">const</span> <span class="enscript-type">char</span> * name);
+
+<span class="enscript-type">struct</span> iocpu_platform_action_entry
+{
+    queue_chain_t                     link;
+    iocpu_platform_action_t           action;
+    int32_t	                      priority;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *		      name;
+    <span class="enscript-type">void</span> *	                      refcon0;
+    <span class="enscript-type">void</span> *			      refcon1;
+    <span class="enscript-type">struct</span> iocpu_platform_action_entry * alloc_list;
+};
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> iocpu_platform_action_entry iocpu_platform_action_entry_t;
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">kBootCPUNumber</span>  0
+
+<span class="enscript-type">enum</span>
+{
+    kQueueSleep       = 0,
+    kQueueWake        = 1,
+    kQueueQuiesce     = 2,
+    kQueueActive      = 3,
+    kQueueHaltRestart = 4,
+    kQueuePanic       = 5,
+    kQueueCount       = 6
+};
+
+<span class="enscript-type">const</span> OSSymbol *		gIOPlatformSleepActionKey;
+<span class="enscript-type">const</span> OSSymbol *		gIOPlatformWakeActionKey;
+<span class="enscript-type">const</span> OSSymbol *		gIOPlatformQuiesceActionKey;
+<span class="enscript-type">const</span> OSSymbol *		gIOPlatformActiveActionKey;
+<span class="enscript-type">const</span> OSSymbol *		gIOPlatformHaltRestartActionKey;
+<span class="enscript-type">const</span> OSSymbol *		gIOPlatformPanicActionKey;
+
+<span class="enscript-type">static</span> queue_head_t     	gActionQueues[kQueueCount];
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> OSSymbol *		gActionSymbols[kQueueCount];
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">iocpu_add_platform_action</span>(queue_head_t * queue, iocpu_platform_action_entry_t * entry)
+{
+    iocpu_platform_action_entry_t * next;
+
+    queue_iterate(queue, next, iocpu_platform_action_entry_t *, link)
+    {
+	<span class="enscript-keyword">if</span> (next-&gt;priority &gt; entry-&gt;priority)
+	{
+	    queue_insert_before(queue, entry, next, iocpu_platform_action_entry_t *, link);
+	    <span class="enscript-keyword">return</span>;
+	}
+    }
+    queue_enter(queue, entry, iocpu_platform_action_entry_t *, link);	<span class="enscript-comment">// at tail
+</span>}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">iocpu_remove_platform_action</span>(iocpu_platform_action_entry_t * entry)
+{
+    remque(&amp;entry-&gt;link);
+}
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">iocpu_run_platform_actions</span>(queue_head_t * queue, uint32_t first_priority, uint32_t last_priority,
+					<span class="enscript-type">void</span> * param1, <span class="enscript-type">void</span> * param2, <span class="enscript-type">void</span> * param3)
+{
+    kern_return_t                ret = KERN_SUCCESS;
+    kern_return_t                result = KERN_SUCCESS;
+    iocpu_platform_action_entry_t * next;
+
+    queue_iterate(queue, next, iocpu_platform_action_entry_t *, link)
+    {
+	uint32_t pri = (next-&gt;priority &lt; 0) ? -next-&gt;priority : next-&gt;priority;
+	<span class="enscript-keyword">if</span> ((pri &gt;= first_priority) &amp;&amp; (pri &lt;= last_priority))
+	{
+	    <span class="enscript-comment">//kprintf(&quot;[%p]&quot;, next-&gt;action);
+</span>	    ret = (*next-&gt;action)(next-&gt;refcon0, next-&gt;refcon1, pri, param1, param2, param3, next-&gt;name);
+	}
+	<span class="enscript-keyword">if</span> (KERN_SUCCESS == result)
+	    result = ret;
+    }
+    <span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> kern_return_t 
+<span class="enscript-function-name">IOCPURunPlatformQuiesceActions</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">return</span> (iocpu_run_platform_actions(&amp;gActionQueues[kQueueQuiesce], 0, 0U-1,
+				    NULL, NULL, NULL));
+}
+
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> kern_return_t 
+<span class="enscript-function-name">IOCPURunPlatformActiveActions</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">return</span> (iocpu_run_platform_actions(&amp;gActionQueues[kQueueActive], 0, 0U-1,
+				    NULL, NULL, NULL));
+}
+
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> kern_return_t 
+<span class="enscript-function-name">IOCPURunPlatformHaltRestartActions</span>(uint32_t message)
+{
+    <span class="enscript-keyword">return</span> (iocpu_run_platform_actions(&amp;gActionQueues[kQueueHaltRestart], 0, 0U-1,
+				     (<span class="enscript-type">void</span> *)(uintptr_t) message, NULL, NULL));
+}
+
+<span class="enscript-type">extern</span> <span class="enscript-string">&quot;C&quot;</span> kern_return_t 
+<span class="enscript-function-name">IOCPURunPlatformPanicActions</span>(uint32_t message)
+{
+    <span class="enscript-keyword">return</span> (iocpu_run_platform_actions(&amp;gActionQueues[kQueuePanic], 0, 0U-1,
+				     (<span class="enscript-type">void</span> *)(uintptr_t) message, NULL, NULL));
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">static</span> kern_return_t 
+<span class="enscript-function-name">IOServicePlatformAction</span>(<span class="enscript-type">void</span> * refcon0, <span class="enscript-type">void</span> * refcon1, uint32_t priority,
+			  <span class="enscript-type">void</span> * param1, <span class="enscript-type">void</span> * param2, <span class="enscript-type">void</span> * param3,
+			  <span class="enscript-type">const</span> <span class="enscript-type">char</span> * service_name)
+{
+    IOReturn	     ret;
+    IOService *      service  = (IOService *)      refcon0;
+    <span class="enscript-type">const</span> OSSymbol * function = (<span class="enscript-type">const</span> OSSymbol *) refcon1;
+
+    kprintf(<span class="enscript-string">&quot;%s -&gt; %s\n&quot;</span>, function-&gt;getCStringNoCopy(), service_name);
+
+    ret = service-&gt;callPlatformFunction(function, false, 
+					 (<span class="enscript-type">void</span> *)(uintptr_t) priority, param1, param2, param3);
+
+    <span class="enscript-keyword">return</span> (ret);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">IOInstallServicePlatformAction</span>(IOService * service, uint32_t qidx)
+{
+    iocpu_platform_action_entry_t * entry;
+    OSNumber *       num;
+    uint32_t         priority;
+    <span class="enscript-type">const</span> OSSymbol * key = gActionSymbols[qidx]; 
+    queue_head_t *   queue = &amp;gActionQueues[qidx];
+    <span class="enscript-type">bool</span>             reverse;
+    <span class="enscript-type">bool</span>             uniq;
+
+    num = OSDynamicCast(OSNumber, service-&gt;getProperty(key));
+    <span class="enscript-keyword">if</span> (!num) <span class="enscript-keyword">return</span>;
+
+    reverse = false;
+    uniq    = false;
+    <span class="enscript-keyword">switch</span> (qidx)
+    {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">kQueueWake</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">kQueueActive</span>:
+	    reverse = true;
+	    <span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">kQueueHaltRestart</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">kQueuePanic</span>:
+	    uniq = true;
+	    <span class="enscript-keyword">break</span>;
+    }
+    <span class="enscript-keyword">if</span> (uniq)
+    {
+	queue_iterate(queue, entry, iocpu_platform_action_entry_t *, link)
+	{
+	    <span class="enscript-keyword">if</span> (service == entry-&gt;refcon0) <span class="enscript-keyword">return</span>;
+	}
+    }
+
+    entry = IONew(iocpu_platform_action_entry_t, 1);
+    entry-&gt;action = &amp;IOServicePlatformAction;
+    entry-&gt;name = service-&gt;getName();
+    priority = num-&gt;unsigned32BitValue();
+    <span class="enscript-keyword">if</span> (reverse)
+	entry-&gt;priority = -priority;
+    <span class="enscript-keyword">else</span>
+	entry-&gt;priority = priority;
+    entry-&gt;refcon0 = service;
+    entry-&gt;refcon1 = (<span class="enscript-type">void</span> *) key;
+
+    iocpu_add_platform_action(queue, entry);
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">IOCPUInitialize</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-keyword">for</span> (uint32_t qidx = kQueueSleep; qidx &lt; kQueueCount; qidx++)
+    {
+	queue_init(&amp;gActionQueues[qidx]);
+    }
+
+    gIOPlatformSleepActionKey	     = gActionSymbols[kQueueSleep]
+    	= OSSymbol::withCStringNoCopy(kIOPlatformSleepActionKey);
+    gIOPlatformWakeActionKey	     = gActionSymbols[kQueueWake]
+    	= OSSymbol::withCStringNoCopy(kIOPlatformWakeActionKey);
+    gIOPlatformQuiesceActionKey	     = gActionSymbols[kQueueQuiesce]
+    	= OSSymbol::withCStringNoCopy(kIOPlatformQuiesceActionKey);
+    gIOPlatformActiveActionKey	     = gActionSymbols[kQueueActive]
+    	= OSSymbol::withCStringNoCopy(kIOPlatformActiveActionKey);
+    gIOPlatformHaltRestartActionKey  = gActionSymbols[kQueueHaltRestart]
+    	= OSSymbol::withCStringNoCopy(kIOPlatformHaltRestartActionKey);
+    gIOPlatformPanicActionKey = gActionSymbols[kQueuePanic]
+    	= OSSymbol::withCStringNoCopy(kIOPlatformPanicActionKey);
+}
+
+IOReturn
+<span class="enscript-function-name">IOInstallServicePlatformActions</span>(IOService * service)
+{
+    IOInstallServicePlatformAction(service, kQueueHaltRestart);
+    IOInstallServicePlatformAction(service, kQueuePanic);
+
+    <span class="enscript-keyword">return</span> (kIOReturnSuccess);
+}
+
+IOReturn
+<span class="enscript-function-name">IORemoveServicePlatformActions</span>(IOService * service)
+{
+    iocpu_platform_action_entry_t * entry;
+    iocpu_platform_action_entry_t * next;
+
+    <span class="enscript-keyword">for</span> (uint32_t qidx = kQueueSleep; qidx &lt; kQueueCount; qidx++)
+    {
+	next = (typeof(entry)) queue_first(&amp;gActionQueues[qidx]);
+	<span class="enscript-keyword">while</span> (!queue_end(&amp;gActionQueues[qidx], &amp;next-&gt;link))
+	{
+	    entry = next;
+	    next = (typeof(entry)) queue_next(&amp;entry-&gt;link);
+	    <span class="enscript-keyword">if</span> (service == entry-&gt;refcon0)
+	    {
+		iocpu_remove_platform_action(entry);
+		IODelete(entry, iocpu_platform_action_entry_t, 1);
+	    }
+	}
+    }
+
+    <span class="enscript-keyword">return</span> (kIOReturnSuccess);
+}
+
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+kern_return_t <span class="enscript-function-name">PE_cpu_start</span>(cpu_id_t target,
+			   vm_offset_t start_paddr, vm_offset_t arg_paddr)
+{
+  IOCPU *targetCPU = OSDynamicCast(IOCPU, (OSObject *)target);
+  
+  <span class="enscript-keyword">if</span> (targetCPU == 0) <span class="enscript-keyword">return</span> KERN_FAILURE;
+  <span class="enscript-keyword">return</span> targetCPU-&gt;startCPU(start_paddr, arg_paddr);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PE_cpu_halt</span>(cpu_id_t target)
+{
+  IOCPU *targetCPU = OSDynamicCast(IOCPU, (OSObject *)target);
+  
+  <span class="enscript-keyword">if</span> (targetCPU) targetCPU-&gt;haltCPU();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PE_cpu_signal</span>(cpu_id_t source, cpu_id_t target)
+{
+  IOCPU *sourceCPU = OSDynamicCast(IOCPU, (OSObject *)source);
+  IOCPU *targetCPU = OSDynamicCast(IOCPU, (OSObject *)target);
+  
+  <span class="enscript-keyword">if</span> (sourceCPU &amp;&amp; targetCPU) sourceCPU-&gt;signalCPU(targetCPU);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PE_cpu_signal_deferred</span>(cpu_id_t source, cpu_id_t target)
+{
+  IOCPU *sourceCPU = OSDynamicCast(IOCPU, (OSObject *)source);
+  IOCPU *targetCPU = OSDynamicCast(IOCPU, (OSObject *)target);
+
+  <span class="enscript-keyword">if</span> (sourceCPU &amp;&amp; targetCPU) sourceCPU-&gt;signalCPUDeferred(targetCPU);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PE_cpu_signal_cancel</span>(cpu_id_t source, cpu_id_t target)
+{
+  IOCPU *sourceCPU = OSDynamicCast(IOCPU, (OSObject *)source);
+  IOCPU *targetCPU = OSDynamicCast(IOCPU, (OSObject *)target);
+
+  <span class="enscript-keyword">if</span> (sourceCPU &amp;&amp; targetCPU) sourceCPU-&gt;signalCPUCancel(targetCPU);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PE_cpu_machine_init</span>(cpu_id_t target, boolean_t bootb)
+{
+  IOCPU *targetCPU = OSDynamicCast(IOCPU, (OSObject *)target);
+  
+  <span class="enscript-keyword">if</span> (targetCPU) targetCPU-&gt;initCPU(bootb);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">PE_cpu_machine_quiesce</span>(cpu_id_t target)
+{
+  IOCPU *targetCPU = OSDynamicCast(IOCPU, (OSObject *)target);
+
+  <span class="enscript-keyword">if</span> (targetCPU) targetCPU-&gt;quiesceCPU();
+}
+
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOService
+
+<span class="enscript-function-name">OSDefineMetaClassAndAbstractStructors</span>(IOCPU, IOService);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOCPU, 0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOCPU, 1);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOCPU, 2);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOCPU, 3);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOCPU, 4);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOCPU, 5);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOCPU, 6);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOCPU, 7);
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+<span class="enscript-type">static</span> OSArray *gIOCPUs;
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> OSSymbol *gIOCPUStateKey;
+<span class="enscript-type">static</span> OSString *gIOCPUStateNames[kIOCPUStateCount];
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOCPUSleepKernel</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-type">long</span> cnt, numCPUs;
+    IOCPU *target;
+    IOCPU *bootCPU = NULL;
+    IOPMrootDomain  *rootDomain = IOService::getPMRootDomain();
+
+    kprintf(<span class="enscript-string">&quot;IOCPUSleepKernel\n&quot;</span>);
+
+    IORegistryIterator * iter;
+    OSOrderedSet *       all;
+    IOService *          service;
+
+    rootDomain-&gt;tracePoint( kIOPMTracePointSleepPlatformActions );
+
+    iter = IORegistryIterator::iterateOver( gIOServicePlane,
+					    kIORegistryIterateRecursively );
+    <span class="enscript-keyword">if</span>( iter)
+    {
+	all = 0;
+	<span class="enscript-keyword">do</span> 
+	{
+	    <span class="enscript-keyword">if</span> (all)
+		all-&gt;release();
+	    all = iter-&gt;iterateAll();
+	}
+	<span class="enscript-keyword">while</span> (!iter-&gt;isValid());
+	iter-&gt;release();
+
+	<span class="enscript-keyword">if</span> (all)
+	{
+	    <span class="enscript-keyword">while</span>((service = (IOService *) all-&gt;getFirstObject()))
+	    {
+		<span class="enscript-keyword">for</span> (uint32_t qidx = kQueueSleep; qidx &lt;= kQueueActive; qidx++)
+		{
+		    IOInstallServicePlatformAction(service, qidx);
+		}
+		all-&gt;removeObject(service);
+	    }
+	    all-&gt;release();
+	}	
+    }
+
+    iocpu_run_platform_actions(&amp;gActionQueues[kQueueSleep], 0, 0U-1,
+				NULL, NULL, NULL);
+
+    rootDomain-&gt;tracePoint( kIOPMTracePointSleepCPUs );
+
+    numCPUs = gIOCPUs-&gt;getCount();
+    <span class="enscript-comment">// Sleep the CPUs.
+</span>    cnt = numCPUs;
+    <span class="enscript-keyword">while</span> (cnt--) 
+    {
+        target = OSDynamicCast(IOCPU, gIOCPUs-&gt;getObject(cnt));
+        
+        <span class="enscript-comment">// We make certain that the bootCPU is the last to sleep
+</span>        <span class="enscript-comment">// We'll skip it for now, and halt it after finishing the
+</span>        <span class="enscript-comment">// non-boot CPU's.
+</span>        <span class="enscript-keyword">if</span> (target-&gt;getCPUNumber() == kBootCPUNumber) 
+        {
+            bootCPU = target;
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (target-&gt;getCPUState() == kIOCPUStateRunning) 
+        {
+            target-&gt;haltCPU();
+        }
+    }
+
+    rootDomain-&gt;tracePoint( kIOPMTracePointSleepPlatformDriver );
+
+    <span class="enscript-comment">// Now sleep the boot CPU.
+</span>    <span class="enscript-keyword">if</span> (bootCPU)
+        bootCPU-&gt;haltCPU();
+
+    rootDomain-&gt;tracePoint( kIOPMTracePointWakePlatformActions );
+
+    iocpu_run_platform_actions(&amp;gActionQueues[kQueueWake], 0, 0U-1,
+				    NULL, NULL, NULL);
+
+    iocpu_platform_action_entry_t * entry;
+    <span class="enscript-keyword">for</span> (uint32_t qidx = kQueueSleep; qidx &lt;= kQueueActive; qidx++)
+    {
+	<span class="enscript-keyword">while</span> (!(queue_empty(&amp;gActionQueues[qidx])))
+	{
+	    entry = (typeof(entry)) queue_first(&amp;gActionQueues[qidx]);
+	    iocpu_remove_platform_action(entry);
+	    IODelete(entry, iocpu_platform_action_entry_t, 1);
+	}
+    }
+
+    rootDomain-&gt;tracePoint( kIOPMTracePointWakeCPUs );
+
+    <span class="enscript-comment">// Wake the other CPUs.
+</span>    <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; numCPUs; cnt++) 
+    {
+        target = OSDynamicCast(IOCPU, gIOCPUs-&gt;getObject(cnt));
+        
+        <span class="enscript-comment">// Skip the already-woken boot CPU.
+</span>        <span class="enscript-keyword">if</span> ((target-&gt;getCPUNumber() != kBootCPUNumber)
+            &amp;&amp; (target-&gt;getCPUState() == kIOCPUStateStopped))
+        {
+            processor_start(target-&gt;getMachProcessor());
+        }
+    }
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOCPU::initCPUs</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">if</span> (gIOCPUs == 0) {
+    gIOCPUs = OSArray::withCapacity(1);
+    
+    gIOCPUStateKey = OSSymbol::withCStringNoCopy(<span class="enscript-string">&quot;IOCPUState&quot;</span>);
+    
+    gIOCPUStateNames[kIOCPUStateUnregistered] =
+      <span class="enscript-reference">OSString</span>::withCStringNoCopy(<span class="enscript-string">&quot;Unregistered&quot;</span>);
+    gIOCPUStateNames[kIOCPUStateUninitalized] =
+      <span class="enscript-reference">OSString</span>::withCStringNoCopy(<span class="enscript-string">&quot;Uninitalized&quot;</span>);
+    gIOCPUStateNames[kIOCPUStateStopped] =
+      <span class="enscript-reference">OSString</span>::withCStringNoCopy(<span class="enscript-string">&quot;Stopped&quot;</span>);
+    gIOCPUStateNames[kIOCPUStateRunning] =
+      <span class="enscript-reference">OSString</span>::withCStringNoCopy(<span class="enscript-string">&quot;Running&quot;</span>);
+  }
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOCPU::start</span>(IOService *provider)
+{
+  OSData *busFrequency, *cpuFrequency, *timebaseFrequency;
+  
+  <span class="enscript-keyword">if</span> (!super::start(provider)) <span class="enscript-keyword">return</span> false;
+  
+  initCPUs();
+  
+  _cpuGroup = gIOCPUs;
+  cpuNub = provider;
+  
+  gIOCPUs-&gt;setObject(<span class="enscript-keyword">this</span>);
+  
+  <span class="enscript-comment">// Correct the bus, cpu and timebase frequencies in the device tree.
+</span>  <span class="enscript-keyword">if</span> (gPEClockFrequencyInfo.bus_frequency_hz &lt; 0x100000000ULL) {
+    busFrequency = OSData::withBytesNoCopy((<span class="enscript-type">void</span> *)&amp;gPEClockFrequencyInfo.bus_clock_rate_hz, 4);
+  } <span class="enscript-keyword">else</span> {
+    busFrequency = OSData::withBytesNoCopy((<span class="enscript-type">void</span> *)&amp;gPEClockFrequencyInfo.bus_frequency_hz, 8);
+  }
+  provider-&gt;setProperty(<span class="enscript-string">&quot;bus-frequency&quot;</span>, busFrequency);
+  busFrequency-&gt;release();
+    
+  <span class="enscript-keyword">if</span> (gPEClockFrequencyInfo.cpu_frequency_hz &lt; 0x100000000ULL) {
+    cpuFrequency = OSData::withBytesNoCopy((<span class="enscript-type">void</span> *)&amp;gPEClockFrequencyInfo.cpu_clock_rate_hz, 4);
+  } <span class="enscript-keyword">else</span> {
+    cpuFrequency = OSData::withBytesNoCopy((<span class="enscript-type">void</span> *)&amp;gPEClockFrequencyInfo.cpu_frequency_hz, 8);
+  }
+  provider-&gt;setProperty(<span class="enscript-string">&quot;clock-frequency&quot;</span>, cpuFrequency);
+  cpuFrequency-&gt;release();
+  
+  timebaseFrequency = OSData::withBytesNoCopy((<span class="enscript-type">void</span> *)&amp;gPEClockFrequencyInfo.timebase_frequency_hz, 4);
+  provider-&gt;setProperty(<span class="enscript-string">&quot;timebase-frequency&quot;</span>, timebaseFrequency);
+  timebaseFrequency-&gt;release();
+  
+  <span class="enscript-reference">super</span>::setProperty(<span class="enscript-string">&quot;IOCPUID&quot;</span>, getRegistryEntryID(), <span class="enscript-keyword">sizeof</span>(uint64_t)*8);
+  
+  setCPUNumber(0);
+  setCPUState(kIOCPUStateUnregistered);
+  
+  <span class="enscript-keyword">return</span> true;
+}
+
+OSObject *<span class="enscript-function-name">IOCPU::getProperty</span>(<span class="enscript-type">const</span> OSSymbol *aKey) <span class="enscript-type">const</span>
+{
+  <span class="enscript-keyword">if</span> (aKey == gIOCPUStateKey) <span class="enscript-keyword">return</span> gIOCPUStateNames[_cpuState];
+  
+  <span class="enscript-keyword">return</span> super::getProperty(aKey);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOCPU::setProperty</span>(<span class="enscript-type">const</span> OSSymbol *aKey, OSObject *anObject)
+{
+  OSString *stateStr;
+  
+  <span class="enscript-keyword">if</span> (aKey == gIOCPUStateKey) {
+    stateStr = OSDynamicCast(OSString, anObject);
+    <span class="enscript-keyword">if</span> (stateStr == 0) <span class="enscript-keyword">return</span> false;
+    
+    <span class="enscript-keyword">if</span> (_cpuNumber == 0) <span class="enscript-keyword">return</span> false;
+    
+    <span class="enscript-keyword">if</span> (stateStr-&gt;isEqualTo(<span class="enscript-string">&quot;running&quot;</span>)) {
+      <span class="enscript-keyword">if</span> (_cpuState == kIOCPUStateStopped) {
+	processor_start(machProcessor);
+      } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (_cpuState != kIOCPUStateRunning) {
+	<span class="enscript-keyword">return</span> false;
+      }
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (stateStr-&gt;isEqualTo(<span class="enscript-string">&quot;stopped&quot;</span>)) {
+      <span class="enscript-keyword">if</span> (_cpuState == kIOCPUStateRunning) {
+        haltCPU();
+      } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (_cpuState != kIOCPUStateStopped) {
+        <span class="enscript-keyword">return</span> false;
+      }
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">return</span> false;
+    
+    <span class="enscript-keyword">return</span> true;
+  }
+  
+  <span class="enscript-keyword">return</span> super::setProperty(aKey, anObject);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">IOCPU::serializeProperties</span>(OSSerialize *serialize) <span class="enscript-type">const</span>
+{
+	<span class="enscript-type">bool</span> result;
+	OSDictionary *dict = dictionaryWithProperties();
+	<span class="enscript-keyword">if</span> (!dict) <span class="enscript-keyword">return</span> false;
+	dict-&gt;setObject(gIOCPUStateKey, gIOCPUStateNames[_cpuState]);
+	result = dict-&gt;serialize(serialize);
+	dict-&gt;release();  
+	<span class="enscript-keyword">return</span> result;
+}
+
+IOReturn <span class="enscript-function-name">IOCPU::setProperties</span>(OSObject *properties)
+{
+  OSDictionary *dict = OSDynamicCast(OSDictionary, properties);
+  OSString     *stateStr;
+  IOReturn     result;
+  
+  <span class="enscript-keyword">if</span> (dict == 0) <span class="enscript-keyword">return</span> kIOReturnUnsupported;
+  
+  stateStr = OSDynamicCast(OSString, dict-&gt;getObject(gIOCPUStateKey));
+  <span class="enscript-keyword">if</span> (stateStr != 0) {
+    result = IOUserClient::clientHasPrivilege(current_task(), kIOClientPrivilegeAdministrator);
+    <span class="enscript-keyword">if</span> (result != kIOReturnSuccess) <span class="enscript-keyword">return</span> result;
+    
+    <span class="enscript-keyword">if</span> (setProperty(gIOCPUStateKey, stateStr)) <span class="enscript-keyword">return</span> kIOReturnSuccess;
+    
+    <span class="enscript-keyword">return</span> kIOReturnUnsupported;
+  }
+  
+  <span class="enscript-keyword">return</span> kIOReturnUnsupported;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOCPU::signalCPU</span>(IOCPU *<span class="enscript-comment">/*target*/</span>)
+{
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOCPU::signalCPUDeferred</span>(IOCPU *target)
+{
+  <span class="enscript-comment">// Our CPU may not support deferred IPIs,
+</span>  <span class="enscript-comment">// so send a regular IPI by default
+</span>  signalCPU(target);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOCPU::signalCPUCancel</span>(IOCPU *<span class="enscript-comment">/*target*/</span>)
+{
+  <span class="enscript-comment">// Meant to cancel signals sent by
+</span>  <span class="enscript-comment">// signalCPUDeferred; unsupported
+</span>  <span class="enscript-comment">// by default
+</span>}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOCPU::enableCPUTimeBase</span>(<span class="enscript-type">bool</span> <span class="enscript-comment">/*enable*/</span>)
+{
+}
+
+UInt32 <span class="enscript-function-name">IOCPU::getCPUNumber</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span> _cpuNumber;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOCPU::setCPUNumber</span>(UInt32 cpuNumber)
+{
+  _cpuNumber = cpuNumber;
+  <span class="enscript-reference">super</span>::setProperty(<span class="enscript-string">&quot;IOCPUNumber&quot;</span>, _cpuNumber, 32);
+}
+
+UInt32 <span class="enscript-function-name">IOCPU::getCPUState</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span> _cpuState;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOCPU::setCPUState</span>(UInt32 cpuState)
+{
+  <span class="enscript-keyword">if</span> (cpuState &lt; kIOCPUStateCount) {
+    _cpuState = cpuState;
+  }
+}
+
+OSArray *<span class="enscript-function-name">IOCPU::getCPUGroup</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span> _cpuGroup;
+}
+
+UInt32 <span class="enscript-function-name">IOCPU::getCPUGroupSize</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span> _cpuGroup-&gt;getCount();
+}
+
+processor_t <span class="enscript-function-name">IOCPU::getMachProcessor</span>(<span class="enscript-type">void</span>)
+{
+  <span class="enscript-keyword">return</span> machProcessor;
+}
+
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">super</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">super</span> IOInterruptController
+
+<span class="enscript-function-name">OSDefineMetaClassAndStructors</span>(IOCPUInterruptController, IOInterruptController);
+
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOCPUInterruptController, 0);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOCPUInterruptController, 1);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOCPUInterruptController, 2);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOCPUInterruptController, 3);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOCPUInterruptController, 4);
+<span class="enscript-function-name">OSMetaClassDefineReservedUnused</span>(IOCPUInterruptController, 5);
+
+
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+
+IOReturn <span class="enscript-function-name">IOCPUInterruptController::initCPUInterruptController</span>(<span class="enscript-type">int</span> sources)
+{
+  <span class="enscript-type">int</span> cnt;
+  
+  <span class="enscript-keyword">if</span> (!super::init()) <span class="enscript-keyword">return</span> kIOReturnInvalid;
+  
+  numCPUs = sources;
+  
+  cpus = (IOCPU **)IOMalloc(numCPUs * <span class="enscript-keyword">sizeof</span>(IOCPU *));
+  <span class="enscript-keyword">if</span> (cpus == 0) <span class="enscript-keyword">return</span> kIOReturnNoMemory;
+  bzero(cpus, numCPUs * <span class="enscript-keyword">sizeof</span>(IOCPU *));
+  
+  vectors = (IOInterruptVector *)IOMalloc(numCPUs * <span class="enscript-keyword">sizeof</span>(IOInterruptVector));
+  <span class="enscript-keyword">if</span> (vectors == 0) <span class="enscript-keyword">return</span> kIOReturnNoMemory;
+  bzero(vectors, numCPUs * <span class="enscript-keyword">sizeof</span>(IOInterruptVector));
+  
+  <span class="enscript-comment">// Allocate locks for the
+</span>  <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; numCPUs; cnt++) {
+    vectors[cnt].interruptLock = IOLockAlloc();
+    <span class="enscript-keyword">if</span> (vectors[cnt].interruptLock == NULL) {
+      <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; numCPUs; cnt++) {
+	<span class="enscript-keyword">if</span> (vectors[cnt].interruptLock != NULL)
+	  IOLockFree(vectors[cnt].interruptLock);
+      }
+      <span class="enscript-keyword">return</span> kIOReturnNoResources;
+    }
+  }
+  
+  ml_init_max_cpus(numCPUs);
+  
+  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOCPUInterruptController::registerCPUInterruptController</span>(<span class="enscript-type">void</span>)
+{
+  registerService();
+  
+  getPlatform()-&gt;registerInterruptController(gPlatformInterruptControllerName,
+					     <span class="enscript-keyword">this</span>);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOCPUInterruptController::setCPUInterruptProperties</span>(IOService *service)
+{
+  <span class="enscript-type">int</span>          cnt;
+  OSArray      *controller;
+  OSArray      *specifier;
+  OSData       *tmpData;
+  <span class="enscript-type">long</span>         tmpLong;
+  
+  <span class="enscript-keyword">if</span> ((service-&gt;getProperty(gIOInterruptControllersKey) != 0) &amp;&amp;
+      (service-&gt;getProperty(gIOInterruptSpecifiersKey) != 0))
+    <span class="enscript-keyword">return</span>;
+  
+  <span class="enscript-comment">// Create the interrupt specifer array.
+</span>  specifier = OSArray::withCapacity(numCPUs);
+  <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; numCPUs; cnt++) {
+    tmpLong = cnt;
+    tmpData = OSData::withBytes(&amp;tmpLong, <span class="enscript-keyword">sizeof</span>(tmpLong));
+    specifier-&gt;setObject(tmpData);
+    tmpData-&gt;release();
+  };
+  
+  <span class="enscript-comment">// Create the interrupt controller array.
+</span>  controller = OSArray::withCapacity(numCPUs);
+  <span class="enscript-keyword">for</span> (cnt = 0; cnt &lt; numCPUs; cnt++) {
+    controller-&gt;setObject(gPlatformInterruptControllerName);
+  }
+  
+  <span class="enscript-comment">// Put the two arrays into the property table.
+</span>  service-&gt;setProperty(gIOInterruptControllersKey, controller);
+  service-&gt;setProperty(gIOInterruptSpecifiersKey, specifier);
+  controller-&gt;release();
+  specifier-&gt;release();
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">IOCPUInterruptController::enableCPUInterrupt</span>(IOCPU *cpu)
+{
+	IOInterruptHandler handler = OSMemberFunctionCast(
+		IOInterruptHandler, <span class="enscript-keyword">this</span>, &amp;IOCPUInterruptController::handleInterrupt);
+
+	ml_install_interrupt_handler(cpu, cpu-&gt;getCPUNumber(), <span class="enscript-keyword">this</span>, handler, 0);
+
+	<span class="enscript-comment">// Ensure that the increment is seen by all processors
+</span>	OSIncrementAtomic(&amp;enabledCPUs);
+
+	<span class="enscript-keyword">if</span> (enabledCPUs == numCPUs) {
+    <span class="enscript-reference">IOService</span>::cpusRunning();
+    thread_wakeup(<span class="enscript-keyword">this</span>);
+  }
+}
+
+IOReturn <span class="enscript-function-name">IOCPUInterruptController::registerInterrupt</span>(IOService *nub,
+						     <span class="enscript-type">int</span> source,
+						     <span class="enscript-type">void</span> *target,
+						     IOInterruptHandler handler,
+						     <span class="enscript-type">void</span> *refCon)
+{
+  IOInterruptVector *vector;
+  
+  <span class="enscript-keyword">if</span> (source &gt;= numCPUs) <span class="enscript-keyword">return</span> kIOReturnNoResources;
+  
+  vector = &amp;vectors[source];
+  
+  <span class="enscript-comment">// Get the lock for this vector.
+</span>  IOTakeLock(vector-&gt;interruptLock);
+  
+  <span class="enscript-comment">// Make sure the vector is not in use.
+</span>  <span class="enscript-keyword">if</span> (vector-&gt;interruptRegistered) {
+    IOUnlock(vector-&gt;interruptLock);
+    <span class="enscript-keyword">return</span> kIOReturnNoResources;
+  }
+  
+  <span class="enscript-comment">// Fill in vector with the client's info.
+</span>  vector-&gt;handler = handler;
+  vector-&gt;nub     = nub;
+  vector-&gt;source  = source;
+  vector-&gt;target  = target;
+  vector-&gt;refCon  = refCon;
+  
+  <span class="enscript-comment">// Get the vector ready.  It starts hard disabled.
+</span>  vector-&gt;interruptDisabledHard = 1;
+  vector-&gt;interruptDisabledSoft = 1;
+  vector-&gt;interruptRegistered   = 1;
+  
+  IOUnlock(vector-&gt;interruptLock);
+  
+  <span class="enscript-keyword">if</span> (enabledCPUs != numCPUs) {
+    assert_wait(<span class="enscript-keyword">this</span>, THREAD_UNINT);
+    thread_block(THREAD_CONTINUE_NULL);
+  }
+  
+  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOReturn <span class="enscript-function-name">IOCPUInterruptController::getInterruptType</span>(IOService *<span class="enscript-comment">/*nub*/</span>,
+						    <span class="enscript-type">int</span> <span class="enscript-comment">/*source*/</span>,
+						    <span class="enscript-type">int</span> *interruptType)
+{
+  <span class="enscript-keyword">if</span> (interruptType == 0) <span class="enscript-keyword">return</span> kIOReturnBadArgument;
+  
+  *interruptType = kIOInterruptTypeLevel;
+  
+  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOReturn <span class="enscript-function-name">IOCPUInterruptController::enableInterrupt</span>(IOService *<span class="enscript-comment">/*nub*/</span>,
+						   <span class="enscript-type">int</span> <span class="enscript-comment">/*source*/</span>)
+{
+<span class="enscript-comment">//  ml_set_interrupts_enabled(true);
+</span>  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOReturn <span class="enscript-function-name">IOCPUInterruptController::disableInterrupt</span>(IOService *<span class="enscript-comment">/*nub*/</span>,
+						    <span class="enscript-type">int</span> <span class="enscript-comment">/*source*/</span>)
+{
+<span class="enscript-comment">//  ml_set_interrupts_enabled(false);
+</span>  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOReturn <span class="enscript-function-name">IOCPUInterruptController::causeInterrupt</span>(IOService *<span class="enscript-comment">/*nub*/</span>,
+						  <span class="enscript-type">int</span> <span class="enscript-comment">/*source*/</span>)
+{
+  ml_cause_interrupt();
+  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+IOReturn <span class="enscript-function-name">IOCPUInterruptController::handleInterrupt</span>(<span class="enscript-type">void</span> *<span class="enscript-comment">/*refCon*/</span>,
+						   IOService *<span class="enscript-comment">/*nub*/</span>,
+						   <span class="enscript-type">int</span> source)
+{
+  IOInterruptVector *vector;
+  
+  vector = &amp;vectors[source];
+  
+  <span class="enscript-keyword">if</span> (!vector-&gt;interruptRegistered) <span class="enscript-keyword">return</span> kIOReturnInvalid;
+  
+  vector-&gt;handler(vector-&gt;target, vector-&gt;refCon,
+		  vector-&gt;nub, vector-&gt;source);
+  
+  <span class="enscript-keyword">return</span> kIOReturnSuccess;
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+</pre>
+<hr />
+</body></html>

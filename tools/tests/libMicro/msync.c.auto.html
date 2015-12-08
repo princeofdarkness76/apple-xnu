@@ -1,0 +1,215 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>msync.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">msync.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms
+ * of the Common Development and Distribution License
+ * (the &quot;License&quot;).  You may not use this file except
+ * in compliance with the License.
+ *
+ * You can obtain a copy of the license at
+ * src/OPENSOLARIS.LICENSE
+ * or <a href="http://www.opensolaris.org/os/licensing.">http://www.opensolaris.org/os/licensing.</a>
+ * See the License for the specific language governing
+ * permissions and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL
+ * HEADER in each file and include the License file at
+ * usr/src/OPENSOLARIS.LICENSE.  If applicable,
+ * add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets &quot;[]&quot; replaced with your
+ * own identifying information: Portions Copyright [yyyy]
+ * [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright 2004 Sun Microsystems, Inc.  All rights reserved.
+ * Use is subject to license terms.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mman.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;strings.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;libmicro.h&quot;</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+	<span class="enscript-type">char</span> 			*ts_map;
+	<span class="enscript-type">int</span>			ts_foo; <span class="enscript-comment">/* defeat optimizers */</span>
+} tsd_t;
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DEFF</span>			<span class="enscript-string">&quot;/dev/zero&quot;</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DEFL</span>			8192
+
+<span class="enscript-type">static</span> <span class="enscript-type">char</span>			*optf = DEFF;
+<span class="enscript-type">static</span> <span class="enscript-type">long</span> <span class="enscript-type">long</span>		optl = DEFL;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			optr = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			opts = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			optw = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			opta = MS_SYNC;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			opti = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			anon = 0;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>			pagesize;
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_init</span>()
+{
+	lm_tsdsize = <span class="enscript-keyword">sizeof</span> (tsd_t);
+
+	(<span class="enscript-type">void</span>) sprintf(lm_optstr, <span class="enscript-string">&quot;af:il:rsw&quot;</span>);
+
+	(<span class="enscript-type">void</span>) sprintf(lm_usage,
+	    <span class="enscript-string">&quot;       [-f file-to-map (default %s)]\n&quot;</span>
+	    <span class="enscript-string">&quot;       [-l mapping-length (default %d)]\n&quot;</span>
+	    <span class="enscript-string">&quot;       [-r] (read a byte from each page between msyncs)\n&quot;</span>
+	    <span class="enscript-string">&quot;       [-w] (write a byte to each page between msyncs)\n&quot;</span>
+	    <span class="enscript-string">&quot;       [-s] (use MAP_SHARED instead of MAP_PRIVATE)\n&quot;</span>
+	    <span class="enscript-string">&quot;       [-a (specify MS_ASYNC rather than default MS_SYNC)\n&quot;</span>
+	    <span class="enscript-string">&quot;       [-i (specify MS_INVALIDATE)\n&quot;</span>
+	    <span class="enscript-string">&quot;notes: measures msync()\n&quot;</span>,
+	    DEFF, DEFL);
+
+	(<span class="enscript-type">void</span>) sprintf(lm_header, <span class="enscript-string">&quot;%8s %6s&quot;</span>, <span class="enscript-string">&quot;length&quot;</span>, <span class="enscript-string">&quot;flags&quot;</span>);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_optswitch</span>(<span class="enscript-type">int</span> opt, <span class="enscript-type">char</span> *optarg)
+{
+	<span class="enscript-keyword">switch</span> (opt) {
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'a'</span>:
+		opta = MS_ASYNC;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'f'</span>:
+		optf = optarg;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'i'</span>:
+		opti = MS_INVALIDATE;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'l'</span>:
+		optl = sizetoll(optarg);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'r'</span>:
+		optr = 1;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'s'</span>:
+		opts = 1;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'w'</span>:
+		optw = 1;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	pagesize = getpagesize();
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initworker</span>(<span class="enscript-type">void</span> *tsd)
+{
+	tsd_t			*ts = (tsd_t *)tsd;
+
+	<span class="enscript-type">int</span> fd;
+
+	<span class="enscript-keyword">if</span> ((fd = open(optf, O_RDWR)) &lt; 0) {
+		perror(<span class="enscript-string">&quot;open:&quot;</span>);
+		<span class="enscript-keyword">return</span> (1);
+	}
+
+	(<span class="enscript-type">void</span>) ftruncate(fd, optl);
+
+	<span class="enscript-keyword">if</span> ((ts-&gt;ts_map = (<span class="enscript-type">char</span> *)mmap(NULL, optl,
+	    PROT_READ | PROT_WRITE, opts ? MAP_SHARED : MAP_PRIVATE,
+	    fd, 0L)) == MAP_FAILED) {
+		perror(<span class="enscript-string">&quot;mmap:&quot;</span>);
+		(<span class="enscript-type">void</span>) close(fd);
+		<span class="enscript-keyword">return</span> (1);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark</span>(<span class="enscript-type">void</span> *tsd, result_t *res)
+{
+	tsd_t			*ts = (tsd_t *)tsd;
+	<span class="enscript-type">int</span>			i, j;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; lm_optB; i++) {
+
+		<span class="enscript-keyword">if</span> (msync(ts-&gt;ts_map, optl, opta | opti) &lt; 0) {
+			perror(<span class="enscript-string">&quot;msync:&quot;</span>);
+			res-&gt;re_errors++;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (optr) {
+			<span class="enscript-keyword">for</span> (j = 0; j &lt; optl; j += pagesize) {
+				ts-&gt;ts_foo += ts-&gt;ts_map[j];
+			}
+		}
+
+		<span class="enscript-keyword">if</span> (optw) {
+			<span class="enscript-keyword">for</span> (j = 0; j &lt; optl; j += pagesize) {
+				ts-&gt;ts_map[j] = 1;
+			}
+		}
+	}
+	res-&gt;re_count = i;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">char</span> *
+<span class="enscript-function-name">benchmark_result</span>()
+{
+	<span class="enscript-type">static</span> <span class="enscript-type">char</span>		result[256];
+	<span class="enscript-type">char</span>			flags[6];
+
+	flags[0] = anon ? <span class="enscript-string">'a'</span> : <span class="enscript-string">'-'</span>;
+	flags[1] = optr ? <span class="enscript-string">'r'</span> : <span class="enscript-string">'-'</span>;
+	flags[2] = optw ? <span class="enscript-string">'w'</span> : <span class="enscript-string">'-'</span>;
+	flags[3] = opts ? <span class="enscript-string">'s'</span> : <span class="enscript-string">'-'</span>;
+	flags[4] = opti ? <span class="enscript-string">'i'</span> : <span class="enscript-string">'-'</span>;
+	flags[5] = 0;
+
+	(<span class="enscript-type">void</span>) sprintf(result, <span class="enscript-string">&quot;%8lld %6s&quot;</span>, optl, flags);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,2286 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>FileExtentMapping.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">FileExtentMapping.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../../hfs.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../../hfs_format.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../../hfs_endian.h&quot;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../headers/FileMgrInternal.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../headers/BTreesInternal.h&quot;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+ 
+<span class="enscript-comment">/*
+============================================================
+Public (Exported) Routines:
+============================================================
+
+	ExtendFileC		Allocate more space to a given file.
+
+	CompareExtentKeys
+					Compare two extents file keys (a search key and a trial
+					key).  Used by the BTree manager when searching for,
+					adding, or deleting keys in the extents file of an HFS
+					volume.
+					
+	CompareExtentKeysPlus
+					Compare two extents file keys (a search key and a trial
+					key).  Used by the BTree manager when searching for,
+					adding, or deleting keys in the extents file of an HFS+
+					volume.
+					
+	MapFileBlockC	Convert (map) an offset within a given file into a
+					physical disk address.
+					
+	TruncateFileC	Truncates the disk space allocated to a file.  The file
+					space is truncated to a specified new physical EOF, rounded
+					up to the next allocation block boundry.  There is an option
+					to truncate to the end of the extent containing the new EOF.
+	
+	FlushExtentFile
+					Flush the extents file for a given volume.
+
+	SearchExtentFile
+					Search the FCB and extents file for an extent record that
+					contains a given file position (in bytes).
+
+
+============================================================
+Internal Routines:
+============================================================
+	FindExtentRecord
+					Search the extents BTree for a particular extent record.
+	SearchExtentRecord
+					Search a given extent record to see if it contains a given
+					file position (in bytes).  Used by SearchExtentFile.
+	ReleaseExtents
+					Deallocate all allocation blocks in all extents of an extent
+					data record.
+	TruncateExtents
+					Deallocate blocks and delete extent records for all allocation
+					blocks beyond a certain point in a file.  The starting point
+					must be the first file allocation block for some extent record
+					for the file.
+	DeallocateFork
+					Deallocate all allocation blocks belonging to a given fork.
+	UpdateExtentRecord
+					If the extent record came from the extents file, write out
+					the updated record; otherwise, copy the updated record into
+					the FCB resident extent record.  If the record has no extents,
+					and was in the extents file, then delete the record instead.
+*/</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> int64_t kTwoGigabytes = 0x80000000LL;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">enum</span>
+{
+	kDataForkType			= 0,
+	kResourceForkType		= 0xFF,
+	
+	kPreviousRecord			= -1
+};
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">HFSPlusToHFSExtents</span>(
+	<span class="enscript-type">const</span> HFSPlusExtentRecord	oldExtents,
+	HFSExtentRecord				newExtents);
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">FindExtentRecord</span>(
+	<span class="enscript-type">const</span> ExtendedVCB		*vcb,
+	u_int8_t				forkType,
+	u_int32_t				fileID,
+	u_int32_t				startBlock,
+	Boolean					allowPrevious,
+	HFSPlusExtentKey		*foundKey,
+	HFSPlusExtentRecord		foundData,
+	u_int32_t				*foundHint);
+
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">DeleteExtentRecord</span>(
+	<span class="enscript-type">const</span> ExtendedVCB		*vcb,
+	u_int8_t				forkType,
+	u_int32_t				fileID,
+	u_int32_t				startBlock);
+
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">CreateExtentRecord</span>(
+	ExtendedVCB		*vcb,
+	HFSPlusExtentKey		*key,
+	HFSPlusExtentRecord		extents,
+	u_int32_t				*hint);
+
+
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">GetFCBExtentRecord</span>(
+	<span class="enscript-type">const</span> FCB				*fcb,
+	HFSPlusExtentRecord		extents);
+
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">SearchExtentRecord</span>(
+	ExtendedVCB		*vcb,
+	u_int32_t				searchFABN,
+	<span class="enscript-type">const</span> HFSPlusExtentRecord	extentData,
+	u_int32_t				extentDataStartFABN,
+	u_int32_t				*foundExtentDataOffset,
+	u_int32_t				*endingFABNPlusOne,
+	Boolean					*noMoreExtents);
+
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">ReleaseExtents</span>(
+	ExtendedVCB				*vcb,
+	<span class="enscript-type">const</span> HFSPlusExtentRecord	extentRecord,
+	u_int32_t				*numReleasedAllocationBlocks,
+	Boolean 				*releasedLastExtent);
+
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">DeallocateFork</span>(
+	ExtendedVCB 		*vcb,
+	HFSCatalogNodeID	fileID,
+	u_int8_t			forkType,
+	HFSPlusExtentRecord	catalogExtents,
+	Boolean *		recordDeleted);
+
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">TruncateExtents</span>(
+	ExtendedVCB			*vcb,
+	u_int8_t			forkType,
+	u_int32_t			fileID,
+	u_int32_t			startBlock,
+	Boolean *			recordDeleted);
+
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">UpdateExtentRecord</span> (
+	ExtendedVCB		*vcb,
+	FCB				*fcb,
+	<span class="enscript-type">int</span>				deleted,
+	<span class="enscript-type">const</span> HFSPlusExtentKey	*extentFileKey,
+	<span class="enscript-type">const</span> HFSPlusExtentRecord	extentData,
+	u_int32_t					extentBTreeHint);
+
+<span class="enscript-type">static</span> Boolean <span class="enscript-function-name">ExtentsAreIntegral</span>(
+	<span class="enscript-type">const</span> HFSPlusExtentRecord extentRecord,
+	u_int32_t	mask,
+	u_int32_t	*blocksChecked,
+	Boolean		*checkedLastExtent);
+
+<span class="enscript-comment">//_________________________________________________________________________________
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Routine:	FindExtentRecord
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Purpose:	Search the extents BTree for an extent record matching the given
+</span><span class="enscript-comment">//				FileID, fork, and starting file allocation block number.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Inputs:
+</span><span class="enscript-comment">//		vcb				Volume to search
+</span><span class="enscript-comment">//		forkType		0 = data fork, -1 = resource fork
+</span><span class="enscript-comment">//		fileID			File's FileID (CatalogNodeID)
+</span><span class="enscript-comment">//		startBlock		Starting file allocation block number
+</span><span class="enscript-comment">//		allowPrevious	If the desired record isn't found and this flag is set,
+</span><span class="enscript-comment">//						then see if the previous record belongs to the same fork.
+</span><span class="enscript-comment">//						If so, then return it.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Outputs:
+</span><span class="enscript-comment">//		foundKey	The key data for the record actually found
+</span><span class="enscript-comment">//		foundData	The extent record actually found (NOTE: on an HFS volume, the
+</span><span class="enscript-comment">//					fourth entry will be zeroes.
+</span><span class="enscript-comment">//		foundHint	The BTree hint to find the node again
+</span><span class="enscript-comment">//_________________________________________________________________________________
+</span><span class="enscript-type">static</span> OSErr <span class="enscript-function-name">FindExtentRecord</span>(
+	<span class="enscript-type">const</span> ExtendedVCB	*vcb,
+	u_int8_t			forkType,
+	u_int32_t			fileID,
+	u_int32_t			startBlock,
+	Boolean				allowPrevious,
+	HFSPlusExtentKey	*foundKey,
+	HFSPlusExtentRecord	foundData,
+	u_int32_t			*foundHint)
+{
+	FCB *				fcb;
+	<span class="enscript-type">struct</span> BTreeIterator *btIterator = NULL;
+	FSBufferDescriptor	btRecord;
+	OSErr				err;
+	u_int16_t			btRecordSize;
+	
+	err = noErr;
+	<span class="enscript-keyword">if</span> (foundHint)
+		*foundHint = 0;
+	fcb = GetFileControlBlock(vcb-&gt;extentsRefNum);
+
+	MALLOC (btIterator, <span class="enscript-type">struct</span> BTreeIterator*, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> BTreeIterator), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (btIterator == NULL) {
+		<span class="enscript-keyword">return</span> memFullErr;  <span class="enscript-comment">// translates to ENOMEM
+</span>	}
+	bzero(btIterator, <span class="enscript-keyword">sizeof</span>(*btIterator));
+
+	<span class="enscript-comment">/* HFS Plus / HFSX */</span>
+	<span class="enscript-keyword">if</span> (vcb-&gt;vcbSigWord != kHFSSigWord) {
+		HFSPlusExtentKey *	extentKeyPtr;
+		HFSPlusExtentRecord	extentData;
+
+		extentKeyPtr = (HFSPlusExtentKey*) &amp;btIterator-&gt;key;
+		extentKeyPtr-&gt;keyLength	 = kHFSPlusExtentKeyMaximumLength;
+		extentKeyPtr-&gt;forkType	 = forkType;
+		extentKeyPtr-&gt;pad		 = 0;
+		extentKeyPtr-&gt;fileID	 = fileID;
+		extentKeyPtr-&gt;startBlock = startBlock;
+		
+		btRecord.bufferAddress = &amp;extentData;
+		btRecord.itemSize = <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord);
+		btRecord.itemCount = 1;
+
+		err = BTSearchRecord(fcb, btIterator, &amp;btRecord, &amp;btRecordSize, btIterator);
+
+		<span class="enscript-keyword">if</span> (err == btNotFound &amp;&amp; allowPrevious) {
+			err = BTIterateRecord(fcb, kBTreePrevRecord, btIterator, &amp;btRecord, &amp;btRecordSize);
+
+			<span class="enscript-comment">//	A previous record may not exist, so just return btNotFound (like we would if
+</span>			<span class="enscript-comment">//	it was for the wrong file/fork).
+</span>			<span class="enscript-keyword">if</span> (err == (OSErr) fsBTStartOfIterationErr)		<span class="enscript-comment">//¥¥ fsBTStartOfIterationErr is type unsigned long
+</span>				err = btNotFound;
+
+			<span class="enscript-keyword">if</span> (err == noErr) {
+				<span class="enscript-comment">//	Found a previous record.  Does it belong to the same fork of the same file?
+</span>				<span class="enscript-keyword">if</span> (extentKeyPtr-&gt;fileID != fileID || extentKeyPtr-&gt;forkType != forkType)
+					err = btNotFound;
+			}
+		}
+
+		<span class="enscript-keyword">if</span> (err == noErr) {
+			<span class="enscript-comment">// Copy the found key back for the caller
+</span>			<span class="enscript-keyword">if</span> (foundKey)
+				BlockMoveData(extentKeyPtr, foundKey, <span class="enscript-keyword">sizeof</span>(HFSPlusExtentKey));
+			<span class="enscript-comment">// Copy the found data back for the caller
+</span>			BlockMoveData(&amp;extentData, foundData, <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord));
+		}
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+	<span class="enscript-keyword">else</span> { 
+		HFSExtentKey *		extentKeyPtr;
+		HFSExtentRecord		extentData;
+
+		extentKeyPtr = (HFSExtentKey*) &amp;btIterator-&gt;key;
+		extentKeyPtr-&gt;keyLength	= kHFSExtentKeyMaximumLength;
+		extentKeyPtr-&gt;forkType = forkType;
+		extentKeyPtr-&gt;fileID = fileID;
+		extentKeyPtr-&gt;startBlock = startBlock;
+		
+		btRecord.bufferAddress = &amp;extentData;
+		btRecord.itemSize = <span class="enscript-keyword">sizeof</span>(HFSExtentRecord);
+		btRecord.itemCount = 1;
+
+		err = BTSearchRecord(fcb, btIterator, &amp;btRecord, &amp;btRecordSize, btIterator);
+
+		<span class="enscript-keyword">if</span> (err == btNotFound &amp;&amp; allowPrevious) {
+			err = BTIterateRecord(fcb, kBTreePrevRecord, btIterator, &amp;btRecord, &amp;btRecordSize);
+
+			<span class="enscript-comment">//	A previous record may not exist, so just return btNotFound (like we would if
+</span>			<span class="enscript-comment">//	it was for the wrong file/fork).
+</span>			<span class="enscript-keyword">if</span> (err == (OSErr) fsBTStartOfIterationErr)		<span class="enscript-comment">//¥¥ fsBTStartOfIterationErr is type unsigned long
+</span>				err = btNotFound;
+
+			<span class="enscript-keyword">if</span> (err == noErr) {
+				<span class="enscript-comment">//	Found a previous record.  Does it belong to the same fork of the same file?
+</span>				<span class="enscript-keyword">if</span> (extentKeyPtr-&gt;fileID != fileID || extentKeyPtr-&gt;forkType != forkType)
+					err = btNotFound;
+			}
+		}
+
+		<span class="enscript-keyword">if</span> (err == noErr) {
+			u_int16_t	i;
+			
+			<span class="enscript-comment">// Copy the found key back for the caller
+</span>			<span class="enscript-keyword">if</span> (foundKey) {
+				foundKey-&gt;keyLength  = kHFSPlusExtentKeyMaximumLength;
+				foundKey-&gt;forkType   = extentKeyPtr-&gt;forkType;
+				foundKey-&gt;pad        = 0;
+				foundKey-&gt;fileID     = extentKeyPtr-&gt;fileID;
+				foundKey-&gt;startBlock = extentKeyPtr-&gt;startBlock;
+			}
+			<span class="enscript-comment">// Copy the found data back for the caller
+</span>			foundData[0].startBlock = extentData[0].startBlock;
+			foundData[0].blockCount = extentData[0].blockCount;
+			foundData[1].startBlock = extentData[1].startBlock;
+			foundData[1].blockCount = extentData[1].blockCount;
+			foundData[2].startBlock = extentData[2].startBlock;
+			foundData[2].blockCount = extentData[2].blockCount;
+			
+			<span class="enscript-keyword">for</span> (i = 3; i &lt; kHFSPlusExtentDensity; ++i)
+			{
+				foundData[i].startBlock = 0;
+				foundData[i].blockCount = 0;
+			}
+		}
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (foundHint)
+		*foundHint = btIterator-&gt;hint.nodeNum;
+
+	FREE(btIterator, M_TEMP);
+	<span class="enscript-keyword">return</span> err;
+}
+
+
+
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">CreateExtentRecord</span>(
+	ExtendedVCB	*vcb,
+	HFSPlusExtentKey	*key,
+	HFSPlusExtentRecord	extents,
+	u_int32_t			*hint)
+{
+	<span class="enscript-type">struct</span> BTreeIterator *btIterator = NULL;
+	FSBufferDescriptor	btRecord;
+	u_int16_t  btRecordSize;
+	<span class="enscript-type">int</span>  lockflags;
+	OSErr  err;
+	
+	err = noErr;
+	*hint = 0;
+
+	MALLOC (btIterator, <span class="enscript-type">struct</span> BTreeIterator*, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> BTreeIterator), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (btIterator == NULL) {
+		<span class="enscript-keyword">return</span> memFullErr;  <span class="enscript-comment">// translates to ENOMEM
+</span>	}
+	bzero(btIterator, <span class="enscript-keyword">sizeof</span>(*btIterator));
+
+	<span class="enscript-comment">/*
+	 * The lock taken by callers of ExtendFileC is speculative and
+	 * only occurs when the file already has overflow extents. So
+	 * We need to make sure we have the lock here.  The extents
+	 * btree lock can be nested (its recursive) so we always take
+	 * it here.
+	 */</span>
+	lockflags = hfs_systemfile_lock(vcb, SFL_EXTENTS, HFS_EXCLUSIVE_LOCK);
+
+	<span class="enscript-comment">/* HFS+/HFSX */</span>
+	<span class="enscript-keyword">if</span> (vcb-&gt;vcbSigWord != kHFSSigWord) {
+		btRecordSize = <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord);
+		btRecord.bufferAddress = extents;
+		btRecord.itemSize = btRecordSize;
+		btRecord.itemCount = 1;
+
+		BlockMoveData(key, &amp;btIterator-&gt;key, <span class="enscript-keyword">sizeof</span>(HFSPlusExtentKey));
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* HFS Standard */</span>
+		HFSExtentKey *		keyPtr;
+		HFSExtentRecord		data;
+		
+		btRecordSize = <span class="enscript-keyword">sizeof</span>(HFSExtentRecord);
+		btRecord.bufferAddress = &amp;data;
+		btRecord.itemSize = btRecordSize;
+		btRecord.itemCount = 1;
+
+		keyPtr = (HFSExtentKey*) &amp;btIterator-&gt;key;
+		keyPtr-&gt;keyLength	= kHFSExtentKeyMaximumLength;
+		keyPtr-&gt;forkType	= key-&gt;forkType;
+		keyPtr-&gt;fileID		= key-&gt;fileID;
+		keyPtr-&gt;startBlock	= key-&gt;startBlock;
+		
+		err = HFSPlusToHFSExtents(extents, data);
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (err == noErr)
+		err = BTInsertRecord(GetFileControlBlock(vcb-&gt;extentsRefNum), btIterator, &amp;btRecord, btRecordSize);
+
+	<span class="enscript-keyword">if</span> (err == noErr)
+		*hint = btIterator-&gt;hint.nodeNum;
+
+	(<span class="enscript-type">void</span>) BTFlushPath(GetFileControlBlock(vcb-&gt;extentsRefNum));
+	
+	hfs_systemfile_unlock(vcb, lockflags);
+
+	FREE (btIterator, M_TEMP);	
+	<span class="enscript-keyword">return</span> err;
+}
+
+
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">DeleteExtentRecord</span>(
+	<span class="enscript-type">const</span> ExtendedVCB	*vcb,
+	u_int8_t			forkType,
+	u_int32_t			fileID,
+	u_int32_t			startBlock)
+{
+	<span class="enscript-type">struct</span> BTreeIterator *btIterator = NULL;
+	OSErr				err;
+	
+	err = noErr;
+
+	MALLOC (btIterator, <span class="enscript-type">struct</span> BTreeIterator*, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> BTreeIterator), M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (btIterator == NULL) {
+		<span class="enscript-keyword">return</span> memFullErr;  <span class="enscript-comment">// translates to ENOMEM
+</span>	}
+	bzero(btIterator, <span class="enscript-keyword">sizeof</span>(*btIterator));
+	
+	<span class="enscript-comment">/* HFS+ / HFSX */</span>
+	<span class="enscript-keyword">if</span> (vcb-&gt;vcbSigWord != kHFSSigWord) {		<span class="enscript-comment">//	HFS Plus volume
+</span>		HFSPlusExtentKey *	keyPtr;
+
+		keyPtr = (HFSPlusExtentKey*) &amp;btIterator-&gt;key;
+		keyPtr-&gt;keyLength	= kHFSPlusExtentKeyMaximumLength;
+		keyPtr-&gt;forkType	= forkType;
+		keyPtr-&gt;pad			= 0;
+		keyPtr-&gt;fileID		= fileID;
+		keyPtr-&gt;startBlock	= startBlock;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* HFS standard */</span>
+		HFSExtentKey *	keyPtr;
+
+		keyPtr = (HFSExtentKey*) &amp;btIterator-&gt;key;
+		keyPtr-&gt;keyLength	= kHFSExtentKeyMaximumLength;
+		keyPtr-&gt;forkType	= forkType;
+		keyPtr-&gt;fileID		= fileID;
+		keyPtr-&gt;startBlock	= startBlock;
+	}
+#<span class="enscript-reference">endif</span>
+
+	err = BTDeleteRecord(GetFileControlBlock(vcb-&gt;extentsRefNum), btIterator);
+	(<span class="enscript-type">void</span>) BTFlushPath(GetFileControlBlock(vcb-&gt;extentsRefNum));
+	
+
+	FREE(btIterator, M_TEMP);
+	<span class="enscript-keyword">return</span> err;
+}
+
+
+
+<span class="enscript-comment">//_________________________________________________________________________________
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Routine:		MapFileBlock
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Function: 	Maps a file position into a physical disk address.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//_________________________________________________________________________________
+</span>
+OSErr <span class="enscript-function-name">MapFileBlockC</span> (
+	ExtendedVCB		*vcb,				<span class="enscript-comment">// volume that file resides on
+</span>	FCB				*fcb,				<span class="enscript-comment">// FCB of file
+</span>	size_t			numberOfBytes,		<span class="enscript-comment">// number of contiguous bytes desired
+</span>	off_t			offset,				<span class="enscript-comment">// starting offset within file (in bytes)
+</span>	daddr64_t		*startSector,		<span class="enscript-comment">// first sector (NOT an allocation block)
+</span>	size_t			*availableBytes)	<span class="enscript-comment">// number of contiguous bytes (up to numberOfBytes)
+</span>{
+	OSErr				err;
+	u_int32_t			allocBlockSize;			<span class="enscript-comment">//	Size of the volume's allocation block
+</span>	u_int32_t			sectorSize;
+	HFSPlusExtentKey	foundKey;
+	HFSPlusExtentRecord	foundData;
+	u_int32_t			foundIndex;
+	u_int32_t			hint;
+	u_int32_t			firstFABN;				<span class="enscript-comment">// file allocation block of first block in found extent
+</span>	u_int32_t			nextFABN;				<span class="enscript-comment">// file allocation block of block after end of found extent
+</span>	off_t				dataEnd;				<span class="enscript-comment">// (offset) end of range that is contiguous
+</span>	u_int32_t			sectorsPerBlock;		<span class="enscript-comment">// Number of sectors per allocation block
+</span>	u_int32_t			startBlock;				<span class="enscript-comment">// volume allocation block corresponding to firstFABN
+</span>	daddr64_t			temp;
+	off_t				tmpOff;
+
+	allocBlockSize = vcb-&gt;blockSize;
+	sectorSize = VCBTOHFS(vcb)-&gt;hfs_logical_block_size;
+
+	err = SearchExtentFile(vcb, fcb, offset, &amp;foundKey, foundData, &amp;foundIndex, &amp;hint, &amp;nextFABN);
+	<span class="enscript-keyword">if</span> (err == noErr) {
+		startBlock = foundData[foundIndex].startBlock;
+		firstFABN = nextFABN - foundData[foundIndex].blockCount;
+	}
+	
+	<span class="enscript-keyword">if</span> (err != noErr)
+	{
+		<span class="enscript-keyword">return</span> err;
+	}
+
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Determine the end of the available space.  It will either be the end of the extent,
+</span>	<span class="enscript-comment">//	or the file's PEOF, whichever is smaller.
+</span>	<span class="enscript-comment">//
+</span>	dataEnd = (off_t)((off_t)(nextFABN) * (off_t)(allocBlockSize));   <span class="enscript-comment">// Assume valid data through end of this extent
+</span>	<span class="enscript-keyword">if</span> (((off_t)fcb-&gt;ff_blocks * (off_t)allocBlockSize) &lt; dataEnd)    <span class="enscript-comment">// Is PEOF shorter?
+</span>		dataEnd = (off_t)fcb-&gt;ff_blocks * (off_t)allocBlockSize;  <span class="enscript-comment">// Yes, so only map up to PEOF
+</span>	
+	<span class="enscript-comment">//	Compute the number of sectors in an allocation block
+</span>	sectorsPerBlock = allocBlockSize / sectorSize;	<span class="enscript-comment">// sectors per allocation block
+</span>	
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Compute the absolute sector number that contains the offset of the given file
+</span>	<span class="enscript-comment">//	offset in sectors from start of the extent +
+</span>	<span class="enscript-comment">//      offset in sectors from start of allocation block space
+</span>	<span class="enscript-comment">//
+</span>	temp = (daddr64_t)((offset - (off_t)((off_t)(firstFABN) * (off_t)(allocBlockSize)))/sectorSize);
+	temp += (daddr64_t)startBlock * (daddr64_t)sectorsPerBlock;
+
+	<span class="enscript-comment">/* Add in any volume offsets */</span>
+	<span class="enscript-keyword">if</span> (vcb-&gt;vcbSigWord == kHFSPlusSigWord)
+		temp += vcb-&gt;hfsPlusIOPosOffset / sectorSize;
+	<span class="enscript-keyword">else</span>
+		temp += vcb-&gt;vcbAlBlSt;
+	
+	<span class="enscript-comment">//	Return the desired sector for file position &quot;offset&quot;
+</span>	*startSector = temp;
+	
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Determine the number of contiguous bytes until the end of the extent
+</span>	<span class="enscript-comment">//	(or the amount they asked for, whichever comes first).
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-keyword">if</span> (availableBytes)
+	{
+		tmpOff = dataEnd - offset;
+		<span class="enscript-comment">/*
+		 * Disallow negative runs.
+		 */</span>
+		<span class="enscript-keyword">if</span> (tmpOff &lt;= 0) {
+			<span class="enscript-keyword">return</span> EINVAL;
+		}
+
+		<span class="enscript-keyword">if</span> (tmpOff &gt; (off_t)(numberOfBytes)) {
+			*availableBytes = numberOfBytes;  <span class="enscript-comment">// more there than they asked for, so pin the output
+</span>		}
+		<span class="enscript-keyword">else</span> {
+			*availableBytes = tmpOff;
+		}
+	}
+
+	<span class="enscript-keyword">return</span> noErr;
+}
+
+
+<span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span><span class="enscript-comment">//	Routine:	ReleaseExtents
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Function: 	Release the extents of a single extent data record.
+</span><span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span>
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">ReleaseExtents</span>(
+	ExtendedVCB 			*vcb,
+	<span class="enscript-type">const</span> HFSPlusExtentRecord	extentRecord,
+	u_int32_t				*numReleasedAllocationBlocks,
+	Boolean 				*releasedLastExtent)
+{
+	u_int32_t	extentIndex;
+	u_int32_t	numberOfExtents;
+	OSErr	err = noErr;
+	
+	*numReleasedAllocationBlocks = 0;
+	*releasedLastExtent = false;
+	
+	<span class="enscript-keyword">if</span> (vcb-&gt;vcbSigWord == kHFSPlusSigWord)
+		numberOfExtents = kHFSPlusExtentDensity;
+	<span class="enscript-keyword">else</span>
+		numberOfExtents = kHFSExtentDensity;
+
+	<span class="enscript-keyword">for</span>( extentIndex = 0; extentIndex &lt; numberOfExtents; extentIndex++)
+	{
+		u_int32_t	numAllocationBlocks;
+		
+		<span class="enscript-comment">// Loop over the extent record and release the blocks associated with each extent.
+</span>		
+		numAllocationBlocks = extentRecord[extentIndex].blockCount;
+		<span class="enscript-keyword">if</span> ( numAllocationBlocks == 0 )
+		{
+			*releasedLastExtent = true;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		err = BlockDeallocate( vcb, extentRecord[extentIndex].startBlock, numAllocationBlocks , 0);
+		<span class="enscript-keyword">if</span> ( err != noErr )
+			<span class="enscript-keyword">break</span>;
+					
+		*numReleasedAllocationBlocks += numAllocationBlocks;		<span class="enscript-comment">//	bump FABN to beg of next extent
+</span>	}
+
+	<span class="enscript-keyword">return</span>( err );
+}
+
+
+
+<span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span><span class="enscript-comment">//	Routine:	TruncateExtents
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Purpose:	Delete extent records whose starting file allocation block number
+</span><span class="enscript-comment">//				is greater than or equal to a given starting block number.  The
+</span><span class="enscript-comment">//				allocation blocks represented by the extents are deallocated.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Inputs:
+</span><span class="enscript-comment">//		vcb			Volume to operate on
+</span><span class="enscript-comment">//		fileID		Which file to operate on
+</span><span class="enscript-comment">//		startBlock	Starting file allocation block number for first extent
+</span><span class="enscript-comment">//					record to delete.
+</span><span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span>
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">TruncateExtents</span>(
+	ExtendedVCB		*vcb,
+	u_int8_t		forkType,
+	u_int32_t		fileID,
+	u_int32_t		startBlock,
+	Boolean *		recordDeleted)
+{
+	OSErr				err;
+	u_int32_t			numberExtentsReleased;
+	Boolean				releasedLastExtent;
+	u_int32_t			hint;
+	HFSPlusExtentKey	key;
+	HFSPlusExtentRecord	extents;
+	<span class="enscript-type">int</span>  lockflags;
+
+	<span class="enscript-comment">/*
+	 * The lock taken by callers of TruncateFileC is speculative and
+	 * only occurs when the file already has overflow extents. So
+	 * We need to make sure we have the lock here.  The extents
+	 * btree lock can be nested (its recursive) so we always take
+	 * it here.
+	 */</span>
+	lockflags = hfs_systemfile_lock(vcb, SFL_EXTENTS, HFS_EXCLUSIVE_LOCK);
+
+	<span class="enscript-keyword">while</span> (true) {
+		err = FindExtentRecord(vcb, forkType, fileID, startBlock, false, &amp;key, extents, &amp;hint);
+		<span class="enscript-keyword">if</span> (err != noErr) {
+			<span class="enscript-keyword">if</span> (err == btNotFound)
+				err = noErr;
+			<span class="enscript-keyword">break</span>;
+		}
+		
+		err = ReleaseExtents( vcb, extents, &amp;numberExtentsReleased, &amp;releasedLastExtent );
+		<span class="enscript-keyword">if</span> (err != noErr) <span class="enscript-keyword">break</span>;
+		
+		err = DeleteExtentRecord(vcb, forkType, fileID, startBlock);
+		<span class="enscript-keyword">if</span> (err != noErr) <span class="enscript-keyword">break</span>;
+
+		*recordDeleted = true;
+		startBlock += numberExtentsReleased;
+	}
+	hfs_systemfile_unlock(vcb, lockflags);
+	
+	<span class="enscript-keyword">return</span> err;
+}
+
+
+
+<span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span><span class="enscript-comment">//	Routine:	DeallocateFork
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Function: 	De-allocates all disk space allocated to a specified fork.
+</span><span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span>
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">DeallocateFork</span>(
+	ExtendedVCB 		*vcb,
+	HFSCatalogNodeID	fileID,
+	u_int8_t			forkType,
+	HFSPlusExtentRecord	catalogExtents,
+	Boolean *		recordDeleted) <span class="enscript-comment">/* true if a record was deleted */</span>
+{
+	OSErr				err;
+	u_int32_t			numReleasedAllocationBlocks;
+	Boolean				releasedLastExtent;
+	
+	<span class="enscript-comment">//	Release the catalog extents
+</span>	err = ReleaseExtents( vcb, catalogExtents, &amp;numReleasedAllocationBlocks, &amp;releasedLastExtent );
+	<span class="enscript-comment">// Release the extra extents, if present
+</span>	<span class="enscript-keyword">if</span> (err == noErr &amp;&amp; !releasedLastExtent)
+		err = TruncateExtents(vcb, forkType, fileID, numReleasedAllocationBlocks, recordDeleted);
+
+	<span class="enscript-keyword">return</span>( err );
+}
+
+<span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span><span class="enscript-comment">//	Routine:	FlushExtentFile
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Function: 	Flushes the extent file for a specified volume
+</span><span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span>
+OSErr <span class="enscript-function-name">FlushExtentFile</span>( ExtendedVCB *vcb )
+{
+	FCB *	fcb;
+	OSErr	err;
+	<span class="enscript-type">int</span>  lockflags;
+	
+	fcb = GetFileControlBlock(vcb-&gt;extentsRefNum);
+
+	lockflags = hfs_systemfile_lock(vcb, SFL_EXTENTS, HFS_EXCLUSIVE_LOCK);
+	err = BTFlushPath(fcb);
+	hfs_systemfile_unlock(vcb, lockflags);
+
+	<span class="enscript-keyword">if</span> ( err == noErr )
+	{
+		<span class="enscript-comment">// If the FCB for the extent &quot;file&quot; is dirty, mark the VCB as dirty.
+</span>		
+        <span class="enscript-keyword">if</span> (FTOC(fcb)-&gt;c_flag &amp; C_MODIFIED)
+		{
+			MarkVCBDirty( vcb );
+		<span class="enscript-comment">//	err = FlushVolumeControlBlock( vcb );
+</span>		}
+	}
+	
+	<span class="enscript-keyword">return</span>( err );
+}
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+<span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span><span class="enscript-comment">//	Routine:	CompareExtentKeys
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Function: 	Compares two extent file keys (a search key and a trial key) for
+</span><span class="enscript-comment">//				an HFS volume.
+</span><span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span>
+__private_extern__
+int32_t <span class="enscript-function-name">CompareExtentKeys</span>( <span class="enscript-type">const</span> HFSExtentKey *searchKey, <span class="enscript-type">const</span> HFSExtentKey *trialKey )
+{
+	int32_t	result;		<span class="enscript-comment">//	± 1
+</span>	
+	#<span class="enscript-keyword">if</span> DEBUG_BUILD
+		<span class="enscript-keyword">if</span> (searchKey-&gt;keyLength != kHFSExtentKeyMaximumLength)
+			DebugStr(<span class="enscript-string">&quot;HFS: search Key is wrong length&quot;</span>);
+		<span class="enscript-keyword">if</span> (trialKey-&gt;keyLength != kHFSExtentKeyMaximumLength)
+			DebugStr(<span class="enscript-string">&quot;HFS: trial Key is wrong length&quot;</span>);
+	#endif
+	
+	result = -1;		<span class="enscript-comment">//	assume searchKey &lt; trialKey
+</span>	
+	<span class="enscript-keyword">if</span> (searchKey-&gt;fileID == trialKey-&gt;fileID) {
+		<span class="enscript-comment">//
+</span>		<span class="enscript-comment">//	FileNum's are equal; compare fork types
+</span>		<span class="enscript-comment">//
+</span>		<span class="enscript-keyword">if</span> (searchKey-&gt;forkType == trialKey-&gt;forkType) {
+			<span class="enscript-comment">//
+</span>			<span class="enscript-comment">//	Fork types are equal; compare allocation block number
+</span>			<span class="enscript-comment">//
+</span>			<span class="enscript-keyword">if</span> (searchKey-&gt;startBlock == trialKey-&gt;startBlock) {
+				<span class="enscript-comment">//
+</span>				<span class="enscript-comment">//	Everything is equal
+</span>				<span class="enscript-comment">//
+</span>				result = 0;
+			}
+			<span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">//
+</span>				<span class="enscript-comment">//	Allocation block numbers differ; determine sign
+</span>				<span class="enscript-comment">//
+</span>				<span class="enscript-keyword">if</span> (searchKey-&gt;startBlock &gt; trialKey-&gt;startBlock)
+					result = 1;
+			}
+		}
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">//
+</span>			<span class="enscript-comment">//	Fork types differ; determine sign
+</span>			<span class="enscript-comment">//
+</span>			<span class="enscript-keyword">if</span> (searchKey-&gt;forkType &gt; trialKey-&gt;forkType)
+				result = 1;
+		}
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">//
+</span>		<span class="enscript-comment">//	FileNums differ; determine sign
+</span>		<span class="enscript-comment">//
+</span>		<span class="enscript-keyword">if</span> (searchKey-&gt;fileID &gt; trialKey-&gt;fileID)
+			result = 1;
+	}
+	
+	<span class="enscript-keyword">return</span>( result );
+}
+#<span class="enscript-reference">endif</span>
+
+
+<span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span><span class="enscript-comment">//	Routine:	CompareExtentKeysPlus
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Function: 	Compares two extent file keys (a search key and a trial key) for
+</span><span class="enscript-comment">//				an HFS volume.
+</span><span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span>
+__private_extern__
+int32_t <span class="enscript-function-name">CompareExtentKeysPlus</span>( <span class="enscript-type">const</span> HFSPlusExtentKey *searchKey, <span class="enscript-type">const</span> HFSPlusExtentKey *trialKey )
+{
+	int32_t	result;		<span class="enscript-comment">//	± 1
+</span>	
+	#<span class="enscript-keyword">if</span> DEBUG_BUILD
+		<span class="enscript-keyword">if</span> (searchKey-&gt;keyLength != kHFSPlusExtentKeyMaximumLength)
+			DebugStr(<span class="enscript-string">&quot;HFS: search Key is wrong length&quot;</span>);
+		<span class="enscript-keyword">if</span> (trialKey-&gt;keyLength != kHFSPlusExtentKeyMaximumLength)
+			DebugStr(<span class="enscript-string">&quot;HFS: trial Key is wrong length&quot;</span>);
+	#endif
+	
+	result = -1;		<span class="enscript-comment">//	assume searchKey &lt; trialKey
+</span>	
+	<span class="enscript-keyword">if</span> (searchKey-&gt;fileID == trialKey-&gt;fileID) {
+		<span class="enscript-comment">//
+</span>		<span class="enscript-comment">//	FileNum's are equal; compare fork types
+</span>		<span class="enscript-comment">//
+</span>		<span class="enscript-keyword">if</span> (searchKey-&gt;forkType == trialKey-&gt;forkType) {
+			<span class="enscript-comment">//
+</span>			<span class="enscript-comment">//	Fork types are equal; compare allocation block number
+</span>			<span class="enscript-comment">//
+</span>			<span class="enscript-keyword">if</span> (searchKey-&gt;startBlock == trialKey-&gt;startBlock) {
+				<span class="enscript-comment">//
+</span>				<span class="enscript-comment">//	Everything is equal
+</span>				<span class="enscript-comment">//
+</span>				result = 0;
+			}
+			<span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">//
+</span>				<span class="enscript-comment">//	Allocation block numbers differ; determine sign
+</span>				<span class="enscript-comment">//
+</span>				<span class="enscript-keyword">if</span> (searchKey-&gt;startBlock &gt; trialKey-&gt;startBlock)
+					result = 1;
+			}
+		}
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">//
+</span>			<span class="enscript-comment">//	Fork types differ; determine sign
+</span>			<span class="enscript-comment">//
+</span>			<span class="enscript-keyword">if</span> (searchKey-&gt;forkType &gt; trialKey-&gt;forkType)
+				result = 1;
+		}
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">//
+</span>		<span class="enscript-comment">//	FileNums differ; determine sign
+</span>		<span class="enscript-comment">//
+</span>		<span class="enscript-keyword">if</span> (searchKey-&gt;fileID &gt; trialKey-&gt;fileID)
+			result = 1;
+	}
+	
+	<span class="enscript-keyword">return</span>( result );
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">should_pin_blocks</span>(hfsmount_t *hfsmp, FCB *fcb)
+{
+	<span class="enscript-keyword">if</span> (!ISSET(hfsmp-&gt;hfs_flags, HFS_CS_HOTFILE_PIN)
+		|| fcb-&gt;ff_cp == NULL || fcb-&gt;ff_cp-&gt;c_vp == NULL) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-type">int</span> pin_blocks;
+
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">// File system metadata should get pinned
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-keyword">if</span> (vnode_issystem(fcb-&gt;ff_cp-&gt;c_vp)) {
+		<span class="enscript-keyword">return</span> 1;
+	}
+
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">// If a file is AutoCandidate, we should not pin its blocks because
+</span>	<span class="enscript-comment">// it was an automatically added file and this function is intended
+</span>	<span class="enscript-comment">// to pin new blocks being added to user-generated content.
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">// If a file is marked FastDevPinned or FastDevCandidate it is an
+</span>	<span class="enscript-comment">// existing pinned file or a new file that should be pinned.
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-keyword">if</span> (fcb-&gt;ff_cp-&gt;c_attr.ca_recflags &amp; kHFSAutoCandidateMask) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">if</span> ((fcb-&gt;ff_cp-&gt;c_attr.ca_recflags &amp; (kHFSFastDevPinnedMask|kHFSFastDevCandidateMask)) != 0) {
+		pin_blocks = 1;
+	} <span class="enscript-keyword">else</span> {
+		pin_blocks = 0;
+	}
+
+	<span class="enscript-keyword">return</span> pin_blocks;
+}
+	
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pin_blocks_if_needed</span>(ExtendedVCB *vcb, FCB *fcb, u_int32_t startBlock, u_int32_t blockCount)	
+{
+	<span class="enscript-keyword">if</span> (!should_pin_blocks(vcb, fcb)) {
+		<span class="enscript-keyword">return</span>;
+	}
+	
+	<span class="enscript-comment">// ask CoreStorage to pin the new blocks being added to this file
+</span>	<span class="enscript-keyword">if</span> (hfs_pin_block_range((<span class="enscript-type">struct</span> hfsmount *)vcb, HFS_PIN_IT, startBlock, blockCount, vfs_context_kernel()) == 0) {
+		<span class="enscript-type">struct</span> vnode *vp = fcb-&gt;ff_cp-&gt;c_vp;
+		
+		<span class="enscript-comment">// and make sure to keep our accounting in order
+</span>		hfs_hotfile_adjust_blocks(vp, -blockCount);
+	}
+}
+
+
+
+<span class="enscript-comment">/*
+ * Add a file extent to a file.
+ *
+ * Used by hfs_extendfs to extend the volume allocation bitmap file.
+ *
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">AddFileExtent</span>(ExtendedVCB *vcb, FCB *fcb, u_int32_t startBlock, u_int32_t blockCount)
+{
+	HFSPlusExtentKey foundKey;
+	HFSPlusExtentRecord foundData;
+	u_int32_t foundIndex;
+	u_int32_t hint;
+	u_int32_t nextBlock;
+	int64_t peof;
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> error;
+
+	peof = (int64_t)(fcb-&gt;ff_blocks + blockCount) * (int64_t)vcb-&gt;blockSize;
+
+	error = SearchExtentFile(vcb, fcb, peof-1, &amp;foundKey, foundData, &amp;foundIndex, &amp;hint, &amp;nextBlock);
+	<span class="enscript-keyword">if</span> (error != fxRangeErr)
+		<span class="enscript-keyword">return</span> (EBUSY);
+
+	<span class="enscript-comment">/*
+	 * Add new extent.  See if there is room in the current record.
+	 */</span>
+	<span class="enscript-keyword">if</span> (foundData[foundIndex].blockCount != 0)
+		++foundIndex;
+	<span class="enscript-keyword">if</span> (foundIndex == kHFSPlusExtentDensity) {
+		<span class="enscript-comment">/*
+		 * Existing record is full so create a new one.
+		 */</span>
+		foundKey.keyLength = kHFSPlusExtentKeyMaximumLength;
+		foundKey.forkType = kDataForkType;
+		foundKey.pad = 0;
+		foundKey.fileID = FTOC(fcb)-&gt;c_fileid;
+		foundKey.startBlock = nextBlock;
+		
+		foundData[0].startBlock = startBlock;
+		foundData[0].blockCount = blockCount;
+		
+		<span class="enscript-comment">/* zero out remaining extents. */</span>
+		<span class="enscript-keyword">for</span> (i = 1; i &lt; kHFSPlusExtentDensity; ++i) {
+			foundData[i].startBlock = 0;
+			foundData[i].blockCount = 0;
+		}
+
+		foundIndex = 0;
+
+		error = CreateExtentRecord(vcb, &amp;foundKey, foundData, &amp;hint);
+		<span class="enscript-keyword">if</span> (error == fxOvFlErr) {
+			error = dskFulErr;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (error == 0) {
+			pin_blocks_if_needed(vcb, fcb, startBlock, blockCount);
+		}
+		
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* 
+		 * Add a new extent into existing record.
+		 */</span>
+		foundData[foundIndex].startBlock = startBlock;
+		foundData[foundIndex].blockCount = blockCount;
+		error = UpdateExtentRecord(vcb, fcb, 0, &amp;foundKey, foundData, hint);
+		<span class="enscript-keyword">if</span> (error == 0) {
+			pin_blocks_if_needed(vcb, fcb, startBlock, blockCount);
+		}
+	}
+	(<span class="enscript-type">void</span>) FlushExtentFile(vcb);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">//_________________________________________________________________________________
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Routine:		Extendfile
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Function: 	Extends the disk space allocated to a file.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//_________________________________________________________________________________
+</span>
+OSErr <span class="enscript-function-name">ExtendFileC</span> (
+	ExtendedVCB		*vcb,				<span class="enscript-comment">// volume that file resides on
+</span>	FCB				*fcb,				<span class="enscript-comment">// FCB of file to truncate
+</span>	int64_t			bytesToAdd,			<span class="enscript-comment">// number of bytes to allocate
+</span>	u_int32_t		blockHint,			<span class="enscript-comment">// desired starting allocation block
+</span>	u_int32_t		flags,				<span class="enscript-comment">// EFContig and/or EFAll
+</span>	int64_t			*actualBytesAdded)	<span class="enscript-comment">// number of bytes actually allocated
+</span>{
+	OSErr				err;
+	u_int32_t			volumeBlockSize;
+	int64_t				blocksToAdd;
+	int64_t				bytesThisExtent;
+	HFSPlusExtentKey	foundKey;
+	HFSPlusExtentRecord	foundData;
+	u_int32_t			foundIndex;
+	u_int32_t			hint;
+	u_int32_t			nextBlock;
+	u_int32_t			startBlock;
+	Boolean				allOrNothing;
+	Boolean				forceContig;
+	Boolean				wantContig;
+	Boolean				useMetaZone;
+	Boolean				needsFlush;
+	<span class="enscript-type">int</span>					allowFlushTxns;
+	u_int32_t			actualStartBlock;
+	u_int32_t			actualNumBlocks;
+	u_int32_t			numExtentsPerRecord;
+	int64_t				maximumBytes;
+	int64_t 			availbytes;
+	int64_t				peof;
+	u_int32_t			prevblocks;
+	uint32_t			fastdev = 0;
+
+	<span class="enscript-type">struct</span> hfsmount *hfsmp = (<span class="enscript-type">struct</span> hfsmount*)vcb;	
+	allowFlushTxns = 0;
+	needsFlush = false;
+	*actualBytesAdded = 0;
+	volumeBlockSize = vcb-&gt;blockSize;
+	allOrNothing = ((flags &amp; kEFAllMask) != 0);
+	forceContig = ((flags &amp; kEFContigMask) != 0);
+	prevblocks = fcb-&gt;ff_blocks;
+
+	<span class="enscript-keyword">if</span> (vcb-&gt;vcbSigWord != kHFSSigWord) {
+		numExtentsPerRecord = kHFSPlusExtentDensity;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/* HFS Standard */</span>
+		numExtentsPerRecord = kHFSExtentDensity;
+
+		<span class="enscript-comment">/* Make sure the request and new PEOF are less than 2GB if HFS std*/</span>
+		<span class="enscript-keyword">if</span> (bytesToAdd &gt;=  kTwoGigabytes)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">HFS_Std_Overflow</span>;
+		<span class="enscript-keyword">if</span> ((((int64_t)fcb-&gt;ff_blocks * (int64_t)volumeBlockSize) + bytesToAdd) &gt;= kTwoGigabytes)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">HFS_Std_Overflow</span>;
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Determine how many blocks need to be allocated.
+</span>	<span class="enscript-comment">//	Round up the number of desired bytes to add.
+</span>	<span class="enscript-comment">//
+</span>	blocksToAdd = howmany(bytesToAdd, volumeBlockSize);
+	bytesToAdd = (int64_t)((int64_t)blocksToAdd * (int64_t)volumeBlockSize);
+
+	<span class="enscript-comment">/*
+	 * For deferred allocations just reserve the blocks.
+	 */</span>
+	<span class="enscript-keyword">if</span> ((flags &amp; kEFDeferMask)
+	&amp;&amp;  (vcb-&gt;vcbSigWord == kHFSPlusSigWord)
+	&amp;&amp;  (bytesToAdd &lt; (int64_t)HFS_MAX_DEFERED_ALLOC)
+	&amp;&amp;  (blocksToAdd &lt; hfs_freeblks(VCBTOHFS(vcb), 1))) {
+		hfs_lock_mount (hfsmp);
+		vcb-&gt;loanedBlocks += blocksToAdd;
+		hfs_unlock_mount(hfsmp);
+
+		fcb-&gt;ff_unallocblocks += blocksToAdd;
+		FTOC(fcb)-&gt;c_blocks   += blocksToAdd;
+		fcb-&gt;ff_blocks        += blocksToAdd;
+
+		<span class="enscript-comment">/*
+		 * We haven't touched the disk here; no blocks have been
+		 * allocated and the volume will not be inconsistent if we
+		 * don't update the catalog record immediately.
+		 */</span>
+		FTOC(fcb)-&gt;c_flag |= C_MINOR_MOD;
+		*actualBytesAdded = bytesToAdd;
+		<span class="enscript-keyword">return</span> (0);
+	}
+	<span class="enscript-comment">/* 
+	 * Give back any unallocated blocks before doing real allocations.
+	 */</span>
+	<span class="enscript-keyword">if</span> (fcb-&gt;ff_unallocblocks &gt; 0) {
+		u_int32_t loanedBlocks;
+
+		loanedBlocks = fcb-&gt;ff_unallocblocks;
+		blocksToAdd += loanedBlocks;
+		bytesToAdd = (int64_t)blocksToAdd * (int64_t)volumeBlockSize;
+		FTOC(fcb)-&gt;c_blocks -= loanedBlocks;
+		fcb-&gt;ff_blocks -= loanedBlocks;
+		fcb-&gt;ff_unallocblocks  = 0;
+
+		hfs_lock_mount(hfsmp);
+		vcb-&gt;loanedBlocks -= loanedBlocks;
+		hfs_unlock_mount(hfsmp);
+	}
+
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	If the file's clump size is larger than the allocation block size,
+</span>	<span class="enscript-comment">//	then set the maximum number of bytes to the requested number of bytes
+</span>	<span class="enscript-comment">//	rounded up to a multiple of the clump size.
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-keyword">if</span> ((vcb-&gt;vcbClpSiz &gt; (int32_t)volumeBlockSize)
+	&amp;&amp;  (bytesToAdd &lt; (int64_t)HFS_MAX_DEFERED_ALLOC)
+	&amp;&amp;  (flags &amp; kEFNoClumpMask) == 0) {
+		maximumBytes = (int64_t)howmany(bytesToAdd, vcb-&gt;vcbClpSiz);
+		maximumBytes *= vcb-&gt;vcbClpSiz;
+	} <span class="enscript-keyword">else</span> {
+		maximumBytes = bytesToAdd;
+	}
+	
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Compute new physical EOF, rounded up to a multiple of a block.
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-keyword">if</span> ( (vcb-&gt;vcbSigWord == kHFSSigWord) &amp;&amp;		<span class="enscript-comment">//	Too big?
+</span>		 ((((int64_t)fcb-&gt;ff_blocks * (int64_t)volumeBlockSize) + bytesToAdd) &gt;= kTwoGigabytes) ) {
+		<span class="enscript-keyword">if</span> (allOrNothing)					<span class="enscript-comment">// Yes, must they have it all?
+</span>			<span class="enscript-keyword">goto</span> <span class="enscript-reference">HFS_Std_Overflow</span>;						<span class="enscript-comment">// Yes, can't have it
+</span>		<span class="enscript-keyword">else</span> {
+			--blocksToAdd;						<span class="enscript-comment">// No, give give 'em one block less
+</span>			bytesToAdd -= volumeBlockSize;
+		}
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	If allocation is all-or-nothing, make sure there are
+</span>	<span class="enscript-comment">//	enough free blocks on the volume (quick test).
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-keyword">if</span> (allOrNothing &amp;&amp;
+	    (blocksToAdd &gt; hfs_freeblks(VCBTOHFS(vcb), flags &amp; kEFReserveMask))) {
+		err = dskFulErr;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+	}
+	
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	See if there are already enough blocks allocated to the file.
+</span>	<span class="enscript-comment">//
+</span>	peof = ((int64_t)fcb-&gt;ff_blocks * (int64_t)volumeBlockSize) + bytesToAdd;  <span class="enscript-comment">// potential new PEOF
+</span>	err = SearchExtentFile(vcb, fcb, peof-1, &amp;foundKey, foundData, &amp;foundIndex, &amp;hint, &amp;nextBlock);
+	<span class="enscript-keyword">if</span> (err == noErr) {
+		<span class="enscript-comment">//	Enough blocks are already allocated.  Just update the FCB to reflect the new length.
+</span>		fcb-&gt;ff_blocks = peof / volumeBlockSize;
+		FTOC(fcb)-&gt;c_blocks += (bytesToAdd / volumeBlockSize);
+		FTOC(fcb)-&gt;c_flag |= C_MODIFIED;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">Exit</span>;
+	}
+	<span class="enscript-keyword">if</span> (err != fxRangeErr)		<span class="enscript-comment">// Any real error?
+</span>		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;				<span class="enscript-comment">// Yes, so exit immediately
+</span>
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Adjust the PEOF to the end of the last extent.
+</span>	<span class="enscript-comment">//
+</span>	peof = (int64_t)((int64_t)nextBlock * (int64_t)volumeBlockSize);			<span class="enscript-comment">// currently allocated PEOF
+</span>	bytesThisExtent = (int64_t)(nextBlock - fcb-&gt;ff_blocks) * (int64_t)volumeBlockSize;
+	<span class="enscript-keyword">if</span> (bytesThisExtent != 0) {
+		fcb-&gt;ff_blocks = nextBlock;
+		FTOC(fcb)-&gt;c_blocks += (bytesThisExtent / volumeBlockSize);
+		FTOC(fcb)-&gt;c_flag |= C_MODIFIED;
+		bytesToAdd -= bytesThisExtent;
+	}
+	
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Allocate some more space.
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	First try a contiguous allocation (of the whole amount).
+</span>	<span class="enscript-comment">//	If that fails, get whatever we can.
+</span>	<span class="enscript-comment">//		If forceContig, then take whatever we got
+</span>	<span class="enscript-comment">//		else, keep getting bits and pieces (non-contig)
+</span>	
+	<span class="enscript-comment">/*
+	 * Note that for sparse devices (like sparse bundle dmgs), we
+	 * should only be aggressive with re-using once-allocated pieces
+	 * if we're not dealing with system files.  If we're trying to operate
+	 * on behalf of a system file, we need the maximum contiguous amount
+	 * possible.  For non-system files we favor locality and fragmentation over
+	 * contiguity as it can result in fewer blocks being needed from the underlying
+	 * filesystem that the sparse image resides upon. 
+	 */</span>
+	err = noErr;
+	<span class="enscript-keyword">if</span> (   (vcb-&gt;hfs_flags &amp; HFS_HAS_SPARSE_DEVICE)
+			&amp;&amp; (fcb-&gt;ff_cp-&gt;c_fileid &gt;= kHFSFirstUserCatalogNodeID)
+			&amp;&amp; (flags &amp; kEFMetadataMask) == 0) {
+		<span class="enscript-comment">/*
+		 * We want locality over contiguity so by default we set wantContig to 
+		 * false unless we hit one of the circumstances below.
+		 */</span> 
+		wantContig = false;
+		<span class="enscript-keyword">if</span> (hfs_isrbtree_active(VCBTOHFS(vcb))) {
+			<span class="enscript-comment">/* 
+			 * If the red-black tree is acive, we can always find a suitable contiguous
+			 * chunk.  So if the user specifically requests contiguous files,  we should 
+			 * honor that no matter what kind of device it is.
+			 */</span>
+			<span class="enscript-keyword">if</span> (forceContig) {
+				wantContig = true;
+			}
+		}
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* 
+			 * If the red-black tree is not active, then only set wantContig to true
+			 * if we have never done a contig scan on the device, which would populate
+			 * the free extent cache.  Note that the caller may explicitly unset the 
+			 * DID_CONTIG_SCAN bit in order to force us to vend a contiguous extent here
+			 * if the caller wants to get a contiguous chunk.
+			 */</span>
+			<span class="enscript-keyword">if</span> ((vcb-&gt;hfs_flags &amp; HFS_DID_CONTIG_SCAN) == 0) { 
+				vcb-&gt;hfs_flags |= HFS_DID_CONTIG_SCAN;	
+				wantContig = true;
+			}
+		}
+	} 
+	<span class="enscript-keyword">else</span> {
+		wantContig = true;
+	}
+
+	<span class="enscript-keyword">if</span> (should_pin_blocks(hfsmp, fcb))
+		fastdev = HFS_ALLOC_FAST_DEV;
+
+	useMetaZone = flags &amp; kEFMetadataMask;
+	<span class="enscript-keyword">do</span> {
+		<span class="enscript-keyword">if</span> (blockHint != 0)
+			startBlock = blockHint;
+		<span class="enscript-keyword">else</span>
+			startBlock = foundData[foundIndex].startBlock + foundData[foundIndex].blockCount;
+
+		actualNumBlocks = 0;
+		actualStartBlock = 0;
+			
+		<span class="enscript-comment">/* Find number of free blocks based on reserved block flag option */</span>
+		availbytes = (int64_t)hfs_freeblks(VCBTOHFS(vcb), flags &amp; kEFReserveMask) *
+		             (int64_t)volumeBlockSize;
+		<span class="enscript-keyword">if</span> (availbytes &lt;= 0) {
+			err = dskFulErr;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (wantContig &amp;&amp; (availbytes &lt; bytesToAdd)) {
+				err = dskFulErr;
+			}
+			<span class="enscript-keyword">else</span> {
+				uint32_t ba_flags = fastdev;
+
+				<span class="enscript-keyword">if</span> (wantContig) {
+					ba_flags |= HFS_ALLOC_FORCECONTIG;	
+				}
+				<span class="enscript-keyword">if</span> (useMetaZone) {
+					ba_flags |= HFS_ALLOC_METAZONE;
+				}
+				<span class="enscript-keyword">if</span> (allowFlushTxns) {
+					ba_flags |= HFS_ALLOC_FLUSHTXN;
+				}
+
+				err = BlockAllocate(
+						  vcb,
+						  startBlock,
+						  howmany(MIN(bytesToAdd, availbytes), volumeBlockSize),
+						  howmany(MIN(maximumBytes, availbytes), volumeBlockSize),
+						  ba_flags,
+						  &amp;actualStartBlock,
+						  &amp;actualNumBlocks);
+			}
+		}
+		<span class="enscript-keyword">if</span> (err == dskFulErr) {
+			<span class="enscript-keyword">if</span> (forceContig) {
+				<span class="enscript-keyword">if</span> (allowFlushTxns == 0) {
+					<span class="enscript-comment">/* If we're forcing contiguity, re-try but allow plucking from recently freed regions */</span>
+					allowFlushTxns = 1;
+					wantContig = 1;
+					err = noErr;
+					<span class="enscript-keyword">continue</span>;
+				}
+				<span class="enscript-keyword">else</span> {
+					<span class="enscript-keyword">break</span>;			<span class="enscript-comment">// AllocContig failed because not enough contiguous space
+</span>				}
+			}
+			<span class="enscript-keyword">if</span> (wantContig) {
+				<span class="enscript-comment">//	Couldn't get one big chunk, so get whatever we can.
+</span>				err = noErr;
+				wantContig = false;
+				<span class="enscript-keyword">continue</span>;
+			}
+			<span class="enscript-keyword">if</span> (actualNumBlocks != 0)
+				err = noErr;
+
+			<span class="enscript-keyword">if</span> (useMetaZone == 0) {
+				<span class="enscript-comment">/* Couldn't get anything so dip into metadat zone */</span>
+				err = noErr;
+				useMetaZone = 1;
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			<span class="enscript-comment">/* If we couldn't find what we needed without flushing the journal, then go ahead and do it now */</span>
+			<span class="enscript-keyword">if</span> (allowFlushTxns == 0) {
+				allowFlushTxns = 1;
+				err = noErr;
+				<span class="enscript-keyword">continue</span>;
+			}
+
+		}
+		<span class="enscript-keyword">if</span> (err == noErr) {
+			<span class="enscript-comment">//	Add the new extent to the existing extent record, or create a new one.
+</span>			<span class="enscript-keyword">if</span> ((actualStartBlock == startBlock) &amp;&amp; (blockHint == 0)) {
+				<span class="enscript-comment">//	We grew the file's last extent, so just adjust the number of blocks.
+</span>				foundData[foundIndex].blockCount += actualNumBlocks;
+				err = UpdateExtentRecord(vcb, fcb, 0, &amp;foundKey, foundData, hint);
+				<span class="enscript-keyword">if</span> (err != noErr) <span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">else</span> {
+				u_int16_t	i;
+
+				<span class="enscript-comment">//	Need to add a new extent.  See if there is room in the current record.
+</span>				<span class="enscript-keyword">if</span> (foundData[foundIndex].blockCount != 0)	<span class="enscript-comment">//	Is current extent free to use?
+</span>					++foundIndex;							<span class="enscript-comment">// 	No, so use the next one.
+</span>				<span class="enscript-keyword">if</span> (foundIndex == numExtentsPerRecord) {
+					<span class="enscript-comment">//	This record is full.  Need to create a new one.
+</span>					<span class="enscript-keyword">if</span> (FTOC(fcb)-&gt;c_fileid == kHFSExtentsFileID) {
+						(<span class="enscript-type">void</span>) BlockDeallocate(vcb, actualStartBlock, actualNumBlocks, 0);
+						err = dskFulErr;		<span class="enscript-comment">// Oops.  Can't extend extents file past first record.
+</span>						<span class="enscript-keyword">break</span>;
+					}
+					
+					foundKey.keyLength = kHFSPlusExtentKeyMaximumLength;
+					<span class="enscript-keyword">if</span> (FORK_IS_RSRC(fcb))
+						foundKey.forkType = kResourceForkType;
+					<span class="enscript-keyword">else</span>
+						foundKey.forkType = kDataForkType;
+					foundKey.pad = 0;
+					foundKey.fileID = FTOC(fcb)-&gt;c_fileid;
+					foundKey.startBlock = nextBlock;
+					
+					foundData[0].startBlock = actualStartBlock;
+					foundData[0].blockCount = actualNumBlocks;
+					
+					<span class="enscript-comment">// zero out remaining extents...
+</span>					<span class="enscript-keyword">for</span> (i = 1; i &lt; kHFSPlusExtentDensity; ++i)
+					{
+						foundData[i].startBlock = 0;
+						foundData[i].blockCount = 0;
+					}
+
+					foundIndex = 0;
+					
+					err = CreateExtentRecord(vcb, &amp;foundKey, foundData, &amp;hint);
+					<span class="enscript-keyword">if</span> (err == fxOvFlErr) {
+						<span class="enscript-comment">//	We couldn't create an extent record because extents B-tree
+</span>						<span class="enscript-comment">//	couldn't grow.  Dellocate the extent just allocated and
+</span>						<span class="enscript-comment">//	return a disk full error.
+</span>						(<span class="enscript-type">void</span>) BlockDeallocate(vcb, actualStartBlock, actualNumBlocks, 0);
+						err = dskFulErr;
+					}
+					<span class="enscript-keyword">if</span> (err != noErr) <span class="enscript-keyword">break</span>;
+
+					needsFlush = true;		<span class="enscript-comment">//	We need to update the B-tree header
+</span>				}
+				<span class="enscript-keyword">else</span> {
+					<span class="enscript-comment">//	Add a new extent into this record and update.
+</span>					foundData[foundIndex].startBlock = actualStartBlock;
+					foundData[foundIndex].blockCount = actualNumBlocks;
+					err = UpdateExtentRecord(vcb, fcb, 0, &amp;foundKey, foundData, hint);
+					<span class="enscript-keyword">if</span> (err != noErr) <span class="enscript-keyword">break</span>;
+				}
+			}
+
+			<span class="enscript-comment">// Figure out how many bytes were actually allocated.
+</span>			<span class="enscript-comment">// NOTE: BlockAllocate could have allocated more than we asked for.
+</span>			<span class="enscript-comment">// Don't set the PEOF beyond what our client asked for.
+</span>			nextBlock += actualNumBlocks;
+			bytesThisExtent = (int64_t)((int64_t)actualNumBlocks * (int64_t)volumeBlockSize);
+			<span class="enscript-keyword">if</span> (bytesThisExtent &gt; bytesToAdd) {
+				bytesToAdd = 0;
+			}
+			<span class="enscript-keyword">else</span> {
+				bytesToAdd -= bytesThisExtent;
+				maximumBytes -= bytesThisExtent;
+			}
+			fcb-&gt;ff_blocks += (bytesThisExtent / volumeBlockSize);
+			FTOC(fcb)-&gt;c_blocks += (bytesThisExtent / volumeBlockSize);
+			FTOC(fcb)-&gt;c_flag |= C_MODIFIED;
+
+			<span class="enscript-comment">//	If contiguous allocation was requested, then we've already got one contiguous
+</span>			<span class="enscript-comment">//	chunk.  If we didn't get all we wanted, then adjust the error to disk full.
+</span>			<span class="enscript-keyword">if</span> (forceContig) {
+				<span class="enscript-keyword">if</span> (bytesToAdd != 0)
+					err = dskFulErr;
+				<span class="enscript-keyword">break</span>;			<span class="enscript-comment">//	We've already got everything that's contiguous
+</span>			}
+		}
+	} <span class="enscript-keyword">while</span> (err == noErr &amp;&amp; bytesToAdd);
+
+<span class="enscript-reference">ErrorExit</span>:
+<span class="enscript-reference">Exit</span>:
+	<span class="enscript-keyword">if</span> (VCBTOHFS(vcb)-&gt;hfs_flags &amp; HFS_METADATA_ZONE) {
+		<span class="enscript-comment">/* Keep the roving allocator out of the metadata zone. */</span>
+		<span class="enscript-keyword">if</span> (vcb-&gt;nextAllocation &gt;= VCBTOHFS(vcb)-&gt;hfs_metazone_start &amp;&amp;
+		    vcb-&gt;nextAllocation &lt;= VCBTOHFS(vcb)-&gt;hfs_metazone_end) {
+			hfs_lock_mount (hfsmp);
+			HFS_UPDATE_NEXT_ALLOCATION(vcb, VCBTOHFS(vcb)-&gt;hfs_metazone_end + 1);	
+			MarkVCBDirty(vcb);
+			hfs_unlock_mount(hfsmp);
+		}
+	}
+	<span class="enscript-keyword">if</span> (prevblocks &lt; fcb-&gt;ff_blocks) {
+		*actualBytesAdded = (int64_t)(fcb-&gt;ff_blocks - prevblocks) * (int64_t)volumeBlockSize;
+	} <span class="enscript-keyword">else</span> {
+		*actualBytesAdded = 0;
+	}
+
+	<span class="enscript-keyword">if</span> (fastdev) {
+		hfs_hotfile_adjust_blocks(fcb-&gt;ff_cp-&gt;c_vp, 
+					  (int64_t)prevblocks - fcb-&gt;ff_blocks);
+	}
+
+	<span class="enscript-keyword">if</span> (needsFlush)
+		(<span class="enscript-type">void</span>) FlushExtentFile(vcb);
+
+	<span class="enscript-keyword">return</span> err;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+<span class="enscript-reference">HFS_Std_Overflow</span>:
+	err = fileBoundsErr;
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+#<span class="enscript-reference">endif</span>
+}
+
+
+
+<span class="enscript-comment">//_________________________________________________________________________________
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Routine:		TruncateFileC
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Function: 	Truncates the disk space allocated to a file.  The file space is
+</span><span class="enscript-comment">//				truncated to a specified new PEOF rounded up to the next allocation
+</span><span class="enscript-comment">//				block boundry.  If the 'TFTrunExt' option is specified, the file is
+</span><span class="enscript-comment">//				truncated to the end of the extent containing the new PEOF.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//_________________________________________________________________________________
+</span>
+OSErr <span class="enscript-function-name">TruncateFileC</span> (
+	ExtendedVCB		*vcb,				<span class="enscript-comment">// volume that file resides on
+</span>	FCB				*fcb,				<span class="enscript-comment">// FCB of file to truncate
+</span>	int64_t			peof,				<span class="enscript-comment">// new physical size for file
+</span>	<span class="enscript-type">int</span>				deleted,			<span class="enscript-comment">// if nonzero, the file's catalog record has already been deleted.
+</span>	<span class="enscript-type">int</span>				rsrc,				<span class="enscript-comment">// does this represent a resource fork or not?
+</span>	uint32_t		fileid,				<span class="enscript-comment">// the fileid of the file we're manipulating.
+</span>	Boolean			truncateToExtent)	<span class="enscript-comment">// if true, truncate to end of extent containing newPEOF
+</span>
+{
+	OSErr				err;
+	u_int32_t			nextBlock;		<span class="enscript-comment">//	next file allocation block to consider
+</span>	u_int32_t			startBlock;		<span class="enscript-comment">//	Physical (volume) allocation block number of start of a range
+</span>	u_int32_t			physNumBlocks;	<span class="enscript-comment">//	Number of allocation blocks in file (according to PEOF)
+</span>	u_int32_t			numBlocks;
+	HFSPlusExtentKey	key;			<span class="enscript-comment">//	key for current extent record; key-&gt;keyLength == 0 if FCB's extent record
+</span>	u_int32_t			hint;			<span class="enscript-comment">//	BTree hint corresponding to key
+</span>	HFSPlusExtentRecord	extentRecord;
+	u_int32_t			extentIndex;
+	u_int32_t			extentNextBlock;
+	u_int32_t			numExtentsPerRecord;
+	int64_t             temp64;
+	u_int8_t			forkType;
+	Boolean				extentChanged;	<span class="enscript-comment">// true if we actually changed an extent
+</span>	Boolean				recordDeleted;	<span class="enscript-comment">// true if an extent record got deleted
+</span>
+	recordDeleted = false;
+	
+	<span class="enscript-keyword">if</span> (vcb-&gt;vcbSigWord == kHFSPlusSigWord) {
+		numExtentsPerRecord = kHFSPlusExtentDensity;
+	}
+	<span class="enscript-keyword">else</span> {
+		numExtentsPerRecord = kHFSExtentDensity;
+	}
+	
+	<span class="enscript-keyword">if</span> (rsrc) {
+		forkType = kResourceForkType;
+	}
+	<span class="enscript-keyword">else</span> {
+		forkType = kDataForkType;
+	}
+	
+	temp64 = fcb-&gt;ff_blocks;
+	physNumBlocks = (u_int32_t)temp64;
+
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Round newPEOF up to a multiple of the allocation block size.  If new size is
+</span>	<span class="enscript-comment">//	two gigabytes or more, then round down by one allocation block (??? really?
+</span>	<span class="enscript-comment">//	shouldn't that be an error?).
+</span>	<span class="enscript-comment">//
+</span>	nextBlock = howmany(peof, vcb-&gt;blockSize);	<span class="enscript-comment">// number of allocation blocks to remain in file
+</span>	peof = (int64_t)((int64_t)nextBlock * (int64_t)vcb-&gt;blockSize);					<span class="enscript-comment">// number of bytes in those blocks
+</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+	<span class="enscript-keyword">if</span> ((vcb-&gt;vcbSigWord == kHFSSigWord) &amp;&amp; (peof &gt;= kTwoGigabytes)) {
+		#<span class="enscript-keyword">if</span> DEBUG_BUILD
+			DebugStr(<span class="enscript-string">&quot;HFS: Trying to truncate a file to 2GB or more&quot;</span>);
+		#endif
+		err = fileBoundsErr;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Update FCB's length
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">/*
+	 * XXX Any errors could cause ff_blocks and c_blocks to get out of sync...
+	 */</span>
+	numBlocks = peof / vcb-&gt;blockSize;
+	<span class="enscript-keyword">if</span> (!deleted) {
+		FTOC(fcb)-&gt;c_blocks -= (fcb-&gt;ff_blocks - numBlocks);
+	}
+	fcb-&gt;ff_blocks = numBlocks;
+	
+	<span class="enscript-comment">// this catalog entry is modified and *must* get forced 
+</span>	<span class="enscript-comment">// to disk when hfs_update() is called
+</span>	<span class="enscript-keyword">if</span> (!deleted) {
+		<span class="enscript-comment">/* 
+		 * If the file is already C_NOEXISTS, then the catalog record
+		 * has been removed from disk already.  We wouldn't need to force 
+		 * another update
+		 */</span>
+		FTOC(fcb)-&gt;c_flag |= C_MODIFIED;
+	}
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	If the new PEOF is 0, then truncateToExtent has no meaning (we should always deallocate
+</span>	<span class="enscript-comment">//	all storage).
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-keyword">if</span> (peof == 0) {
+		<span class="enscript-type">int</span> i;
+		
+		<span class="enscript-comment">//	Deallocate all the extents for this fork
+</span>		err = DeallocateFork(vcb, fileid, forkType, fcb-&gt;fcbExtents, &amp;recordDeleted);
+		<span class="enscript-keyword">if</span> (err != noErr) <span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;	<span class="enscript-comment">//	got some error, so return it
+</span>		
+		<span class="enscript-comment">//	Update the catalog extent record (making sure it's zeroed out)
+</span>		<span class="enscript-keyword">if</span> (err == noErr) {
+			<span class="enscript-keyword">for</span> (i=0; i &lt; kHFSPlusExtentDensity; i++) {
+				fcb-&gt;fcbExtents[i].startBlock = 0;
+				fcb-&gt;fcbExtents[i].blockCount = 0;
+			}
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">Done</span>;
+	}
+	
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Find the extent containing byte (peof-1).  This is the last extent we'll keep.
+</span>	<span class="enscript-comment">//	(If truncateToExtent is true, we'll keep the whole extent; otherwise, we'll only
+</span>	<span class="enscript-comment">//	keep up through peof).  The search will tell us how many allocation blocks exist
+</span>	<span class="enscript-comment">//	in the found extent plus all previous extents.
+</span>	<span class="enscript-comment">//
+</span>	err = SearchExtentFile(vcb, fcb, peof-1, &amp;key, extentRecord, &amp;extentIndex, &amp;hint, &amp;extentNextBlock);
+	<span class="enscript-keyword">if</span> (err != noErr) <span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+
+	extentChanged = false;		<span class="enscript-comment">//	haven't changed the extent yet
+</span>	
+	<span class="enscript-keyword">if</span> (!truncateToExtent) {
+		<span class="enscript-comment">//
+</span>		<span class="enscript-comment">//	Shorten this extent.  It may be the case that the entire extent gets
+</span>		<span class="enscript-comment">//	freed here.
+</span>		<span class="enscript-comment">//
+</span>		numBlocks = extentNextBlock - nextBlock;	<span class="enscript-comment">//	How many blocks in this extent to free up
+</span>		<span class="enscript-keyword">if</span> (numBlocks != 0) {
+			<span class="enscript-comment">//	Compute first volume allocation block to free
+</span>			startBlock = extentRecord[extentIndex].startBlock + extentRecord[extentIndex].blockCount - numBlocks;
+			<span class="enscript-comment">//	Free the blocks in bitmap
+</span>			err = BlockDeallocate(vcb, startBlock, numBlocks, 0);
+			<span class="enscript-keyword">if</span> (err != noErr) <span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+			<span class="enscript-comment">//	Adjust length of this extent
+</span>			extentRecord[extentIndex].blockCount -= numBlocks;
+			<span class="enscript-comment">//	If extent is empty, set start block to 0
+</span>			<span class="enscript-keyword">if</span> (extentRecord[extentIndex].blockCount == 0)
+				extentRecord[extentIndex].startBlock = 0;
+			<span class="enscript-comment">//	Remember that we changed the extent record
+</span>			extentChanged = true;
+		}
+	}
+	
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Now move to the next extent in the record, and set up the file allocation block number
+</span>	<span class="enscript-comment">//
+</span>	nextBlock = extentNextBlock;		<span class="enscript-comment">//	Next file allocation block to free
+</span>	++extentIndex;						<span class="enscript-comment">//	Its index within the extent record
+</span>	
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Release all following extents in this extent record.  Update the record.
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-keyword">while</span> (extentIndex &lt; numExtentsPerRecord &amp;&amp; extentRecord[extentIndex].blockCount != 0) {
+		numBlocks = extentRecord[extentIndex].blockCount;
+		<span class="enscript-comment">//	Deallocate this extent
+</span>		err = BlockDeallocate(vcb, extentRecord[extentIndex].startBlock, numBlocks, 0);
+		<span class="enscript-keyword">if</span> (err != noErr) <span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+		<span class="enscript-comment">//	Update next file allocation block number
+</span>		nextBlock += numBlocks;
+		<span class="enscript-comment">//	Zero out start and length of this extent to delete it from record
+</span>		extentRecord[extentIndex].startBlock = 0;
+		extentRecord[extentIndex].blockCount = 0;
+		<span class="enscript-comment">//	Remember that we changed an extent
+</span>		extentChanged = true;
+		<span class="enscript-comment">//	Move to next extent in record
+</span>		++extentIndex;
+	}
+	
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	If any of the extents in the current record were changed, then update that
+</span>	<span class="enscript-comment">//	record (in the FCB, or extents file).
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-keyword">if</span> (extentChanged) {
+		err = UpdateExtentRecord(vcb, fcb, deleted, &amp;key, extentRecord, hint);
+		<span class="enscript-keyword">if</span> (err != noErr) <span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;
+	}
+	
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	If there are any following allocation blocks, then we need
+</span>	<span class="enscript-comment">//	to seach for their extent records and delete those allocation
+</span>	<span class="enscript-comment">//	blocks.
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-keyword">if</span> (nextBlock &lt; physNumBlocks)
+		err = TruncateExtents(vcb, forkType, fileid, nextBlock, &amp;recordDeleted);
+
+<span class="enscript-reference">Done</span>:
+<span class="enscript-reference">ErrorExit</span>:
+	<span class="enscript-keyword">if</span> (recordDeleted)
+		(<span class="enscript-type">void</span>) FlushExtentFile(vcb);
+
+	<span class="enscript-keyword">return</span> err;
+}
+
+
+<span class="enscript-comment">/*
+ * HFS Plus only
+ *
+ */</span>
+OSErr <span class="enscript-function-name">HeadTruncateFile</span> (
+	ExtendedVCB  *vcb,
+	FCB  *fcb,
+	u_int32_t  headblks)
+{
+	HFSPlusExtentRecord  extents;
+	HFSPlusExtentRecord  tailExtents;
+	HFSCatalogNodeID  fileID;
+	u_int8_t  forkType;
+	u_int32_t  blkcnt;
+	u_int32_t  startblk;
+	u_int32_t  blksfreed;
+	<span class="enscript-type">int</span>  i, j;
+	<span class="enscript-type">int</span>  error = 0;
+	<span class="enscript-type">int</span>  lockflags;
+
+
+	<span class="enscript-keyword">if</span> (vcb-&gt;vcbSigWord != kHFSPlusSigWord)
+		<span class="enscript-keyword">return</span> (-1);
+
+	forkType = FORK_IS_RSRC(fcb) ? kResourceForkType : kDataForkType;
+	fileID = FTOC(fcb)-&gt;c_fileid;
+	bzero(tailExtents, <span class="enscript-keyword">sizeof</span>(tailExtents));
+
+	blksfreed = 0;
+	startblk = 0;
+
+	<span class="enscript-comment">/*
+	 * Process catalog resident extents
+	 */</span>
+	<span class="enscript-keyword">for</span> (i = 0, j = 0; i &lt; kHFSPlusExtentDensity; ++i) {
+		blkcnt = fcb-&gt;fcbExtents[i].blockCount;
+		<span class="enscript-keyword">if</span> (blkcnt == 0)
+			<span class="enscript-keyword">break</span>;  <span class="enscript-comment">/* end of extents */</span>
+
+		<span class="enscript-keyword">if</span> (blksfreed &lt; headblks) {
+			error = BlockDeallocate(vcb, fcb-&gt;fcbExtents[i].startBlock, blkcnt, 0);
+			<span class="enscript-comment">/*
+			 * Any errors after the first BlockDeallocate
+			 * must be ignored so we can put the file in
+			 * a known state.
+			 */</span>
+			<span class="enscript-keyword">if</span> (error ) {
+				<span class="enscript-keyword">if</span> (i == 0)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">ErrorExit</span>;  <span class="enscript-comment">/* uh oh */</span>
+				<span class="enscript-keyword">else</span> {
+					error = 0;
+					printf(<span class="enscript-string">&quot;hfs: HeadTruncateFile: problems deallocating %s (%d)\n&quot;</span>,
+					       FTOC(fcb)-&gt;c_desc.cd_nameptr ? (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)FTOC(fcb)-&gt;c_desc.cd_nameptr : <span class="enscript-string">&quot;&quot;</span>, error);
+				}
+			}
+
+			blksfreed += blkcnt;
+			fcb-&gt;fcbExtents[i].startBlock = 0;
+			fcb-&gt;fcbExtents[i].blockCount = 0;
+		} <span class="enscript-keyword">else</span> {
+			tailExtents[j].startBlock = fcb-&gt;fcbExtents[i].startBlock;
+			tailExtents[j].blockCount = blkcnt;
+			++j;
+		}
+		startblk += blkcnt;	
+	}
+	
+	<span class="enscript-keyword">if</span> (blkcnt == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">CopyExtents</span>;
+
+	lockflags = hfs_systemfile_lock(vcb, SFL_EXTENTS, HFS_EXCLUSIVE_LOCK);
+
+	<span class="enscript-comment">/* 
+	 * Process overflow extents
+	 */</span>
+	<span class="enscript-keyword">for</span> (;;) {
+		u_int32_t  extblks;
+
+		error = FindExtentRecord(vcb, forkType, fileID, startblk, false, NULL, extents, NULL);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-comment">/*
+			 * Any errors after the first BlockDeallocate
+			 * must be ignored so we can put the file in
+			 * a known state.
+			 */</span>
+			<span class="enscript-keyword">if</span> (error != btNotFound)
+				printf(<span class="enscript-string">&quot;hfs: HeadTruncateFile: problems finding extents %s (%d)\n&quot;</span>,
+				       FTOC(fcb)-&gt;c_desc.cd_nameptr ? (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)FTOC(fcb)-&gt;c_desc.cd_nameptr : <span class="enscript-string">&quot;&quot;</span>, error);
+			error = 0;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">for</span>(i = 0, extblks = 0; i &lt; kHFSPlusExtentDensity; ++i) {
+			blkcnt = extents[i].blockCount;
+			<span class="enscript-keyword">if</span> (blkcnt == 0)
+				<span class="enscript-keyword">break</span>;  <span class="enscript-comment">/* end of extents */</span>
+
+			<span class="enscript-keyword">if</span> (blksfreed &lt; headblks) {
+				error = BlockDeallocate(vcb, extents[i].startBlock, blkcnt, 0);
+				<span class="enscript-keyword">if</span> (error) {
+					printf(<span class="enscript-string">&quot;hfs: HeadTruncateFile: problems deallocating %s (%d)\n&quot;</span>,
+					       FTOC(fcb)-&gt;c_desc.cd_nameptr ? (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)FTOC(fcb)-&gt;c_desc.cd_nameptr : <span class="enscript-string">&quot;&quot;</span>, error);
+					error = 0;
+				}
+				blksfreed += blkcnt;
+			} <span class="enscript-keyword">else</span> {
+				tailExtents[j].startBlock = extents[i].startBlock;
+				tailExtents[j].blockCount = blkcnt;
+				++j;
+			}
+			extblks += blkcnt;		
+		}
+		
+		error = DeleteExtentRecord(vcb, forkType, fileID, startblk);
+		<span class="enscript-keyword">if</span> (error) {
+			printf(<span class="enscript-string">&quot;hfs: HeadTruncateFile: problems deallocating %s (%d)\n&quot;</span>,
+				FTOC(fcb)-&gt;c_desc.cd_nameptr ? (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)FTOC(fcb)-&gt;c_desc.cd_nameptr : <span class="enscript-string">&quot;&quot;</span>, error);
+			error = 0;
+		}
+		
+		<span class="enscript-keyword">if</span> (blkcnt == 0)
+			<span class="enscript-keyword">break</span>;  <span class="enscript-comment">/* all done */</span>
+
+		startblk += extblks;
+	}
+	hfs_systemfile_unlock(vcb, lockflags);
+
+<span class="enscript-reference">CopyExtents</span>:
+	<span class="enscript-keyword">if</span> (blksfreed) {
+		bcopy(tailExtents, fcb-&gt;fcbExtents, <span class="enscript-keyword">sizeof</span>(tailExtents));
+		blkcnt = fcb-&gt;ff_blocks - headblks;
+		FTOC(fcb)-&gt;c_blocks -= headblks;
+		fcb-&gt;ff_blocks = blkcnt;
+
+		FTOC(fcb)-&gt;c_flag |= C_MODIFIED;
+		FTOC(fcb)-&gt;c_touch_chgtime = TRUE;
+
+		(<span class="enscript-type">void</span>) FlushExtentFile(vcb);
+	}
+
+<span class="enscript-reference">ErrorExit</span>:	
+	<span class="enscript-keyword">return</span> MacToVFSError(error);
+}
+
+
+
+<span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span><span class="enscript-comment">//	Routine:	SearchExtentRecord (was XRSearch)
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Function: 	Searches extent record for the extent mapping a given file
+</span><span class="enscript-comment">//				allocation block number (FABN).
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Input:		searchFABN  			-  desired FABN
+</span><span class="enscript-comment">//				extentData  			-  pointer to extent data record (xdr)
+</span><span class="enscript-comment">//				extentDataStartFABN  	-  beginning FABN for extent record
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Output:		foundExtentDataOffset  -  offset to extent entry within xdr
+</span><span class="enscript-comment">//							result = noErr, offset to extent mapping desired FABN
+</span><span class="enscript-comment">//							result = FXRangeErr, offset to last extent in record
+</span><span class="enscript-comment">//				endingFABNPlusOne	-  ending FABN +1
+</span><span class="enscript-comment">//				noMoreExtents		- True if the extent was not found, and the
+</span><span class="enscript-comment">//									  extent record was not full (so don't bother
+</span><span class="enscript-comment">//									  looking in subsequent records); false otherwise.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Result:		noErr = ok
+</span><span class="enscript-comment">//				FXRangeErr = desired FABN &gt; last mapped FABN in record
+</span><span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span>
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">SearchExtentRecord</span>(
+	ExtendedVCB		*vcb,
+	u_int32_t				searchFABN,
+	<span class="enscript-type">const</span> HFSPlusExtentRecord	extentData,
+	u_int32_t				extentDataStartFABN,
+	u_int32_t				*foundExtentIndex,
+	u_int32_t				*endingFABNPlusOne,
+	Boolean					*noMoreExtents)
+{
+	OSErr	err = noErr;
+	u_int32_t	extentIndex;
+	<span class="enscript-comment">/* Set it to the HFS std value */</span>
+	u_int32_t	numberOfExtents = kHFSExtentDensity;
+	u_int32_t	numAllocationBlocks;
+	Boolean	foundExtent;
+	
+	*endingFABNPlusOne 	= extentDataStartFABN;
+	*noMoreExtents		= false;
+	foundExtent			= false;
+
+	<span class="enscript-comment">/* Override numberOfExtents for HFS+/HFSX */</span>
+	<span class="enscript-keyword">if</span> (vcb-&gt;vcbSigWord != kHFSSigWord) {
+		numberOfExtents = kHFSPlusExtentDensity;
+	}
+	
+	<span class="enscript-keyword">for</span>( extentIndex = 0; extentIndex &lt; numberOfExtents; ++extentIndex )
+	{
+		
+		<span class="enscript-comment">// Loop over the extent record and find the search FABN.
+</span>		
+		numAllocationBlocks = extentData[extentIndex].blockCount;
+		<span class="enscript-keyword">if</span> ( numAllocationBlocks == 0 )
+		{
+			<span class="enscript-keyword">break</span>;
+		}
+
+		*endingFABNPlusOne += numAllocationBlocks;
+		
+		<span class="enscript-keyword">if</span>( searchFABN &lt; *endingFABNPlusOne )
+		{
+			<span class="enscript-comment">// Found the extent.
+</span>			foundExtent = true;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	
+	<span class="enscript-keyword">if</span>( foundExtent )
+	{
+		<span class="enscript-comment">// Found the extent. Note the extent offset
+</span>		*foundExtentIndex = extentIndex;
+	}
+	<span class="enscript-keyword">else</span>
+	{
+		<span class="enscript-comment">// Did not find the extent. Set foundExtentDataOffset accordingly
+</span>		<span class="enscript-keyword">if</span>( extentIndex &gt; 0 )
+		{
+			*foundExtentIndex = extentIndex - 1;
+		}
+		<span class="enscript-keyword">else</span>
+		{
+			*foundExtentIndex = 0;
+		}
+		
+		<span class="enscript-comment">// If we found an empty extent, then set noMoreExtents.
+</span>		<span class="enscript-keyword">if</span> (extentIndex &lt; numberOfExtents)
+			*noMoreExtents = true;
+
+		<span class="enscript-comment">// Finally, return an error to the caller
+</span>		err = fxRangeErr;
+	}
+
+	<span class="enscript-keyword">return</span>( err );
+}
+
+<span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span><span class="enscript-comment">//	Routine:	SearchExtentFile (was XFSearch)
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Function: 	Searches extent file (including the FCB resident extent record)
+</span><span class="enscript-comment">//				for the extent mapping a given file position.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Input:		vcb  			-  VCB pointer
+</span><span class="enscript-comment">//				fcb  			-  FCB pointer
+</span><span class="enscript-comment">//				filePosition  	-  file position (byte address)
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Output:		foundExtentKey  		-  extent key record (xkr)
+</span><span class="enscript-comment">//							If extent was found in the FCB's resident extent record,
+</span><span class="enscript-comment">//							then foundExtentKey-&gt;keyLength will be set to 0.
+</span><span class="enscript-comment">//				foundExtentData			-  extent data record(xdr)
+</span><span class="enscript-comment">//				foundExtentIndex  	-  index to extent entry in xdr
+</span><span class="enscript-comment">//							result =  0, offset to extent mapping desired FABN
+</span><span class="enscript-comment">//							result = FXRangeErr, offset to last extent in record
+</span><span class="enscript-comment">//									 (i.e., kNumExtentsPerRecord-1)
+</span><span class="enscript-comment">//				extentBTreeHint  		-  BTree hint for extent record
+</span><span class="enscript-comment">//							kNoHint = Resident extent record
+</span><span class="enscript-comment">//				endingFABNPlusOne  		-  ending FABN +1
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Result:
+</span><span class="enscript-comment">//		noErr			Found an extent that contains the given file position
+</span><span class="enscript-comment">//		FXRangeErr		Given position is beyond the last allocated extent
+</span><span class="enscript-comment">//		(other)			(some other internal I/O error)
+</span><span class="enscript-comment">//‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹‹
+</span>
+OSErr <span class="enscript-function-name">SearchExtentFile</span>(
+	ExtendedVCB 	*vcb,
+	<span class="enscript-type">const</span> FCB	 		*fcb,
+	int64_t 			filePosition,
+	HFSPlusExtentKey	*foundExtentKey,
+	HFSPlusExtentRecord	foundExtentData,
+	u_int32_t			*foundExtentIndex,
+	u_int32_t			*extentBTreeHint,
+	u_int32_t			*endingFABNPlusOne )
+{
+	OSErr				err;
+	u_int32_t			filePositionBlock;
+	int64_t                         temp64;
+	Boolean				noMoreExtents;
+	<span class="enscript-type">int</span>  lockflags;
+	
+	temp64 = filePosition / (int64_t)vcb-&gt;blockSize;
+	filePositionBlock = (u_int32_t)temp64;
+
+    bcopy ( fcb-&gt;fcbExtents, foundExtentData, <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord));
+	
+	<span class="enscript-comment">//	Search the resident FCB first.
+</span>    err = SearchExtentRecord( vcb, filePositionBlock, foundExtentData, 0,
+									foundExtentIndex, endingFABNPlusOne, &amp;noMoreExtents );
+
+	<span class="enscript-keyword">if</span>( err == noErr ) {
+		<span class="enscript-comment">// Found the extent. Set results accordingly
+</span>		*extentBTreeHint = kNoHint;			<span class="enscript-comment">// no hint, because not in the BTree
+</span>		foundExtentKey-&gt;keyLength = 0;		<span class="enscript-comment">// 0 = the FCB itself
+</span>		
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">Exit</span>;
+	}
+	
+	<span class="enscript-comment">//	Didn't find extent in FCB.  If FCB's extent record wasn't full, there's no point
+</span>	<span class="enscript-comment">//	in searching the extents file.  Note that SearchExtentRecord left us pointing at
+</span>	<span class="enscript-comment">//	the last valid extent (or the first one, if none were valid).  This means we need
+</span>	<span class="enscript-comment">//	to fill in the hint and key outputs, just like the &quot;if&quot; statement above.
+</span>	<span class="enscript-keyword">if</span> ( noMoreExtents ) {
+		*extentBTreeHint = kNoHint;			<span class="enscript-comment">// no hint, because not in the BTree
+</span>		foundExtentKey-&gt;keyLength = 0;		<span class="enscript-comment">// 0 = the FCB itself
+</span>		err = fxRangeErr;		<span class="enscript-comment">// There are no more extents, so must be beyond PEOF
+</span>		<span class="enscript-keyword">goto</span> <span class="enscript-reference">Exit</span>;
+	}
+	
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	Find the desired record, or the previous record if it is the same fork
+</span>	<span class="enscript-comment">//
+</span>	lockflags = hfs_systemfile_lock(vcb, SFL_EXTENTS, HFS_EXCLUSIVE_LOCK);
+
+	err = FindExtentRecord(vcb, FORK_IS_RSRC(fcb) ? kResourceForkType : kDataForkType,
+						   FTOC(fcb)-&gt;c_fileid, filePositionBlock, true, foundExtentKey, foundExtentData, extentBTreeHint);
+	hfs_systemfile_unlock(vcb, lockflags);
+
+	<span class="enscript-keyword">if</span> (err == btNotFound) {
+		<span class="enscript-comment">//
+</span>		<span class="enscript-comment">//	If we get here, the desired position is beyond the extents in the FCB, and there are no extents
+</span>		<span class="enscript-comment">//	in the extents file.  Return the FCB's extents and a range error.
+</span>		<span class="enscript-comment">//
+</span>		*extentBTreeHint = kNoHint;
+		foundExtentKey-&gt;keyLength = 0;
+		err = GetFCBExtentRecord(fcb, foundExtentData);
+		<span class="enscript-comment">//	Note: foundExtentIndex and endingFABNPlusOne have already been set as a result of the very
+</span>		<span class="enscript-comment">//	first SearchExtentRecord call in this function (when searching in the FCB's extents, and
+</span>		<span class="enscript-comment">//	we got a range error).
+</span>		
+		<span class="enscript-keyword">return</span> fxRangeErr;
+	}
+	
+	<span class="enscript-comment">//
+</span>	<span class="enscript-comment">//	If we get here, there was either a BTree error, or we found an appropriate record.
+</span>	<span class="enscript-comment">//	If we found a record, then search it for the correct index into the extents.
+</span>	<span class="enscript-comment">//
+</span>	<span class="enscript-keyword">if</span> (err == noErr) {
+		<span class="enscript-comment">//	Find appropriate index into extent record
+</span>		err = SearchExtentRecord(vcb, filePositionBlock, foundExtentData, foundExtentKey-&gt;startBlock,
+								 foundExtentIndex, endingFABNPlusOne, &amp;noMoreExtents);
+	}
+
+<span class="enscript-reference">Exit</span>:
+	<span class="enscript-keyword">return</span> err;
+}
+
+
+
+<span class="enscript-comment">//============================================================================
+</span><span class="enscript-comment">//	Routine:	UpdateExtentRecord
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Function: 	Write new extent data to an existing extent record with a given key.
+</span><span class="enscript-comment">//				If all of the extents are empty, and the extent record is in the
+</span><span class="enscript-comment">//				extents file, then the record is deleted.
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Input:		vcb			  			-	the volume containing the extents
+</span><span class="enscript-comment">//				fcb						-	the file that owns the extents
+</span><span class="enscript-comment">//				deleted					-	whether or not the file is already deleted
+</span><span class="enscript-comment">//				extentFileKey  			-	pointer to extent key record (xkr)
+</span><span class="enscript-comment">//						If the key length is 0, then the extents are actually part
+</span><span class="enscript-comment">//						of the catalog record, stored in the FCB.
+</span><span class="enscript-comment">//				extentData  			-	pointer to extent data record (xdr)
+</span><span class="enscript-comment">//				extentBTreeHint			-	hint for given key, or kNoHint
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">//	Result:		noErr = ok
+</span><span class="enscript-comment">//				(other) = error from BTree
+</span><span class="enscript-comment">//============================================================================
+</span>
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">UpdateExtentRecord</span> (ExtendedVCB *vcb, FCB  *fcb, <span class="enscript-type">int</span> deleted,
+								 <span class="enscript-type">const</span> HFSPlusExtentKey  *extentFileKey,
+								 <span class="enscript-type">const</span> HFSPlusExtentRecord  extentData,
+								 u_int32_t  extentBTreeHint) 
+{
+    OSErr err = noErr;
+	
+	<span class="enscript-keyword">if</span> (extentFileKey-&gt;keyLength == 0) {	<span class="enscript-comment">// keyLength == 0 means the FCB's extent record
+</span>		BlockMoveData(extentData, fcb-&gt;fcbExtents, <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord));
+		<span class="enscript-keyword">if</span> (!deleted) {
+			FTOC(fcb)-&gt;c_flag |= C_MODIFIED;
+		}
+	}
+	<span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> BTreeIterator *btIterator = NULL;
+		FSBufferDescriptor btRecord;
+		u_int16_t btRecordSize;
+		FCB * btFCB;
+		<span class="enscript-type">int</span> lockflags;
+
+		<span class="enscript-comment">//
+</span>		<span class="enscript-comment">//	Need to find and change a record in Extents BTree
+</span>		<span class="enscript-comment">//
+</span>		btFCB = GetFileControlBlock(vcb-&gt;extentsRefNum);
+		
+		MALLOC (btIterator, <span class="enscript-type">struct</span> BTreeIterator*, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> BTreeIterator), M_TEMP, M_WAITOK);
+		<span class="enscript-keyword">if</span> (btIterator == NULL) {
+			<span class="enscript-keyword">return</span> memFullErr;  <span class="enscript-comment">// translates to ENOMEM
+</span>		}
+		bzero(btIterator, <span class="enscript-keyword">sizeof</span>(*btIterator));
+
+		<span class="enscript-comment">/*
+		 * The lock taken by callers of ExtendFileC/TruncateFileC is
+		 * speculative and only occurs when the file already has
+		 * overflow extents. So we need to make sure we have the lock
+		 * here.  The extents btree lock can be nested (its recursive)
+		 * so we always take it here.
+		 */</span>
+		lockflags = hfs_systemfile_lock(vcb, SFL_EXTENTS, HFS_EXCLUSIVE_LOCK);
+
+		<span class="enscript-comment">/* HFS+/HFSX */</span>
+		<span class="enscript-keyword">if</span> (vcb-&gt;vcbSigWord != kHFSSigWord) {		<span class="enscript-comment">//	HFS Plus volume
+</span>			HFSPlusExtentRecord	foundData;		<span class="enscript-comment">// The extent data actually found
+</span>
+			BlockMoveData(extentFileKey, &amp;btIterator-&gt;key, <span class="enscript-keyword">sizeof</span>(HFSPlusExtentKey));
+
+			btIterator-&gt;hint.index = 0;
+			btIterator-&gt;hint.nodeNum = extentBTreeHint;
+
+			btRecord.bufferAddress = &amp;foundData;
+			btRecord.itemSize = <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord);
+			btRecord.itemCount = 1;
+
+			err = BTSearchRecord(btFCB, btIterator, &amp;btRecord, &amp;btRecordSize, btIterator);
+	
+			<span class="enscript-keyword">if</span> (err == noErr) {
+				BlockMoveData(extentData, &amp;foundData, <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord));
+				err = BTReplaceRecord(btFCB, btIterator, &amp;btRecord, btRecordSize);
+			}
+			(<span class="enscript-type">void</span>) BTFlushPath(btFCB);
+		}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+		<span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* HFS Standard */</span>
+			HFSExtentKey *	key;				<span class="enscript-comment">// Actual extent key used on disk in HFS
+</span>			HFSExtentRecord	foundData;			<span class="enscript-comment">// The extent data actually found
+</span>
+			key = (HFSExtentKey*) &amp;btIterator-&gt;key;
+			key-&gt;keyLength	= kHFSExtentKeyMaximumLength;
+			key-&gt;forkType	= extentFileKey-&gt;forkType;
+			key-&gt;fileID		= extentFileKey-&gt;fileID;
+			key-&gt;startBlock	= extentFileKey-&gt;startBlock;
+
+			btIterator-&gt;hint.index = 0;
+			btIterator-&gt;hint.nodeNum = extentBTreeHint;
+
+			btRecord.bufferAddress = &amp;foundData;
+			btRecord.itemSize = <span class="enscript-keyword">sizeof</span>(HFSExtentRecord);
+			btRecord.itemCount = 1;
+
+			err = BTSearchRecord(btFCB, btIterator, &amp;btRecord, &amp;btRecordSize, btIterator);
+
+			<span class="enscript-keyword">if</span> (err == noErr)
+				err = HFSPlusToHFSExtents(extentData, (HFSExtentDescriptor *)&amp;foundData);
+
+			<span class="enscript-keyword">if</span> (err == noErr)
+				err = BTReplaceRecord(btFCB, btIterator, &amp;btRecord, btRecordSize);
+			(<span class="enscript-type">void</span>) BTFlushPath(btFCB);
+
+		}
+#<span class="enscript-reference">endif</span>
+
+		hfs_systemfile_unlock(vcb, lockflags);
+
+		FREE(btIterator, M_TEMP);
+	}
+	
+	<span class="enscript-keyword">return</span> err;
+}
+
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_HFS_STD</span>
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">HFSPlusToHFSExtents</span>(
+	<span class="enscript-type">const</span> HFSPlusExtentRecord	oldExtents,
+	HFSExtentRecord		newExtents)
+{
+	OSErr	err;
+	
+	err = noErr;
+
+	<span class="enscript-comment">// copy the first 3 extents
+</span>	newExtents[0].startBlock = oldExtents[0].startBlock;
+	newExtents[0].blockCount = oldExtents[0].blockCount;
+	newExtents[1].startBlock = oldExtents[1].startBlock;
+	newExtents[1].blockCount = oldExtents[1].blockCount;
+	newExtents[2].startBlock = oldExtents[2].startBlock;
+	newExtents[2].blockCount = oldExtents[2].blockCount;
+
+	#<span class="enscript-keyword">if</span> DEBUG_BUILD
+		<span class="enscript-keyword">if</span> (oldExtents[3].startBlock || oldExtents[3].blockCount) {
+			DebugStr(<span class="enscript-string">&quot;ExtentRecord with &gt; 3 extents is invalid for HFS&quot;</span>);
+			err = fsDSIntErr;
+		}
+	#endif
+	
+	<span class="enscript-keyword">return</span> err;
+}
+#<span class="enscript-reference">endif</span>
+
+
+
+<span class="enscript-type">static</span> OSErr <span class="enscript-function-name">GetFCBExtentRecord</span>(
+	<span class="enscript-type">const</span> FCB			*fcb,
+	HFSPlusExtentRecord	extents)
+{
+	
+	BlockMoveData(fcb-&gt;fcbExtents, extents, <span class="enscript-keyword">sizeof</span>(HFSPlusExtentRecord));
+	
+	<span class="enscript-keyword">return</span> noErr;
+}
+
+
+<span class="enscript-comment">//_________________________________________________________________________________
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Routine:		ExtentsAreIntegral
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Purpose:		Ensure that each extent can hold an integral number of nodes
+</span><span class="enscript-comment">//				Called by the NodesAreContiguous function
+</span><span class="enscript-comment">//_________________________________________________________________________________
+</span>
+<span class="enscript-type">static</span> Boolean <span class="enscript-function-name">ExtentsAreIntegral</span>(
+	<span class="enscript-type">const</span> HFSPlusExtentRecord extentRecord,
+	u_int32_t	mask,
+	u_int32_t	*blocksChecked,
+	Boolean		*checkedLastExtent)
+{
+	u_int32_t	blocks;
+	u_int32_t	extentIndex;
+
+	*blocksChecked = 0;
+	*checkedLastExtent = false;
+	
+	<span class="enscript-keyword">for</span>(extentIndex = 0; extentIndex &lt; kHFSPlusExtentDensity; extentIndex++)
+	{		
+		blocks = extentRecord[extentIndex].blockCount;
+		
+		<span class="enscript-keyword">if</span> ( blocks == 0 )
+		{
+			*checkedLastExtent = true;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		*blocksChecked += blocks;
+
+		<span class="enscript-keyword">if</span> (blocks &amp; mask)
+			<span class="enscript-keyword">return</span> false;
+	}
+	
+	<span class="enscript-keyword">return</span> true;
+}
+
+
+<span class="enscript-comment">//_________________________________________________________________________________
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Routine:		NodesAreContiguous
+</span><span class="enscript-comment">//
+</span><span class="enscript-comment">// Purpose:		Ensure that all b-tree nodes are contiguous on disk
+</span><span class="enscript-comment">//				Called by BTOpenPath during volume mount
+</span><span class="enscript-comment">//_________________________________________________________________________________
+</span>
+Boolean <span class="enscript-function-name">NodesAreContiguous</span>(
+	ExtendedVCB	*vcb,
+	FCB			*fcb,
+	u_int32_t	nodeSize)
+{
+	u_int32_t			mask;
+	u_int32_t			startBlock;
+	u_int32_t			blocksChecked;
+	u_int32_t			hint;
+	HFSPlusExtentKey	key;
+	HFSPlusExtentRecord	extents;
+	OSErr				result;
+	Boolean				lastExtentReached;
+	<span class="enscript-type">int</span>  lockflags;
+	
+
+	<span class="enscript-keyword">if</span> (vcb-&gt;blockSize &gt;= nodeSize)
+		<span class="enscript-keyword">return</span> TRUE;
+
+	mask = (nodeSize / vcb-&gt;blockSize) - 1;
+
+	<span class="enscript-comment">// check the local extents
+</span>	(<span class="enscript-type">void</span>) GetFCBExtentRecord(fcb, extents);
+	<span class="enscript-keyword">if</span> ( !ExtentsAreIntegral(extents, mask, &amp;blocksChecked, &amp;lastExtentReached) )
+		<span class="enscript-keyword">return</span> FALSE;
+
+	<span class="enscript-keyword">if</span> ( lastExtentReached || 
+		 (int64_t)((int64_t)blocksChecked * (int64_t)vcb-&gt;blockSize) &gt;= (int64_t)fcb-&gt;ff_size)
+		<span class="enscript-keyword">return</span> TRUE;
+
+	startBlock = blocksChecked;
+
+	lockflags = hfs_systemfile_lock(vcb, SFL_EXTENTS, HFS_EXCLUSIVE_LOCK);
+
+	<span class="enscript-comment">// check the overflow extents (if any)
+</span>	<span class="enscript-keyword">while</span> ( !lastExtentReached )
+	{
+		result = FindExtentRecord(vcb, kDataForkType, fcb-&gt;ff_cp-&gt;c_fileid, startBlock, FALSE, &amp;key, extents, &amp;hint);
+		<span class="enscript-keyword">if</span> (result) <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">if</span> ( !ExtentsAreIntegral(extents, mask, &amp;blocksChecked, &amp;lastExtentReached) ) {
+			hfs_systemfile_unlock(vcb, lockflags);
+			<span class="enscript-keyword">return</span> FALSE;
+		}
+		startBlock += blocksChecked;
+	}
+	hfs_systemfile_unlock(vcb, lockflags);
+	<span class="enscript-keyword">return</span> TRUE;
+}
+
+</pre>
+<hr />
+</body></html>

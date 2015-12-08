@@ -1,0 +1,1281 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>OSMetaClass.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">OSMetaClass.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/* OSMetaClass.cpp created by gvdl on Fri 1998-11-17 */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSReturn.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSMetaClass.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSObject.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSKext.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSCollectionIterator.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSDictionary.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSArray.h&gt;</span>   
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSSet.h&gt;</span> 
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSSymbol.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSNumber.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSSerialize.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSLib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOLib.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOKitDebug.h&gt;</span>
+
+
+__BEGIN_DECLS
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread_call.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_interface.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PRAGMA_MARK</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> <span class="enscript-variable-name">Macros</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PRAGMA_MARK */</span>
+<span class="enscript-comment">/*********************************************************************
+* Macros
+*********************************************************************/</span>
+__END_DECLS
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PRAGMA_MARK</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> <span class="enscript-variable-name">Internal</span> <span class="enscript-variable-name">constants</span> &amp; <span class="enscript-variable-name">data</span> <span class="enscript-variable-name">structs</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PRAGMA_MARK */</span>
+<span class="enscript-comment">/*********************************************************************
+* Internal constants &amp; data structs
+*********************************************************************/</span>
+OSKextLogSpec kOSMetaClassLogSpec =
+    kOSKextLogErrorLevel |
+    kOSKextLogLoadFlag |
+    kOSKextLogKextBookkeepingFlag;
+
+<span class="enscript-type">static</span> <span class="enscript-type">enum</span> {
+    kCompletedBootstrap = 0,
+    kNoDictionaries     = 1,
+    kMakingDictionaries = 2
+} sBootstrapState = kNoDictionaries;
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">int</span>      kClassCapacityIncrement = 40;
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">int</span>      kKModCapacityIncrement  = 10;
+<span class="enscript-type">static</span> OSDictionary * sAllClassesDict;
+<span class="enscript-type">static</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>   sDeepestClass;
+IOLock              * sAllClassesLock = NULL;
+IOLock              * sInstancesLock  = NULL;
+
+<span class="enscript-comment">/*
+ * While loading a kext and running all its constructors to register
+ * all OSMetaClass classes, the classes are queued up here. Only one
+ * kext can be in flight at a time, guarded by sStalledClassesLock
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> StalledData {
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span>   * kextIdentifier;
+    OSReturn       result;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>   capacity;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>   count;
+    OSMetaClass ** classes;
+} * sStalled;
+IOLock * sStalledClassesLock = NULL;
+
+<span class="enscript-type">struct</span> ExpansionData {
+    OSOrderedSet    * instances;
+    OSKext          * kext;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IOTRACKING</span>
+    IOTrackingQueue * tracking;
+#<span class="enscript-reference">endif</span>
+};
+
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PRAGMA_MARK</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> <span class="enscript-variable-name">OSMetaClassBase</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PRAGMA_MARK */</span>
+<span class="enscript-comment">/*********************************************************************
+* OSMetaClassBase.
+*********************************************************************/</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">APPLE_KEXT_VTABLE_PADDING</span>
+<span class="enscript-comment">/*********************************************************************
+* Reserved vtable functions.
+*********************************************************************/</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">SLOT_USED</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClassBase::_RESERVEDOSMetaClassBase0</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClassBase::_RESERVEDOSMetaClassBase%d called.&quot;</span>, 0); }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClassBase::_RESERVEDOSMetaClassBase1</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClassBase::_RESERVEDOSMetaClassBase%d called.&quot;</span>, 1); }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClassBase::_RESERVEDOSMetaClassBase2</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClassBase::_RESERVEDOSMetaClassBase%d called.&quot;</span>, 2); }
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* SLOT_USED */</span>
+
+<span class="enscript-comment">// As these slots are used move them up inside the #if above
+</span><span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClassBase::_RESERVEDOSMetaClassBase3</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClassBase::_RESERVEDOSMetaClassBase%d called.&quot;</span>, 3); }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClassBase::_RESERVEDOSMetaClassBase4</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClassBase::_RESERVEDOSMetaClassBase%d called.&quot;</span>, 4); }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClassBase::_RESERVEDOSMetaClassBase5</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClassBase::_RESERVEDOSMetaClassBase%d called.&quot;</span>, 5); }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClassBase::_RESERVEDOSMetaClassBase6</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClassBase::_RESERVEDOSMetaClassBase%d called.&quot;</span>, 6); }
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*********************************************************************
+* These used to be inline in the header but gcc didn't believe us
+* Now we MUST pull the inline out at least until the compiler is
+* repaired.
+*
+* Helper inlines for runtime type preprocessor macros
+*********************************************************************/</span>
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+OSMetaClassBase *
+<span class="enscript-function-name">OSMetaClassBase::safeMetaCast</span>(
+    <span class="enscript-type">const</span> OSMetaClassBase * me,
+    <span class="enscript-type">const</span> OSMetaClass     * toType)
+{
+    <span class="enscript-keyword">return</span> (me)? me-&gt;metaCast(toType) : 0;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">OSMetaClassBase::checkTypeInst</span>(
+    <span class="enscript-type">const</span> OSMetaClassBase * inst,
+    <span class="enscript-type">const</span> OSMetaClassBase * typeinst)
+{
+    <span class="enscript-type">const</span> OSMetaClass * toType = OSTypeIDInst(typeinst);
+    <span class="enscript-keyword">return</span> typeinst &amp;&amp; inst &amp;&amp; (0 != inst-&gt;metaCast(toType));
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">void</span> OSMetaClassBase::
+<span class="enscript-function-name">initialize</span>()
+{
+    sAllClassesLock = IOLockAlloc();
+    sStalledClassesLock = IOLockAlloc();
+    sInstancesLock = IOLockAlloc();
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">APPLE_KEXT_VTABLE_PADDING</span>
+<span class="enscript-comment">/*********************************************************************
+* If you need this slot you had better setup an IOCTL style interface.
+* 'Cause the whole kernel world depends on OSMetaClassBase and YOU
+* CANT change the VTABLE size ever.
+*********************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClassBase::_RESERVEDOSMetaClassBase7</span>()
+{ panic(<span class="enscript-string">&quot;OSMetaClassBase::_RESERVEDOSMetaClassBase%d called.&quot;</span>, 7); }
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-function-name">OSMetaClassBase::OSMetaClassBase</span>()
+{
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-function-name">OSMetaClassBase::~OSMetaClassBase</span>()
+{
+    <span class="enscript-type">void</span> ** thisVTable;
+
+    thisVTable = (<span class="enscript-type">void</span> **) <span class="enscript-keyword">this</span>;
+    *thisVTable = (<span class="enscript-type">void</span> *) -1UL;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">OSMetaClassBase::isEqualTo</span>(<span class="enscript-type">const</span> OSMetaClassBase * anObj) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> <span class="enscript-keyword">this</span> == anObj;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+OSMetaClassBase *
+<span class="enscript-function-name">OSMetaClassBase::metaCast</span>(<span class="enscript-type">const</span> OSMetaClass * toMeta) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> toMeta-&gt;checkMetaCast(<span class="enscript-keyword">this</span>);
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+OSMetaClassBase *
+<span class="enscript-function-name">OSMetaClassBase::metaCast</span>(<span class="enscript-type">const</span> OSSymbol * toMetaSymb) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> OSMetaClass::checkMetaCastWithName(toMetaSymb, <span class="enscript-keyword">this</span>);
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+OSMetaClassBase *
+<span class="enscript-function-name">OSMetaClassBase::metaCast</span>(<span class="enscript-type">const</span> OSString * toMetaStr) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">const</span> OSSymbol  * tempSymb = OSSymbol::withString(toMetaStr);
+    OSMetaClassBase * ret = 0;
+    <span class="enscript-keyword">if</span> (tempSymb) {
+        ret = metaCast(tempSymb);
+        tempSymb-&gt;release();
+    }
+    <span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+OSMetaClassBase *
+<span class="enscript-function-name">OSMetaClassBase::metaCast</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> * toMetaCStr) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">const</span> OSSymbol  * tempSymb = OSSymbol::withCString(toMetaCStr);
+    OSMetaClassBase * ret = 0;
+    <span class="enscript-keyword">if</span> (tempSymb) {
+        ret = metaCast(tempSymb);
+        tempSymb-&gt;release();
+    }
+    <span class="enscript-keyword">return</span> ret;
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PRAGMA_MARK</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> <span class="enscript-variable-name">OSMetaClassMeta</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PRAGMA_MARK */</span>
+<span class="enscript-comment">/*********************************************************************
+* OSMetaClassMeta - the bootstrap metaclass of OSMetaClass
+*********************************************************************/</span>
+<span class="enscript-type">class</span> OSMetaClassMeta : <span class="enscript-type">public</span> OSMetaClass 
+{
+<span class="enscript-type">public</span>:
+    OSMetaClassMeta();
+    OSObject * alloc() <span class="enscript-type">const</span>;
+};
+<span class="enscript-function-name">OSMetaClassMeta::OSMetaClassMeta</span>()
+    : OSMetaClass(<span class="enscript-string">&quot;OSMetaClass&quot;</span>, 0, <span class="enscript-keyword">sizeof</span>(OSMetaClass))
+    { }
+OSObject * <span class="enscript-function-name">OSMetaClassMeta::alloc</span>() <span class="enscript-type">const</span> { <span class="enscript-keyword">return</span> 0; }
+
+<span class="enscript-type">static</span> OSMetaClassMeta sOSMetaClassMeta;
+
+<span class="enscript-type">const</span> OSMetaClass * <span class="enscript-type">const</span> OSMetaClass::metaClass = &amp;sOSMetaClassMeta;
+<span class="enscript-type">const</span> OSMetaClass * <span class="enscript-function-name">OSMetaClass::getMetaClass</span>() <span class="enscript-type">const</span>
+    { <span class="enscript-keyword">return</span> &amp;sOSMetaClassMeta; }
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">PRAGMA_MARK</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> <span class="enscript-variable-name">OSMetaClass</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PRAGMA_MARK */</span>
+<span class="enscript-comment">/*********************************************************************
+* OSMetaClass
+*********************************************************************/</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">APPLE_KEXT_VTABLE_PADDING</span>
+<span class="enscript-comment">/*********************************************************************
+* Reserved functions.
+*********************************************************************/</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::_RESERVEDOSMetaClass0</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClass::_RESERVEDOSMetaClass%d called&quot;</span>, 0); }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::_RESERVEDOSMetaClass1</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClass::_RESERVEDOSMetaClass%d called&quot;</span>, 1); }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::_RESERVEDOSMetaClass2</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClass::_RESERVEDOSMetaClass%d called&quot;</span>, 2); }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::_RESERVEDOSMetaClass3</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClass::_RESERVEDOSMetaClass%d called&quot;</span>, 3); }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::_RESERVEDOSMetaClass4</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClass::_RESERVEDOSMetaClass%d called&quot;</span>, 4); }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::_RESERVEDOSMetaClass5</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClass::_RESERVEDOSMetaClass%d called&quot;</span>, 5); }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::_RESERVEDOSMetaClass6</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClass::_RESERVEDOSMetaClass%d called&quot;</span>, 6); }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::_RESERVEDOSMetaClass7</span>()
+    { panic(<span class="enscript-string">&quot;OSMetaClass::_RESERVEDOSMetaClass%d called&quot;</span>, 7); }
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClassLogErrorForKext</span>(
+    OSReturn   error,
+    OSKext   * aKext)
+{
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> * message = NULL;
+
+    <span class="enscript-keyword">switch</span> (error) {
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSReturnSuccess</span>:
+        <span class="enscript-keyword">return</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSMetaClassNoInit</span>:  <span class="enscript-comment">// xxx - never returned; logged at fail site
+</span>        message = <span class="enscript-string">&quot;OSMetaClass: preModLoad() wasn't called (runtime internal error).&quot;</span>;
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSMetaClassNoDicts</span>:
+        message = <span class="enscript-string">&quot;OSMetaClass: Allocation failure for OSMetaClass internal dictionaries.&quot;</span>;
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSMetaClassNoKModSet</span>:
+        message = <span class="enscript-string">&quot;OSMetaClass: Allocation failure for internal kext recording set/set missing.&quot;</span>;
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSMetaClassNoInsKModSet</span>:
+        message = <span class="enscript-string">&quot;OSMetaClass: Failed to record class in kext.&quot;</span>;
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSMetaClassDuplicateClass</span>:
+        message = <span class="enscript-string">&quot;OSMetaClass: Duplicate class encountered.&quot;</span>;
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSMetaClassNoSuper</span>:  <span class="enscript-comment">// xxx - never returned
+</span>        message = <span class="enscript-string">&quot;OSMetaClass: Can't associate a class with its superclass.&quot;</span>;
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSMetaClassInstNoSuper</span>:  <span class="enscript-comment">// xxx - never returned
+</span>        message = <span class="enscript-string">&quot;OSMetaClass: Instance construction error; unknown superclass.&quot;</span>;
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSMetaClassNoKext</span>:
+        message = <span class="enscript-string">&quot;OSMetaClass: Kext not found for metaclass.&quot;</span>;
+        <span class="enscript-keyword">break</span>;
+    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSMetaClassInternal</span>:
+    <span class="enscript-reference">default</span>:
+        message = <span class="enscript-string">&quot;OSMetaClass: Runtime internal error.&quot;</span>;
+        <span class="enscript-keyword">break</span>;
+    }
+
+    <span class="enscript-keyword">if</span> (message) {
+        OSKextLog(aKext, kOSMetaClassLogSpec, <span class="enscript-string">&quot;%s&quot;</span>, message);
+    }
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClass::logError</span>(OSReturn error)
+{
+    OSMetaClassLogErrorForKext(error, NULL);
+}
+
+<span class="enscript-comment">/*********************************************************************
+* The core constructor for a MetaClass (defined with this name always
+* but within the scope of its represented class).
+*
+* MetaClass constructors are invoked in OSRuntimeInitializeCPP(),
+* in between calls to OSMetaClass::preModLoad(), which sets up for
+* registration, and OSMetaClass::postModLoad(), which actually
+* records all the class/kext relationships of the new MetaClasses.
+*********************************************************************/</span>
+<span class="enscript-function-name">OSMetaClass::OSMetaClass</span>(
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span>        * inClassName,
+    <span class="enscript-type">const</span> OSMetaClass * inSuperClass,
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>        inClassSize)
+{
+    instanceCount = 0;
+    classSize = inClassSize;
+    superClassLink = inSuperClass;
+
+    reserved = IONew(ExpansionData, 1);
+    bzero(reserved, <span class="enscript-keyword">sizeof</span>(ExpansionData));
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IOTRACKING</span>
+    reserved-&gt;tracking = IOTrackingQueueAlloc(inClassName, inClassSize, 0, true);
+#<span class="enscript-reference">endif</span>
+
+   <span class="enscript-comment">/* Hack alert: We are just casting inClassName and storing it in
+    * an OSString * instance variable. This may be because you can't
+    * create C++ objects in static constructors, but I really don't know!
+    */</span>
+    className = (<span class="enscript-type">const</span> OSSymbol *)inClassName;
+
+    <span class="enscript-comment">// sStalledClassesLock taken in preModLoad
+</span>    <span class="enscript-keyword">if</span> (!sStalled) {
+       <span class="enscript-comment">/* There's no way we can look up the kext here, unfortunately.
+        */</span>
+        OSKextLog(<span class="enscript-comment">/* kext */</span> NULL, kOSMetaClassLogSpec,
+            <span class="enscript-string">&quot;OSMetaClass: preModLoad() wasn't called for class %s &quot;</span>
+            <span class="enscript-string">&quot;(runtime internal error).&quot;</span>,
+            inClassName);
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!sStalled-&gt;result) {
+        <span class="enscript-comment">// Grow stalled array if neccessary
+</span>        <span class="enscript-keyword">if</span> (sStalled-&gt;count &gt;= sStalled-&gt;capacity) {
+            OSMetaClass **oldStalled = sStalled-&gt;classes;
+            <span class="enscript-type">int</span> oldSize = sStalled-&gt;capacity * <span class="enscript-keyword">sizeof</span>(OSMetaClass *);
+            <span class="enscript-type">int</span> newSize = oldSize
+                + kKModCapacityIncrement * <span class="enscript-keyword">sizeof</span>(OSMetaClass *);
+
+            sStalled-&gt;classes = (OSMetaClass **)kalloc_tag(newSize, VM_KERN_MEMORY_OSKEXT);
+            <span class="enscript-keyword">if</span> (!sStalled-&gt;classes) {
+                sStalled-&gt;classes = oldStalled;
+                sStalled-&gt;result = kOSMetaClassNoTempData;
+                <span class="enscript-keyword">return</span>;
+            }
+
+            sStalled-&gt;capacity += kKModCapacityIncrement;
+            memmove(sStalled-&gt;classes, oldStalled, oldSize);
+            kfree(oldStalled, oldSize);
+            OSMETA_ACCUMSIZE(((size_t)newSize) - ((size_t)oldSize));
+        }
+
+        sStalled-&gt;classes[sStalled-&gt;count++] = <span class="enscript-keyword">this</span>;
+    }
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-function-name">OSMetaClass::~OSMetaClass</span>()
+{
+    OSKext * myKext = reserved ? reserved-&gt;kext : 0; <span class="enscript-comment">// do not release
+</span>
+   <span class="enscript-comment">/* Hack alert: 'className' is a C string during early C++ init, and
+    * is converted to a real OSSymbol only when we record the OSKext in
+    * OSMetaClass::postModLoad(). So only do this bit if we have an OSKext.
+    * We can't safely cast or check 'className'.
+    *
+    * Also, release className *after* calling into the kext,
+    * as removeClass() may access className.
+    */</span>
+    IOLockLock(sAllClassesLock);
+    <span class="enscript-keyword">if</span> (sAllClassesDict) {
+        <span class="enscript-keyword">if</span> (myKext) {
+            sAllClassesDict-&gt;removeObject(className);
+        } <span class="enscript-keyword">else</span> {
+            sAllClassesDict-&gt;removeObject((<span class="enscript-type">char</span> *)className);
+        }
+    }
+    IOLockUnlock(sAllClassesLock);
+    
+    <span class="enscript-keyword">if</span> (myKext) {
+        <span class="enscript-keyword">if</span> (myKext-&gt;removeClass(<span class="enscript-keyword">this</span>) != kOSReturnSuccess) {
+            <span class="enscript-comment">// xxx - what can we do?
+</span>        }
+        className-&gt;release();
+    }
+
+    <span class="enscript-comment">// sStalledClassesLock taken in preModLoad
+</span>    <span class="enscript-keyword">if</span> (sStalled) {
+        <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+        
+       <span class="enscript-comment">/* First pass find class in stalled list. If we find it that means
+        * we started C++ init with constructors but now we're tearing down
+        * because of some failure.
+        */</span>
+        <span class="enscript-keyword">for</span> (i = 0; i &lt; sStalled-&gt;count; i++) {
+            <span class="enscript-keyword">if</span> (<span class="enscript-keyword">this</span> == sStalled-&gt;classes[i]) {
+                <span class="enscript-keyword">break</span>;
+            }
+        }
+        
+       <span class="enscript-comment">/* Remove this metaclass from the stalled list so postModLoad() doesn't
+        * try to register it.
+        */</span>
+        <span class="enscript-keyword">if</span> (i &lt; sStalled-&gt;count) {
+            sStalled-&gt;count--;
+            <span class="enscript-keyword">if</span> (i &lt; sStalled-&gt;count) {
+                memmove(&amp;sStalled-&gt;classes[i], &amp;sStalled-&gt;classes[i+1],
+                    (sStalled-&gt;count - i) * <span class="enscript-keyword">sizeof</span>(OSMetaClass *));
+            }
+        }
+    }
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IOTRACKING</span>
+    IOTrackingQueueFree(reserved-&gt;tracking);
+#<span class="enscript-reference">endif</span>
+    IODelete(reserved, ExpansionData, 1);
+}
+
+<span class="enscript-comment">/*********************************************************************
+* Empty overrides.
+*********************************************************************/</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::retain</span>() <span class="enscript-type">const</span> { }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::release</span>() <span class="enscript-type">const</span> { }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::release</span>(__unused <span class="enscript-type">int</span> when) <span class="enscript-type">const</span> { }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::taggedRetain</span>(__unused <span class="enscript-type">const</span> <span class="enscript-type">void</span> * tag) <span class="enscript-type">const</span> { }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::taggedRelease</span>(__unused <span class="enscript-type">const</span> <span class="enscript-type">void</span> * tag) <span class="enscript-type">const</span> { }
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::taggedRelease</span>(__unused <span class="enscript-type">const</span> <span class="enscript-type">void</span> * tag, __unused <span class="enscript-type">const</span> <span class="enscript-type">int</span> when) <span class="enscript-type">const</span> { }
+<span class="enscript-type">int</span>  <span class="enscript-function-name">OSMetaClass::getRetainCount</span>() <span class="enscript-type">const</span> { <span class="enscript-keyword">return</span> 0; }
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">const</span> <span class="enscript-type">char</span> *
+<span class="enscript-function-name">OSMetaClass::getClassName</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">if</span> (!className) <span class="enscript-keyword">return</span> NULL;
+    <span class="enscript-keyword">return</span> className-&gt;getCStringNoCopy();
+}
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">const</span> OSSymbol *
+<span class="enscript-function-name">OSMetaClass::getClassNameSymbol</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> className;
+}
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">OSMetaClass::getClassSize</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> classSize;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">void</span> *
+<span class="enscript-function-name">OSMetaClass::preModLoad</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> * kextIdentifier)
+{
+    IOLockLock(sStalledClassesLock);
+
+    assert (sStalled == NULL);
+    sStalled = (StalledData *)kalloc_tag(<span class="enscript-keyword">sizeof</span>(* sStalled), VM_KERN_MEMORY_OSKEXT);
+    <span class="enscript-keyword">if</span> (sStalled) {
+        sStalled-&gt;classes = (OSMetaClass **)
+            kalloc_tag(kKModCapacityIncrement * <span class="enscript-keyword">sizeof</span>(OSMetaClass *), VM_KERN_MEMORY_OSKEXT);
+        <span class="enscript-keyword">if</span> (!sStalled-&gt;classes) {
+            kfree(sStalled, <span class="enscript-keyword">sizeof</span>(*sStalled));
+            <span class="enscript-keyword">return</span> 0;
+        }
+        OSMETA_ACCUMSIZE((kKModCapacityIncrement * <span class="enscript-keyword">sizeof</span>(OSMetaClass *)) +
+            <span class="enscript-keyword">sizeof</span>(*sStalled));
+
+        sStalled-&gt;result   = kOSReturnSuccess;
+        sStalled-&gt;capacity = kKModCapacityIncrement;
+        sStalled-&gt;count    = 0;
+        sStalled-&gt;kextIdentifier = kextIdentifier;
+        bzero(sStalled-&gt;classes, kKModCapacityIncrement * <span class="enscript-keyword">sizeof</span>(OSMetaClass *));
+    }
+
+    <span class="enscript-comment">// keep sStalledClassesLock locked until postModLoad
+</span>    
+    <span class="enscript-keyword">return</span> sStalled;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">OSMetaClass::checkModLoad</span>(<span class="enscript-type">void</span> * loadHandle)
+{
+    <span class="enscript-keyword">return</span> sStalled &amp;&amp; loadHandle == sStalled &amp;&amp;
+        sStalled-&gt;result == kOSReturnSuccess;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+OSReturn
+<span class="enscript-function-name">OSMetaClass::postModLoad</span>(<span class="enscript-type">void</span> * loadHandle)
+{
+    OSReturn         result     = kOSReturnSuccess;
+    OSSymbol       * myKextName = 0;  <span class="enscript-comment">// must release
+</span>    OSKext         * myKext     = 0;  <span class="enscript-comment">// must release
+</span>
+    <span class="enscript-keyword">if</span> (!sStalled || loadHandle != sStalled) {
+        result = kOSMetaClassInternal;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    <span class="enscript-keyword">if</span> (sStalled-&gt;result) {
+        result = sStalled-&gt;result;
+    } <span class="enscript-keyword">else</span> <span class="enscript-keyword">switch</span> (sBootstrapState) {
+
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kNoDictionaries</span>:
+            sBootstrapState = kMakingDictionaries;
+            <span class="enscript-comment">// No break; fall through
+</span>            
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kMakingDictionaries</span>:
+            sAllClassesDict = OSDictionary::withCapacity(kClassCapacityIncrement);
+            <span class="enscript-keyword">if</span> (!sAllClassesDict) {
+                result = kOSMetaClassNoDicts;
+                <span class="enscript-keyword">break</span>;
+            }
+            sAllClassesDict-&gt;setOptions(OSCollection::kSort, OSCollection::kSort);
+
+        <span class="enscript-comment">// No break; fall through
+</span>
+        <span class="enscript-keyword">case</span> <span class="enscript-reference">kCompletedBootstrap</span>:
+        {
+            <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i;
+            myKextName = const_cast&lt;OSSymbol *&gt;(OSSymbol::withCStringNoCopy(
+                sStalled-&gt;kextIdentifier));
+            
+            <span class="enscript-keyword">if</span> (!sStalled-&gt;count) {
+                <span class="enscript-keyword">break</span>;  <span class="enscript-comment">// Nothing to do so just get out
+</span>            }
+            
+            myKext = OSKext::lookupKextWithIdentifier(myKextName);
+            <span class="enscript-keyword">if</span> (!myKext) {
+                result = kOSMetaClassNoKext;
+
+               <span class="enscript-comment">/* Log this error here so we can include the kext name.
+                */</span>
+                OSKextLog(<span class="enscript-comment">/* kext */</span> NULL, kOSMetaClassLogSpec,
+                    <span class="enscript-string">&quot;OSMetaClass: Can't record classes for kext %s - kext not found.&quot;</span>,
+                    sStalled-&gt;kextIdentifier);
+                <span class="enscript-keyword">break</span>;
+            }
+            
+           <span class="enscript-comment">/* First pass checking classes aren't already loaded. If any already
+            * exist, we don't register any, and so we don't technically have
+            * to do any C++ teardown.
+            *
+            * Hack alert: me-&gt;className has been a C string until now.
+            * We only release the OSSymbol if we store the kext.
+            */</span>
+            IOLockLock(sAllClassesLock);
+            <span class="enscript-keyword">for</span> (i = 0; i &lt; sStalled-&gt;count; i++) {
+                <span class="enscript-type">const</span> OSMetaClass * me = sStalled-&gt;classes[i];
+                OSMetaClass * orig = OSDynamicCast(OSMetaClass,
+                    sAllClassesDict-&gt;getObject((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)me-&gt;className));
+                
+                <span class="enscript-keyword">if</span> (orig) {
+
+                   <span class="enscript-comment">/* Log this error here so we can include the class name.
+                    * xxx - we should look up the other kext that defines the class
+                    */</span>
+                    OSKextLog(myKext, kOSMetaClassLogSpec,
+                        <span class="enscript-string">&quot;OSMetaClass: Kext %s class %s is a duplicate;&quot;</span>
+                        <span class="enscript-string">&quot;kext %s already has a class by that name.&quot;</span>,
+                         sStalled-&gt;kextIdentifier, (<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)me-&gt;className,
+                        ((OSKext *)orig-&gt;reserved-&gt;kext)-&gt;getIdentifierCString());
+                    result = kOSMetaClassDuplicateClass;
+                    <span class="enscript-keyword">break</span>;
+                }
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> depth = 1;
+		<span class="enscript-keyword">while</span> ((me = me-&gt;superClassLink)) depth++;
+		<span class="enscript-keyword">if</span> (depth &gt; sDeepestClass) sDeepestClass = depth;
+            }
+            IOLockUnlock(sAllClassesLock);
+            
+           <span class="enscript-comment">/* Bail if we didn't go through the entire list of new classes
+            * (if we hit a duplicate).
+            */</span>
+            <span class="enscript-keyword">if</span> (i != sStalled-&gt;count) {
+                <span class="enscript-keyword">break</span>;
+            }
+
+            <span class="enscript-comment">// Second pass symbolling strings and inserting classes in dictionary
+</span>            IOLockLock(sAllClassesLock);
+            <span class="enscript-keyword">for</span> (i = 0; i &lt; sStalled-&gt;count; i++) {
+                OSMetaClass * me = sStalled-&gt;classes[i];
+                
+               <span class="enscript-comment">/* Hack alert: me-&gt;className has been a C string until now.
+                * We only release the OSSymbol in ~OSMetaClass()
+                * if we set the reference to the kext.
+                */</span>
+                me-&gt;className = 
+                    <span class="enscript-reference">OSSymbol</span>::withCStringNoCopy((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)me-&gt;className);
+
+                <span class="enscript-comment">// xxx - I suppose if these fail we're going to panic soon....
+</span>                sAllClassesDict-&gt;setObject(me-&gt;className, me);
+                
+               <span class="enscript-comment">/* Do not retain the kext object here.
+                */</span>
+                me-&gt;reserved-&gt;kext = myKext;
+                <span class="enscript-keyword">if</span> (myKext) {
+                    result = myKext-&gt;addClass(me, sStalled-&gt;count);
+                    <span class="enscript-keyword">if</span> (result != kOSReturnSuccess) {
+                       <span class="enscript-comment">/* OSKext::addClass() logs with kOSMetaClassNoInsKModSet. */</span>
+                        <span class="enscript-keyword">break</span>;
+                    }
+                }
+            }
+            IOLockUnlock(sAllClassesLock);
+            sBootstrapState = kCompletedBootstrap;
+            <span class="enscript-keyword">break</span>;
+        }
+            
+        <span class="enscript-reference">default</span>:
+            result = kOSMetaClassInternal;
+            <span class="enscript-keyword">break</span>;
+    }
+    
+<span class="enscript-reference">finish</span>:
+   <span class="enscript-comment">/* Don't call logError() for success or the conditions logged above
+    * or by called function.
+    */</span>
+    <span class="enscript-keyword">if</span> (result != kOSReturnSuccess &amp;&amp;
+        result != kOSMetaClassNoInsKModSet &amp;&amp;
+        result != kOSMetaClassDuplicateClass &amp;&amp;
+        result != kOSMetaClassNoKext) {
+
+        OSMetaClassLogErrorForKext(result, myKext);
+    }
+
+    OSSafeRelease(myKextName);
+    OSSafeRelease(myKext);
+
+    <span class="enscript-keyword">if</span> (sStalled) {
+        OSMETA_ACCUMSIZE(-(sStalled-&gt;capacity * <span class="enscript-keyword">sizeof</span>(OSMetaClass *) +
+            <span class="enscript-keyword">sizeof</span>(*sStalled)));
+        kfree(sStalled-&gt;classes, sStalled-&gt;capacity * <span class="enscript-keyword">sizeof</span>(OSMetaClass *));
+        kfree(sStalled, <span class="enscript-keyword">sizeof</span>(*sStalled));
+        sStalled = 0;
+    }
+    
+    IOLockUnlock(sStalledClassesLock);
+
+    <span class="enscript-keyword">return</span> result;
+}
+
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClass::instanceConstructed</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-comment">// if ((0 == OSIncrementAtomic(&amp;(((OSMetaClass *) this)-&gt;instanceCount))) &amp;&amp; superClassLink)
+</span>    <span class="enscript-keyword">if</span> ((0 == OSIncrementAtomic(&amp;instanceCount)) &amp;&amp; superClassLink) {
+        superClassLink-&gt;instanceConstructed();
+    }
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClass::instanceDestructed</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">if</span> ((1 == OSDecrementAtomic(&amp;instanceCount)) &amp;&amp; superClassLink) {
+        superClassLink-&gt;instanceDestructed();
+    }
+
+    <span class="enscript-keyword">if</span> (((<span class="enscript-type">int</span>)instanceCount) &lt; 0) {
+        OSKext * myKext = reserved-&gt;kext;
+
+        OSKextLog(myKext, kOSMetaClassLogSpec,
+            <span class="enscript-comment">// xxx - this phrasing is rather cryptic
+</span>            <span class="enscript-string">&quot;OSMetaClass: Class %s - bad retain (%d)&quot;</span>,
+            getClassName(), instanceCount);
+    }
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">OSMetaClass::modHasInstance</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> * kextIdentifier)
+{
+    <span class="enscript-type">bool</span>     result  = false;
+    OSKext * theKext = NULL;  <span class="enscript-comment">// must release
+</span>    
+    theKext = OSKext::lookupKextWithIdentifier(kextIdentifier);
+    <span class="enscript-keyword">if</span> (!theKext) {
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+    
+    result = theKext-&gt;hasOSMetaClassInstances();
+
+<span class="enscript-reference">finish</span>:
+    OSSafeRelease(theKext);
+    <span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClass::reportModInstances</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> * kextIdentifier)
+{
+    <span class="enscript-reference">OSKext</span>::reportOSMetaClassInstances(kextIdentifier,
+        kOSKextLogExplicitLevel);
+    <span class="enscript-keyword">return</span>;
+}
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClass::addInstance</span>(<span class="enscript-type">const</span> OSObject * instance, <span class="enscript-type">bool</span> super) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">if</span> (!super) IOLockLock(sInstancesLock);
+
+    <span class="enscript-keyword">if</span> (!reserved-&gt;instances) {
+	reserved-&gt;instances = OSOrderedSet::withCapacity(16);
+	<span class="enscript-keyword">if</span> (superClassLink) {
+	    superClassLink-&gt;addInstance(reserved-&gt;instances, true);
+	}
+    }
+    reserved-&gt;instances-&gt;setLastObject(instance);
+
+    <span class="enscript-keyword">if</span> (!super) IOLockUnlock(sInstancesLock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClass::removeInstance</span>(<span class="enscript-type">const</span> OSObject * instance, <span class="enscript-type">bool</span> super) <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">if</span> (!super) IOLockLock(sInstancesLock);
+
+    <span class="enscript-keyword">if</span> (reserved-&gt;instances) {
+	reserved-&gt;instances-&gt;removeObject(instance);
+	<span class="enscript-keyword">if</span> (0 == reserved-&gt;instances-&gt;getCount()) {
+	    <span class="enscript-keyword">if</span> (superClassLink) {
+		superClassLink-&gt;removeInstance(reserved-&gt;instances, true);
+	    }
+	    IOLockLock(sAllClassesLock);
+	    reserved-&gt;instances-&gt;release();
+	    reserved-&gt;instances = 0;
+	    IOLockUnlock(sAllClassesLock);
+	}
+    }
+
+    <span class="enscript-keyword">if</span> (!super) IOLockUnlock(sInstancesLock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClass::applyToInstances</span>(OSOrderedSet * set,
+			      OSMetaClassInstanceApplierFunction  applier,
+                              <span class="enscript-type">void</span> * context)
+{
+    <span class="enscript-type">enum</span> { 	    kLocalDepth = 24 };
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>    _nextIndex[kLocalDepth];
+    OSOrderedSet *  _sets[kLocalDepth];
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> *  nextIndex = &amp;_nextIndex[0];
+    OSOrderedSet ** sets      = &amp;_sets[0];
+    OSObject *      obj;
+    OSOrderedSet *  childSet;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>    maxDepth;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>    idx;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>    level;
+    <span class="enscript-type">bool</span>            done;
+
+    maxDepth = sDeepestClass;
+    <span class="enscript-keyword">if</span> (maxDepth &gt; kLocalDepth)
+    {
+    	nextIndex = IONew(typeof(nextIndex[0]), maxDepth);
+    	sets      = IONew(typeof(sets[0]), maxDepth);
+    }
+    done = false;
+    level = 0;
+    idx = 0;
+    <span class="enscript-keyword">do</span>
+    {
+	<span class="enscript-keyword">while</span> (!done &amp;&amp; (obj = set-&gt;getObject(idx++)))
+	{
+	    <span class="enscript-keyword">if</span> ((childSet = OSDynamicCast(OSOrderedSet, obj)))
+	    {
+		<span class="enscript-keyword">if</span> (level &gt;= maxDepth) panic(<span class="enscript-string">&quot;&gt;maxDepth&quot;</span>);
+		sets[level] = set;
+		nextIndex[level] = idx;
+		level++;
+		set = childSet;
+		idx = 0;
+		<span class="enscript-keyword">break</span>;
+	    }
+	    done = (*applier)(obj, context);
+	}
+	<span class="enscript-keyword">if</span> (!obj)
+	{
+	    <span class="enscript-keyword">if</span> (!done &amp;&amp; level)
+	    {
+		level--;
+		set = sets[level];
+		idx = nextIndex[level];
+	    } <span class="enscript-keyword">else</span> done = true;
+	}
+    }
+    <span class="enscript-keyword">while</span> (!done);
+    <span class="enscript-keyword">if</span> (maxDepth &gt; kLocalDepth)
+    {
+    	IODelete(nextIndex, typeof(nextIndex[0]), maxDepth);
+    	IODelete(sets, typeof(sets[0]), maxDepth);
+    }
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClass::applyToInstances</span>(OSMetaClassInstanceApplierFunction applier,
+                              <span class="enscript-type">void</span> * context) <span class="enscript-type">const</span>
+{
+    IOLockLock(sInstancesLock);
+    <span class="enscript-keyword">if</span> (reserved-&gt;instances) applyToInstances(reserved-&gt;instances, applier, context);
+    IOLockUnlock(sInstancesLock);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClass::applyToInstancesOfClassName</span>(
+    				<span class="enscript-type">const</span> OSSymbol * name,
+    				OSMetaClassInstanceApplierFunction  applier,
+                                <span class="enscript-type">void</span> * context)
+{
+    OSMetaClass  * meta;
+    OSOrderedSet * set = 0;
+
+    IOLockLock(sAllClassesLock);
+    <span class="enscript-keyword">if</span> (sAllClassesDict 
+    	&amp;&amp; (meta = (OSMetaClass *) sAllClassesDict-&gt;getObject(name))
+    	&amp;&amp; (set = meta-&gt;reserved-&gt;instances))
+    {
+    	set-&gt;retain();
+    }
+    IOLockUnlock(sAllClassesLock);
+
+    <span class="enscript-keyword">if</span> (!set) <span class="enscript-keyword">return</span>;
+
+    IOLockLock(sInstancesLock);
+    applyToInstances(set, applier, context);
+    IOLockUnlock(sInstancesLock);
+    set-&gt;release();
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClass::considerUnloads</span>()
+{
+    <span class="enscript-reference">OSKext</span>::considerUnloads();
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">const</span> OSMetaClass *
+<span class="enscript-function-name">OSMetaClass::getMetaClassWithName</span>(<span class="enscript-type">const</span> OSSymbol * name)
+{
+    OSMetaClass * retMeta = 0;
+
+    <span class="enscript-keyword">if</span> (!name) {
+        <span class="enscript-keyword">return</span> 0;
+    }
+
+    IOLockLock(sAllClassesLock);
+    <span class="enscript-keyword">if</span> (sAllClassesDict) {
+        retMeta = (OSMetaClass *) sAllClassesDict-&gt;getObject(name);
+    }
+    IOLockUnlock(sAllClassesLock);
+
+    <span class="enscript-keyword">return</span> retMeta;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+OSObject *
+<span class="enscript-function-name">OSMetaClass::allocClassWithName</span>(<span class="enscript-type">const</span> OSSymbol * name)
+{
+    OSObject * result = 0;
+
+    <span class="enscript-type">const</span> OSMetaClass * <span class="enscript-type">const</span> meta = getMetaClassWithName(name);
+
+    <span class="enscript-keyword">if</span> (meta) {
+        result = meta-&gt;alloc();
+    }
+
+    <span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+OSObject *
+<span class="enscript-function-name">OSMetaClass::allocClassWithName</span>(<span class="enscript-type">const</span> OSString * name)
+{
+    <span class="enscript-type">const</span> OSSymbol * tmpKey = OSSymbol::withString(name);
+    OSObject * result = allocClassWithName(tmpKey);
+    tmpKey-&gt;release();
+    <span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+OSObject *
+<span class="enscript-function-name">OSMetaClass::allocClassWithName</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> * name)
+{
+    <span class="enscript-type">const</span> OSSymbol * tmpKey = OSSymbol::withCStringNoCopy(name);
+    OSObject       * result = allocClassWithName(tmpKey);
+    tmpKey-&gt;release();
+    <span class="enscript-keyword">return</span> result;
+}
+
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+OSMetaClassBase *
+<span class="enscript-function-name">OSMetaClass::checkMetaCastWithName</span>(
+    <span class="enscript-type">const</span> OSSymbol        * name,
+    <span class="enscript-type">const</span> OSMetaClassBase * in)
+{
+    OSMetaClassBase * result = 0;
+
+    <span class="enscript-type">const</span> OSMetaClass * <span class="enscript-type">const</span> meta = getMetaClassWithName(name);
+
+    <span class="enscript-keyword">if</span> (meta) {
+        result = meta-&gt;checkMetaCast(in);
+    }
+
+    <span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+OSMetaClassBase * OSMetaClass::
+<span class="enscript-function-name">checkMetaCastWithName</span>(
+    <span class="enscript-type">const</span> OSString        * name,
+    <span class="enscript-type">const</span> OSMetaClassBase * in)
+{
+    <span class="enscript-type">const</span> OSSymbol  * tmpKey = OSSymbol::withString(name);
+    OSMetaClassBase * result = checkMetaCastWithName(tmpKey, in);
+
+    tmpKey-&gt;release();
+    <span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+OSMetaClassBase *
+<span class="enscript-function-name">OSMetaClass::checkMetaCastWithName</span>(
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span>            * name,
+    <span class="enscript-type">const</span> OSMetaClassBase * in)
+{
+    <span class="enscript-type">const</span> OSSymbol  * tmpKey = OSSymbol::withCStringNoCopy(name);
+    OSMetaClassBase * result = checkMetaCastWithName(tmpKey, in);
+
+    tmpKey-&gt;release();
+    <span class="enscript-keyword">return</span> result;
+}
+
+<span class="enscript-comment">/*********************************************************************
+ * OSMetaClass::checkMetaCast()
+ * Check to see if the 'check' object has this object in its metaclass chain.
+ * Returns check if it is indeed a kind of the current meta class, 0 otherwise.
+ *
+ * Generally this method is not invoked directly but is used to implement
+ * the OSMetaClassBase::metaCast member function.
+ *
+ * See also OSMetaClassBase::metaCast
+*********************************************************************/</span>
+OSMetaClassBase * <span class="enscript-function-name">OSMetaClass::checkMetaCast</span>(
+    <span class="enscript-type">const</span> OSMetaClassBase * check) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">const</span> OSMetaClass * <span class="enscript-type">const</span> toMeta   = <span class="enscript-keyword">this</span>;
+    <span class="enscript-type">const</span> OSMetaClass *       fromMeta;
+
+    <span class="enscript-keyword">for</span> (fromMeta = check-&gt;getMetaClass(); ; fromMeta = fromMeta-&gt;superClassLink) {
+        <span class="enscript-keyword">if</span> (toMeta == fromMeta) {
+            <span class="enscript-keyword">return</span> const_cast&lt;OSMetaClassBase *&gt;(check); <span class="enscript-comment">// Discard const
+</span>        }
+        <span class="enscript-keyword">if</span> (!fromMeta-&gt;superClassLink) {
+            <span class="enscript-keyword">break</span>;
+        }
+    }
+
+    <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClass::reservedCalled</span>(<span class="enscript-type">int</span> ind) <span class="enscript-type">const</span>
+{
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> * cname = className-&gt;getCStringNoCopy();
+    panic(<span class="enscript-string">&quot;%s::_RESERVED%s%d called.&quot;</span>, cname, cname, ind);
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">const</span>
+OSMetaClass *
+<span class="enscript-function-name">OSMetaClass::getSuperClass</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> superClassLink;
+}
+
+<span class="enscript-comment">/*********************************************************************
+* xxx - I want to rename this :-/
+*********************************************************************/</span>
+<span class="enscript-type">const</span> OSSymbol *
+<span class="enscript-function-name">OSMetaClass::getKmodName</span>() <span class="enscript-type">const</span>
+{
+    OSKext * myKext = reserved ? reserved-&gt;kext : 0;
+    <span class="enscript-keyword">if</span> (myKext) {
+        <span class="enscript-keyword">return</span> myKext-&gt;getIdentifier();
+    }
+    <span class="enscript-keyword">return</span> OSSymbol::withCStringNoCopy(<span class="enscript-string">&quot;unknown&quot;</span>);
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">OSMetaClass::getInstanceCount</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> instanceCount;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-comment">/* static */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClass::printInstanceCounts</span>()
+{
+    OSCollectionIterator * classes;
+    OSSymbol             * className;
+    OSMetaClass          * meta;
+
+    IOLockLock(sAllClassesLock);
+    classes = OSCollectionIterator::withCollection(sAllClassesDict);
+    assert(classes);
+
+    <span class="enscript-keyword">while</span>( (className = (OSSymbol *)classes-&gt;getNextObject())) {
+        meta = (OSMetaClass *)sAllClassesDict-&gt;getObject(className);
+        assert(meta);
+
+        printf(<span class="enscript-string">&quot;%24s count: %03d x 0x%03x = 0x%06x\n&quot;</span>,
+            className-&gt;getCStringNoCopy(),
+            meta-&gt;getInstanceCount(),
+            meta-&gt;getClassSize(),
+            meta-&gt;getInstanceCount() * meta-&gt;getClassSize() );
+    }
+    printf(<span class="enscript-string">&quot;\n&quot;</span>);
+    classes-&gt;release();
+    IOLockUnlock(sAllClassesLock);
+    <span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+OSDictionary *
+<span class="enscript-function-name">OSMetaClass::getClassDictionary</span>()
+{
+    panic(<span class="enscript-string">&quot;OSMetaClass::getClassDictionary() is obsoleted.\n&quot;</span>);
+    <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-type">bool</span>
+<span class="enscript-function-name">OSMetaClass::serialize</span>(__unused OSSerialize * s) <span class="enscript-type">const</span>
+{
+    panic(<span class="enscript-string">&quot;OSMetaClass::serialize(): Obsoleted\n&quot;</span>);
+    <span class="enscript-keyword">return</span> false;
+}
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+<span class="enscript-comment">/* static */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">OSMetaClass::serializeClassDictionary</span>(OSDictionary * serializeDictionary)
+{
+    OSDictionary * classDict = NULL;
+
+    IOLockLock(sAllClassesLock);
+
+    classDict = OSDictionary::withCapacity(sAllClassesDict-&gt;getCount());
+    <span class="enscript-keyword">if</span> (!classDict) {
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">finish</span>;
+    }
+
+    <span class="enscript-keyword">do</span> {
+        OSCollectionIterator * classes;
+        <span class="enscript-type">const</span> OSSymbol * className;
+
+        classes = OSCollectionIterator::withCollection(sAllClassesDict);
+        <span class="enscript-keyword">if</span> (!classes) {
+            <span class="enscript-keyword">break</span>;
+        }
+    
+        <span class="enscript-keyword">while</span> ((className = (<span class="enscript-type">const</span> OSSymbol *)classes-&gt;getNextObject())) {
+            <span class="enscript-type">const</span> OSMetaClass * meta;
+            OSNumber * count;
+
+            meta = (OSMetaClass *)sAllClassesDict-&gt;getObject(className);
+            count = OSNumber::withNumber(meta-&gt;getInstanceCount(), 32);
+            <span class="enscript-keyword">if</span> (count) {
+                classDict-&gt;setObject(className, count);
+                count-&gt;release();
+            }
+        }
+        classes-&gt;release();
+
+        serializeDictionary-&gt;setObject(<span class="enscript-string">&quot;Classes&quot;</span>, classDict);
+    } <span class="enscript-keyword">while</span> (0);
+
+<span class="enscript-reference">finish</span>:
+    OSSafeRelease(classDict);
+
+    IOLockUnlock(sAllClassesLock);
+
+    <span class="enscript-keyword">return</span>;
+}
+
+
+<span class="enscript-comment">/*********************************************************************
+*********************************************************************/</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IOTRACKING</span>
+
+<span class="enscript-type">void</span> *<span class="enscript-function-name">OSMetaClass::trackedNew</span>(size_t size)
+{
+    IOTracking * mem;
+
+    mem = (typeof(mem)) kalloc_tag_bt(size + <span class="enscript-keyword">sizeof</span>(IOTracking), VM_KERN_MEMORY_LIBKERN);
+    assert(mem);
+    <span class="enscript-keyword">if</span> (!mem) <span class="enscript-keyword">return</span> (mem);
+
+    memset(mem, 0, size + <span class="enscript-keyword">sizeof</span>(IOTracking));
+    mem++;
+
+    OSIVAR_ACCUMSIZE(size);
+
+    <span class="enscript-keyword">return</span> (mem);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::trackedDelete</span>(<span class="enscript-type">void</span> * instance, size_t size)
+{
+    IOTracking * mem = (typeof(mem)) instance; mem--;
+
+    kfree(mem, size + <span class="enscript-keyword">sizeof</span>(IOTracking));
+    OSIVAR_ACCUMSIZE(-size);
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::trackedInstance</span>(OSObject * instance) <span class="enscript-type">const</span>
+{
+    IOTracking * mem = (typeof(mem)) instance; mem--;
+
+    <span class="enscript-keyword">return</span> (IOTrackingAdd(reserved-&gt;tracking, mem, classSize, false));
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::trackedFree</span>(OSObject * instance) <span class="enscript-type">const</span>
+{
+    IOTracking * mem = (typeof(mem)) instance; mem--;
+
+    <span class="enscript-keyword">return</span> (IOTrackingRemove(reserved-&gt;tracking, mem, classSize));
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">OSMetaClass::trackedAccumSize</span>(OSObject * instance, size_t size) <span class="enscript-type">const</span>
+{
+    IOTracking * mem = (typeof(mem)) instance; mem--;
+
+    <span class="enscript-keyword">return</span> (IOTrackingAccumSize(reserved-&gt;tracking, mem, size));
+}
+
+IOTrackingQueue * <span class="enscript-function-name">OSMetaClass::getTracking</span>() <span class="enscript-type">const</span>
+{
+    <span class="enscript-keyword">return</span> (reserved-&gt;tracking);
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* IOTRACKING */</span></pre>
+<hr />
+</body></html>

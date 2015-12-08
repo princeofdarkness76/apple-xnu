@@ -1,0 +1,460 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>KUNCUserNotifications.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">KUNCUserNotifications.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/message.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_kobject.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;UserNotification/UNDTypes.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;UserNotification/UNDRequest.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;UserNotification/UNDReplyServer.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;UserNotification/KUNCUserNotifications.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL_CF</span>
+<span class="enscript-comment">// external
+</span>#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOCFSerialize.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOCFUnserialize.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * DEFINES AND STRUCTURES
+ */</span>
+
+<span class="enscript-type">struct</span> UNDReply {
+	decl_lck_mtx_data(,lock)				<span class="enscript-comment">/* UNDReply lock */</span>
+	<span class="enscript-type">int</span>				userLandNotificationKey;
+	KUNCUserNotificationCallBack 	callback;
+	boolean_t			inprogress;
+	ipc_port_t			self_port;	<span class="enscript-comment">/* Our port */</span>
+};
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">UNDReply_lock</span>(reply)		lck_mtx_lock(&amp;reply-&gt;lock)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">UNDReply_unlock</span>(reply)		lck_mtx_unlock(&amp;reply-&gt;lock)
+
+<span class="enscript-type">extern</span> lck_grp_t LockCompatGroup;
+
+<span class="enscript-comment">/* forward declarations */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">UNDReply_deallocate</span>(
+	UNDReplyRef		reply);
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">UNDReply_deallocate</span>(
+	UNDReplyRef		reply)
+{
+	ipc_port_t port;
+
+	UNDReply_lock(reply);
+	port = reply-&gt;self_port;
+	assert(IP_VALID(port));
+	ipc_kobject_set(port, IKO_NULL, IKOT_NONE);
+	reply-&gt;self_port = IP_NULL;
+	UNDReply_unlock(reply);
+
+	ipc_port_dealloc_kernel(port);
+	lck_mtx_destroy(&amp;reply-&gt;lock, &amp;LockCompatGroup);
+	kfree(reply, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> UNDReply));
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">static</span> UNDServerRef
+<span class="enscript-function-name">UNDServer_reference</span>(<span class="enscript-type">void</span>)
+{
+	UNDServerRef UNDServer;
+	kern_return_t kr;
+
+	kr = host_get_user_notification_port(host_priv_self(), &amp;UNDServer);
+	assert(kr == KERN_SUCCESS);
+	<span class="enscript-keyword">return</span> UNDServer;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">UNDServer_deallocate</span>(
+	UNDServerRef	UNDServer)
+{
+	<span class="enscript-keyword">if</span> (IP_VALID(UNDServer))
+		ipc_port_release_send(UNDServer);
+}
+
+<span class="enscript-comment">/* 
+ * UND Mig Callbacks
+*/</span>
+
+kern_return_t
+<span class="enscript-function-name">UNDAlertCompletedWithResult_rpc</span> (
+        UNDReplyRef 		reply,
+        <span class="enscript-type">int</span> 			result,
+        xmlData_t		keyRef,		<span class="enscript-comment">/* raw XML bytes */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL_CF</span>
+        mach_msg_type_number_t	keyLen)
+#<span class="enscript-reference">else</span>
+        __unused mach_msg_type_number_t	keyLen)
+#<span class="enscript-reference">endif</span>
+{
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL_CF</span>
+	CFStringRef		xmlError = NULL;
+	CFDictionaryRef 	dict = NULL;
+#<span class="enscript-reference">else</span>
+	<span class="enscript-type">const</span> <span class="enscript-type">void</span> *dict = (<span class="enscript-type">const</span> <span class="enscript-type">void</span> *)keyRef;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (reply == UND_REPLY_NULL || !reply-&gt;inprogress)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	<span class="enscript-comment">/*
+	 * JMM - No C vesion of the Unserialize code in-kernel
+	 * and no C type for a CFDictionary either.  For now,
+	 * just pass the raw keyRef through.
+	 */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL_CF</span> 
+	<span class="enscript-keyword">if</span> (keyRef &amp;&amp; keyLen) {
+		dict = IOCFUnserialize(keyRef, NULL, NULL, &amp;xmlError);
+	}
+
+	<span class="enscript-keyword">if</span> (xmlError) {
+		CFShow(xmlError);
+		CFRelease(xmlError);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* KERNEL_CF */</span>
+
+	<span class="enscript-keyword">if</span> (reply-&gt;callback) {
+		(reply-&gt;callback)((<span class="enscript-type">int</span>)(KUNCUserNotificationID)reply, result, dict);
+	}
+
+	UNDReply_lock(reply);
+	reply-&gt;inprogress = FALSE;
+	reply-&gt;userLandNotificationKey = -1;
+	UNDReply_unlock(reply);
+	UNDReply_deallocate(reply);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	Routine: UNDNotificationCreated_rpc
+ *
+ *		Intermediate routine.  Allows the kernel mechanism
+ *		to be informed that the notification request IS
+ *		being processed by the user-level daemon, and how
+ *		to identify that request.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">UNDNotificationCreated_rpc</span> (
+        UNDReplyRef	reply,
+        <span class="enscript-type">int</span>		userLandNotificationKey)
+{
+	<span class="enscript-keyword">if</span> (reply == UND_REPLY_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	UNDReply_lock(reply);
+	<span class="enscript-keyword">if</span> (reply-&gt;inprogress || reply-&gt;userLandNotificationKey != -1) {
+		UNDReply_unlock(reply);
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+	reply-&gt;userLandNotificationKey = userLandNotificationKey;
+	UNDReply_unlock(reply);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ * KUNC Functions
+*/</span>
+
+
+KUNCUserNotificationID
+<span class="enscript-function-name">KUNCGetNotificationID</span>(<span class="enscript-type">void</span>)
+{
+	UNDReplyRef reply;
+
+	reply = (UNDReplyRef) kalloc(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> UNDReply));
+	<span class="enscript-keyword">if</span> (reply != UND_REPLY_NULL) {
+		reply-&gt;self_port = ipc_port_alloc_kernel();
+		<span class="enscript-keyword">if</span> (reply-&gt;self_port == IP_NULL) {
+			kfree(reply, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> UNDReply));
+			reply = UND_REPLY_NULL;
+		} <span class="enscript-keyword">else</span> {
+			lck_mtx_init(&amp;reply-&gt;lock, &amp;LockCompatGroup, LCK_ATTR_NULL);
+			reply-&gt;userLandNotificationKey = -1;
+			reply-&gt;inprogress = FALSE;
+			ipc_kobject_set(reply-&gt;self_port,
+					(ipc_kobject_t)reply,
+					IKOT_UND_REPLY);
+		}
+	}
+	<span class="enscript-keyword">return</span> (KUNCUserNotificationID) reply;
+}
+
+
+kern_return_t <span class="enscript-function-name">KUNCExecute</span>(<span class="enscript-type">char</span> executionPath[1024], <span class="enscript-type">int</span> uid, <span class="enscript-type">int</span> gid)
+{
+
+	UNDServerRef UNDServer;
+
+	UNDServer = UNDServer_reference();
+	<span class="enscript-keyword">if</span> (IP_VALID(UNDServer)) {
+		kern_return_t kr;
+		kr = UNDExecute_rpc(UNDServer, executionPath, uid, gid);
+		UNDServer_deallocate(UNDServer);
+		<span class="enscript-keyword">return</span> kr;
+	}
+	<span class="enscript-keyword">return</span> MACH_SEND_INVALID_DEST;
+}
+
+kern_return_t <span class="enscript-function-name">KUNCUserNotificationCancel</span>(
+	KUNCUserNotificationID id)
+{
+	UNDReplyRef reply = (UNDReplyRef)id;
+	kern_return_t kr;
+	<span class="enscript-type">int</span> ulkey;
+
+	<span class="enscript-keyword">if</span> (reply == UND_REPLY_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	UNDReply_lock(reply);
+	<span class="enscript-keyword">if</span> (!reply-&gt;inprogress) {
+		UNDReply_unlock(reply);
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	reply-&gt;inprogress = FALSE;
+	<span class="enscript-keyword">if</span> ((ulkey = reply-&gt;userLandNotificationKey) != 0) {
+		UNDServerRef UNDServer;
+
+		reply-&gt;userLandNotificationKey = 0;
+		UNDReply_unlock(reply);
+
+		UNDServer = UNDServer_reference();
+		<span class="enscript-keyword">if</span> (IP_VALID(UNDServer)) {
+			kr = UNDCancelNotification_rpc(UNDServer,ulkey);
+			UNDServer_deallocate(UNDServer);
+		} <span class="enscript-keyword">else</span>
+			kr = MACH_SEND_INVALID_DEST;
+	} <span class="enscript-keyword">else</span> {
+		UNDReply_unlock(reply);
+		kr = KERN_SUCCESS;
+	}
+	UNDReply_deallocate(reply);
+	<span class="enscript-keyword">return</span> kr;
+}
+
+kern_return_t
+<span class="enscript-function-name">KUNCUserNotificationDisplayNotice</span>(
+	<span class="enscript-type">int</span>		noticeTimeout,
+	<span class="enscript-type">unsigned</span>	flags,
+	<span class="enscript-type">char</span>		*iconPath,
+	<span class="enscript-type">char</span>		*soundPath,
+	<span class="enscript-type">char</span>		*localizationPath,
+	<span class="enscript-type">char</span>		*alertHeader,
+	<span class="enscript-type">char</span>		*alertMessage,
+	<span class="enscript-type">char</span>		*defaultButtonTitle)
+{
+	UNDServerRef UNDServer;
+
+	UNDServer = UNDServer_reference();
+	<span class="enscript-keyword">if</span> (IP_VALID(UNDServer)) {
+		kern_return_t kr;
+		kr = UNDDisplayNoticeSimple_rpc(UNDServer,
+					noticeTimeout,
+					flags,
+					iconPath,
+					soundPath,
+					localizationPath,
+					alertHeader,
+					alertMessage,
+					defaultButtonTitle);
+		UNDServer_deallocate(UNDServer);
+		<span class="enscript-keyword">return</span> kr;
+	}
+	<span class="enscript-keyword">return</span> MACH_SEND_INVALID_DEST;
+}
+
+kern_return_t
+<span class="enscript-function-name">KUNCUserNotificationDisplayAlert</span>(
+	<span class="enscript-type">int</span>		alertTimeout,
+	<span class="enscript-type">unsigned</span>	flags,
+	<span class="enscript-type">char</span>		*iconPath,
+	<span class="enscript-type">char</span>		*soundPath,
+	<span class="enscript-type">char</span>		*localizationPath,
+	<span class="enscript-type">char</span>		*alertHeader,
+	<span class="enscript-type">char</span>		*alertMessage,
+	<span class="enscript-type">char</span>		*defaultButtonTitle,
+	<span class="enscript-type">char</span>		*alternateButtonTitle,
+	<span class="enscript-type">char</span>		*otherButtonTitle,
+	<span class="enscript-type">unsigned</span>	*responseFlags)
+{
+	UNDServerRef	UNDServer;
+	
+	UNDServer = UNDServer_reference();
+	<span class="enscript-keyword">if</span> (IP_VALID(UNDServer)) {
+		kern_return_t	kr;
+		kr = UNDDisplayAlertSimple_rpc(UNDServer,
+				       alertTimeout,
+				       flags,
+				       iconPath,
+				       soundPath,
+				       localizationPath,
+				       alertHeader,
+				       alertMessage,
+				       defaultButtonTitle,
+				       alternateButtonTitle,
+				       otherButtonTitle,
+				       responseFlags);
+		UNDServer_deallocate(UNDServer);
+		<span class="enscript-keyword">return</span> kr;
+	}
+	<span class="enscript-keyword">return</span> MACH_SEND_INVALID_DEST;
+}
+
+kern_return_t
+<span class="enscript-function-name">KUNCUserNotificationDisplayFromBundle</span>(
+	KUNCUserNotificationID	     id,
+	<span class="enscript-type">char</span> 			     *bundlePath,
+	<span class="enscript-type">char</span>			     *fileName,
+	<span class="enscript-type">char</span>			     *fileExtension,
+	<span class="enscript-type">char</span>			     *messageKey,
+	<span class="enscript-type">char</span>			     *tokenString,
+	KUNCUserNotificationCallBack callback,
+	__unused <span class="enscript-type">int</span>			contextKey)
+{
+	UNDReplyRef reply = (UNDReplyRef)id;
+	UNDServerRef UNDServer;
+	ipc_port_t reply_port;
+
+	<span class="enscript-keyword">if</span> (reply == UND_REPLY_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	UNDReply_lock(reply);
+	<span class="enscript-keyword">if</span> (reply-&gt;inprogress == TRUE || reply-&gt;userLandNotificationKey != -1) {
+		UNDReply_unlock(reply);
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+	reply-&gt;inprogress = TRUE;
+	reply-&gt;callback = callback;
+	reply_port = ipc_port_make_send(reply-&gt;self_port);
+	UNDReply_unlock(reply);
+
+	UNDServer = UNDServer_reference();
+	<span class="enscript-keyword">if</span> (IP_VALID(UNDServer)) {
+		kern_return_t kr;
+
+		kr = UNDDisplayCustomFromBundle_rpc(UNDServer,
+					    reply_port,
+					    bundlePath,
+					    fileName,
+					    fileExtension,
+					    messageKey,
+					    tokenString);
+		UNDServer_deallocate(UNDServer);
+		<span class="enscript-keyword">return</span> kr;
+	}
+	<span class="enscript-keyword">return</span> MACH_SEND_INVALID_DEST;
+}
+
+<span class="enscript-comment">/*
+ *	Routine: convert_port_to_UNDReply
+ *
+ *		MIG helper routine to convert from a mach port to a
+ *		UNDReply object.
+ *
+ *	Assumptions:
+ *		Nothing locked.
+ */</span>
+UNDReplyRef
+<span class="enscript-function-name">convert_port_to_UNDReply</span>(
+	ipc_port_t port)
+{
+	<span class="enscript-keyword">if</span> (IP_VALID(port)) {
+		UNDReplyRef reply;
+
+		ip_lock(port);
+		<span class="enscript-keyword">if</span> (!ip_active(port) || (ip_kotype(port) != IKOT_UND_REPLY)) {
+			ip_unlock(port);
+			<span class="enscript-keyword">return</span> UND_REPLY_NULL;
+		}
+		reply = (UNDReplyRef) port-&gt;ip_kobject;
+		assert(reply != UND_REPLY_NULL);
+		ip_unlock(port);
+		<span class="enscript-keyword">return</span> reply;
+	}
+	<span class="enscript-keyword">return</span> UND_REPLY_NULL;
+}
+
+<span class="enscript-comment">/*
+ *      User interface for setting the host UserNotification Daemon port.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">host_set_UNDServer</span>(
+        host_priv_t     host_priv,
+        UNDServerRef    server)
+{
+	<span class="enscript-keyword">return</span> (host_set_user_notification_port(host_priv, server));
+}
+
+<span class="enscript-comment">/*
+ *      User interface for retrieving the UserNotification Daemon port.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">host_get_UNDServer</span>(
+	host_priv_t     host_priv,
+	UNDServerRef	*serverp)
+{
+	<span class="enscript-keyword">return</span> (host_get_user_notification_port(host_priv, serverp));
+}
+</pre>
+<hr />
+</body></html>

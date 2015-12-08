@@ -1,0 +1,965 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>blist.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">blist.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * BLIST.C -	Bitmap allocator/deallocator, using a radix tree with hinting
+ *
+ *	(c)Copyright 1998, Matthew Dillon.  Terms for use and redistribution
+ *	are covered by the BSD Copyright as found in /usr/src/COPYRIGHT.
+ *
+ *	This module implements a general bitmap allocator/deallocator.  The
+ *	allocator eats around 2 bits per 'block'.  The module does not 
+ *	try to interpret the meaning of a 'block' other then to return 
+ *	SWAPBLK_NONE on an allocation failure.
+ *
+ *	A radix tree is used to maintain the bitmap.  Two radix constants are
+ *	involved:  One for the bitmaps contained in the leaf nodes (typically
+ *	32), and one for the meta nodes (typically 16).  Both meta and leaf
+ *	nodes have a hint field.  This field gives us a hint as to the largest
+ *	free contiguous range of blocks under the node.  It may contain a
+ *	value that is too high, but will never contain a value that is too 
+ *	low.  When the radix tree is searched, allocation failures in subtrees
+ *	update the hint. 
+ *
+ *	The radix tree also implements two collapsed states for meta nodes:
+ *	the ALL-ALLOCATED state and the ALL-FREE state.  If a meta node is
+ *	in either of these two states, all information contained underneath
+ *	the node is considered stale.  These states are used to optimize
+ *	allocation and freeing operations.
+ *
+ * 	The hinting greatly increases code efficiency for allocations while
+ *	the general radix structure optimizes both allocations and frees.  The
+ *	radix tree should be able to operate well no matter how much 
+ *	fragmentation there is and no matter how large a bitmap is used.
+ *
+ *	Unlike the rlist code, the blist code wires all necessary memory at
+ *	creation time.  Neither allocations nor frees require interaction with
+ *	the memory subsystem.  In contrast, the rlist code may allocate memory 
+ *	on an rlist_free() call.  The non-blocking features of the blist code
+ *	are used to great advantage in the swap code (vm/nswap_pager.c).  The
+ *	rlist code uses a little less overall memory then the blist code (but
+ *	due to swap interleaving not all that much less), but the blist code 
+ *	scales much, much better.
+ *
+ *	LAYOUT: The radix tree is layed out recursively using a
+ *	linear array.  Each meta node is immediately followed (layed out
+ *	sequentially in memory) by BLIST_META_RADIX lower level nodes.  This
+ *	is a recursive structure but one that can be easily scanned through
+ *	a very simple 'skip' calculation.  In order to support large radixes, 
+ *	portions of the tree may reside outside our memory allocation.  We 
+ *	handle this with an early-termination optimization (when bighint is 
+ *	set to -1) on the scan.  The memory allocation is only large enough 
+ *	to cover the number of blocks requested at creation time even if it
+ *	must be encompassed in larger root-node radix.
+ *
+ *	NOTE: the allocator cannot currently allocate more then 
+ *	BLIST_BMAP_RADIX blocks per call.  It will panic with 'allocation too 
+ *	large' if you try.  This is an area that could use improvement.  The 
+ *	radix is large enough that this restriction does not effect the swap 
+ *	system, though.  Currently only the allocation code is effected by
+ *	this algorithmic unfeature.  The freeing code can handle arbitrary
+ *	ranges.
+ *
+ *	This code can be compiled stand-alone for debugging.
+ *
+ * $FreeBSD: src/sys/kern/subr_blist.c,v 1.5.2.1 2000/03/17 10:47:29 ps Exp $
+ */</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__APPLE__</span>)
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_KERNEL</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/blist.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_extern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_page.h&gt;</span>
+
+#<span class="enscript-reference">else</span>
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">BLIST_NO_DEBUG</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BLIST_DEBUG</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SWAPBLK_NONE</span> ((daddr_t)-1)
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdarg.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">malloc</span>(a,b,c)	malloc(a)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">free</span>(a,b)	free(a)
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> u_daddr_t;
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/blist.h&gt;</span>
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">panic</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *ctl, ...);
+
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* is MacOS X */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_KERNEL</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">_KERNEL</span> <span class="enscript-comment">/* Solaris vs. Darwin */</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> u_daddr_t;
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+<span class="enscript-comment">/* #include &lt;sys/blist.h&gt; */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;blist.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">SWAPBLK_NONE</span> ((daddr_t)-1)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">malloc</span> _MALLOC
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">free</span> _FREE
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">M_SWAP</span> M_TEMP
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE__ */</span>
+
+<span class="enscript-comment">/*
+ * static support functions
+ */</span>
+
+<span class="enscript-type">static</span> daddr_t <span class="enscript-function-name">blst_leaf_alloc</span>(blmeta_t *scan, daddr_t blk, <span class="enscript-type">int</span> count);
+<span class="enscript-type">static</span> daddr_t <span class="enscript-function-name">blst_meta_alloc</span>(blmeta_t *scan, daddr_t blk, 
+				daddr_t count, daddr_t radix, <span class="enscript-type">int</span> skip);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">blst_leaf_free</span>(blmeta_t *scan, daddr_t relblk, <span class="enscript-type">int</span> count);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">blst_meta_free</span>(blmeta_t *scan, daddr_t freeBlk, daddr_t count, 
+					daddr_t radix, <span class="enscript-type">int</span> skip, daddr_t blk);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">blst_copy</span>(blmeta_t *scan, daddr_t blk, daddr_t radix, 
+				daddr_t skip, blist_t dest, daddr_t count);
+<span class="enscript-type">static</span> daddr_t	blst_radix_init(blmeta_t *scan, daddr_t radix, 
+						<span class="enscript-type">int</span> skip, daddr_t count);
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">_KERNEL</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	blst_radix_print(blmeta_t *scan, daddr_t blk, 
+					daddr_t radix, <span class="enscript-type">int</span> skip, <span class="enscript-type">int</span> tab);
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__APPLE__</span>)
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_KERNEL</span>
+<span class="enscript-type">static</span> <span class="enscript-function-name">MALLOC_DEFINE</span>(M_SWAP, <span class="enscript-string">&quot;SWAP&quot;</span>, <span class="enscript-string">&quot;Swap space&quot;</span>);
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE__ */</span>
+
+<span class="enscript-comment">/*
+ * blist_create() - create a blist capable of handling up to the specified
+ *		    number of blocks
+ *
+ *	blocks must be greater then 0
+ *
+ *	The smallest blist consists of a single leaf node capable of 
+ *	managing BLIST_BMAP_RADIX blocks.
+ */</span>
+
+blist_t 
+<span class="enscript-function-name">blist_create</span>(daddr_t blocks)
+{
+	blist_t bl;
+	<span class="enscript-type">int</span> radix;
+	<span class="enscript-type">int</span> skip = 0;
+
+	<span class="enscript-comment">/*
+	 * Calculate radix and skip field used for scanning.
+	 */</span>
+	radix = BLIST_BMAP_RADIX;
+
+	<span class="enscript-keyword">while</span> (radix &lt; blocks) {
+		radix &lt;&lt;= BLIST_META_RADIX_SHIFT;
+		skip = (skip + 1) &lt;&lt; BLIST_META_RADIX_SHIFT;
+	}
+
+	bl = malloc(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> blist), M_SWAP, M_WAITOK);
+
+	bzero(bl, <span class="enscript-keyword">sizeof</span>(*bl));
+
+	bl-&gt;bl_blocks = blocks;
+	bl-&gt;bl_radix = radix;
+	bl-&gt;bl_skip = skip;
+	bl-&gt;bl_rootblks = 1 +
+	    blst_radix_init(NULL, bl-&gt;bl_radix, bl-&gt;bl_skip, blocks);
+	bl-&gt;bl_root = malloc(<span class="enscript-keyword">sizeof</span>(blmeta_t) * bl-&gt;bl_rootblks, M_SWAP, M_WAITOK);
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">BLIST_DEBUG</span>)
+	printf(
+		<span class="enscript-string">&quot;BLIST representing %d blocks (%d MB of swap)&quot;</span>
+		<span class="enscript-string">&quot;, requiring %dK of ram\n&quot;</span>,
+		bl-&gt;bl_blocks,
+		bl-&gt;bl_blocks * 4 / 1024,
+		(bl-&gt;bl_rootblks * <span class="enscript-keyword">sizeof</span>(blmeta_t) + 1023) / 1024
+	);
+	printf(<span class="enscript-string">&quot;BLIST raw radix tree contains %d records\n&quot;</span>, bl-&gt;bl_rootblks);
+#<span class="enscript-reference">endif</span>
+	blst_radix_init(bl-&gt;bl_root, bl-&gt;bl_radix, bl-&gt;bl_skip, blocks);
+
+	<span class="enscript-keyword">return</span>(bl);
+}
+
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">blist_destroy</span>(blist_t bl)
+{
+	free(bl-&gt;bl_root, M_SWAP);
+	free(bl, M_SWAP);
+}
+
+<span class="enscript-comment">/*
+ * blist_alloc() - reserve space in the block bitmap.  Return the base
+ *		     of a contiguous region or SWAPBLK_NONE if space could
+ *		     not be allocated.
+ */</span>
+
+daddr_t 
+<span class="enscript-function-name">blist_alloc</span>(blist_t bl, daddr_t count)
+{
+	daddr_t blk = SWAPBLK_NONE;
+
+	<span class="enscript-keyword">if</span> (bl) {
+		<span class="enscript-keyword">if</span> (bl-&gt;bl_radix == BLIST_BMAP_RADIX)
+			blk = blst_leaf_alloc(bl-&gt;bl_root, 0, count);
+		<span class="enscript-keyword">else</span>
+			blk = blst_meta_alloc(bl-&gt;bl_root, 0, count,
+					      bl-&gt;bl_radix, bl-&gt;bl_skip);
+		<span class="enscript-keyword">if</span> (blk != SWAPBLK_NONE)
+			bl-&gt;bl_free -= count;
+	}
+	<span class="enscript-keyword">return</span>(blk);
+}
+
+<span class="enscript-comment">/*
+ * blist_free() -	free up space in the block bitmap.  Return the base
+ *		     	of a contiguous region.  Panic if an inconsistancy is
+ *			found.
+ */</span>
+
+<span class="enscript-type">void</span> 
+<span class="enscript-function-name">blist_free</span>(blist_t bl, daddr_t blkno, daddr_t count)
+{
+	<span class="enscript-keyword">if</span> (bl) {
+		<span class="enscript-keyword">if</span> (bl-&gt;bl_radix == BLIST_BMAP_RADIX)
+			blst_leaf_free(bl-&gt;bl_root, blkno, count);
+		<span class="enscript-keyword">else</span>
+			blst_meta_free(bl-&gt;bl_root, blkno, count,
+				       bl-&gt;bl_radix, bl-&gt;bl_skip, 0);
+		bl-&gt;bl_free += count;
+	}
+}
+
+<span class="enscript-comment">/*
+ * blist_resize() -	resize an existing radix tree to handle the
+ *			specified number of blocks.  This will reallocate
+ *			the tree and transfer the previous bitmap to the new
+ *			one.  When extending the tree you can specify whether
+ *			the new blocks are to left allocated or freed.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">blist_resize</span>(blist_t *pbl, daddr_t count, <span class="enscript-type">int</span> freenew)
+{
+    blist_t newbl = blist_create(count);
+    blist_t save = *pbl;
+
+    *pbl = newbl;
+    <span class="enscript-keyword">if</span> (count &gt; save-&gt;bl_blocks)
+	    count = save-&gt;bl_blocks;
+    blst_copy(save-&gt;bl_root, 0, save-&gt;bl_radix, save-&gt;bl_skip, newbl, count);
+
+    <span class="enscript-comment">/*
+     * If resizing upwards, should we free the new space or not?
+     */</span>
+    <span class="enscript-keyword">if</span> (freenew &amp;&amp; count &lt; newbl-&gt;bl_blocks)
+	    blist_free(newbl, count, newbl-&gt;bl_blocks - count);
+    blist_destroy(save);
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">BLIST_DEBUG</span>
+
+<span class="enscript-comment">/*
+ * blist_print()    - dump radix tree
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">blist_print</span>(blist_t bl)
+{
+	printf(<span class="enscript-string">&quot;BLIST {\n&quot;</span>);
+	blst_radix_print(bl-&gt;bl_root, 0, bl-&gt;bl_radix, bl-&gt;bl_skip, 4);
+	printf(<span class="enscript-string">&quot;}\n&quot;</span>);
+}
+
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/************************************************************************
+ *			  ALLOCATION SUPPORT FUNCTIONS			*
+ ************************************************************************
+ *
+ *	These support functions do all the actual work.  They may seem 
+ *	rather longish, but that's because I've commented them up.  The
+ *	actual code is straight forward.
+ *
+ */</span>
+
+<span class="enscript-comment">/*
+ * blist_leaf_alloc() -	allocate at a leaf in the radix tree (a bitmap).
+ *
+ *	This is the core of the allocator and is optimized for the 1 block
+ *	and the BLIST_BMAP_RADIX block allocation cases.  Other cases are
+ *	somewhat slower.  The 1 block allocation case is log2 and extremely
+ *	quick.
+ */</span>
+
+<span class="enscript-type">static</span> daddr_t
+<span class="enscript-function-name">blst_leaf_alloc</span>(blmeta_t *scan, daddr_t blk, <span class="enscript-type">int</span> count)
+{
+	u_daddr_t orig = scan-&gt;u.bmu_bitmap;
+
+	<span class="enscript-keyword">if</span> (orig == 0) {
+		<span class="enscript-comment">/*
+		 * Optimize bitmap all-allocated case.  Also, count = 1
+		 * case assumes at least 1 bit is free in the bitmap, so
+		 * we have to take care of this case here.
+		 */</span>
+		scan-&gt;bm_bighint = 0;
+		<span class="enscript-keyword">return</span>(SWAPBLK_NONE);
+	}
+	<span class="enscript-keyword">if</span> (count == 1) {
+		<span class="enscript-comment">/*
+		 * Optimized code to allocate one bit out of the bitmap
+		 */</span>
+		u_daddr_t mask;
+		<span class="enscript-type">int</span> j = BLIST_BMAP_RADIX/2;
+		<span class="enscript-type">int</span> r = 0;
+
+		mask = (u_daddr_t)-1 &gt;&gt; (BLIST_BMAP_RADIX/2);
+
+		<span class="enscript-keyword">while</span> (j) {
+			<span class="enscript-keyword">if</span> ((orig &amp; mask) == 0) {
+			    r += j;
+			    orig &gt;&gt;= j;
+			}
+			j &gt;&gt;= 1;
+			mask &gt;&gt;= j;
+		}
+		scan-&gt;u.bmu_bitmap &amp;= ~(1 &lt;&lt; r);
+		<span class="enscript-keyword">return</span>(blk + r);
+	}
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__APPLE__</span>)
+	<span class="enscript-keyword">if</span> (count &lt;= BLIST_BMAP_RADIX) {
+#<span class="enscript-reference">else</span>
+	<span class="enscript-keyword">if</span> (count &lt;= (<span class="enscript-type">int</span>)BLIST_BMAP_RADIX) {
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE__ */</span>
+		<span class="enscript-comment">/*
+		 * non-optimized code to allocate N bits out of the bitmap.
+		 * The more bits, the faster the code runs.  It will run
+		 * the slowest allocating 2 bits, but since there aren't any
+		 * memory ops in the core loop (or shouldn't be, anyway),
+		 * you probably won't notice the difference.
+		 */</span>
+		<span class="enscript-type">int</span> j;
+		<span class="enscript-type">int</span> n = BLIST_BMAP_RADIX - count;
+		u_daddr_t mask;
+
+		mask = (u_daddr_t)-1 &gt;&gt; n;
+
+		<span class="enscript-keyword">for</span> (j = 0; j &lt;= n; ++j) {
+			<span class="enscript-keyword">if</span> ((orig &amp; mask) == mask) {
+				scan-&gt;u.bmu_bitmap &amp;= ~mask;
+				<span class="enscript-keyword">return</span>(blk + j);
+			}
+			mask = (mask &lt;&lt; 1);
+		}
+	}
+	<span class="enscript-comment">/*
+	 * We couldn't allocate count in this subtree, update bighint.
+	 */</span>
+	scan-&gt;bm_bighint = count - 1;
+	<span class="enscript-keyword">return</span>(SWAPBLK_NONE);
+}
+
+<span class="enscript-comment">/*
+ * blist_meta_alloc() -	allocate at a meta in the radix tree.
+ *
+ *	Attempt to allocate at a meta node.  If we can't, we update
+ *	bighint and return a failure.  Updating bighint optimize future
+ *	calls that hit this node.  We have to check for our collapse cases
+ *	and we have a few optimizations strewn in as well.
+ */</span>
+
+<span class="enscript-type">static</span> daddr_t
+<span class="enscript-function-name">blst_meta_alloc</span>(blmeta_t *scan, daddr_t blk, daddr_t count, daddr_t radix,
+		<span class="enscript-type">int</span> skip)
+{
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> next_skip = (skip &gt;&gt; BLIST_META_RADIX_SHIFT);
+
+	<span class="enscript-keyword">if</span> (scan-&gt;u.bmu_avail == 0)  {
+		<span class="enscript-comment">/*
+		 * ALL-ALLOCATED special case
+		 */</span>
+		scan-&gt;bm_bighint = count;
+		<span class="enscript-keyword">return</span>(SWAPBLK_NONE);
+	}
+
+	<span class="enscript-keyword">if</span> (scan-&gt;u.bmu_avail == radix) {
+		radix &gt;&gt;= BLIST_META_RADIX_SHIFT;
+
+		<span class="enscript-comment">/*
+		 * ALL-FREE special case, initialize uninitialize
+		 * sublevel.
+		 */</span>
+		<span class="enscript-keyword">for</span> (i = 1; i &lt;= skip; i += next_skip) {
+			<span class="enscript-keyword">if</span> (scan[i].bm_bighint == (daddr_t)-1)
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">if</span> (next_skip == 1) {
+				scan[i].u.bmu_bitmap = (u_daddr_t)-1;
+				scan[i].bm_bighint = BLIST_BMAP_RADIX;
+			} <span class="enscript-keyword">else</span> {
+				scan[i].bm_bighint = radix;
+				scan[i].u.bmu_avail = radix;
+			}
+		}
+	} <span class="enscript-keyword">else</span> {
+		radix &gt;&gt;= BLIST_META_RADIX_SHIFT;
+	}
+
+	<span class="enscript-keyword">for</span> (i = 1; i &lt;= skip; i += next_skip) {
+		<span class="enscript-keyword">if</span> (count &lt;= scan[i].bm_bighint) {
+			<span class="enscript-comment">/*
+			 * count fits in object
+			 */</span>
+			daddr_t r;
+			<span class="enscript-keyword">if</span> (next_skip == 1)
+				r = blst_leaf_alloc(&amp;scan[i], blk, count);
+			<span class="enscript-keyword">else</span>
+				r = blst_meta_alloc(&amp;scan[i], blk, count,
+						    radix, next_skip - 1);
+			<span class="enscript-keyword">if</span> (r != SWAPBLK_NONE) {
+				scan-&gt;u.bmu_avail -= count;
+				<span class="enscript-keyword">if</span> (scan-&gt;bm_bighint &gt; scan-&gt;u.bmu_avail)
+					scan-&gt;bm_bighint = scan-&gt;u.bmu_avail;
+				<span class="enscript-keyword">return</span> r;
+			}
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (scan[i].bm_bighint == (daddr_t)-1) {
+			<span class="enscript-comment">/*
+			 * Terminator
+			 */</span>
+			<span class="enscript-keyword">break</span>;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (count &gt; radix) {
+			<span class="enscript-comment">/*
+			 * count does not fit in object even if it were
+			 * complete free.
+			 */</span>
+			panic(<span class="enscript-string">&quot;blist_meta_alloc: allocation too large&quot;</span>);
+		}
+		blk += radix;
+	}
+
+	<span class="enscript-comment">/*
+	 * We couldn't allocate count in this subtree, update bighint.
+	 */</span>
+	<span class="enscript-keyword">if</span> (scan-&gt;bm_bighint &gt;= count)
+		scan-&gt;bm_bighint = count - 1;
+	<span class="enscript-keyword">return</span>(SWAPBLK_NONE);
+}
+
+<span class="enscript-comment">/*
+ * BLST_LEAF_FREE() -	free allocated block from leaf bitmap
+ *
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">blst_leaf_free</span>(blmeta_t *scan, daddr_t blk, <span class="enscript-type">int</span> count)
+{
+	<span class="enscript-comment">/*
+	 * free some data in this bitmap
+	 *
+	 * e.g.
+	 *	0000111111111110000
+	 *          \_________/\__/
+	 *		v        n
+	 */</span>
+	<span class="enscript-type">int</span> n = blk &amp; (BLIST_BMAP_RADIX - 1);
+	u_daddr_t mask;
+
+	mask = ((u_daddr_t)-1 &lt;&lt; n) &amp;
+	    ((u_daddr_t)-1 &gt;&gt; (BLIST_BMAP_RADIX - count - n));
+
+	<span class="enscript-keyword">if</span> (scan-&gt;u.bmu_bitmap &amp; mask)
+		panic(<span class="enscript-string">&quot;blst_radix_free: freeing free block&quot;</span>);
+	scan-&gt;u.bmu_bitmap |= mask;
+
+	<span class="enscript-comment">/*
+	 * We could probably do a better job here.  We are required to make
+	 * bighint at least as large as the biggest contiguous block of 
+	 * data.  If we just shoehorn it, a little extra overhead will
+	 * be incured on the next allocation (but only that one typically).
+	 */</span>
+	scan-&gt;bm_bighint = BLIST_BMAP_RADIX;
+}
+
+<span class="enscript-comment">/*
+ * BLST_META_FREE() - free allocated blocks from radix tree meta info
+ *
+ *	This support routine frees a range of blocks from the bitmap.
+ *	The range must be entirely enclosed by this radix node.  If a
+ *	meta node, we break the range down recursively to free blocks
+ *	in subnodes (which means that this code can free an arbitrary
+ *	range whereas the allocation code cannot allocate an arbitrary
+ *	range).
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> 
+<span class="enscript-function-name">blst_meta_free</span>(blmeta_t *scan, daddr_t freeBlk, daddr_t count, daddr_t radix,
+	       <span class="enscript-type">int</span> skip, daddr_t blk)
+{
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> next_skip = (skip &gt;&gt; BLIST_META_RADIX_SHIFT);
+
+#<span class="enscript-reference">if</span> 0
+	printf(<span class="enscript-string">&quot;FREE (%x,%d) FROM (%x,%d)\n&quot;</span>,
+	    freeBlk, count,
+	    blk, radix
+	);
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (scan-&gt;u.bmu_avail == 0) {
+		<span class="enscript-comment">/*
+		 * ALL-ALLOCATED special case, with possible
+		 * shortcut to ALL-FREE special case.
+		 */</span>
+		scan-&gt;u.bmu_avail = count;
+		scan-&gt;bm_bighint = count;
+
+		<span class="enscript-keyword">if</span> (count != radix)  {
+			<span class="enscript-keyword">for</span> (i = 1; i &lt;= skip; i += next_skip) {
+				<span class="enscript-keyword">if</span> (scan[i].bm_bighint == (daddr_t)-1)
+					<span class="enscript-keyword">break</span>;
+				scan[i].bm_bighint = 0;
+				<span class="enscript-keyword">if</span> (next_skip == 1)
+					scan[i].u.bmu_bitmap = 0;
+				<span class="enscript-keyword">else</span>
+					scan[i].u.bmu_avail = 0;
+			}
+			<span class="enscript-comment">/* fall through */</span>
+		}
+	} <span class="enscript-keyword">else</span> {
+		scan-&gt;u.bmu_avail += count;
+		<span class="enscript-comment">/* scan-&gt;bm_bighint = radix; */</span>
+	}
+
+	<span class="enscript-comment">/*
+	 * ALL-FREE special case.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (scan-&gt;u.bmu_avail == radix)
+		<span class="enscript-keyword">return</span>;
+	<span class="enscript-keyword">if</span> (scan-&gt;u.bmu_avail &gt; radix)
+		panic(<span class="enscript-string">&quot;blst_meta_free: freeing already free blocks (%d) %d/%d&quot;</span>, count, scan-&gt;u.bmu_avail, radix);
+
+	<span class="enscript-comment">/*
+	 * Break the free down into its components
+	 */</span>
+
+	radix &gt;&gt;= BLIST_META_RADIX_SHIFT;
+
+	i = (freeBlk - blk) / radix;
+	blk += i * radix;
+	i = i * next_skip + 1;
+
+	<span class="enscript-keyword">while</span> (i &lt;= skip &amp;&amp; blk &lt; freeBlk + count) {
+		daddr_t v;
+
+		v = blk + radix - freeBlk;
+		<span class="enscript-keyword">if</span> (v &gt; count)
+			v = count;
+
+		<span class="enscript-keyword">if</span> (scan-&gt;bm_bighint == (daddr_t)-1)
+			panic(<span class="enscript-string">&quot;blst_meta_free: freeing unexpected range&quot;</span>);
+
+		<span class="enscript-keyword">if</span> (next_skip == 1)
+			blst_leaf_free(&amp;scan[i], freeBlk, v);
+		<span class="enscript-keyword">else</span>
+			blst_meta_free(&amp;scan[i], freeBlk, v, radix,
+				       next_skip - 1, blk);
+		<span class="enscript-keyword">if</span> (scan-&gt;bm_bighint &lt; scan[i].bm_bighint)
+		    scan-&gt;bm_bighint = scan[i].bm_bighint;
+		count -= v;
+		freeBlk += v;
+		blk += radix;
+		i += next_skip;
+	}
+}
+
+<span class="enscript-comment">/*
+ * BLIST_RADIX_COPY() - copy one radix tree to another
+ *
+ *	Locates free space in the source tree and frees it in the destination
+ *	tree.  The space may not already be free in the destination.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">blst_copy</span>(blmeta_t *scan, daddr_t blk, daddr_t radix,
+		      daddr_t skip, blist_t dest, daddr_t count)
+{
+	<span class="enscript-type">int</span> next_skip;
+	<span class="enscript-type">int</span> i;
+
+	<span class="enscript-comment">/*
+	 * Leaf node
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (radix == BLIST_BMAP_RADIX) {
+		u_daddr_t v = scan-&gt;u.bmu_bitmap;
+
+		<span class="enscript-keyword">if</span> (v == (u_daddr_t)-1) {
+			blist_free(dest, blk, count);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (v != 0) {
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__APPLE__</span>)
+			<span class="enscript-type">int</span> i;
+
+			<span class="enscript-keyword">for</span> (i = 0; i &lt; BLIST_BMAP_RADIX &amp;&amp; i &lt; count; ++i)
+				<span class="enscript-keyword">if</span> (v &amp; (1 &lt;&lt; i))
+					blist_free(dest, blk + i, 1);
+#<span class="enscript-reference">else</span>
+			<span class="enscript-type">int</span> j;   <span class="enscript-comment">/* Avoid shadow warnings */</span>
+
+			<span class="enscript-keyword">for</span> (j = 0; j &lt; (<span class="enscript-type">int</span>)BLIST_BMAP_RADIX &amp;&amp; j &lt; count; ++j)
+				<span class="enscript-keyword">if</span> (v &amp; (1 &lt;&lt; j))
+					blist_free(dest, blk + j, 1);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* __APPLE__ */</span>
+		}
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Meta node
+	 */</span>
+
+	<span class="enscript-comment">/*
+	 * Source all allocated, leave dest allocated
+	 */</span>
+	<span class="enscript-keyword">if</span> (scan-&gt;u.bmu_avail == 0)
+		<span class="enscript-keyword">return</span>;
+	<span class="enscript-keyword">if</span> (scan-&gt;u.bmu_avail == radix) {
+		<span class="enscript-comment">/*
+		 * Source all free, free entire dest
+		 */</span>
+		<span class="enscript-keyword">if</span> (count &lt; radix)
+			blist_free(dest, blk, count);
+		<span class="enscript-keyword">else</span>
+			blist_free(dest, blk, radix);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	radix &gt;&gt;= BLIST_META_RADIX_SHIFT;
+	next_skip = (skip &gt;&gt; BLIST_META_RADIX_SHIFT);
+
+	<span class="enscript-keyword">for</span> (i = 1; count &amp;&amp; i &lt;= skip; i += next_skip) {
+		<span class="enscript-keyword">if</span> (scan[i].bm_bighint == (daddr_t)-1)
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">if</span> (count &gt;= radix) {
+			blst_copy(
+			    &amp;scan[i],
+			    blk,
+			    radix,
+			    next_skip - 1,
+			    dest,
+			    radix
+			);
+			count -= radix;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (count) {
+				blst_copy(
+				    &amp;scan[i],
+				    blk,
+				    radix,
+				    next_skip - 1,
+				    dest,
+				    count
+				);
+			}
+			count = 0;
+		}
+		blk += radix;
+	}
+}
+
+<span class="enscript-comment">/*
+ * BLST_RADIX_INIT() - initialize radix tree
+ *
+ *	Initialize our meta structures and bitmaps and calculate the exact
+ *	amount of space required to manage 'count' blocks - this space may
+ *	be considerably less then the calculated radix due to the large
+ *	RADIX values we use.
+ */</span>
+
+<span class="enscript-type">static</span> daddr_t	
+<span class="enscript-function-name">blst_radix_init</span>(blmeta_t *scan, daddr_t radix, <span class="enscript-type">int</span> skip, daddr_t count)
+{
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> next_skip;
+	daddr_t memindex = 0;
+
+	<span class="enscript-comment">/*
+	 * Leaf node
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (radix == BLIST_BMAP_RADIX) {
+		<span class="enscript-keyword">if</span> (scan) {
+			scan-&gt;bm_bighint = 0;
+			scan-&gt;u.bmu_bitmap = 0;
+		}
+		<span class="enscript-keyword">return</span>(memindex);
+	}
+
+	<span class="enscript-comment">/*
+	 * Meta node.  If allocating the entire object we can special
+	 * case it.  However, we need to figure out how much memory
+	 * is required to manage 'count' blocks, so we continue on anyway.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (scan) {
+		scan-&gt;bm_bighint = 0;
+		scan-&gt;u.bmu_avail = 0;
+	}
+
+	radix &gt;&gt;= BLIST_META_RADIX_SHIFT;
+	next_skip = (skip &gt;&gt; BLIST_META_RADIX_SHIFT);
+
+	<span class="enscript-keyword">for</span> (i = 1; i &lt;= skip; i += next_skip) {
+		<span class="enscript-keyword">if</span> (count &gt;= radix) {
+			<span class="enscript-comment">/*
+			 * Allocate the entire object
+			 */</span>
+			memindex = i + blst_radix_init(
+			    ((scan) ? &amp;scan[i] : NULL),
+			    radix,
+			    next_skip - 1,
+			    radix
+			);
+			count -= radix;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (count &gt; 0) {
+			<span class="enscript-comment">/*
+			 * Allocate a partial object
+			 */</span>
+			memindex = i + blst_radix_init(
+			    ((scan) ? &amp;scan[i] : NULL),
+			    radix,
+			    next_skip - 1,
+			    count
+			);
+			count = 0;
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/*
+			 * Add terminator and break out
+			 */</span>
+			<span class="enscript-keyword">if</span> (scan)
+				scan[i].bm_bighint = (daddr_t)-1;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (memindex &lt; i)
+		memindex = i;
+	<span class="enscript-keyword">return</span>(memindex);
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">BLIST_DEBUG</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	
+<span class="enscript-function-name">blst_radix_print</span>(blmeta_t *scan, daddr_t blk, daddr_t radix, <span class="enscript-type">int</span> skip, <span class="enscript-type">int</span> tab)
+{
+	<span class="enscript-type">int</span> i;
+	<span class="enscript-type">int</span> next_skip;
+	<span class="enscript-type">int</span> lastState = 0;
+
+	<span class="enscript-keyword">if</span> (radix == BLIST_BMAP_RADIX) {
+		printf(
+		    <span class="enscript-string">&quot;%*.*s(%04x,%d): bitmap %08x big=%d\n&quot;</span>, 
+		    tab, tab, <span class="enscript-string">&quot;&quot;</span>,
+		    blk, radix,
+		    scan-&gt;u.bmu_bitmap,
+		    scan-&gt;bm_bighint
+		);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (scan-&gt;u.bmu_avail == 0) {
+		printf(
+		    <span class="enscript-string">&quot;%*.*s(%04x,%d) ALL ALLOCATED\n&quot;</span>,
+		    tab, tab, <span class="enscript-string">&quot;&quot;</span>,
+		    blk,
+		    radix
+		);
+		<span class="enscript-keyword">return</span>;
+	}
+	<span class="enscript-keyword">if</span> (scan-&gt;u.bmu_avail == radix) {
+		printf(
+		    <span class="enscript-string">&quot;%*.*s(%04x,%d) ALL FREE\n&quot;</span>,
+		    tab, tab, <span class="enscript-string">&quot;&quot;</span>,
+		    blk,
+		    radix
+		);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	printf(
+	    <span class="enscript-string">&quot;%*.*s(%04x,%d): subtree (%d/%d) big=%d {\n&quot;</span>,
+	    tab, tab, <span class="enscript-string">&quot;&quot;</span>,
+	    blk, radix,
+	    scan-&gt;u.bmu_avail,
+	    radix,
+	    scan-&gt;bm_bighint
+	);
+
+	radix &gt;&gt;= BLIST_META_RADIX_SHIFT;
+	next_skip = (skip &gt;&gt; BLIST_META_RADIX_SHIFT);
+	tab += 4;
+
+	<span class="enscript-keyword">for</span> (i = 1; i &lt;= skip; i += next_skip) {
+		<span class="enscript-keyword">if</span> (scan[i].bm_bighint == (daddr_t)-1) {
+			printf(
+			    <span class="enscript-string">&quot;%*.*s(%04x,%d): Terminator\n&quot;</span>,
+			    tab, tab, <span class="enscript-string">&quot;&quot;</span>,
+			    blk, radix
+			);
+			lastState = 0;
+			<span class="enscript-keyword">break</span>;
+		}
+		blst_radix_print(
+		    &amp;scan[i],
+		    blk,
+		    radix,
+		    next_skip - 1,
+		    tab
+		);
+		blk += radix;
+	}
+	tab -= 4;
+
+	printf(
+	    <span class="enscript-string">&quot;%*.*s}\n&quot;</span>,
+	    tab, tab, <span class="enscript-string">&quot;&quot;</span>
+	);
+}
+
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">BLIST_DEBUG</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">main</span>(<span class="enscript-type">int</span> ac, <span class="enscript-type">char</span> **av)
+{
+	<span class="enscript-type">int</span> size = 1024;
+	<span class="enscript-type">int</span> i;
+	blist_t bl;
+
+	<span class="enscript-keyword">for</span> (i = 1; i &lt; ac; ++i) {
+		<span class="enscript-type">const</span> <span class="enscript-type">char</span> *ptr = av[i];
+		<span class="enscript-keyword">if</span> (*ptr != <span class="enscript-string">'-'</span>) {
+			size = strtol(ptr, NULL, 0);
+			<span class="enscript-keyword">continue</span>;
+		}
+		ptr += 2;
+		fprintf(stderr, <span class="enscript-string">&quot;Bad option: %s\n&quot;</span>, ptr - 2);
+		exit(1);
+	}
+	bl = blist_create(size);
+	blist_free(bl, 0, size);
+
+	<span class="enscript-keyword">for</span> (;;) {
+		<span class="enscript-type">char</span> buf[1024];
+		daddr_t da = 0;
+		daddr_t count = 0;
+
+
+		printf(<span class="enscript-string">&quot;%d/%d/%d&gt; &quot;</span>, bl-&gt;bl_free, size, bl-&gt;bl_radix);
+		fflush(stdout);
+		<span class="enscript-keyword">if</span> (fgets(buf, <span class="enscript-keyword">sizeof</span>(buf), stdin) == NULL)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">switch</span>(buf[0]) {
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'r'</span>:
+			<span class="enscript-keyword">if</span> (sscanf(buf + 1, <span class="enscript-string">&quot;%d&quot;</span>, &amp;count) == 1) {
+				blist_resize(&amp;bl, count, 1);
+			} <span class="enscript-keyword">else</span> {
+				printf(<span class="enscript-string">&quot;?\n&quot;</span>);
+			}
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'p'</span>:
+			blist_print(bl);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'a'</span>:
+			<span class="enscript-keyword">if</span> (sscanf(buf + 1, <span class="enscript-string">&quot;%d&quot;</span>, &amp;count) == 1) {
+				daddr_t blk = blist_alloc(bl, count);
+				printf(<span class="enscript-string">&quot;    R=%04x\n&quot;</span>, blk);
+			} <span class="enscript-keyword">else</span> {
+				printf(<span class="enscript-string">&quot;?\n&quot;</span>);
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'f'</span>:
+			<span class="enscript-keyword">if</span> (sscanf(buf + 1, <span class="enscript-string">&quot;%x %d&quot;</span>, &amp;da, &amp;count) == 2) {
+				blist_free(bl, da, count);
+			} <span class="enscript-keyword">else</span> {
+				printf(<span class="enscript-string">&quot;?\n&quot;</span>);
+			}
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'?'</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-string">'h'</span>:
+			puts(
+			    <span class="enscript-string">&quot;p          -print\n&quot;</span>
+			    <span class="enscript-string">&quot;a %d       -allocate\n&quot;</span>
+			    <span class="enscript-string">&quot;f %x %d    -free\n&quot;</span>
+			    <span class="enscript-string">&quot;r %d       -resize\n&quot;</span>
+			    <span class="enscript-string">&quot;h/?        -help&quot;</span>
+			);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			printf(<span class="enscript-string">&quot;?\n&quot;</span>);
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">panic</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *ctl, ...)
+{
+	va_list va;
+
+	va_start(va, ctl);
+	vfprintf(stderr, ctl, va);
+	fprintf(stderr, <span class="enscript-string">&quot;\n&quot;</span>);
+	va_end(va);
+	exit(1);
+}
+
+#<span class="enscript-reference">endif</span>
+</pre>
+<hr />
+</body></html>

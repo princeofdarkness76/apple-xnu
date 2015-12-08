@@ -1,0 +1,3171 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>tty.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">tty.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1997-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*-
+ * Copyright (c) 1982, 1986, 1990, 1991, 1993
+ *      The Regents of the University of California.  All rights reserved.
+ * (c) UNIX System Laboratories, Inc.
+ * All or some portions of this file are derived from material licensed
+ * to the University of California by American Telephone and Telegraph
+ * Co. or Unix System Laboratories, Inc. and are reproduced herein with
+ * the permission of UNIX System Laboratories, Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the University of
+ *      California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)tty.c	8.8 (Berkeley) 1/21/94
+ */</span>
+<span class="enscript-comment">/*-
+ * TODO:
+ *	o Fix races for sending the start char in ttyflush().
+ *	o Handle inter-byte timeout for &quot;MIN &gt; 0, TIME &gt; 0&quot; in ttyselect().
+ *	  With luck, there will be MIN chars before select() returns().
+ *	o Handle CLOCAL consistently for ptys.  Perhaps disallow setting it.
+ *	o Don't allow input in TS_ZOMBIE case.  It would be visible through
+ *	  FIONREAD.
+ *	o Do the new sio locking stuff here and use it to avoid special
+ *	  case for EXTPROC?
+ *	o Lock PENDIN too?
+ *	o Move EXTPROC and/or PENDIN to t_state?
+ *	o Wrap most of ttioctl in spltty/splx.
+ *	o Implement TIOCNOTTY or remove it from &lt;sys/ioctl.h&gt;.
+ *	o Send STOP if IXOFF is toggled off while TS_TBLOCK is set.
+ *	o Don't allow certain termios flags to affect disciplines other
+ *	  than TTYDISC.  Cancel their effects before switch disciplines
+ *	  and ignore them if they are set while we are in another
+ *	  discipline.
+ *	o Handle c_ispeed = 0 to c_ispeed = c_ospeed conversion here instead
+ *	  of in drivers and fix drivers that write to tp-&gt;t_termios.
+ *	o Check for TS_CARR_ON being set while everything is closed and not
+ *	  waiting for carrier.  TS_CARR_ON isn't cleared if nothing is open,
+ *	  so it would live until the next open even if carrier drops.
+ *	o Restore TS_WOPEN since it is useful in pstat.  It must be cleared
+ *	  only when _all_ openers leave open().
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TTYDEFCHARS</span> 1
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">TTYDEFCHARS</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dkstat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syslog.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signalvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signalvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;dev/kmreg_com.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/cons.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/resource.h&gt;</span>	<span class="enscript-comment">/* averunnable */</span>
+
+<span class="enscript-comment">/*
+ * Debugging assertions for tty locks
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TTY_DEBUG</span> 1
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">TTY_DEBUG</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">TTY_LOCK_OWNED</span>(tp) do {lck_mtx_assert(&amp;tp-&gt;t_lock, LCK_MTX_ASSERT_OWNED); } while (0)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">TTY_LOCK_NOTOWNED</span>(tp) do {lck_mtx_assert(&amp;tp-&gt;t_lock, LCK_MTX_ASSERT_NOTOWNED); } while (0)
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TTY_LOCK_OWNED</span>(tp)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TTY_LOCK_NOTOWNED</span>(tp)
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-type">static</span> lck_grp_t	*tty_lck_grp;
+<span class="enscript-type">static</span> lck_grp_attr_t	*tty_lck_grp_attr;
+<span class="enscript-type">static</span> lck_attr_t      *tty_lck_attr;
+
+__private_extern__ <span class="enscript-type">int</span> ttnread(<span class="enscript-type">struct</span> tty *tp);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	ttyecho(<span class="enscript-type">int</span> c, <span class="enscript-type">struct</span> tty *tp);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	ttyoutput(<span class="enscript-type">int</span> c, <span class="enscript-type">struct</span> tty *tp);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	ttypend(<span class="enscript-type">struct</span> tty *tp);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	ttyretype(<span class="enscript-type">struct</span> tty *tp);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	ttyrub(<span class="enscript-type">int</span> c, <span class="enscript-type">struct</span> tty *tp);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	ttyrubo(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">int</span> count);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	ttystop(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">int</span> rw);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	ttyunblock(<span class="enscript-type">struct</span> tty *tp);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	ttywflush(<span class="enscript-type">struct</span> tty *tp);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	proc_compare(proc_t p1, proc_t p2);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	ttyhold(<span class="enscript-type">struct</span> tty *tp);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>	ttydeallocate(<span class="enscript-type">struct</span> tty *tp);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">isctty</span>(proc_t p, <span class="enscript-type">struct</span> tty  *tp);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">isctty_sp</span>(proc_t p, <span class="enscript-type">struct</span> tty  *tp, <span class="enscript-type">struct</span> session *sessp);
+
+<span class="enscript-comment">/*
+ * Table with character classes and parity. The 8th bit indicates parity,
+ * the 7th bit indicates the character is an alphameric or underscore (for
+ * ALTWERASE), and the low 6 bits indicate delay type.  If the low 6 bits
+ * are 0 then the character needs no special processing on output; classes
+ * other than 0 might be translated or (not currently) require delays.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">E</span>	0x00	<span class="enscript-comment">/* Even parity. */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">O</span>	0x80	<span class="enscript-comment">/* Odd parity. */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">PARITY</span>(c)	(char_type[c] &amp; O)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">ALPHA</span>	0x40	<span class="enscript-comment">/* Alpha or underscore. */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ISALPHA</span>(c)	(char_type[(c) &amp; TTY_CHARMASK] &amp; ALPHA)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CCLASSMASK</span>	0x3f
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">CCLASS</span>(c)	(char_type[c] &amp; CCLASSMASK)
+<span class="enscript-comment">/* 0b10xxxxxx is the mask for UTF-8 continuations */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">CCONT</span>(c)	((c &amp; 0xc0) == 0x80)
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">BS</span>	BACKSPACE
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CC</span>	CONTROL
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">CR</span>	RETURN
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">NA</span>	ORDINARY | ALPHA
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">NL</span>	NEWLINE
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">NO</span>	ORDINARY
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">TB</span>	TAB
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">VT</span>	VTAB
+
+<span class="enscript-type">static</span> u_char <span class="enscript-type">const</span> char_type[] = {
+	E|CC, O|CC, O|CC, E|CC, O|CC, E|CC, E|CC, O|CC,	<span class="enscript-comment">/* nul - bel */</span>
+	O|BS, E|TB, E|NL, O|CC, E|VT, O|CR, O|CC, E|CC, <span class="enscript-comment">/* bs - si */</span>
+	O|CC, E|CC, E|CC, O|CC, E|CC, O|CC, O|CC, E|CC, <span class="enscript-comment">/* dle - etb */</span>
+	E|CC, O|CC, O|CC, E|CC, O|CC, E|CC, E|CC, O|CC, <span class="enscript-comment">/* can - us */</span>
+	O|NO, E|NO, E|NO, O|NO, E|NO, O|NO, O|NO, E|NO, <span class="enscript-comment">/* sp - ' */</span>
+	E|NO, O|NO, O|NO, E|NO, O|NO, E|NO, E|NO, O|NO, <span class="enscript-comment">/* ( - / */</span>
+	E|NA, O|NA, O|NA, E|NA, O|NA, E|NA, E|NA, O|NA, <span class="enscript-comment">/* 0 - 7 */</span>
+	O|NA, E|NA, E|NO, O|NO, E|NO, O|NO, O|NO, E|NO, <span class="enscript-comment">/* 8 - ? */</span>
+	O|NO, E|NA, E|NA, O|NA, E|NA, O|NA, O|NA, E|NA, <span class="enscript-comment">/* @ - G */</span>
+	E|NA, O|NA, O|NA, E|NA, O|NA, E|NA, E|NA, O|NA, <span class="enscript-comment">/* H - O */</span>
+	E|NA, O|NA, O|NA, E|NA, O|NA, E|NA, E|NA, O|NA, <span class="enscript-comment">/* P - W */</span>
+	O|NA, E|NA, E|NA, O|NO, E|NO, O|NO, O|NO, O|NA, <span class="enscript-comment">/* X - _ */</span>
+	E|NO, O|NA, O|NA, E|NA, O|NA, E|NA, E|NA, O|NA, <span class="enscript-comment">/* ` - g */</span>
+	O|NA, E|NA, E|NA, O|NA, E|NA, O|NA, O|NA, E|NA, <span class="enscript-comment">/* h - o */</span>
+	O|NA, E|NA, E|NA, O|NA, E|NA, O|NA, O|NA, E|NA, <span class="enscript-comment">/* p - w */</span>
+	E|NA, O|NA, O|NA, E|NO, O|NO, E|NO, E|NO, O|CC, <span class="enscript-comment">/* x - del */</span>
+	<span class="enscript-comment">/*
+	 * Meta chars; should be settable per character set;
+	 * for now, treat them all as normal characters.
+	 */</span>
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+	NA,   NA,   NA,   NA,   NA,   NA,   NA,   NA,
+};
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">BS</span>
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">CC</span>
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">CR</span>
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">NA</span>
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">NL</span>
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">NO</span>
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">TB</span>
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">VT</span>
+
+<span class="enscript-comment">/* Macros to clear/set/test flags. */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">SET</span>(t, f)	(t) |= (f)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">CLR</span>(t, f)	(t) &amp;= ~(f)
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">ISSET</span>(t, f)	((t) &amp; (f))
+
+<span class="enscript-comment">/*
+ * Input control starts when we would not be able to fit the maximum
+ * contents of the ping-pong buffers and finishes when we would be able
+ * to fit that much plus 1/8 more.
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">I_HIGH_WATER</span>	(TTYHOG - 2 * 256)	<span class="enscript-comment">/* XXX */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">I_LOW_WATER</span>	((TTYHOG - 2 * 256) * 7 / 8)	<span class="enscript-comment">/* XXX */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">termios32to64</span>(<span class="enscript-type">struct</span> termios32 *in, <span class="enscript-type">struct</span> user_termios *out)
+{
+	out-&gt;c_iflag = (user_tcflag_t)in-&gt;c_iflag;
+	out-&gt;c_oflag = (user_tcflag_t)in-&gt;c_oflag;
+	out-&gt;c_cflag = (user_tcflag_t)in-&gt;c_cflag;
+	out-&gt;c_lflag = (user_tcflag_t)in-&gt;c_lflag;
+
+	<span class="enscript-comment">/* bcopy is OK, since this type is ILP32/LP64 size invariant */</span>
+	bcopy(in-&gt;c_cc, out-&gt;c_cc, <span class="enscript-keyword">sizeof</span>(in-&gt;c_cc));
+
+	out-&gt;c_ispeed = (user_speed_t)in-&gt;c_ispeed;
+	out-&gt;c_ospeed = (user_speed_t)in-&gt;c_ospeed;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">termios64to32</span>(<span class="enscript-type">struct</span> user_termios *in, <span class="enscript-type">struct</span> termios32 *out)
+{
+	out-&gt;c_iflag = (tcflag_t)in-&gt;c_iflag;
+	out-&gt;c_oflag = (tcflag_t)in-&gt;c_oflag;
+	out-&gt;c_cflag = (tcflag_t)in-&gt;c_cflag;
+	out-&gt;c_lflag = (tcflag_t)in-&gt;c_lflag;
+
+	<span class="enscript-comment">/* bcopy is OK, since this type is ILP32/LP64 size invariant */</span>
+	bcopy(in-&gt;c_cc, out-&gt;c_cc, <span class="enscript-keyword">sizeof</span>(in-&gt;c_cc));
+
+	out-&gt;c_ispeed = (speed_t)in-&gt;c_ispeed;
+	out-&gt;c_ospeed = (speed_t)in-&gt;c_ospeed;
+}
+
+
+<span class="enscript-comment">/*
+ * tty_init
+ *
+ * Initialize the tty line discipline subsystem.
+ *
+ * Parameters:	void
+ *
+ * Returns:	void
+ *
+ * Locks:	No ttys can be allocated and no tty locks can be used
+ *		until after this function is called
+ *
+ * Notes:	The intent of this is to set up a log group attribute,
+ *		lock group, and loc atribute for subsequent per-tty locks.
+ *		This function is called early in bsd_init(), prior to the
+ *		console device initialization.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tty_init</span>(<span class="enscript-type">void</span>)
+{
+	tty_lck_grp_attr = lck_grp_attr_alloc_init();
+	tty_lck_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;tty&quot;</span>,  tty_lck_grp_attr);
+	tty_lck_attr = lck_attr_alloc_init();
+}
+
+
+<span class="enscript-comment">/*
+ * tty_lock
+ *
+ * Lock the requested tty structure.
+ *
+ * Parameters:	tp				The tty we want to lock
+ *
+ * Returns:	void
+ *
+ * Locks:	On return, tp is locked
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tty_lock</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_NOTOWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+	lck_mtx_lock(&amp;tp-&gt;t_lock);
+}
+
+
+<span class="enscript-comment">/*
+ * tty_unlock
+ *
+ * Unlock the requested tty structure.
+ *
+ * Parameters:	tp				The tty we want to unlock
+ *
+ * Returns:	void
+ *
+ * Locks:	On return, tp is unlocked
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">tty_unlock</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+	lck_mtx_unlock(&amp;tp-&gt;t_lock);
+}
+
+
+<span class="enscript-comment">/*
+ * ttyopen (LDISC)
+ *
+ * Initial open of tty, or (re)entry to standard tty line discipline.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttyopen</span>(dev_t device, <span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	tp-&gt;t_dev = device;
+
+	<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_state, TS_ISOPEN)) {
+		SET(tp-&gt;t_state, TS_ISOPEN);
+		<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_cflag, CLOCAL)) {
+			SET(tp-&gt;t_state, TS_CONNECTED); }
+		bzero(&amp;tp-&gt;t_winsize, <span class="enscript-keyword">sizeof</span>(tp-&gt;t_winsize));
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * ttyclose
+ *
+ * Handle close() on a tty line: flush and set to initial state,
+ * bumping generation number so that pending read/write calls
+ * can detect recycling of the tty.
+ * XXX our caller should have done `spltty(); l_close(); ttyclose();'
+ * and l_close() should have flushed, but we repeat the spltty() and
+ * the flush in case there are buggy callers.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttyclose</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	<span class="enscript-type">struct</span> pgrp * oldpg;
+	<span class="enscript-type">struct</span> session * oldsessp;
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	<span class="enscript-keyword">if</span> (constty == tp) {
+		constty = NULL;
+
+
+		<span class="enscript-comment">/*
+		 * Closing current console tty; disable printing of console
+		 * messages at bottom-level driver. 
+		 */</span>
+		(*cdevsw[major(tp-&gt;t_dev)].d_ioctl)
+			(tp-&gt;t_dev, KMIOCDISABLCONS, NULL, 0, current_proc());
+	}
+
+	ttyflush(tp, FREAD | FWRITE);
+
+	tp-&gt;t_gen++;
+	tp-&gt;t_line = TTYDISC;
+	proc_list_lock();
+	oldpg = tp-&gt;t_pgrp;
+	oldsessp = tp-&gt;t_session;
+	tp-&gt;t_pgrp = NULL;
+	tp-&gt;t_session = NULL;
+	<span class="enscript-keyword">if</span> (oldsessp != SESSION_NULL)
+		oldsessp-&gt;s_ttypgrpid = NO_PID;
+	proc_list_unlock();
+	<span class="enscript-comment">/* drop the reference on prev session and pgrp */</span>
+	<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+	tty_unlock(tp);
+	<span class="enscript-keyword">if</span> (oldsessp != SESSION_NULL)
+		session_rele(oldsessp);
+	<span class="enscript-keyword">if</span> (oldpg != PGRP_NULL)
+		pg_rele(oldpg);
+	tty_lock(tp);
+	tp-&gt;t_state = 0;
+	selthreadclear(&amp;tp-&gt;t_wsel);
+	selthreadclear(&amp;tp-&gt;t_rsel);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">FLUSHQ</span>(q) {							\
+	<span class="enscript-keyword">if</span> ((q)-&gt;c_cc)							\
+		ndflush(q, (q)-&gt;c_cc);					\
+}
+
+<span class="enscript-comment">/* Is 'c' a line delimiter (&quot;break&quot; character)? */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">TTBREAKC</span>(c, lflag)							\
+	((c) == <span class="enscript-string">'\n'</span> || (((c) == cc[VEOF] ||				\
+	  (c) == cc[VEOL] || ((c) == cc[VEOL2] &amp;&amp; lflag &amp; IEXTEN)) &amp;&amp;	\
+	 (c) != _POSIX_VDISABLE))
+
+<span class="enscript-comment">/*
+ * ttyinput (LDISC)
+ *
+ * Process input of a single character received on a tty.
+ *
+ * Parameters:	c			The character received
+ *		tp			The tty on which it was received
+ *
+ * Returns:	.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttyinput</span>(<span class="enscript-type">int</span> c, <span class="enscript-type">struct</span> tty *tp)
+{
+	tcflag_t iflag, lflag;
+	cc_t *cc;
+	<span class="enscript-type">int</span> i, err;
+	<span class="enscript-type">int</span> retval = 0;			<span class="enscript-comment">/* default return value */</span>
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+        
+	<span class="enscript-comment">/*
+	 * If input is pending take it first.
+	 */</span>
+	lflag = tp-&gt;t_lflag;
+	<span class="enscript-keyword">if</span> (ISSET(lflag, PENDIN))
+		ttypend(tp);
+	<span class="enscript-comment">/*
+	 * Gather stats.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ISSET(lflag, ICANON)) {
+		++tk_cancc;
+		++tp-&gt;t_cancc;
+	} <span class="enscript-keyword">else</span> {
+		++tk_rawcc;
+		++tp-&gt;t_rawcc;
+	}
+	++tk_nin;
+
+	<span class="enscript-comment">/*
+	 * Block further input iff:
+	 * current input &gt; threshold AND input is available to user program
+	 * AND input flow control is enabled and not yet invoked.
+	 * The 3 is slop for PARMRK.
+	 */</span>
+	iflag = tp-&gt;t_iflag;
+	<span class="enscript-keyword">if</span> (tp-&gt;t_rawq.c_cc + tp-&gt;t_canq.c_cc &gt; I_HIGH_WATER - 3 &amp;&amp;
+	    (!ISSET(lflag, ICANON) || tp-&gt;t_canq.c_cc != 0) &amp;&amp;
+	    (ISSET(tp-&gt;t_cflag, CRTS_IFLOW) || ISSET(iflag, IXOFF)) &amp;&amp;
+	    !ISSET(tp-&gt;t_state, TS_TBLOCK))
+		ttyblock(tp);
+
+	<span class="enscript-comment">/* Handle exceptional conditions (break, parity, framing). */</span>
+	cc = tp-&gt;t_cc;
+	err = (ISSET(c, TTY_ERRORMASK));
+	<span class="enscript-keyword">if</span> (err) {
+		CLR(c, TTY_ERRORMASK);
+		<span class="enscript-keyword">if</span> (ISSET(err, TTY_BI)) {
+			<span class="enscript-keyword">if</span> (ISSET(iflag, IGNBRK)) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                        }
+			<span class="enscript-keyword">if</span> (ISSET(iflag, BRKINT)) {
+				ttyflush(tp, FREAD | FWRITE);
+				<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+				tty_unlock(tp);
+				tty_pgsignal(tp, SIGINT, 1);
+				tty_lock(tp);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+			}
+			<span class="enscript-keyword">if</span> (ISSET(iflag, PARMRK))
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">parmrk</span>;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((ISSET(err, TTY_PE) &amp;&amp; ISSET(iflag, INPCK))
+			|| ISSET(err, TTY_FE)) {
+			<span class="enscript-keyword">if</span> (ISSET(iflag, IGNPAR)) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ISSET(iflag, PARMRK)) {
+<span class="enscript-reference">parmrk</span>:
+				<span class="enscript-keyword">if</span> (tp-&gt;t_rawq.c_cc + tp-&gt;t_canq.c_cc &gt;
+				    MAX_INPUT - 3)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">input_overflow</span>;
+				(<span class="enscript-type">void</span>)putc(0377 | TTY_QUOTE, &amp;tp-&gt;t_rawq);
+				(<span class="enscript-type">void</span>)putc(0 | TTY_QUOTE, &amp;tp-&gt;t_rawq);
+				(<span class="enscript-type">void</span>)putc(c | TTY_QUOTE, &amp;tp-&gt;t_rawq);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+			} <span class="enscript-keyword">else</span>
+				c = 0;
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_state, TS_TYPEN) &amp;&amp; ISSET(iflag, ISTRIP))
+		CLR(c, 0x80);
+	<span class="enscript-keyword">if</span> (!ISSET(lflag, EXTPROC)) {
+		<span class="enscript-comment">/*
+		 * Check for literal nexting very first
+		 */</span>
+		<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_LNCH)) {
+			SET(c, TTY_QUOTE);
+			CLR(tp-&gt;t_state, TS_LNCH);
+		}
+		<span class="enscript-comment">/*
+		 * Scan for special characters.  This code
+		 * is really just a big case statement with
+		 * non-constant cases.  The bottom of the
+		 * case statement is labeled ``endcase'', so goto
+		 * it after a case match, or similar.
+		 */</span>
+
+		<span class="enscript-comment">/*
+		 * Control chars which aren't controlled
+		 * by ICANON, ISIG, or IXON.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ISSET(lflag, IEXTEN)) {
+			<span class="enscript-keyword">if</span> (CCEQ(cc[VLNEXT], c)) {
+				<span class="enscript-keyword">if</span> (ISSET(lflag, ECHO)) {
+					<span class="enscript-keyword">if</span> (ISSET(lflag, ECHOE)) {
+						(<span class="enscript-type">void</span>)ttyoutput(<span class="enscript-string">'^'</span>, tp);
+						(<span class="enscript-type">void</span>)ttyoutput(<span class="enscript-string">'\b'</span>, tp);
+					} <span class="enscript-keyword">else</span>
+						ttyecho(c, tp);
+				}
+				SET(tp-&gt;t_state, TS_LNCH);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+			}
+			<span class="enscript-keyword">if</span> (CCEQ(cc[VDISCARD], c)) {
+				<span class="enscript-keyword">if</span> (ISSET(lflag, FLUSHO))
+					CLR(tp-&gt;t_lflag, FLUSHO);
+				<span class="enscript-keyword">else</span> {
+					ttyflush(tp, FWRITE);
+					ttyecho(c, tp);
+					<span class="enscript-keyword">if</span> (tp-&gt;t_rawq.c_cc + tp-&gt;t_canq.c_cc)
+						ttyretype(tp);
+					SET(tp-&gt;t_lflag, FLUSHO);
+				}
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">startoutput</span>;
+			}
+		}
+		<span class="enscript-comment">/*
+		 * Signals.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ISSET(lflag, ISIG)) {
+			<span class="enscript-keyword">if</span> (CCEQ(cc[VINTR], c) || CCEQ(cc[VQUIT], c)) {
+				<span class="enscript-keyword">if</span> (!ISSET(lflag, NOFLSH))
+					ttyflush(tp, FREAD | FWRITE);
+				ttyecho(c, tp);
+				<span class="enscript-comment">/*
+				 * SAFE: All callers drop the lock on return;
+				 * SAFE: if we lose a threaded race on change
+				 * SAFE: of the interrupt character, we could
+				 * SAFE: have lost that race anyway due to the
+				 * SAFE: scheduler executing threads in
+				 * SAFE: priority order rather than &quot;last
+				 * SAFE: active thread&quot; order (FEATURE).
+				 */</span>
+				tty_unlock(tp);
+				tty_pgsignal(tp,
+				    CCEQ(cc[VINTR], c) ? SIGINT : SIGQUIT, 1);
+				tty_lock(tp);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+			}
+			<span class="enscript-keyword">if</span> (CCEQ(cc[VSUSP], c)) {
+				<span class="enscript-keyword">if</span> (!ISSET(lflag, NOFLSH))
+					ttyflush(tp, FREAD);
+				ttyecho(c, tp);
+				<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+				tty_unlock(tp);
+				tty_pgsignal(tp, SIGTSTP, 1);
+				tty_lock(tp);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+			}
+		}
+		<span class="enscript-comment">/*
+		 * Handle start/stop characters.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ISSET(iflag, IXON)) {
+			<span class="enscript-keyword">if</span> (CCEQ(cc[VSTOP], c)) {
+				<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_state, TS_TTSTOP)) {
+					SET(tp-&gt;t_state, TS_TTSTOP);
+                                        ttystop(tp, 0);
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+				}
+				<span class="enscript-keyword">if</span> (!CCEQ(cc[VSTART], c)) {
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                                }
+				<span class="enscript-comment">/*
+				 * if VSTART == VSTOP then toggle
+				 */</span>
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+			}
+			<span class="enscript-keyword">if</span> (CCEQ(cc[VSTART], c))
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">restartoutput</span>;
+		}
+		<span class="enscript-comment">/*
+		 * IGNCR, ICRNL, &amp; INLCR
+		 */</span>
+		<span class="enscript-keyword">if</span> (c == <span class="enscript-string">'\r'</span>) {
+			<span class="enscript-keyword">if</span> (ISSET(iflag, IGNCR)) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                        }
+			<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ISSET(iflag, ICRNL))
+				c = <span class="enscript-string">'\n'</span>;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (c == <span class="enscript-string">'\n'</span> &amp;&amp; ISSET(iflag, INLCR))
+			c = <span class="enscript-string">'\r'</span>;
+	}
+	<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_lflag, EXTPROC) &amp;&amp; ISSET(lflag, ICANON)) {
+		<span class="enscript-comment">/*
+		 * From here on down canonical mode character
+		 * processing takes place.
+		 */</span>
+		<span class="enscript-comment">/*
+		 * erase (^H / ^?)
+		 */</span>
+		<span class="enscript-keyword">if</span> (CCEQ(cc[VERASE], c)) {
+			<span class="enscript-keyword">if</span> (tp-&gt;t_rawq.c_cc) {
+				<span class="enscript-keyword">if</span> (ISSET(iflag, IUTF8)) {
+					<span class="enscript-keyword">do</span> {
+						ttyrub((c = unputc(&amp;tp-&gt;t_rawq)), tp);
+					} <span class="enscript-keyword">while</span>(tp-&gt;t_rawq.c_cc &amp;&amp; CCONT(c));
+				} <span class="enscript-keyword">else</span> {
+					ttyrub(unputc(&amp;tp-&gt;t_rawq), tp);
+				}
+			}
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+		}
+		<span class="enscript-comment">/*
+		 * kill (^U)
+		 */</span>
+		<span class="enscript-keyword">if</span> (CCEQ(cc[VKILL], c)) {
+			<span class="enscript-keyword">if</span> (ISSET(lflag, ECHOKE) &amp;&amp;
+			    tp-&gt;t_rawq.c_cc == tp-&gt;t_rocount &amp;&amp;
+			    !ISSET(lflag, ECHOPRT))
+				<span class="enscript-keyword">while</span> (tp-&gt;t_rawq.c_cc)
+					ttyrub(unputc(&amp;tp-&gt;t_rawq), tp);
+			<span class="enscript-keyword">else</span> {
+				ttyecho(c, tp);
+				<span class="enscript-keyword">if</span> (ISSET(lflag, ECHOK) ||
+				    ISSET(lflag, ECHOKE))
+					ttyecho(<span class="enscript-string">'\n'</span>, tp);
+				FLUSHQ(&amp;tp-&gt;t_rawq);
+				tp-&gt;t_rocount = 0;
+			}
+			CLR(tp-&gt;t_state, TS_LOCAL);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+		}
+		<span class="enscript-comment">/*
+		 * word erase (^W)
+		 */</span>
+		<span class="enscript-keyword">if</span> (CCEQ(cc[VWERASE], c) &amp;&amp; ISSET(lflag, IEXTEN)) {
+			<span class="enscript-type">int</span> ctype;
+
+			<span class="enscript-comment">/*
+			 * erase whitespace
+			 */</span>
+			<span class="enscript-keyword">while</span> ((c = unputc(&amp;tp-&gt;t_rawq)) == <span class="enscript-string">' '</span> || c == <span class="enscript-string">'\t'</span>)
+				ttyrub(c, tp);
+			<span class="enscript-keyword">if</span> (c == -1)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+			<span class="enscript-comment">/*
+			 * erase last char of word and remember the
+			 * next chars type (for ALTWERASE)
+			 */</span>
+			ttyrub(c, tp);
+			c = unputc(&amp;tp-&gt;t_rawq);
+			<span class="enscript-keyword">if</span> (c == -1)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+			<span class="enscript-keyword">if</span> (c == <span class="enscript-string">' '</span> || c == <span class="enscript-string">'\t'</span>) {
+				(<span class="enscript-type">void</span>)putc(c, &amp;tp-&gt;t_rawq);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+			}
+			ctype = ISALPHA(c);
+			<span class="enscript-comment">/*
+			 * erase rest of word
+			 */</span>
+			<span class="enscript-keyword">do</span> {
+				ttyrub(c, tp);
+				c = unputc(&amp;tp-&gt;t_rawq);
+				<span class="enscript-keyword">if</span> (c == -1)
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+			} <span class="enscript-keyword">while</span> (c != <span class="enscript-string">' '</span> &amp;&amp; c != <span class="enscript-string">'\t'</span> &amp;&amp;
+			    (!ISSET(lflag, ALTWERASE) || ISALPHA(c) == ctype));
+			(<span class="enscript-type">void</span>)putc(c, &amp;tp-&gt;t_rawq);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+		}
+		<span class="enscript-comment">/*
+		 * reprint line (^R)
+		 */</span>
+		<span class="enscript-keyword">if</span> (CCEQ(cc[VREPRINT], c) &amp;&amp; ISSET(lflag, IEXTEN)) {
+			ttyretype(tp);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+		}
+		<span class="enscript-comment">/*
+		 * ^T - kernel info and generate SIGINFO
+		 */</span>
+		<span class="enscript-keyword">if</span> (CCEQ(cc[VSTATUS], c) &amp;&amp; ISSET(lflag, IEXTEN)) {
+			<span class="enscript-keyword">if</span> (ISSET(lflag, ISIG)) {
+				<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+				tty_unlock(tp);
+				tty_pgsignal(tp, SIGINFO, 1);
+				tty_lock(tp);
+			}
+			<span class="enscript-keyword">if</span> (!ISSET(lflag, NOKERNINFO))
+				ttyinfo_locked(tp);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+		}
+	}
+	<span class="enscript-comment">/*
+	 * Check for input buffer overflow
+	 */</span>
+	<span class="enscript-keyword">if</span> (tp-&gt;t_rawq.c_cc + tp-&gt;t_canq.c_cc &gt;= MAX_INPUT) {
+<span class="enscript-reference">input_overflow</span>:
+		<span class="enscript-keyword">if</span> (ISSET(iflag, IMAXBEL)) {
+			<span class="enscript-keyword">if</span> (tp-&gt;t_outq.c_cc &lt; tp-&gt;t_hiwat)
+				(<span class="enscript-type">void</span>)ttyoutput(CTRL(<span class="enscript-string">'g'</span>), tp);
+		}
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (   c == 0377 &amp;&amp; ISSET(iflag, PARMRK) &amp;&amp; !ISSET(iflag, ISTRIP)
+	     &amp;&amp; ISSET(iflag, IGNBRK|IGNPAR) != (IGNBRK|IGNPAR))
+		(<span class="enscript-type">void</span>)putc(0377 | TTY_QUOTE, &amp;tp-&gt;t_rawq);
+
+	<span class="enscript-comment">/*
+	 * Put data char in q for user and
+	 * wakeup on seeing a line delimiter.
+	 */</span>
+	<span class="enscript-keyword">if</span> (putc(c, &amp;tp-&gt;t_rawq) &gt;= 0) {
+		<span class="enscript-keyword">if</span> (!ISSET(lflag, ICANON)) {
+			ttwakeup(tp);
+			ttyecho(c, tp);
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">endcase</span>;
+		}
+		<span class="enscript-keyword">if</span> (TTBREAKC(c, lflag)) {
+			tp-&gt;t_rocount = 0;
+			catq(&amp;tp-&gt;t_rawq, &amp;tp-&gt;t_canq);
+			ttwakeup(tp);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (tp-&gt;t_rocount++ == 0)
+			tp-&gt;t_rocol = tp-&gt;t_column;
+		<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_ERASE)) {
+			<span class="enscript-comment">/*
+			 * end of prterase \.../
+			 */</span>
+			CLR(tp-&gt;t_state, TS_ERASE);
+			(<span class="enscript-type">void</span>)ttyoutput(<span class="enscript-string">'/'</span>, tp);
+		}
+		i = tp-&gt;t_column;
+		ttyecho(c, tp);
+		<span class="enscript-keyword">if</span> (CCEQ(cc[VEOF], c) &amp;&amp; ISSET(lflag, ECHO)) {
+			<span class="enscript-comment">/*
+			 * Place the cursor over the '^' of the ^D.
+			 */</span>
+			i = min(2, tp-&gt;t_column - i);
+			<span class="enscript-keyword">while</span> (i &gt; 0) {
+				(<span class="enscript-type">void</span>)ttyoutput(<span class="enscript-string">'\b'</span>, tp);
+				i--;
+			}
+		}
+	}
+
+<span class="enscript-reference">endcase</span>:
+	<span class="enscript-comment">/*
+	 * IXANY means allow any character to restart output.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_TTSTOP) &amp;&amp;
+	    !ISSET(iflag, IXANY) &amp;&amp; cc[VSTART] != cc[VSTOP]) {
+	    	<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+        }
+
+<span class="enscript-reference">restartoutput</span>:
+	CLR(tp-&gt;t_lflag, FLUSHO);
+	CLR(tp-&gt;t_state, TS_TTSTOP);
+
+<span class="enscript-reference">startoutput</span>:
+	<span class="enscript-comment">/* Start the output */</span>
+	retval = ttstart(tp);
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> (retval);
+}
+
+
+<span class="enscript-comment">/*
+ * ttyoutput
+ *
+ * Output a single character on a tty, doing output processing
+ * as needed (expanding tabs, newline processing, etc.).
+ *
+ * Parameters:	c			The character to output
+ *		tp			The tty on which to output on the tty
+ *
+ * Returns:	&lt; 0			Success
+ *		&gt;= 0			Character to resend (failure)
+ *
+ * Locks:	Assumes tp is locked on entry, remains locked on exit
+ *
+ * Notes:	Must be recursive.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ttyoutput</span>(<span class="enscript-type">int</span> c, <span class="enscript-type">struct</span> tty *tp)
+{
+	tcflag_t oflag;
+	<span class="enscript-type">int</span> col;
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	oflag = tp-&gt;t_oflag;
+	<span class="enscript-keyword">if</span> (!ISSET(oflag, OPOST)) {
+		<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_lflag, FLUSHO))
+			<span class="enscript-keyword">return</span> (-1);
+		<span class="enscript-keyword">if</span> (putc(c, &amp;tp-&gt;t_outq))
+			<span class="enscript-keyword">return</span> (c);
+		tk_nout++;
+		tp-&gt;t_outcc++;
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	<span class="enscript-comment">/*
+	 * Do tab expansion if OXTABS is set.  Special case if we external
+	 * processing, we don't do the tab expansion because we'll probably
+	 * get it wrong.  If tab expansion needs to be done, let it happen
+	 * externally.
+	 */</span>
+	CLR(c, ~TTY_CHARMASK);
+	<span class="enscript-keyword">if</span> (c == <span class="enscript-string">'\t'</span> &amp;&amp;
+	    ISSET(oflag, OXTABS) &amp;&amp; !ISSET(tp-&gt;t_lflag, EXTPROC)) {
+		col = c = 8 - (tp-&gt;t_column &amp; 7);
+		<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_lflag, FLUSHO)) {
+			c -= b_to_q((<span class="enscript-type">const</span> u_char *)<span class="enscript-string">&quot;        &quot;</span>, c, &amp;tp-&gt;t_outq);
+			tk_nout += c;
+			tp-&gt;t_outcc += c;
+		}
+		tp-&gt;t_column += c;
+		<span class="enscript-keyword">return</span> (c == col ? -1 : <span class="enscript-string">'\t'</span>);
+	}
+	<span class="enscript-keyword">if</span> (c == CEOT &amp;&amp; ISSET(oflag, ONOEOT))
+		<span class="enscript-keyword">return</span> (-1);
+
+	<span class="enscript-comment">/*
+	 * Newline translation: if ONLCR is set,
+	 * translate newline into &quot;\r\n&quot;.
+	 */</span>
+	<span class="enscript-keyword">if</span> (c == <span class="enscript-string">'\n'</span> &amp;&amp; ISSET(tp-&gt;t_oflag, ONLCR)) {
+		tk_nout++;
+		tp-&gt;t_outcc++;
+		<span class="enscript-keyword">if</span> (putc(<span class="enscript-string">'\r'</span>, &amp;tp-&gt;t_outq))
+			<span class="enscript-keyword">return</span> (c);
+	}
+        <span class="enscript-comment">/* If OCRNL is set, translate &quot;\r&quot; into &quot;\n&quot;. */</span>
+        <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (c == <span class="enscript-string">'\r'</span> &amp;&amp; ISSET(tp-&gt;t_oflag, OCRNL))
+                c = <span class="enscript-string">'\n'</span>;
+        <span class="enscript-comment">/* If ONOCR is set, don't transmit CRs when on column 0. */</span>
+        <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (c == <span class="enscript-string">'\r'</span> &amp;&amp; ISSET(tp-&gt;t_oflag, ONOCR) &amp;&amp; tp-&gt;t_column == 0)
+                <span class="enscript-keyword">return</span> (-1);
+	tk_nout++;
+	tp-&gt;t_outcc++;
+	<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_lflag, FLUSHO) &amp;&amp; putc(c, &amp;tp-&gt;t_outq))
+		<span class="enscript-keyword">return</span> (c);
+
+	col = tp-&gt;t_column;
+	<span class="enscript-keyword">switch</span> (CCLASS(c)) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BACKSPACE</span>:
+		<span class="enscript-keyword">if</span> (col &gt; 0)
+			--col;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">CONTROL</span>:
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">NEWLINE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">RETURN</span>:
+		col = 0;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ORDINARY</span>:
+		++col;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TAB</span>:
+		col = (col + 8) &amp; ~7;
+		<span class="enscript-keyword">break</span>;
+	}
+	tp-&gt;t_column = col;
+	<span class="enscript-keyword">return</span> (-1);
+}
+
+<span class="enscript-comment">/*
+ * Sets the tty state to not allow any more changes of foreground process
+ * group. This is required to be done so that a subsequent revoke on a vnode
+ * is able to always successfully complete.
+ *
+ * Locks :   Assumes tty_lock held on entry
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ttysetpgrphup</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_OWNED(tp);     <span class="enscript-comment">/* debug assert */</span>
+	SET(tp-&gt;t_state, TS_PGRPHUP);
+}
+
+<span class="enscript-comment">/*
+ * Locks : Assumes tty lock held on entry
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ttyclrpgrphup</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_OWNED(tp);     <span class="enscript-comment">/* debug assert */</span>
+	CLR(tp-&gt;t_state, TS_PGRPHUP);
+}
+
+<span class="enscript-comment">/*
+ * ttioctl
+ *
+ * Identical to ttioctl_locked, only the lock is not held
+ *
+ * Parameters:	&lt;See ttioctl_locked()&gt;
+ *
+ * Returns:	&lt;See ttioctl_locked()&gt;
+ *
+ * Locks:	This function assumes the tty_lock() is not held on entry;
+ *		it takes the lock, and releases it before returning.
+ *
+ * Notes:	This is supported to ensure the line discipline interfaces
+ *		all have the same locking semantics.
+ *
+ *		This function is called from 
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttioctl</span>(<span class="enscript-type">struct</span> tty *tp, u_long cmd, caddr_t data, <span class="enscript-type">int</span> flag, proc_t p)
+{
+	<span class="enscript-type">int</span>	retval;
+
+	tty_lock(tp);
+	retval = ttioctl_locked(tp, cmd, data, flag, p);
+	tty_unlock(tp);
+
+	<span class="enscript-keyword">return</span> (retval);
+}
+
+
+<span class="enscript-comment">/*
+ * ttioctl_locked
+ *
+ * Ioctls for all tty devices.
+ *
+ * Parameters:	tp			Tty on which ioctl() is being called
+ *		cmd			ioctl() command parameter
+ *		data			ioctl() data argument (if any)
+ *		flag			fileglob open modes from fcntl.h;
+ *					if called internally, this is usually
+ *					set to 0, rather than something useful
+ *		p			Process context for the call; if the
+ *					call is proxied to a worker thread,
+ *					this will not be the current process!!!
+ *
+ * Returns:	0			Success
+ *		EIO			I/O error (no process group, job
+ *					control, etc.)
+ *		EINTR			Interrupted by signal
+ *		EBUSY			Attempt to become the console while
+ *					the console is busy
+ *		ENOTTY			TIOCGPGRP on a non-controlling tty
+ *		EINVAL			Invalid baud rate
+ *		ENXIO			TIOCSETD of invalid line discipline
+ *		EPERM			TIOCSTI, not root, not open for read
+ *		EACCES			TIOCSTI, not root, not your controlling
+ *					tty
+ *		EPERM			TIOCSCTTY failed
+ *		ENOTTY/EINVAL/EPERM	TIOCSPGRP failed
+ *		EPERM			TIOCSDRAINWAIT as non-root user
+ *	suser:EPERM			Console control denied
+ *	ttywait:EIO			t_timeout too small/expired
+ *	ttywait:ERESTART		Upper layer must redrive the call;
+ *					this is usually done by the Libc
+ *					stub in user space
+ *	ttywait:EINTR			Interrupted (usually a signal)
+ *	ttcompat:EINVAL
+ *	ttcompat:ENOTTY
+ *	ttcompat:EIOCTL
+ *	ttcompat:ENOTTY			TIOCGSID, if no session or session
+ *					leader
+ *	ttcompat:ENOTTY			All unrecognized ioctls
+ *	*tp-&gt;t_param:?			TIOCSETA* underlying function
+ *	*linesw[t].l_open:?		TIOCSETD line discipline open failure
+ *
+ *
+ * Locks:	This function assumes that the tty_lock() is held for the
+ *		tp at the time of the call.  The lock remains held on return.
+ *
+ * Notes:	This function is called after line-discipline specific ioctl
+ *		has been called to do discipline-specific functions and/or
+ *		reject any of these ioctl() commands.
+ *
+ *		This function calls ttcompat(), which can re-call ttioctl()
+ *		to a depth of one (FORTRAN style mutual recursion); at some
+ *		point, we should just in-line ttcompat() here.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttioctl_locked</span>(<span class="enscript-type">struct</span> tty *tp, u_long cmd, caddr_t data, <span class="enscript-type">int</span> flag, proc_t p)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">int</span> bogusData = 1;
+	<span class="enscript-type">struct</span> uthread *ut;
+	<span class="enscript-type">struct</span> pgrp *pg, *oldpg;
+	<span class="enscript-type">struct</span> session *sessp, *oldsessp;
+	<span class="enscript-type">struct</span> tty *oldtp;
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	ut = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(current_thread());
+	<span class="enscript-comment">/* If the ioctl involves modification, signal if in the background. */</span>
+	<span class="enscript-keyword">switch</span> (cmd) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCIXON</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCIXOFF</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCDRAIN</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCFLUSH</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSTOP</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSTART</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSETA_32</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSETA_64</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSETD</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSETAF_32</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSETAF_64</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSETAW_32</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSETAW_64</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSPGRP</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSTAT</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSTI</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSWINSZ</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCLBIC</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCLBIS</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCLSET</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSETC</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">OTIOCSETD</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSETN</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSETP</span>:
+	<span class="enscript-keyword">case</span>  <span class="enscript-reference">TIOCSLTC</span>:
+		<span class="enscript-keyword">while</span> (isbackground(p, tp) &amp;&amp;
+		    (p-&gt;p_lflag &amp; P_LPPWAIT) == 0 &amp;&amp;
+		    (p-&gt;p_sigignore &amp; sigmask(SIGTTOU)) == 0 &amp;&amp;
+		    (ut-&gt;uu_sigmask &amp; sigmask(SIGTTOU)) == 0) {
+			pg = proc_pgrp(p);
+			<span class="enscript-keyword">if</span> (pg == PGRP_NULL) {
+				error = EIO;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+			tty_unlock(tp);
+			<span class="enscript-keyword">if</span> (pg-&gt;pg_jobc == 0) {
+				pg_rele(pg);
+				tty_lock(tp);
+				error = EIO;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			pgsignal(pg, SIGTTOU, 1);
+			pg_rele(pg);
+			tty_lock(tp);
+
+
+			<span class="enscript-comment">/*
+			 * We signalled ourself, so we need to act as if we
+			 * have been &quot;interrupted&quot; from a &quot;sleep&quot; to act on
+			 * the signal.  If it's a signal that stops the
+			 * process, that's handled in the signal sending code.
+			 */</span>
+			error = EINTR;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">switch</span> (cmd) {			<span class="enscript-comment">/* Process the ioctl. */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIOASYNC</span>:			<span class="enscript-comment">/* set/clear async i/o */</span>
+		<span class="enscript-keyword">if</span> (*(<span class="enscript-type">int</span> *)data)
+			SET(tp-&gt;t_state, TS_ASYNC);
+		<span class="enscript-keyword">else</span>
+			CLR(tp-&gt;t_state, TS_ASYNC);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIONBIO</span>:			<span class="enscript-comment">/* set/clear non-blocking i/o */</span>
+		<span class="enscript-keyword">break</span>;			<span class="enscript-comment">/* XXX: delete. */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FIONREAD</span>:			<span class="enscript-comment">/* get # bytes to read */</span>
+		*(<span class="enscript-type">int</span> *)data = ttnread(tp);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCEXCL</span>:			<span class="enscript-comment">/* set exclusive use of tty */</span>
+		SET(tp-&gt;t_state, TS_XCLUDE);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCFLUSH</span>: {		<span class="enscript-comment">/* flush buffers */</span>
+		<span class="enscript-type">int</span> flags = *(<span class="enscript-type">int</span> *)data;
+
+		<span class="enscript-keyword">if</span> (flags == 0)
+			flags = FREAD | FWRITE;
+		<span class="enscript-keyword">else</span>
+			flags &amp;= FREAD | FWRITE;
+		ttyflush(tp, flags);
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSCONS</span>: {
+		<span class="enscript-comment">/* Set current console device to this line */</span>
+		data = (caddr_t) &amp;bogusData;
+
+		<span class="enscript-comment">/* No break - Fall through to BSD code */</span>
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCCONS</span>: {			<span class="enscript-comment">/* become virtual console */</span>
+		<span class="enscript-keyword">if</span> (*(<span class="enscript-type">int</span> *)data) {
+			<span class="enscript-keyword">if</span> (constty &amp;&amp; constty != tp &amp;&amp;
+			    ISSET(constty-&gt;t_state, TS_CONNECTED)) {
+				error = EBUSY;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			<span class="enscript-keyword">if</span> ( (error = suser(kauth_cred_get(), &amp;p-&gt;p_acflag)) ) 
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			constty = tp;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (tp == constty) {
+			constty = NULL;
+		}
+		<span class="enscript-keyword">if</span> (constty) {
+			(*cdevsw[major(constty-&gt;t_dev)].d_ioctl)
+				(constty-&gt;t_dev, KMIOCDISABLCONS, NULL, 0, p);
+		} <span class="enscript-keyword">else</span> {
+			(*cdevsw[major(tp-&gt;t_dev)].d_ioctl)
+				(tp-&gt;t_dev, KMIOCDISABLCONS, NULL, 0, p);
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCDRAIN</span>:			<span class="enscript-comment">/* wait till output drained */</span>
+		error = ttywait(tp);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCGETA_32</span>:		<span class="enscript-comment">/* get termios struct */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__LP64__</span>
+		termios64to32((<span class="enscript-type">struct</span> user_termios *)&amp;tp-&gt;t_termios, (<span class="enscript-type">struct</span> termios32 *)data);
+#<span class="enscript-reference">else</span>
+		bcopy(&amp;tp-&gt;t_termios, data, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> termios));
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCGETA_64</span>:		<span class="enscript-comment">/* get termios struct */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__LP64__</span>
+		bcopy(&amp;tp-&gt;t_termios, data, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> termios));
+#<span class="enscript-reference">else</span>
+		termios32to64((<span class="enscript-type">struct</span> termios32 *)&amp;tp-&gt;t_termios, (<span class="enscript-type">struct</span> user_termios *)data);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCGETD</span>:			<span class="enscript-comment">/* get line discipline */</span>
+		*(<span class="enscript-type">int</span> *)data = tp-&gt;t_line;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCGWINSZ</span>:		<span class="enscript-comment">/* get window size */</span>
+		*(<span class="enscript-type">struct</span> winsize *)data = tp-&gt;t_winsize;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCGPGRP</span>:			<span class="enscript-comment">/* get pgrp of tty */</span>
+		<span class="enscript-keyword">if</span> (!isctty(p, tp)) {
+			error = ENOTTY;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		*(<span class="enscript-type">int</span> *)data = tp-&gt;t_pgrp ? tp-&gt;t_pgrp-&gt;pg_id : NO_PID;
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">TIOCHPCL</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCHPCL</span>:			<span class="enscript-comment">/* hang up on last close */</span>
+		SET(tp-&gt;t_cflag, HUPCL);
+		<span class="enscript-keyword">break</span>;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCNXCL</span>:			<span class="enscript-comment">/* reset exclusive use of tty */</span>
+		CLR(tp-&gt;t_state, TS_XCLUDE);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCOUTQ</span>:			<span class="enscript-comment">/* output queue size */</span>
+		*(<span class="enscript-type">int</span> *)data = tp-&gt;t_outq.c_cc;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETA_32</span>:			<span class="enscript-comment">/* set termios struct */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETA_64</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETAW_32</span>:			<span class="enscript-comment">/* drain output, set */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETAW_64</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETAF_32</span>:		<span class="enscript-comment">/* drn out, fls in, set */</span>
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETAF_64</span>:
+	{		<span class="enscript-comment">/* drn out, fls in, set */</span>
+		<span class="enscript-type">struct</span> termios *t = (<span class="enscript-type">struct</span> termios *)data;
+		<span class="enscript-type">struct</span> termios lcl_termios;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__LP64__</span>
+		<span class="enscript-keyword">if</span> (cmd==TIOCSETA_32 || cmd==TIOCSETAW_32 || cmd==TIOCSETAF_32) {
+			termios32to64((<span class="enscript-type">struct</span> termios32 *)data, (<span class="enscript-type">struct</span> user_termios *)&amp;lcl_termios);
+			t = &amp;lcl_termios;
+		}
+#<span class="enscript-reference">else</span>
+		<span class="enscript-keyword">if</span> (cmd==TIOCSETA_64 || cmd==TIOCSETAW_64 || cmd==TIOCSETAF_64) {
+			termios64to32((<span class="enscript-type">struct</span> user_termios *)data, (<span class="enscript-type">struct</span> termios32 *)&amp;lcl_termios);
+			t = &amp;lcl_termios;
+		}
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">if</span> 0
+	<span class="enscript-comment">/* XXX bogus test; always false */</span>
+		<span class="enscript-keyword">if</span> (t-&gt;c_ispeed &lt; 0 || t-&gt;c_ospeed &lt; 0) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* 0 - leave in; may end up being a conformance issue */</span>
+		<span class="enscript-keyword">if</span> (t-&gt;c_ispeed == 0)
+			t-&gt;c_ispeed = t-&gt;c_ospeed;
+		<span class="enscript-keyword">if</span> (cmd == TIOCSETAW_32 || cmd == TIOCSETAF_32 ||
+		    cmd == TIOCSETAW_64 || cmd == TIOCSETAF_64) {
+			error = ttywait(tp);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			<span class="enscript-keyword">if</span> (cmd == TIOCSETAF_32 || cmd == TIOCSETAF_64)
+				ttyflush(tp, FREAD);
+		}
+		<span class="enscript-keyword">if</span> (!ISSET(t-&gt;c_cflag, CIGNORE)) {
+			<span class="enscript-comment">/*
+			 * Set device hardware.
+			 */</span>
+			<span class="enscript-keyword">if</span> (tp-&gt;t_param &amp;&amp; (error = (*tp-&gt;t_param)(tp, t))) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			<span class="enscript-keyword">if</span> (ISSET(t-&gt;c_cflag, CLOCAL) &amp;&amp;
+			    !ISSET(tp-&gt;t_cflag, CLOCAL)) {
+				<span class="enscript-comment">/*
+				 * XXX disconnections would be too hard to
+				 * get rid of without this kludge.  The only
+				 * way to get rid of controlling terminals
+				 * is to exit from the session leader.
+				 */</span>
+				CLR(tp-&gt;t_state, TS_ZOMBIE);
+
+				wakeup(TSA_CARR_ON(tp));
+				ttwakeup(tp);
+				ttwwakeup(tp);
+			}
+			<span class="enscript-keyword">if</span> ((ISSET(tp-&gt;t_state, TS_CARR_ON) ||
+			     ISSET(t-&gt;c_cflag, CLOCAL)) &amp;&amp;
+			    !ISSET(tp-&gt;t_state, TS_ZOMBIE))
+				SET(tp-&gt;t_state, TS_CONNECTED);
+			<span class="enscript-keyword">else</span>
+				CLR(tp-&gt;t_state, TS_CONNECTED);
+			tp-&gt;t_cflag = t-&gt;c_cflag;
+			tp-&gt;t_ispeed = t-&gt;c_ispeed;
+			tp-&gt;t_ospeed = t-&gt;c_ospeed;
+			ttsetwater(tp);
+		}
+		<span class="enscript-keyword">if</span> (ISSET(t-&gt;c_lflag, ICANON) != ISSET(tp-&gt;t_lflag, ICANON) &amp;&amp;
+		    cmd != TIOCSETAF_32 &amp;&amp; cmd != TIOCSETAF_64) {
+			<span class="enscript-keyword">if</span> (ISSET(t-&gt;c_lflag, ICANON))
+				SET(tp-&gt;t_lflag, PENDIN);
+			<span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/*
+				 * XXX we really shouldn't allow toggling
+				 * ICANON while we're in a non-termios line
+				 * discipline.  Now we have to worry about
+				 * panicing for a null queue.
+				 */</span>
+				<span class="enscript-keyword">if</span> (tp-&gt;t_rawq.c_cs &amp;&amp; tp-&gt;t_canq.c_cs) {
+				    <span class="enscript-type">struct</span> clist tq;
+
+				    catq(&amp;tp-&gt;t_rawq, &amp;tp-&gt;t_canq);
+				    tq = tp-&gt;t_rawq;
+				    tp-&gt;t_rawq = tp-&gt;t_canq;
+				    tp-&gt;t_canq = tq;
+				}
+				CLR(tp-&gt;t_lflag, PENDIN);
+			}
+			ttwakeup(tp);
+		}
+		tp-&gt;t_iflag = t-&gt;c_iflag;
+		tp-&gt;t_oflag = t-&gt;c_oflag;
+		<span class="enscript-comment">/*
+		 * Make the EXTPROC bit read only.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_lflag, EXTPROC))
+			SET(t-&gt;c_lflag, EXTPROC);
+		<span class="enscript-keyword">else</span>
+			CLR(t-&gt;c_lflag, EXTPROC);
+		tp-&gt;t_lflag = t-&gt;c_lflag | ISSET(tp-&gt;t_lflag, PENDIN);
+		<span class="enscript-keyword">if</span> (t-&gt;c_cc[VMIN] != tp-&gt;t_cc[VMIN] ||
+		    t-&gt;c_cc[VTIME] != tp-&gt;t_cc[VTIME])
+			ttwakeup(tp);
+		bcopy(t-&gt;c_cc, tp-&gt;t_cc, <span class="enscript-keyword">sizeof</span>(t-&gt;c_cc));
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSETD</span>: {		<span class="enscript-comment">/* set line discipline */</span>
+		<span class="enscript-type">int</span> t = *(<span class="enscript-type">int</span> *)data;
+		dev_t device = tp-&gt;t_dev;
+
+		<span class="enscript-keyword">if</span> (t &gt;= nlinesw || t &lt; 0) {
+			error = ENXIO;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-comment">/*
+		 * If the new line discipline is not equal to the old one,
+		 * close the old one and open the new one.
+		 */</span>
+		<span class="enscript-keyword">if</span> (t != tp-&gt;t_line) {
+			(*linesw[tp-&gt;t_line].l_close)(tp, flag);
+			error = (*linesw[t].l_open)(device, tp);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-comment">/* This is racy; it's possible to lose both */</span>
+				(<span class="enscript-type">void</span>)(*linesw[tp-&gt;t_line].l_open)(device, tp);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+			tp-&gt;t_line = t;
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSTART</span>:			<span class="enscript-comment">/* start output, like ^Q */</span>
+		<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_TTSTOP) ||
+		    ISSET(tp-&gt;t_lflag, FLUSHO)) {
+			CLR(tp-&gt;t_lflag, FLUSHO);
+			CLR(tp-&gt;t_state, TS_TTSTOP);
+			ttstart(tp);
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSTI</span>:			<span class="enscript-comment">/* simulate terminal input */</span>
+		<span class="enscript-keyword">if</span> (suser(kauth_cred_get(), NULL) &amp;&amp; (flag &amp; FREAD) == 0) {
+			error = EPERM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-keyword">if</span> (suser(kauth_cred_get(), NULL) &amp;&amp; !isctty(p, tp)) {
+			error = EACCES;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		(*linesw[tp-&gt;t_line].l_rint)(*(u_char *)data, tp);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSTOP</span>:			<span class="enscript-comment">/* stop output, like ^S */</span>
+		<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_state, TS_TTSTOP)) {
+			SET(tp-&gt;t_state, TS_TTSTOP);
+                        ttystop(tp, 0);
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCIXON</span>:
+		ttyunblock(tp);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCIXOFF</span>:
+		ttyblock(tp);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSCTTY</span>:			<span class="enscript-comment">/* become controlling tty */</span>
+		<span class="enscript-comment">/* Session ctty vnode pointer set in vnode layer. */</span>
+		sessp = proc_session(p);
+		<span class="enscript-keyword">if</span> (sessp == SESSION_NULL) {
+			error = EPERM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * This can only be done by a session leader.
+		 */</span>
+		<span class="enscript-keyword">if</span> (!SESS_LEADER(p, sessp)) {
+			<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+			tty_unlock(tp);
+			session_rele(sessp);
+			tty_lock(tp);
+			error = EPERM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-comment">/*
+		 * If this terminal is already the controlling terminal for the
+		 * session, nothing to do here.
+		 */</span>
+		<span class="enscript-keyword">if</span> (tp-&gt;t_session == sessp) {
+			<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+			tty_unlock(tp);
+			session_rele(sessp);
+			tty_lock(tp);
+			error = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		pg = proc_pgrp(p);
+		<span class="enscript-comment">/*
+		 * Deny if the terminal is already attached to another session or
+		 * the session already has a terminal vnode.
+		 */</span>
+		session_lock(sessp);
+		<span class="enscript-keyword">if</span> (sessp-&gt;s_ttyvp || tp-&gt;t_session) {
+			session_unlock(sessp);
+			<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+			tty_unlock(tp);
+			<span class="enscript-keyword">if</span> (pg != PGRP_NULL) {
+				pg_rele(pg);
+			}
+			session_rele(sessp);
+			tty_lock(tp);
+			error = EPERM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		sessp-&gt;s_ttypgrpid = pg-&gt;pg_id;
+		oldtp = sessp-&gt;s_ttyp;
+		ttyhold(tp);
+		sessp-&gt;s_ttyp = tp;
+		session_unlock(sessp);
+		proc_list_lock();
+		oldsessp = tp-&gt;t_session;
+		oldpg = tp-&gt;t_pgrp;
+		<span class="enscript-keyword">if</span> (oldsessp != SESSION_NULL)
+			oldsessp-&gt;s_ttypgrpid = NO_PID;
+		<span class="enscript-comment">/* do not drop refs on sessp and pg as tp holds them */</span>
+		tp-&gt;t_session = sessp;
+		tp-&gt;t_pgrp = pg;
+		proc_list_unlock();
+		OSBitOrAtomic(P_CONTROLT, &amp;p-&gt;p_flag);
+		<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+		tty_unlock(tp);
+		<span class="enscript-comment">/* drop the reference on prev session and pgrp */</span>
+		<span class="enscript-keyword">if</span> (oldsessp != SESSION_NULL)
+			session_rele(oldsessp);
+		<span class="enscript-keyword">if</span> (oldpg != PGRP_NULL)
+			pg_rele(oldpg);
+		<span class="enscript-keyword">if</span> (NULL != oldtp)
+			ttyfree(oldtp);
+		tty_lock(tp);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSPGRP</span>: {		<span class="enscript-comment">/* set pgrp of tty */</span>
+		<span class="enscript-type">struct</span> pgrp *pgrp = PGRP_NULL;
+
+		sessp = proc_session(p);
+		<span class="enscript-keyword">if</span> (!isctty_sp(p, tp, sessp)) {
+			<span class="enscript-keyword">if</span> (sessp != SESSION_NULL)
+				session_rele(sessp);
+			error = ENOTTY;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((pgrp = pgfind(*(<span class="enscript-type">int</span> *)data)) == PGRP_NULL) {
+			<span class="enscript-keyword">if</span> (sessp != SESSION_NULL)
+				session_rele(sessp);
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		 } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (pgrp-&gt;pg_session != sessp) {
+			<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+			tty_unlock(tp);
+			<span class="enscript-keyword">if</span> (sessp != SESSION_NULL)
+				session_rele(sessp);
+			pg_rele(pgrp);
+			tty_lock(tp);
+			error = EPERM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-comment">/*
+		 * The session leader is going away and is possibly going to revoke
+		 * the terminal, we can't change the process group when that is the
+		 * case.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_PGRPHUP)) {
+			error = EPERM;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		proc_list_lock();
+		oldpg = tp-&gt;t_pgrp;
+		tp-&gt;t_pgrp = pgrp;
+		sessp-&gt;s_ttypgrpid = pgrp-&gt;pg_id;
+		proc_list_unlock();
+		<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+		tty_unlock(tp);
+		<span class="enscript-keyword">if</span> (oldpg != PGRP_NULL)
+			pg_rele(oldpg);
+		<span class="enscript-keyword">if</span> (sessp != SESSION_NULL)
+			session_rele(sessp);
+		tty_lock(tp);
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSTAT</span>:			<span class="enscript-comment">/* simulate control-T */</span>
+		ttyinfo_locked(tp);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSWINSZ</span>:		<span class="enscript-comment">/* set window size */</span>
+		<span class="enscript-keyword">if</span> (bcmp((caddr_t)&amp;tp-&gt;t_winsize, data,
+		    <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> winsize))) {
+			tp-&gt;t_winsize = *(<span class="enscript-type">struct</span> winsize *)data;
+			<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+			tty_unlock(tp);
+			tty_pgsignal(tp, SIGWINCH, 1);
+			tty_lock(tp);
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCSDRAINWAIT</span>:
+		error = suser(kauth_cred_get(), &amp;p-&gt;p_acflag);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		tp-&gt;t_timeout = *(<span class="enscript-type">int</span> *)data * hz;
+		wakeup(TSA_OCOMPLETE(tp));
+		wakeup(TSA_OLOWAT(tp));
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TIOCGDRAINWAIT</span>:
+		*(<span class="enscript-type">int</span> *)data = tp-&gt;t_timeout / hz;
+		<span class="enscript-keyword">break</span>; 
+	<span class="enscript-reference">default</span>:
+		error = ttcompat(tp, cmd, data, flag, p);
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	error = 0;
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span>(error);
+}
+
+
+<span class="enscript-comment">/*
+ * Locks:	Assumes tp is locked on entry, remains locked on exit
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttyselect</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">int</span> rw, <span class="enscript-type">void</span> *wql, proc_t p)
+{
+	<span class="enscript-type">int</span> retval = 0;
+
+	<span class="enscript-keyword">if</span> (tp == NULL)
+		<span class="enscript-keyword">return</span> (ENXIO);
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	<span class="enscript-keyword">switch</span> (rw) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FREAD</span>:
+		<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_ZOMBIE)) {
+			<span class="enscript-keyword">return</span>(1);
+		}
+
+		retval = ttnread(tp);
+		<span class="enscript-keyword">if</span> (retval &gt; 0) {
+			<span class="enscript-keyword">break</span>;
+		}
+
+		selrecord(p, &amp;tp-&gt;t_rsel, wql);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">FWRITE</span>:
+		<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_ZOMBIE)) {
+			<span class="enscript-keyword">return</span>(1);
+		}
+
+		<span class="enscript-keyword">if</span> ((tp-&gt;t_outq.c_cc &lt;= tp-&gt;t_lowat) &amp;&amp;
+				ISSET(tp-&gt;t_state, TS_CONNECTED)) {
+			retval = tp-&gt;t_hiwat - tp-&gt;t_outq.c_cc;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		selrecord(p, &amp;tp-&gt;t_wsel, wql);
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">return</span> retval;
+}
+
+
+<span class="enscript-comment">/*
+ * This is a wrapper for compatibility with the select vector used by
+ * cdevsw.  It relies on a proper xxxdevtotty routine.
+ *
+ * Locks:	Assumes tty_lock() is not held prior to calling.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttselect</span>(dev_t dev, <span class="enscript-type">int</span> rw, <span class="enscript-type">void</span> *wql, proc_t p)
+{
+	<span class="enscript-type">int</span>	rv;
+	<span class="enscript-type">struct</span> tty *tp = cdevsw[major(dev)].d_ttys[minor(dev)];
+
+	tty_lock(tp);
+	rv =  ttyselect(tp, rw, wql, p);
+	tty_unlock(tp);
+
+	<span class="enscript-keyword">return</span> (rv);
+}
+
+
+<span class="enscript-comment">/*
+ * Locks:	Assumes tp is locked on entry, remains locked on exit
+ */</span>
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">ttnread</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	<span class="enscript-type">int</span> nread;
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_lflag, PENDIN))
+		ttypend(tp);
+	nread = tp-&gt;t_canq.c_cc;
+	<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_lflag, ICANON)) {
+		nread += tp-&gt;t_rawq.c_cc;
+		<span class="enscript-keyword">if</span> (nread &lt; tp-&gt;t_cc[VMIN] &amp;&amp; tp-&gt;t_cc[VTIME] == 0)
+			nread = 0;
+	}
+	<span class="enscript-keyword">return</span> (nread);
+}
+
+
+<span class="enscript-comment">/*
+ * ttywait
+ *
+ * Wait for output to drain.
+ *
+ * Parameters:	tp			Tty on which to wait for output to drain
+ *
+ * Returns:	0			Success
+ *		EIO			t_timeout too small/expired
+ *	ttysleep:ERESTART		Upper layer must redrive the call;
+ *					this is usually done by the Libc
+ *					stub in user space
+ *	ttysleep:EINTR			Interrupted (usually a signal)
+ *
+ * Notes:	Called from proc_exit() and vproc_exit().
+ *
+ * Locks:	Assumes tp is locked on entry, remains locked on exit
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttywait</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	<span class="enscript-type">int</span> error;
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	error = 0;
+	<span class="enscript-keyword">while</span> ((tp-&gt;t_outq.c_cc || ISSET(tp-&gt;t_state, TS_BUSY)) &amp;&amp;
+	       ISSET(tp-&gt;t_state, TS_CONNECTED) &amp;&amp; tp-&gt;t_oproc) {
+		(*tp-&gt;t_oproc)(tp);
+		<span class="enscript-keyword">if</span> ((tp-&gt;t_outq.c_cc || ISSET(tp-&gt;t_state, TS_BUSY)) &amp;&amp;
+		    ISSET(tp-&gt;t_state, TS_CONNECTED)) {
+			SET(tp-&gt;t_state, TS_SO_OCOMPLETE);
+			error = ttysleep(tp, TSA_OCOMPLETE(tp),
+					 TTOPRI | PCATCH, <span class="enscript-string">&quot;ttywai&quot;</span>,
+					 tp-&gt;t_timeout);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">if</span> (error == EWOULDBLOCK)
+					error = EIO;
+				<span class="enscript-keyword">break</span>;
+			}
+		} <span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">if</span> (!error &amp;&amp; (tp-&gt;t_outq.c_cc || ISSET(tp-&gt;t_state, TS_BUSY)))
+		error = EIO;
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Stop the underlying device driver.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ttystop</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">int</span> rw)
+{
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	(*cdevsw[major(tp-&gt;t_dev)].d_stop)(tp, rw);
+}
+
+<span class="enscript-comment">/*
+ * Flush if successfully wait.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">ttywflush</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	<span class="enscript-type">int</span> error;
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	<span class="enscript-keyword">if</span> ((error = ttywait(tp)) == 0)
+		ttyflush(tp, FREAD);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * Flush tty read and/or write queues, notifying anyone waiting.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ttyflush</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">int</span> rw)
+{
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-reference">again</span>:
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (rw &amp; FWRITE) {
+		FLUSHQ(&amp;tp-&gt;t_outq);
+		CLR(tp-&gt;t_state, TS_TTSTOP);
+	}
+        ttystop(tp, rw);
+        <span class="enscript-keyword">if</span> (rw &amp; FREAD) {
+		FLUSHQ(&amp;tp-&gt;t_canq);
+		FLUSHQ(&amp;tp-&gt;t_rawq);
+		CLR(tp-&gt;t_lflag, PENDIN);
+		tp-&gt;t_rocount = 0;
+		tp-&gt;t_rocol = 0;
+		CLR(tp-&gt;t_state, TS_LOCAL);
+		ttwakeup(tp);
+		<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_TBLOCK)) {
+			<span class="enscript-keyword">if</span> (rw &amp; FWRITE)
+				FLUSHQ(&amp;tp-&gt;t_outq);
+			ttyunblock(tp);
+
+			<span class="enscript-comment">/*
+			 * Don't let leave any state that might clobber the
+			 * next line discipline (although we should do more
+			 * to send the START char).  Not clearing the state
+			 * may have caused the &quot;putc to a clist with no
+			 * reserved cblocks&quot; panic/printf.
+			 */</span>
+			CLR(tp-&gt;t_state, TS_TBLOCK);
+
+#<span class="enscript-reference">if</span> 0 <span class="enscript-comment">/* forget it, sleeping isn't always safe and we don't know when it is */</span>
+			<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_iflag, IXOFF)) {
+				<span class="enscript-comment">/*
+				 * XXX wait a bit in the hope that the stop
+				 * character (if any) will go out.  Waiting
+				 * isn't good since it allows races.  This
+				 * will be fixed when the stop character is
+				 * put in a special queue.  Don't bother with
+				 * the checks in ttywait() since the timeout
+				 * will save us.
+				 */</span>
+				SET(tp-&gt;t_state, TS_SO_OCOMPLETE);
+				ttysleep(tp, TSA_OCOMPLETE(tp), TTOPRI,
+					 <span class="enscript-string">&quot;ttyfls&quot;</span>, hz / 10);
+				<span class="enscript-comment">/*
+				 * Don't try sending the stop character again.
+				 */</span>
+				CLR(tp-&gt;t_state, TS_TBLOCK);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">again</span>;
+			}
+#<span class="enscript-reference">endif</span>
+		}
+	}
+	<span class="enscript-keyword">if</span> (rw &amp; FWRITE) {
+		FLUSHQ(&amp;tp-&gt;t_outq);
+		ttwwakeup(tp);
+	}
+}
+
+<span class="enscript-comment">/*
+ * Copy in the default termios characters.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ *
+ * Notes:	No assertion; tp is not in scope.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">termioschars</span>(<span class="enscript-type">struct</span> termios *t)
+{
+	bcopy(ttydefchars, t-&gt;c_cc, <span class="enscript-keyword">sizeof</span> t-&gt;c_cc);
+}
+
+
+<span class="enscript-comment">/*
+ * Handle input high water.  Send stop character for the IXOFF case.  Turn
+ * on our input flow control bit and propagate the changes to the driver.
+ * XXX the stop character should be put in a special high priority queue.
+ *
+ * Locks:	Assumes tty_lock() is held for the call.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ttyblock</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	SET(tp-&gt;t_state, TS_TBLOCK);
+	<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_iflag, IXOFF) &amp;&amp; tp-&gt;t_cc[VSTOP] != _POSIX_VDISABLE &amp;&amp;
+	    putc(tp-&gt;t_cc[VSTOP], &amp;tp-&gt;t_outq) != 0)
+		CLR(tp-&gt;t_state, TS_TBLOCK);	<span class="enscript-comment">/* try again later */</span>
+	ttstart(tp);
+}
+
+
+<span class="enscript-comment">/*
+ * Handle input low water.  Send start character for the IXOFF case.  Turn
+ * off our input flow control bit and propagate the changes to the driver.
+ * XXX the start character should be put in a special high priority queue.
+ *
+ * Locks:	Assumes tty_lock() is held for the call.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ttyunblock</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	CLR(tp-&gt;t_state, TS_TBLOCK);
+	<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_iflag, IXOFF) &amp;&amp; tp-&gt;t_cc[VSTART] != _POSIX_VDISABLE &amp;&amp;
+	    putc(tp-&gt;t_cc[VSTART], &amp;tp-&gt;t_outq) != 0)
+		SET(tp-&gt;t_state, TS_TBLOCK);	<span class="enscript-comment">/* try again later */</span>
+	ttstart(tp);
+}
+
+
+<span class="enscript-comment">/*
+ * ttstart
+ *
+ * Start tty output
+ *
+ * Parameters:	tp			tty on which to start output
+ *
+ * Returns:	0			Success
+ *
+ * Locks:	Assumes tty_lock() is held for the call.
+ *
+ * Notes:	This function might as well be void; it always returns success
+ *
+ *		Called from ttioctl_locked(), LDISC routines, and
+ *		ttycheckoutq(), ttyblock(), ttyunblock(), and tputchar()
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttstart</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	<span class="enscript-keyword">if</span> (tp-&gt;t_oproc != NULL)	<span class="enscript-comment">/* XXX: Kludge for pty. */</span>
+		(*tp-&gt;t_oproc)(tp);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * ttylclose (LDISC)
+ *
+ * &quot;close&quot; a line discipline
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttylclose</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">int</span> flag)
+{
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	<span class="enscript-keyword">if</span> ( (flag &amp; FNONBLOCK) || ttywflush(tp))
+		ttyflush(tp, FREAD | FWRITE);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * ttymodem (LDISC)
+ *
+ * Handle modem control transition on a tty.
+ * Flag indicates new state of carrier.
+ * Returns 0 if the line should be turned off, otherwise 1.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttymodem</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">int</span> flag)
+{
+	<span class="enscript-type">int</span> rval = 1;		<span class="enscript-comment">/* default return value */</span>
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_CARR_ON) &amp;&amp; ISSET(tp-&gt;t_cflag, MDMBUF)) {
+		<span class="enscript-comment">/*
+		 * MDMBUF: do flow control according to carrier flag
+		 * XXX TS_CAR_OFLOW doesn't do anything yet.  TS_TTSTOP
+		 * works if IXON and IXANY are clear.
+		 */</span>
+		<span class="enscript-keyword">if</span> (flag) {
+			CLR(tp-&gt;t_state, TS_CAR_OFLOW);
+			CLR(tp-&gt;t_state, TS_TTSTOP);
+			ttstart(tp);
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_state, TS_CAR_OFLOW)) {
+			SET(tp-&gt;t_state, TS_CAR_OFLOW);
+			SET(tp-&gt;t_state, TS_TTSTOP);
+                        ttystop(tp, 0);
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (flag == 0) {
+		<span class="enscript-comment">/*
+		 * Lost carrier.
+		 */</span>
+		CLR(tp-&gt;t_state, TS_CARR_ON);
+		<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_ISOPEN) &amp;&amp;
+		    !ISSET(tp-&gt;t_cflag, CLOCAL)) {
+			SET(tp-&gt;t_state, TS_ZOMBIE);
+			CLR(tp-&gt;t_state, TS_CONNECTED);
+			<span class="enscript-keyword">if</span> (tp-&gt;t_session &amp;&amp; tp-&gt;t_session-&gt;s_leader)
+				psignal(tp-&gt;t_session-&gt;s_leader, SIGHUP);
+			ttyflush(tp, FREAD | FWRITE);
+			rval = 0;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * Carrier now on.
+		 */</span>
+		SET(tp-&gt;t_state, TS_CARR_ON);
+		<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_state, TS_ZOMBIE))
+			SET(tp-&gt;t_state, TS_CONNECTED);
+		wakeup(TSA_CARR_ON(tp));
+		ttwakeup(tp);
+		ttwwakeup(tp);
+	}
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">return</span> (rval);
+}
+
+
+<span class="enscript-comment">/*
+ * Reinput pending characters after state switch
+ * call at spltty().
+ *
+ * Locks:	Assumes tty_lock() is held for the call.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ttypend</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	<span class="enscript-type">struct</span> clist tq;
+	<span class="enscript-type">int</span> c;
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	CLR(tp-&gt;t_lflag, PENDIN);
+	SET(tp-&gt;t_state, TS_TYPEN);
+	tq = tp-&gt;t_rawq;
+	tp-&gt;t_rawq.c_cc = 0;
+	tp-&gt;t_rawq.c_cf = tp-&gt;t_rawq.c_cl = NULL;
+	<span class="enscript-keyword">while</span> ((c = getc(&amp;tq)) &gt;= 0)
+		ttyinput(c, tp);
+	CLR(tp-&gt;t_state, TS_TYPEN);
+}
+
+
+<span class="enscript-comment">/*
+ * ttread (LDISC)
+ *
+ * Process a read call on a tty device.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttread</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">struct</span> uio *uio, <span class="enscript-type">int</span> flag)
+{
+	<span class="enscript-type">struct</span> clist *qp;
+	<span class="enscript-type">int</span> c;
+	tcflag_t lflag;
+	cc_t *cc = tp-&gt;t_cc;
+	proc_t p = current_proc();
+	<span class="enscript-type">int</span> first, error = 0;
+	<span class="enscript-type">int</span> has_etime = 0, last_cc = 0;
+	<span class="enscript-type">long</span> slp = 0;		<span class="enscript-comment">/* XXX this should be renamed `timo'. */</span>
+	<span class="enscript-type">struct</span> uthread *ut;
+	<span class="enscript-type">struct</span> pgrp * pg;
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	ut = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(current_thread());
+
+<span class="enscript-reference">loop</span>:
+	lflag = tp-&gt;t_lflag;
+	<span class="enscript-comment">/*
+	 * take pending input first
+	 */</span>
+	<span class="enscript-keyword">if</span> (ISSET(lflag, PENDIN)) {
+		ttypend(tp);
+		lflag = tp-&gt;t_lflag;	<span class="enscript-comment">/* XXX ttypend() clobbers it */</span>
+	}
+
+	<span class="enscript-comment">/*
+	 * Signal the process if it's in the background.
+	 */</span>
+	<span class="enscript-keyword">if</span> (isbackground(p, tp)) {
+		<span class="enscript-keyword">if</span> ((p-&gt;p_sigignore &amp; sigmask(SIGTTIN)) ||
+		   (ut-&gt;uu_sigmask &amp; sigmask(SIGTTIN)) ||
+		    p-&gt;p_lflag &amp; P_LPPWAIT) {
+		    	error = EIO;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+		}
+		pg = proc_pgrp(p);
+		<span class="enscript-keyword">if</span> (pg == PGRP_NULL) {
+		    	error = EIO;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+		}
+		<span class="enscript-keyword">if</span> (pg-&gt;pg_jobc == 0) {
+			<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+			tty_unlock(tp);
+			pg_rele(pg);
+			tty_lock(tp);
+		    	error = EIO;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+		}
+		<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+		tty_unlock(tp);
+		pgsignal(pg, SIGTTIN, 1);
+		pg_rele(pg);
+		tty_lock(tp);
+
+		<span class="enscript-comment">/*
+		 * We signalled ourself, so we need to act as if we
+		 * have been &quot;interrupted&quot; from a &quot;sleep&quot; to act on
+		 * the signal.  If it's a signal that stops the
+		 * process, that's handled in the signal sending code.
+		 */</span>
+		error = EINTR;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_ZOMBIE)) {
+		<span class="enscript-comment">/* EOF - returning 0 */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * If canonical, use the canonical queue,
+	 * else use the raw queue.
+	 *
+	 * (should get rid of clists...)
+	 */</span>
+	qp = ISSET(lflag, ICANON) ? &amp;tp-&gt;t_canq : &amp;tp-&gt;t_rawq;
+
+	<span class="enscript-keyword">if</span> (flag &amp; IO_NDELAY) {
+		<span class="enscript-keyword">if</span> (qp-&gt;c_cc &gt; 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">read</span>;
+		<span class="enscript-keyword">if</span> (ISSET(lflag, ICANON) || cc[VMIN] != 0) {
+		    	error = EWOULDBLOCK;
+		}
+		<span class="enscript-comment">/* else polling - returning 0 */</span>
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+	}
+	<span class="enscript-keyword">if</span> (!ISSET(lflag, ICANON)) {
+		<span class="enscript-type">int</span> m = cc[VMIN];
+		<span class="enscript-type">long</span> t = cc[VTIME];
+		<span class="enscript-type">struct</span> timeval timecopy;
+		<span class="enscript-type">struct</span> timeval etime = {0, 0};	<span class="enscript-comment">/* protected by !has_etime */</span>
+
+		<span class="enscript-comment">/*
+		 * Check each of the four combinations.
+		 * (m &gt; 0 &amp;&amp; t == 0) is the normal read case.
+		 * It should be fairly efficient, so we check that and its
+		 * companion case (m == 0 &amp;&amp; t == 0) first.
+		 * For the other two cases, we compute the target sleep time
+		 * into slp.
+		 */</span>
+		<span class="enscript-keyword">if</span> (t == 0) {
+			<span class="enscript-keyword">if</span> (qp-&gt;c_cc &lt; m)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">sleep</span>;
+			<span class="enscript-keyword">if</span> (qp-&gt;c_cc &gt; 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">read</span>;
+
+			<span class="enscript-comment">/* m, t and qp-&gt;c_cc are all 0.  0 is enough input. */</span>
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+		}
+		t *= 100000;		<span class="enscript-comment">/* time in us */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">diff</span>(t1, t2) (((t1).tv_sec - (t2).tv_sec) * 1000000 + \
+			 ((t1).tv_usec - (t2).tv_usec))
+		<span class="enscript-keyword">if</span> (m &gt; 0) {
+			<span class="enscript-keyword">if</span> (qp-&gt;c_cc &lt;= 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">sleep</span>;
+			<span class="enscript-keyword">if</span> (qp-&gt;c_cc &gt;= m)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">read</span>;
+			microuptime(&amp;timecopy);
+			<span class="enscript-keyword">if</span> (!has_etime) {
+				<span class="enscript-comment">/* first character, start timer */</span>
+				has_etime = 1;
+
+				etime.tv_sec = t / 1000000;
+				etime.tv_usec = (t - (etime.tv_sec * 1000000));
+				timeradd(&amp;etime, &amp;timecopy, &amp;etime);
+				
+				slp = t;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (qp-&gt;c_cc &gt; last_cc) {
+				<span class="enscript-comment">/* got a character, restart timer */</span>
+
+				etime.tv_sec = t / 1000000;
+				etime.tv_usec = (t - (etime.tv_sec * 1000000));
+				timeradd(&amp;etime, &amp;timecopy, &amp;etime);
+
+				slp = t;
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-comment">/* nothing, check expiration */</span>
+			        <span class="enscript-keyword">if</span> (timercmp(&amp;etime, &amp;timecopy, &lt;=))
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">read</span>;
+
+				slp = diff(etime, timecopy);
+			}
+			last_cc = qp-&gt;c_cc;
+		} <span class="enscript-keyword">else</span> {	<span class="enscript-comment">/* m == 0 */</span>
+			<span class="enscript-keyword">if</span> (qp-&gt;c_cc &gt; 0)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">read</span>;
+			microuptime(&amp;timecopy);
+			<span class="enscript-keyword">if</span> (!has_etime) {
+				has_etime = 1;
+
+				etime.tv_sec = t / 1000000;
+				etime.tv_usec = (t - (etime.tv_sec * 1000000));
+				timeradd(&amp;etime, &amp;timecopy, &amp;etime);
+
+				slp = t;
+			} <span class="enscript-keyword">else</span> {
+			        <span class="enscript-keyword">if</span> (timercmp(&amp;etime, &amp;timecopy, &lt;=)) {
+					<span class="enscript-comment">/* Timed out, but 0 is enough input. */</span>
+					<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+				}
+				slp = diff(etime, timecopy);
+			}
+		}
+#<span class="enscript-reference">undef</span> <span class="enscript-variable-name">diff</span>
+		<span class="enscript-comment">/*
+		 * Rounding down may make us wake up just short
+		 * of the target, so we round up.
+		 * The formula is ceiling(slp * hz/1000000).
+		 * 32-bit arithmetic is enough for hz &lt; 169.
+		 * XXX see hzto() for how to avoid overflow if hz
+		 * is large (divide by `tick' and/or arrange to
+		 * use hzto() if hz is large).
+		 */</span>
+		slp = (<span class="enscript-type">long</span>) (((u_int32_t)slp * hz) + 999999) / 1000000;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">sleep</span>;
+	}
+	<span class="enscript-keyword">if</span> (qp-&gt;c_cc &lt;= 0) {
+<span class="enscript-reference">sleep</span>:
+		<span class="enscript-comment">/*
+		 * There is no input, or not enough input and we can block.
+		 */</span>
+		error = ttysleep(tp, TSA_HUP_OR_INPUT(tp), TTIPRI | PCATCH,
+				 ISSET(tp-&gt;t_state, TS_CONNECTED) ?
+				 <span class="enscript-string">&quot;ttyin&quot;</span> : <span class="enscript-string">&quot;ttyhup&quot;</span>, (<span class="enscript-type">int</span>)slp);
+		<span class="enscript-keyword">if</span> (error == EWOULDBLOCK)
+			error = 0;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+		}
+		<span class="enscript-comment">/*
+		 * XXX what happens if another process eats some input
+		 * while we are asleep (not just here)?  It would be
+		 * safest to detect changes and reset our state variables
+		 * (has_stime and last_cc).
+		 */</span>
+		slp = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop</span>;
+	}
+<span class="enscript-reference">read</span>:
+	<span class="enscript-comment">/*
+	 * Input present, check for input mapping and processing.
+	 */</span>
+	first = 1;
+	<span class="enscript-keyword">if</span> (ISSET(lflag, ICANON)
+	|| (ISSET(lflag, IEXTEN | ISIG) == (IEXTEN | ISIG)) )
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">slowcase</span>;
+	<span class="enscript-keyword">for</span> (;;) {
+		<span class="enscript-type">char</span> ibuf[IBUFSIZ];
+		<span class="enscript-type">int</span> icc;
+
+		icc = MIN(uio_resid(uio), IBUFSIZ);
+		icc = q_to_b(qp, (u_char *)ibuf, icc);
+		<span class="enscript-keyword">if</span> (icc &lt;= 0) {
+			<span class="enscript-keyword">if</span> (first)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop</span>;
+			<span class="enscript-keyword">break</span>;
+		}
+		error = uiomove(ibuf, icc, uio);
+		<span class="enscript-comment">/*
+		 * XXX if there was an error then we should ungetc() the
+		 * unmoved chars and reduce icc here.
+		 */</span>
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-keyword">break</span>;
+ 		<span class="enscript-keyword">if</span> (uio_resid(uio) == 0)
+			<span class="enscript-keyword">break</span>;
+		first = 0;
+	}
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+<span class="enscript-reference">slowcase</span>:
+	<span class="enscript-keyword">for</span> (;;) {
+		c = getc(qp);
+		<span class="enscript-keyword">if</span> (c &lt; 0) {
+			<span class="enscript-keyword">if</span> (first)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop</span>;
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/*
+		 * delayed suspend (^Y)
+		 */</span>
+		<span class="enscript-keyword">if</span> (CCEQ(cc[VDSUSP], c) &amp;&amp;
+		    ISSET(lflag, IEXTEN | ISIG) == (IEXTEN | ISIG)) {
+			<span class="enscript-comment">/*
+			 * SAFE: All callers drop the lock on return and
+			 * SAFE: current thread will not change out from
+			 * SAFE: under us in the &quot;goto loop&quot; case.
+			 */</span>
+			tty_unlock(tp);
+			tty_pgsignal(tp, SIGTSTP, 1);
+			tty_lock(tp);
+			<span class="enscript-keyword">if</span> (first) {
+				error = ttysleep(tp, &amp;ttread, TTIPRI | PCATCH,
+						 <span class="enscript-string">&quot;ttybg3&quot;</span>, hz);
+				<span class="enscript-keyword">if</span> (error)
+					<span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop</span>;
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+		<span class="enscript-comment">/*
+		 * Interpret EOF only in canonical mode.
+		 */</span>
+		<span class="enscript-keyword">if</span> (CCEQ(cc[VEOF], c) &amp;&amp; ISSET(lflag, ICANON))
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-comment">/*
+		 * Give user character.
+		 */</span>
+ 		error = ureadc(c, uio);
+		<span class="enscript-keyword">if</span> (error)
+			<span class="enscript-comment">/* XXX should ungetc(c, qp). */</span>
+			<span class="enscript-keyword">break</span>;
+ 		<span class="enscript-keyword">if</span> (uio_resid(uio) == 0)
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-comment">/*
+		 * In canonical mode check for a &quot;break character&quot;
+		 * marking the end of a &quot;line of input&quot;.
+		 */</span>
+		<span class="enscript-keyword">if</span> (ISSET(lflag, ICANON) &amp;&amp; TTBREAKC(c, lflag))
+			<span class="enscript-keyword">break</span>;
+		first = 0;
+	}
+
+<span class="enscript-reference">out</span>:
+	<span class="enscript-comment">/*
+	 * Look to unblock input now that (presumably)
+	 * the input queue has gone down.
+	 */</span>
+	<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_TBLOCK) &amp;&amp;
+	    tp-&gt;t_rawq.c_cc + tp-&gt;t_canq.c_cc &lt;= I_LOW_WATER)
+		ttyunblock(tp);
+
+<span class="enscript-reference">err</span>:
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * Check the output queue on tp for space for a kernel message (from uprintf
+ * or tprintf).  Allow some space over the normal hiwater mark so we don't
+ * lose messages due to normal flow control, but don't let the tty run amok.
+ * Sleeps here are not interruptible, but we return prematurely if new signals
+ * arrive.
+ *
+ * Locks:	Assumes tty_lock() is held before calling
+ *
+ * Notes:	This function is called from tprintf() in subr_prf.c
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttycheckoutq</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">int</span> wait)
+{
+	<span class="enscript-type">int</span> hiwat;
+	sigset_t oldsig;
+	<span class="enscript-type">struct</span> uthread *ut;
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	ut = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(current_thread());
+
+	hiwat = tp-&gt;t_hiwat;
+	oldsig = wait ? ut-&gt;uu_siglist : 0;
+	<span class="enscript-keyword">if</span> (tp-&gt;t_outq.c_cc &gt; hiwat + OBUFSIZ + 100)
+		<span class="enscript-keyword">while</span> (tp-&gt;t_outq.c_cc &gt; hiwat) {
+			ttstart(tp);
+			<span class="enscript-keyword">if</span> (tp-&gt;t_outq.c_cc &lt;= hiwat)
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">if</span> (wait == 0 || ut-&gt;uu_siglist != oldsig) {
+				<span class="enscript-keyword">return</span> (0);
+			}
+			SET(tp-&gt;t_state, TS_SO_OLOWAT);
+			ttysleep(tp, TSA_OLOWAT(tp), PZERO - 1, <span class="enscript-string">&quot;ttoutq&quot;</span>, hz);
+		}
+	<span class="enscript-keyword">return</span> (1);
+}
+
+
+<span class="enscript-comment">/*
+ * ttwrite (LDISC)
+ *
+ * Process a write call on a tty device.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttwrite</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">struct</span> uio *uio, <span class="enscript-type">int</span> flag)
+{
+	<span class="enscript-type">char</span> *cp = NULL;
+	<span class="enscript-type">int</span> cc, ce;
+	proc_t p;
+	<span class="enscript-type">int</span> i, hiwat, error;
+	user_ssize_t count;
+	<span class="enscript-type">char</span> obuf[OBUFSIZ];
+	<span class="enscript-type">struct</span> uthread *ut;
+	<span class="enscript-type">struct</span> pgrp * pg;
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	ut = (<span class="enscript-type">struct</span> uthread *)get_bsdthread_info(current_thread());
+	hiwat = tp-&gt;t_hiwat;
+	count = uio_resid(uio);
+	error = 0;
+	cc = 0;
+<span class="enscript-reference">loop</span>:
+	<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_ZOMBIE)) {
+		<span class="enscript-keyword">if</span> (uio_resid(uio) == count)
+			error = EIO;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_state, TS_CONNECTED)) {
+		<span class="enscript-keyword">if</span> (flag &amp; IO_NDELAY) {
+			error = EWOULDBLOCK;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		error = ttysleep(tp, TSA_CARR_ON(tp), TTIPRI | PCATCH,
+				 <span class="enscript-string">&quot;ttydcd&quot;</span>, 0);
+		<span class="enscript-keyword">if</span> (error) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>; }
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop</span>;
+	}
+	<span class="enscript-comment">/*
+	 * Signal the process if it's in the background.
+	 */</span>
+	p = current_proc();
+	<span class="enscript-keyword">if</span> (isbackground(p, tp) &amp;&amp;
+	    ISSET(tp-&gt;t_lflag, TOSTOP) &amp;&amp; (p-&gt;p_lflag &amp; P_LPPWAIT) == 0 &amp;&amp;
+	    (p-&gt;p_sigignore &amp; sigmask(SIGTTOU)) == 0 &amp;&amp;
+	    (ut-&gt;uu_sigmask &amp; sigmask(SIGTTOU)) == 0) {
+
+		pg = proc_pgrp(p);
+		<span class="enscript-keyword">if</span> (pg == PGRP_NULL) {
+			error = EIO;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-keyword">if</span> (pg-&gt;pg_jobc == 0) {
+			<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+			tty_unlock(tp);
+			pg_rele(pg);
+			tty_lock(tp);
+			error = EIO;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+		tty_unlock(tp);
+		pgsignal(pg, SIGTTOU, 1);
+		pg_rele(pg);
+		tty_lock(tp);
+		<span class="enscript-comment">/*
+		 * We signalled ourself, so we need to act as if we
+		 * have been &quot;interrupted&quot; from a &quot;sleep&quot; to act on
+		 * the signal.  If it's a signal that stops the
+		 * process, that's handled in the signal sending code.
+		 */</span>
+		error = EINTR;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+	<span class="enscript-comment">/*
+	 * Process the user's data in at most OBUFSIZ chunks.  Perform any
+	 * output translation.  Keep track of high water mark, sleep on
+	 * overflow awaiting device aid in acquiring new space.
+	 */</span>
+	<span class="enscript-keyword">while</span> (uio_resid(uio) &gt; 0 || cc &gt; 0) {
+		<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_lflag, FLUSHO)) {
+			uio_setresid(uio, 0);
+			<span class="enscript-keyword">return</span> (0);
+		}
+		<span class="enscript-keyword">if</span> (tp-&gt;t_outq.c_cc &gt; hiwat)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">ovhiwat</span>;
+		<span class="enscript-comment">/*
+		 * Grab a hunk of data from the user, unless we have some
+		 * leftover from last time.
+		 */</span>
+		<span class="enscript-keyword">if</span> (cc == 0) {
+			cc = MIN(uio_resid(uio), OBUFSIZ);
+			cp = obuf;
+			error = uiomove(cp, cc, uio);
+			<span class="enscript-keyword">if</span> (error) {
+				cc = 0;
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+		<span class="enscript-comment">/*
+		 * If nothing fancy need be done, grab those characters we
+		 * can handle without any of ttyoutput's processing and
+		 * just transfer them to the output q.  For those chars
+		 * which require special processing (as indicated by the
+		 * bits in char_type), call ttyoutput.  After processing
+		 * a hunk of data, look for FLUSHO so ^O's will take effect
+		 * immediately.
+		 */</span>
+		<span class="enscript-keyword">while</span> (cc &gt; 0) {
+			<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_oflag, OPOST))
+				ce = cc;
+			<span class="enscript-keyword">else</span> {
+				ce = cc - scanc((u_int)cc, (u_char *)cp,
+						char_type, CCLASSMASK);
+				<span class="enscript-comment">/*
+				 * If ce is zero, then we're processing
+				 * a special character through ttyoutput.
+				 */</span>
+				<span class="enscript-keyword">if</span> (ce == 0) {
+					tp-&gt;t_rocount = 0;
+					<span class="enscript-keyword">if</span> (ttyoutput(*cp, tp) &gt;= 0) {
+						<span class="enscript-comment">/* out of space */</span>
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">overfull</span>;
+					}
+					cp++;
+					cc--;
+					<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_lflag, FLUSHO) ||
+					    tp-&gt;t_outq.c_cc &gt; hiwat)
+						<span class="enscript-keyword">goto</span> <span class="enscript-reference">ovhiwat</span>;
+					<span class="enscript-keyword">continue</span>;
+				}
+			}
+			<span class="enscript-comment">/*
+			 * A bunch of normal characters have been found.
+			 * Transfer them en masse to the output queue and
+			 * continue processing at the top of the loop.
+			 * If there are any further characters in this
+			 * &lt;= OBUFSIZ chunk, the first should be a character
+			 * requiring special handling by ttyoutput.
+			 */</span>
+			tp-&gt;t_rocount = 0;
+			i = b_to_q((u_char *)cp, ce, &amp;tp-&gt;t_outq);
+			ce -= i;
+			tp-&gt;t_column += ce;
+			cp += ce, cc -= ce, tk_nout += ce;
+			tp-&gt;t_outcc += ce;
+			<span class="enscript-keyword">if</span> (i &gt; 0) {
+				<span class="enscript-comment">/* out of space */</span>
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">overfull</span>;
+			}
+			<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_lflag, FLUSHO) ||
+			    tp-&gt;t_outq.c_cc &gt; hiwat)
+				<span class="enscript-keyword">break</span>;
+		}
+		ttstart(tp);
+	}
+<span class="enscript-reference">out</span>:
+	<span class="enscript-comment">/*
+	 * If cc is nonzero, we leave the uio structure inconsistent, as the
+	 * offset and iov pointers have moved forward, but it doesn't matter
+	 * (the call will either return short or restart with a new uio).
+	 */</span>
+	uio_setresid(uio, (uio_resid(uio) + cc));
+	<span class="enscript-keyword">return</span> (error);
+
+<span class="enscript-reference">overfull</span>:
+
+	<span class="enscript-comment">/*
+	 * Since we are using ring buffers, if we can't insert any more into
+	 * the output queue, we can assume the ring is full and that someone
+	 * forgot to set the high water mark correctly.  We set it and then
+	 * proceed as normal.
+	 */</span>
+	hiwat = tp-&gt;t_outq.c_cc - 1;
+
+<span class="enscript-reference">ovhiwat</span>:
+	ttstart(tp);
+	<span class="enscript-comment">/*
+	 * This can only occur if FLUSHO is set in t_lflag,
+	 * or if ttstart/oproc is synchronous (or very fast).
+	 */</span>
+	<span class="enscript-keyword">if</span> (tp-&gt;t_outq.c_cc &lt;= hiwat) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop</span>;
+	}
+	<span class="enscript-keyword">if</span> (flag &amp; IO_NDELAY) {
+		uio_setresid(uio, (uio_resid(uio) + cc));
+		<span class="enscript-keyword">return</span> (uio_resid(uio) == count ? EWOULDBLOCK : 0);
+	}
+	SET(tp-&gt;t_state, TS_SO_OLOWAT);
+	error = ttysleep(tp, TSA_OLOWAT(tp), TTOPRI | PCATCH, <span class="enscript-string">&quot;ttywri&quot;</span>,
+			 tp-&gt;t_timeout);
+	<span class="enscript-keyword">if</span> (error == EWOULDBLOCK)
+		error = EIO;
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	<span class="enscript-keyword">goto</span> <span class="enscript-reference">loop</span>;
+}
+
+
+<span class="enscript-comment">/*
+ * Rubout one character from the rawq of tp
+ * as cleanly as possible.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ttyrub</span>(<span class="enscript-type">int</span> c, <span class="enscript-type">struct</span> tty *tp)
+{
+	u_char *cp;
+	<span class="enscript-type">int</span> savecol;
+	<span class="enscript-type">int</span> tabc;
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_lflag, ECHO) || ISSET(tp-&gt;t_lflag, EXTPROC))
+		<span class="enscript-keyword">return</span>;
+	CLR(tp-&gt;t_lflag, FLUSHO);
+	<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_lflag, ECHOE)) {
+		<span class="enscript-keyword">if</span> (tp-&gt;t_rocount == 0) {
+			<span class="enscript-comment">/*
+			 * Messed up by ttwrite; retype
+			 */</span>
+			ttyretype(tp);
+			<span class="enscript-keyword">return</span>;
+		}
+		<span class="enscript-keyword">if</span> (c == (<span class="enscript-string">'\t'</span> | TTY_QUOTE) || c == (<span class="enscript-string">'\n'</span> | TTY_QUOTE))
+			ttyrubo(tp, 2);
+		<span class="enscript-keyword">else</span> {
+			CLR(c, ~TTY_CHARMASK);
+			<span class="enscript-keyword">switch</span> (CCLASS(c)) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">ORDINARY</span>:
+				<span class="enscript-keyword">if</span>(!(ISSET(tp-&gt;t_iflag, IUTF8) &amp;&amp; CCONT(c))) {
+					ttyrubo(tp, 1);
+				}
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">BACKSPACE</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">CONTROL</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">NEWLINE</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">RETURN</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">VTAB</span>:
+				<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_lflag, ECHOCTL))
+					ttyrubo(tp, 2);
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">TAB</span>:
+				<span class="enscript-keyword">if</span> (tp-&gt;t_rocount &lt; tp-&gt;t_rawq.c_cc) {
+					ttyretype(tp);
+					<span class="enscript-keyword">return</span>;
+				}
+				savecol = tp-&gt;t_column;
+				SET(tp-&gt;t_state, TS_CNTTB);
+				SET(tp-&gt;t_lflag, FLUSHO);
+				tp-&gt;t_column = tp-&gt;t_rocol;
+				<span class="enscript-keyword">for</span> (cp = firstc(&amp;tp-&gt;t_rawq, &amp;tabc); cp;
+				    cp = nextc(&amp;tp-&gt;t_rawq, cp, &amp;tabc))
+					ttyecho(tabc, tp);
+				CLR(tp-&gt;t_lflag, FLUSHO);
+				CLR(tp-&gt;t_state, TS_CNTTB);
+
+				<span class="enscript-comment">/* savecol will now be length of the tab. */</span>
+				savecol -= tp-&gt;t_column;
+				tp-&gt;t_column += savecol;
+				<span class="enscript-keyword">if</span> (savecol &gt; 8)
+					savecol = 8;	<span class="enscript-comment">/* overflow fixup */</span>
+				<span class="enscript-keyword">while</span> (--savecol &gt;= 0)
+					(<span class="enscript-type">void</span>)ttyoutput(<span class="enscript-string">'\b'</span>, tp);
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-reference">default</span>:			<span class="enscript-comment">/* XXX */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PANICSTR</span>	<span class="enscript-string">&quot;ttyrub: would panic c = %d, val = %d\n&quot;</span>
+				printf(PANICSTR, c, CCLASS(c));
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">notdef</span>
+				panic(PANICSTR, c, CCLASS(c));
+#<span class="enscript-reference">endif</span>
+			}
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_lflag, ECHOPRT)) {
+		<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_state, TS_ERASE)) {
+			SET(tp-&gt;t_state, TS_ERASE);
+			(<span class="enscript-type">void</span>)ttyoutput(<span class="enscript-string">'\\'</span>, tp);
+		}
+		ttyecho(c, tp);
+	} <span class="enscript-keyword">else</span>
+		ttyecho(tp-&gt;t_cc[VERASE], tp);
+	--tp-&gt;t_rocount;
+}
+
+
+<span class="enscript-comment">/*
+ * Back over count characters, erasing them.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ttyrubo</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">int</span> count)
+{
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	<span class="enscript-keyword">while</span> (count-- &gt; 0) {
+		(<span class="enscript-type">void</span>)ttyoutput(<span class="enscript-string">'\b'</span>, tp);
+		(<span class="enscript-type">void</span>)ttyoutput(<span class="enscript-string">' '</span>, tp);
+		(<span class="enscript-type">void</span>)ttyoutput(<span class="enscript-string">'\b'</span>, tp);
+	}
+}
+
+
+<span class="enscript-comment">/*
+ * ttyretype --
+ *	Reprint the rawq line.  Note, it is assumed that c_cc has already
+ *	been checked.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ttyretype</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	u_char *cp;
+	<span class="enscript-type">int</span> c;
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	<span class="enscript-comment">/* Echo the reprint character. */</span>
+	<span class="enscript-keyword">if</span> (tp-&gt;t_cc[VREPRINT] != _POSIX_VDISABLE)
+		ttyecho(tp-&gt;t_cc[VREPRINT], tp);
+
+	(<span class="enscript-type">void</span>)ttyoutput(<span class="enscript-string">'\n'</span>, tp);
+
+	<span class="enscript-comment">/*
+	 * FREEBSD XXX
+	 * FIX: NEXTC IS BROKEN - DOESN'T CHECK QUOTE
+	 * BIT OF FIRST CHAR.
+	 */</span>
+	<span class="enscript-keyword">for</span> (cp = firstc(&amp;tp-&gt;t_canq, &amp;c); cp; cp = nextc(&amp;tp-&gt;t_canq, cp, &amp;c))
+		ttyecho(c, tp);
+	<span class="enscript-keyword">for</span> (cp = firstc(&amp;tp-&gt;t_rawq, &amp;c); cp; cp = nextc(&amp;tp-&gt;t_rawq, cp, &amp;c))
+		ttyecho(c, tp);
+	CLR(tp-&gt;t_state, TS_ERASE);
+
+	tp-&gt;t_rocount = tp-&gt;t_rawq.c_cc;
+	tp-&gt;t_rocol = 0;
+}
+
+
+<span class="enscript-comment">/*
+ * Echo a typed character to the terminal.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ttyecho</span>(<span class="enscript-type">int</span> c, <span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_state, TS_CNTTB))
+		CLR(tp-&gt;t_lflag, FLUSHO);
+	<span class="enscript-keyword">if</span> ((!ISSET(tp-&gt;t_lflag, ECHO) &amp;&amp;
+	     (c != <span class="enscript-string">'\n'</span> || !ISSET(tp-&gt;t_lflag, ECHONL))) ||
+	    ISSET(tp-&gt;t_lflag, EXTPROC))
+		<span class="enscript-keyword">return</span>;
+	<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_lflag, ECHOCTL) &amp;&amp;
+	    ((ISSET(c, TTY_CHARMASK) &lt;= 037 &amp;&amp; c != <span class="enscript-string">'\t'</span> &amp;&amp; c != <span class="enscript-string">'\n'</span>) ||
+	    ISSET(c, TTY_CHARMASK) == 0177)) {
+		(<span class="enscript-type">void</span>)ttyoutput(<span class="enscript-string">'^'</span>, tp);
+		CLR(c, ~TTY_CHARMASK);
+		<span class="enscript-keyword">if</span> (c == 0177)
+			c = <span class="enscript-string">'?'</span>;
+		<span class="enscript-keyword">else</span>
+			c += <span class="enscript-string">'A'</span> - 1;
+	}
+	(<span class="enscript-type">void</span>)ttyoutput(c, tp);
+}
+
+
+<span class="enscript-comment">/*
+ * Wake up any readers on a tty.
+ *
+ * Locks:	Assumes tty_lock() is held for the call.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ttwakeup</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	selwakeup(&amp;tp-&gt;t_rsel);
+	KNOTE(&amp;tp-&gt;t_rsel.si_note, 1);
+	<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_ASYNC)) {
+		<span class="enscript-comment">/*
+		 * XXX: Callers may not revalidate it the tty is closed
+		 * XXX: out from under them by another thread, but we do
+		 * XXX: not support queued signals.  This should be safe,
+		 * XXX: since the process we intend to wakeup is in the
+		 * XXX: process group, and will wake up because of the
+		 * XXX: signal anyway.
+		 */</span>
+		tty_unlock(tp);
+		tty_pgsignal(tp, SIGIO, 1);
+		tty_lock(tp);
+	}
+	wakeup(TSA_HUP_OR_INPUT(tp));
+}
+
+
+<span class="enscript-comment">/*
+ * ttwwakeup (LDISC)
+ *
+ * Wake up any writers on a tty.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ttwwakeup</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	<span class="enscript-keyword">if</span> (tp-&gt;t_outq.c_cc &lt;= tp-&gt;t_lowat) {
+		selwakeup(&amp;tp-&gt;t_wsel);
+		KNOTE(&amp;tp-&gt;t_wsel.si_note, 1);
+	}
+	<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_BUSY | TS_SO_OCOMPLETE) ==
+	    TS_SO_OCOMPLETE &amp;&amp; tp-&gt;t_outq.c_cc == 0) {
+		CLR(tp-&gt;t_state, TS_SO_OCOMPLETE);
+		wakeup(TSA_OCOMPLETE(tp));
+	}
+	<span class="enscript-keyword">if</span> (ISSET(tp-&gt;t_state, TS_SO_OLOWAT) &amp;&amp;
+	    tp-&gt;t_outq.c_cc &lt;= tp-&gt;t_lowat) {
+		CLR(tp-&gt;t_state, TS_SO_OLOWAT);
+		wakeup(TSA_OLOWAT(tp));
+	}
+}
+
+
+<span class="enscript-comment">/*
+ * Look up a code for a specified speed in a conversion table;
+ * used by drivers to map software speed values to hardware parameters.
+ *
+ * Notes:	No locks are assumed for this function; it does not
+ *		directly access struct tty.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttspeedtab</span>(<span class="enscript-type">int</span> speed, <span class="enscript-type">struct</span> speedtab *table)
+{
+	<span class="enscript-keyword">for</span> ( ; table-&gt;sp_speed != -1; table++)
+		<span class="enscript-keyword">if</span> (table-&gt;sp_speed == speed)
+			<span class="enscript-keyword">return</span> (table-&gt;sp_code);
+	<span class="enscript-keyword">return</span> (-1);
+}
+
+
+<span class="enscript-comment">/*
+ * Set tty hi and low water marks.
+ *
+ * Try to arrange the dynamics so there's about one second
+ * from hi to low water.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ttsetwater</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	<span class="enscript-type">int</span> cps;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> x;
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">CLAMP</span>(x, h, l)	((x) &gt; h ? h : ((x) &lt; l) ? l : (x))
+
+	cps = tp-&gt;t_ospeed / 10;
+	tp-&gt;t_lowat = x = CLAMP(cps / 2, TTMAXLOWAT, TTMINLOWAT);
+	x += cps;
+	x = CLAMP(x, TTMAXHIWAT, TTMINHIWAT);
+	tp-&gt;t_hiwat = roundup(x, CBSIZE);
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">CLAMP</span>
+}
+
+<span class="enscript-comment">/* ttyinfo has been converted to the MACH kernel */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_info.h&gt;</span>
+
+<span class="enscript-comment">/* XXX Should be in Mach header &lt;kern/thread.h&gt;, but doesn't work */</span>
+<span class="enscript-type">extern</span> kern_return_t	thread_info_internal(thread_t thread,
+				thread_flavor_t flavor,
+				thread_info_t thread_info_out,
+				mach_msg_type_number_t *thread_info_count);
+
+
+<span class="enscript-comment">/*
+ * Report on state of foreground process group.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ttyinfo_locked</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	<span class="enscript-type">int</span>		load;
+	thread_t	thread;
+	uthread_t	uthread;
+	proc_t		p;
+	proc_t		pick;
+	pid_t pickpid;
+	<span class="enscript-type">const</span> <span class="enscript-type">char</span>	*state;
+	<span class="enscript-type">struct</span> timeval	utime;
+	<span class="enscript-type">struct</span> timeval	stime;
+	thread_basic_info_data_t	basic_info;
+	mach_msg_type_number_t		mmtn = THREAD_BASIC_INFO_COUNT;
+	<span class="enscript-type">struct</span> pgrp * pg;
+
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	<span class="enscript-keyword">if</span> (ttycheckoutq(tp,0) == 0)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/* Print load average. */</span>
+	load = (averunnable.ldavg[0] * 100 + FSCALE / 2) &gt;&gt; FSHIFT;
+	ttyprintf(tp, <span class="enscript-string">&quot;load: %d.%02d &quot;</span>, load / 100, load % 100);
+
+	<span class="enscript-comment">/*
+	 * On return following a ttyprintf(), we set tp-&gt;t_rocount to 0 so
+	 * that pending input will be retyped on BS.
+	 */</span>
+	<span class="enscript-keyword">if</span> (tp-&gt;t_session == NULL) {
+		ttyprintf(tp, <span class="enscript-string">&quot;not a controlling terminal\n&quot;</span>);
+		tp-&gt;t_rocount = 0;
+		<span class="enscript-keyword">return</span>;
+}
+	<span class="enscript-keyword">if</span> (tp-&gt;t_pgrp == NULL) {
+		ttyprintf(tp, <span class="enscript-string">&quot;no foreground process group\n&quot;</span>);
+		tp-&gt;t_rocount = 0;
+		<span class="enscript-keyword">return</span>;
+	}
+	<span class="enscript-comment">/* first process in process group */</span>
+	<span class="enscript-comment">/* XXX is there a need for pgrp lock ? */</span>
+	<span class="enscript-keyword">if</span> ((p = tp-&gt;t_pgrp-&gt;pg_members.lh_first) == NULL) {
+		ttyprintf(tp, <span class="enscript-string">&quot;empty foreground process group\n&quot;</span>);
+		tp-&gt;t_rocount = 0;
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * Pick the most interesting process and copy some of its
+	 * state for printing later.
+	 */</span>
+	pg = proc_pgrp(p);
+	pgrp_lock(pg);
+	<span class="enscript-comment">/* the proc_compare is non blocking fn, no need to use iterator */</span>
+	<span class="enscript-keyword">for</span> (pick = NULL; p != NULL; p = p-&gt;p_pglist.le_next) {
+		<span class="enscript-keyword">if</span> (proc_compare(pick, p)) {
+			pick = p;
+			pickpid = p-&gt;p_pid;
+		} <span class="enscript-keyword">else</span> {
+			pickpid = pick-&gt;p_pid;
+		}
+	}
+	pgrp_unlock(pg);
+	<span class="enscript-comment">/* SAFE: All callers drop the lock on return */</span>
+	tty_unlock(tp);
+	pg_rele(pg);
+	tty_lock(tp);
+
+	pick = proc_find(pickpid);
+	<span class="enscript-keyword">if</span> (pick == PROC_NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (TAILQ_EMPTY(&amp;pick-&gt;p_uthlist) ||
+	    (uthread = TAILQ_FIRST(&amp;pick-&gt;p_uthlist)) == NULL ||
+	    (thread = vfs_context_thread(&amp;uthread-&gt;uu_context)) == NULL ||
+	    (thread_info_internal(thread, THREAD_BASIC_INFO, (thread_info_t)&amp;basic_info, &amp;mmtn) != KERN_SUCCESS)) {
+		ttyprintf(tp, <span class="enscript-string">&quot;foreground process without thread\n&quot;</span>);
+		tp-&gt;t_rocount = 0;
+		proc_rele(pick);
+		<span class="enscript-keyword">return</span>;
+	}
+
+	<span class="enscript-keyword">switch</span>(basic_info.run_state) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TH_STATE_RUNNING</span>:
+		state = <span class="enscript-string">&quot;running&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TH_STATE_STOPPED</span>:
+		state = <span class="enscript-string">&quot;stopped&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TH_STATE_WAITING</span>:
+		state = <span class="enscript-string">&quot;waiting&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TH_STATE_UNINTERRUPTIBLE</span>:
+		state = <span class="enscript-string">&quot;uninterruptible&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">TH_STATE_HALTED</span>:
+		state = <span class="enscript-string">&quot;halted&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		state = <span class="enscript-string">&quot;unknown&quot;</span>;
+		<span class="enscript-keyword">break</span>;
+	}
+	calcru(pick, &amp;utime, &amp;stime, NULL);
+	proc_rele(pick);
+
+	<span class="enscript-comment">/* Print command, pid, state, utime, and stime */</span>
+	ttyprintf(tp, <span class="enscript-string">&quot; cmd: %s %d %s %ld.%02du %ld.%02ds\n&quot;</span>,
+		pick-&gt;p_comm,
+		pick-&gt;p_pid,
+		state,
+		(<span class="enscript-type">long</span>)utime.tv_sec, utime.tv_usec / 10000,
+		(<span class="enscript-type">long</span>)stime.tv_sec, stime.tv_usec / 10000);
+	tp-&gt;t_rocount = 0;
+}
+
+
+<span class="enscript-comment">/*
+ * Returns 1 if p2 is &quot;better&quot; than p1
+ *
+ * The algorithm for picking the &quot;interesting&quot; process is thus:
+ *
+ *	1) Only foreground processes are eligible - implied.
+ *	2) Runnable processes are favored over anything else.  The runner
+ *	   with the highest cpu utilization is picked (p_estcpu).  Ties are
+ *	   broken by picking the highest pid.
+ *	3) The sleeper with the shortest sleep time is next.
+ *	4) Further ties are broken by picking the highest pid.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">ISRUN</span>(p)	(((p)-&gt;p_stat == SRUN) || ((p)-&gt;p_stat == SIDL))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TESTAB</span>(a, b)    ((a)&lt;&lt;1 | (b))
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ONLYA</span>   2
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">ONLYB</span>   1
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BOTH</span>    3
+
+<span class="enscript-comment">/*
+ * Locks:	pgrp_lock(p2) held on call to this function
+ *		tty_lock(tp) for p2's tty, for which p2 is the foreground
+ *			process, held on call to this function
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">proc_compare</span>(proc_t p1, proc_t p2)
+{
+	<span class="enscript-comment">/* NOTE THIS FN needs to be NON BLOCKING */</span>
+
+	<span class="enscript-keyword">if</span> (p1 == NULL)
+		<span class="enscript-keyword">return</span> (1);
+	<span class="enscript-comment">/*
+	 * see if at least one of them is runnable
+	 */</span>
+	<span class="enscript-keyword">switch</span> (TESTAB(ISRUN(p1), ISRUN(p2))) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ONLYA</span>:
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ONLYB</span>:
+		<span class="enscript-keyword">return</span> (1);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BOTH</span>:
+		<span class="enscript-comment">/*
+		 * tie - favor one with highest recent cpu utilization
+		 */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_PROC_HAS_SCHEDINFO_</span>
+		<span class="enscript-comment">/* Without the support the fields are always zero */</span>
+		<span class="enscript-keyword">if</span> (p2-&gt;p_estcpu &gt; p1-&gt;p_estcpu)
+			<span class="enscript-keyword">return</span> (1);
+		<span class="enscript-keyword">if</span> (p1-&gt;p_estcpu &gt; p2-&gt;p_estcpu)
+			<span class="enscript-keyword">return</span> (0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* _PROC_HAS_SCHEDINFO_ */</span>
+		<span class="enscript-keyword">return</span> (p2-&gt;p_pid &gt; p1-&gt;p_pid);	<span class="enscript-comment">/* tie - return highest pid */</span>
+	}
+	<span class="enscript-comment">/*
+ 	 * weed out zombies
+	 */</span>
+	<span class="enscript-keyword">switch</span> (TESTAB(p1-&gt;p_stat == SZOMB, p2-&gt;p_stat == SZOMB)) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ONLYA</span>:
+		<span class="enscript-keyword">return</span> (1);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">ONLYB</span>:
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">BOTH</span>:
+		<span class="enscript-keyword">return</span> (p2-&gt;p_pid &gt; p1-&gt;p_pid); <span class="enscript-comment">/* tie - return highest pid */</span>
+	}
+	<span class="enscript-comment">/*
+	 * pick the one with the smallest sleep time
+	 */</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">_PROC_HAS_SCHEDINFO_</span>
+	<span class="enscript-comment">/* Without the support the fields are always zero */</span>
+	<span class="enscript-keyword">if</span> (p2-&gt;p_slptime &gt; p1-&gt;p_slptime)
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">if</span> (p1-&gt;p_slptime &gt; p2-&gt;p_slptime)
+		<span class="enscript-keyword">return</span> (1);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* _PROC_HAS_SCHEDINFO_ */</span>
+	<span class="enscript-keyword">return</span> (p2-&gt;p_pid &gt; p1-&gt;p_pid);		<span class="enscript-comment">/* tie - return highest pid */</span>
+}
+
+
+<span class="enscript-comment">/*
+ * Output char to tty; console putchar style.
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ *
+ * Notes:	Only ever called from putchar() in subr_prf.c
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">tputchar</span>(<span class="enscript-type">int</span> c, <span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_OWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+	<span class="enscript-keyword">if</span> (!ISSET(tp-&gt;t_state, TS_CONNECTED)) {
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	<span class="enscript-keyword">if</span> (c == <span class="enscript-string">'\n'</span>)
+		(<span class="enscript-type">void</span>)ttyoutput(<span class="enscript-string">'\r'</span>, tp);
+	(<span class="enscript-type">void</span>)ttyoutput(c, tp);
+	ttstart(tp);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-comment">/*
+ * ttysleep
+ *
+ * Sleep on a wait channel waiting for an interrupt or a condition to come
+ * true so that we are woken up.
+ *
+ * Parameters:	tp			Tty going to sleep
+ *		chan			The sleep channel (usually an address
+ *					of a structure member)
+ *		pri			priority and flags
+ *		wmesg			Wait message; shows up in debugger,
+ *					should show up in &quot;ps&quot;, but doesn't
+ *		timo			Timeout for the sleep
+ *
+ * Returns:	0			Condition came true
+ *		ERESTART		Upper layer must redrive the call;
+ *					this is usually done by the Libc
+ *					stub in user space
+ *	msleep0:EINTR			Interrupted (usually a signal)
+ *	msleep0:ERESTART		Interrupted (usually a masked signal)
+ *	msleep0:EWOULDBLOCK		Timeout (timo) already expired
+ *
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ *
+ * Sleep on chan, returning ERESTART if tty changed while we napped and
+ * returning any errors (e.g. EINTR/EWOULDBLOCK) reported by msleep0.  If
+ * the tty is revoked, restarting a pending call will redo validation done
+ * at the start of the call.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">ttysleep</span>(<span class="enscript-type">struct</span> tty *tp, <span class="enscript-type">void</span> *chan, <span class="enscript-type">int</span> pri, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *wmesg, <span class="enscript-type">int</span> timo)
+{
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> gen;
+
+	TTY_LOCK_OWNED(tp);
+
+	gen = tp-&gt;t_gen;
+	<span class="enscript-comment">/* Use of msleep0() avoids conversion timo/timespec/timo */</span>
+	error = msleep0(chan, &amp;tp-&gt;t_lock, pri, wmesg, timo, (<span class="enscript-type">int</span> (*)(<span class="enscript-type">int</span>))0);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> (error);
+	<span class="enscript-keyword">return</span> (tp-&gt;t_gen == gen ? 0 : ERESTART);
+}
+
+
+<span class="enscript-comment">/*
+ * Allocate a tty structure and its associated buffers.
+ *
+ * Parameters:	void
+ *
+ * Returns:	!NULL				Address of new struct tty
+ *		NULL				Error (&quot;ENOMEM&quot;)
+ *
+ * Locks:	The tty_lock() of the returned tty is not held when it
+ *		is returned.
+ */</span>
+<span class="enscript-type">struct</span> tty *
+<span class="enscript-function-name">ttymalloc</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> tty *tp;
+
+	MALLOC(tp, <span class="enscript-type">struct</span> tty *, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> tty), M_TTYS, M_WAITOK|M_ZERO);
+	<span class="enscript-keyword">if</span> (tp != NULL) {
+		<span class="enscript-comment">/* XXX: default to TTYCLSIZE(1024) chars for now */</span>
+		clalloc(&amp;tp-&gt;t_rawq, TTYCLSIZE, 1);
+		clalloc(&amp;tp-&gt;t_canq, TTYCLSIZE, 1);
+		<span class="enscript-comment">/* output queue doesn't need quoting */</span>
+		clalloc(&amp;tp-&gt;t_outq, TTYCLSIZE, 0);
+		lck_mtx_init(&amp;tp-&gt;t_lock, tty_lck_grp, tty_lck_attr);
+		klist_init(&amp;tp-&gt;t_rsel.si_note);
+		klist_init(&amp;tp-&gt;t_wsel.si_note);
+		tp-&gt;t_refcnt = 1;
+	}
+	<span class="enscript-keyword">return</span> (tp);
+}
+
+<span class="enscript-comment">/*
+ * Increment the reference count on a tty.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ttyhold</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_OWNED(tp);
+	tp-&gt;t_refcnt++;
+}
+
+<span class="enscript-comment">/*
+ * Drops a reference count on a tty structure; if the reference count reaches
+ * zero, then also frees the structure and associated buffers.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ttyfree</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_NOTOWNED(tp);
+
+	tty_lock(tp);
+	<span class="enscript-keyword">if</span> (--tp-&gt;t_refcnt == 0) {
+		tty_unlock(tp);
+		ttydeallocate(tp);
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (tp-&gt;t_refcnt &lt; 0) {
+		panic(<span class="enscript-string">&quot;%s: freeing free tty %p&quot;</span>, __func__, tp);
+	} <span class="enscript-keyword">else</span>
+		tty_unlock(tp);
+}
+
+<span class="enscript-comment">/*
+ * Deallocate a tty structure and its buffers.
+ *
+ * Locks:	The tty_lock() is assumed to not be held at the time of
+ *		the free; this function destroys the mutex.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">ttydeallocate</span>(<span class="enscript-type">struct</span> tty *tp)
+{
+	TTY_LOCK_NOTOWNED(tp);	<span class="enscript-comment">/* debug assert */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEBUG</span>
+	<span class="enscript-keyword">if</span> (!(SLIST_EMPTY(&amp;tp-&gt;t_rsel.si_note) &amp;&amp; SLIST_EMPTY(&amp;tp-&gt;t_wsel.si_note))) {
+		panic(<span class="enscript-string">&quot;knotes hooked into a tty when the tty is freed.\n&quot;</span>);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEBUG */</span>
+
+	clfree(&amp;tp-&gt;t_rawq);
+	clfree(&amp;tp-&gt;t_canq);
+	clfree(&amp;tp-&gt;t_outq);
+	lck_mtx_destroy(&amp;tp-&gt;t_lock, tty_lck_grp);
+	FREE(tp, M_TTYS);
+}
+
+
+<span class="enscript-comment">/*
+ * Locks:	Assumes tty_lock() is held prior to calling.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">isbackground</span>(proc_t p, <span class="enscript-type">struct</span> tty  *tp)
+{
+	TTY_LOCK_OWNED(tp);
+
+	<span class="enscript-keyword">return</span> (tp-&gt;t_session != NULL &amp;&amp; p-&gt;p_pgrp != NULL &amp;&amp; (p-&gt;p_pgrp != tp-&gt;t_pgrp) &amp;&amp; isctty_sp(p, tp, p-&gt;p_pgrp-&gt;pg_session));
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 
+<span class="enscript-function-name">isctty</span>(proc_t p, <span class="enscript-type">struct</span> tty  *tp)
+{
+	<span class="enscript-type">int</span> retval;
+	<span class="enscript-type">struct</span> session * sessp;
+
+	sessp = proc_session(p);
+	retval = (sessp == tp-&gt;t_session &amp;&amp; p-&gt;p_flag &amp; P_CONTROLT);
+	session_rele(sessp);
+	<span class="enscript-keyword">return</span>(retval);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">isctty_sp</span>(proc_t p, <span class="enscript-type">struct</span> tty  *tp, <span class="enscript-type">struct</span> session *sessp)
+{
+	<span class="enscript-keyword">return</span>(sessp == tp-&gt;t_session &amp;&amp; p-&gt;p_flag &amp; P_CONTROLT);
+
+}
+</pre>
+<hr />
+</body></html>

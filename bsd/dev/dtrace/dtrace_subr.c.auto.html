@@ -1,0 +1,387 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>dtrace_subr.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">dtrace_subr.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the &quot;License&quot;).
+ * You may not use this file except in compliance with the License.
+ *
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or <a href="http://www.opensolaris.org/os/licensing.">http://www.opensolaris.org/os/licensing.</a>
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets &quot;[]&quot; replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */</span>
+
+<span class="enscript-comment">/*
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
+ * Use is subject to license terms.
+ */</span>
+
+<span class="enscript-comment">/*
+ * #pragma ident	&quot;@(#)dtrace_subr.c	1.8	07/06/05 SMI&quot;
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdarg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_impl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_CSR</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/codesign.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/csr.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * APPLE NOTE: Solaris proc_t is the struct.
+ * Darwin's proc_t is a pointer to it.
+ */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">proc_t</span> struct proc <span class="enscript-comment">/* Steer clear of the Darwin typedef for proc_t */</span>
+
+
+<span class="enscript-comment">/* Copied from an arch specific dtrace_subr.c. */</span>
+<span class="enscript-function-name">int</span> (*dtrace_fasttrap_probe_ptr)(<span class="enscript-type">struct</span> regs *);
+
+<span class="enscript-comment">/*
+ * Following DTrace hooks are taken from Solaris' dtrace_subr.c
+ * They're assigned in dtrace.c but Darwin never calls them.
+ */</span>
+<span class="enscript-function-name">void</span> (*dtrace_cpu_init)(processorid_t);
+<span class="enscript-function-name">int</span> (*dtrace_modload)(<span class="enscript-type">struct</span> kmod_info *, uint32_t);
+<span class="enscript-function-name">int</span> (*dtrace_modunload)(<span class="enscript-type">struct</span> kmod_info *);
+<span class="enscript-function-name">void</span> (*dtrace_helpers_cleanup)(proc_t *);
+<span class="enscript-function-name">void</span> (*dtrace_helpers_fork)(proc_t *, proc_t *);
+<span class="enscript-function-name">void</span> (*dtrace_cpustart_init)(<span class="enscript-type">void</span>);
+<span class="enscript-function-name">void</span> (*dtrace_cpustart_fini)(<span class="enscript-type">void</span>);
+
+<span class="enscript-function-name">void</span> (*dtrace_debugger_init)(<span class="enscript-type">void</span>);
+<span class="enscript-function-name">void</span> (*dtrace_debugger_fini)(<span class="enscript-type">void</span>);
+
+dtrace_vtime_state_t dtrace_vtime_active = 0;
+dtrace_cacheid_t dtrace_predcache_id = DTRACE_CACHEIDNONE + 1;
+
+<span class="enscript-function-name">void</span> (*dtrace_fasttrap_fork_ptr)(proc_t *, proc_t *);
+<span class="enscript-function-name">void</span> (*dtrace_fasttrap_exec_ptr)(proc_t *);
+<span class="enscript-function-name">void</span> (*dtrace_fasttrap_exit_ptr)(proc_t *);
+
+<span class="enscript-comment">/*
+ * This function is called by cfork() in the event that it appears that
+ * there may be dtrace tracepoints active in the parent process's address
+ * space. This first confirms the existence of dtrace tracepoints in the
+ * parent process and calls into the fasttrap module to remove the
+ * corresponding tracepoints from the child. By knowing that there are
+ * existing tracepoints, and ensuring they can't be removed, we can rely
+ * on the fasttrap module remaining loaded.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_fasttrap_fork</span>(proc_t *p, proc_t *cp)
+{
+	<span class="enscript-keyword">if</span> (dtrace_fasttrap_fork_ptr) {
+		(*dtrace_fasttrap_fork_ptr)(p, cp);
+	}
+}
+
+
+<span class="enscript-comment">/*
+ * DTrace wait for process execution
+ *
+ * This feature is using a list of entries, each entry containing a pointer
+ * on a process description. The description is provided by a client, and it
+ * contains the command we want to wait for along with a reserved space for
+ * the caught process id.
+ *
+ * Once an awaited process has been spawned, it will be suspended before
+ * notifying the client. Once the client has been back to userland, it's its
+ * duty to resume the task.
+ */</span>
+
+lck_mtx_t dtrace_procwaitfor_lock;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> dtrace_proc_awaited_entry {
+	<span class="enscript-type">struct</span> dtrace_procdesc			*pdesc;
+	LIST_ENTRY(dtrace_proc_awaited_entry)	entries;
+} dtrace_proc_awaited_entry_t;
+
+<span class="enscript-function-name">LIST_HEAD</span>(listhead, dtrace_proc_awaited_entry) dtrace_proc_awaited_head
+	= LIST_HEAD_INITIALIZER(dtrace_proc_awaited_head);
+
+<span class="enscript-function-name">void</span> (*dtrace_proc_waitfor_exec_ptr)(proc_t*) = NULL;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">dtrace_proc_get_execpath</span>(proc_t *p, <span class="enscript-type">char</span> *buffer, <span class="enscript-type">int</span> *maxlen)
+{
+	<span class="enscript-type">int</span> err = 0, vid = 0;
+	vnode_t tvp = NULLVP, nvp = NULLVP;
+
+	ASSERT(p);
+	ASSERT(buffer);
+	ASSERT(maxlen);
+
+	<span class="enscript-keyword">if</span> ((tvp = p-&gt;p_textvp) == NULLVP)
+		<span class="enscript-keyword">return</span> ESRCH;
+
+	vid = vnode_vid(tvp);
+	<span class="enscript-keyword">if</span> ((err = vnode_getwithvid(tvp, vid)) != 0)
+		<span class="enscript-keyword">return</span> err;
+
+	<span class="enscript-keyword">if</span> ((err = vn_getpath_fsenter(tvp, buffer, maxlen)) != 0)
+		<span class="enscript-keyword">return</span> err;
+	vnode_put(tvp);
+
+	<span class="enscript-keyword">if</span> ((err = vnode_lookup(buffer, 0, &amp;nvp, vfs_context_current())) != 0)
+		<span class="enscript-keyword">return</span> err;
+	<span class="enscript-keyword">if</span> (nvp != NULLVP)
+		vnode_put(nvp);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_proc_exec_notification</span>(proc_t *p) {
+	dtrace_proc_awaited_entry_t *entry, *tmp;
+	<span class="enscript-type">static</span> <span class="enscript-type">char</span> execpath[MAXPATHLEN];
+
+	ASSERT(p);
+	ASSERT(p-&gt;p_pid != -1);
+	ASSERT(current_task() != p-&gt;task);
+
+	lck_mtx_lock(&amp;dtrace_procwaitfor_lock);
+
+	LIST_FOREACH_SAFE(entry, &amp;dtrace_proc_awaited_head, entries, tmp) {
+		<span class="enscript-comment">/* By default consider we're using p_comm. */</span>
+		<span class="enscript-type">char</span> *pname = p-&gt;p_comm;
+
+		<span class="enscript-comment">/* Already matched with another process. */</span>
+		<span class="enscript-keyword">if</span> ((entry-&gt;pdesc-&gt;p_pid != -1))
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-comment">/* p_comm is too short, use the execpath. */</span>
+		<span class="enscript-keyword">if</span> (entry-&gt;pdesc-&gt;p_name_length &gt;= MAXCOMLEN) {
+			<span class="enscript-comment">/*
+			 * Retrieve the executable path. After the call, length contains
+			 * the length of the string + 1.
+			 */</span>
+			<span class="enscript-type">int</span> length = <span class="enscript-keyword">sizeof</span>(execpath);
+			<span class="enscript-keyword">if</span> (dtrace_proc_get_execpath(p, execpath, &amp;length) != 0)
+				<span class="enscript-keyword">continue</span>;
+			<span class="enscript-comment">/* Move the cursor to the position after the last / */</span>
+			pname = &amp;execpath[length - 1];
+			<span class="enscript-keyword">while</span> (pname != execpath &amp;&amp; *pname != <span class="enscript-string">'/'</span>)
+				pname--;
+			pname = (*pname == <span class="enscript-string">'/'</span>) ? pname + 1 : pname;
+		}
+
+		<span class="enscript-keyword">if</span> (!strcmp(entry-&gt;pdesc-&gt;p_name, pname)) {
+			entry-&gt;pdesc-&gt;p_pid = p-&gt;p_pid;
+			task_pidsuspend(p-&gt;task);
+			wakeup(entry);
+		}
+	}
+
+	lck_mtx_unlock(&amp;dtrace_procwaitfor_lock);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">dtrace_proc_waitfor</span>(dtrace_procdesc_t* pdesc) {
+	dtrace_proc_awaited_entry_t entry;
+	<span class="enscript-type">int</span> res;
+
+	ASSERT(pdesc);
+	ASSERT(pdesc-&gt;p_name);
+
+	<span class="enscript-comment">/*
+	 * Never trust user input, compute the length of the process name and ensure the
+	 * string is null terminated.
+	 */</span>
+	pdesc-&gt;p_name_length = strnlen(pdesc-&gt;p_name, <span class="enscript-keyword">sizeof</span>(pdesc-&gt;p_name));
+	<span class="enscript-keyword">if</span> (pdesc-&gt;p_name_length &gt;= (<span class="enscript-type">int</span>) <span class="enscript-keyword">sizeof</span>(pdesc-&gt;p_name))
+		<span class="enscript-keyword">return</span> -1;
+
+	lck_mtx_lock(&amp;dtrace_procwaitfor_lock);
+
+	<span class="enscript-comment">/* Initialize and insert the entry, then install the hook. */</span>
+	pdesc-&gt;p_pid = -1;
+	entry.pdesc = pdesc;
+	LIST_INSERT_HEAD(&amp;dtrace_proc_awaited_head, &amp;entry, entries);
+	dtrace_proc_waitfor_exec_ptr = &amp;dtrace_proc_exec_notification;
+
+	<span class="enscript-comment">/* Sleep until the process has been executed */</span>
+	res = msleep(&amp;entry, &amp;dtrace_procwaitfor_lock, PCATCH, <span class="enscript-string">&quot;dtrace_proc_waitfor&quot;</span>, NULL);
+
+	<span class="enscript-comment">/* Remove the entry and the hook if it is not needed anymore. */</span>
+	LIST_REMOVE(&amp;entry, entries);
+	<span class="enscript-keyword">if</span> (LIST_EMPTY(&amp;dtrace_proc_awaited_head))
+		dtrace_proc_waitfor_exec_ptr = NULL;
+
+	lck_mtx_unlock(&amp;dtrace_procwaitfor_lock);
+
+	<span class="enscript-keyword">return</span> res;
+}
+
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> dtrace_invop_hdlr {
+	<span class="enscript-type">int</span> (*dtih_func)(uintptr_t, uintptr_t *, uintptr_t);
+	<span class="enscript-type">struct</span> dtrace_invop_hdlr *dtih_next;
+} dtrace_invop_hdlr_t;
+
+dtrace_invop_hdlr_t *dtrace_invop_hdlr;
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">dtrace_invop</span>(uintptr_t, uintptr_t *, uintptr_t);
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">dtrace_invop</span>(uintptr_t addr, uintptr_t *stack, uintptr_t eax)
+{
+	dtrace_invop_hdlr_t *hdlr;
+	<span class="enscript-type">int</span> rval;
+
+	<span class="enscript-keyword">for</span> (hdlr = dtrace_invop_hdlr; hdlr != NULL; hdlr = hdlr-&gt;dtih_next) {
+		<span class="enscript-keyword">if</span> ((rval = hdlr-&gt;dtih_func(addr, stack, eax)) != 0)
+			<span class="enscript-keyword">return</span> (rval);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_invop_add</span>(<span class="enscript-type">int</span> (*func)(uintptr_t, uintptr_t *, uintptr_t))
+{
+	dtrace_invop_hdlr_t *hdlr;
+
+	hdlr = kmem_alloc(<span class="enscript-keyword">sizeof</span> (dtrace_invop_hdlr_t), KM_SLEEP);
+	hdlr-&gt;dtih_func = func;
+	hdlr-&gt;dtih_next = dtrace_invop_hdlr;
+	dtrace_invop_hdlr = hdlr;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_invop_remove</span>(<span class="enscript-type">int</span> (*func)(uintptr_t, uintptr_t *, uintptr_t))
+{
+	dtrace_invop_hdlr_t *hdlr = dtrace_invop_hdlr, *prev = NULL;
+
+	<span class="enscript-keyword">for</span> (;;) {
+		<span class="enscript-keyword">if</span> (hdlr == NULL)
+			panic(<span class="enscript-string">&quot;attempt to remove non-existent invop handler&quot;</span>);
+
+		<span class="enscript-keyword">if</span> (hdlr-&gt;dtih_func == func)
+			<span class="enscript-keyword">break</span>;
+
+		prev = hdlr;
+		hdlr = hdlr-&gt;dtih_next;
+	}
+
+	<span class="enscript-keyword">if</span> (prev == NULL) {
+		ASSERT(dtrace_invop_hdlr == hdlr);
+		dtrace_invop_hdlr = hdlr-&gt;dtih_next;
+	} <span class="enscript-keyword">else</span> {
+		ASSERT(dtrace_invop_hdlr != hdlr);
+		prev-&gt;dtih_next = hdlr-&gt;dtih_next;
+	}
+
+	kmem_free(hdlr, <span class="enscript-keyword">sizeof</span> (dtrace_invop_hdlr_t));
+}
+
+
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_restriction_policy_load</span>(<span class="enscript-type">void</span>)
+{
+}
+
+<span class="enscript-comment">/*
+ * Check if DTrace has been restricted by the current security policy.
+ */</span>
+boolean_t
+<span class="enscript-function-name">dtrace_is_restricted</span>(<span class="enscript-type">void</span>)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_CSR</span>
+	<span class="enscript-keyword">if</span> (csr_check(CSR_ALLOW_UNRESTRICTED_DTRACE) != 0)
+		<span class="enscript-keyword">return</span> TRUE;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> FALSE;
+}
+
+<span class="enscript-comment">/*
+ * Check if DTrace is running on a machine currently configured for Apple Internal development
+ */</span>
+boolean_t
+<span class="enscript-function-name">dtrace_is_running_apple_internal</span>(<span class="enscript-type">void</span>)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_CSR</span>
+	<span class="enscript-keyword">if</span> (csr_check(CSR_ALLOW_APPLE_INTERNAL) == 0)
+		<span class="enscript-keyword">return</span> TRUE;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> FALSE;
+}
+
+boolean_t
+<span class="enscript-function-name">dtrace_fbt_probes_restricted</span>(<span class="enscript-type">void</span>)
+{
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_CSR</span>
+	<span class="enscript-keyword">if</span> (dtrace_is_restricted() &amp;&amp; !dtrace_is_running_apple_internal())
+		<span class="enscript-keyword">return</span> TRUE;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> FALSE;
+}
+
+<span class="enscript-comment">/*
+ * Check if the process can be attached.
+ */</span>
+boolean_t
+<span class="enscript-function-name">dtrace_can_attach_to_proc</span>(proc_t *proc)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">proc</span>)
+	ASSERT(proc != NULL);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_CSR</span>
+	<span class="enscript-keyword">if</span> (cs_restricted(proc))
+		<span class="enscript-keyword">return</span> FALSE;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> TRUE;
+}
+
+</pre>
+<hr />
+</body></html>

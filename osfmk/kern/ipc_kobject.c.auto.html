@@ -1,0 +1,633 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ipc_kobject.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ipc_kobject.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by McAfee Research in 2004 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ * Copyright (c) 2005 SPARTA, Inc.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+<span class="enscript-comment">/*
+ *	File:	kern/ipc_kobject.c
+ *	Author:	Rich Draves
+ *	Date:	1989
+ *
+ *	Functions for letting a port represent a kernel object.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach_debug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach_ipc_test.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach_rt.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mig.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/message.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mig_errors.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/notify.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/ndr.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_port_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_host_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_security_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/clock_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/clock_priv_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/lock_set_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;default_pager/default_pager_object_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_control_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_default_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/processor_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/processor_set_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_voucher_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_voucher_attr_control_server.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">VM32_SUPPORT</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm32_map_server.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act_server.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;device/device_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;device/device_server.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;UserNotification/UNDReplyServer.h&gt;</span>
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">CONFIG_AUDIT</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/audit_sessionport.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span>     <span class="enscript-variable-name">MACH_MACHINE_ROUTINES</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MACH_MACHINE_ROUTINES */</span>
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">XK_PROXY</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;uk_xkern/xk_uproxy_server.h&gt;</span>
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* XK_PROXY */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_tt.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_mig.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_misc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_kobject.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host_notify.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/mk_timer.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_kmsg.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_port.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;ipc/ipc_voucher.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sync_sema.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/counters.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_mach_internal.h&gt;</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">char</span> *<span class="enscript-function-name">proc_name_address</span>(<span class="enscript-type">void</span> *p);
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">proc_pid</span>(<span class="enscript-type">void</span> *p);
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kobject_notify
+ *	Purpose:
+ *		Deliver notifications to kobjects that care about them.
+ */</span>
+boolean_t
+<span class="enscript-function-name">ipc_kobject_notify</span>(
+        mach_msg_header_t *request_header,
+        mach_msg_header_t *reply_header);
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+        mach_msg_id_t num;
+        mig_routine_t routine;
+	<span class="enscript-type">int</span> size;
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MACH_COUNTERS</span>
+	mach_counter_t callcount;
+#<span class="enscript-reference">endif</span>
+} mig_hash_t;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_MIG_ENTRIES</span> 1031
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MIG_HASH</span>(x) (x)
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">max</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">max</span>(a,b)        (((a) &gt; (b)) ? (a) : (b))
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* max */</span>
+
+<span class="enscript-type">static</span> mig_hash_t mig_buckets[MAX_MIG_ENTRIES];
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> mig_table_max_displ;
+<span class="enscript-type">static</span> mach_msg_size_t mig_reply_size = <span class="enscript-keyword">sizeof</span>(mig_reply_error_t);
+
+
+
+<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *mig_e[] = {
+        (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;mach_vm_subsystem,
+        (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;mach_port_subsystem,
+        (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;mach_host_subsystem,
+        (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;host_priv_subsystem,
+        (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;host_security_subsystem,
+        (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;clock_subsystem,
+        (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;clock_priv_subsystem,
+        (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;processor_subsystem,
+        (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;processor_set_subsystem,
+        (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;is_iokit_subsystem,
+	(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;lock_set_subsystem,
+	(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;task_subsystem,
+	(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;thread_act_subsystem,
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">VM32_SUPPORT</span>
+	(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;vm32_map_subsystem,
+#<span class="enscript-reference">endif</span>
+	(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;UNDReply_subsystem,
+	(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;default_pager_object_subsystem,
+	(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;mach_voucher_subsystem,
+	(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;mach_voucher_attr_control_subsystem,
+
+#<span class="enscript-reference">if</span>     <span class="enscript-variable-name">XK_PROXY</span>
+        (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;do_uproxy_xk_uproxy_subsystem,
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* XK_PROXY */</span>
+#<span class="enscript-reference">if</span>     <span class="enscript-variable-name">MACH_MACHINE_ROUTINES</span>
+        (<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;MACHINE_SUBSYSTEM,
+#<span class="enscript-reference">endif</span>  <span class="enscript-comment">/* MACH_MACHINE_ROUTINES */</span>
+#<span class="enscript-reference">if</span>     <span class="enscript-variable-name">MCMSG</span> &amp;&amp; <span class="enscript-variable-name">iPSC860</span>
+	(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *)&amp;mcmsg_info_subsystem,
+#<span class="enscript-reference">endif</span>  <span class="enscript-comment">/* MCMSG &amp;&amp; iPSC860 */</span>
+};
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mig_init</span>(<span class="enscript-type">void</span>)
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> i, n = <span class="enscript-keyword">sizeof</span>(mig_e)/<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> mig_subsystem *);
+    <span class="enscript-type">int</span> howmany;
+    mach_msg_id_t j, pos, nentry, range;
+	
+    <span class="enscript-keyword">for</span> (i = 0; i &lt; n; i++) {
+	range = mig_e[i]-&gt;end - mig_e[i]-&gt;start;
+	<span class="enscript-keyword">if</span> (!mig_e[i]-&gt;start || range &lt; 0)
+	    panic(<span class="enscript-string">&quot;the msgh_ids in mig_e[] aren't valid!&quot;</span>);
+
+	<span class="enscript-keyword">for</span>  (j = 0; j &lt; range; j++) {
+	  <span class="enscript-keyword">if</span> (mig_e[i]-&gt;routine[j].stub_routine) { 
+	    <span class="enscript-comment">/* Only put real entries in the table */</span>
+	    nentry = j + mig_e[i]-&gt;start;	
+	    <span class="enscript-keyword">for</span> (pos = MIG_HASH(nentry) % MAX_MIG_ENTRIES, howmany = 1;
+		 mig_buckets[pos].num;
+		 pos++, pos = pos % MAX_MIG_ENTRIES, howmany++) {
+	         <span class="enscript-keyword">if</span> (mig_buckets[pos].num == nentry) {
+		        printf(<span class="enscript-string">&quot;message id = %d\n&quot;</span>, nentry);
+		 	panic(<span class="enscript-string">&quot;multiple entries with the same msgh_id&quot;</span>);
+	         }
+		 <span class="enscript-keyword">if</span> (howmany == MAX_MIG_ENTRIES)
+		       panic(<span class="enscript-string">&quot;the mig dispatch table is too small&quot;</span>);
+	    }
+		
+	    mig_buckets[pos].num = nentry;
+	    mig_buckets[pos].routine = mig_e[i]-&gt;routine[j].stub_routine;
+	    <span class="enscript-keyword">if</span> (mig_e[i]-&gt;routine[j].max_reply_msg)
+		    mig_buckets[pos].size = mig_e[i]-&gt;routine[j].max_reply_msg;
+	    <span class="enscript-keyword">else</span>
+		    mig_buckets[pos].size = mig_e[i]-&gt;maxsize;
+
+	    mig_table_max_displ = max(howmany, mig_table_max_displ);
+	  }
+	}
+    }
+    printf(<span class="enscript-string">&quot;mig_table_max_displ = %d\n&quot;</span>, mig_table_max_displ);
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kobject_server
+ *	Purpose:
+ *		Handle a message sent to the kernel.
+ *		Generates a reply message.
+ *		Version for Untyped IPC.
+ *	Conditions:
+ *		Nothing locked.
+ */</span>
+
+ipc_kmsg_t
+<span class="enscript-function-name">ipc_kobject_server</span>(
+	ipc_kmsg_t	request)
+{
+	mach_msg_size_t reply_size;
+	ipc_kmsg_t reply;
+	kern_return_t kr;
+	ipc_port_t *destp;
+	mach_msg_format_0_trailer_t *trailer;
+	<span class="enscript-type">register</span> mig_hash_t *ptr;
+
+	<span class="enscript-comment">/*
+	 * Find out corresponding mig_hash entry if any
+	 */</span>
+	{
+	    <span class="enscript-type">register</span> <span class="enscript-type">int</span> key = request-&gt;ikm_header-&gt;msgh_id;
+	    <span class="enscript-type">register</span> <span class="enscript-type">int</span> i = MIG_HASH(key);
+	    <span class="enscript-type">register</span> <span class="enscript-type">int</span> max_iter = mig_table_max_displ;
+	
+	    <span class="enscript-keyword">do</span>
+		ptr = &amp;mig_buckets[i++ % MAX_MIG_ENTRIES];
+	    <span class="enscript-keyword">while</span> (key != ptr-&gt;num &amp;&amp; ptr-&gt;num &amp;&amp; --max_iter);
+
+	    <span class="enscript-keyword">if</span> (!ptr-&gt;routine || key != ptr-&gt;num) {
+	        ptr = (mig_hash_t *)0;
+		reply_size = mig_reply_size;
+	    } <span class="enscript-keyword">else</span> {
+		reply_size = ptr-&gt;size;
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MACH_COUNTER</span>
+		ptr-&gt;callcount++;
+#<span class="enscript-reference">endif</span>
+	    }
+	}
+
+	<span class="enscript-comment">/* round up for trailer size */</span>
+        reply_size += MAX_TRAILER_SIZE;
+	reply = ipc_kmsg_alloc(reply_size);
+
+	<span class="enscript-keyword">if</span> (reply == IKM_NULL) {
+		printf(<span class="enscript-string">&quot;ipc_kobject_server: dropping request\n&quot;</span>);
+		ipc_kmsg_destroy(request);
+		<span class="enscript-keyword">return</span> IKM_NULL;
+	}
+
+	<span class="enscript-comment">/*
+	 * Initialize reply message.
+	 */</span>
+	{
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">InP</span>	((mach_msg_header_t *) request-&gt;ikm_header)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">OutP</span>	((mig_reply_error_t *) reply-&gt;ikm_header)
+
+	    <span class="enscript-comment">/* 
+	     * MIG should really assure no data leakage -
+	     * but until it does, pessimistically zero the
+	     * whole reply buffer.
+	     */</span>
+	    bzero((<span class="enscript-type">void</span> *)OutP, reply_size);
+
+	    OutP-&gt;NDR = NDR_record;
+	    OutP-&gt;Head.msgh_size = <span class="enscript-keyword">sizeof</span>(mig_reply_error_t);
+
+	    OutP-&gt;Head.msgh_bits =
+		MACH_MSGH_BITS_SET(MACH_MSGH_BITS_LOCAL(InP-&gt;msgh_bits), 0, 0, 0);
+	    OutP-&gt;Head.msgh_remote_port = InP-&gt;msgh_local_port;
+	    OutP-&gt;Head.msgh_local_port = MACH_PORT_NULL;
+	    OutP-&gt;Head.msgh_voucher_port = MACH_PORT_NULL;
+	    OutP-&gt;Head.msgh_id = InP-&gt;msgh_id + 100;
+
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">InP</span>
+#<span class="enscript-reference">undef</span>	<span class="enscript-variable-name">OutP</span>
+	}
+
+	<span class="enscript-comment">/*
+	 * Find the routine to call, and call it
+	 * to perform the kernel function
+	 */</span>
+	{
+	    <span class="enscript-keyword">if</span> (ptr) {	
+		(*ptr-&gt;routine)(request-&gt;ikm_header, reply-&gt;ikm_header);
+		kernel_task-&gt;messages_received++;
+	    }
+	    <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (!ipc_kobject_notify(request-&gt;ikm_header, reply-&gt;ikm_header)){
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MACH_IPC_TEST</span>
+		    printf(<span class="enscript-string">&quot;ipc_kobject_server: bogus kernel message, id=%d\n&quot;</span>,
+			request-&gt;ikm_header-&gt;msgh_id);
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MACH_IPC_TEST */</span>
+		    _MIG_MSGID_INVALID(request-&gt;ikm_header-&gt;msgh_id);
+
+		    ((mig_reply_error_t *) reply-&gt;ikm_header)-&gt;RetCode
+			= MIG_BAD_ID;
+		}
+		<span class="enscript-keyword">else</span>
+		  kernel_task-&gt;messages_received++;
+	    }
+	    kernel_task-&gt;messages_sent++;
+	}
+
+	<span class="enscript-comment">/*
+	 *	Destroy destination. The following code differs from
+	 *	ipc_object_destroy in that we release the send-once
+	 *	right instead of generating a send-once notification
+	 * 	(which would bring us here again, creating a loop).
+	 *	It also differs in that we only expect send or
+	 *	send-once rights, never receive rights.
+	 *
+	 *	We set msgh_remote_port to IP_NULL so that the kmsg
+	 *	destroy routines don't try to destroy the port twice.
+	 */</span>
+	destp = (ipc_port_t *) &amp;request-&gt;ikm_header-&gt;msgh_remote_port;
+	<span class="enscript-keyword">switch</span> (MACH_MSGH_BITS_REMOTE(request-&gt;ikm_header-&gt;msgh_bits)) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_TYPE_PORT_SEND</span>:
+		    ipc_port_release_send(*destp);
+		    <span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_MSG_TYPE_PORT_SEND_ONCE</span>:
+		    ipc_port_release_sonce(*destp);
+		    <span class="enscript-keyword">break</span>;
+		
+		<span class="enscript-reference">default</span>:
+		    panic(<span class="enscript-string">&quot;ipc_kobject_server: strange destination rights&quot;</span>);
+	}
+	*destp = IP_NULL;
+
+	<span class="enscript-comment">/*
+	 *	Destroy voucher.  The kernel MIG servers never take ownership
+	 *	of vouchers sent in messages.  Swallow any such rights here.
+	 */</span>
+	<span class="enscript-keyword">if</span> (IP_VALID(request-&gt;ikm_voucher)) {
+		assert(MACH_MSG_TYPE_PORT_SEND ==
+		       MACH_MSGH_BITS_VOUCHER(request-&gt;ikm_header-&gt;msgh_bits));
+		ipc_port_release_send(request-&gt;ikm_voucher);
+		request-&gt;ikm_voucher = IP_NULL;
+	}
+
+        <span class="enscript-keyword">if</span> (!(reply-&gt;ikm_header-&gt;msgh_bits &amp; MACH_MSGH_BITS_COMPLEX) &amp;&amp;
+           ((mig_reply_error_t *) reply-&gt;ikm_header)-&gt;RetCode != KERN_SUCCESS)
+	 	kr = ((mig_reply_error_t *) reply-&gt;ikm_header)-&gt;RetCode;
+	<span class="enscript-keyword">else</span>
+		kr = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> ((kr == KERN_SUCCESS) || (kr == MIG_NO_REPLY)) {
+		<span class="enscript-comment">/*
+		 *	The server function is responsible for the contents
+		 *	of the message.  The reply port right is moved
+		 *	to the reply message, and we have deallocated
+		 *	the destination port right, so we just need
+		 *	to free the kmsg.
+		 */</span>
+		ipc_kmsg_free(request);
+
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 *	The message contents of the request are intact.
+		 *	Destroy everthing except the reply port right,
+		 *	which is needed in the reply message.
+		 */</span>
+		request-&gt;ikm_header-&gt;msgh_local_port = MACH_PORT_NULL;
+		ipc_kmsg_destroy(request);
+	}
+
+	<span class="enscript-keyword">if</span> (kr == MIG_NO_REPLY) {
+		<span class="enscript-comment">/*
+		 *	The server function will send a reply message
+		 *	using the reply port right, which it has saved.
+		 */</span>
+
+		ipc_kmsg_free(reply);
+
+		<span class="enscript-keyword">return</span> IKM_NULL;
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!IP_VALID((ipc_port_t)reply-&gt;ikm_header-&gt;msgh_remote_port)) {
+		<span class="enscript-comment">/*
+		 *	Can't queue the reply message if the destination
+		 *	(the reply port) isn't valid.
+		 */</span>
+
+		ipc_kmsg_destroy(reply);
+
+		<span class="enscript-keyword">return</span> IKM_NULL;
+	}
+
+ 	trailer = (mach_msg_format_0_trailer_t *)
+		((vm_offset_t)reply-&gt;ikm_header + (<span class="enscript-type">int</span>)reply-&gt;ikm_header-&gt;msgh_size);
+
+ 	trailer-&gt;msgh_sender = KERNEL_SECURITY_TOKEN;
+ 	trailer-&gt;msgh_trailer_type = MACH_MSG_TRAILER_FORMAT_0;
+ 	trailer-&gt;msgh_trailer_size = MACH_MSG_TRAILER_MINIMUM_SIZE;
+
+	<span class="enscript-keyword">return</span> reply;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kobject_set
+ *	Purpose:
+ *		Make a port represent a kernel object of the given type.
+ *		The caller is responsible for handling refs for the
+ *		kernel object, if necessary.
+ *	Conditions:
+ *		Nothing locked.  The port must be active if setting
+ *		a kobject linkage.  Clearing a linkage is OK on an
+ *		inactive port.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kobject_set</span>(
+	ipc_port_t			port,
+	ipc_kobject_t		kobject,
+	ipc_kobject_type_t	type)
+{
+	ip_lock(port);
+	ipc_kobject_set_atomically(port, kobject, type);
+	ip_unlock(port);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kobject_set_atomically</span>(
+	ipc_port_t			port,
+	ipc_kobject_t		kobject,
+	ipc_kobject_type_t	type)
+{
+	assert(type == IKOT_NONE || ip_active(port));
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">MACH_ASSERT</span>
+	port-&gt;ip_spares[2] = (port-&gt;ip_bits &amp; IO_BITS_KOTYPE);
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* MACH_ASSERT */</span>
+	port-&gt;ip_bits = (port-&gt;ip_bits &amp;~ IO_BITS_KOTYPE) | type;
+	port-&gt;ip_kobject = kobject;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	ipc_kobject_destroy
+ *	Purpose:
+ *		Release any kernel object resources associated
+ *		with the port, which is being destroyed.
+ *
+ *		This should only be needed when resources are
+ *		associated with a user's port.  In the normal case,
+ *		when the kernel is the receiver, the code calling
+ *		ipc_port_dealloc_kernel should clean up the resources.
+ *	Conditions:
+ *		The port is not locked, but it is dead.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">ipc_kobject_destroy</span>(
+	ipc_port_t		port)
+{
+	<span class="enscript-keyword">switch</span> (ip_kotype(port)) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IKOT_TIMER</span>:
+		mk_timer_port_destroy(port);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IKOT_NAMED_ENTRY</span>:
+		mach_destroy_memory_entry(port);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">IKOT_HOST_NOTIFY</span>:
+		host_notify_port_destroy(port);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+}
+
+
+boolean_t
+<span class="enscript-function-name">ipc_kobject_notify</span>(
+	mach_msg_header_t *request_header,
+	mach_msg_header_t *reply_header)
+{
+	ipc_port_t port = (ipc_port_t) request_header-&gt;msgh_remote_port;
+
+	((mig_reply_error_t *) reply_header)-&gt;RetCode = MIG_NO_REPLY;
+	<span class="enscript-keyword">switch</span> (request_header-&gt;msgh_id) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_NOTIFY_NO_SENDERS</span>:
+			<span class="enscript-keyword">switch</span> (ip_kotype(port)) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">IKOT_VOUCHER</span>:
+				ipc_voucher_notify(request_header);
+				<span class="enscript-keyword">return</span> TRUE;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">IKOT_VOUCHER_ATTR_CONTROL</span>:
+				ipc_voucher_attr_control_notify(request_header);
+				<span class="enscript-keyword">return</span> TRUE;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">IKOT_SEMAPHORE</span>:
+				semaphore_notify(request_header);
+				<span class="enscript-keyword">return</span> TRUE;
+				
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">IKOT_NAMED_ENTRY</span>:
+				ip_lock(port);
+
+				<span class="enscript-comment">/*
+				 * Bring the sequence number and mscount in
+				 * line with ipc_port_destroy assertion.
+				 */</span>
+				port-&gt;ip_mscount = 0;
+				port-&gt;ip_messages.imq_seqno = 0;
+				ipc_port_destroy(port); <span class="enscript-comment">/* releases lock */</span>
+				<span class="enscript-keyword">return</span> TRUE;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">IKOT_UPL</span>:
+				upl_no_senders(
+					request_header-&gt;msgh_remote_port, 
+					(mach_port_mscount_t) 
+					((mach_no_senders_notification_t *) 
+					 request_header)-&gt;not_count);
+				reply_header-&gt;msgh_remote_port = MACH_PORT_NULL;
+				<span class="enscript-keyword">return</span> TRUE;
+
+#<span class="enscript-reference">if</span>	<span class="enscript-variable-name">CONFIG_AUDIT</span>
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">IKOT_AU_SESSIONPORT</span>:
+				audit_session_nosenders(request_header);
+				<span class="enscript-keyword">return</span> TRUE;
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">IKOT_FILEPORT</span>:
+				fileport_notify(request_header);
+				<span class="enscript-keyword">return</span> TRUE;
+			}
+	  	   <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_NOTIFY_PORT_DELETED</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_NOTIFY_PORT_DESTROYED</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_NOTIFY_SEND_ONCE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MACH_NOTIFY_DEAD_NAME</span>:
+		<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> FALSE;
+	}
+	<span class="enscript-keyword">switch</span> (ip_kotype(port)) {
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">IOKIT</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IKOT_IOKIT_OBJECT</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IKOT_IOKIT_CONNECT</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IKOT_IOKIT_SPARE</span>:
+		{
+                <span class="enscript-keyword">return</span> iokit_notify(request_header);
+		}
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">IKOT_TASK_RESUME</span>:
+		{
+			<span class="enscript-keyword">return</span> task_suspension_notify(request_header);
+		}
+
+		<span class="enscript-reference">default</span>:
+                <span class="enscript-keyword">return</span> FALSE;
+        }
+}
+</pre>
+<hr />
+</body></html>

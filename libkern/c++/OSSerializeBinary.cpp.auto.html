@@ -1,0 +1,500 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>OSSerializeBinary.cpp</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">OSSerializeBinary.cpp&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2014 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSContainers.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSLib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/c++/OSDictionary.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSSerializeBinary.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;IOKit/IOLib.h&gt;</span>
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">if</span> 0
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DEBG</span>(fmt, args...)  { kprintf(fmt, args); }
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">DEBG</span>(fmt, args...)	{}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+OSSerialize *<span class="enscript-function-name">OSSerialize::binaryWithCapacity</span>(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> inCapacity, 
+											 Editor editor, <span class="enscript-type">void</span> * reference)
+{
+	OSSerialize *me;
+
+    <span class="enscript-keyword">if</span> (inCapacity &lt; <span class="enscript-keyword">sizeof</span>(uint32_t)) <span class="enscript-keyword">return</span> (0);
+	me = OSSerialize::withCapacity(inCapacity);
+    <span class="enscript-keyword">if</span> (!me) <span class="enscript-keyword">return</span> (0);
+
+    me-&gt;binary        = true;
+    me-&gt;endCollection = true;
+    me-&gt;editor        = editor;
+    me-&gt;editRef       = reference;
+
+	bcopy(kOSSerializeBinarySignature, &amp;me-&gt;data[0], <span class="enscript-keyword">sizeof</span>(kOSSerializeBinarySignature));
+	me-&gt;length = <span class="enscript-keyword">sizeof</span>(kOSSerializeBinarySignature);
+
+    <span class="enscript-keyword">return</span> (me);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSSerialize::addBinary</span>(<span class="enscript-type">const</span> <span class="enscript-type">void</span> * bits, size_t size)
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> newCapacity;
+    size_t       alignSize;
+
+	alignSize = ((size + 3) &amp; ~3L);
+	newCapacity = length + alignSize;
+	<span class="enscript-keyword">if</span> (newCapacity &gt;= capacity) 
+	{
+	   newCapacity = (((newCapacity - 1) / capacityIncrement) + 1) * capacityIncrement;
+	   <span class="enscript-keyword">if</span> (newCapacity &lt; ensureCapacity(newCapacity)) <span class="enscript-keyword">return</span> (false);
+    }
+
+	bcopy(bits, &amp;data[length], size);
+	length += alignSize;
+ 
+	<span class="enscript-keyword">return</span> (true);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSSerialize::addBinaryObject</span>(<span class="enscript-type">const</span> OSMetaClassBase * o, uint32_t key, 
+								  <span class="enscript-type">const</span> <span class="enscript-type">void</span> * bits, size_t size)
+{
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> newCapacity;
+    size_t       alignSize;
+	OSNumber   * tagNum;
+
+	<span class="enscript-comment">// build a tag
+</span>	tagNum = OSNumber::withNumber(tag, 32);
+	tag++;
+    <span class="enscript-comment">// add to tag dictionary
+</span>	tags-&gt;setObject((<span class="enscript-type">const</span> OSSymbol *) o, tagNum);
+	tagNum-&gt;release();
+
+	alignSize = ((size + <span class="enscript-keyword">sizeof</span>(key) + 3) &amp; ~3L);
+	newCapacity = length + alignSize;
+	<span class="enscript-keyword">if</span> (newCapacity &gt;= capacity) 
+	{
+	   newCapacity = (((newCapacity - 1) / capacityIncrement) + 1) * capacityIncrement;
+	   <span class="enscript-keyword">if</span> (newCapacity &lt; ensureCapacity(newCapacity)) <span class="enscript-keyword">return</span> (false);
+    }
+
+    <span class="enscript-keyword">if</span> (endCollection)
+    {
+         endCollection = false;
+         key |= kOSSerializeEndCollecton;
+    }
+
+	bcopy(&amp;key, &amp;data[length], <span class="enscript-keyword">sizeof</span>(key));
+	bcopy(bits, &amp;data[length + <span class="enscript-keyword">sizeof</span>(key)], size);
+	length += alignSize;
+ 
+	<span class="enscript-keyword">return</span> (true);
+}
+
+<span class="enscript-type">bool</span> <span class="enscript-function-name">OSSerialize::binarySerialize</span>(<span class="enscript-type">const</span> OSMetaClassBase *o)
+{
+    OSDictionary * dict;
+    OSArray      * array;
+    OSSet        * set;
+    OSNumber     * num;
+    OSSymbol     * sym;
+    OSString     * str;
+    OSData       * data;
+    OSBoolean    * boo;
+
+	OSNumber * tagNum;
+    uint32_t   i, key;
+    size_t     len;
+    <span class="enscript-type">bool</span>       ok;
+
+	tagNum = (OSNumber *)tags-&gt;getObject((<span class="enscript-type">const</span> OSSymbol *) o);
+	<span class="enscript-comment">// does it exist?
+</span>	<span class="enscript-keyword">if</span> (tagNum)
+	{
+		key = (kOSSerializeObject | tagNum-&gt;unsigned32BitValue());
+		<span class="enscript-keyword">if</span> (endCollection)
+		{
+			 endCollection = false;
+			 key |= kOSSerializeEndCollecton;
+		}
+		ok = addBinary(&amp;key, <span class="enscript-keyword">sizeof</span>(key));
+		<span class="enscript-keyword">return</span> (ok);
+	}
+
+	<span class="enscript-keyword">if</span> ((dict = OSDynamicCast(OSDictionary, o)))
+	{
+		key = (kOSSerializeDictionary | dict-&gt;count);
+		ok = addBinaryObject(o, key, NULL, 0);
+		<span class="enscript-keyword">for</span> (i = 0; ok &amp;&amp; (i &lt; dict-&gt;count);)
+		{
+			<span class="enscript-type">const</span> OSSymbol        * dictKey;
+			<span class="enscript-type">const</span> OSMetaClassBase * dictValue;
+			<span class="enscript-type">const</span> OSMetaClassBase * nvalue = 0;
+
+			i++;
+			dictKey = dict-&gt;dictionary[i-1].key;
+			dictValue = dict-&gt;dictionary[i-1].value;
+			<span class="enscript-keyword">if</span> (editor)
+			{
+				dictValue = nvalue = (*editor)(editRef, <span class="enscript-keyword">this</span>, dict, dictKey, dictValue);
+				<span class="enscript-keyword">if</span> (!dictValue) dictValue = dict;
+			}
+			ok = binarySerialize(dictKey);
+			<span class="enscript-keyword">if</span> (!ok) <span class="enscript-keyword">break</span>;
+			endCollection = (i == dict-&gt;count);
+			ok = binarySerialize(dictValue);
+			<span class="enscript-keyword">if</span> (!ok) ok = dictValue-&gt;serialize(<span class="enscript-keyword">this</span>);
+			<span class="enscript-keyword">if</span> (nvalue) nvalue-&gt;release();
+<span class="enscript-comment">//			if (!ok) ok = binarySerialize(kOSBooleanFalse);
+</span>		}			
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((array = OSDynamicCast(OSArray, o)))
+	{
+		key = (kOSSerializeArray | array-&gt;count);
+		ok = addBinaryObject(o, key, NULL, 0);
+		<span class="enscript-keyword">for</span> (i = 0; ok &amp;&amp; (i &lt; array-&gt;count);)
+		{
+			i++;
+			endCollection = (i == array-&gt;count);
+			ok = binarySerialize(array-&gt;array[i-1]);
+			<span class="enscript-keyword">if</span> (!ok) ok = array-&gt;array[i-1]-&gt;serialize(<span class="enscript-keyword">this</span>);
+<span class="enscript-comment">//			if (!ok) ok = binarySerialize(kOSBooleanFalse);
+</span>		}			
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((set = OSDynamicCast(OSSet, o)))
+	{
+		key = (kOSSerializeSet | set-&gt;members-&gt;count);
+		ok = addBinaryObject(o, key, NULL, 0);
+		<span class="enscript-keyword">for</span> (i = 0; ok &amp;&amp; (i &lt; set-&gt;members-&gt;count);)
+		{
+			i++;
+			endCollection = (i == set-&gt;members-&gt;count);
+			ok = binarySerialize(set-&gt;members-&gt;array[i-1]);
+			<span class="enscript-keyword">if</span> (!ok) ok = set-&gt;members-&gt;array[i-1]-&gt;serialize(<span class="enscript-keyword">this</span>);
+<span class="enscript-comment">//			if (!ok) ok = binarySerialize(kOSBooleanFalse);
+</span>		}			
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((num = OSDynamicCast(OSNumber, o)))
+	{
+		key = (kOSSerializeNumber | num-&gt;size);
+		ok = addBinaryObject(o, key, &amp;num-&gt;value, <span class="enscript-keyword">sizeof</span>(num-&gt;value));
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((boo = OSDynamicCast(OSBoolean, o)))
+	{
+		key = (kOSSerializeBoolean | (kOSBooleanTrue == boo));
+		ok = addBinaryObject(o, key, NULL, 0);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((sym = OSDynamicCast(OSSymbol, o)))
+	{
+		len = (sym-&gt;getLength() + 1);
+		key = (kOSSerializeSymbol | len);
+		ok = addBinaryObject(o, key, sym-&gt;getCStringNoCopy(), len);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((str = OSDynamicCast(OSString, o)))
+	{
+		len = (str-&gt;getLength() + 0);
+		key = (kOSSerializeString | len);
+		ok = addBinaryObject(o, key, str-&gt;getCStringNoCopy(), len);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((data = OSDynamicCast(OSData, o)))
+	{
+		len = data-&gt;getLength();
+		<span class="enscript-keyword">if</span> (data-&gt;reserved &amp;&amp; data-&gt;reserved-&gt;disableSerialization) len = 0;
+		key = (kOSSerializeData | len);
+		ok = addBinaryObject(o, key, data-&gt;getBytesNoCopy(), len);
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">return</span> (false);
+
+    <span class="enscript-keyword">return</span> (ok);
+}
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">setAtIndex</span>(v, idx, o)													\
+	<span class="enscript-keyword">if</span> (idx &gt;= v##Capacity)														\
+	{																			\
+		uint32_t ncap = v##Capacity + 64;										\
+		typeof(v##Array) nbuf = (typeof(v##Array)) kalloc_container(ncap * <span class="enscript-keyword">sizeof</span>(o));	\
+		<span class="enscript-keyword">if</span> (!nbuf) ok = false;													\
+		<span class="enscript-keyword">if</span> (v##Array)															\
+		{																		\
+			bcopy(v##Array, nbuf, v##Capacity * <span class="enscript-keyword">sizeof</span>(o));						\
+			kfree(v##Array, v##Capacity * <span class="enscript-keyword">sizeof</span>(o));							\
+		}																		\
+		v##Array    = nbuf;														\
+		v##Capacity = ncap;														\
+	}																			\
+	<span class="enscript-keyword">if</span> (ok) v##Array[idx] = o;
+
+<span class="enscript-comment">/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */</span>
+
+OSObject *
+<span class="enscript-function-name">OSUnserializeBinary</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *buffer, size_t bufferSize, OSString **errorString)
+{
+	OSObject ** objsArray;
+	uint32_t    objsCapacity;
+	uint32_t    objsIdx;
+
+	OSObject ** stackArray;
+	uint32_t    stackCapacity;
+	uint32_t    stackIdx;
+
+    OSObject     * result;
+    OSObject     * parent;
+    OSDictionary * dict;
+    OSArray      * array;
+    OSSet        * set;
+    OSDictionary * newDict;
+    OSArray      * newArray;
+    OSSet        * newSet;
+    OSObject     * o;
+    OSSymbol     * sym;
+    OSString     * str;
+
+    size_t           bufferPos;
+    <span class="enscript-type">const</span> uint32_t * next;
+    uint32_t         key, len, wordLen;
+    <span class="enscript-type">bool</span>             end, newCollect, isRef;
+    <span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> <span class="enscript-type">long</span> value;
+    <span class="enscript-type">bool</span> ok;
+
+	<span class="enscript-keyword">if</span> (errorString) *errorString = 0;
+	<span class="enscript-keyword">if</span> (0 != strcmp(kOSSerializeBinarySignature, buffer)) <span class="enscript-keyword">return</span> (NULL);
+	<span class="enscript-keyword">if</span> (3 &amp; ((uintptr_t) buffer)) <span class="enscript-keyword">return</span> (NULL);
+	<span class="enscript-keyword">if</span> (bufferSize &lt; <span class="enscript-keyword">sizeof</span>(kOSSerializeBinarySignature)) <span class="enscript-keyword">return</span> (NULL);
+	bufferPos = <span class="enscript-keyword">sizeof</span>(kOSSerializeBinarySignature);
+	next = (typeof(next)) (((uintptr_t) buffer) + bufferPos);
+
+	DEBG(<span class="enscript-string">&quot;---------OSUnserializeBinary(%p)\n&quot;</span>, buffer);
+
+	objsArray = stackArray    = NULL;
+	objsIdx   = objsCapacity  = 0;
+	stackIdx  = stackCapacity = 0;
+
+    result   = 0;
+    parent   = 0;
+	dict     = 0;
+	array    = 0;
+	set      = 0;
+	sym      = 0;
+
+	ok = true;
+	<span class="enscript-keyword">while</span> (ok)
+	{
+		bufferPos += <span class="enscript-keyword">sizeof</span>(*next);
+		<span class="enscript-keyword">if</span> (!(ok = (bufferPos &lt;= bufferSize))) <span class="enscript-keyword">break</span>;
+		key = *next++;
+
+        len = (key &amp; kOSSerializeDataMask);
+        wordLen = (len + 3) &gt;&gt; 2;
+		end = (0 != (kOSSerializeEndCollecton &amp; key));
+        DEBG(<span class="enscript-string">&quot;key 0x%08x: 0x%04x, %d\n&quot;</span>, key, len, end);
+
+        newCollect = isRef = false;
+		o = 0; newDict = 0; newArray = 0; newSet = 0;
+		
+		<span class="enscript-keyword">switch</span> (kOSSerializeTypeMask &amp; key)
+		{
+		    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSSerializeDictionary</span>:
+				o = newDict = OSDictionary::withCapacity(len);
+				newCollect = (len != 0);
+		        <span class="enscript-keyword">break</span>;
+		    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSSerializeArray</span>:
+				o = newArray = OSArray::withCapacity(len);
+				newCollect = (len != 0);
+		        <span class="enscript-keyword">break</span>;
+		    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSSerializeSet</span>:
+				o = newSet = OSSet::withCapacity(len);
+				newCollect = (len != 0);
+		        <span class="enscript-keyword">break</span>;
+
+		    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSSerializeObject</span>:
+				<span class="enscript-keyword">if</span> (len &gt;= objsIdx) <span class="enscript-keyword">break</span>;
+				o = objsArray[len];
+				o-&gt;retain();
+				isRef = true;
+				<span class="enscript-keyword">break</span>;
+
+		    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSSerializeNumber</span>:
+				bufferPos += <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">long</span> <span class="enscript-type">long</span>);
+				<span class="enscript-keyword">if</span> (bufferPos &gt; bufferSize) <span class="enscript-keyword">break</span>;
+		    	value = next[1];
+		    	value &lt;&lt;= 32;
+		    	value |= next[0];
+		    	o = OSNumber::withNumber(value, len);
+		    	next += 2;
+		        <span class="enscript-keyword">break</span>;
+
+		    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSSerializeSymbol</span>:
+				bufferPos += (wordLen * <span class="enscript-keyword">sizeof</span>(uint32_t));
+				<span class="enscript-keyword">if</span> (bufferPos &gt; bufferSize)           <span class="enscript-keyword">break</span>;
+				<span class="enscript-keyword">if</span> (0 != ((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *)next)[len-1]) <span class="enscript-keyword">break</span>;
+		        o = (OSObject *) OSSymbol::withCString((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) next);
+		        next += wordLen;
+		        <span class="enscript-keyword">break</span>;
+
+		    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSSerializeString</span>:
+				bufferPos += (wordLen * <span class="enscript-keyword">sizeof</span>(uint32_t));
+				<span class="enscript-keyword">if</span> (bufferPos &gt; bufferSize) <span class="enscript-keyword">break</span>;
+		        o = OSString::withStringOfLength((<span class="enscript-type">const</span> <span class="enscript-type">char</span> *) next, len);
+		        next += wordLen;
+		        <span class="enscript-keyword">break</span>;
+
+    	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSSerializeData</span>:
+				bufferPos += (wordLen * <span class="enscript-keyword">sizeof</span>(uint32_t));
+				<span class="enscript-keyword">if</span> (bufferPos &gt; bufferSize) <span class="enscript-keyword">break</span>;
+		        o = OSData::withBytes(next, len);
+		        next += wordLen;
+		        <span class="enscript-keyword">break</span>;
+
+    	    <span class="enscript-keyword">case</span> <span class="enscript-reference">kOSSerializeBoolean</span>:
+				o = (len ? kOSBooleanTrue : kOSBooleanFalse);
+		        <span class="enscript-keyword">break</span>;
+
+		    <span class="enscript-reference">default</span>:
+		        <span class="enscript-keyword">break</span>;
+		}
+
+		<span class="enscript-keyword">if</span> (!(ok = (o != 0))) <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">if</span> (!isRef)
+		{
+			setAtIndex(objs, objsIdx, o);
+			<span class="enscript-keyword">if</span> (!ok) <span class="enscript-keyword">break</span>;
+			objsIdx++;
+		}
+
+		<span class="enscript-keyword">if</span> (dict)
+		{
+			<span class="enscript-keyword">if</span> (sym)
+			{
+				DEBG(<span class="enscript-string">&quot;%s = %s\n&quot;</span>, sym-&gt;getCStringNoCopy(), o-&gt;getMetaClass()-&gt;getClassName());
+				<span class="enscript-keyword">if</span> (o != dict) ok = dict-&gt;setObject(sym, o);
+				o-&gt;release();
+				sym-&gt;release();
+				sym = 0;
+			}
+			<span class="enscript-keyword">else</span> 
+			{
+				sym = OSDynamicCast(OSSymbol, o);
+				<span class="enscript-keyword">if</span> (!sym &amp;&amp; (str = OSDynamicCast(OSString, o)))
+				{
+				    sym = (OSSymbol *) OSSymbol::withString(str);
+				    o-&gt;release();
+				    o = 0;
+				}
+				ok = (sym != 0);
+			}
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (array) 
+		{
+			ok = array-&gt;setObject(o);
+		    o-&gt;release();
+		}
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (set)
+		{
+		   ok = set-&gt;setObject(o);
+		   o-&gt;release();
+		}
+		<span class="enscript-keyword">else</span>
+		{
+		    assert(!parent);
+		    result = o;
+		}
+
+		<span class="enscript-keyword">if</span> (!ok) <span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">if</span> (newCollect)
+		{
+			<span class="enscript-keyword">if</span> (!end)
+			{
+				stackIdx++;
+				setAtIndex(stack, stackIdx, parent);
+				<span class="enscript-keyword">if</span> (!ok) <span class="enscript-keyword">break</span>;
+			}
+			DEBG(<span class="enscript-string">&quot;++stack[%d] %p\n&quot;</span>, stackIdx, parent);
+			parent = o;
+			dict   = newDict;
+			array  = newArray;
+			set    = newSet;
+			end    = false;
+		}
+
+		<span class="enscript-keyword">if</span> (end)
+		{
+			<span class="enscript-keyword">if</span> (!stackIdx) <span class="enscript-keyword">break</span>;
+			parent = stackArray[stackIdx];
+			DEBG(<span class="enscript-string">&quot;--stack[%d] %p\n&quot;</span>, stackIdx, parent);
+			stackIdx--;
+			set   = 0; 
+			dict  = 0; 
+			array = 0;
+			<span class="enscript-keyword">if</span> (!(dict = OSDynamicCast(OSDictionary, parent)))
+			{
+				<span class="enscript-keyword">if</span> (!(array = OSDynamicCast(OSArray, parent))) ok = (0 != (set = OSDynamicCast(OSSet, parent)));
+			}
+		}
+	}
+	DEBG(<span class="enscript-string">&quot;ret %p\n&quot;</span>, result);
+
+	<span class="enscript-keyword">if</span> (objsCapacity)  kfree(objsArray,  objsCapacity  * <span class="enscript-keyword">sizeof</span>(*objsArray));
+	<span class="enscript-keyword">if</span> (stackCapacity) kfree(stackArray, stackCapacity * <span class="enscript-keyword">sizeof</span>(*stackArray));
+
+	<span class="enscript-keyword">if</span> (!ok &amp;&amp; result)
+	{
+		result-&gt;release();
+		result = 0;
+	}
+	<span class="enscript-keyword">return</span> (result);
+}</pre>
+<hr />
+</body></html>

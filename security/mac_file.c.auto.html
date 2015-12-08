@@ -1,0 +1,255 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mac_file.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mac_file.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*-
+ * Copyright (c) 2002, 2003 Networks Associates Technology, Inc.
+ * Copyright (c) 2006 SPARTA, Inc.
+ * All rights reserved.
+ *
+ * This software was developed for the FreeBSD Project in part by Network
+ * Associates Laboratories, the Security Research Division of Network
+ * Associates, Inc. under DARPA/SPAWAR contract N66001-01-C-8035 (&quot;CBOSS&quot;),
+ * as part of the DARPA CHATS research program.
+ *
+ * This software was enhanced by SPARTA ISSO under SPAWAR contract
+ * N66001-04-C-6019 (&quot;SEFOS&quot;).
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_internal.h&gt;</span>
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> label *
+<span class="enscript-function-name">mac_file_label_alloc</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> label *label;
+
+	label = mac_labelzone_alloc(MAC_WAITOK);
+	<span class="enscript-keyword">if</span> (label == NULL)
+		<span class="enscript-keyword">return</span> (NULL);
+	MAC_PERFORM(file_label_init, label);
+	<span class="enscript-keyword">return</span> (label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_file_label_init</span>(<span class="enscript-type">struct</span> fileglob *fg)
+{
+
+	fg-&gt;fg_label = mac_file_label_alloc();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_file_label_free</span>(<span class="enscript-type">struct</span> label *label)
+{
+
+	MAC_PERFORM(file_label_destroy, label);
+	mac_labelzone_free(label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_file_label_associate</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> fileglob *fg)
+{
+
+	MAC_PERFORM(file_label_associate, cred, fg, fg-&gt;fg_label);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_file_label_destroy</span>(<span class="enscript-type">struct</span> fileglob *fg)
+{
+
+	mac_file_label_free(fg-&gt;fg_label);
+	fg-&gt;fg_label = NULL;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_file_check_create</span>(<span class="enscript-type">struct</span> ucred *cred)
+{
+	<span class="enscript-type">int</span> error;
+
+	MAC_CHECK(file_check_create, cred);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_file_check_dup</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> fileglob *fg, <span class="enscript-type">int</span> newfd)
+{
+	<span class="enscript-type">int</span> error;
+
+	MAC_CHECK(file_check_dup, cred, fg, fg-&gt;fg_label, newfd);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_file_check_fcntl</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> fileglob *fg, <span class="enscript-type">int</span> cmd,
+    user_long_t arg)
+{
+	<span class="enscript-type">int</span> error;
+
+	MAC_CHECK(file_check_fcntl, cred, fg, fg-&gt;fg_label, cmd, arg);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_file_check_ioctl</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> fileglob *fg, u_int cmd)
+{
+	<span class="enscript-type">int</span> error;
+
+	MAC_CHECK(file_check_ioctl, cred, fg, fg-&gt;fg_label, cmd);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_file_check_inherit</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> fileglob *fg)
+{
+	<span class="enscript-type">int</span> error;
+
+	MAC_CHECK(file_check_inherit, cred, fg, fg-&gt;fg_label);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_file_check_receive</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> fileglob *fg)
+{
+	<span class="enscript-type">int</span> error;
+
+	MAC_CHECK(file_check_receive, cred, fg, fg-&gt;fg_label);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_file_check_get_offset</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> fileglob *fg)
+{
+	<span class="enscript-type">int</span> error;
+
+	MAC_CHECK(file_check_get_offset, cred, fg, fg-&gt;fg_label);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_file_check_change_offset</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> fileglob *fg)
+{
+	<span class="enscript-type">int</span> error;
+
+	MAC_CHECK(file_check_change_offset, cred, fg, fg-&gt;fg_label);
+	<span class="enscript-keyword">return</span> (error);
+}
+ 
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_file_check_get</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> fileglob *fg, <span class="enscript-type">char</span> *elements,
+    <span class="enscript-type">int</span> len)
+{
+	<span class="enscript-type">int</span> error;
+	
+	MAC_CHECK(file_check_get, cred, fg, elements, len);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_file_check_set</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> fileglob *fg, <span class="enscript-type">char</span> *buf,
+    <span class="enscript-type">int</span> buflen)
+{
+	<span class="enscript-type">int</span> error;
+	
+	MAC_CHECK(file_check_set, cred, fg, buf, buflen);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_file_check_lock</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> fileglob *fg, <span class="enscript-type">int</span> op,
+    <span class="enscript-type">struct</span> flock *fl)
+{
+	<span class="enscript-type">int</span> error;
+	
+	MAC_CHECK(file_check_lock, cred, fg, fg-&gt;fg_label, op, fl);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/*
+ * On some platforms, VM_PROT_READ implies VM_PROT_EXECUTE. If that is true,
+ * both prot and maxprot will have VM_PROT_EXECUTE set after file_check_mmap
+ * if VM_PROT_READ is set.
+ *
+ * The type of maxprot in file_check_mmap must be equivalent to vm_prot_t *
+ * (defined in &lt;mach/vm_prot.h&gt;). mac_policy.h does not include any header
+ * files, so cannot use the typedef itself.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_file_check_mmap</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> fileglob *fg, <span class="enscript-type">int</span> prot,
+    <span class="enscript-type">int</span> flags, uint64_t offset, <span class="enscript-type">int</span> *maxprot)
+{
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> maxp;
+
+	maxp = *maxprot;
+	MAC_CHECK(file_check_mmap, cred, fg, fg-&gt;fg_label, prot, flags, offset, &amp;maxp);
+	<span class="enscript-keyword">if</span> ((maxp | *maxprot) != *maxprot)
+		panic(<span class="enscript-string">&quot;file_check_mmap increased max protections&quot;</span>);
+	*maxprot = maxp;
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">mac_file_check_mmap_downgrade</span>(<span class="enscript-type">struct</span> ucred *cred, <span class="enscript-type">struct</span> fileglob *fg,
+    <span class="enscript-type">int</span> *prot)
+{
+	<span class="enscript-type">int</span> result = *prot;
+
+	MAC_PERFORM(file_check_mmap_downgrade, cred, fg, fg-&gt;fg_label,
+	    &amp;result);
+
+	*prot = result;
+}
+</pre>
+<hr />
+</body></html>

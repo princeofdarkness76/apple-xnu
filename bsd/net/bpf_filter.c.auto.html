@@ -1,0 +1,686 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>bpf_filter.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">bpf_filter.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2011 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1990, 1991, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from the Stanford/CMU enet packet filter,
+ * (net/enet.c) distributed as part of 4.3BSD, and code contributed
+ * to Berkeley by Steven McCanne and Van Jacobson both of Lawrence
+ * Berkeley Laboratory.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *      @(#)bpf_filter.c	8.1 (Berkeley) 6/10/93
+ *
+ * $FreeBSD: src/sys/net/bpf_filter.c,v 1.17 1999/12/29 04:38:31 peter Exp $
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">sun</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) &amp;&amp; !<span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BPF_ALIGN</span> 1
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* defined(__i386__) || defined(__x86_64__) */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">BPF_ALIGN</span> 0
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* defined(__i386__) || defined(__x86_64__) */</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">BPF_ALIGN</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">EXTRACT_SHORT</span>(p)	((u_int16_t)ntohs(*(u_int16_t *)(void *)p))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">EXTRACT_LONG</span>(p)		(ntohl(*(u_int32_t *)(void *)p))
+#<span class="enscript-reference">else</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">EXTRACT_SHORT</span>(p)\
+	((u_int16_t)\
+		((u_int16_t)*((u_char *)p+0)&lt;&lt;8|\
+		 (u_int16_t)*((u_char *)p+1)&lt;&lt;0))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">EXTRACT_LONG</span>(p)\
+		((u_int32_t)*((u_char *)p+0)&lt;&lt;24|\
+		 (u_int32_t)*((u_char *)p+1)&lt;&lt;16|\
+		 (u_int32_t)*((u_char *)p+2)&lt;&lt;8|\
+		 (u_int32_t)*((u_char *)p+3)&lt;&lt;0)
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/bpf.h&gt;</span>
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">MINDEX</span>(m, k) \
+{ \
+	<span class="enscript-type">register</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> len = m-&gt;m_len; \
+ \
+	<span class="enscript-keyword">while</span> (k &gt;= len) { \
+		k -= len; \
+		m = m-&gt;m_next; \
+		<span class="enscript-keyword">if</span> (m == 0) \
+			<span class="enscript-keyword">return</span> 0; \
+		len = m-&gt;m_len; \
+	} \
+}
+
+<span class="enscript-type">extern</span> <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> bpf_maxbufsize;
+
+<span class="enscript-type">static</span> u_int16_t	m_xhalf(<span class="enscript-type">struct</span> mbuf *m, bpf_u_int32 k, <span class="enscript-type">int</span> *err);
+<span class="enscript-type">static</span> u_int32_t	m_xword(<span class="enscript-type">struct</span> mbuf *m, bpf_u_int32 k, <span class="enscript-type">int</span> *err);
+
+<span class="enscript-type">static</span> u_int32_t
+<span class="enscript-function-name">m_xword</span>(<span class="enscript-type">struct</span> mbuf *m, bpf_u_int32 k, <span class="enscript-type">int</span> *err)
+{
+	<span class="enscript-type">register</span> size_t len;
+	<span class="enscript-type">register</span> u_char *cp, *np;
+	<span class="enscript-type">register</span> <span class="enscript-type">struct</span> mbuf *m0;
+
+	len = m-&gt;m_len;
+	<span class="enscript-keyword">while</span> (k &gt;= len) {
+		k -= len;
+		m = m-&gt;m_next;
+		<span class="enscript-keyword">if</span> (m == 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		len = m-&gt;m_len;
+	}
+	cp = mtod(m, u_char *) + k;
+	<span class="enscript-keyword">if</span> (len - k &gt;= 4) {
+		*err = 0;
+		<span class="enscript-keyword">return</span> EXTRACT_LONG(cp);
+	}
+	m0 = m-&gt;m_next;
+	<span class="enscript-keyword">if</span> (m0 == 0 || m0-&gt;m_len + len - k &lt; 4)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	*err = 0;
+	np = mtod(m0, u_char *);
+	<span class="enscript-keyword">switch</span> (len - k) {
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">1</span>:
+		<span class="enscript-keyword">return</span>
+		    ((u_int32_t)cp[0] &lt;&lt; 24) |
+		    ((u_int32_t)np[0] &lt;&lt; 16) |
+		    ((u_int32_t)np[1] &lt;&lt; 8)  |
+		    (u_int32_t)np[2];
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">2</span>:
+		<span class="enscript-keyword">return</span>
+		    ((u_int32_t)cp[0] &lt;&lt; 24) |
+		    ((u_int32_t)cp[1] &lt;&lt; 16) |
+		    ((u_int32_t)np[0] &lt;&lt; 8) |
+		    (u_int32_t)np[1];
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span>
+		    ((u_int32_t)cp[0] &lt;&lt; 24) |
+		    ((u_int32_t)cp[1] &lt;&lt; 16) |
+		    ((u_int32_t)cp[2] &lt;&lt; 8) |
+		    (u_int32_t)np[0];
+	}
+    <span class="enscript-reference">bad</span>:
+	*err = 1;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> u_int16_t
+<span class="enscript-function-name">m_xhalf</span>(<span class="enscript-type">struct</span> mbuf *m, bpf_u_int32 k, <span class="enscript-type">int</span> *err)
+{
+	<span class="enscript-type">register</span> size_t len;
+	<span class="enscript-type">register</span> u_char *cp;
+	<span class="enscript-type">register</span> <span class="enscript-type">struct</span> mbuf *m0;
+
+	len = m-&gt;m_len;
+	<span class="enscript-keyword">while</span> (k &gt;= len) {
+		k -= len;
+		m = m-&gt;m_next;
+		<span class="enscript-keyword">if</span> (m == 0)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		len = m-&gt;m_len;
+	}
+	cp = mtod(m, u_char *) + k;
+	<span class="enscript-keyword">if</span> (len - k &gt;= 2) {
+		*err = 0;
+		<span class="enscript-keyword">return</span> EXTRACT_SHORT(cp);
+	}
+	m0 = m-&gt;m_next;
+	<span class="enscript-keyword">if</span> (m0 == 0)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	*err = 0;
+	<span class="enscript-keyword">return</span> (cp[0] &lt;&lt; 8) | mtod(m0, u_char *)[0];
+ <span class="enscript-reference">bad</span>:
+	*err = 1;
+	<span class="enscript-keyword">return</span> 0;
+}
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*
+ * Execute the filter program starting at pc on the packet p
+ * wirelen is the length of the original packet
+ * buflen is the amount of data present
+ */</span>
+u_int
+<span class="enscript-function-name">bpf_filter</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> bpf_insn *pc, u_char *p, u_int wirelen, u_int buflen)
+{
+	<span class="enscript-type">register</span> u_int32_t A = 0, X = 0;
+	<span class="enscript-type">register</span> bpf_u_int32 k;
+	int32_t mem[BPF_MEMWORDS];
+
+	bzero(mem, <span class="enscript-keyword">sizeof</span>(mem));
+
+	<span class="enscript-keyword">if</span> (pc == 0)
+		<span class="enscript-comment">/*
+		 * No filter means accept all.
+		 */</span>
+		<span class="enscript-keyword">return</span> (u_int)-1;
+
+	--pc;
+	<span class="enscript-keyword">while</span> (1) {
+		++pc;
+		<span class="enscript-keyword">switch</span> (pc-&gt;code) {
+
+		<span class="enscript-reference">default</span>:
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+			<span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">else</span>
+			abort();
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_RET</span>|BPF_K:
+			<span class="enscript-keyword">return</span> (u_int)pc-&gt;k;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_RET</span>|BPF_A:
+			<span class="enscript-keyword">return</span> (u_int)A;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LD</span>|BPF_W|BPF_ABS:
+			k = pc-&gt;k;
+			<span class="enscript-keyword">if</span> (k &gt; buflen || <span class="enscript-keyword">sizeof</span>(int32_t) &gt; buflen - k) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+				<span class="enscript-type">int</span> merr;
+
+				<span class="enscript-keyword">if</span> (buflen != 0)
+					<span class="enscript-keyword">return</span> 0;
+				A = m_xword((<span class="enscript-type">struct</span> mbuf *)(<span class="enscript-type">void</span> *)p, k, &amp;merr);
+				<span class="enscript-keyword">if</span> (merr != 0)
+					<span class="enscript-keyword">return</span> 0;
+				<span class="enscript-keyword">continue</span>;
+#<span class="enscript-reference">else</span>
+				<span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+			}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">BPF_ALIGN</span>
+			<span class="enscript-keyword">if</span> (((intptr_t)(p + k) &amp; 3) != 0)
+				A = EXTRACT_LONG(&amp;p[k]);
+			<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span>
+				A = ntohl(*(int32_t *)(<span class="enscript-type">void</span> *)(p + k));
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LD</span>|BPF_H|BPF_ABS:
+			k = pc-&gt;k;
+			<span class="enscript-keyword">if</span> (k &gt; buflen || <span class="enscript-keyword">sizeof</span>(int16_t) &gt; buflen - k) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+				<span class="enscript-type">int</span> merr;
+
+				<span class="enscript-keyword">if</span> (buflen != 0)
+					<span class="enscript-keyword">return</span> 0;
+				A = m_xhalf((<span class="enscript-type">struct</span> mbuf *)(<span class="enscript-type">void</span> *)p, k, &amp;merr);
+				<span class="enscript-keyword">continue</span>;
+#<span class="enscript-reference">else</span>
+				<span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+			}
+			A = EXTRACT_SHORT(&amp;p[k]);
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LD</span>|BPF_B|BPF_ABS:
+			k = pc-&gt;k;
+			<span class="enscript-keyword">if</span> (k &gt;= buflen) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+				<span class="enscript-type">register</span> <span class="enscript-type">struct</span> mbuf *m;
+
+				<span class="enscript-keyword">if</span> (buflen != 0)
+					<span class="enscript-keyword">return</span> 0;
+				m = (<span class="enscript-type">struct</span> mbuf *)(<span class="enscript-type">void</span> *)p;
+				MINDEX(m, k);
+				A = mtod(m, u_char *)[k];
+				<span class="enscript-keyword">continue</span>;
+#<span class="enscript-reference">else</span>
+				<span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+			}
+			A = p[k];
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LD</span>|BPF_W|BPF_LEN:
+			A = wirelen;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LDX</span>|BPF_W|BPF_LEN:
+			X = wirelen;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LD</span>|BPF_W|BPF_IND:
+			k = X + pc-&gt;k;
+			<span class="enscript-keyword">if</span> (pc-&gt;k &gt; buflen || X &gt; buflen - pc-&gt;k ||
+			    <span class="enscript-keyword">sizeof</span>(int32_t) &gt; buflen - k) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+				<span class="enscript-type">int</span> merr;
+
+				<span class="enscript-keyword">if</span> (buflen != 0)
+					<span class="enscript-keyword">return</span> 0;
+				A = m_xword((<span class="enscript-type">struct</span> mbuf *)(<span class="enscript-type">void</span> *)p, k, &amp;merr);
+				<span class="enscript-keyword">if</span> (merr != 0)
+					<span class="enscript-keyword">return</span> 0;
+				<span class="enscript-keyword">continue</span>;
+#<span class="enscript-reference">else</span>
+				<span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+			}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">BPF_ALIGN</span>
+			<span class="enscript-keyword">if</span> (((intptr_t)(p + k) &amp; 3) != 0)
+				A = EXTRACT_LONG(&amp;p[k]);
+			<span class="enscript-keyword">else</span>
+#<span class="enscript-reference">endif</span>
+				A = ntohl(*(int32_t *)(<span class="enscript-type">void</span> *)(p + k));
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LD</span>|BPF_H|BPF_IND:
+			k = X + pc-&gt;k;
+			<span class="enscript-keyword">if</span> (X &gt; buflen || pc-&gt;k &gt; buflen - X ||
+			    <span class="enscript-keyword">sizeof</span>(int16_t) &gt; buflen - k) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+				<span class="enscript-type">int</span> merr;
+
+				<span class="enscript-keyword">if</span> (buflen != 0)
+					<span class="enscript-keyword">return</span> 0;
+				A = m_xhalf((<span class="enscript-type">struct</span> mbuf *)(<span class="enscript-type">void</span> *)p, k, &amp;merr);
+				<span class="enscript-keyword">if</span> (merr != 0)
+					<span class="enscript-keyword">return</span> 0;
+				<span class="enscript-keyword">continue</span>;
+#<span class="enscript-reference">else</span>
+				<span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+			}
+			A = EXTRACT_SHORT(&amp;p[k]);
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LD</span>|BPF_B|BPF_IND:
+			k = X + pc-&gt;k;
+			<span class="enscript-keyword">if</span> (pc-&gt;k &gt;= buflen || X &gt;= buflen - pc-&gt;k) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+				<span class="enscript-type">register</span> <span class="enscript-type">struct</span> mbuf *m;
+
+				<span class="enscript-keyword">if</span> (buflen != 0)
+					<span class="enscript-keyword">return</span> 0;
+				m = (<span class="enscript-type">struct</span> mbuf *)(<span class="enscript-type">void</span> *)p;
+				MINDEX(m, k);
+				A = mtod(m, u_char *)[k];
+				<span class="enscript-keyword">continue</span>;
+#<span class="enscript-reference">else</span>
+				<span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+			}
+			A = p[k];
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LDX</span>|BPF_MSH|BPF_B:
+			k = pc-&gt;k;
+			<span class="enscript-keyword">if</span> (k &gt;= buflen) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+				<span class="enscript-type">register</span> <span class="enscript-type">struct</span> mbuf *m;
+
+				<span class="enscript-keyword">if</span> (buflen != 0)
+					<span class="enscript-keyword">return</span> 0;
+				m = (<span class="enscript-type">struct</span> mbuf *)(<span class="enscript-type">void</span> *)p;
+				MINDEX(m, k);
+				X = (mtod(m, u_char *)[k] &amp; 0xf) &lt;&lt; 2;
+				<span class="enscript-keyword">continue</span>;
+#<span class="enscript-reference">else</span>
+				<span class="enscript-keyword">return</span> 0;
+#<span class="enscript-reference">endif</span>
+			}
+			X = (p[pc-&gt;k] &amp; 0xf) &lt;&lt; 2;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LD</span>|BPF_IMM:
+			A = pc-&gt;k;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LDX</span>|BPF_IMM:
+			X = pc-&gt;k;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LD</span>|BPF_MEM:
+			A = mem[pc-&gt;k];
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LDX</span>|BPF_MEM:
+			X = mem[pc-&gt;k];
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ST</span>:
+			<span class="enscript-keyword">if</span> (pc-&gt;k &gt;= BPF_MEMWORDS)
+				<span class="enscript-keyword">return</span> 0;
+			mem[pc-&gt;k] = A;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_STX</span>:
+			<span class="enscript-keyword">if</span> (pc-&gt;k &gt;= BPF_MEMWORDS)
+				<span class="enscript-keyword">return</span> 0;
+			mem[pc-&gt;k] = X;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JMP</span>|BPF_JA:
+			pc += pc-&gt;k;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JMP</span>|BPF_JGT|BPF_K:
+			pc += (A &gt; pc-&gt;k) ? pc-&gt;jt : pc-&gt;jf;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JMP</span>|BPF_JGE|BPF_K:
+			pc += (A &gt;= pc-&gt;k) ? pc-&gt;jt : pc-&gt;jf;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JMP</span>|BPF_JEQ|BPF_K:
+			pc += (A == pc-&gt;k) ? pc-&gt;jt : pc-&gt;jf;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JMP</span>|BPF_JSET|BPF_K:
+			pc += (A &amp; pc-&gt;k) ? pc-&gt;jt : pc-&gt;jf;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JMP</span>|BPF_JGT|BPF_X:
+			pc += (A &gt; X) ? pc-&gt;jt : pc-&gt;jf;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JMP</span>|BPF_JGE|BPF_X:
+			pc += (A &gt;= X) ? pc-&gt;jt : pc-&gt;jf;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JMP</span>|BPF_JEQ|BPF_X:
+			pc += (A == X) ? pc-&gt;jt : pc-&gt;jf;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JMP</span>|BPF_JSET|BPF_X:
+			pc += (A &amp; X) ? pc-&gt;jt : pc-&gt;jf;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_ADD|BPF_X:
+			A += X;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_SUB|BPF_X:
+			A -= X;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_MUL|BPF_X:
+			A *= X;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_DIV|BPF_X:
+			<span class="enscript-keyword">if</span> (X == 0)
+				<span class="enscript-keyword">return</span> 0;
+			A /= X;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_AND|BPF_X:
+			A &amp;= X;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_OR|BPF_X:
+			A |= X;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_LSH|BPF_X:
+			A &lt;&lt;= X;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_RSH|BPF_X:
+			A &gt;&gt;= X;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_ADD|BPF_K:
+			A += pc-&gt;k;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_SUB|BPF_K:
+			A -= pc-&gt;k;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_MUL|BPF_K:
+			A *= pc-&gt;k;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_DIV|BPF_K:
+			A /= pc-&gt;k;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_AND|BPF_K:
+			A &amp;= pc-&gt;k;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_OR|BPF_K:
+			A |= pc-&gt;k;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_LSH|BPF_K:
+			A &lt;&lt;= pc-&gt;k;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_RSH|BPF_K:
+			A &gt;&gt;= pc-&gt;k;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>|BPF_NEG:
+			A = -A;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_MISC</span>|BPF_TAX:
+			X = A;
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_MISC</span>|BPF_TXA:
+			A = X;
+			<span class="enscript-keyword">continue</span>;
+		}
+	}
+}
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">KERNEL</span>
+<span class="enscript-comment">/*
+ * Return true if the 'fcode' is a valid filter program.
+ * The constraints are that each jump be forward and to a valid
+ * code, that memory accesses are within valid ranges (to the 
+ * extent that this can be checked statically; loads of packet data
+ * have to be, and are, also checked at run time), and that
+ * the code terminates with either an accept or reject.
+ *
+ * The kernel needs to be able to verify an application's filter code.
+ * Otherwise, a bogus program could easily crash the system.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">bpf_validate</span>(<span class="enscript-type">const</span> <span class="enscript-type">struct</span> bpf_insn *f, <span class="enscript-type">int</span> len)
+{
+	u_int i, from;
+	<span class="enscript-type">const</span> <span class="enscript-type">struct</span> bpf_insn *p;
+
+	<span class="enscript-keyword">if</span> (len &lt; 1 || len &gt; BPF_MAXINSNS)
+		<span class="enscript-keyword">return</span> 0;
+	
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; ((u_int)len); ++i) {
+		p = &amp;f[i];
+		<span class="enscript-keyword">switch</span> (BPF_CLASS(p-&gt;code)) {
+			<span class="enscript-comment">/*
+			 * Check that memory operations use valid addresses
+			 */</span>
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LD</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LDX</span>:
+				<span class="enscript-keyword">switch</span> (BPF_MODE(p-&gt;code)) {
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_IMM</span>:
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ABS</span>:
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_IND</span>:
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_MSH</span>:
+						<span class="enscript-comment">/*
+						 * More strict check with actual packet length
+						 * is done runtime.
+						 */</span>
+						<span class="enscript-keyword">if</span> (p-&gt;k &gt;= bpf_maxbufsize)
+							<span class="enscript-keyword">return</span> 0;
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_MEM</span>:
+						<span class="enscript-keyword">if</span> (p-&gt;k &gt;= BPF_MEMWORDS)
+							<span class="enscript-keyword">return</span> 0;
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LEN</span>:
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-reference">default</span>:
+						<span class="enscript-keyword">return</span> 0;
+				}
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ST</span>:
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_STX</span>:
+				<span class="enscript-keyword">if</span> (p-&gt;k &gt;= BPF_MEMWORDS)
+					<span class="enscript-keyword">return</span> 0;
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ALU</span>:
+				<span class="enscript-keyword">switch</span> (BPF_OP(p-&gt;code)) {
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_ADD</span>:
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_SUB</span>:
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_MUL</span>:
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_OR</span>:
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_AND</span>:
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_LSH</span>:
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_RSH</span>:
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_NEG</span>:
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_DIV</span>:
+						<span class="enscript-comment">/* 
+						 * Check for constant division by 0
+						 */</span>
+						<span class="enscript-keyword">if</span>(BPF_SRC(p-&gt;code) == BPF_K &amp;&amp; p-&gt;k == 0)
+							<span class="enscript-keyword">return</span> 0;
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-reference">default</span>:
+						<span class="enscript-keyword">return</span> 0;
+				}
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JMP</span>:
+				<span class="enscript-comment">/*
+				 * Check that jumps are within the code block,
+				 * and that unconditional branches don't go 
+				 * backwards as a result of an overflow.
+				 * Unconditional branches have a 32-bit offset,
+				 * so they could overflow; we check to make 
+				 * sure they don't. Conditional branches have 
+				 * an 8-bit offset, and the from address is 
+				 * less than equal to BPF_MAXINSNS, and we assume that
+				 * BPF_MAXINSNS is sufficiently small that adding 255 
+				 * to it won't overlflow
+				 *
+				 * We know that len is &lt;= BPF_MAXINSNS, and we 
+				 * assume that BPF_MAXINSNS is less than the maximum 
+				 * size of a u_int, so that i+1 doesn't overflow
+				 */</span>
+				from = i+1;
+				<span class="enscript-keyword">switch</span> (BPF_OP(p-&gt;code)) {
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JA</span>:
+						<span class="enscript-keyword">if</span> (from + p-&gt;k &lt; from || from + p-&gt;k &gt;= ((u_int)len))
+							<span class="enscript-keyword">return</span> 0;
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JEQ</span>:
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JGT</span>:
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JGE</span>:
+					<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_JSET</span>:
+						<span class="enscript-keyword">if</span> (from + p-&gt;jt &gt;= ((u_int)len) || from + p-&gt;jf &gt;= ((u_int)len))
+							<span class="enscript-keyword">return</span> 0;
+						<span class="enscript-keyword">break</span>;
+					<span class="enscript-reference">default</span>:
+						<span class="enscript-keyword">return</span> 0;
+				}
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_RET</span>:
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">BPF_MISC</span>:
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-reference">default</span>:
+				<span class="enscript-keyword">return</span> 0;
+		}
+	}
+		<span class="enscript-keyword">return</span> BPF_CLASS(f[len - 1].code) == BPF_RET;
+}
+#<span class="enscript-reference">endif</span>
+</pre>
+<hr />
+</body></html>

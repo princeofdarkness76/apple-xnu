@@ -1,0 +1,319 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ip6_id.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ip6_id.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2009-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+<span class="enscript-comment">/*-
+ * Copyright (C) 2003 WIDE Project.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the project nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */</span>
+
+<span class="enscript-comment">/*-
+ * Copyright 1998 Niels Provos &lt;<a href="mailto:provos@citi.umich.edu">provos@citi.umich.edu</a>&gt;
+ * All rights reserved.
+ *
+ * Theo de Raadt &lt;<a href="mailto:deraadt@openbsd.org">deraadt@openbsd.org</a>&gt; came up with the idea of using
+ * such a mathematical system to generate more random (yet non-repeating)
+ * ids to solve the resolver/named problem.  But Niels designed the
+ * actual system based on the constraints.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Niels Provos.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * seed = random (bits - 1) bit
+ * n = prime, g0 = generator to n,
+ * j = random so that gcd(j,n-1) == 1
+ * g = g0^j mod n will be a generator again.
+ *
+ * X[0] = random seed.
+ * X[n] = a*X[n-1]+b mod m is a Linear Congruential Generator
+ * with a = 7^(even random) mod m,
+ *      b = random with gcd(b,m) == 1
+ *      m = constant and a maximal period of m-1.
+ *
+ * The transaction id is determined by:
+ * id[n] = seed xor (g^X[n] mod n)
+ *
+ * Effectivly the id is restricted to the lower (bits - 1) bits, thus
+ * yielding two different cycles by toggling the msb on and off.
+ * This avoids reuse issues caused by reseeding.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/random.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/libkern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;dev/random/randomdev.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip6.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet6/ip6_var.h&gt;</span>
+
+<span class="enscript-type">struct</span> randomtab {
+	<span class="enscript-type">const</span> <span class="enscript-type">int</span>	ru_bits; <span class="enscript-comment">/* resulting bits */</span>
+	<span class="enscript-type">const</span> <span class="enscript-type">long</span>	ru_out;	<span class="enscript-comment">/* Time after wich will be reseeded */</span>
+	<span class="enscript-type">const</span> u_int32_t ru_max;	<span class="enscript-comment">/* Uniq cycle, avoid blackjack prediction */</span>
+	<span class="enscript-type">const</span> u_int32_t ru_gen;	<span class="enscript-comment">/* Starting generator */</span>
+	<span class="enscript-type">const</span> u_int32_t ru_n;	<span class="enscript-comment">/* ru_n: prime, ru_n - 1: product of pfacts[] */</span>
+	<span class="enscript-type">const</span> u_int32_t ru_agen; <span class="enscript-comment">/* determine ru_a as ru_agen^(2*rand) */</span>
+	<span class="enscript-type">const</span> u_int32_t ru_m;	<span class="enscript-comment">/* ru_m = 2^x*3^y */</span>
+	<span class="enscript-type">const</span> u_int32_t pfacts[4];	<span class="enscript-comment">/* factors of ru_n */</span>
+
+	u_int32_t ru_counter;
+	u_int32_t ru_msb;
+
+	u_int32_t ru_x;
+	u_int32_t ru_seed, ru_seed2;
+	u_int32_t ru_a, ru_b;
+	u_int32_t ru_g;
+	<span class="enscript-type">long</span> ru_reseed;
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> randomtab randomtab_32 = {
+	32,			<span class="enscript-comment">/* resulting bits */</span>
+	180,			<span class="enscript-comment">/* Time after wich will be reseeded */</span>
+	1000000000,		<span class="enscript-comment">/* Uniq cycle, avoid blackjack prediction */</span>
+	2,			<span class="enscript-comment">/* Starting generator */</span>
+	2147483629,		<span class="enscript-comment">/* RU_N-1 = 2^2*3^2*59652323 */</span>
+	7,			<span class="enscript-comment">/* determine ru_a as RU_AGEN^(2*rand) */</span>
+	1836660096,		<span class="enscript-comment">/* RU_M = 2^7*3^15 - don't change */</span>
+	{ 2, 3, 59652323, 0 },	<span class="enscript-comment">/* factors of ru_n */</span>
+	0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> randomtab randomtab_20 = {
+	20,			<span class="enscript-comment">/* resulting bits */</span>
+	180,			<span class="enscript-comment">/* Time after wich will be reseeded */</span>
+	200000,			<span class="enscript-comment">/* Uniq cycle, avoid blackjack prediction */</span>
+	2,			<span class="enscript-comment">/* Starting generator */</span>
+	524269,			<span class="enscript-comment">/* RU_N-1 = 2^2*3^2*14563 */</span>
+	7,			<span class="enscript-comment">/* determine ru_a as RU_AGEN^(2*rand) */</span>
+	279936,			<span class="enscript-comment">/* RU_M = 2^7*3^7 - don't change */</span>
+	{ 2, 3, 14563, 0 },	<span class="enscript-comment">/* factors of ru_n */</span>
+	0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+
+<span class="enscript-type">static</span> u_int32_t <span class="enscript-function-name">pmod</span>(u_int32_t, u_int32_t, u_int32_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">initid</span>(<span class="enscript-type">struct</span> randomtab *);
+<span class="enscript-type">static</span> u_int32_t <span class="enscript-function-name">randomid</span>(<span class="enscript-type">struct</span> randomtab *);
+
+<span class="enscript-comment">/*
+ * Do a fast modular exponation, returned value will be in the range
+ * of 0 - (mod-1)
+ */</span>
+<span class="enscript-type">static</span> u_int32_t
+<span class="enscript-function-name">pmod</span>(u_int32_t gen, u_int32_t expo, u_int32_t mod)
+{
+	u_int64_t s, t, u;
+
+	s = 1;
+	t = gen;
+	u = expo;
+
+	<span class="enscript-keyword">while</span> (u) {
+		<span class="enscript-keyword">if</span> (u &amp; 1)
+			s = (s * t) % mod;
+		u &gt;&gt;= 1;
+		t = (t * t) % mod;
+	}
+	<span class="enscript-keyword">return</span> (s);
+}
+
+<span class="enscript-comment">/*
+ * Initalizes the seed and chooses a suitable generator. Also toggles
+ * the msb flag. The msb flag is used to generate two distinct
+ * cycles of random numbers and thus avoiding reuse of ids.
+ *
+ * This function is called from id_randomid() when needed, an
+ * application does not have to worry about it.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">initid</span>(<span class="enscript-type">struct</span> randomtab *p)
+{
+	time_t curtime = (time_t)net_uptime();
+	u_int32_t j, i;
+	<span class="enscript-type">int</span> noprime = 1;
+
+	p-&gt;ru_x = RandomULong() % p-&gt;ru_m;
+
+	<span class="enscript-comment">/* (bits - 1) bits of random seed */</span>
+	p-&gt;ru_seed = RandomULong() &amp; (~0U &gt;&gt; (32 - p-&gt;ru_bits + 1));
+	p-&gt;ru_seed2 = RandomULong() &amp; (~0U &gt;&gt; (32 - p-&gt;ru_bits + 1));
+
+	<span class="enscript-comment">/* Determine the LCG we use */</span>
+	p-&gt;ru_b = (RandomULong() &amp; (~0U &gt;&gt; (32 - p-&gt;ru_bits))) | 1;
+	p-&gt;ru_a = pmod(p-&gt;ru_agen,
+	    (RandomULong() &amp; (~0U &gt;&gt; (32 - p-&gt;ru_bits))) &amp; (~1U), p-&gt;ru_m);
+	<span class="enscript-keyword">while</span> (p-&gt;ru_b % 3 == 0)
+		p-&gt;ru_b += 2;
+
+	j = RandomULong() % p-&gt;ru_n;
+
+	<span class="enscript-comment">/*
+	 * Do a fast gcd(j, RU_N - 1), so we can find a j with
+	 * gcd(j, RU_N - 1) == 1, giving a new generator for
+	 * RU_GEN^j mod RU_N
+	 */</span>
+	<span class="enscript-keyword">while</span> (noprime) {
+		<span class="enscript-keyword">for</span> (i = 0; p-&gt;pfacts[i] &gt; 0; i++)
+			<span class="enscript-keyword">if</span> (j % p-&gt;pfacts[i] == 0)
+				<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">if</span> (p-&gt;pfacts[i] == 0)
+			noprime = 0;
+		<span class="enscript-keyword">else</span>
+			j = (j + 1) % p-&gt;ru_n;
+	}
+
+	p-&gt;ru_g = pmod(p-&gt;ru_gen, j, p-&gt;ru_n);
+	p-&gt;ru_counter = 0;
+
+	p-&gt;ru_reseed = curtime + p-&gt;ru_out;
+	p-&gt;ru_msb = p-&gt;ru_msb ? 0 : (1U &lt;&lt; (p-&gt;ru_bits - 1));
+}
+
+<span class="enscript-type">static</span> u_int32_t
+<span class="enscript-function-name">randomid</span>(<span class="enscript-type">struct</span> randomtab *p)
+{
+	time_t curtime = (time_t)net_uptime();
+	<span class="enscript-type">int</span> i, n;
+	u_int32_t tmp;
+
+	<span class="enscript-keyword">if</span> (p-&gt;ru_counter &gt;= p-&gt;ru_max || curtime &gt; p-&gt;ru_reseed)
+		initid(p);
+
+	tmp = RandomULong();
+
+	<span class="enscript-comment">/* Skip a random number of ids */</span>
+	n = tmp &amp; 0x3; tmp = tmp &gt;&gt; 2;
+	<span class="enscript-keyword">if</span> (p-&gt;ru_counter + n &gt;= p-&gt;ru_max)
+		initid(p);
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt;= n; i++) {
+		<span class="enscript-comment">/* Linear Congruential Generator */</span>
+		p-&gt;ru_x = ((u_int64_t)p-&gt;ru_a * p-&gt;ru_x + p-&gt;ru_b) % p-&gt;ru_m;
+	}
+
+	p-&gt;ru_counter += i;
+
+	<span class="enscript-keyword">return</span> ((p-&gt;ru_seed ^ pmod(p-&gt;ru_g, p-&gt;ru_seed2 ^ p-&gt;ru_x, p-&gt;ru_n)) |
+	    p-&gt;ru_msb);
+}
+
+u_int32_t
+<span class="enscript-function-name">ip6_randomid</span>(<span class="enscript-type">void</span>)
+{
+
+	<span class="enscript-keyword">return</span> (randomid(&amp;randomtab_32));
+}
+
+u_int32_t
+<span class="enscript-function-name">ip6_randomflowlabel</span>(<span class="enscript-type">void</span>)
+{
+
+	<span class="enscript-keyword">return</span> (randomid(&amp;randomtab_20) &amp; 0xfffff);
+}
+</pre>
+<hr />
+</body></html>

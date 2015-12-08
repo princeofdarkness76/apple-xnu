@@ -1,0 +1,2388 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>memory_object.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">memory_object.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * @OSF_COPYRIGHT@
+ */</span>
+<span class="enscript-comment">/* 
+ * Mach Operating System
+ * Copyright (c) 1991,1990,1989,1988,1987 Carnegie Mellon University
+ * All Rights Reserved.
+ * 
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ * 
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS &quot;AS IS&quot;
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
+ * 
+ * Carnegie Mellon requests users of this software to return to
+ * 
+ *  Software Distribution Coordinator  or  <a href="mailto:Software.Distribution@CS.CMU.EDU">Software.Distribution@CS.CMU.EDU</a>
+ *  School of Computer Science
+ *  Carnegie Mellon University
+ *  Pittsburgh PA 15213-3890
+ * 
+ * any improvements or extensions that they make and grant Carnegie Mellon
+ * the rights to redistribute these changes.
+ */</span>
+<span class="enscript-comment">/*
+ */</span>
+<span class="enscript-comment">/*
+ *	File:	vm/memory_object.c
+ *	Author:	Michael Wayne Young
+ *
+ *	External memory management interface control functions.
+ */</span>
+
+<span class="enscript-comment">/*
+ *	Interface dependencies:
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/std_types.h&gt;</span>	<span class="enscript-comment">/* For pointer_t */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mig.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_default.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_control_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv_server.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_prot.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/message.h&gt;</span>
+
+<span class="enscript-comment">/*
+ *	Implementation dependencies:
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>		<span class="enscript-comment">/* For memcpy() */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/xpr.h&gt;</span>		
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>	<span class="enscript-comment">/* For current_thread() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ipc_mig.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/misc_protos.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_fault.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/memory_object.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_page.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/pmap.h&gt;</span>		<span class="enscript-comment">/* For pmap_clear_modify */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>		<span class="enscript-comment">/* For kernel_map, vm_move */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>		<span class="enscript-comment">/* For vm_map_pageable */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_purgeable_internal.h&gt;</span>	<span class="enscript-comment">/* Needed by some vm_page.h macros */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_shared_region.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_external.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+memory_object_default_t	memory_manager_default = MEMORY_OBJECT_DEFAULT_NULL;
+<span class="enscript-function-name">decl_lck_mtx_data</span>(,	memory_manager_default_lock)
+
+
+<span class="enscript-comment">/*
+ *	Routine:	memory_object_should_return_page
+ *
+ *	Description:
+ *		Determine whether the given page should be returned,
+ *		based on the page's state and on the given return policy.
+ *
+ *		We should return the page if one of the following is true:
+ *
+ *		1. Page is dirty and should_return is not RETURN_NONE.
+ *		2. Page is precious and should_return is RETURN_ALL.
+ *		3. Should_return is RETURN_ANYTHING.
+ *
+ *		As a side effect, m-&gt;dirty will be made consistent
+ *		with pmap_is_modified(m), if should_return is not
+ *		MEMORY_OBJECT_RETURN_NONE.
+ */</span>
+
+#<span class="enscript-reference">define</span>	<span class="enscript-function-name">memory_object_should_return_page</span>(m, should_return) \
+    (should_return != MEMORY_OBJECT_RETURN_NONE &amp;&amp; \
+     (((m)-&gt;dirty || ((m)-&gt;dirty = pmap_is_modified((m)-&gt;phys_page))) || \
+      ((m)-&gt;precious &amp;&amp; (should_return) == MEMORY_OBJECT_RETURN_ALL) || \
+      (should_return) == MEMORY_OBJECT_RETURN_ANYTHING))
+
+<span class="enscript-type">typedef</span>	<span class="enscript-type">int</span>	memory_object_lock_result_t;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MEMORY_OBJECT_LOCK_RESULT_DONE</span>          	0
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MEMORY_OBJECT_LOCK_RESULT_MUST_BLOCK</span>    	1
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MEMORY_OBJECT_LOCK_RESULT_MUST_RETURN</span>   	2
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MEMORY_OBJECT_LOCK_RESULT_MUST_FREE</span>		3
+
+memory_object_lock_result_t <span class="enscript-function-name">memory_object_lock_page</span>(
+				vm_page_t		m,
+				memory_object_return_t	should_return,
+				boolean_t		should_flush,
+				vm_prot_t		prot);
+
+<span class="enscript-comment">/*
+ *	Routine:	memory_object_lock_page
+ *
+ *	Description:
+ *		Perform the appropriate lock operations on the
+ *		given page.  See the description of
+ *		&quot;memory_object_lock_request&quot; for the meanings
+ *		of the arguments.
+ *
+ *		Returns an indication that the operation
+ *		completed, blocked, or that the page must
+ *		be cleaned.
+ */</span>
+memory_object_lock_result_t
+<span class="enscript-function-name">memory_object_lock_page</span>(
+	vm_page_t		m,
+	memory_object_return_t	should_return,
+	boolean_t		should_flush,
+	vm_prot_t		prot)
+{
+        XPR(XPR_MEMORY_OBJECT,
+            <span class="enscript-string">&quot;m_o_lock_page, page 0x%X rtn %d flush %d prot %d\n&quot;</span>,
+            m, should_return, should_flush, prot, 0);
+
+
+	<span class="enscript-keyword">if</span> (m-&gt;busy || m-&gt;cleaning)
+		<span class="enscript-keyword">return</span> (MEMORY_OBJECT_LOCK_RESULT_MUST_BLOCK);
+
+	<span class="enscript-keyword">if</span> (m-&gt;laundry)
+		vm_pageout_steal_laundry(m, FALSE);
+
+	<span class="enscript-comment">/*
+	 *	Don't worry about pages for which the kernel
+	 *	does not have any data.
+	 */</span>
+	<span class="enscript-keyword">if</span> (m-&gt;absent || m-&gt;error || m-&gt;restart) {
+		<span class="enscript-keyword">if</span> (m-&gt;error &amp;&amp; should_flush &amp;&amp; !VM_PAGE_WIRED(m)) {
+			<span class="enscript-comment">/*
+			 * dump the page, pager wants us to
+			 * clean it up and there is no
+			 * relevant data to return
+			 */</span>
+			<span class="enscript-keyword">return</span> (MEMORY_OBJECT_LOCK_RESULT_MUST_FREE);
+		}
+		<span class="enscript-keyword">return</span> (MEMORY_OBJECT_LOCK_RESULT_DONE);
+	}
+	assert(!m-&gt;fictitious);
+
+	<span class="enscript-keyword">if</span> (VM_PAGE_WIRED(m)) {
+		<span class="enscript-comment">/*
+		 * The page is wired... just clean or return the page if needed.
+		 * Wired pages don't get flushed or disconnected from the pmap.
+		 */</span>
+		<span class="enscript-keyword">if</span> (memory_object_should_return_page(m, should_return))
+			<span class="enscript-keyword">return</span> (MEMORY_OBJECT_LOCK_RESULT_MUST_RETURN);
+
+		<span class="enscript-keyword">return</span> (MEMORY_OBJECT_LOCK_RESULT_DONE);
+	}		
+
+	<span class="enscript-keyword">if</span> (should_flush) {
+		<span class="enscript-comment">/*
+		 * must do the pmap_disconnect before determining the 
+		 * need to return the page... otherwise it's possible
+		 * for the page to go from the clean to the dirty state
+		 * after we've made our decision
+		 */</span>
+		<span class="enscript-keyword">if</span> (pmap_disconnect(m-&gt;phys_page) &amp; VM_MEM_MODIFIED) {
+			SET_PAGE_DIRTY(m, FALSE);
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 * If we are decreasing permission, do it now;
+		 * let the fault handler take care of increases
+		 * (pmap_page_protect may not increase protection).
+		 */</span>
+		<span class="enscript-keyword">if</span> (prot != VM_PROT_NO_CHANGE)
+			pmap_page_protect(m-&gt;phys_page, VM_PROT_ALL &amp; ~prot);
+	}
+	<span class="enscript-comment">/*
+	 *	Handle returning dirty or precious pages
+	 */</span>
+	<span class="enscript-keyword">if</span> (memory_object_should_return_page(m, should_return)) {
+		<span class="enscript-comment">/*
+		 * we use to do a pmap_disconnect here in support
+		 * of memory_object_lock_request, but that routine
+		 * no longer requires this...  in any event, in
+		 * our world, it would turn into a big noop since
+		 * we don't lock the page in any way and as soon
+		 * as we drop the object lock, the page can be
+		 * faulted back into an address space
+		 *
+		 *	if (!should_flush)
+		 *		pmap_disconnect(m-&gt;phys_page);
+		 */</span>
+		<span class="enscript-keyword">return</span> (MEMORY_OBJECT_LOCK_RESULT_MUST_RETURN);
+	}
+
+	<span class="enscript-comment">/*
+	 *	Handle flushing clean pages
+	 */</span>
+	<span class="enscript-keyword">if</span> (should_flush)
+		<span class="enscript-keyword">return</span> (MEMORY_OBJECT_LOCK_RESULT_MUST_FREE);
+
+	<span class="enscript-comment">/*
+	 * we use to deactivate clean pages at this point,
+	 * but we do not believe that an msync should change
+	 * the 'age' of a page in the cache... here is the
+	 * original comment and code concerning this...
+	 *
+	 *	XXX Make clean but not flush a paging hint,
+	 *	and deactivate the pages.  This is a hack
+	 *	because it overloads flush/clean with
+	 *	implementation-dependent meaning.  This only
+	 *	happens to pages that are already clean.
+	 *
+	 *   if (vm_page_deactivate_hint &amp;&amp; (should_return != MEMORY_OBJECT_RETURN_NONE))
+	 *	return (MEMORY_OBJECT_LOCK_RESULT_MUST_DEACTIVATE);
+	 */</span>
+
+	<span class="enscript-keyword">return</span> (MEMORY_OBJECT_LOCK_RESULT_DONE);
+}
+
+
+
+<span class="enscript-comment">/*
+ *	Routine:	memory_object_lock_request [user interface]
+ *
+ *	Description:
+ *		Control use of the data associated with the given
+ *		memory object.  For each page in the given range,
+ *		perform the following operations, in order:
+ *			1)  restrict access to the page (disallow
+ *			    forms specified by &quot;prot&quot;);
+ *			2)  return data to the manager (if &quot;should_return&quot;
+ *			    is RETURN_DIRTY and the page is dirty, or
+ * 			    &quot;should_return&quot; is RETURN_ALL and the page
+ *			    is either dirty or precious); and,
+ *			3)  flush the cached copy (if &quot;should_flush&quot;
+ *			    is asserted).
+ *		The set of pages is defined by a starting offset
+ *		(&quot;offset&quot;) and size (&quot;size&quot;).  Only pages with the
+ *		same page alignment as the starting offset are
+ *		considered.
+ *
+ *		A single acknowledgement is sent (to the &quot;reply_to&quot;
+ *		port) when these actions are complete.  If successful,
+ *		the naked send right for reply_to is consumed.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">memory_object_lock_request</span>(
+	memory_object_control_t		control,
+	memory_object_offset_t		offset,
+	memory_object_size_t		size,
+	memory_object_offset_t	*	resid_offset,
+	<span class="enscript-type">int</span>			*	io_errno,
+	memory_object_return_t		should_return,
+	<span class="enscript-type">int</span>				flags,
+	vm_prot_t			prot)
+{
+	vm_object_t	object;
+
+        <span class="enscript-comment">/*
+	 *	Check for bogus arguments.
+	 */</span>
+	object = memory_object_control_to_vm_object(control);
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">if</span> ((prot &amp; ~VM_PROT_ALL) != 0 &amp;&amp; prot != VM_PROT_NO_CHANGE)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	size = round_page_64(size);
+
+	<span class="enscript-comment">/*
+	 *	Lock the object, and acquire a paging reference to
+	 *	prevent the memory_object reference from being released.
+	 */</span>
+	vm_object_lock(object);
+	vm_object_paging_begin(object);
+
+	<span class="enscript-keyword">if</span> (flags &amp; MEMORY_OBJECT_DATA_FLUSH_ALL) {
+		<span class="enscript-keyword">if</span> ((should_return != MEMORY_OBJECT_RETURN_NONE) || offset || object-&gt;copy) {
+			flags &amp;= ~MEMORY_OBJECT_DATA_FLUSH_ALL;
+			flags |= MEMORY_OBJECT_DATA_FLUSH;
+		}
+	}
+	offset -= object-&gt;paging_offset;
+
+	<span class="enscript-keyword">if</span> (flags &amp; MEMORY_OBJECT_DATA_FLUSH_ALL)
+		vm_object_reap_pages(object, REAP_DATA_FLUSH);
+	<span class="enscript-keyword">else</span>
+		(<span class="enscript-type">void</span>)vm_object_update(object, offset, size, resid_offset,
+				       io_errno, should_return, flags, prot);
+
+	vm_object_paging_end(object);
+	vm_object_unlock(object);
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ *	memory_object_release_name:  [interface]
+ *
+ *	Enforces name semantic on memory_object reference count decrement
+ *	This routine should not be called unless the caller holds a name
+ *	reference gained through the memory_object_named_create or the
+ *	memory_object_rename call.
+ *	If the TERMINATE_IDLE flag is set, the call will return if the
+ *	reference count is not 1. i.e. idle with the only remaining reference
+ *	being the name.
+ *	If the decision is made to proceed the name field flag is set to
+ *	false and the reference count is decremented.  If the RESPECT_CACHE
+ *	flag is set and the reference count has gone to zero, the 
+ *	memory_object is checked to see if it is cacheable otherwise when
+ *	the reference count is zero, it is simply terminated.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">memory_object_release_name</span>(
+	memory_object_control_t	control,
+	<span class="enscript-type">int</span>				flags)
+{
+	vm_object_t	object;
+
+	object = memory_object_control_to_vm_object(control);
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">return</span> vm_object_release_name(object, flags);
+}
+
+
+
+<span class="enscript-comment">/*
+ *	Routine:	memory_object_destroy [user interface]
+ *	Purpose:
+ *		Shut down a memory object, despite the
+ *		presence of address map (or other) references
+ *		to the vm_object.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">memory_object_destroy</span>(
+	memory_object_control_t	control,
+	kern_return_t		reason)
+{
+	vm_object_t		object;
+
+	object = memory_object_control_to_vm_object(control);
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">return</span> (vm_object_destroy(object, reason));
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	vm_object_sync
+ *
+ *	Kernel internal function to synch out pages in a given
+ *	range within an object to its memory manager.  Much the
+ *	same as memory_object_lock_request but page protection
+ *	is not changed.
+ *
+ *	If the should_flush and should_return flags are true pages
+ *	are flushed, that is dirty &amp; precious pages are written to
+ *	the memory manager and then discarded.  If should_return
+ *	is false, only precious pages are returned to the memory
+ *	manager.
+ *
+ *	If should flush is false and should_return true, the memory
+ *	manager's copy of the pages is updated.  If should_return
+ *	is also false, only the precious pages are updated.  This
+ *	last option is of limited utility.
+ *
+ *	Returns:
+ *	FALSE		if no pages were returned to the pager
+ *	TRUE		otherwise.
+ */</span>
+
+boolean_t
+<span class="enscript-function-name">vm_object_sync</span>(
+	vm_object_t		object,
+	vm_object_offset_t	offset,
+	vm_object_size_t	size,
+	boolean_t		should_flush,
+	boolean_t		should_return,
+	boolean_t		should_iosync)
+{
+	boolean_t	rv;
+	<span class="enscript-type">int</span>             flags;
+
+        XPR(XPR_VM_OBJECT,
+            <span class="enscript-string">&quot;vm_o_sync, object 0x%X, offset 0x%X size 0x%x flush %d rtn %d\n&quot;</span>,
+            object, offset, size, should_flush, should_return);
+
+	<span class="enscript-comment">/*
+	 * Lock the object, and acquire a paging reference to
+	 * prevent the memory_object and control ports from
+	 * being destroyed.
+	 */</span>
+	vm_object_lock(object);
+	vm_object_paging_begin(object);
+
+	<span class="enscript-keyword">if</span> (should_flush) {
+	        flags = MEMORY_OBJECT_DATA_FLUSH;
+		<span class="enscript-comment">/*
+		 * This flush is from an msync(), not a truncate(), so the
+		 * contents of the file are not affected.
+		 * MEMORY_OBECT_DATA_NO_CHANGE lets vm_object_update() know
+		 * that the data is not changed and that there's no need to
+		 * push the old contents to a copy object.
+		 */</span>
+		flags |= MEMORY_OBJECT_DATA_NO_CHANGE;
+	} <span class="enscript-keyword">else</span>
+	        flags = 0;
+
+	<span class="enscript-keyword">if</span> (should_iosync)
+	        flags |= MEMORY_OBJECT_IO_SYNC;
+
+	rv = vm_object_update(object, offset, (vm_object_size_t)size, NULL, NULL,
+		(should_return) ?
+			MEMORY_OBJECT_RETURN_ALL :
+			MEMORY_OBJECT_RETURN_NONE,
+		flags,
+		VM_PROT_NO_CHANGE);
+
+
+	vm_object_paging_end(object);
+	vm_object_unlock(object);
+	<span class="enscript-keyword">return</span> rv;
+}
+
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">LIST_REQ_PAGEOUT_PAGES</span>(object, data_cnt, po, ro, ioerr, iosync)    \
+MACRO_BEGIN								\
+									\
+        <span class="enscript-type">int</span>			upl_flags;                              \
+	memory_object_t		pager;					\
+									\
+	<span class="enscript-keyword">if</span> (object-&gt;object_slid) {					\
+		panic(<span class="enscript-string">&quot;Objects with slid pages not allowed\n&quot;</span>);		\
+	}								\
+				                   			\
+	<span class="enscript-keyword">if</span> ((pager = (object)-&gt;pager) != MEMORY_OBJECT_NULL) {		\
+		vm_object_paging_begin(object);				\
+		vm_object_unlock(object);				\
+									\
+                <span class="enscript-keyword">if</span> (iosync)                                     	\
+                        upl_flags = UPL_MSYNC | UPL_IOSYNC;     	\
+                <span class="enscript-keyword">else</span>                                            	\
+                        upl_flags = UPL_MSYNC;                  	\
+				                   			\
+	   	(<span class="enscript-type">void</span>) memory_object_data_return(pager,			\
+			po,						\
+			(memory_object_cluster_size_t)data_cnt,		\
+	                ro,                                             \
+	                ioerr,                                          \
+			FALSE,						\
+			FALSE,		                                \
+			upl_flags);                                 	\
+									\
+		vm_object_lock(object);					\
+		vm_object_paging_end(object);				\
+	}								\
+MACRO_END
+
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">vm_object_update_extent</span>(
+        vm_object_t		object,
+        vm_object_offset_t	offset,
+	vm_object_offset_t	offset_end,
+	vm_object_offset_t	*offset_resid,
+	<span class="enscript-type">int</span>			*io_errno,
+        boolean_t		should_flush,
+	memory_object_return_t	should_return,
+        boolean_t		should_iosync, 
+        vm_prot_t		prot)
+{
+        vm_page_t	m;
+        <span class="enscript-type">int</span>		retval = 0;
+	vm_object_offset_t	paging_offset = 0;
+	vm_object_offset_t	next_offset = offset;
+        memory_object_lock_result_t	page_lock_result;
+	memory_object_cluster_size_t	data_cnt = 0;
+	<span class="enscript-type">struct</span> vm_page_delayed_work	dw_array[DEFAULT_DELAYED_WORK_LIMIT];
+	<span class="enscript-type">struct</span> vm_page_delayed_work	*dwp;
+	<span class="enscript-type">int</span>		dw_count;
+	<span class="enscript-type">int</span>		dw_limit;
+
+        dwp = &amp;dw_array[0];
+        dw_count = 0;
+	dw_limit = DELAYED_WORK_LIMIT(DEFAULT_DELAYED_WORK_LIMIT);
+
+	<span class="enscript-keyword">for</span> (;
+	     offset &lt; offset_end &amp;&amp; object-&gt;resident_page_count;
+	     offset += PAGE_SIZE_64) {
+
+	        <span class="enscript-comment">/*
+		 * Limit the number of pages to be cleaned at once to a contiguous
+		 * run, or at most MAX_UPL_TRANSFER_BYTES
+		 */</span>
+		<span class="enscript-keyword">if</span> (data_cnt) {
+			<span class="enscript-keyword">if</span> ((data_cnt &gt;= MAX_UPL_TRANSFER_BYTES) || (next_offset != offset)) {
+
+				<span class="enscript-keyword">if</span> (dw_count) {
+					vm_page_do_delayed_work(object, VM_KERN_MEMORY_NONE, &amp;dw_array[0], dw_count);
+					dwp = &amp;dw_array[0];
+					dw_count = 0;
+				}
+				LIST_REQ_PAGEOUT_PAGES(object, data_cnt,
+						       paging_offset, offset_resid, io_errno, should_iosync);
+				data_cnt = 0;
+			}
+		}
+		<span class="enscript-keyword">while</span> ((m = vm_page_lookup(object, offset)) != VM_PAGE_NULL) {
+
+			dwp-&gt;dw_mask = 0;
+		        
+			page_lock_result = memory_object_lock_page(m, should_return, should_flush, prot);
+
+			<span class="enscript-keyword">if</span> (data_cnt &amp;&amp; page_lock_result != MEMORY_OBJECT_LOCK_RESULT_MUST_RETURN) {
+				<span class="enscript-comment">/*
+				 *	End of a run of dirty/precious pages.
+				 */</span>
+				<span class="enscript-keyword">if</span> (dw_count) {
+					vm_page_do_delayed_work(object, VM_KERN_MEMORY_NONE, &amp;dw_array[0], dw_count);
+					dwp = &amp;dw_array[0];
+					dw_count = 0;
+				}
+				LIST_REQ_PAGEOUT_PAGES(object, data_cnt,
+						       paging_offset, offset_resid, io_errno, should_iosync);
+				<span class="enscript-comment">/*
+				 * LIST_REQ_PAGEOUT_PAGES will drop the object lock which will
+				 * allow the state of page 'm' to change... we need to re-lookup
+				 * the current offset
+				 */</span>
+				data_cnt = 0;
+				<span class="enscript-keyword">continue</span>;
+			}
+
+			<span class="enscript-keyword">switch</span> (page_lock_result) {
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">MEMORY_OBJECT_LOCK_RESULT_DONE</span>:
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">MEMORY_OBJECT_LOCK_RESULT_MUST_FREE</span>:
+				dwp-&gt;dw_mask |= DW_vm_page_free;
+				<span class="enscript-keyword">break</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">MEMORY_OBJECT_LOCK_RESULT_MUST_BLOCK</span>:
+				PAGE_SLEEP(object, m, THREAD_UNINT);
+				<span class="enscript-keyword">continue</span>;
+
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">MEMORY_OBJECT_LOCK_RESULT_MUST_RETURN</span>:
+				<span class="enscript-keyword">if</span> (data_cnt == 0)
+					paging_offset = offset;
+
+				data_cnt += PAGE_SIZE;
+				next_offset = offset + PAGE_SIZE_64;
+
+				<span class="enscript-comment">/*
+				 * wired pages shouldn't be flushed and
+				 * since they aren't on any queue,
+				 * no need to remove them
+				 */</span>
+				<span class="enscript-keyword">if</span> (!VM_PAGE_WIRED(m)) {
+
+					<span class="enscript-keyword">if</span> (should_flush) {
+						<span class="enscript-comment">/*
+						 * add additional state for the flush
+						 */</span>
+						m-&gt;pageout = TRUE;
+					}
+					<span class="enscript-comment">/*
+					 * we use to remove the page from the queues at this
+					 * point, but we do not believe that an msync
+					 * should cause the 'age' of a page to be changed
+					 *
+					 *    else
+					 *	dwp-&gt;dw_mask |= DW_VM_PAGE_QUEUES_REMOVE;
+					 */</span>
+				}
+				retval = 1;
+				<span class="enscript-keyword">break</span>;
+			}
+			<span class="enscript-keyword">if</span> (dwp-&gt;dw_mask) {
+				VM_PAGE_ADD_DELAYED_WORK(dwp, m, dw_count);
+
+				<span class="enscript-keyword">if</span> (dw_count &gt;= dw_limit) {
+					vm_page_do_delayed_work(object, VM_KERN_MEMORY_NONE, &amp;dw_array[0], dw_count);
+					dwp = &amp;dw_array[0];
+					dw_count = 0;
+				}
+			}
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	<span class="enscript-comment">/*
+	 *	We have completed the scan for applicable pages.
+	 *	Clean any pages that have been saved.
+	 */</span>
+	<span class="enscript-keyword">if</span> (dw_count)
+		vm_page_do_delayed_work(object, VM_KERN_MEMORY_NONE, &amp;dw_array[0], dw_count);
+
+	<span class="enscript-keyword">if</span> (data_cnt) {
+	        LIST_REQ_PAGEOUT_PAGES(object, data_cnt,
+				       paging_offset, offset_resid, io_errno, should_iosync);
+	}
+	<span class="enscript-keyword">return</span> (retval);
+}
+
+
+
+<span class="enscript-comment">/*
+ *	Routine:	vm_object_update
+ *	Description:
+ *		Work function for m_o_lock_request(), vm_o_sync().
+ *
+ *		Called with object locked and paging ref taken.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">vm_object_update</span>(
+	vm_object_t		object,
+	vm_object_offset_t	offset,
+	vm_object_size_t	size,
+	vm_object_offset_t	*resid_offset,
+	<span class="enscript-type">int</span>			*io_errno,
+	memory_object_return_t	should_return,
+	<span class="enscript-type">int</span>			flags,
+	vm_prot_t		protection)
+{
+        vm_object_t		copy_object = VM_OBJECT_NULL;
+	boolean_t		data_returned = FALSE;
+	boolean_t		update_cow;
+	boolean_t		should_flush = (flags &amp; MEMORY_OBJECT_DATA_FLUSH) ? TRUE : FALSE;
+	boolean_t		should_iosync = (flags &amp; MEMORY_OBJECT_IO_SYNC) ? TRUE : FALSE;
+	vm_fault_return_t	result;
+	<span class="enscript-type">int</span>			num_of_extents;
+	<span class="enscript-type">int</span>			n;
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">MAX_EXTENTS</span>	8
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">EXTENT_SIZE</span>	(1024 * 1024 * 256)
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">RESIDENT_LIMIT</span>	(1024 * 32)
+	<span class="enscript-type">struct</span> extent {
+	        vm_object_offset_t e_base;
+	        vm_object_offset_t e_min;
+	        vm_object_offset_t e_max;
+	} extents[MAX_EXTENTS];
+
+	<span class="enscript-comment">/*
+	 *	To avoid blocking while scanning for pages, save
+	 *	dirty pages to be cleaned all at once.
+	 *
+	 *	XXXO A similar strategy could be used to limit the
+	 *	number of times that a scan must be restarted for
+	 *	other reasons.  Those pages that would require blocking
+	 *	could be temporarily collected in another list, or
+	 *	their offsets could be recorded in a small array.
+	 */</span>
+
+	<span class="enscript-comment">/*
+	 * XXX	NOTE: May want to consider converting this to a page list
+	 * XXX	vm_map_copy interface.  Need to understand object
+	 * XXX	coalescing implications before doing so.
+	 */</span>
+
+	update_cow = ((flags &amp; MEMORY_OBJECT_DATA_FLUSH) 
+			&amp;&amp; (!(flags &amp; MEMORY_OBJECT_DATA_NO_CHANGE) &amp;&amp;
+					!(flags &amp; MEMORY_OBJECT_DATA_PURGE)))
+				|| (flags &amp; MEMORY_OBJECT_COPY_SYNC);
+			
+	<span class="enscript-keyword">if</span> (update_cow || (flags &amp; (MEMORY_OBJECT_DATA_PURGE | MEMORY_OBJECT_DATA_SYNC))) {
+	        <span class="enscript-type">int</span> collisions = 0;
+
+	        <span class="enscript-keyword">while</span> ((copy_object = object-&gt;copy) != VM_OBJECT_NULL) {
+		        <span class="enscript-comment">/*
+			 * need to do a try here since we're swimming upstream
+			 * against the normal lock ordering... however, we need
+			 * to hold the object stable until we gain control of the
+			 * copy object so we have to be careful how we approach this
+			 */</span>
+		        <span class="enscript-keyword">if</span> (vm_object_lock_try(copy_object)) {
+			       <span class="enscript-comment">/*
+				* we 'won' the lock on the copy object...
+				* no need to hold the object lock any longer...
+				* take a real reference on the copy object because
+				* we're going to call vm_fault_page on it which may
+				* under certain conditions drop the lock and the paging
+				* reference we're about to take... the reference
+				* will keep the copy object from going away if that happens
+				*/</span>
+			       vm_object_unlock(object);
+			       vm_object_reference_locked(copy_object);
+			       <span class="enscript-keyword">break</span>;
+			}
+			vm_object_unlock(object);
+
+			collisions++;
+			mutex_pause(collisions);
+
+			vm_object_lock(object);
+		}
+	}
+	<span class="enscript-keyword">if</span> ((copy_object != VM_OBJECT_NULL &amp;&amp; update_cow) || (flags &amp; MEMORY_OBJECT_DATA_SYNC)) {
+		vm_map_size_t		i;
+		vm_map_size_t		copy_size;
+		vm_map_offset_t		copy_offset;
+		vm_prot_t		prot;
+		vm_page_t		page;
+		vm_page_t		top_page;
+		kern_return_t		error = 0;
+		<span class="enscript-type">struct</span> vm_object_fault_info fault_info;
+
+		<span class="enscript-keyword">if</span> (copy_object != VM_OBJECT_NULL) {
+		        <span class="enscript-comment">/*
+			 * translate offset with respect to shadow's offset
+			 */</span>
+		        copy_offset = (offset &gt;= copy_object-&gt;vo_shadow_offset) ?
+			  (vm_map_offset_t)(offset - copy_object-&gt;vo_shadow_offset) :
+			  (vm_map_offset_t) 0;
+
+			<span class="enscript-keyword">if</span> (copy_offset &gt; copy_object-&gt;vo_size)
+			        copy_offset = copy_object-&gt;vo_size;
+
+			<span class="enscript-comment">/*
+			 * clip size with respect to shadow offset
+			 */</span>
+			<span class="enscript-keyword">if</span> (offset &gt;= copy_object-&gt;vo_shadow_offset) {
+			        copy_size = size;
+			} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (size &gt;= copy_object-&gt;vo_shadow_offset - offset) {
+			        copy_size = size - (copy_object-&gt;vo_shadow_offset - offset);
+			} <span class="enscript-keyword">else</span> {
+			        copy_size = 0;
+			}
+			
+			<span class="enscript-keyword">if</span> (copy_offset + copy_size &gt; copy_object-&gt;vo_size) {
+			        <span class="enscript-keyword">if</span> (copy_object-&gt;vo_size &gt;= copy_offset) {
+				        copy_size = copy_object-&gt;vo_size - copy_offset;
+				} <span class="enscript-keyword">else</span> {
+				        copy_size = 0;
+				}
+			}
+			copy_size+=copy_offset;
+
+		} <span class="enscript-keyword">else</span> {
+			copy_object = object;
+
+			copy_size   = offset + size;
+			copy_offset = offset;
+		}
+		fault_info.interruptible = THREAD_UNINT;
+		fault_info.behavior  = VM_BEHAVIOR_SEQUENTIAL;
+		fault_info.user_tag  = 0;
+		fault_info.pmap_options = 0;
+		fault_info.lo_offset = copy_offset;
+		fault_info.hi_offset = copy_size;
+		fault_info.no_cache   = FALSE;
+		fault_info.stealth = TRUE;
+		fault_info.io_sync = FALSE;
+		fault_info.cs_bypass = FALSE;
+		fault_info.mark_zf_absent = FALSE;
+		fault_info.batch_pmap_op = FALSE;
+
+		vm_object_paging_begin(copy_object);
+
+		<span class="enscript-keyword">for</span> (i = copy_offset; i &lt; copy_size; i += PAGE_SIZE) {
+	<span class="enscript-reference">RETRY_COW_OF_LOCK_REQUEST</span>:
+			fault_info.cluster_size = (vm_size_t) (copy_size - i);
+			assert(fault_info.cluster_size == copy_size - i);
+
+			prot = 	VM_PROT_WRITE|VM_PROT_READ;
+			page = VM_PAGE_NULL;
+			result = vm_fault_page(copy_object, i, 
+					       VM_PROT_WRITE|VM_PROT_READ,
+					       FALSE,
+					       FALSE, <span class="enscript-comment">/* page not looked up */</span>
+					       &amp;prot,
+					       &amp;page,
+					       &amp;top_page,
+					       (<span class="enscript-type">int</span> *)0,
+					       &amp;error,
+					       FALSE,
+					       FALSE, &amp;fault_info);
+
+			<span class="enscript-keyword">switch</span> (result) {
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_SUCCESS</span>:
+				<span class="enscript-keyword">if</span> (top_page) {
+					vm_fault_cleanup(
+						page-&gt;object, top_page);
+					vm_object_lock(copy_object);
+					vm_object_paging_begin(copy_object);
+				}
+				<span class="enscript-keyword">if</span> (!page-&gt;active &amp;&amp;
+				    !page-&gt;inactive &amp;&amp;
+				    !page-&gt;throttled) {
+					vm_page_lockspin_queues();
+					<span class="enscript-keyword">if</span> (!page-&gt;active &amp;&amp;
+					    !page-&gt;inactive &amp;&amp;
+					    !page-&gt;throttled)
+						vm_page_deactivate(page);
+					vm_page_unlock_queues();
+				}
+				PAGE_WAKEUP_DONE(page);
+				<span class="enscript-keyword">break</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_RETRY</span>:
+				prot = 	VM_PROT_WRITE|VM_PROT_READ;
+				vm_object_lock(copy_object);
+				vm_object_paging_begin(copy_object);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">RETRY_COW_OF_LOCK_REQUEST</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_INTERRUPTED</span>:
+				prot = 	VM_PROT_WRITE|VM_PROT_READ;
+				vm_object_lock(copy_object);
+				vm_object_paging_begin(copy_object);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">RETRY_COW_OF_LOCK_REQUEST</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_MEMORY_SHORTAGE</span>:
+				VM_PAGE_WAIT();
+				prot = 	VM_PROT_WRITE|VM_PROT_READ;
+				vm_object_lock(copy_object);
+				vm_object_paging_begin(copy_object);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">RETRY_COW_OF_LOCK_REQUEST</span>;
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_SUCCESS_NO_VM_PAGE</span>:
+				<span class="enscript-comment">/* success but no VM page: fail */</span>
+				vm_object_paging_end(copy_object);
+				vm_object_unlock(copy_object);
+				<span class="enscript-comment">/*FALLTHROUGH*/</span>
+			<span class="enscript-keyword">case</span> <span class="enscript-reference">VM_FAULT_MEMORY_ERROR</span>:
+			        <span class="enscript-keyword">if</span> (object != copy_object)
+				        vm_object_deallocate(copy_object);
+				vm_object_lock(object);
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">BYPASS_COW_COPYIN</span>;
+			<span class="enscript-reference">default</span>:
+				panic(<span class="enscript-string">&quot;vm_object_update: unexpected error 0x%x&quot;</span>
+				      <span class="enscript-string">&quot; from vm_fault_page()\n&quot;</span>, result);
+			}
+
+		}
+		vm_object_paging_end(copy_object);
+	}
+	<span class="enscript-keyword">if</span> ((flags &amp; (MEMORY_OBJECT_DATA_SYNC | MEMORY_OBJECT_COPY_SYNC))) {
+	        <span class="enscript-keyword">if</span> (copy_object != VM_OBJECT_NULL &amp;&amp; copy_object != object) {
+			vm_object_unlock(copy_object);
+		        vm_object_deallocate(copy_object);
+			vm_object_lock(object);
+		}
+		<span class="enscript-keyword">return</span> KERN_SUCCESS;
+	}
+	<span class="enscript-keyword">if</span> (copy_object != VM_OBJECT_NULL &amp;&amp; copy_object != object) {
+	        <span class="enscript-keyword">if</span> ((flags &amp; MEMORY_OBJECT_DATA_PURGE)) {
+		        copy_object-&gt;shadow_severed = TRUE;
+			copy_object-&gt;shadowed = FALSE;
+			copy_object-&gt;shadow = NULL;
+			<span class="enscript-comment">/*
+			 * delete the ref the COW was holding on the target object
+			 */</span>
+			vm_object_deallocate(object);
+		}
+		vm_object_unlock(copy_object);
+	        vm_object_deallocate(copy_object);
+		vm_object_lock(object);
+	}
+<span class="enscript-reference">BYPASS_COW_COPYIN</span>:
+
+	<span class="enscript-comment">/*
+	 * when we have a really large range to check relative
+	 * to the number of actual resident pages, we'd like
+	 * to use the resident page list to drive our checks
+	 * however, the object lock will get dropped while processing
+	 * the page which means the resident queue can change which
+	 * means we can't walk the queue as we process the pages
+	 * we also want to do the processing in offset order to allow
+	 * 'runs' of pages to be collected if we're being told to 
+	 * flush to disk... the resident page queue is NOT ordered.
+	 * 
+	 * a temporary solution (until we figure out how to deal with
+	 * large address spaces more generically) is to pre-flight
+	 * the resident page queue (if it's small enough) and develop
+	 * a collection of extents (that encompass actual resident pages)
+	 * to visit.  This will at least allow us to deal with some of the
+	 * more pathological cases in a more efficient manner.  The current
+	 * worst case (a single resident page at the end of an extremely large
+	 * range) can take minutes to complete for ranges in the terrabyte
+	 * category... since this routine is called when truncating a file,
+	 * and we currently support files up to 16 Tbytes in size, this
+	 * is not a theoretical problem
+	 */</span>
+
+	<span class="enscript-keyword">if</span> ((object-&gt;resident_page_count &lt; RESIDENT_LIMIT) &amp;&amp; 
+	    (atop_64(size) &gt; (<span class="enscript-type">unsigned</span>)(object-&gt;resident_page_count/(8 * MAX_EXTENTS)))) {
+		vm_page_t		next;
+		vm_object_offset_t	start;
+		vm_object_offset_t	end;
+		vm_object_size_t	e_mask;
+		vm_page_t               m;
+
+		start = offset;
+		end   = offset + size;
+		num_of_extents = 0;
+		e_mask = ~((vm_object_size_t)(EXTENT_SIZE - 1));
+
+		m = (vm_page_t) queue_first(&amp;object-&gt;memq);
+
+		<span class="enscript-keyword">while</span> (!queue_end(&amp;object-&gt;memq, (queue_entry_t) m)) {
+			next = (vm_page_t) queue_next(&amp;m-&gt;listq);
+
+			<span class="enscript-keyword">if</span> ((m-&gt;offset &gt;= start) &amp;&amp; (m-&gt;offset &lt; end)) {
+			        <span class="enscript-comment">/*
+				 * this is a page we're interested in
+				 * try to fit it into a current extent
+				 */</span>
+			        <span class="enscript-keyword">for</span> (n = 0; n &lt; num_of_extents; n++) {
+				        <span class="enscript-keyword">if</span> ((m-&gt;offset &amp; e_mask) == extents[n].e_base) {
+					        <span class="enscript-comment">/*
+						 * use (PAGE_SIZE - 1) to determine the
+						 * max offset so that we don't wrap if
+						 * we're at the last page of the space
+						 */</span>
+					        <span class="enscript-keyword">if</span> (m-&gt;offset &lt; extents[n].e_min)
+						        extents[n].e_min = m-&gt;offset;
+						<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((m-&gt;offset + (PAGE_SIZE - 1)) &gt; extents[n].e_max)
+						        extents[n].e_max = m-&gt;offset + (PAGE_SIZE - 1);
+					        <span class="enscript-keyword">break</span>;
+					}
+				}
+				<span class="enscript-keyword">if</span> (n == num_of_extents) {
+				        <span class="enscript-comment">/*
+					 * didn't find a current extent that can encompass
+					 * this page
+					 */</span>
+				        <span class="enscript-keyword">if</span> (n &lt; MAX_EXTENTS) {
+					        <span class="enscript-comment">/*
+						 * if we still have room, 
+						 * create a new extent
+						 */</span>
+					        extents[n].e_base = m-&gt;offset &amp; e_mask;
+						extents[n].e_min  = m-&gt;offset;
+						extents[n].e_max  = m-&gt;offset + (PAGE_SIZE - 1);
+
+						num_of_extents++;
+					} <span class="enscript-keyword">else</span> {
+						<span class="enscript-comment">/*
+						 * no room to create a new extent...
+						 * fall back to a single extent based
+						 * on the min and max page offsets 
+						 * we find in the range we're interested in...
+						 * first, look through the extent list and
+						 * develop the overall min and max for the
+						 * pages we've looked at up to this point
+						 */</span>						
+					        <span class="enscript-keyword">for</span> (n = 1; n &lt; num_of_extents; n++) {
+						        <span class="enscript-keyword">if</span> (extents[n].e_min &lt; extents[0].e_min)
+						                extents[0].e_min = extents[n].e_min;
+							<span class="enscript-keyword">if</span> (extents[n].e_max &gt; extents[0].e_max)
+						                extents[0].e_max = extents[n].e_max;
+						}
+						<span class="enscript-comment">/*
+						 * now setup to run through the remaining pages
+						 * to determine the overall min and max
+						 * offset for the specified range
+						 */</span>
+						extents[0].e_base = 0;
+						e_mask = 0;
+						num_of_extents = 1;
+
+						<span class="enscript-comment">/*
+						 * by continuing, we'll reprocess the
+						 * page that forced us to abandon trying
+						 * to develop multiple extents
+						 */</span>
+						<span class="enscript-keyword">continue</span>;
+					}
+				}
+			}
+			m = next;
+		}
+	} <span class="enscript-keyword">else</span> {
+	        extents[0].e_min = offset;
+		extents[0].e_max = offset + (size - 1);
+
+		num_of_extents = 1;
+	}
+	<span class="enscript-keyword">for</span> (n = 0; n &lt; num_of_extents; n++) {
+	        <span class="enscript-keyword">if</span> (vm_object_update_extent(object, extents[n].e_min, extents[n].e_max, resid_offset, io_errno,
+					    should_flush, should_return, should_iosync, protection))
+		        data_returned = TRUE;
+	}
+	<span class="enscript-keyword">return</span> (data_returned);
+}
+
+
+<span class="enscript-comment">/*
+ *	Routine:	memory_object_synchronize_completed [user interface]
+ *
+ *	Tell kernel that previously synchronized data
+ *	(memory_object_synchronize) has been queue or placed on the
+ *	backing storage.
+ *
+ *	Note: there may be multiple synchronize requests for a given
+ *	memory object outstanding but they will not overlap.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">memory_object_synchronize_completed</span>(
+	memory_object_control_t	control,
+	memory_object_offset_t	offset,
+	memory_object_size_t    length)
+{
+	vm_object_t			object;
+	msync_req_t			msr;
+
+	object = memory_object_control_to_vm_object(control);
+
+        XPR(XPR_MEMORY_OBJECT,
+	    <span class="enscript-string">&quot;m_o_sync_completed, object 0x%X, offset 0x%X length 0x%X\n&quot;</span>,
+	    object, offset, length, 0, 0);
+
+	<span class="enscript-comment">/*
+	 *      Look for bogus arguments
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	vm_object_lock(object);
+
+<span class="enscript-comment">/*
+ *	search for sync request structure
+ */</span>
+	queue_iterate(&amp;object-&gt;msr_q, msr, msync_req_t, msr_q) {
+ 		<span class="enscript-keyword">if</span> (msr-&gt;offset == offset &amp;&amp; msr-&gt;length == length) {
+			queue_remove(&amp;object-&gt;msr_q, msr, msync_req_t, msr_q);
+			<span class="enscript-keyword">break</span>;
+		}
+        }<span class="enscript-comment">/* queue_iterate */</span>
+
+	<span class="enscript-keyword">if</span> (queue_end(&amp;object-&gt;msr_q, (queue_entry_t)msr)) {
+		vm_object_unlock(object);
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+
+	msr_lock(msr);
+	vm_object_unlock(object);
+	msr-&gt;flag = VM_MSYNC_DONE;
+	msr_unlock(msr);
+	thread_wakeup((event_t) msr);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}<span class="enscript-comment">/* memory_object_synchronize_completed */</span>
+
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">vm_object_set_attributes_common</span>(
+	vm_object_t	object,
+	boolean_t	may_cache,
+	memory_object_copy_strategy_t copy_strategy,
+	boolean_t	temporary,
+	__unused boolean_t	silent_overwrite,
+	boolean_t	advisory_pageout)
+{
+	boolean_t	object_became_ready;
+
+        XPR(XPR_MEMORY_OBJECT,
+	    <span class="enscript-string">&quot;m_o_set_attr_com, object 0x%X flg %x strat %d\n&quot;</span>,
+	    object, (may_cache&amp;1)|((temporary&amp;1)&lt;1), copy_strategy, 0, 0);
+
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-comment">/*
+	 *	Verify the attributes of importance
+	 */</span>
+
+	<span class="enscript-keyword">switch</span>(copy_strategy) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MEMORY_OBJECT_COPY_NONE</span>:
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">MEMORY_OBJECT_COPY_DELAY</span>:
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-reference">default</span>:
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+	}
+
+	<span class="enscript-keyword">if</span> (may_cache)
+		may_cache = TRUE;
+	<span class="enscript-keyword">if</span> (temporary)
+		temporary = TRUE;
+
+	vm_object_lock(object);
+
+	<span class="enscript-comment">/*
+	 *	Copy the attributes
+	 */</span>
+	assert(!object-&gt;internal);
+	object_became_ready = !object-&gt;pager_ready;
+	object-&gt;copy_strategy = copy_strategy;
+	object-&gt;can_persist = may_cache;
+	object-&gt;temporary = temporary;
+<span class="enscript-comment">//	object-&gt;silent_overwrite = silent_overwrite;
+</span>	object-&gt;advisory_pageout = advisory_pageout;
+
+	<span class="enscript-comment">/*
+	 *	Wake up anyone waiting for the ready attribute
+	 *	to become asserted.
+	 */</span>
+
+	<span class="enscript-keyword">if</span> (object_became_ready) {
+		object-&gt;pager_ready = TRUE;
+		vm_object_wakeup(object, VM_OBJECT_EVENT_PAGER_READY);
+	}
+
+	vm_object_unlock(object);
+
+	<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+}
+
+<span class="enscript-comment">/*
+ *	Set the memory object attribute as provided.
+ *
+ *	XXX This routine cannot be completed until the vm_msync, clean 
+ *	     in place, and cluster work is completed. See ifdef notyet
+ *	     below and note that vm_object_set_attributes_common()
+ *	     may have to be expanded.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">memory_object_change_attributes</span>(
+	memory_object_control_t		control,
+	memory_object_flavor_t		flavor,
+	memory_object_info_t		attributes,
+	mach_msg_type_number_t		count)
+{
+	vm_object_t             	object;
+	kern_return_t   		result = KERN_SUCCESS;
+	boolean_t       		temporary;
+	boolean_t       		may_cache;
+	boolean_t       		invalidate;
+	memory_object_copy_strategy_t	copy_strategy;
+	boolean_t       		silent_overwrite;
+	boolean_t			advisory_pageout;
+
+	object = memory_object_control_to_vm_object(control);
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	vm_object_lock(object);
+
+	temporary = object-&gt;temporary;
+	may_cache = object-&gt;can_persist;
+	copy_strategy = object-&gt;copy_strategy;
+<span class="enscript-comment">//	silent_overwrite = object-&gt;silent_overwrite;
+</span>	silent_overwrite = FALSE;
+	advisory_pageout = object-&gt;advisory_pageout;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">notyet</span>
+	invalidate = object-&gt;invalidate;
+#<span class="enscript-reference">endif</span>
+	vm_object_unlock(object);	
+
+	<span class="enscript-keyword">switch</span> (flavor) {
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">OLD_MEMORY_OBJECT_BEHAVIOR_INFO</span>:
+	    {
+                old_memory_object_behave_info_t     behave;
+
+                <span class="enscript-keyword">if</span> (count != OLD_MEMORY_OBJECT_BEHAVE_INFO_COUNT) {
+                        result = KERN_INVALID_ARGUMENT;
+                        <span class="enscript-keyword">break</span>;
+                }
+
+                behave = (old_memory_object_behave_info_t) attributes;
+
+		temporary = behave-&gt;temporary;
+		invalidate = behave-&gt;invalidate;
+		copy_strategy = behave-&gt;copy_strategy;
+
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MEMORY_OBJECT_BEHAVIOR_INFO</span>:
+	    {
+                memory_object_behave_info_t     behave;
+
+                <span class="enscript-keyword">if</span> (count != MEMORY_OBJECT_BEHAVE_INFO_COUNT) {
+                        result = KERN_INVALID_ARGUMENT;
+                        <span class="enscript-keyword">break</span>;
+                }
+
+                behave = (memory_object_behave_info_t) attributes;
+
+		temporary = behave-&gt;temporary;
+		invalidate = behave-&gt;invalidate;
+		copy_strategy = behave-&gt;copy_strategy;
+		silent_overwrite = behave-&gt;silent_overwrite;
+		advisory_pageout = behave-&gt;advisory_pageout;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MEMORY_OBJECT_PERFORMANCE_INFO</span>:
+	    {
+		memory_object_perf_info_t	perf;
+
+                <span class="enscript-keyword">if</span> (count != MEMORY_OBJECT_PERF_INFO_COUNT) {
+                        result = KERN_INVALID_ARGUMENT;
+                        <span class="enscript-keyword">break</span>;
+                }
+
+                perf = (memory_object_perf_info_t) attributes;
+
+		may_cache = perf-&gt;may_cache;
+
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">OLD_MEMORY_OBJECT_ATTRIBUTE_INFO</span>:
+	    {
+		old_memory_object_attr_info_t	attr;
+
+                <span class="enscript-keyword">if</span> (count != OLD_MEMORY_OBJECT_ATTR_INFO_COUNT) {
+                        result = KERN_INVALID_ARGUMENT;
+                        <span class="enscript-keyword">break</span>;
+                }
+
+		attr = (old_memory_object_attr_info_t) attributes;
+
+                may_cache = attr-&gt;may_cache;
+                copy_strategy = attr-&gt;copy_strategy;
+
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MEMORY_OBJECT_ATTRIBUTE_INFO</span>:
+	    {
+		memory_object_attr_info_t	attr;
+
+                <span class="enscript-keyword">if</span> (count != MEMORY_OBJECT_ATTR_INFO_COUNT) {
+                        result = KERN_INVALID_ARGUMENT;
+                        <span class="enscript-keyword">break</span>;
+                }
+
+		attr = (memory_object_attr_info_t) attributes;
+
+		copy_strategy = attr-&gt;copy_strategy;
+                may_cache = attr-&gt;may_cache_object;
+		temporary = attr-&gt;temporary;
+
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-reference">default</span>:
+		result = KERN_INVALID_ARGUMENT;
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		<span class="enscript-keyword">return</span>(result);
+
+	<span class="enscript-keyword">if</span> (copy_strategy == MEMORY_OBJECT_COPY_TEMPORARY) {
+		copy_strategy = MEMORY_OBJECT_COPY_DELAY;
+		temporary = TRUE;
+	} <span class="enscript-keyword">else</span> {
+		temporary = FALSE;
+	}
+
+	<span class="enscript-comment">/*
+	 * XXX	may_cache may become a tri-valued variable to handle
+	 * XXX	uncache if not in use.
+	 */</span>
+	<span class="enscript-keyword">return</span> (vm_object_set_attributes_common(object,
+						     may_cache,
+						     copy_strategy,
+						     temporary,
+						     silent_overwrite,
+						     advisory_pageout));
+}
+
+kern_return_t
+<span class="enscript-function-name">memory_object_get_attributes</span>(
+        memory_object_control_t	control,
+        memory_object_flavor_t 	flavor,
+	memory_object_info_t	attributes,	<span class="enscript-comment">/* pointer to OUT array */</span>
+	mach_msg_type_number_t	*count)		<span class="enscript-comment">/* IN/OUT */</span>
+{
+	kern_return_t 		ret = KERN_SUCCESS;
+	vm_object_t		object;
+
+	object = memory_object_control_to_vm_object(control);
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+        vm_object_lock(object);
+
+	<span class="enscript-keyword">switch</span> (flavor) {
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">OLD_MEMORY_OBJECT_BEHAVIOR_INFO</span>:
+	    {
+		old_memory_object_behave_info_t	behave;
+
+		<span class="enscript-keyword">if</span> (*count &lt; OLD_MEMORY_OBJECT_BEHAVE_INFO_COUNT) {
+			ret = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		behave = (old_memory_object_behave_info_t) attributes;
+		behave-&gt;copy_strategy = object-&gt;copy_strategy;
+		behave-&gt;temporary = object-&gt;temporary;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">notyet</span>	<span class="enscript-comment">/* remove when vm_msync complies and clean in place fini */</span>
+                behave-&gt;invalidate = object-&gt;invalidate;
+#<span class="enscript-reference">else</span>
+		behave-&gt;invalidate = FALSE;
+#<span class="enscript-reference">endif</span>
+
+		*count = OLD_MEMORY_OBJECT_BEHAVE_INFO_COUNT;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MEMORY_OBJECT_BEHAVIOR_INFO</span>:
+	    {
+		memory_object_behave_info_t	behave;
+
+		<span class="enscript-keyword">if</span> (*count &lt; MEMORY_OBJECT_BEHAVE_INFO_COUNT) {
+                        ret = KERN_INVALID_ARGUMENT;
+                        <span class="enscript-keyword">break</span>;
+                }
+
+                behave = (memory_object_behave_info_t) attributes;
+                behave-&gt;copy_strategy = object-&gt;copy_strategy;
+		behave-&gt;temporary = object-&gt;temporary;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">notyet</span>	<span class="enscript-comment">/* remove when vm_msync complies and clean in place fini */</span>
+                behave-&gt;invalidate = object-&gt;invalidate;
+#<span class="enscript-reference">else</span>
+		behave-&gt;invalidate = FALSE;
+#<span class="enscript-reference">endif</span>
+		behave-&gt;advisory_pageout = object-&gt;advisory_pageout;
+<span class="enscript-comment">//		behave-&gt;silent_overwrite = object-&gt;silent_overwrite;
+</span>		behave-&gt;silent_overwrite = FALSE;
+                *count = MEMORY_OBJECT_BEHAVE_INFO_COUNT;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+	    <span class="enscript-keyword">case</span> <span class="enscript-reference">MEMORY_OBJECT_PERFORMANCE_INFO</span>:
+	    {
+		memory_object_perf_info_t	perf;
+
+		<span class="enscript-keyword">if</span> (*count &lt; MEMORY_OBJECT_PERF_INFO_COUNT) {
+			ret = KERN_INVALID_ARGUMENT;
+			<span class="enscript-keyword">break</span>;
+		}
+
+		perf = (memory_object_perf_info_t) attributes;
+		perf-&gt;cluster_size = PAGE_SIZE;
+		perf-&gt;may_cache = object-&gt;can_persist;
+
+		*count = MEMORY_OBJECT_PERF_INFO_COUNT;
+		<span class="enscript-keyword">break</span>;
+	    }
+
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">OLD_MEMORY_OBJECT_ATTRIBUTE_INFO</span>:
+            {
+                old_memory_object_attr_info_t       attr;
+
+                <span class="enscript-keyword">if</span> (*count &lt; OLD_MEMORY_OBJECT_ATTR_INFO_COUNT) {
+                        ret = KERN_INVALID_ARGUMENT;
+                        <span class="enscript-keyword">break</span>;
+                }
+
+                attr = (old_memory_object_attr_info_t) attributes;
+        	attr-&gt;may_cache = object-&gt;can_persist;
+        	attr-&gt;copy_strategy = object-&gt;copy_strategy;
+
+                *count = OLD_MEMORY_OBJECT_ATTR_INFO_COUNT;
+                <span class="enscript-keyword">break</span>;
+            }
+
+            <span class="enscript-keyword">case</span> <span class="enscript-reference">MEMORY_OBJECT_ATTRIBUTE_INFO</span>:
+            {
+                memory_object_attr_info_t       attr;
+
+                <span class="enscript-keyword">if</span> (*count &lt; MEMORY_OBJECT_ATTR_INFO_COUNT) {
+                        ret = KERN_INVALID_ARGUMENT;
+                        <span class="enscript-keyword">break</span>;
+                }
+
+                attr = (memory_object_attr_info_t) attributes;
+        	attr-&gt;copy_strategy = object-&gt;copy_strategy;
+		attr-&gt;cluster_size = PAGE_SIZE;
+        	attr-&gt;may_cache_object = object-&gt;can_persist;
+		attr-&gt;temporary = object-&gt;temporary;
+
+                *count = MEMORY_OBJECT_ATTR_INFO_COUNT;
+                <span class="enscript-keyword">break</span>;
+            }
+
+	    <span class="enscript-reference">default</span>:
+		ret = KERN_INVALID_ARGUMENT;
+		<span class="enscript-keyword">break</span>;
+	}
+
+        vm_object_unlock(object);
+
+        <span class="enscript-keyword">return</span>(ret);
+}
+
+
+kern_return_t
+<span class="enscript-function-name">memory_object_iopl_request</span>(
+	ipc_port_t		port,
+	memory_object_offset_t	offset,
+	upl_size_t		*upl_size,
+	upl_t			*upl_ptr,
+	upl_page_info_array_t	user_page_list,
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		*page_list_count,
+	upl_control_flags_t	*flags)
+{
+	vm_object_t		object;
+	kern_return_t		ret;
+	upl_control_flags_t	caller_flags;
+
+	caller_flags = *flags;
+
+	<span class="enscript-keyword">if</span> (caller_flags &amp; ~UPL_VALID_FLAGS) {
+		<span class="enscript-comment">/*
+		 * For forward compatibility's sake,
+		 * reject any unknown flag.
+		 */</span>
+		<span class="enscript-keyword">return</span> KERN_INVALID_VALUE;
+	}
+
+	<span class="enscript-keyword">if</span> (ip_kotype(port) == IKOT_NAMED_ENTRY) {
+		vm_named_entry_t	named_entry;
+
+		named_entry = (vm_named_entry_t)port-&gt;ip_kobject;
+		<span class="enscript-comment">/* a few checks to make sure user is obeying rules */</span>
+		<span class="enscript-keyword">if</span>(*upl_size == 0) {
+			<span class="enscript-keyword">if</span>(offset &gt;= named_entry-&gt;size)
+				<span class="enscript-keyword">return</span>(KERN_INVALID_RIGHT);
+			*upl_size = (upl_size_t)(named_entry-&gt;size - offset);
+			<span class="enscript-keyword">if</span> (*upl_size != named_entry-&gt;size - offset)
+				<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+		}
+		<span class="enscript-keyword">if</span>(caller_flags &amp; UPL_COPYOUT_FROM) {
+			<span class="enscript-keyword">if</span>((named_entry-&gt;protection &amp; VM_PROT_READ) 
+						!= VM_PROT_READ) {
+				<span class="enscript-keyword">return</span>(KERN_INVALID_RIGHT);
+			}
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span>((named_entry-&gt;protection &amp; 
+				(VM_PROT_READ | VM_PROT_WRITE)) 
+				!= (VM_PROT_READ | VM_PROT_WRITE)) {
+				<span class="enscript-keyword">return</span>(KERN_INVALID_RIGHT);
+			}
+		}
+		<span class="enscript-keyword">if</span>(named_entry-&gt;size &lt; (offset + *upl_size))
+			<span class="enscript-keyword">return</span>(KERN_INVALID_ARGUMENT);
+
+		<span class="enscript-comment">/* the callers parameter offset is defined to be the */</span>
+		<span class="enscript-comment">/* offset from beginning of named entry offset in object */</span>
+		offset = offset + named_entry-&gt;offset;
+
+		<span class="enscript-keyword">if</span> (named_entry-&gt;is_sub_map ||
+		    named_entry-&gt;is_copy)
+			<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+		
+		named_entry_lock(named_entry);
+
+		<span class="enscript-keyword">if</span> (named_entry-&gt;is_pager) {
+			object = vm_object_enter(named_entry-&gt;backing.pager, 
+					named_entry-&gt;offset + named_entry-&gt;size, 
+					named_entry-&gt;internal, 
+					FALSE,
+					FALSE);
+			<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL) {
+				named_entry_unlock(named_entry);
+				<span class="enscript-keyword">return</span>(KERN_INVALID_OBJECT);
+			}
+
+			<span class="enscript-comment">/* JMM - drop reference on pager here? */</span>
+
+			<span class="enscript-comment">/* create an extra reference for the named entry */</span>
+			vm_object_lock(object);
+			vm_object_reference_locked(object);
+			named_entry-&gt;backing.object = object;
+			named_entry-&gt;is_pager = FALSE;
+			named_entry_unlock(named_entry);
+
+			<span class="enscript-comment">/* wait for object to be ready */</span>
+			<span class="enscript-keyword">while</span> (!object-&gt;pager_ready) {
+				vm_object_wait(object,
+						VM_OBJECT_EVENT_PAGER_READY,
+						THREAD_UNINT);
+				vm_object_lock(object);
+			}
+			vm_object_unlock(object);
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-comment">/* This is the case where we are going to map */</span>
+			<span class="enscript-comment">/* an already mapped object.  If the object is */</span>
+			<span class="enscript-comment">/* not ready it is internal.  An external     */</span>
+			<span class="enscript-comment">/* object cannot be mapped until it is ready  */</span>
+			<span class="enscript-comment">/* we can therefore avoid the ready check     */</span>
+			<span class="enscript-comment">/* in this case.  */</span>
+			object = named_entry-&gt;backing.object;
+			vm_object_reference(object);
+			named_entry_unlock(named_entry);
+		}
+	} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (ip_kotype(port) == IKOT_MEM_OBJ_CONTROL) {
+		memory_object_control_t	control;
+		control = (memory_object_control_t) port;
+		<span class="enscript-keyword">if</span> (control == NULL)
+			<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+		object = memory_object_control_to_vm_object(control);
+		<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+			<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+		vm_object_reference(object);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+	}
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">if</span> (!object-&gt;private) {
+		<span class="enscript-keyword">if</span> (object-&gt;phys_contiguous) {
+			*flags = UPL_PHYS_CONTIG;
+		} <span class="enscript-keyword">else</span> {
+			*flags = 0;
+		}
+	} <span class="enscript-keyword">else</span> {
+		*flags = UPL_DEV_MEMORY | UPL_PHYS_CONTIG;
+	}
+
+	ret = vm_object_iopl_request(object,
+				     offset,
+				     *upl_size,
+				     upl_ptr,
+				     user_page_list,
+				     page_list_count,
+				     caller_flags);
+	vm_object_deallocate(object);
+	<span class="enscript-keyword">return</span> ret;
+}
+
+<span class="enscript-comment">/*  
+ *	Routine:	memory_object_upl_request [interface]
+ *	Purpose:
+ *		Cause the population of a portion of a vm_object.
+ *		Depending on the nature of the request, the pages
+ *		returned may be contain valid data or be uninitialized.
+ *
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">memory_object_upl_request</span>(
+	memory_object_control_t	control,
+	memory_object_offset_t	offset,
+	upl_size_t		size,
+	upl_t			*upl_ptr,
+	upl_page_info_array_t	user_page_list,
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		*page_list_count,
+	<span class="enscript-type">int</span>			cntrl_flags)
+{
+	vm_object_t		object;
+
+	object = memory_object_control_to_vm_object(control);
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> (KERN_TERMINATED);
+
+	<span class="enscript-keyword">return</span> vm_object_upl_request(object,
+				     offset,
+				     size,
+				     upl_ptr,
+				     user_page_list,
+				     page_list_count,
+				     (upl_control_flags_t)(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) cntrl_flags);
+}
+
+<span class="enscript-comment">/*  
+ *	Routine:	memory_object_super_upl_request [interface]
+ *	Purpose:
+ *		Cause the population of a portion of a vm_object
+ *		in much the same way as memory_object_upl_request.
+ *		Depending on the nature of the request, the pages
+ *		returned may be contain valid data or be uninitialized.
+ *		However, the region may be expanded up to the super
+ *		cluster size provided.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">memory_object_super_upl_request</span>(
+	memory_object_control_t control,
+	memory_object_offset_t	offset,
+	upl_size_t		size,
+	upl_size_t		super_cluster,
+	upl_t			*upl,
+	upl_page_info_t		*user_page_list,
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		*page_list_count,
+	<span class="enscript-type">int</span>			cntrl_flags)
+{
+	vm_object_t		object;
+
+	object = memory_object_control_to_vm_object(control);
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">return</span> vm_object_super_upl_request(object,
+					   offset,
+					   size,
+					   super_cluster,
+					   upl,
+					   user_page_list,
+					   page_list_count,
+					   (upl_control_flags_t)(<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>) cntrl_flags);
+}
+
+kern_return_t
+<span class="enscript-function-name">memory_object_cluster_size</span>(memory_object_control_t control, memory_object_offset_t *start,
+			   vm_size_t *length, uint32_t *io_streaming, memory_object_fault_info_t fault_info)
+{
+	vm_object_t		object;
+
+	object = memory_object_control_to_vm_object(control);
+
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL || object-&gt;paging_offset &gt; *start)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	*start -= object-&gt;paging_offset;
+
+	vm_object_cluster_size(object, (vm_object_offset_t *)start, length, (vm_object_fault_info_t)fault_info, io_streaming);
+
+	*start += object-&gt;paging_offset;
+
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+
+<span class="enscript-type">int</span> vm_stat_discard_cleared_reply = 0;
+<span class="enscript-type">int</span> vm_stat_discard_cleared_unset = 0;
+<span class="enscript-type">int</span> vm_stat_discard_cleared_too_late = 0;
+
+
+
+<span class="enscript-comment">/*
+ *	Routine:	host_default_memory_manager [interface]
+ *	Purpose:
+ *		set/get the default memory manager port and default cluster
+ *		size.
+ *
+ *		If successful, consumes the supplied naked send right.
+ */</span>
+kern_return_t
+<span class="enscript-function-name">host_default_memory_manager</span>(
+	host_priv_t		host_priv,
+	memory_object_default_t	*default_manager,
+	__unused memory_object_cluster_size_t cluster_size)
+{
+	memory_object_default_t current_manager;
+	memory_object_default_t new_manager;
+	memory_object_default_t returned_manager;
+	kern_return_t result = KERN_SUCCESS;
+
+	<span class="enscript-keyword">if</span> (host_priv == HOST_PRIV_NULL)
+		<span class="enscript-keyword">return</span>(KERN_INVALID_HOST);
+
+	assert(host_priv == &amp;realhost);
+
+	new_manager = *default_manager;
+	lck_mtx_lock(&amp;memory_manager_default_lock);
+	current_manager = memory_manager_default;
+	returned_manager = MEMORY_OBJECT_DEFAULT_NULL;
+
+	<span class="enscript-keyword">if</span> (new_manager == MEMORY_OBJECT_DEFAULT_NULL) {
+		<span class="enscript-comment">/*
+		 *	Retrieve the current value.
+		 */</span>
+		returned_manager = current_manager;
+		memory_object_default_reference(returned_manager);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-comment">/*
+		 *	Only allow the kernel to change the value.
+		 */</span>
+		<span class="enscript-type">extern</span> task_t kernel_task;
+		<span class="enscript-keyword">if</span> (current_task() != kernel_task) {
+			result = KERN_NO_ACCESS;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 *	If this is the first non-null manager, start
+		 *	up the internal pager support.
+		 */</span>
+		<span class="enscript-keyword">if</span> (current_manager == MEMORY_OBJECT_DEFAULT_NULL) {
+			result = vm_pageout_internal_start();
+			<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 *	Retrieve the current value,
+		 *	and replace it with the supplied value.
+		 *	We return the old reference to the caller
+		 *	but we have to take a reference on the new
+		 *	one.
+		 */</span>
+		returned_manager = current_manager;
+		memory_manager_default = new_manager;
+		memory_object_default_reference(new_manager);
+
+		<span class="enscript-comment">/*
+		 *	In case anyone's been waiting for a memory
+		 *	manager to be established, wake them up.
+		 */</span>
+
+		thread_wakeup((event_t) &amp;memory_manager_default);
+
+		<span class="enscript-comment">/*
+		 * Now that we have a default pager for anonymous memory,
+		 * reactivate all the throttled pages (i.e. dirty pages with
+		 * no pager).
+		 */</span>
+		<span class="enscript-keyword">if</span> (current_manager == MEMORY_OBJECT_DEFAULT_NULL)
+		{
+			vm_page_reactivate_all_throttled();
+		}
+	}
+ <span class="enscript-reference">out</span>:
+	lck_mtx_unlock(&amp;memory_manager_default_lock);
+
+	*default_manager = returned_manager;
+	<span class="enscript-keyword">return</span>(result);
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	memory_manager_default_reference
+ *	Purpose:
+ *		Returns a naked send right for the default
+ *		memory manager.  The returned right is always
+ *		valid (not IP_NULL or IP_DEAD).
+ */</span>
+
+__private_extern__ memory_object_default_t
+<span class="enscript-function-name">memory_manager_default_reference</span>(<span class="enscript-type">void</span>)
+{
+	memory_object_default_t current_manager;
+
+	lck_mtx_lock(&amp;memory_manager_default_lock);
+	current_manager = memory_manager_default;
+	<span class="enscript-keyword">while</span> (current_manager == MEMORY_OBJECT_DEFAULT_NULL) {
+		wait_result_t res;
+
+		res = lck_mtx_sleep(&amp;memory_manager_default_lock,
+					LCK_SLEEP_DEFAULT,
+					(event_t) &amp;memory_manager_default,
+					THREAD_UNINT);
+		assert(res == THREAD_AWAKENED);
+		current_manager = memory_manager_default;
+	}
+	memory_object_default_reference(current_manager);
+	lck_mtx_unlock(&amp;memory_manager_default_lock);
+
+	<span class="enscript-keyword">return</span> current_manager;
+}
+
+<span class="enscript-comment">/*
+ *	Routine:	memory_manager_default_check
+ *
+ *	Purpose:
+ *		Check whether a default memory manager has been set
+ *		up yet, or not. Returns KERN_SUCCESS if dmm exists,
+ *		and KERN_FAILURE if dmm does not exist.
+ *
+ *		If there is no default memory manager, log an error,
+ *		but only the first time.
+ *
+ */</span>
+__private_extern__ kern_return_t
+<span class="enscript-function-name">memory_manager_default_check</span>(<span class="enscript-type">void</span>)
+{
+	memory_object_default_t current;
+
+	lck_mtx_lock(&amp;memory_manager_default_lock);
+	current = memory_manager_default;
+	<span class="enscript-keyword">if</span> (current == MEMORY_OBJECT_DEFAULT_NULL) {
+		<span class="enscript-type">static</span> boolean_t logged;	<span class="enscript-comment">/* initialized to 0 */</span>
+		boolean_t	complain = !logged;
+		logged = TRUE;
+		lck_mtx_unlock(&amp;memory_manager_default_lock);
+		<span class="enscript-keyword">if</span> (complain)
+			printf(<span class="enscript-string">&quot;Warning: No default memory manager\n&quot;</span>);
+		<span class="enscript-keyword">return</span>(KERN_FAILURE);
+	} <span class="enscript-keyword">else</span> {
+		lck_mtx_unlock(&amp;memory_manager_default_lock);
+		<span class="enscript-keyword">return</span>(KERN_SUCCESS);
+	}
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">memory_manager_default_init</span>(<span class="enscript-type">void</span>)
+{
+	memory_manager_default = MEMORY_OBJECT_DEFAULT_NULL;
+	lck_mtx_init(&amp;memory_manager_default_lock, &amp;vm_object_lck_grp, &amp;vm_object_lck_attr);
+}
+
+
+
+<span class="enscript-comment">/* Allow manipulation of individual page state.  This is actually part of */</span>
+<span class="enscript-comment">/* the UPL regimen but takes place on the object rather than on a UPL */</span>
+
+kern_return_t
+<span class="enscript-function-name">memory_object_page_op</span>(
+	memory_object_control_t	control,
+	memory_object_offset_t	offset,
+	<span class="enscript-type">int</span>			ops,
+	ppnum_t			*phys_entry,
+	<span class="enscript-type">int</span>			*flags)
+{
+	vm_object_t		object;
+
+	object = memory_object_control_to_vm_object(control);
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">return</span> vm_object_page_op(object, offset, ops, phys_entry, flags);
+}
+
+<span class="enscript-comment">/*
+ * memory_object_range_op offers performance enhancement over 
+ * memory_object_page_op for page_op functions which do not require page 
+ * level state to be returned from the call.  Page_op was created to provide 
+ * a low-cost alternative to page manipulation via UPLs when only a single 
+ * page was involved.  The range_op call establishes the ability in the _op 
+ * family of functions to work on multiple pages where the lack of page level
+ * state handling allows the caller to avoid the overhead of the upl structures.
+ */</span>
+
+kern_return_t
+<span class="enscript-function-name">memory_object_range_op</span>(
+	memory_object_control_t	control,
+	memory_object_offset_t	offset_beg,
+	memory_object_offset_t	offset_end,
+	<span class="enscript-type">int</span>                     ops,
+	<span class="enscript-type">int</span>                     *range)
+{
+	vm_object_t		object;
+
+	object = memory_object_control_to_vm_object(control);
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">return</span> vm_object_range_op(object,
+				  offset_beg,
+				  offset_end,
+				  ops,
+				  (uint32_t *) range);
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">memory_object_mark_used</span>(
+        memory_object_control_t	control)
+{
+	vm_object_t		object;
+
+	<span class="enscript-keyword">if</span> (control == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	object = memory_object_control_to_vm_object(control);
+
+	<span class="enscript-keyword">if</span> (object != VM_OBJECT_NULL)
+		vm_object_cache_remove(object);
+}
+
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">memory_object_mark_unused</span>(
+	memory_object_control_t	control,
+	__unused boolean_t	rage)
+{
+	vm_object_t		object;
+
+	<span class="enscript-keyword">if</span> (control == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	object = memory_object_control_to_vm_object(control);
+
+	<span class="enscript-keyword">if</span> (object != VM_OBJECT_NULL)
+		vm_object_cache_add(object);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">memory_object_mark_io_tracking</span>(
+	memory_object_control_t control)
+{
+	vm_object_t             object;
+
+	<span class="enscript-keyword">if</span> (control == NULL)
+		<span class="enscript-keyword">return</span>;
+	object = memory_object_control_to_vm_object(control);
+
+	<span class="enscript-keyword">if</span> (object != VM_OBJECT_NULL) {
+		vm_object_lock(object);
+		object-&gt;io_tracking = TRUE;
+		vm_object_unlock(object);
+	}
+}
+
+kern_return_t
+<span class="enscript-function-name">memory_object_pages_resident</span>(
+	memory_object_control_t	control,
+	boolean_t			*	has_pages_resident)
+{
+	vm_object_t		object;
+
+	*has_pages_resident = FALSE;
+
+	object = memory_object_control_to_vm_object(control);
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> (KERN_INVALID_ARGUMENT);
+
+	<span class="enscript-keyword">if</span> (object-&gt;resident_page_count)
+		*has_pages_resident = TRUE;
+	
+	<span class="enscript-keyword">return</span> (KERN_SUCCESS);
+}
+
+kern_return_t
+<span class="enscript-function-name">memory_object_signed</span>(
+	memory_object_control_t	control,
+	boolean_t		is_signed)
+{
+	vm_object_t	object;
+
+	object = memory_object_control_to_vm_object(control);
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> KERN_INVALID_ARGUMENT;
+
+	vm_object_lock(object);
+	object-&gt;code_signed = is_signed;
+	vm_object_unlock(object);
+
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+boolean_t
+<span class="enscript-function-name">memory_object_is_signed</span>(
+	memory_object_control_t	control)
+{
+	boolean_t	is_signed;
+	vm_object_t	object;
+
+	object = memory_object_control_to_vm_object(control);
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> FALSE;
+
+	vm_object_lock_shared(object);
+	is_signed = object-&gt;code_signed;
+	vm_object_unlock(object);
+
+	<span class="enscript-keyword">return</span> is_signed;
+}
+
+boolean_t
+<span class="enscript-function-name">memory_object_is_slid</span>(
+	memory_object_control_t	control)
+{
+	vm_object_t	object = VM_OBJECT_NULL;
+
+	object = memory_object_control_to_vm_object(control);
+	<span class="enscript-keyword">if</span> (object == VM_OBJECT_NULL)
+		<span class="enscript-keyword">return</span> FALSE;
+
+	<span class="enscript-keyword">return</span> object-&gt;object_slid;
+}
+
+<span class="enscript-type">static</span> zone_t mem_obj_control_zone;
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">memory_object_control_bootstrap</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">int</span>	i;
+
+	i = (vm_size_t) <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> memory_object_control);
+	mem_obj_control_zone = zinit (i, 8192*i, 4096, <span class="enscript-string">&quot;mem_obj_control&quot;</span>);
+	zone_change(mem_obj_control_zone, Z_CALLERACCT, FALSE);
+	zone_change(mem_obj_control_zone, Z_NOENCRYPT, TRUE);
+	<span class="enscript-keyword">return</span>;
+}
+
+__private_extern__ memory_object_control_t
+<span class="enscript-function-name">memory_object_control_allocate</span>(
+	vm_object_t		object)
+{		       
+	memory_object_control_t control;
+
+	control = (memory_object_control_t)zalloc(mem_obj_control_zone);
+	<span class="enscript-keyword">if</span> (control != MEMORY_OBJECT_CONTROL_NULL) {
+		control-&gt;moc_object = object;
+		control-&gt;moc_ikot = IKOT_MEM_OBJ_CONTROL; <span class="enscript-comment">/* fake ip_kotype */</span>
+	}
+	<span class="enscript-keyword">return</span> (control);
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">memory_object_control_collapse</span>(
+	memory_object_control_t control,		       
+	vm_object_t		object)
+{		       
+	assert((control-&gt;moc_object != VM_OBJECT_NULL) &amp;&amp;
+	       (control-&gt;moc_object != object));
+	control-&gt;moc_object = object;
+}
+
+__private_extern__ vm_object_t
+<span class="enscript-function-name">memory_object_control_to_vm_object</span>(
+	memory_object_control_t	control)
+{
+	<span class="enscript-keyword">if</span> (control == MEMORY_OBJECT_CONTROL_NULL ||
+	    control-&gt;moc_ikot != IKOT_MEM_OBJ_CONTROL)
+		<span class="enscript-keyword">return</span> VM_OBJECT_NULL;
+
+	<span class="enscript-keyword">return</span> (control-&gt;moc_object);
+}
+
+memory_object_control_t
+<span class="enscript-function-name">convert_port_to_mo_control</span>(
+	__unused mach_port_t	port)
+{
+	<span class="enscript-keyword">return</span> MEMORY_OBJECT_CONTROL_NULL;
+}
+
+
+mach_port_t
+<span class="enscript-function-name">convert_mo_control_to_port</span>(
+	__unused memory_object_control_t	control)
+{
+	<span class="enscript-keyword">return</span> MACH_PORT_NULL;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">memory_object_control_reference</span>(
+	__unused memory_object_control_t	control)
+{
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * We only every issue one of these references, so kill it
+ * when that gets released (should switch the real reference
+ * counting in true port-less EMMI).
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">memory_object_control_deallocate</span>(
+	memory_object_control_t	control)
+{
+	zfree(mem_obj_control_zone, control);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">memory_object_control_disable</span>(
+	memory_object_control_t	control)
+{
+	assert(control-&gt;moc_object != VM_OBJECT_NULL);
+	control-&gt;moc_object = VM_OBJECT_NULL;
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">memory_object_default_reference</span>(
+	memory_object_default_t dmm)
+{
+	ipc_port_make_send(dmm);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">memory_object_default_deallocate</span>(
+	memory_object_default_t dmm)
+{
+	ipc_port_release_send(dmm);
+}
+
+memory_object_t
+<span class="enscript-function-name">convert_port_to_memory_object</span>(
+	__unused mach_port_t	port)
+{
+	<span class="enscript-keyword">return</span> (MEMORY_OBJECT_NULL);
+}
+
+
+mach_port_t
+<span class="enscript-function-name">convert_memory_object_to_port</span>(
+	__unused memory_object_t	object)
+{
+	<span class="enscript-keyword">return</span> (MACH_PORT_NULL);
+}
+
+
+<span class="enscript-comment">/* Routine memory_object_reference */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">memory_object_reference</span>(
+	memory_object_t memory_object)
+{
+	(memory_object-&gt;mo_pager_ops-&gt;memory_object_reference)(
+		memory_object);
+}
+
+<span class="enscript-comment">/* Routine memory_object_deallocate */</span>
+<span class="enscript-type">void</span> <span class="enscript-function-name">memory_object_deallocate</span>(
+	memory_object_t memory_object)
+{
+	(memory_object-&gt;mo_pager_ops-&gt;memory_object_deallocate)(
+		 memory_object);
+}
+
+
+<span class="enscript-comment">/* Routine memory_object_init */</span>
+kern_return_t memory_object_init
+(
+	memory_object_t memory_object,
+	memory_object_control_t memory_control,
+	memory_object_cluster_size_t memory_object_page_size
+)
+{
+	<span class="enscript-keyword">return</span> (memory_object-&gt;mo_pager_ops-&gt;memory_object_init)(
+		memory_object,
+		memory_control,
+		memory_object_page_size);
+}
+
+<span class="enscript-comment">/* Routine memory_object_terminate */</span>
+kern_return_t memory_object_terminate
+(
+	memory_object_t memory_object
+)
+{
+	<span class="enscript-keyword">return</span> (memory_object-&gt;mo_pager_ops-&gt;memory_object_terminate)(
+		memory_object);
+}
+
+<span class="enscript-comment">/* Routine memory_object_data_request */</span>
+kern_return_t memory_object_data_request
+(
+	memory_object_t memory_object,
+	memory_object_offset_t offset,
+	memory_object_cluster_size_t length,
+	vm_prot_t desired_access,
+	memory_object_fault_info_t fault_info
+)
+{
+	<span class="enscript-keyword">return</span> (memory_object-&gt;mo_pager_ops-&gt;memory_object_data_request)(
+		memory_object,
+		offset, 
+		length,
+		desired_access,
+		fault_info);
+}
+
+<span class="enscript-comment">/* Routine memory_object_data_return */</span>
+kern_return_t memory_object_data_return
+(
+	memory_object_t memory_object,
+	memory_object_offset_t offset,
+	memory_object_cluster_size_t size,
+	memory_object_offset_t *resid_offset,
+	<span class="enscript-type">int</span>	*io_error,
+	boolean_t dirty,
+	boolean_t kernel_copy,
+	<span class="enscript-type">int</span>	upl_flags
+)
+{
+	<span class="enscript-keyword">return</span> (memory_object-&gt;mo_pager_ops-&gt;memory_object_data_return)(
+		memory_object,
+		offset,
+		size,
+		resid_offset,
+		io_error,
+		dirty,
+		kernel_copy,
+		upl_flags);
+}
+
+<span class="enscript-comment">/* Routine memory_object_data_initialize */</span>
+kern_return_t memory_object_data_initialize
+(
+	memory_object_t memory_object,
+	memory_object_offset_t offset,
+	memory_object_cluster_size_t size
+)
+{
+	<span class="enscript-keyword">return</span> (memory_object-&gt;mo_pager_ops-&gt;memory_object_data_initialize)(
+		memory_object,
+		offset,
+		size);
+}
+
+<span class="enscript-comment">/* Routine memory_object_data_unlock */</span>
+kern_return_t memory_object_data_unlock
+(
+	memory_object_t memory_object,
+	memory_object_offset_t offset,
+	memory_object_size_t size,
+	vm_prot_t desired_access
+)
+{
+	<span class="enscript-keyword">return</span> (memory_object-&gt;mo_pager_ops-&gt;memory_object_data_unlock)(
+		memory_object,
+		offset,
+		size,
+		desired_access);
+}
+
+<span class="enscript-comment">/* Routine memory_object_synchronize */</span>
+kern_return_t memory_object_synchronize
+(
+	memory_object_t memory_object,
+	memory_object_offset_t offset,
+	memory_object_size_t size,
+	vm_sync_t sync_flags
+)
+{
+	<span class="enscript-keyword">return</span> (memory_object-&gt;mo_pager_ops-&gt;memory_object_synchronize)(
+		memory_object,
+		offset,
+		size,
+		sync_flags);
+}
+
+
+<span class="enscript-comment">/*
+ * memory_object_map() is called by VM (in vm_map_enter() and its variants)
+ * each time a &quot;named&quot; VM object gets mapped directly or indirectly
+ * (copy-on-write mapping).  A &quot;named&quot; VM object has an extra reference held
+ * by the pager to keep it alive until the pager decides that the 
+ * memory object (and its VM object) can be reclaimed.
+ * VM calls memory_object_last_unmap() (in vm_object_deallocate()) when all
+ * the mappings of that memory object have been removed.
+ *
+ * For a given VM object, calls to memory_object_map() and memory_object_unmap()
+ * are serialized (through object-&gt;mapping_in_progress), to ensure that the
+ * pager gets a consistent view of the mapping status of the memory object.
+ *
+ * This allows the pager to keep track of how many times a memory object
+ * has been mapped and with which protections, to decide when it can be
+ * reclaimed.
+ */</span>
+
+<span class="enscript-comment">/* Routine memory_object_map */</span>
+kern_return_t memory_object_map
+(
+	memory_object_t memory_object,
+	vm_prot_t prot
+)
+{
+	<span class="enscript-keyword">return</span> (memory_object-&gt;mo_pager_ops-&gt;memory_object_map)(
+		memory_object,
+		prot);
+}
+
+<span class="enscript-comment">/* Routine memory_object_last_unmap */</span>
+kern_return_t memory_object_last_unmap
+(
+	memory_object_t memory_object
+)
+{
+	<span class="enscript-keyword">return</span> (memory_object-&gt;mo_pager_ops-&gt;memory_object_last_unmap)(
+		memory_object);
+}
+
+<span class="enscript-comment">/* Routine memory_object_data_reclaim */</span>
+kern_return_t memory_object_data_reclaim
+(
+	memory_object_t memory_object,
+	boolean_t	reclaim_backing_store
+)
+{
+	<span class="enscript-keyword">if</span> (memory_object-&gt;mo_pager_ops-&gt;memory_object_data_reclaim == NULL)
+		<span class="enscript-keyword">return</span> KERN_NOT_SUPPORTED;
+	<span class="enscript-keyword">return</span> (memory_object-&gt;mo_pager_ops-&gt;memory_object_data_reclaim)(
+		memory_object,
+		reclaim_backing_store);
+}
+
+<span class="enscript-comment">/* Routine memory_object_create */</span>
+kern_return_t memory_object_create
+(
+	memory_object_default_t default_memory_manager,
+	vm_size_t new_memory_object_size,
+	memory_object_t *new_memory_object
+)
+{
+	<span class="enscript-keyword">return</span> default_pager_memory_object_create(default_memory_manager,
+						  new_memory_object_size,
+						  new_memory_object);
+}
+
+upl_t
+<span class="enscript-function-name">convert_port_to_upl</span>(
+	ipc_port_t	port)
+{
+	upl_t upl;
+
+	ip_lock(port);
+	<span class="enscript-keyword">if</span> (!ip_active(port) || (ip_kotype(port) != IKOT_UPL)) {
+			ip_unlock(port);
+			<span class="enscript-keyword">return</span> (upl_t)NULL;
+	}
+	upl = (upl_t) port-&gt;ip_kobject;
+	ip_unlock(port);
+	upl_lock(upl);
+	upl-&gt;ref_count+=1;
+	upl_unlock(upl);
+	<span class="enscript-keyword">return</span> upl;
+}
+
+mach_port_t
+<span class="enscript-function-name">convert_upl_to_port</span>(
+	__unused upl_t		upl)
+{
+	<span class="enscript-keyword">return</span> MACH_PORT_NULL;
+}
+
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">upl_no_senders</span>(
+	__unused ipc_port_t				port,
+	__unused mach_port_mscount_t	mscount)
+{
+	<span class="enscript-keyword">return</span>;
+}
+</pre>
+<hr />
+</body></html>

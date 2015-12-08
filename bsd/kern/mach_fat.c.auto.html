@@ -1,0 +1,321 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mach_fat.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mach_fat.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1991-2015 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/cpu_number.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach-o/fat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/mach_loader.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/mach_fat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSByteOrder.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/exec.h&gt;</span>
+
+<span class="enscript-comment">/**********************************************************************
+ * Routine:	fatfile_getarch()
+ *
+ * Function:	Locate the architecture-dependant contents of a fat
+ *		file that match this CPU.
+ *
+ * Args: header:		A pointer to the fat file header.
+ *		size:			How large the fat file header is (including fat_arch array)
+ *		req_cpu_type:	The required cpu type.
+ *		mask_bits:	Bits to mask from the sub-image type when
+ *				grading it vs. the req_cpu_type
+ *		archret (out):	Pointer to fat_arch structure to hold
+ *				the results.
+ *
+ * Returns:	KERN_SUCCESS:	Valid architecture found.
+ *		KERN_FAILURE:	No valid architecture found.
+ **********************************************************************/</span>
+<span class="enscript-type">static</span> load_return_t
+<span class="enscript-function-name">fatfile_getarch</span>(
+	vm_offset_t	data_ptr,
+	vm_size_t	data_size,
+	cpu_type_t	req_cpu_type,
+	cpu_type_t	mask_bits,
+	<span class="enscript-type">struct</span> fat_arch	*archret)
+{
+	load_return_t		lret;
+	<span class="enscript-type">struct</span> fat_arch		*arch;
+	<span class="enscript-type">struct</span> fat_arch		*best_arch;
+	<span class="enscript-type">int</span>			grade;
+	<span class="enscript-type">int</span>			best_grade;
+	uint32_t		nfat_arch, max_nfat_arch;
+	cpu_type_t		testtype;
+	cpu_type_t		testsubtype;
+	<span class="enscript-type">struct</span> fat_header	*header;
+
+	<span class="enscript-keyword">if</span> (<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> fat_header) &gt; data_size) {
+		<span class="enscript-keyword">return</span> (LOAD_FAILURE);
+	}
+
+	header = (<span class="enscript-type">struct</span> fat_header *)data_ptr;
+	nfat_arch = OSSwapBigToHostInt32(header-&gt;nfat_arch);
+
+	max_nfat_arch = (data_size - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> fat_header)) / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> fat_arch);
+	<span class="enscript-keyword">if</span> (nfat_arch &gt; max_nfat_arch) {
+		<span class="enscript-comment">/* nfat_arch would cause us to read off end of buffer */</span>
+		<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+	}
+
+	<span class="enscript-comment">/*
+	 * Scan the fat_arch's looking for the best one.  */</span>
+	best_arch = NULL;
+	best_grade = 0;
+	arch = (<span class="enscript-type">struct</span> fat_arch *) (data_ptr + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> fat_header));
+	<span class="enscript-keyword">for</span> (; nfat_arch-- &gt; 0; arch++) {
+ 		testtype = OSSwapBigToHostInt32(arch-&gt;cputype);
+ 		testsubtype = OSSwapBigToHostInt32(arch-&gt;cpusubtype) &amp; ~CPU_SUBTYPE_MASK;
+
+		<span class="enscript-comment">/*
+		 *	Check to see if right cpu type.
+		 */</span>
+ 		<span class="enscript-keyword">if</span>((testtype &amp; ~mask_bits) != (req_cpu_type &amp; ~mask_bits)) {
+			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">/*
+		 * 	Get the grade of the cpu subtype (without feature flags)
+		 */</span>
+ 		grade = grade_binary(testtype, testsubtype);
+
+		<span class="enscript-comment">/*
+		 *	Remember it if it's the best we've seen.
+		 */</span>
+		<span class="enscript-keyword">if</span> (grade &gt; best_grade) {
+			best_grade = grade;
+			best_arch = arch;
+		}
+	}
+
+	<span class="enscript-comment">/*
+	 *	Return our results.
+	 */</span>
+	<span class="enscript-keyword">if</span> (best_arch == NULL) {
+		lret = LOAD_BADARCH;
+	} <span class="enscript-keyword">else</span> {
+		archret-&gt;cputype	=
+			    OSSwapBigToHostInt32(best_arch-&gt;cputype);
+		archret-&gt;cpusubtype	=
+			    OSSwapBigToHostInt32(best_arch-&gt;cpusubtype);
+		archret-&gt;offset		=
+			    OSSwapBigToHostInt32(best_arch-&gt;offset);
+		archret-&gt;size		=
+			    OSSwapBigToHostInt32(best_arch-&gt;size);
+		archret-&gt;align		=
+			    OSSwapBigToHostInt32(best_arch-&gt;align);
+
+		lret = LOAD_SUCCESS;
+	}
+
+	<span class="enscript-comment">/*
+	 * Free the memory we allocated and return.
+	 */</span>
+	<span class="enscript-keyword">return</span>(lret);
+}
+
+load_return_t
+<span class="enscript-function-name">fatfile_getbestarch</span>(
+		vm_offset_t		data_ptr,
+		vm_size_t		data_size,
+		<span class="enscript-type">struct</span> fat_arch	*archret)
+{
+	<span class="enscript-comment">/*
+	 * Ignore all architectural bits when determining if an image
+	 * in a fat file should be skipped or graded.
+	 */</span>
+	<span class="enscript-keyword">return</span> fatfile_getarch(data_ptr, data_size, cpu_type(), CPU_ARCH_MASK, archret);
+}
+
+load_return_t
+<span class="enscript-function-name">fatfile_getbestarch_for_cputype</span>(
+	cpu_type_t cputype,
+	vm_offset_t data_ptr,
+	vm_size_t data_size,
+	<span class="enscript-type">struct</span> fat_arch *archret)
+{
+	<span class="enscript-comment">/*
+	 * Scan the fat_arch array for exact matches for this cpu_type_t only
+	 */</span>
+	<span class="enscript-keyword">return</span> fatfile_getarch(data_ptr, data_size, cputype, 0, archret);
+}
+
+<span class="enscript-comment">/**********************************************************************
+ * Routine:	fatfile_getarch_with_bits()
+ *
+ * Function:	Locate the architecture-dependant contents of a fat
+ *		file that match this CPU.
+ *
+ * Args:	vp:		The vnode for the fat file.
+ *		archbits:	Architecture specific feature bits
+ *		header:		A pointer to the fat file header.
+ *		archret (out):	Pointer to fat_arch structure to hold
+ *				the results.
+ *
+ * Returns:	KERN_SUCCESS:	Valid architecture found.
+ *		KERN_FAILURE:	No valid architecture found.
+ **********************************************************************/</span>
+load_return_t
+<span class="enscript-function-name">fatfile_getarch_with_bits</span>(
+	integer_t		archbits,
+	vm_offset_t 	data_ptr,
+	vm_size_t		data_size,
+	<span class="enscript-type">struct</span> fat_arch		*archret)
+{
+	<span class="enscript-comment">/*
+	 * Scan the fat_arch array for matches with the requested
+	 * architectural bits set, and for the current hardware cpu CPU.
+	 */</span>
+	<span class="enscript-keyword">return</span> fatfile_getarch(data_ptr, data_size, (archbits &amp; CPU_ARCH_MASK) | (cpu_type() &amp; ~CPU_ARCH_MASK), 0, archret);
+}
+
+<span class="enscript-comment">/*
+ * Validate the fat_header and fat_arch array in memory. We check that:
+ *
+ * 1) arch count would not exceed the data buffer
+ * 2) arch list does not contain duplicate cputype/cpusubtype tuples
+ * 3) arch list does not have two overlapping slices. The area
+ *    at the front of the file containing the fat headers is implicitly
+ *    a range that a slice should also not try to cover
+ */</span>
+load_return_t
+<span class="enscript-function-name">fatfile_validate_fatarches</span>(vm_offset_t data_ptr, vm_size_t data_size)
+{
+	uint32_t magic, nfat_arch;
+	uint32_t max_nfat_arch, i, j;
+	uint32_t fat_header_size;
+
+	<span class="enscript-type">struct</span> fat_arch		*arches;
+	<span class="enscript-type">struct</span> fat_header	*header;
+
+	<span class="enscript-keyword">if</span> (<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> fat_header) &gt; data_size) {
+		<span class="enscript-keyword">return</span> (LOAD_FAILURE);
+	}
+
+	header = (<span class="enscript-type">struct</span> fat_header *)data_ptr;
+	magic = OSSwapBigToHostInt32(header-&gt;magic);
+	nfat_arch = OSSwapBigToHostInt32(header-&gt;nfat_arch);
+
+	<span class="enscript-keyword">if</span> (magic != FAT_MAGIC) {
+		<span class="enscript-comment">/* must be FAT_MAGIC big endian */</span>
+		<span class="enscript-keyword">return</span> (LOAD_FAILURE);
+	}
+
+	max_nfat_arch = (data_size - <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> fat_header)) / <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> fat_arch);
+	<span class="enscript-keyword">if</span> (nfat_arch &gt; max_nfat_arch) {
+		<span class="enscript-comment">/* nfat_arch would cause us to read off end of buffer */</span>
+		<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+	}
+
+	<span class="enscript-comment">/* now that we know the fat_arch list fits in the buffer, how much does it use? */</span>
+	fat_header_size = <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> fat_header) + nfat_arch * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> fat_arch);
+	arches = (<span class="enscript-type">struct</span> fat_arch *)(data_ptr + <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> fat_header));
+
+	<span class="enscript-keyword">for</span> (i=0; i &lt; nfat_arch; i++) {
+		uint32_t i_begin = OSSwapBigToHostInt32(arches[i].offset);
+		uint32_t i_size = OSSwapBigToHostInt32(arches[i].size);
+		uint32_t i_cputype = OSSwapBigToHostInt32(arches[i].cputype);
+		uint32_t i_cpusubtype = OSSwapBigToHostInt32(arches[i].cpusubtype);
+
+		<span class="enscript-keyword">if</span> (i_begin &lt; fat_header_size) {
+			<span class="enscript-comment">/* slice is trying to claim part of the file used by fat headers themselves */</span>
+			<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+		}
+
+		<span class="enscript-keyword">if</span> ((UINT32_MAX - i_size) &lt; i_begin) {
+			<span class="enscript-comment">/* start + size would overflow */</span>
+			<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+		}
+		uint32_t i_end = i_begin + i_size;
+
+		<span class="enscript-keyword">for</span> (j=i+1; j &lt; nfat_arch; j++) {
+			uint32_t j_begin = OSSwapBigToHostInt32(arches[j].offset);
+			uint32_t j_size = OSSwapBigToHostInt32(arches[j].size);
+			uint32_t j_cputype = OSSwapBigToHostInt32(arches[j].cputype);
+			uint32_t j_cpusubtype = OSSwapBigToHostInt32(arches[j].cpusubtype);
+
+			<span class="enscript-keyword">if</span> ((i_cputype == j_cputype) &amp;&amp; (i_cpusubtype == j_cpusubtype)) {
+				<span class="enscript-comment">/* duplicate cputype/cpusubtype, results in ambiguous references */</span>
+				<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+			}
+
+			<span class="enscript-keyword">if</span> ((UINT32_MAX - j_size) &lt; j_begin) {
+				<span class="enscript-comment">/* start + size would overflow */</span>
+				<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+			}
+			uint32_t j_end = j_begin + j_size;
+
+			<span class="enscript-keyword">if</span> (i_begin &lt;= j_begin) {
+				<span class="enscript-keyword">if</span> (i_end &lt;= j_begin) {
+					<span class="enscript-comment">/* I completely precedes J */</span>
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-comment">/* I started before J, but ends somewhere in or after J */</span>
+					<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+				}
+			} <span class="enscript-keyword">else</span> {
+				<span class="enscript-keyword">if</span> (i_begin &gt;= j_end) {
+					<span class="enscript-comment">/* I started after J started but also after J ended */</span>
+				} <span class="enscript-keyword">else</span> {
+					<span class="enscript-comment">/* I started after J started but before it ended, so there is overlap */</span>
+					<span class="enscript-keyword">return</span> (LOAD_BADMACHO);
+				}
+			}
+		}
+	}
+
+	<span class="enscript-keyword">return</span> (LOAD_SUCCESS);
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,1598 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>thread_call.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">thread_call.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 1993-1995, 1999-2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+ 
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/thread_act.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kern_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/waitq.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/ledger.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_pageout.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/thread_call.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/call_entry.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/timer_call.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/timer_queue.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/sdt.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/machine_routines.h&gt;</span>
+
+<span class="enscript-type">static</span> zone_t			thread_call_zone;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> waitq		daemon_waitq;
+
+<span class="enscript-type">struct</span> thread_call_group {
+	queue_head_t		pending_queue;
+	uint32_t		pending_count;
+
+	queue_head_t		delayed_queue;
+	uint32_t		delayed_count;
+
+	timer_call_data_t	delayed_timer;
+	timer_call_data_t	dealloc_timer;
+
+	<span class="enscript-type">struct</span> waitq		idle_waitq;
+	uint32_t		idle_count, active_count;
+
+	integer_t		pri;
+	uint32_t 		target_thread_count;
+	uint64_t		idle_timestamp;
+
+	uint32_t		flags;
+	sched_call_t		sched_call;
+};
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> thread_call_group	*thread_call_group_t;
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCG_PARALLEL</span>		0x01
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">TCG_DEALLOC_ACTIVE</span>	0x02
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">THREAD_CALL_GROUP_COUNT</span>		4
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">THREAD_CALL_THREAD_MIN</span>		4
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">INTERNAL_CALL_COUNT</span>		768
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">THREAD_CALL_DEALLOC_INTERVAL_NS</span> (5 * 1000 * 1000) <span class="enscript-comment">/* 5 ms */</span>
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">THREAD_CALL_ADD_RATIO</span>		4
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">THREAD_CALL_MACH_FACTOR_CAP</span>	3
+
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> thread_call_group	thread_call_groups[THREAD_CALL_GROUP_COUNT];
+<span class="enscript-type">static</span> boolean_t		thread_call_daemon_awake;
+<span class="enscript-type">static</span> thread_call_data_t	internal_call_storage[INTERNAL_CALL_COUNT];
+<span class="enscript-type">static</span> queue_head_t		thread_call_internal_queue;
+<span class="enscript-type">int</span>						thread_call_internal_queue_count = 0;
+<span class="enscript-type">static</span> uint64_t 		thread_call_dealloc_interval_abs;
+
+<span class="enscript-type">static</span> __inline__ thread_call_t	_internal_call_allocate(thread_call_func_t func, thread_call_param_t param0);
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>		_internal_call_release(thread_call_t call);
+<span class="enscript-type">static</span> __inline__ boolean_t	_pending_call_enqueue(thread_call_t call, thread_call_group_t group);
+<span class="enscript-type">static</span> __inline__ boolean_t 	_delayed_call_enqueue(thread_call_t call, thread_call_group_t group, uint64_t deadline);
+<span class="enscript-type">static</span> __inline__ boolean_t 	_call_dequeue(thread_call_t call, thread_call_group_t group);
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>		thread_call_wake(thread_call_group_t group);
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>		_set_delayed_call_timer(thread_call_t call, thread_call_group_t	group);
+<span class="enscript-type">static</span> boolean_t		_remove_from_pending_queue(thread_call_func_t func, thread_call_param_t	param0, boolean_t remove_all);
+<span class="enscript-type">static</span> boolean_t 		_remove_from_delayed_queue(thread_call_func_t func, thread_call_param_t	param0, boolean_t remove_all);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>			thread_call_daemon(<span class="enscript-type">void</span> *arg);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>			thread_call_thread(thread_call_group_t group, wait_result_t wres);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span>			thread_call_delayed_timer(timer_call_param_t p0, timer_call_param_t p1);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>			thread_call_dealloc_timer(timer_call_param_t p0, timer_call_param_t p1);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>			thread_call_group_setup(thread_call_group_t group, thread_call_priority_t pri, uint32_t target_thread_count, boolean_t parallel);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>			sched_call_thread(<span class="enscript-type">int</span> type, thread_t thread);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>			thread_call_start_deallocate_timer(thread_call_group_t group);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>			thread_call_wait_locked(thread_call_t call);
+<span class="enscript-type">static</span> boolean_t		thread_call_enter_delayed_internal(thread_call_t call,
+						thread_call_func_t alt_func, thread_call_param_t alt_param0,
+						thread_call_param_t param1, uint64_t deadline,
+						uint64_t leeway, <span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> flags);
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">qe</span>(x)		((queue_entry_t)(x))
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">TC</span>(x)		((thread_call_t)(x))
+
+
+lck_grp_t               thread_call_queues_lck_grp;
+lck_grp_t               thread_call_lck_grp;
+lck_attr_t              thread_call_lck_attr;
+lck_grp_attr_t          thread_call_lck_grp_attr;
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+lck_mtx_t		thread_call_lock_data;
+#<span class="enscript-reference">else</span>
+lck_spin_t		thread_call_lock_data;
+#<span class="enscript-reference">endif</span>
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">thread_call_lock_spin</span>()			\
+	lck_mtx_lock_spin_always(&amp;thread_call_lock_data)
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">thread_call_unlock</span>()			\
+	lck_mtx_unlock_always(&amp;thread_call_lock_data)
+
+<span class="enscript-type">extern</span> boolean_t	mach_timer_coalescing_enabled;
+
+<span class="enscript-type">static</span> inline spl_t
+<span class="enscript-function-name">disable_ints_and_lock</span>(<span class="enscript-type">void</span>)
+{
+	spl_t s;
+
+	s = splsched();
+	thread_call_lock_spin();
+
+	<span class="enscript-keyword">return</span> s;
+}
+
+<span class="enscript-type">static</span> inline <span class="enscript-type">void</span> 
+<span class="enscript-function-name">enable_ints_and_unlock</span>(spl_t s)
+{
+	thread_call_unlock();
+	splx(s);
+}
+
+
+<span class="enscript-type">static</span> inline boolean_t
+<span class="enscript-function-name">group_isparallel</span>(thread_call_group_t group)
+{
+	<span class="enscript-keyword">return</span> ((group-&gt;flags &amp; TCG_PARALLEL) != 0);
+}
+
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">thread_call_group_should_add_thread</span>(thread_call_group_t group) 
+{
+	uint32_t thread_count;
+
+	<span class="enscript-keyword">if</span> (!group_isparallel(group)) {
+		<span class="enscript-keyword">if</span> (group-&gt;pending_count &gt; 0 &amp;&amp; group-&gt;active_count == 0) {
+			<span class="enscript-keyword">return</span> TRUE;
+		}
+
+		<span class="enscript-keyword">return</span> FALSE;
+	}
+
+	<span class="enscript-keyword">if</span> (group-&gt;pending_count &gt; 0) {
+		<span class="enscript-keyword">if</span> (group-&gt;idle_count &gt; 0) {
+			panic(<span class="enscript-string">&quot;Pending work, but threads are idle?&quot;</span>);
+		}
+
+		thread_count = group-&gt;active_count;
+
+		<span class="enscript-comment">/*
+		 * Add a thread if either there are no threads,
+		 * the group has fewer than its target number of
+		 * threads, or the amount of work is large relative
+		 * to the number of threads.  In the last case, pay attention
+		 * to the total load on the system, and back off if 
+         * it's high.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((thread_count == 0) ||
+			(thread_count &lt; group-&gt;target_thread_count) ||
+			((group-&gt;pending_count &gt; THREAD_CALL_ADD_RATIO * thread_count) &amp;&amp; 
+			 (sched_mach_factor &lt; THREAD_CALL_MACH_FACTOR_CAP))) {
+			<span class="enscript-keyword">return</span> TRUE;
+		}
+	}
+			
+	<span class="enscript-keyword">return</span> FALSE;
+}
+
+<span class="enscript-type">static</span> inline integer_t
+<span class="enscript-function-name">thread_call_priority_to_sched_pri</span>(thread_call_priority_t pri) 
+{
+	<span class="enscript-keyword">switch</span> (pri) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_CALL_PRIORITY_HIGH</span>:
+		<span class="enscript-keyword">return</span> BASEPRI_PREEMPT;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_CALL_PRIORITY_KERNEL</span>:
+		<span class="enscript-keyword">return</span> BASEPRI_KERNEL;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_CALL_PRIORITY_USER</span>:
+		<span class="enscript-keyword">return</span> BASEPRI_DEFAULT;
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">THREAD_CALL_PRIORITY_LOW</span>:
+		<span class="enscript-keyword">return</span> MAXPRI_THROTTLE;
+	<span class="enscript-reference">default</span>:
+		panic(<span class="enscript-string">&quot;Invalid priority.&quot;</span>);
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* Lock held */</span>
+<span class="enscript-type">static</span> inline thread_call_group_t
+<span class="enscript-function-name">thread_call_get_group</span>(
+		thread_call_t call)
+{
+	thread_call_priority_t 	pri = call-&gt;tc_pri;
+
+	assert(pri == THREAD_CALL_PRIORITY_LOW ||
+			pri == THREAD_CALL_PRIORITY_USER ||
+			pri == THREAD_CALL_PRIORITY_KERNEL ||
+			pri == THREAD_CALL_PRIORITY_HIGH);
+
+	<span class="enscript-keyword">return</span> &amp;thread_call_groups[pri];
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_group_setup</span>(
+		thread_call_group_t 		group, 
+		thread_call_priority_t		pri,
+		uint32_t			target_thread_count,
+		boolean_t			parallel)
+{
+	queue_init(&amp;group-&gt;pending_queue);
+	queue_init(&amp;group-&gt;delayed_queue);
+
+	timer_call_setup(&amp;group-&gt;delayed_timer, thread_call_delayed_timer, group);
+	timer_call_setup(&amp;group-&gt;dealloc_timer, thread_call_dealloc_timer, group);
+
+	waitq_init(&amp;group-&gt;idle_waitq, SYNC_POLICY_FIFO|SYNC_POLICY_DISABLE_IRQ);
+
+	group-&gt;target_thread_count = target_thread_count;
+	group-&gt;pri = thread_call_priority_to_sched_pri(pri);
+
+	group-&gt;sched_call = sched_call_thread; 
+	<span class="enscript-keyword">if</span> (parallel) {
+		group-&gt;flags |= TCG_PARALLEL;
+		group-&gt;sched_call = NULL;
+	} 
+}
+
+<span class="enscript-comment">/*
+ * Simple wrapper for creating threads bound to 
+ * thread call groups.
+ */</span>
+<span class="enscript-type">static</span> kern_return_t
+<span class="enscript-function-name">thread_call_thread_create</span>(
+		thread_call_group_t             group)
+{
+	thread_t thread;
+	kern_return_t result;
+
+	result = kernel_thread_start_priority((thread_continue_t)thread_call_thread, group, group-&gt;pri, &amp;thread);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS) {
+		<span class="enscript-keyword">return</span> result;
+	}
+
+	<span class="enscript-keyword">if</span> (group-&gt;pri &lt; BASEPRI_PREEMPT) {
+		<span class="enscript-comment">/*
+		 * New style doesn't get to run to completion in 
+		 * kernel if there are higher priority threads 
+		 * available.
+		 */</span>
+		thread_set_eager_preempt(thread);
+	}
+
+	thread_deallocate(thread);
+	<span class="enscript-keyword">return</span> KERN_SUCCESS;
+}
+
+<span class="enscript-comment">/*
+ *	thread_call_initialize:
+ *
+ *	Initialize this module, called
+ *	early during system initialization.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_initialize</span>(<span class="enscript-type">void</span>)
+{
+	thread_call_t			call;
+	kern_return_t			result;
+	thread_t			thread;
+	<span class="enscript-type">int</span>				i;
+	spl_t			s;
+
+	i = <span class="enscript-keyword">sizeof</span> (thread_call_data_t);
+	thread_call_zone = zinit(i, 4096 * i, 16 * i, <span class="enscript-string">&quot;thread_call&quot;</span>);
+	zone_change(thread_call_zone, Z_CALLERACCT, FALSE);
+	zone_change(thread_call_zone, Z_NOENCRYPT, TRUE);
+
+	lck_attr_setdefault(&amp;thread_call_lck_attr);
+	lck_grp_attr_setdefault(&amp;thread_call_lck_grp_attr);
+	lck_grp_init(&amp;thread_call_queues_lck_grp, <span class="enscript-string">&quot;thread_call_queues&quot;</span>, &amp;thread_call_lck_grp_attr);
+	lck_grp_init(&amp;thread_call_lck_grp, <span class="enscript-string">&quot;thread_call&quot;</span>, &amp;thread_call_lck_grp_attr);
+
+#<span class="enscript-reference">if</span> <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__i386__</span>) || <span class="enscript-reference">defined</span>(<span class="enscript-variable-name">__x86_64__</span>)
+        lck_mtx_init(&amp;thread_call_lock_data, &amp;thread_call_lck_grp, &amp;thread_call_lck_attr);
+#<span class="enscript-reference">else</span>
+        lck_spin_init(&amp;thread_call_lock_data, &amp;thread_call_lck_grp, &amp;thread_call_lck_attr);
+#<span class="enscript-reference">endif</span>
+
+	nanotime_to_absolutetime(0, THREAD_CALL_DEALLOC_INTERVAL_NS, &amp;thread_call_dealloc_interval_abs);
+	waitq_init(&amp;daemon_waitq, SYNC_POLICY_FIFO);
+
+	thread_call_group_setup(&amp;thread_call_groups[THREAD_CALL_PRIORITY_LOW], THREAD_CALL_PRIORITY_LOW, 0, TRUE);
+	thread_call_group_setup(&amp;thread_call_groups[THREAD_CALL_PRIORITY_USER], THREAD_CALL_PRIORITY_USER, 0, TRUE);
+	thread_call_group_setup(&amp;thread_call_groups[THREAD_CALL_PRIORITY_KERNEL], THREAD_CALL_PRIORITY_KERNEL, 1, TRUE);
+	thread_call_group_setup(&amp;thread_call_groups[THREAD_CALL_PRIORITY_HIGH], THREAD_CALL_PRIORITY_HIGH, THREAD_CALL_THREAD_MIN, FALSE);
+
+	s = disable_ints_and_lock();
+
+	queue_init(&amp;thread_call_internal_queue);
+	<span class="enscript-keyword">for</span> (
+			call = internal_call_storage;
+			call &lt; &amp;internal_call_storage[INTERNAL_CALL_COUNT];
+			call++) {
+
+		enqueue_tail(&amp;thread_call_internal_queue, qe(call));
+		thread_call_internal_queue_count++;
+	}
+
+	thread_call_daemon_awake = TRUE;
+
+	enable_ints_and_unlock(s);
+
+	result = kernel_thread_start_priority((thread_continue_t)thread_call_daemon, NULL, BASEPRI_PREEMPT + 1, &amp;thread);
+	<span class="enscript-keyword">if</span> (result != KERN_SUCCESS)
+		panic(<span class="enscript-string">&quot;thread_call_initialize&quot;</span>);
+
+	thread_deallocate(thread);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_setup</span>(
+	thread_call_t			call,
+	thread_call_func_t		func,
+	thread_call_param_t		param0)
+{
+	bzero(call, <span class="enscript-keyword">sizeof</span>(*call));
+	call_entry_setup((call_entry_t)call, func, param0);
+	call-&gt;tc_pri = THREAD_CALL_PRIORITY_HIGH; <span class="enscript-comment">/* Default priority */</span>
+}
+
+<span class="enscript-comment">/*
+ *	_internal_call_allocate:
+ *
+ *	Allocate an internal callout entry.
+ *
+ *	Called with thread_call_lock held.
+ */</span>
+<span class="enscript-type">static</span> __inline__ thread_call_t
+<span class="enscript-function-name">_internal_call_allocate</span>(thread_call_func_t func, thread_call_param_t param0)
+{
+    thread_call_t		call;
+    
+    <span class="enscript-keyword">if</span> (queue_empty(&amp;thread_call_internal_queue))
+    	panic(<span class="enscript-string">&quot;_internal_call_allocate&quot;</span>);
+	
+    call = TC(dequeue_head(&amp;thread_call_internal_queue));
+    thread_call_internal_queue_count--;
+
+    thread_call_setup(call, func, param0);
+    call-&gt;tc_refs = 0;
+    call-&gt;tc_flags = 0; <span class="enscript-comment">/* THREAD_CALL_ALLOC not set, do not free back to zone */</span>
+
+    <span class="enscript-keyword">return</span> (call);
+}
+
+<span class="enscript-comment">/*
+ *	_internal_call_release:
+ *
+ *	Release an internal callout entry which
+ *	is no longer pending (or delayed). This is
+ *	safe to call on a non-internal entry, in which
+ *	case nothing happens.
+ *
+ * 	Called with thread_call_lock held.
+ */</span>
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">_internal_call_release</span>(
+    thread_call_t		call)
+{
+    <span class="enscript-keyword">if</span> (    call &gt;= internal_call_storage						&amp;&amp;
+	   	    call &lt; &amp;internal_call_storage[INTERNAL_CALL_COUNT]		) {
+		assert((call-&gt;tc_flags &amp; THREAD_CALL_ALLOC) == 0);
+		enqueue_head(&amp;thread_call_internal_queue, qe(call));
+		thread_call_internal_queue_count++;
+	}
+}
+
+<span class="enscript-comment">/*
+ *	_pending_call_enqueue:
+ *
+ *	Place an entry at the end of the
+ *	pending queue, to be executed soon.
+ *
+ *	Returns TRUE if the entry was already
+ *	on a queue.
+ *
+ *	Called with thread_call_lock held.
+ */</span>
+<span class="enscript-type">static</span> __inline__ boolean_t
+<span class="enscript-function-name">_pending_call_enqueue</span>(
+    thread_call_t		call,
+	thread_call_group_t	group)
+{
+	queue_head_t		*old_queue;
+
+	old_queue = call_entry_enqueue_tail(CE(call), &amp;group-&gt;pending_queue);
+
+	<span class="enscript-keyword">if</span> (old_queue == NULL) {
+		call-&gt;tc_submit_count++;
+	}
+
+	group-&gt;pending_count++;
+
+	thread_call_wake(group);
+
+	<span class="enscript-keyword">return</span> (old_queue != NULL);
+}
+
+<span class="enscript-comment">/*
+ *	_delayed_call_enqueue:
+ *
+ *	Place an entry on the delayed queue,
+ *	after existing entries with an earlier
+ * 	(or identical) deadline.
+ *
+ *	Returns TRUE if the entry was already
+ *	on a queue.
+ *
+ *	Called with thread_call_lock held.
+ */</span>
+<span class="enscript-type">static</span> __inline__ boolean_t
+<span class="enscript-function-name">_delayed_call_enqueue</span>(
+    	thread_call_t		call,
+	thread_call_group_t	group,
+	uint64_t		deadline)
+{
+	queue_head_t		*old_queue;
+
+	old_queue = call_entry_enqueue_deadline(CE(call), &amp;group-&gt;delayed_queue, deadline);
+
+	<span class="enscript-keyword">if</span> (old_queue == &amp;group-&gt;pending_queue)
+		group-&gt;pending_count--;
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (old_queue == NULL) 
+		call-&gt;tc_submit_count++;
+
+	<span class="enscript-keyword">return</span> (old_queue != NULL);
+}
+
+<span class="enscript-comment">/*
+ *	_call_dequeue:
+ *
+ *	Remove an entry from a queue.
+ *
+ *	Returns TRUE if the entry was on a queue.
+ *
+ *	Called with thread_call_lock held.
+ */</span>
+<span class="enscript-type">static</span> __inline__ boolean_t
+<span class="enscript-function-name">_call_dequeue</span>(
+	thread_call_t		call,
+	thread_call_group_t	group)
+{
+	queue_head_t		*old_queue;
+
+	old_queue = call_entry_dequeue(CE(call));
+
+	<span class="enscript-keyword">if</span> (old_queue != NULL) {
+		call-&gt;tc_finish_count++;
+		<span class="enscript-keyword">if</span> (old_queue == &amp;group-&gt;pending_queue)
+			group-&gt;pending_count--;
+	}
+
+	<span class="enscript-keyword">return</span> (old_queue != NULL);
+}
+
+<span class="enscript-comment">/*
+ *	_set_delayed_call_timer:
+ *
+ *	Reset the timer so that it
+ *	next expires when the entry is due.
+ *
+ *	Called with thread_call_lock held.
+ */</span>
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">_set_delayed_call_timer</span>(
+    thread_call_t		call,
+	thread_call_group_t	group)
+{
+	uint64_t leeway;
+
+	assert((call-&gt;tc_soft_deadline != 0) &amp;&amp; ((call-&gt;tc_soft_deadline &lt;= call-&gt;tc_call.deadline)));
+
+	leeway = call-&gt;tc_call.deadline - call-&gt;tc_soft_deadline;
+	timer_call_enter_with_leeway(&amp;group-&gt;delayed_timer, NULL,
+	    call-&gt;tc_soft_deadline, leeway,
+	    TIMER_CALL_SYS_CRITICAL|TIMER_CALL_LEEWAY,
+	    ((call-&gt;tc_flags &amp; THREAD_CALL_RATELIMITED) == THREAD_CALL_RATELIMITED));
+}
+
+<span class="enscript-comment">/*
+ *	_remove_from_pending_queue:
+ *
+ *	Remove the first (or all) matching
+ *	entries	from the pending queue.
+ *
+ *	Returns	TRUE if any matching entries
+ *	were found.
+ *
+ *	Called with thread_call_lock held.
+ */</span>
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">_remove_from_pending_queue</span>(
+    thread_call_func_t		func,
+    thread_call_param_t		param0,
+    boolean_t				remove_all)
+{
+	boolean_t				call_removed = FALSE;
+	thread_call_t			call;
+	thread_call_group_t		group = &amp;thread_call_groups[THREAD_CALL_PRIORITY_HIGH];
+
+	call = TC(queue_first(&amp;group-&gt;pending_queue));
+
+	<span class="enscript-keyword">while</span> (!queue_end(&amp;group-&gt;pending_queue, qe(call))) {
+		<span class="enscript-keyword">if</span> (call-&gt;tc_call.func == func &amp;&amp;
+				call-&gt;tc_call.param0 == param0) {
+			thread_call_t	next = TC(queue_next(qe(call)));
+
+			_call_dequeue(call, group);
+
+			_internal_call_release(call);
+
+			call_removed = TRUE;
+			<span class="enscript-keyword">if</span> (!remove_all)
+				<span class="enscript-keyword">break</span>;
+
+			call = next;
+		}
+		<span class="enscript-keyword">else</span>	
+			call = TC(queue_next(qe(call)));
+	}
+
+	<span class="enscript-keyword">return</span> (call_removed);
+}
+
+<span class="enscript-comment">/*
+ *	_remove_from_delayed_queue:
+ *
+ *	Remove the first (or all) matching
+ *	entries	from the delayed queue.
+ *
+ *	Returns	TRUE if any matching entries
+ *	were found.
+ *
+ *	Called with thread_call_lock held.
+ */</span>
+<span class="enscript-type">static</span> boolean_t
+<span class="enscript-function-name">_remove_from_delayed_queue</span>(
+    thread_call_func_t		func,
+    thread_call_param_t		param0,
+    boolean_t				remove_all)
+{
+	boolean_t			call_removed = FALSE;
+	thread_call_t			call;
+	thread_call_group_t		group = &amp;thread_call_groups[THREAD_CALL_PRIORITY_HIGH];
+
+	call = TC(queue_first(&amp;group-&gt;delayed_queue));
+
+	<span class="enscript-keyword">while</span> (!queue_end(&amp;group-&gt;delayed_queue, qe(call))) {
+		<span class="enscript-keyword">if</span> (call-&gt;tc_call.func == func	&amp;&amp;
+				call-&gt;tc_call.param0 == param0) {
+			thread_call_t	next = TC(queue_next(qe(call)));
+
+			_call_dequeue(call, group);
+
+			_internal_call_release(call);
+
+			call_removed = TRUE;
+			<span class="enscript-keyword">if</span> (!remove_all)
+				<span class="enscript-keyword">break</span>;
+
+			call = next;
+		}
+		<span class="enscript-keyword">else</span>	
+			call = TC(queue_next(qe(call)));
+	}
+
+	<span class="enscript-keyword">return</span> (call_removed);
+}
+
+<span class="enscript-comment">/*
+ *	thread_call_func_delayed:
+ *
+ *	Enqueue a function callout to
+ *	occur at the stated time.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_func_delayed</span>(
+		thread_call_func_t		func,
+		thread_call_param_t		param,
+		uint64_t			deadline)
+{
+	(<span class="enscript-type">void</span>)thread_call_enter_delayed_internal(NULL, func, param, 0, deadline, 0, 0);
+}
+
+<span class="enscript-comment">/*
+ * thread_call_func_delayed_with_leeway:
+ *
+ * Same as thread_call_func_delayed(), but with
+ * leeway/flags threaded through.
+ */</span>
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_func_delayed_with_leeway</span>(
+	thread_call_func_t		func,
+	thread_call_param_t		param,
+	uint64_t		deadline,
+	uint64_t		leeway,
+	uint32_t		flags)
+{
+	(<span class="enscript-type">void</span>)thread_call_enter_delayed_internal(NULL, func, param, 0, deadline, leeway, flags);
+}
+
+<span class="enscript-comment">/*
+ *	thread_call_func_cancel:
+ *
+ *	Dequeue a function callout.
+ *
+ *	Removes one (or all) { function, argument }
+ *	instance(s) from either (or both)
+ *	the pending and	the delayed queue,
+ *	in that order.
+ *
+ *	Returns TRUE if any calls were cancelled.
+ */</span>
+boolean_t
+<span class="enscript-function-name">thread_call_func_cancel</span>(
+		thread_call_func_t		func,
+		thread_call_param_t		param,
+		boolean_t			cancel_all)
+{
+	boolean_t	result;
+	spl_t		s;
+
+	s = splsched();
+	thread_call_lock_spin();
+
+	<span class="enscript-keyword">if</span> (cancel_all)
+		result = _remove_from_pending_queue(func, param, cancel_all) |
+			_remove_from_delayed_queue(func, param, cancel_all);
+	<span class="enscript-keyword">else</span>
+		result = _remove_from_pending_queue(func, param, cancel_all) ||
+			_remove_from_delayed_queue(func, param, cancel_all);
+
+	thread_call_unlock();
+	splx(s);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ * Allocate a thread call with a given priority.  Importances
+ * other than THREAD_CALL_PRIORITY_HIGH will be run in threads
+ * with eager preemption enabled (i.e. may be aggressively preempted
+ * by higher-priority threads which are not in the normal &quot;urgent&quot; bands).
+ */</span>
+thread_call_t
+<span class="enscript-function-name">thread_call_allocate_with_priority</span>(
+		thread_call_func_t		func,
+		thread_call_param_t		param0,
+		thread_call_priority_t		pri)
+{
+	thread_call_t call;
+
+	<span class="enscript-keyword">if</span> (pri &gt; THREAD_CALL_PRIORITY_LOW) {
+		panic(<span class="enscript-string">&quot;Invalid pri: %d\n&quot;</span>, pri);
+	}
+
+	call = thread_call_allocate(func, param0);
+	call-&gt;tc_pri = pri;
+
+	<span class="enscript-keyword">return</span> call;
+}
+
+<span class="enscript-comment">/*
+ *	thread_call_allocate:
+ *
+ *	Allocate a callout entry.
+ */</span>
+thread_call_t
+<span class="enscript-function-name">thread_call_allocate</span>(
+		thread_call_func_t		func,
+		thread_call_param_t		param0)
+{
+	thread_call_t	call = zalloc(thread_call_zone);
+
+	thread_call_setup(call, func, param0);
+	call-&gt;tc_refs = 1;
+	call-&gt;tc_flags = THREAD_CALL_ALLOC;
+
+	<span class="enscript-keyword">return</span> (call);
+}
+
+<span class="enscript-comment">/*
+ *	thread_call_free:
+ *
+ *	Release a callout.  If the callout is currently
+ *	executing, it will be freed when all invocations
+ *	finish.
+ */</span>
+boolean_t
+<span class="enscript-function-name">thread_call_free</span>(
+		thread_call_t		call)
+{
+	spl_t	s;
+	int32_t refs;
+
+	s = splsched();
+	thread_call_lock_spin();
+
+	<span class="enscript-keyword">if</span> (call-&gt;tc_call.queue != NULL) {
+		thread_call_unlock();
+		splx(s);
+
+		<span class="enscript-keyword">return</span> (FALSE);
+	}
+
+	refs = --call-&gt;tc_refs;
+	<span class="enscript-keyword">if</span> (refs &lt; 0) {
+		panic(<span class="enscript-string">&quot;Refcount negative: %d\n&quot;</span>, refs);
+	}	
+
+	thread_call_unlock();
+	splx(s);
+
+	<span class="enscript-keyword">if</span> (refs == 0) {
+		zfree(thread_call_zone, call);
+	}
+
+	<span class="enscript-keyword">return</span> (TRUE);
+}
+
+<span class="enscript-comment">/*
+ *	thread_call_enter:
+ *
+ *	Enqueue a callout entry to occur &quot;soon&quot;.
+ *
+ *	Returns TRUE if the call was
+ *	already on a queue.
+ */</span>
+boolean_t
+<span class="enscript-function-name">thread_call_enter</span>(
+		thread_call_t		call)
+{
+	boolean_t		result = TRUE;
+	thread_call_group_t	group;
+	spl_t			s;
+
+	group = thread_call_get_group(call);
+
+	s = splsched();
+	thread_call_lock_spin();
+
+	<span class="enscript-keyword">if</span> (call-&gt;tc_call.queue != &amp;group-&gt;pending_queue) {
+		result = _pending_call_enqueue(call, group);
+	}
+
+	call-&gt;tc_call.param1 = 0;
+
+	thread_call_unlock();
+	splx(s);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+boolean_t
+<span class="enscript-function-name">thread_call_enter1</span>(
+		thread_call_t			call,
+		thread_call_param_t		param1)
+{
+	boolean_t		result = TRUE;
+	thread_call_group_t	group;
+	spl_t			s;
+
+	group = thread_call_get_group(call);
+
+	s = splsched();
+	thread_call_lock_spin();
+
+	<span class="enscript-keyword">if</span> (call-&gt;tc_call.queue != &amp;group-&gt;pending_queue) {
+		result = _pending_call_enqueue(call, group);
+	}
+
+	call-&gt;tc_call.param1 = param1;
+
+	thread_call_unlock();
+	splx(s);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ *	thread_call_enter_delayed:
+ *
+ *	Enqueue a callout entry to occur
+ *	at the stated time.
+ *
+ *	Returns TRUE if the call was
+ *	already on a queue.
+ */</span>
+boolean_t
+<span class="enscript-function-name">thread_call_enter_delayed</span>(
+		thread_call_t		call,
+		uint64_t		deadline)
+{
+	assert(call);
+	<span class="enscript-keyword">return</span> thread_call_enter_delayed_internal(call, NULL, 0, 0, deadline, 0, 0);
+}
+
+boolean_t
+<span class="enscript-function-name">thread_call_enter1_delayed</span>(
+		thread_call_t			call,
+		thread_call_param_t		param1,
+		uint64_t			deadline)
+{
+	assert(call);
+	<span class="enscript-keyword">return</span> thread_call_enter_delayed_internal(call, NULL, 0, param1, deadline, 0, 0);
+}
+
+boolean_t
+<span class="enscript-function-name">thread_call_enter_delayed_with_leeway</span>(
+		thread_call_t		call,
+		thread_call_param_t	param1,
+		uint64_t		deadline,
+		uint64_t		leeway,
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>		flags)
+{
+	assert(call);
+	<span class="enscript-keyword">return</span> thread_call_enter_delayed_internal(call, NULL, 0, param1, deadline, leeway, flags);
+}
+
+
+<span class="enscript-comment">/*
+ * thread_call_enter_delayed_internal:
+ * enqueue a callout entry to occur at the stated time
+ *
+ * Returns True if the call was already on a queue
+ * params:
+ * call     - structure encapsulating state of the callout
+ * alt_func/alt_param0 - if call is NULL, allocate temporary storage using these parameters
+ * deadline - time deadline in nanoseconds
+ * leeway   - timer slack represented as delta of deadline.
+ * flags    - THREAD_CALL_DELAY_XXX : classification of caller's desires wrt timer coalescing.
+ *            THREAD_CALL_DELAY_LEEWAY : value in leeway is used for timer coalescing.
+ */</span>
+boolean_t
+<span class="enscript-function-name">thread_call_enter_delayed_internal</span>(
+		thread_call_t 		call,
+		thread_call_func_t	alt_func,
+		thread_call_param_t	alt_param0,
+		thread_call_param_t 	param1,
+		uint64_t 		deadline,
+		uint64_t 		leeway,
+		<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> 		flags)
+{
+	boolean_t		result = TRUE;
+	thread_call_group_t	group;
+	spl_t			s;
+	uint64_t		abstime, sdeadline, slop;
+	uint32_t		urgency;
+
+	<span class="enscript-comment">/* direct mapping between thread_call, timer_call, and timeout_urgency values */</span>
+	urgency = (flags &amp; TIMEOUT_URGENCY_MASK);
+
+	s = splsched();
+	thread_call_lock_spin();
+
+	<span class="enscript-keyword">if</span> (call == NULL) {
+		<span class="enscript-comment">/* allocate a structure out of internal storage, as a convenience for BSD callers */</span>
+		call = _internal_call_allocate(alt_func, alt_param0);
+	}
+
+	group = thread_call_get_group(call);
+	abstime =  mach_absolute_time();
+	
+	call-&gt;tc_flags |= THREAD_CALL_DELAYED;
+
+	call-&gt;tc_soft_deadline = sdeadline = deadline;
+
+	boolean_t ratelimited = FALSE;
+	slop = timer_call_slop(deadline, abstime, urgency, current_thread(), &amp;ratelimited);
+	
+	<span class="enscript-keyword">if</span> ((flags &amp; THREAD_CALL_DELAY_LEEWAY) != 0 &amp;&amp; leeway &gt; slop)
+		slop = leeway;
+
+	<span class="enscript-keyword">if</span> (UINT64_MAX - deadline &lt;= slop)
+		deadline = UINT64_MAX;
+	<span class="enscript-keyword">else</span>
+		deadline += slop;
+
+	<span class="enscript-keyword">if</span> (ratelimited) {
+		call-&gt;tc_flags |= TIMER_CALL_RATELIMITED;
+	} <span class="enscript-keyword">else</span> {
+		call-&gt;tc_flags &amp;= ~TIMER_CALL_RATELIMITED;
+	}
+
+
+	call-&gt;tc_call.param1 = param1;
+	call-&gt;ttd = (sdeadline &gt; abstime) ? (sdeadline - abstime) : 0;
+
+	result = _delayed_call_enqueue(call, group, deadline);
+
+	<span class="enscript-keyword">if</span> (queue_first(&amp;group-&gt;delayed_queue) == qe(call))
+		_set_delayed_call_timer(call, group);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+	DTRACE_TMR5(thread_callout__create, thread_call_func_t, call-&gt;tc_call.func, uint64_t, (deadline - sdeadline), uint64_t, (call-&gt;ttd &gt;&gt; 32), (<span class="enscript-type">unsigned</span>) (call-&gt;ttd &amp; 0xFFFFFFFF), call);
+#<span class="enscript-reference">endif</span>
+	thread_call_unlock();
+	splx(s);
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ *	thread_call_cancel:
+ *
+ *	Dequeue a callout entry.
+ *
+ *	Returns TRUE if the call was
+ *	on a queue.
+ */</span>
+boolean_t
+<span class="enscript-function-name">thread_call_cancel</span>(
+		thread_call_t		call)
+{
+	boolean_t		result, do_cancel_callout = FALSE;
+	thread_call_group_t	group;
+	spl_t			s;
+
+	group = thread_call_get_group(call);
+
+	s = splsched();
+	thread_call_lock_spin();
+
+	<span class="enscript-keyword">if</span> ((call-&gt;tc_call.deadline != 0) &amp;&amp;
+	    (queue_first(&amp;group-&gt;delayed_queue) == qe(call))) {
+		assert (call-&gt;tc_call.queue == &amp;group-&gt;delayed_queue);
+		do_cancel_callout = TRUE;
+	}
+
+	result = _call_dequeue(call, group);
+
+	<span class="enscript-keyword">if</span> (do_cancel_callout) {
+		timer_call_cancel(&amp;group-&gt;delayed_timer);
+		<span class="enscript-keyword">if</span> (!queue_empty(&amp;group-&gt;delayed_queue)) {
+			_set_delayed_call_timer(TC(queue_first(&amp;group-&gt;delayed_queue)), group);
+		}
+	}
+
+	thread_call_unlock();
+	splx(s);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+	DTRACE_TMR4(thread_callout__cancel, thread_call_func_t, call-&gt;tc_call.func, 0, (call-&gt;ttd &gt;&gt; 32), (<span class="enscript-type">unsigned</span>) (call-&gt;ttd &amp; 0xFFFFFFFF));
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> (result);
+}
+
+<span class="enscript-comment">/*
+ * Cancel a thread call.  If it cannot be cancelled (i.e.
+ * is already in flight), waits for the most recent invocation
+ * to finish.  Note that if clients re-submit this thread call,
+ * it may still be pending or in flight when thread_call_cancel_wait
+ * returns, but all requests to execute this work item prior
+ * to the call to thread_call_cancel_wait will have finished.
+ */</span>
+boolean_t
+<span class="enscript-function-name">thread_call_cancel_wait</span>(
+		thread_call_t		call)
+{
+	boolean_t		result;
+	thread_call_group_t	group;
+
+	<span class="enscript-keyword">if</span> ((call-&gt;tc_flags &amp; THREAD_CALL_ALLOC) == 0) {
+		panic(<span class="enscript-string">&quot;%s: Can't wait on thread call whose storage I don't own.&quot;</span>, __FUNCTION__);
+	}
+
+	group = thread_call_get_group(call);
+
+	(<span class="enscript-type">void</span>) splsched();
+	thread_call_lock_spin();
+
+	result = _call_dequeue(call, group);
+	<span class="enscript-keyword">if</span> (result == FALSE) {
+		thread_call_wait_locked(call);
+	}
+
+	thread_call_unlock();
+	(<span class="enscript-type">void</span>) spllo();
+
+	<span class="enscript-keyword">return</span> result;
+}
+
+
+<span class="enscript-comment">/*
+ *	thread_call_wake:
+ *
+ *	Wake a call thread to service
+ *	pending call entries.  May wake
+ *	the daemon thread in order to
+ *	create additional call threads.
+ *
+ *	Called with thread_call_lock held.
+ *
+ *	For high-priority group, only does wakeup/creation if there are no threads
+ *	running.
+ */</span>
+<span class="enscript-type">static</span> __inline__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_wake</span>(
+	thread_call_group_t		group)
+{
+	<span class="enscript-comment">/* 
+	 * New behavior: use threads if you've got 'em.
+	 * Traditional behavior: wake only if no threads running.
+	 */</span>
+	<span class="enscript-keyword">if</span> (group_isparallel(group) || group-&gt;active_count == 0) {
+		<span class="enscript-keyword">if</span> (waitq_wakeup64_one(&amp;group-&gt;idle_waitq, NO_EVENT64,
+				       THREAD_AWAKENED, WAITQ_ALL_PRIORITIES) == KERN_SUCCESS) {
+			group-&gt;idle_count--; group-&gt;active_count++;
+
+			<span class="enscript-keyword">if</span> (group-&gt;idle_count == 0) {
+				timer_call_cancel(&amp;group-&gt;dealloc_timer);
+				group-&gt;flags &amp;= TCG_DEALLOC_ACTIVE;
+			}
+		} <span class="enscript-keyword">else</span> {
+			<span class="enscript-keyword">if</span> (!thread_call_daemon_awake &amp;&amp; thread_call_group_should_add_thread(group)) {
+				thread_call_daemon_awake = TRUE;
+				waitq_wakeup64_one(&amp;daemon_waitq, NO_EVENT64,
+						   THREAD_AWAKENED, WAITQ_ALL_PRIORITIES);
+			}
+		}
+	}
+}
+
+<span class="enscript-comment">/*
+ *	sched_call_thread:
+ *
+ *	Call out invoked by the scheduler.  Used only for high-priority
+ *	thread call group.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sched_call_thread</span>(
+		<span class="enscript-type">int</span>				type,
+		__unused	thread_t		thread)
+{
+	thread_call_group_t		group;
+
+	group = &amp;thread_call_groups[THREAD_CALL_PRIORITY_HIGH]; <span class="enscript-comment">/* XXX */</span>
+
+	thread_call_lock_spin();
+
+	<span class="enscript-keyword">switch</span> (type) {
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SCHED_CALL_BLOCK</span>:
+			--group-&gt;active_count;
+			<span class="enscript-keyword">if</span> (group-&gt;pending_count &gt; 0)
+				thread_call_wake(group);
+			<span class="enscript-keyword">break</span>;
+
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">SCHED_CALL_UNBLOCK</span>:
+			group-&gt;active_count++;
+			<span class="enscript-keyword">break</span>;
+	}
+
+	thread_call_unlock();
+}
+
+<span class="enscript-comment">/* 
+ * Interrupts disabled, lock held; returns the same way. 
+ * Only called on thread calls whose storage we own.  Wakes up
+ * anyone who might be waiting on this work item and frees it
+ * if the client has so requested.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_finish</span>(thread_call_t call, spl_t *s)
+{
+	boolean_t dowake = FALSE;
+
+	call-&gt;tc_finish_count++;
+	call-&gt;tc_refs--;
+
+	<span class="enscript-keyword">if</span> ((call-&gt;tc_flags &amp; THREAD_CALL_WAIT) != 0) {
+		dowake = TRUE;
+		call-&gt;tc_flags &amp;= ~THREAD_CALL_WAIT;
+
+		<span class="enscript-comment">/* 
+		 * Dropping lock here because the sched call for the 
+		 * high-pri group can take the big lock from under
+		 * a thread lock.
+		 */</span>
+		thread_call_unlock();
+		thread_wakeup((event_t)call);
+		thread_call_lock_spin();
+	}
+
+	<span class="enscript-keyword">if</span> (call-&gt;tc_refs == 0) {
+		<span class="enscript-keyword">if</span> (dowake) {
+			panic(<span class="enscript-string">&quot;Someone waiting on a thread call that is scheduled for free: %p\n&quot;</span>, call-&gt;tc_call.func);
+		}
+
+		enable_ints_and_unlock(*s);
+
+		zfree(thread_call_zone, call);
+
+		*s = disable_ints_and_lock();
+	}
+
+}
+
+<span class="enscript-comment">/*
+ *	thread_call_thread:
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_thread</span>(
+		thread_call_group_t		group,
+		wait_result_t			wres)
+{
+	thread_t	self = current_thread();
+	boolean_t	canwait;
+	spl_t		s;
+
+	<span class="enscript-keyword">if</span> ((thread_get_tag_internal(self) &amp; THREAD_TAG_CALLOUT) == 0)
+		(<span class="enscript-type">void</span>)thread_set_tag_internal(self, THREAD_TAG_CALLOUT);
+
+	<span class="enscript-comment">/*
+	 * A wakeup with THREAD_INTERRUPTED indicates that 
+	 * we should terminate.
+	 */</span>
+	<span class="enscript-keyword">if</span> (wres == THREAD_INTERRUPTED) {
+		thread_terminate(self);
+
+		<span class="enscript-comment">/* NOTREACHED */</span>
+		panic(<span class="enscript-string">&quot;thread_terminate() returned?&quot;</span>);
+	}
+
+	s = disable_ints_and_lock();
+
+	thread_sched_call(self, group-&gt;sched_call);
+
+	<span class="enscript-keyword">while</span> (group-&gt;pending_count &gt; 0) {
+		thread_call_t			call;
+		thread_call_func_t		func;
+		thread_call_param_t		param0, param1;
+
+		call = TC(dequeue_head(&amp;group-&gt;pending_queue));
+		group-&gt;pending_count--;
+
+		func = call-&gt;tc_call.func;
+		param0 = call-&gt;tc_call.param0;
+		param1 = call-&gt;tc_call.param1;
+
+		call-&gt;tc_call.queue = NULL;
+
+		_internal_call_release(call);
+
+		<span class="enscript-comment">/*
+		 * Can only do wakeups for thread calls whose storage
+		 * we control.
+		 */</span>
+		<span class="enscript-keyword">if</span> ((call-&gt;tc_flags &amp; THREAD_CALL_ALLOC) != 0) {
+			canwait = TRUE;
+			call-&gt;tc_refs++;	<span class="enscript-comment">/* Delay free until we're done */</span>
+		} <span class="enscript-keyword">else</span>
+			canwait = FALSE;
+
+		enable_ints_and_unlock(s);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DEVELOPMENT</span> || <span class="enscript-variable-name">DEBUG</span>
+		KERNEL_DEBUG_CONSTANT(
+				MACHDBG_CODE(DBG_MACH_SCHED,MACH_CALLOUT) | DBG_FUNC_NONE,
+				VM_KERNEL_UNSLIDE(func), param0, param1, 0, 0);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DEVELOPMENT || DEBUG */</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+		DTRACE_TMR6(thread_callout__start, thread_call_func_t, func, <span class="enscript-type">int</span>, 0, <span class="enscript-type">int</span>, (call-&gt;ttd &gt;&gt; 32), (<span class="enscript-type">unsigned</span>) (call-&gt;ttd &amp; 0xFFFFFFFF), (call-&gt;tc_flags &amp; THREAD_CALL_DELAYED), call);
+#<span class="enscript-reference">endif</span>
+
+		(*func)(param0, param1);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DTRACE</span>
+		DTRACE_TMR6(thread_callout__end, thread_call_func_t, func, <span class="enscript-type">int</span>, 0, <span class="enscript-type">int</span>, (call-&gt;ttd &gt;&gt; 32), (<span class="enscript-type">unsigned</span>) (call-&gt;ttd &amp; 0xFFFFFFFF), (call-&gt;tc_flags &amp; THREAD_CALL_DELAYED), call);
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-keyword">if</span> (get_preemption_level() != 0) {
+			<span class="enscript-type">int</span> pl = get_preemption_level();
+			panic(<span class="enscript-string">&quot;thread_call_thread: preemption_level %d, last callout %p(%p, %p)&quot;</span>,
+					pl, (<span class="enscript-type">void</span> *)VM_KERNEL_UNSLIDE(func), param0, param1);
+		}
+
+		s = disable_ints_and_lock();
+		
+		<span class="enscript-keyword">if</span> (canwait) {
+			<span class="enscript-comment">/* Frees if so desired */</span>
+			thread_call_finish(call, &amp;s);
+		}
+	}
+
+	thread_sched_call(self, NULL);
+	group-&gt;active_count--;
+	
+	<span class="enscript-keyword">if</span> (self-&gt;callout_woken_from_icontext &amp;&amp; !self-&gt;callout_woke_thread) {
+		ledger_credit(self-&gt;t_ledger, task_ledgers.interrupt_wakeups, 1);
+		<span class="enscript-keyword">if</span> (self-&gt;callout_woken_from_platform_idle)
+		        ledger_credit(self-&gt;t_ledger, task_ledgers.platform_idle_wakeups, 1);
+	}
+	
+	self-&gt;callout_woken_from_icontext = FALSE;
+	self-&gt;callout_woken_from_platform_idle = FALSE;
+	self-&gt;callout_woke_thread = FALSE;
+
+	<span class="enscript-keyword">if</span> (group_isparallel(group)) {
+		<span class="enscript-comment">/*
+		 * For new style of thread group, thread always blocks. 
+		 * If we have more than the target number of threads,
+		 * and this is the first to block, and it isn't active 
+		 * already, set a timer for deallocating a thread if we 
+		 * continue to have a surplus.
+		 */</span>
+		group-&gt;idle_count++;
+
+		<span class="enscript-keyword">if</span> (group-&gt;idle_count == 1) {
+			group-&gt;idle_timestamp = mach_absolute_time();
+		}   
+
+		<span class="enscript-keyword">if</span> (((group-&gt;flags &amp; TCG_DEALLOC_ACTIVE) == 0) &amp;&amp;
+				((group-&gt;active_count + group-&gt;idle_count) &gt; group-&gt;target_thread_count)) {
+			group-&gt;flags |= TCG_DEALLOC_ACTIVE;
+			thread_call_start_deallocate_timer(group);
+		}   
+
+		<span class="enscript-comment">/* Wait for more work (or termination) */</span>
+		wres = waitq_assert_wait64(&amp;group-&gt;idle_waitq, NO_EVENT64, THREAD_INTERRUPTIBLE, 0);
+		<span class="enscript-keyword">if</span> (wres != THREAD_WAITING) {
+			panic(<span class="enscript-string">&quot;kcall worker unable to assert wait?&quot;</span>);
+		}   
+
+		enable_ints_and_unlock(s);
+
+		thread_block_parameter((thread_continue_t)thread_call_thread, group);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (group-&gt;idle_count &lt; group-&gt;target_thread_count) {
+			group-&gt;idle_count++;
+
+			waitq_assert_wait64(&amp;group-&gt;idle_waitq, NO_EVENT64, THREAD_UNINT, 0); <span class="enscript-comment">/* Interrupted means to exit */</span>
+
+			enable_ints_and_unlock(s);
+
+			thread_block_parameter((thread_continue_t)thread_call_thread, group);
+			<span class="enscript-comment">/* NOTREACHED */</span>
+		}
+	}
+
+	enable_ints_and_unlock(s);
+
+	thread_terminate(self);
+	<span class="enscript-comment">/* NOTREACHED */</span>
+}
+
+<span class="enscript-comment">/*
+ *	thread_call_daemon: walk list of groups, allocating
+ *	threads if appropriate (as determined by 
+ *	thread_call_group_should_add_thread()).  
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_daemon_continue</span>(__unused <span class="enscript-type">void</span> *arg)
+{
+	<span class="enscript-type">int</span>		i;
+	kern_return_t	kr;
+	thread_call_group_t group;
+	spl_t	s;
+
+	s = disable_ints_and_lock();
+
+	<span class="enscript-comment">/* Starting at zero happens to be high-priority first. */</span>
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; THREAD_CALL_GROUP_COUNT; i++) {
+		group = &amp;thread_call_groups[i];
+		<span class="enscript-keyword">while</span> (thread_call_group_should_add_thread(group)) {
+			group-&gt;active_count++;
+
+			enable_ints_and_unlock(s);
+
+			kr = thread_call_thread_create(group);
+			<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+				<span class="enscript-comment">/*
+				 * On failure, just pause for a moment and give up. 
+				 * We can try again later.
+				 */</span>
+				delay(10000); <span class="enscript-comment">/* 10 ms */</span>
+				s = disable_ints_and_lock();
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+			}
+
+			s = disable_ints_and_lock();
+		}
+	}
+
+<span class="enscript-reference">out</span>:
+	thread_call_daemon_awake = FALSE;
+	waitq_assert_wait64(&amp;daemon_waitq, NO_EVENT64, THREAD_UNINT, 0);
+
+	enable_ints_and_unlock(s);
+
+	thread_block_parameter((thread_continue_t)thread_call_daemon_continue, NULL);
+	<span class="enscript-comment">/* NOTREACHED */</span>
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_daemon</span>(
+		__unused <span class="enscript-type">void</span>	 *arg)
+{
+	thread_t	self = current_thread();
+
+	self-&gt;options |= TH_OPT_VMPRIV;
+	vm_page_free_reserve(2);	<span class="enscript-comment">/* XXX */</span>
+
+	thread_call_daemon_continue(NULL);
+	<span class="enscript-comment">/* NOTREACHED */</span>
+}
+
+<span class="enscript-comment">/*
+ * Schedule timer to deallocate a worker thread if we have a surplus 
+ * of threads (in excess of the group's target) and at least one thread
+ * is idle the whole time.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_start_deallocate_timer</span>(
+		thread_call_group_t group)
+{
+        uint64_t deadline;
+        boolean_t onqueue;
+
+	assert(group-&gt;idle_count &gt; 0);
+
+        group-&gt;flags |= TCG_DEALLOC_ACTIVE;
+        deadline = group-&gt;idle_timestamp + thread_call_dealloc_interval_abs;
+        onqueue = timer_call_enter(&amp;group-&gt;dealloc_timer, deadline, 0); 
+
+        <span class="enscript-keyword">if</span> (onqueue) {
+                panic(<span class="enscript-string">&quot;Deallocate timer already active?&quot;</span>);
+        }   
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_delayed_timer</span>(
+		timer_call_param_t		p0,
+		__unused timer_call_param_t	p1
+)
+{
+	thread_call_t			call;
+	thread_call_group_t		group = p0;
+	uint64_t			timestamp;
+
+	thread_call_lock_spin();
+
+	timestamp = mach_absolute_time();
+
+	call = TC(queue_first(&amp;group-&gt;delayed_queue));
+
+	<span class="enscript-keyword">while</span> (!queue_end(&amp;group-&gt;delayed_queue, qe(call))) {
+		<span class="enscript-keyword">if</span> (call-&gt;tc_soft_deadline &lt;= timestamp) {
+			<span class="enscript-keyword">if</span> ((call-&gt;tc_flags &amp; THREAD_CALL_RATELIMITED) &amp;&amp;
+			    (CE(call)-&gt;deadline &gt; timestamp) &amp;&amp;
+			    (ml_timer_forced_evaluation() == FALSE)) {
+				<span class="enscript-keyword">break</span>;
+			}
+			_pending_call_enqueue(call, group);
+		} <span class="enscript-comment">/* TODO, identify differentially coalesced timers */</span>
+		<span class="enscript-keyword">else</span>
+			<span class="enscript-keyword">break</span>;
+
+		call = TC(queue_first(&amp;group-&gt;delayed_queue));
+	}
+
+	<span class="enscript-keyword">if</span> (!queue_end(&amp;group-&gt;delayed_queue, qe(call)))
+		_set_delayed_call_timer(call, group);
+
+	thread_call_unlock();
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_delayed_timer_rescan</span>(timer_call_param_t		p0, __unused timer_call_param_t	p1)
+{
+	thread_call_t			call;
+	thread_call_group_t		group = p0;
+	uint64_t				timestamp;
+	boolean_t		istate;
+
+	istate = ml_set_interrupts_enabled(FALSE);
+	thread_call_lock_spin();
+
+	assert(ml_timer_forced_evaluation() == TRUE);
+	timestamp = mach_absolute_time();
+
+	call = TC(queue_first(&amp;group-&gt;delayed_queue));
+
+	<span class="enscript-keyword">while</span> (!queue_end(&amp;group-&gt;delayed_queue, qe(call))) {
+		<span class="enscript-keyword">if</span> (call-&gt;tc_soft_deadline &lt;= timestamp) {
+			_pending_call_enqueue(call, group);
+			call = TC(queue_first(&amp;group-&gt;delayed_queue));
+		}
+		<span class="enscript-keyword">else</span> {
+			uint64_t skew = call-&gt;tc_call.deadline - call-&gt;tc_soft_deadline;
+			assert (call-&gt;tc_call.deadline &gt;= call-&gt;tc_soft_deadline);
+			<span class="enscript-comment">/* On a latency quality-of-service level change,
+			 * re-sort potentially rate-limited callout. The platform
+			 * layer determines which timers require this.
+			 */</span>
+			<span class="enscript-keyword">if</span> (timer_resort_threshold(skew)) {
+				_call_dequeue(call, group);
+				_delayed_call_enqueue(call, group, call-&gt;tc_soft_deadline);
+			}
+			call = TC(queue_next(qe(call)));
+		}
+	}
+
+	<span class="enscript-keyword">if</span> (!queue_empty(&amp;group-&gt;delayed_queue))
+ 		_set_delayed_call_timer(TC(queue_first(&amp;group-&gt;delayed_queue)), group);
+	thread_call_unlock();
+	ml_set_interrupts_enabled(istate);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_delayed_timer_rescan_all</span>(<span class="enscript-type">void</span>) {
+	thread_call_delayed_timer_rescan((timer_call_param_t)&amp;thread_call_groups[THREAD_CALL_PRIORITY_LOW], NULL);
+	thread_call_delayed_timer_rescan((timer_call_param_t)&amp;thread_call_groups[THREAD_CALL_PRIORITY_USER], NULL);
+	thread_call_delayed_timer_rescan((timer_call_param_t)&amp;thread_call_groups[THREAD_CALL_PRIORITY_KERNEL], NULL);
+	thread_call_delayed_timer_rescan((timer_call_param_t)&amp;thread_call_groups[THREAD_CALL_PRIORITY_HIGH], NULL);
+}
+
+<span class="enscript-comment">/*
+ * Timer callback to tell a thread to terminate if
+ * we have an excess of threads and at least one has been
+ * idle for a long time.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_dealloc_timer</span>(
+		timer_call_param_t 		p0,
+		__unused timer_call_param_t 	p1)
+{
+	thread_call_group_t group = (thread_call_group_t)p0;
+	uint64_t now;
+	kern_return_t res;
+	boolean_t terminated = FALSE;
+	
+	thread_call_lock_spin();
+
+	now = mach_absolute_time();
+	<span class="enscript-keyword">if</span> (group-&gt;idle_count &gt; 0) {
+		<span class="enscript-keyword">if</span> (now &gt; group-&gt;idle_timestamp + thread_call_dealloc_interval_abs) {
+			terminated = TRUE;
+			group-&gt;idle_count--;
+			res = waitq_wakeup64_one(&amp;group-&gt;idle_waitq, NO_EVENT64,
+						 THREAD_INTERRUPTED, WAITQ_ALL_PRIORITIES);
+			<span class="enscript-keyword">if</span> (res != KERN_SUCCESS) {
+				panic(<span class="enscript-string">&quot;Unable to wake up idle thread for termination?&quot;</span>);
+			}
+		}
+
+	}
+
+	<span class="enscript-comment">/*
+	 * If we still have an excess of threads, schedule another
+	 * invocation of this function.
+	 */</span>
+	<span class="enscript-keyword">if</span> (group-&gt;idle_count &gt; 0 &amp;&amp; (group-&gt;idle_count + group-&gt;active_count &gt; group-&gt;target_thread_count)) {
+		<span class="enscript-comment">/*
+		 * If we killed someone just now, push out the
+		 * next deadline.
+		 */</span>
+		<span class="enscript-keyword">if</span> (terminated) {
+			group-&gt;idle_timestamp = now;
+		}
+
+		thread_call_start_deallocate_timer(group);
+	} <span class="enscript-keyword">else</span> {
+		group-&gt;flags &amp;= ~TCG_DEALLOC_ACTIVE;
+	}
+
+	thread_call_unlock();
+}
+
+<span class="enscript-comment">/*
+ * Wait for all requested invocations of a thread call prior to now
+ * to finish.  Can only be invoked on thread calls whose storage we manage.  
+ * Just waits for the finish count to catch up to the submit count we find
+ * at the beginning of our wait.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">thread_call_wait_locked</span>(thread_call_t call)
+{
+	uint64_t submit_count;
+	wait_result_t res;
+
+	assert(call-&gt;tc_flags &amp; THREAD_CALL_ALLOC);
+
+	submit_count = call-&gt;tc_submit_count;
+
+	<span class="enscript-keyword">while</span> (call-&gt;tc_finish_count &lt; submit_count) {
+		call-&gt;tc_flags |= THREAD_CALL_WAIT;
+
+		res = assert_wait(call, THREAD_UNINT);
+		<span class="enscript-keyword">if</span> (res != THREAD_WAITING) {
+			panic(<span class="enscript-string">&quot;Unable to assert wait?&quot;</span>);
+		}
+
+		thread_call_unlock();
+		(<span class="enscript-type">void</span>) spllo();
+
+		res = thread_block(NULL);
+		<span class="enscript-keyword">if</span> (res != THREAD_AWAKENED) {
+			panic(<span class="enscript-string">&quot;Awoken with %d?&quot;</span>, res);
+		}
+	
+		(<span class="enscript-type">void</span>) splsched();
+		thread_call_lock_spin();
+	}
+}
+
+<span class="enscript-comment">/*
+ * Determine whether a thread call is either on a queue or
+ * currently being executed.
+ */</span>
+boolean_t
+<span class="enscript-function-name">thread_call_isactive</span>(thread_call_t call) 
+{
+	boolean_t active;
+	spl_t	s;
+
+	s = disable_ints_and_lock();
+	active = (call-&gt;tc_submit_count &gt; call-&gt;tc_finish_count);
+	enable_ints_and_unlock(s);
+
+	<span class="enscript-keyword">return</span> active;
+}
+</pre>
+<hr />
+</body></html>

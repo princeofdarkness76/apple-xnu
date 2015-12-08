@@ -1,0 +1,813 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>ip_divert.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">ip_divert.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ * Copyright (c) 1982, 1986, 1988, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/netinet/ip_divert.c,v 1.98 2004/08/17 22:05:54 andre Exp $
+ */</span>
+
+#<span class="enscript-reference">if</span> !<span class="enscript-variable-name">INET</span>
+#<span class="enscript-reference">error</span> <span class="enscript-string">&quot;IPDIVERT requires INET.&quot;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socket.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/endian.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/kpi_protocol.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_fw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/ip_divert.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Divert sockets
+ */</span>
+
+<span class="enscript-comment">/*
+ * Allocate enough space to hold a full IP packet
+ */</span>
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DIVSNDQ</span>		(65536 + 100)
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">DIVRCVQ</span>		(65536 + 100)
+
+<span class="enscript-comment">/*
+ * Divert sockets work in conjunction with ipfw, see the divert(4)
+ * manpage for features.
+ * Internally, packets selected by ipfw in ip_input() or ip_output(),
+ * and never diverted before, are passed to the input queue of the
+ * divert socket with a given 'divert_port' number (as specified in
+ * the matching ipfw rule), and they are tagged with a 16 bit cookie
+ * (representing the rule number of the matching ipfw rule), which
+ * is passed to process reading from the socket.
+ *
+ * Packets written to the divert socket are again tagged with a cookie
+ * (usually the same as above) and a destination address.
+ * If the destination address is INADDR_ANY then the packet is
+ * treated as outgoing and sent to ip_output(), otherwise it is
+ * treated as incoming and sent to ip_input().
+ * In both cases, the packet is tagged with the cookie.
+ *
+ * On reinjection, processing in ip_input() and ip_output()
+ * will be exactly the same as for the original packet, except that
+ * ipfw processing will start at the rule number after the one
+ * written in the cookie (so, tagging a packet with a cookie of 0
+ * will cause it to be effectively considered as a standard packet).
+ */</span>
+
+<span class="enscript-comment">/* Internal variables */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> inpcbhead divcb;
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> inpcbinfo divcbinfo;
+
+<span class="enscript-type">static</span> u_int32_t	div_sendspace = DIVSNDQ;	<span class="enscript-comment">/* XXX sysctl ? */</span>
+<span class="enscript-type">static</span> u_int32_t	div_recvspace = DIVRCVQ;	<span class="enscript-comment">/* XXX sysctl ? */</span>
+
+<span class="enscript-comment">/* Optimization: have this preinitialized */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">struct</span> sockaddr_in divsrc = { <span class="enscript-keyword">sizeof</span>(divsrc), AF_INET, 0, { 0 }, { 0,0,0,0,0,0,0,0 } };
+
+<span class="enscript-comment">/* Internal functions */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">div_output</span>(<span class="enscript-type">struct</span> socket *so,
+		<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> sockaddr_in *addr, <span class="enscript-type">struct</span> mbuf *control);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">load_ipfw</span>(<span class="enscript-type">void</span>);
+<span class="enscript-comment">/*
+ * Initialize divert connection block queue.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">div_init</span>(<span class="enscript-type">struct</span> protosw *pp, <span class="enscript-type">struct</span> domain *dp)
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">dp</span>)
+	<span class="enscript-type">static</span> <span class="enscript-type">int</span> div_initialized = 0;
+	<span class="enscript-type">struct</span> inpcbinfo *pcbinfo;
+
+	VERIFY((pp-&gt;pr_flags &amp; (PR_INITIALIZED|PR_ATTACHED)) == PR_ATTACHED);
+
+	<span class="enscript-keyword">if</span> (div_initialized)
+		<span class="enscript-keyword">return</span>;
+	div_initialized = 1;
+
+	LIST_INIT(&amp;divcb);
+	divcbinfo.ipi_listhead = &amp;divcb;
+	<span class="enscript-comment">/*
+	 * XXX We don't use the hash list for divert IP, but it's easier
+	 * to allocate a one entry hash list than it is to check all
+	 * over the place for ipi_hashbase == NULL.
+	 */</span>
+	divcbinfo.ipi_hashbase = hashinit(1, M_PCB, &amp;divcbinfo.ipi_hashmask);
+	divcbinfo.ipi_porthashbase = hashinit(1, M_PCB, &amp;divcbinfo.ipi_porthashmask);
+	divcbinfo.ipi_zone = zinit(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> inpcb),(512 * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> inpcb)),
+				   4096, <span class="enscript-string">&quot;divzone&quot;</span>);
+	pcbinfo = &amp;divcbinfo;
+        <span class="enscript-comment">/*
+	 * allocate lock group attribute and group for udp pcb mutexes
+	 */</span>
+	pcbinfo-&gt;ipi_lock_grp_attr = lck_grp_attr_alloc_init();
+
+	pcbinfo-&gt;ipi_lock_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;divcb&quot;</span>, pcbinfo-&gt;ipi_lock_grp_attr);
+
+	<span class="enscript-comment">/*
+	 * allocate the lock attribute for divert pcb mutexes
+	 */</span>
+	pcbinfo-&gt;ipi_lock_attr = lck_attr_alloc_init();
+
+	<span class="enscript-keyword">if</span> ((pcbinfo-&gt;ipi_lock = lck_rw_alloc_init(pcbinfo-&gt;ipi_lock_grp,
+	    pcbinfo-&gt;ipi_lock_attr)) == NULL) {
+		panic(<span class="enscript-string">&quot;%s: unable to allocate PCB lock\n&quot;</span>, __func__);
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	in_pcbinfo_attach(&amp;divcbinfo);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">IPFIREWALL</span>
+	<span class="enscript-keyword">if</span> (!IPFW_LOADED) {
+		load_ipfw();
+	}
+#<span class="enscript-reference">endif</span>
+}
+
+<span class="enscript-comment">/*
+ * IPPROTO_DIVERT is not a real IP protocol; don't allow any packets
+ * with that protocol number to enter the system from the outside.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">div_input</span>(<span class="enscript-type">struct</span> mbuf *m, __unused <span class="enscript-type">int</span> off)
+{
+	OSAddAtomic(1, &amp;ipstat.ips_noproto);
+	m_freem(m);
+}
+
+<span class="enscript-comment">/*
+ * Divert a packet by passing it up to the divert socket at port 'port'.
+ *
+ * Setup generic address and protocol structures for div_input routine,
+ * then pass them along with mbuf chain.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">divert_packet</span>(<span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">int</span> incoming, <span class="enscript-type">int</span> port, <span class="enscript-type">int</span> rule)
+{
+	<span class="enscript-type">struct</span> ip *ip;
+	<span class="enscript-type">struct</span> inpcb *inp;
+	<span class="enscript-type">struct</span> socket *sa;
+	u_int16_t nport;
+
+	<span class="enscript-comment">/* Sanity check */</span>
+	KASSERT(port != 0, (<span class="enscript-string">&quot;%s: port=0&quot;</span>, __FUNCTION__));
+
+	divsrc.sin_port = rule;		<span class="enscript-comment">/* record matching rule */</span>
+
+	<span class="enscript-comment">/* Assure header */</span>
+	<span class="enscript-keyword">if</span> (m-&gt;m_len &lt; <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip) &amp;&amp;
+	    (m = m_pullup(m, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> ip))) == 0) {
+		<span class="enscript-keyword">return</span>;
+	}
+	ip = mtod(m, <span class="enscript-type">struct</span> ip *);
+
+	<span class="enscript-comment">/*
+	 * Record receive interface address, if any.
+	 * But only for incoming packets.
+	 */</span>
+	divsrc.sin_addr.s_addr = 0;
+	<span class="enscript-keyword">if</span> (incoming) {
+		<span class="enscript-type">struct</span> ifaddr *ifa;
+
+		<span class="enscript-comment">/* Sanity check */</span>
+		KASSERT((m-&gt;m_flags &amp; M_PKTHDR), (<span class="enscript-string">&quot;%s: !PKTHDR&quot;</span>, __FUNCTION__));
+
+		<span class="enscript-comment">/* Find IP address for receive interface */</span>
+		ifnet_lock_shared(m-&gt;m_pkthdr.rcvif);
+		TAILQ_FOREACH(ifa, &amp;m-&gt;m_pkthdr.rcvif-&gt;if_addrhead, ifa_link) {
+			IFA_LOCK(ifa);
+			<span class="enscript-keyword">if</span> (ifa-&gt;ifa_addr-&gt;sa_family != AF_INET) {
+				IFA_UNLOCK(ifa);
+				<span class="enscript-keyword">continue</span>;
+			}
+			divsrc.sin_addr =
+			    ((<span class="enscript-type">struct</span> sockaddr_in *)(<span class="enscript-type">void</span> *) ifa-&gt;ifa_addr)-&gt;sin_addr;
+			IFA_UNLOCK(ifa);
+			<span class="enscript-keyword">break</span>;
+		}
+		ifnet_lock_done(m-&gt;m_pkthdr.rcvif);
+	}
+	<span class="enscript-comment">/*
+	 * Record the incoming interface name whenever we have one.
+	 */</span>
+	bzero(&amp;divsrc.sin_zero, <span class="enscript-keyword">sizeof</span>(divsrc.sin_zero));
+	<span class="enscript-keyword">if</span> (m-&gt;m_pkthdr.rcvif) {
+		<span class="enscript-comment">/*
+		 * Hide the actual interface name in there in the 
+		 * sin_zero array. XXX This needs to be moved to a
+		 * different sockaddr type for divert, e.g.
+		 * sockaddr_div with multiple fields like 
+		 * sockaddr_dl. Presently we have only 7 bytes
+		 * but that will do for now as most interfaces
+		 * are 4 or less + 2 or less bytes for unit.
+		 * There is probably a faster way of doing this,
+		 * possibly taking it from the sockaddr_dl on the iface.
+		 * This solves the problem of a P2P link and a LAN interface
+		 * having the same address, which can result in the wrong
+		 * interface being assigned to the packet when fed back
+		 * into the divert socket. Theoretically if the daemon saves
+		 * and re-uses the sockaddr_in as suggested in the man pages,
+		 * this iface name will come along for the ride.
+		 * (see div_output for the other half of this.)
+		 */</span> 
+		snprintf(divsrc.sin_zero, <span class="enscript-keyword">sizeof</span>(divsrc.sin_zero),
+			<span class="enscript-string">&quot;%s&quot;</span>, if_name(m-&gt;m_pkthdr.rcvif));
+	}
+
+	<span class="enscript-comment">/* Put packet on socket queue, if any */</span>
+	sa = NULL;
+	nport = htons((u_int16_t)port);
+	lck_rw_lock_shared(divcbinfo.ipi_lock); 	
+	LIST_FOREACH(inp, &amp;divcb, inp_list) {
+		<span class="enscript-keyword">if</span> (inp-&gt;inp_lport == nport)
+			sa = inp-&gt;inp_socket;
+	}
+	<span class="enscript-keyword">if</span> (sa) {
+		<span class="enscript-type">int</span> error = 0;
+		
+		socket_lock(sa, 1);
+		<span class="enscript-keyword">if</span> (sbappendaddr(&amp;sa-&gt;so_rcv, (<span class="enscript-type">struct</span> sockaddr *)&amp;divsrc,
+				m, (<span class="enscript-type">struct</span> mbuf *)0, &amp;error) != 0)
+			sorwakeup(sa);
+		socket_unlock(sa, 1);
+	} <span class="enscript-keyword">else</span> {
+		m_freem(m);
+		OSAddAtomic(1, &amp;ipstat.ips_noproto);
+		OSAddAtomic(-1, &amp;ipstat.ips_delivered);
+        }
+	lck_rw_done(divcbinfo.ipi_lock); 	
+}
+
+<span class="enscript-comment">/*
+ * Deliver packet back into the IP processing machinery.
+ *
+ * If no address specified, or address is 0.0.0.0, send to ip_output();
+ * otherwise, send to ip_input() and mark as having been received on
+ * the interface with that address.
+ * ###LOCK  called in inet_proto mutex when from div_send. 
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">div_output</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> sockaddr_in *sin,
+	   <span class="enscript-type">struct</span> mbuf *control)
+{
+	<span class="enscript-type">struct</span> inpcb *<span class="enscript-type">const</span> inp = sotoinpcb(so);
+	<span class="enscript-type">struct</span> ip *<span class="enscript-type">const</span> ip = mtod(m, <span class="enscript-type">struct</span> ip *);
+	<span class="enscript-type">int</span> error = 0;
+	mbuf_svc_class_t msc = MBUF_SC_UNSPEC;
+
+	<span class="enscript-keyword">if</span> (control != NULL) {
+		msc = mbuf_service_class_from_control(control);
+
+		m_freem(control);		<span class="enscript-comment">/* XXX */</span>
+		control = NULL;
+	}
+	<span class="enscript-comment">/* Loopback avoidance and state recovery */</span>
+	<span class="enscript-keyword">if</span> (sin) {
+		<span class="enscript-type">struct</span> m_tag *mtag;
+		<span class="enscript-type">struct</span> divert_tag *dt;
+		<span class="enscript-type">int</span>	len = 0;
+		<span class="enscript-type">char</span>	*c = sin-&gt;sin_zero;
+
+		mtag = m_tag_create(KERNEL_MODULE_TAG_ID, KERNEL_TAG_TYPE_DIVERT,
+				<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> divert_tag), M_NOWAIT, m);
+		<span class="enscript-keyword">if</span> (mtag == NULL) {
+			error = ENOBUFS;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">cantsend</span>;
+		}
+		dt = (<span class="enscript-type">struct</span> divert_tag *)(mtag+1);
+		dt-&gt;info = 0;
+		dt-&gt;cookie = sin-&gt;sin_port;
+		m_tag_prepend(m, mtag);
+
+		<span class="enscript-comment">/*
+		 * Find receive interface with the given name or IP address.
+		 * The name is user supplied data so don't trust it's size or 
+		 * that it is zero terminated. The name has priority.
+		 * We are presently assuming that the sockaddr_in 
+		 * has not been replaced by a sockaddr_div, so we limit it
+		 * to 16 bytes in total. the name is stuffed (if it exists)
+		 * in the sin_zero[] field.
+		 */</span>
+		<span class="enscript-keyword">while</span> (*c++ &amp;&amp; (len++ &lt; <span class="enscript-keyword">sizeof</span>(sin-&gt;sin_zero)));
+		<span class="enscript-keyword">if</span> ((len &gt; 0) &amp;&amp; (len &lt; <span class="enscript-keyword">sizeof</span>(sin-&gt;sin_zero)))
+			m-&gt;m_pkthdr.rcvif = ifunit(sin-&gt;sin_zero);
+	}
+
+	<span class="enscript-comment">/* Reinject packet into the system as incoming or outgoing */</span>
+	<span class="enscript-keyword">if</span> (!sin || sin-&gt;sin_addr.s_addr == 0) {
+		<span class="enscript-type">struct</span> ip_out_args ipoa =
+		    { IFSCOPE_NONE, { 0 }, IPOAF_SELECT_SRCIF, 0 };
+		<span class="enscript-type">struct</span> route ro;
+		<span class="enscript-type">struct</span> ip_moptions *imo;
+
+		<span class="enscript-comment">/*
+		 * Don't allow both user specified and setsockopt options,
+		 * and don't allow packet length sizes that will crash
+		 */</span>
+		<span class="enscript-keyword">if</span> (((ip-&gt;ip_hl != (<span class="enscript-keyword">sizeof</span> (*ip) &gt;&gt; 2)) &amp;&amp; inp-&gt;inp_options) ||
+		     ((u_short)ntohs(ip-&gt;ip_len) &gt; m-&gt;m_pkthdr.len)) {
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">cantsend</span>;
+		}
+
+		<span class="enscript-comment">/* Convert fields to host order for ip_output() */</span>
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">BYTE_ORDER</span> != <span class="enscript-variable-name">BIG_ENDIAN</span>
+		NTOHS(ip-&gt;ip_len);
+		NTOHS(ip-&gt;ip_off);
+#<span class="enscript-reference">endif</span>
+
+		OSAddAtomic(1, &amp;ipstat.ips_rawout);
+		<span class="enscript-comment">/* Copy the cached route and take an extra reference */</span>
+		inp_route_copyout(inp, &amp;ro);
+
+		set_packet_service_class(m, so, msc, 0);
+
+		imo = inp-&gt;inp_moptions;
+		<span class="enscript-keyword">if</span> (imo != NULL)
+			IMO_ADDREF(imo);
+		socket_unlock(so, 0);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+		mac_mbuf_label_associate_inpcb(inp, m);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-comment">/* Send packet to output processing */</span>
+		error = ip_output(m, inp-&gt;inp_options, &amp;ro,
+			(so-&gt;so_options &amp; SO_DONTROUTE) |
+			IP_ALLOWBROADCAST | IP_RAWOUTPUT | IP_OUTARGS,
+			imo, &amp;ipoa);
+
+		socket_lock(so, 0);
+		<span class="enscript-keyword">if</span> (imo != NULL)
+			IMO_REMREF(imo);
+		<span class="enscript-comment">/* Synchronize cached PCB route */</span>
+		inp_route_copyin(inp, &amp;ro);
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span>	ifaddr *ifa;
+
+		<span class="enscript-comment">/* If no luck with the name above. check by IP address.  */</span>
+		<span class="enscript-keyword">if</span> (m-&gt;m_pkthdr.rcvif == NULL) {
+			<span class="enscript-type">struct</span> sockaddr_in _sin;
+			<span class="enscript-comment">/*
+			 * Make sure there are no distractions for
+			 * ifa_ifwithaddr; use sanitized version.
+			 */</span>
+			bzero(&amp;_sin, <span class="enscript-keyword">sizeof</span> (_sin));
+			_sin.sin_family = AF_INET;
+			_sin.sin_len = <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> sockaddr_in);
+			_sin.sin_addr.s_addr = sin-&gt;sin_addr.s_addr;
+			<span class="enscript-keyword">if</span> (!(ifa = ifa_ifwithaddr(SA(&amp;_sin)))) {
+				error = EADDRNOTAVAIL;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">cantsend</span>;
+			}
+			m-&gt;m_pkthdr.rcvif = ifa-&gt;ifa_ifp;
+			IFA_REMREF(ifa);
+		}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF_NET</span>
+		mac_mbuf_label_associate_socket(so, m);
+#<span class="enscript-reference">endif</span>
+		<span class="enscript-comment">/* Send packet to input processing */</span>
+		proto_inject(PF_INET, m);
+	}
+
+	<span class="enscript-keyword">return</span> error;
+
+<span class="enscript-reference">cantsend</span>:
+	m_freem(m);
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">div_attach</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> proto, <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">struct</span> inpcb *inp;
+	<span class="enscript-type">int</span> error;
+
+
+	inp  = sotoinpcb(so);
+	<span class="enscript-keyword">if</span> (inp)
+		panic(<span class="enscript-string">&quot;div_attach&quot;</span>);
+	<span class="enscript-keyword">if</span> ((error = proc_suser(p)) != 0)
+		<span class="enscript-keyword">return</span> error;
+
+	error = soreserve(so, div_sendspace, div_recvspace);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+	error = in_pcballoc(so, &amp;divcbinfo, p);
+	<span class="enscript-keyword">if</span> (error)
+		<span class="enscript-keyword">return</span> error;
+	inp = (<span class="enscript-type">struct</span> inpcb *)so-&gt;so_pcb;
+	inp-&gt;inp_ip_p = proto;
+	inp-&gt;inp_vflag |= INP_IPV4;
+	inp-&gt;inp_flags |= INP_HDRINCL;
+	<span class="enscript-comment">/* The socket is always &quot;connected&quot; because
+	   we always know &quot;where&quot; to send the packet */</span>
+	so-&gt;so_state |= SS_ISCONNECTED;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MORE_DICVLOCK_DEBUG</span>
+	printf(<span class="enscript-string">&quot;div_attach: so=0x%llx sopcb=0x%llx lock=0x%llx ref=%x\n&quot;</span>,
+	    (uint64_t)VM_KERNEL_ADDRPERM(so),
+	    (uint64_t)VM_KERNEL_ADDRPERM(so-&gt;so_pcb),
+	    (uint64_t)VM_KERNEL_ADDRPERM(&amp;(sotoinpcb(so)-&gt;inpcb_mtx)),
+	    so-&gt;so_usecount);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">div_detach</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-type">struct</span> inpcb *inp;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MORE_DICVLOCK_DEBUG</span>
+	printf(<span class="enscript-string">&quot;div_detach: so=0x%llx sopcb=0x%llx lock=0x%llx ref=%x\n&quot;</span>,
+	    (uint64_t)VM_KERNEL_ADDRPERM(so),
+	    (uint64_t)VM_KERNEL_ADDRPERM(so-&gt;so_pcb),
+	    (uint64_t)VM_KERNEL_ADDRPERM(&amp;(sotoinpcb(so)-&gt;inpcb_mtx)),
+	    so-&gt;so_usecount);
+#<span class="enscript-reference">endif</span>
+	inp = sotoinpcb(so);
+	<span class="enscript-keyword">if</span> (inp == 0)
+		panic(<span class="enscript-string">&quot;div_detach: so=%p null inp\n&quot;</span>, so);
+	in_pcbdetach(inp);
+	inp-&gt;inp_state = INPCB_STATE_DEAD;
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">div_abort</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	soisdisconnected(so);
+	<span class="enscript-keyword">return</span> div_detach(so);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">div_disconnect</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	<span class="enscript-keyword">if</span> ((so-&gt;so_state &amp; SS_ISCONNECTED) == 0)
+		<span class="enscript-keyword">return</span> ENOTCONN;
+	<span class="enscript-keyword">return</span> div_abort(so);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">div_bind</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> sockaddr *nam, <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-type">struct</span> inpcb *inp;
+	<span class="enscript-type">int</span> error;
+
+	inp = sotoinpcb(so);
+	<span class="enscript-comment">/* in_pcbbind assumes that the socket is a sockaddr_in
+	* and in_pcbbind requires a valid address. Since divert
+	* sockets don't we need to make sure the address is
+	* filled in properly.
+	* XXX -- divert should not be abusing in_pcbind
+	* and should probably have its own family.
+	*/</span>
+	<span class="enscript-keyword">if</span> (nam-&gt;sa_family != AF_INET) {
+		error = EAFNOSUPPORT;
+	} <span class="enscript-keyword">else</span> {
+               ((<span class="enscript-type">struct</span> sockaddr_in *)(<span class="enscript-type">void</span> *)nam)-&gt;sin_addr.s_addr = INADDR_ANY;
+		error = in_pcbbind(inp, nam, p);
+	}
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">div_shutdown</span>(<span class="enscript-type">struct</span> socket *so)
+{
+	socantsendmore(so);
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">div_send</span>(<span class="enscript-type">struct</span> socket *so, __unused <span class="enscript-type">int</span> flags, <span class="enscript-type">struct</span> mbuf *m, <span class="enscript-type">struct</span> sockaddr *nam,
+	 <span class="enscript-type">struct</span> mbuf *control, __unused <span class="enscript-type">struct</span> proc *p)
+{
+	<span class="enscript-comment">/* Packet must have a header (but that's about it) */</span>
+	<span class="enscript-keyword">if</span> (m-&gt;m_len &lt; <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ip) &amp;&amp;
+	    (m = m_pullup(m, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> ip))) == 0) {
+		OSAddAtomic(1, &amp;ipstat.ips_toosmall);
+		m_freem(m);
+		<span class="enscript-keyword">return</span> EINVAL;
+	}
+
+	<span class="enscript-comment">/* Send packet */</span>
+	<span class="enscript-keyword">return</span> div_output(so, m, SIN(nam), control);
+}
+
+#<span class="enscript-reference">if</span> 0
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+div_pcblist SYSCTL_HANDLER_ARGS
+{
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">unused</span>(<span class="enscript-variable-name">oidp</span>, <span class="enscript-variable-name">arg1</span>, <span class="enscript-variable-name">arg2</span>)
+	<span class="enscript-type">int</span> error, i, n;
+	<span class="enscript-type">struct</span> inpcb *inp, **inp_list;
+	inp_gen_t gencnt;
+	<span class="enscript-type">struct</span> xinpgen xig;
+
+	<span class="enscript-comment">/*
+	 * The process of preparing the TCB list is too time-consuming and
+	 * resource-intensive to repeat twice on every request.
+	 */</span>
+	lck_rw_lock_exclusive(divcbinfo.ipi_lock);
+	<span class="enscript-keyword">if</span> (req-&gt;oldptr == USER_ADDR_NULL) {
+		n = divcbinfo.ipi_count;
+		req-&gt;oldidx = 2 * (<span class="enscript-keyword">sizeof</span> xig)
+			+ (n + n/8) * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> xinpcb);
+		lck_rw_done(divcbinfo.ipi_lock);
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">if</span> (req-&gt;newptr != USER_ADDR_NULL) {
+		lck_rw_done(divcbinfo.ipi_lock);
+		<span class="enscript-keyword">return</span> EPERM;
+	}
+
+	<span class="enscript-comment">/*
+	 * OK, now we're committed to doing something.
+	 */</span>
+	gencnt = divcbinfo.ipi_gencnt;
+	n = divcbinfo.ipi_count;
+
+	bzero(&amp;xig, <span class="enscript-keyword">sizeof</span>(xig));
+	xig.xig_len = <span class="enscript-keyword">sizeof</span> xig;
+	xig.xig_count = n;
+	xig.xig_gen = gencnt;
+	xig.xig_sogen = so_gencnt;
+	error = SYSCTL_OUT(req, &amp;xig, <span class="enscript-keyword">sizeof</span> xig);
+	<span class="enscript-keyword">if</span> (error) {
+		lck_rw_done(divcbinfo.ipi_lock);
+		<span class="enscript-keyword">return</span> error;
+	}
+
+	inp_list = _MALLOC(n * <span class="enscript-keyword">sizeof</span> *inp_list, M_TEMP, M_WAITOK);
+	<span class="enscript-keyword">if</span> (inp_list == 0) {
+		lck_rw_done(divcbinfo.ipi_lock);
+		<span class="enscript-keyword">return</span> ENOMEM;
+	}
+	
+	<span class="enscript-keyword">for</span> (inp = LIST_FIRST(divcbinfo.ipi_listhead), i = 0; inp &amp;&amp; i &lt; n;
+	     inp = LIST_NEXT(inp, inp_list)) {
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">__APPLE__</span>
+		<span class="enscript-keyword">if</span> (inp-&gt;inp_gencnt &lt;= gencnt &amp;&amp; inp-&gt;inp_state != INPCB_STATE_DEAD)
+#<span class="enscript-reference">else</span>
+		<span class="enscript-keyword">if</span> (inp-&gt;inp_gencnt &lt;= gencnt &amp;&amp; !prison_xinpcb(req-&gt;p, inp))
+#<span class="enscript-reference">endif</span>
+			inp_list[i++] = inp;
+	}
+	n = i;
+
+	error = 0;
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; n; i++) {
+		inp = inp_list[i];
+		<span class="enscript-keyword">if</span> (inp-&gt;inp_gencnt &lt;= gencnt &amp;&amp; inp-&gt;inp_state != INPCB_STATE_DEAD) {
+			<span class="enscript-type">struct</span> xinpcb xi;
+
+			bzero(&amp;xi, <span class="enscript-keyword">sizeof</span>(xi));
+			xi.xi_len = <span class="enscript-keyword">sizeof</span> xi;
+			<span class="enscript-comment">/* XXX should avoid extra copy */</span>
+			inpcb_to_compat(inp, &amp;xi.xi_inp);
+			<span class="enscript-keyword">if</span> (inp-&gt;inp_socket)
+				sotoxsocket(inp-&gt;inp_socket, &amp;xi.xi_socket);
+			error = SYSCTL_OUT(req, &amp;xi, <span class="enscript-keyword">sizeof</span> xi);
+		}
+	}
+	<span class="enscript-keyword">if</span> (!error) {
+		<span class="enscript-comment">/*
+		 * Give the user an updated idea of our state.
+		 * If the generation differs from what we told
+		 * her before, she knows that something happened
+		 * while we were processing this request, and it
+		 * might be necessary to retry.
+		 */</span>
+		bzero(&amp;xig, <span class="enscript-keyword">sizeof</span>(xig));
+		xig.xig_len = <span class="enscript-keyword">sizeof</span> xig;
+		xig.xig_gen = divcbinfo.ipi_gencnt;
+		xig.xig_sogen = so_gencnt;
+		xig.xig_count = divcbinfo.ipi_count;
+		error = SYSCTL_OUT(req, &amp;xig, <span class="enscript-keyword">sizeof</span> xig);
+	}
+	FREE(inp_list, M_TEMP);
+	lck_rw_done(divcbinfo.ipi_lock);
+	<span class="enscript-keyword">return</span> error;
+}
+#<span class="enscript-reference">endif</span>
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">div_lock</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> refcount, <span class="enscript-type">void</span> *lr)
+{
+	<span class="enscript-type">void</span> *lr_saved;
+
+	<span class="enscript-keyword">if</span> (lr == NULL)
+		lr_saved = __builtin_return_address(0);
+	<span class="enscript-keyword">else</span>
+		lr_saved = lr;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MORE_DICVLOCK_DEBUG</span>
+	printf(<span class="enscript-string">&quot;div_lock: so=0x%llx sopcb=0x%llx lock=0x%llx ref=%x &quot;</span>
+	    <span class="enscript-string">&quot;lr=0x%llx\n&quot;</span>, (uint64_t)VM_KERNEL_ADDRPERM(so),
+	    (uint64_t)VM_KERNEL_ADDRPERM(so-&gt;so_pcb), so-&gt;so_pcb ?
+	    (uint64_t)VM_KERNEL_ADDRPERM(&amp;(sotoinpcb(so)-&gt;inpcb_mtx)) : NULL,
+	    so-&gt;so_usecount, (uint64_t)VM_KERNEL_ADDRPERM(lr_saved));
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (so-&gt;so_pcb) {
+		lck_mtx_lock(&amp;((<span class="enscript-type">struct</span> inpcb *)so-&gt;so_pcb)-&gt;inpcb_mtx);
+	} <span class="enscript-keyword">else</span>  {
+		panic(<span class="enscript-string">&quot;div_lock: so=%p NO PCB! lr=%p lrh= lrh= %s\n&quot;</span>, 
+		    so, lr_saved, solockhistory_nr(so));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_usecount &lt; 0) {
+		panic(<span class="enscript-string">&quot;div_lock: so=%p so_pcb=%p lr=%p ref=%x lrh= %s\n&quot;</span>,
+		    so, so-&gt;so_pcb, lr_saved, so-&gt;so_usecount,
+		    solockhistory_nr(so));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+
+	<span class="enscript-keyword">if</span> (refcount)
+		so-&gt;so_usecount++;
+	so-&gt;lock_lr[so-&gt;next_lock_lr] = lr_saved;
+	so-&gt;next_lock_lr = (so-&gt;next_lock_lr+1) % SO_LCKDBG_MAX;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+__private_extern__ <span class="enscript-type">int</span>
+<span class="enscript-function-name">div_unlock</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">int</span> refcount, <span class="enscript-type">void</span> *lr)
+{
+	<span class="enscript-type">void</span> *lr_saved;
+	lck_mtx_t * mutex_held;
+	<span class="enscript-type">struct</span> inpcb *inp = sotoinpcb(so);
+
+	<span class="enscript-keyword">if</span> (lr == NULL)
+		lr_saved = __builtin_return_address(0);
+	<span class="enscript-keyword">else</span>
+		lr_saved = lr;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">MORE_DICVLOCK_DEBUG</span>
+	printf(<span class="enscript-string">&quot;div_unlock: so=0x%llx sopcb=0x%llx lock=0x%llx ref=%x &quot;</span>
+	    <span class="enscript-string">&quot;lr=0x%llx\n&quot;</span>, (uint64_t)VM_KERNEL_ADDRPERM(so),
+	    (uint64_t)VM_KERNEL_ADDRPERM(so-&gt;so_pcb), so-&gt;so_pcb ?
+	    (uint64_t)VM_KERNEL_ADDRPERM(&amp;(sotoinpcb(so)-&gt;inpcb_mtx)) : NULL,
+	    so-&gt;so_usecount, lr_saved);
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (refcount)
+		so-&gt;so_usecount--;
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_usecount &lt; 0) {
+		panic(<span class="enscript-string">&quot;div_unlock: so=%p usecount=%x lrh= %s\n&quot;</span>, 
+		    so, so-&gt;so_usecount, solockhistory_nr(so));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	<span class="enscript-keyword">if</span> (so-&gt;so_pcb == NULL) {
+		panic(<span class="enscript-string">&quot;div_unlock: so=%p NO PCB usecount=%x lr=%p lrh= %s\n&quot;</span>,
+		    so, so-&gt;so_usecount, lr_saved, solockhistory_nr(so));
+		<span class="enscript-comment">/* NOTREACHED */</span>
+	}
+	mutex_held = &amp;((<span class="enscript-type">struct</span> inpcb *)so-&gt;so_pcb)-&gt;inpcb_mtx;
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_usecount == 0 &amp;&amp; (inp-&gt;inp_wantcnt == WNT_STOPUSING)) {
+		lck_rw_lock_exclusive(divcbinfo.ipi_lock);
+		<span class="enscript-keyword">if</span> (inp-&gt;inp_state != INPCB_STATE_DEAD)
+			in_pcbdetach(inp);
+		in_pcbdispose(inp);
+		lck_rw_done(divcbinfo.ipi_lock);
+		<span class="enscript-keyword">return</span> (0);
+	}
+	lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+	so-&gt;unlock_lr[so-&gt;next_unlock_lr] = lr_saved;
+	so-&gt;next_unlock_lr = (so-&gt;next_unlock_lr+1) % SO_LCKDBG_MAX;
+	lck_mtx_unlock(mutex_held);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+__private_extern__ lck_mtx_t *
+<span class="enscript-function-name">div_getlock</span>(<span class="enscript-type">struct</span> socket *so, __unused <span class="enscript-type">int</span> locktype)
+{
+	<span class="enscript-type">struct</span> inpcb *inpcb = (<span class="enscript-type">struct</span> inpcb *)so-&gt;so_pcb;
+	
+	<span class="enscript-keyword">if</span> (so-&gt;so_pcb)  {
+		<span class="enscript-keyword">if</span> (so-&gt;so_usecount &lt; 0)
+			panic(<span class="enscript-string">&quot;div_getlock: so=%p usecount=%x lrh= %s\n&quot;</span>, 
+			    so, so-&gt;so_usecount, solockhistory_nr(so));
+		<span class="enscript-keyword">return</span>(&amp;inpcb-&gt;inpcb_mtx);
+	} <span class="enscript-keyword">else</span> {
+		panic(<span class="enscript-string">&quot;div_getlock: so=%p NULL NO PCB lrh= %s\n&quot;</span>, 
+		    so, solockhistory_nr(so));
+		<span class="enscript-keyword">return</span> (so-&gt;so_proto-&gt;pr_domain-&gt;dom_mtx);
+	}
+}
+
+<span class="enscript-type">struct</span> pr_usrreqs div_usrreqs = {
+	.pru_abort =		div_abort,
+	.pru_attach =		div_attach,
+	.pru_bind =		div_bind,
+	.pru_control =		in_control,
+	.pru_detach =		div_detach,
+	.pru_disconnect =	div_disconnect,
+	.pru_peeraddr =		in_getpeeraddr,
+	.pru_send =		div_send,
+	.pru_shutdown =		div_shutdown,
+	.pru_sockaddr =		in_getsockaddr,
+	.pru_sosend =		sosend,
+	.pru_soreceive =	soreceive,
+};
+
+</pre>
+<hr />
+</body></html>

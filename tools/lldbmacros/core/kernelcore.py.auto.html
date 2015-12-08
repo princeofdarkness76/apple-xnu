@@ -1,0 +1,499 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kernelcore.py</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kernelcore.py&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+
+<span class="enscript-string">&quot;&quot;&quot; Please make sure you read the README COMPLETELY BEFORE reading anything below.
+    It is very critical that you read coding guidelines in Section E in README file.
+&quot;&quot;&quot;</span>
+
+<span class="enscript-keyword">from</span> cvalue <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> lazytarget <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">from</span> configuration <span class="enscript-keyword">import</span> *
+<span class="enscript-keyword">import</span> caching
+<span class="enscript-keyword">import</span> lldb
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">IterateTAILQ_HEAD</span>(headval, element_name):
+    <span class="enscript-string">&quot;&quot;&quot; iterate over a TAILQ_HEAD in kernel. refer to bsd/sys/queue.h
+        params:
+            headval     - value : value object representing the head of the list
+            element_name- str          :  string name of the field which holds the list links.
+        returns:
+            A generator does not return. It is used for iterating.
+            value : an object that is of type as headval-&gt;tqh_first. Always a pointer object
+        example usage:
+          list_head = kern.GetGlobalVariable('mountlist')
+          for entryobj in IterateTAILQ_HEAD(list_head, 'mnt_list'):
+            print GetEntrySummary(entryobj)
+    &quot;&quot;&quot;</span>
+    iter_val = headval.tqh_first
+    <span class="enscript-keyword">while</span> unsigned(iter_val) != 0 :
+        <span class="enscript-keyword">yield</span> iter_val
+        iter_val = iter_val.__getattr__(element_name).tqe_next
+    <span class="enscript-comment">#end of yield loop
+</span>
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">IterateLinkedList</span>(element, field_name):
+    <span class="enscript-string">&quot;&quot;&quot; iterate over a linked list.
+        This is equivalent to elt = element; while(elt) { do_work(elt); elt = elt-&gt;&lt;field_name&gt;; }
+        params:
+            element - value : value object representing element in the list.
+            field_name - str       : name of field that holds pointer to next element
+        returns: Nothing. This is used as iterable
+        example usage:
+            first_zone = kern.GetGlobalVariable('first_zone')
+            for zone in IterateLinkedList(first_zone, 'next_zone'):
+                print GetZoneSummary(zone)
+    &quot;&quot;&quot;</span>
+    elt = element
+    <span class="enscript-keyword">while</span> unsigned(elt) != 0:
+        <span class="enscript-keyword">yield</span> elt
+        elt = elt.__getattr__(field_name)
+    <span class="enscript-comment">#end of while loop
+</span>
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">IterateListEntry</span>(element, element_type, field_name):
+    <span class="enscript-string">&quot;&quot;&quot; iterate over a list as defined with LIST_HEAD in bsd/sys/queue.h
+        params:
+            element      - value : Value object for lh_first
+            element_type - str   : Type of the next element
+            field_name   - str   : Name of the field in next element's structure
+        returns:
+            A generator does not return. It is used for iterating
+            value  : an object thats of type (element_type) head-&gt;le_next. Always a pointer object
+        example usage:
+            headp = kern.globals.initproc.p_children
+            for pp in IterateListEntry(headp, 'struct proc *', 'p_sibling'):
+                print GetProcInfo(pp)
+    &quot;&quot;&quot;</span>
+    elt = element.lh_first
+    <span class="enscript-keyword">if</span> type(element_type) == str:
+        element_type = gettype(element_type)
+    <span class="enscript-keyword">while</span> unsigned(elt) != 0:
+        <span class="enscript-keyword">yield</span> elt
+        next_el = elt.__getattr__(field_name).le_next
+        elt = cast(next_el, element_type)
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">IterateLinkageChain</span>(queue_head, element_type, field_name, field_ofst=0):
+    <span class="enscript-string">&quot;&quot;&quot; Iterate over a Linkage Chain queue in kernel of type queue_head_t. (osfmk/kern/queue.h method 1)
+        This is equivalent to the qe_foreach_element() macro
+        params:
+            queue_head   - value       : Value object for queue_head.
+            element_type - lldb.SBType : pointer type of the element which contains the queue_chain_t. Typically its structs like thread, task etc..
+                         - str         : OR a string describing the type. ex. 'task *'
+            field_name   - str         : Name of the field (in element) which holds a queue_chain_t
+            field_ofst   - int         : offset from the 'field_name' (in element) which holds a queue_chain_t
+                                         This is mostly useful if a particular element contains an array of queue_chain_t
+        returns:
+            A generator does not return. It is used for iterating.
+            value  : An object thats of type (element_type). Always a pointer object
+        example usage:
+            coalq = kern.GetGlobalVariable('coalitions_q')
+            for coal in IterateLinkageChain(coalq, 'struct coalition *', 'coalitions'):
+                print GetCoalitionInfo(coal)
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">global</span> kern
+    <span class="enscript-keyword">if</span> type(element_type) == str:
+        element_type = gettype(element_type)
+
+    <span class="enscript-keyword">if</span> unsigned(queue_head) == 0:
+        <span class="enscript-keyword">return</span>
+
+    <span class="enscript-keyword">if</span> element_type.IsPointerType():
+        elem_ofst = getfieldoffset(element_type.GetPointeeType(), field_name) + field_ofst
+    <span class="enscript-keyword">else</span>:
+        elem_ofst = getfieldoffset(element_type, field_name) + field_ofst
+
+    link = queue_head.next
+    <span class="enscript-keyword">while</span> (unsigned(link) != unsigned(queue_head)):
+        addr = unsigned(link) - elem_ofst;
+        <span class="enscript-comment"># I can't use the GetValueFromAddress function of the kernel class
+</span>        <span class="enscript-comment"># because I have no instance of that class!
+</span>        obj = value(link.GetSBValue().CreateValueFromExpression(None,<span class="enscript-string">'(void *)'</span>+str(addr)))
+        obj = cast(obj, element_type)
+        <span class="enscript-keyword">yield</span> obj
+        link = link.next
+
+
+<span class="enscript-keyword">def</span> <span class="enscript-function-name">IterateQueue</span>(queue_head, element_ptr_type, element_field_name, backwards=False):
+    <span class="enscript-string">&quot;&quot;&quot; Iterate over an Element Chain queue in kernel of type queue_head_t. (osfmk/kern/queue.h method 2)
+        params:
+            queue_head         - value : Value object for queue_head.
+            element_ptr_type   - lldb.SBType : a pointer type of the element 'next' points to. Typically its structs like thread, task etc..
+                               - str         : OR a string describing the type. ex. 'task *'
+            element_field_name - str : name of the field in target struct.
+            backwards          - backwards : traverse the queue backwards
+        returns:
+            A generator does not return. It is used for iterating.
+            value  : an object thats of type (element_type) queue_head-&gt;next. Always a pointer object
+        example usage:
+            for page_meta in IterateQueue(kern.globals.first_zone.pages.all_free, 'struct zone_page_metadata *', 'pages'):
+                print page_meta
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">if</span> type(element_ptr_type) == str :
+        element_ptr_type = gettype(element_ptr_type)
+
+    queue_head = queue_head.GetSBValue()
+    queue_head_addr = 0x0
+    <span class="enscript-keyword">if</span> queue_head.TypeIsPointerType():
+        queue_head_addr = queue_head.GetValueAsUnsigned()
+    <span class="enscript-keyword">else</span>:
+        queue_head_addr = queue_head.GetAddress().GetLoadAddress(LazyTarget.GetTarget())
+    <span class="enscript-keyword">if</span> backwards:
+        cur_elt = queue_head.GetChildMemberWithName(<span class="enscript-string">'prev'</span>)
+    <span class="enscript-keyword">else</span>:
+        cur_elt = queue_head.GetChildMemberWithName(<span class="enscript-string">'next'</span>)
+
+    <span class="enscript-keyword">while</span> True:
+
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> cur_elt.IsValid() <span class="enscript-keyword">or</span> cur_elt.GetValueAsUnsigned() == 0 <span class="enscript-keyword">or</span> cur_elt.GetValueAsUnsigned() == queue_head_addr:
+            <span class="enscript-keyword">break</span>
+        elt = cur_elt.Cast(element_ptr_type)
+        <span class="enscript-keyword">yield</span> value(elt)
+        <span class="enscript-keyword">if</span> backwards:
+            cur_elt = elt.GetChildMemberWithName(element_field_name).GetChildMemberWithName(<span class="enscript-string">'prev'</span>)
+        <span class="enscript-keyword">else</span>:
+            cur_elt = elt.GetChildMemberWithName(element_field_name).GetChildMemberWithName(<span class="enscript-string">'next'</span>)
+
+<span class="enscript-keyword">class</span> KernelTarget(object):
+    <span class="enscript-string">&quot;&quot;&quot; A common kernel object that provides access to kernel objects and information.
+        The class holds global lists for  task, terminated_tasks, procs, zones, zombroc etc.
+        It also provides a way to symbolicate an address or create a value from an address.
+    &quot;&quot;&quot;</span>
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">__init__</span>(self, debugger):
+        <span class="enscript-string">&quot;&quot;&quot; Initialize the kernel debugging environment.
+            Target properties like architecture and connectedness are lazy-evaluted.
+        &quot;&quot;&quot;</span>
+        self._debugger = debugger <span class="enscript-comment"># This holds an lldb.SBDebugger object for debugger state
+</span>        self._threads_list = []
+        self._tasks_list = []
+        self._coalitions_list = []
+        self._allproc = []
+        self._terminated_tasks_list = []
+        self._zones_list = []
+        self._zombproc_list = []
+        self._kernel_types_cache = {} <span class="enscript-comment">#this will cache the Type objects as and when requested.
+</span>        self._version = None
+        self._arch = None
+        self._ptrsize = None <span class="enscript-comment"># pointer size of kernel, not userspace
+</span>        self.symbolicator = None
+        <span class="enscript-keyword">class</span> _GlobalVariableFind(object):
+            <span class="enscript-keyword">def</span> <span class="enscript-function-name">__init__</span>(self, kern):
+                self._xnu_kernobj_12obscure12 = kern
+            <span class="enscript-keyword">def</span> <span class="enscript-function-name">__getattr__</span>(self, name):
+                v = self._xnu_kernobj_12obscure12.GetGlobalVariable(name)
+                <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> v.GetSBValue().IsValid():
+                    <span class="enscript-keyword">raise</span> ValueError(<span class="enscript-string">'No such global variable by name: %s '</span>%str(name))
+                <span class="enscript-keyword">return</span> v
+        self.globals = _GlobalVariableFind(self)
+        LazyTarget.Initialize(debugger)
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">_GetSymbolicator</span>(self):
+        <span class="enscript-string">&quot;&quot;&quot; Internal function: To initialize the symbolication from lldb.utils
+        &quot;&quot;&quot;</span>
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> self.symbolicator <span class="enscript-keyword">is</span> None:
+            <span class="enscript-keyword">return</span> self.symbolicator
+
+        <span class="enscript-keyword">from</span> lldb.utils <span class="enscript-keyword">import</span> symbolication
+        symbolicator = symbolication.Symbolicator()
+        symbolicator.target = LazyTarget.GetTarget()
+        self.symbolicator = symbolicator
+        <span class="enscript-keyword">return</span> self.symbolicator
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">Symbolicate</span>(self, addr):
+        <span class="enscript-string">&quot;&quot;&quot; simple method to get name of function/variable from an address. this is equivalent of gdb 'output /a 0xaddress'
+            params:
+                addr - int : typically hex value like 0xffffff80002c0df0
+            returns:
+                str - '' if no symbol found else the symbol name.
+            Note: this function only finds the first symbol. If you expect multiple symbol conflict please use SymbolicateFromAddress()
+        &quot;&quot;&quot;</span>
+        ret_str = <span class="enscript-string">''</span>
+        syms = self.SymbolicateFromAddress(addr)
+        <span class="enscript-keyword">if</span> len(syms) &gt; 0:
+            ret_str +=syms[0].GetName()
+        <span class="enscript-keyword">return</span> ret_str
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">SymbolicateFromAddress</span>(self, addr):
+        <span class="enscript-string">&quot;&quot;&quot; symbolicates any given address based on modules loaded in the target.
+            params:
+                addr - int : typically hex value like 0xffffff80002c0df0
+            returns:
+                [] of SBSymbol: In case we don't find anything than empty array is returned.
+                      Note: a type of symbol can be figured out by gettype() function of SBSymbol.
+            example usage:
+                syms = kern.Symbolicate(0xffffff80002c0df0)
+                for s in syms:
+                  if s.GetType() == lldb.eSymbolTypeCode:
+                    print &quot;Function&quot;, s.GetName()
+                  if s.GetType() == lldb.eSymbolTypeData:
+                    print &quot;Variable&quot;, s.GetName()
+        &quot;&quot;&quot;</span>
+        <span class="enscript-keyword">if</span> type(int(1)) != type(addr):
+            <span class="enscript-keyword">if</span> str(addr).strip().find(<span class="enscript-string">&quot;0x&quot;</span>) == 0 :
+                addr = int(addr, 16)
+            <span class="enscript-keyword">else</span>:
+                addr = int(addr)
+        ret_array = []
+        symbolicator = self._GetSymbolicator()
+        syms = symbolicator.symbolicate(addr)
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> syms:
+            <span class="enscript-keyword">return</span> ret_array
+        <span class="enscript-keyword">for</span> s <span class="enscript-keyword">in</span> syms:
+            ret_array.append(s.get_symbol_context().symbol)
+        <span class="enscript-keyword">return</span> ret_array
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">IsDebuggerConnected</span>(self):
+        proc_state = LazyTarget.GetProcess().state
+        <span class="enscript-keyword">if</span> proc_state == lldb.eStateInvalid : <span class="enscript-keyword">return</span> False
+        <span class="enscript-keyword">if</span> proc_state <span class="enscript-keyword">in</span> [lldb.eStateStopped, lldb.eStateSuspended] : <span class="enscript-keyword">return</span> True
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">GetGlobalVariable</span>(self, name):
+        <span class="enscript-string">&quot;&quot;&quot; Get the value object representation for a kernel global variable
+            params:
+              name : str - name of the variable. ex. version
+            returns: value - python object representing global variable.
+            raises : Exception in case the variable is not found.
+        &quot;&quot;&quot;</span>
+        self._globals_cache_dict = caching.GetDynamicCacheData(<span class="enscript-string">&quot;kern._globals_cache_dict&quot;</span>, {})
+        <span class="enscript-keyword">if</span> name <span class="enscript-keyword">not</span> <span class="enscript-keyword">in</span> self._globals_cache_dict:
+            self._globals_cache_dict[name] = value(LazyTarget.GetTarget().FindGlobalVariables(name, 1).GetValueAtIndex(0))
+        <span class="enscript-keyword">return</span> self._globals_cache_dict[name]
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">GetLoadAddressForSymbol</span>(self, name):
+        <span class="enscript-string">&quot;&quot;&quot; Get the load address of a symbol in the kernel.
+            params:
+              name : str - name of the symbol to lookup
+            returns: int - the load address as an integer. Use GetValueFromAddress to cast to a value.
+            raises : LookupError - if the symbol is not found.
+        &quot;&quot;&quot;</span>
+        name = str(name)
+        target = LazyTarget.GetTarget()
+        syms_arr = target.FindSymbols(name)
+        <span class="enscript-keyword">if</span> syms_arr.IsValid() <span class="enscript-keyword">and</span> len(syms_arr) &gt; 0:
+            symbol = syms_arr[0].GetSymbol()
+            <span class="enscript-keyword">if</span> symbol.IsValid():
+                <span class="enscript-keyword">return</span> int(symbol.GetStartAddress().GetLoadAddress(target))
+
+        <span class="enscript-keyword">raise</span> LookupError(<span class="enscript-string">&quot;Symbol not found: &quot;</span> + name)
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">GetValueFromAddress</span>(self, addr, type_str = <span class="enscript-string">'void *'</span>):
+        <span class="enscript-string">&quot;&quot;&quot; convert a address to value
+            params:
+                addr - int : typically hex value like 0xffffff80008dc390
+                type_str - str: type to cast to. Default type will be void *
+            returns:
+                value : a value object which has address as addr and type is type_str
+        &quot;&quot;&quot;</span>
+        obj = value(self.globals.version.GetSBValue().CreateValueFromExpression(None,<span class="enscript-string">'(void *)'</span>+str(addr)))
+        obj = cast(obj, type_str)
+        <span class="enscript-keyword">return</span> obj
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">GetValueAsType</span>(self, v, t):
+        <span class="enscript-string">&quot;&quot;&quot; Retrieves a global variable 'v' of type 't' wrapped in a vue object.
+            If 'v' is an address, creates a vue object of the appropriate type.
+            If 'v' is a name, looks for the global variable and asserts its type.
+            Throws:
+                NameError - If 'v' cannot be found
+                TypeError - If 'v' is of the wrong type
+        &quot;&quot;&quot;</span>
+        <span class="enscript-keyword">if</span> islong(v):
+            <span class="enscript-keyword">return</span> self.GetValueFromAddress(v, t)
+        <span class="enscript-keyword">else</span>:
+            var = LazyTarget.GetTarget().FindGlobalVariables(v, 1)[0]
+            <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> var:
+                <span class="enscript-keyword">raise</span> NameError(<span class="enscript-string">&quot;Failed to find global variable '{0}'&quot;</span>.format(v))
+            <span class="enscript-keyword">if</span> var.GetTypeName() != t:
+                <span class="enscript-keyword">raise</span> TypeError(<span class="enscript-string">&quot;{0} must be of type '{1}', not '{2}'&quot;</span>.format(v, t, var.GetTypeName()))
+            <span class="enscript-keyword">return</span> value(var)
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">_GetIterator</span>(self, iter_head_name, next_element_name=<span class="enscript-string">'next'</span>, iter_head_type=None):
+        <span class="enscript-string">&quot;&quot;&quot; returns an iterator for a collection in kernel memory.
+            params:
+                iter_head_name - str : name of queue_head or list head variable.
+                next_element_name - str : name of the element that leads to next element.
+                                          for ex. in struct zone list 'next_zone' is the linking element.
+            returns:
+                iterable : typically used in conjunction with &quot;for varname in iterable:&quot;
+        &quot;&quot;&quot;</span>
+        head_element = self.GetGlobalVariable(iter_head_name)
+        <span class="enscript-keyword">return</span> head_element.GetSBValue().linked_list_iter(next_element_name)
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">TruncPage</span>(self, addr):
+        <span class="enscript-keyword">return</span> (addr &amp; ~(unsigned(self.GetGlobalVariable(<span class="enscript-string">&quot;page_size&quot;</span>)) - 1))
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">RoundPage</span>(self, addr):
+        <span class="enscript-keyword">return</span> trunc_page(addr + unsigned(self.GetGlobalVariable(<span class="enscript-string">&quot;page_size&quot;</span>)) - 1)
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">StraddlesPage</span>(self, addr, size):
+        <span class="enscript-keyword">if</span> size &gt; unsigned(self.GetGlobalVariable(<span class="enscript-string">&quot;page_size&quot;</span>)):
+            <span class="enscript-keyword">return</span> True
+        val = ((addr + size) &amp; (unsigned(self.GetGlobalVariable(<span class="enscript-string">&quot;page_size&quot;</span>))-1))
+        <span class="enscript-keyword">return</span> (val &lt; size <span class="enscript-keyword">and</span> val &gt; 0)
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">PhysToKernelVirt</span>(self, addr):
+        <span class="enscript-keyword">if</span> self.arch == <span class="enscript-string">'x86_64'</span>:
+            <span class="enscript-keyword">return</span> (addr + unsigned(self.GetGlobalVariable(<span class="enscript-string">'physmap_base'</span>)))
+        <span class="enscript-keyword">elif</span> self.arch == <span class="enscript-string">'arm'</span> <span class="enscript-keyword">or</span> self.arch == <span class="enscript-string">'arm64'</span>:
+            <span class="enscript-keyword">return</span> (addr - unsigned(self.GetGlobalVariable(<span class="enscript-string">&quot;gPhysBase&quot;</span>)) + unsigned(self.GetGlobalVariable(<span class="enscript-string">&quot;gVirtBase&quot;</span>)))
+        <span class="enscript-keyword">else</span>:
+            <span class="enscript-keyword">raise</span> ValueError(<span class="enscript-string">&quot;PhysToVirt does not support {0}&quot;</span>.format(arch))
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">GetNanotimeFromAbstime</span>(self, abstime):
+        <span class="enscript-string">&quot;&quot;&quot; convert absolute time (which is in MATUs) to nano seconds.
+            Since based on architecture the conversion may differ.
+            params:
+                abstime - int absolute time as shown by mach_absolute_time
+            returns:
+                int - nanosecs of time
+        &quot;&quot;&quot;</span>
+        usec_divisor = caching.GetStaticCacheData(<span class="enscript-string">&quot;kern.rtc_usec_divisor&quot;</span>, None)
+        <span class="enscript-keyword">if</span> <span class="enscript-keyword">not</span> usec_divisor:
+            <span class="enscript-keyword">if</span> self.arch == <span class="enscript-string">'x86_64'</span>:
+                usec_divisor = 1000
+            <span class="enscript-keyword">else</span>:
+                rtclockdata_addr = self.GetLoadAddressForSymbol(<span class="enscript-string">'RTClockData'</span>)
+                rtc = self.GetValueFromAddress(rtclockdata_addr, <span class="enscript-string">'struct _rtclock_data_ *'</span>)
+                usec_divisor = unsigned(rtc.rtc_usec_divisor)
+            usec_divisor = int(usec_divisor)
+            caching.SaveStaticCacheData(<span class="enscript-string">'kern.rtc_usec_divisor'</span>, usec_divisor)
+        nsecs = (abstime * 1000)/usec_divisor
+        <span class="enscript-keyword">return</span> nsecs
+
+    <span class="enscript-keyword">def</span> <span class="enscript-function-name">__getattribute__</span>(self, name):
+        <span class="enscript-keyword">if</span> name == <span class="enscript-string">'zones'</span> :
+            self._zones_list = caching.GetDynamicCacheData(<span class="enscript-string">&quot;kern._zones_list&quot;</span>, [])
+            <span class="enscript-keyword">if</span> len(self._zones_list) &gt; 0: <span class="enscript-keyword">return</span> self._zones_list
+            first_zone = self.GetGlobalVariable(<span class="enscript-string">'first_zone'</span>)
+            <span class="enscript-keyword">for</span> z <span class="enscript-keyword">in</span> IterateLinkedList(first_zone, <span class="enscript-string">'next_zone'</span>):
+                self._zones_list.append(z)
+            caching.SaveDynamicCacheData(<span class="enscript-string">&quot;kern._zones_list&quot;</span>, self._zones_list)
+            <span class="enscript-keyword">return</span> self._zones_list
+
+        <span class="enscript-keyword">if</span> name == <span class="enscript-string">'threads'</span> :
+            self._threads_list = caching.GetDynamicCacheData(<span class="enscript-string">&quot;kern._threads_list&quot;</span>, [])
+            <span class="enscript-keyword">if</span> len(self._threads_list) &gt; 0 : <span class="enscript-keyword">return</span> self._threads_list
+            thread_queue_head = self.GetGlobalVariable(<span class="enscript-string">'threads'</span>)
+            thread_type = LazyTarget.GetTarget().FindFirstType(<span class="enscript-string">'thread'</span>)
+            thread_ptr_type = thread_type.GetPointerType()
+            <span class="enscript-keyword">for</span> th <span class="enscript-keyword">in</span> IterateQueue(thread_queue_head, thread_ptr_type, <span class="enscript-string">'threads'</span>):
+                self._threads_list.append(th)
+            caching.SaveDynamicCacheData(<span class="enscript-string">&quot;kern._threads_list&quot;</span>, self._threads_list)
+            <span class="enscript-keyword">return</span> self._threads_list
+
+        <span class="enscript-keyword">if</span> name == <span class="enscript-string">'tasks'</span> :
+            self._tasks_list = caching.GetDynamicCacheData(<span class="enscript-string">&quot;kern._tasks_list&quot;</span>, [])
+            <span class="enscript-keyword">if</span> len(self._tasks_list) &gt; 0 : <span class="enscript-keyword">return</span> self._tasks_list
+            task_queue_head = self.GetGlobalVariable(<span class="enscript-string">'tasks'</span>)
+            task_type = LazyTarget.GetTarget().FindFirstType(<span class="enscript-string">'task'</span>)
+            task_ptr_type = task_type.GetPointerType()
+            <span class="enscript-keyword">for</span> tsk <span class="enscript-keyword">in</span> IterateQueue(task_queue_head, task_ptr_type, <span class="enscript-string">'tasks'</span>):
+                self._tasks_list.append(tsk)
+            caching.SaveDynamicCacheData(<span class="enscript-string">&quot;kern._tasks_list&quot;</span>, self._tasks_list)
+            <span class="enscript-keyword">return</span> self._tasks_list
+
+        <span class="enscript-keyword">if</span> name == <span class="enscript-string">'coalitions'</span> :
+            self._coalitions_list = caching.GetDynamicCacheData(<span class="enscript-string">&quot;kern._coalitions_list&quot;</span>, [])
+            <span class="enscript-keyword">if</span> len(self._coalitions_list) &gt; 0 : <span class="enscript-keyword">return</span> self._coalitions_list
+            coalition_queue_head = self.GetGlobalVariable(<span class="enscript-string">'coalitions_q'</span>)
+            coalition_type = LazyTarget.GetTarget().FindFirstType(<span class="enscript-string">'coalition'</span>)
+            coalition_ptr_type = coalition_type.GetPointerType()
+            <span class="enscript-keyword">for</span> coal <span class="enscript-keyword">in</span> IterateLinkageChain(addressof(coalition_queue_head), coalition_ptr_type, <span class="enscript-string">'coalitions'</span>):
+                self._coalitions_list.append(coal)
+            caching.SaveDynamicCacheData(<span class="enscript-string">&quot;kern._coalitions_list&quot;</span>, self._coalitions_list)
+            <span class="enscript-keyword">return</span> self._coalitions_list
+
+        <span class="enscript-keyword">if</span> name == <span class="enscript-string">'terminated_tasks'</span> :
+            self._terminated_tasks_list = caching.GetDynamicCacheData(<span class="enscript-string">&quot;kern._terminated_tasks_list&quot;</span>, [])
+            <span class="enscript-keyword">if</span> len(self._terminated_tasks_list) &gt; 0 : <span class="enscript-keyword">return</span> self._terminated_tasks_list
+            task_queue_head = self.GetGlobalVariable(<span class="enscript-string">'terminated_tasks'</span>)
+            task_type = LazyTarget.GetTarget().FindFirstType(<span class="enscript-string">'task'</span>)
+            task_ptr_type = task_type.GetPointerType()
+            <span class="enscript-keyword">for</span> tsk <span class="enscript-keyword">in</span> IterateQueue(task_queue_head, task_ptr_type, <span class="enscript-string">'tasks'</span>):
+                self._terminated_tasks_list.append(tsk)
+            caching.SaveDynamicCacheData(<span class="enscript-string">&quot;kern._terminated_tasks_list&quot;</span>, self._terminated_tasks_list)
+            <span class="enscript-keyword">return</span> self._terminated_tasks_list
+
+        <span class="enscript-keyword">if</span> name == <span class="enscript-string">'procs'</span> :
+            self._allproc = caching.GetDynamicCacheData(<span class="enscript-string">&quot;kern._allproc&quot;</span>, [])
+            <span class="enscript-keyword">if</span> len(self._allproc) &gt; 0 : <span class="enscript-keyword">return</span> self._allproc
+            all_proc_head = self.GetGlobalVariable(<span class="enscript-string">'allproc'</span>)
+            proc_val = cast(all_proc_head.lh_first, <span class="enscript-string">'proc *'</span>)
+            <span class="enscript-keyword">while</span> proc_val != 0:
+                self._allproc.append(proc_val)
+                proc_val = cast(proc_val.p_list.le_next, <span class="enscript-string">'proc *'</span>)
+            caching.SaveDynamicCacheData(<span class="enscript-string">&quot;kern._allproc&quot;</span>, self._allproc)
+            <span class="enscript-keyword">return</span> self._allproc
+
+        <span class="enscript-keyword">if</span> name == <span class="enscript-string">'interrupt_stats'</span> :
+            self._interrupt_stats_list = caching.GetDynamicCacheData(<span class="enscript-string">&quot;kern._interrupt_stats_list&quot;</span>, [])
+            <span class="enscript-keyword">if</span> len(self._interrupt_stats_list) &gt; 0 : <span class="enscript-keyword">return</span> self._interrupt_stats_list
+            interrupt_stats_head = self.GetGlobalVariable(<span class="enscript-string">'gInterruptAccountingDataList'</span>)
+            interrupt_stats_type = LazyTarget.GetTarget().FindFirstType(<span class="enscript-string">'IOInterruptAccountingData'</span>)
+            interrupt_stats_ptr_type = interrupt_stats_type.GetPointerType()
+            <span class="enscript-keyword">for</span> interrupt_stats_obj <span class="enscript-keyword">in</span> IterateQueue(interrupt_stats_head, interrupt_stats_ptr_type, <span class="enscript-string">'chain'</span>):
+                self._interrupt_stats_list.append(interrupt_stats_obj)
+            caching.SaveDynamicCacheData(<span class="enscript-string">&quot;kern._interrupt_stats&quot;</span>, self._interrupt_stats_list)
+            <span class="enscript-keyword">return</span> self._interrupt_stats_list
+
+        <span class="enscript-keyword">if</span> name == <span class="enscript-string">'zombprocs'</span> :
+            self._zombproc_list = caching.GetDynamicCacheData(<span class="enscript-string">&quot;kern._zombproc_list&quot;</span>, [])
+            <span class="enscript-keyword">if</span> len(self._zombproc_list) &gt; 0 : <span class="enscript-keyword">return</span> self._zombproc_list
+            zproc_head = self.GetGlobalVariable(<span class="enscript-string">'zombproc'</span>)
+            proc_val = cast(zproc_head.lh_first, <span class="enscript-string">'proc *'</span>)
+            <span class="enscript-keyword">while</span> proc_val != 0:
+                self._zombproc_list.append(proc_val)
+                proc_val = cast(proc_val.p_list.le_next, <span class="enscript-string">'proc *'</span>)
+            caching.SaveDynamicCacheData(<span class="enscript-string">&quot;kern._zombproc_list&quot;</span>, self._zombproc_list)
+            <span class="enscript-keyword">return</span> self._zombproc_list
+
+        <span class="enscript-keyword">if</span> name == <span class="enscript-string">'version'</span> :
+            self._version = caching.GetStaticCacheData(<span class="enscript-string">&quot;kern.version&quot;</span>, None)
+            <span class="enscript-keyword">if</span> self._version != None : <span class="enscript-keyword">return</span> self._version
+            self._version = str(self.GetGlobalVariable(<span class="enscript-string">'version'</span>))
+            caching.SaveStaticCacheData(<span class="enscript-string">&quot;kern.version&quot;</span>, self._version)
+            <span class="enscript-keyword">return</span> self._version
+
+        <span class="enscript-keyword">if</span> name == <span class="enscript-string">'arch'</span> :
+            self._arch = caching.GetStaticCacheData(<span class="enscript-string">&quot;kern.arch&quot;</span>, None)
+            <span class="enscript-keyword">if</span> self._arch != None : <span class="enscript-keyword">return</span> self._arch
+            arch = LazyTarget.GetTarget().triple.split(<span class="enscript-string">'-'</span>)[0]
+            <span class="enscript-keyword">if</span> arch <span class="enscript-keyword">in</span> (<span class="enscript-string">'armv7'</span>, <span class="enscript-string">'armv7s'</span>, <span class="enscript-string">'armv7k'</span>):
+                self._arch = <span class="enscript-string">'arm'</span>
+            <span class="enscript-keyword">else</span>:
+                self._arch = arch
+            caching.SaveStaticCacheData(<span class="enscript-string">&quot;kern.arch&quot;</span>, self._arch)
+            <span class="enscript-keyword">return</span> self._arch
+
+        <span class="enscript-keyword">if</span> name == <span class="enscript-string">'ptrsize'</span> :
+            self._ptrsize = caching.GetStaticCacheData(<span class="enscript-string">&quot;kern.ptrsize&quot;</span>, None)
+            <span class="enscript-keyword">if</span> self._ptrsize != None : <span class="enscript-keyword">return</span> self._ptrsize
+            arch = LazyTarget.GetTarget().triple.split(<span class="enscript-string">'-'</span>)[0]
+            <span class="enscript-keyword">if</span> arch <span class="enscript-keyword">in</span> (<span class="enscript-string">'x86_64'</span>, <span class="enscript-string">'arm64'</span>):
+                self._ptrsize = 8
+            <span class="enscript-keyword">else</span>:
+                self._ptrsize = 4
+            caching.SaveStaticCacheData(<span class="enscript-string">&quot;kern.ptrsize&quot;</span>, self._ptrsize)
+            <span class="enscript-keyword">return</span> self._ptrsize
+
+        <span class="enscript-keyword">return</span> object.__getattribute__(self, name)
+
+</pre>
+<hr />
+</body></html>

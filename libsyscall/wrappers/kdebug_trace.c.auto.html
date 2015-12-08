@@ -1,0 +1,136 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kdebug_trace.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kdebug_trace.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this
+ * file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdint.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;machine/cpu_capabilities.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+
+<span class="enscript-type">extern</span> <span class="enscript-type">int</span> <span class="enscript-function-name">__kdebug_trace64</span>(uint32_t code, uint64_t arg1, uint64_t arg2,
+                            uint64_t arg3, uint64_t arg4);
+<span class="enscript-type">extern</span> uint64_t <span class="enscript-function-name">__kdebug_trace_string</span>(uint32_t debugid, uint64_t str_id,
+                                      <span class="enscript-type">const</span> <span class="enscript-type">char</span> *str);
+
+<span class="enscript-comment">/* Returns non-zero if tracing is enabled. */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kdebug_enabled</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">volatile</span> uint32_t *kdebug_enable_address =
+	    (<span class="enscript-type">volatile</span> uint32_t *)(uintptr_t)(_COMM_PAGE_KDEBUG_ENABLE);
+
+	<span class="enscript-keyword">if</span> (*kdebug_enable_address == 0) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">return</span> 1;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">kdebug_validate_debugid</span>(uint32_t debugid)
+{
+	uint8_t debugid_class;
+
+	<span class="enscript-comment">/*
+	 * This filtering is also done in the kernel, but we also do it here so
+	 * that errors are returned in all cases, not just when the system call
+	 * is actually performed.
+	 */</span>
+	debugid_class = KDBG_EXTRACT_CLASS(debugid);
+	<span class="enscript-keyword">switch</span> (debugid_class) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">DBG_TRACE</span>:
+			<span class="enscript-keyword">return</span> EPERM;
+	}
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">kdebug_trace</span>(uint32_t debugid, uint64_t arg1, uint64_t arg2, uint64_t arg3,
+             uint64_t arg4)
+{
+	<span class="enscript-type">int</span> err;
+
+	<span class="enscript-keyword">if</span> (!kdebug_enabled()) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">if</span> ((err = kdebug_validate_debugid(debugid)) != 0) {
+		errno = err;
+		<span class="enscript-keyword">return</span> -1;
+	}
+
+	<span class="enscript-keyword">return</span> __kdebug_trace64(debugid, arg1, arg2, arg3, arg4);
+}
+
+uint64_t
+<span class="enscript-function-name">kdebug_trace_string</span>(uint32_t debugid, uint64_t str_id, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *str)
+{
+	<span class="enscript-type">int</span> err;
+
+	<span class="enscript-keyword">if</span> (!kdebug_enabled()) {
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-keyword">if</span> ((int64_t)str_id == -1) {
+		errno = EINVAL;
+		<span class="enscript-keyword">return</span> (uint64_t)-1;
+	}
+
+	<span class="enscript-keyword">if</span> (str_id == 0 &amp;&amp; str == NULL) {
+		errno = EINVAL;
+		<span class="enscript-keyword">return</span> (uint64_t)-1;
+	}
+
+	<span class="enscript-keyword">if</span> ((err = kdebug_validate_debugid(debugid)) != 0) {
+		errno = err;
+		<span class="enscript-keyword">return</span> (uint64_t)-1;
+	}
+
+	<span class="enscript-keyword">return</span> __kdebug_trace_string(debugid, str_id, str);
+}
+</pre>
+<hr />
+</body></html>

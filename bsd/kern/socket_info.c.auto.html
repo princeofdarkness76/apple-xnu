@@ -1,0 +1,264 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>socket_info.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">socket_info.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2005-2015 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/errno.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/select.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/pipe.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/unpcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sys_domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kern_event.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/ndrv_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/tcp_var.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">fill_sockbuf_info</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> sockbuf_info *sbi);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">fill_common_sockinfo</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> socket_info *si);
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fill_sockbuf_info</span>(<span class="enscript-type">struct</span> sockbuf *sb, <span class="enscript-type">struct</span> sockbuf_info *sbi)
+{
+	sbi-&gt;sbi_cc = sb-&gt;sb_cc;
+	sbi-&gt;sbi_hiwat = sb-&gt;sb_hiwat;
+	sbi-&gt;sbi_mbcnt = sb-&gt;sb_mbcnt;
+	sbi-&gt;sbi_mbmax = sb-&gt;sb_mbmax;
+	sbi-&gt;sbi_lowat = sb-&gt;sb_lowat;
+	sbi-&gt;sbi_flags = sb-&gt;sb_flags;
+	sbi-&gt;sbi_timeo = (u_int32_t)(sb-&gt;sb_timeo.tv_sec * hz) +
+	    sb-&gt;sb_timeo.tv_usec / tick;
+	<span class="enscript-keyword">if</span> (sbi-&gt;sbi_timeo == 0 &amp;&amp; sb-&gt;sb_timeo.tv_usec != 0)
+		sbi-&gt;sbi_timeo = 1;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">fill_common_sockinfo</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> socket_info *si)
+{
+	si-&gt;soi_so = (u_int64_t)VM_KERNEL_ADDRPERM(so);
+	si-&gt;soi_type = so-&gt;so_type;
+	si-&gt;soi_options = (<span class="enscript-type">short</span>)(so-&gt;so_options &amp; 0xffff);
+	si-&gt;soi_linger = so-&gt;so_linger;
+	si-&gt;soi_state = so-&gt;so_state;
+	si-&gt;soi_pcb = (u_int64_t)VM_KERNEL_ADDRPERM(so-&gt;so_pcb);
+	<span class="enscript-keyword">if</span> (so-&gt;so_proto) {
+		si-&gt;soi_protocol = SOCK_PROTO(so);
+		<span class="enscript-keyword">if</span> (so-&gt;so_proto-&gt;pr_domain)
+			si-&gt;soi_family = SOCK_DOM(so);
+		<span class="enscript-keyword">else</span>
+			si-&gt;soi_family = 0;
+	} <span class="enscript-keyword">else</span> {
+		si-&gt;soi_protocol = si-&gt;soi_family = 0;
+	}
+	si-&gt;soi_qlen = so-&gt;so_qlen;
+	si-&gt;soi_incqlen = so-&gt;so_incqlen;
+	si-&gt;soi_qlimit = so-&gt;so_qlimit;
+	si-&gt;soi_timeo = so-&gt;so_timeo;
+	si-&gt;soi_error = so-&gt;so_error;
+	si-&gt;soi_oobmark = so-&gt;so_oobmark;
+	fill_sockbuf_info(&amp;so-&gt;so_snd, &amp;si-&gt;soi_snd);
+	fill_sockbuf_info(&amp;so-&gt;so_rcv, &amp;si-&gt;soi_rcv);
+}
+
+errno_t
+<span class="enscript-function-name">fill_socketinfo</span>(<span class="enscript-type">struct</span> socket *so, <span class="enscript-type">struct</span> socket_info *si)
+{
+	errno_t error = 0;
+	<span class="enscript-type">int</span> domain;
+	<span class="enscript-type">short</span> type;
+	<span class="enscript-type">short</span> protocol;
+
+	socket_lock(so, 0);
+
+	si-&gt;soi_kind = SOCKINFO_GENERIC;
+
+	fill_common_sockinfo(so, si);
+
+	<span class="enscript-keyword">if</span> (so-&gt;so_pcb == NULL || so-&gt;so_proto == 0 ||
+	    so-&gt;so_proto-&gt;pr_domain == NULL)
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+	<span class="enscript-comment">/*
+	 * The kind of socket is determined by the triplet
+	 * {domain, type, protocol}
+	 */</span>
+	domain = SOCK_DOM(so);
+	type = SOCK_TYPE(so);
+	protocol = SOCK_PROTO(so);
+	<span class="enscript-keyword">switch</span> (domain) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PF_INET</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PF_INET6</span>: {
+		<span class="enscript-type">struct</span> in_sockinfo *insi = &amp;si-&gt;soi_proto.pri_in;
+		<span class="enscript-type">struct</span> inpcb *inp = (<span class="enscript-type">struct</span> inpcb *)so-&gt;so_pcb;
+
+		si-&gt;soi_kind = SOCKINFO_IN;
+
+		insi-&gt;insi_fport = inp-&gt;inp_fport;
+		insi-&gt;insi_lport = inp-&gt;inp_lport;
+		insi-&gt;insi_gencnt = inp-&gt;inp_gencnt;
+		insi-&gt;insi_flags = inp-&gt;inp_flags;
+		insi-&gt;insi_vflag = inp-&gt;inp_vflag;
+		insi-&gt;insi_ip_ttl = inp-&gt;inp_ip_ttl;
+		insi-&gt;insi_faddr.ina_6 = inp-&gt;inp_dependfaddr.inp6_foreign;
+		insi-&gt;insi_laddr.ina_6 = inp-&gt;inp_dependladdr.inp6_local;
+		insi-&gt;insi_v4.in4_tos = inp-&gt;inp_depend4.inp4_ip_tos;
+		insi-&gt;insi_v6.in6_hlim = 0;
+		insi-&gt;insi_v6.in6_cksum = inp-&gt;inp_depend6.inp6_cksum;
+		insi-&gt;insi_v6.in6_ifindex = 0;
+		insi-&gt;insi_v6.in6_hops = inp-&gt;inp_depend6.inp6_hops;
+
+		<span class="enscript-keyword">if</span> (type == SOCK_STREAM &amp;&amp; (protocol == 0 ||
+		    protocol == IPPROTO_TCP) &amp;&amp; inp-&gt;inp_ppcb != NULL) {
+			<span class="enscript-type">struct</span> tcp_sockinfo *tcpsi = &amp;si-&gt;soi_proto.pri_tcp;
+			<span class="enscript-type">struct</span> tcpcb *tp = (<span class="enscript-type">struct</span> tcpcb *)inp-&gt;inp_ppcb;
+
+			si-&gt;soi_kind = SOCKINFO_TCP;
+
+			tcpsi-&gt;tcpsi_state = tp-&gt;t_state;
+			tcpsi-&gt;tcpsi_timer[TSI_T_REXMT] =
+			    tp-&gt;t_timer[TCPT_REXMT];
+			tcpsi-&gt;tcpsi_timer[TSI_T_PERSIST] =
+			    tp-&gt;t_timer[TCPT_PERSIST];
+			tcpsi-&gt;tcpsi_timer[TSI_T_KEEP] =
+			    tp-&gt;t_timer[TCPT_KEEP];
+			tcpsi-&gt;tcpsi_timer[TSI_T_2MSL] =
+			    tp-&gt;t_timer[TCPT_2MSL];
+			tcpsi-&gt;tcpsi_mss = tp-&gt;t_maxseg;
+			tcpsi-&gt;tcpsi_flags = tp-&gt;t_flags;
+			tcpsi-&gt;tcpsi_tp =
+			    (u_int64_t)VM_KERNEL_ADDRPERM(tp);
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PF_UNIX</span>: {
+		<span class="enscript-type">struct</span> unpcb *unp = (<span class="enscript-type">struct</span> unpcb *)so-&gt;so_pcb;
+		<span class="enscript-type">struct</span> un_sockinfo *unsi = &amp;si-&gt;soi_proto.pri_un;
+
+		si-&gt;soi_kind = SOCKINFO_UN;
+
+		unsi-&gt;unsi_conn_pcb =
+		    (uint64_t)VM_KERNEL_ADDRPERM(unp-&gt;unp_conn);
+		<span class="enscript-keyword">if</span> (unp-&gt;unp_conn)
+			unsi-&gt;unsi_conn_so = (uint64_t)
+			    VM_KERNEL_ADDRPERM(unp-&gt;unp_conn-&gt;unp_socket);
+
+		<span class="enscript-keyword">if</span> (unp-&gt;unp_addr) {
+			size_t	addrlen = unp-&gt;unp_addr-&gt;sun_len;
+
+			<span class="enscript-keyword">if</span> (addrlen &gt; SOCK_MAXADDRLEN)
+				addrlen = SOCK_MAXADDRLEN;
+			bcopy(unp-&gt;unp_addr, &amp;unsi-&gt;unsi_addr, addrlen);
+		}
+		<span class="enscript-keyword">if</span> (unp-&gt;unp_conn &amp;&amp; unp-&gt;unp_conn-&gt;unp_addr) {
+			size_t	addrlen = unp-&gt;unp_conn-&gt;unp_addr-&gt;sun_len;
+
+			<span class="enscript-keyword">if</span> (addrlen &gt; SOCK_MAXADDRLEN)
+				addrlen = SOCK_MAXADDRLEN;
+			bcopy(unp-&gt;unp_conn-&gt;unp_addr, &amp;unsi-&gt;unsi_caddr,
+			    addrlen);
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PF_NDRV</span>: {
+		<span class="enscript-type">struct</span> ndrv_cb *ndrv_cb = (<span class="enscript-type">struct</span> ndrv_cb *)so-&gt;so_pcb;
+		<span class="enscript-type">struct</span> ndrv_info *ndrvsi = &amp;si-&gt;soi_proto.pri_ndrv;
+
+		si-&gt;soi_kind = SOCKINFO_NDRV;
+
+		<span class="enscript-comment">/* TDB lock ifnet ???? */</span>
+		<span class="enscript-keyword">if</span> (ndrv_cb-&gt;nd_if != 0) {
+			<span class="enscript-type">struct</span> ifnet *ifp = ndrv_cb-&gt;nd_if;
+
+			ndrvsi-&gt;ndrvsi_if_family = ifp-&gt;if_family;
+			ndrvsi-&gt;ndrvsi_if_unit = ifp-&gt;if_unit;
+			strlcpy(ndrvsi-&gt;ndrvsi_if_name, ifp-&gt;if_name, IFNAMSIZ);
+		}
+		<span class="enscript-keyword">break</span>;
+	}
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PF_SYSTEM</span>:
+		<span class="enscript-keyword">if</span> (SOCK_PROTO(so) == SYSPROTO_EVENT) {
+			<span class="enscript-type">struct</span> kern_event_pcb *ev_pcb =
+			    (<span class="enscript-type">struct</span> kern_event_pcb *)so-&gt;so_pcb;
+			<span class="enscript-type">struct</span> kern_event_info *kesi =
+			    &amp;si-&gt;soi_proto.pri_kern_event;
+
+			si-&gt;soi_kind = SOCKINFO_KERN_EVENT;
+
+			kesi-&gt;kesi_vendor_code_filter =
+			    ev_pcb-&gt;evp_vendor_code_filter;
+			kesi-&gt;kesi_class_filter = ev_pcb-&gt;evp_class_filter;
+			kesi-&gt;kesi_subclass_filter = ev_pcb-&gt;evp_subclass_filter;
+		} <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (SOCK_PROTO(so) == SYSPROTO_CONTROL) {
+			kctl_fill_socketinfo(so, si);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PF_ROUTE</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">PF_PPP</span>:
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">break</span>;
+	}
+<span class="enscript-reference">out</span>:
+	socket_unlock(so, 0);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+</pre>
+<hr />
+</body></html>

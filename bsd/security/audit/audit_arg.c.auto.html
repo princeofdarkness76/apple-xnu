@@ -1,0 +1,922 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>audit_arg.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">audit_arg.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*-
+ * Copyright (c) 1999-2012 Apple Inc.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1.  Redistributions of source code must retain the above copyright
+ *     notice, this list of conditions and the following disclaimer.
+ * 2.  Redistributions in binary form must reproduce the above copyright
+ *     notice, this list of conditions and the following disclaimer in the
+ *     documentation and/or other materials provided with the distribution.
+ * 3.  Neither the name of Apple Inc. (&quot;Apple&quot;) nor the names of
+ *     its contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS &quot;AS IS&quot; AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+ * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by McAfee Research in 2004 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/fcntl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/lock.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/queue.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ucred.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/syscall.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/un.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysent.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vfs_context.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/domain.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/protosw.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/socketvar.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit_kevents.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit_bsd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit_private.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_special_ports.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/audit_triggers_server.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/kalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/zalloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;bsm/audit_record.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_policy.h&gt;</span>
+<span class="enscript-type">extern</span> zone_t audit_mac_label_zone;
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/route.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;netinet/in_pcb.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_AUDIT</span>
+<span class="enscript-comment">/*
+ * Calls to manipulate elements of the audit record structure from system
+ * call code.  Macro wrappers will prevent this functions from being entered
+ * if auditing is disabled, avoiding the function call cost.  We check the
+ * thread audit record pointer anyway, as the audit condition could change,
+ * and pre-selection may not have allocated an audit record for this event.
+ *
+ * XXXAUDIT: Should we assert, in each case, that this field of the record
+ * hasn't already been filled in?
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_addr</span>(<span class="enscript-type">struct</span> kaudit_record *ar, user_addr_t addr)
+{
+	<span class="enscript-type">struct</span> proc *p = current_proc();
+
+	ar-&gt;k_ar.ar_arg_addr = addr;
+
+	<span class="enscript-comment">/*
+	 * If the process is 64-bit then flag the address as such.
+	 */</span>
+	<span class="enscript-keyword">if</span> (proc_is64bit(p))
+		ARG_SET_VALID(ar, ARG_ADDR64);
+	<span class="enscript-keyword">else</span>
+		ARG_SET_VALID(ar, ARG_ADDR32);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_exit</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">int</span> status, <span class="enscript-type">int</span> retval)
+{
+
+	ar-&gt;k_ar.ar_arg_exitstatus = status;
+	ar-&gt;k_ar.ar_arg_exitretval = retval;
+	ARG_SET_VALID(ar, ARG_EXIT);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_len</span>(<span class="enscript-type">struct</span> kaudit_record *ar, user_size_t len)
+{
+
+	ar-&gt;k_ar.ar_arg_len = len;
+	ARG_SET_VALID(ar, ARG_LEN);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_fd</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">int</span> fd)
+{
+
+	ar-&gt;k_ar.ar_arg_fd = fd;
+	ARG_SET_VALID(ar, ARG_FD);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_fflags</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">int</span> fflags)
+{
+
+	ar-&gt;k_ar.ar_arg_fflags = fflags;
+	ARG_SET_VALID(ar, ARG_FFLAGS);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_gid</span>(<span class="enscript-type">struct</span> kaudit_record *ar, gid_t gid)
+{
+
+	ar-&gt;k_ar.ar_arg_gid = gid;
+	ARG_SET_VALID(ar, ARG_GID);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_uid</span>(<span class="enscript-type">struct</span> kaudit_record *ar, uid_t uid)
+{
+
+	ar-&gt;k_ar.ar_arg_uid = uid;
+	ARG_SET_VALID(ar, ARG_UID);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_egid</span>(<span class="enscript-type">struct</span> kaudit_record *ar, gid_t egid)
+{
+
+	ar-&gt;k_ar.ar_arg_egid = egid;
+	ARG_SET_VALID(ar, ARG_EGID);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_euid</span>(<span class="enscript-type">struct</span> kaudit_record *ar, uid_t euid)
+{
+
+	ar-&gt;k_ar.ar_arg_euid = euid;
+	ARG_SET_VALID(ar, ARG_EUID);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_rgid</span>(<span class="enscript-type">struct</span> kaudit_record *ar, gid_t rgid)
+{
+
+	ar-&gt;k_ar.ar_arg_rgid = rgid;
+	ARG_SET_VALID(ar, ARG_RGID);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_ruid</span>(<span class="enscript-type">struct</span> kaudit_record *ar, uid_t ruid)
+{
+
+	ar-&gt;k_ar.ar_arg_ruid = ruid;
+	ARG_SET_VALID(ar, ARG_RUID);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_sgid</span>(<span class="enscript-type">struct</span> kaudit_record *ar, gid_t sgid)
+{
+
+	ar-&gt;k_ar.ar_arg_sgid = sgid;
+	ARG_SET_VALID(ar, ARG_SGID);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_suid</span>(<span class="enscript-type">struct</span> kaudit_record *ar, uid_t suid)
+{
+
+	ar-&gt;k_ar.ar_arg_suid = suid;
+	ARG_SET_VALID(ar, ARG_SUID);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_groupset</span>(<span class="enscript-type">struct</span> kaudit_record *ar, gid_t *gidset, u_int gidset_size)
+{
+	u_int i;
+
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; gidset_size; i++)
+		ar-&gt;k_ar.ar_arg_groups.gidset[i] = gidset[i];
+	ar-&gt;k_ar.ar_arg_groups.gidset_size = gidset_size;
+	ARG_SET_VALID(ar, ARG_GROUPSET);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_login</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">char</span> *login)
+{
+
+	strlcpy(ar-&gt;k_ar.ar_arg_login, login, MAXLOGNAME);
+	ARG_SET_VALID(ar, ARG_LOGIN);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_ctlname</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">int</span> *name, <span class="enscript-type">int</span> namelen)
+{
+
+	bcopy(name, &amp;ar-&gt;k_ar.ar_arg_ctlname, namelen * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">int</span>));
+	ar-&gt;k_ar.ar_arg_len = namelen;
+	ARG_SET_VALID(ar, ARG_CTLNAME | ARG_LEN);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_mask</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">int</span> mask)
+{
+
+	ar-&gt;k_ar.ar_arg_mask = mask;
+	ARG_SET_VALID(ar, ARG_MASK);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_mode</span>(<span class="enscript-type">struct</span> kaudit_record *ar, mode_t mode)
+{
+
+	ar-&gt;k_ar.ar_arg_mode = mode;
+	ARG_SET_VALID(ar, ARG_MODE);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_value32</span>(<span class="enscript-type">struct</span> kaudit_record *ar, uint32_t value32)
+{
+
+	ar-&gt;k_ar.ar_arg_value32 = value32;
+	ARG_SET_VALID(ar, ARG_VALUE32);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_value64</span>(<span class="enscript-type">struct</span> kaudit_record *ar, uint64_t value64)
+{
+
+	ar-&gt;k_ar.ar_arg_value64 = value64;
+	ARG_SET_VALID(ar, ARG_VALUE64);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_owner</span>(<span class="enscript-type">struct</span> kaudit_record *ar, uid_t uid, gid_t gid)
+{
+
+	ar-&gt;k_ar.ar_arg_uid = uid;
+	ar-&gt;k_ar.ar_arg_gid = gid;
+	ARG_SET_VALID(ar, ARG_UID | ARG_GID);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_pid</span>(<span class="enscript-type">struct</span> kaudit_record *ar, pid_t pid)
+{
+
+	ar-&gt;k_ar.ar_arg_pid = pid;
+	ARG_SET_VALID(ar, ARG_PID);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_process</span>(<span class="enscript-type">struct</span> kaudit_record *ar, proc_t p)
+{
+	kauth_cred_t my_cred;
+
+	KASSERT(p != NULL, (<span class="enscript-string">&quot;audit_arg_process: p == NULL&quot;</span>));
+
+	<span class="enscript-keyword">if</span> ( p == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	my_cred = kauth_cred_proc_ref(p);
+	ar-&gt;k_ar.ar_arg_auid = my_cred-&gt;cr_audit.as_aia_p-&gt;ai_auid;
+	ar-&gt;k_ar.ar_arg_asid = my_cred-&gt;cr_audit.as_aia_p-&gt;ai_asid;
+	bcopy(&amp;my_cred-&gt;cr_audit.as_aia_p-&gt;ai_termid,
+	    &amp;ar-&gt;k_ar.ar_arg_termid_addr, <span class="enscript-keyword">sizeof</span>(au_tid_addr_t));
+	ar-&gt;k_ar.ar_arg_euid = kauth_cred_getuid(my_cred);
+	ar-&gt;k_ar.ar_arg_egid = kauth_cred_getgid(my_cred);
+	ar-&gt;k_ar.ar_arg_ruid = kauth_cred_getruid(my_cred);
+	ar-&gt;k_ar.ar_arg_rgid = kauth_cred_getrgid(my_cred);
+	kauth_cred_unref(&amp;my_cred);
+	ar-&gt;k_ar.ar_arg_pid = p-&gt;p_pid;
+	ARG_SET_VALID(ar, ARG_AUID | ARG_EUID | ARG_EGID | ARG_RUID |
+	    ARG_RGID | ARG_ASID | ARG_TERMID_ADDR | ARG_PID | ARG_PROCESS);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_signum</span>(<span class="enscript-type">struct</span> kaudit_record *ar, u_int signum)
+{
+
+	ar-&gt;k_ar.ar_arg_signum = signum;
+	ARG_SET_VALID(ar, ARG_SIGNUM);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_socket</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">int</span> sodomain, <span class="enscript-type">int</span> sotype,
+    <span class="enscript-type">int</span> soprotocol)
+{
+
+	ar-&gt;k_ar.ar_arg_sockinfo.sai_domain = sodomain;
+	ar-&gt;k_ar.ar_arg_sockinfo.sai_type = sotype;
+	ar-&gt;k_ar.ar_arg_sockinfo.sai_protocol = soprotocol;
+	ARG_SET_VALID(ar, ARG_SOCKINFO);
+}
+
+<span class="enscript-comment">/*
+ * Note that the current working directory vp must be supplied at the audit
+ * call site to permit per thread current working directories, and that it
+ * must take a upath starting with '/' into account for chroot if the path
+ * is absolute.  This results in the real (non-chroot) path being recorded
+ * in the audit record.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_sockaddr</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">struct</span> vnode *cwd_vp,
+    <span class="enscript-type">struct</span> sockaddr *sa)
+{
+	<span class="enscript-type">int</span> slen;
+	<span class="enscript-type">struct</span> sockaddr_un *sun;
+	<span class="enscript-type">char</span> path[SOCK_MAXADDRLEN - offsetof(<span class="enscript-type">struct</span> sockaddr_un, sun_path) + 1];
+
+	KASSERT(sa != NULL, (<span class="enscript-string">&quot;audit_arg_sockaddr: sa == NULL&quot;</span>));
+
+	<span class="enscript-keyword">if</span> (cwd_vp == NULL || sa == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	bcopy(sa, &amp;ar-&gt;k_ar.ar_arg_sockaddr, sa-&gt;sa_len);
+	<span class="enscript-keyword">switch</span> (sa-&gt;sa_family) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET</span>:
+		ARG_SET_VALID(ar, ARG_SADDRINET);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_INET6</span>:
+		ARG_SET_VALID(ar, ARG_SADDRINET6);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AF_UNIX</span>:
+		sun = (<span class="enscript-type">struct</span> sockaddr_un *)sa;
+		slen = sun-&gt;sun_len - offsetof(<span class="enscript-type">struct</span> sockaddr_un, sun_path);
+
+		<span class="enscript-keyword">if</span> (slen &gt;= 0) {
+			<span class="enscript-comment">/*
+			 * Make sure the path is NULL-terminated
+			 */</span>
+			<span class="enscript-keyword">if</span> (sun-&gt;sun_path[slen] != 0) {
+				bcopy(sun-&gt;sun_path, path, slen);
+				path[slen] = 0;
+				audit_arg_upath(ar, cwd_vp, path, ARG_UPATH1);
+			} <span class="enscript-keyword">else</span> {
+				audit_arg_upath(ar, cwd_vp, sun-&gt;sun_path, 
+					ARG_UPATH1);
+			}
+		}
+		ARG_SET_VALID(ar, ARG_SADDRUNIX);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-comment">/* XXXAUDIT: default:? */</span>
+	}
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_auid</span>(<span class="enscript-type">struct</span> kaudit_record *ar, uid_t auid)
+{
+
+	ar-&gt;k_ar.ar_arg_auid = auid;
+	ARG_SET_VALID(ar, ARG_AUID);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_auditinfo</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">struct</span> auditinfo *au_info)
+{
+
+	ar-&gt;k_ar.ar_arg_auid = au_info-&gt;ai_auid;
+	ar-&gt;k_ar.ar_arg_asid = au_info-&gt;ai_asid;
+	ar-&gt;k_ar.ar_arg_amask.am_success = au_info-&gt;ai_mask.am_success;
+	ar-&gt;k_ar.ar_arg_amask.am_failure = au_info-&gt;ai_mask.am_failure;
+	ar-&gt;k_ar.ar_arg_termid.port = au_info-&gt;ai_termid.port;
+	ar-&gt;k_ar.ar_arg_termid.machine = au_info-&gt;ai_termid.machine;
+	ARG_SET_VALID(ar, ARG_AUID | ARG_ASID | ARG_AMASK | ARG_TERMID);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_auditinfo_addr</span>(<span class="enscript-type">struct</span> kaudit_record *ar,
+    <span class="enscript-type">struct</span> auditinfo_addr *au_info)
+{
+
+	ar-&gt;k_ar.ar_arg_auid = au_info-&gt;ai_auid;
+	ar-&gt;k_ar.ar_arg_asid = au_info-&gt;ai_asid;
+	ar-&gt;k_ar.ar_arg_amask.am_success = au_info-&gt;ai_mask.am_success;
+	ar-&gt;k_ar.ar_arg_amask.am_failure = au_info-&gt;ai_mask.am_failure;
+	ar-&gt;k_ar.ar_arg_termid_addr.at_type = au_info-&gt;ai_termid.at_type;
+	ar-&gt;k_ar.ar_arg_termid_addr.at_port = au_info-&gt;ai_termid.at_port;
+	ar-&gt;k_ar.ar_arg_termid_addr.at_addr[0] = au_info-&gt;ai_termid.at_addr[0];
+	ar-&gt;k_ar.ar_arg_termid_addr.at_addr[1] = au_info-&gt;ai_termid.at_addr[1];
+	ar-&gt;k_ar.ar_arg_termid_addr.at_addr[2] = au_info-&gt;ai_termid.at_addr[2];
+	ar-&gt;k_ar.ar_arg_termid_addr.at_addr[3] = au_info-&gt;ai_termid.at_addr[3];
+	ARG_SET_VALID(ar, ARG_AUID | ARG_ASID | ARG_AMASK | ARG_TERMID_ADDR);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_text</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">char</span> *text)
+{
+
+	KASSERT(text != NULL, (<span class="enscript-string">&quot;audit_arg_text: text == NULL&quot;</span>));
+
+	<span class="enscript-comment">/* Invalidate the text string */</span>
+	ar-&gt;k_ar.ar_valid_arg &amp;= (ARG_ALL ^ ARG_TEXT);
+	<span class="enscript-keyword">if</span> (text == NULL)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (ar-&gt;k_ar.ar_arg_text == NULL) 
+		ar-&gt;k_ar.ar_arg_text = malloc(MAXPATHLEN, M_AUDITTEXT, 
+		    M_WAITOK);
+
+	strncpy(ar-&gt;k_ar.ar_arg_text, text, MAXPATHLEN);
+	ARG_SET_VALID(ar, ARG_TEXT);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_opaque</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">void</span> *data, size_t size)
+{
+
+	KASSERT(data != NULL, (<span class="enscript-string">&quot;audit_arg_opaque: data == NULL&quot;</span>));
+	KASSERT(size &lt;= UINT16_MAX, (<span class="enscript-string">&quot;audit_arg_opaque: size &gt; UINT16_MAX&quot;</span>));
+
+	<span class="enscript-keyword">if</span> (data == NULL || size &gt; UINT16_MAX)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (ar-&gt;k_ar.ar_arg_opaque == NULL)
+		ar-&gt;k_ar.ar_arg_opaque = malloc(size, M_AUDITDATA, M_WAITOK);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>;
+
+	memcpy(ar-&gt;k_ar.ar_arg_opaque, data, size);
+	ar-&gt;k_ar.ar_arg_opq_size = (u_int16_t) size;
+	ARG_SET_VALID(ar, ARG_OPAQUE);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_data</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">void</span> *data, size_t size, size_t number)
+{
+	size_t sz;
+
+	KASSERT(data != NULL, (<span class="enscript-string">&quot;audit_arg_data: data == NULL&quot;</span>));
+	KASSERT(size &gt;= AUR_BYTE_SIZE &amp;&amp; size &lt;= AUR_INT64_SIZE,
+	    (<span class="enscript-string">&quot;audit_arg_data: size &lt; AUR_BYTE_SIZE or size &gt; AUR_INT64_SIZE&quot;</span>));
+	KASSERT(number &lt;= UINT8_MAX,
+	    (<span class="enscript-string">&quot;audit_arg_data: number &gt; UINT8_MAX&quot;</span>));
+
+	<span class="enscript-keyword">if</span> (data == NULL || size &lt; AUR_BYTE_SIZE || size &gt; AUR_INT64_SIZE ||
+	    number &gt; UINT8_MAX)
+		<span class="enscript-keyword">return</span>;
+
+	sz = size * number;
+
+	<span class="enscript-keyword">if</span> (ar-&gt;k_ar.ar_arg_data == NULL)
+		ar-&gt;k_ar.ar_arg_data = malloc(sz, M_AUDITDATA, M_WAITOK);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>;
+
+	memcpy(ar-&gt;k_ar.ar_arg_data, data, sz);
+
+	<span class="enscript-keyword">switch</span>(size) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUR_BYTE_SIZE</span>:
+		ar-&gt;k_ar.ar_arg_data_type = AUR_BYTE;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUR_SHORT_SIZE</span>:
+		ar-&gt;k_ar.ar_arg_data_type = AUR_SHORT;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUR_INT32_SIZE</span>:
+		ar-&gt;k_ar.ar_arg_data_type = AUR_INT32;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">AUR_INT64_SIZE</span>:
+		ar-&gt;k_ar.ar_arg_data_type = AUR_INT64;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		free(ar-&gt;k_ar.ar_arg_data, M_AUDITDATA);
+		ar-&gt;k_ar.ar_arg_data = NULL;
+		<span class="enscript-keyword">return</span>;
+	}
+
+	ar-&gt;k_ar.ar_arg_data_count = (u_char)number;
+
+	ARG_SET_VALID(ar, ARG_DATA);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_cmd</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">int</span> cmd)
+{
+
+	ar-&gt;k_ar.ar_arg_cmd = cmd;
+	ARG_SET_VALID(ar, ARG_CMD);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_svipc_cmd</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">int</span> cmd)
+{
+
+	ar-&gt;k_ar.ar_arg_svipc_cmd = cmd;
+	ARG_SET_VALID(ar, ARG_SVIPC_CMD);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_svipc_perm</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">struct</span> ipc_perm *perm)
+{
+
+	bcopy(perm, &amp;ar-&gt;k_ar.ar_arg_svipc_perm,
+	    <span class="enscript-keyword">sizeof</span>(ar-&gt;k_ar.ar_arg_svipc_perm));
+	ARG_SET_VALID(ar, ARG_SVIPC_PERM);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_svipc_id</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">int</span> id)
+{
+
+	ar-&gt;k_ar.ar_arg_svipc_id = id;
+	ARG_SET_VALID(ar, ARG_SVIPC_ID);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_svipc_addr</span>(<span class="enscript-type">struct</span> kaudit_record *ar, user_addr_t addr)
+{
+
+	ar-&gt;k_ar.ar_arg_svipc_addr = addr;
+	ARG_SET_VALID(ar, ARG_SVIPC_ADDR);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_posix_ipc_perm</span>(<span class="enscript-type">struct</span> kaudit_record *ar, uid_t uid, gid_t gid,
+    mode_t mode)
+{
+
+	ar-&gt;k_ar.ar_arg_pipc_perm.pipc_uid = uid;
+	ar-&gt;k_ar.ar_arg_pipc_perm.pipc_gid = gid;
+	ar-&gt;k_ar.ar_arg_pipc_perm.pipc_mode = mode;
+	ARG_SET_VALID(ar, ARG_POSIX_IPC_PERM);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_auditon</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">union</span> auditon_udata *udata)
+{
+
+	bcopy((<span class="enscript-type">void</span> *)udata, &amp;ar-&gt;k_ar.ar_arg_auditon,
+	    <span class="enscript-keyword">sizeof</span>(ar-&gt;k_ar.ar_arg_auditon));
+	ARG_SET_VALID(ar, ARG_AUDITON);
+}
+
+<span class="enscript-comment">/*
+ * Audit information about a file, either the file's vnode info, or its
+ * socket address info.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_file</span>(<span class="enscript-type">struct</span> kaudit_record *ar, __unused proc_t p,
+    <span class="enscript-type">struct</span> fileproc *fp)
+{
+	<span class="enscript-type">struct</span> socket *so;
+	<span class="enscript-type">struct</span> inpcb *pcb;
+	<span class="enscript-type">struct</span> sockaddr_in *sin;
+	<span class="enscript-type">struct</span> sockaddr_in6 *sin6;
+
+	<span class="enscript-keyword">switch</span> (FILEGLOB_DTYPE(fp-&gt;f_fglob)) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTYPE_VNODE</span>:
+	<span class="enscript-comment">/* case DTYPE_FIFO: */</span>
+		audit_arg_vnpath_withref(ar,
+		    (<span class="enscript-type">struct</span> vnode *)fp-&gt;f_fglob-&gt;fg_data, ARG_VNODE1);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">DTYPE_SOCKET</span>:
+		so = (<span class="enscript-type">struct</span> socket *)fp-&gt;f_fglob-&gt;fg_data;
+		<span class="enscript-keyword">if</span> (SOCK_CHECK_DOM(so, PF_INET)) {
+			<span class="enscript-keyword">if</span> (so-&gt;so_pcb == NULL)
+				<span class="enscript-keyword">break</span>;
+			ar-&gt;k_ar.ar_arg_sockinfo.sai_type =
+			    so-&gt;so_type;
+			ar-&gt;k_ar.ar_arg_sockinfo.sai_domain = SOCK_DOM(so);
+			ar-&gt;k_ar.ar_arg_sockinfo.sai_protocol = SOCK_PROTO(so);
+			pcb = (<span class="enscript-type">struct</span> inpcb *)so-&gt;so_pcb;
+			sin = (<span class="enscript-type">struct</span> sockaddr_in *)
+			    &amp;ar-&gt;k_ar.ar_arg_sockinfo.sai_faddr;
+			sin-&gt;sin_addr.s_addr = pcb-&gt;inp_faddr.s_addr;
+			sin-&gt;sin_port = pcb-&gt;inp_fport;
+			sin = (<span class="enscript-type">struct</span> sockaddr_in *)
+			    &amp;ar-&gt;k_ar.ar_arg_sockinfo.sai_laddr;
+			sin-&gt;sin_addr.s_addr = pcb-&gt;inp_laddr.s_addr;
+			sin-&gt;sin_port = pcb-&gt;inp_lport;
+			ARG_SET_VALID(ar, ARG_SOCKINFO);
+		}
+		<span class="enscript-keyword">if</span> (SOCK_CHECK_DOM(so, PF_INET6)) {
+			<span class="enscript-keyword">if</span> (so-&gt;so_pcb == NULL)
+				<span class="enscript-keyword">break</span>;
+			ar-&gt;k_ar.ar_arg_sockinfo.sai_type =
+			    so-&gt;so_type;
+			ar-&gt;k_ar.ar_arg_sockinfo.sai_domain = SOCK_DOM(so);
+			ar-&gt;k_ar.ar_arg_sockinfo.sai_protocol = SOCK_PROTO(so);
+			pcb = (<span class="enscript-type">struct</span> inpcb *)so-&gt;so_pcb;
+			sin6 = (<span class="enscript-type">struct</span> sockaddr_in6 *)
+			    &amp;ar-&gt;k_ar.ar_arg_sockinfo.sai_faddr;
+			sin6-&gt;sin6_addr = pcb-&gt;in6p_faddr;
+			sin6-&gt;sin6_port = pcb-&gt;in6p_fport;
+			sin6 = (<span class="enscript-type">struct</span> sockaddr_in6 *)
+			    &amp;ar-&gt;k_ar.ar_arg_sockinfo.sai_laddr;
+			sin6-&gt;sin6_addr = pcb-&gt;in6p_laddr;
+			sin6-&gt;sin6_port = pcb-&gt;in6p_lport;
+			ARG_SET_VALID(ar, ARG_SOCKINFO);
+		}
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-comment">/* XXXAUDIT: else? */</span>
+		<span class="enscript-keyword">break</span>;
+	}
+}
+
+<span class="enscript-comment">/*
+ * Store a path as given by the user process for auditing into the audit
+ * record stored on the user thread.  This function will allocate the memory
+ * to store the path info if not already available.  This memory will be
+ * freed when the audit record is freed.
+ * 
+ * Note that the current working directory vp must be supplied at the audit call
+ * site to permit per thread current working directories, and that it must take
+ * a upath starting with '/' into account for chroot if the path is absolute.
+ * This results in the real (non-chroot) path being recorded in the audit
+ * record.
+ *
+ * XXXAUDIT: Possibly assert that the memory isn't already allocated?
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_upath</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">struct</span> vnode *cwd_vp, <span class="enscript-type">char</span> *upath, u_int64_t flag)
+{
+	<span class="enscript-type">char</span> **pathp;
+
+	KASSERT(upath != NULL, (<span class="enscript-string">&quot;audit_arg_upath: upath == NULL&quot;</span>));
+	KASSERT((flag == ARG_UPATH1) || (flag == ARG_UPATH2),
+	    (<span class="enscript-string">&quot;audit_arg_upath: flag %llu&quot;</span>, (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> <span class="enscript-type">long</span>)flag));
+	KASSERT((flag != ARG_UPATH1) || (flag != ARG_UPATH2),
+	    (<span class="enscript-string">&quot;audit_arg_upath: flag %llu&quot;</span>, (<span class="enscript-type">unsigned</span> <span class="enscript-type">long</span> <span class="enscript-type">long</span>)flag));
+
+	<span class="enscript-keyword">if</span> (flag == ARG_UPATH1)
+		pathp = &amp;ar-&gt;k_ar.ar_arg_upath1;
+	<span class="enscript-keyword">else</span>
+		pathp = &amp;ar-&gt;k_ar.ar_arg_upath2;
+
+	<span class="enscript-keyword">if</span> (*pathp == NULL)
+		*pathp = malloc(MAXPATHLEN, M_AUDITPATH, M_WAITOK);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (audit_canon_path(cwd_vp, upath, *pathp) == 0)
+		ARG_SET_VALID(ar, flag);
+	<span class="enscript-keyword">else</span> {
+		free(*pathp, M_AUDITPATH);
+		*pathp = NULL;
+	}
+}
+
+<span class="enscript-comment">/*
+ * Function to save the path and vnode attr information into the audit
+ * record.
+ *
+ * It is assumed that the caller will hold any vnode locks necessary to
+ * perform a VNOP_GETATTR() on the passed vnode.
+ *
+ * XXX: The attr code is very similar to vfs_vnops.c:vn_stat(), but always
+ * provides access to the generation number as we need that to construct the
+ * BSM file ID.
+ *
+ * XXX: We should accept the process argument from the caller, since it's
+ * very likely they already have a reference.
+ *
+ * XXX: Error handling in this function is poor.
+ *
+ * XXXAUDIT: Possibly KASSERT the path pointer is NULL?
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_vnpath</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">struct</span> vnode *vp, u_int64_t flags)
+{
+	<span class="enscript-type">struct</span> vnode_attr va;
+	<span class="enscript-type">int</span> error;
+	<span class="enscript-type">int</span> len;
+	<span class="enscript-type">char</span> **pathp;
+	<span class="enscript-type">struct</span> vnode_au_info *vnp;
+	proc_t p;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-type">char</span> **vnode_mac_labelp;
+	<span class="enscript-type">struct</span> mac mac;
+#<span class="enscript-reference">endif</span>
+
+	KASSERT(vp != NULL, (<span class="enscript-string">&quot;audit_arg_vnpath: vp == NULL&quot;</span>));
+	KASSERT((flags == ARG_VNODE1) || (flags == ARG_VNODE2),
+	    (<span class="enscript-string">&quot;audit_arg_vnpath: flags != ARG_VNODE[1,2]&quot;</span>));
+
+	p = current_proc();
+
+	<span class="enscript-comment">/* 
+	 * XXXAUDIT: The below clears, and then resets the flags for valid
+	 * arguments.  Ideally, either the new vnode is used, or the old one
+	 * would be.
+	 */</span>
+	<span class="enscript-keyword">if</span> (flags &amp; ARG_VNODE1) {
+		ar-&gt;k_ar.ar_valid_arg &amp;= (ARG_ALL ^ ARG_KPATH1);
+		ar-&gt;k_ar.ar_valid_arg &amp;= (ARG_ALL ^ ARG_VNODE1);
+		pathp = &amp;ar-&gt;k_ar.ar_arg_kpath1;
+		vnp = &amp;ar-&gt;k_ar.ar_arg_vnode1;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+		vnode_mac_labelp = &amp;ar-&gt;k_ar.ar_vnode1_mac_labels;
+#<span class="enscript-reference">endif</span>
+	} <span class="enscript-keyword">else</span> {
+		ar-&gt;k_ar.ar_valid_arg &amp;= (ARG_ALL ^ ARG_KPATH2);
+		ar-&gt;k_ar.ar_valid_arg &amp;= (ARG_ALL ^ ARG_VNODE2);
+		pathp = &amp;ar-&gt;k_ar.ar_arg_kpath2;
+		vnp = &amp;ar-&gt;k_ar.ar_arg_vnode2;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+		vnode_mac_labelp = &amp;ar-&gt;k_ar.ar_vnode2_mac_labels;
+#<span class="enscript-reference">endif</span>
+	}
+
+	<span class="enscript-keyword">if</span> (*pathp == NULL)
+		*pathp = malloc(MAXPATHLEN, M_AUDITPATH, M_WAITOK);
+	<span class="enscript-keyword">else</span>
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-comment">/*
+	 * If vn_getpath() succeeds, place it in a string buffer
+	 * attached to the audit record, and set a flag indicating
+	 * it is present.
+	 */</span>
+	len = MAXPATHLEN;
+	<span class="enscript-keyword">if</span> (vn_getpath(vp, *pathp, &amp;len) == 0) {
+		<span class="enscript-keyword">if</span> (flags &amp; ARG_VNODE1)
+			ARG_SET_VALID(ar, ARG_KPATH1);
+		<span class="enscript-keyword">else</span>
+			ARG_SET_VALID(ar, ARG_KPATH2);
+	} <span class="enscript-keyword">else</span> {
+		free(*pathp, M_AUDITPATH);
+		*pathp = NULL;
+	}
+
+	VATTR_INIT(&amp;va);
+	VATTR_WANTED(&amp;va, va_mode);
+	VATTR_WANTED(&amp;va, va_uid);
+	VATTR_WANTED(&amp;va, va_gid);
+	VATTR_WANTED(&amp;va, va_rdev);
+	VATTR_WANTED(&amp;va, va_fsid);
+	VATTR_WANTED(&amp;va, va_fileid);
+	VATTR_WANTED(&amp;va, va_gen);
+	error = vnode_getattr(vp, &amp;va, vfs_context_current());
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-comment">/* XXX: How to handle this case? */</span>
+		<span class="enscript-keyword">return</span>;
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-keyword">if</span> (*vnode_mac_labelp == NULL &amp;&amp; (vp-&gt;v_lflag &amp; VL_LABELED) == VL_LABELED) {
+		*vnode_mac_labelp = (<span class="enscript-type">char</span> *)zalloc(audit_mac_label_zone);
+		<span class="enscript-keyword">if</span> (*vnode_mac_labelp != NULL) {
+			mac.m_buflen = MAC_AUDIT_LABEL_LEN;
+			mac.m_string = *vnode_mac_labelp;
+			mac_vnode_label_externalize_audit(vp, &amp;mac);
+		}
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-comment">/*
+	 * XXX do we want to fall back here when these aren't supported?
+	 */</span>
+	vnp-&gt;vn_mode = va.va_mode;
+	vnp-&gt;vn_uid = va.va_uid;
+	vnp-&gt;vn_gid = va.va_gid;
+	vnp-&gt;vn_dev = va.va_rdev;
+	vnp-&gt;vn_fsid = va.va_fsid;
+	vnp-&gt;vn_fileid = (u_int32_t)va.va_fileid;
+	vnp-&gt;vn_gen = va.va_gen;
+	<span class="enscript-keyword">if</span> (flags &amp; ARG_VNODE1)
+		ARG_SET_VALID(ar, ARG_VNODE1);
+	<span class="enscript-keyword">else</span>
+		ARG_SET_VALID(ar, ARG_VNODE2);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_vnpath_withref</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">struct</span> vnode *vp, u_int64_t flags)
+{
+	<span class="enscript-keyword">if</span> (vp == NULL || vnode_getwithref(vp))
+		<span class="enscript-keyword">return</span>;
+	audit_arg_vnpath(ar, vp, flags);
+	(<span class="enscript-type">void</span>)vnode_put(vp);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_mach_port1</span>(<span class="enscript-type">struct</span> kaudit_record *ar, mach_port_name_t port)
+{
+
+	ar-&gt;k_ar.ar_arg_mach_port1 = port;
+	ARG_SET_VALID(ar, ARG_MACHPORT1);
+}
+
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_mach_port2</span>(<span class="enscript-type">struct</span> kaudit_record *ar, mach_port_name_t port)
+{
+
+	ar-&gt;k_ar.ar_arg_mach_port2 = port;
+	ARG_SET_VALID(ar, ARG_MACHPORT2);
+}
+
+
+<span class="enscript-comment">/*
+ * Audit the argument strings passed to exec.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_argv</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">char</span> *argv, <span class="enscript-type">int</span> argc, <span class="enscript-type">int</span> length)
+{
+
+	<span class="enscript-keyword">if</span> (audit_argv == 0 || argc == 0)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (ar-&gt;k_ar.ar_arg_argv == NULL)
+		ar-&gt;k_ar.ar_arg_argv = malloc(length, M_AUDITTEXT, M_WAITOK);
+	bcopy(argv, ar-&gt;k_ar.ar_arg_argv, length);
+	ar-&gt;k_ar.ar_arg_argc = argc;
+	ARG_SET_VALID(ar, ARG_ARGV);
+}
+
+<span class="enscript-comment">/*
+ * Audit the environment strings passed to exec.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_arg_envv</span>(<span class="enscript-type">struct</span> kaudit_record *ar, <span class="enscript-type">char</span> *envv, <span class="enscript-type">int</span> envc, <span class="enscript-type">int</span> length)
+{
+
+	<span class="enscript-keyword">if</span> (audit_arge == 0 || envc == 0)
+		<span class="enscript-keyword">return</span>;
+
+	<span class="enscript-keyword">if</span> (ar-&gt;k_ar.ar_arg_envv == NULL)
+		ar-&gt;k_ar.ar_arg_envv = malloc(length, M_AUDITTEXT, M_WAITOK);
+	bcopy(envv, ar-&gt;k_ar.ar_arg_envv, length);
+	ar-&gt;k_ar.ar_arg_envc = envc;
+	ARG_SET_VALID(ar, ARG_ENVV);
+}
+
+<span class="enscript-comment">/*
+ * The close() system call uses it's own audit call to capture the path/vnode
+ * information because those pieces are not easily obtained within the system
+ * call itself.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">audit_sysclose</span>(<span class="enscript-type">struct</span> kaudit_record *ar, proc_t p, <span class="enscript-type">int</span> fd)
+{
+	<span class="enscript-type">struct</span> fileproc *fp;
+	<span class="enscript-type">struct</span> vnode *vp;
+
+	KASSERT(p != NULL, (<span class="enscript-string">&quot;audit_sysclose: p == NULL&quot;</span>));
+
+	audit_arg_fd(ar, fd);
+
+	<span class="enscript-keyword">if</span> (fp_getfvp(p, fd, &amp;fp, &amp;vp) != 0)
+		<span class="enscript-keyword">return</span>;
+
+	audit_arg_vnpath_withref(ar, (<span class="enscript-type">struct</span> vnode *)fp-&gt;f_fglob-&gt;fg_data,
+	    ARG_VNODE1);
+	fp_drop(p, fd, fp, 0);
+}
+
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* CONFIG_AUDIT */</span>
+</pre>
+<hr />
+</body></html>

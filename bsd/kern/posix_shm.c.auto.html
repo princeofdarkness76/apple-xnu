@@ -1,0 +1,1324 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>posix_shm.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">posix_shm.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ *	Copyright (c) 1990, 1996-1998 Apple Computer, Inc.
+ *	All Rights Reserved.
+ */</span>
+<span class="enscript-comment">/*
+ * posix_shm.c : Support for POSIX shared memory APIs
+ *
+ *	File:	posix_shm.c
+ *	Author:	Ananthakrishna Ramesh
+ *
+ * HISTORY
+ * 2-Sep-1999	A.Ramesh
+ *	Created for MacOSX
+ *
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/cdefs.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/filedesc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/tty.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mman.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/stat.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_info.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_prot.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_inherit.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/kern_return.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/memory_object_control.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_protos.h&gt;</span>
+
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">f_flag</span> f_fglob-&gt;fg_flag
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">f_type</span> f_fglob-&gt;fg_ops-&gt;fo_type
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">f_msgcount</span> f_fglob-&gt;fg_msgcount
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">f_cred</span> f_fglob-&gt;fg_cred
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">f_ops</span> f_fglob-&gt;fg_ops
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">f_offset</span> f_fglob-&gt;fg_offset
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">f_data</span> f_fglob-&gt;fg_data
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PSHMNAMLEN</span>	31	<span class="enscript-comment">/* maximum name segment length we bother with */</span>
+
+<span class="enscript-type">struct</span> pshmobj {
+	<span class="enscript-type">void</span> *			pshmo_memobject;
+	memory_object_size_t	pshmo_size;
+	<span class="enscript-type">struct</span> pshmobj *	pshmo_next;
+};
+
+<span class="enscript-type">struct</span> pshminfo {
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	pshm_flags;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	pshm_usecount;
+	off_t		pshm_length;
+	mode_t		pshm_mode;
+	uid_t		pshm_uid;
+	gid_t		pshm_gid;
+	<span class="enscript-type">char</span>		pshm_name[PSHMNAMLEN + 1];	<span class="enscript-comment">/* segment name */</span>
+	<span class="enscript-type">struct</span> pshmobj *pshm_memobjects;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> 	pshm_readcount;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> 	pshm_writecount;
+	proc_t		pshm_proc;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DIAGNOSTIC */</span>
+	<span class="enscript-type">struct</span> label*	pshm_label;
+};
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PSHMINFO_NULL</span> (struct pshminfo *)0
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PSHM_NONE</span>	0x001
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PSHM_DEFINED</span>	0x002
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PSHM_ALLOCATED</span>	0x004
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PSHM_MAPPED</span>	0x008
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PSHM_INUSE</span>	0x010
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PSHM_REMOVED</span>	0x020
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PSHM_INCREATE</span>	0x040
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">PSHM_INDELETE</span>	0x080
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PSHM_ALLOCATING</span>	0x100
+
+<span class="enscript-type">struct</span>	pshmcache {
+	LIST_ENTRY(pshmcache) pshm_hash;	<span class="enscript-comment">/* hash chain */</span>
+	<span class="enscript-type">struct</span>	pshminfo *pshminfo;		<span class="enscript-comment">/* vnode the name refers to */</span>
+	<span class="enscript-type">int</span>	pshm_nlen;		<span class="enscript-comment">/* length of name */</span>
+	<span class="enscript-type">char</span>	pshm_name[PSHMNAMLEN + 1];	<span class="enscript-comment">/* segment name */</span>
+};
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PSHMCACHE_NULL</span> (struct pshmcache *)0
+
+<span class="enscript-type">struct</span>	pshmstats {
+	<span class="enscript-type">long</span>	goodhits;		<span class="enscript-comment">/* hits that we can really use */</span>
+	<span class="enscript-type">long</span>	neghits;		<span class="enscript-comment">/* negative hits that we can use */</span>
+	<span class="enscript-type">long</span>	badhits;		<span class="enscript-comment">/* hits we must drop */</span>
+	<span class="enscript-type">long</span>	falsehits;		<span class="enscript-comment">/* hits with id mismatch */</span>
+	<span class="enscript-type">long</span>	miss;		<span class="enscript-comment">/* misses */</span>
+	<span class="enscript-type">long</span>	longnames;		<span class="enscript-comment">/* long names that ignore cache */</span>
+};
+
+<span class="enscript-type">struct</span> pshmname {
+	<span class="enscript-type">char</span>	*pshm_nameptr;	<span class="enscript-comment">/* pointer to looked up name */</span>
+	<span class="enscript-type">long</span>	pshm_namelen;	<span class="enscript-comment">/* length of looked up component */</span>
+	u_long	pshm_hash;	<span class="enscript-comment">/* hash value of looked up name */</span>
+};
+
+<span class="enscript-type">struct</span> pshmnode {
+	off_t  		mapp_addr;
+	user_size_t	map_size;	<span class="enscript-comment">/* XXX unused ? */</span>
+	<span class="enscript-type">struct</span> pshminfo *pinfo;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>	pshm_usecount;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> readcnt;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> writecnt;
+#<span class="enscript-reference">endif</span>
+};
+#<span class="enscript-reference">define</span> <span class="enscript-variable-name">PSHMNODE_NULL</span> (struct pshmnode *)0
+
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PSHMHASH</span>(pnp) \
+	(&amp;pshmhashtbl[(pnp)-&gt;pshm_hash &amp; pshmhash])
+
+<span class="enscript-function-name">LIST_HEAD</span>(pshmhashhead, pshmcache) *pshmhashtbl;	<span class="enscript-comment">/* Hash Table */</span>
+u_long	pshmhash;				<span class="enscript-comment">/* size of hash table - 1 */</span>
+<span class="enscript-type">long</span>	pshmnument;			<span class="enscript-comment">/* number of cache entries allocated */</span>
+<span class="enscript-type">struct</span> pshmstats pshmstats;		<span class="enscript-comment">/* cache effectiveness statistics */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pshm_read</span> (<span class="enscript-type">struct</span> fileproc *fp, <span class="enscript-type">struct</span> uio *uio,
+		    <span class="enscript-type">int</span> flags, vfs_context_t ctx);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pshm_write</span> (<span class="enscript-type">struct</span> fileproc *fp, <span class="enscript-type">struct</span> uio *uio,
+		    <span class="enscript-type">int</span> flags, vfs_context_t ctx);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pshm_ioctl</span> (<span class="enscript-type">struct</span> fileproc *fp, u_long com,
+		    caddr_t data, vfs_context_t ctx);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pshm_select</span> (<span class="enscript-type">struct</span> fileproc *fp, <span class="enscript-type">int</span> which, <span class="enscript-type">void</span> *wql, vfs_context_t ctx);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pshm_close</span>(<span class="enscript-type">struct</span> pshminfo *pinfo, <span class="enscript-type">int</span> dropref);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pshm_closefile</span> (<span class="enscript-type">struct</span> fileglob *fg, vfs_context_t ctx);
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pshm_kqfilter</span>(<span class="enscript-type">struct</span> fileproc *fp, <span class="enscript-type">struct</span> knote *kn, vfs_context_t ctx);
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">pshm_access</span>(<span class="enscript-type">struct</span> pshminfo *pinfo, <span class="enscript-type">int</span> mode, kauth_cred_t cred, proc_t p);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pshm_cache_add</span>(<span class="enscript-type">struct</span> pshminfo *pshmp, <span class="enscript-type">struct</span> pshmname *pnp, <span class="enscript-type">struct</span> pshmcache *pcp);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pshm_cache_delete</span>(<span class="enscript-type">struct</span> pshmcache *pcp);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NOT_USED</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">pshm_cache_purge</span>(<span class="enscript-type">void</span>);
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* NOT_USED */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">pshm_cache_search</span>(<span class="enscript-type">struct</span> pshminfo **pshmp, <span class="enscript-type">struct</span> pshmname *pnp,
+	<span class="enscript-type">struct</span> pshmcache **pcache, <span class="enscript-type">int</span> addref);
+
+<span class="enscript-type">static</span> <span class="enscript-type">const</span> <span class="enscript-type">struct</span> fileops pshmops = {
+	DTYPE_PSXSHM,
+	pshm_read,
+	pshm_write,
+	pshm_ioctl,
+	pshm_select,
+	pshm_closefile,
+	pshm_kqfilter,
+	0
+};
+
+<span class="enscript-type">static</span> lck_grp_t       *psx_shm_subsys_lck_grp;
+<span class="enscript-type">static</span> lck_grp_attr_t  *psx_shm_subsys_lck_grp_attr;
+<span class="enscript-type">static</span> lck_attr_t      *psx_shm_subsys_lck_attr;
+<span class="enscript-type">static</span> lck_mtx_t        psx_shm_subsys_mutex;
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PSHM_SUBSYS_LOCK</span>() lck_mtx_lock(&amp; psx_shm_subsys_mutex)
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">PSHM_SUBSYS_UNLOCK</span>() lck_mtx_unlock(&amp; psx_shm_subsys_mutex)
+
+
+<span class="enscript-comment">/* Initialize the mutex governing access to the posix shm subsystem */</span>
+__private_extern__ <span class="enscript-type">void</span>
+<span class="enscript-function-name">pshm_lock_init</span>( <span class="enscript-type">void</span> )
+{
+
+    psx_shm_subsys_lck_grp_attr = lck_grp_attr_alloc_init();
+
+    psx_shm_subsys_lck_grp = lck_grp_alloc_init(<span class="enscript-string">&quot;posix shared memory&quot;</span>, psx_shm_subsys_lck_grp_attr);
+
+    psx_shm_subsys_lck_attr = lck_attr_alloc_init();
+    lck_mtx_init(&amp; psx_shm_subsys_mutex, psx_shm_subsys_lck_grp, psx_shm_subsys_lck_attr);
+}
+
+<span class="enscript-comment">/*
+ * Lookup an entry in the cache 
+ * 
+ * 
+ * status of -1 is returned if matches
+ * If the lookup determines that the name does not exist
+ * (negative cacheing), a status of ENOENT is returned. If the lookup
+ * fails, a status of zero is returned.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pshm_cache_search</span>(<span class="enscript-type">struct</span> pshminfo **pshmp, <span class="enscript-type">struct</span> pshmname *pnp,
+	<span class="enscript-type">struct</span> pshmcache **pcache, <span class="enscript-type">int</span> addref)
+{
+	<span class="enscript-type">struct</span> pshmcache *pcp, *nnp;
+	<span class="enscript-type">struct</span> pshmhashhead *pcpp;
+
+	<span class="enscript-keyword">if</span> (pnp-&gt;pshm_namelen &gt; PSHMNAMLEN) {
+		pshmstats.longnames++;
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	pcpp = PSHMHASH(pnp);
+	<span class="enscript-keyword">for</span> (pcp = pcpp-&gt;lh_first; pcp != 0; pcp = nnp) {
+		nnp = pcp-&gt;pshm_hash.le_next;
+		<span class="enscript-keyword">if</span> (pcp-&gt;pshm_nlen == pnp-&gt;pshm_namelen &amp;&amp;
+		    !bcmp(pcp-&gt;pshm_name, pnp-&gt;pshm_nameptr, 						(u_int)pcp-&gt; pshm_nlen))
+			<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (pcp == 0) {
+		pshmstats.miss++;
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-comment">/* We found a &quot;positive&quot; match, return the vnode */</span>
+        <span class="enscript-keyword">if</span> (pcp-&gt;pshminfo) {
+		pshmstats.goodhits++;
+		<span class="enscript-comment">/* TOUCH(ncp); */</span>
+		*pshmp = pcp-&gt;pshminfo;
+		*pcache = pcp;
+		<span class="enscript-keyword">if</span> (addref)
+			pcp-&gt;pshminfo-&gt;pshm_usecount++;
+		<span class="enscript-keyword">return</span> (-1);
+	}
+
+	<span class="enscript-comment">/*
+	 * We found a &quot;negative&quot; match, ENOENT notifies client of this match.
+	 */</span>
+	pshmstats.neghits++;
+	<span class="enscript-keyword">return</span> (ENOENT);
+}
+
+<span class="enscript-comment">/*
+ * Add an entry to the cache.
+ * XXX should be static?
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pshm_cache_add</span>(<span class="enscript-type">struct</span> pshminfo *pshmp, <span class="enscript-type">struct</span> pshmname *pnp, <span class="enscript-type">struct</span> pshmcache *pcp)
+{
+	<span class="enscript-type">struct</span> pshmhashhead *pcpp;
+	<span class="enscript-type">struct</span> pshminfo *dpinfo;
+	<span class="enscript-type">struct</span> pshmcache *dpcp;
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-keyword">if</span> (pnp-&gt;pshm_namelen &gt; PSHMNAMLEN)
+		panic(<span class="enscript-string">&quot;cache_enter: name too long&quot;</span>);
+#<span class="enscript-reference">endif</span>
+
+
+	<span class="enscript-comment">/*  if the entry has already been added by some one else return */</span>
+	<span class="enscript-keyword">if</span> (pshm_cache_search(&amp;dpinfo, pnp, &amp;dpcp, 0) == -1) {
+		<span class="enscript-keyword">return</span>(EEXIST);
+	}
+	pshmnument++;
+
+	<span class="enscript-comment">/*
+	 * Fill in cache info, if vp is NULL this is a &quot;negative&quot; cache entry.
+	 */</span>
+	pcp-&gt;pshminfo = pshmp;
+	pcp-&gt;pshm_nlen = pnp-&gt;pshm_namelen;
+	bcopy(pnp-&gt;pshm_nameptr, pcp-&gt;pshm_name, (<span class="enscript-type">unsigned</span>)pcp-&gt;pshm_nlen);
+	pcpp = PSHMHASH(pnp);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	{
+		<span class="enscript-type">struct</span> pshmcache *p;
+
+		<span class="enscript-keyword">for</span> (p = pcpp-&gt;lh_first; p != 0; p = p-&gt;pshm_hash.le_next)
+			<span class="enscript-keyword">if</span> (p == pcp)
+				panic(<span class="enscript-string">&quot;cache_enter: duplicate&quot;</span>);
+	}
+#<span class="enscript-reference">endif</span>
+	LIST_INSERT_HEAD(pcpp, pcp, pshm_hash);
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/*
+ * Name cache initialization, from vfs_init() when we are booting
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pshm_cache_init</span>(<span class="enscript-type">void</span>)
+{
+	pshmhashtbl = hashinit(desiredvnodes / 8, M_SHM, &amp;pshmhash);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NOT_USED</span>
+<span class="enscript-comment">/*
+ * Invalidate a all entries to particular vnode.
+ * 
+ * We actually just increment the v_id, that will do it. The entries will
+ * be purged by lookup as they get found. If the v_id wraps around, we
+ * need to ditch the entire cache, to avoid confusion. No valid vnode will
+ * ever have (v_id == 0).
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pshm_cache_purge</span>(<span class="enscript-type">void</span>)
+{
+	<span class="enscript-type">struct</span> pshmcache *pcp;
+	<span class="enscript-type">struct</span> pshmhashhead *pcpp;
+
+	<span class="enscript-keyword">for</span> (pcpp = &amp;pshmhashtbl[pshmhash]; pcpp &gt;= pshmhashtbl; pcpp--) {
+		<span class="enscript-keyword">while</span> ( (pcp = pcpp-&gt;lh_first) )
+			pshm_cache_delete(pcp);
+	}
+}
+#<span class="enscript-reference">endif</span>	<span class="enscript-comment">/* NOT_USED */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">pshm_cache_delete</span>(<span class="enscript-type">struct</span> pshmcache *pcp)
+{
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-keyword">if</span> (pcp-&gt;pshm_hash.le_prev == 0)
+		panic(<span class="enscript-string">&quot;namecache purge le_prev&quot;</span>);
+	<span class="enscript-keyword">if</span> (pcp-&gt;pshm_hash.le_next == pcp)
+		panic(<span class="enscript-string">&quot;namecache purge le_next&quot;</span>);
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DIAGNOSTIC */</span>
+	LIST_REMOVE(pcp, pshm_hash);
+	pcp-&gt;pshm_hash.le_prev = 0;	
+	pshmnument--;
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">shm_open</span>(proc_t p, <span class="enscript-type">struct</span> shm_open_args *uap, int32_t *retval)
+{
+	size_t  i;
+	<span class="enscript-type">int</span> indx, error;
+	<span class="enscript-type">struct</span> pshmname nd;
+	<span class="enscript-type">struct</span> pshminfo *pinfo;
+	<span class="enscript-type">struct</span> fileproc *fp = NULL;
+	<span class="enscript-type">char</span> *pnbuf = NULL;
+	<span class="enscript-type">struct</span> pshminfo *new_pinfo = PSHMINFO_NULL;
+	<span class="enscript-type">struct</span> pshmnode *new_pnode = PSHMNODE_NULL;
+	<span class="enscript-type">struct</span> pshmcache *pcache = PSHMCACHE_NULL;	<span class="enscript-comment">/* ignored on return */</span>
+	<span class="enscript-type">char</span> * nameptr;
+	<span class="enscript-type">char</span> * cp;
+	size_t pathlen, plen;
+	<span class="enscript-type">int</span> fmode ;
+	<span class="enscript-type">int</span> cmode = uap-&gt;mode;
+	<span class="enscript-type">int</span> incache = 0;
+	<span class="enscript-type">struct</span> pshmcache *pcp = NULL;
+
+	AUDIT_ARG(fflags, uap-&gt;oflag);
+	AUDIT_ARG(mode, uap-&gt;mode);
+
+	pinfo = PSHMINFO_NULL;
+
+	<span class="enscript-comment">/*
+	 * Preallocate everything we might need up front to avoid taking
+	 * and dropping the lock, opening us up to race conditions.
+	 */</span>
+	MALLOC_ZONE(pnbuf, caddr_t, MAXPATHLEN, M_NAMEI, M_WAITOK);
+	<span class="enscript-keyword">if</span> (pnbuf == NULL) {
+		error = ENOSPC;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+
+	pathlen = MAXPATHLEN;
+	error = copyinstr(uap-&gt;name, (<span class="enscript-type">void</span> *)pnbuf, MAXPATHLEN, &amp;pathlen);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+	AUDIT_ARG(text, pnbuf);
+	<span class="enscript-keyword">if</span> (pathlen &gt; PSHMNAMLEN) {
+		error = ENAMETOOLONG;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">PSXSHM_NAME_RESTRICT</span>
+	nameptr = pnbuf;
+	<span class="enscript-keyword">if</span> (*nameptr == <span class="enscript-string">'/'</span>) {
+		<span class="enscript-keyword">while</span> (*(nameptr++) == <span class="enscript-string">'/'</span>) {
+			plen--;
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+	} <span class="enscript-keyword">else</span> {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PSXSHM_NAME_RESTRICT */</span>
+
+	plen = pathlen;
+	nameptr = pnbuf;
+	nd.pshm_nameptr = nameptr;
+	nd.pshm_namelen = plen;
+	nd. pshm_hash =0;
+
+	<span class="enscript-keyword">for</span> (cp = nameptr, i=1; *cp != 0 &amp;&amp; i &lt;= plen; i++, cp++) {
+		nd.pshm_hash += (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)*cp * i;
+	}
+
+	<span class="enscript-comment">/*
+	 * attempt to allocate a new fp; if unsuccessful, the fp will be
+	 * left unmodified (NULL).
+	 */</span>
+	error = falloc(p, &amp;fp, &amp;indx, vfs_context_current());
+	<span class="enscript-keyword">if</span> (error) 
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+	cmode &amp;=  ALLPERMS;
+
+	fmode = FFLAGS(uap-&gt;oflag);
+	<span class="enscript-keyword">if</span> ((fmode &amp; (FREAD | FWRITE)) == 0) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+
+	<span class="enscript-comment">/*
+	 * We allocate a new entry if we are less than the maximum
+	 * allowed and the one at the front of the LRU list is in use.
+	 * Otherwise we use the one at the front of the LRU list.
+	 */</span>
+	MALLOC(pcp, <span class="enscript-type">struct</span> pshmcache *, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pshmcache), M_SHM, M_WAITOK|M_ZERO);
+	<span class="enscript-keyword">if</span> (pcp == NULL) {
+		error = ENOSPC;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+
+	MALLOC(new_pinfo, <span class="enscript-type">struct</span> pshminfo *, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pshminfo), M_SHM, M_WAITOK|M_ZERO);
+	<span class="enscript-keyword">if</span> (new_pinfo == PSHMINFO_NULL) {
+		error = ENOSPC;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	mac_posixshm_label_init(new_pinfo);
+#<span class="enscript-reference">endif</span>
+
+	MALLOC(new_pnode, <span class="enscript-type">struct</span> pshmnode *, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> pshmnode), M_SHM, M_WAITOK|M_ZERO);
+	<span class="enscript-keyword">if</span> (new_pnode == PSHMNODE_NULL) {
+		error = ENOSPC;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+
+	PSHM_SUBSYS_LOCK();
+
+	<span class="enscript-comment">/*
+	 * If we find the entry in the cache, this will take a reference,
+	 * allowing us to unlock it for the permissions check.
+	 */</span>
+	error = pshm_cache_search(&amp;pinfo, &amp;nd, &amp;pcache, 1);
+
+	PSHM_SUBSYS_UNLOCK();
+
+	<span class="enscript-keyword">if</span> (error == ENOENT) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (!error) {
+		incache = 0;
+		<span class="enscript-keyword">if</span> (fmode &amp; O_CREAT) {
+			<span class="enscript-comment">/*  create a new one (commit the allocation) */</span>
+			pinfo = new_pinfo;
+			pinfo-&gt;pshm_flags = PSHM_DEFINED | PSHM_INCREATE;
+			pinfo-&gt;pshm_usecount = 1; <span class="enscript-comment">/* existence reference */</span>
+			pinfo-&gt;pshm_mode = cmode;
+			pinfo-&gt;pshm_uid = kauth_getuid();
+			pinfo-&gt;pshm_gid = kauth_getgid();
+			bcopy(pnbuf, &amp;pinfo-&gt;pshm_name[0], pathlen);
+			pinfo-&gt;pshm_name[pathlen]=0;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+			error = mac_posixshm_check_create(kauth_cred_get(), nameptr);
+			<span class="enscript-keyword">if</span> (error) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+			mac_posixshm_label_associate(kauth_cred_get(), pinfo, nameptr);
+#<span class="enscript-reference">endif</span>
+		}
+	} <span class="enscript-keyword">else</span> {
+		incache = 1;
+		<span class="enscript-keyword">if</span> (fmode &amp; O_CREAT) {
+			<span class="enscript-comment">/*  already exists */</span>
+			<span class="enscript-keyword">if</span> ((fmode &amp; O_EXCL)) {
+				AUDIT_ARG(posix_ipc_perm, pinfo-&gt;pshm_uid,
+						pinfo-&gt;pshm_gid,
+						pinfo-&gt;pshm_mode);
+
+				<span class="enscript-comment">/* shm obj exists and opened O_EXCL */</span>
+				error = EEXIST;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			} 
+
+			<span class="enscript-keyword">if</span>( pinfo-&gt;pshm_flags &amp; PSHM_INDELETE) {
+				error = ENOENT;
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}	
+			AUDIT_ARG(posix_ipc_perm, pinfo-&gt;pshm_uid,
+					pinfo-&gt;pshm_gid, pinfo-&gt;pshm_mode);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>	
+			<span class="enscript-keyword">if</span> ((error = mac_posixshm_check_open(kauth_cred_get(), pinfo, fmode))) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+#<span class="enscript-reference">endif</span>
+			<span class="enscript-keyword">if</span> ( (error = pshm_access(pinfo, fmode, kauth_cred_get(), p)) ) {
+				<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+			}
+		}
+	}
+	<span class="enscript-keyword">if</span> (!(fmode &amp; O_CREAT)) {
+		<span class="enscript-keyword">if</span> (!incache) {
+			<span class="enscript-comment">/* O_CREAT is not set and the object does not exist */</span>
+			error = ENOENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+		<span class="enscript-keyword">if</span>( pinfo-&gt;pshm_flags &amp; PSHM_INDELETE) {
+			error = ENOENT;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}	
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>	
+		<span class="enscript-keyword">if</span> ((error = mac_posixshm_check_open(kauth_cred_get(), pinfo, fmode))) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-keyword">if</span> ((error = pshm_access(pinfo, fmode, kauth_cred_get(), p))) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+	}
+	<span class="enscript-keyword">if</span> (fmode &amp; O_TRUNC) {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+
+
+	PSHM_SUBSYS_LOCK();
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span> 
+	<span class="enscript-keyword">if</span> (fmode &amp; FWRITE)
+		pinfo-&gt;pshm_writecount++;
+	<span class="enscript-keyword">if</span> (fmode &amp; FREAD)
+		pinfo-&gt;pshm_readcount++;
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (!incache) {
+		<span class="enscript-comment">/* if successful, this will consume the pcp */</span>
+		<span class="enscript-keyword">if</span> ( (error = pshm_cache_add(pinfo, &amp;nd, pcp)) ) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad_locked</span>;
+		}
+		<span class="enscript-comment">/*
+		 * add reference for the new entry; otherwise, we obtained
+		 * one from the cache hit earlier.
+		 */</span>
+		pinfo-&gt;pshm_usecount++;
+	}
+	pinfo-&gt;pshm_flags &amp;= ~PSHM_INCREATE;
+	new_pnode-&gt;pinfo = pinfo;
+
+	PSHM_SUBSYS_UNLOCK();
+
+	<span class="enscript-comment">/*
+	 * if incache, we did not use the new pcp or new_pinfo and must
+	 * free them
+	 */</span>
+	<span class="enscript-keyword">if</span> (incache) {
+		FREE(pcp, M_SHM);
+
+		<span class="enscript-keyword">if</span> (new_pinfo != PSHMINFO_NULL) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+			mac_posixshm_label_destroy(new_pinfo);
+#<span class="enscript-reference">endif</span>
+			FREE(new_pinfo, M_SHM);
+		}
+	}
+
+	proc_fdlock(p);
+	fp-&gt;f_flag = fmode &amp; FMASK;
+	fp-&gt;f_ops = &amp;pshmops;
+	fp-&gt;f_data = (caddr_t)new_pnode;
+	*fdflags(p, indx) |= UF_EXCLOSE;
+	procfdtbl_releasefd(p, indx, NULL);
+	fp_drop(p, indx, fp, 1);
+	proc_fdunlock(p);
+
+	*retval = indx;
+	FREE_ZONE(pnbuf, MAXPATHLEN, M_NAMEI);
+	<span class="enscript-keyword">return</span> (0);
+
+<span class="enscript-reference">bad_locked</span>:
+	PSHM_SUBSYS_UNLOCK();
+<span class="enscript-reference">bad</span>:
+	<span class="enscript-comment">/*
+	 * If we obtained the entry from the cache, we need to drop the
+	 * reference; holding the reference may have prevented unlinking,
+	 * so we need to call pshm_close() to get the full effect.
+	 */</span>
+	<span class="enscript-keyword">if</span> (incache) {
+		PSHM_SUBSYS_LOCK();
+		pshm_close(pinfo, 1);
+		PSHM_SUBSYS_UNLOCK();
+	}
+
+	<span class="enscript-keyword">if</span> (pcp != NULL)
+		FREE(pcp, M_SHM);
+
+	<span class="enscript-keyword">if</span> (new_pnode != PSHMNODE_NULL)
+		FREE(new_pnode, M_SHM);
+
+	<span class="enscript-keyword">if</span> (fp != NULL)
+		fp_free(p, indx, fp);
+
+	<span class="enscript-keyword">if</span> (new_pinfo != PSHMINFO_NULL) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+		mac_posixshm_label_destroy(new_pinfo);
+#<span class="enscript-reference">endif</span>
+		FREE(new_pinfo, M_SHM);
+	}
+	<span class="enscript-keyword">if</span> (pnbuf != NULL)
+		FREE_ZONE(pnbuf, MAXPATHLEN, M_NAMEI);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pshm_truncate</span>(__unused proc_t p, <span class="enscript-type">struct</span> fileproc *fp, __unused <span class="enscript-type">int</span> fd, 
+				off_t length, __unused int32_t *retval)
+{
+	<span class="enscript-type">struct</span> pshminfo * pinfo;
+	<span class="enscript-type">struct</span> pshmnode * pnode ;
+	kern_return_t kret;
+	mem_entry_name_port_t mem_object;
+	mach_vm_size_t total_size, alloc_size;
+	memory_object_size_t mosize;
+	<span class="enscript-type">struct</span> pshmobj *pshmobj, *pshmobj_next, **pshmobj_next_p;
+	vm_map_t	user_map;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-type">int</span> error;
+#<span class="enscript-reference">endif</span>
+
+	user_map = current_map();
+
+	<span class="enscript-keyword">if</span> (fp-&gt;f_type != DTYPE_PSXSHM) {
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+	
+
+	<span class="enscript-keyword">if</span> (((pnode = (<span class="enscript-type">struct</span> pshmnode *)fp-&gt;f_data)) == PSHMNODE_NULL )
+		<span class="enscript-keyword">return</span>(EINVAL);
+
+	PSHM_SUBSYS_LOCK();
+	<span class="enscript-keyword">if</span> ((pinfo = pnode-&gt;pinfo) == PSHMINFO_NULL) {
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+	<span class="enscript-keyword">if</span> ((pinfo-&gt;pshm_flags &amp; (PSHM_DEFINED|PSHM_ALLOCATING|PSHM_ALLOCATED)) 
+			!= PSHM_DEFINED) {
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_posixshm_check_truncate(kauth_cred_get(), pinfo, length);
+	<span class="enscript-keyword">if</span> (error) {
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span>(error);
+	}
+#<span class="enscript-reference">endif</span>
+
+	pinfo-&gt;pshm_flags |= PSHM_ALLOCATING;
+	total_size = vm_map_round_page(length,
+				       vm_map_page_mask(user_map));
+	pshmobj_next_p = &amp;pinfo-&gt;pshm_memobjects;
+
+	<span class="enscript-keyword">for</span> (alloc_size = 0;
+	     alloc_size &lt; total_size;
+	     alloc_size += mosize) {
+
+		PSHM_SUBSYS_UNLOCK();
+
+		mosize = MIN(total_size - alloc_size, ANON_MAX_SIZE);
+		kret = mach_make_memory_entry_64(
+			VM_MAP_NULL,
+			&amp;mosize,
+			0,
+			MAP_MEM_NAMED_CREATE | VM_PROT_DEFAULT,
+			&amp;mem_object,
+			0);
+
+		<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) 
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		MALLOC(pshmobj, <span class="enscript-type">struct</span> pshmobj *, <span class="enscript-keyword">sizeof</span> (<span class="enscript-type">struct</span> pshmobj),
+		       M_SHM, M_WAITOK);
+		<span class="enscript-keyword">if</span> (pshmobj == NULL) {
+			kret = KERN_NO_SPACE;
+			mach_memory_entry_port_release(mem_object);
+			mem_object = NULL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+
+		PSHM_SUBSYS_LOCK();
+
+		pshmobj-&gt;pshmo_memobject = (<span class="enscript-type">void</span> *) mem_object;
+		pshmobj-&gt;pshmo_size = mosize;
+		pshmobj-&gt;pshmo_next = NULL;
+		
+		*pshmobj_next_p = pshmobj;
+		pshmobj_next_p = &amp;pshmobj-&gt;pshmo_next;
+	}
+	
+	pinfo-&gt;pshm_flags |= PSHM_ALLOCATED;
+	pinfo-&gt;pshm_flags &amp;= ~(PSHM_ALLOCATING);
+	pinfo-&gt;pshm_length = total_size;
+	PSHM_SUBSYS_UNLOCK();
+	<span class="enscript-keyword">return</span>(0);
+
+<span class="enscript-reference">out</span>:
+	PSHM_SUBSYS_LOCK();
+	<span class="enscript-keyword">for</span> (pshmobj = pinfo-&gt;pshm_memobjects;
+	     pshmobj != NULL;
+	     pshmobj = pshmobj_next) {
+		pshmobj_next = pshmobj-&gt;pshmo_next;
+		mach_memory_entry_port_release(pshmobj-&gt;pshmo_memobject);
+		FREE(pshmobj, M_SHM);
+	}
+	pinfo-&gt;pshm_memobjects = NULL;
+	pinfo-&gt;pshm_flags &amp;= ~PSHM_ALLOCATING;
+	PSHM_SUBSYS_UNLOCK();
+
+	<span class="enscript-keyword">switch</span> (kret) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ADDRESS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NO_SPACE</span>:
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_PROTECTION_FAILURE</span>:
+		<span class="enscript-keyword">return</span> (EACCES);
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (EINVAL);
+	
+	}
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pshm_stat</span>(<span class="enscript-type">struct</span> pshmnode *pnode, <span class="enscript-type">void</span> *ub, <span class="enscript-type">int</span> isstat64)
+{
+	<span class="enscript-type">struct</span> stat *sb = (<span class="enscript-type">struct</span> stat *)0;	<span class="enscript-comment">/* warning avoidance ; protected by isstat64 */</span>
+	<span class="enscript-type">struct</span> stat64 * sb64 = (<span class="enscript-type">struct</span> stat64 *)0;  <span class="enscript-comment">/* warning avoidance ; protected by isstat64 */</span>
+	<span class="enscript-type">struct</span> pshminfo *pinfo;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-type">int</span> error;
+#<span class="enscript-reference">endif</span>
+	
+	PSHM_SUBSYS_LOCK();
+	<span class="enscript-keyword">if</span> ((pinfo = pnode-&gt;pinfo) == PSHMINFO_NULL){
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_posixshm_check_stat(kauth_cred_get(), pinfo);
+	<span class="enscript-keyword">if</span> (error) {
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span>(error);
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (isstat64 != 0) {
+		sb64 = (<span class="enscript-type">struct</span> stat64 *)ub;
+		bzero(sb64, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> stat64)); 
+		sb64-&gt;st_mode = pinfo-&gt;pshm_mode;
+		sb64-&gt;st_uid = pinfo-&gt;pshm_uid;
+		sb64-&gt;st_gid = pinfo-&gt;pshm_gid;
+		sb64-&gt;st_size = pinfo-&gt;pshm_length;
+	} <span class="enscript-keyword">else</span> {
+		sb = (<span class="enscript-type">struct</span> stat *)ub;
+		bzero(sb, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> stat)); 
+		sb-&gt;st_mode = pinfo-&gt;pshm_mode;
+		sb-&gt;st_uid = pinfo-&gt;pshm_uid;
+		sb-&gt;st_gid = pinfo-&gt;pshm_gid;
+		sb-&gt;st_size = pinfo-&gt;pshm_length;
+	}
+	PSHM_SUBSYS_UNLOCK();
+
+	<span class="enscript-keyword">return</span>(0);
+}
+
+<span class="enscript-comment">/*
+ * This is called only from shm_open which holds pshm_lock();
+ * XXX This code is repeated many times
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pshm_access</span>(<span class="enscript-type">struct</span> pshminfo *pinfo, <span class="enscript-type">int</span> mode, kauth_cred_t cred, __unused proc_t p)
+{
+	<span class="enscript-type">int</span> mode_req = ((mode &amp; FREAD) ? S_IRUSR : 0) |
+		       ((mode &amp; FWRITE) ? S_IWUSR : 0);
+
+	<span class="enscript-comment">/* Otherwise, user id 0 always gets access. */</span>
+	<span class="enscript-keyword">if</span> (!suser(cred, NULL))
+		<span class="enscript-keyword">return</span> (0);
+
+	<span class="enscript-keyword">return</span>(posix_cred_access(cred, pinfo-&gt;pshm_uid, pinfo-&gt;pshm_gid, pinfo-&gt;pshm_mode, mode_req));
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">pshm_mmap</span>(__unused proc_t p, <span class="enscript-type">struct</span> mmap_args *uap, user_addr_t *retval, <span class="enscript-type">struct</span> fileproc *fp, off_t pageoff) 
+{
+	vm_map_offset_t	user_addr = (vm_map_offset_t)uap-&gt;addr;
+	vm_map_size_t	user_size = (vm_map_size_t)uap-&gt;len ;
+	vm_map_offset_t	user_start_addr;
+	vm_map_size_t	map_size, mapped_size;
+	<span class="enscript-type">int</span> prot = uap-&gt;prot;
+	<span class="enscript-type">int</span> flags = uap-&gt;flags;
+	vm_object_offset_t file_pos = (vm_object_offset_t)uap-&gt;pos;
+	vm_object_offset_t map_pos;
+	vm_map_t	user_map;
+	<span class="enscript-type">int</span>		alloc_flags;
+	boolean_t 	docow;
+	kern_return_t	kret;
+	<span class="enscript-type">struct</span> pshminfo * pinfo;
+	<span class="enscript-type">struct</span> pshmnode * pnode;
+	<span class="enscript-type">struct</span> pshmobj * pshmobj;
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	<span class="enscript-type">int</span> error;
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">if</span> (user_size == 0) 
+		<span class="enscript-keyword">return</span>(0);
+
+	<span class="enscript-keyword">if</span> ((flags &amp; MAP_SHARED) == 0)
+		<span class="enscript-keyword">return</span>(EINVAL);
+
+
+	<span class="enscript-keyword">if</span> ((prot &amp; PROT_WRITE) &amp;&amp; ((fp-&gt;f_flag &amp; FWRITE) == 0)) {
+		<span class="enscript-keyword">return</span>(EPERM);
+	}
+
+	<span class="enscript-keyword">if</span> (((pnode = (<span class="enscript-type">struct</span> pshmnode *)fp-&gt;f_data)) == PSHMNODE_NULL )
+		<span class="enscript-keyword">return</span>(EINVAL);
+
+	PSHM_SUBSYS_LOCK();
+	<span class="enscript-keyword">if</span> ((pinfo = pnode-&gt;pinfo) == PSHMINFO_NULL) {
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+
+	<span class="enscript-keyword">if</span> ((pinfo-&gt;pshm_flags &amp; PSHM_ALLOCATED) != PSHM_ALLOCATED) {
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+	<span class="enscript-keyword">if</span> ((off_t)user_size &gt; pinfo-&gt;pshm_length) {
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+	<span class="enscript-keyword">if</span> ((off_t)(user_size + file_pos) &gt; pinfo-&gt;pshm_length) {
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+	<span class="enscript-keyword">if</span> ((pshmobj = pinfo-&gt;pshm_memobjects) == NULL) {
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_posixshm_check_mmap(kauth_cred_get(), pinfo, prot, flags);
+	<span class="enscript-keyword">if</span> (error) {
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span>(error);
+	}
+#<span class="enscript-reference">endif</span>
+
+	PSHM_SUBSYS_UNLOCK();
+	user_map = current_map();
+
+	<span class="enscript-keyword">if</span> ((flags &amp; MAP_FIXED) == 0) {
+		alloc_flags = VM_FLAGS_ANYWHERE;
+		user_addr = vm_map_round_page(user_addr,
+					      vm_map_page_mask(user_map)); 
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-keyword">if</span> (user_addr != vm_map_round_page(user_addr,
+						   vm_map_page_mask(user_map)))
+			<span class="enscript-keyword">return</span> (EINVAL);
+		<span class="enscript-comment">/*
+		 * We do not get rid of the existing mappings here because
+		 * it wouldn't be atomic (see comment in mmap()).  We let
+		 * Mach VM know that we want it to replace any existing
+		 * mapping with the new one.
+		 */</span>
+		alloc_flags = VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE;
+	}
+	docow = FALSE;	
+
+	mapped_size = 0;
+
+	<span class="enscript-comment">/* reserver the entire space first... */</span>
+	kret = vm_map_enter_mem_object(user_map,
+				       &amp;user_addr,
+				       user_size,
+				       0,
+				       alloc_flags,
+				       IPC_PORT_NULL,
+				       0,
+				       FALSE,
+				       VM_PROT_NONE,
+				       VM_PROT_NONE,
+				       VM_INHERIT_NONE);
+	user_start_addr = user_addr;
+	<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+	}
+
+	<span class="enscript-comment">/* ... and overwrite with the real mappings */</span>
+	<span class="enscript-keyword">for</span> (map_pos = 0, pshmobj = pinfo-&gt;pshm_memobjects;
+	     user_size != 0;
+	     map_pos += pshmobj-&gt;pshmo_size, pshmobj = pshmobj-&gt;pshmo_next) {
+		<span class="enscript-keyword">if</span> (pshmobj == NULL) {
+			<span class="enscript-comment">/* nothing there to map !? */</span>
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+		<span class="enscript-keyword">if</span> (file_pos &gt;= map_pos + pshmobj-&gt;pshmo_size) {
+			<span class="enscript-keyword">continue</span>;
+		}
+		map_size = pshmobj-&gt;pshmo_size - (file_pos - map_pos);
+		<span class="enscript-keyword">if</span> (map_size &gt; user_size) {
+			map_size = user_size;
+		}
+		kret = vm_map_enter_mem_object(
+			user_map,
+			&amp;user_addr,
+			map_size,
+			0,
+			VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
+			pshmobj-&gt;pshmo_memobject,
+			file_pos - map_pos,
+			docow,
+			prot,
+			VM_PROT_DEFAULT, 
+			VM_INHERIT_SHARE);
+		<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) 
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+		user_addr += map_size;
+		user_size -= map_size;
+		mapped_size += map_size;
+		file_pos += map_size;
+	}
+
+	PSHM_SUBSYS_LOCK();
+	pnode-&gt;mapp_addr = user_start_addr;
+	pnode-&gt;map_size = mapped_size;
+	pinfo-&gt;pshm_flags |= (PSHM_MAPPED | PSHM_INUSE);
+	PSHM_SUBSYS_UNLOCK();
+<span class="enscript-reference">out</span>:
+	<span class="enscript-keyword">if</span> (kret != KERN_SUCCESS) {
+		<span class="enscript-keyword">if</span> (mapped_size != 0) {
+			(<span class="enscript-type">void</span>) mach_vm_deallocate(current_map(),
+						  user_start_addr,
+						  mapped_size);
+		}
+	}
+
+	<span class="enscript-keyword">switch</span> (kret) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_SUCCESS</span>:
+		*retval = (user_start_addr + pageoff);
+		<span class="enscript-keyword">return</span> (0);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_INVALID_ADDRESS</span>:
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_NO_SPACE</span>:
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">KERN_PROTECTION_FAILURE</span>:
+		<span class="enscript-keyword">return</span> (EACCES);
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (EINVAL);
+	}
+
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">shm_unlink</span>(__unused proc_t p, <span class="enscript-type">struct</span> shm_unlink_args *uap, 
+			__unused int32_t *retval)
+{
+	size_t i;
+	<span class="enscript-type">int</span> error=0;
+	<span class="enscript-type">struct</span> pshmname nd;
+	<span class="enscript-type">struct</span> pshminfo *pinfo;
+	<span class="enscript-type">char</span> * pnbuf;
+	<span class="enscript-type">char</span> * nameptr;
+	<span class="enscript-type">char</span> * cp;
+	size_t pathlen, plen;
+	<span class="enscript-type">int</span> incache = 0;
+	<span class="enscript-type">struct</span> pshmcache *pcache = PSHMCACHE_NULL;
+	<span class="enscript-type">struct</span> pshmobj *pshmobj, *pshmobj_next;
+
+	pinfo = PSHMINFO_NULL;
+
+	MALLOC_ZONE(pnbuf, caddr_t, MAXPATHLEN, M_NAMEI, M_WAITOK);
+	<span class="enscript-keyword">if</span> (pnbuf == NULL) {
+		<span class="enscript-keyword">return</span>(ENOSPC);		<span class="enscript-comment">/* XXX non-standard */</span>
+	}
+	pathlen = MAXPATHLEN;
+	error = copyinstr(uap-&gt;name, (<span class="enscript-type">void</span> *)pnbuf, MAXPATHLEN, &amp;pathlen);
+	<span class="enscript-keyword">if</span> (error) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+	AUDIT_ARG(text, pnbuf);
+	<span class="enscript-keyword">if</span> (pathlen &gt; PSHMNAMLEN) {
+		error = ENAMETOOLONG;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">PSXSHM_NAME_RESTRICT</span>
+	nameptr = pnbuf;
+	<span class="enscript-keyword">if</span> (*nameptr == <span class="enscript-string">'/'</span>) {
+		<span class="enscript-keyword">while</span> (*(nameptr++) == <span class="enscript-string">'/'</span>) {
+			plen--;
+			error = EINVAL;
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+		}
+        } <span class="enscript-keyword">else</span> {
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* PSXSHM_NAME_RESTRICT */</span>
+
+	plen = pathlen;
+	nameptr = pnbuf;
+	nd.pshm_nameptr = nameptr;
+	nd.pshm_namelen = plen;
+	nd. pshm_hash =0;
+
+        <span class="enscript-keyword">for</span> (cp = nameptr, i=1; *cp != 0 &amp;&amp; i &lt;= plen; i++, cp++) {
+               nd.pshm_hash += (<span class="enscript-type">unsigned</span> <span class="enscript-type">char</span>)*cp * i;
+	}
+
+	PSHM_SUBSYS_LOCK();
+	error = pshm_cache_search(&amp;pinfo, &amp;nd, &amp;pcache, 0);
+
+	<span class="enscript-keyword">if</span> (error == ENOENT) {
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+
+	}
+	<span class="enscript-comment">/* During unlink lookup failure also implies ENOENT */</span> 
+	<span class="enscript-keyword">if</span> (!error) {
+		PSHM_SUBSYS_UNLOCK();
+		error = ENOENT;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	} <span class="enscript-keyword">else</span>
+		incache = 1;
+
+	<span class="enscript-keyword">if</span> ((pinfo-&gt;pshm_flags &amp; (PSHM_DEFINED | PSHM_ALLOCATED))==0) {
+		PSHM_SUBSYS_UNLOCK();
+		error = EINVAL;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (pinfo-&gt;pshm_flags &amp; PSHM_ALLOCATING) {
+		<span class="enscript-comment">/* XXX should we wait for flag to clear and then proceed ? */</span>
+		PSHM_SUBSYS_UNLOCK();
+		error = EAGAIN;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+
+	<span class="enscript-keyword">if</span> (pinfo-&gt;pshm_flags &amp; PSHM_INDELETE) {
+		PSHM_SUBSYS_UNLOCK();
+		error = 0;
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+	error = mac_posixshm_check_unlink(kauth_cred_get(), pinfo, nameptr);
+	<span class="enscript-keyword">if</span> (error) {
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+#<span class="enscript-reference">endif</span>
+
+	AUDIT_ARG(posix_ipc_perm, pinfo-&gt;pshm_uid, pinfo-&gt;pshm_gid,
+		  pinfo-&gt;pshm_mode);
+
+	<span class="enscript-comment">/* 
+	 * following file semantics, unlink should be allowed 
+	 * for users with write permission only. 
+	 */</span>
+	<span class="enscript-keyword">if</span> ( (error = pshm_access(pinfo, FWRITE, kauth_cred_get(), p)) ) {
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">bad</span>;
+	}
+
+	pinfo-&gt;pshm_flags |= PSHM_INDELETE;
+	pshm_cache_delete(pcache);
+	pinfo-&gt;pshm_flags |= PSHM_REMOVED;
+	<span class="enscript-comment">/* release the existence reference */</span>
+ 	<span class="enscript-keyword">if</span> (!--pinfo-&gt;pshm_usecount) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+		mac_posixshm_label_destroy(pinfo);
+#<span class="enscript-reference">endif</span>
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-comment">/*
+		 * If this is the last reference going away on the object,
+		 * then we need to destroy the backing object.  The name
+		 * has an implied but uncounted reference on the object,
+		 * once it's created, since it's used as a rendezvous, and
+		 * therefore may be subsequently reopened.
+		 */</span>
+		<span class="enscript-keyword">for</span> (pshmobj = pinfo-&gt;pshm_memobjects;
+		     pshmobj != NULL;
+		     pshmobj = pshmobj_next) {
+			mach_memory_entry_port_release(pshmobj-&gt;pshmo_memobject);
+			pshmobj_next = pshmobj-&gt;pshmo_next;
+			FREE(pshmobj, M_SHM);
+		}
+		FREE(pinfo,M_SHM);
+	} <span class="enscript-keyword">else</span> {
+		PSHM_SUBSYS_UNLOCK();
+	}
+	FREE(pcache, M_SHM);
+	error = 0;
+<span class="enscript-reference">bad</span>:
+	FREE_ZONE(pnbuf, MAXPATHLEN, M_NAMEI);
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/* already called locked */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pshm_close</span>(<span class="enscript-type">struct</span> pshminfo *pinfo, <span class="enscript-type">int</span> dropref)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> pshmobj *pshmobj, *pshmobj_next;
+
+	<span class="enscript-comment">/*
+	 * If we are dropping the reference we took on the cache object, don't
+	 * enforce the allocation requirement.
+	 */</span>
+	<span class="enscript-keyword">if</span> ( !dropref &amp;&amp; ((pinfo-&gt;pshm_flags &amp; PSHM_ALLOCATED) != PSHM_ALLOCATED)) {
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">DIAGNOSTIC</span>
+	<span class="enscript-keyword">if</span>(!pinfo-&gt;pshm_usecount) {
+		kprintf(<span class="enscript-string">&quot;negative usecount in pshm_close\n&quot;</span>);
+	}
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* DIAGNOSTIC */</span>
+	pinfo-&gt;pshm_usecount--; <span class="enscript-comment">/* release this fd's reference */</span>
+
+ 	<span class="enscript-keyword">if</span> ((pinfo-&gt;pshm_flags &amp; PSHM_REMOVED) &amp;&amp; !pinfo-&gt;pshm_usecount) {
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+		mac_posixshm_label_destroy(pinfo);
+#<span class="enscript-reference">endif</span>
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-comment">/*
+		 * If this is the last reference going away on the object,
+		 * then we need to destroy the backing object.
+		 */</span>
+		<span class="enscript-keyword">for</span> (pshmobj = pinfo-&gt;pshm_memobjects;
+		     pshmobj != NULL;
+		     pshmobj = pshmobj_next) {
+			mach_memory_entry_port_release(pshmobj-&gt;pshmo_memobject);
+			pshmobj_next = pshmobj-&gt;pshmo_next;
+			FREE(pshmobj, M_SHM);
+		}
+		PSHM_SUBSYS_LOCK();
+		FREE(pinfo,M_SHM);
+	}
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-comment">/* vfs_context_t passed to match prototype for struct fileops */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pshm_closefile</span>(<span class="enscript-type">struct</span> fileglob *fg, __unused vfs_context_t ctx)
+{
+	<span class="enscript-type">int</span> error = EINVAL;
+	<span class="enscript-type">struct</span> pshmnode *pnode;
+
+	PSHM_SUBSYS_LOCK();
+
+	<span class="enscript-keyword">if</span> ((pnode = (<span class="enscript-type">struct</span> pshmnode *)fg-&gt;fg_data) != NULL) {
+		<span class="enscript-keyword">if</span> (pnode-&gt;pinfo != PSHMINFO_NULL) {
+			error =  pshm_close(pnode-&gt;pinfo, 0);
+		}
+		FREE(pnode, M_SHM);
+	}
+
+	PSHM_SUBSYS_UNLOCK();
+
+	<span class="enscript-keyword">return</span>(error);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pshm_read</span>(__unused <span class="enscript-type">struct</span> fileproc *fp, __unused <span class="enscript-type">struct</span> uio *uio, 
+			__unused <span class="enscript-type">int</span> flags, __unused vfs_context_t ctx)
+{
+	<span class="enscript-keyword">return</span>(ENOTSUP);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pshm_write</span>(__unused <span class="enscript-type">struct</span> fileproc *fp, __unused <span class="enscript-type">struct</span> uio *uio, 
+			__unused <span class="enscript-type">int</span> flags, __unused vfs_context_t ctx)
+{
+	<span class="enscript-keyword">return</span>(ENOTSUP);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pshm_ioctl</span>(__unused <span class="enscript-type">struct</span> fileproc *fp, __unused u_long com, 
+			__unused caddr_t data, __unused vfs_context_t ctx)
+{
+	<span class="enscript-keyword">return</span>(ENOTSUP);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pshm_select</span>(__unused <span class="enscript-type">struct</span> fileproc *fp, __unused <span class="enscript-type">int</span> which, __unused <span class="enscript-type">void</span> *wql, 
+			__unused vfs_context_t ctx)
+{
+	<span class="enscript-keyword">return</span>(ENOTSUP);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">pshm_kqfilter</span>(__unused <span class="enscript-type">struct</span> fileproc *fp, __unused <span class="enscript-type">struct</span> knote *kn, 
+				__unused vfs_context_t ctx)
+{
+	<span class="enscript-keyword">return</span>(ENOTSUP);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">fill_pshminfo</span>(<span class="enscript-type">struct</span> pshmnode * pshm, <span class="enscript-type">struct</span> pshm_info * info)
+{
+	<span class="enscript-type">struct</span> pshminfo *pinfo;
+	<span class="enscript-type">struct</span> vinfo_stat *sb;
+	
+	PSHM_SUBSYS_LOCK();
+	<span class="enscript-keyword">if</span> ((pinfo = pshm-&gt;pinfo) == PSHMINFO_NULL){
+		PSHM_SUBSYS_UNLOCK();
+		<span class="enscript-keyword">return</span>(EINVAL);
+	}
+
+	sb = &amp;info-&gt;pshm_stat;
+
+	bzero(sb, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> vinfo_stat)); 
+	sb-&gt;vst_mode = pinfo-&gt;pshm_mode;
+	sb-&gt;vst_uid = pinfo-&gt;pshm_uid;
+	sb-&gt;vst_gid = pinfo-&gt;pshm_gid;
+	sb-&gt;vst_size = pinfo-&gt;pshm_length;
+
+	info-&gt;pshm_mappaddr = pshm-&gt;mapp_addr;
+	bcopy(&amp;pinfo-&gt;pshm_name[0], &amp;info-&gt;pshm_name[0], PSHMNAMLEN+1); 
+
+	PSHM_SUBSYS_UNLOCK();
+	<span class="enscript-keyword">return</span>(0);
+}
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">pshm_label_associate</span>(<span class="enscript-type">struct</span> fileproc *fp, <span class="enscript-type">struct</span> vnode *vp, vfs_context_t ctx)
+{
+	<span class="enscript-type">struct</span> pshmnode *pnode;
+	<span class="enscript-type">struct</span> pshminfo *pshm;
+
+	PSHM_SUBSYS_LOCK();
+	pnode = (<span class="enscript-type">struct</span> pshmnode *)fp-&gt;f_fglob-&gt;fg_data;
+	<span class="enscript-keyword">if</span> (pnode != NULL) {
+		pshm = pnode-&gt;pinfo;
+		<span class="enscript-keyword">if</span> (pshm != NULL)
+			mac_posixshm_vnode_label_associate(
+				vfs_context_ucred(ctx), pshm, pshm-&gt;pshm_label,
+				vp, vp-&gt;v_label);
+	}
+	PSHM_SUBSYS_UNLOCK();
+}
+#<span class="enscript-reference">endif</span>
+</pre>
+<hr />
+</body></html>

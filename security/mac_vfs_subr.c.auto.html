@@ -1,0 +1,250 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>mac_vfs_subr.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">mac_vfs_subr.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2007 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/uio_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/xattr.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../bsd/sys/fsevents.h&quot;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_internal.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Caller holds I/O reference on vnode
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">vnode_label</span>(<span class="enscript-type">struct</span> mount *mp, <span class="enscript-type">struct</span> vnode *dvp, <span class="enscript-type">struct</span> vnode *vp,
+	    <span class="enscript-type">struct</span> componentname *cnp, <span class="enscript-type">int</span> flags, vfs_context_t ctx)
+{
+	<span class="enscript-type">int</span> error = 0;
+
+
+	<span class="enscript-comment">/* fast path checks... */</span>
+
+	<span class="enscript-comment">/* are we labeling vnodes? If not still notify of create */</span>
+	<span class="enscript-keyword">if</span> (mac_label_vnodes == 0) {
+		<span class="enscript-keyword">if</span> (flags &amp; VNODE_LABEL_CREATE)
+			error = mac_vnode_notify_create(ctx,
+			    mp, dvp, vp, cnp);
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-comment">/* if already VL_LABELED */</span>
+	<span class="enscript-keyword">if</span> (vp-&gt;v_lflag &amp; VL_LABELED)
+		<span class="enscript-keyword">return</span> (0);
+
+	vnode_lock_spin(vp);
+
+	<span class="enscript-comment">/*
+	 * must revalidate state once we hold the lock
+	 * since we could have blocked and someone else
+	 * has since labeled this vnode
+	 */</span>
+	<span class="enscript-keyword">if</span> (vp-&gt;v_lflag &amp; VL_LABELED) {
+		vnode_unlock(vp);
+		<span class="enscript-keyword">return</span> (0);
+	}
+
+	<span class="enscript-keyword">if</span> ((vp-&gt;v_lflag &amp; VL_LABEL) == 0) {
+		vp-&gt;v_lflag |= VL_LABEL;
+
+		<span class="enscript-comment">/* Could sleep on disk I/O, drop lock. */</span>
+		vnode_unlock(vp);
+
+		<span class="enscript-keyword">if</span> (vp-&gt;v_label == NULL)
+			vp-&gt;v_label = mac_vnode_label_alloc();
+
+		<span class="enscript-keyword">if</span> (flags &amp; VNODE_LABEL_CREATE)
+			error = mac_vnode_notify_create(ctx,
+			    mp, dvp, vp, cnp);
+		<span class="enscript-keyword">else</span>
+			error = mac_vnode_label_associate(mp, vp, ctx);
+
+		vnode_lock_spin(vp);
+
+		<span class="enscript-keyword">if</span> ((error == 0) &amp;&amp; (vp-&gt;v_flag &amp; VNCACHEABLE))
+			vp-&gt;v_lflag |= VL_LABELED;
+		vp-&gt;v_lflag &amp;= ~VL_LABEL;
+
+		<span class="enscript-keyword">if</span> (vp-&gt;v_lflag &amp; VL_LABELWAIT) {
+			vp-&gt;v_lflag &amp;= ~VL_LABELWAIT;
+			wakeup(&amp;vp-&gt;v_label);
+		}
+	} <span class="enscript-keyword">else</span> {
+		<span class="enscript-type">struct</span> timespec ts;
+
+		ts.tv_sec = 10;
+		ts.tv_nsec = 0;
+
+		<span class="enscript-keyword">while</span> (vp-&gt;v_lflag &amp; VL_LABEL) {
+			vp-&gt;v_lflag |= VL_LABELWAIT;
+
+			error = msleep(&amp;vp-&gt;v_label, &amp;vp-&gt;v_lock, PVFS|PDROP,
+				       <span class="enscript-string">&quot;vnode_label&quot;</span>, &amp;ts);
+			vnode_lock_spin(vp);
+
+			<span class="enscript-keyword">if</span> (error == EWOULDBLOCK) {
+				vprint(<span class="enscript-string">&quot;vnode label timeout&quot;</span>, vp);
+				<span class="enscript-keyword">break</span>;
+			}
+		}
+		<span class="enscript-comment">/* XXX: what should be done if labeling failed (above)? */</span>
+	}
+	vnode_unlock(vp);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+
+<span class="enscript-comment">/*
+ * Clear the &quot;labeled&quot; flag on a VNODE.
+ * VNODE will have label re-associated upon
+ * next call to lookup().
+ *
+ * Caller verifies vfs_flags(vnode_mount(vp)) &amp; MNT_MULTILABEL
+ * Caller holds vnode lock.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">vnode_relabel</span>(<span class="enscript-type">struct</span> vnode *vp)
+{
+
+	<span class="enscript-comment">/* Wait for any other labeling to complete. */</span>
+	<span class="enscript-keyword">while</span> (vp-&gt;v_lflag &amp; VL_LABEL) {
+		vp-&gt;v_lflag |= VL_LABELWAIT;
+		(<span class="enscript-type">void</span>)msleep(&amp;vp-&gt;v_label, &amp;vp-&gt;v_lock, PVFS, <span class="enscript-string">&quot;vnode_relabel&quot;</span>, 0);
+	}
+
+	<span class="enscript-comment">/* Clear labeled flag */</span>
+	vp-&gt;v_lflag &amp;= ~VL_LABELED;
+
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-comment">/*
+ * VFS XATTR helpers.
+ */</span>
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnop_setxattr</span> (<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">char</span> *buf, size_t len)
+{
+	vfs_context_t ctx;
+	<span class="enscript-type">int</span> options = XATTR_NOSECURITY;
+	<span class="enscript-type">char</span> uio_buf[ UIO_SIZEOF(1) ];
+        uio_t auio;
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (vfs_isrdonly(vp-&gt;v_mount))
+		<span class="enscript-keyword">return</span> (EROFS);
+
+	ctx = vfs_context_current();
+	auio = uio_createwithbuffer(1, 0, UIO_SYSSPACE, UIO_WRITE,
+				    &amp;uio_buf[0], <span class="enscript-keyword">sizeof</span>(uio_buf));
+	uio_addiov(auio, CAST_USER_ADDR_T(buf), len);
+
+	error = vn_setxattr(vp, name, auio, options, ctx);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_FSE</span>
+	<span class="enscript-keyword">if</span> (error == 0) {
+		add_fsevent(FSE_XATTR_MODIFIED, ctx,
+		    FSE_ARG_VNODE, vp,
+		    FSE_ARG_DONE);
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnop_getxattr</span> (<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name, <span class="enscript-type">char</span> *buf, size_t len,
+		   size_t *attrlen)
+{
+	vfs_context_t ctx = vfs_context_current();
+	<span class="enscript-type">int</span> options = XATTR_NOSECURITY;
+	<span class="enscript-type">char</span> uio_buf[ UIO_SIZEOF(1) ];
+        uio_t auio;
+	<span class="enscript-type">int</span> error;
+
+	auio = uio_createwithbuffer(1, 0, UIO_SYSSPACE, UIO_READ,
+				    &amp;uio_buf[0], <span class="enscript-keyword">sizeof</span>(uio_buf));
+	uio_addiov(auio, CAST_USER_ADDR_T(buf), len);
+
+	error = vn_getxattr(vp, name, auio, attrlen, options, ctx);
+	*attrlen = len - uio_resid(auio);
+
+	<span class="enscript-keyword">return</span> (error);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">mac_vnop_removexattr</span> (<span class="enscript-type">struct</span> vnode *vp, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *name)
+{
+	vfs_context_t ctx = vfs_context_current();
+	<span class="enscript-type">int</span> options = XATTR_NOSECURITY;
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-keyword">if</span> (vfs_isrdonly(vp-&gt;v_mount))
+		<span class="enscript-keyword">return</span> (EROFS);
+
+	error = vn_removexattr(vp, name, options, ctx);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_FSE</span>
+	<span class="enscript-keyword">if</span> (error == 0) {
+		add_fsevent(FSE_XATTR_REMOVED, ctx,
+		    FSE_ARG_VNODE, vp,
+		    FSE_ARG_DONE);
+	}
+#<span class="enscript-reference">endif</span>
+
+	<span class="enscript-keyword">return</span> (error);
+}
+</pre>
+<hr />
+</body></html>

@@ -1,0 +1,627 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>kern_shutdown.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">kern_shutdown.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*
+ *	File:	bsd/kern/kern_shutdown.c
+ *
+ *	Copyright (C) 1989, NeXT, Inc.
+ *
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/reboot.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/conf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/file_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/clist.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/callout.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/msgbuf.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/ioctl.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/tty.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/quota.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_kern.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/filedesc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_priv.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/host_reboot.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/audit/audit.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/sched_prim.h&gt;</span>		<span class="enscript-comment">/* for thread_block() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/host.h&gt;</span>			<span class="enscript-comment">/* for host_priv_self() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;net/if_var.h&gt;</span>			<span class="enscript-comment">/* for if_down_all() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/buf_internal.h&gt;</span>		<span class="enscript-comment">/* for count_busy_buffers() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>		<span class="enscript-comment">/* for vfs_unmountall() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/task.h&gt;</span>			<span class="enscript-comment">/* for task_suspend() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>		<span class="enscript-comment">/* abused for sync() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/clock.h&gt;</span>			<span class="enscript-comment">/* for delay_for_interval() */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kdebug.h&gt;</span>
+
+uint32_t system_inshutdown = 0;
+
+<span class="enscript-comment">/* XXX should be in a header file somewhere, but isn't */</span>
+<span class="enscript-type">extern</span> <span class="enscript-function-name">void</span> (*unmountroot_pre_hook)(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span> proc_shutdown_exitcount = 0;
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">sd_openlog</span>(vfs_context_t);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">sd_closelog</span>(vfs_context_t);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">sd_log</span>(vfs_context_t, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *, ...);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">proc_shutdown</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">kernel_hwm_panic_info</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">void</span> <span class="enscript-function-name">IOSystemShutdownNotification</span>(<span class="enscript-type">void</span>);
+
+<span class="enscript-type">struct</span> sd_filterargs{
+	<span class="enscript-type">int</span> delayterm;
+	<span class="enscript-type">int</span> shutdownstate;
+};
+
+
+<span class="enscript-type">struct</span> sd_iterargs {
+	<span class="enscript-type">int</span> signo;		<span class="enscript-comment">/* the signal to be posted */</span>
+	<span class="enscript-type">int</span> setsdstate;  	<span class="enscript-comment">/* shutdown state to be set */</span>
+	<span class="enscript-type">int</span> countproc;		<span class="enscript-comment">/* count processes on action */</span>
+	<span class="enscript-type">int</span> activecount; 	<span class="enscript-comment">/* number of processes on which action was done */</span>
+};
+
+<span class="enscript-type">static</span> vnode_t sd_logvp = NULLVP;
+<span class="enscript-type">static</span> off_t sd_log_offset = 0;
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">sd_filt1</span>(proc_t, <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">sd_filt2</span>(proc_t, <span class="enscript-type">void</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">sd_callback1</span>(proc_t p, <span class="enscript-type">void</span> * arg);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">sd_callback2</span>(proc_t p, <span class="enscript-type">void</span> * arg);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  <span class="enscript-function-name">sd_callback3</span>(proc_t p, <span class="enscript-type">void</span> * arg);
+
+<span class="enscript-type">extern</span> boolean_t panic_include_zprint;
+<span class="enscript-type">extern</span> vm_offset_t panic_kext_memory_info;
+<span class="enscript-type">extern</span> vm_size_t panic_kext_memory_size; 
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">kernel_hwm_panic_info</span>(<span class="enscript-type">void</span>)
+{
+	mach_memory_info_t      *memory_info;
+	<span class="enscript-type">unsigned</span> <span class="enscript-type">int</span>            num_sites;
+	kern_return_t           kr;
+
+	panic_include_zprint = TRUE;
+	panic_kext_memory_info = 0;
+	panic_kext_memory_size = 0;
+
+	num_sites = VM_KERN_MEMORY_COUNT + VM_KERN_COUNTER_COUNT;
+	panic_kext_memory_size = round_page(num_sites * <span class="enscript-keyword">sizeof</span>(mach_zone_info_t));
+	
+	kr = kmem_alloc(kernel_map, (vm_offset_t *) &amp;panic_kext_memory_info, panic_kext_memory_size, VM_KERN_MEMORY_OSFMK);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		panic_kext_memory_info = 0;
+		<span class="enscript-keyword">return</span>;
+	}
+	memory_info = (mach_memory_info_t *)panic_kext_memory_info;
+	vm_page_diagnose(memory_info, num_sites);
+	<span class="enscript-keyword">return</span>;
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">reboot_kernel</span>(<span class="enscript-type">int</span> howto, <span class="enscript-type">char</span> *message)
+{
+	<span class="enscript-type">int</span> hostboot_option=0;
+
+	<span class="enscript-keyword">if</span> (!OSCompareAndSwap(0, 1, &amp;system_inshutdown)) {
+		<span class="enscript-keyword">if</span> ( (howto&amp;RB_QUICK) == RB_QUICK)
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">force_reboot</span>;
+		<span class="enscript-keyword">return</span> (EBUSY);
+	}
+	<span class="enscript-comment">/*
+	 * Temporary hack to notify the power management root domain
+	 * that the system will shut down.
+	 */</span>
+	IOSystemShutdownNotification();
+
+	<span class="enscript-keyword">if</span> ((howto&amp;RB_QUICK)==RB_QUICK) {
+		printf(<span class="enscript-string">&quot;Quick reboot...\n&quot;</span>);
+		<span class="enscript-keyword">if</span> ((howto&amp;RB_NOSYNC)==0) {
+			sync((proc_t)NULL, (<span class="enscript-type">void</span> *)NULL, (<span class="enscript-type">int</span> *)NULL);
+		}
+	}
+	<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ((howto&amp;RB_NOSYNC)==0) {
+		<span class="enscript-type">int</span> iter, nbusy;
+
+		printf(<span class="enscript-string">&quot;syncing disks... &quot;</span>);
+
+		<span class="enscript-comment">/*
+		 * Release vnodes held by texts before sync.
+		 */</span>
+
+		<span class="enscript-comment">/* handle live procs (deallocate their root and current directories), suspend initproc */</span>
+		proc_shutdown();
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_AUDIT</span>
+		audit_shutdown();
+#<span class="enscript-reference">endif</span>
+
+		<span class="enscript-keyword">if</span> (unmountroot_pre_hook != NULL)
+			unmountroot_pre_hook();
+
+		sync((proc_t)NULL, (<span class="enscript-type">void</span> *)NULL, (<span class="enscript-type">int</span> *)NULL);
+
+		<span class="enscript-keyword">if</span> (kdebug_enable)
+			kdbg_dump_trace_to_file(<span class="enscript-string">&quot;/var/log/shutdown/shutdown.trace&quot;</span>);
+
+		<span class="enscript-comment">/*
+		 * Unmount filesystems
+		 */</span>
+		vfs_unmountall();
+
+		<span class="enscript-comment">/* Wait for the buffer cache to clean remaining dirty buffers */</span>
+		<span class="enscript-keyword">for</span> (iter = 0; iter &lt; 100; iter++) {
+			nbusy = count_busy_buffers();
+			<span class="enscript-keyword">if</span> (nbusy == 0)
+				<span class="enscript-keyword">break</span>;
+			printf(<span class="enscript-string">&quot;%d &quot;</span>, nbusy);
+			delay_for_interval( 1 * nbusy, 1000 * 1000);
+		}
+		<span class="enscript-keyword">if</span> (nbusy)
+			printf(<span class="enscript-string">&quot;giving up\n&quot;</span>);
+		<span class="enscript-keyword">else</span>
+			printf(<span class="enscript-string">&quot;done\n&quot;</span>);
+	}
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">NETWORKING</span>
+	<span class="enscript-comment">/*
+	 * Can't just use an splnet() here to disable the network
+	 * because that will lock out softints which the disk
+	 * drivers depend on to finish DMAs.
+	 */</span>
+	if_down_all();
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* NETWORKING */</span>
+
+<span class="enscript-reference">force_reboot</span>:
+
+	<span class="enscript-keyword">if</span> (howto &amp; RB_PANIC) {
+		<span class="enscript-keyword">if</span> (strncmp(message, <span class="enscript-string">&quot;Kernel memory has exceeded limits&quot;</span>, 33) == 0) {
+			kernel_hwm_panic_info();
+		}
+		panic (<span class="enscript-string">&quot;userspace panic: %s&quot;</span>, message);
+	}
+
+	<span class="enscript-keyword">if</span> (howto &amp; RB_POWERDOWN)
+		hostboot_option = HOST_REBOOT_HALT;
+	<span class="enscript-keyword">if</span> (howto &amp; RB_HALT)
+		hostboot_option = HOST_REBOOT_HALT;
+
+	<span class="enscript-keyword">if</span> (howto &amp; RB_UPSDELAY) {
+		hostboot_option = HOST_REBOOT_UPSDELAY;
+	}
+
+	host_reboot(host_priv_self(), hostboot_option);
+	<span class="enscript-comment">/*
+	 * should not be reached
+	 */</span>
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sd_openlog</span>(vfs_context_t ctx)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> timeval tv;
+	
+	<span class="enscript-comment">/* Open shutdown log */</span>
+	<span class="enscript-keyword">if</span> ((error = vnode_open(PROC_SHUTDOWN_LOG, (O_CREAT | FWRITE | O_NOFOLLOW), 0644, 0, &amp;sd_logvp, ctx))) {
+		printf(<span class="enscript-string">&quot;Failed to open %s: error %d\n&quot;</span>, PROC_SHUTDOWN_LOG, error);
+		sd_logvp = NULLVP;
+		<span class="enscript-keyword">return</span> error;
+	}
+
+	vnode_setsize(sd_logvp, (off_t)0, 0, ctx);
+
+	<span class="enscript-comment">/* Write a little header */</span>
+	microtime(&amp;tv);
+	sd_log(ctx, <span class="enscript-string">&quot;Process shutdown log.  Current time is %lu (in seconds).\n\n&quot;</span>, tv.tv_sec);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sd_closelog</span>(vfs_context_t ctx)
+{
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-keyword">if</span> (sd_logvp != NULLVP) {
+		VNOP_FSYNC(sd_logvp, MNT_WAIT, ctx);
+		error = vnode_close(sd_logvp, FWRITE, ctx);
+	}
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">sd_log</span>(vfs_context_t ctx, <span class="enscript-type">const</span> <span class="enscript-type">char</span> *fmt, ...) 
+{
+	<span class="enscript-type">int</span> resid, log_error, len;
+	<span class="enscript-type">char</span> logbuf[100];
+	va_list arglist;
+
+	<span class="enscript-comment">/* If the log isn't open yet, open it */</span>
+	<span class="enscript-keyword">if</span> (sd_logvp == NULLVP) {
+		<span class="enscript-keyword">if</span> (sd_openlog(ctx) != 0) {
+			<span class="enscript-comment">/* Couldn't open, we fail out */</span>
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+
+	va_start(arglist, fmt);
+	len = vsnprintf(logbuf, <span class="enscript-keyword">sizeof</span>(logbuf), fmt, arglist);
+	log_error = vn_rdwr(UIO_WRITE, sd_logvp, (caddr_t)logbuf, len, sd_log_offset,
+			UIO_SYSSPACE, IO_UNIT | IO_NOAUTH, vfs_context_ucred(ctx), &amp;resid, vfs_context_proc(ctx));
+	<span class="enscript-keyword">if</span> (log_error == EIO || log_error == 0) {
+		sd_log_offset += (len - resid);
+	}
+
+	va_end(arglist);
+
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sd_filt1</span>(proc_t p, <span class="enscript-type">void</span> * args)
+{
+	proc_t self = current_proc();
+	<span class="enscript-type">struct</span> sd_filterargs * sf = (<span class="enscript-type">struct</span> sd_filterargs *)args;
+	<span class="enscript-type">int</span> delayterm = sf-&gt; delayterm;
+	<span class="enscript-type">int</span> shutdownstate = sf-&gt;shutdownstate;
+
+	<span class="enscript-keyword">if</span> (((p-&gt;p_flag&amp;P_SYSTEM) != 0) || (p-&gt;p_ppid == 0) 
+		||(p == self) || (p-&gt;p_stat == SZOMB) 
+		|| (p-&gt;p_shutdownstate != shutdownstate) 
+		||((delayterm == 0) &amp;&amp; ((p-&gt;p_lflag&amp; P_LDELAYTERM) == P_LDELAYTERM))
+		|| ((p-&gt;p_sigcatch &amp; sigmask(SIGTERM))== 0)) {
+			<span class="enscript-keyword">return</span>(0);
+		}
+        <span class="enscript-keyword">else</span> 
+                <span class="enscript-keyword">return</span>(1);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  
+<span class="enscript-function-name">sd_callback1</span>(proc_t p, <span class="enscript-type">void</span> * args)
+{
+	<span class="enscript-type">struct</span> sd_iterargs * sd = (<span class="enscript-type">struct</span> sd_iterargs *)args;
+	<span class="enscript-type">int</span> signo = sd-&gt;signo;
+	<span class="enscript-type">int</span> setsdstate = sd-&gt;setsdstate;
+	<span class="enscript-type">int</span> countproc = sd-&gt;countproc;
+
+	proc_lock(p);
+	p-&gt;p_shutdownstate = setsdstate;
+	<span class="enscript-keyword">if</span> (p-&gt;p_stat != SZOMB) {
+		proc_unlock(p);
+		<span class="enscript-keyword">if</span> (countproc != 0) {
+			proc_list_lock();
+			p-&gt;p_listflag |= P_LIST_EXITCOUNT;
+			proc_shutdown_exitcount++;
+			proc_list_unlock();
+		}
+
+		psignal(p, signo);
+		<span class="enscript-keyword">if</span> (countproc !=  0)
+			sd-&gt;activecount++;
+	} <span class="enscript-keyword">else</span>
+		proc_unlock(p);
+	<span class="enscript-keyword">return</span>(PROC_RETURNED);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">sd_filt2</span>(proc_t p, <span class="enscript-type">void</span> * args)
+{
+	proc_t self = current_proc();
+	<span class="enscript-type">struct</span> sd_filterargs * sf = (<span class="enscript-type">struct</span> sd_filterargs *)args;
+	<span class="enscript-type">int</span> delayterm = sf-&gt; delayterm;
+	<span class="enscript-type">int</span> shutdownstate = sf-&gt;shutdownstate;
+
+	<span class="enscript-keyword">if</span> (((p-&gt;p_flag&amp;P_SYSTEM) != 0) || (p-&gt;p_ppid == 0) 
+		||(p == self) || (p-&gt;p_stat == SZOMB) 
+		|| (p-&gt;p_shutdownstate == shutdownstate) 
+		||((delayterm == 0) &amp;&amp; ((p-&gt;p_lflag&amp; P_LDELAYTERM) == P_LDELAYTERM))) {
+			<span class="enscript-keyword">return</span>(0);
+		}
+        <span class="enscript-keyword">else</span>
+                <span class="enscript-keyword">return</span>(1);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  
+<span class="enscript-function-name">sd_callback2</span>(proc_t p, <span class="enscript-type">void</span> * args)
+{
+	<span class="enscript-type">struct</span> sd_iterargs * sd = (<span class="enscript-type">struct</span> sd_iterargs *)args;
+	<span class="enscript-type">int</span> signo = sd-&gt;signo;
+	<span class="enscript-type">int</span> setsdstate = sd-&gt;setsdstate;
+	<span class="enscript-type">int</span> countproc = sd-&gt;countproc;
+
+	proc_lock(p);
+	p-&gt;p_shutdownstate = setsdstate;
+	<span class="enscript-keyword">if</span> (p-&gt;p_stat != SZOMB) {
+		proc_unlock(p);
+		<span class="enscript-keyword">if</span> (countproc !=  0) {
+			proc_list_lock();
+			p-&gt;p_listflag |= P_LIST_EXITCOUNT;
+			proc_shutdown_exitcount++;
+			proc_list_unlock();
+		}
+		psignal(p, signo);
+		<span class="enscript-keyword">if</span> (countproc !=  0)
+			sd-&gt;activecount++;
+	} <span class="enscript-keyword">else</span>
+		proc_unlock(p);
+
+	<span class="enscript-keyword">return</span>(PROC_RETURNED);
+
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>  
+<span class="enscript-function-name">sd_callback3</span>(proc_t p, <span class="enscript-type">void</span> * args)
+{
+	<span class="enscript-type">struct</span> sd_iterargs * sd = (<span class="enscript-type">struct</span> sd_iterargs *)args;
+	vfs_context_t ctx = vfs_context_current();
+
+	<span class="enscript-type">int</span> setsdstate = sd-&gt;setsdstate;
+
+	proc_lock(p);
+	p-&gt;p_shutdownstate = setsdstate;
+	<span class="enscript-keyword">if</span> (p-&gt;p_stat != SZOMB) {
+	       <span class="enscript-comment">/*
+		* NOTE: following code ignores sig_lock and plays
+		* with exit_thread correctly.  This is OK unless we
+		* are a multiprocessor, in which case I do not
+		* understand the sig_lock.  This needs to be fixed.
+		* XXX
+		*/</span>
+		<span class="enscript-keyword">if</span> (p-&gt;exit_thread) {	<span class="enscript-comment">/* someone already doing it */</span>
+			proc_unlock(p);
+			<span class="enscript-comment">/* give him a chance */</span>
+			thread_block(THREAD_CONTINUE_NULL);
+		} <span class="enscript-keyword">else</span> {
+			p-&gt;exit_thread = current_thread();
+			printf(<span class="enscript-string">&quot;.&quot;</span>);
+
+			sd_log(ctx, <span class="enscript-string">&quot;%s[%d] had to be forced closed with exit1().\n&quot;</span>, p-&gt;p_comm, p-&gt;p_pid);
+
+			proc_unlock(p);
+			KERNEL_DEBUG_CONSTANT(BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_FRCEXIT) | DBG_FUNC_NONE,
+					      p-&gt;p_pid, 0, 1, 0, 0);
+			sd-&gt;activecount++;
+			exit1(p, 1, (<span class="enscript-type">int</span> *)NULL);
+		}
+	} <span class="enscript-keyword">else</span>
+		proc_unlock(p);
+
+	<span class="enscript-keyword">return</span>(PROC_RETURNED);
+}
+
+
+<span class="enscript-comment">/*
+ * proc_shutdown()
+ *
+ *	Shutdown down proc system (release references to current and root
+ *	dirs for each process).
+ *
+ * POSIX modifications:
+ *
+ *	For POSIX fcntl() file locking call vno_lockrelease() on 
+ *	the file to release all of its record locks, if any.
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">proc_shutdown</span>(<span class="enscript-type">void</span>)
+{
+	vfs_context_t ctx = vfs_context_current();
+	<span class="enscript-type">struct</span> proc *p, *self;
+	<span class="enscript-type">int</span> delayterm = 0;
+	<span class="enscript-type">struct</span> sd_filterargs sfargs;
+	<span class="enscript-type">struct</span> sd_iterargs sdargs;
+	<span class="enscript-type">int</span> error = 0;
+	<span class="enscript-type">struct</span> timespec ts;
+
+	<span class="enscript-comment">/*
+	 *	Kill as many procs as we can.  (Except ourself...)
+	 */</span>
+	self = (<span class="enscript-type">struct</span> proc *)current_proc();
+	
+	<span class="enscript-comment">/*
+	 * Signal the init with SIGTERM so that he does not launch
+	 * new processes 
+	 */</span>
+	p = proc_find(1);
+	<span class="enscript-keyword">if</span> (p &amp;&amp; p != self) {
+		psignal(p, SIGTERM);
+	}
+	proc_rele(p);
+
+	printf(<span class="enscript-string">&quot;Killing all processes &quot;</span>);
+
+<span class="enscript-reference">sigterm_loop</span>:
+	<span class="enscript-comment">/*
+	 * send SIGTERM to those procs interested in catching one
+	 */</span>
+	sfargs.delayterm = delayterm;
+	sfargs.shutdownstate = 0;
+	sdargs.signo = SIGTERM;
+	sdargs.setsdstate = 1;
+	sdargs.countproc = 1;
+	sdargs.activecount = 0;
+
+	error = 0;
+	<span class="enscript-comment">/* post a SIGTERM to all that catch SIGTERM and not marked for delay */</span>
+	proc_rebootscan(sd_callback1, (<span class="enscript-type">void</span> *)&amp;sdargs, sd_filt1, (<span class="enscript-type">void</span> *)&amp;sfargs);
+
+	<span class="enscript-keyword">if</span> (sdargs.activecount != 0 &amp;&amp; proc_shutdown_exitcount!= 0) {
+		proc_list_lock();
+		<span class="enscript-keyword">if</span> (proc_shutdown_exitcount != 0) {
+			<span class="enscript-comment">/*
+	 		* now wait for up to 30 seconds to allow those procs catching SIGTERM
+	 		* to digest it
+	 		* as soon as these procs have exited, we'll continue on to the next step
+	 		*/</span>
+			ts.tv_sec = 30;
+			ts.tv_nsec = 0;
+			error = msleep(&amp;proc_shutdown_exitcount, proc_list_mlock, PWAIT, <span class="enscript-string">&quot;shutdownwait&quot;</span>, &amp;ts);
+			<span class="enscript-keyword">if</span> (error != 0) {
+				<span class="enscript-keyword">for</span> (p = allproc.lh_first; p; p = p-&gt;p_list.le_next) {
+					<span class="enscript-keyword">if</span> ((p-&gt;p_listflag &amp; P_LIST_EXITCOUNT) == P_LIST_EXITCOUNT)
+						p-&gt;p_listflag &amp;= ~P_LIST_EXITCOUNT;
+				}
+				<span class="enscript-keyword">for</span> (p = zombproc.lh_first; p; p = p-&gt;p_list.le_next) {
+					<span class="enscript-keyword">if</span> ((p-&gt;p_listflag &amp; P_LIST_EXITCOUNT) == P_LIST_EXITCOUNT)
+						p-&gt;p_listflag &amp;= ~P_LIST_EXITCOUNT;
+				}
+			}
+			
+		}
+		proc_list_unlock();
+	}
+	<span class="enscript-keyword">if</span> (error == ETIMEDOUT) {
+		<span class="enscript-comment">/*
+		 * log the names of the unresponsive tasks
+		 */</span>
+
+
+		proc_list_lock();
+
+		<span class="enscript-keyword">for</span> (p = allproc.lh_first; p; p = p-&gt;p_list.le_next) {
+			<span class="enscript-keyword">if</span> (p-&gt;p_shutdownstate == 1) {
+				printf(<span class="enscript-string">&quot;%s[%d]: didn't act on SIGTERM\n&quot;</span>, p-&gt;p_comm, p-&gt;p_pid);
+				sd_log(ctx, <span class="enscript-string">&quot;%s[%d]: didn't act on SIGTERM\n&quot;</span>, p-&gt;p_comm, p-&gt;p_pid);
+			}
+		}
+
+		proc_list_unlock();
+
+		delay_for_interval(1000 * 5, 1000 * 1000);
+	}
+
+	<span class="enscript-comment">/*
+	 * send a SIGKILL to all the procs still hanging around
+	 */</span>
+	sfargs.delayterm = delayterm;
+	sfargs.shutdownstate = 2;
+	sdargs.signo = SIGKILL;
+	sdargs.setsdstate = 2;
+	sdargs.countproc = 1;
+	sdargs.activecount = 0;
+
+	<span class="enscript-comment">/* post a SIGKILL to all that catch SIGTERM and not marked for delay */</span>
+	proc_rebootscan(sd_callback2, (<span class="enscript-type">void</span> *)&amp;sdargs, sd_filt2, (<span class="enscript-type">void</span> *)&amp;sfargs);
+
+	<span class="enscript-keyword">if</span> (sdargs.activecount != 0 &amp;&amp; proc_shutdown_exitcount!= 0) {
+		proc_list_lock();
+		<span class="enscript-keyword">if</span> (proc_shutdown_exitcount != 0) {
+			<span class="enscript-comment">/*
+	 		* wait for up to 60 seconds to allow these procs to exit normally
+	 		*
+	 		* History:	The delay interval was changed from 100 to 200
+	 		*		for NFS requests in particular.
+	 		*/</span>
+			ts.tv_sec = 60;
+			ts.tv_nsec = 0;
+			error = msleep(&amp;proc_shutdown_exitcount, proc_list_mlock, PWAIT, <span class="enscript-string">&quot;shutdownwait&quot;</span>, &amp;ts);
+			<span class="enscript-keyword">if</span> (error != 0) {
+				<span class="enscript-keyword">for</span> (p = allproc.lh_first; p; p = p-&gt;p_list.le_next) {
+					<span class="enscript-keyword">if</span> ((p-&gt;p_listflag &amp; P_LIST_EXITCOUNT) == P_LIST_EXITCOUNT)
+						p-&gt;p_listflag &amp;= ~P_LIST_EXITCOUNT;
+				}
+				<span class="enscript-keyword">for</span> (p = zombproc.lh_first; p; p = p-&gt;p_list.le_next) {
+					<span class="enscript-keyword">if</span> ((p-&gt;p_listflag &amp; P_LIST_EXITCOUNT) == P_LIST_EXITCOUNT)
+						p-&gt;p_listflag &amp;= ~P_LIST_EXITCOUNT;
+				}
+			}
+		}
+		proc_list_unlock();
+	}
+
+	<span class="enscript-comment">/*
+	 * if we still have procs that haven't exited, then brute force 'em
+	 */</span>
+	sfargs.delayterm = delayterm;
+	sfargs.shutdownstate = 3;
+	sdargs.signo = 0;
+	sdargs.setsdstate = 3;
+	sdargs.countproc = 0;
+	sdargs.activecount = 0;
+
+	<span class="enscript-comment">/* post a SIGTERM to all that catch SIGTERM and not marked for delay */</span>
+	proc_rebootscan(sd_callback3, (<span class="enscript-type">void</span> *)&amp;sdargs, sd_filt2, (<span class="enscript-type">void</span> *)&amp;sfargs);
+	printf(<span class="enscript-string">&quot;\n&quot;</span>);
+
+	<span class="enscript-comment">/* Now start the termination of processes that are marked for delayed termn */</span>
+	<span class="enscript-keyword">if</span> (delayterm == 0) {
+		delayterm = 1;
+		<span class="enscript-keyword">goto</span>  <span class="enscript-reference">sigterm_loop</span>;
+	}
+
+	sd_closelog(ctx);
+
+	<span class="enscript-comment">/*
+	 * Now that all other processes have been terminated, suspend init
+	 */</span>
+	task_suspend_internal(initproc-&gt;task);
+
+	<span class="enscript-comment">/* drop the ref on initproc */</span>
+	proc_rele(initproc);
+	printf(<span class="enscript-string">&quot;continuing\n&quot;</span>);
+}
+
+</pre>
+<hr />
+</body></html>

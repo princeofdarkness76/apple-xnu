@@ -1,0 +1,309 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>profile_runtime.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">profile_runtime.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2014 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ *
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/sysproto.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/pgo.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSKextLib.h&gt;</span>
+
+
+<span class="enscript-comment">/*
+ * This tells compiler_rt not to include userspace-specific stuff writing
+ * profile data to a file.
+ */</span>
+<span class="enscript-type">int</span> __llvm_profile_runtime = 0;
+
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">PROFILE</span>
+
+<span class="enscript-comment">/* These __llvm functions are defined in InstrProfiling.h in compiler_rt.  That
+ * is a internal header, so we need to re-prototype them here.  */</span>
+
+uint64_t <span class="enscript-function-name">__llvm_profile_get_size_for_buffer</span>(<span class="enscript-type">void</span>);
+<span class="enscript-type">int</span> <span class="enscript-function-name">__llvm_profile_write_buffer</span>(<span class="enscript-type">char</span> *Buffer);
+uint64_t <span class="enscript-function-name">__llvm_profile_get_size_for_buffer_internal</span>(<span class="enscript-type">const</span> <span class="enscript-type">char</span> *DataBegin,
+                                                     <span class="enscript-type">const</span> <span class="enscript-type">char</span> *DataEnd,
+                                                     <span class="enscript-type">const</span> <span class="enscript-type">char</span> *CountersBegin,
+                                                     <span class="enscript-type">const</span> <span class="enscript-type">char</span> *CountersEnd ,
+                                                     <span class="enscript-type">const</span> <span class="enscript-type">char</span> *NamesBegin,
+                                                     <span class="enscript-type">const</span> <span class="enscript-type">char</span> *NamesEnd);
+<span class="enscript-type">int</span> <span class="enscript-function-name">__llvm_profile_write_buffer_internal</span>(<span class="enscript-type">char</span> *Buffer,
+                                         <span class="enscript-type">const</span> <span class="enscript-type">char</span> *DataBegin,
+                                         <span class="enscript-type">const</span> <span class="enscript-type">char</span> *DataEnd,
+                                         <span class="enscript-type">const</span> <span class="enscript-type">char</span> *CountersBegin,
+                                         <span class="enscript-type">const</span> <span class="enscript-type">char</span> *CountersEnd ,
+                                         <span class="enscript-type">const</span> <span class="enscript-type">char</span> *NamesBegin,
+                                         <span class="enscript-type">const</span> <span class="enscript-type">char</span> *NamesEnd);
+
+<span class="enscript-type">extern</span> <span class="enscript-type">char</span> __pgo_hib_DataStart <span class="enscript-function-name">__asm</span>(<span class="enscript-string">&quot;section$start$__HIB$__llvm_prf_data&quot;</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">char</span> __pgo_hib_DataEnd   <span class="enscript-function-name">__asm</span>(<span class="enscript-string">&quot;section$end$__HIB$__llvm_prf_data&quot;</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">char</span> __pgo_hib_NamesStart <span class="enscript-function-name">__asm</span>(<span class="enscript-string">&quot;section$start$__HIB$__llvm_prf_names&quot;</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">char</span> __pgo_hib_NamesEnd   <span class="enscript-function-name">__asm</span>(<span class="enscript-string">&quot;section$end$__HIB$__llvm_prf_names&quot;</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">char</span> __pgo_hib_CountersStart <span class="enscript-function-name">__asm</span>(<span class="enscript-string">&quot;section$start$__HIB$__llvm_prf_cnts&quot;</span>);
+<span class="enscript-type">extern</span> <span class="enscript-type">char</span> __pgo_hib_CountersEnd   <span class="enscript-function-name">__asm</span>(<span class="enscript-string">&quot;section$end$__HIB$__llvm_prf_cnts&quot;</span>);
+
+
+<span class="enscript-type">static</span> uint64_t <span class="enscript-function-name">get_size_for_buffer</span>(<span class="enscript-type">int</span> flags)
+{
+        <span class="enscript-keyword">if</span> (flags &amp; PGO_HIB) {
+                <span class="enscript-keyword">return</span> __llvm_profile_get_size_for_buffer_internal(
+                        &amp;__pgo_hib_DataStart, &amp;__pgo_hib_DataEnd,
+                        &amp;__pgo_hib_CountersStart, &amp;__pgo_hib_CountersEnd,
+                        &amp;__pgo_hib_NamesStart, &amp;__pgo_hib_NamesEnd);
+        } <span class="enscript-keyword">else</span> {
+                <span class="enscript-keyword">return</span> __llvm_profile_get_size_for_buffer();
+        }
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">write_buffer</span>(<span class="enscript-type">int</span> flags, <span class="enscript-type">char</span> *buffer)
+{
+        <span class="enscript-keyword">if</span> (flags &amp; PGO_HIB) {
+                <span class="enscript-keyword">return</span> __llvm_profile_write_buffer_internal(
+                        buffer,
+                        &amp;__pgo_hib_DataStart, &amp;__pgo_hib_DataEnd,
+                        &amp;__pgo_hib_CountersStart, &amp;__pgo_hib_CountersEnd,
+                        &amp;__pgo_hib_NamesStart, &amp;__pgo_hib_NamesEnd);
+        } <span class="enscript-keyword">else</span> {
+                <span class="enscript-keyword">return</span> __llvm_profile_write_buffer(buffer);
+        }
+}
+
+
+#<span class="enscript-reference">endif</span>
+
+
+
+<span class="enscript-comment">/*
+ * returns:
+ *   EPERM  unless you are root
+ *   EINVAL for invalid args.
+ *   ENOSYS for not implemented
+ *   ERANGE for integer overflow
+ *   ENOENT if kext not found
+ *   ENOTSUP kext does not support PGO
+ *   EIO llvm returned an error.  shouldn't ever happen.
+ */</span>
+
+<span class="enscript-type">int</span> <span class="enscript-function-name">grab_pgo_data</span>(<span class="enscript-type">struct</span> proc *p,
+                  <span class="enscript-type">struct</span> grab_pgo_data_args *uap,
+                  register_t *retval)
+{
+        <span class="enscript-type">char</span> *buffer = NULL;
+        <span class="enscript-type">int</span> err = 0;
+
+        (<span class="enscript-type">void</span>) p;
+
+        <span class="enscript-keyword">if</span> (!kauth_cred_issuser(kauth_cred_get())) {
+                err = EPERM;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+        }
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+        err = mac_system_check_info(kauth_cred_get(), <span class="enscript-string">&quot;kern.profiling_data&quot;</span>);
+        <span class="enscript-keyword">if</span> (err) {
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+        }
+#<span class="enscript-reference">endif</span>
+
+        <span class="enscript-keyword">if</span> ( uap-&gt;flags &amp; ~PGO_ALL_FLAGS ||
+             uap-&gt;size &lt; 0 ||
+             (uap-&gt;size &gt; 0 &amp;&amp; uap-&gt;buffer == 0))
+        {
+                err = EINVAL;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+        }
+
+        *retval = 0;
+
+        <span class="enscript-keyword">if</span> (uap-&gt;uuid) {
+                uuid_t uuid;
+                err = copyin(uap-&gt;uuid, &amp;uuid, <span class="enscript-keyword">sizeof</span>(uuid));
+                <span class="enscript-keyword">if</span> (err) {
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                }
+
+                <span class="enscript-keyword">if</span> (uap-&gt;buffer == 0 &amp;&amp; uap-&gt;size == 0) {
+                    uint64_t size64;
+
+                    <span class="enscript-keyword">if</span> (uap-&gt;flags &amp; PGO_WAIT_FOR_UNLOAD) {
+                        err = EINVAL;
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                    }
+
+                    err = OSKextGrabPgoData(uuid, &amp;size64, NULL, 0, 0, !!(uap-&gt;flags &amp; PGO_METADATA));
+                    <span class="enscript-keyword">if</span> (err) {
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                    }
+
+                    ssize_t size = size64;
+                    <span class="enscript-keyword">if</span> ( ((uint64_t) size) != size64  ||
+                         size &lt; 0 )
+                    {
+                        err = ERANGE;
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                    }
+
+                    *retval = size;
+                    err = 0;
+                    <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+                } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (!uap-&gt;buffer || uap-&gt;size &lt;= 0) {
+
+                    err = EINVAL;
+                    <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+                } <span class="enscript-keyword">else</span> {
+
+                    MALLOC(buffer, <span class="enscript-type">char</span> *, uap-&gt;size, M_TEMP, M_WAITOK);
+                    <span class="enscript-keyword">if</span> (!buffer) {
+                        err = ENOMEM;
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                    }
+
+                    uint64_t size64;
+
+                    err = OSKextGrabPgoData(uuid, &amp;size64, buffer, uap-&gt;size,
+                                            !!(uap-&gt;flags &amp; PGO_WAIT_FOR_UNLOAD),
+                                            !!(uap-&gt;flags &amp; PGO_METADATA));
+                    <span class="enscript-keyword">if</span> (err) {
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                    }
+
+                    ssize_t size = size64;
+                    <span class="enscript-keyword">if</span> ( ((uint64_t) size) != size64  ||
+                         size &lt; 0 )
+                    {
+                        err = ERANGE;
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                    }
+
+                    err = copyout(buffer, uap-&gt;buffer, size);
+                    <span class="enscript-keyword">if</span> (err) {
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                    }
+
+                    *retval = size;
+                    <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                }
+        }
+
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">PROFILE</span>
+
+        uint64_t size64 = get_size_for_buffer(uap-&gt;flags);
+        ssize_t size = size64;
+
+        <span class="enscript-keyword">if</span> (uap-&gt;flags &amp; (PGO_WAIT_FOR_UNLOAD | PGO_METADATA)) {
+            err = EINVAL;
+            <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+        }
+
+        <span class="enscript-keyword">if</span> ( ((uint64_t) size) != size64  ||
+             size &lt; 0 )
+        {
+                err = ERANGE;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+        }
+
+
+        <span class="enscript-keyword">if</span> (uap-&gt;buffer == 0 &amp;&amp; uap-&gt;size == 0) {
+                *retval = size;
+                err = 0;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+        } <span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> (uap-&gt;size &lt; size) {
+                err = EINVAL;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+        } <span class="enscript-keyword">else</span> {
+                MALLOC(buffer, <span class="enscript-type">char</span> *, size, M_TEMP, M_WAITOK);
+                <span class="enscript-keyword">if</span> (!buffer) {
+                        err = ENOMEM;
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                }
+
+                err = write_buffer(uap-&gt;flags, buffer);
+                <span class="enscript-keyword">if</span> (err)
+                {
+                    err = EIO;
+                    <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                }
+
+                err = copyout(buffer, uap-&gt;buffer, size);
+                <span class="enscript-keyword">if</span> (err) {
+                        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+                }
+
+                *retval = size;
+                <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+        }
+
+#<span class="enscript-reference">else</span>
+
+        *retval = -1;
+        err = ENOSYS;
+        <span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-reference">out</span>:
+        <span class="enscript-keyword">if</span> (buffer) {
+                FREE(buffer, M_TEMP);
+        }
+        <span class="enscript-keyword">if</span> (err) {
+                *retval = -1;
+        }
+        <span class="enscript-keyword">return</span> err;
+}
+</pre>
+<hr />
+</body></html>

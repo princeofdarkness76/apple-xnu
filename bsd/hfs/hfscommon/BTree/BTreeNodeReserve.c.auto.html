@@ -1,0 +1,366 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>BTreeNodeReserve.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">BTreeNodeReserve.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2004-2008 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../headers/BTreesPrivate.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;sys/malloc.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/locks.h&gt;</span>
+
+
+<span class="enscript-comment">/*
+ * B-tree Node Reserve
+ *
+ * BTReserveSpace
+ * BTReleaseReserve
+ * BTUpdateReserve
+ *
+ * Each kernel thread can have it's own reserve of b-tree
+ * nodes. This reserve info is kept in a hash table.
+ *
+ * Don't forget to call BTReleaseReserve when you're finished
+ * or you will leave stale node reserves in the hash.
+ */</span>
+
+
+<span class="enscript-comment">/*
+ * BE CAREFUL WHEN INCREASING THE SIZE OF THIS STRUCT!
+ *
+ * It must remain equal in size to the opaque cat_cookie_t
+ * struct (in hfs_catalog.h).
+ */</span>
+<span class="enscript-type">struct</span> nreserve {
+	LIST_ENTRY(nreserve) nr_hash;  <span class="enscript-comment">/* hash chain */</span>
+	<span class="enscript-type">int</span>  nr_nodecnt;               <span class="enscript-comment">/* count of nodes held in reserve */</span>
+	<span class="enscript-type">int</span>  nr_newnodes;              <span class="enscript-comment">/* nodes that were allocated */</span>
+	<span class="enscript-type">struct</span>	vnode *nr_btvp;        <span class="enscript-comment">/* b-tree file vnode */</span>
+	<span class="enscript-type">void</span>  *nr_tag;                 <span class="enscript-comment">/* unique tag (per thread) */</span>
+};
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">NR_GET_TAG</span>()	(current_thread())
+
+#<span class="enscript-reference">define</span>	<span class="enscript-variable-name">NR_CACHE</span> 17
+
+#<span class="enscript-reference">define</span> <span class="enscript-function-name">NR_HASH</span>(btvp, tag) \
+	(&amp;nr_hashtbl[((((intptr_t)(btvp)) &gt;&gt; 8) ^ ((intptr_t)(tag) &gt;&gt; 4)) &amp; nr_hashmask])
+
+<span class="enscript-function-name">LIST_HEAD</span>(nodereserve, nreserve) *nr_hashtbl;
+
+u_long nr_hashmask;
+
+lck_grp_t * nr_lck_grp;
+lck_grp_attr_t * nr_lck_grp_attr;
+lck_attr_t * nr_lck_attr;
+
+lck_mtx_t  nr_mutex;
+
+<span class="enscript-comment">/* Internal Node Reserve Hash Routines (private) */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">nr_insert</span> (<span class="enscript-type">struct</span> vnode *, <span class="enscript-type">struct</span> nreserve *nrp, <span class="enscript-type">int</span>);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">nr_delete</span> (<span class="enscript-type">struct</span> vnode *, <span class="enscript-type">struct</span> nreserve *nrp, <span class="enscript-type">int</span> *);
+<span class="enscript-type">static</span> <span class="enscript-type">void</span> <span class="enscript-function-name">nr_update</span> (<span class="enscript-type">struct</span> vnode *, <span class="enscript-type">int</span>);
+
+
+<span class="enscript-comment">/*
+ * BTReserveSetup - initialize the node reserve hash table
+ */</span>
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">BTReserveSetup</span>()
+{
+	<span class="enscript-keyword">if</span> (<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> nreserve) != <span class="enscript-keyword">sizeof</span>(cat_cookie_t))
+		panic(<span class="enscript-string">&quot;hfs: BTReserveSetup: nreserve size != opaque struct size&quot;</span>);
+
+	nr_hashtbl = hashinit(NR_CACHE, M_HFSMNT, &amp;nr_hashmask);
+
+	nr_lck_grp_attr= lck_grp_attr_alloc_init();
+	nr_lck_grp  = lck_grp_alloc_init(<span class="enscript-string">&quot;btree_node_reserve&quot;</span>, nr_lck_grp_attr);
+
+	nr_lck_attr = lck_attr_alloc_init();
+
+	lck_mtx_init(&amp;nr_mutex, nr_lck_grp, nr_lck_attr);
+}
+
+
+<span class="enscript-comment">/*
+ * BTReserveSpace - obtain a node reserve (for current thread)
+ *
+ * Used by the Catalog Layer (hfs_catalog.c) to reserve space.
+ *
+ * When data is NULL, we only insure that there's enough space
+ * but it is not reserved (assumes you keep the b-tree lock).
+ */</span>
+__private_extern__
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">BTReserveSpace</span>(FCB *file, <span class="enscript-type">int</span> operations, <span class="enscript-type">void</span>* data)
+{
+	BTreeControlBlock *btree;
+	<span class="enscript-type">int</span> rsrvNodes, availNodes, totalNodes;
+	<span class="enscript-type">int</span> height;
+	<span class="enscript-type">int</span> inserts, deletes;
+	u_int32_t clumpsize;
+	<span class="enscript-type">int</span> err = 0;
+
+	btree = (BTreeControlBlockPtr)file-&gt;fcbBTCBPtr;
+	clumpsize = file-&gt;ff_clumpsize;
+
+	REQUIRE_FILE_LOCK(btree-&gt;fileRefNum, true);
+
+	<span class="enscript-comment">/*
+	 * The node reserve is based on the number of b-tree
+	 * operations (insert/deletes) and the height of the
+	 * tree.
+	 */</span>
+	height = btree-&gt;treeDepth;
+	<span class="enscript-keyword">if</span> (height &lt; 2)
+		height = 2;  <span class="enscript-comment">/* prevent underflow in rsrvNodes calculation */</span>
+	inserts = operations &amp; 0xffff;
+	deletes = operations &gt;&gt; 16;
+	
+	<span class="enscript-comment">/*
+	 * Allow for at least one root split.
+	 *
+	 * Each delete operation can propogate a big key up the
+	 * index. This can cause a split at each level up.
+	 *
+	 * Each insert operation can cause a local split and a
+	 * split at each level up.
+	 */</span>
+	rsrvNodes = 1 + (deletes * (height - 2)) + (inserts * (height - 1));
+
+	availNodes = btree-&gt;freeNodes - btree-&gt;reservedNodes;
+	
+	<span class="enscript-keyword">if</span> (rsrvNodes &gt; availNodes) {
+		u_int32_t reqblks, freeblks, rsrvblks;
+		uint32_t bt_rsrv;
+		<span class="enscript-type">struct</span> hfsmount *hfsmp;
+
+		<span class="enscript-comment">/* 
+		 * For UNIX conformance, we try and reserve the MIN of either 5% of 
+		 * total file blocks or 10MB worth of blocks, for growing existing 
+		 * files.  On non-HFS filesystems, creating a new directory entry may
+		 * not cause additional disk space to be allocated, but on HFS, creating
+		 * a new entry could cause the b-tree to grow.  As a result, we take 
+		 * some precautions here to prevent that on configurations that try to 
+		 * satisfy conformance.
+		 */</span>
+		hfsmp = VTOVCB(btree-&gt;fileRefNum);
+		rsrvblks = ((u_int64_t)hfsmp-&gt;allocLimit * 5) / 100;
+		<span class="enscript-keyword">if</span> (hfsmp-&gt;blockSize &gt; HFS_BT_MAXRESERVE) {
+			bt_rsrv = 1;	
+		}
+		<span class="enscript-keyword">else</span> {
+			bt_rsrv = (HFS_BT_MAXRESERVE / hfsmp-&gt;blockSize);
+		}
+		rsrvblks = MIN(rsrvblks, bt_rsrv);	
+		
+		freeblks = hfs_freeblks(hfsmp, 0);
+		<span class="enscript-keyword">if</span> (freeblks &lt;= rsrvblks) {
+			<span class="enscript-comment">/* When running low, disallow adding new items. */</span>
+			<span class="enscript-keyword">if</span> ((inserts &gt; 0) &amp;&amp; (deletes == 0)) {
+				<span class="enscript-keyword">return</span> (ENOSPC);
+			}
+			freeblks = 0;
+		} <span class="enscript-keyword">else</span> {
+			freeblks -= rsrvblks;
+		}
+		reqblks = clumpsize / hfsmp-&gt;blockSize;
+
+		<span class="enscript-keyword">if</span> (reqblks &gt; freeblks) {
+			reqblks = ((rsrvNodes - availNodes) * btree-&gt;nodeSize) / hfsmp-&gt;blockSize;
+			<span class="enscript-comment">/* When running low, disallow adding new items. */</span>
+			<span class="enscript-keyword">if</span> ((reqblks &gt; freeblks) &amp;&amp; (inserts &gt; 0) &amp;&amp; (deletes == 0)) {
+				<span class="enscript-keyword">return</span> (ENOSPC);
+			}
+			file-&gt;ff_clumpsize = freeblks * hfsmp-&gt;blockSize;
+		}
+		totalNodes = rsrvNodes + btree-&gt;totalNodes - availNodes;
+		
+		<span class="enscript-comment">/* See if we also need a map node */</span>
+		<span class="enscript-keyword">if</span> (totalNodes &gt; (<span class="enscript-type">int</span>)CalcMapBits(btree)) {
+			++totalNodes;
+		}
+		<span class="enscript-keyword">if</span> ((err = ExtendBTree(btree, totalNodes))) {
+			<span class="enscript-keyword">goto</span> <span class="enscript-reference">out</span>;
+		}
+	}
+	<span class="enscript-comment">/* Save this reserve if this is a persistent request. */</span>
+	<span class="enscript-keyword">if</span> (data) {
+		btree-&gt;reservedNodes += rsrvNodes;
+		nr_insert(btree-&gt;fileRefNum, (<span class="enscript-type">struct</span> nreserve *)data, rsrvNodes);
+	}
+<span class="enscript-reference">out</span>:
+	<span class="enscript-comment">/* Put clump size back if it was changed. */</span>
+	<span class="enscript-keyword">if</span> (file-&gt;ff_clumpsize != clumpsize)
+		file-&gt;ff_clumpsize = clumpsize;
+
+	<span class="enscript-keyword">return</span> (err);
+}
+
+
+<span class="enscript-comment">/*
+ * BTReleaseReserve - release the node reserve held by current thread
+ *
+ * Used by the Catalog Layer (hfs_catalog.c) to relinquish reserved space.
+ */</span>
+__private_extern__
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">BTReleaseReserve</span>(FCB *file, <span class="enscript-type">void</span>* data)
+{
+	BTreeControlBlock *btree;
+	<span class="enscript-type">int</span> nodecnt;
+
+	btree = (BTreeControlBlockPtr)file-&gt;fcbBTCBPtr;
+	
+	REQUIRE_FILE_LOCK(btree-&gt;fileRefNum, true);
+
+	nr_delete(btree-&gt;fileRefNum, (<span class="enscript-type">struct</span> nreserve *)data, &amp;nodecnt);
+
+	<span class="enscript-keyword">if</span> (nodecnt)
+		btree-&gt;reservedNodes -= nodecnt;
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-comment">/*
+ * BTUpdateReserve - update a node reserve for allocations that occurred.
+ */</span>
+__private_extern__
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">BTUpdateReserve</span>(BTreeControlBlockPtr btreePtr, <span class="enscript-type">int</span> nodes)
+{
+	nr_update(btreePtr-&gt;fileRefNum, nodes);
+}
+
+
+<span class="enscript-comment">/*----------------------------------------------------------------------------*/</span>
+<span class="enscript-comment">/* Node Reserve Hash Functions (private) */</span>
+
+
+<span class="enscript-type">int</span> nrinserts = 0;
+<span class="enscript-type">int</span> nrdeletes = 0;
+
+<span class="enscript-comment">/*
+ * Insert a new node reserve.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nr_insert</span>(<span class="enscript-type">struct</span> vnode * btvp, <span class="enscript-type">struct</span> nreserve *nrp, <span class="enscript-type">int</span> nodecnt)
+{
+	<span class="enscript-type">struct</span> nodereserve *nrhead;
+	<span class="enscript-type">struct</span> nreserve *tmp_nrp;
+	<span class="enscript-type">void</span> * tag = NR_GET_TAG();
+
+	<span class="enscript-comment">/*
+	 * Check the cache - there may already be a reserve
+	 */</span>
+	lck_mtx_lock(&amp;nr_mutex);
+	nrhead = NR_HASH(btvp, tag);
+	<span class="enscript-keyword">for</span> (tmp_nrp = nrhead-&gt;lh_first; tmp_nrp;
+	     tmp_nrp = tmp_nrp-&gt;nr_hash.le_next) {
+		<span class="enscript-keyword">if</span> ((tmp_nrp-&gt;nr_tag == tag) &amp;&amp; (tmp_nrp-&gt;nr_btvp == btvp)) {
+			nrp-&gt;nr_tag = 0;
+			tmp_nrp-&gt;nr_nodecnt += nodecnt;
+			lck_mtx_unlock(&amp;nr_mutex);
+			<span class="enscript-keyword">return</span>;
+		}
+	}
+
+	nrp-&gt;nr_nodecnt = nodecnt;
+	nrp-&gt;nr_newnodes = 0;
+	nrp-&gt;nr_btvp = btvp;
+	nrp-&gt;nr_tag = tag;
+	LIST_INSERT_HEAD(nrhead, nrp, nr_hash);
+	++nrinserts;
+	lck_mtx_unlock(&amp;nr_mutex);
+}
+
+<span class="enscript-comment">/*
+ * Delete a node reserve.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nr_delete</span>(<span class="enscript-type">struct</span> vnode * btvp, <span class="enscript-type">struct</span> nreserve *nrp, <span class="enscript-type">int</span> *nodecnt)
+{
+	<span class="enscript-type">void</span> * tag = NR_GET_TAG();
+
+	lck_mtx_lock(&amp;nr_mutex);
+	<span class="enscript-keyword">if</span> (nrp-&gt;nr_tag) {
+		<span class="enscript-keyword">if</span> ((nrp-&gt;nr_tag != tag) || (nrp-&gt;nr_btvp != btvp))
+			panic(<span class="enscript-string">&quot;hfs: nr_delete: invalid NR (%p)&quot;</span>, nrp);
+		LIST_REMOVE(nrp, nr_hash);
+		*nodecnt = nrp-&gt;nr_nodecnt;
+		bzero(nrp, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> nreserve));
+		++nrdeletes;
+	} <span class="enscript-keyword">else</span> {
+		*nodecnt = 0;
+	}
+	lck_mtx_unlock(&amp;nr_mutex);
+}
+
+
+<span class="enscript-comment">/*
+ * Update a node reserve for any allocations that occurred.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">void</span>
+<span class="enscript-function-name">nr_update</span>(<span class="enscript-type">struct</span> vnode * btvp, <span class="enscript-type">int</span> nodecnt)
+{
+	<span class="enscript-type">struct</span> nodereserve *nrhead;
+	<span class="enscript-type">struct</span> nreserve *nrp;
+	<span class="enscript-type">void</span>* tag = NR_GET_TAG();
+
+	lck_mtx_lock(&amp;nr_mutex);
+
+	nrhead = NR_HASH(btvp, tag);
+	<span class="enscript-keyword">for</span> (nrp = nrhead-&gt;lh_first; nrp; nrp = nrp-&gt;nr_hash.le_next) {
+		<span class="enscript-keyword">if</span> ((nrp-&gt;nr_tag == tag) &amp;&amp; (nrp-&gt;nr_btvp == btvp)) {			
+			nrp-&gt;nr_newnodes += nodecnt;
+			<span class="enscript-keyword">break</span>;
+		}
+	}
+	lck_mtx_unlock(&amp;nr_mutex);
+}
+</pre>
+<hr />
+</body></html>

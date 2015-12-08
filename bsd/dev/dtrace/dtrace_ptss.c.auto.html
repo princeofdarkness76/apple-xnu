@@ -1,0 +1,337 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>dtrace_ptss.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">dtrace_ptss.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/user.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/dtrace_ptss.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/vm_param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_vm.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;kern/task.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;vm/vm_map.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * This function requires the sprlock to be held
+ *
+ * In general, it will not block. If it needs to allocate a new
+ * page of memory, the underlying kernel _MALLOC may block.
+ */</span>
+<span class="enscript-type">struct</span> dtrace_ptss_page_entry*
+<span class="enscript-function-name">dtrace_ptss_claim_entry_locked</span>(<span class="enscript-type">struct</span> proc* p) {
+	lck_mtx_assert(&amp;p-&gt;p_dtrace_sprlock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-type">struct</span> dtrace_ptss_page_entry* entry = NULL;
+
+	<span class="enscript-keyword">while</span> (TRUE) {
+		<span class="enscript-type">struct</span> dtrace_ptss_page_entry* temp = p-&gt;p_dtrace_ptss_free_list;
+
+		<span class="enscript-keyword">if</span> (temp == NULL) {
+			<span class="enscript-comment">// Nothing on the free list. Allocate a new page, its okay if multiple threads race here.
+</span>			<span class="enscript-type">struct</span> dtrace_ptss_page* page = dtrace_ptss_allocate_page(p);
+
+			<span class="enscript-comment">// Make sure we actually got a page
+</span>			<span class="enscript-keyword">if</span> (page == NULL)
+				<span class="enscript-keyword">return</span> NULL;
+
+			<span class="enscript-comment">// Add the page to the page list
+</span>			page-&gt;next = p-&gt;p_dtrace_ptss_pages;
+			p-&gt;p_dtrace_ptss_pages = page;
+
+			<span class="enscript-comment">// CAS the entries onto the free list.
+</span>			<span class="enscript-keyword">do</span> {
+				page-&gt;entries[DTRACE_PTSS_ENTRIES_PER_PAGE-1].next = p-&gt;p_dtrace_ptss_free_list;
+			} <span class="enscript-keyword">while</span> (!OSCompareAndSwapPtr((<span class="enscript-type">void</span> *)page-&gt;entries[DTRACE_PTSS_ENTRIES_PER_PAGE-1].next,
+						   (<span class="enscript-type">void</span> *)&amp;page-&gt;entries[0],
+						   (<span class="enscript-type">void</span> * <span class="enscript-type">volatile</span> *)&amp;p-&gt;p_dtrace_ptss_free_list));
+				 
+			<span class="enscript-comment">// Now that we've added to the free list, try again.
+</span>			<span class="enscript-keyword">continue</span>;
+		}
+
+		<span class="enscript-comment">// Claim temp
+</span>		<span class="enscript-keyword">if</span> (!OSCompareAndSwapPtr((<span class="enscript-type">void</span> *)temp, (<span class="enscript-type">void</span> *)temp-&gt;next, (<span class="enscript-type">void</span> * <span class="enscript-type">volatile</span> *)&amp;p-&gt;p_dtrace_ptss_free_list))
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-comment">// At this point, we own temp.
+</span>		entry = temp;
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> entry;
+}
+
+<span class="enscript-comment">/*
+ * This function does not require any locks to be held on entry.
+ */</span>
+<span class="enscript-type">struct</span> dtrace_ptss_page_entry*
+<span class="enscript-function-name">dtrace_ptss_claim_entry</span>(<span class="enscript-type">struct</span> proc* p) {
+	<span class="enscript-comment">// Verify no locks held on entry
+</span>	lck_mtx_assert(&amp;p-&gt;p_dtrace_sprlock, LCK_MTX_ASSERT_NOTOWNED);
+	lck_mtx_assert(&amp;p-&gt;p_mlock, LCK_MTX_ASSERT_NOTOWNED);
+
+	<span class="enscript-type">struct</span> dtrace_ptss_page_entry* entry = NULL;
+
+	<span class="enscript-keyword">while</span> (TRUE) {
+		<span class="enscript-type">struct</span> dtrace_ptss_page_entry* temp = p-&gt;p_dtrace_ptss_free_list;
+
+		<span class="enscript-keyword">if</span> (temp == NULL) {
+			lck_mtx_lock(&amp;p-&gt;p_dtrace_sprlock);
+			temp = dtrace_ptss_claim_entry_locked(p);
+			lck_mtx_unlock(&amp;p-&gt;p_dtrace_sprlock);
+			<span class="enscript-keyword">return</span> temp;
+		}
+
+		<span class="enscript-comment">// Claim temp
+</span>		<span class="enscript-keyword">if</span> (!OSCompareAndSwapPtr((<span class="enscript-type">void</span> *)temp, (<span class="enscript-type">void</span> *)temp-&gt;next, (<span class="enscript-type">void</span> * <span class="enscript-type">volatile</span> *)&amp;p-&gt;p_dtrace_ptss_free_list))
+			<span class="enscript-keyword">continue</span>;
+
+		<span class="enscript-comment">// At this point, we own temp.
+</span>		entry = temp;
+
+		<span class="enscript-keyword">break</span>;
+	}
+
+	<span class="enscript-keyword">return</span> entry;
+}
+
+<span class="enscript-comment">/*
+ * This function does not require any locks to be held on entry.
+ *
+ * (PR-11138709) A NULL p-&gt;p_dtrace_ptss_pages means the entry can
+ * no longer be referenced safely. When found in this state, the chore
+ * of releasing an entry to the free list is ignored.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_ptss_release_entry</span>(<span class="enscript-type">struct</span> proc* p, <span class="enscript-type">struct</span> dtrace_ptss_page_entry* e) {
+	<span class="enscript-keyword">if</span> (p &amp;&amp; p-&gt;p_dtrace_ptss_pages &amp;&amp; e) {
+		<span class="enscript-keyword">do</span> {
+			e-&gt;next = p-&gt;p_dtrace_ptss_free_list;
+		} <span class="enscript-keyword">while</span> (!OSCompareAndSwapPtr((<span class="enscript-type">void</span> *)e-&gt;next, (<span class="enscript-type">void</span> *)e, (<span class="enscript-type">void</span> * <span class="enscript-type">volatile</span> *)&amp;p-&gt;p_dtrace_ptss_free_list));
+	}
+}
+
+<span class="enscript-comment">/*
+ * This function allocates a new page in the target process's address space.
+ * 
+ * It returns a dtrace_ptss_page that has its entries chained, with the last
+ * entries next field set to NULL. It does not add the page or the entries to
+ * the process's page/entry lists.
+ *
+ * This function does not require that any locks be held when it is invoked.
+ */</span>
+<span class="enscript-type">struct</span> dtrace_ptss_page*
+<span class="enscript-function-name">dtrace_ptss_allocate_page</span>(<span class="enscript-type">struct</span> proc* p)
+{
+	<span class="enscript-comment">// Allocate the kernel side data
+</span>	<span class="enscript-type">struct</span> dtrace_ptss_page* ptss_page = _MALLOC(<span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> dtrace_ptss_page), M_TEMP, M_ZERO | M_WAITOK);
+	<span class="enscript-keyword">if</span> (ptss_page == NULL)
+		<span class="enscript-keyword">return</span> NULL;
+
+	<span class="enscript-comment">// Now allocate a page in user space and set its protections to allow execute.
+</span>	task_t task = p-&gt;task;
+	vm_map_t map = get_task_map_reference(task);
+	<span class="enscript-keyword">if</span> (map == NULL)
+	  <span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+
+	vm_prot_t cur_protection = VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE;
+	vm_prot_t max_protection = VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE;
+
+	mach_vm_offset_t addr = 0;
+	mach_vm_size_t size = PAGE_SIZE; <span class="enscript-comment">// We need some way to assert that this matches vm_map_round_page() !!!
+</span>	kern_return_t kr = mach_vm_map(map, &amp;addr, size, 0, VM_FLAGS_ANYWHERE, IPC_PORT_NULL, 0, FALSE, cur_protection, max_protection, VM_INHERIT_DEFAULT);
+	<span class="enscript-keyword">if</span> (kr != KERN_SUCCESS) {
+		<span class="enscript-keyword">goto</span> <span class="enscript-reference">err</span>;
+	}
+
+	<span class="enscript-comment">// Chain the page entries.
+</span>	<span class="enscript-type">int</span> i;
+	<span class="enscript-keyword">for</span> (i=0; i&lt;DTRACE_PTSS_ENTRIES_PER_PAGE; i++) {
+		ptss_page-&gt;entries[i].addr = addr + (i * DTRACE_PTSS_SCRATCH_SPACE_PER_THREAD);
+		ptss_page-&gt;entries[i].next = &amp;ptss_page-&gt;entries[i+1];
+	}
+
+	<span class="enscript-comment">// The last entry should point to NULL
+</span>	ptss_page-&gt;entries[DTRACE_PTSS_ENTRIES_PER_PAGE-1].next = NULL;
+
+	vm_map_deallocate(map);
+
+	<span class="enscript-keyword">return</span> ptss_page;
+
+<span class="enscript-reference">err</span>:
+	_FREE(ptss_page, M_TEMP);
+
+	<span class="enscript-keyword">if</span> (map)
+	  vm_map_deallocate(map);
+
+	<span class="enscript-keyword">return</span> NULL;
+}
+
+<span class="enscript-comment">/*
+ * This function frees an existing page in the target process's address space.
+ * 
+ * It does not alter any of the process's page/entry lists.
+ *
+ * TODO: Inline in dtrace_ptrace_exec_exit?
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_ptss_free_page</span>(<span class="enscript-type">struct</span> proc* p, <span class="enscript-type">struct</span> dtrace_ptss_page* ptss_page)
+{
+	<span class="enscript-comment">// Grab the task and get a reference to its vm_map
+</span>	task_t task = p-&gt;task;
+	vm_map_t map = get_task_map_reference(task);
+
+	mach_vm_address_t addr = ptss_page-&gt;entries[0].addr;
+	mach_vm_size_t size = PAGE_SIZE; <span class="enscript-comment">// We need some way to assert that this matches vm_map_round_page() !!!
+</span>
+	<span class="enscript-comment">// Silent failures, no point in checking return code.
+</span>	mach_vm_deallocate(map, addr, size);
+
+	vm_map_deallocate(map);
+}
+
+<span class="enscript-comment">/*
+ * This function assumes that the target process has been
+ * suspended, and the proc_lock &amp; sprlock is held 
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_ptss_enable</span>(<span class="enscript-type">struct</span> proc* p) {
+	lck_mtx_assert(&amp;p-&gt;p_dtrace_sprlock, LCK_MTX_ASSERT_OWNED);
+	lck_mtx_assert(&amp;p-&gt;p_mlock, LCK_MTX_ASSERT_OWNED);
+
+	<span class="enscript-type">struct</span> uthread* uth;
+	<span class="enscript-comment">/*
+	 * XXX There has been a concern raised about holding the proc_lock
+	 * while calling dtrace_ptss_claim_entry(), due to the fact
+	 * that dtrace_ptss_claim_entry() can potentially malloc.
+	 */</span>
+	TAILQ_FOREACH(uth, &amp;p-&gt;p_uthlist, uu_list) {
+		uth-&gt;t_dtrace_scratch = dtrace_ptss_claim_entry_locked(p);
+	}
+}
+
+<span class="enscript-comment">/*
+ * This function is not thread safe.
+ *
+ * It assumes the sprlock is held, and the proc_lock is not.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_ptss_exec_exit</span>(<span class="enscript-type">struct</span> proc* p) {
+	<span class="enscript-comment">/*
+	 * Should hold sprlock to touch the pages list. Must not
+	 * hold the proc lock to avoid deadlock.
+	 */</span>
+	lck_mtx_assert(&amp;p-&gt;p_dtrace_sprlock, LCK_MTX_ASSERT_OWNED);
+	lck_mtx_assert(&amp;p-&gt;p_mlock, LCK_MTX_ASSERT_NOTOWNED);
+
+	p-&gt;p_dtrace_ptss_free_list = NULL;
+
+	<span class="enscript-type">struct</span> dtrace_ptss_page* temp = p-&gt;p_dtrace_ptss_pages;
+	p-&gt;p_dtrace_ptss_pages = NULL;
+
+	<span class="enscript-keyword">while</span> (temp != NULL) {
+		<span class="enscript-type">struct</span> dtrace_ptss_page* next = temp-&gt;next;
+		
+		<span class="enscript-comment">// Do we need to specifically mach_vm_deallocate the user pages?
+</span>		<span class="enscript-comment">// This can be called when the process is exiting, I believe the proc's
+</span>		<span class="enscript-comment">// vm_map_t may already be toast.
+</span>		
+		<span class="enscript-comment">// Must be certain to free the kernel memory!
+</span>		_FREE(temp, M_TEMP);
+		temp = next;
+	}
+}
+
+<span class="enscript-comment">/*
+ * This function is not thread safe. It is not used for vfork.
+ *
+ * The child proc ptss fields are initialized to NULL at fork time.
+ * Pages allocated in the parent are copied as part of the vm_map copy, though.
+ * We need to deallocate those pages.
+ *
+ * Parent and child sprlock should be held, and proc_lock must NOT be held.
+ */</span>
+<span class="enscript-type">void</span>
+<span class="enscript-function-name">dtrace_ptss_fork</span>(<span class="enscript-type">struct</span> proc* parent, <span class="enscript-type">struct</span> proc* child) {
+	<span class="enscript-comment">// The child should not have any pages/entries allocated at this point.
+</span>	<span class="enscript-comment">// ASSERT(child-&gt;p_dtrace_ptss_pages == NULL);
+</span>	<span class="enscript-comment">// ASSERT(child-&gt;p_dtrace_ptss_free_list == NULL);
+</span>
+	<span class="enscript-comment">/*
+	 * The parent's sprlock should be held, to protect its pages list
+	 * from changing while the child references it. The child's sprlock
+	 * must also be held, because we are modifying its pages list.
+	 * Finally, to prevent a deadlock with the fasttrap cleanup code,
+	 * neither the parent or child proc_lock should be held.
+	 */</span>
+	lck_mtx_assert(&amp;parent-&gt;p_dtrace_sprlock, LCK_MTX_ASSERT_OWNED);
+	lck_mtx_assert(&amp;parent-&gt;p_mlock, LCK_MTX_ASSERT_NOTOWNED);
+	lck_mtx_assert(&amp;child-&gt;p_dtrace_sprlock, LCK_MTX_ASSERT_OWNED);
+	lck_mtx_assert(&amp;child-&gt;p_mlock, LCK_MTX_ASSERT_NOTOWNED);
+
+	<span class="enscript-comment">// Get page list from *PARENT*
+</span>	<span class="enscript-type">struct</span> dtrace_ptss_page* temp = parent-&gt;p_dtrace_ptss_pages;
+
+	<span class="enscript-keyword">while</span> (temp != NULL) {		
+		<span class="enscript-comment">// Freeing the page in the *CHILD*
+</span>		dtrace_ptss_free_page(child, temp);
+
+		<span class="enscript-comment">// Do not free the kernel memory, it belong to the parent.
+</span>		temp = temp-&gt;next;
+	}
+}
+</pre>
+<hr />
+</body></html>

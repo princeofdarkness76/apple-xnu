@@ -1,0 +1,626 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>lb_mmtest.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">lb_mmtest.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2006 Apple Inc.  All Rights Reserved.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+
+
+<span class="enscript-comment">/*
+ *	Order of Execution
+ *
+ *	benchmark_init
+ *
+ *	benchmark_optswitch
+ *
+ *		benchmark_initrun
+ *
+ *			benchmark_initworker
+ *				benchmark_initbatch
+ *					benchmark
+ *				benchmark_finibatch
+ *				benchmark_initbatch
+ *					benchmark
+ *				benchmark_finibatch, etc.
+ *			benchmark_finiworker
+ *
+ *		benchmark_result
+ *
+ *		benchmark_finirun
+ *
+ *	benchmark_fini
+ */</span>
+
+
+
+#<span class="enscript-reference">ifdef</span>	<span class="enscript-variable-name">__sun</span>
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">ident</span>	<span class="enscript-string">&quot;@(#)lb_mmtest.c	1.0	08/21/06 Apple Inc.&quot;</span>
+#<span class="enscript-reference">endif</span>
+
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;unistd.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/boolean.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach_error.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/mach.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;mach/notify.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;servers/bootstrap.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;signal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdio.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;stdlib.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;string.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/signal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/time.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/types.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;../libmicro.h&quot;</span>
+
+<span class="enscript-comment">/*
+ *	Your state variables should live in the tsd_t struct below
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+    <span class="enscript-type">int</span> server_mode;
+    boolean_t verbose;
+    boolean_t oneway;
+    <span class="enscript-type">int</span> overwrite;
+    <span class="enscript-type">int</span> msg_type;
+    <span class="enscript-type">int</span> num_ints;
+    <span class="enscript-type">int</span> num_msgs;
+    <span class="enscript-type">const</span> <span class="enscript-type">char</span> *server_port_name;
+    mach_port_t server_port;
+    mach_port_t reply_port;
+    <span class="enscript-type">int</span> request_msg_size;
+    <span class="enscript-type">void</span> *request_msg;
+    <span class="enscript-type">int</span> reply_msg_size;
+    <span class="enscript-type">void</span> *reply_msg;
+    <span class="enscript-type">void</span> *ints;
+    <span class="enscript-type">long</span> pid;
+} tsd_t;
+
+<span class="enscript-type">static</span> boolean_t 	opt_verbose;
+<span class="enscript-type">static</span> boolean_t 	opt_oneway;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 			opt_num_msgs;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>	 		opt_msg_type;
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> 			opt_num_ints;
+<span class="enscript-type">static</span> <span class="enscript-type">char</span> *		opt_server_port_name;
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> *** <span class="enscript-variable-name">definitions</span> <span class="enscript-variable-name">from</span> <span class="enscript-variable-name">MMTest</span>.<span class="enscript-variable-name">c</span>
+<span class="enscript-comment">/*
+ *	These variables were taken from MMtest.c
+ */</span>
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+    mach_msg_header_t	header;
+    mach_msg_trailer_t	trailer;		<span class="enscript-comment">// subtract this when sending
+</span>} ipc_trivial_message;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+    mach_msg_header_t	header;
+    u_int32_t		numbers[0];
+    mach_msg_trailer_t	trailer;		<span class="enscript-comment">// subtract this when sending
+</span>} ipc_inline_message;
+
+<span class="enscript-type">typedef</span> <span class="enscript-type">struct</span> {
+    mach_msg_header_t		header;
+    mach_msg_body_t		body;
+    mach_msg_ool_descriptor_t	descriptor;
+    mach_msg_trailer_t		trailer;	<span class="enscript-comment">// subtract this when sending
+</span>} ipc_complex_message;
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">signal_handler</span>(<span class="enscript-type">int</span> sig) {
+}
+
+<span class="enscript-type">enum</span> {
+    msg_type_trivial = 0,
+    msg_type_inline = 1,
+    msg_type_complex = 2
+};
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">server</span>(<span class="enscript-type">void</span> *tsd);
+<span class="enscript-type">void</span> <span class="enscript-function-name">client</span>(<span class="enscript-type">void</span> *tsd);
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> *** <span class="enscript-variable-name">routines</span> <span class="enscript-variable-name">from</span> <span class="enscript-variable-name">MMTest</span>.<span class="enscript-variable-name">c</span>
+<span class="enscript-comment">/*
+ *	These routines were taken from MMtest.c
+ */</span>
+ 
+<span class="enscript-type">void</span> <span class="enscript-function-name">server</span>(<span class="enscript-type">void</span> *tsd) {
+    mach_msg_header_t *request;
+    mach_msg_header_t *reply;
+    mach_msg_option_t option;
+    kern_return_t ret;
+
+	tsd_t			*ts = (tsd_t *)tsd;
+
+    request = (mach_msg_header_t *)ts-&gt;request_msg;
+
+    reply = (mach_msg_header_t *)ts-&gt;reply_msg;
+
+#<span class="enscript-reference">ifndef</span> <span class="enscript-variable-name">OPTIMIZED_SERVER</span>
+    <span class="enscript-keyword">for</span> (;;) {
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !OPTIMIZED_SERVER */</span>
+
+    	<span class="enscript-keyword">if</span> (ts-&gt;verbose) printf(<span class="enscript-string">&quot;Awaiting message\n&quot;</span>);
+	option = MACH_RCV_MSG|MACH_RCV_INTERRUPT|MACH_RCV_LARGE;
+	ret = mach_msg(request,  
+		       option,
+		       0,
+		       ts-&gt;request_msg_size,  
+		       ts-&gt;server_port,
+		       MACH_MSG_TIMEOUT_NONE,
+		       MACH_PORT_NULL);
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">OPTIMIZED_SERVER</span>
+    <span class="enscript-keyword">for</span> (;;) {
+    	mach_msg_header_t *tmp;
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* OPTIMIZED_SERVER */</span>
+
+	<span class="enscript-keyword">if</span> (MACH_MSG_SUCCESS != ret)
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">if</span> (ts-&gt;verbose) printf(<span class="enscript-string">&quot;Received message\n&quot;</span>);
+	<span class="enscript-keyword">if</span> (request-&gt;msgh_bits &amp; MACH_MSGH_BITS_COMPLEX) {
+		ipc_complex_message *complex_request;
+
+		complex_request = (ipc_complex_message *)ts-&gt;request_msg;
+		ret = vm_deallocate(mach_task_self(),  
+				    (vm_address_t)complex_request-&gt;descriptor.address,  
+				    complex_request-&gt;descriptor.size);
+	}
+	<span class="enscript-keyword">if</span> (1 == request-&gt;msgh_id) {
+	    	<span class="enscript-keyword">if</span> (ts-&gt;verbose) printf(<span class="enscript-string">&quot;Sending reply\n&quot;</span>);
+	    	reply-&gt;msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_MOVE_SEND_ONCE, 0);
+		reply-&gt;msgh_size = ts-&gt;reply_msg_size;
+	    	reply-&gt;msgh_remote_port = request-&gt;msgh_remote_port;
+		reply-&gt;msgh_local_port = MACH_PORT_NULL;
+	    	reply-&gt;msgh_id = 2;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">OPTIMIZED_SERVER</span>
+		option = MACH_SEND_MSG|MACH_RCV_MSG|MACH_RCV_INTERRUPT|MACH_RCV_LARGE;
+	} <span class="enscript-keyword">else</span> {
+		option = MACH_RCV_MSG|MACH_RCV_INTERRUPT|MACH_RCV_LARGE;
+	}
+
+	ret = mach_msg(	reply,
+			option,
+			ts-&gt;reply_msg_size,
+			ts-&gt;request_msg_size,
+			ts-&gt;server_port,
+			MACH_MSG_TIMEOUT_NONE,  
+			MACH_PORT_NULL);
+	tmp = reply;
+	reply = request;
+	request = tmp;
+#<span class="enscript-reference">else</span> <span class="enscript-comment">/* !OPTIMIZED_SERVER */</span>
+		ret = mach_msg(reply,
+			       MACH_SEND_MSG,
+			       ts-&gt;reply_msg_size,
+			       0,
+			       MACH_PORT_NULL,
+			       MACH_MSG_TIMEOUT_NONE,
+			       MACH_PORT_NULL);
+		<span class="enscript-keyword">if</span> (ret != MACH_MSG_SUCCESS)
+			<span class="enscript-keyword">break</span>;
+        }
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* !OPTIMIZED_SERVER */</span>
+    }
+
+    <span class="enscript-keyword">if</span> (MACH_RCV_INTERRUPTED != ret) {
+    	mach_error(<span class="enscript-string">&quot;mach_msg: &quot;</span>, ret);
+		exit(1);
+    }
+}
+
+<span class="enscript-type">void</span> <span class="enscript-function-name">client</span>(<span class="enscript-type">void</span> *tsd) {
+	mach_msg_header_t *request;
+	mach_msg_header_t *reply;
+	mach_msg_option_t option;
+	kern_return_t ret;
+	<span class="enscript-type">int</span> idx;
+
+	tsd_t			*ts = (tsd_t *)tsd;
+
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">SWAP_BUFFERS</span>
+	mach_msg_header_t *tmp;
+#<span class="enscript-reference">endif</span>
+
+	request = (mach_msg_header_t *)ts-&gt;request_msg;
+	reply = (mach_msg_header_t *)ts-&gt;reply_msg;
+	
+    <span class="enscript-keyword">for</span> (idx = 0; idx &lt; ts-&gt;num_msgs; idx++) {
+	request-&gt;msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, 
+					    MACH_MSG_TYPE_MAKE_SEND_ONCE);
+	request-&gt;msgh_size = ts-&gt;request_msg_size;
+	request-&gt;msgh_remote_port = ts-&gt;server_port;
+	request-&gt;msgh_local_port = ts-&gt;reply_port;
+
+	<span class="enscript-keyword">if</span> (ts-&gt;msg_type == msg_type_complex) {
+	    ipc_complex_message *complexmsg = (ipc_complex_message *)request;
+
+	    request-&gt;msgh_bits |=  MACH_MSGH_BITS_COMPLEX;
+	    complexmsg-&gt;body.msgh_descriptor_count = 1;
+	    complexmsg-&gt;descriptor.address =  ts-&gt;ints;
+	    complexmsg-&gt;descriptor.size = ts-&gt;num_ints * <span class="enscript-keyword">sizeof</span>(u_int32_t);
+	    complexmsg-&gt;descriptor.deallocate = FALSE;
+	    complexmsg-&gt;descriptor.copy = MACH_MSG_VIRTUAL_COPY;
+	    complexmsg-&gt;descriptor.type =  MACH_MSG_OOL_DESCRIPTOR;
+	}
+
+	<span class="enscript-keyword">if</span> (ts-&gt;oneway) {
+	    request-&gt;msgh_id = 0;
+	    option = MACH_SEND_MSG;
+	} <span class="enscript-keyword">else</span> {
+	    request-&gt;msgh_id = 1;
+	    option = MACH_SEND_MSG|MACH_RCV_MSG;
+	}
+
+	<span class="enscript-keyword">if</span> (ts-&gt;verbose) printf(<span class="enscript-string">&quot;Sending request\n&quot;</span>);
+#<span class="enscript-reference">ifdef</span> <span class="enscript-variable-name">SWAP_BUFFERS</span>
+	ret = mach_msg(	request,
+			option,
+			ts-&gt;request_msg_size,
+			ts-&gt;reply_msg_size,
+			ts-&gt;reply_port,
+			MACH_MSG_TIMEOUT_NONE,
+			MACH_PORT_NULL);
+	<span class="enscript-keyword">if</span> (MACH_MSG_SUCCESS != ret) {
+	    mach_error(<span class="enscript-string">&quot;client: mach_msg: &quot;</span>, ret);
+	    fprintf(stderr, <span class="enscript-string">&quot;bailing after %u iterations\n&quot;</span>, idx);
+	    exit(1);
+	}
+	tmp = request;
+	request = reply;
+	reply = tmp;
+#<span class="enscript-reference">else</span>
+	ret = mach_msg_overwrite(request,
+				 option,
+				 ts-&gt;request_msg_size,
+				 ts-&gt;reply_msg_size,
+				 ts-&gt;reply_port,
+				 MACH_MSG_TIMEOUT_NONE,
+				 MACH_PORT_NULL,
+				 reply,
+				 0);
+	<span class="enscript-keyword">if</span> (MACH_MSG_SUCCESS != ret) {
+	    mach_error(<span class="enscript-string">&quot;client: mach_msg_overwrite: &quot;</span>, ret);
+	    fprintf(stderr, <span class="enscript-string">&quot;bailing after %u iterations\n&quot;</span>, idx);
+	    exit(1);
+	}
+#<span class="enscript-reference">endif</span>
+	<span class="enscript-keyword">if</span> (ts-&gt;verbose &amp;&amp; !ts-&gt;oneway) printf(<span class="enscript-string">&quot;Received reply\n&quot;</span>);
+    }
+}
+
+
+#<span class="enscript-reference">pragma</span> <span class="enscript-variable-name">mark</span> *** <span class="enscript-variable-name">Darbench</span> <span class="enscript-variable-name">routines</span>
+
+<span class="enscript-comment">/*
+ *	These routines are required by darbench
+ */</span>
+ 
+<span class="enscript-comment">/*ARGSUSED*/</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initbatch</span>(<span class="enscript-type">void</span> *tsd)
+{
+	<span class="enscript-comment">/*
+	 * initialize your state variables here second
+	 */</span>
+	<span class="enscript-type">long</span>	pid;
+	tsd_t	*ts = (tsd_t *)tsd;
+	
+    ts-&gt;server_mode = -1;
+    ts-&gt;verbose = opt_verbose;
+    ts-&gt;oneway = opt_oneway;
+    ts-&gt;overwrite = 0;
+    ts-&gt;msg_type = opt_msg_type;
+    ts-&gt;num_ints = opt_num_ints;
+    ts-&gt;num_msgs = opt_num_msgs;
+    ts-&gt;server_port_name = opt_server_port_name;
+    ts-&gt;server_port = MACH_PORT_NULL;
+    ts-&gt;reply_port = MACH_PORT_NULL;
+    ts-&gt;request_msg = NULL;
+    ts-&gt;request_msg_size = 0;
+    ts-&gt;reply_msg = NULL;
+    ts-&gt;reply_msg_size = 0;
+
+	<span class="enscript-keyword">switch</span> (ts-&gt;msg_type) {
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">msg_type_trivial</span>:
+	  ts-&gt;request_msg_size = <span class="enscript-keyword">sizeof</span>(ipc_trivial_message);
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">msg_type_inline</span>:
+	  ts-&gt;request_msg_size = <span class="enscript-keyword">sizeof</span>(ipc_inline_message) +  
+		<span class="enscript-keyword">sizeof</span>(u_int32_t) * ts-&gt;num_ints;
+		<span class="enscript-keyword">break</span>;
+
+	<span class="enscript-keyword">case</span> <span class="enscript-reference">msg_type_complex</span>:
+	  ts-&gt;request_msg_size = <span class="enscript-keyword">sizeof</span>(ipc_complex_message);
+	  ts-&gt;ints = malloc(<span class="enscript-keyword">sizeof</span>(u_int32_t) * ts-&gt;num_ints);
+	  <span class="enscript-keyword">break</span>;
+	}
+
+    ts-&gt;request_msg = malloc(ts-&gt;request_msg_size);
+    ts-&gt;reply_msg = malloc(ts-&gt;reply_msg_size);
+
+    <span class="enscript-keyword">if</span> (ts-&gt;server_mode) {
+		kern_return_t ret = 0;
+		mach_port_t bsport;
+
+		ts-&gt;reply_msg_size -= <span class="enscript-keyword">sizeof</span>(mach_msg_trailer_t);
+		ret = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE,  
+					 &amp;(ts-&gt;server_port));
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+			mach_error(<span class="enscript-string">&quot;mach_port_allocate(): &quot;</span>, ret);
+			exit(1);
+		}
+		ret = mach_port_insert_right(mach_task_self(), ts-&gt;server_port,  
+                ts-&gt;server_port, MACH_MSG_TYPE_MAKE_SEND);
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+			mach_error(<span class="enscript-string">&quot;mach_port_insert_right(): &quot;</span>, ret);
+			exit(1);
+		}
+		ret = task_get_bootstrap_port(mach_task_self(), &amp;bsport);
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+			mach_error(<span class="enscript-string">&quot;task_get_bootstrap_port(): &quot;</span>, ret);
+			exit(1);
+		}
+		ret = bootstrap_check_in(bsport, (<span class="enscript-type">char</span> *)ts-&gt;server_port_name,  
+                	&amp;ts-&gt;server_port);
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+			mach_error(<span class="enscript-string">&quot;bootstrap_register(): &quot;</span>, ret);
+			exit(1);
+		}
+    } <span class="enscript-keyword">else</span> {   <span class="enscript-comment">/* client mode */</span>
+		kern_return_t ret = 0;
+		mach_port_t bsport;
+
+		ts-&gt;request_msg_size -= <span class="enscript-keyword">sizeof</span>(mach_msg_trailer_t);
+
+		ret = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE,  
+					 &amp;(ts-&gt;reply_port));
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+			mach_error(<span class="enscript-string">&quot;mach_port_allocate(): &quot;</span>, ret);
+			exit(1);
+		}
+
+		ret = task_get_bootstrap_port(mach_task_self(), &amp;bsport);
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+			mach_error(<span class="enscript-string">&quot;task_get_bootstrap_port(): &quot;</span>, ret);
+			exit(1);
+		}
+		ret = bootstrap_look_up(bsport, (<span class="enscript-type">char</span> *)ts-&gt;server_port_name,  
+			&amp;(ts-&gt;server_port));
+		<span class="enscript-keyword">if</span> (KERN_SUCCESS != ret) {
+	   		mach_error(<span class="enscript-string">&quot;bootstrap_look_up(): &quot;</span>, ret);
+			exit(1);
+		}
+    }
+    
+    <span class="enscript-keyword">if</span> (ts-&gt;verbose) {
+		<span class="enscript-keyword">if</span> (ts-&gt;server_mode) {
+			printf(<span class="enscript-string">&quot;Server waiting for IPC messages from client on port  '%s'.\n&quot;</span>,
+			       ts-&gt;server_port_name);
+		} <span class="enscript-keyword">else</span> {
+			printf(<span class="enscript-string">&quot;Client sending %d %s IPC messages to port '%s' in %s  mode.\n&quot;</span>,
+			       ts-&gt;num_msgs, (ts-&gt;msg_type == msg_type_inline) ? <span class="enscript-string">&quot;inline&quot;</span> :  
+			       ((ts-&gt;msg_type == msg_type_complex) ? <span class="enscript-string">&quot;complex&quot;</span> : <span class="enscript-string">&quot;trivial&quot;</span>),  
+			       ts-&gt;server_port_name, (ts-&gt;oneway ? <span class="enscript-string">&quot;oneway&quot;</span> : <span class="enscript-string">&quot;rpc&quot;</span>));
+		}
+    }
+
+	pid = fork();
+	<span class="enscript-keyword">switch</span> (pid) {
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">0</span>:
+			server(tsd);
+			exit(0);
+			<span class="enscript-keyword">break</span>;
+		<span class="enscript-keyword">case</span> <span class="enscript-reference">-1</span>:
+			<span class="enscript-keyword">return</span> (-1);
+		<span class="enscript-reference">default</span>:
+			ts-&gt;pid = pid;
+			<span class="enscript-keyword">break</span>;
+		}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_finirun</span>()
+{
+	(<span class="enscript-type">void</span>) fprintf(stderr, <span class="enscript-string">&quot;benchmark_finirun\n&quot;</span>);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_init</span>()
+{
+	<span class="enscript-comment">/* 
+	 *	the lm_optstr must be defined here or no options for you
+	 * 	...and the framework will throw an error
+	 *	lm_optstr has two kinds of arguments, boolean (single
+	 *	lower case character) and with an argument (single lower
+	 *	case character plus a :, indicating the next option is
+	 *	the argument)
+	 *
+	 */</span>
+	(<span class="enscript-type">void</span>) sprintf(lm_optstr, <span class="enscript-string">&quot;voc:t:n:p:&quot;</span>);
+	<span class="enscript-comment">/*
+	 * 	tsd_t is the struct that we can pass around our
+	 *	state info in
+	 *
+	 *	lm_tsdsize will allocate the space we need for this
+	 *	structure throughout the rest of the framework
+	 */</span>
+	lm_tsdsize = <span class="enscript-keyword">sizeof</span> (tsd_t);
+
+	(<span class="enscript-type">void</span>) sprintf(lm_usage,
+	<span class="enscript-string">&quot;    -v\t\tbe verbose\n&quot;</span>
+	<span class="enscript-string">&quot;    -o\t\tdo not request return reply (client)\n&quot;</span>
+	<span class="enscript-string">&quot;    -c num\t\tnumber of messages to send (client)\n&quot;</span>
+	<span class="enscript-string">&quot;    -t trivial|inline|complex\ttype of messages to  send (client)\n&quot;</span>
+	<span class="enscript-string">&quot;    -n num\tnumber of 32-bit ints to send in  messages\n&quot;</span>
+	<span class="enscript-string">&quot;\t\t\t(client's value must be &lt;= the server's)\n&quot;</span>
+	<span class="enscript-string">&quot;    -p portname\tname of port on which to communicate\n&quot;</span>
+	<span class="enscript-string">&quot;\t\t\t(client and server must use the same value)\n&quot;</span>);
+
+	opt_verbose = FALSE;
+	opt_oneway = FALSE;
+	opt_num_msgs = 10000;
+	opt_msg_type = msg_type_trivial;
+	opt_num_ints = 64;
+	opt_server_port_name = malloc(32);
+	strcpy(opt_server_port_name, <span class="enscript-string">&quot;TEST&quot;</span>);
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_fini</span>()
+{
+	free(opt_server_port_name);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_finibatch</span>(<span class="enscript-type">void</span> *tsd)
+{
+	tsd_t			*ts = (tsd_t *)tsd;
+	kill(ts-&gt;pid, SIGKILL);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">char</span> *
+<span class="enscript-function-name">benchmark_result</span>()
+{
+	<span class="enscript-type">static</span> <span class="enscript-type">char</span>		result = <span class="enscript-string">'\0'</span>;
+	(<span class="enscript-type">void</span>) fprintf(stderr, <span class="enscript-string">&quot;benchmark_result\n&quot;</span>);
+	<span class="enscript-keyword">return</span> (&amp;result);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_finiworker</span>(<span class="enscript-type">void</span> *tsd)
+{
+<span class="enscript-comment">//	tsd_t			*ts = (tsd_t *)tsd;
+</span>	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_optswitch</span>(<span class="enscript-type">int</span> opt, <span class="enscript-type">char</span> *optarg)
+{
+	(<span class="enscript-type">void</span>) fprintf(stderr, <span class="enscript-string">&quot;benchmark_optswitch\n&quot;</span>);
+	
+	<span class="enscript-keyword">switch</span> (opt) {
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'v'</span>:
+		opt_verbose = TRUE;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'o'</span>:
+		opt_oneway = TRUE;
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'c'</span>:
+		opt_num_msgs = sizetoint(optarg);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'t'</span>:
+		<span class="enscript-keyword">if</span> ( 0 == strcmp(<span class="enscript-string">&quot;trivial&quot;</span>, optarg) )
+			opt_msg_type = msg_type_trivial;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( 0 == strcmp(<span class="enscript-string">&quot;inline&quot;</span>, optarg) )
+			opt_msg_type = msg_type_inline;
+		<span class="enscript-keyword">else</span> <span class="enscript-keyword">if</span> ( 0 == strcmp(<span class="enscript-string">&quot;complex&quot;</span>, optarg) )
+			opt_msg_type = msg_type_complex;
+		<span class="enscript-keyword">else</span> {
+			(<span class="enscript-type">void</span>) fprintf(stderr, <span class="enscript-string">&quot;incorrect argument for message type %s\n&quot;</span>, optarg);
+			<span class="enscript-keyword">return</span> (-1);
+		}
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'n'</span>:
+		opt_num_ints = sizetoint(optarg);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-keyword">case</span> <span class="enscript-string">'p'</span>:
+		strncpy(opt_server_port_name, optarg, 32);
+		<span class="enscript-keyword">break</span>;
+	<span class="enscript-reference">default</span>:
+		<span class="enscript-keyword">return</span> (-1);
+	}
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initworker</span>(<span class="enscript-type">void</span> *tsd)
+{
+	<span class="enscript-comment">/*
+	 *	initialize your state variables here first
+	 */</span>
+<span class="enscript-comment">//	tsd_t			*ts = (tsd_t *)tsd;
+</span>	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark_initrun</span>()
+{
+	(<span class="enscript-type">void</span>) fprintf(stderr, <span class="enscript-string">&quot;benchmark_initrun\n&quot;</span>);
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">benchmark</span>(<span class="enscript-type">void</span> *tsd, result_t *res)
+{
+	<span class="enscript-comment">/* 
+	 *	initialize your state variables here last
+	 * 
+	 * 	and realize that you are paying for your initialization here
+	 *	and it is really a bad idea
+	 */</span>
+<span class="enscript-comment">//	tsd_t			*ts = (tsd_t *)tsd;
+</span>	<span class="enscript-type">int</span>			i;
+	
+	<span class="enscript-keyword">for</span> (i = 0; i &lt; lm_optB; i++) {
+		client(tsd);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+</pre>
+<hr />
+</body></html>

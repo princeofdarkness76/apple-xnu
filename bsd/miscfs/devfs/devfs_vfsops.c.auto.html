@@ -1,0 +1,526 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>devfs_vfsops.c</title>
+<style type="text/css">
+.enscript-comment { font-style: italic; color: rgb(178,34,34); }
+.enscript-function-name { font-weight: bold; color: rgb(0,0,255); }
+.enscript-variable-name { font-weight: bold; color: rgb(184,134,11); }
+.enscript-keyword { font-weight: bold; color: rgb(160,32,240); }
+.enscript-reference { font-weight: bold; color: rgb(95,158,160); }
+.enscript-string { font-weight: bold; color: rgb(188,143,143); }
+.enscript-builtin { font-weight: bold; color: rgb(218,112,214); }
+.enscript-type { font-weight: bold; color: rgb(34,139,34); }
+.enscript-highlight { text-decoration: underline; color: 0; }
+</style>
+</head>
+<body id="top">
+<h1 style="margin:8px;" id="f1">devfs_vfsops.c&nbsp;&nbsp;&nbsp;<span style="font-weight: normal; font-size: 0.5em;">[<a href="?txt">plain text</a>]</span></h1>
+<hr/>
+<div></div>
+<pre>
+<span class="enscript-comment">/*
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+ *
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * <a href="http://www.opensource.apple.com/apsl/">http://www.opensource.apple.com/apsl/</a> and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ */</span>
+<span class="enscript-comment">/*-
+ * Copyright 1997,1998 Julian Elischer.  All rights reserved.
+ * <a href="mailto:julian@freebsd.org">julian@freebsd.org</a>
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met:
+ *  1. Redistributions of source code must retain the above copyright
+ *     notice, this list of conditions and the following disclaimer.
+ *  2. Redistributions in binary form must reproduce the above copyright notice,
+ *     this list of conditions and the following disclaimer in the documentation
+ *     and/or other materials provided with the distribution.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER ``AS IS'' AND ANY EXPRESS
+ * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL THE HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ * 
+ * devfs_vfsops.c
+ *
+ */</span>
+<span class="enscript-comment">/*
+ * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
+ * support for mandatory and extensible security protections.  This notice
+ * is included in support of clause 2.2 (b) of the Apple Public License,
+ * Version 2.0.
+ */</span>
+<span class="enscript-comment">/*
+ * HISTORY
+ *  Dieter Siegmund (<a href="mailto:dieter@apple.com">dieter@apple.com</a>) Wed Jul 14 13:37:59 PDT 1999
+ *  - modified devfs_statfs() to use devfs_stats to calculate the
+ *    amount of memory used by devfs
+ */</span>
+
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/param.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/systm.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kernel.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/vnode_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/proc.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/kauth.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/mount_internal.h&gt;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/malloc.h&gt;</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;libkern/OSAtomic.h&gt;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_MACF</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;security/mac_framework.h&gt;</span>
+#<span class="enscript-reference">endif</span>
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;devfs.h&quot;</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;devfsdefs.h&quot;</span>
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">FDESC</span>
+#<span class="enscript-reference">include</span> <span class="enscript-string">&quot;fdesc.h&quot;</span>
+#<span class="enscript-reference">endif</span> <span class="enscript-comment">/* FDESC */</span>
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">devfs_statfs</span>( <span class="enscript-type">struct</span> mount *mp, <span class="enscript-type">struct</span> vfsstatfs *sbp, vfs_context_t ctx);
+<span class="enscript-type">static</span> <span class="enscript-type">int</span> <span class="enscript-function-name">devfs_vfs_getattr</span>(mount_t mp, <span class="enscript-type">struct</span> vfs_attr *fsap, vfs_context_t ctx);
+
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DEV_KMEM</span>
+<span class="enscript-type">extern</span> boolean_t dev_kmem_enabled;
+#<span class="enscript-reference">endif</span>
+
+<span class="enscript-comment">/*-
+ * Called from the generic VFS startups.
+ * This is the second stage of DEVFS initialisation.
+ * The probed devices have already been loaded and the 
+ * basic structure of the DEVFS created.
+ * We take the oportunity to mount the hidden DEVFS layer, so that
+ * devices from devfs get sync'd.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_init</span>(__unused <span class="enscript-type">struct</span> vfsconf *vfsp)
+{
+	<span class="enscript-keyword">if</span> (devfs_sinit())
+		<span class="enscript-keyword">return</span> (ENOTSUP);
+	devfs_make_node(makedev(0, 0), DEVFS_CHAR, 
+					UID_ROOT, GID_WHEEL, 0622, <span class="enscript-string">&quot;console&quot;</span>);
+	devfs_make_node(makedev(2, 0), DEVFS_CHAR, 
+					UID_ROOT, GID_WHEEL, 0666, <span class="enscript-string">&quot;tty&quot;</span>);
+#<span class="enscript-reference">if</span> <span class="enscript-variable-name">CONFIG_DEV_KMEM</span>
+	<span class="enscript-keyword">if</span> (dev_kmem_enabled) {
+		<span class="enscript-comment">/* (3,0) reserved for /dev/mem physical memory */</span>
+		devfs_make_node(makedev(3, 1), DEVFS_CHAR, 
+						UID_ROOT, GID_KMEM, 0640, <span class="enscript-string">&quot;kmem&quot;</span>);
+	}
+#<span class="enscript-reference">endif</span>
+	devfs_make_node(makedev(3, 2), DEVFS_CHAR, 
+					UID_ROOT, GID_WHEEL, 0666, <span class="enscript-string">&quot;null&quot;</span>);
+	devfs_make_node(makedev(3, 3), DEVFS_CHAR, 
+					UID_ROOT, GID_WHEEL, 0666, <span class="enscript-string">&quot;zero&quot;</span>);
+	devfs_make_node(makedev(6, 0), DEVFS_CHAR, 
+					UID_ROOT, GID_WHEEL, 0600, <span class="enscript-string">&quot;klog&quot;</span>);
+
+#<span class="enscript-reference">if</span>  <span class="enscript-variable-name">FDESC</span>
+	devfs_fdesc_init();
+#<span class="enscript-reference">endif</span>
+
+    <span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*-
+ *  mp	 - pointer to 'mount' structure
+ *  path - addr in user space of mount point (ie /usr or whatever)
+ *  data - addr in user space of mount params including the
+ *         name of the block special file to treat as a filesystem.
+ *         (NOT USED)
+ *  ndp  - namei data pointer (NOT USED)
+ *  p    - proc pointer
+ * devfs is special in that it doesn't require any device to be mounted..
+ * It makes up its data as it goes along.
+ * it must be mounted during single user.. until it is, only std{in/out/err}
+ * and the root filesystem are available.
+ */</span>
+<span class="enscript-comment">/*proto*/</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_mount</span>(<span class="enscript-type">struct</span> mount *mp, __unused vnode_t devvp, __unused user_addr_t data, vfs_context_t ctx)
+{
+	<span class="enscript-type">struct</span> devfsmount *devfs_mp_p;	<span class="enscript-comment">/* devfs specific mount info */</span>
+	<span class="enscript-type">int</span> error;
+
+	<span class="enscript-comment">/*-
+	 *  If they just want to update, we don't need to do anything.
+	 */</span>
+	<span class="enscript-keyword">if</span> (mp-&gt;mnt_flag &amp; MNT_UPDATE)
+	{
+		<span class="enscript-keyword">return</span> 0;
+	}
+
+	<span class="enscript-comment">/* Advisory locking should be handled at the VFS layer */</span>
+	vfs_setlocklocal(mp);
+
+	<span class="enscript-comment">/*-
+	 *  Well, it's not an update, it's a real mount request.
+	 *  Time to get dirty.
+	 * HERE we should check to see if we are already mounted here.
+	 */</span>
+
+	MALLOC(devfs_mp_p, <span class="enscript-type">struct</span> devfsmount *, <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> devfsmount),
+	       M_DEVFSMNT, M_WAITOK);
+	<span class="enscript-keyword">if</span> (devfs_mp_p == NULL)
+		<span class="enscript-keyword">return</span> (ENOMEM);
+	bzero(devfs_mp_p,<span class="enscript-keyword">sizeof</span>(*devfs_mp_p));
+	devfs_mp_p-&gt;mount = mp;
+
+	<span class="enscript-comment">/*-
+	 *  Fill out some fields
+	 */</span>
+	__IGNORE_WCASTALIGN(mp-&gt;mnt_data = (qaddr_t)devfs_mp_p);
+	mp-&gt;mnt_vfsstat.f_fsid.val[0] = (int32_t)(uintptr_t)devfs_mp_p;
+	mp-&gt;mnt_vfsstat.f_fsid.val[1] = vfs_typenum(mp);
+	mp-&gt;mnt_flag |= MNT_LOCAL;
+
+	DEVFS_LOCK();
+	error = dev_dup_plane(devfs_mp_p);
+	DEVFS_UNLOCK();
+
+	<span class="enscript-keyword">if</span> (error) {
+		mp-&gt;mnt_data = (qaddr_t)0;
+		FREE((caddr_t)devfs_mp_p, M_DEVFSMNT);
+		<span class="enscript-keyword">return</span> (error);
+	} <span class="enscript-keyword">else</span>
+	        DEVFS_INCR_MOUNTS();
+
+	<span class="enscript-comment">/*-
+	 *  Copy in the name of the directory the filesystem
+	 *  is to be mounted on.
+	 *  And we clear the remainder of the character strings
+	 *  to be tidy.
+	 */</span>
+	
+	bzero(mp-&gt;mnt_vfsstat.f_mntfromname, MAXPATHLEN);
+	bcopy(<span class="enscript-string">&quot;devfs&quot;</span>,mp-&gt;mnt_vfsstat.f_mntfromname, 5);
+	(<span class="enscript-type">void</span>)devfs_statfs(mp, &amp;mp-&gt;mnt_vfsstat, ctx);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_start</span>(__unused <span class="enscript-type">struct</span> mount *mp, __unused <span class="enscript-type">int</span> flags, __unused vfs_context_t ctx)
+{
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/*-
+ *  Unmount the filesystem described by mp.
+ */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_unmount</span>( <span class="enscript-type">struct</span> mount *mp, <span class="enscript-type">int</span> mntflags, __unused vfs_context_t ctx)
+{
+	<span class="enscript-type">struct</span> devfsmount *devfs_mp_p = (<span class="enscript-type">struct</span> devfsmount *)mp-&gt;mnt_data;
+	<span class="enscript-type">int</span> flags = 0;
+	<span class="enscript-type">int</span> force = 0;
+	<span class="enscript-type">int</span> error;
+	
+	<span class="enscript-keyword">if</span> (mntflags &amp; MNT_FORCE) {
+		flags |= FORCECLOSE;
+		force = 1;
+	}
+	error = vflush(mp, NULLVP, flags);
+	<span class="enscript-keyword">if</span> (error &amp;&amp; !force)
+		<span class="enscript-keyword">return</span> error;
+
+	DEVFS_LOCK();
+	devfs_free_plane(devfs_mp_p);
+	DEVFS_UNLOCK();
+
+	DEVFS_DECR_MOUNTS();
+
+	FREE((caddr_t)devfs_mp_p, M_DEVFSMNT);
+	mp-&gt;mnt_data = (qaddr_t)0;
+	mp-&gt;mnt_flag &amp;= ~MNT_LOCAL;
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-comment">/* return the address of the root vnode  in *vpp */</span>
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_root</span>(<span class="enscript-type">struct</span> mount *mp, <span class="enscript-type">struct</span> vnode **vpp, __unused vfs_context_t ctx)
+{
+	<span class="enscript-type">struct</span> devfsmount *devfs_mp_p = (<span class="enscript-type">struct</span> devfsmount *)(mp-&gt;mnt_data);
+	<span class="enscript-type">int</span> error;
+
+	DEVFS_LOCK();
+	<span class="enscript-comment">/* last parameter to devfs_dntovn() is ignored */</span>
+	error = devfs_dntovn(devfs_mp_p-&gt;plane_root-&gt;de_dnp, vpp, NULL);
+	DEVFS_UNLOCK();
+
+	<span class="enscript-keyword">return</span> error;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_statfs</span>( <span class="enscript-type">struct</span> mount *mp, <span class="enscript-type">struct</span> vfsstatfs *sbp, __unused vfs_context_t ctx)
+{
+	<span class="enscript-type">struct</span> devfsmount *devfs_mp_p = (<span class="enscript-type">struct</span> devfsmount *)mp-&gt;mnt_data;
+
+	<span class="enscript-comment">/*-
+	 *  Fill in the stat block.
+	 */</span>
+	<span class="enscript-comment">//sbp-&gt;f_type   = mp-&gt;mnt_vfsstat.f_type;
+</span>	sbp-&gt;f_flags  = 0;		<span class="enscript-comment">/* XXX */</span>
+	sbp-&gt;f_bsize  = 512;
+	sbp-&gt;f_iosize = 512;
+	sbp-&gt;f_blocks = (devfs_stats.mounts * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> devfsmount)
+			 + devfs_stats.nodes * <span class="enscript-keyword">sizeof</span>(devnode_t)
+			 + devfs_stats.entries * <span class="enscript-keyword">sizeof</span>(devdirent_t)
+			 + devfs_stats.stringspace
+			 ) / sbp-&gt;f_bsize;
+	sbp-&gt;f_bfree  = 0;
+	sbp-&gt;f_bavail = 0;
+	sbp-&gt;f_files  = devfs_stats.nodes;
+	sbp-&gt;f_ffree  = 0;
+	sbp-&gt;f_fsid.val[0] = (int32_t)(uintptr_t)devfs_mp_p;
+	sbp-&gt;f_fsid.val[1] = vfs_typenum(mp);
+
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_vfs_getattr</span>(__unused mount_t mp, <span class="enscript-type">struct</span> vfs_attr *fsap, __unused vfs_context_t ctx)
+{
+	VFSATTR_RETURN(fsap, f_objcount, devfs_stats.nodes);
+	VFSATTR_RETURN(fsap, f_maxobjcount, devfs_stats.nodes);
+	VFSATTR_RETURN(fsap, f_bsize, 512);
+	VFSATTR_RETURN(fsap, f_iosize, 512);
+	<span class="enscript-keyword">if</span> (VFSATTR_IS_ACTIVE(fsap, f_blocks) || VFSATTR_IS_ACTIVE(fsap, f_bused)) {
+		fsap-&gt;f_blocks = (devfs_stats.mounts * <span class="enscript-keyword">sizeof</span>(<span class="enscript-type">struct</span> devfsmount)
+			 + devfs_stats.nodes * <span class="enscript-keyword">sizeof</span>(devnode_t)
+			 + devfs_stats.entries * <span class="enscript-keyword">sizeof</span>(devdirent_t)
+			 + devfs_stats.stringspace
+			 ) / fsap-&gt;f_bsize;
+		fsap-&gt;f_bused = fsap-&gt;f_blocks;
+		VFSATTR_SET_SUPPORTED(fsap, f_blocks);
+		VFSATTR_SET_SUPPORTED(fsap, f_bused);
+	}
+	VFSATTR_RETURN(fsap, f_bfree, 0);
+	VFSATTR_RETURN(fsap, f_bavail, 0);
+	VFSATTR_RETURN(fsap, f_files, devfs_stats.nodes);
+	VFSATTR_RETURN(fsap, f_ffree, 0);
+	VFSATTR_RETURN(fsap, f_fssubtype, 0);
+	
+	<span class="enscript-keyword">if</span> (VFSATTR_IS_ACTIVE(fsap, f_capabilities)) {
+		fsap-&gt;f_capabilities.capabilities[VOL_CAPABILITIES_FORMAT] =
+			VOL_CAP_FMT_SYMBOLICLINKS |
+			VOL_CAP_FMT_HARDLINKS |
+			VOL_CAP_FMT_NO_ROOT_TIMES |
+			VOL_CAP_FMT_CASE_SENSITIVE |
+			VOL_CAP_FMT_CASE_PRESERVING |
+			VOL_CAP_FMT_FAST_STATFS |
+			VOL_CAP_FMT_2TB_FILESIZE |
+			VOL_CAP_FMT_HIDDEN_FILES;
+		fsap-&gt;f_capabilities.capabilities[VOL_CAPABILITIES_INTERFACES] =
+			VOL_CAP_INT_ATTRLIST ;
+		fsap-&gt;f_capabilities.capabilities[VOL_CAPABILITIES_RESERVED1] = 0;
+		fsap-&gt;f_capabilities.capabilities[VOL_CAPABILITIES_RESERVED2] = 0;
+		
+		fsap-&gt;f_capabilities.valid[VOL_CAPABILITIES_FORMAT] =
+			VOL_CAP_FMT_PERSISTENTOBJECTIDS |
+			VOL_CAP_FMT_SYMBOLICLINKS |
+			VOL_CAP_FMT_HARDLINKS |
+			VOL_CAP_FMT_JOURNAL |
+			VOL_CAP_FMT_JOURNAL_ACTIVE |
+			VOL_CAP_FMT_NO_ROOT_TIMES |
+			VOL_CAP_FMT_SPARSE_FILES |
+			VOL_CAP_FMT_ZERO_RUNS |
+			VOL_CAP_FMT_CASE_SENSITIVE |
+			VOL_CAP_FMT_CASE_PRESERVING |
+			VOL_CAP_FMT_FAST_STATFS |
+			VOL_CAP_FMT_2TB_FILESIZE |
+			VOL_CAP_FMT_OPENDENYMODES |
+			VOL_CAP_FMT_HIDDEN_FILES |
+			VOL_CAP_FMT_PATH_FROM_ID |
+			VOL_CAP_FMT_NO_VOLUME_SIZES;
+		fsap-&gt;f_capabilities.valid[VOL_CAPABILITIES_INTERFACES] =
+			VOL_CAP_INT_SEARCHFS |
+			VOL_CAP_INT_ATTRLIST |
+			VOL_CAP_INT_NFSEXPORT |
+			VOL_CAP_INT_READDIRATTR |
+			VOL_CAP_INT_EXCHANGEDATA |
+			VOL_CAP_INT_COPYFILE |
+			VOL_CAP_INT_ALLOCATE |
+			VOL_CAP_INT_VOL_RENAME |
+			VOL_CAP_INT_ADVLOCK |
+			VOL_CAP_INT_FLOCK |
+			VOL_CAP_INT_EXTENDED_SECURITY |
+			VOL_CAP_INT_USERACCESS |
+			VOL_CAP_INT_MANLOCK |
+			VOL_CAP_INT_EXTENDED_ATTR |
+			VOL_CAP_INT_NAMEDSTREAMS;
+		fsap-&gt;f_capabilities.valid[VOL_CAPABILITIES_RESERVED1] = 0;
+		fsap-&gt;f_capabilities.valid[VOL_CAPABILITIES_RESERVED2] = 0;
+		
+		VFSATTR_SET_SUPPORTED(fsap, f_capabilities);
+	}
+	
+	<span class="enscript-keyword">if</span> (VFSATTR_IS_ACTIVE(fsap, f_attributes)) {
+		fsap-&gt;f_attributes.validattr.commonattr =
+			ATTR_CMN_NAME | ATTR_CMN_DEVID | ATTR_CMN_FSID |
+			ATTR_CMN_OBJTYPE | ATTR_CMN_OBJTAG | ATTR_CMN_OBJID |
+			ATTR_CMN_PAROBJID |
+			ATTR_CMN_MODTIME | ATTR_CMN_CHGTIME | ATTR_CMN_ACCTIME |
+			ATTR_CMN_OWNERID | ATTR_CMN_GRPID | ATTR_CMN_ACCESSMASK |
+			ATTR_CMN_FLAGS | ATTR_CMN_USERACCESS | ATTR_CMN_FILEID;
+		fsap-&gt;f_attributes.validattr.volattr =
+			ATTR_VOL_FSTYPE | ATTR_VOL_SIZE | ATTR_VOL_SPACEFREE |
+			ATTR_VOL_SPACEAVAIL | ATTR_VOL_MINALLOCATION |
+			ATTR_VOL_OBJCOUNT | ATTR_VOL_MAXOBJCOUNT |
+			ATTR_VOL_MOUNTPOINT | ATTR_VOL_MOUNTFLAGS |
+			ATTR_VOL_MOUNTEDDEVICE | ATTR_VOL_CAPABILITIES |
+			ATTR_VOL_ATTRIBUTES;
+		fsap-&gt;f_attributes.validattr.dirattr =
+			ATTR_DIR_LINKCOUNT | ATTR_DIR_MOUNTSTATUS;
+		fsap-&gt;f_attributes.validattr.fileattr =
+			ATTR_FILE_LINKCOUNT | ATTR_FILE_TOTALSIZE |
+			ATTR_FILE_IOBLOCKSIZE | ATTR_FILE_DEVTYPE |
+			ATTR_FILE_DATALENGTH;
+		fsap-&gt;f_attributes.validattr.forkattr = 0;
+		
+		fsap-&gt;f_attributes.nativeattr.commonattr =
+			ATTR_CMN_NAME | ATTR_CMN_DEVID | ATTR_CMN_FSID |
+			ATTR_CMN_OBJTYPE | ATTR_CMN_OBJTAG | ATTR_CMN_OBJID |
+			ATTR_CMN_PAROBJID |
+			ATTR_CMN_MODTIME | ATTR_CMN_CHGTIME | ATTR_CMN_ACCTIME |
+			ATTR_CMN_OWNERID | ATTR_CMN_GRPID | ATTR_CMN_ACCESSMASK |
+			ATTR_CMN_FLAGS | ATTR_CMN_USERACCESS | ATTR_CMN_FILEID;
+		fsap-&gt;f_attributes.nativeattr.volattr =
+			ATTR_VOL_FSTYPE | ATTR_VOL_SIZE | ATTR_VOL_SPACEFREE |
+			ATTR_VOL_SPACEAVAIL | ATTR_VOL_MINALLOCATION |
+			ATTR_VOL_OBJCOUNT | ATTR_VOL_MAXOBJCOUNT |
+			ATTR_VOL_MOUNTPOINT | ATTR_VOL_MOUNTFLAGS |
+			ATTR_VOL_MOUNTEDDEVICE | ATTR_VOL_CAPABILITIES |
+			ATTR_VOL_ATTRIBUTES;
+		fsap-&gt;f_attributes.nativeattr.dirattr =
+			ATTR_DIR_MOUNTSTATUS;
+		fsap-&gt;f_attributes.nativeattr.fileattr =
+			ATTR_FILE_LINKCOUNT | ATTR_FILE_TOTALSIZE |
+			ATTR_FILE_IOBLOCKSIZE | ATTR_FILE_DEVTYPE |
+			ATTR_FILE_DATALENGTH;
+		fsap-&gt;f_attributes.nativeattr.forkattr = 0;
+
+		VFSATTR_SET_SUPPORTED(fsap, f_attributes);
+	}
+	
+	<span class="enscript-keyword">return</span> 0;
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_sync</span>(__unused <span class="enscript-type">struct</span> mount *mp, __unused <span class="enscript-type">int</span> waitfor, __unused vfs_context_t ctx)
+{
+    <span class="enscript-keyword">return</span> (0);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_vget</span>(__unused <span class="enscript-type">struct</span> mount *mp, __unused ino64_t ino, __unused <span class="enscript-type">struct</span> vnode **vpp, __unused vfs_context_t ctx)
+{
+	<span class="enscript-keyword">return</span> ENOTSUP;
+}
+
+<span class="enscript-comment">/*************************************************************
+ * The concept of exporting a kernel generated devfs is stupid
+ * So don't handle filehandles
+ */</span>
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_fhtovp</span> (__unused <span class="enscript-type">struct</span> mount *mp, __unused <span class="enscript-type">int</span> fhlen, __unused <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *fhp, __unused <span class="enscript-type">struct</span> vnode **vpp, __unused vfs_context_t ctx)
+{
+	<span class="enscript-keyword">return</span> (EINVAL);
+}
+
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_vptofh</span> (__unused <span class="enscript-type">struct</span> vnode *vp, __unused <span class="enscript-type">int</span> *fhlenp, __unused <span class="enscript-type">unsigned</span> <span class="enscript-type">char</span> *fhp, __unused vfs_context_t ctx)
+{
+	<span class="enscript-keyword">return</span> (EINVAL);
+}
+
+<span class="enscript-type">static</span> <span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_sysctl</span>(__unused <span class="enscript-type">int</span> *name, __unused u_int namelen, __unused user_addr_t oldp, 
+             __unused size_t *oldlenp, __unused user_addr_t newp, 
+             __unused size_t newlen, __unused vfs_context_t ctx)
+{
+    <span class="enscript-keyword">return</span> (ENOTSUP);
+}
+
+#<span class="enscript-reference">include</span> <span class="enscript-string">&lt;sys/namei.h&gt;</span>
+
+<span class="enscript-comment">/*
+ * Function: devfs_kernel_mount
+ * Purpose:
+ *   Mount devfs at the given mount point from within the kernel.
+ */</span>
+<span class="enscript-type">int</span>
+<span class="enscript-function-name">devfs_kernel_mount</span>(<span class="enscript-type">char</span> * mntname)
+{
+	<span class="enscript-type">int</span> error;
+	vfs_context_t ctx = vfs_context_kernel();
+	<span class="enscript-type">char</span> fsname[] = <span class="enscript-string">&quot;devfs&quot;</span>;
+
+	error = kernel_mount(fsname, NULLVP, NULLVP, mntname, NULL, 0, MNT_DONTBROWSE, KERNEL_MOUNT_NOAUTH, ctx);
+	<span class="enscript-keyword">if</span> (error) {
+		printf(<span class="enscript-string">&quot;devfs_kernel_mount: kernel_mount failed: %d\n&quot;</span>, error);
+		<span class="enscript-keyword">return</span> (error);
+	}
+
+	<span class="enscript-keyword">return</span> (0);
+}
+
+<span class="enscript-type">struct</span> vfsops devfs_vfsops = {
+	devfs_mount,
+	devfs_start,
+	devfs_unmount,
+	devfs_root,
+	NULL,				<span class="enscript-comment">/* quotactl */</span>
+	devfs_vfs_getattr,
+	devfs_sync,
+	devfs_vget,
+	devfs_fhtovp,
+	devfs_vptofh,
+	devfs_init,
+	devfs_sysctl,
+	NULL,
+	{NULL}
+};
+</pre>
+<hr />
+</body></html>
